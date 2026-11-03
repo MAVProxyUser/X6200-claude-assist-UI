@@ -994,6 +994,22 @@ static const struct {
     {KEYPAD_DFL, buttons_group_dfl, &params.long_dfl},
 };
 
+/* APP key / GSOC clock tap: icon grid when that setting is on, else the APP button pages */
+void main_screen_apps_key(void) {
+    if (params.icon_menus.x) {
+        if (dialog_type_is_run(dialog_apps)) {
+            dialog_destruct();
+        } else {
+            close_apps();
+            buttons_load_page_group(buttons_group_app);
+            dialog_construct(dialog_apps, obj);
+        }
+    } else {
+        close_apps();
+        buttons_load_page_group(buttons_group_app);
+    }
+}
+
 /* The group of buttons a key's tap steps through: GEN APP KEY DFN DFL (page_keys) and VM; NULL for the others */
 static buttons_page_t **key_group(keypad_key_t key) {
     if (key == KEYPAD_VM) {

@@ -19,6 +19,7 @@
  * remote viewer (remote_server.c) is looking at the screen or it is recorded (screen_rec.c). */
 
 #include "screen_light.h"
+#include "board.h"
 #include "cfg/cfg_api.h"
 #include "screen_idle.h"
 #include "screen_rec.h"
@@ -49,10 +50,20 @@ static uint64_t       knob_woke_ms;         /* a knob ended the screensaver then
 static bool           knob_woke;
 static bool           at_level;             /* the light put at its level by light_again(), not dimmed since */
 
-/* The driver counts the other way: 10 - level */
+/* X6100's backlight driver counts the other way, so a bright panel is a small sysfs value.
+ * GSOC's kernel PWM is already inverted: 0 is off and 10 is full, and the GUI level is that scale. */
 static void write_level(int16_t level) {
     char text[8];
-    int  n = snprintf(text, sizeof(text), "%i\n", 10 - level);
+#if BOARD_GSOC
+    int  sysfs = level;
+    if (sysfs < 0)
+        sysfs = 0;
+    if (sysfs > 10)
+        sysfs = 10;
+#else
+    int  sysfs = 10 - level;
+#endif
+    int  n = snprintf(text, sizeof(text), "%i\n", sysfs);
 
     if (level_fd > 0 && write(level_fd, text, n) < 0) {
         LV_LOG_WARN("Backlight level not set");

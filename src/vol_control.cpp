@@ -23,6 +23,21 @@ extern "C" {
 
 static cfg_ctrl_t vol_ctrl = CTRL_VOL;
 
+/* Edit vs select lives on the X6100 VOL evdev object. A board with no such
+ * device (GSOC) still calls vol_update; a missing object is edit, not a crash. */
+static int vol_knob_state(void) {
+    if (!vol) {
+        static int told;
+
+        if (!told) {
+            LV_LOG_ERROR("VOL device missing");
+            told = 1;
+        }
+        return VOL_STATE_EDIT;
+    }
+    return vol->state;
+}
+
 void vol_init() {
     vol_ctrl = controls_encoder_get_next(ENCODER_BIND_VOL, vol_ctrl, 0);   /* the first one bound */
     knobs_set_vol_param(vol_ctrl);
@@ -34,7 +49,7 @@ void vol_update(int16_t diff) {
     controls_encoder_update(vol_ctrl, diff, msg);
 
     if (!knobs_visible()) {
-        knobs_say(msg.c_str(), vol->state == VOL_STATE_EDIT);     /* as the knob lines colour it (#279) */
+        knobs_say(msg.c_str(), vol_knob_state() == VOL_STATE_EDIT);     /* as the knob lines colour it (#279) */
     }
 }
 
@@ -56,7 +71,11 @@ cfg_ctrl_t vol_get_ctrl() {
 }
 
 void vol_set_ctrl(cfg_ctrl_t ctrl) {
-    vol_ctrl   = ctrl;
+    vol_ctrl = ctrl;
+    if (!vol) {
+        LV_LOG_ERROR("VOL device missing");
+        return;
+    }
     vol->state = VOL_STATE_EDIT;
     knobs_set_vol_param(vol_ctrl);
     knobs_set_vol_state(true);
