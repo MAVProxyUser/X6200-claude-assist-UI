@@ -42,10 +42,13 @@ bool drm_planes(void);
 void drm_set_portrait(bool on);
 /* flush_cb, partial rendering: area-sized color_p */
 void drm_flush(lv_disp_drv_t * drv, const lv_area_t * area, lv_color_t * color_p);
-/* A strip (waterfall, spectrum) into the primary plane: portrait columns
- * x .. x + w - 1, all 800 rows of src (w pixels each, XRGB) */
+/* A strip (waterfall, spectrum) into the primary plane, in the panel's own
+ * layout. Portrait panel (BOARD_FB_ROTATE_90): portrait columns x .. x + w - 1,
+ * all 800 rows of src (w pixels each, XRGB). Landscape panel: landscape rows
+ * x .. x + w - 1, src row-major, w rows of BOARD_DISP_W pixels, XRGB */
 void drm_wf_present(const uint32_t *src, int32_t x, int32_t w);
-/* The same with each row of src a ring: column x shows src[head], then on */
+/* The same with each row of src a ring: column x shows src[head], then on.
+ * Landscape panel: the rows of src are the ring, row x shows src row head */
 void drm_wf_present_ring(const uint32_t *src, int32_t x, int32_t w, int32_t head);
 /* The primary plane claimed by one that draws it whole each time (the Sentry's picture), or given back: meanwhile
  * the strips above are not shown nor copied (they present themselves whole again after) */
@@ -80,6 +83,11 @@ void drm_gui_gpu(bool (*draw)(int back, bool portrait, const lv_area_t *rects, i
  * the next drm_commit(), the area drawn (in the frame's own coordinates) noted for a dump */
 int drm_wf_back(bool portrait);
 void drm_wf_drawn(bool portrait, int32_t x, int32_t y, int32_t w, int32_t h);
+#if !BOARD_FB_ROTATE_90
+/* The same after a ring turn: only rows head .. head + n - 1 (mod w) of src are new, the
+ * others as last presented. On a strip plane only those rows are written */
+void drm_wf_scroll(const uint32_t *src, int32_t x, int32_t w, int32_t head, int32_t n);
+#endif
 /* Shows what was flushed or presented since the last call, at the next vblank:
  * once per main loop, after lv_timer_handler() */
 void drm_commit(void);
