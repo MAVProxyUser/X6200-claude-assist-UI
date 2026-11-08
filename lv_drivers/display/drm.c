@@ -938,6 +938,15 @@ void drm_wf_scroll(const uint32_t *src, int32_t x, int32_t w, int32_t head, int3
     }
 }
 
+bool drm_strip_back_pending(int32_t x, int32_t w) {
+    for (int i = 0; i < nsplanes; i++) {
+        if (splanes[i].w && splanes[i].x == x && splanes[i].w == w) {
+            return splanes[i].pl.ready;
+        }
+    }
+    return false;
+}
+
 uint32_t * drm_strip_back(int32_t x, int32_t w, int32_t *pitch_px) {
     splane_t *s;
 

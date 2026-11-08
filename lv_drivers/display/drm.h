@@ -93,6 +93,9 @@ void drm_wf_scroll(const uint32_t *src, int32_t x, int32_t w, int32_t head, int3
  * drm_strip_back_done(), which shows it at the next commit. The buffer may be written from
  * another thread meanwhile; both calls are the GUI thread's */
 uint32_t * drm_strip_back(int32_t x, int32_t w, int32_t *pitch_px);
+/* A picture of strip x, w waits for the next commit: its buffer is the one drm_strip_back() would
+ * give (the commit has not swapped them yet), so no new picture may start before it */
+bool drm_strip_back_pending(int32_t x, int32_t w);
 void drm_strip_back_done(int32_t x, int32_t w);
 #endif
 /* Shows what was flushed or presented since the last call, at the next vblank:
