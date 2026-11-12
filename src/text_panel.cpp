@@ -66,7 +66,7 @@ static void scope_tick(lv_timer_t *t) {
         scope_buf[i].ch.blue  = scope_buf[i].ch.blue * 5 / 8;
     }
 
-    lv_color_t grid = lv_color_hex(0x2a4038);
+    lv_color_t grid = theme_shape.sentry ? TC(card) : lv_color_hex(0x2a4038);   /* the Sentry's look: amber phosphor */
     for (int i = 4; i < SCOPE_SZ - 4; i += 3) {
         scope_buf[SCOPE_SZ / 2 * SCOPE_SZ + i] = grid;
         scope_buf[i * SCOPE_SZ + SCOPE_SZ / 2] = grid;
@@ -77,7 +77,7 @@ static void scope_tick(lv_timer_t *t) {
         peak = fmaxf(peak, fmaxf(fabsf(x[i]), fabsf(y[i])));
 
     float      k = (SCOPE_SZ / 2 - 3) / peak;
-    lv_color_t trace = lv_color_hex(0x70ff90);
+    lv_color_t trace = theme_shape.sentry ? TC(accent_soft) : lv_color_hex(0x70ff90);
     for (int i = 0; i < RTTY_SCOPE_LEN; i++) {
         int px = SCOPE_SZ / 2 + (int)lroundf(x[i] * k);
         int py = SCOPE_SZ / 2 - (int)lroundf(y[i] * k);

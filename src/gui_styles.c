@@ -92,7 +92,7 @@ static void bar_sizes(void) {
 
 static void screen_styles(void) {
     lv_style_set_bg_opa(&spectrum_style, LV_OPA_COVER);
-    lv_style_set_border_color(&spectrum_style, lv_color_hex(0xAAAAAA));
+    lv_style_set_border_color(&spectrum_style, theme_shape.sentry ? TC(panel_border) : lv_color_hex(0xAAAAAA));
     lv_style_set_border_width(&spectrum_style, 0);
     lv_style_set_radius(&spectrum_style, 0);
     lv_style_set_width(&spectrum_style, BOARD_DISP_W);
@@ -105,7 +105,7 @@ static void screen_styles(void) {
     lv_style_set_height(&freq_style, 36);
     lv_style_set_text_align(&freq_style, LV_TEXT_ALIGN_CENTER);
 
-    lv_style_set_border_color(&waterfall_style, lv_color_hex(0xAAAAAA));
+    lv_style_set_border_color(&waterfall_style, theme_shape.sentry ? TC(panel_border) : lv_color_hex(0xAAAAAA));
     lv_style_set_border_width(&waterfall_style, 0);
     lv_style_set_radius(&waterfall_style, 0);
     lv_style_set_clip_corner(&waterfall_style, true);
@@ -268,6 +268,78 @@ void styles_init(void) {
     styles_apply();
 }
 
+/* The Sentry's look over LVGL's default theme, for the widgets LVGL draws itself: an on-screen keyboard and any
+ * button grid (black keys in amber frames, amber type, pressed or chosen in amber with black type, the special keys
+ * a shade lit), a drop-down's list, a roller, a list. Applied to every object as it is made; what code sets on an
+ * object itself still wins */
+static lv_theme_t sentry_lv_theme;
+static lv_style_t sy_box, sy_items, sy_items_on, sy_items_special;
+static bool       sy_made;
+
+static void sentry_apply(lv_theme_t *th, lv_obj_t *obj) {
+    (void)th;
+    if (lv_obj_has_class(obj, &lv_btnmatrix_class)) {         /* the keyboard is one */
+        lv_obj_add_style(obj, &sy_box, LV_PART_MAIN);
+        lv_obj_add_style(obj, &sy_items, LV_PART_ITEMS);
+        lv_obj_add_style(obj, &sy_items_special, LV_PART_ITEMS | LV_STATE_CHECKED);
+        lv_obj_add_style(obj, &sy_items_on, LV_PART_ITEMS | LV_STATE_PRESSED);
+    } else if (lv_obj_has_class(obj, &lv_dropdownlist_class) || lv_obj_has_class(obj, &lv_roller_class) ||
+               lv_obj_has_class(obj, &lv_list_class)) {
+        lv_obj_add_style(obj, &sy_box, LV_PART_MAIN);
+        lv_obj_add_style(obj, &sy_items_on, LV_PART_SELECTED);
+    }
+}
+
+static void sentry_lv_theme_make(lv_disp_t *disp, lv_theme_t *base) {
+    if (!sy_made) {
+        lv_style_init(&sy_box);
+        lv_style_init(&sy_items);
+        lv_style_init(&sy_items_on);
+        lv_style_init(&sy_items_special);
+        sy_made = true;
+    }
+    lv_style_reset(&sy_box);
+    lv_style_set_bg_color(&sy_box, TC(bg));
+    lv_style_set_bg_opa(&sy_box, LV_OPA_COVER);
+    lv_style_set_border_color(&sy_box, TC(panel_border));
+    lv_style_set_border_width(&sy_box, theme_shape.border);
+    lv_style_set_radius(&sy_box, 0);
+    lv_style_set_text_color(&sy_box, TC(text));
+
+    lv_style_reset(&sy_items);
+    lv_style_set_bg_color(&sy_items, TC(btn));
+    lv_style_set_bg_opa(&sy_items, LV_OPA_COVER);
+    lv_style_set_border_color(&sy_items, TC(btn_border));
+    lv_style_set_border_width(&sy_items, 1);
+    lv_style_set_border_opa(&sy_items, LV_OPA_COVER);
+    lv_style_set_radius(&sy_items, 0);
+    lv_style_set_shadow_width(&sy_items, 0);
+    lv_style_set_text_color(&sy_items, TC(btn_text));
+    lv_style_set_text_font(&sy_items, &sony_22);
+    /* the keyboard's special keys are LVGL's symbols (backspace, enter, the arrows), which neither the pixel font
+     * nor the one under it (fonts_apply) has: LVGL's own font, which has them, at the end of the chain */
+    {
+        lv_font_t *f = &sony_22;
+
+        while (f->fallback && f->fallback != &lv_font_montserrat_22) f = (lv_font_t *)f->fallback;
+        if (!f->fallback) f->fallback = &lv_font_montserrat_22;
+    }
+
+    lv_style_reset(&sy_items_special);
+    lv_style_set_bg_color(&sy_items_special, TC(card));
+    lv_style_set_text_color(&sy_items_special, TC(text_value));
+
+    lv_style_reset(&sy_items_on);
+    lv_style_set_bg_color(&sy_items_on, TC(btn_active));
+    lv_style_set_bg_opa(&sy_items_on, LV_OPA_COVER);
+    lv_style_set_text_color(&sy_items_on, TC(btn_active_text));
+
+    sentry_lv_theme = *base;
+    lv_theme_set_parent(&sentry_lv_theme, base);
+    lv_theme_set_apply_cb(&sentry_lv_theme, sentry_apply);
+    lv_disp_set_theme(disp, &sentry_lv_theme);
+}
+
 void styles_load(const char *name) {
     theme_init(name);    /* an unknown name gives RF.Guru */
     fonts_apply(theme_shape.font >= 0 ? theme_shape.font : params.font.x);
@@ -281,7 +353,7 @@ void styles_load(const char *name) {
         lv_disp_t  *disp = lv_disp_get_default();
         lv_theme_t *th   = lv_theme_default_init(disp, TC(accent), TC(err), true, LV_FONT_DEFAULT);
 
-        if (th) lv_disp_set_theme(disp, th);
+        if (th) sentry_lv_theme_make(disp, th);
     }
     styles_init();
 }

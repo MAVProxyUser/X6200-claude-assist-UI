@@ -90,7 +90,7 @@ static void db_label_place(void) {
         lv_obj_align(db_val_label, LV_ALIGN_RIGHT_MID, -12, 0);
     } else if (needle_on()) {
         lv_obj_set_style_text_font(db_val_label, &sony_20, 0);
-        lv_obj_set_style_text_color(db_val_label, param_i_get(cfg_smeter_lamp) ? lv_color_hex(0x4a2e0e) : TC(text_dim), 0);
+        lv_obj_set_style_text_color(db_val_label, param_i_get(cfg_smeter_lamp) && !theme_shape.sentry ? lv_color_hex(0x4a2e0e) : TC(text_dim), 0);
         lv_obj_align(db_val_label, LV_ALIGN_BOTTOM_MID, 0, -1);
     } else {
         lv_obj_set_style_text_font(db_val_label, &sony_20, 0);

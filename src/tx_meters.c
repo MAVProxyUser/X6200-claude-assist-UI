@@ -204,7 +204,7 @@ static void update_strip(void) {
     float    tune = tune_len, len = tune > 0.0f ? tune : tx_len;
     float    ref = LV_MAX(tune > 0.0f ? tune_w : param_f_get(cfg_pwr), 0.1f);
     /* SWR from 2 yellow, from 3 red (as the panel's bar and the walkie) */
-    lv_color_t c = vswr >= 3.0f ? TC(bar_high) : vswr >= 2.0f ? TC(bar_mid) : lv_color_white();
+    lv_color_t c = vswr >= 3.0f ? TC(bar_high) : vswr >= 2.0f ? TC(bar_mid) : theme_shape.sentry ? TC(text) : lv_color_white();
 
     lv_obj_set_width(strip_fill, STRIP_BAR_W * LV_MIN(pwr / ref, 1.0f));
     lv_label_set_text_fmt(strip_pwr, "%.1f W", pwr);
@@ -450,7 +450,7 @@ lv_obj_t *tx_info_init(lv_obj_t *parent) {
     lv_obj_t *track = lv_obj_create(strip);
     lv_obj_remove_style_all(track);
     lv_obj_set_size(track, STRIP_BAR_W, 14);
-    lv_obj_set_style_bg_color(track, lv_color_make(30, 30, 30), 0);
+    lv_obj_set_style_bg_color(track, theme_shape.sentry ? TC(track) : lv_color_make(30, 30, 30), 0);
     lv_obj_set_style_bg_opa(track, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(track, 4, 0);
     lv_obj_set_style_clip_corner(track, true, 0);
@@ -458,7 +458,7 @@ lv_obj_t *tx_info_init(lv_obj_t *parent) {
     strip_fill = lv_obj_create(track);
     lv_obj_remove_style_all(strip_fill);
     lv_obj_set_size(strip_fill, 0, 14);
-    lv_obj_set_style_bg_color(strip_fill, lv_color_make(80, 200, 110), 0);
+    lv_obj_set_style_bg_color(strip_fill, theme_shape.sentry ? TC(ok_bar) : lv_color_make(80, 200, 110), 0);   /* the strip stays red: transmitting */
     lv_obj_set_style_bg_opa(strip_fill, LV_OPA_COVER, 0);
 
     strip_pwr = make_label(strip, &sony_30, 0xFFFFFF);
