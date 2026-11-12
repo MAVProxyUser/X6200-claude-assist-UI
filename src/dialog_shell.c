@@ -3,7 +3,8 @@
  *
  *  OpenX6X00 - a Unix shell on the radio's own screen, opened from the Sentry's E SYSTEM.
  *
- *  /bin/sh as a login shell on a pseudo terminal, its output in the app's body in a monospaced font, as a plain
+ *  /bin/sh as a login shell on a pseudo terminal, over the whole screen but the buttons (the top bar, the meter and
+ *  the frequency go while it is open, as for the Sentry), in a monospaced font, as a plain
  *  terminal that only scrolls: a carriage return starts the line again (the shell's line editing redraws it whole),
  *  a backspace or a step left takes the last character back, other escape sequences are dropped (TERM=dumb asks for
  *  few). What a keyboard types goes to it as typed (a USB or Bluetooth one; Enter, Backspace, Tab, the arrows, Esc);
@@ -15,7 +16,6 @@
 
 #include "dialog_shell.h"
 
-#include "app_frame.h"
 #include "button_bar.h"
 #include "gui_styles.h"
 #include "key_input.h"
@@ -36,8 +36,7 @@
 
 #define TERM_SIZE   32768   /* the text kept; whole lines go from the top when it is full */
 #define TICK_MS     40
-#define COLS        74      /* codec_18 across the body */
-#define ROWS        13
+#define PAD         4       /* inside the frame */
 
 extern const lv_font_t codec_18;
 
@@ -61,8 +60,8 @@ static dialog_t dialog = {.construct_cb = construct_cb, .destruct_cb = destruct_
 
 dialog_t *dialog_shell = &dialog;
 
-static app_frame_t frame;
 static lv_obj_t   *body, *label;
+static int         cols = 80, rows = 18;    /* the terminal's size, from the font (construct_cb) */
 static lv_timer_t *timer;
 static int         master = -1;
 static pid_t       child = -1;
@@ -147,7 +146,7 @@ static void send(const char *s, size_t n) {
 }
 
 static bool start_shell(void) {
-    struct winsize ws = {.ws_row = ROWS, .ws_col = COLS};
+    struct winsize ws = {.ws_row = (unsigned short)rows, .ws_col = (unsigned short)cols};
     char          *argv[] = {"sh", "-l", NULL};
     char          *envp[] = {"TERM=dumb", "HOME=/root", "SHELL=/bin/sh", "USER=root", "LOGNAME=root",
                              "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "PS1=\\h:\\w\\$ ", NULL};
@@ -218,7 +217,6 @@ static void timer_cb(lv_timer_t *t) {
         ended = true;
         child = -1;
         feed_str("\n[the shell ended: Close, and open it again for a new one]\n");
-        lv_label_set_text(frame.head_right, "ENDED");
         got = true;
     }
     if (got) show();
@@ -307,18 +305,27 @@ static void page_cb(button_data_t *b) {
 /* ---- the window ---- */
 
 static void construct_cb(lv_obj_t *parent) {
-    dialog.obj = dialog_init(parent);
-    app_frame_create(&frame, dialog.obj);
-    lv_label_set_text(frame.head_left, "UNIX SHELL   /bin/sh");
-    lv_label_set_text(frame.head_right, "ROOT");
-    lv_label_set_text(frame.status, "Keyboard: types - Type: a line on screen - Ctrl-C: interrupt - Close: ends it");
+    lv_coord_t h = 480 - BUTTONS_H;
 
-    body = lv_obj_create(dialog.obj);
+    /* The whole screen but the buttons: over the top bar, the meter and the frequency, which the shell has no use for */
+    body = lv_obj_create(parent);
+    dialog.obj = body;
     lv_obj_remove_style_all(body);
-    app_frame_body(body);
-    lv_obj_set_style_pad_all(body, 6, 0);
+    lv_obj_set_pos(body, 0, 0);
+    lv_obj_set_size(body, 800, h);
+    lv_obj_set_style_bg_color(body, TC(bg), 0);
+    lv_obj_set_style_bg_opa(body, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(body, TC(panel_border), 0);
+    lv_obj_set_style_border_width(body, 1, 0);
+    lv_obj_set_style_pad_all(body, PAD, 0);
     lv_obj_set_scroll_dir(body, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_AUTO);
+
+    /* As many columns and rows as Share Tech Mono fits */
+    lv_coord_t gw = lv_font_get_glyph_width(&codec_18, 'M', 0), lh = lv_font_get_line_height(&codec_18);
+
+    cols = gw > 0 ? (800 - 2 * PAD - 2 - 8) / gw : 80;     /* 8: the scroll bar */
+    rows = lh > 0 ? (h - 2 * PAD - 2) / lh : 18;
 
     label = lv_label_create(body);
     lv_obj_set_width(label, lv_pct(100));
@@ -341,6 +348,7 @@ static void construct_cb(lv_obj_t *parent) {
     lv_group_focus_obj(dialog.obj);
     lv_group_set_editing(keyboard_group, true);
     timer = lv_timer_create(timer_cb, TICK_MS, NULL);
+    LV_LOG_USER("Shell: %d columns, %d rows", cols, rows);
 }
 
 static void destruct_cb(void) {
