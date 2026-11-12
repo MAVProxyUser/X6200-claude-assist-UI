@@ -50,6 +50,10 @@ struct audio_worker_s {
     /* Audio buffer (written by audio_worker_feed, read by worker). */
     pthread_mutex_t audio_mux;
     cbufferf        audio_buf;
+    double          audio_newest_t;   /* when the newest sample in it came in (CLOCK_REALTIME s); the oldest one
+                                       * came in buffered / sample_rate before it. Under audio_mux */
+    long long       slot_index;       /* the slot the waterfall is filling: seconds since the epoch / slot time.
+                                       * Worker thread only */
 
     /* DSP state (worker thread only). */
     spgramf         sg;
@@ -86,12 +90,16 @@ static void msleep_interruptible(audio_worker_t *w, long ms) {
     pthread_mutex_unlock(&w->sleep_mux);
 }
 
-static void drain_audio_buf(audio_worker_t *w) {
-    pthread_mutex_lock(&w->audio_mux);
-    if (w->audio_buf) {
-        cbufferf_reset(w->audio_buf);
-    }
-    pthread_mutex_unlock(&w->audio_mux);
+static double now_s(void) {
+    struct timespec t;
+
+    clock_gettime(CLOCK_REALTIME, &t);
+    return t.tv_sec + t.tv_nsec / 1e9;
+}
+
+/* The slot a moment falls in, counted from the epoch: the slots of all three modes divide the minute */
+static long long slot_of(const audio_worker_t *w, double t) {
+    return (long long)floor(t / ftx_slot_time(w->proto));
 }
 
 /* ---------- PSD / waterfall ------------------------------------------- */
@@ -143,19 +151,41 @@ static void rx_consume_frames(audio_worker_t *w, const slot_info_t *info,
         float         *block       = NULL;
         float          block_data[w->block_size];
 
+        bool           stale     = false;
+
+        /*
+         * Each block goes to the slot it came in during, by the time it came
+         * in, not by when this loop gets to it: a decode in this thread can
+         * take the better part of a second on the radio (an FT2 slot's 200
+         * candidates), and the slot change was seen only that late. The old
+         * slot's waterfall took the new one's start meanwhile and the new
+         * one began up to a second late. FT2's candidate search reaches only
+         * 4 symbols (0.1 s) before the waterfall's start, FT4's 0.2 s: their
+         * signals start at the slot, so those decodes were lost.
+         */
         pthread_mutex_lock(&w->audio_mux);
-        if (cbufferf_size(w->audio_buf) >= w->block_size) {
-            has_frame = true;
-            cbufferf_read(w->audio_buf, w->block_size, &block, &got);
-            // Copy data to external buffer
-            memcpy((void*)block_data, (void*)block, got * sizeof(float));
-            block = block_data;
-            cbufferf_release(w->audio_buf, got);
+        unsigned int buffered = cbufferf_size(w->audio_buf);
+        if (buffered >= (unsigned int)w->block_size) {
+            double    t0 = w->audio_newest_t - (double)buffered / w->sample_rate;
+            long long s  = slot_of(w, t0 + 0.5 * w->block_size / w->sample_rate);
+
+            if (s <= w->slot_index) {     /* a later slot's block waits for the slot change */
+                has_frame = true;
+                stale = s < w->slot_index;   /* a slot already decoded: dropped */
+                cbufferf_read(w->audio_buf, w->block_size, &block, &got);
+                // Copy data to external buffer
+                memcpy((void*)block_data, (void*)block, got * sizeof(float));
+                block = block_data;
+                cbufferf_release(w->audio_buf, got);
+            }
         }
         pthread_mutex_unlock(&w->audio_mux);
 
         if (!block) {
             break;
+        }
+        if (stale) {
+            continue;
         }
 
         spgramf_write(w->sg, block, w->block_size);
@@ -178,6 +208,8 @@ static void *worker_main(void *arg) {
     audio_worker_t *w = (audio_worker_t *)arg;
     slot_info_t     info = { .odd = false, .answer_generated = false };
     decode_ctx_t    dc   = { .w = w, .info = &info };
+
+    w->slot_index = slot_of(w, now_s());
 
     while (!atomic_load(&w->stop_req)) {
         struct timespec now;
@@ -203,11 +235,13 @@ static void *worker_main(void *arg) {
         rx_consume_frames(w, &info, sec_since_slot_start);
 
         if (new_slot) {
-            /* Slot boundary: flush a final decode, drain stale audio that
-             * accumulated during TX, and fire the slot_end handler. */
+            /* Slot boundary: flush a final decode and fire the slot_end
+             * handler. The audio from before the new slot still to come
+             * (stale audio accumulated during TX too) is dropped as it is
+             * read; the new slot's own start stays for it. */
             ftx_worker_decode(decode_cb, true, (void *)&dc);
             ftx_worker_reset();
-            drain_audio_buf(w);
+            w->slot_index = slot_of(w, now_s());
 
             if (w->cb.on_slot_end) {
                 w->cb.on_slot_end(&info, w->cb.ctx);
@@ -334,6 +368,7 @@ void audio_worker_feed(audio_worker_t *w, unsigned int n, float *samples) {
     pthread_mutex_lock(&w->audio_mux);
     if (w->audio_buf) {
         cbufferf_write(w->audio_buf, samples, n);
+        w->audio_newest_t = now_s();
     }
     pthread_mutex_unlock(&w->audio_mux);
 }
