@@ -128,9 +128,28 @@ static void read_callback(pa_stream *s, size_t nbytes, void *udata) {
     pa_stream_drop(s);
 }
 
+/* For tests: a recording heard in place of the receiver. /tmp/ox_capture_source names another PulseAudio source
+ * (tools/replay: the monitor of a null sink a recording is played into), read once here; on tmpfs, so it is gone at
+ * the next boot. Every app hears it as the radio's audio */
+static void capture_override(void) {
+    static char name[128];
+    FILE       *f = fopen("/tmp/ox_capture_source", "r");
+
+    if (!f) return;
+    if (fgets(name, sizeof(name), f)) {
+        name[strcspn(name, "\r\n")] = '\0';
+        if (name[0]) {
+            capture_device = name;
+            LV_LOG_USER("Capture from %s (/tmp/ox_capture_source), not the radio", name);
+        }
+    }
+    fclose(f);
+}
+
 void audio_init() {
     audio_set_rec_vol(0.0f);
     audio_set_play_vol(0.0f);
+    capture_override();
 
     mloop = pa_threaded_mainloop_new();
     pa_threaded_mainloop_start(mloop);

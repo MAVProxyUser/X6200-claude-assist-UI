@@ -323,6 +323,8 @@ static void draw_row_cb(lv_event_t *e) {
         rect->bg_color = TC(panel);
     }
 
+    if (theme_shape.sentry) label->color = TC(text_soft);   /* every row in the Sentry's amber, none in white */
+
     bool     mfk_here;
     uint16_t sel_row, sel_col;
 
