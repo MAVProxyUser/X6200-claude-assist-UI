@@ -1,0 +1,776 @@
+[
+ {
+  "name": "cw_sweepstakes_14028",
+  "file": "cw_sweepstakes_14028.wav",
+  "dial": 14028500,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794099693.884088,
+  "seconds": 30,
+  "smeter_med": -103
+ },
+ {
+  "name": "psk31_14070",
+  "file": "psk31_14070.wav",
+  "dial": 14069500,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794099726.9538007,
+  "seconds": 30,
+  "smeter_med": -115
+ },
+ {
+  "name": "js8_14078",
+  "file": "js8_14078.wav",
+  "dial": 14078000,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794099765.0896587,
+  "seconds": 31,
+  "smeter_med": -116
+ },
+ {
+  "name": "ft4_14080",
+  "file": "ft4_14080.wav",
+  "dial": 14080000,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794099907.57073,
+  "seconds": 31,
+  "smeter_med": -117
+ },
+ {
+  "name": "rtty_14083",
+  "file": "rtty_14083.wav",
+  "dial": 14082500,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794099941.6949923,
+  "seconds": 30,
+  "smeter_med": -117
+ },
+ {
+  "name": "ssb_voice_14305",
+  "file": "ssb_voice_14305.wav",
+  "dial": 14305000,
+  "mode": "usb",
+  "filter": [
+   100,
+   2900
+  ],
+  "t0": 1794100006.8759859,
+  "seconds": 25,
+  "smeter_med": -114
+ },
+ {
+  "name": "sstv_14230",
+  "file": "sstv_14230.wav",
+  "dial": 14230000,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794100034.9888053,
+  "seconds": 60,
+  "smeter_med": -116
+ },
+ {
+  "name": "chu_14670",
+  "file": "chu_14670.wav",
+  "dial": 14670000,
+  "mode": "am",
+  "filter": [
+   -4000,
+   4000
+  ],
+  "t0": 1794100098.1206617,
+  "seconds": 20,
+  "smeter_med": -121
+ },
+ {
+  "name": "wwv_15000",
+  "file": "wwv_15000.wav",
+  "dial": 15000000,
+  "mode": "am",
+  "filter": [
+   -4000,
+   4000
+  ],
+  "t0": 1794100121.2761614,
+  "seconds": 20,
+  "smeter_med": -121
+ },
+ {
+  "name": "broadcast_15770",
+  "file": "broadcast_15770.wav",
+  "dial": 15770000,
+  "mode": "am",
+  "filter": [
+   -5000,
+   5000
+  ],
+  "t0": 1794100144.5046566,
+  "seconds": 20,
+  "smeter_med": -117
+ },
+ {
+  "name": "wspr_14095_6",
+  "file": "wspr_14095_6.wav",
+  "dial": 14095600,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794100200.1797657,
+  "seconds": 116,
+  "smeter_med": -117
+ },
+ {
+  "name": "ncdxf_beacons_14100",
+  "file": "ncdxf_beacons_14100.wav",
+  "dial": 14099000,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794100320.147754,
+  "seconds": 181,
+  "smeter_med": -118
+ },
+ {
+  "name": "js8_14078_b",
+  "file": "js8_14078_b.wav",
+  "dial": 14078000,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794100950.197942,
+  "seconds": 46,
+  "smeter_med": -117
+ },
+ {
+  "name": "ncdxf_beacons_14100_b",
+  "file": "ncdxf_beacons_14100_b.wav",
+  "dial": 14099000,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794101040.2009475,
+  "seconds": 181,
+  "smeter_med": -118
+ },
+ {
+  "name": "cw_14023_9",
+  "file": "cw_14023_9.wav",
+  "dial": 14023200,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794101472.0490496,
+  "seconds": 30,
+  "smeter_med": -115
+ },
+ {
+  "name": "cw_14040_cluster",
+  "file": "cw_14040_cluster.wav",
+  "dial": 14039500,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794101505.2749507,
+  "seconds": 30,
+  "smeter_med": -116
+ },
+ {
+  "name": "cw_14045_cluster",
+  "file": "cw_14045_cluster.wav",
+  "dial": 14044000,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794101538.3901196,
+  "seconds": 30,
+  "smeter_med": -116
+ },
+ {
+  "name": "cw_14056_cluster",
+  "file": "cw_14056_cluster.wav",
+  "dial": 14054500,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794101571.4703467,
+  "seconds": 30,
+  "smeter_med": -113
+ },
+ {
+  "name": "carrier_14117_7",
+  "file": "carrier_14117_7.wav",
+  "dial": 14117200,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794101604.626269,
+  "seconds": 15,
+  "smeter_med": -116
+ },
+ {
+  "name": "cw40_7029_5",
+  "file": "cw40_7029_5.wav",
+  "dial": 7029500,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794105703.837383,
+  "seconds": 30,
+  "smeter_med": null,
+  "note": "the strongest CW at 7.0302, its tone near 700 Hz",
+  "radio": {
+   "freq": 7029500,
+   "mode": 2,
+   "flo": 100,
+   "fhi": 3100,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "cw40_7040",
+  "file": "cw40_7040.wav",
+  "dial": 7040000,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794105736.595801,
+  "seconds": 30,
+  "smeter_med": null,
+  "note": "the CW group around 7.040-7.043",
+  "radio": {
+   "freq": 7040000,
+   "mode": 2,
+   "flo": 100,
+   "fhi": 3100,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "lsb40_7224_5",
+  "file": "lsb40_7224_5.wav",
+  "dial": 7224500,
+  "mode": "lsb",
+  "filter": [
+   100,
+   2900
+  ],
+  "t0": 1794105774.5806513,
+  "seconds": 25,
+  "smeter_med": null,
+  "note": "voice seen at 7.2202 MHz (+38 dB); tuned to 7224.5 kHz LSB from the zoomed spectrum",
+  "radio": {
+   "freq": 7224500,
+   "mode": 0,
+   "flo": 100,
+   "fhi": 2900,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "lsb40_7251_0",
+  "file": "lsb40_7251_0.wav",
+  "dial": 7251000,
+  "mode": "lsb",
+  "filter": [
+   100,
+   2900
+  ],
+  "t0": 1794105807.6242123,
+  "seconds": 25,
+  "smeter_med": null,
+  "note": "voice seen at 7.2501 MHz (+37 dB); tuned to 7251.0 kHz LSB from the zoomed spectrum",
+  "radio": {
+   "freq": 7251000,
+   "mode": 0,
+   "flo": 100,
+   "fhi": 2900,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "lsb40_7266_0",
+  "file": "lsb40_7266_0.wav",
+  "dial": 7266000,
+  "mode": "lsb",
+  "filter": [
+   100,
+   2900
+  ],
+  "t0": 1794105840.6131036,
+  "seconds": 25,
+  "smeter_med": null,
+  "note": "voice seen at 7.2651 MHz (+31 dB); tuned to 7266.0 kHz LSB from the zoomed spectrum",
+  "radio": {
+   "freq": 7266000,
+   "mode": 0,
+   "flo": 100,
+   "fhi": 2900,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "lsb40_7160_0",
+  "file": "lsb40_7160_0.wav",
+  "dial": 7160000,
+  "mode": "lsb",
+  "filter": [
+   100,
+   2900
+  ],
+  "t0": 1794105873.755042,
+  "seconds": 25,
+  "smeter_med": null,
+  "note": "voice seen at 7.1600 MHz (+25 dB); tuned to 7160.0 kHz LSB from the zoomed spectrum",
+  "radio": {
+   "freq": 7160000,
+   "mode": 0,
+   "flo": 100,
+   "fhi": 2900,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "bc40_7505",
+  "file": "bc40_7505.wav",
+  "dial": 7505000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794105901.1453807,
+  "seconds": 20,
+  "smeter_med": null,
+  "note": "the strongest broadcaster on the sweep",
+  "radio": {
+   "freq": 7505000,
+   "mode": 6,
+   "flo": 0,
+   "fhi": 5000,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "bc40_7355",
+  "file": "bc40_7355.wav",
+  "dial": 7355000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794105923.5395057,
+  "seconds": 20,
+  "smeter_med": null,
+  "note": "41 m broadcast",
+  "radio": {
+   "freq": 7355000,
+   "mode": 6,
+   "flo": 0,
+   "fhi": 5000,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "bc40_7490",
+  "file": "bc40_7490.wav",
+  "dial": 7490000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794105945.9153268,
+  "seconds": 20,
+  "smeter_med": null,
+  "note": "41 m broadcast",
+  "radio": {
+   "freq": 7490000,
+   "mode": 6,
+   "flo": 0,
+   "fhi": 5000,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "bc40_7570",
+  "file": "bc40_7570.wav",
+  "dial": 7570000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794105968.3751442,
+  "seconds": 20,
+  "smeter_med": null,
+  "note": "41 m broadcast",
+  "radio": {
+   "freq": 7570000,
+   "mode": 6,
+   "flo": 0,
+   "fhi": 5000,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "chu_7850",
+  "file": "chu_7850.wav",
+  "dial": 7850000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794105990.758271,
+  "seconds": 20,
+  "smeter_med": null,
+  "note": "CHU, Canada's time station (not seen on the sweep)",
+  "radio": {
+   "freq": 7850000,
+   "mode": 6,
+   "flo": 0,
+   "fhi": 5000,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "psk31_7070",
+  "file": "psk31_7070.wav",
+  "dial": 7069500,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794106013.5380323,
+  "seconds": 30,
+  "smeter_med": null,
+  "note": "",
+  "radio": {
+   "freq": 7069500,
+   "mode": 2,
+   "flo": 100,
+   "fhi": 3100,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "rtty_7089",
+  "file": "rtty_7089.wav",
+  "dial": 7089000,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794106046.3194942,
+  "seconds": 30,
+  "smeter_med": null,
+  "note": "the digital group at 7.0906-7.098",
+  "radio": {
+   "freq": 7089000,
+   "mode": 2,
+   "flo": 100,
+   "fhi": 3100,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "ft4_7047_5",
+  "file": "ft4_7047_5.wav",
+  "dial": 7047500,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794106087.0537555,
+  "seconds": 31,
+  "smeter_med": null,
+  "note": "",
+  "radio": {
+   "freq": 7047500,
+   "mode": 2,
+   "flo": 100,
+   "fhi": 3100,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "js8_7078",
+  "file": "js8_7078.wav",
+  "dial": 7078000,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794106124.6009135,
+  "seconds": 46,
+  "smeter_med": null,
+  "note": "",
+  "radio": {
+   "freq": 7078000,
+   "mode": 2,
+   "flo": 100,
+   "fhi": 3100,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "wspr_7038_6",
+  "file": "wspr_7038_6.wav",
+  "dial": 7038600,
+  "mode": "usb",
+  "filter": [
+   100,
+   3100
+  ],
+  "t0": 1794106199.5177636,
+  "seconds": 116,
+  "smeter_med": null,
+  "note": "",
+  "radio": {
+   "freq": 7038600,
+   "mode": 2,
+   "flo": 100,
+   "fhi": 3100,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "am40_7250",
+  "file": "am40_7250.wav",
+  "dial": 7250000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794106508.3867176,
+  "seconds": 25,
+  "smeter_med": null,
+  "note": "the voice at 7.2501 is an AM signal: its carrier sat at 7.250 (the 1 kHz whistle in LSB); recorded in AM",
+  "radio": {
+   "freq": 7250000,
+   "mode": 6,
+   "flo": 0,
+   "fhi": 5000,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "am40_7265",
+  "file": "am40_7265.wav",
+  "dial": 7265000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794106535.798156,
+  "seconds": 25,
+  "smeter_med": null,
+  "note": "the voice at 7.2651 is an AM signal too (carrier at 7.265); recorded in AM",
+  "radio": {
+   "freq": 7265000,
+   "mode": 6,
+   "flo": 0,
+   "fhi": 5000,
+   "pre": 1,
+   "agc": 3
+  }
+ },
+ {
+  "name": "fm_92_300",
+  "file": "fm_92_300.wav",
+  "dial": 92300000,
+  "mode": "wfm",
+  "filter": null,
+  "t0": 1794108888.2910662,
+  "seconds": 15,
+  "smeter_med": null,
+  "note": "FM broadcast channel found by the scan, +39 dB",
+  "radio": {
+   "freq": 92300000,
+   "mode": 9,
+   "flo": 0,
+   "fhi": 8000
+  }
+ },
+ {
+  "name": "fm_97_900",
+  "file": "fm_97_900.wav",
+  "dial": 97900000,
+  "mode": "wfm",
+  "filter": null,
+  "t0": 1794108905.08061,
+  "seconds": 15,
+  "smeter_med": null,
+  "note": "FM broadcast channel found by the scan, +31 dB",
+  "radio": {
+   "freq": 97900000,
+   "mode": 9,
+   "flo": 0,
+   "fhi": 8000
+  }
+ },
+ {
+  "name": "fm_103_900",
+  "file": "fm_103_900.wav",
+  "dial": 103900000,
+  "mode": "wfm",
+  "filter": null,
+  "t0": 1794108921.886784,
+  "seconds": 15,
+  "smeter_med": null,
+  "note": "FM broadcast channel found by the scan, +29 dB",
+  "radio": {
+   "freq": 103900000,
+   "mode": 9,
+   "flo": 0,
+   "fhi": 8000
+  }
+ },
+ {
+  "name": "air_122_875",
+  "file": "air_122_875.wav",
+  "dial": 122875000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794109587.0908191,
+  "seconds": 25,
+  "smeter_med": null,
+  "note": "Not an aircraft: 122.880 MHz is the radio's own ADC clock leaking in (a steady +59 dB carrier there, checked with the base tuned directly), and this channel sits on it or its sidebands.",
+  "radio": {
+   "freq": 122875000,
+   "mode": 6,
+   "flo": 0,
+   "fhi": 5000
+  }
+ },
+ {
+  "name": "air_122_925",
+  "file": "air_122_925.wav",
+  "dial": 122925000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794109613.883625,
+  "seconds": 25,
+  "smeter_med": null,
+  "note": "Not an aircraft: 122.880 MHz is the radio's own ADC clock leaking in (a steady +59 dB carrier there, checked with the base tuned directly), and this channel sits on it or its sidebands.",
+  "radio": {
+   "freq": 122925000,
+   "mode": 6,
+   "flo": 0,
+   "fhi": 5000
+  }
+ },
+ {
+  "name": "air_122_825",
+  "file": "air_122_825.wav",
+  "dial": 122825000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794109640.660277,
+  "seconds": 25,
+  "smeter_med": null,
+  "note": "Not an aircraft: 122.880 MHz is the radio's own ADC clock leaking in (a steady +59 dB carrier there, checked with the base tuned directly), and this channel sits on it or its sidebands.",
+  "radio": {
+   "freq": 122825000,
+   "mode": 6,
+   "flo": 0,
+   "fhi": 5000
+  }
+ },
+ {
+  "name": "air_122_975",
+  "file": "air_122_975.wav",
+  "dial": 122975000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794109667.45336,
+  "seconds": 25,
+  "smeter_med": null,
+  "note": "Not an aircraft: 122.880 MHz is the radio's own ADC clock leaking in (a steady +59 dB carrier there, checked with the base tuned directly), and this channel sits on it or its sidebands.",
+  "radio": {
+   "freq": 122975000,
+   "mode": 6,
+   "flo": 0,
+   "fhi": 5000
+  }
+ },
+ {
+  "name": "air_121_675",
+  "file": "air_121_675.wav",
+  "dial": 121675000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794110205.218328,
+  "seconds": 30,
+  "smeter_med": null,
+  "note": "Airband 121.675 MHz, the strongest channel away from the radio's 122.88 MHz clock spur (+40 dB in the scan); AM, 30 s."
+ },
+ {
+  "name": "air_124_075",
+  "file": "air_124_075.wav",
+  "dial": 124075000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794110237.827991,
+  "seconds": 30,
+  "smeter_med": null,
+  "note": "Airband 124.075 MHz, the strongest channel away from the radio's 122.88 MHz clock spur (+40 dB in the scan); AM, 30 s."
+ },
+ {
+  "name": "wwv_10000",
+  "file": "wwv_10000.wav",
+  "dial": 10000000,
+  "mode": "am",
+  "filter": null,
+  "t0": 1794111605.851677,
+  "seconds": 62,
+  "smeter_med": -114.8,
+  "note": "WWV/WWVH on 10.000 MHz, AM, 62 s with the coil midway (30 m). S-meter median -115 dBm, peak -110 dBm."
+ }
+]

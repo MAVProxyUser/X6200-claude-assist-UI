@@ -1,0 +1,678 @@
+{
+ "cw_sweepstakes_14028": {
+  "dial": 14028500,
+  "mode": "usb",
+  "seconds": 30,
+  "smeter": -103,
+  "rms_dbfs": -23.7,
+  "cw": [
+   {
+    "tone": 1708,
+    "wpm": 30,
+    "text": "U W4IX NR 349 U K0SN 75 MT TU K0S",
+    "snr_db": 28
+   }
+  ]
+ },
+ "psk31_14070": {
+  "dial": 14069500,
+  "mode": "usb",
+  "seconds": 30,
+  "smeter": -115,
+  "rms_dbfs": -26.9,
+  "psk31": []
+ },
+ "js8_14078": {
+  "dial": 14078000,
+  "mode": "usb",
+  "seconds": 31,
+  "smeter": -116,
+  "rms_dbfs": -27.3,
+  "js8": []
+ },
+ "ft4_14080": {
+  "dial": 14080000,
+  "mode": "usb",
+  "seconds": 31,
+  "smeter": -117,
+  "rms_dbfs": -27.0,
+  "ft4": [
+   "01:05:22  CQ XQ3SK FF46"
+  ]
+ },
+ "rtty_14083": {
+  "dial": 14082500,
+  "mode": "usb",
+  "seconds": 30,
+  "smeter": -117,
+  "rms_dbfs": -27.4,
+  "rtty": []
+ },
+ "ssb_voice_14305": {
+  "dial": 14305000,
+  "mode": "usb",
+  "seconds": 25,
+  "smeter": -114,
+  "rms_dbfs": -24.4,
+  "peaks": [
+   [
+    873,
+    26
+   ],
+   [
+    993,
+    25
+   ],
+   [
+    933,
+    22
+   ],
+   [
+    813,
+    21
+   ],
+   [
+    1053,
+    20
+   ],
+   [
+    753,
+    18
+   ],
+   [
+    633,
+    17
+   ],
+   [
+    693,
+    16
+   ]
+  ]
+ },
+ "sstv_14230": {
+  "dial": 14230000,
+  "mode": "usb",
+  "seconds": 60,
+  "smeter": -116,
+  "rms_dbfs": -27.2,
+  "peaks": []
+ },
+ "chu_14670": {
+  "dial": 14670000,
+  "mode": "am",
+  "seconds": 20,
+  "smeter": -121,
+  "rms_dbfs": -38.8
+ },
+ "wwv_15000": {
+  "dial": 15000000,
+  "mode": "am",
+  "seconds": 20,
+  "smeter": -121,
+  "rms_dbfs": -37.7
+ },
+ "broadcast_15770": {
+  "dial": 15770000,
+  "mode": "am",
+  "seconds": 20,
+  "smeter": -117,
+  "rms_dbfs": -29.9
+ },
+ "wspr_14095_6": {
+  "dial": 14095600,
+  "mode": "usb",
+  "seconds": 116,
+  "smeter": -117,
+  "rms_dbfs": -27.3,
+  "wspr": [],
+  "cycle": "01:10"
+ },
+ "ncdxf_beacons_14100": {
+  "dial": 14099000,
+  "mode": "usb",
+  "seconds": 181,
+  "smeter": -118,
+  "rms_dbfs": -27.4,
+  "beacons": [
+   [
+    1,
+    "VE8AT",
+    "Inuvik, Canada",
+    10,
+    1,
+    ""
+   ],
+   [
+    2,
+    "W6WX",
+    "California",
+    10,
+    0,
+    ""
+   ],
+   [
+    3,
+    "KH6RS",
+    "Hawaii",
+    10,
+    0,
+    ""
+   ],
+   [
+    4,
+    "ZL6B",
+    "New Zealand",
+    10,
+    0,
+    ""
+   ],
+   [
+    5,
+    "VK6RBP",
+    "Western Australia",
+    10,
+    0,
+    ""
+   ]
+  ],
+  "tone": 1000.0
+ },
+ "js8_14078_b": {
+  "dial": 14078000,
+  "mode": "usb",
+  "seconds": 46,
+  "smeter": -117,
+  "rms_dbfs": -27.6,
+  "js8": []
+ },
+ "ncdxf_beacons_14100_b": {
+  "dial": 14099000,
+  "mode": "usb",
+  "seconds": 181,
+  "smeter": -118,
+  "rms_dbfs": -27.5,
+  "beacons": [
+   [
+    1,
+    "VE8AT",
+    "Inuvik, Canada",
+    10,
+    1,
+    ""
+   ],
+   [
+    2,
+    "W6WX",
+    "California",
+    10,
+    0,
+    ""
+   ],
+   [
+    3,
+    "KH6RS",
+    "Hawaii",
+    10,
+    0,
+    ""
+   ],
+   [
+    4,
+    "ZL6B",
+    "New Zealand",
+    10,
+    1,
+    ""
+   ],
+   [
+    5,
+    "VK6RBP",
+    "Western Australia",
+    10,
+    0,
+    ""
+   ],
+   [
+    6,
+    "JA2IGY",
+    "Japan",
+    11,
+    1,
+    ""
+   ],
+   [
+    7,
+    "RR9O",
+    "Siberia, Russia",
+    10,
+    0,
+    ""
+   ],
+   [
+    8,
+    "VR2B",
+    "Hong Kong",
+    10,
+    0,
+    ""
+   ],
+   [
+    9,
+    "4S7B",
+    "Sri Lanka",
+    10,
+    0,
+    ""
+   ],
+   [
+    10,
+    "ZS6DN",
+    "South Africa",
+    10,
+    0,
+    ""
+   ],
+   [
+    11,
+    "5Z4B",
+    "Kenya",
+    11,
+    0,
+    ""
+   ],
+   [
+    12,
+    "4X6TU",
+    "Israel",
+    10,
+    1,
+    ""
+   ],
+   [
+    13,
+    "OH2B",
+    "Finland",
+    10,
+    1,
+    ""
+   ],
+   [
+    14,
+    "CS3B",
+    "Madeira",
+    14,
+    0,
+    ""
+   ],
+   [
+    15,
+    "LU4AA",
+    "Argentina",
+    10,
+    0,
+    ""
+   ],
+   [
+    16,
+    "OA4B",
+    "Peru",
+    10,
+    0,
+    ""
+   ],
+   [
+    17,
+    "YV5B",
+    "Venezuela",
+    10,
+    0,
+    ""
+   ]
+  ],
+  "tone": 1000.0
+ },
+ "cw_14023_9": {
+  "dial": 14023200,
+  "mode": "usb",
+  "seconds": 30,
+  "smeter": -115,
+  "rms_dbfs": -25.3,
+  "cw": []
+ },
+ "cw_14040_cluster": {
+  "dial": 14039500,
+  "mode": "usb",
+  "seconds": 30,
+  "smeter": -116,
+  "rms_dbfs": -25.5,
+  "cw": [
+   {
+    "tone": 1292,
+    "wpm": 30,
+    "text": "E CD SS N6 IO CQ SSN6HO N6RO CQ SS N6RO N6RO",
+    "snr_db": 24
+   },
+   {
+    "tone": 2566,
+    "wpm": 33,
+    "text": "N N6AR CQ SS N6AR N6AR N0AX 135 A N6RF II EH NFL E E E",
+    "snr_db": 21
+   }
+  ]
+ },
+ "cw_14045_cluster": {
+  "dial": 14044000,
+  "mode": "usb",
+  "seconds": 30,
+  "smeter": -116,
+  "rms_dbfs": -24.8,
+  "cw": [
+   {
+    "tone": 829,
+    "wpm": 38,
+    "text": "E IIE NI IMZ7 3*I<ERR> E E *L7SB 76 AK E 4TM 8 E AI 7 M Z MEE EE E N* U T TU KL7SB",
+    "snr_db": 20
+   }
+  ]
+ },
+ "cw_14056_cluster": {
+  "dial": 14054500,
+  "mode": "usb",
+  "seconds": 30,
+  "smeter": -113,
+  "rms_dbfs": -24.3,
+  "cw": [
+   {
+    "tone": 2591,
+    "wpm": 33,
+    "text": "TU W6EU N0AVV 17PU B W6EU 58 SV",
+    "snr_db": 25
+   }
+  ]
+ },
+ "carrier_14117_7": {
+  "dial": 14117200,
+  "mode": "usb",
+  "seconds": 15,
+  "smeter": -116,
+  "rms_dbfs": -25.8
+ },
+ "cw40_7029_5": {
+  "dial": 7029500,
+  "mode": "usb",
+  "seconds": 30,
+  "smeter": null,
+  "rms_dbfs": -21.5,
+  "cw": [
+   {
+    "tone": 573,
+    "wpm": 46,
+    "text": "H1 LA IPEEH**I* EE* IE TU K6KU UD K5KU E SS K5OK WS K1OK DD K5KU SS T",
+    "snr_db": 34
+   }
+  ]
+ },
+ "cw40_7040": {
+  "dial": 7040000,
+  "mode": "usb",
+  "seconds": 30,
+  "smeter": null,
+  "rms_dbfs": -22.0,
+  "cw": [
+   {
+    "tone": 2703,
+    "wpm": 26,
+    "text": "NR ETV W6PH E CQ SS W6PH W6PH E WAT EKHEA WA6KHK 508 B I",
+    "snr_db": 29
+   }
+  ]
+ },
+ "lsb40_7224_5": {
+  "dial": 7224500,
+  "mode": "lsb",
+  "seconds": 25,
+  "smeter": null,
+  "rms_dbfs": -22.6
+ },
+ "lsb40_7251_0": {
+  "dial": 7251000,
+  "mode": "lsb",
+  "seconds": 25,
+  "smeter": null,
+  "rms_dbfs": -19.2
+ },
+ "lsb40_7266_0": {
+  "dial": 7266000,
+  "mode": "lsb",
+  "seconds": 25,
+  "smeter": null,
+  "rms_dbfs": -20.2
+ },
+ "lsb40_7160_0": {
+  "dial": 7160000,
+  "mode": "lsb",
+  "seconds": 25,
+  "smeter": null,
+  "rms_dbfs": -24.2
+ },
+ "bc40_7505": {
+  "dial": 7505000,
+  "mode": "am",
+  "seconds": 20,
+  "smeter": null,
+  "rms_dbfs": -28.7
+ },
+ "bc40_7355": {
+  "dial": 7355000,
+  "mode": "am",
+  "seconds": 20,
+  "smeter": null,
+  "rms_dbfs": -26.5
+ },
+ "bc40_7490": {
+  "dial": 7490000,
+  "mode": "am",
+  "seconds": 20,
+  "smeter": null,
+  "rms_dbfs": -29.0
+ },
+ "bc40_7570": {
+  "dial": 7570000,
+  "mode": "am",
+  "seconds": 20,
+  "smeter": null,
+  "rms_dbfs": -32.2
+ },
+ "chu_7850": {
+  "dial": 7850000,
+  "mode": "am",
+  "seconds": 20,
+  "smeter": null,
+  "rms_dbfs": -35.3
+ },
+ "psk31_7070": {
+  "dial": 7069500,
+  "mode": "usb",
+  "seconds": 30,
+  "smeter": null,
+  "rms_dbfs": -23.6,
+  "psk31": [
+   {
+    "tone": 1745.0,
+    "snr_db": 16,
+    "text": "oo ea eeonp)e:en eh eoeeeeeIo3cgconpenopqEeehl roet PH a ot , :o ee ae etet t S nE eE*"
+   },
+   {
+    "tone": 2778.7,
+    "snr_db": 13,
+    "text": "ec|eesao o tnetee 2eeGe r,eenna-.Sto ear5! i ree eaiite eee bIn nntI a3avpn ek"
+   },
+   {
+    "tone": 521.3,
+    "snr_db": 13,
+    "text": "s ,aIh nooSm t>(v3mooawde tVi s e eeImeEtw Sto .ln oLf"
+   }
+  ]
+ },
+ "rtty_7089": {
+  "dial": 7089000,
+  "mode": "usb",
+  "seconds": 30,
+  "smeter": null,
+  "rms_dbfs": -21.3,
+  "rtty": [
+   {
+    "tones": [
+     1192,
+     1374
+    ],
+    "text": "LDXF FNFFFDFNDFUFIFFDFIDFV"
+   },
+   {
+    "tones": [
+     1132,
+     1312
+    ],
+    "text": "N FF SDD NDF F FDDF NDDN\u0000\u0000N \u0000 D EDDNNFFSNNNF\u0000ND NFNF ND SFFF\u0000 FNSD NNNF"
+   },
+   {
+    "tones": [
+     953,
+     1132
+    ],
+    "text": "HDFF NFM\u0000 FDFFFFF FNEFID N JFN NSDFDNIFFDF NFDFIDFF D NDHSUN P ND FF SN NP DSNF"
+   },
+   {
+    "tones": [
+     1013,
+     1192
+    ],
+    "text": "S MFFCFFFSNKFNFFJH NFFFSHD\u0000\u0000\u0000X SHXRNDSDH FFYNNN FYSFSDFFSF F"
+   }
+  ]
+ },
+ "ft4_7047_5": {
+  "dial": 7047500,
+  "mode": "usb",
+  "seconds": 31,
+  "smeter": null,
+  "rms_dbfs": -22.7,
+  "ft4": [
+   "02:48:15  KM6TAU KQ4CRY R-10",
+   "02:48:30  KM6TAU KQ4CRY R-14"
+  ]
+ },
+ "js8_7078": {
+  "dial": 7078000,
+  "mode": "usb",
+  "seconds": 46,
+  "smeter": null,
+  "rms_dbfs": -23.2,
+  "js8": [
+   "~02:48:52  -14 dB  dt  +0.0  1192.5 Hz  turbo",
+   "~02:49:13  -21 dB  dt  -0.7  1195.2 Hz  normal  W6CJ: K1KFX HW CPY?",
+   "~02:49:13  -13 dB  dt  -0.4   597.4 Hz  normal  KF5NRU: W6CJ HEARTBEAT SNR -13",
+   "~02:49:28  -10 dB  dt  +0.0  1197.5 Hz  turbo   K1KFX: W6CJ HW CPY?"
+  ]
+ },
+ "wspr_7038_6": {
+  "dial": 7038600,
+  "mode": "usb",
+  "seconds": 116,
+  "smeter": null,
+  "rms_dbfs": -22.4,
+  "wspr": [
+   " -14 dB  dt  +0.2  7.040132 MHz  drift +0  K5NAV DM55 23",
+   " -19 dB  dt  -0.3  7.040142 MHz  drift +0  N0KAM DN84 23",
+   " -20 dB  dt  +0.9  7.040048 MHz  drift +0  WW0WWV DN70 30",
+   " -20 dB  dt  +0.0  7.040136 MHz  drift +0  K7CMI DN57 27",
+   " -21 dB  dt  -0.1  7.040169 MHz  drift +0  KE7ZXJ CN95 33",
+   " -23 dB  dt  -0.3  7.040185 MHz  drift +0  AE0GQ DM79 23"
+  ],
+  "cycle": "02:50"
+ },
+ "am40_7250": {
+  "dial": 7250000,
+  "mode": "am",
+  "seconds": 25,
+  "smeter": null,
+  "rms_dbfs": -28.8
+ },
+ "am40_7265": {
+  "dial": 7265000,
+  "mode": "am",
+  "seconds": 25,
+  "smeter": null,
+  "rms_dbfs": -27.0
+ },
+ "fm_92_300": {
+  "dial": 92300000,
+  "mode": "wfm",
+  "seconds": 15,
+  "smeter": null,
+  "rms_dbfs": -23.4
+ },
+ "fm_97_900": {
+  "dial": 97900000,
+  "mode": "wfm",
+  "seconds": 15,
+  "smeter": null,
+  "rms_dbfs": -22.9
+ },
+ "fm_103_900": {
+  "dial": 103900000,
+  "mode": "wfm",
+  "seconds": 15,
+  "smeter": null,
+  "rms_dbfs": -22.4
+ },
+ "air_122_875": {
+  "dial": 122875000,
+  "mode": "am",
+  "seconds": 25,
+  "smeter": null,
+  "rms_dbfs": -28.4
+ },
+ "air_122_925": {
+  "dial": 122925000,
+  "mode": "am",
+  "seconds": 25,
+  "smeter": null,
+  "rms_dbfs": -25.0
+ },
+ "air_122_825": {
+  "dial": 122825000,
+  "mode": "am",
+  "seconds": 25,
+  "smeter": null,
+  "rms_dbfs": -27.4
+ },
+ "air_122_975": {
+  "dial": 122975000,
+  "mode": "am",
+  "seconds": 25,
+  "smeter": null,
+  "rms_dbfs": -23.5
+ },
+ "air_121_675": {
+  "dial": 121675000,
+  "mode": "am",
+  "seconds": 30,
+  "smeter": null,
+  "rms_dbfs": -29.8
+ },
+ "air_124_075": {
+  "dial": 124075000,
+  "mode": "am",
+  "seconds": 30,
+  "smeter": null,
+  "rms_dbfs": -29.7
+ },
+ "wwv_10000": {
+  "dial": 10000000,
+  "mode": "am",
+  "seconds": 62,
+  "smeter": -114.8,
+  "rms_dbfs": -25.7
+ }
+}

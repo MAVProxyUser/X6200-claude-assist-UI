@@ -1,0 +1,406 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Captures by Coil</title>
+<style>
+:root{--bg:#f5f6f8;--panel:#fff;--text:#1c2230;--muted:#687187;--line:#e2e5eb;--accent:#2563eb}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1117;--panel:#161a22;--text:#e5e8ee;--muted:#8b93a7;--line:#252b37;--accent:#60a5fa}}
+*{box-sizing:border-box} [id]{scroll-margin-top:56px}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:0 16px 40px}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+h1{font-size:20px;margin:4px 0} .sub{color:var(--muted);margin:0 0 14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:12px 0;scroll-margin-top:56px}
+h2{font-size:16px;margin:0 0 6px} h2 span{font-weight:400;color:var(--muted);font-size:12.5px;margin-left:6px}
+img{width:100%;border-radius:6px;display:block;margin:6px 0} audio{width:100%;margin:4px 0}
+ul{margin:6px 0 0;padding-left:18px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+.muted{color:var(--muted);font-family:inherit} .note{color:var(--muted);margin:0 0 4px}
+.t{border-collapse:collapse;font-size:13px;width:100%} .t td,.t th{padding:4px 12px 4px 0;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+.t th{font-weight:600;color:var(--muted);font-size:12px} .num{font-variant-numeric:tabular-nums;white-space:nowrap} .idx .res{color:var(--muted)}
+.scroll{overflow-x:auto}
+.sw{display:inline-block;width:14px;height:14px;border-radius:50%;flex:none;border:1px solid rgba(0,0,0,.15)}
+nav.pills{position:sticky;top:0;z-index:5;display:flex;gap:8px;flex-wrap:wrap;padding:10px 0;background:var(--bg);border-bottom:1px solid var(--line)}
+nav.pills a{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--text);font-size:13px}
+nav.pills small{color:var(--muted)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:8px 0 6px}
+.tile{display:flex;flex-direction:column;gap:2px;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;color:var(--text)}
+.tile:hover{text-decoration:none;border-color:var(--accent)} .tile b{font-size:15px;display:flex;align-items:center;gap:8px}
+.coil{margin-top:28px;scroll-margin-top:48px} .coil-head{display:flex;gap:12px;align-items:center;padding-top:8px;border-top:2px solid var(--line)}
+.coil-head .sw{width:28px;height:28px} .coil-head .sub{margin:0}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:12px 0}
+.facts div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.facts dt{color:var(--muted);font-size:12px} .facts dd{margin:2px 0 0;font-weight:600;font-variant-numeric:tabular-nums} .facts small{font-weight:400;color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:1px 8px 1px 6px;border-radius:999px;border:1px solid var(--line);vertical-align:2px;margin-right:4px}
+.chip::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--sw)}
+.sub-h{font-size:16px;margin:22px 0 0} .sub-h small{font-weight:400;color:var(--muted)}
+</style></head><body><main>
+<nav class=pills><a href="#red-gold"><span class=sw style="background:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)"></span>Red-gold <small>20 m</small></a><a href="#red-silver"><span class=sw style="background:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)"></span>Red-silver <small>40 m</small></a><a href="#midway"><span class=sw style="background:linear-gradient(135deg,#d4a017 50%,#aab0b8 50%)"></span>Midway <small>30 m</small></a></nav>
+<h1 style="margin-top:14px">JPC-12 on the X6200: everything captured, by coil setting</h1>
+<p class=sub>Recorded remotely from the X6200, Dublin, Ohio (EN80kc), night of 2026-11-07 (23:50-04:28 UTC). Receive only.
+Each recording was tuned from the radio's own spectrum, and its coil setting follows from the time it was made.</p>
+<div class=tiles><a class=tile href="#red-gold"><b><span class=sw style="background:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)"></span>Red-gold</b>
+<span>20 m (14 MHz)</span><span class=muted>23:50-02:34 UTC</span><span class=muted>19 recordings, 3,030 FT8 messages</span></a><a class=tile href="#red-silver"><b><span class=sw style="background:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)"></span>Red-silver</b>
+<span>40 m (7 MHz), plus the VHF tests</span><span class=muted>02:38-04:18 UTC</span><span class=muted>27 recordings, 4,309 FT8 messages</span></a><a class=tile href="#midway"><b><span class=sw style="background:linear-gradient(135deg,#d4a017 50%,#aab0b8 50%)"></span>Midway</b>
+<span>30 m (10 MHz)</span><span class=muted>04:19-04:28 UTC</span><span class=muted>1 recording, 79 FT8 messages</span></a></div>
+
+<section class=coil id="red-gold"><a id="m20"></a>
+<header class=coil-head><span class=sw style="background:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)"></span><div><h1>Red-gold: 20 m (14 MHz)</h1><p class=sub>Slider on the red-gold mark, near the top of the coil.</p></div></header>
+<dl class=facts><div><dt>On the air</dt><dd>23:50-02:34 UTC<br><small>6:50-9:34 PM EST, Nov 7</small></dd></div><div><dt>Tunes</dt><dd>20 m (14 MHz)</dd></div><div><dt>Preamp</dt><dd>on</dd></div><div><dt>Recordings</dt><dd>19</dd></div><div><dt>FT8 on 14.074</dt><dd>3,030 messages<br><small>242 stations, 32 countries</small></dd></div></dl>
+<p class=note>Farthest FT8 stations (from their grid squares): C91RU Mozambique (13,789 km), D2UY Angola (10,920 km), LU9XJR Argentina (10,277 km).</p>
+<section class=card><h2>Everything heard at this setting <span>in time order; click a frequency to jump to it</span></h2>
+<div class=scroll><table class="t idx"><tr><th>UTC</th><th>Frequency</th><th>Mode</th><th>What</th><th>Result</th></tr><tr><td class=num>23:58-02:34</td><td class=num><a href="http://127.0.0.1:8073/">14.074 MHz</a></td><td>USB</td><td>FT8 (in FT8 Live)</td><td class=res>3,030 messages, 242 stations, 32 countries; 8.2 per 15 s slot</td></tr><tr><td class=num>01:01</td><td class=num><a href="#cw_sweepstakes_14028">14.0285 MHz</a></td><td>USB</td><td>CW (Morse), ARRL Sweepstakes</td><td class=res>1 decoded: tone 1708 Hz, 30 WPM: U W4IX NR 349 U K0SN 75 MT TU K0S</td></tr><tr><td class=num>01:02</td><td class=num><a href="#psk31_14070">14.0695 MHz</a></td><td>USB</td><td>PSK31</td><td class=res>One weak, narrow signal at 1377 Hz, coming and going.</td></tr><tr><td class=num>01:02</td><td class=num><a href="#js8_14078">14.0780 MHz</a></td><td>USB</td><td>JS8Call</td><td class=res>One weak signal near 1727 Hz.</td></tr><tr><td class=num>01:05</td><td class=num><a href="#ft4_14080">14.0800 MHz</a></td><td>USB</td><td>FT4</td><td class=res>1 decoded: 01:05:22 CQ XQ3SK FF46</td></tr><tr><td class=num>01:05</td><td class=num><a href="#rtty_14083">14.0825 MHz</a></td><td>USB</td><td>RTTY</td><td class=res>No RTTY signal in this 30 s window.</td></tr><tr><td class=num>01:06</td><td class=num><a href="#ssb_voice_14305">14.3050 MHz</a></td><td>USB</td><td>SSB voice</td><td class=res>No voice found.</td></tr><tr><td class=num>01:07</td><td class=num><a href="#sstv_14230">14.2300 MHz</a></td><td>USB</td><td>SSTV</td><td class=res>No SSTV picture was being sent during these 60 s; the band is noise only.</td></tr><tr><td class=num>01:08</td><td class=num><a href="#chu_14670">14.6700 MHz</a></td><td>AM</td><td>CHU, Canada&#x27;s time station</td><td class=res>CHU (Ottawa) not heard: the S-meter sat at its floor and the audio is noise.</td></tr><tr><td class=num>01:08</td><td class=num><a href="#wwv_15000">15.0000 MHz</a></td><td>AM</td><td>WWV/WWVH time station</td><td class=res>WWV/WWVH not heard: noise only.</td></tr><tr><td class=num>01:09</td><td class=num><a href="#broadcast_15770">15.7700 MHz</a></td><td>AM</td><td>Shortwave broadcast</td><td class=res>A shortwave broadcast station (15.770 MHz is one of WRMI&#x27;s frequencies, Okeechobee, Florida).</td></tr><tr><td class=num>01:10</td><td class=num><a href="#wspr_14095_6">14.0956 MHz</a></td><td>USB</td><td>WSPR beacons</td><td class=res>One full 2-minute WSPR cycle (01:10 UTC) through the repo&#x27;s own wsprd: no spots, and no WSPR traces are visible in the…</td></tr><tr><td class=num>01:12</td><td class=num><a href="#ncdxf_beacons_14100">14.0990 MHz</a></td><td>USB</td><td>NCDXF/IARU beacons</td><td class=res>0 of 5 beacons heard</td></tr><tr><td class=num>01:22</td><td class=num><a href="#js8_14078_b">14.0780 MHz</a></td><td>USB</td><td>JS8Call</td><td class=res>A second try after the radio came back (three slots, 01:22:30-01:23:16 UTC): the band is noise only here, no JS8 trans…</td></tr><tr><td class=num>01:24</td><td class=num><a href="#ncdxf_beacons_14100_b">14.0990 MHz</a></td><td>USB</td><td>NCDXF/IARU beacons</td><td class=res>0 of 17 beacons heard</td></tr><tr><td class=num>01:30</td><td class=num><a href="#sweep-20m">14.000-14.350 MHz</a></td><td>-</td><td>Spectrum: the 20 m band</td><td class=res>a picture of the whole range, below</td></tr><tr><td class=num>01:31</td><td class=num><a href="#cw_14023_9">14.0232 MHz</a></td><td>USB</td><td>CW (Morse), ARRL Sweepstakes</td><td class=res>The strongest signal in the spectrum (14.0239 MHz, +26 dB at its peak).</td></tr><tr><td class=num>01:31</td><td class=num><a href="#cw_14040_cluster">14.0395 MHz</a></td><td>USB</td><td>CW (Morse), ARRL Sweepstakes</td><td class=res>2 decoded: tone 1292 Hz, 30 WPM: E CD SS N6 IO CQ SSN6HO N6RO CQ SS N6RO N6RO</td></tr><tr><td class=num>01:32</td><td class=num><a href="#cw_14045_cluster">14.0440 MHz</a></td><td>USB</td><td>CW (Morse), ARRL Sweepstakes</td><td class=res>1 decoded: tone 829 Hz, 38 WPM: E IIE NI IMZ7 3*I&lt;ERR&gt; E E *L7SB 76 AK E 4TM 8 E AI 7 M Z M…</td></tr><tr><td class=num>01:32</td><td class=num><a href="#cw_14056_cluster">14.0545 MHz</a></td><td>USB</td><td>CW (Morse), ARRL Sweepstakes</td><td class=res>1 decoded: tone 2591 Hz, 33 WPM: TU W6EU N0AVV 17PU B W6EU 58 SV</td></tr><tr><td class=num>01:33</td><td class=num><a href="#carrier_14117_7">14.1172 MHz</a></td><td>USB</td><td>A steady carrier from the spectrum</td><td class=res>One of the steady lines in the spectrum: nothing keyed or modulated on it, so a carrier or local interference, not a s…</td></tr><tr><td class=num>02:13</td><td class=num><a href="#sweep-wide">13.4-15.9 MHz</a></td><td>-</td><td>Spectrum: everything this setting reaches</td><td class=res>a picture of the whole range, below</td></tr></table></div></section>
+<section class=card id=sweep-20m><h2>The band, from the radio's own spectrum <span>14.000-14.350 MHz, 01:30 UTC, seven 50 kHz views stitched</span></h2><p class=note>Where the stations were: CW (Sweepstakes) packed at 14.020-14.060, FT8 at 14.075, and no voice signals anywhere in 14.150-14.350; the thin steady lines at 14.118, 14.180, 14.243 and 14.306 are carriers or interference. The CW recordings below were tuned from this picture.</p><img src="spectrum_20m.png" alt="20 m spectrum and waterfall"></section><section class=card id=sweep-wide><h2>Everything the 20 m coil setting reaches <span>13.4-15.9 MHz, 02:13 UTC, charger on, preamp on, 25 views of 100 kHz</span></h2><p class=note>Most of the steady lines are not stations: they fall on three evenly spaced combs (98.24, ~102.9 and ~95.6 kHz apart, triangles), the harmonics of switching power supplies. What is left: CW at 14.000-14.045, FT8 at 14.074 (weak, below the marks here), a pulsing signal at 13.560 MHz in the ISM band, and weak narrow signals at 14.68-14.86 MHz outside the ham band.</p><img src="spectrum_wide.png" alt="13.4-15.9 MHz spectrum"></section>
+
+<section class=card id="cw_sweepstakes_14028">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> CW (Morse), ARRL Sweepstakes <span>14.0285 MHz USB · 01:01:33 UTC · 30 s · S-meter -103 dBm</span></h2>
+  <p class=note>The ARRL Sweepstakes contest. The strongest signal decodes as a complete contest exchange: K0SN (Montana) sends W4IX serial 349, class U, licensed 75, section MT, then TU. Weaker CW signals are visible at 1170, 2000 and 2340 Hz but were below what the decoder copies cleanly.</p>
+  <img src="cw_sweepstakes_14028.png" alt="spectrogram of cw_sweepstakes_14028" loading=lazy>
+  <audio controls preload=none src="cw_sweepstakes_14028.wav"></audio>
+  <ul><li>tone 1708 Hz, 30 WPM: U W4IX NR 349 U K0SN 75 MT TU K0S</li></ul>
+</section>
+<section class=card id="psk31_14070">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> PSK31 <span>14.0695 MHz USB · 01:02:06 UTC · 30 s · S-meter -115 dBm</span></h2>
+  <p class=note>One weak, narrow signal at 1377 Hz, coming and going. Too weak to decode: the PSK31 decoder copies a synthetic test message exactly, so the signal, not the decoder, is the limit.</p>
+  <img src="psk31_14070.png" alt="spectrogram of psk31_14070" loading=lazy>
+  <audio controls preload=none src="psk31_14070.wav"></audio>
+  <ul><li class=muted>nothing decoded in this recording</li></ul>
+</section>
+<section class=card id="js8_14078">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> JS8Call <span>14.0780 MHz USB · 01:02:45 UTC · 31 s · S-meter -116 dBm</span></h2>
+  <p class=note>One weak signal near 1727 Hz. Decoded offline with the radio&#x27;s own JS8 receiver (tools/js8_play, all four speeds): nothing. The same player decodes a synthetic two-station JS8 band exactly, so the signal was too weak or not JS8.</p>
+  <img src="js8_14078.png" alt="spectrogram of js8_14078" loading=lazy>
+  <audio controls preload=none src="js8_14078.wav"></audio>
+  <ul><li class=muted>nothing decoded in this recording</li></ul>
+</section>
+<section class=card id="ft4_14080">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> FT4 <span>14.0800 MHz USB · 01:05:07 UTC · 31 s · S-meter -117 dBm</span></h2>
+  <p class=note>FT4 (FT8&#x27;s faster cousin, 7.5 s slots): one decode, a station in central Chile calling CQ.</p>
+  <img src="ft4_14080.png" alt="spectrogram of ft4_14080" loading=lazy>
+  <audio controls preload=none src="ft4_14080.wav"></audio>
+  <ul><li>01:05:22  CQ XQ3SK FF46</li></ul>
+</section>
+<section class=card id="rtty_14083">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> RTTY <span>14.0825 MHz USB · 01:05:41 UTC · 30 s · S-meter -117 dBm</span></h2>
+  <p class=note>No RTTY signal in this 30 s window. The RTTY decoder copies a synthetic test signal correctly.</p>
+  <img src="rtty_14083.png" alt="spectrogram of rtty_14083" loading=lazy>
+  <audio controls preload=none src="rtty_14083.wav"></audio>
+  <ul><li class=muted>nothing decoded in this recording</li></ul>
+</section>
+<section class=card id="ssb_voice_14305">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> SSB voice <span>14.3050 MHz USB · 01:06:46 UTC · 25 s · S-meter -114 dBm</span></h2>
+  <p class=note>No voice found. The &#x27;loudest&#x27; spot on 14.150-14.350 was a steady comb of tones 60 Hz apart (the horizontal lines at 600-1050 Hz): electrical interference, most likely from something near the antenna, not a station.</p>
+  <img src="ssb_voice_14305.png" alt="spectrogram of ssb_voice_14305" loading=lazy>
+  <audio controls preload=none src="ssb_voice_14305.wav"></audio>
+  
+</section>
+<section class=card id="sstv_14230">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> SSTV <span>14.2300 MHz USB · 01:07:14 UTC · 60 s · S-meter -116 dBm</span></h2>
+  <p class=note>No SSTV picture was being sent during these 60 s; the band is noise only.</p>
+  <img src="sstv_14230.png" alt="spectrogram of sstv_14230" loading=lazy>
+  <audio controls preload=none src="sstv_14230.wav"></audio>
+  
+</section>
+<section class=card id="chu_14670">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> CHU, Canada&#x27;s time station <span>14.6700 MHz AM · 01:08:18 UTC · 20 s · S-meter -121 dBm</span></h2>
+  <p class=note>CHU (Ottawa) not heard: the S-meter sat at its floor and the audio is noise.</p>
+  <img src="chu_14670.png" alt="spectrogram of chu_14670" loading=lazy>
+  <audio controls preload=none src="chu_14670.wav"></audio>
+  
+</section>
+<section class=card id="wwv_15000">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> WWV/WWVH time station <span>15.0000 MHz AM · 01:08:41 UTC · 20 s · S-meter -121 dBm</span></h2>
+  <p class=note>WWV/WWVH not heard: noise only. 15 MHz is outside the 20 m coil setting and usually fades after dark.</p>
+  <img src="wwv_15000.png" alt="spectrogram of wwv_15000" loading=lazy>
+  <audio controls preload=none src="wwv_15000.wav"></audio>
+  
+</section>
+<section class=card id="broadcast_15770">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> Shortwave broadcast <span>15.7700 MHz AM · 01:09:04 UTC · 20 s · S-meter -117 dBm</span></h2>
+  <p class=note>A shortwave broadcast station (15.770 MHz is one of WRMI&#x27;s frequencies, Okeechobee, Florida). Weak, but programme audio is there: the curved stripes in the first 12 s are voice or singing. Listen to the recording.</p>
+  <img src="broadcast_15770.png" alt="spectrogram of broadcast_15770" loading=lazy>
+  <audio controls preload=none src="broadcast_15770.wav"></audio>
+  
+</section>
+<section class=card id="wspr_14095_6">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> WSPR beacons <span>14.0956 MHz USB · 01:10:00 UTC · 116 s · S-meter -117 dBm</span></h2>
+  <p class=note>One full 2-minute WSPR cycle (01:10 UTC) through the repo&#x27;s own wsprd: no spots, and no WSPR traces are visible in the 1400-1600 Hz window either.</p>
+  <img src="wspr_14095_6.png" alt="spectrogram of wspr_14095_6" loading=lazy>
+  <audio controls preload=none src="wspr_14095_6.wav"></audio>
+  <ul><li class=muted>nothing decoded in this recording</li></ul>
+</section>
+<section class=card id="ncdxf_beacons_14100">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> NCDXF/IARU beacons <span>14.0990 MHz USB · 01:12:00 UTC · 181 s · S-meter -118 dBm</span></h2>
+  <p class=note>Cut short at 60 s: the radio rebooted onto the test kernel at 01:13 UTC. Of the six beacon slots that were recorded (4U1UN New York through VK6RBP Australia), none stands above the noise.</p>
+  <img src="ncdxf_beacons_14100.png" alt="spectrogram of ncdxf_beacons_14100" loading=lazy>
+  <audio controls preload=none src="ncdxf_beacons_14100.wav"></audio>
+  <ul><li>VE8AT   Inuvik, Canada: not heard (+10 dB)</li><li>W6WX    California: not heard (+10 dB)</li><li>KH6RS   Hawaii: not heard (+10 dB)</li><li>ZL6B    New Zealand: not heard (+10 dB)</li><li>VK6RBP  Western Australia: not heard (+10 dB)</li></ul>
+</section>
+<section class=card id="js8_14078_b">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> JS8Call <span>14.0780 MHz USB · 01:22:30 UTC · 46 s · S-meter -117 dBm</span></h2>
+  <p class=note>A second try after the radio came back (three slots, 01:22:30-01:23:16 UTC): the band is noise only here, no JS8 transmissions at all, so nothing to decode.</p>
+  <img src="js8_14078_b.png" alt="spectrogram of js8_14078_b" loading=lazy>
+  <audio controls preload=none src="js8_14078_b.wav"></audio>
+  <ul><li class=muted>nothing decoded in this recording</li></ul>
+</section>
+<section class=card id="ncdxf_beacons_14100_b">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> NCDXF/IARU beacons <span>14.0990 MHz USB · 01:24:00 UTC · 181 s · S-meter -118 dBm</span></h2>
+  <p class=note>The full 3-minute beacon cycle, recorded after the radio came back (01:24 UTC). None of the 18 beacons stands above the noise: 20 m had mostly closed by then.</p>
+  <img src="ncdxf_beacons_14100_b.png" alt="spectrogram of ncdxf_beacons_14100_b" loading=lazy>
+  <audio controls preload=none src="ncdxf_beacons_14100_b.wav"></audio>
+  <ul><li>VE8AT   Inuvik, Canada: not heard (+10 dB)</li><li>W6WX    California: not heard (+10 dB)</li><li>KH6RS   Hawaii: not heard (+10 dB)</li><li>ZL6B    New Zealand: not heard (+10 dB)</li><li>VK6RBP  Western Australia: not heard (+10 dB)</li><li>JA2IGY  Japan: not heard (+11 dB)</li><li>RR9O    Siberia, Russia: not heard (+10 dB)</li><li>VR2B    Hong Kong: not heard (+10 dB)</li><li>4S7B    Sri Lanka: not heard (+10 dB)</li><li>ZS6DN   South Africa: not heard (+10 dB)</li><li>5Z4B    Kenya: not heard (+11 dB)</li><li>4X6TU   Israel: not heard (+10 dB)</li><li>OH2B    Finland: not heard (+10 dB)</li><li>CS3B    Madeira: not heard (+14 dB)</li><li>LU4AA   Argentina: not heard (+10 dB)</li><li>OA4B    Peru: not heard (+10 dB)</li><li>YV5B    Venezuela: not heard (+10 dB)</li></ul>
+</section>
+<section class=card id="cw_14023_9">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> CW (Morse), ARRL Sweepstakes <span>14.0232 MHz USB · 01:31:12 UTC · 30 s · S-meter -115 dBm</span></h2>
+  <p class=note>The strongest signal in the spectrum (14.0239 MHz, +26 dB at its peak). It was only on in bursts while recorded, and nothing copied cleanly.</p>
+  <img src="cw_14023_9.png" alt="spectrogram of cw_14023_9" loading=lazy>
+  <audio controls preload=none src="cw_14023_9.wav"></audio>
+  <ul><li class=muted>nothing decoded in this recording</li></ul>
+</section>
+<section class=card id="cw_14040_cluster">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> CW (Morse), ARRL Sweepstakes <span>14.0395 MHz USB · 01:31:45 UTC · 30 s · S-meter -116 dBm</span></h2>
+  <p class=note>Tuned from the spectrum: two Sweepstakes stations calling CQ, N6RO (California) at 14.0408 and N6AR at 14.0421, plus part of an exchange to N0AX.</p>
+  <img src="cw_14040_cluster.png" alt="spectrogram of cw_14040_cluster" loading=lazy>
+  <audio controls preload=none src="cw_14040_cluster.wav"></audio>
+  <ul><li>tone 1292 Hz, 30 WPM: E CD SS N6 IO CQ SSN6HO N6RO CQ SS N6RO N6RO</li><li>tone 2566 Hz, 33 WPM: N N6AR CQ SS N6AR N6AR N0AX 135 A N6RF II EH NFL E E E</li></ul>
+</section>
+<section class=card id="cw_14045_cluster">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> CW (Morse), ARRL Sweepstakes <span>14.0440 MHz USB · 01:32:18 UTC · 30 s · S-meter -116 dBm</span></h2>
+  <p class=note>Tuned from the spectrum: a noisy copy, but KL7SB in Alaska comes through, with its exchange&#x27;s &#x27;76 AK&#x27; and &#x27;TU KL7SB&#x27;.</p>
+  <img src="cw_14045_cluster.png" alt="spectrogram of cw_14045_cluster" loading=lazy>
+  <audio controls preload=none src="cw_14045_cluster.wav"></audio>
+  <ul><li>tone 829 Hz, 38 WPM: E IIE NI IMZ7 3*I&lt;ERR&gt; E E *L7SB 76 AK E 4TM 8 E AI 7 M Z MEE EE E N* U T TU KL7SB</li></ul>
+</section>
+<section class=card id="cw_14056_cluster">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> CW (Morse), ARRL Sweepstakes <span>14.0545 MHz USB · 01:32:51 UTC · 30 s · S-meter -113 dBm</span></h2>
+  <p class=note>Tuned from the spectrum: W6EU sending its exchange, class B, licensed &#x27;58, section SV (Sacramento Valley), with &#x27;TU&#x27; before it.</p>
+  <img src="cw_14056_cluster.png" alt="spectrogram of cw_14056_cluster" loading=lazy>
+  <audio controls preload=none src="cw_14056_cluster.wav"></audio>
+  <ul><li>tone 2591 Hz, 33 WPM: TU W6EU N0AVV 17PU B W6EU 58 SV</li></ul>
+</section>
+<section class=card id="carrier_14117_7">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#d4a017 50%)">Red-gold</b> A steady carrier from the spectrum <span>14.1172 MHz USB · 01:33:24 UTC · 15 s · S-meter -116 dBm</span></h2>
+  <p class=note>One of the steady lines in the spectrum: nothing keyed or modulated on it, so a carrier or local interference, not a station.</p>
+  <img src="carrier_14117_7.png" alt="spectrogram of carrier_14117_7" loading=lazy>
+  <audio controls preload=none src="carrier_14117_7.wav"></audio>
+  
+</section>
+
+</section>
+<section class=coil id="red-silver"><a id="m40"></a>
+<header class=coil-head><span class=sw style="background:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)"></span><div><h1>Red-silver: 40 m (7 MHz), plus the VHF tests</h1><p class=sub>Slider on the red-silver mark, at the bottom of the coil.</p></div></header>
+<dl class=facts><div><dt>On the air</dt><dd>02:38-04:18 UTC<br><small>9:38-11:18 PM EST</small></dd></div><div><dt>Tunes</dt><dd>40 m (7 MHz), plus the VHF tests</dd></div><div><dt>Preamp</dt><dd>on</dd></div><div><dt>Recordings</dt><dd>27</dd></div><div><dt>FT8 on 7.074</dt><dd>4,309 messages<br><small>343 stations, 33 countries</small></dd></div></dl>
+<p class=note>Farthest FT8 stations (from their grid squares): ZS1WC South Africa (13,585 km), V51NA Namibia (12,426 km), 4X1UF Israel (9,739 km).</p>
+<section class=card><h2>Everything heard at this setting <span>in time order; click a frequency to jump to it</span></h2>
+<div class=scroll><table class="t idx"><tr><th>UTC</th><th>Frequency</th><th>Mode</th><th>What</th><th>Result</th></tr><tr><td class=num>02:38-04:18</td><td class=num><a href="http://127.0.0.1:8073/">7.074 MHz</a></td><td>USB</td><td>FT8 (in FT8 Live)</td><td class=res>4,309 messages, 343 stations, 33 countries; 16.8 per 15 s slot</td></tr><tr><td class=num>02:39</td><td class=num><a href="#sweep-40m">6.9-7.9 MHz</a></td><td>-</td><td>Spectrum: everything this setting reaches</td><td class=res>a picture of the whole range, below</td></tr><tr><td class=num>02:41</td><td class=num><a href="#cw40_7029_5">7.0295 MHz</a></td><td>USB</td><td>CW (Morse), ARRL Sweepstakes</td><td class=res>1 decoded: tone 573 Hz, 46 WPM: H1 LA IPEEH**I* EE* IE TU K6KU UD K5KU E SS K5OK WS K1OK DD…</td></tr><tr><td class=num>02:42</td><td class=num><a href="#cw40_7040">7.0400 MHz</a></td><td>USB</td><td>CW (Morse), ARRL Sweepstakes</td><td class=res>1 decoded: tone 2703 Hz, 26 WPM: NR ETV W6PH E CQ SS W6PH W6PH E WAT EKHEA WA6KHK 508 B I</td></tr><tr><td class=num>02:42</td><td class=num><a href="#lsb40_7224_5">7.2245 MHz</a></td><td>LSB</td><td>SSB voice (LSB)</td><td class=res>The strongest voice in the spectrum (7.2202), tuned from the zoomed spectrum to 7.2245 LSB: a voice QSO, clear speech.</td></tr><tr><td class=num>02:43</td><td class=num><a href="#lsb40_7251_0">7.2510 MHz</a></td><td>LSB</td><td>SSB voice (LSB)</td><td class=res>Voice at 7.2501 recorded in LSB: speech, but with a steady 1 kHz whistle, a carrier at 7.250: this is an AM signal.</td></tr><tr><td class=num>02:44</td><td class=num><a href="#lsb40_7266_0">7.2660 MHz</a></td><td>LSB</td><td>SSB voice (LSB)</td><td class=res>Voice at 7.2651 in LSB: speech with the same 1 kHz whistle, an AM signal (carrier 7.265).</td></tr><tr><td class=num>02:44</td><td class=num><a href="#lsb40_7160_0">7.1600 MHz</a></td><td>LSB</td><td>SSB voice (LSB)</td><td class=res>Voice at 7.1600, tuned from the zoomed spectrum to 7.160 LSB.</td></tr><tr><td class=num>02:45</td><td class=num><a href="#bc40_7505">7.5050 MHz</a></td><td>AM</td><td>Shortwave broadcast</td><td class=res>The strongest broadcaster on the sweep, 7.505 MHz (WRNO, New Orleans, uses this frequency): clear speech and music.</td></tr><tr><td class=num>02:45</td><td class=num><a href="#bc40_7355">7.3550 MHz</a></td><td>AM</td><td>Shortwave broadcast</td><td class=res>41 m broadcast, 7.355 MHz: weaker, programme audio under the noise.</td></tr><tr><td class=num>02:45</td><td class=num><a href="#bc40_7490">7.4900 MHz</a></td><td>AM</td><td>Shortwave broadcast</td><td class=res>41 m broadcast, 7.490 MHz (a frequency WBCQ uses).</td></tr><tr><td class=num>02:46</td><td class=num><a href="#bc40_7570">7.5700 MHz</a></td><td>AM</td><td>Shortwave broadcast</td><td class=res>41 m broadcast, 7.570 MHz (a frequency WRMI uses).</td></tr><tr><td class=num>02:46</td><td class=num><a href="#chu_7850">7.8500 MHz</a></td><td>AM</td><td>CHU, Canada&#x27;s time station</td><td class=res>CHU (Ottawa) not heard: noise only, and nothing showed at 7.850 in the spectrum.</td></tr><tr><td class=num>02:46</td><td class=num><a href="#psk31_7070">7.0695 MHz</a></td><td>USB</td><td>PSK31</td><td class=res>PSK31 window: the decoder&#x27;s output was noise letters only, no real copy (it decodes a test signal exactly).</td></tr><tr><td class=num>02:47</td><td class=num><a href="#rtty_7089">7.0890 MHz</a></td><td>USB</td><td>RTTY</td><td class=res>The digital group at 7.0906-7.098: not RTTY that decodes; the output was noise letters only.</td></tr><tr><td class=num>02:48</td><td class=num><a href="#ft4_7047_5">7.0475 MHz</a></td><td>USB</td><td>FT4</td><td class=res>2 decoded: 02:48:15 KM6TAU KQ4CRY R-10</td></tr><tr><td class=num>02:48</td><td class=num><a href="#js8_7078">7.0780 MHz</a></td><td>USB</td><td>JS8Call</td><td class=res>4 decoded: ~02:48:52 -14 dB dt +0.0 1192.5 Hz turbo</td></tr><tr><td class=num>02:49</td><td class=num><a href="#wspr_7038_6">7.0386 MHz</a></td><td>USB</td><td>WSPR beacons</td><td class=res>6 decoded:  -14 dB dt +0.2 7.040132 MHz drift +0 K5NAV DM55 23</td></tr><tr><td class=num>02:55</td><td class=num><a href="#am40_7250">7.2500 MHz</a></td><td>AM</td><td>AM voice</td><td class=res>The 7.250 voice in AM, as it is sent: no whistle.</td></tr><tr><td class=num>02:55</td><td class=num><a href="#am40_7265">7.2650 MHz</a></td><td>AM</td><td>AM voice</td><td class=res>The 7.265 voice in AM.</td></tr><tr><td class=num>03:34</td><td class=num><a href="#scan-fm">87.9-107.9 MHz</a></td><td>WFM</td><td>FM broadcast scan, 101 channels</td><td class=res>about 15 stations; strongest 92.3 MHz at +39 dB (-82 dBm)</td></tr><tr><td class=num>03:34</td><td class=num><a href="#fm_92_300">92.3000 MHz</a></td><td>WFM</td><td>FM broadcast</td><td class=res>FM broadcast channel found by the scan, +39 dB</td></tr><tr><td class=num>03:35</td><td class=num><a href="#fm_97_900">97.9000 MHz</a></td><td>WFM</td><td>FM broadcast</td><td class=res>FM broadcast channel found by the scan, +31 dB</td></tr><tr><td class=num>03:35</td><td class=num><a href="#fm_103_900">103.9000 MHz</a></td><td>WFM</td><td>FM broadcast</td><td class=res>FM broadcast channel found by the scan, +29 dB</td></tr><tr><td class=num>03:46</td><td class=num><a href="#scan-air">118-137 MHz</a></td><td>AM</td><td>Airband scan</td><td class=res>the &#x27;busiest&#x27; channels were the radio&#x27;s 122.880 MHz spur; no aircraft voice</td></tr><tr><td class=num>03:46</td><td class=num><a href="#air_122_875">122.8750 MHz</a></td><td>AM</td><td>Airband (aircraft, ATIS)</td><td class=res>Around the radio&#x27;s own 122.880 MHz clock spur (+59 dB): the airband scan&#x27;s &#x27;busiest&#x27; channels were the spur, not aircr…</td></tr><tr><td class=num>03:46</td><td class=num><a href="#air_122_925">122.9250 MHz</a></td><td>AM</td><td>Airband (aircraft, ATIS)</td><td class=res>Around the radio&#x27;s own 122.880 MHz clock spur (+59 dB): the airband scan&#x27;s &#x27;busiest&#x27; channels were the spur, not aircr…</td></tr><tr><td class=num>03:47</td><td class=num><a href="#air_122_825">122.8250 MHz</a></td><td>AM</td><td>Airband (aircraft, ATIS)</td><td class=res>Around the radio&#x27;s own 122.880 MHz clock spur (+59 dB): the airband scan&#x27;s &#x27;busiest&#x27; channels were the spur, not aircr…</td></tr><tr><td class=num>03:47</td><td class=num><a href="#air_122_975">122.9750 MHz</a></td><td>AM</td><td>Airband (aircraft, ATIS)</td><td class=res>Around the radio&#x27;s own 122.880 MHz clock spur (+59 dB): the airband scan&#x27;s &#x27;busiest&#x27; channels were the spur, not aircr…</td></tr><tr><td class=num>03:53</td><td class=num><a href="#probe-2m">92.3-160 MHz</a></td><td>base</td><td>2 m test: the base tuned directly</td><td class=res>2 m not reachable; above 122.88 MHz only mirrors of FM broadcast</td></tr><tr><td class=num>03:56</td><td class=num><a href="#air_121_675">121.6750 MHz</a></td><td>AM</td><td>Airband (aircraft, ATIS)</td><td class=res>A steady carrier, no speech.</td></tr><tr><td class=num>03:57</td><td class=num><a href="#air_124_075">124.0750 MHz</a></td><td>AM</td><td>Airband (aircraft, ATIS)</td><td class=res>A steady carrier, no speech.</td></tr></table></div></section>
+<section class=card id=sweep-40m><h2>Everything the 40 m coil setting reaches <span>6.9-7.9 MHz, 02:39 UTC, charger off, preamp on, 10 views of 100 kHz</span></h2>
+<p class=note>CW wall to wall at 7.000-7.065 (Sweepstakes), FT8 and JS8 at 7.074-7.080, digital at 7.09-7.11, voice (LSB)
+from 7.15 up, and shortwave broadcasters from 7.34 to 7.78 MHz, the strongest at 7.505. No interference combs here, with the charger off; plugged back in at 02:55 it put one line in each view, 102.9 kHz apart (6.9998, 7.4112, 7.6170, 7.8230 MHz): comb B is the charger's.</p>
+<img src="spectrum_40m.png" alt="6.9-7.9 MHz spectrum"></section>
+
+<section class=card id="cw40_7029_5">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> CW (Morse), ARRL Sweepstakes <span>7.0295 MHz USB · 02:41:43 UTC · 30 s · S-meter None dBm</span></h2>
+  <p class=note>Tuned from the spectrum to the strongest CW (7.0302). Sweepstakes at 46 WPM, a noisy copy: K5KU calling (SS K5KU) and a &#x27;TU&#x27; comes through.</p>
+  <img src="cw40_7029_5.png" alt="spectrogram of cw40_7029_5" loading=lazy>
+  <audio controls preload=none src="cw40_7029_5.wav"></audio>
+  <ul><li>tone 573 Hz, 46 WPM: H1 LA IPEEH**I* EE* IE TU K6KU UD K5KU E SS K5OK WS K1OK DD K5KU SS T</li></ul>
+</section>
+<section class=card id="cw40_7040">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> CW (Morse), ARRL Sweepstakes <span>7.0400 MHz USB · 02:42:16 UTC · 30 s · S-meter None dBm</span></h2>
+  <p class=note>The CW group at 7.040-7.043: W6PH calling CQ SS twice, and part of an exchange from WA6KHK (serial 508, class B).</p>
+  <img src="cw40_7040.png" alt="spectrogram of cw40_7040" loading=lazy>
+  <audio controls preload=none src="cw40_7040.wav"></audio>
+  <ul><li>tone 2703 Hz, 26 WPM: NR ETV W6PH E CQ SS W6PH W6PH E WAT EKHEA WA6KHK 508 B I</li></ul>
+</section>
+<section class=card id="lsb40_7224_5">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> SSB voice (LSB) <span>7.2245 MHz LSB · 02:42:54 UTC · 25 s · S-meter None dBm</span></h2>
+  <p class=note>The strongest voice in the spectrum (7.2202), tuned from the zoomed spectrum to 7.2245 LSB: a voice QSO, clear speech.</p>
+  <img src="lsb40_7224_5.png" alt="spectrogram of lsb40_7224_5" loading=lazy>
+  <audio controls preload=none src="lsb40_7224_5.wav"></audio>
+  
+</section>
+<section class=card id="lsb40_7251_0">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> SSB voice (LSB) <span>7.2510 MHz LSB · 02:43:27 UTC · 25 s · S-meter None dBm</span></h2>
+  <p class=note>Voice at 7.2501 recorded in LSB: speech, but with a steady 1 kHz whistle, a carrier at 7.250: this is an AM signal. The AM recording below is the right way to hear it.</p>
+  <img src="lsb40_7251_0.png" alt="spectrogram of lsb40_7251_0" loading=lazy>
+  <audio controls preload=none src="lsb40_7251_0.wav"></audio>
+  
+</section>
+<section class=card id="lsb40_7266_0">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> SSB voice (LSB) <span>7.2660 MHz LSB · 02:44:00 UTC · 25 s · S-meter None dBm</span></h2>
+  <p class=note>Voice at 7.2651 in LSB: speech with the same 1 kHz whistle, an AM signal (carrier 7.265). See the AM recording below.</p>
+  <img src="lsb40_7266_0.png" alt="spectrogram of lsb40_7266_0" loading=lazy>
+  <audio controls preload=none src="lsb40_7266_0.wav"></audio>
+  
+</section>
+<section class=card id="lsb40_7160_0">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> SSB voice (LSB) <span>7.1600 MHz LSB · 02:44:33 UTC · 25 s · S-meter None dBm</span></h2>
+  <p class=note>Voice at 7.1600, tuned from the zoomed spectrum to 7.160 LSB.</p>
+  <img src="lsb40_7160_0.png" alt="spectrogram of lsb40_7160_0" loading=lazy>
+  <audio controls preload=none src="lsb40_7160_0.wav"></audio>
+  
+</section>
+<section class=card id="bc40_7505">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> Shortwave broadcast <span>7.5050 MHz AM · 02:45:01 UTC · 20 s · S-meter None dBm</span></h2>
+  <p class=note>The strongest broadcaster on the sweep, 7.505 MHz (WRNO, New Orleans, uses this frequency): clear speech and music.</p>
+  <img src="bc40_7505.png" alt="spectrogram of bc40_7505" loading=lazy>
+  <audio controls preload=none src="bc40_7505.wav"></audio>
+  
+</section>
+<section class=card id="bc40_7355">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> Shortwave broadcast <span>7.3550 MHz AM · 02:45:23 UTC · 20 s · S-meter None dBm</span></h2>
+  <p class=note>41 m broadcast, 7.355 MHz: weaker, programme audio under the noise.</p>
+  <img src="bc40_7355.png" alt="spectrogram of bc40_7355" loading=lazy>
+  <audio controls preload=none src="bc40_7355.wav"></audio>
+  
+</section>
+<section class=card id="bc40_7490">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> Shortwave broadcast <span>7.4900 MHz AM · 02:45:45 UTC · 20 s · S-meter None dBm</span></h2>
+  <p class=note>41 m broadcast, 7.490 MHz (a frequency WBCQ uses).</p>
+  <img src="bc40_7490.png" alt="spectrogram of bc40_7490" loading=lazy>
+  <audio controls preload=none src="bc40_7490.wav"></audio>
+  
+</section>
+<section class=card id="bc40_7570">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> Shortwave broadcast <span>7.5700 MHz AM · 02:46:08 UTC · 20 s · S-meter None dBm</span></h2>
+  <p class=note>41 m broadcast, 7.570 MHz (a frequency WRMI uses).</p>
+  <img src="bc40_7570.png" alt="spectrogram of bc40_7570" loading=lazy>
+  <audio controls preload=none src="bc40_7570.wav"></audio>
+  
+</section>
+<section class=card id="chu_7850">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> CHU, Canada&#x27;s time station <span>7.8500 MHz AM · 02:46:30 UTC · 20 s · S-meter None dBm</span></h2>
+  <p class=note>CHU (Ottawa) not heard: noise only, and nothing showed at 7.850 in the spectrum.</p>
+  <img src="chu_7850.png" alt="spectrogram of chu_7850" loading=lazy>
+  <audio controls preload=none src="chu_7850.wav"></audio>
+  
+</section>
+<section class=card id="psk31_7070">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> PSK31 <span>7.0695 MHz USB · 02:46:53 UTC · 30 s · S-meter None dBm</span></h2>
+  <p class=note>PSK31 window: the decoder&#x27;s output was noise letters only, no real copy (it decodes a test signal exactly).</p>
+  <img src="psk31_7070.png" alt="spectrogram of psk31_7070" loading=lazy>
+  <audio controls preload=none src="psk31_7070.wav"></audio>
+  <ul><li class=muted>nothing decoded in this recording</li></ul>
+</section>
+<section class=card id="rtty_7089">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> RTTY <span>7.0890 MHz USB · 02:47:26 UTC · 30 s · S-meter None dBm</span></h2>
+  <p class=note>The digital group at 7.0906-7.098: not RTTY that decodes; the output was noise letters only.</p>
+  <img src="rtty_7089.png" alt="spectrogram of rtty_7089" loading=lazy>
+  <audio controls preload=none src="rtty_7089.wav"></audio>
+  <ul><li class=muted>nothing decoded in this recording</li></ul>
+</section>
+<section class=card id="ft4_7047_5">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> FT4 <span>7.0475 MHz USB · 02:48:07 UTC · 31 s · S-meter None dBm</span></h2>
+  <p class=note>FT4: KM6TAU and KQ4CRY finishing a contact (R-10, then R-14).</p>
+  <img src="ft4_7047_5.png" alt="spectrogram of ft4_7047_5" loading=lazy>
+  <audio controls preload=none src="ft4_7047_5.wav"></audio>
+  <ul><li>02:48:15  KM6TAU KQ4CRY R-10</li><li>02:48:30  KM6TAU KQ4CRY R-14</li></ul>
+</section>
+<section class=card id="js8_7078">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> JS8Call <span>7.0780 MHz USB · 02:48:44 UTC · 46 s · S-meter None dBm</span></h2>
+  <p class=note>JS8, decoded offline with the radio&#x27;s own JS8 receiver (tools/js8_play): W6CJ and K1KFX asking each other &#x27;HW CPY?&#x27;, and KF5NRU&#x27;s heartbeat to W6CJ, at normal and turbo speeds.</p>
+  <img src="js8_7078.png" alt="spectrogram of js8_7078" loading=lazy>
+  <audio controls preload=none src="js8_7078.wav"></audio>
+  <ul><li>~02:48:52  -14 dB  dt  +0.0  1192.5 Hz  turbo</li><li>~02:49:13  -21 dB  dt  -0.7  1195.2 Hz  normal  W6CJ: K1KFX HW CPY?</li><li>~02:49:13  -13 dB  dt  -0.4   597.4 Hz  normal  KF5NRU: W6CJ HEARTBEAT SNR -13</li><li>~02:49:28  -10 dB  dt  +0.0  1197.5 Hz  turbo   K1KFX: W6CJ HW CPY?</li></ul>
+</section>
+<section class=card id="wspr_7038_6">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> WSPR beacons <span>7.0386 MHz USB · 02:49:59 UTC · 116 s · S-meter None dBm</span></h2>
+  <p class=note>One 2-minute WSPR cycle (02:50 UTC) through the repo&#x27;s wsprd: six stations, from Arizona to Oregon, including WW0WWV (the WWV amateur radio club, Colorado).</p>
+  <img src="wspr_7038_6.png" alt="spectrogram of wspr_7038_6" loading=lazy>
+  <audio controls preload=none src="wspr_7038_6.wav"></audio>
+  <ul><li> -14 dB  dt  +0.2  7.040132 MHz  drift +0  K5NAV DM55 23</li><li> -19 dB  dt  -0.3  7.040142 MHz  drift +0  N0KAM DN84 23</li><li> -20 dB  dt  +0.9  7.040048 MHz  drift +0  WW0WWV DN70 30</li><li> -20 dB  dt  +0.0  7.040136 MHz  drift +0  K7CMI DN57 27</li><li> -21 dB  dt  -0.1  7.040169 MHz  drift +0  KE7ZXJ CN95 33</li><li> -23 dB  dt  -0.3  7.040185 MHz  drift +0  AE0GQ DM79 23</li></ul>
+</section>
+<section class=card id="am40_7250">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> AM voice <span>7.2500 MHz AM · 02:55:08 UTC · 25 s · S-meter None dBm</span></h2>
+  <p class=note>The 7.250 voice in AM, as it is sent: no whistle.</p>
+  <img src="am40_7250.png" alt="spectrogram of am40_7250" loading=lazy>
+  <audio controls preload=none src="am40_7250.wav"></audio>
+  
+</section>
+<section class=card id="am40_7265">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> AM voice <span>7.2650 MHz AM · 02:55:35 UTC · 25 s · S-meter None dBm</span></h2>
+  <p class=note>The 7.265 voice in AM.</p>
+  <img src="am40_7265.png" alt="spectrogram of am40_7265" loading=lazy>
+  <audio controls preload=none src="am40_7265.wav"></audio>
+  
+</section>
+<h3 class=sub-h>VHF on the same setting <small>(the JPC-12 is not made for VHF; these came in anyway)</small></h3><section class=card id=scan-fm><h2>FM broadcast scan <span>03:34 UTC</span></h2><p class=note>All 101 channels, 87.9-107.9 MHz, wide FM, through the JPC-12 at its 40 m setting (not made for VHF). dB over the band's floor in the radio's spectrum; S-meter in dBm.</p><table class=t><tr><th>Frequency</th><th>Level</th><th>S-meter</th></tr><tr><td>92.3000 MHz</td><td>+39 dB</td><td>-82 dBm</td></tr><tr><td>97.9000 MHz</td><td>+31 dB</td><td>-92 dBm</td></tr><tr><td>103.9000 MHz</td><td>+29 dB</td><td>-90 dBm</td></tr><tr><td>107.9000 MHz</td><td>+29 dB</td><td>-88 dBm</td></tr><tr><td>104.9000 MHz</td><td>+27 dB</td><td>-94 dBm</td></tr><tr><td>91.5000 MHz</td><td>+26 dB</td><td>-95 dBm</td></tr><tr><td>94.7000 MHz</td><td>+26 dB</td><td>-88 dBm</td></tr><tr><td>107.5000 MHz</td><td>+24 dB</td><td>-95 dBm</td></tr><tr><td>106.7000 MHz</td><td>+23 dB</td><td>-98 dBm</td></tr><tr><td>88.7000 MHz</td><td>+22 dB</td><td>-100 dBm</td></tr><tr><td>89.7000 MHz</td><td>+22 dB</td><td>-90 dBm</td></tr><tr><td>94.1000 MHz</td><td>+20 dB</td><td>-102 dBm</td></tr><tr><td>97.1000 MHz</td><td>+20 dB</td><td>-92 dBm</td></tr><tr><td>105.7000 MHz</td><td>+20 dB</td><td>-100 dBm</td></tr><tr><td>95.5000 MHz</td><td>+18 dB</td><td>-104 dBm</td></tr><tr><td>101.7000 MHz</td><td>+17 dB</td><td>-101 dBm</td></tr></table></section><section class=card id=scan-air><h2>Airband scan <span>03:46 UTC</span></h2><p class=note>118-137 MHz in 100 kHz views, about 3 s each (aircraft transmit in bursts; ATIS runs without a stop). Peak dB over the floor in the radio's spectrum.</p><table class=t><tr><th>Frequency</th><th>Level</th><th></th></tr><tr><td>122.8750 MHz</td><td>+61 dB</td><td></td></tr><tr><td>122.9250 MHz</td><td>+58 dB</td><td></td></tr><tr><td>122.8250 MHz</td><td>+55 dB</td><td></td></tr><tr><td>122.9750 MHz</td><td>+41 dB</td><td></td></tr><tr><td>121.6750 MHz</td><td>+40 dB</td><td></td></tr><tr><td>124.0750 MHz</td><td>+40 dB</td><td></td></tr><tr><td>122.7750 MHz</td><td>+36 dB</td><td></td></tr><tr><td>122.8500 MHz</td><td>+35 dB</td><td></td></tr><tr><td>122.2750 MHz</td><td>+33 dB</td><td></td></tr><tr><td>122.9500 MHz</td><td>+32 dB</td><td></td></tr><tr><td>122.8000 MHz</td><td>+30 dB</td><td></td></tr><tr><td>122.9000 MHz</td><td>+30 dB</td><td></td></tr><tr><td>123.0250 MHz</td><td>+29 dB</td><td></td></tr><tr><td>122.7250 MHz</td><td>+27 dB</td><td></td></tr><tr><td>123.0000 MHz</td><td>+27 dB</td><td></td></tr><tr><td>123.7000 MHz</td><td>+27 dB</td><td></td></tr></table></section><section class=card id=probe-2m><h2>2 m and beyond: the base tuned directly <span>03:53 and 03:55 UTC, GUI stopped about a minute each, coil at red-silver</span></h2><p class=note>The base tuned directly over I2C (frequency and mode registers only, nothing transmitted) and its own spectrum packets read at each frequency. 92.3 MHz FM is the check that the method works. Above 122.88 MHz the base hears the mirror of what lies below it: 153.46 MHz reads exactly as 92.3 FM does (2 x 122.88 - 92.3), 137.86 is 107.9 FM and 141.86 is 103.9 FM. The X6200 samples at 122.88 MHz (its clock also leaks in at 122.880, +59 dB) and reaches VHF through aliasing, so 144-148 MHz lands on the mirror of 97.8-101.8 MHz FM broadcast: no APRS, ISS or NOAA Weather signal came through, and none can without different hardware (the WR12).</p><div class=scroll><table class=t><tr><th>Frequency</th><th>Target</th><th>Packets</th><th>Peak at the dial</th><th>Packets with a signal</th><th>S-meter median / max</th></tr><tr><td>92.3000 MHz</td><td>FM 92.3 control (+39 dB in the GUI scan)</td><td>62</td><td>+35 dB</td><td>62</td><td>-80 / -79</td></tr><tr><td>14.0740 MHz</td><td>HF control 14.074 FT8</td><td>47</td><td>+19 dB</td><td>47</td><td>-118 / -116</td></tr><tr><td>122.8800 MHz</td><td>122.880: the suspected ADC-clock spur</td><td>63</td><td>+59 dB</td><td>63</td><td>-108 / -103</td></tr><tr><td>136.9750 MHz</td><td>top of the airband 136.975</td><td>62</td><td>+7 dB</td><td>0</td><td>-135 / -133</td></tr><tr><td>137.1000 MHz</td><td>137.1 weather satellites (just above the airband)</td><td>63</td><td>+10 dB</td><td>5</td><td>-124 / -122</td></tr><tr><td>137.9125 MHz</td><td>137.9125 weather satellites</td><td>62</td><td>+33 dB</td><td>57</td><td>-109 / -102</td></tr><tr><td>144.3900 MHz</td><td>APRS 144.390 (packets every few seconds)</td><td>63</td><td>+9 dB</td><td>0</td><td>-124 / -121</td></tr><tr><td>145.8000 MHz</td><td>ISS downlink 145.800 (only during a pass)</td><td>62</td><td>+9 dB</td><td>0</td><td>-124 / -122</td></tr><tr><td>146.5200 MHz</td><td>2 m simplex 146.520</td><td>63</td><td>+12 dB</td><td>8</td><td>-123 / -120</td></tr><tr><td>146.7600 MHz</td><td>2 m repeater band 146.760</td><td>62</td><td>+9 dB</td><td>0</td><td>-124 / -122</td></tr><tr><td>162.4000 MHz</td><td>NOAA Weather Radio 162.400</td><td>63</td><td>+10 dB</td><td>1</td><td>-124 / -121</td></tr><tr><td>162.5500 MHz</td><td>NOAA Weather Radio 162.550</td><td>62</td><td>+10 dB</td><td>4</td><td>-124 / -123</td></tr><tr><td>92.3000 MHz</td><td>FM 92.3 control again</td><td>47</td><td>+34 dB</td><td>47</td><td>-80 / -79</td></tr><tr><td>92.3000 MHz</td><td>FM 92.3 control</td><td>63</td><td>+34 dB</td><td>63</td><td>-80 / -79</td></tr><tr><td>153.4600 MHz</td><td>153.46 = 245.76 - 92.3: the mirror of 92.3?</td><td>62</td><td>+34 dB</td><td>62</td><td>-80 / -79</td></tr><tr><td>137.8600 MHz</td><td>137.86 = 245.76 - 107.9: the mirror of 107.9?</td><td>63</td><td>+38 dB</td><td>62</td><td>-86 / -85</td></tr><tr><td>141.8600 MHz</td><td>141.86 = 245.76 - 103.9: the mirror of 103.9?</td><td>48</td><td>+27 dB</td><td>48</td><td>-88 / -87</td></tr><tr><td>150.0000 MHz</td><td>150.00: no FM station mirrors here (95.76)</td><td>47</td><td>+9 dB</td><td>0</td><td>-102 / -102</td></tr><tr><td>92.3000 MHz</td><td>FM 92.3 control again</td><td>47</td><td>+31 dB</td><td>47</td><td>-80 / -79</td></tr></table></div></section>
+<section class=card id="fm_92_300">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> FM broadcast <span>92.3000 MHz WFM · 03:34:48 UTC · 15 s · S-meter None dBm</span></h2>
+  <p class=note>FM broadcast channel found by the scan, +39 dB</p>
+  <img src="fm_92_300.png" alt="spectrogram of fm_92_300" loading=lazy>
+  <audio controls preload=none src="fm_92_300.wav"></audio>
+  
+</section>
+<section class=card id="fm_97_900">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> FM broadcast <span>97.9000 MHz WFM · 03:35:05 UTC · 15 s · S-meter None dBm</span></h2>
+  <p class=note>FM broadcast channel found by the scan, +31 dB</p>
+  <img src="fm_97_900.png" alt="spectrogram of fm_97_900" loading=lazy>
+  <audio controls preload=none src="fm_97_900.wav"></audio>
+  
+</section>
+<section class=card id="fm_103_900">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> FM broadcast <span>103.9000 MHz WFM · 03:35:21 UTC · 15 s · S-meter None dBm</span></h2>
+  <p class=note>FM broadcast channel found by the scan, +29 dB</p>
+  <img src="fm_103_900.png" alt="spectrogram of fm_103_900" loading=lazy>
+  <audio controls preload=none src="fm_103_900.wav"></audio>
+  
+</section>
+<section class=card id="air_122_875">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> Airband (aircraft, ATIS) <span>122.8750 MHz AM · 03:46:27 UTC · 25 s · S-meter None dBm</span></h2>
+  <p class=note>Around the radio&#x27;s own 122.880 MHz clock spur (+59 dB): the airband scan&#x27;s &#x27;busiest&#x27; channels were the spur, not aircraft.</p>
+  <img src="air_122_875.png" alt="spectrogram of air_122_875" loading=lazy>
+  <audio controls preload=none src="air_122_875.wav"></audio>
+  
+</section>
+<section class=card id="air_122_925">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> Airband (aircraft, ATIS) <span>122.9250 MHz AM · 03:46:53 UTC · 25 s · S-meter None dBm</span></h2>
+  <p class=note>Around the radio&#x27;s own 122.880 MHz clock spur (+59 dB): the airband scan&#x27;s &#x27;busiest&#x27; channels were the spur, not aircraft.</p>
+  <img src="air_122_925.png" alt="spectrogram of air_122_925" loading=lazy>
+  <audio controls preload=none src="air_122_925.wav"></audio>
+  
+</section>
+<section class=card id="air_122_825">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> Airband (aircraft, ATIS) <span>122.8250 MHz AM · 03:47:20 UTC · 25 s · S-meter None dBm</span></h2>
+  <p class=note>Around the radio&#x27;s own 122.880 MHz clock spur (+59 dB): the airband scan&#x27;s &#x27;busiest&#x27; channels were the spur, not aircraft.</p>
+  <img src="air_122_825.png" alt="spectrogram of air_122_825" loading=lazy>
+  <audio controls preload=none src="air_122_825.wav"></audio>
+  
+</section>
+<section class=card id="air_122_975">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> Airband (aircraft, ATIS) <span>122.9750 MHz AM · 03:47:47 UTC · 25 s · S-meter None dBm</span></h2>
+  <p class=note>Around the radio&#x27;s own 122.880 MHz clock spur (+59 dB): the airband scan&#x27;s &#x27;busiest&#x27; channels were the spur, not aircraft.</p>
+  <img src="air_122_975.png" alt="spectrogram of air_122_975" loading=lazy>
+  <audio controls preload=none src="air_122_975.wav"></audio>
+  
+</section>
+<section class=card id="air_121_675">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> Airband (aircraft, ATIS) <span>121.6750 MHz AM · 03:56:45 UTC · 30 s · S-meter None dBm</span></h2>
+  <p class=note>A steady carrier, no speech.</p>
+  <img src="air_121_675.png" alt="spectrogram of air_121_675" loading=lazy>
+  <audio controls preload=none src="air_121_675.wav"></audio>
+  
+</section>
+<section class=card id="air_124_075">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#c0392b 50%,#aab0b8 50%)">Red-silver</b> Airband (aircraft, ATIS) <span>124.0750 MHz AM · 03:57:17 UTC · 30 s · S-meter None dBm</span></h2>
+  <p class=note>A steady carrier, no speech.</p>
+  <img src="air_124_075.png" alt="spectrogram of air_124_075" loading=lazy>
+  <audio controls preload=none src="air_124_075.wav"></audio>
+  
+</section>
+</section>
+<section class=coil id="midway"><a id="m30"></a>
+<header class=coil-head><span class=sw style="background:linear-gradient(135deg,#d4a017 50%,#aab0b8 50%)"></span><div><h1>Midway: 30 m (10 MHz)</h1><p class=sub>Slider midway between the two marks, set by eye.</p></div></header>
+<dl class=facts><div><dt>On the air</dt><dd>04:19-04:28 UTC<br><small>11:19-11:28 PM EST</small></dd></div><div><dt>Tunes</dt><dd>30 m (10 MHz)</dd></div><div><dt>Preamp</dt><dd>off</dd></div><div><dt>Recordings</dt><dd>1</dd></div><div><dt>FT8 on 10.136</dt><dd>79 messages<br><small>17 stations, 5 countries</small></dd></div></dl>
+<p class=note>Farthest FT8 stations (from their grid squares): HC1HC Ecuador (4,534 km), W7IUV United States (2,966 km), NP4VA Puerto Rico (2,855 km).</p>
+<section class=card><h2>Everything heard at this setting <span>in time order; click a frequency to jump to it</span></h2>
+<div class=scroll><table class="t idx"><tr><th>UTC</th><th>Frequency</th><th>Mode</th><th>What</th><th>Result</th></tr><tr><td class=num>04:19-04:28</td><td class=num><a href="http://127.0.0.1:8073/">10.136 MHz</a></td><td>USB</td><td>FT8 (in FT8 Live)</td><td class=res>79 messages, 17 stations, 5 countries; 2.6 per 15 s slot</td></tr><tr><td class=num>04:19</td><td class=num><a href="#sweep-30m">9.4-10.25 MHz</a></td><td>-</td><td>Spectrum: everything this setting reaches</td><td class=res>a picture of the whole range, below</td></tr><tr><td class=num>04:20</td><td class=num><a href="#wwv_10000">10.0000 MHz</a></td><td>AM</td><td>WWV/WWVH time station</td><td class=res>WWV/WWVH on 10.000 MHz, AM, 62 s with the coil midway (30 m).</td></tr></table></div></section>
+<section class=card id=sweep-30m><h2>Everything the midway setting reaches <span>9.4-10.25 MHz, 04:19 UTC, charger off</span></h2><p class=note>The 31 m broadcast band (strongest 9.455 and 9.955 MHz), WWV on 10.000 MHz (+33 dB, steady carrier), and 30 m FT8 at 10.136 MHz. Cut short by condensation on the coil and whip.</p><img src="spectrum_30m.png" alt="9.4-10.25 MHz spectrum"></section>
+
+<section class=card id="wwv_10000">
+  <h2><b class=chip style="--sw:linear-gradient(135deg,#d4a017 50%,#aab0b8 50%)">Midway</b> WWV/WWVH time station <span>10.0000 MHz AM · 04:20:05 UTC · 62 s · S-meter -114.8 dBm</span></h2>
+  <p class=note>WWV/WWVH on 10.000 MHz, AM, 62 s with the coil midway (30 m). S-meter median -115 dBm, peak -110 dBm.</p>
+  <img src="wwv_10000.png" alt="spectrogram of wwv_10000" loading=lazy>
+  <audio controls preload=none src="wwv_10000.wav"></audio>
+  
+</section>
+
+</section>
+</main></body></html>
