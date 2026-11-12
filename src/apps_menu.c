@@ -47,6 +47,9 @@ static const struct {
     {"Cluster", "DX spots", "cluster", OPEN_APP, ACTION_APP_CLUSTER},
     {"Field Ops", "SOTA, POTA, WWFF...", "field", OPEN_APP, ACTION_APP_FIELD},
     {"Bands", "Band activity", "bands", OPEN_APP, ACTION_APP_BANDS},
+#ifdef BOARD_X6200
+    {"Wide Scan", "384 kHz, signals named", "wide", OPEN_APP, ACTION_APP_WIDE},
+#endif
     {"Channels", "Memory channels", "channels", OPEN_APP, ACTION_APP_CHANNELS},
     {"SWR Scan", "Sweep, transmits", "swr", OPEN_APP, ACTION_APP_SWRSCAN},
     {"Recorder", "RX audio", "recorder", OPEN_APP, ACTION_APP_RECORDER},

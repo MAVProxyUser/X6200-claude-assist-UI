@@ -213,6 +213,13 @@ def i_birdie(p):     # a spike over the noise: a birdie
     p.line([(60, 74), (60, 16)])
     p.dot(60, 14, 6)
 
+def i_wide(p):       # a wide trace with three signals, in a sight's corners: Wide Scan
+    p.line([(10, 70), (20, 68), (26, 42), (32, 68), (44, 70), (52, 24), (58, 69), (72, 68), (78, 52), (84, 69),
+            (90, 70)], w=p.w // 2 + 1)
+    for x0, d in ((6, 1), (94, -1)):
+        p.line([(x0 + 10 * d, 12), (x0, 12), (x0, 24)])
+        p.line([(x0 + 10 * d, 88), (x0, 88), (x0, 76)])
+
 def i_navtex(p):     # lines of text
     p.box(16, 10, 84, 90, r=6)
     for y in (32, 48, 64):

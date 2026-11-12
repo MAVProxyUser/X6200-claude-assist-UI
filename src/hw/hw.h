@@ -142,6 +142,7 @@ typedef enum {
     HW_NR,
     HW_NR_LEVEL,
     HW_IQ_SWAP,         /* the X6200 with the WR12: I and Q of its IF the other way round; compared first, as a register */
+    HW_PSD_WIDE,        /* 1: the base's whole spectrum (384 kHz on the X6200) whatever the zoom; HW_CAP_PSD bases only */
     HW_PARAM_COUNT
 } hw_param_t;
 

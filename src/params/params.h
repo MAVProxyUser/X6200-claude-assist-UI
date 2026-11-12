@@ -73,6 +73,7 @@ typedef enum {
     ACTION_APP_JTTY,    /* 123, appended after OLIVIA */
     ACTION_APP_CHANNELS, /* 124: the CHANNELS window, as the hand mic V/M key */
     ACTION_APP_BIRDIE,   /* 125: Birdie Cal */
+    ACTION_APP_WIDE,     /* 126: Wide Scan, the X6200 base's whole spectrum */
 } press_action_t;
 
 typedef enum {

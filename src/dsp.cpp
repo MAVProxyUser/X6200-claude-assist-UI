@@ -192,6 +192,12 @@ static float    wf_db[WATERFALL_NFFT];
 static float           snap_db[WATERFALL_NFFT];
 static uint32_t        snap_center, snap_width, snap_seq;
 static pthread_mutex_t snap_mux = PTHREAD_MUTEX_INITIALIZER;
+/* dsp_psd_raw: the base's last packet of bins, uncut (HW_CAP_PSD), under the same lock */
+#define RAW_MAX 1024
+static float           raw_db[RAW_MAX];
+static uint16_t        raw_n;
+static uint32_t        raw_span, raw_seq;
+static bool            raw_tx;
 static uint64_t wf_time;
 
 static uint32_t cur_freq;
@@ -422,6 +428,14 @@ void dsp_psd(const float *db, uint16_t n, uint32_t span_hz, bool tx, int16_t sme
 
     uint64_t now  = get_time();
     float    frac = span_hz ? (float)wf_span() / span_hz : 1.0f;
+
+    pthread_mutex_lock(&snap_mux);
+    raw_n = n < RAW_MAX ? n : RAW_MAX;
+    memcpy(raw_db, db, raw_n * sizeof(float));
+    raw_span = span_hz;
+    raw_tx   = tx;
+    raw_seq++;
+    pthread_mutex_unlock(&snap_mux);
 
     if (settle)
         settle--;
@@ -671,6 +685,20 @@ void dsp_put_audio_samples(size_t nsamples, int16_t *samples) {
     }
     if (out)
         sink(out, audio);
+}
+
+bool dsp_psd_raw(float *db, uint16_t cap, uint16_t *n, uint32_t *span_hz, bool *tx, uint32_t *seq) {
+    pthread_mutex_lock(&snap_mux);
+    bool ok = raw_seq > 0 && raw_n > 0;
+    if (ok) {
+        *n = raw_n < cap ? raw_n : cap;
+        memcpy(db, raw_db, *n * sizeof(float));
+        *span_hz = raw_span;
+        *tx      = raw_tx;
+        *seq     = raw_seq;
+    }
+    pthread_mutex_unlock(&snap_mux);
+    return ok;
 }
 
 bool dsp_spectrum_snapshot(float *db, uint16_t n, uint32_t *center_hz, uint32_t *width_hz, uint32_t *seq) {

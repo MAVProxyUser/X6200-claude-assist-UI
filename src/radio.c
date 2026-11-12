@@ -1896,6 +1896,22 @@ static void on_change_comp_ratio(Subject *subj, void *user_data) {
     }
 }
 
+bool radio_psd_wide(bool on) {
+    static atomic_int users;
+
+    if (!(radio_caps() & HW_CAP_PSD))
+        return false;
+    int n = on ? atomic_fetch_add(&users, 1) + 1 : atomic_fetch_sub(&users, 1) - 1;
+    if (n < 0) {                       /* an off without its on: none */
+        atomic_store(&users, 0);
+        n = 0;
+    }
+    if ((on && n == 1) || (!on && n == 0)) {
+        WITH_RADIO_LOCK(hw_set_i(HW_PSD_WIDE, n > 0));
+    }
+    return true;
+}
+
 static void on_fw_zoom_change(Subject *subj, void *user_data) {
     uint8_t zoom = subject_i_get((SubjectInt*)subj);
     uint8_t val = 0;
