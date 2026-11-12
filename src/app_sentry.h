@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
- *  OpenX6X00 - Wide Scan: the base's whole spectrum around the dial (app_wide.c)
+ *  OpenX6X00 - Sentry: a listener's receiver on the base's whole spectrum (app_sentry.c)
  */
 
 #pragma once
@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-extern dialog_t *dialog_wide;
+extern dialog_t *dialog_sentry;
 
 #ifdef __cplusplus
 }

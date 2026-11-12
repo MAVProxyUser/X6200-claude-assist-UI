@@ -263,6 +263,7 @@ static atomic_bool      band_hold;
 static atomic_bool      band_said;
 static bool             band_looked;
 static atomic_bool      off_dial;
+static atomic_int       rx_only;        /* radio_rx_only(): its users; any: held at 0 W, the GUI's keys refused */
 static atomic_uint      band_stops;
 static atomic_bool      atu_band_stop;
 static pthread_mutex_t  tune_mux = PTHREAD_MUTEX_INITIALIZER;
@@ -1067,6 +1068,15 @@ static bool no_data_refused(tx_by_t by) {
 /* The modem goes out on radio_tx_freq (radio_set_tx_freq moves the VFO in use there), PTT and the GUI's CW key on
  * the X6200 in split on the dial too (split_keys_dial). Where it may, not without data from the base either */
 static bool tx_refused(tx_by_t by) {
+    if (atomic_load(&rx_only) > 0) {
+        static uint64_t said;
+
+        if (get_time() - said > 3000) {
+            said = get_time();
+            msg_schedule_text_fmt("Receive only (Sentry): no TX");
+        }
+        return true;
+    }
     return tx_refused_at(radio_tx_freq(), by) ||
            (by != TX_BY_GUI && split_keys_dial() && tx_refused_at(vfo_freq(true), by)) ||
            no_data_refused(by);
@@ -1455,7 +1465,7 @@ static void band_look(bool settled) {
     radio_lock();
     no    = radio_key_refused(&f);
     stop  = no || atu_dial_refused(&f);     /* the tuner in split: on the dial too, stopped without a hold */
-    hold  = no || atomic_load(&off_dial);
+    hold  = no || atomic_load(&off_dial) || atomic_load(&rx_only) > 0;
     later = !settled && (stop ? gui_keys() : atomic_load(&band_hold));
     band_looked = true;
     if (hold || !later) {
@@ -1463,7 +1473,7 @@ static void band_look(bool settled) {
     }
     radio_unlock();
     if (later && !scheduler_put_coalesced(band_settle_cb)) {
-        WITH_RADIO_LOCK(band_hold_set(radio_key_refused(NULL) || atomic_load(&off_dial)));
+        WITH_RADIO_LOCK(band_hold_set(radio_key_refused(NULL) || atomic_load(&off_dial) || atomic_load(&rx_only) > 0));
     } else if (settled && stop && gui_keys() && scheduler_on_gui_thread()) {
         band_stop(f);
     }
@@ -1480,7 +1490,7 @@ static void band_settle_cb(void *arg) {
 static void split_held_look(void) {
     radio_lock();
     if (band_looked) {
-        band_hold_set(radio_key_refused(NULL) || atomic_load(&off_dial));
+        band_hold_set(radio_key_refused(NULL) || atomic_load(&off_dial) || atomic_load(&rx_only) > 0);
     }
     radio_unlock();
 }
@@ -1498,7 +1508,9 @@ static void band_note(void) {
     if (!atomic_load(&band_hold) || atomic_load(&train_hold) || cw_trainer_on() || atomic_exchange(&band_said, true)) {
         return;
     }
-    if (radio_key_refused(&f)) {
+    if (atomic_load(&rx_only) > 0) {
+        msg_schedule_text_fmt("0 W: receive only (Sentry)");
+    } else if (radio_key_refused(&f)) {
         radio_say_no_tx("0 W", f, false);
     } else {
         msg_schedule_text_fmt("0 W during Birdie Cal");
@@ -2779,4 +2791,22 @@ static void * radio_thread(void *arg) {
         }
     }
     return NULL;
+}
+
+bool radio_rx_only(bool on) {
+    int n = on ? atomic_fetch_add(&rx_only, 1) + 1 : atomic_fetch_sub(&rx_only, 1) - 1;
+
+    if (n < 0) {                       /* an off without its on: none */
+        atomic_store(&rx_only, 0);
+        n = 0;
+    }
+    if ((on && n == 1) || (!on && n == 0)) {
+        if (on) {
+            if (radio_get_state() != RADIO_RX) radio_set_ptt(false);
+            WITH_RADIO_LOCK(band_hold_set(true));
+        } else {
+            band_look(true);
+        }
+    }
+    return n > 0;
 }

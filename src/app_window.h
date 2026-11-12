@@ -35,6 +35,9 @@ typedef struct {
     buttons_page_t        *prev_page;       /* given back on close */
     lv_event_cb_t          key_cb;          /* keys of its controls (dialog_item()) */
     bool                   restore_radio;   /* frequency and mode saved on open, back on close */
+    /* The front panel's keys (keypad_key_t, keypad_state_t) before the main screen acts on them: true when taken.
+     * Only an app over the whole screen wants them (the Sentry): the others leave it NULL */
+    bool                 (*front_key_cb)(int key, int state);
     bool                   run;             /* open now */
 } dialog_t;
 
@@ -67,6 +70,8 @@ void dialog_item(dialog_t *dialog, lv_obj_t *item);
 bool dialog_need_audio();
 void dialog_audio_samples(unsigned int count, float *samples);
 void dialog_rotary(int32_t steps);
+/* A front panel key to the open window first: true when it took it */
+bool dialog_front_key(int key, int state);
 
 #ifdef __cplusplus
 }

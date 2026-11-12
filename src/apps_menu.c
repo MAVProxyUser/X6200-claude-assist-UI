@@ -48,7 +48,7 @@ static const struct {
     {"Field Ops", "SOTA, POTA, WWFF...", "field", OPEN_APP, ACTION_APP_FIELD},
     {"Bands", "Band activity", "bands", OPEN_APP, ACTION_APP_BANDS},
 #ifdef BOARD_X6200
-    {"Wide Scan", "384 kHz, signals named", "wide", OPEN_APP, ACTION_APP_WIDE},
+    {"Sentry", "Scan, track, bands, decoders", "sentry", OPEN_APP, ACTION_APP_SENTRY},
 #endif
     {"Channels", "Memory channels", "channels", OPEN_APP, ACTION_APP_CHANNELS},
     {"SWR Scan", "Sweep, transmits", "swr", OPEN_APP, ACTION_APP_SWRSCAN},
