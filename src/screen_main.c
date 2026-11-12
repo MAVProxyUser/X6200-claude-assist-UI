@@ -638,8 +638,12 @@ void main_screen_dialog_closed(void) {
 }
 
 void main_screen_open_apps(void) {
+    main_screen_open_dialog(dialog_apps);
+}
+
+void main_screen_open_dialog(dialog_t *d) {
     close_apps();
-    dialog_construct(dialog_apps, obj);
+    dialog_construct(d, obj);
 }
 
 /* What a long press (or a hand mic F key) was given in Settings */

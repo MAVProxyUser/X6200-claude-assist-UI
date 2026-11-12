@@ -57,6 +57,7 @@ void main_screen_dialog_closed(void);
 void main_screen_home_pause(bool on);
 /* The APP grid, as the APP key opens it */
 void main_screen_open_apps(void);
+/* main_screen_open_dialog(): app_window.h, with dialog_t */
 void main_screen_action(press_action_t action);
 
 /* The knobs' presses and the MFK (dir -1, +1 a turn, 0 the press), as on the main screen */

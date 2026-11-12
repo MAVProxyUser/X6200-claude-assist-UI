@@ -38,6 +38,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     app_sentry.c
     dialog_cw_trainer.c
     dialog_cw_kbd.c
+    dialog_shell.c
     theme.c
     freq_strip.c
     lcd_panel.c

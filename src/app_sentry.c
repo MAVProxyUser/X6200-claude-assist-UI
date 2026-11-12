@@ -29,6 +29,8 @@
 
 #include "app_sentry.h"
 
+#include "dialog_shell.h"
+
 #include "band_plan.h"
 #include "board.h"
 #include "broadcast_db.h"
@@ -345,7 +347,7 @@ static box_t     d_sel, d_how, d_ant, d_now;
 static lv_obj_t *d_head_l, *d_row_l[12];
 
 /* E SYSTEM: the rest of the radio, from here */
-typedef enum { SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_CLASSIC, SYS_HOME, SYS_N } sysitem_t;
+typedef enum { SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_CLASSIC, SYS_SHELL, SYS_HOME, SYS_N } sysitem_t;
 static const struct {
     const char *name, *about;
 } sys_items[SYS_N] = {
@@ -357,6 +359,8 @@ static const struct {
                       "D DECODE OPENS THEM ON KNOWN FREQUENCIES."},
     {"CLASSIC RADIO", "THE FULL RADIO SCREEN, WITH TRANSMIT. THE SENTRY STAYS AWAY TILL YOU OPEN IT AGAIN: APP, THEN "
                       "THE SENTRY TILE."},
+    {"UNIX SHELL", "A SHELL ON THE RADIO ITSELF (/BIN/SH, AS ROOT): A KEYBOARD TYPES INTO IT, TYPE OPENS THE ON-SCREEN "
+                   "ONE FOR A LINE, CTRL-C INTERRUPTS. CLOSING IT ENDS THE SHELL AND BRINGS YOU BACK HERE."},
     {"START IN", "WHERE THE RADIO STARTS AND COMES BACK TO WHEN AN APP CLOSES: THE SENTRY, OR THE CLASSIC RADIO "
                  "SCREEN. PUSH TO SWITCH."},
 };
@@ -1778,6 +1782,7 @@ static void sys_open_async(void *arg) {
         case SYS_SETTINGS: main_screen_start_app(ACTION_APP_SETTINGS); break;
         case SYS_APPS: main_screen_open_apps(); break;
         case SYS_MODES: main_screen_start_app(ACTION_APP_MODES); break;
+        case SYS_SHELL: main_screen_open_dialog(dialog_shell); break;
         case SYS_CLASSIC:
             main_screen_home_pause(true);   /* not straight back here */
             dialog_destruct();

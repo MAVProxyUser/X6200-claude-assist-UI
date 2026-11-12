@@ -225,3 +225,7 @@ void textarea_window_set(const char *val) {
 lv_obj_t *textarea_window_text() {
     return field;
 }
+
+void textarea_window_lower(void) {
+    if (kbd) lv_keyboard_set_mode(kbd, LV_KEYBOARD_MODE_TEXT_LOWER);
+}

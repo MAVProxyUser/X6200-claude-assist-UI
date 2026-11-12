@@ -41,6 +41,9 @@ typedef struct {
     bool                   run;             /* open now */
 } dialog_t;
 
+/* A window that has no APP action (the Sentry's UNIX SHELL), opened as the APP grid is (screen_main.c) */
+void main_screen_open_dialog(dialog_t *d);
+
 /* Open dialog over parent (nothing if it is open already); close the open one */
 void dialog_construct(dialog_t *dialog, lv_obj_t *parent);
 void dialog_destruct();
