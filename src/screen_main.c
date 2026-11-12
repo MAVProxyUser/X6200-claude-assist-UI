@@ -621,6 +621,26 @@ void main_screen_start_app(press_action_t app_action) {
     }
     freq_strip_set_app(app_name(app_action));
 }
+static bool home_paused;   /* the main screen chosen in the Sentry: no going back to it till it opens again */
+
+void main_screen_home_pause(bool on) {
+    home_paused = on;
+}
+
+/* A window closed (app_window.c calls this after it): the Sentry again, the X6200's home screen, unless something
+ * else took the screen (an app that opened in its place, RTTY without a window, the walkie screen) */
+void main_screen_dialog_closed(void) {
+#ifdef BOARD_X6200
+    if (!param_i_get(cfg_sentry_home) || home_paused) return;
+    if (dialog_is_run() || rtty_get_state() != RTTY_OFF || walkie_on()) return;
+    main_screen_start_app(ACTION_APP_SENTRY);
+#endif
+}
+
+void main_screen_open_apps(void) {
+    close_apps();
+    dialog_construct(dialog_apps, obj);
+}
 
 /* What a long press (or a hand mic F key) was given in Settings */
 void main_screen_action(press_action_t action) {

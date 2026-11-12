@@ -51,6 +51,12 @@ bool main_screen_buttons_wake(void);
 /* Apps and the actions a long press or a hand mic F key can be given */
 void main_screen_start_app(press_action_t app);
 void main_screen_close_app(void);
+/* The X6200's home screen, the Sentry (cfg_sentry_home): main_screen_dialog_closed() after a window closed brings
+ * it back when nothing else took the screen; paused while the main screen was chosen in it, till it opens again */
+void main_screen_dialog_closed(void);
+void main_screen_home_pause(bool on);
+/* The APP grid, as the APP key opens it */
+void main_screen_open_apps(void);
 void main_screen_action(press_action_t action);
 
 /* The knobs' presses and the MFK (dir -1, +1 a turn, 0 the press), as on the main screen */

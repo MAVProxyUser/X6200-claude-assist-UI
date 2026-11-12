@@ -623,6 +623,10 @@ static const uint32_t *d3_palette(uint32_t *accent) {
     static const uint32_t blue[] = {0x000a28, 0x0028a0, 0x1070ff, 0x60b0ff, 0xd8f0ff};
     int32_t c = param_i_get(cfg_wf_3d_colors);
 
+    if (theme_shape.sentry) {           /* the Sentry's look: the waterfall's amber, the newest trace pale */
+        *accent = theme_hex(TC_accent_soft);
+        return wf_palette;
+    }
     if (c == D3_WATERFALL) {
         *accent = 0xffffff;
         return wf_palette;

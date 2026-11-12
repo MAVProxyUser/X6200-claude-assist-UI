@@ -40,6 +40,7 @@ ParamInt         *cfg_spectrum_show       = nullptr;
 ParamInt         *cfg_spectrum_height     = nullptr;
 ParamInt         *cfg_digi_text_compact   = nullptr;
 ParamInt         *cfg_cluster_spots_wf    = nullptr;
+ParamInt         *cfg_sentry_home         = nullptr;
 ParamInt         *cfg_walkie              = nullptr;
 ParamInt         *cfg_walkie_mem          = nullptr;
 ParamInt         *cfg_walkie_ch           = nullptr;
@@ -236,6 +237,7 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_spectrum_height  = &cfg_sm.p_spectrum_height;
     cfg_digi_text_compact = &cfg_sm.p_digi_text_compact;
     cfg_cluster_spots_wf = &cfg_sm.p_cluster_spots_wf;
+    cfg_sentry_home      = &cfg_sm.p_sentry_home;
     cfg_walkie           = &cfg_sm.p_walkie;
     cfg_walkie_mem       = &cfg_sm.p_walkie_mem;
     cfg_walkie_ch        = &cfg_sm.p_walkie_ch;

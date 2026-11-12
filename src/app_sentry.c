@@ -16,6 +16,12 @@
  *    C BANDS   what each band carries, when, with which antenna, and what the Sentry found there; LISTEN tunes it
  *              and scans it, SWEEP marks it for the sweep.
  *    D DECODE  the decoders and the frequencies they work on; OPEN takes the radio there in the radio's own app.
+ *    E SYSTEM  the rest of the radio, in this look: its settings, the other apps, the digital modes menu, the
+ *              classic radio screen (with transmit), and where the radio starts. The APP key comes here.
+ *
+ *  On the X6200 the Sentry is the home screen (cfg_sentry_home): the radio starts in it, and an app or a menu opened
+ *  from it comes back to it when it closes (screen_main.c main_screen_dialog_closed). CLASSIC RADIO leaves it till it
+ *  is opened again.
  *
  *  The picture's bins: bin n/2 is the dial (the base's FFT shifted, its DC in the middle), checked on the night AM
  *  band where the stations sit on their 10 kHz channels.
@@ -45,6 +51,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include <time.h>
 
@@ -86,7 +93,7 @@ extern const lv_font_t pixel_16, pixel_20, pixel_24, pixel_28, pixel_44;
 #define VISITED     16
 #define IGNORED     32
 
-typedef enum { SCR_SCAN, SCR_TRACK, SCR_BANDS, SCR_DECODE, SCR_N } scr_t;
+typedef enum { SCR_SCAN, SCR_TRACK, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_N } scr_t;
 typedef enum { MODE_AUTO, MODE_SEMI, MODE_MAN } sysmode_t;
 typedef enum { ROUT_BAND, ROUT_SWEEP } routine_t;
 
@@ -336,6 +343,25 @@ static lv_obj_t *bd_head_l, *bd_row_l[20], *bd_about_l;
 static int       bd_rows;
 static box_t     d_sel, d_how, d_ant, d_now;
 static lv_obj_t *d_head_l, *d_row_l[12];
+
+/* E SYSTEM: the rest of the radio, from here */
+typedef enum { SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_CLASSIC, SYS_HOME, SYS_N } sysitem_t;
+static const struct {
+    const char *name, *about;
+} sys_items[SYS_N] = {
+    {"SETTINGS", "EVERY SETTING OF THE RADIO: DISPLAY AND THEME, AUDIO, KEYS, BANDS, NETWORK, TRANSMIT. THEY OPEN IN "
+                 "THIS LOOK; CLOSING THEM BRINGS YOU BACK HERE."},
+    {"APPS", "THE RADIO'S OTHER APPS: CLUSTER, FIELD OPS, PROPAGATION, CHANNELS, SCANNER, RECORDER, CW TRAINER, GPS, "
+             "BIRDIE CAL. CLOSING ONE BRINGS YOU BACK HERE."},
+    {"DIGITAL MODES", "THE MODES MENU: FT8, FT4, FT2, JS8, WSPR, PSK, RTTY, JTTY, OLIVIA, SSTV, WEFAX, NAVTEX, RADE. "
+                      "D DECODE OPENS THEM ON KNOWN FREQUENCIES."},
+    {"CLASSIC RADIO", "THE FULL RADIO SCREEN, WITH TRANSMIT. THE SENTRY STAYS AWAY TILL YOU OPEN IT AGAIN: APP, THEN "
+                      "THE SENTRY TILE."},
+    {"START IN", "WHERE THE RADIO STARTS AND COMES BACK TO WHEN AN APP CLOSES: THE SENTRY, OR THE CLASSIC RADIO "
+                 "SCREEN. PUSH TO SWITCH."},
+};
+static int       sys_sel;
+static box_t     s_list, s_what, s_look, s_home, s_keys;
 static lv_obj_t *key_l[5];
 
 /* The knobs and keys, said: the legend, a word on screen for a moment (OSD), the list of them all (help) */
@@ -939,7 +965,7 @@ static lv_obj_t *screen_obj(void) {
 /* ---- Showing the state ---- */
 
 static const char *titles[SCR_N] = {"REMOTE SENTRY RECEIVER SYSTEM", "REMOTE SENTRY RECEIVER SYSTEM",
-                                    "BAND INTELLIGENCE", "DECODER SENTRY"};
+                                    "BAND INTELLIGENCE", "DECODER SENTRY", "SYSTEM CONTROL"};
 
 static void show_head(void) {
     char       f[24], t[16];
@@ -1251,6 +1277,28 @@ static void show_decode(void) {
     }
 }
 
+static void show_system(void) {
+    char s[48];
+    bool home = param_i_get(cfg_sentry_home);
+
+    for (int i = 0; i < SYS_N; i++) {
+        if (i == SYS_HOME)
+            snprintf(s, sizeof(s), "START IN: %s", home ? "SENTRY" : "CLASSIC");
+        else
+            snprintf(s, sizeof(s), "%s", sys_items[i].name);
+        opt_set(&s_list, i, s, i == sys_sel);
+    }
+    opt_set(&s_what, 0, sys_items[sys_sel].about, 0);
+    snprintf(s, sizeof(s), "%s THEME", params.theme_name.x);
+    for (char *c = s; *c; c++) *c = (char)toupper((unsigned char)*c);
+    opt_set(&s_look, 0, s, 0);
+    opt_set(&s_look, 1, "SETTINGS > DISPLAY", 2);
+    opt_set(&s_home, 0, home ? "THE SENTRY" : "CLASSIC RADIO", 0);
+    opt_set(&s_home, 1, home ? "APPS COME BACK HERE" : "APPS GO TO CLASSIC", 2);
+    opt_set(&s_keys, 0, "APP: THIS SCREEN", 0);
+    opt_set(&s_keys, 1, "F5: CLASSIC RADIO", 2);
+}
+
 static const char *f_label(int k);
 
 static const char *const vol_names[] = {"VOLUME", "SQUELCH", "RF GAIN"};
@@ -1266,7 +1314,7 @@ static int vol_value(void) {
 
 static void show_legend(void) {
     static const char *const mfk[SCR_N] = {"TARGET, PUSH TRACK", "TARGET, PUSH HOLD", "BAND, PUSH LISTEN",
-                                           "FREQ, PUSH OPEN"};
+                                           "FREQ, PUSH OPEN", "ITEM, PUSH OPEN"};
 
     lv_label_set_text_fmt(legend_l, "VFO: TUNE | MFK: %s | RING: SCREEN | VOL: %s %d, PUSH %s | GEN: HELP",
                           mfk[scr], vol_short[vol_fn], vol_value(), vol_short[(vol_fn + 1) % 3]);
@@ -1369,7 +1417,7 @@ static void show_screen(void) {
         else
             lv_obj_add_flag(scr_obj[i], LV_OBJ_FLAG_HIDDEN);
     }
-    static const char letters[SCR_N] = {'A', 'B', 'C', 'D'};
+    static const char letters[SCR_N] = {'A', 'B', 'C', 'D', 'E'};
     char              l[2]           = {letters[scr], 0};
 
     lv_label_set_text(badge_l[0], l);
@@ -1383,6 +1431,7 @@ static void show_screen(void) {
         case SCR_TRACK: show_track(); break;
         case SCR_BANDS: show_bands(); break;
         case SCR_DECODE: show_decode(); break;
+        case SCR_SYSTEM: show_system(); break;
         default: break;
     }
     show_head();
@@ -1645,7 +1694,7 @@ static const char *f_label(int k) {
         case SCR_SCAN: {
             static const char *const m[] = {"Mode:\nAuto", "Mode:\nSemi", "Mode:\nManual"};
             const char *const        l[] = {m[smode], routine == ROUT_BAND ? "Routine:\nBand" : "Routine:\nSweep",
-                                            "Bands", "Decode", "Exit"};
+                                            "Bands", "Decode", "System"};
             return l[k];
         }
         case SCR_TRACK: {
@@ -1658,7 +1707,7 @@ static const char *f_label(int k) {
                 snprintf(s, sizeof(s), "Sweep:\n%s", band_rt[band_sel].sweep ? "In" : "Out");
                 return s;
             } else {
-                const char *const l[] = {"Scan", "Listen", "", "Decode", "Exit"};
+                const char *const l[] = {"Scan", "Listen", "", "Decode", "System"};
                 return l[k];
             }
         case SCR_DECODE:
@@ -1666,9 +1715,13 @@ static const char *f_label(int k) {
                 snprintf(s, sizeof(s), "Type:\n%s", decoders[dec_sel].name);
                 return s;
             } else {
-                const char *const l[] = {"Scan", "Open", "Bands", "", "Exit"};
+                const char *const l[] = {"Scan", "Open", "Bands", "", "System"};
                 return l[k];
             }
+        case SCR_SYSTEM: {
+            const char *const l[] = {"Scan", "Open", "Bands", "Decode", "Classic"};
+            return l[k];
+        }
         default:
             return "";
     }
@@ -1698,7 +1751,8 @@ static void open_async(void *arg) {
     const decoder_t *d = &decoders[(intptr_t)arg];
 
     if (d->proto >= 0) param_i_set(cfg_ft8_protocol, d->proto);    /* the FT8 app: 0 FT4, 1 FT8 */
-    if (!d->app) {                          /* CW: the main screen, there */
+    if (!d->app) {                          /* CW: the main screen, there, till the Sentry opens again */
+        main_screen_home_pause(true);
         dialog_destruct();
         lv_timer_create(open_tune_cb, 50, NULL);
         return;
@@ -1717,6 +1771,28 @@ static void open_decoder(void) {
     open_mode = d->mode;
     if (d->mode < 0) open_mode = open_hz < 10000000 ? radio_mode_lsb : radio_mode_usb;
     lv_async_call(open_async, (void *)(intptr_t)dec_sel);
+}
+
+static void sys_open_async(void *arg) {
+    switch ((int)(intptr_t)arg) {
+        case SYS_SETTINGS: main_screen_start_app(ACTION_APP_SETTINGS); break;
+        case SYS_APPS: main_screen_open_apps(); break;
+        case SYS_MODES: main_screen_start_app(ACTION_APP_MODES); break;
+        case SYS_CLASSIC:
+            main_screen_home_pause(true);   /* not straight back here */
+            dialog_destruct();
+            break;
+        default: break;
+    }
+}
+
+static void sys_open(int i) {
+    if (i == SYS_HOME) {
+        param_i_set(cfg_sentry_home, !param_i_get(cfg_sentry_home));
+        show_screen();
+        return;
+    }
+    lv_async_call(sys_open_async, (void *)(intptr_t)i);
 }
 
 static void listen_band(void) {
@@ -1748,7 +1824,7 @@ static void fkey(int k) {
             if (k == 1) set_routine(routine == ROUT_BAND ? ROUT_SWEEP : ROUT_BAND);
             if (k == 2) go(SCR_BANDS);
             if (k == 3) go(SCR_DECODE);
-            if (k == 4) dialog_destruct();
+            if (k == 4) go(SCR_SYSTEM);
             break;
         case SCR_TRACK:
             if (k == 0) {
@@ -1783,7 +1859,7 @@ static void fkey(int k) {
                 show_screen();
             }
             if (k == 3) go(SCR_DECODE);
-            if (k == 4) dialog_destruct();
+            if (k == 4) go(SCR_SYSTEM);
             break;
         case SCR_DECODE:
             if (k == 0) go(SCR_SCAN);
@@ -1794,7 +1870,14 @@ static void fkey(int k) {
                 dec_row = 0;
                 show_screen();
             }
-            if (k == 4) dialog_destruct();
+            if (k == 4) go(SCR_SYSTEM);
+            break;
+        case SCR_SYSTEM:
+            if (k == 0) go(SCR_SCAN);
+            if (k == 1) sys_open(sys_sel);
+            if (k == 2) go(SCR_BANDS);
+            if (k == 3) go(SCR_DECODE);
+            if (k == 4) sys_open(SYS_CLASSIC);
             break;
         default:
             break;
@@ -1835,6 +1918,10 @@ static void step(int dir) {
             show_screen();
             break;
         }
+        case SCR_SYSTEM:
+            sys_sel = (sys_sel + dir + SYS_N) % SYS_N;
+            show_screen();
+            break;
         default:
             break;
     }
@@ -1857,6 +1944,7 @@ static void press(void) {
             break;
         case SCR_BANDS: listen_band(); break;
         case SCR_DECODE: open_decoder(); break;
+        case SCR_SYSTEM: sys_open(sys_sel); break;
         default: break;
     }
 }
@@ -1995,6 +2083,9 @@ static bool front_key(int key, int state) {
         case KEYPAD_GEN:
             if (tap) help_show(true);
             return true;
+        case KEYPAD_APP:
+            if (tap) go(SCR_SYSTEM);
+            return true;
         case KEYPAD_BAND_UP:
         case KEYPAD_BAND_DOWN:
             if (tap) band_key(key == KEYPAD_BAND_UP);
@@ -2050,7 +2141,7 @@ static bool front_key(int key, int state) {
         case KEYPAD_MSG:
             if (tap || hold) {
                 snprintf(t, sizeof(t), "%s", key == KEYPAD_KEY ? "KEY: CW KEYER" : "MSG: MESSAGES");
-                osd(t, "THEY TRANSMIT: LOCKED OUT WHILE THE SENTRY IS OPEN. F5 LEAVES IT.", -1);
+                osd(t, "THEY TRANSMIT: LOCKED OUT IN THE SENTRY. E SYSTEM, CLASSIC RADIO LEAVES IT.", -1);
             }
             return true;
         case KEYPAD_MODE_AM:
@@ -2066,7 +2157,7 @@ static bool front_key(int key, int state) {
             if (tap) osd("TUNING STEP", "HOW FAR ONE CLICK OF THE VFO KNOB MOVES.", -1);
             return false;
         default:
-            return false;       /* APP, PTT (refused), POWER, F1-F5: as ever */
+            return false;       /* PTT (refused), POWER, F1-F5: as ever */
     }
 }
 
@@ -2107,6 +2198,16 @@ static void tap_cb(lv_event_t *e) {
         case 0: set_mode((sysmode_t)i); break;                     /* SYSTEM MODE */
         case 1: if (i < 2) set_routine((routine_t)i); break;       /* SCAN ROUTINE */
         case 4: if (i == 1) go(SCR_TRACK); break;                  /* SIGNAL STATUS: TRACK */
+        case 5:                                                    /* a SYSTEM item */
+            if (i < SYS_N) {
+                if (i == sys_sel) {
+                    sys_open(i);
+                } else {
+                    sys_sel = i;
+                    show_screen();
+                }
+            }
+            break;
         case 3:                                                    /* a decoder */
             if (i < DECODERS_N) {
                 dec_sel = i;
@@ -2290,6 +2391,29 @@ static void build_decode(lv_obj_t *p) {
     for (int i = 0; i < 2; i++) lv_obj_set_style_text_font(d_now.opt[i], &pixel_16, 0);
 }
 
+/* E SYSTEM: the items on the left, what the chosen one does on the right, the look, the home screen and the keys
+ * under them */
+static void build_system(lv_obj_t *p) {
+    int y = BODY_Y, h = scr_h - y - DLOW_H - 10, lw = 300;
+
+    box_make(&s_list, p, 6, y, lw, h, "SYSTEM", SYS_N, 5);
+    box_make(&s_what, p, lw + 12, y, SW - lw - 18, h, "WHAT IT DOES", 1, -1);
+    lv_obj_set_height(s_what.opt[0], h - 34);
+    lv_obj_set_style_text_align(s_what.opt[0], LV_TEXT_ALIGN_LEFT, 0);
+    lv_label_set_long_mode(s_what.opt[0], LV_LABEL_LONG_WRAP);
+
+    int ly = scr_h - DLOW_H - 4, w = (SW - 12 - 2 * 6) / 3;
+
+    box_make(&s_look, p, 6, ly, w, DLOW_H, "THE LOOK", 2, -1);
+    box_make(&s_home, p, 6 + w + 6, ly, w, DLOW_H, "HOME SCREEN", 2, -1);
+    box_make(&s_keys, p, 6 + 2 * (w + 6), ly, SW - 12 - 2 * (w + 6), DLOW_H, "KEYS", 2, -1);
+    for (int i = 0; i < 2; i++) {
+        lv_obj_set_style_text_font(s_look.opt[i], &pixel_16, 0);
+        lv_obj_set_style_text_font(s_home.opt[i], &pixel_16, 0);
+        lv_obj_set_style_text_font(s_keys.opt[i], &pixel_16, 0);
+    }
+}
+
 static void build_keys(void) {
     int w = (SW - 12 - 4 * 6) / 5, y = 480 - KEYS_H - 3;
 
@@ -2345,7 +2469,7 @@ static void build_overlays(void) {
                    "\n"
                    "VFO KNOB       TUNES BY HAND: THE SENTRY GOES TO MAN-OVERRIDE (F1: BACK)\n"
                    "MFK KNOB       CHOOSES A TARGET, A BAND, A FREQUENCY. PUSH: TRACK, LISTEN, OPEN\n"
-                   "MFK RING       THE SCREENS: A SCAN, B TRACK, C BANDS, D DECODE\n"
+                   "MFK RING       THE SCREENS: A SCAN, B TRACK, C BANDS, D DECODE, E SYSTEM\n"
                    "VOL KNOB       VOLUME. PUSH: SQUELCH, PUSH: RF GAIN, PUSH: VOLUME AGAIN\n"
                    "F1 - F5        THE KEYS ALONG THE BOTTOM OF THE SCREEN\n"
                    "BAND UP/DOWN   THE NEXT BAND OF THE BANDS LIST, SCANNED\n"
@@ -2356,12 +2480,13 @@ static void build_overlays(void) {
                    "ATU            ANTENNA TUNER IN/OUT. TUNING ITSELF TRANSMITS: NOT HERE\n"
                    "A/B            NOT USED HERE\n"
                    "PTT  KEY  MSG  TRANSMIT: LOCKED OUT WHILE THE SENTRY IS OPEN\n"
-                   "APP            THE APPS (LEAVES THE SENTRY).  F5: EXIT\n"
+                   "APP            E SYSTEM: SETTINGS, APPS, MODES, THE CLASSIC RADIO SCREEN\n"
                    "GEN            THIS LIST.  A TAP ON THE TITLE AT THE TOP SHOWS IT TOO");
     help_show(false);
 }
 
 static void construct_cb(lv_obj_t *parent) {
+    main_screen_home_pause(false);      /* the home screen again: apps come back here */
     amb   = TC(accent);
     ink   = TC(bg);
     dim   = lv_color_mix(amb, ink, 110);
@@ -2390,6 +2515,7 @@ static void construct_cb(lv_obj_t *parent) {
     build_track(scr_obj[SCR_TRACK]);
     build_bands(scr_obj[SCR_BANDS]);
     build_decode(scr_obj[SCR_DECODE]);
+    build_system(scr_obj[SCR_SYSTEM]);
     build_keys();
     build_overlays();
 

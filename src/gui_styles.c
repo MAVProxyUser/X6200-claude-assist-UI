@@ -275,6 +275,14 @@ void styles_load(const char *name) {
         fonts_scale(VISION_FONT_STEPS);   /* apps, Settings and popups bigger too */
     }
     mono_set(theme_shape.mono);   /* 1bit: ink and paper only; the others: LVGL's drawing as it is */
+    if (theme_shape.sentry) {
+        /* LVGL's own widgets (a slider's knob and fill, a text area's frame) take its default theme's primary
+         * colour, blue: the Sentry's look has them in its amber, red the second colour as for transmitting */
+        lv_disp_t  *disp = lv_disp_get_default();
+        lv_theme_t *th   = lv_theme_default_init(disp, TC(accent), TC(err), true, LV_FONT_DEFAULT);
+
+        if (th) lv_disp_set_theme(disp, th);
+    }
     styles_init();
 }
 

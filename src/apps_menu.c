@@ -200,7 +200,7 @@ static void construct_cb(lv_obj_t *parent) {
         lv_obj_remove_style_all(t);
         lv_obj_set_size(t, TILE_W, TILE_H);
         lv_obj_set_pos(t, PAD + (i % COLS) * (TILE_W + GAP), HEAD_H + (i / COLS) * (TILE_H + GAP));
-        lv_obj_set_style_radius(t, 8, 0);
+        lv_obj_set_style_radius(t, theme_shape.sentry ? 0 : 8, 0);
         lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
         lv_obj_clear_flag(t, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(t, LV_OBJ_FLAG_CLICKABLE);

@@ -167,11 +167,18 @@ static void close_window(dialog_t *d) {
     main_screen_buttons_wake();     /* Hide buttons: counted from the close */
 }
 
+/* After a window closed, once whatever closed it has done the rest (opened another app, say): the home screen */
+static void closed_async(void *arg) {
+    (void)arg;
+    main_screen_dialog_closed();
+}
+
 void dialog_destruct() {
     freq_strip_set_app(NULL);
     if (dialog_is_run()) {
         close_window(shown);
         shown = NULL;
+        lv_async_call(closed_async, NULL);
     }
     if (mode_back >= 0) {
         if (cparam_i_get(cfg_cur_mode) == mode_forced) {    /* not changed again meanwhile */

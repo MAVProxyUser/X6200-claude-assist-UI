@@ -204,6 +204,10 @@ class SettingsManager {
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_cluster_spots_wf{"cluster_spots_wf", true, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The X6200: the Sentry is the home screen. The GUI starts in it, and comes back to it whenever an app or a
+    // menu opened from it closes (screen_main.c main_screen_dialog_closed)
+    Parameter<int32_t> p_sentry_home{"sentry_home", true, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     // Walkie Talkie: a portrait screen instead of the main one (live)
     Parameter<int32_t> p_walkie{"walkie", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};

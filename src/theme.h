@@ -202,6 +202,7 @@ typedef struct {
     bool    rule;           /* accent line under the top bar and over the active button (Holo) */
     bool    codec;          /* Codec: the S-meter as a SIGNAL bar of segments, the scale under it (smeter.c) */
     bool    vision;         /* VISION: big type for weak eyes, a low top bar, a tall frequency strip, the S-meter on a row of its own */
+    bool    sentry;         /* Sentry: the Sentry's look all over; the S-meter dial and the 3D view in the theme's amber */
 #define VISION_FONT_STEPS 3 /* VISION: every font this many sizes up, apps and Settings too (fonts_scale) */
     bool    ops_room;       /* Ops Room (a theme's "ops_room": true): the clock as the activity timer in 7-segment
                              * digits, the S-meter as a row of hexagons, the TRANSMIT band at TX (ops_room.c) */

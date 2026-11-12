@@ -272,7 +272,8 @@ void meter_needle_draw(lv_obj_t *obj, lv_draw_ctx_t *draw_ctx) {
     lv_draw_label_dsc_t label_dsc;
     float               span = NEEDLE_A1 - NEEDLE_A0;
 
-    bool                lamp    = param_i_get(cfg_smeter_lamp);         /* amber dial, dark ink, red zone */
+    /* amber dial, dark ink, red zone; not in the Sentry's look, where the dial is the theme's black and amber */
+    bool                lamp    = param_i_get(cfg_smeter_lamp) && !theme_shape.sentry;
     int32_t             colors  = lamp ? 0 : param_i_get(cfg_smeter_color);
     bool                colored = colors != 0;      /* the needle in text; 1 the arc green to red, 2 lit to the level */
     float               level_u = needle_u(meter_db);

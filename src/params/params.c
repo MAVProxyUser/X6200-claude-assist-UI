@@ -140,7 +140,11 @@ params_t params = {
     .wifi_enabled           = { .x = false, .name="wifi_enabled" },
 
     .theme                  = { .x = THEME_SIMPLE, .name="theme"},
+#ifdef BOARD_X6200
+    .theme_name             = { .x = "Sentry", .max_len = 31, .name = "theme_name" },   /* the Sentry's look, all over */
+#else
     .theme_name             = { .x = "RF.Guru", .max_len = 31, .name = "theme_name" },
+#endif
     .font                  = { .x = 2, .name="font"},     /* FONT_DEJAVU */
 };
 

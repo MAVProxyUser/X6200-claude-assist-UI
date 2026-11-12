@@ -23,10 +23,11 @@
 #endif
 
 enum { B_RFGURU, B_LEGACY, B_OUTDOOR, B_CLASSIC, B_OUTDOOR_NEG, B_VISION, B_BLACK_METAL, B_TOTAL_BLACK, B_ONEBIT,
-       B_COUNT };
+       B_SENTRY, B_COUNT };
 
 static const char *const builtin_names[B_COUNT] = {"RF.Guru", "Legacy", "Outdoor", "Classic", "Outdoor-Negative",
-                                                   "VISION", "Black Metal", "Total Black", "1bit"};
+                                                   "VISION", "Black Metal", "Total Black", "1bit",
+                                                   "Sentry"};
 
 /* 1bit: black on one white, as a monochrome LCD. These roles are the paper (screen, boxes, the text
  * on what is inverted), every other one the ink: what is on or selected is an ink box, and the mono
@@ -97,6 +98,49 @@ static const theme_set_t total_black_colors[] = {   /* over deck_colors */
     {TC_btn, 0x000000},         {TC_btn_grad, 0x000000},     {TC_btn_border, 0x46494d},     {TC_btn_active, 0x000000},
     {TC_btn_active_grad, 0x000000}, {TC_btn_page, 0x000000}, {TC_popup, 0x000000},          {TC_side, 0x000000},
     {TC_list, 0x000000},        {TC_frame, 0x000000},        {TC_veil, 0x000000},
+};
+
+/* Sentry: the whole radio in the Sentry's look (app_sentry.c), an old amber terminal: RF.Guru's amber on its black,
+ * square boxes with amber frames, what is chosen in amber with the black on it, the pixel font in capitals. Red
+ * stays for transmitting and errors, so a transmission still stands out; everything else is amber, dimmer when
+ * it matters less. On RF.Guru's colours for the roles this table does not set */
+#define SY_AMB   0xe5a823   /* RF.Guru's accent: the Sentry's amber */
+#define SY_SOFT  0xf2d886   /* its pale accent */
+#define SY_INK   0x08090c   /* RF.Guru's black */
+#define SY_MID   0xa77a1d   /* amber three quarters lit */
+#define SY_DIM   0x674d16   /* the Sentry's dim (amber 110/255 over the black) */
+#define SY_FAINT 0x332810   /* the Sentry's faint (50/255) */
+#define SY_ROW   0x15110a   /* a row a shade off the black */
+static const theme_set_t sentry_colors[] = {
+    {TC_bg, SY_INK},            {TC_panel, SY_INK},          {TC_panel_border, SY_AMB},     {TC_bar, SY_INK},
+    {TC_bar_grad, SY_INK},      {TC_bar_border, SY_AMB},     {TC_strip, SY_INK},            {TC_strip_grad, SY_INK},
+    {TC_strip_border, SY_AMB},  {TC_dialog, SY_INK},         {TC_dialog_grad, SY_INK},      {TC_dialog_border, SY_AMB},
+    {TC_btn, SY_INK},           {TC_btn_grad, SY_INK},       {TC_btn_border, SY_AMB},       {TC_btn_text, SY_AMB},
+    {TC_btn_active, SY_AMB},    {TC_btn_active_grad, SY_AMB}, {TC_btn_active_border, SY_AMB}, {TC_btn_active_text, SY_INK},
+    {TC_btn_page, SY_INK},      {TC_btn_page_text, SY_AMB},  {TC_btn_off_text, SY_DIM},     {TC_btn_off_border, SY_FAINT},
+    {TC_btn_mark, SY_DIM},      {TC_btn_mark_assigned, SY_MID}, {TC_btn_mark_active, SY_SOFT},
+    {TC_card, SY_FAINT},        {TC_focus, SY_AMB},          {TC_focus_text, SY_INK},       {TC_edited, SY_SOFT},
+    {TC_list, SY_INK},          {TC_row, SY_ROW},            {TC_popup, SY_INK},            {TC_popup_border, SY_AMB},
+    {TC_side, SY_INK},          {TC_chip, SY_ROW},           {TC_sel_bg, SY_AMB},           {TC_sel_text, SY_INK},
+    {TC_sel_border, SY_SOFT},   {TC_focus_bg, SY_FAINT},     {TC_near_bg, SY_FAINT},        {TC_vfo, SY_SOFT},
+    {TC_vfo_bg, SY_FAINT},      {TC_text, SY_AMB},           {TC_text_value, SY_SOFT},      {TC_text_dim, SY_MID},
+    {TC_text_soft, SY_AMB},     {TC_text_mute, SY_DIM},      {TC_text_faint, SY_FAINT},     {TC_text_head, SY_SOFT},
+    {TC_line, SY_DIM},          {TC_action, SY_SOFT},        {TC_ok, SY_SOFT},              {TC_ok_bg, SY_FAINT},
+    {TC_ok_bar, SY_AMB},        {TC_warn, SY_SOFT},          {TC_warn_bg, SY_FAINT},        {TC_info, SY_SOFT},
+    {TC_digi, SY_AMB},          {TC_alert, SY_SOFT},         {TC_alert_text, SY_SOFT},      {TC_alert_bg, SY_FAINT},
+    {TC_new, SY_SOFT},          {TC_veil, SY_INK},           {TC_alert_box, SY_FAINT},      {TC_track, SY_FAINT},
+    {TC_frame, SY_INK},         {TC_off, SY_DIM},            {TC_switch_off, SY_DIM},       {TC_icon_off, SY_FAINT},
+    {TC_lock, SY_AMB},          {TC_control_border, SY_MID}, {TC_toggle_on, SY_AMB},        {TC_toggle_focus, SY_SOFT},
+    {TC_spot, SY_SOFT},         {TC_mode_dig, SY_AMB},       {TC_mode_text, SY_INK},        {TC_mode_bg, SY_AMB},
+    {TC_mode_border, SY_AMB},   {TC_pill_off_text, SY_MID},  {TC_pill_border, SY_DIM},      {TC_meter_weak, SY_DIM},
+    {TC_meter_bar, SY_AMB},     {TC_meter_over, SY_SOFT},    {TC_meter_low, SY_AMB},        {TC_bar_mid, SY_SOFT},
+    {TC_alc, SY_SOFT},          {TC_tune_good, SY_SOFT},     {TC_bp_cw, SY_MID},            {TC_bp_dig, SY_AMB},
+    {TC_bp_ssb, SY_SOFT},       {TC_bp_out, SY_DIM},         {TC_bp_text, SY_INK},          {TC_finder_cursor, SY_SOFT},
+    {TC_saver_bg, SY_INK},      {TC_saver, SY_AMB},          {TC_saver_head, SY_SOFT},      {TC_pill_hp, SY_FAINT},
+    {TC_pill_cat, SY_FAINT},    {TC_pill_cat_text, SY_SOFT}, {TC_pill_kbd, SY_FAINT},       {TC_pill_kbd_text, SY_SOFT},
+    {TC_age_mid, SY_SOFT},      {TC_age_old, SY_DIM},        {TC_row_alert, SY_FAINT},      {TC_row_alert_text, SY_SOFT},
+    {TC_row_heard, SY_FAINT},   {TC_row_tx, 0x3a1010},       {TC_row_to_me, 0x5a1414},      {TC_row_cq, SY_ROW},
+    {TC_row_group, SY_FAINT},   {TC_row_sel_bar, SY_AMB},    {TC_title_text, SY_INK},       {TC_vfo_line, SY_SOFT},
 };
 
 static const uint32_t builtin_colors[B_OUTDOOR_NEG][TC_COUNT] = {   /* VISION and Outdoor-Negative are made from these */
@@ -210,6 +254,15 @@ static void use_builtin(int b) {
                                       /* black, deep blue, blue, cyan, yellow-green */
                                       .waterfall = {0x000000, 0x000418, 0x00145e, 0x0a5ad2, 0x28c8f0, 0xc8f05a},
                                       .waterfall_n = 6};
+    }
+    if (b == B_SENTRY) {
+        theme_set(sentry_colors, sizeof(sentry_colors) / sizeof(sentry_colors[0]));
+        theme_shape = (theme_shape_t){.radius = 0, .radius_btn = 0, .radius_popup = 0, .border = 2,
+                                      .focus_solid = true, .mode_box = true, .pill_border = 1, .font = FONT_PIXEL,
+                                      .btn_text_size = 24, .btn_caps = true, .sentry = true,
+                                      /* the Sentry's waterfall: black, then the amber coming up to its pale */
+                                      .waterfall = {SY_INK, SY_FAINT, SY_DIM, SY_MID, SY_AMB, SY_SOFT, 0xfff4d0},
+                                      .waterfall_n = 7};
     }
     if (b == B_ONEBIT) {
         /* paper a little warm, as a reflective LCD: it reads as a display, not as paper-white glare,

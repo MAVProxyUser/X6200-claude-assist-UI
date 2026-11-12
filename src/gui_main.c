@@ -445,6 +445,12 @@ int main(void) {
     if (!walkie_on() && param_i_get(cfg_field_boot)) {
         main_screen_start_app(ACTION_APP_FIELD);
     }
+#ifdef BOARD_X6200
+    /* The Sentry is the home screen: the radio starts in it (cfg_sentry_home) */
+    else if (!walkie_on() && param_i_get(cfg_sentry_home)) {
+        main_screen_start_app(ACTION_APP_SENTRY);
+    }
+#endif
     /* Not when this version could not use the settings file (params/db.c): the update is then taken back */
     if (!database_version_fault()) {
         lv_timer_set_repeat_count(lv_timer_create(update_confirm_cb, 60000, NULL), 1);
