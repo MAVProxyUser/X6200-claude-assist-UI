@@ -77,6 +77,7 @@ extern ParamInt         *cfg_walkie_mic;         // p_walkie_mic
 extern ParamInt         *cfg_band_plan;          // p_band_plan
 extern ParamInt         *cfg_wr12;               // p_wr12 (the X6200: the WR12 on HOST)
 extern ParamInt         *cfg_speaker_off;        // p_speaker_off
+extern ParamInt         *cfg_kbd_layout;         // p_kbd_layout
 extern ParamInt         *cfg_smeter_needle;      // p_smeter_needle
 extern ParamInt         *cfg_smeter_color;       // p_smeter_color
 extern ParamInt         *cfg_wf_palette;         // p_wf_palette
@@ -133,6 +134,7 @@ extern ParamInt *cfg_freq_accel_onset; // p_freq_accel_onset
 extern ParamInt *cfg_wspr_tx_freq;   // p_wspr_tx_freq
 extern ParamInt *cfg_wspr_upload;    // p_wspr_upload
 extern ParamInt *cfg_wspr_dbm;       // p_wspr_dbm
+extern ParamInt *cfg_rade_pwr;       // p_rade_pwr
 extern ParamInt *cfg_pskreporter;    // p_pskreporter
 extern ParamInt *cfg_field_boot;     // p_field_boot
 extern ParamInt *cfg_field_respot;   // p_field_respot

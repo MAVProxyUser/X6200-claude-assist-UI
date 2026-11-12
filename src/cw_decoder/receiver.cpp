@@ -58,8 +58,8 @@ void Receiver::detector_step(float power) {
      * and split a word gap into two, and before the timer's confirmations needed
      * elements of their own (ElementTimer::set_dot) it took them for a new speed.
      */
-    if (e.dir > 0 && text_.owning()) {
-        pend_      = false;   /* our own keying is no blip: on at once */
+    if (e.dir > 0 && (text_.owning() || tx_)) {
+        pend_      = false;   /* our own keying, or the radio's sidetone, is no blip: on at once */
     } else if (e.dir > 0) {
         pend_      = true;
         pend_ms_   = static_cast<float>(STEP_MS);

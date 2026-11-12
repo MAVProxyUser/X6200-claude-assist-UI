@@ -819,6 +819,7 @@ static const key_action_t front_actions[] = {
     {" APP SSTV ", ACTION_APP_SSTV},
     {" APP WeFax ", ACTION_APP_WEFAX},
     {" APP NavTex ", ACTION_APP_NAVTEX},
+    {" APP RADE ", ACTION_APP_FREEDV},
     /* Tools */
     {" APP Cluster ", ACTION_APP_CLUSTER},
     {" APP CW Trainer ", ACTION_APP_CWTRAINER},
@@ -3585,6 +3586,11 @@ static void make_keys_page() {
     row = card_begin("PADDLE");
     row = make_paddle(row);
     card_end(row);
+
+    /* The USB or Bluetooth keyboard's layout (#236): key_input.c follows it at once */
+    row = card_begin("KEYBOARD");
+    row = make_param_choice(row, "Layout", kbd_layout_options(), cfg_sm.p_kbd_layout);
+    card_end(row);
 }
 
 /* Cluster: which spots the app, the column and the waterfall show. Saved in
@@ -4135,6 +4141,8 @@ static void make_display_page() {
     row = make_param_choice(row, "Birdies", " Off \n Marks \n Marks + notch ", cfg_sm.p_birdie_marks);
     /* Off: one waterfall zoom and one tuning step for every mode, a mode change keeps them */
     row = make_param_switch(row, "Zoom and step per mode", cfg_sm.p_zoom_step_per_mode);
+    /* On: each zoom keeps the last step chosen at it, and a zoom change brings it back (#132) */
+    row = make_param_switch(row, "Step per zoom", cfg_sm.p_step_per_zoom);
     /* The box at the top right: the charge and the time left or to full, the voltages, the two in turn, or
      * the charge and the supply's voltage */
     row = make_param_choice(row, "Power display", " % + time \n Volts \n Alternate \n % + V ", cfg_sm.p_power_display);

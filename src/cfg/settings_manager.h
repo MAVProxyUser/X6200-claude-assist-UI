@@ -27,6 +27,7 @@
 #include <ft8lib/constants.h>
 
 #include "../board.h"
+#include "../kbd_layout.h"
 #include "../radio_types.h"
 #include "../common/math.h"
 #include "smeter_att.h"
@@ -174,6 +175,10 @@ class SettingsManager {
     // Zoom and step per mode (Settings > Display): on, each mode group keeps its own waterfall zoom and tuning
     // step, as it always did. Off, one zoom and one step for every mode (zoom_step_scope)
     Parameter<int32_t> p_zoom_step_per_mode{"zoom_step_per_mode", true, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Step per zoom (Settings > Display, #132): on, each zoom keeps the last tuning step chosen at it, and a zoom
+    // change brings that step back (step_zoom). Per mode or for every mode, as p_zoom_step_per_mode has it
+    Parameter<int32_t> p_step_per_zoom{"step_per_zoom", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     // Birdies (birdie.c): 0 nothing, 1 marked on the waterfall, 2 marked and notched in the passband
     Parameter<int32_t> p_birdie_marks{"birdie_marks", 1, 0, 2,
@@ -344,6 +349,10 @@ class SettingsManager {
     // volume (radio.c radio_vol_refresh); the audio to a browser, TCI and headphones goes on
     Parameter<int32_t> p_speaker_off{"speaker_off", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Settings > Keys > KEYBOARD > Layout: the USB or Bluetooth keyboard's xkb layout, an index into kbd_layout.c's
+    // list (0 US, as up to v0.3.9); key_input.c follows it (#236)
+    Parameter<int32_t> p_kbd_layout{"kbd_layout", 0, 0, KBD_LAYOUTS - 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_vox_gain{"vox_gain", 0, 0, 100,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_vox_ag{"vox_ag", 0, 0, 100,
@@ -380,6 +389,10 @@ class SettingsManager {
     // WSPR's own TX power, as the dBm the beacon reports (20 = 0.1 W, 23 = 0.2 W ... 37 = 5 W); the radio's power
     // setting is left alone. 23 dBm: 0.2 W is a 0.1 W step of the X6200 and an exact WSPR level, 0.25 W neither
     Parameter<int32_t> p_wspr_dbm{"wspr_dbm", 23, 20, 37,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // RADE's own TX power, in tenths of a W (the radio's power setting is left alone). Its OFDM signal's peaks are
+    // several dB over its average, which the power reading follows: 2 W by default, at most 3 W
+    Parameter<int32_t> p_rade_pwr{"rade_pwr", 20, 5, 30,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     // Decodes (FT8 FT4 FT2 JS8 PSK31 PSK63 Olivia) to PSK Reporter, on by default
     Parameter<int32_t> p_pskreporter{"pskreporter", true, 0, 1,
@@ -659,6 +672,16 @@ class SettingsManager {
         StorageType::MODE, pending_writes_, [this]() { on_mode_freq_step_not_found(); }, &mode_params_};
     Parameter<int32_t> p_mode_zoom{"spectrum_factor", 1, [](int32_t v) { return clip(v, 1, 8); },
         StorageType::MODE, pending_writes_, [this]() { on_mode_zoom_not_found(); }, &mode_params_};
+    // The step last chosen at the zoom 1, 2, 4 and 8 (100, 50, 25 and 12.5 kHz), 0 none yet (p_step_per_zoom,
+    // #132). Bound as the zoom and the step are (zoom_step_scope); a row not there is none, not the last mode's
+    Parameter<int32_t> p_mode_step_z1{"step_z1", 0, [](int32_t v) { return clip(v, 0, 100000); },
+        StorageType::MODE, pending_writes_, [this]() { p_mode_step_z1.set_quiet(0); }, &mode_params_};
+    Parameter<int32_t> p_mode_step_z2{"step_z2", 0, [](int32_t v) { return clip(v, 0, 100000); },
+        StorageType::MODE, pending_writes_, [this]() { p_mode_step_z2.set_quiet(0); }, &mode_params_};
+    Parameter<int32_t> p_mode_step_z4{"step_z4", 0, [](int32_t v) { return clip(v, 0, 100000); },
+        StorageType::MODE, pending_writes_, [this]() { p_mode_step_z4.set_quiet(0); }, &mode_params_};
+    Parameter<int32_t> p_mode_step_z8{"step_z8", 0, [](int32_t v) { return clip(v, 0, 100000); },
+        StorageType::MODE, pending_writes_, [this]() { p_mode_step_z8.set_quiet(0); }, &mode_params_};
 
   private:
     // MODE-scoped filter band edges. PRIVATE: never read/written directly
@@ -956,6 +979,12 @@ class SettingsManager {
     void zoom_step_scope(bool at_init);
     static void zoom_step_scope_cb(Subject *subj, void *user_data);
 
+    // Step per zoom (#132): a new zoom brings back the step last chosen at it; a step chosen, or the option turned
+    // on, is kept for the zoom in use. step_zoom_slot: the zoom's p_mode_step_z*, nullptr for a zoom not 1, 2, 4, 8
+    Parameter<int32_t> *step_zoom_slot(int32_t zoom);
+    void step_zoom(Subject *subj);
+    static void step_zoom_cb(Subject *subj, void *user_data);
+
     // Switch-time band loads: never loads current_vfo; when `implicit` is true
     // the VFOs as load_band_vfo keeps them.
     void load_band_switch(int new_band_id, bool implicit);
@@ -1040,6 +1069,7 @@ class SettingsManager {
 
     // The p_zoom_step_per_mode observer: rebinds the zoom and the step (zoom_step_scope)
     Subscription zoom_step_obs_;
+    Subscription step_zoom_obs_[3];
 
     // Holds the p_band_id observer that triggers an explicit band switch when
     // p_band_id is set. RAII: unsubscribe on destruction.

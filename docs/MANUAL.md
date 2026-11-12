@@ -1,7 +1,9 @@
 # OpenX6X00: manual
 
 How to use every part of the firmware, and the reference tables. The short
-overview is the [README](../README.md).
+overview is the [README](../README.md). Each release on GitHub has this
+manual as a PDF too, `OpenX6X00-manual-v<version>.pdf`, to read offline or
+print (A4); `tools/manual_pdf/build.sh` makes it.
 
 Each option has a "Where:" line with its place on the radio, for example
 "Where: Settings > Display > MAIN SCREEN". Settings opens from APP (page 2) >
@@ -9,12 +11,12 @@ Settings. Button and option names are written as the radio shows them.
 
 ## Contents
 
-- [Getting started](#getting-started): [first steps](#first-steps), [buttons and knobs](#buttons-and-knobs), [hand mic](#hand-mic), [keyboard](#keyboard) ([quick QSO log](#quick-qso-log))
+- [Getting started](#getting-started): [first steps](#first-steps), [setting up the transmitter](#setting-up-the-transmitter), [buttons and knobs](#buttons-and-knobs), [hand mic](#hand-mic), [keyboard](#keyboard) ([quick QSO log](#quick-qso-log))
 - [Updating the firmware](#updating-the-firmware)
 - [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
 - [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab)
 - [Transmitting](#transmitting): [amateur bands only](#amateur-bands-only), [no TX without data from the base](#no-tx-without-data-from-the-base), [TX shift](#tx-shift), [transverter TX power limit](#transverter-tx-power-limit), [SWR scan and the tuner](#swr-scan-and-the-tuner), [TUNE for an external tuner](#tune-for-an-external-tuner), [digital-mode TX level](#digital-mode-tx-level), [recording voice messages](#recording-voice-messages), [ALC in CW](#alc-in-cw), [PA bias](#pa-bias-x6200), [register 32](#register-32-x6200)
-- [Digital modes](#digital-modes): [opening a mode](#opening-a-mode), [FT8 and FT4](#ft8-and-ft4), [JS8](#js8), [WSPR](#wspr), [SSTV, WeFax and NavTex](#sstv-wefax-and-navtex), [PSK31, PSK63 and Olivia](#psk31-psk63-and-olivia), [JTTY](#jtty), [text log of the keyboard modes](#text-log-of-the-keyboard-modes), [RTTY and WeFax TX](#rtty-and-wefax-tx)
+- [Digital modes](#digital-modes): [opening a mode](#opening-a-mode), [FT8 and FT4](#ft8-and-ft4), [JS8](#js8), [WSPR](#wspr), [SSTV, WeFax and NavTex](#sstv-wefax-and-navtex), [RADE (FreeDV)](#rade-freedv), [PSK31, PSK63 and Olivia](#psk31-psk63-and-olivia), [JTTY](#jtty), [text log of the keyboard modes](#text-log-of-the-keyboard-modes), [RTTY and WeFax TX](#rtty-and-wefax-tx)
 - [CW](#cw): [CW decoder](#cw-decoder), [CW from the keyboard](#cw-from-the-keyboard), [CW Keyboard](#cw-keyboard), [USB paddle](#usb-paddle), [CW messages](#cw-messages) ([beacon](#cw-beacon), [QRSS3](#qrss3)), [CW Trainer](#cw-trainer)
 - [Apps](#apps): [DX Cluster](#dx-cluster), [Field Ops (SOTA / POTA)](#field-ops-sota--pota), [Bands](#bands), [Propagation](#propagation), [Channels](#channels), [Scanner](#scanner)
 - [Bluetooth](#bluetooth): [headphones](#bluetooth-headphones), [CAT](#bluetooth-cat), [a PC on Bluetooth](#a-pc-on-bluetooth)
@@ -49,6 +51,106 @@ Settings. Button and option names are written as the radio shows them.
 4. Open the web configurator from a browser on the same network:
    `http://x6100.local/`, or `http://<radio IP>/` where mDNS names do not
    resolve (see [Web configurator](#web-configurator)).
+5. Before your first voice transmission, set the TX level and the
+   microphone: see [Setting up the transmitter](#setting-up-the-transmitter).
+
+### Setting up the transmitter
+
+What to set before you go on the air with your voice, and in which order:
+the TX level first, because the ALC figures further down assume it is set.
+Use a dummy load and a power meter, on a band where you may transmit.
+
+Which settings you have depends on the base, the radio board's own firmware
+(see [The baseband](../README.md#the-baseband) in the README). OpenX6X00
+hides a setting the base can't do. The patched base is gdyuldin's
+x6100_base_patch, which you install apart from OpenX6X00; Settings > Info >
+Baseband shows which base the radio runs.
+
+| Setting | Where | X6100, Xiegu's base | X6100, patched base | X6200 |
+|---|---|---|---|---|
+| Codec gain | Settings > TX Cal > TX CALIBRATION | - | r3 and later | - |
+| Band output gain | Settings > TX Cal > TX CALIBRATION | - | r8 and later | - |
+| IQ offsets | Settings > TX Cal > TX CALIBRATION | yes | yes | - |
+| Mic gain | Settings > Audio > MICROPHONE | yes | yes | yes |
+| Comp (the ratio) | the MFK 2:4 page | the button (see 4) | yes | three levels |
+| Compressor, makeup | Settings > Audio > TX AUDIO | - | r3 and later | - |
+| TX filter | Settings > Audio > TX AUDIO | - | r9 and later | - |
+| FM pre/de-emphasis | Settings > Audio > TX AUDIO | - | r8 and later | - |
+| CESSB | Settings > TX Cal > CESSB | - | r12 and later | - |
+
+1. **Codec gain** (-25 to +25 dB, 0 by default) is the patched base's
+   overall TX level. You set it once, not while you operate. The base's notes
+   say to set it so the radio gives 10 W at a 10 W setting. On our X6100,
+   which shipped with Xiegu's V1.1.8, r13 gave about 10 % too much at 5 W and
+   20 % at 10 W before this. Measure on the second transmission after a band
+   change: on ours the first one sometimes had next to no power.
+2. **Band output gain** (-6 to +6 dB, 0 by default) is kept for each band,
+   the band the radio is on. It evens the bands out where the power is low or
+   the ALC high: the codec gain alone left ours apart. With a codec gain of
+   -3 dB, the five bands we did (160, 40, 20, 15 and 10 m) came right
+   between about -1.3 and +1.2 dB.
+3. **Mic gain**, for the microphone you use: Hand mic (20 by default) or
+   Built-in (30), 0 to 50; Input chooses between them (Auto by default).
+   Speak at your normal voice, with Comp off and CESSB off. If the ALC sits
+   high, turn it down. On the X6200 the ALC reading does not follow the audio
+   (see [Digital-mode TX level](#digital-mode-tx-level)), so judge it by the
+   power reading and by ear: a second receiver, or a recording.
+4. **Compressor**, for voice. It brings loud and soft syllables closer
+   together, which raises the average power. The X6100's base leaves the
+   data modes and CW out of it, and the digital apps transmit in a data mode.
+   - **Comp** on the MFK 2:4 page is the ratio: 1:1 is off, the default on
+     both radios. From 2:1 to 8:1 it compresses more and more: at 4:1, 4 dB
+     more voice above the threshold gives 1 dB more out. On the X6200 the base
+     has three levels: 2:1 and 3:1 go as 2:1, 4:1 to 7:1 as 4:1, 8:1 as 8:1.
+     On the X6100 the compressor came with the patched base (r3); what Comp
+     does with Xiegu's own X6100 base we haven't measured.
+   - **Compressor, makeup** (patched base) are two sliders, -15 to +15 dB in
+     0.5 dB steps, both 0 by default. They shift the base's own values. The
+     first moves the threshold, the level where the compressor starts to act.
+     The second, the makeup, is the gain added after it to bring the voice
+     back up: with the makeup at 0 a compressor turns the power down, more at
+     a higher ratio.
+
+   A careful start is 2:1, the ratio the patched base starts with, and both
+   sliders at 0. More makeup means more drive into what follows, so watch the
+   ALC as you raise it.
+5. **CESSB** (patched base r12 and later, X6100 only) is for SSB: it clips
+   and filters the voice so the average power goes up without splatter. On
+   or off (off by default), and a level from 0.0 to 5.0 dB (3.7 by default),
+   how far the signal is raised before the clipping. The base's notes give
+   2.4 dB as barely audible, 3.7 dB as clean and 4.3 dB as a slightly
+   "processed" sound. With the TX level set as in 1 and 2, the ALC should
+   mostly read 0.1 to 0.3 or below with CESSB on, and not stay over 1 for
+   long. Even at 0 it keeps the peaks from overdriving the final stage, and
+   an amplifier after it. Starting at 0 and going up in small steps while
+   you listen on a second receiver is the careful way.
+
+The compressor and CESSB both raise the average power, in different ways:
+the compressor evens out the syllables, CESSB keeps the SSB signal's peaks
+in check. Their effects add up, so turn up one at a time and listen. A
+spectrum display on a second receiver or an SDR shows splatter better than
+the ear.
+
+The rest, left as it is unless you have a reason:
+
+- **IQ offsets** (X6100, per band, 0 by default) shift the I and Q signals
+  of the transmitter, which sets how well the carrier is suppressed. Change
+  them only while you watch the carrier on a spectrum analyser or a second
+  receiver.
+- **TX filter** (patched base r9 and later): the transmitted audio's
+  passband, low edge 50-400 Hz (160 by default), high edge 2000-4000 Hz
+  (3000).
+- **FM pre/de-emphasis** (patched base r8 and later), for FM.
+- **Moni level** (VOL 2:2 page) plays your own transmission on the speaker.
+  It is 0 by default: higher, the microphone can pick it up again (see
+  [Audio tab](#audio-tab)).
+- The digital apps set their own audio level: see
+  [Digital-mode TX level](#digital-mode-tx-level).
+
+We haven't tried CESSB or the compressor on the air or into a dummy load
+ourselves: the figures in 1, 2 and 5 are from the patched base's notes and
+from what we measured with r13 on our X6100 on 24 October 2026. Reports are
+welcome (issue #157).
 
 ### Buttons and knobs
 
@@ -140,7 +242,7 @@ Where: Settings > Keys > FRONT KEYS, LONG PRESS.
 | Kind | Actions |
 |---|---|
 | Quick | none, screenshot, RX recorder on/off, screen rec on/off, mute, frequency lock on/off, step up, step down, WF mode, WF 3D on/off, CW decoder on/off, CW ZAP (in CW and CW-R, the dial onto the signal the CW Tuner hears, as the CW 1:2 ZAP button; up to v0.3.9 neither was a key action, #196), ATT on/off, PRE on/off, tuner on/off, tuner tune (transmits a carrier), TUNE ext. tuner on/off (a carrier for a tuner at the antenna, see [TUNE for an external tuner](#tune-for-an-external-tuner)) |
-| Digital modes | RTTY, FT8, WSPR, JS8, SSTV, WeFax, NavTex |
+| Digital modes | RTTY, FT8, WSPR, JS8, SSTV, WeFax, NavTex, RADE |
 | Tools | Cluster, CW Trainer, CW Keyboard, Field Ops, Bands, Propagation, Channels, Scanner, RX recorder, SWR Scan, GPS, QTH grid, Settings |
 
 The hand mic F1 and F2 keys (and the H-22's F3 on the X6200), short and long
@@ -237,6 +339,15 @@ frequency box and, in CW, the [CW line](#cw-from-the-keyboard). Scroll Lock
 turns the [frequency lock](#buttons-and-knobs) on and off and Print Screen
 takes a screenshot, both on the main screen only.
 
+The keyboard's layout is set in Settings > Keys > KEYBOARD > Layout: US (the
+default, and the only one up to v0.3.9), UK, German (QWERTZ), Swiss German,
+French (AZERTY), Belgian (AZERTY), Spanish, Italian, Portuguese, Swedish,
+Finnish, Danish, Norwegian, Polish or Czech (QWERTZ). It applies at once, to
+the keyboard plugged in and the next ones. With German, Y and Z type as they
+are marked, `/` is Shift+7 and `@` AltGr+Q (issue #236). Letters with
+accents type in the text boxes, but the radio's fonts may not show them, and
+CW has no code for most of them.
+
 CapsLock is the keyboard's shortcut key: held, the key pressed with it does
 something on the radio instead of typing. Every keyboard has it, small and
 Bluetooth ones too, which often have no F keys, or only with Fn.
@@ -258,9 +369,10 @@ Bluetooth ones too, which often have no F keys, or only with Fn.
   type nothing: in walkie mode CapsLock+Space keys nothing (it still lets go).
   RTTY receives on the main screen, with no window of its own: there the
   chords work, and CapsLock+L logs the QSO as RTTY.
-- The keys count by their place on a US keyboard, as the radio types. The
+- The keys count by their place on a US keyboard, whatever the Layout. The
   letters are in the same place on AZERTY and QWERTZ keyboards; on an AZERTY
-  one CapsLock+1 is the key marked & and 1.
+  one CapsLock+1 is the key marked & and 1. The CW paddle keys (`[` and `]`
+  on a US keyboard) stay in their place too.
 - A chord's key is never typed, in the CW line, the quick log's box or a
   text box neither, and Caps Lock stays as it was, on or off. The
   keyboard's Caps Lock light can come on while CapsLock is held, and goes
@@ -330,6 +442,14 @@ reads CW 1:2, then F5), opens a one-line box near the top,
 - Type the call, then the report you sent and the one you received, and
   press Enter: `F4ABC 59 57`. A report left out is 59, 599 in CW. Esc
   closes the box without logging. Field Ops' Log QSO takes the same order.
+- More can follow, each after a comma: the name, the QTH with its locator,
+  and a comment: `F4ABC 59 57, Jean, Paris JN18du, Nice signal`. Each may be
+  empty or left out (`F4ABC 59 57, , JN18`). The QTH's last word is the
+  locator when it has a locator's shape (4 or 6 characters); the comment is
+  the rest of the line, commas and all. They go into the log as ADIF `NAME`,
+  `QTH`, `GRIDSQUARE` and `COMMENT`, and so to [Wavelog](#wavelog). The box
+  takes 64 characters. Field Ops' Log QSO takes them too, after the call,
+  the reports and their reference (issue #195).
 - In CW with the decoder's text on the screen (and in RTTY) the call it
   confirmed last is in the box already. Not in SSB after CW: the call heard
   in CW stays out.
@@ -1052,6 +1172,21 @@ web configurator's Display page).
 - Turned on again, each mode has its own zoom and step back, as they were
   when the option went off.
 
+Step per zoom. Where: Settings > Display > MAIN SCREEN, under Zoom and step
+per mode (also on the web configurator's Display page; off by default;
+issue #132).
+
+- On: each zoom (100, 50, 25 and 12.5 kHz) keeps the last tuning step you
+  chose at it with FST, and a zoom change brings that step back: for
+  example 1 kHz at 100 kHz and 10 Hz at 12.5 kHz, set once each.
+- A zoom where no step was chosen yet keeps the step in use, and takes it
+  as its own. Turned on, the option takes the step in use for the zoom in
+  use.
+- It follows Zoom and step per mode: on, each mode has its own steps per
+  zoom (CW finer than SSB at the same zoom); off, one set for every mode.
+- A zoom between those four, which CAT or the browser panel can set, keeps
+  the step in use.
+
 Spectrum. Where: Settings > Display > SPECTRUM (off by default; the screen
 restarts to lay it out). The band plan and the cluster spots stay at the top
 of the waterfall. With Spectrum on, the card has:
@@ -1336,7 +1471,7 @@ Per band S-meter cal: see [S-meter](#s-meter). TCI SERVER: see
 | BACKLIGHT | timeout and brightness, buttons brightness (Always Off, Always On, Temporarily On), Screensaver (None, Matrix rain), Screensaver (min) (with a screensaver: 1-120 minutes without use), Rain speed (Normal, Slow, Very slow), Screen off (min) (minutes without use, 0 never; the key that wakes it does nothing else), Screen always off (the screen stays dark for a radio run from the VFO-Knob or a browser, no screensaver; POWER shows it for the blank time, a minute at least); see [Screensaver](#screensaver) |
 | SPECTRUM | Spectrum; with it on Fill, Peaks, Fill gradient, Filter colour, Filter shade, Height (see [Waterfall](#waterfall)) |
 | WATERFALL | see [Waterfall](#waterfall) |
-| MAIN SCREEN | Band plan, Cluster spots, Cluster column, Broadcast names, S-meter type, S-meter colours, Needle lamp, Birdies (see [Birdie Cal](#birdie-cal)), Zoom and step per mode (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)) |
+| MAIN SCREEN | Band plan, Cluster spots, Cluster column, Broadcast names, S-meter type, S-meter colours, Needle lamp, Birdies (see [Birdie Cal](#birdie-cal)), Zoom and step per mode, Step per zoom (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)) |
 | INTERFACE | Popups Freq/Info/TX, Icon menus, Knob info, Hide buttons (Off, After 3 s, After 5 s, After 10 s), Theme, Font, Decoder text, FT8/FT4 info |
 
 - Popups Freq/Info/TX (Popups Freq/Info/ALC up to v0.3.8), three switches:
@@ -1636,6 +1771,7 @@ by itself. The 20 MHz and channel 12 and 13 settings in `x6100-wifi.conf` are
 | FRONT KEYS, LONG PRESS | the long-press action of GEN, APP, KEY, MSG, DFN, DFL and FST (see [Buttons and knobs](#buttons-and-knobs)) |
 | HAND MIC KEYS | F1, F2, F1 long, F2 long; on the X6200 F3 and F3 long too, for the H-22's F3 (see [Hand mic](#hand-mic)) |
 | PADDLE | USB paddles: Connected, the dit/dah of each kind, Learn dit and dah, Swap dit and dah, Serial port (see [USB paddle](#usb-paddle)) |
+| KEYBOARD | Layout of a USB or Bluetooth keyboard: US by default, UK, German, French and others (see [Keyboard](#keyboard)) |
 
 ### Cluster tab
 
@@ -2654,7 +2790,7 @@ it, and the X6100 is not changed.
 ### Opening a mode
 
 APP (page 1) > Modes opens a menu: RTTY, PSK31, PSK63, FT8, FT4, FT2, WSPR, Olivia
-(Contestia too, from the Olivia window's Mode), JTTY, JS8, SSTV, WeFax, NavTex. Turn the MFK to choose, press to open; the last used mode is marked.
+(Contestia too, from the Olivia window's Mode), JTTY, JS8, SSTV, WeFax, NavTex, RADE. Turn the MFK to choose, press to open; the last used mode is marked.
 Pressing Modes again closes the menu.
 
 - Callsign and QTH: Settings > General > STATION.
@@ -2857,7 +2993,12 @@ UDP messages (heartbeat, status, decodes, logged QSOs), so GridTracker or
 JTAlert can follow it. From SP2KMO's upstream PR #275. It is set in
 `/mnt/ft8_udp.conf` (`enabled=`, `host=`, `port=`, `id=`); the defaults are
 port 2237 and the network gateway (your phone on a hotspot) plus the WSJT-X
-multicast group.
+multicast group. QSOs logged anywhere else on the radio go out the same way,
+as "QSO Logged" and "Logged ADIF", also with the FT8 app closed: the QSO
+log, Field Ops, the phone's and the browser's Log tab, the CW line and JS8
+(#248). So a logger that listens to WSJT-X (GridTracker, JTAlert, a
+log program's WSJT-X input) gets the phone and CW QSOs too. `enabled=0` turns
+all of it off.
 
 Custom frequency. DXpeditions often work away from 14.074, e.g. H49A on
 14.091. Page 4 > Freq lists the mode's preset frequencies, one per band: pick
@@ -3118,6 +3259,70 @@ and its colours; the next press transmits.
   Received pictures are saved in `/mnt/sstv`.
 - Pictures can be uploaded from the web configurator's Gallery.
 
+### RADE (FreeDV)
+
+APP > Modes > RADE receives and sends FreeDV's RADE V1 digital voice
+(experimental; no RADE V2, no Codec 2 modes). It is jochenhammes' work
+(#130), finished for both radios. The window shows Sync, the SNR (dB), the
+frequency offset (Hz), the input level, where the speech goes, what was lost
+and the processor's time per modem frame. The buttons: Freq., Rec, Send and
+Close on the first page; Power, Discard and Close on the second.
+
+**Where you hear it.** The radio's speaker can't play the speech: with the
+base's firmware it plays the app's audio only in Play mode, and then the base
+sends Linux the app's audio instead of the receiver's, so decoding and the
+speaker don't go together. The speech goes to:
+- **Bluetooth headphones**, with Mute speaker on (Settings > Bluetooth >
+  HEADPHONES, the default);
+- **the TCI clients**: the VFO-Knob, and the browser's Panel and Remote pages
+  with their sound on. While the RADE window is open they hear the speech in
+  place of the receiver's audio (RADE's own signal is only a hiss), and
+  silence between the overs.
+
+RADE opens only when one of them is connected; otherwise the radio says what
+to connect. "Speech to" shows where it goes now.
+
+**Tuning.** The signal is 30 carriers from 750 to 2200 Hz in the audio: above
+the dial in USB, below it in LSB. Both stations must use the same sideband.
+FreeDV's convention is the one SSB has, LSB below 10 MHz and USB from 10 MHz
+up; Freq. opens the FreeDV activity frequencies, and choosing one sets the
+dial and the sideband. The filter has to pass 750 to 2200 Hz. Keep AGC and
+noise reduction off, and the input level below "too loud": RADE V1 has no AGC
+of its own, and a level that is too low or too high loses the sync. It is
+amateur radio: send only on the bands and with the privileges you hold.
+
+**Receiving.** "Lost": "input" and "speech" count samples thrown away because
+the decoder or the player was behind, "gaps" the breaks in the speech;
+"decode" and "synth" are the slowest ms for one 120 ms modem frame, and above
+120 the speech breaks up. The callsign that the last End-of-Over carried is
+shown after "last over", in the form rade_c's own test sends it (8 characters
+of 7 bits, as this app sends yours), and only when it reads as a callsign.
+FreeDV's own program sends its callsign in another form (with error
+correction): nothing is shown for its overs, and it may not show yours.
+
+**Sending: record, then send, not live.** Linux records only the hand mic, and
+only while the radio is receiving (the same limit as the
+[voice messages](#recording-voice-messages)), so the app works like a voice
+message:
+- Rec starts the recording from the hand mic and encodes it as you speak (up
+  to 60 s); the receiver is off meanwhile. Press Stop (the same button) to end
+  it. **Do not press the mic's PTT while recording**: the base would send your
+  voice as ordinary SSB. If the radio keys under a recording (the PTT, CAT),
+  the recording is dropped.
+- The window says "encoding" until the over is ready, then "over ready" with
+  its length. Send keys the radio and plays it at **RADE's own power**: Power
+  on the second page, 0.5, 1, 2 (the default) or 3 W. The radio's power
+  setting and the level the other digital apps use are left alone. The levels
+  are low because the power reading follows the average of RADE's signal, and
+  its peaks go several dB higher. Stop ends the send. The End-of-Over frame at
+  the end of an over carries your callsign (Settings > callsign; the first 8
+  characters), and the receiver shows it. Send again sends the same over once
+  more; Discard drops it, and Rec starts a new one.
+- Send is refused without a callsign set, while another transmission runs, or
+  when the radio does not transmit on this frequency.
+- The built-in microphone cannot be used. The level meter shows the mic's
+  peak while recording; "too loud" is clipping.
+
 ### PSK31, PSK63 and Olivia
 
 Keyboard-to-keyboard modes, ported from SP2KMO's OpenX6100 PSK31 and Olivia
@@ -3178,7 +3383,10 @@ The keyboard mode added in WSJT-X 3.2 by K1JT and the WSJT-X team (ported
 from WSJT-X, GPLv3). APP > Modes > JTTY. The radio goes to the JTTY dial
 frequency of the band in USB-D (14.090 on 20 m). The layout is the same as
 RTTY and PSK: received text in the panel under the waterfall, sent text in
-the TX colour. F1-F8 (pages 2 and 3) are macros: press sends, hold edits
+the TX colour. Each received line starts with its report, the signal-to-noise
+in 2500 Hz in dB, averaged over the message's frames as the text log has it
+(`-12 dB  CQ PA3XYZ JO21`); a line from outside the RX window has its audio
+frequency in front of that. F1-F8 (pages 2 and 3) are macros: press sends, hold edits
 the name and then the text (an empty text deletes, the ones after move up).
 With a keyboard CapsLock+1 to CapsLock+8 send them too (up to v0.3.8 its F1
 to F8 did).
@@ -3308,6 +3516,22 @@ over the waterfall.
   nothing is decoded. A key-down longer than 8 dots (tune-up) is ignored.
 - Upstream bugs fixed here: a strong station slightly off tune was never
   decoded, and a dash cut by a retune came out as a dot.
+- Your own keying: while the radio keys in CW, with KEY Train on or on the
+  air, the base cuts the receiver's audio and puts its sidetone there
+  instead, so the decoder shows what you send and the
+  [CW Trainer](#cw-trainer) reads your answers from it. The X6100's base
+  puts it in at full scale. The X6200's base puts it in at the KEY Volume's
+  level, far under a band's: about -89 dBFS at Volume 10 (the default),
+  -66 at 40 and -48 at 63, the Moni level not counting (measured on base
+  1.0.8). While the X6200 keys in CW the decoder's audio is raised to make
+  up for it. Up to v0.3.9 its decoder read nothing of your keying at the
+  usual Volumes, and the trainer missed dits (#198, #199).
+- Your speed: the first key-down of a transmission, after 2 s or more
+  without one, sets the decoder to the KEY Speed (KEY > Speed), on both
+  radios. Before that it went on at the band's speed, or at whatever speed
+  it had read out of the noise between stations, and the first word you
+  sent came out wrong (VVV as TTT TTTT). Within a transmission it follows
+  your keying, a straight key's speed too.
 
 In CW and CW-R a station on the dial sounds at the key tone (KEY > Tone),
 on the X6100 and the X6200 alike, and the waterfall, the spectrum and the
@@ -4369,6 +4593,12 @@ pairing and connection in DEVICES, the audio switches in HEADPHONES.
   A2DP source) into the radio TX audio.
 - The headphones get mono audio, like the radio's, with about 0.4 s of delay;
   it can grow to 0.7 s when the link is busy.
+- CW: the headphones get the receiver's audio, which the base cuts while it
+  keys. The X6100's base puts its sidetone in at full scale, so the
+  headphones hear it, that much late. The X6200's base puts it in at the KEY
+  Volume's level, about -89 dBFS at Volume 10, so the headphones hear next
+  to nothing of your keying (#192). For your own sidetone on an X6200, turn
+  Mute speaker off: the radio's speaker plays it.
 - WiFi runs at 20 MHz only, so it leaves more of the band to the headphones.
 - Bluetooth keyboards (for [CW from the keyboard](#cw-from-the-keyboard)) are paired the
   same way: Scan also finds keyboards, marked *keyboard* in the list (one
@@ -4630,7 +4860,7 @@ them.
 | Backlight | Brightness, Brightness when idle, Idle after (5-120 s), Button lights (Always off, Always on, Temporarily on), Screensaver (None, Matrix rain), Screensaver after (1-120 min, greyed with None), Rain speed (Normal, Slow, Very slow; greyed with None), Screen off after (0-120 min), Screen always off (the screensaver's rows greyed while it is on); see [Screensaver](#screensaver) |
 | Receiver | the X6200 only: WR12 on HOST (see [WR12 receiver](#wr12-receiver-x6200)) |
 | Transmitter | TX outside ham bands (Settings > TX Cal; see [Amateur bands only](#amateur-bands-only)) |
-| Text and info | Independent VFOs, Birdies (Off, Marks, Marks + notch), Mode from band plan, Zoom and step per mode (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)), 12-hour clock, Icon menus, Knob info, Hide buttons (Off, 3 s, 5 s, 10 s; see [Buttons and knobs](#buttons-and-knobs)), Decoder text (Large, Compact), Magnify frequency, Magnify info, TX panel (the radio's Popups TX) |
+| Text and info | Independent VFOs, Birdies (Off, Marks, Marks + notch), Mode from band plan, Zoom and step per mode, Step per zoom (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)), 12-hour clock, Icon menus, Knob info, Hide buttons (Off, 3 s, 5 s, 10 s; see [Buttons and knobs](#buttons-and-knobs)), Decoder text (Large, Compact), Magnify frequency, Magnify info, TX panel (the radio's Popups TX) |
 | Boot picture | the picture the radio starts with, Upload, Default; kept by the web server, not a Settings option, so it works with the radio's screen down too (see [Boot picture](#boot-picture)) |
 
 HTTPS. The server also listens on port 443, with a self-signed certificate
@@ -6849,7 +7079,7 @@ The DATA partition, readable on a PC.
 | `btcat.conf` | Bluetooth power, written by `btcat-ctl` |
 | `btaudio.conf` | headphones settings (RX loopback, speaker mute, Connect at startup devices) |
 | `ft_log.adi`, `js8call_log.adi` | FT8/FT4 and JS8 logs (ADIF) |
-| `ft8_udp.conf` | FT8/FT4 WSJT-X UDP output: `enabled=`, `host=`, `port=`, `id=` |
+| `ft8_udp.conf` | WSJT-X UDP output (FT8/FT4/FT2, and every logged QSO): `enabled=`, `host=`, `port=`, `id=` |
 | `app_freqs` | the last frequency and mode of each digital app |
 | `psk_macros.txt`, `olivia_macros.txt`, `psk.conf` | PSK and Olivia macros, PSK squelch |
 | `js8_inbox.txt`, `js8_held.txt`, `js8_texts.txt` | JS8 inbox, messages held for others, INFO/STATUS/alert words/groups |

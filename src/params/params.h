@@ -77,7 +77,8 @@ typedef enum {
     ACTION_APP_BIRDIE,   /* 125: Birdie Cal */
     ACTION_APP_PROPAGATION, /* 126: band conditions and the NCDXF beacons */
     ACTION_APP_SCAN,     /* 127: Scanner */
-    ACTION_APP_SENTRY,   /* 128: Sentry, the listener's receiver on the X6200 base's whole spectrum */
+    ACTION_APP_FREEDV,   /* 128: RADE (FreeDV) */
+    ACTION_APP_SENTRY,   /* 129: Sentry, the listener's receiver on the X6200 base's whole spectrum */
 } press_action_t;
 
 typedef enum {

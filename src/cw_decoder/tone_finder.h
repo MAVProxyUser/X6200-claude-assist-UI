@@ -42,6 +42,15 @@ class ToneFinder {
     /* The key is down, or its mark is still in the FFT window: the noise is not
      * followed then (Receiver::feed) */
     void  hold_noise(bool on) { hold_ = on; }
+    /* The radio is transmitting: its own sidetone, no band (analyse). When the
+     * band comes back the floor is seeded again from its first frame */
+    void  transmitting(bool on) {
+        if (tx_ && !on) {
+            noise_  = -1.0f;
+            wait_n_ = 0;
+        }
+        tx_ = on;
+    }
     float peak_hz() const { return peak_hz_; }
 
     /* Last FFT frame, non-negative half (for the tests) */
@@ -69,6 +78,7 @@ class ToneFinder {
     size_t first_ = 0, last_ = 0; /* band, in bins */
     float  noise_    = -1.0f;
     bool   hold_     = false;
+    bool   tx_       = false;
     /* Frames' band noise waiting to be averaged in (analyse): a key down drops them */
     std::array<float, 3> wait_{};
     size_t wait_n_   = 0;

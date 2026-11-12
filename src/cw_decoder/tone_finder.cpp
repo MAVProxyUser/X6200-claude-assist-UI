@@ -123,7 +123,15 @@ void ToneFinder::analyse(float lock_hz, PeakReport &out) {
      * frames (48 ms) later, once the detector would have seen a mark starting in
      * its window: a key down drops the frames waiting, whose windows took in the
      * new mark's first edge (at 20 WPM the element gap, 60 ms, is shorter than
-     * the window, and that edge's splatter lifted the floor 9 dB in a frame). */
+     * the window, and that edge's splatter lifted the floor 9 dB in a frame).
+     * While the radio transmits (tx_) there is no band and no AGC: the X6200's
+     * base puts its sidetone over the cut audio, which dsp.cpp raises (up to
+     * 40 dB under the band's noise at KEY Volume 63, cw_own_tone.h). The floor
+     * then follows every frame, and comes down fast: held in the marks it fell
+     * only in the character gaps (at 15 WPM the element gap, 80 ms, is shorter
+     * than the window and the wait) and the first characters sent were lost;
+     * at 1 % a frame the first dit still was, the TX state coming with each
+     * 100 ms block (cw_put_audio_samples), its first frame still the band's. */
     size_t n = last_ - first_ + 1;
     std::copy_n(&pwr_[first_], n, sorted_.begin());
     size_t k = std::min(static_cast<size_t>(0.25f * static_cast<float>(n)), n - 1);
@@ -132,6 +140,9 @@ void ToneFinder::analyse(float lock_hz, PeakReport &out) {
 
     if (noise_ < 0.0f) {
         noise_ = now;
+    } else if (tx_) {
+        wait_n_ = 0;
+        noise_ += (now > noise_ ? 0.003f : 0.3f) * (now - noise_);
     } else if (hold_) {
         wait_n_ = 0;
     } else if (wait_n_ < wait_.size()) {

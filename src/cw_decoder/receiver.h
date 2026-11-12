@@ -55,6 +55,12 @@ class Receiver {
     /* The next n dits and dahs are our own keying (MorseText::own), not
      * learned (ElementTimer::ours) */
     void  own(int n) { text_.own(n); }
+    /* The radio is transmitting: the audio is its own sidetone (ToneFinder::transmitting), with no
+     * noise to key the detector, so no blips to hold back (detector_step) */
+    void  transmitting(bool on) {
+        tx_ = on;
+        finder_.transmitting(on);
+    }
     /* Our own keying follows at wpm (the CW trainer's, ElementTimer::expect) */
     void  expect(float wpm) { timer_.expect(wpm); }
     /* The CW trainer is open: down to 5 WPM (ElementTimer::trainer_range), its
@@ -78,6 +84,7 @@ class Receiver {
     StepFn       step_fn_;
 
     float step_noise_ = -1.0f;   /* noise of one integrator step, < 0 = not known */
+    bool  tx_         = false;   /* the radio is transmitting (transmitting) */
     /* A key down not passed on yet (detector_step): since this long, its crossing this long before its step */
     bool  pend_       = false;
     float pend_ms_    = 0.0f;

@@ -22,8 +22,14 @@ strip and the cluster's calls at the top of the waterfall, FT8 at the marker,
 the needle S-meter.*
 
 [Install](#install) · [Updating](#updating) · [Screenshots](#screenshots) ·
-[Manual](docs/MANUAL.md) · [Releases](https://github.com/Guru-RF/OpenX6X00/releases) ·
+[Manual](docs/MANUAL.md) (a PDF with each release) · [Releases](https://github.com/Guru-RF/OpenX6X00/releases) ·
 [openx6x00.org](https://openx6x00.org/)
+
+**A release every Friday.** We try to put out a new version each Friday:
+mostly bug fixes, with one or two new features. The radio fetches it itself
+(Settings > Info > Update), and the
+[release notes](https://github.com/Guru-RF/OpenX6X00/releases) say what each
+one fixes and adds.
 
 ## Reporting a problem
 
@@ -88,6 +94,8 @@ Please give:
 
 The form asks for each of these, and labels the issue **enhancement**. One
 feature per issue lets each be answered, built and closed on its own.
+New features go into the Friday releases one or two at a time, after the bug
+fixes, so a request may wait a few weeks even when it's a clear yes.
 
 ## The baseband
 
@@ -484,7 +492,9 @@ Pat are MIT. XARA, the third Winlink modem (built from its release by
 `tools/xara/build.sh`, with our patches), is MIT, and so are the Rust crates in it
 as used here (some also Apache-2.0, Zlib or 0BSD), with the Rust standard library
 Apache-2.0 or MIT; their texts are in the image (`/usr/share/x6100/licenses/xara`),
-see [tools/xara/UPSTREAM.md](tools/xara/UPSTREAM.md). The web server is LGPL-2.1
+see [tools/xara/UPSTREAM.md](tools/xara/UPSTREAM.md). RADE, the RADE app's modem (`tools/rade/build.sh`), is
+freedv/rade_c (BSD-2-Clause, with its kiss_fft, BSD-3-Clause) and the Opus fork that has
+the FARGAN vocoder (BSD-3-Clause), linked statically into the GUI. The web server is LGPL-2.1
 ([webserver/LICENSE](webserver/LICENSE)). Every file keeps the copyright
 notice of its authors.
 
@@ -525,7 +535,7 @@ scope (#161); Spyyena Contestia (#154); DF8MH the Wavelog upload (#12); Trey
 Propagation and Scanner apps (#184), APPS and Modes over the whole strip, the CW
 bars off the band plan and Settings' switches in the theme's colours (#185), and
 the Codec and Ops Room themes (#186, #187); jochenhammes the RADE app (#129,
-#130, not merged yet).
+#130).
 
 Patches, captures, logs and tests from the issues: BrunoKlu the capture and the
 driver patch of #29; KR8MER the diagnosis and the patch of #50; DL9RP the
