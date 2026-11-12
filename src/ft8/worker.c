@@ -12,6 +12,7 @@
 #include "../util.h"
 #include "gfsk.h"
 #include "ft2.h"
+#include "contest_unpack.h"
 #include "hound.h"
 #include "msg_encode.h"
 
@@ -431,10 +432,11 @@ static void decode_messages(const ftx_waterfall_t *wf, int *num_candidates, ftx_
             memcpy(&decoded[idx_hash], &message, sizeof(message));
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
 
-            char             text[FTX_MAX_MESSAGE_LENGTH];
+            char             text[CONTEST_TEXT_LENGTH];   /* 37 characters: two calls in brackets and an exchange */
             ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
-            if (unpack_status == FTX_MESSAGE_RC_ERROR_TYPE && hound_unpack_dxpedition(&message, text))
-                unpack_status = FTX_MESSAGE_RC_OK; /* a Fox's multi-stream message */
+            if (unpack_status == FTX_MESSAGE_RC_ERROR_TYPE &&
+                (hound_unpack_dxpedition(&message, text) || contest_unpack(&message, &hash_if, text)))
+                unpack_status = FTX_MESSAGE_RC_OK; /* a Fox's multi-stream message, a contest exchange (as WSJT-X) */
             if (unpack_status != FTX_MESSAGE_RC_OK) {
                 LV_LOG_INFO("Error [%d] while unpacking!", (int)unpack_status);
             } else {

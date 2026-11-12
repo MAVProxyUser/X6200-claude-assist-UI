@@ -1,0 +1,5 @@
+build/
+contest_test
+qso_texts
+decode_contest
+*.dSYM

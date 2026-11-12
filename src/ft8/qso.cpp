@@ -151,6 +151,18 @@ FTxQsoProcessor::~FTxQsoProcessor() {
     clear();
 }
 
+/* A signal report as FT8 and FT4 send it: a sign and one to three digits ("+05", "-12"). Free text can put anything
+ * where the report goes ("A B +" is a valid free-text frame anyone can send): a bare sign, or a sign and letters,
+ * reached std::stoi, which threw std::invalid_argument on the decoder thread, where nothing catches it, and the GUI
+ * ended (std::terminate). Three digits at most keep std::stoi far inside an int. */
+static bool is_report(const std::string &s) {
+    if (s.size() < 2 || s.size() > 4 || (s[0] != '+' && s[0] != '-')) return false;
+    for (size_t i = 1; i < s.size(); i++) {
+        if (s[i] < '0' || s[i] > '9') return false;
+    }
+    return true;
+}
+
 void FTxQsoProcessor::add_rx_text(std::string text, const int snr, ftx_msg_meta_t *meta, ftx_tx_msg_t *tx_msg) {
     meta->type = FXT_MSG_TYPE_OTHER;
     meta->local_snr = snr;
@@ -163,8 +175,9 @@ void FTxQsoProcessor::add_rx_text(std::string text, const int snr, ftx_msg_meta_
         return;
     }
 
-    if ((tokens.size() >= 5) && (text.find(';') != text.npos)) {
-        // "A2AA RR73; R2RFE <RP79AA> +05"
+    if ((tokens.size() >= 5) && (tokens[1] == "RR73;")) {
+        // "A2AA RR73; R2RFE <RP79AA> +05". Not the RTTY Roundup's "TU; W9XYZ K1ABC 579 MA" (contest_unpack.c): read as
+        // "K1ABC 579 MA" it was the grid MA from a call "579", heard, and answered when K1ABC is our call
         std::vector<std::string> new_tokens;
         if (tokens[0] == _local_callsign) {
             new_tokens.push_back(tokens[0]);
@@ -196,9 +209,9 @@ void FTxQsoProcessor::add_rx_text(std::string text, const int snr, ftx_msg_meta_
             process_73(meta, tokens, snr, *tx_msg);
         } else if ((tokens[2] == "RRR") || (tokens[2] == "RR73")) {
             process_rr73(meta, tokens, snr, *tx_msg);
-        } else if ((tokens[2][0] == 'R') && ((tokens[2][1] == '+') || (tokens[2][1] == '-'))) {
+        } else if ((tokens[2][0] == 'R') && is_report(tokens[2].substr(1))) {
             process_r_report(meta, tokens, snr, *tx_msg);
-        } else if ((tokens[2][0] == '+') || (tokens[2][0] == '-')) {
+        } else if (is_report(tokens[2])) {
             process_report(meta, tokens, snr, *tx_msg);
         } else if (qth_grid_check(tokens[2].c_str())) {
             process_grid(meta, tokens, snr, *tx_msg);
