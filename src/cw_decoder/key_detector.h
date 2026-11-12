@@ -35,6 +35,8 @@ class KeyDetector {
     void  set_floor_db(float db) { floor_db_ = db; }
     float floor_db() const { return floor_db_; }
     bool  down() const { return down_; }
+    /* Steps since key up (counted while up) */
+    size_t up_steps() const { return up_steps_; }
 
     /* Another tone: measure its carrier floor again */
     void  new_tone() { batch_n_ = 0; }

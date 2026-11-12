@@ -38,6 +38,11 @@ constexpr float CLUSTER_END = 2.2f;
  * then the histogram starts over, so two speeds are not averaged */
 constexpr float NEW_SPEED = 0.25f;
 constexpr int   CONFIRM   = 3;
+/* ... each by an element of its own: one within 40% of the new dot (a dot or an
+ * element gap of the new speed). One short blip stays in the histogram and gave
+ * the same low estimate at three closes in a row, the dit and gaps around it:
+ * the speed went to 50 WPM on it, and 20 WPM dits came out dahs ("T TTT T") */
+constexpr float OWN_K     = 0.4f;
 /* ... but only once the histogram holds 8 entries: right after starting over
  * the first dah alone looks like a new speed, and the estimate would swing
  * between the two forever */
@@ -87,7 +92,7 @@ bool ElementTimer::backed(float ms) const {
     return strict >= 0.0f && std::fabs(std::clamp(strict, DOT_MIN_MS, dot_max_) - ms) <= NEW_SPEED * ms;
 }
 
-void ElementTimer::set_dot(float ms) {
+void ElementTimer::set_dot(float ms, float entry_ms) {
     if (std::fabs(ms - dot_ms_) <= NEW_SPEED * dot_ms_) {
         dot_ms_   = std::clamp(dot_ms_ + DOT_GAIN * (ms - dot_ms_), DOT_MIN_MS, dot_max_);
         new_dot_  = -1.0f;
@@ -102,8 +107,9 @@ void ElementTimer::set_dot(float ms) {
         return;
     } else {
         bool again = new_seen_ > 0 && std::fabs(ms - new_dot_) <= NEW_SPEED * new_dot_;
+        bool own   = std::fabs(entry_ms - ms) <= OWN_K * ms;
         new_dot_   = ms;
-        new_seen_  = again ? new_seen_ + 1 : 1;
+        new_seen_  = !own ? (again ? new_seen_ : 0) : again ? new_seen_ + 1 : 1;
         if (new_seen_ >= CONFIRM) {
             hist_.fill(0.0f);
             hist_n_   = 0;
@@ -235,7 +241,7 @@ Sym ElementTimer::close(bool mark, float ms, bool learn_it) {
         learn(ms);
         float dot = dot_estimate(MIN_PEAK);
         if (dot >= 0.0f)
-            set_dot(std::clamp(dot, DOT_MIN_MS, dot_max_));
+            set_dot(std::clamp(dot, DOT_MIN_MS, dot_max_), ms);
     }
     return s;
 }

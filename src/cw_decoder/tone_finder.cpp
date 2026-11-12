@@ -13,6 +13,9 @@
 
 namespace cw {
 
+/* The gaps' noise average, up per frame (16 ms); down it goes at 0.01 */
+constexpr float NOISE_UP = 0.02f;
+
 /* APF as the radio sets it up: y = b0 (x[n] - x[n-2]) + a1 y[n-1] + a2 y[n-2] at 12.5 kHz */
 float apf_gain2(float tone_hz, float q, float hz) {
     const float pi2 = 2.0f * static_cast<float>(M_PI);
@@ -109,18 +112,36 @@ void ToneFinder::analyse(float lock_hz, PeakReport &out) {
             top = i;
     float top_pwr = pwr_[top];
 
-    /* Noise: the band's 25th percentile, then a slow average (faster down than up,
-     * so keying in the band does not lift it) */
+    /* Noise: the band's 25th percentile, then an average taken in the gaps only.
+     * The radio's AGC turns its gain down under a strong mark, the band's noise
+     * with it, and up again within 30 ms of key up: averaged over marks and gaps
+     * alike (and slowly up, so keying would not lift it) the floor sat 10-15 dB
+     * under the gaps' noise of a station 10 dB or more over the noise, and that
+     * noise keyed the detector a dit or a dah into each gap ("SENTRY TEST" came
+     * out "SENTRYET T TTT T"). Held while the key is down and while its mark is in
+     * the window (hold_), it is the gaps'. A frame goes in only wait_.size()
+     * frames (48 ms) later, once the detector would have seen a mark starting in
+     * its window: a key down drops the frames waiting, whose windows took in the
+     * new mark's first edge (at 20 WPM the element gap, 60 ms, is shorter than
+     * the window, and that edge's splatter lifted the floor 9 dB in a frame). */
     size_t n = last_ - first_ + 1;
     std::copy_n(&pwr_[first_], n, sorted_.begin());
     size_t k = std::min(static_cast<size_t>(0.25f * static_cast<float>(n)), n - 1);
     std::nth_element(sorted_.begin(), sorted_.begin() + k, sorted_.begin() + n);
     float now = sorted_[k];
 
-    if (noise_ < 0.0f)
+    if (noise_ < 0.0f) {
         noise_ = now;
-    else
-        noise_ += (now > noise_ ? 0.003f : 0.01f) * (now - noise_);
+    } else if (hold_) {
+        wait_n_ = 0;
+    } else if (wait_n_ < wait_.size()) {
+        wait_[wait_n_++] = now;
+    } else {
+        float old = wait_[0];
+        std::copy(wait_.begin() + 1, wait_.end(), wait_.begin());
+        wait_.back() = now;
+        noise_ += (old > noise_ ? NOISE_UP : 0.01f) * (old - noise_);
+    }
 
     /* Peak between bins: parabola through the three dB values */
     float bin = static_cast<float>(top);

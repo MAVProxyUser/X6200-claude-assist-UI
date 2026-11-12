@@ -39,6 +39,9 @@ class ToneFinder {
     void  set_band(float lo_hz, float hi_hz);
     void  set_apf(bool on, float tone_hz, float q);
     float noise() const { return noise_; }   /* per-bin noise power, < 0 until the first frame */
+    /* The key is down, or its mark is still in the FFT window: the noise is not
+     * followed then (Receiver::feed) */
+    void  hold_noise(bool on) { hold_ = on; }
     float peak_hz() const { return peak_hz_; }
 
     /* Last FFT frame, non-negative half (for the tests) */
@@ -65,6 +68,10 @@ class ToneFinder {
 
     size_t first_ = 0, last_ = 0; /* band, in bins */
     float  noise_    = -1.0f;
+    bool   hold_     = false;
+    /* Frames' band noise waiting to be averaged in (analyse): a key down drops them */
+    std::array<float, 3> wait_{};
+    size_t wait_n_   = 0;
     float  peak_hz_  = 0.0f;
     int    last_bin_ = -1;        /* bin of the last strong frame */
     int    steady_   = 0;

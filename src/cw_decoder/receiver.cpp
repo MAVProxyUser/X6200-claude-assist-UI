@@ -12,6 +12,9 @@
 
 namespace cw {
 
+/* A mark shorter than this many dots is a blip (noise keying the detector), not a dit */
+constexpr float BLIP_K = 0.6f;
+
 Receiver::Receiver(TextFn text, KeyFn key, StepFn step)
     : text_(std::move(text)), key_fn_(std::move(key)), step_fn_(std::move(step)) {
     set_floor_db(5.0f);
@@ -25,6 +28,9 @@ void Receiver::set_apf(bool on, float tone_hz, float q) {
 
 void Receiver::feed(const float *x, size_t n) {
     for (size_t i = 0; i < n; i++) {
+        /* The noise floor is the gaps': not followed while the key is down, nor
+         * while its mark is still in the FFT's 64 ms (ToneFinder::analyse) */
+        finder_.hold_noise(keyer_.down() || keyer_.up_steps() * INTEG_STEP < FFT_LEN);
         if (finder_.push(x[i], lock_.hz(), peak_) && finder_.noise() > 0.0f) {
             step_noise_ = finder_.noise() * NOISE_TO_STEP;
             lock_.set_noise(step_noise_);
@@ -43,6 +49,35 @@ void Receiver::feed(const float *x, size_t n) {
 
 void Receiver::detector_step(float power) {
     KeyEdge e = keyer_.step(power, step_noise_);
+
+    /*
+     * A key down goes on to the timer only once the mark has lasted BLIP_K dots,
+     * with its crossing that much further back; one that ends sooner is dropped,
+     * and the gaps either side of it are one. Noise peaks in the gaps of a station
+     * 10 dB over the noise keyed the detector for 16-32 ms: each came out an E
+     * and split a word gap into two, and before the timer's confirmations needed
+     * elements of their own (ElementTimer::set_dot) it took them for a new speed.
+     */
+    if (e.dir > 0 && text_.owning()) {
+        pend_      = false;   /* our own keying is no blip: on at once */
+    } else if (e.dir > 0) {
+        pend_      = true;
+        pend_ms_   = static_cast<float>(STEP_MS);
+        pend_back_ = e.back_ms;
+        e.dir      = 0;
+    } else if (pend_) {
+        if (e.dir < 0) {
+            pend_ = false;   /* a blip: never there */
+            e.dir = 0;
+        } else {
+            pend_ms_ += static_cast<float>(STEP_MS);
+        }
+    }
+    if (pend_ && pend_ms_ + pend_back_ >= BLIP_K * timer_.dot_ms()) {
+        pend_     = false;
+        e.dir     = 1;
+        e.back_ms = pend_back_ + pend_ms_ - static_cast<float>(STEP_MS);
+    }
 
     /* Our own keying is not learned: its speed is known (expect), and its dah heard in pieces while the lock
      * finds the tone would only move it */

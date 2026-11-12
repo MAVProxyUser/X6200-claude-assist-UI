@@ -78,6 +78,10 @@ class Receiver {
     StepFn       step_fn_;
 
     float step_noise_ = -1.0f;   /* noise of one integrator step, < 0 = not known */
+    /* A key down not passed on yet (detector_step): since this long, its crossing this long before its step */
+    bool  pend_       = false;
+    float pend_ms_    = 0.0f;
+    float pend_back_  = 0.0f;
     float snr_db_     = 0.0f;
     bool  moved_      = false;   /* the lock moved since the last step (for the tests) */
     PeakReport peak_{};

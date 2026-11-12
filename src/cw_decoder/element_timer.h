@@ -41,6 +41,7 @@ class ElementTimer {
     Sym   step(int dir, float back_ms, bool strong = true);
 
     float wpm() const { return static_cast<float>(PARIS_MS) / dot_ms_; }
+    float dot_ms() const { return dot_ms_; }
     bool  key_down() const { return down_; }
 
     /* The lock moved to another tone: the running mark or gap is not learned
@@ -75,7 +76,7 @@ class ElementTimer {
     Sym   close(bool mark, float ms, bool learn);
     void  learn(float ms);
     float dot_estimate(float min_peak) const;
-    void  set_dot(float ms);
+    void  set_dot(float ms, float entry_ms);   /* entry_ms: the element just learned */
     bool  backed(float ms) const;
     void  retime();
 
