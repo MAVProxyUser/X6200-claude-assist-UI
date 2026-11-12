@@ -40,6 +40,10 @@ static int log2_exact(int v)
     return (v == 1) ? n : -1;
 }
 
+/* The FHT figure of a block (peak over the RMS of the rest) is capped here: a
+ * clean signal leaves next to nothing beside the peak. */
+#define OLIVIA_FIGURE_MAX 1e5f
+
 /* Olivia: the sequence from the specification. */
 #define OLIVIA_SCRAMBLER    0xE257E6D0291574ECULL
 #define CONTESTIA_SCRAMBLER 0xEDB88320ULL
@@ -272,7 +276,6 @@ static void decode_core(const olivia_cfg_t *cfg,
         float peak = 0.0f;
         float sqr_sum = 0.0f;
         int peak_pos = 0;
-        float rest;
 
         /* de-interleave + descramble */
         for (t = 0; t < n; t++) {
@@ -300,19 +303,33 @@ static void decode_core(const olivia_cfg_t *cfg,
         chars[i] = (uint8_t)(peak > 0.0f ? peak_pos : peak_pos + n);
 
         if (snr) {
-            rest = sqr_sum - peak * peak;
             /*
-             * A zero remainder does NOT mean perfect confidence - it means
-             * no information. That is what silence at the input looks like:
-             * all soft decisions are zero, the FHT puts everything in bin
-             * 0 and the remainder comes out zero. Returning a high value
-             * then gave a false lock showing "100%" and no text.
+             * Silence is no information, not perfect confidence: every
+             * soft decision is zero and so is every FHT bin. Returning a
+             * high value for it gave a false lock showing "100%" and no
+             * text.
+             *
+             * A clean signal is the opposite: one bin holds nearly all of
+             * it and the rest is close to zero. The rest is summed here
+             * directly. Taken as sqr_sum - peak * peak it cancelled in
+             * float to nothing, or below, and such a block scored 0 like
+             * silence: Contestia 16/500 and 16/1000 (and, built without
+             * fused multiply-add, Olivia 64/2000) never decoded a
+             * noiseless signal. The figure is capped instead.
              */
-            if (rest <= 1e-12f || sqr_sum <= 1e-12f) {
+            if (sqr_sum <= 1e-12f) {
                 snr[i] = 0.0f;
             } else {
+                float rest = 0.0f;
+                float mag = fabsf(peak);
+
+                for (t = 0; t < n; t++) {
+                    if (t != peak_pos)
+                        rest += vec[t] * vec[t];
+                }
                 rest = sqrtf(rest / (float)(n - 1));
-                snr[i] = fabsf(peak) / rest;
+                snr[i] = rest * OLIVIA_FIGURE_MAX > mag ? mag / rest
+                                                        : OLIVIA_FIGURE_MAX;
             }
         }
     }
