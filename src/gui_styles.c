@@ -273,7 +273,7 @@ void styles_init(void) {
  * a shade lit), a drop-down's list, a roller, a list. Applied to every object as it is made; what code sets on an
  * object itself still wins */
 static lv_theme_t sentry_lv_theme;
-static lv_style_t sy_box, sy_items, sy_items_on, sy_items_special;
+static lv_style_t sy_box, sy_items, sy_items_on, sy_items_special, sy_cell;
 static bool       sy_made;
 
 static void sentry_apply(lv_theme_t *th, lv_obj_t *obj) {
@@ -283,6 +283,13 @@ static void sentry_apply(lv_theme_t *th, lv_obj_t *obj) {
         lv_obj_add_style(obj, &sy_items, LV_PART_ITEMS);
         lv_obj_add_style(obj, &sy_items_special, LV_PART_ITEMS | LV_STATE_CHECKED);
         lv_obj_add_style(obj, &sy_items_on, LV_PART_ITEMS | LV_STATE_PRESSED);
+    } else if (lv_obj_has_class(obj, &lv_table_class)) {
+        /* a table's cells: the app sets their colour for the normal state; a focused or chosen one took LVGL's white */
+        static const lv_state_t states[] = {LV_STATE_FOCUSED, LV_STATE_FOCUS_KEY, LV_STATE_EDITED, LV_STATE_PRESSED,
+                                            LV_STATE_CHECKED};
+
+        for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); i++)
+            lv_obj_add_style(obj, &sy_cell, LV_PART_ITEMS | states[i]);
     } else if (lv_obj_has_class(obj, &lv_dropdownlist_class) || lv_obj_has_class(obj, &lv_roller_class) ||
                lv_obj_has_class(obj, &lv_list_class)) {
         lv_obj_add_style(obj, &sy_box, LV_PART_MAIN);
@@ -296,6 +303,7 @@ static void sentry_lv_theme_make(lv_disp_t *disp, lv_theme_t *base) {
         lv_style_init(&sy_items);
         lv_style_init(&sy_items_on);
         lv_style_init(&sy_items_special);
+        lv_style_init(&sy_cell);
         sy_made = true;
     }
     lv_style_reset(&sy_box);
@@ -328,6 +336,9 @@ static void sentry_lv_theme_make(lv_disp_t *disp, lv_theme_t *base) {
     lv_style_reset(&sy_items_special);
     lv_style_set_bg_color(&sy_items_special, TC(card));
     lv_style_set_text_color(&sy_items_special, TC(text_value));
+
+    lv_style_reset(&sy_cell);
+    lv_style_set_text_color(&sy_cell, TC(text_soft));
 
     lv_style_reset(&sy_items_on);
     lv_style_set_bg_color(&sy_items_on, TC(btn_active));

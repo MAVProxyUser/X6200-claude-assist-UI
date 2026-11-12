@@ -1014,6 +1014,7 @@ static void table_draw_cb(lv_event_t *ev)
         const js8_rx_msg_t *msg = &history[slot];
         d->rect_dsc->bg_color   = message_bg(msg);
         bool ours = msg->to_me || js8_to_x6100(msg, groups_text);
+        if (theme_shape.sentry) d->label_dsc->color = TC(text_soft);   /* the Sentry's amber: no row in white */
         if (!msg->tx && !msg->alert && !ours && !msg->cq && msg->heartbeat) d->label_dsc->color = TC(text_mute);
         if (msg->low_confidence) d->label_dsc->opa = LV_OPA_60;
     } else {
