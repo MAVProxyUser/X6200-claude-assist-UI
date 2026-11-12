@@ -26,6 +26,7 @@
 #include "gui_events.h"
 #include "msg_box.h"
 
+#include <math.h>
 #include <pthread.h>        /* rx_lock */
 #include <stdio.h>          /* snprintf, the Save file */
 #include <stdlib.h>         /* free */
@@ -231,7 +232,7 @@ static void bit_cb(int mark, void *userdata)
     dsc_rx_bit(&dsc_rx, !mark);
 }
 
-/* Station and frequency on the left; the right side always says RX */
+/* Station and frequency on the left; on the right RX, or how the transmission read came through */
 static void header_update(void)
 {
     char         l[80];
@@ -250,6 +251,23 @@ static void header_update(void)
         snprintf(l, sizeof(l), "%s   %.1f kHz", name, f / 1000.0);
     if (strcmp(l, lv_label_get_text(frame.head_left)))
         lv_label_set_text(frame.head_left, l);
+
+    /* On the right, how the transmission being read came through, then the last one's: the tones' signal to noise
+     * in the decoder's filters, and of its characters the share read alike in both copies (ok), readable only from
+     * the two together (fixed), too weak to print (lost) (navtex_decoder_get_stats) */
+    char           r[80] = "RX";
+    navtex_stats_t st;
+
+    if (!dsc_mode && decoder) {
+        navtex_decoder_get_stats(decoder, &st);
+        if (st.chars) {
+            snprintf(r, sizeof(r), "%s %d dB SNR, %u ch: %u%% ok %u%% fixed %u%% lost", st.receiving ? "RX" : "LAST",
+                     (int)lroundf(st.snr_db), st.chars, 100 * st.clean / st.chars, 100 * st.repaired / st.chars,
+                     100 * st.lost / st.chars);
+        }
+    }
+    if (strcmp(r, lv_label_get_text(frame.head_right)))
+        lv_label_set_text(frame.head_right, r);
 }
 
 /* DSC rows: the format's name for the remote */
@@ -511,6 +529,9 @@ static void app_open(lv_obj_t *parent)
     dsp_set_spectrum_enabled(false);
     app_frame_create(&frame, dialog.obj);
     lv_label_set_text(frame.head_right, "RX");
+    /* wide enough for the transmission's figures (header_update), the station's name still clear of it */
+    lv_obj_set_width(frame.head_right, 500);
+    lv_obj_set_x(frame.head_right, 796 - 18 - 500);
 
     lv_obj_t *body = lv_obj_create(dialog.obj);
 

@@ -30,6 +30,18 @@ void navtex_decoder_set_bit_callback(navtex_decoder_t *decoder, void (*cb)(int m
 
 void navtex_decoder_process(navtex_decoder_t *decoder, const float *samples, unsigned int n);
 
+/* How the transmission being read now, or the last one, came through. Counted from the moment the receiver locked on
+ * it: its characters (shifts included), each either read alike in both copies as received (clean), readable only from
+ * the two copies together (repaired), or too weak to print (lost); and its tones over the noise floor in the
+ * decoder's filters, dB, averaged over its characters. A snapshot, read from any thread without a lock */
+typedef struct {
+    int      receiving;     /* locked on a transmission now */
+    float    snr_db;
+    unsigned chars, clean, repaired, lost;
+} navtex_stats_t;
+
+void navtex_decoder_get_stats(const navtex_decoder_t *decoder, navtex_stats_t *stats);
+
 #ifdef __cplusplus
 }
 #endif
