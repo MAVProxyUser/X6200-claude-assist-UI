@@ -239,6 +239,10 @@ void dialog_audio_samples(unsigned int n, float *samples) {
     }
 }
 
+bool dialog_front_key(int key, int state) {
+    return dialog_is_run() && shown->front_key_cb && shown->front_key_cb(key, state);
+}
+
 void dialog_rotary(int32_t diff) {
     if (dialog_is_run() && shown->rotary_cb) {
         shown->rotary_cb(diff);

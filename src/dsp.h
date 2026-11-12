@@ -49,6 +49,11 @@ void dsp_put_audio_samples(size_t nsamples, int16_t *samples);
  * centre - width/2 + i * width / n). seq counts the spectra, so a caller sees a new one. Any thread;
  * false before the first */
 bool dsp_spectrum_snapshot(float *db, uint16_t n, uint32_t *center_hz, uint32_t *width_hz, uint32_t *seq);
+
+/* The base's own last packet of bins as it came (HW_CAP_PSD bases: the X6200's 512 in dB, 0 dBm = 0), not cut to the
+ * zoom: span_hz wide around the tuned frequency (384 kHz with HW_PSD_WIDE), the lowest first, bin n/2 on it; tx while it was on the
+ * air. seq counts the packets. Any thread; false before the first, and always on a base without its own spectrum */
+bool dsp_psd_raw(float *db, uint16_t cap, uint16_t *n, uint32_t *span_hz, bool *tx, uint32_t *seq);
 #ifdef __cplusplus
 }
 #endif

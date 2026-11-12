@@ -145,6 +145,7 @@ typedef enum {
     HW_OPEN_TX,         /* the X6200: the base keys outside its own band table (byte 280 of its calibration block);
                          * read from the base at each call, radio.c keeping what it has. hw_set_i: true when the base
                          * has it as asked now, written or so already; false when refused or failed (hw_x6200.c) */
+    HW_PSD_WIDE,        /* 1: the base's whole spectrum (384 kHz on the X6200) whatever the zoom; HW_CAP_PSD bases only */
     HW_PARAM_COUNT
 } hw_param_t;
 

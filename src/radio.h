@@ -164,6 +164,13 @@ void radio_pa_bias_info(char *buf, size_t size);
 #endif
 /* HW_CAP_* bits (radio_types.h): what the base does itself */
 uint32_t radio_caps(void);
+/* The base's whole spectrum (384 kHz on the X6200, dsp_psd_raw()) while one or more users want it: each on is
+ * matched by an off. Any thread; false (nothing done) on a base without its own spectrum (HW_CAP_PSD) */
+bool radio_psd_wide(bool on);
+/* Receive only while one or more users want it (the Sentry): the base held at 0 W, VOX off and KEY Train on, as where
+ * the radio may not transmit, and the GUI's PTT and CW key refused (the screen says so). Each on is matched by an
+ * off; true while any holds it. Any thread */
+bool radio_rx_only(bool on);
 /* CW and CW-R as the base receives them: 1 when the tone rises as the dial goes up (CW-R; CW too with
  * HW_CAP_CW_TONE_RISES, the X6200), -1 when it falls (CW on the X6100), 0 in the other modes. The tone is
  * heard from an oscillator the key tone off the dial on that side: a station on the dial sounds at the key tone */

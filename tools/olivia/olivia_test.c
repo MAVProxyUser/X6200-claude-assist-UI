@@ -132,6 +132,10 @@ static void on_text(void *user, const uint8_t *chars, int count)
     }
 }
 
+/* Blocks of noise alone before the transmission: a receiver that has been
+ * listening a while, as on the radio, rather than one started with the signal. */
+static int lead_noise = 0;
+
 /*
  * Send msg with `shift_hz` of tuning error at a level of snr_db measured in
  * 2500 Hz (the usual way of quoting these modes). Returns 1 when the receiver
@@ -184,6 +188,16 @@ static int loopback(int proto, int tones, int bw, const char *msg,
             sig_pow /= (n - n / 2);
             /* Noise power in 4000 Hz of real samples, for the SNR in 2500. */
             noise_sd = sqrt(sig_pow / pow(10.0, snr_db / 10.0) * 4000.0 / 2500.0);
+
+            for (int q = 0; q < lead_noise; q++) {
+                float *hush = malloc(sizeof(float) * n);
+
+                for (int i = 0; i < n; i++)
+                    hush[i] = (float)(noise_sd * gauss());
+                for (int i = 0; i < n; i += 701)
+                    olivia_rx_process(&rx, hush + i, n - i < 701 ? n - i : 701);
+                free(hush);
+            }
         }
         if (snr_db < 100.0) {
             for (int i = 0; i < n; i++)
@@ -388,6 +402,34 @@ int main(int argc, char **argv)
             CHECK(loopback(OLIVIA_PROTO_CONTESTIA, t, b, msg, 20.0, 0.0, NULL) == 1,
                   "Contestia %d/%d loopback, 0 dB, 20 Hz off", t, b);
         }
+    }
+
+    /*
+     * A receiver that has listened to noise before the transmission starts.
+     * Every phase has been judged long before, so the first one the signal
+     * fills enough wins the lock - on the radio one only partly aligned with
+     * the blocks, which printed rubbish all through (Olivia 8/250,
+     * "[[[DKm0_w0m0..."). The lock has to move to the right phase.
+     */
+    {
+        const char *msg = "CQ CQ DE N0CALL N0CALL K";
+
+        lead_noise = 6;
+        for (size_t i = 0; i < sizeof(olivia_modes) / sizeof(olivia_modes[0]); i++) {
+            int t = olivia_modes[i].tones, b = olivia_modes[i].bw;
+
+            for (int r = 0; r < 3; r++)
+                CHECK(loopback(OLIVIA_PROTO_OLIVIA, t, b, msg, 0.0, 10.0, NULL) == 1,
+                      "Olivia %d/%d loopback after noise, 10 dB, run %d", t, b, r);
+        }
+        for (size_t i = 0; i < sizeof(contestia_modes) / sizeof(contestia_modes[0]); i++) {
+            int t = contestia_modes[i].tones, b = contestia_modes[i].bw;
+
+            for (int r = 0; r < 3; r++)
+                CHECK(loopback(OLIVIA_PROTO_CONTESTIA, t, b, msg, 0.0, 10.0, NULL) == 1,
+                      "Contestia %d/%d loopback after noise, 10 dB, run %d", t, b, r);
+        }
+        lead_noise = 0;
     }
 
     /* Noise alone must not lock Contestia: the modes with the fewest tones are

@@ -35,6 +35,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     dialog_modes.c
     apps_menu.c
     birdie.c dialog_birdie.c
+    app_sentry.c
     dialog_cw_trainer.c
     dialog_cw_kbd.c
     theme.c

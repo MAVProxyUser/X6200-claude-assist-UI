@@ -90,6 +90,7 @@
 #include "radio_controls.h"
 #include "apps_menu.h"
 #include "dialog_birdie.h"
+#include "app_sentry.h"
 #include "control_owner.h"
 #include "kbd_hyper.h"
 #include "kbd_ptt.h"
@@ -496,6 +497,7 @@ static const char *app_name(press_action_t a) {
         case ACTION_APP_BIRDIE:     return "Birdie Cal";
         case ACTION_APP_PROPAGATION: return "Propagation";
         case ACTION_APP_SCAN:       return "Scanner";
+        case ACTION_APP_SENTRY:     return "Sentry";
         default:                   return NULL;    /* Modes menu: a menu, not an app */
     }
 }
@@ -587,6 +589,7 @@ void main_screen_start_app(press_action_t app_action) {
         {ACTION_APP_BIRDIE, &dialog_birdie},
         {ACTION_APP_PROPAGATION, &dialog_propagation},
         {ACTION_APP_SCAN, &dialog_scan},
+        {ACTION_APP_SENTRY, &dialog_sentry},
     };
 
     if (app_action == ACTION_APP_RTTY) {
@@ -871,6 +874,9 @@ static void front_key_cb(lv_event_t *e) {
         if (ev->state == KEYPAD_RELEASE || ev->state == KEYPAD_LONG_RELEASE) {
             woke_key = KEYPAD_UNKNOWN;
         }
+        return;
+    }
+    if (dialog_front_key(ev->key, ev->state)) {     /* an app over the whole screen gives the keys its own jobs */
         return;
     }
     if (page_key(ev->key, tap, hold)) {

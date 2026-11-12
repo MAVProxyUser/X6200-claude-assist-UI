@@ -30,7 +30,10 @@
 #define PAD    6
 #define BOX_W  796     /* the screen less the top bar's margins: nothing of the strip shows at the sides */
 #define TILE_W ((BOX_W - 2 * PAD - (COLS - 1) * GAP) / COLS)
-#define TILE_H 66
+/* 66 px: the name and two rows of the line. A fifth row (the X6200's Sentry makes 17 tiles) only fits
+ * at 52 px, the line then in one row */
+#define TILE_H (ROWS_N > 4 ? 52 : 66)
+#define SUB_H  (TILE_H - 30)
 #define HEAD_H 38
 #define HINT_H 26
 #define BOX_Y  (TOP_BAR_STD_H + 4)
@@ -48,6 +51,9 @@ static const struct {
     {"Field Ops", "SOTA, POTA, WWFF", "field", OPEN_APP, ACTION_APP_FIELD},
     {"Bands", "Band activity", "bands", OPEN_APP, ACTION_APP_BANDS},
     {"Propagation", "Conditions, beacons", "prop", OPEN_APP, ACTION_APP_PROPAGATION},
+#ifdef BOARD_X6200
+    {"Sentry", "Scan, track, bands, decoders", "sentry", OPEN_APP, ACTION_APP_SENTRY},
+#endif
     {"Channels", "Memory channels", "channels", OPEN_APP, ACTION_APP_CHANNELS},
     {"Scanner", "Stops on activity", "scan", OPEN_APP, ACTION_APP_SCAN},
     {"SWR Scan", "Sweep, transmits", "swr", OPEN_APP, ACTION_APP_SWRSCAN},
@@ -213,14 +219,14 @@ static void construct_cb(lv_obj_t *parent) {
         lv_obj_t *name = lv_label_create(t);
         lv_obj_set_style_text_font(name, &sony_22, 0);
         lv_label_set_text(name, apps[i].name);
-        lv_obj_set_pos(name, 10 + ICON + 10, 5);
+        lv_obj_set_pos(name, 10 + ICON + 10, ROWS_N > 4 ? 3 : 5);
 
         lv_obj_t *sub = lv_label_create(t);
         lv_obj_set_style_text_font(sub, &sony_16, 0);
         lv_label_set_text(sub, apps[i].sub);
-        lv_obj_set_size(sub, TILE_W - ICON - 30, 36);
+        lv_obj_set_size(sub, TILE_W - ICON - 30, SUB_H);
         lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
-        lv_obj_set_pos(sub, 10 + ICON + 10, 29);
+        lv_obj_set_pos(sub, 10 + ICON + 10, ROWS_N > 4 ? 26 : 29);
     }
 
     lv_obj_t *hint = lv_label_create(box);

@@ -199,6 +199,7 @@ typedef struct {
     uint64_t        screen_ms;      /* its last frame */
     bool            panel;          /* wants the state, the spectrum and the spots (the Panel page) */
     bool            panel_fresh;    /* just subscribed: the whole state goes out next */
+    bool            wide;           /* "wide 1": the base's whole spectrum (radio_psd_wide) and its raw frames */
     atomic_bool     state_due;      /* a "set" refused: the state goes out to it next, changed or not */
     int             sess;           /* the session it authenticated as, -1 none (a viewer) */
     uint8_t         role;           /* ROLE_VIEW, ROLE_OPERATE, ROLE_ADMIN */
@@ -933,6 +934,10 @@ static void client_close(client_t *c) {
         ext_tune_stop_owner(TUNE_BY_PANEL + (int)(c - clients), true);
     }
     ctl_release(CTL_BROWSER, (int)(c - clients));
+    if (c->wide) {                  /* its wide spectrum goes with it */
+        c->wide = false;
+        radio_psd_wide(false);
+    }
     pthread_mutex_lock(&c->lock);
     if (c->fd >= 0) {
         close(c->fd);
@@ -1605,6 +1610,9 @@ static void app_log_cmd(client_t *c, uint64_t id, const char *text) {
 static void *panel_thread(void *arg) {
     static float   db[WATERFALL_NFFT];
     static int8_t  bins[WATERFALL_NFFT];
+    static float   raw[1024];               /* the base's own packet of bins, uncut ("wide 1") */
+    static int8_t  rbins[1024];
+    uint32_t       raw_seq = 0;
     pstate_t       last = {0};
     ft8_status_t   ft8_last = {0};
     bool           have_last = false;
@@ -1644,6 +1652,34 @@ static void *panel_thread(void *arg) {
                 pthread_mutex_unlock(&c->lock);
                 if (room)
                     client_frame(c, WS_OP_BINARY, &hdr, sizeof(hdr), bins, sizeof(bins));
+            }
+        }
+
+        /* The base's raw spectrum to the clients that asked for it ("wide 1"): {u16 0xFFFE, u16 bins, u32 centre Hz,
+         * u32 width Hz, u32 sequence}, then one int8 dBm per bin, the lowest first */
+        uint16_t rn;
+        uint32_t rspan, rseq;
+        bool     rtx;
+        if (dsp_psd_raw(raw, (uint16_t)(sizeof(raw) / sizeof(raw[0])), &rn, &rspan, &rtx, &rseq) && rseq != raw_seq && !rtx) {
+            raw_seq = rseq;
+            uint32_t rc = cparam_i_get(cfg_fg_freq) - param_i_get(cfg_band_if_shift) + cparam_i_get(cfg_mode_lo_offset);
+            for (int i = 0; i < rn; i++) {
+                float v = raw[i];
+                rbins[i] = (int8_t)(v < -128.0f ? -128 : v > 127.0f ? 127 : lroundf(v));
+            }
+            struct {
+                uint16_t mark, n;
+                uint32_t center, width, seq;
+            } rh = {0xFFFE, rn, rc, rspan, rseq};
+            for (int i = 0; i < MAX_CLIENTS; i++) {
+                client_t *c = &clients[i];
+                if (c->fd < 0 || !c->up || !c->panel || !c->wide)
+                    continue;
+                pthread_mutex_lock(&c->lock);
+                bool room = c->out_len < PANEL_ROOM;
+                pthread_mutex_unlock(&c->lock);
+                if (room)
+                    client_frame(c, WS_OP_BINARY, &rh, sizeof(rh), rbins, rn);
             }
         }
 
@@ -1737,7 +1773,7 @@ static void *panel_thread(void *arg) {
     return NULL;
 }
 
-/* "key NAME 1|0", "knob main|vol|mfk N", "ping", "screen 0|1", "panel 0|1", "set NAME VALUE",
+/* "key NAME 1|0", "knob main|vol|mfk N", "ping", "screen 0|1", "panel 0|1", "wide 0|1", "set NAME VALUE",
  * "ft8 WHAT [ARG]", "log TEXT" */
 /* "ctl WHO MINE": who controls the radio, and whether it is this client */
 static void ctl_tell(client_t *c) {
@@ -2098,6 +2134,19 @@ static void handle_text(client_t *c, char *text) {
                 c->pic          = (uint8_t)k;
                 c->screen_stale = true;
             }
+    } else if (!strcmp(a[0], "wide") && n >= 2) {
+        /* The base's whole spectrum (384 kHz on the X6200) in frames of its own: the main screen's waterfall gets
+         * coarser meanwhile, so a paired session's, not a viewer's; no control needed (nothing is tuned) */
+        bool on = atoi(a[1]) != 0;
+        if (on != c->wide && allowed(c, ROLE_OPERATE, false)) {
+            if (!on || radio_psd_wide(true)) {
+                if (!on)
+                    radio_psd_wide(false);
+                c->wide = on;
+            } else {
+                client_text(c, "err wide: this radio's base has no spectrum of its own");
+            }
+        }
     } else if (!strcmp(a[0], "panel") && n >= 2) {
         bool on = atoi(a[1]) != 0;
         if (on != c->panel) {

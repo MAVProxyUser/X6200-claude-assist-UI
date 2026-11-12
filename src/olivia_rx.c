@@ -21,6 +21,17 @@
  * signal drifts away, the figure drops and the synchronisation is worked
  * out again from scratch. A deliberately different architecture from an
  * accumulating correction.
+ *
+ * The search goes on while locked, and the lock moves to a hypothesis
+ * whose average figure is OLIVIA_RELOCK_RATIO times the locked one's. A
+ * receiver that has been listening to noise has every phase judged long
+ * before a signal starts, so the first phase that the signal fills enough
+ * to pass the threshold wins - usually one only partly aligned with the
+ * blocks, which decodes into rubbish at a figure of 4-7 while the right
+ * phase, judged a block later, scores in the hundreds. Without the move
+ * that lock held for the whole transmission (seen on the radio: Olivia
+ * 8/250 printed "[[[DKm0_w0m0..." where the same audio, started fresh,
+ * decoded cleanly).
  */
 
 #include "olivia_rx.h"
@@ -32,6 +43,10 @@
 /* A reversed-order hypothesis loses to the normal one at the same phase
  * and offset unless it scores clearly better (see the lock decision). */
 #define OLIVIA_REV_TIE 0.8f
+
+/* While locked, a hypothesis whose average figure is this many times the
+ * locked one's takes the lock over (see the top of the file). */
+#define OLIVIA_RELOCK_RATIO 1.5f
 
 /*
  * Contestia's lock figures, by tones. The figure averages one FHT per
@@ -226,6 +241,41 @@ static float eval_block(olivia_rx_t *rx, int offset_idx, uint8_t *chars)
     return sum / bits;
 }
 
+/* Lock onto offset variant best_off at this phase. */
+static void take_lock(olivia_rx_t *rx, int phase, int best_off, float best)
+{
+    /*
+     * With an even number of bits per symbol (16, 64, 256 tones) the
+     * reversed tone order is NOT distinguishable by the score. Reversing N
+     * tones complements the tone number, which after the Gray code XORs
+     * every symbol with a constant that flips every other bit plane; with
+     * the diagonal interleave that multiplies each character vector by an
+     * alternating +-1 sequence, which is itself a Walsh row - so the
+     * reversed hypothesis decodes into other, equally "valid" characters at
+     * full strength. Measured at 16/500: 12 of 40 noisy runs locked
+     * reversed and printed rubbish. Normal order is the standard, so it
+     * wins whenever it scores nearly as well.
+     */
+    if (best_off >= rx->offsets) {
+        int    normal = best_off - rx->offsets;
+        size_t ni = (size_t)phase * rx->variants + normal;
+
+        if (rx->score[ni] >= OLIVIA_REV_TIE * best) {
+            best_off = normal;
+            best = rx->score[ni];
+        }
+    }
+
+    rx->locked = 1;
+    rx->lock_phase = phase;
+    rx->lock_variant = best_off;
+    rx->lock_rev = best_off >= rx->offsets;
+    rx->lock_offset = (best_off % rx->offsets) * rx->offset_step -
+                      rx->margin_bins;
+    rx->lock_score = best;
+    rx->bad_blocks = 0;
+}
+
 /* Process one slice: update the history, evaluate the hypotheses. */
 static void process_slice(olivia_rx_t *rx, const float *in)
 {
@@ -256,40 +306,25 @@ static void process_slice(olivia_rx_t *rx, const float *in)
 
     phase = rx->slice_pos;
 
-    if (rx->locked && phase == rx->lock_phase) {
-        /* Locked, and our block has just completed. */
+    /*
+     * Only the phase that has just completed is evaluated, for all offsets
+     * - the trick that keeps the cost per slice constant. Locked or not:
+     * while locked this is what finds a better hypothesis.
+     */
+    {
         uint8_t chars[OLIVIA_MAX_BITS];
-        float m = eval_block(rx, rx->lock_variant, chars);
-
-        rx->lock_score = m;
-
-        if (m < OLIVIA_SYNC_THRESHOLD) {
-            rx->bad_blocks++;
-            if (rx->bad_blocks >= 3) {
-                /* The signal is gone - back to searching. */
-                olivia_rx_reset(rx);
-                rx->slice_pos = (rx->slice_pos + 1) % rx->block_slices;
-                return;
-            }
-        } else {
-            rx->bad_blocks = 0;
-            if (rx->cb)
-                rx->cb(rx->cb_user, chars, rx->bits);
-        }
-    } else if (!rx->locked) {
-        /*
-         * Searching. Only the phase that has just completed is evaluated,
-         * for all offsets - the trick that keeps the cost per slice
-         * constant.
-         */
+        int   at_lock = rx->locked && phase == rx->lock_phase;
+        float lock_m = 0.0f;
         float best = -1.0f;
-        int best_off = 0;
-        int ready = 1;
+        int   best_off = 0;
 
         for (offset_idx = 0; offset_idx < rx->variants; offset_idx++) {
             size_t idx = (size_t)phase * rx->variants + offset_idx;
-            float m = eval_block(rx, offset_idx, NULL);
-            float avg;
+            int    mine = at_lock && offset_idx == rx->lock_variant;
+            float  m = eval_block(rx, offset_idx, mine ? chars : NULL);
+
+            if (mine)
+                lock_m = m;
 
             if (rx->count[idx] < OLIVIA_SYNC_INTEG) {
                 /* running mean until the window has filled */
@@ -302,10 +337,28 @@ static void process_slice(olivia_rx_t *rx, const float *in)
                 rx->score[idx] += (m - rx->score[idx]) / OLIVIA_SYNC_INTEG;
             }
 
-            avg = rx->score[idx];
-            if (avg > best) {
-                best = avg;
+            if (rx->score[idx] > best) {
+                best = rx->score[idx];
                 best_off = offset_idx;
+            }
+        }
+
+        if (at_lock) {
+            /* Locked, and our block has just completed. */
+            rx->lock_score = lock_m;
+
+            if (lock_m < OLIVIA_SYNC_THRESHOLD) {
+                rx->bad_blocks++;
+                if (rx->bad_blocks >= 3) {
+                    /* The signal is gone - back to searching. */
+                    olivia_rx_reset(rx);
+                    rx->slice_pos = (rx->slice_pos + 1) % rx->block_slices;
+                    return;
+                }
+            } else {
+                rx->bad_blocks = 0;
+                if (rx->cb)
+                    rx->cb(rx->cb_user, chars, rx->bits);
             }
         }
 
@@ -316,12 +369,10 @@ static void process_slice(olivia_rx_t *rx, const float *in)
          * premature. This did happen: the right phase scored 18051
          * while the receiver locked onto another one scoring 7.
          */
-        ready = (rx->sweeps >= 2);
-
-        if (ready && best > rx->lock_threshold) {
-            int p, o;
+        if (rx->sweeps >= 2 && best > rx->lock_threshold) {
             float global_best = best;
-            int global_phase = phase;
+            int   global_phase = phase;
+            int   p, o;
 
             for (p = 0; p < rx->block_slices; p++) {
                 for (o = 0; o < rx->variants; o++) {
@@ -335,38 +386,15 @@ static void process_slice(olivia_rx_t *rx, const float *in)
             }
 
             if (global_phase == phase) {
-                /*
-                 * With an even number of bits per symbol (16, 64, 256
-                 * tones) the reversed tone order is NOT distinguishable
-                 * by the score. Reversing N tones complements the tone
-                 * number, which after the Gray code XORs every symbol
-                 * with a constant that flips every other bit plane; with
-                 * the diagonal interleave that multiplies each character
-                 * vector by an alternating +-1 sequence, which is itself
-                 * a Walsh row - so the reversed hypothesis decodes into
-                 * other, equally "valid" characters at full strength.
-                 * Measured at 16/500: 12 of 40 noisy runs locked reversed
-                 * and printed rubbish. Normal order is the standard, so
-                 * it wins whenever it scores nearly as well.
-                 */
-                if (best_off >= rx->offsets) {
-                    int    normal = best_off - rx->offsets;
-                    size_t ni = (size_t)phase * rx->variants + normal;
+                if (!rx->locked) {
+                    take_lock(rx, phase, best_off, best);
+                } else if (phase != rx->lock_phase || best_off != rx->lock_variant) {
+                    size_t li = (size_t)rx->lock_phase * rx->variants +
+                                rx->lock_variant;
 
-                    if (rx->score[ni] >= OLIVIA_REV_TIE * best) {
-                        best_off = normal;
-                        best = rx->score[ni];
-                    }
+                    if (best > OLIVIA_RELOCK_RATIO * rx->score[li])
+                        take_lock(rx, phase, best_off, best);
                 }
-
-                rx->locked = 1;
-                rx->lock_phase = phase;
-                rx->lock_variant = best_off;
-                rx->lock_rev = best_off >= rx->offsets;
-                rx->lock_offset = (best_off % rx->offsets) * rx->offset_step -
-                                  rx->margin_bins;
-                rx->lock_score = best;
-                rx->bad_blocks = 0;
             }
         }
     }
