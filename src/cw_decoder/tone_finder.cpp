@@ -13,8 +13,9 @@
 
 namespace cw {
 
-/* The gaps' noise average, up per frame (16 ms); down it goes at 0.01 */
-constexpr float NOISE_UP = 0.02f;
+/* The gaps' noise average, up per frame (16 ms), as fast as it goes down (0.01): faster up (0.02) set it above the
+ * noise's mean and lost weak stations, a real 10 dB QSO's copy 75 % -> 70 %, KL7SB heard by the X6200 not at all */
+constexpr float NOISE_UP = 0.01f;
 
 /* APF as the radio sets it up: y = b0 (x[n] - x[n-2]) + a1 y[n-1] + a2 y[n-2] at 12.5 kHz */
 float apf_gain2(float tone_hz, float q, float hz) {
