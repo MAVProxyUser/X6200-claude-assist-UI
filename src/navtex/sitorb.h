@@ -20,6 +20,16 @@ typedef void (*navtex_char_cb_t)(int c, void *userdata);
 
 /* reverse != 0 swaps mark and space; NULL when out of memory */
 navtex_decoder_t *navtex_decoder_create(int reverse);
+
+/* The same with more choices, for reading a transmission several ways at once (navtex_window.c): the tones moved by
+ * offset_hz (a receiver a little off tune), and loose: weaker characters printed too, more text with more errors */
+typedef struct {
+    int    reverse;
+    double offset_hz;
+    int    loose;
+} navtex_options_t;
+
+navtex_decoder_t *navtex_decoder_create_ex(const navtex_options_t *options);
 void navtex_decoder_destroy(navtex_decoder_t *decoder);
 
 /* Decoded characters: ASCII, '\n' for line feed (carriage returns are dropped) */

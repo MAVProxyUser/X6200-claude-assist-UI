@@ -78,6 +78,8 @@ typedef struct {
 
 struct navtex_decoder {
     bool        reverse;
+    double      tone_mark, tone_space;  /* Hz: TONE_MARK and TONE_SPACE, moved by the options' offset */
+    double      print_score, print_agree;   /* PRINT_SCORE and PRINT_AGREE, lower when loose */
 
     double      mark_phase, space_phase;
     tone_lpf_t  mark_lpf, space_lpf;
@@ -418,7 +420,7 @@ static void take_bit(navtex_decoder_t *d, double weight) {
     if (now != d->phase)
         return;
 
-    if (d->score[now] < PRINT_SCORE) {
+    if (d->score[now] < d->print_score) {
         if (++d->lost > LOST_CHARS) {
             end_of(d);
             return;
@@ -434,7 +436,7 @@ static void take_bit(navtex_decoder_t *d, double weight) {
     } else {
         d->alphas = 0;
     }
-    bool printed = d->score[now] >= PRINT_SCORE && agree > PRINT_AGREE;
+    bool printed = d->score[now] >= d->print_score && agree > d->print_agree;
 
     count_char(d, code, printed);
     if (printed)
@@ -539,6 +541,12 @@ static inline cpx_t mix(double *phase, double tone, double v) {
 /* ---- API ----------------------------------------------------------------- */
 
 navtex_decoder_t *navtex_decoder_create(int reverse) {
+    navtex_options_t o = {.reverse = reverse};
+
+    return navtex_decoder_create_ex(&o);
+}
+
+navtex_decoder_t *navtex_decoder_create_ex(const navtex_options_t *o) {
     if (!tables_ready)
         make_tables();
 
@@ -546,7 +554,11 @@ navtex_decoder_t *navtex_decoder_create(int reverse) {
 
     if (!d)
         return NULL;
-    d->reverse = reverse != 0;
+    d->reverse = o->reverse != 0;
+    d->tone_mark = TONE_MARK + o->offset_hz;
+    d->tone_space = TONE_SPACE + o->offset_hz;
+    d->print_score = o->loose ? PRINT_SCORE - 0.07 : PRINT_SCORE;
+    d->print_agree = o->loose ? PRINT_AGREE - 0.12 : PRINT_AGREE;
     d->spb = RATE / BAUD;
     d->t_early = 0;
     d->t_prompt = d->spb / 5;
@@ -581,8 +593,8 @@ void navtex_decoder_process(navtex_decoder_t *d, const float *samples, unsigned 
 
     for (unsigned int i = 0; i < n; i++) {
         double v = 32767.0f * samples[i];   /* the int16 scale the levels below are tuned on */
-        cpx_t  mk = mix(&d->mark_phase, TONE_MARK, v);
-        cpx_t  sp = mix(&d->space_phase, TONE_SPACE, v);
+        cpx_t  mk = mix(&d->mark_phase, d->tone_mark, v);
+        cpx_t  sp = mix(&d->space_phase, d->tone_space, v);
 
         bool done = lpf_push(&d->mark_lpf, mk);
 

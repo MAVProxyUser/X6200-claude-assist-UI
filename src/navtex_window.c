@@ -29,6 +29,7 @@
 #include <math.h>
 #include <pthread.h>        /* rx_lock */
 #include <stdio.h>          /* snprintf, the Save file */
+#include <stdint.h>         /* intptr_t */
 #include <stdlib.h>         /* free */
 #include <string.h>         /* memcpy, strcmp */
 #include <sys/stat.h>
@@ -45,12 +46,31 @@
 #define DSC_PENDING_MAX 8
 #define DSC_REPEAT_S 120      /* a distress alert is repeated: the same call again within this is skipped */
 
-static navtex_decoder_t *decoder;
+/* Each transmission read several ways at once, each decoder its own text: the window shows the best (view -1) or
+ * the one chosen with Decode. Best: of those that read at least half as many characters as the most, the highest
+ * signal to noise (the one tuned best), the fewest lost on a tie, the standard one on a tie still; a weak signal a
+ * little off tune often reads only in the decoder tuned to it */
+#define NV 5
+static const struct {
+    const char      *name, *tag;
+    navtex_options_t o;
+} variants[NV] = {
+    {"Standard", "STD", {0, 0, 0}},
+    {"Reversed", "REV", {1, 0, 0}},
+    {"-40 Hz", "-40", {0, -40, 0}},
+    {"+40 Hz", "+40", {0, 40, 0}},
+    {"Loose", "LOOSE", {0, 0, 1}},     /* weaker characters printed too: more text, more errors */
+};
+static navtex_decoder_t *dec[NV];
+static navtex_decoder_t *decoder;   /* dec[0], the standard one: DSC's bits come from it */
+static int               view = -1; /* the decoder chosen, -1 the best */
+static int               best;      /* the best now */
+static int               shown;     /* the one whose text is on the screen */
 
-/* What the audio thread hands over (under rx_lock): characters, and DSC calls */
+/* What the audio thread hands over (under rx_lock): each decoder's characters, and DSC calls */
 static pthread_mutex_t rx_lock = PTHREAD_MUTEX_INITIALIZER;
-static char            rx_chars[RX_CHARS];
-static size_t          rx_nchars;
+static char            rx_chars[NV][RX_CHARS];
+static size_t          rx_nchars[NV];
 
 /* DSC: the mode, and the calls from the audio thread (under rx_lock) to the UI */
 static volatile bool dsc_mode = false;
@@ -61,9 +81,11 @@ static int dsc_npending = 0;
 static lv_obj_t *dsc_list = NULL;
 static lv_font_t dsc_font;    /* sony_18 with Montserrat behind it for the degree sign and the arrow */
 
-/* NAVTEX text, a plain C string for the label */
-static char   screen_text[TEXT_SIZE];
-static size_t screen_len;
+/* NAVTEX text, a plain C string for the label: each decoder's; the one shown */
+static char   vtext[NV][TEXT_SIZE];
+static size_t vlen[NV];
+#define screen_text (vtext[shown])
+#define screen_len  (vlen[shown])
 static bool   follow;         /* the view stays on the newest line */
 
 static lv_obj_t   *scroll;
@@ -84,6 +106,8 @@ static void save_cb(button_data_t *data);
 static const char *mode_label(void);
 static const char *page1_label(void);
 static const char *page2_label(void);
+static const char *view_label(void);
+static void view_cb(button_data_t *data);
 
 static button_data_t btn_page   = {.type = BTN_TEXT_FN, .label_fn = page1_label, .press = page_cb};
 static button_data_t btn_freq   = {.type = BTN_TEXT, .label = "Freq.", .press = freq_cb};
@@ -92,9 +116,10 @@ static button_data_t btn_clear  = {.type = BTN_TEXT, .label = "Clear", .press = 
 static button_data_t btn_close  = {.type = BTN_TEXT, .label = "Close", .press = close_btn_cb};
 static button_data_t btn_page_2 = {.type = BTN_TEXT_FN, .label_fn = page2_label, .press = page_cb};
 static button_data_t btn_save   = {.type = BTN_TEXT, .label = "Save", .press = save_cb};
+static button_data_t btn_view   = {.type = BTN_TEXT_FN, .label_fn = view_label, .press = view_cb};
 
 static buttons_page_t page_1 = {.items = {&btn_page, &btn_freq, &btn_mode, &btn_clear, &btn_close}};
-static buttons_page_t page_2 = {.items = {&btn_page_2, &btn_save, NULL, NULL, NULL}};
+static buttons_page_t page_2 = {.items = {&btn_page_2, &btn_save, &btn_view, NULL, NULL}};
 
 static dialog_t dialog = {.construct_cb = app_open, .destruct_cb = app_close, .audio_cb = audio_in,
                           .btn_page = &page_1, .restore_radio = true};
@@ -163,48 +188,81 @@ static void body_scroll(lv_coord_t y)
     lv_obj_scroll_to_y(scroll, y, LV_ANIM_OFF);
 }
 
-/* New text at the end; a chunk longer than the whole buffer keeps only its tail */
-static void text_add(const char *s, size_t n)
+/* New text at the end of decoder v's; a chunk longer than the whole buffer keeps only its tail */
+static void text_add(int v, const char *s, size_t n)
 {
+    char  *t   = vtext[v];
     size_t cut = 0;
 
     if (n > TEXT_SIZE - 1) {
         s += n - (TEXT_SIZE - 1);
         n = TEXT_SIZE - 1;
-        screen_len = 0;
+        vlen[v] = 0;
     }
-    while (screen_len - cut + n > TEXT_SIZE - 1) {
-        const char *nl = memchr(screen_text + cut, '\n', screen_len - cut);
+    while (vlen[v] - cut + n > TEXT_SIZE - 1) {
+        const char *nl = memchr(t + cut, '\n', vlen[v] - cut);
 
-        cut = nl ? (size_t)(nl - screen_text) + 1 : screen_len;
+        cut = nl ? (size_t)(nl - t) + 1 : vlen[v];
     }
-    memmove(screen_text, screen_text + cut, screen_len - cut);
-    screen_len -= cut;
-    memcpy(screen_text + screen_len, s, n);
-    screen_len += n;
-    screen_text[screen_len] = '\0';
+    memmove(t, t + cut, vlen[v] - cut);
+    vlen[v] -= cut;
+    memcpy(t + vlen[v], s, n);
+    vlen[v] += n;
+    t[vlen[v]] = '\0';
 }
 
 static void text_clear(void)
 {
     pthread_mutex_lock(&rx_lock);
-    rx_nchars = 0;
+    memset(rx_nchars, 0, sizeof(rx_nchars));
     pthread_mutex_unlock(&rx_lock);
-    screen_len = 0;
-    screen_text[0] = '\0';
+    for (int v = 0; v < NV; v++) {
+        vlen[v]     = 0;
+        vtext[v][0] = '\0';
+    }
     follow = true;
 }
 
-/* Audio thread: a decoded character, kept for the UI (NAVTEX mode only) */
+/* Audio thread: a character decoder user decoded, kept for the UI (NAVTEX mode only) */
 static void char_cb(int c, void *user)
 {
-    (void)user;
+    int v = (int)(intptr_t)user;
+
     if (!dsc_mode && c != '\r') {
         pthread_mutex_lock(&rx_lock);
-        if (rx_nchars < RX_CHARS - 1)
-            rx_chars[rx_nchars++] = (char)c;
+        if (rx_nchars[v] < RX_CHARS - 1)
+            rx_chars[v][rx_nchars[v]++] = (char)c;
         pthread_mutex_unlock(&rx_lock);
     }
+}
+
+/* The best decoder now (see variants): the one shown unless Decode chose another; it moves only for a clearly
+ * better one (0.5 dB), so the text does not jump between two that read alike */
+static int best_of(void)
+{
+    navtex_stats_t st[NV];
+    unsigned       most = 0;
+
+    for (int v = 0; v < NV; v++) {
+        if (dec[v])
+            navtex_decoder_get_stats(dec[v], &st[v]);
+        else
+            memset(&st[v], 0, sizeof(st[v]));
+        if (st[v].chars > most) most = st[v].chars;
+    }
+    if (most < 10) return best;
+
+    int b = -1;
+
+    for (int v = 0; v < NV; v++) {
+        if (st[v].chars * 2 < most) continue;
+        if (b < 0 || st[v].snr_db > st[b].snr_db + 0.25f ||
+            (st[v].snr_db > st[b].snr_db - 0.25f && st[v].lost * st[b].chars < st[b].lost * st[v].chars))
+            b = v;
+    }
+    if (b < 0 || b == best) return best;
+    if (st[best].chars * 2 >= most && st[b].snr_db < st[best].snr_db + 0.5f) return best;
+    return b;
 }
 
 /* Audio thread: a DSC call to the UI */
@@ -258,12 +316,12 @@ static void header_update(void)
     char           r[80] = "RX";
     navtex_stats_t st;
 
-    if (!dsc_mode && decoder) {
-        navtex_decoder_get_stats(decoder, &st);
+    if (!dsc_mode && dec[shown]) {
+        navtex_decoder_get_stats(dec[shown], &st);
         if (st.chars) {
-            snprintf(r, sizeof(r), "%s %d dB SNR, %u ch: %u%% ok %u%% fixed %u%% lost", st.receiving ? "RX" : "LAST",
-                     (int)lroundf(st.snr_db), st.chars, 100 * st.clean / st.chars, 100 * st.repaired / st.chars,
-                     100 * st.lost / st.chars);
+            snprintf(r, sizeof(r), "%s %s %d dB, %u ch: %u%% ok %u%% fixed %u%% lost", st.receiving ? "RX" : "LAST",
+                     variants[shown].tag, (int)lroundf(st.snr_db), st.chars, 100 * st.clean / st.chars,
+                     100 * st.repaired / st.chars, 100 * st.lost / st.chars);
         }
     }
     if (strcmp(r, lv_label_get_text(frame.head_right)))
@@ -453,18 +511,19 @@ static void dsc_add_row(const dsc_call_t *c, const char *hms, int32_t freq)
 /* Every UI_TICK_MS while the app is open: the header, then what the audio thread decoded */
 static void ui_timer_cb(lv_timer_t *t)
 {
-    char       chars[RX_CHARS];
-    dsc_call_t calls[DSC_PENDING_MAX];
-    size_t     nchars;
-    int        ncalls;
+    static char chars[NV][RX_CHARS];
+    dsc_call_t  calls[DSC_PENDING_MAX];
+    size_t      nchars[NV];
+    int         ncalls;
 
     (void)t;
-    header_update();
 
     pthread_mutex_lock(&rx_lock);
-    nchars = rx_nchars;
-    memcpy(chars, rx_chars, nchars);
-    rx_nchars = 0;
+    for (int v = 0; v < NV; v++) {
+        nchars[v] = rx_nchars[v];
+        memcpy(chars[v], rx_chars[v], nchars[v]);
+        rx_nchars[v] = 0;
+    }
     ncalls = dsc_npending;
     memcpy(calls, dsc_pending, ncalls * sizeof(calls[0]));
     dsc_npending = 0;
@@ -477,12 +536,21 @@ static void ui_timer_cb(lv_timer_t *t)
         for (int i = 0; i < ncalls; i++)
             dsc_add_row(&calls[i], hms, cparam_i_get(cfg_fg_freq) + 1000);
     }
-    if (nchars) {
-        text_add(chars, nchars);
-        lv_label_set_text(label, screen_text);
-        if (follow)
-            body_scroll(LV_COORD_MAX);
+    for (int v = 0; v < NV; v++)
+        if (nchars[v]) text_add(v, chars[v], nchars[v]);
+    if (!dsc_mode) {
+        int was = shown;
+
+        best  = best_of();
+        shown = view < 0 ? best : view;
+        if (shown != was || nchars[shown]) {
+            lv_label_set_text(label, screen_text);
+            if (follow)
+                body_scroll(LV_COORD_MAX);
+        }
+        if (shown != was && btn_view.disp_btn) buttons_refresh(&btn_view);
     }
+    header_update();
 }
 
 /* The mode's content, status line and buttons */
@@ -514,9 +582,13 @@ static void app_open(lv_obj_t *parent)
     pthread_mutex_unlock(&rx_lock);
     text_clear();
 
-    decoder = navtex_decoder_create(0);
+    for (int v = 0; v < NV; v++) {
+        dec[v] = navtex_decoder_create_ex(&variants[v].o);
+        if (dec[v]) navtex_decoder_set_char_callback(dec[v], char_cb, (void *)(intptr_t)v);
+    }
+    best = shown = 0;
+    decoder = dec[0];
     if (decoder) {
-        navtex_decoder_set_char_callback(decoder, char_cb, NULL);
         navtex_decoder_set_bit_callback(decoder, bit_cb, NULL);
     } else {
         fprintf(stderr, "NAVTEX: unable to create decoder\n");
@@ -573,15 +645,17 @@ static void app_open(lv_obj_t *parent)
 
 static void app_close(void)
 {
-    navtex_decoder_t *d = decoder;
+    navtex_decoder_t *d[NV];
 
     freq_list_close();
     lv_timer_del(ui_timer); ui_timer = NULL;
+    memcpy(d, dec, sizeof(d));
     decoder = NULL;     /* audio_in sees no decoder from here */
-    if (d)
-        navtex_decoder_destroy(d);
+    memset(dec, 0, sizeof(dec));
+    for (int v = 0; v < NV; v++)
+        if (d[v]) navtex_decoder_destroy(d[v]);
     pthread_mutex_lock(&rx_lock);
-    rx_nchars = 0;
+    memset(rx_nchars, 0, sizeof(rx_nchars));
     pthread_mutex_unlock(&rx_lock);
 
     label = scroll = dsc_list = NULL;
@@ -591,10 +665,13 @@ static void app_close(void)
 
 static void audio_in(unsigned int n, float *samples)
 {
-    navtex_decoder_t *d = decoder;
+    if (!decoder)
+        return;
+    for (int v = 0; v < (dsc_mode ? 1 : NV); v++) {   /* DSC: the standard one's bits only */
+        navtex_decoder_t *d = dec[v];
 
-    if (d)
-        navtex_decoder_process(d, samples, n);
+        if (d) navtex_decoder_process(d, samples, n);
+    }
 }
 
 /* MFK left goes back through the text and stops following it; right goes forward, and a
@@ -728,4 +805,22 @@ static const char *page1_label(void)
 static const char *page2_label(void)
 {
     return dsc_mode ? "(DSC 2:2)" : "(NAVTEX 2:2)";
+}
+
+/* Decode: which decoder's text is shown, the best or one chosen (variants); each press the next */
+static const char *view_label(void)
+{
+    static char l[32];
+
+    if (view < 0)
+        snprintf(l, sizeof(l), "Decode:\nBest (%s)", variants[best].tag);
+    else
+        snprintf(l, sizeof(l), "Decode:\n%s", variants[view].name);
+    return l;
+}
+
+static void view_cb(button_data_t *data)
+{
+    view = view + 1 >= NV ? -1 : view + 1;
+    buttons_refresh(data);
 }
