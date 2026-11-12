@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentry Receiver Mock</title>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+:root { --amb: #ffc21a; --dim: #6e5410; --ink: #0b0800; --page: #1b1b1b; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--amb); font-family: "VT323", ui-monospace, monospace; padding: 16px; }
+h1 { font: 400 26px "VT323", monospace; color: #bbb; margin: 8px 0 16px; letter-spacing: 1px; }
+.note { color: #999; font-size: 18px; max-width: 800px; margin: 0 0 6px; }
+.scr { width: 800px; max-width: 100%; aspect-ratio: 800/480; background: var(--ink); border: 10px solid #000; outline: 1px solid #333;
+       margin: 0 0 28px; padding: 8px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; position: relative;
+       text-transform: uppercase; font-size: 22px; line-height: 1; }
+.scr::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+       background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); }
+.hd { border: 3px solid var(--amb); display: flex; align-items: center; justify-content: space-between; padding: 2px 10px; }
+.hd .t { text-align: center; font-size: 26px; line-height: .95; }
+.bdg { width: 42px; height: 42px; border: 3px solid var(--amb); border-radius: 50%; display: grid; place-items: center; font-size: 34px; }
+.row { display: grid; gap: 6px; }
+.box { border: 3px solid var(--amb); padding: 4px 6px; min-width: 0; }
+.cap { text-align: center; font-size: 22px; padding: 2px 0 4px; border-bottom: 3px solid var(--amb); margin: -4px -6px 4px; }
+.cap.on { background: var(--amb); color: var(--ink); }
+.opt { text-align: center; font-size: 21px; padding: 1px 0; color: var(--amb); }
+.opt.sel { background: var(--amb); color: var(--ink); }
+.opt.off { color: var(--dim); }
+.spec { border: 3px solid var(--amb); flex: 1; position: relative; min-height: 0; }
+.spec canvas { width: 100%; height: 100%; display: block; }
+.keys { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.keys div { border: 2px solid var(--amb); text-align: center; font-size: 19px; padding: 2px 0; }
+.keys div b { font-weight: 400; color: var(--dim); }
+.big { font-size: 74px; line-height: .9; letter-spacing: 2px; }
+.ghost { color: var(--dim); }
+.lbl { font-size: 24px; line-height: .95; text-align: center; }
+.crit { border: 3px solid var(--amb); padding: 4px; }
+.crit div { background: var(--amb); color: var(--ink); text-align: center; font-size: 26px; padding: 2px 6px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { background: transparent; color: var(--amb); } }
+.bar { width: 46px; height: 100%; border-right: 3px solid var(--amb); position: relative;
+       background: repeating-linear-gradient(180deg, transparent 0 22px, var(--amb) 22px 25px) right / 12px 100% no-repeat; }
+.bar i { position: absolute; left: 4px; right: 18px; bottom: 0; background: var(--amb); }
+table { width: 100%; border-collapse: collapse; font-size: 20px; }
+td, th { padding: 1px 6px; text-align: left; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+th { border-bottom: 3px solid var(--amb); }
+tr.sel td { background: var(--amb); color: var(--ink); }
+.dim { color: var(--dim); }
+</style>
+</head>
+<body>
+<h1>Sentry receiver: screen mock (800 x 480, the X6200's screen)</h1>
+<p class="note">Four screens, F1 to F5 switch between them, the MFK knob moves the highlight inside a panel. Transmit is locked out everywhere.</p>
+
+<!-- A: SCAN -->
+<div class="scr">
+  <div class="hd"><div class="bdg">A</div><div class="t">XR 6200-L<br>REMOTE SENTRY RECEIVER SYSTEM</div><div class="bdg">A</div></div>
+  <div class="row" style="grid-template-columns: 1fr 1fr 1fr 1fr;">
+    <div class="box"><div class="cap">System mode</div><div class="opt sel">Auto-scan</div><div class="opt">Man-override</div><div class="opt">Semi-auto</div></div>
+    <div class="box"><div class="cap">Transmitter</div><div class="opt sel">Safe</div><div class="opt off">Armed</div><div class="opt off">(locked)</div></div>
+    <div class="box"><div class="cap">Signal status</div><div class="opt sel" id="st">Search</div><div class="opt">Track</div><div class="opt">Decode</div></div>
+    <div class="box"><div class="cap on">Scan routine</div><div class="opt sel">Band</div><div class="opt">Decoder</div><div class="opt">Channels</div></div>
+  </div>
+  <div class="spec"><canvas id="sp" width="760" height="150"></canvas></div>
+  <div class="row" style="grid-template-columns: 1.2fr 1fr 1fr;">
+    <div class="box"><div class="cap">Target band</div><div class="opt">11 M  CB  26.965 - 27.405</div><div class="opt dim">384 KHZ WIDE  -  40 CH IN VIEW</div></div>
+    <div class="box"><div class="cap">Signal profile</div><div class="opt sel">Voice</div><div class="opt">Data</div></div>
+    <div class="box"><div class="cap">Targets</div><div class="opt" id="tg">03 live  /  47 today</div><div class="opt dim">noise rejected: 5</div></div>
+  </div>
+  <div class="keys"><div><b>F1</b> Scan</div><div><b>F2</b> Track</div><div><b>F3</b> Bands</div><div><b>F4</b> Decode</div><div><b>F5</b> Exit</div></div>
+</div>
+
+<!-- B: TRACK -->
+<div class="scr">
+  <div class="hd"><div class="bdg">B</div><div class="t">XR 6200-L<br>REMOTE SENTRY RECEIVER SYSTEM</div><div class="bdg">B</div></div>
+  <div style="display:grid; grid-template-columns: 1.1fr 1.5fr 120px; gap: 10px; flex: 1; min-height: 0;">
+    <div style="display:flex; flex-direction:column; justify-content:space-around;">
+      <div class="lbl">Target<br>locked</div>
+      <div class="crit"><div>Strong signal</div></div>
+      <div class="lbl">Time on<br>target (secs)</div>
+    </div>
+    <div style="display:flex; flex-direction:column; justify-content:space-around; gap:8px;">
+      <div class="box" style="text-align:center;"><div class="big">CH 19</div><div style="font-size:26px">27.185 AM</div></div>
+      <div class="box" style="text-align:center;"><div class="big" id="tt">15.8<span class="ghost">3</span></div></div>
+      <div style="text-align:center; font-size:22px">ID: AM VOICE - CB CHANNEL 19 - TRUCKERS' CHANNEL</div>
+    </div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px; min-height: 0;">
+      <div style="display:flex; flex-direction:column; align-items:center; gap:4px; min-height:0;"><div>Sig</div><div class="bar" style="flex:1"><i style="height:78%"></i></div></div>
+      <div style="display:flex; flex-direction:column; align-items:center; gap:4px; min-height:0;"><div>Noise</div><div class="bar" style="flex:1"><i style="height:22%"></i></div></div>
+    </div>
+  </div>
+  <div class="keys"><div><b>F1</b> Scan</div><div><b>F2</b> Hold</div><div><b>F3</b> Record</div><div><b>F4</b> Next</div><div><b>F5</b> Ignore</div></div>
+</div>
+
+<!-- C: BANDS -->
+<div class="scr">
+  <div class="hd"><div class="bdg">C</div><div class="t">XR 6200-L<br>BAND INTELLIGENCE</div><div class="bdg">C</div></div>
+  <div class="box" style="flex:1; padding:0;">
+    <table>
+      <tr><th>Band</th><th>MHz</th><th>What you'll hear</th><th>Best</th><th>Antenna</th><th>Now</th></tr>
+      <tr><td>80 M</td><td>3.5-4.0</td><td>Ham nets, regional voice</td><td>Night</td><td>Long wire</td><td>Open</td></tr>
+      <tr><td>49 M BC</td><td>5.9-6.2</td><td>Shortwave broadcasts</td><td>Night</td><td>Any wire</td><td>Open</td></tr>
+      <tr class="sel"><td>40 M</td><td>7.0-7.3</td><td>FT8, CW, voice, all night</td><td>Night</td><td>JPC-12 red-silver</td><td>Open</td></tr>
+      <tr><td>30 M</td><td>10.1</td><td>FT8, CW only. WWV 10.000</td><td>Any</td><td>JPC-12 midway</td><td>Open</td></tr>
+      <tr><td>20 M</td><td>14.0-14.35</td><td>The world: FT8, voice, SSTV</td><td>Day</td><td>JPC-12 red-gold</td><td class="dim">Fading</td></tr>
+      <tr><td>11 M CB</td><td>26.9-27.4</td><td>CB voice, truckers on 19</td><td>Day</td><td>CB whip</td><td class="dim">Local</td></tr>
+      <tr><td>10 M</td><td>28.0-29.7</td><td>FT8, beacons when open</td><td>Midday</td><td>CB whip works</td><td class="dim">Closed</td></tr>
+      <tr><td>Air</td><td>118-137</td><td>Pilots and towers (AM)</td><td>Any</td><td>Any short whip</td><td>Local</td></tr>
+    </table>
+  </div>
+  <div class="box" style="font-size:20px; text-transform:none;">40 m: the night band. Signals bounce off the upper atmosphere after dark, so you'll hear the whole country. Try FT8 at 7.074, voice from 7.125 up.</div>
+  <div class="keys"><div><b>F1</b> Scan</div><div><b>F2</b> Track</div><div><b>F3</b> Listen</div><div><b>F4</b> Decode</div><div><b>F5</b> Exit</div></div>
+</div>
+
+<!-- D: DECODE -->
+<div class="scr">
+  <div class="hd"><div class="bdg">D</div><div class="t">XR 6200-L<br>DECODER SENTRY</div><div class="bdg">D</div></div>
+  <div style="display:grid; grid-template-columns: 200px 1fr; gap: 8px; flex:1; min-height:0;">
+    <div class="box"><div class="cap">Target select</div>
+      <div class="opt sel">FT8</div><div class="opt">FT4</div><div class="opt">WSPR</div><div class="opt">CW</div><div class="opt">SSTV</div><div class="opt">NAVTEX</div><div class="opt">WEFAX</div></div>
+    <div class="box" style="padding:0;">
+      <table>
+        <tr><th>Known freq</th><th>Band</th><th>Status</th><th>Decodes</th></tr>
+        <tr><td>7.074</td><td>40 M</td><td>Engaged</td><td>17 / slot</td></tr>
+        <tr class="sel"><td>10.136</td><td>30 M</td><td id="ds">Search</td><td>-</td></tr>
+        <tr><td>14.074</td><td>20 M</td><td>Queued</td><td class="dim">2 h ago: 9</td></tr>
+        <tr><td>3.573</td><td>80 M</td><td>Queued</td><td>-</td></tr>
+        <tr><td>18.100</td><td>17 M</td><td class="dim">Closed</td><td>-</td></tr>
+        <tr><td>28.074</td><td>10 M</td><td class="dim">Closed</td><td class="dim">00:25: 1</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="row" style="grid-template-columns: 1fr 1fr 1fr;">
+    <div class="box"><div class="cap">Sweep routine</div><div class="opt sel">Auto: 2 slots each</div></div>
+    <div class="box"><div class="cap">Last contact</div><div class="opt">K2AK  DM41  2,600 KM</div></div>
+    <div class="box"><div class="cap">Rounds</div><div class="opt" id="rd">0471 decoded</div></div>
+  </div>
+  <div class="keys"><div><b>F1</b> Scan</div><div><b>F2</b> Map</div><div><b>F3</b> Bands</div><div><b>F4</b> Sweep</div><div><b>F5</b> Exit</div></div>
+</div>
+
+<script>
+const cv = document.getElementById("sp"), c = cv.getContext("2d");
+const AMB = "#ffc21a", DIM = "#6e5410";
+let t = 0;
+const targets = [{x: .52, w: .012, a: .8}, {x: .74, w: .01, a: .5}, {x: .31, w: .006, a: .35}];
+function draw() {
+  const W = cv.width, H = cv.height;
+  c.fillStyle = "#0b0800"; c.fillRect(0, 0, W, H);
+  c.strokeStyle = DIM; c.lineWidth = 1;
+  for (let i = 0; i < 40; i++) { const x = (i + .5) / 40 * W; c.beginPath(); c.moveTo(x, H - 10); c.lineTo(x, H); c.stroke(); }
+  c.strokeStyle = AMB; c.lineWidth = 2; c.beginPath();
+  for (let x = 0; x < W; x++) {
+    const f = x / W; let y = .12 + Math.random() * .1;
+    for (const g of targets) { const d = (f - g.x) / g.w; y += g.a * Math.exp(-d * d) * (.75 + .25 * Math.sin(t / 5 + g.x * 9)); }
+    const py = H - 14 - y * (H - 30);
+    x ? c.lineTo(x, py) : c.moveTo(x, py);
+  }
+  c.stroke();
+  for (const g of targets.slice(0, 2)) {
+    const x = g.x * W, s = 16;
+    c.strokeStyle = AMB; c.lineWidth = 2;
+    c.strokeRect(x - s, 8, 2 * s, H - 30);
+  }
+  c.fillStyle = AMB; c.font = "20px VT323, monospace";
+  c.fillText("CH 1", 4, 20); c.fillText("CH 40", W - 52, 20); c.fillText("TGT CH 19", targets[0].x * W + 20, 26);
+  t++; requestAnimationFrame(draw);
+}
+draw();
+let n = 15.8;
+setInterval(() => {
+  n += .01; const s = n.toFixed(2);
+  document.getElementById("tt").innerHTML = s.slice(0, -1) + '<span class="ghost">' + s.slice(-1) + "</span>";
+}, 100);
+setInterval(() => { const e = document.getElementById("st"); e.textContent = e.textContent === "Search" ? "Search_" : "Search"; }, 500);
+</script>
+</body>
+</html>
