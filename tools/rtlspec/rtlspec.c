@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <poll.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <signal.h>
 #include <stdint.h>
@@ -43,9 +44,14 @@
 
 static volatile sig_atomic_t stop;
 
+static rtlsdr_dev_t *volatile term_dev;      /* the stick streaming: a signal cancels its transfers */
+
+/* As rtl_sdr's handler: the transfers cancelled here too, so a stream that has stalled (no callback to see stop)
+ * still ends cleanly; the radio's USB host (MUSB) is left broken by a stick killed with transfers in flight */
 static void on_term(int s) {
     (void)s;
     stop = 1;
+    if (term_dev) rtlsdr_cancel_async(term_dev);
 }
 
 /* In place, radix 2, n a power of two */
@@ -263,58 +269,82 @@ static inline void listen_sample(uint8_t ib, uint8_t qb) {
 static long per_row_now;        /* samples a row at the rate now */
 static int  rows_now = 20;
 
-/* The commands waiting on standard input */
-static void commands(rtlsdr_dev_t *dev, uint64_t *centre, bool *fresh) {
-    static char line[128];
-    static int  len;
-    struct pollfd p = {.fd = 0, .events = POLLIN};
+/* The commands, on a thread of their own: the tuner's calls are USB control transfers, which libusb does not take
+ * from inside its own event callback (the stream's, on_samples). What they change for the stream is handed to it
+ * through `pend` and taken at the start of its next transfer */
+static pthread_mutex_t pend_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+    bool     centre, rate, listen;
+    uint64_t centre_hz, listen_hz;
+    uint32_t rate_sps;
+    int      mode;
+} pend;
 
-    while (poll(&p, 1, 0) > 0) {
-        ssize_t n = read(0, line + len, sizeof(line) - 1 - len);
+static void *commands_thread(void *arg) {
+    rtlsdr_dev_t *dev = arg;
+    char          line[128];
+    FILE         *in = fdopen(0, "r");
 
-        if (n <= 0) {
-            stop = 1;                   /* the GUI went */
-            return;
-        }
-        len += (int)n;
-        line[len] = 0;
-        char *nl;
-        while ((nl = strchr(line, '\n'))) {
-            *nl = 0;
-            if (line[0] == 'f') {
-                uint64_t hz = strtoull(line + 1, NULL, 10);
-                if (hz >= 24000000 && hz <= 1766000000 && rtlsdr_set_center_freq(dev, (uint32_t)hz) == 0) {
-                    *centre = hz;
-                    *fresh  = true;
-                    if (l_hz) listen_set(l_mode ? l_mode : want_mode, l_hz, hz, rate_now);
-                }
-            } else if (line[0] == 'l') {
-                char    *e;
-                uint64_t hz = strtoull(line + 1, &e, 10);
+    while (in && !stop && fgets(line, sizeof(line), in)) {
+        if (line[0] == 'f') {
+            uint64_t hz = strtoull(line + 1, NULL, 10);
 
-                want_mode = (int)strtol(e, NULL, 10);
-                listen_set(hz ? want_mode : 0, hz, *centre, rate_now);
-                if (!hz) l_hz = 0;
-            } else if (line[0] == 's') {
-                uint32_t r = (uint32_t)strtoul(line + 1, NULL, 10);
-
-                if (r >= 900001 && r <= 3200000 && rtlsdr_set_sample_rate(dev, r) == 0) {
-                    rtlsdr_reset_buffer(dev);
-                    rate_now    = rtlsdr_get_sample_rate(dev);
-                    per_row_now = (long)rate_now / rows_now;
-                    *fresh      = true;
-                    if (l_hz) listen_set(l_mode ? l_mode : want_mode, l_hz, *centre, rate_now);
-                }
-            } else if (line[0] == 'g') {
-                set_gain(dev, atoi(line + 1));
-            } else if (line[0] == 'q') {
-                stop = 1;
+            if (hz >= 24000000 && hz <= 1766000000 && rtlsdr_set_center_freq(dev, (uint32_t)hz) == 0) {
+                pthread_mutex_lock(&pend_lock);
+                pend.centre    = true;
+                pend.centre_hz = hz;
+                pthread_mutex_unlock(&pend_lock);
             }
-            len -= (int)(nl + 1 - line);
-            memmove(line, nl + 1, len + 1);
+        } else if (line[0] == 'l') {
+            char    *e;
+            uint64_t hz = strtoull(line + 1, &e, 10);
+
+            pthread_mutex_lock(&pend_lock);
+            pend.listen    = true;
+            pend.listen_hz = hz;
+            pend.mode      = hz ? (int)strtol(e, NULL, 10) : 0;
+            pthread_mutex_unlock(&pend_lock);
+        } else if (line[0] == 's') {
+            uint32_t r = (uint32_t)strtoul(line + 1, NULL, 10);
+
+            if (r >= 900001 && r <= 3200000 && rtlsdr_set_sample_rate(dev, r) == 0) {
+                pthread_mutex_lock(&pend_lock);
+                pend.rate     = true;
+                pend.rate_sps = rtlsdr_get_sample_rate(dev);
+                pthread_mutex_unlock(&pend_lock);
+            }
+        } else if (line[0] == 'g') {
+            set_gain(dev, atoi(line + 1));
+        } else if (line[0] == 'q') {
+            break;
         }
-        if (len >= (int)sizeof(line) - 1) len = 0;
     }
+    stop = 1;                           /* "q", or the GUI went */
+    rtlsdr_cancel_async(dev);
+    return NULL;
+}
+
+/* What the commands changed, taken by the stream */
+static void commands(uint64_t *centre, bool *fresh) {
+    pthread_mutex_lock(&pend_lock);
+    if (pend.rate) {
+        rate_now    = pend.rate_sps;
+        per_row_now = (long)rate_now / rows_now;
+        *fresh      = true;
+    }
+    if (pend.centre) {
+        *centre = pend.centre_hz;
+        *fresh  = true;
+    }
+    if (pend.listen) {
+        want_mode = pend.mode;
+        listen_set(pend.mode, pend.listen_hz, *centre, rate_now);
+        if (!pend.listen_hz) l_hz = 0;
+    } else if ((pend.centre || pend.rate) && l_hz) {
+        listen_set(l_mode ? l_mode : want_mode, l_hz, *centre, rate_now);
+    }
+    pend.centre = pend.rate = pend.listen = false;
+    pthread_mutex_unlock(&pend_lock);
 }
 
 /* ---- The stream: rows and, while listening, audio ---- */
@@ -335,7 +365,7 @@ static void on_samples(unsigned char *buf, uint32_t n, void *ctx) {
     int bins = n_bins;
     (void)ctx;
 
-    commands(the_dev, &centre_now, &fresh);
+    commands(&centre_now, &fresh);
     if (stop) {
         rtlsdr_cancel_async(the_dev);
         return;
@@ -445,8 +475,12 @@ int main(int argc, char **argv) {
 
     /* Several transfers queued all the time (as rtl_sdr and dump1090 read): one at a time, what the stick sent
      * between two of them was lost, a quarter of it whatever the rate */
-    the_dev = dev;
+    the_dev  = dev;
+    term_dev = dev;
+    pthread_t cmd;
+    pthread_create(&cmd, NULL, commands_thread, dev);
     rtlsdr_read_async(dev, on_samples, NULL, 12, READ_LEN);
+    stop = 1;
     rtlsdr_close(dev);
     return 0;
 }

@@ -1672,12 +1672,12 @@ static int rtl_peaks(int64_t lo, double px_hz, int32_t *best_hz, float *best_db)
 
 static void show_rtl(void) {
     static const char *const st[] = {"OFF", "NO HELPER ON THIS IMAGE", "NO RTL-SDR ON USB", "STICK BUSY: WAITING",
-                                     "OPENING THE STICK", "RECEIVING"};
+                                     "OPENING THE STICK", "RECEIVING", "STICK SENDS NOTHING"};
     rtl_spec_state_t s = rtl_spectrum_state();
     char             t[48], tn[16], f[16];
     int              g = param_i_get(cfg_rtl_gain);
 
-    if (listen_rtl && (s == RTL_SPEC_NO_STICK || s == RTL_SPEC_NO_HELPER)) {
+    if (listen_rtl && (s == RTL_SPEC_NO_STICK || s == RTL_SPEC_NO_HELPER || s == RTL_SPEC_STALLED)) {
         rtl_listen(false);
         osd("BACK TO THE X6200", "THE RTL-SDR WENT: THE SPEAKER AND THE VFO KNOB ARE THE X6200'S AGAIN.", -1);
     }
@@ -1699,7 +1699,8 @@ static void show_rtl(void) {
     opt_set(&r_sig, 1, t, 2);
     /* No rows: why, in the picture */
     static const char *const why[] = {"", "THIS IMAGE HAS NO /USR/BIN/X6X00-RTLSPEC", "NO RTL-SDR ON USB\n\nPLUG ONE INTO THE HOST PORT",
-                                      "THE STICK IS BUSY\n\nWAITING FOR IT", "OPENING THE RTL-SDR", ""};
+                                      "THE STICK IS BUSY\n\nWAITING FOR IT", "OPENING THE RTL-SDR", "",
+                                      "THE RTL-SDR SENDS NOTHING\n\nUNPLUG IT AND PLUG IT IN AGAIN"};
     lv_label_set_text(rtl_why_l, why[s]);
     if (s == RTL_SPEC_ON || s == RTL_SPEC_OFF) lv_obj_add_flag(rtl_why_l, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_clear_flag(rtl_why_l, LV_OBJ_FLAG_HIDDEN);

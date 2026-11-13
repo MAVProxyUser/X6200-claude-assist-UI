@@ -83,6 +83,8 @@ static void say(const char *cmd) {
     pthread_mutex_unlock(&lock);
 }
 
+static int64_t spawned_hz;      /* the frequency the helper was started on */
+
 static pid_t spawn(int *in_fd, int *out_fd) {
     int   to[2], from[2];
     char  f[24], g[16], n[16], r[16];
@@ -93,7 +95,8 @@ static pid_t spawn(int *in_fd, int *out_fd) {
         close(to[0]), close(to[1]);
         return -1;
     }
-    snprintf(f, sizeof(f), "%lld", (long long)atomic_load(&want_hz));
+    spawned_hz = atomic_load(&want_hz);
+    snprintf(f, sizeof(f), "%lld", (long long)spawned_hz);
     snprintf(g, sizeof(g), "%d", atomic_load(&want_gain));
     snprintf(n, sizeof(n), "%d", BINS);
     snprintf(r, sizeof(r), "%d", ROWS);
@@ -129,8 +132,13 @@ static void end_child(pid_t p, int in_fd, int out_fd) {
         close(in_fd);
     }
     if (out_fd >= 0) close(out_fd);
+    /* Time to close the stick: a helper killed with transfers in flight leaves the radio's USB host (MUSB) broken
+     * for the stick until it is plugged in again, and once froze the radio. SIGTERM after 2 s (it cancels them
+     * too), SIGKILL only after 6 */
     if (p > 0) {
-        for (int i = 0; i < 20 && waitpid(p, NULL, WNOHANG) == 0; i++) usleep(50000);
+        for (int i = 0; i < 40 && waitpid(p, NULL, WNOHANG) == 0; i++) usleep(50000);
+        if (waitpid(p, NULL, WNOHANG) == 0) kill(p, SIGTERM);
+        for (int i = 0; i < 80 && waitpid(p, NULL, WNOHANG) == 0; i++) usleep(50000);
         if (waitpid(p, NULL, WNOHANG) == 0) {
             kill(p, SIGKILL);
             waitpid(p, NULL, 0);
@@ -208,7 +216,7 @@ static void *spec_thread(void *arg) {
             sleep(2);
             continue;
         }
-        if (state != RTL_SPEC_ON) state = RTL_SPEC_OPENING;
+        if (state != RTL_SPEC_STALLED) state = RTL_SPEC_OPENING;
         if (!read_line(out_fd, line, sizeof(line), 8000) ||
             sscanf(line, "RTLSPEC %d %15s %u %d", &ver, tn, &rate, &nb) != 4 || ver != 1 || nb < 64 || nb > MAX_BINS) {
             end_child(p, in_fd, out_fd);
@@ -227,8 +235,8 @@ static void *spec_thread(void *arg) {
             say(cmd);
         }
 
-        /* A retune asked for while it started */
-        int64_t asked = atomic_load(&want_hz);
+        /* What it was started on: a retune asked for while it started (before it took commands) is sent below */
+        int64_t asked = spawned_hz;
         for (;;) {
             size_t len = 24 + (size_t)nb * 4;
 
@@ -274,10 +282,15 @@ static void *spec_thread(void *arg) {
                 say(cmd);
             }
         }
+        bool got_rows = state == RTL_SPEC_ON;
         end_child(p, in_fd, out_fd);
-        if (atomic_load(&want)) {       /* it went: the stick unplugged, most likely */
-            state = RTL_SPEC_NO_STICK;
-            sleep(2);
+        if (atomic_load(&want)) {       /* it went: unplugged, or the stream stalled */
+            static int stalls;
+
+            stalls = got_rows ? 0 : stalls + 1;
+            /* Opened twice and nothing sent: the USB host's endpoint is broken, retries would not mend it */
+            state = stalls >= 2 ? RTL_SPEC_STALLED : RTL_SPEC_NO_STICK;
+            sleep(stalls >= 2 ? 15 : 2);
         }
     }
     return NULL;

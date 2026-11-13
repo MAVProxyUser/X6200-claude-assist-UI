@@ -19,6 +19,7 @@ typedef enum {
     RTL_SPEC_BUSY,          /* the stick, held by another program for now */
     RTL_SPEC_OPENING,       /* started, its first row not here yet */
     RTL_SPEC_ON,            /* rows coming */
+    RTL_SPEC_STALLED,       /* the stick opened but sent nothing, twice: the radio's USB has to have it again */
 } rtl_spec_state_t;
 
 #define RTL_SPEC_MIN_HZ  24000000LL
