@@ -177,16 +177,67 @@ The patched X6100 base comes with its own instructions.
 
 ### This fork: the Sentry look (X6200)
 
-Taken on 12 and 13 November 2026 on an X6200 in Dublin, Ohio, on its own
-antenna; the aircraft are real, heard by a GNS 5890 ADS-B stick on its USB port.
+This fork ([MAVProxyUser/X6200-claude-assist-UI](https://github.com/MAVProxyUser/X6200-claude-assist-UI)) adds a
+receive-first home screen, the **Sentry**, to the X6200, with these on top of upstream:
+
+- **The Sentry**: six screens in an amber-on-black look, turned with the MFK's inner ring. A SCAN watches the
+  base's 384 kHz around the dial and marks what it hears; B TRACK holds one signal; C BANDS says what each band
+  carries and what antenna it wants; D DECODE opens the decoders on known frequencies; E SYSTEM reaches Settings,
+  the apps, AIRSPACE, VHF/UHF, the classic radio screen and a shell. Transmit is locked while it is open. GEN
+  shows the controls (help below).
+- **F VHF/UHF**: an RTL-SDR stick on the HOST port, 24 MHz to 1.7 GHz, as a trace and a 3D picture like A SCAN's,
+  with its signals named (NOAA WX1-7, AIS, APRS, the ISS, marine 16, the airband, sondes, ISM...). F4 VIEW shows the
+  stick alone, the stick under the X6200's own spectrum, or the X6200 alone; F2 steps through presets (NOAA
+  weather, 2 m, airband, FM, marine, Meteor, sondes, 70 cm, ISM, GMRS, UAT, ADS-B). **F5 LISTEN** (or a tap on a
+  signal) puts the stick on the speaker, narrow FM, AM on the airband or wide FM by band, and gives it the VFO
+  knob, a channel a click; the header then shows its frequency. A small helper, `x6x00-rtlspec`
+  ([tools/rtlspec](tools/rtlspec/rtlspec.c)), reads the stick.
+- **AIRSPACE**: ADS-B aircraft on a scope with their tracks fading out, from a GNS 5890, a microADSB or an
+  RTL-SDR (dump1090-fa, in the image). It lends the RTL-SDR to F VHF/UHF while that screen is open.
+- **Keyboard and mouse**: a Bluetooth or USB keyboard types in text boxes; its shortcuts (the knob keys,
+  CapsLock chords) only with Settings > Keys > KEYBOARD AND MOUSE > Shortcuts on, off by default. A mouse or a
+  keyboard's touchpad points and clicks on every screen with Mouse on: the wheel is the MFK, the right button ESC.
+- **Boot video**: your own `/mnt/bootvideo.mp4` plays from the start of the boot in place of the logo, and the
+  main screen comes when it ends ([manual](docs/MANUAL.md#boot-video)); ffmpeg is in the image.
+- The clock in your time zone (Settings > General > Date / Time), the processor's temperature beside the battery.
+
+Taken on 13 November 2026 on an X6200 in Dublin, Ohio, on its own antenna and a generic RTL-SDR (R820T) with its
+stock whip: NOAA Weather Radio on 162.550 MHz and WNCI 97.9 FM are real; the aircraft on AIRSPACE (12 November)
+were heard by a GNS 5890. The WiFi network's name, the addresses and the Bluetooth adapter's address are blanked.
+
+**The Sentry**
 
 | | |
 |---|---|
-| ![A SCAN](docs/readme/a_scan.png) **A SCAN**, the screen the radio starts in | ![C BANDS](docs/readme/c_bands.png) **C BANDS** |
-| ![D DECODE](docs/readme/d_decode.png) **D DECODE** | ![E SYSTEM](docs/readme/e_system.png) **E SYSTEM** |
-| ![AIRSPACE](docs/readme/f_airspace.png) **AIRSPACE**: ADS-B from a GNS 5890 or a microADSB on USB | ![Settings](docs/readme/settings.png) **Settings**, in the same look |
-| ![APP](docs/readme/apps.png) **APP** | ![Modes](docs/readme/modes.png) **Modes** |
-| ![FT8](docs/readme/ft8.png) **FT8** | ![Classic radio](docs/readme/classic.png) **Classic radio** |
+| ![A SCAN](docs/readme/a_scan.png) **A SCAN**, the screen the radio starts in | ![B TRACK](docs/readme/b_track.png) **B TRACK**, one signal held |
+| ![C BANDS](docs/readme/c_bands.png) **C BANDS** | ![D DECODE](docs/readme/d_decode.png) **D DECODE** |
+| ![E SYSTEM](docs/readme/e_system.png) **E SYSTEM** | ![Help](docs/readme/sentry_help.png) **GEN**: the controls |
+
+**F VHF/UHF, an RTL-SDR on the HOST port**
+
+| | |
+|---|---|
+| ![F VHF/UHF, RTL](docs/readme/f_vhf_rtl.png) **View RTL**: NOAA Weather Radio, WX1 on 162.550 | ![F VHF/UHF, split](docs/readme/f_vhf_split.png) **View SPLIT**: the X6200's 60 m above, the stick below |
+| ![F VHF/UHF, X6200](docs/readme/f_vhf_x6200.png) **View X6200**: the radio's own spectrum alone | ![F VHF/UHF, listening](docs/readme/f_vhf_listen.png) **F5 LISTEN**: WX1 on the speaker, the header follows it |
+| ![F VHF/UHF, FM](docs/readme/f_vhf_fm.png) **FM BC**: listening to WNCI 97.9 in wide FM | ![AIRSPACE](docs/readme/f_airspace.png) **AIRSPACE**: ADS-B from a GNS 5890, a microADSB or an RTL-SDR |
+
+**Settings, in the same look: every tab**
+
+| | |
+|---|---|
+| ![General](docs/readme/settings_general.png) **General**: station, band plan, date and time zone | ![Display](docs/readme/settings_display.png) **Display** |
+| ![Audio](docs/readme/settings_audio.png) **Audio** | ![Wireless](docs/readme/settings_wireless.png) **Wireless** |
+| ![Bluetooth](docs/readme/settings_bluetooth.png) **Bluetooth**: pairing, headphones and keyboards | ![Keys](docs/readme/settings_keys.png) **Keys**: long presses, the hand mic, the paddle |
+| ![Keyboard and mouse](docs/readme/settings_keys_keyboard.png) **Keys > KEYBOARD AND MOUSE**: layout, Shortcuts, Mouse | ![Cluster](docs/readme/settings_cluster.png) **Cluster** |
+| ![TX Cal](docs/readme/settings_txcal.png) **TX Cal** | ![Info](docs/readme/settings_info.png) **Info**: versions, the PA bias, Update |
+| ![Walkie](docs/readme/settings_walkie.png) **Walkie** | |
+
+**Apps and the classic screen**
+
+| | |
+|---|---|
+| ![APP](docs/readme/apps.png) **APP**: every app, the Sentry and Airspace among them | ![Modes](docs/readme/modes.png) **Digital modes** |
+| ![FT8](docs/readme/ft8.png) **FT8** | ![Classic radio](docs/readme/classic.png) **Classic radio**: the clock and the temperature at the top right |
 
 **Inspiration.** The look is borrowed from the remote sentry guns of James
 Cameron's *Aliens* (1986, 20th Century Fox) and their amber-on-black screens,
