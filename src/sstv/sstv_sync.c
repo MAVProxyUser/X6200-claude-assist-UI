@@ -5,7 +5,8 @@
  * the window energy at 1200 Hz, so it does not depend on the level.  A pulse
  * starts above 0.55 and ends below 0.40.  Real 4.9-10 ms syncs measure 6-12
  * ms here; anything under 5 ms is dropped (noise makes many short pulses,
- * almost no long ones).
+ * almost no long ones).  PD's 20-ms syncs measure 21-23 ms: a class of their
+ * own, 15-28 ms, that only the PD modes chain (and the others never see).
  *
  * Mode: for every new pulse and every mode, is there a pulse one line period
  * earlier (or two, if one sync was lost)?  The periods are far apart against
@@ -37,6 +38,8 @@
 #define FALL        0.40
 #define SHORTEST_MS 5.0
 #define LONGEST_MS  14.0
+#define PD_SHORTEST_MS 15.0     /* PD: 20-ms syncs */
+#define PD_LONGEST_MS  28.0
 #define TO_LOCK     5
 #define TOL_MS      3.0
 #define TOL_SHARE   0.006       /* of the line, if larger than TOL_MS */
@@ -50,6 +53,7 @@
 /* Mode order of the chain tables.  It matters only for ties. */
 static const sstv_mode_t order[SSTV_SYNC_MODES] = {
     SSTV_ROBOT8, SSTV_ROBOT36, SSTV_ROBOT72, SSTV_MARTIN2, SSTV_MARTIN1, SSTV_SCOTTIE2, SSTV_SCOTTIE1, SSTV_SCOTTIE_DX,
+    SSTV_PD120, SSTV_PD90, SSTV_PD180,
 };
 
 typedef struct { float b0, b1, b2, a1, a2; } biquad_t;
@@ -106,6 +110,13 @@ static int row_of(sstv_mode_t mode)
 static double line_ms(int row) { return sstv_mode_info(order[row])->line_ms; }
 static double line_len(int row) { return line_ms(row) * SSTV_RATE / 1000.0; }
 
+/* A pulse of ms can be a line sync of table row `row` */
+static bool fits(int row, double ms)
+{
+    if (sstv_mode_info(order[row])->line_rows == 2) return ms >= PD_SHORTEST_MS && ms <= PD_LONGEST_MS;
+    return ms >= SHORTEST_MS && ms <= LONGEST_MS;
+}
+
 static double tolerance(int row)
 {
     double t = TOL_MS * SSTV_RATE / 1000.0, share = TOL_SHARE * line_len(row);
@@ -121,7 +132,8 @@ double sstv_sync_line_s(sstv_mode_t mode)
 double sstv_sync_picture_s(sstv_mode_t mode)
 {
     int r = row_of(mode);
-    return r < 0 ? 0.0 : line_ms(r) * sstv_mode_info(mode)->height / 1000.0;
+    const sstv_mode_info_t *mi = sstv_mode_info(mode);
+    return r < 0 ? 0.0 : line_ms(r) * mi->height / mi->line_rows / 1000.0;
 }
 
 void sstv_sync_init(sstv_sync_t *s, sstv_mode_t only)
@@ -160,12 +172,13 @@ static void fit_add(sstv_sync_t *s, double line, double at)
     s->st.clock_ppm = (p / nominal - 1.0) * 1e6;
 }
 
-/* The latest remembered pulse one period (+- tol) before t, or -1 */
-static int earlier(const sstv_sync_t *s, uint64_t t, double period, double tol)
+/* The latest remembered pulse that can be a sync of table row `row`, one
+ * period (+- tol) before t, or -1 */
+static int earlier(const sstv_sync_t *s, int row, uint64_t t, double period, double tol)
 {
     for (int k = 1; k < s->count; ++k) {
         int i = (s->head - 1 - k + SSTV_SYNC_PULSES) % SSTV_SYNC_PULSES;
-        if (s->at[i] >= t) continue;               /* lock() starts from older pulses */
+        if (s->at[i] >= t || !fits(row, s->ms[i])) continue;   /* lock() starts from older pulses */
         double d = (double)(t - s->at[i]);
         if (d > period + tol) return -1;           /* older ones are further away */
         if (fabs(d - period) <= tol) return i;
@@ -190,7 +203,7 @@ static void lock(sstv_sync_t *s, int row, uint64_t t)
     uint64_t at = t;
     fit_add(s, 0.0, (double)t);
     for (int k = 0; k < 8; ++k) {
-        int i = earlier(s, at, line_len(row), tolerance(row));
+        int i = earlier(s, row, at, line_len(row), tolerance(row));
         if (i < 0) break;
         line -= 1.0;
         at = s->at[i];
@@ -203,7 +216,7 @@ static void lock(sstv_sync_t *s, int row, uint64_t t)
 
 static void pulse(sstv_sync_t *s, uint64_t t, double ms)
 {
-    if (ms < SHORTEST_MS || ms > LONGEST_MS) return;
+    if (ms < SHORTEST_MS || ms > PD_LONGEST_MS || (ms > LONGEST_MS && ms < PD_SHORTEST_MS)) return;
     int me = s->head;
     s->at[me] = t;
     s->ms[me] = (float)ms;
@@ -214,10 +227,10 @@ static void pulse(sstv_sync_t *s, uint64_t t, double ms)
     for (int m = 0; m < SSTV_SYNC_MODES; ++m) {
         s->chain[me][m] = 1;
         s->single[me][m] = 0;
-        if (s->only != SSTV_UNKNOWN && order[m] != s->only) continue;
-        int one = 1, prev = earlier(s, t, line_len(m), tolerance(m));
+        if ((s->only != SSTV_UNKNOWN && order[m] != s->only) || !fits(m, ms)) continue;
+        int one = 1, prev = earlier(s, m, t, line_len(m), tolerance(m));
         if (prev < 0) {
-            prev = earlier(s, t, 2.0 * line_len(m), tolerance(m));
+            prev = earlier(s, m, t, 2.0 * line_len(m), tolerance(m));
             one = 0;
         }
         if (prev < 0) continue;
@@ -239,6 +252,7 @@ static void pulse(sstv_sync_t *s, uint64_t t, double ms)
     if (s->st.state != SSTV_SYNC_LOCKED) return;
 
     /* on the grid? */
+    if (!fits(s->cur, ms)) return;
     double since = (double)(t - s->st.last_sync);
     double lines = floor(since / s->st.period + 0.5);
     if (lines < 1.0) return;

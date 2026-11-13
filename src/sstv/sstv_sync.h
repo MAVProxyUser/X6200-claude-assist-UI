@@ -22,7 +22,7 @@ typedef enum {
 #define SSTV_SYNC_WIN    22   /* 2-ms detector window                           */
 #define SSTV_SYNC_PULSES 64   /* pulses remembered                              */
 #define SSTV_SYNC_FIT    32   /* syncs in the line period fit                   */
-#define SSTV_SYNC_MODES  8
+#define SSTV_SYNC_MODES  11
 
 typedef struct {
     sstv_sync_state_t state;

@@ -138,7 +138,8 @@ static const freq_list_item_t freqs[] = {
 
 static pthread_mutex_t rx_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* the picture shown and saved, filled by the decoder thread */
+/* the picture shown and saved, filled by the decoder thread (930 kB each for
+ * PD120's 640x496; pages never written stay unallocated) */
 static uint8_t       pic[SSTV_MAX_W * SSTV_MAX_H * 3];
 static uint8_t       pic_tmp[SSTV_MAX_W * SSTV_MAX_H * 3];     /* sstv_denoise() scratch */
 static sstv_mode_t   pic_mode;
@@ -514,14 +515,14 @@ static void auto_rows_start(void)
     auto_rows_on = true;
 }
 
-/* Draws up to ROWS_AT_ONCE rows whose audio is in buf, scaled like
- * show_picture() straight into the canvas buffer.  The audio and the row
- * state are copied under rx_lock (audio_cb() may restart the recording),
- * the row is drawn outside it.  false: the recording is over. */
+/* Draws up to ROWS_AT_ONCE lines (PD: two rows each) whose audio is in buf,
+ * scaled like show_picture() straight into the canvas buffer.  The audio and
+ * the row state are copied under rx_lock (audio_cb() may restart the
+ * recording), the line is drawn outside it.  false: the recording is over. */
 static bool rows_tick(sstv_rows_t *r, const sstv_sync_t *s, float *const *buf, const long *n,
                       volatile bool *recording)
 {
-    uint8_t     line[SSTV_MAX_W * 3];
+    uint8_t     line[2 * SSTV_MAX_W * 3];
     sstv_rows_t one;
     int         drawn = 0;
 
@@ -540,17 +541,21 @@ static bool rows_tick(sstv_rows_t *r, const sstv_sync_t *s, float *const *buf, c
         pthread_mutex_unlock(&rx_lock);
         if (!on) return false;
         if (!go) break;
-        int row = sstv_rows_draw(&one, rows_audio, line);
-        if (row < 0 || !sstv_canvas) continue;
+        int first = sstv_rows_draw(&one, rows_audio, line);
+        if (first < 0 || !sstv_canvas) continue;
 
         int w = one.width, h = one.height, ow, oh, x0, y0;
         fit(w, h, &ow, &oh, &x0, &y0);
-        int y1 = (int)(((int64_t)(row + 1) * oh + h - 1) / h);
-        for (int y = (int)(((int64_t)row * oh + h - 1) / h); y < y1 && y < oh; ++y)
-            for (int x = 0; x < ow; ++x) {
-                const uint8_t *p = line + (size_t)(x * w / ow) * 3;
-                sstv_pixels[(size_t)(y0 + y) * SSTV_PIC_W + x0 + x] = lv_color_make(p[0], p[1], p[2]);
-            }
+        for (int k = 0; k < one.per_line && first + k < h; ++k) {
+            int            row = first + k;
+            const uint8_t *src = line + (size_t)k * w * 3;
+            int            y1 = (int)(((int64_t)(row + 1) * oh + h - 1) / h);
+            for (int y = (int)(((int64_t)row * oh + h - 1) / h); y < y1 && y < oh; ++y)
+                for (int x = 0; x < ow; ++x) {
+                    const uint8_t *p = src + (size_t)(x * w / ow) * 3;
+                    sstv_pixels[(size_t)(y0 + y) * SSTV_PIC_W + x0 + x] = lv_color_make(p[0], p[1], p[2]);
+                }
+        }
         ++drawn;
     }
     if (drawn && sstv_canvas) lv_obj_invalidate(sstv_canvas);
@@ -768,6 +773,9 @@ static void timer_cb(lv_timer_t *t)
         char s[96];
         man_ready = false;
         man_dec = true;
+        /* the recording may have stopped by itself (picture over, time limit) */
+        btn_manual.label = "Start\nManual RX";
+        if (btn_manual.disp_btn) buttons_refresh(&btn_manual);
         snprintf(s, sizeof(s), "Decoding Cont %s", man_mode == SSTV_UNKNOWN ? "Auto" : mode_label_of(man_mode));
         sstv_status(s);
         if (sstv_bar) lv_obj_add_flag(sstv_bar, LV_OBJ_FLAG_HIDDEN);

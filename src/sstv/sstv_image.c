@@ -15,6 +15,9 @@
  * again; a second pass over all syncs can lengthen a short early chain.
  * A chain found late in the picture is moved back by whole lines.  With no
  * usable chain the picture is still drawn at the nominal timing.
+ *
+ * PD: a line (one sync) carries two rows, so the line timing above works on
+ * lines and every line is drawn as two rows (Y of each, the colour shared).
  */
 #include "sstv_image.h"
 #include "sstv_vis.h"
@@ -31,6 +34,8 @@
 #define AVG_LEN   11
 #define PULSES    300
 #define MAX_GAP   8           /* lines between two chained syncs */
+#define SYNC_WIN  224         /* longest sync window, samples (PD: 20 ms) */
+#define FM_LAG    8.0         /* samples sstv_fm() lags its input (see pd_edges) */
 
 /* ---- Front end ---- */
 
@@ -117,6 +122,9 @@ static const layout_t layouts[] = {
     { SSTV_SCOTTIE1,    9.0f, PULSES, 2.229, 2.229, 0.50, false },
     { SSTV_SCOTTIE2,    9.0f, PULSES, 2.229, 2.229, 0.50, false },
     { SSTV_SCOTTIE_DX,  9.0f, PULSES, 2.229, 2.229, 0.50, false },
+    { SSTV_PD90,       20.0f, PULSES, 2.000, 2.000, 0.50, false },
+    { SSTV_PD120,      20.0f, PULSES, 2.000, 2.000, 0.50, false },
+    { SSTV_PD180,      20.0f, PULSES, 2.000, 2.000, 0.50, false },
 };
 
 static const layout_t *layout(sstv_mode_t mode)
@@ -126,7 +134,7 @@ static const layout_t *layout(sstv_mode_t mode)
     return NULL;
 }
 
-/* Colour scan length of Martin and Scottie, ms */
+/* Colour scan length of Martin and Scottie, scan of one component of PD, ms */
 static float scan_ms(sstv_mode_t mode)
 {
     switch (mode) {
@@ -135,8 +143,24 @@ static float scan_ms(sstv_mode_t mode)
     case SSTV_SCOTTIE1:   return 138.240f;
     case SSTV_SCOTTIE2:   return 88.064f;
     case SSTV_SCOTTIE_DX: return 345.600f;
+    case SSTV_PD90:       return 170.240f;
+    case SSTV_PD120:      return 121.600f;
+    case SSTV_PD180:      return 183.040f;
     default:              return 0.0f;
     }
+}
+
+static bool pd(sstv_mode_t mode) { return mode == SSTV_PD90 || mode == SSTV_PD120 || mode == SSTV_PD180; }
+
+/* PD scan edges from the start of the sync, ms: Y0, R-Y, B-Y, Y1, each read
+ * FM_LAG later.  The front end (Hilbert pair + 11-sample mean) answers a
+ * frequency step half-way 9.7 samples late; at PD120's 2.1 samples a pixel
+ * that is worth 4 px.  8 samples put PD90, PD120 and PD180 test pictures
+ * exactly on their pixels (the other modes are read without it). */
+static void pd_edges(sstv_mode_t mode, double *ms)
+{
+    const double ch = scan_ms(mode), lag = FM_LAG * 1000.0 / SR;
+    for (int i = 0; i < 8; ++i) ms[i] = 20.0 + 2.08 + ch * (double)((i + 1) / 2) + lag;
 }
 
 /* Line period, ms */
@@ -148,6 +172,9 @@ static float line_ms(sstv_mode_t mode)
     case SSTV_ROBOT72: return 300.0f;
     case SSTV_MARTIN1: return 446.446f;
     case SSTV_MARTIN2: return 226.798f;
+    case SSTV_PD90:
+    case SSTV_PD120:
+    case SSTV_PD180:   return 20.0f + 2.08f + 4.0f * scan_ms(mode);
     default:           return 9.0f + 3.0f * 1.5f + 3.0f * scan_ms(mode);   /* Scottie */
     }
 }
@@ -155,7 +182,8 @@ static float line_ms(sstv_mode_t mode)
 /* The sample ranges of a row whose sync starts at base (Scottie: the sync
  * between B and R), line length scale x nominal.  seg[2i], seg[2i+1]: one
  * scan; Robot 8 Y; Robot 36 Y, chroma; Robot 72 Y, R-Y, B-Y; Martin and
- * Scottie G, B, R.  Returns the number of scans. */
+ * Scottie G, B, R; PD Y0, R-Y, B-Y, Y1 (a line of two rows).  Returns the
+ * number of scans. */
 static int segments(sstv_mode_t mode, long base, double scale, long *seg)
 {
     switch (mode) {
@@ -196,6 +224,15 @@ static int segments(sstv_mode_t mode, long base, double scale, long *seg)
         seg[5] = seg[4] + (long)llround(ch * SR / 1000.0 * scale);
         return 3;
     }
+    case SSTV_PD90:
+    case SSTV_PD120:
+    case SSTV_PD180: {
+        double ms[8];
+        pd_edges(mode, ms);
+        for (int i = 0; i < 8; ++i)
+            seg[i] = base + (long)llround(ms[i] * SR / 1000.0 * scale);
+        return 4;
+    }
     default:
         return 0;
     }
@@ -208,7 +245,7 @@ static int segments_live(sstv_mode_t mode, long base, double scale, long *seg)
     static const double r8[] = { 10.0, 66.0 }, r36[] = { 12.0, 100.0 },
                         r72[] = { 12.0, 150.0, 156.0, 225.0, 231.0, 300.0 };
     const double  k = (double)SR / 1000.0 * scale;     /* samples per ms */
-    double        ms[6];
+    double        ms[8];
     const double *t = ms;
     int           n = 6;
 
@@ -229,6 +266,12 @@ static int segments_live(sstv_mode_t mode, long base, double scale, long *seg)
         ms[0] = -(2.0 * ch + 1.5), ms[1] = -(ch + 1.5), ms[2] = -ch, ms[3] = 0.0, ms[4] = 10.5, ms[5] = 10.5 + ch;
         break;
     }
+    case SSTV_PD90:
+    case SSTV_PD120:
+    case SSTV_PD180:
+        pd_edges(mode, ms);
+        n = 8;
+        break;
     default:
         return 0;
     }
@@ -248,13 +291,27 @@ static bool inside(long base, const long *seg, int k, long n)
     return lo >= 0 && hi < n;
 }
 
+/* PD colour: ITU-R BT.601, Y 16..235 and R-Y, B-Y 16..240 around 128, the
+ * conversion of the PD definition (JL Barber N7CXI, Dayton 2000).  QSSTV and
+ * slowrx read PD with the full 0..255, as the Robot modes here do. */
+static void ycc601(float y, float cr, float cb, uint8_t *p)
+{
+    y = 1.164383f * (y - 16.0f);
+    cr -= 128.0f;
+    cb -= 128.0f;
+    p[0] = byte(y + 1.596027f * cr);
+    p[1] = byte(y - 0.812968f * cr - 0.391762f * cb);
+    p[2] = byte(y + 2.017232f * cb);
+}
+
 /* One row of any mode but Robot 36 colour; Robot 36 gives its Y in grey.
- * live: the edges of the rows drawn while receiving */
+ * PD: the two rows of a line, out holds 2 x width pixels.  live: the edges
+ * of the rows drawn while receiving */
 static bool draw(sstv_mode_t mode, const float *hz, long n, long base, double scale, int width, bool live,
                  uint8_t *out)
 {
     float a[SSTV_MAX_W], b[SSTV_MAX_W], c[SSTV_MAX_W];
-    long  seg[6];
+    long  seg[8];
     int   k = live ? segments_live(mode, base, scale, seg) : segments(mode, base, scale, seg);
 
     if (!k || !inside(base, seg, k, n)) return false;
@@ -265,6 +322,12 @@ static bool draw(sstv_mode_t mode, const float *hz, long n, long base, double sc
     }
     scan(hz, n, seg[2], seg[3], b, width);
     scan(hz, n, seg[4], seg[5], c, width);
+    if (k == 4) {               /* PD: Y0, R-Y, B-Y, then the second row's Y in a */
+        for (int x = 0; x < width; ++x) ycc601(a[x], b[x], c[x], out + 3 * x);
+        scan(hz, n, seg[6], seg[7], a, width);
+        for (int x = 0; x < width; ++x) ycc601(a[x], b[x], c[x], out + 3 * (width + x));
+        return true;
+    }
     for (int x = 0; x < width; ++x) {
         uint8_t *p = out + 3 * x;
         if (mode == SSTV_ROBOT72) {
@@ -286,14 +349,14 @@ static int find_syncs(const float *x, long n, float pulse_ms, long *at, int max)
 {
     const int   hop = (SR + 500) / 1000;
     const float need = 0.45f;
-    float       cs[160], sn[160], top = 0.0f;
+    float       cs[SYNC_WIN], sn[SYNC_WIN], top = 0.0f;
     int         win = (int)lroundf(pulse_ms * (float)SR / 1000.0f), found = 0;
     bool        run = false;
     long        top_at = 0;
 
     if (!x || n <= 0 || max <= 0) return 0;
     if (win < 24) win = 24;
-    if (win > 160) win = 160;
+    if (win > SYNC_WIN) win = SYNC_WIN;
     for (int k = 0; k < win; ++k) {
         float ph = 2.0f * PI_F * 1200.0f * (float)k / (float)SR;
         cs[k] = cosf(ph);
@@ -543,6 +606,18 @@ static void row_syncs(const layout_t *L, const float *x, long n, int height, dou
             for (int r = 0; r < height; ++r) grid[r] -= d;
             fprintf(stderr, "SSTV: chain started at row %ld, grid moved back\n", back);
         }
+    } else if (pd(L->mode) && *period > 0.0) {
+        /* PD: the first sync follows the VIS stop bit (30 ms, 1200 Hz too)
+         * with no gap, reads up to 30 ms early and is left off the chain.
+         * A pulse there one line before the chain is that line. */
+        double want = (double)grid[0] - *period;
+        for (int k = 0; k < count; ++k)
+            if ((double)at[k] >= want - 0.035 * SR && (double)at[k] <= want + 0.005 * SR) {
+                long d = (long)llround(*period);
+                for (int r = 0; r < height; ++r) grid[r] -= d;
+                fprintf(stderr, "SSTV: first sync after the VIS stop bit, grid moved back a line\n");
+                break;
+            }
     }
 }
 
@@ -552,23 +627,29 @@ int sstv_decode(const float *x, long n, sstv_mode_t mode, uint8_t *rgb)
 {
     const sstv_mode_info_t *mi = sstv_mode_info(mode);
     const layout_t         *L = layout(mode);
-    long                    grid[SSTV_MAX_H], seg[6];
+    long                    grid[SSTV_MAX_H], seg[8];
     double                  period;
-    int                     w, h, rows;
+    int                     w, h, lines, rows;
 
     if (!x || n <= 0 || !rgb) return -1;
     if (!mi || !L) return -2;
     w = mi->width;
     h = mi->height;
+    lines = h / mi->line_rows;
     fprintf(stderr, "SSTV: decoding %s, %.1f s of audio\n", mi->name, (double)n / SR);
 
     float *hz = sstv_fm(x, n);
     if (!hz) return -3;
     const double nominal = (double)line_ms(mode) * SR / 1000.0;
-    row_syncs(L, x, n, h, nominal, grid, &period);
+    row_syncs(L, x, n, lines, nominal, grid, &period);
     const double scale = period / nominal;
 
-    if (mode != SSTV_ROBOT36) {
+    if (pd(mode)) {
+        int line;
+        for (line = 0; line < lines; ++line)
+            if (!draw(mode, hz, n, grid[line], scale, w, false, rgb + (size_t)line * 2 * w * 3)) break;
+        rows = 2 * line;
+    } else if (mode != SSTV_ROBOT36) {
         for (rows = 0; rows < h; ++rows)
             if (!draw(mode, hz, n, grid[rows], scale, w, false, rgb + (size_t)rows * w * 3)) break;
     } else {
@@ -675,6 +756,7 @@ void sstv_rows_init(sstv_rows_t *r, sstv_mode_t mode, double row0_sync)
     r->mode = mode;
     r->width = mi ? mi->width : 0;
     r->height = mi ? mi->height : 0;
+    r->per_line = mi ? mi->line_rows : 1;
     r->nominal = sstv_sync_line_s(mode) * SR;
     r->row0 = row0_sync >= 0.0 ? row0_sync + SSTV_ROWS_VIS_BIAS : -1.0;
 }
@@ -715,7 +797,7 @@ bool sstv_rows_ready(sstv_rows_t *r, long written, const sstv_sync_status_t *syn
 
 int sstv_rows_draw(sstv_rows_t *r, const float *audio, uint8_t *rgb_row)
 {
-    int    row = r->next++;
+    int    row = r->next++ * r->per_line;
     long   n = r->to - r->from;
     float *hz = sstv_fm(audio, n);
 

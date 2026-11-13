@@ -4,6 +4,8 @@
  * rgb buffers hold at least SSTV_MAX_W * SSTV_MAX_H * 3 bytes; a picture of
  * mode m fills width x height of sstv_mode_info(m), rows not received are
  * black.  The decoders return the number of rows decoded, or < 0.
+ * PD sends two rows a line (sync): "line" below is one sync period, a row
+ * one picture row.
  */
 #pragma once
 
@@ -24,7 +26,7 @@ int sstv_decode_manual(const float *x, long n, sstv_mode_t mode, uint8_t *rgb);
 float *sstv_fm(const float *x, long n);
 
 /* Seconds from the end of the VIS to the sync a row hangs on: the line sync
- * (Robot, Martin), the sync between B and R (Scottie).  < 0: unknown mode */
+ * (Robot, Martin, PD), the sync between B and R (Scottie).  < 0: unknown mode */
 double sstv_row0_after_vis(sstv_mode_t mode);
 
 /* ---- Rows drawn while the picture arrives ----
@@ -42,10 +44,11 @@ double sstv_row0_after_vis(sstv_mode_t mode);
 typedef struct {
     sstv_mode_t mode;
     int         width, height;
-    double      row0;           /* row 0 sync, bias corrected; < 0 not known yet */
+    int         per_line;       /* rows a line draws: 2 for PD, else 1           */
+    double      row0;           /* line 0 sync, bias corrected; < 0 not known yet */
     double      nominal;        /* line, samples                                 */
-    int         next;           /* first row not drawn                           */
-    double      at, scale;      /* sync and scale of row next (from sstv_rows_ready) */
+    int         next;           /* first line not drawn                          */
+    double      at, scale;      /* sync and scale of line next (from sstv_rows_ready) */
     long        from, to;       /* its audio                                     */
 } sstv_rows_t;
 
@@ -53,13 +56,14 @@ typedef struct {
  * there is no VIS (Manual RX): row 0 is then the first sync of the lock */
 void sstv_rows_init(sstv_rows_t *r, sstv_mode_t mode, double row0_sync);
 
-/* Can row r->next be drawn from the written samples?  Then [*from, *to) is
+/* Can line r->next be drawn from the written samples?  Then [*from, *to) is
  * the audio to hand to sstv_rows_draw().  sync: follower status or NULL. */
 bool sstv_rows_ready(sstv_rows_t *r, long written, const sstv_sync_status_t *sync, long *from, long *to);
 
-/* Draws the row prepared by sstv_rows_ready() from audio = capture[from..to)
- * into rgb_row (width * 3 bytes).  Robot 36 rows are grey (its colour comes
- * every other line).  Returns the row, or -1 if it could not be drawn. */
+/* Draws the line prepared by sstv_rows_ready() from audio = capture[from..to)
+ * into rgb_row: per_line rows of width * 3 bytes, one after the other.
+ * Robot 36 rows are grey (its colour comes every other line).  Returns the
+ * picture row of the first one, or -1 if it could not be drawn. */
 int sstv_rows_draw(sstv_rows_t *r, const float *audio, uint8_t *rgb_row);
 
-static inline bool sstv_rows_done(const sstv_rows_t *r) { return r->next >= r->height; }
+static inline bool sstv_rows_done(const sstv_rows_t *r) { return r->next * r->per_line >= r->height; }
