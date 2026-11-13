@@ -7402,7 +7402,7 @@ every R16; there is no calibration for each processor. There is no setting
 for it, and the X6100's kernel is not changed.
 
 On the screen it is shown, in whole degrees (`37C`) and read again every 5 s,
-wherever the battery and the time are:
+wherever the battery and the time are, and after the Sentry's time:
 
 - under the main screen's clock, after the battery, in every theme; on Ops
   Room's clock in the middle of its top row, between EXTERNAL or INTERNAL
@@ -7410,7 +7410,9 @@ wherever the battery and the time are:
 - on [Walkie Talkie](#walkie-talkie-mode), after the battery's voltage
   (`8.6 V  36C`), or alone without a battery;
 - on Amber Trey's status line, after the time and the voltage
-  (`14:29Z  11.8V  37C`).
+  (`14:29Z  11.8V  37C`);
+- in the [Sentry](#the-sentry)'s title bar, after the time on its second line
+  (`SEMI-AUTO   14:49 EST  53C`), on every Sentry screen.
 
 A radio whose kernel has no thermal zone shows none of them.
 

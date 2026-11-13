@@ -123,8 +123,8 @@ Base 1.0.8 fixes the S-meter stuck at S1, -121.0 on 1.0.7. On 13 November 2026 t
 - The clock in your own time zone (Settings > General > Date / Time), on the main screen, the Sentry and
   AIRSPACE.
 - The processor's temperature wherever the battery and the time are: under the main screen's clock (every theme;
-  on Ops Room's clock between the supply and the charge), on Walkie after the battery's voltage, and on Amber Trey's
-  status line after the time and the voltage.
+  on Ops Room's clock between the supply and the charge), on Walkie after the battery's voltage, on Amber Trey's
+  status line after the time and the voltage, and in the Sentry's title bar after the time.
 - The RTTY tile in Digital modes shows your baud rate.
 
 ### Decoder fixes

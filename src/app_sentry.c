@@ -39,6 +39,7 @@
 #include "board.h"
 #include "broadcast_db.h"
 #include "buttons.h"
+#include "clock.h"
 #include "cfg/cfg_api.h"
 #include "cfg/settings_manager_api.h"
 #include "dsp.h"
@@ -1021,26 +1022,29 @@ static const char *titles[SCR_N] = {"REMOTE SENTRY RECEIVER SYSTEM", "REMOTE SEN
                                     "BAND INTELLIGENCE", "DECODER SENTRY", "SYSTEM CONTROL", "VHF/UHF SPECTRUM"};
 
 static void show_head(void) {
-    char       f[24], t[16];
+    char       f[24], t[16], tc[12] = "";
     time_t     now = time(NULL);
     struct tm  tm;
     int32_t    fq  = cparam_i_get(cfg_fg_freq);
+    int        c   = clock_cpu_temp();  /* the processor's, the kernel's cpu-thermal zone (sun4i-gpadc-iio) */
 
     localtime_r(&now, &tm);             /* the radio's time zone (Settings > General > DATE / TIME), named */
     strftime(t, sizeof(t), "%H:%M %Z", &tm);
+    if (c != CLOCK_NO_TEMP)             /* after the time, as the other clocks show it; none read: none shown */
+        snprintf(tc, sizeof(tc), "  %dC", c);
     snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
     static const char *const modes[] = {"AUTO-SCAN", "SEMI-AUTO", "MAN-OVERRIDE"};
 
     if (scr == SCR_RTL && listen_rtl) {     /* the receiver heard: the stick */
         snprintf(f, sizeof(f), "RTL %lld.%03lld.%02lld", (long long)(listen_hz / 1000000),
                  (long long)(listen_hz / 1000 % 1000), (long long)(listen_hz % 1000 / 10));
-        lv_label_set_text_fmt(status_l, "%s %s   %s   %s   %s", f, rtl_mode_names[rtl_mode_of(listen_hz)],
-                              rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t);
+        lv_label_set_text_fmt(status_l, "%s %s   %s   %s   %s%s", f, rtl_mode_names[rtl_mode_of(listen_hz)],
+                              rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc);
         return;
     }
-    lv_label_set_text_fmt(status_l, "%s %s%s%s   %s   %s   %s", f, mode_name(cparam_i_get(cfg_cur_mode)),
+    lv_label_set_text_fmt(status_l, "%s %s%s%s   %s   %s   %s%s", f, mode_name(cparam_i_get(cfg_cur_mode)),
                           cparam_i_get(cfg_cur_pre) ? "  PRE" : "", cparam_i_get(cfg_cur_att) ? "  ATT" : "",
-                          rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t);
+                          rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc);
 }
 
 static void show_scan(void) {
