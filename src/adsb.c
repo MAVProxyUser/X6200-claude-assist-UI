@@ -249,9 +249,27 @@ bool adsb_frame_hex(const char *hex, size_t n, double now) {
         stats.other_df++;
         return false;
     }
-    if (adsb_crc24(msg, 14) != 0) {
-        stats.crc_bad++;
-        return false;
+    uint32_t syn = adsb_crc24(msg, 14);
+    if (syn != 0) {                             /* one bit wrong (not in DF): put right, as dump1090 does */
+        static uint32_t table[112];
+        static bool     made;
+        int             bit = -1;
+        if (!made) {
+            for (int i = 0; i < 112; i++) {
+                uint8_t m[14] = {0};
+                m[i / 8] = (uint8_t)(0x80 >> (i % 8));
+                table[i] = adsb_crc24(m, 14);
+            }
+            made = true;
+        }
+        for (int i = 5; i < 112 && bit < 0; i++)
+            if (table[i] == syn) bit = i;
+        if (bit < 0) {
+            stats.crc_bad++;
+            return false;
+        }
+        msg[bit / 8] ^= (uint8_t)(0x80 >> (bit % 8));
+        stats.fixed++;
     }
     stats.adsb++;
     count_rate(now);

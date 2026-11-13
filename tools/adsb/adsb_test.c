@@ -42,7 +42,8 @@ int main(void) {
         check(adsb_crc24(m, 14) == 0, "8D4840D6202CC371C32CE0576098 is good");
         m[13] ^= 1;
         check(adsb_crc24(m, 14) != 0, "one bit wrong is not");
-        check(!feed("8D4840D6202CC371C32CE0576099", 0.5) && adsb_stats()->crc_bad == 1, "nor decoded");
+        check(feed("8D4840D6202CC371C32CE0576099", 0.5) && adsb_stats()->fixed == 1, "but put right, one bit");
+        check(!feed("8D4840D6202CC371C32CE0576066", 0.6) && adsb_stats()->crc_bad == 1, "several wrong: not decoded");
     }
 
     printf("Identification, position, velocity (The 1090 MHz Riddle)\n");

@@ -19,10 +19,19 @@ is_wr12() {
                 [ "$(cat $n/idVendor 2>/dev/null):$(cat $n/idProduct 2>/dev/null)" = "0483:5740" ]
 }
 
+# So are the ADS-B receivers the AIRSPACE screen reads (src/adsb_rx.c): a GNS 5890 (04d8:f8e8) or a microADSB
+# (04d8:000a, "ADSB" in its name). gpsd taking one would read its frames and send it GPS probes
+is_adsb() {
+        n=$(readlink -f $1)
+        n=/sys/class/tty/${n##*/}/device/..
+        id="$(cat $n/idVendor 2>/dev/null):$(cat $n/idProduct 2>/dev/null)"
+        [ "$id" = "04d8:f8e8" ] || { [ "$id" = "04d8:000a" ] && grep -q ADSB $n/product 2>/dev/null; }
+}
+
 start() {
         printf "Starting $NAME: "
         DEVICES=""
-        for d in /dev/ttyACM0 /dev/gps0; do [ -e $d ] && ! is_wr12 $d && DEVICES="$DEVICES $d"; done
+        for d in /dev/ttyACM0 /dev/gps0; do [ -e $d ] && ! is_wr12 $d && ! is_adsb $d && DEVICES="$DEVICES $d"; done
         start-stop-daemon -S -q -p $PIDFILE --exec $DAEMON -- -P $PIDFILE -F $GPSD_SOCKET $GPSD_OPTIONS $DEVICES && echo "OK" || echo "Failed"
 }
 stop() {

@@ -44,6 +44,7 @@ typedef struct {
     uint32_t shorts;            /* 56-bit Mode-S */
     uint32_t longs;             /* 112-bit */
     uint32_t adsb;              /* DF17/18/19 with a good CRC */
+    uint32_t fixed;             /* of them, one bit put right */
     uint32_t crc_bad, other_df, junk;
 } adsb_stats_t;
 

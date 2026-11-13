@@ -21,6 +21,7 @@
 #include "adsb_rx.h"
 #include "buttons.h"
 #include "cfg/cfg_api.h"
+#include "gps.h"
 #include "gui_events.h"
 #include "keyboard.h"
 #include "main_screen.h"
@@ -111,7 +112,10 @@ static uint32_t     sel_icao;
 static int          rot_acc;
 static bool         help_on;
 static double       c_lat, c_lon;   /* the scope's centre */
-static bool         c_qth, c_ok;    /* the QTH locator; any centre at all */
+static bool         c_qth, c_ok;    /* the station's place (GPS or locator); any centre at all */
+static char         c_from[40];     /* where the centre comes from, said in the head */
+
+#define FIX_MAX_S 600               /* a GPS or phone position this recent is the centre */
 
 static int range_nm(void) { return ranges[param_i_get(cfg_adsb_range)]; }
 static int decay_s(void) { return decays[param_i_get(cfg_adsb_decay)]; }
@@ -193,17 +197,28 @@ static bool proj(double lat, double lon, double *x, double *y) {
     return *x >= -20 && *y >= -20 && *x < SC + 20 && *y < SC + 20;
 }
 
-/* The centre: the QTH locator, or the traffic's middle, moved there slowly */
+/* The centre: a USB GPS (gpsd), else the QTH locator (Settings > General), else the traffic's middle, moved there
+ * slowly */
 static void find_centre(double now) {
     const char *q = params.qth.x;
+    double      lat, lon;
+    int         age;
 
+    if (gps_last_fix(&lat, &lon, &age) && age < FIX_MAX_S) {
+        c_lat = lat, c_lon = lon, c_ok = c_qth = true;
+        snprintf(c_from, sizeof(c_from), "GPS %.4f %.4f", lat, lon);
+        adsb_set_ref(true, c_lat, c_lon);
+        return;
+    }
     c_qth = qth_grid_check(q);
     if (c_qth) {
         qth_str_to_pos(q, &c_lat, &c_lon);
         c_ok = true;
+        snprintf(c_from, sizeof(c_from), "QTH %s", q);
         adsb_set_ref(true, c_lat, c_lon);
         return;
     }
+    snprintf(c_from, sizeof(c_from), "NO GPS OR QTH: CENTRED ON TRAFFIC");
     adsb_set_ref(false, 0, 0);
     double la = 0, lo = 0;
     int    n  = 0;
@@ -499,7 +514,7 @@ static void show_head(double now, int nlive, int nghost) {
     strftime(t, sizeof(t), "%H:%M UTC", &tm);
     lv_label_set_text_fmt(status_l, "%s   %d LIVE   %d HISTORY   %s   %s",
                           st == ADSB_RX_ON ? name : "NO RECEIVER", nlive, nghost,
-                          c_qth ? params.qth.x : "QTH NOT SET: CENTRED ON TRAFFIC", t);
+                          c_from, t);
     const adsb_stats_t *s = adsb_stats();
     uint16_t            r[10];
     unsigned            sum = 0;
@@ -817,6 +832,7 @@ static void build(void) {
                    "MINUTES, OR HOLD TILL CLEARED.  F3: TRACKS ON OR OFF.  F4: FORGET THE HISTORY.  F5: BACK TO "
                    "THE SENTRY.\n\n"
                    "MFK OR A TAP CHOOSES AN AIRCRAFT. LISTENING GOES ON WHEN THIS SCREEN CLOSES. RECEIVE ONLY.\n\n"
+                   "THE CENTRE: A USB GPS, ELSE THE QTH LOCATOR (SETTINGS > GENERAL), ELSE THE TRAFFIC.\n\n"
                    "ANY KEY: CLOSE.");
     lv_label_set_long_mode(help_l, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_bg_color(help_l, ink, 0);

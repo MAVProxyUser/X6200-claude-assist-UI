@@ -8,9 +8,12 @@
  *    (new_id), it does, and /dev/ttyACMn appears. That lasts till the next boot; it is done here each time the stick
  *    is found without its port.
  *  - microADSB (sprut's adsbPIC, 04d8:000a, "ADSB-PIC" in its product name: 04d8:000a alone is Microchip's generic
- *    serial ID): a plain CDC device, but silent till told what to send: "#00" (its firmware, "#00-00-0E-..."), then
- *    "#43-03", DF17-19 only, a second after the port opens (sent at once they were missed). Its V.14 firmware
- *    time-stamps every frame whatever the mode. The mode goes again when nothing came for 30 s.
+ *    serial ID): a plain CDC device, silent till started. The start of picadsb-multiplexer (smkrv), which is
+ *    adsbScope's: "#00" (its firmware, "#00-00-0E-..."), "#43-00" (stop), "#51-01-00", "#37-03", "#51-00-00",
+ *    "#37-03", "#38" (start reception), "#43-02" (all frames), a second after the port opens, each command's
+ *    answer waited for as the multiplexer does (sent 300 ms apart, "#38" was missed and the stick stayed stopped).
+ *    With "#38" it gave 0.65 frames/s against 0.28 with "#43" alone, more of them good. Its V.14 firmware
+ *    time-stamps every frame whatever the mode. After 120 s without a frame, the whole start again.
  *  The thread looks for a receiver every 2 s while it has none.
  */
 
@@ -31,16 +34,17 @@
 
 #define USB_DEVICES "/sys/bus/usb/devices"
 #define CDC_ACM     "/sys/bus/usb/drivers/cdc_acm"
-#define QUIET_S     30
+#define QUIET_S     120
 
 static const struct {
     const char *vid, *pid, *product;    /* product: a part its USB product name must have, or NULL */
     const char *name;
     bool        new_id;                 /* cdc_acm told its ID */
-    const char *init;                   /* sent on opening, and again after QUIET_S without a frame */
+    const char *init;                   /* sent on opening, each answered, and again after QUIET_S without a frame */
 } receivers[] = {
     {"04d8", "f8e8", NULL, "GNS 5890", true, NULL},
-    {"04d8", "000a", "ADSB", "MICROADSB", false, "#00\r#43-03\r"},
+    {"04d8", "000a", "ADSB", "MICROADSB", false,
+     "#00\r#43-00\r#51-01-00\r#37-03\r#51-00-00\r#37-03\r#43-00\r#38\r#43-02\r"},
 };
 #define N_RECEIVERS (int)(sizeof(receivers) / sizeof(receivers[0]))
 
@@ -160,17 +164,60 @@ static void set_info(const char *line) {
     }
 }
 
-static void send_init(int fd, int r) {
-    const char *s = receivers[r].init;
+/* One command ("#38\r"), then its answer waited for ("#38-..."), up to 2.5 s; whatever else comes meanwhile is
+ * dropped. Sent 300 ms apart without waiting, the stick took "#43-00" (stop) and missed "#38" (start): silent */
+static bool command(int fd, const char *cmd, size_t n) {
+    char   line[96];
+    size_t ll = 0;
+    bool   in = false;
+    double end;
 
-    if (!s) return;
-    while (*s) {                        /* one command at a time, a moment between them */
+    if (write(fd, cmd, n) != (ssize_t)n) return false;
+    end = adsb_now() + 2.5;
+    while (adsb_now() < end) {
+        fd_set         rd;
+        struct timeval tv = {.tv_sec = 0, .tv_usec = 200000};
+        char           buf[256];
+        FD_ZERO(&rd);
+        FD_SET(fd, &rd);
+        if (select(fd + 1, &rd, NULL, NULL, &tv) <= 0) continue;
+        ssize_t got = read(fd, buf, sizeof(buf));
+        if (got <= 0) return false;
+        bytes += (unsigned long long)got;
+        for (ssize_t i = 0; i < got; i++) {
+            char c = buf[i];
+            if (c == '#') {
+                in = true;
+                ll = 0;
+            }
+            if (!in) continue;
+            if (c == '\r' || c == '\n') {
+                line[ll] = 0;
+                in       = false;
+                if (ll >= 3 && !strncmp(line, cmd, 3)) {    /* "#43" for "#43-00" */
+                    set_info(line);
+                    return true;
+                }
+            } else if (ll < sizeof(line) - 1) {
+                line[ll++] = c;
+            }
+        }
+    }
+    return false;
+}
+
+/* Commands one after another, each answered; false when one was not */
+static bool send_cmds(int fd, const char *s) {
+    bool all = true;
+
+    if (!s) return true;
+    while (*s) {
         const char *e = strchr(s, '\r');
         size_t      n = e ? (size_t)(e - s + 1) : strlen(s);
-        if (write(fd, s, n) != (ssize_t)n) return;
+        all &= command(fd, s, n);
         s += n;
-        usleep(150000);
     }
+    return all;
 }
 
 static void *rx_thread(void *arg) {
@@ -207,11 +254,12 @@ static void *rx_thread(void *arg) {
             continue;
         }
         if (init_at > 0 && adsb_now() >= init_at) {
-            send_init(fd, rx);
+            send_cmds(fd, receivers[rx].init);
             init_at = 0;
+            last    = adsb_now();
         }
-        if (receivers[rx].init && !init_at && adsb_now() - last > QUIET_S) {   /* quiet: the mode again */
-            send_init(fd, rx);
+        if (receivers[rx].init && !init_at && adsb_now() - last > QUIET_S) {   /* quiet: started again */
+            send_cmds(fd, receivers[rx].init);
             last = adsb_now();
         }
 
