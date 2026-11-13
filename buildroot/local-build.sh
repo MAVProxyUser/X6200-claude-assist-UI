@@ -281,8 +281,14 @@ if [ $MODEL = x6200 ]; then
     done
 fi
 
-echo "== Boot logo background"
-cp $GUI/boot/kernel_logo.png $BOARD/logo.png
+echo "== No kernel boot logo"
+# The kernel draws no picture of its own: the screen stays dark until the boot video (S94bootvideo) or the boot
+# picture (S00bootanim) comes. The trees' own logo.png, Aether Radio's wolf, was replaced by a plain background
+# before. CONFIG_LOGO off, and Buildroot's custom logo dropped with it, as linux.mk turns CONFIG_LOGO and
+# CONFIG_LOGO_LINUX_CLUT224 back on for one
+sed -i 's|^BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH=.*|BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH=""|' $DEFCONFIG
+sed -i '/^CONFIG_LOGO[A-Z0-9_]*=/d; /^# CONFIG_LOGO is not set/d' $KERNEL_DEFCONFIG
+echo "# CONFIG_LOGO is not set" >> $KERNEL_DEFCONFIG
 
 echo "== Configure"
 cd $BR && bash ./br_config.sh

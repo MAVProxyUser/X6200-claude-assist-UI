@@ -4,7 +4,8 @@
  *  OpenX6X00: boot animation and boot sound
  *
  *  The boot logo composes itself on the framebuffer while the radio boots.
- *  The kernel logo is the first frame (the plain background), then every
+ *  The plain background is the first frame (the kernel draws no logo of its
+ *  own: buildroot/local-build.sh), then every
  *  logo pixel fades in from its own start time: the ring grows out from its
  *  centre, the signal runs through it left to right and out of the gap, the
  *  name sweeps in, the rule draws from the centre, the subtitle last.
