@@ -12,6 +12,8 @@
 #include "keyboard.h"
 #include "main_screen.h"
 #include "params/params.h"
+
+#include <stdio.h>
 #include "radio.h"
 #include "styles.h"
 #include "theme.h"
@@ -66,6 +68,16 @@ static const struct {
     {"NavTex", "", ACTION_APP_NAVTEX, -1, "navtex"},
     {"RADE", "FreeDV", ACTION_APP_FREEDV, -1, "text"},
 };
+
+/* A tile's note: RTTY's the rate set (Settings of the RTTY app, 50 Bd by default here, 45.45 for hams), not a fixed
+ * "45 bd" */
+static const char *note_of(int i) {
+    static char rate[16];
+
+    if (modes[i].action != ACTION_APP_RTTY || !params.rtty_rate) return modes[i].note;
+    snprintf(rate, sizeof(rate), "%g bd", params.rtty_rate / 100.0);
+    return rate;
+}
 
 #define MODES_N ((int)(sizeof(modes) / sizeof(modes[0])))
 
@@ -222,7 +234,7 @@ static void construct_cb(lv_obj_t *parent) {
 
         lv_obj_t *note = lv_label_create(t);
         lv_obj_set_style_text_font(note, &sony_16, 0);
-        lv_label_set_text(note, i == last_used ? "last used" : modes[i].note);
+        lv_label_set_text(note, i == last_used ? "last used" : note_of(i));
         lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -4);
     }
 
@@ -246,7 +258,7 @@ static void construct_cb(lv_obj_t *parent) {
         lv_obj_t *note = lv_label_create(row);
         lv_obj_set_style_text_font(note, &sony_22, 0);
         lv_obj_set_style_text_color(note, TC(text_dim), 0);
-        lv_label_set_text(note, i == last_used ? "last used" : modes[i].note);
+        lv_label_set_text(note, i == last_used ? "last used" : note_of(i));
         lv_obj_align(note, LV_ALIGN_RIGHT_MID, -22, 0);
     }
 

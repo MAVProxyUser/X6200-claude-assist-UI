@@ -183,8 +183,23 @@ static float line_ms(sstv_mode_t mode)
  * between B and R), line length scale x nominal.  seg[2i], seg[2i+1]: one
  * scan; Robot 8 Y; Robot 36 Y, chroma; Robot 72 Y, R-Y, B-Y; Martin and
  * Scottie G, B, R; PD Y0, R-Y, B-Y, Y1 (a line of two rows).  Returns the
- * number of scans. */
+ * number of scans.  Every scan is read FM_LAG later than its nominal edges,
+ * as the front end answers that late (pd_edges); without it the pictures sat
+ * 2-4 px to the right (measured through sstv_tx and sstv_decode). */
+static int segments_nominal(sstv_mode_t mode, long base, double scale, long *seg);
+
 static int segments(sstv_mode_t mode, long base, double scale, long *seg)
+{
+    int k = segments_nominal(mode, base, scale, seg);
+
+    if (!pd(mode)) {            /* PD's edges have the lag in them already */
+        const long lag = (long)llround(FM_LAG * scale);
+        for (int i = 0; i < 2 * k; ++i) seg[i] += lag;
+    }
+    return k;
+}
+
+static int segments_nominal(sstv_mode_t mode, long base, double scale, long *seg)
 {
     switch (mode) {
     case SSTV_ROBOT8: {
@@ -643,6 +658,33 @@ int sstv_decode(const float *x, long n, sstv_mode_t mode, uint8_t *rgb)
     const double nominal = (double)line_ms(mode) * SR / 1000.0;
     row_syncs(L, x, n, lines, nominal, grid, &period);
     const double scale = period / nominal;
+
+    /* Where the audio has the VIS, line 0's sync is where the VIS says (as the rows drawn while receiving have
+     * it): a chain begun on the header's own 1200 Hz pulses, its break, start and stop bits, had them numbered as
+     * picture lines, Robot's and Scottie 2's pictures one or two rows low. PD keeps its own rule (row_syncs) */
+    if (!pd(mode) && period > 0.0) {
+        sstv_vis_t v;
+        long       from = -1;
+
+        /* sstv_vis_find takes 2-s blocks: the header (0.91 s) ends just before line 0, which the chain has within
+         * a line or two; blocks ending around there, a quarter of a second apart */
+        for (double back = 2.0; back >= 0.75 && from < 0; back -= 0.25) {
+            long a = (long)grid[0] - lround(back * SR);
+            if (a < 0) a = 0;
+            if (a + 2L * SR > n) continue;
+            if (sstv_vis_find(x + a, 2 * SR, &v) && v.mode == mode) from = a;
+        }
+        if (from >= 0) {
+            double row0 = (double)from + (v.start_s + v.gap_s + SSTV_VIS_S + sstv_row0_after_vis(mode)) * SR;
+            long   k    = lround((row0 - (double)grid[0]) / period);
+
+            if (k != 0 && labs(k) <= 3) {
+                long d = lround((double)k * period);
+                for (int r = 0; r < lines; ++r) grid[r] += d;
+                fprintf(stderr, "SSTV: line 0 from the VIS, the sync chain moved %+ld lines\n", k);
+            }
+        }
+    }
 
     if (pd(mode)) {
         int line;

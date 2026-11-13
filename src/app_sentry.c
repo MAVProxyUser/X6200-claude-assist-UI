@@ -111,6 +111,7 @@ static void f3_cb(button_data_t *b);
 static void f4_cb(button_data_t *b);
 static bool knob_taken(void);
 static void rtl_listen(bool on);
+static int64_t rtl_snap(int64_t hz);
 static void osd(const char *title, const char *text, int bar);
 static void show_head(void);
 static void f5_cb(button_data_t *b);
@@ -1650,6 +1651,17 @@ static int rtl_peaks(int64_t lo, double px_hz, int32_t *best_hz, float *best_db)
             if (x >= 0 && x < RTL_COLS) used[x] = true;
         found++;
         int64_t hz = lo + (int64_t)((bx + 0.5) * px_hz);
+
+        /* A broadcast FM station is a hump 200 kHz wide, its strongest column anywhere on it: its middle, to its
+         * channel */
+        if (rtl_mode_of(hz) == 3) {
+            int l = bx, r = bx;
+
+            while (l > 0 && rtl_cols[l - 1] > bv - 10) l--;
+            while (r < RTL_COLS - 1 && rtl_cols[r + 1] > bv - 10) r++;
+            hz = rtl_snap(lo + (int64_t)(((l + r) / 2.0 + 0.5) * px_hz));
+            bx = (int)lround((hz - lo) / px_hz);
+        }
         if (bv > *best_db) *best_db = bv, *best_hz = (int32_t)hz;
 
         bool clash = false;
@@ -1661,6 +1673,7 @@ static int rtl_peaks(int64_t lo, double px_hz, int32_t *best_hz, float *best_db)
         int y = p_rtl.trace_h - 1 - (int)((bv - p_rtl.bot_db) / (p_rtl.top_db - p_rtl.bot_db) * (p_rtl.trace_h - 1)) - 20;
 
         x = x < IMG_X ? IMG_X : x + w > IMG_X + RTL_COLS ? IMG_X + RTL_COLS - w : x;
+        if (y < 22 && x + w > IMG_X + RTL_COLS - 250) y = 22;       /* clear of the half's name at the top right */
         lv_label_set_text(rtl_peak_l[np], s);
         lv_obj_set_pos(rtl_peak_l[np], x, iy + p_rtl.y0 + (y < 0 ? 0 : y));
         lv_obj_clear_flag(rtl_peak_l[np], LV_OBJ_FLAG_HIDDEN);

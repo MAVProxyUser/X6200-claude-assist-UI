@@ -511,8 +511,8 @@ static void show_head(double now, int nlive, int nghost) {
     adsb_rx_state_t st = adsb_rx_state(dev, sizeof(dev));
 
     adsb_rx_name(name, sizeof(name));
-    gmtime_r(&tt, &tm);
-    strftime(t, sizeof(t), "%H:%M UTC", &tm);
+    localtime_r(&tt, &tm);              /* the radio's time zone, named, as the Sentry's header */
+    strftime(t, sizeof(t), "%H:%M %Z", &tm);
     lv_label_set_text_fmt(status_l, "%s   %d LIVE   %d HISTORY   %s   %s",
                           st == ADSB_RX_ON ? name : "NO RECEIVER", nlive, nghost,
                           c_from, t);
