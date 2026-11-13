@@ -157,7 +157,9 @@ the base is reset). Every step keeps the radios apart:
 
 - **The writer runs on an X6200 only.** Before it opens the base's port or bus, x6x00-base-flash reads the device tree
   (`/proc/device-tree/compatible`) and refuses unless it says `xiegu,x6200`: on an X6100 not one byte reaches the base
-  (tested: the `x6100` scenario below). It is in both radios' images, so this check matters.
+  (tested: the `x6100` scenario below). It is built into the X6200's image only, as are the fetcher, the list
+  of releases, the screen and the hooks that lend the base: an X6100's image and GUI have none of it, and this check
+  stops the writer should it ever be copied there.
 - **Only the X6200's files are written.** A file is known by its SHA-256 against the X6200 files in
   [base_releases.txt](../../rootfs/usr/share/x6100/base_releases.txt), never by its name. Any other file needs
   `--unknown-ok` and a second confirmation, and a file named for another radio (X6100, G90, G106, X5105) is refused

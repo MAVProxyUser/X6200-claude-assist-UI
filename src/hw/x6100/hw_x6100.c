@@ -356,11 +356,6 @@ void hw_pin_set(hw_pin_t pin, bool on) {
 
 /* ---- The packet stream -------------------------------------------------------------------- */
 
-/* Nothing to lend: the X6100's base is written another way (tools/base_update is the X6200's) */
-void hw_base_hold(bool on) {
-    (void)on;
-}
-
 bool hw_flow_read(hw_pack_t *p) {
     if (!x6100_flow_read(pack)) {
         return false;

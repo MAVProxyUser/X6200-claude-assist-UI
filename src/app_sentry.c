@@ -29,7 +29,9 @@
 
 #include "app_sentry.h"
 
-#include "dialog_base_update.h"
+#ifdef BOARD_X6200
+#include "dialog_base_update.h"     /* the X6200's base firmware: never on another radio */
+#endif
 #include "git_commit.h"
 #include "dialog_shell.h"
 
@@ -370,7 +372,11 @@ static lv_obj_t *d_head_l, *d_row_l[12];
 
 /* E SYSTEM: the rest of the radio, from here */
 typedef enum {
-    SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_CLASSIC, SYS_SHELL, SYS_BASEFW, SYS_HOME, SYS_N
+    SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_CLASSIC, SYS_SHELL,
+#ifdef BOARD_X6200
+    SYS_BASEFW,
+#endif
+    SYS_HOME, SYS_N
 } sysitem_t;
 static const struct {
     const char *name, *about;
@@ -392,9 +398,11 @@ static const struct {
                       "THE SENTRY TILE."},
     {"UNIX SHELL", "A SHELL ON THE RADIO ITSELF (/BIN/SH, AS ROOT): A KEYBOARD TYPES INTO IT, TYPE OPENS THE ON-SCREEN "
                    "ONE FOR A LINE, CTRL-C INTERRUPTS. CLOSING IT ENDS THE SHELL AND BRINGS YOU BACK HERE."},
-    {"BASE FIRMWARE", "XIEGU'S BASE FIRMWARE WRITTEN FROM HERE, AS XIEGU'S OWN UPGRADE SCREEN DOES IT: 1.0.8 OR 1.0.7, "
-                      "WITH THE KERNEL'S MESSAGES AND THE BASE'S PORT SHOWN AS IT GOES. THE BASE SWITCHES THE RADIO OFF "
-                      "A FEW MINUTES AFTER: SWITCH IT ON AGAIN."},
+#ifdef BOARD_X6200
+    {"BASE FIRMWARE", "XIEGU'S X6200 BASE FIRMWARE, ANY RELEASE, FETCHED FROM XIEGU.EU AND WRITTEN FROM HERE AS XIEGU'S "
+                      "OWN UPGRADE SCREEN DOES IT, WITH THE KERNEL'S MESSAGES AND THE BASE'S PORT SHOWN AS IT GOES. THE "
+                      "BASE SWITCHES THE RADIO OFF A FEW MINUTES AFTER: SWITCH IT ON AGAIN."},
+#endif
     {"START IN", "WHERE THE RADIO STARTS AND COMES BACK TO WHEN AN APP CLOSES: THE SENTRY, OR THE CLASSIC RADIO "
                  "SCREEN. PUSH TO SWITCH."},
 };
@@ -2561,7 +2569,9 @@ static void sys_open_async(void *arg) {
         case SYS_MODES: main_screen_start_app(ACTION_APP_MODES); break;
         case SYS_AIRSPACE: main_screen_start_app(ACTION_APP_ADSB); break;
         case SYS_SHELL: main_screen_open_dialog(dialog_shell); break;
+#ifdef BOARD_X6200
         case SYS_BASEFW: main_screen_open_dialog(dialog_base_update); break;
+#endif
         case SYS_CLASSIC:
             main_screen_home_pause(true);   /* not straight back here */
             dialog_destruct();

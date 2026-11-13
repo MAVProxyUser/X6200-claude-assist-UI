@@ -191,9 +191,12 @@ bool hw_tx_keyed_by_gui(void);
 
 void hw_pin_set(hw_pin_t pin, bool on);
 
+#ifdef BOARD_X6200
 /* The base lent to another program (base_flash, dialog_base_update.c) or given back: while it is lent no packet is
- * read from it and no write reaches it, through any of the calls here. The X6200's; the others do nothing */
+ * read from it and no write reaches it, through any of the calls here. The X6200's only: the base firmware updater is
+ * never built for another radio */
 void hw_base_hold(bool on);
+#endif
 
 /* The next packet from the base, decoded; false: none yet */
 bool hw_flow_read(hw_pack_t *pack);

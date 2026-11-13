@@ -373,6 +373,7 @@ void radio_start() {
 
     hw_start();
     base_ver = hw_base_ver();
+#ifdef BOARD_X6200
     {   /* the base's version for the daily base firmware check (x6x00-base-fetch check, S99updatecheck) */
         FILE *f = fopen("/tmp/x6x00-base-version", "w");
         if (f) {
@@ -380,6 +381,7 @@ void radio_start() {
             fclose(f);
         }
     }
+#endif
     cfg_hw_caps_set(hw_caps());     /* the LO offset from them, before the first frame */
     start_trace("base: version %s", hw_base_ver_str());
 #ifdef BOARD_X6200
@@ -3196,7 +3198,9 @@ static bool resend_all() {
     return ok;
 }
 
-/* The base lent to base_flash (radio_base_hold): asked, and the thread out of its packet read */
+#ifdef BOARD_X6200
+/* The base lent to base_flash (radio_base_hold): asked, and the thread out of its packet read. The X6200's only: the
+ * base firmware updater is never built for another radio */
 static atomic_bool base_lent, base_lent_seen;
 
 bool radio_base_hold(bool on) {
@@ -3222,14 +3226,17 @@ bool radio_base_hold(bool on) {
     }
     return true;
 }
+#endif
 
 static void * radio_thread(void *arg) {
     while (true) {
+#ifdef BOARD_X6200
         if (atomic_load(&base_lent)) {  /* base_flash has the base: nothing read, nothing sent, not even the keepalive */
             atomic_store(&base_lent_seen, true);
             usleep(20000);
             continue;
         }
+#endif
         now_time = get_time();
 
         guard_events();

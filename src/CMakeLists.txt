@@ -53,7 +53,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     dialog_cw_trainer.c
     dialog_cw_kbd.c
     dialog_shell.c
-    dialog_base_update.c update_watch.c
+    update_watch.c
     theme.c
     freq_strip.c
     lcd_panel.c
@@ -92,6 +92,11 @@ target_sources(${PROJECT_NAME} PUBLIC
     control_owner.c
     winlink.c
 )
+
+# The X6200's base firmware screen (tools/base_update): built for the X6200 only, never in another radio's GUI
+if(HW_BACKEND STREQUAL "x6200")
+    target_sources(${PROJECT_NAME} PRIVATE dialog_base_update.c)
+endif()
 
 # The radio behind src/hw/hw.h (HW_BACKEND, chosen in the top-level CMakeLists.txt)
 if(HW_BACKEND STREQUAL "x6100")
