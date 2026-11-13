@@ -3588,10 +3588,12 @@ static void make_keys_page() {
     card_end(row);
 
     /* The USB or Bluetooth keyboard's layout (#236): key_input.c follows it at once. Shortcuts off (the default): it
-     * only types; on, its keys work the knobs and buttons too, CapsLock's chords and [ ] as a CW paddle */
-    row = card_begin("KEYBOARD");
+     * only types; on, its keys work the knobs and buttons too, CapsLock's chords and [ ] as a CW paddle. Mouse (off
+     * by default): a mouse or touchpad points and clicks on the screen (mouse_input.c) */
+    row = card_begin("KEYBOARD AND MOUSE");
     row = make_param_choice(row, "Layout", kbd_layout_options(), cfg_sm.p_kbd_layout);
     row = make_param_switch(row, "Shortcuts", cfg_sm.p_kbd_shortcuts);
+    row = make_param_switch(row, "Mouse", cfg_sm.p_mouse);
     card_end(row);
 }
 

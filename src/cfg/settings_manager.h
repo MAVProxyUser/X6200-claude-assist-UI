@@ -370,6 +370,10 @@ class SettingsManager {
     // paddle (key_input.c, paddle_keyer.c)
     Parameter<int32_t> p_kbd_shortcuts{"kbd_shortcuts", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Settings > Keys > KEYBOARD AND MOUSE > Mouse: a USB or Bluetooth mouse or touchpad on the screen, an arrow
+    // and clicks (mouse_input.c); off by default
+    Parameter<int32_t> p_mouse{"mouse", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_vox_gain{"vox_gain", 0, 0, 100,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_vox_ag{"vox_ag", 0, 0, 100,

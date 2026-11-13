@@ -90,6 +90,11 @@ void paddle_keyer_stop(void);
 /* CW / CW-R: [ and ] are the paddle, not keys */
 bool paddle_keyer_active(void);
 
+/* The device is a paddle the keyer has open (mouse buttons, or a second keyboard's paddle keys): no pointer
+ * (mouse_input.c) */
+struct stat;
+bool paddle_keyer_holds(const struct stat *st);
+
 #ifdef __cplusplus
 }
 #endif

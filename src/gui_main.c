@@ -38,6 +38,7 @@
 #include "dsp.h"
 #include "util.h"
 #include "key_input.h"
+#include "mouse_input.h"
 #include "paddle_keyer.h"
 #include "front_keys.h"
 #include "params/params.h"
@@ -234,6 +235,9 @@ static void inputs_open(void) {
         }
     }
 #endif
+#if !USE_SDL
+    mouse_init();           /* after the MFK: its wheel is a second encoder */
+#endif
 }
 
 /* The settings, and what is made from them before the screen is built */
@@ -248,6 +252,7 @@ static void settings_load(void) {
     vol_init();
 #if !USE_SDL
     keyboard_layout_start();    /* the keyboard opened before the settings were read: its layout now */
+    mouse_start();              /* the Mouse setting: open one if it is on */
 #endif
     /* The folder for the user's own themes (docs/THEMES.md). None comes with the image any more: the RS
      * theme that was copied here is cut from a screenshot of another maker's remote software (themes/make_rs.py) */

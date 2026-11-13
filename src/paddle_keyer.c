@@ -397,6 +397,10 @@ static bool is_open(int i, const struct stat *st) {
     return (atomic_load(&open_bits) & 1u << i) && st->st_rdev == fd_rdev[i] && st->st_ino == fd_ino[i];
 }
 
+bool paddle_keyer_holds(const struct stat *st) {
+    return is_open(FD_BTN, st) || is_open(FD_KBD2, st);
+}
+
 #define BITS(max) ((max) / (8 * sizeof(long)) + 1)
 
 static bool has_bit(const unsigned long *b, int n) {

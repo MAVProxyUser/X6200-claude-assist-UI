@@ -22,6 +22,7 @@
 #include "kbd_keymap.h"
 #include "kbd_layout.h"
 #include "kbd_rollover.h"
+#include "mouse_input.h"
 #include "paddle_keyer.h"
 #include "pubsub_ids.h"
 #include "screen_light.h"
@@ -406,6 +407,7 @@ static void check_keyboard(void) {
         ready = false;
     }
     paddle_keyer_scan();   /* after the keyboard: a second one with the paddle keys is the paddle */
+    mouse_check();         /* after the paddles: a paddle with mouse buttons is never the pointer */
 }
 
 /* Every time, also once one is found: an unplugged keyboard's link can outlive the "remove" */

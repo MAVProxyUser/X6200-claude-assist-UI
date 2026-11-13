@@ -335,7 +335,7 @@ one second.
 A USB keyboard, or a Bluetooth one paired in Settings > Bluetooth > DEVICES,
 types in the text boxes and the apps.
 
-Settings > Keys > KEYBOARD > Shortcuts, off by default, decides whether it
+Settings > Keys > KEYBOARD AND MOUSE > Shortcuts, off by default, decides whether it
 does more than type:
 
 - Off: it only types. Its keys reach a text box (the frequency box, a
@@ -354,7 +354,7 @@ frequency box and, in CW, the [CW line](#cw-from-the-keyboard). Scroll Lock
 turns the [frequency lock](#buttons-and-knobs) on and off and Print Screen
 takes a screenshot, both on the main screen only.
 
-The keyboard's layout is set in Settings > Keys > KEYBOARD > Layout: US (the
+The keyboard's layout is set in Settings > Keys > KEYBOARD AND MOUSE > Layout: US (the
 default, and the only one up to v0.3.9), UK, German (QWERTZ), Swiss German,
 French (AZERTY), Belgian (AZERTY), Spanish, Italian, Portuguese, Swedish,
 Finnish, Danish, Norwegian, Polish or Czech (QWERTZ). It applies at once, to
@@ -446,6 +446,26 @@ On the bench X6200 (5 Nov) the CapsLock chords and the PTT toggle worked,
 with a USB keyboard; checked in the host tests (`tools/keyboard`) and on
 the PC build too. Not tried on an X6100 yet, nor the Caps Lock light and a
 Bluetooth keyboard's link lost.
+
+#### Mouse
+
+A USB mouse, or a Bluetooth one or the touchpad of a Bluetooth keyboard
+(paired in Settings > Bluetooth > DEVICES), points and clicks on the screen
+with Settings > Keys > KEYBOARD AND MOUSE > Mouse on. It is off by default.
+
+- An arrow follows it, and goes after 5 s without a move or a click.
+- Left click: a tap where the arrow is, on every button, tab, tile, list
+  row, switch and option, the Sentry's screens and their F keys included.
+  Held, it is a long press; held and moved, it scrolls a page or a list.
+- Wheel (or the touchpad's two-finger scroll): the MFK turned, one step a
+  notch. Where the MFK changes a value, so does the wheel.
+- Middle button: the MFK pressed. Right button: ESC, back or close.
+- The first move or click on a dark screen or the screensaver only brings
+  the screen back, as the radio's keys do.
+- A paddle that shows up as mouse buttons (Settings > Keys > PADDLE) stays
+  the paddle and is never the pointer.
+- The knobs and keys work as always next to it. A click on a button that
+  transmits (TUNE, a TX key in an app) transmits, as a press of it would.
 
 #### Quick QSO log
 
@@ -1786,7 +1806,7 @@ by itself. The 20 MHz and channel 12 and 13 settings in `x6100-wifi.conf` are
 | FRONT KEYS, LONG PRESS | the long-press action of GEN, APP, KEY, MSG, DFN, DFL and FST (see [Buttons and knobs](#buttons-and-knobs)) |
 | HAND MIC KEYS | F1, F2, F1 long, F2 long; on the X6200 F3 and F3 long too, for the H-22's F3 (see [Hand mic](#hand-mic)) |
 | PADDLE | USB paddles: Connected, the dit/dah of each kind, Learn dit and dah, Swap dit and dah, Serial port (see [USB paddle](#usb-paddle)) |
-| KEYBOARD | Layout of a USB or Bluetooth keyboard: US by default, UK, German, French and others (see [Keyboard](#keyboard)) |
+| KEYBOARD AND MOUSE | Layout of a USB or Bluetooth keyboard: US by default, UK, German, French and others; Shortcuts, off by default (the keyboard only types); Mouse, off by default (see [Keyboard](#keyboard) and [Mouse](#mouse)) |
 
 ### Cluster tab
 
