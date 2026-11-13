@@ -85,6 +85,7 @@ static pthread_t       thread;
 static atomic_bool     started;
 static atomic_int      state = ADSB_RX_OFF;
 static atomic_ullong   bytes;
+static atomic_bool     lent;            /* the RTL-SDR lent: adsb_rx_lend() */
 static pthread_mutex_t dev_lock = PTHREAD_MUTEX_INITIALIZER;
 static char            dev_path[32], dev_name[16], dev_info[48];
 
@@ -340,6 +341,19 @@ static void *rx_thread(void *arg) {
     double last = 0, init_at = 0;           /* init_at: the start commands are due, 0 sent */
 
     for (;;) {
+        /* The RTL-SDR lent: its dump1090 stopped, not started again till it is back */
+        if (atomic_load(&lent) && (rx < 0 || receivers[rx].sdr)) {
+            if (fd >= 0) {
+                close(fd);
+                fd = -1;
+            }
+            d1090_stop();
+            set_dev("", "");
+            state = ADSB_RX_LENT;
+            usleep(300000);
+            rx = -1;
+            continue;
+        }
         if (fd < 0) {
             char usb[64], dev[32];
 
@@ -485,3 +499,5 @@ void adsb_rx_name(char *name, size_t n) {
 }
 
 uint64_t adsb_rx_bytes(void) { return bytes; }
+
+void adsb_rx_lend(bool on) { atomic_store(&lent, on); }

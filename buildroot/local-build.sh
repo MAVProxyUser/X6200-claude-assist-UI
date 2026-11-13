@@ -210,10 +210,14 @@ rm -f $BR/build/target/etc/init.d/S01create_data                         # and f
 rm -f $BOARD/rootfs-overlay/etc/init.d/S02update $BR/build/target/etc/init.d/S02update
 # The AIRSPACE screen's RTL-SDR sticks (src/adsb_rx.c): dump1090-fa and the RTL-SDR Blog librtlsdr with its rtl_*
 # tools (buildroot/br2_external/package), on both radios
-for p in rtlsdr-blog dump1090-fa; do
+# The Sentry's VHF/UHF screen reads a stick through x6x00-rtlspec (tools/rtlspec, built from this repository)
+for p in rtlsdr-blog dump1090-fa x6x00-rtlspec; do
     grep -q "package/$p/Config.in" $EXT/Config.in || echo "source \"\$BR2_EXTERNAL_${M}_PATH/package/$p/Config.in\"" >> $EXT/Config.in
 done
-grep -q "^BR2_PACKAGE_DUMP1090_FA=y" $DEFCONFIG || echo "BR2_PACKAGE_DUMP1090_FA=y" >> $DEFCONFIG
+sed -i "s|@OPENX6X00@|$GUI|" $EXT/package/x6x00-rtlspec/x6x00-rtlspec.mk
+for o in BR2_PACKAGE_DUMP1090_FA=y BR2_PACKAGE_X6X00_RTLSPEC=y; do
+    grep -q "^$o" $DEFCONFIG || echo "$o" >> $DEFCONFIG
+done
 # ffmpeg for the boot video (rootfs/etc/init.d/S94bootvideo), with what it needs only, not buildroot's every codec:
 # MP4/MKV/AVI, H.264, HEVC, MPEG-4 and VP8/VP9 video, scaled and turned into the framebuffer (fbdev). 4.4 looks
 # for linux/fb.h only with v4l2-m2m on. tools/bootvideo/build.sh builds the same for a radio on an older image

@@ -36,7 +36,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     apps_menu.c
     birdie.c dialog_birdie.c
     app_sentry.c
-    adsb.c adsb_rx.c app_adsb.c
+    adsb.c adsb_rx.c app_adsb.c rtl_spectrum.c
     dialog_cw_trainer.c
     dialog_cw_kbd.c
     dialog_shell.c

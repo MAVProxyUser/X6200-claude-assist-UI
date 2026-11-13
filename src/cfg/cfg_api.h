@@ -84,6 +84,9 @@ extern ParamInt         *cfg_speaker_off;        // p_speaker_off
 extern ParamInt         *cfg_kbd_layout;         // p_kbd_layout
 extern ParamInt         *cfg_kbd_shortcuts;      // p_kbd_shortcuts
 extern ParamInt         *cfg_mouse;              // p_mouse
+extern ParamInt         *cfg_rtl_freq;           // p_rtl_freq
+extern ParamInt         *cfg_rtl_gain;           // p_rtl_gain
+extern ParamInt         *cfg_rtl_view;           // p_rtl_view
 extern ParamInt         *cfg_smeter_needle;      // p_smeter_needle
 extern ParamInt         *cfg_smeter_color;       // p_smeter_color
 extern ParamInt         *cfg_wf_palette;         // p_wf_palette

@@ -1,0 +1,10 @@
+config BR2_PACKAGE_X6X00_RTLSPEC
+	bool "x6x00-rtlspec"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_RTLSDR_BLOG
+	help
+	  An RTL-SDR stick's spectrum for the OpenX6X00 GUI's Sentry
+	  (the F VHF/UHF screen, src/rtl_spectrum.c): rows of averaged
+	  FFTs on its standard output, retuned from its standard input.
+	  Installed as /usr/bin/x6x00-rtlspec; its source is this
+	  repository's tools/rtlspec.

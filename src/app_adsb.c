@@ -484,6 +484,7 @@ static void show_scope_words(double now, int nlive) {
         case ADSB_RX_NO_DRIVER: msg = "RECEIVER FOUND\n\nTHE KERNEL HAS\nNO CDC_ACM DRIVER"; break;
         case ADSB_RX_OPENING: msg = "RECEIVER FOUND\n\nOPENING ITS PORT"; break;
         case ADSB_RX_OFF: msg = "RECEIVER NOT STARTED"; break;
+        case ADSB_RX_LENT: msg = "RTL-SDR IN USE\n\nBY THE SENTRY'S\nVHF/UHF SPECTRUM"; break;
         default:
             if (!nlive && !adsb_count()) msg = "LISTENING ON 1090 MHZ\n\nNO AIRCRAFT YET";
             break;

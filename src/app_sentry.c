@@ -46,6 +46,7 @@
 #include "params/params.h"
 #include "qth/qth.h"
 #include "radio.h"
+#include "rtl_spectrum.h"
 #include "recorder.h"
 #include "styles.h"
 #include "theme.h"
@@ -95,7 +96,7 @@ extern const lv_font_t pixel_16, pixel_20, pixel_24, pixel_28, pixel_44;
 #define VISITED     16
 #define IGNORED     32
 
-typedef enum { SCR_SCAN, SCR_TRACK, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_N } scr_t;
+typedef enum { SCR_SCAN, SCR_TRACK, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_RTL, SCR_N } scr_t;
 typedef enum { MODE_AUTO, MODE_SEMI, MODE_MAN } sysmode_t;
 typedef enum { ROUT_BAND, ROUT_SWEEP } routine_t;
 
@@ -347,7 +348,7 @@ static box_t     d_sel, d_how, d_ant, d_now;
 static lv_obj_t *d_head_l, *d_row_l[12];
 
 /* E SYSTEM: the rest of the radio, from here */
-typedef enum { SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_CLASSIC, SYS_SHELL, SYS_HOME, SYS_N } sysitem_t;
+typedef enum { SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_CLASSIC, SYS_SHELL, SYS_HOME, SYS_N } sysitem_t;
 static const struct {
     const char *name, *about;
 } sys_items[SYS_N] = {
@@ -360,6 +361,9 @@ static const struct {
     {"AIRSPACE (ADS-B)", "AIRCRAFT ON 1090 MHZ FROM AN ADS-B RECEIVER ON USB (GNS 5890 OR MICROADSB): A SCOPE AROUND "
                          "YOUR QTH, THEIR CALLS, HEIGHTS AND TRACKS, AND THE HISTORY FADING OUT. IT KEEPS LISTENING "
                          "WHEN CLOSED."},
+    {"VHF/UHF (RTL-SDR)", "F VHF/UHF: AN RTL-SDR STICK'S SPECTRUM AND WATERFALL, 24 MHZ TO 1.7 GHZ, ALONE OR UNDER THE "
+                          "X6200'S. THE MFK TUNES IT, F2 CHOOSES A PRESET, A TAP CENTRES A SIGNAL. AIRSPACE LENDS IT "
+                          "THE STICK MEANWHILE."},
     {"CLASSIC RADIO", "THE FULL RADIO SCREEN, WITH TRANSMIT. THE SENTRY STAYS AWAY TILL YOU OPEN IT AGAIN: APP, THEN "
                       "THE SENTRY TILE."},
     {"UNIX SHELL", "A SHELL ON THE RADIO ITSELF (/BIN/SH, AS ROOT): A KEYBOARD TYPES INTO IT, TYPE OPENS THE ON-SCREEN "
@@ -979,7 +983,7 @@ static lv_obj_t *screen_obj(void) {
 /* ---- Showing the state ---- */
 
 static const char *titles[SCR_N] = {"REMOTE SENTRY RECEIVER SYSTEM", "REMOTE SENTRY RECEIVER SYSTEM",
-                                    "BAND INTELLIGENCE", "DECODER SENTRY", "SYSTEM CONTROL"};
+                                    "BAND INTELLIGENCE", "DECODER SENTRY", "SYSTEM CONTROL", "VHF/UHF SPECTRUM"};
 
 static void show_head(void) {
     char       f[24], t[16];
@@ -1313,6 +1317,487 @@ static void show_system(void) {
     opt_set(&s_keys, 1, "F5: CLASSIC RADIO", 2);
 }
 
+/* ---- F VHF/UHF: an RTL-SDR stick's spectrum (rtl_spectrum.c), alone or under the X6200's ---- */
+
+#define RTL_COLS     IMG_W
+#define RTL_TICKS    9
+#define RTL_PEAKS    6
+#define RTL_TRACE_H  90         /* the stick alone: its trace, the scale, the rest its waterfall */
+#define RTL_HALF_TR  46         /* split: each half's trace */
+#define RTL_SCALE_H  16
+
+static const struct {
+    const char *name;
+    int32_t     hz;
+    const char *about;
+} rtl_presets[] = {
+    {"NOAA WX", 162475000, "WEATHER RADIO 162.400-.550, AIS 161.975 / 162.025"},
+    {"2 M", 145000000, "HAMS 144-146: APRS 144.390, THE ISS 145.800"},
+    {"2 M RPT", 147000000, "HAMS 146-148: REPEATERS AND SIMPLEX"},
+    {"AIRBAND", 121000000, "AIRCRAFT VOICE (AM) 120-122, GUARD 121.500"},
+    {"FM BC", 98000000, "FM BROADCAST 97-99 MHZ"},
+    {"MARINE", 156800000, "MARINE VHF, CALLING CHANNEL 16 156.800"},
+    {"WX SAT", 137500000, "METEOR-M WEATHER SATELLITES 137.100 / 137.900"},
+    {"SONDES", 403000000, "WEATHER BALLOONS 400-406 MHZ"},
+    {"70 CM", 446000000, "HAMS 445-447: SIMPLEX 446.000"},
+    {"ISM 433", 433920000, "SENSORS, KEY FOBS, WEATHER STATIONS"},
+    {"GMRS", 462600000, "GMRS AND FRS RADIOS"},
+    {"ISM 915", 915000000, "METERS AND SENSORS 914-916 MHZ"},
+    {"UAT 978", 978000000, "AIRCRAFT UAT, 978 MHZ"},
+    {"ADS-B", 1090000000, "AIRCRAFT, 1090 MHZ (AIRSPACE DECODES THEM)"},
+};
+#define RTL_PRESETS N_OF(rtl_presets)
+
+static const int32_t rtl_steps[] = {12500, 25000, 100000, 500000, 1000000};
+static const int     rtl_gains[] = {-1, 97, 197, 280, 372, 496};     /* tenths of dB; -1 the tuner's AGC */
+
+typedef struct {
+    int   y0, trace_h, wf_y0, wf_h;
+    float floor, top_db, bot_db;
+} panel_t;
+
+static lv_img_dsc_t *rtl_frame;
+static lv_obj_t     *rtl_img, *rtl_why_l, *rtl_tick_l[RTL_TICKS], *hf_tick_l[RTL_TICKS], *rtl_peak_l[RTL_PEAKS], *rtl_src_l[2];
+static box_t         r_dev, r_tune, r_pre, r_sig;
+static lv_timer_t   *rtl_timer;
+static int           rtl_img_h, rtl_preset, rtl_step = 2, rtl_drop;
+static panel_t       p_rtl, p_hf;
+static float         rtl_db[8192], rtl_cols[RTL_COLS], hf_cols[RTL_COLS];
+static uint16_t      rtl_n;
+static uint32_t      rtl_rate, rtl_seq, hf_seen;
+static int64_t       rtl_centre, rtl_drawn;      /* the stick's tuning, what the waterfall's columns show */
+static bool          rtl_wanted;
+
+static int64_t rtl_view_hz(void) {
+    return rtl_rate ? (int64_t)rtl_rate * 5 / 6 : 2000000;   /* the middle of the band: the edges roll off */
+}
+
+static double rtl_px_hz(void) {
+    return (double)rtl_view_hz() / RTL_COLS;
+}
+
+/* What a VHF/UHF frequency is, in a few letters, "" not known */
+static const char *rtl_name(int64_t hz) {
+    static const struct { int32_t hz; int32_t w; const char *n; } exact[] = {
+        {162550000, 6000, "WX1"}, {162400000, 6000, "WX2"}, {162475000, 6000, "WX3"}, {162425000, 6000, "WX4"},
+        {162450000, 6000, "WX5"}, {162500000, 6000, "WX6"}, {162525000, 6000, "WX7"}, {161975000, 6000, "AIS 1"},
+        {162025000, 6000, "AIS 2"}, {144390000, 6000, "APRS"}, {145800000, 6000, "ISS"}, {156800000, 6000, "CH16"},
+        {121500000, 6000, "GUARD"}, {137100000, 40000, "METEOR"}, {137900000, 40000, "METEOR"},
+        {1090000000, 1500000, "ADS-B"}, {978000000, 1000000, "UAT"}, {146520000, 6000, "CALL"},
+        {446000000, 6000, "CALL"},
+    };
+    static const struct { int32_t lo, hi; const char *n; } ranges[] = {
+        {88000000, 108000000, "FM"}, {108000000, 118000000, "NAV"}, {118000000, 137000000, "AIR"},
+        {137000000, 138000000, "SAT"}, {144000000, 148000000, "2M"}, {156000000, 157450000, "MARINE"},
+        {150800000, 174000000, "LMR"}, {400000000, 406000000, "SONDE"}, {433050000, 434790000, "ISM"},
+        {420000000, 450000000, "70CM"}, {462550000, 467725000, "GMRS"}, {902000000, 928000000, "ISM"},
+    };
+
+    for (int i = 0; i < N_OF(exact); i++)
+        if (llabs(hz - exact[i].hz) <= exact[i].w) return exact[i].n;
+    for (int i = 0; i < N_OF(ranges); i++)
+        if (hz >= ranges[i].lo && hz < ranges[i].hi) return ranges[i].n;
+    return "";
+}
+
+/* Columns from bins (n of them, the first at lo_hz, bin_hz apart): each the strongest bin in it, so a narrow
+ * carrier stays in sight; an empty one from its neighbour */
+static void to_cols(const float *db, int n, double lo_hz, double bin_hz, int64_t view_lo, double px_hz, float *cols) {
+    for (int x = 0; x < RTL_COLS; x++) {
+        double f0 = view_lo + x * px_hz, f1 = f0 + px_hz;
+        int    b0 = (int)floor((f0 - lo_hz) / bin_hz), b1 = (int)ceil((f1 - lo_hz) / bin_hz);
+        float  best = -300;
+
+        if (b1 <= b0) b1 = b0 + 1;
+        for (int b = b0; b < b1; b++)
+            if (b >= 0 && b < n && db[b] > best) best = db[b];
+        cols[x] = best > -300 ? best : (x ? cols[x - 1] : -150);
+    }
+}
+
+static float cols_floor(const float *cols) {
+    static float tmp[RTL_COLS];
+
+    memcpy(tmp, cols, sizeof(tmp));
+    return median(tmp, RTL_COLS);
+}
+
+static uint8_t panel_level(const panel_t *p, float db) {
+    int v = (int)((db - (p->floor + 2)) * 255 / 34);
+    return v < 0 ? 0 : v > 255 ? 255 : (uint8_t)v;
+}
+
+/* The trace: coloured by level, as A SCAN's */
+static void panel_trace(panel_t *p, const float *cols) {
+    uint32_t *px  = (uint32_t *)rtl_frame->data;
+    uint32_t  bg  = argb(ink), grid = argb(faint);
+    float     top = -300;
+    int       h   = p->trace_h, prev = -1;
+
+    for (int x = 0; x < RTL_COLS; x++)
+        if (cols[x] > top) top = cols[x];
+    p->floor = p->floor < -250 ? cols_floor(cols) : p->floor * 0.8f + cols_floor(cols) * 0.2f;
+    float want_top = top + 4 > p->floor + 30 ? top + 4 : p->floor + 30, want_bot = p->floor - 8;
+    p->top_db += (want_top - p->top_db) * (want_top > p->top_db ? 0.5f : 0.08f);
+    p->bot_db += (want_bot - p->bot_db) * 0.1f;
+
+    for (int i = p->y0 * RTL_COLS; i < (p->y0 + h + RTL_SCALE_H) * RTL_COLS; i++) px[i] = bg;
+    for (int d = (int)ceilf(p->bot_db / 10) * 10; d < p->top_db; d += 10) {
+        int y = h - 1 - (int)((d - p->bot_db) / (p->top_db - p->bot_db) * (h - 1));
+        if (y >= 0 && y < h)
+            for (int x = 0; x < RTL_COLS; x += 3) px[(p->y0 + y) * RTL_COLS + x] = grid;
+    }
+    for (int x = 0; x < RTL_COLS; x++) {
+        int y = h - 1 - (int)((cols[x] - p->bot_db) / (p->top_db - p->bot_db) * (h - 1));
+        y     = y < 0 ? 0 : y > h - 1 ? h - 1 : y;
+        int      y0 = prev < 0 ? y : prev < y ? prev : y, y1 = prev < 0 ? y : prev > y ? prev : y;
+        uint8_t  v    = panel_level(p, cols[x]);
+        uint32_t edge = d3_pal[v], body = scale_rgb(d3_pal[v / 2], 0.45f);
+
+        for (int yy = y + 1; yy < h; yy++) px[(p->y0 + yy) * RTL_COLS + x] = yy == y + 1 ? scale_rgb(edge, 0.8f) : body;
+        for (int yy = y0; yy <= y1; yy++) px[(p->y0 + yy) * RTL_COLS + x] = edge;
+        prev = y;
+    }
+    for (int y = 2; y < h; y += 3) {        /* scan lines, as an old tube */
+        uint32_t *r = px + (p->y0 + y) * RTL_COLS;
+        for (int x = 0; x < RTL_COLS; x++) r[x] = 0xff000000 | ((r[x] >> 1) & 0x7f7f7f) | ((r[x] >> 2) & 0x3f3f3f);
+    }
+}
+
+/* A waterfall row on top, the older ones a row down */
+static void panel_row(panel_t *p, const float *cols) {
+    uint32_t *px = (uint32_t *)rtl_frame->data, *top = px + p->wf_y0 * RTL_COLS;
+
+    if (p->wf_h < 2) return;
+    memmove(top + RTL_COLS, top, (size_t)(p->wf_h - 1) * RTL_COLS * 4);
+    for (int x = 0; x < RTL_COLS; x++) top[x] = d3_pal[panel_level(p, cols[x])];
+}
+
+/* The waterfall's columns follow a retune: what they showed moves aside, or goes */
+static void panel_shift(panel_t *p, int dx) {
+    uint32_t *px = (uint32_t *)rtl_frame->data, bg = argb(ink);
+
+    for (int y = p->wf_y0; y < p->wf_y0 + p->wf_h; y++) {
+        uint32_t *r = px + y * RTL_COLS;
+
+        if (abs(dx) >= RTL_COLS) {
+            for (int x = 0; x < RTL_COLS; x++) r[x] = bg;
+        } else if (dx > 0) {
+            memmove(r, r + dx, (size_t)(RTL_COLS - dx) * 4);
+            for (int x = RTL_COLS - dx; x < RTL_COLS; x++) r[x] = bg;
+        } else if (dx < 0) {
+            memmove(r - dx, r, (size_t)(RTL_COLS + dx) * 4);
+            for (int x = 0; x < -dx; x++) r[x] = bg;
+        }
+    }
+}
+
+static void panel_clear(panel_t *p) {
+    uint32_t *px = (uint32_t *)rtl_frame->data, bg = argb(ink);
+
+    for (int i = p->y0 * RTL_COLS; i < (p->wf_y0 + p->wf_h) * RTL_COLS; i++) px[i] = bg;
+    p->floor = -300;
+}
+
+/* The halves: the stick alone fills the picture; split, the X6200 above and the stick below */
+static void rtl_layout(void) {
+    bool split = param_i_get(cfg_rtl_view) == 1;
+    int  h     = rtl_img_h;
+
+    p_hf = (panel_t){0};
+    if (split) {
+        int half = (h - 4) / 2;
+
+        p_hf  = (panel_t){.y0 = 0, .trace_h = RTL_HALF_TR, .wf_y0 = RTL_HALF_TR + RTL_SCALE_H,
+                          .wf_h = half - RTL_HALF_TR - RTL_SCALE_H, .floor = -300, .top_db = -60, .bot_db = -130};
+        p_rtl = (panel_t){.y0 = half + 4, .trace_h = RTL_HALF_TR, .wf_y0 = half + 4 + RTL_HALF_TR + RTL_SCALE_H,
+                          .wf_h = h - (half + 4 + RTL_HALF_TR + RTL_SCALE_H), .floor = -300, .top_db = -60, .bot_db = -130};
+    } else {
+        p_rtl = (panel_t){.y0 = 0, .trace_h = RTL_TRACE_H, .wf_y0 = RTL_TRACE_H + RTL_SCALE_H,
+                          .wf_h = h - RTL_TRACE_H - RTL_SCALE_H, .floor = -300, .top_db = -60, .bot_db = -130};
+    }
+    uint32_t *px = (uint32_t *)rtl_frame->data, bg = argb(ink), line = argb(amb);
+    for (int i = 0; i < RTL_COLS * h; i++) px[i] = bg;
+    if (split)
+        for (int y = p_rtl.y0 - 3; y < p_rtl.y0 - 1; y++)
+            for (int x = 0; x < RTL_COLS; x++) px[y * RTL_COLS + x] = line;
+    rtl_drawn = 0;
+    lv_label_set_text(rtl_src_l[0], "");
+    lv_label_set_text(rtl_src_l[1], "");
+    for (int i = 0; i < RTL_TICKS; i++) lv_obj_add_flag(hf_tick_l[i], LV_OBJ_FLAG_HIDDEN);
+    if (rtl_img) lv_obj_invalidate(rtl_img);
+}
+
+static void fmt_mhz(char *s, size_t n, int64_t hz, int dec) {
+    snprintf(s, n, "%lld.%0*lld", (long long)(hz / 1000000), dec, (long long)((hz % 1000000) / (dec == 3 ? 1000 : 100)));
+}
+
+/* The scale's labels: a tick label every step that leaves room for them */
+static void rtl_ticks(lv_obj_t **l, const panel_t *p, int64_t lo, double px_hz, int64_t every, bool mhz) {
+    int  t = 0, iy = lv_obj_get_y(rtl_img);
+    char s[24];
+
+    for (int64_t f = (lo / every + 1) * every; f < lo + (int64_t)(px_hz * RTL_COLS) && t < RTL_TICKS; f += every) {
+        int x = (int)lround((f - lo) / px_hz);
+
+        if (x < 30 || x > RTL_COLS - 30) continue;
+        if (mhz) fmt_mhz(s, sizeof(s), f, 3);
+        else fmt_freq(s, sizeof(s), f);
+        lv_label_set_text(l[t], s);
+        lv_obj_set_pos(l[t], IMG_X + x - lv_txt_get_width(s, strlen(s), &pixel_16, 0, 0) / 2, iy + p->y0 + p->trace_h);
+        lv_obj_clear_flag(l[t], LV_OBJ_FLAG_HIDDEN);
+        t++;
+    }
+    for (; t < RTL_TICKS; t++) lv_obj_add_flag(l[t], LV_OBJ_FLAG_HIDDEN);
+}
+
+/* The strongest peaks over the stick's floor, labelled with their frequency and what they are */
+static int rtl_peaks(int64_t lo, double px_hz, int32_t *best_hz, float *best_db) {
+    int   placed[RTL_PEAKS], np = 0, iy = lv_obj_get_y(rtl_img), found = 0;
+    bool  used[RTL_COLS] = {false};
+    char  s[32], f[16];
+
+    *best_hz = 0;
+    *best_db = -300;
+    for (int k = 0; k < RTL_PEAKS * 3 && np < RTL_PEAKS; k++) {
+        int   bx = -1;
+        float bv = p_rtl.floor + 10;
+
+        for (int x = 2; x < RTL_COLS - 2; x++)
+            if (!used[x] && rtl_cols[x] > bv && rtl_cols[x] >= rtl_cols[x - 1] && rtl_cols[x] >= rtl_cols[x + 1]) {
+                bv = rtl_cols[x];
+                bx = x;
+            }
+        if (bx < 0) break;
+        for (int x = bx - 12; x <= bx + 12; x++)
+            if (x >= 0 && x < RTL_COLS) used[x] = true;
+        found++;
+        int64_t hz = lo + (int64_t)((bx + 0.5) * px_hz);
+        if (bv > *best_db) *best_db = bv, *best_hz = (int32_t)hz;
+
+        bool clash = false;
+        for (int j = 0; j < np && !clash; j++) clash = abs(placed[j] - bx) < 70;
+        if (clash) continue;
+        fmt_mhz(f, sizeof(f), hz, 3);
+        snprintf(s, sizeof(s), "%s%s%s", f, rtl_name(hz)[0] ? " " : "", rtl_name(hz));
+        int w = lv_txt_get_width(s, strlen(s), &pixel_16, 0, 0), x = IMG_X + bx - w / 2;
+        int y = p_rtl.trace_h - 1 - (int)((bv - p_rtl.bot_db) / (p_rtl.top_db - p_rtl.bot_db) * (p_rtl.trace_h - 1)) - 20;
+
+        x = x < IMG_X ? IMG_X : x + w > IMG_X + RTL_COLS ? IMG_X + RTL_COLS - w : x;
+        lv_label_set_text(rtl_peak_l[np], s);
+        lv_obj_set_pos(rtl_peak_l[np], x, iy + p_rtl.y0 + (y < 0 ? 0 : y));
+        lv_obj_clear_flag(rtl_peak_l[np], LV_OBJ_FLAG_HIDDEN);
+        placed[np++] = bx;
+    }
+    for (int i = np; i < RTL_PEAKS; i++) lv_obj_add_flag(rtl_peak_l[i], LV_OBJ_FLAG_HIDDEN);
+    return found;
+}
+
+static void show_rtl(void) {
+    static const char *const st[] = {"OFF", "NO HELPER ON THIS IMAGE", "NO RTL-SDR ON USB", "STICK BUSY: WAITING",
+                                     "OPENING THE STICK", "RECEIVING"};
+    rtl_spec_state_t s = rtl_spectrum_state();
+    char             t[48], tn[16], f[16];
+    int              g = param_i_get(cfg_rtl_gain);
+
+    rtl_spectrum_tuner(tn, sizeof(tn));
+    snprintf(t, sizeof(t), "RTL-SDR %s", tn[0] ? tn : "");
+    opt_set(&r_dev, 0, t, 0);
+    opt_set(&r_dev, 1, st[s], s == RTL_SPEC_ON ? 2 : 0);
+    fmt_mhz(f, sizeof(f), param_i_get(cfg_rtl_freq), 3);
+    snprintf(t, sizeof(t), "%s MHZ", f);
+    opt_set(&r_tune, 0, t, 0);
+    static const char *const steps[] = {"12.5K", "25K", "100K", "500K", "1M"};
+    snprintf(t, sizeof(t), "%.1f MHZ / %s", rtl_view_hz() / 1e6, steps[rtl_step]);
+    opt_set(&r_tune, 1, t, 2);
+    opt_set(&r_pre, 0, rtl_presets[rtl_preset].name, 0);
+    opt_set(&r_pre, 1, rtl_presets[rtl_preset].about, 2);
+    if (g < 0) snprintf(t, sizeof(t), "GAIN AUTO");
+    else snprintf(t, sizeof(t), "GAIN %d.%d DB", g / 10, g % 10);
+    opt_set(&r_sig, 1, t, 2);
+    /* No rows: why, in the picture */
+    static const char *const why[] = {"", "THIS IMAGE HAS NO /USR/BIN/X6X00-RTLSPEC", "NO RTL-SDR ON USB\n\nPLUG ONE INTO THE HOST PORT",
+                                      "THE STICK IS BUSY\n\nWAITING FOR IT", "OPENING THE RTL-SDR", ""};
+    lv_label_set_text(rtl_why_l, why[s]);
+    if (s == RTL_SPEC_ON || s == RTL_SPEC_OFF) lv_obj_add_flag(rtl_why_l, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_clear_flag(rtl_why_l, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* The stick's tuning, kept and sent */
+static void rtl_tune(int64_t hz) {
+    if (hz < RTL_SPEC_MIN_HZ) hz = RTL_SPEC_MIN_HZ;
+    if (hz > RTL_SPEC_MAX_HZ) hz = RTL_SPEC_MAX_HZ;
+    param_i_set(cfg_rtl_freq, (int32_t)hz);
+    rtl_spectrum_tune(hz);
+    show_rtl();
+}
+
+static void rtl_want(bool on) {
+    if (on == rtl_wanted) return;
+    rtl_wanted = on;
+    rtl_spectrum_want(on, param_i_get(cfg_rtl_freq), param_i_get(cfg_rtl_gain));
+    if (on) {
+        rtl_seq = 0;
+        rtl_drop = 2;
+        rtl_layout();
+    }
+}
+
+static void rtl_timer_cb(lv_timer_t *t) {
+    uint16_t n;
+    uint32_t rate;
+    int64_t  c;
+    bool     fresh, drew = false;
+    int32_t  best_hz;
+    float    best_db;
+    char     s[48], f[16];
+
+    (void)t;
+    if (scr != SCR_RTL) return;
+    static uint32_t shown_ms;
+    if (lv_tick_elaps(shown_ms) > 1000) {   /* the boxes, once a second */
+        shown_ms = lv_tick_get();
+        show_rtl();
+    }
+    /* The X6200 above, split: A SCAN's own average, a row each frame of it */
+    if (param_i_get(cfg_rtl_view) == 1 && centre && nbins && last_seq != hf_seen) {
+        hf_seen = last_seq;
+        to_cols(avg_db, nbins, centre - span_hz / 2.0, bin_hz, centre - VIEW_HZ / 2, HZ_PX, hf_cols);
+        panel_trace(&p_hf, hf_cols);
+        panel_row(&p_hf, hf_cols);
+        rtl_ticks(hf_tick_l, &p_hf, centre - VIEW_HZ / 2, HZ_PX, 50000, false);
+        fmt_freq(f, sizeof(f), centre);
+        snprintf(s, sizeof(s), "X6200 HF  %s", f);
+        lv_label_set_text(rtl_src_l[0], s);
+        drew = true;
+    }
+    while (rtl_spectrum_frame(rtl_db, N_OF(rtl_db), &n, &rate, &c, &rtl_seq, &fresh)) {
+        if (fresh) rtl_drop = 2;
+        if (rtl_drop > 0) {                 /* the rows of before a retune */
+            rtl_drop--;
+            continue;
+        }
+        rtl_n = n;
+        rtl_rate = rate;
+        rtl_centre = c;
+        double  px_hz = rtl_px_hz();
+        int64_t lo    = c - rtl_view_hz() / 2;
+
+        if (rtl_drawn && rtl_drawn != c) panel_shift(&p_rtl, (int)lround((c - rtl_drawn) / px_hz));
+        rtl_drawn = c;
+        to_cols(rtl_db, n, c - rate / 2.0, (double)rate / n, lo, px_hz, rtl_cols);
+        panel_trace(&p_rtl, rtl_cols);
+        panel_row(&p_rtl, rtl_cols);
+        drew = true;
+    }
+    if (drew && rtl_rate) {
+        double  px_hz = rtl_px_hz();
+        int64_t lo    = rtl_centre - rtl_view_hz() / 2, every = rtl_view_hz() > 1500000 ? 250000 : 100000;
+        int     found = rtl_peaks(lo, px_hz, &best_hz, &best_db);
+
+        rtl_ticks(rtl_tick_l, &p_rtl, lo, px_hz, every, true);
+        fmt_mhz(f, sizeof(f), rtl_centre, 3);
+        snprintf(s, sizeof(s), "RTL-SDR  %s MHZ", f);
+        lv_label_set_text(rtl_src_l[1], s);
+        if (best_hz) {
+            fmt_mhz(f, sizeof(f), best_hz, 3);
+            snprintf(s, sizeof(s), "%d  BEST %s %s", found, f, rtl_name(best_hz));
+        } else {
+            snprintf(s, sizeof(s), "NONE OVER THE NOISE");
+        }
+        opt_set(&r_sig, 0, s, 0);
+    }
+    if (drew) lv_obj_invalidate(rtl_img);
+}
+
+/* A tap on the stick's half: that frequency to the middle */
+static void rtl_touch_cb(lv_event_t *e) {
+    lv_point_t p;
+    lv_area_t  a;
+
+    (void)e;
+    if (!rtl_rate || !lv_indev_get_act()) return;
+    lv_indev_get_point(lv_indev_get_act(), &p);
+    lv_obj_get_coords(rtl_img, &a);
+    if (p.y - a.y1 < p_rtl.y0) return;      /* the X6200's half: the VFO knob tunes that */
+    int64_t hz = rtl_centre - rtl_view_hz() / 2 + (int64_t)((p.x - a.x1 + 0.5) * rtl_px_hz());
+
+    rtl_tune(hz / 1000 * 1000);
+}
+
+static void build_rtl(lv_obj_t *p) {
+    int w = (SW - 12 - 18) / 4, iy = BODY_Y + LOW_H + 6;
+
+    box_make(&r_dev, p, 6, BODY_Y, w, LOW_H, "RECEIVER", 2, -1);
+    box_make(&r_tune, p, 6 + (w + 6), BODY_Y, w, LOW_H, "TUNED", 2, -1);
+    box_make(&r_pre, p, 6 + 2 * (w + 6), BODY_Y, w, LOW_H, "PRESET", 2, -1);
+    box_make(&r_sig, p, 6 + 3 * (w + 6), BODY_Y, w, LOW_H, "SIGNALS", 2, -1);
+    lv_label_set_long_mode(r_pre.opt[1], LV_LABEL_LONG_SCROLL_CIRCULAR);    /* the preset's about, running by */
+    rtl_img_h = scr_h - iy - 6 - 6;
+    rect(p, IMG_X - 3, iy, IMG_W + 6, rtl_img_h + 6, 3, false);
+    rtl_frame = lv_img_buf_alloc(RTL_COLS, rtl_img_h, LV_IMG_CF_TRUE_COLOR);
+    rtl_img   = lv_img_create(p);
+    lv_img_set_src(rtl_img, rtl_frame);
+    lv_obj_set_pos(rtl_img, IMG_X, iy + 3);
+    lv_obj_add_flag(rtl_img, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(rtl_img, rtl_touch_cb, LV_EVENT_CLICKED, NULL);
+    for (int i = 0; i < RTL_TICKS; i++) {
+        rtl_tick_l[i] = label(p, &pixel_16, dim, 0, 0, 0, 0, "");
+        hf_tick_l[i]  = label(p, &pixel_16, dim, 0, 0, 0, 0, "");
+        lv_obj_add_flag(rtl_tick_l[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(hf_tick_l[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    for (int i = 0; i < RTL_PEAKS; i++) {
+        rtl_peak_l[i] = label(p, &pixel_16, amb, 0, 0, 0, 0, "");
+        lv_obj_add_flag(rtl_peak_l[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    rtl_why_l = label(p, &pixel_24, amb, IMG_X, iy + rtl_img_h / 2 - 40, RTL_COLS, LV_TEXT_ALIGN_CENTER, "");
+    /* which half is which, at the right of each trace */
+    rtl_src_l[0] = label(p, &pixel_16, amb, IMG_X + RTL_COLS - 250, iy + 6, 244, LV_TEXT_ALIGN_RIGHT, "");
+    rtl_src_l[1] = label(p, &pixel_16, amb, IMG_X + RTL_COLS - 250, iy + 6, 244, LV_TEXT_ALIGN_RIGHT, "");
+    for (int i = 0; i < RTL_PRESETS; i++)       /* the preset the tuning is at, if one */
+        if (rtl_presets[i].hz == param_i_get(cfg_rtl_freq)) rtl_preset = i;
+    rtl_layout();
+}
+
+/* The second source label goes with the stick's half */
+static void rtl_labels_place(void) {
+    int iy = lv_obj_get_y(rtl_img);
+
+    lv_obj_set_y(rtl_src_l[1], iy + p_rtl.y0 + 3);
+    lv_obj_set_y(rtl_src_l[0], iy + p_hf.y0 + 3);
+}
+
+static void rtl_fkey(int k) {
+    switch (k) {
+        case 1:
+            rtl_preset = (rtl_preset + 1) % RTL_PRESETS;
+            rtl_tune(rtl_presets[rtl_preset].hz);
+            break;
+        case 2:
+            rtl_step = (rtl_step + 1) % N_OF(rtl_steps);
+            break;
+        case 3:
+            param_i_set(cfg_rtl_view, !param_i_get(cfg_rtl_view));
+            rtl_layout();
+            rtl_labels_place();
+            break;
+        case 4: {
+            int g = param_i_get(cfg_rtl_gain), i = 0;
+
+            while (i < N_OF(rtl_gains) && rtl_gains[i] != g) i++;
+            g = rtl_gains[(i + 1) % N_OF(rtl_gains)];
+            param_i_set(cfg_rtl_gain, g);
+            rtl_spectrum_gain(g);
+            p_rtl.floor = -300;
+            break;
+        }
+        default:
+            break;
+    }
+    show_rtl();
+}
+
 static const char *f_label(int k);
 
 static const char *const vol_names[] = {"VOLUME", "SQUELCH", "RF GAIN"};
@@ -1328,7 +1813,7 @@ static int vol_value(void) {
 
 static void show_legend(void) {
     static const char *const mfk[SCR_N] = {"TARGET, PUSH TRACK", "TARGET, PUSH HOLD", "BAND, PUSH LISTEN",
-                                           "FREQ, PUSH OPEN", "ITEM, PUSH OPEN"};
+                                           "FREQ, PUSH OPEN", "ITEM, PUSH OPEN", "RTL TUNE, PUSH PRESET"};
 
     lv_label_set_text_fmt(legend_l, "VFO: TUNE | MFK: %s | RING: SCREEN | VOL: %s %d, PUSH %s | GEN: HELP",
                           mfk[scr], vol_short[vol_fn], vol_value(), vol_short[(vol_fn + 1) % 3]);
@@ -1431,7 +1916,7 @@ static void show_screen(void) {
         else
             lv_obj_add_flag(scr_obj[i], LV_OBJ_FLAG_HIDDEN);
     }
-    static const char letters[SCR_N] = {'A', 'B', 'C', 'D', 'E'};
+    static const char letters[SCR_N] = {'A', 'B', 'C', 'D', 'E', 'F'};
     char              l[2]           = {letters[scr], 0};
 
     lv_label_set_text(badge_l[0], l);
@@ -1446,6 +1931,7 @@ static void show_screen(void) {
         case SCR_BANDS: show_bands(); break;
         case SCR_DECODE: show_decode(); break;
         case SCR_SYSTEM: show_system(); break;
+        case SCR_RTL: show_rtl(); rtl_labels_place(); break;
         default: break;
     }
     show_head();
@@ -1453,6 +1939,7 @@ static void show_screen(void) {
 
 static void go(scr_t s) {
     scr = s;
+    rtl_want(s == SCR_RTL);     /* the stick only while F shows it: AIRSPACE has it the rest of the time */
     show_screen();
 }
 
@@ -1736,6 +2223,17 @@ static const char *f_label(int k) {
             const char *const l[] = {"Scan", "Open", "Bands", "Decode", "Classic"};
             return l[k];
         }
+        case SCR_RTL: {
+            int g = param_i_get(cfg_rtl_gain);
+
+            if (k == 1) snprintf(s, sizeof(s), "Preset:\n%s", rtl_presets[rtl_preset].name);
+            else if (k == 2) snprintf(s, sizeof(s), "Step:\n%g kHz", rtl_steps[rtl_step] / 1000.0);
+            else if (k == 3) snprintf(s, sizeof(s), "View:\n%s", param_i_get(cfg_rtl_view) ? "Split" : "RTL");
+            else if (k == 4 && g < 0) snprintf(s, sizeof(s), "Gain:\nAuto");
+            else if (k == 4) snprintf(s, sizeof(s), "Gain:\n%d dB", (g + 5) / 10);
+            else snprintf(s, sizeof(s), "Scan");
+            return s;
+        }
         default:
             return "";
     }
@@ -1803,6 +2301,10 @@ static void sys_open_async(void *arg) {
 }
 
 static void sys_open(int i) {
+    if (i == SYS_VHF) {
+        go(SCR_RTL);
+        return;
+    }
     if (i == SYS_HOME) {
         param_i_set(cfg_sentry_home, !param_i_get(cfg_sentry_home));
         show_screen();
@@ -1895,6 +2397,11 @@ static void fkey(int k) {
             if (k == 3) go(SCR_DECODE);
             if (k == 4) sys_open(SYS_CLASSIC);
             break;
+        case SCR_RTL:
+            if (k == 0) go(SCR_SCAN);
+            else rtl_fkey(k);
+            if (scr == SCR_RTL) show_screen();
+            break;
         default:
             break;
     }
@@ -1938,6 +2445,10 @@ static void step(int dir) {
             sys_sel = (sys_sel + dir + SYS_N) % SYS_N;
             show_screen();
             break;
+        case SCR_RTL:
+            rtl_tune((int64_t)param_i_get(cfg_rtl_freq) / rtl_steps[rtl_step] * rtl_steps[rtl_step] +
+                     (int64_t)dir * rtl_steps[rtl_step]);
+            break;
         default:
             break;
     }
@@ -1961,6 +2472,7 @@ static void press(void) {
         case SCR_BANDS: listen_band(); break;
         case SCR_DECODE: open_decoder(); break;
         case SCR_SYSTEM: sys_open(sys_sel); break;
+        case SCR_RTL: rtl_fkey(1); show_screen(); break;
         default: break;
     }
 }
@@ -2485,7 +2997,8 @@ static void build_overlays(void) {
                    "\n"
                    "VFO KNOB       TUNES BY HAND: THE SENTRY GOES TO MAN-OVERRIDE (F1: BACK)\n"
                    "MFK KNOB       CHOOSES A TARGET, A BAND, A FREQUENCY. PUSH: TRACK, LISTEN, OPEN\n"
-                   "MFK RING       THE SCREENS: A SCAN, B TRACK, C BANDS, D DECODE, E SYSTEM\n"
+                   "MFK RING       THE SCREENS: A SCAN, B TRACK, C BANDS, D DECODE, E SYSTEM, F VHF/UHF\n"
+                   "F VHF/UHF      AN RTL-SDR ON USB: THE MFK TUNES IT, A TAP CENTRES A SIGNAL\n"
                    "VOL KNOB       VOLUME. PUSH: SQUELCH, PUSH: RF GAIN, PUSH: VOLUME AGAIN\n"
                    "F1 - F5        THE KEYS ALONG THE BOTTOM OF THE SCREEN\n"
                    "BAND UP/DOWN   THE NEXT BAND OF THE BANDS LIST, SCANNED\n"
@@ -2532,6 +3045,7 @@ static void construct_cb(lv_obj_t *parent) {
     build_bands(scr_obj[SCR_BANDS]);
     build_decode(scr_obj[SCR_DECODE]);
     build_system(scr_obj[SCR_SYSTEM]);
+    build_rtl(scr_obj[SCR_RTL]);
     build_keys();
     build_overlays();
 
@@ -2559,6 +3073,7 @@ static void construct_cb(lv_obj_t *parent) {
     wide_ok = radio_psd_wide(true);
     if (wide_ok) timer = lv_timer_create(timer_cb, 60, NULL);
     blink_timer = lv_timer_create(blink_cb, 500, NULL);
+    rtl_timer   = lv_timer_create(rtl_timer_cb, 50, NULL);
 
     lv_group_add_obj(keyboard_group, root);
     lv_obj_add_event_cb(root, key_cb, LV_EVENT_KEY, NULL);
@@ -2576,7 +3091,9 @@ static void construct_cb(lv_obj_t *parent) {
 static void destruct_cb(void) {
     if (timer) lv_timer_del(timer);
     if (blink_timer) lv_timer_del(blink_timer);
-    timer = blink_timer = NULL;
+    if (rtl_timer) lv_timer_del(rtl_timer);
+    timer = blink_timer = rtl_timer = NULL;
+    rtl_want(false);
     if (wide_ok) radio_psd_wide(false);
     if (rx_held) radio_rx_only(false);
     wide_ok = rx_held = false;
@@ -2592,5 +3109,10 @@ static void destruct_cb(void) {
         lv_img_buf_free(frame);
         frame = NULL;
     }
-    root = img = NULL;
+    if (rtl_frame) {
+        lv_img_cache_invalidate_src(rtl_frame);
+        lv_img_buf_free(rtl_frame);
+        rtl_frame = NULL;
+    }
+    root = img = rtl_img = NULL;
 }
