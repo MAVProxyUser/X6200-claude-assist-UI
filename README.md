@@ -16,9 +16,8 @@ is kept as **[README_original.md](README_original.md)**.
 seconds, where the signals over the noise are marked and named. Here the 60 m band at 2:39 at night, with nothing
 over the noise.*
 
-[What it adds](#what-it-adds) · [Screenshots](#screenshots) · [Tested](#tested-on-the-bench-and-off-the-air) ·
-[Install](#install) · [Hardware](#hardware) · [Manual](docs/MANUAL.md#the-sentry) ·
-[Upstream's README](README_original.md)
+[What it adds](#what-it-adds) · [Screenshots](#screenshots) · [Install](#install) · [Hardware](#hardware) ·
+[Manual](docs/MANUAL.md#the-sentry) · [Upstream's README](README_original.md)
 
 Developed and tested on an X6200. The image for the X6100 builds from the same source, but nobody has tried it here.
 
@@ -99,6 +98,16 @@ logo; the GUI comes up when it ends (30 s at most). [tools/bootvideo/prepare.sh]
 any video to the screen. A small decode-only ffmpeg is in the image for it.
 [Manual](docs/MANUAL.md#boot-video).
 
+### The base firmware, updated from OpenX6X00
+
+The X6200's base, the radio board's own firmware from Xiegu, written from OpenX6X00 over SSH, without Xiegu's own
+system and its card swaps: [tools/base_update](tools/base_update/README.md). fetch.sh downloads Xiegu's 1.0.8
+update and takes the base's file out of it; flash.sh writes it with **base_flash**, which does on the radio what
+Xiegu's app 1.0.8 does from its UPGRADE screen, step for step, its timeouts and error handling worked out from that
+app's code. `flash.sh --check` reads the base's version and touches nothing. Base 1.0.8 fixes the S-meter stuck at
+S1, -121.0 on 1.0.7; this fork's X6200 went from 1.0.7 to 1.0.8 this way on 13 November 2026.
+[More](#the-baseband).
+
 ### Smaller things
 
 - The clock in your own time zone (Settings > General > Date / Time), on the main screen, the Sentry and
@@ -130,6 +139,8 @@ Found with recordings played into the radio and test signals from a HackRF on th
   it, to test a decoder against real signals.
 - [tools/rtlsdr](tools/rtlsdr/build.sh) and [tools/bootvideo](tools/bootvideo/build.sh): the RTL-SDR programs
   and ffmpeg built for a radio running an older image.
+- [tools/base_update](tools/base_update/README.md): the X6200's base firmware fetched from Xiegu and written from
+  OpenX6X00, with its tests (a simulated base).
 - [tools/adsb](tools/adsb/adsb_read.py), [tools/ft8_live](tools/ft8_live), [tools/js8_play](tools/js8_play),
   [tools/cw_trainer](tools/cw_trainer): ADS-B sticks read on the radio, FT8 decodes watched live, JS8 played
   in, CW test messages.
@@ -182,19 +193,6 @@ their amber-on-black screens, as in this clip, "Aliens 1986 Turrets" (Mic Mitja,
 
 [![Aliens 1986 Turrets, on YouTube](https://img.youtube.com/vi/IS2PtmM9mwU/hqdefault.jpg)](https://www.youtube.com/watch?v=IS2PtmM9mwU)
 
-## Tested on the bench and off the air
-
-Test signals came from a HackRF next to the radio with no antenna, at low level, with made-up callsigns.
-
-| | |
-|---|---|
-| ![CW before](radio_captures/hackrf_tests/cw_before_fix_30db.png) **CW before**: a 20 WPM test message garbled | ![CW after](radio_captures/hackrf_tests/cw_after_fix_30_10_0_db.png) **CW after**: the same message at 30, 10 and 0 dB |
-| ![FT2](radio_captures/hackrf_tests/ft2_four_start_times_decoded.png) **FT2**: four start times in the slot, all decoded | ![NAVTEX](radio_captures/hackrf_tests/navtex_decoded.png) **NAVTEX**: test messages decoded |
-
-More in [radio_captures/hackrf_tests](radio_captures/hackrf_tests) (the decoders' bench tests, some before and
-after their fix) and [radio_captures/modes](radio_captures/modes) (real signals the decoders were checked against:
-CW, SSB, RTTY, PSK31, FT4, JS8, WSPR, SSTV, the NCDXF beacons, WWV and CHU, broadcast and the airband).
-
 ## Install
 
 1. **The card image.** GitHub builds both radios' images on every push to `main`. Open
@@ -234,9 +232,29 @@ tools/cross_x6200/build.sh && tools/cross_x6200/install.sh root@<radio>
 
 ## The baseband
 
-The radio board's own firmware, from Xiegu, which OpenX6X00 never changes: upstream's README has the table of
-bases and how to update one ([README_original.md, The baseband](README_original.md#the-baseband)). On the X6200's
-base 1.0.7 the S-meter can stick at S1, -121.0; 1.0.8 fixes it.
+The radio board's own firmware, from Xiegu: upstream's README has the table of bases and Xiegu's way to update one
+([README_original.md, The baseband](README_original.md#the-baseband)). On the X6200's base 1.0.7 the S-meter can
+stick at S1, -121.0; 1.0.8 fixes it, and also corrects the CW keyer's speed and brings back its macros.
+
+This fork updates the X6200's base from OpenX6X00 as well ([tools/base_update](tools/base_update/README.md),
+[manual](docs/MANUAL.md#the-x6200s-base-firmware-from-openx6x00)):
+
+```bash
+tools/base_update/fetch.sh && tools/base_update/build.sh
+```
+
+```bash
+tools/base_update/flash.sh root@<radio> --check
+```
+
+```bash
+tools/base_update/flash.sh root@<radio> --flash
+```
+
+`--check` only reads. `--flash` stops the GUI, writes the base in about half a minute and starts the GUI again;
+the radio then switches itself off, and is switched on again by hand to run the new firmware. As Xiegu asks: a
+13.8 V supply of 3 A or more and the battery out while it writes. A write that fails after the erase is written
+again with `--recover`; `--to 1.0.7` goes back.
 
 ## Documentation
 

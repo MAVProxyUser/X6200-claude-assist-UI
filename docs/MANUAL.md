@@ -13,7 +13,7 @@ Settings. Button and option names are written as the radio shows them.
 
 - [Getting started](#getting-started): [first steps](#first-steps), [setting up the transmitter](#setting-up-the-transmitter), [buttons and knobs](#buttons-and-knobs), [hand mic](#hand-mic), [keyboard](#keyboard) ([mouse](#mouse), [quick QSO log](#quick-qso-log))
 - [The Sentry](#the-sentry) (this fork, X6200): [the screens A to E](#the-screens-a-to-e), [F VHF/UHF, an RTL-SDR](#f-vhfuhf-an-rtl-sdr), [AIRSPACE](#airspace)
-- [Updating the firmware](#updating-the-firmware)
+- [Updating the firmware](#updating-the-firmware): [the X6200's base firmware from OpenX6X00](#the-x6200s-base-firmware-from-openx6x00)
 - [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
 - [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab)
 - [Transmitting](#transmitting): [amateur bands only](#amateur-bands-only), [no TX without data from the base](#no-tx-without-data-from-the-base), [TX shift](#tx-shift), [transverter TX power limit](#transverter-tx-power-limit), [SWR scan and the tuner](#swr-scan-and-the-tuner), [TUNE for an external tuner](#tune-for-an-external-tuner), [digital-mode TX level](#digital-mode-tx-level), [recording voice messages](#recording-voice-messages), [ALC in CW](#alc-in-cw), [PA bias](#pa-bias-x6200), [register 32](#register-32-x6200)
@@ -656,6 +656,40 @@ web configurator (System > Update).
     `/etc/openx6x00-image`, which no update touches, and each version lists the
     level it wants in `/usr/share/x6100/image-required`. Images up to v0.3.3
     have no stamp and count as level 1.
+
+### The X6200's base firmware from OpenX6X00
+
+This fork, X6200 only. The update above brings OpenX6X00; the base, the radio
+board's own firmware from Xiegu, is updated apart from it, and Xiegu's way
+takes its own system (two card swaps and its UPGRADE menu, see the README's
+[baseband](../README.md#the-baseband) section). The tools in
+[tools/base_update](../tools/base_update/README.md) do it from a computer over
+SSH while OpenX6X00 runs, with Xiegu's own steps: base_flash does on the radio
+what Xiegu's app 1.0.8 does from MENU > SYSTEM > UPGRADE.
+
+1. `tools/base_update/fetch.sh`: Xiegu's 1.0.8 update downloaded from
+   xiegu.eu (371 MB), the base's file taken out of it and checked.
+2. `tools/base_update/build.sh`: base_flash, built with an ARM cross compiler.
+3. `tools/base_update/flash.sh root@<radio> --check`: reads only; it says the
+   base's version (`version "1.0.7"`).
+4. `tools/base_update/flash.sh root@<radio> --flash`: the GUI stops, the base
+   is written (about half a minute), the GUI starts again.
+5. The base does not start the new firmware by itself: the radio switches
+   itself off a minute or two later. Switch it on; `--check`, and Settings >
+   Info > Baseband, then say 1.0.8.
+
+- As Xiegu asks for its own update: a 13.8 V supply of 3 A or more and the
+  battery out, and the radio not switched off while it writes.
+- A write that fails after the erase leaves the base without its application:
+  the GUI is then left off, and `flash.sh --recover` writes it again (the
+  base's bootloader is not erased). `flash.sh --to 1.0.7` goes back to 1.0.7.
+- Or with Xiegu's own screen: `tools/base_update/install.sh root@<radio>`
+  puts the 1.0.8 file in the list of Xiegu's UPGRADE screen on the internal
+  memory; take the card out, switch on, MENU > SYSTEM > UPGRADE.
+
+1.0.8 fixes the S-meter that sticks at S1, -121.0 on 1.0.7 (see
+[The waterfall stays black](#the-waterfall-stays-black-and-the-s-meter-does-not-move)),
+corrects the CW keyer's speed and brings back the CW keyer macros.
 
 ## Main screen
 
