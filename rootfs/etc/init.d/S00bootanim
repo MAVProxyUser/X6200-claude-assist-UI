@@ -4,12 +4,14 @@
 # the boot goes on (an own boot picture, /mnt/bootlogo.png, fades in instead),
 # with "CQ CQ" in CW when Settings > Audio > Boot sound is on. In the
 # background, and nothing waits for it (S49bootanim makes sure the codec is
-# free before ALSA and PulseAudio start).
+# free before ALSA and PulseAudio start). An own boot video
+# (/mnt/bootvideo.mp4, S94bootvideo) plays in its place: no logo, no sound.
 #
 
 case "$1" in
 	start)
 		echo 0 > /sys/class/graphics/fbcon/cursor_blink 2>/dev/null
+		[ -x /etc/init.d/S94bootvideo ] && /etc/init.d/S94bootvideo early && exit 0
 		/usr/sbin/x6100-bootanim > /dev/null 2>&1 &
 		;;
 esac

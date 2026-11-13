@@ -1,27 +1,54 @@
 #!/bin/sh
 #
-# Boot video: your own video, /mnt/bootvideo.mp4 on the DATA partition, plays on the screen just before the GUI
-# starts (S95gui), after the boot animation; its last picture stays until the GUI draws. Any size or shape is fitted
-# into the 800x480 screen, black around it; tools/bootvideo/prepare.sh on a PC makes one that plays smoothly
-# (800x480, H.264). No sound. None there, or /mnt/bootvideo.off: nothing happens. MAX_S seconds at most: the boot
-# waits for it.
+# Boot video: your own video, /mnt/bootvideo.mp4 on the DATA partition, plays on the screen from the start of the
+# boot, in place of the boot logo and its sound (S00bootanim starts it as soon as DATA is mounted), and the GUI
+# waits for its end (this script's start, just before S95gui); its last picture stays until the GUI draws. Any size
+# or shape is fitted into the 800x480 screen, black around it; tools/bootvideo/prepare.sh on a PC makes one that
+# plays smoothly (800x480, H.264). No sound. None there, or /mnt/bootvideo.off: the boot logo as before. MAX_S
+# seconds at most.
+#
+#   S94bootvideo early    from S00bootanim: started in the background; true when it was (a video there)
+#   S94bootvideo start    before the GUI: wait for the video started early to end
 #
 
 VIDEO=/mnt/bootvideo.mp4
 LOG=/tmp/bootvideo.log
+PID=/tmp/bootvideo.pid
 MAX_S=30
 # The panel is portrait (480x800) under the landscape screen the GUI draws: fitted landscape, then turned as
 # the boot animation turns its logo (landscape x, y is the panel's y, 799 - x)
 FIT="scale=800:480:force_original_aspect_ratio=decrease,pad=800:480:(ow-iw)/2:(oh-ih)/2:black,transpose=2,format=bgra"
 
+have_video() {
+	[ -f "$VIDEO" ] && [ ! -e /mnt/bootvideo.off ] && command -v ffmpeg > /dev/null
+}
+
+play() {
+	ffmpeg -hide_banner -loglevel error -nostdin -re -i "$VIDEO" -t "$MAX_S" -an -vf "$FIT" \
+		-f fbdev /dev/fb0 > "$LOG" 2>&1
+}
+
 case "$1" in
-	start)
-		[ -f "$VIDEO" ] && [ ! -e /mnt/bootvideo.off ] && command -v ffmpeg > /dev/null || exit 0
-		# The boot animation draws on the same screen: done by now, or stopped
-		killall x6100-bootanim 2> /dev/null
+	early)
+		have_video || exit 1
 		echo 0 > /sys/class/graphics/fbcon/cursor_blink 2> /dev/null
-		ffmpeg -hide_banner -loglevel error -nostdin -re -i "$VIDEO" -t "$MAX_S" -an -vf "$FIT" \
-			-f fbdev /dev/fb0 > "$LOG" 2>&1
+		( play; rm -f "$PID" ) < /dev/null > /dev/null 2>&1 &
+		echo $! > "$PID"
+		exit 0
+		;;
+	start)
+		# The one started early: its end waited for, MAX_S at most (with a little more for a slow start)
+		[ -f "$PID" ] || exit 0
+		p=$(cat "$PID")
+		n=0
+		while [ -f "$PID" ] && kill -0 "$p" 2> /dev/null && [ $n -lt $(((MAX_S + 5) * 10)) ]; do
+			sleep 0.1
+			n=$((n + 1))
+		done
+		if [ -f "$PID" ]; then
+			killall ffmpeg 2> /dev/null
+			rm -f "$PID"
+		fi
 		;;
 esac
 exit 0

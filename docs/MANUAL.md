@@ -4965,10 +4965,11 @@ card. No SSH needed.
 
 ### Boot video
 
-A video of your own can play on the screen as the radio starts, after the
-boot picture and just before the main screen comes. Copy it to the DATA
-partition as `/mnt/bootvideo.mp4` (SFTP or `scp`); it plays from the next
-start. No video there, nothing changes.
+A video of your own can play on the screen as the radio starts, in place of
+the boot picture or the built-in logo (and the boot sound): from the start of
+the boot, as soon as the DATA partition is there, and the main screen comes
+once it has ended. Copy it to the DATA partition as `/mnt/bootvideo.mp4` (SFTP
+or `scp`); it plays from the next start. No video there, nothing changes.
 
 - Any size or shape plays (MP4, MKV or AVI; H.264, HEVC, MPEG-4, VP8 or
   VP9): it is fitted into the 800x480 screen with black around it. A phone's
@@ -4979,10 +4980,11 @@ start. No video there, nothing changes.
   sound. The optional crop (ffmpeg's `crop=W:H:X:Y`) keeps the part of a tall
   or wide video that matters, so it fills more of the screen.
 - No sound: the speaker is not the radio's to use until the main screen
-  starts.
-- The start waits for it: a 15 s video starts the main screen 15 s later. It
-  stops after 30 s whatever its length. Its last picture stays until the
-  main screen draws.
+  starts, and the boot sound (Settings > Audio) is left out with the logo.
+- The main screen waits for its end: the rest of the start goes on while it
+  plays, so a 15 s video delays the main screen by less than that. It stops
+  after 30 s whatever its length. Its last picture stays until the main
+  screen draws.
 - `/mnt/bootvideo.off` (an empty file) turns it off without removing it;
   deleting `/mnt/bootvideo.mp4` removes it. Updates and a new card image that
   keeps the DATA partition leave it there.
