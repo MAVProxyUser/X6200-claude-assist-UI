@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A simulated X6200 base for base_flash, on this computer: base_flash.c built with its port on a pseudo-terminal and
 its I2C bus on /dev/null (the I2C commands then fail, as on a base in its bootloader), run as on the radio
-(--flash FILE --yes --recover), against a fake base that streams like the base's application, answers as Xiegu's
+(--flash FILE --yes --recover --held-by, as the GUI runs it), against a fake base that streams like the base's application, answers as Xiegu's
 bootloader does, or fails in one of the ways Xiegu's app has an answer for. tools/base_update/test/run.sh runs them all.
 
     sim.py CC SRC STUB_DIR WORK_DIR XGF MODE [TAG]
@@ -49,7 +49,10 @@ with open(dtp, 'wb') as f:
 subprocess.run([cc, '-O1', '-w', '-I', stub, '-DUART="%s"' % os.ttyname(s), '-DI2C_BUS="/dev/null"', '-DBACK_WAIT_S=2',
                 '-DDT_COMPAT="%s"' % dtp, '-o', binp, src], check=True)
 log = open(logp, 'w')
-p = subprocess.Popen([binp, '--flash', xgf_path, '--yes', '--recover'], stdout=log, stderr=subprocess.STDOUT)
+# This process holds the port's other end, as the GUI does when it lends the base: --held-by says so (on Linux the
+# writer sees every holder in /proc, and would refuse another)
+p = subprocess.Popen([binp, '--flash', xgf_path, '--yes', '--recover', '--held-by', str(os.getpid())], stdout=log,
+                     stderr=subprocess.STDOUT)
 
 
 def rd(n, t):
