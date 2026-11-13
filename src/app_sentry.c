@@ -177,30 +177,46 @@ typedef struct {
 } band_t;
 
 static const band_t bands[] = {
+    {"SHIP MF", 415, 526, "NAVTEX: SHIP WARNINGS ON 518", "LONG WIRE, UNTRIED", 'N', 518000, radio_mode_usb, false,
+     "Coast stations' NAVTEX on 518 kHz (English) and 490: weather and navigation warnings, farther at night."},
     {"AM BC", 530, 1700, "AM RADIO: NEWS, TALK, SPORTS", "ANY WIRE; CB WHIP OK", 'N', 720000, radio_mode_am, true,
      "Your AM radio band. By day the locals; after dark big stations 1000 km away (WGN 720, Chicago)."},
     {"160 M", 1800, 2000, "HAM CW AND VOICE, WINTER", "LONG WIRE, UNTRIED", 'N', 1900000, radio_mode_lsb, false,
      "The top band: hams on winter nights. It needs a long wire; the JPC-12 does not reach it."},
     {"80 M", 3500, 4000, "HAM NETS, REGIONAL VOICE", "LONG WIRE, UNTRIED", 'N', 3850000, radio_mode_lsb, false,
      "Evening ham nets within a few hundred km: voice on LSB above 3.6 MHz, CW and FT8 below."},
+    {"SHIP 4", 4063, 4438, "NAVTEX 4209.5, WEATHER FAX", "LONG WIRE, UNTRIED", 'N', 4235000, radio_mode_usb, false,
+     "The 4 MHz marine band: NAVTEX on 4209.5, NOAA weather fax (4235 Boston, 4317.9 New Orleans, 4346 Pt Reyes)."},
     {"60 M BC", 4750, 5060, "TROPICAL BROADCASTS, WWV 5", "JPC-12 RED-SILVER", 'N', 4950000, radio_mode_am, false,
      "Shortwave stations from the tropics at night, and WWV's time signal on 5.000 MHz."},
+    {"60 M", 5330, 5410, "HAM CHANNELS, FT8 ON 5.357", "JPC-12 RED-SILVER", 'N', 5357000, radio_mode_usb, false,
+     "Five ham channels and FT8 on 5.357: regional by day, farther at night, as 80 m."},
     {"49 M BC", 5900, 6200, "SHORTWAVE BROADCASTS", "JPC-12 RED-SILVER", 'N', 6050000, radio_mode_am, true,
      "International broadcasters in the evening: news and music from abroad, in AM."},
+    {"SHIP 6", 6200, 6525, "WEATHER FAX, SHIP VOICE", "JPC-12 RED-SILVER", 'N', 6340500, radio_mode_usb, false,
+     "The 6 MHz marine band: NOAA weather fax from Boston on 6340.5, ship voice in USB, evening and night."},
     {"40 M", 7000, 7300, "FT8, CW, VOICE ALL NIGHT", "JPC-12 RED-SILVER, TESTED", 'N', 7150000, radio_mode_lsb, true,
      "The night band, the whole country after dark. FT8 on 7.074, voice from 7.125 up in LSB."},
     {"41 M BC", 7300, 7600, "SHORTWAVE BROADCASTS", "JPC-12 RED-SILVER", 'N', 7450000, radio_mode_am, false,
      "Broadcasters just above the 40 m ham band, strong in the evening (7.505 was loud in the coil test)."},
+    {"SHIP 8", 8195, 8815, "WEATHER FAX, SHIP VOICE", "JPC-12 MIDWAY", 'A', 8503900, radio_mode_usb, false,
+     "The 8 MHz marine band: NOAA weather fax from New Orleans (8503.9) and Pt Reyes (8682), coast stations' voice."},
+    {"UTIL 9", 9040, 9399, "NOAA WEATHER FAX, BOSTON", "JPC-12 MIDWAY", 'A', 9110000, radio_mode_usb, false,
+     "Utility stations below the 31 m broadcasters: NOAA's weather fax from Boston on 9110 kHz, day and night."},
     {"31 M BC", 9400, 9900, "SHORTWAVE BROADCASTS", "JPC-12 MIDWAY", 'A', 9650000, radio_mode_am, true,
      "The busiest broadcast band, day and evening: AM programmes from around the world."},
     {"30 M", 10100, 10150, "FT8, CW; WWV ON 10.000", "JPC-12 MIDWAY, TESTED", 'A', 10000000, radio_mode_am, true,
      "Data and CW only, no voice. WWV's time signal on 10.000 MHz day and night: a good antenna test."},
     {"25 M BC", 11600, 12100, "SHORTWAVE BROADCASTS", "JPC-12 MIDWAY", 'D', 11850000, radio_mode_am, false,
      "Broadcasters by day and into the evening."},
+    {"SHIP 12", 12230, 13200, "WEATHER FAX, SHIP VOICE", "JPC-12 MIDWAY", 'D', 12750000, radio_mode_usb, false,
+     "The 12 MHz marine band by day: NOAA weather fax (12750 Boston, 12789.9 New Orleans, 12786 Pt Reyes)."},
     {"20 M", 14000, 14350, "THE WORLD: FT8, VOICE, SSTV", "JPC-12 RED-GOLD, TESTED", 'D', 14200000, radio_mode_usb,
      true, "The daytime DX band: FT8 on 14.074, voice in USB above 14.150, SSTV pictures on 14.230."},
     {"19 M BC", 15100, 15800, "BROADCASTS, WWV 15", "JPC-12 RED-GOLD", 'D', 15000000, radio_mode_am, false,
      "Daytime broadcasters, and WWV on 15.000 MHz."},
+    {"SHIP 16", 16360, 17410, "WEATHER FAX, PT REYES", "JPC-12 RED-GOLD", 'D', 17151200, radio_mode_usb, false,
+     "The 16 MHz marine band by day: Pt Reyes' weather fax on 17151.2, and coast stations."},
     {"17 M", 18068, 18168, "QUIET DX BAND", "JPC-12 ABOVE GOLD, UNTRIED", 'D', 18120000, radio_mode_usb,
      false, "A small, quiet band for long-distance contacts by day."},
     {"15 M", 21000, 21450, "DX BY DAY", "JPC-12 ABOVE GOLD, UNTRIED", 'D', 21300000, radio_mode_usb, false,
@@ -1223,14 +1239,15 @@ static void show_track(void) {
     lv_obj_set_y(t_noise_fill, t_bar_y + t_bar_h - (int)(noise * t_bar_h));
 }
 
-/* NOW for a band: what the Sentry saw there in the last half hour, else the sun's word if the station is known */
-static bool sun_elev(double *elev) {
+/* NOW for a band: what the Sentry heard there in the last half hour, else what the sun says at the station's QTH.
+ * One set of words on C and D: "3 SIG LIVE", "3 SIG 12 MIN", OPEN, CLOSED, OPENING, CLOSING, LOCAL, SET QTH */
+static bool sun_elev(time_t t, double *elev) {
     const char *q = params.qth.x;
     double      lat, lon;
 
     if (!q || strlen(q) < 4) return false;
     qth_str_to_pos(q, &lat, &lon);
-    double n   = time(NULL) / 86400.0 + 2440587.5 - 2451545.0;
+    double n   = t / 86400.0 + 2440587.5 - 2451545.0;
     double L   = fmod(280.460 + 0.9856474 * n, 360);
     double g   = fmod(357.528 + 0.9856003 * n, 360) * M_PI / 180;
     double lam = (L + 1.915 * sin(g) + 0.020 * sin(2 * g)) * M_PI / 180;
@@ -1244,22 +1261,31 @@ static bool sun_elev(double *elev) {
 }
 
 static void band_now(int i, char *s, size_t n) {
-    double   e;
+    double   e, later;
+    time_t   t   = time(NULL);
     uint32_t age = band_rt[i].ms ? (lv_tick_get() - band_rt[i].ms) / 60000 : 0;
 
     if (band_of(centre) == i && nbins) {
         snprintf(s, n, "%d SIG LIVE", nlive);
     } else if (band_rt[i].ms && age < 30) {
-        snprintf(s, n, "%d SIG %uM", band_rt[i].seen, age);
+        snprintf(s, n, "%d SIG %u MIN", band_rt[i].seen, age);     /* minutes ago: "12M" read as the 12 m band */
     } else if (bands[i].when == 'A') {
         snprintf(s, n, "OPEN");
     } else if (bands[i].when == 'L') {
         snprintf(s, n, "LOCAL");
-    } else if (sun_elev(&e)) {
-        bool night = bands[i].when == 'N';
-        snprintf(s, n, "%s", e < -6 ? (night ? "OPEN" : "CLOSED") : e > 6 ? (night ? "LOCAL ONLY" : "OPEN") : "CHANGING");
+    } else if (sun_elev(t, &e) && sun_elev(t + 600, &later)) {
+        /* A night band (N) is open in the dark and short-range by day; a day band (D) the other way round. Within 6
+         * degrees of the horizon it is on its way: a setting sun opens the night bands and closes the day ones */
+        bool night = bands[i].when == 'N', rising = later > e;
+
+        if (e < -6)
+            snprintf(s, n, "%s", night ? "OPEN" : "CLOSED");
+        else if (e > 6)
+            snprintf(s, n, "%s", night ? "LOCAL" : "OPEN");
+        else
+            snprintf(s, n, "%s", rising == night ? "CLOSING" : "OPENING");
     } else {
-        snprintf(s, n, "-");
+        snprintf(s, n, "SET QTH");      /* Settings > General: QTH locator */
     }
 }
 
@@ -1318,7 +1344,7 @@ static void show_decode(void) {
         if (bi >= 0)
             band_now(bi, now, sizeof(now));
         else
-            snprintf(now, sizeof(now), "-");
+            snprintf(now, sizeof(now), "NO BAND");     /* a frequency added without one in bands[]: says so */
         snprintf(s, sizeof(s), DEC_ROW, fs, bi >= 0 ? bands[bi].name : "", now,
                  bi >= 0 ? bands[bi].ant : "");
         lv_label_set_text(d_row_l[r], s);

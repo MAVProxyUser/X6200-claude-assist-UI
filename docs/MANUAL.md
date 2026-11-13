@@ -542,8 +542,16 @@ Its controls, on every screen (GEN shows them, as does a tap on the title):
 - **B TRACK**: one signal held: what it is, how long it has been on, its level against the noise. F2 holds it,
   F3 records it (the RX recorder), F4 goes to the next one, F5 ignores it until the Sentry closes.
 - **C BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry heard
-  there last. F2 listens to the band chosen, F3 puts it in or out of the SWEEP.
-- **D DECODE**: the decoders and the frequencies they work on. F2 opens the one chosen there, F4 the next kind.
+  there last. F2 listens to the band chosen, F3 puts it in or out of the SWEEP. The bands: the ham bands (60 m
+  too), the broadcast bands, CB, FM, and the marine bands the weather decoders use (SHIP MF, 4, 6, 8, 12, 16;
+  UTIL 9 for NOAA's Boston fax on 9110).
+- **D DECODE**: the decoders and the frequencies they work on, each with its band, NOW and antenna. F2 opens the
+  one chosen there, F4 the next kind.
+- **NOW** (C and D), one set of words: `3 SIG LIVE` (the band in the picture), `3 SIG 12 MIN` (heard 12 minutes
+  ago, within the half hour), else what the sun says at your QTH: OPEN, CLOSED, LOCAL (a night band by day, CB,
+  FM), and OPENING or CLOSING while the sun is within 6 degrees of the horizon (a setting sun opens the night
+  bands and closes the day ones). ANY-time bands (30 m, 31 m, 8 MHz marine) say OPEN; `SET QTH` when no QTH
+  locator is set.
 - **E SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the classic radio screen, a shell,
   the [base firmware](#the-x6200s-base-firmware-from-openx6x00) (the X6200's; on an X6100 the item says it is
   not supported) and where the radio starts. F2 opens the item
