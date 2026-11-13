@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# Stop all init scripts in /etc/init.d, executing them in reversed numerical order (buildroot's rcK).
+#
+# OpenX6X00: with the start trace (x6100-starttrace), as rcS has it: a line before each script, on the card at once,
+# so the trace shows how long a power-off takes and where the time goes. On the X6200 the power goes during
+# S11radio_daemon's stop (it tells the base to switch off), so that is the last line a power-off leaves; the GUI
+# turns the speaker down when the power-off starts, the screen is dark from S95gui's stop on.
+#
+
+trace=/usr/sbin/x6100-starttrace
+[ -x "$trace" ] || trace=:
+"$trace" "power off: stopping the init scripts"
+
+for i in $(ls -r /etc/init.d/S??*) ;do
+
+     # Ignore dangling symlinks (if any).
+     [ ! -f "$i" ] && continue
+
+     "$trace" "${i##*/} stop"
+     case "$i" in
+	*.sh)
+	    # Source shell script for speed.
+	    (
+		trap - INT QUIT TSTP
+		set stop
+		. $i
+	    )
+	    ;;
+	*)
+	    # No sh extension, so fork subprocess.
+	    $i stop
+	    ;;
+    esac
+done
+"$trace" "init scripts stopped"

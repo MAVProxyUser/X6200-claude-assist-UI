@@ -1067,6 +1067,12 @@ static void save_log(void) {
 }
 
 void radio_poweroff() {
+    /* Quiet at once: the power goes only at the end of Linux's shutdown (hw_poweroff starts it; on the X6200 the base
+     * is told by S11radio_daemon's stop, near the end), seconds after the screen went dark, and the speaker played the
+     * band until then: "the radio went off, but I can still hear the traffic". The base's volume only: the setting is
+     * saved as it is, and the next start comes back at it */
+    WITH_RADIO_LOCK(hw_set_i(HW_RXVOL, 0));
+    WITH_RADIO_LOCK(hw_set_i(HW_MONI, 0));
     save_log();
     screen_rec_shutdown();
     settings_window_poweroff();     /* a Measure under way: PRE, ATT and the RF gain back before they are saved */
