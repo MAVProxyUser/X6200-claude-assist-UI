@@ -25,6 +25,7 @@ typedef struct {
     bool    full;       /* on a supply at 100% */
     bool    low;        /* on battery under the guard level */
     float   v_ext;      /* the supply's voltage */
+    int     temp_c;     /* the processor's temperature, CLOCK_NO_TEMP (clock.h) none */
 } ops_room_clock_t;
 
 /* Once, with the main screen's object: the band at TX */

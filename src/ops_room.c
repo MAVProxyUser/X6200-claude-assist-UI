@@ -85,6 +85,11 @@ void ops_room_clock_draw(lv_obj_t *o, lv_draw_ctx_t *dc, const ops_room_clock_t 
         else snprintf(buf, sizeof(buf), "NO BATT");
         text(dc, &sony_14, low ? TC(err) : c->battery ? TC(text) : dim, x2 - 12, y1 + 4, LV_TEXT_ALIGN_RIGHT, buf);
     }
+    /* The processor's temperature between them, as the other themes show it after the power */
+    if (c->temp_c > -100) {
+        snprintf(buf, sizeof(buf), "%dC", c->temp_c);
+        text(dc, &sony_14, dim, (x1 + x2 + 1) / 2, y1 + 4, LV_TEXT_ALIGN_CENTER, buf);
+    }
 
     /* HH:MM big, :SS small, the lot centred */
     const lv_coord_t W = 16, H = 26, T = 3, G = 3, w = 9, h = 15, t = 2;

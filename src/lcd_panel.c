@@ -52,7 +52,7 @@ typedef struct {
     int8_t  mode, agc, bars, swr_bars, rf_bars;
     uint8_t flags;      /* tx, split, lock */
     uint16_t icons;
-    int16_t sdb, swr10, pwr10, volts10, minute;
+    int16_t sdb, swr10, pwr10, volts10, minute, temp;
     uint16_t cw_seq;
     bool    cw;
     bool    cwt, cwt_on;    /* CW with the tuning aid on; a tone locked in the last second */
@@ -491,9 +491,14 @@ static void plus_info(const lcd_state_t *st) {
     x = text(30, 427, s, true, &sony_24);
     snprintf(s, sizeof(s), "IF %d.%dk", (int)(st->bw / 1000), (int)(st->bw / 100 % 10));
     text(x + 22, 427, s, true, &sony_24);
-    /* the volts after the time, on the right */
+    /* the volts after the time, on the right, and the processor's temperature after them */
+    x = 770;
+    if (st->temp != CLOCK_NO_TEMP) {
+        snprintf(s, sizeof(s), "%dC", st->temp);
+        x = text_r(x, 427, s, true, &sony_24) - 22;
+    }
     snprintf(s, sizeof(s), "%d.%dV", st->volts10 / 10, st->volts10 % 10);
-    x = text_r(770, 427, s, true, &sony_24);
+    x = text_r(x, 427, s, true, &sony_24);
     snprintf(s, sizeof(s), "%02d:%02dZ", st->minute / 60, st->minute % 60);
     text_r(x - 22, 427, s, true, &sony_24);
 }
@@ -590,6 +595,7 @@ static void read_state(lcd_state_t *st) {
     st->pwr10   = (tx ? pwr : param_f_get(cfg_pwr)) * 10 + 0.5f;
     st->volts10 = (ext >= 3.0f ? ext : bat) * 10 + 0.5f;
     st->minute  = t.tm_hour * 60 + t.tm_min;
+    st->temp    = clock_cpu_temp();
     st->bw      = cparam_i_get(cfg_cur_filter_bw);
     pthread_mutex_lock(&cw_mux);
     st->cw_seq = cw_seq;

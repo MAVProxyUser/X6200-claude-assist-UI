@@ -62,23 +62,30 @@ static time_t get_last_sync_time();
  * between the two halves last: 4 px between the labels and 4 more before the supply's sign when there is room,
  * else 2 or 1 between the labels and what is left (up to 4 more) before the supply's sign. The usual gaps in
  * the other choices */
-/* The processor's temperature (the kernel's first thermal zone; the X6200's from the v0.3.10 image on), read
- * every few seconds; none there, nothing shown */
-static void temp_show(void) {
+/* The processor's temperature (the kernel's first thermal zone; the X6200's from the v0.3.10 image on), read again
+ * every 5 s. From the GUI's thread only: the main screen's clock, the Ops Room clock, Walkie, the LCD panel */
+int clock_cpu_temp(void) {
     static time_t last;
-    static int    c = -1000;
+    static int    c = CLOCK_NO_TEMP;
     time_t        now = time(NULL);
 
-    if (!temp_label) return;
     if (now - last >= 5) {
         FILE *f = fopen("/sys/class/thermal/thermal_zone0/temp", "r");
         int   m;
 
         last = now;
-        c    = f && fscanf(f, "%d", &m) == 1 ? (m + 500) / 1000 : -1000;
+        c    = f && fscanf(f, "%d", &m) == 1 && m > -100000 ? (m + 500) / 1000 : CLOCK_NO_TEMP;
         if (f) fclose(f);
     }
-    if (c > -100) lv_label_set_text_fmt(temp_label, "%iC", c);
+    return c;
+}
+
+/* After the power, none there, nothing shown */
+static void temp_show(void) {
+    int c = clock_cpu_temp();
+
+    if (!temp_label) return;
+    if (c != CLOCK_NO_TEMP) lv_label_set_text_fmt(temp_label, "%iC", c);
     else lv_label_set_text(temp_label, "");
 }
 
@@ -290,7 +297,7 @@ static void draw_cb(lv_event_t *e) {
     const char      *ampm;
     ops_room_clock_t c = {.h = clock_hour(t->tm_hour, &ampm), .m = t->tm_min, .s = t->tm_sec, .cap = cap_bat, .ext = p.ext,
                           .est_min = p.est, .approx = est_approx, .known = p.known, .battery = p.battery,
-                          .full = p.full, .low = p.low, .v_ext = v_ext};
+                          .full = p.full, .low = p.low, .v_ext = v_ext, .temp_c = clock_cpu_temp()};
     pthread_mutex_unlock(&power_mux);
     ops_room_clock_draw(lv_event_get_target(e), lv_event_get_draw_ctx(e), &c);
 }

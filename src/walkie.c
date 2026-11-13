@@ -430,11 +430,13 @@ static void update_cb(lv_timer_t *t) {
 
     localtime_r(&now, &tm);
     set_text(clock_label, clock_hm(&tm, buf, sizeof(buf)));     /* 3:07 PM with the 12-hour clock (#54) */
-    /* No battery fitted, or no reading yet in the first seconds after power-on (radio.c): nothing */
-    if (clock_battery_volts() >= 3.0f)
-        snprintf(buf, sizeof(buf), "%.1f V", clock_battery_volts());
-    else
-        buf[0] = '\0';
+    /* No battery fitted, or no reading yet in the first seconds after power-on (radio.c): no voltage. The
+     * processor's temperature after it, as on the main screen */
+    int temp = clock_cpu_temp();
+    int n    = clock_battery_volts() >= 3.0f ? snprintf(buf, sizeof(buf), "%.1f V", clock_battery_volts()) : 0;
+
+    buf[n] = '\0';
+    if (temp != CLOCK_NO_TEMP) snprintf(buf + n, sizeof(buf) - n, "%s%dC", n ? "  " : "", temp);
     set_text(bat_label, buf);
 
     if (param_i_get(cfg_walkie_mem)) {
