@@ -24,6 +24,9 @@
 # mark each start that mounts DATA leaves on the system partition. Nor is what is left of it
 # formatted after a new image.
 LOG=/tmp/data_fsck.log
+# The FAT keeps no modes: its files show the mount's mask, which is the umask of the one mounting it. A start
+# has 022; run by hand from an SSH shell (umask 077) DATA came up 0700, and the update staged there with it
+umask 022
 P3=/dev/mmcblk0p3
 SYS_TRACE=/var/lib/x6100/start_trace    # the start trace on the system partition (.txt, .1.txt)
 MOUNTED=/var/lib/x6100/data_mounted     # DATA mounted on this card, or found gone bad: never formatted

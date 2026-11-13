@@ -415,6 +415,7 @@ def apply(m):
     st = os.path.join(WORK, "stage")
     shutil.rmtree(PREV, ignore_errors=True)
     files = [{"path": e["path"], "prev": os.path.exists(e["path"]), "done": False} for e in m["files"]]
+    modes = {e["path"]: int(str(e.get("mode", "644")), 8) for e in m["files"]}
     journal = {"version": m["version"], "from": running_version(), "state": "applying", "files": files,
                "started": time.time()}
     save(JOURNAL, journal)
@@ -429,6 +430,10 @@ def apply(m):
         os.makedirs(os.path.dirname(p), exist_ok=True)
         tmp = p + ".x6new"
         shutil.copy2(os.path.join(st, p.lstrip("/")), tmp)
+        # The manifest's mode, not the staged copy's: WORK is on DATA, a FAT partition that keeps none (each file
+        # shows the mount's mask: 0755 from a start, 0700 mounted from an SSH shell), and copy2 carried that over,
+        # every file of the system 0755, libraries and data alike, or 0700 and closed to the daemons not run as root
+        os.chmod(tmp, modes[p])
         fd = os.open(tmp, os.O_RDONLY)
         os.fsync(fd)
         os.close(fd)
@@ -447,6 +452,7 @@ def apply(m):
             f.write(m["version"] + "\n")
             f.flush()
             os.fsync(f.fileno())
+        os.chmod(tmp, 0o644)        # whatever the umask of the one running this
         os.replace(tmp, VERSION_FILE)
     # The crash counter before the state: an interruption between the two still rolls back
     save(PENDING, {"version": m["version"], "from": journal["from"], "starts": 0, "since": time.time()})
