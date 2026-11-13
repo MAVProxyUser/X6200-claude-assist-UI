@@ -81,6 +81,18 @@ if [ -x "$OUT" ] && [ -f "$(dirname "$OUT")/doc/LICENSE" ]; then
 fi
 mkdir -p "$DL"
 
+# XARA's author withdrew it on 2026-11-08 (its README: development and distribution discontinued) and took its
+# releases down. Without the two tarballs in the cache, a release file that answers 404 is said with exit status 3,
+# before any Rust is downloaded: buildroot/local-build.sh then builds the image without XARA. Any other failure
+# stays one (exit 1). The tarballs are not fetched from anywhere else.
+for f in "xara-$XARA_VER.tar.xz" "xara-$XARA_VER-vendor.tar.xz"; do
+    if [ ! -f "$DL/$f" ] && command -v curl > /dev/null &&
+       [ "$(curl -sIL -o /dev/null -w '%{http_code}' "$XARA_URL/$f")" = 404 ]; then
+        echo "tools/xara/build.sh: $XARA_URL/$f is gone (404): XARA's releases were withdrawn by its author"
+        exit 3
+    fi
+done
+
 fetch() {   # URL FILE SHA256: downloaded once, kept only with the pinned hash
     [ -f "$2" ] && echo "$3  $2" | sha256sum -c --quiet - 2> /dev/null && return 0
     echo "== $1"
