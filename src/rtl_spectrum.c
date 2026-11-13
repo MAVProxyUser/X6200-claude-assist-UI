@@ -26,6 +26,7 @@
 #include <sys/prctl.h>
 #include <sys/select.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #define HELPER    "/usr/bin/x6x00-rtlspec"
@@ -51,6 +52,13 @@ static int64_t         row_centre;
 static bool            row_fresh;
 static char            tuner[16];
 static int             cmd_fd = -1;
+
+/* SAME alerts from the watched channel (NOAA Weather Radio): the last one, also kept in ALERT_LOG */
+#define ALERT_LOG "/mnt/wx_alerts.log"
+static atomic_llong    watch_hz;
+static char            alert[300];
+static time_t          alert_at;
+static uint32_t        alert_seq;
 
 /* Listening: the helper's audio, played on the speaker in the recorder's way (the base in play mode) */
 static atomic_llong    listen_hz;
@@ -229,6 +237,11 @@ static void *spec_thread(void *arg) {
         snprintf(tuner, sizeof(tuner), "%s", tn);
         cmd_fd = in_fd;
         pthread_mutex_unlock(&lock);
+        if (atomic_load(&watch_hz)) {           /* a new helper: the channel watched, again */
+            char cmd[40];
+            snprintf(cmd, sizeof(cmd), "w %lld\n", (long long)atomic_load(&watch_hz));
+            say(cmd);
+        }
         if (atomic_load(&listen_mode)) {        /* a new helper: what was listened to, again */
             char cmd[48];
             snprintf(cmd, sizeof(cmd), "l %lld %d\n", (long long)atomic_load(&listen_hz), atomic_load(&listen_mode));
@@ -253,6 +266,30 @@ static void *spec_thread(void *arg) {
                     else ring_head = (ring_head + 1) % RING;
                 }
                 pthread_mutex_unlock(&ring_lock);
+                continue;
+            }
+            if (memcmp(buf, "RSAM", 4) == 0) {      /* a SAME header decided: kept, and in the log */
+                uint32_t n;
+                char     t[300];
+
+                if (!read_all(out_fd, &n, 4, 3000) || n >= sizeof(t) || !read_all(out_fd, t, n, 3000)) break;
+                t[n] = 0;
+                pthread_mutex_lock(&lock);
+                snprintf(alert, sizeof(alert), "%s", t);
+                alert_at = time(NULL);
+                alert_seq++;
+                pthread_mutex_unlock(&lock);
+                FILE *f = fopen(ALERT_LOG, "a");
+                if (f) {
+                    char      when[32];
+                    struct tm tm;
+                    time_t    now = time(NULL);
+
+                    gmtime_r(&now, &tm);
+                    strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%SZ", &tm);
+                    fprintf(f, "%s %.3f MHz %s\n", when, atomic_load(&watch_hz) / 1e6, t);
+                    fclose(f);
+                }
                 continue;
             }
             if (memcmp(buf, "RSPC", 4) != 0 || !read_all(out_fd, buf + 4, len - 4, 3000)) break;
@@ -425,4 +462,27 @@ void rtl_spectrum_listen(int64_t hz, int mode) {
 
 bool rtl_spectrum_listening(void) {
     return atomic_load(&listen_mode) != 0;
+}
+
+void rtl_spectrum_watch(int64_t hz) {
+    char cmd[40];
+
+    if (atomic_load(&watch_hz) == hz) return;
+    atomic_store(&watch_hz, hz);
+    snprintf(cmd, sizeof(cmd), "w %lld\n", (long long)hz);
+    say(cmd);
+}
+
+bool rtl_spectrum_alert(char *text, size_t n, time_t *at, uint32_t *seq) {
+    bool got = false;
+
+    pthread_mutex_lock(&lock);
+    if (alert_seq != *seq) {
+        snprintf(text, n, "%s", alert);
+        *at  = alert_at;
+        *seq = alert_seq;
+        got  = true;
+    }
+    pthread_mutex_unlock(&lock);
+    return got;
 }

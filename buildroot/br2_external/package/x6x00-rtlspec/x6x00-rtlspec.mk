@@ -14,7 +14,8 @@ X6X00_RTLSPEC_LICENSE = LGPL-2.1+
 X6X00_RTLSPEC_DEPENDENCIES = rtlsdr-blog
 
 define X6X00_RTLSPEC_BUILD_CMDS
-	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -o $(@D)/x6x00-rtlspec $(@D)/rtlspec.c -lrtlsdr -lm
+	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -I$(@D) -o $(@D)/x6x00-rtlspec $(@D)/rtlspec.c $(@D)/same.c \
+		-lrtlsdr -lpthread -lm
 endef
 
 define X6X00_RTLSPEC_INSTALL_TARGET_CMDS

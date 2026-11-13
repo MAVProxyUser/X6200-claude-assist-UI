@@ -1411,6 +1411,15 @@ static double rtl_px_hz(void) {
     return (double)rtl_view_hz() / RTL_COLS;
 }
 
+/* A NOAA Weather Radio channel's own frequency for one within 6 kHz of it, 0 for any other */
+static int64_t rtl_wx_hz(int64_t hz) {
+    static const int32_t wx[] = {162400000, 162425000, 162450000, 162475000, 162500000, 162525000, 162550000};
+
+    for (int i = 0; i < 7; i++)
+        if (llabs(hz - wx[i]) <= 6000) return wx[i];
+    return 0;
+}
+
 /* What a VHF/UHF frequency is, in a few letters, "" not known */
 static const char *rtl_name(int64_t hz) {
     static const struct { int32_t hz; int32_t w; const char *n; } exact[] = {
@@ -1630,13 +1639,15 @@ static void rtl_ticks(lv_obj_t **l, const panel_t *p, int64_t lo, double px_hz, 
 }
 
 /* The strongest peaks over the stick's floor, labelled with their frequency and what they are */
-static int rtl_peaks(int64_t lo, double px_hz, int32_t *best_hz, float *best_db) {
+static int rtl_peaks(int64_t lo, double px_hz, int32_t *best_hz, float *best_db, int64_t *wx_hz) {
     int   placed[RTL_PEAKS], np = 0, iy = lv_obj_get_y(rtl_img), found = 0;
     bool  used[RTL_COLS] = {false};
     char  s[32], f[16];
 
     *best_hz = 0;
     *best_db = -300;
+    *wx_hz   = 0;
+    float wx_db = -300;
     for (int k = 0; k < RTL_PEAKS * 3 && np < RTL_PEAKS; k++) {
         int   bx = -1;
         float bv = p_rtl.floor + 10;
@@ -1663,6 +1674,7 @@ static int rtl_peaks(int64_t lo, double px_hz, int32_t *best_hz, float *best_db)
             bx = (int)lround((hz - lo) / px_hz);
         }
         if (bv > *best_db) *best_db = bv, *best_hz = (int32_t)hz;
+        if (rtl_wx_hz(hz) && bv > wx_db) wx_db = bv, *wx_hz = rtl_wx_hz(hz);    /* the strongest NOAA channel */
 
         bool clash = false;
         for (int j = 0; j < np && !clash; j++) clash = abs(placed[j] - bx) < 70;
@@ -1730,6 +1742,40 @@ static void rtl_tune(int64_t hz) {
 
 static int64_t rtl_best;      /* the strongest signal of the last row, 0 none */
 
+/* A NOAA Weather Radio alert (SAME, rtl_spectrum_alert): shown in the title until it expires */
+static uint32_t alert_seq;
+static char     alert_event[48];
+static time_t   alert_until;
+
+static void show_title(void);
+
+/* A SAME header said: its event in the title for its duration (15 minutes at least), the rest in a pop-up */
+static void alert_take(const char *text) {
+    char        h[300], code[4] = "", sender[12] = "", what[48];
+    int         areas = 0, dur = 0;
+    const char *name = strchr(text, '|');
+
+    snprintf(h, sizeof(h), "%.*s", name ? (int)(name - text) : (int)strlen(text), text);
+    name = name ? name + 1 : NULL;
+    const char *plus = strchr(h, '+');
+
+    if (strncmp(h, "ZCZC-", 5) != 0 || strlen(h) < 16 || !plus) return;
+    memcpy(code, h + 9, 3);                                 /* ZCZC-ORG-EEE-... */
+    for (const char *q = h + 13; q < plus; q++) areas += *q == '-';
+    areas++;
+    if (strlen(plus) >= 5) dur = (plus[1] - '0') * 600 + (plus[2] - '0') * 60 + (plus[3] - '0') * 10 + (plus[4] - '0');
+    const char *s1 = plus + 1;                              /* +TTTT-JJJHHMM-LLLLLLLL- */
+    for (int i = 0; i < 2 && s1; i++) s1 = strchr(s1, '-') ? strchr(s1, '-') + 1 : NULL;
+    if (s1) snprintf(sender, sizeof(sender), "%.8s", s1);
+    snprintf(alert_event, sizeof(alert_event), "%s", name ? name : code);
+    alert_until = time(NULL) + 60 * (dur > 15 ? dur : 15);
+    snprintf(what, sizeof(what), "%s, %d AREA%s, %d MIN", sender, areas, areas == 1 ? "" : "S", dur);
+    char title[64];
+    snprintf(title, sizeof(title), "WX ALERT: %s", alert_event);
+    osd(title, what, -1);
+    show_title();
+}
+
 /* A frequency to the channels of its band: FM broadcast 100 kHz, the airband 25 kHz, the rest 12.5 kHz */
 static int64_t rtl_step_of(int64_t hz) {
     int m = rtl_mode_of(hz);
@@ -1796,6 +1842,18 @@ static void rtl_timer_cb(lv_timer_t *t) {
     char     s[48], f[16];
 
     (void)t;
+    {   /* a weather alert, whatever the screen */
+        char   h[300];
+        time_t at;
+
+        if (rtl_spectrum_alert(h, sizeof(h), &at, &alert_seq)) alert_take(h);
+        static time_t titled;
+        if (alert_until && time(NULL) != titled) {
+            titled = time(NULL);
+            if (titled >= alert_until) alert_until = 0;
+            show_title();
+        }
+    }
     if (scr != SCR_RTL) return;
     static uint32_t shown_ms;
     if (lv_tick_elaps(shown_ms) > 1000) {   /* the boxes, once a second */
@@ -1855,9 +1913,11 @@ static void rtl_timer_cb(lv_timer_t *t) {
     if (drew && rtl_rate && view != VIEW_X6200) {
         double  px_hz = rtl_px_hz();
         int64_t lo    = rtl_centre - rtl_view_hz() / 2, every = rtl_view_hz() > 1500000 ? 250000 : 100000;
-        int     found = rtl_peaks(lo, px_hz, &best_hz, &best_db);
+        int64_t wx;
+        int     found = rtl_peaks(lo, px_hz, &best_hz, &best_db, &wx);
 
         rtl_best = best_hz;
+        rtl_spectrum_watch(wx);             /* SAME alerts from the strongest NOAA channel in view */
         rtl_ticks(rtl_tick_l, &p_rtl, lo, px_hz, every, true);
         fmt_mhz(f, sizeof(f), rtl_centre, 3);
         if (listen_rtl) {
@@ -2104,7 +2164,7 @@ static void show_screen(void) {
 
     lv_label_set_text(badge_l[0], l);
     lv_label_set_text(badge_l[1], l);
-    lv_label_set_text_fmt(title_l, "XIEGU X6200  %s", titles[scr]);
+    show_title();
     for (int i = 0; i < 5; i++) buttons_refresh(&btn[i]);
     show_keys();
     show_legend();
@@ -2118,6 +2178,14 @@ static void show_screen(void) {
         default: break;
     }
     show_head();
+}
+
+/* The title: the screen's, or a weather alert's event while it lasts, blinking */
+static void show_title(void) {
+    if (alert_until && time(NULL) < alert_until && (time(NULL) & 1))
+        lv_label_set_text_fmt(title_l, "WX ALERT: %s", alert_event);
+    else
+        lv_label_set_text_fmt(title_l, "XIEGU X6200  %s", titles[scr]);
 }
 
 static void go(scr_t s) {

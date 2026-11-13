@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 typedef enum {
     RTL_SPEC_OFF,           /* not wanted */
@@ -38,6 +39,13 @@ rtl_spec_state_t rtl_spectrum_state(void);
  * the X6200. Within the helper's span only: outside it is silent until the stick is retuned there */
 void rtl_spectrum_listen(int64_t hz, int mode);
 bool rtl_spectrum_listening(void);
+
+/* The channel watched for SAME alerts (NOAA Weather Radio, narrow FM), 0 none: within the stick's span only */
+void rtl_spectrum_watch(int64_t hz);
+
+/* The last SAME header the watch decided ("ZCZC-WXR-TOR-039049+0030-3170815-KILN/NWS-", "NNNN" an end), when, and
+ * a count that tells a new one: false when none newer than *seq. Each is also appended to /mnt/wx_alerts.log */
+bool rtl_spectrum_alert(char *text, size_t n, time_t *at, uint32_t *seq);
 
 /* The tuner the helper found ("R820T"), "" before */
 void rtl_spectrum_tuner(char *s, size_t n);

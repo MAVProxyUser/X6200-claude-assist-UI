@@ -569,6 +569,12 @@ spectrum on the screen and its audio on the speaker. Where: the MFK ring past E,
   the header shows its frequency and mode (`RTL 162.550.00 NFM`). A bracket marks the channel on the trace.
 - The speaker plays one of the two, never both: the base gives it the radio's receiver or the GUI's audio.
 - The tuning, the gain and the view are kept for the next time.
+- **Weather alerts**: while the stick is on and a NOAA Weather Radio channel (WX1 to WX7) is in view, the
+  strongest of them is watched for SAME headers, the bursts the National Weather Service sends before each alert
+  and test, whether you listen to it or not. An alert takes the title of every Sentry screen, blinking, for its
+  duration (15 minutes at least): `WX ALERT: TORNADO WARNING`, with the issuing office, the number of areas and
+  the duration in a message as it comes. Each is kept in `/mnt/wx_alerts.log` with the time (UTC) and the
+  channel. Only while F has the stick: AIRSPACE has it the rest of the time.
 - AIRSPACE lends the stick while F has it (its dump1090 stops, AIRSPACE says so) and has it back after.
 - A stick that opens but sends nothing ("THE RTL-SDR SENDS NOTHING"): unplug it and plug it in again. The radio's
   USB host can leave a stick in that state when a program using it was ended in the middle of its transfers.

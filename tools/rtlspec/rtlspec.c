@@ -12,6 +12,9 @@
  *  Standard output: one text line first, "RTLSPEC 1 <tuner> <rate> <bins>\n", then frames of
  *      "RSPC", u32 seq, u64 centre Hz, u32 rate, u16 bins, u16 flags (1: the first since a retune), f32 dB[bins]
  *  little endian. Or one line and the exit status: "RTLSPEC NOSTICK" (2), "RTLSPEC BUSY" (3, another program has it).
+ *  "w <Hz>" watches that channel (narrow FM, NOAA Weather Radio) for SAME alerts (tools/rtlspec/same.c), each
+ *  header decided going out as "RSAM", u32 length, its text and "|" and the event's name when known
+ *  ("ZCZC-WXR-TOR-039049+0030-3170815-KILN/NWS-|TORNADO WARNING"; "NNNN": the end of a message); "w 0" stops.
  *  Standard input, a line each: "f <Hz>" retunes, "g <tenths of dB>" a gain ("g -1": the tuner's AGC), "q" ends,
  *  "l <Hz> <mode>" listens to that frequency (mode 1 NFM, 2 AM, 3 WFM; 0 or "l 0 0" stops): it is mixed to 0 Hz,
  *  decimated to 264.6 kHz (CIC, order 2) and by 6 (a 63-tap FIR) to 44.1 kHz and demodulated, and comes out as
@@ -19,7 +22,10 @@
  *  a multiple of 264.6 kHz: 1058400 or 2116800 (the radio's USB carries the first without loss, not the second).
  *  "s <rate>" sets another sample rate.
  *
- *      x6x00-rtlspec [-d index] [-f Hz] [-s rate] [-n bins] [-r rows/s] [-g tenths]
+ *      x6x00-rtlspec [-d index] [-f Hz] [-s rate] [-n bins] [-r rows/s] [-g tenths] [-i FILE]
+ *
+ *  -i replays FILE (unsigned 8-bit I/Q at the rate, as rtl_sdr writes it) in place of the stick, at its own pace:
+ *  the same rows, audio and alerts, to try the GUI without a signal on the air (a SAME alert, say).
  */
 
 #define _GNU_SOURCE
@@ -37,6 +43,8 @@
 #include <unistd.h>
 
 #include <rtl-sdr.h>
+
+#include "same.h"
 
 #define AVG       8         /* FFTs averaged into a row, at most */
 #define MAX_BINS  8192
@@ -116,7 +124,7 @@ static void set_gain(rtlsdr_dev_t *dev, int tenths) {
     rtlsdr_set_tuner_gain(dev, gains[best]);
 }
 
-/* ---- Listening: one channel demodulated ---- */
+/* ---- Channels: one demodulated to the speaker, one watched for SAME alerts ---- */
 
 static uint32_t rate_now;       /* the stick's sample rate */
 static int      want_mode;      /* the mode asked for: kept across a retune that leaves the channel outside */
@@ -127,17 +135,28 @@ static int      want_mode;      /* the mode asked for: kept across a retune that
 #define TAPS      63
 #define AUD_CHUNK 2205          /* 50 ms a frame */
 
-static int      l_mode;         /* 0 off, 1 NFM, 2 AM, 3 WFM */
-static uint64_t l_hz;
-static int16_t  sin_lut[1024];  /* the mixer in integers: 2.1 million samples a second leave no room for floats */
-static uint32_t ph, ph_inc;     /* its phase, 2^32 a turn */
-static uint32_t i1r, i1i, i2r, i2i, c1r, c1i, c2r, c2i;     /* CIC: modular arithmetic */
-static int      cic_n, r1 = 8;
-static float    hist_r[TAPS], hist_i[TAPS], taps[TAPS];
-static int      hist_at, fir_n;
-static float    prev_r = 1, prev_i, deemph, dc, avg_mag = 0.01f;
-static int16_t  aud[AUD_CHUNK];
-static int      aud_n;
+static int16_t sin_lut[1024];   /* the mixers in integers: 2.1 million samples a second leave no room for floats */
+
+typedef struct chan chan_t;
+struct chan {
+    int      mode;              /* 0 off, 1 NFM, 2 AM, 3 WFM */
+    uint64_t hz;
+    uint32_t ph, ph_inc;        /* the mixer's phase, 2^32 a turn */
+    uint32_t i1r, i1i, i2r, i2i, c1r, c1i, c2r, c2i;     /* CIC: modular arithmetic */
+    int      cic_n, r1;
+    float    hist_r[TAPS], hist_i[TAPS], taps[TAPS];
+    int      hist_at, fir_n;
+    float    prev_r, prev_i, deemph, dc, avg_mag;
+    bool     raw;               /* the demodulated FM as it is, no audio shaping (SAME's tones) */
+    void   (*out)(float v);     /* each 44.1 kHz sample */
+};
+
+static void listen_out(float v);
+static void watch_out(float v);
+static chan_t listen = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .out = listen_out};
+static chan_t watch  = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .raw = true, .out = watch_out};
+#define l_mode listen.mode
+#define l_hz   listen.hz
 
 static void put(const void *b, size_t want) {
     const uint8_t *w = b;
@@ -155,7 +174,7 @@ static void put(const void *b, size_t want) {
 }
 
 /* A low pass of cutoff Hz at 264.6 kHz, Blackman windowed sinc, unity at DC */
-static void design(float cutoff) {
+static void design(float *taps, float cutoff) {
     float fc = cutoff / (AUD_RATE * R2), sum = 0;
 
     for (int i = 0; i < TAPS; i++) {
@@ -168,24 +187,31 @@ static void design(float cutoff) {
     for (int i = 0; i < TAPS; i++) taps[i] /= sum;
 }
 
-/* What to listen to, against the centre the stick is tuned to: the mixer's step, the filter; off when outside */
-static void listen_set(int mode, uint64_t hz, uint64_t centre, uint32_t rate) {
+/* What a channel takes, against the centre the stick is tuned to: the mixer's step, the filter; off outside */
+static void chan_set(chan_t *c, int mode, uint64_t hz, uint64_t centre, uint32_t rate) {
     double off = (double)hz - (double)centre;
 
-    l_mode = (mode >= 1 && mode <= 3 && rate % MID_RATE == 0 && rate / MID_RATE <= 16 && fabs(off) < rate * 0.45)
-             ? mode : 0;
-    l_hz   = hz;
-    if (!l_mode) return;
-    r1    = (int)(rate / MID_RATE);
-    cic_n = 0;
-    ph_inc = (uint32_t)(int64_t)llround(-off / rate * 4294967296.0);
-    design(l_mode == 2 ? 5000 : l_mode == 1 ? 9000 : 15000);     /* AM, NFM; WFM's is the audio's after the demod */
-    memset(hist_r, 0, sizeof(hist_r));
-    memset(hist_i, 0, sizeof(hist_i));
-    deemph = dc = 0;
+    c->mode = (mode >= 1 && mode <= 3 && rate % MID_RATE == 0 && rate / MID_RATE <= 16 && fabs(off) < rate * 0.45)
+              ? mode : 0;
+    c->hz = hz;
+    if (!c->mode) return;
+    c->r1     = (int)(rate / MID_RATE);
+    c->cic_n  = 0;
+    c->ph_inc = (uint32_t)(int64_t)llround(-off / rate * 4294967296.0);
+    design(c->taps, c->mode == 2 ? 5000 : c->mode == 1 ? 9000 : 15000);   /* AM, NFM; WFM's: the audio's */
+    memset(c->hist_r, 0, sizeof(c->hist_r));
+    memset(c->hist_i, 0, sizeof(c->hist_i));
+    c->deemph = c->dc = 0;
 }
 
-static void aud_out(float v) {
+static void listen_set(int mode, uint64_t hz, uint64_t centre, uint32_t rate) {
+    chan_set(&listen, mode, hz, centre, rate);
+}
+
+static void listen_out(float v) {
+    static int16_t aud[AUD_CHUNK];
+    static int     aud_n;
+
     v *= 20000;
     aud[aud_n++] = (int16_t)(v > 32767 ? 32767 : v < -32767 ? -32767 : v);
     if (aud_n == AUD_CHUNK) {
@@ -198,72 +224,102 @@ static void aud_out(float v) {
     }
 }
 
-/* One sample at 264.6 kHz: into the FIR, every sixth a 44.1 kHz one demodulated (WFM: demodulated here, then the
- * FIR on the audio) */
-static void at_264k(float r, float i) {
-    if (l_mode == 3) {
-        float zr = r * prev_r + i * prev_i, zi = i * prev_r - r * prev_i;
+/* The watched channel's audio into the SAME decoder; a header decided goes out as "RSAM", u32 length, its text */
+static same_t *same;
 
-        prev_r = r;
-        prev_i = i;
-        r = atan2f(zi, zr) * (264600.0f / (2 * (float)M_PI * 75000));    /* +-75 kHz: +-1 */
-        i = 0;
-    }
-    hist_r[hist_at] = r;
-    hist_i[hist_at] = i;
-    hist_at = (hist_at + 1) % TAPS;
-    if (++fir_n < R2) return;
-    fir_n = 0;
+static void watch_out(float v) {
+    static float buf[441];
+    static int   n;
+    char         text[SAME_MAX + 48];
 
-    float yr = 0, yi = 0;
-    for (int k = 0; k < TAPS; k++) {
-        int h = (hist_at + k) % TAPS;
-        yr += hist_r[h] * taps[k];
-        yi += hist_i[h] * taps[k];
-    }
-    if (l_mode == 1) {                  /* NFM: +-5 kHz full scale, a little low pass and no DC */
-        float zr = yr * prev_r + yi * prev_i, zi = yi * prev_r - yr * prev_i;
-        float d  = atan2f(zi, zr) * (AUD_RATE / (2 * (float)M_PI * 5000));
+    buf[n++] = v;
+    if (n < (int)(sizeof(buf) / sizeof(buf[0]))) return;
+    n = 0;
+    if (!same) same = same_new(AUD_RATE);
+    if (same && same_feed(same, buf, sizeof(buf) / sizeof(buf[0]), text, sizeof(text) - 40)) {
+        /* the event's name after a "|", for the GUI: "ZCZC-WXR-TOR-...-|TORNADO WARNING" */
+        const char *name = strlen(text) > 12 ? same_event_name(text + 9) : NULL;
 
-        prev_r = yr;
-        prev_i = yi;
-        deemph += 0.45f * (d - deemph);
-        dc += 0.002f * (deemph - dc);
-        aud_out((deemph - dc) * 0.7f);
-    } else if (l_mode == 2) {           /* AM: the envelope over its average, its DC out */
-        float mag = sqrtf(yr * yr + yi * yi);
+        if (name) snprintf(text + strlen(text), sizeof(text) - strlen(text), "|%s", name);
+        uint32_t len = (uint32_t)strlen(text);
 
-        avg_mag += 0.0005f * (mag - avg_mag);
-        dc += 0.002f * (mag - dc);
-        aud_out((mag - dc) / (avg_mag + 1e-6f) * 0.6f);
-    } else {                            /* WFM: 75 us de-emphasis */
-        deemph += 0.26f * (yr - deemph);
-        aud_out(deemph * 0.8f);
+        put("RSAM", 4);
+        put(&len, 4);
+        put(text, len);
     }
 }
 
-/* One stick sample, while listening: mixed down (integers, a 1024-step sine), into the CIC */
-static inline void listen_sample(uint8_t ib, uint8_t qb) {
+/* One sample at 264.6 kHz: into the FIR, every sixth a 44.1 kHz one demodulated (WFM: demodulated here, then the
+ * FIR on the audio) */
+static void at_264k(chan_t *c, float r, float i) {
+    if (c->mode == 3) {
+        float zr = r * c->prev_r + i * c->prev_i, zi = i * c->prev_r - r * c->prev_i;
+
+        c->prev_r = r;
+        c->prev_i = i;
+        r = atan2f(zi, zr) * (264600.0f / (2 * (float)M_PI * 75000));    /* +-75 kHz: +-1 */
+        i = 0;
+    }
+    c->hist_r[c->hist_at] = r;
+    c->hist_i[c->hist_at] = i;
+    c->hist_at = (c->hist_at + 1) % TAPS;
+    if (++c->fir_n < R2) return;
+    c->fir_n = 0;
+
+    float yr = 0, yi = 0;
+    for (int k = 0; k < TAPS; k++) {
+        int h = (c->hist_at + k) % TAPS;
+        yr += c->hist_r[h] * c->taps[k];
+        yi += c->hist_i[h] * c->taps[k];
+    }
+    if (c->mode == 1) {                 /* NFM: +-5 kHz full scale, a little low pass and no DC */
+        float zr = yr * c->prev_r + yi * c->prev_i, zi = yi * c->prev_r - yr * c->prev_i;
+        float d  = atan2f(zi, zr) * (AUD_RATE / (2 * (float)M_PI * 5000));
+
+        c->prev_r = yr;
+        c->prev_i = yi;
+        if (c->raw) {
+            c->dc += 0.002f * (d - c->dc);
+            c->out(d - c->dc);
+            return;
+        }
+        c->deemph += 0.45f * (d - c->deemph);
+        c->dc += 0.002f * (c->deemph - c->dc);
+        c->out((c->deemph - c->dc) * 0.7f);
+    } else if (c->mode == 2) {          /* AM: the envelope over its average, its DC out */
+        float mag = sqrtf(yr * yr + yi * yi);
+
+        c->avg_mag += 0.0005f * (mag - c->avg_mag);
+        c->dc += 0.002f * (mag - c->dc);
+        c->out((mag - c->dc) / (c->avg_mag + 1e-6f) * 0.6f);
+    } else {                            /* WFM: 75 us de-emphasis */
+        c->deemph += 0.26f * (yr - c->deemph);
+        c->out(c->deemph * 0.8f);
+    }
+}
+
+/* One stick sample into a channel: mixed down (integers, a 1024-step sine), into its CIC */
+static inline void chan_sample(chan_t *c, uint8_t ib, uint8_t qb) {
     int      x = ib - 127, y = qb - 127;
-    uint32_t k = ph >> 22;
-    int      s = sin_lut[k], c = sin_lut[(k + 256) & 1023];
-    int      r = (x * c - y * s) >> 8, i = (x * s + y * c) >> 8;     /* +-32k */
+    uint32_t k = c->ph >> 22;
+    int      s = sin_lut[k], co = sin_lut[(k + 256) & 1023];
+    int      r = (x * co - y * s) >> 8, i = (x * s + y * co) >> 8;     /* +-32k */
 
-    ph += ph_inc;
-    i1r += (uint32_t)r;
-    i1i += (uint32_t)i;
-    i2r += i1r;
-    i2i += i1i;
-    if (++cic_n < r1) return;
-    cic_n = 0;
+    c->ph += c->ph_inc;
+    c->i1r += (uint32_t)r;
+    c->i1i += (uint32_t)i;
+    c->i2r += c->i1r;
+    c->i2i += c->i1i;
+    if (++c->cic_n < c->r1) return;
+    c->cic_n = 0;
 
-    uint32_t a = i2r - c1r, b = i2i - c1i;      /* the combs */
-    c1r = i2r;
-    c1i = i2i;
-    uint32_t cr = a - c2r, ci = b - c2i;
-    c2r = a;
-    c2i = b;
-    at_264k((int32_t)cr / (32768.0f * r1 * r1), (int32_t)ci / (32768.0f * r1 * r1));
+    uint32_t a = c->i2r - c->c1r, b = c->i2i - c->c1i;      /* the combs */
+    c->c1r = c->i2r;
+    c->c1i = c->i2i;
+    uint32_t cr = a - c->c2r, ci = b - c->c2i;
+    c->c2r = a;
+    c->c2i = b;
+    at_264k(c, (int32_t)cr / (32768.0f * c->r1 * c->r1), (int32_t)ci / (32768.0f * c->r1 * c->r1));
 }
 
 static long per_row_now;        /* samples a row at the rate now */
@@ -274,8 +330,8 @@ static int  rows_now = 20;
  * through `pend` and taken at the start of its next transfer */
 static pthread_mutex_t pend_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
-    bool     centre, rate, listen;
-    uint64_t centre_hz, listen_hz;
+    bool     centre, rate, listen, watch;
+    uint64_t centre_hz, listen_hz, watch_hz;
     uint32_t rate_sps;
     int      mode;
 } pend;
@@ -289,7 +345,7 @@ static void *commands_thread(void *arg) {
         if (line[0] == 'f') {
             uint64_t hz = strtoull(line + 1, NULL, 10);
 
-            if (hz >= 24000000 && hz <= 1766000000 && rtlsdr_set_center_freq(dev, (uint32_t)hz) == 0) {
+            if (hz >= 24000000 && hz <= 1766000000 && (!dev || rtlsdr_set_center_freq(dev, (uint32_t)hz) == 0)) {
                 pthread_mutex_lock(&pend_lock);
                 pend.centre    = true;
                 pend.centre_hz = hz;
@@ -304,23 +360,28 @@ static void *commands_thread(void *arg) {
             pend.listen_hz = hz;
             pend.mode      = hz ? (int)strtol(e, NULL, 10) : 0;
             pthread_mutex_unlock(&pend_lock);
+        } else if (line[0] == 'w') {          /* "w <Hz>": the channel watched for SAME alerts, 0 none */
+            pthread_mutex_lock(&pend_lock);
+            pend.watch    = true;
+            pend.watch_hz = strtoull(line + 1, NULL, 10);
+            pthread_mutex_unlock(&pend_lock);
         } else if (line[0] == 's') {
             uint32_t r = (uint32_t)strtoul(line + 1, NULL, 10);
 
-            if (r >= 900001 && r <= 3200000 && rtlsdr_set_sample_rate(dev, r) == 0) {
+            if (dev && r >= 900001 && r <= 3200000 && rtlsdr_set_sample_rate(dev, r) == 0) {
                 pthread_mutex_lock(&pend_lock);
                 pend.rate     = true;
                 pend.rate_sps = rtlsdr_get_sample_rate(dev);
                 pthread_mutex_unlock(&pend_lock);
             }
         } else if (line[0] == 'g') {
-            set_gain(dev, atoi(line + 1));
+            if (dev) set_gain(dev, atoi(line + 1));
         } else if (line[0] == 'q') {
             break;
         }
     }
     stop = 1;                           /* "q", or the GUI went */
-    rtlsdr_cancel_async(dev);
+    if (dev) rtlsdr_cancel_async(dev);
     return NULL;
 }
 
@@ -343,7 +404,10 @@ static void commands(uint64_t *centre, bool *fresh) {
     } else if ((pend.centre || pend.rate) && l_hz) {
         listen_set(l_mode ? l_mode : want_mode, l_hz, *centre, rate_now);
     }
-    pend.centre = pend.rate = pend.listen = false;
+    if (pend.watch || ((pend.centre || pend.rate) && watch.hz))
+        chan_set(&watch, (pend.watch ? pend.watch_hz : watch.hz) ? 1 : 0, pend.watch ? pend.watch_hz : watch.hz,
+                 *centre, rate_now);
+    pend.centre = pend.rate = pend.listen = pend.watch = false;
     pthread_mutex_unlock(&pend_lock);
 }
 
@@ -371,7 +435,8 @@ static void on_samples(unsigned char *buf, uint32_t n, void *ctx) {
         return;
     }
     for (uint32_t off = 0; off + 1 < n; off += 2) {
-        if (l_mode) listen_sample(buf[off], buf[off + 1]);
+        if (listen.mode) chan_sample(&listen, buf[off], buf[off + 1]);
+        if (watch.mode) chan_sample(&watch, buf[off], buf[off + 1]);
         /* The first BINS * AVG samples of each row's share go into its FFTs, the rest are passed over */
         if (nfft < AVG) {
             blk[fill * 2]     = buf[off];
@@ -422,12 +487,50 @@ static void on_samples(unsigned char *buf, uint32_t n, void *ctx) {
     }
 }
 
+/* -i: a recording in place of the stick, read at its own pace through the same callback; commands still taken,
+ * a retune only moves what the rows say (the recording's frequencies stay where they are) */
+static int replay_file(const char *path, uint64_t centre, uint32_t rate, int rows, int bins) {
+    static uint8_t chunk[READ_LEN];
+    FILE          *f = fopen(path, "rb");
+    pthread_t      cmd;
+
+    if (!f) {
+        printf("RTLSPEC NOSTICK\n");
+        return 2;
+    }
+    rate_now    = rate;
+    rows_now    = rows;
+    per_row_now = (long)rate / rows;
+    row_left    = per_row_now;
+    n_bins      = bins;
+    centre_now  = centre;
+    for (int i = 0; i < 1024; i++) sin_lut[i] = (int16_t)lrint(32767 * sin(2 * M_PI * i / 1024));
+    for (int i = 0; i < bins; i++) {
+        win[i] = 0.5f - 0.5f * cosf(2 * (float)M_PI * i / (bins - 1));
+        wsum += win[i];
+    }
+    norm = 20 * log10f(wsum);
+    printf("RTLSPEC 1 REPLAY %u %d\n", rate, bins);
+    fflush(stdout);
+    pthread_create(&cmd, NULL, commands_thread, NULL);
+    while (!stop) {
+        size_t n = fread(chunk, 1, sizeof(chunk), f);
+
+        if (n < 2) break;
+        on_samples(chunk, (uint32_t)n, NULL);
+        usleep((useconds_t)(n / 2 * 1000000.0 / rate));
+    }
+    fclose(f);
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    int      index = 0, bins = 2048, rows = 20, gain = 280, opt;
+    int         index = 0, bins = 2048, rows = 20, gain = 280, opt;
+    const char *replay = NULL;
     uint32_t rate   = 2400000;
     uint64_t centre = 162550000;
 
-    while ((opt = getopt(argc, argv, "d:f:s:n:r:g:")) != -1) {
+    while ((opt = getopt(argc, argv, "d:f:s:n:r:g:i:")) != -1) {
         switch (opt) {
             case 'd': index = atoi(optarg); break;
             case 'f': centre = strtoull(optarg, NULL, 10); break;
@@ -435,6 +538,7 @@ int main(int argc, char **argv) {
             case 'n': bins = atoi(optarg); break;
             case 'r': rows = atoi(optarg); break;
             case 'g': gain = atoi(optarg); break;
+            case 'i': replay = optarg; break;
             default: return 1;
         }
     }
@@ -443,6 +547,7 @@ int main(int argc, char **argv) {
     signal(SIGINT, on_term);
     signal(SIGPIPE, on_term);
 
+    if (replay) return replay_file(replay, centre, rate, rows, bins);
     if ((int)rtlsdr_get_device_count() <= index) {
         printf("RTLSPEC NOSTICK\n");
         return 2;
