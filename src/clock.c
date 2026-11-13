@@ -29,6 +29,7 @@ static lv_obj_t         *obj;
 static lv_obj_t         *time_label;
 static lv_obj_t         *sec_label;
 static lv_obj_t         *power_labels[4];  /* battery symbol, volts, ext symbol, volts or % */
+static lv_obj_t         *temp_label;       /* the processor's temperature after them, "51C" */
 
 #define POWER_TURN_S    5       /* Power display Alternate: each for 5 s */
 
@@ -61,6 +62,26 @@ static time_t get_last_sync_time();
  * between the two halves last: 4 px between the labels and 4 more before the supply's sign when there is room,
  * else 2 or 1 between the labels and what is left (up to 4 more) before the supply's sign. The usual gaps in
  * the other choices */
+/* The processor's temperature (the kernel's first thermal zone; the X6200's from the v0.3.10 image on), read
+ * every few seconds; none there, nothing shown */
+static void temp_show(void) {
+    static time_t last;
+    static int    c = -1000;
+    time_t        now = time(NULL);
+
+    if (!temp_label) return;
+    if (now - last >= 5) {
+        FILE *f = fopen("/sys/class/thermal/thermal_zone0/temp", "r");
+        int   m;
+
+        last = now;
+        c    = f && fscanf(f, "%d", &m) == 1 ? (m + 500) / 1000 : -1000;
+        if (f) fclose(f);
+    }
+    if (c > -100) lv_label_set_text_fmt(temp_label, "%iC", c);
+    else lv_label_set_text(temp_label, "");
+}
+
 static void power_gaps(bool fit) {
     lv_obj_t  *row  = lv_obj_get_parent(power_labels[0]);
     lv_obj_t  *box  = lv_obj_get_parent(row);
@@ -70,10 +91,11 @@ static void power_gaps(bool fit) {
         /* the box's width inside its border, 2 px clear of each side, less the labels */
         lv_coord_t room = lv_obj_get_style_width(box, 0) - 2 * lv_obj_get_style_border_width(box, 0) - 4;
 
-        for (int i = 0; i < 4; i++) {
-            const char *t = lv_label_get_text(power_labels[i]);
+        for (int i = 0; i < 5; i++) {
+            lv_obj_t   *l = i < 4 ? power_labels[i] : temp_label;
+            const char *t = l ? lv_label_get_text(l) : "";
 
-            room -= lv_txt_get_width(t, strlen(t), lv_obj_get_style_text_font(power_labels[i], 0), 0,
+            room -= lv_txt_get_width(t, strlen(t), lv_obj_get_style_text_font(l ? l : power_labels[0], 0), 0,
                                      LV_TEXT_FLAG_NONE);
         }
         if (room < 3 * col + half) {
@@ -250,6 +272,7 @@ static void show_time() {
             lv_obj_set_style_text_color(power_labels[i], low ? TC(tx)
                                         : (theme_shape.deck && i % 2) ? TC(text_mute) : TC(text_soft), 0);
     }
+    temp_show();
     power_gaps(fit);
 
     pthread_mutex_unlock(&power_mux);
@@ -312,6 +335,10 @@ lv_obj_t * clock_init(lv_obj_t * parent) {
         lv_obj_set_style_text_color(power_labels[i], TC(text_soft), 0);
     }
     lv_obj_set_style_pad_left(power_labels[2], 4, 0);
+    temp_label = lv_label_create(row);
+    lv_obj_set_style_text_font(temp_label, &sony_24, 0);
+    lv_obj_set_style_text_color(temp_label, TC(text_soft), 0);
+    lv_obj_set_style_pad_left(temp_label, 6, 0);
     power_col  = 4;             /* new labels (a theme change): the usual gaps */
     power_half = 4;
     if (theme_shape.vision) {   /* VISION: the time only here, the battery in a box of its own at the right end of the S-meter's row */
@@ -325,6 +352,7 @@ lv_obj_t * clock_init(lv_obj_t * parent) {
         lv_obj_center(row);
         for (int i = 0; i < 4; i++)
             lv_obj_set_style_text_font(power_labels[i], i % 2 ? &sony_20 : &power_sym_22, 0);
+        lv_obj_set_style_text_font(temp_label, &sony_20, 0);
     }
     if (theme_shape.deck) {     /* "13:03:02" at the right of the first row, the voltages in the second */
         lv_obj_set_style_text_font(time_label, &sony_24, 0);
@@ -334,6 +362,8 @@ lv_obj_t * clock_init(lv_obj_t * parent) {
         lv_obj_align(row, LV_ALIGN_BOTTOM_LEFT, 0, -3);
         for (int i = 0; i < 4; i++)
             lv_obj_set_style_text_font(power_labels[i], i % 2 ? &sony_20 : &power_sym_14, 0);
+        lv_obj_set_style_text_font(temp_label, &sony_20, 0);
+        lv_obj_set_style_text_color(temp_label, TC(text_mute), 0);
         lv_obj_set_style_text_color(power_labels[1], TC(text_mute), 0);
         lv_obj_set_style_text_color(power_labels[3], TC(text_mute), 0);
     }

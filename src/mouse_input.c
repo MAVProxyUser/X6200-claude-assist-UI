@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
- *  OpenX6X00 - A USB or Bluetooth mouse or touchpad on the screen (mouse_input.h). The first input device with
- *  a left button and X and Y movement that no paddle has is opened, at each device scan (key_input.c's), while
+ *  OpenX6X00 - A USB or Bluetooth mouse or touchpad on the screen (mouse_input.h). Every input device with a
+ *  left button and X and Y movement that no paddle has is opened (up to four: a touchpad and a mouse both point), at each device scan (key_input.c's), while
  *  Settings > Keys > KEYBOARD AND MOUSE > Mouse is on. One reader takes its events for three LVGL inputs: the
  *  pointer (left button, with an arrow on the top layer that goes after a few seconds still), an encoder (the
  *  wheel and the middle button, as the MFK) and a key (the right button, ESC). A press that lights a dark screen
@@ -41,9 +41,11 @@ typedef struct {
     bool ignored;   /* its press only woke the screen: up until it is let go */
 } button_t;
 
-static int            fd = -1;
-static dev_t          dev_rdev;
-static ino_t          dev_ino;
+#define MICE 4                  /* open at once: a touchpad and a mouse both point */
+
+static int            fds[MICE] = {-1, -1, -1, -1};
+static dev_t          dev_rdev[MICE];
+static ino_t          dev_ino[MICE];
 static bool           started;          /* the settings are there */
 static button_t       btn[B_N];
 static int            wheel;            /* detents not read yet: + is toward the user, the MFK's next */
@@ -81,17 +83,27 @@ static void arrow_show(void) {
     }
 }
 
+static bool any_open(void) {
+    for (int i = 0; i < MICE; i++)
+        if (fds[i] >= 0) return true;
+    return false;
+}
+
+/* One let go (gone, or no longer a mouse); the buttons up when it was the last */
+static void close_one(int i) {
+    if (fds[i] < 0) return;
+    close(fds[i]);
+    fds[i] = -1;
+    LV_LOG_USER("Mouse %d closed", i);
+    if (!any_open()) {
+        wheel = 0;
+        for (int b = 0; b < B_N; b++) btn[b] = (button_t){0};
+        arrow_hide();
+    }
+}
+
 static void close_mouse(void) {
-    if (fd >= 0) {
-        close(fd);
-        LV_LOG_USER("Mouse closed");
-    }
-    fd    = -1;
-    wheel = 0;
-    for (int b = 0; b < B_N; b++) {
-        btn[b] = (button_t){0};
-    }
-    arrow_hide();
+    for (int i = 0; i < MICE; i++) close_one(i);
 }
 
 /* Faster moves go further: one count a pixel when slow, up to three */
@@ -149,21 +161,21 @@ static void take(const struct input_event *e) {
     }
 }
 
-/* Every event waiting, by whichever input reads first */
+/* Every event waiting on every mouse, by whichever input reads first */
 static void drain(void) {
     struct input_event ev[32];
     ssize_t            n;
 
-    if (fd < 0) {
-        return;
-    }
-    while ((n = read(fd, ev, sizeof(ev))) > 0) {
-        for (size_t i = 0; i < (size_t)n / sizeof(ev[0]); i++) {
-            take(&ev[i]);
+    for (int m = 0; m < MICE; m++) {
+        if (fds[m] < 0) continue;
+        while ((n = read(fds[m], ev, sizeof(ev))) > 0) {
+            for (size_t i = 0; i < (size_t)n / sizeof(ev[0]); i++) {
+                take(&ev[i]);
+            }
         }
-    }
-    if (n < 0 && errno == ENODEV) {     /* unplugged, or its Bluetooth link gone */
-        close_mouse();
+        if (n < 0 && errno == ENODEV) {     /* unplugged, or its Bluetooth link gone */
+            close_one(m);
+        }
     }
 }
 
@@ -207,45 +219,47 @@ static bool is_mouse(const char *path, struct stat *st) {
            HAS(rel, REL_Y) && !paddle_keyer_holds(st);
 }
 
+/* Every mouse there opened (up to MICE), the ones gone let go */
 void mouse_check(void) {
     glob_t      g;
     struct stat st;
+    bool        seen[MICE] = {false};
 
-    if (!mouse_on()) {
-        close_mouse();
-        return;
-    }
-    if (glob("/dev/input/event*", 0, NULL, &g) != 0) {
+    if (!mouse_on() || glob("/dev/input/event*", 0, NULL, &g) != 0) {
         close_mouse();
         return;
     }
     for (size_t i = 0; i < g.gl_pathc; i++) {
-        if (!is_mouse(g.gl_pathv[i], &st)) {
+        int m, free_m = -1;
+
+        if (!is_mouse(g.gl_pathv[i], &st)) continue;
+        for (m = 0; m < MICE; m++) {
+            if (fds[m] >= 0 && st.st_rdev == dev_rdev[m] && st.st_ino == dev_ino[m]) break;
+            if (fds[m] < 0 && free_m < 0) free_m = m;
+        }
+        if (m < MICE) {         /* open already */
+            seen[m] = true;
             continue;
         }
-        if (fd >= 0 && st.st_rdev == dev_rdev && st.st_ino == dev_ino) {
-            globfree(&g);
-            return;         /* the one open */
-        }
+        if (free_m < 0) continue;
         int n = open(g.gl_pathv[i], O_RDONLY | O_NONBLOCK | O_CLOEXEC);
 
         if (n >= 0) {
-            close_mouse();
-            fd       = n;
-            dev_rdev = st.st_rdev;
-            dev_ino  = st.st_ino;
-            LV_LOG_USER("Mouse on %s", g.gl_pathv[i]);
-            globfree(&g);
-            return;
+            fds[free_m]      = n;
+            dev_rdev[free_m] = st.st_rdev;
+            dev_ino[free_m]  = st.st_ino;
+            seen[free_m]     = true;
+            LV_LOG_USER("Mouse %d on %s", free_m, g.gl_pathv[i]);
         }
     }
     globfree(&g);
-    close_mouse();          /* none, or the one open is gone */
+    for (int m = 0; m < MICE; m++)
+        if (!seen[m]) close_one(m);
 }
 
 static void hide_cb(lv_timer_t *t) {
     if (arrow && !lv_obj_has_flag(arrow, LV_OBJ_FLAG_HIDDEN) &&
-        (fd < 0 || lv_tick_elaps(active) > HIDE_MS)) {
+        (!any_open() || lv_tick_elaps(active) > HIDE_MS)) {
         arrow_hide();
     }
 }

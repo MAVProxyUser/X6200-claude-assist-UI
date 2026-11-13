@@ -991,8 +991,8 @@ static void show_head(void) {
     struct tm  tm;
     int32_t    fq  = cparam_i_get(cfg_fg_freq);
 
-    gmtime_r(&now, &tm);
-    strftime(t, sizeof(t), "%H:%M UTC", &tm);
+    localtime_r(&now, &tm);             /* the radio's time zone (Settings > General > DATE / TIME), named */
+    strftime(t, sizeof(t), "%H:%M %Z", &tm);
     snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
     static const char *const modes[] = {"AUTO-SCAN", "SEMI-AUTO", "MAN-OVERRIDE"};
 
@@ -1351,10 +1351,17 @@ static const struct {
 static const int32_t rtl_steps[] = {12500, 25000, 100000, 500000, 1000000};
 static const int     rtl_gains[] = {-1, 97, 197, 280, 372, 496};     /* tenths of dB; -1 the tuner's AGC */
 
+/* A half of the picture: its trace, the scale under it and the 3D picture of its last rows, as A SCAN's */
 typedef struct {
     int   y0, trace_h, wf_y0, wf_h;
     float floor, top_db, bot_db;
+    uint8_t (*rows)[RTL_COLS];      /* D3_ROWS rows of levels, newest at head - 1 */
+    int   head, count;
+    float pend[RTL_COLS];           /* frames not yet a row: their strongest */
+    int   npend;
 } panel_t;
+
+static uint8_t rows_rtl[D3_ROWS][RTL_COLS], rows_hf[D3_ROWS][RTL_COLS];
 
 static lv_img_dsc_t *rtl_frame;
 static lv_obj_t     *rtl_img, *rtl_why_l, *rtl_tick_l[RTL_TICKS], *hf_tick_l[RTL_TICKS], *rtl_peak_l[RTL_PEAKS], *rtl_src_l[2];
@@ -1452,7 +1459,7 @@ static void panel_trace(panel_t *p, const float *cols) {
         y     = y < 0 ? 0 : y > h - 1 ? h - 1 : y;
         int      y0 = prev < 0 ? y : prev < y ? prev : y, y1 = prev < 0 ? y : prev > y ? prev : y;
         uint8_t  v    = panel_level(p, cols[x]);
-        uint32_t edge = d3_pal[v], body = scale_rgb(d3_pal[v / 2], 0.45f);
+        uint32_t edge = 0xff000000 | d3_pal[v], body = scale_rgb(d3_pal[v / 2], 0.45f);
 
         for (int yy = y + 1; yy < h; yy++) px[(p->y0 + yy) * RTL_COLS + x] = yy == y + 1 ? scale_rgb(edge, 0.8f) : body;
         for (int yy = y0; yy <= y1; yy++) px[(p->y0 + yy) * RTL_COLS + x] = edge;
@@ -1464,39 +1471,67 @@ static void panel_trace(panel_t *p, const float *cols) {
     }
 }
 
-/* A waterfall row on top, the older ones a row down */
-static void panel_row(panel_t *p, const float *cols) {
-    uint32_t *px = (uint32_t *)rtl_frame->data, *top = px + p->wf_y0 * RTL_COLS;
-
-    if (p->wf_h < 2) return;
-    memmove(top + RTL_COLS, top, (size_t)(p->wf_h - 1) * RTL_COLS * 4);
-    for (int x = 0; x < RTL_COLS; x++) top[x] = d3_pal[panel_level(p, cols[x])];
-}
-
-/* The waterfall's columns follow a retune: what they showed moves aside, or goes */
-static void panel_shift(panel_t *p, int dx) {
+/* The 3D picture of the half's rows, back to front: A SCAN's render_3d in the half's own place */
+static void panel_render(const panel_t *p) {
     uint32_t *px = (uint32_t *)rtl_frame->data, bg = argb(ink);
+    int       h = p->wf_h, y0 = p->wf_y0, n = p->count;
+    float     cx = RTL_COLS / 2.0f;
 
-    for (int y = p->wf_y0; y < p->wf_y0 + p->wf_h; y++) {
-        uint32_t *r = px + y * RTL_COLS;
+    if (h < 8) return;
+    for (int i = y0 * RTL_COLS; i < (y0 + h) * RTL_COLS; i++) px[i] = bg;
+    for (int r = n - 1; r >= 0; r--) {
+        const uint8_t *lv     = p->rows[(p->head - 1 - r + D3_ROWS) % D3_ROWS];
+        float          t      = (float)r / (D3_ROWS - 1);
+        int            yb     = y0 + h - 2 - (int)(t * h * 0.6f);
+        float          shrink = 1.0f - 0.36f * t, amp = h * 0.62f * (1.0f - 0.3f * t), fade = 1.0f - 0.62f * t;
+        int            x0 = (int)(cx - cx * shrink), x1 = (int)(cx + cx * shrink);
 
-        if (abs(dx) >= RTL_COLS) {
-            for (int x = 0; x < RTL_COLS; x++) r[x] = bg;
-        } else if (dx > 0) {
-            memmove(r, r + dx, (size_t)(RTL_COLS - dx) * 4);
-            for (int x = RTL_COLS - dx; x < RTL_COLS; x++) r[x] = bg;
-        } else if (dx < 0) {
-            memmove(r - dx, r, (size_t)(RTL_COLS + dx) * 4);
-            for (int x = 0; x < -dx; x++) r[x] = bg;
+        for (int x = x0 < 0 ? 0 : x0; x < x1 && x < RTL_COLS; x++) {
+            int sx = (int)(cx + (x - cx) / shrink);
+
+            if (sx < 0 || sx >= RTL_COLS) continue;
+            uint8_t  v    = lv[sx];
+            int      top  = yb - (int)(v * amp / 255);
+            uint32_t edge = scale_rgb(d3_pal[v], fade), body = scale_rgb(d3_pal[v / 2], fade * 0.45f);
+
+            if (top < y0) top = y0;
+            px[top * RTL_COLS + x] = edge;
+            if (top + 1 <= yb) px[(top + 1) * RTL_COLS + x] = scale_rgb(d3_pal[v], fade * 0.8f);
+            for (int y = top + 2; y <= yb; y++) px[y * RTL_COLS + x] = body;
         }
     }
 }
 
-static void panel_clear(panel_t *p) {
-    uint32_t *px = (uint32_t *)rtl_frame->data, bg = argb(ink);
+/* A frame into the half's rows: every second one makes a row (the strongest of the two), drawn at once */
+static void panel_row(panel_t *p, const float *cols) {
+    for (int x = 0; x < RTL_COLS; x++) p->pend[x] = p->npend ? fmaxf(p->pend[x], cols[x]) : cols[x];
+    if (++p->npend < 2) return;
+    p->npend = 0;
 
-    for (int i = p->y0 * RTL_COLS; i < (p->wf_y0 + p->wf_h) * RTL_COLS; i++) px[i] = bg;
-    p->floor = -300;
+    uint8_t *row = p->rows[p->head];
+    for (int x = 0; x < RTL_COLS; x++) row[x] = panel_level(p, p->pend[x]);
+    p->head = (p->head + 1) % D3_ROWS;
+    if (p->count < D3_ROWS) p->count++;
+    panel_render(p);
+}
+
+/* The rows' columns follow a retune: what they showed moves aside, or goes */
+static void panel_shift(panel_t *p, int dx) {
+    for (int r = 0; r < D3_ROWS; r++) {
+        uint8_t *row = p->rows[r];
+
+        if (abs(dx) >= RTL_COLS) {
+            memset(row, 0, RTL_COLS);
+        } else if (dx > 0) {
+            memmove(row, row + dx, RTL_COLS - dx);
+            memset(row + RTL_COLS - dx, 0, dx);
+        } else if (dx < 0) {
+            memmove(row - dx, row, RTL_COLS + dx);
+            memset(row, 0, -dx);
+        }
+    }
+    p->npend = 0;
+    panel_render(p);
 }
 
 /* The halves: the stick alone fills the picture; split, the X6200 above and the stick below */
@@ -1504,17 +1539,22 @@ static void rtl_layout(void) {
     bool split = param_i_get(cfg_rtl_view) == 1;
     int  h     = rtl_img_h;
 
-    p_hf = (panel_t){0};
+    p_hf = (panel_t){.rows = rows_hf};
+    memset(rows_hf, 0, sizeof(rows_hf));
+    memset(rows_rtl, 0, sizeof(rows_rtl));
     if (split) {
         int half = (h - 4) / 2;
 
         p_hf  = (panel_t){.y0 = 0, .trace_h = RTL_HALF_TR, .wf_y0 = RTL_HALF_TR + RTL_SCALE_H,
-                          .wf_h = half - RTL_HALF_TR - RTL_SCALE_H, .floor = -300, .top_db = -60, .bot_db = -130};
+                          .wf_h = half - RTL_HALF_TR - RTL_SCALE_H, .floor = -300, .top_db = -60, .bot_db = -130,
+                          .rows = rows_hf};
         p_rtl = (panel_t){.y0 = half + 4, .trace_h = RTL_HALF_TR, .wf_y0 = half + 4 + RTL_HALF_TR + RTL_SCALE_H,
-                          .wf_h = h - (half + 4 + RTL_HALF_TR + RTL_SCALE_H), .floor = -300, .top_db = -60, .bot_db = -130};
+                          .wf_h = h - (half + 4 + RTL_HALF_TR + RTL_SCALE_H), .floor = -300, .top_db = -60, .bot_db = -130,
+                          .rows = rows_rtl};
     } else {
         p_rtl = (panel_t){.y0 = 0, .trace_h = RTL_TRACE_H, .wf_y0 = RTL_TRACE_H + RTL_SCALE_H,
-                          .wf_h = h - RTL_TRACE_H - RTL_SCALE_H, .floor = -300, .top_db = -60, .bot_db = -130};
+                          .wf_h = h - RTL_TRACE_H - RTL_SCALE_H, .floor = -300, .top_db = -60, .bot_db = -130,
+                          .rows = rows_rtl};
     }
     uint32_t *px = (uint32_t *)rtl_frame->data, bg = argb(ink), line = argb(amb);
     for (int i = 0; i < RTL_COLS * h; i++) px[i] = bg;
@@ -1701,11 +1741,13 @@ static void rtl_timer_cb(lv_timer_t *t) {
         lv_label_set_text(rtl_src_l[1], s);
         if (best_hz) {
             fmt_mhz(f, sizeof(f), best_hz, 3);
-            snprintf(s, sizeof(s), "%d  BEST %s %s", found, f, rtl_name(best_hz));
+            snprintf(s, sizeof(s), "%s %s", f, rtl_name(best_hz));
         } else {
-            snprintf(s, sizeof(s), "NONE OVER THE NOISE");
+            snprintf(s, sizeof(s), "ONLY NOISE");
         }
         opt_set(&r_sig, 0, s, 0);
+        snprintf(s, sizeof(s), "SIGNALS: %d", found);
+        lv_label_set_text(r_sig.cap, s);
     }
     if (drew) lv_obj_invalidate(rtl_img);
 }
