@@ -46,6 +46,7 @@
 #include "events.h"
 #include "gui_styles.h"
 #include "keyboard.h"
+#include "main.h"             /* VERSION, the release in the title */
 #include "main_screen.h"
 #include "msg_box.h"
 #include "params/params.h"
@@ -1031,19 +1032,19 @@ static void show_head(void) {
     localtime_r(&now, &tm);             /* the radio's time zone (Settings > General > DATE / TIME), named */
     strftime(t, sizeof(t), "%H:%M %Z", &tm);
     if (c != CLOCK_NO_TEMP)             /* after the time, as the other clocks show it; none read: none shown */
-        snprintf(tc, sizeof(tc), "  %dC", c);
+        snprintf(tc, sizeof(tc), " %dC", c);
     snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
     static const char *const modes[] = {"AUTO-SCAN", "SEMI-AUTO", "MAN-OVERRIDE"};
 
     if (scr == SCR_RTL && listen_rtl) {     /* the receiver heard: the stick */
         snprintf(f, sizeof(f), "RTL %lld.%03lld.%02lld", (long long)(listen_hz / 1000000),
                  (long long)(listen_hz / 1000 % 1000), (long long)(listen_hz % 1000 / 10));
-        lv_label_set_text_fmt(status_l, "%s %s   %s   %s   %s%s", f, rtl_mode_names[rtl_mode_of(listen_hz)],
+        lv_label_set_text_fmt(status_l, "%s %s  %s  %s  %s%s", f, rtl_mode_names[rtl_mode_of(listen_hz)],
                               rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc);
         return;
     }
-    lv_label_set_text_fmt(status_l, "%s %s%s%s   %s   %s   %s%s", f, mode_name(cparam_i_get(cfg_cur_mode)),
-                          cparam_i_get(cfg_cur_pre) ? "  PRE" : "", cparam_i_get(cfg_cur_att) ? "  ATT" : "",
+    lv_label_set_text_fmt(status_l, "%s %s%s%s  %s  %s  %s%s", f, mode_name(cparam_i_get(cfg_cur_mode)),
+                          cparam_i_get(cfg_cur_pre) ? " PRE" : "", cparam_i_get(cfg_cur_att) ? " ATT" : "",
                           rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc);
 }
 
@@ -2204,14 +2205,20 @@ static void show_title(void) {
     if (alert_until && time(NULL) < alert_until && (time(NULL) & 1))
         lv_label_set_text_fmt(title_l, "WX ALERT: %s", alert_event);
     else {
-        /* after SYSTEM (E's "SYSTEM CONTROL" whole): the commit the GUI is built from and the base's firmware version,
-         * "... SYSTEM: c6e93af - base 1.0.8", the title centred as one line still */
-        const char *t = titles[scr], *ver = radio_base_ver_str();
+        /* after SYSTEM (E's "SYSTEM CONTROL" whole): the release (src/main.h's version, the tag it is built for),
+         * the commit and the base's firmware version, "... SYSTEM: v0.3.9.4 c6e93af - base 1.0.8". One line between
+         * the badges, 68 of pixel_20's 10 px characters: A and B's long title gives up "XIEGU " for it */
+        const char *t = titles[scr], *ver = radio_base_ver_str(), *rel = strrchr(VERSION, ' ') + 1;
+        char        s[128];
 
-        if (strstr(t, "SYSTEM"))
-            lv_label_set_text_fmt(title_l, "XIEGU X6200  %s: %s - base %s", t, GIT_COMMIT, ver && ver[0] ? ver : "?");
-        else
-            lv_label_set_text_fmt(title_l, "XIEGU X6200  %s", t);
+        if (strstr(t, "SYSTEM")) {
+            snprintf(s, sizeof(s), "XIEGU X6200 %s: %s %s - base %s", t, rel, GIT_COMMIT, ver && ver[0] ? ver : "?");
+            if (lv_txt_get_width(s, strlen(s), lv_obj_get_style_text_font(title_l, 0), 0, LV_TEXT_FLAG_NONE) >
+                lv_obj_get_style_width(title_l, LV_PART_MAIN))    /* the width given, laid out or not yet */
+                memmove(s, s + 6, strlen(s + 6) + 1);     /* "XIEGU " */
+            lv_label_set_text(title_l, s);
+        } else
+            lv_label_set_text_fmt(title_l, "XIEGU X6200 %s", t);
     }
 }
 
