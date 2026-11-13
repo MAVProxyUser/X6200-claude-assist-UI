@@ -95,7 +95,8 @@ and takes it back after. E SYSTEM > AIRSPACE, or APP > Airspace.
 
 Put your own video at `/mnt/bootvideo.mp4` and it plays from the first seconds of the boot in place of the boot
 logo; the GUI comes up when it ends (30 s at most). [tools/bootvideo/prepare.sh](tools/bootvideo/prepare.sh) fits
-any video to the screen. A small decode-only ffmpeg is in the image for it.
+any video to the screen. A small decode-only ffmpeg is in the image for it. The kernel draws no logo of its own
+before it (the build trees' kernels carried Aether Radio's wolf), so the screen stays dark until the video starts.
 [Manual](docs/MANUAL.md#boot-video).
 
 ### The base firmware, updated from OpenX6X00
@@ -112,7 +113,9 @@ S1, -121.0 on 1.0.7; this fork's X6200 went from 1.0.7 to 1.0.8 this way on 13 N
 
 - The clock in your own time zone (Settings > General > Date / Time), on the main screen, the Sentry and
   AIRSPACE.
-- The processor's temperature next to the battery, under the clock.
+- The processor's temperature wherever the battery and the time are: under the main screen's clock (every theme;
+  on Ops Room's clock between the supply and the charge), on Walkie after the battery's voltage, and on Amber Trey's
+  status line after the time and the voltage.
 - The RTTY tile in Digital modes shows your baud rate.
 
 ### Decoder fixes

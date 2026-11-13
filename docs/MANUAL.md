@@ -5103,6 +5103,10 @@ or `scp`); it plays from the next start. No video there, nothing changes.
 - On a radio with an image older than the boot video,
   `tools/bootvideo/build.sh` and `tools/bootvideo/install.sh` put the player
   (ffmpeg) and its start script on it.
+- Before it the screen stays dark: the kernel draws no logo of its own
+  (images built from 13 November 2026 on; older ones show a plain dark
+  background, and a kernel built from the build trees without
+  `buildroot/local-build.sh` shows their logo, a wolf).
 
 ## Wavelog
 
@@ -7335,6 +7339,19 @@ after it: find those by their `name`, not their number
 The kernel turns the sensor's reading into degrees with the same formula for
 every R16; there is no calibration for each processor. There is no setting
 for it, and the X6100's kernel is not changed.
+
+On the screen it is shown, in whole degrees (`37C`) and read again every 5 s,
+wherever the battery and the time are:
+
+- under the main screen's clock, after the battery, in every theme; on Ops
+  Room's clock in the middle of its top row, between EXTERNAL or INTERNAL
+  and the charge;
+- on [Walkie Talkie](#walkie-talkie-mode), after the battery's voltage
+  (`8.6 V  36C`), or alone without a battery;
+- on Amber Trey's status line, after the time and the voltage
+  (`14:29Z  11.8V  37C`).
+
+A radio whose kernel has no thermal zone shows none of them.
 
 ## Build
 
