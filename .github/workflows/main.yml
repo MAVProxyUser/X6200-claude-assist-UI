@@ -6,7 +6,7 @@ name: Build image
 
 # On every push to main, on a version tag, and by hand (Actions > Build image > Run workflow). A build takes about 2
 # hours: a push while one runs does not stop it, only the newest waiting run is kept and starts after it. The images
-# and update bundles are the run's artifacts (30 days); a version tag (v0.3.9.1) also makes a release with them.
+# and update bundles are the run's artifacts (30 days); a version tag (v0.3.9.2) also makes a release with them.
 on:
   push:
     branches: [main]
@@ -114,13 +114,15 @@ jobs:
         key: ${{ runner.os }}-${{ matrix.model }}-ccache-${{ steps.ccache_cache_timestamp.outputs.timestamp }}
 
     # The release names: <out>-<ref>-sdcard.img.zip and <out>-<ref>-update.tar.gz (the script
-    # named the bundle after the version in src/main.h)
+    # named the bundle after the version in src/main.h: on a version tag that is the name already, and mv
+    # onto itself fails the step)
     - name: Name the image and the bundle
       run: |
         cd $X6CI_IMAGES
         mv ${{ matrix.out }}-local-sdcard.img $X6CI_IMG
         zip $X6CI_IMG.zip $X6CI_IMG
-        mv ${{ matrix.out }}-v*-update.tar.gz $X6CI_BUNDLE
+        b=$(ls ${{ matrix.out }}-v*-update.tar.gz)
+        [ "$b" = "$X6CI_BUNDLE" ] || mv "$b" $X6CI_BUNDLE
         ls -la $X6CI_IMG.zip $X6CI_BUNDLE
 
     # Always keep the image and the bundle as workflow artifacts: branch runs have no

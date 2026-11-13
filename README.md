@@ -217,7 +217,7 @@ their amber-on-black screens, as in this clip, "Aliens 1986 Turrets" (Mic Mitja,
 
 **Settings > Info > Update installs this fork's releases**, from the GitHub repository the image was built from:
 this one for its own images, and a fork's own for a fork's images (the build writes the repository into the image,
-`/usr/share/x6100/update-repo`). A release is made by pushing a version tag (`v0.3.9.1`, the version in `src/main.h`);
+`/usr/share/x6100/update-repo`). A release is made by pushing a version tag (`v0.3.9.2`, the version in `src/main.h`);
 GitHub builds both radios' images and bundles and attaches them. Nothing is signed and there is no key to keep, for
 this repository or a fork of it: a download rests on HTTPS to GitHub, and each file is checked against the bundle's
 own list of SHA-256 sums. RF.Guru's releases are not this updater's business: their GUI would drop everything above.
