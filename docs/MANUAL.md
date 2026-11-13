@@ -547,8 +547,8 @@ Its controls, on every screen (GEN shows them, as does a tap on the title):
 - **E SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the classic radio screen, a shell,
   the [base firmware](#the-x6200s-base-firmware-from-openx6x00) (the X6200's; on an X6100 the item says it is
   not supported) and where the radio starts. F2 opens the item
-  chosen, F5 the classic radio screen. Its title says the GUI's commit and the base's version
-  (`SYSTEM CONTROL: c6e93af - base 1.0.8`).
+  chosen, F5 the classic radio screen. Its title says the release, the GUI's commit and the base's version
+  (`SYSTEM CONTROL: v0.3.9.5 c6e93af - base 1.0.8`); so do A and B's, without "XIEGU " for the room.
 
 ### F VHF/UHF, an RTL-SDR
 
@@ -7412,7 +7412,7 @@ wherever the battery and the time are, and after the Sentry's time:
 - on Amber Trey's status line, after the time and the voltage
   (`14:29Z  11.8V  37C`);
 - in the [Sentry](#the-sentry)'s title bar, after the time on its second line
-  (`SEMI-AUTO   14:49 EST  53C`), on every Sentry screen.
+  (`SEMI-AUTO  14:49 EST 53C`), on every Sentry screen.
 
 A radio whose kernel has no thermal zone shows none of them.
 
