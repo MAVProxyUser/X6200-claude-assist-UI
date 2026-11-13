@@ -214,6 +214,27 @@ for p in rtlsdr-blog dump1090-fa; do
     grep -q "package/$p/Config.in" $EXT/Config.in || echo "source \"\$BR2_EXTERNAL_${M}_PATH/package/$p/Config.in\"" >> $EXT/Config.in
 done
 grep -q "^BR2_PACKAGE_DUMP1090_FA=y" $DEFCONFIG || echo "BR2_PACKAGE_DUMP1090_FA=y" >> $DEFCONFIG
+# ffmpeg for the boot video (rootfs/etc/init.d/S94bootvideo), with what it needs only, not buildroot's every codec:
+# MP4/MKV/AVI, H.264, HEVC, MPEG-4 and VP8/VP9 video, scaled and turned into the framebuffer (fbdev). 4.4 looks
+# for linux/fb.h only with v4l2-m2m on. tools/bootvideo/build.sh builds the same for a radio on an older image
+if ! grep -q "^BR2_PACKAGE_FFMPEG=y" $DEFCONFIG; then
+    cat >> $DEFCONFIG << 'FFMPEG'
+BR2_PACKAGE_FFMPEG=y
+BR2_PACKAGE_FFMPEG_FFMPEG=y
+BR2_PACKAGE_FFMPEG_SWSCALE=y
+BR2_PACKAGE_FFMPEG_ENCODERS="rawvideo"
+BR2_PACKAGE_FFMPEG_DECODERS="h264 hevc mpeg4 vp8 vp9"
+BR2_PACKAGE_FFMPEG_MUXERS=""
+BR2_PACKAGE_FFMPEG_DEMUXERS="mov matroska avi"
+BR2_PACKAGE_FFMPEG_PARSERS="h264 hevc mpeg4video vp8 vp9"
+BR2_PACKAGE_FFMPEG_BSFS=""
+BR2_PACKAGE_FFMPEG_PROTOCOLS="file"
+BR2_PACKAGE_FFMPEG_FILTERS="scale pad transpose format fps crop setsar null trim"
+# BR2_PACKAGE_FFMPEG_INDEVS is not set
+BR2_PACKAGE_FFMPEG_OUTDEVS=y
+BR2_PACKAGE_FFMPEG_EXTRACONF="--enable-v4l2-m2m"
+FFMPEG
+fi
 if [ $MODEL = x6100 ]; then
     grep -q "rtl8723bu-wifi/Config.in" $EXT/Config.in || echo 'source "$BR2_EXTERNAL_X6100_PATH/package/rtl8723bu-wifi/Config.in"' >> $EXT/Config.in
     grep -q "^BR2_PACKAGE_RTL8723BU_WIFI=y" $DEFCONFIG || echo "BR2_PACKAGE_RTL8723BU_WIFI=y" >> $DEFCONFIG

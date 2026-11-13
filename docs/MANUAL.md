@@ -4963,6 +4963,33 @@ card. No SSH needed.
   copied over the system's own `/usr/share/x6100/bootlogo.png`, as was done
   before this card, is replaced by every update: upload it on the card.
 
+### Boot video
+
+A video of your own can play on the screen as the radio starts, after the
+boot picture and just before the main screen comes. Copy it to the DATA
+partition as `/mnt/bootvideo.mp4` (SFTP or `scp`); it plays from the next
+start. No video there, nothing changes.
+
+- Any size or shape plays (MP4, MKV or AVI; H.264, HEVC, MPEG-4, VP8 or
+  VP9): it is fitted into the 800x480 screen with black around it. A phone's
+  portrait video comes out as a narrow strip in the middle unless it is
+  cropped first.
+- `tools/bootvideo/prepare.sh IN.mp4 OUT.mp4 [W:H:X:Y]` on a PC with ffmpeg
+  makes one that plays smoothly: 800x480 at 30 frames a second, H.264, no
+  sound. The optional crop (ffmpeg's `crop=W:H:X:Y`) keeps the part of a tall
+  or wide video that matters, so it fills more of the screen.
+- No sound: the speaker is not the radio's to use until the main screen
+  starts.
+- The start waits for it: a 15 s video starts the main screen 15 s later. It
+  stops after 30 s whatever its length. Its last picture stays until the
+  main screen draws.
+- `/mnt/bootvideo.off` (an empty file) turns it off without removing it;
+  deleting `/mnt/bootvideo.mp4` removes it. Updates and a new card image that
+  keeps the DATA partition leave it there.
+- On a radio with an image older than the boot video,
+  `tools/bootvideo/build.sh` and `tools/bootvideo/install.sh` put the player
+  (ffmpeg) and its start script on it.
+
 ## Wavelog
 
 Every QSO the radio logs goes to your [Wavelog](https://github.com/wavelog/wavelog) as well, a few seconds after it is logged: FT8, FT4, FT2, JS8, voice, CW and the keyboard modes (the phone's logger, the CW keyboard) and the Field Ops activations, all that the web Logs page lists. The radio's own logs stay as they are. Where: web configurator, Operating > Wavelog.

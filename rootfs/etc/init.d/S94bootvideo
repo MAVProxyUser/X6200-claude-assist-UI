@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# Boot video: your own video, /mnt/bootvideo.mp4 on the DATA partition, plays on the screen just before the GUI
+# starts (S95gui), after the boot animation; its last picture stays until the GUI draws. Any size or shape is fitted
+# into the 800x480 screen, black around it; tools/bootvideo/prepare.sh on a PC makes one that plays smoothly
+# (800x480, H.264). No sound. None there, or /mnt/bootvideo.off: nothing happens. MAX_S seconds at most: the boot
+# waits for it.
+#
+
+VIDEO=/mnt/bootvideo.mp4
+LOG=/tmp/bootvideo.log
+MAX_S=30
+# The panel is portrait (480x800) under the landscape screen the GUI draws: fitted landscape, then turned as
+# the boot animation turns its logo (landscape x, y is the panel's y, 799 - x)
+FIT="scale=800:480:force_original_aspect_ratio=decrease,pad=800:480:(ow-iw)/2:(oh-ih)/2:black,transpose=2,format=bgra"
+
+case "$1" in
+	start)
+		[ -f "$VIDEO" ] && [ ! -e /mnt/bootvideo.off ] && command -v ffmpeg > /dev/null || exit 0
+		# The boot animation draws on the same screen: done by now, or stopped
+		killall x6100-bootanim 2> /dev/null
+		echo 0 > /sys/class/graphics/fbcon/cursor_blink 2> /dev/null
+		ffmpeg -hide_banner -loglevel error -nostdin -re -i "$VIDEO" -t "$MAX_S" -an -vf "$FIT" \
+			-f fbdev /dev/fb0 > "$LOG" 2>&1
+		;;
+esac
+exit 0
