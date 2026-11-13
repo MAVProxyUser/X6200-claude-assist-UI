@@ -1,0 +1,18 @@
+From: Kevin Finisterre <kf@digitalmunition.com>
+Subject: [PATCH] hashtable: zero the whole table, not a pointer's size per entry
+
+hashtable_init() cleared sizeof(callsign_hashtable), a pointer (4 bytes on the radio), for each of the
+table's 16-byte entries: three quarters of it began as whatever the heap held, entries that a lookup
+could take for a stored callsign and copy out without its terminating NUL.
+
+--- a/ft8/hashtable.c
++++ b/ft8/hashtable.c
+@@ -22,7 +22,7 @@
+     callsign_hashtable_size = 0;
+     callsign_hashtable_max_size = hashtable_max_size;
+     callsign_hashtable = malloc(sizeof(*callsign_hashtable) * callsign_hashtable_max_size);
+-    memset(callsign_hashtable, 0, sizeof(callsign_hashtable) * callsign_hashtable_max_size);
++    memset(callsign_hashtable, 0, sizeof(*callsign_hashtable) * callsign_hashtable_max_size);
+ }
+ 
+ void hashtable_delete()

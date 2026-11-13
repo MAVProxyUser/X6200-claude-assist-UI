@@ -186,6 +186,8 @@ cp $GUI/buildroot/bt_start.sh $BOARD/rootfs-overlay/usr/bin/bt_start.sh
 find $GUI/rootfs -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
 
 echo "== OpenX6X00 additions to the buildroot tree (buildroot/br2_external in this repository)"
+# ft8_lib's patch (br2_external/package/ft8lib: its callsign table zeroed whole, from the security review) goes
+# next to the tree's own ft8lib.mk, both radios.
 # The rtl8723bu WiFi driver package (the X6100's USB WiFi; the X6200's is on the board), the DATA
 # partition repair at boot, the USB tethering profile, the Bluetooth, NTP and PulseAudio settings:
 # copied over the upstream tree. Kept under board/X6100 in this repository; the X6200 tree gets
@@ -391,6 +393,10 @@ fi
 if [ $MODEL = x6100 ] && ls -d $BR/build/build/rtl8723bu-wifi-*/ > /dev/null 2>&1 \
         && ! grep -qs "0005-ht-capabilities-element" $BR/build/build/rtl8723bu-wifi-*/.applied_patches_list; then
     make rtl8723bu-wifi-dirclean
+fi
+if ls -d $BR/build/build/ft8lib-*/ > /dev/null 2>&1 \
+        && ! grep -qs "0001-hashtable-zero-the-whole-table" $BR/build/build/ft8lib-*/.applied_patches_list; then
+    make ft8lib-dirclean
 fi
 # The GUI and the web server come from this repository (a local site): buildroot syncs them
 # once and never again on its own, so they are re-synced and rebuilt every run
