@@ -4,12 +4,16 @@ add_executable(${PROJECT_NAME})
 
 # git_commit.h: the commit the GUI is built from (GIT_COMMIT, cmake/git_commit.cmake), made at every build; the
 # Sentry's title shows it
+# In a directory of its own: buildroot builds in the source tree, where the build directory is src/ itself, and an
+# include path to it would make <gps.h> (gpsd's, in src/gps.h) find src/gps.h
+set(GIT_COMMIT_DIR ${CMAKE_BINARY_DIR}/generated/git_commit)
 add_custom_target(git_commit ALL
-    COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR} -DOUT=${CMAKE_CURRENT_BINARY_DIR}/git_commit.h
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${GIT_COMMIT_DIR}
+    COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR} -DOUT=${GIT_COMMIT_DIR}/git_commit.h
             -P ${CMAKE_SOURCE_DIR}/cmake/git_commit.cmake
-    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/git_commit.h)
+    BYPRODUCTS ${GIT_COMMIT_DIR}/git_commit.h)
 add_dependencies(${PROJECT_NAME} git_commit)
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(${PROJECT_NAME} PRIVATE ${GIT_COMMIT_DIR})
 
 target_sources(${PROJECT_NAME} PUBLIC
     gui_main.c gui_wake.c ops_room.c screen_main.c walkie.c gui_styles.c mono.c wf_palettes.c

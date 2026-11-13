@@ -57,3 +57,4 @@ build-host/
 build-docker/
 # the commit buildroot/local-build.sh hands the build (cmake/git_commit.cmake)
 /build-commit.txt
+/generated/
