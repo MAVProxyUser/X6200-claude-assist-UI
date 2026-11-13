@@ -39,7 +39,7 @@ turned with the MFK's inner ring:
 - **D DECODE**: the decoders and the frequencies they work on, each a key away.
 - **E SYSTEM**: the rest of the radio in the same look: Settings, the apps, the digital modes, AIRSPACE,
   VHF/UHF, the classic radio screen, a UNIX shell on the radio's own screen, the base firmware, and which screen the
-  radio starts in. The title says the release, the GUI's commit and the base's version: `SYSTEM CONTROL: v0.3.9.5 c6e93af - base 1.0.8`.
+  radio starts in. The title says the release, the GUI's commit and the base's version: `SYSTEM CONTROL: v0.3.9.6 c6e93af - base 1.0.8`.
 - **F VHF/UHF**: the RTL-SDR (next section).
 
 GEN shows the controls on every screen. The Sentry's look is also a theme for the whole radio: Settings, the
