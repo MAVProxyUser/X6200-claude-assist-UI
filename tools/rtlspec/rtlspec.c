@@ -12,7 +12,12 @@
  *  Standard output: one text line first, "RTLSPEC 1 <tuner> <rate> <bins>\n", then frames of
  *      "RSPC", u32 seq, u64 centre Hz, u32 rate, u16 bins, u16 flags (1: the first since a retune), f32 dB[bins]
  *  little endian. Or one line and the exit status: "RTLSPEC NOSTICK" (2), "RTLSPEC BUSY" (3, another program has it).
- *  Standard input, a line each: "f <Hz>" retunes, "g <tenths of dB>" a gain ("g -1": the tuner's AGC), "q" ends.
+ *  Standard input, a line each: "f <Hz>" retunes, "g <tenths of dB>" a gain ("g -1": the tuner's AGC), "q" ends,
+ *  "l <Hz> <mode>" listens to that frequency (mode 1 NFM, 2 AM, 3 WFM; 0 or "l 0 0" stops): it is mixed to 0 Hz,
+ *  decimated to 264.6 kHz (CIC, order 2) and by 6 (a 63-tap FIR) to 44.1 kHz and demodulated, and comes out as
+ *  frames of "RAUD", u32 count, s16 samples[count] (mono, 44.1 kHz) between the rows. Only at a sample rate that is
+ *  a multiple of 264.6 kHz: 1058400 or 2116800 (the radio's USB carries the first without loss, not the second).
+ *  "s <rate>" sets another sample rate.
  *
  *      x6x00-rtlspec [-d index] [-f Hz] [-s rate] [-n bins] [-r rows/s] [-g tenths]
  */
@@ -105,6 +110,159 @@ static void set_gain(rtlsdr_dev_t *dev, int tenths) {
     rtlsdr_set_tuner_gain(dev, gains[best]);
 }
 
+/* ---- Listening: one channel demodulated ---- */
+
+static uint32_t rate_now;       /* the stick's sample rate */
+static int      want_mode;      /* the mode asked for: kept across a retune that leaves the channel outside */
+
+#define AUD_RATE  44100
+#define MID_RATE  264600        /* the CIC's output: the rate / MID_RATE, 4 or 8 */
+#define R2        6             /* 264600 -> 44100 (FIR) */
+#define TAPS      63
+#define AUD_CHUNK 2205          /* 50 ms a frame */
+
+static int      l_mode;         /* 0 off, 1 NFM, 2 AM, 3 WFM */
+static uint64_t l_hz;
+static int16_t  sin_lut[1024];  /* the mixer in integers: 2.1 million samples a second leave no room for floats */
+static uint32_t ph, ph_inc;     /* its phase, 2^32 a turn */
+static uint32_t i1r, i1i, i2r, i2i, c1r, c1i, c2r, c2i;     /* CIC: modular arithmetic */
+static int      cic_n, r1 = 8;
+static float    hist_r[TAPS], hist_i[TAPS], taps[TAPS];
+static int      hist_at, fir_n;
+static float    prev_r = 1, prev_i, deemph, dc, avg_mag = 0.01f;
+static int16_t  aud[AUD_CHUNK];
+static int      aud_n;
+
+static void put(const void *b, size_t want) {
+    const uint8_t *w = b;
+
+    while (want > 0) {
+        ssize_t k = write(1, w, want);
+        if (k < 0 && errno == EINTR) continue;
+        if (k <= 0) {
+            stop = 1;
+            return;
+        }
+        w += k;
+        want -= (size_t)k;
+    }
+}
+
+/* A low pass of cutoff Hz at 264.6 kHz, Blackman windowed sinc, unity at DC */
+static void design(float cutoff) {
+    float fc = cutoff / (AUD_RATE * R2), sum = 0;
+
+    for (int i = 0; i < TAPS; i++) {
+        int   m = i - TAPS / 2;
+        float s = m ? sinf(2 * (float)M_PI * fc * m) / ((float)M_PI * m) : 2 * fc;
+        float w = 0.42f - 0.5f * cosf(2 * (float)M_PI * i / (TAPS - 1)) + 0.08f * cosf(4 * (float)M_PI * i / (TAPS - 1));
+        taps[i] = s * w;
+        sum += taps[i];
+    }
+    for (int i = 0; i < TAPS; i++) taps[i] /= sum;
+}
+
+/* What to listen to, against the centre the stick is tuned to: the mixer's step, the filter; off when outside */
+static void listen_set(int mode, uint64_t hz, uint64_t centre, uint32_t rate) {
+    double off = (double)hz - (double)centre;
+
+    l_mode = (mode >= 1 && mode <= 3 && rate % MID_RATE == 0 && rate / MID_RATE <= 16 && fabs(off) < rate * 0.45)
+             ? mode : 0;
+    l_hz   = hz;
+    if (!l_mode) return;
+    r1    = (int)(rate / MID_RATE);
+    cic_n = 0;
+    ph_inc = (uint32_t)(int64_t)llround(-off / rate * 4294967296.0);
+    design(l_mode == 2 ? 5000 : l_mode == 1 ? 9000 : 15000);     /* AM, NFM; WFM's is the audio's after the demod */
+    memset(hist_r, 0, sizeof(hist_r));
+    memset(hist_i, 0, sizeof(hist_i));
+    deemph = dc = 0;
+}
+
+static void aud_out(float v) {
+    v *= 20000;
+    aud[aud_n++] = (int16_t)(v > 32767 ? 32767 : v < -32767 ? -32767 : v);
+    if (aud_n == AUD_CHUNK) {
+        uint32_t cnt = AUD_CHUNK;
+
+        put("RAUD", 4);
+        put(&cnt, 4);
+        put(aud, sizeof(aud));
+        aud_n = 0;
+    }
+}
+
+/* One sample at 264.6 kHz: into the FIR, every sixth a 44.1 kHz one demodulated (WFM: demodulated here, then the
+ * FIR on the audio) */
+static void at_264k(float r, float i) {
+    if (l_mode == 3) {
+        float zr = r * prev_r + i * prev_i, zi = i * prev_r - r * prev_i;
+
+        prev_r = r;
+        prev_i = i;
+        r = atan2f(zi, zr) * (264600.0f / (2 * (float)M_PI * 75000));    /* +-75 kHz: +-1 */
+        i = 0;
+    }
+    hist_r[hist_at] = r;
+    hist_i[hist_at] = i;
+    hist_at = (hist_at + 1) % TAPS;
+    if (++fir_n < R2) return;
+    fir_n = 0;
+
+    float yr = 0, yi = 0;
+    for (int k = 0; k < TAPS; k++) {
+        int h = (hist_at + k) % TAPS;
+        yr += hist_r[h] * taps[k];
+        yi += hist_i[h] * taps[k];
+    }
+    if (l_mode == 1) {                  /* NFM: +-5 kHz full scale, a little low pass and no DC */
+        float zr = yr * prev_r + yi * prev_i, zi = yi * prev_r - yr * prev_i;
+        float d  = atan2f(zi, zr) * (AUD_RATE / (2 * (float)M_PI * 5000));
+
+        prev_r = yr;
+        prev_i = yi;
+        deemph += 0.45f * (d - deemph);
+        dc += 0.002f * (deemph - dc);
+        aud_out((deemph - dc) * 0.7f);
+    } else if (l_mode == 2) {           /* AM: the envelope over its average, its DC out */
+        float mag = sqrtf(yr * yr + yi * yi);
+
+        avg_mag += 0.0005f * (mag - avg_mag);
+        dc += 0.002f * (mag - dc);
+        aud_out((mag - dc) / (avg_mag + 1e-6f) * 0.6f);
+    } else {                            /* WFM: 75 us de-emphasis */
+        deemph += 0.26f * (yr - deemph);
+        aud_out(deemph * 0.8f);
+    }
+}
+
+/* One stick sample, while listening: mixed down (integers, a 1024-step sine), into the CIC */
+static inline void listen_sample(uint8_t ib, uint8_t qb) {
+    int      x = ib - 127, y = qb - 127;
+    uint32_t k = ph >> 22;
+    int      s = sin_lut[k], c = sin_lut[(k + 256) & 1023];
+    int      r = (x * c - y * s) >> 8, i = (x * s + y * c) >> 8;     /* +-32k */
+
+    ph += ph_inc;
+    i1r += (uint32_t)r;
+    i1i += (uint32_t)i;
+    i2r += i1r;
+    i2i += i1i;
+    if (++cic_n < r1) return;
+    cic_n = 0;
+
+    uint32_t a = i2r - c1r, b = i2i - c1i;      /* the combs */
+    c1r = i2r;
+    c1i = i2i;
+    uint32_t cr = a - c2r, ci = b - c2i;
+    c2r = a;
+    c2i = b;
+    at_264k((int32_t)cr / (32768.0f * r1 * r1), (int32_t)ci / (32768.0f * r1 * r1));
+}
+
+static long per_row_now;        /* samples a row at the rate now */
+static int  rows_now = 20;
+
 /* The commands waiting on standard input */
 static void commands(rtlsdr_dev_t *dev, uint64_t *centre, bool *fresh) {
     static char line[128];
@@ -128,6 +286,24 @@ static void commands(rtlsdr_dev_t *dev, uint64_t *centre, bool *fresh) {
                 if (hz >= 24000000 && hz <= 1766000000 && rtlsdr_set_center_freq(dev, (uint32_t)hz) == 0) {
                     *centre = hz;
                     *fresh  = true;
+                    if (l_hz) listen_set(l_mode ? l_mode : want_mode, l_hz, hz, rate_now);
+                }
+            } else if (line[0] == 'l') {
+                char    *e;
+                uint64_t hz = strtoull(line + 1, &e, 10);
+
+                want_mode = (int)strtol(e, NULL, 10);
+                listen_set(hz ? want_mode : 0, hz, *centre, rate_now);
+                if (!hz) l_hz = 0;
+            } else if (line[0] == 's') {
+                uint32_t r = (uint32_t)strtoul(line + 1, NULL, 10);
+
+                if (r >= 900001 && r <= 3200000 && rtlsdr_set_sample_rate(dev, r) == 0) {
+                    rtlsdr_reset_buffer(dev);
+                    rate_now    = rtlsdr_get_sample_rate(dev);
+                    per_row_now = (long)rate_now / rows_now;
+                    *fresh      = true;
+                    if (l_hz) listen_set(l_mode ? l_mode : want_mode, l_hz, *centre, rate_now);
                 }
             } else if (line[0] == 'g') {
                 set_gain(dev, atoi(line + 1));
@@ -177,6 +353,12 @@ int main(int argc, char **argv) {
     set_gain(dev, gain);
     rtlsdr_reset_buffer(dev);
     rate = rtlsdr_get_sample_rate(dev);
+    long row_left;                  /* samples till the next row */
+    rate_now    = rate;
+    rows_now    = rows;
+    per_row_now = (long)rate / rows;
+    row_left    = per_row_now;
+    for (int i = 0; i < 1024; i++) sin_lut[i] = (int16_t)lrint(32767 * sin(2 * M_PI * i / 1024));
     printf("RTLSPEC 1 %s %u %d\n", tuner_name(rtlsdr_get_tuner_type(dev)), rate, bins);
     fflush(stdout);
 
@@ -186,7 +368,6 @@ int main(int argc, char **argv) {
     static uint8_t  blk[MAX_BINS * 2];
     uint32_t        seq = 0;
     bool            fresh = true;
-    long            per_row = (long)rate / rows, row_left = per_row;     /* samples */
     int             nfft = 0, fill = 0;
     float           wsum = 0;
 
@@ -205,6 +386,7 @@ int main(int argc, char **argv) {
             break;                      /* unplugged */
         }
         for (int off = 0; off + 1 < n; off += 2) {
+            if (l_mode) listen_sample(buf[off], buf[off + 1]);
             /* The first BINS * AVG samples of each row's share go into its FFTs, the rest are passed over */
             if (nfft < AVG) {
                 blk[fill * 2]     = buf[off];
@@ -221,7 +403,7 @@ int main(int argc, char **argv) {
                 }
             }
             if (--row_left > 0) continue;
-            row_left = per_row;
+            row_left = per_row_now;
             if (nfft == 0) continue;
 
             /* A row: lowest frequency first (the FFT's second half, then its first), the DC bin from its neighbours */
@@ -232,7 +414,7 @@ int main(int argc, char **argv) {
             seq++;
             memcpy(p, &seq, 4); p += 4;
             memcpy(p, &centre, 8); p += 8;
-            memcpy(p, &rate, 4); p += 4;
+            memcpy(p, &rate_now, 4); p += 4;
             memcpy(p, &nb, 2); p += 2;
             memcpy(p, &flags, 2); p += 2;
             acc[0] = (acc[1] + acc[bins - 1]) / 2;
@@ -248,18 +430,7 @@ int main(int argc, char **argv) {
             nfft  = 0;
             fill  = 0;
             fresh = false;
-            size_t   want = (size_t)(p - frame);
-            uint8_t *w    = frame;
-            while (want > 0) {
-                ssize_t k = write(1, w, want);
-                if (k < 0 && errno == EINTR) continue;
-                if (k <= 0) {
-                    stop = 1;
-                    break;
-                }
-                w += k;
-                want -= (size_t)k;
-            }
+            put(frame, (size_t)(p - frame));
         }
     }
     rtlsdr_close(dev);

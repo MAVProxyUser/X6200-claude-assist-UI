@@ -33,6 +33,11 @@ void rtl_spectrum_gain(int tenths);
 
 rtl_spec_state_t rtl_spectrum_state(void);
 
+/* Listen to hz (mode 1 NFM, 2 AM, 3 WFM) on the speaker in place of the X6200's receiver; mode 0 or hz 0: back to
+ * the X6200. Within the helper's span only: outside it is silent until the stick is retuned there */
+void rtl_spectrum_listen(int64_t hz, int mode);
+bool rtl_spectrum_listening(void);
+
 /* The tuner the helper found ("R820T"), "" before */
 void rtl_spectrum_tuner(char *s, size_t n);
 

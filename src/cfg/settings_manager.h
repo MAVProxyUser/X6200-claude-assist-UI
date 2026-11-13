@@ -375,12 +375,12 @@ class SettingsManager {
     Parameter<int32_t> p_mouse{"mouse", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     // The Sentry's F VHF/UHF screen (an RTL-SDR stick): its centre in Hz, its gain in tenths of dB (-1 the tuner's
-    // AGC) and its view (0 the stick alone, 1 split with the X6200's spectrum)
+    // AGC) and its view (0 the stick alone, 1 split with the X6200's spectrum, 2 the X6200's alone)
     Parameter<int32_t> p_rtl_freq{"rtl_freq", 162475000, 24000000, 1766000000,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_rtl_gain{"rtl_gain", 280, -1, 500,
         StorageType::GLOBAL, pending_writes_, &global_params_};
-    Parameter<int32_t> p_rtl_view{"rtl_view", 0, 0, 1,
+    Parameter<int32_t> p_rtl_view{"rtl_view", 0, 0, 2,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_vox_gain{"vox_gain", 0, 0, 100,
         StorageType::GLOBAL, pending_writes_, &global_params_};

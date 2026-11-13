@@ -250,6 +250,10 @@ bool dialog_front_key(int key, int state) {
     return dialog_is_run() && shown->front_key_cb && shown->front_key_cb(key, state);
 }
 
+bool dialog_rotary_taken(void) {
+    return dialog_is_run() && shown->rotary_takes_cb && shown->rotary_takes_cb();
+}
+
 void dialog_rotary(int32_t diff) {
     if (dialog_is_run() && shown->rotary_cb) {
         shown->rotary_cb(diff);

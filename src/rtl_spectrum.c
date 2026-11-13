@@ -12,6 +12,8 @@
 #include "rtl_spectrum.h"
 
 #include "adsb_rx.h"
+#include "audio.h"
+#include "radio.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -31,6 +33,10 @@
 #define MAX_BINS  8192
 #define BINS      2048
 #define ROWS      20            /* a second */
+#define RATE_WIDE   2116800     /* 48 x 44.1 kHz: the spectrum's; the radio's USB loses a quarter of it */
+#define RATE_LISTEN 1058400     /* 24 x 44.1 kHz while listening: carried whole */
+#define RING        (44100 * 2) /* audio waiting to play: two seconds at most */
+#define CHUNK       1024        /* audio_play() needs room for the whole write: a bigger one may never find it */
 
 static pthread_t       thread;
 static bool            started;
@@ -46,6 +52,16 @@ static int64_t         row_centre;
 static bool            row_fresh;
 static char            tuner[16];
 static int             cmd_fd = -1;
+
+/* Listening: the helper's audio, played on the speaker in the recorder's way (the base in play mode) */
+static atomic_llong    listen_hz;
+static atomic_int      listen_mode;      /* 0 not listening */
+static pthread_mutex_t ring_lock = PTHREAD_MUTEX_INITIALIZER;
+static int16_t         ring[RING];
+static int             ring_head, ring_len;
+static pthread_t       player;
+static bool            player_started;
+static atomic_bool     playing;          /* the player has the speaker */
 
 /* A write to the helper that cannot end the GUI: one that has just gone gives EPIPE, and its SIGPIPE is taken here,
  * not left to end the process (the GUI keeps the default action) */
@@ -82,6 +98,8 @@ static pid_t spawn(int *in_fd, int *out_fd) {
     snprintf(g, sizeof(g), "%d", atomic_load(&want_gain));
     snprintf(n, sizeof(n), "%d", BINS);
     snprintf(r, sizeof(r), "%d", ROWS);
+    char s[16];
+    snprintf(s, sizeof(s), "%d", atomic_load(&listen_mode) ? RATE_LISTEN : RATE_WIDE);
     if ((p = fork()) < 0) {
         close(to[0]), close(to[1]), close(from[0]), close(from[1]);
         return -1;
@@ -93,7 +111,7 @@ static pid_t spawn(int *in_fd, int *out_fd) {
         dup2(from[1], 1);
         if (log >= 0) dup2(log, 2);
         for (int fd = 3; fd < 1024; fd++) close(fd);
-        execl(HELPER, HELPER, "-f", f, "-g", g, "-n", n, "-r", r, (char *)NULL);
+        execl(HELPER, HELPER, "-f", f, "-g", g, "-n", n, "-r", r, "-s", s, (char *)NULL);
         _exit(127);
     }
     close(to[0]);
@@ -204,13 +222,33 @@ static void *spec_thread(void *arg) {
         snprintf(tuner, sizeof(tuner), "%s", tn);
         cmd_fd = in_fd;
         pthread_mutex_unlock(&lock);
+        if (atomic_load(&listen_mode)) {        /* a new helper: what was listened to, again */
+            char cmd[48];
+            snprintf(cmd, sizeof(cmd), "l %lld %d\n", (long long)atomic_load(&listen_hz), atomic_load(&listen_mode));
+            say(cmd);
+        }
 
         /* A retune asked for while it started */
         int64_t asked = atomic_load(&want_hz);
         for (;;) {
             size_t len = 24 + (size_t)nb * 4;
 
-            if (!read_all(out_fd, buf, len, 3000) || memcmp(buf, "RSPC", 4) != 0) break;
+            if (!read_all(out_fd, buf, 4, 3000)) break;
+            if (memcmp(buf, "RAUD", 4) == 0) {      /* audio: into the ring, the oldest out when it is full */
+                uint32_t cnt;
+                static int16_t a[44100];
+
+                if (!read_all(out_fd, &cnt, 4, 3000) || cnt > 44100 || !read_all(out_fd, a, cnt * 2, 3000)) break;
+                pthread_mutex_lock(&ring_lock);
+                for (uint32_t k = 0; k < cnt; k++) {
+                    ring[(ring_head + ring_len) % RING] = a[k];
+                    if (ring_len < RING) ring_len++;
+                    else ring_head = (ring_head + 1) % RING;
+                }
+                pthread_mutex_unlock(&ring_lock);
+                continue;
+            }
+            if (memcmp(buf, "RSPC", 4) != 0 || !read_all(out_fd, buf + 4, len - 4, 3000)) break;
             uint32_t seq, r;
             uint64_t c;
             uint16_t n, flags;
@@ -304,4 +342,81 @@ bool rtl_spectrum_frame(float *db, uint16_t cap, uint16_t *n, uint32_t *rate, in
     }
     pthread_mutex_unlock(&lock);
     return got;
+}
+
+/* The audio to the speaker while listening: one thread for good, that never has to be waited for. It takes the
+ * speaker when listening starts (the base in play mode, as the recorder plays; or the Bluetooth headphones when they
+ * stand in for it) and gives it back when it ends. audio_play() waits for room in CHUNK at most, so the codec paces
+ * it; kept under half a second behind, as the stick's clock and the codec's differ a little */
+static void *player_thread(void *arg) {
+    static int16_t chunk[CHUNK];
+    bool           bt = false;
+    (void)arg;
+
+    for (;;) {
+        bool want_play = atomic_load(&listen_mode) != 0;
+
+        if (want_play && !atomic_load(&playing)) {
+            bt = audio_play_bt_begin();
+            if (!bt) radio_set_play_mode(AUDIO_PLAY_ON);
+            atomic_store(&playing, true);
+        } else if (!want_play && atomic_load(&playing)) {
+            audio_play_flush();
+            if (bt) audio_play_bt_end();
+            else radio_set_play_mode(AUDIO_PLAY_OFF);
+            bt = false;
+            atomic_store(&playing, false);
+        }
+        if (!want_play) {
+            usleep(20000);
+            continue;
+        }
+
+        int n = 0;
+        pthread_mutex_lock(&ring_lock);
+        if (ring_len > 44100 / 2) {             /* behind: catch up */
+            ring_head = (ring_head + ring_len - 44100 / 5) % RING;
+            ring_len  = 44100 / 5;
+        }
+        if (ring_len >= CHUNK) {
+            for (; n < CHUNK; n++) chunk[n] = ring[(ring_head + n) % RING];
+            ring_head = (ring_head + CHUNK) % RING;
+            ring_len -= CHUNK;
+        }
+        pthread_mutex_unlock(&ring_lock);
+        if (n) audio_play(chunk, n);
+        else usleep(5000);
+    }
+    return NULL;
+}
+
+void rtl_spectrum_listen(int64_t hz, int mode) {
+    char cmd[48];
+
+    if (!hz) mode = 0;
+    bool was = atomic_load(&listen_mode) != 0;
+
+    atomic_store(&listen_hz, hz);
+    atomic_store(&listen_mode, mode);
+    if (mode && !was) {                 /* the narrower rate first: the channel is set up for it */
+        snprintf(cmd, sizeof(cmd), "s %d\n", RATE_LISTEN);
+        say(cmd);
+        pthread_mutex_lock(&ring_lock);
+        ring_head = ring_len = 0;
+        pthread_mutex_unlock(&ring_lock);
+    }
+    snprintf(cmd, sizeof(cmd), "l %lld %d\n", (long long)(mode ? hz : 0), mode);
+    say(cmd);
+    if (!mode && was) {
+        snprintf(cmd, sizeof(cmd), "s %d\n", RATE_WIDE);
+        say(cmd);
+    }
+    if (mode && !player_started) {
+        player_started = pthread_create(&player, NULL, player_thread, NULL) == 0;
+        if (player_started) pthread_detach(player);
+    }
+}
+
+bool rtl_spectrum_listening(void) {
+    return atomic_load(&listen_mode) != 0;
 }

@@ -1311,7 +1311,7 @@ static void plan_mode(int32_t old, int32_t freq) {
 static void main_knob_cb(lv_event_t *e) {
     rotary_data_t *turn = lv_event_get_param(e);
 
-    freq_shift(turn->diff, turn->dt);
+    if (!dialog_rotary_taken()) freq_shift(turn->diff, turn->dt);     /* the Sentry's RTL-SDR may have it */
     dialog_rotary(turn->diff);
     free(turn);     /* rotary.c allocates one per event */
 }

@@ -38,8 +38,14 @@ typedef struct {
     /* The front panel's keys (keypad_key_t, keypad_state_t) before the main screen acts on them: true when taken.
      * Only an app over the whole screen wants them (the Sentry): the others leave it NULL */
     bool                 (*front_key_cb)(int key, int state);
+    /* True while the main knob is the window's alone (the Sentry listening to an RTL-SDR): the radio is not tuned by
+     * it, rotary_cb still gets the turns. NULL: the radio is tuned as ever */
+    bool                 (*rotary_takes_cb)(void);
     bool                   run;             /* open now */
 } dialog_t;
+
+/* The open window has the main knob to itself (rotary_takes_cb) */
+bool dialog_rotary_taken(void);
 
 /* A window that has no APP action (the Sentry's UNIX SHELL), opened as the APP grid is (screen_main.c) */
 void main_screen_open_dialog(dialog_t *d);
