@@ -729,8 +729,67 @@ static void own_keying_x6200(void) {
     }
 }
 
+/* Digital silence (exact zeros: the capture's lost samples, audio muted after TX, a replay's null sink) before a
+ * message. A noise floor seeded at 0 held the decoder deaf for good: it steps the key detector only over a floor
+ * above 0, and the detector's steps since key up release the floor's hold. silence_ms of zeros first, or with tx the
+ * band's noise, a transmission (its end reseeds the floor) and the zeros after it; then "VVV CQ TEST" at 20 WPM (the
+ * lock takes the first characters, as after any quiet band) */
+static std::string after_silence(double silence_ms, bool tx) {
+    std::mt19937                     rng(11);
+    std::normal_distribution<double> gauss(0.0, 1.0);
+    std::vector<Mark>                marks;
+    double                           dit = 1200.0 / 20, start = (tx ? 3000.0 : 0.0) + silence_ms, k = start + 500.0;
+
+    for (const char *c = "VVV CQ TEST"; *c; c++) {
+        if (*c == ' ') {
+            k += 4 * dit;
+            continue;
+        }
+        for (const char *p = morse_of(*c); *p; p++) {
+            double el = *p == '.' ? dit : 3 * dit;
+            marks.push_back({k, k + el});
+            k += el + dit;
+        }
+        k += 2 * dit;
+    }
+    std::string        text;
+    cw::Receiver       rx([&](const char *t, bool) { text += t; }, [](bool) {});
+    cw::AudioResampler rs(RATE);
+    std::vector<float> buf(FRAG);
+
+    rx.set_floor_db(8.0f);
+    rx.set_band(TONE - 250.0, TONE + 250.0);
+    for (long n = 0; 1000.0 * n / RATE < k + 2500.0;) {
+        double now = 1000.0 * n / RATE;
+        for (int i = 0; i < FRAG; i++, n++) {
+            double ms = 1000.0 * n / RATE, x = 0.0;
+            if (ms >= start || (tx && ms < 2000.0)) {   /* the band, or nothing at all */
+                x = NOISE * gauss(rng);
+                for (const Mark &m : marks)
+                    if (ms >= m.on && ms <= m.off) x += SIDE * sin(2.0 * M_PI * TONE * n / RATE);
+            }
+            buf[i] = (float)x;
+        }
+        rx.transmitting(tx && now >= 2000.0 && now < 3000.0);
+        rs.process(buf.size(), buf.data(), rx);
+    }
+    return text;
+}
+
+static void silence_first(void) {
+    printf("Digital silence before a message\n");
+    for (double ms : {200.0, 3000.0}) {
+        std::string t = after_silence(ms, false);
+        check(t.find("CQ TEST") != std::string::npos, "%.0f ms of zeros first: \"%s\"", ms, t.c_str());
+    }
+    std::string t = after_silence(2000.0, true);
+    check(t.find("CQ TEST") != std::string::npos, "zeros after a transmission (the floor reseeded in them): \"%s\"",
+          t.c_str());
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IOLBF, 0);
+    silence_first();
     morse_text_rules();
     element_timer_rules();
     answer_rules();
