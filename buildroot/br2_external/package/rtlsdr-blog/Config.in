@@ -1,0 +1,15 @@
+config BR2_PACKAGE_RTLSDR_BLOG
+	bool "rtlsdr-blog"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_LIBUSB
+	help
+	  librtlsdr and its tools (rtl_test, rtl_sdr, rtl_fm, ...) from the
+	  RTL-SDR Blog's fork, which knows the Blog V4's R828D tuner as well
+	  as the R820T sticks. The AIRSPACE screen's RTL-SDR support uses it
+	  through dump1090-fa. Built with kernel driver detaching, so a DVB-T
+	  driver holding the stick lets it go.
+
+	  https://github.com/rtlsdrblog/rtl-sdr-blog
+
+comment "rtlsdr-blog needs a toolchain w/ threads"
+	depends on !BR2_TOOLCHAIN_HAS_THREADS

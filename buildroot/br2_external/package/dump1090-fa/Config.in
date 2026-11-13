@@ -1,0 +1,17 @@
+config BR2_PACKAGE_DUMP1090_FA
+	bool "dump1090-fa"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on BR2_USE_MMU # fork()
+	select BR2_PACKAGE_NCURSES
+	select BR2_PACKAGE_RTLSDR_BLOG
+	help
+	  FlightAware's Mode S / ADS-B decoder for RTL-SDR sticks, installed
+	  as /usr/bin/dump1090-fa. The AIRSPACE screen (src/adsb_rx.c)
+	  starts it headless on a stick it finds and reads its raw output
+	  on 127.0.0.1:30002. Built for the ARMv7 NEON DSP flavours of the
+	  radios' Cortex-A7.
+
+	  https://github.com/flightaware/dump1090
+
+comment "dump1090-fa needs a toolchain w/ threads"
+	depends on !BR2_TOOLCHAIN_HAS_THREADS

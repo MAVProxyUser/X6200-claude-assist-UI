@@ -208,6 +208,12 @@ rm -f $BR/build/target/etc/init.d/S01create_data                         # and f
 # The legacy updater (any x6100_r1cbu_*.tgz on the DATA partition unpacked over / at boot, unsigned,
 # unchecked): OpenX6X00 is installed as a card image, so it goes
 rm -f $BOARD/rootfs-overlay/etc/init.d/S02update $BR/build/target/etc/init.d/S02update
+# The AIRSPACE screen's RTL-SDR sticks (src/adsb_rx.c): dump1090-fa and the RTL-SDR Blog librtlsdr with its rtl_*
+# tools (buildroot/br2_external/package), on both radios
+for p in rtlsdr-blog dump1090-fa; do
+    grep -q "package/$p/Config.in" $EXT/Config.in || echo "source \"\$BR2_EXTERNAL_${M}_PATH/package/$p/Config.in\"" >> $EXT/Config.in
+done
+grep -q "^BR2_PACKAGE_DUMP1090_FA=y" $DEFCONFIG || echo "BR2_PACKAGE_DUMP1090_FA=y" >> $DEFCONFIG
 if [ $MODEL = x6100 ]; then
     grep -q "rtl8723bu-wifi/Config.in" $EXT/Config.in || echo 'source "$BR2_EXTERNAL_X6100_PATH/package/rtl8723bu-wifi/Config.in"' >> $EXT/Config.in
     grep -q "^BR2_PACKAGE_RTL8723BU_WIFI=y" $DEFCONFIG || echo "BR2_PACKAGE_RTL8723BU_WIFI=y" >> $DEFCONFIG

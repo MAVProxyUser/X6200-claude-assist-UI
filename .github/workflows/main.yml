@@ -4,11 +4,17 @@
 # the build, here as in the container at home.
 name: Build image
 
-# By hand only (Actions > Build image > Run workflow): releases are built
-# locally and the images attached by hand; building on every tag only made a
-# second copy, took 2 hours and failed now and then.
+# On every push to main, and by hand (Actions > Build image > Run workflow). A build takes about 2 hours: a push
+# while one runs does not stop it, only the newest waiting run is kept and starts after it. The images and update
+# bundles are the run's artifacts (30 days); a tag also makes a release.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: build-image-${{ github.ref }}
+  cancel-in-progress: false
 
 # Write access for the Release step (the default token is read-only)
 permissions:
