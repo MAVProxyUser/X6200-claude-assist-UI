@@ -556,7 +556,7 @@ Its controls, on every screen (GEN shows them, as does a tap on the title):
   the [base firmware](#the-x6200s-base-firmware-from-openx6x00) (the X6200's; on an X6100 the item says it is
   not supported) and where the radio starts. F2 opens the item
   chosen, F5 the classic radio screen. Its title says the release, the GUI's commit and the base's version
-  (`SYSTEM CONTROL: v0.3.9.6 c6e93af - base 1.0.8`); so do A and B's, without "XIEGU " for the room.
+  (`SYSTEM CONTROL: v0.3.9.7 c6e93af - base 1.0.8`); so do A and B's, without "XIEGU " for the room.
 
 ### F VHF/UHF, an RTL-SDR
 
