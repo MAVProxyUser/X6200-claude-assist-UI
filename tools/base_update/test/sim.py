@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A simulated X6200 base for base_flash, on this computer: base_flash.c built with its port on a pseudo-terminal and
-its I2C bus on /dev/null (the I2C commands then fail, as on a base in its bootloader), run as on the radio
+its I2C bus on an empty file (the I2C commands then fail, as on a base in its bootloader), run as on the radio
 (--flash FILE --yes --recover --held-by, as the GUI runs it), against a fake base that streams like the base's application, answers as Xiegu's
 bootloader does, or fails in one of the ways Xiegu's app has an answer for. tools/base_update/test/run.sh runs them all.
 
@@ -46,7 +46,11 @@ logp = os.path.join(work, 'sim_' + tag + '.log')
 dtp = os.path.join(work, 'dt_' + tag)              # the device tree's compatible: an X6200's, or another radio's
 with open(dtp, 'wb') as f:
     f.write((b'xiegu,x6100' if mode == 'x6100' else b'xiegu,x6200') + b'\0allwinner,sun8i-r16\0')
-subprocess.run([cc, '-O1', '-w', '-I', stub, '-DUART="%s"' % os.ttyname(s), '-DI2C_BUS="/dev/null"', '-DBACK_WAIT_S=2',
+# The I2C bus: an empty file of this scenario's own, where its ioctls fail as on a base in its bootloader (not
+# /dev/null, which every process on Linux holds: the writer would see them all as holders of its bus)
+i2cp = os.path.join(work, 'i2c_' + tag)
+open(i2cp, 'wb').close()
+subprocess.run([cc, '-O1', '-w', '-I', stub, '-DUART="%s"' % os.ttyname(s), '-DI2C_BUS="%s"' % i2cp, '-DBACK_WAIT_S=2',
                 '-DDT_COMPAT="%s"' % dtp, '-o', binp, src], check=True)
 log = open(logp, 'w')
 # This process holds the port's other end, as the GUI does when it lends the base: --held-by says so (on Linux the
