@@ -613,6 +613,13 @@ web configurator (System > Update).
 - The web page can also take a bundle file (`OpenX6X00-x6100-vX.Y.Z-update.tar.gz` or `OpenX6X00-x6200-vX.Y.Z-update.tar.gz`
   from the releases page) for a radio without internet, and has a button to go
   back to the previous version by hand.
+- Once a day, online, the radio checks by itself (5 to 35 minutes after the
+  start, then every 24 hours) and says on the screen, once per version, when a
+  newer release is out; Settings > Info shows it next to Update. It never
+  downloads or installs anything by itself. Each radio looks only at its own
+  bundle: an X6200 never takes the X6100's (`-x6100-`), nor the other way
+  round, and the installer refuses a bundle made for the other radio. An empty
+  file `/mnt/update/no-check` turns the daily check off.
 - Going back from v0.3.7 to v0.3.6 (that button, or v0.3.6's bundle): the
   radio first turns [Tailscale Funnel](#tailscale-funnel) off and takes its
   funnel, and any set up by hand, out of tailscaled. v0.3.6 knows nothing of
@@ -709,8 +716,8 @@ Where: E SYSTEM > BASE FIRMWARE, or Settings > Info > Base firmware > Open.
 
 Once a day, online, the radio reads xiegu.eu's downloads page and says on the
 screen, once, when a newer base is out; Settings > Info shows it next to Base
-firmware. It never downloads or writes one by itself. An empty file
-`/mnt/base_update/no-check` turns it off.
+firmware. It never downloads or writes one by itself. It reads only
+xiegu.eu's X6200 files. An empty file `/mnt/base_update/no-check` turns it off.
 
 - As Xiegu asks for its own update: a 13.8 V supply of 3 A or more and the
   battery out, and the radio not switched off while it writes.
@@ -5132,7 +5139,9 @@ A video of your own can play on the screen as the radio starts, in place of
 the boot picture or the built-in logo (and the boot sound): from the start of
 the boot, as soon as the DATA partition is there, and the main screen comes
 once it has ended. Copy it to the DATA partition as `/mnt/bootvideo.mp4` (SFTP
-or `scp`); it plays from the next start. No video there, nothing changes.
+or `scp`); it plays from the next start. Without one of yours the image's own
+plays (`/usr/share/x6100/bootvideo.mp4`, this fork's GoldCorp start-up,
+800x480, 15 s); `/mnt/bootvideo.off` turns either off.
 
 - Any size or shape plays (MP4, MKV or AVI; H.264, HEVC, MPEG-4, VP8 or
   VP9): it is fitted into the 800x480 screen with black around it. A phone's

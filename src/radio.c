@@ -373,7 +373,7 @@ void radio_start() {
 
     hw_start();
     base_ver = hw_base_ver();
-    {   /* the base's version for the daily base firmware check (x6x00-base-fetch check, S99basecheck) */
+    {   /* the base's version for the daily base firmware check (x6x00-base-fetch check, S99updatecheck) */
         FILE *f = fopen("/tmp/x6x00-base-version", "w");
         if (f) {
             fprintf(f, "%s\n", hw_base_ver_str());

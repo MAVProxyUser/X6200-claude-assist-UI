@@ -9,7 +9,7 @@
  *      --unknown-ok: a multiple of 16 bytes, 16 to 512 KiB, not a plain ARM image), and releases xiegu.eu has that the
  *      list does not (the last check). The MFK chooses one;
  *    - Get: x6x00-base-fetch streams Xiegu's update zip from xiegu.eu and keeps only the base file, checked;
- *    - Check: xiegu.eu's downloads page against the list and this base (the daily check's own, S99basecheck);
+ *    - Check: xiegu.eu's downloads page against the list and this base (the daily check's own, S99updatecheck);
  *    - Flash: base_flash (/usr/sbin/x6x00-base-flash: Xiegu's own app 1.0.8, step for step) as a child, the base lent
  *      to it meanwhile (radio_base_hold: the radio thread off /dev/ttyS1, every write off the base), as Xiegu's app
  *      runs its worker with its own reading of the port paused. An unknown file asks twice.
@@ -396,6 +396,26 @@ static bool copy_file(const char *from, const char *to) {
     return ok;
 }
 
+/* A file with this SHA-256 in BASE_DIR already, whatever its name */
+static bool here_already(const char *sha) {
+    DIR           *d = opendir(BASE_DIR);
+    struct dirent *e;
+    char           path[300], ver[16], s[65];
+    bool           found = false;
+
+    if (!d) return false;
+    while (!found && (e = readdir(d))) {
+        size_t l = strlen(e->d_name);
+
+        if (l < 5 || strcmp(e->d_name + l - 4, ".xgf")) continue;
+        snprintf(path, sizeof(path), BASE_DIR "/%s", e->d_name);
+        identify(path, ver, sizeof(ver), s);
+        found = s[0] && !strcmp(s, sha);
+    }
+    closedir(d);
+    return found;
+}
+
 static item_t *add_item(void) {
     if (n_items >= MAX_ITEMS) return NULL;
     memset(&items[n_items], 0, sizeof(items[0]));
@@ -415,7 +435,8 @@ static void *scan_main(void *arg) {
         return NULL;
     }
     mkdir(BASE_DIR, 0755);
-    /* Xiegu's own system keeps its base files for its UPGRADE screen: copied here once, read-only meanwhile */
+    /* Xiegu's own system keeps its base files for its UPGRADE screen: copied here once, read-only meanwhile. Once by
+     * its SHA-256: a file already here under any name is not copied again, nor is a file of the same name overwritten */
     mkdir(EMMC_AT, 0755);
     if (system("grep -q '^" EMMC_DEV " ' /proc/mounts || mount -o ro,noload " EMMC_DEV " " EMMC_AT " 2>/dev/null") == 0 &&
         (d = opendir(EMMC_AT "/usr/firmware"))) {
@@ -423,9 +444,14 @@ static void *scan_main(void *arg) {
             size_t l = strlen(e->d_name);
 
             if (l < 5 || strcmp(e->d_name + l - 4, ".xgf")) continue;
+            char ver[16], sha[65];
+
             snprintf(path, sizeof(path), EMMC_AT "/usr/firmware/%s", e->d_name);
             snprintf(to, sizeof(to), BASE_DIR "/%s", e->d_name);
-            if (access(to, F_OK) && copy_file(path, to)) scan_say("copied from Xiegu's system: %s", e->d_name);
+            identify(path, ver, sizeof(ver), sha);
+            if (sha[0] ? here_already(sha) : !access(to, F_OK)) continue;
+            if (!access(to, F_OK)) snprintf(to, sizeof(to), BASE_DIR "/%.*s-%.8s.xgf", (int)(l - 4), e->d_name, sha);
+            if (copy_file(path, to)) scan_say("copied from Xiegu's system: %s", strrchr(to, '/') + 1);
         }
         closedir(d);
         if (system("umount " EMMC_AT " 2>/dev/null")) scan_say("(the internal memory could not be unmounted)");

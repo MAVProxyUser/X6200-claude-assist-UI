@@ -94,8 +94,8 @@ and takes it back after. E SYSTEM > AIRSPACE, or APP > Airspace.
 
 ### Boot video
 
-Put your own video at `/mnt/bootvideo.mp4` and it plays from the first seconds of the boot in place of the boot
-logo; the GUI comes up when it ends (30 s at most). [tools/bootvideo/prepare.sh](tools/bootvideo/prepare.sh) fits
+The image plays its own start-up video (GoldCorp, 15 s) from the first seconds of the boot in place of the boot
+logo; put your own at `/mnt/bootvideo.mp4` and it plays instead. The GUI comes up when it ends (30 s at most). [tools/bootvideo/prepare.sh](tools/bootvideo/prepare.sh) fits
 any video to the screen. A small decode-only ffmpeg is in the image for it. The kernel draws no logo of its own
 before it (the build trees' kernels carried Aether Radio's wolf), so the screen stays dark until the video starts.
 [Manual](docs/MANUAL.md#boot-video).

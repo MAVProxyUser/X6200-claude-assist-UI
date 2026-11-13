@@ -49,6 +49,25 @@ for way in zlib libz; do
         fi
     fi
 done
+# Told apart by SHA-256 alone: the same file under another name is not kept twice, another file under the same name
+# is not overwritten
+rm -rf "$W/dedupe" && mkdir -p "$W/dedupe" && cp "$W/made_up.xgf" "$W/dedupe/mine.xgf"
+if python3 "$FETCH" get --zip "$W/synth_new.zip" --out "$W/dedupe" > "$W/dedupe.log" 2>&1; grep -q "here already" "$W/dedupe.log" \
+    && [ "$(ls "$W/dedupe" | grep -c '\.xgf$')" = 1 ]; then
+    echo "pass  x6x00-base-fetch: a file here already under another name is not kept twice"
+else
+    echo "FAIL  x6x00-base-fetch, same file twice: $W/dedupe.log"; fails=1
+fi
+rm -rf "$W/clobber" && mkdir -p "$W/clobber" && head -c 32768 /dev/urandom > "$W/clobber/x6200_mcu_20300101000000.xgf"
+cp "$W/clobber/x6200_mcu_20300101000000.xgf" "$W/clobber_orig"
+SUM=$(shasum -a 256 "$W/made_up.xgf" 2> /dev/null || sha256sum "$W/made_up.xgf")
+if python3 "$FETCH" get --zip "$W/synth_new.zip" --out "$W/clobber" > "$W/clobber.log" 2>&1; \
+    cmp -s "$W/clobber_orig" "$W/clobber/x6200_mcu_20300101000000.xgf" \
+    && cmp -s "$W/made_up.xgf" "$W/clobber/x6200_mcu_20300101000000-$(echo "$SUM" | cut -c1-8).xgf"; then
+    echo "pass  x6x00-base-fetch: another file of the same name is kept, the new one beside it"
+else
+    echo "FAIL  x6x00-base-fetch, same name: $W/clobber.log"; fails=1
+fi
 
 # The transfers: Xiegu's 1.0.8 file, or a stand-in of its size that only the simulated base sees (base_flash takes
 # only Xiegu's files: the stand-in is let through by building the scenarios with its hash in place of 1.0.8's)

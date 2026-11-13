@@ -96,11 +96,23 @@ int main(int argc, char **argv) {
     }
     FILE *f = fopen("units_junk.xgf", "wb");     /* in the directory run.sh works in */
     if (f) {
-        for (int i = 0; i < 4096; i++)
+        for (int i = 0; i < 32768; i++)
             fputc(rand(), f);
         fclose(f);
         expect(load("units_junk.xgf") < 0, "a file not Xiegu's is refused");
-        remove("units_junk.xgf");
+        /* --unknown-ok takes it, unless it is named for another radio */
+        unknown_ok = true;
+        image      = NULL;
+        expect(load("units_junk.xgf") == 0, "--unknown-ok takes an unknown file that passes the checks");
+        free(image);
+        rename("units_junk.xgf", "XIEGU_X6100_units_junk.xgf");
+        image = NULL;
+        expect(load("XIEGU_X6100_units_junk.xgf") < 0, "an X6100 base file is refused, --unknown-ok or not");
+        rename("XIEGU_X6100_units_junk.xgf", "g90_units_junk.xgf");
+        image = NULL;
+        expect(load("g90_units_junk.xgf") < 0, "a G90 base file is refused, --unknown-ok or not");
+        unknown_ok = false;
+        remove("g90_units_junk.xgf");
     }
     printf("%s\n", fails ? "UNIT TESTS FAILED" : "unit tests: all pass");
     return fails != 0;

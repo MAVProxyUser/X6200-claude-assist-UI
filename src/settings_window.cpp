@@ -7,6 +7,7 @@
  */
 
 #include "image_level.h"
+#include "update_watch.h"
 #include "settings_window.h"
 #include "board.h"
 
@@ -4997,7 +4998,12 @@ static uint8_t make_update(uint8_t row) {
     FILE *f = fopen("/var/lib/x6100-update/pending.json", "r");
     char  s[96], note[160], t[240];
 
-    wl_row_label(row, "Update");
+    char        st[48];
+    std::string name = "Update";
+
+    update_watch_status(st, sizeof(st));    /* the daily check's word: "0.3.9.2 out" */
+    if (st[0]) name += std::string(" (") + st + ")";
+    wl_row_label(row, name.c_str());
     upd_btn = wl_button(row, "Check", upd_btn_cb);
     lv_obj_add_event_cb(upd_btn, ptr_clear_cb, LV_EVENT_DELETE, &upd_btn);
     upd_latest[0] = 0;
@@ -5209,7 +5215,8 @@ static void make_info_page() {
     row = card_begin("FIRMWARE");
     row = info_row(row, "Version", strrchr(VERSION, ' ') + 1);
     row = info_row(row, "Project", "OpenX6X00 by RF.Guru");
-    row = info_row(row, "Source", "github.com/Guru-RF/OpenX6X00");
+    std::string source = std::string("github.com/") + update_repo();    /* the releases it updates from */
+    row = info_row(row, "Source", source.c_str());
     row = info_row(row, "Baseband", radio_base_ver_str());
 #ifdef BOARD_X6200
     char bias[48];

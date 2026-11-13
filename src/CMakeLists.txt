@@ -49,7 +49,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     dialog_cw_trainer.c
     dialog_cw_kbd.c
     dialog_shell.c
-    dialog_base_update.c
+    dialog_base_update.c update_watch.c
     theme.c
     freq_strip.c
     lcd_panel.c

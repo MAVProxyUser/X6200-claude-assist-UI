@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """x6x00-base-fetch: Xiegu's X6200 base firmware, found and fetched for OpenX6X00. On the radio for its E SYSTEM >
-BASE FIRMWARE screen and its daily check (/etc/init.d/S97basecheck), on a computer for tools/base_update/fetch.sh.
+BASE FIRMWARE screen and its daily check (/etc/init.d/S99updatecheck), on a computer for tools/base_update/fetch.sh.
 
   x6x00-base-fetch list
         the releases known (base_releases.txt), and which of their files are in DIR
@@ -413,42 +413,65 @@ def open_url(url):
     return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=60)
 
 
+def here_by_sha(out):
+    """The .xgf files in out by their SHA-256, whatever their names"""
+    have = {}
+    if os.path.isdir(out):
+        for n in sorted(os.listdir(out)):
+            if n.endswith(".xgf"):
+                with open(os.path.join(out, n), "rb") as f:
+                    have.setdefault(hashlib.sha256(f.read()).hexdigest(), n)
+    return have
+
+
 def keep(out, files, note, rels, url, zip_size):
+    """Each file taken out, told apart by its SHA-256 alone: one already here under any name is not kept twice, a
+    different file of the same name is not overwritten (the new one gets its sum in its name)"""
     os.makedirs(out, exist_ok=True)
+    have = here_by_sha(out)
     ok = True
     for name, data in files.items():
         sha = hashlib.sha256(data).hexdigest()
-        known = [r for r in rels if r["xgf"] == name or r["xgf_sha256"] == sha]
+        known = [r for r in rels if r["xgf_sha256"] == sha]
+        if sha in have:
+            say("%s: here already, as %s (the same SHA-256 %s): not kept twice" %
+                (name, os.path.join(out, have[sha]), sha))
+            continue
         path = os.path.join(out, name)
+        if os.path.exists(path):                   # another file under this name: kept, the new one beside it
+            path = os.path.join(out, "%s-%s.xgf" % (name[:-4] if name.endswith(".xgf") else name, sha[:8]))
         tmp = path + ".part"
         with open(tmp, "wb") as f:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
+        have[sha] = os.path.basename(path)
         if note:
             with open(path + ".txt", "wb") as f:
                 f.write(note[1])
-        if known and known[0]["xgf_sha256"] == sha and known[0]["xgf_size"] == len(data):
+        if known and known[0]["xgf_size"] == len(data):
             say("%s: Xiegu's base %s (%s), %d bytes, sha256 %s: as the list has it" %
                 (path, known[0]["version"], known[0]["built"], len(data), sha))
             if os.path.exists(path + ".json"):
                 os.remove(path + ".json")
-        elif known:
-            say("%s: %d bytes, sha256 %s, NOT as the list has it (%s): kept as unverified" %
-                (path, len(data), sha, known[0]["xgf_sha256"]))
+            continue
+        named = [r for r in rels if r["xgf"] == name]
+        ver = "?"
+        m = re.search(r"BASE\W*(\d+\.\d+\.\d+)", (note[1].decode(errors="replace") if note else ""), re.I)
+        if m:
+            ver = m.group(1)
+        stamp = re.search(r"_(\d{8})", name)
+        built = "%s-%s-%s" % (stamp.group(1)[:4], stamp.group(1)[4:6], stamp.group(1)[6:8]) if stamp else "?"
+        line = "%s %s %s %d %s %s - %s" % (ver, built, name, len(data), sha, zip_size or "-", url or "-")
+        with open(path + ".json", "w") as f:
+            json.dump({"unverified": True, "version": ver, "built": built, "size": len(data), "sha256": sha,
+                       "url": url, "list_line": line}, f, indent=1)
+        if named:
+            say("%s: %d bytes, sha256 %s: the list has another file under this name (%s): kept as unverified" %
+                (path, len(data), sha, named[0]["xgf_sha256"]))
             ok = False
         else:
-            ver = "?"
-            m = re.search(r"BASE\W*(\d+\.\d+\.\d+)", (note[1].decode(errors="replace") if note else ""), re.I)
-            if m:
-                ver = m.group(1)
-            stamp = re.search(r"_(\d{8})", name)
-            built = "%s-%s-%s" % (stamp.group(1)[:4], stamp.group(1)[4:6], stamp.group(1)[6:8]) if stamp else "?"
-            line = "%s %s %s %d %s %s - %s" % (ver, built, name, len(data), sha, zip_size or "-", url or "-")
-            with open(path + ".json", "w") as f:
-                json.dump({"unverified": True, "version": ver, "built": built, "size": len(data), "sha256": sha,
-                           "url": url, "list_line": line}, f, indent=1)
             say("%s: NOT in the list: %d bytes, sha256 %s, kept as unverified (%s.json)" % (path, len(data), sha, path))
             say("its line for base_releases.txt (the zip's sum still to fill in): %s" % line)
     return ok
@@ -474,11 +497,7 @@ def get(args, rels):
             say("no release %s on xiegu.eu in the list (x6x00-base-fetch list)" % v)
             return 2
     rc = 0
-    have = {}                                       # the files here by their SHA-256, whatever their names
-    if os.path.isdir(out):
-        for n in os.listdir(out):
-            if n.endswith(".xgf"):
-                have[hashlib.sha256(open(os.path.join(out, n), "rb").read()).hexdigest()] = n
+    have = here_by_sha(out)                         # the files here by their SHA-256, whatever their names
     for r in targets:
         if r.get("xgf_sha256") in have:
             say("base %s: here already, as %s (its SHA-256)" % (r["version"], os.path.join(out, have[r["xgf_sha256"]])))

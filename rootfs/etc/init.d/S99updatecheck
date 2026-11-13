@@ -1,0 +1,70 @@
+#!/bin/sh
+#
+# Updates looked for once a day, online; nothing is downloaded or installed by this:
+#
+#   - OpenX6X00, both radios: x6100-update check asks this fork's GitHub releases (/usr/share/x6100/update-repo) for
+#     a newer version, into /mnt/update/check.json. Only this radio's own bundle counts: an X6200 never looks at the
+#     X6100's, nor the other way round. The GUI says a newer one once (Settings > Info > Update installs it).
+#   - The base firmware, the X6200 only: x6x00-base-fetch check reads xiegu.eu's X6200 downloads and compares them
+#     with the releases known and the base's version (/tmp/x6x00-base-version, from the GUI), into
+#     /mnt/base_update/check.json. The GUI says a newer one once (E SYSTEM > BASE FIRMWARE writes it).
+#
+# The first look 5 to 35 minutes after the start (a random wait: radios do not all ask at once), then every 24
+# hours, or every hour while a check fails (no network). /mnt/update/no-check stops the first, /mnt/base_update/no-check
+# the second.
+#
+PIDFILE=/var/run/updatecheck.pid
+UPD=/mnt/update
+BASE=/mnt/base_update
+MODEL=$(sed -n 's/^model=//p' /etc/openx6x00-image 2> /dev/null)
+
+check_openx6x00() {
+    [ -x /usr/sbin/x6100-update ] && [ ! -e "$UPD/no-check" ] || return 0
+    mkdir -p "$UPD"
+    if /usr/sbin/x6100-update check > "$UPD/check.json.part" 2> /dev/null; then
+        mv "$UPD/check.json.part" "$UPD/check.json"
+    else
+        mv "$UPD/check.json.part" /tmp/updatecheck.log     # its one line: why
+        return 1
+    fi
+}
+
+check_base() {
+    [ "$MODEL" = x6200 ] && [ -x /usr/sbin/x6x00-base-fetch ] && [ ! -e "$BASE/no-check" ] || return 0
+    /usr/sbin/x6x00-base-fetch check --out "$BASE" > /tmp/basecheck.log 2>&1
+}
+
+loop() {
+    sleep $((300 + RANDOM % 1800))
+    while :; do
+        ok=1
+        check_openx6x00 || ok=0
+        check_base || ok=0
+        if [ $ok = 1 ]; then sleep 86400; else sleep 3600; fi
+    done
+}
+
+start() {
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2> /dev/null; then
+        return 0
+    fi
+    printf 'Starting updatecheck: '
+    loop < /dev/null > /dev/null 2>&1 &
+    echo $! > "$PIDFILE"
+    echo "OK"
+}
+
+stop() {
+    printf 'Stopping updatecheck: '
+    [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2> /dev/null
+    rm -f "$PIDFILE"
+    echo "OK"
+}
+
+case "$1" in
+    start | stop) "$1" ;;
+    restart | reload) stop; start ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|reload}"
+        exit 1 ;;
+esac

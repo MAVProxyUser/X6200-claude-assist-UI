@@ -105,14 +105,23 @@ def running_version():
 
 def radio_model():
     """x6100 or x6200, from the device tree: the two radios share this program and the release
-    page, each has its own bundle: the X6200's name carries -x6200-, the X6100's -x6100- (none up
-    to v0.3.1). Updaters before v0.3.1 take the first -update.tar.gz asset of the release, so the
-    X6100's bundle is uploaded first"""
+    page, each has its own bundle and card image: the X6200's names carry -x6200-, the X6100's
+    -x6100-. Without the device tree, the card image's stamp; neither: "unknown", which takes no
+    radio's files. An X6200 never takes the X6100's, nor the other way round"""
     try:
         with open("/proc/device-tree/compatible", "rb") as f:
             return "x6200" if b"xiegu,x6200" in f.read() else "x6100"
     except OSError:
-        return "x6100"
+        pass
+    try:
+        with open(IMAGE_STAMP) as f:
+            for line in f:
+                k, _, v = line.strip().partition("=")
+                if k == "model" and v in ("x6100", "x6200"):
+                    return v
+    except OSError:
+        pass
+    return "unknown"
 
 
 def image_required(text, model=None):
@@ -150,7 +159,7 @@ def image_state():
 
 
 def bundle_for_this_radio(name):
-    return name.endswith("-update.tar.gz") and (("-x6200-" in name) == (radio_model() == "x6200"))
+    return name.endswith("-update.tar.gz") and f"-{radio_model()}-" in name     # this radio's own, never the other's
 
 
 def vtuple(v):
@@ -305,7 +314,7 @@ def cmd_check(args):
                 need, note = image_required(r.read(4096).decode(errors="replace"))
             if need > image_level():
                 img = next((x for x in rel.get("assets", []) if str(x.get("name", "")).endswith("-sdcard.img.zip")
-                            and (("-x6200-" in str(x.get("name"))) == (radio_model() == "x6200"))), None)
+                            and f"-{radio_model()}-" in str(x.get("name"))), None)
                 out["image_needed"], out["image_note"] = True, note
                 out["image_url"] = img["browser_download_url"] if img else rel.get("html_url")
         except Exception:      # http.client errors are neither OSError nor ValueError: never fatal here

@@ -11,7 +11,7 @@ from the radio's own screen, or from a computer over SSH. Any release Xiegu has 
 | **E SYSTEM > BASE FIRMWARE** | the radio's screen ([dialog_base_update.c](../../src/dialog_base_update.c)) | the releases, Get, Check, Flash, with everything shown as it happens |
 | **x6x00-base-fetch** | [rootfs/usr/sbin](../../rootfs/usr/sbin/x6x00-base-fetch), on the radio and here | fetches a release from xiegu.eu as a stream, keeping only the base file; the check |
 | **x6x00-base-flash** | [base_flash.c](base_flash.c), on the radio | writes the base the way Xiegu's own app 1.0.8 does, step for step |
-| **S99basecheck** | [rootfs/etc/init.d](../../rootfs/etc/init.d/S99basecheck) | once a day, online: is there a newer release on xiegu.eu? Says so, never more |
+| **S99updatecheck** | [rootfs/etc/init.d](../../rootfs/etc/init.d/S99updatecheck) | once a day, online: is there a newer base on xiegu.eu (and a newer OpenX6X00)? Says so, never more |
 | **base_releases.txt** | [rootfs/usr/share/x6100](../../rootfs/usr/share/x6100/base_releases.txt) | the releases known: version, file, size, SHA-256, Xiegu's zip and its address |
 | fetch.sh, build.sh, flash.sh, install.sh | here | the same from a computer |
 
@@ -75,12 +75,14 @@ which base the radio runs, after SYSTEM with the GUI's own commit: `REMOTE SENTR
 
 ### The daily check
 
-[S99basecheck](../../rootfs/etc/init.d/S99basecheck) runs `x6x00-base-fetch check` 5 to 35 minutes after the start
-(a random wait: radios do not all ask xiegu.eu at once), then every 24 hours, or every hour while there is no
-network. It reads xiegu.eu's downloads page and compares it with the list and with the base's version (the GUI writes
-it to `/tmp/x6x00-base-version`), into `/mnt/base_update/check.json`. A newer release is said on the screen once
-("Base firmware 1.0.9 is out: E SYSTEM > BASE FIRMWARE"), and Settings > Info shows it next to Base firmware. It never
-downloads a base file and never writes the base. `/mnt/base_update/no-check` stops it.
+[S99updatecheck](../../rootfs/etc/init.d/S99updatecheck) runs `x6x00-base-fetch check` on an X6200 5 to 35 minutes
+after the start (a random wait: radios do not all ask xiegu.eu at once), then every 24 hours, or every hour while
+there is no network. It reads xiegu.eu's X6200 downloads (nothing of the X6100's) and compares them with the list and
+with the base's version (the GUI writes it to `/tmp/x6x00-base-version`), into `/mnt/base_update/check.json`. A newer
+release is said on the screen once ("Base firmware 1.0.9 is out: E SYSTEM > BASE FIRMWARE"), and Settings > Info
+shows it next to Base firmware. It never downloads a base file and never writes the base.
+`/mnt/base_update/no-check` stops it. The same job looks for a newer OpenX6X00 for this radio (`x6100-update check`,
+on both radios, each only for its own bundle).
 
 ## From a computer
 

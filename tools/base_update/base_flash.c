@@ -57,6 +57,7 @@
 
 #define _GNU_SOURCE
 #include <dirent.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/i2c-dev.h>
@@ -232,6 +233,23 @@ static int load(const char *path) {
     if (name) {
         say("it is Xiegu's %s", name);
         return 0;
+    }
+    /* Another radio's base, by its name: never written to the X6200's, --unknown-ok or not (its content can't tell:
+     * Xiegu encrypts the X6100's and the G90's with the same key) */
+    {
+        static const char *other[] = {"x6100", "6100_", "g90", "g106", "x5105", "x6100_mcu"};
+        const char        *b       = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
+        char               low[256];
+        size_t             i;
+
+        for (i = 0; b[i] && i < sizeof(low) - 1; i++) low[i] = (char)tolower((unsigned char)b[i]);
+        low[i] = '\0';
+        for (i = 0; i < sizeof(other) / sizeof(other[0]); i++)
+            if (strstr(low, other[i])) {
+                say("refused: %s is named for another radio (%s): only the X6200's base firmware is written here", b,
+                    other[i]);
+                return -1;
+            }
     }
     if (!unknown_ok) {
         say("not one of Xiegu's X6200 base files known here: it is not written (--unknown-ok takes one that passes "
