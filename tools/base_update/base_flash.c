@@ -89,6 +89,9 @@
 #ifndef BACK_WAIT_S
 #define BACK_WAIT_S 60              /* after the write, seconds the base's new application is looked for on I2C */
 #endif
+#ifndef DT_COMPAT                   /* the radio's model, from its device tree (a test points it at a file of its own) */
+#define DT_COMPAT   "/proc/device-tree/compatible"
+#endif
 
 #define SOH_STX 0x02
 #define EOT     0x04
@@ -572,10 +575,32 @@ static bool send_file(void) {
     return true;
 }
 
+/* An X6200: its device tree says so. Anything that touches the base is refused on any other radio: an X6100's base
+ * is written another way (its Morse key line held low while it is reset), and this file's I2C command and serial
+ * bytes are not for it */
+static bool is_x6200(void) {
+    char   buf[512];
+    FILE  *f = fopen(DT_COMPAT, "rb");
+    size_t n;
+
+    if (!f) return false;
+    n = fread(buf, 1, sizeof(buf), f);
+    fclose(f);
+    for (size_t i = 0; i + 11 <= n; i++)
+        if (!memcmp(buf + i, "xiegu,x6200", 11)) return true;
+    return false;
+}
+
 static int check(bool for_flash, bool recover) {
     char v[160];
-    int  busy = holders(UART) + holders(I2C_BUS);
+    int  busy;
 
+    if (!is_x6200()) {
+        say("refused: this radio is not an X6200 (%s has no xiegu,x6200): only the X6200's base is written by this, "
+            "and nothing was sent to the base", DT_COMPAT);
+        return EXIT_REFUSED;
+    }
+    busy = holders(UART) + holders(I2C_BUS);
     if (busy && for_flash) {
         say("refused: stop what holds them first (the GUI: tools/base_update/flash.sh does it)");
         return EXIT_REFUSED;

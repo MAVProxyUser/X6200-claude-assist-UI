@@ -32,6 +32,7 @@ MODES = {
     'can':     (3, '1k xmodem transfer canceled. (packet 50', False),
     'garbage': (3, '1k xmodem error, = 88 (packet 10', False),
     'eot':     (3, '1k xmodem error, = 0 (after EOT)', True),
+    'x6100':   (1, 'refused: this radio is not an X6200', False),  # another radio: nothing at all sent to its base
 }
 
 cc, src, stub, work, xgf_path, mode = sys.argv[1:7]
@@ -42,8 +43,11 @@ m, s = pty.openpty()
 tty.setraw(s)
 binp = os.path.join(work, 'sim_' + tag)
 logp = os.path.join(work, 'sim_' + tag + '.log')
+dtp = os.path.join(work, 'dt_' + tag)              # the device tree's compatible: an X6200's, or another radio's
+with open(dtp, 'wb') as f:
+    f.write((b'xiegu,x6100' if mode == 'x6100' else b'xiegu,x6200') + b'\0allwinner,sun8i-r16\0')
 subprocess.run([cc, '-O1', '-w', '-I', stub, '-DUART="%s"' % os.ttyname(s), '-DI2C_BUS="/dev/null"', '-DBACK_WAIT_S=2',
-                '-o', binp, src], check=True)
+                '-DDT_COMPAT="%s"' % dtp, '-o', binp, src], check=True)
 log = open(logp, 'w')
 p = subprocess.Popen([binp, '--flash', xgf_path, '--yes', '--recover'], stdout=log, stderr=subprocess.STDOUT)
 
@@ -78,7 +82,12 @@ def stream():
 
 if mode == 'stream':
     threading.Thread(target=stream, daemon=True).start()
+sent = b''
 while p.poll() is None:
+    if mode == 'x6100':                         # an application streaming, as on any radio: base_flash must not answer
+        os.write(m, b'\x55' * 64)
+        sent += rd(4096, 0.01)
+        continue
     if mode == 'dead':                          # nothing ever: the base gone
         rd(4096, 0.1)
         continue
@@ -132,7 +141,8 @@ while p.poll() is None:
                 seq += 1
 log.close()
 same = bytes(got) == xgf + b'\xff' * (-len(xgf) % 1024)
-good = p.returncode == want_rc and logged(want_line) and same == want_data
+sent += rd(4096, 0.1) if mode == 'x6100' else b''
+good = p.returncode == want_rc and logged(want_line) and same == want_data and not (mode == 'x6100' and sent)
 print('%s %-8s exit %d (want %d), %3d packets, data %s, "%s" %s, %.0f s' % (
     'PASS' if good else 'FAIL', tag, p.returncode, want_rc, seq - 1, '== file' if same else '!= file',
     want_line, 'logged' if logged(want_line) else 'NOT logged', time.time() - t0))

@@ -84,7 +84,7 @@ else
 fi
 
 pids=()
-for mode in ok silent stream dead noerase nostart nak can garbage eot; do
+for mode in ok silent stream dead noerase nostart nak can garbage eot x6100; do
     python3 "$T/sim.py" "$CC" "$SRC" "$T/stub" "$W" "$F" "$mode" > "$W/result_$mode" 2>&1 &
     pids+=($!)
 done

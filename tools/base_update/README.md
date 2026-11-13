@@ -149,6 +149,24 @@ again. That is how Xiegu's design reads; no write here has needed it yet.
   release note) and prints its line for `base_releases.txt`. Added to the list and to `known[]` in
   [base_flash.c](base_flash.c) (the test suite checks the two agree), it is a known release like the others.
 
+## Only the X6200's base, only the X6200's files
+
+Xiegu encrypts the X6100's, the G90's and the X6200's base files with the same key, so nothing in an encrypted file
+says which radio it is for, and the X6100's base is written another way altogether (its Morse key line held low while
+the base is reset). Every step keeps the radios apart:
+
+- **The writer runs on an X6200 only.** Before it opens the base's port or bus, x6x00-base-flash reads the device tree
+  (`/proc/device-tree/compatible`) and refuses unless it says `xiegu,x6200`: on an X6100 not one byte reaches the base
+  (tested: the `x6100` scenario below). It is in both radios' images, so this check matters.
+- **Only the X6200's files are written.** A file is known by its SHA-256 against the X6200 files in
+  [base_releases.txt](../../rootfs/usr/share/x6100/base_releases.txt), never by its name. Any other file needs
+  `--unknown-ok` and a second confirmation, and a file named for another radio (X6100, G90, G106, X5105) is refused
+  even then.
+- **Only the X6200's releases are fetched.** The fetcher and the daily check read only xiegu.eu's links titled
+  "X6200 Firmware Upgrade", and take only `./usr/firmware/*.xgf` from those zips.
+- **Only an X6200 offers it.** The screen is built for the X6200 only, and the daily check runs only where the image
+  says `model=x6200`.
+
 ## How it works
 
 Xiegu's app 1.0.8 (`/usr/app_qt/x6200_ui_v100` in its update) was disassembled to see what its UPGRADE screen does:
@@ -184,7 +202,8 @@ be; anything else holding them is refused.
 
 ## How it was checked
 
-- **[test/run.sh](test/run.sh)**, on a Mac or a Linux PC, in about two minutes:
+- **[test/run.sh](test/run.sh)**, on a Mac or a Linux PC, in about two minutes, and on GitHub for every change to
+  the updater ([base_update.yml](../../.github/workflows/base_update.yml), with a stand-in for Xiegu's files):
   - unit tests: SHA-256 against FIPS 180-2's vectors; the packet's CRC against CRC-16/XMODEM's check value and against
     Xiegu's own CRC routine (rewritten from its disassembly) on 2000 random packets; the packet's frame; the writer's
     `known[]` against `base_releases.txt`; Xiegu's files taken, any other refused;
@@ -200,6 +219,7 @@ be; anything else holding them is refused.
     | nostart | never sends the `C` | `1k xmodem timeout.`; exit 3 |
     | nak, can, garbage | NAK at packet 100, CAN at 50, an `X` at 10 | `1k xmodem bad packet`, `… transfer canceled.`, `… error, = 88`; exit 3 |
     | eot | no ACK for the EOT | `1k xmodem error, = 0 (after EOT)`; exit 3 |
+    | x6100 | an X6100's device tree | `refused: this radio is not an X6200`, not one byte sent; exit 1 |
 
   - the fetcher on small update zips made as Xiegu's are ([test/synth.py](test/synth.py): a zip written as a stream,
     an MBR, a FAT16 boot partition, a Linux one, a FAT16 one with rootfs.tar), through Python's zlib and through libz
