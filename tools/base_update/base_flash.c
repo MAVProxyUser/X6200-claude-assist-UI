@@ -28,8 +28,10 @@
  *   4. Every way out ends the same in Xiegu's app ("finished.", "civ start", its reading of the port resumed); it
  *      neither resets the base nor sends it a command after. Here the exit status says which step failed.
  *
- *  Only the files listed in known[] are written (Xiegu's 1.0.7 and 1.0.8, by SHA-256), and only with nothing else
- *  holding /dev/ttyS1 or /dev/i2c-0 (the GUI stopped first: tools/base_update/flash.sh). From step 1 on, the hang-up,
+ *  Only on an X6200 (its device tree says xiegu,x6200; on any other radio nothing is sent to the base), only the
+ *  files listed in known[] (Xiegu's X6200 releases 1.0.3 to 1.0.8, by SHA-256) or, with --unknown-ok, one that passes
+ *  the checks below and is not named for another radio, and only with nothing else holding /dev/ttyS1 or /dev/i2c-0
+ *  (the GUI stopped first, tools/base_update/flash.sh, or lending the base, --held-by). From step 1 on, the hang-up,
  *  interrupt and terminate signals are ignored: a lost SSH session must not end the transfer half way.
  *
  *  The bootloader (the MCU's first sectors) is not erased by 'r': after a failed transfer the same run again should

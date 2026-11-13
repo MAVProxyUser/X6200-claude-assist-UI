@@ -84,9 +84,8 @@ if mode == 'stream':
     threading.Thread(target=stream, daemon=True).start()
 sent = b''
 while p.poll() is None:
-    if mode == 'x6100':                         # an application streaming, as on any radio: base_flash must not answer
-        os.write(m, b'\x55' * 64)
-        sent += rd(4096, 0.01)
+    if mode == 'x6100':                         # base_flash must not open the port: anything it sends is caught here
+        sent += rd(4096, 0.05)                  # (nothing is written to it: no reader, and a full buffer would block)
         continue
     if mode == 'dead':                          # nothing ever: the base gone
         rd(4096, 0.1)

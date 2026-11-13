@@ -21,7 +21,7 @@ KNOWN=()
 [ -f "$X7" ] && KNOWN+=("$X7")
 
 "$CC" -O1 -w -I "$T/stub" -o units "$T/units.c" || exit 1
-./units "$TOP/rootfs/usr/share/x6100/base_releases.txt" "${KNOWN[@]}" || fails=1
+./units "$TOP/rootfs/usr/share/x6100/base_releases.txt" ${KNOWN[@]+"${KNOWN[@]}"} || fails=1
 
 # x6x00-base-fetch on small update zips made as Xiegu's are (synth.py), through Python's zlib and through libz as on
 # the radio: a file the list has comes out checked, one it does not comes out unverified with its line for the list
