@@ -14,6 +14,11 @@
  *    answer waited for as the multiplexer does (sent 300 ms apart, "#38" was missed and the stick stayed stopped).
  *    With "#38" it gave 0.65 frames/s against 0.28 with "#43" alone, more of them good. Its V.14 firmware
  *    time-stamps every frame whatever the mode. After 120 s without a frame, the whole start again.
+ *  - RTL-SDR (an RTL2832U DVB-T stick, 0bda:2838 and the rest librtlsdr knows): no decoder of its own. dump1090-fa
+ *    (FlightAware's, with the rtl-sdr-blog librtlsdr built in, which knows the Blog V4's R828D too; tools/rtlsdr)
+ *    is started on it, headless, its raw output alone on 127.0.0.1:30002, "*8D...;" lines as the sticks send, read
+ *    here over TCP; adaptive gain. It ends with the GUI (PR_SET_PDEATHSIG) and is started again when the stick
+ *    changes. The tuner librtlsdr found ("R820T", "R828D") is said from its log, /tmp/dump1090.log.
  *  The thread looks for a receiver every 2 s while it has none.
  */
 
@@ -26,25 +31,53 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 
 #define USB_DEVICES "/sys/bus/usb/devices"
 #define CDC_ACM     "/sys/bus/usb/drivers/cdc_acm"
 #define QUIET_S     120
+#define DUMP1090    "/usr/bin/dump1090-fa"
+#define D1090_LOG   "/tmp/dump1090.log"
+#define D1090_PORT  30002
 
 static const struct {
     const char *vid, *pid, *product;    /* product: a part its USB product name must have, or NULL */
     const char *name;
     bool        new_id;                 /* cdc_acm told its ID */
     const char *init;                   /* sent on opening, each answered, and again after QUIET_S without a frame */
+    bool        sdr;                    /* an RTL-SDR: dump1090 decodes it */
 } receivers[] = {
-    {"04d8", "f8e8", NULL, "GNS 5890", true, NULL},
+    {"04d8", "f8e8", NULL, "GNS 5890", true, NULL, false},
     {"04d8", "000a", "ADSB", "MICROADSB", false,
-     "#00\r#43-00\r#51-01-00\r#37-03\r#51-00-00\r#37-03\r#43-00\r#38\r#43-02\r"},
+     "#00\r#43-00\r#51-01-00\r#37-03\r#51-00-00\r#37-03\r#43-00\r#38\r#43-02\r", false},
+    /* RTL2832U sticks, librtlsdr's commonest IDs */
+    {"0bda", "2838", NULL, "RTL-SDR", false, NULL, true},
+    {"0bda", "2832", NULL, "RTL-SDR", false, NULL, true},
+    {"0ccd", "00a9", NULL, "RTL-SDR", false, NULL, true},
+    {"0ccd", "00b3", NULL, "RTL-SDR", false, NULL, true},
+    {"0ccd", "00d3", NULL, "RTL-SDR", false, NULL, true},
+    {"1554", "5020", NULL, "RTL-SDR", false, NULL, true},
+    {"15f4", "0131", NULL, "RTL-SDR", false, NULL, true},
+    {"185b", "0620", NULL, "RTL-SDR", false, NULL, true},
+    {"185b", "0650", NULL, "RTL-SDR", false, NULL, true},
+    {"1b80", "d393", NULL, "RTL-SDR", false, NULL, true},
+    {"1b80", "d3a4", NULL, "RTL-SDR", false, NULL, true},
+    {"1d19", "1101", NULL, "RTL-SDR", false, NULL, true},
+    {"1d19", "1102", NULL, "RTL-SDR", false, NULL, true},
+    {"1d19", "1103", NULL, "RTL-SDR", false, NULL, true},
+    {"1f4d", "b803", NULL, "RTL-SDR", false, NULL, true},
+    {"1f4d", "c803", NULL, "RTL-SDR", false, NULL, true},
+    {"1f4d", "d803", NULL, "RTL-SDR", false, NULL, true},
 };
 #define N_RECEIVERS (int)(sizeof(receivers) / sizeof(receivers[0]))
 
@@ -220,6 +253,84 @@ static bool send_cmds(int fd, const char *s) {
     return all;
 }
 
+/* ---- dump1090 for an RTL-SDR ---- */
+
+static pid_t d1090 = -1;
+
+static bool d1090_alive(void) {
+    if (d1090 <= 0) return false;
+    pid_t r = waitpid(d1090, NULL, WNOHANG);
+    if (r == d1090 || (r < 0 && kill(d1090, 0) != 0)) {
+        d1090 = -1;
+        return false;
+    }
+    return true;
+}
+
+static void d1090_stop(void) {
+    if (d1090 <= 0) return;
+    kill(d1090, SIGTERM);
+    for (int i = 0; i < 20 && d1090_alive(); i++) usleep(100000);
+    if (d1090_alive()) kill(d1090, SIGKILL);
+    waitpid(d1090, NULL, 0);
+    d1090 = -1;
+}
+
+static bool d1090_start(void) {
+    if (access(DUMP1090, X_OK) != 0) return false;
+    pid_t p = fork();
+    if (p < 0) return false;
+    if (p == 0) {                               /* the child: nothing of the GUI's but what dump1090 needs */
+        prctl(PR_SET_PDEATHSIG, SIGTERM);
+        int nul = open("/dev/null", O_RDONLY), log = open(D1090_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (nul >= 0) dup2(nul, 0);
+        if (log >= 0) dup2(log, 1), dup2(log, 2);
+        for (int f = 3; f < 1024; f++) close(f);
+        execl(DUMP1090, DUMP1090, "--device-index", "0", "--adaptive-range", "--quiet", "--net",
+              "--net-bind-address", "127.0.0.1", "--net-ro-port", "30002", "--net-ri-port", "0", "--net-sbs-port", "0",
+              "--net-bi-port", "0", "--net-bo-port", "0", "--net-stratux-port", "0", (char *)NULL);
+        _exit(127);
+    }
+    d1090 = p;
+    return true;
+}
+
+static int d1090_connect(void) {
+    int                fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    struct sockaddr_in a  = {.sin_family = AF_INET, .sin_port = htons(D1090_PORT)};
+
+    if (fd < 0) return -1;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (connect(fd, (struct sockaddr *)&a, sizeof(a)) != 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+/* The tuner librtlsdr found, from dump1090's log: "Found Rafael Micro R820T tuner", "RTL-SDR Blog V4 Detected" */
+static void d1090_tuner(void) {
+    FILE *f = fopen(D1090_LOG, "r");
+    char  line[160], tuner[24] = "";
+
+    if (!f) return;
+    while (fgets(line, sizeof(line), f)) {
+        char *p;
+        if ((p = strstr(line, "Blog V4"))) snprintf(tuner, sizeof(tuner), "BLOG V4");
+        else if (!tuner[0] && (p = strstr(line, "Found ")) && strstr(line, "tuner")) {
+            char *last = strstr(p, " tuner"), *w = last;
+            while (w > p + 6 && w[-1] != ' ') w--;      /* the word before " tuner": R820T, E4000, FC0013 */
+            snprintf(tuner, sizeof(tuner), "%.*s", (int)(last - w), w);
+        }
+    }
+    fclose(f);
+    if (tuner[0]) {
+        pthread_mutex_lock(&dev_lock);
+        snprintf(dev_info, sizeof(dev_info), "%s", tuner);
+        pthread_mutex_unlock(&dev_lock);
+    }
+}
+
 static void *rx_thread(void *arg) {
     (void)arg;
     int    fd = -1, rx = -1;
@@ -235,6 +346,27 @@ static void *rx_thread(void *arg) {
             set_dev("", "");
             if ((rx = find_stick(usb, sizeof(usb))) < 0) {
                 state = ADSB_RX_NO_STICK;
+                d1090_stop();                   /* the RTL-SDR went: its dump1090 too */
+            } else if (receivers[rx].sdr) {     /* dump1090 decodes it; its raw frames over TCP */
+                if (!d1090_alive()) {
+                    if (!d1090_start()) {
+                        state = ADSB_RX_NO_DRIVER;
+                        sleep(2);
+                        continue;
+                    }
+                    state = ADSB_RX_OPENING;
+                    sleep(3);                   /* the tuner set up, the port open */
+                }
+                if ((fd = d1090_connect()) >= 0) {
+                    set_dev("127.0.0.1:30002", receivers[rx].name);
+                    d1090_tuner();
+                    state  = ADSB_RX_ON;
+                    inside = replying = false;
+                    last   = adsb_now();
+                    init_at = 0;
+                    continue;
+                }
+                state = ADSB_RX_OPENING;
             } else if (access(CDC_ACM, F_OK) != 0) {
                 state = ADSB_RX_NO_DRIVER;
             } else if (!find_tty(usb, dev, sizeof(dev))) {
