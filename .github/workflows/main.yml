@@ -4,12 +4,13 @@
 # the build, here as in the container at home.
 name: Build image
 
-# On every push to main, and by hand (Actions > Build image > Run workflow). A build takes about 2 hours: a push
-# while one runs does not stop it, only the newest waiting run is kept and starts after it. The images and update
-# bundles are the run's artifacts (30 days); a tag also makes a release.
+# On every push to main, on a version tag, and by hand (Actions > Build image > Run workflow). A build takes about 2
+# hours: a push while one runs does not stop it, only the newest waiting run is kept and starts after it. The images
+# and update bundles are the run's artifacts (30 days); a version tag (v0.3.9.1) also makes a release with them.
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 concurrency:
