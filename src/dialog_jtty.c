@@ -1240,6 +1240,7 @@ static void construct_cb(lv_obj_t *parent)
     text_h = DIALOG_H - TEXT_Y - 13 - GAP - tx_h;
 
     text_box = panel_box(TEXT_Y, text_h);
+    keyboard_takes_typing(text_box);       /* typing with the keyboard's Shortcuts off too */
     for (int i = 0; i < TXT_SHOW; i++) {
         lv_obj_t *lbl = lv_label_create(text_box);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);

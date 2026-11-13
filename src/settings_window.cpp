@@ -3587,9 +3587,11 @@ static void make_keys_page() {
     row = make_paddle(row);
     card_end(row);
 
-    /* The USB or Bluetooth keyboard's layout (#236): key_input.c follows it at once */
+    /* The USB or Bluetooth keyboard's layout (#236): key_input.c follows it at once. Shortcuts off (the default): it
+     * only types; on, its keys work the knobs and buttons too, CapsLock's chords and [ ] as a CW paddle */
     row = card_begin("KEYBOARD");
     row = make_param_choice(row, "Layout", kbd_layout_options(), cfg_sm.p_kbd_layout);
+    row = make_param_switch(row, "Shortcuts", cfg_sm.p_kbd_shortcuts);
     card_end(row);
 }
 

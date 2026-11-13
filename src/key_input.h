@@ -24,3 +24,12 @@ bool keyboard_ready();
 
 /* What CapsLock and a key held together do, a kbd_hyper_action_t (kbd_hyper.h): run once the key's read is over */
 void keyboard_chord(int action);
+
+/* Settings > Keys > KEYBOARD > Shortcuts. Off (the default) the keyboard only types: its presses reach a text box
+ * (an lv_textarea, or LVGL's keyboard on screen) or a widget marked with keyboard_takes_typing(), and nothing else;
+ * CapsLock is plain Caps Lock, no chords, and [ ] are no CW paddle. On: its keys also work the knobs and buttons */
+bool keyboard_shortcuts(void);
+
+/* obj takes typing from the keyboard though it is not a text box (the CW keyboard, JTTY, the shell): it gets the
+ * keyboard's keys with Shortcuts off too */
+void keyboard_takes_typing(lv_obj_t *obj);

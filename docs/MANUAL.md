@@ -333,7 +333,22 @@ one second.
 ### Keyboard
 
 A USB keyboard, or a Bluetooth one paired in Settings > Bluetooth > DEVICES,
-types in the text boxes and the apps. On the main screen it has the keys for
+types in the text boxes and the apps.
+
+Settings > Keys > KEYBOARD > Shortcuts, off by default, decides whether it
+does more than type:
+
+- Off: it only types. Its keys reach a text box (the frequency box, a
+  callsign, a free text) and the windows made for typing (the CW keyboard,
+  JTTY, the shell), with Enter, Backspace, the arrows and ESC in them;
+  anywhere else a key does nothing (it still lights a dark screen).
+  CapsLock is plain Caps Lock, with no chords, and `[` `]` are no CW
+  paddle. The knobs, the buttons and the touch screen work as always.
+- On: everything below as well. The keys stand in for the knobs on the main
+  screen and in the apps, CapsLock's chords work (CapsLock+Space is PTT),
+  and in CW `[` `]` are the paddle.
+
+With Shortcuts on, on the main screen it has the keys for
 the knobs (see [Buttons and knobs](#buttons-and-knobs)), `f` for the
 frequency box and, in CW, the [CW line](#cw-from-the-keyboard). Scroll Lock
 turns the [frequency lock](#buttons-and-knobs) on and off and Print Screen

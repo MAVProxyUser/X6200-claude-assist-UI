@@ -116,6 +116,7 @@ bool paddle_mouse(bool btn_left, bool btn_right, bool rel_x, bool adapter, unsig
 #include "cfg/cfg_api.h"
 #include "cw_encoder.h"
 #include "input_caps.h"
+#include "key_input.h"
 #include "radio.h"
 #include "wr12.h"
 
@@ -308,7 +309,11 @@ static void wait_until(const struct timespec *deadline) {
                     continue;
                 }
                 while (i != FD_SER && fd[i] >= 0 && read(fd[i], &in, sizeof(in)) == sizeof(in)) {
-                    if (in.type == EV_KEY && in.value != 2) got(fd_src[i], in.code, in.value);   /* 2: auto-repeat */
+                    /* 2: auto-repeat. The typing keyboard's own keys are a paddle only with Settings > Keys >
+                     * KEYBOARD > Shortcuts on (key_input.h); a second keyboard (FD_KBD2) is a paddle adapter */
+                    if (in.type == EV_KEY && in.value != 2 && (i != FD_KBD || keyboard_shortcuts())) {
+                        got(fd_src[i], in.code, in.value);
+                    }
                 }
             }
         }

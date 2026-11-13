@@ -524,6 +524,7 @@ static void construct_cb(lv_obj_t *parent) {
     lv_obj_set_pos(hint, 16, DIALOG_H - 34);
 
     lv_group_add_obj(keyboard_group, dialog.obj);
+    keyboard_takes_typing(dialog.obj);     /* typing with the keyboard's Shortcuts off too */
     lv_obj_add_event_cb(dialog.obj, key_cb, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(dialog.obj, click_cb, LV_EVENT_CLICKED, NULL);
     lv_group_focus_obj(dialog.obj);

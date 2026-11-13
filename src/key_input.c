@@ -7,7 +7,9 @@
  */
 
 /* The input group every knob and button feeds, and the USB (or Bluetooth) keyboard:
- * found at start and again whenever a USB device comes or goes. CapsLock is its hyper key
+ * found at start and again whenever a USB device comes or goes. With Settings > Keys >
+ * KEYBOARD > Shortcuts off (the default) the keyboard only types, in the text boxes and the
+ * windows that take typing. On, its keys work the knobs too and CapsLock is its hyper key
  * (kbd_hyper.h): CapsLock+L logs a QSO, CapsLock+Space is PTT, and the others. */
 
 #include "key_input.h"
@@ -65,6 +67,7 @@ static bool           caps;         /* Caps Lock on, as xkb has it: only a CapsL
 static bool           woke_hold;    /* the press of the CapsLock held woke the screen: its first chord only did that */
 static int            swallowed = -1;   /* the key whose press ended the screensaver: its repeats and release too */
 static bool           layout_on;    /* the settings are there: the keyboard's layout follows Settings > Keys (#236) */
+static bool           shortcuts_were;   /* Settings > Keys > KEYBOARD > Shortcuts at the last key */
 
 /* The keyboard's Caps Lock light to ours. The light is the kernel console's (/dev/tty0), which turns
  * it at every CapsLock press, also one held for a chord: put back at the chord, and set at each
@@ -79,6 +82,25 @@ static void caps_light(void) {
     if (fd >= 0 && ioctl(fd, KDGKBLED, &leds) == 0 && !(leds & K_CAPSLOCK) != !caps) {
         ioctl(fd, KDSKBLED, (unsigned long)(caps ? leds | K_CAPSLOCK : leds & ~K_CAPSLOCK));
     }
+}
+
+/* Marks a widget that takes typing though it is no text box: keyboard_takes_typing() */
+#define TYPING_FLAG LV_OBJ_FLAG_USER_2
+
+bool keyboard_shortcuts(void) {
+    return cfg_kbd_shortcuts && param_i_get(cfg_kbd_shortcuts);   /* before the settings are read: typing only */
+}
+
+void keyboard_takes_typing(lv_obj_t *obj) {
+    lv_obj_add_flag(obj, TYPING_FLAG);
+}
+
+/* With Shortcuts off, where the keyboard's presses may go: a text box or a widget that takes typing has the focus */
+static bool typing_has_focus(void) {
+    lv_obj_t *f = keyboard_group ? lv_group_get_focused(keyboard_group) : NULL;
+
+    return f && (lv_obj_check_type(f, &lv_textarea_class) || lv_obj_check_type(f, &lv_keyboard_class) ||
+                 lv_obj_has_flag(f, TYPING_FLAG));
 }
 
 /* A chord's action, after the read of its key: it opens windows and moves the keyboard's focus */
@@ -167,6 +189,17 @@ static bool hyper_key(const struct input_event *ev, bool woke) {
     }
 }
 
+/* CapsLock with Shortcuts off: plain Caps Lock, at its press, and no chords. false when the event goes no further */
+static bool plain_caps(const struct input_event *ev) {
+    if (ev->code != KEY_CAPSLOCK) {
+        return true;
+    }
+    if (ev->value == 1) {
+        caps_turn();
+    }
+    return false;
+}
+
 /* The keyboard open went away: unplugged, its Bluetooth link lost, another one in its place. The releases of its keys
  * never come: the key LVGL holds is let go, or LVGL repeats it into the screen (a frequency step, the volume, a letter
  * keyed in CW Live) until a keyboard opens again; LVGL releases the key it holds. A PTT its CapsLock+Space keyed lets
@@ -213,16 +246,21 @@ static bool next_key(void *unused, uint16_t *scancode, uint32_t *key, int *state
         /* A key at the radio, as the front keys and the knobs: the screen stays lit, a dark one wakes */
         bool saver = backlight_saver_on();
         bool woke  = backlight_tick() && ev.value == 1;
+        bool shortcuts = keyboard_shortcuts();
 
+        if (shortcuts != shortcuts_were) {      /* switched: no chord half-made from before */
+            hyper          = (kbd_hyper_t){0};
+            shortcuts_were = shortcuts;
+        }
         /* In CW [ ] and the paddle keys are the paddle (paddle_keyer.c): a press stops a
-         * message on air, as a break */
-        if (paddle_keyer_key(ev.code)) {
+         * message on air, as a break. With Shortcuts off they type */
+        if (shortcuts && paddle_keyer_key(ev.code)) {
             if (ev.value == 1 && cw_encoder_state() != CW_ENCODER_IDLE && !cw_field_key(LV_KEY_ESC)) {
                 cw_encoder_stop();
             }
             continue;
         }
-        if (!hyper_key(&ev, woke)) {
+        if (shortcuts ? !hyper_key(&ev, woke) : !plain_caps(&ev)) {
             continue;
         }
         if (woke && saver) {
@@ -246,6 +284,12 @@ static bool next_key(void *unused, uint16_t *scancode, uint32_t *key, int *state
         /* Scroll Lock and Print Screen pressed away from the main screen: nowhere to go (a text box would type
          * them); let go, they still reach LVGL, which only takes the release of the key it holds */
         if (ev.value != 0 && kbd_keymap_main_only(ev.code) && !main_screen_has_keys()) {
+            continue;
+        }
+        /* Shortcuts off: the keyboard only types. A press or its repeat goes on only to a text box or a widget that
+         * takes typing (xkb has had it, for Shift); a release always does: LVGL takes only the one of the key it
+         * holds */
+        if (!shortcuts && ev.value != 0 && !typing_has_focus()) {
             continue;
         }
         return true;
