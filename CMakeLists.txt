@@ -131,4 +131,12 @@ else()
         string(REGEX REPLACE ".* v([0-9.]+).*" "\\1" APP_VERSION "${APP_VERSION}")
         file(WRITE ${CMAKE_BINARY_DIR}/app-version "${APP_VERSION}\n")
         install(FILES ${CMAKE_BINARY_DIR}/app-version DESTINATION share/x6100)
+        # The GitHub repository whose releases the radio updates from (x6100-update), owner/name:
+        # buildroot/local-build.sh passes the one it builds from (GitHub Actions' own, else the checkout's
+        # origin), so a fork's images update from that fork. None given: x6100-update's own default
+        set(UPDATE_REPO "" CACHE STRING "owner/name of the GitHub repository the radio updates from")
+        if(UPDATE_REPO)
+                file(WRITE ${CMAKE_BINARY_DIR}/update-repo "${UPDATE_REPO}\n")
+                install(FILES ${CMAKE_BINARY_DIR}/update-repo DESTINATION share/x6100)
+        endif()
 endif()

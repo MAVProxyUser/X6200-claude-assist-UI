@@ -120,6 +120,17 @@ sed -i "s|^\$(eval \$(cmake-package))|${GUI_VAR}_OVERRIDE_SRCDIR_RSYNC_EXCLUSION
 grep -q "^${GUI_VAR}_OVERRIDE_SRCDIR_RSYNC_EXCLUSIONS = --exclude /.claude" $GUI_MK
 sed -i "s|^\$(eval \$(cmake-package))|${GUI_VAR}_CONF_OPTS += -DHW_BACKEND=$MODEL\n\n&|" $GUI_MK
 grep -q "^${GUI_VAR}_CONF_OPTS += -DHW_BACKEND=$MODEL" $GUI_MK
+# The repository the radio updates from (x6100-update reads /usr/share/x6100/update-repo): the one GitHub Actions
+# builds (a fork's own), else this checkout's origin. Not found: x6100-update's default
+UPDATE_REPO=${GITHUB_REPOSITORY:-$(git -C $GUI remote get-url origin 2>/dev/null |
+    sed -E 's#^(git@github\.com:|https://github\.com/|ssh://git@github\.com/)##; s#\.git$##')}
+sed -i "/_CONF_OPTS += -DUPDATE_REPO=/d" $GUI_MK
+if [[ "$UPDATE_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+    sed -i "s|^\$(eval \$(cmake-package))|${GUI_VAR}_CONF_OPTS += -DUPDATE_REPO=$UPDATE_REPO\n\n&|" $GUI_MK
+    echo "   updates from github.com/$UPDATE_REPO"
+else
+    echo "   update repository not known here: x6100-update's default"
+fi
 
 echo "== Pat, the Winlink client (tools/pat/build.sh): one static ARMv7 binary for both radios"
 # Built with its own pinned Go (buildroot's is too old for it) and kept in $HOME/.cache/openx6x00;

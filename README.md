@@ -206,9 +206,13 @@ their amber-on-black screens, as in this clip, "Aliens 1986 Turrets" (Mic Mitja,
    upstream describes ([README_original.md, Install](README_original.md#install)). Settings and logs live on the
    card's DATA partition (`/mnt`).
 
-**Settings > Info > Update installs upstream's releases**, from github.com/Guru-RF/OpenX6X00. That replaces this
-fork with upstream's GUI: the Sentry, the RTL-SDR screen and the rest of the above go away until this fork's image
-is written again. This fork's update bundles are not signed yet, so a radio refuses them.
+**Settings > Info > Update installs this fork's releases**, from the GitHub repository the image was built from:
+this one for its own images, and a fork's own for a fork's images (the build writes the repository into the image,
+`/usr/share/x6100/update-repo`). A release is made by pushing a version tag (`v0.3.9.1`, the version in `src/main.h`);
+GitHub builds both radios' images and bundles and attaches them. The bundles are not signed and the images carry no
+key, so there is no key to keep, for this repository or a fork of it: a download rests on HTTPS to GitHub, and each
+file is checked against the bundle's own list of SHA-256 sums. An image with RF.Guru's key (upstream's) still takes
+only RF.Guru's signed bundles.
 
 **Just the GUI, from a Mac**, onto a radio already running this fork's image (it reaches the radio over SSH):
 

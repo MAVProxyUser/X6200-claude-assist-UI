@@ -38,8 +38,35 @@ import time
 import urllib.error
 import urllib.request
 
-REPO = os.environ.get("X6100_UPDATE_REPO", "Guru-RF/OpenX6X00")
+REPO_FILE = "/usr/share/x6100/update-repo"          # owner/name, written by the build (CMakeLists.txt UPDATE_REPO)
+DEFAULT_REPO = "MAVProxyUser/X6200-claude-assist-UI"
+
+
+def update_repo():
+    """The GitHub repository whose releases this radio updates from: X6100_UPDATE_REPO, else the one the image was
+    built from (GitHub Actions' own repository, so a fork's images update from that fork; a local build's origin),
+    else this fork's"""
+    for r in (os.environ.get("X6100_UPDATE_REPO", ""), _read(REPO_FILE)):
+        r = r.strip()
+        if r.count("/") == 1 and all(p and all(c.isalnum() or c in "-_." for c in p) for p in r.split("/")):
+            return r
+    return DEFAULT_REPO
+
+
+def _read(path):
+    try:
+        with open(path) as f:
+            return f.read(200)
+    except OSError:
+        return ""
+
+
+REPO = update_repo()
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
+# The bundles' signature is checked only when the image carries a public key. This fork's images carry none and
+# take unsigned bundles: there is no key to keep, and a fork of it updates from its own releases as they are. What
+# a download then rests on is HTTPS to GitHub and the repository's owner. An image built with update.pub in it
+# (RF.Guru's) still refuses a bundle without a valid signature
 PUB = "/usr/share/x6100/update.pub"
 VERSION_FILE = "/usr/share/x6100/app-version"
 IMAGE_STAMP = "/etc/openx6x00-image"                 # written by the image build only, never by an update
@@ -257,7 +284,7 @@ def http(url, timeout=TIMEOUT):
 
 
 def cmd_check(args):
-    out = {"running": running_version(), "latest": None, "url": None, "newer": False, "notes": ""}
+    out = {"running": running_version(), "latest": None, "url": None, "newer": False, "notes": "", "repo": REPO}
     try:
         with http(API) as r:
             rel = json.load(r)
@@ -324,7 +351,9 @@ def read_manifest(tar):
         sig = tar.extractfile("manifest.sig").read()
     except (KeyError, AttributeError):
         sig = None
-    if sig is None:
+    if not os.path.exists(PUB):
+        pass                    # no key in this image: bundles are taken without a signature (PUB above)
+    elif sig is None:
         if not os.path.exists(ALLOW_UNSIGNED):
             raise Fail("the bundle is not signed")
     else:

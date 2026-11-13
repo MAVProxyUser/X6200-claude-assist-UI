@@ -1,6 +1,6 @@
 % rebase('base.html', title='Update')
 <h2><svg class="i"><use href="#i-download"/></svg>Update</h2>
-<p class="sub">The radio installs a newer OpenX6X00 by itself: the GUI, the web pages, the helpers and their data, from the project's GitHub releases or from a bundle file. The files are checked against the project's signature, the previous version is kept, and the radio software restarts at the end (about a minute). A version that does not come up is put back automatically. The kernel and the WiFi driver still come with a card image.</p>
+<p class="sub">The radio installs a newer OpenX6X00 by itself: the GUI, the web pages, the helpers and their data, from the GitHub releases of the repository it was built from (<span id="repo">its own</span>) or from a bundle file. The files are checked against the bundle's own list of them (and against the project's signature on an image that carries a key), the previous version is kept, and the radio software restarts at the end (about a minute). A version that does not come up is put back automatically. The kernel and the WiFi driver still come with a card image.</p>
 
 <div class="dp-card">
   <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-cpu"/></svg></span><div><h3>Version</h3><p>What runs now, and the latest release</p></div></div>
@@ -89,13 +89,14 @@ $("#check").on("click", function() {
   showStatus("#status", "Asking GitHub...");
   $.get('/api/update/check', {}, function(c) {
     if (c.error) { showStatus("#status", c.error, true); return; }
+    if (c.repo) $("#repo").empty().append($("<a>").attr("href", "https://github.com/" + c.repo + "/releases").text(c.repo));
     $("#latest").text(c.latest ? "v" + c.latest : "no release yet");
     $("#notes").text((c.notes || "").split("\n")[0].slice(0, 120));
     $("#upgrade").toggle(!!c.newer);
     showStatus("#status", c.newer ? "v" + c.latest + " is available" : "Up to date");
     if (c.newer && c.image_needed) {
       /* the release also has a new card image for this radio: the update brings the rest */
-      $("#image").empty().append($("<a>").attr("href", c.image_url || "https://github.com/Guru-RF/OpenX6X00/releases/latest").text("v" + c.latest + " image"));
+      $("#image").empty().append($("<a>").attr("href", c.image_url || "https://github.com/" + (c.repo || "MAVProxyUser/X6200-claude-assist-UI") + "/releases/latest").text("v" + c.latest + " image"));
       $("#imgnote").text("v" + c.latest + " also has a new card image, bringing " + (c.image_note || "more") + ". Install updates the radio software now; write the image when convenient (settings and logs stay)");
     }
   }).fail(fail);

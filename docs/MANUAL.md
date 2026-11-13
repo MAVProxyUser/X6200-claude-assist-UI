@@ -594,10 +594,14 @@ chooses an aircraft, a tap chooses one on the scope.
 The radio updates itself: Settings > Info > Update, or the Update page of the
 web configurator (System > Update).
 
-- Check asks GitHub for the latest release. Install downloads its update
+- Check asks GitHub for the latest release of the repository the image was
+  built from (`/usr/share/x6100/update-repo`: GitHub Actions' own repository,
+  so a fork's images update from the fork; the web Update page names it).
+  Install downloads its update
   bundle (the GUI and its FT8 library, the web pages, the helpers and their
   data, about 14 MB),
-  checks every file against the project's signature, puts the files in place
+  checks every file against the bundle's list of SHA-256 sums (and the list
+  against the project's signature on an image that carries a key), puts the files in place
   with the previous ones kept, and restarts the radio software: the screen
   goes dark for a few seconds. Settings, logs and everything on the DATA
   partition stay as they are, your own [boot picture](#boot-picture) too.
@@ -634,10 +638,21 @@ web configurator (System > Update).
   of each browser's key: Forget all (Settings > General > BROWSER REMOTE), on
   either version, before pairing, so that the first browser paired is the
   admin again.
-- The bundle is signed; a bundle not made by the project is refused. (For
-  building your own: `tools/update/mkbundle.py`, the key in
-  `rootfs/usr/share/x6100/update.pub`; a radio with `/mnt/update/allow-unsigned`
-  takes unsigned bundles.)
+- This fork's images carry no key (`/usr/share/x6100/update.pub`) and take
+  unsigned bundles, so neither this repository nor a fork of it has a key to
+  keep: a download rests on HTTPS to GitHub and the repository's owner. An
+  image with a key in it (RF.Guru's) checks the bundle's signature and refuses
+  an unsigned one unless `/mnt/update/allow-unsigned` is there. Bundles are
+  made by `tools/update/mkbundle.py` (signed only when given a key).
+- A radio whose card image still has RF.Guru's key (any image from before
+  this change, upstream's included) refuses this fork's bundles: an update
+  replaces files but does not take the key away. Write this fork's card
+  image once, or create `/mnt/update/allow-unsigned` (`touch` it over SSH);
+  from then on the radio updates from this fork by itself.
+- A release: push a tag with the version of `src/main.h` (this fork numbers
+  its own after upstream's, `v0.3.9.1`, `v0.3.9.2`, so the radio sees each as
+  newer); GitHub builds both radios' images and bundles and makes the
+  release with them.
 - What the updater cannot change comes with a card image: the kernel, its
   modules (the WiFi driver), U-Boot, the partition layout. The radio says when
   a release has a new card image for it:
