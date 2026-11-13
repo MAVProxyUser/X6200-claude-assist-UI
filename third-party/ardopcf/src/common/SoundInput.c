@@ -711,14 +711,16 @@ int CorrectRawDataWithRS(UCHAR * bytRawData, UCHAR * bytCorrectedData, int intDa
 		// Athough we have already checked the data, it may be in the wrong place
 		// in the buffer if another carrier was decoded wrong.
 
-		memcpy(bytCorrectedData, &bytRawData[1], bytRawData[0]);
+		// Never past the carrier: a repeat of the frame may have put an unchecked length byte here
+		int intLen = bytRawData[0] <= intDataLen ? bytRawData[0] : intDataLen;
+		memcpy(bytCorrectedData, &bytRawData[1], intLen);
 
 		ZF_LOGV(
 			"Carrier[%d] %d raw bytes. CER and BER not calculated (previously decoded)",
 			Carrier,
 			CombinedLength);
-		ZF_LOGD("[CorrectRawDataWithRS] Carrier %d (%d/%d net/gross bytes) already decoded", Carrier, bytRawData[0], intDataLen);
-		return bytRawData[0];  // don't do it again
+		ZF_LOGD("[CorrectRawDataWithRS] Carrier %d (%d/%d net/gross bytes) already decoded", Carrier, intLen, intDataLen);
+		return intLen;  // don't do it again
 	}
 
 	// An earlier version did CheckCRC16FrameType() here, before rs_correct.
@@ -2845,7 +2847,15 @@ void Demod1Car4FSK600Char(int Start, UCHAR * Decoded)
 		Start += intSampPerSym;  // advance the pointer one symbol
 	}
 
-	Decoded[charIndex] = bytData;
+	// A part already decoded (CarrierOk) keeps the bytes RS and the CRC checked: a repeat of the
+	// frame overwrote them, and its unchecked length byte was then trusted. 600 data bytes come as
+	// three parts of their own
+	{
+		int part = intDataLen == 600 ? charIndex / (intDataLen / 3 + intRSLen / 3 + 3) : 0;
+
+		if (part < 0 || part >= 8 || !CarrierOk[part])
+			Decoded[charIndex] = bytData;
+	}
 	return;
 }
 

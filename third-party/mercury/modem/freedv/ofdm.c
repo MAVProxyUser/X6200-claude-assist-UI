@@ -2475,6 +2475,9 @@ void ofdm_set_sync(struct OFDM *ofdm, int sync_cmd) {
       /* clear rxbuf so we don't try to sync on any existing OFDM signals
          in buffer */
       for (int i = 0; i < ofdm->nrxbuf; i++) ofdm->rxbuf[i] = 0.0f;
+      /* and start over at the history's end (codec2 16769f5b): left where it was, rxbufst went
+         below 0 at the next frames and the demodulator read before rxbuf */
+      ofdm->rxbufst = ofdm->nrxbufhistory;
       break;
     case AUTO_SYNC:
       /* normal operating mode - sync state machine decides when to unsync */

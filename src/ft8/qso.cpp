@@ -1,6 +1,8 @@
 
 #include "qso.h"
 
+#include <cstdio>
+
 #define DEFAULT_SNR 100
 #define ASIDE_SLOTS 4       /* a QSO put aside waits this many slots for its station's late message */
 #define ASIDE_MAX   4       /* QSOs put aside at most, the oldest goes */
@@ -198,7 +200,8 @@ void FTxQsoProcessor::add_rx_text(std::string text, const int snr, ftx_msg_meta_
     }
 
     if (tokens[0] == "CQ") {
-        process_cq(meta, tokens, snr);
+        if (tokens.size() >= 2)     /* free text "CQ" alone: tokens[1] would be read past the end */
+            process_cq(meta, tokens, snr);
     } else if ((tokens.size() == 2) && (tokens[0] == _local_callsign) && (text.find('<') != text.npos)) {
         // "<ON6URE> PA/W1ABC": a non-standard call answers our CQ the way WSJT-X sends it, type 4 with no grid. Free
         // text has no brackets
@@ -225,8 +228,8 @@ void FTxQsoProcessor::process_grid(ftx_msg_meta_t *meta, std::vector<std::string
     auto call_de = tokens[1];
     auto grid = tokens[2];
     meta->type = FTX_MSG_TYPE_GRID;
-    strcpy(meta->grid, grid.c_str());
-    strcpy(meta->call_de, call_de.c_str());
+    snprintf(meta->grid, sizeof(meta->grid), "%s", grid.c_str());
+    snprintf(meta->call_de, sizeof(meta->call_de), "%s", call_de.c_str());
     if (call_to == _local_callsign) {
         meta->to_me = true;
         auto candidate_to_update = get_candidate_to_update(call_de);
@@ -249,7 +252,7 @@ void FTxQsoProcessor::process_report(ftx_msg_meta_t *meta, std::vector<std::stri
     auto rcvd_snr = std::stoi(tokens[2]);
     meta->type = FTX_MSG_TYPE_REPORT;
     meta->remote_snr = rcvd_snr;
-    strcpy(meta->call_de, call_de.c_str());
+    snprintf(meta->call_de, sizeof(meta->call_de), "%s", call_de.c_str());
     if (call_to == _local_callsign) {
         meta->to_me = true;
         auto candidate_to_update = get_candidate_to_update(call_de);
@@ -272,7 +275,7 @@ void FTxQsoProcessor::process_r_report(ftx_msg_meta_t *meta, std::vector<std::st
     auto rcvd_snr = std::stoi(tokens[2].substr(1, tokens[2].npos));
     meta->type = FTX_MSG_TYPE_R_REPORT;
     meta->remote_snr = rcvd_snr;
-    strcpy(meta->call_de, call_de.c_str());
+    snprintf(meta->call_de, sizeof(meta->call_de), "%s", call_de.c_str());
     if (call_to == _local_callsign) {
         meta->to_me = true;
         if (((_cur_candidate != NULL) && (_cur_candidate->match_callsign(call_de))) || take_back(call_de) ||
@@ -300,7 +303,7 @@ void FTxQsoProcessor::process_rr73(ftx_msg_meta_t *meta, std::vector<std::string
     auto call_to = tokens[0];
     auto call_de = tokens[1];
     meta->type = FTX_MSG_TYPE_RR73;
-    strcpy(meta->call_de, call_de.c_str());
+    snprintf(meta->call_de, sizeof(meta->call_de), "%s", call_de.c_str());
     if (call_to == _local_callsign) {
         meta->to_me = true;
         if (((_cur_candidate != NULL) && (_cur_candidate->match_callsign(call_de))) || take_back(call_de)) {
@@ -325,7 +328,7 @@ void FTxQsoProcessor::process_73(ftx_msg_meta_t *meta, std::vector<std::string> 
     auto call_to = tokens[0];
     auto call_de = tokens[1];
     meta->type = FTX_MSG_TYPE_73;
-    strcpy(meta->call_de, call_de.c_str());
+    snprintf(meta->call_de, sizeof(meta->call_de), "%s", call_de.c_str());
     if (call_to == _local_callsign) {
         meta->to_me = true;
         if ((_cur_candidate != NULL) && (_cur_candidate->match_callsign(call_de))) {
@@ -364,9 +367,9 @@ void FTxQsoProcessor::process_cq(ftx_msg_meta_t *meta, std::vector<std::string> 
     } else {
         call_de_pos = 1;
     }
-    strcpy(meta->call_de, tokens[call_de_pos].c_str());
+    snprintf(meta->call_de, sizeof(meta->call_de), "%s", tokens[call_de_pos].c_str());
     if (tokens.size() > call_de_pos + 1) {
-        strcpy(meta->grid, tokens[call_de_pos + 1].c_str());
+        snprintf(meta->grid, sizeof(meta->grid), "%s", tokens[call_de_pos + 1].c_str());
     }
 }
 

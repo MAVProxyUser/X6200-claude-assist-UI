@@ -23,7 +23,8 @@ extern int intLeaderRcvdMs;  // defined and updated in SoundInput.c. ref in ARQ.
 int parse_params(char *paramstr, char *parsed[10]) {
 	int paramcount = 1;
 	parsed[paramcount - 1] = paramstr;
-	for (;;) {
+	// parsed[] has 10 places: the rest stays in the last parameter
+	while (paramcount < 10) {
 		if (parsed[paramcount - 1][0] == '"') {
 			// param wrapped in double quotes
 			parsed[paramcount] = strchr(parsed[paramcount - 1] + 1, '"');

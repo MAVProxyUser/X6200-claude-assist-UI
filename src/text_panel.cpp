@@ -283,12 +283,24 @@ static bool too_wide() {
     return size.x > lv_obj_get_width(obj) - 20;
 }
 
-/* New decoded text at the end of buf. No bound on its length: the decoders send a few
- * characters at a time and the lines are kept to the panel's */
+/* New decoded text at the end of buf. The lines are kept to the panel's width and count, but
+ * that does not bound the bytes: a line of narrow characters (',' 'I') is ~250 of them, so room
+ * is made first, the oldest lines going, for the text, a '\n' and the NUL */
 static void add_text(void *arg) {
     const char *text = (const char *)arg;
-    char       *at = buf_write;
+    size_t      tl = strlen(text);
+    char       *at;
 
+    if (tl + 2 > sizeof(buf) / 2)
+        return;
+    while ((size_t)(buf_write - buf) + tl + 2 > sizeof(buf)) {
+        char  *nl  = strchr(buf, '\n');
+        size_t cut = nl ? (size_t)(nl - buf) + 1 : (size_t)(buf_write - buf);
+
+        memmove(buf, buf + cut, (size_t)(buf_write - buf) - cut + 1);
+        buf_write -= cut;
+    }
+    at = buf_write;
     buf_write = stpcpy(at, text);
     if (buf_write - buf >= 2 && !strcmp(buf_write - 2, "\n\n")) {
         buf_write--;            /* one empty line at most: the next text goes over the second '\n' */

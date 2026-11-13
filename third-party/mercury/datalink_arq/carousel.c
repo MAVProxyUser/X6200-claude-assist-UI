@@ -1355,6 +1355,11 @@ static void decode_block(car_t *c, car_rblock_t *r)
     for (int i = 0; i < r->K; i++) memcpy(r->piece[i], out[i], (size_t)P);
     int len = r->len - BLOCK_CHECK;
     uint32_t want = 0;
+    if (len < 0) {      /* K and pad from the air: tested before len indexes piece[] */
+        car_trace(c, "rx block %d failed its check", r->id);
+        if (!c->failed) c->failed = "a block failed its check";
+        return;
+    }
     for (int i = 0; i < BLOCK_CHECK; i++)
         want |= (uint32_t)r->piece[(len + i) / P][(len + i) % P] << (8 * i);
     if (len < 0 || block_check(c, r->id, r->K, (const uint8_t (*)[CAR_PIECE])r->piece, len) != want) {

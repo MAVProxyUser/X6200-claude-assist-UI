@@ -813,7 +813,7 @@ Lost:
 		int Len, addrLen = addrlen = sizeof(struct sockaddr_in);
 		char GUIMsg[256];
 
-		Len = recvfrom(GUISock, GUIMsg, 256, 0, (struct sockaddr *)&GUIHost, &addrLen);
+		Len = recvfrom(GUISock, GUIMsg, sizeof(GUIMsg) - 1, 0, (struct sockaddr *)&GUIHost, &addrLen);  // room for the NUL
 
 		if (Len > 0)
 		{

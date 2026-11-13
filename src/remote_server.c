@@ -1245,7 +1245,7 @@ static void panel_spots(uint32_t *gen, bool force) {
         const cluster_spot_t *s = &spots[i];
         if (!cluster_filter_pass(&flt, s, now))
             continue;
-        if (k + 160 > sizeof(buf))
+        if (k + 256 > sizeof(buf))     /* json_str doubles '"' and '\\': a spot can take ~225 bytes */
             break;
         uint8_t cls = cluster_spot_mode_class(s);
         k += snprintf(buf + k, sizeof(buf) - k, "%s{\"f\":%d,\"c\":", sent ? "," : "", s->freq_hz);
@@ -1258,6 +1258,8 @@ static void panel_spots(uint32_t *gen, bool force) {
         k += snprintf(buf + k, sizeof(buf) - k, ",\"al\":%d}", cluster_alert_match(&flt, s) >= 0);
         sent++;
     }
+    if (k > sizeof(buf) - 2)            /* snprintf counts what did not fit: never past the end for the ']' */
+        k = sizeof(buf) - 2;
     snprintf(buf + k, sizeof(buf) - k, "]");
     for (int i = 0; i < MAX_CLIENTS; i++) {
         client_t *c = &clients[i];

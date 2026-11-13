@@ -251,20 +251,18 @@ struct Frame {
     }
 
     void log(const char *prefix=nullptr) const {
-        char buf[512];
-        char *buf_ptr = buf;
-        buf_ptr += sprintf(buf_ptr, "[%02X:%02X:", FRAME_PRE, FRAME_PRE);
-        buf_ptr += sprintf(buf_ptr, "%02X:", dst_addr);
-        buf_ptr += sprintf(buf_ptr, "%02X]-", src_addr);
-        buf_ptr += sprintf(buf_ptr, "[%02X:", command);
-        uint16_t remain_len = data.size();
-        size_t i = 0;
-        while (remain_len) {
-            buf_ptr += sprintf(buf_ptr, "%02X:", data[i++]);
-            remain_len--;
+        /* 3 characters a data byte and frames up to 1024 bytes: the bytes that fit, then "..." */
+        char   buf[512];
+        size_t n = snprintf(buf, sizeof(buf), "[%02X:%02X:%02X:%02X]-[%02X", FRAME_PRE, FRAME_PRE, dst_addr, src_addr,
+                            command);
+        for (size_t i = 0; i < data.size(); i++) {
+            if (n + 16 > sizeof(buf)) {
+                n += snprintf(buf + n, sizeof(buf) - n, ":...");
+                break;
+            }
+            n += snprintf(buf + n, sizeof(buf) - n, ":%02X", data[i]);
         }
-        buf_ptr += sprintf(buf_ptr - 1, "]-[%02X]", FRAME_END);
-        *(buf_ptr - 1) = '\0';
+        snprintf(buf + n, sizeof(buf) - n, "]-[%02X]", FRAME_END);
         if (prefix) {
             LV_LOG_USER("%s\t: %s\t(Len %i)", prefix, buf, data.size() + FRAME_ADD_LEN + 1);
         } else {
@@ -946,7 +944,7 @@ static Frame *process_req(const Frame *req) {
                         set_unsupported(req, resp);
                         break;
                 }
-            } else {
+            } else if (data_size >= 2) {    /* data[0] and data[1] are read below */
                 switch (req->data[0]) {
                     case MEM_BS_REG:
                         {
@@ -969,6 +967,8 @@ static Frame *process_req(const Frame *req) {
                         set_unsupported(req, resp);
                         break;
                 }
+            } else {                        /* no data: nothing to read */
+                set_unsupported(req, resp);
             }
             break;
 
@@ -1033,6 +1033,10 @@ static Frame *process_req(const Frame *req) {
         case C_SEND_SEL_FREQ:
             {
                 ComputedParameter<int32_t> *freq;
+                if (data_size < 1) {        /* data[0] of an empty vector */
+                    set_unsupported(req, resp);
+                    break;
+                }
                 if (req->data[0] == 0) {
                     // fg freq
                     freq = &cfg_sm.cp_fg_freq;
@@ -1059,6 +1063,10 @@ static Frame *process_req(const Frame *req) {
                 bool data_mode = false;
                 Parameter<int32_t> *mode_par;
 
+                if (data_size < 1) {        /* data[0] of an empty vector */
+                    set_unsupported(req, resp);
+                    break;
+                }
                 if (req->data[0] == 0) {
                     // fg
                     mode_par = cfg_sm.p_band_current_vfo.get() == RADIO_VFO_A ? &cfg_sm.p_band_vfoa_mode :&cfg_sm.p_band_vfob_mode;

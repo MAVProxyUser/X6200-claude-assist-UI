@@ -141,6 +141,8 @@ std::string decompress(Codeword const& bitvec) {
     }
     if (j >= JSC_SIZE) break;
     if (start + k >= bytes.size()) break;
+    // A run of nibbles equal to s keeps j at 0 while k grows past base[8]
+    if (k >= sizeof(base) / sizeof(base[0])) break;
     j = j * s + static_cast<std::uint32_t>(bytes[start + k]) + base[k];
     if (j >= JSC_SIZE) break;
 

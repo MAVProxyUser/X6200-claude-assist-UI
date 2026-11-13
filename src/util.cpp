@@ -90,11 +90,11 @@ char * util_canonize_callsign(const char * callsign, bool strip_slashes) {
         char *s = strdup(callsign);
         char *token = strtok(s, "/");
         while(token) {
-            if ((
+            if (strlen(token) >= 4 && (     /* the length first: "AB/C" has no token[2] */
                 ((token[0] >= '0') && (token[0] <= '9')) ||
                 ((token[1] >= '0') && (token[1] <= '9')) ||
                 ((token[2] >= '0') && (token[2] <= '9'))
-            ) && strlen(token) >= 4) {
+            )) {
                 result = strdup(token);
                 break;
             }
