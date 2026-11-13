@@ -373,6 +373,13 @@ void radio_start() {
 
     hw_start();
     base_ver = hw_base_ver();
+    {   /* the base's version for the daily base firmware check (x6x00-base-fetch check, S99basecheck) */
+        FILE *f = fopen("/tmp/x6x00-base-version", "w");
+        if (f) {
+            fprintf(f, "%s\n", hw_base_ver_str());
+            fclose(f);
+        }
+    }
     cfg_hw_caps_set(hw_caps());     /* the LO offset from them, before the first frame */
     start_trace("base: version %s", hw_base_ver_str());
 #ifdef BOARD_X6200
@@ -3189,8 +3196,40 @@ static bool resend_all() {
     return ok;
 }
 
+/* The base lent to base_flash (radio_base_hold): asked, and the thread out of its packet read */
+static atomic_bool base_lent, base_lent_seen;
+
+bool radio_base_hold(bool on) {
+    if (!on) {
+        atomic_store(&base_lent, false);
+        hw_base_hold(false);
+        return true;
+    }
+    if (state != RADIO_RX) {
+        return false;                   /* never in the middle of a transmission */
+    }
+    atomic_store(&base_lent_seen, false);
+    atomic_store(&base_lent, true);
+    hw_base_hold(true);                 /* no write leaves from here on, from any thread */
+    radio_lock();                       /* one already on its way has gone through */
+    radio_unlock();
+    for (int i = 0; i < 200 && !atomic_load(&base_lent_seen); i++) {
+        usleep(10000);                  /* the radio thread lets go of /dev/ttyS1 between two packets */
+    }
+    if (!atomic_load(&base_lent_seen)) {
+        radio_base_hold(false);
+        return false;
+    }
+    return true;
+}
+
 static void * radio_thread(void *arg) {
     while (true) {
+        if (atomic_load(&base_lent)) {  /* base_flash has the base: nothing read, nothing sent, not even the keepalive */
+            atomic_store(&base_lent_seen, true);
+            usleep(20000);
+            continue;
+        }
         now_time = get_time();
 
         guard_events();

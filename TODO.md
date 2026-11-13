@@ -134,8 +134,9 @@ Xiegu's newest bases, X6100 V1.1.9 and X6200 1.0.8, have no CESSB, and the X6200
   shape, FM pre-emphasis, a TX equaliser.
 - **Before any image carries a patched base**: how it is flashed and rolled back safely (flashing a base needs the
   owner's go), and that a radio without it keeps working as today. The flashing half is there for the X6200:
-  tools/base_update writes any of Xiegu's .xgf files from OpenX6X00 as Xiegu's own UPGRADE screen does (base 1.0.8
-  written on the bench radio 2026-11-13; going back to 1.0.7 in tools/base_update/README.md). A patched base would
+  tools/base_update writes any of Xiegu's .xgf files from OpenX6X00 as Xiegu's own UPGRADE screen does, from the
+  radio's screen or a computer (on the bench radio 2026-11-13: 1.0.7 to 1.0.8, back to 1.0.7, to 1.0.8 again; each
+  time the base switched the radio off about three minutes after the write). A patched base would
   still have to be encrypted with Xiegu's key for the bootloader, which we don't have.
 
 ## FreeDV: RADE and the Codec 2 modes (#37, #52)

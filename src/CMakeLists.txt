@@ -2,6 +2,15 @@
 # The source order below is the link order: keep it when adding files.
 add_executable(${PROJECT_NAME})
 
+# git_commit.h: the commit the GUI is built from (GIT_COMMIT, cmake/git_commit.cmake), made at every build; the
+# Sentry's title shows it
+add_custom_target(git_commit ALL
+    COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR} -DOUT=${CMAKE_CURRENT_BINARY_DIR}/git_commit.h
+            -P ${CMAKE_SOURCE_DIR}/cmake/git_commit.cmake
+    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/git_commit.h)
+add_dependencies(${PROJECT_NAME} git_commit)
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+
 target_sources(${PROJECT_NAME} PUBLIC
     gui_main.c gui_wake.c ops_room.c screen_main.c walkie.c gui_styles.c mono.c wf_palettes.c
     spectrum_view.c radio.c dsp.cpp util.cpp
@@ -40,6 +49,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     dialog_cw_trainer.c
     dialog_cw_kbd.c
     dialog_shell.c
+    dialog_base_update.c
     theme.c
     freq_strip.c
     lcd_panel.c

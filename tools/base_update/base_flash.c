@@ -42,6 +42,13 @@
  *      base_flash --flash FILE --yes --recover
  *                                  after a transfer that failed past the erase: the base has no application to answer
  *                                  on I2C, so that check is left out; the bootloader is asked as before.
+ *      base_flash --flash FILE --yes --held-by PID
+ *                                  started by the GUI (dialog_base_update.c), which keeps /dev/ttyS1 and /dev/i2c-0 open
+ *                                  but has lent us the base (radio_base_hold): its descriptors are let be.
+ *      base_flash --identify FILE  the file only: "xiegu-base 1.0.8 SHA256" when it is one of Xiegu's known here.
+ *      ... --unknown-ok            a file not known here taken (identified as "unknown") when it passes the checks
+ *                                  an .xgf can be given without its key: a multiple of 16 bytes, 16 KiB to 512 KiB,
+ *                                  and not a plain ARM image. With a warning; the screen and flash.sh ask twice.
  *
  *  Exit status: 0 done, 1 refused before anything was sent to the base, 2 failed before the erase (the base's
  *  application is still there; switching the radio off and on brings it back), 3 failed after the erase (the base has
@@ -94,10 +101,25 @@ enum { EXIT_DONE = 0, EXIT_REFUSED = 1, EXIT_BEFORE_ERASE = 2, EXIT_AFTER_ERASE 
 static const struct {
     const char *name, *sha256;
     long        size;
-} known[] = {
-    {"x6200_mcu_20260820141208.xgf (base 1.0.8)", "9a19f97a5ad9e141a3663d222f984073bf0b18b38d4662604372a0036f9daa23", 524288},
-    {"x6200_mcu_20260116092100.xgf (base 1.0.7)", "9baa46b824d9b20ddb41c6c3b64dde4a3dfbc3bdcd0a0cbc600506cb7a1e2690", 401024},
+    const char *ver;
+} known[] = {     /* as rootfs/usr/share/x6100/base_releases.txt has them (tools/base_update/test checks) */
+    {"x6200_mcu_20260820141208.xgf (base 1.0.8, Aug 2026)",
+     "9a19f97a5ad9e141a3663d222f984073bf0b18b38d4662604372a0036f9daa23", 524288, "1.0.8"},
+    {"x6200_mcu_20260116092100.xgf (base 1.0.7, Jan 2026: Xiegu's factory build, not on xiegu.eu)",
+     "9baa46b824d9b20ddb41c6c3b64dde4a3dfbc3bdcd0a0cbc600506cb7a1e2690", 401024, "1.0.7"},
+    {"x6200_mcu_20250916150221.xgf (base 1.0.7, Sep 2025: xiegu.eu's update)",
+     "d58382c210738fee5261e58819aef9f3829030bf0997d53511dab3355a8fb4e2", 524288, "1.0.7"},
+    {"x6200_mcu_20250111134652.xgf (base 1.0.6, Jan 2025)",
+     "dca90387b70d9550448006310a69ea65625bec87f402c10df789deeb13ff12f3", 524288, "1.0.6"},
+    {"x6200_mcu_20240924203603.xgf (base 1.0.3, Sep 2024)",
+     "61e59a52e7c007c427d31f9de3b296e5568225efb93a1fd8df46028d48ffc3f1", 524288, "1.0.3"},
 };
+static const char *image_ver;   /* the loaded file's base version, known[].ver, or "unknown" (--unknown-ok) */
+static char        image_sha[65];   /* and its SHA-256 */
+static bool        unknown_ok;  /* --unknown-ok: a file not in known[] taken when it passes the checks below */
+
+#define UNKNOWN_MIN 16384       /* an .xgf not known here: AES blocks (a multiple of 16), no more than the 512 KiB */
+#define UNKNOWN_MAX 524288      /* Xiegu's own files fill, and not a plain ARM image (the bootloader decrypts it) */
 
 static struct timespec t0;
 
@@ -202,19 +224,44 @@ static int load(const char *path) {
     }
     fclose(f);
     sha256_hex(image, image_len, hex);
+    memcpy(image_sha, hex, sizeof(image_sha));
     for (size_t i = 0; i < sizeof(known) / sizeof(known[0]); i++)
         if (image_len == known[i].size && !strcmp(hex, known[i].sha256))
-            name = known[i].name;
+            name = known[i].name, image_ver = known[i].ver;
     say("file %s: %ld bytes, %ld packets of 1024, sha256 %s", path, image_len, (image_len + 1023) / 1024, hex);
-    if (!name) {
-        say("not one of Xiegu's X6200 base files known here: it is not written");
+    if (name) {
+        say("it is Xiegu's %s", name);
+        return 0;
+    }
+    if (!unknown_ok) {
+        say("not one of Xiegu's X6200 base files known here: it is not written (--unknown-ok takes one that passes "
+            "the checks)");
         return -1;
     }
-    say("it is Xiegu's %s", name);
+    /* Unknown: what can be told of an encrypted file. A plain ARM image starts with its stack pointer (in SRAM,
+     * 0x2000xxxx) and its reset vector (in flash, 0x08xxxxxx): sent as it is, the bootloader would decrypt it into
+     * garbage */
+    uint32_t sp = image[0] | image[1] << 8 | image[2] << 16 | (uint32_t)image[3] << 24;
+    uint32_t pc = image[4] | image[5] << 8 | image[6] << 16 | (uint32_t)image[7] << 24;
+
+    if (image_len % 16 || image_len < UNKNOWN_MIN || image_len > UNKNOWN_MAX) {
+        say("refused: %ld bytes is not an .xgf as Xiegu makes them (a multiple of 16, %d to %d bytes)", image_len,
+            UNKNOWN_MIN, UNKNOWN_MAX);
+        return -1;
+    }
+    if ((sp & 0xfff00000u) == 0x20000000u && (pc & 0xff000000u) == 0x08000000u) {
+        say("refused: it starts as a plain ARM image (stack 0x%08x, reset 0x%08x), not an encrypted .xgf", sp, pc);
+        return -1;
+    }
+    image_ver = "unknown";
+    say("WARNING: not one of Xiegu's files known here; it passes the checks (size, AES blocks, not a plain image), "
+        "but what it holds can't be told. Written only because --unknown-ok was given");
     return 0;
 }
 
 /* ---- Who else has the base's port or bus ---------------------------------------------------------------------- */
+
+static int held_by = -1;    /* --held-by: the GUI that lent us the base (radio_base_hold) keeps its descriptors */
 
 static int holders(const char *dev) {
     DIR           *proc = opendir("/proc");
@@ -245,8 +292,12 @@ static int holders(const char *dev) {
             snprintf(path, sizeof(path), "/proc/%s/fd/%s", p->d_name, fd->d_name);
             l = readlink(path, link, sizeof(link) - 1);
             if (l > 0 && (link[l] = 0, !strcmp(link, dev))) {
-                say("%s is open in %s (pid %s)", dev, comm, p->d_name);
-                n++;
+                if (atoi(p->d_name) == held_by) {
+                    say("%s is open in %s (pid %s), which has lent us the base", dev, comm, p->d_name);
+                } else {
+                    say("%s is open in %s (pid %s)", dev, comm, p->d_name);
+                    n++;
+                }
                 break;
             }
         }
@@ -537,7 +588,7 @@ static int check(bool for_flash, bool recover) {
 }
 
 int main(int argc, char **argv) {
-    bool        do_flash = false, yes = false, recover = false;
+    bool        do_flash = false, yes = false, recover = false, identify = false;
     const char *path     = NULL;
     int         rc;
 
@@ -551,15 +602,26 @@ int main(int argc, char **argv) {
             yes = true;
         else if (!strcmp(argv[i], "--recover"))
             recover = true;
+        else if (!strcmp(argv[i], "--held-by") && i + 1 < argc)
+            held_by = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--unknown-ok"))
+            unknown_ok = true;
+        else if (!strcmp(argv[i], "--identify") && i + 1 < argc)
+            path = argv[++i], identify = true;
         else
             path = NULL, i = argc;
     }
-    if (!path || (do_flash && !yes) || (recover && !do_flash)) {
-        fprintf(stderr, "usage: %s --check FILE | --flash FILE --yes [--recover]\n", argv[0]);
+    if (!path || (do_flash && !yes) || (recover && !do_flash) || (identify && do_flash)) {
+        fprintf(stderr, "usage: %s --check FILE | --flash FILE --yes [--recover] [--held-by PID] | --identify FILE  "
+                        "[--unknown-ok]\n", argv[0]);
         return EXIT_REFUSED;
     }
     if (load(path) < 0)
         return EXIT_REFUSED;
+    if (identify) {                     /* the file only: its version and SHA-256 on a line (dialog_base_update.c) */
+        printf("xiegu-base %s %s\n", image_ver, image_sha);
+        return EXIT_DONE;
+    }
     rc = check(do_flash, recover);
     if (rc != EXIT_DONE || !do_flash) {
         if (!do_flash)

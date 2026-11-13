@@ -367,6 +367,11 @@ static void iq_load(void) {
     }
 }
 
+/* Nothing to lend: no base here */
+void hw_base_hold(bool on) {
+    (void)on;
+}
+
 bool hw_flow_read(hw_pack_t *p) {
     uint64_t now = now_ns();
     const uint64_t period = (uint64_t)SAMPLES * 1000000000ULL / SAMPLE_RATE;   /* 5.12 ms */

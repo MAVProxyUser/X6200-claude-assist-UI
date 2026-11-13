@@ -38,7 +38,8 @@ turned with the MFK's inner ring:
   there.
 - **D DECODE**: the decoders and the frequencies they work on, each a key away.
 - **E SYSTEM**: the rest of the radio in the same look: Settings, the apps, the digital modes, AIRSPACE,
-  VHF/UHF, the classic radio screen, a UNIX shell on the radio's own screen, and which screen the radio starts in.
+  VHF/UHF, the classic radio screen, a UNIX shell on the radio's own screen, the base firmware, and which screen the
+  radio starts in. The title says the GUI's commit and the base's version: `SYSTEM CONTROL: c6e93af - base 1.0.8`.
 - **F VHF/UHF**: the RTL-SDR (next section).
 
 GEN shows the controls on every screen. The Sentry's look is also a theme for the whole radio: Settings, the
@@ -101,13 +102,21 @@ before it (the build trees' kernels carried Aether Radio's wolf), so the screen 
 
 ### The base firmware, updated from OpenX6X00
 
-The X6200's base, the radio board's own firmware from Xiegu, written from OpenX6X00 over SSH, without Xiegu's own
-system and its card swaps: [tools/base_update](tools/base_update/README.md). fetch.sh downloads Xiegu's 1.0.8
-update and takes the base's file out of it; flash.sh writes it with **base_flash**, which does on the radio what
-Xiegu's app 1.0.8 does from its UPGRADE screen, step for step, its timeouts and error handling worked out from that
-app's code. `flash.sh --check` reads the base's version and touches nothing. Base 1.0.8 fixes the S-meter stuck at
-S1, -121.0 on 1.0.7; this fork's X6200 went from 1.0.7 to 1.0.8 this way on 13 November 2026.
-[More](#the-baseband).
+The X6200's base, the radio board's own firmware from Xiegu, fetched and written from OpenX6X00, without Xiegu's
+own system and its card swaps: [tools/base_update](tools/base_update/README.md).
+
+- **On the radio**: E SYSTEM > BASE FIRMWARE lists every release Xiegu has published (1.0.3, 1.0.6, 1.0.7, 1.0.8),
+  fetches the one chosen from xiegu.eu (Xiegu's 370 MB update streamed, only the base file kept, checked by its
+  SHA-256) and writes it, showing the writer's steps, the kernel's messages and the base's serial port as they come,
+  and when the base is done.
+- **Once a day**, online, the radio looks at xiegu.eu's downloads page and says when there is a newer base. It never
+  downloads or writes one by itself.
+- **The writer**, x6x00-base-flash, does what Xiegu's app 1.0.8 does from its UPGRADE screen, step for step, its
+  timeouts and error handling worked out from that app's code, and is tested against a simulated base in every way
+  it can fail. The same from a computer: fetch.sh, flash.sh.
+
+Base 1.0.8 fixes the S-meter stuck at S1, -121.0 on 1.0.7. On 13 November 2026 this fork's X6200 went from 1.0.7 to
+1.0.8, back to 1.0.7 (a downgrade works), and to 1.0.8 again from its own screen. [More](#the-baseband).
 
 ### Smaller things
 
@@ -245,7 +254,8 @@ The radio board's own firmware, from Xiegu: upstream's README has the table of b
 ([README_original.md, The baseband](README_original.md#the-baseband)). On the X6200's base 1.0.7 the S-meter can
 stick at S1, -121.0; 1.0.8 fixes it, and also corrects the CW keyer's speed and brings back its macros.
 
-This fork updates the X6200's base from OpenX6X00 as well ([tools/base_update](tools/base_update/README.md),
+This fork updates the X6200's base from OpenX6X00 as well: on the radio, E SYSTEM > BASE FIRMWARE (Get, then
+Flash); from a computer, as below ([tools/base_update](tools/base_update/README.md),
 [manual](docs/MANUAL.md#the-x6200s-base-firmware-from-openx6x00)):
 
 ```bash
@@ -261,9 +271,9 @@ tools/base_update/flash.sh root@<radio> --flash
 ```
 
 `--check` only reads. `--flash` stops the GUI, writes the base in about half a minute and starts the GUI again;
-the radio then switches itself off, and is switched on again by hand to run the new firmware. As Xiegu asks: a
-13.8 V supply of 3 A or more and the battery out while it writes. A write that fails after the erase is written
-again with `--recover`; `--to 1.0.7` goes back.
+about three minutes later the base switches the radio off by itself, and it is switched on again by hand to run the
+new firmware. As Xiegu asks: a 13.8 V supply of 3 A or more and the battery out while it writes. A write that fails
+after the erase is written again with `--recover`; `--to 1.0.7` goes back (`fetch.sh 1.0.7` first).
 
 ## Documentation
 

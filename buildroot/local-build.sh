@@ -27,6 +27,13 @@ case $MODEL in
     *) echo "MODEL must be x6100 or x6200, not '$MODEL'"; exit 1 ;;
 esac
 GUI=${GUI_DIR:-/work/OpenX6X00}
+# The commit the GUI is built from, for the Sentry's title (cmake/git_commit.cmake): buildroot copies the tree
+# without its .git, so it goes with the tree as build-commit.txt ("+": changes not committed)
+COMMIT=$(git -c safe.directory='*' -C "$GUI" rev-parse --short=7 HEAD 2> /dev/null || true)
+if [ -n "$COMMIT" ]; then
+    git -c safe.directory='*' -C "$GUI" diff --quiet HEAD -- 2> /dev/null || COMMIT="$COMMIT+"
+    echo "$COMMIT" > "$GUI/build-commit.txt"
+fi
 BR=${BR_DIR:-/work/$BRDEF}
 EXT=$BR/br2_external
 GUI_MK=$EXT/package/$GUI_PKG/${GUI_PKG/-/_}.mk

@@ -1,57 +1,48 @@
 #!/bin/bash
 #
-# Fetches the X6200's base firmware 1.0.8 from Xiegu's own update on xiegu.eu (x6200udimg-260820001.zip, 371 MB) into
-# build/base_update, and takes the base's file out of it: the zip holds a card image (sdcard.img) whose third partition
-# (FAT) holds rootfs.tar, the system Xiegu's update writes to the radio's internal memory, with the base's file in
-# its /usr/firmware. The zip and the file are checked against the sizes and SHA-256 sums below; the big intermediate
-# files are removed after. Base 1.0.8 fixes the S-meter that sticks at -255 dBm (shown as S1, -121.0) on 1.0.7.
-# Needs 7-Zip (7zz or 7z, "brew install sevenzip") for the card image and its FAT partition.
+# Fetches Xiegu's X6200 base firmware into build/base_update, by rootfs/usr/sbin/x6x00-base-fetch (the radio's own
+# fetcher, run here): Xiegu's update zip streamed from xiegu.eu and the base file taken out of it as it goes by (the
+# zip's card image, its FAT partition, rootfs.tar, ./usr/firmware/*.xgf). Neither the zip (370 MB) nor the card image
+# is kept; the download stops once the file is through (about two thirds of the zip). Each file is checked against
+# rootfs/usr/share/x6100/base_releases.txt (size, SHA-256) and kept with Xiegu's release note (FILE.xgf.txt).
 #
-#     tools/base_update/fetch.sh           then tools/base_update/install.sh [root@radio]
+#     tools/base_update/fetch.sh                 the latest in the list (1.0.8)
+#     tools/base_update/fetch.sh 1.0.6           a release in the list: 1.0.3, 1.0.6, 1.0.7 (xiegu.eu's), 1.0.8
+#     tools/base_update/fetch.sh all             every release in the list that is on xiegu.eu
+#     tools/base_update/fetch.sh --discover      xiegu.eu's downloads page: each "X6200 Firmware Upgrade vX.Y.Z" the
+#                                                list does not have fetched, kept as unverified (FILE.xgf.json), and
+#                                                its line for base_releases.txt printed
+#     tools/base_update/fetch.sh --url URL       an update zip by its address, unverified unless the list has it
+#     tools/base_update/fetch.sh --zip FILE      the same from a zip here
+#
+# A file of your own: put it in build/base_update/ as NAME.xgf; flash.sh --file takes it (with --unknown-ok when it is
+# not one the list knows). Needs Python 3 (its zlib module, or libz).
 #
 set -euo pipefail
 TOP=$(cd "$(dirname "$0")/../.." && pwd)
 B=$TOP/build/base_update
-URL=https://xiegu.eu/wp-content/uploads/sites/4/2026/10/x6200udimg-260820001.zip
-ZIP=x6200udimg-260820001.zip
-ZIP_SIZE=371310845
-ZIP_SHA=ca0226c7ffbfa38a5655bd9fc4bbe4e7995055cb3e2b35433a2ad5d39b4100a1
-XGF=x6200_mcu_20260820141208.xgf
-XGF_SIZE=524288
-XGF_SHA=9a19f97a5ad9e141a3663d222f984073bf0b18b38d4662604372a0036f9daa23
-
-sha() { shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1 || sha256sum "$1" | cut -d' ' -f1; }
-size() { stat -f %z "$1" 2>/dev/null || stat -c %s "$1"; }
-SZ=$(command -v 7zz || command -v 7z || true)
-[ -n "$SZ" ] || { echo "needs 7-Zip: brew install sevenzip (or apt install 7zip)"; exit 1; }
+FETCH=(python3 "$TOP/rootfs/usr/sbin/x6x00-base-fetch")
 mkdir -p "$B"
 
-if [ -f "$B/$XGF" ] && [ "$(sha "$B/$XGF")" = "$XGF_SHA" ]; then
-    echo "$B/$XGF is there already (sha256 $XGF_SHA)"
-    exit 0
-fi
-
-# The zip: the direct link from Xiegu's downloads page (its download counter link turns curl away)
-if [ ! -f "$B/$ZIP" ] || [ "$(size "$B/$ZIP")" != "$ZIP_SIZE" ]; then
-    echo "downloading $ZIP (371 MB) from xiegu.eu"
-    curl -fL --retry 3 -C - -A "Mozilla/5.0 (compatible; OpenX6X00 base_update)" -o "$B/$ZIP.part" "$URL"
-    mv "$B/$ZIP.part" "$B/$ZIP"
-fi
-[ "$(size "$B/$ZIP")" = "$ZIP_SIZE" ] || { echo "$ZIP: $(size "$B/$ZIP") bytes, not $ZIP_SIZE"; exit 1; }
-[ "$(sha "$B/$ZIP")" = "$ZIP_SHA" ] || { echo "$ZIP: not the file this was written for (sha256)"; exit 1; }
-
-# zip -> sdcard.img -> its third partition (2.fat) -> rootfs.tar -> ./usr/firmware/$XGF
-W=$B/work
-rm -rf "$W"
-mkdir -p "$W"
-trap 'rm -rf "$W"' EXIT
-unzip -q -o -j "$B/$ZIP" '*/sdcard.img' -d "$W"
-"$SZ" x -y -o"$W" "$W/sdcard.img" 2.fat > /dev/null
-rm -f "$W/sdcard.img"
-"$SZ" x -y -o"$W" "$W/2.fat" rootfs.tar > /dev/null
-rm -f "$W/2.fat"
-tar -xf "$W/rootfs.tar" -C "$W" "./usr/firmware/$XGF"
-[ "$(size "$W/usr/firmware/$XGF")" = "$XGF_SIZE" ] && [ "$(sha "$W/usr/firmware/$XGF")" = "$XGF_SHA" ] ||
-    { echo "$XGF in the image is not the one expected"; exit 1; }
-mv "$W/usr/firmware/$XGF" "$B/$XGF"
-echo "$B/$XGF: $XGF_SIZE bytes, sha256 $XGF_SHA (Xiegu's base 1.0.8)"
+case "${1:-latest}" in
+    --url | --zip)
+        [ -n "${2:-}" ] || { echo "$1 needs an argument"; exit 1; }
+        exec "${FETCH[@]}" get "$1" "$2" --out "$B" ;;
+    --discover)
+        # The downloads page, read by the same tool (check): the releases there that the list does not have
+        CHECK=$B/discover
+        mkdir -p "$CHECK"
+        "${FETCH[@]}" check --out "$CHECK" --base 0
+        NEW=$(python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); print(" ".join(c["links"][v] for v in c["not_in_list"]))' "$CHECK/check.json")
+        [ -n "$NEW" ] || { echo "nothing on xiegu.eu that the list does not have"; exit 0; }
+        rc=0
+        for link in $NEW; do
+            "${FETCH[@]}" get --url "$link" --out "$B" || rc=1
+        done
+        exit $rc ;;
+    -*)
+        sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+        exit 1 ;;
+    *)
+        exec "${FETCH[@]}" get "${1:-latest}" --out "$B" ;;
+esac

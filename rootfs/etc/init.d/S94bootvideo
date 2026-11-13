@@ -12,6 +12,8 @@
 #
 
 VIDEO=/mnt/bootvideo.mp4
+# none of your own: the image's, when it has one
+[ -f "$VIDEO" ] || VIDEO=/usr/share/x6100/bootvideo.mp4
 LOG=/tmp/bootvideo.log
 PID=/tmp/bootvideo.pid
 MAX_S=30

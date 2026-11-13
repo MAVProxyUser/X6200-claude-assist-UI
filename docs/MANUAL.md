@@ -545,7 +545,9 @@ Its controls, on every screen (GEN shows them, as does a tap on the title):
   there last. F2 listens to the band chosen, F3 puts it in or out of the SWEEP.
 - **D DECODE**: the decoders and the frequencies they work on. F2 opens the one chosen there, F4 the next kind.
 - **E SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the classic radio screen, a shell,
-  and where the radio starts. F2 opens the item chosen, F5 the classic radio screen.
+  the [base firmware](#the-x6200s-base-firmware-from-openx6x00) and where the radio starts. F2 opens the item
+  chosen, F5 the classic radio screen. Its title says the GUI's commit and the base's version
+  (`SYSTEM CONTROL: c6e93af - base 1.0.8`).
 
 ### F VHF/UHF, an RTL-SDR
 
@@ -675,27 +677,63 @@ web configurator (System > Update).
 This fork, X6200 only. The update above brings OpenX6X00; the base, the radio
 board's own firmware from Xiegu, is updated apart from it, and Xiegu's way
 takes its own system (two card swaps and its UPGRADE menu, see the README's
-[baseband](../README.md#the-baseband) section). The tools in
-[tools/base_update](../tools/base_update/README.md) do it from a computer over
-SSH while OpenX6X00 runs, with Xiegu's own steps: base_flash does on the radio
-what Xiegu's app 1.0.8 does from MENU > SYSTEM > UPGRADE.
+[baseband](../README.md#the-baseband) section). Here it is done while
+OpenX6X00 runs, with Xiegu's own steps: the writer does on the radio what
+Xiegu's app 1.0.8 does from MENU > SYSTEM > UPGRADE. More, and how it was
+worked out and tested: [tools/base_update](../tools/base_update/README.md).
 
-1. `tools/base_update/fetch.sh`: Xiegu's 1.0.8 update downloaded from
-   xiegu.eu (371 MB), the base's file taken out of it and checked.
-2. `tools/base_update/build.sh`: base_flash, built with an ARM cross compiler.
-3. `tools/base_update/flash.sh root@<radio> --check`: reads only; it says the
-   base's version (`version "1.0.7"`).
-4. `tools/base_update/flash.sh root@<radio> --flash`: the GUI stops, the base
-   is written (about half a minute), the GUI starts again.
-5. The base does not start the new firmware by itself: the radio switches
-   itself off a minute or two later. Switch it on; `--check`, and Settings >
-   Info > Baseband, then say 1.0.8.
+Where: E SYSTEM > BASE FIRMWARE, or Settings > Info > Base firmware > Open.
+
+- The top line: the base the radio runs, and its supply now. The next: the
+  last look at xiegu.eu.
+- The list: every release, HERE when its file is on the card
+  (`/mnt/base_update`), ON XIEGU.EU when it can be fetched, `<- NOW` on the
+  one the base runs. Files are told apart by their SHA-256, not their name or
+  date. The base files of Xiegu's own system on the internal memory are copied
+  there the first time (1.0.7 of January 2026 is Xiegu's factory build, not on
+  xiegu.eu). A `.xgf` of your own put there is listed as UNKNOWN, and a release
+  xiegu.eu has that the list does not as NEW. The MFK chooses.
+- **Get** (F2): the chosen release from xiegu.eu. Xiegu's update zip is
+  streamed and only the base file kept, so the card needs no room for the
+  370 MB; about two thirds of it come down, some minutes on WiFi.
+- **Check** (F3): xiegu.eu's downloads page read now.
+- **Flash** (F4): what it is about to do, Xiegu's power conditions and the
+  supply now; then **FLASH NOW** writes it (an unknown file asks once more,
+  UNKNOWN: OK?). About half a minute: the window shows the writer's steps,
+  every kernel message and the base's serial port once a second.
+- Then wait: "the base's firmware is running" ten seconds after the write,
+  and about three minutes later "the base stopped its stream: it is switching
+  the radio off". The radio switches itself off. **Switch it on again**: it
+  runs the new base. The window keeps the log (`/mnt/base_update.log`) and
+  shows its end when opened again.
+
+Once a day, online, the radio reads xiegu.eu's downloads page and says on the
+screen, once, when a newer base is out; Settings > Info shows it next to Base
+firmware. It never downloads or writes one by itself. An empty file
+`/mnt/base_update/no-check` turns it off.
 
 - As Xiegu asks for its own update: a 13.8 V supply of 3 A or more and the
   battery out, and the radio not switched off while it writes.
+- Any release can be written, older ones too: 1.0.8 to 1.0.7 and back has
+  been done.
 - A write that fails after the erase leaves the base without its application:
-  the GUI is then left off, and `flash.sh --recover` writes it again (the
-  base's bootloader is not erased). `flash.sh --to 1.0.7` goes back to 1.0.7.
+  **Recover** writes it again (the base's bootloader is not erased). Do not
+  switch the radio off before.
+
+From a computer over SSH, the same steps:
+
+1. `tools/base_update/fetch.sh`: the latest release from xiegu.eu, its base
+   file taken out and checked (`fetch.sh 1.0.7`, `fetch.sh all`).
+2. `tools/base_update/build.sh`: the writer, built with an ARM cross compiler.
+3. `tools/base_update/flash.sh root@<radio> --check`: reads only; it says the
+   base's version (`version "1.0.7"`).
+4. `tools/base_update/flash.sh root@<radio> --flash`: the GUI stops, the base
+   is written (about half a minute), the GUI starts again. `--to 1.0.7` writes
+   another release, `--file FILE.xgf` a file of your own, `--recover` again
+   after a failed write.
+5. The radio switches itself off a few minutes later. Switch it on; `--check`,
+   and Settings > Info > Baseband, then say the new version.
+
 - Or with Xiegu's own screen: `tools/base_update/install.sh root@<radio>`
   puts the 1.0.8 file in the list of Xiegu's UPGRADE screen on the internal
   memory; take the card out, switch on, MENU > SYSTEM > UPGRADE.

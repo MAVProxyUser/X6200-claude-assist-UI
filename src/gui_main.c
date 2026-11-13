@@ -68,6 +68,7 @@
 #include "bt_dev.h"
 #include "usb_devices.h"
 #include "image_level.h"
+#include "dialog_base_update.h"
 #include "start_trace.h"
 #include "dialog_cluster.h"
 #include "app_sstv.h"
@@ -301,6 +302,9 @@ static void services_start(void) {
     start_trace("services: QSO log read");
     dialog_cluster_start_client();
     image_level_notice_init();   /* a newer card image wanted: said once per version */
+#ifdef BOARD_X6200
+    base_update_watch_init();    /* a newer base firmware on xiegu.eu (the daily check): said once per version */
+#endif
     lv_timer_set_repeat_count(lv_timer_create(settings_note_cb, 3000, NULL), 1);
 }
 

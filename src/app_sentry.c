@@ -29,6 +29,8 @@
 
 #include "app_sentry.h"
 
+#include "dialog_base_update.h"
+#include "git_commit.h"
 #include "dialog_shell.h"
 
 #include "band_plan.h"
@@ -355,7 +357,7 @@ static uint8_t  d3_lv[D3_ROWS][IMG_W];
 static int      d3_head, d3_count;
 static uint32_t d3_pal[256];
 static lv_obj_t *badge_l[2], *title_l, *status_l;
-typedef struct { lv_obj_t *frame, *cap, *line, *opt[8]; int n; } box_t;
+typedef struct { lv_obj_t *frame, *cap, *line, *opt[12]; int n; } box_t;     /* opt: E SYSTEM's 9 rows the most */
 static box_t     b_mode, b_tx, b_sig, b_rout, b_band, b_prof, b_tgts;
 static lv_obj_t *tick_l[TICKS], *tgt_l[LABELS];
 static lv_obj_t *t_state_l, *t_crit_frame, *t_crit_l, *t_time_cap_l, *t_big_l, *t_sub_l, *t_time_l, *t_id_l, *t_db_l;
@@ -367,7 +369,9 @@ static box_t     d_sel, d_how, d_ant, d_now;
 static lv_obj_t *d_head_l, *d_row_l[12];
 
 /* E SYSTEM: the rest of the radio, from here */
-typedef enum { SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_CLASSIC, SYS_SHELL, SYS_HOME, SYS_N } sysitem_t;
+typedef enum {
+    SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_CLASSIC, SYS_SHELL, SYS_BASEFW, SYS_HOME, SYS_N
+} sysitem_t;
 static const struct {
     const char *name, *about;
 } sys_items[SYS_N] = {
@@ -388,6 +392,9 @@ static const struct {
                       "THE SENTRY TILE."},
     {"UNIX SHELL", "A SHELL ON THE RADIO ITSELF (/BIN/SH, AS ROOT): A KEYBOARD TYPES INTO IT, TYPE OPENS THE ON-SCREEN "
                    "ONE FOR A LINE, CTRL-C INTERRUPTS. CLOSING IT ENDS THE SHELL AND BRINGS YOU BACK HERE."},
+    {"BASE FIRMWARE", "XIEGU'S BASE FIRMWARE WRITTEN FROM HERE, AS XIEGU'S OWN UPGRADE SCREEN DOES IT: 1.0.8 OR 1.0.7, "
+                      "WITH THE KERNEL'S MESSAGES AND THE BASE'S PORT SHOWN AS IT GOES. THE BASE SWITCHES THE RADIO OFF "
+                      "A FEW MINUTES AFTER: SWITCH IT ON AGAIN."},
     {"START IN", "WHERE THE RADIO STARTS AND COMES BACK TO WHEN AN APP CLOSES: THE SENTRY, OR THE CLASSIC RADIO "
                  "SCREEN. PUSH TO SWITCH."},
 };
@@ -963,6 +970,7 @@ static void box_make(box_t *b, lv_obj_t *parent, int x, int y, int w, int h, con
     b->frame = rect(parent, x, y, w, h, 3, false);
     b->cap   = label(parent, &pixel_20, amb, x + 3, y + 3, w - 6, LV_TEXT_ALIGN_CENTER, cap);
     b->line  = rect(parent, x, y + 25, w, 3, 0, true);
+    if (n > (int)(sizeof(b->opt) / sizeof(b->opt[0]))) n = (int)(sizeof(b->opt) / sizeof(b->opt[0]));
     b->n     = n;
     for (int i = 0; i < n; i++) {
         b->opt[i] = label(parent, &pixel_20, amb, x + 3, y + 30 + i * 20, w - 6, LV_TEXT_ALIGN_CENTER, "");
@@ -2184,8 +2192,16 @@ static void show_screen(void) {
 static void show_title(void) {
     if (alert_until && time(NULL) < alert_until && (time(NULL) & 1))
         lv_label_set_text_fmt(title_l, "WX ALERT: %s", alert_event);
-    else
-        lv_label_set_text_fmt(title_l, "XIEGU X6200  %s", titles[scr]);
+    else {
+        /* after SYSTEM (E's "SYSTEM CONTROL" whole): the commit the GUI is built from and the base's firmware version,
+         * "... SYSTEM: c6e93af - base 1.0.8", the title centred as one line still */
+        const char *t = titles[scr], *ver = radio_base_ver_str();
+
+        if (strstr(t, "SYSTEM"))
+            lv_label_set_text_fmt(title_l, "XIEGU X6200  %s: %s - base %s", t, GIT_COMMIT, ver && ver[0] ? ver : "?");
+        else
+            lv_label_set_text_fmt(title_l, "XIEGU X6200  %s", t);
+    }
 }
 
 static void go(scr_t s) {
@@ -2545,6 +2561,7 @@ static void sys_open_async(void *arg) {
         case SYS_MODES: main_screen_start_app(ACTION_APP_MODES); break;
         case SYS_AIRSPACE: main_screen_start_app(ACTION_APP_ADSB); break;
         case SYS_SHELL: main_screen_open_dialog(dialog_shell); break;
+        case SYS_BASEFW: main_screen_open_dialog(dialog_base_update); break;
         case SYS_CLASSIC:
             main_screen_home_pause(true);   /* not straight back here */
             dialog_destruct();

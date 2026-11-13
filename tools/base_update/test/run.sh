@@ -21,7 +21,34 @@ KNOWN=()
 [ -f "$X7" ] && KNOWN+=("$X7")
 
 "$CC" -O1 -w -I "$T/stub" -o units "$T/units.c" || exit 1
-./units "${KNOWN[@]}" || fails=1
+./units "$TOP/rootfs/usr/share/x6100/base_releases.txt" "${KNOWN[@]}" || fails=1
+
+# x6x00-base-fetch on small update zips made as Xiegu's are (synth.py), through Python's zlib and through libz as on
+# the radio: a file the list has comes out checked, one it does not comes out unverified with its line for the list
+FETCH=$TOP/rootfs/usr/sbin/x6x00-base-fetch
+head -c 32768 /dev/urandom > "$W/made_up.xgf"
+python3 "$T/synth.py" "$W/synth_new.zip" x6200_mcu_20300101000000.xgf "$W/made_up.xgf"
+[ -f "$X8" ] && python3 "$T/synth.py" "$W/synth_108.zip" x6200_mcu_20260820141208.xgf "$X8"
+for way in zlib libz; do
+    env=()
+    [ "$way" = libz ] && env=(X6X00_LIBZ=1)
+    rm -rf "$W/fetch_$way"
+    if env "${env[@]+"${env[@]}"}" python3 "$FETCH" get --zip "$W/synth_new.zip" --out "$W/fetch_$way" > "$W/fetch_$way.log" 2>&1 \
+        && cmp -s "$W/made_up.xgf" "$W/fetch_$way/x6200_mcu_20300101000000.xgf" \
+        && grep -q "NOT in the list" "$W/fetch_$way.log" && [ -f "$W/fetch_$way/x6200_mcu_20300101000000.xgf.json" ]; then
+        echo "pass  x6x00-base-fetch ($way): a file not in the list comes out whole, unverified"
+    else
+        echo "FAIL  x6x00-base-fetch ($way), unknown file: $W/fetch_$way.log"; fails=1
+    fi
+    if [ -f "$X8" ]; then
+        if env "${env[@]+"${env[@]}"}" python3 "$FETCH" get --zip "$W/synth_108.zip" --out "$W/fetch_$way" >> "$W/fetch_$way.log" 2>&1 \
+            && cmp -s "$X8" "$W/fetch_$way/x6200_mcu_20260820141208.xgf" && grep -q "as the list has it" "$W/fetch_$way.log"; then
+            echo "pass  x6x00-base-fetch ($way): Xiegu's 1.0.8 file comes out checked against the list"
+        else
+            echo "FAIL  x6x00-base-fetch ($way), 1.0.8: $W/fetch_$way.log"; fails=1
+        fi
+    fi
+done
 
 # The transfers: Xiegu's 1.0.8 file, or a stand-in of its size that only the simulated base sees (base_flash takes
 # only Xiegu's files: the stand-in is let through by building the scenarios with its hash in place of 1.0.8's)

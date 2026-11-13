@@ -29,6 +29,7 @@
 extern "C" {
 
     #include "app_window.h"
+    #include "dialog_base_update.h"
     #include "gui_styles.h"
     #include "theme.h"
     #include "fonts/font_select.h"
@@ -5174,6 +5175,31 @@ static uint8_t make_factory_reset(uint8_t row) {
     return row + 1;
 }
 
+#ifdef BOARD_X6200
+/* The base's firmware written from the radio's own screen (dialog_base_update.c): its window takes Settings' place,
+ * opened after this event, as Settings goes with it */
+static void base_update_open(void *arg) {
+    (void)arg;
+    main_screen_open_dialog(dialog_base_update);
+}
+
+static void base_update_btn_cb(lv_event_t *e) {
+    (void)e;
+    lv_async_call(base_update_open, NULL);
+}
+
+static uint8_t make_base_update(uint8_t row) {
+    char        st[24];
+    std::string name = "Base firmware";
+
+    base_update_status(st, sizeof(st));     /* the daily check's word: "1.0.9 out", "latest" */
+    if (st[0]) name += std::string(" (") + st + ")";
+    wl_row_label(row, name.c_str());
+    wl_button(row, "Open...", base_update_btn_cb);
+    return row + 1;
+}
+#endif
+
 /* Info: cards and rows as the other tabs, in the same font */
 static void make_info_page() {
     grid_create();
@@ -5189,6 +5215,7 @@ static void make_info_page() {
     char bias[48];
     radio_pa_bias_info(bias, sizeof(bias));
     row = info_row(row, "PA bias", bias);
+    row = make_base_update(row);
 #endif
     row = make_update(row);
     row = make_broadcast_list(row);

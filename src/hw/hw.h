@@ -191,6 +191,10 @@ bool hw_tx_keyed_by_gui(void);
 
 void hw_pin_set(hw_pin_t pin, bool on);
 
+/* The base lent to another program (base_flash, dialog_base_update.c) or given back: while it is lent no packet is
+ * read from it and no write reaches it, through any of the calls here. The X6200's; the others do nothing */
+void hw_base_hold(bool on);
+
 /* The next packet from the base, decoded; false: none yet */
 bool hw_flow_read(hw_pack_t *pack);
 /* The stream stopped: open it again */

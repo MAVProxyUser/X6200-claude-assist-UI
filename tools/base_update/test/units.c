@@ -65,7 +65,31 @@ int main(int argc, char **argv) {
     }
     expect(same, "2000 packets: STX, number, complement, data, Xiegu's CRC high byte first");
 
-    for (int i = 1; i < argc; i++) {
+    /* base_flash's known[] and the release list: the same files, both ways (argv[1]: base_releases.txt) */
+    FILE *rf = argc > 1 ? fopen(argv[1], "r") : NULL;
+    if (rf) {
+        char   line[600];
+        size_t n_known = sizeof(known) / sizeof(known[0]), in_list = 0;
+        bool   all = true;
+
+        while (fgets(line, sizeof(line), rf)) {
+            char ver[16], built[16], name[80], sha[80];
+            long size;
+
+            if (line[0] == '#' || sscanf(line, "%15s %15s %79s %ld %79s", ver, built, name, &size, sha) != 5) continue;
+            bool found = false;
+            for (size_t k = 0; k < n_known; k++)
+                if (!strncmp(known[k].name, name, strlen(name)) && known[k].size == size &&
+                    !strcmp(known[k].sha256, sha) && !strcmp(known[k].ver, ver))
+                    found = true;
+            if (!found) printf("      %s %s is in the list but not in base_flash's known[]\n", ver, name);
+            all = all && found;
+            in_list++;
+        }
+        fclose(rf);
+        expect(all && in_list == n_known, "base_flash's known[] and base_releases.txt: the same files");
+    }
+    for (int i = 2; i < argc; i++) {
         image = NULL;
         expect(load(argv[i]) == 0, argv[i]);
         free(image);
