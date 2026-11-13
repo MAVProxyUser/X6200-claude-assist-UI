@@ -1734,8 +1734,6 @@ static void rtl_listen(bool on) {
         int64_t c = param_i_get(cfg_rtl_freq);
 
         if (!listen_hz || llabs(listen_hz - c) > rtl_view_hz() / 2) listen_hz = rtl_snap(rtl_best ? rtl_best : c);
-        /* Listening narrows the stick to 1.06 MHz (all the radio's USB carries): the channel kept well inside */
-        if (llabs(listen_hz - c) > 350000) rtl_tune(listen_hz);
         rtl_spectrum_listen(listen_hz, rtl_mode_of(listen_hz));
     } else {
         rtl_spectrum_listen(0, 0);

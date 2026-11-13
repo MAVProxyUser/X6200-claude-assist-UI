@@ -33,8 +33,7 @@
 #define MAX_BINS  8192
 #define BINS      2048
 #define ROWS      20            /* a second */
-#define RATE_WIDE   2116800     /* 48 x 44.1 kHz: the spectrum's; the radio's USB loses a quarter of it */
-#define RATE_LISTEN 1058400     /* 24 x 44.1 kHz while listening: carried whole */
+#define RATE        2116800     /* 48 x 44.1 kHz: the helper's audio comes out at the codec's rate */
 #define RING        (44100 * 2) /* audio waiting to play: two seconds at most */
 #define CHUNK       1024        /* audio_play() needs room for the whole write: a bigger one may never find it */
 
@@ -99,7 +98,7 @@ static pid_t spawn(int *in_fd, int *out_fd) {
     snprintf(n, sizeof(n), "%d", BINS);
     snprintf(r, sizeof(r), "%d", ROWS);
     char s[16];
-    snprintf(s, sizeof(s), "%d", atomic_load(&listen_mode) ? RATE_LISTEN : RATE_WIDE);
+    snprintf(s, sizeof(s), "%d", RATE);
     if ((p = fork()) < 0) {
         close(to[0]), close(to[1]), close(from[0]), close(from[1]);
         return -1;
@@ -398,19 +397,13 @@ void rtl_spectrum_listen(int64_t hz, int mode) {
 
     atomic_store(&listen_hz, hz);
     atomic_store(&listen_mode, mode);
-    if (mode && !was) {                 /* the narrower rate first: the channel is set up for it */
-        snprintf(cmd, sizeof(cmd), "s %d\n", RATE_LISTEN);
-        say(cmd);
+    if (mode && !was) {
         pthread_mutex_lock(&ring_lock);
         ring_head = ring_len = 0;
         pthread_mutex_unlock(&ring_lock);
     }
     snprintf(cmd, sizeof(cmd), "l %lld %d\n", (long long)(mode ? hz : 0), mode);
     say(cmd);
-    if (!mode && was) {
-        snprintf(cmd, sizeof(cmd), "s %d\n", RATE_WIDE);
-        say(cmd);
-    }
     if (mode && !player_started) {
         player_started = pthread_create(&player, NULL, player_thread, NULL) == 0;
         if (player_started) pthread_detach(player);

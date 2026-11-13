@@ -317,6 +317,81 @@ static void commands(rtlsdr_dev_t *dev, uint64_t *centre, bool *fresh) {
     }
 }
 
+/* ---- The stream: rows and, while listening, audio ---- */
+
+static rtlsdr_dev_t *the_dev;
+static uint64_t      centre_now;
+static int           n_bins;
+static long          row_left;      /* samples till the next row */
+static float         re[MAX_BINS], im[MAX_BINS], win[MAX_BINS], acc[MAX_BINS], wsum, norm;
+static uint8_t       frame[24 + MAX_BINS * 4];
+static uint8_t       blk[MAX_BINS * 2];
+static uint32_t      seq;
+static bool          fresh = true;
+static int           nfft, fill;
+
+/* Each transfer the stick sends, on librtlsdr's thread: the commands waiting first */
+static void on_samples(unsigned char *buf, uint32_t n, void *ctx) {
+    int bins = n_bins;
+    (void)ctx;
+
+    commands(the_dev, &centre_now, &fresh);
+    if (stop) {
+        rtlsdr_cancel_async(the_dev);
+        return;
+    }
+    for (uint32_t off = 0; off + 1 < n; off += 2) {
+        if (l_mode) listen_sample(buf[off], buf[off + 1]);
+        /* The first BINS * AVG samples of each row's share go into its FFTs, the rest are passed over */
+        if (nfft < AVG) {
+            blk[fill * 2]     = buf[off];
+            blk[fill * 2 + 1] = buf[off + 1];
+            if (++fill == bins) {
+                for (int i = 0; i < bins; i++) {
+                    re[i] = (blk[i * 2] - 127.4f) / 128.0f * win[i];
+                    im[i] = (blk[i * 2 + 1] - 127.4f) / 128.0f * win[i];
+                }
+                fft(re, im, bins);
+                for (int i = 0; i < bins; i++) acc[i] += re[i] * re[i] + im[i] * im[i];
+                nfft++;
+                fill = 0;
+            }
+        }
+        if (--row_left > 0) continue;
+        row_left = per_row_now;
+        if (nfft == 0) continue;
+
+        /* A row: lowest frequency first (the FFT's second half, then its first), the DC bin from its neighbours */
+        uint8_t *p = frame;
+        uint16_t nb = (uint16_t)bins, flags = fresh ? 1 : 0;
+
+        memcpy(p, "RSPC", 4); p += 4;
+        seq++;
+        memcpy(p, &seq, 4); p += 4;
+        memcpy(p, &centre_now, 8); p += 8;
+        memcpy(p, &rate_now, 4); p += 4;
+        memcpy(p, &nb, 2); p += 2;
+        memcpy(p, &flags, 2); p += 2;
+        acc[0] = (acc[1] + acc[bins - 1]) / 2;
+        for (int i = 0; i < bins; i++) {
+            float v  = acc[(i + bins / 2) % bins] / nfft;
+            float db = 10 * log10f(v + 1e-20f) - norm;
+
+            memcpy(p, &db, 4);
+            p += 4;
+        }
+        for (int i = 0; i < bins; i++) acc[i] = 0;
+        nfft  = 0;
+        fill  = 0;
+        fresh = false;
+        put(frame, (size_t)(p - frame));
+        if (stop) {
+            rtlsdr_cancel_async(the_dev);
+            return;
+        }
+    }
+}
+
 int main(int argc, char **argv) {
     int      index = 0, bins = 2048, rows = 20, gain = 280, opt;
     uint32_t rate   = 2400000;
@@ -353,86 +428,25 @@ int main(int argc, char **argv) {
     set_gain(dev, gain);
     rtlsdr_reset_buffer(dev);
     rate = rtlsdr_get_sample_rate(dev);
-    long row_left;                  /* samples till the next row */
     rate_now    = rate;
     rows_now    = rows;
     per_row_now = (long)rate / rows;
     row_left    = per_row_now;
+    n_bins      = bins;
+    centre_now  = centre;
     for (int i = 0; i < 1024; i++) sin_lut[i] = (int16_t)lrint(32767 * sin(2 * M_PI * i / 1024));
-    printf("RTLSPEC 1 %s %u %d\n", tuner_name(rtlsdr_get_tuner_type(dev)), rate, bins);
-    fflush(stdout);
-
-    static uint8_t  buf[READ_LEN];
-    static float    re[MAX_BINS], im[MAX_BINS], win[MAX_BINS], acc[MAX_BINS];
-    static uint8_t  frame[24 + MAX_BINS * 4];
-    static uint8_t  blk[MAX_BINS * 2];
-    uint32_t        seq = 0;
-    bool            fresh = true;
-    int             nfft = 0, fill = 0;
-    float           wsum = 0;
-
     for (int i = 0; i < bins; i++) {
         win[i] = 0.5f - 0.5f * cosf(2 * (float)M_PI * i / (bins - 1));
         wsum += win[i];
     }
-    /* dB of the window's full-scale sine: a level read as dBFS */
-    float norm = 20 * log10f(wsum);
+    norm = 20 * log10f(wsum);           /* dB of the window's full-scale sine: a level read as dBFS */
+    printf("RTLSPEC 1 %s %u %d\n", tuner_name(rtlsdr_get_tuner_type(dev)), rate, bins);
+    fflush(stdout);
 
-    while (!stop) {
-        int n = 0;
-
-        commands(dev, &centre, &fresh);
-        if (rtlsdr_read_sync(dev, buf, READ_LEN, &n) < 0 || n <= 0) {
-            break;                      /* unplugged */
-        }
-        for (int off = 0; off + 1 < n; off += 2) {
-            if (l_mode) listen_sample(buf[off], buf[off + 1]);
-            /* The first BINS * AVG samples of each row's share go into its FFTs, the rest are passed over */
-            if (nfft < AVG) {
-                blk[fill * 2]     = buf[off];
-                blk[fill * 2 + 1] = buf[off + 1];
-                if (++fill == bins) {
-                    for (int i = 0; i < bins; i++) {
-                        re[i] = (blk[i * 2] - 127.4f) / 128.0f * win[i];
-                        im[i] = (blk[i * 2 + 1] - 127.4f) / 128.0f * win[i];
-                    }
-                    fft(re, im, bins);
-                    for (int i = 0; i < bins; i++) acc[i] += re[i] * re[i] + im[i] * im[i];
-                    nfft++;
-                    fill = 0;
-                }
-            }
-            if (--row_left > 0) continue;
-            row_left = per_row_now;
-            if (nfft == 0) continue;
-
-            /* A row: lowest frequency first (the FFT's second half, then its first), the DC bin from its neighbours */
-            uint8_t *p = frame;
-            uint16_t nb = (uint16_t)bins, flags = fresh ? 1 : 0;
-
-            memcpy(p, "RSPC", 4); p += 4;
-            seq++;
-            memcpy(p, &seq, 4); p += 4;
-            memcpy(p, &centre, 8); p += 8;
-            memcpy(p, &rate_now, 4); p += 4;
-            memcpy(p, &nb, 2); p += 2;
-            memcpy(p, &flags, 2); p += 2;
-            acc[0] = (acc[1] + acc[bins - 1]) / 2;
-            for (int i = 0; i < bins; i++) {
-                float v  = acc[(i + bins / 2) % bins] / nfft;
-                float db = 10 * log10f(v + 1e-20f) - norm;
-
-                memcpy(p, &db, 4);
-                p += 4;
-                acc[(i + bins / 2) % bins] = 0;
-            }
-            for (int i = 0; i < bins; i++) acc[i] = 0;
-            nfft  = 0;
-            fill  = 0;
-            fresh = false;
-            put(frame, (size_t)(p - frame));
-        }
-    }
+    /* Several transfers queued all the time (as rtl_sdr and dump1090 read): one at a time, what the stick sent
+     * between two of them was lost, a quarter of it whatever the rate */
+    the_dev = dev;
+    rtlsdr_read_async(dev, on_samples, NULL, 12, READ_LEN);
     rtlsdr_close(dev);
     return 0;
 }
