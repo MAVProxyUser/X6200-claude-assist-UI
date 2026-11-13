@@ -372,11 +372,7 @@ static lv_obj_t *d_head_l, *d_row_l[12];
 
 /* E SYSTEM: the rest of the radio, from here */
 typedef enum {
-    SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_CLASSIC, SYS_SHELL,
-#ifdef BOARD_X6200
-    SYS_BASEFW,
-#endif
-    SYS_HOME, SYS_N
+    SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_CLASSIC, SYS_SHELL, SYS_BASEFW, SYS_HOME, SYS_N
 } sysitem_t;
 static const struct {
     const char *name, *about;
@@ -402,6 +398,9 @@ static const struct {
     {"BASE FIRMWARE", "XIEGU'S X6200 BASE FIRMWARE, ANY RELEASE, FETCHED FROM XIEGU.EU AND WRITTEN FROM HERE AS XIEGU'S "
                       "OWN UPGRADE SCREEN DOES IT, WITH THE KERNEL'S MESSAGES AND THE BASE'S PORT SHOWN AS IT GOES. THE "
                       "BASE SWITCHES THE RADIO OFF A FEW MINUTES AFTER: SWITCH IT ON AGAIN."},
+#else
+    {"BASE FIRMWARE", "NOT SUPPORTED ON THE X6100: THE BASE FIRMWARE UPDATER IS THE X6200'S ONLY, AND NOTHING OF IT IS IN "
+                      "THIS RADIO'S SOFTWARE. THE X6100'S BASE IS WRITTEN ANOTHER WAY, WITH XIEGU'S OWN SYSTEM."},
 #endif
     {"START IN", "WHERE THE RADIO STARTS AND COMES BACK TO WHEN AN APP CLOSES: THE SENTRY, OR THE CLASSIC RADIO "
                  "SCREEN. PUSH TO SWITCH."},
@@ -2571,6 +2570,8 @@ static void sys_open_async(void *arg) {
         case SYS_SHELL: main_screen_open_dialog(dialog_shell); break;
 #ifdef BOARD_X6200
         case SYS_BASEFW: main_screen_open_dialog(dialog_base_update); break;
+#else
+        case SYS_BASEFW: msg_update_text_fmt("Base firmware updates are not supported on the X6100"); break;
 #endif
         case SYS_CLASSIC:
             main_screen_home_pause(true);   /* not straight back here */

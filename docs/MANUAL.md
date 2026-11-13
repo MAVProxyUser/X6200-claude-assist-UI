@@ -545,7 +545,8 @@ Its controls, on every screen (GEN shows them, as does a tap on the title):
   there last. F2 listens to the band chosen, F3 puts it in or out of the SWEEP.
 - **D DECODE**: the decoders and the frequencies they work on. F2 opens the one chosen there, F4 the next kind.
 - **E SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the classic radio screen, a shell,
-  the [base firmware](#the-x6200s-base-firmware-from-openx6x00) and where the radio starts. F2 opens the item
+  the [base firmware](#the-x6200s-base-firmware-from-openx6x00) (the X6200's; on an X6100 the item says it is
+  not supported) and where the radio starts. F2 opens the item
   chosen, F5 the classic radio screen. Its title says the GUI's commit and the base's version
   (`SYSTEM CONTROL: c6e93af - base 1.0.8`).
 
