@@ -600,8 +600,7 @@ web configurator (System > Update).
   Install downloads its update
   bundle (the GUI and its FT8 library, the web pages, the helpers and their
   data, about 14 MB),
-  checks every file against the bundle's list of SHA-256 sums (and the list
-  against the project's signature on an image that carries a key), puts the files in place
+  checks every file against the bundle's list of SHA-256 sums, puts the files in place
   with the previous ones kept, and restarts the radio software: the screen
   goes dark for a few seconds. Settings, logs and everything on the DATA
   partition stay as they are, your own [boot picture](#boot-picture) too.
@@ -638,17 +637,16 @@ web configurator (System > Update).
   of each browser's key: Forget all (Settings > General > BROWSER REMOTE), on
   either version, before pairing, so that the first browser paired is the
   admin again.
-- This fork's images carry no key (`/usr/share/x6100/update.pub`) and take
-  unsigned bundles, so neither this repository nor a fork of it has a key to
-  keep: a download rests on HTTPS to GitHub and the repository's owner. An
-  image with a key in it (RF.Guru's) checks the bundle's signature and refuses
-  an unsigned one unless `/mnt/update/allow-unsigned` is there. Bundles are
-  made by `tools/update/mkbundle.py` (signed only when given a key).
-- A radio whose card image still has RF.Guru's key (any image from before
-  this change, upstream's included) refuses this fork's bundles: an update
-  replaces files but does not take the key away. Write this fork's card
-  image once, or create `/mnt/update/allow-unsigned` (`touch` it over SSH);
-  from then on the radio updates from this fork by itself.
+- Nothing is signed, and there is no key for this repository or a fork of it
+  to keep: a download rests on HTTPS to GitHub and the repository's owner,
+  each file on the bundle's SHA-256 list. Bundles are made by
+  `tools/update/mkbundle.py`. RF.Guru's releases are not looked at.
+- A radio on an older card image (any from before 13 November 2026, RF.Guru's
+  included) has RF.Guru's updater: it asks RF.Guru's releases and wants their
+  signature. Write this fork's card image once; or, keeping the card,
+  `touch /mnt/update/allow-unsigned` over SSH and give the web Update page
+  this fork's bundle file once. From then on the radio updates from this
+  fork by itself.
 - A release: push a tag with the version of `src/main.h` (this fork numbers
   its own after upstream's, `v0.3.9.1`, `v0.3.9.2`, so the radio sees each as
   newer); GitHub builds both radios' images and bundles and makes the

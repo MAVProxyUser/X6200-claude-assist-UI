@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # OpenX6X00 updater: the GUI, the web server, the helpers and the data they install, replaced on
-# the running radio from a signed bundle (tools/update/mkbundle.py), with a journal and the previous
+# the running radio from a bundle (tools/update/mkbundle.py), with a journal and the previous
 # files kept so a bad version goes back by itself. Every command prints one line or one JSON object
 # on stdout, exit 0/1.
 #
@@ -63,11 +63,8 @@ def _read(path):
 
 REPO = update_repo()
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
-# The bundles' signature is checked only when the image carries a public key. This fork's images carry none and
-# take unsigned bundles: there is no key to keep, and a fork of it updates from its own releases as they are. What
-# a download then rests on is HTTPS to GitHub and the repository's owner. An image built with update.pub in it
-# (RF.Guru's) still refuses a bundle without a valid signature
-PUB = "/usr/share/x6100/update.pub"
+# Bundles carry no signature and none is asked for: there is no key to keep, and a fork updates from its own
+# releases as they are. A download rests on HTTPS to GitHub and the repository's owner, each file on the manifest
 VERSION_FILE = "/usr/share/x6100/app-version"
 IMAGE_STAMP = "/etc/openx6x00-image"                 # written by the image build only, never by an update
 IMAGE_REQUIRED = "/usr/share/x6100/image-required"   # comes with each version
@@ -79,7 +76,6 @@ PENDING = os.path.join(STATE, "pending.json")
 LAST = os.path.join(STATE, "last.json")
 WORK = "/mnt/update"                  # the download and the staging: the DATA partition has the room
 PROGRESS = os.path.join(WORK, ".progress")
-ALLOW_UNSIGNED = os.path.join(WORK, "allow-unsigned")
 ALLOWED = ("/usr/sbin/", "/usr/bin/", "/usr/lib/", "/usr/share/x6100/",
            "/etc/init.d/", "/etc/")
 MAX_STARTS = 3                        # GUI starts without a confirm before the rollback
@@ -347,29 +343,8 @@ def read_manifest(tar):
         mjson = tar.extractfile("manifest.json").read()
     except (KeyError, AttributeError):
         raise Fail("not an update bundle: no manifest")
-    try:
-        sig = tar.extractfile("manifest.sig").read()
-    except (KeyError, AttributeError):
-        sig = None
-    if not os.path.exists(PUB):
-        pass                    # no key in this image: bundles are taken without a signature (PUB above)
-    elif sig is None:
-        if not os.path.exists(ALLOW_UNSIGNED):
-            raise Fail("the bundle is not signed")
-    else:
-        os.makedirs(WORK, exist_ok=True)
-        mpath, spath = os.path.join(WORK, ".manifest"), os.path.join(WORK, ".manifest.sig")
-        with open(mpath, "wb") as f:
-            f.write(mjson)
-        with open(spath, "wb") as f:
-            f.write(sig)
-        try:
-            r = subprocess.run(["openssl", "dgst", "-sha256", "-verify", PUB, "-signature", spath, mpath],
-                               capture_output=True, timeout=60)
-        except OSError:
-            raise Fail("openssl is missing: the signature cannot be checked")
-        if r.returncode != 0:
-            raise Fail("the signature does not match: not a bundle made for this firmware")
+    # No signature: a manifest.sig in an older bundle is left unread. Each file is checked against the manifest's
+    # SHA-256 below; where the bundle came from is the repository's releases over HTTPS, or the owner's own file
     try:
         m = json.loads(mjson)
     except ValueError:
@@ -455,7 +430,7 @@ def apply(m):
         os.replace(tmp, p)
         f["done"] = True
         save(JOURNAL, journal)
-    # The version file follows the signed manifest, whatever the bundle's copy says (a bundle built
+    # The version file follows the manifest, whatever the bundle's copy says (a bundle built
     # without a configure carried a stale one); the rollback restores the previous one from PREV
     if running_version() != m["version"]:
         tmp = VERSION_FILE + ".x6new"

@@ -463,12 +463,8 @@ rm -rf $BR/build/target/usr/share/x6100/themes
 make
 
 echo "== Update bundle (tools/update/mkbundle.py): what x6100-update installs on a running radio"
-# Signed with $UPDATE_KEY (default: $HOME/.config/openx6x00/update-key.pem, so inside the container
-# /work/.brhome/.config/openx6x00/update-key.pem); unsigned without it, which a radio only takes with
-# /mnt/update/allow-unsigned present
+# Not signed: the radio checks each file against the bundle's own SHA-256 list (x6100-update), and there is no key
 VER=$(sed -n 's/.*define VERSION.* v\([0-9.]*\).*/\1/p' $GUI/src/main.h)
-KEY=${UPDATE_KEY:-$HOME/.config/openx6x00/update-key.pem}
-KEYARG=""; [ -f "$KEY" ] && KEYARG="--key $KEY"
 # The FT8 library goes in too (mkbundle.py LIB_FILES): the ft8lib package at the tree's pin, installed in target/ by
 # this build (an X6200 card image up to v0.3.8 has 117022b). Buildroot installs a version once: a tree that had
 # another pin after this one (the X6200's had 117022b) keeps that one's file in target/ when it comes back to this
@@ -479,7 +475,7 @@ FT8LIB_STAMP=$BR/build/build/ft8lib-$FT8LIB_VER/.stamp_target_installed
     { echo "ft8_lib $FT8LIB_VER: another version was installed in target/ after it (make ft8lib-dirclean, build again)"; exit 1; }
 echo "   ft8_lib ${FT8LIB_VER:0:7}: /usr/lib/libft8.so $(sha256sum $BR/build/target/usr/lib/libft8.so | cut -c1-12)"
 python3 $GUI/tools/update/mkbundle.py --target $BR/build/target --manifest $(ls -d $BR/build/build/$GUI_PKG-*/install_manifest.txt | head -1) \
-    --version $VER --model $MODEL --out $BR/build/images/$OUT-v$VER-update.tar.gz $KEYARG
+    --version $VER --model $MODEL --out $BR/build/images/$OUT-v$VER-update.tar.gz
 
 cp $BR/build/images/sdcard.img $BR/build/images/$OUT-local-sdcard.img
 ls -la $BR/build/images/$OUT-local-sdcard.img

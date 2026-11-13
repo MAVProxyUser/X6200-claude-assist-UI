@@ -78,7 +78,7 @@ def refuse_other_sites():
     The page's port counts too (review of #105): Pat's mailbox is on port 8080 of the same names, opens a received
     message's attachments there and shows the names of its files as they came, so a script in a message could run
     on Pat's page. What such a page sends without asking first passed: a form's POST (an update bundle, an older
-    signed one too, Go back to the previous version, Upgrade, the uploads). A change sent as JSON, a PUT or a DELETE
+    one too, Go back to the previous version, Upgrade, the uploads). A change sent as JSON, a PUT or a DELETE
     the browser asks for first (CORS), which these pages never allow"""
     req = bottle.request
     if via_funnel():

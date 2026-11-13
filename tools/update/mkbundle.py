@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 """Makes the update bundle the radio installs by itself (rootfs/usr/sbin/x6100-update): the files
-the GUI and the web server put in the buildroot target, and the FT8 library the GUI links, a
-manifest with a SHA-256 per file, and an ECDSA P-256 / SHA-256 signature of the manifest (what the
-radio's OpenSSL 1.1.1 can check).
+the GUI and the web server put in the buildroot target, and the FT8 library the GUI links, and a
+manifest with a SHA-256 per file, which the radio checks every file against. No signature: this
+fork's radios ask for none, so there is no key to keep (x6100-update).
 
   python3 tools/update/mkbundle.py --target <buildroot target dir> \\
       --manifest <build/x6100-gui-*/install_manifest.txt> --version 0.2.0 \\
-      --out OpenX6X00-x6100-v0.3.2-update.tar.gz [--key update-key.pem] [--notes "..."]
-
-The key is the EC private key whose public half is rootfs/usr/share/x6100/update.pub
-(openssl ecparam -name prime256v1 -genkey -noout -out key.pem); without it the bundle is
-unsigned and a radio only takes it with /mnt/update/allow-unsigned present. Signing uses the
-openssl command.
+      --out OpenX6X00-x6100-v0.3.2-update.tar.gz [--notes "..."]
 
 SPDX-License-Identifier: LGPL-2.1-or-later
 Copyright (c) 2026 Joeri Van Dooren ON6URE / Guru-RF
@@ -21,7 +16,6 @@ import hashlib
 import io
 import json
 import os
-import subprocess
 import sys
 import tarfile
 import time
@@ -44,7 +38,6 @@ def main():
     ap.add_argument("--manifest", required=True, help="the GUI's CMake install_manifest.txt")
     ap.add_argument("--version", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--key")
     ap.add_argument("--notes", default="")
     ap.add_argument("--model", default="x6100", choices=["x6100", "x6200"], help="the radio the bundle is built for")
     a = ap.parse_args()
@@ -76,13 +69,6 @@ def main():
                 "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "notes": a.notes, "files": entries}
     mjson = json.dumps(manifest, indent=1, sort_keys=True).encode()
 
-    sig = b""
-    if a.key:
-        r = subprocess.run(["openssl", "dgst", "-sha256", "-sign", a.key], input=mjson, capture_output=True)
-        if r.returncode != 0:
-            sys.exit("signing failed: " + r.stderr.decode())
-        sig = r.stdout
-
     def add_bytes(tar, name, data, mode=0o644):
         ti = tarfile.TarInfo(name)
         ti.size, ti.mode, ti.mtime = len(data), mode, int(time.time())
@@ -90,12 +76,10 @@ def main():
 
     with tarfile.open(a.out, "w:gz") as tar:
         add_bytes(tar, "manifest.json", mjson)
-        if sig:
-            add_bytes(tar, "manifest.sig", sig)
         for e in entries:
             tar.add(os.path.join(a.target, e["path"].lstrip("/")), "files" + e["path"], recursive=False)
     total = sum(e["size"] for e in entries)
-    print(f"{a.out}: {len(entries)} files, {total / 1e6:.1f} MB, {'signed' if sig else 'UNSIGNED'}")
+    print(f"{a.out}: {len(entries)} files, {total / 1e6:.1f} MB")
 
 
 if __name__ == "__main__":
