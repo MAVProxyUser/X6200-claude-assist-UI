@@ -376,37 +376,47 @@ def stage(bundle):
     os.makedirs(st)
     # Decompressed by the system's gzip: the radio's Python may come without zlib
     plain = os.path.join(WORK, "bundle.tar")
-    with open(plain, "wb") as f:
-        r = subprocess.run(["gzip", "-dc", bundle], stdout=f, stderr=subprocess.PIPE)
-    if r.returncode != 0:
-        raise Fail("not a gzip file")
-    with tarfile.open(plain, "r:") as tar:
-        m = read_manifest(tar)
-        n = len(m["files"])
-        for i, e in enumerate(m["files"]):
-            progress("verify", i, n)
-            try:
-                src = tar.extractfile("files" + e["path"])
-            except KeyError:
-                src = None
-            if src is None:
-                raise Fail(f"{e['path']} is missing from the bundle")
-            dest = os.path.join(st, e["path"].lstrip("/"))
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            h = hashlib.sha256()
-            with open(dest, "wb") as f:
-                while True:
-                    chunk = src.read(65536)
-                    if not chunk:
-                        break
-                    h.update(chunk)
-                    f.write(chunk)
-                f.flush()
-                os.fsync(f.fileno())
-            if h.hexdigest() != e.get("sha256"):
-                raise Fail(f"{e['path']} does not match its checksum")
-            os.chmod(dest, int(str(e.get("mode", "644")), 8))
-    os.remove(plain)
+    # A bundle refused (another radio's, a checksum, not a bundle at all) leaves nothing behind on DATA: the
+    # unpacked tar goes whatever happens, the staged files with it when the bundle is refused
+    try:
+        with open(plain, "wb") as f:
+            r = subprocess.run(["gzip", "-dc", bundle], stdout=f, stderr=subprocess.PIPE)
+        if r.returncode != 0:
+            raise Fail("not a gzip file")
+        with tarfile.open(plain, "r:") as tar:
+            m = read_manifest(tar)
+            n = len(m["files"])
+            for i, e in enumerate(m["files"]):
+                progress("verify", i, n)
+                try:
+                    src = tar.extractfile("files" + e["path"])
+                except KeyError:
+                    src = None
+                if src is None:
+                    raise Fail(f"{e['path']} is missing from the bundle")
+                dest = os.path.join(st, e["path"].lstrip("/"))
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                h = hashlib.sha256()
+                with open(dest, "wb") as f:
+                    while True:
+                        chunk = src.read(65536)
+                        if not chunk:
+                            break
+                        h.update(chunk)
+                        f.write(chunk)
+                    f.flush()
+                    os.fsync(f.fileno())
+                if h.hexdigest() != e.get("sha256"):
+                    raise Fail(f"{e['path']} does not match its checksum")
+                os.chmod(dest, int(str(e.get("mode", "644")), 8))
+    except BaseException:
+        shutil.rmtree(st, ignore_errors=True)
+        raise
+    finally:
+        try:
+            os.remove(plain)
+        except FileNotFoundError:
+            pass
     return m
 
 
