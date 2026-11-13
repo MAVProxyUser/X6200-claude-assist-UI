@@ -175,7 +175,26 @@ The patched X6100 base comes with its own instructions.
 
 ## Screenshots
 
-Taken on 25 October 2026 on an X6200 (base 1.0.8) on an antenna, during the
+### This fork: the Sentry look (X6200)
+
+Taken on 12 and 13 November 2026 on an X6200 in Dublin, Ohio, on its own
+antenna; the aircraft are real, heard by a GNS 5890 ADS-B stick on its USB port.
+
+| | |
+|---|---|
+| ![A SCAN](docs/readme/a_scan.png) **A SCAN**, the screen the radio starts in | ![C BANDS](docs/readme/c_bands.png) **C BANDS** |
+| ![D DECODE](docs/readme/d_decode.png) **D DECODE** | ![E SYSTEM](docs/readme/e_system.png) **E SYSTEM** |
+| ![AIRSPACE](docs/readme/f_airspace.png) **AIRSPACE**: ADS-B from a GNS 5890 or a microADSB on USB | ![Settings](docs/readme/settings.png) **Settings**, in the same look |
+| ![APP](docs/readme/apps.png) **APP** | ![Modes](docs/readme/modes.png) **Modes** |
+| ![FT8](docs/readme/ft8.png) **FT8** | ![Classic radio](docs/readme/classic.png) **Classic radio** |
+
+**Inspiration.** The look is borrowed from the remote sentry guns of James
+Cameron's *Aliens* (1986, 20th Century Fox) and their amber-on-black screens,
+as in this clip, "Aliens 1986 Turrets" (Mic Mitja, YouTube):
+
+[![Aliens 1986 Turrets, on YouTube](https://img.youtube.com/vi/IS2PtmM9mwU/hqdefault.jpg)](https://www.youtube.com/watch?v=IS2PtmM9mwU)
+
+**Upstream's screens.** Taken on 25 October 2026 on an X6200 (base 1.0.8) on an antenna, during the
 CQ WW SSB weekend: the signals, decodes and spots are real. The X6100 runs
 the same GUI. How they are taken: [docs/screenshots](docs/screenshots/README.md).
 
