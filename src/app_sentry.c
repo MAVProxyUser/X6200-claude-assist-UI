@@ -760,6 +760,9 @@ static void bracket(uint32_t *px, int x, int w, uint32_t c) {
     }
 }
 
+static uint8_t  level_of(float db);
+static uint32_t scale_rgb(uint32_t c, float f);
+
 static void draw_spectrum(void) {
     uint32_t *px   = (uint32_t *)frame->data;
     uint32_t  bg   = argb(ink), grid = argb(faint), fill = argb(dim), line = argb(amb);
@@ -780,12 +783,16 @@ static void draw_spectrum(void) {
         for (int x = 0; x < IMG_W; x += 3) px[y * IMG_W + x] = grid;
     }
     for (int x = 0; x < IMG_W; x++) {
-        int   b = bin_of(hz_of_px(x + 0.5));
-        int   y = y_of(b >= 0 && b < nbins ? avg_db[b] : bot_db);
-        int   y0 = prev < 0 ? y : prev < y ? prev : y, y1 = prev < 0 ? y : prev > y ? prev : y;
+        int      b  = bin_of(hz_of_px(x + 0.5));
+        float    db = b >= 0 && b < nbins ? avg_db[b] : bot_db;
+        int      y  = y_of(db);
+        int      y0 = prev < 0 ? y : prev < y ? prev : y, y1 = prev < 0 ? y : prev > y ? prev : y;
+        /* coloured by level as the 3D picture's front row: deep orange in the noise, yellow at the top */
+        uint8_t  v    = level_of(db);
+        uint32_t edge = d3_pal[v], body = scale_rgb(d3_pal[v / 2], 0.45f);
 
-        for (int yy = y + 1; yy < SPEC_H; yy++) px[yy * IMG_W + x] = fill;
-        for (int yy = y0; yy <= y1; yy++) px[yy * IMG_W + x] = line;
+        for (int yy = y + 1; yy < SPEC_H; yy++) px[yy * IMG_W + x] = yy == y + 1 ? scale_rgb(edge, 0.8f) : body;
+        for (int yy = y0; yy <= y1; yy++) px[yy * IMG_W + x] = edge;
         prev = y;
     }
     for (int i = 0; i < ntg; i++) {
@@ -1426,7 +1433,7 @@ static void show_screen(void) {
 
     lv_label_set_text(badge_l[0], l);
     lv_label_set_text(badge_l[1], l);
-    lv_label_set_text_fmt(title_l, "XR 6200-L  %s", titles[scr]);
+    lv_label_set_text_fmt(title_l, "XIEGU X6200  %s", titles[scr]);
     for (int i = 0; i < 5; i++) buttons_refresh(&btn[i]);
     show_keys();
     show_legend();
