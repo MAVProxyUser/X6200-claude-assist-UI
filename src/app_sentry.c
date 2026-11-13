@@ -1271,7 +1271,7 @@ static void show_decode(void) {
                                  : d->app == ACTION_APP_NAVTEX ? "THE NAVTEX APP"
                                  : d->app == ACTION_APP_WEFAX ? "THE WEFAX APP"
                                  : d->app == ACTION_APP_JS8   ? "THE JS8 APP"
-                                                              : "MAIN SCREEN, CW MODE");
+                                                              : "THE MAIN SCREEN");   /* in CW: the text says so */
     opt_set(&d_ant, 0, s, 0);
     opt_set(&d_ant, 1, "F2 OR PRESS: OPEN", 2);
     {

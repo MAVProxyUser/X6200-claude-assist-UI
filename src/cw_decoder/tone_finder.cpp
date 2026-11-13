@@ -139,7 +139,12 @@ void ToneFinder::analyse(float lock_hz, PeakReport &out) {
     std::nth_element(sorted_.begin(), sorted_.begin() + k, sorted_.begin() + n);
     float now = sorted_[k];
 
-    if (noise_ < 0.0f) {
+    /* A floor of 0 is no floor: seeded in digital silence (a replay's null sink, the capture's lost samples
+     * filled with zeros, audio muted right after TX) it never moved again. The receiver steps the key
+     * detector only over a floor above 0, so the detector's steps since key up stayed at 0, which held the
+     * floor (hold_) at 0 for good and the decoder was deaf. It is seeded again from the first frame with a
+     * level; that is the band's 25th percentile, so a mark in progress does not lift it. */
+    if (noise_ <= 0.0f) {
         noise_ = now;
     } else if (tx_) {
         wait_n_ = 0;
