@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
-"""Reads a GNS 5890 ADS-B stick (04d8:f8e8) and lists the aircraft it hears. Receive only, Python's standard library
-only, so it runs on the X6200 itself.
+"""Reads a USB ADS-B receiver and lists the aircraft it hears: a GNS 5890 (04d8:f8e8) or a microADSB (sprut's
+adsbPIC, 04d8:000a). Receive only, Python's standard library only, so it runs on the X6200 itself. The GUI's AIRSPACE
+screen (src/adsb_rx.c, src/adsb.c) reads them the same way.
 
-The stick is a CDC-ACM serial device that streams Mode-S frames as ASCII hex, "*8D4840D6202CC371C32CE0576098;"
-(112 bits) or "*5D4840D6F3A1B2;" (56 bits), with no command needed to start (GNS's AdsbTest app, AdsbUsbDriver.java,
-only reads). It names itself vendor-specific (device class ff), so Linux's cdc_acm does not take it by its interfaces;
-until it does, tell cdc_acm its ID, once per boot or plug:
+Both are CDC-ACM serial devices streaming Mode-S frames as ASCII hex, "*8D4840D6202CC371C32CE0576098;" (112 bits) or
+"*5D4840D6F3A1B2;" (56 bits), or with a 48-bit time stamp first, "@0000626E0AE8<frame>;".
+- GNS 5890: sends with no command (GNS's AdsbTest app, AdsbUsbDriver.java, only reads). It names itself
+  vendor-specific (device class ff), so Linux's cdc_acm does not take it by its interfaces; until it does, tell
+  cdc_acm its ID, once per boot or plug:
 
-    echo "04d8 f8e8" > /sys/bus/usb/drivers/cdc_acm/new_id      # then /dev/ttyACM0
+      echo "04d8 f8e8" > /sys/bus/usb/drivers/cdc_acm/new_id      # then /dev/ttyACM0
+
+- microADSB: silent till told what to send. "#00" gives its firmware ("#00-00-0E-..."), "#43-03" DF17-19 frames
+  (the mode's low nibble: 2 all, 3 DF17-19, 4 those with a good CRC; 0x10 time stamps, 0x20 frame numbers, 0x40 a
+  heartbeat, 0x80 binary). Its V.14 firmware time-stamps every frame whatever the mode. Sent here when the port's USB
+  device says it is one (--init sends it anyway).
 
 Decoded, as in AdsbManager.java: DF17, DF18 (CF 0, 1) and DF19 (CF 0) with a good CRC: the call sign (TC 1-4),
 barometric altitude and position (TC 9-18, even/odd CPR, globally from a pair or locally near the receiver), and
 speed, track and vertical rate (TC 19). Range and bearing are from --lat/--lon (default the centre of EN80kc).
 
-    gns5890.py [--dev /dev/ttyACM0] [--seconds 60] [--every 5] [--raw] [--lat 40.104 --lon -83.125]
+    adsb_read.py [--dev /dev/ttyACM0] [--seconds 60] [--every 5] [--raw] [--init] [--lat 40.104 --lon -83.125]
 """
 import argparse
 import math
@@ -184,8 +191,26 @@ class Decoder:
         p.pos_time = now
 
 
+def receiver_of(dev):
+    """'MICROADSB', 'GNS 5890' or '' from the USB device behind /dev/ttyACMn"""
+    base = "/sys/class/tty/%s/device/.." % os.path.basename(dev)
+
+    def get(f):
+        try:
+            with open(os.path.join(base, f)) as h:
+                return h.read().strip()
+        except OSError:
+            return ""
+    vid, pid, prod = get("idVendor"), get("idProduct"), get("product")
+    if (vid, pid) == ("04d8", "f8e8"):
+        return "GNS 5890"
+    if (vid, pid) == ("04d8", "000a") and "ADSB" in prod:
+        return "MICROADSB"
+    return ""
+
+
 def open_stick(dev):
-    fd = os.open(dev, os.O_RDONLY | os.O_NOCTTY | os.O_NONBLOCK)
+    fd = os.open(dev, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     attr = termios.tcgetattr(fd)
     attr[0] = 0                                                     # iflag: raw
     attr[1] = 0                                                     # oflag
@@ -234,13 +259,20 @@ def main():
     ap.add_argument("--seconds", type=float, default=60.0, help="how long to listen, 0 for ever")
     ap.add_argument("--every", type=float, default=5.0, help="seconds between tables")
     ap.add_argument("--raw", action="store_true", help="print every frame as it comes")
+    ap.add_argument("--init", action="store_true", help="send the microADSB's start commands whatever the device")
     ap.add_argument("--lat", type=float, default=40.104)            # EN80kc
     ap.add_argument("--lon", type=float, default=-83.125)
     a = ap.parse_args()
 
     fd = open_stick(a.dev)
+    rx = receiver_of(a.dev)
+    print("receiver: %s on %s" % (rx or "unknown", a.dev), flush=True)
+    if rx == "MICROADSB" or a.init:
+        for cmd in (b"#00\r", b"#43-03\r"):
+            os.write(fd, cmd)
+            time.sleep(0.15)
     dec = Decoder(a.lat, a.lon)
-    buf, inside, nbytes = "", False, 0
+    buf, inside, stamped, reply, nbytes = "", False, False, None, 0
     start = last = time.time()
     try:
         while not a.seconds or time.time() - start < a.seconds:
@@ -252,11 +284,20 @@ def main():
                     sys.exit("the stick went away")
                 nbytes += len(chunk)
                 for ch in chunk.decode("ascii", "replace"):
-                    if ch in "*@":
-                        buf, inside = "", True
+                    if reply is not None:                   # "#00-00-0E-...": a command's answer, to its line end
+                        if ch in "\r\n":
+                            print("%s %s" % (time.strftime("%H:%M:%S"), reply), flush=True)
+                            reply = None
+                        else:
+                            reply += ch
+                        continue
+                    if ch == "#":
+                        reply, inside = "#", False
+                    elif ch in "*@":
+                        buf, inside, stamped = "", True, ch == "@"
                     elif ch == ";" and inside:
                         inside = False
-                        hexstr = buf[12:] if len(buf) in (26, 40) else buf     # "@": a 48-bit time stamp first
+                        hexstr = buf[12:] if stamped else buf  # "@": a 48-bit time stamp first
                         got = dec.frame(hexstr, now)
                         if a.raw:
                             print("%s %s%s" % (time.strftime("%H:%M:%S"), hexstr,

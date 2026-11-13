@@ -238,6 +238,14 @@ def i_scan(p):       # a sweep through the channels, stopped on one
     p.poly([(49, 12), (65, 12), (57, 24)])
 
 
+def i_adsb(p):       # an aircraft over two range rings, a sweep from the middle: AIRSPACE (ADS-B)
+    p.ring(50, 50, 44, w=p.w // 2 + 1, start=200, end=340)
+    p.ring(50, 50, 26, w=p.w // 2 + 1, start=190, end=350)
+    p.line([(50, 50), (82, 18)], w=p.w // 2 + 1)
+    p.poly([(50, 46), (54, 56), (80, 66), (80, 72), (54, 66), (53, 82), (60, 88), (60, 92), (50, 89), (40, 92),
+            (40, 88), (47, 82), (46, 66), (20, 72), (20, 66), (46, 56)])
+
+
 ICONS = {n[2:]: f for n, f in globals().items() if n.startswith("i_") and callable(f)}
 
 

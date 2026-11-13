@@ -53,6 +53,7 @@ static const struct {
     {"Propagation", "Conditions, beacons", "prop", OPEN_APP, ACTION_APP_PROPAGATION},
 #ifdef BOARD_X6200
     {"Sentry", "Scan, track, bands, decoders", "sentry", OPEN_APP, ACTION_APP_SENTRY},
+    {"Airspace", "ADS-B aircraft on USB", "adsb", OPEN_APP, ACTION_APP_ADSB},
 #endif
     {"Channels", "Memory channels", "channels", OPEN_APP, ACTION_APP_CHANNELS},
     {"Scanner", "Stops on activity", "scan", OPEN_APP, ACTION_APP_SCAN},

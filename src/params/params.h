@@ -79,6 +79,7 @@ typedef enum {
     ACTION_APP_SCAN,     /* 127: Scanner */
     ACTION_APP_FREEDV,   /* 128: RADE (FreeDV) */
     ACTION_APP_SENTRY,   /* 129: Sentry, the listener's receiver on the X6200 base's whole spectrum */
+    ACTION_APP_ADSB,     /* 130: AIRSPACE, aircraft from a GNS 5890 ADS-B stick on USB */
 } press_action_t;
 
 typedef enum {

@@ -208,6 +208,14 @@ class SettingsManager {
     // menu opened from it closes (screen_main.c main_screen_dialog_closed)
     Parameter<int32_t> p_sentry_home{"sentry_home", true, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The AIRSPACE (ADS-B) screen, app_adsb.c: the scope's range (5..250 NM, an index), how long history stays
+    // (OFF, 1..60 MIN, HOLD: an index, 5 MIN by default) and whether the tracks are drawn
+    Parameter<int32_t> p_adsb_range{"adsb_range", 3, 0, 6,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_adsb_decay{"adsb_decay", 3, 0, 7,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_adsb_trails{"adsb_trails", true, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     // Walkie Talkie: a portrait screen instead of the main one (live)
     Parameter<int32_t> p_walkie{"walkie", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};

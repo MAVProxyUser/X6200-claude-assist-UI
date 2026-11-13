@@ -92,6 +92,7 @@
 #include "apps_menu.h"
 #include "dialog_birdie.h"
 #include "app_sentry.h"
+#include "app_adsb.h"
 #include "control_owner.h"
 #include "kbd_hyper.h"
 #include "kbd_ptt.h"
@@ -500,6 +501,7 @@ static const char *app_name(press_action_t a) {
         case ACTION_APP_SCAN:       return "Scanner";
         case ACTION_APP_FREEDV:     return "RADE";
         case ACTION_APP_SENTRY:     return "Sentry";
+        case ACTION_APP_ADSB:       return "Airspace";
         default:                   return NULL;    /* Modes menu: a menu, not an app */
     }
 }
@@ -599,6 +601,7 @@ void main_screen_start_app(press_action_t app_action) {
         {ACTION_APP_SCAN, &dialog_scan},
         {ACTION_APP_FREEDV, &dialog_freedv},
         {ACTION_APP_SENTRY, &dialog_sentry},
+        {ACTION_APP_ADSB, &dialog_adsb},
     };
 
     if (app_action == ACTION_APP_RTTY) {

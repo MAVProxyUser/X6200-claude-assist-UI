@@ -71,6 +71,9 @@ extern ParamInt         *cfg_spectrum_height;    // p_spectrum_height
 extern ParamInt         *cfg_digi_text_compact;  // p_digi_text_compact
 extern ParamInt         *cfg_cluster_spots_wf;   // p_cluster_spots_wf
 extern ParamInt         *cfg_sentry_home;        // p_sentry_home
+extern ParamInt         *cfg_adsb_range;         // p_adsb_range
+extern ParamInt         *cfg_adsb_decay;         // p_adsb_decay
+extern ParamInt         *cfg_adsb_trails;        // p_adsb_trails
 extern ParamInt         *cfg_walkie;             // p_walkie
 extern ParamInt         *cfg_walkie_mem;         // p_walkie_mem
 extern ParamInt         *cfg_walkie_ch;          // p_walkie_ch

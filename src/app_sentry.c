@@ -347,7 +347,7 @@ static box_t     d_sel, d_how, d_ant, d_now;
 static lv_obj_t *d_head_l, *d_row_l[12];
 
 /* E SYSTEM: the rest of the radio, from here */
-typedef enum { SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_CLASSIC, SYS_SHELL, SYS_HOME, SYS_N } sysitem_t;
+typedef enum { SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_CLASSIC, SYS_SHELL, SYS_HOME, SYS_N } sysitem_t;
 static const struct {
     const char *name, *about;
 } sys_items[SYS_N] = {
@@ -357,6 +357,9 @@ static const struct {
              "BIRDIE CAL. CLOSING ONE BRINGS YOU BACK HERE."},
     {"DIGITAL MODES", "THE MODES MENU: FT8, FT4, FT2, JS8, WSPR, PSK, RTTY, JTTY, OLIVIA, SSTV, WEFAX, NAVTEX, RADE. "
                       "D DECODE OPENS THEM ON KNOWN FREQUENCIES."},
+    {"AIRSPACE (ADS-B)", "AIRCRAFT ON 1090 MHZ FROM AN ADS-B RECEIVER ON USB (GNS 5890 OR MICROADSB): A SCOPE AROUND "
+                         "YOUR QTH, THEIR CALLS, HEIGHTS AND TRACKS, AND THE HISTORY FADING OUT. IT KEEPS LISTENING "
+                         "WHEN CLOSED."},
     {"CLASSIC RADIO", "THE FULL RADIO SCREEN, WITH TRANSMIT. THE SENTRY STAYS AWAY TILL YOU OPEN IT AGAIN: APP, THEN "
                       "THE SENTRY TILE."},
     {"UNIX SHELL", "A SHELL ON THE RADIO ITSELF (/BIN/SH, AS ROOT): A KEYBOARD TYPES INTO IT, TYPE OPENS THE ON-SCREEN "
@@ -1789,6 +1792,7 @@ static void sys_open_async(void *arg) {
         case SYS_SETTINGS: main_screen_start_app(ACTION_APP_SETTINGS); break;
         case SYS_APPS: main_screen_open_apps(); break;
         case SYS_MODES: main_screen_start_app(ACTION_APP_MODES); break;
+        case SYS_AIRSPACE: main_screen_start_app(ACTION_APP_ADSB); break;
         case SYS_SHELL: main_screen_open_dialog(dialog_shell); break;
         case SYS_CLASSIC:
             main_screen_home_pause(true);   /* not straight back here */
