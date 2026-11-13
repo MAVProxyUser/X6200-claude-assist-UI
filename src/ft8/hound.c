@@ -122,7 +122,7 @@ bool hound_unpack_dxpedition(const ftx_message_t *msg, char *text) {
     ftx_message_t std = {0};
     put_bits(std.payload, 0, 29, n28a << 1);
     put_bits(std.payload, 29, 29, n28b << 1);
-    put_bits(std.payload, 59, 16, 32400 + 1); /* ir 0, igrid4 MAXGRID4+1: no grid */
+    put_bits(std.payload, 58, 16, 32400 + 1); /* bit 58 ir 0, bits 59-73 igrid4 MAXGRID4+1: no grid */
     put_bits(std.payload, 74, 3, 1);          /* i3 1 */
 
     char c1[14], c2[14], extra[8], fox[14];
