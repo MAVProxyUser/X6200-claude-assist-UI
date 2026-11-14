@@ -55,7 +55,8 @@ turned with the MFK's inner ring, and SCAN CFG beside the two spectrum screens:
   comes by itself when the VFO is turned), SWEEP through the marked bands, STEP, and the signal locked on (HOLD,
   NEXT, REC, IGNORE); from B, the stick's GAIN, DWELL, STEP and SQUELCH.
 
-The title bar shows what is plugged in, in Xiegu's blue: **RTL**, **ADS-B**, **WR12**. GEN shows the controls on
+The title bar shows what is plugged in, in Xiegu's blue: **RTL**, **ADS-B**, **WR12**, and after the processor's
+temperature the battery's charge with a bolt while it charges. GEN shows the controls on
 every screen. The Sentry's look is also a theme for the whole radio: Settings, the
 on-screen keyboard, the apps and their tables all draw in amber.
 

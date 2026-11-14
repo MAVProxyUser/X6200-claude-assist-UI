@@ -485,7 +485,9 @@ static lv_obj_t *root, *scr_obj[SCR_N];
 static uint8_t  d3_lv[D3_ROWS][IMG_W];
 static int      d3_head, d3_count;
 static uint32_t d3_pal[256];
-static lv_obj_t *badge_l[2], *title_l, *status_l;
+static lv_obj_t *badge_l[2], *title_l, *status_l, *batt_l;
+extern const lv_font_t power_sym_14;    /* the clock's: Montserrat's battery and bolt, and a plug (clock.c) */
+#define SYMBOL_PLUG "\xEF\x87\xA6"     /* U+F1E6 */
 typedef struct { lv_obj_t *frame, *cap, *line, *opt[12]; int n; } box_t;     /* opt: E SYSTEM's 9 rows the most */
 static box_t     b_mode, b_tx, b_sig, b_rout, b_band, b_prof, b_tgts;
 static lv_obj_t *tick_l[TICKS], *tgt_l[LABELS];
@@ -1172,7 +1174,7 @@ static const char *titles[SCR_N] = {"MF/HF/VHF SPECTRUM", "SCAN CONFIGURATION",
                                     "SIGNAL LOG", "WALKIE TALKIE"};
 
 static void show_head(void) {
-    char       f[24], t[16], tc[12] = "";
+    char       f[24], t[16], tc[24] = "";
     time_t     now = time(NULL);
     struct tm  tm;
     int32_t    fq  = cparam_i_get(cfg_fg_freq);
@@ -1182,6 +1184,26 @@ static void show_head(void) {
     strftime(t, sizeof(t), "%H:%M %Z", &tm);
     if (c != CLOCK_NO_TEMP)             /* after the time, as the other clocks show it; none read: none shown */
         snprintf(tc, sizeof(tc), " %dC", c);
+    /* the battery's % after it, and its icon after that: the bolt charging, the plug on a supply not charging, the
+     * battery's level on the battery (the base's last word kept: its reports come and go) */
+    static float   l_bat, l_ext;
+    static uint8_t l_cap;
+    static bool    l_chg;
+    {
+        float   e, b;
+        uint8_t cp;
+        bool    ch;
+
+        clock_power_get(&e, &b, &cp, &ch);
+        if (b > 1 || e > 1) l_bat = b, l_ext = e, l_cap = cp, l_chg = ch;
+    }
+    const char *icon = "";
+    if (l_bat >= 3) {
+        snprintf(tc + strlen(tc), sizeof(tc) - strlen(tc), " %d%%", l_cap);
+        icon = l_chg && l_cap < 100 ? LV_SYMBOL_CHARGE : l_ext >= 3 ? SYMBOL_PLUG
+             : l_cap > 80 ? LV_SYMBOL_BATTERY_FULL : l_cap > 55 ? LV_SYMBOL_BATTERY_3 : l_cap > 30 ? LV_SYMBOL_BATTERY_2
+             : l_cap > 10 ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_EMPTY;
+    }
     snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
     static const char *const modes[] = {"AUTO-SCAN", "SEMI-AUTO", "MAN-OVERRIDE"};
 
@@ -1190,18 +1212,33 @@ static void show_head(void) {
     snprintf(dev, sizeof(dev), "%s%s%s", sdr_here ? "  #" RTL_BLUE " RTL#" : "", adsb_here ? "  #" RTL_BLUE " ADS-B#" : "",
              wr12_here ? "  #" RTL_BLUE " WR12#" : "");
 
+    char pre[160];
+
     if (scr == SCR_RTL || (scr == SCR_LOG && g_on >= 0 && hits[g_on].rtl)) {   /* the screen's radio: the stick */
         int64_t hz = scr == SCR_LOG ? g_hz : listen_hz;
 
         snprintf(f, sizeof(f), "RTL %lld.%03lld.%02lld", (long long)(hz / 1000000), (long long)(hz / 1000 % 1000),
                  (long long)(hz % 1000 / 10));
-        lv_label_set_text_fmt(status_l, "%s %s  %s  %s  %s%s%s", f, rtl_mode_names[rtl_mode_of(hz)],
-                              rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc, dev);
-        return;
+        snprintf(pre, sizeof(pre), "%s %s  %s  %s  %s%s", f, rtl_mode_names[rtl_mode_of(hz)],
+                 rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc);
+    } else {
+        snprintf(pre, sizeof(pre), "%s %s%s%s  %s  %s  %s%s", f, mode_name(cparam_i_get(cfg_cur_mode)),
+                 cparam_i_get(cfg_cur_pre) ? " PRE" : "", cparam_i_get(cfg_cur_att) ? " ATT" : "",
+                 rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc);
     }
-    lv_label_set_text_fmt(status_l, "%s %s%s%s  %s  %s  %s%s%s", f, mode_name(cparam_i_get(cfg_cur_mode)),
-                          cparam_i_get(cfg_cur_pre) ? " PRE" : "", cparam_i_get(cfg_cur_att) ? " ATT" : "",
-                          rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc, dev);
+    /* the line, room for the icon after the %, then the devices; the icon where that room is */
+    char line[240];
+    snprintf(line, sizeof(line), "%s%s%s", pre, icon[0] ? "   " : "", dev);
+    lv_label_set_text(status_l, line);
+    lv_label_set_text(batt_l, icon);
+    if (icon[0]) {
+        const lv_font_t *fn = &pixel_16;
+        lv_coord_t       ls = lv_obj_get_style_text_letter_space(status_l, 0);
+        lv_coord_t       w  = lv_txt_get_width(line, strlen(line), fn, ls, LV_TEXT_FLAG_RECOLOR);
+        lv_coord_t       p  = lv_txt_get_width(pre, strlen(pre), fn, ls, LV_TEXT_FLAG_NONE);
+
+        lv_obj_set_pos(batt_l, 60 + (SW - 120 - w) / 2 + p + 6, 27);
+    }
 }
 
 static void show_scan(void) {
@@ -4380,6 +4417,10 @@ static void build_head(void) {
     title_l  = label(root, &pixel_20, amb, 60, 6, SW - 120, LV_TEXT_ALIGN_CENTER, "");
     status_l = label(root, &pixel_16, amb, 60, 27, SW - 120, LV_TEXT_ALIGN_CENTER, "");
     lv_label_set_recolor(status_l, true);       /* the devices in blue */
+    batt_l = lv_label_create(root);             /* the charge's icon, after the battery's % (show_head) */
+    lv_obj_set_style_text_font(batt_l, &power_sym_14, 0);
+    lv_obj_set_style_text_color(batt_l, amb, 0);
+    lv_label_set_text(batt_l, "");
 }
 
 static void build_scan(lv_obj_t *p) {
@@ -4793,7 +4834,7 @@ static void show_walkie(void) {
     snprintf(tx, sizeof(tx), "%s", g_armed ? "TX ARMED" : rx_held ? "TX LOCKED" : "TX NOT LOCKED");
     clock_power_get(&ext, &bat, &cap, &chg);
     if (bat > 1 || ext > 1) l_bat = bat, l_ext = ext, l_cap = cap, l_chg = chg;
-    if (l_bat > 1) snprintf(pw1, sizeof(pw1), "BAT %.1f V %d%%%s", l_bat, l_cap, l_chg ? " +" : "");
+    if (l_bat > 1) snprintf(pw1, sizeof(pw1), "BAT %.1f V %d%%%s", l_bat, l_cap, l_chg ? " CHARGING" : "");
     else snprintf(pw1, sizeof(pw1), "NO BATTERY");
     snprintf(pw2, sizeof(pw2), "EXT %.1f V  TX %.0f W", l_ext, param_f_get(cfg_pwr));
     {

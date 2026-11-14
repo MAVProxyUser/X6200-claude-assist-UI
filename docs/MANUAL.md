@@ -653,7 +653,9 @@ last seconds, the strongest signals named over it and the screen's channel brack
   An alert takes the title of every Sentry screen, blinking, for its duration (15 minutes at least):
   `WX ALERT: TORNADO WARNING`, the rest in a message. Each is kept in `/mnt/wx_alerts.log`.
 - The title bar names what is on USB in Xiegu's blue (its WR12 logo's): **RTL** for an RTL-SDR, **ADS-B** for an
-  ADS-B receiver (a GNS 5890 or microADSB, or dump1090 running), **WR12** for a ready WR12.
+  ADS-B receiver (a GNS 5890 or microADSB, or dump1090 running), **WR12** for a ready WR12. After the processor's
+  temperature it gives the battery's charge and an icon: the bolt while it charges, the plug on a supply without
+  charging (full, Charger not On, or a supply under 12 V), the battery's level on the battery (`51C 34%`).
 
 ### SCAN CFG
 
