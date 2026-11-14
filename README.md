@@ -41,7 +41,8 @@ turned with the MFK's inner ring, and SCAN CFG beside the two spectrum screens:
   switching between the two by itself; **F4 SCAN** goes through the list by itself, holding on whatever is busy.
 - **D BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry last heard
   there. The airband, 2 m, marine VHF, NOAA weather, 70 cm and GMRS are in it too; its **RX** column says RTL (in
-  blue) for every band the RTL-SDR takes, and LISTEN opens those on B.
+  blue) for every band the RTL-SDR takes, and LISTEN opens those on B. **F1 SCAN** sets the band chosen on its
+  radio and scans it end to end (A for the X6200's, B for the stick's).
 - **E DECODE**: the decoders and the frequencies they work on, each a key away.
 - **F SYSTEM**: the rest of the radio in the same look: Settings, the apps, the digital modes, AIRSPACE,
   VHF/UHF, the classic radio screen, a UNIX shell on the radio's own screen, the base firmware, and which screen the

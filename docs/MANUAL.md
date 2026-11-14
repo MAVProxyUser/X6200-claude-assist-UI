@@ -634,7 +634,7 @@ last seconds, the strongest signals named over it and the screen's channel brack
   the one heard), and each is played at its own wherever it is heard later; BOTH sets the speaker at the louder and
   scales the other down in the mix. The X6200's is the radio's own volume setting; the stick's is kept beside it. The speaker changes only when A
   or B is shown (or C plays an entry); the other screens keep what was heard last. The stick plays B's channel
-  whichever screen asked for it. The mode comes from the band: wide FM from 87.5 to 108 MHz, AM on the airband,
+  whichever screen asked for it. The mode comes from the band: wide FM from 87.5 to 108 MHz, AM on the airband and below 29.5 MHz (CB),
   narrow FM elsewhere.
 - **F5 SCAN CFG**: below.
 - **The MFK** pans the picture by STEP, its push going to the strongest signal (A locks on it, B's channel goes to
@@ -698,8 +698,10 @@ X6200, half a channel on the stick) moves up with its count. Up to 64, kept on D
   last. The bands: the ham bands (60 m too), the broadcast bands, CB, FM, the marine bands the weather decoders use
   (SHIP MF, 4, 6, 8, 12, 16; UTIL 9 for NOAA's Boston fax on 9110), and the stick's: the airband, 2 m, marine VHF,
   NOAA weather, 70 cm and GMRS. **RX** says RTL (blue with a stick plugged in) for each band the RTL-SDR takes:
-  with a stick, every band from 24 MHz up. F2 (LISTEN) tunes the X6200 to the band and goes to A, or opens B on it
-  for a stick band; F3 puts it in or out of the SWEEP.
+  with a stick, every band from 24 MHz up. **F1 SCAN** sets the band chosen on its radio and scans it end to end
+  there: the X6200's on A (its F1 scan, on that band), the stick's on B (from the band's low end, heard). F2
+  (LISTEN) tunes the X6200 to the band and goes to A, or opens B on it for a stick band; F3 puts it in or out of the
+  SWEEP; F4 and F5 do nothing here.
 - **E DECODE**: the decoders and the frequencies they work on, each with D's columns for its band: BAND, BEST
   (NIGHT, DAY, ANY or LOCAL), ANTENNA and NOW. F2 opens the one chosen; F4 (TYPE) goes to the next decoder type.
 - **NOW** (D and E), one set of words: `3 SIG LIVE` (the band in the picture), `3 SIG 12 MIN` (heard 12 minutes

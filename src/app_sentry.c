@@ -141,6 +141,7 @@ static void f3_cb(button_data_t *b);
 static void f4_cb(button_data_t *b);
 static bool knob_taken(void);
 static void hear_apply(int h);
+static void scan_band(void);
 static void hear_vol_refresh(void);
 static int64_t rtl_snap(int64_t hz);
 static void osd(const char *title, const char *text, int bar);
@@ -412,7 +413,9 @@ static const char *const rtl_mode_names[] = {"", "NFM", "AM", "WFM"};
 
 /* The stick's demodulator for a frequency: broadcast FM wide, the airband AM, the rest narrow FM */
 static int rtl_mode_of(int64_t hz) {
-    return hz >= 87500000 && hz < 108000000 ? 3 : hz >= 108000000 && hz < 137000000 ? 2 : 1;
+    if (hz >= 87500000 && hz < 108000000) return 3;                 /* FM broadcast: wide FM */
+    if ((hz >= 108000000 && hz < 137000000) || hz < 29500000) return 2;     /* the airband, and CB and HF: AM */
+    return 1;                                                       /* 10 m's FM segment and up: narrow FM */
 }
 
 /* The sentry */
@@ -3585,7 +3588,7 @@ static const char *f_label(int k) {
                 snprintf(s, sizeof(s), "Sweep:\n%s", band_rt[band_sel].sweep ? "In" : "Out");
                 return s;
             } else {
-                const char *const l[] = {"Scan", "Listen", "", "Decode", "System"};
+                const char *const l[] = {"Scan", "Listen", "", "", ""};    /* F4, F5: nothing here */
                 return l[k];
             }
         case SCR_DECODE:
@@ -3721,6 +3724,38 @@ static void listen_band_x6200(int i) {
     go(SCR_SCAN);
 }
 
+/* D's SCAN (F1): the band chosen set on its radio first, then scanned end to end there: the X6200's on A (its F1
+ * scan, on this band), the stick's on B (its scan, from the band's low end, heard as LISTEN would have it) */
+static void scan_band(void) {
+    const band_t *b = &bands[band_sel];
+
+    if (band_uses_rtl(band_sel)) {
+        f_band = band_sel;
+        rtl_scan_set(false);
+        rtl_tune(b->listen_hz);
+        listen_hz = rtl_snap(b->listen_hz);
+        if (param_i_get(cfg_hear_f) == HEAR_X6200 || param_i_get(cfg_hear_f) == HEAR_OFF) param_i_set(cfg_hear_f, HEAR_RTL);
+        go(SCR_RTL);
+        rtl_scan_set(true);
+        show_screen();
+        return;
+    }
+    if (!cfg_is_valid_hw_freq(b->listen_hz)) {
+        msg_update_text_fmt("The radio can't tune %s", b->name);
+        return;
+    }
+    listen_band_x6200(band_sel);        /* tuned there, A shown */
+    scan_a_band = band_sel;             /* this band, not the one the old picture still shows */
+    if (smode == MODE_MAN) smode = MODE_SEMI;
+    set_routine(ROUT_SCAN);
+    {
+        char t[24];
+
+        snprintf(t, sizeof(t), "SCAN: %s", b->name);
+        osd(t, "THE BAND END TO END, 360 KHZ AT A TIME, LOCKING ON WHAT IT FINDS (AUTO).", -1);
+    }
+}
+
 /* C's LISTEN (F2 or a press): F for a band the stick takes, its listening frequency on the speaker, the scan off */
 static void listen_band(void) {
     const band_t *b = &bands[band_sel];
@@ -3806,7 +3841,7 @@ static void fkey(int k) {
             if (scr == SCR_TRACK) show_screen();
             break;
         case SCR_BANDS:
-            if (k == 0) go(SCR_SCAN);
+            if (k == 0) scan_band();
             if (k == 1) listen_band();
             if (k == 2) {
                 if (!cfg_is_valid_hw_freq(bands[band_sel].listen_hz)) {
@@ -3817,9 +3852,7 @@ static void fkey(int k) {
                 band_rt[band_sel].sweep = !band_rt[band_sel].sweep;
                 show_screen();
             }
-            if (k == 3) go(SCR_DECODE);
-            if (k == 4) go(SCR_SYSTEM);
-            break;
+            break;                      /* F4, F5: nothing */
         case SCR_DECODE:
             if (k == 0) go(SCR_SCAN);
             if (k == 1) open_decoder();
