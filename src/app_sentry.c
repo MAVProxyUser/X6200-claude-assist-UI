@@ -47,7 +47,9 @@
 #include "board.h"
 #include "broadcast_db.h"
 #include "buttons.h"
+#include "audio.h"
 #include "clock.h"
+#include "smeter.h"
 #include "cfg/cfg_api.h"
 #include "cfg/settings_manager_api.h"
 #include "dsp.h"
@@ -113,12 +115,13 @@ extern const lv_font_t pixel_16, pixel_20, pixel_24, pixel_28, pixel_32, pixel_4
 #define VISITED     16
 #define IGNORED     32
 
-typedef enum { SCR_SCAN, SCR_TRACK, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_RTL, SCR_LOG, SCR_N } scr_t;
+typedef enum { SCR_SCAN, SCR_TRACK, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_RTL, SCR_LOG, SCR_WALKIE, SCR_N } scr_t;
 
 /* The MFK ring's order and the screens' letters: A the X6200's spectrum, B the log, C the stick's spectrum (A and C
  * one screen, each set up for its own radio), D the bands, E the decoders, F the rest of the radio. SCAN CFG
- * (SCR_TRACK, A's settings and its lock, or C's) is on no ring: F5 on A or C opens it for that screen's radio */
-static const scr_t ring[] = {SCR_SCAN, SCR_LOG, SCR_RTL, SCR_BANDS, SCR_DECODE, SCR_SYSTEM};
+ * (SCR_TRACK, A's settings and its lock, or C's) is on no ring: F5 on A or C opens it for that screen's radio. G, the
+ * last, is the walkie-talkie */
+static const scr_t ring[] = {SCR_SCAN, SCR_LOG, SCR_RTL, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_WALKIE};
 #define RING_N (int)(sizeof(ring) / sizeof(ring[0]))
 static scr_t cfg_from = SCR_SCAN;          /* the screen SCAN CFG was opened from: its radio's settings */
 typedef enum { MODE_AUTO, MODE_SEMI, MODE_MAN } sysmode_t;
@@ -129,6 +132,7 @@ static void destruct_cb(void);
 static void key_cb(lv_event_t *e);
 static void rotary_cb(int32_t diff);
 static bool front_key(int key, int state);
+static void walkie_ptt(void);
 static void f1_cb(button_data_t *b);
 static void f2_cb(button_data_t *b);
 static void f3_cb(button_data_t *b);
@@ -1140,7 +1144,7 @@ static lv_obj_t *screen_obj(void) {
 
 static const char *titles[SCR_N] = {"REMOTE SENTRY RECEIVER SYSTEM", "SCAN CONFIGURATION",
                                     "BAND INTELLIGENCE", "DECODER SENTRY", "SYSTEM CONTROL", "VHF/UHF SPECTRUM",
-                                    "SIGNAL LOG"};
+                                    "SIGNAL LOG", "WALKIE TALKIE"};
 
 static void show_head(void) {
     char       f[24], t[16], tc[12] = "";
@@ -1318,6 +1322,12 @@ static void ignore_tap_cb(lv_event_t *e) {
 }
 
 static void show_cfg_rtl(void);
+static void show_walkie(void);
+static void walkie_step(void);
+static void walkie_ch(int dir, int to);
+static void walkie_show(bool on);
+static void walkie_tx_note(void);
+static bool g_portrait;         /* G held up: its own portrait screen shows (walkie_show) */
 
 static void show_track(void) {
     char s[96];
@@ -2301,6 +2311,7 @@ static void rtl_timer_cb(lv_timer_t *t) {
 
     (void)t;
     rtl_scan_step();
+    if (scr == SCR_WALKIE) walkie_step();
     {   /* a weather alert, whatever the screen */
         char   h[300];
         time_t at;
@@ -2597,7 +2608,7 @@ static int vol_bar(void) {
 static void show_legend(void) {
     static const char *const mfk[SCR_N] = {"PAN, PUSH STRONGEST", "NEXT TARGET, PUSH HOLD", "BAND, PUSH LISTEN",
                                            "FREQ, PUSH OPEN", "ITEM, PUSH OPEN", "PAN, PUSH STRONGEST",
-                                           "SIGNAL, PUSH LISTEN"};
+                                           "SIGNAL, PUSH LISTEN", "CHANNEL, PUSH CH 19"};
 
     char v[16];
 
@@ -2807,7 +2818,7 @@ static void show_cfg_rtl(void) {
 }
 
 static char scr_letter(scr_t s) {
-    static const char letters[SCR_N] = {'A', 'A', 'D', 'E', 'F', 'C', 'B'};      /* by scr_t; SCR_TRACK: its screen's */
+    static const char letters[SCR_N] = {'A', 'A', 'D', 'E', 'F', 'C', 'B', 'G'};  /* by scr_t; SCR_TRACK: its screen's */
 
     return s == SCR_TRACK ? letters[cfg_from] : letters[s];
 }
@@ -2837,6 +2848,7 @@ static void show_screen(void) {
         case SCR_SYSTEM: show_system(); break;
         case SCR_RTL: show_rtl(); rtl_labels_place(); break;
         case SCR_LOG: show_glog(); break;
+        case SCR_WALKIE: show_walkie(); break;
         default: break;
     }
     show_head();
@@ -3123,6 +3135,8 @@ static void go(scr_t s) {
     if (s == SCR_SCAN) hear_apply(param_i_get(cfg_hear_a));    /* A and F each put their own LISTEN on the speaker; */
     if (s == SCR_RTL) hear_apply(param_i_get(cfg_hear_f));     /* the others keep what was heard last */
     if (s == SCR_LOG) g_enter();
+    audio_scope(s == SCR_WALKIE);       /* G's voiceprint: the receiver's audio only while it shows */
+    if (was != s && (was == SCR_WALKIE || s == SCR_WALKIE)) walkie_show(s == SCR_WALKIE);
     show_screen();
 }
 
@@ -3475,6 +3489,10 @@ static const char *f_label(int k) {
             else snprintf(s, sizeof(s), "Scan Cfg");
             return s;
         }
+        case SCR_WALKIE: {
+            const char *const l[] = {"Ch -", "Ch +", "Ch 9", "Ch 19", "Tx:\nLocked"};
+            return l[k];
+        }
         case SCR_TRACK:         /* SCAN CFG: A's settings and its lock, or C's stick */
             if (cfg_from == SCR_SCAN) {
                 static const char *const m[] = {"Mode:\nAuto", "Mode:\nSemi", "Mode:\nManual"};
@@ -3679,6 +3697,13 @@ static void fkey(int k) {
                 go(SCR_TRACK);
             }
             break;
+        case SCR_WALKIE:
+            if (k == 0) walkie_ch(-1, 0);
+            if (k == 1) walkie_ch(1, 0);
+            if (k == 2) walkie_ch(0, 9);
+            if (k == 3) walkie_ch(0, 19);
+            if (k == 4) walkie_tx_note();
+            break;
         case SCR_TRACK:
             if (k == 4) {
                 go(cfg_from);           /* BACK */
@@ -3833,6 +3858,7 @@ static void step(int dir) {
             sys_sel = (sys_sel + dir + SYS_N) % SYS_N;
             show_screen();
             break;
+        case SCR_WALKIE: walkie_ch(dir, 0); break;
         case SCR_LOG:                   /* the next one; while one plays, it plays the next one; a scan stops */
             if (!nhits) break;
             g_scan = false;
@@ -3886,6 +3912,7 @@ static void press(void) {
             g_scan = false;
             g_listen(g_on == g_sel ? -1 : g_sel);
             break;
+        case SCR_WALKIE: walkie_ch(0, 19); break;
         default: break;
     }
 }
@@ -4050,7 +4077,7 @@ static bool front_key(int key, int state) {
     }
     switch (key) {
         case KEYPAD_GEN:
-            if (tap) help_show(true);
+            if (tap && !g_portrait) help_show(true);    /* drawn on the landscape screen: none held up */
             return true;
         case KEYPAD_APP:
             if (tap) go(SCR_SYSTEM);
@@ -4125,8 +4152,11 @@ static bool front_key(int key, int state) {
         case KEYPAD_FST:
             if (tap) osd("TUNING STEP", "HOW FAR ONE CLICK OF THE VFO KNOB MOVES.", -1);
             return false;
+        case KEYPAD_PTT:
+            if (scr == SCR_WALKIE && state != KEYPAD_RELEASE) walkie_ptt();
+            return false;       /* refused as ever (radio_rx_only) */
         default:
-            return false;       /* PTT (refused), POWER, F1-F5: as ever */
+            return false;       /* POWER, F1-F5: as ever */
     }
 }
 
@@ -4429,6 +4459,391 @@ static void build_system(lv_obj_t *p) {
     }
 }
 
+/* ---- G WALKIE: the radio as a walkie-talkie on CB, its voice drawn as it is heard ----
+ *
+ * Held up as a walkie-talkie: in portrait (main_display_portrait, as the Walkie app goes, the panel 480x800), a
+ * screen of its own with the F keys' names down the left edge where the keys are, the channel, a lamp, the voiceprint,
+ * the meters and the radio's state under each other. A build without portrait (fbdev, a PC) has it in landscape in
+ * the Sentry's own look. The knobs, keys and timers are the Sentry's either way */
+
+#define VP_FFT  1024
+#define VP_HOP  512
+#define VP_HZ   4000            /* the voiceprint: 0-4 kHz up, the last seconds across */
+#define VP_MAXH 300
+
+typedef struct {
+    box_t         ch, link, pow, sys;                 /* landscape: four boxes */
+    lv_obj_t     *freq_l, *info_l, *msg_l;            /* portrait: the frequency, the state in lines, a word */
+    lv_obj_t     *num_l, *band_l, *lamp, *lamp_l, *vp_img, *s_fill, *a_fill, *s_l, *a_l;
+    lv_img_dsc_t *vp_frame;
+    int           vp_w, vp_h, bar_w;
+} wui_t;
+
+static wui_t      w_land, w_port, *wui = &w_land;
+static lv_obj_t  *g_scr, *g_prev_scr;           /* the portrait screen, and the one it took the place of */
+static uint32_t   vp_pal[256];
+static int16_t    vp_in[VP_FFT];
+static int        vp_have;
+static float      vp_floor = 20, vp_rms;
+static uint32_t   ptt_ms;
+
+/* In place, radix 2 */
+static void vp_fft(float *re, float *im, int n) {
+    for (int i = 1, j = 0; i < n; i++) {
+        int bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) {
+            float t = re[i]; re[i] = re[j]; re[j] = t;
+            t = im[i]; im[i] = im[j]; im[j] = t;
+        }
+    }
+    for (int len = 2; len <= n; len <<= 1) {
+        double a  = -2 * M_PI / len;
+        float  wr = (float)cos(a), wi = (float)sin(a);
+
+        for (int i = 0; i < n; i += len) {
+            float cr = 1, ci = 0;
+
+            for (int k = 0; k < len / 2; k++) {
+                float ur = re[i + k], ui = im[i + k];
+                float vr = re[i + k + len / 2] * cr - im[i + k + len / 2] * ci;
+                float vi = re[i + k + len / 2] * ci + im[i + k + len / 2] * cr;
+
+                re[i + k] = ur + vr, im[i + k] = ui + vi;
+                re[i + k + len / 2] = ur - vr, im[i + k + len / 2] = ui - vi;
+                float nr = cr * wr - ci * wi;
+                ci = cr * wi + ci * wr, cr = nr;
+            }
+        }
+    }
+}
+
+/* One column of the voiceprint from the last VP_FFT samples, shifted in at the right */
+static void vp_column(void) {
+    static float re[VP_FFT], im[VP_FFT];
+    float        col[VP_MAXH], sorted[VP_MAXH], bin_hz = 44100.0f / VP_FFT;
+    int          w = wui->vp_w, h = wui->vp_h;
+    uint32_t    *px = (uint32_t *)wui->vp_frame->data;
+
+    for (int i = 0; i < VP_FFT; i++) {
+        float win = 0.5f - 0.5f * cosf(2 * (float)M_PI * i / (VP_FFT - 1));
+        re[i] = vp_in[i] * win, im[i] = 0;
+    }
+    vp_fft(re, im, VP_FFT);
+    for (int r = 0; r < h; r++) {
+        float f  = (r + 0.5f) * VP_HZ / h, b = f / bin_hz;
+        int   b0 = (int)b;
+        float t  = b - b0;
+        float m0 = re[b0] * re[b0] + im[b0] * im[b0], m1 = re[b0 + 1] * re[b0 + 1] + im[b0 + 1] * im[b0 + 1];
+
+        col[r] = 10 * log10f(m0 * (1 - t) + m1 * t + 1);
+    }
+    memcpy(sorted, col, (size_t)h * sizeof(float));
+    qsort(sorted, h, sizeof(float), cmp_f);
+    vp_floor = 0.98f * vp_floor + 0.02f * sorted[h / 3];       /* the hiss, followed slowly */
+    for (int y = 0; y < h; y++) {
+        uint32_t *row = px + y * w;
+        float     v   = (col[h - 1 - y] - vp_floor - 2) / 30;
+        int       i   = v <= 0 ? 0 : v >= 1 ? 255 : (int)(v * 255);
+
+        memmove(row, row + 1, (size_t)(w - 1) * sizeof(uint32_t));
+        row[w - 1] = vp_pal[i];
+    }
+}
+
+/* G's 50 ms: the voiceprint's new columns, the bars, the lamp */
+static void walkie_step(void) {
+    int16_t buf[2048];
+    size_t  n, got = 0;
+    int     cols = 0;
+    double  e    = 0;
+
+    if (!wui->vp_frame) return;
+    while ((n = audio_scope_read(buf, N_OF(buf))) > 0) {
+        for (size_t i = 0; i < n; i++) {
+            e += (double)buf[i] * buf[i];
+            vp_in[vp_have++] = buf[i];
+            if (vp_have == VP_FFT) {
+                if (cols < 16) vp_column();     /* behind: the oldest skipped, not the screen held up */
+                cols++;
+                memmove(vp_in, vp_in + VP_HOP, (VP_FFT - VP_HOP) * sizeof(int16_t));
+                vp_have = VP_FFT - VP_HOP;
+            }
+        }
+        got += n;
+    }
+    if (cols) lv_obj_invalidate(wui->vp_img);
+    if (got) vp_rms = 0.7f * vp_rms + 0.3f * (float)sqrt(e / got);
+
+    /* the S-meter: S0 -127 dBm to S9+40 -33 dBm; the audio: -60 to 0 dBFS */
+    float db = meter_get_db(), s = (db + 127) / 94, a = vp_rms > 1 ? (20 * log10f(vp_rms / 32768) + 60) / 60 : 0;
+    char  t[24];
+
+    s = s < 0 ? 0 : s > 1 ? 1 : s;
+    a = a < 0 ? 0 : a > 1 ? 1 : a;
+    lv_obj_set_width(wui->s_fill, (int)(s * wui->bar_w) + 1);
+    lv_obj_set_width(wui->a_fill, (int)(a * wui->bar_w) + 1);
+    if (db >= -73) snprintf(t, sizeof(t), "S9+%d  %.0f DBM", (int)(db + 73), db);
+    else snprintf(t, sizeof(t), "S%d  %.0f DBM", db <= -127 ? 0 : (int)((db + 127) / 6), db);
+    lv_label_set_text(wui->s_l, t);
+    snprintf(t, sizeof(t), "%d DBFS", vp_rms > 1 ? (int)(20 * log10f(vp_rms / 32768)) : -90);
+    lv_label_set_text(wui->a_l, t);
+    /* the lamp: a voice (the audio up) or a carrier (the meter up); PTT refused, said in it */
+    bool on = a > 0.45f || db > -100, ptt = ptt_ms && lv_tick_get() - ptt_ms < 1500;
+
+    lv_obj_set_style_bg_opa(wui->lamp, ptt || on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_text_color(wui->lamp_l, ptt || on ? ink : amb, 0);
+    lv_label_set_text(wui->lamp_l, ptt ? (g_portrait ? "TX LOCKED" : "TX\nLOCKED")
+                                   : on ? (g_portrait ? "RX  SIGNAL" : "RX\nSIGNAL")
+                                        : (g_portrait ? "RX  QUIET" : "RX\nQUIET"));
+    if (g_portrait && wui->msg_l && ptt_ms && lv_tick_get() - ptt_ms > 4000) lv_label_set_text(wui->msg_l, "");
+}
+
+/* F5 on G: the transmitter's lock, said where it is looked at */
+static void walkie_tx_note(void) {
+    if (g_portrait) lv_label_set_text(wui->msg_l, "TX LOCKED: THE SENTRY IS RECEIVE ONLY");
+    else osd("TRANSMIT LOCKED", "THE SENTRY IS RECEIVE ONLY: PTT IS REFUSED HERE. THE VOICEPRINT SHOWS WHAT IS HEARD.", -1);
+}
+
+/* PTT pressed on G: refused (the Sentry is receive only), and said so where it is looked at */
+static void walkie_ptt(void) {
+    ptt_ms = lv_tick_get() | 1;
+    if (g_portrait) lv_label_set_text(wui->msg_l, "PTT REFUSED: THE SENTRY IS RECEIVE ONLY");
+    else osd("PTT REFUSED", "THE SENTRY IS RECEIVE ONLY: NOTHING IS TRANSMITTED FROM HERE.", -1);
+}
+
+/* The CB channel: dir one up or down (wrapping), or channel `to` (1-40); off CB, the nearest channel first */
+static void walkie_ch(int dir, int to) {
+    int32_t khz = cparam_i_get(cfg_fg_freq) / 1000;
+    int     i   = 0;
+
+    for (int k = 1; k < 40; k++)
+        if (labs(cb_khz[k] - khz) < labs(cb_khz[i] - khz)) i = k;
+    if (to) i = to - 1;
+    else if (labs(cb_khz[i] - khz) <= 3) i = (i + dir + 40) % 40;
+    tune(cb_khz[i] * 1000, radio_mode_am);
+    show_walkie();
+}
+
+static void show_walkie(void) {
+    char           fr[40], nm[80], lk[40], tx[24], pw1[40], pw2[40], sy1[40], sy2[40], f[24];
+    int32_t        fq = cparam_i_get(cfg_fg_freq);
+    int            ch = -1, bi = band_of(fq);
+    float          ext = 0, bat = 0;
+    uint8_t        cap = 0;
+    bool           chg = false;
+    ident_t        id;
+    static float   l_bat, l_ext;            /* the base's last word: its reports come and go between reads */
+    static uint8_t l_cap;
+    static bool    l_chg;
+
+    if (!wui->num_l) return;
+    for (int k = 0; k < 40; k++)
+        if (labs(cb_khz[k] * 1000 - fq) <= 3000) ch = k + 1;
+    snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
+    snprintf(fr, sizeof(fr), "%s %s", f, mode_name(cparam_i_get(cfg_cur_mode)));
+    identify_ex(fq, &id, false);
+    snprintf(nm, sizeof(nm), "%s", id.name);
+    lv_label_set_text_fmt(wui->num_l, ch > 0 ? "%02d" : "--", ch);
+    lv_label_set_text(wui->band_l, ch == 9 ? "EMERGENCY" : ch == 19 ? "TRUCKERS" : ch > 0 ? "CB CHANNEL"
+                                   : bi >= 0 ? bands[bi].name : "OFF CB");
+    snprintf(lk, sizeof(lk), "SQL %d  VOL %d", param_i_get(cfg_squelch), radio_change_vol(0));
+    snprintf(tx, sizeof(tx), "%s", rx_held ? "TX LOCKED" : "TX NOT LOCKED");
+    clock_power_get(&ext, &bat, &cap, &chg);
+    if (bat > 1 || ext > 1) l_bat = bat, l_ext = ext, l_cap = cap, l_chg = chg;
+    if (l_bat > 1) snprintf(pw1, sizeof(pw1), "BAT %.1f V %d%%%s", l_bat, l_cap, l_chg ? " +" : "");
+    else snprintf(pw1, sizeof(pw1), "NO BATTERY");
+    snprintf(pw2, sizeof(pw2), "EXT %.1f V  TX %.0f W", l_ext, param_f_get(cfg_pwr));
+    {
+        int    c  = clock_cpu_temp();
+        double ld = 0;
+        FILE  *fl = fopen("/proc/loadavg", "r");
+
+        if (fl) {
+            if (fscanf(fl, "%lf", &ld) != 1) ld = 0;
+            fclose(fl);
+        }
+        if (c != CLOCK_NO_TEMP) snprintf(sy1, sizeof(sy1), "CPU %dC  LD %.1f", c, ld);
+        else snprintf(sy1, sizeof(sy1), "LOAD %.1f", ld);
+    }
+    const char *ver = radio_base_ver_str();
+
+    snprintf(sy2, sizeof(sy2), "BASE %s", ver && ver[0] ? ver : "?");
+    if (g_portrait) {
+        time_t    now = time(NULL);
+        struct tm tm;
+        char      hm[16];
+
+        lv_label_set_text(wui->freq_l, fr);
+        localtime_r(&now, &tm);
+        strftime(hm, sizeof(hm), "%H:%M %Z", &tm);
+        lv_label_set_text_fmt(wui->info_l, "LINK    %s  %s\nPOWER   %s\n        %s\nSYSTEM  %s  %s\nTIME    %s",
+                              lk, tx, pw1, pw2, sy1, sy2, hm);
+        lv_label_set_text(wui->ch.opt[0], nm);
+    } else {
+        opt_set(&wui->ch, 0, fr, 0);
+        opt_set(&wui->ch, 1, nm, 2);
+        opt_set(&wui->link, 0, lk, 0);
+        opt_set(&wui->link, 1, tx, rx_held ? 2 : 1);
+        opt_set(&wui->pow, 0, pw1, 0);
+        opt_set(&wui->pow, 1, pw2, 2);
+        opt_set(&wui->sys, 0, sy1, 0);
+        opt_set(&wui->sys, 1, sy2, 2);
+    }
+}
+
+/* The voiceprint's picture, its kHz marks and its caption, at x, y in p */
+static void vp_make(wui_t *u, lv_obj_t *p, int x, int y, int w, int h) {
+    rect(p, x - 4, y - 3, w + 8, h + 6, 3, false);
+    u->vp_w     = w;
+    u->vp_h     = h;
+    u->vp_frame = lv_img_buf_alloc(w, h, LV_IMG_CF_TRUE_COLOR);
+    u->vp_img   = lv_img_create(p);
+    lv_img_set_src(u->vp_img, u->vp_frame);
+    lv_obj_set_pos(u->vp_img, x, y);
+    {
+        uint32_t *px = (uint32_t *)u->vp_frame->data;
+        for (int i = 0; i < w * h; i++) px[i] = vp_pal[0];
+    }
+    for (int k = 1; k <= 3; k++) {      /* 1, 2, 3 kHz */
+        char t[8];
+
+        snprintf(t, sizeof(t), "%dK", k);
+        label(p, &pixel_16, dim, x + 4, y + h - k * h * 1000 / VP_HZ - 8, 30, LV_TEXT_ALIGN_LEFT, t);
+    }
+    label(p, &pixel_16, amb, x + w - 260, y + 3, 252, LV_TEXT_ALIGN_RIGHT, "VOICEPRINT  RX  0-4 KHZ");
+}
+
+/* A bar: its name, the scale, the fill and its value */
+static void bar_make(wui_t *u, lv_obj_t *p, int x, int y, int w, int h, bool audio) {
+    rect(p, x, y, w, h, 3, false);
+    label(p, &pixel_16, amb, x + 8, y + 10, 80, LV_TEXT_ALIGN_LEFT, audio ? "AUDIO" : "S-METER");
+    u->bar_w = w - 100;
+    rect(p, x + 88, y + 6, u->bar_w + 6, 24, 2, false);
+    for (int k = 1; k < 10; k++) rect(p, x + 91 + k * u->bar_w / 10, y + 9, 2, 18, 0, true);
+    lv_obj_t *fl = rect(p, x + 91, y + 9, 1, 18, 0, true);
+    lv_obj_t *vl = label(p, &pixel_16, amb, x + 88, y + 34, u->bar_w + 6, LV_TEXT_ALIGN_RIGHT, "");
+
+    if (audio) u->a_fill = fl, u->a_l = vl;
+    else u->s_fill = fl, u->s_l = vl;
+}
+
+static void vp_palette(void) {
+    for (int i = 0; i < 256; i++) {     /* ink, dim, amber, then amber whitened at the loudest */
+        lv_color_t c = i < 96    ? lv_color_mix(dim, ink, (uint8_t)(i * 255 / 96))
+                       : i < 200 ? lv_color_mix(amb, dim, (uint8_t)((i - 96) * 255 / 104))
+                                 : lv_color_mix(lv_color_white(), amb, (uint8_t)((i - 200) * 120 / 55));
+        vp_pal[i] = argb(c);
+    }
+}
+
+/* Landscape, the Sentry's look: four boxes, the channel and lamp beside the voiceprint, the bars */
+static void build_walkie(lv_obj_t *p) {
+    wui_t *u  = &w_land;
+    int    w1 = 226, w2 = 150, w3 = 206, w4 = SW - 12 - w1 - w2 - w3 - 18, y = BODY_Y, vh = 176;
+
+    vp_palette();
+    box_make(&u->ch, p, 6, y, w1, LOW_H, "CHANNEL", 2, -1);
+    box_make(&u->link, p, 6 + w1 + 6, y, w2, LOW_H, "LINK", 2, -1);
+    box_make(&u->pow, p, 6 + w1 + w2 + 12, y, w3, LOW_H, "POWER", 2, -1);
+    box_make(&u->sys, p, 6 + w1 + w2 + w3 + 18, y, w4, LOW_H, "SYSTEM", 2, -1);
+    lv_label_set_long_mode(u->ch.opt[1], LV_LABEL_LONG_SCROLL_CIRCULAR);
+
+    int my = y + LOW_H + 6;
+
+    rect(p, 6, my, 160, vh + 6, 3, false);
+    label(p, &pixel_16, amb, 6, my + 6, 160, LV_TEXT_ALIGN_CENTER, "CH");
+    u->num_l  = label(p, &pixel_44, amb, 6, my + 22, 160, LV_TEXT_ALIGN_CENTER, "--");
+    u->band_l = label(p, &pixel_16, amb, 6, my + 72, 160, LV_TEXT_ALIGN_CENTER, "");
+    u->lamp   = rect(p, 20, my + 98, 132, 68, 3, false);
+    lv_obj_set_style_bg_color(u->lamp, amb, 0);
+    u->lamp_l = label(p, &pixel_24, amb, 20, my + 108, 132, LV_TEXT_ALIGN_CENTER, "RX\nQUIET");
+    vp_make(u, p, 176, my + 3, 612, vh);
+
+    int by = my + vh + 12, bw = (SW - 12 - 6) / 2;
+
+    bar_make(u, p, 6, by, bw, scr_h - by - 6, false);
+    bar_make(u, p, 6 + bw + 6, by, bw, scr_h - by - 6, true);
+}
+
+/* Portrait, held up: 480 x 800, the F keys' names in a column on the left where the keys are (160 px apart, F1 at
+ * the top, as the Walkie app has them), the rest under each other */
+#define PW      480
+#define PH      800
+#define P_SIDE  104
+#define P_X     (P_SIDE + 8)
+#define P_W     (PW - P_X - 6)
+
+/* The radio's keys and its main knob go to the screen shown: held up, G's. They go on to the main screen, where the
+ * Sentry has them (its front_key, its rotary_cb), as the Walkie app sends them on. A knob's turn is the receiver's to
+ * free */
+static void g_fwd_cb(lv_event_t *e) {
+    if (g_prev_scr && lv_obj_is_valid(g_prev_scr))
+        lv_event_send(g_prev_scr, lv_event_get_code(e), lv_event_get_param(e));
+    else if (lv_event_get_code(e) == EVENT_ROTARY)
+        free(lv_event_get_param(e));
+}
+
+static void build_walkie_portrait(void) {
+    wui_t *u = &w_port;
+    g_scr = lv_obj_create(NULL);
+    lv_obj_remove_style_all(g_scr);
+    lv_obj_set_size(g_scr, PW, PH);
+    lv_obj_set_style_bg_color(g_scr, ink, 0);
+    lv_obj_set_style_bg_opa(g_scr, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(g_scr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(g_scr, g_fwd_cb, EVENT_KEYPAD, NULL);
+    lv_obj_add_event_cb(g_scr, g_fwd_cb, EVENT_ROTARY, NULL);
+    /* the left column: the radio's own F buttons, moved here while G shows (walkie_show), as the Walkie app does */
+    /* the head: G, the name, the time */
+    rect(g_scr, P_X, 6, P_W, 44, 3, false);
+    label(g_scr, &pixel_24, amb, P_X, 16, P_W, LV_TEXT_ALIGN_CENTER, "G  WALKIE TALKIE");
+    /* the channel */
+    rect(g_scr, P_X, 56, P_W, 168, 3, false);
+    label(g_scr, &pixel_16, amb, P_X, 62, P_W, LV_TEXT_ALIGN_CENTER, "CHANNEL");
+    u->num_l  = label(g_scr, &pixel_44, amb, P_X, 82, P_W, LV_TEXT_ALIGN_CENTER, "--");
+    u->band_l = label(g_scr, &pixel_20, amb, P_X, 132, P_W, LV_TEXT_ALIGN_CENTER, "");
+    u->freq_l = label(g_scr, &pixel_20, amb, P_X, 158, P_W, LV_TEXT_ALIGN_CENTER, "");
+    u->info_l = NULL;
+    u->ch.opt[0] = label(g_scr, &pixel_16, dim, P_X + 8, 196, P_W - 16, LV_TEXT_ALIGN_CENTER, "");  /* what it is */
+    lv_label_set_long_mode(u->ch.opt[0], LV_LABEL_LONG_SCROLL_CIRCULAR);
+    u->ch.n = 1;
+    /* the lamp */
+    u->lamp = rect(g_scr, P_X, 230, P_W, 48, 3, false);
+    lv_obj_set_style_bg_color(u->lamp, amb, 0);
+    u->lamp_l = label(g_scr, &pixel_28, amb, P_X, 240, P_W, LV_TEXT_ALIGN_CENTER, "RX  QUIET");
+    /* the voiceprint, the meters */
+    vp_make(u, g_scr, P_X + 4, 288, P_W - 8, 268);
+    bar_make(u, g_scr, P_X, 566, P_W, 56, false);
+    bar_make(u, g_scr, P_X, 628, P_W, 56, true);
+    /* the radio's state, a word for what was refused */
+    rect(g_scr, P_X, 690, P_W, 104, 3, false);
+    u->info_l = label(g_scr, &pixel_16, amb, P_X + 8, 696, P_W - 16, LV_TEXT_ALIGN_LEFT, "");
+    u->msg_l  = label(g_scr, &pixel_16, amb, P_X + 8, 776, P_W - 16, LV_TEXT_ALIGN_LEFT, "");
+}
+
+/* G shown (on) or left: held up in portrait where the build can, its own screen in place of the Sentry's */
+static void walkie_show(bool on) {
+    if (on && !g_portrait && g_scr && main_display_portrait(true)) {
+        g_portrait = true;
+        wui        = &w_port;
+        g_prev_scr = lv_scr_act();
+        buttons_vertical(g_scr, P_SIDE, 160);      /* the F keys reach only buttons on the screen shown */
+        for (int i = 0; i < 5; i++) buttons_refresh(&btn[i]);
+        lv_scr_load(g_scr);
+        show_walkie();
+    } else if (!on && g_portrait) {
+        if (g_prev_scr && lv_obj_is_valid(g_prev_scr)) buttons_horizontal(g_prev_scr);   /* under the Sentry again */
+        main_display_portrait(false);
+        g_portrait = false;
+        wui        = &w_land;
+        if (g_prev_scr && lv_obj_is_valid(g_prev_scr)) lv_scr_load(g_prev_scr);
+    } else if (on) {
+        wui = &w_land;
+    }
+}
+
 static void build_keys(void) {
     int w = (SW - 12 - 4 * 6) / 5, y = 480 - KEYS_H - 3;
 
@@ -4484,7 +4899,7 @@ static void build_overlays(void) {
                    "\n"
                    "VFO KNOB       THE SCREEN'S RADIO: A'S X6200 (MAN-OVERRIDE), C'S STICK CHANNEL\n"
                    "MFK KNOB       CHOOSES A TARGET, A BAND, A FREQUENCY. PUSH: TRACK, LISTEN, OPEN\n"
-                   "MFK RING       A X6200, B LOG, C VHF/UHF, D BANDS, E DECODE, F SYSTEM\n"
+                   "MFK RING       A X6200  B LOG  C VHF/UHF  D BANDS  E DECODE  F SYSTEM  G WALKIE\n"
                    "A AND C        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"
                    "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON C THE STICK'S)\n"
                    "LISTEN         A AND C EACH: X6200, RTL OR BOTH; THE OTHER SCREENS KEEP IT\n"
@@ -4534,6 +4949,8 @@ static void construct_cb(lv_obj_t *parent) {
     build_system(scr_obj[SCR_SYSTEM]);
     build_rtl(scr_obj[SCR_RTL]);
     build_log(scr_obj[SCR_LOG]);
+    build_walkie(scr_obj[SCR_WALKIE]);
+    build_walkie_portrait();
     build_keys();
     build_overlays();
 
@@ -4589,6 +5006,20 @@ static void destruct_cb(void) {
     if (rtl_timer) lv_timer_del(rtl_timer);
     timer = blink_timer = rtl_timer = NULL;
     if (scr == SCR_LOG) g_leave(false);
+    audio_scope(false);
+    walkie_show(false);                 /* landscape again before anything else draws */
+    for (int i = 0; i < 2; i++) {
+        wui_t *u = i ? &w_port : &w_land;
+
+        if (u->vp_frame) {
+            lv_img_cache_invalidate_src(u->vp_frame);
+            lv_img_buf_free(u->vp_frame);
+        }
+        memset(u, 0, sizeof(*u));
+    }
+    if (g_scr) lv_obj_del(g_scr);
+    g_scr = NULL;
+    wui   = &w_land;
     rtl_want(false);
     if (hits_dirty) hits_save();
     if (wide_ok) radio_psd_wide(false);

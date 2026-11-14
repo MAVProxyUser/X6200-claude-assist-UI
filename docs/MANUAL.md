@@ -12,7 +12,7 @@ Settings. Button and option names are written as the radio shows them.
 ## Contents
 
 - [Getting started](#getting-started): [first-start guide](#first-start-guide), [first steps](#first-steps), [setting up the transmitter](#setting-up-the-transmitter), [buttons and knobs](#buttons-and-knobs), [hand mic](#hand-mic), [keyboard](#keyboard) ([mouse](#mouse), [quick QSO log](#quick-qso-log))
-- [The Sentry](#the-sentry) (this fork, X6200): [the screens A to E](#the-screens-a-to-e), [F VHF/UHF, an RTL-SDR](#f-vhfuhf-an-rtl-sdr), [G LOG](#g-log), [AIRSPACE](#airspace)
+- [The Sentry](#the-sentry) (this fork, X6200): [A and C](#a-and-c-the-spectrum-screens), [SCAN CFG](#scan-cfg), [B LOG](#b-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [AIRSPACE](#airspace)
 - [Updating the firmware](#updating-the-firmware): [the X6200's base firmware from OpenX6X00](#the-x6200s-base-firmware-from-openx6x00)
 - [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
 - [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab)
@@ -576,130 +576,170 @@ reads CW 1:2, then F5), opens a one-line box near the top,
 ## The Sentry
 
 This fork's home screen on the X6200: a receive-first view of the radio in amber on black, after the remote
-sentry guns of *Aliens* (1986). The radio starts in it and comes back to it when an app closes (E SYSTEM >
+sentry guns of *Aliens* (1986). The radio starts in it and comes back to it when an app closes (F SYSTEM >
 START IN chooses the classic radio screen instead). Transmit is locked while it is open: PTT, KEY and MSG are
 refused, and tuning the antenna tuner too, as it transmits.
 
-Its controls, on every screen (GEN shows them, as does a tap on the title):
+Seven screens on the MFK's inner ring, and SCAN CFG beside the two spectrum screens:
+
+| Screen | What it is |
+|---|---|
+| **A X6200** | The X6200's spectrum, set up as C is: four boxes, the picture, the same keys |
+| **B LOG** | Every signal A's and C's scans locked on, each heard on its own radio |
+| **C VHF/UHF** | An RTL-SDR's spectrum: its presets or D's bands |
+| **D BANDS** | What each band carries, when, with which antenna |
+| **E DECODE** | The decoders and the frequencies they work on |
+| **F SYSTEM** | Settings, the apps, the modes, the classic radio screen |
+| **G WALKIE** | The radio as a CB walkie-talkie, the voice drawn as it is heard |
+| SCAN CFG | On no ring: F5 on A or C. That screen's radio's settings (A's: what A had beyond C's look) |
+
+Its controls (GEN shows them, as does a tap on the title):
 
 | Control | Does |
 |---|---|
-| VFO knob | Tunes the X6200 by hand (the Sentry goes to MAN-OVERRIDE and A's scan stops; F3 on A SCAN back to SEMI or AUTO). On F VHF/UHF while the RTL-SDR is heard, and on G LOG while a stick entry plays, it tunes the RTL-SDR instead |
-| MFK knob | Chooses: a target, a band, a frequency, an item, a logged signal. Push: track it, listen, open |
+| VFO knob | The screen's own radio: on A (and the other screens) the X6200 by hand, the Sentry going to MAN-OVERRIDE and A's scan stopping; on C the stick's channel (heard or not); on B the stick while a stick entry plays |
+| MFK knob | On A and C it pans the picture by SCAN CFG's STEP, its push going to the strongest signal; elsewhere it chooses a band, a frequency, an item, a logged signal, a CB channel. Push: listen, open |
 | MFK inner ring | The screens, A to G and round again |
-| VOL/SQL/RFG knob | Volume; push: squelch, push: RF gain, push: volume again. On F the squelch and RF gain are the RTL-SDR's |
-| F1-F5 | The keys along the bottom of the screen: their names change with the screen. On A and F, F1 SCAN sweeps the band end to end and F2 chooses the band |
-| APP | E SYSTEM |
-| BAND up/down | The next band, as F2 on A (on F, the next preset) |
+| VOL/SQL/RFG knob | Volume; push: squelch, push: RF gain, push: volume again. On C the squelch and RF gain are the RTL-SDR's |
+| F1-F5 | The keys along the bottom: on A and C, F1 SCAN, F2 BAND (C: PRESET), F3 VIEW, F4 LISTEN, F5 SCAN CFG |
+| APP | F SYSTEM |
+| BAND up/down | The next band, as F2 on A (on C, the next preset) |
 | AM, CW, SSB, DFN, DFL, FST | The mode, the noise reduction and blanker, the filter, the tuning step, as on the main screen |
 | A tap, a click | The option, the row, the signal tapped (a mouse works too: [Mouse](#mouse)) |
 
-### The screens A to E
+### A and C, the spectrum screens
 
-- **A SCAN**: the base's 384 kHz around the dial as a trace over a 3D picture of the last seconds, the signals
-  over the noise marked and labelled. Its keys, as F's: **F1 SCAN** sweeps the band the dial is in end to end,
-  360 kHz at a time (3 s each, a little overlapped, from the bottom again past the top; a band narrower than that
-  stays in its middle), and **F2 BAND** goes to the next band (the BAND keys too), the scan going on there.
-  **F3 MODE** (SYSTEM MODE): AUTO-SCAN goes from target to target by itself (with the scan on, it locks on what it
-  finds along the band, then goes on), SEMI-AUTO lets the MFK choose, MAN-OVERRIDE is the VFO knob's (it stops the
-  scan). **F4 SWEEP** goes through the bands of C BANDS marked for it, a few seconds each. F5 is E SYSTEM. SCAN
-  ROUTINE shows SCAN or SWEEP, a tap on either turns it on or off; neither is the 360 kHz at the dial. The MFK's
-  push tracks the target chosen (B TRACK). Every lock goes into [G LOG](#g-log).
-- **B TRACK**: one signal held: what it is, how long it has been on, its level against the noise. F2 holds it,
-  F3 records it (the RX recorder), F4 goes to the next one, F5 ignores it until the Sentry closes.
-- **C BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry heard
-  there last. F2 listens to the band chosen, F3 puts it in or out of the SWEEP. The bands: the ham bands (60 m
-  too), the broadcast bands, CB, FM, the marine bands the weather decoders use (SHIP MF, 4, 6, 8, 12, 16;
-  UTIL 9 for NOAA's Boston fax on 9110), and the stick's: the airband, 2 m, marine VHF, NOAA weather, 70 cm and
-  GMRS. **RX**, the last column, says RTL (in blue while a stick is plugged in) for each band the RTL-SDR takes:
-  with a stick, every band from 24 MHz up; without one, those the X6200 cannot tune. F2 (LISTEN) on one of them
-  opens [F](#f-vhfuhf-an-rtl-sdr) on that band with the stick on the speaker, never A; F1 there scans it.
-- **D DECODE**: the decoders and the frequencies they work on, each with C's columns for its band: BAND, BEST
-  (NIGHT, DAY, ANY or LOCAL), ANTENNA and NOW. F2 opens the one chosen there; F4 (TYPE) goes to the next decoder
-  type, the one TYPE SELECT marks.
-- **NOW** (C and D), one set of words: `3 SIG LIVE` (the band in the picture), `3 SIG 12 MIN` (heard 12 minutes
-  ago, within the half hour), else what the sun says at your QTH: OPEN, CLOSED, LOCAL (a night band by day, CB,
-  FM), and OPENING or CLOSING while the sun is within 6 degrees of the horizon (a setting sun opens the night
-  bands and closes the day ones). ANY-time bands (30 m, 31 m, 8 MHz marine) say OPEN; `SET QTH` when no QTH
-  locator is set.
-- **E SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the classic radio screen, a shell,
-  the [base firmware](#the-x6200s-base-firmware-from-openx6x00) (the X6200's; on an X6100 the item says it is
-  not supported) and where the radio starts. F2 opens the item
-  chosen, F5 the classic radio screen. Its title says the release, the GUI's commit and the base's version
-  (`SYSTEM CONTROL: v0.3.9.7 c6e93af - base 1.0.8`); so do A and B's, without "XIEGU " for the room.
+One screen, set up for its own radio: A for the X6200 (its base's 384 kHz around the dial, the middle 360 kHz
+shown), C for an RTL-SDR stick (the middle 1.8 MHz of its 2.1 MHz). Each draws a trace over a 3D picture of the
+last seconds, the strongest signals named over it and the screen's channel bracketed (A's dial, C's channel).
 
-### F VHF/UHF, an RTL-SDR
-
-A generic RTL-SDR stick (an RTL2832U with an R820T, R828D and the like, 24 MHz to 1.7 GHz) on the HOST port, its
-spectrum on the screen and its audio on the speaker. Where: the MFK ring past E, or E SYSTEM > VHF/UHF (RTL-SDR).
-
-- The middle 1.8 MHz of the stick's 2.1 MHz, as a trace over a 3D picture like A SCAN's; the strongest signals
-  are labelled with their frequency and what they are where it is known (NOAA WX1 to WX7, AIS 1 and 2, APRS,
-  the ISS, marine channel 16, guard 121.500, the airband, weather balloons, the Meteor-M satellites, ISM, GMRS,
-  UAT, ADS-B).
-- **F2 PRESET**: NOAA weather (162.400-162.550 MHz), 2 m, 2 m repeaters, the airband, FM broadcast, marine VHF,
-  the weather satellites, the weather balloons, 70 cm, ISM 433, GMRS, ISM 915, UAT 978 and ADS-B 1090.
-- **The MFK** pans the stick by the **F3 STEP** (12.5 kHz to 1 MHz); its push sets the gain (Auto, 10 to 50 dB).
-- **F4 VIEW**: RTL (the stick alone), SPLIT (the X6200's own spectrum above, the stick below) or X6200 (the
-  radio's spectrum alone). The stick keeps running in all three.
-- **F5 LISTEN** puts the stick on the speaker in place of the X6200, or the X6200 back. Listening starts on the
-  strongest signal in view; a tap on a signal in the stick's half listens to that one (a tap on the X6200's half
-  goes back to the X6200). The mode comes from the band: wide FM from 87.5 to 108 MHz, AM on the airband (108
-  to 137 MHz), narrow FM elsewhere. While the stick is heard, the VFO knob is its: a channel a click (100 kHz in
-  the FM band, 25 kHz on the airband, 12.5 kHz above), the stick following when the channel nears an edge, and
-  the header shows its frequency and mode (`RTL 162.550.00 NFM`). A bracket marks the channel on the trace.
-- The speaker plays one of the two, never both: the base gives it the radio's receiver or the GUI's audio.
-- **F1 SCAN** sweeps the preset's band (or the band C's LISTEN brought) end to end, a picture at a time (2 s
-  each, nine tenths of a picture on, from the bottom again past the top). Listening, the speaker goes to each
-  picture's middle and then to its strongest signal; each picture's strongest goes into [G LOG](#g-log). The MFK
-  (a pan) or the VFO knob (a channel) stops it where it is. The PRESET box says `SCAN 118-137 MHZ`.
-- **The VOL/SQL/RFG knob** on F: its push still goes VOLUME, SQUELCH, RF GAIN, but the squelch and the RF gain
-  are the stick's. The squelch is in dB over the noise of the stick's picture (OFF, 1 to 40): the channel's
-  strongest bin against the picture's median, open at the level, shut half a second after falling 3 dB under it,
-  eased in and out without a click. The header reads `SQUELCHED  88.300 WFM` while it is shut. RF GAIN walks the
-  R820T's gains one a detent (AUTO, 0 to 49.6 dB); the MFK's push still steps the coarse ones.
-- F stays as it was left when another screen is shown: the band, the tuning, the scan (paused) and the listening
-  come back with it. The tuning, the gain, the squelch and the view are kept for the next time.
-- **Weather alerts**: while the stick is on and a NOAA Weather Radio channel (WX1 to WX7) is in view, the
-  strongest of them is watched for SAME headers, the bursts the National Weather Service sends before each alert
-  and test, whether you listen to it or not. An alert takes the title of every Sentry screen, blinking, for its
-  duration (15 minutes at least): `WX ALERT: TORNADO WARNING`, with the issuing office, the number of areas and
-  the duration in a message as it comes. Each is kept in `/mnt/wx_alerts.log` with the time (UTC) and the
-  channel. Only while F has the stick: AIRSPACE has it the rest of the time.
-- AIRSPACE lends the stick while F has it (its dump1090 stops, AIRSPACE says so) and has it back after.
-- A stick that opens but sends nothing ("THE RTL-SDR SENDS NOTHING"): unplug it and plug it in again. The radio's
-  USB host can leave a stick in that state when a program using it was ended in the middle of its transfers, so
-  AIRSPACE's dump1090 is asked to stop and given 8 seconds before it is killed, and F waits for it. The stick is
-  never "unplugged" by software (its `authorized` file): the radio's USB host driver crashes on that.
+- **The boxes**: RECEIVER (the radio, and what the speaker plays: `HEARD: X6200`, `RTL` or `BOTH`), TUNED (the
+  frequency, the span and the MFK's step), BAND (A: the band the dial is in; C: PRESET, the preset or D's band) and
+  SIGNALS (how many, the strongest; A adds its mode, C the stick's gain).
+- **F1 SCAN** sweeps the band end to end: A 360 kHz at a time (3 s each), C a picture at a time (DWELL, 2 s), each
+  a little overlapped, from the bottom again past the top; a band narrower than the picture stays in its middle.
+  On A, AUTO locks on what it finds along the band (only inside it) and goes on; SEMI only marks. On C the channel
+  goes to each picture's strongest signal. Both put what they lock on into B LOG, and C's scan goes on behind the
+  other screens. Turning the MFK or the VFO stops a scan where it is.
+- **F2 BAND** (A: the next band, the BAND keys too, the scan going on there) or **PRESET** (C: NOAA weather, 2 m,
+  2 m repeaters, the airband, FM broadcast, marine VHF, the weather satellites, the weather balloons, 70 cm, ISM 433,
+  GMRS, ISM 915, UAT 978 and ADS-B 1090).
+- **F3 VIEW**: the screen's radio alone, SPLIT (the X6200 above, the stick below) or the other radio alone. Each
+  half says its radio, its channel and whether it is HEARD, MUTED or SQUELCHED.
+- **F4 LISTEN**, each screen's own: X6200, RTL or BOTH, BOTH mixing the X6200's receiver into the stick's audio
+  (the base sends its receiver to the processor while it plays the GUI's audio). The speaker changes only when A
+  or C is shown (or B plays an entry); the other screens keep what was heard last. The stick plays C's channel
+  whichever screen asked for it. The mode comes from the band: wide FM from 87.5 to 108 MHz, AM on the airband,
+  narrow FM elsewhere.
+- **F5 SCAN CFG**: below.
+- **The MFK** pans the picture by STEP, its push going to the strongest signal (A locks on it, C's channel goes to
+  it). **The VFO** tunes the screen's radio only: A's X6200 (MAN-OVERRIDE), C's channel a click at a time (100 kHz
+  in the FM band, 25 kHz on the airband, 12.5 kHz above), the stick following when the channel nears an edge. A tap
+  on A's X6200 half locks on the signal tapped (or tunes there); on C's stick half it takes that channel.
+- **The VOL/SQL/RFG knob** on C: its squelch and RF gain are the stick's. The squelch is in dB over the noise of
+  the stick's picture (OFF, 1 to 40): open at the level, shut half a second after falling 3 dB under it, eased in
+  and out without a click; the stick's half reads SQUELCHED meanwhile. RF GAIN walks the R820T's gains one a detent.
+- C stays as it was left when another screen is shown: band, tuning, channel and scan. Its tuning, gain, squelch
+  and view are kept for the next time; so are A's view and both screens' LISTEN.
+- **Weather alerts**: while the stick is on and a NOAA Weather Radio channel (WX1 to WX7) is in view, the strongest
+  of them is watched for SAME headers, the bursts the National Weather Service sends before each alert and test.
+  An alert takes the title of every Sentry screen, blinking, for its duration (15 minutes at least):
+  `WX ALERT: TORNADO WARNING`, the rest in a message. Each is kept in `/mnt/wx_alerts.log`.
 - The title bar names what is on USB in Xiegu's blue (its WR12 logo's): **RTL** for an RTL-SDR, **ADS-B** for an
   ADS-B receiver (a GNS 5890 or microADSB, or dump1090 running), **WR12** for a ready WR12.
 
-### G LOG
+### SCAN CFG
 
-Every signal A's and F's scans locked on, the newest (or the latest heard again) first: A's locks (AUTO, or the
-MFK's push) on the X6200, F's scan pictures' strongest on the stick. The same signal again (within 2 kHz on the
-X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`, a minute
-behind at most and when the Sentry closes).
+F5 on A or C, F5 again (BACK) to return; on no ring, the badge says the screen it came from.
 
-- Its columns: FREQ, BAND, WHAT IT WAS, BEST, ANTENNA and NOW (C's for the band), LAST (heard), SEEN (how often),
-  RX (X6200, or RTL in blue). The line under them: first and last heard, the count, its level (dB over the noise
-  on the X6200, the stick's level on the stick).
-- **Listening**: the MFK's push (or F1) plays the one chosen on its own receiver: the X6200 tuned to it, or the
-  stick tuned to it and on the speaker. While one plays, the MFK plays each one it comes to, switching between the
-  X6200 and the stick by itself, and `>` marks it. The VFO knob tunes the stick by a channel while a stick entry
-  plays (the entry stays as it was). A's scan waits while G plays something.
-- The stick starts when G opens if the log has a stick entry, so the first one plays at once; G gives it back
-  (to AIRSPACE, or to F) when it closes.
-- F2 removes the one chosen; F3 twice within 3 seconds clears the log; F4 goes to A, F5 to F.
-- `x6x00-rtlspec` (tools/rtlspec) reads the stick: a program of its own, so a stick that hangs or goes away
-  never takes the screen with it.
+- **From A**: the boxes A had: SYSTEM MODE, TRANSMITTER, SIGNAL STATUS, SCAN ROUTINE, TARGET BAND, SIGNAL PROFILE,
+  TARGETS, and the lock under them: what it is, the time on target, its level against the noise (SIG and NOISE),
+  the last three signals locked on. **F1 MODE**: AUTO-SCAN (locks on each signal it finds by itself, listens a
+  while, goes on) or SEMI-AUTO (marks them; A's MFK push or a tap locks on one); MAN-OVERRIDE comes only from
+  turning the VFO, and F1 leaves it for SEMI. **F2 SWEEP**: the X6200 hops through the bands marked `*` in D, a few
+  seconds each. **F3 STEP**: A's MFK (1 to 100 kHz). **F4 REC**: the RX recorder. The MFK goes to the NEXT target,
+  its push HOLDs the lock, a tap on the locked frequency IGNOREs it until the Sentry closes. Each choice is said in
+  words as it is made.
+- **From C**: the stick (its tuner, gain and squelch), its scan (on, DWELL, STEP), the band, the strongest signal,
+  and C's channel as the lock. **F1 GAIN** (AUTO, 10 to 50 dB), **F2 DWELL** (1, 2 or 4 s a picture), **F3 STEP**
+  (12.5 kHz to 1 MHz), **F4 SQL** (OFF, 6, 10, 15, 20 dB).
+
+### B LOG
+
+Every signal A's and C's scans locked on, the newest (or the latest heard again) first: A's locks (AUTO, or the
+MFK's push) on the X6200, C's scan pictures' strongest on the stick. The same signal again (within 2 kHz on the
+X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`).
+
+- Its columns: FREQ, BAND, WHAT IT WAS, BEST, ANTENNA and NOW (D's for the band), LAST, SEEN, RX (X6200, or RTL in
+  blue). BAND says OFF BAND for a frequency in none of D's bands.
+- **Listening**: the MFK's push (or F1) plays the one chosen on its own radio. While one plays, the MFK plays each
+  one it comes to, switching between the X6200 and the stick by itself, and `>` marks it. A's scan waits meanwhile.
+- **F4 SCAN** goes through the list by itself: **F5 DWELL** seconds on each (2, 4 or 8), held while it is busy (on
+  the X6200, its signal 6 dB over the noise; on the stick, its squelch open, with a squelch set on C).
+- F2 removes the one chosen; F3 twice within 3 seconds clears the log.
+
+### D BANDS, E DECODE, F SYSTEM
+
+- **D BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry heard there
+  last. The bands: the ham bands (60 m too), the broadcast bands, CB, FM, the marine bands the weather decoders use
+  (SHIP MF, 4, 6, 8, 12, 16; UTIL 9 for NOAA's Boston fax on 9110), and the stick's: the airband, 2 m, marine VHF,
+  NOAA weather, 70 cm and GMRS. **RX** says RTL (blue with a stick plugged in) for each band the RTL-SDR takes:
+  with a stick, every band from 24 MHz up. F2 (LISTEN) tunes the X6200 to the band and goes to A, or opens C on it
+  for a stick band; F3 puts it in or out of the SWEEP.
+- **E DECODE**: the decoders and the frequencies they work on, each with D's columns for its band: BAND, BEST
+  (NIGHT, DAY, ANY or LOCAL), ANTENNA and NOW. F2 opens the one chosen; F4 (TYPE) goes to the next decoder type.
+- **NOW** (D and E), one set of words: `3 SIG LIVE` (the band in the picture), `3 SIG 12 MIN` (heard 12 minutes
+  ago, within the half hour), else what the sun says at your QTH: OPEN, CLOSED, LOCAL, OPENING or CLOSING; `SET QTH`
+  when no QTH locator is set.
+- **F SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the classic radio screen, a shell, the
+  [base firmware](#the-x6200s-base-firmware-from-openx6x00) and where the radio starts. F2 opens the item chosen,
+  F5 the classic radio screen. Its title says the release, the GUI's commit and the base's version; so does A's.
+
+### G WALKIE
+
+The radio as a walkie-talkie on CB, in the same look, **held up**: G turns the screen to portrait (480 x 800, as
+the Walkie app does), the F keys' names down the left edge where the keys then are, F1 at the top, and from the top
+down:
+
+- The channel big (09 EMERGENCY, 19 TRUCKERS), its frequency and mode and what it is, over a lamp: RX SIGNAL when a
+  voice or a carrier is there, RX QUIET, TX LOCKED for a moment after PTT.
+- At the bottom the radio's state in lines: LINK (squelch, volume, the transmitter's lock), POWER (the battery's volts
+  and charge, the supply's, the TX power setting), SYSTEM (the processor's temperature and load, the base's version)
+  and the time. The knobs and keys work as on the other screens; another screen on the ring turns it back. A build
+  without portrait (on a PC) shows G in landscape, the same in four boxes.
+- **The voiceprint**: the receiver's audio as a sonogram, 0 to 4 kHz up and the last seven seconds across, in
+  amber: voices show as their harmonics stacked, a tone as a line, the hiss as speckle.
+- The S-meter (S0 to S9+40, in dBm) and the audio's level (dBFS) as bars.
+- **F1 CH -**, **F2 CH +** (the MFK too), **F3 CH 9**, **F4 CH 19** (the MFK's push); each in AM. **F5** says the
+  transmitter is locked: PTT is refused in the Sentry, on G too.
+
+### The RTL-SDR, the GNS 5890 and the microADSB on USB
+
+A generic RTL-SDR stick (an RTL2832U with an R820T, R828D and the like, 24 MHz to 1.7 GHz), a GNS 5890 or a
+microADSB on the HOST port (a hub takes more than one); any can be swapped while the radio runs.
+
+- **The stick is the Sentry's for as long as the radio runs**: its stream starts when the Sentry first opens and
+  goes on whatever screen or app is shown (A, B and C only tune it and listen; about 7% of the processor). Only
+  AIRSPACE's screen takes it: dump1090 decodes ADS-B from it while that is open, and the Sentry has it back when it
+  closes. Every stop and start of the stream is a chance for the radio's USB host to leave the stick sending
+  nothing, so there are as few as can be; a GUI started again (a hot install, an update) waits for the old one's
+  helper to let the stick go first.
+- What is on USB is looked at each second by a thread of its own, never on the screen's thread: a USB host stuck
+  in a disconnect cannot hang the screen.
+- A stick that opens but sends nothing ("THE RTL-SDR SENDS NOTHING"): unplug it and plug it in again. Nothing
+  touches it until it is plugged in again (seen as a new USB device), so it is never pulled out with transfers
+  queued on it; nor is it ever "unplugged" by software (its `authorized` file): the radio's USB host driver
+  crashes on that.
+- `x6x00-rtlspec` (tools/rtlspec) reads the stick: a program of its own, so a stick that hangs or goes away never
+  takes the screen with it.
 
 ### AIRSPACE
 
 ADS-B aircraft on a scope around your position (a USB GPS, else the QTH locator, else the traffic), their
-calls, heights and tracks, and the history fading out (F2 DECAY, 5 minutes by default). Where: E SYSTEM >
+calls, heights and tracks, and the history fading out (F2 DECAY, 5 minutes by default). Where: F SYSTEM >
 AIRSPACE (ADS-B), or APP > Airspace. Its receiver on the HOST port: a GNS 5890, a microADSB, or an RTL-SDR
-decoded by dump1090-fa (in the image). It keeps listening when closed. The VFO knob sets the range, the MFK
+decoded by dump1090-fa (in the image). A GNS 5890 or microADSB keeps listening when it is closed; an RTL-SDR is
+AIRSPACE's only while its screen is open, the Sentry's the rest of the time. The VFO knob sets the range, the MFK
 chooses an aircraft, a tap chooses one on the scope.
 
 ## Updating the firmware
@@ -829,7 +869,7 @@ OpenX6X00 runs, with Xiegu's own steps: the writer does on the radio what
 Xiegu's app 1.0.8 does from MENU > SYSTEM > UPGRADE. More, and how it was
 worked out and tested: [tools/base_update](../tools/base_update/README.md).
 
-Where: E SYSTEM > BASE FIRMWARE, or Settings > Info > Base firmware > Open.
+Where: F SYSTEM > BASE FIRMWARE, or Settings > Info > Base firmware > Open.
 
 - The top line: the base the radio runs, and its supply now. The next: the
   last look at xiegu.eu.

@@ -10,11 +10,11 @@ Everything upstream does is still here: the digital modes, the cluster, the port
 TCI, the web configurator. Upstream's own README, with its feature list, install and build instructions and credits,
 is kept as **[README_original.md](README_original.md)**.
 
-![The Sentry's A SCAN screen on an X6200](docs/readme/a_scan.png)
+![The Sentry's A screen on an X6200](docs/readme/a_x6200.png)
 
-*A SCAN, the screen the radio starts in: the base's 384 kHz around the dial as a trace over a 3D picture of the last
-seconds, where the signals over the noise are marked and named. Here the 60 m band at 2:39 at night, with nothing
-over the noise.*
+*A, the screen the radio starts in: the X6200's 360 kHz around the dial as a trace over a 3D picture of the last
+seconds, the dial bracketed and the signals over the noise named, the RTL-SDR's twin screen's keys along the bottom.
+Here 11 m CB, channel 19.*
 
 [What it adds](#what-it-adds) · [Screenshots](#screenshots) · [Install](#install) · [Hardware](#hardware) ·
 [Manual](docs/MANUAL.md#the-sentry) · [Upstream's README](README_original.md)
@@ -27,62 +27,60 @@ Developed and tested on an X6200. The image for the X6100 builds from the same s
 
 The X6200's home screen: the radio starts in it, and every app or menu opened from it comes back to it when it
 closes. **Transmit is locked while it is open**: PTT, KEY, MSG and the antenna tuner are refused. Seven screens,
-turned with the MFK's inner ring:
+turned with the MFK's inner ring, and SCAN CFG beside the two spectrum screens:
 
-- **A SCAN**: the base's 384 kHz around the dial, the signals in it found, marked and labelled. **F1 SCAN** sweeps
-  the band end to end, 360 kHz at a time, and **F2 BAND** chooses the band, as F1 and F2 do on F. F3 MODE:
-  AUTO-SCAN goes from one signal to the next by itself (with the scan on, it stops on what it finds along the
-  band), SEMI-AUTO lets the MFK choose, MAN-OVERRIDE is the VFO knob's. F4 SWEEP goes through the bands marked for
-  it.
-- **B TRACK**: one signal held: what it is, how long it has been on, its level over the noise. Record it, hold it
-  or ignore it.
-- **C BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry last heard
+- **A X6200** and **C VHF/UHF**: the X6200's spectrum and an RTL-SDR's, one screen set up for each radio: the same
+  four boxes (RECEIVER, TUNED, BAND or PRESET, SIGNALS), the same trace over a 3D picture with the signals named
+  and the screen's channel bracketed, the same keys. **F1 SCAN** sweeps the band end to end, locking on what it
+  finds (into B LOG); **F2** chooses the band (A) or preset (C); **F3 VIEW** shows the radio alone, SPLIT with the
+  other, or the other alone; **F4 LISTEN** is each screen's own: the X6200, the RTL-SDR or BOTH mixed;
+  **F5 SCAN CFG**. The MFK pans, its push goes to the strongest signal; the VFO tunes the screen's own radio.
+- **B LOG**: every signal the two scans locked on, newest first, with D's columns (BAND, BEST, ANTENNA, NOW), when it
+  was last heard and how often, and which radio heard it. The MFK goes through them and each plays on its own radio,
+  switching between the two by itself; **F4 SCAN** goes through the list by itself, holding on whatever is busy.
+- **D BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry last heard
   there. The airband, 2 m, marine VHF, NOAA weather, 70 cm and GMRS are in it too; its **RX** column says RTL (in
-  blue) for every band the RTL-SDR takes, and LISTEN opens those on F with the stick on the speaker.
-- **D DECODE**: the decoders and the frequencies they work on, each a key away.
-- **E SYSTEM**: the rest of the radio in the same look: Settings, the apps, the digital modes, AIRSPACE,
+  blue) for every band the RTL-SDR takes, and LISTEN opens those on C.
+- **E DECODE**: the decoders and the frequencies they work on, each a key away.
+- **F SYSTEM**: the rest of the radio in the same look: Settings, the apps, the digital modes, AIRSPACE,
   VHF/UHF, the classic radio screen, a UNIX shell on the radio's own screen, the base firmware, and which screen the
-  radio starts in. The title says the release, the GUI's commit and the base's version: `SYSTEM CONTROL: v0.3.9.7 c6e93af - base 1.0.8`.
-- **F VHF/UHF**: the RTL-SDR (next section).
-- **G LOG**: every signal A's and F's scans locked on, newest first, with C's columns (BAND, BEST, ANTENNA, NOW),
-  when it was last heard and how often, and which receiver heard it. The MFK goes through them and each plays on
-  its own receiver as it is chosen, the X6200 or the stick, switching between the two by itself. Kept on DATA
-  (`/mnt/sentry_log.txt`).
+  radio starts in. The title says the release, the GUI's commit and the base's version.
+- **G WALKIE**: the radio as a CB walkie-talkie: the channel big (19 TRUCKERS), a **voiceprint** of what is heard
+  (a 0-4 kHz sonogram scrolling across, voices as their stacked harmonics), the S-meter and the audio's level, the
+  battery and supply volts, the processor's temperature and load. CH-/CH+, CH 9, CH 19; PTT stays refused.
+- **SCAN CFG** (F5 on A or C, on no ring): A's scan settings and its lock: AUTO-SCAN or SEMI-AUTO (MAN-OVERRIDE
+  comes by itself when the VFO is turned), SWEEP through the marked bands, STEP, and the signal locked on (HOLD,
+  NEXT, REC, IGNORE); from C, the stick's GAIN, DWELL, STEP and SQUELCH.
 
 The title bar shows what is plugged in, in Xiegu's blue: **RTL**, **ADS-B**, **WR12**. GEN shows the controls on
 every screen. The Sentry's look is also a theme for the whole radio: Settings, the
 on-screen keyboard, the apps and their tables all draw in amber.
 
-### F VHF/UHF: an RTL-SDR as a second receiver
+### C VHF/UHF: an RTL-SDR as a second receiver
 
 A generic RTL-SDR stick (an RTL2832U with an R820T, R828D or the like) on the HOST port:
 
-- **The spectrum**: the middle 1.8 MHz of the stick's span as a trace over a 3D waterfall, like A SCAN's. The
-  strongest signals are labelled with what they are where it is known: NOAA WX1 to WX7, AIS, APRS, the ISS,
-  marine channel 16, guard 121.500, the airband, weather balloons, the Meteor-M satellites, ISM, GMRS, UAT, ADS-B.
-  FM broadcast stations are labelled on their channel (97.900).
-- **F1 SCAN** sweeps the preset's band end to end, a picture at a time, the speaker following each picture's
-  strongest signal. **F2 PRESET**: NOAA weather, 2 m, 2 m repeaters, the airband, FM broadcast, marine VHF, the
-  weather satellites, the weather balloons, 70 cm, ISM 433, GMRS, ISM 915, UAT 978 and ADS-B 1090 (or the band C's
-  LISTEN brought). **F3 STEP** sets how far the MFK pans (12.5 kHz to 1 MHz); the MFK's push sets the gain.
-- **The VOL/SQL/RFG knob** on F: its squelch and RF gain are the stick's. Squelch in dB over the noise (OFF, 1 to
-  40): `SQUELCHED` in place of `LISTENING` while it is shut.
-- F stays as it was left: the band, the tuning, the scan and what was heard come back with it.
-- **F4 VIEW**: RTL (the stick alone), SPLIT (the X6200's own spectrum above, the stick below) or X6200 (the radio
-  alone). The stick keeps running in all three.
-- **F5 LISTEN** puts the stick on the speaker in place of the X6200, or gives the speaker back. A tap on a signal
-  listens to that one. The mode follows the band: wide FM on 87.5-108 MHz, AM on the airband, narrow FM elsewhere.
-  While the stick is heard the **VFO knob tunes it**, a channel a click, and the header shows its frequency
-  (`RTL 162.550.00 NFM`).
-- The speaker plays one receiver or the other, never both: the X6200's base gives it either the radio's receiver or
-  the GUI's audio.
+- **The spectrum**: the middle 1.8 MHz of the stick's span. The strongest signals are labelled with what they are
+  where it is known: NOAA WX1 to WX7, AIS, APRS, the ISS, marine channel 16, guard 121.500, the airband, weather
+  balloons, the Meteor-M satellites, ISM, GMRS, UAT, ADS-B; FM broadcast stations on their channel (97.900).
+- **F2 PRESET**: NOAA weather, 2 m, 2 m repeaters, the airband, FM broadcast, marine VHF, the weather satellites,
+  the weather balloons, 70 cm, ISM 433, GMRS, ISM 915, UAT 978 and ADS-B 1090 (or the band D's LISTEN brought).
+  Its scan goes on behind the other screens.
+- **LISTEN BOTH** mixes the X6200's receiver into the stick's audio: the two on the speaker at once. The speaker
+  changes only when A or C is shown; the other screens keep what was heard last.
+- **The VOL/SQL/RFG knob** on C: its squelch and RF gain are the stick's. Squelch in dB over the noise (OFF, 1 to
+  40): SQUELCHED on the stick's half while it is shut.
+- C stays as it was left: the band, the tuning, the channel and the scan come back with it.
+- **The stick's stream runs for as long as the radio does**: screens and apps come and go without it being stopped
+  and started again, which can leave this radio's USB host sending nothing; only AIRSPACE's screen borrows it. An
+  RTL-SDR, a GNS 5890 and a microADSB can be swapped while the radio runs; a stick that sends nothing is left alone
+  until it is plugged in again.
 - A small helper program, `x6x00-rtlspec` ([tools/rtlspec](tools/rtlspec/rtlspec.c)), reads the stick and
-  demodulates it, so a stick that hangs or is pulled out never takes the screen with it. A stick that opens but
-  sends nothing is said on the screen: unplug it and plug it in again.
+  demodulates it, so a stick that hangs or is pulled out never takes the screen with it.
 
 ### NOAA Weather Radio alerts
 
-While F has the stick and a NOAA Weather Radio channel is in view, the strongest one is watched for **SAME** headers,
+While a NOAA Weather Radio channel is in the stick's view, the strongest one is watched for **SAME** headers,
 the data bursts the National Weather Service sends before every alert and test, whether you are listening to it
 or not. An alert takes the title of every Sentry screen, blinking, for its duration: `WX ALERT: TORNADO WARNING`,
 with the issuing office, the number of areas and the duration in a message. Each one is kept in
@@ -93,8 +91,8 @@ character by character.
 
 ADS-B aircraft on a scope around you (a USB GPS, else your QTH locator, else the traffic itself), with their calls,
 heights and tracks, and their history fading out. Its receiver on the HOST port: a GNS 5890, a microADSB, or an
-RTL-SDR decoded by dump1090-fa, which is in the image. It lends the RTL-SDR to F VHF/UHF while that screen is open
-and takes it back after. E SYSTEM > AIRSPACE, or APP > Airspace.
+RTL-SDR decoded by dump1090-fa, which is in the image. An RTL-SDR is AIRSPACE's while its screen is open and the
+Sentry's the rest of the time. F SYSTEM > AIRSPACE, or APP > Airspace.
 
 ### Keyboard and mouse
 
@@ -118,7 +116,7 @@ right), so the screen stays dark until the video starts.
 The X6200's base, the radio board's own firmware from Xiegu, fetched and written from OpenX6X00, without Xiegu's
 own system and its card swaps: [tools/base_update](tools/base_update/README.md).
 
-- **On the radio**: E SYSTEM > BASE FIRMWARE lists every release Xiegu has published (1.0.3, 1.0.6, 1.0.7, 1.0.8),
+- **On the radio**: F SYSTEM > BASE FIRMWARE lists every release Xiegu has published (1.0.3, 1.0.6, 1.0.7, 1.0.8),
   fetches the one chosen from xiegu.eu (Xiegu's 370 MB update streamed, only the base file kept, checked by its
   SHA-256) and writes it, showing the writer's steps, the kernel's messages and the base's serial port as they come,
   and when the base is done.
@@ -183,17 +181,12 @@ adapter's address are blanked out. The S-meter's S1 and -121.0 are the 1.0.7 bas
 
 | | |
 |---|---|
-| ![A SCAN](docs/readme/a_scan.png) **A SCAN**: the screen the radio starts in | ![B TRACK](docs/readme/b_track.png) **B TRACK**: one signal held |
-| ![C BANDS](docs/readme/c_bands.png) **C BANDS**: what each band carries and when | ![D DECODE](docs/readme/d_decode.png) **D DECODE**: the decoders and their frequencies |
-| ![E SYSTEM](docs/readme/e_system.png) **E SYSTEM**: the rest of the radio | ![Help](docs/readme/sentry_help.png) **GEN**: the controls |
-
-**F VHF/UHF, an RTL-SDR on the HOST port**
-
-| | |
-|---|---|
-| ![F VHF/UHF, RTL](docs/readme/f_vhf_rtl.png) **View RTL**: NOAA Weather Radio, WX1 on 162.550 | ![F VHF/UHF, split](docs/readme/f_vhf_split.png) **View SPLIT**: the X6200's 60 m above, the stick below |
-| ![F VHF/UHF, X6200](docs/readme/f_vhf_x6200.png) **View X6200**: the radio's own spectrum alone | ![F VHF/UHF, listening](docs/readme/f_vhf_listen.png) **F5 LISTEN**: WX1 on the speaker, the header follows it |
-| ![F VHF/UHF, FM](docs/readme/f_vhf_fm.png) **FM broadcast**: WNCI 97.9 in wide FM | ![AIRSPACE](docs/readme/f_airspace.png) **AIRSPACE**: ADS-B from a GNS 5890, a microADSB or an RTL-SDR |
+| ![A X6200](docs/readme/a_x6200.png) **A X6200**: the screen the radio starts in | ![A, split](docs/readme/a_split.png) **F3 VIEW SPLIT**: the X6200 above, the RTL-SDR below |
+| ![B LOG](docs/readme/b_log.png) **B LOG**: what the scans locked on, each heard on its own radio | ![C VHF/UHF](docs/readme/c_vhf.png) **C VHF/UHF**: the RTL-SDR, the airband preset |
+| ![SCAN CFG](docs/readme/scan_cfg.png) **SCAN CFG** from A: the modes, the sweep, the lock | ![SCAN CFG, C](docs/readme/scan_cfg_c.png) **SCAN CFG** from C: the stick and its scan |
+| ![D BANDS](docs/readme/d_bands.png) **D BANDS**: what each band carries; RX says RTL in blue | ![E DECODE](docs/readme/e_decode.png) **E DECODE**: the decoders and their frequencies |
+| ![F SYSTEM](docs/readme/f_system.png) **F SYSTEM**: the rest of the radio | ![Help](docs/readme/sentry_help.png) **GEN**: the controls |
+| ![G WALKIE](docs/readme/g_walkie.png) **G WALKIE**, held up: channel 19, the voiceprint, the meters | ![AIRSPACE](docs/readme/f_airspace.png) **AIRSPACE**: ADS-B from a GNS 5890, a microADSB or an RTL-SDR |
 
 **Settings, in the same look: every tab**
 
@@ -271,7 +264,7 @@ The radio board's own firmware, from Xiegu: upstream's README has the table of b
 ([README_original.md, The baseband](README_original.md#the-baseband)). On the X6200's base 1.0.7 the S-meter can
 stick at S1, -121.0; 1.0.8 fixes it, and also corrects the CW keyer's speed and brings back its macros.
 
-This fork updates the X6200's base from OpenX6X00 as well: on the radio, E SYSTEM > BASE FIRMWARE (Get, then
+This fork updates the X6200's base from OpenX6X00 as well: on the radio, F SYSTEM > BASE FIRMWARE (Get, then
 Flash); from a computer, as below ([tools/base_update](tools/base_update/README.md),
 [manual](docs/MANUAL.md#the-x6200s-base-firmware-from-openx6x00)):
 
@@ -295,7 +288,7 @@ after the erase is written again with `--recover`; `--to 1.0.7` goes back (`fetc
 ## Documentation
 
 - [The manual](docs/MANUAL.md): [the Sentry](docs/MANUAL.md#the-sentry),
-  [F VHF/UHF](docs/MANUAL.md#f-vhfuhf-an-rtl-sdr), [AIRSPACE](docs/MANUAL.md#airspace),
+  [A and C](docs/MANUAL.md#a-and-c-the-spectrum-screens), [AIRSPACE](docs/MANUAL.md#airspace),
   [the mouse](docs/MANUAL.md#mouse), [the boot video](docs/MANUAL.md#boot-video), and everything upstream does.
 - [Upstream's README](README_original.md): the full feature list, reporting a problem, updating, Tailscale,
   building the image, the source's layout.

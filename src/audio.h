@@ -50,6 +50,10 @@ void audio_gain_db_transition(int16_t *buf, size_t samples, float gain1, float g
 void audio_rx_tap(bool on);
 size_t audio_rx_tap_read(int16_t *buf, size_t samples);
 
+/* The receiver's audio for a picture of it (a voiceprint): kept while on; read as the tap above, apart from it */
+void audio_scope(bool on);
+size_t audio_scope_read(int16_t *buf, size_t samples);
+
 float audio_set_play_vol(float db);
 float audio_set_rec_vol(float db);
 

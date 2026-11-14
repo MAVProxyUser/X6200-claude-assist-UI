@@ -137,6 +137,41 @@ size_t audio_rx_tap_read(int16_t *buf, size_t n) {
     return n;
 }
 
+/* The receiver's audio for a picture of it (the Sentry's G WALKIE voiceprint): its own ring, read apart from the
+ * playback's tap above */
+#define SCOPE_RING 8192
+static int16_t         scope_ring[SCOPE_RING];
+static size_t          scope_head, scope_len;
+static pthread_mutex_t scope_lock = PTHREAD_MUTEX_INITIALIZER;
+static volatile bool   scope_on;
+
+void audio_scope(bool on) {
+    pthread_mutex_lock(&scope_lock);
+    scope_on   = on;
+    scope_head = scope_len = 0;
+    pthread_mutex_unlock(&scope_lock);
+}
+
+size_t audio_scope_read(int16_t *buf, size_t n) {
+    pthread_mutex_lock(&scope_lock);
+    if (n > scope_len) n = scope_len;
+    for (size_t i = 0; i < n; i++) buf[i] = scope_ring[(scope_head + i) % SCOPE_RING];
+    scope_head = (scope_head + n) % SCOPE_RING;
+    scope_len -= n;
+    pthread_mutex_unlock(&scope_lock);
+    return n;
+}
+
+static void scope_put(const int16_t *b, size_t n) {
+    pthread_mutex_lock(&scope_lock);
+    for (size_t i = 0; i < n; i++) {
+        scope_ring[(scope_head + scope_len) % SCOPE_RING] = b ? b[i] : 0;
+        if (scope_len < SCOPE_RING) scope_len++;
+        else scope_head = (scope_head + 1) % SCOPE_RING;
+    }
+    pthread_mutex_unlock(&scope_lock);
+}
+
 /* The receiver's audio to the decoders and the recorders. A peek gives data, or a hole (no
  * buffer, a byte count: samples the server lost) that is still to be dropped, or nothing;
  * the hole goes on as silence so the decoders keep their timing (audit A19) */
@@ -150,6 +185,7 @@ static void read_callback(pa_stream *s, size_t nbytes, void *udata) {
     if (nbytes == 0)
         return;
     if (tap_on) tap_put(buf, nbytes / 2);
+    if (scope_on) scope_put(buf, nbytes / 2);
     if (buf) {
         dsp_put_audio_samples(nbytes / 2, (int16_t *) buf);
     } else {
