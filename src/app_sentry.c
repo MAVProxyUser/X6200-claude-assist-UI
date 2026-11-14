@@ -348,7 +348,7 @@ static const decoder_t decoders[] = {
 
 /* The tables' rows, in the monospaced font: their heads take the same format */
 #define BAND_ROW "%c%-8.8s %-11.11s %-24.24s %-5.5s %-24.24s %-13.13s %s"   /* 97 of the row's 97 at most: RX 5 wide (X6200) */
-#define DEC_ROW  " %-12s %-9s %-5s %-26.26s %s"     /* C's columns in C's order: 71 of the row's 72 at most */
+#define DEC_ROW  " %-12s %-9s %-5s %-20.20s %-13.13s %s"   /* D's columns in D's order, RX last: 70 of 72 */
 
 /* ---- State ---- */
 
@@ -1408,6 +1408,11 @@ static void walkie_show(bool on);
 static void walkie_tx_note(void);
 static bool g_portrait;         /* G held up: its own portrait screen shows (walkie_show) */
 static bool g_armed;            /* G's transmitter armed (the A/B key): the Sentry's receive-only hold let go */
+static int  w_at = -1;          /* G's channel (w_chs[]), -1 none chosen yet */
+static bool w_rtl_now(void);    /* G shows a channel the stick serves */
+static void walkie_group(void);
+static void walkie_mode_next(void);
+static void walkie_key_label(int k, char *s, size_t n);
 static void walkie_arm(bool on);
 
 static void show_track(void) {
@@ -1578,8 +1583,11 @@ static void show_decode(void) {
             band_now(bi, now, sizeof(now));
         else
             snprintf(now, sizeof(now), "NO BAND");     /* a frequency added without one in bands[]: says so */
+        char rx[24];                    /* the radio it is heard on: the X6200 (its apps), else the stick */
+        if (cfg_is_valid_hw_freq(f)) snprintf(rx, sizeof(rx), "X6200");
+        else snprintf(rx, sizeof(rx), f >= RTL_SPEC_MIN_HZ ? "#%s RTL#" : "", tag_hex);
         snprintf(s, sizeof(s), DEC_ROW, fs, bi >= 0 ? bands[bi].name : "", bi >= 0 ? best_name(bands[bi].when) : "",
-                 bi >= 0 ? bands[bi].ant : "", now);
+                 bi >= 0 ? bands[bi].ant : "", now, rx);
         lv_label_set_text(d_row_l[r], s);
         lv_obj_set_style_bg_opa(d_row_l[r], r == dec_row ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(d_row_l[r], r == dec_row ? ink : amb, 0);
@@ -2335,7 +2343,7 @@ static void rtl_listen_turn(int32_t diff) {
 
 /* The VFO knob is the screen's radio's: on F the stick's channel always (heard or not), on G a stick entry playing */
 static bool knob_taken(void) {
-    return scr == SCR_RTL || (scr == SCR_LOG && g_on >= 0 && hits[g_on].rtl);
+    return scr == SCR_RTL || (scr == SCR_LOG && g_on >= 0 && hits[g_on].rtl) || (w_rtl_now() && heard == HEAR_RTL);
 }
 
 /* F shown (on) or left: its picture again, at its own tuning (G may have moved the stick); F left as it is otherwise:
@@ -2379,7 +2387,9 @@ static void rtl_scan_step(void) {
     uint32_t now = lv_tick_get();
 
     /* on whatever screen (B's log and SCAN CFG see it), but not while G plays a stick entry of its own */
-    if (!rtl_scan || rtl_spectrum_state() != RTL_SPEC_ON || (scr == SCR_LOG && g_on >= 0 && hits[g_on].rtl)) return;
+    if (!rtl_scan || rtl_spectrum_state() != RTL_SPEC_ON || (scr == SCR_LOG && g_on >= 0 && hits[g_on].rtl) ||
+        w_rtl_now())
+        return;
     if (scan_pick && now >= scan_pick) {
         scan_pick = 0;
         if (rtl_best) {                 /* the picture's strongest: locked on, into G's log */
@@ -3264,6 +3274,7 @@ static void go(scr_t s) {
     if (s == SCR_RTL) hear_apply(param_i_get(cfg_hear_f));     /* the others keep what was heard last */
     if (s == SCR_LOG) g_enter();
     audio_scope(s == SCR_WALKIE);       /* G's voiceprint: the receiver's audio only while it shows */
+    rtl_spectrum_scope(s == SCR_WALKIE);    /* and the stick's, for its channels */
     if (was != s && (was == SCR_WALKIE || s == SCR_WALKIE)) walkie_show(s == SCR_WALKIE);
     if (g_armed && s != SCR_SCAN && s != SCR_WALKIE) walkie_arm(false);    /* armed only on A and G */
     show_screen();
@@ -3621,8 +3632,10 @@ static const char *f_label(int k) {
             return s;
         }
         case SCR_WALKIE: {
-            const char *const l[] = {"Ch -", "Ch +", "Ch 9", "Ch 19", g_armed ? "Tx:\nArmed" : "Tx:\nLocked"};
-            return l[k];
+            if (k == 2 || k == 3) walkie_key_label(k, s, sizeof(s));
+            else if (k == 4) snprintf(s, sizeof(s), "%s", w_rtl_now() ? "Tx:\nRX only" : g_armed ? "Tx:\nArmed" : "Tx:\nLocked");
+            else snprintf(s, sizeof(s), "%s", k ? "Ch +" : "Ch -");
+            return s;
         }
         case SCR_TRACK:         /* SCAN CFG: A's settings and its lock, or C's stick */
             if (cfg_from == SCR_SCAN) {
@@ -3863,8 +3876,8 @@ static void fkey(int k) {
         case SCR_WALKIE:
             if (k == 0) walkie_ch(-1, 0);
             if (k == 1) walkie_ch(1, 0);
-            if (k == 2) walkie_ch(0, 9);
-            if (k == 3) walkie_ch(0, 19);
+            if (k == 2) walkie_group();
+            if (k == 3) walkie_mode_next();
             if (k == 4) walkie_tx_note();
             break;
         case SCR_TRACK:
@@ -4147,6 +4160,7 @@ static void click_cb(lv_event_t *e) {
 static void rotary_cb(int32_t diff) {
     if (knob_taken()) {                 /* the stick is heard: the knob is its */
         if (scr == SCR_LOG) g_turn(diff);
+        else if (scr == SCR_WALKIE) walkie_ch(diff > 0 ? 1 : -1, 0);
         else rtl_listen_turn(diff);
         return;
     }
@@ -4584,11 +4598,12 @@ static void build_decode(lv_obj_t *p) {
     rect(p, lw + 12, y, SW - lw - 18, h, 3, false);
     char hd[96];
 
-    snprintf(hd, sizeof(hd), DEC_ROW, "KNOWN FREQ", "BAND", "BEST", "ANTENNA", "NOW");
+    snprintf(hd, sizeof(hd), DEC_ROW, "KNOWN FREQ", "BAND", "BEST", "ANTENNA", "NOW", "RX");
     d_head_l = label(p, &pixel_16, amb, lw + 15, y + 5, 0, 0, hd);
     rect(p, lw + 12, y + 25, SW - lw - 18, 3, 0, true);
     for (int r = 0; r < 12; r++) {
         d_row_l[r] = label(p, &pixel_16, amb, lw + 15, y + 30 + r * 18, SW - lw - 24, LV_TEXT_ALIGN_LEFT, "");
+        lv_label_set_recolor(d_row_l[r], true);         /* RX: RTL in the tags' orange */
         lv_obj_set_height(d_row_l[r], 18);
         lv_label_set_long_mode(d_row_l[r], LV_LABEL_LONG_CLIP);
         lv_obj_set_style_bg_color(d_row_l[r], amb, 0);
@@ -4645,6 +4660,7 @@ static void build_system(lv_obj_t *p) {
 typedef struct {
     box_t         ch, link, pow, sys;                 /* landscape: four boxes */
     lv_obj_t     *freq_l, *info_l, *msg_l;            /* portrait: the frequency, the state in lines, a word */
+    lv_obj_t     *via_l;                              /* the radio serving the channel: VIA X6200, VIA RTL-SDR */
     lv_obj_t     *num_l, *band_l, *lamp, *lamp_l, *vp_img, *s_fill, *a_fill, *s_l, *a_l, *cap_l;
     lv_img_dsc_t *vp_frame;
     int           vp_w, vp_h, bar_w;
@@ -4731,7 +4747,9 @@ static void walkie_step(void) {
     double  e    = 0;
 
     if (!wui->vp_frame) return;
-    while ((n = audio_scope_read(buf, N_OF(buf))) > 0) {
+    bool from_rtl = w_rtl_now() && heard == HEAR_RTL;
+
+    while ((n = from_rtl ? rtl_spectrum_scope_read(buf, N_OF(buf)) : audio_scope_read(buf, N_OF(buf))) > 0) {
         for (size_t i = 0; i < n; i++) {
             e += (double)buf[i] * buf[i];
             vp_in[vp_have++] = buf[i];
@@ -4751,17 +4769,30 @@ static void walkie_step(void) {
     float db = meter_get_db(), s = (db + 127) / 94, a = vp_rms > 1 ? (20 * log10f(vp_rms / 32768) + 60) / 60 : 0;
     char  t[24];
 
+    if (from_rtl) {                     /* the stick's: its channel over the noise, as its squelch measures it */
+        float o = rtl_spectrum_level();
+
+        s  = o < 0 ? 0 : o / 40;
+        db = o < 0 ? -127 : -121 + o;
+    }
+
     s = s < 0 ? 0 : s > 1 ? 1 : s;
     a = a < 0 ? 0 : a > 1 ? 1 : a;
     lv_obj_set_width(wui->s_fill, (int)(s * wui->bar_w) + 1);
     lv_obj_set_width(wui->a_fill, (int)(a * wui->bar_w) + 1);
-    if (db >= -73) snprintf(t, sizeof(t), "S9+%d  %.0f DBM", (int)(db + 73), db);
+    if (from_rtl) snprintf(t, sizeof(t), "RTL +%.0f DB", rtl_spectrum_level() < 0 ? 0 : rtl_spectrum_level());
+    else if (db >= -73) snprintf(t, sizeof(t), "S9+%d  %.0f DBM", (int)(db + 73), db);
     else snprintf(t, sizeof(t), "S%d  %.0f DBM", db <= -127 ? 0 : (int)((db + 127) / 6), db);
     lv_label_set_text(wui->s_l, t);
     snprintf(t, sizeof(t), "%d DBFS", vp_rms > 1 ? (int)(20 * log10f(vp_rms / 32768)) : -90);
     lv_label_set_text(wui->a_l, t);
     /* the lamp: a voice (the audio up) or a carrier (the meter up); PTT refused, said in it */
-    bool on = a > 0.45f || db > -100, ptt = ptt_ms && lv_tick_get() - ptt_ms < 1500;
+    /* a signal: the audio 6 dB over its own floor (followed slowly: the hiss, the band's noise), or the stick's
+     * squelch open where one is set */
+    static float floor_rms = 1000;
+    if (got) floor_rms = vp_rms < floor_rms ? 0.9f * floor_rms + 0.1f * vp_rms : 0.998f * floor_rms + 0.002f * vp_rms;
+    bool on = from_rtl && param_i_get(cfg_rtl_sql) > 0 ? rtl_spectrum_squelch_open() : vp_rms > 2 * floor_rms + 100;
+    bool ptt = ptt_ms && lv_tick_get() - ptt_ms < 1500;
     bool air = radio_get_state() == RADIO_TX;
 
     lv_obj_set_style_bg_opa(wui->lamp, air || ptt || on || (g_armed && blink) ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
@@ -4771,7 +4802,8 @@ static void walkie_step(void) {
                                    : g_armed ? (g_portrait ? "TX  ARMED" : "TX\nARMED")
                                    : on ? (g_portrait ? "RX  SIGNAL" : "RX\nSIGNAL")
                                         : (g_portrait ? "RX  QUIET" : "RX\nQUIET"));
-    lv_label_set_text(wui->cap_l, air ? "VOICEPRINT  TX  0-4 KHZ" : "VOICEPRINT  RX  0-4 KHZ");
+    lv_label_set_text(wui->cap_l, air ? "VOICEPRINT  TX  0-4 KHZ" : from_rtl ? "VOICEPRINT  RTL  0-4 KHZ"
+                                                                           : "VOICEPRINT  RX  0-4 KHZ");
     if (g_portrait && wui->msg_l && ptt_ms && lv_tick_get() - ptt_ms > 4000) lv_label_set_text(wui->msg_l, "");
 }
 
@@ -4791,6 +4823,11 @@ static void walkie_arm(bool on) {
     char t[64];
 
     if (on == g_armed) return;
+    if (on && w_rtl_now()) {            /* G on a stick channel: nothing to transmit with */
+        if (g_portrait) lv_label_set_text(wui->msg_l, "THE RTL-SDR ONLY RECEIVES: NO TX HERE");
+        else osd("RECEIVE ONLY", "THIS CHANNEL IS THE RTL-SDR'S: IT CANNOT TRANSMIT.", -1);
+        return;
+    }
     if (on) {
         if (rx_held) radio_rx_only(false);
         rx_held = false;
@@ -4818,17 +4855,179 @@ static void walkie_ptt(void) {
     else osd("PTT REFUSED", "THE SENTRY IS RECEIVE ONLY: NOTHING IS TRANSMITTED FROM HERE.", -1);
 }
 
-/* The CB channel: dir one up or down (wrapping), or channel `to` (1-40); off CB, the nearest channel first */
-static void walkie_ch(int dir, int to) {
-    int32_t khz = cparam_i_get(cfg_fg_freq) / 1000;
-    int     i   = 0;
+/* ---- G's channels: a plan across both radios, each served by the one that takes it ----
+ *
+ * The groups in order: CB 1-40 (AM), 10 m and 6 m FM calling (the X6200's: it can transmit there, armed with A/B),
+ * then MURS, 2 m simplex, marine VHF, NOAA weather and FRS/GMRS (the stick's: receive only). CH- and CH+ go through
+ * the whole list, the receiver changing by itself; GROUP goes to the next group's home channel. The modes are a table:
+ * another (DMR, say) is a row with what each radio does for it */
 
-    for (int k = 1; k < 40; k++)
-        if (labs(cb_khz[k] - khz) < labs(cb_khz[i] - khz)) i = k;
-    if (to) i = to - 1;
-    else if (labs(cb_khz[i] - khz) <= 3) i = (i + dir + 40) % 40;
-    tune(cb_khz[i] * 1000, radio_mode_am);
+typedef struct {
+    const char *grp, *name;     /* the group and the channel's name in it ("19", "WX1", "22A") */
+    int32_t     hz;
+    uint8_t     mode;           /* w_modes[]: the channel's own */
+    bool        home;           /* where GROUP lands */
+} wch_t;
+
+static const struct {
+    const char *name;
+    int         x62;            /* the X6200's radio_mode_t, -2 SSB (USB from 10 MHz up, LSB under), -1 none */
+    int         rtl;            /* the stick's demodulator (1 NFM, 2 AM, 3 WFM), 0 none */
+} w_modes[] = {
+    {"AM", radio_mode_am, 2},
+    {"FM", radio_mode_nfm, 1},
+    {"SSB", -2, 0},
+};
+#define W_MODES (int)(sizeof(w_modes) / sizeof(w_modes[0]))
+enum { WM_AM, WM_FM, WM_SSB };
+
+static wch_t w_chs[100];
+static int   w_n, w_mode = WM_AM;
+
+static void w_add(const char *grp, const char *name, int32_t hz, int mode, bool home) {
+    if (w_n < (int)N_OF(w_chs)) w_chs[w_n++] = (wch_t){grp, name, hz, (uint8_t)mode, home};
+}
+
+static void w_plan(void) {
+    static const char *const n40[] = {"01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13",
+                                      "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26",
+                                      "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+                                      "40"};
+    static const int32_t frs[] = {462562500, 462587500, 462612500, 462637500, 462662500, 462687500, 462712500,
+                                  467562500, 467587500, 467612500, 467637500, 467662500, 467687500, 467712500,
+                                  462550000, 462575000, 462600000, 462625000, 462650000, 462675000, 462700000,
+                                  462725000};
+    static const int32_t wx[] = {162550000, 162400000, 162475000, 162425000, 162450000, 162500000, 162525000};
+    static const char *const wxn[] = {"WX1", "WX2", "WX3", "WX4", "WX5", "WX6", "WX7"};
+
+    if (w_n) return;
+    for (int i = 0; i < 40; i++) w_add("CB", n40[i], cb_khz[i] * 1000, WM_AM, i == 18);
+    w_add("10 M FM", "S", 29600000, WM_FM, true);
+    w_add("6 M FM", "S", 52525000, WM_FM, true);
+    w_add("MURS", "1", 151820000, WM_FM, true);
+    w_add("MURS", "2", 151880000, WM_FM, false);
+    w_add("MURS", "3", 151940000, WM_FM, false);
+    w_add("MURS", "4", 154570000, WM_FM, false);
+    w_add("MURS", "5", 154600000, WM_FM, false);
+    w_add("2 M", "S1", 146520000, WM_FM, true);
+    w_add("2 M", "S2", 146550000, WM_FM, false);
+    w_add("2 M", "S3", 146580000, WM_FM, false);
+    w_add("MARINE", "16", 156800000, WM_FM, true);
+    w_add("MARINE", "09", 156450000, WM_FM, false);
+    w_add("MARINE", "13", 156650000, WM_FM, false);
+    w_add("MARINE", "22A", 157100000, WM_FM, false);
+    for (int i = 0; i < 7; i++) w_add("NOAA WX", wxn[i], wx[i], WM_FM, i == 0);
+    for (int i = 0; i < 22; i++) w_add("FRS/GMRS", n40[i], frs[i], WM_FM, i == 0);
+}
+
+/* The stick serves a channel the X6200 cannot tune, and the VHF/UHF ones when it is there */
+static bool w_is_rtl(int i) {
+    return i >= 0 && i < w_n && (!cfg_is_valid_hw_freq(w_chs[i].hz) || w_chs[i].hz >= 60000000);
+}
+
+static bool w_rtl_now(void) {
+    return scr == SCR_WALKIE && w_is_rtl(w_at);
+}
+
+static bool w_mode_ok(int i, int m) {
+    return w_is_rtl(i) ? w_modes[m].rtl > 0 : w_modes[m].x62 != -1;
+}
+
+/* Channel i heard on its own radio, in G's mode (the channel's own if the mode is not the radio's) */
+static void walkie_go(int i) {
+    const wch_t *c = &w_chs[i];
+
+    if (!w_mode_ok(i, w_mode)) w_mode = c->mode;
+    if (w_is_rtl(i)) {
+        if (!sdr_here && rtl_spectrum_state() != RTL_SPEC_ON) {
+            if (g_portrait) lv_label_set_text(wui->msg_l, "NO RTL-SDR: THIS CHANNEL IS THE STICK'S");
+            else osd("NO RTL-SDR", "THIS CHANNEL IS THE STICK'S: PLUG AN RTL-SDR INTO THE HOST PORT.", -1);
+            return;
+        }
+        if (g_armed) walkie_arm(false);         /* the stick only receives */
+        w_at = i;
+        rtl_spectrum_squelch(param_i_get(cfg_rtl_sql));
+        rtl_spectrum_tune(c->hz + G_STICK_OFF);
+        stick_at = c->hz + G_STICK_OFF;
+        rtl_spectrum_mute(false);
+        rtl_spectrum_mux(false);
+        heard = HEAR_RTL;
+        hear_vol_refresh();
+        rtl_spectrum_listen(c->hz, w_modes[w_mode].rtl);
+    } else {
+        int m = w_modes[w_mode].x62;
+
+        if (m == -2) m = c->hz >= 10000000 ? radio_mode_usb : radio_mode_lsb;
+        w_at = i;
+        if (heard != HEAR_X6200) hear_apply(HEAR_X6200);     /* the X6200 on the speaker again */
+        tune(c->hz, m);
+    }
     show_walkie();
+    for (int k = 0; k < 5; k++) buttons_refresh(&btn[k]);
+}
+
+/* The channel the X6200's dial is on, for a G that has none yet (-1 off the plan) */
+static int w_from_dial(void) {
+    int32_t fq = cparam_i_get(cfg_fg_freq);
+
+    for (int i = 0; i < w_n; i++)
+        if (!w_is_rtl(i) && labs(w_chs[i].hz - fq) <= 3000) return i;
+    return -1;
+}
+
+static void walkie_group(void) {
+    int         i = w_at < 0 ? 0 : w_at;
+    const char *g;
+
+    w_plan();
+    g = w_chs[i].grp;
+    while (i < w_n && !strcmp(w_chs[i].grp, g)) i++;    /* the next group */
+    if (i >= w_n) i = 0;
+    for (int k = i; k < w_n && !strcmp(w_chs[k].grp, w_chs[i].grp); k++)
+        if (w_chs[k].home) {
+            i = k;
+            break;
+        }
+    w_mode = w_chs[i].mode;
+    walkie_go(i);
+}
+
+static void walkie_mode_next(void) {
+    int i;
+
+    w_plan();
+    i = w_at < 0 ? w_from_dial() : w_at;
+    if (i < 0) i = 18;
+    for (int k = 1; k <= W_MODES; k++)
+        if (w_mode_ok(i, (w_mode + k) % W_MODES)) {
+            w_mode = (w_mode + k) % W_MODES;
+            break;
+        }
+    walkie_go(i);
+}
+
+/* F3 and F4's names on G: the group and the mode */
+static void walkie_key_label(int k, char *s, size_t n) {
+    int wi;
+
+    w_plan();
+    wi = w_at >= 0 ? w_at : w_from_dial();
+    if (k == 2) snprintf(s, n, "Group:\n%s", wi >= 0 ? w_chs[wi].grp : "CB");
+    else snprintf(s, n, "Mode:\n%s", w_modes[w_mode].name);
+}
+
+/* CH- / CH+ (and the MFK, the VFO on a stick channel): the next channel of the plan, its radio taken by itself;
+ * to: CB channel to (the MFK's push: 19) */
+static void walkie_ch(int dir, int to) {
+    int i;
+
+    w_plan();
+    i = w_at < 0 ? w_from_dial() : w_at;
+    if (to) i = to - 1;
+    else if (i < 0) i = 18;
+    else i = (i + dir + w_n) % w_n;
+    if (w_at < 0 || strcmp(w_chs[i].grp, w_chs[w_at].grp)) w_mode = w_chs[i].mode;     /* another group */
+    walkie_go(i);
 }
 
 static void show_walkie(void) {
@@ -4844,15 +5043,36 @@ static void show_walkie(void) {
     static bool    l_chg;
 
     if (!wui->num_l) return;
-    for (int k = 0; k < 40; k++)
-        if (labs(cb_khz[k] * 1000 - fq) <= 3000) ch = k + 1;
-    snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
-    snprintf(fr, sizeof(fr), "%s %s", f, mode_name(cparam_i_get(cfg_cur_mode)));
-    identify_ex(fq, &id, false);
-    snprintf(nm, sizeof(nm), "%s", id.name);
-    lv_label_set_text_fmt(wui->num_l, ch > 0 ? "%02d" : "--", ch);
-    lv_label_set_text(wui->band_l, ch == 9 ? "EMERGENCY" : ch == 19 ? "TRUCKERS" : ch > 0 ? "CB CHANNEL"
-                                   : bi >= 0 ? bands[bi].name : "OFF CB");
+    w_plan();
+    int  wi  = w_at >= 0 ? w_at : w_from_dial();
+    bool rtl = w_is_rtl(wi) && heard == HEAR_RTL;
+    char via[64];
+
+    (void)ch;
+    if (rtl) {                          /* the stick serves it: its frequency, its mode */
+        const wch_t *c = &w_chs[wi];
+        snprintf(fr, sizeof(fr), "%d.%04d %s", c->hz / 1000000, (c->hz % 1000000) / 100, w_modes[w_mode].name);
+        snprintf(nm, sizeof(nm), "%s %s", c->grp, c->name);
+        snprintf(via, sizeof(via), "VIA #%s RTL-SDR#  RECEIVE ONLY", tag_hex);
+    } else {
+        snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
+        snprintf(fr, sizeof(fr), "%s %s", f, mode_name(cparam_i_get(cfg_cur_mode)));
+        identify_ex(fq, &id, false);
+        snprintf(nm, sizeof(nm), "%s", id.name);
+        snprintf(via, sizeof(via), "VIA X6200");
+    }
+    if (wi >= 0 && (rtl || labs(w_chs[wi].hz - fq) <= 3000)) {
+        const wch_t *c = &w_chs[wi];
+        bool         cb = !strcmp(c->grp, "CB");
+
+        lv_label_set_text(wui->num_l, c->name);
+        lv_label_set_text(wui->band_l, cb && !strcmp(c->name, "09") ? "CB EMERGENCY" : cb && !strcmp(c->name, "19")
+                                       ? "CB TRUCKERS" : c->grp);
+    } else {
+        lv_label_set_text(wui->num_l, "--");
+        lv_label_set_text(wui->band_l, bi >= 0 ? bands[bi].name : "OFF THE PLAN");
+    }
+    if (wui->via_l) lv_label_set_text(wui->via_l, via);
     snprintf(lk, sizeof(lk), "SQL %d  VOL %d", param_i_get(cfg_squelch), radio_change_vol(0));
     snprintf(tx, sizeof(tx), "%s", g_armed ? "TX ARMED" : rx_held ? "TX LOCKED" : "TX NOT LOCKED");
     clock_power_get(&ext, &bat, &cap, &chg);
@@ -4966,9 +5186,12 @@ static void build_walkie(lv_obj_t *p) {
     label(p, &pixel_16, amb, 6, my + 6, 160, LV_TEXT_ALIGN_CENTER, "CH");
     u->num_l  = label(p, &pixel_44, amb, 6, my + 22, 160, LV_TEXT_ALIGN_CENTER, "--");
     u->band_l = label(p, &pixel_16, amb, 6, my + 72, 160, LV_TEXT_ALIGN_CENTER, "");
-    u->lamp   = rect(p, 20, my + 98, 132, 68, 3, false);
+    u->via_l  = label(p, &pixel_16, amb, 6, my + 88, 160, LV_TEXT_ALIGN_CENTER, "");     /* over the lamp */
+    lv_label_set_recolor(u->via_l, true);
+    lv_label_set_long_mode(u->via_l, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    u->lamp   = rect(p, 20, my + 108, 132, 62, 3, false);
     lv_obj_set_style_bg_color(u->lamp, amb, 0);
-    u->lamp_l = label(p, &pixel_24, amb, 20, my + 108, 132, LV_TEXT_ALIGN_CENTER, "RX\nQUIET");
+    u->lamp_l = label(p, &pixel_24, amb, 20, my + 114, 132, LV_TEXT_ALIGN_CENTER, "RX\nQUIET");
     vp_make(u, p, 176, my + 3, 612, vh);
 
     int by = my + vh + 12, bw = (SW - 12 - 6) / 2;
@@ -5011,10 +5234,11 @@ static void build_walkie_portrait(void) {
     label(g_scr, &pixel_24, amb, P_X, 16, P_W, LV_TEXT_ALIGN_CENTER, "G  WALKIE TALKIE");
     /* the channel */
     rect(g_scr, P_X, 56, P_W, 168, 3, false);
-    label(g_scr, &pixel_16, amb, P_X, 62, P_W, LV_TEXT_ALIGN_CENTER, "CHANNEL");
     u->num_l  = label(g_scr, &pixel_44, amb, P_X, 82, P_W, LV_TEXT_ALIGN_CENTER, "--");
     u->band_l = label(g_scr, &pixel_20, amb, P_X, 132, P_W, LV_TEXT_ALIGN_CENTER, "");
     u->freq_l = label(g_scr, &pixel_20, amb, P_X, 158, P_W, LV_TEXT_ALIGN_CENTER, "");
+    u->via_l  = label(g_scr, &pixel_16, amb, P_X, 62, P_W, LV_TEXT_ALIGN_CENTER, "");   /* the channel box's head */
+    lv_label_set_recolor(u->via_l, true);
     u->info_l = NULL;
     u->ch.opt[0] = label(g_scr, &pixel_16, dim, P_X + 8, 196, P_W - 16, LV_TEXT_ALIGN_CENTER, "");  /* what it is */
     lv_label_set_long_mode(u->ch.opt[0], LV_LABEL_LONG_SCROLL_CIRCULAR);

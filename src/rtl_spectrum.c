@@ -101,6 +101,14 @@ static atomic_int      g_stick = 1000, g_x62 = 1000;   /* each receiver's share 
 #define SQL_HANG    10          /* rows: half a second */
 static atomic_int      sql_db;
 static atomic_bool     sql_open = true;
+static atomic_int      chan_over = -10;  /* the listened channel over the noise, tenths of dB; -10 none */
+
+/* The stick's audio for a picture of it (the Sentry's G WALKIE voiceprint on a stick channel): its own ring */
+#define RSCOPE 8192
+static int16_t         rscope[RSCOPE];
+static int             rscope_head, rscope_len;
+static atomic_bool     rscope_on;
+static pthread_mutex_t rscope_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* A write to the helper that cannot end the GUI: one that has just gone gives EPIPE, and its SIGPIPE is taken here,
  * not left to end the process (the GUI keeps the default action) */
@@ -240,8 +248,9 @@ static void squelch_row(const float *db, uint16_t n, uint32_t rate, int64_t cent
     static int   quiet;
     int          sql = atomic_load(&sql_db), mode = atomic_load(&listen_mode);
 
-    if (!sql || !mode || !n || !rate) {
+    if (!mode || !n || !rate) {
         atomic_store(&sql_open, true);
+        atomic_store(&chan_over, -10);
         quiet = 0;
         return;
     }
@@ -263,6 +272,13 @@ static void squelch_row(const float *db, uint16_t n, uint32_t rate, int64_t cent
     qsort(sorted, n, sizeof(float), cmp_float);
     float over = peak - sorted[n / 2];
     bool  open = atomic_load(&sql_open);
+
+    atomic_store(&chan_over, (int)(over * 10));
+    if (!sql) {                         /* no squelch: always open, the level measured all the same */
+        atomic_store(&sql_open, true);
+        quiet = 0;
+        return;
+    }
 
     if (over >= sql) {
         open  = true;
@@ -630,6 +646,15 @@ static void *player_thread(void *arg) {
                 else if (g > to) g = g - 1.0f / 441 < to ? to : g - 1.0f / 441;
                 chunk[k] = (int16_t)(chunk[k] * g);
             }
+            if (atomic_load(&rscope_on)) {
+                pthread_mutex_lock(&rscope_lock);
+                for (int k = 0; k < n; k++) {
+                    rscope[(rscope_head + rscope_len) % RSCOPE] = chunk[k];
+                    if (rscope_len < RSCOPE) rscope_len++;
+                    else rscope_head = (rscope_head + 1) % RSCOPE;
+                }
+                pthread_mutex_unlock(&rscope_lock);
+            }
             audio_play(chunk, n);
         } else {
             usleep(5000);
@@ -661,6 +686,27 @@ void rtl_spectrum_listen(int64_t hz, int mode) {
 
 bool rtl_spectrum_listening(void) {
     return atomic_load(&listen_mode) != 0;
+}
+
+void rtl_spectrum_scope(bool on) {
+    pthread_mutex_lock(&rscope_lock);
+    atomic_store(&rscope_on, on);
+    rscope_head = rscope_len = 0;
+    pthread_mutex_unlock(&rscope_lock);
+}
+
+size_t rtl_spectrum_scope_read(int16_t *buf, size_t n) {
+    pthread_mutex_lock(&rscope_lock);
+    if (n > (size_t)rscope_len) n = rscope_len;
+    for (size_t i = 0; i < n; i++) buf[i] = rscope[(rscope_head + i) % RSCOPE];
+    rscope_head = (rscope_head + (int)n) % RSCOPE;
+    rscope_len -= (int)n;
+    pthread_mutex_unlock(&rscope_lock);
+    return n;
+}
+
+float rtl_spectrum_level(void) {
+    return atomic_load(&chan_over) / 10.0f;
 }
 
 void rtl_spectrum_mux(bool on) {

@@ -43,14 +43,16 @@ turned with the MFK's inner ring, and SCAN CFG beside the two spectrum screens:
   there. The airband, 2 m, marine VHF, NOAA weather, 70 cm and GMRS are in it too; its **RX** column names the radio
   that takes each band: X6200, or RTL (in the spectrum's orange) for the stick's, and LISTEN opens those on B. **F1 SCAN** sets the band chosen on its
   radio and scans it end to end (A for the X6200's, B for the stick's).
-- **E DECODE**: the decoders and the frequencies they work on, each a key away.
+- **E DECODE**: the decoders and the frequencies they work on, each a key away, and the radio each is heard on.
 - **F SYSTEM**: the rest of the radio in the same look: Settings, the apps, the digital modes, AIRSPACE,
   VHF/UHF, the classic radio screen, a UNIX shell on the radio's own screen, the base firmware, and which screen the
   radio starts in. The title says the release, the GUI's commit and the base's version; A's says what its scope
   takes in (`MF/HF/VHF SPECTRUM`).
-- **G WALKIE**: the radio as a CB walkie-talkie: the channel big (19 TRUCKERS), a **voiceprint** of what is heard
-  (a 0-4 kHz sonogram scrolling across, voices as their stacked harmonics), the S-meter and the audio's level, the
-  battery and supply volts, the processor's temperature and load. CH-/CH+, CH 9, CH 19; A/B arms PTT.
+- **G WALKIE**, held up (portrait): a walkie-talkie across both radios: CB, 10 m and 6 m FM on the X6200, MURS,
+  2 m, marine, NOAA weather and FRS/GMRS on the stick, CH-/CH+ going from one radio to the other by itself and the
+  screen saying which (VIA X6200, VIA RTL-SDR); GROUP, MODE (AM, FM, SSB; a table, more to come), a **voiceprint**
+  of what is heard (a 0-4 kHz sonogram scrolling across), the S-meter and the audio's level, the battery, the
+  processor's temperature. A/B arms PTT on the X6200's channels.
 - **SCAN CFG** (F5 on A or B, on no ring): A's scan settings and its lock: AUTO-SCAN or SEMI-AUTO (MAN-OVERRIDE
   comes by itself when the VFO is turned), SWEEP through the marked bands, STEP, and the signal locked on (HOLD,
   NEXT, REC, IGNORE); from B, the stick's GAIN, DWELL, STEP and SQUELCH.
