@@ -34,7 +34,7 @@
 #define BOARD_G90_DEV       "/dev/ttyS1"
 #endif
 #ifndef BOARD_G90_PROFILE
-#define BOARD_G90_PROFILE   "1.81"
+#define BOARD_G90_PROFILE   "auto"  /* the body's own firmware picks it (hw_g90.c) */
 #endif
 #ifndef BOARD_G90_ALLOW_TX
 #define BOARD_G90_ALLOW_TX  0
@@ -105,6 +105,9 @@
 #define BOARD_FILTER_BW_STEP    20
 #define BOARD_KEY_SPEED_MIN     5
 #define BOARD_KEY_SPEED_MAX     50
+/* The body on a DE-9 cable, not in the case: the GUI starts without it (radio_init), the S-meter
+ * says whether it answers (smeter.c), and the "No data from the base" notice is not shown */
+#define BOARD_BASE_DETACHABLE   1
 #else
 /* The rest of the radio's ranges. The same on the X6100 and the X6200; the settings manager reads them. */
 #define BOARD_PWR_MIN       0.1f        /* PWR and the external tuner's TUNE power */
