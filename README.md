@@ -75,7 +75,8 @@ A generic RTL-SDR stick (an RTL2832U with an R820T, R828D or the like) on the HO
   the weather balloons, 70 cm, ISM 433, GMRS, ISM 915, UAT 978 and ADS-B 1090 (or the band D's LISTEN brought).
   Its scan goes on behind the other screens.
 - **LISTEN BOTH** mixes the X6200's receiver into the stick's audio: the two on the speaker at once; OFF silences
-  both. The speaker changes only when A or B is shown; the other screens keep what was heard last. **Each radio
+  both. The speaker changes only when A or B is shown; the other screens keep what was heard last. RTL or BOTH chosen
+  with no stick is the X6200 alone till one is plugged in: the stick then joins at once, on whatever screen. **Each radio
   keeps its own volume** (the VOL knob on A and on B), played at it wherever that radio is heard.
 - **The VOL/SQL/RFG knob** on B: its squelch and RF gain are the stick's. Squelch in dB over the noise (OFF, 1 to
   40): SQUELCHED on the stick's half while it is shut.

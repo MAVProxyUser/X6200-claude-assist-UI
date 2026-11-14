@@ -390,6 +390,11 @@ enum { VIEW_RTL, VIEW_SPLIT, VIEW_X6200 };      /* cfg_rtl_view: F4 goes RTL, SP
 enum { HEAR_X6200, HEAR_RTL, HEAR_BOTH, HEAR_OFF, HEAR_N };
 static const char *const hear_names[] = {"X6200", "RTL", "BOTH", "OFF"};
 static int     heard = HEAR_X6200;
+/* What is to be heard: A's or B's LISTEN, C's entry's radio, G's channel's (or what the others kept). heard is that,
+ * or the X6200 standing in while it needs a stick that is not there: the stick taken as soon as it is (hear_follow) */
+static int     hear_want = HEAR_X6200;
+static bool    to_airspace;     /* the Sentry closing for AIRSPACE, its H (app_sentry_open_at) */
+static uint32_t opened_ms;      /* the Sentry's start: the stick found in its first seconds joins without an OSD */
 #define listen_rtl (heard == HEAR_RTL || heard == HEAR_BOTH)     /* the stick on the speaker, alone or with the X6200 */
 #define listen_x62 (heard == HEAR_X6200 || heard == HEAR_BOTH)   /* the X6200's receiver on it */
 static int64_t stick_at;      /* where the stick is tuned: F's rtl_hz, or a G entry's place */
@@ -526,7 +531,7 @@ static const struct {
                          "MICROADSB KEEPS LISTENING WHEN CLOSED; AN RTL-SDR IS ITS ONLY WHILE IT IS OPEN."},
     {"VHF/UHF (RTL-SDR)", "B VHF/UHF: AN RTL-SDR STICK'S SPECTRUM, 24 MHZ TO 1.7 GHZ, ALONE, SPLIT WITH THE X6200'S OR "
                           "THE X6200'S ALONE (F3 VIEW), A'S KEYS: F1 SCANS THE BAND, F2 CHOOSES IT, F4 LISTEN (X6200, "
-                          "RTL OR BOTH), F5 SCAN CFG. THE VFO TUNES ITS CHANNEL, THE MFK PANS. AIRSPACE HAS THE STICK "
+                          "RTL, BOTH OR OFF), F5 SCAN CFG. THE VFO TUNES ITS CHANNEL, THE MFK PANS. AIRSPACE HAS THE STICK "
                           "WHILE IT IS OPEN."},
     {"CLASSIC RADIO", "THE FULL RADIO SCREEN, WITH TRANSMIT. THE SENTRY STAYS AWAY TILL YOU OPEN IT AGAIN: APP, THEN "
                       "THE SENTRY TILE."},
@@ -2285,9 +2290,11 @@ static void hear_vol_refresh(void) {
     }
 }
 
-/* The speaker: the X6200's receiver, the stick at F's channel (listen_hz), or both mixed (rtl_spectrum_mux). The stick
- * goes back to F's place for it if G moved it; no stick, the X6200 for now */
+/* The speaker: the X6200's receiver, the stick at B's channel (listen_hz), or both mixed (rtl_spectrum_mux). The stick
+ * goes back to B's place for it if C or G moved it; no stick, the X6200 for now (hear_follow puts the stick on when one
+ * is plugged in) */
 static void hear_apply(int h) {
+    hear_want = h;
     if ((h == HEAR_RTL || h == HEAR_BOTH) && !sdr_here && rtl_spectrum_state() != RTL_SPEC_ON) h = HEAR_X6200;
     heard = h;
     rtl_spectrum_mute(h == HEAR_OFF);
@@ -2308,27 +2315,48 @@ static void hear_apply(int h) {
     show_head();
 }
 
-/* F5 on A or F: that screen's LISTEN, the next one, heard at once */
-static void hear_next(void) {
-    ParamInt *c = scr == SCR_RTL ? cfg_hear_f : cfg_hear_a;
-    int       h = (param_i_get(c) + 1) % HEAR_N;
-    char      t[160];
+/* What LISTEN h does, for the OSD: B's channel, its mode put in */
+static void hear_how(int h, char *t, size_t n) {
     static const char *const how[] = {"THE X6200'S RECEIVER ON THE SPEAKER.",
                                       "THE RTL-SDR ON THE SPEAKER, AT B'S CHANNEL: %s %s.",
                                       "THE X6200 AND THE RTL-SDR TOGETHER (B'S CHANNEL: %s %s).",
                                       "THE SPEAKER SILENT: NEITHER RADIO IS HEARD (THEIR VOLUME KEPT)."};
-    char f[16];
+    int64_t hz = listen_hz ? listen_hz : rtl_hz;
+    char    f[16];
 
-    if ((h == HEAR_RTL || h == HEAR_BOTH) && !sdr_here) {
-        osd("NO RTL-SDR", "PLUG AN RTL-SDR INTO THE HOST PORT TO HEAR IT.", -1);
-        h = HEAR_OFF;                   /* past RTL and BOTH: on to OFF */
-    }
+    fmt_mhz(f, sizeof(f), hz, 3);
+    snprintf(t, n, how[h], f, rtl_mode_names[rtl_mode_of(hz)]);
+}
+
+/* F4 on A or B: that screen's LISTEN, the next one, heard at once. RTL and BOTH with no stick yet: the X6200 alone
+ * till one is plugged in, then the stick (hear_follow) */
+static void hear_next(void) {
+    ParamInt *c = scr == SCR_RTL ? cfg_hear_f : cfg_hear_a;
+    int       h = (param_i_get(c) + 1) % HEAR_N;
+    char      t[160], title[32];
+
     param_i_set(c, h);
     hear_apply(h);
-    fmt_mhz(f, sizeof(f), listen_hz ? listen_hz : rtl_hz, 3);
-    snprintf(t, sizeof(t), how[h], f, rtl_mode_names[rtl_mode_of(listen_hz ? listen_hz : rtl_hz)]);
-    char title[32];
     snprintf(title, sizeof(title), "%s LISTEN: %s", scr == SCR_RTL ? "B" : "A", hear_names[h]);
+    if (heard != h)                     /* the X6200 standing in */
+        snprintf(t, sizeof(t), "NO RTL-SDR YET: THE X6200 ALONE TILL ONE IS PLUGGED INTO THE HOST PORT, THEN %s.",
+                 h == HEAR_BOTH ? "BOTH TOGETHER" : "THE STICK");
+    else
+        hear_how(h, t, sizeof(t));
+    osd(title, t, -1);
+}
+
+/* An RTL-SDR plugged in (its rows coming) while what is to be heard has the stick and the X6200 stands in for it:
+ * the stick on the speaker at once, alone or mixed with the X6200, on whatever screen. A stick pulled out changes
+ * nothing: it is silent meanwhile and heard again as soon as it is back (the daemon keeps what it plays) */
+static void hear_follow(void) {
+    char t[160], title[32];
+
+    if ((hear_want != HEAR_RTL && hear_want != HEAR_BOTH) || listen_rtl || rtl_spectrum_state() != RTL_SPEC_ON) return;
+    hear_apply(hear_want);
+    if (!listen_rtl || lv_tick_get() - opened_ms < 5000) return;
+    snprintf(title, sizeof(title), "RTL-SDR IN: %s", hear_names[heard]);
+    hear_how(heard, t, sizeof(t));
     osd(title, t, -1);
 }
 
@@ -3122,12 +3150,14 @@ static void g_listen(int i) {
         }
         g_hz = h->hz;
         g_stick_on(g_hz);
-        heard = HEAR_RTL;               /* the log plays one radio at a time: the entry's */
+        heard = hear_want = HEAR_RTL;   /* the log plays one radio at a time: the entry's */
         hear_vol_refresh();
+        rtl_spectrum_mute(false);
         rtl_spectrum_mux(false);
         rtl_spectrum_listen(g_hz, h->mode ? h->mode : rtl_mode_of(g_hz));
     } else {
-        if (listen_rtl) hear_apply(HEAR_X6200);      /* the X6200 on the speaker again */
+        if (heard != HEAR_X6200) hear_apply(HEAR_X6200);     /* the X6200 on the speaker again (OFF too) */
+        hear_want = HEAR_X6200;         /* alone: a stick plugged in now does not join it */
         if (!tune((int32_t)h->hz, h->mode)) return;
     }
     g_on = i;
@@ -3599,9 +3629,18 @@ static void blink_cb(lv_timer_t *t) {
         g_clear_ms = 0;
         buttons_refresh(&btn[2]);
     }
+    {
+        bool here = adsb_rx_sdr_present();     /* an atomic, kept by adsb_rx.c's look at USB each second */
+
+        if (here != sdr_here && scr == SCR_BANDS) {
+            sdr_here = here;
+            show_bands();
+        }
+        sdr_here = here;
+        hear_follow();                  /* a stick plugged in: heard at once if LISTEN has it */
+    }
     if (n++ % 4 == 0) {
         hear_vol_refresh();             /* the X6200's volume may have changed elsewhere (BOTH's shares) */
-        bool here = adsb_rx_sdr_present();
         bool ads  = adsb_rx_receiver_present() || adsb_rx_state(NULL, 0) == ADSB_RX_ON;
 #ifdef BOARD_X6200
         bool wr   = param_i_get(cfg_wr12) && wr12_ready();      /* wr12.c: the X6200's only */
@@ -3609,11 +3648,6 @@ static void blink_cb(lv_timer_t *t) {
         bool wr   = false;
 #endif
 
-        if (here != sdr_here && scr == SCR_BANDS) {
-            sdr_here = here;
-            show_bands();
-        }
-        sdr_here  = here;
         adsb_here = ads;
         wr12_here = wr;
     }
@@ -3765,7 +3799,7 @@ static void sys_open_async(void *arg) {
         case SYS_SETTINGS: main_screen_start_app(ACTION_APP_SETTINGS); break;
         case SYS_APPS: main_screen_open_apps(); break;
         case SYS_MODES: main_screen_start_app(ACTION_APP_MODES); break;
-        case SYS_AIRSPACE: main_screen_start_app(ACTION_APP_ADSB); break;
+        case SYS_AIRSPACE: app_sentry_open_at('H'); break;
         case SYS_SHELL: main_screen_open_dialog(dialog_shell); break;
 #ifdef BOARD_X6200
         case SYS_BASEFW: main_screen_open_dialog(dialog_base_update); break;
@@ -4113,7 +4147,7 @@ static void key_cb(lv_event_t *e) {
 
             while (i < RING_N && ring[i] != at) i++;
             i = (i % RING_N + (key == KEY_MFK_NEXT ? 1 : RING_N)) % (RING_N + 1);
-            if (i == RING_N) main_screen_start_app(ACTION_APP_ADSB);   /* H: AIRSPACE, in the Sentry's place */
+            if (i == RING_N) app_sentry_open_at('H');   /* H: AIRSPACE, in the Sentry's place */
             else go(ring[i]);
             return;
         }
@@ -4955,7 +4989,7 @@ static void walkie_go(int i) {
         stick_at = c->hz + G_STICK_OFF;
         rtl_spectrum_mute(false);
         rtl_spectrum_mux(false);
-        heard = HEAR_RTL;
+        heard = hear_want = HEAR_RTL;
         hear_vol_refresh();
         rtl_spectrum_listen(c->hz, w_modes[w_mode].rtl);
     } else {
@@ -4964,6 +4998,7 @@ static void walkie_go(int i) {
         if (m == -2) m = c->hz >= 10000000 ? radio_mode_usb : radio_mode_lsb;
         w_at = i;
         if (heard != HEAR_X6200) hear_apply(HEAR_X6200);     /* the X6200 on the speaker again */
+        hear_want = HEAR_X6200;         /* the channel's radio alone: a stick plugged in now does not join it */
         tune(c->hz, m);
     }
     show_walkie();
@@ -5348,7 +5383,7 @@ static void build_overlays(void) {
                    "MFK RING       A X6200 B VHF/UHF C LOG D BANDS E DECODE F SYSTEM G WALKIE H AIRSPACE\n"
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"
                    "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON B THE STICK'S)\n"
-                   "LISTEN         A AND B EACH: X6200, RTL, BOTH OR OFF; OTHER SCREENS KEEP IT\n"
+                   "LISTEN         A, B: X6200, RTL, BOTH, OFF; OTHERS KEEP IT; A STICK PLUGGED IN JOINS\n"
                    "BAND UP/DOWN   THE NEXT BAND, AS F2 (ON B: THE NEXT PRESET)\n"
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
                    "DFN            NOISE REDUCTION ON/OFF. HOLD: NOISE BLANKER (CLICKS AND POPS)\n"
@@ -5410,6 +5445,9 @@ static void construct_cb(lv_obj_t *parent) {
     if (!rtl_hz) rtl_hz = param_i_get(cfg_rtl_freq);      /* the stick from now on, at F's tuning (rtl_spectrum.h) */
     rtl_spectrum_squelch(param_i_get(cfg_rtl_sql));
     rtl_spectrum_want(true, rtl_hz, param_i_get(cfg_rtl_gain));
+    sdr_here    = adsb_rx_sdr_present();    /* before A's LISTEN is put on the speaker */
+    to_airspace = false;
+    opened_ms   = lv_tick_get();
     g_on = -1;
     g_stick = false;
     if (g_sel >= nhits) g_sel = 0;
@@ -5463,6 +5501,13 @@ static void destruct_cb(void) {
     walkie_show(false);                 /* landscape again before anything else draws */
     walkie_arm(false);                  /* the transmitter locked (the hold let go below with the rest) */
     radio_set_vol_override(-1);         /* the speaker at the X6200's volume again */
+    /* and the X6200's receiver on it: the stick's audio is the Sentry's (nothing outside it shows the stick's channel
+     * or turns it), and OFF's silence would leave the classic radio and the apps mute. On AIRSPACE, the Sentry's H,
+     * OFF stays silent (AIRSPACE lets it go when it closes) */
+    rtl_spectrum_mux(false);
+    rtl_spectrum_listen(0, 0);
+    rtl_spectrum_mute(to_airspace && heard == HEAR_OFF);
+    to_airspace = false;
     for (int i = 0; i < 2; i++) {
         wui_t *u = i ? &w_port : &w_land;
 
@@ -5505,6 +5550,7 @@ void app_sentry_open_at(char letter) {
     static const scr_t by[] = {SCR_SCAN, SCR_RTL, SCR_LOG, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_WALKIE};
 
     if (letter == 'H') {
+        to_airspace = dialog_type_is_run(dialog_sentry);    /* the Sentry closing for its H */
         main_screen_start_app(ACTION_APP_ADSB);
         return;
     }

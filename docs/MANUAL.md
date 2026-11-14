@@ -637,7 +637,13 @@ last seconds, the strongest signals named over it and the screen's channel brack
   scales the other down in the mix, so equal volumes sound about equal (each radio's audio is levelled first): turn
   either one to match them. While BOTH is heard the legend and the volume's word show the other's beside it
   (`VOLUME 22 (RTL 29)`). The X6200's is the radio's own volume setting; the stick's is kept beside it. The speaker changes only when A
-  or B is shown (or C plays an entry); the other screens keep what was heard last. The stick plays B's channel
+  or B is shown (or C plays an entry, or G a channel); the other screens keep what was heard last. RTL and BOTH can
+  be chosen with no stick plugged in: the X6200 is heard alone till one is, and **the moment an RTL-SDR is plugged in
+  (its picture coming), on whatever screen, the stick joins**: alone for RTL, mixed in for BOTH, with an OSD saying
+  so. A stick pulled out changes nothing (it is silent meanwhile and heard again as soon as it is back); an entry of
+  C's or a channel of G's played on the X6200 stays the X6200's alone. Leaving the Sentry (the classic radio, an app)
+  gives the speaker back to the X6200; on H AIRSPACE (the stick busy with ADS-B) the X6200 is heard, or nothing if
+  LISTEN was OFF. The stick plays B's channel
   whichever screen asked for it. The mode comes from the band: wide FM from 87.5 to 108 MHz, AM on the airband and below 29.5 MHz (CB),
   narrow FM elsewhere.
 - **F5 SCAN CFG**: below.

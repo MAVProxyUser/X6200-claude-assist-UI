@@ -921,6 +921,7 @@ static void destruct_cb(void) {
     if (timer) lv_timer_del(timer);
     timer = NULL;
     rtl_spectrum_yield(false);      /* the RTL-SDR back to the Sentry */
+    rtl_spectrum_mute(false);       /* the Sentry's OFF let go: what opens next sets the speaker (the Sentry again) */
     lv_group_remove_obj(root);
     if (scope) {
         lv_img_cache_invalidate_src(scope);

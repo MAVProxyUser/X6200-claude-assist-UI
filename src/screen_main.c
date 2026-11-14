@@ -1844,7 +1844,7 @@ static void receivers_watch_cb(lv_timer_t *t) {
     was = only;
     if (!due || radio_get_state() != RADIO_RX || dialog_type_is_run(dialog_first_start)) return;
     due = false;
-    if (!dialog_type_is_run(dialog_adsb)) main_screen_start_app(ACTION_APP_ADSB);
+    if (!dialog_type_is_run(dialog_adsb)) app_sentry_open_at('H');     /* from the Sentry: its speaker kept as is */
 }
 
 static void build(void);
