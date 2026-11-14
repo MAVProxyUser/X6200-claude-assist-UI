@@ -27,6 +27,7 @@
 #include <linux/i2c.h>
 #include <linux/i2c-dev.h>
 #include <stddef.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -783,9 +784,13 @@ void hw_vfo_set_pre(radio_vfo_t vfo, bool on) {
     x6200_control_vfo_pre_set((x6200_vfo_t)vfo, on ? x6200_pre_on : x6200_pre_off);
 }
 
+/* Linux's shutdown only (init's poweroff, as the library's x6200_control_poweroff() ends), not the library's power-off
+ * bit before it: base 1.0.8, the bit set, ignores the "s" rcK sends it at the end of the shutdown and leaves the power
+ * on (the green XIEGU light) until a timeout of its own, minutes later; without the bit it cuts the power about 3 s
+ * after the "s" (both seen 2026-11-14). Xiegu's app sends no bit either: "s", then poweroff */
 void hw_poweroff(void) {
     if (atomic_load(&held)) return;     /* not in the middle of a firmware write: the base switches itself off after */
-    x6200_control_poweroff();
+    kill(1, SIGUSR2);
 }
 
 /* The library reopens the bus and tries once more on its own, and reports nothing but errno */
