@@ -607,7 +607,8 @@ Its controls, on every screen (GEN shows them, as does a tap on the title):
   too), the broadcast bands, CB, FM, and the marine bands the weather decoders use (SHIP MF, 4, 6, 8, 12, 16;
   UTIL 9 for NOAA's Boston fax on 9110).
 - **D DECODE**: the decoders and the frequencies they work on, each with C's columns for its band: BAND, BEST
-  (NIGHT, DAY, ANY or LOCAL), ANTENNA and NOW. F2 opens the one chosen there, F4 the next kind.
+  (NIGHT, DAY, ANY or LOCAL), ANTENNA and NOW. F2 opens the one chosen there; F4 (TYPE) goes to the next decoder
+  type, the one TYPE SELECT marks.
 - **NOW** (C and D), one set of words: `3 SIG LIVE` (the band in the picture), `3 SIG 12 MIN` (heard 12 minutes
   ago, within the half hour), else what the sun says at your QTH: OPEN, CLOSED, LOCAL (a night band by day, CB,
   FM), and OPENING or CLOSING while the sun is within 6 degrees of the horizon (a setting sun opens the night

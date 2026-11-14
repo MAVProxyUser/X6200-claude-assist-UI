@@ -3216,7 +3216,7 @@ static void build_bands(lv_obj_t *p) {
 static void build_decode(lv_obj_t *p) {
     int y = BODY_Y, h = scr_h - y - DLOW_H - 10, lw = 196;
 
-    box_make(&d_sel, p, 6, y, lw, h, "TARGET SELECT", DECODERS_N < 8 ? DECODERS_N : 8, 3);
+    box_make(&d_sel, p, 6, y, lw, h, "TYPE SELECT", DECODERS_N < 8 ? DECODERS_N : 8, 3);
     rect(p, lw + 12, y, SW - lw - 18, h, 3, false);
     char hd[96];
 
