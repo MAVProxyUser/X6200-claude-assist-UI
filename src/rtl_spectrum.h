@@ -51,6 +51,9 @@ void rtl_spectrum_mux(bool on);
 /* OFF: the speaker taken from the X6200's receiver and given nothing (on), or let go */
 void rtl_spectrum_mute(bool on);
 
+/* BOTH: each receiver's share of the mix (0-1), the louder at 1 and the base's speaker at its volume */
+void rtl_spectrum_levels(float stick, float x6200);
+
 /* The squelch while listening: open at db over the noise floor of the stick's picture (the listened channel's
  * strongest bin over the median), 0 always open. Open says whether it lets the audio through now */
 void rtl_spectrum_squelch(int db);

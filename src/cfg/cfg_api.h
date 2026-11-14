@@ -88,6 +88,7 @@ extern ParamInt         *cfg_rtl_freq;           // p_rtl_freq
 extern ParamInt         *cfg_rtl_gain;           // p_rtl_gain
 extern ParamInt         *cfg_rtl_view;           // p_rtl_view
 extern ParamInt         *cfg_rtl_sql;            // p_rtl_sql
+extern ParamInt         *cfg_rtl_vol;            // p_rtl_vol
 extern ParamInt         *cfg_hear_a;             // p_hear_a
 extern ParamInt         *cfg_hear_f;             // p_hear_f
 extern ParamInt         *cfg_a_view;             // p_a_view

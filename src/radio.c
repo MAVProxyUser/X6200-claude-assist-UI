@@ -255,6 +255,7 @@ static volatile bool    charger_asked;  /* the charger setting as last applied (
 static bool             mute = false;
 static bool             tci_mute = false;   /* a TCI client transmits: the speaker and the monitor off */
 static bool             scan_mute = false;  /* the scanner between stops: no noise burst at every step */
+static int              vol_override = -1;  /* the speaker's level in place of cfg_volume (the Sentry's RTL-SDR heard), -1 none */
 static bool             rec_moni = false;   /* a screen recording takes the TX audio: the monitor at 30 at least (X6100) */
 static bool             digi_cap;       /* a digital app is open: never above its cap */
 static float            tune_cap;       /* a TUNE for an external tuner: never above its power (under the lock) */
@@ -822,7 +823,7 @@ void radio_vol_refresh() {
     if (rec_raise) moni = LV_MAX(moni, 30);
     else if (muted || vol == 0) moni = 0;
     radio_lock();
-    hw_set_i(HW_RXVOL, muted ? 0 : vol);
+    hw_set_i(HW_RXVOL, muted ? 0 : vol_override >= 0 ? vol_override : vol);
     hw_set_i(HW_MONI, moni);
     radio_unlock();
 }
@@ -832,6 +833,12 @@ void radio_vol_refresh() {
 void radio_set_tci_mute(bool on) {
     if (tci_mute == on) return;
     tci_mute = on;
+    radio_vol_refresh();
+}
+
+void radio_set_vol_override(int vol) {
+    if (vol_override == vol) return;
+    vol_override = vol < 0 ? -1 : vol > BOARD_VOL_MAX ? BOARD_VOL_MAX : vol;
     radio_vol_refresh();
 }
 

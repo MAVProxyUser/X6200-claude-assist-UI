@@ -45,7 +45,8 @@ turned with the MFK's inner ring, and SCAN CFG beside the two spectrum screens:
 - **E DECODE**: the decoders and the frequencies they work on, each a key away.
 - **F SYSTEM**: the rest of the radio in the same look: Settings, the apps, the digital modes, AIRSPACE,
   VHF/UHF, the classic radio screen, a UNIX shell on the radio's own screen, the base firmware, and which screen the
-  radio starts in. The title says the release, the GUI's commit and the base's version.
+  radio starts in. The title says the release, the GUI's commit and the base's version; A's says what its scope
+  takes in (`MF/HF/VHF SPECTRUM`).
 - **G WALKIE**: the radio as a CB walkie-talkie: the channel big (19 TRUCKERS), a **voiceprint** of what is heard
   (a 0-4 kHz sonogram scrolling across, voices as their stacked harmonics), the S-meter and the audio's level, the
   battery and supply volts, the processor's temperature and load. CH-/CH+, CH 9, CH 19; A/B arms PTT.
@@ -67,8 +68,9 @@ A generic RTL-SDR stick (an RTL2832U with an R820T, R828D or the like) on the HO
 - **F2 PRESET**: NOAA weather, 2 m, 2 m repeaters, the airband, FM broadcast, marine VHF, the weather satellites,
   the weather balloons, 70 cm, ISM 433, GMRS, ISM 915, UAT 978 and ADS-B 1090 (or the band D's LISTEN brought).
   Its scan goes on behind the other screens.
-- **LISTEN BOTH** mixes the X6200's receiver into the stick's audio: the two on the speaker at once. The speaker
-  changes only when A or B is shown; the other screens keep what was heard last.
+- **LISTEN BOTH** mixes the X6200's receiver into the stick's audio: the two on the speaker at once; OFF silences
+  both. The speaker changes only when A or B is shown; the other screens keep what was heard last. **Each radio
+  keeps its own volume** (the VOL knob on A and on B), played at it wherever that radio is heard.
 - **The VOL/SQL/RFG knob** on B: its squelch and RF gain are the stick's. Squelch in dB over the noise (OFF, 1 to
   40): SQUELCHED on the stick's half while it is shut.
 - B stays as it was left: the band, the tuning, the channel and the scan come back with it.

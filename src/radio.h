@@ -97,6 +97,9 @@ void radio_change_mute();
 void radio_set_tci_mute(bool on);
 /* The scanner looking from one frequency to the next: the speaker quiet until it stops */
 void radio_set_scan_mute(bool on);
+/* The speaker's level in place of the volume setting while another receiver is heard through the GUI (the Sentry's
+ * RTL-SDR at its own volume), -1 back to the setting. The setting itself is left as it is */
+void radio_set_vol_override(int vol);
 void radio_vol_refresh();
 
 void radio_set_pwr(float d);

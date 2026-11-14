@@ -141,6 +141,7 @@ static void f3_cb(button_data_t *b);
 static void f4_cb(button_data_t *b);
 static bool knob_taken(void);
 static void hear_apply(int h);
+static void hear_vol_refresh(void);
 static int64_t rtl_snap(int64_t hz);
 static void osd(const char *title, const char *text, int bar);
 static void show_head(void);
@@ -569,6 +570,24 @@ static int band_of(int64_t hz) {
     for (int i = 0; i < BANDS_N; i++)
         if (khz >= bands[i].lo && khz <= bands[i].hi) return i;
     return -1;
+}
+
+/* The band hz is in, else the nearest (by its edge): what is past a band's end carries, opens and wants an antenna
+ * much as the band beside it */
+static int band_near(int64_t hz, bool *in) {
+    int32_t khz = (int32_t)(hz / 1000), best = -1, d = 0;
+
+    *in = false;
+    for (int i = 0; i < BANDS_N; i++) {
+        int32_t e = khz < bands[i].lo ? bands[i].lo - khz : khz > bands[i].hi ? khz - bands[i].hi : 0;
+
+        if (!e) {
+            *in = true;
+            return i;
+        }
+        if (best < 0 || e < d) best = i, d = e;
+    }
+    return best;
 }
 
 static void fmt_freq(char *s, size_t n, int64_t hz) {
@@ -1145,7 +1164,7 @@ static lv_obj_t *screen_obj(void) {
 
 /* ---- Showing the state ---- */
 
-static const char *titles[SCR_N] = {"REMOTE SENTRY RECEIVER SYSTEM", "SCAN CONFIGURATION",
+static const char *titles[SCR_N] = {"MF/HF/VHF SPECTRUM", "SCAN CONFIGURATION",
                                     "BAND INTELLIGENCE", "DECODER SENTRY", "SYSTEM CONTROL", "VHF/UHF SPECTRUM",
                                     "SIGNAL LOG", "WALKIE TALKIE"};
 
@@ -1970,7 +1989,8 @@ static int               a_step       = 2;
 static void show_a_boxes(void) {
     char    t[64], f[24];
     int32_t fq = cparam_i_get(cfg_fg_freq);
-    int     bi = band_of(fq), b = -1;
+    bool    in;
+    int     bi = band_near(fq, &in), b = -1;
 
     lv_label_set_text(r_pre.cap, "BAND");
     if (radio_get_state() == RADIO_TX) opt_set(&r_dev, 0, "X6200  ON AIR", 1);
@@ -1984,7 +2004,12 @@ static void show_a_boxes(void) {
     snprintf(t, sizeof(t), "360 KHZ / %s", a_step_n[a_step]);
     opt_set(&r_tune, 1, t, 2);
     if (routine == ROUT_SCAN && scan_a_band >= 0) bi = scan_a_band;
-    opt_set(&r_pre, 0, bi >= 0 ? bands[bi].name : "OFF BAND", 0);
+    {
+        char bn[24];
+
+        snprintf(bn, sizeof(bn), "%s%s", in || routine == ROUT_SCAN ? "" : "NEAR ", bi >= 0 ? bands[bi].name : "-");
+        opt_set(&r_pre, 0, bn, 0);
+    }
     if (routine == ROUT_SCAN && bi >= 0) {
         char lo[16], hi[16];
 
@@ -1994,7 +2019,7 @@ static void show_a_boxes(void) {
         if (strlen(t) > 17) t[strlen(t) - 4] = 0;
         opt_set(&r_pre, 1, t, 1);
     } else {
-        opt_set(&r_pre, 1, bi >= 0 ? bands[bi].hear : "NOT IN ONE OF D'S BANDS", 2);
+        opt_set(&r_pre, 1, bi >= 0 ? bands[bi].hear : "", 2);
     }
     for (int i = 0; i < ntg; i++)
         if (!tg[i].ignored && (b < 0 || tg[i].con > tg[b].con)) b = i;
@@ -2170,6 +2195,23 @@ static int64_t rtl_snap(int64_t hz) {
     return (hz + st / 2) / st * st;
 }
 
+/* Each receiver at its own volume: the X6200's (cfg_volume) and the stick's (cfg_rtl_vol). The base's speaker is at the
+ * one heard, BOTH at the louder of the two with the other scaled down in the mix (rtl_spectrum_levels) */
+static void hear_vol_refresh(void) {
+    int x = param_i_get(cfg_volume), r = param_i_get(cfg_rtl_vol), m = x > r ? x : r;
+
+    if (heard == HEAR_RTL) {
+        radio_set_vol_override(r);
+        rtl_spectrum_levels(1, 0);
+    } else if (heard == HEAR_BOTH) {
+        radio_set_vol_override(m);
+        rtl_spectrum_levels(m ? powf((float)r / m, 1.5f) : 0, m ? powf((float)x / m, 1.5f) : 0);
+    } else {
+        radio_set_vol_override(-1);
+        rtl_spectrum_levels(1, 1);
+    }
+}
+
 /* The speaker: the X6200's receiver, the stick at F's channel (listen_hz), or both mixed (rtl_spectrum_mux). The stick
  * goes back to F's place for it if G moved it; no stick, the X6200 for now */
 static void hear_apply(int h) {
@@ -2189,6 +2231,7 @@ static void hear_apply(int h) {
         rtl_spectrum_mux(h == HEAR_BOTH);
         rtl_spectrum_listen(listen_hz, rtl_mode_of(listen_hz));
     }
+    hear_vol_refresh();
     show_head();
 }
 
@@ -2576,7 +2619,7 @@ static const char *const vol_short[] = {"VOLUME", "SQL", "RF GAIN"};
 /* On F the knob's SQL and RF GAIN are the stick's: its squelch (dB over the noise of its picture) and its tuner's gain;
  * the other screens', the X6200's */
 static bool vol_stick(void) {
-    return scr == SCR_RTL;
+    return scr == SCR_RTL || (scr != SCR_SCAN && scr != SCR_WALKIE && heard == HEAR_RTL);
 }
 
 /* The R820T's gains in tenths of dB, after -1 (its AGC): the knob's RF GAIN on F walks them one a detent */
@@ -2587,7 +2630,7 @@ static int vol_value(void) {
     switch (vol_fn) {
         case VF_SQL: return param_i_get(vol_stick() ? cfg_rtl_sql : cfg_squelch);
         case VF_RFG: return param_i_get(vol_stick() ? cfg_rtl_gain : cfg_rfgain);
-        default: return radio_change_vol(0);
+        default: return vol_stick() ? param_i_get(cfg_rtl_vol) : radio_change_vol(0);
     }
 }
 
@@ -2611,6 +2654,7 @@ static int vol_bar(void) {
 
     if (vol_stick() && vol_fn == VF_SQL) return v * 100 / 40;
     if (vol_stick() && vol_fn == VF_RFG) return v < 0 ? 0 : v * 100 / 496;
+    if (vol_fn == VF_VOL) return v * 100 / BOARD_VOL_MAX;
     return v;
 }
 
@@ -2664,7 +2708,7 @@ static void vol_say(void) {
         "MUTES THE HISS UNTIL A SIGNAL COMES. 0: ALWAYS OPEN. PUSH: RF GAIN.",
         "SIGNALS AND NOISE DOWN TOGETHER. LOWER IT ONLY IF STRONG ONES DISTORT. PUSH: VOLUME."};
     static const char *const stick[] = {
-        "HOW LOUD. PUSH THE VOL KNOB FOR THE STICK'S SQUELCH.",
+        "THE STICK'S OWN, WHEREVER IT IS HEARD (THE X6200 KEEPS ITS OWN). PUSH: ITS SQUELCH.",
         "THE STICK'S: QUIET UNTIL A SIGNAL STANDS THIS MUCH OVER THE NOISE. OFF: ALWAYS OPEN. PUSH: RF GAIN.",
         "THE STICK'S TUNER: UP FOR WEAK SIGNALS, DOWN IF STRONG ONES SWAMP IT. AUTO: ITS AGC. PUSH: VOLUME."};
     char t[40], v[16];
@@ -2707,9 +2751,15 @@ static void vol_turn(int d) {
             param_i_set(cfg_rfgain, v < 0 ? 0 : v > BOARD_RFG_MAX ? BOARD_RFG_MAX : v);
             break;
         default:
-            radio_change_vol(d);
+            if (vol_stick()) {          /* the stick's own volume, kept for wherever it is heard */
+                v = param_i_get(cfg_rtl_vol) + d;
+                param_i_set(cfg_rtl_vol, v < 0 ? 0 : v > BOARD_VOL_MAX ? BOARD_VOL_MAX : v);
+            } else {
+                radio_change_vol(d);
+            }
             break;
     }
+    hear_vol_refresh();
     vol_say();
 }
 
@@ -2990,7 +3040,8 @@ static void g_listen(int i) {
         }
         g_hz = h->hz;
         g_stick_on(g_hz);
-        heard = HEAR_RTL;               /* G plays one radio at a time: the entry's */
+        heard = HEAR_RTL;               /* the log plays one radio at a time: the entry's */
+        hear_vol_refresh();
         rtl_spectrum_mux(false);
         rtl_spectrum_listen(g_hz, h->mode ? h->mode : rtl_mode_of(g_hz));
     } else {
@@ -3091,9 +3142,10 @@ static void show_glog(void) {
             lv_label_set_text(lg_row_l[r], "");
             continue;
         }
-        const hit_t *h  = &hits[i];
-        int          bi = band_of(h->hz);
-        char         f[16], now[16] = "", last[8];
+        const hit_t *h = &hits[i];
+        bool         in;
+        int          bi = band_near(h->hz, &in);
+        char         f[16], now[16] = "", last[8], bn[12];
         struct tm    tm;
 
         snprintf(f, sizeof(f), "%lld.%03lld.%02lld", (long long)(h->hz / 1000000), (long long)(h->hz / 1000 % 1000),
@@ -3103,7 +3155,8 @@ static void show_glog(void) {
         strftime(last, sizeof(last), "%H:%M", &tm);
         char n[8];
         snprintf(n, sizeof(n), "%d", h->times);
-        snprintf(s, sizeof(s), LOG_ROW, i == g_on ? '>' : ' ', f, bi >= 0 ? bands[bi].name : h->rtl ? rtl_name(h->hz) : "OFF BAND",
+        snprintf(bn, sizeof(bn), "%s%s", in ? "" : "~", bi >= 0 ? bands[bi].name : "-");
+        snprintf(s, sizeof(s), LOG_ROW, i == g_on ? '>' : ' ', f, bn,
                  h->what, bi >= 0 ? best_name(bands[bi].when) : "", bi >= 0 ? bands[bi].ant : "", now, last, n,
                  h->rtl ? (sdr_here ? "#" RTL_BLUE " RTL#" : "RTL") : "X6200");
         lv_label_set_text(lg_row_l[r], s);
@@ -3461,6 +3514,7 @@ static void blink_cb(lv_timer_t *t) {
         buttons_refresh(&btn[2]);
     }
     if (n++ % 4 == 0) {
+        hear_vol_refresh();             /* the X6200's volume may have changed elsewhere (BOTH's shares) */
         bool here = adsb_rx_sdr_present();
         bool ads  = adsb_rx_receiver_present() || adsb_rx_state(NULL, 0) == ADSB_RX_ON;
 #ifdef BOARD_X6200
@@ -5060,6 +5114,7 @@ static void destruct_cb(void) {
     audio_scope(false);
     walkie_show(false);                 /* landscape again before anything else draws */
     walkie_arm(false);                  /* the transmitter locked (the hold let go below with the rest) */
+    radio_set_vol_override(-1);         /* the speaker at the X6200's volume again */
     for (int i = 0; i < 2; i++) {
         wui_t *u = i ? &w_port : &w_land;
 

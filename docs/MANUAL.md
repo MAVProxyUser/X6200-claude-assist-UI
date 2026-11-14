@@ -629,7 +629,10 @@ last seconds, the strongest signals named over it and the screen's channel brack
 - **F3 VIEW**: the screen's radio alone, SPLIT (the X6200 above, the stick below) or the other radio alone. Each
   half says its radio, its channel and whether it is HEARD, MUTED or SQUELCHED.
 - **F4 LISTEN**, each screen's own: X6200, RTL, BOTH or OFF, BOTH mixing the X6200's receiver into the stick's audio
-  (the base sends its receiver to the processor while it plays the GUI's audio), OFF silencing the speaker (neither radio, the volume kept). The speaker changes only when A
+  (the base sends its receiver to the processor while it plays the GUI's audio), OFF silencing the speaker (neither radio, the volume kept).
+  **Each radio keeps its own volume**: the VOL knob sets the X6200's on A and the stick's on B (on the other screens,
+  the one heard), and each is played at its own wherever it is heard later; BOTH sets the speaker at the louder and
+  scales the other down in the mix. The X6200's is the radio's own volume setting; the stick's is kept beside it. The speaker changes only when A
   or B is shown (or C plays an entry); the other screens keep what was heard last. The stick plays B's channel
   whichever screen asked for it. The mode comes from the band: wide FM from 87.5 to 108 MHz, AM on the airband,
   narrow FM elsewhere.
@@ -673,7 +676,16 @@ MFK's push) on the X6200, B's scan pictures' strongest on the stick. The same si
 X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`).
 
 - Its columns: FREQ, BAND, WHAT IT WAS, BEST, ANTENNA and NOW (D's for the band), LAST, SEEN, RX (X6200, or RTL in
-  blue). BAND says OFF BAND for a frequency in none of D's bands.
+  blue). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest
+  band's columns, marked `~`: 26.835 MHz, below CB's channel 1, is `~11 M CB` with CB's BEST, ANTENNA and NOW. A's
+  BAND box says `NEAR 11 M CB` there.
+- **WHAT IT WAS** is what the frequency is known for, not a decoding of the signal: on the X6200 a time station (WWV,
+  WWVH, CHU), NAVTEX 518, an AM broadcast channel (9 or 10 kHz apart, as the carriers say), a CB channel (within
+  3 kHz), an FM broadcast channel, an FT8 frequency, a shortwave broadcast band (with the station from the EiBi
+  schedule when one is on the air there), a ham band and its CW or phone part, else UNKNOWN SIGNAL; on the stick a
+  known channel (NOAA WX1 to WX7, AIS, APRS, the ISS, marine 16, guard 121.500, the Meteor-M satellites) or the
+  band (FM, NAV, AIR, SAT, 2M, MARINE, LMR, SONDE, ISM, 70CM, GMRS, UAT, ADS-B). A's SIGNAL PROFILE adds the width
+  (1.6 kHz or less: CARRIER / CW).
 - **Listening**: the MFK's push (or F1) plays the one chosen on its own radio. While one plays, the MFK plays each
   one it comes to, switching between the X6200 and the stick by itself, and `>` marks it. A's scan waits meanwhile.
 - **F4 SCAN** goes through the list by itself: **F5 DWELL** seconds on each (2, 4 or 8), held while it is busy (on
@@ -695,7 +707,8 @@ X6200, half a channel on the stick) moves up with its count. Up to 64, kept on D
   when no QTH locator is set.
 - **F SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the classic radio screen, a shell, the
   [base firmware](#the-x6200s-base-firmware-from-openx6x00) and where the radio starts. F2 opens the item chosen,
-  F5 the classic radio screen. Its title says the release, the GUI's commit and the base's version; so does A's.
+  F5 the classic radio screen. Its title says the release, the GUI's commit and the base's version. A's title names
+  what its scope takes in: `MF/HF/VHF SPECTRUM` (the X6200 from 100 kHz to 55 MHz, and 87.5 to 137 MHz).
 
 ### G WALKIE
 

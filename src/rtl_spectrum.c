@@ -93,6 +93,7 @@ static bool            player_started;
 static atomic_bool     playing;          /* the player has the speaker */
 static atomic_bool     mux;              /* BOTH: the X6200's receiver mixed in (audio_rx_tap) */
 static atomic_bool     mute;             /* OFF: the speaker taken and given nothing, neither radio heard */
+static atomic_int      g_stick = 1000, g_x62 = 1000;   /* each receiver's share in the mix, thousandths (BOTH) */
 
 /* The squelch while listening: the channel's strongest bin over the row's noise floor (its median), in dB, at least
  * sql_db to open (0: always open); it closes SQL_HANG rows after falling 3 dB under that, so a voice's pauses do not
@@ -596,10 +597,13 @@ static void *player_thread(void *arg) {
             float to   = !atomic_load(&sql_db) || atomic_load(&sql_open) ? 1.0f : 0.0f;
 
             gx = gx < 1 ? 1 : gx > 16 ? 16 : gx;
+            float ks = atomic_load(&g_stick) / 1000.0f, kx = atomic_load(&g_x62) / 1000.0f;
+
+            gx *= kx;
             for (int k = 0; k < n; k++) {
                 if (g < to) g = g + 1.0f / 441 > to ? to : g + 1.0f / 441;
                 else if (g > to) g = g - 1.0f / 441 < to ? to : g - 1.0f / 441;
-                float v = 0.6f * (k < m ? chunk[k] * g : 0) + 0.6f * rx[k] * gx;
+                float v = 0.6f * (k < m ? chunk[k] * g * ks : 0) + 0.6f * rx[k] * gx;
                 chunk[k] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
             }
             audio_play(chunk, n);
@@ -661,6 +665,11 @@ bool rtl_spectrum_listening(void) {
 
 void rtl_spectrum_mux(bool on) {
     atomic_store(&mux, on);
+}
+
+void rtl_spectrum_levels(float stick, float x6200) {
+    atomic_store(&g_stick, (int)(stick * 1000));
+    atomic_store(&g_x62, (int)(x6200 * 1000));
 }
 
 void rtl_spectrum_mute(bool on) {

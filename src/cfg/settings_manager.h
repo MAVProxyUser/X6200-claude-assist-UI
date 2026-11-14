@@ -391,6 +391,9 @@ class SettingsManager {
     // Its squelch while listening: dB over the noise floor of its picture, 0 always open (the VOL knob's SQL on F)
     Parameter<int32_t> p_rtl_sql{"rtl_sql", 0, 0, 40,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Its volume, the speaker's while it is heard (the X6200's own is cfg_volume): the VOL knob on B, and wherever it plays
+    Parameter<int32_t> p_rtl_vol{"rtl_vol", 30, 0, BOARD_VOL_MAX,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     // What the Sentry's A and B screens put on the speaker when shown (0 the X6200, 1 the RTL-SDR, 2 both mixed, 3 off)
     Parameter<int32_t> p_hear_a{"sentry_hear_a", 0, 0, 3,
         StorageType::GLOBAL, pending_writes_, &global_params_};
