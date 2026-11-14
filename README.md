@@ -97,7 +97,8 @@ and takes it back after. E SYSTEM > AIRSPACE, or APP > Airspace.
 The image plays its own start-up video (GoldCorp, 15 s) from the first seconds of the boot in place of the boot
 logo; put your own at `/mnt/bootvideo.mp4` and it plays instead. The GUI comes up when it ends (30 s at most). [tools/bootvideo/prepare.sh](tools/bootvideo/prepare.sh) fits
 any video to the screen. A small decode-only ffmpeg is in the image for it. The kernel draws no logo of its own
-before it (the build trees' kernels carried Aether Radio's wolf), so the screen stays dark until the video starts.
+before it (the build trees' kernels carried Aether Radio's wolf), nor does the X6200's U-Boot (its submarine, top
+right), so the screen stays dark until the video starts.
 [Manual](docs/MANUAL.md#boot-video).
 
 ### The base firmware, updated from OpenX6X00

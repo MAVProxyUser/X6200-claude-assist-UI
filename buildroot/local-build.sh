@@ -310,6 +310,16 @@ sed -i 's|^BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH=.*|BR2_LINUX_KERNEL_CUSTOM_LOGO_PAT
 sed -i '/^CONFIG_LOGO[A-Z0-9_]*=/d; /^# CONFIG_LOGO is not set/d' $KERNEL_DEFCONFIG
 echo "# CONFIG_LOGO is not set" >> $KERNEL_DEFCONFIG
 
+if [ $MODEL = x6200 ]; then
+    # Nor does U-Boot: its 2023.01 turns CONFIG_VIDEO_LOGO on by default and drew its submarine (160x160) at the top
+    # right of the screen as it switched the display on, before the kernel. Its text console on the screen stays
+    # (stdout=serial,vidconsole). The X6100's U-Boot (2026.07, above) is not changed
+    echo "== No U-Boot logo"
+    UBOOT_DEFCONFIG=$EXT/board/$M/u-boot/sun8i-r16-$MODEL\_defconfig
+    sed -i '/^CONFIG_VIDEO_LOGO=/d; /^# CONFIG_VIDEO_LOGO is not set/d' $UBOOT_DEFCONFIG
+    echo "# CONFIG_VIDEO_LOGO is not set" >> $UBOOT_DEFCONFIG
+fi
+
 echo "== Configure"
 cd $BR && bash ./br_config.sh
 
@@ -397,6 +407,11 @@ fi
 if ls -d $BR/build/build/ft8lib-*/ > /dev/null 2>&1 \
         && ! grep -qs "0001-hashtable-zero-the-whole-table" $BR/build/build/ft8lib-*/.applied_patches_list; then
     make ft8lib-dirclean
+fi
+# and U-Boot built before its logo was turned off (above) is built again with its new config
+if [ $MODEL = x6200 ] && ls -d $BR/build/build/uboot-*/ > /dev/null 2>&1 \
+        && ! grep -qs "^# CONFIG_VIDEO_LOGO is not set" $BR/build/build/uboot-*/.config; then
+    make uboot-dirclean
 fi
 # The GUI and the web server come from this repository (a local site): buildroot syncs them
 # once and never again on its own, so they are re-synced and rebuilt every run

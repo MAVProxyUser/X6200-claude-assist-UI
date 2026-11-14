@@ -5175,7 +5175,11 @@ plays (`/usr/share/x6100/bootvideo.mp4`, this fork's GoldCorp start-up,
 - Before it the screen stays dark: the kernel draws no logo of its own
   (images built from 13 November 2026 on; older ones show a plain dark
   background, and a kernel built from the build trees without
-  `buildroot/local-build.sh` shows their logo, a wolf).
+  `buildroot/local-build.sh` shows their logo, a wolf). Nor does the
+  X6200's U-Boot (card images from v0.3.9.8 on; older ones show U-Boot's
+  submarine at the top right for a moment). The X6100's U-Boot is not
+  changed. U-Boot lives on the card outside the partitions, so an update
+  doesn't change it; only a new card image does.
 
 ## Wavelog
 
