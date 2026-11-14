@@ -2647,6 +2647,9 @@ static void vol_text(char *s, size_t n) {
         snprintf(s, n, "AUTO");
     else if (vol_stick() && vol_fn == VF_RFG)
         snprintf(s, n, "%d.%d DB", v / 10, v % 10);
+    else if (vol_fn == VF_VOL && heard == HEAR_BOTH)        /* both heard: this one's, and the other's to match it */
+        snprintf(s, n, "%d (%s %d)", v, vol_stick() ? "X6200" : "RTL",
+                 vol_stick() ? param_i_get(cfg_volume) : param_i_get(cfg_rtl_vol));
     else
         snprintf(s, n, "%d", v);
 }
@@ -2666,7 +2669,7 @@ static void show_legend(void) {
                                            "FREQ, PUSH OPEN", "ITEM, PUSH OPEN", "PAN, PUSH STRONGEST",
                                            "SIGNAL, PUSH LISTEN", "CHANNEL, PUSH CH 19"};
 
-    char v[16];
+    char v[24];
 
     vol_text(v, sizeof(v));
     lv_label_set_text_fmt(legend_l, "VFO: TUNE | MFK: %s | RING: SCREEN | VOL: %s %s, PUSH %s | GEN: HELP",
@@ -2714,10 +2717,10 @@ static void vol_say(void) {
         "THE STICK'S OWN, WHEREVER IT IS HEARD (THE X6200 KEEPS ITS OWN). PUSH: ITS SQUELCH.",
         "THE STICK'S: QUIET UNTIL A SIGNAL STANDS THIS MUCH OVER THE NOISE. OFF: ALWAYS OPEN. PUSH: RF GAIN.",
         "THE STICK'S TUNER: UP FOR WEAK SIGNALS, DOWN IF STRONG ONES SWAMP IT. AUTO: ITS AGC. PUSH: VOLUME."};
-    char t[40], v[16];
+    char t[48], v[24];
 
     vol_text(v, sizeof(v));
-    snprintf(t, sizeof(t), "%s %s", vol_names[vol_fn], v);
+    snprintf(t, sizeof(t), "%s%s %s", vol_fn == VF_VOL ? (vol_stick() ? "RTL " : "X6200 ") : "", vol_names[vol_fn], v);
     osd(t, (vol_stick() ? stick : how)[vol_fn], vol_bar());
     show_legend();
 }

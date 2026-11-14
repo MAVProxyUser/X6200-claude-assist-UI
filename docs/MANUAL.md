@@ -632,7 +632,9 @@ last seconds, the strongest signals named over it and the screen's channel brack
   (the base sends its receiver to the processor while it plays the GUI's audio), OFF silencing the speaker (neither radio, the volume kept).
   **Each radio keeps its own volume**: the VOL knob sets the X6200's on A and the stick's on B (on the other screens,
   the one heard), and each is played at its own wherever it is heard later; BOTH sets the speaker at the louder and
-  scales the other down in the mix. The X6200's is the radio's own volume setting; the stick's is kept beside it. The speaker changes only when A
+  scales the other down in the mix, so equal volumes sound about equal (each radio's audio is levelled first): turn
+  either one to match them. While BOTH is heard the legend and the volume's word show the other's beside it
+  (`VOLUME 22 (RTL 29)`). The X6200's is the radio's own volume setting; the stick's is kept beside it. The speaker changes only when A
   or B is shown (or C plays an entry); the other screens keep what was heard last. The stick plays B's channel
   whichever screen asked for it. The mode comes from the band: wide FM from 87.5 to 108 MHz, AM on the airband and below 29.5 MHz (CB),
   narrow FM elsewhere.
