@@ -35,6 +35,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
 #include <sys/select.h>
@@ -507,41 +508,75 @@ void adsb_rx_lend(bool on) { atomic_store(&lent, on); }
 
 /* ---- the RTL-SDR between its two users ---- */
 
-/* The USB device name ("3-1") of an RTL-SDR on USB */
-static bool find_sdr(char *usb, size_t n) {
-    DIR           *d = opendir(USB_DEVICES);
-    struct dirent *e;
-    bool           found = false;
+/* What is on USB, looked at each second by a thread of its own, so no screen ever reads sysfs for it: a USB host stuck
+ * in a disconnect (the radio's MUSB has been) must not take the GUI with it. Any number of receivers on a hub: an
+ * RTL-SDR and a serial one are each seen */
+static atomic_bool    p_sdr, p_rcv;
+static atomic_int     p_sdr_id;         /* the RTL-SDR's bus * 1000 + device number: another one once it is replugged */
+static pthread_once_t p_once = PTHREAD_ONCE_INIT;
 
-    if (!d) return false;
-    while (!found && (e = readdir(d))) {
-        char path[300], v[8], p[8];
+static void *presence_thread(void *arg) {
+    (void)arg;
+    for (;;) {
+        DIR           *d   = opendir(USB_DEVICES);
+        struct dirent *e;
+        bool           sdr = false, rcv = false;
+        int            id  = 0;
 
-        if (e->d_name[0] == '.' || strchr(e->d_name, ':')) continue;
-        snprintf(path, sizeof(path), USB_DEVICES "/%s/idVendor", e->d_name);
-        if (!read_line(path, v, sizeof(v))) continue;
-        snprintf(path, sizeof(path), USB_DEVICES "/%s/idProduct", e->d_name);
-        if (!read_line(path, p, sizeof(p))) continue;
-        for (int r = 0; r < N_RECEIVERS && !found; r++)
-            if (receivers[r].sdr && !strcmp(v, receivers[r].vid) && !strcmp(p, receivers[r].pid)) {
-                snprintf(usb, n, "%s", e->d_name);
-                found = true;
+        while (d && (e = readdir(d))) {
+            char path[300], v[8], p[8], prod[64], bus[8], dev[8];
+
+            if (e->d_name[0] == '.' || strchr(e->d_name, ':')) continue;
+            snprintf(path, sizeof(path), USB_DEVICES "/%s/idVendor", e->d_name);
+            if (!read_line(path, v, sizeof(v))) continue;
+            snprintf(path, sizeof(path), USB_DEVICES "/%s/idProduct", e->d_name);
+            if (!read_line(path, p, sizeof(p))) continue;
+            snprintf(path, sizeof(path), USB_DEVICES "/%s/product", e->d_name);
+            if (!read_line(path, prod, sizeof(prod))) prod[0] = 0;
+            for (int r = 0; r < N_RECEIVERS; r++) {
+                if (strcmp(v, receivers[r].vid) || strcmp(p, receivers[r].pid) ||
+                    (receivers[r].product && !strstr(prod, receivers[r].product)))
+                    continue;
+                if (receivers[r].sdr) {
+                    sdr = true;
+                    snprintf(path, sizeof(path), USB_DEVICES "/%s/busnum", e->d_name);
+                    if (!read_line(path, bus, sizeof(bus))) bus[0] = 0;
+                    snprintf(path, sizeof(path), USB_DEVICES "/%s/devnum", e->d_name);
+                    if (!read_line(path, dev, sizeof(dev))) dev[0] = 0;
+                    id = atoi(bus) * 1000 + atoi(dev);
+                } else {
+                    rcv = true;
+                }
+                break;
             }
+        }
+        if (d) closedir(d);
+        atomic_store(&p_sdr, sdr);
+        atomic_store(&p_rcv, rcv);
+        atomic_store(&p_sdr_id, sdr ? id : 0);
+        sleep(1);
     }
-    closedir(d);
-    return found;
+    return NULL;
+}
+
+static void presence_start(void) {
+    pthread_t t;
+
+    if (pthread_create(&t, NULL, presence_thread, NULL) == 0) pthread_detach(t);
 }
 
 bool adsb_rx_receiver_present(void) {
-    char usb[64];
-    int  r = find_stick(usb, sizeof(usb));
-
-    return r >= 0 && !receivers[r].sdr;
+    pthread_once(&p_once, presence_start);
+    return atomic_load(&p_rcv);
 }
 
 bool adsb_rx_sdr_present(void) {
-    char usb[64];
+    pthread_once(&p_once, presence_start);
+    return atomic_load(&p_sdr);
+}
 
-    return find_sdr(usb, sizeof(usb));
+int adsb_rx_sdr_id(void) {
+    pthread_once(&p_once, presence_start);
+    return atomic_load(&p_sdr_id);
 }
 

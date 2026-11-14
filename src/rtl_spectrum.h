@@ -1,9 +1,11 @@
 /*
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
- *  OpenX6X00 - An RTL-SDR stick's spectrum for the Sentry's F VHF/UHF screen (rtl_spectrum.c): /usr/bin/x6x00-rtlspec
- *  (tools/rtlspec) runs while it is wanted and its rows are kept here, the newest one. AIRSPACE lends it the stick
- *  (adsb_rx_lend) meanwhile and gets it back after.
+ *  OpenX6X00 - An RTL-SDR stick's spectrum for the Sentry's F VHF/UHF and G LOG screens (rtl_spectrum.c):
+ *  /usr/bin/x6x00-rtlspec (tools/rtlspec) runs while it is wanted and its rows are kept here, the newest one. The
+ *  Sentry wants it from its first start for as long as the GUI runs, so screens and apps come and go without the
+ *  stick being stopped and started again (the radio's USB host suffers from that); AIRSPACE's screen has it while it
+ *  is open (rtl_spectrum_yield: AIRSPACE's dump1090 lent it, adsb_rx_lend) and gives it back when it closes.
  */
 
 #pragma once
@@ -35,10 +37,16 @@ void rtl_spectrum_gain(int tenths);
 
 rtl_spec_state_t rtl_spectrum_state(void);
 
+/* AIRSPACE's screen open (on): the helper stops and AIRSPACE's dump1090 may have the stick; closed: the helper again */
+void rtl_spectrum_yield(bool on);
+
 /* Listen to hz (mode 1 NFM, 2 AM, 3 WFM) on the speaker in place of the X6200's receiver; mode 0 or hz 0: back to
  * the X6200. Within the helper's span only: outside it is silent until the stick is retuned there */
 void rtl_spectrum_listen(int64_t hz, int mode);
 bool rtl_spectrum_listening(void);
+
+/* While listening: the X6200's receiver mixed in with the stick (on: BOTH), or the stick alone */
+void rtl_spectrum_mux(bool on);
 
 /* The squelch while listening: open at db over the noise floor of the stick's picture (the listened channel's
  * strongest bin over the median), 0 always open. Open says whether it lets the audio through now */

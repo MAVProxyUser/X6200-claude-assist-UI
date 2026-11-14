@@ -19,6 +19,7 @@
 
 #include "adsb.h"
 #include "adsb_rx.h"
+#include "rtl_spectrum.h"
 #include "buttons.h"
 #include "cfg/cfg_api.h"
 #include "gps.h"
@@ -484,7 +485,7 @@ static void show_scope_words(double now, int nlive) {
         case ADSB_RX_NO_DRIVER: msg = "RECEIVER FOUND\n\nTHE KERNEL HAS\nNO CDC_ACM DRIVER"; break;
         case ADSB_RX_OPENING: msg = "RECEIVER FOUND\n\nOPENING ITS PORT"; break;
         case ADSB_RX_OFF: msg = "RECEIVER NOT STARTED"; break;
-        case ADSB_RX_LENT: msg = "RTL-SDR IN USE\n\nBY THE SENTRY'S\nVHF/UHF SPECTRUM"; break;
+        case ADSB_RX_LENT: msg = "RTL-SDR COMING\n\nFROM THE SENTRY'S\nVHF/UHF SPECTRUM"; break;
         default:
             if (!nlive && !adsb_count()) msg = "LISTENING ON 1090 MHZ\n\nNO AIRCRAFT YET";
             break;
@@ -832,8 +833,8 @@ static void build(void) {
                    "F1 / VFO: RANGE OF THE SCOPE.  F2: DECAY, HOW LONG GHOSTS AND TRACKS STAY: OFF, 1 TO 60 "
                    "MINUTES, OR HOLD TILL CLEARED.  F3: TRACKS ON OR OFF.  F4: FORGET THE HISTORY.  F5: BACK TO "
                    "THE SENTRY.\n\n"
-                   "MFK OR A TAP CHOOSES AN AIRCRAFT. LISTENING GOES ON WHEN THIS SCREEN CLOSES; AN RTL-SDR IS LENT TO THE "
-                   "SENTRY'S VHF/UHF SCREEN WHILE THAT IS OPEN. RECEIVE ONLY.\n\n"
+                   "MFK OR A TAP CHOOSES AN AIRCRAFT. A GNS 5890 OR MICROADSB GOES ON LISTENING WHEN THIS SCREEN CLOSES; "
+                   "AN RTL-SDR IS THIS SCREEN'S WHILE IT IS OPEN AND THE SENTRY'S THE REST OF THE TIME. RECEIVE ONLY.\n\n"
                    "THE CENTRE: A USB GPS, ELSE THE QTH LOCATOR (SETTINGS > GENERAL), ELSE THE TRAFFIC.\n\n"
                    "ANY KEY: CLOSE.");
     lv_label_set_long_mode(help_l, LV_LABEL_LONG_WRAP);
@@ -883,6 +884,7 @@ static void construct_cb(lv_obj_t *parent) {
     lv_group_focus_obj(root);
     lv_group_set_editing(keyboard_group, true);
 
+    rtl_spectrum_yield(true);       /* an RTL-SDR: the Sentry's helper lets it go, dump1090 has it while this is open */
     adsb_rx_start();
     help_on = false;
     rot_acc = 0;
@@ -894,6 +896,7 @@ static void construct_cb(lv_obj_t *parent) {
 static void destruct_cb(void) {
     if (timer) lv_timer_del(timer);
     timer = NULL;
+    rtl_spectrum_yield(false);      /* the RTL-SDR back to the Sentry */
     lv_group_remove_obj(root);
     if (scope) {
         lv_img_cache_invalidate_src(scope);

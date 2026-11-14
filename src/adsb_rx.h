@@ -36,8 +36,13 @@ uint64_t adsb_rx_bytes(void);
  * seconds and not started again until it comes back. The serial receivers (GNS 5890, microADSB) go on */
 void adsb_rx_lend(bool on);
 
-/* An RTL-SDR on USB, whoever has it */
+/* An RTL-SDR on USB, whoever has it. These three read what a thread of their own sees each second (no sysfs on the
+ * caller's thread: a stuck USB host never hangs the GUI); false or 0 for the first second */
 bool adsb_rx_sdr_present(void);
 
 /* A receiver of its own on USB (GNS 5890, microADSB), AIRSPACE open or not */
 bool adsb_rx_receiver_present(void);
+
+/* The RTL-SDR's USB identity (bus * 1000 + device number), 0 none: another number once it was unplugged and plugged
+ * in again (rtl_spectrum.c waits for that before it opens a stick that sent nothing) */
+int adsb_rx_sdr_id(void);

@@ -15,7 +15,9 @@
 #include "audio.h"
 #include "radio.h"
 
+#include <dirent.h>
 #include <errno.h>
+#include <math.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
@@ -41,6 +43,26 @@
 static pthread_t       thread;
 static bool            started;
 static atomic_bool     want;
+static atomic_bool     yielded;          /* AIRSPACE's screen open: its dump1090 has the stick */
+static atomic_uint     want_ms;          /* when want or yielded last changed (now_ms) */
+
+/* The stick's stream started and stopped as seldom as can be: the radio's USB host (MUSB) has been left broken for
+ * the stick ("THE RTL-SDR SENDS NOTHING") after stops and starts, and once froze the radio. So the Sentry wants it
+ * from its first start for as long as the GUI runs, whatever screen or app is shown (F and G only tune it and listen),
+ * and it stops only while AIRSPACE's screen is open; it starts START_MS after that closes */
+#define START_MS    500
+
+static uint32_t now_ms(void) {
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
+
+/* Wanted and not yielded: the helper running stays */
+static bool kept(void) {
+    return atomic_load(&want) && !atomic_load(&yielded);
+}
 static atomic_int      state = RTL_SPEC_OFF;
 static atomic_llong    want_hz = 162475000;
 static atomic_int      want_gain = 280;
@@ -69,6 +91,7 @@ static int             ring_head, ring_len;
 static pthread_t       player;
 static bool            player_started;
 static atomic_bool     playing;          /* the player has the speaker */
+static atomic_bool     mux;              /* BOTH: the X6200's receiver mixed in (audio_rx_tap) */
 
 /* The squelch while listening: the channel's strongest bin over the row's noise floor (its median), in dB, at least
  * sql_db to open (0: always open); it closes SQL_HANG rows after falling 3 dB under that, so a voice's pauses do not
@@ -169,7 +192,7 @@ static bool read_all(int fd, void *buf, size_t n, int ms) {
         fd_set         rd;
         struct timeval tv = {.tv_sec = 0, .tv_usec = 200000};
 
-        if (!atomic_load(&want) || ms <= 0) return false;
+        if (!kept() || ms <= 0) return false;
         FD_ZERO(&rd);
         FD_SET(fd, &rd);
         int r = select(fd + 1, &rd, NULL, NULL, &tv);
@@ -250,15 +273,47 @@ static void squelch_row(const float *db, uint16_t n, uint32_t rate, int64_t cent
     atomic_store(&sql_open, open);
 }
 
+/* A helper still running: the GUI before this one, restarted (a hot install, an update), its helper closing the stick */
+static bool helper_running(void) {
+    DIR           *d = opendir("/proc");
+    struct dirent *e;
+    bool           found = false;
+
+    while (d && !found && (e = readdir(d))) {
+        char p[64], comm[32] = "";
+        FILE *f;
+
+        if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
+        snprintf(p, sizeof(p), "/proc/%s/comm", e->d_name);
+        if ((f = fopen(p, "r"))) {
+            if (fgets(comm, sizeof(comm), f)) comm[strcspn(comm, "\n")] = 0;
+            fclose(f);
+        }
+        found = !strcmp(comm, "x6x00-rtlspec");
+    }
+    if (d) closedir(d);
+    return found;
+}
+
 static void *spec_thread(void *arg) {
     static uint8_t buf[24 + MAX_BINS * 4];
     (void)arg;
 
     for (;;) {
-        if (!atomic_load(&want)) {
+        if (!kept()) {
             adsb_rx_lend(false);
             state = RTL_SPEC_OFF;
             usleep(200000);
+            continue;
+        }
+        if (now_ms() - atomic_load(&want_ms) < START_MS) {     /* AIRSPACE only just closed */
+            usleep(100000);
+            continue;
+        }
+        if (!adsb_rx_sdr_present()) {   /* no stick: looked for each second, no helper started for nothing */
+            adsb_rx_lend(true);         /* and dump1090 kept off it, should one come */
+            state = RTL_SPEC_NO_STICK;
+            usleep(1000000);
             continue;
         }
         if (access(HELPER, X_OK) != 0) {
@@ -278,6 +333,10 @@ static void *spec_thread(void *arg) {
         }
         if (waited) usleep(1000000);
 
+        /* none of ours runs here: one still running is the GUI's before this one, closing the stick; opened over it,
+         * the stick is left sending nothing. It goes first (it ends with its GUI: PR_SET_PDEATHSIG) */
+        for (int i = 0; i < 80 && helper_running(); i++) usleep(100000);
+
         int   in_fd = -1, out_fd = -1;
         pid_t p = spawn(&in_fd, &out_fd);
         char  line[96] = "", tn[16] = "";
@@ -292,7 +351,7 @@ static void *spec_thread(void *arg) {
         if (!read_line(out_fd, line, sizeof(line), 8000) ||
             sscanf(line, "RTLSPEC %d %15s %u %d", &ver, tn, &rate, &nb) != 4 || ver != 1 || nb < 64 || nb > MAX_BINS) {
             end_child(p, in_fd, out_fd);
-            if (!atomic_load(&want)) continue;
+            if (!kept()) continue;
             state = strstr(line, "BUSY") ? RTL_SPEC_BUSY : RTL_SPEC_NO_STICK;
             sleep(state == RTL_SPEC_BUSY ? 1 : 2);
             continue;
@@ -386,14 +445,24 @@ static void *spec_thread(void *arg) {
         }
         bool got_rows = state == RTL_SPEC_ON;
         end_child(p, in_fd, out_fd);
-        if (atomic_load(&want)) {       /* it went: unplugged, or the stream stalled */
+        if (kept()) {                   /* it went: unplugged, or the stream stalled */
             static int stalls;
 
             stalls = got_rows ? 0 : stalls + 1;
-            /* Opened twice and nothing sent: the USB host's endpoint is broken, retries would not mend it. Nor may the
-             * radio unplug it in software: de-authorizing the stick crashed the MUSB driver (2026-11-14) */
-            state = stalls >= 2 ? RTL_SPEC_STALLED : RTL_SPEC_NO_STICK;
-            sleep(stalls >= 2 ? 15 : 2);
+            if (stalls < 2) {
+                state = RTL_SPEC_NO_STICK;
+                sleep(2);
+                continue;
+            }
+            /* Opened twice and nothing sent: the USB host's endpoint is broken, retries would not mend it, and the
+             * stick pulled out while a helper had transfers queued on it has hung the radio. Nor may the radio unplug
+             * it in software: de-authorizing the stick crashed the MUSB driver (2026-11-14). So nothing touches it
+             * until it is another device: unplugged and plugged in again (or another stick) */
+            int id = adsb_rx_sdr_id();
+
+            state = RTL_SPEC_STALLED;
+            while (kept() && id && adsb_rx_sdr_id() == id) sleep(1);
+            stalls = 0;
         }
     }
     return NULL;
@@ -404,11 +473,17 @@ void rtl_spectrum_want(bool on, int64_t hz, int gain) {
     if (hz > RTL_SPEC_MAX_HZ) hz = RTL_SPEC_MAX_HZ;
     atomic_store(&want_hz, hz);
     atomic_store(&want_gain, gain);
+    if (on != atomic_load(&want)) atomic_store(&want_ms, now_ms());
     atomic_store(&want, on);
     if (on && !started) {
         started = pthread_create(&thread, NULL, spec_thread, NULL) == 0;
         if (started) pthread_detach(thread);
     }
+}
+
+void rtl_spectrum_yield(bool on) {
+    if (on != atomic_load(&yielded)) atomic_store(&want_ms, now_ms());
+    atomic_store(&yielded, on);
 }
 
 void rtl_spectrum_tune(int64_t hz) {
@@ -464,9 +539,10 @@ bool rtl_spectrum_frame(float *db, uint16_t cap, uint16_t *n, uint32_t *rate, in
  * stand in for it) and gives it back when it ends. audio_play() waits for room in CHUNK at most, so the codec paces
  * it; kept under half a second behind, as the stick's clock and the codec's differ a little */
 static void *player_thread(void *arg) {
-    static int16_t chunk[CHUNK];
-    bool           bt = false;
+    static int16_t chunk[CHUNK], rx[CHUNK];
+    bool           bt = false, tapping = false;
     float          g  = 1;          /* the squelch's level, 0 shut: eased over 10 ms, no click */
+    float          rx_rms = 500;    /* the X6200's level in the mix, brought up to the stick's (its AGC'd audio) */
     (void)arg;
 
     for (;;) {
@@ -483,8 +559,49 @@ static void *player_thread(void *arg) {
             bt = false;
             atomic_store(&playing, false);
         }
+        if (want_play && atomic_load(&mux) != tapping) {
+            tapping = !tapping;
+            audio_rx_tap(tapping);
+        } else if (!want_play && tapping) {
+            tapping = false;
+            audio_rx_tap(false);
+        }
         if (!want_play) {
             usleep(20000);
+            continue;
+        }
+        if (tapping) {                  /* BOTH: the X6200's samples pace it, the stick's added as they are there */
+            int n = (int)audio_rx_tap_read(rx, CHUNK), m = 0;
+
+            if (!n) {
+                usleep(5000);
+                continue;
+            }
+            pthread_mutex_lock(&ring_lock);
+            if (ring_len > 44100 / 2) {
+                ring_head = (ring_head + ring_len - 44100 / 5) % RING;
+                ring_len  = 44100 / 5;
+            }
+            for (; m < n && ring_len > 0; m++) {
+                chunk[m]  = ring[ring_head];
+                ring_head = (ring_head + 1) % RING;
+                ring_len--;
+            }
+            pthread_mutex_unlock(&ring_lock);
+            double e = 0;
+            for (int k = 0; k < n; k++) e += (double)rx[k] * rx[k];
+            rx_rms     = 0.97f * rx_rms + 0.03f * (float)sqrt(e / n);
+            float gx   = rx_rms > 1 ? 6000 / rx_rms : 1;
+            float to   = !atomic_load(&sql_db) || atomic_load(&sql_open) ? 1.0f : 0.0f;
+
+            gx = gx < 1 ? 1 : gx > 16 ? 16 : gx;
+            for (int k = 0; k < n; k++) {
+                if (g < to) g = g + 1.0f / 441 > to ? to : g + 1.0f / 441;
+                else if (g > to) g = g - 1.0f / 441 < to ? to : g - 1.0f / 441;
+                float v = 0.6f * (k < m ? chunk[k] * g : 0) + 0.6f * rx[k] * gx;
+                chunk[k] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+            }
+            audio_play(chunk, n);
             continue;
         }
 
@@ -539,6 +656,10 @@ void rtl_spectrum_listen(int64_t hz, int mode) {
 
 bool rtl_spectrum_listening(void) {
     return atomic_load(&listen_mode) != 0;
+}
+
+void rtl_spectrum_mux(bool on) {
+    atomic_store(&mux, on);
 }
 
 void rtl_spectrum_squelch(int db) {

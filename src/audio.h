@@ -46,6 +46,10 @@ bool audio_play_if_room(int16_t *buf, size_t samples);
 void audio_gain_db(int16_t *buf, size_t samples, float gain, int16_t *out);
 void audio_gain_db_transition(int16_t *buf, size_t samples, float gain1, float gain2, int16_t *out);
 
+/* The receiver's audio kept for the GUI's own playback (on), or not; read: up to n samples of it, as many as came */
+void audio_rx_tap(bool on);
+size_t audio_rx_tap_read(int16_t *buf, size_t samples);
+
 float audio_set_play_vol(float db);
 float audio_set_rec_vol(float db);
 

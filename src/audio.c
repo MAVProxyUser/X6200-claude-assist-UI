@@ -101,6 +101,42 @@ static void context_connect(void) {
     pa_threaded_mainloop_unlock(mloop);
 }
 
+/* The receiver's audio for the GUI's own playback as well (the Sentry's BOTH: the X6200 and an RTL-SDR on the
+ * speaker together, rtl_spectrum.c): a second of it kept while that is on. The base goes on sending its receiver
+ * here while it plays the GUI's audio (measured: an AM station's program, 200 Hz-3 kHz 30 dB over the hiss above) */
+#define TAP_RING AUDIO_CAPTURE_RATE
+static int16_t         tap_ring[TAP_RING];
+static size_t          tap_head, tap_len;
+static pthread_mutex_t tap_lock = PTHREAD_MUTEX_INITIALIZER;
+static volatile bool   tap_on;
+
+static void tap_put(const int16_t *b, size_t n) {
+    pthread_mutex_lock(&tap_lock);
+    for (size_t i = 0; i < n; i++) {
+        tap_ring[(tap_head + tap_len) % TAP_RING] = b ? b[i] : 0;
+        if (tap_len < TAP_RING) tap_len++;
+        else tap_head = (tap_head + 1) % TAP_RING;
+    }
+    pthread_mutex_unlock(&tap_lock);
+}
+
+void audio_rx_tap(bool on) {
+    pthread_mutex_lock(&tap_lock);
+    tap_on   = on;
+    tap_head = tap_len = 0;
+    pthread_mutex_unlock(&tap_lock);
+}
+
+size_t audio_rx_tap_read(int16_t *buf, size_t n) {
+    pthread_mutex_lock(&tap_lock);
+    if (n > tap_len) n = tap_len;
+    for (size_t i = 0; i < n; i++) buf[i] = tap_ring[(tap_head + i) % TAP_RING];
+    tap_head = (tap_head + n) % TAP_RING;
+    tap_len -= n;
+    pthread_mutex_unlock(&tap_lock);
+    return n;
+}
+
 /* The receiver's audio to the decoders and the recorders. A peek gives data, or a hole (no
  * buffer, a byte count: samples the server lost) that is still to be dropped, or nothing;
  * the hole goes on as silence so the decoders keep their timing (audit A19) */
@@ -113,6 +149,7 @@ static void read_callback(pa_stream *s, size_t nbytes, void *udata) {
     }
     if (nbytes == 0)
         return;
+    if (tap_on) tap_put(buf, nbytes / 2);
     if (buf) {
         dsp_put_audio_samples(nbytes / 2, (int16_t *) buf);
     } else {
