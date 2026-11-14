@@ -646,6 +646,8 @@ last seconds, the strongest signals named over it and the screen's channel brack
 - **The VOL/SQL/RFG knob** on B: its squelch and RF gain are the stick's. The squelch is in dB over the noise of
   the stick's picture (OFF, 1 to 40): open at the level, shut half a second after falling 3 dB under it, eased in
   and out without a click; the stick's half reads SQUELCHED meanwhile. RF GAIN walks the R820T's gains one a detent.
+- The stick gone for a moment (the first second of a start, a replug) changes nothing: its audio is silent meanwhile,
+  RECEIVER says why, and it is heard again as soon as it is back.
 - B stays as it was left when another screen is shown: band, tuning, channel and scan. Its tuning, gain, squelch
   and view are kept for the next time; so are A's view and both screens' LISTEN.
 - **Weather alerts**: while the stick is on and a NOAA Weather Radio channel (WX1 to WX7) is in view, the strongest
@@ -680,7 +682,8 @@ F5 on A or B, F5 again (BACK) to return; on no ring, the badge says the screen i
 
 Every signal A's and B's scans locked on, the newest (or the latest heard again) first: A's locks (AUTO, or the
 MFK's push) on the X6200, B's scan pictures' strongest on the stick. The same signal again (within 2 kHz on the
-X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`).
+X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`,
+written through to the card before it replaces the last copy, so a power cut keeps one whole).
 
 - Its columns: FREQ, BAND, WHAT IT WAS, BEST, ANTENNA and NOW (D's for the band), LAST, SEEN, RX (X6200, or RTL in
   the tags' orange). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest

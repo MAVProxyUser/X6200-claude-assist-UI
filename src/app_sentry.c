@@ -2163,10 +2163,8 @@ static void show_rtl(void) {
     char             t[48], tn[16], f[16];
     int              g = param_i_get(cfg_rtl_gain);
 
-    if (listen_rtl && (s == RTL_SPEC_NO_STICK || s == RTL_SPEC_NO_HELPER || s == RTL_SPEC_STALLED)) {
-        hear_apply(HEAR_X6200);         /* for now: the screens' own LISTEN stays as it was chosen */
-        osd("BACK TO THE X6200", "THE RTL-SDR WENT: THE SPEAKER IS THE X6200'S UNTIL IT IS BACK.", -1);
-    }
+    /* No stick for a moment (the first second of a start, a replug) changes nothing: its audio is silent meanwhile,
+     * RECEIVER says why, and it is heard again as soon as it is back (the helper is told what to play as it starts) */
     rtl_spectrum_tuner(tn, sizeof(tn));
     snprintf(t, sizeof(t), "RTL-SDR %s", tn[0] ? tn : "");
     opt_set(&r_dev, 0, t, 0);
@@ -3022,6 +3020,10 @@ static void hits_save(void) {
     for (int i = 0; i < nhits; i++)
         fprintf(f, "%lld\t%d\t%d\t%lld\t%lld\t%d\t%.1f\t%s\n", (long long)hits[i].hz, hits[i].mode, hits[i].rtl,
                 (long long)hits[i].first, (long long)hits[i].last, hits[i].times, hits[i].peak, hits[i].what);
+    /* on the card before the rename: DATA is FAT, and a power cut after a rename of data still in memory left the
+     * log empty (2026-11-14, a radio switched off at its battery's end) */
+    fflush(f);
+    fsync(fileno(f));
     if (fclose(f) == 0 && rename(tmp, HITS_FILE) == 0) hits_dirty = false;
 }
 
