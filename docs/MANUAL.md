@@ -800,7 +800,8 @@ ADS-B aircraft on a scope around your position (a USB GPS, else the QTH locator,
 calls, heights and tracks, and the history fading out (F2 DECAY, 5 minutes by default). Where: F SYSTEM >
 AIRSPACE (ADS-B), APP > Airspace, or the Sentry's ring past G: AIRSPACE is its H. It opens by itself when a GNS
 5890 or a microADSB becomes the only ADS-B receiver on USB (put in the RTL-SDR's place, plugged in with no RTL-SDR,
-or the RTL-SDR pulled out from beside it); not over a transmission. With no receiver at all its scope asks for one.
+or the RTL-SDR pulled out from beside it), and when the radio starts so; not over a transmission. Turned away
+from, it stays away till the receivers change again. With no receiver at all its scope asks for one.
 Its receiver on the HOST port: a GNS 5890, a microADSB, or an RTL-SDR
 decoded by dump1090-fa (in the image). A GNS 5890 or microADSB keeps listening when it is closed; an RTL-SDR is
 AIRSPACE's only while its screen is open, the Sentry's the rest of the time: the stick's daemon tunes it to

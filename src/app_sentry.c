@@ -21,7 +21,8 @@
  *    G WALKIE  the radio as a CB walkie-talkie, held up (portrait): the channel, a voiceprint, the meters. Its G
  *              where the others have their letter (the portrait screen's top right, the display's top left).
  *    H AIRSPACE ADS-B aircraft: the AIRSPACE app, opened by the ring past G (or before A), and by itself when a GNS
- *              5890 or a microADSB becomes the only ADS-B receiver on USB (screen_main.c). Its ring comes back here.
+ *              5890 or a microADSB is or becomes the only ADS-B receiver on USB (screen_main.c). Its ring comes back
+ *              here.
  *    A/B       on A and G arms the transmitter for PTT (the Sentry is receive only otherwise).
  *    D BANDS   what each band carries, when, with which antenna, and what the Sentry found there; LISTEN tunes it
  *              and scans it (the stick's on C), SWEEP marks it for the sweep.

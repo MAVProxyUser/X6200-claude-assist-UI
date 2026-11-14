@@ -103,7 +103,8 @@ ADS-B aircraft on a scope around you (a USB GPS, else your QTH locator, else the
 heights and tracks, and their history fading out. Its receiver on the HOST port: a GNS 5890, a microADSB, or an
 RTL-SDR decoded by dump1090-fa, which is in the image. An RTL-SDR is AIRSPACE's while its screen is open and the
 Sentry's the rest of the time. The Sentry's ring past G (it is H), F SYSTEM > AIRSPACE, or APP > Airspace; and by
-itself when a GNS 5890 or a microADSB becomes the only ADS-B receiver on USB, the RTL-SDR swapped out for it.
+itself when a GNS 5890 or a microADSB is or becomes the only ADS-B receiver on USB (the RTL-SDR swapped out for
+it, or none there when the radio starts).
 
 ### Keyboard and mouse
 

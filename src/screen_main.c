@@ -1827,20 +1827,19 @@ static void channels_poll_cb(lv_timer_t *t) {
     dialog_channels_poll();
 }
 
-/* A GNS 5890 or a microADSB the only ADS-B receiver on USB (put in the RTL-SDR's place, plugged in with no RTL-SDR, or
- * the RTL-SDR pulled out from beside it): AIRSPACE, the Sentry's H, opens on it. What is on USB when the GUI starts
- * opens nothing. Not over a transmission or the first start's guide: it waits for them, as long as the receiver
- * stays the only one */
+/* A GNS 5890 or a microADSB the only ADS-B receiver on USB (put in the RTL-SDR's place, plugged in with no RTL-SDR,
+ * the RTL-SDR pulled out from beside it, or so already when the GUI starts): AIRSPACE, the Sentry's H, opens on it,
+ * once each time it becomes so (turned away from, it stays away). Not over a transmission or the first start's
+ * guide: it waits for them, as long as the receiver stays the only one */
 static void receivers_watch_cb(lv_timer_t *t) {
-    static int  was = -1;               /* -1: USB not looked at yet */
-    static bool due;
+    static bool was, due;
     (void)t;
 
     bool rcv = adsb_rx_receiver_present();      /* the first call starts the looking */
     if (!adsb_rx_usb_looks()) return;
     bool only = rcv && !adsb_rx_sdr_present();
 
-    if (was >= 0 && only && !was) due = true;
+    if (only && !was) due = true;
     if (!only) due = false;
     was = only;
     if (!due || radio_get_state() != RADIO_RX || dialog_type_is_run(dialog_first_start)) return;
