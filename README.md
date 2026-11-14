@@ -26,37 +26,38 @@ Developed and tested on an X6200. The image for the X6100 builds from the same s
 ### The Sentry
 
 The X6200's home screen: the radio starts in it, and every app or menu opened from it comes back to it when it
-closes. **Transmit is locked while it is open**: PTT, KEY, MSG and the antenna tuner are refused. Seven screens,
+closes. **Transmit is locked while it is open**: PTT, KEY, MSG and the antenna tuner are refused; on A and G the
+**A/B key arms the transmitter for PTT** until A/B again or another screen. Seven screens,
 turned with the MFK's inner ring, and SCAN CFG beside the two spectrum screens:
 
-- **A X6200** and **C VHF/UHF**: the X6200's spectrum and an RTL-SDR's, one screen set up for each radio: the same
+- **A X6200** and **B VHF/UHF**: the X6200's spectrum and an RTL-SDR's, one screen set up for each radio: the same
   four boxes (RECEIVER, TUNED, BAND or PRESET, SIGNALS), the same trace over a 3D picture with the signals named
   and the screen's channel bracketed, the same keys. **F1 SCAN** sweeps the band end to end, locking on what it
-  finds (into B LOG); **F2** chooses the band (A) or preset (C); **F3 VIEW** shows the radio alone, SPLIT with the
-  other, or the other alone; **F4 LISTEN** is each screen's own: the X6200, the RTL-SDR or BOTH mixed;
+  finds (into C LOG); **F2** chooses the band (A) or preset (B); **F3 VIEW** shows the radio alone, SPLIT with the
+  other, or the other alone; **F4 LISTEN** is each screen's own: the X6200, the RTL-SDR, BOTH mixed or OFF;
   **F5 SCAN CFG**. The MFK pans, its push goes to the strongest signal; the VFO tunes the screen's own radio.
-- **B LOG**: every signal the two scans locked on, newest first, with D's columns (BAND, BEST, ANTENNA, NOW), when it
+- **C LOG**: every signal the two scans locked on, newest first, with D's columns (BAND, BEST, ANTENNA, NOW), when it
   was last heard and how often, and which radio heard it. The MFK goes through them and each plays on its own radio,
   switching between the two by itself; **F4 SCAN** goes through the list by itself, holding on whatever is busy.
 - **D BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry last heard
   there. The airband, 2 m, marine VHF, NOAA weather, 70 cm and GMRS are in it too; its **RX** column says RTL (in
-  blue) for every band the RTL-SDR takes, and LISTEN opens those on C.
+  blue) for every band the RTL-SDR takes, and LISTEN opens those on B.
 - **E DECODE**: the decoders and the frequencies they work on, each a key away.
 - **F SYSTEM**: the rest of the radio in the same look: Settings, the apps, the digital modes, AIRSPACE,
   VHF/UHF, the classic radio screen, a UNIX shell on the radio's own screen, the base firmware, and which screen the
   radio starts in. The title says the release, the GUI's commit and the base's version.
 - **G WALKIE**: the radio as a CB walkie-talkie: the channel big (19 TRUCKERS), a **voiceprint** of what is heard
   (a 0-4 kHz sonogram scrolling across, voices as their stacked harmonics), the S-meter and the audio's level, the
-  battery and supply volts, the processor's temperature and load. CH-/CH+, CH 9, CH 19; PTT stays refused.
-- **SCAN CFG** (F5 on A or C, on no ring): A's scan settings and its lock: AUTO-SCAN or SEMI-AUTO (MAN-OVERRIDE
+  battery and supply volts, the processor's temperature and load. CH-/CH+, CH 9, CH 19; A/B arms PTT.
+- **SCAN CFG** (F5 on A or B, on no ring): A's scan settings and its lock: AUTO-SCAN or SEMI-AUTO (MAN-OVERRIDE
   comes by itself when the VFO is turned), SWEEP through the marked bands, STEP, and the signal locked on (HOLD,
-  NEXT, REC, IGNORE); from C, the stick's GAIN, DWELL, STEP and SQUELCH.
+  NEXT, REC, IGNORE); from B, the stick's GAIN, DWELL, STEP and SQUELCH.
 
 The title bar shows what is plugged in, in Xiegu's blue: **RTL**, **ADS-B**, **WR12**. GEN shows the controls on
 every screen. The Sentry's look is also a theme for the whole radio: Settings, the
 on-screen keyboard, the apps and their tables all draw in amber.
 
-### C VHF/UHF: an RTL-SDR as a second receiver
+### B VHF/UHF: an RTL-SDR as a second receiver
 
 A generic RTL-SDR stick (an RTL2832U with an R820T, R828D or the like) on the HOST port:
 
@@ -67,10 +68,10 @@ A generic RTL-SDR stick (an RTL2832U with an R820T, R828D or the like) on the HO
   the weather balloons, 70 cm, ISM 433, GMRS, ISM 915, UAT 978 and ADS-B 1090 (or the band D's LISTEN brought).
   Its scan goes on behind the other screens.
 - **LISTEN BOTH** mixes the X6200's receiver into the stick's audio: the two on the speaker at once. The speaker
-  changes only when A or C is shown; the other screens keep what was heard last.
-- **The VOL/SQL/RFG knob** on C: its squelch and RF gain are the stick's. Squelch in dB over the noise (OFF, 1 to
+  changes only when A or B is shown; the other screens keep what was heard last.
+- **The VOL/SQL/RFG knob** on B: its squelch and RF gain are the stick's. Squelch in dB over the noise (OFF, 1 to
   40): SQUELCHED on the stick's half while it is shut.
-- C stays as it was left: the band, the tuning, the channel and the scan come back with it.
+- B stays as it was left: the band, the tuning, the channel and the scan come back with it.
 - **The stick's stream runs for as long as the radio does**: screens and apps come and go without it being stopped
   and started again, which can leave this radio's USB host sending nothing; only AIRSPACE's screen borrows it. An
   RTL-SDR, a GNS 5890 and a microADSB can be swapped while the radio runs; a stick that sends nothing is left alone
@@ -182,8 +183,8 @@ adapter's address are blanked out. The S-meter's S1 and -121.0 are the 1.0.7 bas
 | | |
 |---|---|
 | ![A X6200](docs/readme/a_x6200.png) **A X6200**: the screen the radio starts in | ![A, split](docs/readme/a_split.png) **F3 VIEW SPLIT**: the X6200 above, the RTL-SDR below |
-| ![B LOG](docs/readme/b_log.png) **B LOG**: what the scans locked on, each heard on its own radio | ![C VHF/UHF](docs/readme/c_vhf.png) **C VHF/UHF**: the RTL-SDR, the airband preset |
-| ![SCAN CFG](docs/readme/scan_cfg.png) **SCAN CFG** from A: the modes, the sweep, the lock | ![SCAN CFG, C](docs/readme/scan_cfg_c.png) **SCAN CFG** from C: the stick and its scan |
+| ![B VHF/UHF](docs/readme/b_vhf.png) **B VHF/UHF**: the RTL-SDR's screen, set up as A is | ![C LOG](docs/readme/c_log.png) **C LOG**: what the scans locked on, each heard on its own radio |
+| ![SCAN CFG](docs/readme/scan_cfg.png) **SCAN CFG** from A: the modes, the sweep, the lock | ![SCAN CFG, B](docs/readme/scan_cfg_b.png) **SCAN CFG** from B: the stick and its scan |
 | ![D BANDS](docs/readme/d_bands.png) **D BANDS**: what each band carries; RX says RTL in blue | ![E DECODE](docs/readme/e_decode.png) **E DECODE**: the decoders and their frequencies |
 | ![F SYSTEM](docs/readme/f_system.png) **F SYSTEM**: the rest of the radio | ![Help](docs/readme/sentry_help.png) **GEN**: the controls |
 | ![G WALKIE](docs/readme/g_walkie.png) **G WALKIE**, held up: channel 19, the voiceprint, the meters | ![AIRSPACE](docs/readme/f_airspace.png) **AIRSPACE**: ADS-B from a GNS 5890, a microADSB or an RTL-SDR |
@@ -288,7 +289,7 @@ after the erase is written again with `--recover`; `--to 1.0.7` goes back (`fetc
 ## Documentation
 
 - [The manual](docs/MANUAL.md): [the Sentry](docs/MANUAL.md#the-sentry),
-  [A and C](docs/MANUAL.md#a-and-c-the-spectrum-screens), [AIRSPACE](docs/MANUAL.md#airspace),
+  [A and B](docs/MANUAL.md#a-and-b-the-spectrum-screens), [AIRSPACE](docs/MANUAL.md#airspace),
   [the mouse](docs/MANUAL.md#mouse), [the boot video](docs/MANUAL.md#boot-video), and everything upstream does.
 - [Upstream's README](README_original.md): the full feature list, reporting a problem, updating, Tailscale,
   building the image, the source's layout.

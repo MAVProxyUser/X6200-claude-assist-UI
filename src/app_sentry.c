@@ -9,14 +9,16 @@
  *              waterfall on C's screen, the signals that stand out of the noise around them named (AM broadcast
  *              channel, CB channel, FM station, time signal, shortwave broadcaster from the EiBi list, FT8, ham
  *              band). Its keys are C's: F1 SCAN the band end to end, F2 BAND, F3 VIEW (X6200, SPLIT, RTL), F4 LISTEN
- *              (X6200, RTL or BOTH mixed), F5 SCAN CFG. The MFK pans, its push locks on the strongest; the VFO tunes
+ *              (X6200, RTL, BOTH mixed or OFF), F5 SCAN CFG. The MFK pans, its push locks on the strongest; the VFO tunes
  *              the X6200 (MAN-OVERRIDE). AUTO-SCAN locks on the strongest target not seen lately and tracks it, then
  *              goes on; SEMI-AUTO only marks. Routines: BAND, the 360 kHz at the dial; SCAN, the band end to end,
  *              360 kHz at a time; SWEEP, the bands marked in D BANDS, a few seconds each.
- *    B LOG     the signals A's and C's scans locked on, newest first, kept on DATA (sentry_log.txt): the MFK goes
- *              through them and each is heard on its own receiver, the X6200 or the stick; F4 scans the list.
- *    C VHF/UHF an RTL-SDR stick's spectrum (rtl_spectrum.c): its presets or D's bands, scanned end to end (F1); the
+ *    B VHF/UHF an RTL-SDR stick's spectrum (rtl_spectrum.c): its presets or D's bands, scanned end to end (F1); the
  *              VFO tunes its channel (a bracket), the MFK pans, its push goes to the strongest.
+ *    C LOG     the signals A's and B's scans locked on, newest first, kept on DATA (sentry_log.txt): the MFK goes
+ *              through them and each is heard on its own receiver, the X6200 or the stick; F4 scans the list.
+ *    G WALKIE  the radio as a CB walkie-talkie, held up (portrait): the channel, a voiceprint, the meters.
+ *    A/B       on A and G arms the transmitter for PTT (the Sentry is receive only otherwise).
  *    D BANDS   what each band carries, when, with which antenna, and what the Sentry found there; LISTEN tunes it
  *              and scans it (the stick's on C), SWEEP marks it for the sweep.
  *    E DECODE  the decoders and the frequencies they work on; OPEN takes the radio there in the radio's own app.
@@ -117,11 +119,11 @@ extern const lv_font_t pixel_16, pixel_20, pixel_24, pixel_28, pixel_32, pixel_4
 
 typedef enum { SCR_SCAN, SCR_TRACK, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_RTL, SCR_LOG, SCR_WALKIE, SCR_N } scr_t;
 
-/* The MFK ring's order and the screens' letters: A the X6200's spectrum, B the log, C the stick's spectrum (A and C
- * one screen, each set up for its own radio), D the bands, E the decoders, F the rest of the radio. SCAN CFG
- * (SCR_TRACK, A's settings and its lock, or C's) is on no ring: F5 on A or C opens it for that screen's radio. G, the
+/* The MFK ring's order and the screens' letters: A the X6200's spectrum, B the stick's spectrum (A and B one screen,
+ * each set up for its own radio), C the log, D the bands, E the decoders, F the rest of the radio. SCAN CFG
+ * (SCR_TRACK, A's settings and its lock, or B's) is on no ring: F5 on A or B opens it for that screen's radio. G, the
  * last, is the walkie-talkie */
-static const scr_t ring[] = {SCR_SCAN, SCR_LOG, SCR_RTL, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_WALKIE};
+static const scr_t ring[] = {SCR_SCAN, SCR_RTL, SCR_LOG, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_WALKIE};
 #define RING_N (int)(sizeof(ring) / sizeof(ring[0]))
 static scr_t cfg_from = SCR_SCAN;          /* the screen SCAN CFG was opened from: its radio's settings */
 typedef enum { MODE_AUTO, MODE_SEMI, MODE_MAN } sysmode_t;
@@ -376,10 +378,11 @@ enum { VIEW_RTL, VIEW_SPLIT, VIEW_X6200 };      /* cfg_rtl_view: F4 goes RTL, SP
 /* The receiver on the speaker: the X6200's own, or the stick at listen_hz (it then has the VFO knob) */
 /* The speaker: what A and F each want when shown (their F5 LISTEN), and what it has now. Only A or F shown changes it
  * (or G playing an entry); the other screens keep what was last heard */
-enum { HEAR_X6200, HEAR_RTL, HEAR_BOTH };
-static const char *const hear_names[] = {"X6200", "RTL", "BOTH"};
+enum { HEAR_X6200, HEAR_RTL, HEAR_BOTH, HEAR_OFF, HEAR_N };
+static const char *const hear_names[] = {"X6200", "RTL", "BOTH", "OFF"};
 static int     heard = HEAR_X6200;
-#define listen_rtl (heard != HEAR_X6200)     /* the stick on the speaker, alone or with the X6200 */
+#define listen_rtl (heard == HEAR_RTL || heard == HEAR_BOTH)     /* the stick on the speaker, alone or with the X6200 */
+#define listen_x62 (heard == HEAR_X6200 || heard == HEAR_BOTH)   /* the X6200's receiver on it */
 static int64_t stick_at;      /* where the stick is tuned: F's rtl_hz, or a G entry's place */
 static int64_t rtl_best;      /* the strongest signal of the stick's last row, 0 none */
 static float   rtl_best_db;   /* and its level (dB) */
@@ -508,7 +511,7 @@ static const struct {
     {"AIRSPACE (ADS-B)", "AIRCRAFT ON 1090 MHZ FROM AN ADS-B RECEIVER ON USB (RTL-SDR, GNS 5890 OR MICROADSB): A SCOPE AROUND "
                          "YOUR QTH, THEIR CALLS, HEIGHTS AND TRACKS, AND THE HISTORY FADING OUT. A GNS 5890 OR "
                          "MICROADSB KEEPS LISTENING WHEN CLOSED; AN RTL-SDR IS ITS ONLY WHILE IT IS OPEN."},
-    {"VHF/UHF (RTL-SDR)", "C VHF/UHF: AN RTL-SDR STICK'S SPECTRUM, 24 MHZ TO 1.7 GHZ, ALONE, SPLIT WITH THE X6200'S OR "
+    {"VHF/UHF (RTL-SDR)", "B VHF/UHF: AN RTL-SDR STICK'S SPECTRUM, 24 MHZ TO 1.7 GHZ, ALONE, SPLIT WITH THE X6200'S OR "
                           "THE X6200'S ALONE (F3 VIEW), A'S KEYS: F1 SCANS THE BAND, F2 CHOOSES IT, F4 LISTEN (X6200, "
                           "RTL OR BOTH), F5 SCAN CFG. THE VFO TUNES ITS CHANNEL, THE MFK PANS. AIRSPACE HAS THE STICK "
                           "WHILE IT IS OPEN."},
@@ -1328,6 +1331,8 @@ static void walkie_ch(int dir, int to);
 static void walkie_show(bool on);
 static void walkie_tx_note(void);
 static bool g_portrait;         /* G held up: its own portrait screen shows (walkie_show) */
+static bool g_armed;            /* G's transmitter armed (the A/B key): the Sentry's receive-only hold let go */
+static void walkie_arm(bool on);
 
 static void show_track(void) {
     char s[96];
@@ -1968,9 +1973,11 @@ static void show_a_boxes(void) {
     int     bi = band_of(fq), b = -1;
 
     lv_label_set_text(r_pre.cap, "BAND");
-    opt_set(&r_dev, 0, "XIEGU X6200", 0);
+    if (radio_get_state() == RADIO_TX) opt_set(&r_dev, 0, "X6200  ON AIR", 1);
+    else if (g_armed) opt_set(&r_dev, 0, blink ? "X6200  TX ARMED" : "X6200", 1);
+    else opt_set(&r_dev, 0, "XIEGU X6200", 0);
     snprintf(t, sizeof(t), "HEARD: %s", hear_names[heard]);
-    opt_set(&r_dev, 1, t, heard != HEAR_RTL ? 1 : 2);
+    opt_set(&r_dev, 1, t, listen_x62 ? 1 : 2);
     snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
     snprintf(t, sizeof(t), "%s %s", f, mode_name(cparam_i_get(cfg_cur_mode)));
     opt_set(&r_tune, 0, t, 0);
@@ -2166,9 +2173,10 @@ static int64_t rtl_snap(int64_t hz) {
 /* The speaker: the X6200's receiver, the stick at F's channel (listen_hz), or both mixed (rtl_spectrum_mux). The stick
  * goes back to F's place for it if G moved it; no stick, the X6200 for now */
 static void hear_apply(int h) {
-    if (h != HEAR_X6200 && !sdr_here && rtl_spectrum_state() != RTL_SPEC_ON) h = HEAR_X6200;
+    if ((h == HEAR_RTL || h == HEAR_BOTH) && !sdr_here && rtl_spectrum_state() != RTL_SPEC_ON) h = HEAR_X6200;
     heard = h;
-    if (h == HEAR_X6200) {
+    rtl_spectrum_mute(h == HEAR_OFF);
+    if (h == HEAR_X6200 || h == HEAR_OFF) {
         rtl_spectrum_mux(false);
         rtl_spectrum_listen(0, 0);
     } else {
@@ -2187,23 +2195,24 @@ static void hear_apply(int h) {
 /* F5 on A or F: that screen's LISTEN, the next one, heard at once */
 static void hear_next(void) {
     ParamInt *c = scr == SCR_RTL ? cfg_hear_f : cfg_hear_a;
-    int       h = (param_i_get(c) + 1) % 3;
+    int       h = (param_i_get(c) + 1) % HEAR_N;
     char      t[160];
     static const char *const how[] = {"THE X6200'S RECEIVER ON THE SPEAKER.",
-                                      "THE RTL-SDR ON THE SPEAKER, AT C'S CHANNEL: %s %s.",
-                                      "THE X6200 AND THE RTL-SDR TOGETHER (C'S CHANNEL: %s %s)."};
+                                      "THE RTL-SDR ON THE SPEAKER, AT B'S CHANNEL: %s %s.",
+                                      "THE X6200 AND THE RTL-SDR TOGETHER (B'S CHANNEL: %s %s).",
+                                      "THE SPEAKER SILENT: NEITHER RADIO IS HEARD (THEIR VOLUME KEPT)."};
     char f[16];
 
-    if (h != HEAR_X6200 && !sdr_here) {
+    if ((h == HEAR_RTL || h == HEAR_BOTH) && !sdr_here) {
         osd("NO RTL-SDR", "PLUG AN RTL-SDR INTO THE HOST PORT TO HEAR IT.", -1);
-        h = HEAR_X6200;
+        h = HEAR_OFF;                   /* past RTL and BOTH: on to OFF */
     }
     param_i_set(c, h);
     hear_apply(h);
     fmt_mhz(f, sizeof(f), listen_hz ? listen_hz : rtl_hz, 3);
     snprintf(t, sizeof(t), how[h], f, rtl_mode_names[rtl_mode_of(listen_hz ? listen_hz : rtl_hz)]);
     char title[32];
-    snprintf(title, sizeof(title), "%s LISTEN: %s", scr == SCR_RTL ? "C" : "A", hear_names[h]);
+    snprintf(title, sizeof(title), "%s LISTEN: %s", scr == SCR_RTL ? "B" : "A", hear_names[h]);
     osd(title, t, -1);
 }
 
@@ -2364,7 +2373,7 @@ static void rtl_timer_cb(lv_timer_t *t) {
         rtl_ticks(hf_tick_l, &p_hf, centre - VIEW_HZ / 2, HZ_PX, 50000, false);
         hf_labels();
         fmt_freq(f, sizeof(f), centre);
-        snprintf(s, sizeof(s), "X6200  %s  %s", f, heard == HEAR_RTL ? "MUTED" : "HEARD");
+        snprintf(s, sizeof(s), "X6200  %s  %s", f, listen_x62 ? "HEARD" : "MUTED");
         lv_label_set_text(rtl_src_l[0], s);
         drew = true;
     }
@@ -2789,7 +2798,7 @@ static void show_cfg_rtl(void) {
     for (int i = 0; i < nhits; i++) seen += hits[i].rtl;
     snprintf(t, sizeof(t), "%02d LOGGED ON THE STICK", seen);
     opt_set(&b_tgts, 0, t, 0);
-    opt_set(&b_tgts, 1, "B LOG HAS THEM", 2);
+    opt_set(&b_tgts, 1, "C LOG HAS THEM", 2);
     /* the lock: C's channel and its scan's pick */
     if (rtl_best && llabs(rtl_best - pick) > rtl_step_of(rtl_best)) {
         pick    = rtl_best;
@@ -2801,12 +2810,12 @@ static void show_cfg_rtl(void) {
     lv_obj_set_style_text_color(t_crit_l, amb, 0);
     fmt_mhz(f, sizeof(f), listen_hz ? listen_hz : rtl_hz, 3);
     lv_label_set_text(t_big_l, f);
-    snprintf(t, sizeof(t), "C'S CHANNEL, %s %s", rtl_mode_names[rtl_mode_of(listen_hz ? listen_hz : rtl_hz)],
+    snprintf(t, sizeof(t), "B'S CHANNEL, %s %s", rtl_mode_names[rtl_mode_of(listen_hz ? listen_hz : rtl_hz)],
              listen_rtl ? "HEARD" : "MUTED");
     lv_label_set_text(t_sub_l, t);
     snprintf(t, sizeof(t), "%.1f", rtl_best ? (lv_tick_get() - pick_ms) / 1000.0 : 0.0);
     lv_label_set_text(t_time_l, t);
-    lv_label_set_text(t_id_l, rtl_scan ? "C'S SCAN GOES ON BEHIND THE OTHER SCREENS" : "C'S F1 SCANS ITS BAND");
+    lv_label_set_text(t_id_l, rtl_scan ? "B'S SCAN GOES ON BEHIND THE OTHER SCREENS" : "B'S F1 SCANS ITS BAND");
     snprintf(t, sizeof(t), rtl_best ? "LEVEL %.0f DB" : "", rtl_best_db);
     lv_label_set_text(t_db_l, t);
     float sig = rtl_best ? (rtl_best_db + 100) / 60 : 0;
@@ -2818,7 +2827,7 @@ static void show_cfg_rtl(void) {
 }
 
 static char scr_letter(scr_t s) {
-    static const char letters[SCR_N] = {'A', 'A', 'D', 'E', 'F', 'C', 'B', 'G'};  /* by scr_t; SCR_TRACK: its screen's */
+    static const char letters[SCR_N] = {'A', 'A', 'D', 'E', 'F', 'B', 'C', 'G'};  /* by scr_t; SCR_TRACK: its screen's */
 
     return s == SCR_TRACK ? letters[cfg_from] : letters[s];
 }
@@ -3100,7 +3109,7 @@ static void show_glog(void) {
         lv_label_set_text(lg_row_l[r], s);
     }
     if (!nhits) {
-        lv_label_set_text(lg_about_l, "NOTHING LOCKED ON YET: A'S SCAN (F1, WITH AUTO) AND C'S (F1) PUT WHAT THEY STOP "
+        lv_label_set_text(lg_about_l, "NOTHING LOCKED ON YET: A'S SCAN (F1, WITH AUTO) AND B'S (F1) PUT WHAT THEY STOP "
                                       "ON HERE.");
         return;
     }
@@ -3137,6 +3146,7 @@ static void go(scr_t s) {
     if (s == SCR_LOG) g_enter();
     audio_scope(s == SCR_WALKIE);       /* G's voiceprint: the receiver's audio only while it shows */
     if (was != s && (was == SCR_WALKIE || s == SCR_WALKIE)) walkie_show(s == SCR_WALKIE);
+    if (g_armed && s != SCR_SCAN && s != SCR_WALKIE) walkie_arm(false);    /* armed only on A and G */
     show_screen();
 }
 
@@ -3276,7 +3286,8 @@ static void sentry_step(void) {
         return;
     }
     if (smode == MODE_MAN) return;
-    if (scr == SCR_LOG && g_on >= 0) return;      /* G is playing one: the dial is G's meanwhile */
+    if (scr == SCR_LOG && g_on >= 0) return;      /* the log is playing one: the dial is its meanwhile */
+    if (g_armed) return;                          /* armed to transmit: the dial is the operator's */
     if (routine == ROUT_SCAN && scan_a_band >= 0 && (scan_a_next == 0 || now > scan_a_next)) {
         a_scan_hop(now);
         return;
@@ -3490,7 +3501,7 @@ static const char *f_label(int k) {
             return s;
         }
         case SCR_WALKIE: {
-            const char *const l[] = {"Ch -", "Ch +", "Ch 9", "Ch 19", "Tx:\nLocked"};
+            const char *const l[] = {"Ch -", "Ch +", "Ch 9", "Ch 19", g_armed ? "Tx:\nArmed" : "Tx:\nLocked"};
             return l[k];
         }
         case SCR_TRACK:         /* SCAN CFG: A's settings and its lock, or C's stick */
@@ -3745,7 +3756,7 @@ static void fkey(int k) {
             if (k == 1) listen_band();
             if (k == 2) {
                 if (!cfg_is_valid_hw_freq(bands[band_sel].listen_hz)) {
-                    osd("THE STICK'S BAND", "THE X6200'S SWEEP CANNOT TUNE IT. F2 HERE OPENS IT ON C VHF/UHF, WHERE F1 "
+                    osd("THE STICK'S BAND", "THE X6200'S SWEEP CANNOT TUNE IT. F2 HERE OPENS IT ON B VHF/UHF, WHERE F1 "
                         "SCANS IT END TO END.", -1);
                     break;
                 }
@@ -4131,7 +4142,13 @@ static bool front_key(int key, int state) {
                          "THE RADIO'S ANTENNA TUNER, WITH THE TUNING IT KEPT FOR THIS BAND.", -1);
             return false;       /* the main screen switches it */
         case KEYPAD_AB:
-            if (tap || hold) osd("A/B", "THE SECOND VFO IS NOT USED IN THE SENTRY.", -1);
+            if (scr == SCR_WALKIE || scr == SCR_SCAN) {     /* A and G, the X6200's: the transmitter armed or locked */
+                if (tap) walkie_arm(!g_armed);
+                return true;
+            }
+            if (tap || hold)
+                osd("A/B", scr == SCR_RTL ? "THE RTL-SDR ONLY RECEIVES: A/B ARMS THE X6200'S TRANSMITTER ON A AND G."
+                                          : "ON A AND G, A/B ARMS THE X6200'S TRANSMITTER FOR PTT.", -1);
             return true;
         case KEYPAD_KEY:
         case KEYPAD_MSG:
@@ -4153,8 +4170,8 @@ static bool front_key(int key, int state) {
             if (tap) osd("TUNING STEP", "HOW FAR ONE CLICK OF THE VFO KNOB MOVES.", -1);
             return false;
         case KEYPAD_PTT:
-            if (scr == SCR_WALKIE && state != KEYPAD_RELEASE) walkie_ptt();
-            return false;       /* refused as ever (radio_rx_only) */
+            if (scr == SCR_WALKIE && !g_armed && state != KEYPAD_RELEASE) walkie_ptt();
+            return false;       /* refused (radio_rx_only), unless G armed it */
         default:
             return false;       /* POWER, F1-F5: as ever */
     }
@@ -4474,7 +4491,7 @@ static void build_system(lv_obj_t *p) {
 typedef struct {
     box_t         ch, link, pow, sys;                 /* landscape: four boxes */
     lv_obj_t     *freq_l, *info_l, *msg_l;            /* portrait: the frequency, the state in lines, a word */
-    lv_obj_t     *num_l, *band_l, *lamp, *lamp_l, *vp_img, *s_fill, *a_fill, *s_l, *a_l;
+    lv_obj_t     *num_l, *band_l, *lamp, *lamp_l, *vp_img, *s_fill, *a_fill, *s_l, *a_l, *cap_l;
     lv_img_dsc_t *vp_frame;
     int           vp_w, vp_h, bar_w;
 } wui_t;
@@ -4591,19 +4608,53 @@ static void walkie_step(void) {
     lv_label_set_text(wui->a_l, t);
     /* the lamp: a voice (the audio up) or a carrier (the meter up); PTT refused, said in it */
     bool on = a > 0.45f || db > -100, ptt = ptt_ms && lv_tick_get() - ptt_ms < 1500;
+    bool air = radio_get_state() == RADIO_TX;
 
-    lv_obj_set_style_bg_opa(wui->lamp, ptt || on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-    lv_obj_set_style_text_color(wui->lamp_l, ptt || on ? ink : amb, 0);
-    lv_label_set_text(wui->lamp_l, ptt ? (g_portrait ? "TX LOCKED" : "TX\nLOCKED")
+    lv_obj_set_style_bg_opa(wui->lamp, air || ptt || on || (g_armed && blink) ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_text_color(wui->lamp_l, air || ptt || on || (g_armed && blink) ? ink : amb, 0);
+    lv_label_set_text(wui->lamp_l, air ? (g_portrait ? "TX  ON AIR" : "TX\nON AIR")
+                                   : ptt ? (g_portrait ? "TX LOCKED" : "TX\nLOCKED")
+                                   : g_armed ? (g_portrait ? "TX  ARMED" : "TX\nARMED")
                                    : on ? (g_portrait ? "RX  SIGNAL" : "RX\nSIGNAL")
                                         : (g_portrait ? "RX  QUIET" : "RX\nQUIET"));
+    lv_label_set_text(wui->cap_l, air ? "VOICEPRINT  TX  0-4 KHZ" : "VOICEPRINT  RX  0-4 KHZ");
     if (g_portrait && wui->msg_l && ptt_ms && lv_tick_get() - ptt_ms > 4000) lv_label_set_text(wui->msg_l, "");
 }
 
 /* F5 on G: the transmitter's lock, said where it is looked at */
 static void walkie_tx_note(void) {
-    if (g_portrait) lv_label_set_text(wui->msg_l, "TX LOCKED: THE SENTRY IS RECEIVE ONLY");
-    else osd("TRANSMIT LOCKED", "THE SENTRY IS RECEIVE ONLY: PTT IS REFUSED HERE. THE VOICEPRINT SHOWS WHAT IS HEARD.", -1);
+    if (g_armed) {
+        walkie_arm(false);              /* F5 locks it again */
+        return;
+    }
+    if (g_portrait) lv_label_set_text(wui->msg_l, "TX LOCKED. A/B ARMS IT FOR PTT");
+    else osd("TRANSMIT LOCKED", "THE SENTRY IS RECEIVE ONLY. ON G, THE A/B KEY ARMS THE TRANSMITTER FOR PTT.", -1);
+}
+
+/* The A/B (VFO) key on G: the transmitter armed for PTT (the Sentry's receive-only hold let go: the radio's own TX
+ * rules again, its power and band limits), or locked again. A/B again, F5 or leaving G locks it */
+static void walkie_arm(bool on) {
+    char t[64];
+
+    if (on == g_armed) return;
+    if (on) {
+        if (rx_held) radio_rx_only(false);
+        rx_held = false;
+        g_armed = true;
+        if (routine == ROUT_SCAN || routine == ROUT_SWEEP) set_routine(ROUT_BAND);     /* the dial stays put */
+        snprintf(t, sizeof(t), "TX ARMED: PTT TRANSMITS (%.0f W)", param_f_get(cfg_pwr));
+    } else {
+        rx_held = radio_rx_only(true);
+        g_armed = false;
+        snprintf(t, sizeof(t), "TX LOCKED AGAIN");
+    }
+    if (g_portrait) lv_label_set_text(wui->msg_l, t);
+    else osd(on ? "TX ARMED" : "TX LOCKED",
+             on ? "PTT TRANSMITS ON THE X6200'S DIAL; THE SENTRY'S SCANS AND AUTO WAIT. A/B AGAIN, OR A SCREEN BUT A AND "
+                  "G, LOCKS IT."
+                : "THE SENTRY IS RECEIVE ONLY AGAIN.", -1);
+    for (int i = 0; i < 5; i++) buttons_refresh(&btn[i]);
+    show_walkie();
 }
 
 /* PTT pressed on G: refused (the Sentry is receive only), and said so where it is looked at */
@@ -4649,7 +4700,7 @@ static void show_walkie(void) {
     lv_label_set_text(wui->band_l, ch == 9 ? "EMERGENCY" : ch == 19 ? "TRUCKERS" : ch > 0 ? "CB CHANNEL"
                                    : bi >= 0 ? bands[bi].name : "OFF CB");
     snprintf(lk, sizeof(lk), "SQL %d  VOL %d", param_i_get(cfg_squelch), radio_change_vol(0));
-    snprintf(tx, sizeof(tx), "%s", rx_held ? "TX LOCKED" : "TX NOT LOCKED");
+    snprintf(tx, sizeof(tx), "%s", g_armed ? "TX ARMED" : rx_held ? "TX LOCKED" : "TX NOT LOCKED");
     clock_power_get(&ext, &bat, &cap, &chg);
     if (bat > 1 || ext > 1) l_bat = bat, l_ext = ext, l_cap = cap, l_chg = chg;
     if (l_bat > 1) snprintf(pw1, sizeof(pw1), "BAT %.1f V %d%%%s", l_bat, l_cap, l_chg ? " +" : "");
@@ -4712,7 +4763,7 @@ static void vp_make(wui_t *u, lv_obj_t *p, int x, int y, int w, int h) {
         snprintf(t, sizeof(t), "%dK", k);
         label(p, &pixel_16, dim, x + 4, y + h - k * h * 1000 / VP_HZ - 8, 30, LV_TEXT_ALIGN_LEFT, t);
     }
-    label(p, &pixel_16, amb, x + w - 260, y + 3, 252, LV_TEXT_ALIGN_RIGHT, "VOICEPRINT  RX  0-4 KHZ");
+    u->cap_l = label(p, &pixel_16, amb, x + w - 260, y + 3, 252, LV_TEXT_ALIGN_RIGHT, "VOICEPRINT  RX  0-4 KHZ");
 }
 
 /* A bar: its name, the scale, the fill and its value */
@@ -4897,20 +4948,20 @@ static void build_overlays(void) {
     help_l = label(root, &pixel_16, amb, 26, 60, SW - 52, LV_TEXT_ALIGN_LEFT,
                    "CONTROLS IN THE SENTRY                        ANY KEY OR A TAP CLOSES THIS\n"
                    "\n"
-                   "VFO KNOB       THE SCREEN'S RADIO: A'S X6200 (MAN-OVERRIDE), C'S STICK CHANNEL\n"
+                   "VFO KNOB       THE SCREEN'S RADIO: A'S X6200 (MAN-OVERRIDE), B'S STICK CHANNEL\n"
                    "MFK KNOB       CHOOSES A TARGET, A BAND, A FREQUENCY. PUSH: TRACK, LISTEN, OPEN\n"
-                   "MFK RING       A X6200  B LOG  C VHF/UHF  D BANDS  E DECODE  F SYSTEM  G WALKIE\n"
-                   "A AND C        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"
-                   "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON C THE STICK'S)\n"
-                   "LISTEN         A AND C EACH: X6200, RTL OR BOTH; THE OTHER SCREENS KEEP IT\n"
-                   "BAND UP/DOWN   THE NEXT BAND, AS F2 (ON C: THE NEXT PRESET)\n"
+                   "MFK RING       A X6200  B VHF/UHF  C LOG  D BANDS  E DECODE  F SYSTEM  G WALKIE\n"
+                   "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"
+                   "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON B THE STICK'S)\n"
+                   "LISTEN         A AND B EACH: X6200, RTL, BOTH OR OFF; OTHER SCREENS KEEP IT\n"
+                   "BAND UP/DOWN   THE NEXT BAND, AS F2 (ON B: THE NEXT PRESET)\n"
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
                    "DFN            NOISE REDUCTION ON/OFF. HOLD: NOISE BLANKER (CLICKS AND POPS)\n"
                    "DFL            FILTER WIDE, NORMAL, NARROW (NARROW: LESS NOISE, MUFFLED)\n"
                    "FST            HOW FAR ONE CLICK OF THE VFO KNOB MOVES\n"
                    "ATU            ANTENNA TUNER IN/OUT. TUNING ITSELF TRANSMITS: NOT HERE\n"
-                   "A/B            NOT USED HERE\n"
-                   "PTT  KEY  MSG  TRANSMIT: LOCKED OUT WHILE THE SENTRY IS OPEN\n"
+                   "A/B            ON G: ARMS THE TRANSMITTER FOR PTT (AGAIN, F5: LOCKED)\n"
+                   "PTT  KEY  MSG  TRANSMIT: LOCKED OUT IN THE SENTRY (PTT: G WITH A/B)\n"
                    "APP            F SYSTEM: SETTINGS, APPS, MODES, THE CLASSIC RADIO SCREEN\n"
                    "GEN            THIS LIST.  A TAP ON THE TITLE AT THE TOP SHOWS IT TOO");
     help_show(false);
@@ -5008,6 +5059,7 @@ static void destruct_cb(void) {
     if (scr == SCR_LOG) g_leave(false);
     audio_scope(false);
     walkie_show(false);                 /* landscape again before anything else draws */
+    walkie_arm(false);                  /* the transmitter locked (the hold let go below with the rest) */
     for (int i = 0; i < 2; i++) {
         wui_t *u = i ? &w_port : &w_land;
 

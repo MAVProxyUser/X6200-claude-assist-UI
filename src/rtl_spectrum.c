@@ -92,6 +92,7 @@ static pthread_t       player;
 static bool            player_started;
 static atomic_bool     playing;          /* the player has the speaker */
 static atomic_bool     mux;              /* BOTH: the X6200's receiver mixed in (audio_rx_tap) */
+static atomic_bool     mute;             /* OFF: the speaker taken and given nothing, neither radio heard */
 
 /* The squelch while listening: the channel's strongest bin over the row's noise floor (its median), in dB, at least
  * sql_db to open (0: always open); it closes SQL_HANG rows after falling 3 dB under that, so a voice's pauses do not
@@ -546,7 +547,7 @@ static void *player_thread(void *arg) {
     (void)arg;
 
     for (;;) {
-        bool want_play = atomic_load(&listen_mode) != 0;
+        bool want_play = atomic_load(&listen_mode) != 0 || atomic_load(&mute);
 
         if (want_play && !atomic_load(&playing)) {
             bt = audio_play_bt_begin();
@@ -566,7 +567,7 @@ static void *player_thread(void *arg) {
             tapping = false;
             audio_rx_tap(false);
         }
-        if (!want_play) {
+        if (!want_play || !atomic_load(&listen_mode)) {     /* nothing, or OFF: the speaker silent */
             usleep(20000);
             continue;
         }
@@ -660,6 +661,14 @@ bool rtl_spectrum_listening(void) {
 
 void rtl_spectrum_mux(bool on) {
     atomic_store(&mux, on);
+}
+
+void rtl_spectrum_mute(bool on) {
+    atomic_store(&mute, on);
+    if (on && !player_started) {
+        player_started = pthread_create(&player, NULL, player_thread, NULL) == 0;
+        if (player_started) pthread_detach(player);
+    }
 }
 
 void rtl_spectrum_squelch(int db) {
