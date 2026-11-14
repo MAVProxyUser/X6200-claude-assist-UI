@@ -716,13 +716,14 @@ written through to the card before it replaces the last copy, so a power cut kee
   SWEEP; F4 and F5 do nothing here.
 - **E DECODE**: the decoders and the frequencies they work on, each with D's columns for its band: BAND, BEST
   (NIGHT, DAY, ANY or LOCAL), ANTENNA and NOW, and RX: the radio it is heard on (X6200: the decoders are its apps;
-  RTL for a frequency only the stick takes). F2 opens the one chosen; F4 (TYPE) goes to the next decoder type.
+  RTL for a frequency only the stick takes). F2 opens the one chosen; F4 (TYPE) goes to the next decoder type;
+  F1, F3 and F5 do nothing here (no F key on any screen only goes to another screen: the ring does that).
 - **NOW** (D and E), one set of words: `3 SIG LIVE` (the band in the picture), `3 SIG 12 MIN` (heard 12 minutes
   ago, within the half hour), else what the sun says at your QTH: OPEN, CLOSED, LOCAL, OPENING or CLOSING; `SET QTH`
   when no QTH locator is set.
 - **F SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the classic radio screen, a shell, the
-  [base firmware](#the-x6200s-base-firmware-from-openx6x00) and where the radio starts. F2 opens the item chosen,
-  F5 the classic radio screen. Its title says the release, the GUI's commit and the base's version. A's title names
+  [base firmware](#the-x6200s-base-firmware-from-openx6x00) and where the radio starts. F2 opens the item chosen
+  (CLASSIC RADIO is on the list); the other F keys do nothing here. Its title says the release, the GUI's commit and the base's version. A's title names
   what its scope takes in: `MF/HF/VHF SPECTRUM` (the X6200 from 100 kHz to 55 MHz, and 87.5 to 137 MHz).
 
 ### G WALKIE

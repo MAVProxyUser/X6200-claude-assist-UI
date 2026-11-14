@@ -546,8 +546,11 @@ static void show_head(double now, int nlive, int nghost) {
 static void show_keys(void) {
     for (int i = 0; i < 5; i++) {
         char t[40];
-        snprintf(t, sizeof(t), "F%d %s", i + 1, f_label(i));
+        const char *l = f_label(i);
+
+        snprintf(t, sizeof(t), "F%d %s", i + 1, l);
         lv_label_set_text(key_l[i], t);
+        lv_obj_set_style_text_color(key_l[i], l[0] ? amb : dim, 0);     /* a key with nothing to do, dimmed */
         lv_obj_set_style_pad_top(key_l[i], strchr(t, '\n') ? 2 : 12, 0);
         buttons_refresh(&btn[i]);
     }
@@ -590,7 +593,7 @@ static const char *f_label(int i) {
         case 1: snprintf(s[1], sizeof(s[1]), "DECAY\n%s", decay_names[param_i_get(cfg_adsb_decay)]); break;
         case 2: snprintf(s[2], sizeof(s[2]), "TRACKS\n%s", param_i_get(cfg_adsb_trails) ? "ON" : "OFF"); break;
         case 3: snprintf(s[3], sizeof(s[3]), "CLEAR\nHISTORY"); break;
-        default: snprintf(s[4], sizeof(s[4]), "SENTRY"); break;
+        default: s[4][0] = 0; break;       /* nothing: the MFK's ring goes back to the Sentry */
     }
     return s[i];
 }
@@ -639,7 +642,7 @@ static void fkey(int k) {
             adsb_unlock();
             sel_icao = 0;
             break;
-        default: dialog_destruct(); return;
+        default: return;                /* F5: nothing */
     }
     show_keys();
     refresh();
@@ -852,8 +855,8 @@ static void build(void) {
                    "AN ARROW IS AN AIRCRAFT HEARD IN THE LAST MINUTE, POINTING ALONG ITS TRACK; A RING GROWS "
                    "ROUND IT FOR EACH MESSAGE. A SQUARE IS A GHOST: NOT HEARD FOR A MINUTE, FADING WITH ITS TRACK.\n\n"
                    "F1 / VFO: RANGE OF THE SCOPE, 0.5 TO 250 NM.  F2: DECAY, HOW LONG GHOSTS AND TRACKS STAY: OFF, 1 TO 60 "
-                   "MINUTES, OR HOLD TILL CLEARED.  F3: TRACKS ON OR OFF.  F4: FORGET THE HISTORY.  F5: BACK TO "
-                   "THE SENTRY.  THE MFK'S RING: THE SENTRY'S A NEXT, ITS G BEFORE (THIS IS ITS H).\n\n"
+                   "MINUTES, OR HOLD TILL CLEARED.  F3: TRACKS ON OR OFF.  F4: FORGET THE HISTORY.  "
+                   "THE MFK'S RING: THE SENTRY'S A NEXT, ITS G BEFORE (THIS IS ITS H).\n\n"
                    "MFK OR A TAP CHOOSES AN AIRCRAFT. A GNS 5890 OR MICROADSB GOES ON LISTENING WHEN THIS SCREEN CLOSES; "
                    "AN RTL-SDR IS THIS SCREEN'S WHILE IT IS OPEN AND THE SENTRY'S THE REST OF THE TIME. RECEIVE ONLY.\n\n"
                    "THE CENTRE: A USB GPS, ELSE THE QTH LOCATOR (SETTINGS > GENERAL), ELSE THE TRAFFIC.\n\n"

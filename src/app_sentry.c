@@ -1634,7 +1634,7 @@ static void show_system(void) {
     opt_set(&s_home, 0, home ? "THE SENTRY" : "CLASSIC RADIO", 0);
     opt_set(&s_home, 1, home ? "APPS COME BACK HERE" : "APPS GO TO CLASSIC", 2);
     opt_set(&s_keys, 0, "APP: THIS SCREEN", 0);
-    opt_set(&s_keys, 1, "F5: CLASSIC RADIO", 2);
+    opt_set(&s_keys, 1, "F2 OR PRESS: OPEN", 2);
 }
 
 /* ---- F VHF/UHF: an RTL-SDR stick's spectrum (rtl_spectrum.c), alone or under the X6200's ---- */
@@ -3681,11 +3681,11 @@ static const char *f_label(int k) {
                 snprintf(s, sizeof(s), "Type:\n%s", decoders[dec_sel].name);
                 return s;
             } else {
-                const char *const l[] = {"Scan", "Open", "Bands", "", "System"};
+                const char *const l[] = {"", "Open", "", "", ""};    /* no keys that only go to another screen */
                 return l[k];
             }
         case SCR_SYSTEM: {
-            const char *const l[] = {"Scan", "Open", "Bands", "Decode", "Classic"};
+            const char *const l[] = {"", "Open", "", "", ""};    /* the ring and the list reach the rest */
             return l[k];
         }
         case SCR_RTL: {
@@ -3938,23 +3938,16 @@ static void fkey(int k) {
                 show_screen();
             }
             break;                      /* F4, F5: nothing */
-        case SCR_DECODE:
-            if (k == 0) go(SCR_SCAN);
+        case SCR_DECODE:                /* F1, F3, F5: nothing (no key only goes to another screen) */
             if (k == 1) open_decoder();
-            if (k == 2) go(SCR_BANDS);
             if (k == 3) {
                 dec_sel = (dec_sel + 1) % DECODERS_N;
                 dec_row = 0;
                 show_screen();
             }
-            if (k == 4) go(SCR_SYSTEM);
             break;
-        case SCR_SYSTEM:
-            if (k == 0) go(SCR_SCAN);
+        case SCR_SYSTEM:                /* F2 opens the item; the others nothing (CLASSIC RADIO is on the list) */
             if (k == 1) sys_open(sys_sel);
-            if (k == 2) go(SCR_BANDS);
-            if (k == 3) go(SCR_DECODE);
-            if (k == 4) sys_open(SYS_CLASSIC);
             break;
         case SCR_RTL:
             if (k == 0) rtl_scan_set(!rtl_scan);     /* the preset's band swept here, not A's scan */
@@ -5352,7 +5345,7 @@ static void build_overlays(void) {
                    "\n"
                    "VFO KNOB       THE SCREEN'S RADIO: A'S X6200 (MAN-OVERRIDE), B'S STICK CHANNEL\n"
                    "MFK KNOB       CHOOSES A TARGET, A BAND, A FREQUENCY. PUSH: TRACK, LISTEN, OPEN\n"
-                   "MFK RING       A X6200  B VHF/UHF  C LOG  D BANDS  E DECODE  F SYSTEM  G WALKIE\n"
+                   "MFK RING       A X6200 B VHF/UHF C LOG D BANDS E DECODE F SYSTEM G WALKIE H AIRSPACE\n"
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"
                    "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON B THE STICK'S)\n"
                    "LISTEN         A AND B EACH: X6200, RTL, BOTH OR OFF; OTHER SCREENS KEEP IT\n"
