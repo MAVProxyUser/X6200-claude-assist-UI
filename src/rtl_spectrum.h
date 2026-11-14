@@ -1,11 +1,12 @@
 /*
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
- *  OpenX6X00 - An RTL-SDR stick's spectrum for the Sentry's F VHF/UHF and G LOG screens (rtl_spectrum.c):
- *  /usr/bin/x6x00-rtlspec (tools/rtlspec) runs while it is wanted and its rows are kept here, the newest one. The
- *  Sentry wants it from its first start for as long as the GUI runs, so screens and apps come and go without the
- *  stick being stopped and started again (the radio's USB host suffers from that); AIRSPACE's screen has it while it
- *  is open (rtl_spectrum_yield: AIRSPACE's dump1090 lent it, adsb_rx_lend) and gives it back when it closes.
+ *  OpenX6X00 - An RTL-SDR stick's spectrum for the Sentry's spectrum, LOG and WALKIE screens (rtl_spectrum.c). The
+ *  stick is held by /usr/bin/x6x00-rtlspec (tools/rtlspec), a daemon that opens it once and keeps it streaming for as
+ *  long as the radio runs; this side connects to it, asks for rows while they are wanted and keeps the newest one.
+ *  A GUI started again finds the same daemon and the same open stick: nothing closes it but pulling it out. While
+ *  AIRSPACE's screen is open (rtl_spectrum_yield) no rows are asked for and its dump1090 is given the samples
+ *  (rtl_spectrum_feed).
  */
 
 #pragma once
@@ -17,18 +18,19 @@
 
 typedef enum {
     RTL_SPEC_OFF,           /* not wanted */
-    RTL_SPEC_NO_HELPER,     /* no /usr/bin/x6x00-rtlspec on this image */
+    RTL_SPEC_NO_HELPER,     /* no /usr/bin/x6x00-rtlspec on this image, or it does not start */
     RTL_SPEC_NO_STICK,      /* no RTL-SDR on USB */
     RTL_SPEC_BUSY,          /* the stick, held by another program for now */
-    RTL_SPEC_OPENING,       /* started, its first row not here yet */
+    RTL_SPEC_OPENING,       /* the stick opening, or its first row not here yet */
     RTL_SPEC_ON,            /* rows coming */
-    RTL_SPEC_STALLED,       /* the stick opened but sent nothing, twice: the radio's USB has to have it again */
+    RTL_SPEC_STALLED,       /* the stick open and sending nothing: it has to be pulled out and plugged in again */
 } rtl_spec_state_t;
 
 #define RTL_SPEC_MIN_HZ  24000000LL
 #define RTL_SPEC_MAX_HZ  1766000000LL
 
-/* Wanted (on, at hz with gain tenths of dB, -1 the tuner's AGC) or not: the helper starts or ends in the background */
+/* Wanted (on, at hz with gain tenths of dB, -1 the tuner's AGC) or not: rows asked of the daemon or not, which is
+ * started (in the background, for good) the first time */
 void rtl_spectrum_want(bool on, int64_t hz, int gain);
 
 /* While on: another frequency (kept within RTL_SPEC_MIN_HZ..MAX_HZ), another gain */
@@ -37,8 +39,17 @@ void rtl_spectrum_gain(int tenths);
 
 rtl_spec_state_t rtl_spectrum_state(void);
 
-/* AIRSPACE's screen open (on): the helper stops and AIRSPACE's dump1090 may have the stick; closed: the helper again */
+/* AIRSPACE's screen open (on): no rows asked for, and AIRSPACE's dump1090 runs on the stick's samples; closed: rows
+ * again. The stick stays open and streaming either way */
 void rtl_spectrum_yield(bool on);
+
+/* Connected to the daemon: the stick's samples can be had through it */
+bool rtl_spectrum_daemon(void);
+
+/* The stick's raw samples (unsigned 8-bit I/Q, 1090 MHz, 2.4 MS/s) written by the daemon into fd, a pipe's end it
+ * takes over (the caller closes its own copy), for dump1090 reading the other end; -1: no more, the stick back to the
+ * spectrum. False when the daemon is not connected */
+bool rtl_spectrum_feed(int fd);
 
 /* Listen to hz (mode 1 NFM, 2 AM, 3 WFM) on the speaker in place of the X6200's receiver; mode 0 or hz 0: back to
  * the X6200. Within the helper's span only: outside it is silent until the stick is retuned there */

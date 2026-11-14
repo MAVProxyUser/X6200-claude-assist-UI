@@ -773,20 +773,23 @@ from the top down:
 A generic RTL-SDR stick (an RTL2832U with an R820T, R828D and the like, 24 MHz to 1.7 GHz), a GNS 5890 or a
 microADSB on the HOST port (a hub takes more than one); any can be swapped while the radio runs.
 
-- **The stick is the Sentry's for as long as the radio runs**: its stream starts when the Sentry first opens and
-  goes on whatever screen or app is shown (A, C and B only tune it and listen; about 7% of the processor). Only
-  AIRSPACE's screen takes it: dump1090 decodes ADS-B from it while that is open, and the Sentry has it back when it
-  closes. Every stop and start of the stream is a chance for the radio's USB host to leave the stick sending
-  nothing, so there are as few as can be; a GUI started again (a hot install, an update) waits for the old one's
-  helper to let the stick go first.
+- **The stick is opened once and never closed while it is plugged in.** Every stop and start of its stream is a
+  chance for the radio's USB host to leave it sending nothing, so there are none: `x6x00-rtlspec` (tools/rtlspec),
+  a daemon of its own started with the Sentry, opens the stick and keeps it streaming for as long as the radio runs,
+  and gives out only what is asked for: the spectrum's rows while the Sentry wants them, a channel's audio while one
+  is listened to, SAME alerts while a weather channel is watched; nothing at all with nobody asking. The GUI talks
+  to it over a local socket, so a GUI started again (a hot install, an update, a crash) finds the same daemon and the
+  same open stick. AIRSPACE does not take the stick either: while its screen is open the daemon tunes it to
+  1090 MHz and writes its samples into dump1090 (`--ifile -`), and tunes it back when it closes. The stick is closed
+  only when it is pulled out (the next one is opened when it is plugged in), or when an update brings another
+  version of the daemon (once, as the new one starts).
 - What is on USB is looked at each second by a thread of its own, never on the screen's thread: a USB host stuck
   in a disconnect cannot hang the screen.
-- A stick that opens but sends nothing ("THE RTL-SDR SENDS NOTHING"): unplug it and plug it in again. Nothing
-  touches it until it is plugged in again (seen as a new USB device), so it is never pulled out with transfers
-  queued on it; nor is it ever "unplugged" by software (its `authorized` file): the radio's USB host driver
-  crashes on that.
-- `x6x00-rtlspec` (tools/rtlspec) reads the stick: a program of its own, so a stick that hangs or goes away never
-  takes the screen with it.
+- A stick that opens but sends nothing ("THE RTL-SDR SENDS NOTHING"): unplug it and plug it in again. The daemon
+  leaves it open and alone till then (closed and opened again it would not be mended); nor is it ever "unplugged" by
+  software (its `authorized` file): the radio's USB host driver crashes on that.
+- The daemon is a program of its own, so a stick that hangs or goes away never takes the screen with it. Its log
+  is `/tmp/rtlspec.log`.
 
 ### AIRSPACE
 
@@ -794,8 +797,9 @@ ADS-B aircraft on a scope around your position (a USB GPS, else the QTH locator,
 calls, heights and tracks, and the history fading out (F2 DECAY, 5 minutes by default). Where: F SYSTEM >
 AIRSPACE (ADS-B), or APP > Airspace. Its receiver on the HOST port: a GNS 5890, a microADSB, or an RTL-SDR
 decoded by dump1090-fa (in the image). A GNS 5890 or microADSB keeps listening when it is closed; an RTL-SDR is
-AIRSPACE's only while its screen is open, the Sentry's the rest of the time. The VFO knob sets the range, the MFK
-chooses an aircraft, a tap chooses one on the scope.
+AIRSPACE's only while its screen is open, the Sentry's the rest of the time: the stick's daemon tunes it to
+1090 MHz and hands dump1090 its samples, so the stick itself is never closed for it. The VFO knob sets the range,
+the MFK chooses an aircraft, a tap chooses one on the scope.
 
 ## Updating the firmware
 

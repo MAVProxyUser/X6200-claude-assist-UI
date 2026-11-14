@@ -79,12 +79,13 @@ A generic RTL-SDR stick (an RTL2832U with an R820T, R828D or the like) on the HO
 - **The VOL/SQL/RFG knob** on B: its squelch and RF gain are the stick's. Squelch in dB over the noise (OFF, 1 to
   40): SQUELCHED on the stick's half while it is shut.
 - B stays as it was left: the band, the tuning, the channel and the scan come back with it.
-- **The stick's stream runs for as long as the radio does**: screens and apps come and go without it being stopped
-  and started again, which can leave this radio's USB host sending nothing; only AIRSPACE's screen borrows it. An
-  RTL-SDR, a GNS 5890 and a microADSB can be swapped while the radio runs; a stick that sends nothing is left alone
-  until it is plugged in again.
-- A small helper program, `x6x00-rtlspec` ([tools/rtlspec](tools/rtlspec/rtlspec.c)), reads the stick and
-  demodulates it, so a stick that hangs or is pulled out never takes the screen with it.
+- **The stick is opened once and never closed while it is plugged in**: a daemon, `x6x00-rtlspec`
+  ([tools/rtlspec](tools/rtlspec/rtlspec.c)), holds it and keeps it streaming for as long as the radio runs, and
+  hands the screens only what they ask for (the spectrum, a channel's audio, weather alerts). Screens, apps, a GUI
+  restarted or updated and AIRSPACE (its dump1090 reads the daemon's samples) all leave the stick alone; stopping and
+  starting its stream is what can leave this radio's USB host sending nothing. An RTL-SDR, a GNS 5890 and a
+  microADSB can be swapped while the radio runs; a stick that sends nothing is left alone until it is plugged in
+  again. The daemon is a program of its own, so a stick that hangs or is pulled out never takes the screen with it.
 
 ### NOAA Weather Radio alerts
 

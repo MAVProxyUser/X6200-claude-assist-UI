@@ -2107,7 +2107,7 @@ static void show_a_boxes(void) {
     opt_set(&r_sig, 1, t, 2);
     /* the stick's half, split: why it is empty, as C says */
     rtl_spec_state_t st = rtl_spectrum_state();
-    static const char *const why[] = {"", "THIS IMAGE HAS NO /USR/BIN/X6X00-RTLSPEC", "NO RTL-SDR ON USB\n\nPLUG ONE INTO THE HOST PORT",
+    static const char *const why[] = {"", "THE STICK'S DAEMON DOES NOT START\n\n/USR/BIN/X6X00-RTLSPEC", "NO RTL-SDR ON USB\n\nPLUG ONE INTO THE HOST PORT",
                                       "THE STICK IS BUSY\n\nWAITING FOR IT", "OPENING THE RTL-SDR", "",
                                       "THE RTL-SDR SENDS NOTHING\n\nUNPLUG IT AND PLUG IT IN AGAIN"};
     lv_label_set_text(rtl_why_l, why[st]);
@@ -2157,14 +2157,15 @@ static void show_rtl(void) {
         opt_set(&r_sig, 0, rtl_best ? b : "ONLY NOISE", 0);
         lv_label_set_text(r_sig.cap, "SIGNALS");
     }
-    static const char *const st[] = {"OFF", "NO HELPER ON THIS IMAGE", "NO RTL-SDR ON USB", "STICK BUSY: WAITING",
+    static const char *const st[] = {"OFF", "ITS DAEMON DOES NOT START", "NO RTL-SDR ON USB", "STICK BUSY: WAITING",
                                      "OPENING THE STICK", "RECEIVING", "STICK SENDS NOTHING"};
     rtl_spec_state_t s = rtl_spectrum_state();
     char             t[48], tn[16], f[16];
     int              g = param_i_get(cfg_rtl_gain);
 
     /* No stick for a moment (the first second of a start, a replug) changes nothing: its audio is silent meanwhile,
-     * RECEIVER says why, and it is heard again as soon as it is back (the helper is told what to play as it starts) */
+     * RECEIVER says why, and it is heard again as soon as it is back (the daemon is told what to play as the GUI
+     * connects) */
     rtl_spectrum_tuner(tn, sizeof(tn));
     snprintf(t, sizeof(t), "RTL-SDR %s", tn[0] ? tn : "");
     opt_set(&r_dev, 0, t, 0);
@@ -2192,7 +2193,7 @@ static void show_rtl(void) {
     else snprintf(t, sizeof(t), "GAIN %d.%d DB", g / 10, g % 10);
     opt_set(&r_sig, 1, t, 2);
     /* No rows: why, in the picture */
-    static const char *const why[] = {"", "THIS IMAGE HAS NO /USR/BIN/X6X00-RTLSPEC", "NO RTL-SDR ON USB\n\nPLUG ONE INTO THE HOST PORT",
+    static const char *const why[] = {"", "THE STICK'S DAEMON DOES NOT START\n\n/USR/BIN/X6X00-RTLSPEC", "NO RTL-SDR ON USB\n\nPLUG ONE INTO THE HOST PORT",
                                       "THE STICK IS BUSY\n\nWAITING FOR IT", "OPENING THE RTL-SDR", "",
                                       "THE RTL-SDR SENDS NOTHING\n\nUNPLUG IT AND PLUG IT IN AGAIN"};
     lv_label_set_text(rtl_why_l, why[s]);

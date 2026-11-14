@@ -15,16 +15,21 @@
  *    With "#38" it gave 0.65 frames/s against 0.28 with "#43" alone, more of them good. Its V.14 firmware
  *    time-stamps every frame whatever the mode. After 120 s without a frame, the whole start again.
  *  - RTL-SDR (an RTL2832U DVB-T stick, 0bda:2838 and the rest librtlsdr knows): no decoder of its own. dump1090-fa
- *    (FlightAware's, with the rtl-sdr-blog librtlsdr built in, which knows the Blog V4's R828D too; tools/rtlsdr)
- *    is started on it, headless, its raw output alone on 127.0.0.1:30002, "*8D...;" lines as the sticks send, read
- *    here over TCP; adaptive gain. It ends with the GUI (PR_SET_PDEATHSIG) and is started again when the stick
- *    changes. The tuner librtlsdr found ("R820T", "R828D") is said from its log, /tmp/dump1090.log.
+ *    (FlightAware's; tools/rtlsdr) decodes it, headless, its raw output alone on 127.0.0.1:30002, "*8D...;" lines as
+ *    the sticks send, read here over TCP. The stick itself is the Sentry's daemon's (x6x00-rtlspec, rtl_spectrum.c),
+ *    which keeps it open for as long as the radio runs: dump1090 reads its samples from a pipe ("--ifile -"), the
+ *    daemon writing them at 1090 MHz while AIRSPACE's screen is open, so the stick is never closed and opened for
+ *    it. Without the daemon, dump1090 opens the stick itself (rtl-sdr-blog's librtlsdr built in, which knows the
+ *    Blog V4's R828D too; adaptive gain). It ends with the GUI (PR_SET_PDEATHSIG) and is started again when the stick
+ *    changes. The tuner ("R820T", "R828D") is the daemon's word, or said from dump1090's log, /tmp/dump1090.log.
  *  The thread looks for a receiver every 2 s while it has none.
  */
 
+#define _GNU_SOURCE    /* pipe2, F_SETPIPE_SZ */
 #include "adsb_rx.h"
 
 #include "adsb.h"
+#include "rtl_spectrum.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -258,6 +263,7 @@ static bool send_cmds(int fd, const char *s) {
 /* ---- dump1090 for an RTL-SDR ---- */
 
 static pid_t d1090 = -1;
+static bool  d1090_fed;                 /* on the daemon's samples, not the stick itself */
 
 static bool d1090_alive(void) {
     if (d1090 <= 0) return false;
@@ -274,6 +280,7 @@ static bool d1090_alive(void) {
  * and sent nothing ("THE RTL-SDR SENDS NOTHING"), till it was unplugged; rtl_spectrum.c's helper is ended so too */
 static void d1090_stop(void) {
     if (d1090 <= 0) return;
+    if (d1090_fed) rtl_spectrum_feed(-1);      /* the daemon's samples end: so does its input, and it ends */
     kill(d1090, SIGTERM);
     for (int i = 0; i < 80 && d1090_alive(); i++) usleep(100000);
     if (d1090_alive()) kill(d1090, SIGKILL);
@@ -281,22 +288,44 @@ static void d1090_stop(void) {
     d1090 = -1;
 }
 
+/* On the daemon's samples when it is there (a pipe: dump1090 reads one end, the daemon is given the other), else on
+ * the stick itself */
 static bool d1090_start(void) {
+    int  pp[2] = {-1, -1};
+    bool fed;
+
     if (access(DUMP1090, X_OK) != 0) return false;
+    fed = rtl_spectrum_daemon() && pipe2(pp, O_CLOEXEC) == 0;
+    if (fed) fcntl(pp[1], F_SETPIPE_SZ, 1 << 20);  /* room for 0.2 s of samples: dump1090 reads in big gulps */
     pid_t p = fork();
-    if (p < 0) return false;
+    if (p < 0) {
+        if (fed) close(pp[0]), close(pp[1]);
+        return false;
+    }
     if (p == 0) {                               /* the child: nothing of the GUI's but what dump1090 needs */
         prctl(PR_SET_PDEATHSIG, SIGTERM);
         int nul = open("/dev/null", O_RDONLY), log = open(D1090_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (nul >= 0) dup2(nul, 0);
+        if (fed) dup2(pp[0], 0);
+        else if (nul >= 0) dup2(nul, 0);
         if (log >= 0) dup2(log, 1), dup2(log, 2);
         for (int f = 3; f < 1024; f++) close(f);
-        execl(DUMP1090, DUMP1090, "--device-index", "0", "--adaptive-range", "--quiet", "--net",
-              "--net-bind-address", "127.0.0.1", "--net-ro-port", "30002", "--net-ri-port", "0", "--net-sbs-port", "0",
-              "--net-bi-port", "0", "--net-bo-port", "0", "--net-stratux-port", "0", (char *)NULL);
+        if (fed)
+            execl(DUMP1090, DUMP1090, "--ifile", "-", "--iformat", "UC8", "--quiet", "--net",
+                  "--net-bind-address", "127.0.0.1", "--net-ro-port", "30002", "--net-ri-port", "0", "--net-sbs-port",
+                  "0", "--net-bi-port", "0", "--net-bo-port", "0", "--net-stratux-port", "0", (char *)NULL);
+        else
+            execl(DUMP1090, DUMP1090, "--device-index", "0", "--adaptive-range", "--quiet", "--net",
+                  "--net-bind-address", "127.0.0.1", "--net-ro-port", "30002", "--net-ri-port", "0", "--net-sbs-port",
+                  "0", "--net-bi-port", "0", "--net-bo-port", "0", "--net-stratux-port", "0", (char *)NULL);
         _exit(127);
     }
-    d1090 = p;
+    if (fed) {
+        close(pp[0]);
+        if (!rtl_spectrum_feed(pp[1])) fed = false;    /* nothing to read: it ends, and is started again */
+        close(pp[1]);
+    }
+    d1090     = p;
+    d1090_fed = fed;
     return true;
 }
 
@@ -313,12 +342,22 @@ static int d1090_connect(void) {
     return fd;
 }
 
-/* The tuner librtlsdr found, from dump1090's log: "Found Rafael Micro R820T tuner", "RTL-SDR Blog V4 Detected" */
+/* The tuner: the daemon's word ("R820T"), or what librtlsdr found from dump1090's log ("Found Rafael Micro R820T
+ * tuner", "RTL-SDR Blog V4 Detected") */
 static void d1090_tuner(void) {
-    FILE *f = fopen(D1090_LOG, "r");
+    FILE *f;
     char  line[160], tuner[24] = "";
 
-    if (!f) return;
+    if (d1090_fed) {
+        rtl_spectrum_tuner(tuner, sizeof(tuner));
+        if (tuner[0]) {
+            pthread_mutex_lock(&dev_lock);
+            snprintf(dev_info, sizeof(dev_info), "%s", tuner);
+            pthread_mutex_unlock(&dev_lock);
+        }
+        return;
+    }
+    if (!(f = fopen(D1090_LOG, "r"))) return;
     while (fgets(line, sizeof(line), f)) {
         char *p;
         if ((p = strstr(line, "Blog V4"))) snprintf(tuner, sizeof(tuner), "BLOG V4");

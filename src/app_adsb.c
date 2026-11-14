@@ -884,7 +884,7 @@ static void construct_cb(lv_obj_t *parent) {
     lv_group_focus_obj(root);
     lv_group_set_editing(keyboard_group, true);
 
-    rtl_spectrum_yield(true);       /* an RTL-SDR: the Sentry's helper lets it go, dump1090 has it while this is open */
+    rtl_spectrum_yield(true);       /* an RTL-SDR: its daemon feeds dump1090 while this is open, no rows meanwhile */
     adsb_rx_start();
     help_on = false;
     rot_acc = 0;

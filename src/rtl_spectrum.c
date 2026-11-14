@@ -1,65 +1,57 @@
 /*
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
- *  OpenX6X00 - An RTL-SDR stick's spectrum (rtl_spectrum.h). A thread of its own starts /usr/bin/x6x00-rtlspec while
- *  the spectrum is wanted, with a pipe each way: its rows come in on one (a text line, then binary frames, see
- *  tools/rtlspec/rtlspec.c), retunes go out on the other. The stick is AIRSPACE's otherwise: it is lent first, and
- *  a helper that finds it still busy (dump1090 not yet gone) is started again a moment later. No stick, or one that
- *  goes away: looked for again every two seconds.
+ *  OpenX6X00 - An RTL-SDR stick's spectrum (rtl_spectrum.h). The stick is the daemon's, /usr/bin/x6x00-rtlspec
+ *  (tools/rtlspec/rtlspec.c): it opens it once and keeps it streaming for as long as the radio runs. A thread of its
+ *  own here connects to it over its socket (starting it when none answers), asks for rows while they are wanted and
+ *  takes them in, with the audio and the alerts. The daemon is nobody's child: a GUI started again (a hot install,
+ *  a crash) connects to the same daemon and the same open stick. Nothing here closes the stick, ends the daemon or
+ *  starts it over, but for a daemon of another protocol version (an update since it started), told to end so this
+ *  GUI's own is started. AIRSPACE's screen open: no rows asked for, and its dump1090 is given the stick's samples by
+ *  the daemon (rtl_spectrum_feed).
  */
 
-#define _GNU_SOURCE    /* pipe2 */
+#define _GNU_SOURCE
 #include "rtl_spectrum.h"
 
 #include "adsb_rx.h"
 #include "audio.h"
 #include "radio.h"
 
-#include <dirent.h>
 #include <errno.h>
 #include <math.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/prctl.h>
-#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
 #define HELPER    "/usr/bin/x6x00-rtlspec"
+#define SOCK_NAME "x6x00-rtlspec"       /* the daemon's socket, in the abstract namespace */
+#define PROTO     2                     /* its protocol: "RTLSPEC 2 ..." */
 #define LOG       "/tmp/rtlspec.log"
 #define MAX_BINS  8192
 #define BINS      2048
 #define ROWS      20            /* a second */
-#define RATE        2116800     /* 48 x 44.1 kHz: the helper's audio comes out at the codec's rate */
+#define RATE        2116800     /* 48 x 44.1 kHz: the daemon's audio comes out at the codec's rate */
 #define RING        (44100 * 2) /* audio waiting to play: two seconds at most */
 #define CHUNK       1024        /* audio_play() needs room for the whole write: a bigger one may never find it */
 
 static pthread_t       thread;
 static bool            started;
 static atomic_bool     want;
-static atomic_bool     yielded;          /* AIRSPACE's screen open: its dump1090 has the stick */
-static atomic_uint     want_ms;          /* when want or yielded last changed (now_ms) */
+static atomic_bool     yielded;          /* AIRSPACE's screen open: its dump1090 has the stick's samples */
 
-/* The stick's stream started and stopped as seldom as can be: the radio's USB host (MUSB) has been left broken for
- * the stick ("THE RTL-SDR SENDS NOTHING") after stops and starts, and once froze the radio. So the Sentry wants it
- * from its first start for as long as the GUI runs, whatever screen or app is shown (F and G only tune it and listen),
- * and it stops only while AIRSPACE's screen is open; it starts START_MS after that closes */
-#define START_MS    500
-
-static uint32_t now_ms(void) {
-    struct timespec ts;
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
-}
-
-/* Wanted and not yielded: the helper running stays */
+/* Wanted and not yielded: rows asked for */
 static bool kept(void) {
     return atomic_load(&want) && !atomic_load(&yielded);
 }
@@ -110,130 +102,77 @@ static int             rscope_head, rscope_len;
 static atomic_bool     rscope_on;
 static pthread_mutex_t rscope_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* A write to the helper that cannot end the GUI: one that has just gone gives EPIPE, and its SIGPIPE is taken here,
- * not left to end the process (the GUI keeps the default action) */
-static void quiet_write(int fd, const char *s, size_t n) {
-    sigset_t        pipe_set, old;
-    struct timespec now = {0, 0};
-
-    sigemptyset(&pipe_set);
-    sigaddset(&pipe_set, SIGPIPE);
-    pthread_sigmask(SIG_BLOCK, &pipe_set, &old);
-    if (write(fd, s, n) < 0 && errno == EPIPE) {
-        sigtimedwait(&pipe_set, NULL, &now);
-    }
-    pthread_sigmask(SIG_SETMASK, &old, NULL);
-}
-
+/* A command to the daemon, one message: never waiting for it, never a SIGPIPE */
 static void say(const char *cmd) {
     pthread_mutex_lock(&lock);
-    if (cmd_fd >= 0) quiet_write(cmd_fd, cmd, strlen(cmd));
+    if (cmd_fd >= 0) (void)send(cmd_fd, cmd, strlen(cmd), MSG_DONTWAIT | MSG_NOSIGNAL);
     pthread_mutex_unlock(&lock);
 }
 
-static int64_t spawned_hz;      /* the frequency the helper was started on */
+static int daemon_connect(void) {
+    struct sockaddr_un a   = {.sun_family = AF_UNIX};
+    socklen_t          len = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + strlen(SOCK_NAME));
+    int                fd  = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
 
-static pid_t spawn(int *in_fd, int *out_fd) {
-    int   to[2], from[2];
-    char  f[24], g[16], n[16], r[16];
-    pid_t p;
-
-    if (pipe2(to, O_CLOEXEC) != 0) return -1;
-    if (pipe2(from, O_CLOEXEC) != 0) {
-        close(to[0]), close(to[1]);
+    if (fd < 0) return -1;
+    memcpy(a.sun_path + 1, SOCK_NAME, strlen(SOCK_NAME));
+    if (connect(fd, (struct sockaddr *)&a, len) != 0) {
+        close(fd);
         return -1;
     }
-    spawned_hz = atomic_load(&want_hz);
-    snprintf(f, sizeof(f), "%lld", (long long)spawned_hz);
+    return fd;
+}
+
+/* The daemon on the other end of fd runs another helper than the one on disk now (replaced since it started: an
+ * update, a hot install). Its binary is compared with the file, so an update that brings the same helper leaves the
+ * daemon, and the stick, alone */
+static bool daemon_outdated(int fd) {
+    struct ucred cr;
+    socklen_t    len = sizeof(cr);
+    char         exe[32], x[4096], y[4096];
+    FILE        *a, *b;
+    bool         differ = false;
+
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cr, &len) != 0 || cr.pid <= 0) return false;
+    snprintf(exe, sizeof(exe), "/proc/%d/exe", (int)cr.pid);
+    a = fopen(exe, "rb");
+    b = fopen(HELPER, "rb");
+    if (a && b) {
+        size_t n, m;
+
+        do {
+            n = fread(x, 1, sizeof(x), a);
+            m = fread(y, 1, sizeof(y), b);
+            differ = n != m || memcmp(x, y, n) != 0;
+        } while (!differ && n > 0);
+    }
+    if (a) fclose(a);
+    if (b) fclose(b);
+    return differ;
+}
+
+/* The daemon started, on what is wanted now: it goes into the background at once (the child waited for here is gone
+ * in a moment), nobody's child, so no GUI's end is its end. One already running: this one ends at once */
+static void daemon_start(void) {
+    char  f[24], g[16], n[16], r[16], s[16];
+    pid_t p;
+
+    snprintf(f, sizeof(f), "%lld", (long long)atomic_load(&want_hz));
     snprintf(g, sizeof(g), "%d", atomic_load(&want_gain));
     snprintf(n, sizeof(n), "%d", BINS);
     snprintf(r, sizeof(r), "%d", ROWS);
-    char s[16];
     snprintf(s, sizeof(s), "%d", RATE);
-    if ((p = fork()) < 0) {
-        close(to[0]), close(to[1]), close(from[0]), close(from[1]);
-        return -1;
-    }
-    if (p == 0) {                       /* the child: its stdin and stdout the pipes, stderr the log */
-        prctl(PR_SET_PDEATHSIG, SIGTERM);
-        int log = open(LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        dup2(to[0], 0);
-        dup2(from[1], 1);
+    if ((p = fork()) < 0) return;
+    if (p == 0) {
+        int nul = open("/dev/null", O_RDWR), log = open(LOG, O_WRONLY | O_CREAT | O_APPEND, 0644);
+
+        if (nul >= 0) dup2(nul, 0), dup2(nul, 1);
         if (log >= 0) dup2(log, 2);
         for (int fd = 3; fd < 1024; fd++) close(fd);
         execl(HELPER, HELPER, "-f", f, "-g", g, "-n", n, "-r", r, "-s", s, (char *)NULL);
         _exit(127);
     }
-    close(to[0]);
-    close(from[1]);
-    *in_fd  = to[1];
-    *out_fd = from[0];
-    return p;
-}
-
-static void end_child(pid_t p, int in_fd, int out_fd) {
-    pthread_mutex_lock(&lock);
-    cmd_fd = -1;
-    pthread_mutex_unlock(&lock);
-    if (in_fd >= 0) {
-        quiet_write(in_fd, "q\n", 2);
-        close(in_fd);
-    }
-    if (out_fd >= 0) close(out_fd);
-    /* Time to close the stick: a helper killed with transfers in flight leaves the radio's USB host (MUSB) broken
-     * for the stick until it is plugged in again, and once froze the radio. SIGTERM after 2 s (it cancels them
-     * too), SIGKILL only after 6 */
-    if (p > 0) {
-        for (int i = 0; i < 40 && waitpid(p, NULL, WNOHANG) == 0; i++) usleep(50000);
-        if (waitpid(p, NULL, WNOHANG) == 0) kill(p, SIGTERM);
-        for (int i = 0; i < 80 && waitpid(p, NULL, WNOHANG) == 0; i++) usleep(50000);
-        if (waitpid(p, NULL, WNOHANG) == 0) {
-            kill(p, SIGKILL);
-            waitpid(p, NULL, 0);
-        }
-    }
-}
-
-/* n bytes, with up to ms in all for them: false at the end of the pipe, the time, or when no longer wanted */
-static bool read_all(int fd, void *buf, size_t n, int ms) {
-    uint8_t *b = buf;
-
-    while (n > 0) {
-        fd_set         rd;
-        struct timeval tv = {.tv_sec = 0, .tv_usec = 200000};
-
-        if (!kept() || ms <= 0) return false;
-        FD_ZERO(&rd);
-        FD_SET(fd, &rd);
-        int r = select(fd + 1, &rd, NULL, NULL, &tv);
-        if (r < 0 && errno == EINTR) continue;
-        if (r < 0) return false;
-        if (r == 0) {
-            ms -= 200;
-            continue;
-        }
-        ssize_t k = read(fd, b, n);
-        if (k < 0 && (errno == EINTR || errno == EAGAIN)) continue;
-        if (k <= 0) return false;
-        b += k;
-        n -= (size_t)k;
-    }
-    return true;
-}
-
-static bool read_line(int fd, char *s, size_t n, int ms) {
-    size_t i = 0;
-
-    while (i + 1 < n) {
-        if (!read_all(fd, s + i, 1, ms)) {
-            s[i] = 0;
-            return false;
-        }
-        if (s[i] == '\n') break;
-        i++;
-    }
-    s[i] = 0;
-    return true;
+    waitpid(p, NULL, 0);
 }
 
 static int cmp_float(const void *a, const void *b) {
@@ -291,196 +230,184 @@ static void squelch_row(const float *db, uint16_t n, uint32_t rate, int64_t cent
     atomic_store(&sql_open, open);
 }
 
-/* A helper still running: the GUI before this one, restarted (a hot install, an update), its helper closing the stick */
-static bool helper_running(void) {
-    DIR           *d = opendir("/proc");
-    struct dirent *e;
-    bool           found = false;
+/* The daemon's word for the stick's state, as this side says it */
+static rtl_spec_state_t daemon_state(const char *s) {
+    if (!strcmp(s, "NOSTICK")) return RTL_SPEC_NO_STICK;
+    if (!strcmp(s, "BUSY")) return RTL_SPEC_BUSY;
+    if (!strcmp(s, "STALLED")) return RTL_SPEC_STALLED;
+    if (!strcmp(s, "ADSB")) return RTL_SPEC_OFF;
+    return RTL_SPEC_OPENING;            /* OPENING; ON: ON once its rows come */
+}
 
-    while (d && !found && (e = readdir(d))) {
-        char p[64], comm[32] = "";
-        FILE *f;
+/* A SAME header decided: kept, and in the log */
+static void take_alert(const char *t) {
+    pthread_mutex_lock(&lock);
+    snprintf(alert, sizeof(alert), "%s", t);
+    alert_at = time(NULL);
+    alert_seq++;
+    pthread_mutex_unlock(&lock);
+    FILE *f = fopen(ALERT_LOG, "a");
+    if (f) {
+        char      when[32];
+        struct tm tm;
+        time_t    now = time(NULL);
 
-        if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
-        snprintf(p, sizeof(p), "/proc/%s/comm", e->d_name);
-        if ((f = fopen(p, "r"))) {
-            if (fgets(comm, sizeof(comm), f)) comm[strcspn(comm, "\n")] = 0;
-            fclose(f);
-        }
-        found = !strcmp(comm, "x6x00-rtlspec");
+        gmtime_r(&now, &tm);
+        strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%SZ", &tm);
+        fprintf(f, "%s %.3f MHz %s\n", when, atomic_load(&watch_hz) / 1e6, t);
+        fclose(f);
     }
-    if (d) closedir(d);
-    return found;
 }
 
 static void *spec_thread(void *arg) {
-    static uint8_t buf[24 + MAX_BINS * 4];
+    static uint8_t buf[24 + MAX_BINS * 4 + 64];
+    int            fd = -1, asked = -1, failed = 0;
     (void)arg;
 
     for (;;) {
-        if (!kept()) {
-            adsb_rx_lend(false);
-            state = RTL_SPEC_OFF;
-            usleep(200000);
-            continue;
-        }
-        if (now_ms() - atomic_load(&want_ms) < START_MS) {     /* AIRSPACE only just closed */
-            usleep(100000);
-            continue;
-        }
-        if (!adsb_rx_sdr_present()) {   /* no stick: looked for each second, no helper started for nothing */
-            adsb_rx_lend(true);         /* and dump1090 kept off it, should one come */
-            state = RTL_SPEC_NO_STICK;
-            usleep(1000000);
-            continue;
-        }
-        if (access(HELPER, X_OK) != 0) {
-            state = RTL_SPEC_NO_HELPER;
-            sleep(2);
-            continue;
-        }
-        adsb_rx_lend(true);             /* AIRSPACE's dump1090 lets the stick go */
-        /* and is gone, its transfers cancelled and the stick closed (up to 8 s, adsb_rx.c d1090_stop), a moment before
-         * the helper opens it: opened while dump1090 still had transfers in flight, the stick sent nothing */
-        bool waited = false;
-        for (int i = 0; i < 100; i++) {
-            adsb_rx_state_t a = adsb_rx_state(NULL, 0);
-            if (a != ADSB_RX_ON && a != ADSB_RX_OPENING) break;
-            waited = true;
-            usleep(100000);
-        }
-        if (waited) usleep(1000000);
+        bool k = kept();
 
-        /* none of ours runs here: one still running is the GUI's before this one, closing the stick; opened over it,
-         * the stick is left sending nothing. It goes first (it ends with its GUI: PR_SET_PDEATHSIG) */
-        for (int i = 0; i < 80 && helper_running(); i++) usleep(100000);
-
-        int   in_fd = -1, out_fd = -1;
-        pid_t p = spawn(&in_fd, &out_fd);
-        char  line[96] = "", tn[16] = "";
-        int   ver = 0, nb = 0;
-        unsigned rate = 0;
-
-        if (p < 0) {
-            sleep(2);
-            continue;
-        }
-        if (state != RTL_SPEC_STALLED) state = RTL_SPEC_OPENING;
-        if (!read_line(out_fd, line, sizeof(line), 8000) ||
-            sscanf(line, "RTLSPEC %d %15s %u %d", &ver, tn, &rate, &nb) != 4 || ver != 1 || nb < 64 || nb > MAX_BINS) {
-            end_child(p, in_fd, out_fd);
-            if (!kept()) continue;
-            state = strstr(line, "BUSY") ? RTL_SPEC_BUSY : RTL_SPEC_NO_STICK;
-            sleep(state == RTL_SPEC_BUSY ? 1 : 2);
-            continue;
-        }
-        pthread_mutex_lock(&lock);
-        snprintf(tuner, sizeof(tuner), "%s", tn);
-        cmd_fd = in_fd;
-        pthread_mutex_unlock(&lock);
-        if (atomic_load(&watch_hz)) {           /* a new helper: the channel watched, again */
-            char cmd[40];
-            snprintf(cmd, sizeof(cmd), "w %lld\n", (long long)atomic_load(&watch_hz));
-            say(cmd);
-        }
-        if (atomic_load(&listen_mode)) {        /* a new helper: what was listened to, again */
-            char cmd[48];
-            snprintf(cmd, sizeof(cmd), "l %lld %d\n", (long long)atomic_load(&listen_hz), atomic_load(&listen_mode));
-            say(cmd);
-        }
-
-        /* What it was started on: a retune asked for while it started (before it took commands) is sent below */
-        int64_t asked = spawned_hz;
-        for (;;) {
-            size_t len = 24 + (size_t)nb * 4;
-
-            if (!read_all(out_fd, buf, 4, 3000)) break;
-            if (memcmp(buf, "RAUD", 4) == 0) {      /* audio: into the ring, the oldest out when it is full */
-                uint32_t cnt;
-                static int16_t a[44100];
-
-                if (!read_all(out_fd, &cnt, 4, 3000) || cnt > 44100 || !read_all(out_fd, a, cnt * 2, 3000)) break;
-                pthread_mutex_lock(&ring_lock);
-                for (uint32_t k = 0; k < cnt; k++) {
-                    ring[(ring_head + ring_len) % RING] = a[k];
-                    if (ring_len < RING) ring_len++;
-                    else ring_head = (ring_head + 1) % RING;
-                }
-                pthread_mutex_unlock(&ring_lock);
+        /* AIRSPACE's dump1090 runs only while its screen is open, on the daemon's samples (adsb_rx.c) */
+        adsb_rx_lend(!atomic_load(&yielded));
+        if (fd < 0) {
+            if ((fd = daemon_connect()) < 0 && access(HELPER, X_OK) == 0) {
+                daemon_start();
+                for (int i = 0; i < 30 && (fd = daemon_connect()) < 0; i++) usleep(100000);
+            }
+            if (fd < 0) {               /* a helper that does not start (or not as a daemon): tried less and less */
+                state = !k ? RTL_SPEC_OFF : RTL_SPEC_NO_HELPER;
+                sleep(failed < 5 ? 2 << failed : 60);
+                failed++;
                 continue;
             }
-            if (memcmp(buf, "RSAM", 4) == 0) {      /* a SAME header decided: kept, and in the log */
-                uint32_t n;
-                char     t[300];
-
-                if (!read_all(out_fd, &n, 4, 3000) || n >= sizeof(t) || !read_all(out_fd, t, n, 3000)) break;
-                t[n] = 0;
-                pthread_mutex_lock(&lock);
-                snprintf(alert, sizeof(alert), "%s", t);
-                alert_at = time(NULL);
-                alert_seq++;
-                pthread_mutex_unlock(&lock);
-                FILE *f = fopen(ALERT_LOG, "a");
-                if (f) {
-                    char      when[32];
-                    struct tm tm;
-                    time_t    now = time(NULL);
-
-                    gmtime_r(&now, &tm);
-                    strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%SZ", &tm);
-                    fprintf(f, "%s %.3f MHz %s\n", when, atomic_load(&watch_hz) / 1e6, t);
-                    fclose(f);
-                }
+            failed = 0;
+            if (daemon_outdated(fd)) {  /* the helper updated: the old daemon told to end, the new one started */
+                (void)send(fd, "Q\n", 2, MSG_DONTWAIT | MSG_NOSIGNAL);
+                close(fd);
+                fd = -1;
+                sleep(3);
                 continue;
             }
-            if (memcmp(buf, "RSPC", 4) != 0 || !read_all(out_fd, buf + 4, len - 4, 3000)) break;
-            uint32_t seq, r;
-            uint64_t c;
-            uint16_t n, flags;
-
-            memcpy(&seq, buf + 4, 4);
-            memcpy(&c, buf + 8, 8);
-            memcpy(&r, buf + 16, 4);
-            memcpy(&n, buf + 20, 2);
-            memcpy(&flags, buf + 22, 2);
-            if (n != nb) break;
             pthread_mutex_lock(&lock);
-            memcpy(row, buf + 24, (size_t)n * 4);
-            row_n      = n;
-            row_rate   = r;
+            cmd_fd = fd;
+            pthread_mutex_unlock(&lock);
+            asked = -1;
+
+            /* What this GUI wants, said again: a daemon that ran before it is as the last GUI left it */
+            char cmd[64];
+            snprintf(cmd, sizeof(cmd), "s %d\n", RATE);
+            say(cmd);
+            snprintf(cmd, sizeof(cmd), "g %d\n", atomic_load(&want_gain));
+            say(cmd);
+            snprintf(cmd, sizeof(cmd), "f %lld\n", (long long)atomic_load(&want_hz));
+            say(cmd);
+            if (atomic_load(&watch_hz)) {
+                snprintf(cmd, sizeof(cmd), "w %lld\n", (long long)atomic_load(&watch_hz));
+                say(cmd);
+            }
+            if (atomic_load(&listen_mode)) {
+                snprintf(cmd, sizeof(cmd), "l %lld %d\n", (long long)atomic_load(&listen_hz),
+                         atomic_load(&listen_mode));
+                say(cmd);
+            }
+        }
+        if ((int)k != asked) {          /* rows asked for while wanted, and only then */
+            say(k ? "r 1\n" : "r 0\n");
+            asked = k;
+        }
+        if (!k) state = RTL_SPEC_OFF;
+
+        struct pollfd p = {.fd = fd, .events = POLLIN};
+        int           r = poll(&p, 1, 200);
+        ssize_t       n;
+
+        if (r == 0 || (r < 0 && errno == EINTR)) continue;
+        n = r > 0 ? recv(fd, buf, sizeof(buf) - 1, 0) : -1;
+        if (n < 0 && (errno == EINTR || errno == EAGAIN)) continue;
+        if (n <= 0) {                   /* the daemon went (told to end, or it died): connected again, or started */
+            pthread_mutex_lock(&lock);
+            cmd_fd = -1;
+            pthread_mutex_unlock(&lock);
+            close(fd);
+            fd = -1;
+            sleep(1);
+            continue;
+        }
+
+        if (n > 8 && memcmp(buf, "RTLSPEC ", 8) == 0) {
+            char     st[16] = "", tn[16] = "";
+            int      ver = 0, nb = 0;
+            unsigned rate = 0;
+
+            buf[n] = 0;
+            int got = sscanf((char *)buf, "RTLSPEC %d %15s %15s %u %d", &ver, st, tn, &rate, &nb);
+
+            if (got >= 1 && ver != PROTO) {
+                /* another version of the daemon, running since before an update: told to end (it closes the stick),
+                 * and this GUI's own started once it has */
+                say("Q\n");
+                pthread_mutex_lock(&lock);
+                cmd_fd = -1;
+                pthread_mutex_unlock(&lock);
+                close(fd);
+                fd = -1;
+                sleep(3);
+                continue;
+            }
+            if (got != 5) continue;
+            pthread_mutex_lock(&lock);
+            snprintf(tuner, sizeof(tuner), "%s", strcmp(tn, "-") ? tn : "");
+            pthread_mutex_unlock(&lock);
+            if (k && !(state == RTL_SPEC_ON && !strcmp(st, "ON"))) state = daemon_state(st);
+            continue;
+        }
+        if (n >= 8 && memcmp(buf, "RAUD", 4) == 0) {   /* audio: into the ring, the oldest out when it is full */
+            uint32_t cnt;
+            int16_t  s;
+
+            memcpy(&cnt, buf + 4, 4);
+            if (cnt > (uint32_t)(n - 8) / 2) continue;
+            pthread_mutex_lock(&ring_lock);
+            for (uint32_t i = 0; i < cnt; i++) {
+                memcpy(&s, buf + 8 + i * 2, 2);
+                ring[(ring_head + ring_len) % RING] = s;
+                if (ring_len < RING) ring_len++;
+                else ring_head = (ring_head + 1) % RING;
+            }
+            pthread_mutex_unlock(&ring_lock);
+            continue;
+        }
+        if (n >= 8 && memcmp(buf, "RSAM", 4) == 0) {
+            uint32_t len;
+            char     t[300];
+
+            memcpy(&len, buf + 4, 4);
+            if (len >= sizeof(t) || len > (uint32_t)(n - 8)) continue;
+            memcpy(t, buf + 8, len);
+            t[len] = 0;
+            take_alert(t);
+            continue;
+        }
+        if (n >= 24 && memcmp(buf, "RSPC", 4) == 0) {
+            uint64_t c;
+            uint32_t rt;
+            uint16_t nb, flags;
+
+            memcpy(&c, buf + 8, 8);
+            memcpy(&rt, buf + 16, 4);
+            memcpy(&nb, buf + 20, 2);
+            memcpy(&flags, buf + 22, 2);
+            if (!nb || nb > MAX_BINS || (size_t)n < 24 + (size_t)nb * 4 || !k) continue;
+            pthread_mutex_lock(&lock);
+            memcpy(row, buf + 24, (size_t)nb * 4);
+            row_n      = nb;
+            row_rate   = rt;
             row_centre = (int64_t)c;
             row_seq++;
             row_fresh  = flags & 1;
             pthread_mutex_unlock(&lock);
-            squelch_row(row, n, r, (int64_t)c);     /* row is only written here: read without the lock */
+            squelch_row(row, nb, rt, (int64_t)c);   /* row is only written here: read without the lock */
             state = RTL_SPEC_ON;
-            if (asked != atomic_load(&want_hz) && (int64_t)c != atomic_load(&want_hz)) {
-                char cmd[32];
-                asked = atomic_load(&want_hz);
-                snprintf(cmd, sizeof(cmd), "f %lld\n", (long long)asked);
-                say(cmd);
-            }
-        }
-        bool got_rows = state == RTL_SPEC_ON;
-        end_child(p, in_fd, out_fd);
-        if (kept()) {                   /* it went: unplugged, or the stream stalled */
-            static int stalls;
-
-            stalls = got_rows ? 0 : stalls + 1;
-            if (stalls < 2) {
-                state = RTL_SPEC_NO_STICK;
-                sleep(2);
-                continue;
-            }
-            /* Opened twice and nothing sent: the USB host's endpoint is broken, retries would not mend it, and the
-             * stick pulled out while a helper had transfers queued on it has hung the radio. Nor may the radio unplug
-             * it in software: de-authorizing the stick crashed the MUSB driver (2026-11-14). So nothing touches it
-             * until it is another device: unplugged and plugged in again (or another stick) */
-            int id = adsb_rx_sdr_id();
-
-            state = RTL_SPEC_STALLED;
-            while (kept() && id && adsb_rx_sdr_id() == id) sleep(1);
-            stalls = 0;
         }
     }
     return NULL;
@@ -491,7 +418,6 @@ void rtl_spectrum_want(bool on, int64_t hz, int gain) {
     if (hz > RTL_SPEC_MAX_HZ) hz = RTL_SPEC_MAX_HZ;
     atomic_store(&want_hz, hz);
     atomic_store(&want_gain, gain);
-    if (on != atomic_load(&want)) atomic_store(&want_ms, now_ms());
     atomic_store(&want, on);
     if (on && !started) {
         started = pthread_create(&thread, NULL, spec_thread, NULL) == 0;
@@ -500,8 +426,41 @@ void rtl_spectrum_want(bool on, int64_t hz, int gain) {
 }
 
 void rtl_spectrum_yield(bool on) {
-    if (on != atomic_load(&yielded)) atomic_store(&want_ms, now_ms());
     atomic_store(&yielded, on);
+}
+
+bool rtl_spectrum_daemon(void) {
+    pthread_mutex_lock(&lock);
+    bool on = cmd_fd >= 0;
+    pthread_mutex_unlock(&lock);
+    return on;
+}
+
+bool rtl_spectrum_feed(int fd) {
+    bool ok = false;
+
+    pthread_mutex_lock(&lock);
+    if (cmd_fd >= 0 && fd < 0) {
+        ok = send(cmd_fd, "a 0\n", 4, MSG_DONTWAIT | MSG_NOSIGNAL) == 4;
+    } else if (cmd_fd >= 0) {             /* the pipe's end itself, passed over the socket */
+        char line[] = "a\n";
+        union {
+            struct cmsghdr h;
+            char           b[CMSG_SPACE(sizeof(int))];
+        } cm;
+        struct iovec  io = {.iov_base = line, .iov_len = 2};
+        struct msghdr m  = {.msg_iov = &io, .msg_iovlen = 1, .msg_control = cm.b, .msg_controllen = sizeof(cm.b)};
+
+        memset(&cm, 0, sizeof(cm));
+        struct cmsghdr *h = CMSG_FIRSTHDR(&m);
+        h->cmsg_level     = SOL_SOCKET;
+        h->cmsg_type      = SCM_RIGHTS;
+        h->cmsg_len       = CMSG_LEN(sizeof(int));
+        memcpy(CMSG_DATA(h), &fd, sizeof(int));
+        ok = sendmsg(cmd_fd, &m, MSG_DONTWAIT | MSG_NOSIGNAL) == 2;
+    }
+    pthread_mutex_unlock(&lock);
+    return ok;
 }
 
 void rtl_spectrum_tune(int64_t hz) {

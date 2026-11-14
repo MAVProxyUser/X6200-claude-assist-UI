@@ -17,7 +17,7 @@ typedef enum {
     ADSB_RX_NO_DRIVER,      /* the stick, but no cdc_acm in the kernel */
     ADSB_RX_OPENING,        /* the stick, its serial port not there yet */
     ADSB_RX_ON,             /* reading */
-    ADSB_RX_LENT,           /* an RTL-SDR lent to the Sentry's spectrum (rtl_spectrum.c): dump1090 stopped */
+    ADSB_RX_LENT,           /* an RTL-SDR, the Sentry's while AIRSPACE's screen is closed: dump1090 stopped */
 } adsb_rx_state_t;
 
 /* Started once, it listens till the GUI ends, the screen open or not; the stick may come and go */
@@ -32,8 +32,8 @@ void adsb_rx_name(char *name, size_t n);
 /* Bytes read since the start */
 uint64_t adsb_rx_bytes(void);
 
-/* An RTL-SDR lent to another user of the stick (on) or given back (off): lent, dump1090 is stopped within a few
- * seconds and not started again until it comes back. The serial receivers (GNS 5890, microADSB) go on */
+/* An RTL-SDR lent to the Sentry's spectrum (on) or given to AIRSPACE (off): lent, dump1090 is stopped and not started
+ * again until it comes back. The serial receivers (GNS 5890, microADSB) go on */
 void adsb_rx_lend(bool on);
 
 /* An RTL-SDR on USB, whoever has it. These three read what a thread of their own sees each second (no sysfs on the
