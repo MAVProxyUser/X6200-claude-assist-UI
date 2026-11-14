@@ -6,12 +6,12 @@ lost and freed all of them, the others still in flight on libusb's list.
 libusb_close() then looped for ever on that list of freed memory (seen
 on the X6200: x6x00-rtlspec spinning in libusb_close, the stick never
 opened again). The transfers in flight are counted; the loop's end waits
-for them (10 s at most, after which they are leaked, never freed).
+for them (3 s at most, after which they are leaked, never freed).
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
 diff --git a/src/librtlsdr.c b/src/librtlsdr.c
-index 82bab6d..3676fdc 100644
+index 82bab6d..5b1572f 100644
 --- a/src/librtlsdr.c
 +++ b/src/librtlsdr.c
 @@ -24,6 +24,7 @@
@@ -94,7 +94,7 @@ index 82bab6d..3676fdc 100644
  			fprintf(stderr, "Failed to submit transfer %i\n"
  					"Please increase your allowed " 
  					"usbfs buffer size with the "
-@@ -2032,7 +2056,43 @@ int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
+@@ -2032,7 +2056,44 @@ int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
  		}
  	}
  
@@ -112,7 +112,7 @@ index 82bab6d..3676fdc 100644
 +		/* by the clock: libusb may return at once, a device's end
 +		 * still under way in the kernel */
 +		while (__atomic_load_n(&dev->xfer_inflight, __ATOMIC_SEQ_CST) > 0 &&
-+		       t1.tv_sec - t0.tv_sec < 10) {
++		       t1.tv_sec - t0.tv_sec < 3) {
 +			struct timeval drain_tv = { 0, 100000 };
 +			unsigned int j;
 +
@@ -127,7 +127,8 @@ index 82bab6d..3676fdc 100644
 +	}
 +
 +	if (__atomic_load_n(&dev->xfer_inflight, __ATOMIC_SEQ_CST) > 0) {
-+		/* never given back in 10 s: left allocated, libusb may still
++		/* never given back in 3 s (on the X6200's MUSB, those not back by
++		 * then never were, waited for 10 s): left allocated, libusb may still
 +		 * touch them; leaked rather than freed under it */
 +		fprintf(stderr, "%d transfers never came back, left allocated\n",
 +			__atomic_load_n(&dev->xfer_inflight, __ATOMIC_SEQ_CST));

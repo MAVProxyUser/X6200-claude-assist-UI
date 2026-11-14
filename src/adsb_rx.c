@@ -22,7 +22,7 @@
  *    it. Without the daemon, dump1090 opens the stick itself (rtl-sdr-blog's librtlsdr built in, which knows the
  *    Blog V4's R828D too; adaptive gain). It ends with the GUI (PR_SET_PDEATHSIG) and is started again when the stick
  *    changes. The tuner ("R820T", "R828D") is the daemon's word, or said from dump1090's log, /tmp/dump1090.log.
- *  The thread looks for a receiver every 2 s while it has none, and each second that the one it has is still there
+ *  The thread looks for a receiver every second while it has none, and each second that the one it has is still there
  *  under the USB device number it had: pulled out, or plugged back (another number), or another receiver in its
  *  place, it is let go (its dump1090 ended) and looked for again. A serial port's read fails when it goes; dump1090 on
  *  the daemon's samples does not end when the stick does, it only waits, so the number is what says it.
@@ -423,9 +423,11 @@ static void *rx_thread(void *arg) {
                         continue;
                     }
                     state = ADSB_RX_OPENING;
-                    sleep(3);                   /* the tuner set up, the port open */
+                    /* its port as soon as it is up, looked for each 200 ms (5 s at most): a stick swapped in while
+                     * the screen is open is heard within a second or two */
+                    for (int i = 0; i < 25 && (fd = d1090_connect()) < 0 && d1090_alive(); i++) usleep(200000);
                 }
-                if ((fd = d1090_connect()) >= 0) {
+                if (fd >= 0 || (fd = d1090_connect()) >= 0) {
                     snprintf(held, sizeof(held), "%s", usb);
                     held_num = usb_devnum(usb);
                     set_dev("127.0.0.1:30002", receivers[rx].name);
@@ -454,7 +456,7 @@ static void *rx_thread(void *arg) {
             } else {
                 state = ADSB_RX_OPENING;
             }
-            sleep(2);
+            sleep(1);                           /* looked for each second: a swap is seen at once */
             continue;
         }
         if (adsb_now() - looked >= 1.0) {       /* still the receiver it opened, where it was */
