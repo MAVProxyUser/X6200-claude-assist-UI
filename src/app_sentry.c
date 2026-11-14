@@ -283,7 +283,8 @@ static struct {
 
 /* The bands the stick takes: in C, any it can tune when one is plugged in (its RX column says RTL, LISTEN opens F on
  * it), and those only it reaches (above the X6200's own receiver, without a WR12) always */
-#define RTL_BLUE "1E6FD9"       /* Xiegu's blue for its WR12 logo: the stick's, the ADS-B receiver's, the WR12's */
+static char tag_hex[8] = "E07020";      /* the tags' colour (RTL, ADS-B, WR12, RX): the 3D picture's orange, set from
+                                          * the theme at the Sentry's start (construct_cb) */
 static bool sdr_here;           /* an RTL-SDR on USB (adsb_rx_sdr_present), looked at every 2 s */
 static bool adsb_here;          /* an ADS-B receiver on USB, or AIRSPACE decoding (the stick's dump1090) */
 static bool wr12_here;          /* the WR12 on HOST, found and set up */
@@ -346,7 +347,7 @@ static const decoder_t decoders[] = {
 #define DECODERS_N N_OF(decoders)
 
 /* The tables' rows, in the monospaced font: their heads take the same format */
-#define BAND_ROW "%c%-8.8s %-11.11s %-24.24s %-5.5s %-26.26s %-13.13s %s"   /* 97 of the row's 97 at most */
+#define BAND_ROW "%c%-8.8s %-11.11s %-24.24s %-5.5s %-24.24s %-13.13s %s"   /* 97 of the row's 97 at most: RX 5 wide (X6200) */
 #define DEC_ROW  " %-12s %-9s %-5s %-26.26s %s"     /* C's columns in C's order: 71 of the row's 72 at most */
 
 /* ---- State ---- */
@@ -1170,11 +1171,21 @@ static lv_obj_t *screen_obj(void) {
 /* ---- Showing the state ---- */
 
 static const char *titles[SCR_N] = {"MF/HF/VHF SPECTRUM", "SCAN CONFIGURATION",
-                                    "BAND INTELLIGENCE", "DECODER SENTRY", "SYSTEM CONTROL", "VHF/UHF SPECTRUM",
+                                    "BAND INTELLIGENCE", "DECODER SENTRY", "SYSTEM CONTROL", "HF/VHF/UHF SPECTRUM",
                                     "SIGNAL LOG", "WALKIE TALKIE"};
 
+/* The battery's % as it runs down, in the 3D picture's own ramp (d3_pal, deep orange to yellow): the usual colour
+ * over 30%, yellow at 30, orange at 20, the ramp's deep orange-red at 15, the theme's red under; 0 the usual */
+static uint32_t batt_rgb(int cap) {
+    if (cap > 30) return 0;
+    if (cap < 15) return lv_color_to32(TC(err)) & 0xffffff;
+    int i = cap >= 20 ? 128 + (cap - 20) * 127 / 10 : 64 + (cap - 15) * 64 / 5;
+
+    return d3_pal[i < 0 ? 0 : i > 255 ? 255 : i] & 0xffffff;
+}
+
 static void show_head(void) {
-    char       f[24], t[16], tc[24] = "";
+    char       f[24], t[16], tc[32] = "";
     time_t     now = time(NULL);
     struct tm  tm;
     int32_t    fq  = cparam_i_get(cfg_fg_freq);
@@ -1198,8 +1209,11 @@ static void show_head(void) {
         if (b > 1 || e > 1) l_bat = b, l_ext = e, l_cap = cp, l_chg = ch;
     }
     const char *icon = "";
+    uint32_t bc = 0;
     if (l_bat >= 3) {
-        snprintf(tc + strlen(tc), sizeof(tc) - strlen(tc), " %d%%", l_cap);
+        bc = batt_rgb(l_cap);
+        if (bc) snprintf(tc + strlen(tc), sizeof(tc) - strlen(tc), " #%06X %d%%#", (unsigned)bc, l_cap);
+        else snprintf(tc + strlen(tc), sizeof(tc) - strlen(tc), " %d%%", l_cap);
         icon = l_chg && l_cap < 100 ? LV_SYMBOL_CHARGE : l_ext >= 3 ? SYMBOL_PLUG
              : l_cap > 80 ? LV_SYMBOL_BATTERY_FULL : l_cap > 55 ? LV_SYMBOL_BATTERY_3 : l_cap > 30 ? LV_SYMBOL_BATTERY_2
              : l_cap > 10 ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_EMPTY;
@@ -1209,8 +1223,10 @@ static void show_head(void) {
 
     /* The devices on USB, at the end in Xiegu's blue (its WR12 logo): the stick, an ADS-B receiver, the WR12 */
     char dev[96];
-    snprintf(dev, sizeof(dev), "%s%s%s", sdr_here ? "  #" RTL_BLUE " RTL#" : "", adsb_here ? "  #" RTL_BLUE " ADS-B#" : "",
-             wr12_here ? "  #" RTL_BLUE " WR12#" : "");
+    dev[0] = 0;
+    if (sdr_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s RTL#", tag_hex);
+    if (adsb_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s ADS-B#", tag_hex);
+    if (wr12_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s WR12#", tag_hex);
 
     char pre[160];
 
@@ -1231,11 +1247,12 @@ static void show_head(void) {
     snprintf(line, sizeof(line), "%s%s%s", pre, icon[0] ? "   " : "", dev);
     lv_label_set_text(status_l, line);
     lv_label_set_text(batt_l, icon);
+    lv_obj_set_style_text_color(batt_l, bc ? lv_color_hex(bc) : amb, 0);
     if (icon[0]) {
         const lv_font_t *fn = &pixel_16;
         lv_coord_t       ls = lv_obj_get_style_text_letter_space(status_l, 0);
         lv_coord_t       w  = lv_txt_get_width(line, strlen(line), fn, ls, LV_TEXT_FLAG_RECOLOR);
-        lv_coord_t       p  = lv_txt_get_width(pre, strlen(pre), fn, ls, LV_TEXT_FLAG_NONE);
+        lv_coord_t       p  = lv_txt_get_width(pre, strlen(pre), fn, ls, LV_TEXT_FLAG_RECOLOR);
 
         lv_obj_set_pos(batt_l, 60 + (SW - 120 - w) / 2 + p + 6, 27);
     }
@@ -1522,9 +1539,12 @@ static void show_bands(void) {
         else
             snprintf(mhz, sizeof(mhz), "%.1f-%.1f", bands[i].lo / 1000.0, bands[i].hi / 1000.0);
         band_now(i, now, sizeof(now));
+        char rx[24];                    /* which radio takes it: the stick (in the tags' orange) or the X6200 */
+        if (band_uses_rtl(i)) snprintf(rx, sizeof(rx), sdr_here ? "#%s RTL#" : "RTL", tag_hex);
+        else snprintf(rx, sizeof(rx), "%s", cfg_is_valid_hw_freq(bands[i].listen_hz) ? "X6200" : "");
         snprintf(s, sizeof(s), BAND_ROW, band_rt[i].sweep ? '*' : ' ',
                  bands[i].name, mhz, bands[i].hear, best_name(bands[i].when), bands[i].ant, now,
-                 band_uses_rtl(i) ? (sdr_here ? "#" RTL_BLUE " RTL#" : "RTL") : "");
+                 rx);
         lv_label_set_text(bd_row_l[r], s);
         lv_obj_set_style_bg_opa(bd_row_l[r], i == band_sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(bd_row_l[r], i == band_sel ? ink : amb, 0);
@@ -3199,9 +3219,12 @@ static void show_glog(void) {
         char n[8];
         snprintf(n, sizeof(n), "%d", h->times);
         snprintf(bn, sizeof(bn), "%s%s", in ? "" : "~", bi >= 0 ? bands[bi].name : "-");
+        char rxs[24];
+        if (h->rtl) snprintf(rxs, sizeof(rxs), sdr_here ? "#%s RTL#" : "RTL", tag_hex);
+        else snprintf(rxs, sizeof(rxs), "X6200");
         snprintf(s, sizeof(s), LOG_ROW, i == g_on ? '>' : ' ', f, bn,
                  h->what, bi >= 0 ? best_name(bands[bi].when) : "", bi >= 0 ? bands[bi].ant : "", now, last, n,
-                 h->rtl ? (sdr_here ? "#" RTL_BLUE " RTL#" : "RTL") : "X6200");
+                 rxs);
         lv_label_set_text(lg_row_l[r], s);
     }
     if (!nhits) {
@@ -4860,8 +4883,13 @@ static void show_walkie(void) {
         lv_label_set_text(wui->freq_l, fr);
         localtime_r(&now, &tm);
         strftime(hm, sizeof(hm), "%H:%M %Z", &tm);
+        uint32_t bc = l_bat > 1 ? batt_rgb(l_cap) : 0;     /* the title bar's colours as it runs down */
+        char     pwc[64];
+
+        if (bc) snprintf(pwc, sizeof(pwc), "#%06X %s#", (unsigned)bc, pw1);
+        else snprintf(pwc, sizeof(pwc), "%s", pw1);
         lv_label_set_text_fmt(wui->info_l, "LINK    %s  %s\nPOWER   %s\n        %s\nSYSTEM  %s  %s\nTIME    %s",
-                              lk, tx, pw1, pw2, sy1, sy2, hm);
+                              lk, tx, pwc, pw2, sy1, sy2, hm);
         lv_label_set_text(wui->ch.opt[0], nm);
     } else {
         opt_set(&wui->ch, 0, fr, 0);
@@ -5002,6 +5030,7 @@ static void build_walkie_portrait(void) {
     /* the radio's state, a word for what was refused */
     rect(g_scr, P_X, 690, P_W, 104, 3, false);
     u->info_l = label(g_scr, &pixel_16, amb, P_X + 8, 696, P_W - 16, LV_TEXT_ALIGN_LEFT, "");
+    lv_label_set_recolor(u->info_l, true);      /* the battery's line coloured as it runs down */
     u->msg_l  = label(g_scr, &pixel_16, amb, P_X + 8, 776, P_W - 16, LV_TEXT_ALIGN_LEFT, "");
 }
 
@@ -5109,6 +5138,7 @@ static void construct_cb(lv_obj_t *parent) {
         uint32_t   s3[] = {lv_color_to32(lv_color_mix(deep, ink, 120)) & 0xffffff, lv_color_to32(deep) & 0xffffff,
                            lv_color_to32(orange) & 0xffffff, theme_hex(TC_accent), theme_hex(TC_accent_soft)};
         theme_ramp_palette(s3, 5, 0, d3_pal);
+        snprintf(tag_hex, sizeof(tag_hex), "%06X", (unsigned)(lv_color_to32(orange) & 0xffffff));    /* the tags */
     }
     scr_h = 480 - KEYS_H - 6 - LEGEND_H;  /* over the radio's buttons: the Sentry draws its own (F1-F5 still reach them) */
 

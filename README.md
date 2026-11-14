@@ -40,8 +40,8 @@ turned with the MFK's inner ring, and SCAN CFG beside the two spectrum screens:
   was last heard and how often, and which radio heard it. The MFK goes through them and each plays on its own radio,
   switching between the two by itself; **F4 SCAN** goes through the list by itself, holding on whatever is busy.
 - **D BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry last heard
-  there. The airband, 2 m, marine VHF, NOAA weather, 70 cm and GMRS are in it too; its **RX** column says RTL (in
-  blue) for every band the RTL-SDR takes, and LISTEN opens those on B. **F1 SCAN** sets the band chosen on its
+  there. The airband, 2 m, marine VHF, NOAA weather, 70 cm and GMRS are in it too; its **RX** column names the radio
+  that takes each band: X6200, or RTL (in the spectrum's orange) for the stick's, and LISTEN opens those on B. **F1 SCAN** sets the band chosen on its
   radio and scans it end to end (A for the X6200's, B for the stick's).
 - **E DECODE**: the decoders and the frequencies they work on, each a key away.
 - **F SYSTEM**: the rest of the radio in the same look: Settings, the apps, the digital modes, AIRSPACE,
@@ -55,8 +55,9 @@ turned with the MFK's inner ring, and SCAN CFG beside the two spectrum screens:
   comes by itself when the VFO is turned), SWEEP through the marked bands, STEP, and the signal locked on (HOLD,
   NEXT, REC, IGNORE); from B, the stick's GAIN, DWELL, STEP and SQUELCH.
 
-The title bar shows what is plugged in, in Xiegu's blue: **RTL**, **ADS-B**, **WR12**, and after the processor's
-temperature the battery's charge with a bolt while it charges. GEN shows the controls on
+The title bar shows what is plugged in, in the orange of the spectrum's peaks: **RTL**, **ADS-B**, **WR12**, and after
+the processor's temperature the battery's charge with a bolt while it charges, yellow from 30%, orange at 20% and red
+from 15% down. GEN shows the controls on
 every screen. The Sentry's look is also a theme for the whole radio: Settings, the
 on-screen keyboard, the apps and their tables all draw in amber.
 
@@ -189,7 +190,7 @@ adapter's address are blanked out. The S-meter's S1 and -121.0 are the 1.0.7 bas
 | ![A X6200](docs/readme/a_x6200.png) **A X6200**: the screen the radio starts in | ![A, split](docs/readme/a_split.png) **F3 VIEW SPLIT**: the X6200 above, the RTL-SDR below |
 | ![B VHF/UHF](docs/readme/b_vhf.png) **B VHF/UHF**: the RTL-SDR's screen, set up as A is | ![C LOG](docs/readme/c_log.png) **C LOG**: what the scans locked on, each heard on its own radio |
 | ![SCAN CFG](docs/readme/scan_cfg.png) **SCAN CFG** from A: the modes, the sweep, the lock | ![SCAN CFG, B](docs/readme/scan_cfg_b.png) **SCAN CFG** from B: the stick and its scan |
-| ![D BANDS](docs/readme/d_bands.png) **D BANDS**: what each band carries; RX says RTL in blue | ![E DECODE](docs/readme/e_decode.png) **E DECODE**: the decoders and their frequencies |
+| ![D BANDS](docs/readme/d_bands.png) **D BANDS**: what each band carries; RX says which radio | ![E DECODE](docs/readme/e_decode.png) **E DECODE**: the decoders and their frequencies |
 | ![F SYSTEM](docs/readme/f_system.png) **F SYSTEM**: the rest of the radio | ![Help](docs/readme/sentry_help.png) **GEN**: the controls |
 | ![G WALKIE](docs/readme/g_walkie.png) **G WALKIE**, held up: channel 19, the voiceprint, the meters | ![AIRSPACE](docs/readme/f_airspace.png) **AIRSPACE**: ADS-B from a GNS 5890, a microADSB or an RTL-SDR |
 

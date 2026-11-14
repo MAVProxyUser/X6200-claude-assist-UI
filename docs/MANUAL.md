@@ -652,10 +652,13 @@ last seconds, the strongest signals named over it and the screen's channel brack
   of them is watched for SAME headers, the bursts the National Weather Service sends before each alert and test.
   An alert takes the title of every Sentry screen, blinking, for its duration (15 minutes at least):
   `WX ALERT: TORNADO WARNING`, the rest in a message. Each is kept in `/mnt/wx_alerts.log`.
-- The title bar names what is on USB in Xiegu's blue (its WR12 logo's): **RTL** for an RTL-SDR, **ADS-B** for an
-  ADS-B receiver (a GNS 5890 or microADSB, or dump1090 running), **WR12** for a ready WR12. After the processor's
-  temperature it gives the battery's charge and an icon: the bolt while it charges, the plug on a supply without
-  charging (full, Charger not On, or a supply under 12 V), the battery's level on the battery (`51C 34%`).
+- The title bar names what is on USB in the orange of the 3D picture's peaks (the theme's own): **RTL** for an
+  RTL-SDR, **ADS-B** for an ADS-B receiver (a GNS 5890 or microADSB, or dump1090 running), **WR12** for a ready WR12.
+  After the processor's temperature it gives the battery's charge and an icon: the bolt while it charges, the plug on
+  a supply without charging (full, Charger not On, or a supply under 12 V), the battery's level on the battery
+  (`51C 34%`). As the battery runs down the two take the 3D picture's colours: yellow at 30%, orange at 20%, its
+  deep orange-red at 15% and the theme's red under that (G's POWER line too). B's title is `HF/VHF/UHF SPECTRUM`,
+  what the stick takes in (24 MHz to 1.7 GHz).
 
 ### SCAN CFG
 
@@ -680,7 +683,7 @@ MFK's push) on the X6200, B's scan pictures' strongest on the stick. The same si
 X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`).
 
 - Its columns: FREQ, BAND, WHAT IT WAS, BEST, ANTENNA and NOW (D's for the band), LAST, SEEN, RX (X6200, or RTL in
-  blue). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest
+  the tags' orange). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest
   band's columns, marked `~`: 26.835 MHz, below CB's channel 1, is `~11 M CB` with CB's BEST, ANTENNA and NOW. A's
   BAND box says `NEAR 11 M CB` there.
 - **WHAT IT WAS** is what the frequency is known for, not a decoding of the signal: on the X6200 a time station (WWV,
@@ -701,8 +704,8 @@ X6200, half a channel on the stick) moves up with its count. Up to 64, kept on D
 - **D BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry heard there
   last. The bands: the ham bands (60 m too), the broadcast bands, CB, FM, the marine bands the weather decoders use
   (SHIP MF, 4, 6, 8, 12, 16; UTIL 9 for NOAA's Boston fax on 9110), and the stick's: the airband, 2 m, marine VHF,
-  NOAA weather, 70 cm and GMRS. **RX** says RTL (blue with a stick plugged in) for each band the RTL-SDR takes:
-  with a stick, every band from 24 MHz up. **F1 SCAN** sets the band chosen on its radio and scans it end to end
+  NOAA weather, 70 cm and GMRS. **RX** names the radio that takes each band: RTL (in the tags' orange with a stick
+  plugged in) for the stick's, with a stick every band from 24 MHz up, and X6200 for the rest it tunes. **F1 SCAN** sets the band chosen on its radio and scans it end to end
   there: the X6200's on A (its F1 scan, on that band), the stick's on B (from the band's low end, heard). F2
   (LISTEN) tunes the X6200 to the band and goes to A, or opens B on it for a stick band; F3 puts it in or out of the
   SWEEP; F4 and F5 do nothing here.
