@@ -736,8 +736,12 @@ written through to the card before it replaces the last copy, so a power cut kee
 
 The radio as a walkie-talkie across both receivers, in the same look, **held up**: G turns the screen to portrait
 (480 x 800, as the Walkie app does), the F keys' names down the left edge where the keys then are, F1 at the top, and
-from the top down (its letter G stays where every screen has its letter, at the display's top left: held up, the
-top right of WALKIE TALKIE):
+from the top down:
+
+- **The title bar**, as every screen has one: XIEGU X6200 WALKIE TALKIE, and under it the transmitter's lock (RX
+  ONLY, TX ARMED), the time, the processor's temperature, the battery's % and icon (coloured as it runs down) and the
+  devices on USB. Its letter G stays where every screen has its letter, at the display's top left (held up, the top
+  right of the bar), turned a quarter to the right: upright with the radio lying as for the other screens.
 
 - **Which radio**: `VIA X6200`, or `VIA RTL-SDR  RECEIVE ONLY` (RTL-SDR in the tags' orange) for a channel the stick
   serves; then the channel big, its group (CB EMERGENCY for CB 9, CB TRUCKERS for 19, MURS, FRS/GMRS...), its
@@ -757,24 +761,37 @@ top right of WALKIE TALKIE):
 
 | Group | Channels | Radio | Mode |
 |---|---|---|---|
+| Every band of D's under CB (SHIP MF, AM BC, 160 M, 80 M ... 15 M, 12 M) | 1: where D listens in it (720 AM, 1.900 LSB, 7.150 LSB, 14.200 USB, 10.000 WWV...) | X6200 | the band's |
 | CB | 1 to 40 (home 19) | X6200 | AM |
+| 10 M | 1: 28.400 | X6200 | SSB |
 | 10 M FM | 29.600 calling | X6200 | FM |
+| 6 M | 1: 50.125 | X6200 | SSB |
 | 6 M FM | 52.525 calling | X6200 | FM |
-| MURS | 1 to 5 (151.820 to 154.600) | RTL-SDR | FM |
+| FM BC | 1: 92.3 | RTL-SDR | WFM |
+| AIR | 1: 121.5 | RTL-SDR | AM |
 | 2 M | 146.520, 146.550, 146.580 | RTL-SDR | FM |
+| MURS | 1 to 5 (151.820 to 154.600) | RTL-SDR | FM |
 | MARINE | 16, 09, 13, 22A | RTL-SDR | FM |
 | NOAA WX | WX1 to WX7 | RTL-SDR | FM |
+| 70 CM | 1: 446.000 | RTL-SDR | FM |
 | FRS/GMRS | 1 to 22 | RTL-SDR | FM |
 
-- **F1 CH -**, **F2 CH +** (the MFK too) go through the whole list, the radio changing by itself where the list
-  crosses from the X6200's channels to the stick's; on a stick channel the VFO knob does the same. The MFK's push
-  goes to CB 19.
-- **F3 GROUP**: the next group, at its home channel (CB 19, MARINE 16, the first of the others).
-- **F4 MODE**: the next of the modes, a table the walkie keeps (AM, FM, SSB for now; a mode such as DMR is a row
-  more, with what each radio does for it). Only the modes the channel's radio has: the stick has AM and FM, not SSB.
+So every band has a channel to start on, and **G is always on a channel**: opened with the X6200's dial on a
+channel of the list, on that one; with the dial anywhere else (A tuned it), on the starting channel of the dial's
+band (of the nearest band between two). While G shows, A's scan, sweep and lock wait (the dial is the channel's), and
+a dial moved from outside (TCI, the browser) onto another channel takes G there.
+
+- **F1 CH -**, **F2 CH +**, the **VFO knob** and the MFK go through the whole list a channel a click, the radio
+  changing by itself where the list crosses from the X6200's channels to the stick's: every CB channel is a click
+  away, and the dial never stops between two. The MFK's push goes to CB 19.
+- **F3 GROUP** and **BAND UP**: the next group, at its home channel (CB 19, MARINE 16, the first of the others);
+  **BAND DOWN** the one before. G stays shown.
+- **F4 MODE**: the next of the modes, a table the walkie keeps (AM, FM, SSB, WFM for now; a mode such as DMR is a
+  row more, with what each radio does for it). Only the modes the channel's radio has: the stick has AM, FM and WFM,
+  not SSB; the X6200 AM, FM and SSB.
   SSB is single sideband: AM's carrier and one of its two sidebands left out, the power all in the voice that is
-  left; USB from 10 MHz up, LSB under. A group's channels start in its own mode; a mode chosen stays until another
-  group.
+  left; LSB on 160, 80 and 40 m as hams use it, USB everywhere else (60 m, the ship and utility stations, 20 m up).
+  A group's channels start in its own mode; a mode chosen stays until another group.
 - **A/B** arms the X6200's transmitter for PTT (as on A), **F5** locks it again (or says it is locked); a stick
   channel cannot be armed (F5 says RX only). Leaving G for any screen but A locks it.
 

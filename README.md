@@ -50,8 +50,10 @@ screens:
   radio starts in. The title says the release, the GUI's commit and the base's version; A's says what its scope
   takes in (`MF/HF/VHF SPECTRUM`).
 - **G WALKIE**, held up (portrait): a walkie-talkie across both radios: CB, 10 m and 6 m FM on the X6200, MURS,
-  2 m, marine, NOAA weather and FRS/GMRS on the stick, CH-/CH+ going from one radio to the other by itself and the
-  screen saying which (VIA X6200, VIA RTL-SDR); GROUP, MODE (AM, FM, SSB; a table, more to come), a **voiceprint**
+  2 m, marine, NOAA weather and FRS/GMRS on the stick, and a starting channel for every other band, so G is always
+  on a channel; CH-/CH+ and the VFO knob going from one radio to the other by itself and the
+  screen saying which (VIA X6200, VIA RTL-SDR); GROUP (BAND UP/DOWN too), MODE (AM, FM, SSB, WFM; a table, more to
+  come), the title bar as on the other screens, a **voiceprint**
   of what is heard (a 0-4 kHz sonogram scrolling across), the S-meter and the audio's level, the battery, the
   processor's temperature. A/B arms PTT on the X6200's channels.
 - **SCAN CFG** (F5 on A or B, on no ring): A's scan settings and its lock: AUTO-SCAN or SEMI-AUTO (MAN-OVERRIDE
