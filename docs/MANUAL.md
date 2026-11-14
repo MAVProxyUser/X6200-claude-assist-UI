@@ -805,8 +805,8 @@ from, it stays away till the receivers change again. With no receiver at all its
 Its receiver on the HOST port: a GNS 5890, a microADSB, or an RTL-SDR
 decoded by dump1090-fa (in the image). A GNS 5890 or microADSB keeps listening when it is closed; an RTL-SDR is
 AIRSPACE's only while its screen is open, the Sentry's the rest of the time: the stick's daemon tunes it to
-1090 MHz and hands dump1090 its samples, so the stick itself is never closed for it. The VFO knob sets the range,
-the MFK chooses an aircraft, a tap chooses one on the scope.
+1090 MHz and hands dump1090 its samples, so the stick itself is never closed for it. The VFO knob (or F1) sets
+the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on the scope.
 
 ## Updating the firmware
 

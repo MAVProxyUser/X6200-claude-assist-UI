@@ -98,8 +98,11 @@ static dialog_t dialog = {
 
 dialog_t *dialog_adsb = &dialog;
 
-/* The settings: the scope's range, how long history stays */
-static const int         ranges[] = {5, 10, 25, 50, 100, 150, 250};
+/* The settings: the scope's range, how long history stays. The range is kept as an index into ranges[] in the order
+ * they came: 0.5 and 1 NM were added after the rest, so a range kept before means what it did. F1 and the VFO go
+ * through them by size (by_size) */
+static const double      ranges[] = {5, 10, 25, 50, 100, 150, 250, 0.5, 1};
+static const int         by_size[] = {7, 8, 0, 1, 2, 3, 4, 5, 6};
 static const int         decays[] = {0, 60, 120, 300, 600, 1800, 3600, -1};    /* s; 0 OFF, -1 HOLD */
 static const char *const decay_names[] = {"OFF", "1 MIN", "2 MIN", "5 MIN", "10 MIN", "30 MIN", "60 MIN", "HOLD"};
 #define N_RANGES (int)(sizeof(ranges) / sizeof(ranges[0]))
@@ -121,7 +124,16 @@ static char         c_from[40];     /* where the centre comes from, said in the 
 
 #define FIX_MAX_S 600               /* a GPS or phone position this recent is the centre */
 
-static int range_nm(void) { return ranges[param_i_get(cfg_adsb_range)]; }
+static double range_nm(void) { return ranges[param_i_get(cfg_adsb_range)]; }
+
+/* The range's place by size: 0 the shortest */
+static int range_pos(void) {
+    int r = param_i_get(cfg_adsb_range);
+
+    for (int i = 0; i < N_RANGES; i++)
+        if (by_size[i] == r) return i;
+    return 0;
+}
 static int decay_s(void) { return decays[param_i_get(cfg_adsb_decay)]; }
 
 /* ---- Pixels ---- */
@@ -502,8 +514,10 @@ static void show_scope_words(double now, int nlive) {
     double r = range_nm();
     for (int k = 0; k < 4; k++) {
         double v = r * (k + 1) / 4;
-        if (v == floor(v)) lv_label_set_text_fmt(ring_l[k], "%d", (int)v);
-        else lv_label_set_text_fmt(ring_l[k], "%.1f", v);
+        char   t[16];
+
+        snprintf(t, sizeof(t), "%g", v);                /* 37.5, 0.125: libc's %g, not LVGL's printf */
+        lv_label_set_text(ring_l[k], t);
     }
     (void)now;
 }
@@ -572,7 +586,7 @@ static const char *f_label(int i) {
     static char s[5][24];
 
     switch (i) {
-        case 0: snprintf(s[0], sizeof(s[0]), "RANGE\n%d NM", range_nm()); break;
+        case 0: snprintf(s[0], sizeof(s[0]), "RANGE\n%g NM", range_nm()); break;
         case 1: snprintf(s[1], sizeof(s[1]), "DECAY\n%s", decay_names[param_i_get(cfg_adsb_decay)]); break;
         case 2: snprintf(s[2], sizeof(s[2]), "TRACKS\n%s", param_i_get(cfg_adsb_trails) ? "ON" : "OFF"); break;
         case 3: snprintf(s[3], sizeof(s[3]), "CLEAR\nHISTORY"); break;
@@ -581,11 +595,12 @@ static const char *f_label(int i) {
     return s[i];
 }
 
+/* d places by size, shorter or longer */
 static void set_range(int d) {
-    int r = param_i_get(cfg_adsb_range) + d;
+    int r = range_pos() + d;
 
     if (r < 0 || r >= N_RANGES) return;
-    param_i_set(cfg_adsb_range, r);
+    param_i_set(cfg_adsb_range, by_size[r]);
     show_keys();
     refresh();
 }
@@ -615,7 +630,7 @@ static void fkey(int k) {
         return;
     }
     switch (k) {
-        case 0: set_range(param_i_get(cfg_adsb_range) + 1 < N_RANGES ? 1 : -(N_RANGES - 1)); return;
+        case 0: set_range(range_pos() + 1 < N_RANGES ? 1 : -(N_RANGES - 1)); return;
         case 1: param_i_set(cfg_adsb_decay, (param_i_get(cfg_adsb_decay) + 1) % N_DECAYS); break;
         case 2: param_i_set(cfg_adsb_trails, !param_i_get(cfg_adsb_trails)); break;
         case 3:
@@ -836,7 +851,7 @@ static void build(void) {
                    "AIRSPACE: AIRCRAFT ON 1090 MHZ, FROM AN ADS-B RECEIVER ON USB (AN RTL-SDR STICK, GNS 5890 OR MICROADSB).\n\n"
                    "AN ARROW IS AN AIRCRAFT HEARD IN THE LAST MINUTE, POINTING ALONG ITS TRACK; A RING GROWS "
                    "ROUND IT FOR EACH MESSAGE. A SQUARE IS A GHOST: NOT HEARD FOR A MINUTE, FADING WITH ITS TRACK.\n\n"
-                   "F1 / VFO: RANGE OF THE SCOPE.  F2: DECAY, HOW LONG GHOSTS AND TRACKS STAY: OFF, 1 TO 60 "
+                   "F1 / VFO: RANGE OF THE SCOPE, 0.5 TO 250 NM.  F2: DECAY, HOW LONG GHOSTS AND TRACKS STAY: OFF, 1 TO 60 "
                    "MINUTES, OR HOLD TILL CLEARED.  F3: TRACKS ON OR OFF.  F4: FORGET THE HISTORY.  F5: BACK TO "
                    "THE SENTRY.  THE MFK'S RING: THE SENTRY'S A NEXT, ITS G BEFORE (THIS IS ITS H).\n\n"
                    "MFK OR A TAP CHOOSES AN AIRCRAFT. A GNS 5890 OR MICROADSB GOES ON LISTENING WHEN THIS SCREEN CLOSES; "
