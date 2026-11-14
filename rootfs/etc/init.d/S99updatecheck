@@ -4,7 +4,8 @@
 #
 #   - OpenX6X00, both radios: x6100-update check asks this fork's GitHub releases (/usr/share/x6100/update-repo) for
 #     a newer version, into /mnt/update/check.json. Only this radio's own bundle counts: an X6200 never looks at the
-#     X6100's, nor the other way round. The GUI says a newer one once (Settings > Info > Update installs it).
+#     X6100's, nor the other way round. The GUI fetches a newer one's bundle and asks once whether to apply it
+#     (its version, commit and MD5 shown; No leaves it for Settings > Info > Update).
 #   - The base firmware, the X6200 only: x6x00-base-fetch check reads xiegu.eu's X6200 downloads and compares them
 #     with the releases known and the base's version (/tmp/x6x00-base-version, from the GUI), into
 #     /mnt/base_update/check.json. The GUI says a newer one once (E SYSTEM > BASE FIRMWARE writes it).

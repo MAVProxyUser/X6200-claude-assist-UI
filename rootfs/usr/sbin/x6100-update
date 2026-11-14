@@ -5,7 +5,8 @@
 # on stdout, exit 0/1.
 #
 #   status                   {"running":..,"pending":..,"last":..,"image":{..}}
-#   check                    {"running":..,"latest":..,"url":..,"newer":bool,"image_needed":bool,..}   (GitHub Releases)
+#   check                    {"running":..,"latest":..,"url":..,"newer":bool,"commit":..,"image_needed":bool,..}
+#                            (GitHub Releases; commit: the newer release's tag's commit, for the GUI's question)
 #
 # The card image: what an update cannot carry (the kernel, its modules, U-Boot) comes with a card image. Each
 # version says which image level it wants per radio (/usr/share/x6100/image-required); the image build stamps
@@ -401,7 +402,20 @@ def cmd_check(args):
     out["notes"] = (rel.get("body") or "")[:2000]
     out["newer"] = bool(tag and asset and vtuple(tag) > vtuple(out["running"]))
     out["image_needed"], out["image_note"], out["image_url"] = False, "", None
+    out["commit"] = ""
     if out["newer"]:
+        # The commit the release was built from, which the GUI shows before it asks to apply it: the tag's, as a
+        # bare SHA (the commit's JSON would carry its whole diff); none is no harm
+        try:
+            req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/commits/v{tag}",
+                                         headers={"User-Agent": f"OpenX6X00/{running_version()}",
+                                                  "Accept": "application/vnd.github.sha"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                sha = r.read(64).decode(errors="replace").strip()
+            if len(sha) == 40 and all(c in "0123456789abcdef" for c in sha):
+                out["commit"] = sha
+        except Exception:
+            pass
         # Does the newer release also want a newer card image for this radio? Its own image-required file, at
         # its tag; no answer is no warning
         try:

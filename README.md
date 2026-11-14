@@ -26,23 +26,31 @@ Developed and tested on an X6200. The image for the X6100 builds from the same s
 ### The Sentry
 
 The X6200's home screen: the radio starts in it, and every app or menu opened from it comes back to it when it
-closes. **Transmit is locked while it is open**: PTT, KEY, MSG and the antenna tuner are refused. Six screens,
+closes. **Transmit is locked while it is open**: PTT, KEY, MSG and the antenna tuner are refused. Seven screens,
 turned with the MFK's inner ring:
 
-- **A SCAN**: the base's 384 kHz around the dial, the signals in it found, marked and labelled. AUTO-SCAN goes
-  from one to the next by itself, SEMI-AUTO lets the MFK choose, MAN-OVERRIDE is the VFO knob's. BAND stays on one
-  band; SWEEP goes through the bands marked for it.
+- **A SCAN**: the base's 384 kHz around the dial, the signals in it found, marked and labelled. **F1 SCAN** sweeps
+  the band end to end, 360 kHz at a time, and **F2 BAND** chooses the band, as F1 and F2 do on F. F3 MODE:
+  AUTO-SCAN goes from one signal to the next by itself (with the scan on, it stops on what it finds along the
+  band), SEMI-AUTO lets the MFK choose, MAN-OVERRIDE is the VFO knob's. F4 SWEEP goes through the bands marked for
+  it.
 - **B TRACK**: one signal held: what it is, how long it has been on, its level over the noise. Record it, hold it
   or ignore it.
 - **C BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry last heard
-  there.
+  there. The airband, 2 m, marine VHF, NOAA weather, 70 cm and GMRS are in it too; its **RX** column says RTL (in
+  blue) for every band the RTL-SDR takes, and LISTEN opens those on F with the stick on the speaker.
 - **D DECODE**: the decoders and the frequencies they work on, each a key away.
 - **E SYSTEM**: the rest of the radio in the same look: Settings, the apps, the digital modes, AIRSPACE,
   VHF/UHF, the classic radio screen, a UNIX shell on the radio's own screen, the base firmware, and which screen the
   radio starts in. The title says the release, the GUI's commit and the base's version: `SYSTEM CONTROL: v0.3.9.7 c6e93af - base 1.0.8`.
 - **F VHF/UHF**: the RTL-SDR (next section).
+- **G LOG**: every signal A's and F's scans locked on, newest first, with C's columns (BAND, BEST, ANTENNA, NOW),
+  when it was last heard and how often, and which receiver heard it. The MFK goes through them and each plays on
+  its own receiver as it is chosen, the X6200 or the stick, switching between the two by itself. Kept on DATA
+  (`/mnt/sentry_log.txt`).
 
-GEN shows the controls on every screen. The Sentry's look is also a theme for the whole radio: Settings, the
+The title bar shows what is plugged in, in Xiegu's blue: **RTL**, **ADS-B**, **WR12**. GEN shows the controls on
+every screen. The Sentry's look is also a theme for the whole radio: Settings, the
 on-screen keyboard, the apps and their tables all draw in amber.
 
 ### F VHF/UHF: an RTL-SDR as a second receiver
@@ -53,9 +61,13 @@ A generic RTL-SDR stick (an RTL2832U with an R820T, R828D or the like) on the HO
   strongest signals are labelled with what they are where it is known: NOAA WX1 to WX7, AIS, APRS, the ISS,
   marine channel 16, guard 121.500, the airband, weather balloons, the Meteor-M satellites, ISM, GMRS, UAT, ADS-B.
   FM broadcast stations are labelled on their channel (97.900).
-- **F2 PRESET**: NOAA weather, 2 m, 2 m repeaters, the airband, FM broadcast, marine VHF, the weather satellites,
-  the weather balloons, 70 cm, ISM 433, GMRS, ISM 915, UAT 978 and ADS-B 1090. **F3 STEP** sets how far the MFK
-  pans (12.5 kHz to 1 MHz); the MFK's push sets the gain.
+- **F1 SCAN** sweeps the preset's band end to end, a picture at a time, the speaker following each picture's
+  strongest signal. **F2 PRESET**: NOAA weather, 2 m, 2 m repeaters, the airband, FM broadcast, marine VHF, the
+  weather satellites, the weather balloons, 70 cm, ISM 433, GMRS, ISM 915, UAT 978 and ADS-B 1090 (or the band C's
+  LISTEN brought). **F3 STEP** sets how far the MFK pans (12.5 kHz to 1 MHz); the MFK's push sets the gain.
+- **The VOL/SQL/RFG knob** on F: its squelch and RF gain are the stick's. Squelch in dB over the noise (OFF, 1 to
+  40): `SQUELCHED` in place of `LISTENING` while it is shut.
+- F stays as it was left: the band, the tuning, the scan and what was heard come back with it.
 - **F4 VIEW**: RTL (the stick alone), SPLIT (the X6200's own spectrum above, the stick below) or X6200 (the radio
   alone). The stick keeps running in all three.
 - **F5 LISTEN** puts the stick on the speaker in place of the X6200, or gives the speaker back. A tap on a signal
@@ -215,6 +227,10 @@ their amber-on-black screens, as in this clip, "Aliens 1986 Turrets" (Mic Mitja,
 2. **Write it to a microSD card** with [balenaEtcher](https://etcher.balena.io/) and start the radio from it, as
    upstream describes ([README_original.md, Install](README_original.md#install)). Settings and logs live on the
    card's DATA partition (`/mnt`).
+
+**A newer release asks to be applied by itself**: the daily check finds it, the radio fetches the bundle, and a box
+over whatever is on the screen shows its version, the commit it was built from and the bundle's MD5: "Apply it?"
+The MFK chooses Yes or No (No is chosen first) and its press confirms. No leaves it for Settings > Info > Update.
 
 **Settings > Info > Update installs this fork's releases**, from the GitHub repository the image was built from:
 this one for its own images, and a fork's own for a fork's images (the build writes the repository into the image,

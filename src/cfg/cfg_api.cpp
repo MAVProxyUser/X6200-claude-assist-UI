@@ -57,6 +57,7 @@ ParamInt         *cfg_mouse               = nullptr;
 ParamInt         *cfg_rtl_freq            = nullptr;
 ParamInt         *cfg_rtl_gain            = nullptr;
 ParamInt         *cfg_rtl_view            = nullptr;
+ParamInt         *cfg_rtl_sql             = nullptr;
 ParamInt         *cfg_smeter_needle       = nullptr;
 ParamInt         *cfg_smeter_color        = nullptr;
 ParamInt         *cfg_wf_palette          = nullptr;
@@ -270,6 +271,7 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_rtl_freq         = &cfg_sm.p_rtl_freq;
     cfg_rtl_gain         = &cfg_sm.p_rtl_gain;
     cfg_rtl_view         = &cfg_sm.p_rtl_view;
+    cfg_rtl_sql          = &cfg_sm.p_rtl_sql;
     cfg_smeter_needle    = &cfg_sm.p_smeter_needle;
     cfg_smeter_color     = &cfg_sm.p_smeter_color;
     cfg_wf_palette          = &cfg_sm.p_wf_palette;

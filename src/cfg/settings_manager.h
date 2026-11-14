@@ -388,6 +388,9 @@ class SettingsManager {
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_rtl_view{"rtl_view", 0, 0, 2,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Its squelch while listening: dB over the noise floor of its picture, 0 always open (the VOL knob's SQL on F)
+    Parameter<int32_t> p_rtl_sql{"rtl_sql", 0, 0, 40,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_vox_gain{"vox_gain", 0, 0, 100,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_vox_ag{"vox_ag", 0, 0, 100,

@@ -40,6 +40,11 @@ rtl_spec_state_t rtl_spectrum_state(void);
 void rtl_spectrum_listen(int64_t hz, int mode);
 bool rtl_spectrum_listening(void);
 
+/* The squelch while listening: open at db over the noise floor of the stick's picture (the listened channel's
+ * strongest bin over the median), 0 always open. Open says whether it lets the audio through now */
+void rtl_spectrum_squelch(int db);
+bool rtl_spectrum_squelch_open(void);
+
 /* The channel watched for SAME alerts (NOAA Weather Radio, narrow FM), 0 none: within the stick's span only */
 void rtl_spectrum_watch(int64_t hz);
 

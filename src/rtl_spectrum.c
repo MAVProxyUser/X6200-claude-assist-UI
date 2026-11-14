@@ -70,6 +70,13 @@ static pthread_t       player;
 static bool            player_started;
 static atomic_bool     playing;          /* the player has the speaker */
 
+/* The squelch while listening: the channel's strongest bin over the row's noise floor (its median), in dB, at least
+ * sql_db to open (0: always open); it closes SQL_HANG rows after falling 3 dB under that, so a voice's pauses do not
+ * chop it */
+#define SQL_HANG    10          /* rows: half a second */
+static atomic_int      sql_db;
+static atomic_bool     sql_open = true;
+
 /* A write to the helper that cannot end the GUI: one that has just gone gives EPIPE, and its SIGPIPE is taken here,
  * not left to end the process (the GUI keeps the default action) */
 static void quiet_write(int fd, const char *s, size_t n) {
@@ -196,6 +203,53 @@ static bool read_line(int fd, char *s, size_t n, int ms) {
     return true;
 }
 
+static int cmp_float(const void *a, const void *b) {
+    float x = *(const float *)a, y = *(const float *)b;
+
+    return (x > y) - (x < y);
+}
+
+/* A row in: the squelch decided on it (the reader's thread) */
+static void squelch_row(const float *db, uint16_t n, uint32_t rate, int64_t centre) {
+    static float sorted[MAX_BINS];
+    static int   quiet;
+    int          sql = atomic_load(&sql_db), mode = atomic_load(&listen_mode);
+
+    if (!sql || !mode || !n || !rate) {
+        atomic_store(&sql_open, true);
+        quiet = 0;
+        return;
+    }
+    int64_t hz    = atomic_load(&listen_hz), low = centre - (int64_t)rate / 2;
+    int64_t half  = mode == 3 ? 90000 : mode == 2 ? 4000 : 6000;      /* the channel: WFM, AM, NFM */
+    double  per   = (double)rate / n;
+    int     lo    = (int)((hz - half - low) / per), hi = (int)((hz + half - low) / per);
+
+    if (hi < 0 || lo >= n) {            /* not in the picture (a retune on its way): shut */
+        atomic_store(&sql_open, false);
+        return;
+    }
+    if (lo < 0) lo = 0;
+    if (hi >= n) hi = n - 1;
+    float peak = -1e9f;
+    for (int k = lo; k <= hi; k++)
+        if (db[k] > peak) peak = db[k];
+    memcpy(sorted, db, (size_t)n * sizeof(float));
+    qsort(sorted, n, sizeof(float), cmp_float);
+    float over = peak - sorted[n / 2];
+    bool  open = atomic_load(&sql_open);
+
+    if (over >= sql) {
+        open  = true;
+        quiet = 0;
+    } else if (over >= sql - 3) {
+        quiet = 0;                      /* held open: a little under, not gone */
+    } else if (open && ++quiet >= SQL_HANG) {
+        open = false;
+    }
+    atomic_store(&sql_open, open);
+}
+
 static void *spec_thread(void *arg) {
     static uint8_t buf[24 + MAX_BINS * 4];
     (void)arg;
@@ -213,6 +267,16 @@ static void *spec_thread(void *arg) {
             continue;
         }
         adsb_rx_lend(true);             /* AIRSPACE's dump1090 lets the stick go */
+        /* and is gone, its transfers cancelled and the stick closed (up to 8 s, adsb_rx.c d1090_stop), a moment before
+         * the helper opens it: opened while dump1090 still had transfers in flight, the stick sent nothing */
+        bool waited = false;
+        for (int i = 0; i < 100; i++) {
+            adsb_rx_state_t a = adsb_rx_state(NULL, 0);
+            if (a != ADSB_RX_ON && a != ADSB_RX_OPENING) break;
+            waited = true;
+            usleep(100000);
+        }
+        if (waited) usleep(1000000);
 
         int   in_fd = -1, out_fd = -1;
         pid_t p = spawn(&in_fd, &out_fd);
@@ -311,6 +375,7 @@ static void *spec_thread(void *arg) {
             row_seq++;
             row_fresh  = flags & 1;
             pthread_mutex_unlock(&lock);
+            squelch_row(row, n, r, (int64_t)c);     /* row is only written here: read without the lock */
             state = RTL_SPEC_ON;
             if (asked != atomic_load(&want_hz) && (int64_t)c != atomic_load(&want_hz)) {
                 char cmd[32];
@@ -325,7 +390,8 @@ static void *spec_thread(void *arg) {
             static int stalls;
 
             stalls = got_rows ? 0 : stalls + 1;
-            /* Opened twice and nothing sent: the USB host's endpoint is broken, retries would not mend it */
+            /* Opened twice and nothing sent: the USB host's endpoint is broken, retries would not mend it. Nor may the
+             * radio unplug it in software: de-authorizing the stick crashed the MUSB driver (2026-11-14) */
             state = stalls >= 2 ? RTL_SPEC_STALLED : RTL_SPEC_NO_STICK;
             sleep(stalls >= 2 ? 15 : 2);
         }
@@ -400,6 +466,7 @@ bool rtl_spectrum_frame(float *db, uint16_t cap, uint16_t *n, uint32_t *rate, in
 static void *player_thread(void *arg) {
     static int16_t chunk[CHUNK];
     bool           bt = false;
+    float          g  = 1;          /* the squelch's level, 0 shut: eased over 10 ms, no click */
     (void)arg;
 
     for (;;) {
@@ -433,8 +500,18 @@ static void *player_thread(void *arg) {
             ring_len -= CHUNK;
         }
         pthread_mutex_unlock(&ring_lock);
-        if (n) audio_play(chunk, n);
-        else usleep(5000);
+        if (n) {
+            float to = !atomic_load(&sql_db) || atomic_load(&sql_open) ? 1.0f : 0.0f;
+
+            for (int k = 0; k < n; k++) {
+                if (g < to) g = g + 1.0f / 441 > to ? to : g + 1.0f / 441;
+                else if (g > to) g = g - 1.0f / 441 < to ? to : g - 1.0f / 441;
+                chunk[k] = (int16_t)(chunk[k] * g);
+            }
+            audio_play(chunk, n);
+        } else {
+            usleep(5000);
+        }
     }
     return NULL;
 }
@@ -462,6 +539,14 @@ void rtl_spectrum_listen(int64_t hz, int mode) {
 
 bool rtl_spectrum_listening(void) {
     return atomic_load(&listen_mode) != 0;
+}
+
+void rtl_spectrum_squelch(int db) {
+    atomic_store(&sql_db, db < 0 ? 0 : db);
+}
+
+bool rtl_spectrum_squelch_open(void) {
+    return !atomic_load(&sql_db) || atomic_load(&sql_open);
 }
 
 void rtl_spectrum_watch(int64_t hz) {

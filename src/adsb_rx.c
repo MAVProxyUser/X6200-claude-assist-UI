@@ -268,10 +268,13 @@ static bool d1090_alive(void) {
     return true;
 }
 
+/* SIGTERM: dump1090 cancels its transfers and closes the stick. SIGKILL only after 8 s: killed with transfers in flight
+ * (it was after 2 s) it left the radio's USB host (MUSB) broken for the stick, which then opened for the next user
+ * and sent nothing ("THE RTL-SDR SENDS NOTHING"), till it was unplugged; rtl_spectrum.c's helper is ended so too */
 static void d1090_stop(void) {
     if (d1090 <= 0) return;
     kill(d1090, SIGTERM);
-    for (int i = 0; i < 20 && d1090_alive(); i++) usleep(100000);
+    for (int i = 0; i < 80 && d1090_alive(); i++) usleep(100000);
     if (d1090_alive()) kill(d1090, SIGKILL);
     waitpid(d1090, NULL, 0);
     d1090 = -1;
@@ -501,3 +504,44 @@ void adsb_rx_name(char *name, size_t n) {
 uint64_t adsb_rx_bytes(void) { return bytes; }
 
 void adsb_rx_lend(bool on) { atomic_store(&lent, on); }
+
+/* ---- the RTL-SDR between its two users ---- */
+
+/* The USB device name ("3-1") of an RTL-SDR on USB */
+static bool find_sdr(char *usb, size_t n) {
+    DIR           *d = opendir(USB_DEVICES);
+    struct dirent *e;
+    bool           found = false;
+
+    if (!d) return false;
+    while (!found && (e = readdir(d))) {
+        char path[300], v[8], p[8];
+
+        if (e->d_name[0] == '.' || strchr(e->d_name, ':')) continue;
+        snprintf(path, sizeof(path), USB_DEVICES "/%s/idVendor", e->d_name);
+        if (!read_line(path, v, sizeof(v))) continue;
+        snprintf(path, sizeof(path), USB_DEVICES "/%s/idProduct", e->d_name);
+        if (!read_line(path, p, sizeof(p))) continue;
+        for (int r = 0; r < N_RECEIVERS && !found; r++)
+            if (receivers[r].sdr && !strcmp(v, receivers[r].vid) && !strcmp(p, receivers[r].pid)) {
+                snprintf(usb, n, "%s", e->d_name);
+                found = true;
+            }
+    }
+    closedir(d);
+    return found;
+}
+
+bool adsb_rx_receiver_present(void) {
+    char usb[64];
+    int  r = find_stick(usb, sizeof(usb));
+
+    return r >= 0 && !receivers[r].sdr;
+}
+
+bool adsb_rx_sdr_present(void) {
+    char usb[64];
+
+    return find_sdr(usb, sizeof(usb));
+}
+

@@ -35,3 +35,9 @@ uint64_t adsb_rx_bytes(void);
 /* An RTL-SDR lent to another user of the stick (on) or given back (off): lent, dump1090 is stopped within a few
  * seconds and not started again until it comes back. The serial receivers (GNS 5890, microADSB) go on */
 void adsb_rx_lend(bool on);
+
+/* An RTL-SDR on USB, whoever has it */
+bool adsb_rx_sdr_present(void);
+
+/* A receiver of its own on USB (GNS 5890, microADSB), AIRSPACE open or not */
+bool adsb_rx_receiver_present(void);
