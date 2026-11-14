@@ -28,7 +28,8 @@ Developed and tested on an X6200. The image for the X6100 builds from the same s
 The X6200's home screen: the radio starts in it, and every app or menu opened from it comes back to it when it
 closes. **Transmit is locked while it is open**: PTT, KEY, MSG and the antenna tuner are refused; on A and G the
 **A/B key arms the transmitter for PTT** until A/B again or another screen. Seven screens,
-turned with the MFK's inner ring, and SCAN CFG beside the two spectrum screens:
+turned with the MFK's inner ring, AIRSPACE as an eighth (H, between G and A), and SCAN CFG beside the two spectrum
+screens:
 
 - **A X6200** and **B VHF/UHF**: the X6200's spectrum and an RTL-SDR's, one screen set up for each radio: the same
   four boxes (RECEIVER, TUNED, BAND or PRESET, SIGNALS), the same trace over a 3D picture with the signals named
@@ -101,7 +102,8 @@ character by character.
 ADS-B aircraft on a scope around you (a USB GPS, else your QTH locator, else the traffic itself), with their calls,
 heights and tracks, and their history fading out. Its receiver on the HOST port: a GNS 5890, a microADSB, or an
 RTL-SDR decoded by dump1090-fa, which is in the image. An RTL-SDR is AIRSPACE's while its screen is open and the
-Sentry's the rest of the time. F SYSTEM > AIRSPACE, or APP > Airspace.
+Sentry's the rest of the time. The Sentry's ring past G (it is H), F SYSTEM > AIRSPACE, or APP > Airspace; and by
+itself when a GNS 5890 or a microADSB becomes the only ADS-B receiver on USB, the RTL-SDR swapped out for it.
 
 ### Keyboard and mouse
 

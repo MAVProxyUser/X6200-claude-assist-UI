@@ -262,6 +262,7 @@ static void take_alert(const char *t) {
 static void *spec_thread(void *arg) {
     static uint8_t buf[24 + MAX_BINS * 4 + 64];
     int            fd = -1, asked = -1, failed = 0;
+    char           last_st[16] = "";    /* the daemon's last word on the stick: it says it again only when it changes */
     (void)arg;
 
     for (;;) {
@@ -316,6 +317,7 @@ static void *spec_thread(void *arg) {
             asked = k;
         }
         if (!k) state = RTL_SPEC_OFF;
+        else if (state == RTL_SPEC_OFF && last_st[0]) state = daemon_state(last_st);   /* wanted again (AIRSPACE closed) */
 
         struct pollfd p = {.fd = fd, .events = POLLIN};
         int           r = poll(&p, 1, 200);
@@ -325,6 +327,7 @@ static void *spec_thread(void *arg) {
         n = r > 0 ? recv(fd, buf, sizeof(buf) - 1, 0) : -1;
         if (n < 0 && (errno == EINTR || errno == EAGAIN)) continue;
         if (n <= 0) {                   /* the daemon went (told to end, or it died): connected again, or started */
+            last_st[0] = 0;
             pthread_mutex_lock(&lock);
             cmd_fd = -1;
             pthread_mutex_unlock(&lock);
@@ -355,6 +358,7 @@ static void *spec_thread(void *arg) {
                 continue;
             }
             if (got != 5) continue;
+            snprintf(last_st, sizeof(last_st), "%s", st);
             pthread_mutex_lock(&lock);
             snprintf(tuner, sizeof(tuner), "%s", strcmp(tn, "-") ? tn : "");
             pthread_mutex_unlock(&lock);

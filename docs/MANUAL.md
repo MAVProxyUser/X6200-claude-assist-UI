@@ -581,7 +581,8 @@ START IN chooses the classic radio screen instead). Transmit is locked while it 
 refused, and tuning the antenna tuner too, as it transmits; on A and G the A/B key arms the X6200's transmitter for
 PTT (below).
 
-Seven screens on the MFK's inner ring, and SCAN CFG beside the two spectrum screens:
+Eight screens on the MFK's inner ring (H is the AIRSPACE app, between G and A), and SCAN CFG beside the two
+spectrum screens:
 
 | Screen | What it is |
 |---|---|
@@ -592,6 +593,7 @@ Seven screens on the MFK's inner ring, and SCAN CFG beside the two spectrum scre
 | **E DECODE** | The decoders and the frequencies they work on |
 | **F SYSTEM** | Settings, the apps, the modes, the classic radio screen |
 | **G WALKIE** | The radio as a CB walkie-talkie, the voice drawn as it is heard |
+| **H AIRSPACE** | ADS-B aircraft from an RTL-SDR, a GNS 5890 or a microADSB ([AIRSPACE](#airspace)) |
 | SCAN CFG | On no ring: F5 on A or B. That screen's radio's settings (A's: what A had beyond B's look) |
 
 Its controls (GEN shows them, as does a tap on the title):
@@ -600,7 +602,7 @@ Its controls (GEN shows them, as does a tap on the title):
 |---|---|
 | VFO knob | The screen's own radio: on A (and the other screens) the X6200 by hand, the Sentry going to MAN-OVERRIDE and A's scan stopping; on B the stick's channel (heard or not); on C the stick while a stick entry plays |
 | MFK knob | On A and B it pans the picture by SCAN CFG's STEP, its push going to the strongest signal; elsewhere it chooses a band, a frequency, an item, a logged signal, a CB channel. Push: listen, open |
-| MFK inner ring | The screens, A to G and round again |
+| MFK inner ring | The screens, A to H and round again (H is AIRSPACE; its ring comes back to A or G) |
 | VOL/SQL/RFG knob | Volume; push: squelch, push: RF gain, push: volume again. On B the squelch and RF gain are the RTL-SDR's |
 | F1-F5 | The keys along the bottom: on A and B, F1 SCAN, F2 BAND (B: PRESET), F3 VIEW, F4 LISTEN, F5 SCAN CFG |
 | A/B | On A and G: arms the X6200's transmitter for PTT (`X6200 TX ARMED` blinks in A's RECEIVER box, G's lamp says TX ARMED, ON AIR while it transmits), at the power set; the Sentry's scans and AUTO wait meanwhile, so the dial stays put. A/B again, F5 on G, or any screen but A and G locks it again. KEY and MSG stay refused. The radio's own TX rules still apply (its bands and power) |
@@ -727,7 +729,8 @@ written through to the card before it replaces the last copy, so a power cut kee
 
 The radio as a walkie-talkie across both receivers, in the same look, **held up**: G turns the screen to portrait
 (480 x 800, as the Walkie app does), the F keys' names down the left edge where the keys then are, F1 at the top, and
-from the top down:
+from the top down (its letter G stays where every screen has its letter, at the display's top left: held up, the
+top right of WALKIE TALKIE):
 
 - **Which radio**: `VIA X6200`, or `VIA RTL-SDR  RECEIVE ONLY` (RTL-SDR in the tags' orange) for a channel the stick
   serves; then the channel big, its group (CB EMERGENCY for CB 9, CB TRUCKERS for 19, MURS, FRS/GMRS...), its
@@ -795,7 +798,10 @@ microADSB on the HOST port (a hub takes more than one); any can be swapped while
 
 ADS-B aircraft on a scope around your position (a USB GPS, else the QTH locator, else the traffic), their
 calls, heights and tracks, and the history fading out (F2 DECAY, 5 minutes by default). Where: F SYSTEM >
-AIRSPACE (ADS-B), or APP > Airspace. Its receiver on the HOST port: a GNS 5890, a microADSB, or an RTL-SDR
+AIRSPACE (ADS-B), APP > Airspace, or the Sentry's ring past G: AIRSPACE is its H. It opens by itself when a GNS
+5890 or a microADSB becomes the only ADS-B receiver on USB (put in the RTL-SDR's place, plugged in with no RTL-SDR,
+or the RTL-SDR pulled out from beside it); not over a transmission. With no receiver at all its scope asks for one.
+Its receiver on the HOST port: a GNS 5890, a microADSB, or an RTL-SDR
 decoded by dump1090-fa (in the image). A GNS 5890 or microADSB keeps listening when it is closed; an RTL-SDR is
 AIRSPACE's only while its screen is open, the Sentry's the rest of the time: the stick's daemon tunes it to
 1090 MHz and hands dump1090 its samples, so the stick itself is never closed for it. The VFO knob sets the range,

@@ -93,6 +93,7 @@
 #include "dialog_birdie.h"
 #include "app_sentry.h"
 #include "app_adsb.h"
+#include "adsb_rx.h"
 #include "first_start.h"
 #include "control_owner.h"
 #include "kbd_hyper.h"
@@ -1826,12 +1827,36 @@ static void channels_poll_cb(lv_timer_t *t) {
     dialog_channels_poll();
 }
 
+/* A GNS 5890 or a microADSB the only ADS-B receiver on USB (put in the RTL-SDR's place, plugged in with no RTL-SDR, or
+ * the RTL-SDR pulled out from beside it): AIRSPACE, the Sentry's H, opens on it. What is on USB when the GUI starts
+ * opens nothing. Not over a transmission or the first start's guide: it waits for them, as long as the receiver
+ * stays the only one */
+static void receivers_watch_cb(lv_timer_t *t) {
+    static int  was = -1;               /* -1: USB not looked at yet */
+    static bool due;
+    (void)t;
+
+    bool rcv = adsb_rx_receiver_present();      /* the first call starts the looking */
+    if (!adsb_rx_usb_looks()) return;
+    bool only = rcv && !adsb_rx_sdr_present();
+
+    if (was >= 0 && only && !was) due = true;
+    if (!only) due = false;
+    was = only;
+    if (!due || radio_get_state() != RADIO_RX || dialog_type_is_run(dialog_first_start)) return;
+    due = false;
+    if (!dialog_type_is_run(dialog_adsb)) main_screen_start_app(ACTION_APP_ADSB);
+}
+
 static void build(void);
 
 lv_obj_t * main_screen() {
     broadcast_db_init();      /* SWL list for the GENE key, copied to /mnt the first time */
     channels_load();    /* creates channels.json with the defaults when missing */
     lv_timer_create(channels_poll_cb, 2000, NULL);
+#ifdef BOARD_X6200
+    lv_timer_create(receivers_watch_cb, 1000, NULL);
+#endif
 
     freq_lock = subject_i_create(false);
     obj = lv_obj_create(NULL);

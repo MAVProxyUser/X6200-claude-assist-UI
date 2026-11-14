@@ -20,7 +20,17 @@ LIBUSB_TAG=v1.0.26
 [ -d "$SR/usr/lib/arm-linux-gnueabihf" ] || { echo "run tools/cross_x6200/setup.sh first"; exit 1; }
 mkdir -p "$B/inc/libusb-1.0" "$B/out/lib" "$B/out/include" "$B/out/bin"
 
-[ -d "$B/rtl-sdr-blog" ] || git clone -q --depth 1 https://github.com/rtlsdrblog/rtl-sdr-blog.git "$B/rtl-sdr-blog"
+# rtl-sdr-blog at the commit the release's buildroot package takes, with the same patches (a stick pulled out
+# mid-stream left libusb looping for ever in libusb_close)
+RTLSDR_MK=$TOP/buildroot/br2_external/package/rtlsdr-blog/rtlsdr-blog.mk
+RTLSDR_REV=$(sed -n 's/^RTLSDR_BLOG_VERSION = //p' "$RTLSDR_MK")
+if [ ! -d "$B/rtl-sdr-blog" ]; then
+    git clone -q https://github.com/rtlsdrblog/rtl-sdr-blog.git "$B/rtl-sdr-blog"
+    git -C "$B/rtl-sdr-blog" checkout -q "$RTLSDR_REV"
+fi
+for p in "$(dirname "$RTLSDR_MK")"/*.patch; do
+    git -C "$B/rtl-sdr-blog" apply --reverse --check "$p" 2> /dev/null || git -C "$B/rtl-sdr-blog" apply "$p"
+done
 [ -d "$B/dump1090" ] || git clone -q --depth 1 --branch "$DUMP1090_TAG" https://github.com/flightaware/dump1090.git "$B/dump1090"
 [ -f "$B/inc/libusb-1.0/libusb.h" ] ||
     curl -sSfL -o "$B/inc/libusb-1.0/libusb.h" "https://raw.githubusercontent.com/libusb/libusb/$LIBUSB_TAG/libusb/libusb.h"
@@ -64,6 +74,7 @@ $CC $CF -O3 -I "$TOP/tools/rtlspec" -o "$B/out/bin/x6x00-rtlspec" "$TOP/tools/rt
     "$B/out/lib/librtlsdr.a" $LD -lusb-1.0 -lpthread -lm
 
 # dump1090-fa: ARCH armv7l picks its NEON DSP flavours for the radio's Cortex-A7
+rm -f "$B/dump1090/dump1090"      # linked again: its Makefile does not see librtlsdr.a change
 make -C "$B/dump1090" -j "$(sysctl -n hw.ncpu 2>/dev/null || nproc)" dump1090 CC="$CC" UNAME=Linux ARCH=armv7l \
     RTLSDR=yes RTLSDR_PREFIX="$B/out" STATIC=yes BLADERF=no HACKRF=no LIMESDR=no SOAPYSDR=no \
     CPPFLAGS="-I$B/inc -I$B/inc/libusb-1.0" CFLAGS="-O3 -g" LDFLAGS="$LD"

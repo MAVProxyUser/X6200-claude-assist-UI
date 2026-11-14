@@ -666,17 +666,23 @@ bool buttons_hidden() {
     return hidden;
 }
 
-static uint32_t land_index[BUTTONS];   /* their place among the main screen's children */
+static uint32_t  land_index[BUTTONS];  /* their place among the main screen's children */
+static lv_obj_t *land_parent;           /* that screen: they go back to it whatever buttons_horizontal() is told */
 
 void buttons_vertical(lv_obj_t *parent, lv_coord_t w, lv_coord_t h) {
     lv_coord_t bw = w - 2 * BTN_INSET, bh = h - 2 * BTN_INSET;
 
     buttons_hide(false);    /* Hide buttons is the main screen's: the walkie's column always shows */
+    /* Where they are, all of them before any moves (each one gone shifts the next one's index), and only when they
+     * are on their own screen: told twice, the column's places would be kept for the screen */
+    if (lv_obj_get_parent(slots[0].parent) != parent) {
+        land_parent = lv_obj_get_parent(slots[0].parent);
+        for (uint8_t i = 0; i < BUTTONS; i++) land_index[i] = lv_obj_get_index(slots[i].parent);
+    }
     for (uint8_t i = 0; i < BUTTONS; i++) {
         lv_obj_t           *f = slots[i].parent;
         const lv_img_dsc_t *img;
 
-        land_index[i] = lv_obj_get_index(f);
         lv_obj_set_parent(f, parent);
         lv_obj_set_pos(f, BTN_INSET, i * h + BTN_INSET);
         lv_obj_set_size(f, bw, bh);
@@ -688,11 +694,14 @@ void buttons_vertical(lv_obj_t *parent, lv_coord_t w, lv_coord_t h) {
 }
 
 void buttons_horizontal(lv_obj_t *parent) {
+    if (land_parent && lv_obj_is_valid(land_parent)) parent = land_parent;
+    /* back in their places, the lowest first, so each one's index is right once the ones under it are back: under
+     * whatever was over them (the Sentry draws its own keys over them) */
     for (uint8_t i = 0; i < BUTTONS; i++) {
         lv_obj_t *f = slots[i].parent;
 
         lv_obj_set_parent(f, parent);
-        lv_obj_move_to_index(f, land_index[i]);
+        lv_obj_move_to_index(f, (int32_t)land_index[i]);
         lv_obj_set_pos(f, i * BTN_WIDTH + BTN_INSET, BOARD_DISP_H - BTN_HEIGHT + BTN_INSET);
         lv_obj_set_size(f, BTN_WIDTH - 2 * BTN_INSET, BTN_HEIGHT - 2 * BTN_INSET);
         lv_obj_remove_local_style_prop(f, LV_STYLE_BG_IMG_SRC, LV_STATE_CHECKED);

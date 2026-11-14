@@ -22,7 +22,10 @@
  *    it. Without the daemon, dump1090 opens the stick itself (rtl-sdr-blog's librtlsdr built in, which knows the
  *    Blog V4's R828D too; adaptive gain). It ends with the GUI (PR_SET_PDEATHSIG) and is started again when the stick
  *    changes. The tuner ("R820T", "R828D") is the daemon's word, or said from dump1090's log, /tmp/dump1090.log.
- *  The thread looks for a receiver every 2 s while it has none.
+ *  The thread looks for a receiver every 2 s while it has none, and each second that the one it has is still there
+ *  under the USB device number it had: pulled out, or plugged back (another number), or another receiver in its
+ *  place, it is let go (its dump1090 ended) and looked for again. A serial port's read fails when it goes; dump1090 on
+ *  the daemon's samples does not end when the stick does, it only waits, so the number is what says it.
  */
 
 #define _GNU_SOURCE    /* pipe2, F_SETPIPE_SZ */
@@ -140,6 +143,14 @@ static int find_stick(char *usb, size_t n) {
     }
     closedir(d);
     return found;
+}
+
+/* A USB device's number ("3-1": its devnum), 0 when it is not there; plugged back, it has another */
+static int usb_devnum(const char *usb) {
+    char path[300], n[8];
+
+    snprintf(path, sizeof(path), USB_DEVICES "/%s/devnum", usb);
+    return read_line(path, n, sizeof(n)) ? atoi(n) : 0;
 }
 
 /* Its serial port, if cdc_acm has it: "<usb>:1.0/tty/ttyACMn" */
@@ -377,11 +388,11 @@ static void d1090_tuner(void) {
 
 static void *rx_thread(void *arg) {
     (void)arg;
-    int    fd = -1, rx = -1;
-    char   frame[56], reply[64];
+    int    fd = -1, rx = -1, held_num = 0;
+    char   frame[56], reply[64], held[64] = "";     /* held: the receiver's USB device ("3-1"), held_num its number */
     size_t len = 0, rlen = 0;
     bool   inside = false, stamped = false, replying = false;
-    double last = 0, init_at = 0;           /* init_at: the start commands are due, 0 sent */
+    double last = 0, init_at = 0, looked = 0;       /* init_at: the start commands are due, 0 sent */
 
     for (;;) {
         /* The RTL-SDR lent: its dump1090 stopped, not started again till it is back */
@@ -415,6 +426,8 @@ static void *rx_thread(void *arg) {
                     sleep(3);                   /* the tuner set up, the port open */
                 }
                 if ((fd = d1090_connect()) >= 0) {
+                    snprintf(held, sizeof(held), "%s", usb);
+                    held_num = usb_devnum(usb);
                     set_dev("127.0.0.1:30002", receivers[rx].name);
                     d1090_tuner();
                     state  = ADSB_RX_ON;
@@ -430,6 +443,8 @@ static void *rx_thread(void *arg) {
                 state = ADSB_RX_OPENING;
                 if (receivers[rx].new_id) bind_stick(rx, usb);
             } else if ((fd = open_port(dev)) >= 0) {
+                snprintf(held, sizeof(held), "%s", usb);
+                held_num = usb_devnum(usb);
                 set_dev(dev, receivers[rx].name);
                 state   = ADSB_RX_ON;
                 inside  = replying = false;
@@ -441,6 +456,15 @@ static void *rx_thread(void *arg) {
             }
             sleep(2);
             continue;
+        }
+        if (adsb_now() - looked >= 1.0) {       /* still the receiver it opened, where it was */
+            looked = adsb_now();
+            if (!held_num || usb_devnum(held) != held_num) {
+                close(fd);
+                fd = -1;
+                if (receivers[rx].sdr) d1090_stop();
+                continue;
+            }
         }
         if (init_at > 0 && adsb_now() >= init_at) {
             send_cmds(fd, receivers[rx].init);
@@ -552,6 +576,7 @@ void adsb_rx_lend(bool on) { atomic_store(&lent, on); }
  * RTL-SDR and a serial one are each seen */
 static atomic_bool    p_sdr, p_rcv;
 static atomic_int     p_sdr_id;         /* the RTL-SDR's bus * 1000 + device number: another one once it is replugged */
+static atomic_int     p_looks;          /* looks at USB so far: 0, nothing known yet */
 static pthread_once_t p_once = PTHREAD_ONCE_INIT;
 
 static void *presence_thread(void *arg) {
@@ -593,6 +618,7 @@ static void *presence_thread(void *arg) {
         atomic_store(&p_sdr, sdr);
         atomic_store(&p_rcv, rcv);
         atomic_store(&p_sdr_id, sdr ? id : 0);
+        atomic_fetch_add(&p_looks, 1);
         sleep(1);
     }
     return NULL;
@@ -617,5 +643,10 @@ bool adsb_rx_sdr_present(void) {
 int adsb_rx_sdr_id(void) {
     pthread_once(&p_once, presence_start);
     return atomic_load(&p_sdr_id);
+}
+
+int adsb_rx_usb_looks(void) {
+    pthread_once(&p_once, presence_start);
+    return atomic_load(&p_looks);
 }
 

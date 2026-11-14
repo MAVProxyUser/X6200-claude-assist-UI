@@ -4,7 +4,8 @@
  *  OpenX6X00 - Sentry: a listener's receiver on the X6200 base's whole spectrum, in the look of an old amber
  *  terminal, over the whole screen but the buttons. Receive only while it is open (radio_rx_only()).
  *
- *  Six screens on the MFK's ring, the buttons F1-F5 under them, and SCAN CFG beside A and C:
+ *  Seven screens on the MFK's ring and AIRSPACE (app_adsb.c, an app of its own) as the eighth, H, between G and A;
+ *  the buttons F1-F5 under them, and SCAN CFG beside A and B:
  *    A X6200   384 kHz around the dial (radio_psd_wide(), dsp_psd_raw()), its middle 360 kHz as a trace over a
  *              waterfall on C's screen, the signals that stand out of the noise around them named (AM broadcast
  *              channel, CB channel, FM station, time signal, shortwave broadcaster from the EiBi list, FT8, ham
@@ -17,7 +18,10 @@
  *              VFO tunes its channel (a bracket), the MFK pans, its push goes to the strongest.
  *    C LOG     the signals A's and B's scans locked on, newest first, kept on DATA (sentry_log.txt): the MFK goes
  *              through them and each is heard on its own receiver, the X6200 or the stick; F4 scans the list.
- *    G WALKIE  the radio as a CB walkie-talkie, held up (portrait): the channel, a voiceprint, the meters.
+ *    G WALKIE  the radio as a CB walkie-talkie, held up (portrait): the channel, a voiceprint, the meters. Its G
+ *              where the others have their letter (the portrait screen's top right, the display's top left).
+ *    H AIRSPACE ADS-B aircraft: the AIRSPACE app, opened by the ring past G (or before A), and by itself when a GNS
+ *              5890 or a microADSB becomes the only ADS-B receiver on USB (screen_main.c). Its ring comes back here.
  *    A/B       on A and G arms the transmitter for PTT (the Sentry is receive only otherwise).
  *    D BANDS   what each band carries, when, with which antenna, and what the Sentry found there; LISTEN tunes it
  *              and scans it (the stick's on C), SWEEP marks it for the sweep.
@@ -121,10 +125,11 @@ typedef enum { SCR_SCAN, SCR_TRACK, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_RTL, 
 
 /* The MFK ring's order and the screens' letters: A the X6200's spectrum, B the stick's spectrum (A and B one screen,
  * each set up for its own radio), C the log, D the bands, E the decoders, F the rest of the radio. SCAN CFG
- * (SCR_TRACK, A's settings and its lock, or B's) is on no ring: F5 on A or B opens it for that screen's radio. G, the
- * last, is the walkie-talkie */
+ * (SCR_TRACK, A's settings and its lock, or B's) is on no ring: F5 on A or B opens it for that screen's radio. G is
+ * the walkie-talkie, and H, past it, AIRSPACE: an app of its own, at RING_N on the ring */
 static const scr_t ring[] = {SCR_SCAN, SCR_RTL, SCR_LOG, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_WALKIE};
 #define RING_N (int)(sizeof(ring) / sizeof(ring[0]))
+static scr_t open_at = SCR_SCAN;           /* the screen the Sentry opens on: A, or one app_sentry_open_at() said */
 static scr_t cfg_from = SCR_SCAN;          /* the screen SCAN CFG was opened from: its radio's settings */
 typedef enum { MODE_AUTO, MODE_SEMI, MODE_MAN } sysmode_t;
 typedef enum { ROUT_BAND, ROUT_SWEEP, ROUT_SCAN } routine_t;
@@ -4113,7 +4118,9 @@ static void key_cb(lv_event_t *e) {
             int   i  = 0;
 
             while (i < RING_N && ring[i] != at) i++;
-            go(ring[(i % RING_N + (key == KEY_MFK_NEXT ? 1 : RING_N - 1)) % RING_N]);
+            i = (i % RING_N + (key == KEY_MFK_NEXT ? 1 : RING_N)) % (RING_N + 1);
+            if (i == RING_N) main_screen_start_app(ACTION_APP_ADSB);   /* H: AIRSPACE, in the Sentry's place */
+            else go(ring[i]);
             return;
         }
         default:
@@ -5234,7 +5241,14 @@ static void build_walkie_portrait(void) {
     /* the left column: the radio's own F buttons, moved here while G shows (walkie_show), as the Walkie app does */
     /* the head: G, the name, the time */
     rect(g_scr, P_X, 6, P_W, 44, 3, false);
-    label(g_scr, &pixel_24, amb, P_X, 16, P_W, LV_TEXT_ALIGN_CENTER, "G  WALKIE TALKIE");
+    label(g_scr, &pixel_24, amb, P_X, 16, P_W - 44, LV_TEXT_ALIGN_CENTER, "WALKIE TALKIE");
+    /* its letter where every other screen has its own, at the display's top left: held up, the top right */
+    {
+        lv_obj_t *c = rect(g_scr, PW - 43, 12, 36, 36, 3, false);
+
+        lv_obj_set_style_radius(c, LV_RADIUS_CIRCLE, 0);
+        label(g_scr, &pixel_28, amb, PW - 43, 15, 36, LV_TEXT_ALIGN_CENTER, "G");
+    }
     /* the channel */
     rect(g_scr, P_X, 56, P_W, 168, 3, false);
     u->num_l  = label(g_scr, &pixel_44, amb, P_X, 82, P_W, LV_TEXT_ALIGN_CENTER, "--");
@@ -5432,7 +5446,13 @@ static void construct_cb(lv_obj_t *parent) {
     lv_group_focus_obj(root);
     lv_group_set_editing(keyboard_group, true);
 
-    go(SCR_SCAN);
+    {
+        scr_t s = open_at;
+
+        open_at = SCR_SCAN;
+        go(SCR_SCAN);
+        if (s != SCR_SCAN) go(s);       /* from A, as a turn of the ring would (G held up, B's picture) */
+    }
     if (!wide_ok) {
         opt_set(&b_band, 0, "THIS BASE SENDS NO SPECTRUM", 1);
         opt_set(&b_band, 1, "THE SENTRY NEEDS AN X6200", 2);
@@ -5484,4 +5504,21 @@ static void destruct_cb(void) {
         rtl_frame = NULL;
     }
     root = img = rtl_img = NULL;
+}
+
+/* The Sentry on one of its screens by letter ("A" to "G"; "H" is AIRSPACE): AIRSPACE's ring comes back so */
+void app_sentry_open_at(char letter) {
+    static const scr_t by[] = {SCR_SCAN, SCR_RTL, SCR_LOG, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_WALKIE};
+
+    if (letter == 'H') {
+        main_screen_start_app(ACTION_APP_ADSB);
+        return;
+    }
+    if (letter < 'A' || letter > 'G') return;
+    if (dialog_type_is_run(dialog_sentry)) {
+        go(by[letter - 'A']);
+        return;
+    }
+    open_at = by[letter - 'A'];
+    main_screen_start_app(ACTION_APP_SENTRY);
 }

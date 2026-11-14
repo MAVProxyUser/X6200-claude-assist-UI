@@ -1,0 +1,141 @@
+From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
+Subject: [PATCH] rtlsdr_read_async: every transfer back before they are freed
+
+A stick pulled out mid-stream: the read loop ended at the first transfer
+lost and freed all of them, the others still in flight on libusb's list.
+libusb_close() then looped for ever on that list of freed memory (seen
+on the X6200: x6x00-rtlspec spinning in libusb_close, the stick never
+opened again). The transfers in flight are counted; the loop's end waits
+for them (10 s at most, after which they are leaked, never freed).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+diff --git a/src/librtlsdr.c b/src/librtlsdr.c
+index 82bab6d..3676fdc 100644
+--- a/src/librtlsdr.c
++++ b/src/librtlsdr.c
+@@ -24,6 +24,7 @@
+ #include <stdlib.h>
+ #ifndef _WIN32
+ #include <unistd.h>
++#include <time.h>
+ #define min(a, b) (((a) < (b)) ? (a) : (b))
+ #endif
+ 
+@@ -117,6 +118,7 @@ struct rtlsdr_dev {
+ 	struct r82xx_priv r82xx_p;
+ 	/* status */
+ 	int dev_lost;
++	int xfer_inflight; /* transfers libusb has: none may be freed till they are back */
+ 	int driver_active;
+ 	unsigned int xfer_errors;
+ 	char manufact[256];
+@@ -1780,11 +1782,29 @@ static void LIBUSB_CALL _libusb_callback(struct libusb_transfer *xfer)
+ {
+ 	rtlsdr_dev_t *dev = (rtlsdr_dev_t *)xfer->user_data;
+ 
++	/* back from libusb: not in flight till it is submitted again */
++	__atomic_sub_fetch(&dev->xfer_inflight, 1, __ATOMIC_SEQ_CST);
++
+ 	if (LIBUSB_TRANSFER_COMPLETED == xfer->status) {
+ 		if (dev->cb)
+ 			dev->cb(xfer->buffer, xfer->actual_length, dev->cb_ctx);
+ 
+-		libusb_submit_transfer(xfer); /* resubmit transfer */
++		/* resubmit transfer, while streaming: one that cannot be is
++		 * the stream's end, not a transfer lost from the count */
++		if (RTLSDR_RUNNING == dev->async_status) {
++			int r;
++
++			__atomic_add_fetch(&dev->xfer_inflight, 1, __ATOMIC_SEQ_CST);
++			r = libusb_submit_transfer(xfer);
++			if (r < 0) {
++				__atomic_sub_fetch(&dev->xfer_inflight, 1, __ATOMIC_SEQ_CST);
++				if (LIBUSB_ERROR_NO_DEVICE == r)
++					dev->dev_lost = 1;
++				rtlsdr_cancel_async(dev);
++				fprintf(stderr, "cb resubmit failed: %d, "
++					"canceling...\n", r);
++			}
++		}
+ 		dev->xfer_errors = 0;
+ 	} else if (LIBUSB_TRANSFER_CANCELLED != xfer->status) {
+ #ifndef _WIN32
+@@ -1794,10 +1814,11 @@ static void LIBUSB_CALL _libusb_callback(struct libusb_transfer *xfer)
+ 		if (dev->xfer_errors >= dev->xfer_buf_num ||
+ 		    LIBUSB_TRANSFER_NO_DEVICE == xfer->status) {
+ #endif
++			if (!dev->dev_lost)
++				fprintf(stderr, "cb transfer status: %d, "
++					"canceling...\n", xfer->status);
+ 			dev->dev_lost = 1;
+ 			rtlsdr_cancel_async(dev);
+-			fprintf(stderr, "cb transfer status: %d, "
+-				"canceling...\n", xfer->status);
+ #ifndef _WIN32
+ 		}
+ #endif
+@@ -1959,6 +1980,7 @@ int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
+ 		dev->xfer_buf_len = DEFAULT_BUF_LENGTH;
+ 
+ 	_rtlsdr_alloc_async_buffers(dev);
++	__atomic_store_n(&dev->xfer_inflight, 0, __ATOMIC_SEQ_CST);
+ 
+ 	for(i = 0; i < dev->xfer_buf_num; ++i) {
+ 		libusb_fill_bulk_transfer(dev->xfer[i],
+@@ -1970,8 +1992,10 @@ int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
+ 					  (void *)dev,
+ 					  BULK_TIMEOUT);
+ 
++		__atomic_add_fetch(&dev->xfer_inflight, 1, __ATOMIC_SEQ_CST);
+ 		r = libusb_submit_transfer(dev->xfer[i]);
+ 		if (r < 0) {
++			__atomic_sub_fetch(&dev->xfer_inflight, 1, __ATOMIC_SEQ_CST);
+ 			fprintf(stderr, "Failed to submit transfer %i\n"
+ 					"Please increase your allowed " 
+ 					"usbfs buffer size with the "
+@@ -2032,7 +2056,43 @@ int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
+ 		}
+ 	}
+ 
+-	_rtlsdr_free_async_buffers(dev);
++	/* Every transfer back from libusb before any is freed. The loop above
++	 * ends at the first transfer lost when the device is pulled out, the
++	 * others still in flight: freed then, they stay on libusb's list of
++	 * transfers as freed memory, and libusb_close() loops on that list for
++	 * ever. A device gone gives them all back within an event or two */
++	{
++		struct timespec t0, t1;
++
++		clock_gettime(CLOCK_MONOTONIC, &t0);
++		t1 = t0;
++		/* by the clock: libusb may return at once, a device's end
++		 * still under way in the kernel */
++		while (__atomic_load_n(&dev->xfer_inflight, __ATOMIC_SEQ_CST) > 0 &&
++		       t1.tv_sec - t0.tv_sec < 10) {
++			struct timeval drain_tv = { 0, 100000 };
++			unsigned int j;
++
++			for (j = 0; dev->xfer && j < dev->xfer_buf_num; ++j)
++				if (dev->xfer[j])
++					libusb_cancel_transfer(dev->xfer[j]);
++			libusb_handle_events_timeout_completed(dev->ctx, &drain_tv,
++							       NULL);
++			usleep(10000);
++			clock_gettime(CLOCK_MONOTONIC, &t1);
++		}
++	}
++
++	if (__atomic_load_n(&dev->xfer_inflight, __ATOMIC_SEQ_CST) > 0) {
++		/* never given back in 10 s: left allocated, libusb may still
++		 * touch them; leaked rather than freed under it */
++		fprintf(stderr, "%d transfers never came back, left allocated\n",
++			__atomic_load_n(&dev->xfer_inflight, __ATOMIC_SEQ_CST));
++		dev->xfer = NULL;
++		dev->xfer_buf = NULL;
++	} else {
++		_rtlsdr_free_async_buffers(dev);
++	}
+ 
+ 	dev->async_status = next_status;
+ 

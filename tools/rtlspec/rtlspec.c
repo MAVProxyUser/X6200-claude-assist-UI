@@ -11,7 +11,11 @@
  *  The stick: opened when it is there (looked for each second), set as the GUI last asked, its I/Q read at the sample
  *  rate all the time. Closed only when it is pulled out (another one is opened when it is plugged in) or the daemon
  *  is told to end. One that opens and sends nothing, or whose stream ends with it still plugged in, is left open and
- *  said to be STALLED: only pulling it out mends that, and nothing here touches it in the meantime.
+ *  said to be STALLED: only pulling it out mends that, and nothing here touches it in the meantime. Pulled out is
+ *  its USB device file gone ("/dev/bus/usb/003/002 (deleted)" among this process's files), which a stick plugged
+ *  back at once does not hide (it comes back under another number). The stream's transfers are all back before the
+ *  stick is closed (librtlsdr patched for it: buildroot/br2_external/package/rtlsdr-blog); should the close hang
+ *  anyway, the stick gone 12 s and still held, the daemon ends, and the GUI starts it again.
  *
  *  Out of the samples, only what the client asks for, and nothing with no client: ROWS rows a second while it wants
  *  rows ("r 1"), each the average of up to AVG windowed FFTs of BINS points from that row's samples, in dB, lowest
@@ -50,6 +54,7 @@
  */
 
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -391,6 +396,7 @@ static const char *const s_name[] = {"NOSTICK", "BUSY", "OPENING", "ON", "STALLE
 #define PROTO      2
 #define SOCK_NAME  "x6x00-rtlspec"      /* abstract: gone with the daemon, a second one cannot take it */
 #define STALL_MS   3000                 /* open and nothing for so long: STALLED */
+#define HUNG_MS    12000                /* pulled out and still held so long: the close hangs, the daemon ends */
 #define ADSB_HZ    1090000000u
 #define ADSB_RATE  2400000u             /* dump1090's own */
 
@@ -726,6 +732,28 @@ static void replay_run(void) {
     sleep(1);
 }
 
+/* The stick held pulled out: its USB device file among this process's open files, its node gone ("(deleted)"). Not
+ * the device count: a stick plugged back within a second (or another one) is counted as if it had never gone */
+static bool stick_pulled(void) {
+    DIR           *d = opendir("/proc/self/fd");
+    struct dirent *e;
+    bool           gone = false;
+
+    if (!d) return false;
+    while (!gone && (e = readdir(d))) {
+        char    path[64], to[128];
+        ssize_t n;
+
+        if (e->d_name[0] == '.') continue;
+        snprintf(path, sizeof(path), "/proc/self/fd/%s", e->d_name);
+        if ((n = readlink(path, to, sizeof(to) - 1)) <= 0) continue;
+        to[n] = 0;
+        gone = !strncmp(to, "/dev/bus/usb/", 13) && strstr(to, " (deleted)");
+    }
+    closedir(d);
+    return gone;
+}
+
 /* The stick: opened when it is there, streaming till it is pulled out */
 static void *stick_thread(void *arg) {
     (void)arg;
@@ -767,14 +795,15 @@ static void *stick_thread(void *arg) {
 
         /* The stream ended with the stick still there (not pulled out, not told to end): left open and alone till it
          * is; closed and opened again, it would not be mended, and that is what wears the USB host */
-        if (!stop && (int)rtlsdr_get_device_count() > dev_index) {
+        if (!stop && !stick_pulled()) {
             fprintf(stderr, "rtlspec: the stream ended, the stick still there: kept as it is till it is pulled out\n");
             atomic_store(&s_now, S_STALLED);
-            while (!stop && (int)rtlsdr_get_device_count() > dev_index) sleep(1);
+            while (!stop && !stick_pulled()) sleep(1);
         }
-        term_dev = NULL;
         pthread_mutex_lock(&tune_lock);
-        dev_now = NULL;
+        term_dev = NULL;
+        dev_now  = NULL;
+        snprintf(tuner_s, sizeof(tuner_s), "-");        /* no tuner said for a stick that is not there */
         pthread_mutex_unlock(&tune_lock);
         rtlsdr_close(dev);
         fprintf(stderr, "rtlspec: the stick closed (%s)\n", stop ? "the daemon ends" : "pulled out");
@@ -787,21 +816,37 @@ static void *stick_thread(void *arg) {
 /* Each 200 ms: the state told when it changes, a stall seen, dump1090's samples taken back when it went */
 static void *watch_thread(void *arg) {
     char     said[96] = "", now[96];
-    uint32_t looked = 0;
+    uint32_t looked = 0, pulled_at = 0;
     (void)arg;
 
     while (!stop) {
         int s = atomic_load(&s_now);
 
         if (atomic_exchange(&feed_gone, false)) apply_tuning();
-        if ((s == S_ON || s == S_OPENING) && now_ms() - atomic_load(&last_ms) > STALL_MS) {
+        /* only from the state read: the stick's thread may have said NOSTICK meanwhile */
+        if ((s == S_ON || s == S_OPENING) && now_ms() - atomic_load(&last_ms) > STALL_MS &&
+            atomic_compare_exchange_strong(&s_now, &s, S_STALLED))
             fprintf(stderr, "rtlspec: nothing from the stick for %d s\n", STALL_MS / 1000);
-            atomic_store(&s_now, S_STALLED);
-        }
-        /* stalled and pulled out, its stream not ended by it: ended here, so it is closed and the next one opened */
-        if (atomic_load(&s_now) == S_STALLED && term_dev && now_ms() - looked > 1000) {
+        /* Pulled out, its stream not ended by it: ended here, so it is closed and the next one opened. Still held
+         * HUNG_MS on, libusb hangs on it: the daemon ends (its end lets go of everything), the GUI starts it again */
+        if (now_ms() - looked > 1000) {
+            bool gone = stick_pulled();
+
             looked = now_ms();
-            if ((int)rtlsdr_get_device_count() <= dev_index) rtlsdr_cancel_async(term_dev);
+            if (gone) {
+                pthread_mutex_lock(&tune_lock);
+                if (term_dev) rtlsdr_cancel_async(term_dev);
+                pthread_mutex_unlock(&tune_lock);
+            }
+            if (!gone) {
+                pulled_at = 0;
+            } else if (!pulled_at) {
+                pulled_at = looked;
+            } else if (looked - pulled_at > HUNG_MS) {
+                fprintf(stderr, "rtlspec: the stick pulled out %d s ago and still not closed: the daemon ends\n",
+                        HUNG_MS / 1000);
+                _exit(2);
+            }
         }
         hello(now, sizeof(now));
         if (strcmp(now, said)) {

@@ -46,3 +46,6 @@ bool adsb_rx_receiver_present(void);
 /* The RTL-SDR's USB identity (bus * 1000 + device number), 0 none: another number once it was unplugged and plugged
  * in again (rtl_spectrum.c waits for that before it opens a stick that sent nothing) */
 int adsb_rx_sdr_id(void);
+
+/* How many times that thread has looked at USB: 0, the three above say nothing yet */
+int adsb_rx_usb_looks(void);

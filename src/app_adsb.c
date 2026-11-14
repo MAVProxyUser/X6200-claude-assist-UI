@@ -1,8 +1,10 @@
 /*
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
- *  OpenX6X00 - AIRSPACE, the Sentry's look on 1090 MHz: the aircraft an ADS-B receiver on USB hears (a GNS 5890 or
- *  a microADSB: adsb_rx.c, decoded by adsb.c), drawn on a scope around the station's QTH locator.
+ *  OpenX6X00 - AIRSPACE, the Sentry's look on 1090 MHz and its H (between G and A on the MFK's ring): the aircraft an
+ *  ADS-B receiver on USB hears (an RTL-SDR, a GNS 5890 or a microADSB: adsb_rx.c, decoded by adsb.c), drawn on a
+ *  scope around the station's QTH locator. It opens by itself when a GNS 5890 or a microADSB becomes the only ADS-B
+ *  receiver on USB (screen_main.c).
  *
  *  - The scope: north up, four range rings, a sweep turning every 4 s. A live aircraft (heard in the last minute)
  *    is an arrow along its track with its call and flight level; each message it sends pings a ring around it.
@@ -19,6 +21,7 @@
 
 #include "adsb.h"
 #include "adsb_rx.h"
+#include "app_sentry.h"
 #include "rtl_spectrum.h"
 #include "buttons.h"
 #include "cfg/cfg_api.h"
@@ -481,7 +484,7 @@ static void show_scope_words(double now, int nlive) {
     const char       *msg = NULL;
 
     switch (st) {
-        case ADSB_RX_NO_STICK: msg = "NO ADS-B RECEIVER\n\nPLUG A GNS 5890 OR A\nMICROADSB INTO USB"; break;
+        case ADSB_RX_NO_STICK: msg = "NO ADS-B RECEIVER\n\nPLUG AN RTL-SDR, A GNS 5890\nOR A MICROADSB INTO USB"; break;
         case ADSB_RX_NO_DRIVER: msg = "RECEIVER FOUND\n\nTHE KERNEL HAS\nNO CDC_ACM DRIVER"; break;
         case ADSB_RX_OPENING: msg = "RECEIVER FOUND\n\nOPENING ITS PORT"; break;
         case ADSB_RX_OFF: msg = "RECEIVER NOT STARTED"; break;
@@ -642,6 +645,9 @@ static void key_cb(lv_event_t *e) {
         case LV_KEY_RIGHT:
         case LV_KEY_DOWN: step_sel(1); break;
         case LV_KEY_ESC: dialog_destruct(); break;
+        /* The MFK's inner ring: this is the Sentry's H, between its G and its A */
+        case KEY_MFK_NEXT: app_sentry_open_at('A'); break;
+        case KEY_MFK_PREV: app_sentry_open_at('G'); break;
         default: break;
     }
 }
@@ -750,7 +756,7 @@ static void build(void) {
     for (int i = 0; i < 2; i++) {
         lv_obj_t *c = rect(root, i ? SW - 50 : 12, 7, 36, 36, 3, false);
         lv_obj_set_style_radius(c, LV_RADIUS_CIRCLE, 0);
-        badge_l[i] = label(root, &pixel_28, amb, i ? SW - 50 : 12, 10, 36, LV_TEXT_ALIGN_CENTER, "R");
+        badge_l[i] = label(root, &pixel_28, amb, i ? SW - 50 : 12, 10, 36, LV_TEXT_ALIGN_CENTER, "H");   /* the Sentry's H */
     }
     title_l  = label(root, &pixel_20, amb, 60, 6, SW - 120, LV_TEXT_ALIGN_CENTER, "XIEGU X6200  AIRSPACE SENTRY");
     status_l = label(root, &pixel_16, amb, 60, 27, SW - 120, LV_TEXT_ALIGN_CENTER, "");
@@ -805,7 +811,7 @@ static void build(void) {
     /* what the knobs do, and the F keys */
     int ky = 480 - KEYS_H - 3;
     legend_l = label(root, &pixel_16, dim, 6, ky - LEGEND_H, SW - 12, LV_TEXT_ALIGN_CENTER,
-                     "VFO: RANGE | MFK: AIRCRAFT | TAP: CHOOSE | F2: HOW LONG HISTORY STAYS | GEN: HELP");
+                     "VFO: RANGE | MFK: AIRCRAFT | TAP: CHOOSE | RING: SCREEN | F2: HISTORY | GEN: HELP");
     int w = (SW - 12 - 4 * 6) / 5;
     for (int i = 0; i < 5; i++) {
         lv_obj_t *k = lv_label_create(root);
@@ -832,7 +838,7 @@ static void build(void) {
                    "ROUND IT FOR EACH MESSAGE. A SQUARE IS A GHOST: NOT HEARD FOR A MINUTE, FADING WITH ITS TRACK.\n\n"
                    "F1 / VFO: RANGE OF THE SCOPE.  F2: DECAY, HOW LONG GHOSTS AND TRACKS STAY: OFF, 1 TO 60 "
                    "MINUTES, OR HOLD TILL CLEARED.  F3: TRACKS ON OR OFF.  F4: FORGET THE HISTORY.  F5: BACK TO "
-                   "THE SENTRY.\n\n"
+                   "THE SENTRY.  THE MFK'S RING: THE SENTRY'S A NEXT, ITS G BEFORE (THIS IS ITS H).\n\n"
                    "MFK OR A TAP CHOOSES AN AIRCRAFT. A GNS 5890 OR MICROADSB GOES ON LISTENING WHEN THIS SCREEN CLOSES; "
                    "AN RTL-SDR IS THIS SCREEN'S WHILE IT IS OPEN AND THE SENTRY'S THE REST OF THE TIME. RECEIVE ONLY.\n\n"
                    "THE CENTRE: A USB GPS, ELSE THE QTH LOCATOR (SETTINGS > GENERAL), ELSE THE TRAFFIC.\n\n"
