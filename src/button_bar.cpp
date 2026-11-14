@@ -674,7 +674,14 @@ void buttons_vertical(lv_obj_t *parent, lv_coord_t w, lv_coord_t h) {
 }
 
 void buttons_vertical_at(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, lv_coord_t top) {
-    lv_coord_t bw = w - 2 * BTN_INSET, bh = h - 2 * BTN_INSET;
+    lv_coord_t ws[BUTTONS];
+
+    for (uint8_t i = 0; i < BUTTONS; i++) ws[i] = w;
+    buttons_vertical_w(parent, ws, h, top);
+}
+
+void buttons_vertical_w(lv_obj_t *parent, const lv_coord_t *ws, lv_coord_t h, lv_coord_t top) {
+    lv_coord_t bh = h - 2 * BTN_INSET;
 
     if (top < 0 || top > h / 2) top = 0;
 
@@ -690,6 +697,7 @@ void buttons_vertical_at(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, lv_coord_
         const lv_img_dsc_t *img;
 
         lv_coord_t t = i ? 0 : top;      /* the first key shortened from the top */
+        lv_coord_t bw = ws[i] - 2 * BTN_INSET;
 
         lv_obj_set_parent(f, parent);
         lv_obj_set_pos(f, BTN_INSET, i * h + t + BTN_INSET);

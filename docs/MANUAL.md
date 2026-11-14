@@ -735,7 +735,10 @@ written through to the card before it replaces the last copy, so a power cut kee
 ### G WALKIE
 
 The X6200 as a walkie-talkie, in the same look, **held up**: G turns the screen to portrait (480 x 800, as the
-Walkie app does), the F keys' names down the left edge where the keys then are. G is the X6200's alone: the stick
+Walkie app does), the F keys' names down the left edge where the keys then are. Only F3 (group and mode) and F4
+(view) are named in full; F1 and F2 (CB's CH - and CH +, blank elsewhere) and F5 (TX) are narrow, and what is beside
+them takes the width: the channel and the spectrum beside F1 and F2, the radio's state beside F5, the lamp, the
+voiceprint and the meters beside F3 and F4. G is the X6200's alone: the stick
 only receives and has B for that, so G neither shows nor plays it (shown with LISTEN on RTL or BOTH, G plays the
 X6200 alone; A or B puts its own LISTEN back when shown).
 
@@ -745,16 +748,17 @@ X6200 alone; A or B puts its own LISTEN back when shown).
   other screens, the letter G at both ends turned with it. Across the top, read held up: the name again, and the
   walkie's own line (the transmitter's lock, the time, the processor, the battery's % and icon, the devices). F1's
   key sits under it.
-- **The channel**: `VIA X6200`; the channel big (or `VFO` off the list's channels), its group (CB EMERGENCY for CB 9,
-  CB TRUCKERS for 19), the frequency and mode and what is there, over a lamp: RX SIGNAL when the audio stands 6 dB
-  over its own noise, RX QUIET, TX ARMED, ON AIR, TX LOCKED for a moment after PTT.
+- **The channel**: the channel big on the left (or `VFO` off the list's channels); beside it `VIA X6200`, its group
+  (CB EMERGENCY for CB 9, CB TRUCKERS for 19), the frequency and mode and what is there.
+- **The lamp**: RX SIGNAL when the audio stands 6 dB over its own noise, RX QUIET, TX ARMED, ON AIR, TX LOCKED for a
+  moment after PTT.
 - **The spectrum**: the X6200's, 100 kHz around the dial (bracketed in the middle): its trace over the last rows, in
   3D as A's picture or flat as a waterfall, the newest on top (**F4 VIEW**).
 - **The voiceprint**: the receiver's audio as a sonogram, 0 to 4 kHz up and the last seconds across, in amber:
   voices show as their harmonics stacked, a tone as a line, the hiss as speckle.
-- The S-meter (S0 to S9+40 in dBm) and the audio's level (dBFS) as bars; at the bottom the radio's state in lines:
-  LINK (squelch, volume, the transmitter's lock), POWER (the battery, the supply, the TX power setting), SYSTEM (the
-  processor, the base's version) and the time, refreshed each second. A build without portrait (on a PC) shows G in
+- The S-meter (S0 to S9+40 in dBm) and the audio's level (dBFS) as bars; at the bottom the radio's state in larger
+  lines: LINK (squelch, volume, the transmitter's lock), POWER (the battery, the supply, the TX power setting), SYSTEM
+  (the processor, the base's version) and the time, refreshed each second. A build without portrait (on a PC) shows G in
   landscape, in four boxes.
 
 **G follows the X6200**: its frequency and mode are the dial's, read live, and G never tunes by itself. A's scan
