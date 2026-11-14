@@ -28,13 +28,14 @@ import zipfile
 import bottle
 
 from . import settings
+from . import sites
+from . import smartcw
 
 app = bottle.Bottle()   # the configurator pages and their API
 
-# Reads that hand out what the radio keeps secret, taken only by its own names as the changes are: the Files page
-# serves all of /mnt (the Wavelog, QRZ, HOTA and WWFF keys, backups/backup.tgz with the SSH host keys and the WiFi
-# passwords, the Winlink mail), the Backup download can hold the WiFi passwords, and the Winlink logs your mail's
-# subjects and gateways
+# Reads that hand out what is the owner's own, taken only by its own names as the changes are: the Files page serves
+# /mnt (the Winlink mail, the logs; not the files with the keys and passwords, config_pages.secret_file), the Backup
+# download can hold the WiFi passwords, and the Winlink logs your mail's subjects and gateways
 HOST_ONLY_READS = ("/files/", "/api/backup/download", "/api/winlink/logs")
 # Reads sent as a POST (a form with the selection), with no secret in them: by any name, as the GET reads are (the
 # QSOs and the pictures are on the pages by any name). The cross-site check still applies
@@ -52,7 +53,7 @@ def host_refused():
 def via_funnel():
     """The request came from the internet through Tailscale Funnel: tailscaled sets this header on every one of
     those and drops one a browser sent, so a request from the LAN or the tailnet never has it (#58)"""
-    return bottle.request.get_header("Tailscale-Funnel-Request") is not None
+    return bottle.request.get_header(sites.FUNNEL_HEADER) is not None
 
 
 def funnel_refused():
@@ -92,17 +93,8 @@ def refuse_other_sites():
     if req.headers.get("Sec-Fetch-Site", "") == "cross-site":
         bottle.abort(403, "Cross-site request refused")
     origin = req.headers.get("Origin", "")
-    if origin:   # "null" (a file:// page) has no host and is refused too
-        theirs = urllib.parse.urlsplit(origin)
-        ours = urllib.parse.urlsplit("//" + req.headers.get("Host", ""))
-        # A browser names the port in Origin, as in Host, only when it is not the scheme's own (80, 443): the radio's
-        # pages, by http, https, the tailnet or on a PC on a port of their own, send the same port in both
-        try:
-            same_port = theirs.port is None or theirs.port == ours.port
-        except ValueError:   # no port number
-            same_port = False
-        if not theirs.hostname or theirs.hostname.lower() != (ours.hostname or "").lower() or not same_port:
-            bottle.abort(403, "Cross-site request refused")
+    if origin and not sites.origin_ok(origin, req.headers.get("Host", "")):   # "null" (a file:// page) too
+        bottle.abort(403, "Cross-site request refused")
 
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -127,7 +119,17 @@ def read_callsign():
     return read_param("callsign")
 
 
-bottle.BaseTemplate.defaults.update(callsign=read_callsign, request=bottle.request)
+def smartcw_link():
+    """SmartCW's page (smartcw.py) for the menu, by the name this page was opened by: "" while it does not run or
+    SmartCW is not plugged in (most radios never have one). Plain http on its own port, also from a page opened by
+    https: a link in a new tab is no mixed content"""
+    host = request_host()
+    if not settings.SMARTCW_PORT or not host or not smartcw.smartcw_iface():
+        return ""
+    return f"http://{f'[{host}]' if ':' in host else host}:{settings.SMARTCW_PORT}/"
+
+
+bottle.BaseTemplate.defaults.update(callsign=read_callsign, request=bottle.request, smartcw_link=smartcw_link)
 
 
 # DX cluster routes
@@ -378,8 +380,9 @@ def cluster_update(change):
 
 
 # TCI server routes
-# Same file and format as the radio GUI (src/tci_server.c): enabled=0|1, port=
-TCI_DEFAULTS = {"enabled": "1", "port": "50001", "trust": "operate"}
+# Same file and format as the radio GUI (src/tci_server.c): enabled=0|1, port=, trust=operate|view, tx_confirm=0|1
+# (a client on the network asks on the radio's screen before it transmits; on in a file from before)
+TCI_DEFAULTS = {"enabled": "1", "port": "50001", "trust": "operate", "tx_confirm": "1"}
 
 
 def read_tci_conf():
@@ -396,7 +399,8 @@ def read_tci_conf():
         port = int(conf["port"])
     except ValueError:
         port = int(TCI_DEFAULTS["port"])
-    return {"enabled": conf["enabled"] == "1", "port": port, "trust": "view" if conf["trust"] == "view" else "operate"}
+    return {"enabled": conf["enabled"] == "1", "port": port, "trust": "view" if conf["trust"] == "view" else "operate",
+            "tx_confirm": conf["tx_confirm"].strip() != "0"}
 
 
 @app.route('/tci')
@@ -788,7 +792,7 @@ def own_names():
 
 def request_host():
     """The name or address the page was opened by (the Host header's), lower case, without port and trailing dot"""
-    return (urllib.parse.urlsplit("//" + (bottle.request.get_header("Host") or "")).hostname or "").rstrip(".")
+    return sites.host_name(bottle.request.get_header("Host"))
 
 
 def local_host_ok():
@@ -799,9 +803,12 @@ def local_host_ok():
     (tools/pat). MagicDNS's short name too, which is the tailnet's name for the radio: x6200-1 while the tailnet
     still has the machine of an earlier card image as x6200. Never a request from the internet through Tailscale
     Funnel: its name is a *.ts.net name too (#58)"""
-    if via_funnel():
-        return False
-    host = request_host()
+    return not via_funnel() and name_ok(request_host())
+
+
+def name_ok(host):
+    """local_host_ok's names, host as request_host gives it: also for SmartCW's page on a port of its own
+    (smartcw.py), which reads its requests without bottle"""
     try:
         ipaddress.ip_address(host)
         return True
@@ -942,6 +949,8 @@ def winlink_state():
                     st[k] = v
     except OSError:
         pass
+    hide = secret_hider()       # the supervisor masks the page's password; a program's words could hold Pat's own
+    st.update({k: hide(v) for k, v in st.items() if k not in ("state", "pat", "ardop", "mercury", "xara", "password")})
     conf = winlink_conf()
     try:
         password_set = os.path.getsize(WINLINK_PASSWORD) > 0
@@ -996,7 +1005,7 @@ def winlink_run(args, stdin=None):
         return str(e)
     if r.returncode != 0:
         msg = (r.stderr.strip().splitlines() or [f"exit code {r.returncode}"])[-1]
-        return msg[6:] if msg.startswith("error ") else msg
+        return hide_secrets(msg[6:] if msg.startswith("error ") else msg, stdin)
     return None
 
 
@@ -1012,7 +1021,8 @@ def get_winlink():
 
 @app.get('/api/winlink/logs')
 def winlink_logs():
-    """Pat's, the modem's and the radio's logs as one text file for a bug report; the helper masks the passwords"""
+    """Pat's, the modem's and the radio's logs as one text file for a bug report; the helper masks the passwords,
+    and what it may not know as one (the other secrets the radio keeps) is hidden here"""
     try:
         r = subprocess.run([WINLINK_CMD, "logs"], capture_output=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as e:
@@ -1023,14 +1033,15 @@ def winlink_logs():
     bottle.response.content_type = "text/plain; charset=utf-8"
     bottle.response.set_header("Content-Disposition",
                                f'attachment; filename="winlink-logs-{time.strftime("%Y%m%d-%H%M")}.txt"')
-    return r.stdout
+    return hide_secrets(r.stdout.decode(errors="replace"))
 
 
 @app.post('/api/winlink')
 def set_winlink():
     """Any of enabled, mycall, locator, bandwidth, modem_choice (ardop, mercury or xara), mercury_bandwidth,
     xara_bandwidth, vara_licence and password; what is not sent stays. An empty callsign or locator is the radio's own,
-    an empty password keeps the one set"""
+    an empty password keeps the one set. clear_password: true takes the password away, the page's and the one typed
+    in Pat's own Settings"""
     try:
         data = bottle.request.json
     except ValueError:
@@ -1081,8 +1092,15 @@ def set_winlink():
         password = password.strip() if isinstance(password, str) else None
         if password is None or len(password) > 64 or any(ord(c) < 32 or ord(c) == 127 for c in password):
             return api_error(400, "Password: up to 64 characters")
+        clear = data.get("clear_password") is True
+        if password and clear:
+            return api_error(400, "A new password or Clear, not both")
         if password:
             err = winlink_run(["set-password"], password)
+            if err:
+                return api_error(500, "Winlink: " + err)
+        if clear:
+            err = winlink_run(["clear-password"])
             if err:
                 return api_error(500, "Winlink: " + err)
         keys = ["enabled", "mycall", "locator", "bandwidth", "modem", "mercury_bandwidth", "xara_bandwidth",
@@ -1095,7 +1113,7 @@ def set_winlink():
                 return api_error(500, f"Can't save: {e}")
         err = None
         if new["enabled"] == "1":
-            if password or any(new[k] != conf[k] for k in keys[1:]):
+            if password or clear or any(new[k] != conf[k] for k in keys[1:]):
                 err = winlink_run(["apply"])          # Pat restarts with them, the modem when another is chosen
                                                       # and XARA when its own settings changed
             err = err or winlink_run(["on"])
@@ -1334,10 +1352,15 @@ def set_tci():
     if trust not in ("operate", "view"):
         bottle.response.status = 400
         return {"status": "error", "msg": "trust is operate or view"}
+    confirm = data.get("tx_confirm", read_tci_conf()["tx_confirm"])   # kept too
+    if not isinstance(confirm, bool):
+        bottle.response.status = 400
+        return {"status": "error", "msg": "tx_confirm is true or false"}
     try:
         tmp = settings.TCI_CONF + ".tmp"
         with open(tmp, "w") as f:
-            f.write(f"enabled={1 if data.get('enabled') else 0}\nport={port}\ntrust={trust}\n")
+            f.write(f"enabled={1 if data.get('enabled') else 0}\nport={port}\ntrust={trust}\n"
+                    f"tx_confirm={1 if confirm else 0}\n")
         os.rename(tmp, settings.TCI_CONF)
     except OSError as e:
         bottle.response.status = 500
@@ -1417,6 +1440,97 @@ def qrz_state():
     return {"active": active, "profiles": [{"call": calls[i], "key": bool(keys[i])} for i in range(QRZ_PROFILES)]}
 
 
+# The secrets the radio keeps for its owner. None of them goes back to a browser, in a page or in an answer: each page
+# says only Set or Not set, a new one is typed in its place and Clear takes it away. What a helper or a server said is
+# passed on with them taken out: a server's error can quote the request, which carries the key (x6100-wavelog asks
+# Wavelog for the station list as api/station_info/<key>), and a program's log line the password it was given. The
+# Files page does not hand out the files that hold them (config_pages.secret_file). The SSH keys on the SSH page are
+# the public ones. The Backup download holds the WiFi passwords, with WiFi ticked: that file is for its owner
+SECRET_HIDDEN = "(hidden)"
+WINLINK_PAT_CONFIG = "/var/lib/winlink/pat/config.json"   # Pat's own Settings page writes passwords into it
+WIFI_SECRET_KEY = re.compile(r"psk|wep-key[0-3]|pin|([a-z0-9]+-)*password(-raw)?")   # NetworkManager's names
+
+
+def field_key(name):
+    """The key of hota.conf or wwff.conf, "" when none"""
+    try:
+        with open(field_path(name), errors="replace") as f:
+            return next((line[4:].strip() for line in f if line.startswith("key=")), "")
+    except OSError:
+        return ""
+
+
+def wifi_secrets():
+    """The passwords of the saved networks (and the Ethernet setting's, if it has one)"""
+    found = set()
+    try:
+        names = os.listdir(settings.WIFI_DIR)
+    except OSError:
+        return found
+    for n in names:
+        try:
+            with open(os.path.join(settings.WIFI_DIR, n), errors="replace") as f:
+                for line in f:
+                    k, sep, v = line.strip().partition("=")
+                    if sep and WIFI_SECRET_KEY.fullmatch(k.strip()):
+                        found.add(v.strip())
+        except OSError:
+            pass
+    return found
+
+
+def winlink_secrets():
+    """The Winlink page's password, and those typed in Pat's own Settings (the login's, an auxiliary address's
+    "CALL:password", the telnet listener's), as x6100-winlink's secrets()"""
+    found = set()
+    try:
+        with open(WINLINK_PASSWORD, errors="replace") as f:
+            found.add(f.read().strip("\r\n"))
+    except OSError:
+        pass
+    try:
+        with open(WINLINK_PAT_CONFIG) as f:
+            cfg = json.load(f)
+    except (OSError, ValueError, UnicodeDecodeError):
+        cfg = {}
+    if isinstance(cfg, dict):
+        found.add(cfg.get("secure_login_password"))
+        aux = cfg.get("auxiliary_addresses") or []
+        found.update(a.split(":", 1)[1] for a in aux if isinstance(a, str) and ":" in a)
+        if isinstance(cfg.get("telnet"), dict):
+            found.add(cfg["telnet"].get("password"))
+    return {s for s in found if isinstance(s, str)}
+
+
+def stored_secrets():
+    """Every secret the radio keeps: the Wavelog key, the QRZ, HOTA and WWFF keys, the Winlink passwords, the WiFi
+    passwords"""
+    found = {wavelog_read().get("key", ""), field_key("hota.conf"), field_key("wwff.conf")}
+    found.update(qrz_read()[2])
+    found.update(winlink_secrets())
+    found.update(wifi_secrets())
+    return found
+
+
+def secret_hider(*also):
+    """A function that gives a text with every stored secret, and those of also (one typed on the page, not saved
+    yet), as (hidden). The longest first: one secret inside another would leave the other's ends. Three characters
+    or more: a shorter one would hide parts of words"""
+    hidden = sorted({s for s in stored_secrets().union(also) if isinstance(s, str) and len(s) >= 3},
+                    key=len, reverse=True)
+
+    def hide(text):
+        if isinstance(text, str):
+            for secret in hidden:
+                text = text.replace(secret, SECRET_HIDDEN)
+        return text
+    return hide
+
+
+def hide_secrets(text, *also):
+    return secret_hider(*also)(text) if isinstance(text, str) and text else text
+
+
 def field_refs():
     global field_refs_counts
     try:
@@ -1462,7 +1576,7 @@ def run_field_update():
     except (OSError, subprocess.SubprocessError) as e:
         result = f"error {e}"
     with field_lock:
-        field_update.update(running=False, result=result)
+        field_update.update(running=False, result=hide_secrets(result))
 
 
 @app.route('/field')
@@ -1616,7 +1730,7 @@ def wavelog_state(result=None):
             "verify_tls": conf.get("verify_tls", "1") != "0",
             "since": time.strftime("%Y-%m-%d %H:%M", time.localtime(since)) if since else "",
             "queue": len(wavelog_json("wavelog.queue", [])), "result": result,
-            "last": {"result": last.get("result", ""),
+            "last": {"result": hide_secrets(last.get("result", "")),
                      "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(last["time"])) if last.get("time") else ""}}
 
 
@@ -1630,14 +1744,14 @@ def wavelog_run(cmd, form=None, timeout=330):
     try:   # the helper gives up after 300 s (its RUN_LIMIT): a little longer here, to hear why
         r = subprocess.run([settings.WAVELOG_CMD, cmd], capture_output=True, text=True, timeout=timeout, env=env)
         lines = r.stdout.strip().splitlines()
-        return lines[-1] if lines else f"error exit code {r.returncode}"
+        return hide_secrets(lines[-1], form and form["key"]) if lines else f"error exit code {r.returncode}"
     except subprocess.TimeoutExpired:
         # The helper's own timeouts leave out the name lookup: a name the network's DNS never answers holds it
         # past them. The page said "Wavelog: Command '['/usr/sbin/x6100-wavelog', 'test']' timed out after 40
         # seconds" (#73)
         return f"error no answer in {timeout} s: check the URL, and that the radio can reach that address"
     except (OSError, subprocess.SubprocessError) as e:
-        return f"error {e}"
+        return hide_secrets(f"error {e}", form and form["key"])
 
 
 def wavelog_origin(url):
@@ -2391,6 +2505,47 @@ def display_set():
     if reply.get("t") != "ok":
         return api_error(409, reply.get("err", "Rejected by the radio"))
     return {"status": "OK"}
+
+
+# The own TX list (#247): Settings > TX Cal > TX ranges > Own list, one "from-to" a line in MHz. The file is kept
+# here as written; the GUI reads it (src/cfg/tx_ranges.c) and says what it took, the lines it could not read too
+
+TX_RANGES_MAX = 8 * 1024    # 64 ranges with a comment each
+
+
+@app.get('/api/tx_ranges')
+def tx_ranges_get():
+    try:
+        with open(settings.TX_RANGES_FILE, encoding="utf-8", errors="replace") as f:
+            return {"text": f.read(TX_RANGES_MAX), "missing": False}
+    except FileNotFoundError:
+        return {"text": "", "missing": True}
+    except OSError as ex:
+        return api_error(500, f"Can't read {settings.TX_RANGES_FILE}: {ex.strerror}")
+
+
+@app.post('/api/tx_ranges')
+def tx_ranges_set():
+    try:
+        data = bottle.request.json
+    except ValueError:
+        data = None
+    text = data.get("text") if isinstance(data, dict) else None
+    if not isinstance(text, str) or len(text.encode()) > TX_RANGES_MAX:
+        return api_error(400, "Invalid list")
+    text = text.replace("\r\n", "\n")
+    if text and not text.endswith("\n"):
+        text += "\n"
+    try:
+        with config_lock:
+            replace_file(settings.TX_RANGES_FILE, lambda f: f.write(text), encoding="utf-8")
+    except OSError as ex:
+        return api_error(500, f"Can't save: {ex.strerror}")
+    reply = display_call({"cmd": "tx_ranges_read"})
+    if not reply or reply.get("t") != "tx_ranges":
+        return api_error(503, "Saved; the radio's GUI is not reachable, it reads the list at its next start")
+    reply.pop("t", None)
+    return reply
 
 
 # Boot picture (#101): the owner's own picture for the start, on the Display page. Kept on the DATA partition
@@ -3644,6 +3799,76 @@ def backup_current():
     return files
 
 
+KEYFILE_ESCAPES = {b"s": b" ", b"n": b"\n", b"t": b"\t", b"r": b"\r", b"\\": b"\\", b";": b";"}
+
+
+def keyfile_bytes(value):
+    """A NetworkManager keyfile's byte value (the SSID): a list of numbers ("72;111;109;101;"), or else the text
+    with its escapes"""
+    parts = value.rstrip(b";").split(b";")
+    if value and all(p.isdigit() and int(p) < 256 for p in parts):
+        return bytes(int(p) for p in parts)
+    out, i = bytearray(), 0
+    while i < len(value):
+        if value[i:i + 1] == b"\\" and value[i + 1:i + 2] in KEYFILE_ESCAPES:
+            out += KEYFILE_ESCAPES[value[i + 1:i + 2]]
+            i += 2
+        else:
+            out += value[i:i + 1]
+            i += 1
+    return bytes(out)
+
+
+def wifi_profile(path):
+    """(SSID, time last used) of a NetworkManager profile file of a network the radio joins, None for any other
+    (Ethernet, a hotspot) or a file that can't be read"""
+    try:
+        with open(path, "rb") as f:
+            lines = f.read(BACKUP_TEXT_MAX).split(b"\n")
+    except OSError:
+        return None
+    keys, section = {}, b""
+    for line in lines:
+        line = line.strip(b"\r").lstrip()
+        if line.startswith(b"[") and line.rstrip().endswith(b"]"):
+            section = line.strip()[1:-1]
+        elif line and not line.startswith((b"#", b";")) and b"=" in line:
+            k, _, v = line.partition(b"=")
+            keys[(section, k.strip())] = v.lstrip()
+    wifi = b"wifi" if (b"wifi", b"ssid") in keys else b"802-11-wireless"
+    if keys.get((b"connection", b"type")) not in (b"wifi", b"802-11-wireless") or (wifi, b"ssid") not in keys \
+            or keys.get((wifi, b"mode"), b"infrastructure") != b"infrastructure":
+        return None
+    stamp = keys.get((b"connection", b"timestamp"), b"0")
+    return keyfile_bytes(keys[(wifi, b"ssid")]), int(stamp) if stamp.isdigit() else 0
+
+
+def wifi_in_place(todo, files):
+    """The WiFi networks of a restore go onto the radio's own profile of the same network (SSID), when it has one
+    under another file name: NetworkManager names a file after the profile, the GUI's after the SSID, another
+    system's after whatever it was called there, and the radio had two profiles of one network then, the old
+    password tried as well. Several of one network in the backup: the latest used is the one left. todo: member ->
+    file on the radio, as restore_backup makes it; changed in place, the networks last"""
+    have = {}   # SSID -> (time last used, file on the radio)
+    try:
+        names = sorted(os.listdir(settings.WIFI_DIR))
+    except OSError:
+        names = []
+    for n in names:
+        path = os.path.join(settings.WIFI_DIR, n)
+        info = wifi_profile(path) if n.endswith(".nmconnection") and os.path.isfile(path) else None
+        if info and (info[0] not in have or info[1] > have[info[0]][0]):
+            have[info[0]] = info[1], path
+    nets = []
+    for name in [n for n in todo if backup_member(n)[0] == "wifi"]:
+        info = wifi_profile(files[name])
+        nets.append((info[1] if info else 0, name, info[0] if info else None, todo.pop(name)))
+    for _, name, ssid, dst in sorted(nets):
+        if ssid is not None:
+            dst = have.setdefault(ssid, (0, dst))[1]
+        todo[name] = dst
+
+
 def plural(n, word):
     return f"{n} {word}" + ("" if n == 1 else "s")
 
@@ -4062,6 +4287,8 @@ def restore_backup():
                 todo[name] = member[1]
         if not todo:
             return backup_error(409, "No uploaded backup: choose the file again")
+        if any(backup_member(n)[0] == "wifi" for n in todo):
+            wifi_in_place(todo, files)
         gui = any(backup_member(n)[0] in BACKUP_GUI_PARTS for n in todo)
         gui_up = False
         if gui:
@@ -4071,7 +4298,7 @@ def restore_backup():
                 return backup_error(500, f"Can't stop the radio screen: {e}")
             if err:
                 return backup_error(500, err)
-        failed, restored = {}, []
+        failed, restored, saved = {}, [], set()
         try:
             for name, dst in todo.items():
                 part = backup_member(name)[0]
@@ -4081,7 +4308,12 @@ def restore_backup():
                             save_safety_copy("params.db", dst)
                         apply_memory_slots(files[name])
                     else:
-                        save_safety_copy(name, dst)
+                        # A WiFi network under the name of the radio's file it goes onto (wifi_in_place), and the
+                        # radio's own once: a second of the network in the backup goes onto the first
+                        keep = "wifi/" + os.path.basename(dst) if part == "wifi" else name
+                        if dst not in saved:
+                            save_safety_copy(keep, dst)
+                            saved.add(dst)
                         install_file(files[name], dst, 0o600 if part == "wifi" else 0o644)
                         if name.endswith(".db"):
                             for ext in ("-wal", "-shm"):   # stale journal of the replaced file

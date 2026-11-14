@@ -92,6 +92,7 @@ extern ParamInt         *cfg_smeter_color;       // p_smeter_color
 extern ParamInt         *cfg_wf_palette;         // p_wf_palette
 extern ParamInt         *cfg_filter_color;       // p_filter_color
 extern ParamInt         *cfg_filter_shade;       // p_filter_shade: 0 edges only, 4 the full shade (#167)
+extern ParamInt         *cfg_filter_shade_where; // p_filter_shade_where: 0 the passband shaded, 1 outside it (#250)
 extern ParamInt         *cfg_spectrum_line_color; // p_spectrum_line_color
 extern ParamInt         *cfg_spectrum_fill_color; // p_spectrum_fill_color
 extern ParamInt         *cfg_spectrum_fill_gradient; // p_spectrum_fill_gradient
@@ -99,6 +100,8 @@ extern ParamInt         *cfg_smeter_bar_color;   // p_smeter_bar_color
 extern ParamInt         *cfg_swr_color;          // p_swr_color
 extern ParamInt         *cfg_swr_protect;        // p_swr_protect
 extern ParamInt         *cfg_tx_outside_bands;   // p_tx_outside_bands
+extern ParamInt         *cfg_tx_ranges;          // p_tx_ranges (tx_ranges_t, #247)
+extern SubjectInt       *cfg_tx_ranges_read;     // s_tx_ranges_read: a read of the own list (cfg_tx_ranges_changed)
 extern ParamFloat       *cfg_tune_pwr;           // p_tune_pwr
 extern ParamInt         *cfg_tune_time;          // p_tune_time
 extern ParamInt         *cfg_smeter_lamp;        // p_smeter_lamp
@@ -109,7 +112,8 @@ extern ParamInt         *cfg_cluster_all_bands;  // p_cluster_all_bands
 extern ParamInt         *cfg_waterfall_ref;      // p_waterfall_ref
 extern ParamInt         *cfg_smeter_cal;         // p_band_smeter_cal (current band)
 extern ParamInt         *cfg_smeter_pre;         // p_smeter_pre
-extern ParamInt         *cfg_smeter_att;         // p_smeter_att (X6200: p_band_smeter_att, current band)
+extern ParamInt         *cfg_smeter_att;         // p_smeter_att (X6200: p_band_smeter_att, current band, on a supply)
+extern ParamInt         *cfg_smeter_att_bat;     // X6200: p_band_smeter_att_bat, current band, on battery (#125)
 extern ParamInt         *cfg_smeter_rfg;         // p_smeter_rfg
 extern ParamInt         *cfg_waterfall_speed;    // p_waterfall_speed
 extern ParamInt         *cfg_wf_mode;            // p_wf_mode
@@ -143,6 +147,8 @@ extern ParamInt *cfg_freq_accel_onset; // p_freq_accel_onset
 extern ParamInt *cfg_wspr_tx_freq;   // p_wspr_tx_freq
 extern ParamInt *cfg_wspr_upload;    // p_wspr_upload
 extern ParamInt *cfg_wspr_dbm;       // p_wspr_dbm
+extern ParamInt *cfg_wspr_hop;       // p_wspr_hop
+extern ParamInt *cfg_wspr_bands;     // p_wspr_bands
 extern ParamInt *cfg_rade_pwr;       // p_rade_pwr
 extern ParamInt *cfg_pskreporter;    // p_pskreporter
 extern ParamInt *cfg_field_boot;     // p_field_boot
@@ -210,6 +216,9 @@ extern ParamFloat *cfg_cessb_power_up;       // p_cessb_power_up
 extern ParamInt   *cfg_textlog;              // p_textlog
 extern ParamInt   *cfg_textlog_mb;           // p_textlog_mb
 
+// The first-start guide had
+extern ParamInt   *cfg_first_start_done;     // p_first_start_done
+
 // Waterfall Mode Fixed: when the view moves on, and where the line goes
 extern ParamInt   *cfg_wf_fixed_jump;        // p_wf_fixed_jump
 extern ParamInt   *cfg_wf_fixed_after;       // p_wf_fixed_after
@@ -262,6 +271,7 @@ extern ComputedParamInt *cfg_cur_filter_low;   // cp_cur_filter_low
 extern ComputedParamInt *cfg_cur_filter_high;  // cp_cur_filter_high
 extern ComputedParamInt *cfg_cur_filter_bw;    // cp_cur_filter_bw
 extern ComputedParamInt *cfg_mode_lo_offset;   // cp_mode_lo_offset
+extern ComputedParamInt *cfg_mode_tx_lo_offset; // cp_mode_tx_lo_offset
 
 // S-meter calibration for the site ping: *start = the value of bands never calibrated, then up to
 // max bands whose own value differs from it (name, dB). Returns how many

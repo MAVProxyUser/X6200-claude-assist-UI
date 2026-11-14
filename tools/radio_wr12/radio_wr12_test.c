@@ -13,10 +13,13 @@
  *  write of the open TX not taken (opened at the first turn), a shut and an open that fail (said once, not tried at
  *  every step of the dial but 5 s later, then 10 s after one that fails again; said again after one that went through,
  *  either way; the retry not while the base is in TX), and the CW Trainer outside the bands (the base open for its
- *  sidetone, its key at once opening it first, not where the hardware cannot transmit). And radio.c's battery % from
+ *  sidetone, its key at once opening it first, not where the hardware cannot transmit); South Korea's TX ranges and
+ *  the own list (#247: held and shut outside them whatever TX outside ham bands says, the trainer's key refused there,
+ *  a transverter's IF counted, a read of the own list looked at with the dial still). And radio.c's battery % from
  *  the base's supply readings (#223): a full pack on a supply with the base at 2 % (the voltage's in the top bar, the
  *  base's to the battery model, no time to full), a base that counts right there, the % held over a TX on a supply as
- *  on battery, and not carried over an unplug. Then in order: WR12 on HOST off
+ *  on battery, and not carried over an unplug; and the S-meter told the supply for its attenuator figure as the TX
+ *  power top follows it (#125). Then in order: WR12 on HOST off
  *  at the start, on below 54 MHz, the WR12 found; the knob to 98 MHz (held and shut before the base goes to the IF, I
  *  and Q swapped with it, PTT and the modem refused), a band key to 98.1 MHz, the knob back to 7 MHz (the base on the
  *  dial, IQ back, TX held and shut until the WR12's OK to AT+BYPASS=1, PWR, VOX and Train back as they were after it
@@ -52,6 +55,7 @@
 #include <unistd.h>
 
 #include "fakes.h"
+#include "cfg/tx_ranges.h"
 #include "hw/hw.h"
 #include "radio.h"
 #include "wr12.h"
@@ -382,6 +386,112 @@ static void trainer(void) {
     none_yet("the CW Trainer");
 }
 
+/* South Korea's TX ranges (#247), the real tx_ranges.c: a radio started with them on 7.250 MHz (40 m in Region 2,
+ * not in Korea) is held and shut as outside the bands, TX outside ham bands on or not; PTT refused with the TX
+ * ranges' word, the CW Trainer's key too (which outside the amateur bands goes through at 0 W). Inside them TX as set,
+ * 7.2005 MHz held again. Amateur bands chosen again: 7.250 transmits. A 2 m transverter on a 28 MHz IF: 145.0 MHz (IF
+ * 29.0) as set, 145.9 MHz (IF 29.9, past Korea's 10 m) held and shut. The own list: a read of it alone (the dial
+ * still) holds where it no longer lets TX; an empty one holds everywhere, with its own word */
+static void kr_ranges(void) {
+    fake_cfg_init();
+    set_i(cfg_tx_ranges, TX_RANGES_KR);
+    set_i(cfg_band_vfoa_freq, 7250000);
+    start();
+    check(held(), "KR, 7.250 MHz at the start: held");
+    settle();
+    check(shut(), "KR, 7.250 MHz at the start, settled: held and shut (open TX %d)", base.open_tx);
+    base.violations = 0;
+    clock_add(6000);
+    said_clear();
+    check(!radio_set_ptt(true) && !base.ptt && said("No TX on 7.250 MHz") && said("TX ranges: Settings > TX Cal"),
+          "KR, 7.250 MHz: PTT refused, said");
+    set_i(cfg_tx_outside_bands, 1);
+    gui_run();
+    settle();
+    check(shut(), "KR, 7.250 MHz, TX outside ham bands on: still held and shut (open TX %d)", base.open_tx);
+    clock_add(6000);
+    check(!radio_set_ptt(true) && !base.ptt, "KR, 7.250 MHz, the switch on: PTT refused");
+
+    set_i(cfg_key_train, 1);
+    set_i(cfg_band_vfoa_mode, radio_mode_cw);
+    fake_trainer(true);
+    gui_run();
+    radio_thread_turn();
+    settle();
+    check(shut(), "KR, the trainer on 7.250 MHz: held and shut (open TX %d)", base.open_tx);
+    check(!radio_set_morse_key(true) && !base.key, "KR, the trainer on 7.250 MHz: its key refused");
+    radio_set_morse_key(false);
+    fake_trainer(false);
+    set_i(cfg_key_train, 0);
+    set_i(cfg_band_vfoa_mode, radio_mode_usb);
+    knob(7150000);
+    gui_run();
+    radio_thread_turn();
+    settle();
+    clock_add(3000);    /* past the key's hang */
+    radio_thread_turn();
+    check(as_set(), "KR, 7.150 MHz: TX as set (open TX %d)", base.open_tx);
+    check(radio_set_ptt(true) && base.ptt, "KR, 7.150 MHz: PTT goes");
+    radio_set_ptt(false);
+    knob(7200500);
+    gui_run();
+    settle();
+    check(shut(), "KR, 7.2005 MHz: held and shut (open TX %d)", base.open_tx);
+
+    set_i(cfg_tx_outside_bands, 0);
+    knob(7250000);
+    gui_run();
+    settle();
+    set_i(cfg_tx_ranges, TX_RANGES_BANDS);
+    gui_run();
+    settle();
+    check(as_set(), "Amateur bands again, 7.250 MHz: TX as set (open TX %d)", base.open_tx);
+    set_i(cfg_tx_ranges, TX_RANGES_KR);
+    gui_run();
+    check(held(), "KR again, 7.250 MHz: held at once");
+    settle();
+
+    set_i(cfg_transverter_0_from, 144000000);
+    set_i(cfg_transverter_0_to, 146000000);
+    set_i(cfg_transverter_0_shift, 116000000);
+    knob(145000000);
+    gui_run();
+    settle();
+    base_is("KR, a transverter at 145.0 MHz", A, 29000000, false, 0);
+    check(as_set(), "KR, a transverter at 145.0 MHz, IF 29.0: TX as set (open TX %d)", base.open_tx);
+    knob(145900000);
+    gui_run();
+    settle();
+    check(shut(), "KR, a transverter at 145.9 MHz, IF 29.9: held and shut (open TX %d)", base.open_tx);
+    clock_add(6000);
+    said_clear();
+    check(!radio_set_ptt(true) && !base.ptt && said("No TX on 145.900 MHz"), "KR, 145.9 MHz: PTT refused, said");
+    set_i(cfg_transverter_0_shift, 0);
+
+    tx_ranges_own_set("14.000-14.350\n");
+    set_i(cfg_tx_ranges, TX_RANGES_OWN);
+    knob(14074000);
+    gui_run();
+    settle();
+    check(as_set(), "own list 20 m, 14.074 MHz: TX as set (open TX %d)", base.open_tx);
+    tx_ranges_own_set("7.000-7.200\n");
+    notify_now((ParamInt *)cfg_tx_ranges_read);
+    gui_run();
+    check(held(), "own list read again, 40 m only, the dial on 14.074 MHz: held at once");
+    settle();
+    check(shut(), "own list 40 m, 14.074 MHz: held and shut (open TX %d)", base.open_tx);
+    tx_ranges_own_set("");
+    notify_now((ParamInt *)cfg_tx_ranges_read);
+    knob(7100000);
+    gui_run();
+    settle();
+    check(shut(), "own list empty, 7.100 MHz: held and shut (open TX %d)", base.open_tx);
+    clock_add(6000);
+    said_clear();
+    check(!radio_set_ptt(true) && said("No TX ranges: Settings > TX Cal"), "own list empty: PTT refused, said");
+    none_yet("South Korea's TX ranges");
+}
+
 /* ---- The battery % (#223): radio.c's side, the base's supply readings through the real bat_watch.c to the top bar and
  * the battery model. The battery log takes a row a minute by the wall clock, so each child sees its first one only:
  * the first reading that counts */
@@ -457,6 +567,34 @@ static void bat_unplugged_after_tx(void) {
     supply.charging = false;
     readings(400);
     check(shown.cap == 84, "a TX on 11.7 V, then unplugged: 84 %% at once (%d)", shown.cap);
+}
+
+/* The S-meter's attenuator figure follows the supply as the TX power top does (#125): started on battery, the figure
+ * on the supply until the readings count, the one on battery 5 s after; plugged in, the supply's 5 s on; unplugged
+ * for 2 s and back, no change; unplugged, the battery's 5 s on */
+static void meter_follows_supply(void) {
+    supply_start(83, 0, 80);
+    check(!meter_battery, "started on battery, the readings just counting: the figure on the supply (%d)",
+          meter_battery);
+    readings(5200);
+    check(meter_battery, "on battery for 5 s: the figure on battery (%d)", meter_battery);
+    supply.vext     = 135;
+    supply.charging = true;
+    readings(4400);
+    check(meter_battery, "a 13.5 V supply in for under 5 s: still the figure on battery (%d)", meter_battery);
+    readings(1200);
+    check(!meter_battery, "the supply in for 5 s: the figure on the supply (%d)", meter_battery);
+    supply.vext     = 0;
+    supply.charging = false;
+    readings(2000);
+    supply.vext     = 135;
+    supply.charging = true;
+    readings(6000);
+    check(!meter_battery, "unplugged for 2 s and back: the figure on the supply throughout (%d)", meter_battery);
+    supply.vext     = 0;
+    supply.charging = false;
+    readings(6000);
+    check(meter_battery, "unplugged: the figure on battery (%d)", meter_battery);
 }
 
 int __real_pthread_create(pthread_t *t, const pthread_attr_t *attr, void *(*fn)(void *), void *arg);
@@ -579,10 +717,12 @@ int main(void) {
     apart("open TX 0 at the start", start_open_tx_shut);
     apart("a shut and an open that fail", open_tx_fails);
     apart("the CW Trainer outside the bands", trainer);
+    apart("#247 South Korea's TX ranges and the own list", kr_ranges);
     apart("#223 a full pack on the supply", bat_full_on_supply);
     apart("a base that counts right on the supply", bat_counts_on_supply);
     apart("a TX on a supply that does not hold the battery up", bat_tx_on_supply);
     apart("unplugged after a TX", bat_unplugged_after_tx);
+    apart("the S-meter's attenuator figure and the supply", meter_follows_supply);
     apart("the SWR scan's two ways", swrscan_ways);
     apart("the SWR scan's Stop and the base's TX after it", swrscan_stop_tail);
     fake_cfg_init();

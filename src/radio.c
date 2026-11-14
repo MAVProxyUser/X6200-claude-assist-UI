@@ -32,6 +32,7 @@
 #include "dsp.h"
 #include "screen_rec.h"
 #include "params/params.h"
+#include "params/db.h"
 #include "hkey.h"
 #include "tx_info.h"
 #include "info.h"
@@ -60,6 +61,7 @@
 #include "wr12.h"
 #include "pa_bias.h"
 #include "freq_strip.h"
+#include "smeter.h"
 
 /*********************
  *      DEFINES
@@ -197,8 +199,10 @@ static void hkey_sched_cb(void *arg) {
 #ifdef BOARD_PWR_MAX_BAT
 /* The supply changed (true: external power), on the LVGL thread. On battery the cap drops and a
  * power set above it comes down to it; back on external power only the cap goes up, the power
- * stays where it was, as in Xiegu's app */
+ * stays where it was, as in Xiegu's app. And the S-meter takes the attenuator figure for it: the
+ * X6200's attenuator takes off more on battery alone (#125) */
 static void supply_cb(void *arg) {
+    meter_set_battery(!*(bool *)arg);
     if (*(bool *)arg) {
         cfg_pwr_max_set(BOARD_PWR_MAX);
     } else {
@@ -421,13 +425,15 @@ void radio_start() {
     on_xvtr_pwr_change(NULL, NULL);
 
     /* Outside the amateur bands the base held at 0 W, VOX off, KEY Train on (#121): where the radio transmits and the
-     * switch. Looked at once now, before PWR, VOX and Train go to the base below; subscribed before the split bit and
-     * the VFO in use (HW_SPLIT, HW_VFO_CUR below), which observers get in that order: held before the base moves */
+     * switch, the TX ranges and a read of the own list (#247). Looked at once now, before PWR, VOX and Train go to the
+     * base below; subscribed before the split bit and the VFO in use (HW_SPLIT, HW_VFO_CUR below), which observers get
+     * in that order: held before the base moves */
     Subject *band_by[] = {
         (Subject*)cfg_fg_freq, (Subject*)cfg_bg_freq, (Subject*)cfg_band_split, (Subject*)cfg_band_tx_shift,
         (Subject*)cfg_band_current_vfo, (Subject*)cfg_transverter_0_from, (Subject*)cfg_transverter_0_to,
         (Subject*)cfg_transverter_0_shift, (Subject*)cfg_transverter_1_from, (Subject*)cfg_transverter_1_to,
         (Subject*)cfg_transverter_1_shift, (Subject*)cfg_wr12, (Subject*)cfg_tx_outside_bands,
+        (Subject*)cfg_tx_ranges, (Subject*)cfg_tx_ranges_read,
     };
     for (size_t i = 0; i < sizeof(band_by) / sizeof(band_by[0]); i++) {
         subject_subscribe(band_by[i], on_band_hold_change, NULL);
@@ -1079,7 +1085,12 @@ void radio_poweroff() {
     if (params.charger.x == RADIO_CHARGER_SHADOW) {
         WITH_RADIO_LOCK(hw_set_i(HW_CHARGER, true));
     }
+    /* The settings' last changes written, the older settings' too (theirs go 3 s after a change), then the last good
+     * copy of params.db made of them on the system partition (params/db.c): what a start puts in place of a
+     * params.db the power cut damaged */
+    params_flush();
     cfg_api_flush_all();
+    database_keep();
     cfg_db_shutdown();
     /* Onto the card before the base cuts the power: the settings are written with synchronous=OFF (params/db.c), the
      * FAT keeps its table and folder changes in memory, and the kernel writes them out some 30 s later. Cut before,
@@ -1108,14 +1119,16 @@ static bool practice(void) {
  * tuner and the SWR scan come through here; what the base keys by itself (its hand-mic PTT, VOX, the KEY jack) is
  * not, it is held at 0 W there instead (band_hold). The CW Trainer's key goes through outside the bands, where the
  * hardware transmits, its PTT is refused without a word: the key that follows it sounds. Not while the X6200's WR12
- * is out of its bypass, or may be (cfg_tx_block, #134): then nothing goes, anywhere */
+ * is out of its bypass, or may be (cfg_tx_block, #134): then nothing goes, anywhere. Nor outside South Korea's ranges
+ * or the own list (cfg_tx_ranges_narrow, #247): a radio limited to them for its approval puts the base into TX
+ * nowhere else, at 0 W neither; the trainer works inside them */
 static bool tx_refused_at(int32_t freq, tx_by_t by) {
     static uint64_t said;
 
     if (!cfg_tx_refusal(freq)) {
         return false;
     }
-    if (by != TX_BY_GUI && practice() && cfg_is_tx_freq(freq) && !cfg_tx_block()) {
+    if (by != TX_BY_GUI && practice() && cfg_is_tx_freq(freq) && !cfg_tx_block() && !cfg_tx_ranges_narrow()) {
         return by == TX_BY_PTT;
     }
     if (get_time() - said > 5000) {     /* once, not for every CW element nor each slot of a beacon */
@@ -1138,11 +1151,18 @@ bool radio_say_no_tx(const char *what, int32_t freq, bool now) {
     } else {
         msg_schedule_text_fmt("%s on %s", what, mhz);
     }
-    /* Where the hardware transmits it is the bands (cfg_tx_refusal): where the switch is. The WR12 holds it anywhere */
+    /* Where the hardware transmits it is the bands or the TX ranges (cfg_tx_check, #247): where the switch and the
+     * list are. The WR12 holds it anywhere. Each about 30 characters, what the message box shows whole */
     if (block) {
         msg_schedule_text_fmt("%s: no TX", block);
     } else {
-        msg_schedule_text_fmt("%s", cfg_is_tx_freq(freq) ? "Out of band: Settings > TX Cal" : "Receive only there");
+        switch (cfg_tx_check(freq)) {
+            case HAM_TX_OFF_RANGE: msg_schedule_text_fmt("TX ranges: Settings > TX Cal"); break;
+            case HAM_TX_NO_RANGES: msg_schedule_text_fmt("No TX ranges: Settings > TX Cal"); break;
+            default:
+                msg_schedule_text_fmt("%s", cfg_is_tx_freq(freq) ? "Out of band: Settings > TX Cal" : "Receive only there");
+                break;
+        }
     }
     return true;
 }
@@ -1833,7 +1853,8 @@ static int8_t open_tx_want(void) {
     if (!radio_key_refused(&f)) {
         return 1;
     }
-    return practice() && cfg_is_tx_freq(f) && !cfg_tx_block() && !wr12_takes(vfo_freq(true));
+    /* The trainer's key goes through where tx_refused_at lets it: not outside the TX ranges (#247) */
+    return practice() && cfg_is_tx_freq(f) && !cfg_tx_block() && !wr12_takes(vfo_freq(true)) && !cfg_tx_ranges_narrow();
 }
 
 /* Under the lock: the one asked to the base. Not once the GUI's CW key is down: it looks at open_tx_busy after it set
@@ -2866,20 +2887,16 @@ static bool radio_tick() {
             }
 
 #ifdef BOARD_PWR_MAX_BAT
-            /* The TX power cap follows the supply once it has been steady for 5 s, as Xiegu's app
-             * waits. Until the readings count we assume external power, the cap we start with */
-            static bool     supply_ext = true, seen_ext = true;
-            static uint64_t seen_time;
+            /* The TX power cap and the S-meter's attenuator figure follow the supply once it has been steady for
+             * 5 s, as Xiegu's app waits. Until the readings count we assume external power, the cap we start with
+             * (bat_supply_reading). Not told when the GUI's queue is full: then again at the next reading */
+            static bat_supply_t supply;
 
-            if (bat_watch.counts && bat_watch.ext != seen_ext) {
-                seen_ext  = bat_watch.ext;
-                seen_time = now_time;
-            }
-            if (seen_ext != supply_ext && now_time - seen_time >= 5000) {
-                bool ext = seen_ext;
+            if (bat_supply_reading(&supply, &bat_watch, now_time)) {
+                bool ext = !supply.bat;
 
-                if (scheduler_put(supply_cb, &ext, sizeof(ext))) {
-                    supply_ext = ext;
+                if (!scheduler_put(supply_cb, &ext, sizeof(ext))) {
+                    supply.bat = !supply.bat;
                 }
             }
 #endif

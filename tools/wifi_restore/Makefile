@@ -1,5 +1,6 @@
 # Host test of the Backup page's WiFi restore (webserver apps.py): `make` runs it, a backup uploaded and its WiFi
-# part restored through bottle's WSGI app, with the web server's own code, against a NetworkManager of this PC.
+# part restored through bottle's WSGI app, with the web server's own code, against a NetworkManager of this PC. And
+# the factory reset's WiFi choice (rootfs/usr/sbin/x6100-wifi-forget, #257) against the same NetworkManager.
 # It runs in namespaces of its own (unshare -rmn): no network but loopback, NetworkManager's folders on tmpfs and its
 # D-Bus a bus of its own, so nothing of this PC's network is touched. The web server's commands find only the
 # programs every radio image in TARGETS has, as on the radio: dbus-send, no nmcli. See wifi_restore_test.py.
@@ -15,7 +16,7 @@ BOTTLE    ?= $(patsubst %/,%,$(dir $(firstword $(wildcard \
                  $(TOP)/../AetherX6100Buildroot/build/build/python-bottle-*/bottle.py))))
 TARGETS   ?= $(wildcard $(TOP)/../AetherX6200Buildroot/build/target $(TOP)/../AetherX6100Buildroot/build/target)
 WEBSERVER ?=
-V038_FAILS = test_changed_network test_network_in_use_replaced test_new_network
+V038_FAILS = test_changed_network test_network_in_use_replaced test_new_network test_same_network_other_name
 RUN        = mkdir -p build/tmp && TMPDIR=$(CURDIR)/build/tmp BOTTLE=$(if $(BOTTLE),$(abspath $(BOTTLE))) \
              TARGETS="$(abspath $(TARGETS))" WEBSERVER=$(WEBSERVER) unshare -rmn python3 -I -B wifi_restore_test.py
 

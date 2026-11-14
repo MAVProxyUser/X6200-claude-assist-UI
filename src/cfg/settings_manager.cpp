@@ -57,6 +57,7 @@ SettingsManager::SettingsManager()
       // Mode LO offset: CW→-key_tone, CWR→+key_tone, else 0 (0 also in CW where the base's
       // spectrum is centred on the dial). One-way (no reverse).
       cp_mode_lo_offset([this]() { return lo_offset_compute(); }),
+      cp_mode_tx_lo_offset([this]() { return tx_lo_offset_compute(); }),
 
       // Computed current filter params. The compute fns derive the effective
       // filter edges/bw from the MODE-scoped filter params (and key_tone for
@@ -189,6 +190,9 @@ void SettingsManager::init_load(void (*on_db_error)(const char *msg)) {
     cp_mode_lo_offset.bind(cp_cur_mode);
     cp_mode_lo_offset.bind(p_key_tone);
     cp_mode_lo_offset.recompute();
+    cp_mode_tx_lo_offset.bind(cp_cur_mode);
+    cp_mode_tx_lo_offset.bind(p_key_tone);
+    cp_mode_tx_lo_offset.recompute();
 
     // Bind the computed filter params to their sources (filter_low/high +
     // key_tone) so reverse writes to them propagate to the sibling cur_* and
@@ -375,17 +379,18 @@ bool SettingsManager::band_usable(int32_t id) const {
 }
 
 #ifdef BOARD_X6200
-// The X6200's attenuator on a band never set (#125): the figure for the band's frequency (smeter_att.c). The one value
-// of v0.3.8 and before (params "smeter_att": 15 dB, or a Measure on one band) is not taken: it fit one band at most.
-// Its row stays, for going back
-int32_t SettingsManager::smeter_att_start() const {
-    BandInfoLoadResult b = BandsTable::get_by_id(p_band_smeter_att.context_id());
+// The X6200's attenuator on a band never set (#125): the figure for the band's frequency and the power (smeter_att.c).
+// The one value of v0.3.8 and before (params "smeter_att": 15 dB, or a Measure on one band) is not taken: it fit one
+// band at most. Its row stays, for going back
+int32_t SettingsManager::smeter_att_start(const ParamBase &p, bool battery) const {
+    BandInfoLoadResult b = BandsTable::get_by_id(p.context_id());
 
-    return b.rc == SUCCESS ? smeter_att_start_band(b.value.start_freq, b.value.stop_freq) : smeter_att_start_band(0, 0);
+    return b.rc == SUCCESS ? smeter_att_start_band(b.value.start_freq, b.value.stop_freq, battery)
+                           : smeter_att_start_band(0, 0, battery);
 }
 #endif
 
-// The parts of 40 m and 20 m share the S-meter cal and the X6200's attenuator figure (#125): the receiver is the same
+// The parts of 40 m and 20 m share the S-meter cal and the X6200's attenuator figures (#125): the receiver is the same
 // across 7.0 to 7.3 MHz, and a calibration at 7.100 left 7.020 at the start
 std::vector<BandInfo> SettingsManager::smeter_parts(int32_t band_id) {
     std::vector<BandInfo> all = BandsTable::all_bands(), parts;
@@ -1220,4 +1225,14 @@ int32_t SettingsManager::lo_offset_compute() {
         return key_tone;
     }
     return 0;
+}
+
+/* The same while the base transmits. Xiegu's X6100 base from 1.1.9 on centres it on the dial then, where the carrier
+ * is (HW_CAP_TX_SPECTRUM_ON_DIAL): moved by the key tone as in receive, the carrier was drawn a key tone off the line,
+ * below it in CW. Its 1.1.8 keeps it on the oscillator in TX too, and there the carrier is on the line (#191) */
+int32_t SettingsManager::tx_lo_offset_compute() {
+    if (hw_caps_ & HW_CAP_TX_SPECTRUM_ON_DIAL) {
+        return 0;
+    }
+    return lo_offset_compute();
 }

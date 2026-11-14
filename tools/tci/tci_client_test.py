@@ -289,6 +289,8 @@ def main():
     wsjtx_slow_link()
     capitals()
     funnel()
+    ask()
+    cw()
     print("ALL OK")
 
 
@@ -445,6 +447,247 @@ def funnel():
     ws.send(8, struct.pack(">H", 1000))
     ws = WS()
     print("the LAN:", ws.wait_text("protocol:"))
+    ws.send(8, struct.pack(">H", 1000))
+
+
+ASK = os.environ.get("TCI_TEST_ASK")          # the stub's "screen": "ID<TAB>WHO" while the radio asks
+ANSWER = os.environ.get("TCI_TEST_ANSWER")    # what the operator answers there (stubs.c answer_poll)
+ALLOWED = os.environ.get("TCI_TEST_ALLOWED")  # TCI_ALLOWED: the clients allowed always
+
+
+def asked(timeout=2.0):
+    """The question on the radio's screen, (id, who); None when none comes within timeout"""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            with open(ASK) as f:
+                line = f.read().strip()
+            if line:
+                i, who = line.split("\t", 1)
+                return int(i), who
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.02)
+    return None
+
+
+def operator(word):
+    """The operator at the radio: once, always or no to the question, or Settings: off, on, forget ADDR"""
+    with open(ANSWER + ".tmp", "w") as f:
+        f.write(word + "\n")
+    os.rename(ANSWER + ".tmp", ANSWER)
+    end = time.time() + 2
+    while os.path.exists(ANSWER) and time.time() < end:
+        time.sleep(0.02)
+    assert not os.path.exists(ANSWER), "the stub did not take the answer"
+    time.sleep(0.1)
+
+
+def off_screen(timeout=2.0):
+    end = time.time() + timeout
+    while os.path.exists(ASK) and time.time() < end:
+        time.sleep(0.02)
+    return not os.path.exists(ASK)
+
+
+def net_client(addr, agent=None):
+    """A client on the network, as a proxy on the radio hands it over (from 127.0.0.1, its address in
+    X-Forwarded-For): the web server's https port and tailscaled do so"""
+    ws = WS(headers=f"X-Forwarded-For: {addr}\r\n" + (f"User-Agent: {agent}\r\n" if agent else ""))
+    ws.wait_text("ready;")
+    return ws
+
+
+def keyed_and_unkeyed(ws, start, name):
+    ws.text(start)
+    ws.wait_text("trx:0,true;")
+    ws.text("trx:0,false;")
+    ws.wait_text("trx:0,false;")
+    print(f"ask: {name} keys and unkeys")
+
+
+def ask():
+    """A client on the network that asks to transmit, not allowed yet: trx:0,false, and the radio asks on its screen
+    ("<client> wants to transmit": Allow once / Always / No). A second start from it asks nothing more, another
+    client's meanwhile is refused without a question. Allow once lasts while its connection stays open, Always
+    keeps its address (kept across a reconnect, forgotten from the list), No refuses it while it stays connected.
+    Not asked: a program on the radio itself (from 127.0.0.1 without a proxy's header), the browser Panel with a
+    paired browser's key, any client with asking turned off. No answer in time is tci_own_test's (it takes 20 s)"""
+    assert not asked(0.1), "a question on the screen before any client on the network keyed"
+    ws = WS()
+    ws.wait_text("ready;")
+    keyed_and_unkeyed(ws, "trx:0,true;", "a program on the radio itself")
+    assert not asked(0.3), "a program on the radio was asked about"
+    ws.send(8, struct.pack(">H", 1000))
+
+    a = net_client("192.0.2.10", "WSJT-X/2.7.0")
+    a.text("trx:0,true,tci;")
+    print("ask: a client on the network, its start:", a.wait_text("trx:0,"), end=" ")
+    assert a.texts[-1] == "trx:0,false;", a.texts[-1]
+    q = asked()
+    assert q and q[1] == "192.0.2.10 (WSJT-X/2.7.0)", q
+    print(f"the radio asks: \"{q[1]} wants to transmit\"")
+    a.text("trx:0,true;")
+    a.wait_text("trx:0,false;")
+    b = net_client("192.0.2.11")
+    b.text("trx:0,true;")
+    b.wait_text("trx:0,false;")
+    assert asked(0.3) == q, "a second question"
+    print("ask: its second start and another client's: trx:0,false, no second question")
+    operator("once")
+    assert off_screen(), "Allow once: the question still on the screen"
+    keyed_and_unkeyed(a, "trx:0,true,tci;", "Allow once: its next start")
+    keyed_and_unkeyed(a, "trx:0,true;", "and the next")
+    a.send(8, struct.pack(">H", 1000))
+    a = net_client("192.0.2.10", "WSJT-X/2.7.0")
+    a.text("trx:0,true;")
+    a.wait_text("trx:0,false;")
+    q2 = asked()
+    assert q2 and q2[0] != q[0], q2
+    print("ask: back on a new connection: asked again")
+    operator("no")
+    assert off_screen()
+    a.text("trx:0,true;")
+    a.wait_text("trx:0,false;")
+    assert not asked(0.5), "asked again after a No on the same connection"
+    print("ask: No: refused while it stays connected, not asked again")
+    a.send(8, struct.pack(">H", 1000))
+    b.text("trx:0,true;")
+    b.wait_text("trx:0,false;")
+    assert asked(), "the other client, refused while A's question was open: not asked at its next start"
+    operator("no")
+    b.send(8, struct.pack(">H", 1000))
+
+    c = net_client("192.0.2.12", "JTDX")
+    c.text("trx:0,true;")
+    c.wait_text("trx:0,false;")
+    assert asked()
+    operator("always")
+    assert off_screen()
+    with open(ALLOWED) as f:
+        kept = f.read()
+    assert kept.startswith("192.0.2.12\tJTDX\t"), kept
+    keyed_and_unkeyed(c, "trx:0,true,tci;", "Always: its next start")
+    c.send(8, struct.pack(">H", 1000))
+    c = net_client("192.0.2.12", "JTDX")
+    keyed_and_unkeyed(c, "trx:0,true;", "Always, back on a new connection: not asked, its start")
+    assert not asked(0.3)
+    operator("forget 192.0.2.12")
+    c.text("trx:0,true;")
+    c.wait_text("trx:0,false;")
+    assert asked(), "forgotten: not asked"
+    operator("no")
+    print("ask: forgotten: asked again")
+    c.send(8, struct.pack(">H", 1000))
+
+    p = net_client("192.0.2.14")
+    p.text("auth:" + TOKEN + ";")
+    keyed_and_unkeyed(p, "trx:0,true,tci;", "the browser Panel with the key of a paired browser that may transmit")
+    p.send(8, struct.pack(">H", 1000))
+    p = net_client("192.0.2.15")
+    p.text("auth:" + LISTENER + ";")
+    p.text("trx:0,true,tci;")
+    p.wait_text("trx:0,false;")
+    assert not asked(0.3)
+    print("ask: one whose session may not transmit: trx:0,false, not asked")
+    p.send(8, struct.pack(">H", 1000))
+
+    operator("off")
+    d = net_client("192.0.2.13")
+    keyed_and_unkeyed(d, "trx:0,true,tci;", "asking off: a client on the network")
+    assert not asked(0.3)
+    operator("on")
+    d.text("trx:0,true;")
+    d.wait_text("trx:0,false;")
+    assert asked(), "asking on again: not asked"
+    operator("no")
+    d.send(8, struct.pack(">H", 1000))
+
+
+KEYED = os.environ.get("TCI_TEST_KEYED")      # the texts the stub's keyer was given, a line each (speed steps + - =)
+
+
+def keyed():
+    """The texts the stub's keyer was given so far"""
+    if not KEYED or not os.path.exists(KEYED):
+        return []
+    with open(KEYED) as f:
+        return f.read().split("\n")[:-1]
+
+
+def cw():
+    """CW from a client (#179) as QLog's TCI driver sends it ("Morse over CAT"): its commands in capitals, the speed
+    with one argument, TCI's stand-ins for ':' ',' ';' in the text. The greeting gives the keyer's speed; outside CW
+    a text is refused; in CW it goes on the radio's keyer (the stub's ends a text by itself, 20 ms a character), more
+    text follows it, the end says cw_macros_empty; a stop, the client leaving and Ask before TX"""
+    ws = WS()
+    greeting = []
+    while not greeting or greeting[-1] != "ready;":
+        op, p = ws.frame()
+        greeting.append(p.decode())
+    speed = [g for g in greeting if g.startswith("cw_")]
+    assert speed == ["cw_macros_speed:15;", "cw_keyer_speed:15;"], speed
+    print("cw: the greeting:", " ".join(speed))
+
+    ws.text("MODULATION:0,USB;")
+    ws.wait_text("modulation:0,usb;")
+    ws.text("CW_MACROS:0,TEST;")
+    assert ws.wait_text("trx:0,") == "trx:0,false;", ws.texts[-1]
+    assert keyed() == [], keyed()
+    print("cw: a text in USB: trx:0,false;, nothing keyed")
+    ws.text("MODULATION:0,CW;")
+    ws.wait_text("modulation:0,cw;")
+
+    ws.text("CW_MACROS_SPEED;")
+    assert ws.wait_text("cw_macros_speed:") == "cw_macros_speed:15;", ws.texts[-1]
+    ws.text("CW_KEYER_SPEED:28;CW_MACROS_SPEED:28;")      # QLog sets both
+    ws.wait_text("cw_macros_speed:28;")
+    ws.wait_text("cw_keyer_speed:28;")
+    print("cw: CW_MACROS_SPEED; answered, CW_KEYER_SPEED:28; CW_MACROS_SPEED:28; set it: cw_macros_speed:28; cw_keyer_speed:28;")
+
+    ws.text("CW_MACROS:0,CQ DE ON6URE^ 5NN~ TU* |SK|;")
+    ws.wait_text("trx:0,true;")
+    ws.wait_text("cw_macros_empty:0;")
+    ws.wait_text("trx:0,false;")
+    assert keyed() == ["CQ DE ON6URE: 5NN, TU; <SK>"], keyed()
+    print("cw: CW_MACROS:0,CQ DE ON6URE^ 5NN~ TU* |SK|; keyed as", repr(keyed()[-1]), "then cw_macros_empty:0;")
+
+    ws.text("cw_macros:0,cq ;cw_macros:0,>tu <ra6lh >>599 004 |sk| ;")
+    ws.wait_text("trx:0,true;")
+    ws.wait_text("cw_macros_empty:0;", timeout=5)
+    assert keyed()[-2:] == ["CQ ", "+TU -RA6LH ++599 004 <SK> ="], keyed()
+    print("cw: two texts in one frame: the second after the first:", keyed()[-2:])
+
+    ws.text("cw_macros:0," + "paris " * 20 + ";")
+    ws.wait_text("trx:0,true;")
+    t0 = time.time()
+    ws.text("CW_MACROS_STOP;")
+    ws.wait_text("trx:0,false;", timeout=1)
+    print(f"cw: CW_MACROS_STOP; stopped it, trx:0,false; after {1000 * (time.time() - t0):.0f} ms")
+
+    b = WS()
+    b.wait_text("ready;")
+    b.text("cw_macros:0," + "paris " * 20 + ";")
+    ws.wait_text("trx:0,true;")
+    b.s.close()                     # without a word: the connection lost
+    t0 = time.time()
+    ws.wait_text("trx:0,false;", timeout=1.5)
+    print(f"cw: its client gone mid-text: stopped, trx:0,false; after {1000 * (time.time() - t0):.0f} ms")
+
+    n = len(keyed())
+    a = net_client("192.0.2.20", "QLog")
+    a.text("CW_MACROS:0,TEST;")
+    assert a.wait_text("trx:0,") == "trx:0,false;", a.texts[-1]
+    q = asked()
+    assert q and q[1] == "192.0.2.20 (QLog)", q
+    operator("once")
+    assert off_screen() and len(keyed()) == n, keyed()
+    a.text("CW_MACROS:0,TEST;")
+    a.wait_text("trx:0,true;")
+    a.wait_text("cw_macros_empty:0;")
+    assert keyed()[n:] == ["TEST"], keyed()
+    print(f"cw: a client on the network: asked (\"{q[1]} wants to transmit\"), Allow once, its next text keyed")
+    a.send(8, struct.pack(">H", 1000))
     ws.send(8, struct.pack(">H", 1000))
 
 

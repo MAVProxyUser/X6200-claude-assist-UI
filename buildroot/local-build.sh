@@ -281,6 +281,16 @@ if [ $MODEL = x6100 ]; then
         || echo "# CONFIG_TOOLS_MKEFICAPSULE is not set" >> $EXT/board/X6100/u-boot/sun8i-r16-x6100_defconfig
     grep -E "^BR2_TARGET_UBOOT_(CUSTOM_VERSION_VALUE|NEEDS_PYTHON3|CUSTOM_DTS_PATH)" $DEFCONFIG
 fi
+# The processor's voltage with its speed. The boards' device tree gives the processor no supply (cpu-supply), so the
+# kernel changes the clock but never the voltage: U-Boot's 1.2 V at every speed. With the power chip's vdd-cpu rail
+# (dcdc3) named, the kernel follows the processor's own table: 1.04 V up to 648 MHz, 1.1 V to 816 MHz, 1.2 V above, so
+# full speed (1008 MHz, the only one the GUI uses since v0.3.12) stays at the 1.2 V it has now, and a processor slowed
+# by its temperature limit runs at a lower voltage too. The same line as the kernel's own boards of this processor family. U-Boot builds the same file
+# (the X6100's: with its dtsi); it knows both labels
+DTS=$EXT/board/$M/dts/sun8i-r16-$MODEL.dts
+grep -q "cpu-supply" $DTS || printf '\n&cpu0 {\n\tcpu-supply = <&reg_dcdc3>;\n};\n' >> $DTS
+grep -A1 "^&cpu0" $DTS
+
 grep -q "^BR2_ROOTFS_DEVICE_TABLE=" $DEFCONFIG || echo "BR2_ROOTFS_DEVICE_TABLE=\"system/device_table.txt \$(BR2_EXTERNAL_${M}_PATH)/board/$M/linux/device_table.txt\"" >> $DEFCONFIG
 for o in CONFIG_USB_NET_RNDIS_HOST=m CONFIG_IP_ADVANCED_ROUTER=y CONFIG_IP_MULTIPLE_TABLES=y; do
     grep -q "^$o" $KERNEL_DEFCONFIG || echo "$o" >> $KERNEL_DEFCONFIG
@@ -392,6 +402,13 @@ if [ $MODEL = x6200 ] && ls $BR/build/build/linux-[0-9]*/.config > /dev/null 2>&
         && ! grep -qs "^CONFIG_SUN4I_GPADC=y" $BR/build/build/linux-[0-9]*/.config; then
     make linux-dirclean
 fi
+# A kernel built here before its board's DTS named the processor's supply (cpu-supply, above) builds its device tree
+# again: buildroot copies the DTS into the kernel's tree at the kernel's build step only, so the card image kept the
+# DTB without it (the voltage at 1.2 V at every speed)
+if ls $BR/build/build/linux-[0-9]*/.config > /dev/null 2>&1 && [ -f $BR/build/images/sun8i-r16-$MODEL.dtb ] \
+        && ! grep -qs "cpu-supply" $BR/build/images/sun8i-r16-$MODEL.dtb; then
+    make linux-rebuild
+fi
 uboot_source
 make lame mpg123
 make libsndfile-dirclean
@@ -420,8 +437,15 @@ fi
 # build put in target/. A directory that held another GUI's sources (the stock X6200 GUI, in a tree
 # built stock before) is wiped once: its files would be compiled along with ours
 # A tree whose GUI was configured before, also one whose last build failed in the GUI (.stamp_built gone): the
-# first-build path below skipped the web server's reinstall there, and the bundle went without it
-if ls $BR/build/build/$GUI_PKG-*/.stamp_configured > /dev/null 2>&1; then
+# first-build path below skipped the web server's reinstall there, and the bundle went without it. Also one whose
+# last run failed in the GUI's sync: its reconfigure had taken .stamp_configured away, and the next run took the
+# first-build path, without the web server it had removed from target/ (mkbundle.py stopped there: "missing in
+# target"). A tree this script built once has .openx6x00, which stays; a stock-built one has .stamp_configured only
+synced=""
+for f in $BR/build/build/$GUI_PKG-*/.stamp_configured $BR/build/build/$GUI_PKG-*/.openx6x00; do
+    [ -e "$f" ] && synced=1
+done
+if [ -n "$synced" ]; then
     for d in $BR/build/build/$GUI_PKG-*/; do
         [ -d "$d" ] && [ ! -f "$d/.openx6x00" ] && { echo "   wiping $d (not synced from OpenX6X00 before)"; rm -rf "$d"; }
     done

@@ -50,6 +50,8 @@ typedef enum {
     ACTION_WF_3D,       /* appended after FREQ_LOCK: the 3D waterfall on or off */
     ACTION_CW_DECODER,  /* appended after WF_3D: the CW decoder on or off (#196) */
     ACTION_CW_ZAP,      /* the CW ZAP button's: onto the signal the CW Tuner hears (#196) */
+    ACTION_SWL_PANEL,   /* appended after CW_ZAP: the SWL panel, again the next station, as the X6100 mic's GENE (#155) */
+    ACTION_SWL_SAVE,    /* the station the SWL panel shows saved as a channel, as the X6100 mic's NW (#155) */
 
     ACTION_APP_RTTY = 100,
     ACTION_APP_FT8,
@@ -80,6 +82,8 @@ typedef enum {
     ACTION_APP_FREEDV,   /* 128: RADE (FreeDV) */
     ACTION_APP_SENTRY,   /* 129: Sentry, the listener's receiver on the X6200 base's whole spectrum */
     ACTION_APP_ADSB,     /* 130: AIRSPACE, aircraft from a GNS 5890 ADS-B stick on USB */
+    ACTION_APP_FIRST_START, /* 131 here (upstream's 129): the first-start guide (first_start.c), from Settings >
+                             * General; no key gets it, so its number is saved nowhere */
 } press_action_t;
 
 typedef enum {

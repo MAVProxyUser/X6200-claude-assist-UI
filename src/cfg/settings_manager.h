@@ -28,6 +28,7 @@
 
 #include "../board.h"
 #include "../kbd_layout.h"
+#include "../wspr/wspr_hop.h"
 #include "../radio_types.h"
 #include "../common/math.h"
 #include "smeter_att.h"
@@ -70,7 +71,7 @@ class SettingsManager {
     // Public because it is the shared sink of the managed parameters;
     // flushing goes through the manager methods (flush_all / flush_storage).
     PendingWrites pending_writes_;
-    // The sink of the S-meter cal and the X6200's attenuator figure: into pending_writes_, for every part
+    // The sink of the S-meter cal and the X6200's attenuator figures: into pending_writes_, for every part
     SmeterShareSink smeter_share_sink_{pending_writes_};
 
     // Parameter registries (non-owning). MUST be declared before any Parameter
@@ -239,6 +240,10 @@ class SettingsManager {
     // v0.3.9 (FILTER_SHADE_FULL)
     Parameter<int32_t> p_filter_shade{"filter_shade", 4, 0, 4,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Where that shade goes (#250): 0 over the passband as up to v0.3.11, 1 outside it, the passband clear
+    // (FILTER_SHADE_PASSBAND, FILTER_SHADE_OUTSIDE in filter_shade.h)
+    Parameter<int32_t> p_filter_shade_where{"filter_shade_where", 0, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     // Spectrum trace and fill: 0xRRGGBB, -1 the theme's (the fill: as the trace)
     Parameter<int32_t> p_spectrum_line_color{"spectrum_line_color", -1, -1, 0xffffff,
         StorageType::GLOBAL, pending_writes_, &global_params_};
@@ -298,8 +303,9 @@ class SettingsManager {
     // change: the preamp's gain, the attenuator's depth, and hundredths of a dB for each RF gain
     // step under 100. Defaults measured on one radio; Settings > TX Cal > S-METER > Measure sets
     // them for this one (smeter.c, settings_window.cpp). The X6200's preamp gives about 16 dB (two radios, 14 to
-    // 20 dB on 80, 40, 20 and 10 m, #125); its attenuator is the band's, p_band_smeter_att, and the one attenuator
-    // value is the X6100's alone: the X6200 neither reads nor writes the row v0.3.8 stored, left for going back
+    // 20 dB on 80, 40, 20 and 10 m, #125); its attenuator figures are the band's, p_band_smeter_att and
+    // p_band_smeter_att_bat, and the one attenuator value is the X6100's alone: the X6200 neither reads nor writes
+    // the row v0.3.8 stored, left for going back
 #ifdef BOARD_X6200
     Parameter<int32_t> p_smeter_pre{"smeter_pre", 16, 0, 40,
 #else
@@ -419,6 +425,13 @@ class SettingsManager {
     // setting is left alone. 23 dBm: 0.2 W is a 0.1 W step of the X6200 and an exact WSPR level, 0.25 W neither
     Parameter<int32_t> p_wspr_dbm{"wspr_dbm", 23, 20, 37,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Band hopping (#190), WSPR page 2 F5: off, the app stays on its band as before
+    Parameter<int32_t> p_wspr_hop{"wspr_hop", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Each band's use while hopping, two bits a band from 160 m to 6 m: 0 Off, 1 RX, 2 RX+TX (wspr/wspr_hop.h). The
+    // ten slot bands receive at first, 6 m is off: nothing transmits until a band is set to RX+TX
+    Parameter<int32_t> p_wspr_bands{"wspr_bands", WSPR_HOP_DEFAULT, 0, WSPR_HOP_MAX,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     // RADE's own TX power, in tenths of a W (the radio's power setting is left alone). Its OFDM signal's peaks are
     // several dB over its average, which the power reading follows: 2 W by default, at most 3 W
     Parameter<int32_t> p_rade_pwr{"rade_pwr", 20, 5, 30,
@@ -449,7 +462,7 @@ class SettingsManager {
     // CW
     Parameter<int32_t> p_key_tone{"key_tone", 700, 400, 1200,
         StorageType::GLOBAL, pending_writes_, &global_params_};
-    Parameter<int32_t> p_key_speed{"key_speed", 15, 5, 50,
+    Parameter<int32_t> p_key_speed{"key_speed", 15, BOARD_KEY_SPEED_MIN, BOARD_KEY_SPEED_MAX,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_key_mode{"key_mode", radio_key_manual, 0, 2,
         StorageType::GLOBAL, pending_writes_, &global_params_};
@@ -468,6 +481,12 @@ class SettingsManager {
     // transmit; on, wherever the hardware does, for operators licensed there (MARS, CAP...). Receive-only stays so
     Parameter<int32_t> p_tx_outside_bands{"tx_outside_bands", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // TX ranges (#247, tx_ranges.h): the amateur bands (the default, as above), South Korea's ranges, or the own list
+    // (TX_RANGES_FILE). The last two win over TX outside the amateur bands. s_tx_ranges_read counts the reads of the
+    // own list's file, so that what follows the ranges looks again after one (cfg_tx_ranges_changed)
+    Parameter<int32_t> p_tx_ranges{"tx_ranges", TX_RANGES_BANDS, TX_RANGES_BANDS, TX_RANGES_OWN,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    SubjectT<int32_t>  s_tx_ranges_read{0};
     // TUNE for an external tuner (ext_tune.h): its power, W (tune_tx.h's range: up to the PWR top, #87), and its time
     // limit, s
     Parameter<float, int32_t, 10> p_tune_pwr{"tune_pwr", 1.0f,
@@ -582,6 +601,11 @@ class SettingsManager {
     Parameter<int32_t> p_textlog_mb{"textlog_mb", 10, 1, 100,
         StorageType::GLOBAL, pending_writes_, &global_params_};
 
+    // The first-start guide had (first_start.c): finished, skipped or left once. No row on a new card or after a
+    // settings reset, nor on a radio updated from before the guide: there the callsign decides (first_start_rule.h)
+    Parameter<int32_t> p_first_start_done{"first_start_done", 0, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+
     // Waterfall Mode Fixed (Settings > Display > WATERFALL, live, #10): the view moves on when 0 the line (or what is
     // received) is 40% of the span from the centre, 1 the passband's edge 100 Hz from the screen's edge, 2 the line
     // 100 Hz from it; and puts the line 0 where it is received (the centre), 1 at the other edge, 2 where it went
@@ -627,15 +651,28 @@ class SettingsManager {
         &band_params_};
 #ifdef BOARD_X6200
     // The attenuator's depth on this band, dB, added back to the S-meter reading with ATT on (smeter.c): the
-    // X6200's takes 24 to about 62 dB off depending on the band and the radio (two radios, #125), past the one value
-    // p_smeter_att (0..40) the X6100 keeps. Settings > TX Cal > S-METER and its Measure set the band's. A band never
-    // set starts from the radios' figure for its frequency (smeter_att_start, smeter_att.c), also where v0.3.8 stored
-    // its one value; that start is never written, so a band set keeps its own and the others follow a new figure.
-    // Measure writes the band's also when it comes out at the start (store()). Up to SMETER_ATT_MAX (smeter_att.h).
-    // Shared by the parts of 40 m and 20 m, as p_band_smeter_cal
-    Parameter<int32_t> p_band_smeter_att{"smeter_att", 34, [](int32_t v) { return clip(v, 0, SMETER_ATT_MAX); },
+    // X6200's takes 15 to about 62 dB off depending on the band, the radio and the power (two radios, #125), past the
+    // one value p_smeter_att (0..40) the X6100 keeps. Two figures, as it takes off more on the battery alone than on
+    // an external supply: p_band_smeter_att on a supply, its row the one figure's of before (SMETER_ATT_ROW), and
+    // p_band_smeter_att_bat on battery; the meter takes the one for the power the radio is on (meter_on_battery).
+    // Settings > TX Cal > S-METER sets each, and its Measure the one for the power it measured on. A band never set
+    // starts from the figure for its frequency and that power (smeter_att_start, smeter_att.c), also where v0.3.8
+    // stored its one value; that start is never written, so a band set keeps its own and the others follow a new
+    // figure. Measure writes the band's also when it comes out at the start (store()). Up to SMETER_ATT_MAX
+    // (smeter_att.h). Shared by the parts of 40 m and 20 m, as p_band_smeter_cal
+    Parameter<int32_t> p_band_smeter_att{SMETER_ATT_ROW, 16, [](int32_t v) { return clip(v, 0, SMETER_ATT_MAX); },
         StorageType::BAND, smeter_share_sink_,
-        [this] { p_band_smeter_att.set_quiet(smeter_shared_row(p_band_smeter_att).value_or(smeter_att_start())); },
+        [this] {
+            p_band_smeter_att.set_quiet(
+                smeter_shared_row(p_band_smeter_att).value_or(smeter_att_start(p_band_smeter_att, false)));
+        },
+        &band_params_};
+    Parameter<int32_t> p_band_smeter_att_bat{SMETER_ATT_BAT_ROW, 28,
+        [](int32_t v) { return clip(v, 0, SMETER_ATT_MAX); }, StorageType::BAND, smeter_share_sink_,
+        [this] {
+            p_band_smeter_att_bat.set_quiet(
+                smeter_shared_row(p_band_smeter_att_bat).value_or(smeter_att_start(p_band_smeter_att_bat, true)));
+        },
         &band_params_};
 #endif
     // BAND VFO params (context_id = bands_id). These are NOT in the band
@@ -750,6 +787,8 @@ class SettingsManager {
     // CWR → +key_tone, else 0; 0 in every mode with HW_CAP_CW_SPECTRUM_ON_DIAL.
     // Driven by cp_cur_mode, p_key_tone and hw_caps_.
     ComputedParameter<int32_t> cp_mode_lo_offset;
+    // The same while the base transmits: cp_mode_lo_offset's, 0 with HW_CAP_TX_SPECTRUM_ON_DIAL (#191).
+    ComputedParameter<int32_t> cp_mode_tx_lo_offset;
 
     // Computed current filter params for the active MODE category. The compute
     // fns map the MODE-scoped filter_low/filter_high (and key_tone for CW)
@@ -919,11 +958,17 @@ class SettingsManager {
     // WR12 receives
     int32_t default_mode(int32_t freq) const;
 
-    // The bands that share the S-meter cal and the X6200's attenuator figure with band_id, by frequency
+    // The bands that share the S-meter cal and the X6200's attenuator figures with band_id, by frequency
     // (smeter_share_group): the parts of 40 m, or of 20 m, band_id among them, in the order of the band list. Only
     // band_id's own where it shares with none, nothing outside the bands. Read from the list each time: the web page
     // edits it while the radio runs
     static std::vector<BandInfo> smeter_parts(int32_t band_id);
+
+#ifdef BOARD_X6200
+    // The X6200's attenuator figure for the power the radio is on, battery or a supply: the one the meter adds back
+    // and Measure sets (#125)
+    Parameter<int32_t> &smeter_att_for(bool battery) { return battery ? p_band_smeter_att_bat : p_band_smeter_att; }
+#endif
 
   private:
     // active VFO frequency of the current band (compute fn for cp_fg_freq).
@@ -1038,8 +1083,9 @@ class SettingsManager {
     bool band_usable(int32_t id) const;
 
 #ifdef BOARD_X6200
-    // p_band_smeter_att on a band never set: the X6200s' figure for the band's frequency
-    int32_t smeter_att_start() const;
+    // An attenuator figure, p_band_smeter_att or p_band_smeter_att_bat, on a band never set: the X6200's for the
+    // band's frequency, on a supply or on battery
+    int32_t smeter_att_start(const ParamBase &p, bool battery) const;
 #endif
     // A shared S-meter figure on a part with no row of its own: the row of another part of the band, if one has it
     std::optional<int32_t> smeter_shared_row(const ParamBase &p) const;
@@ -1076,6 +1122,7 @@ class SettingsManager {
     int32_t cur_filter_bw_compute();
 
     int32_t lo_offset_compute();
+    int32_t tx_lo_offset_compute();
 
     // reverse fns for cp_cur_filter_{low,high,bw}: map back into
     // p_mode_filter_low/high per the current mode category.

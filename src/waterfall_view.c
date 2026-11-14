@@ -17,6 +17,7 @@
 #include "band_names.h"
 #include "cfg/cfg_api.h"
 #include "dsp.h"
+#include "filter_shade.h"
 #include "smeter.h"
 #include "params/params.h"
 #include "radio.h"
@@ -64,6 +65,12 @@ static bool          ready;             /* the buffers are made */
 static lv_style_t    vfo_line_style;
 static lv_obj_t     *vfo_line;
 static lv_obj_t     *filter_band;
+/* Filter shade Outside (#250): one object the waterfall's size, which draws the shade left and right of the passband
+ * (filter_out_draw_cb()), on columns out_x1..out_x2 as filter_band covers them */
+static lv_obj_t     *filter_out;
+static int32_t       out_x1, out_x2;
+static lv_color_t    out_color;
+static lv_opa_t      out_opa;
 static lv_point_t    vfo_line_points[] = {{0, 0}, {0, 0}};
 
 static lv_coord_t    height;
@@ -77,7 +84,8 @@ static uint8_t       skip_rows;         /* rows of the old frequency still comin
 static bool          retuned;           /* since the row before (#51) */
 static int32_t       radio_center_freq; /* where the base is tuned */
 static int32_t       wf_center_freq;    /* the frequency at the centre of the picture */
-static int32_t       mode_lo_offset;
+static int32_t       mode_lo_offset;    /* where the base's spectrum is centred, Hz from the dial */
+static int32_t       tx_lo_offset;      /* the same while it transmits (#191) */
 static int32_t       if_shift;
 static uint8_t       zoom = 1;
 static uint8_t       line_zoom = 1;  /* the zoom the VFO line and the passband were placed at */
@@ -278,8 +286,11 @@ void waterfall_data(float *db, uint16_t size, bool tx, uint32_t base_freq, uint3
     static uint32_t acc_freq;
     int             frames = speed_frames[LV_CLAMP(1, param_i_get(cfg_waterfall_speed), 5) - 1];
     /* Where the frame was taken: with no frequency from the base (the OEM X6100 base) the GUI's,
-     * else a line averaged frames of several tuning steps */
-    uint32_t        at = base_freq ? base_freq : radio_center_freq + mode_lo_offset;
+     * else a line averaged frames of several tuning steps. In TX where the base centres the frame
+     * then: on the dial with Xiegu's X6100 base from 1.1.9 on, a key tone from where it receives in
+     * CW, so a line holds frames of TX or of receive, not of both (#191) */
+    int32_t         lo = tx ? tx_lo_offset : mode_lo_offset;
+    uint32_t        at = base_freq ? base_freq : radio_center_freq + lo;
 
     if (frames > 1 && size <= WATERFALL_NFFT) {
         if (acc_n == 0 || at != acc_freq) {
@@ -312,9 +323,9 @@ void waterfall_data(float *db, uint16_t size, bool tx, uint32_t base_freq, uint3
 
     waterfall_get_levels(tx, &min, &max);
     if (base_freq == 0) {
-        base_freq = radio_center_freq + mode_lo_offset;     /* no frequency with the data: the one set */
+        base_freq = radio_center_freq + lo;     /* no frequency with the data: the one set */
     } else if (tx) {
-        base_freq += mode_lo_offset;
+        base_freq += tx_lo_offset;
     }
 
     wf_row_t *row = &rows[next];
@@ -1637,6 +1648,44 @@ static void image_drawn_cb(lv_event_t *e) {
 
 /* ---- The VFO line and the passband ---- */
 
+/* Filter shade Outside (#250): the shade left and right of the passband, over the waterfall's picture (2D or 3D) and
+ * under the VFO line, as filter_band's over the passband. Drawn by LVGL, on the GUI's plane with the planes: the
+ * waterfall's own pictures are as they were */
+static void filter_out_draw_cb(lv_event_t *e) {
+    lv_obj_t           *o = lv_event_get_target(e);
+    lv_draw_rect_dsc_t  d;
+    filter_shade_span_t s[2];
+    int                 n = filter_shade_spans(FILTER_SHADE_OUTSIDE, 0, lv_obj_get_width(o) - 1, out_x1, out_x2, s);
+
+    lv_draw_rect_dsc_init(&d);
+    d.bg_color = out_color;
+    d.bg_opa = out_opa;
+    for (int i = 0; i < n; i++) {
+        lv_area_t a = {o->coords.x1 + s[i].x1, o->coords.y1, o->coords.x1 + s[i].x2, o->coords.y2};
+
+        lv_draw_rect(lv_event_get_draw_ctx(e), &d, &a);
+    }
+}
+
+/* The passband on columns x1..x2: with Outside shown, only the columns between its old and its new edges are drawn
+ * again (filter_shade_moved()); in Fixed mode it moves across the view at every tuning step */
+static void filter_out_move(int32_t x1, int32_t x2) {
+    filter_shade_span_t s[2];
+    int                 n = filter_shade_moved(out_x1, out_x2, x1, x2, s);
+
+    out_x1 = x1;
+    out_x2 = x2;
+    if (!filter_out || lv_obj_has_flag(filter_out, LV_OBJ_FLAG_HIDDEN)) {
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        lv_area_t a = {filter_out->coords.x1 + s[i].x1, filter_out->coords.y1, filter_out->coords.x1 + s[i].x2,
+                       filter_out->coords.y2};
+
+        lv_obj_invalidate_area(filter_out, &a);
+    }
+}
+
 static void update_middle_line(void) {
     /* At the picture's scale: with the zoom of "Line, zoom" off the waterfall shows 100 kHz at any spectrum zoom,
      * and the band came out that many times too wide, the line that far off the middle */
@@ -1659,6 +1708,7 @@ static void update_middle_line(void) {
 
     lv_obj_set_pos(filter_band, x1, 0);
     lv_obj_set_width(filter_band, LV_MAX(x2 - x1, 1));
+    filter_out_move(x1, x1 + LV_MAX(x2 - x1, 1) - 1);
 }
 
 /* Shown or not as set (params), checked at each draw */
@@ -1722,23 +1772,41 @@ static void on_mode_lo_offset_change(Subject *subj, void *user_data) {
     mode_lo_offset = subject_i_get((SubjectInt *)subj);
 }
 
+static void on_tx_lo_offset_change(Subject *subj, void *user_data) {
+    tx_lo_offset = subject_i_get((SubjectInt *)subj);
+}
+
 static void on_filter_change(Subject *subj, void *user_data) {
     update_middle_line();
 }
 
 /* The passband's colour and Filter shade (#167): a band of 20% at Full, as before, a quarter of that at 25%; Edges
- * its two edges in that colour (1bit: always its edges, in the line's colour) */
+ * its two edges in that colour (1bit: always its edges, in the line's colour). Shaded part Outside (#250): the same
+ * shade left and right of it instead (filter_out), the band itself not drawn; Edges as with Passband */
 static void on_filter_color_change(Subject *subj, void *user_data) {
     int32_t    c = theme_filter_color(param_i_get(cfg_filter_color));
     int32_t    q = LV_CLAMP(0, param_i_get(cfg_filter_shade), 4);
     lv_color_t col = c >= 0 ? lv_color_hex(c) : TC(vfo_line);
+    lv_opa_t   opa = (lv_opa_t)(LV_OPA_20 * q / 4);
+    bool       out = q > 0 && param_i_get(cfg_filter_shade_where) == FILTER_SHADE_OUTSIDE;
+    bool       shown = !lv_obj_has_flag(filter_out, LV_OBJ_FLAG_HIDDEN);
 
     if (theme_shape.mono) return;
     lv_obj_set_style_bg_color(filter_band, col, 0);
-    lv_obj_set_style_bg_opa(filter_band, (lv_opa_t)(LV_OPA_20 * q / 4), 0);
+    lv_obj_set_style_bg_opa(filter_band, out ? LV_OPA_TRANSP : opa, 0);
     lv_obj_set_style_border_side(filter_band, LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_RIGHT, 0);
     lv_obj_set_style_border_width(filter_band, q == 0 ? 1 : 0, 0);
     lv_obj_set_style_border_color(filter_band, col, 0);
+    if (out && shown && (out_color.full != col.full || out_opa != opa)) {
+        lv_obj_invalidate(filter_out);  /* a new colour or strength: all of it */
+    }
+    out_color = col;
+    out_opa = opa;
+    if (out && !shown) {
+        lv_obj_clear_flag(filter_out, LV_OBJ_FLAG_HIDDEN);     /* drawn whole */
+    } else if (!out && shown) {
+        lv_obj_add_flag(filter_out, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 /* Manual levels follow the band's settings; automatic ones come from the DSP */
@@ -1782,6 +1850,14 @@ lv_obj_t * waterfall_init(lv_obj_t * parent) {
     lv_obj_set_height(filter_band, LV_PCT(100));
     lv_obj_clear_flag(filter_band, LV_OBJ_FLAG_CLICKABLE);
 
+    /* Outside (#250): hidden till on_filter_color_change() shows it; nothing of it drawn meanwhile */
+    filter_out = lv_obj_create(obj);
+    lv_obj_remove_style_all(filter_out);
+    lv_obj_set_size(filter_out, LV_PCT(100), LV_PCT(100));
+    lv_obj_clear_flag(filter_out, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(filter_out, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(filter_out, filter_out_draw_cb, LV_EVENT_DRAW_MAIN, NULL);
+
     vfo_line = lv_line_create(obj);
     lv_obj_add_style(vfo_line, &vfo_line_style, 0);
     lv_obj_center(vfo_line);
@@ -1813,7 +1889,9 @@ lv_obj_t * waterfall_init(lv_obj_t * parent) {
     subject_subscribe_delayed_and_notify((Subject *)cfg_wf_palette, on_palette_change, NULL);
     subject_subscribe_delayed_and_notify((Subject *)cfg_filter_color, on_filter_color_change, NULL);
     subject_subscribe_delayed((Subject *)cfg_filter_shade, on_filter_color_change, NULL);
+    subject_subscribe_delayed((Subject *)cfg_filter_shade_where, on_filter_color_change, NULL);
     subject_subscribe_and_notify((Subject *)cfg_mode_lo_offset, on_mode_lo_offset_change, NULL);
+    subject_subscribe_and_notify((Subject *)cfg_mode_tx_lo_offset, on_tx_lo_offset_change, NULL);
     subject_subscribe((Subject *)cfg_auto_level_enabled, on_levels_change, NULL);
     subject_subscribe((Subject *)cfg_band_grid_min, on_levels_change, NULL);
     subject_subscribe_and_notify((Subject *)cfg_band_grid_max, on_levels_change, NULL);

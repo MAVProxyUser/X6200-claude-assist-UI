@@ -13,6 +13,7 @@
 #include "spectrum_view.h"
 
 #include "cfg/cfg_api.h"
+#include "filter_shade.h"
 #include "navtex_window.h"
 #include "wefax_window.h"
 #include "dsp.h"
@@ -74,6 +75,7 @@ static int32_t          pass_hi = 3000;
 static int32_t          vfo_hz;
 static int32_t          rit_hz;
 static int32_t          lo_offset;          /* where the base's spectrum is centred, Hz from the dial */
+static int32_t          tx_lo_offset;       /* the same while it transmits (#191) */
 static int32_t          bfo;                /* CW and CW-R: the oscillator the tone is heard from, Hz from the dial */
 static int32_t          if_shift;
 static int32_t          notch_on;
@@ -88,7 +90,7 @@ static bool             vfo_line_on = true;
 static bool             direct;
 static uint32_t        *strip;
 static int32_t          strip_h;
-static int32_t          drawn_markers[15];
+static int32_t          drawn_markers[16];
 
 /* Pixels from the centre of a view w wide for hz, rounded either way from 0 (half up, a VFO
  * tuned below the centre of the Fixed view had its trace a pixel to the right) */
@@ -105,9 +107,10 @@ static lv_coord_t markers_px(lv_coord_t w) {
     return hz_px(bfo + if_shift + waterfall_view_shift(), w);
 }
 
-/* Where the base's spectrum is centred, with no lag */
-static lv_coord_t lo_px(lv_coord_t w) {
-    return hz_px(lo_offset + if_shift + waterfall_view_shift(), w);
+/* Where the base's spectrum is centred, with no lag; tx: where it is centred while the base transmits, on the dial
+ * with Xiegu's X6100 base from 1.1.9 on (#191) */
+static lv_coord_t lo_px(bool tx, lv_coord_t w) {
+    return hz_px((tx ? tx_lo_offset : lo_offset) + if_shift + waterfall_view_shift(), w);
 }
 
 /* Where the data are: the base takes a few frames to follow a new frequency, and
@@ -117,7 +120,7 @@ static lv_coord_t trace_px(lv_coord_t w) {
     int16_t lag = 0;
 
     if (data_tx) {
-        return lo_px(w);
+        return lo_px(true, w);
     }
     if (base_lo_hz) {
         lag = base_lo_hz - (vfo_hz + lo_offset - if_shift + rit_hz);
@@ -406,6 +409,17 @@ void spectrum_draw_cb(lv_event_t *e) {
         edge.color = band.bg_color;
         vline(ctx, &edge, pass_x1, top, h);
         vline(ctx, &edge, pass_x2, top, h);
+    } else if (param_i_get(cfg_filter_shade_where) == FILTER_SHADE_OUTSIDE) {
+        /* Outside (#250): the same shade left and right of the passband, inside the frame (the walkie's bandscope
+         * has a border, which it would tint), the passband clear */
+        lv_coord_t          bw = lv_obj_get_style_border_width(o, LV_PART_MAIN);
+        filter_shade_span_t s[2];
+        int                 n = filter_shade_spans(FILTER_SHADE_OUTSIDE, o->coords.x1 + bw, o->coords.x2 - bw,
+                                                   pass_x1, pass_x2, s);
+
+        for (int i = 0; i < n; i++) {
+            shade(ctx, &band, s[i].x1, s[i].x2, top + bw, h - 1 - 2 * bw);
+        }
     } else {
         shade(ctx, &band, pass_x1, pass_x2, top, h);
     }
@@ -545,13 +559,14 @@ static void polyline(const float *db, int from, int to, float min, float max, lv
 
 /* The markers drawn by LVGL: redrawn only when one of them changes, or the zoom that places them (#59: on
  * a new zoom the passband kept its old width, but where something over it happened to be redrawn), or how the
- * passband is drawn (#167: a new Filter shade or colour showed only at the next redraw for something else) */
+ * passband is drawn (#167: a new Filter shade or colour showed only at the next redraw for something else; #250 the
+ * part shaded) */
 static void markers_check(void) {
     int32_t now[sizeof(drawn_markers) / sizeof(drawn_markers[0])] = {
         markers_px(POINTS), pass_lo, pass_hi, notch_on, notch_hz, notch_half,
         rtty_get_state(), params.rtty_center, params.rtty_shift,
         dialog_navtex_is_active() | dialog_wefax_is_active() << 1, vfo_line_on, recorder_is_on(),
-        zoom, param_i_get(cfg_filter_shade), param_i_get(cfg_filter_color)
+        zoom, param_i_get(cfg_filter_shade), param_i_get(cfg_filter_color), param_i_get(cfg_filter_shade_where)
     };
 
     if (memcmp(now, drawn_markers, sizeof(now))) {
@@ -707,6 +722,10 @@ static void on_lo_offset_change(Subject *subj, void *user_data) {
     kept_settle();
 }
 
+static void on_tx_lo_offset_change(Subject *subj, void *user_data) {
+    tx_lo_offset = subject_i_get((SubjectInt *)subj);
+}
+
 static void on_bfo_change(Subject *subj, void *user_data) {
     bfo = radio_cw_tone_dir(subject_i_get((SubjectInt *)cfg_cur_mode)) * param_i_get(cfg_key_tone);
 }
@@ -755,6 +774,7 @@ lv_obj_t *spectrum_init(lv_obj_t *parent) {
     subject_subscribe_and_notify((Subject *)cfg_cur_mode, on_filter_change, NULL);
     subject_subscribe_and_notify((Subject *)cfg_cur_mode, on_mode_change, NULL);
     subject_subscribe_and_notify((Subject *)cfg_mode_lo_offset, on_lo_offset_change, NULL);
+    subject_subscribe_and_notify((Subject *)cfg_mode_tx_lo_offset, on_tx_lo_offset_change, NULL);
     subject_subscribe((Subject *)cfg_cur_mode, on_bfo_change, NULL);
     subject_subscribe_and_notify((Subject *)cfg_key_tone, on_bfo_change, NULL);
     subject_subscribe_and_notify((Subject *)cfg_band_if_shift, on_if_shift_change, NULL);
@@ -830,7 +850,7 @@ void spectrum_data(float *db, uint16_t size, bool tx, uint32_t base_freq, uint8_
 }
 
 int32_t spectrum_span(float *vfo_at) {
-    *vfo_at = 0.5f + (float)lo_px(POINTS) / POINTS;
+    *vfo_at = 0.5f + (float)lo_px(false, POINTS) / POINTS;
     return SPAN_HZ / zoom;
 }
 

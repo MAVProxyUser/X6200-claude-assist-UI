@@ -1,5 +1,6 @@
 import argparse
 import io
+import ipaddress
 import logging
 import os
 import signal
@@ -20,6 +21,7 @@ except ImportError:   # python built without SSL
 
 from . import apps
 from . import settings
+from . import smartcw
 
 
 class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
@@ -204,6 +206,28 @@ def read_head(sock):
     return head
 
 
+def local_peer(addr):
+    """A connection from the radio itself: 127.0.0.1, ::1, or 127.0.0.1 as an IPv6 socket names it"""
+    try:
+        ip = ipaddress.ip_address(addr.split("%")[0])
+    except ValueError:
+        return False
+    return (getattr(ip, "ipv4_mapped", None) or ip).is_loopback
+
+
+def forwarded(head, addr):
+    """The request's head for the GUI's socket. Through this port the GUI sees a connection from 127.0.0.1, which TCI
+    takes for a program on the radio itself, never asked about before it transmits: for a browser on the network,
+    X-Forwarded-For names its address, in place of any it brought, so the GUI knows the client (src/tci_server.c). A
+    connection from the radio itself (tailscaled's serve, or another program here) goes on as it came: tailscaled names
+    its client in that header itself, and the GUI's Funnel checks read it and Tailscale-Funnel-Request as it set them"""
+    if local_peer(addr):
+        return head
+    req, sep, rest = head.partition(b"\r\n\r\n")
+    lines = [line for line in req.split(b"\r\n") if line.partition(b":")[0].strip().lower() != b"x-forwarded-for"]
+    return b"\r\n".join(lines + [b"X-Forwarded-For: " + addr.encode()]) + sep + rest
+
+
 def ws_port(head):
     """The GUI's port for a request of a page's socket, GET /ws/remote or /ws/tci with Upgrade: websocket; None for
     anything else, which the web server answers"""
@@ -273,7 +297,7 @@ def make_https_server(app, host, port, tls):
                 return
             port = ws_port(head)
             if port:
-                pipe(request, port, head)
+                pipe(request, port, forwarded(head, client_address[0]))
                 return
             try:
                 super().finish_request(Replayed(request, head), client_address)
@@ -332,6 +356,18 @@ def follow_sshd_config():
         pass
 
 
+def follow_smartcw_profile():
+    """SmartCW's NetworkManager profile, brought by an update, read by NetworkManager now (smartcw.follow_profile).
+    Done here because every updater restarts the web server after an install. On the radio only"""
+    try:
+        with open("/proc/device-tree/compatible", "rb") as f:
+            if b"xiegu," not in f.read():
+                return
+    except OSError:
+        return
+    smartcw.follow_profile(apps.NM_RELOAD)
+
+
 OLD_SSH_KEYS = "/mnt/ssh/authorized_keys"
 
 
@@ -375,6 +411,7 @@ def options():
     p.add_argument("--cert-dir", help="directory of the self-signed cert.pem and key.pem", default="/mnt/https")
     p.add_argument("--funnel-dir", help="where the Panel for Tailscale Funnel is written (empty: not written)",
                    default=settings.FUNNEL_DIR)
+    p.add_argument("--smartcw-port", type=int, default=smartcw.PORT, help="port of SmartCW's page (0 = off)")
     return p.parse_args()
 
 
@@ -416,6 +453,11 @@ def serve():
         start_https(apps.app, opts.host, opts.https_port, opts.cert_dir)
     adopt_old_ssh_keys()
     follow_sshd_config()
+    follow_smartcw_profile()
+    # SmartCW's page on its own port (smartcw.py); the configurator's menu links to it while it runs
+    if opts.smartcw_port and not (opts.debug and "BOTTLE_CHILD" not in os.environ):   # not in the reloader's parent
+        if smartcw.start(opts.host, opts.smartcw_port, apps.name_ok):
+            settings.SMARTCW_PORT = opts.smartcw_port
     settings.FUNNEL_DIR = opts.funnel_dir
     name = apps.funnel_name()
     write_funnel_pages(opts.funnel_dir, name)

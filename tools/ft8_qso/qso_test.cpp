@@ -1433,6 +1433,131 @@ static void bare_sign(void) {
     check(logged_once("A1AAA", "IN80", -12, -10, false), "its real R-report logs it: rcvd -12, sent -10");
 }
 
+/* ---- No station to answer (#228) ------------------------------------------------------------------------------- */
+
+/* "<...>": a call sent as a hash the decoder has not heard in full (a compound or long call). It was taken as a
+ * station called "...": Auto answered "... Q1QQQ R-10" in place of our CQ, and that does not encode (ft8_lib refuses
+ * it), so its retries went by with TX rows and nothing on the air. Still a message to us, no QSO made of it */
+static void unknown_call(void) {
+    begin("We call CQ: a report from a call we know only as <...> gets no answer, the CQ goes on");
+    tx_cq();
+    our_slot();
+    ftx_msg_meta_t m = rx(ME " <...> -05", -10);
+    check(m.to_me && !m.call_de[0], "a message to us from no call we know (to_me %d, '%s')", m.to_me, m.call_de);
+    slot_end();
+    check(next_is("CQ " ME " " MY_QTH) && !ftx_qso_processor_has_current(qso), "the CQ stays, no QSO (%s)", tx.msg);
+    for (const char *t : {ME " <...> JO22", ME " <...> R-05", ME " <...> RR73", ME " <...> 73"}) {
+        m = rx(t);
+        check(m.to_me && !m.call_de[0] && next_is("CQ " ME " " MY_QTH), "\"%s\": the CQ stays (%s)", t, tx.msg);
+    }
+    slot_end();
+    check(logged.empty(), "nothing logged");
+    rx(ME " A1AAA IN80", -12);
+    slot_end();
+    check(next_is("A1AAA " ME " -12"), "a call after them answered (%s)", tx.msg);
+
+    begin("We answer A's CQ: a report from <...> in between leaves A's QSO as it is");
+    ftx_msg_meta_t cq = rx("CQ A1AAA IN80");
+    slot_end();
+    press(cq);
+    our_slot();
+    rx(ME " <...> -03");
+    rx(ME " A1AAA -05");
+    slot_end();
+    check(next_is("A1AAA " ME " R-10"), "our R-report to A (%s)", tx.msg);
+    our_slot();
+    rx(ME " A1AAA RR73");
+    slot_end();
+    check(logged_once("A1AAA", "IN80", -5, -10, false) && logged.size() == 1, "A logged, nothing else");
+
+    begin("A CQ from <...>: no call in its row");
+    m = rx("CQ <...>");
+    check(m.type == FTX_MSG_TYPE_CQ && !m.call_de[0], "a CQ with no call (type %d, '%s')", m.type, m.call_de);
+}
+
+/* A row with no call in it pressed: free text (Show: All), a call we know only as <...>. The answer had no call:
+ * " Q1QQQ JO21" went out as the free text "Q1QQQ JO21", and "... Q1QQQ JO21" did not encode. ft8_window.c says "No
+ * call to answer in that message"; the processor makes nothing of it either */
+static void no_call_press(void) {
+    begin("Free text pressed: nothing queued, no QSO");
+    ftx_msg_meta_t m = rx("TNX FER QSO");
+    check(m.type == FXT_MSG_TYPE_OTHER && !m.call_de[0], "free text, no call (type %d)", m.type);
+    slot_end();
+    press(m);
+    check(!tx.msg[0] && !ftx_qso_processor_has_current(qso), "nothing queued (%s), no QSO", tx.msg);
+
+    begin("Rows of <...> pressed: nothing queued, the CQ goes on");
+    tx_cq();
+    our_slot();
+    for (const char *t : {"A1AAA <...> -05", "CQ <...>", ME " <...> -05"}) {
+        m = rx(t);
+        press(m);
+        check(next_is("CQ " ME " " MY_QTH) && !ftx_qso_processor_has_current(qso), "\"%s\": the CQ stays (%s)", t,
+              tx.msg);
+    }
+
+    begin("A row of another station's QSO pressed still calls its sender");
+    m = rx("B1BBB A1AAA -05");
+    slot_end();
+    press(m);
+    check(next_is("A1AAA " ME " JO21"), "our call to A (%s)", tx.msg);
+}
+
+/* The story of #228 (kj7prs): four calls to A with no answer, B pressed, B answers at once. Auto on moves to our
+ * R-report; with Auto off (as in the log the reporter sent: ft8_auto=0) our call to B stays, and goes out its retries
+ * while B sends its report again. A, given up, only comes back if it calls us: then Auto answers it, as the manual
+ * says; with Auto off it does not */
+static void story_228(void) {
+    for (bool auto_on : {true, false}) {
+        begin(auto_on ? "#228 with Auto on: B's report gets our R-report" : "#228 with Auto off: our call to B stays",
+              auto_on);
+        ftx_msg_meta_t cqa = rx("CQ A1AAA IN80");
+        ftx_msg_meta_t cqb = rx("CQ B1BBB FN31");
+        slot_end();
+        press(cqa);
+        for (int i = 0; i < 4; i++) {
+            our_slot();
+            rx("CQ B1BBB FN31");
+            slot_end();
+        }
+        press(cqb);
+        our_slot();
+        ftx_msg_meta_t report = rx(ME " B1BBB -05");
+        slot_end();
+        if (auto_on) {
+            check(next_is("B1BBB " ME " R-10"), "our R-report to B (%s)", tx.msg);
+            continue;
+        }
+        check(next_is("B1BBB " ME " JO21"), "our call to B stays (%s)", tx.msg);
+        for (int i = 0; i < 6; i++) {
+            our_slot();
+            rx(ME " B1BBB -05");
+            slot_end();
+        }
+        check(times_sent("B1BBB " ME " JO21") == 6 && !tx.msg[0], "it went out its 6 retries, nothing after (%d)",
+              times_sent("B1BBB " ME " JO21"));
+        check(times_sent("A1AAA " ME " JO21") == 4, "A called 4 times only (%d)", times_sent("A1AAA " ME " JO21"));
+        rx(ME " A1AAA -12");
+        slot_end();
+        check(!tx.msg[0], "A's late report: nothing queued with Auto off (%s)", tx.msg);
+        press(report);
+        check(next_is("B1BBB " ME " R-10"), "B's report pressed: our R-report (%s)", tx.msg);
+    }
+
+    begin("#228 with Auto on: A calls us after B's QSO was given up, and is answered", true);
+    ftx_msg_meta_t cqb = rx("CQ B1BBB FN31");
+    slot_end();
+    press(cqb);
+    for (int i = 0; i < 14; i++) {
+        our_slot();
+        slot_end();
+    }
+    check(!tx.msg[0] && !ftx_qso_processor_has_current(qso), "B given up, nothing queued (%s)", tx.msg);
+    rx(ME " A1AAA -12");
+    slot_end();
+    check(next_is("A1AAA " ME " R-10"), "A's report answered (%s)", tx.msg);
+}
+
 int main(int argc, char **argv) {
     verbose = argc > 1 && !strcmp(argv[1], "-v");
     good_paths();
@@ -1445,6 +1570,9 @@ int main(int argc, char **argv) {
     own_call();
     own_qth();
     bare_sign();
+    unknown_call();
+    no_call_press();
+    story_228();
     ftx_qso_processor_delete(qso);
     printf("FT8 QSO %s: %d of %d cases\n", good == cases ? "OK" : "FAILED", good, cases);
     return good == cases ? 0 : 1;

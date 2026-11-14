@@ -165,6 +165,12 @@ static bool is_report(const std::string &s) {
     return true;
 }
 
+/* "<...>" as the decoder gives a call sent as a hash it has not heard in full (a compound call, a long one): it names
+ * no station we could answer */
+static bool is_unknown_call(const std::string &call) {
+    return call == "...";
+}
+
 void FTxQsoProcessor::add_rx_text(std::string text, const int snr, ftx_msg_meta_t *meta, ftx_tx_msg_t *tx_msg) {
     meta->type = FXT_MSG_TYPE_OTHER;
     meta->local_snr = snr;
@@ -197,6 +203,14 @@ void FTxQsoProcessor::add_rx_text(std::string text, const int snr, ftx_msg_meta_
         if (!token.empty() && token[0] == '<') {
             token = token.substr(1, token.length() - 2);
         }
+    }
+
+    if ((tokens[0] != "CQ") && (tokens.size() >= 3) && is_unknown_call(tokens[1])) {
+        /* "Q1QQQ <...> -05": the sender's call came as a hash we don't know. It was taken as a station called "...":
+         * Auto answered "... Q1QQQ R-10" in place of a CQ, which does not encode, so its retries went by with TX rows
+         * and nothing on the air, and its next message logged a QSO with "...". A message to us still, no QSO (#228) */
+        meta->to_me = tokens[0] == _local_callsign;
+        return;
     }
 
     if (tokens[0] == "CQ") {
@@ -367,6 +381,7 @@ void FTxQsoProcessor::process_cq(ftx_msg_meta_t *meta, std::vector<std::string> 
     } else {
         call_de_pos = 1;
     }
+    if (is_unknown_call(tokens[call_de_pos])) return;     /* a CQ, of no station we could answer (#228) */
     snprintf(meta->call_de, sizeof(meta->call_de), "%s", tokens[call_de_pos].c_str());
     if (tokens.size() > call_de_pos + 1) {
         snprintf(meta->grid, sizeof(meta->grid), "%s", tokens[call_de_pos + 1].c_str());
@@ -534,7 +549,10 @@ bool FTxQsoProcessor::take_ahead(std::string call) {
     return true;
 }
 
+/* A row pressed. One with no call in it (free text, a call we know only as "<...>") is nobody's: its answer had no
+ * call to go to, " Q1QQQ JO21" went out as free text and "... Q1QQQ JO21" did not encode at all (#228) */
 void FTxQsoProcessor::start_qso(ftx_msg_meta_t *meta, ftx_tx_msg_t *tx_msg) {
+    if (!meta->call_de[0] || is_unknown_call(meta->call_de)) return;
     auto type = meta->type;
     if (!meta->to_me) {
         type = FTX_MSG_TYPE_CQ;

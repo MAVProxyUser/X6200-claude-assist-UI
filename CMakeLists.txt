@@ -98,12 +98,15 @@ else()
         # Installed into the buildroot target: the GUI, the rootfs overlay
         # (init scripts, tools, data) and the images
         install(TARGETS ${PROJECT_NAME} DESTINATION sbin)
-        # The X6200's base firmware updater (its fetcher and its list of releases) in the X6200's image only
+        # The X6200's base firmware updater (its fetcher and its list of releases) in the X6200's image only.
+        # NetworkManager's profiles root's own and 0600, or it leaves them out: git keeps 0644 (the update bundle and
+        # the card image take the mode of the installed file, tools/update/mkbundle.py; both make it root's)
         set(ROOTFS_EXCLUDE)
         if(NOT HW_BACKEND STREQUAL "x6200")
                 list(APPEND ROOTFS_EXCLUDE PATTERN "x6x00-base-fetch" EXCLUDE PATTERN "base_releases.txt" EXCLUDE)
         endif()
-        install(DIRECTORY rootfs/ DESTINATION / USE_SOURCE_PERMISSIONS ${ROOTFS_EXCLUDE})
+        install(DIRECTORY rootfs/ DESTINATION / USE_SOURCE_PERMISSIONS
+                PATTERN "*.nmconnection" PERMISSIONS OWNER_READ OWNER_WRITE ${ROOTFS_EXCLUDE})
         install(DIRECTORY images DESTINATION share/x6100)
         # Callsign -> country for the FT8/FT4 table (AD1C, country-files.com)
         install(FILES third-party/cty/cty.dat DESTINATION share/x6100)

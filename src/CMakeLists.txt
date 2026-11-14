@@ -16,7 +16,7 @@ add_dependencies(${PROJECT_NAME} git_commit)
 target_include_directories(${PROJECT_NAME} PRIVATE ${GIT_COMMIT_DIR})
 
 target_sources(${PROJECT_NAME} PUBLIC
-    gui_main.c gui_wake.c ops_room.c screen_main.c walkie.c gui_styles.c mono.c wf_palettes.c
+    gui_main.c gui_wake.c ops_room.c perf_hud.c screen_main.c walkie.c gui_styles.c mono.c wf_palettes.c
     spectrum_view.c radio.c dsp.cpp util.cpp
     waterfall_view.c knob_device.c key_input.c mouse_input.c input_caps.c mfk_device.c
     gui_events.c msg_box.c msg_note.c front_keys.c kbd_rollover.c kbd_hyper.c kbd_keymap.c kbd_layout.c kbd_ptt.c
@@ -24,7 +24,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     band_names.cpp tx_meters.c
     audio.c mfk_control.cpp cw.cpp cw_decoder.c cw_parse.c text_panel.cpp
     rtty.c screen_shot.c screen_rec.c avi_writer.c screen_light.c screen_idle.c screen_saver.c gps.c
-    cat.cpp tci_ws.c tci_audio.c tci_server.c cfg_socket.cpp
+    cat.cpp tci_ws.c tci_audio.c tci_server.c tci_ask.c cfg_socket.cpp
     app_window.c settings_window.cpp swrscan_window.c ft8_window.c
     freq_entry.c gps_window.c cw_messages.c
     voice_messages.c recorder_window.c qth_entry.c station.c dialog_channels.c
@@ -33,10 +33,11 @@ target_sources(${PROJECT_NAME} PUBLIC
     dialog_olivia.c olivia.c olivia_app.c olivia_demod.c olivia_macro.c olivia_mod.c olivia_resamp.c
     olivia_rx.c olivia_tx.c
     dialog_jtty.c jtty.c jtty_rx.c jtty_tx.c
+    digi_freqs.c
     digi_textlog.c
     tx_player.c tx_level.c
     swr_guard.c tune_tx.c ext_tune.c
-    base_guard.c
+    base_guard.c cpu_power.c
     app_sstv.c
     app_sstv_tx.c
     app_sstv_gallery.c
@@ -50,6 +51,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     birdie.c dialog_birdie.c
     app_sentry.c
     adsb.c adsb_rx.c app_adsb.c rtl_spectrum.c
+    first_start.c first_start_rule.c
     dialog_cw_trainer.c
     dialog_cw_kbd.c
     dialog_shell.c
@@ -132,8 +134,9 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
+# gio-unix-2.0: the sockets BlueZ hands over with a D-Bus call (bt_dev.c, TCI over Bluetooth)
 pkg_check_modules(deps REQUIRED IMPORTED_TARGET
-    libnm dbus-glib-1 sqlite3 libpng sndfile libudev libpulse libpulse-simple alsa libjpeg
+    libnm dbus-glib-1 sqlite3 libpng sndfile libudev libpulse libpulse-simple alsa libjpeg gio-unix-2.0
 )
 # gpsd's library: the radio has it; a PC without it builds without GPS (gps.c)
 pkg_check_modules(gps IMPORTED_TARGET libgps)

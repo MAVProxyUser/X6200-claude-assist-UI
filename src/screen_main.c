@@ -93,6 +93,7 @@
 #include "dialog_birdie.h"
 #include "app_sentry.h"
 #include "app_adsb.h"
+#include "first_start.h"
 #include "control_owner.h"
 #include "kbd_hyper.h"
 #include "kbd_ptt.h"
@@ -502,6 +503,7 @@ static const char *app_name(press_action_t a) {
         case ACTION_APP_FREEDV:     return "RADE";
         case ACTION_APP_SENTRY:     return "Sentry";
         case ACTION_APP_ADSB:       return "Airspace";
+        case ACTION_APP_FIRST_START: return "First start";
         default:                   return NULL;    /* Modes menu: a menu, not an app */
     }
 }
@@ -602,6 +604,7 @@ void main_screen_start_app(press_action_t app_action) {
         {ACTION_APP_FREEDV, &dialog_freedv},
         {ACTION_APP_SENTRY, &dialog_sentry},
         {ACTION_APP_ADSB, &dialog_adsb},
+        {ACTION_APP_FIRST_START, &dialog_first_start},
     };
 
     if (app_action == ACTION_APP_RTTY) {
@@ -671,6 +674,9 @@ void main_screen_action(press_action_t action) {
         case ACTION_WF_3D:          say_state("Waterfall 3D", toggle_param(cfg_wf_3d) ? "On" : "Off"); break;
         case ACTION_CW_DECODER:     say_state("CW decoder", toggle_param(cfg_cw_decoder) ? "On" : "Off"); break;
         case ACTION_CW_ZAP:         controls_cw_zap(NULL); break;   /* in CW and CW-R, as the button */
+        /* The X6100 mic's GENE and NW on any key: the X6200's mic has neither (#155) */
+        case ACTION_SWL_PANEL:      swl_gene(); break;
+        case ACTION_SWL_SAVE:       swl_save_channel(); break;
 
         case ACTION_APP_QTH:        dialog_construct(dialog_qth, obj); break;
 
@@ -1604,6 +1610,10 @@ void main_screen_user_lock_freq(bool lock) {
 
 bool main_screen_freq_user_locked(void) {
     return user_lock;
+}
+
+bool main_screen_freq_app_locked(void) {
+    return app_lock;
 }
 
 void main_screen_lock_band(bool lock) {

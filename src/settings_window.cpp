@@ -35,6 +35,7 @@ extern "C" {
     #include "theme.h"
     #include "fonts/font_select.h"
     #include "params/params.h"
+    #include "params/db.h"
     #include "screen_idle.h"
     #include "screen_light.h"
     #include "radio.h"
@@ -156,10 +157,15 @@ static dialog_t dialog = {
 
 dialog_t *dialog_settings = &dialog;
 
-/* The Ethernet card starts from the settings in use, not from a draft left on the tab */
+/* The Ethernet card starts from the settings in use, not from a draft left on the tab. A WiFi scan as the tab
+ * opens: while connected nothing else scans (the background scans are off, see dispatcher.d/20-wifi-steady), and
+ * the networks last seen drop out of the list after a few minutes */
+static void wifi_scan();
+
 static void make_wireless_tab() {
     eth_draft_load();
     make_wireless_page();
+    wifi_scan();
 }
 
 /* In the order of the buttons, four to a page */
@@ -526,91 +532,57 @@ static void preview_fade(lv_obj_t *obj) {
 
 /* Date and time, local. A change sets the system clock at once, the RTC (in UTC) when the focus
  * comes back to a field after the edit. The fields hold the time the page was built: only what an
- * edit changed is applied, to the clock as it is now */
+ * edit changed is applied, to the clock as it is now (clock_fields_set(), the first-start guide's too) */
 
 static struct tm dt_tm;         /* the fields */
-static struct tm dt_utc;        /* the same instant, for the RTC */
 static bool      dt_changed;
 static bool      zone_refresh;  /* spinboxes being reloaded: not a user edit */
 static lv_obj_t *dt_spin[6];
 
-/* Day, month, year, hour, min, sec: shown as the struct tm field + base */
-static const struct {
-    int        base;
-    int        lo, hi;
-    uint8_t    digits;
-    lv_coord_t w;
-} dt_spec[6] = {
-    {0, 1, 31, 2, 78}, {1, 1, 12, 2, 78}, {1900, 2020, 2038, 4, 100}, {0, 0, 23, 2, 78}, {0, 0, 59, 2, 78}, {0, 0, 59, 2, 78},
-};
+/* Day, month, year, hour, min, sec (clock_fields): their widths, the columns of col_datetime */
+static const lv_coord_t dt_w[6] = {78, 78, 100, 78, 78, 78};
 
 static int * dt_field(int i) {
-    int *f[6] = {&dt_tm.tm_mday, &dt_tm.tm_mon, &dt_tm.tm_year, &dt_tm.tm_hour, &dt_tm.tm_min, &dt_tm.tm_sec};
-
-    return f[i];
+    return clock_field(&dt_tm, i);
 }
 
 /* The fields again from dt_tm */
 static void dt_show() {
     zone_refresh = true;
     for (int i = 0; i < 6; i++) {
-        lv_spinbox_set_value(dt_spin[i], *dt_field(i) + dt_spec[i].base);
+        lv_spinbox_set_value(dt_spin[i], *dt_field(i) + clock_fields[i].base);
     }
     zone_refresh = false;
 }
 
-/* The MFK press that moves a field's edit cursor sends a change too: the whole fields went to the clock, which an
- * edit that changed nothing set back by the time the page had been open (23 s on the bench, 2026-10-26) */
 static void dt_changed_cb(lv_event_t *e) {
-    struct timespec tp;
-    struct tm       was = dt_tm, now;
+    struct tm was = dt_tm;
 
     if (zone_refresh) return;
     for (int i = 0; i < 6; i++) {
-        *dt_field(i) = lv_spinbox_get_value(dt_spin[i]) - dt_spec[i].base;
+        *dt_field(i) = lv_spinbox_get_value(dt_spin[i]) - clock_fields[i].base;
     }
-    now = dt_tm;        /* mktime normalises (31 in a 30-day month): copies, the fields stay as shown */
-    was.tm_isdst = now.tm_isdst = -1;
-
-    time_t delta = mktime(&now) - mktime(&was);
-
-    if (delta == 0) return;
-    clock_gettime(CLOCK_REALTIME, &tp);
-    tp.tv_sec += delta;
-    if (clock_settime(CLOCK_REALTIME, &tp) != 0) {
-        LV_LOG_ERROR("Can't set system time: %s\n", strerror(errno));
-        return;
+    if (clock_fields_set(&was, &dt_tm)) {
+        dt_changed = true;
     }
-    dt_changed = true;
-    gmtime_r(&tp.tv_sec, &dt_utc);
 }
 
 static void dt_rtc_cb(lv_event_t *e) {
     if (lv_obj_has_state(lv_event_get_target(e), LV_STATE_EDITED) || !dt_changed) {
         return;
     }
-    int rtc = open(BOARD_RTC_DEV, O_WRONLY);
-
-    if (rtc <= 0) {
-        LV_LOG_ERROR("Can't open " BOARD_RTC_DEV ": %s\n", strerror(errno));
-    } else {
-        int res = ioctl(rtc, RTC_SET_TIME, &dt_utc);
-
-        close(rtc);
-        if (res != 0) {
-            LV_LOG_ERROR("Can't set RTC time: %s\n", strerror(errno));
-            return;     /* tried again at the next focus */
-        }
+    if (clock_rtc_save()) {
+        dt_changed = false;     /* else tried again at the next focus */
     }
-    dt_changed = false;
 }
 
 /* Date (fields 0-2) or time (3-5) */
 static uint8_t make_dt_row(uint8_t row, const char *label, int first) {
     wl_row_label(row, label);
     for (int i = first; i < first + 3; i++) {
-        dt_spin[i] = row_spin(row, 1 + i - first, 1, dt_spec[i].w, *dt_field(i) + dt_spec[i].base, dt_spec[i].lo,
-                              dt_spec[i].hi, dt_spec[i].digits);
+        const clock_field_t *f = &clock_fields[i];
+
+        dt_spin[i] = row_spin(row, 1 + i - first, 1, dt_w[i], *dt_field(i) + f->base, f->lo, f->hi, f->digits);
         lv_obj_add_event_cb(dt_spin[i], dt_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
         lv_obj_add_event_cb(dt_spin[i], dt_rtc_cb, LV_EVENT_FOCUSED, NULL);
     }
@@ -808,6 +780,8 @@ static const key_action_t front_actions[] = {
     {" WF 3D on/off ", ACTION_WF_3D},
     {" CW decoder on/off ", ACTION_CW_DECODER},
     {" CW ZAP ", ACTION_CW_ZAP},
+    {" SWL panel ", ACTION_SWL_PANEL},
+    {" SWL: save channel ", ACTION_SWL_SAVE},
     {" ATT on/off ", ACTION_ATT_TOGGLE},
     {" PRE on/off ", ACTION_PRE_TOGGLE},
     {" Tuner on/off ", ACTION_ATU_TOGGLE},
@@ -852,6 +826,8 @@ static const key_action_t mic_actions[] = {
     {" WF 3D on/off ", ACTION_WF_3D},
     {" CW decoder on/off ", ACTION_CW_DECODER},
     {" CW ZAP ", ACTION_CW_ZAP},
+    {" SWL panel ", ACTION_SWL_PANEL},
+    {" SWL: save channel ", ACTION_SWL_SAVE},
     {" ATT on/off ", ACTION_ATT_TOGGLE},
     {" PRE on/off ", ACTION_PRE_TOGGLE},
     {" Tuner on/off ", ACTION_ATU_TOGGLE},
@@ -1335,6 +1311,7 @@ static uint8_t make_charger(uint8_t row) {
     row_choice(row, 1, 6, SMALL_6, " Off \n On \n Shadow", params.charger.x, charger_cb, &params.charger);
     return row + 1;
 }
+
 
 static uint8_t make_freq_accel(uint8_t row) {
     wl_row_label(row, "Freq acceleration");
@@ -2049,13 +2026,17 @@ static void wifi_power_cb(lv_event_t *e) {
     wifi_update();
 }
 
-static void wifi_scan_cb(lv_event_t *e) {
+static void wifi_scan() {
     wifi_status_t status = wifi_get_status();
 
     if (status == WIFI_OFF || status == WIFI_STARTING || wifi_scanning()) {
         return;
     }
     wifi_start_scan();
+}
+
+static void wifi_scan_cb(lv_event_t *e) {
+    wifi_scan();
 }
 
 static bool wl_kbd_close() {
@@ -2488,6 +2469,8 @@ static struct {
     lv_obj_t *pill;
     lv_obj_t *client;
     lv_obj_t *trust;     /* Operate / Listen only (R3) */
+    lv_obj_t *ask;       /* a client on the network asks before it transmits */
+    lv_obj_t *allowed;   /* the note beside Forget: the clients allowed always */
 } wv;
 
 /* Browser remote (remote_server.c): on/off, who is watching, the paired browsers (R3) */
@@ -2613,6 +2596,30 @@ static void wv_update() {
         if (lv_dropdown_get_selected(wv.trust) != want)
             lv_dropdown_set_selected(wv.trust, want);
     }
+    if (wv.ask && tci_server_get_tx_confirm() != lv_obj_has_state(wv.ask, LV_STATE_CHECKED)) {
+        if (tci_server_get_tx_confirm()) lv_obj_add_state(wv.ask, LV_STATE_CHECKED);
+        else lv_obj_clear_state(wv.ask, LV_STATE_CHECKED);
+    }
+    if (wv.allowed) {
+        char list[160], text[176];
+        int  k = tci_server_allowed(list, sizeof(list));
+        if (k)
+            snprintf(text, sizeof(text), "%d allowed: %s", k, list);
+        else
+            snprintf(text, sizeof(text), "none allowed always");
+        if (strcmp(lv_label_get_text(wv.allowed), text))
+            lv_label_set_text(wv.allowed, text);
+        lv_obj_set_style_text_color(wv.allowed, k ? TC(text) : TC(text_faint), 0);
+    }
+}
+
+static void wv_ask_cb(lv_event_t *e) {
+    tci_server_set_tx_confirm(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
+static void wv_forget_cb(lv_event_t *e) {
+    tci_server_forget(NULL);
+    wv_update();
 }
 
 static void wv_trust_cb(lv_event_t *e) {
@@ -2651,6 +2658,22 @@ static uint8_t make_tci(uint8_t row) {
     wv.trust = row_choice(row, 1, 3, SMALL_3, "Operate\nListen only", tci_server_get_trust_operate() ? 0 : 1, wv_trust_cb, NULL);
     obj = wl_note(row);
     lv_label_set_text(obj, "listen only: tune and key refused");
+    row++;
+
+    /* A client on the network asks on the screen before it transmits: Allow once, Always, No */
+    wl_row_label(row, "Ask before TX");
+    wv.ask = bt_switch_cell(row, 1, tci_server_get_tx_confirm(), wv_ask_cb);
+    obj = wl_note(row);
+    lv_label_set_text(obj, "not for programs on the radio");
+    row++;
+
+    /* Those it was answered Always for: by their address */
+    wl_row_label(row, "Allowed");
+    wl_button(row, "Forget all", wv_forget_cb);
+    wv.allowed = wl_note(row);
+    lv_label_set_long_mode(wv.allowed, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(wv.allowed, 330);
+    lv_label_set_text(wv.allowed, "");
     return row + 1;
 }
 
@@ -3084,7 +3107,23 @@ static uint8_t make_band_region(uint8_t row) {
     return row + 1;
 }
 
+/* The first-start guide again (first_start.c): Settings gives way to it once this press is over, its window going with
+ * the press's own object */
+static void guide_open(void *arg) {
+    main_screen_start_app(ACTION_APP_FIRST_START);
+}
+
+static void guide_cb(lv_event_t *e) {
+    lv_async_call(guide_open, NULL);
+}
+
 static uint8_t make_station(uint8_t row) {
+    wl_row_label(row, "First-start guide");
+
+    lv_obj_t *obj = wl_button(row, "Start", guide_cb);   /* as wide as the callsign's, under it */
+    lv_obj_set_size(obj, 150, ROW_H - 4);
+    lv_obj_set_grid_cell(obj, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, row++, 1);
+
     row = make_station_row(row, "Callsign", params.callsign.x, ST_CALLSIGN);
     row = make_station_row(row, "QTH locator", params.qth.x, ST_QTH);
     row = make_band_region(row);
@@ -3258,41 +3297,12 @@ static uint8_t make_mic(uint8_t row, const char *label, ParamInt &param) {
     return row + 1;
 }
 
-/* Time zone: POSIX TZ strings, applied at once (see clock_tz_set) */
-
-static const struct { const char *label; const char *posix; } zones[] = {
-    /* UTC, then west to east; the POSIX strings must differ (the current one is found by its string) */
-    { "UTC",                              "UTC0" },
-    { "Pacific/Honolulu (HST)",           "HST10" },
-    { "America/Anchorage (AKST/AKDT)",    "AKST9AKDT,M3.2.0,M11.1.0" },
-    { "America/Los_Angeles (PST/PDT)",    "PST8PDT,M3.2.0,M11.1.0" },
-    { "America/Denver (MST/MDT)",         "MST7MDT,M3.2.0,M11.1.0" },
-    { "America/Chicago (CST/CDT)",        "CST6CDT,M3.2.0,M11.1.0" },
-    { "America/New_York (EST/EDT)",       "EST5EDT,M3.2.0,M11.1.0" },
-    { "America/Sao_Paulo (BRT)",          "BRT3" },
-    { "America/Buenos_Aires (ART)",       "ART3" },
-    { "Europe/London (GMT/BST)",          "GMT0BST,M3.5.0/1,M10.5.0" },
-    { "Europe/Lisbon, Canary (WET/WEST)", "WET0WEST,M3.5.0/1,M10.5.0" },
-    { "Europe/Rome (CET/CEST)",           "CET-1CEST,M3.5.0,M10.5.0/3" },
-    { "Europe/Athens (EET/EEST)",         "EET-2EEST,M3.5.0/3,M10.5.0/4" },
-    { "Africa/Johannesburg (SAST)",       "SAST-2" },
-    { "Europe/Moscow (MSK)",              "MSK-3" },
-    { "Asia/Kolkata (IST)",               "IST-5:30" },
-    { "Asia/Singapore (SGT)",             "SGT-8" },
-    { "Asia/Shanghai (CST)",              "CST-8" },
-    { "Australia/Perth (AWST)",           "AWST-8" },
-    { "Asia/Seoul (KST)",                 "KST-9" },
-    { "Asia/Tokyo (JST)",                 "JST-9" },
-    { "Australia/Brisbane (AEST)",        "AEST-10" },
-    { "Australia/Sydney (AEST/AEDT)",     "AEST-10AEDT,M10.1.0,M4.1.0/3" },
-    { "Pacific/Auckland (NZST/NZDT)",     "NZST-12NZDT,M9.5.0,M4.1.0/3" },
-};
-#define ZONES_NUM   (sizeof(zones) / sizeof(zones[0]))
+/* Time zone: POSIX TZ strings, applied at once (clock_tz_set, clock_zones) */
 
 static void zone_update_cb(lv_event_t *e) {
     time_t now = time(NULL);
 
-    clock_tz_set(zones[lv_dropdown_get_selected(lv_event_get_target(e))].posix);
+    clock_tz_set(clock_zones[lv_dropdown_get_selected(lv_event_get_target(e))].posix);
     localtime_r(&now, &dt_tm);
     dt_show();
 }
@@ -3300,17 +3310,12 @@ static void zone_update_cb(lv_event_t *e) {
 static uint8_t make_zone(uint8_t row) {
     lv_obj_t    *obj;
     std::string  options;
-    const char  *tz = getenv("TZ");
-    uint16_t     sel = 0;
 
-    for (size_t i = 0; i < ZONES_NUM; i++) {
-        options += std::string(i ? "\n " : " ") + zones[i].label + " ";
-        if (tz && !strcmp(tz, zones[i].posix)) {
-            sel = i;
-        }
+    for (size_t i = 0; i < clock_zones_n; i++) {
+        options += std::string(i ? "\n " : " ") + clock_zones[i].label + " ";
     }
     wl_row_label(row, "Zone");
-    obj = row_choice(row, 1, 3, 270, options.c_str(), sel, zone_update_cb, NULL);
+    obj = row_choice(row, 1, 3, 270, options.c_str(), clock_zone_now(), zone_update_cb, NULL);
     lv_obj_set_style_text_font(obj, &sony_22, 0);   /* the long zone names fit at this size only */
     lv_obj_set_style_text_font(lv_dropdown_get_list(obj), SF(22), 0);
 
@@ -3473,7 +3478,9 @@ static void pd_update() {
     for (int i = 0; i < PADDLE_SRC_N; i++) {
         if (s & 1u << i) {
             snprintf(text + strlen(text), sizeof(text) - strlen(text), "%s%s", text[0] ? ", " : "",
-                     i == PADDLE_SRC_SER ? tty : src_name[i]);
+                     i == PADDLE_SRC_SER                                ? tty
+                     : i == PADDLE_SRC_MIDI && paddle_keyer_smartcw() ? "SmartCW (MIDI)"
+                                                                      : src_name[i]);
         }
         int map = pd_param(i)->get();
         int lo = map & 0xffff, hi = map >> 16;
@@ -3792,33 +3799,34 @@ static lv_obj_t * upd_line(uint8_t row);
  * noise) the meter is read with everything off, then with PRE, with ATT, and at RF gain 40, 1.5 s
  * to settle and 1.5 s of readings each, and what was left over moves the three settings.
  * PRE, ATT and the RF gain go back as they were after, also when the page closes or on TX.
- * The X6200's attenuator takes 24 to about 62 dB off depending on the band and the radio (#125): there its
- * figure is the band's, up to 70 dB, and Measure sets the band's; and the signal has to be about S9 or
- * more, so that it stays over the noise with ATT on: 3 dB under S9 passes, as its readings are whole dB
+ * The X6200's attenuator takes 15 to about 62 dB off depending on the band, the radio and the power (#125): there
+ * its figure is the band's, up to 70 dB, one on an external supply and one on the battery alone, which takes more
+ * off; Measure sets the band's for the power the radio is on (meter_on_battery). And the signal has to be about S9
+ * or more, so that it stays over the noise with ATT on: 3 dB under S9 passes, as its readings are whole dB
  * from the base and a generator set to S9, -73 dBm, reading a dB under it was refused. The X6100 has one
  * figure, up to 40 dB, and takes S5 or more. */
 #ifdef BOARD_X6200
-static ParamInt &sm_att = cfg_sm.p_band_smeter_att;
 #define SM_ATT_MAX   SMETER_ATT_MAX
-#define SM_ATT_WHERE " on this band"
 #define SMC_MIN      (S9 - 3)
 #define SMC_MIN_S    "S9"
+static param_slider_t sm_att_slider     = {&cfg_sm.p_band_smeter_att, 0, SM_ATT_MAX, 1, "%i dB"};
+static param_slider_t sm_att_bat_slider = {&cfg_sm.p_band_smeter_att_bat, 0, SM_ATT_MAX, 1, "%i dB"};
 #else
 static ParamInt &sm_att = cfg_sm.p_smeter_att;
 #define SM_ATT_MAX   40
-#define SM_ATT_WHERE ""
 #define SMC_MIN      S5
 #define SMC_MIN_S    "S5"
+static param_slider_t sm_att_slider = {&sm_att, 0, SM_ATT_MAX, 1, "%i dB"};
 #endif
 static param_slider_t sm_pre_slider = {&cfg_sm.p_smeter_pre, 0, 40, 1, "%i dB"};
-static param_slider_t sm_att_slider = {&sm_att, 0, SM_ATT_MAX, 1, "%i dB"};
 
 #define SMC_SETTLE   15     /* ticks of 100 ms */
 #define SMC_SAMPLE   15
 #define SMC_RFG_LOW  40
 #define SMC_STEPS    4
 
-static lv_obj_t   *smc_sl[3];       /* the sliders: Preamp, Attenuator, RF gain (hundredths a step) */
+static lv_obj_t   *smc_sl[4];       /* the sliders: Preamp, Attenuator (X6200: on a supply), RF gain (hundredths a
+                                     * step), and the X6200's Attenuator on battery */
 static lv_obj_t   *smc_btn, *smc_note;
 static lv_timer_t *smc_timer;
 static int         smc_step;        /* 0 all off, 1 PRE, 2 ATT, 3 RF gain low */
@@ -3827,6 +3835,9 @@ static float       smc_sum, smc_min, smc_max;
 static float       smc_read[SMC_STEPS];
 static int32_t     smc_pre, smc_att, smc_rfg;     /* as they were */
 static int32_t     smc_band;                       /* the band measured: PRE and ATT are per band */
+#ifdef BOARD_X6200
+static bool        smc_bat;                        /* measured on the battery alone: the attenuator's figure for it */
+#endif
 
 static void sm_rfg_cb(lv_event_t *e) {
     lv_obj_t *obj = lv_event_get_target(e);
@@ -3897,6 +3908,13 @@ static void smc_timer_cb(lv_timer_t *t) {
         smc_stop_fe("Stopped: band changed. Check PRE and ATT on the band you left.", false);
         return;
     }
+#ifdef BOARD_X6200
+    if (meter_on_battery() != smc_bat) {
+        /* The attenuator takes off another figure on each power (#125): the readings would mix the two */
+        smc_stop("Stopped: the supply came or went. Nothing changed.");
+        return;
+    }
+#endif
     smc_tick++;
     if (smc_tick <= SMC_SETTLE) {
         if (smc_tick == 1) {
@@ -3938,6 +3956,10 @@ static void smc_timer_cb(lv_timer_t *t) {
         return;
     }
 
+#ifdef BOARD_X6200
+    /* The figure for the power it measured on, which the readings came through */
+    ParamInt &sm_att = cfg_sm.smeter_att_for(smc_bat);
+#endif
     /* The readings came through the present corrections: each moves by what was left over */
     int32_t pre = LV_CLAMP(0, lroundf(cfg_sm.p_smeter_pre.get() + (smc_read[1] - smc_read[0])), 40);
     int32_t att = LV_CLAMP(0, lroundf(sm_att.get() + (smc_read[0] - smc_read[2])), SM_ATT_MAX);
@@ -3950,7 +3972,11 @@ static void smc_timer_cb(lv_timer_t *t) {
 
     smc_stop(NULL);
     smc_slider_set(smc_sl[0], pre, 1);
+#ifdef BOARD_X6200
+    smc_slider_set(smc_sl[smc_bat ? 3 : 1], att, 1);
+#else
     smc_slider_set(smc_sl[1], att, 1);
+#endif
     smc_slider_set(smc_sl[2], rfg, 5);
     cfg_sm.p_smeter_pre.set(pre);   /* also without the sliders (the page may be gone) */
     sm_att.set(att);
@@ -3963,19 +3989,18 @@ static void smc_timer_cb(lv_timer_t *t) {
     /* The band by its name: the page follows the band, so "this band" would be another one after a band change, and
      * a broadcast carrier next to a ham band sets the broadcast band's figure, not the ham band's. PRE and ATT as on
      * the keys, for the line to hold "Broadcast 41m". On 40 m and 20 m every part the figure went to, "40m CW and
-     * 40m SSB" (smeter_parts, #125), and the RF gain then only on its slider, for the line to fit */
+     * 40m SSB" (smeter_parts, #125). And the power it was set for, "on the supply" or "on battery" (#125): the RF
+     * gain then only on its slider, and at the top PRE too, for the line to fit */
     std::vector<BandInfo> parts  = SettingsManager::smeter_parts(smc_band);
     std::string           set_on = smeter_parts_names(parts);
-    const char *on   = parts.empty() ? "outside the bands" : "on ";
-    const char *name = set_on.c_str();
+    const char *on    = parts.empty() ? "outside the bands" : "on ";
+    const char *name  = set_on.c_str();
+    const char *power = smc_bat ? "on battery" : "on the supply";
 
     if (att_top) {
-        snprintf(buf, sizeof(buf), "Done %s%s: PRE %i dB, ATT %i, the top, so %i or more.", on, name, pre, att, att);
-    } else if (parts.size() > 1) {
-        snprintf(buf, sizeof(buf), "Done %s%s: PRE %i dB, ATT %i dB.", on, name, pre, att);
+        snprintf(buf, sizeof(buf), "Done %s%s, %s: ATT %i, the top, so %i or more.", on, name, power, att, att);
     } else {
-        snprintf(buf, sizeof(buf), "Done %s%s: PRE %i dB, ATT %i dB, RF gain %i.%02i dB a step.", on, name, pre, att,
-                 rfg / 100, rfg % 100);
+        snprintf(buf, sizeof(buf), "Done %s%s, %s: PRE %i dB, ATT %i dB.", on, name, power, pre, att);
     }
 #else
     if (att_top) {
@@ -4001,6 +4026,9 @@ static void smc_btn_cb(lv_event_t *e) {
     smc_att  = cparam_i_get(cfg_cur_att);
     smc_rfg  = param_i_get(cfg_rfgain);
     smc_band = param_i_get(cfg_band_id);
+#ifdef BOARD_X6200
+    smc_bat  = meter_on_battery();
+#endif
     smc_step = 0;
     smc_tick = 0;
     smc_timer = lv_timer_create(smc_timer_cb, 100, NULL);
@@ -4027,13 +4055,25 @@ static uint8_t make_smeter_fe(uint8_t row) {
     smc_sl[0] = param_slider(row_cell(row, 4, 3, SMALL_3), SMALL_3 - 134, &sm_pre_slider);
     lv_obj_add_event_cb(smc_sl[0], ptr_clear_cb, LV_EVENT_DELETE, &smc_sl[0]);
     row++;
-    wl_row_label(row, "Attenuator" SM_ATT_WHERE);
+#ifdef BOARD_X6200
+    /* The band's two figures, each following a band change: the one for the power the radio is on is the one in use
+     * (#125) */
+    wl_row_label(row, "Attenuator on supply");
     smc_sl[1] = param_slider(row_cell(row, 4, 3, SMALL_3), SMALL_3 - 134, &sm_att_slider);
     lv_obj_add_event_cb(smc_sl[1], ptr_clear_cb, LV_EVENT_DELETE, &smc_sl[1]);
-#ifdef BOARD_X6200
-    observers.emplace_back(sm_att.subscribe(sm_att_follow, smc_sl[1]));
-#endif
+    observers.emplace_back(cfg_sm.p_band_smeter_att.subscribe(sm_att_follow, smc_sl[1]));
     row++;
+    wl_row_label(row, "Attenuator on battery");
+    smc_sl[3] = param_slider(row_cell(row, 4, 3, SMALL_3), SMALL_3 - 134, &sm_att_bat_slider);
+    lv_obj_add_event_cb(smc_sl[3], ptr_clear_cb, LV_EVENT_DELETE, &smc_sl[3]);
+    observers.emplace_back(cfg_sm.p_band_smeter_att_bat.subscribe(sm_att_follow, smc_sl[3]));
+    row++;
+#else
+    wl_row_label(row, "Attenuator");
+    smc_sl[1] = param_slider(row_cell(row, 4, 3, SMALL_3), SMALL_3 - 134, &sm_att_slider);
+    lv_obj_add_event_cb(smc_sl[1], ptr_clear_cb, LV_EVENT_DELETE, &smc_sl[1]);
+    row++;
+#endif
     wl_row_label(row, "RF gain, a step");
     smc_sl[2] = row_slider(row_cell(row, 4, 3, SMALL_3), rfg / 5, 0, 40, SMALL_3 - 134, sm_rfg_cb, NULL,
                            "%i.%02i dB", rfg / 100, rfg % 100);
@@ -4051,9 +4091,96 @@ static uint8_t make_smeter_fe(uint8_t row) {
     return row;
 }
 
+/* TX ranges (#247): Ham bands (the amateur bands, the default), South Korea's ranges, or the own list read from its
+ * file on the DATA partition. The note under it says what is in force, for the own list its ranges as read or why
+ * there are none (an empty list transmits nowhere). Choosing Own list reads the file as it is now, as Read again does
+ * after an edit over SSH; the choice is saved at once, so a radio switched off right after keeps it. "Amateur bands"
+ * did not fit the dropdown */
+static lv_obj_t *txr_note;
+
+static void txr_note_show(void) {
+    char            text[160], mhz[24];
+    tx_ranges_own_t st = tx_ranges_own_state();
+    int             l  = 0;
+
+    if (!txr_note) {
+        return;
+    }
+    switch (cfg_sm.p_tx_ranges.get()) {
+        case TX_RANGES_KR:
+            lv_label_set_text(txr_note, "South Korea's ranges only, 160 to 6 m: the switch below goes no further");
+            return;
+        case TX_RANGES_OWN:
+            break;
+        default:
+            lv_label_set_text(txr_note, "Every region's amateur bands; past them only with the switch below");
+            return;
+    }
+    /* What matters first: the line cut with ... keeps it */
+    if (!st.count) {
+        if (st.bad) {
+            l += snprintf(text + l, sizeof(text) - l, "No TX anywhere: line %d not read%s,", st.first_bad,
+                          st.bad > 1 ? " (and more)" : "");
+        } else {
+            l += snprintf(text + l, sizeof(text) - l, "No TX anywhere:");
+        }
+        snprintf(text + l, sizeof(text) - l, " no %s%s", st.missing ? "" : "range in ", cfg_tx_ranges_path());
+    } else {
+        if (st.bad) {
+            l += snprintf(text + l, sizeof(text) - l, "Line %d not read%s. ", st.first_bad,
+                          st.bad > 1 ? " (and more)" : "");
+        }
+        l += snprintf(text + l, sizeof(text) - l, "%d range%s, MHz:", st.count, st.count > 1 ? "s" : "");
+        for (int i = 0; i < st.count && l < (int)sizeof(text) - 1; i++) {
+            int32_t lo, hi;
+            char    to[24], *unit;
+
+            if (!tx_ranges_own_get(i, &lo, &hi)) {
+                break;
+            }
+            cfg_tx_mhz(lo, mhz, sizeof(mhz));
+            cfg_tx_mhz(hi, to, sizeof(to));
+            if ((unit = strchr(mhz, ' '))) *unit = '\0';    /* "7.000 MHz": the number */
+            if ((unit = strchr(to, ' '))) *unit = '\0';
+            l += snprintf(text + l, sizeof(text) - l, "%s %s-%s", i ? "," : "", mhz, to);
+        }
+    }
+    lv_label_set_text(txr_note, text);
+}
+
+static void txr_choice_cb(lv_event_t *e) {
+    int32_t v = lv_dropdown_get_selected(lv_event_get_target(e));
+
+    if (v == TX_RANGES_OWN) {
+        cfg_tx_ranges_load();
+        cfg_tx_ranges_changed();
+    }
+    cfg_sm.p_tx_ranges.set(v);
+    cfg_api_flush_all();
+    txr_note_show();
+}
+
+static void txr_read_cb(lv_event_t *e) {
+    (void)e;
+    cfg_tx_ranges_load();
+    cfg_tx_ranges_changed();
+    txr_note_show();
+}
+
 /* TX outside the amateur bands (#121): off by default, for operators licensed outside them. The receive-only ranges
- * stay so. The note on a line of its own: beside the switch, VISION's type ran the label into it */
+ * stay so. The note on a line of its own: beside the switch, VISION's type ran the label into it. The TX ranges
+ * before it: South Korea's and the own list win over it (#247) */
 static uint8_t make_tx_bands(uint8_t row) {
+    wl_row_label(row, "TX ranges");
+    row_choice(row, 1, 3, SMALL_3, "Ham bands\nSouth Korea\nOwn list", cfg_sm.p_tx_ranges.get(), txr_choice_cb, NULL);
+    row++;
+    txr_note = upd_line(row);
+    lv_obj_add_event_cb(txr_note, ptr_clear_cb, LV_EVENT_DELETE, &txr_note);
+    txr_note_show();
+    row++;
+    wl_row_label(row, "Own list file");
+    wl_button(row, "Read again", txr_read_cb);
+    row++;
     row = make_param_switch(row, "TX outside ham bands", cfg_sm.p_tx_outside_bands);
     lv_label_set_text(upd_line(row), "Only if licensed outside the amateur bands: MARS, CAP");
     return row + 1;
@@ -4117,6 +4244,8 @@ static void make_display_page() {
                                 " Theme \n Blue \n Cyan \n Green \n Yellow \n Orange \n Red \n Violet \n White ",
                                 cfg_sm.p_filter_color);
         row = make_param_choice(row, "Filter shade", " Edges \n 25 % \n 50 % \n 75 % \n Full ", cfg_sm.p_filter_shade);
+        /* Where it goes (#250): over the passband, or outside it with the passband clear */
+        row = make_param_choice(row, "Shaded part", " Passband \n Outside ", cfg_sm.p_filter_shade_where);
         row = make_param_slider(row, "Height", &spectrum_height_slider);   /* live, at each step */
     }
     card_end(row);
@@ -4244,6 +4373,11 @@ static void nn_load(char *out, size_t size) {
     if (!out[0]) {
         snprintf(out, size, "%s", BOARD_NAME_LOWER);   /* x6100-hostname's default too */
     }
+}
+
+/* The first-start guide's last step names the web configurator by it */
+extern "C" void settings_network_name(char *out, size_t size) {
+    nn_load(out, size);
 }
 
 /* Letters, digits and '-', 1 to 32, not starting or ending with '-' (x6100-hostname checks too) */
@@ -5069,6 +5203,8 @@ static lv_obj_t   *fr_count;
 static lv_timer_t *fr_timer;
 static uint32_t    fr_held;     /* ms the MFK has been down, 0: up */
 static bool        fr_armed;    /* the MFK was seen up since the panel opened */
+static bool        fr_wifi;     /* the WiFi choice: the saved WiFi networks go too (#257); keep, each time it opens */
+static lv_obj_t   *fr_wifi_lbl;
 
 static void fr_close(void *arg) {
     if (fr_timer) {
@@ -5102,6 +5238,8 @@ static void fr_timer_cb(lv_timer_t *t) {
     }
     lv_label_set_text(fr_count, "Resetting...");
     lv_refr_now(NULL);
+    if (fr_wifi) factory_reset_wifi();   /* before the settings: it waits for NetworkManager and the copy on DATA */
+    database_keep_drop();   /* the settings' last good copy too, before the reset's sync: nothing brings them back */
     factory_reset_dir(BOARD_DATA);
     _exit(0);   /* not exit(): no destructor may write the settings back */
 }
@@ -5114,12 +5252,30 @@ static void fr_delete_cb(lv_event_t *e) {
         lv_timer_del(fr_timer);
         fr_timer = NULL;
     }
-    fr_count = NULL;
+    fr_count    = NULL;
+    fr_wifi_lbl = NULL;
+}
+
+/* The WiFi choice as it stands, and the turn that changes it */
+static void fr_wifi_show(void) {
+    if (!fr_wifi_lbl) return;
+    lv_label_set_text(fr_wifi_lbl, fr_wifi ? "WiFi networks: deleted too. Turn MFK left: keep them"
+                                           : "WiFi networks: kept. Turn MFK right: delete them too");
+    lv_obj_set_style_text_color(fr_wifi_lbl, lv_color_hex(theme_hex(fr_wifi ? TC_text_head : TC_text_value)), 0);
 }
 
 static void fr_key_cb(lv_event_t *e) {
     switch (*((uint32_t *)lv_event_get_param(e))) {
         case LV_KEY_ESC:    lv_async_call(fr_close, NULL); break;
+        /* The MFK's turn sets the WiFi choice by its direction (a quick spin can't leave it either way), never
+         * while the MFK is held down for the reset: what the hold confirms is what was on the screen */
+        case LV_KEY_RIGHT:
+        case LV_KEY_LEFT:
+            if (!fr_held) {
+                fr_wifi = *((uint32_t *)lv_event_get_param(e)) == LV_KEY_RIGHT;
+                fr_wifi_show();
+            }
+            break;
         case KEY_VOL_LEFT_EDIT:
         case KEY_VOL_LEFT_SELECT:   radio_change_vol(-1); break;
         case KEY_VOL_RIGHT_EDIT:
@@ -5144,25 +5300,28 @@ static void fr_btn_cb(lv_event_t *e) {
 
     lv_obj_t *obj = wl_label(fr_panel, SF(22), theme_hex(TC_text_head), 0);
     lv_label_set_text(obj, "Factory reset");
+    /* The hold line under the title: what overflows the panel (VISION's big type) is the text at the bottom,
+     * never the line that says how to confirm. Below the lists, VISION cut it in half (#257) */
+    fr_count = wl_label(fr_panel, SF(22), theme_hex(TC_text_head), 0);
+    lv_label_set_text(fr_count, "Hold MFK down 3 s to reset - ESC: cancel");
+    fr_wifi     = false;
+    fr_wifi_lbl = wl_label(fr_panel, SF(18), theme_hex(TC_text_value), 0);
+    lv_obj_set_width(fr_wifi_lbl, lv_pct(100));
+    lv_label_set_long_mode(fr_wifi_lbl, LV_LABEL_LONG_WRAP);
+    fr_wifi_show();
 
     obj = wl_label(fr_panel, SF(18), theme_hex(TC_text_value), 0);
     lv_obj_set_width(obj, lv_pct(100));
     lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(obj, "Back to defaults: all settings with the band memory and the CW messages, app frequencies, "
-                           "DX cluster, FT8 UDP, PSK squelch, TCI server, time zone, headphone volume, Bluetooth CAT.");
+    lv_label_set_text(obj, "Back to defaults: all settings with the band memory and CW messages, app frequencies, "
+                           "DX cluster, FT8 UDP, PSK squelch, TCI server and allowed clients, browser remote, time zone, "
+                           "headphone volume, Bluetooth CAT.");
     obj = wl_label(fr_panel, SF(18), theme_hex(TC_text_dim), 0);
     lv_obj_set_width(obj, lv_pct(100));
     lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(obj, "Kept: logs (ADIF, QSO, field), memory channels, PSK/Olivia macros, JS8 texts, voice messages, "
-                           "pictures, recordings, themes, CW trainer progress, Bluetooth pairings.");
-    obj = wl_label(fr_panel, SF(18), theme_hex(TC_text_dim), 0);
-    lv_obj_set_width(obj, lv_pct(100));
-    lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(obj, "Then the screen goes dark for a few seconds while the radio software restarts.");
-
-    lv_obj_set_flex_grow(wl_label(fr_panel, SF(16), theme_hex(TC_text_dim), 0), 1);   /* spacer */
-    fr_count = wl_label(fr_panel, SF(22), theme_hex(TC_text_head), 0);
-    lv_label_set_text(fr_count, "Hold MFK down 3 s to reset - ESC: cancel");
+    /* No longer than this: with VISION's big type the panel just holds the texts (#257) */
+    lv_label_set_text(obj, "Kept: logs, memory channels, macros and texts, voice messages, pictures, recordings, themes, "
+                           "CW trainer progress, pairings, SSH keys, network name, accounts. Then the radio software restarts.");
 
     fr_held  = 0;
     fr_armed = false;

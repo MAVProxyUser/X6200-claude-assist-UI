@@ -53,6 +53,7 @@
 #include "ext_tune.h"
 #include "birdie.h"
 #include "cfg_socket.h"
+#include "cpu_power.h"
 #include "clock.h"
 #include "btaudio.h"
 #include "rtty.h"
@@ -75,6 +76,8 @@
 #include "app_sstv.h"
 #include "walkie.h"
 #include "winlink.h"
+#include "first_start.h"
+#include "perf_hud.h"
 
 /* LVGL draws the areas it refreshes here, then flushes them to the panel */
 #define DISP_BUF_SIZE (BOARD_DISP_W * BOARD_DISP_H * 4)
@@ -194,6 +197,7 @@ static void display_register(void) {
     disp = lv_disp_get_default();
     lv_disp_set_bg_color(disp, lv_color_black());
     lv_disp_set_bg_opa(disp, LV_OPA_COVER);
+    perf_hud_init(&disp_drv);
 }
 
 /* Front keys (event0, the POWER key on its own device where the board has one), main knob,
@@ -263,18 +267,57 @@ static void settings_load(void) {
     styles_load(params.theme_name.x);
 }
 
-/* Settings that did not come from params.db (params/db.c: one the GUI could not use), said once the screen is up */
+/* Settings that did not come from params.db as it was (params/db.c: one the GUI could not use, the last good copy or
+ * the defaults in its place), said once the screen is up; long enough for the line to scroll through */
 static void settings_note_cb(lv_timer_t *t) {
     const char *note = database_note();
 
     (void)t;
     if (note) {
-        msg_schedule_long_text_fmt("%s", note);
+        msg_schedule_text_ms(8000, "%s", note);
     }
+}
+
+/* A minute up on settings that loaded: the last good copy of params.db (params/db.c), what a damaged one is replaced
+ * with at a start, made in a thread of its own. The update's confirm comes at the same moment */
+static void settings_keep_cb(lv_timer_t *t) {
+    (void)t;
+    database_keep_later();
+}
+
+#define UPDATE_CTL "/usr/sbin/x6100-update"
+
+/* A version installed by x6100-update is "pending" until the GUI has run a minute: then it is
+ * confirmed, otherwise the start loop rolls it back after three failed starts */
+static void update_confirm_cb(lv_timer_t *t) {
+    sh_run(UPDATE_CTL " confirm", NULL, NULL);
+}
+
+/* A version taken back, said once at the start after it, which version, to which and why: it did not stay up, it
+ * could not use the settings file, by hand, or its install was cut short. The step back happens before this GUI
+ * starts (x6100-update boot-check, or the web page's button), so nothing else on the screen would tell */
+static void update_notice_done(const char *out, int status, void *user) {
+    const char *text = out + 3;
+    int         len;
+
+    (void)user;
+    if (status == 0 && strncmp(out, "ok ", 3) == 0 && out[3]) {
+        /* Two short lines from the updater (x6100-update screen_text): one line this long would scroll past in the
+         * message box before it could be read */
+        for (len = (int)strlen(text); len > 0 && (text[len - 1] == '\n' || text[len - 1] == '\r'); len--) {
+        }
+        msg_schedule_text_ms(8000, "%.*s", len, text);
+    }
+}
+
+static void update_notice_cb(lv_timer_t *t) {
+    (void)t;
+    sh_run(UPDATE_CTL " notice", update_notice_done, NULL);
 }
 
 /* Everything that runs beside the GUI, once the radio is up */
 static void services_start(void) {
+    cpu_power_start();  /* a radio v0.3.11's Saves power left on ondemand: back to full speed */
     cw_init();
     rtty_init();
     radio_set_rx_tx_notify_fn(&main_screen_notify_rx_tx);
@@ -308,6 +351,7 @@ static void services_start(void) {
     base_update_watch_init();    /* a newer base firmware on xiegu.eu (the daily check): said once per version */
 #endif
     lv_timer_set_repeat_count(lv_timer_create(settings_note_cb, 3000, NULL), 1);
+    lv_timer_set_repeat_count(lv_timer_create(update_notice_cb, 4000, NULL), 1);
 }
 
 /* LVGL's clock (lv_tick_mono.h): the GUI loop sets it before each lv_timer_handler(), this thread every 5 ms
@@ -333,11 +377,6 @@ static void tick_start(void) {
 
 /* The events from the threads, the scheduled work, LVGL; then sleep until LVGL wants to
  * run again, or until a key, a knob or another thread wakes it (gui_wake.h) */
-/* A version installed by x6100-update is "pending" until the GUI has run a minute: then it is
- * confirmed, otherwise the start loop rolls it back after three failed starts */
-static void update_confirm_cb(lv_timer_t *t) {
-    sh_run("/usr/sbin/x6100-update confirm", NULL, NULL);
-}
 
 /* Input drawn at once, frames at least this far apart. On the radios one frame of the panel: drm_flush() waits for
  * the flip of the frame before, so a frame drawn sooner is not shown sooner, and the GUI thread waits in wait_flip()
@@ -361,6 +400,8 @@ static void gui_loop(void) {
     bool drawn = false;     /* the start trace's last stage */
 
     for (;;) {
+        int64_t start = get_time();     /* the performance overlay's loop time */
+
         event_obj_check();
         scheduler_work();
         lv_tick_mono_set(get_time());   /* LVGL's timers on the clock's time, not up to 5 ms behind */
@@ -390,10 +431,12 @@ static void gui_loop(void) {
             start_trace("first frame");
         }
         /* Both counted from after the commit: a put-off draw whose time came during the pass after the least wait */
-        uint32_t now     = (uint32_t)get_time();
+        int64_t  end     = get_time();
+        uint32_t now     = (uint32_t)end;
         int32_t  wait    = till == LV_NO_TIMER_READY ? 100 : (int32_t)(due - now);
         int32_t  draw_in = gui_wake_draw_left(now);
 
+        perf_loop_time(end - start);
         if (draw_in >= 0 && draw_in < wait) wait = draw_in;
         /* A timer due at once after a frame (a frame that ran past its period, 3D with FT8 on the X6100): 5 ms for
          * the other threads, as before #183; else 1 ms. Input wakes it all the same */
@@ -457,16 +500,22 @@ int main(void) {
         main_screen_start_app(ACTION_APP_FIELD);
     }
 #ifdef BOARD_X6200
-    /* The Sentry is the home screen: the radio starts in it (cfg_sentry_home) */
+    /* The Sentry is the home screen: the radio starts in it (cfg_sentry_home). The first-start guide waits while it
+     * is open (first_start.c start_cb), so it is had from Settings > General there */
     else if (!walkie_on() && param_i_get(cfg_sentry_home)) {
         main_screen_start_app(ACTION_APP_SENTRY);
     }
 #endif
-    /* Not when this version could not use the settings file (params/db.c): the update is then taken back */
+    /* Not when this version could not use the settings file (params/db.c): the update is then taken back, and the
+     * updater told why, for what it says after the step back */
     if (!database_version_fault()) {
         lv_timer_set_repeat_count(lv_timer_create(update_confirm_cb, 60000, NULL), 1);
+    } else {
+        sh_run(UPDATE_CTL " fault settings", NULL, NULL);
     }
+    lv_timer_set_repeat_count(lv_timer_create(settings_keep_cb, 60000, NULL), 1);
     dialog_field_wavelog_start();
+    first_start_init();     /* a new card or a settings reset: the guide, once the screen is up */
     gui_loop();
     return 0;
 }

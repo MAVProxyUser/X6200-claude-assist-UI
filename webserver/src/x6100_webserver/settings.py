@@ -22,10 +22,12 @@ FIELD_CMD = "x6100-field"
 WAVELOG_CMD = "x6100-wavelog"       # the Wavelog upload (rootfs/usr/sbin), its settings in FIELD_DIR/wavelog.conf
 HTTPS_PORT = 0                      # set when the HTTPS server runs (the Gallery's in-browser conversion needs it)
 HTTP_PORT = 80                      # the plain server: every other page
+SMARTCW_PORT = 0                    # set when SmartCW's page runs on its own port (smartcw.py)
 REMOTE_CONF = "/mnt/remote.conf"   # the browser remote (src/remote_server.c): enabled=, port=
 FUNNEL_DIR = "/run/x6100-funnel"    # the Panel and the Screen page for Tailscale Funnel, written at the start (#58)
 LOCALTIME = "/etc/localtime"        # Time page: the timezone link
 ZONEINFO = "/usr/share/zoneinfo"
 BOOT_PICTURE = "/mnt/bootlogo.png"  # the owner's own boot picture (Display page), read by bootanim/bootanim.c
 BOOT_PICTURE_BUILTIN = "/usr/share/x6100/bootlogo.png"   # ours, shown when there is none
+TX_RANGES_FILE = "/mnt/tx_ranges.conf"   # the own TX list (#247), read by the GUI (src/cfg/tx_ranges.c)
 DEVICE_TREE = "/proc/device-tree/compatible"   # "xiegu,x6200" in it on an X6200 (the Memories page's ranges)

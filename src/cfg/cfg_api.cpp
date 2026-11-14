@@ -62,6 +62,7 @@ ParamInt         *cfg_smeter_color        = nullptr;
 ParamInt         *cfg_wf_palette          = nullptr;
 ParamInt         *cfg_filter_color        = nullptr;
 ParamInt         *cfg_filter_shade        = nullptr;
+ParamInt         *cfg_filter_shade_where  = nullptr;
 ParamInt         *cfg_spectrum_line_color = nullptr;
 ParamInt         *cfg_spectrum_fill_color = nullptr;
 ParamInt         *cfg_spectrum_fill_gradient = nullptr;
@@ -69,6 +70,8 @@ ParamInt         *cfg_smeter_bar_color = nullptr;
 ParamInt         *cfg_swr_color = nullptr;
 ParamInt         *cfg_swr_protect = nullptr;
 ParamInt         *cfg_tx_outside_bands = nullptr;
+ParamInt         *cfg_tx_ranges        = nullptr;
+SubjectInt       *cfg_tx_ranges_read   = nullptr;
 ParamFloat       *cfg_tune_pwr    = nullptr;
 ParamInt         *cfg_tune_time   = nullptr;
 ParamInt         *cfg_smeter_lamp         = nullptr;
@@ -80,6 +83,7 @@ ParamInt         *cfg_waterfall_ref       = nullptr;
 ParamInt         *cfg_smeter_cal          = nullptr;
 ParamInt         *cfg_smeter_pre          = nullptr;
 ParamInt         *cfg_smeter_att          = nullptr;
+ParamInt         *cfg_smeter_att_bat      = nullptr;
 ParamInt         *cfg_smeter_rfg          = nullptr;
 ParamInt         *cfg_waterfall_speed     = nullptr;
 ParamInt         *cfg_wf_mode             = nullptr;
@@ -109,6 +113,8 @@ ParamInt         *cfg_freq_accel_onset    = nullptr;
 ParamInt         *cfg_wspr_tx_freq        = nullptr;
 ParamInt         *cfg_wspr_upload         = nullptr;
 ParamInt         *cfg_wspr_dbm            = nullptr;
+ParamInt         *cfg_wspr_hop            = nullptr;
+ParamInt         *cfg_wspr_bands          = nullptr;
 ParamInt         *cfg_rade_pwr            = nullptr;
 ParamInt         *cfg_pskreporter         = nullptr;
 ParamInt         *cfg_field_boot          = nullptr;
@@ -161,6 +167,7 @@ ParamInt         *cfg_cessb_on            = nullptr;
 ParamFloat       *cfg_cessb_power_up      = nullptr;
 ParamInt         *cfg_textlog             = nullptr;
 ParamInt         *cfg_textlog_mb          = nullptr;
+ParamInt         *cfg_first_start_done    = nullptr;
 ParamInt         *cfg_wf_fixed_jump       = nullptr;
 ParamInt         *cfg_wf_fixed_after      = nullptr;
 
@@ -211,6 +218,7 @@ ComputedParamInt *cfg_cur_filter_low      = nullptr;
 ComputedParamInt *cfg_cur_filter_high     = nullptr;
 ComputedParamInt *cfg_cur_filter_bw       = nullptr;
 ComputedParamInt *cfg_mode_lo_offset      = nullptr;
+ComputedParamInt *cfg_mode_tx_lo_offset   = nullptr;
 
 void cfg_api_init(void (*on_db_error)(const char *)) {
     // on_db_error is kept for signature compatibility but is currently inert
@@ -267,6 +275,7 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_wf_palette          = &cfg_sm.p_wf_palette;
     cfg_filter_color        = &cfg_sm.p_filter_color;
     cfg_filter_shade        = &cfg_sm.p_filter_shade;
+    cfg_filter_shade_where  = &cfg_sm.p_filter_shade_where;
     cfg_spectrum_line_color = &cfg_sm.p_spectrum_line_color;
     cfg_spectrum_fill_color = &cfg_sm.p_spectrum_fill_color;
     cfg_spectrum_fill_gradient = &cfg_sm.p_spectrum_fill_gradient;
@@ -274,6 +283,8 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_swr_color        = &cfg_sm.p_swr_color;
     cfg_swr_protect      = &cfg_sm.p_swr_protect;
     cfg_tx_outside_bands = &cfg_sm.p_tx_outside_bands;
+    cfg_tx_ranges        = &cfg_sm.p_tx_ranges;
+    cfg_tx_ranges_read   = &cfg_sm.s_tx_ranges_read;
     cfg_tune_pwr         = &cfg_sm.p_tune_pwr;
     cfg_tune_time        = &cfg_sm.p_tune_time;
     cfg_smeter_lamp      = &cfg_sm.p_smeter_lamp;
@@ -286,6 +297,7 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_smeter_pre       = &cfg_sm.p_smeter_pre;
 #ifdef BOARD_X6200
     cfg_smeter_att       = &cfg_sm.p_band_smeter_att;   /* the X6200's attenuator: the band's (#125) */
+    cfg_smeter_att_bat   = &cfg_sm.p_band_smeter_att_bat;   /* and on battery alone */
 #else
     cfg_smeter_att       = &cfg_sm.p_smeter_att;
 #endif
@@ -318,6 +330,8 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_wspr_tx_freq     = &cfg_sm.p_wspr_tx_freq;
     cfg_wspr_upload      = &cfg_sm.p_wspr_upload;
     cfg_wspr_dbm         = &cfg_sm.p_wspr_dbm;
+    cfg_wspr_hop         = &cfg_sm.p_wspr_hop;
+    cfg_wspr_bands       = &cfg_sm.p_wspr_bands;
     cfg_rade_pwr         = &cfg_sm.p_rade_pwr;
     cfg_pskreporter      = &cfg_sm.p_pskreporter;
     cfg_field_boot       = &cfg_sm.p_field_boot;
@@ -373,6 +387,7 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_cessb_power_up   = &cfg_sm.p_cessb_power_up;
     cfg_textlog          = &cfg_sm.p_textlog;
     cfg_textlog_mb       = &cfg_sm.p_textlog_mb;
+    cfg_first_start_done = &cfg_sm.p_first_start_done;
     cfg_wf_fixed_jump    = &cfg_sm.p_wf_fixed_jump;
     cfg_wf_fixed_after   = &cfg_sm.p_wf_fixed_after;
 
@@ -423,9 +438,14 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_cur_filter_high  = &cfg_sm.cp_cur_filter_high;
     cfg_cur_filter_bw    = &cfg_sm.cp_cur_filter_bw;
     cfg_mode_lo_offset   = &cfg_sm.cp_mode_lo_offset;
+    cfg_mode_tx_lo_offset = &cfg_sm.cp_mode_tx_lo_offset;
 
     // Wire the ATU cache to the parameter sources and do the initial load.
     atu_cache_wire_subscriptions();
+
+    // The own TX list (#247), before radio.c first looks where the radio may transmit: with Own list chosen a radio
+    // starts on the file as it is now, an empty list if there is none
+    cfg_tx_ranges_load();
 }
 
 int cfg_smeter_cal_bands(int *start, char (*names)[16], int *vals, int max) {

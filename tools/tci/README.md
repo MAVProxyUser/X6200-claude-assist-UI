@@ -36,7 +36,50 @@ and drive without their value, each answered with the state, nothing done; contr
 it is: with the browser, with another client that tuned, with the asking client during its own
 transmission, with the browser again after it, which that transmission's end gave it back to.
 Every set takes control as before, a `trx` true or false too, also a value the radio has
-already. Each runs in a child process, its clients on socket
+already. Six more ask the operator before a client on the network transmits (Ask before TX):
+its start answered `trx:0,false;`, keying nothing and taking no control, and the question shown
+(the stub's `tci_ask_show`) with its address and the name it gave; a second start asking
+nothing more, another client's start refused without a question; then Allow once (its next start
+keys, its reconnect asks again), Always (kept in TCI_ALLOWED with its name, not asked after a
+reconnect nor after a restart that reads the file back, asked again once forgotten, also on the
+connection that is open), No (refused without asking until it reconnects), no answer in time
+(No, with the note; a late answer changes nothing) and the client leaving while asked (the
+question closed, nothing kept). Not asked: a program on the radio (127.0.0.1, with a User-Agent
+as Pat's), a browser page from 127.0.0.1 with its Origin, a client through the radio's own proxy
+(X-Forwarded-For's last address is the one asked about), a LAN client's X-Forwarded-For not
+believed, its User-Agent cleaned for the screen, a browser that gave a paired key (keys at once),
+one whose session may only watch (refused without a question), a wrong key (asked), a start while
+the radio is on the air and one under Listen only (refused, nothing asked); with `tx_confirm` off
+every client keys as before, and the file says `tx_confirm=0`. Ten more are CW from a client
+(#179), on the stub keyer in `stubs.c` (it keeps what it was given, sends until the case ends
+the text, all of it or cut short, and refuses its first key with `stub_tx_refused`): a text
+keyed in CW and CW-R as the keyer takes it, every client hearing the radio on the air, another
+client's key and text meanwhile refused, `cw_macros_empty:0;` to its client alone at the end and
+control back with the browser; refused outside CW and CW-R (`trx:0,false;`, the note on the
+screen once in 5 s, nothing asked), also when the mode changed on its way to the keyer; Ask
+before TX at its first text (Allow once, then its next text keys) and Listen only (the state and
+KEY Speed answered, nothing done); refused at its first key where the radio may not transmit; the
+keyer shared with the operator's texts (a client's refused while the operator's goes, also when
+it got past the socket thread first; the operator's started during a client's cuts it short,
+`trx:0,false;` and `cw_macros_empty:0;`, what waited dropped, the operator's not stopped);
+stopped by `cw_macros_stop;` (another client's stop changes nothing, no `cw_macros_empty`), by its
+`trx:0,false;`, by its client leaving, and a text on its way when it left keys nothing; a stop lost
+to a full queue sent again, nobody starting meanwhile; more text waiting and following as one
+text, `cw_macros_empty` once, and the text stopped when the mode is set to USB; `cw_macros_speed`
+and `cw_keyer_speed` asked (with no argument, with 0, with a word) and set (either form, either
+name, 60 to 50, 2 to 5), both names told to every client, the speed it has answered to the setter
+alone, a change on the radio told too; and the text's rules (`cw_text`: `^ ~ *` back, `|SK|` one
+sign or the letters of a run with none, TCI's own example of `<` and `>`, what has no Morse left
+out, a text longer than the queue cut with the speed back) with the commands ignored unanswered
+(another transceiver, no text, nothing to key, `cw_msg`, `cw_terminal`) and a comma left in a
+text kept. One more is a knob over Bluetooth (`tci_server_bt_take`, as bt_dev.c hands BlueZ's
+socket over, a copy kept as BlueZ keeps one): known by the device's address, asked as
+"Bluetooth AA:BB:CC:DD:EE:01 (VFO-Knob BT/1.0)", Always kept by that address and its next
+connection keying without a question; silent 4 s on the air it stays keyed, 5 s and its
+transmission ends with the connection kept, silent with nothing on the air it is only pinged;
+BlueZ asking to let go (`tci_server_bt_drop`) closes it and the other end sees the end while
+BlueZ's copy is open (a shutdown, not a close alone); the link gone unkeys at once; with TCI off
+a connection is refused the same way. Each runs in a child process, its clients on socket
 pairs, without a listener, and three times: the clients' commands as written, in capitals (as
 Hamlib's TCI backend sends them, `TRX:0,TRUE,TCI;`, `AUTH:` over Funnel) and in mixed case
 (`TrX:0,TrUe,tCi;`), which TCI says are the same: the same answers, in lower case. It prints
@@ -74,7 +117,24 @@ unkeying; the first one silent 6 s, another browser's key closed and the same br
 from another address greeted, the first one closed; the session revoked (the file `REVOKED`
 names exists) closing it; a session that may not transmit refused; three wrong keys pausing
 Funnel (the stub's rule); then a request through Tailscale's proxy from the tailnet (no such
-header) and one from the LAN, taken as before. The
+header) and one from the LAN, taken as before. Then Ask before TX on the running server, the
+operator played through the files ASK (the question on the screen: its id and who) and ANSWER
+(`once`, `always`, `no`, `off`, `on`, `forget ADDR`, read by the stub every 50 ms), the clients
+on the network coming from loopback through X-Forwarded-For as from the radio's proxies: a
+program on the radio keys unasked; a client asked, its second start asking nothing more and
+another client's start refused unasked; Allow once keying, its reconnect asked again; No
+refusing until it reconnects; Always keeping it in ALLOWED (`192.0.2.12`, `JTDX`), not asked
+after a reconnect, asked again once forgotten; the Panel's key from a paired browser keying
+unasked, a session that may only watch refused unasked; off keying everyone, on asking again.
+Last, CW from a client as QLog's TCI driver sends it ("Morse over CAT", its commands in
+capitals): the greeting's `cw_macros_speed` and `cw_keyer_speed`; a text in USB refused;
+`CW_MACROS_SPEED;` answered and `CW_KEYER_SPEED:28;CW_MACROS_SPEED:28;` setting both;
+`CW_MACROS:0,CQ DE ON6URE^ 5NN~ TU* |SK|;` keyed as `CQ DE ON6URE: 5NN, TU; <SK>` (the stub's
+keyer writes each text it is given to the file KEYED names, the speed steps as `+ - =`, and
+ends it by itself at 20 ms a character), then `cw_macros_empty:0;`; two texts in one frame, the
+second after the first, with speed steps; `CW_MACROS_STOP;` and a client gone mid-text, each
+stopping it; a client on the network asked at its first text, its next one keyed after Allow
+once. The
 stub keeps what each transmission played in `played.raw` (PLAYED), int16 at 44.1 kHz, for the
 client test to read: how many samples, the tone, its level.
 `make syntax` only compiles; `make PORT=50411 CONF=/tmp/other.conf` runs on another port and
