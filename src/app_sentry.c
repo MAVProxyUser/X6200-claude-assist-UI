@@ -293,7 +293,7 @@ static const decoder_t decoders[] = {
 
 /* The tables' rows, in the monospaced font: their heads take the same format */
 #define BAND_ROW "%c%-8.8s %-11.11s %-29.29s %-5.5s %-26.26s %s"
-#define DEC_ROW  " %-12s %-9s %-14s %s"
+#define DEC_ROW  " %-12s %-9s %-5s %-26.26s %s"     /* C's columns in C's order: 71 of the row's 72 at most */
 
 /* ---- State ---- */
 
@@ -1260,6 +1260,11 @@ static bool sun_elev(time_t t, double *elev) {
     return true;
 }
 
+/* BEST, C's and D's column: when a band is at its best (bands[].when) */
+static const char *best_name(char when) {
+    return when == 'N' ? "NIGHT" : when == 'D' ? "DAY" : when == 'A' ? "ANY" : "LOCAL";
+}
+
 static void band_now(int i, char *s, size_t n) {
     double   e, later;
     time_t   t   = time(NULL);
@@ -1309,9 +1314,7 @@ static void show_bands(void) {
             snprintf(mhz, sizeof(mhz), "%.1f-%.1f", bands[i].lo / 1000.0, bands[i].hi / 1000.0);
         band_now(i, now, sizeof(now));
         snprintf(s, sizeof(s), BAND_ROW, band_rt[i].sweep ? '*' : ' ',
-                 bands[i].name, mhz, bands[i].hear,
-                 bands[i].when == 'N' ? "NIGHT" : bands[i].when == 'D' ? "DAY" : bands[i].when == 'A' ? "ANY" : "LOCAL",
-                 bands[i].ant, now);
+                 bands[i].name, mhz, bands[i].hear, best_name(bands[i].when), bands[i].ant, now);
         lv_label_set_text(bd_row_l[r], s);
         lv_obj_set_style_bg_opa(bd_row_l[r], i == band_sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(bd_row_l[r], i == band_sel ? ink : amb, 0);
@@ -1345,8 +1348,8 @@ static void show_decode(void) {
             band_now(bi, now, sizeof(now));
         else
             snprintf(now, sizeof(now), "NO BAND");     /* a frequency added without one in bands[]: says so */
-        snprintf(s, sizeof(s), DEC_ROW, fs, bi >= 0 ? bands[bi].name : "", now,
-                 bi >= 0 ? bands[bi].ant : "");
+        snprintf(s, sizeof(s), DEC_ROW, fs, bi >= 0 ? bands[bi].name : "", bi >= 0 ? best_name(bands[bi].when) : "",
+                 bi >= 0 ? bands[bi].ant : "", now);
         lv_label_set_text(d_row_l[r], s);
         lv_obj_set_style_bg_opa(d_row_l[r], r == dec_row ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(d_row_l[r], r == dec_row ? ink : amb, 0);
@@ -3217,7 +3220,7 @@ static void build_decode(lv_obj_t *p) {
     rect(p, lw + 12, y, SW - lw - 18, h, 3, false);
     char hd[96];
 
-    snprintf(hd, sizeof(hd), DEC_ROW, "KNOWN FREQ", "BAND", "NOW", "ANTENNA");
+    snprintf(hd, sizeof(hd), DEC_ROW, "KNOWN FREQ", "BAND", "BEST", "ANTENNA", "NOW");
     d_head_l = label(p, &pixel_16, amb, lw + 15, y + 5, 0, 0, hd);
     rect(p, lw + 12, y + 25, SW - lw - 18, 3, 0, true);
     for (int r = 0; r < 12; r++) {
