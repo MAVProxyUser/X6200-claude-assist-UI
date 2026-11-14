@@ -49,13 +49,12 @@ screens:
   VHF/UHF, the classic radio screen, a UNIX shell on the radio's own screen, the base firmware, and which screen the
   radio starts in. The title says the release, the GUI's commit and the base's version; A's says what its scope
   takes in (`MF/HF/VHF SPECTRUM`).
-- **G WALKIE**, held up (portrait): a walkie-talkie across both radios: CB, 10 m and 6 m FM on the X6200, MURS,
-  2 m, marine, NOAA weather and FRS/GMRS on the stick, and a starting channel for every other band, so G is always
-  on a channel; CH-/CH+ and the VFO knob going from one radio to the other by itself and the
-  screen saying which (VIA X6200, VIA RTL-SDR); GROUP (BAND UP/DOWN too), MODE (AM, FM, SSB, WFM; a table, more to
-  come), the title bar as on the other screens, a **voiceprint**
-  of what is heard (a 0-4 kHz sonogram scrolling across), the S-meter and the audio's level, the battery, the
-  processor's temperature. A/B arms PTT on the X6200's channels.
+- **G WALKIE**, held up (portrait): the X6200 as a walkie-talkie, following its dial live (A's scan moves it, so TX
+  armed there is on the band being scanned): CB's 40 channels (CH-/CH+ shown only there), 10 m and 6 m SSB and FM,
+  and a starting channel for every other band; F3 through the groups and their modes, a mini **spectrum** of the
+  X6200 around the dial in 3D or flat (F4), a **voiceprint** of what is heard (a 0-4 kHz sonogram scrolling across),
+  the S-meter and the audio's level, and the title bar as an L to the screen's edges (every screen's bar down the
+  right, read with the radio lying, and across the top). A/B arms PTT; while armed the tuning knobs are locked.
 - **SCAN CFG** (F5 on A or B, on no ring): A's scan settings and its lock: AUTO-SCAN or SEMI-AUTO (MAN-OVERRIDE
   comes by itself when the VFO is turned), SWEEP through the marked bands, STEP, and the signal locked on (HOLD,
   NEXT, REC, IGNORE); from B, the stick's GAIN, DWELL, STEP and SQUELCH.

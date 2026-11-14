@@ -734,66 +734,56 @@ written through to the card before it replaces the last copy, so a power cut kee
 
 ### G WALKIE
 
-The radio as a walkie-talkie across both receivers, in the same look, **held up**: G turns the screen to portrait
-(480 x 800, as the Walkie app does), the F keys' names down the left edge where the keys then are, F1 at the top, and
-from the top down:
+The X6200 as a walkie-talkie, in the same look, **held up**: G turns the screen to portrait (480 x 800, as the
+Walkie app does), the F keys' names down the left edge where the keys then are. G is the X6200's alone: the stick
+only receives and has B for that, so G neither shows nor plays it (shown with LISTEN on RTL or BOTH, G plays the
+X6200 alone; A or B puts its own LISTEN back when shown).
 
-- **The title bar**, as every screen has one: XIEGU X6200 WALKIE TALKIE, and under it the transmitter's lock (RX
-  ONLY, TX ARMED), the time, the processor's temperature, the battery's % and icon (coloured as it runs down) and the
-  devices on USB. Its letter G stays where every screen has its letter, at the display's top left (held up, the top
-  right of the bar), turned a quarter to the right: upright with the radio lying as for the other screens.
+- **The title bar is an L** to the screen's edges. Down the right edge runs every screen's bar, where it is at the
+  display's top: XIEGU X6200 WALKIE TALKIE and the line under it (the dial, the mode, the transmitter's lock, the
+  Sentry's mode, the time, the processor, the battery and the devices on USB), read with the radio lying as for the
+  other screens, the letter G at both ends turned with it. Across the top, read held up: the name again, and the
+  walkie's own line (the transmitter's lock, the time, the processor, the battery's % and icon, the devices). F1's
+  key sits under it.
+- **The channel**: `VIA X6200`; the channel big (or `VFO` off the list's channels), its group (CB EMERGENCY for CB 9,
+  CB TRUCKERS for 19), the frequency and mode and what is there, over a lamp: RX SIGNAL when the audio stands 6 dB
+  over its own noise, RX QUIET, TX ARMED, ON AIR, TX LOCKED for a moment after PTT.
+- **The spectrum**: the X6200's, 100 kHz around the dial (bracketed in the middle): its trace over the last rows, in
+  3D as A's picture or flat as a waterfall, the newest on top (**F4 VIEW**).
+- **The voiceprint**: the receiver's audio as a sonogram, 0 to 4 kHz up and the last seconds across, in amber:
+  voices show as their harmonics stacked, a tone as a line, the hiss as speckle.
+- The S-meter (S0 to S9+40 in dBm) and the audio's level (dBFS) as bars; at the bottom the radio's state in lines:
+  LINK (squelch, volume, the transmitter's lock), POWER (the battery, the supply, the TX power setting), SYSTEM (the
+  processor, the base's version) and the time, refreshed each second. A build without portrait (on a PC) shows G in
+  landscape, in four boxes.
 
-- **Which radio**: `VIA X6200`, or `VIA RTL-SDR  RECEIVE ONLY` (RTL-SDR in the tags' orange) for a channel the stick
-  serves; then the channel big, its group (CB EMERGENCY for CB 9, CB TRUCKERS for 19, MURS, FRS/GMRS...), its
-  frequency and mode and what it is, over a lamp: RX SIGNAL when the audio stands 6 dB over its own noise (on the
-  stick with a squelch set, when the squelch opens), RX QUIET, TX ARMED, ON AIR, TX LOCKED for a moment after PTT.
-- **The voiceprint**: the audio of the radio in use as a sonogram, 0 to 4 kHz up and the last seven seconds across,
-  in amber: voices show as their harmonics stacked, a tone as a line, the hiss as speckle. Its caption says RX (the
-  X6200), RTL (the stick) or TX.
-- The S-meter (the X6200's S0 to S9+40 in dBm; the stick's channel over its noise, `RTL +12 DB`) and the audio's
-  level (dBFS) as bars.
-- At the bottom the radio's state in lines: LINK (squelch, volume, the transmitter's lock), POWER (the battery's volts
-  and charge, coloured as it runs down, the supply's, the TX power setting), SYSTEM (the processor's temperature and
-  load, the base's version) and the time. The knobs and keys work as on the other screens; another screen on the ring
-  turns it back. A build without portrait (on a PC) shows G in landscape, the same in four boxes.
+**G follows the X6200**: its frequency and mode are the dial's, read live, and G never tunes by itself. A's scan
+moving the dial moves G, so TX armed here is on the band A was scanning. Choosing on G (a channel, a group, a mode,
+the VFO) is by hand: the Sentry stops moving the dial (MAN-OVERRIDE, as a turn of A's VFO).
 
-**The channels**, one list across both receivers, each served by the radio that takes it:
+**The channels**: every band of D's the X6200 tunes is a group with a channel to start on, so no band is blank:
 
-| Group | Channels | Radio | Mode |
-|---|---|---|---|
-| Every band of D's under CB (SHIP MF, AM BC, 160 M, 80 M ... 15 M, 12 M) | 1: where D listens in it (720 AM, 1.900 LSB, 7.150 LSB, 14.200 USB, 10.000 WWV...) | X6200 | the band's |
-| CB | 1 to 40 (home 19) | X6200 | AM |
-| 10 M | 1: 28.400 | X6200 | SSB |
-| 10 M FM | 29.600 calling | X6200 | FM |
-| 6 M | 1: 50.125 | X6200 | SSB |
-| 6 M FM | 52.525 calling | X6200 | FM |
-| FM BC | 1: 92.3 | RTL-SDR | WFM |
-| AIR | 1: 121.5 | RTL-SDR | AM |
-| 2 M | 146.520, 146.550, 146.580 | RTL-SDR | FM |
-| MURS | 1 to 5 (151.820 to 154.600) | RTL-SDR | FM |
-| MARINE | 16, 09, 13, 22A | RTL-SDR | FM |
-| NOAA WX | WX1 to WX7 | RTL-SDR | FM |
-| 70 CM | 1: 446.000 | RTL-SDR | FM |
-| FRS/GMRS | 1 to 22 | RTL-SDR | FM |
+| Group | Channels | Modes (F3) |
+|---|---|---|
+| Every band of D's under CB (SHIP MF, AM BC, 160 M, 80 M ... 15 M, 12 M) | 1: where D listens in it (720 AM, 1.900 LSB, 7.150 LSB, 14.200 USB, 10.000 WWV...) | the band's; the ham bands SSB and AM |
+| CB | 1 to 40 (home 19) | AM, SSB, FM |
+| 10 M | 1: 28.400 | SSB, AM |
+| 10 M FM | 29.600 calling | FM |
+| 6 M | 1: 50.125 | SSB, AM |
+| 6 M FM | 52.525 calling | FM |
 
-So every band has a channel to start on, and **G is always on a channel**: opened with the X6200's dial on a
-channel of the list, on that one; with the dial anywhere else (A tuned it), on the starting channel of the dial's
-band (of the nearest band between two). While G shows, A's scan, sweep and lock wait (the dial is the channel's), and
-a dial moved from outside (TCI, the browser) onto another channel takes G there.
-
-- **F1 CH -**, **F2 CH +**, the **VFO knob** and the MFK go through the whole list a channel a click, the radio
-  changing by itself where the list crosses from the X6200's channels to the stick's: every CB channel is a click
-  away, and the dial never stops between two. The MFK's push goes to CB 19.
-- **F3 GROUP** and **BAND UP**: the next group, at its home channel (CB 19, MARINE 16, the first of the others);
-  **BAND DOWN** the one before. G stays shown.
-- **F4 MODE**: the next of the modes, a table the walkie keeps (AM, FM, SSB, WFM for now; a mode such as DMR is a
-  row more, with what each radio does for it). Only the modes the channel's radio has: the stick has AM, FM and WFM,
-  not SSB; the X6200 AM, FM and SSB.
-  SSB is single sideband: AM's carrier and one of its two sidebands left out, the power all in the voice that is
-  left; LSB on 160, 80 and 40 m as hams use it, USB everywhere else (60 m, the ship and utility stations, 20 m up).
-  A group's channels start in its own mode; a mode chosen stays until another group.
-- **A/B** arms the X6200's transmitter for PTT (as on A), **F5** locks it again (or says it is locked); a stick
-  channel cannot be armed (F5 says RX only). Leaving G for any screen but A locks it.
+- **F1 CH -** and **F2 CH +** show only on a service with defined channels: on the X6200, CB. There they, the **VFO
+  knob** and the MFK step the 40 channels, a channel a click, the mode kept. Anywhere else the keys are blank, the
+  VFO tunes the dial as on A and the MFK goes from group to group. The MFK's push goes to CB 19.
+- **F3** goes through the groups and each one's modes in turn: CB AM, CB SSB, CB FM, then 10 M SSB, 10 M AM, 10 M
+  FM... The mode changes where the dial is; past a group's last mode, the next group at its home channel.
+  **BAND UP** and **BAND DOWN** go to the next and previous group, G staying shown. SSB is single sideband: LSB on
+  160, 80 and 40 m as hams use it, USB everywhere else (60 m, the ship and utility stations, 20 m up).
+- **F4 VIEW**: the spectrum in 3D or flat.
+- **A/B** arms the X6200's transmitter for PTT (as on A), **F5** locks it again (or says it is locked); leaving G
+  for any screen but A locks it. **While TX is unlocked (armed) or on the air, the tuning knobs are locked** on every
+  screen (the VFO, and the MFK where it tunes the X6200, on A and G), so a bump cannot move the transmitter: a turn
+  says to lock TX (A/B) to tune again.
 
 ### The RTL-SDR, the GNS 5890 and the microADSB on USB
 

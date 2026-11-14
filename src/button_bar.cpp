@@ -670,7 +670,13 @@ static uint32_t  land_index[BUTTONS];  /* their place among the main screen's ch
 static lv_obj_t *land_parent;           /* that screen: they go back to it whatever buttons_horizontal() is told */
 
 void buttons_vertical(lv_obj_t *parent, lv_coord_t w, lv_coord_t h) {
+    buttons_vertical_at(parent, w, h, 0);
+}
+
+void buttons_vertical_at(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, lv_coord_t top) {
     lv_coord_t bw = w - 2 * BTN_INSET, bh = h - 2 * BTN_INSET;
+
+    if (top < 0 || top > h / 2) top = 0;
 
     buttons_hide(false);    /* Hide buttons is the main screen's: the walkie's column always shows */
     /* Where they are, all of them before any moves (each one gone shifts the next one's index), and only when they
@@ -683,12 +689,14 @@ void buttons_vertical(lv_obj_t *parent, lv_coord_t w, lv_coord_t h) {
         lv_obj_t           *f = slots[i].parent;
         const lv_img_dsc_t *img;
 
+        lv_coord_t t = i ? 0 : top;      /* the first key shortened from the top */
+
         lv_obj_set_parent(f, parent);
-        lv_obj_set_pos(f, BTN_INSET, i * h + BTN_INSET);
-        lv_obj_set_size(f, bw, bh);
+        lv_obj_set_pos(f, BTN_INSET, i * h + t + BTN_INSET);
+        lv_obj_set_size(f, bw, bh - t);
         /* the state images at this size too (the normal one is set with the text) */
-        if ((img = theme_image(TI_btn_active, bw, bh))) lv_obj_set_style_bg_img_src(f, img, LV_STATE_CHECKED);
-        if ((img = theme_image(TI_btn_off, bw, bh))) lv_obj_set_style_bg_img_src(f, img, LV_STATE_DISABLED);
+        if ((img = theme_image(TI_btn_active, bw, bh - t))) lv_obj_set_style_bg_img_src(f, img, LV_STATE_CHECKED);
+        if ((img = theme_image(TI_btn_off, bw, bh - t))) lv_obj_set_style_bg_img_src(f, img, LV_STATE_DISABLED);
         slot_refresh(&slots[i]);
     }
 }

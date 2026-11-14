@@ -81,6 +81,8 @@ extern buttons_group_t buttons_group_vm;
 void            buttons_init(lv_obj_t *parent);
 /* The five buttons to parent in a column, w x h each, F1 on top (the walkie screen) */
 void            buttons_vertical(lv_obj_t *parent, lv_coord_t w, lv_coord_t h);
+/* The same, the first key starting top px down (what the parent shows across the top over it) */
+void            buttons_vertical_at(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, lv_coord_t top);
 /* Back in a row at the bottom of parent, where they were (the main screen) */
 void            buttons_horizontal(lv_obj_t *parent);
 /* The five and the knob lines over them hidden, or shown again (Settings > Display > Hide buttons, screen_main.c) */
