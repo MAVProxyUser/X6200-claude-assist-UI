@@ -1901,15 +1901,20 @@ static void channels_poll_cb(lv_timer_t *t) {
 /* A GNS 5890 or a microADSB the only ADS-B receiver on USB (put in the RTL-SDR's place, plugged in with no RTL-SDR,
  * the RTL-SDR pulled out from beside it, or so already when the GUI starts): AIRSPACE, the Sentry's H, opens on it,
  * once each time it becomes so (turned away from, it stays away). Not over a transmission or the first start's
- * guide: it waits for them, as long as the receiver stays the only one */
+ * guide: it waits for them, as long as the receiver stays the only one. A GUI back where it was (gui_state.c: a
+ * crash, a restart, the radio switched on again) stays there: the receiver plugged in already is not a new one */
 static void receivers_watch_cb(lv_timer_t *t) {
-    static bool was, due;
+    static bool was, due, first = true;
     (void)t;
 
     bool rcv = adsb_rx_receiver_present();      /* the first call starts the looking */
     if (!adsb_rx_usb_looks()) return;
     bool only = rcv && !adsb_rx_sdr_present();
 
+    if (first) {
+        first = false;
+        if (gui_state_restoring()) was = only;
+    }
     if (only && !was) due = true;
     if (!only) due = false;
     was = only;
