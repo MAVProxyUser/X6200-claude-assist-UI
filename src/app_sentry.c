@@ -64,6 +64,8 @@
 #include "gui_styles.h"
 #include "keyboard.h"
 #include "main.h"             /* VERSION, the release in the title */
+#include "waterfall_view.h"   /* direct_hole_cb */
+#include "lv_drivers/display/drm.h"
 #include "main_screen.h"
 #include "msg_box.h"
 #include "params/params.h"
@@ -1738,6 +1740,26 @@ static lv_obj_t     *hf_peak_l[RTL_PEAKS];     /* the X6200's half: A's signals,
 static box_t         r_dev, r_tune, r_pre, r_sig;
 static lv_timer_t   *rtl_timer;
 static int           rtl_img_h, rtl_preset, rtl_step = 2, rtl_drop;
+static bool          rtl_direct;    /* the picture turned straight onto the display's primary plane (rtl_present) */
+
+/* The picture as drawn into rtl_frame shown: turned straight onto the display's primary plane under the GUI's hole
+ * (one pass, no copy through LVGL), only while A or B shows it (elsewhere the plane is under another screen); without
+ * the planes, LVGL draws it again */
+static void rtl_present(void) {
+    if (!rtl_img) return;
+#if USE_DRM
+    if (rtl_direct) {
+        lv_area_t a;
+
+        if (scr != SCR_SCAN && scr != SCR_RTL) return;
+        lv_obj_update_layout(rtl_img);  /* its place, laid out (nothing done when it is) */
+        lv_obj_get_coords(rtl_img, &a);
+        drm_wf_rotate((const uint32_t *)rtl_frame->data, a.x1, a.y1, RTL_COLS, rtl_img_h);
+        return;
+    }
+#endif
+    lv_obj_invalidate(rtl_img);
+}
 
 /* F's band: a preset (F2), or one of C's bands the stick takes (C's LISTEN): its name, what it is, what F1 scans */
 static int f_band = -1;
@@ -1983,7 +2005,7 @@ static void rtl_layout(void) {
         lv_obj_add_flag(rtl_tick_l[i], LV_OBJ_FLAG_HIDDEN);
     }
     for (int i = 0; i < RTL_PEAKS; i++) lv_obj_add_flag(rtl_peak_l[i], LV_OBJ_FLAG_HIDDEN);
-    if (rtl_img) lv_obj_invalidate(rtl_img);
+    rtl_present();
 }
 
 /* MHz without the zeros at the end: 118, 162.55, 467.725 */
@@ -2651,7 +2673,7 @@ static void rtl_timer_cb(lv_timer_t *t) {
             lv_label_set_text(r_sig.cap, s);
         }
     }
-    if (drew) lv_obj_invalidate(rtl_img);
+    if (drew) rtl_present();
 }
 
 /* A tap on the stick's half: that frequency to the middle */
@@ -2698,8 +2720,21 @@ static void build_rtl(lv_obj_t *p) {
     rtl_img_h = scr_h - iy - 6 - 6;
     rect(p, IMG_X - 3, iy, IMG_W + 6, rtl_img_h + 6, 3, false);
     rtl_frame = lv_img_buf_alloc(RTL_COLS, rtl_img_h, LV_IMG_CF_TRUE_COLOR);
-    rtl_img   = lv_img_create(p);
-    lv_img_set_src(rtl_img, rtl_frame);
+#if USE_DRM
+    rtl_direct = drm_planes();
+#endif
+    if (rtl_direct) {   /* the picture on the primary plane (rtl_present), the GUI a hole over it: the ticks, peaks
+                         * and the bracket's labels drawn over the hole. LVGL drew it (a copy into its buffer), turned
+                         * it onto the panel (a second) and copied that (a third), each frame: most of the GUI
+                         * thread's time on A and B (perf, 2026-11-14) */
+        rtl_img = lv_obj_create(p);
+        lv_obj_remove_style_all(rtl_img);
+        lv_obj_set_size(rtl_img, RTL_COLS, rtl_img_h);
+        lv_obj_add_event_cb(rtl_img, direct_hole_cb, LV_EVENT_DRAW_MAIN_END, NULL);
+    } else {
+        rtl_img = lv_img_create(p);
+        lv_img_set_src(rtl_img, rtl_frame);
+    }
     lv_obj_set_pos(rtl_img, IMG_X, iy + 3);
     lv_obj_add_flag(rtl_img, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(rtl_img, rtl_touch_cb, LV_EVENT_CLICKED, NULL);
@@ -6233,6 +6268,9 @@ static void construct_cb(lv_obj_t *parent) {
     build_decode(scr_obj[SCR_DECODE]);
     build_system(scr_obj[SCR_SYSTEM]);
     build_rtl(scr_obj[SCR_RTL]);
+#if USE_DRM
+    drm_wf_claim(rtl_direct);           /* the plane is the Sentry's picture's while it is open (drm_wf_rotate) */
+#endif
     build_log(scr_obj[SCR_LOG]);
     build_walkie(scr_obj[SCR_WALKIE]);
     build_walkie_portrait();
@@ -6295,6 +6333,9 @@ static void construct_cb(lv_obj_t *parent) {
 }
 
 static void destruct_cb(void) {
+#if USE_DRM
+    drm_wf_claim(false);                /* the main screen's waterfall and spectrum on the plane again */
+#endif
     if (timer) lv_timer_del(timer);
     if (blink_timer) lv_timer_del(blink_timer);
     if (rtl_timer) lv_timer_del(rtl_timer);

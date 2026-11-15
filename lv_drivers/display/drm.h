@@ -47,6 +47,12 @@ void drm_flush(lv_disp_drv_t * drv, const lv_area_t * area, lv_color_t * color_p
 void drm_wf_present(const uint32_t *src, int32_t x, int32_t w);
 /* The same with each row of src a ring: column x shows src[head], then on */
 void drm_wf_present_ring(const uint32_t *src, int32_t x, int32_t w, int32_t head);
+/* The primary plane claimed by one that draws it whole each time (the Sentry's picture), or given back: meanwhile
+ * the strips above are not shown nor copied (they present themselves whole again after) */
+void drm_wf_claim(bool on);
+/* Claimed: a landscape picture (src packed, w x h, ARGB/XRGB) at landscape lx, ly turned straight into the primary
+ * plane's back buffer, shown at the next drm_commit(). false (nothing done): no planes, not claimed, portrait */
+bool drm_wf_rotate(const uint32_t *src, int32_t lx, int32_t ly, int32_t w, int32_t h);
 /* Shows what was flushed or presented since the last call, at the next vblank:
  * once per main loop, after lv_timer_handler() */
 void drm_commit(void);

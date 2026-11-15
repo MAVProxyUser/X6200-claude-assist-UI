@@ -105,6 +105,9 @@ static uint32_t             *wf_shadow;     /* portrait copy of the primary plan
 static rects_t              frame[2];       /* this frame, previous frame */
 static int                  cur;
 static bool                 portrait_mode;  /* LVGL renders 480x800: turned 180, not 90 */
+static bool                 wf_claimed;     /* a picture drawn on the primary plane by its owner (drm_wf_rotate) */
+static const uint32_t       *wf_src;        /* its last one, landscape: into wf_shadow only for a dump */
+static lv_area_t            wf_src_a;
 
 /**********************
  *   STATIC FUNCTIONS
@@ -374,6 +377,55 @@ static void rotate_area(const lv_area_t *a, const uint32_t *src) {
 }
 #endif /* BOARD_FB_ROTATE_90 */
 
+#if BOARD_FB_ROTATE_90
+/* Landscape area a (src packed, its width) turned into a portrait buffer dst of stride pixels, as rotate_area: 4x4
+ * blocks, but the landscape columns outermost, so each of the four portrait rows a block writes is written on in
+ * order (the display's buffers are write-combined: scattered writes are slow there) */
+static void rotate_into(uint32_t *dst, int32_t stride, const lv_area_t *a, const uint32_t *src) {
+    int32_t w = lv_area_get_width(a);
+    int32_t h = lv_area_get_height(a);
+    int32_t x = 0, y;
+
+#ifdef __ARM_NEON
+    for (; x + 4 <= w; x += 4) {
+        uint32_t *d0 = dst + (LAND_W - 1 - (a->x1 + x)) * stride + a->y1;
+
+        for (y = 0; y + 4 <= h; y += 4) {
+            const uint32_t *s = src + y * w + x;
+            uint32_t       *d = d0 + y;
+
+            uint32x4x2_t t0 = vtrnq_u32(vld1q_u32(s), vld1q_u32(s + w));
+            uint32x4x2_t t1 = vtrnq_u32(vld1q_u32(s + 2 * w), vld1q_u32(s + 3 * w));
+
+            vst1q_u32(d, vcombine_u32(vget_low_u32(t0.val[0]), vget_low_u32(t1.val[0])));
+            vst1q_u32(d - stride, vcombine_u32(vget_low_u32(t0.val[1]), vget_low_u32(t1.val[1])));
+            vst1q_u32(d - 2 * stride, vcombine_u32(vget_high_u32(t0.val[0]), vget_high_u32(t1.val[0])));
+            vst1q_u32(d - 3 * stride, vcombine_u32(vget_high_u32(t0.val[1]), vget_high_u32(t1.val[1])));
+        }
+        for (; y < h; y++) {            /* the bottom rows of these four columns */
+            for (int32_t xx = x; xx < x + 4; xx++) {
+                dst[(LAND_W - 1 - (a->x1 + xx)) * stride + a->y1 + y] = src[y * w + xx];
+            }
+        }
+    }
+#endif
+    for (; x < w; x++) {                /* the last columns (all without NEON) */
+        for (y = 0; y < h; y++) {
+            dst[(LAND_W - 1 - (a->x1 + x)) * stride + a->y1 + y] = src[y * w + x];
+        }
+    }
+}
+#endif
+
+/* The owner's last picture into wf_shadow, for a dump or a snapshot (not each frame: nothing else reads it) */
+static void wf_src_shadow(void) {
+#if BOARD_FB_ROTATE_90
+    if (wf_claimed && wf_src && wf_shadow) {
+        rotate_into(wf_shadow, PANEL_W, &wf_src_a, wf_src);
+    }
+#endif
+}
+
 static void rects_add(rects_t *r, const lv_area_t *portrait) {
     if (r->cnt < MAX_RECTS) {
         r->rects[r->cnt++] = *portrait;
@@ -596,8 +648,9 @@ static void copy_cols(struct drm_buffer *buf, int32_t x, int32_t w) {
 void drm_wf_present_ring(const uint32_t *src, int32_t x, int32_t w, int32_t head) {
     int i, b;
 
-    /* Portrait: no waterfall on the screen, the primary plane stays black */
-    if (!planes || portrait_mode || x < 0 || w <= 0 || x + w > PANEL_W) {
+    /* Portrait: no waterfall on the screen, the primary plane stays black. Claimed: another's picture is there, the
+     * main screen's waterfall and spectrum go on under it unseen and are not copied */
+    if (!planes || portrait_mode || wf_claimed || x < 0 || w <= 0 || x + w > PANEL_W) {
         return;
     }
     for (int32_t y = 0; y < PANEL_H; y++) {
@@ -623,6 +676,33 @@ void drm_wf_present_ring(const uint32_t *src, int32_t x, int32_t w, int32_t head
     strips[i].stale[b] = false;
     strips[i].stale[b ^ 1] = true;
     primary.ready = true;
+}
+
+void drm_wf_claim(bool on) {
+    wf_claimed = on;
+    wf_src     = NULL;
+    nstrips    = 0;         /* the strips presented before: theirs to present again whole, never copied over it */
+}
+
+bool drm_wf_rotate(const uint32_t *src, int32_t lx, int32_t ly, int32_t w, int32_t h) {
+#if BOARD_FB_ROTATE_90
+    lv_area_t a = { lx, ly, lx + w - 1, ly + h - 1 };
+
+    if (!planes || !wf_claimed || portrait_mode || fd < 0 || w <= 0 || h <= 0 || lx < 0 || ly < 0 ||
+        a.x2 >= LAND_W || a.y2 >= LAND_H) {
+        return false;
+    }
+    wait_flip();                        /* the back buffer was on screen until this flip */
+    rotate_into((uint32_t *) primary.bufs[primary.back].map, (int32_t) (primary.bufs[primary.back].pitch / 4), &a,
+                src);
+    wf_src   = src;
+    wf_src_a = a;
+    primary.ready = true;
+    return true;
+#else
+    (void) src, (void) lx, (void) ly, (void) w, (void) h;
+    return false;
+#endif
 }
 
 uint32_t drm_frame_ms(void) {
@@ -704,6 +784,7 @@ bool drm_dump(const char *path) {
         /* What the panel shows: the GUI over the waterfall */
         static uint32_t row[PANEL_W];
 
+        wf_src_shadow();
         ok = true;
         for (int32_t y = 0; y < PANEL_H && ok; y++) {
             drm_blend_under(row, shadow + y * PANEL_W, wf_shadow + y * PANEL_W, PANEL_W);
@@ -735,6 +816,7 @@ void drm_blend_under(uint32_t *dst, const uint32_t *top, const uint32_t *bottom,
 }
 
 const uint32_t * drm_wf_pixels(void) {
+    wf_src_shadow();
     return planes ? wf_shadow : NULL;
 }
 
@@ -742,6 +824,7 @@ void drm_compose_landscape(uint32_t *px) {
     if (!planes) {
         return;
     }
+    wf_src_shadow();
     for (int32_t y = 0; y < LAND_H; y++) {
         uint32_t *row = px + y * LAND_W;
         uint32_t under[LAND_W];
