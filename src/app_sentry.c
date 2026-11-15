@@ -2424,8 +2424,12 @@ static int64_t rtl_snap(int64_t hz) {
 static void hear_vol_refresh(void) {
     int x = param_i_get(cfg_volume), r = param_i_get(cfg_rtl_vol), m = x > r ? x : r;
 
-    if (heard == HEAR_RTL || (heard == HEAR_BOTH && !rtl_spectrum_on_headphones())) {    /* BOTH on the speaker:
-                                                                                         * the stick alone */
+    if (heard == HEAR_BOTH && rtl_spectrum_on_monitor()) {     /* BOTH's monitor test: the X6200 at A's volume as
+                                                                 * ever, the stick at B's share of it */
+        radio_set_vol_override(-1);
+        rtl_spectrum_levels(x && r < x ? powf((float)r / x, 1.5f) : 1, 0);
+    } else if (heard == HEAR_RTL || (heard == HEAR_BOTH && !rtl_spectrum_on_headphones())) {   /* BOTH on the
+                                                                                         * speaker: the stick alone */
         radio_set_vol_override(r);
         rtl_spectrum_levels(1, 0);
     } else if (heard == HEAR_BOTH) {

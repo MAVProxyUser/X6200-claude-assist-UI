@@ -91,6 +91,7 @@ static bool            player_started;
 static atomic_bool     playing;          /* the player has the speaker */
 static atomic_bool     mux;              /* BOTH: the X6200's receiver mixed in (audio_rx_tap), on the headphones */
 static atomic_bool     on_bt;            /* the player's audio on the Bluetooth headphones now, not the speaker */
+static atomic_bool     on_moni;          /* BOTH's monitor test now: the base in normal mode, the stick to its monitor */
 static atomic_bool     mute;             /* OFF: the speaker taken and given nothing, neither radio heard */
 static atomic_int      g_stick = 1000, g_x62 = 1000;   /* each receiver's share in the mix, thousandths (BOTH) */
 /* BOTH's test (on while /tmp/both_tones exists, looked for each second): a steady tone on each receiver's line, as
@@ -600,8 +601,10 @@ static int stick_take(int16_t *out, int n) {
  * RTL does; the Sentry says why (hear_how) */
 static void *player_thread(void *arg) {
     static int16_t chunk[CHUNK], rx[CHUNK];
-    bool           bt = false, tapping = false;
+    bool           bt = false, tapping = false, moni = false;
     float          g  = 1;          /* the squelch's level, 0 shut: eased over 10 ms, no click */
+    uint32_t       moni_look = 0;
+    bool           moni_file = false;
     (void)arg;
     pthread_setname_np(pthread_self(), "rtl_player");   /* by name in top -H */
 
@@ -609,17 +612,38 @@ static void *player_thread(void *arg) {
         bool want_play = atomic_load(&listen_mode) != 0 || atomic_load(&mute);
 
         if (want_play && !atomic_load(&playing)) {
-            bt = audio_play_bt_begin();
+            bt   = audio_play_bt_begin();
+            moni = false;
             if (!bt) radio_set_play_mode(AUDIO_PLAY_ON);
             atomic_store(&playing, true);
         } else if (!want_play && atomic_load(&playing)) {
             audio_play_flush();
             if (bt) audio_play_bt_end();
-            else radio_set_play_mode(AUDIO_PLAY_OFF);
-            bt = false;
+            else if (!moni) radio_set_play_mode(AUDIO_PLAY_OFF);
+            bt = moni = false;
             atomic_store(&playing, false);
         }
+        /* BOTH's monitor test (while /tmp/both_moni exists, looked for each second; 2026-11-15, for the user's ear):
+         * BOTH on the speaker with the base left in normal mode, so it plays its own receiver as ever, and the stick
+         * sent to its line in as always. Whether the base puts that on the speaker too, at the monitor's level
+         * (/tmp/moni_test, radio.c), only an ear can tell: the processor hears the receiver before the speaker. If it
+         * does, this is BOTH on the speaker */
+        if (want_play && !bt) {
+            if (lv_tick_or_ms() - moni_look >= 1000) {
+                moni_look = lv_tick_or_ms();
+                moni_file = access("/tmp/both_moni", F_OK) == 0;
+            }
+            bool want_moni = moni_file && atomic_load(&mux) && atomic_load(&listen_mode);
+
+            if (want_moni != moni) {
+                moni = want_moni;
+                radio_set_play_mode(moni ? AUDIO_PLAY_OFF : AUDIO_PLAY_ON);
+                fprintf(stderr, "rtl BOTH monitor test: %s\n", moni ? "on, the base in normal mode, the stick to its "
+                                                                     "line in (its monitor: /tmp/moni_test)" : "off");
+            }
+        }
         atomic_store(&on_bt, want_play && bt);
+        atomic_store(&on_moni, want_play && moni);
         if (want_play && (atomic_load(&mux) && bt) != tapping) {   /* BOTH on the headphones: the X6200 mixed in */
             tapping = !tapping;
             audio_rx_tap(tapping);
@@ -729,6 +753,10 @@ bool rtl_spectrum_listening(void) {
 
 bool rtl_spectrum_on_headphones(void) {
     return atomic_load(&on_bt);
+}
+
+bool rtl_spectrum_on_monitor(void) {
+    return atomic_load(&on_moni);
 }
 
 void rtl_spectrum_scope(bool on) {

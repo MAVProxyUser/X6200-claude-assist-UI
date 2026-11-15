@@ -61,6 +61,8 @@ bool rtl_spectrum_listening(void);
 void rtl_spectrum_mux(bool on);
 /* The stick's audio on the Bluetooth headphones now, not the speaker: BOTH mixes the X6200 in */
 bool rtl_spectrum_on_headphones(void);
+/* BOTH's monitor test now (/tmp/both_moni): the base in normal mode with its receiver, the stick to its line in */
+bool rtl_spectrum_on_monitor(void);
 
 /* OFF: the speaker taken from the X6200's receiver and given nothing (on), or let go */
 void rtl_spectrum_mute(bool on);
