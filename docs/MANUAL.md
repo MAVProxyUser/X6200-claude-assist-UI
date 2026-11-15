@@ -656,18 +656,19 @@ last seconds, the strongest signals named over it and the screen's channel brack
   GMRS, ISM 915, UAT 978 and ADS-B 1090).
 - **F3 VIEW**: the screen's radio alone, SPLIT (the X6200 above, the stick below) or the other radio alone. Each
   half says its radio, its channel and whether it is HEARD, MUTED or SQUELCHED.
-- **F4 LISTEN**, each screen's own: X6200, RTL, BOTH or OFF, BOTH mixing the X6200's receiver into the stick's audio
-  (the base sends its receiver to the processor while it plays the GUI's audio), OFF silencing the speaker (neither radio, the volume kept).
-  **Each radio keeps its own volume**: the VOL knob sets the X6200's on A and the stick's on B (on the other screens,
-  the one heard), and each is played at its own wherever it is heard later; BOTH sets the speaker at the louder and
-  scales the other down in the mix. **BOTH plays each as it comes**, nothing levelled or raised: the stick exactly as
-  on B, the X6200 at A's volume, added (a soft knee only where the sum would clip). The stick's audio is buffered
-  300 ms there so its 50 ms packets never leave gaps (at 150 ms they did, now and then). One thing is taken out: the base sends back whatever it plays
-  inside its receiver's audio (inverted, at about 0.8, half a second later), which mixed in again was the echo that
-  repeated till it faded. The GUI subtracts that copy before the mix: it learns the base's return from the stick's
-  part of the audio (never from the X6200's, which made it over-shoot and ring), follows the delay when it jumps,
-  and keeps what it learnt in `/mnt/both_echo.bin` for the next start. For the second or two it cannot (BOTH just
-  started, or the delay jumped), the X6200 is held back and fades back in. While BOTH is heard the legend and the volume's word show the other's beside it
+- **F4 LISTEN**, each screen's own: X6200, RTL, BOTH or OFF, OFF silencing the speaker (neither radio, the volume
+  kept). **BOTH mixes the two only on Bluetooth headphones.** On the speaker it is the stick alone, as RTL is, and its
+  OSD says so: while the speaker plays the GUI's audio (the stick), the base is in play mode and sends the processor
+  nothing of the X6200's receiver, only its own copy of what it plays (measured on base 1.0.8). Up to v0.3.12.20
+  BOTH mixed that copy back in, and that was the echo that repeated till it faded; a canceller only made it fainter.
+  With headphones the base stays out of play mode, so the X6200's receiver comes to the processor and is mixed in as
+  it is. **Each radio keeps its own volume**: the VOL knob sets the X6200's on A and the stick's on B (on the other
+  screens, the one heard), and each is played at its own wherever it is heard later. On headphones BOTH sets them at
+  the louder and scales the other down in the mix, **each as it comes**, nothing levelled or raised: the stick exactly
+  as on B, the X6200 at A's volume, added (a soft knee only where the sum would clip). The stick's audio is buffered
+  400 ms wherever it is heard, so its 50 ms packets never leave gaps (unbuffered, B had six gaps of 8 to 24 ms in
+  20 s; at 150 ms BOTH ran dry now and then). While BOTH is heard on headphones the legend and the volume's word show
+  the other's beside it
   (`VOLUME 22 (RTL 29)`). The X6200's is the radio's own volume setting; the stick's is kept beside it. The speaker changes only when A
   or B is shown (or C plays an entry, or G a channel); the other screens keep what was heard last. RTL and BOTH can
   be chosen with no stick plugged in: the X6200 is heard alone till one is, and **the moment an RTL-SDR is plugged in
@@ -741,10 +742,10 @@ written through to the card before it replaces the last copy, so a power cut kee
   (1.6 kHz or less: CARRIER / CW).
 - **Listening**: the MFK's push (or F1) plays the one chosen on its own radio, or stops it if it plays. Each radio
   plays one entry at a time and both can play at once: an X6200 entry on the X6200 and a stick entry on the stick,
-  mixed (BOTH), each marked `>`. While one plays, the MFK plays each one it comes to on its radio. Only the radio
+  mixed as BOTH is (on headphones; on the speaker the stick's entry is heard), each marked `>`. While one plays, the MFK plays each one it comes to on its radio. Only the radio
   with an entry waits in its own scan meanwhile (an X6200 entry holds A's, a stick entry B's). With one radio's
-  entry alone and LISTEN on BOTH, the other radio stays heard too, mixed in; on X6200 or RTL only the entry's
-  radio is heard.
+  entry alone and LISTEN on BOTH, the other radio stays heard too, mixed in (on headphones); on X6200 or RTL only
+  the entry's radio is heard.
 - **F4 SCAN** is every scan at once: on, A's scan (F1, the dial's band, in AUTO so it locks) and B's start finding
   and filling the log, on whatever
   screen, and while C is shown the log is scanned on each radio at the same time, each through its own entries,

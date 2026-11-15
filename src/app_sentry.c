@@ -79,6 +79,7 @@
 #include "styles.h"
 #include "theme.h"
 #include "gui_state.h"
+#include "btaudio.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -2422,7 +2423,8 @@ static int64_t rtl_snap(int64_t hz) {
 static void hear_vol_refresh(void) {
     int x = param_i_get(cfg_volume), r = param_i_get(cfg_rtl_vol), m = x > r ? x : r;
 
-    if (heard == HEAR_RTL) {
+    if (heard == HEAR_RTL || (heard == HEAR_BOTH && !rtl_spectrum_on_headphones())) {    /* BOTH on the speaker:
+                                                                                         * the stick alone */
         radio_set_vol_override(r);
         rtl_spectrum_levels(1, 0);
     } else if (heard == HEAR_BOTH) {
@@ -2460,16 +2462,22 @@ static void hear_apply(int h) {
 }
 
 /* What LISTEN h does, for the OSD: B's channel, its mode put in */
+/* BOTH mixes the two only on Bluetooth headphones: while the speaker plays the stick, the base sends nothing of the
+ * X6200's receiver (rtl_spectrum.c), so there it is the stick alone, and says so */
 static void hear_how(int h, char *t, size_t n) {
     static const char *const how[] = {"THE X6200'S RECEIVER ON THE SPEAKER.",
                                       "THE RTL-SDR ON THE SPEAKER, AT B'S CHANNEL: %s %s.",
-                                      "THE X6200 AND THE RTL-SDR TOGETHER (B'S CHANNEL: %s %s).",
+                                      "THE X6200 AND THE RTL-SDR TOGETHER ON THE HEADPHONES (B'S CHANNEL: %s %s).",
                                       "THE SPEAKER SILENT: NEITHER RADIO IS HEARD (THEIR VOLUME KEPT)."};
     int64_t hz = listen_hz ? listen_hz : rtl_hz;
-    char    f[16];
+    char    f[16], sink[128];
 
     fmt_mhz(f, sizeof(f), hz, 3);
-    snprintf(t, n, how[h], f, rtl_mode_names[rtl_mode_of(hz)]);
+    if (h == HEAR_BOTH && !btaudio_hp_sink(sink, sizeof(sink)))
+        snprintf(t, n, "THE RTL-SDR ALONE (%s %s): WHILE THE SPEAKER PLAYS IT, THE BASE SENDS NOTHING OF THE X6200. "
+                       "BOTH TOGETHER NEEDS BLUETOOTH HEADPHONES.", f, rtl_mode_names[rtl_mode_of(hz)]);
+    else
+        snprintf(t, n, how[h], f, rtl_mode_names[rtl_mode_of(hz)]);
 }
 
 /* F4 on A or B: that screen's LISTEN, the next one, heard at once. RTL and BOTH with no stick yet: the X6200 alone
@@ -2916,7 +2924,8 @@ static void vol_text(char *s, size_t n) {
         snprintf(s, n, "AUTO");
     else if (vol_stick() && vol_fn == VF_RFG)
         snprintf(s, n, "%d.%d DB", v / 10, v % 10);
-    else if (vol_fn == VF_VOL && heard == HEAR_BOTH)        /* both heard: this one's, and the other's to match it */
+    else if (vol_fn == VF_VOL && heard == HEAR_BOTH && rtl_spectrum_on_headphones())   /* both heard: this one's,
+                                                                                     * and the other's to match it */
         snprintf(s, n, "%d (%s %d)", v, vol_stick() ? "X6200" : "RTL",
                  vol_stick() ? param_i_get(cfg_volume) : param_i_get(cfg_rtl_vol));
     else

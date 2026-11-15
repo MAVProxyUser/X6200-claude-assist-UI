@@ -56,8 +56,11 @@ bool rtl_spectrum_feed(int fd);
 void rtl_spectrum_listen(int64_t hz, int mode);
 bool rtl_spectrum_listening(void);
 
-/* While listening: the X6200's receiver mixed in with the stick (on: BOTH), or the stick alone */
+/* While listening: the X6200's receiver mixed in with the stick (on: BOTH), or the stick alone. Mixed only on the
+ * Bluetooth headphones: on the speaker the base, playing the stick, sends none of its receiver (rtl_spectrum.c) */
 void rtl_spectrum_mux(bool on);
+/* The stick's audio on the Bluetooth headphones now, not the speaker: BOTH mixes the X6200 in */
+bool rtl_spectrum_on_headphones(void);
 
 /* OFF: the speaker taken from the X6200's receiver and given nothing (on), or let go */
 void rtl_spectrum_mute(bool on);
