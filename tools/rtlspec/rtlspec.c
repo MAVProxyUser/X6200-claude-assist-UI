@@ -1000,11 +1000,14 @@ static void commands(uint64_t *centre, bool *fresh) {
 
 /* Each transfer the device sends (unsigned 8-bit I/Q, whichever it is), on its backend's thread: the commands waiting
  * first */
+static atomic_ullong rx_bytes;         /* what the device sent: the watchdog says when it is short of the rate */
+
 static void on_samples(unsigned char *buf, uint32_t n) {
     int  bins = n_bins;
     bool rows;
 
     atomic_store(&last_ms, now_ms());
+    atomic_fetch_add(&rx_bytes, n);
     if (atomic_load(&s_now) != S_ON) atomic_store(&s_now, S_ON);
     if (stop) {
         halt_rx();
@@ -1228,11 +1231,33 @@ static void *stick_thread(void *arg) {
 /* Each 200 ms: the state told when it changes, a stall seen, dump1090's samples taken back when it went */
 static void *watch_thread(void *arg) {
     char     said[128] = "", now[128];
-    uint32_t looked = 0, pulled_at = 0;
+    uint32_t looked = 0, pulled_at = 0, rate_at = 0, rate_said = 0;
+    uint64_t rate_from = 0;
     (void)arg;
 
     while (!stop) {
         int s = atomic_load(&s_now);
+
+        /* Each 10 s streaming: what came against the rate; said when under 95% (once a minute at most), and the first
+         * time after an open */
+        if (s != S_ON) {
+            rate_at = 0;
+        } else if (!rate_at) {
+            rate_at   = now_ms();
+            rate_from = atomic_load(&rx_bytes);
+        } else if (now_ms() - rate_at >= 10000) {
+            uint64_t got  = atomic_load(&rx_bytes) - rate_from;
+            double   want = (double)(cur_rate ? cur_rate : want_rate) * 2 * (now_ms() - rate_at) / 1000.0;
+            int      pc   = want > 0 ? (int)(got * 100 / want) : 0;
+
+            if (!rate_said || (pc < 95 && now_ms() - rate_said > 60000)) {
+                fprintf(stderr, "rtlspec: %.2f MB/s from the device, %d%% of %u S/s\n",
+                        got / ((now_ms() - rate_at) / 1000.0) / 1e6, pc, cur_rate ? cur_rate : want_rate);
+                rate_said = now_ms() | 1;
+            }
+            rate_at   = now_ms();
+            rate_from = atomic_load(&rx_bytes);
+        }
 
         if (atomic_exchange(&feed_gone, false)) apply_tuning();
         /* only from the state read: the stick's thread may have said NOSTICK meanwhile */
