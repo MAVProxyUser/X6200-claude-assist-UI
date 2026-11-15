@@ -31,7 +31,7 @@ Settings. Button and option names are written as the radio shows them.
 - [Bluetooth](#bluetooth): [headphones](#bluetooth-headphones), [CAT](#bluetooth-cat), [TCI over Bluetooth](#tci-over-bluetooth), [a PC on Bluetooth](#a-pc-on-bluetooth)
 - [Themes](#themes)
 - [Web configurator](#web-configurator)
-- [Wavelog](#wavelog)
+- [Wavelog](#wavelog): [live link](#live-link)
 - [Winlink](#winlink): [Mercury](#mercury-experimental), [XARA](#xara-experimental)
 - [Browser panel](#browser-panel)
 - [Browser remote](#browser-remote)
@@ -123,17 +123,48 @@ hides a setting the base can't do. The patched base is gdyuldin's
 x6100_base_patch, which you install apart from GoldCorpHF; Settings > Info >
 Baseband shows which base the radio runs.
 
-| Setting | Where | X6100, Xiegu's base | X6100, patched base | X6200 |
-|---|---|---|---|---|
-| Codec gain | Settings > TX Cal > TX CALIBRATION | - | r3 and later | - |
-| Band output gain | Settings > TX Cal > TX CALIBRATION | - | r8 and later | - |
-| IQ offsets | Settings > TX Cal > TX CALIBRATION | yes | yes | - |
-| Mic gain | Settings > Audio > MICROPHONE | yes | yes | yes |
-| Comp (the ratio) | the MFK 2:4 page | the button (see 4) | yes | three levels |
-| Compressor, makeup | Settings > Audio > TX AUDIO | - | r3 and later | - |
-| TX filter | Settings > Audio > TX AUDIO | - | r9 and later | - |
-| FM pre/de-emphasis | Settings > Audio > TX AUDIO | - | r8 and later | - |
-| CESSB | Settings > TX Cal > CESSB | - | r12 and later | - |
+| Setting | Where | X6100, Xiegu's base | X6100, patched base | X6100, test base | X6200 |
+|---|---|---|---|---|---|
+| Codec gain | Settings > TX Cal > TX CALIBRATION | - | r3 and later | - | - |
+| Band output gain | Settings > TX Cal > TX CALIBRATION | - | r8 and later | - | - |
+| IQ offsets | Settings > TX Cal > TX CALIBRATION | yes | yes | yes | - |
+| Mic gain | Settings > Audio > MICROPHONE | yes | yes | yes | yes |
+| Comp (the ratio) | the MFK 2:4 page | the button (see 4) | yes | yes | three levels |
+| Compressor, makeup | Settings > Audio > TX AUDIO | - | r3 and later | yes | - |
+| TX filter | Settings > Audio > TX AUDIO | - | r9 and later | yes | - |
+| FM pre/de-emphasis | Settings > Audio > TX AUDIO | - | r8 and later | - | - |
+| CESSB | Settings > TX Cal > CESSB | - | r12 and later | yes | - |
+
+#### The X6100 test base
+
+The test base is RF.Guru's own
+[X6100-Baseband test release](https://github.com/Guru-RF/X6100-Baseband/releases/tag/v0.1.0-alpha.2)
+(v0.1.0-alpha.2): Xiegu's V1.1.9 with a compressor/gate, CESSB and an
+adjustable TX filter added. It is **TEST ONLY**. It has not been validated
+on a radio yet: its RF output and power, its timing and the way back to
+Xiegu's base are still to be checked. Try it into a dummy load first. Its
+[TESTING.md](https://github.com/Guru-RF/X6100-Baseband/blob/v0.1.0-alpha.2/TESTING.md)
+says how to install it and how to go back. OpenX6X00 does not install it.
+
+- OpenX6X00 knows it only by its whole version string,
+  `V1.1.9 Nov 27 2025,tx1a2-test`, as Settings > Info > Baseband shows it.
+  "TEST ONLY, not validated on a radio" stands under it there, and at the top
+  of TX AUDIO and CESSB. A short message says so at each start too.
+- At each start on it, OpenX6X00 sets the compressor and CESSB off and the TX
+  filter to 300-3000 Hz, as the test base starts. Turn on what you test.
+- Change these settings while the radio receives. A change goes to the base
+  whole, its added processing off for a moment and back on with the new
+  settings. One made while the radio transmits waits until it receives
+  again. One made just as a transmission starts can still reach the base at
+  its start: the test base does not yet take a change all at once.
+- After a failed write to the base, a reset of the base or a gap in its data,
+  OpenX6X00 sends these settings to it again, in the same order, once the
+  radio receives.
+- The added processing works in LSB and USB voice only. The TX filter is the
+  base's own and works in the other modes too.
+- It has none of the patched base's codec gain, band output gain, FM
+  emphasis or auto notch: those stay hidden, as on Xiegu's own V1.1.9.
+- An older OpenX6X00 runs it as Xiegu's V1.1.9, with the added processing off.
 
 1. **Codec gain** (-25 to +25 dB, 0 by default) is the patched base's
    overall TX level. You set it once, not while you operate. The base's notes
@@ -198,9 +229,9 @@ The rest, left as it is unless you have a reason:
   passband, low edge 50-400 Hz (160 by default), high edge 2000-4000 Hz
   (3000).
 - **FM pre/de-emphasis** (patched base r8 and later), for FM.
-- **Moni level** (VOL 2:2 page) plays your own transmission on the speaker.
-  It is 0 by default: higher, the microphone can pick it up again (see
-  [Audio tab](#audio-tab)).
+- **Moni level** (Settings > Audio > MICROPHONE) plays your own transmission
+  on the speaker. It is 0 by default: higher, the microphone can pick it up
+  again (see [Audio tab](#audio-tab)).
 - The digital apps set their own audio level: see
   [Digital-mode TX level](#digital-mode-tx-level).
 
@@ -254,13 +285,13 @@ brackets (#279).
   they are the paddle).
 - What is on each list is yours to choose. Hold a value button (TX power, RF
   gain, Squelch, the filter edges, RIT, XIT, Spectrum Zoom, WF ref, AGC,
-  Comp, IF shift, VOX, PRE, ATT, ATU, Step, NB, NR, DNF, the KEY and CW
-  values...): each hold steps it from no knob to VOL ("Added to VOL
+  Comp, IF shift, VOX, PRE, ATT, ATU, Step, Brightness, NB, NR, DNF, the KEY
+  and CW values...): each hold steps it from no knob to VOL ("Added to VOL
   encoder"), then to the MFK ("Moved to MFK encoder"), then off again
   ("Removed from MFK encoder"). A mark on the left of the button shows which
   knob it is on, in another colour while that knob turns it.
 - A press of a value button puts it on a knob at once: VOL for Volume,
-  Squelch, RF gain, TX power, Moni level and the filter, the MFK for the
+  Squelch, RF gain, TX power, Brightness and the filter, the MFK for the
   others. A press of an on/off button (NB, NR, DNF, VOX, PRE, ATT, ATU)
   switches it; a press of AGC takes it to the next of Off, Slow, Fast, Auto.
 - AGC is on the MFK 2:4 page, PRE, ATT and ATU on VOL 2:2, Step (the tuning
@@ -270,6 +301,16 @@ brackets (#279).
   go on a knob, and there was no ATU or Step button.
 - At first VOL has Volume, RF gain, the filter edges and TX power, and the MFK
   Spectrum Zoom and DNF. Volume never leaves VOL.
+- GEN shows the VOL pages, then the MFK pages: VOL 1:2 (Volume, Squelch, RF
+  gain, TX power), VOL 2:2 (Brightness, PRE, ATT, ATU), MFK 1:4 to 4:4.
+- Brightness (VOL 2:2, F2) is the screen's, the one of Settings > Display >
+  BACKLIGHT: a press puts it on VOL, and a turn sets it from 0 to 9 and
+  keeps it, as Settings does. Turned below the level the screen dims to,
+  it takes that level down with it, so the screen never brightens when it
+  dims. A turn never puts the light out: the light off (-1) is only in
+  Settings. It took the place of Moni level, which up to v0.3.12 was on VOL
+  2:2 and is now in Settings > Audio > MICROPHONE; a knob you had put Moni
+  level on keeps it (issue #271).
 
 Hide buttons. With Settings > Display > INTERFACE > Hide buttons at After
 3 s, After 5 s or After 10 s (Off by default), the five buttons and the two
@@ -2116,12 +2157,24 @@ Per band S-meter cal: see [S-meter](#s-meter). TCI SERVER: see
 
 | Card | Options |
 |---|---|
-| BACKLIGHT | timeout and brightness, buttons brightness (Always Off, Always On, Temporarily On), Screensaver (None, Matrix rain), Screensaver (min) (with a screensaver: 1-120 minutes without use), Rain speed (Normal, Slow, Very slow), Screen off (min) (minutes without use, 0 never; the key that wakes it does nothing else), Screen always off (the screen stays dark for a radio run from the VFO-Knob or a browser, no screensaver; POWER shows it for the blank time, a minute at least); see [Screensaver](#screensaver) |
+| BACKLIGHT | Timeout (0 off), Brightness (see below), buttons brightness (Always Off, Always On, Temporarily On), Screensaver (None, Matrix rain), Screensaver (min) (with a screensaver: 1-120 minutes without use), Rain speed (Normal, Slow, Very slow), Screen off (min) (minutes without use, 0 never; the key that wakes it does nothing else), Screen always off (the screen stays dark for a radio run from the VFO-Knob or a browser, no screensaver; POWER shows it for the blank time, a minute at least); see [Screensaver](#screensaver) |
 | SPECTRUM | Spectrum; with it on Fill, Peaks, Fill gradient, Filter colour, Filter shade, Shaded part, Height (see [Waterfall](#waterfall)) |
 | WATERFALL | see [Waterfall](#waterfall) |
 | MAIN SCREEN | Band plan, Cluster spots, Channels, Cluster column, Broadcast names, S-meter type, S-meter colours, Needle lamp, Birdies (see [Birdie Cal](#birdie-cal)), Zoom and step per mode, Step per zoom (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)) |
 | INTERFACE | Popups Freq/Info/TX, Icon menus, Knob info, Hide buttons (Off, After 3 s, After 5 s, After 10 s), Keep knob lines, Theme, Font, Decoder text, FT8/FT4 info |
 
+- Timeout (0 off), Brightness: the seconds without a key or a knob before
+  the screen dims, 5 to 120 (30 by default), and the slider of the
+  brightness, from -1 (the light off) to 9, with the level it dims to on
+  its left knob. After the timeout the screen dims to that level, and the
+  next key or knob brings it back. At 0 (Off) the screen never dims: it
+  stays at its brightness, under the screensaver too, until Screen off or
+  POWER darkens it. With Off the slider has one knob, the brightness, and
+  the dim level no longer stands in its way. Buttons brightness Temporarily
+  On lights the keys as long as the screen is at its brightness: with Off,
+  until the screen goes dark. Up to v0.3.12 the timeout went from 5 s, so
+  the screen always dimmed (issue #271). The brightness is also on the VOL
+  2:2 button page (see [Buttons and knobs](#buttons-and-knobs)).
 - Popups Freq/Info/TX (Popups Freq/Info/ALC up to v0.3.8), three switches:
   - Freq (off by default): the new frequency, big in the middle of the
     screen, while tuning.
@@ -2268,7 +2321,7 @@ at 4, as it would have.
 |---|---|
 | RX AUDIO | Speaker mode, Line-in / Line-out, Play / Rec gain, Boot sound (CQ CQ in CW with the boot logo, quiet; at volume 28 when your VOL is lower; off by default), Speaker always off |
 | TX AUDIO | compressor (threshold, makeup), TX filter, FM pre/de-emphasis |
-| MICROPHONE | Input (Built-in, Hand, Auto), Hand mic gain, Built-in gain |
+| MICROPHONE | Input (Built-in, Hand, Auto), Hand mic gain, Built-in gain, Moni level (0-100, 0 by default) |
 | VOX | On, Gain, Anti-VOX, Delay |
 | AGC | Hang, Knee, Slope |
 
@@ -2305,8 +2358,11 @@ Compressor (Comp on the MFK 2:4 page): off (1:1) by default on both radios.
   nearest of them: 2:1 and 3:1 as 2:1, 4:1 to 7:1 as 4:1, 8:1 as 8:1; 1:1
   (Off) is off.
 
-TX monitor: Moni level (VOL 2:2 page, F2) plays your own transmission on the
-speaker. It is 0 by default on both radios. At 30, the default in earlier
+TX monitor: Moni level (MICROPHONE card) plays your own transmission on the
+speaker, and is silent whenever the speaker is (muted, volume 0, Speaker
+always off, Bluetooth headphones on). Up to v0.3.12 it was on the VOL 2:2
+button page, where Brightness is now (issue #271); a knob you had put it on
+keeps it. It is 0 by default on both radios. At 30, the default in earlier
 releases, the microphone picked the monitor up and fed it back into the
 transmission: on the X6200, whose speaker and built-in microphone share the
 case, a loud ringing from the moment PTT was pressed in SSB (issue #15); on
@@ -3660,7 +3716,7 @@ Buttons:
 | 2 | Hold Freq, Auto, Force QSO save, Power |
 | 3 | CQ Modifier, Time Sync, Log Map, Live Map |
 | 4 | Freq: Preset / 14.091, Hound: Off / On, Retries, For you |
-| 5 | Ext tune (see [TUNE for an external tuner](#tune-for-an-external-tuner)) |
+| 5 | Ext tune (see [TUNE for an external tuner](#tune-for-an-external-tuner)), Auto Sync |
 
 - Show: CQ shows the CQs and the messages to you; All shows all traffic.
 - TX CQ calls CQ. A band key, Freq or Mode ends the CQ: TX CQ goes to
@@ -3710,6 +3766,24 @@ Buttons:
   `/mnt/rtc-drift.json`, is taken out at every start (`x6100-rtc status` over
   SSH shows it). A typical chip runs 1 to 2 s a day off; corrected, a few
   tenths of a second in a week. Time Sync and Settings' date set it too.
+- Auto Sync (page 5): Time Sync by itself, from the decodes, for a radio
+  with no WiFi or GPS. Disabled by default; a press switches it. In FT8 and
+  FT4 (not FT2) it reads the time offset (DT) of each station it decodes,
+  one vote a station however often it is heard (a Fox counts once). Once 5
+  stations or more were heard in 3 slots or more within the last 4 minutes,
+  and they agree, their median says how far the clock is off. At 0.2 s or
+  more the clock moves by that, just past the middle of a
+  slot the radio does not transmit in, and goes into the clock chip: "Auto
+  Sync: clock moved -0.42 s by the decodes of 7 stations". Then it starts
+  over with the decodes that follow. It aims at the DT a right clock shows
+  on this radio, a little over 0 (the signals reach the decoder a moment
+  late), not at 0. The clock must be within about 2 s first: Time Sync, at
+  a slot start, does that. Further off it moves nothing and says so once
+  ("too far: press Time Sync as a slot starts"); stations that disagree
+  (two groups of clocks) move nothing either. A clock that NTP or the GPS
+  keeps is left alone. Switched on, the first answer shows too ("the clock
+  is on time by the decodes of 6 stations"). The system log has a line a
+  minute with what it reads ("ft8: Auto Time Sync: median DT ...").
 - CQ Modifier: for example `CQ POTA` or `CQ DX`.
 
 The list. Each row has the slot time, the message, and on the right the
@@ -4205,7 +4279,7 @@ APP > Modes > RADE receives and sends FreeDV's RADE V1 digital voice
 (#130), finished for both radios. The window shows Sync, the SNR (dB), the
 frequency offset (Hz), the input level, where the speech goes, what was lost
 and the processor's time per modem frame. The buttons: Freq., Rec, Send and
-Close on the first page; Power, Discard and Close on the second.
+Close on the first page; Power, Reporter, Discard and Close on the second.
 
 **Where you hear it.** The radio's speaker can't play the speech: with the
 base's firmware it plays the app's audio only in Play mode, and then the base
@@ -4234,10 +4308,17 @@ amateur radio: send only on the bands and with the privileges you hold.
 the decoder or the player was behind, "gaps" the breaks in the speech;
 "decode" and "synth" are the slowest ms for one 120 ms modem frame, and above
 120 the speech breaks up. The callsign that the last End-of-Over carried is
-shown after "last over", in the form rade_c's own test sends it (8 characters
-of 7 bits, as this app sends yours), and only when it reads as a callsign.
-FreeDV's own program sends its callsign in another form (with error
-correction): nothing is shown for its overs, and it may not show yours.
+shown after "last over", and only when it reads as a callsign (3 to 8
+letters, digits and /, with a letter and a digit). The app reads it in
+either form:
+- **FreeDV's own**, as FreeDV's program sends it: error correction and a
+  check sum, read as FreeDV reads it. It comes through down to about 5 dB
+  SNR. FreeDV versions from before July 2026 send / as 0 (K6AQ/5 shows as
+  K6AQ05).
+- **this app's**, the form rade_c's own test sends (8 characters of 7 bits),
+  as this app sends yours. It has no error correction and no check: it needs
+  about 15 dB SNR, and below that a bit error can show a callsign a letter
+  off.
 
 **Sending: record, then send, not live.** Linux records only the hand mic, and
 only while the radio is receiving (the same limit as the
@@ -4255,12 +4336,41 @@ message:
   are low because the power reading follows the average of RADE's signal, and
   its peaks go several dB higher. Stop ends the send. The End-of-Over frame at
   the end of an over carries your callsign (Settings > callsign; the first 8
-  characters), and the receiver shows it. Send again sends the same over once
+  characters) in this app's form: this app shows it, FreeDV's own program
+  does not. Send again sends the same over once
   more; Discard drops it, and Rec starts a new one.
 - Send is refused without a callsign set, while another transmission runs, or
   when the radio does not transmit on this frequency.
 - The built-in microphone cannot be used. The level meter shows the mic's
   peak while recording; "too loud" is clipping.
+
+**FreeDV Reporter (off by default).** Reporter on the second page puts the
+radio on [qso.freedv.org](https://qso.freedv.org), FreeDV's public list of
+the stations on the air, while the RADE window is open. **It publishes your
+callsign, your QTH locator and your frequency on a public site**, and with
+them when you send, the callsigns of the stations you receive with their SNR,
+and your status message if you set one. The locator is the one the radio
+works with everywhere: from the GPS while it has a fix, else the QTH locator
+of Settings. Press Reporter to switch it on or off; the radio keeps the
+choice. It needs the callsign and the QTH locator set in Settings, and the
+internet over WiFi or Ethernet.
+- While the window is open, the list shows a new frequency within a second
+  of tuning, a Send as transmitting until the over ends, and each End-of-Over
+  that carries a callsign (the one shown after "last over") as received, with
+  the SNR. Closing the window takes the radio off the list.
+- Hold Reporter to type the status message, up to 64 characters (kept in
+  `freedv_reporter.txt` on the DATA partition). An empty one clears it.
+- A QSY request from someone on the list shows on the message line: their
+  callsign, the frequency and their words. The radio does not tune or
+  transmit because of it.
+- **Without the internet, RADE works as it does with Reporter off.** One note
+  says it is not connected, and it tries again quietly, waiting longer each
+  time (5 s, then up to 2 minutes). Nothing waits for the network: not the
+  screen, not the decoder, not a send.
+- The connection is encrypted (TLS), and the server's certificate is checked:
+  a radio whose clock is wrong connects once the clock is set. The radio
+  connects as FreeDV's own radio integrations do, a reporter that does not
+  download the list of stations. The mode on the list is RADEV1.
 
 ### PSK31, PSK63 and Olivia
 
@@ -4958,6 +5068,21 @@ too. Turning the RF gain while the trainer is open gives you what you set.
   space there does not end the answer, and the spaces are left out when it
   is checked. Up to v0.3.9 the space ended it and the call counted wrong
   (issue #202).
+- Calls keys a callsign and you key it back. Right: the next call comes
+  1 WPM faster. Wrong: 1 WPM slower. 50 calls make a run. TX speed (page 2,
+  in Calls) sets what your own keying does meanwhile (issue #270):
+  - Follows (the default, as before): KEY Speed goes up and down with the
+    calls, so your paddle speeds up and slows down with them. Leaving Calls
+    puts it back.
+  - Fixed: KEY Speed stays at your own sending speed, and only the calls go
+    up and down. The run starts at your speed. Turning the MFK (or the
+    arrow keys) sets it in Calls too; before the run's first call the calls
+    start from the new speed as well. The hint line shows it ("Key back the
+    callsign at your 20 WPM").
+  - The decoder listens for each call at the slower of the two speeds,
+    and for your answer at yours. A call more than four times faster than
+    you can cost your answer its first character.
+  - The choice is kept for the next time.
 - Start, and Replay (in Learn while it waits for your answer, and in
   Calls), play the group or the call one second after the press, so your
   hand is off the key by then; the screen says "Listen..." meanwhile, and
@@ -4970,13 +5095,13 @@ too. Turning the RF gain while the trainer is open gives you what you set.
   answer, it goes under the screensaver after its minutes, and your answer
   brings the screen back. Up to v0.3.12 nothing of the trainer counted
   (issue #263).
-- The trainer keys at the key speed, 5 to 50 WPM, and the decoder follows
-  it, and a straight key, down to 5 WPM while the trainer is open (on the
-  band it stops at 10). Up to v0.3.8 it stopped at 10 in the trainer too:
-  at 5 WPM it read every group and answer wrong (an M as two Ts). Below
-  10 WPM with KEY Ratio over 3 it also took a long dah for a steady
-  carrier: dahs and the dits after them were lost (a J heard as W, a Z as
-  M).
+- The trainer keys at the key speed (Calls with TX speed Fixed: each call
+  at its own), 5 to 50 WPM, and the decoder follows it, and a straight key,
+  down to 5 WPM while the trainer is open (on the band it stops at 10).
+  Up to v0.3.8 it stopped at 10 in the trainer too: at 5 WPM it read every
+  group and answer wrong (an M as two Ts). Below 10 WPM with KEY Ratio over
+  3 it also took a long dah for a steady carrier: dahs and the dits after
+  them were lost (a J heard as W, a Z as M).
 - A character of your answer the decoder cannot read (dits and dahs that
   make no character, or a prosign such as AR) shows as `<?>`, in Learn and
   Calls, as the CW decoder panel shows it, and is never right; the hint
@@ -5912,7 +6037,7 @@ The menu has General and five groups:
 | | Memories | MEM 1-9 slots and the named channel list ([Channels](#channels)), on the frequencies the radio tunes |
 | Operating | Cluster | DX cluster servers, filters and alerts (writes `/mnt/cluster.conf`) |
 | | Field Ops | QRZ Logbook profiles (three callsigns with their API keys, the active one), HOTA key, WWFF key, update the reference lists, download the activation logs |
-| | Wavelog | every logged QSO to your Wavelog: URL, API key, station profile (one, or Automatic by the radio's callsign), connection test, Send now (writes `/mnt/field/wavelog.conf`, see [Wavelog](#wavelog)) |
+| | Wavelog | every logged QSO to your Wavelog: URL, API key, station profile (one, or Automatic by the radio's callsign), connection test, Send now; the live link: Show the radio in Wavelog, Radio name, Tune from Wavelog, the radio's address for Wavelog, Wavelog in the browser (writes `/mnt/field/wavelog.conf`, see [Wavelog](#wavelog) and [live link](#live-link)) |
 | | Winlink | Winlink email over HF with Pat and ARDOP, or Mercury or XARA (both experimental): Enabled, callsign, locator, the Winlink password (write only, and where Pat's is set), the modem, ARDOP's, Mercury's or XARA's bandwidth, the VARA HF licence tick box (XARA's full speed; the radio does not check it), the status and Open the mailbox (Pat's page on port 8080), the radio before a connection, the last connection with what to do next, and the logs as a download (writes `/mnt/winlink.conf`, see [Winlink](#winlink)) |
 | | CW messages | the MSG > CW messages: add, edit, delete (1-64 characters) |
 | | Macros | the PSK31, Olivia and JTTY macros (add, edit, move up, delete) and the JS8 INFO and STATUS answers (see below) |
@@ -6030,7 +6155,7 @@ them.
 | S-meter | S-meter type (Bars, Needle), Colours (Theme, Scale, Level), Needle lamp; with a preview |
 | Waterfall | Mode (Centered, Fixed), Jump at (40%, Passband, Line) and Jump to (Center, Other edge, Scroll), greyed unless Mode is Fixed (see [Waterfall](#waterfall)), Speed (1-5), Auto level, Auto level offset (-15 to +15 dB), Center line, Zoom, Smooth scroll, 3D, 3D colours (Strength, Waterfall, Blue), 3D depth, tilt, floor, range, peaks, glide (greyed unless 3D is on; under Amber Trey 3D off and greyed with them) |
 | On the waterfall | Band plan, Plan (Auto or a plan, with what Auto takes and from what; see [Band plan](#band-plan)), Cluster spots, Cluster column |
-| Backlight | Brightness, Brightness when idle, Idle after (5-120 s), Button lights (Always off, Always on, Temporarily on), Screensaver (None, Matrix rain), Screensaver after (1-120 min, greyed with None), Rain speed (Normal, Slow, Very slow; greyed with None), Screen off after (0-120 min), Screen always off (the screensaver's rows greyed while it is on); see [Screensaver](#screensaver) |
+| Backlight | Brightness, Brightness when idle (greyed with Idle after Off), Idle after (Off, 5-120 s), Button lights (Always off, Always on, Temporarily on), Screensaver (None, Matrix rain), Screensaver after (1-120 min, greyed with None), Rain speed (Normal, Slow, Very slow; greyed with None), Screen off after (0-120 min), Screen always off (the screensaver's rows greyed while it is on); see [Screensaver](#screensaver) |
 | Receiver | the X6200 only: WR12 on HOST (see [WR12 receiver](#wr12-receiver-x6200)) |
 | Transmitter | TX ranges (Ham bands, South Korea, Own list), TX outside ham bands (Settings > TX Cal), and the own list as a text field: Save writes `tx_ranges.conf` and the radio reads it at once, the ranges it took and a line it could not read said under it (see [Amateur bands only](#amateur-bands-only)) |
 | Text and info | Independent VFOs, Birdies (Off, Marks, Marks + notch), Mode from band plan, Zoom and step per mode, Step per zoom (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)), 12-hour clock, Icon menus, Knob info, Hide buttons (Off, 3 s, 5 s, 10 s; see [Buttons and knobs](#buttons-and-knobs)), Keep knob lines, Decoder text (Large, Compact), Magnify frequency, Magnify info, TX panel (the radio's Popups TX) |
@@ -6152,6 +6277,24 @@ Every QSO the radio logs goes to your [Wavelog](https://github.com/wavelog/wavel
 - HTTPS is checked against the radio's root certificates. Check the certificate off only for a Wavelog at home with a self-signed certificate.
 - The key is kept in `/mnt/field/wavelog.conf`. The Wavelog page says only Set or Not set, Clear takes the key away and stops the upload, and it is not in the Backup. Like the QRZ, HOTA and WWFF keys it is not on the Files page either (up to v0.3.10 anyone who reached the web configurator could download it there). The upload uses Wavelog's API v1 (`api/qso`, `api/station_info`, `api/version`, `api/auth`); QSOs sent through it are not uploaded on to other services by Wavelog at once and get no callbook lookup there.
 - By hand: `x6100-wavelog sync`, `x6100-wavelog stations`, `x6100-wavelog test` (one line each, as the other helpers).
+
+### Live link
+
+Wavelog follows the radio, and the radio follows a click in Wavelog: two switches on the Wavelog page, each off by default. Both use the Wavelog URL and the read & write API key saved above them, whether Upload to Wavelog is on or not. Where: web configurator, Operating > Wavelog > Live link.
+
+- Show the radio in Wavelog: the frequency, the mode and the power go to Wavelog (its `api/radio`) as you tune, so Wavelog's QSO form and band map follow the radio. In Wavelog, choose the radio in the radio list of the QSO page or of the band map. The web server sends it, not the screen program: it asks the radio what it is on twice a second, and a post that waits for Wavelog never holds up the radio.
+- When it goes: once the value has stayed the same for 1.5 s (the knob stopped), at most one post every 4 s, and the same again once a minute while nothing changes, so that Wavelog doesn't take the radio for gone (its Radio Timeout Warning, 30 minutes unless changed). That is 15 posts a minute at most while you tune, and one a minute otherwise. Wavelog limits nothing unless its admin set a rate limit (`api_rate_limits` in its `config.php`, counted per API key; its example allows 60 a minute for `api/radio` and 30 for the others), and when Wavelog answers "too many" (HTTP 429), the radio waits as long as Wavelog says, up to 5 minutes.
+- What goes: the radio's name (the model, X6100 or X6200, unless Radio name says another; Wavelog keeps a radio by its name, so two radios with one Wavelog need two names), the frequency in Hz where the radio transmits, in split the receive frequency too, the power in W as set (at most the 7 W the radio holds itself to while a digital app is open), and the mode the quick QSO log would log now: FT8, FT4 or another app's mode, CW, AM, FM, voice as USB or LSB, a data mode with no app open as USB-D or LSB-D (Wavelog shows those as USB and LSB).
+- The line under the switches says what was sent last: "14.074.000 MHz FT8, 5 W, sent 14:03:12". With no network, Wavelog down or a WiFi login page in the way, each post gives up after 6 s, the line says "Not sent since 14:02: no connection (...). The radio tries again", the system log gets one line (not one a post), and the radio tries again after 10, 20, 40 and 80 s, then every 2 minutes. A key Wavelog refuses, or a certificate that fails the check: "Wavelog refused it: ... Fix it, then Save"; it is tried again after a Save, or after 10 minutes.
+- Tune from Wavelog: a click on a spot in Wavelog's DX cluster or band map (with the band map's CAT connection on) tunes the radio, frequency and mode, nothing else. It never transmits. It is refused while the radio transmits, while the frequency is locked (the lock, or an app that holds the frequency) and where the radio doesn't receive now (a transverter's band with the transverter off); while an app holds the mode, only the frequency changes. The display says "Wavelog: 14.074.0 USB-D" ("- RX only" where the radio may not transmit), control comes back to you at the radio, as with a turn of the knob, from a browser remote or a TCI program, and the page shows the last tune. Tune from Wavelog needs Show the radio in Wavelog: Wavelog learns the radio's address from its posts.
+- How it works: with Tune from Wavelog on, each post carries the radio's address for Wavelog (Wavelog's `cat_url`), `<address>/cat/<secret path>`, and on a click Wavelog's page calls `<address>/cat/<secret path>/<Hz>/<mode>`. It is the browser you use Wavelog in that calls the radio, not the Wavelog server: that browser has to reach the radio, on the radio's own network, or from anywhere over Tailscale with Tailscale on that computer too.
+- The modes: Wavelog's for tuning, LSB, USB, CW, AM and FM as they are, RTTY, PKT, DIG and PKTUSB as USB-D, PKTLSB as LSB-D, PKTFM as FM (the radio has no FM data mode); any other is refused. Wavelog's DX cluster and band map send RTTY for every digital spot (FT8, PSK31 ...), so those tune USB-D, as the radio's own DX cluster tunes them. Wavelog's DX waterfall on the QSO page sends the mode of the QSO form instead, and FT8 there as USB or LSB (by the frequency): a click there moves the radio from USB-D to USB unless an app holds the mode. Wavelog sends the frequency with a fraction of a hertz at times (1000999.9999999999 for 1.001 MHz): the radio rounds it to the nearest hertz.
+- The radio takes that call only with its secret path, only from the page of your Wavelog (the address you open it with in the browser: the Wavelog URL, or Wavelog in the browser when you open it by another name than the radio reaches it by), only by one of the radio's own names or addresses, or the name in the address typed for it on the page, and only for a frequency in the radio's receive range and one of the modes above. Every other page and device gets nothing, and none of its other pages takes more than before.
+- The secret path: random, made when Tune from Wavelog is switched on, kept in `/mnt/field/wavelog.conf` with the key, never shown on the page or sent back to the browser (Wavelog has it: that is how it calls). New address makes a new one, and so does switching Tune from Wavelog off and on: the old address stops working at once. Reload Wavelog's page afterwards, as it keeps the address it read until then. Clear (the key) switches both off and drops the secret path.
+- The radio's address for Wavelog, empty (automatic): https while the radio's HTTPS server runs (the default), on the radio's Tailscale name while Tailscale runs, else on its address on the network; the page shows which one it is now. With [Tailscale Funnel](#tailscale-funnel) on, the Tailscale name's https is Funnel's, which serves the Panel alone, so automatic then gives the address on the network. Type an address when automatic gives one that the browser can't reach (another name, a port your router forwards): `http://` or `https://`, a name or an address, the port when it is not the usual one, and nothing after it.
+- http or https: a Wavelog opened over https (most are) may only call an https address, as a browser blocks a call from a secure page to a plain http one (mixed content). The radio's certificate is its own (see HTTPS under [Web configurator](#web-configurator)), which no browser knows: open the radio's address once in the browser you use Wavelog in (Open it once, on the page) and accept the warning (Advanced, then Proceed); the browser keeps that for the address. The Tailscale name serves the same certificate and needs it once too. A Wavelog opened over plain http (at home, on a NAS) can call either; Wavelog's page tries the other one by itself when the first fails.
+- Chrome and Edge may ask once whether Wavelog's site may reach devices on your local network: allow it, or a click does nothing. The radio answers the browser's check for this (Private Network Access) for your Wavelog's page alone.
+- Wavelog keeps the last address it was sent: with Tune from Wavelog switched off on the radio it still has it, and the radio refuses its clicks. Wavelog's Hardware Interfaces page (Edit on the radio) clears it there.
 
 ## Winlink
 
@@ -8164,7 +8307,8 @@ FAT32 on a PC settles it.
 
 Check the clock: FT8 and JS8 need it within about 2 s, WSPR within about a
 second. WiFi (NTP) or GPS sets it. FT8 and JS8 also have Time Sync (FT8's
-for a clock that neither keeps).
+for a clock that neither keeps), and FT8 Auto Sync, which keeps the clock
+right from the decodes once Time Sync has it within about 2 s.
 
 #### The clock is back at the same time after every power-off
 
@@ -8469,6 +8613,7 @@ The DATA partition, readable on a PC.
 | `app_freqs` | the last frequency and mode of each digital app |
 | `psk_macros.txt`, `olivia_macros.txt`, `psk.conf` | PSK and Olivia macros, PSK squelch |
 | `js8_inbox.txt`, `js8_held.txt`, `js8_texts.txt` | JS8 inbox, messages held for others, INFO/STATUS/alert words/groups |
+| `freedv_reporter.txt` | the RADE app's [FreeDV Reporter](#rade-freedv) status message, one line |
 | `incoming_log.adi` | put an ADIF log here to import it at the next start; a record with neither OPERATOR nor STATION_CALLSIGN is logged under your callsign |
 | `field/` | Field Ops state and activation logs (`field/logs/`) |
 | `digi_text/` | the [text log of the keyboard modes](#text-log-of-the-keyboard-modes): `YYYY-MM-DD.txt`, a file a UTC day |

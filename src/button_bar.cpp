@@ -249,8 +249,10 @@ button_data_t btn_tx_pwr = knob([] { return text("TX power:\n%0.1f W", cfg_sm.p_
                                 CTRL_PWR, &cfg_sm.p_pwr);
 button_data_t btn_dig_pwr = fn_btn(dig_pwr_label, dig_pwr_cb, &cfg_sm.p_pwr);
 button_data_t btn_ext_tune = fn_btn(ext_tune_label, [](button_data_t *) { ext_tune_toggle(); }, &cfg_sm.p_tune_pwr);
-static button_data_t btn_moni = knob([] { return text("Moni level:\n%i", cfg_sm.p_moni.get()); },
-                                     CTRL_MONI, &cfg_sm.p_moni);
+/* The screen's brightness, as Settings > Display sets it: a press puts it on VOL (#271). It took Moni level's
+ * place on VOL 2:2; Moni level is in Settings > Audio, and a knob bound to it keeps it (CTRL_MONI) */
+static button_data_t btn_bright = knob([] { return text("Brightness:\n%s", backlight_normal_text()); },
+                                       CTRL_BRIGHTNESS, &cfg_sm.s_brightness);
 
 /* DFL */
 static button_data_t btn_flt_low = knob([] { return text("Filter low:\n%i Hz", cfg_sm.cp_cur_filter_low.get()); },
@@ -422,7 +424,7 @@ static button_data_t btn_dfn_p1 = page_btn("(DFN 1:3)"), btn_dfn_p2 = page_btn("
 static button_data_t btn_mem_p1 = page_btn("(MEM 1:2)"), btn_mem_p2 = page_btn("(MEM 2:2)");
 
 buttons_page_t        buttons_page_vol_1 = {{&btn_vol_p1, &btn_vol, &btn_sql, &btn_rfg, &btn_tx_pwr}};
-static buttons_page_t page_vol_2 = {{&btn_vol_p2, &btn_moni, &btn_pre, &btn_att, &btn_atu}};
+static buttons_page_t page_vol_2 = {{&btn_vol_p2, &btn_bright, &btn_pre, &btn_att, &btn_atu}};
 static buttons_page_t page_mfk_1 = {{&btn_mfk_p1, &btn_rit, &btn_xit, &btn_zoom, &btn_wf_ref}};
 static buttons_page_t page_mfk_2 = {{&btn_mfk_p2, &btn_agc, &btn_comp, &btn_if_shift, &btn_vox}};
 static buttons_page_t page_mfk_3 = {{&btn_mfk_p3, &btn_wf_mode, &btn_span_wider, &btn_span_narrower, &btn_screen_rec}};

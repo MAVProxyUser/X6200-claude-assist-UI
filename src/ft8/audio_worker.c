@@ -50,8 +50,12 @@ struct audio_worker_s {
     /* Audio buffer (written by audio_worker_feed, read by worker). */
     pthread_mutex_t audio_mux;
     cbufferf        audio_buf;
-    double          audio_newest_t;   /* when the newest sample in it came in (CLOCK_REALTIME s); the oldest one
-                                       * came in buffered / sample_rate before it. Under audio_mux */
+    /* When the newest sample in it came in, by CLOCK_REALTIME and CLOCK_MONOTONIC (the same moment): the oldest one
+     * came buffered / sample_rate before it. Under audio_mux. The slots take their blocks by it, and Auto Time Sync
+     * (time_sync.h) the moment the decoder's audio began. A feed that does not fit loses samples (cbufferf_write
+     * drops it all): stamp_lost, the time of the slot's audio not known, until the next slot */
+    int64_t         newest_ns, newest_mono_ns;
+    bool            stamp_lost;
     long long       slot_index;       /* the slot the waterfall is filling: seconds since the epoch / slot time.
                                        * Worker thread only */
 
@@ -63,6 +67,12 @@ struct audio_worker_s {
     int             block_size;
 
     uint64_t        last_psd_time_ms;
+
+    /* The decoder's audio (worker thread): when its first sample came, 0 not known; the blocks put into it since;
+     * wf_first: the next block read is its first */
+    int64_t         wf_ns, wf_mono_ns;
+    uint32_t        wf_blocks;
+    bool            wf_first;
 };
 
 /* ---------- small helpers ---------------------------------------------- */
@@ -90,16 +100,30 @@ static void msleep_interruptible(audio_worker_t *w, long ms) {
     pthread_mutex_unlock(&w->sleep_mux);
 }
 
-static double now_s(void) {
+static int64_t clock_ns(clockid_t id) {
     struct timespec t;
 
-    clock_gettime(CLOCK_REALTIME, &t);
-    return t.tv_sec + t.tv_nsec / 1e9;
+    clock_gettime(id, &t);
+    return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec;
+}
+
+static double now_s(void) {
+    return clock_ns(CLOCK_REALTIME) / 1e9;
 }
 
 /* The slot a moment falls in, counted from the epoch: the slots of all three modes divide the minute */
 static long long slot_of(const audio_worker_t *w, double t) {
     return (long long)floor(t / ftx_slot_time(w->proto));
+}
+
+/* A new slot: the decoder's audio starts again with its first block, whose time is taken as it is read */
+static void slot_audio_new(audio_worker_t *w) {
+    pthread_mutex_lock(&w->audio_mux);
+    w->stamp_lost = false;
+    pthread_mutex_unlock(&w->audio_mux);
+    w->wf_ns = w->wf_mono_ns = 0;
+    w->wf_blocks = 0;
+    w->wf_first  = true;
 }
 
 /* ---------- PSD / waterfall ------------------------------------------- */
@@ -132,7 +156,11 @@ typedef struct {
 static void decode_cb(const char *text, int snr, float freq_hz, float time_sec, void *user) {
     decode_ctx_t *dc = (decode_ctx_t *)user;
     if (dc && dc->w && dc->w->cb.on_message) {
-        dc->w->cb.on_message(text, snr, freq_hz, time_sec, dc->info, dc->w->cb.ctx);
+        slot_info_t info = *dc->info;
+
+        info.rx_start_ns      = dc->w->wf_ns;
+        info.rx_start_mono_ns = dc->w->wf_mono_ns;
+        dc->w->cb.on_message(text, snr, freq_hz, time_sec, &info, dc->w->cb.ctx);
     }
 }
 
@@ -145,8 +173,6 @@ static void rx_consume_frames(audio_worker_t *w, const slot_info_t *info,
     for (;;) {
         if (atomic_load(&w->stop_req)) return;
 
-        bool           has_frame = false;
-        bool           copied    = false;
         unsigned int   got       = 0;
         float         *block       = NULL;
         float          block_data[w->block_size];
@@ -166,17 +192,25 @@ static void rx_consume_frames(audio_worker_t *w, const slot_info_t *info,
         pthread_mutex_lock(&w->audio_mux);
         unsigned int buffered = cbufferf_size(w->audio_buf);
         if (buffered >= (unsigned int)w->block_size) {
-            double    t0 = w->audio_newest_t - (double)buffered / w->sample_rate;
-            long long s  = slot_of(w, t0 + 0.5 * w->block_size / w->sample_rate);
+            int64_t   back = (int64_t)buffered * 1000000000LL / w->sample_rate;
+            double    t0   = (w->newest_ns - back) / 1e9;
+            long long s    = slot_of(w, t0 + 0.5 * w->block_size / w->sample_rate);
 
             if (s <= w->slot_index) {     /* a later slot's block waits for the slot change */
-                has_frame = true;
                 stale = s < w->slot_index;   /* a slot already decoded: dropped */
                 cbufferf_read(w->audio_buf, w->block_size, &block, &got);
                 // Copy data to external buffer
                 memcpy((void*)block_data, (void*)block, got * sizeof(float));
                 block = block_data;
                 cbufferf_release(w->audio_buf, got);
+                /* The slot's first block: the decoder's audio begins with its first sample, which came in when the
+                 * buffer's oldest did (Auto Time Sync) */
+                if (!stale && w->wf_first) {
+                    w->wf_first   = false;
+                    w->wf_ns      = w->newest_ns ? w->newest_ns - back : 0;
+                    w->wf_mono_ns = w->newest_ns ? w->newest_mono_ns - back : 0;
+                }
+                if (w->stamp_lost) w->wf_ns = w->wf_mono_ns = 0;
             }
         }
         pthread_mutex_unlock(&w->audio_mux);
@@ -192,10 +226,19 @@ static void rx_consume_frames(audio_worker_t *w, const slot_info_t *info,
         maybe_emit_psd(w, info, sec_since_slot_start);
 
         ftx_worker_put_rx_samples(block, w->block_size);
+        w->wf_blocks++;
 
         if (ftx_worker_is_full()) {
             ftx_worker_decode(decode_cb, true, (void *)&dc);
             ftx_worker_reset();
+            /* The decoder's audio goes on from the next block, this many samples on */
+            if (w->wf_ns) {
+                int64_t on = (int64_t)w->wf_blocks * w->block_size * 1000000000LL / w->sample_rate;
+
+                w->wf_ns      += on;
+                w->wf_mono_ns += on;
+            }
+            w->wf_blocks = 0;
         } else {
             ftx_worker_decode(decode_cb, false, (void *)&dc);
         }
@@ -242,6 +285,7 @@ static void *worker_main(void *arg) {
             ftx_worker_decode(decode_cb, true, (void *)&dc);
             ftx_worker_reset();
             w->slot_index = slot_of(w, now_s());
+            slot_audio_new(w);          /* Auto Time Sync: the new slot's audio timed from its first block */
 
             if (w->cb.on_slot_end) {
                 w->cb.on_slot_end(&info, w->cb.ctx);
@@ -300,6 +344,7 @@ audio_worker_t *audio_worker_create(int audio_sample_rate,
     if (w->block_size <= 0) goto fail;
 
     atomic_store(&w->stop_req, false);
+    w->wf_first   = true;   /* the first block read begins the decoder's audio */
 
     return w;
 
@@ -365,10 +410,19 @@ void audio_worker_destroy(audio_worker_t *w) {
 
 void audio_worker_feed(audio_worker_t *w, unsigned int n, float *samples) {
     if (!w || !samples || (n == 0)) return;
+
+    /* The fragment's last sample came now, the rest before it at the sample rate */
+    int64_t now = clock_ns(CLOCK_REALTIME), mono = clock_ns(CLOCK_MONOTONIC);
+
     pthread_mutex_lock(&w->audio_mux);
     if (w->audio_buf) {
-        cbufferf_write(w->audio_buf, samples, n);
-        w->audio_newest_t = now_s();
+        if (cbufferf_space_available(w->audio_buf) < n) {
+            w->stamp_lost = true;       /* cbufferf_write drops it all: the newest sample is still the one before */
+        } else {
+            cbufferf_write(w->audio_buf, samples, n);
+            w->newest_ns      = now;
+            w->newest_mono_ns = mono;
+        }
     }
     pthread_mutex_unlock(&w->audio_mux);
 }

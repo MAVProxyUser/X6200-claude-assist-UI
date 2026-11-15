@@ -14,6 +14,10 @@
  *    {"cmd":"digi_lists"}                             -> {"t":"digi_lists","plan":p,"region":r,"lists":{"6":[[hz,own]...],..}}
  *    {"cmd":"tx_ranges_read"}                         -> {"t":"tx_ranges", "tx_own_count":n, ...} after the own TX list
  *                                                        is read again (the web server wrote its file)
+ *    {"cmd":"radio_get"}                              -> {"t":"radio","hz":..,"tx_hz":..,"mode":"USB-D",...}: what the
+ *                                                        radio is on, for Wavelog's live link (wavelog_cat.h, #245)
+ *    {"cmd":"tune","hz":hz,"mode":"USB-D"}            -> {"t":"ok"} or {"t":"err","err":"..."}: a click on a spot in
+ *                                                        Wavelog; frequency and mode only, refused while transmitting
  *  The values are checked here and applied on the LVGL thread through the scheduler, as the
  *  Settings pages apply them.
  *
@@ -42,6 +46,7 @@ extern "C" {
     #include "screen_main.h"
     #include "theme.h"
     #include "walkie.h"
+    #include "wavelog_cat.h"
 
     #include "lvgl/lvgl.h"
     #include <errno.h>
@@ -169,19 +174,15 @@ static void disp_apply(void *arg) {
             params_bool_set(o.b, d->val);
     if (!strcmp(d->name, "auto_level_offset")) {
         cfg_sm.p_auto_level_offset.set(d->val / 10.0f);
-    } else if (!strcmp(d->name, "bright_normal") || !strcmp(d->name, "bright_idle")) {
-        bool normal = d->name[7] == 'n';
+    } else if (!strcmp(d->name, "bright_normal")) {
+        backlight_set_normal(d->val);       /* as Settings: the idle level not above it */
+    } else if (!strcmp(d->name, "bright_idle")) {
         params_lock();
-        if (normal)
-            params.brightness_normal = d->val;
-        else
-            params.brightness_idle = d->val;
-        params_unlock(normal ? &params.dirty.brightness_normal : &params.dirty.brightness_idle);
-        if (normal)
-            backlight_set_brightness(params.brightness_normal);
+        params.brightness_idle = d->val;
+        params_unlock(&params.dirty.brightness_idle);
     } else if (!strcmp(d->name, "bright_timeout")) {
         params_lock();
-        params.brightness_timeout = d->val;
+        params.brightness_timeout = screen_dim_set(params.brightness_timeout, d->val);   /* 0 Off (#271) */
         params_unlock(&params.dirty.brightness_timeout);
         backlight_tick();
     } else if (!strcmp(d->name, "screen_off_min")) {
@@ -248,9 +249,9 @@ static const char *disp_set(cJSON *req, disp_set_t *d) {
     if (!strcmp(d->name, "auto_level_offset"))
         min = -150, max = 150, known = true;   /* tenths of dB */
     if (!strcmp(d->name, "bright_normal") || !strcmp(d->name, "bright_idle"))
-        min = -1, max = 9, known = true;
+        min = SCREEN_BRIGHT_OFF, max = SCREEN_BRIGHT_MAX, known = true;
     if (!strcmp(d->name, "bright_timeout"))
-        min = 5, max = 120, known = true;
+        min = SCREEN_DIM_OFF, max = SCREEN_DIM_MAX_S, known = true;
     if (!strcmp(d->name, "bright_buttons"))
         min = 0, max = 2, known = true;
     if (!strcmp(d->name, "screen_off_min"))
@@ -447,6 +448,38 @@ static void tx_ranges_read_cb(void *arg) {
     cfg_tx_ranges_changed();
 }
 
+/* Wavelog's live link (#245): a click on a spot tunes the radio on the LVGL thread, this thread waiting for whether it
+ * did (wavelog_cat_tune) */
+typedef struct {
+    int32_t     hz;
+    int         mode;
+    const char *err;
+} tune_req_t;
+
+static void tune_cb(void *arg) {
+    tune_req_t *t = (tune_req_t *)arg;
+
+    t->err = wavelog_cat_tune(t->hz, t->mode);
+}
+
+static const char *tune(cJSON *req) {
+    cJSON     *hz   = cJSON_GetObjectItemCaseSensitive(req, "hz");
+    cJSON     *mode = cJSON_GetObjectItemCaseSensitive(req, "mode");
+    tune_req_t t;
+
+    if (!cJSON_IsNumber(hz) || hz->valuedouble < 0 || hz->valuedouble > 2e9 ||
+        hz->valuedouble != std::floor(hz->valuedouble))
+        return "Invalid frequency";
+    t.hz   = (int32_t)hz->valuedouble;
+    t.mode = cJSON_IsString(mode) ? wavelog_cat_mode(mode->valuestring) : -1;
+    t.err  = NULL;
+    if (t.mode < 0)
+        return "Invalid mode";
+    if (!scheduler_call(tune_cb, &t))
+        return "Busy, try again";
+    return t.err;
+}
+
 /* The answer to one request line */
 static int handle_line(const char *line, char *out, size_t size) {
     cJSON      *req  = cJSON_Parse(line);
@@ -480,6 +513,10 @@ static int handle_line(const char *line, char *out, size_t size) {
         err = band_use_get(req, out, size, &l);
     } else if (!strcmp(name->valuestring, "digi_lists")) {
         l = digi_lists_get(out, size);
+    } else if (!strcmp(name->valuestring, "radio_get")) {
+        l = wavelog_cat_state(out, size);
+    } else if (!strcmp(name->valuestring, "tune")) {
+        err = tune(req);
     } else if (!strcmp(name->valuestring, "tx_ranges_read")) {
         if (!scheduler_call(tx_ranges_read_cb, NULL)) {
             err = "Busy, try again";

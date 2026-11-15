@@ -807,6 +807,13 @@ bool hw_tx_keyed_by_gui(void) {
     return (x6200_control_get(x6200_sple_atue_trx) & TX_BITS) != 0;
 }
 
+bool hw_settings_held(void) {
+    return false;
+}
+
+void hw_send_held(void) {
+}
+
 void hw_pin_set(hw_pin_t pin, bool on) {
     if (atomic_load(&held) && (pin == HW_PIN_BB_RESET || pin == HW_PIN_MORSE_KEY)) {
         return;

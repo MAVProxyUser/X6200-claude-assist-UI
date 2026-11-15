@@ -141,7 +141,8 @@ class SettingsManager {
         StorageType::GLOBAL, pending_writes_, &global_params_};
     /* The TX monitor off on both radios: at 30 the microphone took the monitor back into the transmission,
      * a loud ringing on PTT in SSB on the X6200 (issue #15), and a feedback loop from the X6100's speaker
-     * on PTT and on an app's tones (issue #72) */
+     * on PTT and on an app's tones (issue #72). Settings > Audio > MICROPHONE, a knob bound to it (CTRL_MONI);
+     * on VOL 2:2 until Brightness took its place (#271) */
     Parameter<int32_t> p_moni{"moni", 0, 0, 100,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_atu_enabled{"atu", false, 0, 1,
@@ -429,6 +430,10 @@ class SettingsManager {
     /* "For you": the callers pinned under the list (off: the list only) */
     Parameter<int32_t> p_ft8_foryou{"ft8_foryou", true, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    /* Auto Sync (FT8 5:5): the clock set from the decodes' DT when neither NTP nor the GPS keeps it (ft8/time_sync.h);
+     * off by default */
+    Parameter<int32_t> p_ft8_auto_sync{"ft8_auto_sync", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_ft8_max_repeats{"ft8_max_repeats", 6, {},
         StorageType::GLOBAL, pending_writes_, {}, &global_params_};
     /* RX row, right side: 0 km, 1 mi, 2 country, 3 country + km, 4 country + mi
@@ -457,6 +462,10 @@ class SettingsManager {
     // RADE's own TX power, in tenths of a W (the radio's power setting is left alone). Its OFDM signal's peaks are
     // several dB over its average, which the power reading follows: 2 W by default, at most 3 W
     Parameter<int32_t> p_rade_pwr{"rade_pwr", 20, 5, 30,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // FreeDV Reporter (#37): while the RADE app is open, the radio on qso.freedv.org (callsign, locator, frequency).
+    // Off by default: it publishes the station on a public site
+    Parameter<int32_t> p_rade_report{"rade_report", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     // Decodes (FT8 FT4 FT2 JS8 PSK31 PSK63 Olivia) to PSK Reporter, on by default
     Parameter<int32_t> p_pskreporter{"pskreporter", true, 0, 1,
@@ -509,6 +518,9 @@ class SettingsManager {
     Parameter<int32_t> p_tx_ranges{"tx_ranges", TX_RANGES_BANDS, TX_RANGES_BANDS, TX_RANGES_OWN,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     SubjectT<int32_t>  s_tx_ranges_read{0};
+    // The screen's brightness as last set (params.brightness_normal, screen_light.c's backlight_set_normal): the knob
+    // line and the VOL 2:2 button follow it (#271). Not stored here, the params table has it
+    SubjectT<int32_t>  s_brightness{5};
     // TUNE for an external tuner (ext_tune.h): its power, W (tune_tx.h's range: up to the PWR top, #87), and its time
     // limit, s
     Parameter<float, int32_t, 10> p_tune_pwr{"tune_pwr", 1.0f,
@@ -543,6 +555,9 @@ class SettingsManager {
     Parameter<int32_t> p_cwt_level{"cwt_level", 2, 2, 40,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_cwt_group{"cwt_group", 1, 1, 5,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Calls: the KEY Speed stays the user's, the calls at their own speed (#270); off, it follows the calls
+    Parameter<int32_t> p_cwt_tx_fixed{"cwt_tx_fixed", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
 
     // CW decoder

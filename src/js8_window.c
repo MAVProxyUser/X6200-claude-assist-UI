@@ -89,7 +89,7 @@
 #define TEXT_MAX         64                        /* INFO and STATUS answers */
 #define SAVED_N          10                        /* Query > Saved messages > */
 #define APRS_COMMENT_MAX 43                        /* longest comment in an APRS position report */
-#define JS8_APP_VERSION  "OpenX6X00"            /* what <MYVERSION> becomes */
+#define JS8_APP_VERSION  "GoldCorpHF"           /* what <MYVERSION> becomes */
 
 /* Files on the DATA partition (/mnt), all plain text a PC can edit. Tests
  * point them elsewhere. */

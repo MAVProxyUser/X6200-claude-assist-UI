@@ -108,6 +108,7 @@ extern ParamInt         *cfg_swr_protect;        // p_swr_protect
 extern ParamInt         *cfg_tx_outside_bands;   // p_tx_outside_bands
 extern ParamInt         *cfg_tx_ranges;          // p_tx_ranges (tx_ranges_t, #247)
 extern SubjectInt       *cfg_tx_ranges_read;     // s_tx_ranges_read: a read of the own list (cfg_tx_ranges_changed)
+extern SubjectInt       *cfg_brightness;         // s_brightness: the screen's brightness as set (backlight_set_normal)
 extern ParamFloat       *cfg_tune_pwr;           // p_tune_pwr
 extern ParamInt         *cfg_tune_time;          // p_tune_time
 extern ParamInt         *cfg_smeter_lamp;        // p_smeter_lamp
@@ -146,6 +147,7 @@ extern ParamInt *cfg_ft8_protocol;   // p_ft8_protocol
 extern ParamInt *cfg_ft8_auto;       // p_ft8_auto
 extern ParamInt *cfg_ft8_hold_freq;  // p_ft8_hold_freq
 extern ParamInt *cfg_ft8_foryou;     // p_ft8_foryou
+extern ParamInt *cfg_ft8_auto_sync;  // p_ft8_auto_sync
 extern ParamInt *cfg_wspr_tx_pct;    // p_wspr_tx_pct
 extern ParamInt *cfg_spot_snap_hold; // p_spot_snap_hold
 extern ParamInt *cfg_spot_snap_slow; // p_spot_snap_slow
@@ -156,6 +158,7 @@ extern ParamInt *cfg_wspr_dbm;       // p_wspr_dbm
 extern ParamInt *cfg_wspr_hop;       // p_wspr_hop
 extern ParamInt *cfg_wspr_bands;     // p_wspr_bands
 extern ParamInt *cfg_rade_pwr;       // p_rade_pwr
+extern ParamInt *cfg_rade_report;    // p_rade_report
 extern ParamInt *cfg_pskreporter;    // p_pskreporter
 extern ParamInt *cfg_field_boot;     // p_field_boot
 extern ParamInt *cfg_field_respot;   // p_field_respot
@@ -186,6 +189,7 @@ extern ParamInt   *cfg_paddle_serial;       // p_paddle_serial
 // CW decoder
 extern ParamInt   *cfg_cwt_level;           // p_cwt_level
 extern ParamInt   *cfg_cwt_group;           // p_cwt_group
+extern ParamInt   *cfg_cwt_tx_fixed;        // p_cwt_tx_fixed
 extern ParamInt   *cfg_cw_decoder;         // p_cw_decoder
 extern ParamInt   *cfg_cw_tune;            // p_cw_tune
 extern ParamInt   *cfg_cw_live;            // p_cw_live

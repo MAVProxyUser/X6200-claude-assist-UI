@@ -24,7 +24,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     band_names.cpp tx_meters.c
     audio.c mfk_control.cpp cw.cpp cw_decoder.c cw_parse.c text_panel.cpp
     rtty.c screen_shot.c screen_rec.c avi_writer.c screen_light.c screen_idle.c screen_saver.c gps.c
-    cat.cpp tci_ws.c tci_audio.c tci_server.c tci_ask.c cfg_socket.cpp
+    cat.cpp tci_ws.c tci_audio.c tci_server.c tci_ask.c cfg_socket.cpp wavelog_cat.c
     app_window.c settings_window.cpp swrscan_window.c ft8_window.c
     freq_entry.c gps_window.c cw_messages.c
     voice_messages.c recorder_window.c qth_entry.c station.c dialog_channels.c
@@ -45,6 +45,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     freq_list.c
     ft8_udp.c
     pskreporter.c
+    freedv_report.c
     dxcc.c
     dialog_modes.c
     apps_menu.c
@@ -75,7 +76,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     sstv/denoise.c
     wefax_window.c wefax/decoder.c wefax/encoder.c
     navtex_window.c navtex/sitorb.c navtex/dsc.c
-    dialog_freedv.c freedv_rx.c freedv_tx.c
+    dialog_freedv.c freedv_rx.c freedv_text.c freedv_tx.c
     channel_list.c broadcast_db.c cJSON.c
     text_popup.c cw_encoder.c image_level.c start_trace.c
     cw_beacon.c
@@ -102,7 +103,7 @@ endif()
 
 # The radio behind src/hw/hw.h (HW_BACKEND, chosen in the top-level CMakeLists.txt)
 if(HW_BACKEND STREQUAL "x6100")
-    target_sources(${PROJECT_NAME} PUBLIC hw/x6100/hw_x6100.c)
+    target_sources(${PROJECT_NAME} PUBLIC hw/x6100/hw_x6100.c hw/x6100/test_base.c)
     set(HW_LIBS aether_x6100_control)
 elseif(HW_BACKEND STREQUAL "x6200")
     target_sources(${PROJECT_NAME} PUBLIC hw/x6200/hw_x6200.c)
