@@ -86,6 +86,8 @@ void            buttons_vertical_at(lv_obj_t *parent, lv_coord_t w, lv_coord_t h
 /* The same, each key its own width (ws[i], from the left edge): a key of little use takes less of the screen, one
  * of width 0 no box at all (its key still works) */
 void            buttons_vertical_w(lv_obj_t *parent, const lv_coord_t *ws, lv_coord_t h, lv_coord_t top);
+/* Then key i's box alone at y, w x h (from the left edge): one as small as its name, where the screen has room */
+void            buttons_vertical_place(uint8_t i, lv_coord_t y, lv_coord_t w, lv_coord_t h);
 /* Back in a row at the bottom of parent, where they were (the main screen) */
 void            buttons_horizontal(lv_obj_t *parent);
 /* The five and the knob lines over them hidden, or shown again (Settings > Display > Hide buttons, screen_main.c) */

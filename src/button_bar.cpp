@@ -711,6 +711,20 @@ void buttons_vertical_w(lv_obj_t *parent, const lv_coord_t *ws, lv_coord_t h, lv
     }
 }
 
+void buttons_vertical_place(uint8_t i, lv_coord_t y, lv_coord_t w, lv_coord_t h) {
+    const lv_img_dsc_t *img;
+    lv_coord_t          bw = w - 2 * BTN_INSET, bh = h - 2 * BTN_INSET;
+
+    if (i >= BUTTONS || bw <= 0 || bh <= 0) return;
+    lv_obj_t *f = slots[i].parent;
+
+    lv_obj_set_pos(f, BTN_INSET, y + BTN_INSET);
+    lv_obj_set_size(f, bw, bh);
+    if ((img = theme_image(TI_btn_active, bw, bh))) lv_obj_set_style_bg_img_src(f, img, LV_STATE_CHECKED);
+    if ((img = theme_image(TI_btn_off, bw, bh))) lv_obj_set_style_bg_img_src(f, img, LV_STATE_DISABLED);
+    slot_refresh(&slots[i]);
+}
+
 void buttons_horizontal(lv_obj_t *parent) {
     if (land_parent && lv_obj_is_valid(land_parent)) parent = land_parent;
     /* back in their places, the lowest first, so each one's index is right once the ones under it are back: under

@@ -735,10 +735,10 @@ written through to the card before it replaces the last copy, so a power cut kee
 ### G WALKIE
 
 The X6200 as a walkie-talkie, in the same look, **held up**: G turns the screen to portrait (480 x 800, as the
-Walkie app does). Only F4 (the spectrum's view: a slim 3D or 2D) and F5 (the group and mode) have their names down
-the left edge, beside their keys; F1, F2 and F3 have no box (F1 and F2 still step CB's channels, as the knobs do),
-so beside them the widgets reach the screen's edge: the channel and the spectrum at the top; beside F3 and F4 the
-voiceprint and the lamp under it, all but F4's slim box wide; beside F5 the radio's state. G is the X6200's alone: the stick
+Walkie app does). Only F4 (the spectrum's view) and F5 (the group and mode) have names, at the bottom left in boxes
+as small as their names: F4's `3D` (or `2D`) in the lamp's row, F5's under it beside the radio's state. F1, F2 and
+F3 have no box (F1 and F2 still step CB's channels, as the knobs do), so the channel, the spectrum and the voiceprint
+run from edge to edge. G is the X6200's alone: the stick
 only receives and has B for that, so G neither shows nor plays it (shown with LISTEN on RTL or BOTH, G plays the
 X6200 alone; A or B puts its own LISTEN back when shown).
 
