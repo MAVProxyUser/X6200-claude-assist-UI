@@ -85,6 +85,7 @@ typedef enum {
     ACTION_APP_FIRST_START, /* 131 here (upstream's 129): the first-start guide (first_start.c), from Settings >
                              * General; no key gets it, so its number is saved nowhere */
     ACTION_APP_TIMESIG,  /* 132: Time Signal, the clock from WWV and WWVH (dialog_timesig.c) */
+    ACTION_APP_SWL,      /* 133: On the Air, the broadcast list's stations on the air now (dialog_swl.c) */
 } press_action_t;
 
 typedef enum {

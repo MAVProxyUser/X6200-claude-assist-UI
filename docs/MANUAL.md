@@ -27,7 +27,7 @@ Settings. Button and option names are written as the radio shows them.
 - [Transmitting](#transmitting): [amateur bands only](#amateur-bands-only), [no TX without data from the base](#no-tx-without-data-from-the-base), [TX shift](#tx-shift), [transverter TX power limit](#transverter-tx-power-limit), [SWR scan and the tuner](#swr-scan-and-the-tuner), [TUNE for an external tuner](#tune-for-an-external-tuner), [digital-mode TX level](#digital-mode-tx-level), [recording voice messages](#recording-voice-messages), [ALC in CW](#alc-in-cw), [PA bias](#pa-bias-x6200), [register 32](#register-32-x6200)
 - [Digital modes](#digital-modes): [opening a mode](#opening-a-mode), [FT8 and FT4](#ft8-and-ft4), [JS8](#js8), [WSPR](#wspr) ([band hopping](#band-hopping)), [SSTV, WeFax and NavTex](#sstv-wefax-and-navtex), [RADE (FreeDV)](#rade-freedv), [PSK31, PSK63 and Olivia](#psk31-psk63-and-olivia), [JTTY](#jtty), [frequencies of PSK, Olivia and JTTY](#frequencies-of-psk-olivia-and-jtty), [text log of the keyboard modes](#text-log-of-the-keyboard-modes), [RTTY and WeFax TX](#rtty-and-wefax-tx)
 - [CW](#cw): [CW decoder](#cw-decoder), [CW from the keyboard](#cw-from-the-keyboard), [CW Keyboard](#cw-keyboard), [USB paddle](#usb-paddle), [SmartCW](#smartcw), [CW messages](#cw-messages) ([beacon](#cw-beacon), [QRSS3](#qrss3)), [CW Trainer](#cw-trainer)
-- [Apps](#apps): [DX Cluster](#dx-cluster), [Field Ops (SOTA / POTA)](#field-ops-sota--pota), [Bands](#bands), [Propagation](#propagation), [Time Signal](#time-signal), [Channels](#channels), [Scanner](#scanner)
+- [Apps](#apps): [DX Cluster](#dx-cluster), [Field Ops (SOTA / POTA)](#field-ops-sota--pota), [Bands](#bands), [Propagation](#propagation), [On the Air](#on-the-air), [Time Signal](#time-signal), [Channels](#channels), [Scanner](#scanner)
 - [Bluetooth](#bluetooth): [headphones](#bluetooth-headphones), [CAT](#bluetooth-cat), [TCI over Bluetooth](#tci-over-bluetooth), [a PC on Bluetooth](#a-pc-on-bluetooth)
 - [Themes](#themes)
 - [Web configurator](#web-configurator)
@@ -5695,6 +5695,28 @@ notch on a birdie that falls inside the passband in USB, LSB and the digital
 modes, and takes it off again when you tune away (a notch you set yourself is
 left alone). The receiver's own centre spike, which moves with the VFO, is not a
 birdie and is not kept.
+
+### On the Air
+
+APP > On the Air lists what the broadcast list (EiBi, Settings > Info >
+Broadcast list) has on the air now, on both radios (#155): the stations of
+all of HF and MW the radio can tune, in frequency order, read again each
+minute. The MFK moves through them, its press (or F4 Tune) tunes the one
+chosen: a broadcast in AM, Morse in CW, the others in USB on the frequency
+the list gives. The line under the list says what it is, its hours and days,
+where it is sent from and to.
+
+- F1 Show: All, Broadcast, Utility or Numbers (hold: the one before).
+  EiBi has no category column, so they come from the entries: a language
+  code starting with "-" (-CW, -TY teletype, -TS time signals, -HF) or a
+  name of a navy, an air force, a VOLMET, a fax or weather station is
+  Utility; a name starting with an ENIGMA designation ("E11 Polish Spy
+  Numbers"), saying Numbers, or one of the Russian markers (The Buzzer on
+  4625 kHz, The Squeaky Wheel, The Pip) is Numbers; the rest is Broadcast.
+- F2 Range: All, or Near the dial (250 kHz either side).
+- F3 Tune as you go: tunes each station as the MFK stops on it.
+- F5 Save as channel: tunes it and keeps it as a memory channel under its
+  name ([Channels](#channels)).
 
 ### Time Signal
 

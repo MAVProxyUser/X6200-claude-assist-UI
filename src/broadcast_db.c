@@ -342,3 +342,42 @@ scan:
     }
     return n;
 }
+
+static double khz_of(const void *a) {
+    return list[*(const uint32_t *)a].m.freq_khz;
+}
+
+static int cmp_at_khz(const void *a, const void *b) {
+    double x = khz_of(a), y = khz_of(b);
+
+    return x < y ? -1 : x > y ? 1 : cmp_at(a, b);
+}
+
+size_t broadcast_db_on_air(int32_t lo_hz, int32_t hi_hz, uint32_t *out, size_t max) {
+    time_t      now = time(NULL);
+    struct tm   utc;
+    size_t      n = 0;
+
+    if (!list || !out || !max || !gmtime_r(&now, &utc)) return 0;
+    if (by_freq) {
+        for (size_t i = 0; i < list_len && n < max; i++) {
+            double hz = by_freq[i].khz * 1000.0;
+
+            if (hz < lo_hz) continue;
+            if (hz > hi_hz) break;
+            if (on_air(&list[by_freq[i].at], &utc)) out[n++] = by_freq[i].at;
+        }
+        return n;
+    }
+    for (size_t i = 0; i < list_len && n < max; i++) {
+        double hz = list[i].m.freq_khz * 1000.0;
+
+        if (hz >= lo_hz && hz <= hi_hz && on_air(&list[i], &utc)) out[n++] = (uint32_t)i;
+    }
+    qsort(out, n, sizeof(*out), cmp_at_khz);
+    return n;
+}
+
+const broadcast_match_t *broadcast_db_entry(uint32_t at) {
+    return list && at < list_len ? &list[at].m : NULL;
+}

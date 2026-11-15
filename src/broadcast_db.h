@@ -33,4 +33,11 @@ bool broadcast_db_init(void);           /* once, from main_screen() */
 /* The stations on air now (UTC day, time and season) within tolerance_hz of freq_hz, at most max */
 size_t broadcast_db_find_matches(int32_t freq_hz, int tolerance_hz, broadcast_match_t *out, size_t max);
 
+/* The stations on air now from lo_hz to hi_hz, in frequency order: their places in the list, at most max (the
+ * On the Air list, #155) */
+size_t broadcast_db_on_air(int32_t lo_hz, int32_t hi_hz, uint32_t *out, size_t max);
+
+/* An entry by its place (from broadcast_db_on_air), NULL past the end. Valid until the list is loaded again */
+const broadcast_match_t *broadcast_db_entry(uint32_t at);
+
 #endif /* X6100_BROADCAST_DB_H */

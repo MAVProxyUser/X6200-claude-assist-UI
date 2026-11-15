@@ -66,6 +66,7 @@ static const struct {
     {"Walkie", "Portrait screen", "walkie", OPEN_WALKIE, 0},
     {"Birdie Cal", "Find birdies, antenna off", "birdie", OPEN_APP, ACTION_APP_BIRDIE},
     {"Time Signal", "Clock from WWV", "ft", OPEN_APP, ACTION_APP_TIMESIG},
+    {"On the Air", "Shortwave now", "info", OPEN_APP, ACTION_APP_SWL},
     {"Settings", "All settings", "settings", OPEN_APP, ACTION_APP_SETTINGS},
 };
 
