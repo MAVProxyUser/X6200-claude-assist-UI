@@ -27,7 +27,7 @@ Settings. Button and option names are written as the radio shows them.
 - [Transmitting](#transmitting): [amateur bands only](#amateur-bands-only), [no TX without data from the base](#no-tx-without-data-from-the-base), [TX shift](#tx-shift), [transverter TX power limit](#transverter-tx-power-limit), [SWR scan and the tuner](#swr-scan-and-the-tuner), [TUNE for an external tuner](#tune-for-an-external-tuner), [digital-mode TX level](#digital-mode-tx-level), [recording voice messages](#recording-voice-messages), [ALC in CW](#alc-in-cw), [PA bias](#pa-bias-x6200), [register 32](#register-32-x6200)
 - [Digital modes](#digital-modes): [opening a mode](#opening-a-mode), [FT8 and FT4](#ft8-and-ft4), [JS8](#js8), [WSPR](#wspr) ([band hopping](#band-hopping)), [SSTV, WeFax and NavTex](#sstv-wefax-and-navtex), [RADE (FreeDV)](#rade-freedv), [PSK31, PSK63 and Olivia](#psk31-psk63-and-olivia), [JTTY](#jtty), [frequencies of PSK, Olivia and JTTY](#frequencies-of-psk-olivia-and-jtty), [text log of the keyboard modes](#text-log-of-the-keyboard-modes), [RTTY and WeFax TX](#rtty-and-wefax-tx)
 - [CW](#cw): [CW decoder](#cw-decoder), [CW from the keyboard](#cw-from-the-keyboard), [CW Keyboard](#cw-keyboard), [USB paddle](#usb-paddle), [SmartCW](#smartcw), [CW messages](#cw-messages) ([beacon](#cw-beacon), [QRSS3](#qrss3)), [CW Trainer](#cw-trainer)
-- [Apps](#apps): [DX Cluster](#dx-cluster), [Field Ops (SOTA / POTA)](#field-ops-sota--pota), [Bands](#bands), [Propagation](#propagation), [Channels](#channels), [Scanner](#scanner)
+- [Apps](#apps): [DX Cluster](#dx-cluster), [Field Ops (SOTA / POTA)](#field-ops-sota--pota), [Bands](#bands), [Propagation](#propagation), [Time Signal](#time-signal), [Channels](#channels), [Scanner](#scanner)
 - [Bluetooth](#bluetooth): [headphones](#bluetooth-headphones), [CAT](#bluetooth-cat), [TCI over Bluetooth](#tci-over-bluetooth), [a PC on Bluetooth](#a-pc-on-bluetooth)
 - [Themes](#themes)
 - [Web configurator](#web-configurator)
@@ -5688,6 +5688,37 @@ notch on a birdie that falls inside the passband in USB, LSB and the digital
 modes, and takes it off again when you tune away (a notch you set yourself is
 left alone). The receiver's own centre spike, which moves with the VFO, is not a
 birdie and is not kept.
+
+### Time Signal
+
+APP > Time Signal sets the radio's clock from WWV and WWVH (NIST, Fort
+Collins and Kauai) for a radio with neither WiFi nor a GPS, as the FT8
+apps need a clock within a second (#261, #275). It tunes WWV in AM, 10 MHz
+first (F1: 2.5, 5, 10, 15, 20, 25 MHz; hold for the one before), and the
+frequency and mode come back when it closes.
+
+- The second: the 5 ms ticks each second sends (1000 Hz from WWV, 1200 Hz
+  from WWVH), found by folding a few seconds of audio onto one; the line
+  says which station and how far its ticks stand out.
+- The minute: the 100 Hz subcarrier's time code, one symbol a second: 0, 1,
+  or a marker at :09, :19 ... :59, and no 100 Hz at :00. The second line
+  shows this minute's symbols as they come. A minute is taken only whole
+  (every marker in place, the unused seconds 0, the digits valid): the date,
+  the time in UTC, DUT1 and a leap second warning.
+- The clock: once two minutes in a row read right (three when the clock is
+  more than a minute off), the clock moves to WWV's, and into the clock chip,
+  with Set clock on Auto (F2; Off only shows how far it is). A clock that NTP
+  (WiFi) or a GPS keeps is left alone: the line then says how far the radio's
+  clock is from WWV's, and the log has it too (`timesig:`), which measures
+  the receive path's delay (taken as 30 ms until measured).
+- What it needs: WWV heard well enough for the 100 Hz code, which is 15 dB
+  under the carrier: 10 MHz in most places, 5 MHz at night, 15 and 20 MHz in
+  the day. In AM the receiver's filter must pass 100 Hz (it does on an
+  X6200 by default). Tested on this radio's own 62 s recording of WWV on
+  10 MHz (`radio_captures/modes/wwv_10000.wav`, played back into the app),
+  and on made-up signals down to ticks 15 dB and the code 6 dB over the noise
+  (`tools/wwv`). CHU and the European stations (DCF77, MSF ...) are not read
+  yet.
 
 ### Channels
 

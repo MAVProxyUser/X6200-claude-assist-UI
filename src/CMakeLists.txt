@@ -50,6 +50,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     dialog_modes.c
     apps_menu.c
     birdie.c dialog_birdie.c
+    wwv.c dialog_timesig.c
     app_sentry.c gpu.c
     adsb.c adsb_rx.c app_adsb.c rtl_spectrum.c
     first_start.c first_start_rule.c

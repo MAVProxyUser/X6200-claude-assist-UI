@@ -84,6 +84,7 @@ typedef enum {
     ACTION_APP_ADSB,     /* 130: AIRSPACE, aircraft from a GNS 5890 ADS-B stick on USB */
     ACTION_APP_FIRST_START, /* 131 here (upstream's 129): the first-start guide (first_start.c), from Settings >
                              * General; no key gets it, so its number is saved nowhere */
+    ACTION_APP_TIMESIG,  /* 132: Time Signal, the clock from WWV and WWVH (dialog_timesig.c) */
 } press_action_t;
 
 typedef enum {

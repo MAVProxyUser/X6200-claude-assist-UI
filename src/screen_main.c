@@ -92,6 +92,7 @@
 #include "radio_controls.h"
 #include "apps_menu.h"
 #include "dialog_birdie.h"
+#include "dialog_timesig.h"
 #include "app_sentry.h"
 #include "app_adsb.h"
 #include "adsb_rx.h"
@@ -505,6 +506,7 @@ static const char *app_name(press_action_t a) {
         case ACTION_APP_SCAN:       return "Scanner";
         case ACTION_APP_FREEDV:     return "RADE";
         case ACTION_APP_SENTRY:     return "Sentry";
+        case ACTION_APP_TIMESIG:    return "Time Signal";
         case ACTION_APP_ADSB:       return "Airspace";
         case ACTION_APP_FIRST_START: return "First start";
         default:                   return NULL;    /* Modes menu: a menu, not an app */
@@ -559,6 +561,7 @@ static const struct {
     {ACTION_APP_JS8, &dialog_js8},
     {ACTION_APP_CHANNELS, &dialog_channels},
     {ACTION_APP_BIRDIE, &dialog_birdie},
+    {ACTION_APP_TIMESIG, &dialog_timesig},
     {ACTION_APP_PROPAGATION, &dialog_propagation},
     {ACTION_APP_SCAN, &dialog_scan},
     {ACTION_APP_FREEDV, &dialog_freedv},

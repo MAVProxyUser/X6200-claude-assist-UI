@@ -109,6 +109,13 @@ COUNTDOWN`, off the air on the stock whip). The decoder is [tools/rtlspec/rds.c]
 test on a made multiplex, [tools/rtlspec/rds_test.c](tools/rtlspec/rds_test.c). The X6200's own receiver can't: its
 base hands over audio only, below the 57 kHz subcarrier.
 
+### Time Signal
+
+APP > Time Signal sets the clock from **WWV and WWVH** for a radio with neither WiFi nor GPS: their second ticks
+give the second, the 100 Hz BCD code the minute, and once two minutes in a row agree the clock (and the clock
+chip) moves to theirs. A clock NTP keeps is only compared. The decoder is [src/wwv.c](src/wwv.c), tested in
+[tools/wwv](tools/wwv) on this radio's own recording of WWV on 10 MHz.
+
 ### AIRSPACE
 
 ADS-B aircraft on a scope around you (a USB GPS, else your QTH locator, else the traffic itself), with their calls,
