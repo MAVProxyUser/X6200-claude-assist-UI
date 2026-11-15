@@ -1613,8 +1613,9 @@ static void show_bands(void) {
         else
             snprintf(mhz, sizeof(mhz), "%.1f-%.1f", bands[i].lo / 1000.0, bands[i].hi / 1000.0);
         band_now(i, now, sizeof(now));
-        char rx[24];                    /* which radio takes it: the stick (in the tags' orange) or the X6200 */
-        if (band_uses_rtl(i)) snprintf(rx, sizeof(rx), sdr_here ? "#%s RTL#" : "RTL", tag_hex);
+        char rx[24];                    /* which radio takes it: the stick (in the tags' orange, but in the row's ink
+                                         * on the chosen row: orange on amber hardly showed) or the X6200 */
+        if (band_uses_rtl(i)) snprintf(rx, sizeof(rx), sdr_here && i != band_sel ? "#%s RTL#" : "RTL", tag_hex);
         else snprintf(rx, sizeof(rx), "%s", cfg_is_valid_hw_freq(bands[i].listen_hz) ? "X6200" : "");
         snprintf(s, sizeof(s), BAND_ROW, band_rt[i].sweep ? '*' : ' ',
                  bands[i].name, mhz, bands[i].hear, best_name(bands[i].when), bands[i].ant, now,
@@ -1654,7 +1655,7 @@ static void show_decode(void) {
             snprintf(now, sizeof(now), "NO BAND");     /* a frequency added without one in bands[]: says so */
         char rx[24];                    /* the radio it is heard on: the X6200 (its apps), else the stick */
         if (cfg_is_valid_hw_freq(f)) snprintf(rx, sizeof(rx), "X6200");
-        else snprintf(rx, sizeof(rx), f >= RTL_SPEC_MIN_HZ ? "#%s RTL#" : "", tag_hex);
+        else snprintf(rx, sizeof(rx), f < RTL_SPEC_MIN_HZ ? "" : r != dec_row ? "#%s RTL#" : "RTL", tag_hex);
         snprintf(s, sizeof(s), DEC_ROW, fs, bi >= 0 ? bands[bi].name : "", bi >= 0 ? best_name(bands[bi].when) : "",
                  bi >= 0 ? bands[bi].ant : "", now, rx);
         lv_label_set_text(d_row_l[r], s);
@@ -3583,7 +3584,8 @@ static void show_glog(void) {
         snprintf(n, sizeof(n), "%d", h->times);
         snprintf(bn, sizeof(bn), "%s%s", in ? "" : "~", bi >= 0 ? bands[bi].name : "-");
         char rxs[24];
-        if (h->rtl) snprintf(rxs, sizeof(rxs), sdr_here ? "#%s RTL#" : "RTL", tag_hex);
+        if (h->rtl) snprintf(rxs, sizeof(rxs), sdr_here && i != g_sel ? "#%s RTL#" : "RTL", tag_hex);  /* the
+                                                                                    * chosen row: in its ink */
         else snprintf(rxs, sizeof(rxs), "X6200");
         snprintf(s, sizeof(s), LOG_ROW, g_playing(i) ? '>' : ' ', f, bn,
                  h->what, bi >= 0 ? best_name(bands[bi].when) : "", bi >= 0 ? bands[bi].ant : "", now, last, n,
