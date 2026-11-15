@@ -402,6 +402,40 @@ static void copy_rects(struct drm_buffer *buf, const rects_t *r) {
     }
 }
 
+/* The previous frame's rects into the back buffer (it was on screen during that frame), but those this frame's
+ * rects cover: copied from the shadow just after, with the newest content, they were copied twice (an area redrawn
+ * each frame, A's 3D picture: half the GUI thread's memcpy, the main cost of the Sentry's frames, 2026-11-14) */
+static bool rect_covered(const lv_area_t *p, const rects_t *by) {
+    if (by->full) {
+        return true;
+    }
+    for (uint32_t i = 0; i < by->cnt; i++) {
+        const lv_area_t *c = &by->rects[i];
+
+        if (c->x1 <= p->x1 && c->y1 <= p->y1 && c->x2 >= p->x2 && c->y2 >= p->y2) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void copy_rects_but(struct drm_buffer *buf, const rects_t *r, const rects_t *now) {
+    static const lv_area_t all = { 0, 0, PANEL_W - 1, PANEL_H - 1 };
+
+    if (now->full) {
+        return;
+    }
+    if (r->full) {
+        copy_rect(buf, &all);
+        return;
+    }
+    for (uint32_t i = 0; i < r->cnt; i++) {
+        if (!rect_covered(&r->rects[i], now)) {
+            copy_rect(buf, &r->rects[i]);
+        }
+    }
+}
+
 static void add_prop(drmModeAtomicReq *req, uint32_t obj, uint32_t prop, uint64_t val) {
     if (prop) {
         drmModeAtomicAddProperty(req, obj, prop, val);
@@ -531,7 +565,7 @@ void drm_flush(lv_disp_drv_t * drv, const lv_area_t * area, lv_color_t * color_p
 
     if (lv_disp_flush_is_last(drv)) {
         wait_flip();                    /* the back buffer was on screen until this flip */
-        copy_rects(&gui->bufs[gui->back], &frame[cur ^ 1]);
+        copy_rects_but(&gui->bufs[gui->back], &frame[cur ^ 1], &frame[cur]);
         copy_rects(&gui->bufs[gui->back], &frame[cur]);
         gui->ready = true;
     }
