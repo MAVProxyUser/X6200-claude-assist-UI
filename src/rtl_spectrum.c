@@ -546,8 +546,15 @@ void rtl_spectrum_want(bool on, int64_t hz, int gain) {
     }
 }
 
+/* AIRSPACE open: its dump1090 has the daemon's samples, so the daemon is connected now even if no Sentry screen ever
+ * wanted rows (a GUI started again straight into AIRSPACE: dump1090 found the stick busy, held by the daemon, and
+ * AIRSPACE said OPENING ITS PORT till the Sentry was opened; a HackRF or bladeRF it cannot open at all) */
 void rtl_spectrum_yield(bool on) {
     atomic_store(&yielded, on);
+    if (on && !started) {
+        started = pthread_create(&thread, NULL, spec_thread, NULL) == 0;
+        if (started) pthread_detach(thread);
+    }
 }
 
 bool rtl_spectrum_daemon(void) {
