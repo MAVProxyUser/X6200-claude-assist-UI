@@ -26,8 +26,8 @@ bool gpu_start(void);
  * columns; made again when the size changes */
 bool gpu_slot(int s, int cols, int rows);
 
-/* Ramp `which` (0: the pictures' levels, 1: the voiceprint's, 2: the main waterfall's, 3: the radar's afterglow):
- * 256 colours, 0x00RRGGBB */
+/* Ramp `which` (0: the pictures' levels, 1: the voiceprint's, 2: the main waterfall's, 3: the radar's afterglow, 4: the
+ * classic 3D picture's): 256 colours, 0x00RRGGBB */
 void gpu_palette(int which, const uint32_t *pal);
 
 /* Slot s's levels: one row of its ring, one column (a voiceprint's), or all of them */
@@ -71,6 +71,23 @@ void gpu_point(int x, int y, uint32_t rgb);
 void gpu_line(int x0, int y0, int x1, int y1, uint32_t rgb);
 void gpu_tri(float x0, float y0, float x1, float y1, float x2, float y2, uint32_t rgb);
 void gpu_prims_flush(void);
+
+/* The classic screen's 3D picture (waterfall_view.c): its column records (gpu_d3_size: cols x rows RGBA texels, two
+ * rows a trace as fs_d3_src reads them, a row a line of joins), its background (XRGB, uploaded when it changed),
+ * then in a frame: the background (also the clip), the traces in one draw, the lines of joins over them */
+typedef struct {
+    int   y0, y1;           /* the rows it covers in the picture, from its top */
+    int   row;              /* its first record row */
+    float foot_px, foot_frac, per_px;
+    float fog, fill_fog;    /* 256ths: the ridge's, the fill's */
+} gpu_d3_trace_t;
+bool gpu_d3_size(int cols, int rows);
+void gpu_d3_cols(int row0, int rows, const uint8_t *rgba);
+bool gpu_d3_bg(const uint32_t *xrgb, int w, int h);
+void gpu_d3_draw_bg(int x, int y, int w, int h);
+void gpu_d3_traces(int x, int y, int w, const gpu_d3_trace_t *t, int n);
+/* Record row `row` (each column's ends, quarter pixels) as a line of rgb at opacity op, rows y0..y1 of the picture */
+void gpu_d3_join(int x, int y, int w, int row, int y0, int y1, uint32_t rgb, float op);
 
 #ifdef __cplusplus
 }

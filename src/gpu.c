@@ -145,16 +145,17 @@ static void (*p_glPixelStorei)(GLenum, GLint);
 static const GLubyte *(*p_glGetString)(GLenum);
 static GLenum (*p_glGetError)(void);
 static void (*p_glBindBuffer)(GLenum, GLuint);
+static void (*p_glBlendFunc)(GLenum, GLenum);
 
 /* ---- State ---- */
 
 #define SLOTS 5                     /* the pictures' data: A/B's halves (0, 1), G's spectrum (2), its voiceprint (3), the
                                      * main screen's waterfall (4) */
-#define PALS  4                     /* the ramps: the pictures' levels, the voiceprint's, the main waterfall's, the
-                                     * radar's afterglow (AIRSPACE) */
+#define PALS  5                     /* the ramps: the pictures' levels, the voiceprint's, the main waterfall's, the
+                                     * radar's afterglow (AIRSPACE), the classic 3D picture's */
 #define PRIMS 8192                  /* points, lines' ends, triangles' corners a frame (each kind) */
 
-enum { P_ROWS, P_TRACE, P_RECT, P_FLAT, P_VP, P_WF, P_RADAR, P_PRIM, P_N };
+enum { P_ROWS, P_TRACE, P_RECT, P_FLAT, P_VP, P_WF, P_RADAR, P_PRIM, P_IMG, P_D3, P_JOIN, P_N };
 
 static int    tried;                /* 0 not yet, 1 working, -1 not here */
 static int    pw, ph;               /* the panel, portrait */
@@ -168,6 +169,9 @@ static GLint  u_fl_lv, u_fl_pal, u_fl_bg, u_fl_band, u_fl_head, u_fl_ring, u_fl_
 static GLint  u_vp_lv, u_vp_pal, u_vp_head, u_vp_cols;
 static GLint  u_wf_lv, u_wf_pal, u_wf_head, u_wf_ring;
 static GLint  u_rd_pal, u_rd_ink, u_rd_c, u_rd_r, u_rd_sweep;
+static GLint  u_img_img, u_d3_col, u_d3_pal, u_d3_dr, u_jn_col, u_jn_row, u_jn_c;
+static GLuint tex_d3col, tex_img;   /* the 3D picture's column records, its background */
+static int    d3col_w, d3col_h, img_w, img_h;
 static struct {                     /* a frame's coloured points, lines and triangles (gpu_point, gpu_line, gpu_tri) */
     float   xy[PRIMS * 2];
     uint8_t c[PRIMS * 4];
@@ -225,7 +229,7 @@ static bool load(void) {
           LOAD(gles, glGenTextures) && LOAD(gles, glDeleteTextures) && LOAD(gles, glBindTexture) && LOAD(gles, glTexImage2D) &&
           LOAD(gles, glTexSubImage2D) && LOAD(gles, glTexParameteri) && LOAD(gles, glActiveTexture) &&
           LOAD(gles, glPixelStorei) && LOAD(gles, glGetString) && LOAD(gles, glGetError) &&
-          LOAD(gles, glBindBuffer);
+          LOAD(gles, glBindBuffer) && LOAD(gles, glBlendFunc);
     if (!ok) fprintf(stderr, "gpu: Mesa without a function used here: the pictures drawn by the CPU\n");
     return ok;
 }
@@ -394,6 +398,82 @@ static const char *fs_prim_src =
     "varying vec4 v_col;\n"
     "void main() { gl_FragColor = v_col; }\n";
 
+/* A picture (the 3D background): XRGB in memory, B G R X bytes */
+static const char *fs_img_src =
+    "precision mediump float;\n"
+    "uniform sampler2D u_img;\n"
+    "varying vec2 v_uv;\n"
+    "void main() { gl_FragColor = vec4(texture2D(u_img, v_uv).bgr, 1.0); }\n";
+
+/* The classic screen's 3D traces (waterfall_view.c d3_trace): what each column of a trace shows was worked out by the
+ * CPU (its floating horizon), two texels a column: start, top, bottom (9 bits each: their low bytes, the high bits in
+ * A), then the ridge's extent below the top, the level (its colour), the top pixel's coverage and seen. The pixel's
+ * colour as d3_trace gives it: the ridge (the level's colour a third to white) at the top, joined to the column
+ * before; below it the colour of its height. a_t1: the trace's first record row, its foot (whole, fraction), levels a
+ * pixel; a_t2: its fog and the fill's, in 256ths */
+static const char *vs_d3_src =
+    "attribute vec2 a_pos;\n"
+    "attribute vec2 a_uv;\n"
+    "attribute vec4 a_t1;\n"
+    "attribute vec4 a_t2;\n"
+    "uniform vec2 u_panel;\n"
+    "uniform float u_port;\n"
+    "varying vec2 v_uv;\n"
+    "varying vec4 v_t1;\n"
+    "varying vec4 v_t2;\n"
+    "void main() {\n"
+    "    vec2 p = u_port > 0.5 ? u_panel - a_pos : vec2(a_pos.y, u_panel.y - a_pos.x);\n"
+    "    gl_Position = vec4(p / u_panel * 2.0 - 1.0, 0.0, 1.0);\n"
+    "    v_uv = a_uv;\n"
+    "    v_t1 = a_t1;\n"
+    "    v_t2 = a_t2;\n"
+    "}\n";
+
+static const char *fs_d3_src =
+    "precision mediump float;\n"
+    "uniform sampler2D u_col;\n"
+    "uniform sampler2D u_pal;\n"
+    "uniform float u_dr;\n"
+    "varying vec2 v_uv;\n"
+    "varying vec4 v_t1;\n"
+    "varying vec4 v_t2;\n"
+    "vec3 pal(float l) { return floor(texture2D(u_pal, vec2((l + 0.5) / 256.0, 0.5)).rgb * 255.0 + 0.5); }\n"
+    "void main() {\n"
+    "    vec4 b = floor(texture2D(u_col, vec2(v_uv.x, v_t1.x + u_dr)) * 255.0 + 0.5);\n"
+    "    if (b.a < 0.5) discard;\n"
+    "    vec4 a = floor(texture2D(u_col, vec2(v_uv.x, v_t1.x)) * 255.0 + 0.5);\n"
+    "    float start = a.r + 256.0 * mod(a.a, 2.0);\n"
+    "    float top = a.g + 256.0 * mod(floor(a.a * 0.5), 2.0);\n"
+    "    float bottom = a.b + 256.0 * floor(a.a * 0.25);\n"
+    "    float y = floor(v_uv.y);\n"
+    "    if (y < start || y >= bottom) discard;\n"
+    "    if (y > top + b.r) {\n"
+    "        float l = clamp(floor((max(0.0, v_t1.y - y) + v_t1.z) * v_t1.w), 0.0, 255.0);\n"
+    "        gl_FragColor = vec4(floor(pal(l) * v_t2.y) / 255.0, 1.0);\n"
+    "        return;\n"
+    "    }\n"
+    "    vec3 p = pal(b.g);\n"
+    "    vec3 r = floor((p + floor((255.0 - p) / 3.0)) * v_t2.x);\n"
+    "    gl_FragColor = vec4(r / 255.0, y == top ? b.b / 255.0 : 1.0);\n"
+    "}\n";
+
+/* A line of one segment a column (d3_join): each column's ends in quarter pixels (two bytes each), the pixels it
+ * covers that much of u_c (its opacity in a) */
+static const char *fs_join_src =
+    "precision mediump float;\n"
+    "uniform sampler2D u_col;\n"
+    "uniform float u_row;\n"
+    "uniform vec4 u_c;\n"
+    "varying vec2 v_uv;\n"
+    "void main() {\n"
+    "    vec4 a = floor(texture2D(u_col, vec2(v_uv.x, u_row)) * 255.0 + 0.5);\n"
+    "    float lo = (a.r + 256.0 * a.g) * 0.25, hi = (a.b + 256.0 * a.a) * 0.25;\n"
+    "    float y = floor(v_uv.y);\n"
+    "    float cov = min(y + 1.0, hi) - max(y, lo);\n"
+    "    if (cov <= 0.0) discard;\n"
+    "    gl_FragColor = vec4(u_c.rgb, min(cov, 1.0) * u_c.a);\n"
+    "}\n";
+
 static GLuint shader(GLenum type, const char *src) {
     GLuint s = p_glCreateShader(type);
     GLint  ok = 0;
@@ -421,6 +501,8 @@ static GLuint program_vs(const char *vsrc, const char *fs_src) {
     p_glBindAttribLocation(p, 0, "a_pos");
     p_glBindAttribLocation(p, 1, "a_uv");
     p_glBindAttribLocation(p, 2, "a_col");
+    p_glBindAttribLocation(p, 3, "a_t1");
+    p_glBindAttribLocation(p, 4, "a_t2");
     p_glLinkProgram(p);
     p_glGetProgramiv(p, GL_LINK_STATUS, &ok);
     if (!ok) {
@@ -533,10 +615,12 @@ static bool setup(void) {
     }
     {
         const char *src[P_N] = {fs_rows_src, fs_trace_src, fs_rect_src, fs_flat_src, fs_vp_src, fs_wf_src,
-                                fs_radar_src, fs_prim_src};
+                                fs_radar_src, fs_prim_src, fs_img_src, fs_d3_src, fs_join_src};
 
         for (int i = 0; i < P_N; i++) {
-            if (!(prog[i] = program_vs(i == P_PRIM ? vs_prim_src : vs_src, src[i]))) goto fail;
+            const char *v = i == P_PRIM ? vs_prim_src : i == P_D3 ? vs_d3_src : vs_src;
+
+            if (!(prog[i] = program_vs(v, src[i]))) goto fail;
             u_panel[i] = p_glGetUniformLocation(prog[i], "u_panel");
             u_port[i]  = p_glGetUniformLocation(prog[i], "u_port");
         }
@@ -573,9 +657,17 @@ static bool setup(void) {
     u_rd_c       = p_glGetUniformLocation(prog[P_RADAR], "u_c");
     u_rd_r       = p_glGetUniformLocation(prog[P_RADAR], "u_r");
     u_rd_sweep   = p_glGetUniformLocation(prog[P_RADAR], "u_sweep");
+    u_img_img    = p_glGetUniformLocation(prog[P_IMG], "u_img");
+    u_d3_col     = p_glGetUniformLocation(prog[P_D3], "u_col");
+    u_d3_pal     = p_glGetUniformLocation(prog[P_D3], "u_pal");
+    u_d3_dr      = p_glGetUniformLocation(prog[P_D3], "u_dr");
+    u_jn_col     = p_glGetUniformLocation(prog[P_JOIN], "u_col");
+    u_jn_row     = p_glGetUniformLocation(prog[P_JOIN], "u_row");
+    u_jn_c       = p_glGetUniformLocation(prog[P_JOIN], "u_c");
     for (int i = 0; i < PALS; i++) tex_pal[i] = texture(256, 1, GL_RGBA);
     p_glDisable(GL_DITHER);
     p_glDisable(GL_BLEND);
+    p_glBlendFunc(0x0302, 0x0303);     /* GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA: where blending is on */
     p_glBindBuffer(GL_ARRAY_BUFFER, 0);     /* client-side vertex arrays */
     p_glEnableVertexAttribArray(0);
     p_glEnableVertexAttribArray(1);
@@ -895,6 +987,104 @@ void gpu_prims_flush(void) {
     p_glEnableVertexAttribArray(1);
 }
 
+/* ---- The classic screen's 3D picture ---- */
+
+bool gpu_d3_size(int cols, int rows) {
+    if (tried <= 0 || cols < 1 || rows < 1) return false;
+    if (d3col_w == cols && d3col_h == rows) return true;
+    if (tex_d3col) p_glDeleteTextures(1, &tex_d3col);
+    tex_d3col = texture(cols, rows, GL_RGBA);
+    d3col_w = cols, d3col_h = rows;
+    return tex_d3col != 0;
+}
+
+void gpu_d3_cols(int row0, int rows, const uint8_t *rgba) {
+    if (!tex_d3col || row0 < 0 || rows < 1 || row0 + rows > d3col_h) return;
+    p_glBindTexture(GL_TEXTURE_2D, tex_d3col);
+    p_glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row0, d3col_w, rows, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+}
+
+bool gpu_d3_bg(const uint32_t *xrgb, int w, int h) {
+    if (tried <= 0 || w < 1 || h < 1) return false;
+    if (img_w != w || img_h != h) {
+        if (tex_img) p_glDeleteTextures(1, &tex_img);
+        tex_img = texture(w, h, GL_RGBA);
+        img_w = w, img_h = h;
+    }
+    p_glBindTexture(GL_TEXTURE_2D, tex_img);
+    p_glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, xrgb);
+    return true;
+}
+
+void gpu_d3_draw_bg(int x, int y, int w, int h) {
+    if (!in_frame || !tex_img) return;
+    cx0 = x, cy0 = y, cw0 = w, ch0 = h;
+    scissor(x, y, w, h);
+    use(P_IMG);
+    bind(tex_img, tex_img);
+    p_glUniform1i(u_img_img, 0);
+    quad((float)x, (float)y, (float)(x + w), (float)(y + h), 0, 0, (float)w / img_w, (float)h / img_h);
+}
+
+void gpu_d3_traces(int x, int y, int w, const gpu_d3_trace_t *t, int n) {
+    static float v[6 * 12 * 72];
+    int          k = 0;
+
+    if (!in_frame || !tex_d3col || n < 1) return;
+    if (n > 72) n = 72;
+    for (int i = 0; i < n; i++) {
+        float x0 = (float)x, x1 = (float)(x + w), y0 = (float)(y + t[i].y0), y1 = (float)(y + t[i].y1);
+        float r = (t[i].row + 0.5f) / d3col_h;
+        float q[6][4] = {{x0, y0, 0, (float)t[i].y0}, {x1, y0, 1, (float)t[i].y0}, {x0, y1, 0, (float)t[i].y1},
+                         {x1, y0, 1, (float)t[i].y0}, {x1, y1, 1, (float)t[i].y1}, {x0, y1, 0, (float)t[i].y1}};
+
+        if (t[i].y1 <= t[i].y0) continue;
+        for (int j = 0; j < 6; j++, k++) {
+            float *o = v + k * 12;
+
+            o[0] = q[j][0], o[1] = q[j][1], o[2] = q[j][2], o[3] = q[j][3];
+            o[4] = r, o[5] = t[i].foot_px, o[6] = t[i].foot_frac, o[7] = t[i].per_px;
+            o[8] = t[i].fog / 256.0f, o[9] = t[i].fill_fog / 256.0f, o[10] = 0, o[11] = 0;
+        }
+    }
+    if (!k) return;
+    scissor(cx0, cy0, cw0, ch0);
+    use(P_D3);
+    bind(tex_d3col, tex_pal[4]);
+    p_glUniform1i(u_d3_col, 0);
+    p_glUniform1i(u_d3_pal, 1);
+    p_glUniform1f(u_d3_dr, 1.0f / d3col_h);
+    p_glEnableVertexAttribArray(3);
+    p_glEnableVertexAttribArray(4);
+    p_glVertexAttribPointer(0, 2, GL_FLOAT, 0, 48, v);
+    p_glVertexAttribPointer(1, 2, GL_FLOAT, 0, 48, v + 2);
+    p_glVertexAttribPointer(3, 4, GL_FLOAT, 0, 48, v + 4);
+    p_glVertexAttribPointer(4, 4, GL_FLOAT, 0, 48, v + 8);
+    p_glEnable(GL_BLEND);               /* the top pixel's coverage */
+    p_glDrawArrays(0x0004, 0, k);       /* GL_TRIANGLES */
+    p_glDisable(GL_BLEND);
+    p_glDisableVertexAttribArray(3);
+    p_glDisableVertexAttribArray(4);
+}
+
+void gpu_d3_join(int x, int y, int w, int row, int y0, int y1, uint32_t rgb, float op) {
+    float c[3];
+
+    if (!in_frame || !tex_d3col || y1 <= y0) return;
+    rgb4(rgb, c);
+    scissor(cx0, cy0, cw0, ch0);
+    use(P_JOIN);
+    bind(tex_d3col, tex_d3col);
+    p_glUniform1i(u_jn_col, 0);
+    p_glUniform1f(u_jn_row, (row + 0.5f) / d3col_h);
+    p_glUniform4f(u_jn_c, c[0], c[1], c[2], op);
+    p_glEnable(GL_BLEND);
+    quad((float)x, (float)(y + y0), (float)(x + w), (float)(y + y1), 0, (float)y0, 1, (float)y1);
+    p_glDisable(GL_BLEND);
+}
+
 void gpu_rect(int x, int y, int w, int h, uint32_t rgb) {
     float c[3];
 
@@ -932,6 +1122,26 @@ void gpu_tri(float x0, float y0, float x1, float y1, float x2, float y2, uint32_
     (void)x0, (void)y0, (void)x1, (void)y1, (void)x2, (void)y2, (void)rgb;
 }
 void gpu_prims_flush(void) {}
+bool gpu_d3_size(int cols, int rows) {
+    (void)cols, (void)rows;
+    return false;
+}
+void gpu_d3_cols(int row0, int rows, const uint8_t *rgba) {
+    (void)row0, (void)rows, (void)rgba;
+}
+bool gpu_d3_bg(const uint32_t *xrgb, int w, int h) {
+    (void)xrgb, (void)w, (void)h;
+    return false;
+}
+void gpu_d3_draw_bg(int x, int y, int w, int h) {
+    (void)x, (void)y, (void)w, (void)h;
+}
+void gpu_d3_traces(int x, int y, int w, const gpu_d3_trace_t *t, int n) {
+    (void)x, (void)y, (void)w, (void)t, (void)n;
+}
+void gpu_d3_join(int x, int y, int w, int row, int y0, int y1, uint32_t rgb, float op) {
+    (void)x, (void)y, (void)w, (void)row, (void)y0, (void)y1, (void)rgb, (void)op;
+}
 bool gpu_init(int cols, int rows) {
     (void)cols, (void)rows;
     return false;

@@ -600,10 +600,18 @@ static void direct_redraw(int new_row) {
 
 /* drm_commit's: the GPU's waterfall into the buffer about to be shown (each one the plane flips to), the theme's ramp
  * given again when it changed */
+static bool d3_gpu_on(void);
+static void d3_gpu_draw(int back);
+
 static void wf_gpu_hook(int back) {
     lv_area_t a;
 
-    if (!wf_gpu_on() || wfl_rows != height || !shown(obj) || !backlight_seen()) return;
+    if (!shown(obj) || !backlight_seen()) return;
+    if (d3_gpu_on()) {                  /* the 3D picture, as last worked out (d3_render_gpu) */
+        d3_gpu_draw(back);
+        return;
+    }
+    if (!wf_gpu_on() || wfl_rows != height) return;
     if (wf_palette != wf_gpu_pal || memcmp(wf_gpu_pal_copy, wf_palette, sizeof(wf_gpu_pal_copy))) {
         memcpy(wf_gpu_pal_copy, wf_palette, sizeof(wf_gpu_pal_copy));
         wf_gpu_pal = wf_palette;
@@ -1134,9 +1142,9 @@ static const uint8_t *d3_levels_of(const wf_row_t *row, uint32_t span, int32_t c
     return c->lv;
 }
 
-/* The background into buf: again from the scene when it changed */
-static void d3_background(const d3_target_t *o, const d3_scene_t *sc, uint32_t bg, int32_t tilt,
-                          const int32_t *ref_x, int n_refs) {
+/* d3_bg made again when the scene changed (o's layout); false: the same as before (or no memory: d3_bg NULL) */
+static bool d3_bg_make(const d3_target_t *o, const d3_scene_t *sc, uint32_t bg, int32_t tilt,
+                       const int32_t *ref_x, int n_refs) {
     size_t n = (size_t) WIDTH * o->h;
     bool   same = d3_bg && d3_bg_of.h == o->h && d3_bg_of.hv == (int32_t) sc->hv &&
                   d3_bg_of.cx == (int32_t) sc->cx && d3_bg_of.tilt == tilt && d3_bg_of.panel == bg &&
@@ -1164,6 +1172,15 @@ static void d3_background(const d3_target_t *o, const d3_scene_t *sc, uint32_t b
         d3_bg_of.n_refs = n_refs;
         memcpy(d3_bg_of.ref_x, ref_x, n_refs * sizeof(int32_t));
     }
+    return !same && d3_bg;
+}
+
+/* The background into buf: again from the scene when it changed */
+static void d3_background(const d3_target_t *o, const d3_scene_t *sc, uint32_t bg, int32_t tilt,
+                          const int32_t *ref_x, int n_refs) {
+    size_t n = (size_t) WIDTH * o->h;
+    bool   same = !d3_bg_make(o, sc, bg, tilt, ref_x, n_refs);
+
     if (d3_bg && same && d3_drawn_buf == o->buf) {
         /* Only what the last picture drew over it */
         for (int32_t x = 0; x < WIDTH; x++) {
@@ -1292,6 +1309,251 @@ static void d3_render(uint32_t *buf, bool portrait, const int32_t *ref_x, int n_
     }
 }
 
+/* ---- 3D by the GPU ---- */
+
+/* The GPU draws the 3D picture where it draws the flat one (Mesa there, planes, a colour theme). The CPU still works
+ * out what each column of each trace shows, front to back with the horizon as d3_trace does, but fills no pixel: it
+ * keeps the column's span (start, top, bottom), the ridge below the top, the level and the top pixel's coverage, two
+ * texels a column, and the peaks' and the newest trace's segments a row each; the background goes to the GPU when
+ * the scene changes. drm_commit draws it into each buffer the plane flips to (wf_gpu_hook). The CPU filled a third
+ * to a half of the picture's pixels at every picture (24.6% of a core on the classic screen in 3D, 2026-11-15) */
+#define D3_GPU_TRS  72                          /* traces at most: 64 deep, the newest, a few */
+#define D3_REC_ROWS (2 * D3_GPU_TRS + 2)        /* two rows a trace, then the peaks' and the newest trace's */
+static uint8_t        *d3_rec;                  /* D3_REC_ROWS x WIDTH RGBA records */
+static gpu_d3_trace_t  d3_tr[D3_GPU_TRS];
+static int             d3_tr_n;
+static int32_t         d3_join_y[2][2];         /* the rows the peaks and the newest trace cover: from, to */
+static uint32_t        d3_join_c[2];
+static float           d3_join_op[2];
+static bool            d3_gpu_have;             /* a picture worked out for the GPU since it was switched on */
+static bool            d3_bg_sent;              /* d3_bg is the GPU's background */
+static const uint32_t *d3_gpu_pal;              /* the ramp last given to the GPU (its ramp 4), and a copy */
+static uint32_t        d3_gpu_pal_copy[256];
+
+static bool d3_gpu_on(void) {
+    return wf_gpu && d3_rec && !theme_shape.mono && d3_on();
+}
+
+/* d3_trace's columns without their pixels: record rows 2 idx, 2 idx + 1 and d3_tr[idx] */
+static void d3_trace_cols(const d3_scene_t *sc, const uint8_t *lv, const uint8_t *blk, float t, int16_t *horizon,
+                          float *tops, int idx) {
+    float    s, foot;
+
+    d3_place(sc, t, &s, &foot);
+    float    a = sc->amp * s / 255.0f;
+    float    cx = sc->cx;
+    float    inv_s = 1.0f / s;
+    int32_t  x0 = LV_MAX(0, (int32_t) ceilf(cx - cx * s));
+    int32_t  x1 = LV_MIN(WIDTH - 1, (int32_t) floorf(cx + (WIDTH - 1 - cx) * s));
+    uint32_t fog = 256 - (uint32_t)(t * 150.0f);
+    int32_t  bottom_max = (int32_t) foot + 1;
+    int32_t  prev = -1, ymin = INT32_MAX, ymax = -1;
+    uint8_t *ra = d3_rec + (size_t) 2 * idx * WIDTH * 4, *rb = ra + WIDTH * 4;
+    float    u0 = cx + (x0 - cx) * inv_s;
+
+    memset(rb, 0, WIDTH * 4);           /* no column seen but those set below */
+    for (int32_t x = x0; x <= x1; x++, u0 += inv_s) {
+        int32_t i0 = LV_CLAMP(0, (int32_t) u0, WIDTH - 1);
+        int32_t i1 = LV_CLAMP(i0, (int32_t)(u0 + inv_s), WIDTH - 1);
+        int32_t v;
+
+        if (!blk[i0 >> 3] && !blk[i1 >> 3]) {      /* the floor to the next block with something (d3_trace) */
+            int32_t b = (i1 >> 3) + 1;
+
+            while (b <= (WIDTH - 1) >> 3 && !blk[b]) {
+                b++;
+            }
+            int32_t xn = b > (WIDTH - 1) >> 3 ? x1 + 1 : (int32_t) ceilf(cx + ((b << 3) - 1 - inv_s - cx) * s);
+
+            xn = LV_CLAMP(x + 1, xn, x1 + 1);
+            if (tops) {
+                for (int32_t k = x; k < xn; k++) tops[k] = foot;
+            }
+            prev = -1;
+            x = xn - 1;
+            u0 = cx + (x - cx) * inv_s;
+            continue;
+        }
+        if (i1 > i0 + 1) {
+            v = lv[i0];
+            for (int32_t i = i0 + 1; i < i1; i++) {
+                v = LV_MAX(v, lv[i]);
+            }
+        } else {
+            float f = u0 - i0;
+
+            v = i0 + 1 < WIDTH ? (int32_t)(lv[i0] + (lv[i0 + 1] - lv[i0]) * f + 0.5f) : lv[i0];
+        }
+        float   topf = LV_MAX(0.0f, foot - v * a);
+        int32_t top = (int32_t) topf;
+
+        if (tops) {
+            tops[x] = foot - v * a;
+        }
+        if (v == 0 || top >= horizon[x]) {
+            prev = -1;
+            continue;
+        }
+        int32_t  bottom = LV_MIN(horizon[x], bottom_max);
+        int32_t  r0 = prev >= 0 ? LV_MIN(top + 1, prev) : top + 1;
+        int32_t  r1 = prev >= 0 ? LV_MAX(top + 1, LV_MIN(prev, bottom - 1)) : top + 1;
+        int32_t  start = LV_MIN(r0, top);
+        uint8_t *pa = ra + x * 4, *pb = rb + x * 4;
+
+        pa[0] = (uint8_t) start;
+        pa[1] = (uint8_t) top;
+        pa[2] = (uint8_t) bottom;
+        pa[3] = (uint8_t)((start >> 8 & 1) | (top >> 8 & 1) << 1 | (bottom >> 8 & 1) << 2);
+        pb[0] = (uint8_t) LV_CLAMP(0, r1 - top, 255);
+        pb[1] = (uint8_t) v;
+        pb[2] = (uint8_t)((1.0f - (topf - top)) * 255.0f + 0.5f);
+        pb[3] = 255;
+        horizon[x] = start;
+        if (start < ymin) ymin = start;
+        if (bottom > ymax) ymax = bottom;
+        prev = top + 1;
+    }
+    d3_tr[idx] = (gpu_d3_trace_t){ymax < 0 ? 0 : ymin, ymax < 0 ? 0 : ymax, 2 * idx, (float)(int32_t) foot,
+                                  foot - (int32_t) foot, 1.0f / a, (float) fog, (float)(fog * 3 / 4)};
+}
+
+/* Column x of a line of joins (d3_join): from ya to yb, th thick, into record row `row`; y0, y1 widened to it */
+static void d3_join_rec(uint8_t *row, int32_t x, float ya, float yb, float th, int32_t h, int32_t *y) {
+    float lo = LV_MAX(0.0f, LV_MIN(ya, yb)), hi = LV_MIN((float) h, LV_MAX(ya, yb) + th);
+
+    if (hi <= lo || x < 0 || x >= WIDTH) return;
+    int32_t  ql = (int32_t)(lo * 4.0f + 0.5f), qh = (int32_t)(hi * 4.0f + 0.5f);
+    uint8_t *p = row + x * 4;
+
+    p[0] = (uint8_t) ql;
+    p[1] = (uint8_t)(ql >> 8);
+    p[2] = (uint8_t) qh;
+    p[3] = (uint8_t)(qh >> 8);
+    if ((int32_t) floorf(lo) < y[0]) y[0] = (int32_t) floorf(lo);
+    if ((int32_t) ceilf(hi) > y[1]) y[1] = (int32_t) ceilf(hi);
+}
+
+/* d3_render's picture for the GPU: the same traces, peaks and newest trace, as records */
+static void d3_render_gpu(const int32_t *ref_x, int n_refs) {
+    d3_target_t     o = {NULL, false, height, false};
+    int32_t         h = height;
+    uint32_t        span = shown_span();
+    uint32_t        accent;
+    const uint32_t *pal = d3_palette(&accent);
+    uint32_t        bg = TC(panel).full | 0xff000000u;
+    int32_t         tilt = param_i_get(cfg_wf_3d_tilt);
+    int32_t         cut_add = param_i_get(cfg_wf_3d_floor);
+    int32_t         scale = d3_scale();
+    d3_scene_t      sc;
+    int16_t         horizon[WIDTH];
+    float           front[WIDTH];
+    uint8_t         lv[WIDTH], lv_blk[WIDTH / 8 + 1];
+
+    sc.hv = d3_front(h);
+    sc.amp = sc.hv * (0.75f - 0.04f * tilt);
+    sc.rise = sc.hv - sc.amp - 4;
+    sc.shrink = 0.9f - 0.05f * tilt;
+    sc.cx = d3_vanish;
+    sc.span = LV_MAX(1, LV_MIN(param_i_get(cfg_wf_3d_depth) * D3_STEP, h - 1));
+
+    if (d3_bg_make(&o, &sc, bg, tilt, ref_x, n_refs) || !d3_bg_sent) {
+        d3_bg_sent = d3_bg && gpu_d3_bg(d3_bg, WIDTH, h);
+    }
+    if (pal != d3_gpu_pal || memcmp(d3_gpu_pal_copy, pal, sizeof(d3_gpu_pal_copy))) {
+        memcpy(d3_gpu_pal_copy, pal, sizeof(d3_gpu_pal_copy));
+        d3_gpu_pal = pal;
+        gpu_palette(4, pal);
+    }
+    d3_drawn_buf = NULL;                /* the CPU's picture, if it comes back: all of it again */
+    for (int32_t x = 0; x < WIDTH; x++) {
+        horizon[x] = h;
+        front[x] = NAN;
+    }
+
+    uint16_t        top = __atomic_load_n(&newest, __ATOMIC_ACQUIRE);
+    const wf_row_t *newest_row = row_from(top, 0);
+    float           phase = d3_phase(top);
+
+    d3_tr_n = 0;
+    for (int32_t age = 0; age <= sc.span && d3_tr_n < D3_GPU_TRS; age++) {
+        const wf_row_t *row = row_from(top, age);
+        float           t = (age + phase) / sc.span;
+
+        if (!row->width || (age > 0 && row->num % D3_STEP) || t > 1.0f) {
+            continue;
+        }
+        const uint8_t *blk;
+        const uint8_t *levels = d3_levels_of(row, span, LV_MIN(row->floor + cut_add, 254), scale, lv, lv_blk, &blk);
+
+        d3_trace_cols(&sc, levels, blk, t, horizon, age == 0 ? front : NULL, d3_tr_n++);
+    }
+    d3_drawn_phase = phase;
+    d3_drawn_num = newest_row->num;
+
+    uint8_t *jp = d3_rec + (size_t) 2 * D3_GPU_TRS * WIDTH * 4, *jl = jp + WIDTH * 4;
+
+    memset(jp, 0, 2 * WIDTH * 4);
+    for (int k = 0; k < 2; k++) d3_join_y[k][0] = h, d3_join_y[k][1] = 0;
+    if (newest_row->width) {
+        float s0, f0;
+
+        d3_place(&sc, phase / sc.span, &s0, &f0);
+        uint32_t now = lv_tick_get();
+        float    fall = (now - d3_peak_tick) / 1000.0f * D3_PEAK_DECAY * sc.amp / 255.0f;
+
+        if (d3_peak_center != wf_center_freq || d3_peak_span != span || fall > sc.amp) {
+            for (int32_t x = 0; x < WIDTH; x++) d3_peak[x] = f0;
+            d3_peak_center = wf_center_freq;
+            d3_peak_span = span;
+            fall = 0;
+        }
+        d3_peak_tick = now;
+        for (int32_t x = 0; x < WIDTH; x++) {
+            float y = isnan(front[x]) ? f0 : front[x];
+
+            d3_peak[x] = LV_MIN(LV_MIN(d3_peak[x] + fall, f0), y);
+        }
+        if (param_i_get(cfg_wf_3d_peak)) {
+            for (int32_t x = 1; x < WIDTH; x++) {
+                if (d3_peak[x] < f0 - 1 || d3_peak[x - 1] < f0 - 1) {
+                    d3_join_rec(jp, x, d3_peak[x - 1], d3_peak[x], 1.0f, h, d3_join_y[0]);
+                }
+            }
+        }
+        for (int32_t x = 0; x < WIDTH; x++) {
+            if (!isnan(front[x])) {
+                d3_join_rec(jl, x, x > 0 && !isnan(front[x - 1]) ? front[x - 1] : front[x], front[x], 2.0f, h,
+                            d3_join_y[1]);
+            }
+        }
+    }
+    d3_join_c[0] = d3_light(accent & 0xffffff);
+    d3_join_op[0] = 0.55f;
+    d3_join_c[1] = accent & 0xffffff;
+    d3_join_op[1] = 1.0f;
+    gpu_d3_cols(0, 2 * d3_tr_n, d3_rec);
+    gpu_d3_cols(2 * D3_GPU_TRS, 2, jp);
+    d3_gpu_have = true;
+}
+
+/* drm_commit's (wf_gpu_hook): the picture last worked out into buffer back */
+static void d3_gpu_draw(int back) {
+    lv_area_t a;
+
+    if (!d3_gpu_have || !d3_bg_sent) return;
+    lv_obj_get_coords(obj, &a);
+    if (!gpu_frame_begin_buf(back, false)) return;
+    gpu_d3_draw_bg(0, a.y1, WIDTH, height);
+    gpu_d3_traces(0, a.y1, WIDTH, d3_tr, d3_tr_n);
+    for (int k = 0; k < 2; k++) {
+        if (d3_join_y[k][1] > d3_join_y[k][0]) {
+            gpu_d3_join(0, a.y1, WIDTH, 2 * D3_GPU_TRS + k, d3_join_y[k][0], d3_join_y[k][1], d3_join_c[k],
+                        d3_join_op[k]);
+        }
+    }
+    gpu_frame_finish(0, a.y1, WIDTH, height);
+}
+
 /* The reference frequencies under the front edge of the floor; hidden out of 3D */
 static void d3_labels_update(bool on, const int32_t *ref_x, const int32_t *ref_hz, int n, lv_coord_t y) {
     for (int i = 0; i < D3_LABELS; i++) {
@@ -1399,13 +1661,25 @@ static void d3_redraw(void) {
     }
     __atomic_store_n(&new_rows, 0, __ATOMIC_RELEASE);
     wfp_full = true;                /* the waterfall again whole when 3D is switched off: the plane, or the image */
-    if (direct) {
+    if (direct && d3_gpu_on()) {        /* worked out here, drawn by the GPU at the commit */
         lv_area_t a;
 
+        d3_render_gpu(ref_x, n);
+        lv_obj_get_coords(obj, &a);
+#if USE_DRM
+        drm_wf_forget(a.y1);            /* the CPU's strip of before shown no more */
+        drm_wf_want_flip();
+#endif
+    } else if (direct) {
+        lv_area_t a;
+
+        d3_bg_sent = false;             /* the CPU's d3_bg now */
+        d3_gpu_have = false;
         d3_render(wfp, true, ref_x, n);
         wfp_head = 0;
         lv_obj_get_coords(obj, &a);
 #if USE_DRM
+        drm_wf_gpu_area(false, -1, 0, 0, 0, 0);    /* a dump reads the CPU's strip */
         drm_wf_present_ring(wfp, a.y1, height, wfp_head);
 #endif
     } else {
@@ -2034,6 +2308,7 @@ void waterfall_set_height(lv_coord_t h) {
 #if USE_DRM
         if ((wf_gpu = gpu_start() && (wfl = calloc(WIDTH * MAX_HEIGHT, 1)) != NULL)) {
             drm_wf_commit_hook(wf_gpu_hook);
+            if (gpu_d3_size(WIDTH, D3_REC_ROWS)) d3_rec = calloc((size_t) D3_REC_ROWS * WIDTH * 4, 1);
         }
 #endif
     } else {
