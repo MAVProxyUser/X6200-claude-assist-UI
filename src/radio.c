@@ -1218,13 +1218,7 @@ static bool no_data_refused(tx_by_t by) {
  * (ptt_moves); the GUI's CW key in split on the dial too (split_keys_dial), and PTT with split held off and the dial
  * back. Where it may, not without data from the base either */
 static bool tx_refused(tx_by_t by) {
-    if (atomic_load(&rx_only) > 0) {
-        static uint64_t said;
-
-        if (get_time() - said > 3000) {
-            said = get_time();
-            msg_schedule_text_fmt("Receive only (Sentry): no TX");
-        }
+    if (atomic_load(&rx_only) > 0) {    /* refused quietly: the Sentry (its only user) says what to press, and where */
         return true;
     }
     return tx_refused_at(radio_tx_freq(), by) ||
