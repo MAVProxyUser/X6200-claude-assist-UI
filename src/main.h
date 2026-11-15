@@ -11,7 +11,7 @@
 #include "knob_device.h"
 #include "mfk_device.h"
 
-#define VERSION "GoldCorpHF - v0.3.12.19"
+#define VERSION "GoldCorpHF - v0.3.12.20"
 
 /* The VOL knob and the MFK, opened at start */
 extern rotary_t     *vol;
