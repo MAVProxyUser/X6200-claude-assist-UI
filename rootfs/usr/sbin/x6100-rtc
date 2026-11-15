@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: LGPL-2.1-or-later
+"""x6100-rtc: the X6200's two clocks kept together, for FT8 and WSPR days away from any network.
+
+The system clock (the processor's crystal) is kept by ntpd while a network is there and, its rate learnt in
+/var/lib/ntp/ntp.drift, keeps good time while the radio runs. The clock chip (the PCF8563, /dev/rtc1, on its
+own battery) is the only one counting while the radio is off, and lost time three ways: it counts whole
+seconds and was written (hwclock -w) and read at boot (the kernel) at any moment of one, up to a second each
+time; and its crystal runs off by its own rate, some 20 ppm, 1.7 s a day, that nothing measured.
+
+Here: the chip is read at the moment its second turns (polled, a few ms), so each write is followed by a
+reading of where its second falls against the system clock (its phase), and boot reads it on the turn too.
+Each write after a trusted time (NTP: save --trusted) first measures how far the chip ran since the last
+trusted one: its rate, in ppm, learnt (/mnt/rtc-drift.json). At boot (load) the time is the chip's, less its
+phase and less what its rate made of the time since it was written.
+
+  x6100-rtc load [--dry-run]   boot (S02rtc): the system clock from the chip, its phase and rate taken out
+  x6100-rtc save [--trusted]   the system clock into the chip (the NTP sync: --trusted, its rate measured
+                               first; FT8's Time Sync: not trusted)
+  x6100-rtc mark               the chip was just written by someone else (Settings' date): its phase noted
+  x6100-rtc status             the record and the chip against the system clock now
+"""
+import calendar
+import fcntl
+import json
+import os
+import struct
+import subprocess
+import sys
+import time
+
+DEV = "/dev/rtc1"
+REC = "/mnt/rtc-drift.json"
+RTC_RD_TIME = 0x80247009    # _IOR('p', 0x09, struct rtc_time): nine ints
+RTC_SET_TIME = 0x4024700A   # _IOW('p', 0x0a, struct rtc_time)
+MAX_PPM = 200.0             # a crystal further off than this is a bad measurement, not a rate
+MIN_LEARN_S = 3600          # a rate from less than an hour is mostly the readings' own few ms
+
+
+def say(msg):
+    print(msg)
+    try:
+        subprocess.run(["logger", "-t", "rtc", msg], check=False, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def rtc_read(fd):
+    b = fcntl.ioctl(fd, RTC_RD_TIME, bytes(36))
+    s, mi, h, d, mo, y = struct.unpack("9i", b)[:6]
+    return calendar.timegm((y + 1900, mo + 1, d, h, mi, s, 0, 0, 0))
+
+
+def rtc_edge(fd, timeout=2.5):
+    """The chip's second as it turns: (its new second, the system time then, the monotonic time then)"""
+    first = rtc_read(fd)
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        t0, m0 = time.time(), time.monotonic()
+        r = rtc_read(fd)
+        t1, m1 = time.time(), time.monotonic()
+        if r != first:
+            return r, (t0 + t1) / 2, (m0 + m1) / 2
+        time.sleep(0.002)
+    raise RuntimeError("the clock chip does not count (stopped, or no battery)")
+
+
+def rtc_write(fd, sec):
+    tm = time.gmtime(sec)
+    fcntl.ioctl(fd, RTC_SET_TIME, struct.pack("9i", tm.tm_sec, tm.tm_min, tm.tm_hour, tm.tm_mday,
+                                              tm.tm_mon - 1, tm.tm_year - 1900, 0, 0, 0))
+
+
+def rec_load():
+    try:
+        with open(REC) as f:
+            r = json.load(f)
+        if isinstance(r, dict) and isinstance(r.get("saved"), (int, float)):
+            return r
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def rec_save(r):
+    tmp = REC + ".new"
+    with open(tmp, "w") as f:
+        json.dump(r, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, REC)
+
+
+def phase_now(fd):
+    """Where the chip's second falls against the system clock: the chip ahead by this (s)"""
+    r, s, _ = rtc_edge(fd)
+    return r - s, s
+
+
+def save(trusted):
+    rec = rec_load()
+    fd = os.open(DEV, os.O_RDWR)
+    try:
+        if trusted and rec.get("trusted"):
+            ph, s = phase_now(fd)
+            run = ph - rec.get("phase", 0.0)
+            el = s - rec["saved"]
+            if el >= MIN_LEARN_S and abs(run) < 600:
+                ppm = run / el * 1e6
+                if abs(ppm) <= MAX_PPM:
+                    old = rec.get("ppm")
+                    n = rec.get("n", 0)
+                    # the longer the span, the more it counts; the first one stands alone
+                    w = 1.0 if old is None else min(0.5, el / 86400 * 0.5 + 0.1)
+                    rec["ppm"] = ppm if old is None else old * (1 - w) + ppm * w
+                    rec["n"] = n + 1
+                    say("Clock chip: ran %+.3f s in %.1f h (%+.1f ppm), its rate now %+.1f ppm"
+                        % (run, el / 3600, ppm, rec["ppm"]))
+                else:
+                    say("Clock chip: ran %+.3f s in %.1f h, %+.0f ppm: not taken" % (run, el / 3600, ppm))
+        # written just after the system's second turns: the chip's own second then measured, whatever it does
+        # with the write
+        t = time.time()
+        time.sleep(1.02 - (t - int(t)) if t - int(t) > 0.02 else 0.02 - (t - int(t)))
+        rtc_write(fd, int(time.time()))
+        ph, s = phase_now(fd)
+        rec.update({"saved": s, "phase": ph, "trusted": bool(trusted)})
+        rec_save(rec)
+        say("Clock chip: set from the %s clock, its second %+.3f s off it%s"
+            % ("network's" if trusted else "radio's", ph,
+               "" if rec.get("ppm") is None else ", its rate %+.1f ppm" % rec["ppm"]))
+    finally:
+        os.close(fd)
+
+
+def mark():
+    rec = rec_load()
+    fd = os.open(DEV, os.O_RDONLY)
+    try:
+        ph, s = phase_now(fd)
+    finally:
+        os.close(fd)
+    rec.update({"saved": s, "phase": ph, "trusted": False})
+    rec_save(rec)
+    say("Clock chip: written elsewhere, its second %+.3f s off the system clock" % ph)
+
+
+def load(dry):
+    rec = rec_load()
+    fd = os.open(DEV, os.O_RDONLY)
+    try:
+        r, s, m = rtc_edge(fd)
+    finally:
+        os.close(fd)
+    ph = rec.get("phase", 0.0) if rec else 0.0
+    ppm = rec.get("ppm") or 0.0
+    el = r - rec["saved"] if rec else 0.0
+    drift = ppm * 1e-6 * el if el > 0 else 0.0
+    true = r - ph - drift                   # the true time at the chip's turn
+    step = true - s
+    if abs(step) > 600:
+        say("Clock chip: %+.0f s from the system clock at boot: the record is not this chip's time, left" % step)
+        return
+    detail = "the chip's second %+.3f s, its rate %+.1f ppm over %.1f h: %+.3f s" % (ph, ppm, el / 3600, -drift)
+    if dry:
+        say("Clock chip (dry run): the system clock would move %+.3f s (%s)" % (step, detail))
+        return
+    time.clock_settime(time.CLOCK_REALTIME, true + (time.monotonic() - m))
+    say("Clock chip: the system clock moved %+.3f s (%s)" % (step, detail))
+
+
+def status():
+    rec = rec_load()
+    fd = os.open(DEV, os.O_RDONLY)
+    try:
+        ph, s = phase_now(fd)
+    finally:
+        os.close(fd)
+    print(json.dumps({"record": rec, "phase_now": round(ph, 4),
+                      "ran_since_saved": round(ph - rec.get("phase", 0.0), 4) if rec else None,
+                      "hours_since_saved": round((s - rec["saved"]) / 3600, 2) if rec else None}))
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else ""
+    try:
+        if cmd == "load":
+            load("--dry-run" in argv)
+        elif cmd == "save":
+            save("--trusted" in argv)
+        elif cmd == "mark":
+            mark()
+        elif cmd == "status":
+            status()
+        else:
+            print(__doc__)
+            return 2
+    except (OSError, RuntimeError) as e:
+        say("Clock chip: %s: %s" % (cmd, e))
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

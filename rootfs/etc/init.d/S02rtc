@@ -11,6 +11,11 @@
 # device tree's. i2cget and i2cset (i2c-tools, in both images) take -f, the kernel's driver holding the address;
 # that driver never writes register 0, so the two do not collide. Changes go to syslog (tag rtc).
 #
+# Then the system clock from the chip as x6100-rtc keeps it (the X6200): read as its second turns, less where its
+# second falls and less what its rate (learnt at each network sync after a power-off) made of the time since it
+# was written; the kernel's own reading at boot was up to a second off before any of that. In the background: a
+# reading waits for the chip's next second.
+#
 
 SYS=${X6100_RTC_SYSFS:-/sys}
 ADDR=0x51
@@ -63,6 +68,9 @@ start() {
 case "$1" in
     start)
         start
+        if [ -x /usr/sbin/x6100-rtc ] && [ -e /dev/rtc1 ]; then
+            /usr/sbin/x6100-rtc load > /dev/null 2>&1 &
+        fi
         ;;
 esac
 

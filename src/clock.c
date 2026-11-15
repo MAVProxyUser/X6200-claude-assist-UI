@@ -554,6 +554,13 @@ bool clock_rtc_save(void) {
         LV_LOG_ERROR("Can't set RTC time: %s\n", strerror(errno));
         return false;
     }
+    /* written here: x6100-rtc notes where the chip's second now falls, for the next start (in the background:
+     * it waits for the chip's next second) */
+    if (access("/usr/sbin/x6100-rtc", X_OK) == 0) {
+        if (system("/usr/sbin/x6100-rtc mark >/dev/null 2>&1 &") != 0) {
+            LV_LOG_WARN("x6100-rtc mark did not start");
+        }
+    }
     return true;
 }
 

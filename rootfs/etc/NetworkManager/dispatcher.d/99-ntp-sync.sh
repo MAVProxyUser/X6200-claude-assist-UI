@@ -21,7 +21,13 @@ sync_clock() {
         tries=$((tries + 1))
         sleep 10
     done
-    hwclock -w -u -f /dev/rtc1 && touch /var/run/time-sync
+    # the clock chip from it, its rate measured first against the last such sync (x6100-rtc: what it ran while
+    # the radio was off, taken out at the next start); hwclock where the helper is not
+    if [ -x /usr/sbin/x6100-rtc ]; then
+        /usr/sbin/x6100-rtc save --trusted || hwclock -w -u -f /dev/rtc1
+    else
+        hwclock -w -u -f /dev/rtc1
+    fi && touch /var/run/time-sync
     # ntpd starts at boot (S49ntp), mostly before any network: the server names in ntp.conf did not
     # resolve then, and it asks for them again only minutes later, up to 17. Until then it keeps
     # nothing, and the FT8 window's clock shows as not kept. Started again it finds them at once.

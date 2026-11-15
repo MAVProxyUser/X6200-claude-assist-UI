@@ -983,8 +983,9 @@ static void time_sync_cb(button_data_t *btn) {
         msg_update_text_fmt("Time Sync: the clock can't be set (%s)", why);
         return;
     }
-    /* into the RTC too, in UTC as the kernel reads it at boot: kept across a power-off */
-    sh_run("hwclock -w -u -f /dev/rtc1", NULL, NULL);
+    /* into the RTC too, in UTC as the kernel reads it at boot: kept across a power-off (x6100-rtc: its second's
+     * phase noted for the next start; not a network's time, so its rate is not measured against it) */
+    sh_run("/usr/sbin/x6100-rtc save >/dev/null 2>&1 || hwclock -w -u -f /dev/rtc1", NULL, NULL);
     msg_update_text_fmt("Clock moved %+.2f s to the slot start", -off / 1e9);
 }
 

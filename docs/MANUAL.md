@@ -3602,6 +3602,16 @@ Buttons:
   FT8, 7.5 s FT4, 3.75 s FT2) and is kept in the clock chip. A clock that
   NTP (WiFi) or the GPS keeps is left alone ("Clock in sync", "The GPS keeps
   the clock"): moved to a press it could only get worse.
+- Days away from a network (the X6200): its two clocks are kept together.
+  The processor's clock runs while the radio is on, its rate learnt by ntpd
+  whenever WiFi was there (kept on the card). The clock chip, on its own
+  battery, counts while it is off; it counts whole seconds, so it is now
+  written and read at the moment its second turns (the kernel's reading at
+  boot was up to a second off), and each network time after a power-off
+  measures how far it ran meanwhile: its rate, learnt in
+  `/mnt/rtc-drift.json`, is taken out at every start (`x6100-rtc status` over
+  SSH shows it). A typical chip runs 1 to 2 s a day off; corrected, a few
+  tenths of a second in a week. Time Sync and Settings' date set it too.
 - CQ Modifier: for example `CQ POTA` or `CQ DX`.
 
 The list. Each row has the slot time, the message, and on the right the
