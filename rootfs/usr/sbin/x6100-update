@@ -13,7 +13,15 @@
 # its level into /etc/openx6x00-image. "check" reads the newer release's file and says whether it also wants a
 # newer card image; "status" says whether the running software does.
 #   download <url>           the bundle into /mnt/update, progress in /mnt/update/.progress
-#   install <file>           verify, stage, swap in, restart the GUI and the web server
+#   install <file> [--kernel] [--uboot]
+#                            verify, stage, swap in, restart the GUI and the web server; with --kernel the bundle's
+#                            kernel set (zImage, the DTB, boot.scr) onto the SD card's boot partition and its modules
+#                            into /lib/modules, with --uboot its U-Boot into the card's raw area: only on the SD
+#                            card the radio started from (never the internal eMMC), each only when asked (the GUI's
+#                            checkboxes), both from the next power-on (nothing here reboots)
+#   bundle-info <file>       {"version":..,"sd":..,"kernel":..,"uboot":..}: whether the bundle's kernel set and
+#                            U-Boot differ from the SD card's (what the GUI offers to tick)
+#   boot-rollback            the kernel set, modules and U-Boot the last --kernel/--uboot replaced, back on the card
 #   upgrade                  check, download and install the newer release
 #   rollback                 the previous files back, restart
 #   confirm                  the new version runs: the pending mark goes (the GUI, after a minute)
@@ -87,6 +95,21 @@ WORK = "/mnt/update"                  # the download and the staging: the DATA p
 PROGRESS = os.path.join(WORK, ".progress")
 ALLOWED = ("/usr/sbin/", "/usr/bin/", "/usr/lib/", "/usr/share/x6100/",
            "/etc/init.d/", "/etc/")
+# The SD card the radio started from (OpenX6X00 runs from it; the internal eMMC, Xiegu's own system, mmcblk2, is
+# never written): its kernel set on the FAT boot partition (genimage: zImage, sun8i-r16-<model>.dtb, boot.scr), U-Boot
+# raw from byte 8 KiB in the 1016 KiB before that partition (sunxi), the kernel's modules in /lib/modules on its root
+SD_NAME = "mmcblk0"
+SD_DEV = "/dev/mmcblk0"
+SD_BOOT = "/dev/mmcblk0p1"
+SYS_BLOCK = "/sys/block"
+CMDLINE = "/proc/cmdline"
+BOOT_MNT = "/tmp/x6100-update-boot"
+UBOOT_OFFSET = 8 * 1024
+UBOOT_AREA = 1016 * 1024
+MODULES_ROOT = "/"                    # where the modules' /lib/modules/... paths go (the tests point it elsewhere)
+BOOT_JOURNAL = os.path.join(STATE, "boot-journal.json")   # the last --kernel/--uboot, for its undo
+BOOT_PREV = os.path.join(STATE, "boot-prev")              # the module files it replaced
+UBOOT_PREV = os.path.join(STATE, "uboot-prev.bin")        # the U-Boot area it replaced, whole
 MAX_STARTS = 3                        # GUI starts without a confirm before the rollback
 TIMEOUT = 30
 RUN_LIMIT = 1800
@@ -461,13 +484,65 @@ def read_manifest(tar):
         mjson = tar.extractfile("manifest.json").read()
     except (KeyError, AttributeError):
         raise Fail("not an update bundle: no manifest")
+    return check_manifest(mjson)
+
+
+def bundle_manifest(bundle):
+    """A bundle's manifest, checked, without unpacking the rest: it is the tar's first member, read as the system's
+    gzip streams it"""
+    p = subprocess.Popen(["gzip", "-dc", bundle], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        with tarfile.open(fileobj=p.stdout, mode="r|") as tar:
+            for ti in tar:
+                if ti.name == "manifest.json":
+                    return check_manifest(tar.extractfile(ti).read())
+        raise Fail("not an update bundle: no manifest")
+    except tarfile.TarError:
+        raise Fail("not an update bundle")
+    finally:
+        p.kill()
+        p.stdout.close()
+        p.wait()
+
+
+def boot_section(m):
+    """The manifest's "boot" part, checked ({} when the bundle carries none): the kernel set's names are plain file
+    names for the boot partition, its modules' paths are under /lib/modules/, U-Boot fits its area at its offset"""
+    b = m.get("boot") or {}
+    if not isinstance(b, dict):
+        raise Fail("the manifest's boot part is not readable")
+    k = b.get("kernel")
+    if k:
+        if not isinstance(k.get("files"), list) or not k["files"]:
+            raise Fail("the bundle's kernel has no files")
+        for e in k["files"]:
+            n = str(e.get("name", ""))
+            if not n or "/" in n or n.startswith(".") or n.endswith((".prev", ".x6new")):
+                raise Fail(f"the bundle wants {n!r} on the boot partition: refused")
+        for e in k.get("modules", []):
+            p = str(e.get("path", ""))
+            if not p.startswith("/lib/modules/") or ".." in p.split("/") or p.endswith("/"):
+                raise Fail(f"the bundle wants to write {p}: refused")
+    u = b.get("uboot")
+    if u:
+        try:
+            ok = 0 < int(u.get("size", 0)) <= UBOOT_AREA and int(u.get("offset", -1)) == UBOOT_OFFSET
+        except (TypeError, ValueError):
+            ok = False
+        if not ok or "/" in str(u.get("name", "/")):
+            raise Fail("the bundle's U-Boot does not fit its area: refused")
+    return b
+
+
+def check_manifest(mjson):
     # No signature: a manifest.sig in an older bundle is left unread. Each file is checked against the manifest's
     # SHA-256 below; where the bundle came from is the repository's releases over HTTPS, or the owner's own file
     try:
         m = json.loads(mjson)
     except ValueError:
         raise Fail("the manifest is not JSON")
-    if m.get("product") != "OpenX6X00" or not isinstance(m.get("files"), list) or not m.get("version"):
+    if not isinstance(m, dict) or m.get("product") != "OpenX6X00" or not isinstance(m.get("files"), list) \
+            or not m.get("version"):
         raise Fail("the manifest is not for OpenX6X00")
     if m.get("model", "x6100") != radio_model():
         raise Fail(f"the bundle is for the {m.get('model', 'x6100').upper()}, this radio is a {radio_model().upper()}")
@@ -475,13 +550,42 @@ def read_manifest(tar):
         p = e.get("path", "")
         if not p.startswith("/") or ".." in p.split("/") or not p.startswith(ALLOWED) or p.endswith("/"):
             raise Fail(f"the bundle wants to write {p}: refused")
+    boot_section(m)
     return m
 
 
-def stage(bundle):
-    """The bundle's files into WORK/stage, each checked against the manifest; returns the manifest."""
+def _stage_one(tar, member, dest, sha, mode=None):
+    """One member of the bundle into dest, checked against its SHA-256"""
+    try:
+        src = tar.extractfile(member)
+    except KeyError:
+        src = None
+    if src is None:
+        raise Fail(f"{member.split('/', 1)[-1]} is missing from the bundle")
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    h = hashlib.sha256()
+    with open(dest, "wb") as f:
+        while True:
+            chunk = src.read(65536)
+            if not chunk:
+                break
+            h.update(chunk)
+            f.write(chunk)
+        f.flush()
+        os.fsync(f.fileno())
+    if h.hexdigest() != sha:
+        raise Fail(f"{member.split('/', 1)[-1]} does not match its checksum")
+    if mode is not None:
+        os.chmod(dest, mode)
+
+
+def stage(bundle, kernel=False, uboot=False):
+    """The bundle's files into WORK/stage, each checked against the manifest; with kernel and uboot the SD card's
+    parts too, into WORK/stage-boot (the kernel set, its modules under modules/, U-Boot). Returns the manifest."""
     st = os.path.join(WORK, "stage")
+    bst = os.path.join(WORK, "stage-boot")
     shutil.rmtree(st, ignore_errors=True)
+    shutil.rmtree(bst, ignore_errors=True)
     os.makedirs(st)
     # Decompressed by the system's gzip: the radio's Python may come without zlib
     plain = os.path.join(WORK, "bundle.tar")
@@ -494,32 +598,29 @@ def stage(bundle):
             raise Fail("not a gzip file")
         with tarfile.open(plain, "r:") as tar:
             m = read_manifest(tar)
-            n = len(m["files"])
+            b = boot_section(m)
+            if kernel and not b.get("kernel"):
+                raise Fail("the bundle carries no kernel")
+            if uboot and not b.get("uboot"):
+                raise Fail("the bundle carries no U-Boot")
+            boot = ([("boot/" + e["name"], os.path.join(bst, e["name"]), e["sha256"], None)
+                     for e in b["kernel"]["files"]] +
+                    [("files" + e["path"], os.path.join(bst, "modules", e["path"].lstrip("/")), e["sha256"],
+                      int(str(e.get("mode", "644")), 8)) for e in b["kernel"].get("modules", [])]) if kernel else []
+            if uboot:
+                boot.append(("boot/" + b["uboot"]["name"], os.path.join(bst, b["uboot"]["name"]), b["uboot"]["sha256"],
+                             None))
+            n = len(m["files"]) + len(boot)
             for i, e in enumerate(m["files"]):
                 progress("verify", i, n)
-                try:
-                    src = tar.extractfile("files" + e["path"])
-                except KeyError:
-                    src = None
-                if src is None:
-                    raise Fail(f"{e['path']} is missing from the bundle")
                 dest = os.path.join(st, e["path"].lstrip("/"))
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                h = hashlib.sha256()
-                with open(dest, "wb") as f:
-                    while True:
-                        chunk = src.read(65536)
-                        if not chunk:
-                            break
-                        h.update(chunk)
-                        f.write(chunk)
-                    f.flush()
-                    os.fsync(f.fileno())
-                if h.hexdigest() != e.get("sha256"):
-                    raise Fail(f"{e['path']} does not match its checksum")
-                os.chmod(dest, int(str(e.get("mode", "644")), 8))
+                _stage_one(tar, "files" + e["path"], dest, e.get("sha256"), int(str(e.get("mode", "644")), 8))
+            for i, (member, dest, sha, mode) in enumerate(boot):
+                progress("verify", len(m["files"]) + i, n)
+                _stage_one(tar, member, dest, sha, mode)
     except BaseException:
         shutil.rmtree(st, ignore_errors=True)
+        shutil.rmtree(bst, ignore_errors=True)
         raise
     finally:
         try:
@@ -527,6 +628,243 @@ def stage(bundle):
         except FileNotFoundError:
             pass
     return m
+
+
+# ---- the SD card's kernel and U-Boot (install --kernel/--uboot), each only when asked --------------------------
+
+def _read_text(path, n=4096):
+    try:
+        with open(path) as f:
+            return f.read(n)
+    except OSError:
+        return ""
+
+
+def sd_card_check():
+    """The kernel and U-Boot go only to the SD card the radio started from: mmcblk0 says it is an SD card (the
+    internal eMMC says MMC and is never written), the kernel was started with its root on that card's second
+    partition, and the card's boot partition starts at 1 MiB or after (U-Boot's area ends there). Anything else is
+    refused before a byte is written"""
+    kind = _read_text(os.path.join(SYS_BLOCK, SD_NAME, "device", "type")).strip()
+    if kind != "SD":
+        raise Fail(f"{SD_NAME} is not an SD card ({kind or 'no type'}): the kernel and U-Boot go only to the card "
+                   "the radio started from")
+    if f"root=/dev/{SD_NAME}p2" not in _read_text(CMDLINE).split():
+        raise Fail("the radio did not start from the SD card: no kernel or U-Boot written")
+    start = _read_text(os.path.join(SYS_BLOCK, SD_NAME, SD_NAME + "p1", "start")).strip()
+    if not start.isdigit() or int(start) * 512 < UBOOT_OFFSET + UBOOT_AREA:
+        raise Fail("the SD card's boot partition starts inside U-Boot's area: nothing written")
+
+
+def boot_mount(ro=False):
+    """The SD card's FAT boot partition, mounted in /tmp for the kernel set: its path"""
+    os.makedirs(BOOT_MNT, exist_ok=True)
+    if not os.path.ismount(BOOT_MNT):
+        r = subprocess.run(["mount", "-t", "vfat"] + (["-o", "ro"] if ro else []) + [SD_BOOT, BOOT_MNT],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if r.returncode != 0:
+            raise Fail("the SD card's boot partition did not mount: " + r.stderr.decode(errors="replace").strip()[:80])
+    return BOOT_MNT
+
+
+def boot_umount():
+    subprocess.run(["umount", BOOT_MNT], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    os.sync()
+
+
+def _sha_file(path):
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+    except OSError:
+        return ""
+    return h.hexdigest()
+
+
+def _fsync_path(path):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def uboot_read(n=UBOOT_AREA):
+    """The SD card's U-Boot area as it is on the card"""
+    with open(SD_DEV, "rb") as d:
+        d.seek(UBOOT_OFFSET)
+        return d.read(n)
+
+
+def uboot_write(area):
+    """area onto the card at U-Boot's offset, synced, the block device's cache dropped so the next read reads the card"""
+    fd = os.open(SD_DEV, os.O_WRONLY)
+    try:
+        os.lseek(fd, UBOOT_OFFSET, os.SEEK_SET)
+        view = memoryview(area)
+        while view:
+            view = view[os.write(fd, view):]
+        os.fsync(fd)
+        try:
+            fcntl.ioctl(fd, 0x1261)         # BLKFLSBUF
+        except OSError:
+            pass
+    finally:
+        os.close(fd)
+
+
+def boot_kernel(m, j):
+    """The kernel's modules into /lib/modules (each file replaced kept in boot-prev), then its set onto the SD card's
+    boot partition (each old file kept beside it as <name>.prev, the room checked first; the new one written as
+    <name>.x6new, synced, renamed over): every step journalled for boot_undo. The modules first: the kernel on the card
+    is the old one till its own files are swapped, and its modules are in its own release's folder"""
+    b = m["boot"]["kernel"]
+    bst = os.path.join(WORK, "stage-boot")
+    files, mods = b["files"], b.get("modules", [])
+    n = len(files) + len(mods)
+    jk = j["kernel"] = {"files": [], "modules": [], "release": str(b.get("release", ""))}
+    shutil.rmtree(BOOT_PREV, ignore_errors=True)
+    for i, e in enumerate(mods):
+        progress("kernel", i, n)
+        rel = e["path"].lstrip("/")
+        p = os.path.join(MODULES_ROOT, rel)
+        rec = {"path": e["path"], "prev": os.path.exists(p), "done": False}
+        jk["modules"].append(rec)
+        if rec["prev"]:
+            keep = os.path.join(BOOT_PREV, rel)
+            os.makedirs(os.path.dirname(keep), exist_ok=True)
+            shutil.copy2(p, keep)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = p + ".x6new"
+        shutil.copyfile(os.path.join(bst, "modules", rel), tmp)
+        os.chmod(tmp, int(str(e.get("mode", "644")), 8))
+        _fsync_path(tmp)
+        rec["replacing"] = True
+        save(BOOT_JOURNAL, j)
+        os.replace(tmp, p)
+        rec["done"] = True
+        save(BOOT_JOURNAL, j)
+    d = boot_mount()
+    try:
+        need = sum(int(e.get("size", 0)) for e in files) + \
+            sum(os.path.getsize(os.path.join(d, e["name"])) for e in files if os.path.exists(os.path.join(d, e["name"])))
+        if shutil.disk_usage(d).free < need + 1024 * 1024:
+            raise Fail("no room on the SD card's boot partition for the new kernel beside the one kept")
+        for i, e in enumerate(files):
+            progress("kernel", len(mods) + i, n)
+            p = os.path.join(d, e["name"])
+            rec = {"name": e["name"], "prev": os.path.exists(p), "done": False}
+            jk["files"].append(rec)
+            if rec["prev"]:
+                shutil.copyfile(p, p + ".prev")
+                _fsync_path(p + ".prev")
+            tmp = p + ".x6new"
+            shutil.copyfile(os.path.join(bst, e["name"]), tmp)
+            _fsync_path(tmp)
+            rec["replacing"] = True
+            save(BOOT_JOURNAL, j)
+            os.replace(tmp, p)
+            rec["done"] = True
+            save(BOOT_JOURNAL, j)
+    finally:
+        boot_umount()
+
+
+def boot_uboot(m, j):
+    """U-Boot into the SD card's raw area (the image, then zeros to the area's end, as the card image has it): the
+    area before it saved whole first, the new one written, read back from the card and compared; the old one put back
+    when it does not read back as written"""
+    u = m["boot"]["uboot"]
+    with open(os.path.join(WORK, "stage-boot", u["name"]), "rb") as f:
+        data = f.read()
+    new = data + bytes(UBOOT_AREA - len(data))
+    progress("uboot", 0, 2)
+    old = uboot_read()
+    if len(old) != UBOOT_AREA:
+        raise Fail("the SD card's U-Boot area could not be read whole: nothing written")
+    if old == new:
+        j["uboot"] = {"state": "same"}
+        save(BOOT_JOURNAL, j)
+        return
+    os.makedirs(os.path.dirname(UBOOT_PREV), exist_ok=True)
+    with open(UBOOT_PREV + ".tmp", "wb") as f:
+        f.write(old)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(UBOOT_PREV + ".tmp", UBOOT_PREV)
+    j["uboot"] = {"state": "writing", "prev_sha": hashlib.sha256(old).hexdigest(),
+                  "new_sha": hashlib.sha256(new).hexdigest()}
+    save(BOOT_JOURNAL, j)
+    uboot_write(new)
+    progress("uboot", 1, 2)
+    if uboot_read() != new:
+        uboot_write(old)
+        j["uboot"]["state"] = "restored"
+        save(BOOT_JOURNAL, j)
+        raise Fail("U-Boot did not read back from the SD card as written: the one before is back")
+    j["uboot"]["state"] = "written"
+    save(BOOT_JOURNAL, j)
+
+
+def boot_undo(j):
+    """What a --kernel/--uboot changed, back: U-Boot's saved area (checked against the sum journalled), the kernel
+    set's .prev files (a file that was new goes), the modules from boot-prev (one that was new goes, and its release's
+    folder when nothing is left in it). Safe to run again after an interruption: each step is journalled"""
+    u = j.get("uboot") or {}
+    if u.get("state") in ("writing", "written"):
+        try:
+            with open(UBOOT_PREV, "rb") as f:
+                old = f.read()
+        except OSError:
+            old = b""
+        if len(old) == UBOOT_AREA and hashlib.sha256(old).hexdigest() == u.get("prev_sha"):
+            if uboot_read() != old:
+                uboot_write(old)
+            u["state"] = "restored"
+            save(BOOT_JOURNAL, j)
+    k = j.get("kernel") or {}
+    files = [f for f in k.get("files", []) if (f.get("done") or f.get("replacing")) and not f.get("restored")]
+    if files:
+        d = boot_mount()
+        try:
+            for f in reversed(files):
+                p = os.path.join(d, f["name"])
+                if f.get("prev"):
+                    if os.path.exists(p + ".prev"):
+                        os.replace(p + ".prev", p)
+                else:
+                    try:
+                        os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                f["restored"] = True
+                save(BOOT_JOURNAL, j)
+        finally:
+            boot_umount()
+    for f in reversed(k.get("modules", [])):
+        if f.get("restored") or not (f.get("done") or f.get("replacing")):
+            continue
+        rel = f["path"].lstrip("/")
+        p = os.path.join(MODULES_ROOT, rel)
+        keep = os.path.join(BOOT_PREV, rel)
+        if f.get("prev"):
+            if os.path.exists(keep):
+                os.replace(keep, p)
+        else:
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+        f["restored"] = True
+        save(BOOT_JOURNAL, j)
+    release = k.get("release")
+    if release and "/" not in release:
+        top = os.path.join(MODULES_ROOT, "lib", "modules", release)
+        if os.path.isdir(top) and not any(fs for _, _, fs in os.walk(top)):
+            shutil.rmtree(top, ignore_errors=True)
+    os.sync()
 
 
 def apply(m):
@@ -605,23 +943,102 @@ def undo(journal):
 
 
 def cmd_install(args):
-    if not args:
+    flags = [a for a in args if a.startswith("--")]
+    rest = [a for a in args if not a.startswith("--")]
+    if any(f not in ("--kernel", "--uboot") for f in flags):
+        raise Fail("install takes --kernel and --uboot")
+    if not rest:
         raise Fail("install needs the bundle's path")
-    bundle = args[0]
+    kernel, uboot = "--kernel" in flags, "--uboot" in flags
+    bundle = rest[0]
     if load(JOURNAL, {}).get("state") == "applying":
         raise Fail("an interrupted install must be rolled back first")
+    if (kernel or uboot) and load(BOOT_JOURNAL, {}).get("state") == "applying":
+        raise Fail("an interrupted kernel or U-Boot install must be undone first (boot-check)")
+    if kernel or uboot:
+        sd_card_check()                 # before anything: only the SD card the radio started from
     progress("verify")
-    m = stage(bundle)
+    m = stage(bundle, kernel, uboot)
     try:
         note = funnel_off_before(m["version"], "not installed")     # an older version's bundle (#58)
     except Fail:
         shutil.rmtree(os.path.join(WORK, "stage"), ignore_errors=True)
+        shutil.rmtree(os.path.join(WORK, "stage-boot"), ignore_errors=True)
         raise
-    apply(m)
+    # The SD card's parts first, each undone when a later step fails: a failure leaves nothing changed
+    j, said = None, ""
+    if kernel or uboot:
+        j = {"version": m["version"], "from": running_version(), "state": "applying", "started": time.time()}
+        save(BOOT_JOURNAL, j)
+        try:
+            if kernel:
+                boot_kernel(m, j)
+            if uboot:
+                boot_uboot(m, j)
+        except BaseException:
+            boot_undo(j)
+            j["state"] = "rolled back"
+            save(BOOT_JOURNAL, j)
+            shutil.rmtree(os.path.join(WORK, "stage"), ignore_errors=True)
+            raise
+        finally:
+            shutil.rmtree(os.path.join(WORK, "stage-boot"), ignore_errors=True)
+        j["state"] = "done"
+        save(BOOT_JOURNAL, j)
+        said = " (" + " and ".join((["the kernel"] if kernel else []) + (["U-Boot"] if uboot else [])) + \
+            " on the SD card: from the next power-on)"
+    try:
+        apply(m)
+    except BaseException:
+        if j:
+            boot_undo(j)
+            j["state"] = "rolled back"
+            save(BOOT_JOURNAL, j)
+        raise
     save(LAST, {"result": "installed", "version": m["version"], "when": time.time()})
     progress("done")
     restart_apps()
-    return f"ok {m['version']}{note}"
+    return f"ok {m['version']}{note}{said}"
+
+
+def cmd_bundle_info(args):
+    """What a downloaded bundle carries for the SD card, for the question before it is applied: its version, and
+    whether its kernel set and its U-Boot differ from the card's own (kernel, uboot). Both false when the radio did
+    not start from an SD card: nothing would be written there"""
+    if not args:
+        raise Fail("bundle-info needs the bundle's path")
+    m = bundle_manifest(args[0])
+    b = boot_section(m)
+    out = {"version": m["version"], "sd": True, "kernel": False, "uboot": False,
+           "kernel_release": str((b.get("kernel") or {}).get("release", ""))}
+    try:
+        sd_card_check()
+    except Fail:
+        out["sd"] = False
+        return out
+    if b.get("kernel"):
+        d = boot_mount(ro=True)
+        try:
+            out["kernel"] = any(_sha_file(os.path.join(d, e["name"])) != e["sha256"] for e in b["kernel"]["files"])
+        finally:
+            boot_umount()
+    if b.get("uboot"):
+        u = b["uboot"]
+        out["uboot"] = hashlib.sha256(uboot_read(int(u["size"]))).hexdigest() != u["sha256"]
+    return out
+
+
+def cmd_boot_rollback(args):
+    """The kernel set, its modules and U-Boot that the last install --kernel/--uboot replaced, back on the SD card,
+    from the next power-on (nothing here reboots)"""
+    j = load(BOOT_JOURNAL)
+    if not j or j.get("state") != "done":
+        raise Fail("no kernel or U-Boot install to go back from")
+    sd_card_check()
+    boot_undo(j)
+    j["state"] = "rolled back"
+    save(BOOT_JOURNAL, j)
+    return "ok the kernel and U-Boot before are back on the SD card: from the next power-on"
 
 
 def cmd_upgrade(args):
@@ -661,6 +1078,17 @@ def cmd_confirm(args):
 
 
 def cmd_boot_check(args):
+    # The SD card's kernel or U-Boot being written when the power went (the radio started all the same): put back
+    # what the card had, so the next start is the one it was before
+    bj = load(BOOT_JOURNAL)
+    if bj and bj.get("state") == "applying":
+        try:
+            sd_card_check()
+            boot_undo(bj)
+        except Fail:
+            pass
+        bj["state"] = "rolled back"
+        save(BOOT_JOURNAL, bj)
     journal = load(JOURNAL)
     if journal and journal.get("state") == "applying":   # power went during the swap
         undo(journal)
@@ -723,8 +1151,11 @@ def cmd_status(args):
             prog = f.read().strip()
     except OSError:
         prog = ""
+    bj = load(BOOT_JOURNAL) or {}
     return {"running": running_version(), "pending": load(PENDING), "last": last_state(), "progress": prog,
-            "image": image_state()}
+            "image": image_state(),
+            "boot": {"state": bj.get("state"), "version": bj.get("version"),
+                     "kernel": bool(bj.get("kernel")), "uboot": (bj.get("uboot") or {}).get("state")} if bj else None}
 
 
 def take_lock():
@@ -745,7 +1176,8 @@ def take_lock():
 def main(argv):
     cmds = {"status": cmd_status, "check": cmd_check, "download": cmd_download, "install": cmd_install,
             "upgrade": cmd_upgrade, "rollback": cmd_rollback, "confirm": cmd_confirm, "boot-check": cmd_boot_check,
-            "fault": cmd_fault, "notice": cmd_notice}
+            "fault": cmd_fault, "notice": cmd_notice, "bundle-info": cmd_bundle_info,
+            "boot-rollback": cmd_boot_rollback}
     if not argv or argv[0] not in cmds:
         print("error usage: x6100-update " + "|".join(cmds))
         return 1

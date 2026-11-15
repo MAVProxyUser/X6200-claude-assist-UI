@@ -137,13 +137,18 @@ static void announced_set(const char *v) {
 
 enum { UW_IDLE, UW_FETCHING, UW_ASKING, UW_INSTALLING };
 enum { PICK_YES, PICK_NO, PICKS };
+/* What the bundle also carries for the SD card the radio started from, offered as a tick box each when it differs
+ * from the card's own (x6100-update bundle-info): unticked, nothing of it is written */
+enum { OPT_KERNEL, OPT_UBOOT, OPTS };
 
 static int         uw = UW_IDLE;
-static char        uw_ver[24], uw_commit[48], uw_md5[40];
+static char        uw_ver[24], uw_commit[48], uw_md5[40], uw_krel[32];
 static lv_obj_t   *box, *btn[PICKS];
+static lv_obj_t   *opt_row[OPTS];   /* a tick box's row, NULL when not offered */
+static bool        opt_offer[OPTS], opt_on[OPTS];
 static lv_obj_t   *back;            /* focused before the box took the keys */
 static bool        back_editing, picked;
-static int         sel = PICK_NO;
+static int         sel;             /* the item chosen: the offered tick boxes, then Yes, then No */
 
 /* A box's width: 640 (700 VISION), narrower on a screen turned to portrait (the Sentry's G: 480 wide) */
 static lv_coord_t box_w(void) {
@@ -152,14 +157,50 @@ static lv_coord_t box_w(void) {
     return w < room ? w : room;
 }
 
-static void show_sel(void) {
-    for (int i = 0; i < PICKS; i++) {
-        bool on = i == sel;
+/* The items the MFK goes through: the tick boxes offered, then Yes and No */
+static int n_opts(void) {
+    int n = 0;
 
-        lv_obj_set_style_bg_color(btn[i], on ? TC(sel_bg) : TC(chip), 0);
-        lv_obj_set_style_border_color(btn[i], on ? TC(sel_border) : TC(popup_border), 0);
-        lv_obj_set_style_border_width(btn[i], on ? 2 : 1, 0);
-        lv_obj_set_style_text_color(lv_obj_get_child(btn[i], 0), on ? TC(sel_text) : TC(text), 0);
+    for (int i = 0; i < OPTS; i++) n += opt_offer[i];
+    return n;
+}
+
+static lv_obj_t *item(int i, int *opt) {
+    *opt = -1;
+    for (int k = 0; k < OPTS; k++)
+        if (opt_offer[k] && i-- == 0) {
+            *opt = k;
+            return opt_row[k];
+        }
+    return i >= 0 && i < PICKS ? btn[i] : NULL;
+}
+
+static void opt_text(int k) {
+    static const char *const what[OPTS] = {"the kernel", "the bootloader (U-Boot)"};
+
+    if (!opt_row[k]) return;
+    if (k == OPT_KERNEL && uw_krel[0])
+        lv_label_set_text_fmt(lv_obj_get_child(opt_row[k], 0), "[%s] Also update %s on the SD card (%s)",
+                              opt_on[k] ? "X" : " ", what[k], uw_krel);
+    else
+        lv_label_set_text_fmt(lv_obj_get_child(opt_row[k], 0), "[%s] Also update %s on the SD card",
+                              opt_on[k] ? "X" : " ", what[k]);
+}
+
+static void show_sel(void) {
+    int n = n_opts() + PICKS;
+
+    for (int i = 0; i < n; i++) {
+        int       k;
+        lv_obj_t *o  = item(i, &k);
+        bool      on = i == sel;
+
+        if (!o) continue;
+        lv_obj_set_style_bg_color(o, on ? TC(sel_bg) : TC(chip), 0);
+        lv_obj_set_style_border_color(o, on ? TC(sel_border) : TC(popup_border), 0);
+        lv_obj_set_style_border_width(o, on ? 2 : 1, 0);
+        lv_obj_set_style_text_color(lv_obj_get_child(o, 0), on ? TC(sel_text) : TC(text), 0);
+        if (k >= 0) opt_text(k);
     }
 }
 
@@ -174,6 +215,7 @@ static void box_close(void) {
     lv_obj_del(box);
     box = NULL;
     for (int i = 0; i < PICKS; i++) btn[i] = NULL;
+    for (int i = 0; i < OPTS; i++) opt_row[i] = NULL;
     back = NULL;
 }
 
@@ -225,14 +267,21 @@ static void prog_timer_cb(lv_timer_t *t) {
     if (fscanf(f, "%15s %ld %ld", step, &got, &total) < 1) step[0] = '\0';
     fclose(f);
     if (!strcmp(step, "verify")) {
-        pct = total > 0 ? (int)(45 * got / total) : 0;
+        pct = total > 0 ? (int)(40 * got / total) : 0;
         snprintf(s, sizeof(s), "Checking each file against the release's checksum: %ld of %ld", got, total);
+    } else if (!strcmp(step, "kernel")) {
+        pct = 40 + (total > 0 ? (int)(15 * got / total) : 0);
+        snprintf(s, sizeof(s), "Writing the kernel to the SD card, the old one kept: %ld of %ld", got, total);
+    } else if (!strcmp(step, "uboot")) {
+        pct = 55 + (int)(5 * got / (total > 0 ? total : 1));
+        snprintf(s, sizeof(s), "Writing the bootloader to the SD card, then reading it back to check");
     } else if (!strcmp(step, "install")) {
-        pct = 45 + (total > 0 ? (int)(50 * got / total) : 0);
+        pct = 60 + (total > 0 ? (int)(35 * got / total) : 0);
         snprintf(s, sizeof(s), "Putting the new files in place, the old ones kept: %ld of %ld", got, total);
     } else if (!strcmp(step, "done")) {
         pct = 100;
-        snprintf(s, sizeof(s), "Installed. The radio's software restarts now");
+        snprintf(s, sizeof(s), "Installed. The radio's software restarts now%s",
+                 opt_on[OPT_KERNEL] || opt_on[OPT_UBOOT] ? "; the SD card's part from the next power-on" : "");
     } else {
         snprintf(s, sizeof(s), "Unpacking the bundle...");
     }
@@ -311,7 +360,9 @@ static void install_done(const char *out, int status, void *user) {
     uw = UW_IDLE;           /* "ok": the software restarts, this GUI with it; anything else is why not */
     if (strncmp(out, "ok", 2) == 0) {
         if (pbox) {
-            lv_label_set_text(p_step, "Installed. The radio's software restarts now");
+            lv_label_set_text_fmt(p_step, "Installed. The radio's software restarts now%s",
+                                  opt_on[OPT_KERNEL] || opt_on[OPT_UBOOT] ? "; the SD card's part from the next "
+                                                                            "power-on" : "");
             lv_bar_set_value(p_bar, 100, LV_ANIM_OFF);
         }
         return;
@@ -331,12 +382,13 @@ static void pick_async(void *arg) {
     if (!box) return;
     box_close();
     announced_set(uw_ver);
-    if (sel == PICK_YES) {
-        char cmd[96];
+    if (sel == n_opts() + PICK_YES) {
+        char cmd[128];
 
         uw = UW_INSTALLING;
         prog_open();                    /* what it is doing, step by step, till the restart */
-        snprintf(cmd, sizeof(cmd), UPD_CTL " install " BUNDLE);
+        snprintf(cmd, sizeof(cmd), UPD_CTL " install " BUNDLE "%s%s", opt_on[OPT_KERNEL] ? " --kernel" : "",
+                 opt_on[OPT_UBOOT] ? " --uboot" : "");
         sh_run(cmd, install_done, NULL);
     } else {
         uw = UW_IDLE;
@@ -344,6 +396,7 @@ static void pick_async(void *arg) {
     }
 }
 
+/* Yes or No, item i (after the tick boxes) */
 static void pick(int i) {
     lv_indev_t *indev = lv_indev_get_act();
 
@@ -353,6 +406,21 @@ static void pick(int i) {
     show_sel();
     if (indev) lv_indev_wait_release(indev);   /* the key that answered is still down (tci_ask.c) */
     lv_async_call(pick_async, NULL);
+}
+
+/* Item i pressed: a tick box ticked or unticked, Yes or No answered */
+static void activate(int i) {
+    int k;
+
+    if (picked) return;
+    item(i, &k);
+    if (k >= 0) {
+        opt_on[k] = !opt_on[k];
+        sel       = i;
+        show_sel();
+        return;
+    }
+    pick(i);
 }
 
 static void key_cb(lv_event_t *e) {
@@ -368,13 +436,13 @@ static void key_cb(lv_event_t *e) {
             break;
         case LV_KEY_RIGHT:
         case LV_KEY_DOWN:
-            if (!picked && sel < PICKS - 1) {
+            if (!picked && sel < n_opts() + PICKS - 1) {
                 sel++;
                 show_sel();
             }
             break;
-        case LV_KEY_ENTER: pick(sel); break;
-        case LV_KEY_ESC: pick(PICK_NO); break;
+        case LV_KEY_ENTER: activate(sel); break;
+        case LV_KEY_ESC: pick(n_opts() + PICK_NO); break;
         case KEY_VOL_LEFT_EDIT:
         case KEY_VOL_LEFT_SELECT: radio_change_vol(-1); break;
         case KEY_VOL_RIGHT_EDIT:
@@ -388,11 +456,19 @@ static void box_click_cb(lv_event_t *e) {
     lv_indev_t *indev = lv_indev_get_act();
 
     (void)e;
-    if (indev && lv_indev_get_type(indev) == LV_INDEV_TYPE_ENCODER) pick(sel);
+    if (indev && lv_indev_get_type(indev) == LV_INDEV_TYPE_ENCODER) activate(sel);
 }
 
 static void btn_click_cb(lv_event_t *e) {
-    pick((int)(intptr_t)lv_event_get_user_data(e));
+    pick(n_opts() + (int)(intptr_t)lv_event_get_user_data(e));
+}
+
+/* A tick box's row touched: ticked or unticked */
+static void opt_click_cb(lv_event_t *e) {
+    int k = (int)(intptr_t)lv_event_get_user_data(e), i = 0;
+
+    for (int j = 0; j < k; j++) i += opt_offer[j];
+    activate(i);
 }
 
 static void ask(void) {
@@ -403,8 +479,9 @@ static void ask(void) {
     box_close();
     backlight_tick();       /* the screen lit: the question is seen */
     uw     = UW_ASKING;
-    sel    = PICK_NO;       /* a press meant for something else applies nothing */
+    sel    = n_opts() + PICK_NO;     /* a press meant for something else applies nothing */
     picked = false;
+    for (int k = 0; k < OPTS; k++) opt_on[k] = false;       /* the SD card's parts: only when ticked */
 
     box = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(box);
@@ -437,6 +514,34 @@ static void ask(void) {
     lv_label_set_text_fmt(obj, "Version  %s\nCommit   %s\nMD5      %s\n%s", uw_ver,
                           uw_commit[0] ? uw_commit : "(GitHub did not say)", uw_md5, update_repo());
 
+    /* what the bundle also carries for the SD card, newer than the card's: a tick box each, unticked */
+    for (int k = 0; k < OPTS; k++) {
+        if (!opt_offer[k]) continue;
+        opt_row[k] = lv_obj_create(box);
+        lv_obj_remove_style_all(opt_row[k]);
+        lv_obj_set_size(opt_row[k], LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_all(opt_row[k], 8, 0);
+        lv_obj_set_style_bg_opa(opt_row[k], LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(opt_row[k], theme_shape.radius_popup, 0);
+        lv_obj_add_flag(opt_row[k], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(opt_row[k], LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(opt_row[k], opt_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)k);
+        obj = lv_label_create(opt_row[k]);
+        lv_obj_set_width(obj, LV_PCT(100));
+        lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(obj, VF(18), 0);
+        opt_text(k);
+    }
+    if (n_opts()) {
+        obj = lv_label_create(box);
+        lv_obj_set_width(obj, LV_PCT(100));
+        lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(obj, VF(16), 0);
+        lv_obj_set_style_text_color(obj, TC(text_dim), 0);
+        lv_label_set_text(obj, "Ticked, it is written to the SD card the radio started from (never the internal "
+                               "memory), the old one kept, and starts at the next power-on.");
+    }
+
     row = lv_obj_create(box);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -460,7 +565,8 @@ static void ask(void) {
     obj = lv_label_create(box);
     lv_obj_set_style_text_font(obj, VF(16), 0);
     lv_obj_set_style_text_color(obj, TC(text_dim), 0);
-    lv_label_set_text(obj, "MFK: choose, press: confirm. Yes restarts the radio's software");
+    lv_label_set_text(obj, n_opts() ? "MFK: choose, press: tick or confirm. Yes restarts the radio's software"
+                                    : "MFK: choose, press: confirm. Yes restarts the radio's software");
     show_sel();
 
     back         = lv_group_get_focused(keyboard_group);
@@ -470,6 +576,16 @@ static void ask(void) {
     lv_obj_add_event_cb(box, box_click_cb, LV_EVENT_CLICKED, NULL);
     lv_group_focus_obj(box);
     lv_group_set_editing(keyboard_group, true);
+}
+
+/* x6100-update bundle-info: {"version": .., "sd": .., "kernel": .., "uboot": .., "kernel_release": ..}, then the
+ * question */
+static void bundle_info_done(const char *out, int status, void *user) {
+    (void)user;
+    opt_offer[OPT_KERNEL] = status == 0 && json_true(out, "kernel");
+    opt_offer[OPT_UBOOT]  = status == 0 && json_true(out, "uboot");
+    json_str(out, "kernel_release", uw_krel, sizeof(uw_krel));
+    ask();
 }
 
 /* The download's end: "<path>" then md5sum's "<md5>  <path>"; anything else, another try at the next look */
@@ -491,7 +607,9 @@ static void fetched(const char *out, int status, void *user) {
         uw = UW_IDLE;
         return;
     }
-    ask();
+    /* what it carries for the SD card, newer than the card's own: offered in the question (an updater without
+     * bundle-info, or a radio not started from the SD card: nothing offered) */
+    sh_run(UPD_CTL " bundle-info " BUNDLE, bundle_info_done, NULL);
 }
 
 static void watch_cb(lv_timer_t *t) {

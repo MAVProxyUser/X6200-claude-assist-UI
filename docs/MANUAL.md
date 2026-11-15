@@ -13,7 +13,7 @@ Settings. Button and option names are written as the radio shows them.
 
 - [Getting started](#getting-started): [first-start guide](#first-start-guide), [first steps](#first-steps), [setting up the transmitter](#setting-up-the-transmitter), [buttons and knobs](#buttons-and-knobs), [hand mic](#hand-mic), [keyboard](#keyboard) ([mouse](#mouse), [quick QSO log](#quick-qso-log))
 - [The Sentry](#the-sentry) (this fork, X6200): [A and B](#a-and-b-the-spectrum-screens), [SCAN CFG](#scan-cfg), [C LOG](#c-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [AIRSPACE](#airspace)
-- [Updating the firmware](#updating-the-firmware): [the X6200's base firmware from OpenX6X00](#the-x6200s-base-firmware-from-openx6x00)
+- [Updating the firmware](#updating-the-firmware): [the SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot), [the X6200's base firmware from OpenX6X00](#the-x6200s-base-firmware-from-openx6x00)
 - [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
 - [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab)
 - [Transmitting](#transmitting): [amateur bands only](#amateur-bands-only), [no TX without data from the base](#no-tx-without-data-from-the-base), [TX shift](#tx-shift), [transverter TX power limit](#transverter-tx-power-limit), [SWR scan and the tuner](#swr-scan-and-the-tuner), [TUNE for an external tuner](#tune-for-an-external-tuner), [digital-mode TX level](#digital-mode-tx-level), [recording voice messages](#recording-voice-messages), [ALC in CW](#alc-in-cw), [PA bias](#pa-bias-x6200), [register 32](#register-32-x6200)
@@ -850,6 +850,15 @@ web configurator (System > Update).
   either. Yes installs it as Install below does; No leaves it for Settings >
   Info > Update and does not ask about that version again. A release that wants
   a newer card image is only said in a message: the bundle alone cannot bring it.
+  After Yes a box shows what it is doing, step by step with a bar, till the
+  radio software restarts.
+- **The SD card's kernel and bootloader, when ticked.** A bundle can also carry
+  the kernel (with its modules) and U-Boot: when they differ from what the SD
+  card has, the box shows a tick box for each, unticked: "Also update the
+  kernel on the SD card (6.1.x)", "Also update the bootloader (U-Boot) on the
+  SD card". The MFK goes through them before Yes and No; a press (or a touch)
+  ticks or unticks. Unticked, nothing of them is written. See
+  [The SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot).
 
 - Check asks GitHub for the latest release of the repository the image was
   built from (`/usr/share/x6100/update-repo`: GitHub Actions' own repository,
@@ -933,9 +942,10 @@ web configurator (System > Update).
   its own after upstream's, `v0.3.9.1`, `v0.3.9.2`, so the radio sees each as
   newer); GitHub builds both radios' images and bundles and makes the
   release with them.
-- What the updater cannot change comes with a card image: the kernel, its
-  modules (the WiFi driver), U-Boot, the partition layout. The radio says when
-  a release has a new card image for it:
+- What the updater cannot change comes with a card image: the partition
+  layout and the root filesystem's packages; the kernel, its modules (the WiFi
+  driver) and U-Boot too unless ticked as below. The radio says when a release
+  has a new card image for it:
   - Check: "vX is available, with a new card image", and a message saying what
     the image brings. Install still updates the radio software; the image is
     written when convenient.
@@ -951,6 +961,50 @@ web configurator (System > Update).
     `/etc/openx6x00-image`, which no update touches, and each version lists the
     level it wants in `/usr/share/x6100/image-required`. Images up to v0.3.3
     have no stamp and count as level 1.
+
+### The SD card's kernel and U-Boot
+
+From the bundles built after v0.3.12.18, an update also carries what the SD
+card has outside the root filesystem: the kernel set of its boot partition
+(`zImage`, `sun8i-r16-<model>.dtb`, `boot.scr`) with the kernel's modules
+(`/lib/modules/<release>/`), and U-Boot (raw at the card's byte 8 KiB, in the
+1016 KiB before the boot partition). The radio installs them only when asked:
+the update box's tick boxes, or `x6100-update install <bundle> --kernel
+--uboot` over SSH. Settings > Info > Update and the web Update page update the
+radio software only.
+
+- **Only the SD card the radio started from.** The card must say it is an SD
+  card (`mmcblk0`, "SD" in sysfs), the radio must have started with its root
+  on it (`root=/dev/mmcblk0p2`), and its boot partition must start at 1 MiB or
+  after. Otherwise nothing is written and the update says why. The internal
+  eMMC (Xiegu's own system) and its boot areas are never written.
+- **Checked before anything changes.** Each file is checked against the
+  bundle's SHA-256 list before anything is written, as the radio software's
+  are; a bundle that wants a file anywhere but the boot partition or
+  `/lib/modules/` is refused.
+- **The kernel**: its modules go into `/lib/modules` first, then each file of
+  the boot partition is written beside the old one, synced and renamed over it,
+  the old one kept as `<name>.prev` (the room is checked first).
+- **U-Boot**: the 1016 KiB it takes are saved whole first
+  (`/var/lib/x6100-update/uboot-prev.bin`), then the new one is written (with
+  zeros to the area's end, as the card image has it), read back from the card
+  and compared. If it does not read back as written, the old one is put back.
+- **Nothing half done**: the card's parts go first, and when a later step
+  fails (U-Boot not read back, the radio software's install) everything is put
+  back as it was: nothing changed. Every step is journalled
+  (`/var/lib/x6100-update/boot-journal.json`): if the power goes while they are
+  written and the radio still starts, the next start puts the card back as it
+  was.
+- **From the next power-on.** Nothing reboots the radio: the new kernel and
+  U-Boot start the next time it is switched on (on the X6200 `reboot` switches
+  it off).
+- **Going back**: `x6100-update boot-rollback` over SSH puts the kernel set,
+  its modules and U-Boot the last install replaced back on the card, again
+  from the next power-on. A radio that no longer starts from its card at all:
+  on a computer, rename `zImage.prev` (and the other `.prev` files) on the
+  card's BOOT partition over the new ones, or write the card image again. The
+  updater's `x6100-update rollback` (the web page's button) takes back the
+  radio software only, never the card's parts.
 
 ### The X6200's base firmware from OpenX6X00
 

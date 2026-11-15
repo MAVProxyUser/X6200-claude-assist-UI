@@ -2,13 +2,15 @@
 # updater's own code on a folder of its own under build/tmp for each case. The start loop's step back, the one of a
 # version that could not use the settings file, the one by hand and the one of an install cut short: the reason and
 # the sentence in last.json, "notice" giving it once, "status" giving it, and last.json as earlier updaters wrote it.
-# See rollback_test.py for the cases. mkbundle.py beside it makes the update bundle; it is not tested here.
-RUN = mkdir -p build/tmp && TMPDIR=$(CURDIR)/build/tmp python3 -I -B rollback_test.py
+# See rollback_test.py for the cases. boot_test.py: the SD card's kernel and U-Boot (install --kernel/--uboot,
+# bundle-info, boot-rollback, boot-check) against a card of its own (a file, folders), with mkbundle.py's boot part.
+RUN = mkdir -p build/tmp && TMPDIR=$(CURDIR)/build/tmp python3 -I -B
 
 all: test
 
 test:
-	$(RUN)
+	$(RUN) rollback_test.py
+	$(RUN) boot_test.py
 
 clean:
 	rm -rf build

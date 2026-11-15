@@ -526,8 +526,10 @@ FT8LIB_STAMP=$BR/build/build/ft8lib-$FT8LIB_VER/.stamp_target_installed
 [ "$(ls -t $BR/build/build/ft8lib-*/.stamp_target_installed | head -1)" = $FT8LIB_STAMP ] ||
     { echo "ft8_lib $FT8LIB_VER: another version was installed in target/ after it (make ft8lib-dirclean, build again)"; exit 1; }
 echo "   ft8_lib ${FT8LIB_VER:0:7}: /usr/lib/libft8.so $(sha256sum $BR/build/target/usr/lib/libft8.so | cut -c1-12)"
+# The SD card's kernel set, its modules and U-Boot go in too (--boot-dir), in the manifest's "boot" part: the radio
+# installs them only when asked (its update question's checkboxes; x6100-update install --kernel/--uboot)
 python3 $GUI/tools/update/mkbundle.py --target $BR/build/target --manifest $(ls -d $BR/build/build/$GUI_PKG-*/install_manifest.txt | head -1) \
-    --version $VER --model $MODEL --out $BR/build/images/$OUT-v$VER-update.tar.gz
+    --version $VER --model $MODEL --out $BR/build/images/$OUT-v$VER-update.tar.gz --boot-dir $BR/build/images
 
 cp $BR/build/images/sdcard.img $BR/build/images/$OUT-local-sdcard.img
 ls -la $BR/build/images/$OUT-local-sdcard.img

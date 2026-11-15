@@ -402,3 +402,18 @@ Winlink is used from (the #153 replies of 3 and 4 November).
   copyright assertions", plus NTIA/ITS work). The same data comes in `voacapl`'s itshfbc, so either route ships it:
   settle it before an image carries it.
 - **Then** x6100-winlink sets the engine when the program is in the image, instead of `disabled`.
+
+## Updates: an A/B partition for the firmware binaries (later, to explore)
+
+The owner's idea (14 November 2026), for later: the radio's firmware binaries (the GUI, the web server, the
+helpers, their libraries, maybe the kernel set) on two partitions of the SD card, A and B, the update written
+whole to the one not running and the start switched over to it only once it came up, the other kept as it was to
+go back to. The configuration and everything of the user's (params.db, logs, recordings, `/mnt`) live elsewhere
+and stay as they are on both. What it would bring over today's in-place update (x6100-update: each file checked,
+swapped in with the old one kept, journalled, taken back after three failed starts): files a newer version no
+longer ships go with the old partition (today they stay behind), a version is always whole on its partition, and
+the fallback can include the kernel (U-Boot's boot.scr choosing the partition, with a boot counter). To look at:
+the card's layout (a second root partition: room on the 32 GB cards, a new card image for the change), U-Boot's
+environment on the card for the choice and the counter, how the GUI's settings and the web server's state are
+found from either, what the X6100's smaller cards allow, and the image-required levels.
+
