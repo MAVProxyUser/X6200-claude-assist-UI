@@ -660,6 +660,17 @@ last seconds, the strongest signals named over it and the screen's channel brack
 - **The boxes**: RECEIVER (the radio, and what the speaker plays: `HEARD: X6200`, `RTL` or `BOTH`), TUNED (the
   frequency, the span and the MFK's step), BAND (A: the band the dial is in; B: PRESET, the preset or D's band) and
   SIGNALS (how many, the strongest; A adds its mode, B the stick's gain).
+- **RDS on B**: while B's channel is a broadcast FM one (87.5 to 108 MHz, wide FM), the stick's daemon decodes the
+  station's RDS (RBDS in North America) from its multiplex, whether it is heard or not
+  ([tools/rtlspec/rds.c](../tools/rtlspec/rds.c)). TUNED's second line then names the station, `WVMX ALY TOP`: in
+  the Americas (the band plan's region 2 and the US plans) the call letters its PI code stands for, then its
+  8-character name as it sends it (many stations scroll a title through it, 8 characters at a time); elsewhere the
+  name alone, `PI 54A8` until it came. A line at the top of the stick's history (B, and the stick's half of A) adds the
+  channel, the programme type (`ADULT HITS`, RBDS's or RDS's list), `TRAFFIC` during a traffic announcement, and the
+  RadioText under it once a whole one came (`CARSON DALY TOP 30 COUNTDOWN`). Another channel forgets the last
+  station's. The X6200 cannot show RDS: its base gives the GUI the audio alone, 44.1 kHz, and RDS is at 57 kHz in the
+  multiplex the base never sends. A station with RDS needs a decent signal: on the stock whip WVMX 107.9 decoded at
+  once, a weak one shows nothing.
 - **F1 SCAN** sweeps the band end to end: A 360 kHz at a time, B a picture at a time (the scans' DWELL, 2 s, set by
   C's F5 or SCAN CFG's), each
   a little overlapped, from the bottom again past the top; a band narrower than the picture stays in its middle.

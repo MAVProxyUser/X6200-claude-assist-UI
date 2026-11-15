@@ -70,7 +70,7 @@ cp "$R/include/rtl-sdr.h" "$R/include/rtl-sdr_export.h" "$B/out/include/"
 $CC $CF -c -o "$B/out/convenience.o" "$R/src/convenience/convenience.c"
 $CC $CF -o "$B/out/bin/rtl_test" "$R/src/rtl_test.c" "$B/out/convenience.o" "$B/out/lib/librtlsdr.a" $LD -lusb-1.0 -lpthread -lm
 # x6x00-rtlspec, the Sentry's VHF/UHF spectrum (tools/rtlspec)
-$CC $CF -O3 -I "$TOP/tools/rtlspec" -o "$B/out/bin/x6x00-rtlspec" "$TOP/tools/rtlspec/rtlspec.c" "$TOP/tools/rtlspec/same.c" \
+$CC $CF -O3 -I "$TOP/tools/rtlspec" -o "$B/out/bin/x6x00-rtlspec" "$TOP/tools/rtlspec/rtlspec.c" "$TOP/tools/rtlspec/same.c" "$TOP/tools/rtlspec/rds.c" \
     "$B/out/lib/librtlsdr.a" $LD -lusb-1.0 -lpthread -lm
 
 # dump1090-fa: ARCH armv7l picks its NEON DSP flavours for the radio's Cortex-A7

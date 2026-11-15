@@ -76,6 +76,8 @@ static int             cmd_fd = -1;
 /* SAME alerts from the watched channel (NOAA Weather Radio): the last one, also kept in ALERT_LOG */
 #define ALERT_LOG "/mnt/wx_alerts.log"
 static atomic_llong    watch_hz;
+static atomic_llong    rds_hz;          /* the channel decoded for RDS, 0 none */
+static rtl_rds_t       rds_now;         /* what came for it, under lock */
 static char            alert[300];
 static time_t          alert_at;
 static uint32_t        alert_seq;
@@ -329,6 +331,10 @@ static void *spec_thread(void *arg) {
                 snprintf(cmd, sizeof(cmd), "w %lld\n", (long long)atomic_load(&watch_hz));
                 say(cmd);
             }
+            if (atomic_load(&rds_hz)) {
+                snprintf(cmd, sizeof(cmd), "d %lld\n", (long long)atomic_load(&rds_hz));
+                say(cmd);
+            }
             if (atomic_load(&listen_mode)) {
                 snprintf(cmd, sizeof(cmd), "l %lld %d\n", (long long)atomic_load(&listen_hz),
                          atomic_load(&listen_mode));
@@ -417,6 +423,35 @@ static void *spec_thread(void *arg) {
             memcpy(t, buf + 8, len);
             t[len] = 0;
             take_alert(t);
+            continue;
+        }
+        if (n >= 8 && memcmp(buf, "RRDS", 4) == 0) {   /* "<Hz>|<PI>|<PTY>|<TP>|<TA>|<PS, 8>|<RT>" */
+            uint32_t len;
+            char     t[200], *f[5], *p;
+            int      k = 0;
+
+            memcpy(&len, buf + 4, 4);
+            if (len >= sizeof(t) || len > (uint32_t)(n - 8)) continue;
+            memcpy(t, buf + 8, len);
+            t[len] = 0;
+            for (p = t; k < 5 && (f[k] = p) && (p = strchr(p, '|')); k++) *p++ = 0;
+            if (k < 5 || !p) continue;
+            rtl_rds_t r = {.hz = strtoll(f[0], NULL, 10), .pi = (uint16_t)strtoul(f[1], NULL, 16),
+                           .pty = f[2][0] ? atoi(f[2]) : -1, .tp = atoi(f[3]), .ta = atoi(f[4])};
+
+            if (strlen(p) >= 9 && p[8] == '|') {        /* the name, its 8 characters ('|' among them too) */
+                memcpy(r.ps, p, 8);
+                p += 9;
+            } else if (*p == '|') {
+                p++;
+            }
+            snprintf(r.rt, sizeof(r.rt), "%s", p);
+            pthread_mutex_lock(&lock);
+            if (r.hz == atomic_load(&rds_hz)) {
+                r.seq   = rds_now.seq + 1;
+                rds_now = r;
+            }
+            pthread_mutex_unlock(&lock);
             continue;
         }
         if (n >= 24 && memcmp(buf, "RSPC", 4) == 0) {
@@ -824,6 +859,32 @@ bool rtl_spectrum_alert(char *text, size_t n, time_t *at, uint32_t *seq) {
         *seq = alert_seq;
         got  = true;
     }
+    pthread_mutex_unlock(&lock);
+    return got;
+}
+
+void rtl_spectrum_rds_watch(int64_t hz) {
+    char cmd[40];
+
+    if (atomic_load(&rds_hz) == hz) return;
+    atomic_store(&rds_hz, hz);
+    pthread_mutex_lock(&lock);
+    uint32_t seq = rds_now.seq + 1;
+
+    memset(&rds_now, 0, sizeof(rds_now));
+    rds_now.pty = -1;
+    rds_now.seq = seq;
+    pthread_mutex_unlock(&lock);
+    snprintf(cmd, sizeof(cmd), "d %lld\n", (long long)hz);
+    say(cmd);
+}
+
+bool rtl_spectrum_rds(rtl_rds_t *out) {
+    bool got;
+
+    pthread_mutex_lock(&lock);
+    *out = rds_now;
+    got  = rds_now.pi && rds_now.hz && rds_now.hz == atomic_load(&rds_hz);
     pthread_mutex_unlock(&lock);
     return got;
 }

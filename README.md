@@ -100,6 +100,15 @@ with the issuing office, the number of areas and the duration in a message. Each
 `/mnt/wx_alerts.log`. The decoder ([tools/rtlspec/same.c](tools/rtlspec/same.c)) votes the header's three copies
 character by character.
 
+### RDS on broadcast FM
+
+While B's channel is a broadcast FM station, its **RDS** (RBDS here) is decoded from the stick's FM multiplex,
+heard or not: the call letters its PI code stands for and its name in B's TUNED box, the programme type and the
+RadioText at the top of the stick's history (`RDS 107.900  WVMX ALY TOP  ADULT HITS` / `CARSON DALY TOP 30
+COUNTDOWN`, off the air on the stock whip). The decoder is [tools/rtlspec/rds.c](tools/rtlspec/rds.c), with a host
+test on a made multiplex, [tools/rtlspec/rds_test.c](tools/rtlspec/rds_test.c). The X6200's own receiver can't: its
+base hands over audio only, below the 57 kHz subcarrier.
+
 ### AIRSPACE
 
 ADS-B aircraft on a scope around you (a USB GPS, else your QTH locator, else the traffic itself), with their calls,

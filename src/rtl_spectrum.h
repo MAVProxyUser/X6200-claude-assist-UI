@@ -89,6 +89,22 @@ void rtl_spectrum_watch(int64_t hz);
  * a count that tells a new one: false when none newer than *seq. Each is also appended to /mnt/wx_alerts.log */
 bool rtl_spectrum_alert(char *text, size_t n, time_t *at, uint32_t *seq);
 
+/* RDS (the daemon's rds.c): that FM broadcast channel's station decoded, 0 none; said again to a daemon started anew */
+void rtl_spectrum_rds_watch(int64_t hz);
+
+typedef struct {
+    int64_t  hz;                /* the channel it came from */
+    uint16_t pi;                /* the station's code */
+    int      pty;               /* its programme type, -1 none yet */
+    bool     tp, ta;
+    char     ps[9];             /* its name, "" until whole */
+    char     rt[65];            /* its RadioText, "" until whole */
+    uint32_t seq;               /* one more at each news */
+} rtl_rds_t;
+
+/* What came for the channel watched; false: nothing yet */
+bool rtl_spectrum_rds(rtl_rds_t *out);
+
 /* The tuner the helper found ("R820T"), "" before */
 void rtl_spectrum_tuner(char *s, size_t n);
 

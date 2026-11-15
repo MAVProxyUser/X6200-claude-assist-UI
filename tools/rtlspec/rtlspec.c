@@ -32,6 +32,8 @@
  *      "RAUD", u32 count, s16 samples[count]       the channel listened to, mono, 44.1 kHz, 50 ms a message
  *      "RSAM", u32 length, the header's text and "|" and the event's name when known
  *                          ("ZCZC-WXR-TOR-039049+0030-3170815-KILN/NWS-|TORNADO WARNING"; "NNNN": a message's end)
+ *      "RRDS", u32 length, "<Hz>|<PI hex>|<PTY>|<TP>|<TA>|<PS>|<RT>"   what the station decoded for RDS sends (rds.c),
+ *                          each time it changes; "<Hz>|||||" at a new channel. PI "" and PTY -1 until they came
  *  A client that does not read misses messages: the stream never waits for it. From the client, a line each:
  *      "r 1", "r 0"        rows wanted, or not
  *      "f <Hz>"            the centre; "s <rate>" the sample rate; "g <tenths of dB>" the gain ("g -1": the AGC)
@@ -39,6 +41,8 @@
  *                          (CIC, order 2) and by 6 (a 63-tap FIR) to 44.1 kHz and demodulated. Only at a sample rate
  *                          that is a multiple of 264.6 kHz: 1058400 or 2116800
  *      "w <Hz>"            watch that channel (narrow FM, NOAA Weather Radio) for SAME alerts (same.c); "w 0" stops
+ *      "d <Hz>"            decode that FM broadcast channel's RDS (rds.c); "d 0" stops. Off the listened channel's
+ *                          own multiplex when it listens there in WFM, else demodulated for it alone
  *      "a" and a file descriptor (SCM_RIGHTS)  the raw samples (unsigned 8-bit I/Q) written to it at 1090 MHz,
  *                          2.4 MS/s and the tuner's top gain, for AIRSPACE's dump1090 ("--ifile -"); no rows or audio
  *                          meanwhile. "a 0", or dump1090 gone: the stick back to what the client asked
@@ -77,6 +81,7 @@
 
 #include <rtl-sdr.h>
 
+#include "rds.h"
 #include "same.h"
 
 #define AVG       8         /* FFTs averaged into a row, at most */
@@ -181,13 +186,17 @@ struct chan {
     int      hist_at, fir_n;
     float    prev_r, prev_i, deemph, dc, avg_mag;
     bool     raw;               /* the demodulated FM as it is, no audio shaping (SAME's tones) */
+    bool     mpx_only;          /* WFM's multiplex only, no audio (RDS's own channel) */
     void   (*out)(float v);     /* each 44.1 kHz sample */
+    void   (*mpx)(float v);     /* WFM: each 264.6 kHz sample of the multiplex, NULL none */
 };
 
 static void listen_out(float v);
 static void watch_out(float v);
+static void rds_mpx(float v);
 static chan_t lis    = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .out = listen_out};
 static chan_t watch  = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .raw = true, .out = watch_out};
+static chan_t rdsc   = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .mpx_only = true, .mpx = rds_mpx};
 #define l_mode lis.mode
 #define l_hz   lis.hz
 
@@ -284,8 +293,39 @@ static void watch_out(float v) {
     }
 }
 
+/* RDS (rds.c): the channel decoded, the multiplex in by 441 samples, what changed to the client */
+static rds_t   *rds;
+static uint64_t rds_hz;
+
+static void rds_say(void) {
+    rds_info_t in;
+    char       text[160];
+    uint8_t    msg[8 + sizeof(text)];
+
+    rds_info(rds, &in);
+    if (in.pi) snprintf(text, sizeof(text), "%llu|%04X|%d|%d|%d|%s|%s", (unsigned long long)rds_hz, in.pi, in.pty,
+                        in.tp, in.ta, in.ps, in.rt);
+    else snprintf(text, sizeof(text), "%llu|||||", (unsigned long long)rds_hz);
+    uint32_t len = (uint32_t)strlen(text);
+
+    memcpy(msg, "RRDS", 4);
+    memcpy(msg + 4, &len, 4);
+    memcpy(msg + 8, text, len);
+    put(msg, 8 + len);
+}
+
+static void rds_mpx(float v) {
+    static float buf[441];
+    static int   n;
+
+    buf[n++] = v;
+    if (n < (int)(sizeof(buf) / sizeof(buf[0]))) return;
+    n = 0;
+    if (rds && rds_feed(rds, buf, sizeof(buf) / sizeof(buf[0]))) rds_say();
+}
+
 /* One sample at 264.6 kHz: into the FIR, every sixth a 44.1 kHz one demodulated (WFM: demodulated here, then the
- * FIR on the audio) */
+ * FIR on the audio; its multiplex to RDS when it decodes this channel) */
 static void at_264k(chan_t *c, float r, float i) {
     if (c->mode == 3) {
         float zr = r * c->prev_r + i * c->prev_i, zi = i * c->prev_r - r * c->prev_i;
@@ -294,6 +334,8 @@ static void at_264k(chan_t *c, float r, float i) {
         c->prev_i = i;
         r = atan2f(zi, zr) * (264600.0f / (2 * (float)M_PI * 75000));    /* +-75 kHz: +-1 */
         i = 0;
+        if (c->mpx) c->mpx(r);
+        if (c->mpx_only) return;
     }
     c->hist_r[c->hist_at] = r;
     c->hist_i[c->hist_at] = i;
@@ -365,8 +407,8 @@ static int  rows_now = 20;
  * through `pend` and taken at the start of its next transfer */
 static pthread_mutex_t pend_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
-    bool     centre, rate, listen, watch;
-    uint64_t centre_hz, listen_hz, watch_hz;
+    bool     centre, rate, listen, watch, rds;
+    uint64_t centre_hz, listen_hz, watch_hz, rds_hz;
     uint32_t rate_sps;
     int      mode;
 } pend;
@@ -540,6 +582,11 @@ static void command(char *line, int fd) {
         pend.watch    = true;
         pend.watch_hz = strtoull(line + 1, NULL, 10);
         pthread_mutex_unlock(&pend_lock);
+    } else if (line[0] == 'd') {          /* "d <Hz>": the FM broadcast channel decoded for RDS, 0 none */
+        pthread_mutex_lock(&pend_lock);
+        pend.rds    = true;
+        pend.rds_hz = strtoull(line + 1, NULL, 10);
+        pthread_mutex_unlock(&pend_lock);
     } else if (line[0] == 'a') {
         feed_set(fd);                   /* -1: "a 0", the samples dump1090's no more */
         fd = -1;
@@ -595,6 +642,8 @@ static void *client_thread(void *arg) {
     pend.mode      = 0;
     pend.watch     = true;
     pend.watch_hz  = 0;
+    pend.rds       = true;
+    pend.rds_hz    = 0;
     pthread_mutex_unlock(&pend_lock);
     return NULL;
 }
@@ -621,7 +670,21 @@ static void commands(uint64_t *centre, bool *fresh) {
     if (pend.watch || ((pend.centre || pend.rate) && watch.hz))
         chan_set(&watch, (pend.watch ? pend.watch_hz : watch.hz) ? 1 : 0, pend.watch ? pend.watch_hz : watch.hz,
                  *centre, rate_now);
-    pend.centre = pend.rate = pend.listen = pend.watch = false;
+    if (pend.rds && pend.rds_hz != rds_hz) {    /* another station: what came from the last one forgotten */
+        rds_hz = pend.rds_hz;
+        if (rds_hz && !rds) rds = rds_new(MID_RATE);
+        if (rds) rds_reset(rds);
+        if (rds_hz) rds_say();
+    }
+    if (pend.rds || pend.listen || pend.centre || pend.rate) {
+        /* RDS off the listened channel's multiplex when it is the same WFM channel, else on a channel of its own */
+        bool shared = rds_hz && lis.mode == 3 && lis.hz == rds_hz;
+
+        lis.mpx = shared ? rds_mpx : NULL;
+        if (shared || !rds_hz) rdsc.mode = 0;
+        else if (pend.rds || pend.centre || pend.rate || rdsc.mode != 3) chan_set(&rdsc, 3, rds_hz, *centre, rate_now);
+    }
+    pend.centre = pend.rate = pend.listen = pend.watch = pend.rds = false;
     pthread_mutex_unlock(&pend_lock);
 }
 
@@ -649,11 +712,12 @@ static void on_samples(unsigned char *buf, uint32_t n, void *ctx) {
         nfft = fill = 0;
         row_left = per_row_now;
         fresh    = true;
-        if (!lis.mode && !watch.mode) return;
+        if (!lis.mode && !watch.mode && !rdsc.mode) return;
     }
     for (uint32_t off = 0; off + 1 < n; off += 2) {
         if (lis.mode) chan_sample(&lis, buf[off], buf[off + 1]);
         if (watch.mode) chan_sample(&watch, buf[off], buf[off + 1]);
+        if (rdsc.mode) chan_sample(&rdsc, buf[off], buf[off + 1]);
         if (!rows) continue;
         /* The first BINS * AVG samples of each row's share go into its FFTs, the rest are passed over */
         if (nfft < AVG) {

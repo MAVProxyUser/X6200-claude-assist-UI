@@ -1751,6 +1751,8 @@ static uint8_t rows_rtl[D3_ROWS][RTL_COLS], rows_hf[D3_ROWS][RTL_COLS];
 
 static lv_img_dsc_t *rtl_frame;
 static lv_obj_t     *rtl_img, *rtl_why_l, *rtl_tick_l[RTL_TICKS], *hf_tick_l[RTL_TICKS], *rtl_peak_l[RTL_PEAKS], *rtl_src_l[2];
+static lv_obj_t     *rds_l;            /* B's channel's RDS, at the top of the stick's history */
+static bool          rds_tuned_note(char *t, size_t n);
 static lv_obj_t     *hf_peak_l[RTL_PEAKS];     /* the X6200's half: A's signals, named */
 static box_t         r_dev, r_tune, r_pre, r_sig;
 static lv_timer_t   *rtl_timer;
@@ -2326,8 +2328,12 @@ static void show_rtl(void) {
     snprintf(t, sizeof(t), "%s MHZ", f);
     opt_set(&r_tune, 0, t, 0);
     static const char *const steps[] = {"12.5K", "25K", "100K", "500K", "1M"};
-    snprintf(t, sizeof(t), "%.1f MHZ / %s", rtl_view_hz() / 1e6, steps[rtl_step]);
-    opt_set(&r_tune, 1, t, 2);
+    if (rds_tuned_note(t, sizeof(t))) {     /* the station on B's channel, by its RDS */
+        opt_set(&r_tune, 1, t, 0);
+    } else {
+        snprintf(t, sizeof(t), "%.1f MHZ / %s", rtl_view_hz() / 1e6, steps[rtl_step]);
+        opt_set(&r_tune, 1, t, 2);
+    }
     opt_set(&r_pre, 0, f_name(), 0);
     if (rtl_scan) {
         char lo[16], hi[16];
@@ -2524,7 +2530,11 @@ static void rtl_listen_turn(int32_t diff) {
     rtl_scan_set(false);                /* a channel chosen by hand: the scan stops there */
     int64_t c = rtl_hz, half = rtl_view_hz() / 2;
 
-    listen_hz = rtl_snap(listen_hz + diff * rtl_step_of(listen_hz));
+    int64_t was = listen_hz;
+
+    listen_hz = rtl_snap(was + diff * rtl_step_of(was));
+    /* at a grid's edge a step can snap back where it was (108.000's 25 kHz down into FM's 100 kHz channels): more */
+    for (int i = 2; listen_hz == was && i <= 8; i++) listen_hz = rtl_snap(was + diff * i * rtl_step_of(was));
     if (listen_hz < RTL_SPEC_MIN_HZ) listen_hz = RTL_SPEC_MIN_HZ;
     if (listen_hz > RTL_SPEC_MAX_HZ) listen_hz = RTL_SPEC_MAX_HZ;
     if (llabs(listen_hz - c) > half * 85 / 100) rtl_tune(listen_hz);
@@ -2844,6 +2854,11 @@ static void build_rtl(lv_obj_t *p) {
     /* which half is which, at the right of each trace */
     rtl_src_l[0] = label(p, &pixel_16, amb, IMG_X + RTL_COLS - 250, iy + 6, 244, LV_TEXT_ALIGN_RIGHT, "");
     rtl_src_l[1] = label(p, &pixel_16, amb, IMG_X + RTL_COLS - 250, iy + 6, 244, LV_TEXT_ALIGN_RIGHT, "");
+    rds_l = label(p, &pixel_16, amb, IMG_X + 6, iy + 6, 0, LV_TEXT_ALIGN_LEFT, "");
+    lv_obj_set_style_bg_color(rds_l, ink, 0);
+    lv_obj_set_style_bg_opa(rds_l, LV_OPA_80, 0);     /* over the history, as it is drawn */
+    lv_obj_set_style_pad_hor(rds_l, 3, 0);
+    lv_obj_add_flag(rds_l, LV_OBJ_FLAG_HIDDEN);
     rtl_hz = param_i_get(cfg_rtl_freq);
     for (int i = RTL_PRESETS - 1; i >= 0; i--)  /* the preset the tuning is in (at, first), if one */
         if (rtl_hz >= rtl_presets[i].lo && rtl_hz <= rtl_presets[i].hi) rtl_preset = i;
@@ -2852,12 +2867,94 @@ static void build_rtl(lv_obj_t *p) {
     rtl_layout();
 }
 
-/* The second source label goes with the stick's half */
+/* The second source label goes with the stick's half, RDS's line at the top of its history */
+static void rds_show(bool now);
+
 static void rtl_labels_place(void) {
     int iy = lv_obj_get_y(rtl_img);
 
     lv_obj_set_y(rtl_src_l[1], iy + p_rtl.y0 + 3);
     lv_obj_set_y(rtl_src_l[0], iy + p_hf.y0 + 3);
+    lv_obj_set_y(rds_l, iy + p_rtl.wf_y0 + 6);
+    rds_show(true);
+}
+
+/* RDS: the station on B's channel when that is a broadcast FM one (WFM), decoded by the stick's daemon (rds.c) whether it
+ * is heard or not. RBDS's call letters and programme types in the Americas (the band plan's region 2, the US plans) */
+static int64_t rds_channel(void) {
+    return listen_hz && rtl_mode_of(listen_hz) == 3 ? listen_hz : 0;      /* WFM: broadcast FM */
+}
+
+static bool rds_rbds(void) {
+    int plan = band_plan_now();
+
+    return plan == BP_PLAN_R2 || plan >= BP_PLAN_US_EXTRA;
+}
+
+static void upper(char *t) {
+    for (; *t; t++) *t = (char)toupper((unsigned char)*t);
+}
+
+/* "WOSU TESTFM12": the call letters (RBDS) and the name, or "PI 7B88" until the name came */
+static bool rds_tuned_note(char *t, size_t n) {
+    rtl_rds_t d;
+    char      call[5] = "", ps[9];
+
+    if (!rtl_spectrum_rds(&d)) return false;
+    if (rds_rbds()) {
+        int pi = d.pi;
+        if (pi >= 0x1000 && pi <= 0x994F) {         /* K from 0x1000, W from 0x54A8 (NRSC-4) */
+            int k = pi >= 0x54A8 ? pi - 0x54A8 : pi - 0x1000;
+            snprintf(call, sizeof(call), "%c%c%c%c", pi >= 0x54A8 ? 'W' : 'K', 'A' + k / 676, 'A' + k % 676 / 26,
+                     'A' + k % 26);
+        }
+    }
+    snprintf(ps, sizeof(ps), "%s", d.ps);
+    for (int i = (int)strlen(ps); i > 0 && ps[i - 1] == ' '; i--) ps[i - 1] = 0;
+    char *p = ps;
+    while (*p == ' ') p++;
+    if (call[0] && *p) snprintf(t, n, "%s %s", call, p);
+    else if (*p) snprintf(t, n, "%s", p);
+    else if (call[0]) snprintf(t, n, "%s", call);
+    else snprintf(t, n, "PI %04X", d.pi);
+    upper(t);
+    return true;
+}
+
+static void rds_show(bool now) {
+    static uint32_t   seq = UINT32_MAX;
+    static const char *const RBDS[32] = {
+        "", "NEWS", "INFORMATION", "SPORTS", "TALK", "ROCK", "CLASSIC ROCK", "ADULT HITS", "SOFT ROCK", "TOP 40",
+        "COUNTRY", "OLDIES", "SOFT", "NOSTALGIA", "JAZZ", "CLASSICAL", "R&B", "SOFT R&B", "LANGUAGE",
+        "RELIGIOUS MUSIC", "RELIGIOUS TALK", "PERSONALITY", "PUBLIC", "COLLEGE", "SPANISH TALK", "SPANISH MUSIC",
+        "HIP HOP", "", "", "WEATHER", "EMERGENCY TEST", "EMERGENCY"};
+    static const char *const RDS[32] = {
+        "", "NEWS", "CURRENT AFFAIRS", "INFORMATION", "SPORT", "EDUCATION", "DRAMA", "CULTURE", "SCIENCE", "VARIED",
+        "POP MUSIC", "ROCK MUSIC", "EASY LISTENING", "LIGHT CLASSICAL", "SERIOUS CLASSICAL", "OTHER MUSIC", "WEATHER",
+        "FINANCE", "CHILDREN'S", "SOCIAL AFFAIRS", "RELIGION", "PHONE IN", "TRAVEL", "LEISURE", "JAZZ", "COUNTRY",
+        "NATIONAL MUSIC", "OLDIES", "FOLK MUSIC", "DOCUMENTARY", "ALARM TEST", "ALARM"};
+    rtl_rds_t d;
+    char      note[32], f[16], line[160];
+    bool      got;
+
+    if (!rds_l) return;
+    got = rtl_spectrum_rds(&d);
+    if (!now && d.seq == seq) return;
+    seq = d.seq;
+    if (scr == SCR_RTL) show_rtl();         /* TUNED's second line */
+    if (!got || !p_rtl.trace_h || (scr != SCR_RTL && scr != SCR_SCAN) || !rds_tuned_note(note, sizeof(note))) {
+        lv_obj_add_flag(rds_l, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    const char *pty = d.pty >= 0 && d.pty < 32 ? (rds_rbds() ? RBDS : RDS)[d.pty] : "";
+
+    fmt_mhz(f, sizeof(f), d.hz, 3);
+    /* two lines at most: a RadioText's 64 characters fit the width on its own */
+    snprintf(line, sizeof(line), "RDS %s  %s%s%s%s%s%s", f, note, pty[0] ? "  " : "", pty, d.ta ? "  TRAFFIC" : "",
+             d.rt[0] ? "\n" : "", d.rt);
+    upper(line);
+    lv_label_set_text(rds_l, line);
+    lv_obj_clear_flag(rds_l, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void rtl_fkey(int k) {
@@ -3953,6 +4050,8 @@ static void blink_cb(lv_timer_t *t) {
     (void)t;
     if (hits_dirty && n % 120 == 0) hits_save();     /* G's log on DATA, a minute at most behind */
     state_keep();                                   /* for a restart of the GUI: gui_state.c */
+    rtl_spectrum_rds_watch(rds_channel());          /* B's FM broadcast channel's RDS */
+    rds_show(false);
     g_scan_step();
     if (scr == SCR_LOG && g_clear_ms && lv_tick_get() - g_clear_ms > 3000) {
         g_clear_ms = 0;
@@ -6536,6 +6635,7 @@ static void destruct_cb(void) {
      * or turns it), and OFF's silence would leave the classic radio and the apps mute. On AIRSPACE, the Sentry's H,
      * OFF stays silent (AIRSPACE lets it go when it closes) */
     rtl_spectrum_mux(false);
+    rtl_spectrum_rds_watch(0);
     rtl_spectrum_listen(0, 0);
     rtl_spectrum_mute(to_airspace && heard == HEAR_OFF);
     to_airspace = false;
