@@ -401,7 +401,7 @@ static const char *const hear_names[] = {"X6200", "RTL", "BOTH", "OFF"};
 
 /* LISTEN's choice as said: the stick's by its kind (RTL, HACKRF, BLADERF) */
 static const char *hear_name(int h) {
-    return h == HEAR_RTL ? rtl_spectrum_dev_tag() : h >= 0 && h < HEAR_N ? hear_name(h) : "";
+    return h == HEAR_RTL ? rtl_spectrum_dev_tag() : h >= 0 && h < HEAR_N ? hear_names[h] : "";
 }
 static int     heard = HEAR_X6200;
 /* What is to be heard: A's or B's LISTEN, C's entry's radio, G's channel's (or what the others kept). heard is that,
