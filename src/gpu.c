@@ -568,7 +568,8 @@ static bool gui_layer(EGLDisplay dpy) {
         return false;
     }
     if (!drm_gui_export(ov, pitch, &g)) {
-        fprintf(stderr, "gpu: no /dev/udmabuf (or no planes): the GUI's layer turned by the processor\n");
+        fprintf(stderr, "gpu: no /dev/udmabuf, not switched on (/mnt/gpu_gui) or no planes: the GUI's layer turned by "
+                        "the processor\n");
         return false;
     }
     for (int i = 0; i < 2; i++) {       /* the overlay's buffers, portrait ARGB */

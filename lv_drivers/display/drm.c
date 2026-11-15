@@ -938,6 +938,13 @@ bool drm_gui_export(int ov_fds[2], uint32_t ov_pitch[2], int *gui_fd) {
     if ((dev = open("/dev/udmabuf", O_RDWR | O_CLOEXEC)) < 0) {
         return false;                   /* a kernel without it: the processor turns the GUI, as before */
     }
+    if (access("/mnt/gpu_gui", F_OK) != 0) {
+        /* Not yet by default: the udmabuf path has not run on a radio (2026-11-15, the kernel with it came after
+         * the code). Switched on by that file until it has */
+        err("udmabuf here, the GPU's GUI layer off until /mnt/gpu_gui exists (not yet tested)");
+        close(dev);
+        return false;
+    }
     mfd = (int) syscall(SYS_memfd_create, "x6100_gui", MFD_ALLOW_SEALING | MFD_CLOEXEC);
     if (mfd < 0 || ftruncate(mfd, (off_t) size) || fcntl(mfd, F_ADD_SEALS, F_SEAL_SHRINK) < 0) {
         err("the GUI's memory for the GPU not made: %s", strerror(errno));
