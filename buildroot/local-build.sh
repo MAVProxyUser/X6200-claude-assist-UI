@@ -344,6 +344,13 @@ if [ $MODEL = x6200 ]; then
         sed -i "/^# ${o%%=*} is not set/d" $KERNEL_DEFCONFIG
         grep -q "^${o%%=*}=" $KERNEL_DEFCONFIG || echo "$o" >> $KERNEL_DEFCONFIG
     done
+    # udmabuf: ordinary memory (a memfd) handed to the GPU as a dma-buf. The GUI's picture is drawn by LVGL in cached
+    # memory; with this the GPU can read it where it is, to turn it and compose it onto the panel with no copy by the
+    # processor (drawn straight into the display's write-combined buffers instead, LVGL's blending reads back and is
+    # slow). Asked for 2026-11-15; nothing uses it yet
+    echo "== Kernel: udmabuf (the GUI's memory shared with the GPU)"
+    sed -i "/^# CONFIG_UDMABUF is not set/d" $KERNEL_DEFCONFIG
+    grep -q "^CONFIG_UDMABUF=" $KERNEL_DEFCONFIG || echo "CONFIG_UDMABUF=y" >> $KERNEL_DEFCONFIG
 fi
 
 echo "== No kernel boot logo"
