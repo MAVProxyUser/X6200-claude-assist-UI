@@ -7,7 +7,8 @@
  *  whatever is on the screen (as tci_ask.c asks): its version, the commit it was built from and the bundle's MD5,
  *  "Apply it?" Yes or No. No is chosen when it opens; the MFK turns the choice and its press confirms, the keyboard's
  *  arrows and Enter do the same, Esc is No, a touch takes a choice. Yes installs it (x6100-update install: the radio's
- *  software restarts); No leaves it for Settings > Info > Update. A release that wants a newer card image is only
+ *  software restarts), what it is doing shown meanwhile in a box with a bar; No leaves it for Settings > Info > Update.
+ *  The boxes fit a screen turned to portrait (the Sentry's G). A release that wants a newer card image is only
  *  said, as before: the bundle alone cannot bring it.
  */
 #include "update_watch.h"
@@ -37,6 +38,7 @@
 #define JSON_MAX     32768                                /* the release notes are in it too, up to 2000 chars */
 #define UPD_CTL      "/usr/sbin/x6100-update"
 #define BUNDLE       BOARD_DATA "/update/bundle.tar.gz"   /* where x6100-update download puts it */
+#define PROGRESS     BOARD_DATA "/update/.progress"       /* x6100-update's step: "<step> <done> <of>" */
 #define VF(n)        (theme_shape.vision ? font_down(&sony_##n, VISION_FONT_STEPS - 1) : &sony_##n)
 
 const char *update_repo(void) {
@@ -143,6 +145,13 @@ static lv_obj_t   *back;            /* focused before the box took the keys */
 static bool        back_editing, picked;
 static int         sel = PICK_NO;
 
+/* A box's width: 640 (700 VISION), narrower on a screen turned to portrait (the Sentry's G: 480 wide) */
+static lv_coord_t box_w(void) {
+    lv_coord_t w = theme_shape.vision ? 700 : 640, room = lv_disp_get_hor_res(NULL) - 24;
+
+    return w < room ? w : room;
+}
+
 static void show_sel(void) {
     for (int i = 0; i < PICKS; i++) {
         bool on = i == sel;
@@ -168,13 +177,153 @@ static void box_close(void) {
     back = NULL;
 }
 
+/* ---- The install, after Yes: what it is doing, in a box with a bar (x6100-update's .progress, read 4 times a
+ * second): the files checked against the release's checksums, then put in place one by one (the old ones kept), then
+ * the restart. A failure is said there (nothing changed) and the box goes after 10 s or a key ---- */
+
+static lv_obj_t   *pbox, *p_step, *p_bar, *p_note;
+static lv_timer_t *p_timer;
+static uint32_t    p_end;           /* a failure said: the box goes 10 s on */
+
+static void prog_close(void) {
+    if (p_timer) lv_timer_del(p_timer);
+    p_timer = NULL;
+    if (!pbox) return;
+    if (lv_group_get_focused(keyboard_group) == pbox && back && lv_obj_is_valid(back) &&
+        lv_obj_get_group(back) == keyboard_group) {
+        lv_group_focus_obj(back);
+        lv_group_set_editing(keyboard_group, back_editing);
+    }
+    lv_obj_del(pbox);
+    pbox = NULL;
+}
+
+static void prog_close_async(void *arg) {
+    (void)arg;
+    prog_close();
+}
+
+static void prog_key_cb(lv_event_t *e) {
+    (void)e;
+    if (uw != UW_INSTALLING) lv_async_call(prog_close_async, NULL);     /* installing: the keys wait */
+}
+
+static void prog_timer_cb(lv_timer_t *t) {
+    FILE *f;
+    char  step[16] = "";
+    long  got = 0, total = 0;
+    int   pct = 0;
+    char  s[96];
+
+    (void)t;
+    backlight_tick();               /* the screen stays lit while it works */
+    if (uw != UW_INSTALLING) {
+        if (p_end && lv_tick_elaps(p_end) > 10000) prog_close();
+        return;
+    }
+    if (!(f = fopen(PROGRESS, "r"))) return;
+    if (fscanf(f, "%15s %ld %ld", step, &got, &total) < 1) step[0] = '\0';
+    fclose(f);
+    if (!strcmp(step, "verify")) {
+        pct = total > 0 ? (int)(45 * got / total) : 0;
+        snprintf(s, sizeof(s), "Checking each file against the release's checksum: %ld of %ld", got, total);
+    } else if (!strcmp(step, "install")) {
+        pct = 45 + (total > 0 ? (int)(50 * got / total) : 0);
+        snprintf(s, sizeof(s), "Putting the new files in place, the old ones kept: %ld of %ld", got, total);
+    } else if (!strcmp(step, "done")) {
+        pct = 100;
+        snprintf(s, sizeof(s), "Installed. The radio's software restarts now");
+    } else {
+        snprintf(s, sizeof(s), "Unpacking the bundle...");
+    }
+    lv_label_set_text(p_step, s);
+    lv_bar_set_value(p_bar, pct, LV_ANIM_OFF);
+}
+
+static void prog_open(void) {
+    const lv_coord_t w = box_w();
+    lv_obj_t        *obj;
+
+    prog_close();
+    backlight_tick();
+    pbox = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(pbox);
+    lv_obj_add_style(pbox, &popup_style, 0);
+    lv_obj_set_size(pbox, w, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(pbox, 16, 0);
+    lv_obj_set_style_pad_row(pbox, 12, 0);
+    lv_obj_set_flex_flow(pbox, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(pbox, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_center(pbox);
+
+    obj = lv_label_create(pbox);
+    lv_obj_set_style_text_font(obj, VF(18), 0);
+    lv_obj_set_style_text_color(obj, TC(text_head), 0);
+    lv_label_set_text(obj, "UPDATE FROM GITHUB");
+
+    obj = lv_label_create(pbox);
+    lv_obj_set_width(obj, LV_PCT(100));
+    lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(obj, VF(26), 0);
+    lv_obj_set_style_text_color(obj, TC(text), 0);
+    lv_label_set_text_fmt(obj, "Applying OpenX6X00 %s", uw_ver);
+
+    p_step = lv_label_create(pbox);
+    lv_obj_set_width(p_step, LV_PCT(100));
+    lv_label_set_long_mode(p_step, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(p_step, VF(18), 0);
+    lv_obj_set_style_text_color(p_step, TC(text), 0);
+    lv_label_set_text(p_step, "Unpacking the bundle...");
+
+    p_bar = lv_bar_create(pbox);
+    lv_obj_set_size(p_bar, LV_PCT(100), 22);
+    lv_bar_set_range(p_bar, 0, 100);
+    lv_bar_set_value(p_bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(p_bar, TC(chip), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(p_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(p_bar, TC(popup_border), LV_PART_MAIN);
+    lv_obj_set_style_border_width(p_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(p_bar, TC(sel_bg), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(p_bar, LV_OPA_COVER, LV_PART_INDICATOR);
+
+    p_note = lv_label_create(pbox);
+    lv_obj_set_width(p_note, LV_PCT(100));
+    lv_label_set_long_mode(p_note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(p_note, VF(16), 0);
+    lv_obj_set_style_text_color(p_note, TC(text_dim), 0);
+    lv_label_set_text(p_note, "Leave the radio on. If the power goes now, the version before comes back by itself at "
+                              "the next start.");
+
+    /* the keys wait while it installs (nothing on the screen under it moves) */
+    back         = lv_group_get_focused(keyboard_group);
+    back_editing = lv_group_get_editing(keyboard_group);
+    lv_group_add_obj(keyboard_group, pbox);
+    lv_obj_add_event_cb(pbox, prog_key_cb, LV_EVENT_KEY, NULL);
+    lv_group_focus_obj(pbox);
+    lv_group_set_editing(keyboard_group, true);
+    p_end   = 0;
+    p_timer = lv_timer_create(prog_timer_cb, 250, NULL);
+}
+
 static void install_done(const char *out, int status, void *user) {
     (void)status;
     (void)user;
     uw = UW_IDLE;           /* "ok": the software restarts, this GUI with it; anything else is why not */
-    if (strncmp(out, "ok", 2) != 0)
-        msg_schedule_long_text_fmt("OpenX6X00 %s not applied: %.80s. Nothing changed.", uw_ver,
-                                   strncmp(out, "error", 5) == 0 ? out + 6 : out);
+    if (strncmp(out, "ok", 2) == 0) {
+        if (pbox) {
+            lv_label_set_text(p_step, "Installed. The radio's software restarts now");
+            lv_bar_set_value(p_bar, 100, LV_ANIM_OFF);
+        }
+        return;
+    }
+    msg_schedule_long_text_fmt("OpenX6X00 %s not applied: %.80s. Nothing changed.", uw_ver,
+                               strncmp(out, "error", 5) == 0 ? out + 6 : out);
+    if (pbox) {
+        lv_label_set_text_fmt(p_step, "Not applied: %.80s", strncmp(out, "error", 5) == 0 ? out + 6 : out);
+        lv_label_set_text(p_note, "Nothing changed: the version running stays. Settings > Info > Update tries again. "
+                                  "A key closes this.");
+        p_end = lv_tick_get() | 1;
+    }
 }
 
 static void pick_async(void *arg) {
@@ -186,7 +335,7 @@ static void pick_async(void *arg) {
         char cmd[96];
 
         uw = UW_INSTALLING;
-        msg_schedule_long_text_fmt("Applying OpenX6X00 %s: the radio's software restarts in a moment", uw_ver);
+        prog_open();                    /* what it is doing, step by step, till the restart */
         snprintf(cmd, sizeof(cmd), UPD_CTL " install " BUNDLE);
         sh_run(cmd, install_done, NULL);
     } else {
@@ -248,7 +397,7 @@ static void btn_click_cb(lv_event_t *e) {
 
 static void ask(void) {
     static const char *const names[PICKS] = {"Yes, apply it", "No"};
-    const lv_coord_t         w            = theme_shape.vision ? 700 : 640;
+    const lv_coord_t         w            = box_w();
     lv_obj_t                *obj, *row;
 
     box_close();
