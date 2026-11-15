@@ -23,7 +23,9 @@
 #                            card the radio started from (never the internal eMMC), each only when asked (the GUI's
 #                            checkboxes), both from the next power-on (nothing here reboots). A part the bundle does
 #                            not carry, or that the card has already, is left (and said). The modules of a kernel
-#                            neither running, on the card, nor the one it replaced go from /lib/modules
+#                            neither running, on the card, nor the one it replaced go from /lib/modules, and so do
+#                            the files of the kernel's own release that its new set no longer ships (kept till the
+#                            next kernel install, for boot-rollback)
 #   bundle-info <file>       {"version":..,"sd":..,"kernel":..,"uboot":..,"need_kernel":..,"need_uboot":..,
 #                            "image_needed":..}: whether the bundle's kernel set and U-Boot differ from the SD card's
 #                            (what the GUI offers to tick), and whether its version needs them (its card image level)
@@ -811,7 +813,9 @@ def boot_kernel(m, j):
     """The kernel's modules into /lib/modules (each file replaced kept in boot-prev), then its set onto the SD card's
     boot partition (each old file kept beside it as <name>.prev, the room checked first; the new one written as
     <name>.x6new, synced, renamed over): every step journalled for boot_undo. The modules first: the kernel on the card
-    is the old one till its own files are swapped, and its modules are in its own release's folder"""
+    is the old one till its own files are swapped, and its modules are in its own release's folder. Then the files of
+    that folder the new set does not ship (an older build of the same release had them, its modules.dep lists none of
+    them now) move into boot-prev too"""
     b = m["boot"]["kernel"]
     bst = os.path.join(WORK, "stage-boot")
     files, mods = b["files"], b.get("modules", [])
@@ -838,6 +842,7 @@ def boot_kernel(m, j):
         os.replace(tmp, p)
         rec["done"] = True
         save(BOOT_JOURNAL, j)
+    boot_stale(j, mods)
     d = boot_mount()
     try:
         need = sum(int(e.get("size", 0)) for e in files) + \
@@ -862,6 +867,40 @@ def boot_kernel(m, j):
             save(BOOT_JOURNAL, j)
     finally:
         boot_umount()
+
+
+def boot_stale(j, mods):
+    """The files in the new modules' release folder that the new set does not ship, moved into boot-prev (the list
+    journalled first, so boot_undo finds each where it is), and the folders that leaves empty removed. Symlinks are
+    left (build/, source/)"""
+    jk = j["kernel"]
+    release = jk.get("release", "")
+    if not mods or not release or "/" in release:
+        return
+    top = os.path.join(MODULES_ROOT, "lib", "modules", release)
+    ship = {os.path.normpath(os.path.join(MODULES_ROOT, e["path"].lstrip("/"))) for e in mods}
+    stale = []
+    for root, dirs, fs in os.walk(top):
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
+        for n in fs:
+            p = os.path.join(root, n)
+            if not os.path.islink(p) and os.path.isfile(p) and os.path.normpath(p) not in ship:
+                stale.append("/" + os.path.relpath(p, MODULES_ROOT))
+    if not stale:
+        return
+    jk["stale"], jk["stale_state"] = sorted(stale), "moving"
+    save(BOOT_JOURNAL, j)
+    for path in jk["stale"]:
+        rel = path.lstrip("/")
+        keep = os.path.join(BOOT_PREV, rel)
+        os.makedirs(os.path.dirname(keep), exist_ok=True)
+        shutil.move(os.path.join(MODULES_ROOT, rel), keep)
+    for root, dirs, fs in os.walk(top, topdown=False):
+        if root != top and not os.listdir(root):
+            os.rmdir(root)
+    os.sync()
+    jk["stale_state"] = "moved"
+    save(BOOT_JOURNAL, j)
 
 
 def boot_uboot(m, j):
@@ -902,8 +941,9 @@ def boot_uboot(m, j):
 
 def boot_undo(j):
     """What a --kernel/--uboot changed, back: U-Boot's saved area (checked against the sum journalled), the kernel
-    set's .prev files (a file that was new goes), the modules from boot-prev (one that was new goes, and its release's
-    folder when nothing is left in it). Safe to run again after an interruption: each step is journalled"""
+    set's .prev files (a file that was new goes), the files the new set did not ship and the modules from boot-prev (a
+    module that was new goes, and its release's folder when nothing is left in it). Safe to run again after an
+    interruption: each step is journalled"""
     u = j.get("uboot") or {}
     if u.get("state") in ("writing", "written"):
         try:
@@ -935,6 +975,15 @@ def boot_undo(j):
                 save(BOOT_JOURNAL, j)
         finally:
             boot_umount()
+    if k.get("stale_state") in ("moving", "moved"):
+        for path in k.get("stale", []):
+            rel = path.lstrip("/")
+            p, keep = os.path.join(MODULES_ROOT, rel), os.path.join(BOOT_PREV, rel)
+            if os.path.exists(keep) and not os.path.exists(p):
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                shutil.move(keep, p)
+        k["stale_state"] = "restored"
+        save(BOOT_JOURNAL, j)
     for f in reversed(k.get("modules", [])):
         if f.get("restored") or not (f.get("done") or f.get("replacing")):
             continue

@@ -1048,7 +1048,11 @@ a bundle file), or over SSH `x6100-update install <bundle> --kernel --uboot`
 - **Old modules go.** A kernel's modules take about 15 MB of the root
   filesystem. After a new kernel is written, the folders in `/lib/modules` of
   kernels nothing can start any more are removed; kept are the running
-  kernel's, the new one's and the one it replaced (for going back).
+  kernel's, the new one's and the one it replaced (for going back). A new
+  build of the same kernel version goes into the same folder: the files there
+  that it no longer ships (modules an older build had, which its module list
+  no longer names) move to `/var/lib/x6100-update/boot-prev` with the ones it
+  replaced, for going back, and are gone at the next kernel install.
 - **The card image level.** A release whose new level only its kernel or U-Boot
   bring says so in `/usr/share/x6100/image-required` with a second line,
   `x6200-boot 3 kernel`: the update box marks that part "this version needs

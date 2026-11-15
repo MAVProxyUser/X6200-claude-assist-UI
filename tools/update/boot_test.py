@@ -429,6 +429,56 @@ class BootInstall(unittest.TestCase):
         self.c.run("install", self.c.bundle(kernel=b"newest kernel", release="6.1.99"), "--kernel")
         self.assertEqual(sorted(os.listdir(mods)), ["6.1.90", "6.1.99", "not-a-kernel"])
 
+    def old_build_files(self):
+        """The running release's folder as an older build of it left it: modules and an index the new set does not
+        ship, and a symlink (left as it is)"""
+        top = os.path.join(self.c.rootfs, "lib", "modules", "6.1.82")
+        old = {"kernel/drivers/media/dvb/tuner.ko": b"old tuner", "kernel/drivers/media/dvb/demod.ko": b"old demod",
+               "kernel/sound/codec.ko": b"old codec", "modules.alias.bin": b"old index"}
+        for rel, data in old.items():
+            os.makedirs(os.path.dirname(os.path.join(top, rel)), exist_ok=True)
+            with open(os.path.join(top, rel), "wb") as f:
+                f.write(data)
+        os.symlink("/nowhere", os.path.join(top, "build"))
+        return top, old
+
+    def assertOldBuildBack(self, top, old):
+        for rel, data in old.items():
+            self.assertEqual(read(os.path.join(top, rel)), data)
+        self.assertEqual(read(self.c.old_mod), b"old wifi module")
+        self.assertFalse(os.path.exists(os.path.join(top, "modules.dep")))     # new in the bundle: gone again
+        self.assertTrue(os.path.islink(os.path.join(top, "build")))
+
+    def test_files_the_same_release_no_longer_ships_go(self):
+        top, old = self.old_build_files()
+        out = self.c.run("install", self.c.bundle(release="6.1.82"), "--kernel")
+        self.assertEqual(out, "ok 0.3.13 (the kernel on the SD card: from the next power-on)")
+        found = sorted(os.path.relpath(os.path.join(r, n), top) for r, _, fs in os.walk(top) for n in fs)
+        self.assertEqual(found, ["build", "kernel/wifi.ko", "modules.dep"])
+        self.assertEqual(sorted(os.listdir(os.path.join(top, "kernel"))), ["wifi.ko"])    # emptied folders gone
+        j = self.c.up["load"](self.c.up["BOOT_JOURNAL"])["kernel"]
+        self.assertEqual(j["stale"], sorted("/lib/modules/6.1.82/" + rel for rel in old))
+        self.assertEqual(j["stale_state"], "moved")
+        # boot-rollback brings them back, with the module the bundle replaced
+        self.c.run("boot-rollback")
+        self.assertOldBuildBack(top, old)
+        # another release's kernel leaves this folder alone
+        self.c.run("install", self.c.bundle(release="6.1.90"), "--kernel")
+        self.assertOldBuildBack(top, old)
+
+    def test_files_the_same_release_no_longer_ships_back_after_a_power_cut(self):
+        top, old = self.old_build_files()
+        self.c.run("install", self.c.bundle(release="6.1.82"), "--kernel")
+        j = self.c.up["load"](self.c.up["BOOT_JOURNAL"])
+        j["state"], j["kernel"]["stale_state"] = "applying", "moving"
+        self.c.up["save"](self.c.up["BOOT_JOURNAL"], j)
+        os.makedirs(os.path.join(top, "kernel", "sound"))
+        os.replace(os.path.join(self.c.up["BOOT_PREV"], "lib/modules/6.1.82/kernel/sound/codec.ko"),
+                   os.path.join(top, "kernel", "sound", "codec.ko"))           # cut before that one moved
+        self.c.run("boot-check")
+        self.assertOldBuildBack(top, old)
+        self.assertEqual(self.c.boot_files(), self.c.old_kernel)
+
     # 11. upgrade
 
     def test_upgrade_passes_the_flags(self):
