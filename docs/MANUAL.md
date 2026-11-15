@@ -875,15 +875,16 @@ web configurator (System > Update).
   confirms; the keyboard's arrows and Enter work too, Esc is No, a touch takes
   either. Yes installs it as Install below does; No leaves it for Settings >
   Info > Update and does not ask about that version again. A release that wants
-  a newer card image is only said in a message: the bundle alone cannot bring it.
-  After Yes a box shows what it is doing, step by step with a bar, till the
-  radio software restarts.
+  a newer card image is only said in a message: the bundle alone cannot bring it
+  (unless its own kernel and U-Boot do, below). After Yes a box shows what it is
+  doing, step by step with a bar, till the radio software restarts.
 - **The SD card's kernel and bootloader, when ticked.** A bundle can also carry
   the kernel (with its modules) and U-Boot: when they differ from what the SD
   card has, the box shows a tick box for each, unticked: "Also update the
   kernel on the SD card (6.1.x)", "Also update the bootloader (U-Boot) on the
   SD card". The MFK goes through them before Yes and No; a press (or a touch)
-  ticks or unticks. Unticked, nothing of them is written. See
+  ticks or unticks. Unticked, nothing of them is written. One the new version
+  needs (its card image level, below) says so: ": this version needs it". See
   [The SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot).
 
 - Check asks GitHub for the latest release of the repository the image was
@@ -891,7 +892,10 @@ web configurator (System > Update).
   so a fork's images update from the fork; the web Update page names it).
   Install downloads its update
   bundle (the GUI and its FT8 library, the web pages, the helpers and their
-  data, about 14 MB),
+  data, about 14 MB; with the SD card's kernel, modules and U-Boot about 30 MB).
+  On the radio, Settings > Info > Update's Install then asks the same question
+  as above, tick boxes and all; the web page's Install has the two tick boxes
+  beside it. Yes (or the web page's Install)
   checks every file against the bundle's list of SHA-256 sums, puts the files in place
   with the previous ones kept, and restarts the radio software: the screen
   goes dark for a few seconds. Settings, logs and everything on the DATA
@@ -970,8 +974,10 @@ web configurator (System > Update).
   release with them.
 - What the updater cannot change comes with a card image: the partition
   layout and the root filesystem's packages; the kernel, its modules (the WiFi
-  driver) and U-Boot too unless ticked as below. The radio says when a release
-  has a new card image for it:
+  driver) and U-Boot too unless ticked as below. A level that only the kernel
+  and U-Boot bring is reached by ticking them instead (see
+  [the card image level](#the-sd-cards-kernel-and-u-boot)). The radio says when
+  a release has a new card image for it:
   - Check: "vX is available, with a new card image", and a message saying what
     the image brings. Install still updates the radio software; the image is
     written when convenient.
@@ -995,9 +1001,16 @@ card has outside the root filesystem: the kernel set of its boot partition
 (`zImage`, `sun8i-r16-<model>.dtb`, `boot.scr`) with the kernel's modules
 (`/lib/modules/<release>/`), and U-Boot (raw at the card's byte 8 KiB, in the
 1016 KiB before the boot partition). The radio installs them only when asked:
-the update box's tick boxes, or `x6100-update install <bundle> --kernel
---uboot` over SSH. Settings > Info > Update and the web Update page update the
-radio software only.
+the update box's tick boxes (also after Settings > Info > Update's Install),
+the web Update page's "Also the kernel" and "Also U-Boot" (for Install and for
+a bundle file), or over SSH `x6100-update install <bundle> --kernel --uboot`
+(`x6100-update upgrade --kernel --uboot` checks, downloads and installs).
+
+- **Only what differs.** The box offers a part only when the bundle's differs
+  from the card's. A part ticked on the web page or given over SSH that the
+  bundle does not carry, or that the card has already byte for byte, is left
+  as it is and said ("the kernel on the SD card is the bundle's already"): the
+  `.prev` files of the kernel before stay to go back to.
 
 - **Only the SD card the radio started from.** The card must say it is an SD
   card (`mmcblk0`, "SD" in sysfs), the radio must have started with its root
@@ -1024,9 +1037,21 @@ radio software only.
 - **From the next power-on.** Nothing reboots the radio: the new kernel and
   U-Boot start the next time it is switched on (on the X6200 `reboot` switches
   it off).
-- **Going back**: `x6100-update boot-rollback` over SSH puts the kernel set,
-  its modules and U-Boot the last install replaced back on the card, again
-  from the next power-on. A radio that no longer starts from its card at all:
+- **Old modules go.** A kernel's modules take about 15 MB of the root
+  filesystem. After a new kernel is written, the folders in `/lib/modules` of
+  kernels nothing can start any more are removed; kept are the running
+  kernel's, the new one's and the one it replaced (for going back).
+- **The card image level.** A release whose new level only its kernel or U-Boot
+  bring says so in `/usr/share/x6100/image-required` with a second line,
+  `x6200-boot 3 kernel`: the update box marks that part "this version needs
+  it", and once it is on the card the level counts as reached
+  (`/var/lib/x6100-update/boot-level`): no card image is wanted. Left unticked,
+  the version says it wants a newer card image as before.
+- **Going back**: the web Update page's "Put the previous kernel and U-Boot
+  back" (shown after an install that wrote them), or `x6100-update
+  boot-rollback` over SSH, puts the kernel set, its modules and U-Boot the last
+  install replaced back on the card, again from the next power-on, and the card
+  image level with them. A radio that no longer starts from its card at all:
   on a computer, rename `zImage.prev` (and the other `.prev` files) on the
   card's BOOT partition over the new ones, or write the card image again. The
   updater's `x6100-update rollback` (the web page's button) takes back the

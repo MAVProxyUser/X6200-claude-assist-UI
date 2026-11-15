@@ -620,14 +620,26 @@ def check_update():
     return update_json(["check"])
 
 
+def update_boot_flags():
+    """The page's two tick boxes: the bundle's kernel and U-Boot onto the SD card too (x6100-update leaves a part the
+    bundle does not carry, or that the card has already)"""
+    form = bottle.request.forms
+    return [f for f, k in (("--kernel", "kernel"), ("--uboot", "uboot")) if form.get(k) in ("1", "true", "on")]
+
+
 @app.post('/api/update/upgrade')
 def start_upgrade():
-    return update_start("upgrade", ["upgrade"])
+    return update_start("upgrade", ["upgrade"] + update_boot_flags())
 
 
 @app.post('/api/update/rollback')
 def start_rollback():
     return update_start("rollback", ["rollback"])
+
+
+@app.post('/api/update/boot-rollback')
+def start_boot_rollback():
+    return update_start("boot-rollback", ["boot-rollback"])
 
 
 @app.post('/api/update/upload')
@@ -641,6 +653,7 @@ def upload_update():
     # The job is taken before the file is written, and every upload has a file of its own: a
     # second upload wrote over the one shared path while the accepted job had not opened it yet,
     # was told "already running", and the job installed the second bundle (audit B08)
+    flags = update_boot_flags()
     err = update_reserve("install")
     if err:
         return err
@@ -667,7 +680,7 @@ def upload_update():
         if isinstance(e, ValueError):
             return api_error(413, str(e))
         raise
-    return update_launch(["install", dest])
+    return update_launch(["install", dest] + flags)
 
 
 # Tailscale (rootfs/usr/sbin/x6100-tailscale): its supervisor keeps a status file, the page reads it;

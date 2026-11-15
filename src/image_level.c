@@ -15,16 +15,24 @@
 #define IMAGE_STAMP    "/etc/openx6x00-image"
 #define IMAGE_REQUIRED BOARD_SHARE "/image-required"
 #define NOTICE_SEEN    BOARD_DATA "/.image-notice"   /* the version it was said for */
+#define BOOT_LEVEL     "/var/lib/x6100-update/boot-level"
 
+/* The card's level: the image's stamp, or the one an install of a bundle's own kernel and U-Boot reached on the SD
+ * card (x6100-update keeps it in BOOT_LEVEL, for a level whose "<model>-boot" line in image-required says so) */
 static int stamped_level(void) {
     FILE *f = fopen(IMAGE_STAMP, "r");
     char  line[64];
-    int   level = 1;
+    int   level = 1, boot = 0;
 
     while (f && fgets(line, sizeof(line), f)) {
         if (strncmp(line, "level=", 6) == 0) level = atoi(line + 6);
     }
     if (f) fclose(f);
+    if ((f = fopen(BOOT_LEVEL, "r"))) {
+        if (fgets(line, sizeof(line), f)) boot = atoi(line);
+        fclose(f);
+    }
+    if (boot > level) level = boot;
     return level > 0 ? level : 1;
 }
 

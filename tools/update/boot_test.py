@@ -15,7 +15,14 @@ from 8 KiB to 1 MiB, something else before and after), a folder for its FAT boot
 4. U-Boot that does not read back as written: the old one put back, the kernel set undone too, nothing changed.
 5. boot-rollback: the card as it was before (U-Boot's area, the kernel set, the modules, the new release's folder gone).
 6. A power cut while it was writing (the journal still "applying"): boot-check puts the card back as it was.
-7. bundle-info: what differs from the card (both before, neither after); nothing offered off the SD card.
+7. bundle-info: what differs from the card (both before, neither after); nothing offered off the SD card; what the
+   bundle's version needs of them (its card image level), or that a card image is needed all the same.
+8. A part the bundle does not carry, or that the card has already, is left and said: a second install of the same
+   bundle keeps the .prev files of the kernel before.
+9. The card image level: a "<model>-boot" line's parts on the card reach it (boot-level), boot-rollback takes it back;
+   without them it is still wanted, with the parts that would reach it.
+10. The modules of kernels nothing can start go: kept are the running one's, the card's and the one it replaced.
+11. upgrade passes --kernel/--uboot to the install.
 """
 import gzip
 import hashlib
@@ -86,6 +93,12 @@ class Card:
             self.mounts += 1
             return self.boot
 
+        # the card image: level 2, the radio software's own image-required file (what the version installed wants)
+        self.stamp = os.path.join(root, "openx6x00-image")
+        with open(self.stamp, "w") as f:
+            f.write("model=x6200\nlevel=2\n")
+        self.required = os.path.join(root, "image-required")
+        self.set_required("x6200 2 the WiFi driver fix\n")
         self.up.update(WORK=work, STATE=state, PREV=os.path.join(state, "prev"), JOURNAL=os.path.join(state, "journal.json"),
                        PENDING=os.path.join(state, "pending.json"), LAST=os.path.join(state, "last.json"),
                        LOCK=os.path.join(state, "lock"), PROGRESS=os.path.join(work, ".progress"),
@@ -93,7 +106,14 @@ class Card:
                        TAILSCALE=os.path.join(root, "no-tailscale"), TAILSCALE_STATE=os.path.join(root, "no-state"),
                        BOOT_JOURNAL=os.path.join(state, "boot-journal.json"), BOOT_PREV=os.path.join(state, "boot-prev"),
                        UBOOT_PREV=os.path.join(state, "uboot-prev.bin"), SYS_BLOCK=self.sys, CMDLINE=self.cmdline,
-                       SD_DEV=self.dev, MODULES_ROOT=self.rootfs, boot_mount=mount, boot_umount=lambda: None)
+                       SD_DEV=self.dev, MODULES_ROOT=self.rootfs, boot_mount=mount, boot_umount=lambda: None,
+                       BOOT_LEVEL=os.path.join(state, "boot-level"), IMAGE_STAMP=self.stamp,
+                       IMAGE_REQUIRED=self.required, running_release=lambda: "6.1.82")
+
+    def set_required(self, text):
+        """The installed version's image-required file (apply() would put the bundle's there)"""
+        with open(self.required, "w") as f:
+            f.write(text)
 
     def set_sd(self, kind, p1_start):
         d = os.path.join(self.sys, "mmcblk0")
@@ -116,7 +136,7 @@ class Card:
         return {n: read(os.path.join(self.boot, n)) for n in sorted(os.listdir(self.boot))}
 
     def bundle(self, version="0.3.13", kernel=b"new kernel", uboot=b"NEW-UBOOT" * 50000, release="6.1.90",
-               boot=None):
+               boot=None, image=None):
         """A bundle with no files of the software (they would land on this Mac's own /usr) and the card's parts, its
         "boot" part made by mkbundle.py's own boot_part from an images folder and a target's modules"""
         images, target = os.path.join(self.root, "images"), os.path.join(self.root, "target")
@@ -143,6 +163,11 @@ class Card:
             ti = tarfile.TarInfo("manifest.json")
             ti.size = len(data)
             tar.addfile(ti, io.BytesIO(data))
+            if image is not None:       # its image-required, among its files (not in the manifest: not installed here)
+                data = image.encode()
+                ti = tarfile.TarInfo("files/usr/share/x6100/image-required")
+                ti.size = len(data)
+                tar.addfile(ti, io.BytesIO(data))
             for member, src in members:
                 tar.add(src, member, recursive=False)
         with gzip.open(out, "wb") as f:
@@ -203,11 +228,6 @@ class BootInstall(unittest.TestCase):
                 self.c.run("install", b, "--kernel", "--uboot")
             self.assertCardAsBefore()
 
-    def test_refuses_a_part_the_bundle_does_not_carry(self):
-        b = self.c.bundle(boot={})
-        with self.assertRaisesRegex(self.Fail, "carries no kernel"):
-            self.c.run("install", b, "--kernel")
-        self.assertCardAsBefore()
 
     # 2. Only what is ticked
 
@@ -251,13 +271,16 @@ class BootInstall(unittest.TestCase):
     # 4. Not read back as written
 
     def test_uboot_not_read_back_puts_everything_back(self):
-        read = self.c.up["uboot_read"]
-        calls = []
+        read, write = self.c.up["uboot_read"], self.c.up["uboot_write"]
+        writes = []
 
         def bad_read(n=AREA):
-            calls.append(n)
-            return read(n) if len(calls) != 2 else b"\0" * n      # the read-back after the write: wrong
-        self.c.up["uboot_read"] = bad_read
+            return read(n) if len(writes) != 1 else b"\0" * n      # the read-back after the first write: wrong
+
+        def counted_write(area):
+            write(area)
+            writes.append(1)
+        self.c.up.update(uboot_read=bad_read, uboot_write=counted_write)
         with self.assertRaisesRegex(self.Fail, "did not read back"):
             self.c.run("install", self.c.bundle(), "--kernel", "--uboot")
         self.assertCardAsBefore()
@@ -298,7 +321,8 @@ class BootInstall(unittest.TestCase):
     def test_bundle_info(self):
         b = self.c.bundle()
         self.assertEqual(self.c.run("bundle-info", b),
-                         {"version": "0.3.13", "sd": True, "kernel": True, "uboot": True, "kernel_release": "6.1.90"})
+                         {"version": "0.3.13", "sd": True, "kernel": True, "uboot": True, "kernel_release": "6.1.90",
+                          "need_kernel": False, "need_uboot": False, "image_needed": False})
         self.c.run("install", b, "--kernel", "--uboot")
         info = self.c.run("bundle-info", b)
         self.assertEqual((info["kernel"], info["uboot"]), (False, False))
@@ -309,6 +333,100 @@ class BootInstall(unittest.TestCase):
     def test_bundle_info_of_a_bundle_without_boot_parts(self):
         info = self.c.run("bundle-info", self.c.bundle(boot={}))
         self.assertEqual((info["kernel"], info["uboot"]), (False, False))
+
+    def test_bundle_info_says_what_its_version_needs(self):
+        info = self.c.run("bundle-info", self.c.bundle(image="x6200 3 the new kernel\nx6200-boot 3 kernel\n"))
+        self.assertEqual((info["need_kernel"], info["need_uboot"], info["image_needed"]), (True, False, False))
+        info = self.c.run("bundle-info", self.c.bundle(image="x6200 3 a new root filesystem\n"))
+        self.assertEqual((info["need_kernel"], info["need_uboot"], info["image_needed"]), (False, False, True))
+        info = self.c.run("bundle-info", self.c.bundle(boot={}, image="x6200 3 the new kernel\nx6200-boot 3 kernel\n"))
+        self.assertEqual((info["need_kernel"], info["image_needed"]), (False, True))      # it does not carry it
+        info = self.c.run("bundle-info", self.c.bundle(image="x6200 2 the WiFi driver fix\n"))
+        self.assertEqual((info["need_kernel"], info["need_uboot"], info["image_needed"]), (False, False, False))
+
+    # 8. Left when not carried, or on the card already
+
+    def test_a_part_the_bundle_does_not_carry_is_left(self):
+        out = self.c.run("install", self.c.bundle(boot={}), "--kernel")
+        self.assertEqual(out, "ok 0.3.13 (the bundle carries no kernel)")
+        self.assertCardAsBefore()
+        self.assertFalse(os.path.exists(self.c.up["BOOT_JOURNAL"]))
+
+    def test_a_part_the_card_has_already_is_left(self):
+        b = self.c.bundle()
+        self.c.run("install", b, "--kernel", "--uboot")
+        out = self.c.run("install", b, "--kernel", "--uboot")
+        self.assertEqual(out, "ok 0.3.13 (the kernel on the SD card is the bundle's already; U-Boot on the SD card is "
+                              "the bundle's already)")
+        files = self.c.boot_files()
+        self.assertEqual(files["zImage.prev"], b"old kernel")         # the one before: still there to go back to
+        with open(self.c.up["UBOOT_PREV"], "rb") as f:
+            self.assertEqual(f.read(), self.c.old_uboot)
+        self.c.run("boot-rollback")
+        self.assertCardAsBefore()
+
+    # 9. The card image level
+
+    def test_image_level_reached_by_the_kernel(self):
+        up = self.c.up
+        self.c.set_required("x6200 3 the new kernel\nx6200-boot 3 kernel\n")
+        self.assertEqual(up["image_state"](), {"level": 2, "required": 3, "needed": True, "note": "the new kernel",
+                                               "boot": ["kernel"]})
+        self.c.run("install", self.c.bundle(), "--kernel")
+        self.assertEqual(up["image_level"](), 3)
+        self.assertFalse(up["image_state"]()["needed"])
+        self.c.run("boot-rollback")
+        self.assertEqual(up["image_level"](), 2)
+        self.assertTrue(up["image_state"]()["needed"])
+
+    def test_image_level_not_reached_without_its_parts(self):
+        up = self.c.up
+        self.c.set_required("x6200 3 the new kernel and U-Boot\nx6200-boot 3 kernel uboot\n")
+        self.c.run("install", self.c.bundle(), "--kernel")             # U-Boot left out
+        self.assertEqual(up["image_level"](), 2)
+        self.c.run("install", self.c.bundle(), "--uboot")              # the kernel on the card already
+        self.assertEqual(up["image_level"](), 3)
+
+    def test_image_routes(self):
+        route = self.c.up["boot_route"]
+        text = "x6200 4 x\nx6200-boot 3 kernel\nx6200-boot 4 uboot\nx6100-boot 2 kernel\n"
+        self.assertEqual(route(text, 2, 4, "x6200"), {"kernel", "uboot"})
+        self.assertEqual(route(text, 3, 4, "x6200"), {"uboot"})
+        self.assertIsNone(route(text, 1, 4, "x6200"))                # level 2 has no route: a card image
+        self.assertEqual(route(text, 4, 4, "x6200"), set())
+        self.assertIsNone(route(text, 1, 2, "x6200"))
+
+    # 10. Stale modules
+
+    def test_stale_modules_go(self):
+        mods = os.path.join(self.c.rootfs, "lib", "modules")
+        for d, n in (("6.1.70", "modules.dep"), ("not-a-kernel", "readme")):
+            os.makedirs(os.path.join(mods, d))
+            with open(os.path.join(mods, d, n), "w") as f:
+                f.write("x")
+        self.c.run("install", self.c.bundle(release="6.1.90"), "--kernel")
+        self.assertEqual(sorted(os.listdir(mods)), ["6.1.82", "6.1.90", "not-a-kernel"])
+        # still running 6.1.82, the card's 6.1.90 replaced by 6.1.95: all three kept (boot-rollback brings 6.1.90 back)
+        self.c.run("install", self.c.bundle(kernel=b"newer kernel", release="6.1.95"), "--kernel")
+        self.assertEqual(sorted(os.listdir(mods)), ["6.1.82", "6.1.90", "6.1.95", "not-a-kernel"])
+        self.c.run("boot-rollback")
+        self.assertEqual(self.c.boot_files()["zImage"], b"new kernel")
+        self.assertEqual(sorted(os.listdir(mods)), ["6.1.82", "6.1.90", "not-a-kernel"])
+        # started on 6.1.90 now: a kernel 6.1.99 makes 6.1.82 go
+        self.c.up["running_release"] = lambda: "6.1.90"
+        self.c.run("install", self.c.bundle(kernel=b"newest kernel", release="6.1.99"), "--kernel")
+        self.assertEqual(sorted(os.listdir(mods)), ["6.1.90", "6.1.99", "not-a-kernel"])
+
+    # 11. upgrade
+
+    def test_upgrade_passes_the_flags(self):
+        b = self.c.bundle()
+        self.c.up["cmd_check"] = lambda args: {"newer": True, "latest": "0.3.13", "url": "https://x/b.tar.gz"}
+        self.c.up["cmd_download"] = lambda args: b
+        out = self.c.run("upgrade", "--kernel")
+        self.assertEqual(out, "ok 0.3.13 (the kernel on the SD card: from the next power-on)")
+        with self.assertRaisesRegex(self.Fail, "upgrade takes"):
+            self.c.run("upgrade", "--all")
 
 
 if __name__ == "__main__":

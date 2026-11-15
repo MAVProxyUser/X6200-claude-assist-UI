@@ -4,5 +4,14 @@
 # build (buildroot/local-build.sh) stamps the level into /etc/openx6x00-image, which no update touches;
 # x6100-update and the GUI compare the two and say when a newer card image is worth writing. Images up to
 # v0.3.3 have no stamp: level 1.
+#
+# A level that only the kernel (with its modules) and/or U-Boot bring gets a second line, <model>-boot <level>
+# <parts>, parts being kernel and/or uboot: the release's own bundle carries them, and the radio installs them onto
+# its SD card when ticked in the update question (x6100-update install --kernel/--uboot), which reaches that level
+# without a card image. Each level from the card's own to the one wanted needs such a line, else a card image is
+# still needed. Add one only in a release after the first whose updater reads it (the one after v0.3.12.18): an older
+# updater installs the software alone and then says a card image is wanted.
+#   x6200 3 the kernel 6.1.90 (a WiFi fix)
+#   x6200-boot 3 kernel
 x6100 2 the WiFi driver fix (MediaTek and UniFi access points)
 x6200 2 the WiFi driver fix

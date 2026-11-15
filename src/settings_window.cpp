@@ -5008,10 +5008,13 @@ static void bc_btn_cb(lv_event_t *e) {
     if (!bc_timer) bc_timer = lv_timer_create(bc_timer_cb, 500, NULL);
 }
 
-/* Firmware update (x6100-update): Check asks GitHub for a newer release, Install downloads and
- * installs it (the GUI restarts at the end); the note follows the helper's progress file */
+/* Firmware update (x6100-update): Check asks GitHub for a newer release (kept in check.json, as the daily look keeps
+ * it), Install fetches it and asks the update question (update_watch_now: its version, commit and MD5, the SD card's
+ * kernel and U-Boot as tick boxes when the bundle's differ from the card's), the GUI restarting after a Yes; the note
+ * follows the helper's progress file */
 #define UPD_CTL      "/usr/sbin/x6100-update"
 #define UPD_PROGRESS BOARD_DATA "/update/.progress"
+#define UPD_CHECK    BOARD_DATA "/update/check.json"
 
 static lv_obj_t   *upd_note, *upd_btn;
 static lv_timer_t *upd_timer;
@@ -5034,10 +5037,15 @@ static void upd_timer_cb(lv_timer_t *t) {
     if (!f) return;
     if (fscanf(f, "%15s %ld %ld", step, &got, &total) >= 1) {
         if (!strcmp(step, "download")) {
-            if (total > 0) snprintf(s, sizeof(s), "Downloading %.1f of %.1f MB", got / 1e6, total / 1e6);
+            if (total > 0 && got >= total) snprintf(s, sizeof(s), "Downloaded: the question is on the screen.");
+            else if (total > 0) snprintf(s, sizeof(s), "Downloading %.1f of %.1f MB", got / 1e6, total / 1e6);
             else snprintf(s, sizeof(s), "Downloading %.1f MB", got / 1e6);
         } else if (!strcmp(step, "verify")) {
             snprintf(s, sizeof(s), "Checking the files: %ld of %ld", got, total);
+        } else if (!strcmp(step, "kernel")) {
+            snprintf(s, sizeof(s), "Writing the kernel to the SD card: %ld of %ld", got, total);
+        } else if (!strcmp(step, "uboot")) {
+            snprintf(s, sizeof(s), "Writing U-Boot to the SD card");
         } else if (!strcmp(step, "install")) {
             snprintf(s, sizeof(s), "Installing: %ld of %ld files", got, total);
         } else {
@@ -5089,8 +5097,12 @@ static void upd_check_done(const char *out, int status, void *user) {
         if (strstr(out, "\"image_needed\": true") && upd_json_str(out, "image_note", note, sizeof(note))) {
             /* the release also wants a newer card image for this radio (x6100-update reads its image-required) */
             snprintf(s, sizeof(s), "v%s is out; its card image brings %s", latest, note[0] ? note : "more");
+        } else if (strstr(out, "\"image_boot\": [")) {
+            /* what its card image level brings, its bundle's kernel and U-Boot bring: ticked in the question */
+            snprintf(s, sizeof(s), "v%s is out and needs its kernel on the SD card: Install asks, tick it there.",
+                     latest);
         } else {
-            snprintf(s, sizeof(s), "v%s is available. Install downloads it and restarts the radio software.", latest);
+            snprintf(s, sizeof(s), "v%s is available. Install downloads it and asks before applying.", latest);
         }
         upd_btn_label("Install");
     } else if (upd_json_str(out, "latest", latest, sizeof(latest))) {
@@ -5102,30 +5114,26 @@ static void upd_check_done(const char *out, int status, void *user) {
     else msg_update_text_fmt("%s", s);
 }
 
-static void upd_install_done(const char *out, int status, void *user) {
-    char s[96];
-
-    upd_busy = false;
-    upd_timer_stop();
-    if (strncmp(out, "ok", 2) == 0) snprintf(s, sizeof(s), "Installed. The radio software restarts now.");
-    else snprintf(s, sizeof(s), "Update failed: %.70s. Nothing changed.", strncmp(out, "error", 5) == 0 ? out + 6 : out);
-    upd_latest[0] = 0;
-    upd_btn_label("Check");
-    if (upd_note) upd_say(s);
-    else msg_update_text_fmt("%s", s);
-}
-
 static void upd_btn_cb(lv_event_t *e) {
     if (upd_busy) return;
-    upd_busy = true;
     if (upd_latest[0]) {
-        upd_say("Downloading...");
-        sh_run(UPD_CTL " upgrade", upd_install_done, NULL);
-        if (!upd_timer) upd_timer = lv_timer_create(upd_timer_cb, 500, NULL);
-    } else {
-        upd_say("Asking GitHub for the latest release...");
-        sh_run(UPD_CTL " check", upd_check_done, NULL);
+        /* the update question's own fetch, tick boxes and progress box (update_watch.c) */
+        if (update_watch_now()) {
+            upd_say("Downloading...");
+            if (!upd_timer) upd_timer = lv_timer_create(upd_timer_cb, 500, NULL);
+        } else {
+            upd_say("An update is being fetched or asked about already; Check again after it.");
+        }
+        upd_latest[0] = 0;
+        upd_btn_label("Check");
+        return;
     }
+    upd_busy = true;
+    upd_say("Asking GitHub for the latest release...");
+    /* kept where the daily look keeps it, for update_watch_now; a failure's one line shown, the last answer kept */
+    sh_run("mkdir -p " BOARD_DATA "/update; if " UPD_CTL " check > " UPD_CHECK ".part; then mv " UPD_CHECK ".part "
+           UPD_CHECK "; cat " UPD_CHECK "; else cat " UPD_CHECK ".part; rm -f " UPD_CHECK ".part; exit 1; fi",
+           upd_check_done, NULL);
 }
 
 static uint8_t make_update(uint8_t row) {

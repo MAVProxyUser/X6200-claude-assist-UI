@@ -8,21 +8,28 @@
 #   check                    {"running":..,"latest":..,"url":..,"newer":bool,"commit":..,"image_needed":bool,..}
 #                            (GitHub Releases; commit: the newer release's tag's commit, for the GUI's question)
 #
-# The card image: what an update cannot carry (the kernel, its modules, U-Boot) comes with a card image. Each
-# version says which image level it wants per radio (/usr/share/x6100/image-required); the image build stamps
-# its level into /etc/openx6x00-image. "check" reads the newer release's file and says whether it also wants a
-# newer card image; "status" says whether the running software does.
+# The card image: what an update cannot carry (the root filesystem's packages, the partitions) comes with a card
+# image. Each version says which image level it wants per radio (/usr/share/x6100/image-required); the image build
+# stamps its level into /etc/openx6x00-image. A level that only the kernel or U-Boot brings has a "<model>-boot <level>
+# <parts>" line there too: the bundle's own kernel and U-Boot reach it (install --kernel/--uboot), recorded in
+# /var/lib/x6100-update/boot-level, and no card image is needed for it. "check" reads the newer release's file and
+# says whether it also wants a newer card image (or which of the bundle's parts instead); "status" says whether the
+# running software does.
 #   download <url>           the bundle into /mnt/update, progress in /mnt/update/.progress
 #   install <file> [--kernel] [--uboot]
 #                            verify, stage, swap in, restart the GUI and the web server; with --kernel the bundle's
 #                            kernel set (zImage, the DTB, boot.scr) onto the SD card's boot partition and its modules
 #                            into /lib/modules, with --uboot its U-Boot into the card's raw area: only on the SD
 #                            card the radio started from (never the internal eMMC), each only when asked (the GUI's
-#                            checkboxes), both from the next power-on (nothing here reboots)
-#   bundle-info <file>       {"version":..,"sd":..,"kernel":..,"uboot":..}: whether the bundle's kernel set and
-#                            U-Boot differ from the SD card's (what the GUI offers to tick)
+#                            checkboxes), both from the next power-on (nothing here reboots). A part the bundle does
+#                            not carry, or that the card has already, is left (and said). The modules of a kernel
+#                            neither running, on the card, nor the one it replaced go from /lib/modules
+#   bundle-info <file>       {"version":..,"sd":..,"kernel":..,"uboot":..,"need_kernel":..,"need_uboot":..,
+#                            "image_needed":..}: whether the bundle's kernel set and U-Boot differ from the SD card's
+#                            (what the GUI offers to tick), and whether its version needs them (its card image level)
 #   boot-rollback            the kernel set, modules and U-Boot the last --kernel/--uboot replaced, back on the card
-#   upgrade                  check, download and install the newer release
+#   upgrade [--kernel] [--uboot]
+#                            check, download and install the newer release (the flags as install's)
 #   rollback                 the previous files back, restart
 #   confirm                  the new version runs: the pending mark goes (the GUI, after a minute)
 #   boot-check               before each GUI start (x6100_daemon): a pending version that keeps
@@ -110,6 +117,9 @@ MODULES_ROOT = "/"                    # where the modules' /lib/modules/... path
 BOOT_JOURNAL = os.path.join(STATE, "boot-journal.json")   # the last --kernel/--uboot, for its undo
 BOOT_PREV = os.path.join(STATE, "boot-prev")              # the module files it replaced
 UBOOT_PREV = os.path.join(STATE, "uboot-prev.bin")        # the U-Boot area it replaced, whole
+BOOT_LEVEL = os.path.join(STATE, "boot-level")            # the card image level the card's kernel/U-Boot reached
+IMAGE_MEMBER = "files" + IMAGE_REQUIRED                   # a bundle's own image-required file
+BOOT_PARTS = ("kernel", "uboot")
 MAX_STARTS = 3                        # GUI starts without a confirm before the rollback
 TIMEOUT = 30
 RUN_LIMIT = 1800
@@ -167,8 +177,8 @@ def image_required(text, model=None):
     return 1, ""
 
 
-def image_level():
-    """The running card image's level: its stamp, 1 for the images before the stamp (up to v0.3.3)"""
+def stamp_level():
+    """The card image's own level: its stamp, 1 for the images before the stamp (up to v0.3.3)"""
     try:
         with open(IMAGE_STAMP) as f:
             for line in f:
@@ -180,14 +190,62 @@ def image_level():
     return 1
 
 
+def boot_level():
+    """The level an install of a bundle's kernel and U-Boot brought the SD card to (0: none)"""
+    t = _read(BOOT_LEVEL).strip()
+    return int(t) if t.isdigit() else 0
+
+
+def set_boot_level(level):
+    if level and level > stamp_level():
+        save_text(BOOT_LEVEL, f"{level}\n")
+    else:
+        try:
+            os.remove(BOOT_LEVEL)
+        except FileNotFoundError:
+            pass
+
+
+def image_level():
+    """The running card's level: the image's stamp, or what an install of a bundle's kernel and U-Boot reached"""
+    return max(stamp_level(), boot_level())
+
+
+def image_routes(text, model=None):
+    """{level: {"kernel", "uboot"}} from an image-required file's "<model>-boot <level> <parts>" lines: the levels a
+    bundle's own kernel and/or U-Boot on the SD card reach from the level below (a kernel fix, the WiFi driver)"""
+    model = model or radio_model()
+    out = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] == f"{model}-boot" and parts[1].isdigit():
+            got = {p for p in parts[2:] if p in BOOT_PARTS}
+            if got:
+                out[int(parts[1])] = got
+    return out
+
+
+def boot_route(text, have, need, model=None):
+    """The SD card parts that take a card from level have to need (empty when it is there), None when a level between
+    has no route: a card image is needed then"""
+    routes = image_routes(text, model)
+    parts = set()
+    for level in range(have + 1, need + 1):
+        if level not in routes:
+            return None
+        parts |= routes[level]
+    return parts
+
+
 def image_state():
-    try:
-        with open(IMAGE_REQUIRED) as f:
-            need, note = image_required(f.read())
-    except OSError:
-        need, note = 1, ""
+    text = _read_text(IMAGE_REQUIRED)
+    need, note = image_required(text) if text else (1, "")
     have = image_level()
-    return {"level": have, "required": need, "needed": have < need, "note": note if have < need else ""}
+    out = {"level": have, "required": need, "needed": have < need, "note": note if have < need else ""}
+    route = boot_route(text, have, need) if have < need else None
+    if route:
+        out["boot"] = sorted(route)       # its kernel/U-Boot reach it: install --kernel/--uboot, no card image
+    return out
 
 
 def bundle_for_this_radio(name):
@@ -377,6 +435,15 @@ def save(path, obj):
     os.close(dfd)
 
 
+def save_text(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(path + ".tmp", path)
+
+
 def progress(step, got=0, total=0):
     os.makedirs(WORK, exist_ok=True)
     with open(PROGRESS + ".tmp", "w") as f:
@@ -441,10 +508,16 @@ def cmd_check(args):
             pass
         # Does the newer release also want a newer card image for this radio? Its own image-required file, at
         # its tag; no answer is no warning
+        # A level its bundle's own kernel and U-Boot reach is no card image: "image_boot" names the parts instead
         try:
             with http(RAW.format(tag=tag), timeout=10) as r:
-                need, note = image_required(r.read(4096).decode(errors="replace"))
-            if need > image_level():
+                text = r.read(4096).decode(errors="replace")
+            need, note = image_required(text)
+            have = image_level()
+            route = boot_route(text, have, need) if need > have else None
+            if route:
+                out["image_boot"], out["image_note"] = sorted(route), note
+            elif need > have:
                 img = next((x for x in rel.get("assets", []) if str(x.get("name", "")).endswith("-sdcard.img.zip")
                             and f"-{radio_model()}-" in str(x.get("name"))), None)
                 out["image_needed"], out["image_note"] = True, note
@@ -487,16 +560,26 @@ def read_manifest(tar):
     return check_manifest(mjson)
 
 
-def bundle_manifest(bundle):
+def bundle_manifest(bundle, image=False):
     """A bundle's manifest, checked, without unpacking the rest: it is the tar's first member, read as the system's
-    gzip streams it"""
+    gzip streams it. With image, (manifest, its image-required file's text): read on from the stream till that file
+    ("" when the bundle has none)"""
     p = subprocess.Popen(["gzip", "-dc", bundle], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    m = None
     try:
         with tarfile.open(fileobj=p.stdout, mode="r|") as tar:
             for ti in tar:
                 if ti.name == "manifest.json":
-                    return check_manifest(tar.extractfile(ti).read())
-        raise Fail("not an update bundle: no manifest")
+                    m = check_manifest(tar.extractfile(ti).read())
+                    if not image:
+                        return m
+                elif m is not None and ti.name == IMAGE_MEMBER:
+                    return m, tar.extractfile(ti).read(4096).decode(errors="replace")
+                elif m is not None and ti.name.startswith("boot/"):
+                    break                       # the files are before the SD card's parts
+        if m is None:
+            raise Fail("not an update bundle: no manifest")
+        return m, ""
     except tarfile.TarError:
         raise Fail("not an update bundle")
     finally:
@@ -867,6 +950,57 @@ def boot_undo(j):
     os.sync()
 
 
+def boot_same(b):
+    """Which of a bundle's SD card parts the card has already, byte for byte: {"kernel": .., "uboot": ..} (a part the
+    bundle does not carry: False). The card must have passed sd_card_check"""
+    out = {"kernel": False, "uboot": False}
+    if b.get("kernel"):
+        d = boot_mount(ro=True)
+        try:
+            out["kernel"] = all(_sha_file(os.path.join(d, e["name"])) == e["sha256"] for e in b["kernel"]["files"])
+        finally:
+            boot_umount()
+    if b.get("uboot"):
+        u = b["uboot"]
+        out["uboot"] = hashlib.sha256(uboot_read(int(u["size"]))).hexdigest() == u["sha256"]
+    return out
+
+
+def running_release():
+    return os.uname().release
+
+
+def card_release(prev):
+    """The kernel release on the SD card as the last install of one knows it (what it put there, or what it found
+    when it was taken back), else the one running"""
+    if isinstance(prev, dict):
+        if prev.get("state") == "done" and prev.get("card_after"):
+            return prev["card_after"]
+        if prev.get("state") == "rolled back" and prev.get("card_before"):
+            return prev["card_before"]
+    return running_release()
+
+
+def prune_modules(keep):
+    """The folders in /lib/modules of kernels nothing can start any more go (about 15 MB each): kept are the one
+    running, the one on the card and the one it replaced (boot-rollback's). Only a kernel's folder (modules.dep or
+    kernel/ in it) is taken; never anything when the running kernel's own is not in keep"""
+    keep = {k for k in keep if k}
+    top = os.path.join(MODULES_ROOT, "lib", "modules")
+    if running_release() not in keep or not os.path.isdir(top):
+        return []
+    gone = []
+    for d in sorted(os.listdir(top)):
+        p = os.path.join(top, d)
+        if d in keep or os.path.islink(p) or not os.path.isdir(p):
+            continue
+        if not (os.path.exists(os.path.join(p, "modules.dep")) or os.path.isdir(os.path.join(p, "kernel"))):
+            continue
+        shutil.rmtree(p, ignore_errors=True)
+        gone.append(d)
+    return gone
+
+
 def apply(m):
     """The staged files into place, one by one, the previous ones kept and the journal ahead of each step."""
     st = os.path.join(WORK, "stage")
@@ -955,8 +1089,25 @@ def cmd_install(args):
         raise Fail("an interrupted install must be rolled back first")
     if (kernel or uboot) and load(BOOT_JOURNAL, {}).get("state") == "applying":
         raise Fail("an interrupted kernel or U-Boot install must be undone first (boot-check)")
+    left = []
     if kernel or uboot:
         sd_card_check()                 # before anything: only the SD card the radio started from
+        # A part the bundle does not carry, or that the card has already, is left as it is, and said
+        b = boot_section(bundle_manifest(bundle))
+        same = boot_same(b)
+        for part, what in (("kernel", "the kernel"), ("uboot", "U-Boot")):
+            if not (kernel if part == "kernel" else uboot):
+                continue
+            if not b.get(part):
+                left.append(f"the bundle carries no {'kernel' if part == 'kernel' else 'U-Boot'}")
+            elif same[part]:
+                left.append(f"{what} on the SD card is the bundle's already")
+            else:
+                continue
+            if part == "kernel":
+                kernel = False
+            else:
+                uboot = False
     progress("verify")
     m = stage(bundle, kernel, uboot)
     try:
@@ -968,7 +1119,12 @@ def cmd_install(args):
     # The SD card's parts first, each undone when a later step fails: a failure leaves nothing changed
     j, said = None, ""
     if kernel or uboot:
-        j = {"version": m["version"], "from": running_version(), "state": "applying", "started": time.time()}
+        prev = load(BOOT_JOURNAL)
+        before = card_release(prev)
+        release = str(m["boot"]["kernel"].get("release", "")) if kernel else ""
+        j = {"version": m["version"], "from": running_version(), "state": "applying", "started": time.time(),
+             "card_before": before, "card_after": (release or None) if kernel else before,
+             "level_before": boot_level()}
         save(BOOT_JOURNAL, j)
         try:
             if kernel:
@@ -995,6 +1151,26 @@ def cmd_install(args):
             j["state"] = "rolled back"
             save(BOOT_JOURNAL, j)
         raise
+    if left:
+        said += " (" + "; ".join(left) + ")"
+    # The card image level the new version wants, reached by the bundle's kernel and U-Boot now on the card
+    try:
+        text = _read_text(IMAGE_REQUIRED)
+        need, have = image_required(text)[0], image_level()
+        route = boot_route(text, have, need) if need > have else None
+        if route:
+            sd_card_check()
+            same = boot_same(m.get("boot") or {})
+            if all(same[part] for part in route):
+                set_boot_level(need)
+    except Exception:
+        pass
+    if j and kernel:
+        try:
+            j["pruned"] = prune_modules({running_release(), j["card_before"], j["card_after"]})
+            save(BOOT_JOURNAL, j)
+        except Exception:
+            pass
     save(LAST, {"result": "installed", "version": m["version"], "when": time.time()})
     progress("done")
     restart_apps()
@@ -1007,24 +1183,27 @@ def cmd_bundle_info(args):
     not start from an SD card: nothing would be written there"""
     if not args:
         raise Fail("bundle-info needs the bundle's path")
-    m = bundle_manifest(args[0])
+    m, text = bundle_manifest(args[0], image=True)
     b = boot_section(m)
     out = {"version": m["version"], "sd": True, "kernel": False, "uboot": False,
-           "kernel_release": str((b.get("kernel") or {}).get("release", ""))}
+           "kernel_release": str((b.get("kernel") or {}).get("release", "")),
+           "need_kernel": False, "need_uboot": False, "image_needed": False}
+    # The card image level the bundle's version wants: its kernel and U-Boot may reach it ("need_..."), or not
+    need, have = image_required(text)[0] if text else 1, image_level()
+    route = boot_route(text, have, need) if need > have else set()
     try:
         sd_card_check()
     except Fail:
         out["sd"] = False
+        out["image_needed"] = need > have
         return out
-    if b.get("kernel"):
-        d = boot_mount(ro=True)
-        try:
-            out["kernel"] = any(_sha_file(os.path.join(d, e["name"])) != e["sha256"] for e in b["kernel"]["files"])
-        finally:
-            boot_umount()
-    if b.get("uboot"):
-        u = b["uboot"]
-        out["uboot"] = hashlib.sha256(uboot_read(int(u["size"]))).hexdigest() != u["sha256"]
+    same = boot_same(b)
+    for part in BOOT_PARTS:
+        out[part] = bool(b.get(part)) and not same[part]
+    if route is None or any(not b.get(part) for part in route):
+        out["image_needed"] = True
+    else:
+        out["need_kernel"], out["need_uboot"] = "kernel" in route and out["kernel"], "uboot" in route and out["uboot"]
     return out
 
 
@@ -1038,15 +1217,20 @@ def cmd_boot_rollback(args):
     boot_undo(j)
     j["state"] = "rolled back"
     save(BOOT_JOURNAL, j)
+    if "level_before" in j:
+        set_boot_level(j["level_before"])
     return "ok the kernel and U-Boot before are back on the SD card: from the next power-on"
 
 
 def cmd_upgrade(args):
-    c = cmd_check(args)
+    flags = [a for a in args if a.startswith("--")]
+    if any(f not in ("--kernel", "--uboot") for f in flags) or len(flags) != len(args):
+        raise Fail("upgrade takes --kernel and --uboot")
+    c = cmd_check([])
     if not c["newer"]:
         return "ok up to date" if c["latest"] else "ok no release"
     bundle = cmd_download([c["url"]])
-    return cmd_install([bundle])
+    return cmd_install([bundle] + flags)
 
 
 def cmd_rollback(args):
@@ -1154,8 +1338,9 @@ def cmd_status(args):
     bj = load(BOOT_JOURNAL) or {}
     return {"running": running_version(), "pending": load(PENDING), "last": last_state(), "progress": prog,
             "image": image_state(),
-            "boot": {"state": bj.get("state"), "version": bj.get("version"),
-                     "kernel": bool(bj.get("kernel")), "uboot": (bj.get("uboot") or {}).get("state")} if bj else None}
+            "boot": {"state": bj.get("state"), "version": bj.get("version"), "when": bj.get("started"),
+                     "kernel": bool(bj.get("kernel")), "release": bj.get("card_after"),
+                     "uboot": (bj.get("uboot") or {}).get("state")} if bj else None}
 
 
 def take_lock():

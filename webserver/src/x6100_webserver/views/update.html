@@ -1,12 +1,14 @@
 % rebase('base.html', title='Update')
 <h2><svg class="i"><use href="#i-download"/></svg>Update</h2>
-<p class="sub">The radio installs a newer OpenX6X00 by itself: the GUI, the web pages, the helpers and their data, from the GitHub releases of the repository it was built from (<span id="repo">its own</span>) or from a bundle file. The files are checked against the bundle's own list of their SHA-256 sums, the previous version is kept, and the radio software restarts at the end (about a minute). A version that does not come up is put back automatically. The kernel and the WiFi driver still come with a card image.</p>
+<p class="sub">The radio installs a newer OpenX6X00 by itself: the GUI, the web pages, the helpers and their data, from the GitHub releases of the repository it was built from (<span id="repo">its own</span>) or from a bundle file. The files are checked against the bundle's own list of their SHA-256 sums, the previous version is kept, and the radio software restarts at the end (about a minute). A version that does not come up is put back automatically. A release's bundle also carries the SD card's kernel (with its modules, the WiFi driver among them) and U-Boot: they are written only when ticked below, only to the SD card the radio started from (never its internal memory), the old ones kept, and start at the next power-on.</p>
 
 <div class="dp-card">
   <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-cpu"/></svg></span><div><h3>Version</h3><p>What runs now, and the latest release</p></div></div>
   <div class="dp-row"><div class="dp-lbl"><b>Running</b></div><div class="dp-ctl" id="running">-</div></div>
   <div class="dp-row"><div class="dp-lbl"><b>Latest release</b><span id="notes"></span></div><div class="dp-ctl" id="latest">-</div></div>
-  <div class="dp-row"><div class="dp-lbl"><b>Card image</b><span id="imgnote">What the update cannot carry (the kernel, the WiFi driver) comes with a card image</span></div><div class="dp-ctl" id="image">-</div></div>
+  <div class="dp-row"><div class="dp-lbl"><b>Card image</b><span id="imgnote">What the update cannot carry (the root filesystem's packages) comes with a card image</span></div><div class="dp-ctl" id="image">-</div></div>
+  <div class="dp-row"><div class="dp-lbl"><label for="kernel"><b>Also the kernel</b></label><span>The bundle's kernel and its modules onto the SD card, when they differ from the card's (both Install buttons)</span></div><div class="dp-ctl"><input id="kernel" type="checkbox"></div></div>
+  <div class="dp-row"><div class="dp-lbl"><label for="uboot"><b>Also U-Boot</b></label><span>The bundle's bootloader onto the SD card, when it differs from the card's; read back to check, the old one put back if not as written</span></div><div class="dp-ctl"><input id="uboot" type="checkbox"></div></div>
   <div class="dp-body" style="border-top:1px solid #1a283c">
     <div class="actions" style="margin-top:0">
       <button type="button" id="check">Check</button>
@@ -30,6 +32,17 @@
   </div>
 </form>
 
+<div class="dp-card" id="bootcard" style="display:none">
+  <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-cpu"/></svg></span><div><h3>SD card kernel and U-Boot</h3><p>The ones the last install with a tick replaced are kept on the card</p></div></div>
+  <div class="dp-row"><div class="dp-lbl"><b>Last written</b></div><div class="dp-ctl" id="boot">-</div></div>
+  <div class="dp-body" style="border-top:1px solid #1a283c">
+    <div class="actions" style="margin-top:0">
+      <button type="button" id="bootback">Put the previous kernel and U-Boot back</button>
+      <span class="status" id="bstatus"></span>
+    </div>
+  </div>
+</div>
+
 <div class="dp-card">
   <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-sync"/></svg></span><div><h3>Previous version</h3><p>The files of the version before the last update are kept until the next one</p></div></div>
   <div class="dp-row"><div class="dp-lbl"><b>Last update</b></div><div class="dp-ctl" id="last">-</div></div>
@@ -47,14 +60,28 @@ var showStatus = function(sel, text, error=false) {
   el.toggleClass("error", error);
   el.html('<span class="dot"></span>').append(document.createTextNode(text));
 }
+var jobStatus = function(what) {
+  return what == "install" ? "#ustatus" : what == "rollback" ? "#rstatus" : what == "boot-rollback" ? "#bstatus" : "#status";
+}
+var bootFlags = function() { return {kernel: $("#kernel").prop("checked") ? 1 : 0, uboot: $("#uboot").prop("checked") ? 1 : 0}; }
 var fail = function(xhr) { showStatus("#status", xhr.responseJSON ? xhr.responseJSON.msg : "Failed", true); }
 var poll = null;
 
 var render = function(st, mine) {
   $("#running").text("v" + (st.running || "?"));
   if (st.image) {
-    $("#image").text(st.image.needed ? "a newer one is out" : "up to date");
-    if (st.image.needed) $("#imgnote").text("This version's card image brings " + st.image.note + ": write it from the releases page; settings and logs stay on the card");
+    $("#image").text(st.image.needed ? (st.image.boot ? "wants the bundle's " + st.image.boot.join(" and ") : "a newer one is out") : "up to date");
+    if (st.image.needed && st.image.boot) $("#imgnote").text("This version wants " + st.image.note + ": the bundle's " + st.image.boot.join(" and ") + " on the SD card bring it (tick below and install its bundle file), or its card image");
+    else if (st.image.needed) $("#imgnote").text("This version's card image brings " + st.image.note + ": write it from the releases page; settings and logs stay on the card");
+  }
+  /* the SD card's kernel and U-Boot the last install with a tick wrote: the ones before can go back */
+  var b = st.boot;
+  $("#bootcard").toggle(!!(b && b.state));
+  if (b && b.state) {
+    var parts = [b.kernel ? "the kernel" + (b.release ? " " + b.release : "") : "", b.uboot && b.uboot != "same" ? "U-Boot" : ""].filter(Boolean).join(" and ") || "nothing new";
+    $("#boot").text(parts + " with v" + b.version + (b.when ? ", " + new Date(b.when * 1000).toLocaleString() : "") +
+                    (b.state == "done" ? " (from the next power-on)" : ": " + b.state));
+    $("#bootback").toggle(b.state == "done");
   }
   if (st.pending) $("#running").text("v" + st.running + " (installed, waiting for its first minute)");
   if (st.last) {
@@ -67,14 +94,17 @@ var render = function(st, mine) {
     var p = (st.progress || "").split(" "), text = "Working...";
     if (p[0] == "download") text = "Downloading " + (p[1] / 1e6).toFixed(1) + (p[2] > 0 ? " of " + (p[2] / 1e6).toFixed(1) : "") + " MB";
     else if (p[0] == "verify") text = "Checking the files: " + p[1] + " of " + p[2];
+    else if (p[0] == "kernel") text = "Writing the kernel to the SD card: " + p[1] + " of " + p[2];
+    else if (p[0] == "uboot") text = "Writing U-Boot to the SD card, then reading it back";
     else if (p[0] == "install") text = "Installing: " + p[1] + " of " + p[2] + " files";
-    showStatus(st.job.what == "install" ? "#ustatus" : st.job.what == "rollback" ? "#rstatus" : "#status", text);
+    showStatus(jobStatus(st.job.what), text);
     if (!poll) poll = setInterval(refresh, 1000);
   } else if (poll || (mine === true && st.job && st.job.what)) {
     if (poll) { clearInterval(poll); poll = null; }
     var r = st.job.result || "";
-    var sel = st.job.what == "install" ? "#ustatus" : st.job.what == "rollback" ? "#rstatus" : "#status";
-    if (r.startsWith("ok")) showStatus(sel, "Done: " + r.slice(3) + ". The radio software is restarting; this page comes back in a moment.");
+    var sel = jobStatus(st.job.what);
+    if (r.startsWith("ok") && st.job.what == "boot-rollback") showStatus(sel, "Done: " + r.slice(3));
+    else if (r.startsWith("ok")) showStatus(sel, "Done: " + r.slice(3) + ". The radio software is restarting; this page comes back in a moment.");
     else showStatus(sel, r.replace(/^error /, "Failed: "), true);
     setTimeout(refresh, 8000);
   }
@@ -96,7 +126,10 @@ $("#check").on("click", function() {
     $("#notes").text((c.notes || "").split("\n")[0].slice(0, 120));
     $("#upgrade").toggle(!!c.newer);
     showStatus("#status", c.newer ? "v" + c.latest + " is available" : "Up to date");
-    if (c.newer && c.image_needed) {
+    if (c.newer && c.image_boot) {
+      /* what its card image level brings, its bundle's kernel and U-Boot bring: tick them */
+      $("#imgnote").text("v" + c.latest + " needs " + (c.image_note || "a newer kernel") + ": tick " + c.image_boot.map(function(p) { return p == "uboot" ? "Also U-Boot" : "Also the kernel"; }).join(" and ") + " before Install, no card image needed");
+    } else if (c.newer && c.image_needed) {
       /* the release also has a new card image for this radio: the update brings the rest */
       $("#image").empty().append($("<a>").attr("href", c.image_url || "https://github.com/" + (c.repo || "MAVProxyUser/X6200-claude-assist-UI") + "/releases/latest").text("v" + c.latest + " image"));
       $("#imgnote").text("v" + c.latest + " also has a new card image, bringing " + (c.image_note || "more") + ". Install updates the radio software now; write the image when convenient (settings and logs stay)");
@@ -105,8 +138,14 @@ $("#check").on("click", function() {
 });
 
 $("#upgrade").on("click", function() {
-  if (!confirm("Download and install the latest release? The radio software restarts at the end.")) return;
-  $.post('/api/update/upgrade', {}, started).fail(fail);
+  var f = bootFlags(), also = (f.kernel ? " With the kernel" + (f.uboot ? " and U-Boot" : "") : f.uboot ? " With U-Boot" : "");
+  if (!confirm("Download and install the latest release? The radio software restarts at the end." + (also ? also + " on the SD card, from the next power-on." : ""))) return;
+  $.post('/api/update/upgrade', f, started).fail(fail);
+});
+
+$("#bootback").on("click", function() {
+  if (!confirm("Put the kernel and U-Boot the last install replaced back on the SD card? They start at the next power-on.")) return;
+  $.post('/api/update/boot-rollback', {}, started).fail(function(xhr) { showStatus("#bstatus", xhr.responseJSON ? xhr.responseJSON.msg : "Failed", true); });
 });
 
 $("#rollback").on("click", function() {
@@ -118,7 +157,7 @@ $("#upl").on("submit", function(e) {
   e.preventDefault();
   var f = $("#file")[0].files[0];
   if (!f) { showStatus("#ustatus", "Choose a file first", true); return; }
-  var fd = new FormData(); fd.append("file", f);
+  var fd = new FormData(), bf = bootFlags(); fd.append("file", f); fd.append("kernel", bf.kernel); fd.append("uboot", bf.uboot);
   showStatus("#ustatus", "Uploading " + (f.size / 1e6).toFixed(1) + " MB...");
   $.ajax({url: "/api/update/upload", type: "POST", data: fd, processData: false, contentType: false, dataType: "json",
           success: started, error: function(xhr) { showStatus("#ustatus", xhr.responseJSON ? xhr.responseJSON.msg : "Upload failed", true); }});

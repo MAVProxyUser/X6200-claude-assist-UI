@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -23,6 +24,11 @@ void update_watch_status(char *buf, size_t n);
 
 /* A newer release fetched and asked about once per version: a minute after the start, then every ten minutes */
 void update_watch_init(void);
+
+/* Settings > Info > Update's Install: the newer release the last check found (/mnt/update/check.json) fetched and
+ * asked about now, the question's tick boxes and all, whether said before or not. False when there is none to fetch,
+ * or one is being fetched, asked about or installed already */
+bool update_watch_now(void);
 
 #ifdef __cplusplus
 }

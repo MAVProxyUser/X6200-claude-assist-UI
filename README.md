@@ -247,8 +247,8 @@ this repository or a fork of it: a download rests on HTTPS to GitHub, and each f
 own list of SHA-256 sums. RF.Guru's releases are not this updater's business: their GUI would drop everything above.
 Updates can also carry the SD card's kernel (with its modules) and U-Boot: the radio's update question offers a
 tick box for each when they differ from the card's, unticked, and writes them only to the SD card it started from
-(never the internal eMMC), the old ones kept, from the next power-on (`x6100-update boot-rollback` goes back; see the
-manual's [SD card's kernel and U-Boot](docs/MANUAL.md#the-sd-cards-kernel-and-u-boot)).
+(never the internal eMMC), the old ones kept, from the next power-on (the web Update page has the same tick boxes and
+a button to go back; see the manual's [SD card's kernel and U-Boot](docs/MANUAL.md#the-sd-cards-kernel-and-u-boot)).
 
 A radio still on an older card image has RF.Guru's updater, which asks RF.Guru's releases and wants their signature:
 write this fork's card image once, or `touch /mnt/update/allow-unsigned` over SSH and give the web Update page this

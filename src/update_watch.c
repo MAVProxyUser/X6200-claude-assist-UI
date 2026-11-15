@@ -7,9 +7,11 @@
  *  whatever is on the screen (as tci_ask.c asks): its version, the commit it was built from and the bundle's MD5,
  *  "Apply it?" Yes or No. No is chosen when it opens; the MFK turns the choice and its press confirms, the keyboard's
  *  arrows and Enter do the same, Esc is No, a touch takes a choice. Yes installs it (x6100-update install: the radio's
- *  software restarts), what it is doing shown meanwhile in a box with a bar; No leaves it for Settings > Info > Update.
- *  The boxes fit a screen turned to portrait (the Sentry's G). A release that wants a newer card image is only
- *  said, as before: the bundle alone cannot bring it.
+ *  software restarts), what it is doing shown meanwhile in a box with a bar; No leaves it for Settings > Info > Update,
+ *  whose Install asks the same question (update_watch_now). The bundle's kernel and U-Boot for the SD card are a tick
+ *  box each when they differ from the card's, "needed" when the version's card image level is reached by them. The
+ *  boxes fit a screen turned to portrait (the Sentry's G). A release that wants a newer card image its bundle cannot
+ *  bring is only said by the daily look; Settings' Install still asks, saying so.
  */
 #include "update_watch.h"
 
@@ -146,6 +148,8 @@ static char        uw_ver[24], uw_commit[48], uw_md5[40], uw_krel[32];
 static lv_obj_t   *box, *btn[PICKS];
 static lv_obj_t   *opt_row[OPTS];   /* a tick box's row, NULL when not offered */
 static bool        opt_offer[OPTS], opt_on[OPTS];
+static bool        opt_need[OPTS];  /* the version's card image level wants it on the card */
+static bool        uw_image;        /* a newer card image wanted all the same (Settings' Install asks anyway) */
 static lv_obj_t   *back;            /* focused before the box took the keys */
 static bool        back_editing, picked;
 static int         sel;             /* the item chosen: the offered tick boxes, then Yes, then No */
@@ -179,12 +183,14 @@ static void opt_text(int k) {
     static const char *const what[OPTS] = {"the kernel", "the bootloader (U-Boot)"};
 
     if (!opt_row[k]) return;
+    const char *need = opt_need[k] ? ": this version needs it" : "";
+
     if (k == OPT_KERNEL && uw_krel[0])
-        lv_label_set_text_fmt(lv_obj_get_child(opt_row[k], 0), "[%s] Also update %s on the SD card (%s)",
-                              opt_on[k] ? "X" : " ", what[k], uw_krel);
+        lv_label_set_text_fmt(lv_obj_get_child(opt_row[k], 0), "[%s] Also update %s on the SD card (%s)%s",
+                              opt_on[k] ? "X" : " ", what[k], uw_krel, need);
     else
-        lv_label_set_text_fmt(lv_obj_get_child(opt_row[k], 0), "[%s] Also update %s on the SD card",
-                              opt_on[k] ? "X" : " ", what[k]);
+        lv_label_set_text_fmt(lv_obj_get_child(opt_row[k], 0), "[%s] Also update %s on the SD card%s",
+                              opt_on[k] ? "X" : " ", what[k], need);
 }
 
 static void show_sel(void) {
@@ -541,6 +547,15 @@ static void ask(void) {
         lv_label_set_text(obj, "Ticked, it is written to the SD card the radio started from (never the internal "
                                "memory), the old one kept, and starts at the next power-on.");
     }
+    if (uw_image) {
+        obj = lv_label_create(box);
+        lv_obj_set_width(obj, LV_PCT(100));
+        lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(obj, VF(16), 0);
+        lv_obj_set_style_text_color(obj, TC(text_dim), 0);
+        lv_label_set_text(obj, "This version also wants a newer card image, which the update cannot bring: Settings > "
+                               "Info > Update says what it brings.");
+    }
 
     row = lv_obj_create(box);
     lv_obj_remove_style_all(row);
@@ -584,6 +599,9 @@ static void bundle_info_done(const char *out, int status, void *user) {
     (void)user;
     opt_offer[OPT_KERNEL] = status == 0 && json_true(out, "kernel");
     opt_offer[OPT_UBOOT]  = status == 0 && json_true(out, "uboot");
+    opt_need[OPT_KERNEL]  = opt_offer[OPT_KERNEL] && json_true(out, "need_kernel");
+    opt_need[OPT_UBOOT]   = opt_offer[OPT_UBOOT] && json_true(out, "need_uboot");
+    if (status == 0) uw_image = json_true(out, "image_needed");
     json_str(out, "kernel_release", uw_krel, sizeof(uw_krel));
     ask();
 }
@@ -612,6 +630,21 @@ static void fetched(const char *out, int status, void *user) {
     sh_run(UPD_CTL " bundle-info " BUNDLE, bundle_info_done, NULL);
 }
 
+static bool url_ok(const char *url) {
+    return strncmp(url, "https://", 8) == 0 && !strpbrk(url, "'\\\"$` ");
+}
+
+/* The release's bundle fetched, then asked about */
+static void fetch(const char *latest, const char *url, bool image) {
+    char cmd[640];
+
+    snprintf(uw_ver, sizeof(uw_ver), "%s", latest);
+    uw_image = image;
+    snprintf(cmd, sizeof(cmd), UPD_CTL " download '%s' && md5sum " BUNDLE, url);
+    uw = UW_FETCHING;
+    sh_run(cmd, fetched, NULL);
+}
+
 static void watch_cb(lv_timer_t *t) {
     char  latest[24], seen[24] = "", url[512];
     bool  image;
@@ -625,18 +658,25 @@ static void watch_cb(lv_timer_t *t) {
         fclose(f);
     }
     if (!strcmp(seen, latest)) return;
-    if (image || strncmp(url, "https://", 8) != 0 || strpbrk(url, "'\\\"$` ")) {
+    if (image || !url_ok(url)) {
         /* a card image wanted too (or no bundle to fetch): said, for Settings > Info > Update */
         msg_schedule_long_text_fmt("OpenX6X00 %s is out: Settings > Info > Update", latest);
         announced_set(latest);
         return;
     }
-    char cmd[640];
+    fetch(latest, url, false);
+}
 
-    snprintf(uw_ver, sizeof(uw_ver), "%s", latest);
-    snprintf(cmd, sizeof(cmd), UPD_CTL " download '%s' && md5sum " BUNDLE, url);
-    uw = UW_FETCHING;
-    sh_run(cmd, fetched, NULL);
+bool update_watch_now(void) {
+    char latest[24], url[512];
+    bool image;
+
+    if (uw != UW_IDLE) return false;
+    if (!newer_release_ex(latest, sizeof(latest), &image, url, sizeof(url), uw_commit, sizeof(uw_commit)) ||
+        !url_ok(url))
+        return false;
+    fetch(latest, url, image);
+    return true;
 }
 
 void update_watch_init(void) {
