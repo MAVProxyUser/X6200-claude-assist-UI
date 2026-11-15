@@ -25,9 +25,12 @@ bool gui_state_restoring(void);
 /* Restoring: the place the GUI before this one was at, as it was read at the start (GUI_PLACE_...); 0 otherwise */
 int  gui_state_start_place(void);
 
-/* Kept under a key, written out within 2 s of a change; read back at a restart */
+/* Kept under a key, written out within 2 s of a change (DATA's copy a minute at most behind); read back at a restart
+ * and at the next switch-on */
 void    gui_state_set(const char *key, int32_t val);
 int32_t gui_state_get(const char *key, int32_t def);
+/* Written out now, DATA's copy too: the power-off */
+void    gui_state_flush(void);
 
 #ifdef __cplusplus
 }

@@ -969,6 +969,7 @@ static void on_buttons_hide_change(Subject *subj, void *user_data) {
  * audio), then radio_poweroff() leaves the base with nothing set before Linux's shutdown and the "s" at its end */
 static void power_off_now(void) {
     msg_update_text_fmt("Power off");
+    gui_state_flush();              /* where the GUI is, for the next switch-on (gui_state.c) */
     cluster_client_stop();          /* the cluster link closed, not left to time out at the node */
     if (radio_get_state() == RADIO_RX)
         band_keep_end();            /* the Scanner or Propagation open: the dials back first, never on the air */
