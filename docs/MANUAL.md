@@ -735,10 +735,10 @@ written through to the card before it replaces the last copy, so a power cut kee
 ### G WALKIE
 
 The X6200 as a walkie-talkie, in the same look, **held up**: G turns the screen to portrait (480 x 800, as the
-Walkie app does). Only F4 (the spectrum's view) and F5 (the group and mode) have names, at the bottom left in boxes
-as small as their names: F4's `3D` (or `2D`) in the lamp's row, F5's under it beside the radio's state. F1, F2 and
-F3 have no box (F1 and F2 still step CB's channels, as the knobs do), so the channel, the spectrum and the voiceprint
-run from edge to edge. G is the X6200's alone: the stick
+Walkie app does). Only F4 (the spectrum's view) and F5 (the group and mode) have names, in boxes as small as their
+names: F4's `3D` (or `2D`) beside its key in the lamp's row, F5's at the bottom beside the message box. F1, F2 and F3
+have no box (F1 and F2 still step CB's channels, as the knobs do), so the channel, the spectrum and the voiceprint
+(as tall as each other) and the radio's state run from edge to edge. G is the X6200's alone: the stick
 only receives and has B for that, so G neither shows nor plays it (shown with LISTEN on RTL or BOTH, G plays the
 X6200 alone; A or B puts its own LISTEN back when shown).
 
@@ -759,9 +759,10 @@ X6200 alone; A or B puts its own LISTEN back when shown).
   spectrum's, are framed, so they read over the picture.
 - **The lamp**, under the voiceprint: RX SIGNAL when the audio stands 6 dB over its own noise, RX QUIET, TX ARMED, ON
   AIR, TX LOCKED for a moment after PTT.
-- At the bottom, beside F5, the radio's state in larger lines: the squelch, the volume and the transmitter's lock;
-  the battery; the supply and the TX power setting; the processor and the base's version (the time is in both
-  title bars), refreshed each second. A build without portrait (on a PC) shows G in
+- The radio's state in larger lines: the squelch, the volume and the transmitter's lock; the battery; the supply
+  and the TX power setting; the processor and the base's version (the time is in both title bars), refreshed each
+  second.
+- At the bottom, beside F5's box, what is on the dial, and a word for what was refused and what to press instead. A build without portrait (on a PC) shows G in
   landscape, in four boxes.
 
 **G follows the X6200**: its frequency and mode are the dial's, read live, and G never tunes by itself. A's scan
@@ -788,7 +789,9 @@ the VFO) is by hand: the Sentry stops moving the dial (MAN-OVERRIDE, as a turn o
   160, 80 and 40 m as hams use it, USB everywhere else (60 m, the ship and utility stations, 20 m up).
 - **F4**: the spectrum in 3D or 2D (flat, a waterfall).
 - **A/B** arms the X6200's transmitter for PTT (as on A) and locks it again; leaving G for any screen but A locks
-  it. **While TX is unlocked (armed) or on the air, the tuning knobs are locked** on every
+  it. **PTT while TX is locked** says what to press, on every screen of the Sentry: `PRESS A/B ON THE TOP PANEL TO
+  UNLOCK, THEN PTT` (from B to F: turn the ring to A or G first), with an arrow to where that key is: on G, held up,
+  into the bar's far G (A/B is beyond it on the top panel); on the other screens up to the bar's right end. **While TX is unlocked (armed) or on the air, the tuning knobs are locked** on every
   screen (the VFO, and the MFK where it tunes the X6200, on A and G), so a bump cannot move the transmitter: a turn
   says to lock TX (A/B) to tune again.
 

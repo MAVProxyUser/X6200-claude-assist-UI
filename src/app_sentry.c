@@ -498,6 +498,7 @@ static uint8_t  d3_lv[D3_ROWS][IMG_W];
 static int      d3_head, d3_count;
 static uint32_t d3_pal[256];
 static lv_obj_t *badge_l[2], *title_l, *status_l, *batt_l;
+static lv_obj_t *ab_arrow, *ab_tag;     /* PTT refused: where the A/B key is (landscape) */
 extern const lv_font_t power_sym_14;    /* the clock's: Montserrat's battery and bolt, and a plug (clock.c) */
 #define SYMBOL_PLUG "\xEF\x87\xA6"     /* U+F1E6 */
 typedef struct { lv_obj_t *frame, *cap, *line, *opt[12]; int n; } box_t;     /* opt: E SYSTEM's 9 rows the most */
@@ -1443,6 +1444,7 @@ static bool w_chan(int i);      /* channel i one of a service's defined channels
 static void walkie_group_mode(void);
 static void x62_by_hand(void);
 static bool dial_held(void);    /* TX unlocked or on the air: the tuning knobs held, and said so */
+static void w_say(const char *portrait, const char *title, const char *text);  /* G's message line, or the OSD */
 static void ws_view_next(void);
 static void ws_feed(void);      /* G's picture, a frame of the X6200's spectrum */
 static void walkie_arm(bool on);
@@ -2816,6 +2818,8 @@ static void osd_hide_cb(lv_timer_t *t) {
     lv_obj_add_flag(osd_text_l, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(osd_bar_frame, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(osd_bar, LV_OBJ_FLAG_HIDDEN);
+    if (ab_arrow) lv_obj_add_flag(ab_arrow, LV_OBJ_FLAG_HIDDEN);
+    if (ab_tag) lv_obj_add_flag(ab_tag, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* A word over the screen for 2.5 s: what a knob or key just did; bar 0-100, or -1 none */
@@ -4414,9 +4418,9 @@ static bool front_key(int key, int state) {
         case KEYPAD_FST:
             if (tap) osd("TUNING STEP", "HOW FAR ONE CLICK OF THE VFO KNOB MOVES.", -1);
             return false;
-        case KEYPAD_PTT:
-            if (scr == SCR_WALKIE && !g_armed && state != KEYPAD_RELEASE) walkie_ptt();
-            return false;       /* refused (radio_rx_only), unless G armed it */
+        case KEYPAD_PTT:            /* refused (radio_rx_only) unless armed: said what to press, on every screen */
+            if (rx_held && !g_armed && state != KEYPAD_RELEASE && state != KEYPAD_LONG_RELEASE) walkie_ptt();
+            return false;
         default:
             return false;       /* POWER, F1-F5: as ever */
     }
@@ -4743,9 +4747,11 @@ static void build_system(lv_obj_t *p) {
 #define P_TOP   (6 + P_BAR + 6)         /* under the arm across the top */
 #define P_KEY   160                     /* the keys' pitch: F1 at the top */
 #define P_KW    76                      /* F5 (group and mode): its name in two lines */
-#define P_VW    30                      /* F4 (view): as small as "3D", in the lamp's row */
-#define P_BOT   112                     /* the bottom row: F5's box and the radio's state, as tall as the state */
-#define P_LAMP  46                      /* the lamp's row */
+#define P_VW    30                      /* F4 (view): as small as "3D", in the lamp's row, beside its key */
+#define P_LAMP  46                      /* the lamp's row, its middle at F4's key */
+#define P_LAMPY (3 * P_KEY + P_KEY / 2 - P_LAMP / 2)
+#define P_STATE 92                      /* the radio's state: four lines */
+#define P_BOTY  (P_LAMPY + P_LAMP + 6 + P_STATE + 6)   /* the bottom row: F5's box and the messages */
 #define P_SX    (P_KW + 6)              /* beside F5 */
 #define P_SW    (P_VX - 6 - P_SX)
 #define P_FX    6                       /* beside no box (F1, F2, F3: CB's CH -/+ on F1 and F2): the widgets from the
@@ -4771,6 +4777,7 @@ typedef struct {
     lv_img_dsc_t *ws_frame;
     int           ws_w, ws_h, ws_cap_x, ws_cap_y;
     int           cap_x, cap_y;                       /* the voiceprint's caption: its right edge, its top */
+    lv_obj_t     *ab_arrow, *ab_tag;                  /* portrait: an arrow to the A/B key, while PTT is refused */
     lv_obj_t     *sm_img, *am_img;                    /* portrait: the S-meter and the audio as short bars */
     lv_img_dsc_t *sm_frame, *am_frame;
     int           mb_w, sm_lit, am_lit;
@@ -4825,6 +4832,26 @@ static lv_obj_t *tag_make(lv_obj_t *p, lv_color_t c, const char *t, int x, int y
     lv_label_set_text(l, "");
     tag_text(l, t, x, y, left);
     return l;
+}
+
+/* An arrow from (x0, y0) to its tip (x1, y1), hidden at first: one line, the shaft and the two strokes of its head
+ * (pts: its five points, kept by the caller as the line keeps a pointer to them) */
+static lv_obj_t *arrow_make(lv_obj_t *p, lv_point_t *pts, int x0, int y0, int x1, int y1) {
+    float     dx = (float)(x1 - x0), dy = (float)(y1 - y0), l = sqrtf(dx * dx + dy * dy);
+    float     bx = -dx / l * 16, by = -dy / l * 16, c = cosf(0.5f), sn = sinf(0.5f);
+    lv_obj_t *ln = lv_line_create(p);
+
+    pts[0] = (lv_point_t){(lv_coord_t)x0, (lv_coord_t)y0};
+    pts[1] = (lv_point_t){(lv_coord_t)x1, (lv_coord_t)y1};
+    pts[2] = (lv_point_t){(lv_coord_t)(x1 + bx * c - by * sn), (lv_coord_t)(y1 + bx * sn + by * c)};
+    pts[3] = pts[1];
+    pts[4] = (lv_point_t){(lv_coord_t)(x1 + bx * c + by * sn), (lv_coord_t)(y1 - bx * sn + by * c)};
+    lv_line_set_points(ln, pts, 5);
+    lv_obj_set_style_line_width(ln, 4, 0);
+    lv_obj_set_style_line_color(ln, amb, 0);
+    lv_obj_set_style_line_rounded(ln, true, 0);
+    lv_obj_add_flag(ln, LV_OBJ_FLAG_HIDDEN);
+    return ln;
 }
 
 /* A short bar: segments from the spectrum's deep orange to its yellow, lit up to level (0-1), the rest dim */
@@ -5012,7 +5039,12 @@ static void walkie_step(void) {
                                         : (g_portrait ? "RX  QUIET" : "RX\nQUIET"));
     tag_text(wui->cap_l, air ? "VOICEPRINT  TX  0-4 KHZ" : from_rtl ? "VOICEPRINT  RTL  0-4 KHZ" : "VOICEPRINT  RX  0-4 KHZ",
              wui->cap_x, wui->cap_y, false);
-    if (g_portrait && wui->msg_l && ptt_ms && lv_tick_get() - ptt_ms > 4000) lv_label_set_text(wui->msg_l, "");
+    if (g_portrait && wui->msg_l && ptt_ms && lv_tick_get() - ptt_ms > 4000) {
+        lv_label_set_text(wui->msg_l, "");
+        if (wui->ab_arrow) lv_obj_add_flag(wui->ab_arrow, LV_OBJ_FLAG_HIDDEN);
+        if (wui->ab_tag) lv_obj_add_flag(wui->ab_tag, LV_OBJ_FLAG_HIDDEN);
+        ptt_ms = 0;
+    }
 }
 
 /* The A/B (VFO) key on A and G: the transmitter armed for PTT (the Sentry's receive-only hold let go: the radio's own
@@ -5041,11 +5073,19 @@ static void walkie_arm(bool on) {
     show_walkie();
 }
 
-/* PTT pressed on G: refused (the Sentry is receive only), and said so where it is looked at */
+/* PTT pressed with TX locked (the Sentry is receive only): refused, and said what unlocks it and where that key is:
+ * A/B on the top panel, on A or G (the screens that transmit) */
 static void walkie_ptt(void) {
+    lv_obj_t *a = g_portrait ? wui->ab_arrow : ab_arrow, *t = g_portrait ? wui->ab_tag : ab_tag;
+
     ptt_ms = lv_tick_get() | 1;
-    if (g_portrait) lv_label_set_text(wui->msg_l, "PTT REFUSED: THE SENTRY IS RECEIVE ONLY");
-    else osd("PTT REFUSED", "THE SENTRY IS RECEIVE ONLY: NOTHING IS TRANSMITTED FROM HERE.", -1);
+    if (a) lv_obj_clear_flag(a, LV_OBJ_FLAG_HIDDEN);    /* where the A/B key is */
+    if (t) lv_obj_clear_flag(t, LV_OBJ_FLAG_HIDDEN);
+    if (scr == SCR_SCAN || scr == SCR_WALKIE)
+        w_say("TX LOCKED: PRESS A/B ON THE TOP PANEL TO UNLOCK, THEN PTT", "TX LOCKED",
+              "PTT REFUSED. PRESS A/B ON THE TOP PANEL TO UNLOCK TX, THEN PTT. A/B AGAIN LOCKS IT.");
+    else
+        osd("TX LOCKED", "PTT REFUSED. TURN THE RING TO A OR G, THEN PRESS A/B ON THE TOP PANEL TO UNLOCK TX.", -1);
 }
 
 /* ---- G's channels: a plan across both radios, each served by the one that takes it ----
@@ -5779,30 +5819,28 @@ static void build_walkie_portrait(void) {
     badge_turned(PW - 43, PH - 50);     /* and the bar's other end */
 
     /* F1, F2 and F3 have no box (CB's CH -/+ on F1 and F2; the knobs step CB too): the channel, the spectrum and the
-     * voiceprint from the screen's edge; F4 and F5 boxes as small as their names, at the bottom */
-    int y1 = 2 * P_KEY - 2, y2 = 2 * P_KEY + 2;
+     * voiceprint run from the screen's edge, the spectrum and the voiceprint as tall as each other; F4's box, as
+     * small as "3D", beside its key in the lamp's row; under it the radio's state, then F5's box and the messages */
+    int ys = P_TOP + 92 + 6, yv, hh = (P_LAMPY - 6 - ys - 6) / 2;
 
-    /* the channel: its number big, beside it the radio, the group and the frequency; under them what is there, and
-     * the S-meter and the audio as short bars in the spectrum's colours */
-    rect(g_scr, P_FX, P_TOP, P_FW, 112, 3, false);
-    u->num_l  = label(g_scr, &pixel_44, amb, P_FX + 4, P_TOP + 12, 120, LV_TEXT_ALIGN_CENTER, "--");
+    /* the channel: its number big, beside it the radio, the group and the frequency; under them the S-meter and the
+     * audio as short bars in the spectrum's colours */
+    rect(g_scr, P_FX, P_TOP, P_FW, 92, 3, false);
+    u->num_l  = label(g_scr, &pixel_44, amb, P_FX + 4, P_TOP + 10, 120, LV_TEXT_ALIGN_CENTER, "--");
     u->via_l  = label(g_scr, &pixel_16, amb, P_FX + 130, P_TOP + 6, P_FW - 138, LV_TEXT_ALIGN_LEFT, "");
     lv_label_set_recolor(u->via_l, true);
     u->band_l = label(g_scr, &pixel_20, amb, P_FX + 130, P_TOP + 24, P_FW - 138, LV_TEXT_ALIGN_LEFT, "");
     u->freq_l = label(g_scr, &pixel_20, amb, P_FX + 130, P_TOP + 46, P_FW - 138, LV_TEXT_ALIGN_LEFT, "");
     u->info_l = NULL;
-    u->ch.opt[0] = label(g_scr, &pixel_16, dim, P_FX + 8, P_TOP + 70, P_FW - 16, LV_TEXT_ALIGN_LEFT, "");   /* what */
-    lv_label_set_long_mode(u->ch.opt[0], LV_LABEL_LONG_SCROLL_CIRCULAR);
-    u->ch.n = 1;
     {
         int half = (P_FW - 24) / 2;
 
-        mbar_make(u, g_scr, P_FX + 8, P_TOP + 93, half, false);
-        mbar_make(u, g_scr, P_FX + 16 + half, P_TOP + 93, half, true);
+        mbar_make(u, g_scr, P_FX + 8, P_TOP + 74, half, false);
+        mbar_make(u, g_scr, P_FX + 16 + half, P_TOP + 74, half, true);
     }
-    /* the X6200's spectrum around the dial (3D or flat: F4), edge to edge down to F2's end */
+    /* the X6200's spectrum around the dial (3D or 2D: F4), edge to edge */
     {
-        int y = P_TOP + 118, h = y1 - y;
+        int y = ys, h = hh;
 
         rect(g_scr, P_FX, y, P_FW, h, 3, false);
         u->ws_w     = P_FW - 6;
@@ -5818,20 +5856,36 @@ static void build_walkie_portrait(void) {
         u->ws_cap_l = tag_make(g_scr, amb, ws_3d ? "100 KHZ  3D" : "100 KHZ  2D", u->ws_cap_x, u->ws_cap_y, false);
         ws_draw();
     }
-    /* the voiceprint edge to edge, down to the lamp's row: F4's box is as small as "3D" and sits in that row, beside
-     * the lamp; under them the bottom row: F5's box (group and mode) and the radio's state, as tall as the state */
+    /* the voiceprint, edge to edge, as tall as the spectrum, down to the lamp's row */
+    yv = ys + hh + 6;
+    vp_make(u, g_scr, P_FX + 4, yv + 3, P_FW - 8, P_LAMPY - 6 - yv - 6);
+    /* the lamp's row: F4's box (buttons_vertical_place) beside its key, the lamp */
+    u->lamp = rect(g_scr, P_FX + P_VW + 6, P_LAMPY, P_FW - P_VW - 6, P_LAMP, 3, false);
+    lv_obj_set_style_bg_color(u->lamp, amb, 0);
+    u->lamp_l = label(g_scr, &pixel_28, amb, P_FX + P_VW + 6, P_LAMPY + 9, P_FW - P_VW - 6, LV_TEXT_ALIGN_CENTER,
+                      "RX  QUIET");
+    /* the radio's state, edge to edge */
     {
-        int yb = PH - 6 - P_BOT, yl = yb - 6 - P_LAMP;
+        int y = P_LAMPY + P_LAMP + 6;
 
-        vp_make(u, g_scr, P_FX + 4, y2 + 3, P_FW - 8, yl - 6 - (y2 + 3) - 3);
-        u->lamp = rect(g_scr, P_FX + P_VW + 6, yl, P_FW - P_VW - 6, P_LAMP, 3, false);
-        lv_obj_set_style_bg_color(u->lamp, amb, 0);
-        u->lamp_l = label(g_scr, &pixel_28, amb, P_FX + P_VW + 6, yl + 9, P_FW - P_VW - 6, LV_TEXT_ALIGN_CENTER,
-                          "RX  QUIET");
-        rect(g_scr, P_SX, yb, P_SW, P_BOT, 3, false);
-        u->info_l = label(g_scr, &pixel_20, amb, P_SX + 8, yb + 6, P_SW - 16, LV_TEXT_ALIGN_LEFT, "");
+        rect(g_scr, P_FX, y, P_FW, P_STATE, 3, false);
+        u->info_l = label(g_scr, &pixel_20, amb, P_FX + 8, y + 6, P_FW - 16, LV_TEXT_ALIGN_LEFT, "");
         lv_label_set_recolor(u->info_l, true);      /* the battery's line coloured as it runs down */
-        u->msg_l  = label(g_scr, &pixel_20, amb, P_SX + 8, PH - 6 - 24, P_SW - 16, LV_TEXT_ALIGN_LEFT, "");
+    }
+    /* the bottom row: F5's box (buttons_vertical_place), beside it what is on the dial and a word for what was
+     * refused (and what to press instead) */
+    rect(g_scr, P_SX, P_BOTY, P_SW, PH - 6 - P_BOTY, 3, false);
+    u->ch.opt[0] = label(g_scr, &pixel_16, dim, P_SX + 8, P_BOTY + 6, P_SW - 16, LV_TEXT_ALIGN_LEFT, "");     /* what */
+    lv_label_set_long_mode(u->ch.opt[0], LV_LABEL_LONG_SCROLL_CIRCULAR);
+    u->ch.n  = 1;
+    u->msg_l = label(g_scr, &pixel_20, amb, P_SX + 8, P_BOTY + 26, P_SW - 16, LV_TEXT_ALIGN_LEFT, "");
+    /* PTT refused: an arrow under the words, right into the bar's far G, the A/B key beyond it on the top panel */
+    {
+        static lv_point_t pts[5];
+
+        u->ab_arrow = arrow_make(g_scr, pts, PW - 140, PH - 32, PW - 46, PH - 32);
+        u->ab_tag   = tag_make(g_scr, amb, "A/B", PW - 146, PH - 41, false);
+        lv_obj_add_flag(u->ab_tag, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -5845,8 +5899,8 @@ static void walkie_show(bool on) {
             static const lv_coord_t ws[5] = {0, 0, 0, P_VW, P_KW};
 
             buttons_vertical_w(g_scr, ws, P_KEY, P_TOP);
-            buttons_vertical_place(3, PH - 6 - P_BOT - 6 - P_LAMP, P_VW, P_LAMP);     /* F4: in the lamp's row */
-            buttons_vertical_place(4, PH - 6 - P_BOT, P_KW, P_BOT);                    /* F5: the bottom row */
+            buttons_vertical_place(3, P_LAMPY, P_VW, P_LAMP);              /* F4: beside its key, in the lamp's row */
+            buttons_vertical_place(4, P_BOTY, P_KW, PH - 6 - P_BOTY);      /* F5: the bottom row */
         }
         for (int i = 0; i < 5; i++) buttons_refresh(&btn[i]);
         lv_scr_load(g_scr);
@@ -5907,6 +5961,14 @@ static void build_overlays(void) {
     osd_text_l    = label(root, &pixel_20, amb, 146, 196, SW - 292, LV_TEXT_ALIGN_CENTER, "");
     osd_bar_frame = rect(root, 160, 250, SW - 320, 24, 2, false);
     osd_bar       = rect(root, 166, 255, 1, 14, 0, true);
+    /* PTT refused: an arrow from the OSD up to the bar's right end, where the A/B key is on the top panel */
+    {
+        static lv_point_t pts[5];
+
+        ab_arrow = arrow_make(root, pts, 690, 140, SW - 38, 52);
+        ab_tag   = tag_make(root, amb, "A/B", 694, 112, false);
+        lv_obj_add_flag(ab_tag, LV_OBJ_FLAG_HIDDEN);
+    }
     osd_hide_cb(lv_timer_create(osd_hide_cb, 100000, NULL));
 
     help_frame = rect(root, 14, 52, SW - 28, scr_h - 56, 3, false);
