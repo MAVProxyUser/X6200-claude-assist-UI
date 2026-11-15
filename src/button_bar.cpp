@@ -700,6 +700,8 @@ void buttons_vertical_w(lv_obj_t *parent, const lv_coord_t *ws, lv_coord_t h, lv
         lv_coord_t bw = ws[i] - 2 * BTN_INSET;
 
         lv_obj_set_parent(f, parent);
+        set_hidden(f, ws[i] <= 0);      /* width 0: no box at all (its key still works: buttons_press) */
+        if (ws[i] <= 0) continue;
         lv_obj_set_pos(f, BTN_INSET, i * h + t + BTN_INSET);
         lv_obj_set_size(f, bw, bh - t);
         /* the state images at this size too (the normal one is set with the text) */
@@ -717,6 +719,7 @@ void buttons_horizontal(lv_obj_t *parent) {
         lv_obj_t *f = slots[i].parent;
 
         lv_obj_set_parent(f, parent);
+        set_hidden(f, hidden);          /* shown again, unless the main screen hides its buttons */
         lv_obj_move_to_index(f, (int32_t)land_index[i]);
         lv_obj_set_pos(f, i * BTN_WIDTH + BTN_INSET, BOARD_DISP_H - BTN_HEIGHT + BTN_INSET);
         lv_obj_set_size(f, BTN_WIDTH - 2 * BTN_INSET, BTN_HEIGHT - 2 * BTN_INSET);

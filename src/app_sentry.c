@@ -4745,13 +4745,13 @@ static void build_system(lv_obj_t *p) {
 #define P_BAR   44                      /* the L's arms, as thick as every screen's title bar */
 #define P_VX    (PW - 3 - P_BAR)        /* the arm down the right: the landscape bar's place (3 px from the edge) */
 #define P_TOP   (6 + P_BAR + 6)         /* under the arm across the top */
-#define P_SIDE  104                     /* a key's name in full: F3 (group and mode) and F4 (view) */
-#define P_X     (P_SIDE + 8)
-#define P_W     (P_VX - 6 - P_X)
 #define P_KEY   160                     /* the keys' pitch: F1 at the top */
-#define P_NARROW 40                     /* a key of little use (F1, F2 CB's channels only; F5 the TX lock) */
-#define P_NX    (P_NARROW + 6)          /* beside those, the widgets as wide as the rest of the screen */
-#define P_NW    (P_VX - 6 - P_NX)
+#define P_KW    76                      /* F3 (group and mode) and F4 (view): the only keys G names */
+#define P_X     (P_KW + 6)              /* beside them */
+#define P_W     (P_VX - 6 - P_X)
+#define P_FX    6                       /* beside F1, F2 and F5 (no box: CB's CH -/+, the TX lock, A/B's too):
+                                         * the widgets from the screen's edge */
+#define P_FW    (P_VX - 6 - P_FX)
 /* The arm down the right as the landscape bar: its name's line 3 px under the bar's top, the state's 24 px under it
  * (their middles across the arm), the text from 60 to 740 along it as the bar's from x 60 to 740 */
 #define P_VT    (PW - 3 - 3 - 10)
@@ -4770,7 +4770,11 @@ typedef struct {
     lv_obj_t     *vstatus_l, *vbatt_l;                /* and on the arm down the right, turned with the display */
     lv_obj_t     *ws_img, *ws_cap_l;                  /* portrait: the radio's spectrum around G's frequency */
     lv_img_dsc_t *ws_frame;
-    int           ws_w, ws_h;
+    int           ws_w, ws_h, ws_cap_x, ws_cap_y;
+    int           cap_x, cap_y;                       /* the voiceprint's caption: its right edge, its top */
+    lv_obj_t     *sm_img, *am_img;                    /* portrait: the S-meter and the audio as short bars */
+    lv_img_dsc_t *sm_frame, *am_frame;
+    int           mb_w, sm_lit, am_lit;
     lv_obj_t     *num_l, *band_l, *lamp, *lamp_l, *vp_img, *s_fill, *a_fill, *s_l, *a_l, *cap_l;
     lv_img_dsc_t *vp_frame;
     int           vp_w, vp_h, bar_w;
@@ -4795,6 +4799,69 @@ static int16_t    vp_in[VP_FFT];
 static int        vp_have;
 static float      vp_floor = 20, vp_rms;
 static uint32_t   ptt_ms;
+
+/* A caption over a picture in a frame of its own (ink under it, an amber edge), so it reads over what is drawn: its
+ * left edge at x (left), or its right edge */
+static void tag_text(lv_obj_t *l, const char *t, int x, int y, bool left) {
+    lv_coord_t w = lv_txt_get_width(t, strlen(t), lv_obj_get_style_text_font(l, 0), 0, LV_TEXT_FLAG_NONE) + 8;
+
+    if (!strcmp(lv_label_get_text(l), t) && lv_obj_get_style_width(l, 0) == w) return;
+    lv_label_set_text(l, t);
+    lv_obj_set_width(l, w);
+    lv_obj_set_pos(l, left ? x : x - w, y);
+}
+
+static lv_obj_t *tag_make(lv_obj_t *p, lv_color_t c, const char *t, int x, int y, bool left) {
+    lv_obj_t *l = lv_label_create(p);
+
+    lv_obj_set_style_text_font(l, &pixel_16, 0);
+    lv_obj_set_style_text_color(l, c, 0);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_bg_color(l, ink, 0);
+    lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(l, 1, 0);
+    lv_obj_set_style_border_color(l, c, 0);
+    lv_obj_set_style_pad_top(l, 1, 0);
+    lv_obj_set_style_pad_bottom(l, 1, 0);
+    lv_label_set_text(l, "");
+    tag_text(l, t, x, y, left);
+    return l;
+}
+
+/* A short bar: segments from the spectrum's deep orange to its yellow, lit up to level (0-1), the rest dim */
+#define MB_H   10
+#define MB_SEG 6                        /* a segment and its gap */
+static void mbar_draw(lv_img_dsc_t *f, int w, float level) {
+    uint32_t *px = (uint32_t *)f->data, bg = argb(ink);
+    int       n  = w / MB_SEG, lit = (int)(level * n + 0.5f);
+
+    for (int i = 0; i < w * MB_H; i++) px[i] = bg;
+    for (int k = 0; k < n; k++) {
+        uint32_t c = d3_pal[n > 1 ? k * 255 / (n - 1) : 255];
+
+        c = k < lit ? 0xff000000 | c : scale_rgb(c, 0.2f);
+        for (int y = 0; y < MB_H; y++)
+            for (int x = k * MB_SEG; x < k * MB_SEG + MB_SEG - 2; x++) px[y * w + x] = c;
+    }
+}
+
+/* Its name, the bar and its value (a_l, s_l), at x, y, w wide in all */
+static void mbar_make(wui_t *u, lv_obj_t *p, int x, int y, int w, bool audio) {
+    int bw = (w - 30 - 72) / MB_SEG * MB_SEG;
+
+    label(p, &pixel_16, amb, x, y - 3, 28, LV_TEXT_ALIGN_LEFT, audio ? "AF" : "S");
+    lv_img_dsc_t *f   = lv_img_buf_alloc(bw, MB_H, LV_IMG_CF_TRUE_COLOR);
+    lv_obj_t     *img = lv_img_create(p);
+
+    mbar_draw(f, bw, 0);
+    lv_img_set_src(img, f);
+    lv_obj_set_pos(img, x + 26, y);
+    lv_obj_t *vl = label(p, &pixel_16, amb, x + 34 + bw, y - 3, w - 34 - bw, LV_TEXT_ALIGN_LEFT, "");    /* by its bar */
+
+    u->mb_w = bw;
+    if (audio) u->am_frame = f, u->am_img = img, u->a_l = vl, u->am_lit = -1;
+    else u->sm_frame = f, u->sm_img = img, u->s_l = vl, u->sm_lit = -1;
+}
 
 /* In place, radix 2 */
 static void vp_fft(float *re, float *im, int n) {
@@ -4900,14 +4967,34 @@ static void walkie_step(void) {
 
     s = s < 0 ? 0 : s > 1 ? 1 : s;
     a = a < 0 ? 0 : a > 1 ? 1 : a;
-    lv_obj_set_width(wui->s_fill, (int)(s * wui->bar_w) + 1);
-    lv_obj_set_width(wui->a_fill, (int)(a * wui->bar_w) + 1);
-    if (from_rtl) snprintf(t, sizeof(t), "RTL +%.0f DB", rtl_spectrum_level() < 0 ? 0 : rtl_spectrum_level());
-    else if (db >= -73) snprintf(t, sizeof(t), "S9+%d  %.0f DBM", (int)(db + 73), db);
-    else snprintf(t, sizeof(t), "S%d  %.0f DBM", db <= -127 ? 0 : (int)((db + 127) / 6), db);
-    lv_label_set_text(wui->s_l, t);
-    snprintf(t, sizeof(t), "%d DBFS", vp_rms > 1 ? (int)(20 * log10f(vp_rms / 32768)) : -90);
-    lv_label_set_text(wui->a_l, t);
+    if (wui->sm_frame) {                /* the short bars, redrawn when a segment more or less is lit */
+        int n = wui->mb_w / MB_SEG, ls = (int)(s * n + 0.5f), la = (int)(a * n + 0.5f);
+
+        if (ls != wui->sm_lit) {
+            wui->sm_lit = ls;
+            mbar_draw(wui->sm_frame, wui->mb_w, s);
+            lv_obj_invalidate(wui->sm_img);
+        }
+        if (la != wui->am_lit) {
+            wui->am_lit = la;
+            mbar_draw(wui->am_frame, wui->mb_w, a);
+            lv_obj_invalidate(wui->am_img);
+        }
+        if (db >= -73) snprintf(t, sizeof(t), "S9+%d", (int)(db + 73));
+        else snprintf(t, sizeof(t), "S%d", db <= -127 ? 0 : (int)((db + 127) / 6));
+        lv_label_set_text(wui->s_l, t);
+        snprintf(t, sizeof(t), "%d DB", vp_rms > 1 ? (int)(20 * log10f(vp_rms / 32768)) : -90);
+        lv_label_set_text(wui->a_l, t);
+    } else {
+        lv_obj_set_width(wui->s_fill, (int)(s * wui->bar_w) + 1);
+        lv_obj_set_width(wui->a_fill, (int)(a * wui->bar_w) + 1);
+        if (from_rtl) snprintf(t, sizeof(t), "RTL +%.0f DB", rtl_spectrum_level() < 0 ? 0 : rtl_spectrum_level());
+        else if (db >= -73) snprintf(t, sizeof(t), "S9+%d  %.0f DBM", (int)(db + 73), db);
+        else snprintf(t, sizeof(t), "S%d  %.0f DBM", db <= -127 ? 0 : (int)((db + 127) / 6), db);
+        lv_label_set_text(wui->s_l, t);
+        snprintf(t, sizeof(t), "%d DBFS", vp_rms > 1 ? (int)(20 * log10f(vp_rms / 32768)) : -90);
+        lv_label_set_text(wui->a_l, t);
+    }
     /* the lamp: a voice (the audio up) or a carrier (the meter up); PTT refused, said in it */
     /* a signal: the audio 6 dB over its own floor (followed slowly: the hiss, the band's noise), or the stick's
      * squelch open where one is set */
@@ -4924,8 +5011,8 @@ static void walkie_step(void) {
                                    : g_armed ? (g_portrait ? "TX  ARMED" : "TX\nARMED")
                                    : on ? (g_portrait ? "RX  SIGNAL" : "RX\nSIGNAL")
                                         : (g_portrait ? "RX  QUIET" : "RX\nQUIET"));
-    lv_label_set_text(wui->cap_l, air ? "VOICEPRINT  TX  0-4 KHZ" : from_rtl ? "VOICEPRINT  RTL  0-4 KHZ"
-                                                                           : "VOICEPRINT  RX  0-4 KHZ");
+    tag_text(wui->cap_l, air ? "VOICEPRINT  TX  0-4 KHZ" : from_rtl ? "VOICEPRINT  RTL  0-4 KHZ" : "VOICEPRINT  RX  0-4 KHZ",
+             wui->cap_x, wui->cap_y, false);
     if (g_portrait && wui->msg_l && ptt_ms && lv_tick_get() - ptt_ms > 4000) lv_label_set_text(wui->msg_l, "");
 }
 
@@ -5242,7 +5329,7 @@ static void walkie_key_label(int k, char *s, size_t n) {
     int i = w_match(), g;
 
     if (k <= 1) {
-        snprintf(s, n, "%s", w_chan(i) ? (k ? "CH\n+" : "CH\n-") : "");
+        snprintf(s, n, "%s", w_chan(i) ? (k ? "CH +" : "CH -") : "");      /* no box on G held up */
     } else if (k == 2) {
         g = i >= 0 ? i : w_start(w_hz());
         snprintf(s, n, "%s\n%s", g >= 0 ? w_chs[g].grp : "-", w_modes[w_mode_now()].name);
@@ -5388,7 +5475,7 @@ static void ws_feed(void) {
 /* F4 on G: the picture's rows in 3D or flat */
 static void ws_view_next(void) {
     ws_3d = !ws_3d;
-    if (wui->ws_cap_l) lv_label_set_text(wui->ws_cap_l, ws_3d ? "100 KHZ  3D" : "100 KHZ  FLAT");
+    if (wui->ws_cap_l) tag_text(wui->ws_cap_l, ws_3d ? "100 KHZ  3D" : "100 KHZ  FLAT", wui->ws_cap_x, wui->ws_cap_y, false);
     ws_draw();
     buttons_refresh(&btn[3]);
 }
@@ -5552,9 +5639,11 @@ static void vp_make(wui_t *u, lv_obj_t *p, int x, int y, int w, int h) {
         char t[8];
 
         snprintf(t, sizeof(t), "%dK", k);
-        label(p, &pixel_16, dim, x + 4, y + h - k * h * 1000 / VP_HZ - 8, 30, LV_TEXT_ALIGN_LEFT, t);
+        tag_make(p, dim, t, x + 3, y + h - k * h * 1000 / VP_HZ - 9, true);
     }
-    u->cap_l = label(p, &pixel_16, amb, x + w - 260, y + 3, 252, LV_TEXT_ALIGN_RIGHT, "VOICEPRINT  RX  0-4 KHZ");
+    u->cap_x = x + w - 3;
+    u->cap_y = y + 3;
+    u->cap_l = tag_make(p, amb, "VOICEPRINT  RX  0-4 KHZ", u->cap_x, u->cap_y, false);
 }
 
 /* A bar: its name, the scale, the fill and its value */
@@ -5698,51 +5787,57 @@ static void build_walkie_portrait(void) {
     badge_turned(PW - 43, 12);          /* the display's top left (held up, the top right): every screen's letter */
     badge_turned(PW - 43, PH - 50);     /* and the bar's other end */
 
-    /* Three bands, by the keys beside them: under F1 and F2 (narrow) the channel and the spectrum as wide as the
-     * screen gives; beside F3 and F4 (named in full) the lamp, the voiceprint and the meters; beside F5 (narrow)
-     * the radio's state */
+    /* Three bands by the keys beside them. F1 and F2 have no box (CB's CH -/+ only; the knobs step CB too): the
+     * channel and the spectrum from the screen's edge; beside F3 and F4 the voiceprint and the lamp under it; F5 has
+     * none (A/B arms and locks): the radio's state from the edge */
     int y1 = 2 * P_KEY - 2, y2 = 2 * P_KEY + 2, y3 = 4 * P_KEY - 2, y4 = 4 * P_KEY + 2;
 
-    /* the channel: its number big on the left, what it is on the right */
-    rect(g_scr, P_NX, P_TOP, P_NW, 104, 3, false);
-    u->num_l  = label(g_scr, &pixel_44, amb, P_NX + 4, P_TOP + 28, 132, LV_TEXT_ALIGN_CENTER, "--");
-    u->via_l  = label(g_scr, &pixel_16, amb, P_NX + 140, P_TOP + 8, P_NW - 148, LV_TEXT_ALIGN_LEFT, "");
+    /* the channel: its number big, beside it the radio, the group and the frequency; under them what is there, and
+     * the S-meter and the audio as short bars in the spectrum's colours */
+    rect(g_scr, P_FX, P_TOP, P_FW, 112, 3, false);
+    u->num_l  = label(g_scr, &pixel_44, amb, P_FX + 4, P_TOP + 12, 120, LV_TEXT_ALIGN_CENTER, "--");
+    u->via_l  = label(g_scr, &pixel_16, amb, P_FX + 130, P_TOP + 6, P_FW - 138, LV_TEXT_ALIGN_LEFT, "");
     lv_label_set_recolor(u->via_l, true);
-    u->band_l = label(g_scr, &pixel_20, amb, P_NX + 140, P_TOP + 28, P_NW - 148, LV_TEXT_ALIGN_LEFT, "");
-    u->freq_l = label(g_scr, &pixel_20, amb, P_NX + 140, P_TOP + 52, P_NW - 148, LV_TEXT_ALIGN_LEFT, "");
+    u->band_l = label(g_scr, &pixel_20, amb, P_FX + 130, P_TOP + 24, P_FW - 138, LV_TEXT_ALIGN_LEFT, "");
+    u->freq_l = label(g_scr, &pixel_20, amb, P_FX + 130, P_TOP + 46, P_FW - 138, LV_TEXT_ALIGN_LEFT, "");
     u->info_l = NULL;
-    u->ch.opt[0] = label(g_scr, &pixel_16, dim, P_NX + 140, P_TOP + 80, P_NW - 148, LV_TEXT_ALIGN_LEFT, "");  /* what */
+    u->ch.opt[0] = label(g_scr, &pixel_16, dim, P_FX + 8, P_TOP + 70, P_FW - 16, LV_TEXT_ALIGN_LEFT, "");   /* what */
     lv_label_set_long_mode(u->ch.opt[0], LV_LABEL_LONG_SCROLL_CIRCULAR);
     u->ch.n = 1;
-    /* the X6200's spectrum around the dial (3D or flat: F4), down to F2's end */
     {
-        int y = P_TOP + 110, h = y1 - y;
+        int half = (P_FW - 24) / 2;
 
-        rect(g_scr, P_NX, y, P_NW, h, 3, false);
-        u->ws_w     = P_NW - 8;
+        mbar_make(u, g_scr, P_FX + 8, P_TOP + 93, half, false);
+        mbar_make(u, g_scr, P_FX + 16 + half, P_TOP + 93, half, true);
+    }
+    /* the X6200's spectrum around the dial (3D or flat: F4), edge to edge down to F2's end */
+    {
+        int y = P_TOP + 118, h = y1 - y;
+
+        rect(g_scr, P_FX, y, P_FW, h, 3, false);
+        u->ws_w     = P_FW - 6;
         u->ws_h     = h - 6;
         u->ws_frame = lv_img_buf_alloc(u->ws_w, u->ws_h, LV_IMG_CF_TRUE_COLOR);
         u->ws_img   = lv_img_create(g_scr);
         lv_img_set_src(u->ws_img, u->ws_frame);
-        lv_obj_set_pos(u->ws_img, P_NX + 4, y + 3);
-        /* its caption at the two ends of the trace, clear of the dial's bracket in the middle */
-        label(g_scr, &pixel_16, amb, P_NX + 8, y + 5, 100, LV_TEXT_ALIGN_LEFT, "SPECTRUM");
-        u->ws_cap_l = label(g_scr, &pixel_16, amb, P_NX + P_NW - 128, y + 5, 120, LV_TEXT_ALIGN_RIGHT,
-                            ws_3d ? "100 KHZ  3D" : "100 KHZ  FLAT");
+        lv_obj_set_pos(u->ws_img, P_FX + 3, y + 3);
+        /* its captions framed, at the two ends of the trace, clear of the dial's bracket in the middle */
+        tag_make(g_scr, amb, "SPECTRUM", P_FX + 6, y + 6, true);
+        u->ws_cap_x = P_FX + P_FW - 6;
+        u->ws_cap_y = y + 6;
+        u->ws_cap_l = tag_make(g_scr, amb, ws_3d ? "100 KHZ  3D" : "100 KHZ  FLAT", u->ws_cap_x, u->ws_cap_y, false);
         ws_draw();
     }
-    /* beside F3 and F4: the lamp, the voiceprint, the meters */
-    u->lamp = rect(g_scr, P_X, y2, P_W, 44, 3, false);
+    /* beside F3 and F4: the voiceprint, the lamp under it */
+    vp_make(u, g_scr, P_X + 4, y2 + 3, P_W - 8, y3 - 52 - (y2 + 3) - 3);
+    u->lamp = rect(g_scr, P_X, y3 - 46, P_W, 46, 3, false);
     lv_obj_set_style_bg_color(u->lamp, amb, 0);
-    u->lamp_l = label(g_scr, &pixel_28, amb, P_X, y2 + 8, P_W, LV_TEXT_ALIGN_CENTER, "RX  QUIET");
-    vp_make(u, g_scr, P_X + 4, y2 + 53, P_W - 8, y3 - 2 * 56 - (y2 + 53) - 3);
-    bar_make(u, g_scr, P_X, y3 - 2 * 56 + 6, P_W, 50, false);
-    bar_make(u, g_scr, P_X, y3 - 50, P_W, 50, true);
-    /* beside F5: the radio's state and a word for what was refused, larger */
-    rect(g_scr, P_NX, y4, P_NW, PH - 6 - y4, 3, false);
-    u->info_l = label(g_scr, &pixel_20, amb, P_NX + 8, y4 + 6, P_NW - 16, LV_TEXT_ALIGN_LEFT, "");
+    u->lamp_l = label(g_scr, &pixel_28, amb, P_X, y3 - 37, P_W, LV_TEXT_ALIGN_CENTER, "RX  QUIET");
+    /* beside F5: the radio's state and a word for what was refused, from the edge */
+    rect(g_scr, P_FX, y4, P_FW, PH - 6 - y4, 3, false);
+    u->info_l = label(g_scr, &pixel_20, amb, P_FX + 8, y4 + 6, P_FW - 16, LV_TEXT_ALIGN_LEFT, "");
     lv_label_set_recolor(u->info_l, true);      /* the battery's line coloured as it runs down */
-    u->msg_l  = label(g_scr, &pixel_20, amb, P_NX + 8, PH - 6 - 28, P_NW - 16, LV_TEXT_ALIGN_LEFT, "");
+    u->msg_l  = label(g_scr, &pixel_20, amb, P_FX + 8, PH - 6 - 28, P_FW - 16, LV_TEXT_ALIGN_LEFT, "");
 }
 
 /* G shown (on) or left: held up in portrait where the build can, its own screen in place of the Sentry's */
@@ -5751,8 +5846,8 @@ static void walkie_show(bool on) {
         g_portrait = true;
         wui        = &w_port;
         g_prev_scr = lv_scr_act();
-        {   /* the F keys reach only buttons on the screen shown; F1 under the bar; F1, F2 and F5 narrow */
-            static const lv_coord_t ws[5] = {P_NARROW, P_NARROW, P_SIDE, P_SIDE, P_NARROW};
+        {   /* the F keys reach only buttons on the screen shown; only F3 and F4 named (the others' keys work) */
+            static const lv_coord_t ws[5] = {0, 0, P_KW, P_KW, 0};
 
             buttons_vertical_w(g_scr, ws, P_KEY, P_TOP);
         }
@@ -5963,6 +6058,14 @@ static void destruct_cb(void) {
         if (u->ws_frame) {
             lv_img_cache_invalidate_src(u->ws_frame);
             lv_img_buf_free(u->ws_frame);
+        }
+        for (int k = 0; k < 2; k++) {
+            lv_img_dsc_t *f = k ? u->am_frame : u->sm_frame;
+
+            if (f) {
+                lv_img_cache_invalidate_src(f);
+                lv_img_buf_free(f);
+            }
         }
         memset(u, 0, sizeof(*u));
     }
