@@ -134,8 +134,29 @@ bool hw_init(void) {
     return pack != NULL;
 }
 
+/* The base's version text ("V1.1.8 Sep 15 2024,15:22:37"), read by the library's init and turned into its version
+ * there, once for the whole run. Read just after the base started, it came without its first three bytes ("1.8 Sep 15
+ * ...") and, on a base just written, empty (bench X6100, 15 Nov 2026): no version, so no test base and none of 1.1.9's
+ * capabilities. The init again then, its copy of the text emptied first (the library reads it again while its first
+ * byte is 0); 5 times at most (about 3 s with radio_init's waits, before its own reset of the base at the 6th), then
+ * taken as it is. Each init opens the bus again and leaves the handle before open: 5 at most, once */
 bool hw_control_init(void) {
-    return x6100_control_init();
+    static int garbled;
+    char      *ver;
+
+    if (!x6100_control_init()) {
+        return false;
+    }
+    if (x6100_control_get_base_ver().major == 0 && garbled < 5) {
+        ver = x6100_control_get_fw_version_str();
+        fprintf(stderr, "base: no version in \"%.40s\": read again\n", ver ? ver : "");
+        garbled++;
+        if (ver) {
+            ver[0] = '\0';
+        }
+        return false;
+    }
+    return true;
 }
 
 void hw_bb_reset(void) {

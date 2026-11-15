@@ -69,7 +69,9 @@
 #include "bt_dev.h"
 #include "usb_devices.h"
 #include "image_level.h"
+#ifdef BOARD_X6200
 #include "dialog_base_update.h"
+#endif
 #include "update_watch.h"
 #include "start_trace.h"
 #include "dialog_cluster.h"

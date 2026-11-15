@@ -86,6 +86,9 @@ void dialog_rotary(int32_t steps);
 /* A front panel key to the open window first: true when it took it */
 bool dialog_front_key(int key, int state);
 
+/* A window that has no APP action (Settings > Info > Base firmware), opened as the APP grid is (screen_main.c) */
+void main_screen_open_dialog(dialog_t *d);
+
 #ifdef __cplusplus
 }
 #endif

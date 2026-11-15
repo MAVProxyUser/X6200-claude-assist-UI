@@ -21,7 +21,7 @@ Settings. Button and option names are written as the radio shows them.
 
 - [Getting started](#getting-started): [first-start guide](#first-start-guide), [first steps](#first-steps), [setting up the transmitter](#setting-up-the-transmitter), [buttons and knobs](#buttons-and-knobs), [hand mic](#hand-mic), [keyboard](#keyboard) ([mouse](#mouse), [quick QSO log](#quick-qso-log))
 - [The Sentry](#the-sentry) (this fork, X6200): [A and B](#a-and-b-the-spectrum-screens), [SCAN CFG](#scan-cfg), [C LOG](#c-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [AIRSPACE](#airspace)
-- [Updating the firmware](#updating-the-firmware): [the SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot), [the X6200's base firmware from GoldCorpHF](#the-x6200s-base-firmware-from-goldcorphf)
+- [Updating the firmware](#updating-the-firmware): [the SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot), [the X6200's base firmware](#the-x6200s-base-firmware), [the X6100's base firmware](#the-x6100s-base-firmware)
 - [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
 - [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab)
 - [Transmitting](#transmitting): [amateur bands only](#amateur-bands-only), [no TX without data from the base](#no-tx-without-data-from-the-base), [TX shift](#tx-shift), [transverter TX power limit](#transverter-tx-power-limit), [SWR scan and the tuner](#swr-scan-and-the-tuner), [TUNE for an external tuner](#tune-for-an-external-tuner), [digital-mode TX level](#digital-mode-tx-level), [recording voice messages](#recording-voice-messages), [ALC in CW](#alc-in-cw), [PA bias](#pa-bias-x6200), [register 32](#register-32-x6200)
@@ -140,11 +140,15 @@ Baseband shows which base the radio runs.
 The test base is RF.Guru's own
 [X6100-Baseband test release](https://github.com/Guru-RF/X6100-Baseband/releases/tag/v0.1.0-alpha.2)
 (v0.1.0-alpha.2): Xiegu's V1.1.9 with a compressor/gate, CESSB and an
-adjustable TX filter added. It is **TEST ONLY**. It has not been validated
-on a radio yet: its RF output and power, its timing and the way back to
-Xiegu's base are still to be checked. Try it into a dummy load first. Its
+adjustable TX filter added. It is **TEST ONLY**. On 15 November 2026 it was
+written to one X6100, tried into a dummy load with the radio's own power
+meter, and Xiegu's V1.1.8 written back, its calibration kept; its spectrum,
+its peaks at the start of a transmission and its timing are still to be
+measured. Try it into a dummy load first. Its
 [TESTING.md](https://github.com/Guru-RF/X6100-Baseband/blob/v0.1.0-alpha.2/TESTING.md)
-says how to install it and how to go back. OpenX6X00 does not install it.
+says how to install it with Xiegu's own system and how to go back; from a
+computer, OpenX6X00's writer does both (see
+[The X6100's base firmware](#the-x6100s-base-firmware)).
 
 - OpenX6X00 knows it only by its whole version string,
   `V1.1.9 Nov 27 2025,tx1a2-test`, as Settings > Info > Baseband shows it.
@@ -913,7 +917,7 @@ written through to the card before it replaces the last copy, so a power cut kee
   ago, within the half hour), else what the sun says at your QTH: OPEN, CLOSED, LOCAL, OPENING or CLOSING; `SET QTH`
   when no QTH locator is set.
 - **F SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the classic radio screen, a shell, the
-  [base firmware](#the-x6200s-base-firmware-from-goldcorphf) and where the radio starts. F2 opens the item chosen
+  [base firmware](#the-x6200s-base-firmware) and where the radio starts. F2 opens the item chosen
   (CLASSIC RADIO is on the list); the other F keys do nothing here. Its title says the release, the GUI's commit and the base's version. A's title names
   what its scope takes in: `MF/HF/VHF SPECTRUM` (the X6200 from 100 kHz to 55 MHz, and 87.5 to 137 MHz).
 
@@ -1293,17 +1297,18 @@ a bundle file), or over SSH `x6100-update install <bundle> --kernel --uboot`
   updater's `x6100-update rollback` (the web page's button) takes back the
   radio software only, never the card's parts.
 
-### The X6200's base firmware from GoldCorpHF
+### The X6200's base firmware
 
-This fork, X6200 only. The update above brings GoldCorpHF; the base, the radio
-board's own firmware from Xiegu, is updated apart from it, and Xiegu's way
-takes its own system (two card swaps and its UPGRADE menu, see the README's
-[baseband](../README.md#the-baseband) section). Here it is done while
-GoldCorpHF runs, with Xiegu's own steps: the writer does on the radio what
-Xiegu's app 1.0.8 does from MENU > SYSTEM > UPGRADE. More, and how it was
-worked out and tested: [tools/base_update](../tools/base_update/README.md).
+The X6200's window and checks (the X6100's base:
+[below](#the-x6100s-base-firmware)). The update above brings GoldCorpHF; the
+base, the radio board's own firmware from Xiegu, is updated apart from it,
+and Xiegu's way takes its own system (two card swaps and its UPGRADE menu,
+see the README's [baseband](../README.md#the-baseband) section). Here it is
+done while GoldCorpHF runs, with Xiegu's own steps: the writer does on the
+radio what Xiegu's app 1.0.8 does from MENU > SYSTEM > UPGRADE. More, and how
+it was worked out and tested: [tools/base_update](../tools/base_update/README.md).
 
-Where: F SYSTEM > BASE FIRMWARE, or Settings > Info > Base firmware > Open.
+Where: F SYSTEM > BASE FIRMWARE (the Sentry), or Settings > Info > Base firmware > Open.
 
 - The top line: the base the radio runs, and its supply now. The next: the
   last look at xiegu.eu.
@@ -1317,7 +1322,8 @@ Where: F SYSTEM > BASE FIRMWARE, or Settings > Info > Base firmware > Open.
 - **Get** (F2): the chosen release from xiegu.eu. Xiegu's update zip is
   streamed and only the base file kept, so the card needs no room for the
   370 MB; about two thirds of it come down, some minutes on WiFi.
-- **Check** (F3): xiegu.eu's downloads page read now.
+- **Check** (F3): xiegu.eu's downloads page read now, whether the daily
+  check below is on or off.
 - **Flash** (F4): what it is about to do, Xiegu's power conditions and the
   supply now; then **FLASH NOW** writes it (an unknown file asks once more,
   UNKNOWN: OK?). About half a minute: the window shows the writer's steps,
@@ -1328,10 +1334,13 @@ Where: F SYSTEM > BASE FIRMWARE, or Settings > Info > Base firmware > Open.
   runs the new base. The window keeps the log (`/mnt/base_update.log`) and
   shows its end when opened again.
 
-Once a day, online, the radio reads xiegu.eu's downloads page and says on the
-screen, once, when a newer base is out; Settings > Info shows it next to Base
-firmware. It never downloads or writes one by itself. It reads only
-xiegu.eu's X6200 files. An empty file `/mnt/base_update/no-check` turns it off.
+**Daily base check** (Settings > Info, under Base firmware): **off by
+default**, so the radio asks xiegu.eu nothing until you do (Get or Check).
+Turn the switch on and, once online, the radio reads xiegu.eu's X6200
+downloads once a day (the first look within ten minutes), says on the screen,
+once, when a newer base is out, and Settings > Info shows it next to Base
+firmware. It never downloads or writes one by itself. Turn the switch off and
+it stops; the setting is kept with the others.
 
 - As Xiegu asks for its own update: a 13.8 V supply of 3 A or more and the
   battery out, and the radio not switched off while it writes.
@@ -1340,28 +1349,42 @@ xiegu.eu's X6200 files. An empty file `/mnt/base_update/no-check` turns it off.
 - A write that fails after the erase leaves the base without its application:
   **Recover** writes it again (the base's bootloader is not erased). Do not
   switch the radio off before.
+- Each radio its own files: the writer knows the radio by its device tree,
+  writes only that radio's files, and refuses a file named for another radio
+  even when asked to take an unknown one.
 
-From a computer over SSH, the same steps:
-
-1. `tools/base_update/fetch.sh`: the latest release from xiegu.eu, its base
-   file taken out and checked (`fetch.sh 1.0.7`, `fetch.sh all`).
-2. `tools/base_update/build.sh`: the writer, built with an ARM cross compiler.
-3. `tools/base_update/flash.sh root@<radio> --check`: reads only; it says the
-   base's version (`version "1.0.7"`).
-4. `tools/base_update/flash.sh root@<radio> --flash`: the GUI stops, the base
-   is written (about half a minute), the GUI starts again. `--to 1.0.7` writes
-   another release, `--file FILE.xgf` a file of your own, `--recover` again
-   after a failed write.
-5. The radio switches itself off a few minutes later. Switch it on; `--check`,
-   and Settings > Info > Baseband, then say the new version.
-
-- Or with Xiegu's own screen: `tools/base_update/install.sh root@<radio>`
-  puts the 1.0.8 file in the list of Xiegu's UPGRADE screen on the internal
-  memory; take the card out, switch on, MENU > SYSTEM > UPGRADE.
+From a computer over SSH, the same steps: `tools/base_update/fetch.sh`, then
+`tools/base_update/build.sh` and `tools/base_update/flash.sh root@<radio>
+--check` or `--flash` (`--to 1.0.7`, `--file FILE.xgf`, `--recover`).
 
 1.0.8 fixes the S-meter that sticks at S1, -121.0 on 1.0.7 (see
 [The waterfall stays black](#the-waterfall-stays-black-and-the-s-meter-does-not-move)),
 corrects the CW keyer's speed and brings back the CW keyer macros.
+
+### The X6100's base firmware
+
+From a computer over SSH only: the X6100 has no Base firmware window and no
+daily check, and Xiegu's X6100 base files come with Xiegu's X6100 updates (keep
+the one your radio runs; none is fetched here). The same writer as the
+X6200's, the X6100's way into its base's bootloader: the Morse key line held
+low while the base is reset, as Xiegu's own X6100 updater does. More in
+[tools/base_update](../tools/base_update/README.md#the-x6100).
+
+- `tools/base_update/build.sh`, then
+  `tools/base_update/flash.sh root@<radio> --check --file FILE.xgf`: reads
+  only, the file and the base's version.
+- `--dry-run --file FILE.xgf`: into the base's bootloader and out again,
+  nothing erased or written. Try this first.
+- `--flash --file FILE.xgf`: asks for FLASH to be typed, stops the GUI,
+  writes (about 15 seconds), starts the GUI again. The base starts its new
+  firmware by itself; the radio does not switch itself off.
+- Files known by their SHA-256: Xiegu's V1.1.8 and V1.1.9, and RF.Guru's
+  [test base](#the-x6100-test-base) with `--test-ok` (TEST to be typed).
+  An X6200 file is refused.
+- As Xiegu asks: a 13.8 V supply of 3 A or more, the battery out, and the
+  radio not switched off while it writes.
+- Checked on one X6100 on 15 November 2026: the test base written and
+  Xiegu's V1.1.8 back, the base's calibration the same after each.
 
 ## Main screen
 
@@ -2871,8 +2894,10 @@ keyed. The radio watches for it; there is nothing to set.
 
 The FIRMWARE card: the project, where its source is, the firmware version and
 the baseband version, on the X6200 the PA bias in use and where it came from
-("3326 / 3843, the radio's own", see [PA bias](#pa-bias-x6200)), then the
-broadcast list and the factory reset (below).
+("3326 / 3843, the radio's own", see [PA bias](#pa-bias-x6200)), on the X6200
+Base firmware and Daily base check (off by default, see [the X6200's base
+firmware](#the-x6200s-base-firmware)), then the broadcast list and the factory
+reset (below).
 
 Broadcast list, Update: the timetable of the broadcast stations (EiBi,
 eibispace.de) for the current season: A from the end of March to the end of

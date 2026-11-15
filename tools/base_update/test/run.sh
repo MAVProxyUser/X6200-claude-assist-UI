@@ -69,6 +69,33 @@ else
     echo "FAIL  x6x00-base-fetch, same name: $W/clobber.log"; fails=1
 fi
 
+# The daily check is off until the owner turns it on (Settings > Info > Daily base check, base_daily_check in
+# params.db): no params.db, no row and 0 all answer 3 without asking xiegu.eu; 1 goes on to the check. The network is
+# a closed port here (a proxy nobody listens on), so a look that does go out fails, and shows that it went
+rm -rf "$W/daily" && mkdir -p "$W/daily"
+for v in none norow 0 1; do
+    db=$W/daily/params_$v.db
+    case $v in
+        none) ;;
+        norow) python3 -c "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('CREATE TABLE params (name TEXT PRIMARY KEY ON CONFLICT REPLACE, val INTEGER)'); c.execute(\"INSERT INTO params VALUES ('clock_12h', 1)\"); c.commit()" "$db" ;;
+        *) python3 -c "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('CREATE TABLE params (name TEXT PRIMARY KEY ON CONFLICT REPLACE, val INTEGER)'); c.execute(\"INSERT INTO params VALUES ('base_daily_check', ?)\", (int(sys.argv[2]),)); c.commit()" "$db" "$v" ;;
+    esac
+    env https_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 no_proxy= NO_PROXY= \
+        python3 "$FETCH" daily --params "$db" --base 1.0.8 --out "$W/daily/out_$v" > "$W/daily/$v.log" 2>&1
+    rc=$?
+    if [ "$v" = 1 ]; then
+        if [ "$rc" = 1 ] && ! grep -q "is off" "$W/daily/$v.log"; then
+            echo "pass  x6x00-base-fetch daily: on (1), it goes on to ask xiegu.eu"
+        else
+            echo "FAIL  x6x00-base-fetch daily, on: exit $rc, $W/daily/$v.log"; fails=1
+        fi
+    elif [ "$rc" = 3 ] && grep -q "is off" "$W/daily/$v.log" && [ ! -e "$W/daily/out_$v" ]; then
+        echo "pass  x6x00-base-fetch daily: off ($v), xiegu.eu not asked"
+    else
+        echo "FAIL  x6x00-base-fetch daily, off ($v): exit $rc, $W/daily/$v.log"; fails=1
+    fi
+done
+
 # The transfers: Xiegu's 1.0.8 file, or a stand-in of its size that only the simulated base sees (base_flash takes
 # only Xiegu's files: the stand-in is let through by building the scenarios with its hash in place of 1.0.8's)
 if [ -f "$X8" ]; then
@@ -89,6 +116,25 @@ for mode in ok silent stream dead noerase nostart nak can garbage eot x6100; do
     pids+=($!)
 done
 [ -f "$X7" ] && { python3 "$T/sim.py" "$CC" "$T/../base_flash.c" "$T/stub" "$W" "$X7" ok ok107 > "$W/result_ok107" 2>&1 & pids+=($!); }
+
+# The X6100 (sim6100.py): Xiegu's V1.1.8 file when build/base_update has it, else a stand-in of its size let through
+# the same way, in place of V1.1.8's sum
+X18=$TOP/build/base_update/X6100_BBFW_V1.1.8_240915003.xgf
+if [ -f "$X18" ]; then
+    F6=$X18
+    SRC6=$T/../base_flash.c
+else
+    F6=$W/standin6100.xgf
+    head -c 391584 /dev/urandom > "$F6"
+    H6=$(shasum -a 256 "$F6" 2> /dev/null || sha256sum "$F6")
+    sed "s/8516de0bdcb4a3dcbba1605a482250d17acad2402f89f5d3719db33d6c48348d/${H6%% *}/" "$T/../base_flash.c" > "$W/base_flash6100.c"
+    SRC6=$W/base_flash6100.c
+    echo "no X6100 file of Xiegu's in build/base_update: the X6100 transfers use a stand-in"
+fi
+for mode in ok zeros dry nogreet noerase noprog nostart nak eot x6200dt; do
+    python3 "$T/sim6100.py" "$CC" "$SRC6" "$T/stub" "$W" "$F6" "$mode" > "$W/result_x6100_$mode" 2>&1 &
+    pids+=($!)
+done
 for p in "${pids[@]}"; do wait "$p" || fails=1; done
 cat "$W"/result_*
 [ -z "${fails:-}" ] && echo "all base_flash tests pass" || { echo "BASE_FLASH TESTS FAILED (logs in $W)"; exit 1; }

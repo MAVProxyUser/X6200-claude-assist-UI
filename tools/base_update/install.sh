@@ -6,10 +6,10 @@
 # checked and the system unmounted again. Nothing else there changes, and the base itself is not touched: that is
 # Xiegu's UPGRADE screen (switch off, take the card out, switch on), or tools/base_update/flash.sh from here.
 #
-#     tools/base_update/install.sh [root@192.168.0.224]
+#     tools/base_update/install.sh [root@x6200.local]
 #
 set -euo pipefail
-RADIO=${1:-root@192.168.0.224}
+RADIO=${1:-root@x6200.local}
 TOP=$(cd "$(dirname "$0")/../.." && pwd)
 XGF=x6200_mcu_20260820141208.xgf
 XGF_SHA=9a19f97a5ad9e141a3663d222f984073bf0b18b38d4662604372a0036f9daa23

@@ -1,17 +1,20 @@
-# The X6200's base firmware, fetched and written from OpenX6X00
+# The X6200's and the X6100's base firmware, written from OpenX6X00
 
 The X6200 runs two firmwares: OpenX6X00 on the card (Linux, the GUI), and Xiegu's **base** firmware in the radio
 board's own processor (DSP, RF, power, keyer). Xiegu's way to update the base needs Xiegu's own system on the
-radio's internal memory: a card swap, a menu, another card swap ([README_original.md, The
-baseband](../../README_original.md#the-baseband)). This fork does it from OpenX6X00, without taking the card out:
+radio's internal memory: a card swap, a menu, another card swap ([README.md, The
+baseband](../../README.md#the-baseband)). These tools do it from OpenX6X00, without taking the card out:
 from the radio's own screen, or from a computer over SSH. Any release Xiegu has published, up or down.
+
+The X6100's base is written by the same writer, another way into the same kind of bootloader, from a computer over
+SSH only: [The X6100](#the-x6100) below.
 
 | Piece | Where | Does |
 |---|---|---|
-| **E SYSTEM > BASE FIRMWARE** | the radio's screen ([dialog_base_update.c](../../src/dialog_base_update.c)) | the releases, Get, Check, Flash, with everything shown as it happens |
+| **Settings > Info > Base firmware** | the radio's screen ([dialog_base_update.c](../../src/dialog_base_update.c)) | the releases, Get, Check, Flash, with everything shown as it happens |
 | **x6x00-base-fetch** | [rootfs/usr/sbin](../../rootfs/usr/sbin/x6x00-base-fetch), on the radio and here | fetches a release from xiegu.eu as a stream, keeping only the base file; the check |
 | **x6x00-base-flash** | [base_flash.c](base_flash.c), on the radio | writes the base the way Xiegu's own app 1.0.8 does, step for step |
-| **S99updatecheck** | [rootfs/etc/init.d](../../rootfs/etc/init.d/S99updatecheck) | once a day, online: is there a newer base on xiegu.eu (and a newer OpenX6X00)? Says so, never more |
+| **S99basecheck** | [rootfs/etc/init.d](../../rootfs/etc/init.d/S99basecheck) | once a day, online, on an X6200: is there a newer base on xiegu.eu? Says so, never more |
 | **base_releases.txt** | [rootfs/usr/share/x6100](../../rootfs/usr/share/x6100/base_releases.txt) | the releases known: version, file, size, SHA-256, Xiegu's zip and its address |
 | fetch.sh, build.sh, flash.sh, install.sh | here | the same from a computer |
 
@@ -23,7 +26,7 @@ Files are told apart by their SHA-256, never by name or date (the date is the on
 | Base | File | Bytes | Where | |
 |---|---|---|---|---|
 | **1.0.8** | x6200_mcu_20260820141208.xgf | 524288 | xiegu.eu, `x6200udimg-260820001.zip` | fixes the S-meter stuck at -255 dBm (S1, -121.0 on screen), the CW keyer's speed; CW macros back |
-| 1.0.7 | x6200_mcu_20260116092100.xgf | 401024 | not on xiegu.eu: the factory build, on our X6200's internal memory | a later 1.0.7 build than xiegu.eu's: what our X6200 came with (below) |
+| 1.0.7 | x6200_mcu_20260116092100.xgf | 401024 | not on xiegu.eu: the factory build, on the test X6200's internal memory | a later 1.0.7 build than xiegu.eu's: what the test X6200 came with (below) |
 | 1.0.7 | x6200_mcu_20250916150221.xgf | 524288 | xiegu.eu, `x6200 FW 1.0.7 (251012).zip` | |
 | 1.0.6 | x6200_mcu_20250111134652.xgf | 524288 | xiegu.eu, `Xiegu X6200 update V1.0.6 (240115).zip` | |
 | 1.0.3 | x6200_mcu_20240924203603.xgf | 524288 | xiegu.eu, `X6200_UD_Image_1.0.3.zip` | |
@@ -49,10 +52,9 @@ Another X6200 may carry another factory build. The radio's screen copies whateve
 
 Xiegu's files are Xiegu's: they are fetched from Xiegu's own site and nothing of them is in this repository.
 
-## From the radio: E SYSTEM > BASE FIRMWARE
+## From the radio: Settings > Info > Base firmware
 
-On the Sentry, E SYSTEM > BASE FIRMWARE (or Settings > Info > Base firmware). The title of every Sentry screen says
-which base the radio runs, after SYSTEM with the GUI's own commit: `REMOTE SENTRY RECEIVER SYSTEM: c6e93af - base 1.0.8`.
+Settings > Info > Base firmware > Open... (an X6200 only). Its window takes the screen; Close goes back.
 
 - **The list**: each release, HERE when its file is in `/mnt/base_update` (whatever it is called: its SHA-256 says
   which it is; the files on Xiegu's own system's `/usr/firmware` are copied there first), ON XIEGU.EU when it can be
@@ -61,8 +63,8 @@ which base the radio runs, after SYSTEM with the GUI's own commit: `REMOTE SENTR
 - **Get** fetches the chosen release from xiegu.eu: Xiegu's update zip streamed, the base file taken out as it goes
   by (the zip's card image, its FAT partition, rootfs.tar, `./usr/firmware/*.xgf`), nothing else kept: about two
   thirds of the 370 MB come down and none of it is stored, so a radio has room for it. Checked against the list;
-  4½ minutes on our X6200's WiFi (255 MB at 0.9 MB/s).
-- **Check** reads xiegu.eu's downloads page now, as the daily check does.
+  4½ minutes on the test X6200's WiFi (255 MB at 0.9 MB/s).
+- **Check** reads xiegu.eu's downloads page now, as the daily check does, whether the daily check is on or off.
 - **Flash** shows what it is about to do (versions, Xiegu's power conditions and the radio's own supply now), then
   **FLASH NOW** writes it. An unknown file asks once more first (**UNKNOWN: OK?**). The GUI stays up: it lends the
   base to the writer (it stops reading the base's port and sends it nothing, as Xiegu's own app pauses its own
@@ -75,14 +77,18 @@ which base the radio runs, after SYSTEM with the GUI's own commit: `REMOTE SENTR
 
 ### The daily check
 
-[S99updatecheck](../../rootfs/etc/init.d/S99updatecheck) runs `x6x00-base-fetch check` on an X6200 5 to 35 minutes
-after the start (a random wait: radios do not all ask xiegu.eu at once), then every 24 hours, or every hour while
-there is no network. It reads xiegu.eu's X6200 downloads (nothing of the X6100's) and compares them with the list and
-with the base's version (the GUI writes it to `/tmp/x6x00-base-version`), into `/mnt/base_update/check.json`. A newer
-release is said on the screen once ("Base firmware 1.0.9 is out: E SYSTEM > BASE FIRMWARE"), and Settings > Info
-shows it next to Base firmware. It never downloads a base file and never writes the base.
-`/mnt/base_update/no-check` stops it. The same job looks for a newer OpenX6X00 for this radio (`x6100-update check`,
-on both radios, each only for its own bundle).
+**Off by default:** the radio asks xiegu.eu nothing until its owner turns it on, in Settings > Info > **Daily base
+check** (`base_daily_check` in `/mnt/params.db`, kept with the other settings). Get and Check work the same either way.
+
+[S99basecheck](../../rootfs/etc/init.d/S99basecheck) runs `x6x00-base-fetch daily` on an X6200 5 to 35 minutes after
+the start (a random wait: radios do not all ask xiegu.eu at once). While the setting is off (or `params.db` cannot be
+read) it stops there with exit 3, nothing sent, and asks the setting again ten minutes later; so a switch turned on
+takes effect within ten minutes, without a restart. On, it is `x6x00-base-fetch check`, then every 24 hours, or every
+hour while there is no network. It reads xiegu.eu's X6200 downloads (nothing of the X6100's) and compares them with
+the list and with the base's version (the GUI writes it to `/tmp/x6x00-base-version`), into
+`/mnt/base_update/check.json`. A newer release is said on the screen once ("Base firmware 1.0.9 is out: Settings >
+Info > Base firmware"), and Settings > Info shows it next to Base firmware. It never downloads a base file and never
+writes the base. On an X6100 it does nothing.
 
 ## From a computer
 
@@ -144,30 +150,32 @@ again. That is how Xiegu's design reads; no write here has needed it yet.
   confirmation (`--unknown-ok` from the computer). The writer takes it only if it passes what can be checked of an
   encrypted file: a multiple of 16 bytes, 16 to 512 KiB, and not a plain ARM image (one starting with a stack pointer
   and a reset vector would be decrypted into garbage by the bootloader).
-- **A new release from Xiegu**: the daily check finds it on xiegu.eu's downloads page and the screen lists it as NEW;
+- **A new release from Xiegu**: Check (or the daily check, when it is on) finds it on xiegu.eu's downloads page and
+  the screen lists it as NEW;
   Get (or `fetch.sh --discover`) fetches it, keeps it as unverified (`NAME.xgf.json`, with the version from Xiegu's
   release note) and prints its line for `base_releases.txt`. Added to the list and to `known[]` in
   [base_flash.c](base_flash.c) (the test suite checks the two agree), it is a known release like the others.
 
-## Only the X6200's base, only the X6200's files
+## Each radio its own base, and its own files
 
 Xiegu encrypts the X6100's, the G90's and the X6200's base files with the same key, so nothing in an encrypted file
 says which radio it is for, and the X6100's base is written another way altogether (its Morse key line held low while
 the base is reset). Every step keeps the radios apart:
 
-- **The writer runs on an X6200 only.** Before it opens the base's port or bus, x6x00-base-flash reads the device tree
-  (`/proc/device-tree/compatible`) and refuses unless it says `xiegu,x6200`: on an X6100 not one byte reaches the base
-  (tested: the `x6100` scenario below). It is built into the X6200's image only, as are the fetcher, the list
-  of releases, the screen and the hooks that lend the base: an X6100's image and GUI have none of it, and this check
-  stops the writer should it ever be copied there.
-- **Only the X6200's files are written.** A file is known by its SHA-256 against the X6200 files in
-  [base_releases.txt](../../rootfs/usr/share/x6100/base_releases.txt), never by its name. Any other file needs
-  `--unknown-ok` and a second confirmation, and a file named for another radio (X6100, G90, G106, X5105) is refused
-  even then.
+- **The writer knows the radio from its device tree.** Before it opens the base's port or bus, x6x00-base-flash reads
+  `/proc/device-tree/compatible`: `xiegu,x6200` is written the X6200's way, `xiegu,x6100` the X6100's, anything else
+  is refused with not one byte sent. The writer is in both radios' images; the fetcher, the list of releases, the
+  screen, the daily check and the hooks that lend the base are the X6200's only.
+- **Only that radio's files are written.** A file is known by its SHA-256 in the writer's `known[]`, each entry for
+  one radio, never by its name: an X6200 file is refused on an X6100 and the other way round (tested: the `x6100` and
+  `x6100-x6200dt` scenarios below). Any other file needs `--unknown-ok` and a second confirmation, and a file named
+  for another radio (X6100, G90, G106, X5105 on an X6200; X6200, G90, G106, X5105 on an X6100) is refused even then.
+- **A test build only when asked.** RF.Guru's X6100 test build (`V1.1.9 ... tx1a2-test`) is in `known[]` marked as a
+  test: refused without `--test-ok`, and flash.sh asks for `TEST` to be typed.
 - **Only the X6200's releases are fetched.** The fetcher and the daily check read only xiegu.eu's links titled
   "X6200 Firmware Upgrade", and take only `./usr/firmware/*.xgf` from those zips.
-- **Only an X6200 offers it.** The screen is built for the X6200 only, and the daily check runs only where the image
-  says `model=x6200`.
+- **Only an X6200 offers it.** The screen is built for the X6200 only (`BOARD_X6200`), and the daily check runs only
+  where the device tree says `xiegu,x6200`.
 
 ## How it works
 
@@ -221,12 +229,26 @@ be; anything else holding them is refused.
     | nostart | never sends the `C` | `1k xmodem timeout.`; exit 3 |
     | nak, can, garbage | NAK at packet 100, CAN at 50, an `X` at 10 | `1k xmodem bad packet`, `… transfer canceled.`, `… error, = 88`; exit 3 |
     | eot | no ACK for the EOT | `1k xmodem error, = 0 (after EOT)`; exit 3 |
-    | x6100 | an X6100's device tree | `refused: this radio is not an X6200`, not one byte sent; exit 1 |
+    | x6100 | an X6200 file on an X6100's device tree | `refused: nothing was sent to the base`; exit 1 |
+
+    and against a simulated X6100 base ([test/sim6100.py](test/sim6100.py)), its key and reset lines a log, which
+    streams as its application until the key line is low while the reset is let go, then greets as its bootloader:
+
+    | Scenario | The simulated X6100 base | The writer |
+    |---|---|---|
+    | ok, zeros | answers as the bootloader (zeros: 0 bytes before its answers) | the file whole; the lines in order: key low, reset pulse, key up; exit 0 |
+    | dry | answers | `--dry-run`: no erase, no packet; the application started again (key up, reset pulse); exit 0 |
+    | nogreet | never greets | `[ERR] Wait IAP respond timeout`, the application started again; exit 2 |
+    | noerase, noprog, nostart | no answer to `r`, to `p`, no `C` | each its error; exit 3 |
+    | nak, eot | NAK at packet 100, no ACK for the EOT | `1k xmodem bad packet`, `1k xmodem error, = 0 (after EOT)`; exit 3 |
+    | x6200dt | an X6100 file on an X6200's device tree | `refused: nothing was sent to the base`, no line touched; exit 1 |
 
   - the fetcher on small update zips made as Xiegu's are ([test/synth.py](test/synth.py): a zip written as a stream,
     an MBR, a FAT16 boot partition, a Linux one, a FAT16 one with rootfs.tar), through Python's zlib and through libz
     as on the radio (whose Python has no zlib module): Xiegu's 1.0.8 file out and checked, an unknown one out whole,
-    unverified, with its line for the list.
+    unverified, with its line for the list;
+  - the daily check's switch (`x6x00-base-fetch daily`, the network a closed port): no `params.db`, no
+    `base_daily_check` row and 0 all stop with exit 3 and ask xiegu.eu nothing; 1 goes on to ask.
 - **run_on_radio.sh on the radio** with a stand-in that sends nothing: the GUI stopped, nothing left holding the port
   or the bus, the lock held, the GUI started again.
 - **Fetching on the radio**: 1.0.8 from xiegu.eu, the file out and checked after 255 of the zip's 371 MB, in 272 s;
@@ -256,16 +278,65 @@ An X6200 on its 11.8 V external supply with its battery in, charging (89 to 90 %
 - **The calibration stays**: the base's calibration block came through every write, its PA bias the radio's own
   (3226/3958) each time.
 
+## The X6100
+
+From a computer over SSH, with a file of your own: Xiegu's X6100 base files come in Xiegu's X6100 updates, and none
+is fetched here. The X6100 has no Base firmware screen and no daily check.
+
+```bash
+tools/base_update/flash.sh root@<x6100> --check --file X6100_BBFW_V1.1.8_240915003.xgf
+```
+
+```bash
+tools/base_update/flash.sh root@<x6100> --dry-run --file X6100_BBFW_V1.1.8_240915003.xgf
+```
+
+```bash
+tools/base_update/flash.sh root@<x6100> --flash --file X6100_BBFW_V1.1.8_240915003.xgf
+```
+
+- **The files known**: Xiegu's V1.1.8 (`X6100_BBFW_V1.1.8_240915003.xgf`, 391584 bytes, `8516de0b...`) and V1.1.9
+  (`X6100_BBFW_V1.1.9_251127001.xgf`, 392048 bytes, `87a3e96e...`), and RF.Guru's test build
+  ([X6100-Baseband v0.1.0-alpha.2](https://github.com/Guru-RF/X6100-Baseband/releases/tag/v0.1.0-alpha.2),
+  `--test-ok`). Any other with `--unknown-ok`, as on the X6200.
+- **--dry-run** first: the base asked for its bootloader and, once it answers, its application started again. Nothing
+  is erased or written: it shows the way in works on this radio.
+- **The way in** is the one of Xiegu's own X6100 updater and of Franco Venturi's
+  [x6100-base-experiments](https://github.com/fventuri/x6100-base-experiments) flasher (LGPL-2.1-or-later), which wrote
+  the bench X6100's base first on 24 October 2026: the Morse key line (GPIO 203 on `/dev/gpiochip1`, the bootloader's
+  strap) held low while the base's reset line (204) is pulsed for 100 ms; the port at 1500000 baud; the bootloader's
+  greeting `A`; the key line let go; `r` (the erase, up to 60 s) and `p`, each answered by any byte but 0; then
+  XMODEM-1K as on the X6200 (steps 4 and 5 above). The X6200's `c` handshake and I2C host command are not used.
+- **After the write** the bootloader starts the new firmware by itself: it answered on I2C 4 s after the transfer.
+  For about a minute its version text (I2C register 0) then mostly read without its first three bytes
+  (`1.8 Sep 15 2024,...`), and empty once; the writer says so, and the GUI reads it again at its start
+  ([hw_x6100.c](../../src/hw/x6100/hw_x6100.c), `hw_control_init`), which it did not before: after the first write
+  it took the test base for no known base until a restart. The radio does not switch itself off, unlike the X6200.
+- **Power** as Xiegu asks: a 13.8 V supply of 3 A or more, the battery out, the radio not switched off while it
+  writes. The two writes below were on a 13.6 V supply with the battery in.
+- `--recover` takes the same way in; after a failed X6100 write it has not been needed yet.
+
+### Two real writes, 15 November 2026
+
+The bench X6100, OpenX6X00 running, from a computer over SSH:
+
+| | V1.1.8 -> alpha.2 (the test build) | alpha.2 -> V1.1.8 |
+|---|---|---|
+| bootloader greets | 1.0 s | 1.0 s |
+| erase answered (`g`) | 7.1 s | 7.2 s |
+| transfer done, EOT acknowledged | 396 packets, 6.9 s | 383 packets, 6.8 s |
+| the base answers on I2C | not the same version twice in 60 s (each state not logged then) | 4 s after the transfer |
+| the GUI's version | after a restart (the fix above came after) | on its third read |
+| the calibration block (I2C 0xF000, 816 bytes) | the same | the same, and the same as on 24 October |
+
 ## Files
 
 | File | |
 |---|---|
-| [base_flash.c](base_flash.c) | the writer: `--check FILE`, `--flash FILE --yes [--recover] [--held-by PID] [--unknown-ok]`, `--identify FILE` |
+| [base_flash.c](base_flash.c) | the writer: `--check FILE`, `--flash FILE --yes [--recover \| --dry-run] [--held-by PID] [--unknown-ok] [--test-ok]`, `--identify FILE` |
 | [build.sh](build.sh) | the writer for the radio, static |
 | [fetch.sh](fetch.sh) | releases from xiegu.eu into build/base_update, by x6x00-base-fetch |
-| [flash.sh](flash.sh) | from a computer: `--check`, `--flash`, `--recover`, `--to VERSION`, `--file FILE` |
+| [flash.sh](flash.sh) | from a computer: `--check`, `--flash`, `--recover`, `--dry-run` (X6100), `--to VERSION`, `--file FILE`, `--test-ok` |
 | [run_on_radio.sh](run_on_radio.sh) | on the radio, apart from the SSH session: GUI off, lock, write, GUI on |
 | [install.sh](install.sh) | the 1.0.8 file to `/usr/firmware` on the internal memory, for Xiegu's own UPGRADE screen |
-| [test/](test) | run.sh, the unit tests (units.c), the simulated base (sim.py), the synthetic update zips (synth.py) |
-
-The X6200 only: the X6100's base is written another way (its Morse key line held low while the base is reset).
+| [test/](test) | run.sh, the unit tests (units.c), the simulated bases (sim.py, sim6100.py), the synthetic update zips (synth.py) |

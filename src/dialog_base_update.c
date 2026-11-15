@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
- *  OpenX6X00 - The X6200's base firmware from the radio's own screen: E SYSTEM > BASE FIRMWARE, or Settings > Info >
+ *  OpenX6X00 - The X6200's base firmware from the radio's own screen: Settings > Info >
  *  Base firmware. What tools/base_update does from a computer, here:
  *    - the list: the releases known (/usr/share/x6100/base_releases.txt), each "here" when its file is in
  *      /mnt/base_update (Xiegu's own system's /usr/firmware on the internal memory is copied there first), "on
@@ -9,7 +9,8 @@
  *      --unknown-ok: a multiple of 16 bytes, 16 to 512 KiB, not a plain ARM image), and releases xiegu.eu has that the
  *      list does not (the last check). The MFK chooses one;
  *    - Get: x6x00-base-fetch streams Xiegu's update zip from xiegu.eu and keeps only the base file, checked;
- *    - Check: xiegu.eu's downloads page against the list and this base (the daily check's own, S99updatecheck);
+ *    - Check: xiegu.eu's downloads page against the list and this base, whenever pressed (the same look as the daily
+ *      check's, S99basecheck, which is off until the owner turns it on: Settings > Info > Daily base check);
  *    - Flash: base_flash (/usr/sbin/x6x00-base-flash: Xiegu's own app 1.0.8, step for step) as a child, the base lent
  *      to it meanwhile (radio_base_hold: the radio thread off /dev/ttyS1, every write off the base), as Xiegu's app
  *      runs its worker with its own reading of the port paused. An unknown file asks twice.
@@ -28,6 +29,7 @@
 #include "gui_events.h"
 #include "key_input.h"
 #include "msg_box.h"
+#include "params/params.h"
 #include "radio.h"
 #include "screen_light.h"
 #include "theme.h"
@@ -199,7 +201,7 @@ static void log_sync(void) {
     }
 }
 
-/* ---- the daily check's result (check.json, x6x00-base-fetch check) -------------------------------------------------- */
+/* ---- the last check's result (check.json, x6x00-base-fetch check: Check, or the daily check) ----------------------- */
 
 /* A string value of check.json's ("key": "value"), "" when there is none */
 static void json_str(const char *json, const char *key, char *out, size_t n) {
@@ -239,7 +241,9 @@ static void check_summary(void) {
 
     check_line[0] = '\0';
     if (!read_check(json, sizeof(json))) {
-        snprintf(check_line, sizeof(check_line), "xiegu.eu: not checked yet (Check, or the daily check once online)");
+        snprintf(check_line, sizeof(check_line), params.base_daily_check.x
+                 ? "xiegu.eu: not checked yet (Check, or the daily check once online)"
+                 : "xiegu.eu: not checked yet (Check; the daily check is off: Settings > Info)");
         return;
     }
     json_str(json, "checked", when, sizeof(when));
@@ -261,12 +265,14 @@ void base_update_status(char *buf, size_t n) {
     }
 }
 
-/* Every ten minutes, the first a minute after the start: a newer release the daily check found, said once */
+/* Every ten minutes, the first a minute after the start: a newer release the daily check found, said once; nothing
+ * while the daily check is off (Settings > Info), as Check's own result is in the window already */
 static void watch_cb(lv_timer_t *t) {
     char  json[4096], latest[16], seen[16] = "";
     FILE *f;
 
     lv_timer_set_period(t, 600000);
+    if (!params.base_daily_check.x) return;
     if (!read_check(json, sizeof(json)) || !json_true(json, "newer")) return;
     json_str(json, "latest", latest, sizeof(latest));
     if ((f = fopen(ANNOUNCED, "r"))) {
@@ -274,7 +280,7 @@ static void watch_cb(lv_timer_t *t) {
         fclose(f);
     }
     if (!latest[0] || !strcmp(seen, latest)) return;
-    msg_schedule_long_text_fmt("Base firmware %s is out: E SYSTEM > BASE FIRMWARE", latest);
+    msg_schedule_long_text_fmt("Base firmware %s is out: Settings > Info > Base firmware", latest);
     if ((f = fopen(ANNOUNCED, "w"))) {
         fprintf(f, "%s\n", latest);
         fclose(f);
