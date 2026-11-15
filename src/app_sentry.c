@@ -827,8 +827,11 @@ static void visit(int32_t hz) {
 
 /* ---- The spectrum ---- */
 
-static float median(float *v, int n) {
-    int k = n / 2, lo = 0, hi = n - 1;
+/* The k-th smallest of v (reordered), found without sorting it all (Hoare's selection): qsort did it 86 times a
+ * second for the voiceprint and for each of the stick's rows, glibc's merge sort 4% of G's GUI thread (perf,
+ * 2026-11-15) */
+static float kth(float *v, int n, int k) {
+    int lo = 0, hi = n - 1;
 
     while (lo < hi) {
         float p = v[k];
@@ -847,6 +850,10 @@ static float median(float *v, int n) {
         if (k < i) hi = j;
     }
     return v[k];
+}
+
+static float median(float *v, int n) {
+    return kth(v, n, n / 2);
 }
 
 /* The noise around each bin: the median of the bins +-FLOOR_HALF. FM broadcast (anything 200 kHz wide) would be
@@ -2263,12 +2270,6 @@ static void show_a_boxes(void) {
     else lv_obj_clear_flag(rtl_why_l, LV_OBJ_FLAG_HIDDEN);
 }
 
-static int cmp_f(const void *a, const void *b) {
-    float x = *(const float *)a, y = *(const float *)b;
-
-    return (x > y) - (x < y);
-}
-
 /* The stick's strongest signal off its own picture (F's scan running behind another screen, SCAN CFG): the bin highest
  * over the row's median within the view, 10 dB over at least; 0 none */
 static void rtl_pick_bg(const float *db, uint16_t n, uint32_t rate, int64_t c) {
@@ -2278,8 +2279,7 @@ static void rtl_pick_bg(const float *db, uint16_t n, uint32_t rate, int64_t c) {
 
     if (!n || !rate) return;
     memcpy(sorted, db, (size_t)n * sizeof(float));
-    qsort(sorted, n, sizeof(float), cmp_f);
-    float med = sorted[n / 2];
+    float med = median(sorted, n);
 
     for (int k = k0 < 0 ? 0 : k0; k < k1 && k < n; k++)
         if (abs(k - n / 2) > 2 && (b < 0 || db[k] > db[b])) b = k;
@@ -5235,8 +5235,7 @@ static void vp_column(void) {
         col[r] = 10 * log10f(m0 * (1 - t) + m1 * t + 1);
     }
     memcpy(sorted, col, (size_t)h * sizeof(float));
-    qsort(sorted, h, sizeof(float), cmp_f);
-    vp_floor = 0.98f * vp_floor + 0.02f * sorted[h / 3];       /* the hiss, followed slowly */
+    vp_floor = 0.98f * vp_floor + 0.02f * kth(sorted, h, h / 3);   /* the hiss, followed slowly */
     if (g_gpu && wui == &w_port) {      /* one column into the GPU's ring: the picture is not moved a column (that
                                          * moved all of it, 86 times a second) */
         uint8_t lv[VP_MAXH];

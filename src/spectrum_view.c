@@ -660,7 +660,8 @@ static void spectrum_refresh(void *data) {
     }
     if (!direct) {
         lv_obj_invalidate(obj);
-    } else if (lv_obj_get_screen(obj) == lv_scr_act()) {    /* not under the walkie screen */
+    } else if (lv_obj_get_screen(obj) == lv_scr_act() && !drm_wf_claimed()) {  /* not under the walkie screen,
+                                                                                * nor under the Sentry's pictures */
         direct_render();
     }
 }

@@ -131,6 +131,7 @@ static void (*p_glUniform2f)(GLint, GLfloat, GLfloat);
 static void (*p_glUniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
 static void (*p_glVertexAttribPointer)(GLuint, GLint, GLenum, GLboolean, GLsizei, const void *);
 static void (*p_glEnableVertexAttribArray)(GLuint);
+static void (*p_glDisableVertexAttribArray)(GLuint);
 static void (*p_glDrawArrays)(GLenum, GLint, GLsizei);
 static void (*p_glFinish)(void);
 static void (*p_glGenTextures)(GLsizei, GLuint *);
@@ -147,9 +148,13 @@ static void (*p_glBindBuffer)(GLenum, GLuint);
 
 /* ---- State ---- */
 
-#define SLOTS 4                     /* the pictures' data: A/B's halves (0, 1), G's spectrum (2), its voiceprint (3) */
+#define SLOTS 5                     /* the pictures' data: A/B's halves (0, 1), G's spectrum (2), its voiceprint (3), the
+                                     * main screen's waterfall (4) */
+#define PALS  4                     /* the ramps: the pictures' levels, the voiceprint's, the main waterfall's, the
+                                     * radar's afterglow (AIRSPACE) */
+#define PRIMS 8192                  /* points, lines' ends, triangles' corners a frame (each kind) */
 
-enum { P_ROWS, P_TRACE, P_RECT, P_FLAT, P_VP, P_N };
+enum { P_ROWS, P_TRACE, P_RECT, P_FLAT, P_VP, P_WF, P_RADAR, P_PRIM, P_N };
 
 static int    tried;                /* 0 not yet, 1 working, -1 not here */
 static int    pw, ph;               /* the panel, portrait */
@@ -161,7 +166,14 @@ static GLint  u_tr_tr, u_tr_pal, u_tr_bg, u_tr_grid, u_tr_h, u_tr_db;
 static GLint  u_rect_color;
 static GLint  u_fl_lv, u_fl_pal, u_fl_bg, u_fl_band, u_fl_head, u_fl_ring, u_fl_count;
 static GLint  u_vp_lv, u_vp_pal, u_vp_head, u_vp_cols;
-static GLuint tex_pal[2], tex_lv[SLOTS], tex_tr[SLOTS];
+static GLint  u_wf_lv, u_wf_pal, u_wf_head, u_wf_ring;
+static GLint  u_rd_pal, u_rd_ink, u_rd_c, u_rd_r, u_rd_sweep;
+static struct {                     /* a frame's coloured points, lines and triangles (gpu_point, gpu_line, gpu_tri) */
+    float   xy[PRIMS * 2];
+    uint8_t c[PRIMS * 4];
+    int     n;
+} prim[3];
+static GLuint tex_pal[PALS], tex_lv[SLOTS], tex_tr[SLOTS];
 static int    s_cols[SLOTS], s_rows[SLOTS];
 static bool   in_frame, portrait;
 static int    cx0, cy0, cw0, ch0;   /* the clip: the picture last cleared (gpu_clear) */
@@ -209,7 +221,7 @@ static bool load(void) {
           LOAD(gles, glGetProgramiv) && LOAD(gles, glGetProgramInfoLog) && LOAD(gles, glUseProgram) &&
           LOAD(gles, glGetUniformLocation) && LOAD(gles, glUniform1i) && LOAD(gles, glUniform1f) &&
           LOAD(gles, glUniform2f) && LOAD(gles, glUniform4f) && LOAD(gles, glVertexAttribPointer) &&
-          LOAD(gles, glEnableVertexAttribArray) && LOAD(gles, glDrawArrays) && LOAD(gles, glFinish) &&
+          LOAD(gles, glEnableVertexAttribArray) && LOAD(gles, glDisableVertexAttribArray) && LOAD(gles, glDrawArrays) && LOAD(gles, glFinish) &&
           LOAD(gles, glGenTextures) && LOAD(gles, glDeleteTextures) && LOAD(gles, glBindTexture) && LOAD(gles, glTexImage2D) &&
           LOAD(gles, glTexSubImage2D) && LOAD(gles, glTexParameteri) && LOAD(gles, glActiveTexture) &&
           LOAD(gles, glPixelStorei) && LOAD(gles, glGetString) && LOAD(gles, glGetError) &&
@@ -328,6 +340,60 @@ static const char *fs_vp_src =
     "    gl_FragColor = vec4(texture2D(u_pal, vec2(v * 0.99609375 + 0.001953125, 0.5)).rgb, 1.0);\n"
     "}\n";
 
+/* The main screen's waterfall (waterfall_view.c, direct mode): a ring of rows, row age (0 the newest, at the top)
+ * at ring row head + age, each level its theme's colour */
+static const char *fs_wf_src =
+    "precision mediump float;\n"
+    "uniform sampler2D u_lv;\n"
+    "uniform sampler2D u_pal;\n"
+    "uniform float u_head;\n"
+    "uniform float u_ring;\n"
+    "varying vec2 v_uv;\n"
+    "void main() {\n"
+    "    float ring = mod(u_head + floor(v_uv.y), u_ring);\n"
+    "    float v = texture2D(u_lv, vec2(v_uv.x, (ring + 0.5) / u_ring)).r;\n"
+    "    gl_FragColor = vec4(texture2D(u_pal, vec2(v * 0.99609375 + 0.001953125, 0.5)).rgb, 1.0);\n"
+    "}\n";
+
+/* AIRSPACE's scope (app_adsb.c draw_scope): outside the outer ring the ink; inside, the afterglow a quarter turn behind
+ * the sweep (u_sweep, tenths of a degree clockwise from north), from the glow ramp (64 of the 256) */
+static const char *fs_radar_src =
+    "precision highp float;\n"
+    "uniform sampler2D u_pal;\n"
+    "uniform vec4 u_ink;\n"
+    "uniform vec2 u_c;\n"
+    "uniform float u_r;\n"
+    "uniform float u_sweep;\n"
+    "varying vec2 v_uv;\n"
+    "void main() {\n"
+    "    vec2 p = vec2(v_uv.x - u_c.x, u_c.y - v_uv.y);\n"
+    "    if (dot(p, p) > u_r * u_r) { gl_FragColor = u_ink; return; }\n"
+    "    float a = mod(floor(degrees(atan(p.x, p.y)) * 10.0 + 3600.5), 3600.0);\n"
+    "    float d = mod(u_sweep - a + 3600.0, 3600.0);\n"
+    "    if (d >= 900.0) { gl_FragColor = u_ink; return; }\n"
+    "    float i = floor((900.0 - d) * 63.0 / 900.0);\n"
+    "    gl_FragColor = vec4(texture2D(u_pal, vec2((i + 0.5) / 256.0, 0.5)).rgb, 1.0);\n"
+    "}\n";
+
+/* Coloured points, lines and triangles, each corner its colour; points a pixel */
+static const char *vs_prim_src =
+    "attribute vec2 a_pos;\n"
+    "attribute vec4 a_col;\n"
+    "uniform vec2 u_panel;\n"
+    "uniform float u_port;\n"
+    "varying vec4 v_col;\n"
+    "void main() {\n"
+    "    vec2 p = u_port > 0.5 ? u_panel - a_pos : vec2(a_pos.y, u_panel.y - a_pos.x);\n"
+    "    gl_Position = vec4(p / u_panel * 2.0 - 1.0, 0.0, 1.0);\n"
+    "    gl_PointSize = 1.0;\n"
+    "    v_col = a_col;\n"
+    "}\n";
+
+static const char *fs_prim_src =
+    "precision mediump float;\n"
+    "varying vec4 v_col;\n"
+    "void main() { gl_FragColor = v_col; }\n";
+
 static GLuint shader(GLenum type, const char *src) {
     GLuint s = p_glCreateShader(type);
     GLint  ok = 0;
@@ -344,8 +410,8 @@ static GLuint shader(GLenum type, const char *src) {
     return s;
 }
 
-static GLuint program(const char *fs_src) {
-    GLuint vs = shader(GL_VERTEX_SHADER, vs_src), fs = shader(GL_FRAGMENT_SHADER, fs_src), p;
+static GLuint program_vs(const char *vsrc, const char *fs_src) {
+    GLuint vs = shader(GL_VERTEX_SHADER, vsrc), fs = shader(GL_FRAGMENT_SHADER, fs_src), p;
     GLint  ok = 0;
 
     if (!vs || !fs) return 0;
@@ -354,6 +420,7 @@ static GLuint program(const char *fs_src) {
     p_glAttachShader(p, fs);
     p_glBindAttribLocation(p, 0, "a_pos");
     p_glBindAttribLocation(p, 1, "a_uv");
+    p_glBindAttribLocation(p, 2, "a_col");
     p_glLinkProgram(p);
     p_glGetProgramiv(p, GL_LINK_STATUS, &ok);
     if (!ok) {
@@ -465,10 +532,11 @@ static bool setup(void) {
         fds[i] = -1;
     }
     {
-        const char *src[P_N] = {fs_rows_src, fs_trace_src, fs_rect_src, fs_flat_src, fs_vp_src};
+        const char *src[P_N] = {fs_rows_src, fs_trace_src, fs_rect_src, fs_flat_src, fs_vp_src, fs_wf_src,
+                                fs_radar_src, fs_prim_src};
 
         for (int i = 0; i < P_N; i++) {
-            if (!(prog[i] = program(src[i]))) goto fail;
+            if (!(prog[i] = program_vs(i == P_PRIM ? vs_prim_src : vs_src, src[i]))) goto fail;
             u_panel[i] = p_glGetUniformLocation(prog[i], "u_panel");
             u_port[i]  = p_glGetUniformLocation(prog[i], "u_port");
         }
@@ -496,8 +564,16 @@ static bool setup(void) {
     u_vp_pal     = p_glGetUniformLocation(prog[P_VP], "u_pal");
     u_vp_head    = p_glGetUniformLocation(prog[P_VP], "u_head");
     u_vp_cols    = p_glGetUniformLocation(prog[P_VP], "u_cols");
-    tex_pal[0] = texture(256, 1, GL_RGBA);
-    tex_pal[1] = texture(256, 1, GL_RGBA);
+    u_wf_lv      = p_glGetUniformLocation(prog[P_WF], "u_lv");
+    u_wf_pal     = p_glGetUniformLocation(prog[P_WF], "u_pal");
+    u_wf_head    = p_glGetUniformLocation(prog[P_WF], "u_head");
+    u_wf_ring    = p_glGetUniformLocation(prog[P_WF], "u_ring");
+    u_rd_pal     = p_glGetUniformLocation(prog[P_RADAR], "u_pal");
+    u_rd_ink     = p_glGetUniformLocation(prog[P_RADAR], "u_ink");
+    u_rd_c       = p_glGetUniformLocation(prog[P_RADAR], "u_c");
+    u_rd_r       = p_glGetUniformLocation(prog[P_RADAR], "u_r");
+    u_rd_sweep   = p_glGetUniformLocation(prog[P_RADAR], "u_sweep");
+    for (int i = 0; i < PALS; i++) tex_pal[i] = texture(256, 1, GL_RGBA);
     p_glDisable(GL_DITHER);
     p_glDisable(GL_BLEND);
     p_glBindBuffer(GL_ARRAY_BUFFER, 0);     /* client-side vertex arrays */
@@ -529,9 +605,13 @@ static bool slot(int s, int cols, int rows) {
     return true;
 }
 
-bool gpu_init(int cols, int rows) {
+bool gpu_start(void) {
     if (!tried) tried = setup() ? 1 : -1;
-    return tried > 0 && slot(0, cols, rows) && slot(1, cols, rows);
+    return tried > 0;
+}
+
+bool gpu_init(int cols, int rows) {
+    return gpu_start() && slot(0, cols, rows) && slot(1, cols, rows);
 }
 
 bool gpu_ok(void) {
@@ -545,7 +625,7 @@ bool gpu_slot(int s, int cols, int rows) {
 void gpu_palette(int which, const uint32_t *pal) {
     uint8_t px[256 * 4];
 
-    if (tried <= 0 || which < 0 || which > 1) return;
+    if (tried <= 0 || which < 0 || which >= PALS) return;
     for (int i = 0; i < 256; i++) {
         px[i * 4]     = (uint8_t)(pal[i] >> 16);
         px[i * 4 + 1] = (uint8_t)(pal[i] >> 8);
@@ -621,16 +701,48 @@ static void bind(GLuint data, GLuint pal) {
     p_glBindTexture(GL_TEXTURE_2D, pal);
 }
 
-bool gpu_frame_begin(bool port) {
-    int b;
-
-    if (tried <= 0 || (b = drm_wf_back(port)) < 0) return false;
+static bool begin_on(int b, bool port) {
     portrait = port;
     p_glBindFramebuffer(GL_FRAMEBUFFER, fbo[b]);
     p_glViewport(0, 0, pw, ph);
     p_glEnable(GL_SCISSOR_TEST);
     in_frame = true;
     return true;
+}
+
+bool gpu_frame_begin(bool port) {
+    int b;
+
+    if (tried <= 0 || (b = drm_wf_back(port)) < 0) return false;
+    return begin_on(b, port);
+}
+
+static int cur_buf = -1;
+
+bool gpu_frame_begin_buf(int buf, bool port) {
+    if (tried <= 0 || buf < 0 || buf > 1) return false;
+    cur_buf = buf;
+    return begin_on(buf, port);
+}
+
+void gpu_frame_finish(int x, int y, int w, int h) {
+    if (!in_frame) return;
+    in_frame = false;
+    p_glDisable(GL_SCISSOR_TEST);
+    p_glFinish();                       /* drawn before the plane is flipped to it */
+    drm_wf_gpu_area(portrait, cur_buf, x, y, w, h);
+}
+
+void gpu_wf(int s, int pal, int x, int y, int w, int h, int head) {
+    if (!in_frame || !slot_ok(s) || pal < 0 || pal >= PALS) return;
+    scissor(x, y, w, h);
+    use(P_WF);
+    bind(tex_lv[s], tex_pal[pal]);
+    p_glUniform1i(u_wf_lv, 0);
+    p_glUniform1i(u_wf_pal, 1);
+    p_glUniform1f(u_wf_head, (float)head);
+    p_glUniform1f(u_wf_ring, (float)s_rows[s]);
+    quad((float)x, (float)y, (float)(x + w), (float)(y + h), 0, 0, 1, (float)h);
 }
 
 void gpu_clear(int x, int y, int w, int h, uint32_t bg) {
@@ -716,6 +828,73 @@ void gpu_vp(int s, int x, int y, int w, int h, int head) {
     quad((float)x, (float)y, (float)(x + w), (float)(y + h), 0, 0, (float)s_cols[s], 1);
 }
 
+void gpu_radar(int x, int y, int size, float r, float sweep, uint32_t ink) {
+    float c[3];
+
+    if (!in_frame || size < 2) return;
+    rgb4(ink, c);
+    scissor(x, y, size, size);
+    use(P_RADAR);
+    bind(tex_pal[3], tex_pal[3]);
+    p_glUniform1i(u_rd_pal, 1);
+    p_glUniform4f(u_rd_ink, c[0], c[1], c[2], 1);
+    p_glUniform2f(u_rd_c, size / 2.0f, size / 2.0f);
+    p_glUniform1f(u_rd_r, r);
+    p_glUniform1f(u_rd_sweep, sweep);
+    quad((float)x, (float)y, (float)(x + size), (float)(y + size), 0, 0, (float)size, (float)size);
+}
+
+static void prim_add(int k, float x, float y, uint32_t rgb) {
+    int n = prim[k].n;
+
+    if (n >= PRIMS) return;
+    prim[k].xy[n * 2]     = x;
+    prim[k].xy[n * 2 + 1] = y;
+    prim[k].c[n * 4]      = (uint8_t)(rgb >> 16);
+    prim[k].c[n * 4 + 1]  = (uint8_t)(rgb >> 8);
+    prim[k].c[n * 4 + 2]  = (uint8_t)rgb;
+    prim[k].c[n * 4 + 3]  = 255;
+    prim[k].n             = n + 1;
+}
+
+/* Pixel x, y: its centre (the edges' coordinates + 0.5) */
+void gpu_point(int x, int y, uint32_t rgb) {
+    if (in_frame) prim_add(0, x + 0.5f, y + 0.5f, rgb);
+}
+
+void gpu_line(int x0, int y0, int x1, int y1, uint32_t rgb) {
+    if (!in_frame || prim[1].n > PRIMS - 2) return;
+    prim_add(1, x0 + 0.5f, y0 + 0.5f, rgb);
+    prim_add(1, x1 + 0.5f, y1 + 0.5f, rgb);
+    prim_add(0, x1 + 0.5f, y1 + 0.5f, rgb);     /* its last pixel too, as the CPU's line */
+}
+
+void gpu_tri(float x0, float y0, float x1, float y1, float x2, float y2, uint32_t rgb) {
+    if (!in_frame || prim[2].n > PRIMS - 3) return;
+    prim_add(2, x0, y0, rgb);
+    prim_add(2, x1, y1, rgb);
+    prim_add(2, x2, y2, rgb);
+}
+
+void gpu_prims_flush(void) {
+    static const GLenum mode[3] = {0x0000, 0x0001, 0x0004};    /* GL_POINTS, GL_LINES, GL_TRIANGLES */
+
+    if (!in_frame) return;
+    scissor(cx0, cy0, cw0, ch0);
+    use(P_PRIM);
+    p_glDisableVertexAttribArray(1);
+    p_glEnableVertexAttribArray(2);
+    for (int k = 2; k >= 0; k--) {      /* the filled shapes first, the lines and points over them */
+        if (!prim[k].n) continue;
+        p_glVertexAttribPointer(0, 2, GL_FLOAT, 0, 0, prim[k].xy);
+        p_glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, 1, 0, prim[k].c);
+        p_glDrawArrays(mode[k], 0, prim[k].n);
+        prim[k].n = 0;
+    }
+    p_glDisableVertexAttribArray(2);
+    p_glEnableVertexAttribArray(1);
+}
+
 void gpu_rect(int x, int y, int w, int h, uint32_t rgb) {
     float c[3];
 
@@ -737,9 +916,35 @@ void gpu_frame_end(int x, int y, int w, int h) {
 
 #else  /* no DRM (the Mac's build): no GPU */
 
+bool gpu_start(void) {
+    return false;
+}
+void gpu_radar(int x, int y, int size, float r, float sweep, uint32_t ink) {
+    (void)x, (void)y, (void)size, (void)r, (void)sweep, (void)ink;
+}
+void gpu_point(int x, int y, uint32_t rgb) {
+    (void)x, (void)y, (void)rgb;
+}
+void gpu_line(int x0, int y0, int x1, int y1, uint32_t rgb) {
+    (void)x0, (void)y0, (void)x1, (void)y1, (void)rgb;
+}
+void gpu_tri(float x0, float y0, float x1, float y1, float x2, float y2, uint32_t rgb) {
+    (void)x0, (void)y0, (void)x1, (void)y1, (void)x2, (void)y2, (void)rgb;
+}
+void gpu_prims_flush(void) {}
 bool gpu_init(int cols, int rows) {
     (void)cols, (void)rows;
     return false;
+}
+bool gpu_frame_begin_buf(int buf, bool port) {
+    (void)buf, (void)port;
+    return false;
+}
+void gpu_frame_finish(int x, int y, int w, int h) {
+    (void)x, (void)y, (void)w, (void)h;
+}
+void gpu_wf(int s, int pal, int x, int y, int w, int h, int head) {
+    (void)s, (void)pal, (void)x, (void)y, (void)w, (void)h, (void)head;
 }
 bool gpu_ok(void) {
     return false;

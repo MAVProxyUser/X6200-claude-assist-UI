@@ -50,6 +50,16 @@ void drm_wf_present_ring(const uint32_t *src, int32_t x, int32_t w, int32_t head
 /* The primary plane claimed by one that draws it whole each time (the Sentry's picture), or given back: meanwhile
  * the strips above are not shown nor copied (they present themselves whole again after) */
 void drm_wf_claim(bool on);
+/* Claimed now: the main screen's waterfall and spectrum need not draw at all meanwhile */
+bool drm_wf_claimed(void);
+/* Not claimed, landscape: cb(back) draws (the GPU) into the primary plane's back buffer at each drm_commit() that shows
+ * it, after the strips presented; drm_wf_want_flip() asks for one when only cb's part changed. drm_wf_forget(x): the
+ * strip at x presented no more (the GPU draws it) */
+void drm_wf_commit_hook(void (*cb)(int back));
+void drm_wf_want_flip(void);
+void drm_wf_forget(int32_t x);
+/* The area the GPU drew into buffer buf (the frame's own coordinates), what a dump reads back */
+void drm_wf_gpu_area(bool portrait, int buf, int32_t x, int32_t y, int32_t w, int32_t h);
 /* Claimed: a landscape picture (src packed, w x h, ARGB/XRGB) at landscape lx, ly turned straight into the primary
  * plane's back buffer, shown at the next drm_commit(). false (nothing done): no planes, not claimed, portrait */
 bool drm_wf_rotate(const uint32_t *src, int32_t lx, int32_t ly, int32_t w, int32_t h);

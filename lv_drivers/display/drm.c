@@ -110,6 +110,8 @@ static const uint32_t       *wf_src;        /* its last one, landscape: into wf_
 static lv_area_t            wf_src_a;
 static int                  wf_gpu_buf = -1;    /* the buffer the GPU drew last (drm_wf_drawn) */
 static lv_area_t            wf_gpu_p;           /* and where, in the panel's own coordinates */
+static void                 (*commit_hook)(int back);   /* draws into the primary's back buffer just before it is
+                                                         * shown (drm_wf_commit_hook) */
 
 /**********************
  *   STATIC FUNCTIONS
@@ -425,7 +427,7 @@ static void wf_src_shadow(void) {
 #if BOARD_FB_ROTATE_90
     if (wf_claimed && wf_src && wf_shadow) {
         rotate_into(wf_shadow, PANEL_W, &wf_src_a, wf_src);
-    } else if (wf_claimed && wf_gpu_buf >= 0 && wf_shadow) {
+    } else if (wf_gpu_buf >= 0 && wf_shadow) {
         const struct drm_buffer *b  = &primary.bufs[wf_gpu_buf];
         int32_t                  px = wf_gpu_p.x1, pw = lv_area_get_width(&wf_gpu_p);
 
@@ -688,6 +690,40 @@ void drm_wf_present_ring(const uint32_t *src, int32_t x, int32_t w, int32_t head
     primary.ready = true;
 }
 
+void drm_wf_commit_hook(void (*cb)(int back)) {
+    commit_hook = cb;
+}
+
+void drm_wf_want_flip(void) {
+    if (planes && !portrait_mode && !wf_claimed) {
+        primary.ready = true;
+    }
+}
+
+void drm_wf_forget(int32_t x) {
+    for (int i = 0; i < nstrips; i++) {
+        if (strips[i].x == x) {
+            strips[i] = strips[--nstrips];
+            return;
+        }
+    }
+}
+
+void drm_wf_gpu_area(bool portrait, int buf, int32_t x, int32_t y, int32_t w, int32_t h) {
+    lv_area_t p;
+
+    if (portrait) {
+        p = (lv_area_t){ PANEL_W - x - w, PANEL_H - y - h, PANEL_W - 1 - x, PANEL_H - 1 - y };
+    } else {
+        p = (lv_area_t){ y, LAND_W - x - w, y + h - 1, LAND_W - 1 - x };
+    }
+    wf_gpu_buf = _lv_area_intersect(&wf_gpu_p, &p, &(lv_area_t){ 0, 0, PANEL_W - 1, PANEL_H - 1 }) ? buf : -1;
+}
+
+bool drm_wf_claimed(void) {
+    return wf_claimed;
+}
+
 void drm_wf_claim(bool on) {
     wf_claimed = on;
     wf_src     = NULL;
@@ -784,6 +820,11 @@ void drm_commit(void) {
                 copy_cols(&primary.bufs[primary.back], strips[i].x, strips[i].w);
                 strips[i].stale[primary.back] = false;
             }
+        }
+        /* the GPU's part of the main screen (its waterfall) into this very buffer, after the strips: each buffer the
+         * plane flips to has it as it is now, whichever presented */
+        if (commit_hook && !wf_claimed && !portrait_mode) {
+            commit_hook(primary.back);
         }
     }
 

@@ -19,12 +19,15 @@ extern "C" {
  * a call failing, said once in the log); the caller draws with the CPU. Called again it answers as the first time */
 bool gpu_init(int cols, int rows);
 bool gpu_ok(void);
+/* The context alone (no slots): what the main screen's waterfall needs */
+bool gpu_start(void);
 
-/* Slot s's data (0..3): rows of cols levels (a ring of rows, or of columns for a voiceprint) and one trace of cols
+/* Slot s's data (0..4): rows of cols levels (a ring of rows, or of columns for a voiceprint) and one trace of cols
  * columns; made again when the size changes */
 bool gpu_slot(int s, int cols, int rows);
 
-/* Ramp `which` (0: the pictures' levels, 1: the voiceprint's): 256 colours, 0x00RRGGBB */
+/* Ramp `which` (0: the pictures' levels, 1: the voiceprint's, 2: the main waterfall's, 3: the radar's afterglow):
+ * 256 colours, 0x00RRGGBB */
 void gpu_palette(int which, const uint32_t *pal);
 
 /* Slot s's levels: one row of its ring, one column (a voiceprint's), or all of them */
@@ -53,6 +56,21 @@ void gpu_vp(int s, int x, int y, int w, int h, int head);
 void gpu_rect(int x, int y, int w, int h, uint32_t rgb);
 /* Drawn, waited for, shown at the next commit; (x, y, w, h) what a screen dump reads back */
 void gpu_frame_end(int x, int y, int w, int h);
+/* A frame into the primary plane's buffer buf as it is (drm_wf_commit_hook: the main screen's), no flip asked; then
+ * gpu_frame_finish: waited for, (x, y, w, h) what a dump reads back */
+bool gpu_frame_begin_buf(int buf, bool portrait);
+void gpu_frame_finish(int x, int y, int w, int h);
+/* Slot s as the main screen's waterfall, ramp pal: its ring of rows, the newest (head) on top */
+void gpu_wf(int s, int pal, int x, int y, int w, int h, int head);
+/* AIRSPACE's scope (size square at x, y): the ink outside radius r, the afterglow behind the sweep (tenths of a degree
+ * clockwise from north) from ramp 3 (its first 64 colours) */
+void gpu_radar(int x, int y, int size, float r, float sweep, uint32_t ink);
+/* Coloured points (a pixel), lines (both ends lit) and filled triangles in the frame's coordinates, batched and drawn
+ * by gpu_prims_flush (clipped to the picture last cleared): triangles first, lines and points over them */
+void gpu_point(int x, int y, uint32_t rgb);
+void gpu_line(int x0, int y0, int x1, int y1, uint32_t rgb);
+void gpu_tri(float x0, float y0, float x1, float y1, float x2, float y2, uint32_t rgb);
+void gpu_prims_flush(void);
 
 #ifdef __cplusplus
 }

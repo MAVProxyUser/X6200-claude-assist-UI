@@ -31,6 +31,7 @@
 #include "button_bar.h"
 #include "walkie.h"
 #include "lv_drivers/display/drm.h"
+#include "gpu.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -122,6 +123,22 @@ static float            keep_db[ROW_BINS];
 static uint32_t         keep_anchor;
 static int32_t          keep_bin;
 static uint32_t         keep_width;         /* 0: nothing kept */
+
+/* The GPU draws the flat waterfall where it can (Mesa there, planes, a colour theme): wfl holds its levels, a
+ * landscape row a ring row (as wfp's portrait columns), uploaded as they change, and drm_commit draws them into each
+ * buffer the plane flips to (wf_gpu_hook). It spared turning each level into a pixel and copying the whole strip
+ * twice for each new row. 1-bit themes (dithered per pixel) and 3D draw with the CPU into wfp as before */
+static bool             wf_gpu;
+static uint8_t          *wfl;
+static int              wfl_rows;           /* the GPU's ring's rows: the height it was sized for */
+static bool             wf_gpu_was;         /* the GPU drew it last time: a change of way draws it all again */
+static const uint32_t   *wf_gpu_pal;        /* the theme's ramp last given to the GPU, and a copy of it */
+static uint32_t         wf_gpu_pal_copy[256];
+static bool d3_on(void);
+
+static bool wf_gpu_on(void) {
+    return wf_gpu && !theme_shape.mono && !d3_on();
+}
 
 static void refresh_waterfall(void *arg);
 static void do_scroll_timer(lv_timer_t *t);
@@ -431,6 +448,10 @@ static void direct_column(int32_t age, uint32_t span, size_t i0, size_t i1) {
     const wf_row_t *row = row_at(age);
 
     row_pixels(row, wfp_center, span, i0, i1, px);
+    if (wf_gpu_on()) {                  /* the levels as they are: the GPU colours them */
+        memcpy(wfl + ((wfp_head + age) % height) * WIDTH + i0, px + i0, i1 - i0);
+        return;
+    }
     for (size_t i = i0; i < i1; i++) {
         wfp[(WIDTH - 1 - i) * height + (wfp_head + age) % height] = wf_pixel(px[i], i + dither_x, row) | 0xff000000;
     }
@@ -467,11 +488,22 @@ static bool shown(lv_obj_t *o) {
     return true;
 }
 
+/* The display's plane another's now (the Sentry's pictures, drm_wf_claim): under it nothing of this is seen. It drew
+ * on all the same (the 3D picture 1.5% of the Sentry's GUI thread, 2026-11-15); now it is drawn whole when the plane
+ * is given back */
+static bool plane_taken(void) {
+#if USE_DRM
+    return direct && drm_wf_claimed();
+#else
+    return false;
+#endif
+}
+
 static void direct_redraw(int new_row) {
     uint32_t    bandwidth = shown_span();
     lv_area_t   a;
 
-    if (!shown(obj) || !backlight_seen()) {
+    if (!shown(obj) || !backlight_seen() || plane_taken()) {
         wfp_full = true;            /* not up to date when shown again (the screen dark, the screensaver over it) */
         return;
     }
@@ -482,6 +514,17 @@ static void direct_redraw(int new_row) {
      * redraw for them made it slower still, and more rows piled up. */
     bool    full = wfp_full || new_row >= height || wfp_bw != bandwidth;
     int32_t px   = 0;
+    bool    gpu  = wf_gpu_on();
+
+    if (gpu != wf_gpu_was || (gpu && wfl_rows != height)) {    /* the other way last time, or another height */
+        wf_gpu_was = gpu;
+        full       = true;
+#if USE_DRM
+        if (!gpu) drm_wf_gpu_area(false, -1, 0, 0, 0, 0);  /* a dump reads the CPU's strip again, not the GPU's */
+#endif
+        if (gpu && wfl_rows != height) wfl_rows = gpu_slot(4, WIDTH, height) ? height : 0;
+        if (gpu && !wfl_rows) return;
+    }
 
     if (!full && wfp_center != wf_center_freq) {
         px   = ((int64_t) wf_center_freq - wfp_center) * WIDTH / (int64_t) bandwidth;
@@ -509,12 +552,22 @@ static void direct_redraw(int new_row) {
             /* Landscape pixel i now shows the old i + px: portrait row R the old R - px */
             wfp_center += (int64_t) px * bandwidth / WIDTH;
             dither_x += px;
-            if (px > 0) {
+            if (gpu) {                  /* each ring row slides: landscape i now the old i + px */
+                for (int32_t r = 0; r < height; r++) {
+                    uint8_t *lr = wfl + r * WIDTH;
+
+                    if (px > 0) memmove(lr, lr + px, WIDTH - px);
+                    else memmove(lr - px, lr, WIDTH + px);
+                }
+            } else if (px > 0) {
                 memmove(wfp + px * height, wfp, (WIDTH - px) * height * sizeof(uint32_t));
+            } else {
+                memmove(wfp, wfp - px * height, (WIDTH + px) * height * sizeof(uint32_t));
+            }
+            if (px > 0) {
                 i0 = WIDTH - px;
                 i1 = WIDTH;
             } else {
-                memmove(wfp, wfp - px * height, (WIDTH + px) * height * sizeof(uint32_t));
                 i0 = 0;
                 i1 = -px;
             }
@@ -527,8 +580,39 @@ static void direct_redraw(int new_row) {
     }
     lv_obj_get_coords(obj, &a);
 #if USE_DRM
+    if (gpu) {                          /* the changed rows to the GPU, all of them after a slide; drawn at the commit */
+        if (full || px) {
+            gpu_levels_all(4, wfl);
+        } else {
+            for (int32_t col = 0; col < new_row; col++) {
+                int32_t r = (wfp_head + col) % height;
+
+                gpu_levels_row(4, r, wfl + r * WIDTH);
+            }
+        }
+        drm_wf_forget(a.y1);            /* its strip of before (the CPU's) copied no more */
+        drm_wf_want_flip();
+        return;
+    }
     drm_wf_present_ring(wfp, a.y1, height, wfp_head);
 #endif
+}
+
+/* drm_commit's: the GPU's waterfall into the buffer about to be shown (each one the plane flips to), the theme's ramp
+ * given again when it changed */
+static void wf_gpu_hook(int back) {
+    lv_area_t a;
+
+    if (!wf_gpu_on() || wfl_rows != height || !shown(obj) || !backlight_seen()) return;
+    if (wf_palette != wf_gpu_pal || memcmp(wf_gpu_pal_copy, wf_palette, sizeof(wf_gpu_pal_copy))) {
+        memcpy(wf_gpu_pal_copy, wf_palette, sizeof(wf_gpu_pal_copy));
+        wf_gpu_pal = wf_palette;
+        gpu_palette(2, wf_palette);
+    }
+    lv_obj_get_coords(obj, &a);
+    if (!gpu_frame_begin_buf(back, false)) return;
+    gpu_wf(4, 2, 0, a.y1, WIDTH, height, wfp_head);
+    gpu_frame_finish(0, a.y1, WIDTH, height);
 }
 
 /* ---- 3D: the last rows as traces one behind the other ---- */
@@ -1288,7 +1372,7 @@ static void d3_redraw(void) {
     uint32_t glide = d3_glide_ms();
     uint32_t every = LV_MAX(glide, D3_MIN_MS);   /* with the glide, its rate for every picture: rows and tuning too */
 
-    if (!shown(obj) || walkie_on() || !backlight_seen()) {
+    if (!shown(obj) || walkie_on() || !backlight_seen() || plane_taken()) {
         d3_drawn_buf = NULL;        /* the plane may have been drawn over: the whole background again */
         return;
     }
@@ -1947,6 +2031,11 @@ void waterfall_set_height(lv_coord_t h) {
     if (direct) {
         wfp = calloc(WIDTH * MAX_HEIGHT, sizeof(uint32_t));
         lv_timer_create(do_scroll_timer, 20, NULL);
+#if USE_DRM
+        if ((wf_gpu = gpu_start() && (wfl = calloc(WIDTH * MAX_HEIGHT, 1)) != NULL)) {
+            drm_wf_commit_hook(wf_gpu_hook);
+        }
+#endif
     } else {
         frame = lv_img_buf_alloc(WIDTH, height, LV_IMG_CF_TRUE_COLOR);
     }
