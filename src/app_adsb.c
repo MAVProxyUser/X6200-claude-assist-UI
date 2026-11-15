@@ -776,7 +776,9 @@ static void build(void) {
         lv_obj_set_style_radius(c, LV_RADIUS_CIRCLE, 0);
         badge_l[i] = label(root, &pixel_28, amb, i ? SW - 50 : 12, 10, 36, LV_TEXT_ALIGN_CENTER, "H");   /* the Sentry's H */
     }
-    title_l  = label(root, &pixel_20, amb, 60, 6, SW - 120, LV_TEXT_ALIGN_CENTER, "XIEGU X6200  AIRSPACE SENTRY");
+    char t[80];
+    snprintf(t, sizeof(t), "XIEGU X6200 AIRSPACE SENTRY: %s", app_sentry_release());   /* the release, as the Sentry's */
+    title_l  = label(root, &pixel_20, amb, 60, 6, SW - 120, LV_TEXT_ALIGN_CENTER, t);
     status_l = label(root, &pixel_16, amb, 60, 27, SW - 120, LV_TEXT_ALIGN_CENTER, "");
 
     /* the scope */

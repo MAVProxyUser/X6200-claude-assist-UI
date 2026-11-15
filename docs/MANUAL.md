@@ -620,12 +620,14 @@ last seconds, the strongest signals named over it and the screen's channel brack
 - **The boxes**: RECEIVER (the radio, and what the speaker plays: `HEARD: X6200`, `RTL` or `BOTH`), TUNED (the
   frequency, the span and the MFK's step), BAND (A: the band the dial is in; B: PRESET, the preset or D's band) and
   SIGNALS (how many, the strongest; A adds its mode, B the stick's gain).
-- **F1 SCAN** sweeps the band end to end: A 360 kHz at a time (3 s each), B a picture at a time (DWELL, 2 s), each
+- **F1 SCAN** sweeps the band end to end: A 360 kHz at a time, B a picture at a time (the scans' DWELL, 2 s, set by
+  C's F5 or SCAN CFG's), each
   a little overlapped, from the bottom again past the top; a band narrower than the picture stays in its middle.
   On A, AUTO locks on what it finds along the band (only inside it) and goes on; SEMI only marks. On B the channel
   goes to each picture's strongest signal. Both put what they lock on into C LOG, and B's scan goes on behind the
   other screens. Turning the MFK or the VFO stops a scan where it is.
-- **F2 BAND** (A: the next band, the BAND keys too, the scan going on there) or **PRESET** (B: NOAA weather, 2 m,
+- **F2 BAND** (A: the next band, the BAND keys too, the scan going on there; 30 M and 19 M BC are heard on WWV at
+  10 and 15 MHz, just outside them, and BAND and SCAN still count that as the band) or **PRESET** (B: NOAA weather, 2 m,
   2 m repeaters, the airband, FM broadcast, marine VHF, the weather satellites, the weather balloons, 70 cm, ISM 433,
   GMRS, ISM 915, UAT 978 and ADS-B 1090).
 - **F3 VIEW**: the screen's radio alone, SPLIT (the X6200 above, the stick below) or the other radio alone. Each
@@ -683,13 +685,16 @@ F5 on A or B, F5 again (BACK) to return; on no ring, the badge says the screen i
 - **From A**: the boxes A had: SYSTEM MODE, TRANSMITTER, SIGNAL STATUS, SCAN ROUTINE, TARGET BAND, SIGNAL PROFILE,
   TARGETS, and the lock under them: what it is, the time on target, its level against the noise (SIG and NOISE),
   the last three signals locked on. **F1 MODE**: AUTO-SCAN (locks on each signal it finds by itself, listens a
-  while, goes on) or SEMI-AUTO (marks them; A's MFK push or a tap locks on one); MAN-OVERRIDE comes only from
-  turning the VFO, and F1 leaves it for SEMI. **F2 SWEEP**: the X6200 hops through the bands marked `*` in D, a few
-  seconds each. **F3 STEP**: A's MFK (1 to 100 kHz). **F4 REC**: the RX recorder. The MFK goes to the NEXT target,
+  while, goes on: the scans' dwell while A scans or sweeps, 20 s while it watches one place) or SEMI-AUTO (marks
+  them; A's MFK push or a tap locks on one); MAN-OVERRIDE comes only from turning the VFO, and F1 leaves it for
+  SEMI. The mode stays as chosen here: BAND, D's SCAN and LISTEN keep it (they set AUTO before). **F2 SWEEP**: the
+  X6200 hops between the bands marked `*` in D, the scans' dwell on each, and says which as it starts; it is not
+  A's F1 SCAN, which goes along one band end to end (FM BC included). **F3 STEP**: A's MFK (1 to 100 kHz). **F4 REC**: the RX recorder. The MFK goes to the NEXT target,
   its push HOLDs the lock, a tap on the locked frequency IGNOREs it until the Sentry closes. Each choice is said in
   words as it is made.
 - **From B**: the stick (its tuner, gain and squelch), its scan (on, DWELL, STEP), the band, the strongest signal,
-  and B's channel as the lock. **F1 GAIN** (AUTO, 10 to 50 dB), **F2 DWELL** (1, 2 or 4 s a picture), **F3 STEP**
+  and B's channel as the lock. **F1 GAIN** (AUTO, 10 to 50 dB), **F2 DWELL** (1, 2, 4 or 8 s: every scan's, as C's
+  F5), **F3 STEP**
   (12.5 kHz to 1 MHz), **F4 SQL** (OFF, 6, 10, 15, 20 dB).
 
 ### C LOG
@@ -710,16 +715,26 @@ written through to the card before it replaces the last copy, so a power cut kee
   known channel (NOAA WX1 to WX7, AIS, APRS, the ISS, marine 16, guard 121.500, the Meteor-M satellites) or the
   band (FM, NAV, AIR, SAT, 2M, MARINE, LMR, SONDE, ISM, 70CM, GMRS, UAT, ADS-B). A's SIGNAL PROFILE adds the width
   (1.6 kHz or less: CARRIER / CW).
-- **Listening**: the MFK's push (or F1) plays the one chosen on its own radio. While one plays, the MFK plays each
-  one it comes to, switching between the X6200 and the stick by itself, and `>` marks it. Only that radio's scan
-  waits meanwhile (an X6200 entry holds A's, a stick entry B's): the other radio's scan goes on. With LISTEN on
-  BOTH the other radio stays heard too, mixed in; on X6200 or RTL only the entry's radio is heard.
-- **F4 SCAN** goes through the list by itself: **F5 DWELL** seconds on each (2, 4 or 8), held while it is busy (on
-  the X6200, its signal 6 dB over the noise; on the stick, its squelch open, with a squelch set on B). F4 off (or
-  F1 off) stops what it was playing: A's and B's scans go on and the LISTEN of before is heard again.
+- **Listening**: the MFK's push (or F1) plays the one chosen on its own radio, or stops it if it plays. Each radio
+  plays one entry at a time and both can play at once: an X6200 entry on the X6200 and a stick entry on the stick,
+  mixed (BOTH), each marked `>`. While one plays, the MFK plays each one it comes to on its radio. Only the radio
+  with an entry waits in its own scan meanwhile (an X6200 entry holds A's, a stick entry B's). With one radio's
+  entry alone and LISTEN on BOTH, the other radio stays heard too, mixed in; on X6200 or RTL only the entry's
+  radio is heard.
+- **F4 SCAN** is every scan at once: on, A's scan (F1, the dial's band, in AUTO so it locks) and B's start finding
+  and filling the log, on whatever
+  screen, and while C is shown the log is scanned on each radio at the same time, each through its own entries,
+  mixed. Each radio waits for its entry while that one is busy (on the X6200, its signal 6 dB over the noise; on
+  the stick, its squelch open, with a squelch set on B), and otherwise goes on after the dwell. One frequency per
+  radio: while C scans a radio's entries that radio's own scan waits; on the other screens it goes on. Off, all of
+  them stop (A's scan off, in SEMI) and the LISTEN of before is heard again. A pick by hand (F1, the push, a touch) stops the
+  log's scans and leaves A's and B's running.
+- **F5 DWELL** is every scan's dwell: 1, 2, 4 or 8 s on each 360 kHz of A's, each picture of B's and each quiet
+  entry of the log's (SCAN CFG's DWELL is the same one), A's SWEEP's on each band, and AUTO's on each signal it
+  locks on while A scans or sweeps (held, it stays).
 - F2 removes the one chosen; F3 twice within 3 seconds clears the log.
-- Keys that can do nothing are dimmed and do nothing: Listen, Remove, Clear and Scan with the log empty, Dwell with
-  the scan off.
+- Keys that can do nothing are dimmed and do nothing: Listen, Remove and Clear with the log empty (Scan and Dwell
+  always act: they run A's and B's scans, which fill it).
 
 ### D BANDS, E DECODE, F SYSTEM
 
