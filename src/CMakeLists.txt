@@ -16,7 +16,7 @@ add_dependencies(${PROJECT_NAME} git_commit)
 target_include_directories(${PROJECT_NAME} PRIVATE ${GIT_COMMIT_DIR})
 
 target_sources(${PROJECT_NAME} PUBLIC
-    gui_main.c gui_wake.c ops_room.c perf_hud.c screen_main.c walkie.c gui_styles.c mono.c wf_palettes.c
+    gui_main.c gui_state.c gui_wake.c ops_room.c perf_hud.c screen_main.c walkie.c gui_styles.c mono.c wf_palettes.c
     spectrum_view.c radio.c dsp.cpp util.cpp
     waterfall_view.c knob_device.c key_input.c mouse_input.c input_caps.c mfk_device.c
     gui_events.c msg_box.c msg_note.c front_keys.c kbd_rollover.c kbd_hyper.c kbd_keymap.c kbd_layout.c kbd_ptt.c

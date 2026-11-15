@@ -55,6 +55,10 @@ void main_screen_close_app(void);
  * it back when nothing else took the screen; paused while the main screen was chosen in it, till it opens again */
 void main_screen_dialog_closed(void);
 void main_screen_home_pause(bool on);
+/* At the start, after gui_state_init(): back where the GUI before this one was (a crash, an update, a restart:
+ * gui_state.c), the Sentry, an app or the main screen; false: nowhere to go back to, the start's own defaults. From
+ * then on where the GUI is, kept every half second */
+bool main_screen_restore(void);
 /* The APP grid, as the APP key opens it */
 void main_screen_open_apps(void);
 /* main_screen_open_dialog(): app_window.h, with dialog_t */

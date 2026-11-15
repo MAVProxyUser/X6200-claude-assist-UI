@@ -78,6 +78,7 @@
 #include "recorder.h"
 #include "styles.h"
 #include "theme.h"
+#include "gui_state.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -3928,11 +3929,15 @@ static void timer_cb(lv_timer_t *t) {
     }
 }
 
+static void state_keep(void);
+static void state_restore(void);
+
 static void blink_cb(lv_timer_t *t) {
     static int n;
 
     (void)t;
     if (hits_dirty && n % 120 == 0) hits_save();     /* G's log on DATA, a minute at most behind */
+    state_keep();                                   /* for a restart of the GUI: gui_state.c */
     g_scan_step();
     if (scr == SCR_LOG && g_clear_ms && lv_tick_get() - g_clear_ms > 3000) {
         g_clear_ms = 0;
@@ -6484,11 +6489,13 @@ static void construct_cb(lv_obj_t *parent) {
     lv_group_focus_obj(root);
     lv_group_set_editing(keyboard_group, true);
 
+    state_restore();                    /* the GUI restarted: the screen, the scans as they were */
     {
         scr_t s = open_at;
 
         open_at = SCR_SCAN;
         go(SCR_SCAN);
+        if (s == SCR_TRACK && cfg_from == SCR_RTL) go(SCR_RTL);     /* B's SCAN CFG: from B, as its F5 */
         if (s != SCR_SCAN) go(s);       /* from A, as a turn of the ring would (G held up, B's picture) */
     }
     if (!wide_ok) {
@@ -6564,6 +6571,122 @@ static void destruct_cb(void) {
         rtl_frame = NULL;
     }
     root = img = rtl_img = NULL;
+}
+
+/* ---- Across a restart of the GUI (gui_state.c) ---- */
+
+#define SWEEP_KEYS ((BANDS_N + 29) / 30)
+
+/* What the Sentry has going, kept every half second (blink_cb): its screen, A's and B's scans and C's, the bands
+ * marked for A's sweep, the choices on each screen. Not an armed transmitter (G's A/B), a lock on a signal, help or
+ * the OSD, nor what C was playing (its scan plays again). The dial, the volumes, LISTEN and the views are settings */
+static void state_keep(void) {
+    char k[16];
+
+    gui_state_set("s.scr", scr);
+    gui_state_set("s.cfgfrom", cfg_from);
+    gui_state_set("s.mode", smode == MODE_AUTO ? MODE_AUTO : MODE_SEMI);   /* MAN-OVERRIDE: SEMI, the dial kept */
+    gui_state_set("s.rout", routine);
+    gui_state_set("s.aband", scan_a_band);
+    gui_state_set("s.astep", a_step);
+    gui_state_set("s.rscan", rtl_scan);
+    gui_state_set("s.rtlhz", (int32_t)rtl_hz);
+    gui_state_set("s.lhz", (int32_t)listen_hz);
+    gui_state_set("s.preset", rtl_preset);
+    gui_state_set("s.fband", f_band);
+    gui_state_set("s.dwell", scan_dwell_ms);
+    gui_state_set("s.gscan", g_scan);
+    gui_state_set("s.gsel", g_sel);
+    gui_state_set("s.bsel", band_sel);
+    gui_state_set("s.dsel", dec_sel);
+    gui_state_set("s.drow", dec_row);
+    gui_state_set("s.sys", sys_sel);
+    gui_state_set("s.3d", ws_3d);
+    for (int j = 0; j < SWEEP_KEYS; j++) {
+        int32_t m = 0;
+
+        for (int i = j * 30; i < BANDS_N && i < j * 30 + 30; i++) m |= (int32_t)band_rt[i].sweep << (i - j * 30);
+        snprintf(k, sizeof(k), "s.sweep%d", j);
+        gui_state_set(k, m);
+    }
+}
+
+/* At the first opening after a restart that was in the Sentry (construct_cb, after its defaults, before its screen
+ * is shown): what state_keep kept, each checked against what it may be. The scans go on from where they were */
+static void state_restore(void) {
+    static bool done;
+    uint32_t    now = lv_tick_get();
+    int32_t     v;
+    char        k[16];
+
+    if (done) return;
+    done = true;
+    if (gui_state_start_place() != GUI_PLACE_SENTRY || gui_state_get("s.scr", -1) < 0) return;
+
+    v       = gui_state_get("s.scr", SCR_SCAN);
+    open_at = v >= 0 && v < SCR_N ? (scr_t)v : SCR_SCAN;
+    cfg_from = gui_state_get("s.cfgfrom", SCR_SCAN) == SCR_RTL ? SCR_RTL : SCR_SCAN;
+    v = gui_state_get("s.dwell", scan_dwell_ms);
+    if (v == 1000 || v == 2000 || v == 4000 || v == 8000) scan_dwell_ms = v;
+    v = gui_state_get("s.astep", a_step);
+    if (v >= 0 && v < N_OF(a_steps)) a_step = v;
+    for (int j = 0; j < SWEEP_KEYS; j++) {
+        snprintf(k, sizeof(k), "s.sweep%d", j);
+        if ((v = gui_state_get(k, -1)) == -1) continue;
+        for (int i = j * 30; i < BANDS_N && i < j * 30 + 30; i++) band_rt[i].sweep = (v >> (i - j * 30)) & 1;
+    }
+    v = gui_state_get("s.bsel", band_sel);
+    if (v >= 0 && v < BANDS_N) band_sel = v;
+    v = gui_state_get("s.dsel", dec_sel);
+    if (v >= 0 && v < DECODERS_N) dec_sel = v;
+    v = gui_state_get("s.drow", 0);
+    dec_row = v >= 0 && v < decoders[dec_sel].n ? v : 0;
+    v = gui_state_get("s.sys", sys_sel);
+    if (v >= 0 && v < SYS_N) sys_sel = v;
+    v = gui_state_get("s.gsel", g_sel);
+    if (v >= 0 && v < nhits) g_sel = v;
+    ws_3d = gui_state_get("s.3d", ws_3d) != 0;
+
+    /* B: its preset or C's band, its tuning, the channel heard (hear_apply, as the screen opens, puts it on) */
+    v = gui_state_get("s.fband", -1);
+    f_band = v >= 0 && v < BANDS_N ? v : -1;
+    v = gui_state_get("s.preset", rtl_preset);
+    if (v >= 0 && v < RTL_PRESETS) rtl_preset = v;
+    v = gui_state_get("s.rtlhz", 0);
+    if (v >= RTL_SPEC_MIN_HZ && v <= RTL_SPEC_MAX_HZ) rtl_tune_to(v, false);
+    v = gui_state_get("s.lhz", 0);
+    if (v >= RTL_SPEC_MIN_HZ && v <= RTL_SPEC_MAX_HZ && llabs(v - rtl_hz) <= rtl_view_hz() / 2) listen_hz = v;
+    if (gui_state_get("s.rscan", 0)) {  /* on from the picture it was at, after a dwell there */
+        rtl_scan  = true;
+        scan_next = now + SCAN_DWELL_MS;
+        scan_pick = now + SCAN_PICK_MS;
+    }
+
+    /* A: AUTO or SEMI, its band scan (on from the dial: the base kept it) or the sweep of the marked bands */
+    smode = gui_state_get("s.mode", MODE_SEMI) == MODE_AUTO ? MODE_AUTO : MODE_SEMI;
+    if (smode == MODE_AUTO) sweep_next = 0;
+    v = gui_state_get("s.aband", -1);
+    if (v >= 0 && v < BANDS_N) scan_a_band = v;
+    switch (gui_state_get("s.rout", ROUT_BAND)) {
+        case ROUT_SCAN:
+            if (scan_a_band >= 0 && cfg_is_valid_hw_freq(bands[scan_a_band].listen_hz)) {
+                routine     = ROUT_SCAN;
+                anchor      = dial_centre();
+                scan_a_next = now + scan_dwell_ms;
+            }
+            break;
+        case ROUT_SWEEP:
+            routine    = ROUT_SWEEP;
+            sweep_i    = -1;
+            sweep_next = 0;
+            break;
+        default:
+            break;
+    }
+    g_scan = gui_state_get("s.gscan", 0) != 0;
+    g_nx = g_nr = 0;
+    LV_LOG_USER("Sentry: back on screen %d, A's routine %d (%s), B's scan %s, C's %s", open_at, routine,
+                smode == MODE_AUTO ? "AUTO" : "SEMI", rtl_scan ? "on" : "off", g_scan ? "on" : "off");
 }
 
 /* The Sentry on one of its screens by letter ("A" to "G"; "H" is AIRSPACE): AIRSPACE's ring comes back so */

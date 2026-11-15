@@ -589,6 +589,20 @@ START IN chooses the classic radio screen instead). Transmit is locked while it 
 refused, and tuning the antenna tuner too, as it transmits; on A and G the A/B key arms the X6200's transmitter for
 PTT (below).
 
+When the radio software starts again without the radio going off (a crash, an update, a hot install), it comes back
+where it was. That means the Sentry on the same screen (SCAN CFG too) with A's, B's and C's scans running as they
+were, from where they had got to, and each screen's choices and the bands marked for the sweep. Otherwise it is
+the app that was open, or the classic screen. Not kept on purpose:
+
+- an armed transmitter (the A/B key);
+- a lock on a signal;
+- what C was playing;
+- SWR SCAN and WSPR (each would transmit).
+
+The state is kept in the radio's memory (`/tmp/gui_state.conf`, written within 2 s of a change), so a power-off
+clears it and the next start is the usual one. Two quick restarts in a row that each went down within a minute
+mean the third start is a clean one, in case the state itself is the trouble.
+
 Eight screens on the MFK's inner ring (H is the AIRSPACE app, between G and A), and SCAN CFG beside the two
 spectrum screens:
 

@@ -99,6 +99,7 @@
 #include "control_owner.h"
 #include "kbd_hyper.h"
 #include "kbd_ptt.h"
+#include "gui_state.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -530,6 +531,43 @@ void main_screen_close_app(void) {
     buttons_load_page_group(buttons_group_gen);
 }
 
+/* Every app but RTTY is a window of its own */
+static const struct {
+    press_action_t  app;
+    dialog_t        **window;
+} windows[] = {
+    {ACTION_APP_SETTINGS, &dialog_settings},
+    {ACTION_APP_MODES, &dialog_modes},
+    {ACTION_APP_SWRSCAN, &dialog_swrscan},
+    {ACTION_APP_FT8, &dialog_ft8},
+    {ACTION_APP_GPS, &dialog_gps},
+    {ACTION_APP_RECORDER, &dialog_recorder},
+    {ACTION_APP_WIFI, &dialog_wifi},
+    {ACTION_APP_SSTV, &dialog_sstv},
+    {ACTION_APP_CLUSTER, &dialog_cluster},
+    {ACTION_APP_CWTRAINER, &dialog_cw_trainer},
+    {ACTION_APP_WSPR, &dialog_wspr},
+    {ACTION_APP_CW_KBD, &dialog_cw_kbd},
+    {ACTION_APP_FIELD, &dialog_field},
+    {ACTION_APP_BANDS, &dialog_bands},
+    {ACTION_APP_SNAKE, &dialog_snake},
+    {ACTION_APP_PSK, &dialog_psk},
+    {ACTION_APP_OLIVIA, &dialog_olivia},
+    {ACTION_APP_JTTY, &dialog_jtty},
+    {ACTION_APP_WEFAX, &dialog_wefax},
+    {ACTION_APP_NAVTEX, &dialog_navtex},
+    {ACTION_APP_JS8, &dialog_js8},
+    {ACTION_APP_CHANNELS, &dialog_channels},
+    {ACTION_APP_BIRDIE, &dialog_birdie},
+    {ACTION_APP_PROPAGATION, &dialog_propagation},
+    {ACTION_APP_SCAN, &dialog_scan},
+    {ACTION_APP_FREEDV, &dialog_freedv},
+    {ACTION_APP_SENTRY, &dialog_sentry},
+    {ACTION_APP_ADSB, &dialog_adsb},
+    {ACTION_APP_FIRST_START, &dialog_first_start},
+};
+#define WINDOWS_N (sizeof(windows) / sizeof(windows[0]))
+
 void main_screen_start_app(press_action_t app_action) {
     main_screen_buttons_wake();     /* the app's buttons seen, also when it is opened from afar */
 
@@ -573,41 +611,6 @@ void main_screen_start_app(press_action_t app_action) {
             break;
     }
 
-    /* Every app but RTTY is a window of its own */
-    static const struct {
-        press_action_t  app;
-        dialog_t        **window;
-    } windows[] = {
-        {ACTION_APP_SETTINGS, &dialog_settings},
-        {ACTION_APP_MODES, &dialog_modes},
-        {ACTION_APP_SWRSCAN, &dialog_swrscan},
-        {ACTION_APP_FT8, &dialog_ft8},
-        {ACTION_APP_GPS, &dialog_gps},
-        {ACTION_APP_RECORDER, &dialog_recorder},
-        {ACTION_APP_WIFI, &dialog_wifi},
-        {ACTION_APP_SSTV, &dialog_sstv},
-        {ACTION_APP_CLUSTER, &dialog_cluster},
-        {ACTION_APP_CWTRAINER, &dialog_cw_trainer},
-        {ACTION_APP_WSPR, &dialog_wspr},
-        {ACTION_APP_CW_KBD, &dialog_cw_kbd},
-        {ACTION_APP_FIELD, &dialog_field},
-        {ACTION_APP_BANDS, &dialog_bands},
-        {ACTION_APP_SNAKE, &dialog_snake},
-        {ACTION_APP_PSK, &dialog_psk},
-        {ACTION_APP_OLIVIA, &dialog_olivia},
-        {ACTION_APP_JTTY, &dialog_jtty},
-        {ACTION_APP_WEFAX, &dialog_wefax},
-        {ACTION_APP_NAVTEX, &dialog_navtex},
-        {ACTION_APP_JS8, &dialog_js8},
-        {ACTION_APP_CHANNELS, &dialog_channels},
-        {ACTION_APP_BIRDIE, &dialog_birdie},
-        {ACTION_APP_PROPAGATION, &dialog_propagation},
-        {ACTION_APP_SCAN, &dialog_scan},
-        {ACTION_APP_FREEDV, &dialog_freedv},
-        {ACTION_APP_SENTRY, &dialog_sentry},
-        {ACTION_APP_ADSB, &dialog_adsb},
-        {ACTION_APP_FIRST_START, &dialog_first_start},
-    };
 
     if (app_action == ACTION_APP_RTTY) {
         int32_t freq, mode;
@@ -621,7 +624,7 @@ void main_screen_start_app(press_action_t app_action) {
         rtty_set_state(RTTY_RX);
         panel_update_visibility(true);
     }
-    for (size_t i = 0; i < sizeof(windows) / sizeof(windows[0]); i++) {
+    for (size_t i = 0; i < WINDOWS_N; i++) {
         if (windows[i].app == app_action) {
             dialog_construct(*windows[i].window, obj);
             break;
@@ -643,6 +646,62 @@ void main_screen_dialog_closed(void) {
     if (dialog_is_run() || rtty_get_state() != RTTY_OFF || walkie_on()) return;
     main_screen_start_app(ACTION_APP_SENTRY);
 #endif
+}
+
+/* ---- Across a restart of the GUI (gui_state.c) ---- */
+
+/* Apps not opened again by a restart: the SWR scan and WSPR (each puts the radio on the air), the first-start guide
+ * (it opens itself), Modes (a menu): the GUI comes back where it was before them */
+static bool place_kept(press_action_t app) {
+    return app != ACTION_APP_SWRSCAN && app != ACTION_APP_WSPR && app != ACTION_APP_FIRST_START &&
+           app != ACTION_APP_MODES;
+}
+
+/* Where the GUI is, every half second: an app's window (the Sentry's keeps its own state too), or the main screen.
+ * The APP grid or a menu over it, RTTY (no window) and the walkie screen change nothing */
+static void place_cb(lv_timer_t *t) {
+    (void)t;
+    if (walkie_on()) return;
+    gui_state_set("paused", home_paused);
+    for (size_t i = 0; i < WINDOWS_N; i++) {
+        if (!dialog_type_is_run(*windows[i].window)) continue;
+        if (windows[i].app == ACTION_APP_SENTRY) {
+            gui_state_set("place", GUI_PLACE_SENTRY);
+        } else if (place_kept(windows[i].app)) {
+            gui_state_set("place", GUI_PLACE_APP);
+            gui_state_set("app", windows[i].app);
+        }
+        return;
+    }
+    if (dialog_is_run() || rtty_get_state() != RTTY_OFF) return;
+    gui_state_set("place", GUI_PLACE_MAIN);
+}
+
+bool main_screen_restore(void) {
+    int  place = gui_state_start_place();
+    bool back  = false;
+
+    lv_timer_create(place_cb, 500, NULL);
+    if (!place || walkie_on()) return false;
+    home_paused = gui_state_get("paused", 0);
+    if (place == GUI_PLACE_SENTRY) {
+        main_screen_start_app(ACTION_APP_SENTRY);
+        back = true;
+    } else if (place == GUI_PLACE_MAIN) {
+        home_paused = true;         /* the main screen, as it was: not the Sentry over it */
+        back        = true;
+    } else if (place == GUI_PLACE_APP) {
+        press_action_t app = (press_action_t)gui_state_get("app", ACTION_NONE);
+
+        for (size_t i = 0; i < WINDOWS_N && !back; i++) {
+            if (windows[i].app == app && place_kept(app)) {
+                main_screen_start_app(app);
+                back = true;
+            }
+        }
+    }
+    if (back) LV_LOG_USER("back where the GUI before this one was: place %d", place);
+    return back;
 }
 
 void main_screen_open_apps(void) {
