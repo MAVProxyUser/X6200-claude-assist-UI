@@ -2249,6 +2249,12 @@ static void rtl_tune_to(int64_t hz, bool keep) {
     stick_at = hz;
     if (keep) param_i_set(cfg_rtl_freq, (int32_t)hz);
     rtl_spectrum_tune(hz);
+    /* B's channel follows the stick out of a span it has left (a preset, a band, a pan): to the new one's middle, and
+     * heard there; left behind it played nothing (2026-11-14: a preset changed on B went silent) */
+    if (!listen_hz || llabs(listen_hz - hz) > rtl_view_hz() / 2) {
+        listen_hz = rtl_snap(hz);
+        if (listen_rtl) rtl_spectrum_listen(listen_hz, rtl_mode_of(listen_hz));
+    }
     show_rtl();
 }
 
@@ -4751,9 +4757,12 @@ static void build_system(lv_obj_t *p) {
                                          * lying flat): F4's and F5's boxes as long, each centred on its key */
 #define P_KW    76                      /* F5's box across: its name in two lines */
 #define P_VW    30                      /* F4's across: "3D" */
+#define P_KEYP  190                     /* the physical keys' pitch along the edge, and F1's middle (measured on the */
+#define P_KEY0  6                       /* radio, 2026-11-14: F3 ~386, F4 ~577, F5 ~767 from the top held up) */
 #define P_LAMP  P_KEYLEN                /* the lamp's row: F4's box and the lamp */
-#define P_LAMPY (3 * P_KEY + P_KEY / 2 - P_KEYLEN / 2)
-#define P_BOTY  (4 * P_KEY + P_KEY / 2 - P_KEYLEN / 2)            /* F5's box and, beside it, the messages */
+#define P_LAMPY (P_KEY0 + 3 * P_KEYP - P_KEYLEN / 2)
+#define P_BOTY  (P_KEY0 + 4 * P_KEYP - P_KEYLEN / 2 < PH - 6 - P_KEYLEN ? P_KEY0 + 4 * P_KEYP - P_KEYLEN / 2 \
+                                                                      : PH - 6 - P_KEYLEN)  /* F5's row, in the screen */
 #define P_STATE (P_BOTY - 6 - (P_LAMPY + P_LAMP + 6))             /* the radio's state, between: three lines */
 #define P_SX    (P_KW + 6)              /* beside F5 */
 #define P_SW    (P_VX - 6 - P_SX)
