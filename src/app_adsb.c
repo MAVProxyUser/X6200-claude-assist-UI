@@ -33,6 +33,9 @@
 #include "qth/qth.h"
 #include "styles.h"
 #include "theme.h"
+#include "gpu.h"
+#include "waterfall_view.h"     /* direct_hole_cb */
+#include "lv_drivers/display/drm.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -113,6 +116,9 @@ static uint32_t     c_amb, c_ink, c_dim, c_faint, glow[64];
 static lv_obj_t    *root, *title_l, *status_l, *badge_l[2], *scope_img, *spark_img, *centre_l, *north_l, *ring_l[4];
 static lv_obj_t    *lbl[LABELS], *list_head_l, *row_l[ROWS], *det_l[3], *sig_l, *legend_l, *key_l[5], *help_l;
 static lv_img_dsc_t *scope, *spark;
+static bool          sc_gpu;        /* the GPU draws the scope on the display's plane under a hole (Mesa there): put()
+                                     * and line() with no pixels are its points and lines, at sc_ox, sc_oy */
+static int           sc_ox, sc_oy;
 static uint16_t    *ang;            /* each scope pixel's bearing from the centre, tenths of a degree; 0xffff outside */
 static lv_timer_t  *timer;
 static uint32_t     sel_icao;
@@ -151,10 +157,17 @@ static uint32_t mix(uint32_t fg, uint32_t bg, int a) {
 }
 
 static void put(uint32_t *px, int x, int y, uint32_t c) {
-    if (x >= 0 && y >= 0 && x < SC && y < SC) px[y * SC + x] = c;
+    if (x >= 0 && y >= 0 && x < SC && y < SC) {
+        if (px) px[y * SC + x] = c;
+        else gpu_point(sc_ox + x, sc_oy + y, c);
+    }
 }
 
 static void line(uint32_t *px, int x0, int y0, int x1, int y1, uint32_t c) {
+    if (!px) {                          /* the GPU's: clipped to the scope by the frame */
+        gpu_line(sc_ox + x0, sc_oy + y0, sc_ox + x1, sc_oy + y1, c);
+        return;
+    }
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1, dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1, err = dx + dy;
 
     for (int n = 0; n < 2 * SC; n++) {
@@ -177,6 +190,11 @@ static void arrow(uint32_t *px, double x, double y, double trk, uint32_t c) {
     double tx = x + 7 * s, ty = y - 7 * co;                     /* tip */
     double lx = x - 4 * s - 4.5 * co, ly = y + 4 * co - 4.5 * s; /* tail corners */
     double rx = x - 4 * s + 4.5 * co, ry = y + 4 * co + 4.5 * s;
+    if (!px) {                          /* the GPU fills it: a pixel whose centre is inside, as below */
+        gpu_tri(sc_ox + tx + 0.5, sc_oy + ty + 0.5, sc_ox + lx + 0.5, sc_oy + ly + 0.5, sc_ox + rx + 0.5,
+                sc_oy + ry + 0.5, c);
+        return;
+    }
     int    x0 = (int)floor(fmin(tx, fmin(lx, rx))), x1 = (int)ceil(fmax(tx, fmax(lx, rx)));
     int    y0 = (int)floor(fmin(ty, fmin(ly, ry))), y1 = (int)ceil(fmax(ty, fmax(ly, ry)));
 
@@ -283,13 +301,24 @@ static int order(int *idx, double now) {
 
 /* ---- Drawing ---- */
 
+static void draw_traffic(uint32_t *px, double now, const int *idx, int n);
+
 static void draw_scope(double now, const int *idx, int n) {
-    uint32_t *px = (uint32_t *)scope->data;
+    uint32_t *px = sc_gpu ? NULL : (uint32_t *)scope->data;
     double    cx = SC / 2.0, cy = SC / 2.0, R = SC / 2.0 - 14;
     int       sweep = (int)(fmod(now / SWEEP_S, 1.0) * 3600);
 
     /* the ground and the sweep's afterglow, a quarter turn behind it */
-    for (int i = 0; i < SC * SC; i++) {
+    if (!px) {                          /* the GPU's: each pixel's bearing and glow in its shader */
+        lv_area_t a;
+
+        lv_obj_get_coords(scope_img, &a);
+        sc_ox = a.x1, sc_oy = a.y1;
+        if (!gpu_frame_begin(false)) return;
+        gpu_clear(sc_ox, sc_oy, SC, SC, c_ink);
+        gpu_radar(sc_ox, sc_oy, SC, (float)R, (float)sweep, c_ink);
+    }
+    for (int i = 0; px && i < SC * SC; i++) {
         uint16_t a = ang[i];
         if (a == 0xffff) {
             px[i] = c_ink;
@@ -311,8 +340,16 @@ static void draw_scope(double now, const int *idx, int n) {
     /* the station */
     line(px, (int)cx - 5, (int)cy, (int)cx + 5, (int)cy, c_amb);
     line(px, (int)cx, (int)cy - 5, (int)cx, (int)cy + 5, c_amb);
-    if (!c_ok) return;
+    if (!px) gpu_prims_flush();         /* the GPU's in the CPU's order: what is drawn later lies over it */
+    if (c_ok) draw_traffic(px, now, idx, n);
+    if (!px) {
+        gpu_prims_flush();
+        gpu_frame_end(sc_ox, sc_oy, SC, SC);
+    }
+}
 
+/* The tracks and the aircraft over the scope */
+static void draw_traffic(uint32_t *px, double now, const int *idx, int n) {
     /* history: each track, older parts dimmer */
     bool trails = param_i_get(cfg_adsb_trails) && decay_s() != 0;
     for (int k = n - 1; k >= 0 && trails; k--) {
@@ -335,6 +372,7 @@ static void draw_scope(double now, const int *idx, int n) {
         if (have && p->pos_ok && proj(p->lat, p->lon, &x, &y))
             line(px, (int)lround(x0), (int)lround(y0), (int)lround(x), (int)lround(y), mix(c_amb, c_ink, 190));
     }
+    if (!px) gpu_prims_flush();         /* the aircraft over the tracks */
 
     /* the aircraft: live ones bright, ghosts fading; a ping for each message */
     for (int k = n - 1; k >= 0; k--) {
@@ -574,7 +612,7 @@ static void refresh(void) {
     show_head(now, nlive, n - nlive);
     adsb_unlock();
     show_scope_words(now, nlive);
-    lv_obj_invalidate(scope_img);
+    if (!sc_gpu) lv_obj_invalidate(scope_img);     /* the GPU's is on the plane, under the hole */
     lv_obj_invalidate(spark_img);
 }
 
@@ -783,9 +821,28 @@ static void build(void) {
 
     /* the scope */
     rect(root, SC_X - 3, BODY_Y, SC + 6, SC + 6, 3, false);
-    scope     = lv_img_buf_alloc(SC, SC, LV_IMG_CF_TRUE_COLOR);
-    scope_img = lv_img_create(root);
-    lv_img_set_src(scope_img, scope);
+    scope = lv_img_buf_alloc(SC, SC, LV_IMG_CF_TRUE_COLOR);
+#if USE_DRM
+    sc_gpu = drm_planes() && gpu_start();
+#endif
+    if (sc_gpu) {   /* the GPU draws it on the display's plane, the GUI a hole over it (the labels drawn over the hole):
+                     * LVGL drew the image (a copy), turned it onto the panel (a second) and copied that (a third)
+                     * 5 times a second, after the CPU had drawn its 121,104 pixels */
+        uint32_t pal[256];
+
+        for (int i = 0; i < 256; i++) pal[i] = glow[i < 64 ? i : 63];
+        gpu_palette(3, pal);
+        scope_img = lv_obj_create(root);
+        lv_obj_remove_style_all(scope_img);
+        lv_obj_set_size(scope_img, SC, SC);
+        lv_obj_add_event_cb(scope_img, direct_hole_cb, LV_EVENT_DRAW_MAIN_END, NULL);
+#if USE_DRM
+        drm_wf_claim(true);             /* the plane AIRSPACE's while it is open: the main screen's strips kept off it */
+#endif
+    } else {
+        scope_img = lv_img_create(root);
+        lv_img_set_src(scope_img, scope);
+    }
     lv_obj_set_pos(scope_img, SC_X, SC_Y);
     lv_obj_add_flag(scope_img, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(scope_img, scope_tap_cb, LV_EVENT_CLICKED, NULL);
@@ -922,6 +979,10 @@ static void construct_cb(lv_obj_t *parent) {
 static void destruct_cb(void) {
     if (timer) lv_timer_del(timer);
     timer = NULL;
+#if USE_DRM
+    if (sc_gpu) drm_wf_claim(false);    /* the main screen's waterfall and spectrum on the plane again */
+#endif
+    sc_gpu = false;
     rtl_spectrum_yield(false);      /* the RTL-SDR back to the Sentry */
     rtl_spectrum_mute(false);       /* the Sentry's OFF let go: what opens next sets the speaker (the Sentry again) */
     lv_group_remove_obj(root);
