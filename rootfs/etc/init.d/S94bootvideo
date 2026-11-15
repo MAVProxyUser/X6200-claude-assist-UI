@@ -28,7 +28,11 @@ FIT="scale=800:480:force_original_aspect_ratio=decrease,pad=800:480:(ow-iw)/2:(o
 PORTRAIT=${VIDEO%.mp4}-portrait.mp4
 
 hw_ready() {
-	[ -f "$PORTRAIT" ] && [ -e /dev/video0 ] && command -v gst-launch-1.0 > /dev/null
+	[ -f "$PORTRAIT" ] && command -v gst-launch-1.0 > /dev/null || return 1
+	# the video engine's driver, loaded by name: x6100-blacklist.conf keeps udev from loading it (the X6100 has no
+	# use for it); an X6100's kernel without it just fails here
+	[ -e /sys/bus/platform/drivers/cedrus ] || modprobe sunxi-cedrus 2> /dev/null
+	[ -e /dev/video0 ]
 }
 
 have_video() {
