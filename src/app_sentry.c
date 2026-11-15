@@ -5015,12 +5015,8 @@ static void walkie_step(void) {
     if (g_portrait && wui->msg_l && ptt_ms && lv_tick_get() - ptt_ms > 4000) lv_label_set_text(wui->msg_l, "");
 }
 
-    if (g_portrait) lv_label_set_text(wui->msg_l, "TX LOCKED. A/B ARMS IT FOR PTT");
-    else osd("TRANSMIT LOCKED", "THE SENTRY IS RECEIVE ONLY. ON G, THE A/B KEY ARMS THE TRANSMITTER FOR PTT.", -1);
-}
-
-/* The A/B (VFO) key on G: the transmitter armed for PTT (the Sentry's receive-only hold let go: the radio's own TX
- * rules again, its power and band limits), or locked again. A/B again, F5 or leaving G locks it */
+/* The A/B (VFO) key on A and G: the transmitter armed for PTT (the Sentry's receive-only hold let go: the radio's own
+ * TX rules again, its power and band limits), or locked again. A/B again or leaving A and G locks it */
 static void walkie_arm(bool on) {
     char t[64];
 
