@@ -1715,6 +1715,28 @@ static bool tx_queue(const char *message)
     return tx_queue_at(message, at, false);
 }
 
+/* The list over the waterfall steps aside while the main knob moves the TX offset (#159): faint, so the TX band and
+ * the signals round it show, and back ASIDE_MS after the last turn */
+#define ASIDE_MS 2500
+static lv_timer_t *aside_timer;
+
+static void aside_end(lv_timer_t *t) {
+    (void)t;
+    aside_timer = NULL;     /* one shot: LVGL deletes it */
+    if (table) lv_obj_set_style_opa(table, LV_OPA_COVER, 0);
+}
+
+static void list_aside(void) {
+    if (!table) return;
+    lv_obj_set_style_opa(table, LV_OPA_20, 0);
+    if (aside_timer) {
+        lv_timer_reset(aside_timer);
+        return;
+    }
+    aside_timer = lv_timer_create(aside_end, ASIDE_MS, NULL);
+    lv_timer_set_repeat_count(aside_timer, 1);
+}
+
 /* Move our TX offset, kept inside what the TX speed allows. */
 static void set_tx_offset(int32_t hz)
 {
@@ -1768,6 +1790,7 @@ static void rotary_cb(int32_t steps)
         if (pace >= 6) steps *= 10;
         else if (pace >= 4) steps *= 5;
         set_tx_offset((int32_t)params.js8_tx_freq.x + steps);
+        list_aside(); /* the waterfall and the TX band seen while it moves */
     }
 }
 
@@ -2105,6 +2128,9 @@ static void compose_open(const char *prefill)
 
     if (prefill && prefill[0]) textarea_window_set(prefill);
     else lv_textarea_set_placeholder_text(box, edit_hint(edit_target));
+    /* No keys on the screen: how to leave, said once (#280) */
+    if (textarea_window_no_screen_keys())
+        msg_schedule_long_text_fmt("Enter: %s - ESC, or Send... again: close", edit_target ? "save" : "send");
 }
 
 /* ---- Band and frequency ------------------------------------------------ */
@@ -2511,6 +2537,8 @@ static void destruct_cb(void) { /* the app closes: the radio goes back to how it
     js8_filters(false);
     main_screen_locks(false);
 
+    if (aside_timer) lv_timer_del(aside_timer);
+    aside_timer = NULL;
     /* dialog_destruct() deletes these with dialog.obj, right after us */
     waterfall = NULL;
     finder    = NULL;
@@ -2633,8 +2661,20 @@ static bool need_station(char *call, float *hz) {
 
 /* The keyboard, with their call typed in. With AUTO off and an answer waiting for this station, the
  * answer instead (and the held message it hands over, if any). */
+/* Send... or Reply again while the box is open: it closes, nothing sent (#280: with a keyboard plugged in the screen
+ * has no keys, and without its ESC at hand the box could not be left) */
+static bool compose_again_closes(void) {
+    bool message = edit_target == 0;
+
+    if (!composing) return false;
+    compose_cancel_cb();
+    msg_update_text_fmt(message ? "Not sent: the message box closed" : "Not changed: the box closed");
+    return true;
+}
+
 static void reply_cb(button_data_t *b) {
     (void)b;
+    if (compose_again_closes()) return;
     if (press_closes_list()) return;
     char  call[JS8_RX_CALL_LEN], start[JS8_RX_TEXT_LEN];
     float hz;
@@ -2657,6 +2697,7 @@ static void reply_cb(button_data_t *b) {
 
 static void send_cb(button_data_t *b) {
     (void)b;
+    if (compose_again_closes()) return;
     if (press_closes_list()) return;
     compose_open(NULL); /* an empty keyboard */
 }

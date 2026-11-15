@@ -64,6 +64,9 @@ void main_screen_open_apps(void);
 /* main_screen_open_dialog(): app_window.h, with dialog_t */
 void main_screen_action(press_action_t action);
 
+/* The next mode (dir > 0) or the one before, those this radio has: the MFK walk's and the Mode actions' (#111) */
+void main_screen_mode_step(int dir);
+
 /* The knobs' presses and the MFK (dir -1, +1 a turn, 0 the press), as on the main screen */
 void main_screen_vol_press(void);
 void main_screen_mfk(int dir);

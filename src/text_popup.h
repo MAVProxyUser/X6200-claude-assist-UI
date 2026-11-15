@@ -41,6 +41,8 @@ void textarea_window_lower(void);
  * on-screen keys focused a key event typed nothing */
 bool textarea_window_type(uint32_t key);
 bool textarea_window_is_open(void);
+/* Open without the keys on the screen (a keyboard is plugged in): Enter and ESC are the keyboard's */
+bool textarea_window_no_screen_keys(void);
 
 const char *textarea_window_get();
 void textarea_window_set(const char *text);

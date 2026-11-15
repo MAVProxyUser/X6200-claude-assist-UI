@@ -146,12 +146,22 @@ static void modes_of_spots(void) {
 static void activity_of_spots(void) {
     static const struct {
         const char *comment;
-        uint8_t     act;
+        uint16_t    act;
     } want[] = {
-        {"LLOTA LLPL-0123 SSB", 0},          {"LLOTA LLAR-0393 CW", 0},     {"llota llie-10001 ssb", 0},
-        {"LLPL-0123", 0},                    {"POTA US-1234 SSB", CLUSTER_ACT_POTA},
-        {"US-1234 FT8", CLUSTER_ACT_POTA},   {"FR-10234", CLUSTER_ACT_POTA}, {"TOTA OKR-0150 SSB", 0},
-        {"LH ARLHS BEL 002 SSB", 0},         {"WCA DL-01156 CW", 0},        {"SOTA I/LO-123", CLUSTER_ACT_SOTA},
+        /* not POTA (#81), each its own programme (#277) */
+        {"LLOTA LLPL-0123 SSB", CLUSTER_ACT_LLOTA}, {"LLOTA LLAR-0393 CW", CLUSTER_ACT_LLOTA},
+        {"llota llie-10001 ssb", CLUSTER_ACT_LLOTA}, {"LLPL-0123", CLUSTER_ACT_LLOTA},
+        {"POTA US-1234 SSB", CLUSTER_ACT_POTA},     {"US-1234 FT8", CLUSTER_ACT_POTA},
+        {"FR-10234", CLUSTER_ACT_POTA},             {"TOTA OKR-0150 SSB", CLUSTER_ACT_TOTA},
+        {"LH ARLHS BEL 002 SSB", CLUSTER_ACT_LH},   {"WCA DL-01156 CW", CLUSTER_ACT_WCA},
+        {"SOTA I/LO-123", CLUSTER_ACT_SOTA},
+        /* #277: WWFF by its word or its reference, the others too */
+        {"WWFF ONFF-0123 SSB", CLUSTER_ACT_WWFF},   {"DLFF-0456 CW", CLUSTER_ACT_WWFF},
+        {"#wwff 59", CLUSTER_ACT_WWFF},             {"IOTA EU-005", CLUSTER_ACT_IOTA},
+        {"OC-123 qrv", CLUSTER_ACT_IOTA},           {"MOTA X42018", CLUSTER_ACT_MOTA},
+        {"FRA-123 lighthouse", CLUSTER_ACT_LH},     {"TOTAL 5 QSO TU", 0},
+        {"POTA K-1234 WWFF KFF-1234", CLUSTER_ACT_POTA | CLUSTER_ACT_WWFF},
+        {"CQ TEST 599", 0},
     };
     char what[96];
 

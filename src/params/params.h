@@ -52,6 +52,16 @@ typedef enum {
     ACTION_CW_ZAP,      /* the CW ZAP button's: onto the signal the CW Tuner hears (#196) */
     ACTION_SWL_PANEL,   /* appended after CW_ZAP: the SWL panel, again the next station, as the X6100 mic's GENE (#155) */
     ACTION_SWL_SAVE,    /* the station the SWL panel shows saved as a channel, as the X6100 mic's NW (#155) */
+    /* Appended after SWL_SAVE (#111): the jobs of the radio's own keys, for any key or button */
+    ACTION_MODE_NEXT,   /* 23: the next mode, as the MFK walk steps them (main_screen_mode_step) */
+    ACTION_MODE_PREV,
+    ACTION_VFO_AB,      /* 25: VFO A or B, as the A/B key */
+    ACTION_BAND_UP,     /* 26: the next band, as the band keys */
+    ACTION_BAND_DOWN,
+    ACTION_AGC_NEXT,    /* 28: AGC Off, Slow, Fast, Auto round, as the X6100's AGC key */
+    ACTION_SPLIT,       /* 29: split on or off, as the X6100's AGC key held */
+    ACTION_USER_PAGE,   /* 30: the USER page of F1-F5 actions of the user's own (button_bar.cpp) */
+    ACTION_CHARGER,     /* 31: Settings > General > Charger On, or Off when it is On (#276) */
 
     ACTION_APP_RTTY = 100,
     ACTION_APP_FT8,

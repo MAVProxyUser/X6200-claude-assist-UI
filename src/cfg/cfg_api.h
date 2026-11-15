@@ -85,6 +85,17 @@ extern ParamInt         *cfg_speaker_off;        // p_speaker_off
 extern ParamInt         *cfg_kbd_layout;         // p_kbd_layout
 extern ParamInt         *cfg_kbd_shortcuts;      // p_kbd_shortcuts
 extern ParamInt         *cfg_mouse;              // p_mouse
+
+// Settings > Keys > TOP AND SIDE KEYS (#111): a press and a hold of the radio's own keys, a press_action_t, KEY_OWN the
+// key's own; cfg_key_hold[KA_FST] is NULL (FST's hold is params.long_fst, as before). PRE and AGC: the X6100's keys
+typedef enum {
+    KA_FST, KA_ATU, KA_AB, KA_BAND_DOWN, KA_BAND_UP, KA_AM, KA_CW, KA_SSB, KA_PRE, KA_AGC, KA_NUM
+} key_assign_t;
+#define KEY_OWN (-1)
+extern ParamInt         *cfg_key_press[KA_NUM];  // p_key_press_*
+extern ParamInt         *cfg_key_hold[KA_NUM];   // p_key_hold_*
+extern ParamInt         *cfg_user_key[5];        // p_user_f1..5: the USER page's F1-F5
+extern ParamInt         *cfg_lock_per_band;      // p_lock_per_band
 extern ParamInt         *cfg_rtl_freq;           // p_rtl_freq
 extern ParamInt         *cfg_rtl_gain;           // p_rtl_gain
 extern ParamInt         *cfg_rtl_view;           // p_rtl_view
@@ -242,6 +253,7 @@ extern ParamFloat *cfg_band_dac_offset;   // p_band_dac_offset
 extern ParamInt   *cfg_band_grid_min;     // p_band_grid_min
 extern ParamInt   *cfg_band_grid_max;     // p_band_grid_max
 extern ParamInt   *cfg_band_split;        // p_band_split
+extern ParamInt   *cfg_band_lock_modes;   // p_band_lock_modes
 extern ParamInt   *cfg_band_tx_shift;     // p_band_tx_shift (Hz, 0 off)
 extern ParamInt   *cfg_band_tx_i_offset;  // p_band_tx_i_offset
 extern ParamInt   *cfg_band_tx_q_offset;  // p_band_tx_q_offset

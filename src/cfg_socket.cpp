@@ -18,6 +18,12 @@
  *                                                        radio is on, for Wavelog's live link (wavelog_cat.h, #245)
  *    {"cmd":"tune","hz":hz,"mode":"USB-D"}            -> {"t":"ok"} or {"t":"err","err":"..."}: a click on a spot in
  *                                                        Wavelog; frequency and mode only, refused while transmitting
+ *    {"cmd":"keys_get"}                               -> {"t":"keys","actions":[[v,label]..],"mic_actions":..,"page":..,
+ *                                                        "mic":..,"top":..,"user":[5],"lock_per_band":0|1}: Settings >
+ *                                                        Keys (key_settings.h, #111)
+ *    {"cmd":"keys_set","key":name,"val":v}            -> {"t":"ok"} or {"t":"err",...}; name press_<key>, hold_<key>
+ *                                                        (v -1 its own), long_gen.., mic_f1.., user_f1..5,
+ *                                                        lock_per_band; "reset_top" every key its own job
  *  The values are checked here and applied on the LVGL thread through the scheduler, as the
  *  Settings pages apply them.
  *
@@ -25,6 +31,7 @@
  */
 
 #include "cfg_socket.h"
+#include "key_settings.h"
 
 #include "cfg/settings_manager.h"
 #include "cfg/settings_manager_api.h"
@@ -59,7 +66,7 @@ extern "C" {
 
 #define SOCK_PATH "/tmp/x6100_cfg.sock"
 #define IN_SIZE   1024
-#define OUT_SIZE  4096
+#define OUT_SIZE  8192      /* keys_get: the lists of actions with their names */
 
 /* Screen options of Settings > Display, by name: the ranges the page may set */
 static const struct {
@@ -480,6 +487,112 @@ static const char *tune(cJSON *req) {
     return t.err;
 }
 
+/* Settings > Keys for the web's Keys page (#111): the lists, what each key does */
+static int keys_list(char *buf, size_t size, const char *name, const key_action_t *list, size_t n) {
+    int l = snprintf(buf, size, ",\"%s\":[", name);
+
+    for (size_t i = 0; i < n && l < (int)size - 64; i++) {
+        const char *s = list[i].label;
+        int         len = (int)strlen(s);
+
+        while (*s == ' ') s++, len--;
+        while (len > 0 && s[len - 1] == ' ') len--;
+        l += snprintf(buf + l, size - l, "%s[%d,\"%.*s\"]", i ? "," : "", (int)list[i].action, len, s);
+    }
+    return l + snprintf(buf + l, size - l, "]");
+}
+
+static int keys_get(char *buf, size_t size) {
+    int l = snprintf(buf, size, "{\"t\":\"keys\"");
+
+    l += keys_list(buf + l, size - l, "actions", key_front_actions, key_front_n);
+    l += keys_list(buf + l, size - l, "mic_actions", key_mic_actions, key_mic_n);
+    for (int part = 0; part < 2; part++) {
+        size_t from = part ? KEY_ROWS_FRONT : 0, to = part ? key_rows_n : KEY_ROWS_FRONT;
+
+        l += snprintf(buf + l, size - l, ",\"%s\":[", part ? "mic" : "page");
+        for (size_t i = from; i < to && l < (int)size - 96; i++)
+            l += snprintf(buf + l, size - l, "%s{\"id\":\"%s\",\"label\":\"%s\",\"val\":%d}", i > from ? "," : "",
+                          key_rows[i].id, key_rows[i].label, (int)*key_rows[i].val);
+        l += snprintf(buf + l, size - l, "]");
+    }
+    l += snprintf(buf + l, size - l, ",\"top\":[");
+    for (size_t i = 0; i < key_top_n && l < (int)size - 160; i++)
+        l += snprintf(buf + l, size - l, "%s{\"id\":\"%s\",\"name\":\"%s\",\"own_press\":\"%s\",\"own_hold\":\"%s\","
+                      "\"press\":%d,\"hold\":%d}", i ? "," : "", key_top[i].id, key_top[i].name, key_top[i].own_press,
+                      key_top[i].own_hold, (int)key_top_get(i, false), (int)key_top_get(i, true));
+    l += snprintf(buf + l, size - l, "],\"user\":[");
+    for (int i = 0; i < 5; i++)
+        l += snprintf(buf + l, size - l, "%s%d", i ? "," : "", (int)cfg_user_key[i]->get());
+    l += snprintf(buf + l, size - l, "],\"lock_per_band\":%d}\n", (int)cfg_sm.p_lock_per_band.get());
+    return l;
+}
+
+typedef struct {
+    char    key[24];
+    int32_t val;
+} keys_set_t;
+
+/* LVGL thread: as Settings applies it */
+static void keys_apply(void *arg) {
+    keys_set_t *k = (keys_set_t *)arg;
+
+    if (!strcmp(k->key, "reset_top")) {
+        key_top_reset();
+    } else if (!strcmp(k->key, "lock_per_band")) {
+        cfg_sm.p_lock_per_band.set(k->val);
+    } else if (!strncmp(k->key, "user_f", 6)) {
+        cfg_user_key[k->key[6] - '1']->set(k->val);
+    } else if (!strncmp(k->key, "press_", 6) || !strncmp(k->key, "hold_", 5)) {
+        bool        held = k->key[0] == 'h';
+        const char *id = k->key + (held ? 5 : 6);
+
+        for (size_t i = 0; i < key_top_n; i++)
+            if (!strcmp(id, key_top[i].id)) key_top_set(i, held, k->val);
+    } else {
+        for (size_t i = 0; i < key_rows_n; i++)
+            if (!strcmp(k->key, key_rows[i].id)) key_row_set(i, k->val);
+    }
+}
+
+/* What the name and the value may be: the lists the radio's Settings offers */
+static const char *keys_set(cJSON *req, keys_set_t *k) {
+    cJSON *t = cJSON_GetObjectItemCaseSensitive(req, "key");
+
+    if (!cJSON_IsString(t) || strlen(t->valuestring) >= sizeof(k->key))
+        return "Invalid key";
+    memset(k, 0, sizeof(*k));
+    strcpy(k->key, t->valuestring);
+    if (!strcmp(k->key, "reset_top"))
+        return NULL;
+    if (!get_int(req, -1, 255, &k->val))
+        return "Invalid value";
+    if (!strcmp(k->key, "lock_per_band"))
+        return k->val == 0 || k->val == 1 ? NULL : "Invalid value";
+    if (!strncmp(k->key, "user_f", 6)) {
+        if (k->key[6] < '1' || k->key[6] > '5' || k->key[7])
+            return "Invalid key";
+        return key_action_ok(key_front_actions, key_front_n, k->val) ? NULL : "Not an action of the list";
+    }
+    if (!strncmp(k->key, "press_", 6) || !strncmp(k->key, "hold_", 5)) {
+        const char *id = k->key + (k->key[0] == 'h' ? 5 : 6);
+
+        for (size_t i = 0; i < key_top_n; i++)
+            if (!strcmp(id, key_top[i].id))
+                return k->val == KEY_OWN || key_action_ok(key_front_actions, key_front_n, k->val)
+                           ? NULL : "Not an action of the list";
+        return "Unknown key";
+    }
+    for (size_t i = 0; i < key_rows_n; i++)
+        if (!strcmp(k->key, key_rows[i].id)) {
+            size_t              n;
+            const key_action_t *list = key_row_actions(i, &n);
+
+            return key_action_ok(list, n, k->val) ? NULL : "Not an action of the list";
+        }
+    return "Unknown key";
+}
+
 /* The answer to one request line */
 static int handle_line(const char *line, char *out, size_t size) {
     cJSON      *req  = cJSON_Parse(line);
@@ -517,6 +630,12 @@ static int handle_line(const char *line, char *out, size_t size) {
         l = wavelog_cat_state(out, size);
     } else if (!strcmp(name->valuestring, "tune")) {
         err = tune(req);
+    } else if (!strcmp(name->valuestring, "keys_get")) {
+        l = keys_get(out, size);
+    } else if (!strcmp(name->valuestring, "keys_set")) {
+        keys_set_t k;
+        if (!(err = keys_set(req, &k)) && !scheduler_put(keys_apply, &k, sizeof(k)))
+            err = "Busy, try again";
     } else if (!strcmp(name->valuestring, "tx_ranges_read")) {
         if (!scheduler_call(tx_ranges_read_cb, NULL)) {
             err = "Busy, try again";

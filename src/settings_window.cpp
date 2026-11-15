@@ -19,6 +19,7 @@
 #include "cfg/settings_manager.h"
 #include "cfg/settings_manager_api.h"
 #include "factory_reset.h"
+#include "key_settings.h"
 #include <vector>
 #include <thread>
 #include <string>
@@ -786,126 +787,13 @@ static uint8_t make_mag(uint8_t row) {
     return row + 1;
 }
 
-/* What the front keys do when held, what the hand mic keys do */
-
-typedef struct {
-    const char     *label;
-    press_action_t  action;
-} key_action_t;
-
-static const key_action_t front_actions[] = {
-    {" None ", ACTION_NONE},
-    {" Screenshot ", ACTION_SCREENSHOT},
-    {" RX recorder on/off ", ACTION_RECORDER},
-    {" Screen rec on/off ", ACTION_SCREEN_REC},
-    {" Mute ", ACTION_MUTE},
-    {" Frequency lock on/off ", ACTION_FREQ_LOCK},
-    {" Step up ", ACTION_STEP_UP},
-    {" Step down ", ACTION_STEP_DOWN},     /* FST's long press until it is changed */
-    {" WF mode ", ACTION_WF_MODE},
-    {" WF 3D on/off ", ACTION_WF_3D},
-    {" CW decoder on/off ", ACTION_CW_DECODER},
-    {" CW ZAP ", ACTION_CW_ZAP},
-    {" SWL panel ", ACTION_SWL_PANEL},
-    {" SWL: save channel ", ACTION_SWL_SAVE},
-    {" ATT on/off ", ACTION_ATT_TOGGLE},
-    {" PRE on/off ", ACTION_PRE_TOGGLE},
-    {" Tuner on/off ", ACTION_ATU_TOGGLE},
-    {" Tuner: tune ", ACTION_ATU_TUNE},
-    {" TUNE ext. tuner on/off ", ACTION_EXT_TUNE},
-    /* Digital modes, in the order of the Modes menu */
-    {" APP RTTY ", ACTION_APP_RTTY},
-    {" APP FT8 ", ACTION_APP_FT8},
-    {" APP WSPR ", ACTION_APP_WSPR},
-    {" APP JS8 ", ACTION_APP_JS8},
-    {" APP SSTV ", ACTION_APP_SSTV},
-    {" APP WeFax ", ACTION_APP_WEFAX},
-    {" APP NavTex ", ACTION_APP_NAVTEX},
-    {" APP RADE ", ACTION_APP_FREEDV},
-    /* Tools */
-    {" APP Cluster ", ACTION_APP_CLUSTER},
-    {" APP CW Trainer ", ACTION_APP_CWTRAINER},
-    {" APP CW Keyboard ", ACTION_APP_CW_KBD},
-    {" APP Field Ops ", ACTION_APP_FIELD},
-    {" APP Bands ", ACTION_APP_BANDS},
-    {" APP Propagation ", ACTION_APP_PROPAGATION},
-    {" APP Channels ", ACTION_APP_CHANNELS},
-    {" APP Scanner ", ACTION_APP_SCAN},
-    {" APP RX recorder ", ACTION_APP_RECORDER},
-    {" APP SWR Scan ", ACTION_APP_SWRSCAN},
-    {" APP GPS ", ACTION_APP_GPS},
-    {" APP QTH grid ", ACTION_APP_QTH},
-    {" APP Settings ", ACTION_APP_SETTINGS},
-};
-
-static const key_action_t mic_actions[] = {
-    {" None ", ACTION_NONE},
-    {" RX recorder on/off ", ACTION_RECORDER},
-    {" Screen rec on/off ", ACTION_SCREEN_REC},
-    {" Mute ", ACTION_MUTE},
-    {" Step up ", ACTION_STEP_UP},
-    {" Step down ", ACTION_STEP_DOWN},
-    {" Frequency lock on/off ", ACTION_FREQ_LOCK},
-    {" NR toggle ", ACTION_NR_TOGGLE},
-    {" NB toggle ", ACTION_NB_TOGGLE},
-    {" WF mode ", ACTION_WF_MODE},
-    {" WF 3D on/off ", ACTION_WF_3D},
-    {" CW decoder on/off ", ACTION_CW_DECODER},
-    {" CW ZAP ", ACTION_CW_ZAP},
-    {" SWL panel ", ACTION_SWL_PANEL},
-    {" SWL: save channel ", ACTION_SWL_SAVE},
-    {" ATT on/off ", ACTION_ATT_TOGGLE},
-    {" PRE on/off ", ACTION_PRE_TOGGLE},
-    {" Tuner on/off ", ACTION_ATU_TOGGLE},
-    {" Tuner: tune ", ACTION_ATU_TUNE},
-    {" TUNE ext. tuner on/off ", ACTION_EXT_TUNE},
-};
-
-#define KEY_ROWS_FRONT  7   /* then the hand mic's */
-
-typedef struct {
-    const char *label;
-    uint8_t    *val;
-    bool       *dirty;
-} key_row_t;
-
-static const key_row_t key_rows[] = {
-    {"GEN", &params.long_gen, &params.dirty.long_gen},
-    {"APP", &params.long_app, &params.dirty.long_app},
-    {"KEY", &params.long_key, &params.dirty.long_key},
-    {"MSG", &params.long_msg, &params.dirty.long_msg},
-    {"DFN", &params.long_dfn, &params.dirty.long_dfn},
-    {"DFL", &params.long_dfl, &params.dirty.long_dfl},
-    {"FST", &params.long_fst, &params.dirty.long_fst},     /* the tuning step key: a press steps up */
-    {"F1", &params.press_f1, &params.dirty.press_f1},
-    {"F2", &params.press_f2, &params.dirty.press_f2},
-#ifdef BOARD_X6200
-    {"F3", &params.press_f3, &params.dirty.press_f3},       /* the H-22 has an F3, the X6100's mic not */
-#endif
-    {"F1 long", &params.long_f1, &params.dirty.long_f1},
-    {"F2 long", &params.long_f2, &params.dirty.long_f2},
-#ifdef BOARD_X6200
-    {"F3 long", &params.long_f3, &params.dirty.long_f3},
-#endif
-};
-
-static const key_action_t * key_actions(const key_row_t *k, size_t *n) {
-    if (k < key_rows + KEY_ROWS_FRONT) {
-        *n = sizeof(front_actions) / sizeof(front_actions[0]);
-        return front_actions;
-    }
-    *n = sizeof(mic_actions) / sizeof(mic_actions[0]);
-    return mic_actions;
-}
+/* What the front keys do when held, what the hand mic keys do: the lists are key_settings.cpp's, the web's too */
 
 static void key_action_cb(lv_event_t *e) {
-    const key_row_t *k = (const key_row_t *)lv_event_get_user_data(e);
-    size_t           n;
-    press_action_t   action = key_actions(k, &n)[lv_dropdown_get_selected(lv_event_get_target(e))].action;
+    size_t row = (size_t)(intptr_t)lv_event_get_user_data(e);
+    size_t n;
 
-    params_lock();
-    *k->val = action;
-    params_unlock(k->dirty);
+    key_row_set(row, key_row_actions(row, &n)[lv_dropdown_get_selected(lv_event_get_target(e))].action);
 }
 
 /* key_rows from `first` to `last` (exclusive) */
@@ -913,7 +801,7 @@ static uint8_t make_key_rows(uint8_t row, int first, int last) {
     for (int i = first; i < last; i++) {
         const key_row_t    *k = &key_rows[i];
         size_t              n;
-        const key_action_t *list = key_actions(k, &n);
+        const key_action_t *list = key_row_actions(i, &n);
         std::string         options;
         uint16_t            sel = 0;
 
@@ -922,7 +810,86 @@ static uint8_t make_key_rows(uint8_t row, int first, int last) {
             if (list[a].action == *k->val) sel = a;
         }
         wl_row_label(row, k->label);
-        row_choice(row++, 1, 6, SMALL_6, options.c_str(), sel, key_action_cb, (void *)k);
+        row_choice(row++, 1, 6, SMALL_6, options.c_str(), sel, key_action_cb, (void *)(intptr_t)i);
+    }
+    return row;
+}
+
+static lv_obj_t * wl_button(uint8_t row, const char *text, lv_event_cb_t cb);
+static lv_obj_t * wl_note(uint8_t row);
+
+/* TOP AND SIDE KEYS (#111): a press and a hold of each of the radio's own keys (key_top), "Own" (KEY_OWN) the key's job
+ * as ever, or one of the front list. POWER and PTT are not there: never another job */
+#define TOP_ROWS (2 * key_top_n)
+
+static lv_obj_t *top_dd[2 * 10];
+
+static uint16_t top_index(int32_t value) {
+    if (value == KEY_OWN) return 0;
+    for (size_t a = 0; a < key_front_n; a++)
+        if (key_front_actions[a].action == value) return a + 1;
+    return 0;
+}
+
+static void top_key_cb(lv_event_t *e) {
+    int i   = (int)(intptr_t)lv_event_get_user_data(e);
+    int sel = lv_dropdown_get_selected(lv_event_get_target(e));
+
+    key_top_set(i / 2, i % 2, sel ? key_front_actions[sel - 1].action : KEY_OWN);
+}
+
+/* Reset: every key its own job again */
+static void top_reset_cb(lv_event_t *e) {
+    (void)e;
+    key_top_reset();
+    for (size_t i = 0; i < TOP_ROWS; i++) lv_dropdown_set_selected(top_dd[i], 0);
+    msg_update_text_fmt("The keys do their own jobs again");
+}
+
+static uint8_t make_top_keys(uint8_t row) {
+    std::string actions;
+
+    for (size_t a = 0; a < key_front_n; a++)
+        actions += std::string("\n") + key_front_actions[a].label;
+    for (size_t k = 0; k < key_top_n; k++) {
+        for (int held = 0; held < 2; held++) {
+            int         i = 2 * k + held;
+            std::string label = std::string(key_top[k].name) + (held ? " held" : "");
+            std::string options = std::string(" Own: ") + (held ? key_top[k].own_hold : key_top[k].own_press) +
+                                  " " + actions;
+
+            wl_row_label(row, label.c_str());
+            top_dd[i] = row_choice(row++, 1, 6, SMALL_6, options.c_str(), top_index(key_top_get(k, held)),
+                                   top_key_cb, (void *)(intptr_t)i);
+        }
+    }
+    wl_button(row, "Reset to own", top_reset_cb);
+    lv_label_set_text(wl_note(row++), "every key its own job");
+    return row;
+}
+
+/* USER PAGE (#111): the five actions of the USER page's F1-F5, from the front list (None the first) */
+static void user_key_cb(lv_event_t *e) {
+    int i   = (int)(intptr_t)lv_event_get_user_data(e);
+    int sel = lv_dropdown_get_selected(lv_event_get_target(e));
+
+    cfg_user_key[i]->set(key_front_actions[sel].action);     /* the page names it when it is shown next */
+}
+
+static uint8_t make_user_keys(uint8_t row) {
+    std::string options;
+
+    for (size_t a = 0; a < key_front_n; a++)
+        options += std::string(a ? "\n" : "") + key_front_actions[a].label;
+    for (int i = 0; i < 5; i++) {
+        char     label[8];
+        uint16_t sel = 0;
+
+        for (size_t a = 0; a < key_front_n; a++)
+            if (key_front_actions[a].action == cfg_user_key[i]->get()) sel = a;
+        snprintf(label, sizeof(label), "F%d", i + 1);
+        wl_row_label(row, label);
+        row_choice(row++, 1, 6, SMALL_6, options.c_str(), sel, user_key_cb, (void *)(intptr_t)i);
     }
     return row;
 }
@@ -3706,12 +3673,24 @@ static void make_keys_page() {
     uint8_t row;
 
     grid_create();
-    row = card_begin("FRONT KEYS, LONG PRESS");
+    row = card_begin("PAGE KEYS, LONG PRESS");
     row = make_key_rows(row, 0, KEY_ROWS_FRONT);
     card_end(row);
 
+    row = card_begin("TOP AND SIDE KEYS");
+    row = make_top_keys(row);
+    card_end(row);
+
+    row = card_begin("USER PAGE");
+    row = make_user_keys(row);
+    card_end(row);
+
+    row = card_begin("FREQUENCY LOCK");
+    row = make_param_switch(row, "Per band and mode", cfg_sm.p_lock_per_band);
+    card_end(row);
+
     row = card_begin("HAND MIC KEYS");
-    row = make_key_rows(row, KEY_ROWS_FRONT, sizeof(key_rows) / sizeof(key_rows[0]));
+    row = make_key_rows(row, KEY_ROWS_FRONT, key_rows_n);
     card_end(row);
 
     row = card_begin("PADDLE");
@@ -3746,7 +3725,7 @@ static struct {
 static void cf_save() {
     uint8_t  modes = 0;
     uint16_t bands = 0;
-    uint8_t  act   = 0;
+    uint16_t act   = 0;
     int      on    = 0;
 
     for (int i = 0; i < CF_MODES; i++) {
@@ -3845,7 +3824,7 @@ static void make_cluster_page() {
         lv_obj_set_width(cf.act[i], SMALL_1 * 2 + SMALL_PAD);
         lv_obj_set_grid_cell(cf.act[i], LV_GRID_ALIGN_START, 3 + i % 2 * 2, 2, LV_GRID_ALIGN_CENTER, row + i / 2, 1);
     }
-    row += 2;
+    row += (CLUSTER_ACT_COUNT + 1) / 2;
 
     obj = wl_label(grid, SF(18), theme_hex(TC_text_dim), 0);
     lv_label_set_text(obj, "For the app, the column and the waterfall. Alerts always show.\n"

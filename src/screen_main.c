@@ -148,9 +148,36 @@ static void freq_lock_update(void) {
     freq_strip_set_lock(user_lock);
 }
 
+/* Per band and mode (#111): the lock kept in the band's lock_modes, a bit a mode */
+static void lock_keep(void) {
+    int32_t bits = param_i_get(cfg_band_lock_modes);
+    int32_t bit  = 1 << cparam_i_get(cfg_cur_mode);
+
+    param_i_set(cfg_band_lock_modes, user_lock ? bits | bit : bits & ~bit);
+}
+
 static void set_user_lock(bool lock) {
     user_lock = lock;
+    if (param_i_get(cfg_lock_per_band)) lock_keep();
     freq_lock_update();
+}
+
+/* Another band or mode with Per band and mode on: its own lock; the setting turned on: the lock now is this band's
+ * and mode's. Said when it changes */
+static void lock_follow_cb(Subject *subj, void *user_data) {
+    bool lock;
+
+    (void)user_data;
+    if (!param_i_get(cfg_lock_per_band)) return;
+    if (subj == (Subject *)cfg_lock_per_band) {
+        lock_keep();
+        return;
+    }
+    lock = (param_i_get(cfg_band_lock_modes) >> cparam_i_get(cfg_cur_mode)) & 1;
+    if (lock == user_lock) return;
+    user_lock = lock;
+    freq_lock_update();
+    msg_update_text_fmt("%s", lock ? "Dial locked (this band and mode)" : "Dial unlocked (this band and mode)");
 }
 
 static bool toggle_freq_lock(void) {
@@ -723,6 +750,29 @@ void main_screen_open_dialog(dialog_t *d) {
 }
 
 /* What a long press (or a hand mic F key) was given in Settings */
+static void ab_key(bool tap, bool hold);
+
+/* The modes in the order the MFK walk and the Mode actions step them, those this radio has; not while an app holds
+ * the mode */
+void main_screen_mode_step(int dir) {
+    static const radio_mode_t modes[] = {radio_mode_lsb, radio_mode_usb, radio_mode_cw, radio_mode_cwr, radio_mode_am,
+                                         radio_mode_nfm, radio_mode_lsb_dig, radio_mode_usb_dig, radio_mode_sam,
+                                         radio_mode_wfm};
+    bool         more = (radio_caps() & HW_CAP_SAM_WFM) != 0;
+    int          n    = sizeof(modes) / sizeof(modes[0]) - (more ? 0 : 2);
+    radio_mode_t now  = cparam_i_get(cfg_cur_mode);
+    int          i    = 0;
+
+    if (mode_lock) {
+        msg_update_text_fmt("The mode is the app's");
+        return;
+    }
+    for (int k = 0; k < n; k++)
+        if (modes[k] == now) i = k;
+    i = (i + (dir > 0 ? 1 : n - 1)) % n;
+    cparam_i_set(cfg_cur_mode, modes[i]);
+}
+
 void main_screen_action(press_action_t action) {
     switch (action) {
         case ACTION_SCREENSHOT:     screenshot_take(); break;
@@ -747,6 +797,30 @@ void main_screen_action(press_action_t action) {
         /* The X6100 mic's GENE and NW on any key: the X6200's mic has neither (#155) */
         case ACTION_SWL_PANEL:      swl_gene(); break;
         case ACTION_SWL_SAVE:       swl_save_channel(); break;
+        /* The radio's own keys' jobs (#111) */
+        case ACTION_MODE_NEXT:      main_screen_mode_step(+1); break;
+        case ACTION_MODE_PREV:      main_screen_mode_step(-1); break;
+        case ACTION_VFO_AB:         ab_key(true, false); break;
+        case ACTION_BAND_UP:        band_step(true); break;
+        case ACTION_BAND_DOWN:      band_step(false); break;
+        case ACTION_AGC_NEXT:       main_screen_agc_next(); break;
+        case ACTION_USER_PAGE:
+            if (!dialog_is_run()) buttons_load_user_page();
+            break;
+        case ACTION_CHARGER: {      /* On, or Off when it is On; from Shadow On (#276) */
+            bool on = params.charger.x != RADIO_CHARGER_ON;
+
+            params_uint8_set(&params.charger, on ? RADIO_CHARGER_ON : RADIO_CHARGER_OFF);
+            radio_set_charger(on);
+            say_state("Charger", on ? "On" : "Off");
+            break;
+        }
+        case ACTION_SPLIT:
+            if (!ab_lock) {
+                say_state("Split", toggle_param(cfg_band_split) ? "On" : "Off");
+                spectrum_clear();
+            }
+            break;
 
         case ACTION_APP_QTH:        dialog_construct(dialog_qth, obj); break;
 
@@ -756,9 +830,9 @@ void main_screen_action(press_action_t action) {
             break;
 
         default:
-            /* Voice mode and battery info were removed but may still be stored: nothing */
-            if ((action >= ACTION_APP_RTTY && action <= ACTION_APP_CHANNELS) || action == ACTION_APP_PROPAGATION ||
-                action == ACTION_APP_SCAN) {
+            /* Voice mode and battery info were removed but may still be stored: nothing. Every app the lists offer
+             * (up to v0.3.12.23 RADE, Birdie Cal and the newer apps did nothing from a key) */
+            if (action >= ACTION_APP_RTTY && action <= ACTION_APP_SWL) {
                 main_screen_start_app(action);
             }
             break;
@@ -1012,6 +1086,26 @@ static void power_off_now(void) {
     radio_poweroff();
 }
 
+/* Settings > Keys > TOP AND SIDE KEYS (#111): a press or a hold given an action of the user's in place of the key's
+ * own. True when the key's state is had here: the action on the press (the release before the long press) or the hold,
+ * its other states taken too so the key's own job never half runs. Not over an app that gives the keys its own jobs
+ * (dialog_front_key comes first); POWER, PTT and the X6100's LOCK are never given another */
+static bool key_assigned(keypad_key_t key, bool tap, bool hold, bool long_release) {
+    static const keypad_key_t keys[KA_NUM] = {KEYPAD_FST,       KEYPAD_ATU,     KEYPAD_AB,      KEYPAD_BAND_DOWN,
+                                              KEYPAD_BAND_UP,   KEYPAD_MODE_AM, KEYPAD_MODE_CW, KEYPAD_MODE_SSB,
+                                              KEYPAD_PRE,       KEYPAD_AGC};
+    ParamInt *p;
+    int32_t   a;
+    int       k;
+
+    for (k = 0; k < KA_NUM && keys[k] != key; k++) {}
+    if (k == KA_NUM) return false;
+    p = hold || long_release ? cfg_key_hold[k] : cfg_key_press[k];
+    if (!p || (a = param_i_get(p)) == KEY_OWN) return false;
+    if (tap || hold) main_screen_action((press_action_t)a);
+    return true;
+}
+
 static void front_key_cb(lv_event_t *e) {
     event_keypad_t *ev   = lv_event_get_param(e);
     bool            tap  = ev->state == KEYPAD_RELEASE;
@@ -1040,6 +1134,9 @@ static void front_key_cb(lv_event_t *e) {
         woke_group = KEYPAD_UNKNOWN;
     }
     if (page_key(ev->key, tap, hold, step)) {
+        return;
+    }
+    if (key_assigned(ev->key, tap, hold, ev->state == KEYPAD_LONG_RELEASE)) {
         return;
     }
     switch (ev->key) {
@@ -2056,6 +2153,10 @@ static void build(void) {
     subject_subscribe_delayed((Subject*)cfg_band_plan, on_band_plan_change, NULL);
     subject_subscribe_delayed((Subject*)cfg_band_region, on_band_region_change, NULL);
     subject_subscribe_delayed((Subject*)cfg_band_id, on_band_id_change, NULL);
+    /* The lock per band and mode (#111): at start too, so a band's lock is back after a restart */
+    subject_subscribe_delayed_and_notify((Subject*)cfg_band_id, lock_follow_cb, NULL);
+    subject_subscribe_delayed((Subject*)cfg_cur_mode, lock_follow_cb, NULL);
+    subject_subscribe_delayed((Subject*)cfg_lock_per_band, lock_follow_cb, NULL);
     subject_subscribe_delayed((Subject*)cfg_wr12, on_wr12_change, NULL);
     subject_subscribe_delayed((Subject*)cfg_cluster_column, on_cluster_column_change, NULL);
     subject_subscribe_delayed((Subject*)cfg_spectrum_show, on_spectrum_layout_change, NULL);

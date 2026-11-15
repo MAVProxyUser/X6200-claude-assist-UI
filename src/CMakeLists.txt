@@ -84,7 +84,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     button_bar.cpp vol_control.cpp recorder.c
     cw_tune_view.c adif.c qso_log.c scheduler.cpp
     wifi_window.c wifi.cpp btaudio.cpp bt_dev.c radio_controls.cpp
-    usb_devices.cpp knob_info.cpp main_walk.cpp
+    usb_devices.cpp knob_info.cpp main_walk.cpp key_settings.cpp
     wr12.c pa_bias.c
     dialog_wspr.c app_frame.c
     dialog_field.c

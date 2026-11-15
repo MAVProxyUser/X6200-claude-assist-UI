@@ -1,0 +1,94 @@
+% rebase('base.html', title='Keys')
+<h2><svg class="i"><use href="#i-paddle"/></svg>Keys</h2>
+<p class="sub">What the radio's keys do (Settings &rarr; Keys): the page keys held, the top and side keys, the USER page's F1&ndash;F5, the hand mic keys and the frequency lock. Every change is applied on the radio as you make it. The lists are the radio's own; an app that gives the keys its own jobs keeps them.</p>
+
+<style>
+.ky-grid{columns:2 430px;column-gap:18px}
+.dp-ctl select{max-width:16em}
+</style>
+
+<div class="dp-foot" style="display:flex;align-items:center;gap:10px;margin-top:6px;min-height:24px"><span class="status" id="status" style="margin-left:0"></span></div>
+<div class="ky-grid" id="cards"></div>
+
+<script>
+let K = {};
+
+var showStatus = function(text, error=false) {
+  const el = $("#status");
+  el.toggleClass("error", error);
+  el.html('<span class="dot"></span>').append(document.createTextNode(text));
+}
+
+/* One change to the radio; the page shows what the radio then has */
+var send = function(key, val) {
+  const body = {key: key};
+  if (val !== undefined) body.val = val;
+  showStatus("Applying...");
+  $.ajax({url: "/api/keys", type: "POST", data: JSON.stringify(body), contentType: "application/json; charset=utf-8",
+    dataType: "json", timeout: X6100_WAIT_MS,
+    success: function() { showStatus("Applied on the radio"); if (key === "reset_top") load(); },
+    error: function(xhr, why) { showStatus(x6100FailText(xhr, why), true); load(); }});
+}
+
+/* A dropdown of a list of [value, name]; own: the first entry "Own: ..." with -1 */
+var select = function(key, list, val, own) {
+  const sel = $("<select>").attr({id: "opt-" + key, "aria-label": key});
+  if (own) sel.append($("<option>").val(-1).text("Own: " + own));
+  list.forEach(function(a) { sel.append($("<option>").val(a[0]).text(a[1])); });
+  sel.val(String(val));
+  sel.on("change", function() { send(key, parseInt(sel.val(), 10)); });
+  return sel;
+}
+
+var card = function(title, note) {
+  return $("<section class='dp-card'>").append($("<div class='dp-head'>").append(
+    $("<div class='dp-ico' aria-hidden='true'>").html('<svg class="i"><use href="#i-paddle"/></svg>'),
+    $("<div>").append($("<h3>").text(title), $("<p>").text(note))));
+}
+
+var row = function(label, hint, ctl) {
+  const lbl = $("<div class='dp-lbl'>").append($("<b>").text(label));
+  if (hint) lbl.append($("<span>").text(hint));
+  return $("<div class='dp-row'>").append(lbl, $("<div class='dp-ctl'>").append(ctl));
+}
+
+var render = function() {
+  const cards = $("#cards").empty();
+
+  let c = card("Top and side keys", "A press and a hold of each, its own job or an action; POWER and PTT never change");
+  K.top.forEach(function(k) {
+    c.append(row(k.name, "Pressed", select("press_" + k.id, K.actions, k.press, k.own_press)));
+    c.append(row(k.name + " held", "Held", select("hold_" + k.id, K.actions, k.hold, k.own_hold)));
+  });
+  const reset = $("<button type='button'>").text("Reset to own");
+  reset.on("click", function() { send("reset_top"); });
+  c.append(row("Reset", "Every top and side key its own job again", reset));
+  cards.append(c);
+
+  c = card("Page keys, long press", "GEN, APP, KEY, MSG, DFN and DFL held; their press steps through their pages");
+  K.page.forEach(function(k) { c.append(row(k.label, "", select(k.id, K.actions, k.val))); });
+  cards.append(c);
+
+  c = card("USER page", "F1-F5 of your own, named after their actions: APP 4:4 User keys, or a key given USER page");
+  K.user.forEach(function(v, i) { c.append(row("F" + (i + 1), "", select("user_f" + (i + 1), K.actions, v))); });
+  cards.append(c);
+
+  c = card("Hand mic keys", "F1 and F2 (the H-22's F3 too on the X6200), pressed and held");
+  K.mic.forEach(function(k) { c.append(row(k.label, "", select(k.id, K.mic_actions, k.val))); });
+  cards.append(c);
+
+  c = card("Frequency lock", "The lock that keeps the main dial from tuning");
+  const sw = $("<label class='sw'>").append($("<input type='checkbox' id='opt-lock_per_band'>").prop("checked", !!K.lock_per_band), $("<i>"));
+  sw.find("input").on("change", function() { send("lock_per_band", this.checked ? 1 : 0); });
+  c.append(row("Per band and mode", "Each band and mode keeps its own lock (locked on 20 m USB, free on 20 m CW); off: one lock for all", sw));
+  cards.append(c);
+}
+
+var load = function() {
+  $.ajax({url: "/api/keys", dataType: "json", timeout: X6100_WAIT_MS,
+    success: function(d) { K = d; render(); showStatus("Read from the radio"); },
+    error: function(xhr, why) { showStatus(x6100FailText(xhr, why), true); }});
+}
+
+load();
+</script>

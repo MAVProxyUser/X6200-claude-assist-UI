@@ -110,6 +110,8 @@ void            buttons_load_page_group(buttons_group_t group);
 /* One of the group's pages is the one loaded (also while Hide buttons hides it) */
 bool            buttons_group_shown(buttons_group_t group);
 buttons_page_t *buttons_get_cur_page();
+/* The USER page: F1-F5 of the user's own (#111) */
+void            buttons_load_user_page(void);
 
 #ifdef __cplusplus
 }

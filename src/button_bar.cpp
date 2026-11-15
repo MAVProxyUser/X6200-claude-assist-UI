@@ -396,6 +396,105 @@ static button_data_t btn_gps = {.type = BTN_TEXT, .label = "GPS", .press = app_p
                                 .hold = [](button_data_t *) { main_screen_start_app(ACTION_APP_SNAKE); },  /* the hidden game */
                                 .ctrl = ACTION_APP_GPS};
 
+/* USER (#111): F1-F5 of the user's own, an action each (Settings > Keys > USER PAGE), named after it. Shown by a key
+ * given "USER page" or APP 4:4's User keys; it has no page button, a page key goes on as from any page */
+static const char *user_label_of(int32_t a) {
+    switch (a) {
+        case ACTION_NONE:           return "-";
+        case ACTION_SCREENSHOT:     return "Screen-\nshot";
+        case ACTION_RECORDER:       return "RX rec\non/off";
+        case ACTION_SCREEN_REC:     return "Screen\nrec";
+        case ACTION_MUTE:           return "Mute";
+        case ACTION_STEP_UP:        return "Step +";
+        case ACTION_STEP_DOWN:      return "Step -";
+        case ACTION_NR_TOGGLE:      return "NR";
+        case ACTION_NB_TOGGLE:      return "NB";
+        case ACTION_WF_MODE:        return "WF\nmode";
+        case ACTION_ATT_TOGGLE:     return "ATT";
+        case ACTION_PRE_TOGGLE:     return "PRE";
+        case ACTION_ATU_TOGGLE:     return "Tuner";
+        case ACTION_ATU_TUNE:       return "Tune";
+        case ACTION_EXT_TUNE:       return "TUNE\next.";
+        case ACTION_FREQ_LOCK:      return "Lock";
+        case ACTION_WF_3D:          return "WF 3D";
+        case ACTION_CW_DECODER:     return "CW\ndecoder";
+        case ACTION_CW_ZAP:         return "ZAP";
+        case ACTION_SWL_PANEL:      return "SWL";
+        case ACTION_SWL_SAVE:       return "SWL\nsave";
+        case ACTION_MODE_NEXT:      return "Mode +";
+        case ACTION_MODE_PREV:      return "Mode -";
+        case ACTION_VFO_AB:         return "A/B";
+        case ACTION_BAND_UP:        return "Band +";
+        case ACTION_BAND_DOWN:      return "Band -";
+        case ACTION_AGC_NEXT:       return "AGC";
+        case ACTION_SPLIT:          return "Split";
+        case ACTION_USER_PAGE:      return "User";
+        case ACTION_CHARGER:        return "Charger";
+        case ACTION_APP_RTTY:       return "RTTY";
+        case ACTION_APP_FT8:        return "FT8";
+        case ACTION_APP_SWRSCAN:    return "SWR\nScan";
+        case ACTION_APP_GPS:        return "GPS";
+        case ACTION_APP_SETTINGS:   return "Settings";
+        case ACTION_APP_RECORDER:   return "RX\nRecorder";
+        case ACTION_APP_QTH:        return "QTH";
+        case ACTION_APP_WIFI:       return "WiFi";
+        case ACTION_APP_WEFAX:      return "WeFax";
+        case ACTION_APP_NAVTEX:     return "NavTex";
+        case ACTION_APP_JS8:        return "JS8";
+        case ACTION_APP_SSTV:       return "SSTV";
+        case ACTION_APP_CLUSTER:    return "Cluster";
+        case ACTION_APP_MODES:      return "Modes";
+        case ACTION_APP_CWTRAINER:  return "CW\nTrainer";
+        case ACTION_APP_WSPR:       return "WSPR";
+        case ACTION_APP_CW_KBD:     return "CW\nKeyboard";
+        case ACTION_APP_FIELD:      return "Field\nOps";
+        case ACTION_APP_BANDS:      return "Bands";
+        case ACTION_APP_PSK:        return "PSK";
+        case ACTION_APP_OLIVIA:     return "Olivia";
+        case ACTION_APP_JTTY:       return "JTTY";
+        case ACTION_APP_CHANNELS:   return "Channels";
+        case ACTION_APP_BIRDIE:     return "Birdie\nCal";
+        case ACTION_APP_PROPAGATION: return "Propa-\ngation";
+        case ACTION_APP_SCAN:       return "Scanner";
+        case ACTION_APP_FREEDV:     return "RADE";
+        case ACTION_APP_SENTRY:     return "Sentry";
+        case ACTION_APP_ADSB:       return "Airspace";
+        case ACTION_APP_TIMESIG:    return "Time\nSignal";
+        case ACTION_APP_SWL:        return "On the\nAir";
+        default:                    return "?";
+    }
+}
+
+static const char *user_label(int i) {
+    return user_label_of(cfg_user_key[i]->get());
+}
+
+static void user_press(button_data_t *d) {
+    int32_t a = cfg_user_key[d->ctrl]->get();
+
+    if (a == ACTION_NONE) {
+        msg_update_text_fmt("F%d: Settings > Keys > USER PAGE gives it an action", (int)d->ctrl + 1);
+        return;
+    }
+    main_screen_action((press_action_t)a);
+}
+
+static button_data_t btn_user[5] = {
+    {.type = BTN_TEXT_FN, .label_fn = [] { return user_label(0); }, .press = user_press, .ctrl = 0},
+    {.type = BTN_TEXT_FN, .label_fn = [] { return user_label(1); }, .press = user_press, .ctrl = 1},
+    {.type = BTN_TEXT_FN, .label_fn = [] { return user_label(2); }, .press = user_press, .ctrl = 2},
+    {.type = BTN_TEXT_FN, .label_fn = [] { return user_label(3); }, .press = user_press, .ctrl = 3},
+    {.type = BTN_TEXT_FN, .label_fn = [] { return user_label(4); }, .press = user_press, .ctrl = 4},
+};
+static buttons_page_t page_user = {{&btn_user[0], &btn_user[1], &btn_user[2], &btn_user[3], &btn_user[4]}};
+
+void buttons_load_user_page(void) {
+    buttons_load_page(&page_user);
+}
+
+static button_data_t btn_user_keys = {.type = BTN_TEXT, .label = "User\nkeys",
+                                      .press = [](button_data_t *) { buttons_load_user_page(); }};
+
 /* RTTY: two pages of their own */
 static button_data_t btn_rtty_rate = {.type = BTN_TEXT, .label = "Rate", .press = knob_press,
                                       .ctrl = CTRL_RTTY_RATE, .encoder_allowed = true};
@@ -436,7 +535,7 @@ static buttons_page_t page_app_1 = {{&btn_app_p1, &btn_modes, &btn_cluster, &btn
 static buttons_page_t page_app_2 = {{&btn_app_p2, &btn_settings, &btn_cwt, &btn_field, &btn_chans}};
 /* Screen rec: the MFK 3:4 one too */
 static buttons_page_t page_app_3 = {{&btn_app_p3, &btn_bands, &btn_gps, &btn_screen_rec, &btn_cwkbd}};
-static buttons_page_t page_app_4 = {{&btn_app_p4, &btn_prop, &btn_scan}};
+static buttons_page_t page_app_4 = {{&btn_app_p4, &btn_prop, &btn_scan, &btn_user_keys}};
 
 static buttons_page_t page_key_1 = {{&btn_key_p1, &btn_key_speed, &btn_key_vol, &btn_key_train, &btn_key_tone}};
 static buttons_page_t page_key_2 = {{&btn_key_p2, &btn_key_mode, &btn_iambic, &btn_qsk, &btn_ratio}};

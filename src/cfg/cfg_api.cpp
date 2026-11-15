@@ -15,6 +15,11 @@ SettingsManager cfg_sm;
 // (Transverter) -> COMPUTED.
 
 // GLOBAL
+ParamInt         *cfg_key_press[KA_NUM]   = {};
+ParamInt         *cfg_key_hold[KA_NUM]    = {};
+ParamInt         *cfg_user_key[5]         = {};
+ParamInt         *cfg_lock_per_band       = nullptr;
+ParamInt         *cfg_band_lock_modes     = nullptr;
 ParamInt         *cfg_volume              = nullptr;
 ParamInt         *cfg_squelch             = nullptr;
 ParamInt         *cfg_rfgain              = nullptr;
@@ -278,6 +283,20 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_kbd_layout       = &cfg_sm.p_kbd_layout;
     cfg_kbd_shortcuts    = &cfg_sm.p_kbd_shortcuts;
     cfg_mouse            = &cfg_sm.p_mouse;
+    {
+        ParamInt *press[KA_NUM] = {&cfg_sm.p_key_press_fst, &cfg_sm.p_key_press_atu, &cfg_sm.p_key_press_ab, &cfg_sm.p_key_press_band_down, &cfg_sm.p_key_press_band_up, &cfg_sm.p_key_press_am, &cfg_sm.p_key_press_cw, &cfg_sm.p_key_press_ssb, &cfg_sm.p_key_press_pre, &cfg_sm.p_key_press_agc};
+        ParamInt *hold[KA_NUM]  = {nullptr, &cfg_sm.p_key_hold_atu, &cfg_sm.p_key_hold_ab, &cfg_sm.p_key_hold_band_down, &cfg_sm.p_key_hold_band_up, &cfg_sm.p_key_hold_am, &cfg_sm.p_key_hold_cw, &cfg_sm.p_key_hold_ssb, &cfg_sm.p_key_hold_pre, &cfg_sm.p_key_hold_agc};
+
+        for (int i = 0; i < KA_NUM; i++) {
+            cfg_key_press[i] = press[i];
+            cfg_key_hold[i]  = hold[i];
+        }
+        ParamInt *user[5] = {&cfg_sm.p_user_f1, &cfg_sm.p_user_f2, &cfg_sm.p_user_f3, &cfg_sm.p_user_f4,
+                             &cfg_sm.p_user_f5};
+
+        for (int i = 0; i < 5; i++) cfg_user_key[i] = user[i];
+    }
+    cfg_lock_per_band    = &cfg_sm.p_lock_per_band;
     cfg_rtl_freq         = &cfg_sm.p_rtl_freq;
     cfg_rtl_gain         = &cfg_sm.p_rtl_gain;
     cfg_rtl_view         = &cfg_sm.p_rtl_view;
@@ -420,6 +439,7 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_band_grid_min    = &cfg_sm.p_band_grid_min;
     cfg_band_grid_max    = &cfg_sm.p_band_grid_max;
     cfg_band_split       = &cfg_sm.p_band_split;
+    cfg_band_lock_modes  = &cfg_sm.p_band_lock_modes;
     cfg_band_tx_shift    = &cfg_sm.p_band_tx_shift;
     cfg_band_tx_i_offset = &cfg_sm.p_band_tx_i_offset;
     cfg_band_tx_q_offset = &cfg_sm.p_band_tx_q_offset;

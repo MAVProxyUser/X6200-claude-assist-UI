@@ -391,6 +391,63 @@ class SettingsManager {
     // and clicks (mouse_input.c); off by default
     Parameter<int32_t> p_mouse{"mouse", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Settings > Keys > TOP AND SIDE KEYS (#111): what a press and a hold of the radio's own keys do, a press_action_t;
+    // -1 (KEY_OWN, the default) the key's own (screen_main.c key_assigned). FST's hold stays params.long_fst; PRE and
+    // AGC are the X6100's keys
+    Parameter<int32_t> p_key_press_fst{"key_press_fst", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_press_atu{"key_press_atu", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_press_ab{"key_press_ab", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_press_band_down{"key_press_band_down", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_press_band_up{"key_press_band_up", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_press_am{"key_press_am", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_press_cw{"key_press_cw", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_press_ssb{"key_press_ssb", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_press_pre{"key_press_pre", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_press_agc{"key_press_agc", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_hold_atu{"key_hold_atu", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_hold_ab{"key_hold_ab", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_hold_band_down{"key_hold_band_down", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_hold_band_up{"key_hold_band_up", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_hold_am{"key_hold_am", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_hold_cw{"key_hold_cw", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_hold_ssb{"key_hold_ssb", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_hold_pre{"key_hold_pre", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_key_hold_agc{"key_hold_agc", -1, -1, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Settings > Keys > USER PAGE (#111): the actions of the USER page's F1-F5 (button_bar.cpp), a press_action_t, 0
+    // (ACTION_NONE) none; the page shows by a key given "USER page" or APP 4:4's User keys
+    Parameter<int32_t> p_user_f1{"user_f1", 0, 0, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_user_f2{"user_f2", 0, 0, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_user_f3{"user_f3", 0, 0, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_user_f4{"user_f4", 0, 0, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_user_f5{"user_f5", 0, 0, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Settings > Keys > FREQUENCY LOCK > Per band and mode (#111): the lock kept for each band and mode (the band's
+    // lock_modes), off by default: one lock for all, as ever
+    Parameter<int32_t> p_lock_per_band{"lock_per_band", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     // The Sentry's F VHF/UHF screen (an RTL-SDR stick): its centre in Hz, its gain in tenths of dB (-1 the tuner's
     // AGC) and its view (0 the stick alone, 1 split with the X6200's spectrum, 2 the X6200's alone)
     Parameter<int32_t> p_rtl_freq{"rtl_freq", 162475000, 24000000, 1766000000,
@@ -667,6 +724,10 @@ class SettingsManager {
     // shift turned on stayed on in every band after)
     Parameter<int32_t> p_band_split{"split", false, [](int32_t v) { return clip(v, 0, 1); },
         StorageType::BAND, pending_writes_, [this] { p_band_split.set_quiet(0); }, &band_params_};
+    // The modes this band's frequency lock is on in, a bit a radio_mode_t, with Per band and mode on (#111,
+    // screen_main.c): a band that never saved one is unlocked in all
+    Parameter<int32_t> p_band_lock_modes{"lock_modes", 0, [](int32_t v) { return clip(v, 0, 0x3ff); },
+        StorageType::BAND, pending_writes_, [this] { p_band_lock_modes.set_quiet(0); }, &band_params_};
     // TX shift of this band, Hz, 0 off (|shift| up to 10 MHz): with split on, the other VFO is kept at the active one
     // + the shift (tx_shift_follow), so the radio transmits shifted: an FM repeater's input, a QO-100 station's IF.
     // A band that never saved one has none, not the last band's

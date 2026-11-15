@@ -202,6 +202,10 @@ bool textarea_window_is_open(void) {
     return window != NULL;
 }
 
+bool textarea_window_no_screen_keys(void) {
+    return window != NULL && kbd == NULL;
+}
+
 bool textarea_window_type(uint32_t key) {
     if (!window) {
         return false;

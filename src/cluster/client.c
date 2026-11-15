@@ -9,6 +9,7 @@
 #include "client.h"
 
 #include "../dxcc.h"
+#include "../field/flog.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -351,15 +352,16 @@ static uint16_t parse_bands(char *list) {
     return bits;
 }
 
-const char *const cluster_act_names[CLUSTER_ACT_COUNT] = {"POTA", "SOTA", "WWBOTA", "HOTA"};
+const char *const cluster_act_names[CLUSTER_ACT_COUNT] = {"POTA", "SOTA", "WWBOTA", "HOTA", "WWFF", "IOTA",
+                                                          "WCA",  "TOTA", "MOTA",   "LH",   "LLOTA"};
 
 /* "POTA,SOTA" -> CLUSTER_ACT_* bits; unknown words are ignored */
-static uint8_t parse_activity(char *list) {
-    uint8_t bits = 0;
+static uint16_t parse_activity(char *list) {
+    uint16_t bits = 0;
     for (char *save, *w = strtok_r(list, ",", &save); w; w = strtok_r(NULL, ",", &save)) {
         w = trim(w);
         for (int i = 0; i < CLUSTER_ACT_COUNT; i++)
-            if (strcasecmp(w, cluster_act_names[i]) == 0) bits |= (uint8_t)(1u << i);
+            if (strcasecmp(w, cluster_act_names[i]) == 0) bits |= (uint16_t)(1u << i);
     }
     return bits;
 }
@@ -454,9 +456,50 @@ bool cluster_spot_ref(const cluster_spot_t *s, char *ref, size_t size) {
     return false;
 }
 
-uint8_t cluster_spot_activity(const cluster_spot_t *s) {
-    char    text[sizeof(s->comment)];
-    uint8_t bits = 0;
+/* EU-005, OC-123 (IOTA): a continent and three digits */
+static bool iota_ref(const char *w) {
+    static const char *const cont[] = {"AF", "AN", "AS", "EU", "NA", "OC", "SA"};
+
+    if (strlen(w) != 6 || w[2] != '-' || !all_digits(w + 3, 3)) return false;
+    for (size_t i = 0; i < sizeof(cont) / sizeof(cont[0]); i++)
+        if (!strncmp(w, cont[i], 2)) return true;
+    return false;
+}
+
+/* A word of the comment that names a programme: itself, or with a # before it (#WWFF) */
+static uint16_t act_word(const char *w) {
+    static const struct {
+        const char *word;
+        uint16_t    bit;
+    } words[] = {
+        {"WWFF", CLUSTER_ACT_WWFF}, {"IOTA", CLUSTER_ACT_IOTA},  {"WCA", CLUSTER_ACT_WCA},   {"TOTA", CLUSTER_ACT_TOTA},
+        {"MOTA", CLUSTER_ACT_MOTA}, {"ARLHS", CLUSTER_ACT_LH},   {"ILLW", CLUSTER_ACT_LH},   {"LH", CLUSTER_ACT_LH},
+        {"LLOTA", CLUSTER_ACT_LLOTA},
+    };
+
+    if (*w == '#') w++;
+    for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++)
+        if (!strcmp(w, words[i].word)) return words[i].bit;
+    return 0;
+}
+
+/* The programme of a reference by its shape, as Field Ops tells them apart (field_ref_prog); not the parks (park_ref
+ * is stricter than its catch-all) */
+static uint16_t act_ref(const char *w) {
+    switch (field_ref_prog(w)) {
+        case 'F': return CLUSTER_ACT_WWFF;
+        case 'C': return CLUSTER_ACT_WCA;
+        case 'T': return CLUSTER_ACT_TOTA;
+        case 'M': return CLUSTER_ACT_MOTA;
+        case 'L': return CLUSTER_ACT_LH;
+        case 'K': return CLUSTER_ACT_LLOTA;
+        default:  return iota_ref(w) ? CLUSTER_ACT_IOTA : 0;
+    }
+}
+
+uint16_t cluster_spot_activity(const cluster_spot_t *s) {
+    char     text[sizeof(s->comment)];
+    uint16_t bits = 0;
 
     for (size_t i = 0; i < sizeof(text); i++) {
         text[i] = (char)toupper((unsigned char)s->comment[i]);
@@ -472,6 +515,7 @@ uint8_t cluster_spot_activity(const cluster_spot_t *s) {
         if (summit_ref(w)) bits |= CLUSTER_ACT_SOTA;
         if (bunker_ref(w)) bits |= CLUSTER_ACT_WWBOTA;
         if (hota_ref(w)) bits |= CLUSTER_ACT_HOTA;
+        bits |= act_word(w) | act_ref(w);
     }
     return bits;
 }
@@ -527,7 +571,7 @@ void cluster_filter_load(cluster_filter_t *f) {
 
 static time_t filter_loaded = -1;
 
-bool cluster_filter_save(uint8_t modes, uint16_t bands, uint8_t activity) {
+bool cluster_filter_save(uint8_t modes, uint16_t bands, uint16_t activity) {
     static const char *drop[] = {"filter_modes=", "filter_bands=", "filter_activity="};
     static char        rest[24 * 1024];
     char               line[512];

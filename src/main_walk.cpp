@@ -27,6 +27,7 @@
 extern "C" {
 #include "msg_box.h"
 #include "radio.h"
+#include "screen_main.h"
 }
 
 #define IDLE_MS 6000
@@ -142,22 +143,6 @@ void main_walk_toggle(void) {
     say();
 }
 
-/* The modes in the order the mode step goes, those this radio has */
-static void mode_step(int d) {
-    static const radio_mode_t modes[] = {radio_mode_lsb, radio_mode_usb, radio_mode_cw, radio_mode_cwr, radio_mode_am,
-                                         radio_mode_nfm, radio_mode_lsb_dig, radio_mode_usb_dig,
-#ifdef BOARD_X6200
-                                         radio_mode_sam, radio_mode_wfm,
-#endif
-    };
-    int n = sizeof(modes) / sizeof(modes[0]), i = 0;
-
-    for (int k = 0; k < n; k++)
-        if (modes[k] == (radio_mode_t)cparam_i_get(cfg_cur_mode)) i = k;
-    i = (i + (d > 0 ? 1 : n - 1)) % n;
-    cparam_i_set(cfg_cur_mode, modes[i]);
-}
-
 bool main_walk_mfk(int dir) {
     if (!walking) return false;
     last_ms = lv_tick_get();
@@ -180,7 +165,7 @@ bool main_walk_mfk(int dir) {
             msg_update_text_fmt("%s", m.c_str());
         } else {
             if (at == IV_VFO) radio_toggle_vfo();
-            else mode_step(dir);
+            else main_screen_mode_step(dir);
             say();
         }
         frame_place();

@@ -68,7 +68,7 @@ time_t cluster_config_mtime(void);
  *   max_age=30                    minutes (0 or missing: the store's own limit)
  *   skip_spotters=K1TTT-#,*-3     spotter calls hidden, * matches any run
  *   filter_bands=40,20,6,2,70     bands shown, as the number in their name: 2 is 2 m, 70 is 70 cm (missing: all)
- *   filter_activity=POTA,SOTA,WWBOTA,HOTA   only these activations (missing: all spots)
+ *   filter_activity=POTA,SOTA,WWBOTA,HOTA,WWFF,IOTA,WCA,TOTA,MOTA,LH,LLOTA   only these (missing: all spots)
  *   filter_spotter_dxcc=PA,ON     only spots heard in these countries: the spotter's call, by cty.dat (missing or
  *                                 no prefix it knows: all). The client drops the others as they come in
  *   alert=PATTERN|bands|mode      e.g. VP8*|20,17,15|CW (bands, mode: empty = any)
@@ -85,8 +85,17 @@ time_t cluster_config_mtime(void);
 #define CLUSTER_ACT_SOTA   (1 << 1)
 #define CLUSTER_ACT_WWBOTA (1 << 2)
 #define CLUSTER_ACT_HOTA   (1 << 3)
-#define CLUSTER_ACT_COUNT  4
-extern const char *const cluster_act_names[CLUSTER_ACT_COUNT]; /* "POTA", "SOTA", "WWBOTA", "HOTA": bit order */
+/* #277: the other programmes Field Ops knows, and IOTA, by their word or their reference's shape (field_ref_prog) */
+#define CLUSTER_ACT_WWFF   (1 << 4)
+#define CLUSTER_ACT_IOTA   (1 << 5)
+#define CLUSTER_ACT_WCA    (1 << 6)
+#define CLUSTER_ACT_TOTA   (1 << 7)
+#define CLUSTER_ACT_MOTA   (1 << 8)
+#define CLUSTER_ACT_LH     (1 << 9)
+#define CLUSTER_ACT_LLOTA  (1 << 10)
+#define CLUSTER_ACT_COUNT  11
+/* "POTA", "SOTA", "WWBOTA", "HOTA", "WWFF", "IOTA", "WCA", "TOTA", "MOTA", "LH", "LLOTA": bit order */
+extern const char *const cluster_act_names[CLUSTER_ACT_COUNT];
 
 typedef struct {
     char     pattern[32];
@@ -97,7 +106,7 @@ typedef struct {
 typedef struct {
     uint8_t         modes;
     uint16_t        bands;    /* bit per cluster_band_of() index, 0 = all */
-    uint8_t         activity; /* CLUSTER_ACT_* bits, 0 = all spots */
+    uint16_t        activity; /* CLUSTER_ACT_* bits, 0 = all spots */
     uint16_t        max_age;
     char            skip[128];
     char            spotter_dxcc[128]; /* filter_spotter_dxcc= as written: the client applies it, "" = none */
@@ -113,7 +122,7 @@ uint8_t cluster_spot_mode_class(const cluster_spot_t *s);
 /* CLUSTER_ACT_* of a spot, from its comment: "POTA" or a park reference
  * (US-1234, IT-0123), "SOTA" or a summit reference (I/LO-123, W7W/KG-001),
  * "WWBOTA"/"BOTA" or a bunker (B/G-0070), "HOTA" or a HOTA reference (RO-H0390). */
-uint8_t cluster_spot_activity(const cluster_spot_t *s);
+uint16_t cluster_spot_activity(const cluster_spot_t *s);
 
 /* The activity reference in a spot's comment, the first word that is one: a park (US-1234), a summit (I/LO-123), a
  * bunker (B/G-0070), a HOTA one (RO-H0390) or a WWFF one (ONFF-0123), in capitals into ref. False, ref "", when there
@@ -122,7 +131,7 @@ bool cluster_spot_ref(const cluster_spot_t *s, char *ref, size_t size);
 
 /* Sets the modes, bands and activity filters in CLUSTER_CONF, keeping the
  * other lines (CLUSTER_FM_ALL / 0 / 0 = no filter). LVGL thread only. */
-bool cluster_filter_save(uint8_t modes, uint16_t bands, uint8_t activity);
+bool cluster_filter_save(uint8_t modes, uint16_t bands, uint16_t activity);
 
 /* Reads the filters from CLUSTER_CONF (defaults when missing). */
 void cluster_filter_load(cluster_filter_t *f);

@@ -249,7 +249,7 @@ The APP button opens four pages of apps and tools:
 | APP 1:4 | Modes, Cluster, SWR Scan, RX Recorder |
 | APP 2:4 | Settings, CW Trainer, Field Ops, Channels |
 | APP 3:4 | Bands, GPS, Screen rec, CW Keyboard |
-| APP 4:4 | Propagation, Scanner |
+| APP 4:4 | Propagation, Scanner, User keys |
 
 With Icon menus on (Settings > Display > INTERFACE, on by default) APP also
 opens the same apps as a grid of tiles over these pages, with Walkie and
@@ -375,17 +375,42 @@ held it steps down until you give it another action (Frequency lock on/off,
 as on the stock firmware, say). The steps are 10 Hz, 100 Hz, 500 Hz, 1 kHz,
 5 kHz, 10 kHz, 25 kHz and 100 kHz; up to v0.3.9 they stopped at 5 kHz (#234).
 To go further at once, type the frequency (F-INP, or `f` on a keyboard).
-Where: Settings > Keys > FRONT KEYS, LONG PRESS.
+Where: Settings > Keys > PAGE KEYS, LONG PRESS (FST: TOP AND SIDE KEYS).
+
+The radio's own keys (#111). A press and a hold of FST, ATU, A/B, Band down,
+Band up, AM, CW and SSB (on the X6100 PRE and AGC too) can each be given an
+action of the list below in place of the key's own job; "Own" (the
+default) keeps the job the key has always had, named in the list ("Own:
+step up", "Own: copy VFO"...). The band keys' hold has no job of its own,
+so it is the place for one. POWER, PTT and the X6100's LOCK are not on the
+list: they never do another job. On the main screen only: an app that gives
+the keys its own jobs keeps them. "Reset to own" puts every key back.
+Up to v0.3.12.23 only FST's hold could be given another action.
+Where: Settings > Keys > TOP AND SIDE KEYS.
+
+The USER page (#111). F1-F5 of your own on the main screen: each is given
+an action of the list below in Settings > Keys > USER PAGE, and the button
+is named after it (FT8, Lock, Mode +, Band -...); one with none shows "-".
+APP 4:4's User keys shows the page, and so does any key given "USER page"
+(a long press of GEN, say). It has no page button: a page key (GEN, APP...)
+goes on to its own pages, as from any page. The apps keep their own F keys.
+
+The web configurator's Keys page (System > Keys) sets all of these too: the
+top and side keys, the page keys, the USER page, the hand mic keys and the
+lock per band and mode, from the radio's own lists.
 
 | Kind | Actions |
 |---|---|
+| Keys' jobs | mode: next, mode: back, VFO A/B, band up, band down, AGC (Off, Slow, Fast, Auto), split on/off, USER page (#111), charger on/off (Settings > General > Charger On, or Off when it is On; from Shadow On; #276) |
 | Quick | none, screenshot, RX recorder on/off, screen rec on/off, mute, frequency lock on/off, step up, step down, WF mode, WF 3D on/off, CW decoder on/off, CW ZAP (in CW and CW-R, the dial onto the signal the CW Tuner hears, as the CW 1:2 ZAP button; up to v0.3.9 neither was a key action, #196), SWL panel (as the X6100 hand mic's GENE: the broadcast stations on the air within 2 kHz, again the next one), SWL: save channel (as its NW: the station shown saved as a channel; up to v0.3.11 neither was a key action, so an X6200 could not open the panel, #155), ATT on/off, PRE on/off, tuner on/off, tuner tune (transmits a carrier), TUNE ext. tuner on/off (a carrier for a tuner at the antenna, see [TUNE for an external tuner](#tune-for-an-external-tuner)) |
-| Digital modes | RTTY, FT8, WSPR, JS8, SSTV, WeFax, NavTex, RADE |
-| Tools | Cluster, CW Trainer, CW Keyboard, Field Ops, Bands, Propagation, Channels, Scanner, RX recorder, SWR Scan, GPS, QTH grid, Settings |
+| Digital modes | RTTY, FT8, WSPR, JS8, SSTV, WeFax, NavTex, RADE, PSK, Olivia, JTTY, the Modes menu |
+| Tools | Cluster, CW Trainer, CW Keyboard, Field Ops, Bands, Propagation, Channels, Scanner, RX recorder, SWR Scan, GPS, QTH grid, Settings, Sentry (X6200), Airspace, Birdie Cal, Time Signal, On the Air |
+
+Up to v0.3.12.23 RADE was on the list but did nothing from a key.
 
 The hand mic F1 and F2 keys (and the H-22's F3 on the X6200), short and long
 press, are set in the same tab, from the quick actions (all but the
-screenshot), NR and NB.
+screenshot), NR, NB and the keys' jobs.
 Where: Settings > Keys > HAND MIC KEYS.
 The other hand mic keys: see [Hand mic](#hand-mic).
 
@@ -399,10 +424,15 @@ and a key held while another one was pressed lost its long press.
 Frequency lock. The LOCK key (X6100), the X6100 mic's SPCH key, a
 keyboard's Scroll Lock or CapsLock+K, the browser panel's LOCK and any key
 given "Frequency lock on/off" in Settings > Keys (a long press of GEN, APP,
-KEY, MSG, DFN, DFL or FST, a hand mic F key) turn it on and off. The X6200
-has no LOCK key: give it to FST's long press, as on the stock firmware, or
-to another of those. Each turn says "Dial locked" or "Dial unlocked" on the
+KEY, MSG, DFN or DFL, a press or hold of the top and side keys, a hand mic
+F key) turn it on and off. The X6200 has no LOCK key: give it to FST's
+long press, as on the stock firmware, or to another of those. Each turn says "Dial locked" or "Dial unlocked" on the
 screen.
+Per band and mode (Settings > Keys > FREQUENCY LOCK, off by default): each
+band keeps its own lock for each mode, locked on 20 m USB and free on 20 m
+CW, say. Another band or mode brings its own lock back ("Dial locked (this
+band and mode)"), across a restart too; a lock turned on or off is kept for
+the band and mode you are on. Off, one lock for all, as before (#111).
 Held, the X6100's LOCK key restarts the radio's base board instead, a way
 out when the base stops answering: after the long press the screen counts
 down "Keep holding LOCK to restart: 4 s", and the restart comes 5 s after
@@ -2221,8 +2251,9 @@ acceleration.
 - Accel. onset (1-5, default 3) sets how soon it starts: 1 only when turned
   fast, 5 already when turned gently.
 
-Charger. Where: Settings > General > CONTROLS > Charger (default On). What the
-radio asks the base for with an external supply connected:
+Charger. Where: Settings > General > CONTROLS > Charger (default On), or a
+key or USER page button given "Charger on/off" in Settings > Keys (#276).
+What the radio asks the base for with an external supply connected:
 
 - Off: no charging, with the radio on or switched off.
 - On: charging, with the radio on or switched off.
@@ -2639,7 +2670,10 @@ by itself. The 20 MHz and channel 12 and 13 settings in `x6100-wifi.conf` are
 
 | Card | Options |
 |---|---|
-| FRONT KEYS, LONG PRESS | the long-press action of GEN, APP, KEY, MSG, DFN, DFL and FST (see [Buttons and knobs](#buttons-and-knobs)) |
+| PAGE KEYS, LONG PRESS | the long-press action of GEN, APP, KEY, MSG, DFN and DFL (see [Buttons and knobs](#buttons-and-knobs)) |
+| TOP AND SIDE KEYS | a press and a hold of FST, ATU, A/B, the band keys and the mode keys (X6100: PRE and AGC too), each the key's own job or an action; Reset to own (#111) |
+| USER PAGE | the actions of the USER page's F1-F5 (#111) |
+| FREQUENCY LOCK | Per band and mode: each band and mode its own lock, off by default (#111) |
 | HAND MIC KEYS | F1, F2, F1 long, F2 long; on the X6200 F3 and F3 long too, for the H-22's F3 (see [Hand mic](#hand-mic)) |
 | PADDLE | USB paddles: Connected, the dit/dah of each kind, Learn dit and dah, Swap dit and dah, Serial port (see [USB paddle](#usb-paddle)) |
 | KEYBOARD AND MOUSE | Layout of a USB or Bluetooth keyboard: US by default, UK, German, French and others; Shortcuts, off by default (the keyboard only types); Mouse, off by default (see [Keyboard](#keyboard) and [Mouse](#mouse)) |
@@ -2648,7 +2682,7 @@ by itself. The 20 MHz and channel 12 and 13 settings in `x6100-wifi.conf` are
 
 | Card | Options |
 |---|---|
-| CLUSTER FILTERS | Modes (CW, SSB, DIG, AM/FM), Bands (160 m to 6 m, 4 m, 2 m, 70 cm), Activity (POTA, SOTA, WWBOTA, HOTA; none lit = all spots) |
+| CLUSTER FILTERS | Modes (CW, SSB, DIG, AM/FM), Bands (160 m to 6 m, 4 m, 2 m, 70 cm), Activity (POTA, SOTA, WWBOTA, HOTA, WWFF, IOTA, WCA, TOTA, MOTA, LH, LLOTA; none lit = all spots) |
 | CLUSTER VIEW | Newest first, All bands, Spot snap hold, Spot snap speed |
 | PSK REPORTER | Report decodes (on by default) |
 
@@ -4158,6 +4192,15 @@ What it does:
   message), POTA and SOTA spots, SMS, email and Winlink.
 - Rows in the list: blue sent by you, red to you, green a CQ, dark blue to a
   group, purple an alert word.
+- The main knob moves your TX offset (the dial stays): 1 Hz a click turned
+  slowly, 5 or 10 Hz turned fast. While it turns the list over the
+  waterfall fades, so the TX band (as wide as a signal at your speed) and
+  the signals round it show; it comes back 2.5 s after the last click (#159).
+- The message box (Send..., Reply, and the boxes that edit INFO, STATUS,
+  Groups...) closes unsent with Send... or Reply pressed again, as well as
+  with ESC or the on-screen keys' close key. With a keyboard plugged in the
+  screen has no keys, and the message line says so: Enter sends, ESC or
+  Send... again closes. Up to v0.3.12.23 only ESC closed it (#280).
 
 The @X6100 group, for stations running this firmware. It is in Groups by
 default, and everyone is free to take it out:
@@ -4861,7 +4904,7 @@ again when it reconnects.
 
 The CW Keyboard app is CW as you type, with a keyboard or without one, the
 same on the X6100 and the X6200. Where: APP > CW Keyboard; a long press can
-open it too (Settings > Keys > FRONT KEYS, LONG PRESS: APP CW Keyboard).
+open it too (Settings > Keys > PAGE KEYS, LONG PRESS: APP CW Keyboard).
 
 - It keys in CW or CW-R. In another mode the box on the right reads NOT CW
   and nothing is taken ("Set CW mode to transmit"). Unlike the main screen's
@@ -5320,7 +5363,8 @@ waterfall.
 
 - On the radio: modes (CW, SSB, DIG, AM/FM), bands (160 m to 6 m, then
   4 m, 2 m and 70 cm; all on = no filter) and activity (POTA, SOTA, WWBOTA,
-  HOTA, any mix; none lit = all spots). One mode and one band always stay
+  HOTA, WWFF, IOTA, WCA, TOTA, MOTA, LH, LLOTA, any mix; none lit = all
+  spots; up to v0.3.12.23 only the first four, #277). One mode and one band always stay
   on. A change applies at once. Where: Settings > Cluster > CLUSTER FILTERS.
 - A band filter set up to v0.3.7 keeps its bands: 4 m, 2 m and 70 cm stay
   off in it (their spots were hidden by it before too) until you turn them
@@ -5334,6 +5378,12 @@ waterfall.
   (`LLPL-0001`) are not taken as POTA.
   WWBOTA: the word WWBOTA (or BOTA) or a bunker (`B/G-0070`); HOTA: the word
   HOTA or a HOTA reference (`RO-H0390`).
+- The others by their word (alone or with a #: `#WWFF`) or their
+  reference, told apart as Field Ops does: WWFF (`ONFF-0123`, `KFF-1234`),
+  IOTA (`EU-005`, `OC-123`), WCA (`DL-01156`), TOTA (`OKR-0150`), MOTA
+  (`X42018`), LH (the words ARLHS, ILLW or LH, or `FRA-123`) and LLOTA
+  (`LLPL-0001`). A spot of two programmes (a park in a WWFF area, `K-1234
+  KFF-1234`) is in both.
 - Besides the cluster, the radio reads the activator spots of pota.app,
   wwbota.org, cqhota.app and llota.app once a minute (WiFi needed) and puts
   them in the same list. A llota.app spot reads `LLOTA LLPL-0123 SSB`, as the
@@ -6234,7 +6284,8 @@ The menu has General and five groups:
 | Files | Files | browse and download `/mnt` |
 | | Gallery | screen recordings, voice recordings, screenshots, SSTV and WeFax pictures (see below) |
 | | Backup | download settings, memories, cluster, TCI server, QSO log, voice messages, your own boot picture (optionally CW trainer and WiFi) as one file, and restore the parts you choose (restored WiFi networks are taken a few seconds after, no restart needed; see below) |
-| System | Display | every display option of the radio, a few station options of the other tabs (independent VFOs, the band plan, the WR12, [TX ranges, the own list and TX outside ham bands](#amateur-bands-only) in the Transmitter card), and the [boot picture](#boot-picture) (see below) |
+| System | Keys | what the radio's keys do, as Settings > Keys: the top and side keys pressed and held, the page keys held, the USER page's F1-F5, the hand mic keys, the frequency lock per band and mode ([#111](#buttons-and-knobs)) |
+| | Display | every display option of the radio, a few station options of the other tabs (independent VFOs, the band plan, the WR12, [TX ranges, the own list and TX outside ham bands](#amateur-bands-only) in the Transmitter card), and the [boot picture](#boot-picture) (see below) |
 | | Time | local and server time; Sync sets the radio clock from the browser's, in the radio's timezone; NTP sync; timezone |
 | | Network | the radio's [network name](#network-name), its [other names](#the-radios-own-names), the USB Ethernet adapter: state, DHCP or static address (see [Ethernet](#ethernet)), and each saved WiFi network's address, DHCP or static (see [Wireless tab](#wireless-tab)) |
 | | TCI | enable the [TCI server](#tci-server), set its port |

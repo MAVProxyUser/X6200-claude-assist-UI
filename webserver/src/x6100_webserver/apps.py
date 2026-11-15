@@ -139,7 +139,7 @@ bottle.BaseTemplate.defaults.update(callsign=read_callsign, request=bottle.reque
 # the saved ones. The GUI reloads the server when the file changes: it is always replaced whole
 # (replace_file), so a save within the same 2 s of FAT's mtime is seen by its new inode.
 # Filters and alerts are more lines: filter_modes=CW,SSB,DIG,AMFM, filter_bands=40,20,
-# filter_activity=POTA,SOTA,WWBOTA,HOTA, max_age=MIN, skip_spotters=A,B,
+# filter_activity=POTA,SOTA,WWBOTA,HOTA,WWFF,IOTA,WCA,TOTA,MOTA,LH,LLOTA, max_age=MIN, skip_spotters=A,B,
 # filter_spotter_dxcc=PA,ON (spots heard in these countries: the GUI drops the others as they come in),
 # alert=PATTERN|bands|mode, alert_popup=0|1, alert_beep=0|1.
 
@@ -168,7 +168,7 @@ CLUSTER_MAX_ALERTS = 50
 CLUSTER_MODES = ["CW", "SSB", "DIG", "AMFM"]
 # The GUI's cluster bands (src/cluster/spots.c), as cluster.conf has them: the number in the name, 70 for 70 cm
 CLUSTER_BANDS = [160, 80, 60, 40, 30, 20, 17, 15, 12, 10, 8, 6, 4, 2, 70]
-CLUSTER_ACTIVITY = ["POTA", "SOTA", "WWBOTA", "HOTA"]   # the GUI's cluster_act_names
+CLUSTER_ACTIVITY = ["POTA", "SOTA", "WWBOTA", "HOTA", "WWFF", "IOTA", "WCA", "TOTA", "MOTA", "LH", "LLOTA"]   # the GUI's cluster_act_names
 # Written by the radio GUI: pattern|freq_hz|HH:MM of the last spot that matched
 CLUSTER_ALERTS_SEEN = "/tmp/cluster_alerts_seen"
 # Written by the radio GUI (src/dialog_cluster.c link_write): state|host:port|text, its APP Cluster status line
@@ -2517,6 +2517,44 @@ def display_set():
             return api_error(400, "Invalid theme")
         cmd["theme"] = data["theme"]
     else:
+        val = data.get("val")
+        if not isinstance(val, int) or isinstance(val, bool):
+            return api_error(400, "Invalid value")
+        cmd["val"] = val
+    reply = display_call(cmd)
+    if reply is None:
+        return api_error(503, "Radio GUI not reachable")
+    if reply.get("t") != "ok":
+        return api_error(409, reply.get("err", "Rejected by the radio"))
+    return {"status": "OK"}
+
+
+# Settings > Keys (#111): what the radio's keys do, the radio's own lists and checks (cfg_socket.cpp keys_get/keys_set)
+
+@app.route('/keys')
+def keys_page():
+    return bottle.template('keys')
+
+
+@app.get('/api/keys')
+def keys_get():
+    reply = display_call({"cmd": "keys_get"})
+    if not reply or reply.get("t") != "keys":
+        return api_error(503, "Radio GUI not reachable")
+    reply.pop("t", None)
+    return reply
+
+
+@app.post('/api/keys')
+def keys_set():
+    try:
+        data = bottle.request.json
+    except ValueError:
+        data = None
+    if not isinstance(data, dict) or not isinstance(data.get("key"), str) or len(data["key"]) > 23:
+        return api_error(400, "Invalid key")
+    cmd = {"cmd": "keys_set", "key": data["key"]}
+    if data["key"] != "reset_top":
         val = data.get("val")
         if not isinstance(val, int) or isinstance(val, bool):
             return api_error(400, "Invalid value")
