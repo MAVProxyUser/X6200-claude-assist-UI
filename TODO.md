@@ -372,3 +372,11 @@ the card's layout (a second root partition: room on the 32 GB cards, a new card 
 environment on the card for the choice and the counter, how the GUI's settings and the web server's state are
 found from either, what the X6100's smaller cards allow, and the image-required levels.
 
+
+## Deep backlog: the radio as a Bluetooth microphone for a PC (#278)
+
+Not wanted now (the owner, 2026-11-15: no Bluetooth headset or Bluetooth audio in use). Kept only as a note: a PC
+paired with an X6200 sees an audio output and no input, because the radio offers no headset profile (HFP/HSP). On the
+X6100's chip SCO gives no audio and drops the WiFi; the X6200's is a Realtek RTL8723DU on USB (btusb, SCO over HCI:
+SCO MTU 255:12), so the headset role might work there. A test needs a PC or tablet paired with the radio, and may
+drop WiFi while SCO runs.
