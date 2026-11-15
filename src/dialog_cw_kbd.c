@@ -13,11 +13,13 @@
 #include "cfg/cfg_api.h"
 #include "cw.h"
 #include "cw_encoder.h"
+#include "cw_decoder/morse_code.h"
 #include "params/params.h"
 #include "events.h"
 #include "keyboard.h"
 #include "msg.h"
 #include "radio.h"
+#include "recolor_rows.h"
 #include "styles.h"
 #include "textarea_window.h"
 #include "theme.h"
@@ -29,6 +31,7 @@
 #define TIMER_MS     100
 #define LINE_MAX     64
 #define HISTORY_MAX  400   /* characters of sent text kept on screen */
+#define LOG_W        (776 - 20)
 
 #define COLOR_HEAD   theme_hex(TC_text_head)
 #define COLOR_DIM    theme_hex(TC_text_dim)
@@ -134,32 +137,64 @@ static bool busy(void) {
     return cw_encoder_state() != CW_ENCODER_IDLE;
 }
 
+/* i moved on past the second byte of a letter of two (UTF-8, Å): a cut there would leave half of it */
+static size_t whole(const char *s, size_t i) {
+    while (((unsigned char)s[i] & 0xC0) == 0x80) {
+        i++;
+    }
+    return i;
+}
+
 static void history_add(const char *text) {
     size_t len = strlen(history), add = strlen(text);
 
     if (add > HISTORY_MAX) {
-        text += add - HISTORY_MAX;
-        add = HISTORY_MAX;
+        text += whole(text, add - HISTORY_MAX);
+        add = strlen(text);
     }
     if (len + add > HISTORY_MAX) {     /* drop the oldest */
-        memmove(history, history + len + add - HISTORY_MAX, HISTORY_MAX - add);
-        len = HISTORY_MAX - add;
+        size_t drop = whole(history, len + add - HISTORY_MAX);
+
+        memmove(history, history + drop, len - drop);
+        len -= drop;
     }
     memcpy(history + len, text, add + 1);
 }
 
+/* Live: the last letter queued and not keyed yet goes, both bytes of one of two */
+static void unqueue_last(void) {
+    size_t n = strlen(queue);
+
+    while (n > 1 && ((unsigned char)queue[n - 1] & 0xC0) == 0x80) {
+        n--;
+    }
+    if (n) {
+        queue[n - 1] = 0;
+    }
+}
+
 /* The log: sent text dim, the line being keyed white up to where the key is
- * and yellow after, the queue grey */
+ * and yellow after, the queue grey. Cut into the label's rows here, each with its own colours: a colour that ran on
+ * into the next row lost it there and showed the next ones' codes as text (#269) */
 static void update_view(void) {
-    static char buf[HISTORY_MAX + sizeof(sending) + sizeof(queue) + 64];
-    int         sent = busy() ? cw_encoder_sent() : 0;
-    int         n    = strlen(sending);
+    /* the text and, on each row, its colours and '\n' */
+    static char   buf[2 * (HISTORY_MAX + sizeof(sending) + sizeof(queue)) + 1024];
+    int           sent = busy() ? cw_encoder_sent() : 0;
+    int           n    = strlen(sending);
+    recolor_run_t runs[5];
+    lv_coord_t    w = LOG_W - lv_obj_get_style_pad_left(log_lbl, 0) - lv_obj_get_style_pad_right(log_lbl, 0) -
+                   2 * lv_obj_get_style_border_width(log_lbl, 0);
 
     if (sent > n) {
         sent = n;
     }
-    snprintf(buf, sizeof(buf), "#%06x %s##%06x %.*s##%06x %s# #%06x %s#", COLOR_DIM, history, COLOR_SENT, sent,
-             sending, COLOR_NEXT, sending + sent, theme_hex(TC_text_faint), queue);
+    runs[0] = (recolor_run_t){history, strlen(history), COLOR_DIM};
+    runs[1] = (recolor_run_t){sending, (size_t)sent, COLOR_SENT};
+    runs[2] = (recolor_run_t){sending + sent, (size_t)(n - sent), COLOR_NEXT};
+    runs[3] = (recolor_run_t){" ", 1, COLOR_SENT};
+    runs[4] = (recolor_run_t){queue, strlen(queue), theme_hex(TC_text_faint)};
+    recolor_rows(buf, sizeof(buf), runs, 5, lv_obj_get_style_text_font(log_lbl, 0),
+                 lv_obj_get_style_text_letter_space(log_lbl, 0), w);
     lv_label_set_text(log_lbl, buf);
 
     lv_label_set_text_fmt(head, "CW KEYBOARD - #%06x %i WPM#", theme_hex(TC_text), (int)param_i_get(cfg_key_speed));
@@ -216,6 +251,14 @@ static bool enqueue_raw(const char *text, bool space) {
     for (; *text && len < sizeof(queue) - 2; text++) {
         if (*text != '#') {
             queue[len++] = toupper((unsigned char)*text);
+        }
+    }
+    if (((unsigned char)*text & 0xC0) == 0x80) {   /* full inside a letter of two bytes: none of it */
+        while (len && ((unsigned char)queue[len - 1] & 0xC0) == 0x80) {
+            len--;
+        }
+        if (len) {
+            len--;
         }
     }
     if (space) {
@@ -359,7 +402,7 @@ static void key_cb(lv_event_t *e) {
             if (*lv_textarea_get_text(input)) {
                 lv_textarea_del_char(input);
             } else if (param_i_get(cfg_cw_live) && queue[0]) {   /* Live: the last letter not keyed yet */
-                queue[strlen(queue) - 1] = 0;
+                unqueue_last();
                 update_view();
             }
             break;
@@ -386,17 +429,34 @@ static void key_cb(lv_event_t *e) {
         case KEY_VOL_RIGHT_SELECT:
             radio_change_vol(1);
             break;
-        default:
-            if (key >= ' ' && key < 127 && key != '#') {
-                char c[2] = {(char)toupper((int)key), 0};
+        default: {
+            char c[sizeof(key) + 1] = {0};
 
-                if (param_i_get(cfg_cw_live)) {   /* keyed at once, letter by letter; a space is the word gap */
-                    enqueue_raw(c, false);
+            if (key >= ' ' && key < 127 && key != '#') {
+                c[0] = (char)toupper((int)key);
+            } else {
+                /* A letter of the keyboard's layout (Å on a Swedish one) comes as its UTF-8 bytes (lv_drivers'
+                 * xkb.c): taken when the keyer has a sign for it, in the capital its table has (å as Å) */
+                const cw_characters_t *k;
+
+                memcpy(c, &key, sizeof(key));
+                k = (unsigned char)c[0] >= 0xC0 ? morse_find(c) : NULL;
+                if (k && strlen(k->character) == strlen(c)) {
+                    strcpy(c, k->character);
                 } else {
-                    lv_textarea_add_text(input, c);
+                    c[0] = 0;
                 }
             }
+            if (!c[0]) {
+                break;
+            }
+            if (param_i_get(cfg_cw_live)) {   /* keyed at once, letter by letter; a space is the word gap */
+                enqueue_raw(c, false);
+            } else {
+                lv_textarea_add_text(input, c);
+            }
             break;
+        }
     }
 }
 
@@ -488,7 +548,7 @@ static void construct_cb(lv_obj_t *parent) {
     log_lbl = label(box, &sony_24, COLOR_SENT);
     lv_label_set_recolor(log_lbl, true);
     lv_label_set_long_mode(log_lbl, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(log_lbl, 776 - 20);
+    lv_obj_set_width(log_lbl, LOG_W);
     lv_obj_align(log_lbl, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
     /* Input line and state */

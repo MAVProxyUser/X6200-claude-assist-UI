@@ -53,7 +53,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     adsb.c adsb_rx.c app_adsb.c rtl_spectrum.c
     first_start.c first_start_rule.c
     dialog_cw_trainer.c
-    dialog_cw_kbd.c
+    dialog_cw_kbd.c recolor_rows.c
     dialog_shell.c
     update_watch.c
     theme.c

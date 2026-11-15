@@ -238,7 +238,7 @@ Knobs. On the main screen the main knob tunes, and VOL and the MFK each turn
 one control of their own list. The two lines over the buttons say which
 control and its value (Settings > Display > INTERFACE > Knob info; with it
 off, or while Hide buttons has hidden them, the value shows on the message
-line).
+line, unless Keep knob lines is on).
 - A press of the knob switches it between changing the value and choosing
   the control: while it chooses, a turn goes to the next control on its list
   (the name lit), and the next press changes that one again.
@@ -273,14 +273,29 @@ Hide buttons. With Settings > Display > INTERFACE > Hide buttons at After
 knob lines over them hide on the main screen once that long has gone by
 without a key, and the waterfall shows down to the bottom of the screen.
 - Any key brings them back: a front key, a hand mic key, a keyboard key. It
-  also does its usual job (GEN goes to its next page, ATU switches the
-  tuner), except F1-F5: their press only brings the buttons back, so a
-  button you can't see is never pressed. Press it again to use it. F1-F5
-  from a browser (the Panel's Keys tab, the Screen page) are the same: the
-  first press only brings the radio's buttons back.
+  also does its usual job (ATU switches the tuner), except F1-F5: their
+  press only brings the buttons back, so a button you can't see is never
+  pressed. Press it again to use it. F1-F5 from a browser (the Panel's Keys
+  tab, the Screen page) are the same: the first press only brings the
+  radio's buttons back.
+- A page key (GEN, APP, KEY, DFN, DFL, and V/M on the X6100) brings back
+  the page that was hidden when it is a page of its own: with KEY 1:2
+  hidden, KEY shows KEY 1:2, and the next KEY goes on to KEY 2:2. Over
+  another key's page it shows its own first page, as before (with KEY 1:2
+  hidden, GEN shows its first page). Held, it does its long-press action as
+  always, and with Icon menus on APP still opens the APP grid. The same
+  on the X6100 and the X6200, from the radio or from a browser. Up to
+  v0.3.12 the page key also went to its next page at once (KEY on a hidden
+  KEY 1:2 showed KEY 2:2; issue #128).
 - The main knob tunes and the buttons stay hidden. VOL and the MFK, turned
   or pressed, leave them hidden too: their control and value show on the
-  message line, as with Knob info off. While the buttons show, a turn or a
+  message line, as with Knob info off.
+- Keep knob lines (Settings > Display > INTERFACE, off by default): the two
+  knob lines stay on the screen, where they are, while the buttons hide, and
+  VOL and the MFK show their control and value there instead of on the
+  message line. The waterfall still shows down to the bottom, under them.
+  It needs Knob info on. Up to v0.3.12 the knob lines always hid with the
+  buttons (issue #128). While the buttons show, a turn or a
   press of VOL or the MFK keeps them a while longer, the main knob does not.
   A keyboard's keys for the knobs (- and =, [ ] { }, the left and right
   arrows, Enter, ESC) count as the knobs.
@@ -424,8 +439,9 @@ keyboards do on Windows: F4ABC types without Shift. Shift with Caps Lock types
 the row's own characters (`&`, `é`, `"` and the others) and AltGr's are as
 always; up to v0.3.10 Caps Lock only made the letters capitals there, so the
 row typed `&`, `É`, `"` (issue #254). Letters with
-accents type in the text boxes, but the radio's fonts may not show them, and
-CW has no code for most of them.
+accents type in the text boxes. Å Ä Ö Ü É Ñ and å ä ö ü é ñ show in every
+font (up to v0.3.12 they could be missing; issues #265 and #269); other
+accented letters may not show, and CW has codes only for those six.
 
 CapsLock is the keyboard's shortcut key: held, the key pressed with it does
 something on the radio instead of typing. Every keyboard has it, small and
@@ -2090,7 +2106,7 @@ Per band S-meter cal: see [S-meter](#s-meter). TCI SERVER: see
 | SPECTRUM | Spectrum; with it on Fill, Peaks, Fill gradient, Filter colour, Filter shade, Shaded part, Height (see [Waterfall](#waterfall)) |
 | WATERFALL | see [Waterfall](#waterfall) |
 | MAIN SCREEN | Band plan, Cluster spots, Cluster column, Broadcast names, S-meter type, S-meter colours, Needle lamp, Birdies (see [Birdie Cal](#birdie-cal)), Zoom and step per mode, Step per zoom (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)) |
-| INTERFACE | Popups Freq/Info/TX, Icon menus, Knob info, Hide buttons (Off, After 3 s, After 5 s, After 10 s), Theme, Font, Decoder text, FT8/FT4 info |
+| INTERFACE | Popups Freq/Info/TX, Icon menus, Knob info, Hide buttons (Off, After 3 s, After 5 s, After 10 s), Keep knob lines, Theme, Font, Decoder text, FT8/FT4 info |
 
 - Popups Freq/Info/TX (Popups Freq/Info/ALC up to v0.3.8), three switches:
   - Freq (off by default): the new frequency, big in the middle of the
@@ -2114,6 +2130,8 @@ Per band S-meter cal: see [S-meter](#s-meter). TCI SERVER: see
 - Hide buttons (Off by default): on the main screen the buttons and the knob
   lines hide after 3, 5 or 10 s without a key, and the next key brings them
   back (see [Buttons and knobs](#buttons-and-knobs)).
+- Keep knob lines (Off by default): with Hide buttons on, the knob lines
+  stay on the screen when the buttons hide.
 - Theme: see [Themes](#themes). A new theme applies at once, without a restart.
 - Font: Sony Sketch, Roboto or DejaVu (default). A new font applies at once.
   Themes with their own font (Classic, Black Metal, Total Black, 1bit,
@@ -2152,8 +2170,17 @@ minutes, the screen dark after 30).
 
 - What counts as use: a key or a knob of the radio, a hand mic key, a
   keyboard, tuning from the browser panel, the remote screen's keys and
-  knobs, a new frequency from a TCI client or from Pat (Winlink). Each
-  starts the minutes again, the screensaver's and Screen off's.
+  knobs, a new frequency from a TCI client or from Pat (Winlink), and in the
+  [CW Trainer](#cw-trainer) each group or call it plays and each character
+  of your keying it hears. Each starts the minutes again, the screensaver's
+  and Screen off's.
+- A key or paddle in the KEY jack is the base's own: it counts only through
+  the TX it keys (next point). With KEY Train on the X6100's base sounds
+  the sidetone and, as reported in issue #263, no TX, so outside the CW
+  Trainer keying with Train on does not keep the screensaver away; on the
+  X6200 Train goes into TX at 0 W, which does. Up to v0.3.12 the CW
+  Trainer did not count either: the screensaver came over it while you
+  practised (issue #263).
 - Any TX ends the screensaver at once, whatever keyed it: the PTT key, the
   hand mic, an app, CAT, TCI, the browser, the tuner, the SWR scan (seen
   within a second). No screensaver comes while the radio is on the air;
@@ -2692,14 +2719,17 @@ Up to v0.3.6 the X6200 also went up to 10 W and asked its base for that
 (issue #53). A setting saved above 8 W comes back as 8 W. The TX meter keeps
 its 0-10 W scale on both radios, so it shows what the radio measures.
 
-On battery the X6200 stops at 5 W, as Xiegu's own firmware (1.0.8) does. The
-radio follows the supply once it has been steady for 5 seconds (and once the
-battery readings count after power-on, see [low battery](#low-battery)). With
+On battery both radios stop at 5 W: the X6200 as Xiegu's own firmware (1.0.8)
+does, the X6100 as Xiegu rates it on its battery (up to v0.3.12 the X6100 had
+no battery limit and went up to 10 W on its pack, #258). The radio follows
+the supply once it has been steady for 5 seconds (and once the battery
+readings count after power-on, see [low battery](#low-battery)). With
 PWR above 5 W when the supply goes, PWR comes down to 5 W and the radio says
 "TX power 5 W on battery". When the supply comes back PWR stays at 5 W: the
-top goes back to 8 W, turn it up yourself. On battery every way of setting
-PWR stops at 5 W: TCI's `drive` from 62 % up gives 5 W, and the browser panel's
-PWR goes back to 5 W. The X6100 has no battery limit.
+top goes back to 10 W on the X6100 and 8 W on the X6200, turn it up yourself.
+On battery every way of setting PWR stops at 5 W: TCI's `drive` gives 5 W from
+50 % up on the X6100 and from 62 % up on the X6200, and the browser panel's PWR
+goes back to 5 W.
 
 ### Amateur bands only
 
@@ -3183,8 +3213,8 @@ second), under the transverter's from, to and shift: Off, the default, or
   tune" action): its carrier is the base's own, at a power the radio does
   not set. It says "No tuner: 0.5 W transverter". TUNE for an external
   tuner tunes, at its TUNE power or the limit, whichever is lower.
-- On the X6200 on battery the 5 W top stays: off the transverter PWR comes
-  back to 5 W at most.
+- On battery the 5 W top stays: off the transverter PWR comes back to 5 W
+  at most.
 - The Winlink page's Power row says when the limit is what holds Winlink.
 
 Not tried on a radio with a transverter yet: checked on the PC build.
@@ -3344,8 +3374,8 @@ What goes on the air:
   meanwhile included. Where: Settings > TX Cal > EXTERNAL TUNER > TUNE power,
   W: 0.1 W up to the radio's PWR top, 10 W on the X6100 and 8 W on the X6200,
   for a tuner that needs about 9 W to match (#87). In a digital app too:
-  the apps' 7 W cap is for their own transmissions, not for the tune. The
-  X6200 on battery stops at its 5 W as always, a tune under way too once the
+  the apps' 7 W cap is for their own transmissions, not for the tune. On
+  battery either radio stops at its 5 W as always, a tune under way too once the
   radio has gone onto its battery (unplugged, after the 5 s it waits for the
   supply to settle), and on a transverter's band at its
   [TX power limit](#transverter-tx-power-limit).
@@ -4421,6 +4451,9 @@ over the waterfall.
   be. Lower copies weaker signals but can print noise.
 - No characters from noise: lone blips, clicks and steady carriers (birdies)
   on the tone are not decoded and do not change the speed estimate.
+- It knows A-Z, the figures, punctuation and the prosigns, and Å Ä Ö Ü É Ñ
+  and CH; up to v0.3.12 those came out as <?> (#265). The CW Keyboard and
+  TCI key them too.
 - A letter shows when the next one starts; the last one after a short pause.
   For 1 s after the decoder is reset (first use, CW peak or key tone change)
   nothing is decoded. A key-down longer than 8 dots (tune-up) is ignored.
@@ -4475,6 +4508,15 @@ we'd expect above it in CW-R: that base centres the picture on the dial
 while it transmits, where 1.1.8 keeps it a key tone off, as in receive. Only
 the picture was off: the carrier went out on the dial (#191). We haven't run
 this on a 1.1.9 base ourselves.
+
+With an IF shift (the MFK 2:4 page, an X6100 with base 1.1.9 or later) the
+base is tuned that far from the dial and the received picture is centred
+there; while it transmits, on the dial. Up to v0.3.12 the waterfall drew
+your carrier the IF shift off the line in every mode, while the spectrum
+had it on the line (#191; not run on a 1.1.9 base either). The faint
+stripe of the radio's own noise is where the base is tuned: on the line in
+USB and LSB, a key tone below it in CW and above it in CW-R; an IF shift
+moves it as far the other way (+1000 Hz: 1 kHz lower).
 
 Parse. Where: CW 2:2 > Parse (on by default). The decoder often runs words
 together when the spacing is tight: "CQCQDEON6UREK". With Parse on, each
@@ -4542,7 +4584,10 @@ open it too (Settings > Keys > FRONT KEYS, LONG PRESS: APP CW Keyboard).
 - Turning the MFK (or the arrow keys) sets the speed, 5 to 60 WPM, the same
   as KEY > Speed; the head of the window shows it.
 - The log: what was sent dim, the line on the air bright up to the key and
-  highlighted after it, the queue grey. On the right READY, ON AIR or NOT CW.
+  highlighted after it, the queue grey, on as many rows as it takes, the
+  newest at the bottom. On the right READY, ON AIR or NOT CW. Up to v0.3.12,
+  once the log ran onto a second row, that row came bright and ended in
+  colour codes such as "#f1f5f9 #e5a823 475569" (#269).
 - Buttons: Send, Stop, Clear (the log and the line), Close. The next pages
   key the MSG > CW messages (up to eight, four to a page), each as a typed
   line; the last page has Live.
@@ -4857,10 +4902,18 @@ its TX power held at 0 W in every key mode, Manual too (see [CW](#cw)).
   space there does not end the answer, and the spaces are left out when it
   is checked. Up to v0.3.9 the space ended it and the call counted wrong
   (issue #202).
-- Replay (Learn while it waits for your answer, Calls) plays the group or
-  the call again one second after the press, so your hand is off the key by
-  then; the screen says "Listen..." meanwhile, and nothing you key counts.
-  Up to v0.3.11 it started at once (issue #202).
+- Start, and Replay (in Learn while it waits for your answer, and in
+  Calls), play the group or the call one second after the press, so your
+  hand is off the key by then; the screen says "Listen..." meanwhile, and
+  nothing you key counts. After Start only the first group or call waits
+  that second; the ones that follow come after the result as before. Up to
+  v0.3.11 Replay started at once, up to v0.3.12 Start did (issue #202).
+- The trainer at work keeps the [screensaver](#screensaver) away: each
+  group or call it plays and each character of your answer (or of your
+  keying in Practice) counts as use, as a key does. Left waiting for an
+  answer, it goes under the screensaver after its minutes, and your answer
+  brings the screen back. Up to v0.3.12 nothing of the trainer counted
+  (issue #263).
 - The trainer keys at the key speed, 5 to 50 WPM, and the decoder follows
   it, and a straight key, down to 5 WPM while the trainer is open (on the
   band it stops at 10). Up to v0.3.8 it stopped at 10 in the trainer too:
@@ -5924,7 +5977,7 @@ them.
 | Backlight | Brightness, Brightness when idle, Idle after (5-120 s), Button lights (Always off, Always on, Temporarily on), Screensaver (None, Matrix rain), Screensaver after (1-120 min, greyed with None), Rain speed (Normal, Slow, Very slow; greyed with None), Screen off after (0-120 min), Screen always off (the screensaver's rows greyed while it is on); see [Screensaver](#screensaver) |
 | Receiver | the X6200 only: WR12 on HOST (see [WR12 receiver](#wr12-receiver-x6200)) |
 | Transmitter | TX ranges (Ham bands, South Korea, Own list), TX outside ham bands (Settings > TX Cal), and the own list as a text field: Save writes `tx_ranges.conf` and the radio reads it at once, the ranges it took and a line it could not read said under it (see [Amateur bands only](#amateur-bands-only)) |
-| Text and info | Independent VFOs, Birdies (Off, Marks, Marks + notch), Mode from band plan, Zoom and step per mode, Step per zoom (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)), 12-hour clock, Icon menus, Knob info, Hide buttons (Off, 3 s, 5 s, 10 s; see [Buttons and knobs](#buttons-and-knobs)), Decoder text (Large, Compact), Magnify frequency, Magnify info, TX panel (the radio's Popups TX) |
+| Text and info | Independent VFOs, Birdies (Off, Marks, Marks + notch), Mode from band plan, Zoom and step per mode, Step per zoom (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)), 12-hour clock, Icon menus, Knob info, Hide buttons (Off, 3 s, 5 s, 10 s; see [Buttons and knobs](#buttons-and-knobs)), Keep knob lines, Decoder text (Large, Compact), Magnify frequency, Magnify info, TX panel (the radio's Popups TX) |
 | Boot picture | the picture the radio starts with, Upload, Default; kept by the web server, not a Settings option, so it works with the radio's screen down too (see [Boot picture](#boot-picture)) |
 
 HTTPS. The server also listens on port 443, with a self-signed certificate
@@ -7223,8 +7276,8 @@ the radio, hears it, keys it and sends CW with it.
   otherwise.
 - What it carries: `vfo`, `modulation` (lsb, usb, cw, cwr, am, nfm, digl,
   digu), `rx_filter_band`, `agc_mode`, `rit_enable` / `rit_offset`,
-  `drive` (TX power, 0-100 %: 0.1 W up to 10 W, 8 W on the X6200; on its
-  battery 5 W from 62 % up),
+  `drive` (TX power, 0-100 %: 0.1 W up to 10 W, 8 W on the X6200; on
+  battery 5 W, from 50 % up on the X6100 and 62 % up on the X6200),
   `trx` (PTT; `trx:0,true,tci;` keys with the client's
   audio as the microphone), `cw_macros`, `cw_macros_stop`,
   `cw_macros_speed` and `cw_keyer_speed` (CW, below), `rx_smeter` and `rx_channel_sensors` (the
@@ -7621,7 +7674,9 @@ Turning it on (the radio needs the internet for it):
 2. The first time, the radio downloads Tailscale from Tailscale's own site
    (version 1.104.2 for 32-bit ARM, 37 MB, to the DATA partition) and checks
    it against the checksum that comes with GoldCorpHF. Status shows the
-   download.
+   download. When the link breaks off, Status says where, and a minute later
+   the radio asks for the rest only: on a weak WiFi link it gets there in a
+   few tries.
 3. Status says "Waiting for your login". Scan the code on the radio's screen
    with a phone, or press Log in to Tailscale on the web page, and log in with
    your Tailscale account (a free Personal account will do). If your tailnet
