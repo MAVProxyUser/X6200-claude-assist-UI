@@ -268,17 +268,17 @@ static const band_t bands[] = {
     {"FM BC", 88000, 108000, "FM RADIO, LOCAL", "ANY SHORT WHIP", 'L', 92300000, radio_mode_wfm, false,
      "Local FM stations, one or two 200 kHz-wide ones in the picture at a time."},
     /* Above the X6200's own receiver: the RTL-SDR's (F VHF/UHF), or a WR12's */
-    {"AIR", 118000, 137000, "AIRCRAFT VOICE (AM)", "THE STICK'S OWN", 'L', 121500000, radio_mode_am, false,
+    {"AIR", 118000, 137000, "AIRCRAFT VOICE (AM)", "THE SDR'S OWN", 'L', 121500000, radio_mode_am, false,
      "Pilots and controllers in AM, 25 kHz apart; 121.500 is the emergency guard. Aircraft are heard far off."},
-    {"2 M", 144000, 148000, "HAMS: REPEATERS, APRS", "THE STICK'S OWN", 'L', 146520000, radio_mode_nfm, false,
+    {"2 M", 144000, 148000, "HAMS: REPEATERS, APRS", "THE SDR'S OWN", 'L', 146520000, radio_mode_nfm, false,
      "Local hams in narrow FM: repeaters 145-148, simplex 146.520, APRS packets on 144.390."},
-    {"MARINE", 156000, 162025, "BOATS; CHANNEL 16 CALLS", "THE STICK'S OWN", 'L', 156800000, radio_mode_nfm, false,
+    {"MARINE", 156000, 162025, "BOATS; CHANNEL 16 CALLS", "THE SDR'S OWN", 'L', 156800000, radio_mode_nfm, false,
      "Marine VHF in narrow FM: channel 16 (156.800) for calls and distress, AIS data on 161.975 / 162.025."},
-    {"NOAA WX", 162400, 162550, "WEATHER RADIO, ALERTS", "THE STICK'S OWN", 'L', 162550000, radio_mode_nfm, false,
+    {"NOAA WX", 162400, 162550, "WEATHER RADIO, ALERTS", "THE SDR'S OWN", 'L', 162550000, radio_mode_nfm, false,
      "NOAA Weather Radio around the clock, with SAME alerts the Sentry shows in its title."},
-    {"70 CM", 420000, 450000, "HAMS: REPEATERS, SIMPLEX", "THE STICK'S OWN", 'L', 446000000, radio_mode_nfm, false,
+    {"70 CM", 420000, 450000, "HAMS: REPEATERS, SIMPLEX", "THE SDR'S OWN", 'L', 446000000, radio_mode_nfm, false,
      "Local hams in narrow FM: repeaters 442-450, simplex 446.000."},
-    {"GMRS", 462550, 467725, "FAMILY RADIOS: FRS, GMRS", "THE STICK'S OWN", 'L', 462562500, radio_mode_nfm, false,
+    {"GMRS", 462550, 467725, "FAMILY RADIOS: FRS, GMRS", "THE SDR'S OWN", 'L', 462562500, radio_mode_nfm, false,
      "Handheld family radios, FRS and GMRS, 12.5 kHz apart: a few miles at most."},
 };
 
@@ -397,7 +397,7 @@ enum { VIEW_RTL, VIEW_SPLIT, VIEW_X6200 };      /* cfg_rtl_view: F4 goes RTL, SP
 /* The speaker: what A and F each want when shown (their F5 LISTEN), and what it has now. Only A or F shown changes it
  * (or G playing an entry); the other screens keep what was last heard */
 enum { HEAR_X6200, HEAR_RTL, HEAR_BOTH, HEAR_OFF, HEAR_N };
-static const char *const hear_names[] = {"X6200", "RTL", "BOTH", "OFF"};
+static const char *const hear_names[] = {"X6200", "SDR", "BOTH", "OFF"};     /* the SDR's: its own name (hear_name) */
 
 /* LISTEN's choice as said: the stick's by its kind (RTL, HACKRF, BLADERF) */
 static const char *hear_name(int h) {
@@ -2274,8 +2274,8 @@ static void stick_why(rtl_spec_state_t st, char *b, size_t n) {
             if (!strcmp(tn, "LIBBLADERF"))
                 snprintf(b, n, "THE BLADERF NEEDS LIBBLADERF\n\nNOT ON THIS IMAGE");
             else if (!strcmp(tn, "FIRMWARE") || !strcmp(tn, "FPGA-UPDATE"))
-                snprintf(b, n, "THE BLADERF'S FPGA IMAGE AND ITS\nFIRMWARE DO NOT GO TOGETHER\n\nAN OLDER IMAGE IN /mnt/bladerf,\n"
-                               "THEN UNPLUG IT AND PLUG IT IN");
+                snprintf(b, n, "THE BLADERF'S FPGA IMAGE AND ITS\nFIRMWARE DO NOT GO TOGETHER\n\nNUAND'S bladeRF_fw_vX.Y.Z.img IN\n"
+                               "/mnt/bladerf UPDATES ITS FIRMWARE");
             else
                 snprintf(b, n, "THE BLADERF NEEDS ITS FPGA IMAGE\n\n%s IN /mnt/bladerf\nOR IN ITS OWN FLASH", tn);
             break;
@@ -3185,16 +3185,23 @@ static void vol_say(void) {
         "HOW LOUD. PUSH THE VOL KNOB FOR SQUELCH.",
         "MUTES THE HISS UNTIL A SIGNAL COMES. 0: ALWAYS OPEN. PUSH: RF GAIN.",
         "SIGNALS AND NOISE DOWN TOGETHER. LOWER IT ONLY IF STRONG ONES DISTORT. PUSH: VOLUME."};
+    /* The SDR's, named as it is: the RTL's and the bladeRF's AUTO is their AGC, the HackRF has none (its daemon takes
+     * a middle gain for AUTO) */
     static const char *const stick[] = {
-        "THE STICK'S OWN, WHEREVER IT IS HEARD (THE X6200 KEEPS ITS OWN). PUSH: ITS SQUELCH.",
-        "THE STICK'S: QUIET UNTIL A SIGNAL STANDS THIS MUCH OVER THE NOISE. OFF: ALWAYS OPEN. PUSH: RF GAIN.",
-        "THE STICK'S TUNER: UP FOR WEAK SIGNALS, DOWN IF STRONG ONES SWAMP IT. AUTO: ITS AGC. PUSH: VOLUME."};
-    char t[48], v[24], who[12] = "";
+        "THE %s'S OWN, WHEREVER IT IS HEARD (THE X6200 KEEPS ITS OWN). PUSH: ITS SQUELCH.",
+        "THE %s'S: QUIET UNTIL A SIGNAL STANDS THIS MUCH OVER THE NOISE. OFF: ALWAYS OPEN. PUSH: RF GAIN.",
+        "THE %s'S GAIN: UP FOR WEAK SIGNALS, DOWN IF STRONG ONES SWAMP IT. AUTO: %s. PUSH: VOLUME."};
+    char t[48], v[24], who[12] = "", say[160];
 
     vol_text(v, sizeof(v));
     if (vol_fn == VF_VOL) snprintf(who, sizeof(who), "%s ", vol_stick() ? rtl_spectrum_dev_tag() : "X6200");
     snprintf(t, sizeof(t), "%s%s %s", who, vol_names[vol_fn], v);
-    osd(t, (vol_stick() ? stick : how)[vol_fn], vol_bar());
+    if (vol_stick())
+        snprintf(say, sizeof(say), stick[vol_fn], rtl_spectrum_dev_tag(),
+                 rtl_spectrum_dev() == RTL_DEV_HACKRF ? "A MIDDLE GAIN (IT HAS NO AGC)" : "ITS AGC");
+    else
+        snprintf(say, sizeof(say), "%s", how[vol_fn]);
+    osd(t, say, vol_bar());
     show_legend();
 }
 
@@ -3285,7 +3292,7 @@ static void show_cfg_rtl(void) {
     static uint32_t  pick_ms;
     static const char *const steps[] = {"12.5 KHZ", "25 KHZ", "100 KHZ", "500 KHZ", "1 MHZ"};
 
-    lv_label_set_text(b_mode.cap, "THE STICK");
+    lv_label_set_text_fmt(b_mode.cap, "THE %s", rtl_spectrum_dev_tag());
     lv_label_set_text(b_sig.cap, "SIGNAL STATUS");
     lv_label_set_text(b_rout.cap, "SCAN ROUTINE");
     lv_label_set_text(b_band.cap, "TARGET BAND");
@@ -3293,7 +3300,7 @@ static void show_cfg_rtl(void) {
     lv_label_set_text(b_tgts.cap, "TARGETS");
     rtl_spectrum_tuner(tn, sizeof(tn));
     if (rtl_spectrum_dev() == RTL_DEV_RTL || rtl_spectrum_dev() == RTL_DEV_NONE) {
-        snprintf(t, sizeof(t), "RTL-SDR %s", tn);
+        snprintf(t, sizeof(t), "%s %s", rtl_spectrum_dev_name(), tn);
     } else {                            /* the model says it: "HACKRF-ONE" as HACKRF ONE */
         snprintf(t, sizeof(t), "%s", tn[0] ? tn : rtl_spectrum_dev_name());
         for (char *c = t; *c; c++) if (*c == '-') *c = ' ';
@@ -3337,7 +3344,7 @@ static void show_cfg_rtl(void) {
         opt_set(&b_prof, 1, "", 0);
     }
     for (int i = 0; i < nhits; i++) seen += hits[i].rtl;
-    snprintf(t, sizeof(t), "%02d LOGGED ON THE STICK", seen);
+    snprintf(t, sizeof(t), "%02d LOGGED ON THE %s", seen, rtl_spectrum_dev_tag());
     opt_set(&b_tgts, 0, t, 0);
     opt_set(&b_tgts, 1, "C LOG HAS THEM", 2);
     /* the lock: C's channel and its scan's pick */
@@ -3596,7 +3603,7 @@ static void g_play(int i) {
 
     if (h->rtl) {
         if (!sdr_here) {
-            osd("NO SDR", "THIS ONE WAS HEARD ON THE STICK: PLUG AN RTL-SDR, HACKRF OR BLADERF INTO THE HOST PORT.", -1);
+            osd("NO SDR", "THIS ONE WAS HEARD ON AN SDR: PLUG AN RTL-SDR, HACKRF OR BLADERF INTO THE HOST PORT.", -1);
             return;
         }
         g_hz = h->hz;
@@ -3805,7 +3812,11 @@ static void show_glog(void) {
     snprintf(s, sizeof(s), h->rtl ? "%s: FIRST %s, LAST %s, %d TIME%s, %.0f DB. %s" : "%s: FIRST %s, LAST %s, %d TIME%s, +%.0f DB. %s",
              h->what[0] ? h->what : "THIS ONE", a, b, h->times, h->times == 1 ? "" : "S", h->peak,
              g_scan ? "SCANNING THE LIST ON EACH RADIO (F4: STOP)" : g_playing(g_sel) ? "HEARD NOW (PUSH: STOP)"
-             : h->rtl ? "PUSH: HEAR IT ON THE STICK" : "PUSH: HEAR IT ON THE X6200");
+             : h->rtl ? (rtl_spectrum_dev() == RTL_DEV_NONE ? "PUSH: HEAR IT ON AN SDR"
+                                                             : rtl_spectrum_dev() == RTL_DEV_HACKRF ? "PUSH: HEAR IT ON THE HACKRF"
+                                                             : rtl_spectrum_dev() == RTL_DEV_BLADERF ? "PUSH: HEAR IT ON THE BLADERF"
+                                                                                                    : "PUSH: HEAR IT ON THE RTL")
+             : "PUSH: HEAR IT ON THE X6200");
     for (char *c = s; *c; c++)
         if (*c >= 'a' && *c <= 'z') *c -= 32;
     lv_label_set_text(lg_about_l, s);
@@ -4507,7 +4518,7 @@ static void fkey(int k) {
             if (k == 1) listen_band();
             if (k == 2) {
                 if (!cfg_is_valid_hw_freq(bands[band_sel].listen_hz)) {
-                    osd("THE STICK'S BAND", "THE X6200'S SWEEP CANNOT TUNE IT. F2 HERE OPENS IT ON B VHF/UHF, WHERE F1 "
+                    osd("THE SDR'S BAND", "THE X6200'S SWEEP CANNOT TUNE IT. F2 HERE OPENS IT ON B VHF/UHF, WHERE F1 "
                         "SCANS IT END TO END.", -1);
                     break;
                 }
@@ -4902,7 +4913,13 @@ static bool front_key(int key, int state) {
             return false;       /* the main screen switches it */
         case KEYPAD_AB:
             if (scr == SCR_WALKIE && w_sdr_hz) {            /* G on the SDR's channels: its transmitter */
-                if (tap) w_sdr_arm(!g_sdr_armed);
+                if (tap && !g_sdr_armed && !rtl_spectrum_can_tx()) {    /* an RTL-SDR: heard, never sent */
+                    snprintf(t, sizeof(t), "THE %s ONLY RECEIVES", rtl_spectrum_dev_name());
+                    w_say(t, "RECEIVE ONLY", "G HEARS ITS CHANNELS THROUGH IT. TO TRANSMIT ON THEM: A HACKRF OR A "
+                                             "BLADERF ON THE HOST PORT.");
+                } else if (tap) {
+                    w_sdr_arm(!g_sdr_armed);
+                }
                 return true;
             }
             if (scr == SCR_WALKIE || scr == SCR_SCAN) {     /* A and G, the X6200's: the transmitter armed or locked */
@@ -5684,9 +5701,10 @@ static const struct {
     {"23 CM FM", "CALL", 1294500000},
 };
 
-/* An SDR that transmits on the HOST port (the daemon says so): G's plan has its groups */
+/* An SDR on the HOST port, its daemon up: G's plan has its groups. Any of them hears the channels (an RTL-SDR too); only
+ * one that transmits (a HackRF, a bladeRF: rtl_spectrum_can_tx) is armed by A/B */
 static bool w_sdr_here(void) {
-    return rtl_spectrum_can_tx();
+    return rtl_spectrum_daemon() && rtl_spectrum_dev() != RTL_DEV_NONE;
 }
 
 /* D's band i as a group of its own with one channel, where D listens in it (its starting channel): if the X6200
@@ -5848,7 +5866,7 @@ static void w_say(const char *portrait, const char *title, const char *text) {
     else osd(title, text, -1);
 }
 
-/* ---- G on the SDR: its channels heard and sent through a HackRF or a bladeRF ----
+/* ---- G on the SDR: its channels heard through any SDR, sent through a HackRF or a bladeRF ----
  *
  * One of the plan's SDR channels chosen, G is the SDR's: tuned G_STICK_OFF over the channel (its middle unused), the
  * channel heard on the speaker in FM at B's volume, G's picture and voiceprint from it, the VFO moving it 5 kHz a
@@ -5904,7 +5922,12 @@ static void w_sdr_arm(bool on) {
 
 /* Why G's SDR may not transmit at its channel now, NULL when it may */
 static const char *w_sdr_refusal(void) {
-    if (!rtl_spectrum_can_tx()) return "THE SDR DOES NOT TRANSMIT";
+    static char only[40];
+
+    if (!rtl_spectrum_can_tx()) {
+        snprintf(only, sizeof(only), "THE %s ONLY RECEIVES", rtl_spectrum_dev_name());
+        return only;
+    }
     if (cfg_tx_block()) return "THE WR12 HOLDS TX";
     switch (tx_ranges_sdr_check((tx_ranges_t)param_i_get(cfg_tx_ranges), (int32_t)w_sdr_hz)) {
         case HAM_TX_OK: return NULL;
@@ -6042,7 +6065,7 @@ static void w_sdr_step(void) {
             w_sdr_quiet_ms = lv_tick_get();
         }
     }
-    if (rtl_spectrum_can_tx() || w_sdr_ptt) {
+    if (w_sdr_here() || w_sdr_ptt) {   /* still there (an RTL-SDR that only hears is there too) */
         w_sdr_gone_ms = 0;
     } else if (!w_sdr_gone_ms) {
         w_sdr_gone_ms = lv_tick_get() | 1;
@@ -6929,12 +6952,12 @@ static void build_overlays(void) {
     help_l = label(root, &pixel_16, amb, 26, 60, SW - 52, LV_TEXT_ALIGN_LEFT,
                    "CONTROLS IN THE SENTRY                        ANY KEY OR A TAP CLOSES THIS\n"
                    "\n"
-                   "VFO KNOB       A, G: THE X6200 (MAN-OVERRIDE), B: THE STICK'S CHANNEL\n"
+                   "VFO KNOB       A, G: THE X6200 (MAN-OVERRIDE), B: THE SDR'S CHANNEL\n"
                    "MFK KNOB       CHOOSES A TARGET, A BAND, A FREQUENCY. PUSH: TRACK, LISTEN, OPEN\n"
                    "MFK RING       A X6200 B VHF/UHF C LOG D BANDS E DECODE F SYSTEM G WALKIE H AIRSPACE\n"
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"
-                   "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON B THE STICK'S)\n"
-                   "LISTEN         A, B: X6200, RTL (HACKRF, BLADERF), BOTH, OFF; OTHERS KEEP IT; AN SDR JOINS\n"
+                   "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON B THE SDR'S)\n"
+                   "LISTEN         A, B: X6200, THE SDR (RTL, HACKRF, BLADERF), BOTH, OFF; OTHERS KEEP IT\n"
                    "BAND UP/DOWN   THE NEXT BAND, AS F2 (B: THE NEXT PRESET; G: CB CHANNEL, OR GROUP)\n"
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
                    "DFN            NOISE REDUCTION ON/OFF. HOLD: NOISE BLANKER (CLICKS AND POPS)\n"

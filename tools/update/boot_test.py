@@ -85,9 +85,13 @@ class Card:
         self.cmdline = os.path.join(root, "cmdline")
         self.set_cmdline("console=ttyS0,115200 root=/dev/mmcblk0p2 rootwait panic=10")
         self.restarts = 0
+        self.reboots = 0
 
         def restart():
             self.restarts += 1
+
+        def reboot():
+            self.reboots += 1
 
         def mount(ro=False):
             self.mounts += 1
@@ -108,7 +112,11 @@ class Card:
                        UBOOT_PREV=os.path.join(state, "uboot-prev.bin"), SYS_BLOCK=self.sys, CMDLINE=self.cmdline,
                        SD_DEV=self.dev, MODULES_ROOT=self.rootfs, boot_mount=mount, boot_umount=lambda: None,
                        BOOT_LEVEL=os.path.join(state, "boot-level"), IMAGE_STAMP=self.stamp,
-                       IMAGE_REQUIRED=self.required, running_release=lambda: "6.1.82")
+                       IMAGE_REQUIRED=self.required, running_release=lambda: "6.1.82",
+                       POWERON=os.path.join(state, "poweron.json"), BOOT_ID=os.path.join(root, "boot_id"),
+                       reboot_radio=reboot)
+        with open(os.path.join(root, "boot_id"), "w") as f:
+            f.write("6a1b2c3d-0000-4000-8000-boot-one\n")
 
     def set_required(self, text):
         """The installed version's image-required file (apply() would put the bundle's there)"""
@@ -259,6 +267,16 @@ class BootInstall(unittest.TestCase):
 
     # 3. Both
 
+    def test_kernel_with_reboot(self):
+        """--reboot: the radio restarted instead of the apps (x6x00-reboot: the X6200's base kept on), the kernel
+        starting with it, so no power-on is asked for after"""
+        out = self.c.run("install", self.c.bundle(), "--kernel", "--reboot")
+        self.assertTrue(out.endswith("(the radio restarts)"), out)
+        self.assertEqual((self.c.reboots, self.c.restarts), (1, 0))
+        self.assertFalse(os.path.exists(self.c.up["POWERON"]))
+        with self.assertRaisesRegex(self.Fail, "install takes --kernel, --uboot and --reboot"):
+            self.c.run("install", self.c.bundle(), "--now")
+
     def test_kernel_and_uboot(self):
         new_uboot = b"NEW-UBOOT" * 50000
         out = self.c.run("install", self.c.bundle(uboot=new_uboot), "--kernel", "--uboot")
@@ -279,6 +297,10 @@ class BootInstall(unittest.TestCase):
         self.assertEqual(read(self.c.old_mod), b"old wifi module")   # the running kernel's: kept
         self.assertEqual(self.c.up["load"](self.c.up["BOOT_JOURNAL"])["state"], "done")
         self.assertEqual(self.c.restarts, 1)
+        # A power-on asked for, in this boot: the GUI asks for it till the boot differs (update_watch.c)
+        pon = self.c.up["load"](self.c.up["POWERON"])
+        self.assertEqual(pon["boot_id"], "6a1b2c3d-0000-4000-8000-boot-one")
+        self.assertEqual(pon["what"], "the kernel and U-Boot")
 
     # 4. Not read back as written
 
@@ -304,8 +326,10 @@ class BootInstall(unittest.TestCase):
 
     def test_boot_rollback(self):
         self.c.run("install", self.c.bundle(), "--kernel", "--uboot")
+        os.remove(self.c.up["POWERON"])
         out = self.c.run("boot-rollback")
         self.assertIn("back on the SD card: from the next power-on", out)
+        self.assertEqual(self.c.up["load"](self.c.up["POWERON"])["what"], "the kernel and U-Boot from before")
         self.assertCardAsBefore()
         with self.assertRaisesRegex(self.Fail, "no kernel or U-Boot install"):
             self.c.run("boot-rollback")

@@ -16,7 +16,7 @@
 # says whether it also wants a newer card image (or which of the bundle's parts instead); "status" says whether the
 # running software does.
 #   download <url>           the bundle into /mnt/update, progress in /mnt/update/.progress
-#   install <file> [--kernel] [--uboot]
+#   install <file> [--kernel] [--uboot] [--reboot]
 #                            verify, stage, swap in, restart the GUI and the web server; with --kernel the bundle's
 #                            kernel set (zImage, the DTB, boot.scr) onto the SD card's boot partition and its modules
 #                            into /lib/modules, with --uboot its U-Boot into the card's raw area: only on the SD
@@ -30,7 +30,7 @@
 #                            "image_needed":..}: whether the bundle's kernel set and U-Boot differ from the SD card's
 #                            (what the GUI offers to tick), and whether its version needs them (its card image level)
 #   boot-rollback            the kernel set, modules and U-Boot the last --kernel/--uboot replaced, back on the card
-#   upgrade [--kernel] [--uboot]
+#   upgrade [--kernel] [--uboot] [--reboot]
 #                            check, download and install the newer release (the flags as install's)
 #   rollback                 the previous files back, restart
 #   confirm                  the new version runs: the pending mark goes (the GUI, after a minute)
@@ -129,6 +129,10 @@ BOOT_JOURNAL = os.path.join(STATE, "boot-journal.json")   # the last --kernel/--
 BOOT_PREV = os.path.join(STATE, "boot-prev")              # the module files it replaced
 UBOOT_PREV = os.path.join(STATE, "uboot-prev.bin")        # the U-Boot area it replaced, whole
 BOOT_LEVEL = os.path.join(STATE, "boot-level")            # the card image level the card's kernel/U-Boot reached
+# The SD card's kernel or U-Boot written (install --kernel/--uboot, boot-rollback) in the boot named here: they start at
+# the next power-on, and the GUI asks for one at each of its starts in this same boot (update_watch.c), then removes it
+POWERON = os.path.join(STATE, "poweron.json")
+BOOT_ID = "/proc/sys/kernel/random/boot_id"
 IMAGE_MEMBER = "files" + IMAGE_REQUIRED                   # a bundle's own image-required file
 BOOT_PARTS = ("kernel", "uboot")
 MAX_STARTS = 3                        # GUI starts without a confirm before the rollback
@@ -460,6 +464,15 @@ def progress(step, got=0, total=0):
     with open(PROGRESS + ".tmp", "w") as f:
         f.write(f"{step} {got} {total}\n")
     os.replace(PROGRESS + ".tmp", PROGRESS)
+
+
+def reboot_radio():
+    """The radio restarted instead of the apps (install --reboot): x6x00-reboot, detached, a moment after the answer is
+    out (the caller may be the web server). On the X6200 the base stays on, so the radio comes back by itself; the
+    SD card's kernel and U-Boot start with it"""
+    subprocess.Popen(["setsid", "sh", "-c", "sleep 2; /usr/sbin/x6x00-reboot >/dev/null 2>&1"],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
 
 
 def restart_apps():
@@ -1137,11 +1150,11 @@ def undo(journal):
 def cmd_install(args):
     flags = [a for a in args if a.startswith("--")]
     rest = [a for a in args if not a.startswith("--")]
-    if any(f not in ("--kernel", "--uboot") for f in flags):
-        raise Fail("install takes --kernel and --uboot")
+    if any(f not in ("--kernel", "--uboot", "--reboot") for f in flags):
+        raise Fail("install takes --kernel, --uboot and --reboot")
     if not rest:
         raise Fail("install needs the bundle's path")
-    kernel, uboot = "--kernel" in flags, "--uboot" in flags
+    kernel, uboot, reboot = "--kernel" in flags, "--uboot" in flags, "--reboot" in flags
     bundle = rest[0]
     if load(JOURNAL, {}).get("state") == "applying":
         raise Fail("an interrupted install must be rolled back first")
@@ -1230,9 +1243,27 @@ def cmd_install(args):
         except Exception:
             pass
     save(LAST, {"result": "installed", "version": m["version"], "when": time.time()})
+    if j:
+        poweron_wanted((["the kernel"] if kernel else []) + (["U-Boot"] if uboot else []))
     progress("done")
+    if reboot:
+        reboot_radio()                  # the radio restarted: the card's parts start too, no power-on to ask for
+        try:
+            os.remove(POWERON)
+        except OSError:
+            pass
+        return f"ok {m['version']}{note}{said} (the radio restarts)"
     restart_apps()
     return f"ok {m['version']}{note}{said}"
+
+
+def poweron_wanted(what):
+    """A power-on asked for: what (["the kernel", "U-Boot"]) waits on the SD card for the next start"""
+    try:
+        boot = _read(BOOT_ID).strip()
+    except Exception:
+        boot = ""
+    save(POWERON, {"boot_id": boot, "what": " and ".join(what), "when": time.time()})
 
 
 def cmd_bundle_info(args):
@@ -1277,13 +1308,14 @@ def cmd_boot_rollback(args):
     save(BOOT_JOURNAL, j)
     if "level_before" in j:
         set_boot_level(j["level_before"])
+    poweron_wanted(["the kernel and U-Boot from before"])
     return "ok the kernel and U-Boot before are back on the SD card: from the next power-on"
 
 
 def cmd_upgrade(args):
     flags = [a for a in args if a.startswith("--")]
-    if any(f not in ("--kernel", "--uboot") for f in flags) or len(flags) != len(args):
-        raise Fail("upgrade takes --kernel and --uboot")
+    if any(f not in ("--kernel", "--uboot", "--reboot") for f in flags) or len(flags) != len(args):
+        raise Fail("upgrade takes --kernel, --uboot and --reboot")
     c = cmd_check([])
     if not c["newer"]:
         return "ok up to date" if c["latest"] else "ok no release"

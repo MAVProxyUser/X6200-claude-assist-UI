@@ -12,7 +12,8 @@
 # playing) until a timeout of its own, minutes later (1.0.7 had cut it at once). Xiegu's app sends "s" first and
 # shuts down after it, which the base's 3 s cut short: the DATA partition was left unclean. So here S11's stop is
 # left out, and the "s" goes last: every script stopped, DATA unmounted and the system read-only, Linux waiting for
-# the power to go. A reboot ends the same way, as it did with S11's stop: the radio switches off
+# the power to go. A plain reboot ends the same way, as it did with S11's stop: the radio switches off. x6x00-reboot
+# leaves /run/x6x00-reboot first: then no "s", the base stays on, and Linux restarts with the radio on
 #
 
 trace=/usr/sbin/x6100-starttrace
@@ -49,10 +50,17 @@ for i in $(ls -r /etc/init.d/S??*) ;do
 done
 "$trace" "init scripts stopped"
 
+reboot=false
+[ -e /run/x6x00-reboot ] && reboot=true
+
 if $x6200; then
     # The last line the trace can have: once DATA is unmounted it has nowhere to go. One more after it says DATA
     # was busy, and by what
-    "$trace" "the base's power off: DATA unmounted, the system read-only, then s to the base"
+    if $reboot; then
+        "$trace" "restart (x6x00-reboot): DATA unmounted, the system read-only, the base kept on, no s"
+    else
+        "$trace" "the base's power off: DATA unmounted, the system read-only, then s to the base"
+    fi
     sync
     if ! umount /mnt 2>/dev/null; then
         "$trace" "DATA busy (pids $(fuser -m /mnt 2>/dev/null)): read-only instead"
@@ -63,12 +71,16 @@ if $x6200; then
     sync
     # The base cuts the power about 3 s after it. Now and then it does not act on it: two POWER holds of three
     # left the radio on (2026-11-15, 04:46 and 07:46; 05:50 went off), each trace the same to the second, the base
-    # at 1.0.8, play mode off the last time. So it is said again while Linux waits for the power to go: 3 times,
-    # 4 s apart (more than the base's 3 s, so a second "s" never comes during a cut it has begun). Still here after
-    # that, the shutdown goes on as before
-    stty -F /dev/ttyS1 1152000
-    for k in 1 2 3; do
-        echo s > /dev/ttyS1
-        sleep 4
-    done
+    # at 1.0.8, play mode off the last time. So it is said again while Linux waits for the power to go, 4 s apart
+    # (more than the base's 3 s, so a second "s" never comes during a cut it has begun), till the power goes: up to
+    # 15 times, a minute. Still here after that, the shutdown goes on as before. A restart sends none
+    if ! $reboot; then
+        stty -F /dev/ttyS1 1152000
+        k=0
+        while [ $k -lt 15 ]; do
+            echo s > /dev/ttyS1
+            sleep 4
+            k=$((k + 1))
+        done
+    fi
 fi

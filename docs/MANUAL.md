@@ -788,7 +788,7 @@ last seconds, the strongest signals named over it and the screen's channel brack
   X6200's (below).
 - **F3 VIEW**: the screen's radio alone, SPLIT (the X6200 above, the stick below) or the other radio alone. Each
   half says its radio, its channel and whether it is HEARD, MUTED or SQUELCHED.
-- **F4 LISTEN**, each screen's own: X6200, RTL (or HACKRF, BLADERF: the stick's kind), BOTH or OFF, OFF silencing the speaker (neither radio, the volume
+- **F4 LISTEN**, each screen's own: X6200, the SDR by its kind (RTL, HACKRF or BLADERF; SDR while none is plugged in), BOTH or OFF, OFF silencing the speaker (neither radio, the volume
   kept). **BOTH mixes the two only on Bluetooth headphones.** On the speaker it is the stick alone, as RTL is, and its
   OSD says so: while the speaker plays the GUI's audio (the stick), the base is in play mode and sends the processor
   nothing of the X6200's receiver, only its own copy of what it plays (measured on base 1.0.8). Up to v0.3.12.20
@@ -987,10 +987,12 @@ the VFO) is by hand: the Sentry stops moving the dial (MAN-OVERRIDE, as a turn o
   screen (the VFO, and the MFK where it tunes the X6200, on A and G), so a bump cannot move the transmitter: a turn
   says to lock TX (A/B) to tune again.
 
-#### G on a HackRF or bladeRF
+#### G on an SDR: RTL-SDR, HackRF or bladeRF
 
-With a HackRF or a bladeRF on the HOST port (the daemon says it transmits), G's plan gets five more groups after the
-X6200's, FM simplex channels of the amateur bands the SDR can send on, heard and sent through it:
+With an SDR on the HOST port, G's plan gets five more groups after the X6200's, FM simplex channels of the amateur
+bands, heard through it. A HackRF or a bladeRF (the daemon says it transmits) sends on them too; an RTL-SDR only
+hears them: A/B there says "THE RTL-SDR ONLY RECEIVES". Up to v0.3.12.24 the groups came only with a HackRF or a
+bladeRF, so an RTL-SDR gave G none of them:
 
 | Group | Channels (home: CALL) |
 |---|---|
@@ -1004,7 +1006,7 @@ They are Region 2's (North America's) simplex channels; the VFO tunes anywhere f
 owner asked for "anything the HackRF can", and that is narrowed on purpose. No aviation, marine, NOAA, GPS,
 cellular, FRS/GMRS, MURS, ISM or any other non-amateur frequency is ever keyed, whatever the setting.
 
-- **On an SDR channel G is the SDR's**: `VIA HACKRF` (or `VIA BLADERF`), FM, the channel heard on the speaker at B's
+- **On an SDR channel G is the SDR's**: `VIA HACKRF` (or `VIA BLADERF`, `VIA RTL-SDR`), FM, the channel heard on the speaker at B's
   volume and squelch, G's spectrum and voiceprint from the SDR (the device tuned 200 kHz over the channel, its
   middle unused), the S-meter bar its level over the noise. The VFO moves the channel 5 kHz a click; CH - and CH +
   (F1, F2) and the MFK step the group's channels; BAND UP and DOWN and F5 go from group to group, back to the X6200's
@@ -1055,9 +1057,16 @@ wherever the RTL-SDR did (B, BOTH, C, D, E, RDS, SAME, AIRSPACE), named as they 
   https://www.nuand.com/fpga_images/) in a folder `bladerf` on the card's DATA partition (`/mnt/bladerf`). Without
   it B says `THE BLADERF NEEDS ITS FPGA IMAGE` and the file's name, and the bladeRF is opened again by itself once the
   file is there. **The image has to suit the board's USB firmware**: FPGA v0.16.0 wants firmware v2.6.0 or later; a
-  board on firmware v2.4.0 (the one tried here) takes v0.15.3 (https://www.nuand.com/fpga/v0.15.3/hostedxA9.rbf).
-  Otherwise B says `THE BLADERF'S FPGA IMAGE AND ITS FIRMWARE DO NOT GO TOGETHER`; an image once loaded stays in the
-  board till it loses power, so unplug it and plug it in after putting another one there. Its 12-bit samples are cut
+  board on firmware v2.4.0 takes v0.15.3 (https://www.nuand.com/fpga/v0.15.3/hostedxA9.rbf). Otherwise B says
+  `THE BLADERF'S FPGA IMAGE AND ITS FIRMWARE DO NOT GO TOGETHER`; an image once loaded stays in the board till it
+  loses power, so unplug it and plug it in after putting another one there.
+- **The bladeRF's USB firmware updated from the radio**: put Nuand's image, named as Nuand names it
+  (`bladeRF_fw_v2.6.0.img`, from https://www.nuand.com/fx3/), in `/mnt/bladerf` too. When the board is next opened
+  and its firmware is older than the file's version, the radio writes it to the board: opened with no FPGA image
+  (the least current from the port), the image written, the board reset so it starts the new firmware, then opened as
+  ever with the FPGA image there (v0.16.0 for firmware v2.6.0). Each file is tried once; nothing is written for one as
+  old as the board's or older. `/tmp/rtlspec.log` says what was done ("the bladeRF's firmware v2.4.0 -> ...:
+  writing", "written; the board starts it now"). Up to v0.3.12.24 only `bladeRF-cli` on a computer could. Its 12-bit samples are cut
   to the pipeline's 8.
 - **A bladeRF 2.0 micro needs power of its own on the X6200** (its 5 V DC jack, or a powered hub on HOST): on the
   HOST port's own power it dropped off USB as its RF chip started (2026-11-15, an xA9), and the radio's USB host saw
@@ -1270,9 +1279,30 @@ a bundle file), or over SSH `x6100-update install <bundle> --kernel --uboot`
   (`/var/lib/x6100-update/boot-journal.json`): if the power goes while they are
   written and the radio still starts, the next start puts the card back as it
   was.
-- **From the next power-on.** Nothing reboots the radio: the new kernel and
-  U-Boot start the next time it is switched on (on the X6200 `reboot` switches
-  it off).
+- **When the radio restarts.** The new kernel and U-Boot start when the
+  radio restarts or is next switched on. The update box has **Restart the
+  radio when done**, ticked by itself with the kernel or U-Boot (the web
+  Update page: Restart the radio after; over SSH `x6100-update install
+  <bundle> --kernel --reboot`): the whole radio restarts at the end of the
+  install and comes back by itself in about a minute, the X6200's base kept on.
+  Without it, at each start of the radio's software in the same power-on a box
+  asks for a restart: the MFK's press restarts the radio now, any other key
+  leaves it for later (asked again at the next start); the same after
+  boot-rollback. `/var/lib/x6100-update/poweron.json` holds the power-on it
+  was written in. Up to v0.3.12.24 only the install's own box said "from the
+  next power-on", the restart after the install took that box away, and the
+  radio had to be switched off and on by hand.
+- **Restarting the radio, and switching it off.** On the X6200 every shutdown
+  ends with "s" to the base, which cuts the power, so a plain `reboot` over SSH
+  switches the radio off. `x6x00-reboot` restarts it instead: the base kept on,
+  Linux, U-Boot and the GUI started again, the radio back in about a minute
+  with no POWER press (tried on the radio: twice back by itself, the base
+  answering). A switch-off (POWER held, the low battery, `poweroff`) says "s"
+  last, once DATA is unmounted and the system read-only, and again every 4 s
+  till the power goes, for up to a minute (up to v0.3.12.24 three times: the
+  base now and then let one pass and stayed on). The start trace
+  (`/mnt/app_logs/start_trace.txt`) says which it was: "restart
+  (x6x00-reboot)... the base kept on, no s" or "the base's power off".
 - **Old modules go.** A kernel's modules take about 15 MB of the root
   filesystem. After a new kernel is written, the folders in `/lib/modules` of
   kernels nothing can start any more are removed; kept are the running

@@ -51,7 +51,8 @@ class Updater:
                        PENDING=os.path.join(state, "pending.json"), LAST=os.path.join(state, "last.json"),
                        LOCK=os.path.join(state, "lock"), PROGRESS=os.path.join(work, ".progress"),
                        VERSION_FILE=self.version, restart_apps=restart,
-                       TAILSCALE=os.path.join(root, "no-tailscale"), TAILSCALE_STATE=os.path.join(root, "no-state"))
+                       TAILSCALE=os.path.join(root, "no-tailscale"), TAILSCALE_STATE=os.path.join(root, "no-state"),
+                       POWERON=os.path.join(state, "poweron.json"))
 
     def install(self, old="0.3.11", new="0.3.12"):
         """new over old, as cmd_install leaves it once the files are in place: pending, not confirmed"""

@@ -9,6 +9,7 @@
   <div class="dp-row"><div class="dp-lbl"><b>Card image</b><span id="imgnote">What the update cannot carry (the root filesystem's packages) comes with a card image</span></div><div class="dp-ctl" id="image">-</div></div>
   <div class="dp-row"><div class="dp-lbl"><label for="kernel"><b>Also the kernel</b></label><span>The bundle's kernel and its modules onto the SD card, when they differ from the card's (both Install buttons)</span></div><div class="dp-ctl"><input id="kernel" type="checkbox"></div></div>
   <div class="dp-row"><div class="dp-lbl"><label for="uboot"><b>Also U-Boot</b></label><span>The bundle's bootloader onto the SD card, when it differs from the card's; read back to check, the old one put back if not as written</span></div><div class="dp-ctl"><input id="uboot" type="checkbox"></div></div>
+  <div class="dp-row"><div class="dp-lbl"><label for="reboot"><b>Restart the radio after</b></label><span>The whole radio restarted when the install is done, instead of its software only: the kernel and U-Boot ticked above start at once, and the radio comes back by itself (the X6200's base stays on). Ticked by itself with either of them</span></div><div class="dp-ctl"><input id="reboot" type="checkbox"></div></div>
   <div class="dp-body" style="border-top:1px solid #1a283c">
     <div class="actions" style="margin-top:0">
       <button type="button" id="check">Check</button>
@@ -63,7 +64,9 @@ var showStatus = function(sel, text, error=false) {
 var jobStatus = function(what) {
   return what == "install" ? "#ustatus" : what == "rollback" ? "#rstatus" : what == "boot-rollback" ? "#bstatus" : "#status";
 }
-var bootFlags = function() { return {kernel: $("#kernel").prop("checked") ? 1 : 0, uboot: $("#uboot").prop("checked") ? 1 : 0}; }
+var bootFlags = function() { return {kernel: $("#kernel").prop("checked") ? 1 : 0, uboot: $("#uboot").prop("checked") ? 1 : 0,
+                                     reboot: $("#reboot").prop("checked") ? 1 : 0}; }
+$("#kernel, #uboot").on("change", function() { if (this.checked) $("#reboot").prop("checked", true); });
 var fail = function(xhr) { showStatus("#status", xhr.responseJSON ? xhr.responseJSON.msg : "Failed", true); }
 var poll = null;
 
@@ -139,7 +142,7 @@ $("#check").on("click", function() {
 
 $("#upgrade").on("click", function() {
   var f = bootFlags(), also = (f.kernel ? " With the kernel" + (f.uboot ? " and U-Boot" : "") : f.uboot ? " With U-Boot" : "");
-  if (!confirm("Download and install the latest release? The radio software restarts at the end." + (also ? also + " on the SD card, from the next power-on." : ""))) return;
+  if (!confirm("Download and install the latest release? " + (f.reboot ? "The radio restarts at the end and comes back by itself." : "The radio software restarts at the end.") + (also ? also + " on the SD card, " + (f.reboot ? "started with the restart." : "from the next power-on.") : ""))) return;
   $.post('/api/update/upgrade', f, started).fail(fail);
 });
 
@@ -157,7 +160,7 @@ $("#upl").on("submit", function(e) {
   e.preventDefault();
   var f = $("#file")[0].files[0];
   if (!f) { showStatus("#ustatus", "Choose a file first", true); return; }
-  var fd = new FormData(), bf = bootFlags(); fd.append("file", f); fd.append("kernel", bf.kernel); fd.append("uboot", bf.uboot);
+  var fd = new FormData(), bf = bootFlags(); fd.append("file", f); fd.append("kernel", bf.kernel); fd.append("uboot", bf.uboot); fd.append("reboot", bf.reboot);
   showStatus("#ustatus", "Uploading " + (f.size / 1e6).toFixed(1) + " MB...");
   $.ajax({url: "/api/update/upload", type: "POST", data: fd, processData: false, contentType: false, dataType: "json",
           success: started, error: function(xhr) { showStatus("#ustatus", xhr.responseJSON ? xhr.responseJSON.msg : "Upload failed", true); }});

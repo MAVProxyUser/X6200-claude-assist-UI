@@ -968,13 +968,13 @@ rtl_dev_t rtl_spectrum_dev(void) {
 const char *rtl_spectrum_dev_tag(void) {
     rtl_dev_t d = rtl_spectrum_dev();
 
-    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : "RTL";
+    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : d == RTL_DEV_RTL ? "RTL" : "SDR";
 }
 
 const char *rtl_spectrum_dev_name(void) {
     rtl_dev_t d = rtl_spectrum_dev();
 
-    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : "RTL-SDR";
+    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : d == RTL_DEV_RTL ? "RTL-SDR" : "SDR";
 }
 
 int64_t rtl_spectrum_min_hz(void) {

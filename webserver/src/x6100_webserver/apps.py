@@ -621,10 +621,12 @@ def check_update():
 
 
 def update_boot_flags():
-    """The page's two tick boxes: the bundle's kernel and U-Boot onto the SD card too (x6100-update leaves a part the
-    bundle does not carry, or that the card has already)"""
+    """The page's tick boxes: the bundle's kernel and U-Boot onto the SD card too (x6100-update leaves a part the
+    bundle does not carry, or that the card has already), and the radio restarted when done (x6x00-reboot: the X6200's
+    base kept on, the radio back by itself, the card's parts started)"""
     form = bottle.request.forms
-    return [f for f, k in (("--kernel", "kernel"), ("--uboot", "uboot")) if form.get(k) in ("1", "true", "on")]
+    return [f for f, k in (("--kernel", "kernel"), ("--uboot", "uboot"), ("--reboot", "reboot"))
+            if form.get(k) in ("1", "true", "on")]
 
 
 @app.post('/api/update/upgrade')

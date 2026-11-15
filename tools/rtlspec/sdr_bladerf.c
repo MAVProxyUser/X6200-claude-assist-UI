@@ -13,6 +13,13 @@
  *  said so too ("FIRMWARE"), and tried again when another image is put in /mnt/bladerf; the one loaded stays in the
  *  board till it loses power, so it has to be unplugged and plugged in for an older one.
  *
+ *  Its USB firmware (the FX3's, in its own SPI flash): a Nuand image put in /mnt/bladerf as bladeRF_fw_vX.Y.Z.img (the
+ *  version in its name, as Nuand names them) newer than the board's is written to the board at its next open, once a
+ *  file (fw_flash): the board opened with no FPGA image to look for (none loaded, the AD9361 left alone: less current
+ *  from the HOST port, and an FPGA too new for the old firmware does not stop the open), the image written, the board
+ *  reset so it starts the new firmware, then opened as ever. Nothing is written for an image as old as the board's or
+ *  older. The FPGA image after it (v0.16 needs firmware v2.6) is the one in /mnt/bladerf.
+ *
  *  Receiving: 12-bit I/Q (SC16 Q11, +-2048) cut to the RTL's 8 bits (one in 16), its DC taken out as the HackRF's;
  *  manual gain over the board's own range, its AGC for -1. Transmitting: the FM's signed 8 bits made SC16, the gain
  *  in dB over the board's lowest (0 is its least), no amplifier to switch.
@@ -62,6 +69,9 @@ static struct {
     __typeof__(&bladerf_sync_tx)             sync_tx;
     __typeof__(&bladerf_strerror)            strerror_;
     __typeof__(&bladerf_log_set_verbosity)   verbosity;
+    __typeof__(&bladerf_fw_version)          fwver;
+    __typeof__(&bladerf_flash_firmware)      flashfw;
+    __typeof__(&bladerf_device_reset)        reset;
 } L;
 
 static struct bladerf *volatile bd;
@@ -119,6 +129,9 @@ static bool lib(void) {
     SYM(sync_tx, "bladerf_sync_tx");
     SYM(strerror_, "bladerf_strerror");
     SYM(verbosity, "bladerf_log_set_verbosity");
+    SYM(fwver, "bladerf_fw_version");
+    SYM(flashfw, "bladerf_flash_firmware");
+    SYM(reset, "bladerf_device_reset");
 #undef SYM
     L.verbosity(BLADERF_LOG_LEVEL_WARNING);
     return true;
@@ -127,6 +140,74 @@ static bool lib(void) {
 /* Nuand's IDs: 5250 the bladeRF 2.0 micro, 5246 the bladeRF x40/x115 (OpenMoko's 1d50:6066 on older ones) */
 static int bl_present(void) {
     return sdr_usb_has("2cf0", "5250") || sdr_usb_has("2cf0", "5246") || sdr_usb_has("1d50", "6066");
+}
+
+/* The newest bladeRF_fw_vX.Y.Z.img in FPGA_DIR: its path and version (major*1e6 + minor*1e3 + patch), 0 none */
+static long fw_file(char *path, size_t n) {
+    DIR           *d = opendir(FPGA_DIR);
+    struct dirent *e;
+    long           best = 0;
+    unsigned       a, b, c;
+
+    if (!d) return 0;
+    while ((e = readdir(d))) {
+        int  used = 0;
+
+        if (sscanf(e->d_name, "bladeRF_fw_v%u.%u.%u.img%n", &a, &b, &c, &used) == 3 && used &&
+            !e->d_name[used] && a < 100 && b < 1000 && c < 1000 && (long)a * 1000000 + b * 1000 + c > best) {
+            best = (long)a * 1000000 + b * 1000 + c;
+            snprintf(path, n, "%s/%s", FPGA_DIR, e->d_name);
+        }
+    }
+    closedir(d);
+    return best;
+}
+
+/* A firmware image newer than the board's written to it (the comment at the top). 1: written, the board resetting
+ * (opened again in a moment: the caller says busy); 0 nothing to do; each image's file tried once (fw_done: its path,
+ * size and time), so one that fails is not written again and again */
+static int fw_flash(char *tuner, size_t n) {
+    static char             done[340];
+    char                    path[300], key[340];
+    struct stat             st;
+    struct bladerf         *d;
+    struct bladerf_version  v;
+    long                    want = fw_file(path, sizeof(path)), have;
+    int                     e;
+
+    if (!want || stat(path, &st) != 0) return 0;
+    snprintf(key, sizeof(key), "%s %ld %ld", path, (long)st.st_size, (long)st.st_mtime);
+    if (!strcmp(key, done)) return 0;
+    snprintf(done, sizeof(done), "%s", key);
+    setenv("BLADERF_SEARCH_DIR", "/nonexistent", 1);   /* no FPGA image looked for: none loaded for this */
+    e = L.fopen_(&d, NULL);
+    setenv("BLADERF_SEARCH_DIR", FPGA_DIR, 1);
+    if (e != 0) {
+        fprintf(stderr, "rtlspec: the bladeRF does not open for its firmware: %s\n", L.strerror_(e));
+        return 0;
+    }
+    if (L.fwver(d, &v) != 0) {
+        L.close_(d);
+        return 0;
+    }
+    have = (long)v.major * 1000000 + v.minor * 1000 + v.patch;
+    if (have >= want) {
+        fprintf(stderr, "rtlspec: the bladeRF's firmware is v%u.%u.%u: %s not needed\n", v.major, v.minor, v.patch,
+                path);
+        L.close_(d);
+        return 0;
+    }
+    fprintf(stderr, "rtlspec: the bladeRF's firmware v%u.%u.%u -> %s: writing\n", v.major, v.minor, v.patch, path);
+    if ((e = L.flashfw(d, path)) != 0) {
+        fprintf(stderr, "rtlspec: the bladeRF's firmware not written: %s\n", L.strerror_(e));
+        L.close_(d);
+        return 0;
+    }
+    fprintf(stderr, "rtlspec: the bladeRF's firmware written; the board starts it now\n");
+    snprintf(tuner, n, "FIRMWARE-WRITTEN");
+    L.reset(d);                         /* it reloads its firmware from flash and comes back on USB */
+    L.close_(d);
+    return 1;
 }
 
 static const char *fpga_file(bladerf_fpga_size s) {
@@ -150,6 +231,7 @@ static int bl_open(char *tuner, size_t n, uint64_t *lo, uint64_t *hi) {
         snprintf(tuner, n, "LIBBLADERF");
         return 2;
     }
+    if (fw_flash(tuner, n)) return 1;               /* a newer firmware written: opened again once it is back */
     setenv("BLADERF_SEARCH_DIR", FPGA_DIR, 0);      /* the FPGA image looked for there first, when the board has none */
     if ((e = L.fopen_(&d, NULL)) != 0) {
         fprintf(stderr, "rtlspec: the bladeRF does not open: %s\n", L.strerror_(e));

@@ -141,7 +141,9 @@ enum { UW_IDLE, UW_FETCHING, UW_ASKING, UW_INSTALLING };
 enum { PICK_YES, PICK_NO, PICKS };
 /* What the bundle also carries for the SD card the radio started from, offered as a tick box each when it differs
  * from the card's own (x6100-update bundle-info): unticked, nothing of it is written */
-enum { OPT_KERNEL, OPT_UBOOT, OPTS };
+/* The SD card's kernel and U-Boot, offered when the bundle's differ; the restart, always: ticked by itself with
+ * either card part, so they start at once, the radio back by itself (x6x00-reboot: the X6200's base kept on) */
+enum { OPT_KERNEL, OPT_UBOOT, OPT_REBOOT, OPTS };
 
 static int         uw = UW_IDLE;
 static char        uw_ver[24], uw_commit[48], uw_md5[40], uw_krel[32];
@@ -180,9 +182,15 @@ static lv_obj_t *item(int i, int *opt) {
 }
 
 static void opt_text(int k) {
-    static const char *const what[OPTS] = {"the kernel", "the bootloader (U-Boot)"};
+    static const char *const what[OPTS] = {"the kernel", "the bootloader (U-Boot)", ""};
 
     if (!opt_row[k]) return;
+    if (k == OPT_REBOOT) {
+        lv_label_set_text_fmt(lv_obj_get_child(opt_row[k], 0), "[%s] Restart the radio when done%s",
+                              opt_on[k] ? "X" : " ",
+                              opt_on[OPT_KERNEL] || opt_on[OPT_UBOOT] ? " (the SD card's part starts with it)" : "");
+        return;
+    }
     const char *need = opt_need[k] ? ": this version needs it" : "";
 
     if (k == OPT_KERNEL && uw_krel[0])
@@ -286,8 +294,11 @@ static void prog_timer_cb(lv_timer_t *t) {
         snprintf(s, sizeof(s), "Putting the new files in place, the old ones kept: %ld of %ld", got, total);
     } else if (!strcmp(step, "done")) {
         pct = 100;
-        snprintf(s, sizeof(s), "Installed. The radio's software restarts now%s",
-                 opt_on[OPT_KERNEL] || opt_on[OPT_UBOOT] ? "; the SD card's part from the next power-on" : "");
+        snprintf(s, sizeof(s), "%s", opt_on[OPT_REBOOT] ? "Installed. The radio restarts now and comes back by itself"
+                                     : opt_on[OPT_KERNEL] || opt_on[OPT_UBOOT]
+                                         ? "Installed. The radio's software restarts now; the SD card's part from the "
+                                           "next power-on"
+                                         : "Installed. The radio's software restarts now");
     } else {
         snprintf(s, sizeof(s), "Unpacking the bundle...");
     }
@@ -366,9 +377,11 @@ static void install_done(const char *out, int status, void *user) {
     uw = UW_IDLE;           /* "ok": the software restarts, this GUI with it; anything else is why not */
     if (strncmp(out, "ok", 2) == 0) {
         if (pbox) {
-            lv_label_set_text_fmt(p_step, "Installed. The radio's software restarts now%s",
-                                  opt_on[OPT_KERNEL] || opt_on[OPT_UBOOT] ? "; the SD card's part from the next "
-                                                                            "power-on" : "");
+            lv_label_set_text(p_step, opt_on[OPT_REBOOT] ? "Installed. The radio restarts now and comes back by itself"
+                                      : opt_on[OPT_KERNEL] || opt_on[OPT_UBOOT]
+                                          ? "Installed. The radio's software restarts now; the SD card's part from the "
+                                            "next power-on"
+                                          : "Installed. The radio's software restarts now");
             lv_bar_set_value(p_bar, 100, LV_ANIM_OFF);
         }
         return;
@@ -389,12 +402,12 @@ static void pick_async(void *arg) {
     box_close();
     announced_set(uw_ver);
     if (sel == n_opts() + PICK_YES) {
-        char cmd[128];
+        char cmd[192];
 
         uw = UW_INSTALLING;
         prog_open();                    /* what it is doing, step by step, till the restart */
-        snprintf(cmd, sizeof(cmd), UPD_CTL " install " BUNDLE "%s%s", opt_on[OPT_KERNEL] ? " --kernel" : "",
-                 opt_on[OPT_UBOOT] ? " --uboot" : "");
+        snprintf(cmd, sizeof(cmd), UPD_CTL " install " BUNDLE "%s%s%s", opt_on[OPT_KERNEL] ? " --kernel" : "",
+                 opt_on[OPT_UBOOT] ? " --uboot" : "", opt_on[OPT_REBOOT] ? " --reboot" : "");
         sh_run(cmd, install_done, NULL);
     } else {
         uw = UW_IDLE;
@@ -422,6 +435,7 @@ static void activate(int i) {
     item(i, &k);
     if (k >= 0) {
         opt_on[k] = !opt_on[k];
+        if (k != OPT_REBOOT && opt_on[k]) opt_on[OPT_REBOOT] = true;     /* a card part: started at once */
         sel       = i;
         show_sel();
         return;
@@ -538,14 +552,15 @@ static void ask(void) {
         lv_obj_set_style_text_font(obj, VF(18), 0);
         opt_text(k);
     }
-    if (n_opts()) {
+    if (opt_offer[OPT_KERNEL] || opt_offer[OPT_UBOOT]) {
         obj = lv_label_create(box);
         lv_obj_set_width(obj, LV_PCT(100));
         lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
         lv_obj_set_style_text_font(obj, VF(16), 0);
         lv_obj_set_style_text_color(obj, TC(text_dim), 0);
         lv_label_set_text(obj, "Ticked, it is written to the SD card the radio started from (never the internal "
-                               "memory), the old one kept, and starts at the next power-on.");
+                               "memory), the old one kept, and starts when the radio restarts (ticked below) or at "
+                               "the next power-on.");
     }
     if (uw_image) {
         obj = lv_label_create(box);
@@ -580,8 +595,7 @@ static void ask(void) {
     obj = lv_label_create(box);
     lv_obj_set_style_text_font(obj, VF(16), 0);
     lv_obj_set_style_text_color(obj, TC(text_dim), 0);
-    lv_label_set_text(obj, n_opts() ? "MFK: choose, press: tick or confirm. Yes restarts the radio's software"
-                                    : "MFK: choose, press: confirm. Yes restarts the radio's software");
+    lv_label_set_text(obj, "MFK: choose, press: tick or confirm. Yes restarts the radio's software (or the radio)");
     show_sel();
 
     back         = lv_group_get_focused(keyboard_group);
@@ -601,6 +615,7 @@ static void bundle_info_done(const char *out, int status, void *user) {
     opt_offer[OPT_UBOOT]  = status == 0 && json_true(out, "uboot");
     opt_need[OPT_KERNEL]  = opt_offer[OPT_KERNEL] && json_true(out, "need_kernel");
     opt_need[OPT_UBOOT]   = opt_offer[OPT_UBOOT] && json_true(out, "need_uboot");
+    opt_offer[OPT_REBOOT] = true;
     if (status == 0) uw_image = json_true(out, "image_needed");
     json_str(out, "kernel_release", uw_krel, sizeof(uw_krel));
     ask();
@@ -679,6 +694,121 @@ bool update_watch_now(void) {
     return true;
 }
 
+/* ---- A power-on asked for: the SD card's kernel or U-Boot written (x6100-update install --kernel/--uboot, or its
+ * boot-rollback) start only at the next power-on, and the update's own "from the next power-on" went with the restart
+ * that followed it. x6100-update leaves POWERON with the boot it wrote them in: at each start of this GUI in that same
+ * boot a box asks for the radio to be switched off and on (a press or a key takes it away; the next start asks
+ * again); in a later boot the file goes ---- */
+
+#define POWERON     "/var/lib/x6100-update/poweron.json"
+#define BOOT_ID     "/proc/sys/kernel/random/boot_id"
+#define POWERON_MS  10000       /* after the start: the screen it opens on up first */
+
+static lv_obj_t *pon;
+
+static void pon_close(void *arg) {
+    (void)arg;
+    if (!pon) return;
+    if (lv_group_get_focused(keyboard_group) == pon && back && lv_obj_is_valid(back) &&
+        lv_obj_get_group(back) == keyboard_group) {
+        lv_group_focus_obj(back);
+        lv_group_set_editing(keyboard_group, back_editing);
+    }
+    lv_obj_del(pon);
+    pon  = NULL;
+    back = NULL;
+}
+
+/* The MFK's press (or Enter): the radio restarted now (x6x00-reboot: the X6200's base kept on, back by itself); any other
+ * key: later */
+static void pon_key_cb(lv_event_t *e) {
+    lv_indev_t *indev = lv_indev_get_act();
+    bool        now   = false;
+
+    if (lv_event_get_code(e) == LV_EVENT_KEY) now = *(uint32_t *)lv_event_get_param(e) == LV_KEY_ENTER;
+    else now = indev && lv_indev_get_type(indev) == LV_INDEV_TYPE_ENCODER;
+    lv_async_call(pon_close, NULL);
+    if (now) {
+        msg_schedule_long_text_fmt("Restarting the radio: back by itself in about a minute");
+        sh_run("sleep 2; /usr/sbin/x6x00-reboot", NULL, NULL);
+    }
+}
+
+static bool read_small(const char *path, char *buf, size_t n) {
+    FILE  *f = fopen(path, "r");
+    size_t got;
+
+    if (!f) return false;
+    got = fread(buf, 1, n - 1, f);
+    fclose(f);
+    buf[got] = '\0';
+    return got > 0;
+}
+
+static void poweron_cb(lv_timer_t *t) {
+    char json[256], boot[48] = "", now[48] = "", what[64] = "";
+    lv_obj_t *obj;
+
+    (void)t;
+    if (!read_small(POWERON, json, sizeof(json))) return;
+    json_str(json, "boot_id", boot, sizeof(boot));
+    json_str(json, "what", what, sizeof(what));
+    read_small(BOOT_ID, now, sizeof(now));
+    now[strcspn(now, "\n")] = '\0';
+    if (!boot[0] || strcmp(boot, now)) {        /* switched off and on since (or not known): what was written runs */
+        remove(POWERON);
+        return;
+    }
+    if (pon || box || pbox) return;             /* another box up: the next start asks */
+    backlight_tick();
+
+    pon = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(pon);
+    lv_obj_add_style(pon, &popup_style, 0);
+    lv_obj_set_size(pon, box_w(), LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(pon, 16, 0);
+    lv_obj_set_style_pad_row(pon, 12, 0);
+    lv_obj_set_flex_flow(pon, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(pon, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(pon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(pon);
+
+    obj = lv_label_create(pon);
+    lv_obj_set_style_text_font(obj, VF(18), 0);
+    lv_obj_set_style_text_color(obj, TC(text_head), 0);
+    lv_label_set_text(obj, "UPDATE: RESTART NEEDED");
+
+    obj = lv_label_create(pon);
+    lv_obj_set_width(obj, LV_PCT(100));
+    lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(obj, VF(26), 0);
+    lv_obj_set_style_text_color(obj, TC(text), 0);
+    lv_label_set_text(obj, "Restart the radio");
+
+    obj = lv_label_create(pon);
+    lv_obj_set_width(obj, LV_PCT(100));
+    lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(obj, VF(18), 0);
+    lv_obj_set_style_text_color(obj, TC(text), 0);
+    lv_label_set_text_fmt(obj, "The update put %s on the SD card. %s only when the radio restarts: press the MFK to "
+                          "restart it now (it comes back by itself), or hold POWER till it is off and switch it on.",
+                          what[0] ? what : "the kernel", strstr(what, " and ") ? "They start" : "It starts");
+
+    obj = lv_label_create(pon);
+    lv_obj_set_style_text_font(obj, VF(16), 0);
+    lv_obj_set_style_text_color(obj, TC(text_dim), 0);
+    lv_label_set_text(obj, "MFK press: restart now. Any other key: later (asked again at each start till then)");
+
+    back         = lv_group_get_focused(keyboard_group);
+    back_editing = lv_group_get_editing(keyboard_group);
+    lv_group_add_obj(keyboard_group, pon);
+    lv_obj_add_event_cb(pon, pon_key_cb, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(pon, pon_key_cb, LV_EVENT_CLICKED, NULL);
+    lv_group_focus_obj(pon);
+    lv_group_set_editing(keyboard_group, true);
+}
+
 void update_watch_init(void) {
     lv_timer_create(watch_cb, 60000, NULL);
+    lv_timer_set_repeat_count(lv_timer_create(poweron_cb, POWERON_MS, NULL), 1);
 }
