@@ -735,8 +735,8 @@ written through to the card before it replaces the last copy, so a power cut kee
 ### G WALKIE
 
 The X6200 as a walkie-talkie, in the same look, **held up**: G turns the screen to portrait (480 x 800, as the
-Walkie app does). Only F4 (the spectrum's view) and F5 (the group and mode) have names, in boxes as small as their
-names: F4's `3D` (or `2D`) beside its key in the lamp's row, F5's at the bottom beside the message box. F1, F2 and F3
+Walkie app does). Only F4 (the spectrum's view) and F5 (the group and mode) have names, in boxes of one width (60
+px): F4's `3D` (or `2D`) beside its key in the lamp's row, F5's at the bottom beside the message box. F1, F2 and F3
 have no box (F1 and F2 still step CB's channels, as the knobs do), so the channel, the spectrum and the voiceprint
 (as tall as each other) and the radio's state run from edge to edge. G is the X6200's alone: the stick
 only receives and has B for that, so G neither shows nor plays it (shown with LISTEN on RTL or BOTH, G plays the
@@ -780,12 +780,13 @@ the VFO) is by hand: the Sentry stops moving the dial (MAN-OVERRIDE, as a turn o
 | 6 M | 1: 50.125 | SSB, AM |
 | 6 M FM | 52.525 calling | FM |
 
-- On a service with defined channels (on the X6200, CB) the **VFO knob**, the MFK and the F1 and F2 keys (CH - and
-  CH +, no box) step the 40 channels, a channel a click, the mode kept. Anywhere else the VFO tunes the dial as on A
-  and the MFK goes from group to group. The MFK's push goes to CB 19.
+- On a service with defined channels (on the X6200, CB) the **VFO knob**, the MFK, **BAND UP and DOWN** and the F1
+  and F2 keys (CH - and CH +, no box) step the 40 channels, a channel a click, the mode kept. Anywhere else the VFO
+  tunes the dial as on A, and the MFK and the BAND keys go from group to group. The MFK's push goes to CB 19.
 - **F5** goes through the groups and each one's modes in turn: CB AM, CB SSB, CB FM, then 10 M SSB, 10 M AM, 10 M
   FM... The mode changes where the dial is; past a group's last mode, the next group at its home channel.
-  **BAND UP** and **BAND DOWN** go to the next and previous group, G staying shown. SSB is single sideband: LSB on
+  Off CB, **BAND UP** and **BAND DOWN** go to the next and previous group, G staying shown (on CB they step its
+  channels: F5 leaves CB). SSB is single sideband: LSB on
   160, 80 and 40 m as hams use it, USB everywhere else (60 m, the ship and utility stations, 20 m up).
 - **F4**: the spectrum in 3D or 2D (flat, a waterfall).
 - **A/B** arms the X6200's transmitter for PTT (as on A) and locks it again; leaving G for any screen but A locks

@@ -4287,8 +4287,9 @@ static void filter_step(void) {
 }
 
 static void band_key(bool up) {
-    if (scr == SCR_WALKIE) {            /* G's groups (each band one), G kept */
-        walkie_group(up ? 1 : -1);
+    if (scr == SCR_WALKIE) {            /* G: on CB its channels (as CH -/+), elsewhere the groups (each band one) */
+        if (w_chan(w_match())) walkie_ch(up ? 1 : -1, 0);
+        else walkie_group(up ? 1 : -1);
         return;
     }
     if (scr == SCR_RTL) {               /* F: its presets, not the X6200's bands (and never A) */
@@ -4746,8 +4747,8 @@ static void build_system(lv_obj_t *p) {
 #define P_VX    (PW - 3 - P_BAR)        /* the arm down the right: the landscape bar's place (3 px from the edge) */
 #define P_TOP   (6 + P_BAR + 6)         /* under the arm across the top */
 #define P_KEY   160                     /* the keys' pitch: F1 at the top */
-#define P_KW    76                      /* F5 (group and mode): its name in two lines */
-#define P_VW    30                      /* F4 (view): as small as "3D", in the lamp's row, beside its key */
+#define P_KW    60                      /* F4's box (view) and F5's (group and mode): one width, as the keys are */
+#define P_VW    P_KW                    /* F4's: in the lamp's row, beside its key */
 #define P_LAMP  46                      /* the lamp's row, its middle at F4's key */
 #define P_LAMPY (3 * P_KEY + P_KEY / 2 - P_LAMP / 2)
 #define P_STATE 92                      /* the radio's state: four lines */
@@ -5983,7 +5984,7 @@ static void build_overlays(void) {
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"
                    "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON B THE STICK'S)\n"
                    "LISTEN         A, B: X6200, RTL, BOTH, OFF; OTHERS KEEP IT; A STICK PLUGGED IN JOINS\n"
-                   "BAND UP/DOWN   THE NEXT BAND, AS F2 (ON B: THE NEXT PRESET; G: THE NEXT GROUP)\n"
+                   "BAND UP/DOWN   THE NEXT BAND, AS F2 (B: THE NEXT PRESET; G: CB CHANNEL, OR GROUP)\n"
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
                    "DFN            NOISE REDUCTION ON/OFF. HOLD: NOISE BLANKER (CLICKS AND POPS)\n"
                    "DFL            FILTER WIDE, NORMAL, NARROW (NARROW: LESS NOISE, MUFFLED)\n"
