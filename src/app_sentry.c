@@ -3114,7 +3114,7 @@ static void vol_text(char *s, size_t n) {
         snprintf(s, n, "%d.%d DB", v / 10, v % 10);
     else if (vol_fn == VF_VOL && heard == HEAR_BOTH && rtl_spectrum_on_headphones())   /* both heard: this one's,
                                                                                      * and the other's to match it */
-        snprintf(s, n, "%d (%s %d)", v, vol_stick() ? "X6200" : "RTL",
+        snprintf(s, n, "%d (%s %d)", v, vol_stick() ? "X6200" : rtl_spectrum_dev_tag(),
                  vol_stick() ? param_i_get(cfg_volume) : param_i_get(cfg_rtl_vol));
     else
         snprintf(s, n, "%d", v);
@@ -3186,10 +3186,11 @@ static void vol_say(void) {
         "THE STICK'S OWN, WHEREVER IT IS HEARD (THE X6200 KEEPS ITS OWN). PUSH: ITS SQUELCH.",
         "THE STICK'S: QUIET UNTIL A SIGNAL STANDS THIS MUCH OVER THE NOISE. OFF: ALWAYS OPEN. PUSH: RF GAIN.",
         "THE STICK'S TUNER: UP FOR WEAK SIGNALS, DOWN IF STRONG ONES SWAMP IT. AUTO: ITS AGC. PUSH: VOLUME."};
-    char t[48], v[24];
+    char t[48], v[24], who[12] = "";
 
     vol_text(v, sizeof(v));
-    snprintf(t, sizeof(t), "%s%s %s", vol_fn == VF_VOL ? (vol_stick() ? "RTL " : "X6200 ") : "", vol_names[vol_fn], v);
+    if (vol_fn == VF_VOL) snprintf(who, sizeof(who), "%s ", vol_stick() ? rtl_spectrum_dev_tag() : "X6200");
+    snprintf(t, sizeof(t), "%s%s %s", who, vol_names[vol_fn], v);
     osd(t, (vol_stick() ? stick : how)[vol_fn], vol_bar());
     show_legend();
 }
@@ -3592,7 +3593,7 @@ static void g_play(int i) {
 
     if (h->rtl) {
         if (!sdr_here) {
-            osd("NO RTL-SDR", "THIS ONE WAS HEARD ON THE STICK: PLUG IT INTO THE HOST PORT.", -1);
+            osd("NO SDR", "THIS ONE WAS HEARD ON THE STICK: PLUG AN RTL-SDR, HACKRF OR BLADERF INTO THE HOST PORT.", -1);
             return;
         }
         g_hz = h->hz;
@@ -3776,7 +3777,8 @@ static void show_glog(void) {
         snprintf(n, sizeof(n), "%d", h->times);
         snprintf(bn, sizeof(bn), "%s%s", in ? "" : "~", bi >= 0 ? bands[bi].name : "-");
         char rxs[24];
-        if (h->rtl) snprintf(rxs, sizeof(rxs), sdr_here && i != g_sel ? "#%s RTL#" : "RTL", tag_hex);  /* the
+        if (h->rtl && sdr_here && i != g_sel) snprintf(rxs, sizeof(rxs), "#%s %s#", tag_hex, rtl_spectrum_dev_tag());
+        else if (h->rtl) snprintf(rxs, sizeof(rxs), "%s", rtl_spectrum_dev_tag());  /* the
                                                                                     * chosen row: in its ink */
         else snprintf(rxs, sizeof(rxs), "X6200");
         snprintf(s, sizeof(s), LOG_ROW, g_playing(i) ? '>' : ' ', f, bn,
@@ -4194,7 +4196,8 @@ static const char *f_label(int k) {
 
             if (k == 0) snprintf(s, sizeof(s), "Scan:\n%s", routine == ROUT_SCAN ? "On" : "Off");
             else if (k == 1) snprintf(s, sizeof(s), "Band:\n%s", bi >= 0 ? bands[bi].name : "-");
-            else if (k == 2) snprintf(s, sizeof(s), "View:\n%s", views[spec_view() % 3]);
+            else if (k == 2) snprintf(s, sizeof(s), "View:\n%s", spec_view() == VIEW_RTL ? rtl_spectrum_dev_tag()
+                                                                                       : views[spec_view() % 3]);
             else if (k == 3) snprintf(s, sizeof(s), "Listen:\n%s", hear_name(param_i_get(cfg_hear_a)));
             else snprintf(s, sizeof(s), "Scan Cfg");
             return s;
@@ -4251,7 +4254,8 @@ static const char *f_label(int k) {
 
             (void)g;
             if (k == 1) snprintf(s, sizeof(s), "Preset:\n%s", f_name());
-            else if (k == 2) snprintf(s, sizeof(s), "View:\n%s", views[spec_view() % 3]);
+            else if (k == 2) snprintf(s, sizeof(s), "View:\n%s", spec_view() == VIEW_RTL ? rtl_spectrum_dev_tag()
+                                                                                       : views[spec_view() % 3]);
             else if (k == 3) snprintf(s, sizeof(s), "Listen:\n%s", hear_name(param_i_get(cfg_hear_f)));
             else if (k == 4) snprintf(s, sizeof(s), "Scan Cfg");
             else snprintf(s, sizeof(s), "Scan:\n%s", rtl_scan ? "On" : "Off");
@@ -6927,14 +6931,14 @@ static void build_overlays(void) {
                    "MFK RING       A X6200 B VHF/UHF C LOG D BANDS E DECODE F SYSTEM G WALKIE H AIRSPACE\n"
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"
                    "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON B THE STICK'S)\n"
-                   "LISTEN         A, B: X6200, RTL, BOTH, OFF; OTHERS KEEP IT; A STICK PLUGGED IN JOINS\n"
+                   "LISTEN         A, B: X6200, RTL (HACKRF, BLADERF), BOTH, OFF; OTHERS KEEP IT; AN SDR JOINS\n"
                    "BAND UP/DOWN   THE NEXT BAND, AS F2 (B: THE NEXT PRESET; G: CB CHANNEL, OR GROUP)\n"
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
                    "DFN            NOISE REDUCTION ON/OFF. HOLD: NOISE BLANKER (CLICKS AND POPS)\n"
                    "DFL            FILTER WIDE, NORMAL, NARROW (NARROW: LESS NOISE, MUFFLED)\n"
                    "FST            HOW FAR ONE CLICK OF THE VFO KNOB MOVES\n"
                    "ATU            ANTENNA TUNER IN/OUT. TUNING ITSELF TRANSMITS: NOT HERE\n"
-                   "A/B            ON A, G: ARMS TX FOR PTT, THE TUNING KNOBS LOCKED (AGAIN: TX LOCKED)\n"
+                   "A/B            ON A, G: ARMS TX FOR PTT, KNOBS LOCKED (G'S HACKRF CHANNELS: ITS TX)\n"
                    "PTT  KEY  MSG  TRANSMIT: LOCKED OUT IN THE SENTRY (PTT: G WITH A/B)\n"
                    "APP            F SYSTEM: SETTINGS, APPS, MODES, THE CLASSIC RADIO SCREEN\n"
                    "GEN            THIS LIST.  A TAP ON THE TITLE AT THE TOP SHOWS IT TOO");
