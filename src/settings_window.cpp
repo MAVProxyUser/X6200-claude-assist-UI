@@ -4361,6 +4361,7 @@ static void make_display_page() {
     row = card_begin("MAIN SCREEN");
     row = make_param_switch(row, "Band plan", cfg_sm.p_band_plan);
     row = make_param_switch(row, "Cluster spots", cfg_sm.p_cluster_spots_wf);
+    row = make_param_switch(row, "Channels", cfg_sm.p_channel_marks);
     row = make_param_switch(row, "Cluster column", cfg_sm.p_cluster_column);
     row = make_param_switch(row, "Broadcast names", cfg_sm.p_broadcast_name);
     row = make_param_choice(row, "S-meter type", " Bars \n Needle ", cfg_sm.p_smeter_needle);

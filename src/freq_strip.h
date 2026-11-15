@@ -24,6 +24,8 @@ void      freq_strip_set_label(const char *text, int32_t freq_hz);
 void      freq_strip_set_offset(int32_t offset_hz);
 /* Name of the open app, shown before the band (NULL: none) */
 void      freq_strip_set_app(const char *name);
+/* The memory channels changed (their file written on the web page): the tuned one's name again (#203) */
+void      freq_strip_channels_changed(void);
 /* An app window opens (true) or closes: the deck's frequency moves up, out from under it */
 void      freq_strip_set_dialog(bool open);
 /* The frequency lock changed: LOCK shown while the user's is on (true) */

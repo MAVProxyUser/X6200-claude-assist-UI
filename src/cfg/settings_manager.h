@@ -209,6 +209,10 @@ class SettingsManager {
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_cluster_spots_wf{"cluster_spots_wf", true, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The memory channels marked on the main screen's waterfall by name, as the cluster spots are (#203): off by
+    // default, the preset stations a new radio has would crowd it
+    Parameter<int32_t> p_channel_marks{"channel_marks", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     // The X6200: the Sentry is the home screen. The GUI starts in it, and comes back to it whenever an app or a
     // menu opened from it closes (screen_main.c main_screen_dialog_closed)
     Parameter<int32_t> p_sentry_home{"sentry_home", true, 0, 1,

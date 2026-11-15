@@ -35,6 +35,7 @@ int freq_strip_step_char(const char *text, int32_t step, bool *big) {
 #include "freq_strip.h"
 
 #include "broadcast_db.h"
+#include "channel_list.h"
 #include "cfg/cfg_api.h"
 #include "cluster/spots.h"
 #include "info.h"
@@ -70,6 +71,9 @@ static bool      dialog_open;       /* deck: an app window over the strip's lowe
 static void vision_fit(void);
 static void lock_place(void);
 static char      bc[260];           /* the broadcast on air on the VFO, "" none */
+static char      ch[CHANNEL_NAME_MAX];  /* the memory channel the VFO is on, by name, "" none (#203) */
+static bool      ch_exact;          /* and its mode, AGC, PRE and ATT as the channel has them: else dimmed */
+static bool      tag_is_ch;         /* the tag shows the channel, not a broadcast */
 static int32_t   bc_freq = -1;
 static time_t    bc_minute = -1;
 static char      note[64];
@@ -170,6 +174,25 @@ static void bc_lookup(int32_t f) {
     else snprintf(bc, sizeof(bc), "%s", m[best].station);
 }
 
+/* The named memory channel on the VFO's frequency (#203), one whose settings all match first */
+static void ch_lookup(int32_t f) {
+    ch[0] = 0;
+    for (uint16_t i = 0; i < channels_count(); i++) {
+        const channel_t *c = channels_get(i);
+
+        if ((int32_t)c->freq != f || !c->name[0]) continue;
+        bool exact = c->mode == (radio_mode_t)cparam_i_get(cfg_cur_mode) &&
+                     c->agc == (radio_agc_t)cparam_i_get(cfg_cur_agc) && c->pre == (cparam_i_get(cfg_cur_pre) != 0) &&
+                     c->att == (cparam_i_get(cfg_cur_att) != 0);
+
+        if (!ch[0] || exact) {
+            snprintf(ch, sizeof(ch), "%s", c->name);
+            ch_exact = exact;
+        }
+        if (exact) break;
+    }
+}
+
 /* What the LOCK tag takes in front of the frequency: none while it is off, or placed elsewhere (deck, VISION) */
 static lv_coord_t lock_room(void) {
     return user_locked && !theme_shape.deck && !theme_shape.vision ? lock_w + LOCK_GAP : 0;
@@ -188,16 +211,21 @@ static void bc_tag(bool on) {
 static void bc_fit(lv_coord_t w) {
     const lv_font_t *font = lv_obj_get_style_text_font(band_label, 0);
     lv_coord_t       ls = lv_obj_get_style_text_letter_space(band_label, 0);
-    size_t           len = strlen(bc), n = len;
+    const char      *t = tag_is_ch ? ch : bc, *pre = tag_is_ch ? "CH" : "BC";   /* a memory channel: CH (#203) */
+    size_t           len = strlen(t), n = len;
     char             s[sizeof(bc) + 8];
 
     w -= 2 * 6 + 2;   /* the tag's padding and border */
     for (;;) {
-        snprintf(s, sizeof(s), "BC  %.*s%s", (int)n, bc, n < len ? "..." : "");
+        snprintf(s, sizeof(s), "%s  %.*s%s", pre, (int)n, t, n < len ? "..." : "");
         if (!n || lv_txt_get_width(s, strlen(s), font, ls, LV_TEXT_FLAG_NONE) <= w) break;
-        do n--; while (n && (bc[n] & 0xc0) == 0x80);   /* whole UTF-8 letters */
+        do n--; while (n && (t[n] & 0xc0) == 0x80);   /* whole UTF-8 letters */
     }
-    lv_label_set_text_fmt(band_label, "#%06x BC#  %s", theme_hex(TC_info), s + 4);
+    if (tag_is_ch && !ch_exact)     /* on the channel's frequency, a setting changed since: the name dimmed */
+        lv_label_set_text_fmt(band_label, "#%06x %s#  #%06x %s#", theme_hex(TC_info), pre, theme_hex(TC_text_dim),
+                              s + 4);
+    else
+        lv_label_set_text_fmt(band_label, "#%06x %s#  %s", theme_hex(TC_info), pre, s + 4);
 }
 
 /* The other themes (not VISION, not deck): the band, an open app's name in front (or a memory's name), cut with
@@ -270,6 +298,7 @@ static void update_cb(Subject *subj, void *user_data) {
     int32_t  f = cparam_i_get(cfg_fg_freq);
 
     bc_lookup(f);
+    ch_lookup(f);
 
     split_freq(f, &mhz, &khz, &hz);
     if (theme_shape.deck) {     /* the other VFO at the top right, the current one in the badge */
@@ -299,8 +328,15 @@ static void update_cb(Subject *subj, void *user_data) {
         if (theme_shape.mono) lv_obj_set_style_text_font(freq_label, &pixel_freq_40, 0);
         lv_label_set_text_fmt(freq_label, "%i.%03i.%03i", mhz, khz, hz);
     }
-    /* An open app: the band (a broadcast has nothing to do with the digital apps) */
-    const char *band = note[0] && f == note_freq ? note : bc[0] && !app[0] ? bc : cluster_band_name(cluster_band_of(f));
+    /* An open app: the band (a broadcast has nothing to do with the digital apps). A memory channel's name before a
+     * broadcast's: it is the user's own (#203) */
+    bool        chan = ch[0] && !app[0] && !(note[0] && f == note_freq);
+    const char *band = note[0] && f == note_freq ? note
+                       : chan                    ? ch
+                       : bc[0] && !app[0]        ? bc
+                                                 : cluster_band_name(cluster_band_of(f));
+
+    tag_is_ch = chan;
 
     /* The open app in front of the band, so it's clear where the keys go */
     if (theme_shape.deck) {
@@ -315,7 +351,7 @@ static void update_cb(Subject *subj, void *user_data) {
     }
     /* A station: in its tag, on one line up to the frequency (deck: 300 px, before the other
      * VFO), cut with dots */
-    if (theme_shape.deck ? bc[0] && !app[0] : band == bc) {
+    if (theme_shape.deck ? chan || (bc[0] && !app[0]) : band == bc || band == ch) {
         bc_tag(true);
         lv_obj_set_size(band_label, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_update_layout(strip);
@@ -332,7 +368,7 @@ static void update_cb(Subject *subj, void *user_data) {
     } else {
         lv_obj_add_flag(tx_label, LV_OBJ_FLAG_HIDDEN);
     }
-    bc_tagged = band == bc;
+    bc_tagged = band == bc || band == ch;
     if (!theme_shape.deck && !theme_shape.vision && !bc_tagged) band_fit(band);
     vision_fit();
     if (lock_tag) lock_place();
@@ -555,6 +591,9 @@ lv_obj_t *freq_strip_init(lv_obj_t *parent) {
     subject_subscribe_delayed((Subject *)cfg_tx_ranges, update_cb, NULL);           /* and the TX ranges' (#247) */
     subject_subscribe_delayed((Subject *)cfg_tx_ranges_read, update_cb, NULL);
     subject_subscribe_delayed((Subject *)cfg_cur_mode, update_cb, NULL);
+    subject_subscribe_delayed((Subject *)cfg_cur_agc, update_cb, NULL);     /* a channel's name dimmed (#203) */
+    subject_subscribe_delayed((Subject *)cfg_cur_pre, update_cb, NULL);
+    subject_subscribe_delayed((Subject *)cfg_cur_att, update_cb, NULL);
     subject_subscribe_delayed((Subject *)cfg_broadcast_name, bc_setting_cb, NULL);
     subject_subscribe_delayed((Subject *)cfg_mode_freq_step, step_change_cb, NULL);
     lv_obj_add_event_cb(freq_label, step_mark_draw_cb, LV_EVENT_DRAW_POST, NULL);
@@ -614,3 +653,7 @@ void freq_strip_set_wr12(bool in_use) {
 }
 
 #endif
+
+void freq_strip_channels_changed(void) {
+    if (strip) update_cb(NULL, NULL);
+}

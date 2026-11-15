@@ -2119,7 +2119,7 @@ Per band S-meter cal: see [S-meter](#s-meter). TCI SERVER: see
 | BACKLIGHT | timeout and brightness, buttons brightness (Always Off, Always On, Temporarily On), Screensaver (None, Matrix rain), Screensaver (min) (with a screensaver: 1-120 minutes without use), Rain speed (Normal, Slow, Very slow), Screen off (min) (minutes without use, 0 never; the key that wakes it does nothing else), Screen always off (the screen stays dark for a radio run from the VFO-Knob or a browser, no screensaver; POWER shows it for the blank time, a minute at least); see [Screensaver](#screensaver) |
 | SPECTRUM | Spectrum; with it on Fill, Peaks, Fill gradient, Filter colour, Filter shade, Shaded part, Height (see [Waterfall](#waterfall)) |
 | WATERFALL | see [Waterfall](#waterfall) |
-| MAIN SCREEN | Band plan, Cluster spots, Cluster column, Broadcast names, S-meter type, S-meter colours, Needle lamp, Birdies (see [Birdie Cal](#birdie-cal)), Zoom and step per mode, Step per zoom (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)) |
+| MAIN SCREEN | Band plan, Cluster spots, Channels, Cluster column, Broadcast names, S-meter type, S-meter colours, Needle lamp, Birdies (see [Birdie Cal](#birdie-cal)), Zoom and step per mode, Step per zoom (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)) |
 | INTERFACE | Popups Freq/Info/TX, Icon menus, Knob info, Hide buttons (Off, After 3 s, After 5 s, After 10 s), Keep knob lines, Theme, Font, Decoder text, FT8/FT4 info |
 
 - Popups Freq/Info/TX (Popups Freq/Info/ALC up to v0.3.8), three switches:
@@ -2154,6 +2154,17 @@ Per band S-meter cal: see [S-meter](#s-meter). TCI SERVER: see
   the frequency strip shows "BC <station name>" in a light blue box instead
   of the band name. The names come from the broadcast list (see the
   [Info tab](#info-tab)).
+- Tuned to a memory channel ([Channels](#channels)), always: the frequency
+  strip shows "CH <its name>" in the same box instead of the band name (a
+  channel's name before a broadcast's). The name is dimmed while the
+  frequency is the channel's but its mode, AGC, PRE or ATT is not (USB-D for
+  USB, PRE switched on), and it goes once the frequency moves off. A channel
+  without a name shows nothing (#203).
+- Channels (Off by default): the memory channels in the span marked on the
+  waterfall by name, in the OK colour, as the cluster spots are marked (the
+  channels first, so they keep their places; the tuning snaps to them as to a
+  spot). A channel added or renamed on the web Channels page shows within a
+  second (#203).
 
 All these options are also on the web configurator's Display page.
 

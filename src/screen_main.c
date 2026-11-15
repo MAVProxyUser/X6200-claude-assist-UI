@@ -1825,6 +1825,11 @@ static void on_if_shift_zoom(Subject *subj, void *user_data) {
  * is (a band of their own for the tags was a tall grey bar that took its room). */
 #define SPOT_LINE_H 8
 
+/* Settings > Display > MAIN SCREEN > Channels, or the web Display page: the channels' marks drawn or gone (#203) */
+static void channel_marks_cb(Subject *subj, void *user_data) {
+    spot_marks_refresh();
+}
+
 static void on_cluster_spots_wf_change(Subject *subj, void *user_data) {
     lv_coord_t y = wf_y;
 
@@ -2031,6 +2036,7 @@ static void build(void) {
     spot_marks_init(obj, y, spot_tag_y);   /* laid out by on_cluster_spots_wf_change() */
     cluster_column_init(obj, wf_y);
     subject_subscribe_delayed_and_notify((Subject*)cfg_cluster_spots_wf, on_cluster_spots_wf_change, NULL);
+    subject_subscribe_delayed((Subject*)cfg_channel_marks, channel_marks_cb, NULL);
     subject_subscribe_delayed((Subject*)cfg_band_plan, on_band_plan_change, NULL);
     subject_subscribe_delayed((Subject*)cfg_band_region, on_band_region_change, NULL);
     subject_subscribe_delayed((Subject*)cfg_band_id, on_band_id_change, NULL);

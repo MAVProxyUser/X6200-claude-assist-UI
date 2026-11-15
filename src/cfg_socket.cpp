@@ -77,6 +77,7 @@ static const struct {
     {"wf_speed", &cfg_sm.p_waterfall_speed, 1, 5},
     {"band_plan", &cfg_sm.p_band_plan, 0, 1},
     {"cluster_spots_wf", &cfg_sm.p_cluster_spots_wf, 0, 1},
+    {"channel_marks", &cfg_sm.p_channel_marks, 0, 1},
     {"cluster_column", &cfg_sm.p_cluster_column, 0, 1},
     {"cluster_order", &cfg_sm.p_cluster_order, 0, 1},
     {"cluster_all_bands", &cfg_sm.p_cluster_all_bands, 0, 1},

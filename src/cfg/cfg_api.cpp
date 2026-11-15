@@ -40,6 +40,7 @@ ParamInt         *cfg_spectrum_show       = nullptr;
 ParamInt         *cfg_spectrum_height     = nullptr;
 ParamInt         *cfg_digi_text_compact   = nullptr;
 ParamInt         *cfg_cluster_spots_wf    = nullptr;
+ParamInt         *cfg_channel_marks       = nullptr;
 ParamInt         *cfg_sentry_home         = nullptr;
 ParamInt         *cfg_adsb_range          = nullptr;
 ParamInt         *cfg_adsb_decay          = nullptr;
@@ -258,6 +259,7 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_spectrum_height  = &cfg_sm.p_spectrum_height;
     cfg_digi_text_compact = &cfg_sm.p_digi_text_compact;
     cfg_cluster_spots_wf = &cfg_sm.p_cluster_spots_wf;
+    cfg_channel_marks    = &cfg_sm.p_channel_marks;
     cfg_sentry_home      = &cfg_sm.p_sentry_home;
     cfg_adsb_range       = &cfg_sm.p_adsb_range;
     cfg_adsb_decay       = &cfg_sm.p_adsb_decay;
