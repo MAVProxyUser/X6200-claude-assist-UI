@@ -1,6 +1,6 @@
 % rebase('base.html', title='Network')
 <h2><svg class="i"><use href="#i-ethernet"/></svg>Network</h2>
-<p class="sub">The radio's name on the LAN, the other names it answers to, and a USB Ethernet adapter: DHCP, or a fixed address for networks that need one. The same settings as Settings &rarr; Wireless on the radio. WiFi's settings are not changed; a cable with a gateway holds WiFi off while it is connected, one without leaves the internet on WiFi.</p>
+<p class="sub">The radio's name on the LAN, the other names it answers to, and the address of a USB Ethernet adapter and of each saved WiFi network: DHCP, or a fixed address for networks that need one. The same settings as Settings &rarr; Wireless on the radio. A cable with a gateway holds WiFi off while it is connected, one without leaves the internet on WiFi.</p>
 
 <form class="dp-card" id="nameform">
   <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-network"/></svg></span><div><h3>Network name<span class="eff">Takes effect: now, reachable under the new name in a few seconds</span></h3><p>Any browser on the LAN reaches the radio as <b id="local">x6100.local</b> (mDNS, announced by Avahi), on WiFi and Ethernet alike. The name is kept on the DATA partition.</p></div></div>
@@ -58,6 +58,41 @@
   <div class="dp-row">
     <button type="submit" class="primary">Apply</button>
     <span class="status" id="status"></span>
+  </div>
+</form>
+
+<h3 class="sub" style="margin-top:1.5em">WiFi</h3>
+<p id="wnone" hidden>No WiFi network saved yet: join one on the radio (Settings &rarr; Wireless).</p>
+
+<form class="dp-card" id="wconf" hidden>
+  <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-network"/></svg></span><div><h3>Saved network<span class="eff">Takes effect: now for the network in use, which joins again; another at its next join</span></h3><p>Each network the radio has joined keeps its own address: DHCP, or a fixed one, for a router whose DHCP the radio does not get on with. The same as the network's Address on the radio (Settings &rarr; Wireless, the network's menu). A wrong address on the network this page came over leaves the page without the radio: set DHCP again on the radio.</p></div></div>
+  <div class="dp-row">
+    <div class="dp-lbl"><label for="wnet"><b>Network</b></label><span>The ones saved on the radio</span></div>
+    <div class="dp-ctl"><select id="wnet"></select></div>
+  </div>
+  <div class="dp-row">
+    <div class="dp-lbl"><b>Mode</b><span>DHCP takes the address from the network</span></div>
+    <div class="dp-ctl"><div class="seg" id="wmode"><button type="button" data-dhcp="1">DHCP</button><button type="button" data-dhcp="0">Static</button></div><input type="hidden" id="wdhcpv"></div>
+  </div>
+  <div class="dp-row">
+    <div class="dp-lbl"><label for="wip"><b>IP address</b></label><span>For example 192.168.1.20</span></div>
+    <div class="dp-ctl"><input id="wip" class="wst" autocomplete="off" maxlength="15" inputmode="decimal"></div>
+  </div>
+  <div class="dp-row">
+    <div class="dp-lbl"><label for="wmask"><b>Netmask</b></label><span>255.255.255.0 or /24</span></div>
+    <div class="dp-ctl"><input id="wmask" class="wst" autocomplete="off" maxlength="15"></div>
+  </div>
+  <div class="dp-row">
+    <div class="dp-lbl"><label for="wgw"><b>Gateway</b></label><span>The router: without one, no internet</span></div>
+    <div class="dp-ctl"><input id="wgw" class="wst" autocomplete="off" maxlength="15" inputmode="decimal"></div>
+  </div>
+  <div class="dp-row">
+    <div class="dp-lbl"><label for="wdns"><b>DNS</b></label><span>Usually the router again: without one, no names</span></div>
+    <div class="dp-ctl"><input id="wdns" class="wst" autocomplete="off" maxlength="15" inputmode="decimal"></div>
+  </div>
+  <div class="dp-row">
+    <button type="submit" class="primary">Apply</button>
+    <span class="status" id="wstatus"></span>
   </div>
 </form>
 
@@ -149,6 +184,64 @@ $.get('/api/network', {}, render).fail(function(xhr) {
 setInterval(poll, 3000);
 
 $("#mode button").on("click", function() { setMode(this.dataset.dhcp === "1"); });
+
+/* WiFi (#17): the saved networks, each with its own address */
+const wForm = EditFlow.form($("#wconf"), $("#wstatus"), $("#wconf button[type=submit]"));
+let wnets = [], wdhcp = true;
+
+var wSetMode = function(on) {
+  wdhcp = on;
+  $("#wdhcpv").val(on ? "1" : "0");
+  $("#wmode button").each(function() { $(this).attr("aria-pressed", String((this.dataset.dhcp === "1") === on)); });
+  $(".wst").prop("disabled", on);
+  wForm.check();
+}
+
+var wShow = function(uuid) {
+  const n = wnets.find(function(x) { return x.uuid === uuid; }) || wnets.find(function(x) { return x.active; }) || wnets[0];
+  if (!n) return;
+  $("#wnet").val(n.uuid);
+  wSetMode(!!n.dhcp);
+  FIELDS.forEach(function(k) { $("#w" + k).val(n[k]); });
+  wForm.reset();
+}
+
+var wRender = function(d) {
+  const sel = $("#wnet").val();
+  wnets = d.nets || [];
+  $("#wnone").prop("hidden", wnets.length > 0);
+  $("#wconf").prop("hidden", !wnets.length);
+  $("#wnet").empty();
+  wnets.forEach(function(n) { $("#wnet").append($("<option>").val(n.uuid).text(n.name + (n.active ? " (in use)" : ""))); });
+  wShow(sel);
+}
+
+$.get('/api/network/wifi', {}, wRender).fail(function(xhr) {
+  showStatus($("#wstatus"), xhr.responseJSON ? xhr.responseJSON.msg : "Radio not reachable", true);
+});
+$("#wnet").on("change", function() { wShow(this.value); });
+$("#wmode button").on("click", function() { wSetMode(this.dataset.dhcp === "1"); });
+
+$("#wconf").on("submit", function(e) {
+  e.preventDefault();
+  const n = wnets.find(function(x) { return x.uuid === $("#wnet").val(); });
+  const data = {uuid: $("#wnet").val(), dhcp: wdhcp};
+  FIELDS.forEach(function(k) { data[k] = $("#w" + k).val().trim(); });
+  showStatus($("#wstatus"), "Applying...");
+  $.ajax({
+    url: "/api/network/wifi",
+    type: "POST",
+    data: JSON.stringify(data),
+    contentType: "application/json; charset=utf-8",
+    dataType: "json",
+    success: function() {
+      wForm.reset();
+      showStatus($("#wstatus"), n && n.active ? "Applied. The radio joins the network again: a few seconds without it" : "Saved: it counts at the network's next join");
+      setTimeout(function() { $.get('/api/network/wifi', {}, wRender); }, 6000);
+    },
+    error: function(xhr) { showStatus($("#wstatus"), xhr.responseJSON ? xhr.responseJSON.msg : "Apply failed", true); }
+  });
+});
 
 $("#conf").on("submit", function(e) {
   e.preventDefault();

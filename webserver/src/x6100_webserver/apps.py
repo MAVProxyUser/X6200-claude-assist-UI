@@ -2812,6 +2812,40 @@ def network_set():
     return {"status": "OK"}
 
 
+@app.get('/api/network/wifi')
+def network_wifi_get():
+    """The saved WiFi networks and each one's address, DHCP or static (#17)"""
+    reply = display_call({"cmd": "wifi_nets"})
+    if not reply or reply.get("t") != "wifi_nets":
+        return api_error(503, "Radio GUI not reachable")
+    return {"nets": reply.get("nets", [])}
+
+
+@app.post('/api/network/wifi')
+def network_wifi_set():
+    try:
+        data = bottle.request.json
+    except ValueError:
+        data = None
+    if not isinstance(data, dict) or not isinstance(data.get("dhcp"), bool):
+        return api_error(400, "Invalid mode")
+    uuid = data.get("uuid")
+    if not isinstance(uuid, str) or not 0 < len(uuid) < 40:
+        return api_error(400, "Invalid network")
+    cmd = {"cmd": "wifi_net_set", "uuid": uuid, "dhcp": data["dhcp"]}
+    for k in ETH_FIELDS:
+        v = data.get(k, "")
+        if not isinstance(v, str) or len(v) > 15:
+            return api_error(400, "Invalid value")
+        cmd[k] = v.strip()
+    reply = display_call(cmd)
+    if reply is None:
+        return api_error(503, "Radio GUI not reachable")
+    if reply.get("t") != "ok":
+        return api_error(409, reply.get("err", "Rejected by the radio"))
+    return {"status": "OK"}
+
+
 CW_MSG_MAX = 64     # as the radio's editor (textarea_window)
 
 

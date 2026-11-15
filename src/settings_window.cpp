@@ -6,6 +6,7 @@
  *  Copyright (c) 2022-2023 Belousov Oleg aka R1CBU
  */
 
+#include <arpa/inet.h>
 #include "image_level.h"
 #include "update_watch.h"
 #include "settings_window.h"
@@ -2070,6 +2071,95 @@ static void wl_kbd_open(const wifi_ap_info_t &ap) {
     lv_textarea_set_placeholder_text(textarea_window_text(), " Password");
 }
 
+/* A saved network's address (#17): DHCP, or static typed on one line, "address/prefix gateway DNS" (the netmask also
+ * dotted after the slash, /24 when there is none; gateway and DNS may be left out), with Ethernet's checks */
+static char wl_addr_uuid[40];
+
+static bool wl_addr_ok() {
+    char        line[64], *tok[4] = {}, *save = NULL;
+    eth_cfg_t   cfg = {};
+    int         n = 0;
+    const char *err = NULL;
+
+    snprintf(line, sizeof(line), "%s", textarea_window_get());
+    for (char *t = strtok_r(line, " ", &save); t && n < 4; t = strtok_r(NULL, " ", &save)) {
+        tok[n++] = t;
+    }
+    if (n == 0 || n > 3) {
+        msg_update_text_fmt("Address/prefix, then the gateway and the DNS, spaces between");
+        return false;
+    }
+    char *slash = strchr(tok[0], '/');
+
+    if (slash) {
+        *slash = 0;
+    }
+    snprintf(cfg.field[ETH_IP], sizeof(cfg.field[0]), "%s", tok[0]);
+    snprintf(cfg.field[ETH_MASK], sizeof(cfg.field[0]), "%s%s", slash && strchr(slash + 1, '.') ? "" : "/",
+             slash ? slash + 1 : "24");
+    if (n > 1) snprintf(cfg.field[ETH_GW], sizeof(cfg.field[0]), "%s", tok[1]);
+    if (n > 2) snprintf(cfg.field[ETH_DNS], sizeof(cfg.field[0]), "%s", tok[2]);
+    if (strlen(tok[0]) >= sizeof(cfg.field[0]) || (n > 1 && strlen(tok[1]) >= sizeof(cfg.field[0])) ||
+        (n > 2 && strlen(tok[2]) >= sizeof(cfg.field[0]))) {
+        err = "Too long";
+    } else {
+        err = eth_check(&cfg);
+    }
+    if (err) {
+        msg_update_text_fmt("%s", err);
+        return false;
+    }
+    if (wifi_net_apply(wl_addr_uuid, &cfg)) {
+        msg_update_text_fmt("Static %s saved", cfg.field[ETH_IP]);
+    }
+    return wl_kbd_close();
+}
+
+static void wl_addr_static(const wifi_ap_info_t &ap) {
+    wifi_net_t net;
+    char       text[64] = "";
+
+    snprintf(wl_addr_uuid, sizeof(wl_addr_uuid), "%s", ap.uuid);
+    if (wifi_net_get(ap.uuid, &net) && !net.cfg.dhcp) {
+        eth_cfg_t      c = net.cfg;
+        struct in_addr m;
+        int            prefix = inet_pton(AF_INET, c.field[ETH_MASK], &m) == 1 ? __builtin_popcount(m.s_addr) : 24;
+
+        snprintf(text, sizeof(text), "%s/%d %s %s", c.field[ETH_IP], prefix, c.field[ETH_GW], c.field[ETH_DNS]);
+    } else if (ap.is_connected) {
+        char  ip[16] = "", gw[16] = "", *pip = ip, *pgw = gw;
+
+        if (wifi_get_ipaddr(&pip, &pgw) && ip[0]) {
+            snprintf(text, sizeof(text), "%s/24 %s %s", ip, gw, gw);   /* the lease's, the router as DNS */
+        }
+    }
+    wl_kbd = true;
+    lv_group_remove_all_objs(keyboard_group);
+    textarea_window_open(wl_addr_ok, wl_kbd_close);
+    lv_textarea_set_max_length(textarea_window_text(), 50);
+    lv_textarea_set_accepted_chars(textarea_window_text(), "0123456789./ ");
+    lv_textarea_set_placeholder_text(textarea_window_text(), "Address/24 gateway DNS");
+    if (text[0]) {
+        textarea_window_set(text);
+    }
+}
+
+static void wl_addr_menu(const wifi_ap_info_t &ap) {
+    std::string uuid = ap.uuid;
+
+    wl_menu_open(std::string(ap.ssid) + ": address", {
+        {"DHCP", "from the network", [uuid] {
+            eth_cfg_t cfg = {};
+
+            cfg.dhcp = true;
+            if (wifi_net_apply(uuid.c_str(), &cfg)) {
+                msg_update_text_fmt("DHCP saved");
+            }
+        }},
+        {"Static", "typed in", [ap] { wl_addr_static(ap); }},
+    });
+}
+
 static void wifi_row_cb(lv_event_t *e) {
     wifi_ap_info_t         ap = wf.aps[(intptr_t)lv_event_get_user_data(e)];
     std::vector<wl_item_t> items;
@@ -2091,6 +2181,12 @@ static void wifi_row_cb(lv_event_t *e) {
     }
     if (ap.known && ap.password_validator) {
         items.push_back({"Change password", "", [ap] { wl_kbd_open(ap); }});
+    }
+    if (ap.known) {
+        wifi_net_t net;
+        bool       dhcp = !wifi_net_get(ap.uuid, &net) || net.cfg.dhcp;
+
+        items.push_back({"Address", dhcp ? "DHCP" : net.cfg.field[ETH_IP], [ap] { wl_addr_menu(ap); }});
     }
     if (ap.known) {
         items.push_back({"Delete", "", [ap] {

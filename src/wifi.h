@@ -126,6 +126,24 @@ const char *eth_check(eth_cfg_t *cfg);
 /* LVGL thread, a checked set: saves the profile and applies it to the adapter */
 void eth_apply(const eth_cfg_t *cfg);
 
+/* WiFi (#17): each saved network's address, DHCP or static, with Ethernet's fields and checks (eth_check) */
+#define WIFI_NETS_MAX 16
+
+typedef struct {
+    char      uuid[40];
+    char      name[33];             /* the profile's name: the network's, as it was joined */
+    bool      active;               /* the network in use now */
+    eth_cfg_t cfg;
+} wifi_net_t;
+
+/* Any thread: the saved networks as of the last second; how many */
+int  wifi_nets(wifi_net_t *out, int max);
+bool wifi_net_get(const char *uuid, wifi_net_t *out);
+
+/* LVGL thread, a checked set: into the network's profile, and the network joined again with it when it is the one in
+ * use. False: no such network saved */
+bool wifi_net_apply(const char *uuid, const eth_cfg_t *cfg);
+
 #ifdef __cplusplus
 }
 #endif

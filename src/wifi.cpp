@@ -1046,6 +1046,131 @@ static void mask_from_prefix(guint prefix, char *out) {
     inet_ntop(AF_INET, &a, out, 16);
 }
 
+/* A profile's IPv4 address as the settings show it: DHCP, or the static address, netmask, gateway and DNS */
+static void ip4_read(NMConnection *c, eth_cfg_t *cfg) {
+    NMSettingIPConfig *s = nm_connection_get_setting_ip4_config(c);
+
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->dhcp = true;
+    if (!s || strcmp(nm_setting_ip_config_get_method(s), NM_SETTING_IP4_CONFIG_METHOD_MANUAL) != 0) {
+        return;
+    }
+    cfg->dhcp = false;
+    if (nm_setting_ip_config_get_num_addresses(s)) {
+        NMIPAddress *a = nm_setting_ip_config_get_address(s, 0);
+
+        snprintf(cfg->field[ETH_IP], 16, "%s", nm_ip_address_get_address(a));
+        mask_from_prefix(nm_ip_address_get_prefix(a), cfg->field[ETH_MASK]);
+    }
+    if (nm_setting_ip_config_get_gateway(s)) {
+        snprintf(cfg->field[ETH_GW], 16, "%s", nm_setting_ip_config_get_gateway(s));
+    }
+    if (nm_setting_ip_config_get_num_dns(s)) {
+        snprintf(cfg->field[ETH_DNS], 16, "%s", nm_setting_ip_config_get_dns(s, 0));
+    }
+}
+
+static int mask_prefix(const char *mask);
+
+/* A checked set into a profile's IPv4 setting, what it had before gone */
+static void ip4_write(NMSettingIPConfig *s, const eth_cfg_t *cfg) {
+    nm_setting_ip_config_clear_addresses(s);
+    nm_setting_ip_config_clear_dns(s);
+    g_object_set(G_OBJECT(s), NM_SETTING_IP_CONFIG_GATEWAY, NULL, NULL);
+    if (cfg->dhcp) {
+        g_object_set(G_OBJECT(s), NM_SETTING_IP_CONFIG_METHOD, NM_SETTING_IP4_CONFIG_METHOD_AUTO, NULL);
+        return;
+    }
+    NMIPAddress *a = nm_ip_address_new(AF_INET, cfg->field[ETH_IP], mask_prefix(cfg->field[ETH_MASK]), NULL);
+
+    g_object_set(G_OBJECT(s), NM_SETTING_IP_CONFIG_METHOD, NM_SETTING_IP4_CONFIG_METHOD_MANUAL, NULL);
+    nm_setting_ip_config_add_address(s, a);
+    nm_ip_address_unref(a);
+    if (cfg->field[ETH_GW][0]) {
+        g_object_set(G_OBJECT(s), NM_SETTING_IP_CONFIG_GATEWAY, cfg->field[ETH_GW], NULL);
+    }
+    if (cfg->field[ETH_DNS][0]) {
+        nm_setting_ip_config_add_dns(s, cfg->field[ETH_DNS]);
+    }
+}
+
+/* WiFi: each saved network's address (#17), as of the last second, for any thread (the web configurator's socket) */
+static std::mutex              nets_mutex;
+static std::vector<wifi_net_t> nets;
+
+static void wifi_nets_refresh() {
+    std::vector<wifi_net_t> now;
+    NMActiveConnection     *ac = device ? nm_device_get_active_connection(device) : NULL;
+    const char             *active = ac ? nm_active_connection_get_uuid(ac) : NULL;
+    const GPtrArray        *cons = client ? nm_client_get_connections(client) : NULL;
+
+    for (guint i = 0; cons && i < cons->len && now.size() < WIFI_NETS_MAX; i++) {
+        NMConnection *c = NM_CONNECTION(g_ptr_array_index(cons, i));
+        wifi_net_t    n = {};
+
+        if (!nm_connection_is_type(c, NM_SETTING_WIRELESS_SETTING_NAME)) {
+            continue;
+        }
+        snprintf(n.uuid, sizeof(n.uuid), "%s", nm_connection_get_uuid(c));
+        snprintf(n.name, sizeof(n.name), "%s", nm_connection_get_id(c));
+        n.active = active && !strcmp(active, n.uuid);
+        ip4_read(c, &n.cfg);
+        now.push_back(n);
+    }
+    std::lock_guard<std::mutex> lock(nets_mutex);
+    nets = now;
+}
+
+int wifi_nets(wifi_net_t *out, int max) {
+    std::lock_guard<std::mutex> lock(nets_mutex);
+    int                         n = 0;
+
+    for (; n < max && n < (int)nets.size(); n++) {
+        out[n] = nets[n];
+    }
+    return n;
+}
+
+bool wifi_net_get(const char *uuid, wifi_net_t *out) {
+    std::lock_guard<std::mutex> lock(nets_mutex);
+
+    for (auto &n : nets) {
+        if (!strcmp(n.uuid, uuid)) {
+            *out = n;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool wifi_net_apply(const char *uuid, const eth_cfg_t *cfg) {
+    NMRemoteConnection *rc = client ? nm_client_get_connection_by_uuid(client, uuid) : NULL;
+
+    if (!rc || !nm_connection_is_type(NM_CONNECTION(rc), NM_SETTING_WIRELESS_SETTING_NAME)) {
+        msg_update_text_fmt("WiFi: that network is no longer saved");
+        return false;
+    }
+    NMConnection      *c = nm_simple_connection_new_clone(NM_CONNECTION(rc));
+    NMSettingIPConfig *s = nm_connection_get_setting_ip4_config(c);
+
+    if (!s) {
+        s = NM_SETTING_IP_CONFIG(nm_setting_ip4_config_new());
+        nm_connection_add_setting(c, NM_SETTING(s));
+    }
+    ip4_write(s, cfg);
+    nm_connection_replace_settings_from_connection(NM_CONNECTION(rc), c);
+    g_object_unref(c);
+
+    NMActiveConnection *ac = device ? nm_device_get_active_connection(device) : NULL;
+    bool                in_use = ac && !strcmp(nm_active_connection_get_uuid(ac), uuid);
+
+    LV_LOG_USER("WiFi %s: address %s%s%s", nm_connection_get_id(NM_CONNECTION(rc)), cfg->dhcp ? "DHCP" : "static ",
+                cfg->dhcp ? "" : cfg->field[ETH_IP], in_use ? ", joined again with it" : "");
+    /* user_data: the network in use joined again, so the address changes now */
+    nm_remote_connection_commit_changes_async(rc, TRUE, NULL, connection_modify_cb, in_use ? (gpointer)1 : NULL);
+    return true;
+}
+
 static void eth_refresh_cb(lv_timer_t *t) {
     eth_info_t in = {};
     NMDevice  *d = eth_device();
@@ -1083,23 +1208,11 @@ static void eth_refresh_cb(lv_timer_t *t) {
     }
 
     NMRemoteConnection *rc = client ? nm_client_get_connection_by_id(client, ETH_CON_ID) : NULL;
-    NMSettingIPConfig  *s  = rc ? nm_connection_get_setting_ip4_config(NM_CONNECTION(rc)) : NULL;
 
-    if (s && strcmp(nm_setting_ip_config_get_method(s), NM_SETTING_IP4_CONFIG_METHOD_MANUAL) == 0) {
-        in.cfg.dhcp = false;
-        if (nm_setting_ip_config_get_num_addresses(s)) {
-            NMIPAddress *a = nm_setting_ip_config_get_address(s, 0);
-
-            snprintf(in.cfg.field[ETH_IP], 16, "%s", nm_ip_address_get_address(a));
-            mask_from_prefix(nm_ip_address_get_prefix(a), in.cfg.field[ETH_MASK]);
-        }
-        if (nm_setting_ip_config_get_gateway(s)) {
-            snprintf(in.cfg.field[ETH_GW], 16, "%s", nm_setting_ip_config_get_gateway(s));
-        }
-        if (nm_setting_ip_config_get_num_dns(s)) {
-            snprintf(in.cfg.field[ETH_DNS], 16, "%s", nm_setting_ip_config_get_dns(s, 0));
-        }
+    if (rc) {
+        ip4_read(NM_CONNECTION(rc), &in.cfg);
     }
+    wifi_nets_refresh();
 
     /* A wired connection with a gateway takes over: WiFi's radio is held off while it lasts (a
      * radio the Bluetooth chip shares, and two routes to the same LAN confuse the TCI clients);
@@ -1238,21 +1351,7 @@ static NMConnection *eth_connection_new(const eth_cfg_t *cfg, const char *uuid) 
     nm_connection_add_setting(con, NM_SETTING(s_con));
     nm_connection_add_setting(con, nm_setting_wired_new());
 
-    if (cfg->dhcp) {
-        g_object_set(G_OBJECT(s_ip4), NM_SETTING_IP_CONFIG_METHOD, NM_SETTING_IP4_CONFIG_METHOD_AUTO, NULL);
-    } else {
-        NMIPAddress *a = nm_ip_address_new(AF_INET, cfg->field[ETH_IP], mask_prefix(cfg->field[ETH_MASK]), NULL);
-
-        g_object_set(G_OBJECT(s_ip4), NM_SETTING_IP_CONFIG_METHOD, NM_SETTING_IP4_CONFIG_METHOD_MANUAL, NULL);
-        nm_setting_ip_config_add_address(s_ip4, a);
-        nm_ip_address_unref(a);
-        if (cfg->field[ETH_GW][0]) {
-            g_object_set(G_OBJECT(s_ip4), NM_SETTING_IP_CONFIG_GATEWAY, cfg->field[ETH_GW], NULL);
-        }
-        if (cfg->field[ETH_DNS][0]) {
-            nm_setting_ip_config_add_dns(s_ip4, cfg->field[ETH_DNS]);
-        }
-    }
+    ip4_write(s_ip4, cfg);
     nm_connection_add_setting(con, NM_SETTING(s_ip4));
 
     /* No IPv6, as WiFi */

@@ -8,6 +8,8 @@
  *    {"cmd":"disp_set","text":name,"val":v}           -> {"t":"ok"} or {"t":"err","err":"..."}; "theme":name for the theme
  *    {"cmd":"eth_get"}                                -> {"t":"eth", ...}
  *    {"cmd":"eth_set","dhcp":0|1,"ip":..,"mask":..,"gw":..,"dns":..}
+ *    {"cmd":"wifi_nets"}                              -> {"t":"wifi_nets","nets":[{"uuid","name","active","dhcp","ip",..}]}
+ *    {"cmd":"wifi_net_set","uuid":..,"dhcp":0|1,"ip":..,"mask":..,"gw":..,"dns":..}   a saved WiFi network's address
  *    {"cmd":"band_use","lo":hz,"hi":hz}               -> {"t":"band_use","use":0|1|2} (none, receive, transmit)
  *    {"cmd":"digi_lists"}                             -> {"t":"digi_lists","plan":p,"region":r,"lists":{"6":[[hz,own]...],..}}
  *    {"cmd":"tx_ranges_read"}                         -> {"t":"tx_ranges", "tx_own_count":n, ...} after the own TX list
@@ -345,6 +347,56 @@ static void eth_apply_cb(void *arg) {
     eth_apply((eth_cfg_t *)arg);
 }
 
+/* WiFi (#17): each saved network's address, set as Ethernet's is */
+static int wifi_nets_get(char *buf, size_t size) {
+    wifi_net_t nets[WIFI_NETS_MAX];
+    int        k = wifi_nets(nets, WIFI_NETS_MAX), l;
+    cJSON     *o = cJSON_CreateObject();
+    cJSON     *a = cJSON_AddArrayToObject(o, "nets");
+
+    cJSON_AddStringToObject(o, "t", "wifi_nets");
+    for (int i = 0; i < k; i++) {
+        cJSON *n = cJSON_CreateObject();
+
+        cJSON_AddStringToObject(n, "uuid", nets[i].uuid);
+        cJSON_AddStringToObject(n, "name", nets[i].name);
+        cJSON_AddBoolToObject(n, "active", nets[i].active);
+        cJSON_AddBoolToObject(n, "dhcp", nets[i].cfg.dhcp);
+        for (int f = 0; f < ETH_FIELDS; f++)
+            cJSON_AddStringToObject(n, eth_keys[f], nets[i].cfg.field[f]);
+        cJSON_AddItemToArray(a, n);
+    }
+    char *text = cJSON_PrintUnformatted(o);
+
+    l = text ? snprintf(buf, size, "%s\n", text) : 0;
+    free(text);
+    cJSON_Delete(o);
+    return l;
+}
+
+typedef struct {
+    char      uuid[40];
+    eth_cfg_t cfg;
+} wifi_net_set_t;
+
+static const char *wifi_net_set(cJSON *req, wifi_net_set_t *w) {
+    cJSON     *uuid = cJSON_GetObjectItemCaseSensitive(req, "uuid");
+    wifi_net_t net;
+
+    if (!cJSON_IsString(uuid) || strlen(uuid->valuestring) >= sizeof(w->uuid))
+        return "Invalid network";
+    if (!wifi_net_get(uuid->valuestring, &net))
+        return "That network is not saved on the radio";
+    strcpy(w->uuid, uuid->valuestring);
+    return eth_set(req, &w->cfg);
+}
+
+static void wifi_net_apply_cb(void *arg) {
+    wifi_net_set_t *w = (wifi_net_set_t *)arg;
+
+    wifi_net_apply(w->uuid, &w->cfg);
+}
+
 /* What the radio can do somewhere in [lo, hi] Hz (band_use: HF, the transverters that are on, the X6200's receive
  * ranges): the web Bands page checks a TX shift with it. Read only, answered from this thread */
 static const char *band_use_get(cJSON *req, char *out, size_t size, int *l) {
@@ -414,6 +466,14 @@ static int handle_line(const char *line, char *out, size_t size) {
     } else if (!strcmp(name->valuestring, "eth_set")) {
         eth_cfg_t cfg;
         if (!(err = eth_set(req, &cfg)) && !scheduler_put(eth_apply_cb, &cfg, sizeof(cfg)))
+            err = "Busy, try again";
+    } else if (!strcmp(name->valuestring, "wifi_nets")) {
+        l = wifi_nets_get(out, size);
+        if (!l)
+            err = "Out of memory";
+    } else if (!strcmp(name->valuestring, "wifi_net_set")) {
+        wifi_net_set_t w;
+        if (!(err = wifi_net_set(req, &w)) && !scheduler_put(wifi_net_apply_cb, &w, sizeof(w)))
             err = "Busy, try again";
     } else if (!strcmp(name->valuestring, "band_use")) {
         err = band_use_get(req, out, size, &l);
