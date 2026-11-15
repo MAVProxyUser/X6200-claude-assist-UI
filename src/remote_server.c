@@ -85,6 +85,7 @@
 
 #define _GNU_SOURCE     /* accept4, pipe2 */
 
+#include "zoom_span.h"
 #include <stdio.h>       /* before jpeglib.h, which wants FILE */
 
 #include "remote_server.h"
@@ -990,7 +991,7 @@ static void panel_apply(void *arg) {
         case P_VOL:    param_i_set(cfg_volume, LV_CLAMP(0, p->a, BOARD_VOL_MAX)); break;
         case P_PWR:    cfg_pwr_set(LV_CLAMP(1, p->a, (int)(BOARD_PWR_MAX * 10)) / 10.0f); break;
         case P_STEP:   param_i_set(cfg_mode_freq_step, LV_CLAMP(1, p->a, CFG_FREQ_STEP_MAX)); break;
-        case P_ZOOM:   param_i_set(cfg_mode_zoom, LV_CLAMP(1, p->a, 8)); break;
+        case P_ZOOM:   param_i_set(cfg_mode_zoom, LV_CLAMP(ZOOM_MIN, p->a, ZOOM_MAX)); break;   /* zoom_span.h */
         case P_BAND:
             if (!main_screen_band_locked())
                 cfg_band_load_next(p->a > 0);
@@ -1097,10 +1098,10 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "state {\"freq\":%d,\"mode\":%d,\"flo\":%d,\"fhi\":%d,\"kt\":%d,\"agc\":%d,\"pre\":%d,\"att\":%d,"
              "\"nb\":%d,\"nr\":%d,\"sql\":%d,\"rfg\":%d,\"vol\":%d,\"pwr\":%d.%d,\"step\":%d,\"zoom\":%d,"
              "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d,"
-             "\"cwrise\":%d}",
+             "\"cwrise\":%d,\"zmin\":%d}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
-             s->ulock, s->cwrise);
+             s->ulock, s->cwrise, ZOOM_MIN);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */

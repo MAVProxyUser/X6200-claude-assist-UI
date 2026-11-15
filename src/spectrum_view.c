@@ -10,6 +10,7 @@
  *  trace goes straight to the primary plane and LVGL draws only the markers.
  */
 
+#include "zoom_span.h"
 #include "spectrum_view.h"
 
 #include "cfg/cfg_api.h"
@@ -65,11 +66,11 @@ static float            level_max = TX_MAX;
 static float            kept_db[POINTS];
 static int32_t          kept_view;          /* the view's centre (Hz) they are points of; 0: none */
 static double           kept_at;            /* the centre (Hz) their points are at: kept_view to half a point */
-static uint8_t          kept_zoom;
+static int32_t          kept_zoom;
 static bool             kept_new;           /* a settled trace not kept yet (data_mux) */
 static uint8_t          kept_wait;          /* traces to come before one is settled (data_mux) */
 
-static uint8_t          zoom = 1;
+static int32_t          zoom = 1;          /* zoom_span.h: -1 and 0 the X6200's 384 and 192 kHz (#131) */
 static int32_t          pass_lo;            /* filter edges, Hz from the VFO, LSB below it */
 static int32_t          pass_hi = 3000;
 static int32_t          vfo_hz;
@@ -95,9 +96,9 @@ static int32_t          drawn_markers[16];
 /* Pixels from the centre of a view w wide for hz, rounded either way from 0 (half up, a VFO
  * tuned below the centre of the Fixed view had its trace a pixel to the right) */
 static lv_coord_t hz_px(int32_t hz, lv_coord_t w) {
-    int32_t v = hz * zoom * w;
+    int64_t span = zoom_span_hz(zoom), v = (int64_t)hz * w;
 
-    return (v + (v < 0 ? -SPAN_HZ / 2 : SPAN_HZ / 2)) / SPAN_HZ;
+    return (lv_coord_t)((v + (v < 0 ? -span / 2 : span / 2)) / span);
 }
 
 /* Where the VFO is: the markers follow it (and the fixed waterfall view). In CW and CW-R from the oscillator the
@@ -141,7 +142,7 @@ static void levels(float *min, float *max) {
  * Centered mode: none kept. Before each refresh */
 static void keep_trace(void) {
     int32_t view = param_i_get(cfg_wf_mode) ? vfo_hz - if_shift - waterfall_view_shift() : 0;
-    int32_t span = SPAN_HZ / zoom;
+    int32_t span = zoom_span_hz(zoom);
 
     if (view != kept_view && view && kept_view && zoom == kept_zoom && abs(view - kept_view) < span) {
         int32_t n = LV_CLAMP(-POINTS, lround((view - kept_at) * POINTS / span), POINTS);
@@ -369,7 +370,7 @@ void spectrum_draw_cb(lv_event_t *e) {
     lv_coord_t         w = lv_obj_get_width(o), h = lv_obj_get_height(o);
     lv_coord_t         shift = trace_px(w);
     lv_coord_t         vfo_x = o->coords.x1 + markers_px(w) + w / 2;
-    int32_t            span = SPAN_HZ / zoom;
+    int32_t            span = zoom_span_hz(zoom);
     lv_draw_line_dsc_t line;
     lv_draw_rect_dsc_t band;
 
@@ -669,7 +670,7 @@ static void spectrum_refresh(void *data) {
 /* ---- Settings ---- */
 
 static void on_zoom_changed(Subject *subj, void *user_data) {
-    zoom = (uint8_t)subject_i_get((SubjectInt *)subj);
+    zoom = subject_i_get((SubjectInt *)subj);
     spectrum_clear();
 }
 
@@ -795,7 +796,7 @@ lv_obj_t *spectrum_init(lv_obj_t *parent) {
 /* The peaks follow the base when it moves: whole points, the rest added to the next move */
 static void shift_peaks(int32_t df) {
     uint64_t now = get_time();
-    uint16_t bin_hz = SPAN_HZ / POINTS / zoom;
+    uint16_t bin_hz = zoom_span_hz(zoom) / POINTS;
     int32_t  n;
 
     df += peak_rest_hz;
@@ -852,7 +853,7 @@ void spectrum_data(float *db, uint16_t size, bool tx, uint32_t base_freq, uint8_
 
 int32_t spectrum_span(float *vfo_at) {
     *vfo_at = 0.5f + (float)lo_px(false, POINTS) / POINTS;
-    return SPAN_HZ / zoom;
+    return zoom_span_hz(zoom);
 }
 
 void spectrum_min_max_reset() {

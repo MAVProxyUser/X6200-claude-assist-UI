@@ -9,6 +9,7 @@
  *  the hand mic, the knobs and a USB keyboard do on it. The apps open over it.
  */
 
+#include "zoom_span.h"
 #include "screen_main.h"
 #include "board.h"
 
@@ -1793,13 +1794,8 @@ static void on_freq_change(Subject *subj, void *user_data) {
 /* The span of the waterfall changed: the scale, the spots and the band plan follow. The
  * scale is greyed while the frequency is locked */
 static void on_span_change(Subject *subj, void *user_data) {
-    int32_t  half   = 50000;
     uint32_t color  = theme_hex(subject_i_get(freq_lock) ? TC_text_soft : TC_text);
-    int32_t  zoom   = param_i_get(cfg_mode_zoom);
-
-    if (params.waterfall_zoom.x) {
-        half /= zoom;
-    }
+    int32_t  half   = zoom_span_hz(params.waterfall_zoom.x ? param_i_get(cfg_mode_zoom) : 1) / 2;
 
     /* The waterfall is centred on the VFO minus the IF shift */
     /* Fixed waterfall mode: the centre stays put while the VFO moves */
@@ -1814,10 +1810,10 @@ static void on_span_change(Subject *subj, void *user_data) {
  * 40 kHz of the zoomed span */
 static void on_if_shift_zoom(Subject *subj, void *user_data) {
     uint32_t shift = abs(param_i_get(cfg_band_if_shift));
-    uint32_t zoom  = param_i_get(cfg_mode_zoom);
-    uint32_t fit   = zoom;
+    int32_t  zoom  = param_i_get(cfg_mode_zoom);
+    int32_t  fit   = zoom;
 
-    while (fit > 1 && shift * fit >= 40000) {
+    while (fit > 1 && shift * (uint32_t)fit >= 40000) {     /* the wide zooms (< 1) have room for any shift */
         fit >>= 1;
     }
     if (fit != zoom) {

@@ -1871,6 +1871,19 @@ issue #132).
 - A zoom between those four, which CAT or the browser panel can set, keeps
   the step in use.
 
+Wider than 100 kHz (the X6200, #131). The X6200's base sends its spectrum up
+to 384 kHz wide, so the X6200 has two wider zooms beyond 100 kHz: 192 and
+384 kHz, reached as the others are (Span + past 100 kHz, the MFK's Zoom, the
+browser panel's zoom and pinch, CAT's scope span). The knob line says them as
+spans ("Zoom: 384 kHz"); the spectrum, the waterfall, the frequency scale,
+the band plan, the spots and the Fixed view all follow. At 384 kHz the base's
+512 points are 750 Hz apart: a busy segment or a pileup shows, single FT8 or
+CW signals do not, so zoom back in for those. The 3D waterfall draws the
+noise under its floor, so a quiet part of a wide span can look empty there; the
+2D waterfall shows it. The two wide zooms keep the step in use (Step per zoom
+has no step of their own). The X6100's base gives 100 kHz only: x1 stays its
+widest.
+
 Spectrum. Where: Settings > Display > SPECTRUM (off by default; the screen
 restarts to lay it out). The band plan and the cluster spots stay at the top
 of the waterfall. With Spectrum on, the card has:

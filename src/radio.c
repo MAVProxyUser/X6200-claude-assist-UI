@@ -2417,9 +2417,12 @@ bool radio_psd_wide(bool on) {
     return true;
 }
 
+/* The base asked for 100 kHz over 2^val (it sends one step wider, hw_x6200.c). The X6200's wider zooms (#131): 0
+ * asks what zoom 1 does (192 kHz, shown whole), -1 one step wider still (384 kHz, the base's widest) */
 static void on_fw_zoom_change(Subject *subj, void *user_data) {
-    uint8_t zoom = subject_i_get((SubjectInt*)subj);
-    uint8_t val = 0;
+    int32_t zoom = subject_i_get((SubjectInt*)subj);
+    int32_t val  = zoom < 0 ? -1 : 0;
+
     while (zoom > 1) {
         val++;
         zoom >>= 1;

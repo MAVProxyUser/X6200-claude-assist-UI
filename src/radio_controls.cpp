@@ -9,6 +9,7 @@
 /* What the VOL and MFK knobs change, and the button actions that toggle the same settings.
  * A turn changes the setting and writes "Name: value" for the message line. */
 
+#include "zoom_span.h"
 #include "radio_controls.h"
 
 #include "cw.h"
@@ -189,14 +190,17 @@ void controls_encoder_update(cfg_ctrl_t ctrl, int32_t diff, std::string &msg) {
             snprintf(buf, size, "Volume: %i", radio_change_vol(diff));
             break;
 
-        case CTRL_SPECTRUM_FACTOR:      /* zoom x1 x2 x4 x8: a step doubles or halves it */
+        case CTRL_SPECTRUM_FACTOR: {    /* zoom x1 x2 x4 x8, and the X6200's 192 and 384 kHz below x1 (#131) */
+            char z[16];
+
             i = cfg_sm.p_mode_zoom.get();
             if (diff) {
-                cfg_sm.p_mode_zoom.set(diff > 0 ? i << diff : i >> -diff);
+                cfg_sm.p_mode_zoom.set(zoom_step(i, diff));
                 i = cfg_sm.p_mode_zoom.get();
             }
-            snprintf(buf, size, "Zoom: x%i", i);
+            snprintf(buf, size, "Zoom: %s", zoom_name(i, z, sizeof(z)));
             break;
+        }
 
         case CTRL_COMP:
             snprintf(buf, size, "Compressor ratio: %s", params_comp_str_get(turn(cfg_sm.p_comp, diff, 1)));
@@ -394,11 +398,11 @@ void controls_toggle_wf_3d(button_data_t *data) {
 
 /* Span +/- buttons: wider span = lower zoom (1/2/4/8) */
 void controls_span_wider(button_data_t *data) {
-    cfg_sm.p_mode_zoom.set(cfg_sm.p_mode_zoom.get() >> 1);
+    cfg_sm.p_mode_zoom.set(zoom_step(cfg_sm.p_mode_zoom.get(), -1));
 }
 
 void controls_span_narrower(button_data_t *data) {
-    cfg_sm.p_mode_zoom.set(cfg_sm.p_mode_zoom.get() << 1);
+    cfg_sm.p_mode_zoom.set(zoom_step(cfg_sm.p_mode_zoom.get(), 1));
 }
 
 /* CW ZAP: tune so that the signal the decoder hears sits on the key tone, to 10 Hz. A tone above the key tone

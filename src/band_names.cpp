@@ -9,6 +9,7 @@
 /* The bands around the VFO, named in boxes across the top of the waterfall for 2 s after the
  * frequency changes; not with the band plan strip on, which shows them already */
 
+#include "zoom_span.h"
 #include "band_names.h"
 
 extern "C" {
@@ -36,16 +37,16 @@ extern "C" {
 static lv_obj_t              *strip;
 static std::vector<BandInfo>  bands;
 static uint64_t               vfo;
-static uint8_t                zoom = 1;
+static int32_t                zoom = 1;       /* zoom_span.h: -1 and 0 the X6200's 384 and 192 kHz (#131) */
 static int32_t                if_shift;
 static lv_anim_t              fade;
 static bool                   fading_in;
 static lv_timer_t            *hide_timer;
 static Subscription           zoom_sub, freq_sub, shift_sub;
 
-/* x of f on the strip, w px wide, centred on the VFO as the waterfall is */
-static int32_t band_x(int64_t f, lv_coord_t w, int32_t scale) {
-    return (f - (int64_t)vfo + if_shift + waterfall_view_shift()) * w / SPAN_HZ * scale + w / 2;
+/* x of f on the strip, w px wide, centred on the VFO as the waterfall is, at that zoom */
+static int32_t band_x(int64_t f, lv_coord_t w, int32_t zoom) {
+    return (f - (int64_t)vfo + if_shift + waterfall_view_shift()) * w / zoom_span_hz(zoom) + w / 2;
 }
 
 static void draw_band(lv_draw_ctx_t *ctx, const lv_area_t *box, const BandInfo &band, int32_t scale) {

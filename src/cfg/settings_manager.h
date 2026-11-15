@@ -26,6 +26,8 @@
 
 #include <ft8lib/constants.h>
 
+#include "../zoom_span.h"
+
 #include "../board.h"
 #include "../kbd_layout.h"
 #include "../wspr/wspr_hop.h"
@@ -773,7 +775,8 @@ class SettingsManager {
     // p_zoom_step_per_mode is off: their readers and writers never see the difference
     Parameter<int32_t> p_mode_freq_step{"freq_step", 500, [](int32_t v) { return clip(v, 1, 100000); },
         StorageType::MODE, pending_writes_, [this]() { on_mode_freq_step_not_found(); }, &mode_params_};
-    Parameter<int32_t> p_mode_zoom{"spectrum_factor", 1, [](int32_t v) { return clip(v, 1, 8); },
+    // 1, 2, 4, 8, and on the X6200 0 and -1 for 192 and 384 kHz (zoom_span.h, #131)
+    Parameter<int32_t> p_mode_zoom{"spectrum_factor", 1, [](int32_t v) { return clip(v, ZOOM_MIN, ZOOM_MAX); },
         StorageType::MODE, pending_writes_, [this]() { on_mode_zoom_not_found(); }, &mode_params_};
     // The step last chosen at the zoom 1, 2, 4 and 8 (100, 50, 25 and 12.5 kHz), 0 none yet (p_step_per_zoom,
     // #132). Bound as the zoom and the step are (zoom_step_scope); a row not there is none, not the last mode's

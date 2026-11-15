@@ -11,6 +11,7 @@
  * the S-meter, the automatic waterfall colours, and the audio for the decoders.
  * Demodulation, filters, AGC and the speaker are on the base. */
 
+#include "zoom_span.h"
 #include "dsp.h"
 #include "dsp_math.h"
 #include "cat.h"
@@ -176,6 +177,8 @@ static iirfilt_cccf     dc_block;
 
 static uint8_t       zoom = 1;
 static float         zoom_db;           /* narrower bins hold less noise: lift them back */
+/* The span the screen shows (zoom_span.h): the X6200's spectrum is laid out from it, the wide zooms (#131) too */
+static std::atomic<int32_t> shown_span{SPAN_HZ};
 static firdecim_crcf decim_rx, decim_tx; /* old bases: zoom decimation done here */
 static cfloat        iq[RADIO_SAMPLES * 2];     /* bf16 packets carry twice as many */
 static cfloat        iq_dec[RADIO_SAMPLES * 2];
@@ -463,7 +466,7 @@ void dsp_psd(const float *db, uint16_t n, uint32_t span_hz, bool tx, int16_t sme
         return;
 
     uint64_t now  = get_time();
-    float    frac = span_hz ? (float)wf_span() / span_hz : 1.0f;
+    float    frac = span_hz ? (float)shown_span.load(std::memory_order_relaxed) / span_hz : 1.0f;
     bool     jumped = tune_break.exchange(false, std::memory_order_relaxed);
 
     pthread_mutex_lock(&snap_mux);
@@ -556,18 +559,19 @@ static void set_zoom(uint8_t z) {
 static void on_zoom_change(Subject *subj, void *user_data) {
     int32_t z = cfg_sm.p_mode_zoom.get();
 
+    shown_span = zoom_span_hz(z);
     if (!(caps & HW_CAP_ZOOM)) {    /* an OEM X6100 base, the stub: the IQ is decimated here */
-        set_zoom(z);
+        set_zoom(z < 1 ? 1 : z);
         return;
     }
     /* Narrower bins hold less noise: lifted back (the base that sends its spectrum halves its
-     * bins with the zoom too) */
-    zoom_db = 3.0f * log2f(z);
+     * bins with the zoom too); the wider ones of the X6200's wide zooms hold more: lowered */
+    zoom_db = 3.0f * log2f((float)SPAN_HZ / zoom_span_hz(z));
     floor_reset = true;
     /* The OEM X6100 base from 1.1.9 decimates but does not report the zoom back; a base that
      * sends its spectrum says nothing either */
     if (base_ver.rev < 8)
-        set_zoom(z);
+        set_zoom(z < 1 ? 1 : z);
 }
 
 static void on_filter_change(Subject *subj, void *user_data) {

@@ -11,6 +11,7 @@
  * changes the value. */
 
 #include "knob_info.h"
+#include "zoom_span.h"
 
 #include "button_bar.h"
 #include "cluster/client.h"
@@ -83,7 +84,10 @@ static const std::map<int, Knob> knobs = {
     {CTRL_PWR, num("Power", cfg_sm.p_pwr)},
     {CTRL_MONI, num("Moni level", cfg_sm.p_moni)},
     {CTRL_BRIGHTNESS, {"Brightness", &cfg_sm.s_brightness, [] { return std::string(backlight_normal_text()); }}},
-    {CTRL_SPECTRUM_FACTOR, num("Zoom", cfg_sm.p_mode_zoom)},
+    {CTRL_SPECTRUM_FACTOR, {"Zoom", &cfg_sm.p_mode_zoom, [] {
+         char z[16];
+         return std::string(zoom_name(cfg_sm.p_mode_zoom.get(), z, sizeof(z)));     /* x2, or 384 kHz (#131) */
+     }}},
     {CTRL_COMP, {"Compressor", &cfg_sm.p_comp, [] { return std::string(params_comp_str_get(cfg_sm.p_comp.get())); }}},
     {CTRL_VOX_ON, on_off("VOX", cfg_sm.p_vox_en)},
     {CTRL_RIT, num("RIT", cfg_sm.p_rit)},

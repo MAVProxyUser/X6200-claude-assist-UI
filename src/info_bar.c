@@ -6,6 +6,7 @@
  *  Copyright (c) 2022-2023 Belousov Oleg aka R1CBU
  */
 
+#include "zoom_span.h"
 #include "info_bar.h"
 
 #include "cfg/cfg_api.h"
@@ -185,7 +186,7 @@ static void deck_update(Subject *subj, void *user_data) {
     static const char *const agc[] = {"AGC OFF", "AGC-S", "AGC-F", "AGC-A"};   /* radio_agc_t order */
     radio_agc_t a = cparam_i_get(cfg_cur_agc);
     int32_t     bw = cparam_i_get(cfg_cur_filter_bw), step = param_i_get(cfg_mode_freq_step);
-    int32_t     half = 50000 / (params.waterfall_zoom.x ? LV_MAX(1, param_i_get(cfg_mode_zoom)) : 1);
+    int32_t     half = zoom_span_hz(params.waterfall_zoom.x ? param_i_get(cfg_mode_zoom) : 1) / 2;
 
     if (!theme_shape.deck) return;
     char        b[16], st[16];

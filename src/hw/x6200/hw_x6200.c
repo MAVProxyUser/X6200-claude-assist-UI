@@ -91,7 +91,7 @@ static x6200_mode_t lib_mode(radio_mode_t m) {
 static x6200_flow_t *pack;
 static float         psd_db[PSD_BINS];
 static uint8_t       fft_dec;       /* the base's spectrum decimation as last set */
-static uint8_t       fft_req;       /* the GUI's last HW_FFT_DEC (the zoom's) */
+static int8_t        fft_req;       /* the GUI's last HW_FFT_DEC (the zoom's; -1 the 384 kHz zoom, #131) */
 static bool          psd_wide;      /* HW_PSD_WIDE: decimation 0, all 384 kHz, whatever the zoom */
 static char          ver_str[32] = "?";
 static radio_base_ver_t ver;
@@ -648,7 +648,7 @@ bool hw_set_i(hw_param_t p, int32_t v) {
             else
                 psd_wide = v != 0;
             /* Wide: the base's widest step; the GUI's own views still take their middle part (dsp_psd) */
-            fft_dec = psd_wide ? 0 : fft_req + 1 > PSD_MAX_DEC ? PSD_MAX_DEC : fft_req + 1;
+            fft_dec = psd_wide || fft_req + 1 < 0 ? 0 : fft_req + 1 > PSD_MAX_DEC ? PSD_MAX_DEC : fft_req + 1;
             x6200_control_fft_dec_set(fft_dec);
             break;
         /* One RX filter register: low and high halves. The second filter (the X6100's wider one

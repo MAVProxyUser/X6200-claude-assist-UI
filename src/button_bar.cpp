@@ -8,6 +8,7 @@
  *  The five buttons over F1-F5: the pages of the front keys, the slots on screen that show
  *  whatever page is loaded (an app's too), and the knob marks on the buttons.
  */
+#include "zoom_span.h"
 #include "button_bar.h"
 
 #include "board.h"
@@ -155,18 +156,19 @@ static const char *span_label(int32_t zoom) {
     static int  n;
 
     n ^= 1;
-    snprintf(buf[n], sizeof buf[n], "Span %s\n%g kHz", zoom < cfg_sm.p_mode_zoom.get() ? "+" : "-", 100.0 / zoom);
+    snprintf(buf[n], sizeof buf[n], "Span %s\n%g kHz", zoom < cfg_sm.p_mode_zoom.get() ? "+" : "-",
+             zoom_span_hz(zoom) / 1000.0);
     return buf[n];
 }
 
 static const char *span_wider_label() {
     int32_t z = cfg_sm.p_mode_zoom.get();
-    return z > 1 ? span_label(z >> 1) : "Span +\nmax";
+    return z > ZOOM_MIN ? span_label(zoom_step(z, -1)) : "Span +\nmax";     /* 384 kHz on the X6200 (#131) */
 }
 
 static const char *span_narrower_label() {
     int32_t z = cfg_sm.p_mode_zoom.get();
-    return z < 8 ? span_label(z << 1) : "Span -\nmin";
+    return z < ZOOM_MAX ? span_label(zoom_step(z, 1)) : "Span -\nmin";
 }
 
 /* TX power in the digital apps: press for the next step, up to the apps' 7 W cap */

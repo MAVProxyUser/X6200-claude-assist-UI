@@ -433,7 +433,7 @@ body.app h2, body.app #intro, body.app #intro-away { display:none; }
     $("#c-trx").text(s.tx ? "TX" : "RX").toggleClass("tx", !!s.tx).toggleClass("rx", !s.tx);
     $("#b-mode span").text(MODES[s.mode]);
     $("#b-step span").text(fmtStep(s.step));
-    $("#b-zoom span").text("x" + s.zoom);
+    $("#b-zoom span").text(zname(s.zoom));
     $("#b-agc span").text(AGCS[s.agc]);
     const ulock = "ulock" in s ? s.ulock : s.lock;     /* the user's LOCK; an app's hold greys the frequency only */
     $("#b-lock span").text(ulock ? "on" : "off"); $("#b-lock").toggleClass("on", !!ulock);
@@ -535,7 +535,7 @@ body.app h2, body.app #intro, body.app #intro-away { display:none; }
   function requestDraw() { if (!drawPending) { drawPending = true; requestAnimationFrame(function() { drawPending = false; draw(); }); } }
   /* An old base sends the whole 100 kHz whatever the zoom (the radio zooms the view itself): shown is
    * the zoomed part around the centre, a new base's data is already that wide */
-  function visSpan() { return Math.min(span, 100000 / (state ? state.zoom : 1)); }
+  function visSpan() { return Math.min(span, zspan(state ? state.zoom : 1)); }
   /* The CW pitch: a radio before "kt" sent none, and the default is 700 Hz */
   function keyTone(s) { return typeof s.kt === "number" ? s.kt : 700; }
   /* The passband around the dial, in Hz. In CW and CWR the edges are tones, and the signal heard at the key
@@ -640,7 +640,12 @@ body.app h2, body.app #intro, body.app #intro-away { display:none; }
     showState();
   }
   function roundStep(hz) { const st = Math.min(state ? state.step : 100, 5000); return Math.round(hz / st) * st; }   /* a tap or drag: to 5 kHz at most, with 10-100 kHz steps too (#234) */
-  function zoomTo(z) { z = Math.max(1, Math.min(8, z)); if (state && z !== state.zoom) set("zoom", z); }
+  /* The zoom: 1 2 4 8 over 100 kHz, and an X6200's 192 and 384 kHz as 0 and -1 below them (zmin, #131) */
+  function zspan(z) { return z >= 1 ? 100000 / z : z === 0 ? 192000 : 384000; }
+  function zstep(z, d) { return d > 0 ? (z < 1 ? z + 1 : z * 2) : (z > 1 ? z / 2 : z - 1); }
+  function zname(z) { return z >= 1 ? "x" + z : (zspan(z) / 1000) + "k"; }
+  function zmin() { return state && state.zmin !== undefined ? state.zmin : 1; }
+  function zoomTo(z) { z = Math.max(zmin(), Math.min(8, z)); if (state && z !== state.zoom) set("zoom", z); }
   pan.addEventListener("pointerdown", function(e) {
     e.preventDefault(); pan.setPointerCapture(e.pointerId);
     ptrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
@@ -652,7 +657,7 @@ body.app h2, body.app #intro, body.app #intro-away { display:none; }
     ptrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
     if (pinch && ptrs.size === 2) {
       const p = Array.from(ptrs.values()), d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y), r = d / pinch.d0;
-      if (!pinch.done && (r > 1.35 || r < 0.74)) { pinch.done = true; zoomTo(r > 1 ? pinch.z0 * 2 : pinch.z0 / 2); }
+      if (!pinch.done && (r > 1.35 || r < 0.74)) { pinch.done = true; zoomTo(zstep(pinch.z0, r > 1 ? 1 : -1)); }
       return;
     }
     if (drag) {
@@ -674,7 +679,7 @@ body.app h2, body.app #intro, body.app #intro-away { display:none; }
   pan.addEventListener("wheel", function(e) {
     e.preventDefault();
     if (!state) return;
-    if (e.ctrlKey) { zoomTo(e.deltaY < 0 ? state.zoom * 2 : state.zoom / 2); return; }
+    if (e.ctrlKey) { zoomTo(zstep(state.zoom, e.deltaY < 0 ? 1 : -1)); return; }
     const n = (e.shiftKey ? 10 : 1) * (e.deltaY < 0 ? 1 : -1);
     tuneTo(cur("freq") + n * state.step);           /* from the frequency asked last: steps add up */
   }, {passive: false});
@@ -773,7 +778,7 @@ body.app h2, body.app #intro, body.app #intro-away { display:none; }
   document.querySelectorAll(".b.tg").forEach(function(el) { el.addEventListener("click", function() { if (state) set(el.dataset.set, state[el.dataset.set] ? 0 : 1); }); });
   $("#b-mode").on("click", function() { if (state) popList("Mode", MODES.slice(0, nModes).map(function(m, i) { return {t: m, v: i}; }), state.mode, function(v) { set("mode", v); }); });
   $("#b-step").on("click", function() { if (state) popList("Tuning step", STEPS.map(function(s) { return {t: fmtStep(s), v: s}; }), state.step, function(v) { set("step", v); }); });
-  $("#b-zoom").on("click", function() { if (state) zoomTo(state.zoom >= 8 ? 1 : state.zoom * 2); });
+  $("#b-zoom").on("click", function() { if (state) zoomTo(state.zoom >= 8 ? zmin() : zstep(state.zoom, 1)); });
   $("#b-agc").on("click", function() { if (state) popList("AGC", AGCS.map(function(a, i) { return {t: a, v: i}; }), state.agc, function(v) { set("agc", v); }); });
   $("#b-vfo").on("click", function() { set("vfo", 1); });
   $("#b-lock").on("click", function() { if (state) set("lock", ("ulock" in state ? state.ulock : state.lock) ? 0 : 1); });

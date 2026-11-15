@@ -11,6 +11,7 @@
  *  else into an LVGL image, scrolled the same way (new lines and tune slides only, not a
  *  full rebuild every refresh).
  */
+#include "zoom_span.h"
 #include "waterfall_view.h"
 
 #include "board.h"
@@ -88,8 +89,8 @@ static int32_t       wf_center_freq;    /* the frequency at the centre of the pi
 static int32_t       mode_lo_offset;    /* where the base's spectrum is centred, Hz from the dial */
 static int32_t       tx_lo_offset;      /* the same while it transmits (#191) */
 static int32_t       if_shift;
-static uint8_t       zoom = 1;
-static uint8_t       line_zoom = 1;  /* the zoom the VFO line and the passband were placed at */
+static int32_t       zoom = 1;       /* zoom_span.h: -1 and 0 the X6200's 384 and 192 kHz (#131) */
+static int32_t       line_zoom = 1;  /* the zoom the VFO line and the passband were placed at */
 
 static uint8_t       refresh_period = 1;   /* draw one refresh in so many (dialogs slow it down) */
 static uint8_t       refresh_count;
@@ -421,13 +422,13 @@ static void row_pixels(const wf_row_t *row, uint32_t center, uint32_t span, size
 }
 
 /* The zoom the picture is drawn at: the spectrum's, or 1 with the zoom switch of Settings "Line, zoom" off */
-static uint8_t shown_zoom(void) {
+static int32_t shown_zoom(void) {
     return params.waterfall_zoom.x ? zoom : 1;
 }
 
 /* The span the picture shows now */
 static uint32_t shown_span(void) {
-    return SPAN_HZ / shown_zoom();
+    return zoom_span_hz(shown_zoom());
 }
 
 /* ---- Direct mode ---- */
@@ -1941,7 +1942,7 @@ int32_t waterfall_view_shift(void) {
     int32_t shift = param_i_get(cfg_band_if_shift);
     int32_t vfo = cparam_i_get(cfg_fg_freq);
     int32_t rc = vfo - shift;
-    int32_t half = SPAN_HZ / 2 / param_i_get(cfg_mode_zoom);
+    int32_t half = zoom_span_hz(param_i_get(cfg_mode_zoom)) / 2;
     int32_t x = vfo - view_center;      /* the line, Hz from the centre of the view */
     int32_t lo, hi;
     bool    moved = vfo != last_vfo;
@@ -1982,11 +1983,11 @@ static void do_scroll_timer(lv_timer_t *t) {
         static double pos, vel;
         const double  k = 0.2, c = 0.694;
 
-        if (llround(pos) != wf_center_freq || LV_ABS(target - wf_center_freq) > SPAN_HZ) {
+        if (llround(pos) != wf_center_freq || LV_ABS(target - wf_center_freq) > (int32_t)shown_span()) {
             pos = wf_center_freq;   /* moved elsewhere, or a band change: from here */
             vel = 0;
         }
-        if (LV_ABS(target - wf_center_freq) > SPAN_HZ) {
+        if (LV_ABS(target - wf_center_freq) > (int32_t)shown_span()) {
             pos = target;           /* a band change: no slide across it */
         }
         vel += k * (target - pos) - c * vel;
@@ -2051,8 +2052,9 @@ static void update_middle_line(void) {
     /* At the picture's scale: with the zoom of "Line, zoom" off the waterfall shows 100 kHz at any spectrum zoom,
      * and the band came out that many times too wide, the line that far off the middle */
     line_zoom = shown_zoom();
-    lv_coord_t width = theme_shape.mono ? 3 : line_zoom / 2 + 3;     /* 1bit: the paper halo of vfo_core_cb() */
-    lv_coord_t vfo_x = (if_shift + waterfall_view_shift()) * line_zoom * WIDTH / SPAN_HZ;
+    lv_coord_t width = theme_shape.mono ? 3 : (line_zoom > 1 ? line_zoom / 2 : 0) + 3;   /* 1bit: vfo_core_cb()'s halo */
+    int64_t    span  = zoom_span_hz(line_zoom);
+    lv_coord_t vfo_x = (lv_coord_t)((int64_t)(if_shift + waterfall_view_shift()) * WIDTH / span);
 
     lv_obj_set_pos(vfo_line, vfo_x + width / 2, 0);
     /* 3D: towards the VFO line, straight through the stack; in Fixed mode the line moves across a still view, and
@@ -2064,8 +2066,8 @@ static void update_middle_line(void) {
     int32_t from, to;
 
     line_passband(&from, &to);
-    lv_coord_t x1 = WIDTH / 2 + vfo_x + from * line_zoom * WIDTH / SPAN_HZ;
-    lv_coord_t x2 = WIDTH / 2 + vfo_x + to * line_zoom * WIDTH / SPAN_HZ;
+    lv_coord_t x1 = WIDTH / 2 + vfo_x + (lv_coord_t)((int64_t)from * WIDTH / span);
+    lv_coord_t x2 = WIDTH / 2 + vfo_x + (lv_coord_t)((int64_t)to * WIDTH / span);
 
     lv_obj_set_pos(filter_band, x1, 0);
     lv_obj_set_width(filter_band, LV_MAX(x2 - x1, 1));

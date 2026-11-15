@@ -10,6 +10,7 @@
  * X6100 protocol implementation (Mfg 3087)
  */
 
+#include "zoom_span.h"
 #include "cat.h"
 #include "board.h"
 
@@ -1139,12 +1140,13 @@ static Frame *process_req(const Frame *req) {
                     case 0x15:  // Scope span settings: half span, follows the radio zoom
                         if (data_size <= 2) {
                             resp->set_payload_len(8);
-                            to_bcd(&resp->data[1] + 1, 50000 / cfg_sm.p_mode_zoom.get(), 10);
+                            to_bcd(&resp->data[1] + 1, zoom_span_hz(cfg_sm.p_mode_zoom.get()) / 2, 10);
                         } else if (data_size >= 7) {
                             int32_t span = from_bcd(&req->data[2], 10);
-                            int32_t zoom = 1;
-                            while (zoom < 8 && 50000 / (zoom * 2) >= span)
-                                zoom *= 2;
+                            int32_t zoom = ZOOM_MIN;
+                            /* the narrowest zoom whose half span still holds it (#131: from 192 kHz on an X6200) */
+                            while (zoom < ZOOM_MAX && zoom_span_hz(zoom_step(zoom, 1)) / 2 >= span)
+                                zoom = zoom_step(zoom, 1);
                             cfg_sm.p_mode_zoom.set(zoom);
                             resp->set_code(CODE_OK);
                         } else {
