@@ -65,6 +65,7 @@
 #include "keyboard.h"
 #include "main.h"             /* VERSION, the release in the title */
 #include "waterfall_view.h"   /* direct_hole_cb */
+#include "gpu.h"
 #include "lv_drivers/display/drm.h"
 #include "main_screen.h"
 #include "msg_box.h"
@@ -1741,6 +1742,9 @@ static box_t         r_dev, r_tune, r_pre, r_sig;
 static lv_timer_t   *rtl_timer;
 static int           rtl_img_h, rtl_preset, rtl_step = 2, rtl_drop;
 static bool          rtl_direct;    /* the picture turned straight onto the display's primary plane (rtl_present) */
+static bool          rtl_gpu;       /* and drawn there by the GPU (gpu.c): the CPU fills no pixels of it */
+static int           hf_bx = -1, rtl_bx = -1;  /* the GPU's brackets this frame: their columns, -1 none */
+static void          rtl_gpu_draw(const lv_area_t *a);
 
 /* The picture as drawn into rtl_frame shown: turned straight onto the display's primary plane under the GUI's hole
  * (one pass, no copy through LVGL), only while A or B shows it (elsewhere the plane is under another screen); without
@@ -1754,7 +1758,8 @@ static void rtl_present(void) {
         if (scr != SCR_SCAN && scr != SCR_RTL) return;
         lv_obj_update_layout(rtl_img);  /* its place, laid out (nothing done when it is) */
         lv_obj_get_coords(rtl_img, &a);
-        drm_wf_rotate((const uint32_t *)rtl_frame->data, a.x1, a.y1, RTL_COLS, rtl_img_h);
+        if (rtl_gpu) rtl_gpu_draw(&a);
+        else drm_wf_rotate((const uint32_t *)rtl_frame->data, a.x1, a.y1, RTL_COLS, rtl_img_h);
         return;
     }
 #endif
@@ -1873,6 +1878,25 @@ static void panel_trace(panel_t *p, const float *cols) {
     p->top_db += (want_top - p->top_db) * (want_top > p->top_db ? 0.5f : 0.08f);
     p->bot_db += (want_bot - p->bot_db) * 0.1f;
 
+    if (rtl_gpu) {      /* the GPU draws it (rtl_gpu_draw): per column its line's row, the span to the column before
+                         * and the level, in 0..255 of the trace's height */
+        static uint8_t tr[RTL_COLS][4];
+        int            hm = h > 1 ? h - 1 : 1;
+
+        for (int x = 0; x < RTL_COLS; x++) {
+            int y = h - 1 - (int)((cols[x] - p->bot_db) / (p->top_db - p->bot_db) * (h - 1));
+            y     = y < 0 ? 0 : y > h - 1 ? h - 1 : y;
+            int y0 = prev < 0 ? y : prev < y ? prev : y, y1 = prev < 0 ? y : prev > y ? prev : y;
+
+            tr[x][0] = (uint8_t)((y * 255 + hm / 2) / hm);
+            tr[x][1] = (uint8_t)((y0 * 255 + hm / 2) / hm);
+            tr[x][2] = (uint8_t)((y1 * 255 + hm / 2) / hm);
+            tr[x][3] = panel_level(p, cols[x]);
+            prev     = y;
+        }
+        gpu_trace_set(p == &p_hf ? 0 : 1, (const uint8_t (*)[4])tr);
+        return;
+    }
     for (int i = p->y0 * RTL_COLS; i < (p->y0 + h + RTL_SCALE_H) * RTL_COLS; i++) px[i] = bg;
     for (int d = (int)ceilf(p->bot_db / 10) * 10; d < p->top_db; d += 10) {
         int y = h - 1 - (int)((d - p->bot_db) / (p->top_db - p->bot_db) * (h - 1));
@@ -1902,7 +1926,7 @@ static void panel_render(const panel_t *p) {
     int       h = p->wf_h, y0 = p->wf_y0, n = p->count;
     float     cx = RTL_COLS / 2.0f;
 
-    if (h < 8) return;
+    if (h < 8 || rtl_gpu) return;       /* the GPU draws it from the rows (rtl_gpu_draw) */
     for (int i = y0 * RTL_COLS; i < (y0 + h) * RTL_COLS; i++) px[i] = bg;
     for (int r = n - 1; r >= 0; r--) {
         const uint8_t *lv     = p->rows[(p->head - 1 - r + D3_ROWS) % D3_ROWS];
@@ -1935,6 +1959,7 @@ static void panel_row(panel_t *p, const float *cols) {
 
     uint8_t *row = p->rows[p->head];
     for (int x = 0; x < RTL_COLS; x++) row[x] = panel_level(p, p->pend[x]);
+    if (rtl_gpu) gpu_levels_row(p == &p_hf ? 0 : 1, p->head, row);     /* into the GPU's ring as well */
     p->head = (p->head + 1) % D3_ROWS;
     if (p->count < D3_ROWS) p->count++;
     panel_render(p);
@@ -1956,6 +1981,7 @@ static void panel_shift(panel_t *p, int dx) {
         }
     }
     p->npend = 0;
+    if (rtl_gpu) gpu_levels_all(p == &p_hf ? 0 : 1, &p->rows[0][0]);
     panel_render(p);
 }
 
@@ -1998,6 +2024,7 @@ static void rtl_layout(void) {
         for (int y = p_rtl.y0 - 3; y < p_rtl.y0 - 1; y++)
             for (int x = 0; x < RTL_COLS; x++) px[y * RTL_COLS + x] = line;
     rtl_drawn = 0;
+    hf_bx = rtl_bx = -1;
     lv_label_set_text(rtl_src_l[0], "");
     lv_label_set_text(rtl_src_l[1], "");
     for (int i = 0; i < RTL_TICKS; i++) {
@@ -2006,6 +2033,41 @@ static void rtl_layout(void) {
     }
     for (int i = 0; i < RTL_PEAKS; i++) lv_obj_add_flag(rtl_peak_l[i], LV_OBJ_FLAG_HIDDEN);
     rtl_present();
+}
+
+/* The GPU's bracket on a trace (at landscape x0, y0, height h): the channel's sides from 2 rows down to 2 rows up,
+ * and their ends turned 4 pixels inwards, as the CPU's */
+static void gpu_bracket(int x0, int y0, int x, int h) {
+    uint32_t line = argb(amb);
+
+    gpu_rect(x0 + x - 10, y0 + 2, 1, h - 3, line);
+    gpu_rect(x0 + x + 10, y0 + 2, 1, h - 3, line);
+    gpu_rect(x0 + x - 10, y0 + 2, 4, 1, line);
+    gpu_rect(x0 + x + 7, y0 + 2, 4, 1, line);
+    gpu_rect(x0 + x - 10, y0 + h - 2, 4, 1, line);
+    gpu_rect(x0 + x + 7, y0 + h - 2, 4, 1, line);
+}
+
+/* The picture by the GPU, into the plane under the hole at a: each half's trace (once it has one), its 3D rows and
+ * its bracket, the split's line between them; the CPU's drawing of it (rtl_frame) skipped */
+static void rtl_gpu_draw(const lv_area_t *a) {
+    int      view = spec_view(), x0 = a->x1, y0 = a->y1;
+    uint32_t grid = argb(faint);
+
+    if (!gpu_frame_begin(x0, y0, RTL_COLS, rtl_img_h, argb(ink))) return;
+    if (view != VIEW_RTL) {
+        if (p_hf.floor > -250) gpu_trace(0, x0, y0 + p_hf.y0, RTL_COLS, p_hf.trace_h, p_hf.bot_db, p_hf.top_db, grid);
+        gpu_rows(0, x0, y0 + p_hf.wf_y0, RTL_COLS, p_hf.wf_h, p_hf.head, p_hf.count);
+        if (hf_bx >= 0) gpu_bracket(x0, y0 + p_hf.y0, hf_bx, p_hf.trace_h);
+    }
+    if (view != VIEW_X6200) {
+        if (p_rtl.floor > -250)
+            gpu_trace(1, x0, y0 + p_rtl.y0, RTL_COLS, p_rtl.trace_h, p_rtl.bot_db, p_rtl.top_db, grid);
+        gpu_rows(1, x0, y0 + p_rtl.wf_y0, RTL_COLS, p_rtl.wf_h, p_rtl.head, p_rtl.count);
+        if (rtl_bx > -20 && rtl_bx < RTL_COLS + 20) gpu_bracket(x0, y0 + p_rtl.y0, rtl_bx, p_rtl.trace_h);
+    }
+    if (view == VIEW_SPLIT) gpu_rect(x0, y0 + p_rtl.y0 - 3, RTL_COLS, 2, argb(amb));
+    gpu_frame_end();
 }
 
 /* MHz without the zeros at the end: 118, 162.55, 467.725 */
@@ -2584,7 +2646,9 @@ static void rtl_timer_cb(lv_timer_t *t) {
         hf_seen = last_seq;
         to_cols(avg_db, nbins, centre - span_hz / 2.0, bin_hz, centre - VIEW_HZ / 2, HZ_PX, hf_cols);
         panel_trace(&p_hf, hf_cols);
-        {   /* the dial: the X6200's channel, as the stick's is bracketed below */
+        if (rtl_gpu) {
+            hf_bx = RTL_COLS / 2;       /* the GPU's bracket (rtl_gpu_draw) */
+        } else {   /* the dial: the X6200's channel, as the stick's is bracketed below */
             uint32_t *px = (uint32_t *)rtl_frame->data, line = argb(amb);
             int       x  = RTL_COLS / 2;
 
@@ -2627,7 +2691,10 @@ static void rtl_timer_cb(lv_timer_t *t) {
             continue;
         }
         panel_trace(&p_rtl, rtl_cols);
-        if (listen_hz) {                    /* F's channel (the VFO knob's): a bracket on the trace */
+        rtl_bx = -100;
+        if (listen_hz && rtl_gpu) {
+            rtl_bx = (int)lround((listen_hz - lo) / px_hz);     /* the GPU's bracket (rtl_gpu_draw) */
+        } else if (listen_hz) {             /* F's channel (the VFO knob's): a bracket on the trace */
             int x = (int)lround((listen_hz - lo) / px_hz);
             uint32_t *px = (uint32_t *)rtl_frame->data, line = argb(amb);
 
@@ -2723,6 +2790,8 @@ static void build_rtl(lv_obj_t *p) {
 #if USE_DRM
     rtl_direct = drm_planes();
 #endif
+    rtl_gpu = rtl_direct && gpu_init(RTL_COLS, D3_ROWS);   /* the GPU there (Mesa on the image): it draws it */
+    if (rtl_gpu) gpu_palette(d3_pal);
     if (rtl_direct) {   /* the picture on the primary plane (rtl_present), the GUI a hole over it: the ticks, peaks
                          * and the bracket's labels drawn over the hole. LVGL drew it (a copy into its buffer), turned
                          * it onto the panel (a second) and copied that (a third), each frame: most of the GUI

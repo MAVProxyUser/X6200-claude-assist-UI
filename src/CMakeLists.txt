@@ -49,7 +49,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     dialog_modes.c
     apps_menu.c
     birdie.c dialog_birdie.c
-    app_sentry.c
+    app_sentry.c gpu.c
     adsb.c adsb_rx.c app_adsb.c rtl_spectrum.c
     first_start.c first_start_rule.c
     dialog_cw_trainer.c
@@ -153,6 +153,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Threads::Threads
     lvgl lvgl::drivers
     ${HW_LIBS} liquid ft8
+    ${CMAKE_DL_LIBS}    # gpu.c: Mesa loaded at run time
 )
 
 # RADE (FreeDV): freedv/rade_c and the Opus fork with FARGAN, built outside by tools/rade/build.sh

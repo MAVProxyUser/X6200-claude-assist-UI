@@ -108,6 +108,7 @@ static bool                 portrait_mode;  /* LVGL renders 480x800: turned 180,
 static bool                 wf_claimed;     /* a picture drawn on the primary plane by its owner (drm_wf_rotate) */
 static const uint32_t       *wf_src;        /* its last one, landscape: into wf_shadow only for a dump */
 static lv_area_t            wf_src_a;
+static int                  wf_gpu_buf = -1;    /* the buffer the GPU drew last (drm_wf_drawn), its area wf_src_a */
 
 /**********************
  *   STATIC FUNCTIONS
@@ -417,11 +418,19 @@ static void rotate_into(uint32_t *dst, int32_t stride, const lv_area_t *a, const
 }
 #endif
 
-/* The owner's last picture into wf_shadow, for a dump or a snapshot (not each frame: nothing else reads it) */
+/* The owner's last picture into wf_shadow, for a dump or a snapshot (not each frame: nothing else reads it): turned
+ * from its source, or read back from the buffer the GPU drew (slow, write-combined, but only for a dump) */
 static void wf_src_shadow(void) {
 #if BOARD_FB_ROTATE_90
     if (wf_claimed && wf_src && wf_shadow) {
         rotate_into(wf_shadow, PANEL_W, &wf_src_a, wf_src);
+    } else if (wf_claimed && wf_gpu_buf >= 0 && wf_shadow) {
+        const struct drm_buffer *b  = &primary.bufs[wf_gpu_buf];
+        int32_t                  px = wf_src_a.y1, pw = lv_area_get_height(&wf_src_a);
+
+        for (int32_t y = LAND_W - 1 - wf_src_a.x2; y <= LAND_W - 1 - wf_src_a.x1; y++) {
+            memcpy(wf_shadow + y * PANEL_W + px, b->map + y * b->pitch + px * 4, (size_t) pw * 4);
+        }
     }
 #endif
 }
@@ -681,6 +690,7 @@ void drm_wf_present_ring(const uint32_t *src, int32_t x, int32_t w, int32_t head
 void drm_wf_claim(bool on) {
     wf_claimed = on;
     wf_src     = NULL;
+    wf_gpu_buf = -1;
     nstrips    = 0;         /* the strips presented before: theirs to present again whole, never copied over it */
 }
 
@@ -695,14 +705,54 @@ bool drm_wf_rotate(const uint32_t *src, int32_t lx, int32_t ly, int32_t w, int32
     wait_flip();                        /* the back buffer was on screen until this flip */
     rotate_into((uint32_t *) primary.bufs[primary.back].map, (int32_t) (primary.bufs[primary.back].pitch / 4), &a,
                 src);
-    wf_src   = src;
-    wf_src_a = a;
+    wf_src     = src;
+    wf_src_a   = a;
+    wf_gpu_buf = -1;
     primary.ready = true;
     return true;
 #else
     (void) src, (void) lx, (void) ly, (void) w, (void) h;
     return false;
 #endif
+}
+
+bool drm_wf_export(int fds[2], uint32_t pitch[2], int32_t *w, int32_t *h) {
+#if BOARD_FB_ROTATE_90
+    if (!planes || fd < 0) {
+        return false;
+    }
+    for (int i = 0; i < 2; i++) {
+        if (drmPrimeHandleToFD(fd, primary.bufs[i].handle, DRM_CLOEXEC | DRM_RDWR, &fds[i])) {
+            err("primary buffer %d not exported: %s", i, strerror(errno));
+            if (i) {
+                close(fds[0]);
+            }
+            return false;
+        }
+        pitch[i] = primary.bufs[i].pitch;
+    }
+    *w = PANEL_W;
+    *h = PANEL_H;
+    return true;
+#else
+    (void) fds, (void) pitch, (void) w, (void) h;
+    return false;
+#endif
+}
+
+int drm_wf_back(void) {
+    if (!planes || !wf_claimed || portrait_mode || fd < 0) {
+        return -1;
+    }
+    wait_flip();                        /* the back buffer was on screen until this flip */
+    return primary.back;
+}
+
+void drm_wf_drawn(int32_t lx, int32_t ly, int32_t w, int32_t h) {
+    wf_src     = NULL;
+    wf_gpu_buf = primary.back;
+    wf_src_a   = (lv_area_t){ lx, ly, lx + w - 1, ly + h - 1 };
+    primary.ready = true;
 }
 
 uint32_t drm_frame_ms(void) {

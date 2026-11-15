@@ -53,6 +53,13 @@ void drm_wf_claim(bool on);
 /* Claimed: a landscape picture (src packed, w x h, ARGB/XRGB) at landscape lx, ly turned straight into the primary
  * plane's back buffer, shown at the next drm_commit(). false (nothing done): no planes, not claimed, portrait */
 bool drm_wf_rotate(const uint32_t *src, int32_t lx, int32_t ly, int32_t w, int32_t h);
+/* The GPU's way to the same (gpu.c): the primary plane's two buffers as dma-bufs (fds the caller owns, their pitch),
+ * portrait PANEL x PANEL pixels XRGB8888; false without planes or a turned panel */
+bool drm_wf_export(int fds[2], uint32_t pitch[2], int32_t *w, int32_t *h);
+/* Claimed and landscape: the back buffer's index (0, 1), free once the last flip is done (waited for here); -1 not
+ * now. Then, drawn and finished, drm_wf_drawn(): shown at the next drm_commit(), the landscape area noted for a dump */
+int drm_wf_back(void);
+void drm_wf_drawn(int32_t lx, int32_t ly, int32_t w, int32_t h);
 /* Shows what was flushed or presented since the last call, at the next vblank:
  * once per main loop, after lv_timer_handler() */
 void drm_commit(void);
