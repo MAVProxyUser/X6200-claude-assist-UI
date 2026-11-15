@@ -365,6 +365,38 @@ if [ $MODEL = x6200 ]; then
     echo "# CONFIG_VIDEO_LOGO is not set" >> $UBOOT_DEFCONFIG
 fi
 
+echo "== The kernel set and U-Boot without the time they were built at"
+# Built again from the same sources and configs, the SD card's kernel set (zImage, the DTB, boot.scr) and U-Boot are
+# the same bytes. x6100-update bundle-info offers the update question's kernel and U-Boot boxes when the bundle's
+# differ from the card's, and the build's own time (the kernel's uname -v, U-Boot's version line, the mkimage headers
+# of boot.scr and U-Boot's FIT), the kernel's user, host and link count ticked both at every release. Each part has a
+# date of its own, made from its inputs (buildroot's commit, the defconfig's lines and the files for it, as this
+# script left them): 1 January 2026, at a time of day they give, which a change to them moves and nothing else does.
+# Set in the external tree's external.mk, which buildroot reads after linux.mk and uboot.mk. A tree built here before
+# keeps the kernel and U-Boot it has until they are built again
+boot_epoch() {   # the part's lines of the buildroot defconfig (grep -E), then its files and directories in br2_external
+    local re=$1 h; shift
+    h=$( { git -c safe.directory='*' -C $BR/buildroot rev-parse HEAD 2>/dev/null || true
+           grep -E "$re" $DEFCONFIG || true
+           cd $EXT && { find "$@" -type f 2>/dev/null || true; } | LC_ALL=C sort | xargs -r sha256sum; } | sha256sum)
+    echo $((1767225600 + 0x${h:0:8} % 86400))
+}
+KERNEL_EPOCH=$(boot_epoch '^BR2_(LINUX_KERNEL|PACKAGE_HOST_UBOOT_TOOLS)' board/$M/linux/sun8i-r16-${MODEL}_defconfig \
+    $(cd $EXT && ls board/$M/linux/*.patch 2>/dev/null) board/$M/dts board/$M/drivers board/$M/patches/linux linux \
+    board/$M/u-boot/boot.cmd)
+UBOOT_EPOCH=$(boot_epoch '^BR2_TARGET_UBOOT' board/$M/dts board/$M/patches/uboot \
+    $(cd $EXT && find board/$M/u-boot -type f ! -name boot.cmd))
+[ -z "$(tail -c1 $EXT/external.mk)" ] || echo >> $EXT/external.mk
+sed -i '/OPENX6X00_BOOT/d' $EXT/external.mk
+printf '%s\n' "# OPENX6X00_BOOT: the kernel set's and U-Boot's dates (OpenX6X00's buildroot/local-build.sh)" \
+    "OPENX6X00_BOOT_KERNEL_EPOCH = $KERNEL_EPOCH" \
+    "OPENX6X00_BOOT_KERNEL_DATE = $(LC_ALL=C date -u -d @$KERNEL_EPOCH)" \
+    "OPENX6X00_BOOT_UBOOT_EPOCH = $UBOOT_EPOCH" \
+    'LINUX_MAKE_ENV += KBUILD_BUILD_VERSION=1 KBUILD_BUILD_USER=goldcorphf KBUILD_BUILD_HOST=buildroot KBUILD_BUILD_TIMESTAMP="$(OPENX6X00_BOOT_KERNEL_DATE)"' \
+    'UBOOT_MAKE_OPTS += SOURCE_DATE_EPOCH=$(OPENX6X00_BOOT_UBOOT_EPOCH)' \
+    '$(HOST_UBOOT_TOOLS_TARGET_BUILD): export SOURCE_DATE_EPOCH = $(OPENX6X00_BOOT_KERNEL_EPOCH)' >> $EXT/external.mk
+grep "OPENX6X00_BOOT_.* = " $EXT/external.mk
+
 echo "== Configure"
 cd $BR && bash ./br_config.sh
 
