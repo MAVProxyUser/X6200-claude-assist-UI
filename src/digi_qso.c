@@ -11,6 +11,9 @@
 #include <string.h>
 
 #include "msg.h"
+#include "dialog_field.h"
+
+#include <time.h>
 
 static char    qso_dx[16];
 static uint8_t rst_s = 9;          /* the strength digit, 1..9 */
@@ -134,3 +137,90 @@ const char *digi_qso_feed_rx(char c) {
     }
     return NULL;
 }
+
+/* ---- The shared keys (#55) -------------------------------------------- */
+
+static char   logged_call[16];
+static time_t logged_at;
+
+static void refresh(button_data_t *b) {
+    if (b->disp_btn) buttons_refresh(b);
+}
+
+void digi_qso_refresh_keys(void) {
+    refresh(&btn_digi_log);
+}
+
+static const char *rsts_label(void) {
+    static char buf[24];
+
+    snprintf(buf, sizeof(buf), "RST snt\n%s", rst_s_str);
+    return buf;
+}
+
+static const char *rstr_label(void) {
+    static char buf[24];
+
+    snprintf(buf, sizeof(buf), "RST rcvd\n%s", rst_r_str);
+    return buf;
+}
+
+static const char *log_label(void) {
+    static char buf[32];
+
+    snprintf(buf, sizeof(buf), "Log QSO\n%s", qso_dx[0] ? qso_dx : "---");
+    return buf;
+}
+
+static void rsts_press(button_data_t *b) {
+    digi_qso_change_rst_sent(1);
+    refresh(b);
+}
+
+static void rsts_hold(button_data_t *b) {
+    while (digi_qso_change_rst_sent(0) != 9) digi_qso_change_rst_sent(1);
+    refresh(b);
+}
+
+static void rstr_press(button_data_t *b) {
+    digi_qso_change_rst_rcvd(1);
+    refresh(b);
+}
+
+static void rstr_hold(button_data_t *b) {
+    while (digi_qso_change_rst_rcvd(0) != 9) digi_qso_change_rst_rcvd(1);
+    refresh(b);
+}
+
+static void log_qso(bool again) {
+    char   text[48];
+    time_t now = time(NULL);
+
+    if (!qso_dx[0]) {
+        msg_update_text_fmt("Nothing to log: no DX call yet");
+        return;
+    }
+    if (!again && !strcmp(logged_call, qso_dx) && now - logged_at < 600) {
+        msg_update_text_fmt("%s logged %d min ago: hold Log QSO to log it again", qso_dx, (int)(now - logged_at) / 60);
+        return;
+    }
+    snprintf(text, sizeof(text), "%s|%s|%s", qso_dx, rst_s_str, rst_r_str);
+    if (dialog_field_qso_log(text)) {    /* it says "QSO logged: ..." itself */
+        snprintf(logged_call, sizeof(logged_call), "%s", qso_dx);
+        logged_at = now;
+    }
+}
+
+static void log_press(button_data_t *b) {
+    (void)b;
+    log_qso(false);
+}
+
+static void log_hold(button_data_t *b) {
+    (void)b;
+    log_qso(true);
+}
+
+button_data_t btn_digi_rsts = {.type = BTN_TEXT_FN, .label_fn = rsts_label, .press = rsts_press, .hold = rsts_hold};
+button_data_t btn_digi_rstr = {.type = BTN_TEXT_FN, .label_fn = rstr_label, .press = rstr_press, .hold = rstr_hold};
+button_data_t btn_digi_log  = {.type = BTN_TEXT_FN, .label_fn = log_label, .press = log_press, .hold = log_hold};

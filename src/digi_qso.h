@@ -43,6 +43,15 @@ const char *digi_qso_feed_rx(char c);
 bool        digi_qso_autograb(void);
 bool        digi_qso_toggle_autograb(void);
 
+/* Keys shared by PSK31/PSK63, Olivia/Contestia and JTTY (#55). RST rcvd: a press steps the received report's
+ * strength digit, a hold puts it back to 599. Log QSO: the DX call and the two reports into the day's log, in the
+ * open app's mode, on the radio's frequency, as the browser panel's Log tab logs them (dialog_field_qso_log: Wavelog,
+ * an activation's log in Field Ops, WSJT-X UDP); the same call again within 10 minutes only on a hold. RST snt for
+ * an app without its own (JTTY). digi_qso_refresh_keys: after the DX call changed while one of them shows */
+#include "buttons.h"
+extern button_data_t btn_digi_rsts, btn_digi_rstr, btn_digi_log;
+void digi_qso_refresh_keys(void);
+
 #ifdef __cplusplus
 }
 #endif

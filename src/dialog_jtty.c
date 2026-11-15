@@ -236,7 +236,7 @@ static buttons_page_t page_1 = {{&btn_p1, &btn_text, &btn_stop, &btn_dx, &btn_st
 static buttons_page_t page_2 = {{&btn_p2, &btn_f1, &btn_f2, &btn_f3, &btn_f4}};
 static buttons_page_t page_3 = {{&btn_p3, &btn_f5, &btn_f6, &btn_f7, &btn_f8}};
 static buttons_page_t page_4 = {{&btn_p4, &btn_serial, &btn_tol, &btn_dial, &btn_clear}};
-static buttons_page_t page_5 = {{&btn_p5, &btn_ext_tune}};
+static buttons_page_t page_5 = {{&btn_p5, &btn_ext_tune, &btn_digi_rsts, &btn_digi_rstr, &btn_digi_log}};
 
 static dialog_t dialog = {
     .run = false,
@@ -254,6 +254,8 @@ static void refresh_btn(button_data_t *b)
 {
     if (b && b->disp_btn)
         buttons_refresh(b);
+    if (b == &btn_dx)
+        digi_qso_refresh_keys();    /* Log QSO shows the call too */
 }
 
 /* ---- Text panel ------------------------------------------------------- */
@@ -1072,6 +1074,7 @@ static void dx_hold_cb(button_data_t *b)
     digi_qso_clear();
     msg_update_text_fmt("QSO cleared");
     buttons_refresh(b);
+    digi_qso_refresh_keys();
 }
 
 /* ---- Dialog callbacks ------------------------------------------------- */

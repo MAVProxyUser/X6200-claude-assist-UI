@@ -316,7 +316,7 @@ static buttons_page_t page_5 = {
     {&btn_p5, &btn_macro8, &btn_macro9, &btn_macro10, &btn_macro11}
 };
 static buttons_page_t page_6 = {
-    {&btn_p6, &btn_ext_tune}
+    {&btn_p6, &btn_ext_tune, &btn_digi_rstr, &btn_digi_log}
 };
 
 static dialog_t dialog = {
@@ -337,6 +337,8 @@ static void refresh_btn(button_data_t *b)
 {
     if (b && b->disp_btn)
         buttons_refresh(b);
+    if (b == &btn_dx)
+        digi_qso_refresh_keys();    /* Log QSO shows the call too */
 }
 
 /* ---- Received text ---------------------------------------------------- */
@@ -1291,6 +1293,7 @@ static void dx_hold_cb(button_data_t *b)
     digi_qso_clear();
     msg_update_text_fmt("QSO cleared");
     buttons_refresh(b);
+    digi_qso_refresh_keys();
     refresh_btn(&btn_rst);
 }
 
