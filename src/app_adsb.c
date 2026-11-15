@@ -61,6 +61,8 @@ extern const lv_font_t pixel_16, pixel_20, pixel_28;
 #define SPARK_H   22
 #define SPARK_N   104           /* seconds, 4 px each */
 #define SWEEP_S   4.0
+#define SCOPE_DIV 2             /* with the GPU the scope is drawn twice as often as the rest (10 a second: 25 cost 5% of a
+                                 * core more, Mesa and the kernel per frame, 2026-11-15) */
 
 static void construct_cb(lv_obj_t *parent);
 static void destruct_cb(void);
@@ -156,7 +158,20 @@ static uint32_t mix(uint32_t fg, uint32_t bg, int a) {
     return 0xff000000 | r << 16 | g << 8 | b;
 }
 
+/* The scope's points that never move (the rings, the crosshair): put() into fixed_pt keeps them here */
+static struct {
+    int16_t  x, y;
+    uint32_t c;
+} fixed[2400];
+static int       n_fixed;
+static uint32_t  fixed_pt[1];          /* a marker: put() with it keeps the point in fixed[] */
+
 static void put(uint32_t *px, int x, int y, uint32_t c) {
+    if (px == fixed_pt) {
+        if (n_fixed < (int)(sizeof(fixed) / sizeof(fixed[0]))) fixed[n_fixed].x = (int16_t)x, fixed[n_fixed].y = (int16_t)y,
+                                                                fixed[n_fixed++].c = c;
+        return;
+    }
     if (x >= 0 && y >= 0 && x < SC && y < SC) {
         if (px) px[y * SC + x] = c;
         else gpu_point(sc_ox + x, sc_oy + y, c);
@@ -327,12 +342,16 @@ static void draw_scope(double now, const int *idx, int n) {
         int d = (sweep - a + 3600) % 3600;
         px[i] = d < 900 ? glow[(900 - d) * 63 / 900] : c_ink;
     }
-    for (int k = 1; k <= 4; k++) circle(px, cx, cy, R * k / 4, k == 4 ? 0.25 : 3.0, k == 4 ? c_dim : c_faint);
+    if (!n_fixed) {                     /* the rings' and crosshair's points, worked out once (sin, cos) */
+        for (int k = 1; k <= 4; k++) circle(fixed_pt, cx, cy, R * k / 4, k == 4 ? 0.25 : 3.0, k == 4 ? c_dim : c_faint);
+        for (int t = -(int)R; t <= (int)R; t += 4)
+            put(fixed_pt, (int)cx + t, (int)cy, c_faint), put(fixed_pt, (int)cx, (int)cy + t, c_faint);
+    }
+    for (int i = 0; i < n_fixed; i++) put(px, fixed[i].x, fixed[i].y, fixed[i].c);
     for (int a = 0; a < 360; a += 30) {
         double s = sin(a * M_PI / 180), c = cos(a * M_PI / 180);
         line(px, (int)lround(cx + R * s), (int)lround(cy - R * c), (int)lround(cx + (R + 6) * s), (int)lround(cy - (R + 6) * c), c_dim);
     }
-    for (int t = -(int)R; t <= (int)R; t += 4) put(px, (int)cx + t, (int)cy, c_faint), put(px, (int)cx, (int)cy + t, c_faint);
     {   /* the sweep */
         double s = sin(sweep * M_PI / 1800), c = cos(sweep * M_PI / 1800);
         line(px, (int)cx, (int)cy, (int)lround(cx + R * s), (int)lround(cy - R * c), mix(c_amb, c_ink, 150));
@@ -616,8 +635,21 @@ static void refresh(void) {
     lv_obj_invalidate(spark_img);
 }
 
+/* Every 200 ms all of it; with the GPU the scope alone between (SCOPE_DIV - 1 times): the sweep turns smoothly */
 static void timer_cb(lv_timer_t *t) {
+    static int tick;
+
     (void)t;
+    if (sc_gpu && ++tick % SCOPE_DIV) {
+        double now = adsb_now();
+        int    idx[ADSB_MAX_PLANES], n;
+
+        adsb_lock();
+        n = order(idx, now);
+        draw_scope(now, idx, n);
+        adsb_unlock();
+        return;
+    }
     refresh();
 }
 
@@ -939,6 +971,7 @@ static void construct_cb(lv_obj_t *parent) {
     c_dim   = argb(dim);
     c_faint = argb(faint);
     for (int i = 0; i < 64; i++) glow[i] = mix(c_amb, c_ink, i * 60 / 63);
+    n_fixed = 0;                        /* the theme's colours: the fixed points again */
 
     ang = malloc(sizeof(uint16_t) * SC * SC);
     if (ang) {
@@ -973,7 +1006,7 @@ static void construct_cb(lv_obj_t *parent) {
     rot_acc = 0;
     show_keys();
     if (ang) refresh();
-    timer = lv_timer_create(timer_cb, 200, NULL);
+    timer = lv_timer_create(timer_cb, sc_gpu ? 200 / SCOPE_DIV : 200, NULL);
 }
 
 static void destruct_cb(void) {
