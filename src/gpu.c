@@ -568,7 +568,7 @@ static bool gui_layer(EGLDisplay dpy) {
         return false;
     }
     if (!drm_gui_export(ov, pitch, &g)) {
-        fprintf(stderr, "gpu: no /dev/udmabuf, not switched on (/mnt/gpu_gui) or no planes: the GUI's layer turned by "
+        fprintf(stderr, "gpu: no /dev/udmabuf, /mnt/gpu_gui.off or no planes: the GUI's layer turned by "
                         "the processor\n");
         return false;
     }

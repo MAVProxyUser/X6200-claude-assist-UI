@@ -938,10 +938,11 @@ bool drm_gui_export(int ov_fds[2], uint32_t ov_pitch[2], int *gui_fd) {
     if ((dev = open("/dev/udmabuf", O_RDWR | O_CLOEXEC)) < 0) {
         return false;                   /* a kernel without it: the processor turns the GUI, as before */
     }
-    if (access("/mnt/gpu_gui", F_OK) != 0) {
-        /* Not yet by default: the udmabuf path has not run on a radio (2026-11-15, the kernel with it came after
-         * the code). Switched on by that file until it has */
-        err("udmabuf here, the GPU's GUI layer off until /mnt/gpu_gui exists (not yet tested)");
+    if (access("/mnt/gpu_gui.off", F_OK) == 0) {
+        /* On by default since it ran on the radio (2026-11-15, v0.3.12.23's kernel: the Sentry's A right, read back
+         * from the panel; the GUI's main thread 15.5 -> 15.0 % of a core, the whole-buffer cache clean of each frame's
+         * DMA_BUF_IOCTL_SYNC END taking most of what the turn saved). That file leaves the layer to the processor */
+        err("udmabuf here, the GPU's GUI layer off (/mnt/gpu_gui.off)");
         close(dev);
         return false;
     }

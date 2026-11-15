@@ -8919,7 +8919,7 @@ The DATA partition, readable on a PC.
 | `bootvideo.mp4`, `bootvideo-portrait.mp4` | your own [boot video](#boot-video), and its portrait twin for the X6200's video engine |
 | `bootvideo.off` | an empty file: no boot video, yours or the image's |
 | `gpu.off` | an empty file: the X6200's [graphics processor](#graphics-processor-x6200) left out, the processor draws everything (from the next start of the GUI) |
-| `gpu_gui` | an empty file: the X6200's GPU also turns the GUI's layer onto the panel, with a kernel that has udmabuf (a test, off by default) |
+| `gpu_gui.off` | an empty file: the X6200's GPU leaves the GUI's own layer to the processor (with a kernel that has udmabuf the GPU turns it by default); `gpu_gui` switched it on in v0.3.12.21 to .24 |
 | `tx_ranges.conf` | the own TX list for TX ranges > Own list: one `from-to` range a line in MHz, `#` comments; none or empty: no TX with Own list (see [Amateur bands only](#amateur-bands-only)) |
 | `data_fsck.log` | what the last start's check of DATA found, or that the start formatted it and moved the system's `/mnt` files onto it. While the radio runs without DATA, why it left the partition alone and what to do, in the system's `/mnt` folder it runs on (the Files page shows that one then) |
 | `found_on_system/` | files the radio wrote into the system partition's `/mnt` folder while DATA was there but not mounted, put here at the next start that mounted it; `found_on_system.2/`, `.3/` ... when one is there already (nothing on DATA is written over). A DATA without settings of its own (no `params.db`, as after a format on a PC) gets them on its top level instead, the names it has already left here (a database with its `-wal`, `-shm` and `-journal` when DATA has one of those names: SQLite reads a journal into the database of its name). Files that cannot all be copied, or found when the check did not leave DATA clean ("check not clean: ..." in `data_fsck.log`), stay on the system partition until a start that can move them; a DATA without settings of its own is then not used at that start: the radio comes up with the settings kept there |
@@ -9064,9 +9064,10 @@ The GUI's main thread, as a share of one core (measured on the radio, over
 | Main screen, 3D waterfall | 24.6 % | 11.3 % |
 
 Everything else on the screen (the text, the buttons, the meters) is drawn by
-LVGL in memory as before, then copied and turned by the processor onto the
-panel, which is portrait (480x800) under the landscape picture. The GPU draws
-on the display's lower plane, under holes in that layer.
+LVGL in memory as before, then turned onto the panel, which is portrait
+(480x800) under the landscape picture: by the GPU with a kernel that has
+udmabuf, else by the processor (see below). The pictures above are drawn on the
+display's lower plane, under holes in that layer.
 
 - **Turning it off**: an empty `/mnt/gpu.off` on the DATA partition (SFTP or
   `touch /mnt/gpu.off` over [SSH](#ssh)), then a restart of the GUI or the
@@ -9078,14 +9079,18 @@ on the display's lower plane, under holes in that layer.
   lines beginning `gpu:`, whether the GPU draws (`Mali400 draws the Sentry's
   pictures into the display's plane`) or why the processor does (no Mesa on
   the image, `/mnt/gpu.off`, EGL not started ...).
-- **The GUI's own layer on the GPU (a test, off by default)**: with a kernel
-  that has udmabuf (bundles from v0.3.12.21 with "Also the kernel", see
-  [The SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot)) and an
-  empty `/mnt/gpu_gui`, the GPU also turns that layer onto the panel instead
-  of the processor. Not yet tried on a radio with such a kernel: the log says
-  `the GUI's layer turned onto the panel by the GPU (udmabuf)` when it is on;
-  if a frame fails to draw, the processor takes the layer back for the rest of
-  the run. Delete `/mnt/gpu_gui` to leave it to the processor.
+- **The GUI's own layer on the GPU**: with a kernel that has udmabuf (bundles
+  from v0.3.12.21 with "Also the kernel", see
+  [The SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot)), the GPU
+  also turns that layer onto the panel instead of the processor (on by default
+  from the release after v0.3.12.24; in v0.3.12.21 to .24 only with an empty
+  `/mnt/gpu_gui`). The log says `the GUI's layer turned onto the panel by the
+  GPU (udmabuf)`; if a frame fails to draw, the processor takes the layer back
+  for the rest of the run. It saves little: on the Sentry's A, 15.0 % of a core
+  for the GUI's main thread against 15.5 % (2026-11-15), as the kernel cleans
+  the processor's cache over the whole layer for each frame the GPU reads. An
+  empty `/mnt/gpu_gui.off` leaves the layer to the processor, the rest on the
+  GPU.
 - **The X6100** has the same processor and graphics processor, but its image
   carries no Mesa: the processor draws everything there, as before (the GUI's
   log: `no Mesa on this image`).
