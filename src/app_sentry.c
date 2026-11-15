@@ -1441,6 +1441,7 @@ static void walkie_key_label(int k, char *s, size_t n);
 static int64_t w_hz(void);      /* G's frequency: the X6200's dial */
 static int  w_match(void);      /* the plan's channel the dial is on, -1 none */
 static bool w_chan(int i);      /* channel i one of a service's defined channels (CB) */
+static bool w_cb_here(void);    /* the dial in CB's span: the arrows step its channels */
 static void walkie_group_mode(void);
 static void x62_by_hand(void);
 static bool dial_held(void);    /* TX unlocked or on the air: the tuning knobs held, and said so */
@@ -2408,7 +2409,7 @@ static void rtl_listen_turn(int32_t diff) {
  * on G the channel whichever radio has it (the dial is not turned a step as well) */
 static bool knob_taken(void) {
     if (g_armed || radio_get_state() == RADIO_TX) return true;     /* held: dial_held says why */
-    if (scr == SCR_WALKIE) return w_chan(w_match());
+    if (scr == SCR_WALKIE) return false;    /* the dial, fine, as on A: only the arrows step CB's channels */
     return scr == SCR_RTL || (scr == SCR_LOG && g_on >= 0 && hits[g_on].rtl);
 }
 
@@ -2805,7 +2806,7 @@ static void show_legend(void) {
 
     vol_text(v, sizeof(v));
     lv_label_set_text_fmt(legend_l, "VFO: %s | MFK: %s | RING: SCREEN | VOL: %s %s, PUSH %s | GEN: HELP",
-                          scr == SCR_WALKIE && w_chan(w_match()) ? "CHANNEL" : "TUNE",
+                          "TUNE",
                           scr == SCR_TRACK && cfg_from == SCR_RTL ? "-" : mfk[scr], vol_short[vol_fn], v,
                           vol_short[(vol_fn + 1) % 3]);
 }
@@ -4104,7 +4105,7 @@ static void step(int dir) {
             show_screen();
             break;
         case SCR_WALKIE:                /* on CB the channel, elsewhere the group */
-            if (w_chan(w_match())) walkie_ch(dir, 0);
+            if (w_cb_here()) walkie_ch(dir, 0);
             else walkie_group(dir);
             break;
         case SCR_LOG:                   /* the next one; while one plays, it plays the next one; a scan stops */
@@ -4235,9 +4236,8 @@ static void click_cb(lv_event_t *e) {
 /* The main knob: the radio is the operator's again */
 static void rotary_cb(int32_t diff) {
     if (dial_held()) return;            /* TX unlocked: the dial is not moved by a bump */
-    if (scr == SCR_WALKIE) {            /* on CB a channel a click; elsewhere the dial tunes, by hand */
-        if (w_chan(w_match())) walkie_ch(diff > 0 ? 1 : -1, 0);
-        else x62_by_hand();
+    if (scr == SCR_WALKIE) {            /* the dial tunes, fine (the main screen's step), by hand */
+        x62_by_hand();
         return;
     }
     if (knob_taken()) {                 /* the stick is heard: the knob is its */
@@ -4288,7 +4288,7 @@ static void filter_step(void) {
 
 static void band_key(bool up) {
     if (scr == SCR_WALKIE) {            /* G: on CB its channels (as CH -/+), elsewhere the groups (each band one) */
-        if (w_chan(w_match())) walkie_ch(up ? 1 : -1, 0);
+        if (w_cb_here()) walkie_ch(up ? 1 : -1, 0);
         else walkie_group(up ? 1 : -1);
         return;
     }
@@ -4747,12 +4747,14 @@ static void build_system(lv_obj_t *p) {
 #define P_VX    (PW - 3 - P_BAR)        /* the arm down the right: the landscape bar's place (3 px from the edge) */
 #define P_TOP   (6 + P_BAR + 6)         /* under the arm across the top */
 #define P_KEY   160                     /* the keys' pitch: F1 at the top */
-#define P_KW    60                      /* F4's box (view) and F5's (group and mode): one width, as the keys are */
-#define P_VW    P_KW                    /* F4's: in the lamp's row, beside its key */
-#define P_LAMP  46                      /* the lamp's row, its middle at F4's key */
-#define P_LAMPY (3 * P_KEY + P_KEY / 2 - P_LAMP / 2)
-#define P_STATE 92                      /* the radio's state: four lines */
-#define P_BOTY  (P_LAMPY + P_LAMP + 6 + P_STATE + 6)   /* the bottom row: F5's box and the messages */
+#define P_KEYLEN 80                     /* a physical F key's length along the screen's edge (its width with the radio
+                                         * lying flat): F4's and F5's boxes as long, each centred on its key */
+#define P_KW    76                      /* F5's box across: its name in two lines */
+#define P_VW    30                      /* F4's across: "3D" */
+#define P_LAMP  P_KEYLEN                /* the lamp's row: F4's box and the lamp */
+#define P_LAMPY (3 * P_KEY + P_KEY / 2 - P_KEYLEN / 2)
+#define P_BOTY  (4 * P_KEY + P_KEY / 2 - P_KEYLEN / 2)            /* F5's box and, beside it, the messages */
+#define P_STATE (P_BOTY - 6 - (P_LAMPY + P_LAMP + 6))             /* the radio's state, between: three lines */
 #define P_SX    (P_KW + 6)              /* beside F5 */
 #define P_SW    (P_VX - 6 - P_SX)
 #define P_FX    6                       /* beside no box (F1, F2, F3: CB's CH -/+ on F1 and F2): the widgets from the
@@ -5210,10 +5212,17 @@ static int w_match(void) {
     return -1;
 }
 
-/* A service with defined channels (on the X6200: CB): CH- and CH+ (and the knobs) step them; the other groups are a
- * place to start, the VFO tuning from there */
+/* A service with defined channels (on the X6200: CB): the arrows (BAND, CH -/+) and the MFK step them; the other
+ * groups are a place to start. The VFO always tunes the dial, fine, on CB too */
 static bool w_chan(int i) {
     return i >= 0 && i < w_n && !strcmp(w_chs[i].grp, "CB");
+}
+
+/* The dial in CB's span (channel 1 to 40, a channel's width either side): on a channel or tuned between two */
+static bool w_cb_here(void) {
+    int64_t hz = w_hz();
+
+    return hz >= 26965000 - 5000 && hz <= 27405000 + 5000;
 }
 
 /* SSB's sideband as hams use it: lower on 160, 80 and 40 m, upper everywhere else (60 m, the ship and utility
@@ -5328,21 +5337,33 @@ static void walkie_enter(void) {
     w_mode = w_mode_now();
 }
 
-/* CH- / CH+ (and the knobs on CB): the next CB channel, the mode kept; to: CB channel to (the MFK's push: 19) */
+/* The arrows on CB (BAND UP/DOWN, CH -/+, the MFK): the next CB channel by number, the mode kept; tuned between two,
+ * the nearest one that way; to: CB channel to (the MFK's push: 19) */
 static void walkie_ch(int dir, int to) {
-    int  i = w_match(), k;
-    char cb[12];
+    int     i = w_match(), k = -1;
+    int64_t hz = w_hz();
+    char    cb[12];
 
     if (to) {
         snprintf(cb, sizeof(cb), "%02d", to);
-        if ((k = w_find("CB", cb)) >= 0) walkie_go(k, w_chan(i) ? w_mode_now() : w_chs[k].mode);
+        if ((k = w_find("CB", cb)) >= 0) walkie_go(k, w_cb_here() ? w_mode_now() : w_chs[k].mode);
         return;
     }
-    if (!w_chan(i)) return;
-    k = i;
-    do {
-        k = (k + dir + w_n) % w_n;
-    } while (k != i && !w_chan(k));
+    if (!w_cb_here()) return;
+    if (w_chan(i)) {
+        k = i;
+        do {
+            k = (k + dir + w_n) % w_n;
+        } while (k != i && !w_chan(k));
+    } else {                            /* between two: the nearest that way, round to the far end past the last */
+        for (int j = 0; j < w_n; j++)
+            if (w_chan(j) && (dir > 0 ? w_chs[j].hz > hz : w_chs[j].hz < hz) &&
+                (k < 0 || llabs(w_chs[j].hz - hz) < llabs(w_chs[k].hz - hz)))
+                k = j;
+        for (int j = 0; k < 0 && j < w_n; j++)
+            if (w_chan(j) && (k < 0 || (dir > 0 ? w_chs[j].hz < w_chs[k].hz : w_chs[j].hz > w_chs[k].hz))) k = j;
+        if (k < 0) return;
+    }
     walkie_go(k, w_mode_now());
 }
 
@@ -5360,7 +5381,7 @@ static void walkie_key_label(int k, char *s, size_t n) {
     int i = w_match(), g;
 
     if (k <= 1) {
-        snprintf(s, n, "%s", w_chan(i) ? (k ? "CH +" : "CH -") : "");
+        snprintf(s, n, "%s", w_cb_here() ? (k ? "CH +" : "CH -") : "");
     } else if (k == 2) {
         s[0] = 0;
     } else if (k == 3) {
@@ -5595,7 +5616,8 @@ static void show_walkie(void) {
 
         if (bc) snprintf(pwc, sizeof(pwc), "#%06X %s#", (unsigned)bc, pw1);
         else snprintf(pwc, sizeof(pwc), "%s", pw1);
-        lv_label_set_text_fmt(wui->info_l, "%s  %s\n%s\n%s\n%s  %s", lk, tx, pwc, pw2, sy1, sy2);  /* the time: the bars' */
+        lv_label_set_text_fmt(wui->info_l, "%s  %s\n%s  EXT %.1f V\n%s  %s  TX %.0f W", lk, tx, pwc, l_ext, sy1, sy2,
+                              param_f_get(cfg_pwr));      /* three lines; the time: the bars' */
         lv_label_set_text(wui->ch.opt[0], nm);
         if (wui->status_l) {            /* the title bar's line, as the other screens' (show_head) */
             char        pre[96], line[192], tc[48] = "", dev[64] = "";
@@ -5863,14 +5885,14 @@ static void build_walkie_portrait(void) {
     /* the lamp's row: F4's box (buttons_vertical_place) beside its key, the lamp */
     u->lamp = rect(g_scr, P_FX + P_VW + 6, P_LAMPY, P_FW - P_VW - 6, P_LAMP, 3, false);
     lv_obj_set_style_bg_color(u->lamp, amb, 0);
-    u->lamp_l = label(g_scr, &pixel_28, amb, P_FX + P_VW + 6, P_LAMPY + 9, P_FW - P_VW - 6, LV_TEXT_ALIGN_CENTER,
-                      "RX  QUIET");
+    u->lamp_l = label(g_scr, &pixel_28, amb, P_FX + P_VW + 6, P_LAMPY + (P_LAMP - 28) / 2, P_FW - P_VW - 6,
+                      LV_TEXT_ALIGN_CENTER, "RX  QUIET");
     /* the radio's state, edge to edge */
     {
         int y = P_LAMPY + P_LAMP + 6;
 
         rect(g_scr, P_FX, y, P_FW, P_STATE, 3, false);
-        u->info_l = label(g_scr, &pixel_20, amb, P_FX + 8, y + 6, P_FW - 16, LV_TEXT_ALIGN_LEFT, "");
+        u->info_l = label(g_scr, &pixel_20, amb, P_FX + 8, y + (P_STATE - 60) / 2, P_FW - 16, LV_TEXT_ALIGN_LEFT, "");
         lv_label_set_recolor(u->info_l, true);      /* the battery's line coloured as it runs down */
     }
     /* the bottom row: F5's box (buttons_vertical_place), beside it what is on the dial and a word for what was
@@ -5900,8 +5922,8 @@ static void walkie_show(bool on) {
             static const lv_coord_t ws[5] = {0, 0, 0, P_VW, P_KW};
 
             buttons_vertical_w(g_scr, ws, P_KEY, P_TOP);
-            buttons_vertical_place(3, P_LAMPY, P_VW, P_LAMP);              /* F4: beside its key, in the lamp's row */
-            buttons_vertical_place(4, P_BOTY, P_KW, PH - 6 - P_BOTY);      /* F5: the bottom row */
+            buttons_vertical_place(3, P_LAMPY, P_VW, P_KEYLEN);    /* F4: as long as its key, beside it */
+            buttons_vertical_place(4, P_BOTY, P_KW, P_KEYLEN);     /* F5: the same */
         }
         for (int i = 0; i < 5; i++) buttons_refresh(&btn[i]);
         lv_scr_load(g_scr);
@@ -5978,7 +6000,7 @@ static void build_overlays(void) {
     help_l = label(root, &pixel_16, amb, 26, 60, SW - 52, LV_TEXT_ALIGN_LEFT,
                    "CONTROLS IN THE SENTRY                        ANY KEY OR A TAP CLOSES THIS\n"
                    "\n"
-                   "VFO KNOB       A: THE X6200 (MAN-OVERRIDE), B: THE STICK'S CHANNEL, G: CB CHANNEL\n"
+                   "VFO KNOB       A, G: THE X6200 (MAN-OVERRIDE), B: THE STICK'S CHANNEL\n"
                    "MFK KNOB       CHOOSES A TARGET, A BAND, A FREQUENCY. PUSH: TRACK, LISTEN, OPEN\n"
                    "MFK RING       A X6200 B VHF/UHF C LOG D BANDS E DECODE F SYSTEM G WALKIE H AIRSPACE\n"
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"

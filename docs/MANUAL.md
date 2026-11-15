@@ -735,8 +735,9 @@ written through to the card before it replaces the last copy, so a power cut kee
 ### G WALKIE
 
 The X6200 as a walkie-talkie, in the same look, **held up**: G turns the screen to portrait (480 x 800, as the
-Walkie app does). Only F4 (the spectrum's view) and F5 (the group and mode) have names, in boxes of one width (60
-px): F4's `3D` (or `2D`) beside its key in the lamp's row, F5's at the bottom beside the message box. F1, F2 and F3
+Walkie app does). Only F4 (the spectrum's view) and F5 (the group and mode) have names, each in a box as long as its
+key along the screen's edge (the key's width with the radio lying flat) and centred on it: F4's `3D` (or `2D`) in
+the lamp's row, F5's beside the message box. F1, F2 and F3
 have no box (F1 and F2 still step CB's channels, as the knobs do), so the channel, the spectrum and the voiceprint
 (as tall as each other) and the radio's state run from edge to edge. G is the X6200's alone: the stick
 only receives and has B for that, so G neither shows nor plays it (shown with LISTEN on RTL or BOTH, G plays the
@@ -759,9 +760,9 @@ X6200 alone; A or B puts its own LISTEN back when shown).
   spectrum's, are framed, so they read over the picture.
 - **The lamp**, under the voiceprint: RX SIGNAL when the audio stands 6 dB over its own noise, RX QUIET, TX ARMED, ON
   AIR, TX LOCKED for a moment after PTT.
-- The radio's state in larger lines: the squelch, the volume and the transmitter's lock; the battery; the supply
-  and the TX power setting; the processor and the base's version (the time is in both title bars), refreshed each
-  second.
+- The radio's state in three larger lines: the squelch, the volume and the transmitter's lock; the battery and the
+  supply; the processor, the base's version and the TX power setting (the time is in both title bars), refreshed
+  each second.
 - At the bottom, beside F5's box, what is on the dial, and a word for what was refused and what to press instead. A build without portrait (on a PC) shows G in
   landscape, in four boxes.
 
@@ -780,9 +781,10 @@ the VFO) is by hand: the Sentry stops moving the dial (MAN-OVERRIDE, as a turn o
 | 6 M | 1: 50.125 | SSB, AM |
 | 6 M FM | 52.525 calling | FM |
 
-- On a service with defined channels (on the X6200, CB) the **VFO knob**, the MFK, **BAND UP and DOWN** and the F1
-  and F2 keys (CH - and CH +, no box) step the 40 channels, a channel a click, the mode kept. Anywhere else the VFO
-  tunes the dial as on A, and the MFK and the BAND keys go from group to group. The MFK's push goes to CB 19.
+- **The VFO knob always tunes the dial, fine**, as on A (its step: FST), on CB too. On CB (anywhere in its span, on
+  a channel or tuned between two) the arrows step its 40 channels: **BAND UP and DOWN**, the F1 and F2 keys (CH -
+  and CH +, no box) and the MFK, a channel a click by number, the mode kept (tuned between two: the nearest one that
+  way). Anywhere else the MFK and the BAND keys go from group to group. The MFK's push goes to CB 19.
 - **F5** goes through the groups and each one's modes in turn: CB AM, CB SSB, CB FM, then 10 M SSB, 10 M AM, 10 M
   FM... The mode changes where the dial is; past a group's last mode, the next group at its home channel.
   Off CB, **BAND UP** and **BAND DOWN** go to the next and previous group, G staying shown (on CB they step its
