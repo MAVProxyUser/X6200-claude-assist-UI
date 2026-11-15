@@ -45,8 +45,10 @@
 #define RATE        2116800     /* 48 x 44.1 kHz: the daemon's audio comes out at the codec's rate */
 #define RING        (44100 * 2) /* audio waiting to play: two seconds at most */
 #define CHUNK       1024        /* audio_play() needs room for the whole write: a bigger one may never find it */
-#define ST_FILL     6615        /* BOTH: the stick's audio buffered, 150 ms (its 50 ms messages come in clumps) */
-#define ST_SLACK    2205        /* and let drift 50 ms either way before a sample is dropped or said twice */
+#define ST_FILL     13230       /* BOTH: the stick's audio buffered, 300 ms: its 50 ms messages come in clumps and the
+                                 * X6200's 100 ms fragments take it in bursts; at 150 ms it ran dry, a gap each time
+                                 * (up to 130 ms, two of three 10 s tone tests, 2026-11-15) */
+#define ST_SLACK    4410        /* and let drift 100 ms either way before a sample is dropped or said twice */
 
 static pthread_t       thread;
 static bool            started;
@@ -96,7 +98,19 @@ static atomic_int      g_stick = 1000, g_x62 = 1000;   /* each receiver's share 
 #define TONE_X62_HZ   1300
 #define TONE_STICK_A  8000
 #define TONE_X62_A    3000
-static atomic_bool     tones;
+static atomic_int      tones;            /* 0 off, 1 the tones (/tmp/both_tones), 2 noise (/tmp/both_noise) */
+static uint32_t        noise_st = 0x12345678, noise_x6 = 0x9e3779b9;
+static float           nlp_st, nhp_st, nx_st, nlp_x6, nhp_x6, nx_x6;
+/* Noise as voice spans it (about 300 Hz to 3 kHz), its own on each line: never like itself a delay later, as a
+ * tone is, and spread over the band, so the canceller learns the base's return all over it */
+static float noise_next(uint32_t *st, float *lp, float *hp, float *xp) {
+    *st ^= *st << 13, *st ^= *st >> 17, *st ^= *st << 5;
+    float w = (float)(int32_t)*st / 2147483648.0f, y;
+    *lp = 0.652f * *lp + 0.348f * w;            /* one pole at 3 kHz */
+    y   = *lp - *xp + 0.958f * *hp;             /* DC out, the low end from about 300 Hz */
+    *xp = *lp, *hp = y;
+    return y;
+}
 static uint32_t lv_tick_or_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
@@ -391,9 +405,12 @@ static void *spec_thread(void *arg) {
             pthread_mutex_lock(&ring_lock);
             for (uint32_t i = 0; i < cnt; i++) {
                 memcpy(&s, buf + 8 + i * 2, 2);
-                if (atomic_load(&tones)) {      /* the test's tone in place of the stick's audio */
+                if (atomic_load(&tones) == 1) {     /* the test's tone in place of the stick's audio */
                     s = (int16_t)lrint(TONE_STICK_A * sin(tone_ph_stick));
                     tone_ph_stick = fmod(tone_ph_stick + 2 * M_PI * TONE_STICK_HZ / 44100.0, 2 * M_PI);
+                } else if (atomic_load(&tones) == 2) {  /* or its noise */
+                    float v = 12000 * noise_next(&noise_st, &nlp_st, &nhp_st, &nx_st);
+                    s = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
                 }
                 ring[(ring_head + ring_len) % RING] = s;
                 if (ring_len < RING) ring_len++;
@@ -960,6 +977,8 @@ static void *player_thread(void *arg) {
     bool           bt = false, tapping = false;
     float          g  = 1;          /* the squelch's level, 0 shut: eased over 10 ms, no click */
     bool           st_run = false;  /* BOTH: the stick's buffer filled, taken from (ST_FILL) */
+    int            st_dry = 0, st_low = INT32_MAX;     /* this 10 s: the times it ran dry, its lowest fill */
+    uint32_t       st_said = 0;
     (void)arg;
     pthread_setname_np(pthread_self(), "rtl_player");   /* by name in top -H */
 
@@ -1000,13 +1019,19 @@ static void *player_thread(void *arg) {
             static uint32_t tone_look;
             if (lv_tick_or_ms() - tone_look >= 1000) {
                 tone_look = lv_tick_or_ms();
-                atomic_store(&tones, access("/tmp/both_tones", F_OK) == 0);
+                atomic_store(&tones, access("/tmp/both_tones", F_OK) == 0 ? 1 : access("/tmp/both_noise", F_OK) == 0 ? 2 : 0);
             }
-            if (atomic_load(&tones)) {          /* the test's tone on the X6200's line */
+            if (atomic_load(&tones)) {          /* the test's tone, or noise, on the X6200's line */
                 for (int k = 0; k < n; k++) {
-                    long v = rx[k] + lrint(TONE_X62_A * sin(tone_ph_x62));
-                    rx[k]  = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
-                    tone_ph_x62 = fmod(tone_ph_x62 + 2 * M_PI * TONE_X62_HZ / 44100.0, 2 * M_PI);
+                    long v = rx[k];
+
+                    if (atomic_load(&tones) == 1) {
+                        v += lrint(TONE_X62_A * sin(tone_ph_x62));
+                        tone_ph_x62 = fmod(tone_ph_x62 + 2 * M_PI * TONE_X62_HZ / 44100.0, 2 * M_PI);
+                    } else {
+                        v += lrint(4000 * noise_next(&noise_x6, &nlp_x6, &nhp_x6, &nx_x6));
+                    }
+                    rx[k] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
                 }
             }
             /* The stick's audio comes 50 ms a message, in clumps; the X6200's as the codec sends it. Taken as the
@@ -1035,9 +1060,16 @@ static void *player_thread(void *arg) {
                     ring_len--;
                 }
                 if (m && m == take && take < n) chunk[m] = chunk[m - 1], m++;
-                if (m < n) st_run = false;
+                if (m < n) st_run = false, st_dry++;
+                if (ring_len < st_low) st_low = ring_len;
             }
             pthread_mutex_unlock(&ring_lock);
+            if (lv_tick_or_ms() - st_said >= 10000) {
+                if (st_dry || st_low < 44100 / 20 || atomic_load(&tones))
+                    fprintf(stderr, "rtl BOTH stick buffer: its low %d ms, ran dry %d times in 10 s\n",
+                            st_low == INT32_MAX ? -1 : st_low * 10 / 441, st_dry);
+                st_said = lv_tick_or_ms(), st_dry = 0, st_low = INT32_MAX;
+            }
             static float rxc[CHUNK];    /* the X6200's, the base's copy of what was played taken out (ec_cancel) */
             ec_cancel(rx, rxc, n);
             float to = atomic_load(&tones) || !atomic_load(&sql_db) || atomic_load(&sql_open) ? 1.0f : 0.0f;

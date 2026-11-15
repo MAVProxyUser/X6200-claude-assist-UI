@@ -646,7 +646,7 @@ last seconds, the strongest signals named over it and the screen's channel brack
   the one heard), and each is played at its own wherever it is heard later; BOTH sets the speaker at the louder and
   scales the other down in the mix. **BOTH plays each as it comes**, nothing levelled or raised: the stick exactly as
   on B, the X6200 at A's volume, added (a soft knee only where the sum would clip). The stick's audio is buffered
-  150 ms there so its 50 ms packets never leave gaps. One thing is taken out: the base sends back whatever it plays
+  300 ms there so its 50 ms packets never leave gaps (at 150 ms they did, now and then). One thing is taken out: the base sends back whatever it plays
   inside its receiver's audio (inverted, at about 0.8, half a second later), which mixed in again was the echo that
   repeated till it faded. The GUI subtracts that copy before the mix: it learns the base's return from the stick's
   part of the audio (never from the X6200's, which made it over-shoot and ring), follows the delay when it jumps,
