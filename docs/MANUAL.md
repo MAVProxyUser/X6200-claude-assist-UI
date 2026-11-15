@@ -4884,6 +4884,12 @@ hint counts down the send.
 APP (page 2) > CW Trainer keys with the radio's own keyer, so it follows the
 KEY settings. While it is open the radio is in train mode: sidetone only, no TX,
 its TX power held at 0 W in every key mode, Manual too (see [CW](#cw)).
+The receiver is turned down while it is open (the base gets RF gain 0): the
+band's noise no longer plays under the side tone, nor reaches the decoder that
+checks your keying as extra letters (#110; on an X6200 the receiver's level
+fell to an eighth). The RF gain setting stays as it was, the base gets it back
+when the trainer closes, and a power-off with the trainer open starts with it
+too. Turning the RF gain while the trainer is open gives you what you set.
 
 - KEY button, page KEY 2:2:
   - Mode: Manual is a straight key: the keyer makes no dits and dahs, the

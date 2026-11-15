@@ -325,22 +325,6 @@ the PC build's window.
   of the QTH into QTH, the comment into COMMENT. Settle a comment without a name or a QTH, and a comma inside one.
   A QRZ.com lookup: not now (the PC logger fills these in at import).
 
-## CW Trainer: the receiver turned down while it is open (#110)
-
-Asked 2026-10-31 (joanpao, #110). The trainer leaves the receiver as it is in Learn, Practice and Calls, so the
-band's noise plays under the side tone, and the trainer's decoder, which listens to the side tone to check the
-keying, hears it too: while it waits for an answer, noise can come out as extra letters. The idea: the trainer turns
-the RF gain down by itself while it is open and gives it back when it closes, as it already does with key train and
-the mode (src/dialog_cw_trainer.c, `construct_cb()` and `destruct_cb()`). By hand today: RF gain to 0 before opening
-it (the #110 reply of 31 October).
-
-- **To check first, on both radios**: that the side tone stays as loud with the RF gain at 0 (the X6200's is made in
-  the base and follows the volume) and that the decoder still hears it, in all three modes.
-- **How**: given back on every exit, as key train is. The RF gain is a saved setting (`rfgain`, sent to the base by
-  radio.c as `HW_RFG`): better to set the base's gain alone and leave the setting as it is, so a power-off with the
-  trainer open doesn't leave the radio deaf at the next start. Meanwhile the S-meter's correction for the RF gain
-  (src/smeter.c) and the browser panel's RF gain (`P_RFG`) should see the gain the user set.
-
 ## Winlink: VOACAP predictions in Pat's gateway list (#153)
 
 Asked 2026-11-02 (km4gkd, #153). Pat's gateway list (the mailbox's Connect dialog) has a VOACAP column with each

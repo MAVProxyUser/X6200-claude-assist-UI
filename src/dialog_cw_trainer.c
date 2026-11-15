@@ -1231,6 +1231,9 @@ static void construct_cb(lv_obj_t *parent) {
     }
     main_screen_lock_mode(true);
     panel_hide();
+    /* The receiver down while it is open: the band's noise neither under the side tone nor taken by the decoder for
+     * letters (#110); the setting stays, the base gets it back at the close */
+    radio_set_rfg_override(0);
 
     srand(time(NULL));
     mode = MODE_LEARN;
@@ -1366,6 +1369,7 @@ static void destruct_cb(void) {
         timer = NULL;
     }
     cw_trainer_set(false);
+    radio_set_rfg_override(-1);
     cw_decoder_set_sink(NULL, NULL);
     cw_encoder_stop();
     cw_encoder_require_train(false);

@@ -100,6 +100,8 @@ void radio_set_scan_mute(bool on);
 /* The speaker's level in place of the volume setting while another receiver is heard through the GUI (the Sentry's
  * RTL-SDR at its own volume), -1 back to the setting. The setting itself is left as it is */
 void radio_set_vol_override(int vol);
+/* The base's RF gain in place of the setting (the CW Trainer), -1 back to the setting; a change of the setting ends it */
+void radio_set_rfg_override(int rfg);
 void radio_vol_refresh();
 
 void radio_set_pwr(float d);

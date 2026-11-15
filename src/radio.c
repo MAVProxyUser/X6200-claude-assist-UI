@@ -129,6 +129,7 @@ static void on_change_comp_ratio(Subject *subj, void *user_data);
 static void on_fw_zoom_change(Subject *subj, void *user_data);
 
 static void on_change_i(Subject *subj, void *user_data);
+static void on_rfg_change(Subject *subj, void *user_data);
 static void on_change_f(Subject *subj, void *user_data);
 static void on_rit_change(Subject *subj, void *user_data);
 static void on_split_change(Subject *subj, void *user_data);
@@ -257,6 +258,7 @@ static volatile bool    charger_asked;  /* the charger setting as last applied (
 static bool             mute = false;
 static bool             tci_mute = false;   /* a TCI client transmits: the speaker and the monitor off */
 static bool             scan_mute = false;  /* the scanner between stops: no noise burst at every step */
+static int              rfg_override = -1;  /* the base's RF gain in place of cfg_rfgain (the CW Trainer, #110), -1 none */
 static int              vol_override = -1;  /* the speaker's level in place of cfg_volume (the Sentry's RTL-SDR heard), -1 none */
 static bool             rec_moni = false;   /* a screen recording takes the TX audio: the monitor at 30 at least (X6100) */
 static bool             digi_cap;       /* a digital app is open: never above its cap */
@@ -464,7 +466,7 @@ void radio_start() {
 #endif
     subject_subscribe_and_notify((Subject*)cfg_band_split, on_change_i, (void*)HW_SPLIT);
     subject_subscribe((Subject*)cfg_band_split, on_split_change, NULL);
-    subject_subscribe_and_notify((Subject*)cfg_rfgain, on_change_i, (void*)HW_RFG);
+    subject_subscribe_and_notify((Subject*)cfg_rfgain, on_rfg_change, NULL);
 
     subject_subscribe_and_notify((Subject*)cfg_band_if_shift, on_if_shift_change, NULL);
 
@@ -857,6 +859,22 @@ void radio_set_tci_mute(bool on) {
     if (tci_mute == on) return;
     tci_mute = on;
     radio_vol_refresh();
+}
+
+/* The RF gain the base gets, the setting left as it is: the CW Trainer turns the receiver down while it is open, so
+ * the band's noise is not under its side tone nor in its decoder (#110). A power-off meanwhile leaves the setting,
+ * and the next start sends it. The user turning the RF gain meanwhile ends it: what they set is what they get */
+void radio_set_rfg_override(int rfg) {
+    rfg = rfg < 0 ? -1 : rfg > 100 ? 100 : rfg;
+    if (rfg_override == rfg) return;
+    rfg_override = rfg;
+    WITH_RADIO_LOCK(hw_set_i(HW_RFG, rfg >= 0 ? rfg : param_i_get(cfg_rfgain)));
+}
+
+static void on_rfg_change(Subject *subj, void *user_data) {
+    (void)user_data;
+    rfg_override = -1;
+    WITH_RADIO_LOCK(hw_set_i(HW_RFG, subject_i_get((SubjectInt *)subj)));
 }
 
 void radio_set_vol_override(int vol) {
