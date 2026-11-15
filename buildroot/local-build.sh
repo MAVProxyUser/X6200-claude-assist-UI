@@ -238,6 +238,19 @@ sed -i "s|@OPENX6X00@|$GUI|" $EXT/package/x6x00-rtlspec/x6x00-rtlspec.mk
 for o in BR2_PACKAGE_DUMP1090_FA=y BR2_PACKAGE_X6X00_RTLSPEC=y; do
     grep -q "^$o" $DEFCONFIG || echo "$o" >> $DEFCONFIG
 done
+# The GPU (the R16's Mali-400 MP2; the kernel's lima driver is in already: /dev/dri/renderD128): Mesa's lima with EGL
+# (GBM, no window system) and OpenGL ES 2, for the GUI to move its pixel work there (the picture turned and composed
+# onto the portrait panel, the 3D waterfall: the GUI thread's time is mostly copying and rotating pixels, perf on the
+# radio 2026-11-14). Mesa adds its kmsro glue for the display (sun4i-drm) by itself with lima. The X6200's image
+# only for now: the radio it is tried on
+if [ $MODEL = x6200 ] && ! grep -q "^BR2_PACKAGE_MESA3D=y" $DEFCONFIG; then
+    cat >> $DEFCONFIG << 'MESA'
+BR2_PACKAGE_MESA3D=y
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_LIMA=y
+BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+BR2_PACKAGE_MESA3D_OPENGL_ES=y
+MESA
+fi
 # ffmpeg for the boot video (rootfs/etc/init.d/S94bootvideo), with what it needs only, not buildroot's every codec:
 # MP4/MKV/AVI, H.264, HEVC, MPEG-4 and VP8/VP9 video, scaled and turned into the framebuffer (fbdev). 4.4 looks
 # for linux/fb.h only with v4l2-m2m on. tools/bootvideo/build.sh builds the same for a radio on an older image
@@ -307,6 +320,16 @@ if [ $MODEL = x6200 ]; then
     # The X6100's kernel config is not changed
     echo "== Kernel: the X6200's processor temperature sensor and its thermal zone"
     for o in CONFIG_SUN4I_GPADC=y CONFIG_SENSORS_IIO_HWMON=y; do
+        grep -q "^${o%%=*}=" $KERNEL_DEFCONFIG || echo "$o" >> $KERNEL_DEFCONFIG
+    done
+    # The R16's video engine (Cedrus: video-codec@1c0e000 in sun8i-a33.dtsi, 6.1's staging driver): H.264, H.265,
+    # MPEG-2 and VP8 decoded in hardware through V4L2's stateless (request) API, /dev/video0 and /dev/media0. Nothing
+    # decodes through it yet (the boot video is ffmpeg's, in software: ffmpeg knows only stateful V4L2 decoders); the
+    # driver is there for the first that does. A module, loaded by its node; memory taken only while a decoder runs
+    echo "== Kernel: the video engine (Cedrus)"
+    for o in CONFIG_MEDIA_SUPPORT=y CONFIG_MEDIA_SUPPORT_FILTER=y CONFIG_MEDIA_PLATFORM_SUPPORT=y CONFIG_VIDEO_DEV=y \
+             CONFIG_STAGING=y CONFIG_STAGING_MEDIA=y CONFIG_VIDEO_SUNXI=y CONFIG_VIDEO_SUNXI_CEDRUS=m; do
+        sed -i "/^# ${o%%=*} is not set/d" $KERNEL_DEFCONFIG
         grep -q "^${o%%=*}=" $KERNEL_DEFCONFIG || echo "$o" >> $KERNEL_DEFCONFIG
     done
 fi
@@ -397,9 +420,11 @@ if [ $MODEL = x6100 ]; then
     # A U-Boot configured here before its defconfig turned mkeficapsule off is configured again
     grep -qs "^CONFIG_TOOLS_MKEFICAPSULE=y" $BR/build/build/uboot-2026.07/.config && make uboot-dirclean
 fi
-# An X6200 kernel configured here before its defconfig had the temperature sensor's driver is configured again
+# An X6200 kernel configured here before its defconfig had the temperature sensor's driver, or the video engine's,
+# is configured again
 if [ $MODEL = x6200 ] && ls $BR/build/build/linux-[0-9]*/.config > /dev/null 2>&1 \
-        && ! grep -qs "^CONFIG_SUN4I_GPADC=y" $BR/build/build/linux-[0-9]*/.config; then
+        && ! { grep -qs "^CONFIG_SUN4I_GPADC=y" $BR/build/build/linux-[0-9]*/.config \
+               && grep -qs "^CONFIG_VIDEO_SUNXI_CEDRUS=m" $BR/build/build/linux-[0-9]*/.config; }; then
     make linux-dirclean
 fi
 # A kernel built here before its board's DTS named the processor's supply (cpu-supply, above) builds its device tree
