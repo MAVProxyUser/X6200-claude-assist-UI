@@ -33,10 +33,8 @@ void vol_update(int16_t diff) {
 
     controls_encoder_update(vol_ctrl, diff, msg);
 
-    uint32_t color = vol->state == VOL_STATE_EDIT ? theme_hex(TC_text) : theme_hex(TC_text_soft);
-
     if (!knobs_visible()) {
-        msg_update_text_fmt("#%06x %s", color, msg.c_str());
+        knobs_say(msg.c_str(), vol->state == VOL_STATE_EDIT);     /* as the knob lines colour it (#279) */
     }
 }
 

@@ -27,10 +27,12 @@
 
 extern "C" {
 #include "gui_styles.h"
+#include "msg_box.h"
 #include "theme.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 }
 
 #define LINE_H 26
@@ -294,6 +296,24 @@ void knobs_hide(bool hide) {
 bool knobs_info(bool vol, const char **name, char *val, size_t size, float *level, bool *edit) {
     return vol ? vol_line.info(vol_get_ctrl(), name, val, size, level, edit)
                : mfk_line.info(mfk_ctrl, name, val, size, level, edit);
+}
+
+void knobs_say(const char *text, bool edit) {
+    const char *colon = strstr(text, ": ");
+    uint32_t    on = theme_hex(TC_btn_mark), off = theme_hex(TC_text_soft);
+
+    if (!colon) {                       /* no name: all of it what the knob changes */
+        msg_update_text_fmt("#%06x %s", on, text);
+        return;
+    }
+    int n = (int)(colon - text);
+
+    if (theme_shape.mono) {
+        if (edit) msg_update_text_fmt("%.*s: [%s]", n, text, colon + 2);
+        else msg_update_text_fmt("[%.*s]: %s", n, text, colon + 2);
+    } else {
+        msg_update_text_fmt("#%06x %.*s:# #%06x %s#", edit ? off : on, n, text, edit ? on : off, colon + 2);
+    }
 }
 
 bool knobs_visible() {

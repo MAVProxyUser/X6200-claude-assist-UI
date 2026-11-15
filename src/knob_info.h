@@ -36,6 +36,10 @@ bool knobs_visible();
  * its level 0..1 (-1: no scale) and whether turning changes the value (else it chooses the control) */
 bool knobs_info(bool vol, const char **name, char *val, size_t size, float *level, bool *edit);
 
+/* A knob's "Name: value" on the message line, coloured as its knob line is: what turning changes now in the mark
+ * colour, the other dim (in brackets on 1bit), so a value being changed and a control being chosen look apart (#279) */
+void knobs_say(const char *text, bool edit);
+
 #ifdef __cplusplus
 }
 

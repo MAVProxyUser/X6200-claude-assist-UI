@@ -238,7 +238,10 @@ Knobs. On the main screen the main knob tunes, and VOL and the MFK each turn
 one control of their own list. The two lines over the buttons say which
 control and its value (Settings > Display > INTERFACE > Knob info; with it
 off, or while Hide buttons has hidden them, the value shows on the message
-line, unless Keep knob lines is on).
+line, unless Keep knob lines is on). The message line colours it as the knob
+lines do: what a turn changes in the mark colour (the value while the knob
+changes it, the control's name while it chooses), the other dim; on 1bit in
+brackets (#279).
 - A press of the knob switches it between changing the value and choosing
   the control: while it chooses, a turn goes to the next control on its list
   (the name lit), and the next press changes that one again.
