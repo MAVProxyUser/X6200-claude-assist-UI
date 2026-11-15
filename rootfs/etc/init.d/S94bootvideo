@@ -24,7 +24,8 @@ FIT="scale=800:480:force_original_aspect_ratio=decrease,pad=800:480:(ow-iw)/2:(o
 # The X6200's video engine (Cedrus, /dev/video0) decodes it and the display shows its pictures as they come, no CPU
 # on either: GStreamer's stateless H.264 decoder into kmssink, when the image has them and the video has a portrait
 # twin (480x800, turned as the panel is: tools/bootvideo/prepare.sh --portrait, bootvideo-portrait.mp4 beside it).
-# Else, or when that fails, ffmpeg decodes, fits and turns it in software as before
+# Else, or when that fails, ffmpeg decodes, fits and turns it in software as before. kmssink may scale (the frontend
+# does it, 1:1 here): told not to, it wanted the panel's own pixel aspect (52x86 mm over 480x800) and nothing linked
 PORTRAIT=${VIDEO%.mp4}-portrait.mp4
 
 hw_ready() {
@@ -41,7 +42,7 @@ have_video() {
 
 play_hw() {
 	gst-launch-1.0 -q filesrc location="$PORTRAIT" ! qtdemux ! h264parse ! v4l2slh264dec \
-		! kmssink driver-name=sun4i-drm can-scale=false > "$LOG" 2>&1
+		! kmssink driver-name=sun4i-drm > "$LOG" 2>&1
 }
 
 play() {
