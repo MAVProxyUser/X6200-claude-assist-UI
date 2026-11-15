@@ -475,6 +475,8 @@ static int64_t  g_hz;                       /* heard on the stick: the entry's, 
 static bool     g_stick, hits_dirty, hits_loaded;
 static uint32_t g_clear_ms;                 /* F3 pressed once: a second press within 3 s clears it */
 static bool     g_scan;                     /* F4: through the list, each on its own receiver */
+static int      g_hear = -1;                /* the LISTEN in force when C began playing entries (BOTH keeps the other
+                                             * radio heard meanwhile), put back when it stops; -1 none */
 static uint32_t g_scan_next;                /* when it moves on */
 static int      g_dwell = 1;                /* F5: g_dwells[] */
 static const int g_dwells[] = {2, 4, 8};    /* seconds on each one that is quiet */
@@ -2935,7 +2937,8 @@ static void show_keys(void) {
         if (nl && nl > t && nl[-1] == ':') memmove(nl - 1, nl, strlen(nl) + 1);   /* "MODE:\nAUTO": no colon */
         lv_label_set_text(key_l[i], t);
         lv_obj_set_style_pad_top(key_l[i], strchr(t, '\n') ? 2 : 12, 0);
-        lv_obj_set_style_text_color(key_l[i], l[0] ? amb : dim, 0);
+        lv_obj_set_style_text_color(key_l[i], l[0] && !btn[i].disabled ? amb : dim, 0);     /* dimmed: nothing to do */
+        lv_obj_set_style_border_color(key_l[i], btn[i].disabled ? dim : amb, 0);
     }
 }
 
@@ -3030,6 +3033,22 @@ static char scr_letter(scr_t s) {
     return s == SCR_TRACK ? letters[cfg_from] : letters[s];
 }
 
+/* The F keys dimmed (and refused) while they can do nothing: C's Listen, Remove, Clear and Scan with an empty log,
+ * its Dwell with its scan off. The other screens' all lit */
+static void keys_dim(void) {
+    bool changed = false;
+
+    for (int k = 0; k < 5; k++) {
+        bool off = scr == SCR_LOG && (k == 4 ? !g_scan : nhits == 0);
+
+        if (btn[k].disabled != off) {
+            buttons_disabled(&btn[k], off);
+            changed = true;
+        }
+    }
+    if (changed && key_l[0]) show_keys();   /* the Sentry's own keys, over the bar's */
+}
+
 static void show_screen(void) {
     scr_t shown = scr == SCR_SCAN ? SCR_RTL : scr;        /* A is C's screen, set up for the X6200 */
 
@@ -3045,6 +3064,7 @@ static void show_screen(void) {
     lv_label_set_text(badge_l[1], l);
     show_title();
     for (int i = 0; i < 5; i++) buttons_refresh(&btn[i]);
+    keys_dim();
     show_keys();
     show_legend();
     switch (scr) {
@@ -3164,7 +3184,10 @@ static void hit_add(int64_t hz, int mode, bool rtl, const char *what, float peak
     if (g_on == j) g_on = 0;
     else if (g_on >= 0 && g_on < j) g_on++;
     hits_dirty = true;
-    if (scr == SCR_LOG) show_glog();
+    if (scr == SCR_LOG) {
+        show_glog();
+        keys_dim();                     /* the first one in: C's keys lit */
+    }
 }
 
 /* The stick (running for the whole Sentry: rtl_spectrum.h) tuned for G's entry hz */
@@ -3177,14 +3200,18 @@ static void g_stick_on(int64_t hz) {
 
 /* Entry i on the speaker from its own receiver, -1 none: the stick's on the stick, the X6200's on the X6200 */
 static void g_listen(int i) {
-    if (i < 0 || i >= nhits) {
-        if (g_on >= 0 && hits[g_on].rtl) hear_apply(HEAR_X6200);
-        g_on = -1;
+    if (i < 0 || i >= nhits) {          /* none: the LISTEN of before back (A's and B's scans go on: g_on -1) */
+        if (g_on >= 0 && g_hear >= 0) hear_apply(g_hear);
+        g_on   = -1;
+        g_hear = -1;
         show_screen();
         return;
     }
-    const hit_t *h = &hits[i];
+    const hit_t *h    = &hits[i];
+    bool         both;
 
+    if (g_on < 0) g_hear = hear_want;   /* the LISTEN in force, given back when the log stops */
+    both = g_hear == HEAR_BOTH && (sdr_here || rtl_spectrum_state() == RTL_SPEC_ON);
     if (h->rtl) {
         if (!sdr_here) {
             osd("NO RTL-SDR", "THIS ONE WAS HEARD ON THE STICK: PLUG IT INTO THE HOST PORT.", -1);
@@ -3192,14 +3219,19 @@ static void g_listen(int i) {
         }
         g_hz = h->hz;
         g_stick_on(g_hz);
-        heard = hear_want = HEAR_RTL;   /* the log plays one radio at a time: the entry's */
+        heard = hear_want = both ? HEAR_BOTH : HEAR_RTL;    /* with BOTH the X6200 (A's scan) mixed in */
         hear_vol_refresh();
         rtl_spectrum_mute(false);
-        rtl_spectrum_mux(false);
+        rtl_spectrum_mux(both);
         rtl_spectrum_listen(g_hz, h->mode ? h->mode : rtl_mode_of(g_hz));
     } else {
-        if (heard != HEAR_X6200) hear_apply(HEAR_X6200);     /* the X6200 on the speaker again (OFF too) */
-        hear_want = HEAR_X6200;         /* alone: a stick plugged in now does not join it */
+        if (both) {                     /* the X6200 on the entry, the stick on B's channel (B's scan) mixed in */
+            if (heard != HEAR_BOTH || g_stick) hear_apply(HEAR_BOTH);
+        } else if (heard != HEAR_X6200) {
+            hear_apply(HEAR_X6200);     /* the X6200 on the speaker again (OFF too) */
+        }
+        hear_want = both ? HEAR_BOTH : HEAR_X6200;
+        g_stick   = false;              /* the stick B's again */
         if (!tune((int32_t)h->hz, h->mode)) return;
     }
     g_on = i;
@@ -3220,14 +3252,16 @@ static void g_turn(int32_t diff) {
  * every screen that is not a spectrum. The stick runs on; F retunes it when shown */
 static void g_leave(bool to_f) {
     (void)to_f;
-    g_scan  = false;
+    g_scan = false;
+    if (g_on >= 0 && g_hear >= 0 && !to_f) hear_apply(g_hear);     /* B (to_f) sets its own */
     g_stick = false;
     g_on    = -1;
+    g_hear  = -1;
 }
 
 /* G opened: the stick tuned to its first entry of the stick's, so that one plays without waiting */
 static void g_enter(void) {
-    if (!sdr_here) return;
+    if (!sdr_here || listen_rtl) return;    /* the stick heard (B's channel, BOTH): left where it is */
     for (int i = 0; i < nhits; i++)
         if (hits[i].rtl) {
             g_stick_on(hits[i].hz);
@@ -3267,6 +3301,8 @@ static void g_scan_set(bool on) {
     if (g_scan) {
         if (g_on != g_sel) g_listen(g_sel);
         g_scan_next = lv_tick_get() + g_dwells[g_dwell] * 1000;
+    } else if (g_on >= 0) {
+        g_listen(-1);                   /* off: what it was playing stops, A's and B's scans go on, the LISTEN back */
     }
     show_screen();
 }
@@ -3499,7 +3535,7 @@ static void sentry_step(void) {
         return;
     }
     if (smode == MODE_MAN) return;
-    if (scr == SCR_LOG && g_on >= 0) return;      /* the log is playing one: the dial is its meanwhile */
+    if (scr == SCR_LOG && g_on >= 0 && !hits[g_on].rtl) return;  /* the log plays an X6200 one: the dial is its */
     if (g_armed) return;                          /* armed to transmit: the dial is the operator's */
     if (routine == ROUT_SCAN && scan_a_band >= 0 && (scan_a_next == 0 || now > scan_a_next)) {
         a_scan_hop(now);
@@ -3941,6 +3977,7 @@ static void key_tap_cb(lv_event_t *e) {
 }
 
 static void fkey(int k) {
+    if (k >= 0 && k < 5 && btn[k].disabled) return;     /* dimmed: a tap on its box does nothing either */
     switch (scr) {
         case SCR_SCAN:
             if (k == 0) a_scan_set(routine != ROUT_SCAN);

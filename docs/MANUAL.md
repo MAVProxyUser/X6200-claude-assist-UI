@@ -705,10 +705,15 @@ written through to the card before it replaces the last copy, so a power cut kee
   band (FM, NAV, AIR, SAT, 2M, MARINE, LMR, SONDE, ISM, 70CM, GMRS, UAT, ADS-B). A's SIGNAL PROFILE adds the width
   (1.6 kHz or less: CARRIER / CW).
 - **Listening**: the MFK's push (or F1) plays the one chosen on its own radio. While one plays, the MFK plays each
-  one it comes to, switching between the X6200 and the stick by itself, and `>` marks it. A's scan waits meanwhile.
+  one it comes to, switching between the X6200 and the stick by itself, and `>` marks it. Only that radio's scan
+  waits meanwhile (an X6200 entry holds A's, a stick entry B's): the other radio's scan goes on. With LISTEN on
+  BOTH the other radio stays heard too, mixed in; on X6200 or RTL only the entry's radio is heard.
 - **F4 SCAN** goes through the list by itself: **F5 DWELL** seconds on each (2, 4 or 8), held while it is busy (on
-  the X6200, its signal 6 dB over the noise; on the stick, its squelch open, with a squelch set on B).
+  the X6200, its signal 6 dB over the noise; on the stick, its squelch open, with a squelch set on B). F4 off (or
+  F1 off) stops what it was playing: A's and B's scans go on and the LISTEN of before is heard again.
 - F2 removes the one chosen; F3 twice within 3 seconds clears the log.
+- Keys that can do nothing are dimmed and do nothing: Listen, Remove, Clear and Scan with the log empty, Dwell with
+  the scan off.
 
 ### D BANDS, E DECODE, F SYSTEM
 
