@@ -325,38 +325,6 @@ the PC build's window.
   of the QTH into QTH, the comment into COMMENT. Settle a comment without a name or a QTH, and a comma inside one.
   A QRZ.com lookup: not now (the PC logger fills these in at import).
 
-## WSPR: band hopping (#190)
-
-Asked 2026-11-06 (rwensley). Today the WSPR app stays on the band chosen. A first version: each WSPR band Off, RX or
-RX+TX, and a Hop switch on WSPR 2:2 F5; the coordinated 2-minute slots first (the minute of the hour picks the band,
-160 to 10 m), the band changed between two cycles, never during a beacon; TX % as it is. The ATU's stored match per
-frequency covers the hops once each WSPR frequency is tuned; an external tuner would need Ext tune at each hop, later.
-The parts of the day (grayline, day, night) later: the radio doesn't work out sunrise and sunset yet. ALE: out of
-scope.
-
-## WiFi: a static address, as Ethernet has (#17)
-
-Asked 2026-10-26. Ethernet (Settings > ETHERNET, web System > Network) has DHCP or Static; a WiFi network has
-DHCP only, and a reporter's router never got on with the X6100's DHCP. A Static choice per saved network
-(NetworkManager `ipv4.method manual`, address, gateway, DNS), with Ethernet's fields and checks.
-
-## PSK, Olivia and JTTY: a Log QSO button in the apps (#55)
-
-Asked 2026-10-27 (#55). FT8, FT4 and FT2 log their QSOs by themselves, and JS8 has Log QSO (page 5, and its popup
-at 73 or SK); the keyboard apps log nothing themselves (docs/MANUAL.md, PSK31, PSK63 and Olivia: "The apps don't log
-QSOs themselves yet"). Today a QSO from them goes into the log only from the browser panel's Log tab, in the app's
-mode (#92), and since v0.3.8 the text log keeps what they receive and send (/mnt/digi_text), which is not a log of
-QSOs.
-
-- **The button**: on a page of PSK31, PSK63, Olivia (Contestia too) and JTTY, and of RTTY once it sends. It takes the
-  DX call and the two RSTs the apps already keep (src/digi_qso.c, shared by them), the time, the frequency and the
-  mode as the Log tab gives it, into the radio's log as JS8 does (`qso_log_record_create()` and
-  `qso_log_record_save()`, `dialog_field_day_log()`; src/js8_window.c): so it shows on the Logs page and goes to
-  Wavelog and Field Ops.
-- **Only on a press** at first: the end of a QSO is hard to tell in a keyboard mode, so no offer at 73 or SK as JS8
-  makes (the #55 reply of 29 October). The reporter cared most about the text and the reports, which the text log
-  now keeps.
-
 ## CW Trainer: the receiver turned down while it is open (#110)
 
 Asked 2026-10-31 (joanpao, #110). The trainer leaves the receiver as it is in Learn, Practice and Calls, so the

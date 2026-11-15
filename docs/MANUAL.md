@@ -2295,7 +2295,7 @@ the X6200 a screen recording does not raise it (see
 
 | Card | Options |
 |---|---|
-| WIFI | power, status, IP, networks |
+| WIFI | power, status, IP, networks; each saved network's address, DHCP or static |
 | NETWORK NAME | the radio's name on the LAN, `x6100` by default (`x6200` on an X6200): reachable as `<name>.local` (see [Network name](#network-name)) |
 | TAILSCALE | on/off, status, the radio's name and address on your tailnet, Funnel on/off with Public (the Panel's address on the internet, or what Funnel waits for), the login or the link that allows Funnel as a code to scan, Log out (see [Tailscale](#tailscale) and [Tailscale Funnel](#tailscale-funnel)) |
 | ETHERNET | a USB Ethernet adapter: DHCP or a static address (see [Ethernet](#ethernet)) |
@@ -2322,6 +2322,20 @@ Joining a network:
   then takes the new password and the security the network has now, and keeps
   its name: the radio has one profile per network. Up to v0.3.10 a second
   profile of the same name was added, and the old one was tried as well.
+- Address: a saved network's menu has Address, with what the network uses
+  beside it, DHCP or its static address. Address offers DHCP (the default:
+  the network gives the address) or Static, typed on one line as
+  `address/prefix gateway DNS`, for example `192.168.1.20/24 192.168.1.1
+  192.168.1.1`; the netmask may also be dotted after the slash, /24 when there
+  is none, and gateway and DNS may be left out (without them no internet, no
+  names). The box opens with the network's static address, or with the
+  address the network gave it now and its router as gateway and DNS. The
+  fields are checked as Ethernet's are. For a router whose DHCP the radio does
+  not get on with (#17). Each network keeps its own; the one in use joins
+  again with it at once (a few seconds without WiFi), another uses it at its
+  next join. The web configurator's Network page sets it too, for every saved
+  network, also one out of range. A wrong address on the network you reach
+  the radio over leaves it out of reach: set DHCP again on the radio.
 - After a failed join the radio writes what its WiFi module, NetworkManager and
   the supplicant said to `app_logs/wifi.txt` on the card's DATA partition (no
   password is in it). Attach that file to a report.
@@ -4275,10 +4289,19 @@ Frequency and mode come back when the app closes.
 - The macros can also be edited on the web configurator's Macros page.
 - What is received and sent is kept on the card, a file a day (see
   [Text log of the keyboard modes](#text-log-of-the-keyboard-modes)).
-- The apps don't log QSOs themselves yet. A QSO logged from the browser
-  panel's Log tab while one is open goes into the log in its mode: PSK31 or
-  PSK63 (ADIF mode PSK with that submode), OLIVIA or CONTESTI (see
-  [Browser panel](#browser-panel)).
+- Log QSO (page 6, F4; JTTY page 5): the DX call and the two reports into
+  the day's log, in the app's mode (PSK31 or PSK63 as ADIF mode PSK with that
+  submode, OLIVIA or CONTESTI), on the radio's frequency, as the browser
+  panel's Log tab logs them: on to Wavelog and over WSJT-X UDP when those are
+  on, into an activation's log while Field Ops runs one. The button shows the
+  DX call (DX call on page 2, or picked up from "DE <call>"); with none it
+  says "Nothing to log". RST rcvd (page 6, F3) is the report received: press
+  steps its strength digit, hold puts it back to 599; RST snt is on page 2. The
+  same call again within 10 minutes is logged only on a hold of Log QSO, so a
+  second press does not log it twice. Logging is on a press only: the end of a
+  QSO is hard to tell in a keyboard mode, so nothing is offered at 73 or SK.
+  A QSO logged from the browser panel's Log tab while one is open goes into
+  the log in the same mode (see [Browser panel](#browser-panel)).
 
 ### JTTY
 
@@ -4299,7 +4322,9 @@ By default they are the WSJT-X contest keys. In the text, `%M` is your call,
 `%H` the DX call, `%E` "599" and the serial number, sent as one frame. Up to
 80 characters, kept in `/mnt/jtty_macros.txt`, also on the web configurator's
 Macros page. Page 5: Ext tune, a carrier at the TX frequency for an external
-tuner. Decoded stations go to PSK Reporter when it is on. TX goes through the same path as FT8 (7 W cap, ALC, SWR
+tuner, then RST snt, RST rcvd and Log QSO: the DX call and the two reports
+into the day's log as JTTY, as PSK's Log QSO does (see
+[PSK31, PSK63 and Olivia](#psk31-psk63-and-olivia)). Decoded stations go to PSK Reporter when it is on. TX goes through the same path as FT8 (7 W cap, ALC, SWR
 protection). I haven't made a QSO with it yet, so reports are welcome. A
 QSO logged from the browser panel's Log tab while JTTY is open goes into the
 log as JTTY (ADIF 3.1.8: mode MFSK, submode JTTY).
@@ -5867,7 +5892,7 @@ The menu has General and five groups:
 | | Backup | download settings, memories, cluster, TCI server, QSO log, voice messages, your own boot picture (optionally CW trainer and WiFi) as one file, and restore the parts you choose (restored WiFi networks are taken a few seconds after, no restart needed; see below) |
 | System | Display | every display option of the radio, a few station options of the other tabs (independent VFOs, the band plan, the WR12, [TX ranges, the own list and TX outside ham bands](#amateur-bands-only) in the Transmitter card), and the [boot picture](#boot-picture) (see below) |
 | | Time | local and server time; Sync sets the radio clock from the browser's, in the radio's timezone; NTP sync; timezone |
-| | Network | the radio's [network name](#network-name), its [other names](#the-radios-own-names), and the USB Ethernet adapter: state, DHCP or static address (see [Ethernet](#ethernet)) |
+| | Network | the radio's [network name](#network-name), its [other names](#the-radios-own-names), the USB Ethernet adapter: state, DHCP or static address (see [Ethernet](#ethernet)), and each saved WiFi network's address, DHCP or static (see [Wireless tab](#wireless-tab)) |
 | | TCI | enable the [TCI server](#tci-server), set its port |
 | | SSH | the keys that may log in over SSH: list, add, remove (passwords are not taken, see [SSH](#ssh)) |
 | | Update | Check and Install the latest release, install a bundle file, go back to the previous version (see [Updating the firmware](#updating-the-firmware)) |
