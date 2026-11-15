@@ -3954,6 +3954,7 @@ static void blink_cb(lv_timer_t *t) {
         wr12_here = wr;
     }
     blink = !blink;
+    radio_moni_test_poll();             /* a test of the base's monitor, while /tmp/moni_test is there */
     show_head();
     if (key_l[0]) show_keys();          /* a key's word that follows the dial (A's F2 BAND), tuned from elsewhere:
                                          * TCI, the main screen (it said 15 M on 40 M, 2026-11-14) */

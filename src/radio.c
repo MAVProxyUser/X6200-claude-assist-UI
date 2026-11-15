@@ -808,6 +808,11 @@ void radio_change_mute() {
 /* Speaker AF and TX monitor together: both 0 when muted, with Speaker always off (a remote station), when btaudio
  * silences the speaker (headphones connected) or while a TCI client transmits; the monitor 0 at AF 0 too, which otherwise still played FT8's
  * tones (issue #1). A screen recording keeps the monitor at 30 at least on the X6100, but not under a TCI client's PTT */
+/* A test of the base's monitor: while /tmp/moni_test holds a level (0-100) the monitor is at it, whatever the
+ * setting (radio_moni_test_poll, from the Sentry's half-second timer); -1 none. Whether the base mixes the GUI's
+ * audio into its own speaker while it receives (BOTH without play mode, which takes the receiver away) */
+static int moni_test = -1;
+
 void radio_vol_refresh() {
     bool    muted = mute || tci_mute || scan_mute || btaudio_speaker_muted() || param_i_get(cfg_speaker_off);
     int32_t vol   = param_i_get(cfg_volume);
@@ -822,10 +827,26 @@ void radio_vol_refresh() {
 
     if (rec_raise) moni = LV_MAX(moni, 30);
     else if (muted || vol == 0) moni = 0;
+    if (moni_test >= 0) moni = moni_test;
     radio_lock();
     hw_set_i(HW_RXVOL, muted ? 0 : vol_override >= 0 ? vol_override : vol);
     hw_set_i(HW_MONI, moni);
     radio_unlock();
+}
+
+void radio_moni_test_poll(void) {
+    int   v = -1;
+    FILE *f = fopen("/tmp/moni_test", "r");
+
+    if (f) {
+        if (fscanf(f, "%d", &v) != 1) v = -1;
+        fclose(f);
+    }
+    v = v > 100 ? 100 : v;
+    if (v != moni_test) {
+        moni_test = v;
+        radio_vol_refresh();
+    }
 }
 
 /* A TCI client keyed the radio: the operator is at the other end, so the speaker and the TX
