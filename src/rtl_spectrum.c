@@ -88,6 +88,21 @@ static atomic_bool     playing;          /* the player has the speaker */
 static atomic_bool     mux;              /* BOTH: the X6200's receiver mixed in (audio_rx_tap) */
 static atomic_bool     mute;             /* OFF: the speaker taken and given nothing, neither radio heard */
 static atomic_int      g_stick = 1000, g_x62 = 1000;   /* each receiver's share in the mix, thousandths (BOTH) */
+/* BOTH's test (on while /tmp/both_tones exists, looked for each second): a steady tone on each receiver's line, as
+ * close to where its audio comes in as can be, to hear the mix: 700 Hz in place of the stick's audio as the daemon
+ * sends it (through the buffer and its timing, as a station would be), 1300 Hz added to what the base sends of the
+ * X6200's (its return of what is played left in, as the canceller meets it); the stick's squelch held open */
+#define TONE_STICK_HZ 700
+#define TONE_X62_HZ   1300
+#define TONE_STICK_A  8000
+#define TONE_X62_A    3000
+static atomic_bool     tones;
+static uint32_t lv_tick_or_ms(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
+}
+static double          tone_ph_stick, tone_ph_x62;
 
 /* The squelch while listening: the channel's strongest bin over the row's noise floor (its median), in dB, at least
  * sql_db to open (0: always open); it closes SQL_HANG rows after falling 3 dB under that, so a voice's pauses do not
@@ -376,6 +391,10 @@ static void *spec_thread(void *arg) {
             pthread_mutex_lock(&ring_lock);
             for (uint32_t i = 0; i < cnt; i++) {
                 memcpy(&s, buf + 8 + i * 2, 2);
+                if (atomic_load(&tones)) {      /* the test's tone in place of the stick's audio */
+                    s = (int16_t)lrint(TONE_STICK_A * sin(tone_ph_stick));
+                    tone_ph_stick = fmod(tone_ph_stick + 2 * M_PI * TONE_STICK_HZ / 44100.0, 2 * M_PI);
+                }
                 ring[(ring_head + ring_len) % RING] = s;
                 if (ring_len < RING) ring_len++;
                 else ring_head = (ring_head + 1) % RING;
@@ -978,6 +997,18 @@ static void *player_thread(void *arg) {
                 usleep(5000);
                 continue;
             }
+            static uint32_t tone_look;
+            if (lv_tick_or_ms() - tone_look >= 1000) {
+                tone_look = lv_tick_or_ms();
+                atomic_store(&tones, access("/tmp/both_tones", F_OK) == 0);
+            }
+            if (atomic_load(&tones)) {          /* the test's tone on the X6200's line */
+                for (int k = 0; k < n; k++) {
+                    long v = rx[k] + lrint(TONE_X62_A * sin(tone_ph_x62));
+                    rx[k]  = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+                    tone_ph_x62 = fmod(tone_ph_x62 + 2 * M_PI * TONE_X62_HZ / 44100.0, 2 * M_PI);
+                }
+            }
             /* The stick's audio comes 50 ms a message, in clumps; the X6200's as the codec sends it. Taken as the
              * X6200's came, the stick's ran dry between its clumps and each gap went out as silence (A with BOTH
              * choppy where B alone was clean, 2026-11-14): it fills to ST_FILL first and is taken from then, filled
@@ -1009,7 +1040,7 @@ static void *player_thread(void *arg) {
             pthread_mutex_unlock(&ring_lock);
             static float rxc[CHUNK];    /* the X6200's, the base's copy of what was played taken out (ec_cancel) */
             ec_cancel(rx, rxc, n);
-            float to = !atomic_load(&sql_db) || atomic_load(&sql_open) ? 1.0f : 0.0f;
+            float to = atomic_load(&tones) || !atomic_load(&sql_db) || atomic_load(&sql_open) ? 1.0f : 0.0f;
             float ks = atomic_load(&g_stick) / 1000.0f, kx = atomic_load(&g_x62) / 1000.0f;
 
             static float stk[CHUNK];    /* the stick's part, for the canceller to learn from */
