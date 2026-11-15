@@ -37,6 +37,11 @@ WEB_DIRS = ["/usr/lib/python3.11/site-packages/x6100_webserver"]
 # symbols (only message.c's packing differs), so the GUI runs on either: v0.3.8's on this one when its bundle is
 # installed over a newer one (which leaves the library), this one's on 117022b when a rollback puts that back
 LIB_FILES = ["/usr/lib/libft8.so"]
+# The SDR's daemon (tools/rtlspec, buildroot's x6x00-rtlspec package: librtlsdr and libhackrf linked in, so it needs
+# only libusb) and the libbladeRF it opens for a bladeRF: a radio updated in place keeps its card image's daemon
+# otherwise, RTL-SDR only (v0.3.12.23 and before) or none. The GUI tells a daemon running from another file to end and
+# starts this one (src/rtl_spectrum.c); a GUI of before reads this daemon's hello all the same (its first five words)
+SDR_FILES = ["/usr/bin/x6x00-rtlspec", "/usr/lib/libbladeRF.so.2"]
 SKIP_PREFIXES = ("/usr/include/",)       # the GUI package installs headers too
 UBOOT = "u-boot-sunxi-with-spl.bin"
 UBOOT_OFFSET = 8 * 1024                  # genimage's u-boot partition: offset 8K, size 1016K
@@ -110,6 +115,7 @@ def main():
                 paths.add(p)
     paths.update(WEB_FILES)
     paths.update(LIB_FILES)
+    paths.update(SDR_FILES)
     for d in WEB_DIRS:
         for root, _, files in os.walk(os.path.join(a.target, d.lstrip("/"))):
             for n in files:
