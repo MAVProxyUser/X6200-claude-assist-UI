@@ -6636,7 +6636,14 @@ static void state_restore(void) {
 
     if (done) return;
     done = true;
-    if (gui_state_start_place() != GUI_PLACE_SENTRY || gui_state_get("s.scr", -1) < 0) return;
+    if (!gui_state_restoring()) return;
+    if (gui_state_start_place() != GUI_PLACE_SENTRY || gui_state_get("s.scr", -1) < 0) {
+        /* Back in an app or the classic screen: the Sentry opened later as ever, but B's channel as it was (the
+         * stick's tuning is a setting, its channel was not: a restart from AIRSPACE lost it, 2026-11-15) */
+        v = gui_state_get("s.lhz", 0);
+        if (v >= RTL_SPEC_MIN_HZ && v <= RTL_SPEC_MAX_HZ && llabs(v - rtl_hz) <= rtl_view_hz() / 2) listen_hz = v;
+        return;
+    }
 
     v       = gui_state_get("s.scr", SCR_SCAN);
     open_at = v >= 0 && v < SCR_N ? (scr_t)v : SCR_SCAN;
