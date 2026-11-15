@@ -251,6 +251,18 @@ BR2_PACKAGE_MESA3D_OPENGL_EGL=y
 BR2_PACKAGE_MESA3D_OPENGL_ES=y
 MESA
 fi
+# The boot video decoded by the video engine (Cedrus, the kernel's sunxi-cedrus module) and shown as it comes:
+# GStreamer's stateless H.264 decoder (gst1-plugins-bad's v4l2codecs: v4l2slh264dec) into kmssink, the MP4 read by
+# isomp4 and parsed by videoparsers, run by gst-launch-1.0 (rootfs/etc/init.d/S94bootvideo, with ffmpeg as before
+# when any of it is missing). v4l2codecs needs udev, which the image has (eudev). The X6200's image only
+if [ $MODEL = x6200 ]; then
+    for o in BR2_PACKAGE_GSTREAMER1=y BR2_PACKAGE_GSTREAMER1_INSTALL_TOOLS=y BR2_PACKAGE_GST1_PLUGINS_BASE=y \
+             BR2_PACKAGE_GST1_PLUGINS_GOOD=y BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_ISOMP4=y \
+             BR2_PACKAGE_GST1_PLUGINS_BAD=y BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_VIDEOPARSERS=y \
+             BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_V4L2CODECS=y BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_KMS=y; do
+        grep -q "^${o%%=*}=" $DEFCONFIG || echo "$o" >> $DEFCONFIG
+    done
+fi
 # ffmpeg for the boot video (rootfs/etc/init.d/S94bootvideo), with what it needs only, not buildroot's every codec:
 # MP4/MKV/AVI, H.264, HEVC, MPEG-4 and VP8/VP9 video, scaled and turned into the framebuffer (fbdev). 4.4 looks
 # for linux/fb.h only with v4l2-m2m on. tools/bootvideo/build.sh builds the same for a radio on an older image

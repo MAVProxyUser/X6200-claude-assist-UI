@@ -21,13 +21,33 @@ MAX_S=30
 # the boot animation turns its logo (landscape x, y is the panel's y, 799 - x)
 FIT="scale=800:480:force_original_aspect_ratio=decrease,pad=800:480:(ow-iw)/2:(oh-ih)/2:black,transpose=2,format=bgra"
 
+# The X6200's video engine (Cedrus, /dev/video0) decodes it and the display shows its pictures as they come, no CPU
+# on either: GStreamer's stateless H.264 decoder into kmssink, when the image has them and the video has a portrait
+# twin (480x800, turned as the panel is: tools/bootvideo/prepare.sh --portrait, bootvideo-portrait.mp4 beside it).
+# Else, or when that fails, ffmpeg decodes, fits and turns it in software as before
+PORTRAIT=${VIDEO%.mp4}-portrait.mp4
+
+hw_ready() {
+	[ -f "$PORTRAIT" ] && [ -e /dev/video0 ] && command -v gst-launch-1.0 > /dev/null
+}
+
 have_video() {
-	[ -f "$VIDEO" ] && [ ! -e /mnt/bootvideo.off ] && command -v ffmpeg > /dev/null
+	[ -f "$VIDEO" ] && [ ! -e /mnt/bootvideo.off ] && { command -v ffmpeg > /dev/null || hw_ready; }
+}
+
+play_hw() {
+	gst-launch-1.0 -q filesrc location="$PORTRAIT" ! qtdemux ! h264parse ! v4l2slh264dec \
+		! kmssink driver-name=sun4i-drm can-scale=false > "$LOG" 2>&1
 }
 
 play() {
+	if hw_ready && play_hw; then
+		echo "the video engine decoded it" >> "$LOG"
+		return
+	fi
+	command -v ffmpeg > /dev/null || return
 	ffmpeg -hide_banner -loglevel error -nostdin -re -i "$VIDEO" -t "$MAX_S" -an -vf "$FIT" \
-		-f fbdev /dev/fb0 > "$LOG" 2>&1
+		-f fbdev /dev/fb0 >> "$LOG" 2>&1
 }
 
 case "$1" in
@@ -48,7 +68,7 @@ case "$1" in
 			n=$((n + 1))
 		done
 		if [ -f "$PID" ]; then
-			killall ffmpeg 2> /dev/null
+			killall ffmpeg gst-launch-1.0 2> /dev/null
 			rm -f "$PID"
 		fi
 		;;
