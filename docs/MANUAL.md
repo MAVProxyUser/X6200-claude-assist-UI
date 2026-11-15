@@ -892,7 +892,7 @@ web configurator (System > Update).
   so a fork's images update from the fork; the web Update page names it).
   Install downloads its update
   bundle (the GUI and its FT8 library, the web pages, the helpers and their
-  data, about 14 MB; with the SD card's kernel, modules and U-Boot about 30 MB).
+  data, about 26 MB; with the SD card's kernel, modules and U-Boot about 37 MB).
   On the radio, Settings > Info > Update's Install then asks the same question
   as above, tick boxes and all; the web page's Install has the two tick boxes
   beside it. Yes (or the web page's Install)
