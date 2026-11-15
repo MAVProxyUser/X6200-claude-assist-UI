@@ -599,11 +599,8 @@ the app that was open, or the classic screen. Not kept on purpose:
 - what C was playing;
 - SWR SCAN and WSPR (each would transmit).
 
-The state is kept twice:
-
-- in the radio's memory (`/tmp/gui_state.conf`), within 2 s of a change, so a crash loses nothing;
-- on DATA (`/mnt/gui_state.conf`), at most a minute behind and at the power-off, for the next switch-on (with the
-  battery pulled, up to a minute is lost).
+The state is kept in one file on DATA, `/mnt/gui_state.conf`, written within 2 s of a change and put on the card
+at the power-off (with the battery pulled, the last half minute or so may be lost).
 
 F SYSTEM > START IN applies when nothing was kept (a new card). Two quick restarts in a row
 that each went down within a minute mean the third start is a clean one, in case the state itself is the trouble.
