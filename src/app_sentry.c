@@ -6685,8 +6685,8 @@ static void state_restore(void) {
     }
     g_scan = gui_state_get("s.gscan", 0) != 0;
     g_nx = g_nr = 0;
-    LV_LOG_USER("Sentry: back on screen %d, A's routine %d (%s), B's scan %s, C's %s", open_at, routine,
-                smode == MODE_AUTO ? "AUTO" : "SEMI", rtl_scan ? "on" : "off", g_scan ? "on" : "off");
+    fprintf(stderr, "gui state: the Sentry back on screen %d, A's routine %d (%s), B's scan %s, C's %s\n", open_at,
+            routine, smode == MODE_AUTO ? "AUTO" : "SEMI", rtl_scan ? "on" : "off", g_scan ? "on" : "off");
 }
 
 /* The Sentry on one of its screens by letter ("A" to "G"; "H" is AIRSPACE): AIRSPACE's ring comes back so */
