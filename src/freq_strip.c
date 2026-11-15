@@ -133,15 +133,17 @@ static void ind_set(lv_obj_t *l, bool on) {
     lv_obj_set_style_bg_opa(l, on ? (theme_shape.focus_solid ? LV_OPA_COVER : LV_OPA_50) : LV_OPA_0, 0);
 }
 
+static bool walking;    /* the MFK walks the main screen's values (#113): RIT and XIT shown at 0 too, to be picked */
+
 static void ind_update_cb(Subject *subj, void *user_data) {
     ind_set(nr_label, param_i_get(cfg_nr));
     ind_set(nb_label, param_i_get(cfg_nb));
     ind_set(dnf_label, param_i_get(cfg_dnf));
-    ind_set(rit_label, true);
-    ind_set(xit_label, true);
-    if (param_i_get(cfg_rit)) lv_obj_clear_flag(rit_label, LV_OBJ_FLAG_HIDDEN);
+    ind_set(rit_label, param_i_get(cfg_rit) != 0);
+    ind_set(xit_label, param_i_get(cfg_xit) != 0);
+    if (param_i_get(cfg_rit) || walking) lv_obj_clear_flag(rit_label, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(rit_label, LV_OBJ_FLAG_HIDDEN);
-    if (param_i_get(cfg_xit)) lv_obj_clear_flag(xit_label, LV_OBJ_FLAG_HIDDEN);
+    if (param_i_get(cfg_xit) || walking) lv_obj_clear_flag(xit_label, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(xit_label, LV_OBJ_FLAG_HIDDEN);
     vision_fit();
 }
@@ -656,4 +658,23 @@ void freq_strip_set_wr12(bool in_use) {
 
 void freq_strip_channels_changed(void) {
     if (strip) update_cb(NULL, NULL);
+}
+
+lv_obj_t *freq_strip_value(info_value_t v) {
+    if (!strip) return NULL;
+    switch (v) {
+        case IV_MODE: return mode_label;
+        case IV_NR:   return nr_label;
+        case IV_NB:   return nb_label;
+        case IV_DNF:  return dnf_label;
+        case IV_RIT:  return rit_label;
+        case IV_XIT:  return xit_label;
+        case IV_STEP: return freq_label;    /* the step is the line under one of its digits */
+        default:      return NULL;
+    }
+}
+
+void freq_strip_walk(bool on) {
+    walking = on;
+    if (strip) ind_update_cb(NULL, NULL);
 }

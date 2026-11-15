@@ -127,6 +127,14 @@ void msg_update_text_fmt(const char *fmt, ...) {
     va_end(ap);
 }
 
+void msg_update_text_ms(uint16_t ms, const char *fmt, ...) {
+    va_list ap;
+
+    va_start(ap, fmt);
+    post(false, ms, fmt, ap);
+    va_end(ap);
+}
+
 void msg_schedule_text_fmt(const char *fmt, ...) {
     va_list ap;
 

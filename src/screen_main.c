@@ -95,6 +95,7 @@
 #include "dialog_birdie.h"
 #include "dialog_timesig.h"
 #include "dialog_swl.h"
+#include "main_walk.h"
 #include "app_sentry.h"
 #include "app_adsb.h"
 #include "adsb_rx.h"
@@ -1448,6 +1449,7 @@ void main_screen_vol_press(void) {
 
 /* MFK as on the main screen: dir -1 / +1 turns it, 0 is the press */
 void main_screen_mfk(int dir) {
+    if (main_walk_mfk(dir)) return;     /* walking the screen's values (#113) */
     if (dir) {
         if (mfk_state == MFK_STATE_EDIT)
             mfk_update(dir);
@@ -1496,8 +1498,8 @@ static void spectrum_key_cb(lv_event_t *e) {
         case '+':                   step_freq_step(true); break;
         case '[':  case KEY_VOL_LEFT_EDIT:      vol_update(-1); break;
         case ']':  case KEY_VOL_RIGHT_EDIT:     vol_update(+1); break;
-        case KEY_MFK_PREV:                      mfk_change_ctrl(-1); break;
-        case KEY_MFK_NEXT:                      mfk_change_ctrl(+1); break;
+        case KEY_MFK_PREV:                      if (!main_walk_ring(-1)) mfk_change_ctrl(-1); break;
+        case KEY_MFK_NEXT:                      if (!main_walk_ring(+1)) mfk_change_ctrl(+1); break;
         case '{':  case KEY_VOL_LEFT_SELECT:    vol_change_ctrl(-1); break;
         case '}':  case KEY_VOL_RIGHT_SELECT:   vol_change_ctrl(+1); break;
         case LV_KEY_LEFT:           main_screen_mfk(-1); break;
@@ -1510,7 +1512,9 @@ static void spectrum_key_cb(lv_event_t *e) {
             break;
 
         case LV_KEY_ESC:
-            if (!dialog_is_run()) {
+            if (main_walk_on()) {
+                main_walk_stop();       /* Esc leaves the walk first (#113) */
+            } else if (!dialog_is_run()) {
                 main_screen_vol_press();
             }
             break;
@@ -1541,10 +1545,20 @@ static void spectrum_pressed_cb(lv_event_t *e) {
 /* Long MFK press: with the Cluster item active, tune to the highlighted spot.
  * The press already toggled the MFK state; toggle it back to keep browsing. */
 static void spectrum_long_pressed_cb(lv_event_t *e) {
-    if (mfk_ctrl == CTRL_CLUSTER) {
+    if (mfk_ctrl == CTRL_CLUSTER && !main_walk_on()) {
         cluster_column_tune();
         spectrum_pressed_cb(e);
+        return;
     }
+    /* Otherwise the walk over the screen's values, in or out (#113), from the MFK (a touch's long press is not one).
+     * Not walking, the press that came first is undone; walking, it was the walk's own (it picked: the walk is left;
+     * it ended the walk: nothing more) */
+    lv_indev_t *indev = lv_indev_get_act();
+
+    if (indev && lv_indev_get_type(indev) == LV_INDEV_TYPE_POINTER) return;
+    if (main_walk_just_done()) return;
+    if (!main_walk_on()) spectrum_pressed_cb(e);
+    main_walk_toggle();
 }
 
 static lv_timer_t *keys_timer;   /* an enable on its way: a dialog opened meanwhile cancels it */

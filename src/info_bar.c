@@ -511,3 +511,16 @@ static void atu_update(Subject *subj, void *user_data) {
     else
         pill_paint(o, cfg_atu_is_loaded() ? TC(focus_text) : TC(err_strong), TC(focus), PILL_ON_OPA);
 }
+
+lv_obj_t *info_bar_value(info_value_t v) {
+    if (theme_shape.deck) {     /* Black Metal, Total Black: the two rows of their own */
+        static const int8_t d[IV_NUM] = {-1, -1, D_AGC, D_PRE, D_ATT, D_ATU, D_NR, D_NB, D_DNF, D_RIT, D_XIT, -1};
+
+        if (v == IV_MODE) return deck_mode;
+        return d[v] >= 0 ? deck_ind[d[v]] : NULL;
+    }
+    static const int8_t i[IV_NUM] = {INFO_VFO, INFO_MODE, INFO_AGC, INFO_PRE, INFO_ATT, INFO_ATU, -1, -1, -1, -1, -1,
+                                     -1};
+
+    return i[v] >= 0 ? items[i[v]] : NULL;
+}

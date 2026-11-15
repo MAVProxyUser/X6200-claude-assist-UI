@@ -19,6 +19,8 @@ lv_obj_t *msg_init(lv_obj_t *parent);
 
 /* Shown now, over whatever is shown, for 2 s */
 void msg_update_text_fmt(const char *fmt, ...);
+/* The same, on screen ms long (fades included) */
+void msg_update_text_ms(uint16_t ms, const char *fmt, ...);
 /* Shown after the messages waiting, for 2 s / 4 s / ms */
 void msg_schedule_text_fmt(const char *fmt, ...);
 void msg_schedule_long_text_fmt(const char *fmt, ...);

@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "info_bar.h"
 #include "lvgl/lvgl.h"
 
 #include <stdint.h>
@@ -26,6 +27,11 @@ void      freq_strip_set_offset(int32_t offset_hz);
 void      freq_strip_set_app(const char *name);
 /* The memory channels changed (their file written on the web page): the tuned one's name again (#203) */
 void      freq_strip_channels_changed(void);
+
+/* The MFK walking the main screen's values (#113): the strip's label of one (NULL none); RIT and XIT shown at 0 while
+ * on */
+lv_obj_t *freq_strip_value(info_value_t v);
+void      freq_strip_walk(bool on);
 /* An app window opens (true) or closes: the deck's frequency moves up, out from under it */
 void      freq_strip_set_dialog(bool open);
 /* The frequency lock changed: LOCK shown while the user's is on (true) */

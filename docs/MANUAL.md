@@ -312,6 +312,28 @@ brackets (#279).
   2:2 and is now in Settings > Audio > MICROPHONE; a knob you had put Moni
   level on keeps it (issue #271).
 
+Walking the screen's values (#113). Hold the MFK on the main screen and a
+frame goes round the first value the screen shows; the message line names
+it. The MFK then walks the frame over the values the screen shows, in their
+order: VFO, mode, AGC, PRE, ATT, ATU, NR, NB, DNF, RIT, XIT and the step.
+Only the ones this theme shows are on the walk: the box at the top, the
+frequency strip, Black Metal's and Total Black's two rows and VISION each
+have their own. RIT and XIT show on the strip while you walk, even at 0.
+- A press picks the framed value (the frame fills in), and a turn changes
+  it where it is, as the knob would with that control on it: AGC goes
+  Off, Slow, Fast, Auto, PRE, ATT, ATU, NR, NB and DNF switch, RIT and XIT
+  step, the step goes 10 Hz to 100 kHz. On the VFO a turn switches A and B;
+  on the mode it goes through the modes (LSB, USB, CW, CW-R, AM, NFM, the
+  two data modes, and on the X6200 SAM and WFM).
+- A press again gives the MFK back its own control; so does holding it,
+  ESC, VOL's press, opening an app, or 6 s without touching the MFK.
+- On the X6200 the inner ring moves the frame too, at any time (a picked
+  value is let go).
+- The main knob tunes all the while. A keyboard: the left and right arrows
+  are the MFK, Enter its press, ESC leaves.
+- With the Cluster column on the MFK, holding it still tunes the spot, as
+  before.
+
 Hide buttons. With Settings > Display > INTERFACE > Hide buttons at After
 3 s, After 5 s or After 10 s (Off by default), the five buttons and the two
 knob lines over them hide on the main screen once that long has gone by
