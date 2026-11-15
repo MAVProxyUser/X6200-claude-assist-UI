@@ -1,21 +1,24 @@
 /*
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
- *  OpenX6X00 - x6x00-rtlspec: the RTL-SDR stick's daemon. It opens the stick once and keeps it streaming for as long
- *  as the radio runs; the GUI (src/rtl_spectrum.c) connects to it and asks for what it wants. So the stick is never
- *  closed and opened again for a GUI started again (a hot install, a crash), a screen changed or AIRSPACE opened:
- *  the radio's USB host (MUSB) has been left sending nothing for the stick ("THE RTL-SDR SENDS NOTHING") by its
- *  stream stopped and started. A program of its own, as dump1090 is, so a stick that hangs or goes away never takes
- *  the GUI with it.
+ *  OpenX6X00 - x6x00-rtlspec: the daemon that owns the radio's SDR on its HOST port, an RTL-SDR stick, a HackRF or a
+ *  bladeRF (one backend each behind sdr.h: sdr_rtl.c, sdr_hackrf.c, sdr_bladerf.c). It opens the device once and
+ *  keeps it streaming for as long as the radio runs; the GUI (src/rtl_spectrum.c) connects to it and asks for what it
+ *  wants. So the device is never closed and opened again for a GUI started again (a hot install, a crash), a screen
+ *  changed or AIRSPACE opened: the radio's USB host (MUSB) has been left sending nothing for the stick ("THE RTL-SDR
+ *  SENDS NOTHING") by its stream stopped and started. A program of its own, as dump1090 is, so a device that hangs or
+ *  goes away never takes the GUI with it. Every backend hands its samples on as the RTL-SDR sends them (unsigned
+ *  8-bit I/Q), so all below works the same on each: rows, audio, SAME, RDS, dump1090's samples.
  *
- *  The stick: opened when it is there (looked for each second), set as the GUI last asked, its I/Q read at the sample
- *  rate all the time. Closed only when it is pulled out (another one is opened when it is plugged in) or the daemon
- *  is told to end. One that opens and sends nothing, or whose stream ends with it still plugged in, is left open and
- *  said to be STALLED: only pulling it out mends that, and nothing here touches it in the meantime. Pulled out is
- *  its USB device file gone ("/dev/bus/usb/003/002 (deleted)" among this process's files), which a stick plugged
- *  back at once does not hide (it comes back under another number). The stream's transfers are all back before the
- *  stick is closed (librtlsdr patched for it: buildroot/br2_external/package/rtlsdr-blog); should the close hang
- *  anyway, the stick gone 12 s and still held, the daemon ends, and the GUI starts it again.
+ *  The device: opened when it is there (looked for each second; with more than one plugged in, a HackRF, then a
+ *  bladeRF, then an RTL-SDR: those that transmit first), set as the GUI last asked, its I/Q read at the sample rate all
+ *  the time. Closed only when it is pulled out (another one is opened when it is plugged in) or the daemon is told to
+ *  end. One that opens and sends nothing, or whose stream ends with it still plugged in, is left open and said to be
+ *  STALLED: only pulling it out mends that, and nothing here touches it in the meantime. Pulled out is its USB device
+ *  file gone ("/dev/bus/usb/003/002 (deleted)" among this process's files), which a device plugged back at once does
+ *  not hide (it comes back under another number). The stream's transfers are all back before the stick is closed
+ *  (librtlsdr patched for it: buildroot/br2_external/package/rtlsdr-blog); should the close hang anyway, the device
+ *  gone 12 s and still held, the daemon ends, and the GUI starts it again.
  *
  *  Out of the samples, only what the client asks for, and nothing with no client: ROWS rows a second while it wants
  *  rows ("r 1"), each the average of up to AVG windowed FFTs of BINS points from that row's samples, in dB, lowest
@@ -23,20 +26,34 @@
  *  channel's audio while it listens; SAME alerts while it watches; the raw samples to AIRSPACE's dump1090 while that
  *  has them.
  *
+ *  Transmitting (a HackRF or a bladeRF, the Sentry's G WALKIE armed by its owner): narrow FM voice from the GUI's
+ *  microphone audio, made here: 300 Hz-3 kHz, pre-emphasised, levelled, clipped to 4 kHz deviation and filtered after
+ *  the clipper, ramped up and down over 5 ms. Only in the amateur bands from 2 m up (tx_band below; the GUI narrows it
+ *  to its TX ranges first), never while AIRSPACE has the samples; the receiver's settings are left alone meanwhile
+ *  and put back after. It ends when asked, when the client goes, when no audio came for TX_IDLE_MS (the GUI hung)
+ *  and after TX_TOT_MS in one go (a time-out timer); the HackRF stops by itself 0.1 s after its samples stop.
+ *
  *  The client: a UNIX socket in the abstract namespace, "@x6x00-rtlspec", SOCK_SEQPACKET, one client at a time (a
  *  new one replaces the old: the GUI started again). Each message is one thing. From the daemon, little endian:
- *      "RTLSPEC 2 <state> <tuner> <rate> <bins>"   on connecting and at each change of state: NOSTICK, BUSY (another
- *                          program has it), OPENING, ON (samples coming), STALLED (open, nothing coming), ADSB
- *                          (AIRSPACE's dump1090 has the samples)
+ *      "RTLSPEC 2 <state> <tuner> <rate> <bins> <kind> <lo Hz> <hi Hz> <tx>"   on connecting and at each change:
+ *                          state NOSTICK, BUSY (another program has it), OPENING, ON (samples coming), STALLED (open,
+ *                          nothing coming), ADSB (AIRSPACE's dump1090 has the samples), TX (transmitting), NEEDS
+ *                          (there and not usable: tuner says what, "LIBBLADERF" or the FPGA image's file); tuner the
+ *                          model ("R820T", "HACKRF-ONE", "BLADERF2"); kind RTL, HACKRF or BLADERF ("-" none); the
+ *                          tuning range; tx 0 receive only, 1 it can transmit, 2 transmitting. The first five as
+ *                          before: a GUI that reads only them still works
  *      "RSPC", u32 seq, u64 centre Hz, u32 rate, u16 bins, u16 flags (1: the first since a retune), f32 dB[bins]
  *      "RAUD", u32 count, s16 samples[count]       the channel listened to, mono, 44.1 kHz, 50 ms a message
  *      "RSAM", u32 length, the header's text and "|" and the event's name when known
  *                          ("ZCZC-WXR-TOR-039049+0030-3170815-KILN/NWS-|TORNADO WARNING"; "NNNN": a message's end)
  *      "RRDS", u32 length, "<Hz>|<PI hex>|<PTY>|<TP>|<TA>|<PS>|<RT>"   what the station decoded for RDS sends (rds.c),
  *                          each time it changes; "<Hz>|||||" at a new channel. PI "" and PTY -1 until they came
+ *      "RTX <word> <Hz> <why>" the transmitter: ON (on the air), END (off again: ASKED, IDLE, TIMEOUT, GONE, FAILED),
+ *                          NO (refused: NOT-AMATEUR, RECEIVE-ONLY, AIRSPACE, NO-DEVICE)
  *  A client that does not read misses messages: the stream never waits for it. From the client, a line each:
  *      "r 1", "r 0"        rows wanted, or not
- *      "f <Hz>"            the centre; "s <rate>" the sample rate; "g <tenths of dB>" the gain ("g -1": the AGC)
+ *      "f <Hz>"            the centre (within what the device tunes); "s <rate>" the sample rate; "g <tenths of dB>"
+ *                          the gain, on the RTL's scale ("g -1": the AGC)
  *      "l <Hz> <mode>"     listen (mode 1 NFM, 2 AM, 3 WFM; "l 0 0" stops): mixed to 0 Hz, decimated to 264.6 kHz
  *                          (CIC, order 2) and by 6 (a 63-tap FIR) to 44.1 kHz and demodulated. Only at a sample rate
  *                          that is a multiple of 264.6 kHz: 1058400 or 2116800
@@ -46,15 +63,19 @@
  *      "a" and a file descriptor (SCM_RIGHTS)  the raw samples (unsigned 8-bit I/Q) written to it at 1090 MHz,
  *                          2.4 MS/s and the tuner's top gain, for AIRSPACE's dump1090 ("--ifile -"); no rows or audio
  *                          meanwhile. "a 0", or dump1090 gone: the stick back to what the client asked
+ *      "t <Hz> <gain dB> <amp 0|1>"   transmit FM there (a device that transmits, an amateur band); "t 0" ends it
+ *      "TAUD", u32 count, s16 samples[count]       the voice to transmit, mono, 44.1 kHz, as it comes
+ *      "R"                 the receiver's stream stopped and started again, as a transmission does, without one (a
+ *                          test of that on the radio's USB host)
  *      "Q"                 the daemon ends and closes the stick (a GUI that wants another version of it)
- *  A client gone: its rows, listening and watch end; the stick goes on, tuned as it was.
+ *  A client gone: its rows, listening, watch and transmission end; the device goes on, tuned as it was.
  *
  *      x6x00-rtlspec [-F] [-d index] [-f Hz] [-s rate] [-n bins] [-r rows/s] [-g tenths] [-i FILE]
  *
  *  It goes into the background (-F: it stays in front); with one already running it says "RTLSPEC RUNNING" and ends.
- *  -i replays FILE (unsigned 8-bit I/Q at the rate, as rtl_sdr writes it) in place of the stick, at its own pace and
- *  over again: the same rows, audio and alerts, to try the GUI without a signal on the air (a SAME alert, say); a
- *  retune only moves what the rows say.
+ *  -d: which RTL-SDR stick. -i replays FILE (unsigned 8-bit I/Q at the rate, as rtl_sdr writes it) in place of the
+ *  device, at its own pace and over again: the same rows, audio and alerts, to try the GUI without a signal on the air
+ *  (a SAME alert, say); a retune only moves what the rows say.
  */
 
 #define _GNU_SOURCE
@@ -79,25 +100,34 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <rtl-sdr.h>
-
 #include "rds.h"
 #include "same.h"
+#include "sdr.h"
 
 #define AVG       8         /* FFTs averaged into a row, at most */
 #define MAX_BINS  8192
-#define READ_LEN  (16384 * 2)
+#define READ_LEN  (16384 * 2)     /* a replay's read */
 
 static volatile sig_atomic_t stop;
 
-static rtlsdr_dev_t *volatile term_dev;      /* the stick streaming: a signal cancels its transfers */
+static const sdr_ops_t *volatile dev_ops;   /* the device open, NULL none */
+static volatile int             rx_halt;    /* its stream to end (sdr.h): stop, a transmission, a pull-out, "R" */
+static volatile int             tx_halt;    /* the transmission to end now (ramped down) */
 
-/* As rtl_sdr's handler: the transfers cancelled here too, so a stream that has stalled (no callback to see stop)
- * still ends cleanly; the radio's USB host (MUSB) is left broken by a stick killed with transfers in flight */
+static void halt_rx(void) {
+    const sdr_ops_t *o = dev_ops;
+
+    rx_halt = 1;
+    if (o && o->rx_stop) o->rx_stop();
+}
+
+/* As rtl_sdr's handler: the stream ended here too, so one that has stalled (no callback to see stop) still ends
+ * cleanly; the radio's USB host (MUSB) is left broken by a stick killed with transfers in flight */
 static void on_term(int s) {
     (void)s;
-    stop = 1;
-    if (term_dev) rtlsdr_cancel_async(term_dev);
+    stop    = 1;
+    tx_halt = 1;
+    halt_rx();
 }
 
 /* In place, radix 2, n a power of two */
@@ -132,34 +162,6 @@ static void fft(float *re, float *im, int n) {
             }
         }
     }
-}
-
-static const char *tuner_name(enum rtlsdr_tuner t) {
-    switch (t) {
-        case RTLSDR_TUNER_E4000: return "E4000";
-        case RTLSDR_TUNER_FC0012: return "FC0012";
-        case RTLSDR_TUNER_FC0013: return "FC0013";
-        case RTLSDR_TUNER_FC2580: return "FC2580";
-        case RTLSDR_TUNER_R820T: return "R820T";
-        case RTLSDR_TUNER_R828D: return "R828D";
-        default: return "UNKNOWN";
-    }
-}
-
-static void set_gain(rtlsdr_dev_t *dev, int tenths) {
-    if (tenths < 0) {
-        rtlsdr_set_tuner_gain_mode(dev, 0);
-        return;
-    }
-    /* The nearest the tuner has */
-    int gains[64], n = rtlsdr_get_tuner_gains(dev, NULL), best = 0;
-
-    if (n <= 0 || n > 64) return;
-    rtlsdr_get_tuner_gains(dev, gains);
-    for (int i = 1; i < n; i++)
-        if (abs(gains[i] - tenths) < abs(gains[best] - tenths)) best = i;
-    rtlsdr_set_tuner_gain_mode(dev, 1);
-    rtlsdr_set_tuner_gain(dev, gains[best]);
 }
 
 /* ---- Channels: one demodulated to the speaker, one watched for SAME alerts ---- */
@@ -430,12 +432,12 @@ static uint32_t seq;
 static bool     fresh = true;
 static int      nfft, fill;
 
-/* ---- The stick's state, for the client ---- */
+/* ---- The device's state, for the client ---- */
 
-enum { S_NOSTICK, S_BUSY, S_OPENING, S_ON, S_STALLED };
-static const char *const s_name[] = {"NOSTICK", "BUSY", "OPENING", "ON", "STALLED"};
+enum { S_NOSTICK, S_BUSY, S_OPENING, S_ON, S_STALLED, S_TX, S_NEEDS };
+static const char *const s_name[] = {"NOSTICK", "BUSY", "OPENING", "ON", "STALLED", "TX", "NEEDS"};
 
-#define PROTO      2
+#define PROTO      2                    /* the hello's first five words as before: a GUI of then reads them */
 #define SOCK_NAME  "x6x00-rtlspec"      /* abstract: gone with the daemon, a second one cannot take it */
 #define STALL_MS   3000                 /* open and nothing for so long: STALLED */
 #define HUNG_MS    12000                /* pulled out and still held so long: the close hangs, the daemon ends */
@@ -443,48 +445,55 @@ static const char *const s_name[] = {"NOSTICK", "BUSY", "OPENING", "ON", "STALLE
 #define ADSB_RATE  2400000u             /* dump1090's own */
 
 static atomic_int  s_now = S_NOSTICK;
-static atomic_uint last_ms;             /* the stick's last transfer */
+static atomic_uint last_ms;             /* the device's last transfer, either way */
 static atomic_bool feeding;             /* AIRSPACE's dump1090 has the samples */
-static int         dev_index;
-static atomic_bool stick_done;          /* the stick's thread ended: the stick closed */
+extern int         sdr_rtl_index;       /* -d (sdr_rtl.c) */
+static atomic_bool stick_done;          /* the device's thread ended: the device closed */
 static const char *replay;              /* -i */
 
 /* ---- The tuner: as the client asked, or for dump1090 ---- */
 
 static pthread_mutex_t tune_lock = PTHREAD_MUTEX_INITIALIZER;   /* all below; taken before pend_lock */
-static rtlsdr_dev_t   *dev_now;         /* the stick open */
+static bool            dev_open;        /* the device open and streaming or about to (dev_ops) */
 static char            tuner_s[16] = "-";
+static uint64_t        dev_lo = 1000000, dev_hi = 6000000000ULL;     /* what it tunes */
 static uint64_t        want_centre;
 static uint32_t        want_rate;
 static int             want_gain;
-static uint64_t        cur_centre;      /* what the stick is set to: 0 (INT_MIN) not set since it opened */
+static uint64_t        cur_centre;      /* what the device is set to: 0 (INT_MIN) not set since it opened */
 static uint32_t        cur_rate;
 static int             cur_gain = INT_MIN;
+static atomic_bool     tx_on;           /* transmitting: the device is the transmitter's, the receiver's settings wait */
 
-/* The stick set as it should be. On the client's thread, the watchdog's, the stick's before it streams: never on the
- * stream's, as libusb does not take control transfers from inside its own event callback. What the stream has to
- * know is handed to it through pend */
+/* The device set as it should be. On the client's thread, the watchdog's, the device's before it streams: never on
+ * the stream's, as libusb does not take control transfers from inside its own event callback. What the stream has to
+ * know is handed to it through pend. Nothing while it transmits: what is asked meanwhile is set after */
 static void apply_tuning(void) {
     pthread_mutex_lock(&tune_lock);
     bool     ads = atomic_load(&feeding);
     uint64_t c   = ads ? ADSB_HZ : want_centre;
     uint32_t r   = ads ? ADSB_RATE : want_rate;
     int      g   = ads ? 999 : want_gain;           /* the tuner's top, as dump1090 itself sets */
+    bool     dv  = dev_open && dev_ops && !atomic_load(&tx_on);
 
-    if (dev_now) {
-        if (r != cur_rate && rtlsdr_set_sample_rate(dev_now, r) == 0) {
-            cur_rate = rtlsdr_get_sample_rate(dev_now);
+    if (c < dev_lo) c = dev_lo;
+    if (c > dev_hi) c = dev_hi;
+    if (dv) {
+        uint32_t got;
+
+        if (r != cur_rate && dev_ops->rate(r, &got) == 0) {
+            cur_rate = got;
             pthread_mutex_lock(&pend_lock);
             pend.rate     = true;
             pend.rate_sps = cur_rate;
             pthread_mutex_unlock(&pend_lock);
         }
         if (g != cur_gain) {
-            set_gain(dev_now, g);
+            dev_ops->gain(g);
             cur_gain = g;
         }
     }
-    if (c != cur_centre && (replay || (dev_now && rtlsdr_set_center_freq(dev_now, (uint32_t)c) == 0))) {
+    if (c != cur_centre && (replay || (dv && dev_ops->freq(c) == 0))) {
         cur_centre = c;
         pthread_mutex_lock(&pend_lock);
         pend.centre    = true;
@@ -496,8 +505,13 @@ static void apply_tuning(void) {
 
 static void hello(char *s, size_t n) {
     pthread_mutex_lock(&tune_lock);
-    snprintf(s, n, "RTLSPEC %d %s %s %u %d", PROTO, atomic_load(&feeding) ? "ADSB" : s_name[atomic_load(&s_now)],
-             tuner_s, cur_rate ? cur_rate : want_rate, n_bins);
+    const sdr_ops_t *o  = dev_ops;
+    int              st = atomic_load(&s_now);
+
+    snprintf(s, n, "RTLSPEC %d %s %s %u %d %s %llu %llu %d", PROTO,
+             atomic_load(&feeding) && st != S_TX ? "ADSB" : s_name[st], tuner_s, cur_rate ? cur_rate : want_rate,
+             n_bins, o ? o->kind : replay ? "REPLAY" : "-", (unsigned long long)dev_lo, (unsigned long long)dev_hi,
+             st == S_TX ? 2 : o && o->tx && dev_open ? 1 : 0);
     pthread_mutex_unlock(&tune_lock);
 }
 
@@ -540,6 +554,275 @@ static void feed_out(const uint8_t *b, uint32_t n) {
     pthread_mutex_unlock(&feed_lock);
 }
 
+/* ---- The transmitter (a HackRF, a bladeRF): narrow FM from the client's voice ---- */
+
+#define TX_RATE    2116800u             /* 48 x 44.1 kHz: each voice sample a step of the frequency over 48 */
+#define TX_UP      48
+#define TX_DEV     4000.0f              /* the deviation at the clipper's level, Hz: under 5 kHz with the filter's
+                                         * overshoot after it */
+#define TX_AMP     100                  /* the I/Q's level, of 127: the DAC's top kept clear */
+#define TX_RAMP_ST 3                    /* the level's step a sample, of 32767: 5 ms up, 5 ms down */
+#define TX_TOT_MS  180000               /* an over's longest: a time-out timer, as a handheld's */
+#define TX_IDLE_MS 2000                 /* no voice from the client so long: it hung, the transmission ends */
+#define TX_RING    (44100 * 2)
+#define TX_LUT     4096
+
+/* Where it may transmit at all: the amateur allocations from 2 m to 23 cm that one ITU region or another has (their
+ * union, as src/cfg/ham_bands.c's for HF; the licence decides inside them). The GUI narrows it further to the TX
+ * ranges set on the radio before it asks; outside these, nothing ever goes, whatever is asked */
+static const struct {
+    uint64_t lo, hi;
+} tx_band[] = {
+    {144000000, 148000000},             /* 2 m */
+    {220000000, 225000000},             /* 1.25 m (Region 2) */
+    {420000000, 450000000},             /* 70 cm */
+    {902000000, 928000000},             /* 33 cm (Region 2) */
+    {1240000000, 1300000000},           /* 23 cm */
+};
+
+static bool tx_band_ok(uint64_t hz) {
+    for (size_t i = 0; i < sizeof(tx_band) / sizeof(tx_band[0]); i++)
+        if (hz >= tx_band[i].lo && hz <= tx_band[i].hi) return true;
+    return false;
+}
+
+static pthread_mutex_t tx_lock = PTHREAD_MUTEX_INITIALIZER;     /* the voice waiting, what was asked */
+static int16_t         tx_ring[TX_RING];
+static int             tx_head, tx_len;
+static uint64_t        tx_hz;
+static int             tx_gain;
+static bool            tx_amp;
+static atomic_bool     tx_req;          /* a transmission asked: the stream makes way for it */
+static atomic_uint     tx_voice_ms;     /* the client's last voice */
+static atomic_uint     tx_from_ms;      /* when it went on the air */
+static const char *volatile tx_why;    /* why it is ending: tx_halt's */
+static int16_t         tx_lut[TX_LUT];
+
+static void tx_say(const char *word, uint64_t hz, const char *why) {
+    char m[96];
+
+    snprintf(m, sizeof(m), "RTX %s %llu %s", word, (unsigned long long)hz, why);
+    put(m, strlen(m));
+}
+
+/* The voice's filters at 44.1 kHz: biquads from RBJ's cookbook */
+typedef struct {
+    float b0, b1, b2, a1, a2, z1, z2;
+} bq_t;
+
+static void bq_set(bq_t *q, bool high, float f0, float qq) {
+    float w = 2 * (float)M_PI * f0 / AUD_RATE, al = sinf(w) / (2 * qq), c = cosf(w), a0 = 1 + al;
+
+    q->b0 = (high ? (1 + c) / 2 : (1 - c) / 2) / a0;
+    q->b1 = (high ? -(1 + c) : 1 - c) / a0;
+    q->b2 = q->b0;
+    q->a1 = -2 * c / a0;
+    q->a2 = (1 - al) / a0;
+    q->z1 = q->z2 = 0;
+}
+
+static float bq_run(bq_t *q, float x) {
+    float y = q->b0 * x + q->z1;
+
+    q->z1 = q->b1 * x - q->a1 * y + q->z2;
+    q->z2 = q->b2 * x - q->a2 * y;
+    return y;
+}
+
+/* The modulator, on the device's own thread while it transmits */
+static struct {
+    bq_t        hp, lp1, lp2;
+    float       pre, env, gain;
+    int32_t     inc1, dinc, inc;
+    uint32_t    ph;
+    int         sub, ramp;
+    bool        ending;
+    const char *why;
+} mod;
+
+static void mod_reset(void) {
+    memset(&mod, 0, sizeof(mod));
+    bq_set(&mod.hp, true, 300, 0.7071f);        /* below the voice: hum, the mic's thumps */
+    bq_set(&mod.lp1, false, 3000, 0.5412f);     /* above it, after the clipper: a 4th-order Butterworth */
+    bq_set(&mod.lp2, false, 3000, 1.3066f);
+    mod.gain = 4;
+}
+
+/* The next voice sample (silence when none is waiting), shaped, as the frequency step for TX_UP samples: 300 Hz to
+ * 3 kHz, levelled (its peaks to half scale, at most 26 dB up, held under -54 dBFS so the hiss of a pause is not
+ * raised), pre-emphasised (6 dB an octave from 350 Hz, 0 dB at 1 kHz), clipped, filtered */
+static int32_t mod_next(void) {
+    int16_t s = 0;
+
+    pthread_mutex_lock(&tx_lock);
+    if (tx_len > AUD_RATE * 3 / 10) {   /* behind (the client's clock a little faster): back to 0.1 s */
+        tx_head = (tx_head + tx_len - AUD_RATE / 10) % TX_RING;
+        tx_len  = AUD_RATE / 10;
+    }
+    if (tx_len) {
+        s       = tx_ring[tx_head];
+        tx_head = (tx_head + 1) % TX_RING;
+        tx_len--;
+    }
+    pthread_mutex_unlock(&tx_lock);
+
+    float x = bq_run(&mod.hp, s / 32768.0f), a = fabsf(x);
+
+    mod.env += (a > mod.env ? 0.05f : 0.00005f) * (a - mod.env);
+    if (mod.env > 0.002f) {
+        float want = 0.5f / mod.env;
+
+        want = want > 20 ? 20 : want < 0.5f ? 0.5f : want;
+        mod.gain += 0.002f * (want - mod.gain);
+    }
+    x *= mod.gain;
+    float y = (x - 0.95f * mod.pre) / 0.1475f;
+
+    mod.pre = x;
+    y       = y > 1 ? 1 : y < -1 ? -1 : y;
+    y       = bq_run(&mod.lp2, bq_run(&mod.lp1, y));
+    return (int32_t)lrintf(y * TX_DEV / TX_RATE * 4294967296.0f);
+}
+
+/* The device's next pairs (sdr_tx_fill): the frequency eased from one voice sample's to the next, the level ramped
+ * up at the start and down at the end. The end: asked (tx_halt), no voice for TX_IDLE_MS, TX_TOT_MS on the air */
+static int mod_fill(int8_t *iq, uint32_t pairs) {
+    uint32_t now = now_ms();
+
+    atomic_store(&last_ms, now);
+    if (!mod.ending) {
+        if (tx_halt) mod.ending = true, mod.why = tx_why ? tx_why : "ASKED";
+        else if (now - atomic_load(&tx_from_ms) > TX_TOT_MS) mod.ending = true, mod.why = "TIMEOUT";
+        else if (now - atomic_load(&tx_voice_ms) > TX_IDLE_MS) mod.ending = true, mod.why = "IDLE";
+    }
+    for (uint32_t k = 0; k < pairs; k++) {
+        if (mod.sub == 0) {
+            int32_t from = mod.inc1;
+
+            mod.inc1 = mod_next();
+            mod.dinc = (mod.inc1 - from) / TX_UP;
+            mod.inc  = from;
+        }
+        if (++mod.sub == TX_UP) mod.sub = 0;
+        mod.inc += mod.dinc;
+        mod.ph += (uint32_t)mod.inc;
+        if (mod.ending) {
+            if ((mod.ramp -= TX_RAMP_ST) <= 0) {
+                memset(iq + 2 * k, 0, (size_t)(pairs - k) * 2);
+                return 1;
+            }
+        } else if (mod.ramp < 32767) {
+            mod.ramp = mod.ramp + TX_RAMP_ST > 32767 ? 32767 : mod.ramp + TX_RAMP_ST;
+        }
+        uint32_t p = mod.ph >> 20;
+        int      c = tx_lut[(p + TX_LUT / 4) & (TX_LUT - 1)], sn = tx_lut[p];
+
+        iq[2 * k]     = (int8_t)(((c * mod.ramp) >> 15) * TX_AMP >> 15);
+        iq[2 * k + 1] = (int8_t)(((sn * mod.ramp) >> 15) * TX_AMP >> 15);
+    }
+    return 0;
+}
+
+/* Asked to transmit at hz: refused unless a device that transmits is open, AIRSPACE does not have it, and hz is in an
+ * amateur band it tunes; then the stream is ended and the device's thread transmits (tx_run) */
+static void tx_ask(uint64_t hz, int gain, bool amp) {
+    const char *no = NULL;
+    int         gmax = 0;
+
+    pthread_mutex_lock(&tune_lock);
+    if (!dev_open || !dev_ops) no = "NO-DEVICE";
+    else if (!dev_ops->tx) no = "RECEIVE-ONLY";
+    else if (atomic_load(&feeding)) no = "AIRSPACE";
+    else if (!tx_band_ok(hz) || hz < dev_lo || hz > dev_hi) no = "NOT-AMATEUR";
+    else gmax = dev_ops->tx_gain_max;
+    pthread_mutex_unlock(&tune_lock);
+    if (no) {
+        tx_say("NO", hz, no);
+        fprintf(stderr, "rtlspec: transmitting on %llu Hz refused: %s\n", (unsigned long long)hz, no);
+        return;
+    }
+    if (atomic_load(&tx_req) || atomic_load(&tx_on)) return;     /* one at a time */
+    pthread_mutex_lock(&tx_lock);
+    tx_hz   = hz;
+    tx_gain = gain < 0 ? 0 : gain > gmax ? gmax : gain;
+    tx_amp  = amp;
+    tx_head = tx_len = 0;
+    pthread_mutex_unlock(&tx_lock);
+    atomic_store(&tx_voice_ms, now_ms());
+    tx_why  = NULL;
+    tx_halt = 0;
+    atomic_store(&tx_req, true);
+    halt_rx();
+}
+
+/* The transmission ends (ramped down): why, for the client */
+static void tx_end(const char *why) {
+    if (!atomic_load(&tx_req) && !atomic_load(&tx_on)) return;
+    tx_why  = why;
+    tx_halt = 1;
+}
+
+/* The client's voice in: "TAUD", u32 count, s16 samples[count] */
+static void tx_voice(const uint8_t *b, size_t n) {
+    uint32_t cnt;
+
+    if (n < 8) return;
+    memcpy(&cnt, b + 4, 4);
+    if (cnt > (n - 8) / 2) return;
+    pthread_mutex_lock(&tx_lock);
+    for (uint32_t i = 0; i < cnt; i++) {
+        int16_t v;
+
+        memcpy(&v, b + 8 + i * 2, 2);
+        tx_ring[(tx_head + tx_len) % TX_RING] = v;
+        if (tx_len < TX_RING) tx_len++;
+        else tx_head = (tx_head + 1) % TX_RING;
+    }
+    pthread_mutex_unlock(&tx_lock);
+    atomic_store(&tx_voice_ms, now_ms());
+}
+
+/* On the device's thread, its stream ended for it: the transmission, then the receiver set again as it was */
+static void tx_run(const sdr_ops_t *o) {
+    uint64_t hz;
+    int      g, r;
+    bool     amp;
+
+    pthread_mutex_lock(&tx_lock);
+    hz  = tx_hz;
+    g   = tx_gain;
+    amp = tx_amp;
+    pthread_mutex_unlock(&tx_lock);
+    atomic_store(&tx_req, false);
+    if (tx_halt || stop) {              /* ended before it began */
+        tx_say("END", hz, tx_why ? tx_why : "ASKED");
+        return;
+    }
+    mod_reset();
+    atomic_store(&tx_from_ms, now_ms());
+    atomic_store(&tx_on, true);
+    atomic_store(&s_now, S_TX);
+    tx_say("ON", hz, "-");
+    fprintf(stderr, "rtlspec: transmitting FM on %llu Hz, TX gain %d dB, amplifier %s\n", (unsigned long long)hz, g,
+            amp ? "on" : "off");
+    r = o->tx(hz, TX_RATE, g, amp, mod_fill);
+    atomic_store(&tx_on, false);
+    tx_say("END", hz, r ? "FAILED" : mod.why ? mod.why : "ASKED");
+    fprintf(stderr, "rtlspec: off the air (%s) after %u ms\n", r ? "FAILED" : mod.why ? mod.why : "ASKED",
+            now_ms() - atomic_load(&tx_from_ms));
+    tx_halt = 0;
+    pthread_mutex_lock(&tune_lock);     /* the receiver as the client last asked, all set again */
+    cur_centre = 0;
+    cur_rate   = 0;
+    cur_gain   = INT_MIN;
+    pthread_mutex_unlock(&tune_lock);
+    apply_tuning();
+    atomic_store(&last_ms, now_ms());
+    atomic_store(&s_now, S_OPENING);    /* ON at its first samples */
+}
+
+static atomic_bool rx_restart;          /* "R" */
+
 /* ---- The client's commands, on its own thread ---- */
 
 static void command(char *line, int fd) {
@@ -548,7 +831,7 @@ static void command(char *line, int fd) {
     } else if (line[0] == 'f') {
         uint64_t hz = strtoull(line + 1, NULL, 10);
 
-        if (hz >= 24000000 && hz <= 1766000000) {
+        if (hz >= 1000000 && hz <= 6000000000ULL) {     /* within what the device tunes: apply_tuning */
             pthread_mutex_lock(&tune_lock);
             want_centre = hz;
             pthread_mutex_unlock(&tune_lock);
@@ -590,11 +873,27 @@ static void command(char *line, int fd) {
     } else if (line[0] == 'a') {
         feed_set(fd);                   /* -1: "a 0", the samples dump1090's no more */
         fd = -1;
+    } else if (line[0] == 't') {          /* "t <Hz> <gain> <amp>": transmit; "t 0": end it */
+        char    *e;
+        uint64_t hz = strtoull(line + 1, &e, 10);
+
+        if (!hz) {
+            tx_end("ASKED");
+        } else {
+            long g = strtol(e, &e, 10);
+
+            tx_ask(hz, (int)g, strtol(e, NULL, 10) != 0);
+        }
+    } else if (line[0] == 'R') {          /* the stream stopped and started, as for a transmission */
+        if (!atomic_load(&tx_on) && !atomic_load(&tx_req)) {
+            atomic_store(&rx_restart, true);
+            halt_rx();
+        }
     } else if (line[0] == 'Q') {
-        stop = 1;
-        pthread_mutex_lock(&tune_lock);
-        if (dev_now) rtlsdr_cancel_async(dev_now);
-        pthread_mutex_unlock(&tune_lock);
+        stop    = 1;
+        tx_why  = "ASKED";
+        tx_halt = 1;
+        halt_rx();
     }
     if (fd >= 0) close(fd);
 }
@@ -603,7 +902,7 @@ static void *client_thread(void *arg) {
     int fd = (int)(intptr_t)arg;
 
     for (;;) {
-        char line[128];
+        static char line[16384];        /* a line, or the voice: 50 ms of it is 4418 bytes */
         union {
             struct cmsghdr h;
             char           b[CMSG_SPACE(sizeof(int) * 4)];
@@ -615,6 +914,10 @@ static void *client_thread(void *arg) {
 
         if (n < 0 && errno == EINTR) continue;
         if (n <= 0) break;
+        if (n >= 8 && !memcmp(line, "TAUD", 4)) {
+            tx_voice((const uint8_t *)line, (size_t)n);
+            continue;
+        }
         line[n] = 0;
         for (struct cmsghdr *h = CMSG_FIRSTHDR(&m); h; h = CMSG_NXTHDR(&m, h)) {
             if (h->cmsg_level != SOL_SOCKET || h->cmsg_type != SCM_RIGHTS) continue;
@@ -630,7 +933,8 @@ static void *client_thread(void *arg) {
         }
         command(line, got);
     }
-    /* Gone (or replaced): what it asked for ends; the stick goes on, tuned as it was */
+    /* Gone (or replaced): what it asked for ends, its transmission first; the device goes on, tuned as it was */
+    tx_end("GONE");
     pthread_mutex_lock(&out_lock);
     if (client == fd) client = -1;
     pthread_mutex_unlock(&out_lock);
@@ -690,16 +994,16 @@ static void commands(uint64_t *centre, bool *fresh) {
 
 /* ---- The stream: rows, audio and alerts as asked, or dump1090's samples ---- */
 
-/* Each transfer the stick sends, on librtlsdr's thread: the commands waiting first */
-static void on_samples(unsigned char *buf, uint32_t n, void *ctx) {
+/* Each transfer the device sends (unsigned 8-bit I/Q, whichever it is), on its backend's thread: the commands waiting
+ * first */
+static void on_samples(unsigned char *buf, uint32_t n) {
     int  bins = n_bins;
     bool rows;
-    (void)ctx;
 
     atomic_store(&last_ms, now_ms());
     if (atomic_load(&s_now) != S_ON) atomic_store(&s_now, S_ON);
     if (stop) {
-        if (term_dev) rtlsdr_cancel_async(term_dev);
+        halt_rx();
         return;
     }
     commands(&centre_now, &fresh);
@@ -789,7 +1093,7 @@ static void replay_run(void) {
             rewind(f);
             continue;
         }
-        on_samples(chunk, (uint32_t)n, NULL);
+        on_samples(chunk, (uint32_t)n);
         usleep((useconds_t)(n / 2 * 1000000.0 / rate_now));
     }
     fclose(f);
@@ -818,59 +1122,97 @@ static bool stick_pulled(void) {
     return gone;
 }
 
-/* The stick: opened when it is there, streaming till it is pulled out */
+/* What is looked for, in this order: those that transmit first, so one plugged in beside a stick is the one used */
+static const sdr_ops_t *const kinds[] = {&sdr_hackrf, &sdr_bladerf, &sdr_rtl};
+
+/* The device's stream till it ends: made way for a transmission or a restart ("R"); ended by itself with the
+ * device still there, it is left open and alone till it is pulled out (closed and opened again, it would not be
+ * mended, and that is what wears the USB host) */
+static void streaming(const sdr_ops_t *o) {
+    for (;;) {
+        rx_halt = 0;                    /* before the look at what asked for it: a halt set after it is not lost */
+        if (stop || stick_pulled()) return;
+        if (atomic_load(&tx_req)) {
+            tx_run(o);
+            continue;
+        }
+        if (atomic_exchange(&rx_restart, false)) fprintf(stderr, "rtlspec: the stream started again (R)\n");
+        int e = o->rx(on_samples, &rx_halt);
+
+        if (stop || stick_pulled()) return;
+        if (e == 0 || atomic_load(&tx_req) || atomic_load(&rx_restart)) continue;
+        fprintf(stderr, "rtlspec: the stream ended, the device still there: kept as it is till it is pulled out\n");
+        atomic_store(&s_now, S_STALLED);
+        while (!stop && !stick_pulled()) sleep(1);
+        return;
+    }
+}
+
+/* The device: opened when it is there, streaming till it is pulled out */
 static void *stick_thread(void *arg) {
     (void)arg;
     while (!stop) {
-        rtlsdr_dev_t *dev;
+        const sdr_ops_t *o = NULL;
+        char             tn[16] = "";
+        uint64_t         lo = 0, hi = 0;
+        int              r;
 
         if (replay) {
             replay_run();
             continue;
         }
-        if ((int)rtlsdr_get_device_count() <= dev_index) {
+        for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]) && !o; i++)
+            if (kinds[i]->present()) o = kinds[i];
+        if (!o) {
             atomic_store(&s_now, S_NOSTICK);
             sleep(1);
             continue;
         }
-        if (rtlsdr_open(&dev, (uint32_t)dev_index) != 0) {     /* another program has it: tried again, not forced */
+        if ((r = o->open(tn, sizeof(tn), &lo, &hi)) < 0) {     /* gone again, or not one it can open */
+            atomic_store(&s_now, S_NOSTICK);
+            sleep(2);
+            continue;
+        }
+        if (r == 1) {                   /* another program has it: tried again, not forced */
             atomic_store(&s_now, S_BUSY);
             sleep(2);
             continue;
         }
-        rtlsdr_set_bias_tee(dev, 0);
         pthread_mutex_lock(&tune_lock);
-        dev_now    = dev;
+        dev_ops = o;
+        snprintf(tuner_s, sizeof(tuner_s), "%s", tn[0] ? tn : o->kind);
+        if (r == 0) {
+            dev_lo   = lo;
+            dev_hi   = hi;
+            dev_open = true;
+        }
         cur_centre = 0;
         cur_rate   = 0;
         cur_gain   = INT_MIN;
-        snprintf(tuner_s, sizeof(tuner_s), "%s", tuner_name(rtlsdr_get_tuner_type(dev)));
         pthread_mutex_unlock(&tune_lock);
-        apply_tuning();
-        rtlsdr_reset_buffer(dev);
-        atomic_store(&last_ms, now_ms());
-        atomic_store(&s_now, S_OPENING);
-        fprintf(stderr, "rtlspec: the stick open, %s\n", tuner_s);
-
-        /* Several transfers queued all the time (as rtl_sdr and dump1090 read): one at a time, what the stick sent
-         * between two of them was lost, a quarter of it whatever the rate */
-        term_dev = dev;
-        rtlsdr_read_async(dev, on_samples, NULL, 12, READ_LEN);
-
-        /* The stream ended with the stick still there (not pulled out, not told to end): left open and alone till it
-         * is; closed and opened again, it would not be mended, and that is what wears the USB host */
-        if (!stop && !stick_pulled()) {
-            fprintf(stderr, "rtlspec: the stream ended, the stick still there: kept as it is till it is pulled out\n");
-            atomic_store(&s_now, S_STALLED);
-            while (!stop && !stick_pulled()) sleep(1);
+        if (r == 2) {                   /* there and not usable as it is: said so (tuner), left so till pulled out */
+            atomic_store(&s_now, S_NEEDS);
+            fprintf(stderr, "rtlspec: the %s needs %s\n", o->kind, tn);
+            while (!stop && o->present() && !stick_pulled()) sleep(1);
+        } else {
+            apply_tuning();
+            atomic_store(&last_ms, now_ms());
+            atomic_store(&s_now, S_OPENING);
+            fprintf(stderr, "rtlspec: the %s open, %s, %llu-%llu Hz%s\n", o->kind, tuner_s, (unsigned long long)lo,
+                    (unsigned long long)hi, o->tx ? ", it can transmit" : "");
+            streaming(o);
         }
         pthread_mutex_lock(&tune_lock);
-        term_dev = NULL;
-        dev_now  = NULL;
-        snprintf(tuner_s, sizeof(tuner_s), "-");        /* no tuner said for a stick that is not there */
+        dev_open = false;
+        snprintf(tuner_s, sizeof(tuner_s), "-");        /* no tuner said for a device that is not there */
         pthread_mutex_unlock(&tune_lock);
-        rtlsdr_close(dev);
-        fprintf(stderr, "rtlspec: the stick closed (%s)\n", stop ? "the daemon ends" : "pulled out");
+        o->close();
+        pthread_mutex_lock(&tune_lock);
+        dev_ops = NULL;
+        dev_lo  = 1000000;
+        dev_hi  = 6000000000ULL;
+        pthread_mutex_unlock(&tune_lock);
+        fprintf(stderr, "rtlspec: the %s closed (%s)\n", o->kind, stop ? "the daemon ends" : "pulled out");
         atomic_store(&s_now, S_NOSTICK);
     }
     atomic_store(&stick_done, true);
@@ -879,7 +1221,7 @@ static void *stick_thread(void *arg) {
 
 /* Each 200 ms: the state told when it changes, a stall seen, dump1090's samples taken back when it went */
 static void *watch_thread(void *arg) {
-    char     said[96] = "", now[96];
+    char     said[128] = "", now[128];
     uint32_t looked = 0, pulled_at = 0;
     (void)arg;
 
@@ -898,9 +1240,8 @@ static void *watch_thread(void *arg) {
 
             looked = now_ms();
             if (gone) {
-                pthread_mutex_lock(&tune_lock);
-                if (term_dev) rtlsdr_cancel_async(term_dev);
-                pthread_mutex_unlock(&tune_lock);
+                tx_end("GONE");
+                halt_rx();
             }
             if (!gone) {
                 pulled_at = 0;
@@ -911,6 +1252,15 @@ static void *watch_thread(void *arg) {
                         HUNG_MS / 1000);
                 _exit(2);
             }
+        }
+        /* A transmission whose device stopped taking samples (a hung stream), or long past its time-out: ended
+         * hard, by the backend */
+        if (atomic_load(&tx_on) && (now_ms() - atomic_load(&last_ms) > 1500 ||
+                                    now_ms() - atomic_load(&tx_from_ms) > TX_TOT_MS + 5000)) {
+            const sdr_ops_t *o = dev_ops;
+
+            fprintf(stderr, "rtlspec: the transmission does not end by itself: stopped\n");
+            if (o && o->tx_stop) o->tx_stop();
         }
         hello(now, sizeof(now));
         if (strcmp(now, said)) {
@@ -931,7 +1281,7 @@ int main(int argc, char **argv) {
     while ((opt = getopt(argc, argv, "Fd:f:s:n:r:g:i:")) != -1) {
         switch (opt) {
             case 'F': front = true; break;
-            case 'd': dev_index = atoi(optarg); break;
+            case 'd': sdr_rtl_index = atoi(optarg); break;
             case 'f': centre = strtoull(optarg, NULL, 10); break;
             case 's': rate = (uint32_t)strtoul(optarg, NULL, 10); break;
             case 'n': bins = atoi(optarg); break;
@@ -985,6 +1335,7 @@ int main(int argc, char **argv) {
     n_bins      = bins;
     centre_now  = centre;
     for (int i = 0; i < 1024; i++) sin_lut[i] = (int16_t)lrint(32767 * sin(2 * M_PI * i / 1024));
+    for (int i = 0; i < TX_LUT; i++) tx_lut[i] = (int16_t)lrint(32767 * sin(2 * M_PI * i / TX_LUT));
     for (int i = 0; i < bins; i++) {
         win[i] = 0.5f - 0.5f * cosf(2 * (float)M_PI * i / (bins - 1));
         wsum += win[i];
@@ -1000,7 +1351,7 @@ int main(int argc, char **argv) {
 
     while (!stop) {
         struct pollfd p = {.fd = ls, .events = POLLIN};
-        char          h[96];
+        char          h[128];
         int           c;
 
         if (poll(&p, 1, 500) <= 0) continue;
@@ -1019,8 +1370,9 @@ int main(int argc, char **argv) {
         ct_on = pthread_create(&ct, NULL, client_thread, (void *)(intptr_t)c) == 0;
     }
 
-    /* Told to end: the stream cancelled, the stick closed (6 s for it, then gone anyway) */
-    if (term_dev) rtlsdr_cancel_async(term_dev);
+    /* Told to end: a transmission ended, the stream cancelled, the device closed (6 s for it, then gone anyway) */
+    tx_halt = 1;
+    halt_rx();
     for (int i = 0; i < 60 && !atomic_load(&stick_done); i++) usleep(100000);
     fprintf(stderr, "rtlspec: daemon ends\n");
     _exit(0);

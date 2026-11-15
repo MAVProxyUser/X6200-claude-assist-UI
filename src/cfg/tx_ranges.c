@@ -253,6 +253,42 @@ static bool kr_find(int32_t hz, int32_t *lo, int32_t *hi) {
     return false;
 }
 
+/* The SDR's amateur bands (tx_ranges.h), Hz, both edges in, sorted: tools/tx_ranges checks them and their edges */
+static const struct {
+    int32_t lo, hi;
+} sdr[] = {
+    {144000000, 148000000},     /* 2 m: 144-146 Region 1, 144-148 Regions 2 and 3 */
+    {220000000, 225000000},     /* 1.25 m: Region 2 */
+    {420000000, 450000000},     /* 70 cm: 430-440 Regions 1 and 3, 420-450 Region 2 */
+    {902000000, 928000000},     /* 33 cm: Region 2 */
+    {1240000000, 1300000000},   /* 23 cm */
+};
+#define SDR_N ((int)(sizeof(sdr) / sizeof(sdr[0])))
+
+bool tx_ranges_sdr_band(int32_t hz, int32_t *lo, int32_t *hi) {
+    for (int i = 0; i < SDR_N; i++) {
+        if (hz >= sdr[i].lo && hz <= sdr[i].hi) {
+            if (lo) *lo = sdr[i].lo;
+            if (hi) *hi = sdr[i].hi;
+            return true;
+        }
+    }
+    return false;
+}
+
+ham_tx_t tx_ranges_sdr_check(tx_ranges_t p, int32_t hz) {
+    if (!tx_ranges_sdr_band(hz, NULL, NULL)) {
+        return HAM_TX_OFF_BAND;
+    }
+    if (p == TX_RANGES_KR) {
+        return kr_find(hz, NULL, NULL) ? HAM_TX_OK : HAM_TX_OFF_RANGE;
+    }
+    if (p == TX_RANGES_OWN) {
+        return own_find(hz, NULL, NULL) > 0 ? HAM_TX_OK : HAM_TX_OFF_RANGE;
+    }
+    return HAM_TX_OK;
+}
+
 bool tx_ranges_of(tx_ranges_t p, int32_t hz, int32_t *lo, int32_t *hi) {
     switch (p) {
         case TX_RANGES_KR:

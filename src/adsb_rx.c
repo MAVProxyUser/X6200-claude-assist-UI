@@ -64,7 +64,8 @@ static const struct {
     const char *name;
     bool        new_id;                 /* cdc_acm told its ID */
     const char *init;                   /* sent on opening, each answered, and again after QUIET_S without a frame */
-    bool        sdr;                    /* an RTL-SDR: dump1090 decodes it */
+    bool        sdr;                    /* an SDR: dump1090 decodes it, from x6x00-rtlspec's samples (an RTL-SDR also
+                                         * without: dump1090 opens it itself) */
 } receivers[] = {
     {"04d8", "f8e8", NULL, "GNS 5890", true, NULL, false},
     {"04d8", "000a", "ADSB", "MICROADSB", false,
@@ -87,6 +88,12 @@ static const struct {
     {"1f4d", "b803", NULL, "RTL-SDR", false, NULL, true},
     {"1f4d", "c803", NULL, "RTL-SDR", false, NULL, true},
     {"1f4d", "d803", NULL, "RTL-SDR", false, NULL, true},
+    /* HackRF One, rad1o, Jawbreaker; bladeRF 2.0 micro, bladeRF x40/x115: through x6x00-rtlspec only */
+    {"1d50", "6089", NULL, "HACKRF", false, NULL, true},
+    {"1d50", "cc15", NULL, "HACKRF", false, NULL, true},
+    {"1d50", "604b", NULL, "HACKRF", false, NULL, true},
+    {"2cf0", "5246", NULL, "BLADERF", false, NULL, true},
+    {"1d50", "6066", NULL, "BLADERF", false, NULL, true},
 };
 #define N_RECEIVERS (int)(sizeof(receivers) / sizeof(receivers[0]))
 
@@ -300,13 +307,15 @@ static void d1090_stop(void) {
 }
 
 /* On the daemon's samples when it is there (a pipe: dump1090 reads one end, the daemon is given the other), else on
- * the stick itself */
-static bool d1090_start(void) {
+ * the stick itself: an RTL-SDR only (rtl: dump1090 here has librtlsdr alone; a HackRF or a bladeRF waits for the
+ * daemon) */
+static bool d1090_start(bool rtl) {
     int  pp[2] = {-1, -1};
     bool fed;
 
     if (access(DUMP1090, X_OK) != 0) return false;
     fed = rtl_spectrum_daemon() && pipe2(pp, O_CLOEXEC) == 0;
+    if (!fed && !rtl) return false;
     if (fed) fcntl(pp[1], F_SETPIPE_SZ, 1 << 20);  /* room for 0.2 s of samples: dump1090 reads in big gulps */
     pid_t p = fork();
     if (p < 0) {
@@ -417,7 +426,7 @@ static void *rx_thread(void *arg) {
                 d1090_stop();                   /* the RTL-SDR went: its dump1090 too */
             } else if (receivers[rx].sdr) {     /* dump1090 decodes it; its raw frames over TCP */
                 if (!d1090_alive()) {
-                    if (!d1090_start()) {
+                    if (!d1090_start(!strcmp(receivers[rx].name, "RTL-SDR"))) {
                         state = ADSB_RX_NO_DRIVER;
                         sleep(2);
                         continue;
@@ -578,6 +587,7 @@ void adsb_rx_lend(bool on) { atomic_store(&lent, on); }
  * RTL-SDR and a serial one are each seen */
 static atomic_bool    p_sdr, p_rcv;
 static atomic_int     p_sdr_id;         /* the RTL-SDR's bus * 1000 + device number: another one once it is replugged */
+static const char *_Atomic p_sdr_kind = "";     /* its kind: receivers[]'s name */
 static atomic_int     p_looks;          /* looks at USB so far: 0, nothing known yet */
 static pthread_once_t p_once = PTHREAD_ONCE_INIT;
 
@@ -587,7 +597,8 @@ static void *presence_thread(void *arg) {
         DIR           *d   = opendir(USB_DEVICES);
         struct dirent *e;
         bool           sdr = false, rcv = false;
-        int            id  = 0;
+        int            id  = 0, rank = 0;
+        const char    *kind = "";
 
         while (d && (e = readdir(d))) {
             char path[300], v[8], p[8], prod[64], bus[8], dev[8];
@@ -604,7 +615,13 @@ static void *presence_thread(void *arg) {
                     (receivers[r].product && !strstr(prod, receivers[r].product)))
                     continue;
                 if (receivers[r].sdr) {
+                    /* more than one: the daemon's choice, a HackRF, then a bladeRF, then an RTL-SDR (rtlspec.c) */
+                    int k = !strcmp(receivers[r].name, "HACKRF") ? 3 : !strcmp(receivers[r].name, "BLADERF") ? 2 : 1;
+
                     sdr = true;
+                    if (k <= rank) break;
+                    rank = k;
+                    kind = receivers[r].name;
                     snprintf(path, sizeof(path), USB_DEVICES "/%s/busnum", e->d_name);
                     if (!read_line(path, bus, sizeof(bus))) bus[0] = 0;
                     snprintf(path, sizeof(path), USB_DEVICES "/%s/devnum", e->d_name);
@@ -620,6 +637,7 @@ static void *presence_thread(void *arg) {
         atomic_store(&p_sdr, sdr);
         atomic_store(&p_rcv, rcv);
         atomic_store(&p_sdr_id, sdr ? id : 0);
+        atomic_store(&p_sdr_kind, kind);
         atomic_fetch_add(&p_looks, 1);
         sleep(1);
     }
@@ -640,6 +658,11 @@ bool adsb_rx_receiver_present(void) {
 bool adsb_rx_sdr_present(void) {
     pthread_once(&p_once, presence_start);
     return atomic_load(&p_sdr);
+}
+
+const char *adsb_rx_sdr_kind(void) {
+    pthread_once(&p_once, presence_start);
+    return atomic_load(&p_sdr_kind);
 }
 
 int adsb_rx_sdr_id(void) {

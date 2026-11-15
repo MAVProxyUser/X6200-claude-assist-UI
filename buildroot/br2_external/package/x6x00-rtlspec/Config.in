@@ -1,10 +1,16 @@
 config BR2_PACKAGE_X6X00_RTLSPEC
 	bool "x6x00-rtlspec"
 	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on !BR2_PACKAGE_HACKRF # libhackrf's own package instead
 	select BR2_PACKAGE_RTLSDR_BLOG
+	select BR2_PACKAGE_LIBHACKRF
+	select BR2_PACKAGE_LIBBLADERF
 	help
-	  An RTL-SDR stick's spectrum for the OpenX6X00 GUI's Sentry
-	  (the F VHF/UHF screen, src/rtl_spectrum.c): rows of averaged
-	  FFTs on its standard output, retuned from its standard input.
+	  The daemon that owns the SDR on the HOST port for the
+	  OpenX6X00 GUI's Sentry (src/rtl_spectrum.c): an RTL-SDR
+	  stick, a HackRF or a bladeRF (libbladeRF opened at run
+	  time). Spectrum rows, a channel's audio, SAME, RDS,
+	  AIRSPACE's dump1090 samples; FM through a HackRF or bladeRF
+	  for the walkie, only in the amateur bands.
 	  Installed as /usr/bin/x6x00-rtlspec; its source is this
 	  repository's tools/rtlspec.

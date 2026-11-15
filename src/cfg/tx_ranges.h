@@ -75,6 +75,21 @@ ham_tx_t tx_ranges_check(tx_ranges_t p, int32_t hz, bool hw_tx, int32_t shift, b
  * bands: true, left as given. Only ever narrows */
 bool tx_ranges_narrow(tx_ranges_t p, int32_t freq, int32_t shift, int32_t *lo, int32_t *hi);
 
+/* ---- An SDR's transmitter: the Sentry's walkie through a HackRF or a bladeRF (rtl_spectrum.h) ----
+ *
+ * Only the amateur bands from 2 m to 23 cm: the union of the ITU regions' allocations (144-148, 220-225, 420-450,
+ * 902-928, 1240-1300 MHz), as ham_bands.c's for HF; TX outside ham bands never widens it, and nothing else (airband,
+ * marine, GNSS, cellular, FRS/GMRS, MURS) is ever a range. x6x00-rtlspec refuses the same outside them. Of the
+ * profiles, Ham bands takes these; South Korea's ranges and the own list hold none (0.1-55 MHz): with either chosen
+ * the SDR transmits nowhere, the narrower one winning as for the radio itself */
+
+/* The SDR's amateur band hz is in, its edges into *lo and *hi (Hz, both in; either may be NULL). False: none */
+bool tx_ranges_sdr_band(int32_t hz, int32_t *lo, int32_t *hi);
+
+/* Why the SDR may not transmit at hz with profile p: HAM_TX_OK; HAM_TX_OFF_BAND, not one of its amateur bands;
+ * HAM_TX_OFF_RANGE, the profile (South Korea, the own list) holds no range there. Any thread */
+ham_tx_t tx_ranges_sdr_check(tx_ranges_t p, int32_t hz);
+
 /* The words of a refusal, "outside the TX ranges (Settings > TX Cal)" (cfg_tx_refusal); NULL for HAM_TX_OK */
 const char *tx_ranges_why(ham_tx_t why);
 

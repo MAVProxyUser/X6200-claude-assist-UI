@@ -137,6 +137,42 @@ size_t audio_rx_tap_read(int16_t *buf, size_t n) {
     return n;
 }
 
+/* The capture for an SDR's transmitter (rtl_spectrum.c: the Sentry's walkie through a HackRF or bladeRF): with the base
+ * in record mode (AUDIO_PLAY_VOICE_REC) the capture is the hand mic, as the voice messages record it. Its own ring,
+ * half a second, read apart from the two above */
+#define MIC_RING (AUDIO_CAPTURE_RATE / 2)
+static int16_t         mic_ring[MIC_RING];
+static size_t          mic_head, mic_len;
+static pthread_mutex_t mic_lock = PTHREAD_MUTEX_INITIALIZER;
+static volatile bool   mic_on;
+
+static void mic_put(const int16_t *b, size_t n) {
+    pthread_mutex_lock(&mic_lock);
+    for (size_t i = 0; i < n; i++) {
+        mic_ring[(mic_head + mic_len) % MIC_RING] = b ? b[i] : 0;
+        if (mic_len < MIC_RING) mic_len++;
+        else mic_head = (mic_head + 1) % MIC_RING;
+    }
+    pthread_mutex_unlock(&mic_lock);
+}
+
+void audio_mic_tap(bool on) {
+    pthread_mutex_lock(&mic_lock);
+    mic_on   = on;
+    mic_head = mic_len = 0;
+    pthread_mutex_unlock(&mic_lock);
+}
+
+size_t audio_mic_tap_read(int16_t *buf, size_t n) {
+    pthread_mutex_lock(&mic_lock);
+    if (n > mic_len) n = mic_len;
+    for (size_t i = 0; i < n; i++) buf[i] = mic_ring[(mic_head + i) % MIC_RING];
+    mic_head = (mic_head + n) % MIC_RING;
+    mic_len -= n;
+    pthread_mutex_unlock(&mic_lock);
+    return n;
+}
+
 /* The receiver's audio for a picture of it (the Sentry's G WALKIE voiceprint): its own ring, read apart from the
  * playback's tap above */
 #define SCOPE_RING 8192
@@ -186,6 +222,7 @@ static void read_callback(pa_stream *s, size_t nbytes, void *udata) {
         return;
     if (tap_on) tap_put(buf, nbytes / 2);
     if (scope_on) scope_put(buf, nbytes / 2);
+    if (mic_on) mic_put(buf, nbytes / 2);
     if (buf) {
         dsp_put_audio_samples(nbytes / 2, (int16_t *) buf);
     } else {

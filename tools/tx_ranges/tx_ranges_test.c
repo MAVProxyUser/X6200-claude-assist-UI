@@ -6,7 +6,8 @@
  *  the check with TX outside ham bands on and off, on a transverter's range (its IF counts), receive only; the own
  *  list's lines one by one (good, bad, comments), a list from text and from a file (missing, CRLF, a line too long,
  *  more ranges than it keeps), joined where they overlap or touch, empty; the SWR scan's narrowing; Amateur bands as
- *  ham_tx_check had it, frequency by frequency; and a read of the own list while other threads check against it.
+ *  ham_tx_check had it, frequency by frequency; a read of the own list while other threads check against it; and an
+ *  SDR's transmitter's bands (test_sdr).
  */
 
 #include "cfg/tx_ranges.h"
@@ -368,6 +369,48 @@ static void threads(void) {
     check(atomic_load(&torn) == 0, "reads while checking: never empty, never both", atomic_load(&torn));
 }
 
+/* An SDR's transmitter (the Sentry's walkie through a HackRF or bladeRF): the amateur bands from 2 m to 23 cm, their
+ * edges in and 1 Hz past them out, nothing else of VHF/UHF whatever the switch, and none with South Korea or the own
+ * list chosen (they hold nothing past 55 MHz) */
+static void test_sdr(void) {
+    static const struct {
+        int32_t lo, hi;
+    } want[] = {{144000000, 148000000}, {220000000, 225000000}, {420000000, 450000000}, {902000000, 928000000},
+                {1240000000, 1300000000}};
+    static const int32_t never[] = {
+        121500000,  /* airband guard */      118000000, 136975000, /* the airband's ends */
+        156800000,  /* marine 16 */          162550000,            /* NOAA weather */
+        151820000,  /* MURS 1 */             462562500, 467712500, /* FRS/GMRS */
+        1090000000, /* ADS-B */              1575420000,           /* GPS L1 */
+        1227600000, /* GPS L2 */             1176450000,           /* GPS L5 */
+        869000000,  /* cellular 850 */       1930000000,           /* PCS */
+        98100000,   /* FM broadcast */       27185000, 52525000, 29600000, /* HF and 6 m: the X6200's */
+    };
+    int32_t lo, hi;
+
+    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+        check(tx_ranges_sdr_check(TX_RANGES_BANDS, want[i].lo) == HAM_TX_OK, "SDR: band's low edge in", want[i].lo);
+        check(tx_ranges_sdr_check(TX_RANGES_BANDS, want[i].hi) == HAM_TX_OK, "SDR: band's high edge in", want[i].hi);
+        check(tx_ranges_sdr_check(TX_RANGES_BANDS, want[i].lo - 1) == HAM_TX_OFF_BAND, "SDR: 1 Hz under out",
+              want[i].lo - 1);
+        check(tx_ranges_sdr_check(TX_RANGES_BANDS, want[i].hi + 1) == HAM_TX_OFF_BAND, "SDR: 1 Hz over out",
+              want[i].hi + 1);
+        check(tx_ranges_sdr_band(want[i].lo + (want[i].hi - want[i].lo) / 2, &lo, &hi) && lo == want[i].lo && hi == want[i].hi,
+              "SDR: the band's edges", want[i].lo);
+        check(tx_ranges_sdr_check(TX_RANGES_KR, want[i].lo) == HAM_TX_OFF_RANGE, "SDR: none with South Korea",
+              want[i].lo);
+    }
+    for (size_t i = 0; i < sizeof(never) / sizeof(never[0]); i++) {
+        for (int p = TX_RANGES_BANDS; p <= TX_RANGES_OWN; p++)
+            check(tx_ranges_sdr_check((tx_ranges_t)p, never[i]) != HAM_TX_OK, "SDR: never there", never[i]);
+    }
+    tx_ranges_own_set("144.000-148.000\n7.000-7.300\n");      /* the 2 m line is not read: past 55 MHz */
+    check(tx_ranges_sdr_check(TX_RANGES_OWN, 146520000) == HAM_TX_OFF_RANGE, "SDR: none with the own list", 146520000);
+    check(tx_ranges_sdr_check(TX_RANGES_BANDS, 146520000) == HAM_TX_OK, "SDR: 146.520 with Ham bands", 146520000);
+    check(tx_ranges_sdr_check(TX_RANGES_BANDS, 446000000) == HAM_TX_OK, "SDR: 446.000 with Ham bands", 446000000);
+    tx_ranges_own_set("");
+}
+
 int main(void) {
     kr_table();
     kr_rules();
@@ -378,6 +421,7 @@ int main(void) {
     bands_as_before();
     words();
     threads();
+    test_sdr();
 
     printf("tx_ranges: %d checks, %d failed\n", checks, fails);
     return fails != 0;

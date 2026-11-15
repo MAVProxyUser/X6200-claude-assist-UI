@@ -1,0 +1,13 @@
+config BR2_PACKAGE_LIBHACKRF
+	bool "libhackrf"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on !BR2_PACKAGE_HACKRF # the same library, with its tools
+	select BR2_PACKAGE_LIBUSB
+	help
+	  libhackrf alone, from Great Scott Gadgets' hackrf (none of
+	  its tools: hackrf_transfer transmits), for x6x00-rtlspec:
+	  the Sentry's VHF/UHF screens through a HackRF One, and its
+	  walkie's transmitter. The tag of the HackRF firmware it is
+	  used with (2024.02.1).
+
+	  https://github.com/greatscottgadgets/hackrf

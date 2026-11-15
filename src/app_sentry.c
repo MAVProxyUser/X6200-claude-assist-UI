@@ -59,6 +59,7 @@
 #include "smeter.h"
 #include "cfg/cfg_api.h"
 #include "cfg/settings_manager_api.h"
+#include "cfg/tx_ranges.h"     /* the SDR walkie's bands: tx_ranges_sdr_check */
 #include "dsp.h"
 #include "events.h"
 #include "gui_styles.h"
@@ -298,12 +299,17 @@ static bool sdr_here;           /* an RTL-SDR on USB (adsb_rx_sdr_present), look
 static bool adsb_here;          /* an ADS-B receiver on USB, or AIRSPACE decoding (the stick's dump1090) */
 static bool wr12_here;          /* the WR12 on HOST, found and set up */
 
+/* Within what the stick tunes: an RTL-SDR's 24 MHz-1.7 GHz, a HackRF's 1 MHz-6 GHz, a bladeRF's (B's F2 goes through
+ * these) */
 static bool band_in_rtl(int i) {
-    return (int64_t)bands[i].lo * 1000 >= RTL_SPEC_MIN_HZ && (int64_t)bands[i].hi * 1000 <= RTL_SPEC_MAX_HZ;
+    return (int64_t)bands[i].lo * 1000 >= rtl_spectrum_min_hz() && (int64_t)bands[i].hi * 1000 <= rtl_spectrum_max_hz();
 }
 
+/* Elsewhere a band goes to the stick from where an RTL-SDR's reach starts (24 MHz) when one is plugged in, and where
+ * only it reaches always: HF stays the X6200's, whose receiver it is, even with a HackRF that tunes it too */
 static bool band_uses_rtl(int i) {
-    return band_in_rtl(i) && (sdr_here || !cfg_is_valid_hw_freq(bands[i].listen_hz));
+    return band_in_rtl(i) && (!cfg_is_valid_hw_freq(bands[i].listen_hz) ||
+                              (sdr_here && (int64_t)bands[i].lo * 1000 >= RTL_SPEC_MIN_HZ));
 }
 
 /* ---- The decoders and where they work ---- */
@@ -392,6 +398,11 @@ enum { VIEW_RTL, VIEW_SPLIT, VIEW_X6200 };      /* cfg_rtl_view: F4 goes RTL, SP
  * (or G playing an entry); the other screens keep what was last heard */
 enum { HEAR_X6200, HEAR_RTL, HEAR_BOTH, HEAR_OFF, HEAR_N };
 static const char *const hear_names[] = {"X6200", "RTL", "BOTH", "OFF"};
+
+/* LISTEN's choice as said: the stick's by its kind (RTL, HACKRF, BLADERF) */
+static const char *hear_name(int h) {
+    return h == HEAR_RTL ? rtl_spectrum_dev_tag() : h >= 0 && h < HEAR_N ? hear_name(h) : "";
+}
 static int     heard = HEAR_X6200;
 /* What is to be heard: A's or B's LISTEN, C's entry's radio, G's channel's (or what the others kept). heard is that,
  * or the X6200 standing in while it needs a stick that is not there: the stick taken as soon as it is (hear_follow) */
@@ -540,13 +551,14 @@ static const struct {
              "BIRDIE CAL. CLOSING ONE BRINGS YOU BACK HERE."},
     {"DIGITAL MODES", "THE MODES MENU: FT8, FT4, FT2, JS8, WSPR, PSK, RTTY, JTTY, OLIVIA, SSTV, WEFAX, NAVTEX, RADE. "
                       "E DECODE OPENS THEM ON KNOWN FREQUENCIES."},
-    {"AIRSPACE (ADS-B)", "AIRCRAFT ON 1090 MHZ FROM AN ADS-B RECEIVER ON USB (RTL-SDR, GNS 5890 OR MICROADSB): A SCOPE AROUND "
-                         "YOUR QTH, THEIR CALLS, HEIGHTS AND TRACKS, AND THE HISTORY FADING OUT. A GNS 5890 OR "
-                         "MICROADSB KEEPS LISTENING WHEN CLOSED; AN RTL-SDR IS ITS ONLY WHILE IT IS OPEN."},
-    {"VHF/UHF (RTL-SDR)", "B VHF/UHF: AN RTL-SDR STICK'S SPECTRUM, 24 MHZ TO 1.7 GHZ, ALONE, SPLIT WITH THE X6200'S OR "
-                          "THE X6200'S ALONE (F3 VIEW), A'S KEYS: F1 SCANS THE BAND, F2 CHOOSES IT, F4 LISTEN (X6200, "
-                          "RTL, BOTH OR OFF), F5 SCAN CFG. THE VFO TUNES ITS CHANNEL, THE MFK PANS. AIRSPACE HAS THE STICK "
-                          "WHILE IT IS OPEN."},
+    {"AIRSPACE (ADS-B)", "AIRCRAFT ON 1090 MHZ FROM AN ADS-B RECEIVER ON USB (RTL-SDR, HACKRF, BLADERF, GNS 5890 OR "
+                         "MICROADSB): A SCOPE AROUND YOUR QTH, THEIR CALLS, HEIGHTS AND TRACKS, AND THE HISTORY FADING "
+                         "OUT. A GNS 5890 OR MICROADSB KEEPS LISTENING WHEN CLOSED; AN SDR IS ITS ONLY WHILE IT IS "
+                         "OPEN."},
+    {"VHF/UHF (SDR)", "B VHF/UHF: AN SDR'S SPECTRUM (AN RTL-SDR 24 MHZ TO 1.7 GHZ, A HACKRF 1 MHZ TO 6 GHZ, A BLADERF), "
+                      "ALONE, SPLIT WITH THE X6200'S OR THE X6200'S ALONE (F3 VIEW), A'S KEYS: F1 SCANS THE BAND, F2 "
+                      "CHOOSES IT, F4 LISTEN (X6200, THE SDR, BOTH OR OFF), F5 SCAN CFG. THE VFO TUNES ITS CHANNEL, THE "
+                      "MFK PANS. AIRSPACE HAS THE SDR WHILE IT IS OPEN. A HACKRF OR BLADERF ALSO TRANSMITS ON G."},
     {"CLASSIC RADIO", "THE FULL RADIO SCREEN, WITH TRANSMIT. THE SENTRY STAYS AWAY TILL YOU OPEN IT AGAIN: APP, THEN "
                       "THE SENTRY TILE."},
     {"UNIX SHELL", "A SHELL ON THE RADIO ITSELF (/BIN/SH, AS ROOT): A KEYBOARD TYPES INTO IT, TYPE OPENS THE ON-SCREEN "
@@ -1274,15 +1286,15 @@ static void head_status(char *pre, size_t pn, char *line, size_t ln, const char 
     /* The devices on USB, at the end in Xiegu's blue (its WR12 logo): the stick, an ADS-B receiver, the WR12 */
     char dev[96];
     dev[0] = 0;
-    if (sdr_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s RTL#", tag_hex);
+    if (sdr_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s %s#", tag_hex, rtl_spectrum_dev_tag());
     if (adsb_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s ADS-B#", tag_hex);
     if (wr12_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s WR12#", tag_hex);
 
     if (scr == SCR_RTL || g_stick_side()) {     /* the screen's radio: the stick */
         int64_t hz = scr == SCR_LOG ? g_hz : listen_hz;
 
-        snprintf(f, sizeof(f), "RTL %lld.%03lld.%02lld", (long long)(hz / 1000000), (long long)(hz / 1000 % 1000),
-                 (long long)(hz % 1000 / 10));
+        snprintf(f, sizeof(f), "%s %lld.%03lld.%02lld", rtl_spectrum_dev_tag(), (long long)(hz / 1000000),
+                 (long long)(hz / 1000 % 1000), (long long)(hz % 1000 / 10));
         snprintf(pre, pn, "%s %s  %s  %s  %s%s", f, rtl_mode_names[rtl_mode_of(hz)],
                  rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc);
     } else {
@@ -1442,7 +1454,7 @@ static void show_log(void) {
 
         localtime_r(&hits[i].last, &tm);
         strftime(t, sizeof(t), "%H:%M", &tm);
-        snprintf(s + strlen(s), sizeof(s) - strlen(s), "%s %-5s %4lld.%03lld %.22s\n", t, hits[i].rtl ? "RTL" : "X6200",
+        snprintf(s + strlen(s), sizeof(s) - strlen(s), "%s %-5s %4lld.%03lld %.22s\n", t, hits[i].rtl ? rtl_spectrum_dev_tag() : "X6200",
                  (long long)(hits[i].hz / 1000000), (long long)(hits[i].hz / 1000 % 1000), hits[i].what);
     }
     lv_label_set_text(t_log_l, s);
@@ -1464,6 +1476,21 @@ static void walkie_ch(int dir, int to);
 static void walkie_show(bool on);
 static bool g_portrait;         /* G held up: its own portrait screen shows (walkie_show) */
 static bool g_armed;            /* G's transmitter armed (the A/B key): the Sentry's receive-only hold let go */
+/* G on the SDR's channels (a HackRF or a bladeRF on the HOST port: they transmit): its own channel there, its own
+ * transmitter. The X6200 stays held at 0 W (receive only) all the while */
+static int64_t w_sdr_hz;        /* G's channel on the SDR; 0: G is the X6200's */
+static bool    g_sdr_armed;     /* its transmitter armed (A/B on one of its channels) */
+static bool    w_sdr_ptt;       /* transmitting for G now (asked of the daemon, or on the air) */
+static uint8_t w_sdr_by;        /* what keyed it: 1 the top PTT key, 2 the hand mic's PTT (the base keyed, at 0 W) */
+static int     w_sdr_gain = 10; /* its TX gain, dB: low (a HackRF's 0-47; a bladeRF's over its least) */
+static bool    w_sdr_amp;       /* a HackRF's amplifier: off, unless chosen (never kept across a restart) */
+static int64_t w_sdr_resume;    /* G's SDR channel before a restart: gone back to once the SDR says it is there */
+static void    w_sdr_left(void);
+static void    w_sdr_arm(bool on);
+static void    w_sdr_key(bool down, uint8_t by);
+static void    w_sdr_turn(int32_t diff);
+static void    w_sdr_gain_next(void);
+static void    w_sdr_step(void);
 static int  w_at = -1;          /* G's channel (w_chs[]), -1 none chosen yet */
 static void walkie_group(int dir);
 static void walkie_enter(void);
@@ -1615,7 +1642,10 @@ static void show_bands(void) {
         band_now(i, now, sizeof(now));
         char rx[24];                    /* which radio takes it: the stick (in the tags' orange, but in the row's ink
                                          * on the chosen row: orange on amber hardly showed) or the X6200 */
-        if (band_uses_rtl(i)) snprintf(rx, sizeof(rx), sdr_here && i != band_sel ? "#%s RTL#" : "RTL", tag_hex);
+        if (band_uses_rtl(i)) {
+            if (sdr_here && i != band_sel) snprintf(rx, sizeof(rx), "#%s %s#", tag_hex, rtl_spectrum_dev_tag());
+            else snprintf(rx, sizeof(rx), "%s", rtl_spectrum_dev_tag());
+        }
         else snprintf(rx, sizeof(rx), "%s", cfg_is_valid_hw_freq(bands[i].listen_hz) ? "X6200" : "");
         snprintf(s, sizeof(s), BAND_ROW, band_rt[i].sweep ? '*' : ' ',
                  bands[i].name, mhz, bands[i].hear, best_name(bands[i].when), bands[i].ant, now,
@@ -1655,7 +1685,9 @@ static void show_decode(void) {
             snprintf(now, sizeof(now), "NO BAND");     /* a frequency added without one in bands[]: says so */
         char rx[24];                    /* the radio it is heard on: the X6200 (its apps), else the stick */
         if (cfg_is_valid_hw_freq(f)) snprintf(rx, sizeof(rx), "X6200");
-        else snprintf(rx, sizeof(rx), f < RTL_SPEC_MIN_HZ ? "" : r != dec_row ? "#%s RTL#" : "RTL", tag_hex);
+        else if (f < rtl_spectrum_min_hz() || f > rtl_spectrum_max_hz()) rx[0] = 0;
+        else if (r != dec_row) snprintf(rx, sizeof(rx), "#%s %s#", tag_hex, rtl_spectrum_dev_tag());
+        else snprintf(rx, sizeof(rx), "%s", rtl_spectrum_dev_tag());
         snprintf(s, sizeof(s), DEC_ROW, fs, bi >= 0 ? bands[bi].name : "", bi >= 0 ? best_name(bands[bi].when) : "",
                  bi >= 0 ? bands[bi].ant : "", now, rx);
         lv_label_set_text(d_row_l[r], s);
@@ -1712,10 +1744,11 @@ static void show_system(void) {
 
 static const struct {
     const char *name;
-    int32_t     hz;
-    int32_t     lo, hi;         /* the band F1 (SCAN) sweeps, end to end */
+    int64_t     hz;
+    int64_t     lo, hi;         /* the band F1 (SCAN) sweeps, end to end */
     const char *about;
-} rtl_presets[] = {
+} rtl_presets[] = {           /* those past what the stick tunes are passed over (rtl_preset_ok): the last ones and the
+                               * HF ones a HackRF's */
     {"NOAA WX", 162475000, 162400000, 162550000, "WEATHER RADIO 162.400-.550, AIS 161.975 / 162.025"},
     {"2 M", 145000000, 144000000, 148000000, "HAMS 144-148: APRS 144.390, THE ISS 145.800"},
     {"2 M RPT", 147000000, 146000000, 148000000, "HAMS 146-148: REPEATERS AND SIMPLEX"},
@@ -1730,6 +1763,15 @@ static const struct {
     {"ISM 915", 915000000, 902000000, 928000000, "METERS AND SENSORS 902-928 MHZ"},
     {"UAT 978", 978000000, 977000000, 979000000, "AIRCRAFT UAT, 978 MHZ"},
     {"ADS-B", 1090000000, 1089000000, 1091000000, "AIRCRAFT, 1090 MHZ (AIRSPACE DECODES THEM)"},
+    {"6 M", 52525000, 50000000, 54000000, "HAMS 50-54: FM CALLING 52.525"},
+    {"1.25 M", 223500000, 222000000, 225000000, "HAMS 222-225: FM CALLING 223.500"},
+    {"23 CM", 1294500000, 1240000000, 1300000000, "HAMS 1240-1300: FM CALLING 1294.500"},
+    {"GPS L1", 1575420000, 1574420000, 1576420000, "GPS L1 1575.42 (A HUMP IN THE NOISE)"},
+    {"WIFI 2.4", 2437000000LL, 2400000000LL, 2483500000LL, "WI-FI AND BLUETOOTH 2.4 GHZ (HACKRF, BLADERF)"},
+    {"13 CM", 2304000000LL, 2300000000LL, 2450000000LL, "HAMS 2300-2450 (HACKRF, BLADERF)"},
+    {"5.8 GHZ", 5800000000LL, 5650000000LL, 5925000000LL, "FPV VIDEO, HAMS 5650-5925 (HACKRF, BLADERF)"},
+    {"HF 20 M", 14200000, 14000000, 14350000, "HAMS 14.000-14.350 (A HACKRF; THE X6200 HEARS IT BETTER)"},
+    {"HF 10 M", 28400000, 28000000, 29700000, "HAMS 28.000-29.700"},
 };
 #define RTL_PRESETS N_OF(rtl_presets)
 
@@ -2213,6 +2255,31 @@ static const int32_t     a_steps[]    = {1000, 5000, 10000, 25000, 100000};
 static const char *const a_step_n[]   = {"1K", "5K", "10K", "25K", "100K"};
 static int               a_step       = 2;
 
+/* Why the stick's picture is empty, the device named as it is (RTL-SDR, HACKRF, BLADERF); "" when it is not */
+static void stick_why(rtl_spec_state_t st, char *b, size_t n) {
+    const char *d = rtl_spectrum_dev_name();
+    char        tn[16];
+
+    switch (st) {
+        case RTL_SPEC_NO_HELPER: snprintf(b, n, "THE SDR'S DAEMON DOES NOT START\n\n/USR/BIN/X6X00-RTLSPEC"); break;
+        case RTL_SPEC_NO_STICK:
+            snprintf(b, n, "NO SDR ON USB\n\nPLUG AN RTL-SDR, A HACKRF OR A BLADERF\nINTO THE HOST PORT");
+            break;
+        case RTL_SPEC_BUSY: snprintf(b, n, "THE %s IS BUSY\n\nWAITING FOR IT", d); break;
+        case RTL_SPEC_OPENING: snprintf(b, n, "OPENING THE %s", d); break;
+        case RTL_SPEC_STALLED: snprintf(b, n, "THE %s SENDS NOTHING\n\nUNPLUG IT AND PLUG IT IN AGAIN", d); break;
+        case RTL_SPEC_TX: snprintf(b, n, "THE %s IS TRANSMITTING\n\nG WALKIE HAS IT", d); break;
+        case RTL_SPEC_NEEDS:
+            rtl_spectrum_tuner(tn, sizeof(tn));
+            if (!strcmp(tn, "LIBBLADERF"))
+                snprintf(b, n, "THE BLADERF NEEDS LIBBLADERF\n\nNOT ON THIS IMAGE");
+            else
+                snprintf(b, n, "THE BLADERF NEEDS ITS FPGA IMAGE\n\n%s IN /mnt/bladerf\nOR IN ITS OWN FLASH", tn);
+            break;
+        default: b[0] = 0; break;
+    }
+}
+
 /* A's boxes, C's look: the X6200, its dial, its band, its signals */
 static void show_a_boxes(void) {
     char    t[64], f[24];
@@ -2224,7 +2291,7 @@ static void show_a_boxes(void) {
     if (radio_get_state() == RADIO_TX) opt_set(&r_dev, 0, "X6200  ON AIR", 1);
     else if (g_armed) opt_set(&r_dev, 0, blink ? "X6200  TX ARMED" : "X6200", 1);
     else opt_set(&r_dev, 0, "XIEGU X6200", 0);
-    snprintf(t, sizeof(t), "HEARD: %s", hear_names[heard]);
+    snprintf(t, sizeof(t), "HEARD: %s", hear_name(heard));
     opt_set(&r_dev, 1, t, listen_x62 ? 1 : 2);
     snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
     snprintf(t, sizeof(t), "%s %s", f, mode_name(cparam_i_get(cfg_cur_mode)));
@@ -2267,10 +2334,10 @@ static void show_a_boxes(void) {
     opt_set(&r_sig, 1, t, 2);
     /* the stick's half, split: why it is empty, as C says */
     rtl_spec_state_t st = rtl_spectrum_state();
-    static const char *const why[] = {"", "THE STICK'S DAEMON DOES NOT START\n\n/USR/BIN/X6X00-RTLSPEC", "NO RTL-SDR ON USB\n\nPLUG ONE INTO THE HOST PORT",
-                                      "THE STICK IS BUSY\n\nWAITING FOR IT", "OPENING THE RTL-SDR", "",
-                                      "THE RTL-SDR SENDS NOTHING\n\nUNPLUG IT AND PLUG IT IN AGAIN"};
-    lv_label_set_text(rtl_why_l, why[st]);
+    char why[160];
+
+    stick_why(st, why, sizeof(why));
+    lv_label_set_text(rtl_why_l, why);
     if (spec_view() == VIEW_X6200 || st == RTL_SPEC_ON || st == RTL_SPEC_OFF) lv_obj_add_flag(rtl_why_l, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_clear_flag(rtl_why_l, LV_OBJ_FLAG_HIDDEN);
 }
@@ -2310,8 +2377,8 @@ static void show_rtl(void) {
         opt_set(&r_sig, 0, rtl_best ? b : "ONLY NOISE", 0);
         lv_label_set_text(r_sig.cap, "SIGNALS");
     }
-    static const char *const st[] = {"OFF", "ITS DAEMON DOES NOT START", "NO RTL-SDR ON USB", "STICK BUSY: WAITING",
-                                     "OPENING THE STICK", "RECEIVING", "STICK SENDS NOTHING"};
+    static const char *const st[] = {"OFF", "ITS DAEMON DOES NOT START", "NO SDR ON USB", "BUSY: WAITING",
+                                     "OPENING", "RECEIVING", "SENDS NOTHING", "TRANSMITTING (G)", "NOT READY"};
     rtl_spec_state_t s = rtl_spectrum_state();
     char             t[48], tn[16], f[16];
     int              g = param_i_get(cfg_rtl_gain);
@@ -2320,9 +2387,14 @@ static void show_rtl(void) {
      * RECEIVER says why, and it is heard again as soon as it is back (the daemon is told what to play as the GUI
      * connects) */
     rtl_spectrum_tuner(tn, sizeof(tn));
-    snprintf(t, sizeof(t), "RTL-SDR %s", tn[0] ? tn : "");
+    if (rtl_spectrum_dev() == RTL_DEV_RTL || rtl_spectrum_dev() == RTL_DEV_NONE || s == RTL_SPEC_NEEDS) {
+        snprintf(t, sizeof(t), "%s %s", rtl_spectrum_dev_name(), s == RTL_SPEC_NEEDS ? "" : tn);
+    } else {                            /* the model says it: "HACKRF-ONE" as HACKRF ONE, "BLADERF2" */
+        snprintf(t, sizeof(t), "%s", tn[0] ? tn : rtl_spectrum_dev_name());
+        for (char *c = t; *c; c++) if (*c == '-') *c = ' ';
+    }
     opt_set(&r_dev, 0, t, 0);
-    if (s == RTL_SPEC_ON) snprintf(t, sizeof(t), "HEARD: %s", hear_names[heard]);
+    if (s == RTL_SPEC_ON) snprintf(t, sizeof(t), "HEARD: %s", hear_name(heard));
     opt_set(&r_dev, 1, s == RTL_SPEC_ON ? t : st[s], s == RTL_SPEC_ON ? (listen_rtl ? 1 : 2) : 0);
     fmt_mhz(f, sizeof(f), rtl_hz, 3);
     snprintf(t, sizeof(t), "%s MHZ", f);
@@ -2350,21 +2422,22 @@ static void show_rtl(void) {
     else snprintf(t, sizeof(t), "GAIN %d.%d DB", g / 10, g % 10);
     opt_set(&r_sig, 1, t, 2);
     /* No rows: why, in the picture */
-    static const char *const why[] = {"", "THE STICK'S DAEMON DOES NOT START\n\n/USR/BIN/X6X00-RTLSPEC", "NO RTL-SDR ON USB\n\nPLUG ONE INTO THE HOST PORT",
-                                      "THE STICK IS BUSY\n\nWAITING FOR IT", "OPENING THE RTL-SDR", "",
-                                      "THE RTL-SDR SENDS NOTHING\n\nUNPLUG IT AND PLUG IT IN AGAIN"};
-    lv_label_set_text(rtl_why_l, why[s]);
+    char why[160];
+
+    stick_why(s, why, sizeof(why));
+    lv_label_set_text(rtl_why_l, why);
     if (s == RTL_SPEC_ON || s == RTL_SPEC_OFF) lv_obj_add_flag(rtl_why_l, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_clear_flag(rtl_why_l, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* The stick's tuning, sent, and kept in the settings when keep (a scan's steps are not) */
 static void rtl_tune_to(int64_t hz, bool keep) {
-    if (hz < RTL_SPEC_MIN_HZ) hz = RTL_SPEC_MIN_HZ;
-    if (hz > RTL_SPEC_MAX_HZ) hz = RTL_SPEC_MAX_HZ;
+    if (hz < rtl_spectrum_min_hz()) hz = rtl_spectrum_min_hz();
+    if (hz > rtl_spectrum_max_hz()) hz = rtl_spectrum_max_hz();
     rtl_hz = hz;
     stick_at = hz;
-    if (keep) param_i_set(cfg_rtl_freq, (int32_t)hz);
+    if (keep && hz <= INT32_MAX) param_i_set(cfg_rtl_freq, (int32_t)hz);   /* the setting's 32 bits: past 2.1 GHz
+                                                                           * (a HackRF's) gui_state keeps it, in kHz */
     rtl_spectrum_tune(hz);
     /* B's channel follows the stick out of a span it has left (a preset, a band, a pan): to the new one's middle, and
      * heard there; left behind it played nothing (2026-11-14: a preset changed on B went silent) */
@@ -2477,18 +2550,21 @@ static void hear_apply(int h) {
  * X6200's receiver (rtl_spectrum.c), so there it is the stick alone, and says so */
 static void hear_how(int h, char *t, size_t n) {
     static const char *const how[] = {"THE X6200'S RECEIVER ON THE SPEAKER.",
-                                      "THE RTL-SDR ON THE SPEAKER, AT B'S CHANNEL: %s %s.",
-                                      "THE X6200 AND THE RTL-SDR TOGETHER ON THE HEADPHONES (B'S CHANNEL: %s %s).",
+                                      "THE %s ON THE SPEAKER, AT B'S CHANNEL: %s %s.",
+                                      "THE X6200 AND THE %s TOGETHER ON THE HEADPHONES (B'S CHANNEL: %s %s).",
                                       "THE SPEAKER SILENT: NEITHER RADIO IS HEARD (THEIR VOLUME KEPT)."};
     int64_t hz = listen_hz ? listen_hz : rtl_hz;
     char    f[16], sink[128];
 
     fmt_mhz(f, sizeof(f), hz, 3);
     if (h == HEAR_BOTH && !btaudio_hp_sink(sink, sizeof(sink)))
-        snprintf(t, n, "THE RTL-SDR ALONE (%s %s): WHILE THE SPEAKER PLAYS IT, THE BASE SENDS NOTHING OF THE X6200. "
-                       "BOTH TOGETHER NEEDS BLUETOOTH HEADPHONES.", f, rtl_mode_names[rtl_mode_of(hz)]);
+        snprintf(t, n, "THE %s ALONE (%s %s): WHILE THE SPEAKER PLAYS IT, THE BASE SENDS NOTHING OF THE X6200. "
+                       "BOTH TOGETHER NEEDS BLUETOOTH HEADPHONES.", rtl_spectrum_dev_name(), f,
+                 rtl_mode_names[rtl_mode_of(hz)]);
+    else if (h == HEAR_RTL || h == HEAR_BOTH)
+        snprintf(t, n, how[h], rtl_spectrum_dev_name(), f, rtl_mode_names[rtl_mode_of(hz)]);
     else
-        snprintf(t, n, how[h], f, rtl_mode_names[rtl_mode_of(hz)]);
+        snprintf(t, n, "%s", how[h]);
 }
 
 /* F4 on A or B: that screen's LISTEN, the next one, heard at once. RTL and BOTH with no stick yet: the X6200 alone
@@ -2500,10 +2576,10 @@ static void hear_next(void) {
 
     param_i_set(c, h);
     hear_apply(h);
-    snprintf(title, sizeof(title), "%s LISTEN: %s", scr == SCR_RTL ? "B" : "A", hear_names[h]);
+    snprintf(title, sizeof(title), "%s LISTEN: %s", scr == SCR_RTL ? "B" : "A", hear_name(h));
     if (heard != h)                     /* the X6200 standing in */
-        snprintf(t, sizeof(t), "NO RTL-SDR YET: THE X6200 ALONE TILL ONE IS PLUGGED INTO THE HOST PORT, THEN %s.",
-                 h == HEAR_BOTH ? "BOTH TOGETHER" : "THE STICK");
+        snprintf(t, sizeof(t), "NO SDR YET: THE X6200 ALONE TILL AN RTL-SDR, HACKRF OR BLADERF IS PLUGGED INTO THE "
+                 "HOST PORT, THEN %s.", h == HEAR_BOTH ? "BOTH TOGETHER" : "THE SDR");
     else
         hear_how(h, t, sizeof(t));
     osd(title, t, -1);
@@ -2520,7 +2596,7 @@ static void hear_follow(void) {
         return;
     hear_apply(hear_want);
     if (!listen_rtl || lv_tick_get() - opened_ms < 5000) return;
-    snprintf(title, sizeof(title), "RTL-SDR IN: %s", hear_names[heard]);
+    snprintf(title, sizeof(title), "%s IN: %s", rtl_spectrum_dev_name(), hear_name(heard));
     hear_how(heard, t, sizeof(t));
     osd(title, t, -1);
 }
@@ -2535,8 +2611,8 @@ static void rtl_listen_turn(int32_t diff) {
     listen_hz = rtl_snap(was + diff * rtl_step_of(was));
     /* at a grid's edge a step can snap back where it was (108.000's 25 kHz down into FM's 100 kHz channels): more */
     for (int i = 2; listen_hz == was && i <= 8; i++) listen_hz = rtl_snap(was + diff * i * rtl_step_of(was));
-    if (listen_hz < RTL_SPEC_MIN_HZ) listen_hz = RTL_SPEC_MIN_HZ;
-    if (listen_hz > RTL_SPEC_MAX_HZ) listen_hz = RTL_SPEC_MAX_HZ;
+    if (listen_hz < rtl_spectrum_min_hz()) listen_hz = rtl_spectrum_min_hz();
+    if (listen_hz > rtl_spectrum_max_hz()) listen_hz = rtl_spectrum_max_hz();
     if (llabs(listen_hz - c) > half * 85 / 100) rtl_tune(listen_hz);
     if (listen_rtl) rtl_spectrum_listen(listen_hz, rtl_mode_of(listen_hz));     /* muted: the bracket moves alone */
     show_head();
@@ -2546,8 +2622,9 @@ static void rtl_listen_turn(int32_t diff) {
 /* The VFO knob is the screen's radio's: on B the stick's channel always (heard or not), on C a stick entry playing,
  * on G the channel whichever radio has it (the dial is not turned a step as well) */
 static bool knob_taken(void) {
-    if (g_armed || radio_get_state() == RADIO_TX) return true;     /* held: dial_held says why */
-    if (scr == SCR_WALKIE) return false;    /* the dial, fine, as on A: only the arrows step CB's channels */
+    if (g_armed || g_sdr_armed || radio_get_state() == RADIO_TX) return true;  /* held: dial_held says why */
+    if (scr == SCR_WALKIE) return w_sdr_hz != 0;    /* the dial, fine, as on A (only the arrows step CB's
+                                                     * channels); on the SDR its channel */
     return scr == SCR_RTL || g_stick_side();
 }
 
@@ -2582,7 +2659,7 @@ static void rtl_scan_set(bool on) {
         scan_next = 0;                  /* at once: to the band's low end */
         scan_pick = 0;
     } else if (rtl_hz) {
-        param_i_set(cfg_rtl_freq, (int32_t)rtl_hz);     /* where it stopped, kept */
+        if (rtl_hz <= INT32_MAX) param_i_set(cfg_rtl_freq, (int32_t)rtl_hz);     /* where it stopped, kept */
     }
     if (scr == SCR_RTL) buttons_refresh(&btn[0]);       /* F1's On or Off at once (a pan stops it too) */
     show_rtl();
@@ -2753,10 +2830,10 @@ static void rtl_timer_cb(lv_timer_t *t) {
         if (listen_hz) {
             char lf[16];
             fmt_mhz(lf, sizeof(lf), listen_hz, 3);
-            snprintf(s, sizeof(s), "RTL  %s %s  %s", lf, rtl_mode_names[rtl_mode_of(listen_hz)],
+            snprintf(s, sizeof(s), "%s  %s %s  %s", rtl_spectrum_dev_tag(), lf, rtl_mode_names[rtl_mode_of(listen_hz)],
                      !listen_rtl ? "MUTED" : rtl_spectrum_squelch_open() ? "HEARD" : "SQUELCHED");
         } else {
-            snprintf(s, sizeof(s), "RTL-SDR  %s MHZ", f);
+            snprintf(s, sizeof(s), "%s  %s MHZ", rtl_spectrum_dev_name(), f);
         }
         lv_label_set_text(rtl_src_l[1], s);
         if (scr == SCR_RTL) {               /* C's box (A's shows the X6200's: show_a_boxes) */
@@ -2957,11 +3034,20 @@ static void rds_show(bool now) {
     lv_obj_clear_flag(rds_l, LV_OBJ_FLAG_HIDDEN);
 }
 
+/* The next preset (dir 1) or the one before that the stick tunes: a HackRF's 2.4 GHz is passed over with an RTL-SDR */
+static void rtl_preset_next(int dir) {
+    for (int n = 0; n < (int)RTL_PRESETS; n++) {
+        rtl_preset = (rtl_preset + (dir > 0 ? 1 : (int)RTL_PRESETS - 1)) % (int)RTL_PRESETS;
+        if (rtl_presets[rtl_preset].lo >= rtl_spectrum_min_hz() && rtl_presets[rtl_preset].hi <= rtl_spectrum_max_hz())
+            break;
+    }
+}
+
 static void rtl_fkey(int k) {
     switch (k) {
         case 1:
             if (f_band >= 0) f_band = -1;           /* from C's band back to the presets, at the one it was on */
-            else rtl_preset = (rtl_preset + 1) % RTL_PRESETS;
+            else rtl_preset_next(1);
             rtl_tune(rtl_presets[rtl_preset].hz);
             scan_next = 0;              /* scanning: the new band, from its low end */
             break;
@@ -3202,7 +3288,12 @@ static void show_cfg_rtl(void) {
     lv_label_set_text(b_prof.cap, "SIGNAL PROFILE");
     lv_label_set_text(b_tgts.cap, "TARGETS");
     rtl_spectrum_tuner(tn, sizeof(tn));
-    snprintf(t, sizeof(t), "RTL-SDR %s", tn);
+    if (rtl_spectrum_dev() == RTL_DEV_RTL || rtl_spectrum_dev() == RTL_DEV_NONE) {
+        snprintf(t, sizeof(t), "RTL-SDR %s", tn);
+    } else {                            /* the model says it: "HACKRF-ONE" as HACKRF ONE */
+        snprintf(t, sizeof(t), "%s", tn[0] ? tn : rtl_spectrum_dev_name());
+        for (char *c = t; *c; c++) if (*c == '-') *c = ' ';
+    }
     opt_set(&b_mode, 0, t, 0);
     if (g < 0) snprintf(t, sizeof(t), "GAIN AUTO");
     else snprintf(t, sizeof(t), "GAIN %d.%d DB", g / 10, g % 10);
@@ -3547,8 +3638,8 @@ static bool g_stick_side(void) {
 /* The VFO while G plays the stick: a channel a click, the entry kept as it was */
 static void g_turn(int32_t diff) {
     g_hz = rtl_snap(g_hz + diff * rtl_step_of(g_hz));
-    if (g_hz < RTL_SPEC_MIN_HZ + G_STICK_OFF) g_hz = RTL_SPEC_MIN_HZ + G_STICK_OFF;
-    if (g_hz > RTL_SPEC_MAX_HZ - G_STICK_OFF) g_hz = RTL_SPEC_MAX_HZ - G_STICK_OFF;
+    if (g_hz < rtl_spectrum_min_hz() + G_STICK_OFF) g_hz = rtl_spectrum_min_hz() + G_STICK_OFF;
+    if (g_hz > rtl_spectrum_max_hz() - G_STICK_OFF) g_hz = rtl_spectrum_max_hz() - G_STICK_OFF;
     rtl_spectrum_tune(g_hz + G_STICK_OFF);
     rtl_spectrum_listen(g_hz, rtl_mode_of(g_hz));
     show_head();
@@ -3720,6 +3811,8 @@ static void go(scr_t s) {
     scr_t was = scr;
 
     scr = s;
+    if (was == SCR_WALKIE && s != SCR_WALKIE) w_sdr_left();    /* the SDR's transmitter off, the X6200 heard (A and
+                                                                * B put their own LISTEN on below) */
     rtl_want(s == SCR_RTL);     /* C's own state; the stick itself runs for the whole Sentry */
     if ((s == SCR_SCAN || s == SCR_RTL) && was != s) {      /* one picture, A's view or C's */
         rtl_seq  = 0;
@@ -3730,7 +3823,7 @@ static void go(scr_t s) {
     if (s == SCR_RTL) hear_apply(param_i_get(cfg_hear_f));     /* the others keep what was heard last */
     if (s == SCR_LOG) g_enter();
     audio_scope(s == SCR_WALKIE);       /* G's voiceprint: the receiver's audio only while it shows */
-    rtl_spectrum_scope(false);          /* the stick's: not G's (G is the X6200's) */
+    rtl_spectrum_scope(s == SCR_WALKIE && w_sdr_hz);   /* the stick's: G's on its own channels */
     if (was != s && (was == SCR_WALKIE || s == SCR_WALKIE)) walkie_show(s == SCR_WALKIE);
     if (was != s && s == SCR_WALKIE) walkie_enter();       /* on a channel, never "--" */
     if (g_armed && s != SCR_SCAN && s != SCR_WALKIE) walkie_arm(false);    /* armed only on A and G */
@@ -4102,7 +4195,7 @@ static const char *f_label(int k) {
             if (k == 0) snprintf(s, sizeof(s), "Scan:\n%s", routine == ROUT_SCAN ? "On" : "Off");
             else if (k == 1) snprintf(s, sizeof(s), "Band:\n%s", bi >= 0 ? bands[bi].name : "-");
             else if (k == 2) snprintf(s, sizeof(s), "View:\n%s", views[spec_view() % 3]);
-            else if (k == 3) snprintf(s, sizeof(s), "Listen:\n%s", hear_names[param_i_get(cfg_hear_a)]);
+            else if (k == 3) snprintf(s, sizeof(s), "Listen:\n%s", hear_name(param_i_get(cfg_hear_a)));
             else snprintf(s, sizeof(s), "Scan Cfg");
             return s;
         }
@@ -4159,7 +4252,7 @@ static const char *f_label(int k) {
             (void)g;
             if (k == 1) snprintf(s, sizeof(s), "Preset:\n%s", f_name());
             else if (k == 2) snprintf(s, sizeof(s), "View:\n%s", views[spec_view() % 3]);
-            else if (k == 3) snprintf(s, sizeof(s), "Listen:\n%s", hear_names[param_i_get(cfg_hear_f)]);
+            else if (k == 3) snprintf(s, sizeof(s), "Listen:\n%s", hear_name(param_i_get(cfg_hear_f)));
             else if (k == 4) snprintf(s, sizeof(s), "Scan Cfg");
             else snprintf(s, sizeof(s), "Scan:\n%s", rtl_scan ? "On" : "Off");
             return s;
@@ -4349,9 +4442,11 @@ static void fkey(int k) {
                 go(SCR_TRACK);
             }
             break;
-        case SCR_WALKIE:                /* CH- and CH+ on CB only (walkie_ch does nothing elsewhere); F3 nothing */
+        case SCR_WALKIE:                /* CH- and CH+ on CB and the SDR's groups (walkie_ch does nothing elsewhere);
+                                         * F3 the SDR's TX gain */
             if (k == 0) walkie_ch(-1, 0);
             if (k == 1) walkie_ch(1, 0);
+            if (k == 2) w_sdr_gain_next();
             if (k == 3) ws_view_next();
             if (k == 4) walkie_group_mode();
             break;
@@ -4507,8 +4602,8 @@ static void step(int dir) {
             sys_sel = (sys_sel + dir + SYS_N) % SYS_N;
             show_screen();
             break;
-        case SCR_WALKIE:                /* on CB the channel, elsewhere the group */
-            if (w_cb_here()) walkie_ch(dir, 0);
+        case SCR_WALKIE:                /* on CB and the SDR's groups the channel, elsewhere the group */
+            if (w_cb_here() || w_sdr_hz) walkie_ch(dir, 0);
             else walkie_group(dir);
             break;
         case SCR_LOG:                   /* the next one; while one plays, it plays the next one; a scan stops */
@@ -4638,6 +4733,10 @@ static void click_cb(lv_event_t *e) {
 /* The main knob: the radio is the operator's again */
 static void rotary_cb(int32_t diff) {
     if (dial_held()) return;            /* TX unlocked: the dial is not moved by a bump */
+    if (scr == SCR_WALKIE && w_sdr_hz) {    /* on the SDR: its channel, 5 kHz a click */
+        w_sdr_turn(diff);
+        return;
+    }
     if (scr == SCR_WALKIE) {            /* the dial tunes, fine (the main screen's step), by hand */
         x62_by_hand();
         return;
@@ -4689,14 +4788,15 @@ static void filter_step(void) {
 }
 
 static void band_key(bool up) {
-    if (scr == SCR_WALKIE) {            /* G: on CB its channels (as CH -/+), elsewhere the groups (each band one) */
+    if (scr == SCR_WALKIE) {            /* G: on CB its channels (as CH -/+), elsewhere the groups (each band one; the
+                                         * SDR's after them, their channels on CH -/+ and the MFK) */
         if (w_cb_here()) walkie_ch(up ? 1 : -1, 0);
         else walkie_group(up ? 1 : -1);
         return;
     }
     if (scr == SCR_RTL) {               /* F: its presets, not the X6200's bands (and never A) */
-        f_band     = -1;
-        rtl_preset = (rtl_preset + (up ? 1 : RTL_PRESETS - 1)) % RTL_PRESETS;
+        f_band = -1;
+        rtl_preset_next(up ? 1 : -1);
         rtl_tune(rtl_presets[rtl_preset].hz);
         scan_next = 0;
         osd(rtl_presets[rtl_preset].name, rtl_presets[rtl_preset].about, -1);
@@ -4794,12 +4894,17 @@ static bool front_key(int key, int state) {
                          "THE RADIO'S ANTENNA TUNER, WITH THE TUNING IT KEPT FOR THIS BAND.", -1);
             return false;       /* the main screen switches it */
         case KEYPAD_AB:
+            if (scr == SCR_WALKIE && w_sdr_hz) {            /* G on the SDR's channels: its transmitter */
+                if (tap) w_sdr_arm(!g_sdr_armed);
+                return true;
+            }
             if (scr == SCR_WALKIE || scr == SCR_SCAN) {     /* A and G, the X6200's: the transmitter armed or locked */
                 if (tap) walkie_arm(!g_armed);
                 return true;
             }
             if (tap || hold)
-                osd("A/B", scr == SCR_RTL ? "THE RTL-SDR ONLY RECEIVES: A/B ARMS THE X6200'S TRANSMITTER ON A AND G."
+                osd("A/B", scr == SCR_RTL ? "B ONLY RECEIVES: A/B ARMS THE TRANSMITTER ON A AND G (G: A HACKRF'S OR "
+                                            "BLADERF'S ON ITS VHF/UHF CHANNELS)."
                                           : "ON A AND G, A/B ARMS THE X6200'S TRANSMITTER FOR PTT.", -1);
             return true;
         case KEYPAD_KEY:
@@ -4822,6 +4927,11 @@ static bool front_key(int key, int state) {
             if (tap) osd("TUNING STEP", "HOW FAR ONE CLICK OF THE VFO KNOB MOVES.", -1);
             return false;
         case KEYPAD_PTT:            /* refused (radio_rx_only) unless armed: said what to press, on every screen */
+            if (scr == SCR_WALKIE && w_sdr_hz) {    /* G on the SDR: its transmitter, the X6200 left held */
+                if (state == KEYPAD_PRESS) w_sdr_key(true, 1);
+                else if (state == KEYPAD_RELEASE || state == KEYPAD_LONG_RELEASE) w_sdr_key(false, 1);
+                return true;
+            }
             if (rx_held && !g_armed && state != KEYPAD_RELEASE && state != KEYPAD_LONG_RELEASE) walkie_ptt();
             return false;
         default:
@@ -5385,8 +5495,9 @@ static void walkie_step(void) {
     int     cols = 0;
     double  e    = 0;
 
+    w_sdr_step();
     if (!wui->vp_frame) return;
-    bool from_rtl = false;              /* G is the X6200's */
+    bool from_rtl = w_sdr_hz != 0;      /* G on the SDR's channel: its audio, its level */
 
     while ((n = from_rtl ? rtl_spectrum_scope_read(buf, N_OF(buf)) : audio_scope_read(buf, N_OF(buf))) > 0) {
         for (size_t i = 0; i < n; i++) {
@@ -5438,7 +5549,8 @@ static void walkie_step(void) {
     } else {
         lv_obj_set_width(wui->s_fill, (int)(s * wui->bar_w) + 1);
         lv_obj_set_width(wui->a_fill, (int)(a * wui->bar_w) + 1);
-        if (from_rtl) snprintf(t, sizeof(t), "RTL +%.0f DB", rtl_spectrum_level() < 0 ? 0 : rtl_spectrum_level());
+        if (from_rtl) snprintf(t, sizeof(t), "%s +%.0f DB", rtl_spectrum_dev_tag(),
+                               rtl_spectrum_level() < 0 ? 0 : rtl_spectrum_level());
         else if (db >= -73) snprintf(t, sizeof(t), "S9+%d  %.0f DBM", (int)(db + 73), db);
         else snprintf(t, sizeof(t), "S%d  %.0f DBM", db <= -127 ? 0 : (int)((db + 127) / 6), db);
         lv_label_set_text(wui->s_l, t);
@@ -5452,17 +5564,21 @@ static void walkie_step(void) {
     if (got) floor_rms = vp_rms < floor_rms ? 0.9f * floor_rms + 0.1f * vp_rms : 0.998f * floor_rms + 0.002f * vp_rms;
     bool on = from_rtl && param_i_get(cfg_rtl_sql) > 0 ? rtl_spectrum_squelch_open() : vp_rms > 2 * floor_rms + 100;
     bool ptt = ptt_ms && lv_tick_get() - ptt_ms < 1500;
-    bool air = radio_get_state() == RADIO_TX;
+    /* on the air: the X6200 (not on the SDR's channels, where it is held at 0 W whatever keys it), or the SDR */
+    bool air   = w_sdr_hz ? w_sdr_ptt && rtl_spectrum_tx_state() == RTL_TX_ON : radio_get_state() == RADIO_TX;
+    bool armed = w_sdr_hz ? g_sdr_armed : g_armed;
 
-    lv_obj_set_style_bg_opa(wui->lamp, air || ptt || on || (g_armed && blink) ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-    lv_obj_set_style_text_color(wui->lamp_l, air || ptt || on || (g_armed && blink) ? ink : amb, 0);
+    lv_obj_set_style_bg_opa(wui->lamp, air || ptt || on || (armed && blink) ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_text_color(wui->lamp_l, air || ptt || on || (armed && blink) ? ink : amb, 0);
     lv_label_set_text(wui->lamp_l, air ? (g_portrait ? "TX  ON AIR" : "TX\nON AIR")
                                    : ptt ? (g_portrait ? "TX LOCKED" : "TX\nLOCKED")
-                                   : g_armed ? (g_portrait ? "TX  ARMED" : "TX\nARMED")
+                                   : armed ? (g_portrait ? "TX  ARMED" : "TX\nARMED")
                                    : on ? (g_portrait ? "RX  SIGNAL" : "RX\nSIGNAL")
                                         : (g_portrait ? "RX  QUIET" : "RX\nQUIET"));
-    tag_text(wui->cap_l, air ? "VOICEPRINT  TX  0-4 KHZ" : from_rtl ? "VOICEPRINT  RTL  0-4 KHZ" : "VOICEPRINT  RX  0-4 KHZ",
-             wui->cap_x, wui->cap_y, false);
+    char cap[48];
+
+    snprintf(cap, sizeof(cap), "VOICEPRINT  %s  0-4 KHZ", air ? "TX" : from_rtl ? rtl_spectrum_dev_tag() : "RX");
+    tag_text(wui->cap_l, cap, wui->cap_x, wui->cap_y, false);
     if (g_portrait && wui->msg_l && ptt_ms && lv_tick_get() - ptt_ms > 4000) {
         lv_label_set_text(wui->msg_l, "");
         if (wui->ab_arrow) lv_obj_add_flag(wui->ab_arrow, LV_OBJ_FLAG_HIDDEN);
@@ -5524,6 +5640,7 @@ typedef struct {
     int32_t     hz;
     uint8_t     mode;           /* w_modes[]: the channel's own */
     bool        home;           /* where GROUP lands */
+    bool        sdr;            /* the SDR's (a HackRF, a bladeRF): heard and sent through it, FM */
 } wch_t;
 
 static const struct {
@@ -5541,7 +5658,28 @@ static wch_t w_chs[160];
 static int   w_n, w_mode = WM_AM;
 
 static void w_add(const char *grp, const char *name, int32_t hz, int mode, bool home) {
-    if (w_n < (int)N_OF(w_chs)) w_chs[w_n++] = (wch_t){grp, name, hz, (uint8_t)mode, home};
+    if (w_n < (int)N_OF(w_chs)) w_chs[w_n++] = (wch_t){grp, name, hz, (uint8_t)mode, home, false};
+}
+
+/* The SDR's FM simplex channels, Region 2's band plans (the owner's): each group's national calling channel first.
+ * Only amateur bands (tx_ranges_sdr_check): no MURS, marine, FRS/GMRS or NOAA here, where nothing may be sent */
+static const struct {
+    const char *grp, *name;
+    int32_t     hz;
+} w_sdr_plan[] = {
+    {"2 M FM", "CALL", 146520000}, {"2 M FM", "S2", 146550000}, {"2 M FM", "S3", 146580000},
+    {"2 M FM", "S4", 147420000},   {"2 M FM", "S5", 147450000}, {"2 M FM", "S6", 147480000},
+    {"2 M FM", "S7", 147510000},   {"2 M FM", "S8", 147540000}, {"2 M FM", "S9", 147570000},
+    {"1.25 M FM", "CALL", 223500000}, {"1.25 M FM", "S2", 223420000}, {"1.25 M FM", "S3", 223460000},
+    {"70 CM FM", "CALL", 446000000}, {"70 CM FM", "S2", 446500000}, {"70 CM FM", "S3", 445950000},
+    {"70 CM FM", "S4", 446050000},   {"70 CM FM", "S5", 446100000},
+    {"33 CM FM", "CALL", 927500000},
+    {"23 CM FM", "CALL", 1294500000},
+};
+
+/* An SDR that transmits on the HOST port (the daemon says so): G's plan has its groups */
+static bool w_sdr_here(void) {
+    return rtl_spectrum_can_tx();
 }
 
 /* D's band i as a group of its own with one channel, where D listens in it (its starting channel): if the X6200
@@ -5567,13 +5705,25 @@ static void w_plan(void) {
                                       "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
                                       "40"};
 
-    if (w_n) return;
+    static int sdr_in = -1;     /* the plan made with the SDR's groups (1) or without (0) */
+
+    if (w_n && sdr_in == (int)w_sdr_here()) return;
+    w_n    = 0;                     /* made again: an SDR came or went */
+    sdr_in = w_sdr_here();
     for (int i = 0; i < BANDS_N && bands[i].hi < 26965; i++) w_band(i);     /* MF and HF, each its starting channel */
     for (int i = 0; i < 40; i++) w_add("CB", n40[i], cb_khz[i] * 1000, WM_AM, i == 18);
     w_band(band_named("10 M"));
     w_add("10 M FM", "S", 29600000, WM_FM, true);
     w_band(band_named("6 M"));
     w_add("6 M FM", "S", 52525000, WM_FM, true);
+    for (int i = 0; sdr_in && i < (int)N_OF(w_sdr_plan); i++) {     /* the SDR's, after the X6200's */
+        int64_t hz = w_sdr_plan[i].hz;
+
+        if (hz < rtl_spectrum_min_hz() || hz > rtl_spectrum_max_hz() || w_n >= (int)N_OF(w_chs)) continue;
+        w_chs[w_n++] = (wch_t){w_sdr_plan[i].grp, w_sdr_plan[i].name, w_sdr_plan[i].hz, WM_FM,
+                               !strcmp(w_sdr_plan[i].name, "CALL"), true};
+    }
+    if (w_at >= w_n) w_at = -1;
 }
 
 /* The channel of the plan named so in its group (CB "19"), -1 none */
@@ -5614,11 +5764,12 @@ static int w_start(int64_t hz) {
  * frequency and mode, G never tunes by itself, so A's scan moving the dial moves G and TX armed here is on the band A
  * was scanning */
 static int64_t w_hz(void) {
-    return cparam_i_get(cfg_fg_freq);
+    return w_sdr_hz ? w_sdr_hz : cparam_i_get(cfg_fg_freq);     /* on the SDR: its channel */
 }
 
 /* G's mode, the X6200's (CW and the data modes as SSB) */
 static int w_mode_now(void) {
+    if (w_sdr_hz) return WM_FM;         /* the SDR's walkie: narrow FM */
     int m = cparam_i_get(cfg_cur_mode);
 
     return m == radio_mode_am ? WM_AM : m == radio_mode_nfm ? WM_FM : WM_SSB;
@@ -5690,10 +5841,237 @@ static void w_say(const char *portrait, const char *title, const char *text) {
     else osd(title, text, -1);
 }
 
-/* Channel i in mode m */
+/* ---- G on the SDR: its channels heard and sent through a HackRF or a bladeRF ----
+ *
+ * One of the plan's SDR channels chosen, G is the SDR's: tuned G_STICK_OFF over the channel (its middle unused), the
+ * channel heard on the speaker in FM at B's volume, G's picture and voiceprint from it, the VFO moving it 5 kHz a
+ * click. A/B arms its transmitter (the X6200 stays held at 0 W); PTT (the top key, or the hand mic's) transmits FM
+ * from the hand mic while held, where tx_ranges_sdr_check allows and nowhere else. Leaving G, or an X6200 channel
+ * chosen, ends it all and the X6200 is heard again */
+
+static uint32_t w_sdr_gone_ms;          /* the SDR said it no longer transmits (pulled out): G leaves it 5 s on */
+static uint32_t w_sdr_said_n;           /* the daemon's last word on the transmitter, seen */
+static uint32_t w_sdr_quiet_ms;         /* transmitting with no voice from the mic since */
+
+static void w_sdr_go(int64_t hz) {
+    w_sdr_hz = hz;
+    rtl_spectrum_squelch(param_i_get(cfg_rtl_sql));
+    rtl_spectrum_tune(hz + G_STICK_OFF);
+    stick_at  = hz + G_STICK_OFF;
+    heard     = HEAR_RTL;
+    hear_want = HEAR_RTL;
+    hear_vol_refresh();
+    rtl_spectrum_mute(false);
+    rtl_spectrum_mux(false);
+    rtl_spectrum_listen(hz, 1);
+    rtl_spectrum_scope(scr == SCR_WALKIE);
+}
+
+/* The SDR's TX gain in the words of the screen: "TX 10 DB", "TX 47 DB + AMP" */
+static void w_sdr_power(char *t, size_t n) {
+    snprintf(t, n, "TX %d DB%s", w_sdr_gain, w_sdr_amp ? " + AMP" : "");
+}
+
+/* Its transmitter armed (on) or locked: the X6200 is never let go for it */
+static void w_sdr_arm(bool on) {
+    char t[80], pw[24];
+
+    if (on == g_sdr_armed) return;
+    if (!on && w_sdr_ptt) w_sdr_key(false, w_sdr_by);
+    g_sdr_armed = on;
+    w_sdr_power(pw, sizeof(pw));
+    if (on) {
+        if (routine == ROUT_SCAN || routine == ROUT_SWEEP) set_routine(ROUT_BAND);
+        snprintf(t, sizeof(t), "%s ARMED: PTT TRANSMITS (%s)", rtl_spectrum_dev_tag(), pw);
+    } else {
+        snprintf(t, sizeof(t), "TX LOCKED AGAIN");
+    }
+    if (g_portrait && wui->msg_l) lv_label_set_text(wui->msg_l, t);
+    else osd(on ? "TX ARMED" : "TX LOCKED",
+             on ? "PTT (THE TOP KEY OR THE HAND MIC'S) TRANSMITS FM THROUGH THE SDR FROM THE HAND MIC, ONLY IN THE "
+                  "AMATEUR BANDS. THE X6200 STAYS RECEIVE ONLY. A/B AGAIN, OR LEAVING G, LOCKS IT."
+                : "THE SENTRY IS RECEIVE ONLY AGAIN.", -1);
+    for (int i = 0; i < 5; i++) buttons_refresh(&btn[i]);
+    show_walkie();
+}
+
+/* Why G's SDR may not transmit at its channel now, NULL when it may */
+static const char *w_sdr_refusal(void) {
+    if (!rtl_spectrum_can_tx()) return "THE SDR DOES NOT TRANSMIT";
+    if (cfg_tx_block()) return "THE WR12 HOLDS TX";
+    switch (tx_ranges_sdr_check((tx_ranges_t)param_i_get(cfg_tx_ranges), (int32_t)w_sdr_hz)) {
+        case HAM_TX_OK: return NULL;
+        case HAM_TX_OFF_RANGE: return "OUTSIDE THE TX RANGES (SETTINGS > TX CAL)";
+        default: return "NOT AN AMATEUR BAND";
+    }
+}
+
+/* PTT down or up on G's SDR channel: by 1 the top key, 2 the hand mic's (the base keyed itself, held at 0 W) */
+static void w_sdr_key(bool down, uint8_t by) {
+    char        t[96];
+    const char *no;
+
+    if (!down) {
+        if (!w_sdr_ptt || by != w_sdr_by) return;
+        rtl_spectrum_tx(0, 0, false);
+        w_sdr_ptt = false;
+        show_walkie();
+        return;
+    }
+    if (w_sdr_ptt) return;
+    if (!g_sdr_armed) {
+        if (by == 1) walkie_ptt();      /* the same refusal as the X6200's: A/B first */
+        return;
+    }
+    if ((no = w_sdr_refusal())) {
+        snprintf(t, sizeof(t), "NO TX: %s", no);
+        w_say(t, "NO TX", t);
+        ptt_ms = lv_tick_get() | 1;
+        return;
+    }
+    rtl_spectrum_tx(w_sdr_hz, w_sdr_gain, w_sdr_amp);
+    w_sdr_ptt      = true;
+    w_sdr_by       = by;
+    w_sdr_quiet_ms = lv_tick_get();
+    show_walkie();
+}
+
+/* F3 on G's SDR channels: the TX gain, a step up and round (a HackRF's amplifier the last step: its +14 dB) */
+static void w_sdr_gain_next(void) {
+    static const int steps[] = {0, 5, 10, 15, 20, 30, 40, 47};
+    char             t[64], pw[24];
+    int              i = 0;
+
+    if (!w_sdr_hz) return;
+    if (w_sdr_ptt) {
+        w_say("NOT WHILE TRANSMITTING", "TX GAIN", "NOT WHILE TRANSMITTING.");
+        return;
+    }
+    while (i < (int)N_OF(steps) && steps[i] <= w_sdr_gain) i++;
+    if (w_sdr_amp) {                    /* past the top with the amplifier: back to nothing */
+        w_sdr_amp  = false;
+        w_sdr_gain = 0;
+    } else if (i < (int)N_OF(steps)) {
+        w_sdr_gain = steps[i];
+    } else if (rtl_spectrum_dev() == RTL_DEV_HACKRF) {
+        w_sdr_amp = true;               /* 47 dB, then its amplifier */
+    } else {
+        w_sdr_gain = 0;
+    }
+    w_sdr_power(pw, sizeof(pw));
+    snprintf(t, sizeof(t), "%s%s", pw, w_sdr_amp ? ": AMP ON, +14 DB" : "");
+    w_say(t, "TX GAIN", w_sdr_amp ? "THE HACKRF'S AMPLIFIER ON: ABOUT +14 DB. F3 AGAIN: BACK TO 0 DB, AMP OFF."
+                                  : "THE SDR'S TRANSMIT GAIN FOR THE NEXT OVER. F3 STEPS IT.");
+    show_walkie();
+}
+
+/* The VFO on G's SDR channel: 5 kHz a click, within what it tunes (where it may transmit is PTT's business) */
+static void w_sdr_turn(int32_t diff) {
+    int64_t hz = (w_sdr_hz + diff * 5000LL) / 5000 * 5000;
+
+    if (hz < rtl_spectrum_min_hz() + G_STICK_OFF) hz = rtl_spectrum_min_hz() + G_STICK_OFF;
+    if (hz > rtl_spectrum_max_hz() - G_STICK_OFF) hz = rtl_spectrum_max_hz() - G_STICK_OFF;
+    w_sdr_go(hz);
+    show_walkie();
+}
+
+/* G off the SDR (another screen, an X6200 channel, the SDR gone): its transmitter off and locked, the X6200 heard */
+static void w_sdr_left(void) {
+    if (!w_sdr_hz && !g_sdr_armed) return;
+    if (w_sdr_ptt) {
+        rtl_spectrum_tx(0, 0, false);
+        w_sdr_ptt = false;
+    }
+    g_sdr_armed = false;
+    if (heard == HEAR_RTL) hear_apply(HEAR_X6200);
+    rtl_spectrum_scope(false);
+}
+
+/* Each 50 ms on G: the hand mic's PTT (the base keyed itself, held at 0 W) keys the SDR while armed; what the daemon
+ * said of its transmitter; no voice from the mic; the SDR gone */
+static void w_sdr_step(void) {
+    char said[48];
+
+    if (w_sdr_resume && !w_sdr_hz && w_sdr_here()) {    /* the SDR there after a restart: G where it was */
+        w_plan();
+        w_sdr_go(w_sdr_resume);
+        w_at   = w_match();
+        w_mode = WM_FM;
+        show_walkie();
+    }
+    if (w_sdr_resume && lv_tick_get() > 20000) w_sdr_resume = 0;   /* not there by then: G stays the X6200's */
+    if (!w_sdr_hz) return;
+    if (g_sdr_armed) {
+        bool base = radio_get_state() == RADIO_TX;
+
+        if (base && !w_sdr_ptt) w_sdr_key(true, 2);
+        else if (!base && w_sdr_ptt && w_sdr_by == 2) w_sdr_key(false, 2);
+    }
+    uint32_t n = rtl_spectrum_tx_said(said, sizeof(said));
+
+    if (n != w_sdr_said_n) {
+        char t[96];
+
+        w_sdr_said_n = n;
+        if (!strncmp(said, "NO ", 3)) {
+            snprintf(t, sizeof(t), "NO TX (THE SDR): %s", said + 3);
+            w_say(t, "NO TX", t);
+        } else if (!strncmp(said, "END ", 4) && strcmp(said + 4, "ASKED") && strcmp(said + 4, "GONE")) {
+            snprintf(t, sizeof(t), "TX ENDED: %s", !strcmp(said + 4, "IDLE") ? "NO MIC AUDIO FOR 2 S"
+                                                 : !strcmp(said + 4, "TIMEOUT") ? "3 MINUTES IN ONE GO" : said + 4);
+            w_say(t, "TX ENDED", t);
+        }
+        if (strncmp(said, "ON", 2) && w_sdr_ptt) {      /* it ended by itself: PTT again to go on */
+            rtl_spectrum_tx(0, 0, false);
+            w_sdr_ptt = false;
+        }
+        show_walkie();
+    }
+    if (w_sdr_ptt && rtl_spectrum_tx_state() == RTL_TX_ON) {
+        if (rtl_spectrum_tx_mic_db() > -60) w_sdr_quiet_ms = lv_tick_get();
+        else if (lv_tick_get() - w_sdr_quiet_ms > 3000) {
+            w_say("TX: NO MIC AUDIO (THE HAND MIC CARRIES THE VOICE)", "NO MIC AUDIO",
+                  "NOTHING FROM THE HAND MIC: IS IT PLUGGED IN? THE RADIO'S OWN MIC IS NOT HEARD BY LINUX.");
+            w_sdr_quiet_ms = lv_tick_get();
+        }
+    }
+    if (rtl_spectrum_can_tx() || w_sdr_ptt) {
+        w_sdr_gone_ms = 0;
+    } else if (!w_sdr_gone_ms) {
+        w_sdr_gone_ms = lv_tick_get() | 1;
+    } else if (lv_tick_get() - w_sdr_gone_ms > 5000) {  /* pulled out: G back on the X6200, at its dial */
+        w_sdr_gone_ms = 0;
+        w_sdr_left();
+        w_sdr_hz = 0;
+        w_say("THE SDR WENT: G IS THE X6200'S AGAIN", "SDR GONE", "G IS THE X6200'S AGAIN.");
+        walkie_enter();
+        show_walkie();
+    }
+}
+
+/* Channel i in mode m: the SDR's on the SDR, the X6200's on the X6200 (G off the SDR for it). Not while the SDR
+ * transmits */
 static void walkie_go(int i, int m) {
     const wch_t *c = &w_chs[i];
 
+    if (w_sdr_ptt) {
+        w_say("NOT WHILE TRANSMITTING", "TRANSMITTING", "LET GO OF PTT FIRST.");
+        return;
+    }
+    if (c->sdr) {
+        if (g_sdr_armed && w_sdr_hz && llabs(c->hz - w_sdr_hz) > 1000) w_sdr_arm(false);  /* armed for that one */
+        w_sdr_go(c->hz);
+        w_at   = i;
+        w_mode = WM_FM;
+        show_walkie();
+        for (int k = 0; k < 5; k++) buttons_refresh(&btn[k]);
+        return;
+    }
+    if (w_sdr_hz) {
+        w_sdr_left();
+        w_sdr_hz = 0;
+    }
+    w_sdr_resume = 0;                   /* chosen by hand */
     if (m < 0 || m >= W_MODES) m = c->mode;
     x62_by_hand();
     tune(c->hz, w_x62(m, c->hz));
@@ -5753,6 +6131,14 @@ static void walkie_group_mode(void) {
 /* G shown: where the X6200 is, nothing tuned; the X6200 alone on the speaker (the stick's audio, alone or mixed, is
  * not G's; A or B puts its own LISTEN back when shown) */
 static void walkie_enter(void) {
+    w_plan();
+    if (w_sdr_hz && w_sdr_here()) {     /* left on the SDR's channel: there again */
+        w_sdr_go(w_sdr_hz);
+        w_at   = w_match();
+        w_mode = WM_FM;
+        return;
+    }
+    w_sdr_hz = 0;
     if (heard == HEAR_RTL || heard == HEAR_BOTH) hear_apply(HEAR_X6200);
     w_at   = w_match();
     w_mode = w_mode_now();
@@ -5765,6 +6151,22 @@ static void walkie_ch(int dir, int to) {
     int64_t hz = w_hz();
     char    cb[12];
 
+    if (w_sdr_hz && !to) {              /* on the SDR: its group's channels, round; off them, the group's call */
+        if (dial_held()) return;
+        const char *g = i >= 0 ? w_chs[i].grp : NULL;
+
+        if (!g) {
+            for (int j = 0; j < w_n && k < 0; j++)
+                if (w_chs[j].sdr && w_chs[j].home) k = j;
+        } else {
+            k = i;
+            do {
+                k = (k + dir + w_n) % w_n;
+            } while (k != i && strcmp(w_chs[k].grp, g));
+        }
+        if (k >= 0) walkie_go(k, WM_FM);
+        return;
+    }
     if (to) {
         snprintf(cb, sizeof(cb), "%02d", to);
         if ((k = w_find("CB", cb)) >= 0) walkie_go(k, w_cb_here() ? w_mode_now() : w_chs[k].mode);
@@ -5790,7 +6192,7 @@ static void walkie_ch(int dir, int to) {
 
 /* TX unlocked (armed) or on the air: the knobs that tune the X6200 are held, so a bump cannot move the transmitter */
 static bool dial_held(void) {
-    if (!g_armed && radio_get_state() != RADIO_TX) return false;
+    if (!g_armed && !g_sdr_armed && radio_get_state() != RADIO_TX) return false;
     w_say("DIAL LOCKED: LOCK TX (A/B) TO TUNE", "DIAL LOCKED",
           "TX IS UNLOCKED, SO THE TUNING KNOBS ARE LOCKED AGAINST A BUMP. LOCK TX (A/B) TO TUNE AGAIN.");
     return true;
@@ -5802,9 +6204,10 @@ static void walkie_key_label(int k, char *s, size_t n) {
     int i = w_match(), g;
 
     if (k <= 1) {
-        snprintf(s, n, "%s", w_cb_here() ? (k ? "CH +" : "CH -") : "");
+        snprintf(s, n, "%s", w_cb_here() || w_sdr_hz ? (k ? "CH +" : "CH -") : "");
     } else if (k == 2) {
-        s[0] = 0;
+        if (w_sdr_hz) w_sdr_power(s, n);
+        else s[0] = 0;
     } else if (k == 3) {
         snprintf(s, n, "%s", ws_3d ? "3D" : "2D");
     } else {
@@ -5927,11 +6330,24 @@ static void ws_feed(void) {
     int          w;
     double       px_hz;
 
-    if (!u->ws_frame || !centre || !nbins || last_seq == ws_seen) return;
-    ws_seen = last_seq;
-    w       = u->ws_w;
-    px_hz   = (double)ws_span / w;
-    to_cols_n(avg_db, nbins, centre - span_hz / 2.0, bin_hz, hz - ws_span / 2, px_hz, ws_cols, w);
+    if (!u->ws_frame) return;
+    w     = u->ws_w;
+    px_hz = (double)ws_span / w;
+    if (w_sdr_hz) {                     /* on the SDR's channel: its rows */
+        static float    sdb[8192];
+        static uint32_t sseq;
+        uint16_t        sn;
+        uint32_t        srate;
+        int64_t         sc;
+        bool            sfresh;
+
+        if (!rtl_spectrum_frame(sdb, N_OF(sdb), &sn, &srate, &sc, &sseq, &sfresh) || !sn || !srate) return;
+        to_cols_n(sdb, sn, sc - srate / 2.0, (double)srate / sn, hz - ws_span / 2, px_hz, ws_cols, w);
+    } else {
+        if (!centre || !nbins || last_seq == ws_seen) return;
+        ws_seen = last_seq;
+        to_cols_n(avg_db, nbins, centre - span_hz / 2.0, bin_hz, hz - ws_span / 2, px_hz, ws_cols, w);
+    }
     if (ws_at && ws_at != hz) {
         int dx = (int)lround((hz - ws_at) / px_hz);
 
@@ -6043,10 +6459,10 @@ static void show_walkie(void) {
     }
     (void)ch;
     snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
-    snprintf(fr, sizeof(fr), "%s %s", f, mode_name(cparam_i_get(cfg_cur_mode)));
+    snprintf(fr, sizeof(fr), "%s %s", f, w_sdr_hz ? "FM" : mode_name(cparam_i_get(cfg_cur_mode)));
     identify_ex(fq, &id, false);
     snprintf(nm, sizeof(nm), "%s", id.name);
-    snprintf(via, sizeof(via), "VIA X6200");
+    snprintf(via, sizeof(via), "VIA %s", w_sdr_hz ? rtl_spectrum_dev_name() : "X6200");
     if (wi >= 0) {
         const wch_t *c = &w_chs[wi];
         bool         cb = !strcmp(c->grp, "CB");
@@ -6060,12 +6476,17 @@ static void show_walkie(void) {
     }
     if (wui->via_l) lv_label_set_text(wui->via_l, via);
     snprintf(lk, sizeof(lk), "SQL %d  VOL %d", param_i_get(cfg_squelch), radio_change_vol(0));
-    snprintf(tx, sizeof(tx), "%s", g_armed ? "TX ARMED" : rx_held ? "TX LOCKED" : "TX NOT LOCKED");
+    snprintf(tx, sizeof(tx), "%s", (w_sdr_hz ? g_sdr_armed : g_armed) ? "TX ARMED" : rx_held ? "TX LOCKED"
+                                                                                           : "TX NOT LOCKED");
+    char txp[24];                       /* what goes out: the X6200's watts, or the SDR's gain */
+
+    if (w_sdr_hz) w_sdr_power(txp, sizeof(txp));
+    else snprintf(txp, sizeof(txp), "TX %.0f W", param_f_get(cfg_pwr));
     clock_power_get(&ext, &bat, &cap, &chg);
     if (bat > 1 || ext > 1) l_bat = bat, l_ext = ext, l_cap = cap, l_chg = chg;
     if (l_bat > 1) snprintf(pw1, sizeof(pw1), "BAT %.1f V %d%%%s", l_bat, l_cap, l_chg ? " CHARGING" : "");
     else snprintf(pw1, sizeof(pw1), "NO BATTERY");
-    snprintf(pw2, sizeof(pw2), "EXT %.1f V  TX %.0f W", l_ext, param_f_get(cfg_pwr));
+    snprintf(pw2, sizeof(pw2), "EXT %.1f V  %s", l_ext, txp);
     {
         int    c  = clock_cpu_temp();
         double ld = 0;
@@ -6094,8 +6515,8 @@ static void show_walkie(void) {
 
         if (bc) snprintf(pwc, sizeof(pwc), "#%06X %s#", (unsigned)bc, pw1);
         else snprintf(pwc, sizeof(pwc), "%s", pw1);
-        lv_label_set_text_fmt(wui->info_l, "%s  %s\n%s  EXT %.1f V\n%s  %s  TX %.0f W", lk, tx, pwc, l_ext, sy1, sy2,
-                              param_f_get(cfg_pwr));      /* three lines; the time: the bars' */
+        lv_label_set_text_fmt(wui->info_l, "%s  %s\n%s  EXT %.1f V\n%s  %s  %s", lk, tx, pwc, l_ext, sy1, sy2,
+                              txp);       /* three lines; the time: the bars' */
         lv_label_set_text(wui->ch.opt[0], nm);
         if (wui->status_l) {            /* the title bar's line, as the other screens' (show_head) */
             char        pre[96], line[192], tc[48] = "", dev[64] = "";
@@ -6108,11 +6529,12 @@ static void show_walkie(void) {
                 else snprintf(tc + strlen(tc), sizeof(tc) - strlen(tc), " %d%%", l_cap);
                 icon = batt_sym(l_ext, l_cap, l_chg);
             }
-            if (sdr_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s RTL#", tag_hex);
+            if (sdr_here)
+                snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s %s#", tag_hex, rtl_spectrum_dev_tag());
             if (adsb_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s ADS-B#", tag_hex);
             if (wr12_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s WR12#", tag_hex);
-            snprintf(pre, sizeof(pre), "%s  %s%s", g_armed ? "TX ARMED" : rx_held ? "RX ONLY" : "TX NOT LOCKED", hm,
-                     tc);
+            snprintf(pre, sizeof(pre), "%s  %s%s", (w_sdr_hz ? g_sdr_armed : g_armed) ? "TX ARMED"
+                                                   : rx_held ? "RX ONLY" : "TX NOT LOCKED", hm, tc);
             snprintf(line, sizeof(line), "%s%s%s", pre, icon[0] ? "   " : "", dev);
             lv_label_set_text(wui->status_l, line);
             lv_label_set_text(wui->batt_l, icon);
@@ -6690,6 +7112,15 @@ static void destruct_cb(void) {
 
 /* ---- Across a restart of the GUI (gui_state.c) ---- */
 
+/* A stick frequency kept: in Hz (key hz, 32 bits), or in kHz (key khz) past 2.1 GHz; 0 none, or outside what any SDR
+ * here tunes (the device's own range is rtl_tune_to's: it may not have said yet) */
+static int64_t state_hz(const char *hz, const char *khz) {
+    int64_t v = gui_state_get(hz, 0);
+
+    if (!v) v = (int64_t)gui_state_get(khz, 0) * 1000;
+    return v >= RTL_SPEC_ANY_MIN_HZ && v <= RTL_SPEC_ANY_MAX_HZ ? v : 0;
+}
+
 #define SWEEP_KEYS ((BANDS_N + 29) / 30)
 
 /* What the Sentry has going, kept every half second (blink_cb): its screen, A's and B's scans and C's, the bands
@@ -6705,8 +7136,12 @@ static void state_keep(void) {
     gui_state_set("s.aband", scan_a_band);
     gui_state_set("s.astep", a_step);
     gui_state_set("s.rscan", rtl_scan);
-    gui_state_set("s.rtlhz", (int32_t)rtl_hz);
-    gui_state_set("s.lhz", (int32_t)listen_hz);
+    gui_state_set("s.rtlhz", rtl_hz <= INT32_MAX ? (int32_t)rtl_hz : 0);
+    gui_state_set("s.lhz", listen_hz <= INT32_MAX ? (int32_t)listen_hz : 0);
+    gui_state_set("s.rtlk", (int32_t)(rtl_hz / 1000));         /* past 2.1 GHz too (a HackRF, a bladeRF) */
+    gui_state_set("s.gsdr", (int32_t)(w_sdr_hz / 1000));       /* G on the SDR's channel, kHz; its TX gain (never */
+    gui_state_set("s.sdrg", w_sdr_gain);                       /* its amplifier: off after a restart) */
+    gui_state_set("s.lk", (int32_t)(listen_hz / 1000));
     gui_state_set("s.preset", rtl_preset);
     gui_state_set("s.fband", f_band);
     gui_state_set("s.dwell", scan_dwell_ms);
@@ -6740,8 +7175,9 @@ static void state_restore(void) {
     if (gui_state_start_place() != GUI_PLACE_SENTRY || gui_state_get("s.scr", -1) < 0) {
         /* Back in an app or the classic screen: the Sentry opened later as ever, but B's channel as it was (the
          * stick's tuning is a setting, its channel was not: a restart from AIRSPACE lost it, 2026-11-15) */
-        v = gui_state_get("s.lhz", 0);
-        if (v >= RTL_SPEC_MIN_HZ && v <= RTL_SPEC_MAX_HZ && llabs(v - rtl_hz) <= rtl_view_hz() / 2) listen_hz = v;
+        int64_t lv = state_hz("s.lhz", "s.lk");
+
+        if (lv && llabs(lv - rtl_hz) <= rtl_view_hz() / 2) listen_hz = lv;
         return;
     }
 
@@ -6768,16 +7204,21 @@ static void state_restore(void) {
     v = gui_state_get("s.gsel", g_sel);
     if (v >= 0 && v < nhits) g_sel = v;
     ws_3d = gui_state_get("s.3d", ws_3d) != 0;
+    v = gui_state_get("s.gsdr", 0);     /* G back on the SDR's channel when it is there as G opens (walkie_enter) */
+    if (v >= 144000 && v <= 1300000) w_sdr_resume = (int64_t)v * 1000;
+    v = gui_state_get("s.sdrg", w_sdr_gain);
+    if (v >= 0 && v <= 47) w_sdr_gain = v;
 
     /* B: its preset or C's band, its tuning, the channel heard (hear_apply, as the screen opens, puts it on) */
     v = gui_state_get("s.fband", -1);
     f_band = v >= 0 && v < BANDS_N ? v : -1;
     v = gui_state_get("s.preset", rtl_preset);
     if (v >= 0 && v < RTL_PRESETS) rtl_preset = v;
-    v = gui_state_get("s.rtlhz", 0);
-    if (v >= RTL_SPEC_MIN_HZ && v <= RTL_SPEC_MAX_HZ) rtl_tune_to(v, false);
-    v = gui_state_get("s.lhz", 0);
-    if (v >= RTL_SPEC_MIN_HZ && v <= RTL_SPEC_MAX_HZ && llabs(v - rtl_hz) <= rtl_view_hz() / 2) listen_hz = v;
+    int64_t sv = state_hz("s.rtlhz", "s.rtlk");
+
+    if (sv) rtl_tune_to(sv, false);
+    sv = state_hz("s.lhz", "s.lk");
+    if (sv && llabs(sv - rtl_hz) <= rtl_view_hz() / 2) listen_hz = sv;
     if (gui_state_get("s.rscan", 0)) {  /* on from the picture it was at, after a dwell there */
         rtl_scan  = true;
         scan_next = now + SCAN_DWELL_MS;

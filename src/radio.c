@@ -1392,8 +1392,14 @@ static void play_mode_apply(audio_play_mode_t mode) {
 
     case AUDIO_PLAY_ON:
         hw_set_i(HW_HMIC, 0);
-        /* fall through */
+        hw_set_i(HW_IMIC, 0);
+        hw_set_i(HW_RECORD, true);
+        break;
+
     case AUDIO_PLAY_VOICE_REC:
+        /* the hand mic at its gain again: from AUDIO_PLAY_ON (the Sentry's stick on the speaker, then its SDR's
+         * transmitter: rtl_spectrum_tx) it was at 0, and the voice would be silence */
+        hw_set_i(HW_HMIC, param_i_get(cfg_hmic));
         hw_set_i(HW_IMIC, 0);
         hw_set_i(HW_RECORD, true);
         break;

@@ -230,8 +230,9 @@ rm -f $BR/build/target/etc/init.d/S01create_data                         # and f
 rm -f $BOARD/rootfs-overlay/etc/init.d/S02update $BR/build/target/etc/init.d/S02update
 # The AIRSPACE screen's RTL-SDR sticks (src/adsb_rx.c): dump1090-fa and the RTL-SDR Blog librtlsdr with its rtl_*
 # tools (buildroot/br2_external/package), on both radios
-# The Sentry's VHF/UHF screen reads a stick through x6x00-rtlspec (tools/rtlspec, built from this repository)
-for p in rtlsdr-blog dump1090-fa x6x00-rtlspec; do
+# The Sentry's VHF/UHF screens read an SDR through x6x00-rtlspec (tools/rtlspec, built from this repository): an
+# RTL-SDR, a HackRF (libhackrf) or a bladeRF (libbladerf, opened at run time; no FPGA image in the image)
+for p in rtlsdr-blog dump1090-fa libhackrf libbladerf x6x00-rtlspec; do
     grep -q "package/$p/Config.in" $EXT/Config.in || echo "source \"\$BR2_EXTERNAL_${M}_PATH/package/$p/Config.in\"" >> $EXT/Config.in
 done
 sed -i "s|@OPENX6X00@|$GUI|" $EXT/package/x6x00-rtlspec/x6x00-rtlspec.mk

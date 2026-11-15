@@ -2,7 +2,8 @@
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
  *  OpenX6X00 - AIRSPACE, the Sentry's look on 1090 MHz and its H (between G and A on the MFK's ring): the aircraft an
- *  ADS-B receiver on USB hears (an RTL-SDR, a GNS 5890 or a microADSB: adsb_rx.c, decoded by adsb.c), drawn on a
+ *  ADS-B receiver on USB hears (an RTL-SDR, a HackRF, a bladeRF, a GNS 5890 or a microADSB: adsb_rx.c, decoded by
+ *  adsb.c), drawn on a
  *  scope around the station's QTH locator. It opens by itself when a GNS 5890 or a microADSB becomes the only ADS-B
  *  receiver on USB (screen_main.c).
  *
@@ -548,16 +549,19 @@ static void show_detail(double now, const int *idx, int n) {
 }
 
 static void show_scope_words(double now, int nlive) {
-    char              dev[32];
+    char              dev[32], lent[64];
     adsb_rx_state_t   st = adsb_rx_state(dev, sizeof(dev));
     const char       *msg = NULL;
 
     switch (st) {
-        case ADSB_RX_NO_STICK: msg = "NO ADS-B RECEIVER\n\nPLUG AN RTL-SDR, A GNS 5890\nOR A MICROADSB INTO USB"; break;
+        case ADSB_RX_NO_STICK: msg = "NO ADS-B RECEIVER\n\nPLUG AN RTL-SDR, A HACKRF, A BLADERF,\nA GNS 5890 OR A MICROADSB INTO USB"; break;
         case ADSB_RX_NO_DRIVER: msg = "RECEIVER FOUND\n\nTHE KERNEL HAS\nNO CDC_ACM DRIVER"; break;
         case ADSB_RX_OPENING: msg = "RECEIVER FOUND\n\nOPENING ITS PORT"; break;
         case ADSB_RX_OFF: msg = "RECEIVER NOT STARTED"; break;
-        case ADSB_RX_LENT: msg = "RTL-SDR COMING\n\nFROM THE SENTRY'S\nVHF/UHF SPECTRUM"; break;
+        case ADSB_RX_LENT:
+            snprintf(lent, sizeof(lent), "%s COMING\n\nFROM THE SENTRY'S\nVHF/UHF SPECTRUM", rtl_spectrum_dev_name());
+            msg = lent;
+            break;
         default:
             if (!nlive && !adsb_count()) msg = "LISTENING ON 1090 MHZ\n\nNO AIRCRAFT YET";
             break;
@@ -942,14 +946,14 @@ static void build(void) {
     }
 
     help_l = label(root, &pixel_20, amb, 40, 70, SW - 80, LV_TEXT_ALIGN_LEFT,
-                   "AIRSPACE: AIRCRAFT ON 1090 MHZ, FROM AN ADS-B RECEIVER ON USB (AN RTL-SDR STICK, GNS 5890 OR MICROADSB).\n\n"
+                   "AIRSPACE: AIRCRAFT ON 1090 MHZ, FROM AN ADS-B RECEIVER ON USB (AN RTL-SDR STICK, A HACKRF, A BLADERF, A GNS 5890 OR A MICROADSB).\n\n"
                    "AN ARROW IS AN AIRCRAFT HEARD IN THE LAST MINUTE, POINTING ALONG ITS TRACK; A RING GROWS "
                    "ROUND IT FOR EACH MESSAGE. A SQUARE IS A GHOST: NOT HEARD FOR A MINUTE, FADING WITH ITS TRACK.\n\n"
                    "F1 / VFO: RANGE OF THE SCOPE, 0.5 TO 250 NM.  F2: DECAY, HOW LONG GHOSTS AND TRACKS STAY: OFF, 1 TO 60 "
                    "MINUTES, OR HOLD TILL CLEARED.  F3: TRACKS ON OR OFF.  F4: FORGET THE HISTORY.  "
                    "THE MFK'S RING: THE SENTRY'S A NEXT, ITS G BEFORE (THIS IS ITS H).\n\n"
                    "MFK OR A TAP CHOOSES AN AIRCRAFT. A GNS 5890 OR MICROADSB GOES ON LISTENING WHEN THIS SCREEN CLOSES; "
-                   "AN RTL-SDR IS THIS SCREEN'S WHILE IT IS OPEN AND THE SENTRY'S THE REST OF THE TIME. RECEIVE ONLY.\n\n"
+                   "AN SDR (RTL-SDR, HACKRF, BLADERF) IS THIS SCREEN'S WHILE IT IS OPEN AND THE SENTRY'S THE REST OF THE TIME. RECEIVE ONLY.\n\n"
                    "THE CENTRE: A USB GPS, ELSE THE QTH LOCATOR (SETTINGS > GENERAL), ELSE THE TRAFFIC.\n\n"
                    "ANY KEY: CLOSE.");
     lv_label_set_long_mode(help_l, LV_LABEL_LONG_WRAP);

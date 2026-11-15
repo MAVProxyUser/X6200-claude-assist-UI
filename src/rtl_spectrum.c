@@ -1,8 +1,9 @@
 /*
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
- *  OpenX6X00 - An RTL-SDR stick's spectrum (rtl_spectrum.h). The stick is the daemon's, /usr/bin/x6x00-rtlspec
- *  (tools/rtlspec/rtlspec.c): it opens it once and keeps it streaming for as long as the radio runs. A thread of its
+ *  OpenX6X00 - An SDR's spectrum (rtl_spectrum.h): an RTL-SDR stick, a HackRF or a bladeRF, "the stick" below. It is
+ *  the daemon's, /usr/bin/x6x00-rtlspec (tools/rtlspec/rtlspec.c): it opens it once and keeps it streaming for as long
+ *  as the radio runs, and transmits through a HackRF or a bladeRF when asked (rtl_spectrum_tx). A thread of its
  *  own here connects to it over its socket (starting it when none answers), asks for rows while they are wanted and
  *  takes them in, with the audio and the alerts. The daemon is nobody's child: a GUI started again (a hot install,
  *  a crash) connects to the same daemon and the same open stick. Nothing here closes the stick, ends the daemon or
@@ -73,6 +74,20 @@ static bool            row_fresh;
 static char            tuner[16];
 static int             cmd_fd = -1;
 
+/* The device, as the daemon's hello says it (rtlspec.c): its kind, what it tunes, whether it transmits */
+static atomic_int      dev_kind = RTL_DEV_NONE;
+static atomic_llong    dev_lo = RTL_SPEC_MIN_HZ, dev_hi = RTL_SPEC_MAX_HZ;
+static atomic_bool     dev_tx;
+
+/* Transmitting (rtl_spectrum_tx): what was asked, the daemon's word on it, the hand mic's level */
+static atomic_int      tx_state = RTL_TX_OFF;
+static atomic_bool     tx_mic;          /* the mic thread sends the voice: the base in record mode */
+static atomic_int      tx_mic_cdb = -9900;     /* hundredths of dBFS */
+static char            tx_said[48];
+static uint32_t        tx_said_n;
+static pthread_t       tx_thr;
+static bool            tx_thr_on;
+
 /* SAME alerts from the watched channel (NOAA Weather Radio): the last one, also kept in ALERT_LOG */
 #define ALERT_LOG "/mnt/wx_alerts.log"
 static atomic_llong    watch_hz;
@@ -95,6 +110,7 @@ static atomic_bool     mux;              /* BOTH: the X6200's receiver mixed in 
 static atomic_bool     on_bt;            /* the player's audio on the Bluetooth headphones now, not the speaker */
 static atomic_bool     on_moni;          /* BOTH's monitor test now: the base in normal mode, the stick to its monitor */
 static atomic_bool     mute;             /* OFF: the speaker taken and given nothing, neither radio heard */
+static atomic_bool     player_moni;      /* the player's monitor test on: the base left in normal mode */
 static atomic_int      g_stick = 1000, g_x62 = 1000;   /* each receiver's share in the mix, thousandths (BOTH) */
 /* BOTH's test (on while /tmp/both_tones exists, looked for each second): a steady tone on each receiver's line, as
  * close to where its audio comes in as can be, to hear the mix: 700 Hz in place of the stick's audio as the daemon
@@ -261,6 +277,8 @@ static rtl_spec_state_t daemon_state(const char *s) {
     if (!strcmp(s, "BUSY")) return RTL_SPEC_BUSY;
     if (!strcmp(s, "STALLED")) return RTL_SPEC_STALLED;
     if (!strcmp(s, "ADSB")) return RTL_SPEC_OFF;
+    if (!strcmp(s, "TX")) return RTL_SPEC_TX;
+    if (!strcmp(s, "NEEDS")) return RTL_SPEC_NEEDS;
     return RTL_SPEC_OPENING;            /* OPENING; ON: ON once its rows come */
 }
 
@@ -357,6 +375,7 @@ static void *spec_thread(void *arg) {
         if (n < 0 && (errno == EINTR || errno == EAGAIN)) continue;
         if (n <= 0) {                   /* the daemon went (told to end, or it died): connected again, or started */
             last_st[0] = 0;
+            atomic_store(&tx_state, RTL_TX_OFF);    /* its transmission ended with it */
             pthread_mutex_lock(&lock);
             cmd_fd = -1;
             pthread_mutex_unlock(&lock);
@@ -367,12 +386,14 @@ static void *spec_thread(void *arg) {
         }
 
         if (n > 8 && memcmp(buf, "RTLSPEC ", 8) == 0) {
-            char     st[16] = "", tn[16] = "";
-            int      ver = 0, nb = 0;
-            unsigned rate = 0;
+            char               st[16] = "", tn[16] = "", kd[16] = "";
+            int                ver = 0, nb = 0, tx = 0;
+            unsigned           rate = 0;
+            unsigned long long lo = 0, hi = 0;
 
             buf[n] = 0;
-            int got = sscanf((char *)buf, "RTLSPEC %d %15s %15s %u %d", &ver, st, tn, &rate, &nb);
+            int got = sscanf((char *)buf, "RTLSPEC %d %15s %15s %u %d %15s %llu %llu %d", &ver, st, tn, &rate, &nb,
+                             kd, &lo, &hi, &tx);
 
             if (got >= 1 && ver != PROTO) {
                 /* another version of the daemon, running since before an update: told to end (it closes the stick),
@@ -386,12 +407,44 @@ static void *spec_thread(void *arg) {
                 sleep(3);
                 continue;
             }
-            if (got != 5) continue;
+            if (got < 5) continue;
+            if (got == 9) {             /* the device's kind, range and transmitter (a daemon of before says none) */
+                atomic_store(&dev_kind, !strcmp(kd, "HACKRF") ? RTL_DEV_HACKRF : !strcmp(kd, "BLADERF") ? RTL_DEV_BLADERF
+                                        : !strcmp(kd, "RTL") ? RTL_DEV_RTL : RTL_DEV_NONE);
+                bool none = !strcmp(kd, "-") || !strcmp(kd, "REPLAY");      /* an RTL-SDR's till one says */
+
+                atomic_store(&dev_lo, none || !lo ? RTL_SPEC_MIN_HZ : (long long)lo);
+                atomic_store(&dev_hi, none || !hi ? RTL_SPEC_MAX_HZ : (long long)hi);
+                atomic_store(&dev_tx, tx != 0);
+                if (tx == 2) atomic_store(&tx_state, RTL_TX_ON);
+            } else {
+                atomic_store(&dev_kind, strcmp(st, "NOSTICK") ? RTL_DEV_RTL : RTL_DEV_NONE);
+                atomic_store(&dev_lo, RTL_SPEC_MIN_HZ);
+                atomic_store(&dev_hi, RTL_SPEC_MAX_HZ);
+                atomic_store(&dev_tx, false);
+            }
             snprintf(last_st, sizeof(last_st), "%s", st);
             pthread_mutex_lock(&lock);
             snprintf(tuner, sizeof(tuner), "%s", strcmp(tn, "-") ? tn : "");
             pthread_mutex_unlock(&lock);
             if (k && !(state == RTL_SPEC_ON && !strcmp(st, "ON"))) state = daemon_state(st);
+            continue;
+        }
+        if (n > 4 && memcmp(buf, "RTX ", 4) == 0) {    /* the transmitter: "RTX ON|END|NO <Hz> <why>" */
+            char w[8] = "", why[24] = "";
+            unsigned long long hz = 0;
+
+            buf[n] = 0;
+            if (sscanf((char *)buf, "RTX %7s %llu %23s", w, &hz, why) >= 2) {
+                if (!strcmp(w, "ON")) atomic_store(&tx_state, RTL_TX_ON);
+                else atomic_store(&tx_state, RTL_TX_OFF);
+                pthread_mutex_lock(&lock);
+                snprintf(tx_said, sizeof(tx_said), "%s %s", w, strcmp(why, "-") ? why : "");
+                tx_said_n++;
+                pthread_mutex_unlock(&lock);
+                fprintf(stderr, "sdr transmitter: %s", (char *)buf + 4);
+                fprintf(stderr, "\n");
+            }
             continue;
         }
         if (n >= 8 && memcmp(buf, "RAUD", 4) == 0) {   /* audio: into the ring, the oldest out when it is full */
@@ -479,9 +532,11 @@ static void *spec_thread(void *arg) {
     return NULL;
 }
 
+/* Within what any SDR tunes: the device's own range is the screens' (rtl_spectrum_min_hz), and the daemon keeps the
+ * device within it; a frequency asked before the device said what it is is not cut to an RTL-SDR's */
 void rtl_spectrum_want(bool on, int64_t hz, int gain) {
-    if (hz < RTL_SPEC_MIN_HZ) hz = RTL_SPEC_MIN_HZ;
-    if (hz > RTL_SPEC_MAX_HZ) hz = RTL_SPEC_MAX_HZ;
+    if (hz < RTL_SPEC_ANY_MIN_HZ) hz = RTL_SPEC_ANY_MIN_HZ;
+    if (hz > RTL_SPEC_ANY_MAX_HZ) hz = RTL_SPEC_ANY_MAX_HZ;
     atomic_store(&want_hz, hz);
     atomic_store(&want_gain, gain);
     atomic_store(&want, on);
@@ -532,8 +587,8 @@ bool rtl_spectrum_feed(int fd) {
 void rtl_spectrum_tune(int64_t hz) {
     char cmd[32];
 
-    if (hz < RTL_SPEC_MIN_HZ) hz = RTL_SPEC_MIN_HZ;
-    if (hz > RTL_SPEC_MAX_HZ) hz = RTL_SPEC_MAX_HZ;
+    if (hz < RTL_SPEC_ANY_MIN_HZ) hz = RTL_SPEC_ANY_MIN_HZ;
+    if (hz > RTL_SPEC_ANY_MAX_HZ) hz = RTL_SPEC_ANY_MAX_HZ;
     atomic_store(&want_hz, hz);
     snprintf(cmd, sizeof(cmd), "f %lld\n", (long long)hz);
     say(cmd);
@@ -649,12 +704,13 @@ static void *player_thread(void *arg) {
         if (want_play && !atomic_load(&playing)) {
             bt   = audio_play_bt_begin();
             moni = false;
-            if (!bt) radio_set_play_mode(AUDIO_PLAY_ON);
+            if (!bt && !atomic_load(&tx_mic)) radio_set_play_mode(AUDIO_PLAY_ON);   /* transmitting: the mic's mode
+                                                                                     * stays, put back after it */
             atomic_store(&playing, true);
         } else if (!want_play && atomic_load(&playing)) {
             audio_play_flush();
             if (bt) audio_play_bt_end();
-            else if (!moni) radio_set_play_mode(AUDIO_PLAY_OFF);
+            else if (!moni && !atomic_load(&tx_mic)) radio_set_play_mode(AUDIO_PLAY_OFF);
             bt = moni = false;
             atomic_store(&playing, false);
         }
@@ -670,7 +726,7 @@ static void *player_thread(void *arg) {
             }
             bool want_moni = moni_file && atomic_load(&mux) && atomic_load(&listen_mode);
 
-            if (want_moni != moni) {
+            if (want_moni != moni && !atomic_load(&tx_mic)) {
                 moni = want_moni;
                 radio_set_play_mode(moni ? AUDIO_PLAY_OFF : AUDIO_PLAY_ON);
                 fprintf(stderr, "rtl BOTH monitor test: %s\n", moni ? "on, the base in normal mode, the stick to its "
@@ -678,6 +734,7 @@ static void *player_thread(void *arg) {
             }
         }
         atomic_store(&on_bt, want_play && bt);
+        atomic_store(&player_moni, moni);
         atomic_store(&on_moni, want_play && moni);
         if (want_play && (atomic_load(&mux) && bt) != tapping) {   /* BOTH on the headphones: the X6200 mixed in */
             tapping = !tapping;
@@ -887,4 +944,125 @@ bool rtl_spectrum_rds(rtl_rds_t *out) {
     got  = rds_now.pi && rds_now.hz && rds_now.hz == atomic_load(&rds_hz);
     pthread_mutex_unlock(&lock);
     return got;
+}
+
+/* ---- The device ---- */
+
+rtl_dev_t rtl_spectrum_dev(void) {
+    int k = atomic_load(&dev_kind);
+
+    if (k != RTL_DEV_NONE) return (rtl_dev_t)k;
+    const char *u = adsb_rx_sdr_kind();         /* on USB, before the daemon says (or with none) */
+
+    return !strcmp(u, "HACKRF") ? RTL_DEV_HACKRF : !strcmp(u, "BLADERF") ? RTL_DEV_BLADERF : u[0] ? RTL_DEV_RTL
+                                                                                                : RTL_DEV_NONE;
+}
+
+const char *rtl_spectrum_dev_tag(void) {
+    rtl_dev_t d = rtl_spectrum_dev();
+
+    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : "RTL";
+}
+
+const char *rtl_spectrum_dev_name(void) {
+    rtl_dev_t d = rtl_spectrum_dev();
+
+    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : "RTL-SDR";
+}
+
+int64_t rtl_spectrum_min_hz(void) {
+    return atomic_load(&dev_lo);
+}
+
+int64_t rtl_spectrum_max_hz(void) {
+    return atomic_load(&dev_hi);
+}
+
+bool rtl_spectrum_can_tx(void) {
+    return atomic_load(&dev_tx) && rtl_spectrum_daemon();
+}
+
+/* ---- Transmitting ---- */
+
+/* The voice to the daemon while transmitting: the capture (the hand mic, the base in record mode) as it comes, in
+ * messages of up to 50 ms; its loudest of each 0.1 s for the screen. The base's audio put back as the player wants
+ * it when it ends */
+static void *tx_mic_thread(void *arg) {
+    static uint8_t msg[8 + 2205 * 2];
+    int16_t        buf[2205];
+    int            peak = 0, got = 0;
+    (void)arg;
+    pthread_setname_np(pthread_self(), "sdr_mic");
+
+    radio_set_play_mode(AUDIO_PLAY_VOICE_REC);
+    audio_mic_tap(true);
+    while (atomic_load(&tx_mic)) {
+        size_t n = audio_mic_tap_read(buf, 2205);
+
+        if (!n) {
+            usleep(10000);
+            continue;
+        }
+        uint32_t cnt = (uint32_t)n;
+
+        memcpy(msg, "TAUD", 4);
+        memcpy(msg + 4, &cnt, 4);
+        memcpy(msg + 8, buf, n * 2);
+        pthread_mutex_lock(&lock);
+        if (cmd_fd >= 0) (void)send(cmd_fd, msg, 8 + n * 2, MSG_DONTWAIT | MSG_NOSIGNAL);
+        pthread_mutex_unlock(&lock);
+        for (size_t i = 0; i < n; i++) {
+            int a = abs(buf[i]);
+
+            if (a > peak) peak = a;
+        }
+        if ((got += (int)n) >= 4410) {
+            atomic_store(&tx_mic_cdb, peak ? (int)lrintf(2000 * log10f(peak / 32768.0f)) : -9900);
+            peak = got = 0;
+        }
+    }
+    audio_mic_tap(false);
+    /* the base's audio as the player has it: playing the stick on the speaker (play mode), or not */
+    radio_set_play_mode(atomic_load(&playing) && !atomic_load(&on_bt) && !atomic_load(&player_moni) ? AUDIO_PLAY_ON
+                                                                                                      : AUDIO_PLAY_OFF);
+    atomic_store(&tx_mic_cdb, -9900);
+    return NULL;
+}
+
+void rtl_spectrum_tx(int64_t hz, int gain_db, bool amp) {
+    char cmd[64];
+
+    if (hz > 0) {
+        if (atomic_load(&tx_mic)) return;           /* on already */
+        if (tx_thr_on) pthread_join(tx_thr, NULL);  /* the last one's thread, done */
+        tx_thr_on = false;
+        atomic_store(&tx_state, RTL_TX_ASKED);
+        atomic_store(&tx_mic, true);
+        tx_thr_on = pthread_create(&tx_thr, NULL, tx_mic_thread, NULL) == 0;
+        if (!tx_thr_on) atomic_store(&tx_mic, false);
+        snprintf(cmd, sizeof(cmd), "t %lld %d %d\n", (long long)hz, gain_db, amp ? 1 : 0);
+        say(cmd);
+        fprintf(stderr, "sdr transmitter: asked for %lld Hz, TX gain %d dB, amplifier %s\n", (long long)hz, gain_db,
+                amp ? "on" : "off");
+    } else {
+        say("t 0\n");
+        atomic_store(&tx_mic, false);               /* the mic thread ends, the base's audio back */
+        if (atomic_load(&tx_state) == RTL_TX_ASKED) atomic_store(&tx_state, RTL_TX_OFF);
+    }
+}
+
+rtl_tx_state_t rtl_spectrum_tx_state(void) {
+    return (rtl_tx_state_t)atomic_load(&tx_state);
+}
+
+uint32_t rtl_spectrum_tx_said(char *s, size_t n) {
+    pthread_mutex_lock(&lock);
+    snprintf(s, n, "%s", tx_said);
+    uint32_t k = tx_said_n;
+    pthread_mutex_unlock(&lock);
+    return k;
+}
+
+float rtl_spectrum_tx_mic_db(void) {
+    return atomic_load(&tx_mic_cdb) / 100.0f;
 }

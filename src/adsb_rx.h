@@ -40,6 +40,9 @@ void adsb_rx_lend(bool on);
  * caller's thread: a stuck USB host never hangs the GUI); false or 0 for the first second */
 bool adsb_rx_sdr_present(void);
 
+/* The SDR's kind on USB: "RTL-SDR", "HACKRF", "BLADERF"; "" none */
+const char *adsb_rx_sdr_kind(void);
+
 /* A receiver of its own on USB (GNS 5890, microADSB), AIRSPACE open or not */
 bool adsb_rx_receiver_present(void);
 

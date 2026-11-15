@@ -1,0 +1,12 @@
+config BR2_PACKAGE_LIBBLADERF
+	bool "libbladerf"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_LIBUSB
+	help
+	  libbladeRF alone, from Nuand's bladeRF (none of its tools),
+	  for x6x00-rtlspec: the Sentry's VHF/UHF screens through a
+	  bladeRF (2.0 micro, x40/x115), opened by it at run time. No
+	  FPGA image: Nuand's, put by hand in /mnt/bladerf or in the
+	  board's own flash (docs/MANUAL.md).
+
+	  https://github.com/Nuand/bladeRF

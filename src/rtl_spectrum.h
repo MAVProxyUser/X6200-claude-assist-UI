@@ -1,9 +1,11 @@
 /*
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
- *  OpenX6X00 - An RTL-SDR stick's spectrum for the Sentry's spectrum, LOG and WALKIE screens (rtl_spectrum.c). The
- *  stick is held by /usr/bin/x6x00-rtlspec (tools/rtlspec), a daemon that opens it once and keeps it streaming for as
- *  long as the radio runs; this side connects to it, asks for rows while they are wanted and keeps the newest one.
+ *  OpenX6X00 - An SDR's spectrum for the Sentry's spectrum, LOG and WALKIE screens (rtl_spectrum.c): an RTL-SDR stick,
+ *  a HackRF or a bladeRF on the HOST port, "the stick" below whichever it is. It is held by /usr/bin/x6x00-rtlspec
+ *  (tools/rtlspec), a daemon that opens it once and keeps it streaming for as long as the radio runs; this side
+ *  connects to it, asks for rows while they are wanted and keeps the newest one. A HackRF or a bladeRF also
+ *  transmits, through the same daemon (rtl_spectrum_tx), only where it allows: the amateur bands from 2 m up.
  *  A GUI started again finds the same daemon and the same open stick: nothing closes it but pulling it out. While
  *  AIRSPACE's screen is open (rtl_spectrum_yield) no rows are asked for and its dump1090 is given the samples
  *  (rtl_spectrum_feed).
@@ -24,16 +26,39 @@ typedef enum {
     RTL_SPEC_OPENING,       /* the stick opening, or its first row not here yet */
     RTL_SPEC_ON,            /* rows coming */
     RTL_SPEC_STALLED,       /* the stick open and sending nothing: it has to be pulled out and plugged in again */
+    RTL_SPEC_TX,            /* transmitting (a HackRF, a bladeRF): no rows meanwhile */
+    RTL_SPEC_NEEDS,         /* there and not usable as it is: a bladeRF with no FPGA image, or no libbladeRF
+                             * (rtl_spectrum_tuner says which) */
 } rtl_spec_state_t;
 
+/* An RTL-SDR's tuning; the device's own: rtl_spectrum_min_hz, rtl_spectrum_max_hz */
 #define RTL_SPEC_MIN_HZ  24000000LL
 #define RTL_SPEC_MAX_HZ  1766000000LL
+/* What any of them tunes, the daemon's own bounds: a frequency asked of it within these is kept there (each device
+ * takes what it can of it) */
+#define RTL_SPEC_ANY_MIN_HZ  1000000LL
+#define RTL_SPEC_ANY_MAX_HZ  6000000000LL
+
+/* The kind of SDR: the daemon's word, or before it (or with no daemon) the one found on USB */
+typedef enum { RTL_DEV_NONE, RTL_DEV_RTL, RTL_DEV_HACKRF, RTL_DEV_BLADERF } rtl_dev_t;
+
+rtl_dev_t rtl_spectrum_dev(void);
+/* Its name in a title bar's device tags and other short places: "RTL", "HACKRF", "BLADERF" ("RTL" for none) */
+const char *rtl_spectrum_dev_tag(void);
+/* Its name where the stick is named to the user: "RTL-SDR", "HACKRF", "BLADERF" ("RTL-SDR" for none) */
+const char *rtl_spectrum_dev_name(void);
+/* What it tunes, Hz: the device's own once the daemon has said (a HackRF 1 MHz-6 GHz, a bladeRF 2 47 MHz-6 GHz), an
+ * RTL-SDR's before (RTL_SPEC_MIN_HZ, RTL_SPEC_MAX_HZ) */
+int64_t rtl_spectrum_min_hz(void);
+int64_t rtl_spectrum_max_hz(void);
+/* Open and able to transmit (a HackRF, a bladeRF), transmitting or not */
+bool rtl_spectrum_can_tx(void);
 
 /* Wanted (on, at hz with gain tenths of dB, -1 the tuner's AGC) or not: rows asked of the daemon or not, which is
  * started (in the background, for good) the first time */
 void rtl_spectrum_want(bool on, int64_t hz, int gain);
 
-/* While on: another frequency (kept within RTL_SPEC_MIN_HZ..MAX_HZ), another gain */
+/* While on: another frequency (kept within what the device tunes), another gain */
 void rtl_spectrum_tune(int64_t hz);
 void rtl_spectrum_gain(int tenths);
 
@@ -105,8 +130,25 @@ typedef struct {
 /* What came for the channel watched; false: nothing yet */
 bool rtl_spectrum_rds(rtl_rds_t *out);
 
-/* The tuner the helper found ("R820T"), "" before */
+/* The tuner the helper found ("R820T", "HACKRF-ONE", "BLADERF2"; for RTL_SPEC_NEEDS what is missing: "LIBBLADERF",
+ * "hostedxA4.rbf"), "" before */
 void rtl_spectrum_tuner(char *s, size_t n);
+
+/* ---- Transmitting: a HackRF or a bladeRF, narrow FM, the hand mic's voice ----
+ *
+ * The daemon refuses all but the amateur bands from 2 m to 23 cm whatever is asked here; the caller narrows that to
+ * the TX ranges first (tx_ranges_sdr_check). On: the base in record mode (AUDIO_PLAY_VOICE_REC), so the hand mic's
+ * audio comes into Linux as the voice messages record it, and sent to the daemon as it comes; off: the base's audio
+ * back as it was. The daemon ends it by itself when no voice came for 2 s, after 3 minutes in one go, and when this GUI
+ * goes. hz 0 ends it */
+void rtl_spectrum_tx(int64_t hz, int gain_db, bool amp);
+
+typedef enum { RTL_TX_OFF, RTL_TX_ASKED, RTL_TX_ON } rtl_tx_state_t;
+rtl_tx_state_t rtl_spectrum_tx_state(void);
+/* The daemon's last word on it ("ON", "END TIMEOUT", "NO NOT-AMATEUR"), and a count that tells a new one */
+uint32_t rtl_spectrum_tx_said(char *s, size_t n);
+/* The hand mic's level going out, dBFS (its loudest of the last 0.1 s), -99 none */
+float rtl_spectrum_tx_mic_db(void);
 
 /* The newest row: up to cap dB values from the lowest frequency, its sample rate (the span) and centre. False when
  * there is none, or none newer than *seq (which it updates). fresh: the first since a retune */

@@ -50,6 +50,11 @@ void audio_gain_db_transition(int16_t *buf, size_t samples, float gain1, float g
 void audio_rx_tap(bool on);
 size_t audio_rx_tap_read(int16_t *buf, size_t samples);
 
+/* The capture kept for an SDR's transmitter (on), half a second of it; read as it comes. With the base in record mode
+ * (AUDIO_PLAY_VOICE_REC) it is the hand mic */
+void audio_mic_tap(bool on);
+size_t audio_mic_tap_read(int16_t *buf, size_t samples);
+
 /* The receiver's audio for a picture of it (a voiceprint): kept while on; read as the tap above, apart from it */
 void audio_scope(bool on);
 size_t audio_scope_read(int16_t *buf, size_t samples);
