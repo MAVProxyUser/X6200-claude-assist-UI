@@ -1431,7 +1431,6 @@ static void show_walkie(void);
 static void walkie_step(void);
 static void walkie_ch(int dir, int to);
 static void walkie_show(bool on);
-static void walkie_tx_note(void);
 static bool g_portrait;         /* G held up: its own portrait screen shows (walkie_show) */
 static bool g_armed;            /* G's transmitter armed (the A/B key): the Sentry's receive-only hold let go */
 static int  w_at = -1;          /* G's channel (w_chs[]), -1 none chosen yet */
@@ -5016,12 +5015,6 @@ static void walkie_step(void) {
     if (g_portrait && wui->msg_l && ptt_ms && lv_tick_get() - ptt_ms > 4000) lv_label_set_text(wui->msg_l, "");
 }
 
-/* F5 on G: the transmitter's lock, said where it is looked at */
-static void walkie_tx_note(void) {
-    if (g_armed) {
-        walkie_arm(false);              /* F5 locks it again */
-        return;
-    }
     if (g_portrait) lv_label_set_text(wui->msg_l, "TX LOCKED. A/B ARMS IT FOR PTT");
     else osd("TRANSMIT LOCKED", "THE SENTRY IS RECEIVE ONLY. ON G, THE A/B KEY ARMS THE TRANSMITTER FOR PTT.", -1);
 }
