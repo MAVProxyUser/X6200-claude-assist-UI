@@ -66,6 +66,14 @@ bool drm_wf_rotate(const uint32_t *src, int32_t lx, int32_t ly, int32_t w, int32
 /* The GPU's way to the same (gpu.c): the primary plane's two buffers as dma-bufs (fds the caller owns, their pitch),
  * portrait PANEL x PANEL pixels XRGB8888; false without planes or a turned panel */
 bool drm_wf_export(int fds[2], uint32_t pitch[2], int32_t *w, int32_t *h);
+/* The GUI's layer for the GPU (gpu.c): memory for LVGL's frames as a dma-buf (gui_fd, the caller's; LAND_W x LAND_H
+ * ARGB8888 landscape, or the same bytes portrait, PANEL_W wide) and the overlay's two buffers (ov_fds, portrait ARGB);
+ * false without /dev/udmabuf (a kernel without CONFIG_UDMABUF) or planes. Then drm_gui_gpu(draw): drm_flush copies
+ * each area into that memory and at a frame's last one calls draw(back, portrait, rects in the frame's coordinates,
+ * n) to turn them into the overlay's buffer back; a false from it, or drm_gui_gpu(NULL), and the processor does it
+ * again */
+bool drm_gui_export(int ov_fds[2], uint32_t ov_pitch[2], int *gui_fd);
+void drm_gui_gpu(bool (*draw)(int back, bool portrait, const lv_area_t *rects, int n));
 /* Claimed, and the display turned as asked (landscape, or portrait: G held up): the back buffer's index (0, 1),
  * free once the last flip is done (waited for here); -1 not now. Then, drawn and finished, drm_wf_drawn(): shown at
  * the next drm_commit(), the area drawn (in the frame's own coordinates) noted for a dump */

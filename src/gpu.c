@@ -52,6 +52,7 @@ typedef char         GLchar;
 #define EGL_DMA_BUF_PLANE0_OFFSET_EXT 0x3273
 #define EGL_DMA_BUF_PLANE0_PITCH_EXT  0x3274
 #define DRM_FOURCC_XRGB8888           0x34325258    /* 'X' 'R' '2' '4' */
+#define DRM_FOURCC_ARGB8888           0x34325241    /* 'A' 'R' '2' '4' */
 
 #define GL_FRAMEBUFFER          0x8D40
 #define GL_RENDERBUFFER         0x8D41
@@ -98,6 +99,7 @@ static EGLint (*p_eglGetError)(void);
 static void *(*p_eglGetProcAddress)(const char *);
 static EGLImageKHR (*p_eglCreateImageKHR)(EGLDisplay, EGLContext, EGLenum, EGLClientBuffer, const EGLint *);
 static void (*p_glEGLImageTargetRenderbufferStorageOES)(GLenum, void *);
+static void (*p_glEGLImageTargetTexture2DOES)(GLenum, void *);
 static struct gbm_device *(*p_gbm_create_device)(int);
 
 static void (*p_glGenFramebuffers)(GLsizei, GLuint *);
@@ -155,7 +157,7 @@ static void (*p_glBlendFunc)(GLenum, GLenum);
                                      * radar's afterglow (AIRSPACE), the classic 3D picture's */
 #define PRIMS 8192                  /* points, lines' ends, triangles' corners a frame (each kind) */
 
-enum { P_ROWS, P_TRACE, P_RECT, P_FLAT, P_VP, P_WF, P_RADAR, P_PRIM, P_IMG, P_D3, P_JOIN, P_N };
+enum { P_ROWS, P_TRACE, P_RECT, P_FLAT, P_VP, P_WF, P_RADAR, P_PRIM, P_IMG, P_D3, P_JOIN, P_GUI, P_N };
 
 static int    tried;                /* 0 not yet, 1 working, -1 not here */
 static int    pw, ph;               /* the panel, portrait */
@@ -171,6 +173,9 @@ static GLint  u_wf_lv, u_wf_pal, u_wf_head, u_wf_ring;
 static GLint  u_rd_pal, u_rd_ink, u_rd_c, u_rd_r, u_rd_sweep;
 static GLint  u_img_img, u_d3_col, u_d3_pal, u_d3_dr, u_jn_col, u_jn_row, u_jn_c;
 static GLuint tex_d3col, tex_img;   /* the 3D picture's column records, its background */
+static GLint  u_gui_img;
+static GLuint ov_fbo[2];            /* the overlay plane's buffers: the GUI's layer (drm_gui_export) */
+static GLuint tex_gui[2];           /* LVGL's frame as the GPU reads it: landscape, portrait */
 static int    d3col_w, d3col_h, img_w, img_h;
 static struct {                     /* a frame's coloured points, lines and triangles (gpu_point, gpu_line, gpu_tri) */
     float   xy[PRIMS * 2];
@@ -214,6 +219,7 @@ static bool load(void) {
     ok &= LOAD(egl, eglGetError) != NULL;
     ok &= LOAD(egl, eglCreateImageKHR) != NULL;
     ok &= LOAD(gles, glEGLImageTargetRenderbufferStorageOES) != NULL;
+    LOAD(gles, glEGLImageTargetTexture2DOES);      /* the GUI's layer only: without it the processor turns the GUI */
     ok &= LOAD(gbm, gbm_create_device) != NULL;
     ok &= LOAD(gles, glGenFramebuffers) && LOAD(gles, glBindFramebuffer) && LOAD(gles, glGenRenderbuffers) &&
           LOAD(gles, glBindRenderbuffer) && LOAD(gles, glFramebufferRenderbuffer) &&
@@ -398,6 +404,13 @@ static const char *fs_prim_src =
     "varying vec4 v_col;\n"
     "void main() { gl_FragColor = v_col; }\n";
 
+/* The GUI's layer: LVGL's ARGB frame as it is, alpha too (what the GUI leaves see-through) */
+static const char *fs_gui_src =
+    "precision mediump float;\n"
+    "uniform sampler2D u_img;\n"
+    "varying vec2 v_uv;\n"
+    "void main() { gl_FragColor = texture2D(u_img, v_uv); }\n";
+
 /* A picture (the 3D background): XRGB in memory, B G R X bytes */
 static const char *fs_img_src =
     "precision mediump float;\n"
@@ -541,6 +554,73 @@ static bool has(const char *list, const char *ext) {
     return false;
 }
 
+static bool gui_draw(int back, bool port, const lv_area_t *r, int n);
+
+/* The GUI's layer (drm_gui_export): the overlay's buffers as render targets, LVGL's memory as two textures (the
+ * same bytes landscape and portrait). false: the processor keeps turning the GUI (said why in the log) */
+static bool gui_layer(EGLDisplay dpy) {
+    int      ov[2] = {-1, -1}, g = -1;
+    uint32_t pitch[2];
+    bool     ok = false;
+
+    if (!p_glEGLImageTargetTexture2DOES) {
+        fprintf(stderr, "gpu: no EGLImage textures: the GUI's layer turned by the processor\n");
+        return false;
+    }
+    if (!drm_gui_export(ov, pitch, &g)) {
+        fprintf(stderr, "gpu: no /dev/udmabuf (or no planes): the GUI's layer turned by the processor\n");
+        return false;
+    }
+    for (int i = 0; i < 2; i++) {       /* the overlay's buffers, portrait ARGB */
+        const EGLint attr[] = {EGL_WIDTH, pw, EGL_HEIGHT, ph, EGL_LINUX_DRM_FOURCC_EXT, DRM_FOURCC_ARGB8888,
+                               EGL_DMA_BUF_PLANE0_FD_EXT, ov[i], EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
+                               EGL_DMA_BUF_PLANE0_PITCH_EXT, (EGLint)pitch[i], EGL_NONE};
+        EGLImageKHR  img = p_eglCreateImageKHR(dpy, NULL, EGL_LINUX_DMA_BUF_EXT, NULL, attr);
+        GLuint       rb;
+
+        if (!img) {
+            fprintf(stderr, "gpu: the overlay's buffer %d not imported (0x%x)\n", i, p_eglGetError());
+            goto done;
+        }
+        p_glGenRenderbuffers(1, &rb);
+        p_glBindRenderbuffer(GL_RENDERBUFFER, rb);
+        p_glEGLImageTargetRenderbufferStorageOES(GL_RENDERBUFFER, img);
+        p_glGenFramebuffers(1, &ov_fbo[i]);
+        p_glBindFramebuffer(GL_FRAMEBUFFER, ov_fbo[i]);
+        p_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb);
+        if (p_glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            fprintf(stderr, "gpu: the overlay's buffer %d cannot be drawn into\n", i);
+            goto done;
+        }
+    }
+    for (int i = 0; i < 2; i++) {       /* LVGL's memory: landscape ph x pw, portrait pw x ph */
+        int          w = i ? pw : ph, h = i ? ph : pw;
+        const EGLint attr[] = {EGL_WIDTH, w, EGL_HEIGHT, h, EGL_LINUX_DRM_FOURCC_EXT, DRM_FOURCC_ARGB8888,
+                               EGL_DMA_BUF_PLANE0_FD_EXT, g, EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
+                               EGL_DMA_BUF_PLANE0_PITCH_EXT, w * 4, EGL_NONE};
+        EGLImageKHR  img = p_eglCreateImageKHR(dpy, NULL, EGL_LINUX_DMA_BUF_EXT, NULL, attr);
+
+        if (!img) {
+            fprintf(stderr, "gpu: the GUI's memory not imported as a texture (0x%x)\n", p_eglGetError());
+            goto done;
+        }
+        p_glGenTextures(1, &tex_gui[i]);
+        p_glBindTexture(GL_TEXTURE_2D, tex_gui[i]);
+        p_glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, img);
+        p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    ok = !p_glGetError();
+    if (!ok) fprintf(stderr, "gpu: GL error importing the GUI's layer: turned by the processor\n");
+done:
+    for (int i = 0; i < 2; i++)
+        if (ov[i] >= 0) close(ov[i]);
+    close(g);
+    return ok;
+}
+
 static bool setup(void) {
     int          fds[2] = {-1, -1}, rfd;
     uint32_t     pitch[2];
@@ -615,7 +695,7 @@ static bool setup(void) {
     }
     {
         const char *src[P_N] = {fs_rows_src, fs_trace_src, fs_rect_src, fs_flat_src, fs_vp_src, fs_wf_src,
-                                fs_radar_src, fs_prim_src, fs_img_src, fs_d3_src, fs_join_src};
+                                fs_radar_src, fs_prim_src, fs_img_src, fs_d3_src, fs_join_src, fs_gui_src};
 
         for (int i = 0; i < P_N; i++) {
             const char *v = i == P_PRIM ? vs_prim_src : i == P_D3 ? vs_d3_src : vs_src;
@@ -664,6 +744,7 @@ static bool setup(void) {
     u_jn_col     = p_glGetUniformLocation(prog[P_JOIN], "u_col");
     u_jn_row     = p_glGetUniformLocation(prog[P_JOIN], "u_row");
     u_jn_c       = p_glGetUniformLocation(prog[P_JOIN], "u_c");
+    u_gui_img    = p_glGetUniformLocation(prog[P_GUI], "u_img");
     for (int i = 0; i < PALS; i++) tex_pal[i] = texture(256, 1, GL_RGBA);
     p_glDisable(GL_DITHER);
     p_glDisable(GL_BLEND);
@@ -677,6 +758,10 @@ static bool setup(void) {
     }
     fprintf(stderr, "gpu: %s draws the Sentry's pictures into the display's plane (%dx%d)\n",
             (const char *)p_glGetString(GL_RENDERER), w, h);
+    if (gui_layer(dpy)) {
+        drm_gui_gpu(gui_draw);
+        fprintf(stderr, "gpu: the GUI's layer turned onto the panel by the GPU (udmabuf)\n");
+    }
     return true;
 fail:
     for (int i = 0; i < 2; i++)
@@ -1102,6 +1187,40 @@ void gpu_frame_end(int x, int y, int w, int h) {
     p_glDisable(GL_SCISSOR_TEST);
     p_glFinish();                       /* drawn before the plane is flipped to it */
     drm_wf_drawn(portrait, x, y, w, h);
+}
+
+/* drm_flush's (drm_gui_gpu): rects of LVGL's frame turned into the overlay's buffer back, waited for */
+static bool gui_draw(int back, bool port, const lv_area_t *r, int n) {
+    static float v[2 * 128 * 6 * 4];
+    float        fw = (float)(port ? pw : ph), fh = (float)(port ? ph : pw);
+    int          k = 0;
+
+    if (back < 0 || back > 1 || !ov_fbo[back] || in_frame) return false;
+    if (n > 2 * 128) n = 2 * 128;
+    for (int i = 0; i < n; i++) {
+        float x0 = (float)r[i].x1, y0 = (float)r[i].y1, x1 = (float)(r[i].x2 + 1), y1 = (float)(r[i].y2 + 1);
+        float q[6][2] = {{x0, y0}, {x1, y0}, {x0, y1}, {x1, y0}, {x1, y1}, {x0, y1}};
+
+        for (int j = 0; j < 6; j++, k++) {
+            v[k * 4]     = q[j][0];
+            v[k * 4 + 1] = q[j][1];
+            v[k * 4 + 2] = q[j][0] / fw;
+            v[k * 4 + 3] = q[j][1] / fh;
+        }
+    }
+    if (!k) return true;
+    portrait = port;
+    p_glBindFramebuffer(GL_FRAMEBUFFER, ov_fbo[back]);
+    p_glViewport(0, 0, pw, ph);
+    p_glDisable(GL_SCISSOR_TEST);
+    use(P_GUI);
+    bind(tex_gui[port ? 1 : 0], tex_gui[port ? 1 : 0]);
+    p_glUniform1i(u_gui_img, 0);
+    p_glVertexAttribPointer(0, 2, GL_FLOAT, 0, 16, v);
+    p_glVertexAttribPointer(1, 2, GL_FLOAT, 0, 16, v + 2);
+    p_glDrawArrays(0x0004, 0, k);       /* GL_TRIANGLES */
+    p_glFinish();                       /* turned before the plane is flipped to it */
+    return !p_glGetError();
 }
 
 #else  /* no DRM (the Mac's build): no GPU */

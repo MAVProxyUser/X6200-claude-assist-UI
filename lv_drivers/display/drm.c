@@ -30,8 +30,33 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <unistd.h>
+#if __has_include(<linux/udmabuf.h>)
+#include <linux/dma-buf.h>
+#include <linux/memfd.h>
+#include <linux/udmabuf.h>
+#else           /* older kernel headers (the X6100's toolchain may have them): the same ABI */
+struct udmabuf_create { uint32_t memfd, flags; uint64_t offset, size; };
+struct dma_buf_sync { uint64_t flags; };
+#define UDMABUF_FLAGS_CLOEXEC   0x01
+#define UDMABUF_CREATE          _IOW('u', 0x42, struct udmabuf_create)
+#define DMA_BUF_SYNC_WRITE      (2 << 0)
+#define DMA_BUF_SYNC_START      (0 << 2)
+#define DMA_BUF_SYNC_END        (1 << 2)
+#define DMA_BUF_IOCTL_SYNC      _IOW('b', 0, struct dma_buf_sync)
+#define MFD_CLOEXEC             0x0001U
+#define MFD_ALLOW_SEALING       0x0002U
+#endif
+#ifndef SYS_memfd_create
+#define SYS_memfd_create        385     /* ARM EABI */
+#endif
+#ifndef F_ADD_SEALS
+#define F_ADD_SEALS     1033
+#define F_SEAL_SHRINK   0x0002
+#endif
 #ifdef __ARM_NEON
 #include <arm_neon.h>
 #endif
@@ -112,6 +137,16 @@ static int                  wf_gpu_buf = -1;    /* the buffer the GPU drew last 
 static lv_area_t            wf_gpu_p;           /* and where, in the panel's own coordinates */
 static void                 (*commit_hook)(int back);   /* draws into the primary's back buffer just before it is
                                                          * shown (drm_wf_commit_hook) */
+/* The GUI's layer by the GPU (drm_gui_export, drm_gui_gpu; gpu.c): LVGL's areas are copied, not turned, into gui_px,
+ * memory the GPU reads as a dma-buf (udmabuf); at a frame's last area the GPU turns its rectangles, and the previous
+ * frame's that the back buffer misses, into the overlay's back buffer. The processor no longer writes the display's
+ * write-combined buffers (the GUI's copies there were most of the Sentry's GUI thread after the GPU took its
+ * pictures). shadow is made from gui_px only when something reads it (a dump) */
+static uint32_t             *gui_px;        /* the frame as LVGL draws it: landscape LAND_W x LAND_H, or portrait */
+static int                  gui_dbuf = -1;  /* its dma-buf */
+static bool                 (*gui_gpu)(int back, bool portrait, const lv_area_t *rects, int n);
+static bool                 shadow_stale;   /* shadow behind gui_px */
+static bool                 gui_writing;    /* between the dma-buf's SYNC_START and SYNC_END */
 
 /**********************
  *   STATIC FUNCTIONS
@@ -598,7 +633,95 @@ void drm_set_portrait(bool on) {
     frame[1].full = true;
 }
 
+#if BOARD_FB_ROTATE_90
+/* The processor's caches and the GPU's view of gui_px: START before LVGL's areas go in, END before the GPU reads */
+static void gui_sync(bool start) {
+    struct dma_buf_sync s = { .flags = (start ? DMA_BUF_SYNC_START : DMA_BUF_SYNC_END) | DMA_BUF_SYNC_WRITE };
+
+    if (start != gui_writing && gui_dbuf >= 0) {
+        gui_writing = start;
+        ioctl(gui_dbuf, DMA_BUF_IOCTL_SYNC, &s);
+    }
+}
+
+/* shadow (the panel's portrait) from gui_px, or the other way: the frame's pixel x, y as drm_flush turns it */
+static void gui_shadow(bool to_shadow) {
+    int32_t w = portrait_mode ? PANEL_W : LAND_W, h = portrait_mode ? PANEL_H : LAND_H;
+
+    for (int32_t y = 0; y < h; y++) {
+        for (int32_t x = 0; x < w; x++) {
+            uint32_t *g = gui_px + y * w + x;
+            uint32_t *p = portrait_mode ? shadow + (PANEL_H - 1 - y) * PANEL_W + PANEL_W - 1 - x
+                                        : shadow + (LAND_W - 1 - x) * PANEL_W + y;
+
+            if (to_shadow) *p = *g;
+            else *g = *p;
+        }
+    }
+    shadow_stale = false;
+}
+
+/* A panel rect back into the frame's coordinates */
+static lv_area_t frame_area(const lv_area_t *p) {
+    if (portrait_mode) {
+        return (lv_area_t){ PANEL_W - 1 - p->x2, PANEL_H - 1 - p->y2, PANEL_W - 1 - p->x1, PANEL_H - 1 - p->y1 };
+    }
+    return (lv_area_t){ LAND_W - 1 - p->y2, p->x1, LAND_W - 1 - p->y1, p->x2 };
+}
+
+/* drm_flush's way with the GPU: the area into gui_px; at the last one the GPU draws what the back buffer needs */
+static void flush_gpu(lv_disp_drv_t *drv, const lv_area_t *area, const uint32_t *src) {
+    int32_t w = portrait_mode ? PANEL_W : LAND_W, h = portrait_mode ? PANEL_H : LAND_H;
+
+    if (area->x1 >= 0 && area->y1 >= 0 && area->x2 < w && area->y2 < h) {
+        int32_t   aw = lv_area_get_width(area);
+        lv_area_t p = portrait_mode ? (lv_area_t){ PANEL_W - 1 - area->x2, PANEL_H - 1 - area->y2,
+                                                   PANEL_W - 1 - area->x1, PANEL_H - 1 - area->y1 }
+                                    : (lv_area_t){ area->y1, LAND_W - 1 - area->x2, area->y2, LAND_W - 1 - area->x1 };
+
+        gui_sync(true);
+        for (int32_t y = area->y1; y <= area->y2; y++, src += aw) {
+            memcpy(gui_px + y * w + area->x1, src, (size_t) aw * 4);
+        }
+        rects_add(&frame[cur], &p);
+        shadow_stale = true;
+    }
+    if (lv_disp_flush_is_last(drv)) {
+        static lv_area_t list[2 * MAX_RECTS];
+        const rects_t    *now = &frame[cur], *before = &frame[cur ^ 1];
+        int              n = 0;
+
+        gui_sync(false);
+        if (now->full || before->full) {
+            list[n++] = (lv_area_t){ 0, 0, w - 1, h - 1 };
+        } else {
+            for (uint32_t i = 0; i < before->cnt; i++) {
+                if (!rect_covered(&before->rects[i], now)) list[n++] = frame_area(&before->rects[i]);
+            }
+            for (uint32_t i = 0; i < now->cnt; i++) list[n++] = frame_area(&now->rects[i]);
+        }
+        wait_flip();                    /* the back buffer was on screen until this flip */
+        if (!gui_gpu(gui->back, portrait_mode, list, n)) {
+            err("the GPU failed to draw the GUI: the processor does it from now on");
+            gui_gpu = NULL;
+            gui_shadow(true);
+            frame[0].full = true;
+            frame[1].full = true;
+            copy_rects(&gui->bufs[gui->back], &frame[cur]);
+        }
+        gui->ready = true;
+    }
+    lv_disp_flush_ready(drv);
+}
+#endif
+
 void drm_flush(lv_disp_drv_t * drv, const lv_area_t * area, lv_color_t * color_p) {
+#if BOARD_FB_ROTATE_90
+    if (gui_gpu) {
+        flush_gpu(drv, area, (const uint32_t *) color_p);
+        return;
+    }
+#endif
     if (portrait_mode) {
         /* Turned 180: the panel's native top is the side away from the knobs */
         if (area->x1 >= 0 && area->y1 >= 0 && area->x2 < PANEL_W && area->y2 < PANEL_H) {
@@ -777,6 +900,114 @@ bool drm_wf_export(int fds[2], uint32_t pitch[2], int32_t *w, int32_t *h) {
 #endif
 }
 
+bool drm_gui_export(int ov_fds[2], uint32_t ov_pitch[2], int *gui_fd) {
+#if BOARD_FB_ROTATE_90
+    size_t size = (size_t) LAND_W * LAND_H * 4;
+    int    dev, mfd = -1, dbuf = -1;
+    void   *map = MAP_FAILED;
+
+    if (!planes || fd < 0 || (size & 4095) || gui_px) {
+        return false;
+    }
+    if (access("/tmp/gpu_gui_test", F_OK) == 0) {
+        /* A test of the GPU's part on a kernel without udmabuf: the memory a dumb buffer (write-combined, so slower
+         * for LVGL's copies than udmabuf's; no cache to keep in step) */
+        struct drm_mode_create_dumb creq = { .width = LAND_W, .height = LAND_H, .bpp = 32 };
+        struct drm_mode_map_dumb    mreq = { 0 };
+
+        if (drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &creq) < 0 || creq.pitch != LAND_W * 4) {
+            return false;
+        }
+        mreq.handle = creq.handle;
+        if (drmIoctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq) < 0 ||
+            (map = mmap(0, creq.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, mreq.offset)) == MAP_FAILED ||
+            drmPrimeHandleToFD(fd, creq.handle, DRM_CLOEXEC | DRM_RDWR, gui_fd)) {
+            return false;
+        }
+        for (int i = 0; i < 2; i++) {
+            if (drmPrimeHandleToFD(fd, overlay.bufs[i].handle, DRM_CLOEXEC | DRM_RDWR, &ov_fds[i])) {
+                return false;
+            }
+            ov_pitch[i] = overlay.bufs[i].pitch;
+        }
+        err("GPU GUI test: a dumb buffer for LVGL's frames (/tmp/gpu_gui_test)");
+        gui_px = map;
+        gui_dbuf = -1;
+        return true;
+    }
+    if ((dev = open("/dev/udmabuf", O_RDWR | O_CLOEXEC)) < 0) {
+        return false;                   /* a kernel without it: the processor turns the GUI, as before */
+    }
+    mfd = (int) syscall(SYS_memfd_create, "x6100_gui", MFD_ALLOW_SEALING | MFD_CLOEXEC);
+    if (mfd < 0 || ftruncate(mfd, (off_t) size) || fcntl(mfd, F_ADD_SEALS, F_SEAL_SHRINK) < 0) {
+        err("the GUI's memory for the GPU not made: %s", strerror(errno));
+        goto fail;
+    }
+    {
+        struct udmabuf_create c = { .memfd = (uint32_t) mfd, .flags = UDMABUF_FLAGS_CLOEXEC, .offset = 0,
+                                    .size = size };
+
+        if ((dbuf = ioctl(dev, UDMABUF_CREATE, &c)) < 0) {
+            err("udmabuf: %s", strerror(errno));
+            goto fail;
+        }
+    }
+    map = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, mfd, 0);
+    if (map == MAP_FAILED) {
+        goto fail;
+    }
+    for (int i = 0; i < 2; i++) {
+        if (drmPrimeHandleToFD(fd, overlay.bufs[i].handle, DRM_CLOEXEC | DRM_RDWR, &ov_fds[i])) {
+            err("overlay buffer %d not exported: %s", i, strerror(errno));
+            if (i) {
+                close(ov_fds[0]);
+            }
+            goto fail;
+        }
+        ov_pitch[i] = overlay.bufs[i].pitch;
+    }
+    if ((*gui_fd = fcntl(dbuf, F_DUPFD_CLOEXEC, 0)) < 0) {
+        close(ov_fds[0]);
+        close(ov_fds[1]);
+        goto fail;
+    }
+    gui_px = map;
+    gui_dbuf = dbuf;
+    close(mfd);                         /* the mapping and the dma-buf hold the memory */
+    close(dev);
+    return true;
+fail:
+    if (map != MAP_FAILED) munmap(map, size);
+    if (dbuf >= 0) close(dbuf);
+    if (mfd >= 0) close(mfd);
+    close(dev);
+    return false;
+#else
+    (void) ov_fds, (void) ov_pitch, (void) gui_fd;
+    return false;
+#endif
+}
+
+void drm_gui_gpu(bool (*draw)(int back, bool portrait, const lv_area_t *rects, int n)) {
+#if BOARD_FB_ROTATE_90
+    if (draw && !gui_px) {
+        return;
+    }
+    if (draw && !gui_gpu) {             /* gui_px from what the processor turned: the GPU's first frames whole */
+        gui_sync(true);
+        gui_shadow(false);
+        gui_sync(false);
+    } else if (!draw && gui_gpu) {
+        gui_shadow(true);
+    }
+    gui_gpu = draw;
+    frame[0].full = true;
+    frame[1].full = true;
+#else
+    (void) draw;
+#endif
+}
+
 int drm_wf_back(bool portrait) {
     if (!planes || !wf_claimed || portrait_mode != portrait || fd < 0) {
         return -1;
@@ -882,6 +1113,16 @@ bool drm_dump(const char *path) {
     if (!shadow || !(f = fopen(path, "wb"))) {
         return false;
     }
+#if BOARD_FB_ROTATE_90
+    if (gui_gpu) {                      /* the GUI as the panel shows it: the overlay's buffer on screen */
+        const struct drm_buffer *b = &gui->bufs[gui->back ^ 1];
+
+        for (int32_t y = 0; y < PANEL_H; y++) {
+            memcpy(shadow + y * PANEL_W, b->map + y * b->pitch, PANEL_W * 4);
+        }
+        shadow_stale = true;            /* not gui_px's: made again from it if the processor takes over */
+    }
+#endif
     if (planes) {
         /* What the panel shows: the GUI over the waterfall */
         static uint32_t row[PANEL_W];
