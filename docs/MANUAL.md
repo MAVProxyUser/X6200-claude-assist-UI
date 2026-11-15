@@ -693,13 +693,13 @@ spectrum screens:
 | Screen | What it is |
 |---|---|
 | **A X6200** | The X6200's spectrum, set up as B is: four boxes, the picture, the same keys |
-| **B VHF/UHF** | An RTL-SDR's spectrum: its presets or D's bands |
+| **B VHF/UHF** | An SDR's spectrum (an RTL-SDR, a HackRF or a bladeRF): its presets or D's bands |
 | **C LOG** | Every signal A's and B's scans locked on, each heard on its own radio |
 | **D BANDS** | What each band carries, when, with which antenna |
 | **E DECODE** | The decoders and the frequencies they work on |
 | **F SYSTEM** | Settings, the apps, the modes, the classic radio screen |
-| **G WALKIE** | The radio as a CB walkie-talkie, the voice drawn as it is heard |
-| **H AIRSPACE** | ADS-B aircraft from an RTL-SDR, a GNS 5890 or a microADSB ([AIRSPACE](#airspace)) |
+| **G WALKIE** | The radio as a CB walkie-talkie, the voice drawn as it is heard; with a HackRF or bladeRF, VHF/UHF FM through it too |
+| **H AIRSPACE** | ADS-B aircraft from an RTL-SDR, a HackRF, a bladeRF, a GNS 5890 or a microADSB ([AIRSPACE](#airspace)) |
 | SCAN CFG | On no ring: F5 on A or B. That screen's radio's settings (A's: what A had beyond B's look) |
 
 Its controls (GEN shows them, as does a tap on the title):
@@ -709,9 +709,9 @@ Its controls (GEN shows them, as does a tap on the title):
 | VFO knob | The screen's own radio: on A (and the other screens) the X6200 by hand, the Sentry going to MAN-OVERRIDE and A's scan stopping; on B the stick's channel (heard or not); on C the stick while a stick entry plays |
 | MFK knob | On A and B it pans the picture by SCAN CFG's STEP, its push going to the strongest signal; elsewhere it chooses a band, a frequency, an item, a logged signal, a CB channel. Push: listen, open |
 | MFK inner ring | The screens, A to H and round again (H is AIRSPACE; its ring comes back to A or G) |
-| VOL/SQL/RFG knob | Volume; push: squelch, push: RF gain, push: volume again. On B the squelch and RF gain are the RTL-SDR's |
+| VOL/SQL/RFG knob | Volume; push: squelch, push: RF gain, push: volume again. On B the squelch and RF gain are the SDR's |
 | F1-F5 | The keys along the bottom: on A and B, F1 SCAN, F2 BAND (B: PRESET), F3 VIEW, F4 LISTEN, F5 SCAN CFG |
-| A/B | On A and G: arms the X6200's transmitter for PTT (`X6200 TX ARMED` blinks in A's RECEIVER box, G's lamp says TX ARMED, ON AIR while it transmits), at the power set; the Sentry's scans and AUTO wait meanwhile, so the dial stays put. A/B again, F5 on G, or any screen but A and G locks it again. KEY and MSG stay refused. The radio's own TX rules still apply (its bands and power) |
+| A/B | On A and G: arms the X6200's transmitter for PTT (`X6200 TX ARMED` blinks in A's RECEIVER box, G's lamp says TX ARMED, ON AIR while it transmits), at the power set; the Sentry's scans and AUTO wait meanwhile, so the dial stays put. A/B again, F5 on G, or any screen but A and G locks it again. KEY and MSG stay refused. The radio's own TX rules still apply (its bands and power). On G's SDR channels A/B arms the HackRF's or bladeRF's transmitter instead, the X6200 staying at 0 W ([G on a HackRF or bladeRF](#g-on-a-hackrf-or-bladerf)) |
 | APP | F SYSTEM |
 | BAND up/down | The next band, as F2 on A (on B, the next preset) |
 | AM, CW, SSB, DFN, DFL, FST | The mode, the noise reduction and blanker, the filter, the tuning step, as on the main screen |
@@ -720,10 +720,12 @@ Its controls (GEN shows them, as does a tap on the title):
 ### A and B, the spectrum screens
 
 One screen, set up for its own radio: A for the X6200 (its base's 384 kHz around the dial, the middle 360 kHz
-shown), B for an RTL-SDR stick (the middle 1.8 MHz of its 2.1 MHz). Each draws a trace over a 3D picture of the
+shown), B for an SDR on the HOST port, an RTL-SDR stick, a HackRF or a bladeRF (the middle 1.8 MHz of its
+2.1 MHz; "the stick" below, whichever it is). Each draws a trace over a 3D picture of the
 last seconds, the strongest signals named over it and the screen's channel bracketed (A's dial, B's channel).
 
-- **The boxes**: RECEIVER (the radio, and what the speaker plays: `HEARD: X6200`, `RTL` or `BOTH`), TUNED (the
+- **The boxes**: RECEIVER (the radio, its model: `RTL-SDR R820T`, `HACKRF ONE`, `BLADERF2`; and what the speaker
+  plays: `HEARD: X6200`, `RTL` (`HACKRF`, `BLADERF`) or `BOTH`), TUNED (the
   frequency, the span and the MFK's step), BAND (A: the band the dial is in; B: PRESET, the preset or D's band) and
   SIGNALS (how many, the strongest; A adds its mode, B the stick's gain).
 - **RDS on B**: while B's channel is a broadcast FM one (87.5 to 108 MHz, wide FM), the stick's daemon decodes the
@@ -746,10 +748,13 @@ last seconds, the strongest signals named over it and the screen's channel brack
 - **F2 BAND** (A: the next band, the BAND keys too, the scan going on there; 30 M and 19 M BC are heard on WWV at
   10 and 15 MHz, just outside them, and BAND and SCAN still count that as the band) or **PRESET** (B: NOAA weather, 2 m,
   2 m repeaters, the airband, FM broadcast, marine VHF, the weather satellites, the weather balloons, 70 cm, ISM 433,
-  GMRS, ISM 915, UAT 978 and ADS-B 1090).
+  GMRS, ISM 915, UAT 978 and ADS-B 1090; then 6 m, 1.25 m, 23 cm and GPS L1, and with a HackRF or bladeRF Wi-Fi
+  2.4 GHz, 13 cm, 5.8 GHz, and with a HackRF HF 20 m and 10 m: a preset past what the stick tunes is passed over).
+  With a HackRF or bladeRF, F2 also takes D's bands it tunes from 1 MHz (the HackRF's) up; elsewhere HF stays the
+  X6200's (below).
 - **F3 VIEW**: the screen's radio alone, SPLIT (the X6200 above, the stick below) or the other radio alone. Each
   half says its radio, its channel and whether it is HEARD, MUTED or SQUELCHED.
-- **F4 LISTEN**, each screen's own: X6200, RTL, BOTH or OFF, OFF silencing the speaker (neither radio, the volume
+- **F4 LISTEN**, each screen's own: X6200, RTL (or HACKRF, BLADERF: the stick's kind), BOTH or OFF, OFF silencing the speaker (neither radio, the volume
   kept). **BOTH mixes the two only on Bluetooth headphones.** On the speaker it is the stick alone, as RTL is, and its
   OSD says so: while the speaker plays the GUI's audio (the stick), the base is in play mode and sends the processor
   nothing of the X6200's receiver, only its own copy of what it plays (measured on base 1.0.8). Up to v0.3.12.20
@@ -779,7 +784,9 @@ last seconds, the strongest signals named over it and the screen's channel brack
   on A's X6200 half locks on the signal tapped (or tunes there); on B's stick half it takes that channel.
 - **The VOL/SQL/RFG knob** on B: its squelch and RF gain are the stick's. The squelch is in dB over the noise of
   the stick's picture (OFF, 1 to 40): open at the level, shut half a second after falling 3 dB under it, eased in
-  and out without a click; the stick's half reads SQUELCHED meanwhile. RF GAIN walks the R820T's gains one a detent.
+  and out without a click; the stick's half reads SQUELCHED meanwhile. RF GAIN walks the R820T's gains one a detent;
+  on a HackRF the same scale is spread over its LNA and VGA (B's 28 dB is LNA 32, VGA 24 dB; AUTO, which it lacks,
+  the same), on a bladeRF over its own gain range (AUTO its AGC).
 - The stick gone for a moment (the first second of a start, a replug) changes nothing: its audio is silent meanwhile,
   RECEIVER says why, and it is heard again as soon as it is back.
 - B stays as it was left when another screen is shown: band, tuning, channel and scan. Its tuning, gain, squelch
@@ -789,12 +796,15 @@ last seconds, the strongest signals named over it and the screen's channel brack
   An alert takes the title of every Sentry screen, blinking, for its duration (15 minutes at least):
   `WX ALERT: TORNADO WARNING`, the rest in a message. Each is kept in `/mnt/wx_alerts.log`.
 - The title bar names what is on USB in the orange of the 3D picture's peaks (the theme's own): **RTL** for an
-  RTL-SDR, **ADS-B** for an ADS-B receiver (a GNS 5890 or microADSB, or dump1090 running), **WR12** for a ready WR12.
+  RTL-SDR, **HACKRF** for a HackRF, **BLADERF** for a bladeRF, **ADS-B** for an ADS-B receiver (a GNS 5890 or
+  microADSB, or dump1090 running), **WR12** for a ready WR12. The same names stand for the stick wherever RTL did
+  (C's and D's RX columns, B's history, LISTEN).
   After the processor's temperature it gives the battery's charge and an icon: the bolt while it charges, the plug on
   a supply without charging (full, Charger not On, or a supply under 12 V), the battery's level on the battery
   (`51C 34%`). As the battery runs down the two take the 3D picture's colours: yellow at 30%, orange at 20%, its
-  deep orange-red at 15% and the theme's red under that (G's POWER line too). B's title is `HF/VHF/UHF SPECTRUM`,
-  what the stick takes in (24 MHz to 1.7 GHz).
+  deep orange-red at 15% and the theme's red under that (G's POWER line too). B's title is `HF/VHF/UHF SPECTRUM`;
+  B tunes what the stick does: an RTL-SDR 24 MHz to 1.7 GHz, a HackRF 1 MHz to 6 GHz, a bladeRF 2.0 47 MHz to
+  6 GHz (as libbladeRF says it).
 
 ### SCAN CFG
 
@@ -822,8 +832,8 @@ MFK's push) on the X6200, B's scan pictures' strongest on the stick. The same si
 X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`,
 written through to the card before it replaces the last copy, so a power cut keeps one whole).
 
-- Its columns: FREQ, BAND, WHAT IT WAS, BEST, ANTENNA and NOW (D's for the band), LAST, SEEN, RX (X6200, or RTL in
-  the tags' orange). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest
+- Its columns: FREQ, BAND, WHAT IT WAS, BEST, ANTENNA and NOW (D's for the band), LAST, SEEN, RX (X6200, or RTL,
+  HACKRF or BLADERF in the tags' orange). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest
   band's columns, marked `~`: 26.835 MHz, below CB's channel 1, is `~11 M CB` with CB's BEST, ANTENNA and NOW. A's
   BAND box says `NEAR 11 M CB` there.
 - **WHAT IT WAS** is what the frequency is known for, not a decoding of the signal: on the X6200 a time station (WWV,
@@ -859,8 +869,9 @@ written through to the card before it replaces the last copy, so a power cut kee
 - **D BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry heard there
   last. The bands: the ham bands (60 m too), the broadcast bands, CB, FM, the marine bands the weather decoders use
   (SHIP MF, 4, 6, 8, 12, 16; UTIL 9 for NOAA's Boston fax on 9110), and the stick's: the airband, 2 m, marine VHF,
-  NOAA weather, 70 cm and GMRS. **RX** names the radio that takes each band: RTL (in the tags' orange with a stick
-  plugged in) for the stick's, with a stick every band from 24 MHz up, and X6200 for the rest it tunes. **F1 SCAN** sets the band chosen on its radio and scans it end to end
+  NOAA weather, 70 cm and GMRS. **RX** names the radio that takes each band: RTL, HACKRF or BLADERF (in the tags'
+  orange with one plugged in) for the stick's, with a stick every band from 24 MHz up, and X6200 for the rest it
+  tunes: HF stays the X6200's even with a HackRF, which tunes it too (the X6200 is the HF receiver). **F1 SCAN** sets the band chosen on its radio and scans it end to end
   there: the X6200's on A (its F1 scan, on that band), the stick's on B (from the band's low end, heard). F2
   (LISTEN) tunes the X6200 to the band and goes to A, or opens B on it for a stick band; F3 puts it in or out of the
   SWEEP; F4 and F5 do nothing here.
@@ -883,9 +894,9 @@ Walkie app does). Only F4 (the spectrum's view) and F5 (the group and mode) have
 key along the screen's edge (the key's width with the radio lying flat) and centred on it (the keys are about 190 px
 apart on the X6200's screen): F4's `3D` (or `2D`) in the lamp's row, F5's beside the message box. F1, F2 and F3
 have no box (F1 and F2 still step CB's channels, as the knobs do), so the channel, the spectrum and the voiceprint
-(as tall as each other) and the radio's state run from edge to edge. G is the X6200's alone: the stick
-only receives and has B for that, so G neither shows nor plays it (shown with LISTEN on RTL or BOTH, G plays the
-X6200 alone; A or B puts its own LISTEN back when shown).
+(as tall as each other) and the radio's state run from edge to edge. G is the X6200's, but for the channels of a
+HackRF or bladeRF (below): an RTL-SDR only receives and has B for that, so G neither shows nor plays it (shown with
+LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back when shown).
 
 - **The title bar is an L** to the screen's edges. Down the right edge runs every screen's bar, where it is at the
   display's top: XIEGU X6200 WALKIE TALKIE and the line under it (the dial, the mode, the transmitter's lock, the
@@ -942,10 +953,73 @@ the VFO) is by hand: the Sentry stops moving the dial (MAN-OVERRIDE, as a turn o
   screen (the VFO, and the MFK where it tunes the X6200, on A and G), so a bump cannot move the transmitter: a turn
   says to lock TX (A/B) to tune again.
 
-### The RTL-SDR, the GNS 5890 and the microADSB on USB
+#### G on a HackRF or bladeRF
 
-A generic RTL-SDR stick (an RTL2832U with an R820T, R828D and the like, 24 MHz to 1.7 GHz), a GNS 5890 or a
-microADSB on the HOST port (a hub takes more than one); any can be swapped while the radio runs.
+With a HackRF or a bladeRF on the HOST port (the daemon says it transmits), G's plan gets five more groups after the
+X6200's, FM simplex channels of the amateur bands the SDR can send on, heard and sent through it:
+
+| Group | Channels (home: CALL) |
+|---|---|
+| 2 M FM | CALL 146.520, S2-S9 146.550, 146.580, 147.420, 147.450, 147.480, 147.510, 147.540, 147.570 |
+| 1.25 M FM | CALL 223.500, S2 223.420, S3 223.460 |
+| 70 CM FM | CALL 446.000, S2 446.500, S3 445.950, S4 446.050, S5 446.100 |
+| 33 CM FM | CALL 927.500 |
+| 23 CM FM | CALL 1294.500 |
+
+They are Region 2's (North America's) simplex channels; the VFO tunes anywhere from there. **Only amateur bands**: the
+owner asked for "anything the HackRF can", and that is narrowed on purpose. No aviation, marine, NOAA, GPS,
+cellular, FRS/GMRS, MURS, ISM or any other non-amateur frequency is ever keyed, whatever the setting.
+
+- **On an SDR channel G is the SDR's**: `VIA HACKRF` (or `VIA BLADERF`), FM, the channel heard on the speaker at B's
+  volume and squelch, G's spectrum and voiceprint from the SDR (the device tuned 200 kHz over the channel, its
+  middle unused), the S-meter bar its level over the noise. The VFO moves the channel 5 kHz a click; CH - and CH +
+  (F1, F2) and the MFK step the group's channels; BAND UP and DOWN and F5 go from group to group, back to the X6200's
+  too. Leaving G, or an X6200 channel chosen, gives the speaker back to the X6200; G comes back to the SDR channel it
+  was on (after a restart too, once the SDR is there).
+- **A/B arms the SDR's transmitter** (`HACKRF ARMED: PTT TRANSMITS (TX 10 DB)`, the lamp TX ARMED): the X6200 is
+  never let go for it, it stays receive only at 0 W. A/B again, leaving G, an X6200 channel, or the SDR pulled out
+  locks it. While armed the knobs and the channel keys are locked.
+- **PTT transmits while held**: the top panel's PTT key, or the hand mic's PTT (the base keys itself at 0 W, as it
+  always did in the Sentry; G sees it and keys the SDR). The lamp says ON AIR. Released, it stops (ramped down over
+  5 ms). Refused with a word in G's line: `NO TX: NOT AN AMATEUR BAND` off the bands below, `NO TX: OUTSIDE THE TX
+  RANGES (SETTINGS > TX CAL)` with South Korea's ranges or the own list chosen, `NO TX: THE WR12 HOLDS TX`.
+- **The voice is the hand mic's**: while transmitting the base is put in record mode, as the voice messages record
+  (Settings' hand-mic gain), so the hand mic's audio comes into Linux live and goes to the SDR's daemon as it comes;
+  the radio's built-in mic is not heard by Linux there. No audio from it for 3 s says `TX: NO MIC AUDIO`.
+- **What goes out**: narrow FM made in the daemon: 300 Hz to 3 kHz, pre-emphasised 6 dB an octave, levelled, clipped
+  at 4 kHz deviation and filtered after the clipper (under 5 kHz peak), on the channel's frequency.
+- **Power: low**. **F3** steps the TX gain: 0, 5, 10, 15, 20, 30, 40, 47 dB (a HackRF's VGA; on a bladeRF dB over its
+  least), 10 dB at first and kept; past 47 dB on a HackRF its RF amplifier (+14 dB, `TX 47 DB + AMP`), then back to
+  0 dB with the amplifier off. The amplifier is never on after a restart. A HackRF One gives milliwatts at most; put
+  a band-pass filter before any amplifier after it: it sends its harmonics and mixing products too.
+- **It ends by itself**: after 3 minutes in one go (a time-out timer), 2 s with no audio from the GUI (it hung), when
+  the GUI goes; a HackRF stops by itself a tenth of a second after its samples stop coming (its underrun limit). The
+  daemon refuses anything outside 144-148, 220-225, 420-450, 902-928 and 1240-1300 MHz whatever it is asked, and
+  never transmits while AIRSPACE has the samples.
+- **Not tested on the air yet**: the transmission itself is the owner's to try. Checked without keying (2026-11-15):
+  the refusals (marine 16, the airband guard, NOAA, ADS-B, GPS L1, FRS, 1 Hz past 2 m's edges), the end after 2 s of
+  no audio, and the FM itself from the daemon's test device (tools/rtlspec/tx_check.py: its deviation, the tones, the
+  ramps, its bandwidth). Whether the base still sends the hand mic to Linux while the hand mic's PTT has it keyed
+  is not known: if `NO MIC AUDIO` shows only with the hand mic's PTT, use the top panel's PTT key.
+
+### The SDRs (RTL-SDR, HackRF, bladeRF), the GNS 5890 and the microADSB on USB
+
+A generic RTL-SDR stick (an RTL2832U with an R820T, R828D and the like, 24 MHz to 1.7 GHz), a HackRF One (1 MHz to
+6 GHz; its kin the rad1o and Jawbreaker too), a bladeRF (2.0 micro xA4/xA5/xA9, or x40/x115), a GNS 5890 or a
+microADSB on the HOST port (a hub takes more than one); any can be swapped while the radio runs. The SDRs all work
+wherever the RTL-SDR did (B, BOTH, C, D, E, RDS, SAME, AIRSPACE), named as they are (RTL, HACKRF, BLADERF).
+
+- **One SDR at a time**: with more than one plugged in, the daemon takes a HackRF, then a bladeRF, then an RTL-SDR
+  (those that transmit first), when it opens one; the one open stays till it is pulled out.
+- **A HackRF**: its samples are made the RTL's (signed to unsigned 8 bits), and the spike its receiver puts in the
+  middle of its picture (its own DC) is taken out there. Its RF amplifier is never on to receive. It needs 2 MS/s
+  and up (B's 2.1168 and AIRSPACE's 2.4 MS/s are). Its bias tee is off.
+- **A bladeRF** needs **libbladeRF** (in the image; `tools/rtlsdr/install.sh` puts it on a radio by hand) and **its
+  FPGA image**, which is Nuand's and not in the image: either load it into the board's own flash once from a
+  computer (`bladeRF-cli -L hostedxA4.rbf`, its "autoload"), or put the file Nuand gives for the board
+  (`hostedxA4.rbf`, `hostedxA5.rbf`, `hostedxA9.rbf`, `hostedx40.rbf` or `hostedx115.rbf`, from
+  https://www.nuand.com/fpga_images/) in a folder `bladerf` on the card's DATA partition (`/mnt/bladerf`). Without
+  it B says `THE BLADERF NEEDS ITS FPGA IMAGE` and the file's name. Its 12-bit samples are cut to the pipeline's 8.
 
 - **The stick is opened once and never closed while it is plugged in.** Every stop and start of its stream is a
   chance for the radio's USB host to leave it sending nothing, so there are none: `x6x00-rtlspec` (tools/rtlspec),
@@ -959,7 +1033,7 @@ microADSB on the HOST port (a hub takes more than one); any can be swapped while
   version of the daemon (once, as the new one starts).
 - What is on USB is looked at each second by a thread of its own, never on the screen's thread: a USB host stuck
   in a disconnect cannot hang the screen.
-- A stick that opens but sends nothing ("THE RTL-SDR SENDS NOTHING"): unplug it and plug it in again. The daemon
+- A stick that opens but sends nothing ("THE RTL-SDR SENDS NOTHING", or HACKRF, BLADERF): unplug it and plug it in again. The daemon
   leaves it open and alone till then (closed and opened again it would not be mended); nor is it ever "unplugged" by
   software (its `authorized` file): the radio's USB host driver crashes on that.
 - The daemon is a program of its own, so a stick that hangs or goes away never takes the screen with it. Its log
@@ -973,8 +1047,9 @@ AIRSPACE (ADS-B), APP > Airspace, or the Sentry's ring past G: AIRSPACE is its H
 5890 or a microADSB becomes the only ADS-B receiver on USB (put in the RTL-SDR's place, plugged in with no RTL-SDR,
 or the RTL-SDR pulled out from beside it), and when the radio starts so; not over a transmission. Turned away
 from, it stays away till the receivers change again. With no receiver at all its scope asks for one.
-Its receiver on the HOST port: a GNS 5890, a microADSB, or an RTL-SDR
-decoded by dump1090-fa (in the image). A GNS 5890 or microADSB keeps listening when it is closed; an RTL-SDR is
+Its receiver on the HOST port: a GNS 5890, a microADSB, or an RTL-SDR, HackRF or bladeRF
+decoded by dump1090-fa (in the image; a HackRF or bladeRF only through the daemon's samples). A GNS 5890 or
+microADSB keeps listening when it is closed; an SDR is
 AIRSPACE's only while its screen is open, the Sentry's the rest of the time: the stick's daemon tunes it to
 1090 MHz and hands dump1090 its samples, so the stick itself is never closed for it. The VFO knob (or F1) sets
 the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on the scope.
@@ -2951,6 +3026,24 @@ With South Korea or Own list chosen:
 - The screen says "No TX on 7.250 MHz", then "TX ranges: Settings > TX
   Cal". The browser Panel and Winlink's page say "7.250 MHz: outside the TX
   ranges (Settings > TX Cal)".
+
+An SDR's transmitter (a HackRF or bladeRF on the HOST port, the Sentry's
+G WALKIE: [G on a HackRF or bladeRF](#g-on-a-hackrf-or-bladerf)) has a table
+of its own, the amateur bands from 2 m to 23 cm that one ITU region or
+another has, and nothing else, whatever TX outside ham bands says:
+
+| Band | From | To |
+|---|---|---|
+| 2 m | 144.000 MHz | 148.000 MHz |
+| 1.25 m | 220.000 MHz | 225.000 MHz |
+| 70 cm | 420.000 MHz | 450.000 MHz |
+| 33 cm | 902.000 MHz | 928.000 MHz |
+| 23 cm | 1240.000 MHz | 1300.000 MHz |
+
+With Ham bands chosen it transmits inside these; with South Korea or Own
+list chosen, nowhere (their ranges stop at 55 MHz). The SDR's daemon refuses
+the same outside them whatever the GUI asks. Your licence decides inside
+them (144-146 MHz in Region 1, 222-225 MHz in the US, and so on).
 
 The own list: one range a line, in MHz, from-to, both edges in. A # starts a
 comment.

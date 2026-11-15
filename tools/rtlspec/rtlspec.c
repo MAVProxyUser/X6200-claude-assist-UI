@@ -70,12 +70,15 @@
  *      "Q"                 the daemon ends and closes the stick (a GUI that wants another version of it)
  *  A client gone: its rows, listening, watch and transmission end; the device goes on, tuned as it was.
  *
- *      x6x00-rtlspec [-F] [-d index] [-f Hz] [-s rate] [-n bins] [-r rows/s] [-g tenths] [-i FILE]
+ *      x6x00-rtlspec [-F] [-d index] [-f Hz] [-s rate] [-n bins] [-r rows/s] [-g tenths] [-i FILE] [-S name]
+ *                    [-T FILE]
  *
  *  It goes into the background (-F: it stays in front); with one already running it says "RTLSPEC RUNNING" and ends.
  *  -d: which RTL-SDR stick. -i replays FILE (unsigned 8-bit I/Q at the rate, as rtl_sdr writes it) in place of the
  *  device, at its own pace and over again: the same rows, audio and alerts, to try the GUI without a signal on the air
- *  (a SAME alert, say); a retune only moves what the rows say.
+ *  (a SAME alert, say); a retune only moves what the rows say. -S: another socket name (a test beside the radio's own
+ *  daemon). -T: a test device in place of any (sdr_file.c): it "transmits" into FILE (signed 8-bit I/Q) and hears
+ *  nothing, to check the transmitter with nothing on the air (tools/rtlspec/tx_check.py).
  */
 
 #define _GNU_SOURCE
@@ -439,6 +442,7 @@ static const char *const s_name[] = {"NOSTICK", "BUSY", "OPENING", "ON", "STALLE
 
 #define PROTO      2                    /* the hello's first five words as before: a GUI of then reads them */
 #define SOCK_NAME  "x6x00-rtlspec"      /* abstract: gone with the daemon, a second one cannot take it */
+static const char *sock_name = SOCK_NAME;   /* -S */
 #define STALL_MS   3000                 /* open and nothing for so long: STALLED */
 #define HUNG_MS    12000                /* pulled out and still held so long: the close hangs, the daemon ends */
 #define ADSB_HZ    1090000000u
@@ -1124,6 +1128,7 @@ static bool stick_pulled(void) {
 
 /* What is looked for, in this order: those that transmit first, so one plugged in beside a stick is the one used */
 static const sdr_ops_t *const kinds[] = {&sdr_hackrf, &sdr_bladerf, &sdr_rtl};
+static const sdr_ops_t *const test_kinds[] = {&sdr_file};      /* -T: that alone */
 
 /* The device's stream till it ends: made way for a transmission or a restart ("R"); ended by itself with the
  * device still there, it is left open and alone till it is pulled out (closed and opened again, it would not be
@@ -1161,6 +1166,7 @@ static void *stick_thread(void *arg) {
             replay_run();
             continue;
         }
+        if (sdr_file_path) o = test_kinds[0];
         for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]) && !o; i++)
             if (kinds[i]->present()) o = kinds[i];
         if (!o) {
@@ -1278,7 +1284,7 @@ int main(int argc, char **argv) {
     uint32_t rate   = 2400000;
     uint64_t centre = 162550000;
 
-    while ((opt = getopt(argc, argv, "Fd:f:s:n:r:g:i:")) != -1) {
+    while ((opt = getopt(argc, argv, "Fd:f:s:n:r:g:i:S:T:")) != -1) {
         switch (opt) {
             case 'F': front = true; break;
             case 'd': sdr_rtl_index = atoi(optarg); break;
@@ -1288,6 +1294,8 @@ int main(int argc, char **argv) {
             case 'r': rows = atoi(optarg); break;
             case 'g': gain = atoi(optarg); break;
             case 'i': replay = optarg; break;
+            case 'S': sock_name = optarg; break;
+            case 'T': sdr_file_path = optarg; break;
             default: return 1;
         }
     }
@@ -1296,9 +1304,10 @@ int main(int argc, char **argv) {
     /* The name taken first: a second daemon stops here. Listened on once in the background, so a client is told this
      * process (SO_PEERCRED), and a GUI that started it connects a moment later */
     struct sockaddr_un a = {.sun_family = AF_UNIX};
-    socklen_t          alen = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + strlen(SOCK_NAME));
+    socklen_t          alen = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + strlen(sock_name));
 
-    memcpy(a.sun_path + 1, SOCK_NAME, strlen(SOCK_NAME));
+    if (strlen(sock_name) > sizeof(a.sun_path) - 2) return 1;
+    memcpy(a.sun_path + 1, sock_name, strlen(sock_name));
     ls = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
     if (ls < 0) return 1;
     if (bind(ls, (struct sockaddr *)&a, alen) != 0) {

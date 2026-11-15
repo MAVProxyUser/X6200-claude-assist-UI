@@ -17,7 +17,7 @@ X6X00_RTLSPEC_DEPENDENCIES = rtlsdr-blog libhackrf libbladerf
 define X6X00_RTLSPEC_BUILD_CMDS
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -DSDR_BLADERF -I$(@D) -I$(STAGING_DIR)/usr/include/libhackrf \
 		-o $(@D)/x6x00-rtlspec $(@D)/rtlspec.c $(@D)/same.c $(@D)/rds.c $(@D)/sdr.c $(@D)/sdr_rtl.c \
-		$(@D)/sdr_hackrf.c $(@D)/sdr_bladerf.c -lrtlsdr -lhackrf -lusb-1.0 -lpthread -lm -ldl
+		$(@D)/sdr_hackrf.c $(@D)/sdr_bladerf.c $(@D)/sdr_file.c -lrtlsdr -lhackrf -lusb-1.0 -lpthread -lm -ldl
 endef
 
 define X6X00_RTLSPEC_INSTALL_TARGET_CMDS

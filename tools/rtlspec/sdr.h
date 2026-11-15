@@ -52,6 +52,10 @@ typedef struct {
 
 extern const sdr_ops_t sdr_rtl, sdr_hackrf, sdr_bladerf;
 
+/* The test device (sdr_file.c, -T FILE): transmits into the file, receives nothing; never a radio */
+extern const sdr_ops_t sdr_file;
+extern const char     *sdr_file_path;
+
 /* A device with these USB IDs (hex, "1d50", "6089") is plugged in */
 bool sdr_usb_has(const char *vid, const char *pid);
 

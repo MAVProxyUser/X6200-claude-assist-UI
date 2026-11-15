@@ -2,8 +2,9 @@
 
 GoldCorpHF (OpenX6X00 here up to v0.3.12.19) is a fork of [OpenX6X00 by RF.Guru](https://github.com/Guru-RF/OpenX6X00), the open firmware for the Xiegu X6100 and
 X6200, built around listening. It adds the **Sentry**, a receive-first home screen in amber on black, and a second
-receiver: an RTL-SDR stick on the HOST port, 24 MHz to 1.7 GHz, with its spectrum next to the X6200's and its
-audio on the speaker. NOAA Weather Radio alerts, ADS-B aircraft, a keyboard and a mouse, a boot video and a list
+receiver: an SDR on the HOST port (an RTL-SDR stick, 24 MHz to 1.7 GHz, a HackRF One, 1 MHz to 6 GHz, or a
+bladeRF), with its spectrum next to the X6200's and its audio on the speaker; a HackRF or bladeRF also gives the
+walkie FM on the VHF/UHF amateur bands, only there. NOAA Weather Radio alerts, ADS-B aircraft, a keyboard and a mouse, a boot video and a list
 of decoder fixes come with it.
 
 Everything upstream does is still here: the digital modes, the cluster, the portable tiles, the browser remote,
@@ -55,25 +56,33 @@ screens:
   X6200 around the dial in 3D or flat (F4), a **voiceprint** of what is heard (a 0-4 kHz sonogram scrolling across),
   the S-meter and the audio's level, and the title bar as an L to the screen's edges (every screen's bar down the
   right, read with the radio lying, and across the top). A/B arms PTT; while armed the tuning knobs are locked.
+  With a HackRF or bladeRF plugged in, 2 m, 1.25 m, 70 cm, 33 cm and 23 cm FM simplex channels follow, heard and
+  sent through it (the hand mic's voice, F3 its TX gain, 10 dB at first), the X6200 held at 0 W meanwhile; nothing
+  outside those amateur bands is ever keyed.
 - **SCAN CFG** (F5 on A or B, on no ring): A's scan settings and its lock: AUTO-SCAN or SEMI-AUTO (MAN-OVERRIDE
   comes by itself when the VFO is turned), SWEEP through the marked bands, STEP, and the signal locked on (HOLD,
   NEXT, REC, IGNORE); from B, the stick's GAIN, DWELL, STEP and SQUELCH.
 
-The title bar shows what is plugged in, in the orange of the spectrum's peaks: **RTL**, **ADS-B**, **WR12**, and after
+The title bar shows what is plugged in, in the orange of the spectrum's peaks: **RTL**, **HACKRF**, **BLADERF**,
+**ADS-B**, **WR12**, and after
 the processor's temperature the battery's charge with a bolt while it charges, yellow from 30%, orange at 20% and red
 from 15% down. GEN shows the controls on
 every screen. The Sentry's look is also a theme for the whole radio: Settings, the
 on-screen keyboard, the apps and their tables all draw in amber.
 
-### B VHF/UHF: an RTL-SDR as a second receiver
+### B VHF/UHF: an SDR as a second receiver
 
-A generic RTL-SDR stick (an RTL2832U with an R820T, R828D or the like) on the HOST port:
+A generic RTL-SDR stick (an RTL2832U with an R820T, R828D or the like), a HackRF One or a bladeRF on the HOST port,
+each named as it is (RTL, HACKRF, BLADERF) wherever the stick is, and B tuning what it tunes. A HackRF's DC spike
+in the middle of its picture is taken out; a bladeRF needs its FPGA image from Nuand (in its own flash, or in
+`/mnt/bladerf`: [the manual](docs/MANUAL.md#the-sdrs-rtl-sdr-hackrf-bladerf-the-gns-5890-and-the-microadsb-on-usb)).
 
 - **The spectrum**: the middle 1.8 MHz of the stick's span. The strongest signals are labelled with what they are
   where it is known: NOAA WX1 to WX7, AIS, APRS, the ISS, marine channel 16, guard 121.500, the airband, weather
   balloons, the Meteor-M satellites, ISM, GMRS, UAT, ADS-B; FM broadcast stations on their channel (97.900).
 - **F2 PRESET**: NOAA weather, 2 m, 2 m repeaters, the airband, FM broadcast, marine VHF, the weather satellites,
-  the weather balloons, 70 cm, ISM 433, GMRS, ISM 915, UAT 978 and ADS-B 1090 (or the band D's LISTEN brought).
+  the weather balloons, 70 cm, ISM 433, GMRS, ISM 915, UAT 978, ADS-B 1090, 6 m, 1.25 m, 23 cm, GPS L1, and with a
+  HackRF or bladeRF 2.4 GHz, 13 cm, 5.8 GHz and (a HackRF) HF (or the band D's LISTEN brought).
   Its scan goes on behind the other screens.
 - **LISTEN BOTH** mixes the X6200's receiver into the stick's audio on Bluetooth headphones. On the speaker it is the
   stick alone, and says why: while the speaker plays the stick, the X6200's base sends no receiver audio (its
@@ -87,8 +96,9 @@ A generic RTL-SDR stick (an RTL2832U with an R820T, R828D or the like) on the HO
   ([tools/rtlspec](tools/rtlspec/rtlspec.c)), holds it and keeps it streaming for as long as the radio runs, and
   hands the screens only what they ask for (the spectrum, a channel's audio, weather alerts). Screens, apps, a GUI
   restarted or updated and AIRSPACE (its dump1090 reads the daemon's samples) all leave the stick alone; stopping and
-  starting its stream is what can leave this radio's USB host sending nothing. An RTL-SDR, a GNS 5890 and a
-  microADSB can be swapped while the radio runs; a stick that sends nothing is left alone until it is plugged in
+  starting its stream is what can leave this radio's USB host sending nothing. An RTL-SDR, a HackRF, a bladeRF, a
+  GNS 5890 and a microADSB can be swapped while the radio runs (with more than one SDR plugged in, a HackRF, then a
+  bladeRF, then an RTL-SDR); a stick that sends nothing is left alone until it is plugged in
   again. The daemon is a program of its own, so a stick that hangs or is pulled out never takes the screen with it.
 
 ### NOAA Weather Radio alerts
@@ -120,7 +130,7 @@ chip) moves to theirs. A clock NTP keeps is only compared. The decoder is [src/w
 
 ADS-B aircraft on a scope around you (a USB GPS, else your QTH locator, else the traffic itself), with their calls,
 heights and tracks, and their history fading out. Its receiver on the HOST port: a GNS 5890, a microADSB, or an
-RTL-SDR decoded by dump1090-fa, which is in the image. An RTL-SDR is AIRSPACE's while its screen is open and the
+RTL-SDR, HackRF or bladeRF decoded by dump1090-fa, which is in the image. An SDR is AIRSPACE's while its screen is open and the
 Sentry's the rest of the time. The Sentry's ring past G (it is H), F SYSTEM > AIRSPACE, or APP > Airspace; and by
 itself when a GNS 5890 or a microADSB is or becomes the only ADS-B receiver on USB (the RTL-SDR swapped out for
 it, or none there when the radio starts).
@@ -291,7 +301,10 @@ tools/cross_x6200/build.sh && tools/cross_x6200/install.sh root@<radio>
 
 - **RTL-SDR**: any RTL2832U stick with an R820T or R828D tuner (the RTL-SDR Blog V3 and V4, the generic blue ones),
   on the HOST port. A short whip works for NOAA and FM broadcast; ADS-B wants a 1090 MHz antenna.
-- **ADS-B**: a GNS 5890, a microADSB, or an RTL-SDR.
+- **HackRF One** (firmware 2024.02.1 here) and **bladeRF** (2.0 micro, x40/x115) on the HOST port: everything the
+  RTL-SDR does, and the walkie's VHF/UHF FM transmitter (G WALKIE: 2 m, 1.25 m, 70 cm, 33 cm, 23 cm, low power, the
+  amateur bands only, armed with A/B; [the manual](docs/MANUAL.md#g-on-a-hackrf-or-bladerf)).
+- **ADS-B**: a GNS 5890, a microADSB, or an RTL-SDR, HackRF or bladeRF.
 - **Keyboard and mouse**: Bluetooth (paired in Settings > Bluetooth) or USB on the HOST port.
 
 ## The baseband
