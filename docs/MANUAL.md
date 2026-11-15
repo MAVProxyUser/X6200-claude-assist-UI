@@ -6479,6 +6479,17 @@ plays (`/usr/share/x6100/bootvideo.mp4`, this fork's GoldCorp start-up,
   makes one that plays smoothly: 800x480 at 30 frames a second, H.264, no
   sound. The optional crop (ffmpeg's `crop=W:H:X:Y`) keeps the part of a tall
   or wide video that matters, so it fills more of the screen.
+- On the X6200 the processor's video engine (Cedrus) decodes it and the
+  display shows each picture as it comes, so the whole 15 s video costs the
+  processor under a second (ffmpeg decoding it takes about half the
+  processor). That needs the image's GStreamer (v0.3.12.21 on, with a kernel
+  from v0.3.12.19's bundles or later on the card) and a portrait twin beside
+  the video: `bootvideo-portrait.mp4` next to `bootvideo.mp4`, the same video
+  turned to the panel's 480x800. `tools/bootvideo/prepare.sh --portrait` makes
+  both; the image's own video has its twin. The engine decodes H.264 only.
+  Without a twin, or when the engine fails, ffmpeg plays the landscape one as
+  before. `/tmp/bootvideo.log` ends with `the video engine decoded it` when it
+  did.
 - No sound: the speaker is not the radio's to use until the main screen
   starts, and the boot sound (Settings > Audio) is left out with the logo.
 - The main screen waits for its end: the rest of the start goes on while it
@@ -8871,6 +8882,10 @@ The DATA partition, readable on a PC.
 | `app_logs/` | the log of each run of the GUI (`x6100_log_*.txt`), `wifi.txt` after a failed join, `start_trace.txt`: each step of each start ([a start that stops](#the-radio-stops-at-the-boot-logo-or-the-screen-stays-dark-after-it)) |
 | `perf` | an empty file: the [performance overlay](#the-screen-feels-slow-measuring-it) at the next start |
 | `bootlogo.png` | your own [boot picture](#boot-picture), from the Display page of the web configurator |
+| `bootvideo.mp4`, `bootvideo-portrait.mp4` | your own [boot video](#boot-video), and its portrait twin for the X6200's video engine |
+| `bootvideo.off` | an empty file: no boot video, yours or the image's |
+| `gpu.off` | an empty file: the X6200's [graphics processor](#graphics-processor-x6200) left out, the processor draws everything (from the next start of the GUI) |
+| `gpu_gui` | an empty file: the X6200's GPU also turns the GUI's layer onto the panel, with a kernel that has udmabuf (a test, off by default) |
 | `tx_ranges.conf` | the own TX list for TX ranges > Own list: one `from-to` range a line in MHz, `#` comments; none or empty: no TX with Own list (see [Amateur bands only](#amateur-bands-only)) |
 | `data_fsck.log` | what the last start's check of DATA found, or that the start formatted it and moved the system's `/mnt` files onto it. While the radio runs without DATA, why it left the partition alone and what to do, in the system's `/mnt` folder it runs on (the Files page shows that one then) |
 | `found_on_system/` | files the radio wrote into the system partition's `/mnt` folder while DATA was there but not mounted, put here at the next start that mounted it; `found_on_system.2/`, `.3/` ... when one is there already (nothing on DATA is written over). A DATA without settings of its own (no `params.db`, as after a format on a PC) gets them on its top level instead, the names it has already left here (a database with its `-wal`, `-shm` and `-journal` when DATA has one of those names: SQLite reads a journal into the database of its name). Files that cannot all be copied, or found when the check did not leave DATA clean ("check not clean: ..." in `data_fsck.log`), stay on the system partition until a start that can move them; a DATA without settings of its own is then not used at that start: the radio comes up with the settings kept there |
@@ -8982,6 +8997,66 @@ wherever the battery and the time are, and after the Sentry's time:
   (`SEMI-AUTO  14:49 EST 53C`), on every Sentry screen.
 
 A radio whose kernel has no thermal zone shows none of them.
+
+### Graphics processor (X6200)
+
+The X6200's processor has a graphics processor of its own, a Mali-400 with two
+cores. The X6200's image carries Mesa with its `lima` driver (from v0.3.12.19),
+and the GUI has the GPU draw the pictures that change all the time, which the
+processor drew alone before:
+
+- the [Sentry](#the-sentry)'s A and B: the spectrum, the waterfall in 3D or
+  flat, the dial's brackets and SPLIT's divider (v0.3.12.20);
+- G WALKIE's spectrum and voiceprint, held up in portrait (v0.3.12.21);
+- [AIRSPACE](#airspace)'s radar scope: its rings, the sweep and its glow, the
+  aircraft and their trails; the sweep turns 10 times a second (v0.3.12.21);
+- the main screen's [waterfall](#waterfall), flat and 3D (v0.3.12.21). The
+  processor still works out the 3D waterfall's hidden lines; the GPU fills
+  them in.
+
+From v0.3.12.21, the main screen's waterfall and spectrum are no longer drawn
+while a Sentry screen or AIRSPACE covers them, on the GPU or the processor;
+they are drawn again whole when the main screen comes back.
+
+The GUI's main thread, as a share of one core (measured on the radio, over
+10 s; each pair on one build, the GPU taken away for the first figure):
+
+| Screen | Processor alone | With the GPU |
+|---|---|---|
+| Sentry A | 34-35 % | 20-22 % |
+| G WALKIE | 43 % | 24-25 % |
+| AIRSPACE | 24 % | 14-15 % |
+| Main screen, flat waterfall | 10.6 % | 5.0 % |
+| Main screen, 3D waterfall | 24.6 % | 11.3 % |
+
+Everything else on the screen (the text, the buttons, the meters) is drawn by
+LVGL in memory as before, then copied and turned by the processor onto the
+panel, which is portrait (480x800) under the landscape picture. The GPU draws
+on the display's lower plane, under holes in that layer.
+
+- **Turning it off**: an empty `/mnt/gpu.off` on the DATA partition (SFTP or
+  `touch /mnt/gpu.off` over [SSH](#ssh)), then a restart of the GUI or the
+  radio: the processor draws everything, as it did before Mesa came. For a
+  picture the GPU draws wrongly, or a GUI that stops in Mesa. Delete the file
+  to have the GPU back.
+- **What the GUI found**: its log (`/tmp/x6100_log.txt`, and
+  `/mnt/app_logs/x6100_log_*.txt` for earlier runs) says at each start, in its
+  lines beginning `gpu:`, whether the GPU draws (`Mali400 draws the Sentry's
+  pictures into the display's plane`) or why the processor does (no Mesa on
+  the image, `/mnt/gpu.off`, EGL not started ...).
+- **The GUI's own layer on the GPU (a test, off by default)**: with a kernel
+  that has udmabuf (bundles from v0.3.12.21 with "Also the kernel", see
+  [The SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot)) and an
+  empty `/mnt/gpu_gui`, the GPU also turns that layer onto the panel instead
+  of the processor. Not yet tried on a radio with such a kernel: the log says
+  `the GUI's layer turned onto the panel by the GPU (udmabuf)` when it is on;
+  if a frame fails to draw, the processor takes the layer back for the rest of
+  the run. Delete `/mnt/gpu_gui` to leave it to the processor.
+- **The X6100** has the same processor and graphics processor, but its image
+  carries no Mesa: the processor draws everything there, as before (the GUI's
+  log: `no Mesa on this image`).
+- **The boot video**: on the X6200 the processor's video engine decodes it
+  (see [Boot video](#boot-video)).
 
 ## Build
 

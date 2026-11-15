@@ -178,6 +178,10 @@ Base 1.0.8 fixes the S-meter stuck at S1, -121.0 on 1.0.7. On 13 November 2026 t
   on Ops Room's clock between the supply and the charge), on Walkie after the battery's voltage, on Amber Trey's
   status line after the time and the voltage, and in the Sentry's title bar after the time.
 - The RTTY tile in Digital modes shows your baud rate.
+- The X6200's graphics processor (Mali-400, Mesa's lima) draws the Sentry's A, B and G pictures, AIRSPACE's scope
+  and the main screen's waterfall, flat and 3D: the GUI's main thread 38-54 % lighter on those screens
+  ([manual](docs/MANUAL.md#graphics-processor-x6200); `/mnt/gpu.off` leaves it out). Its video engine decodes the
+  boot video.
 
 ### Decoder fixes
 

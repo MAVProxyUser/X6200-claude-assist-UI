@@ -632,6 +632,12 @@ static bool setup(void) {
     const char  *ext;
     static const EGLint ctx_attr[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
 
+    /* An empty /mnt/gpu.off (the DATA partition, over SFTP): the processor draws everything, as before Mesa was on
+       the image, without taking Mesa off it. For a picture the GPU draws wrongly, or a GUI that stops in Mesa */
+    if (access("/mnt/gpu.off", F_OK) == 0) {
+        fprintf(stderr, "gpu: /mnt/gpu.off: the pictures drawn by the CPU\n");
+        return false;
+    }
     if (!load()) return false;
     if (!drm_wf_export(fds, pitch, &w, &h)) {
         fprintf(stderr, "gpu: the display's planes not shared: the pictures drawn by the CPU\n");
