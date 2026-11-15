@@ -21,6 +21,9 @@ times a second instead of 15. 1.5 MB for the background, allocated the first tim
   waits for this check on both radios. If the DRM path draws wrongly, takes the CPU FT8 needs, or the GUI falls over
   in 3D, the default goes back to 0 for that release: a GUI that does not stay up cannot switch it off (the web
   Display page goes through the GUI's socket), only wf_3d = 0 in params.db on the card would.
+- **The X6200, checked 2026-11-15** (v0.3.12.23, the Mali-400 drawing the classic screen's 3D): the picture the right
+  way round, the labels on the front edge, the 2D waterfall back whole after 3D and 3D after it. The GUI's CPU
+  (`top`, all four cores): 3D 3.4-3.6 %, 2D 1.6 %, the Sentry's A 5 %. The X6100 (no GPU path) is still to check.
 - **After that**: 3D shots for the README gallery from the radio, on an antenna. The front labels sit under the Knob
   info lines at the bottom left (seen on the PC build, zoomed in).
 
@@ -43,6 +46,10 @@ flush and the dark screen's), so some 4 to 8 % of an A7 core by the usual factor
   from the web page and the walkie mode under it; a radio updated with Screen off 3 goes dark at 3 with the rain
   from 2, on FT8 auto too. If the X6100 finds it heavy: a slower rain or fewer columns (the work follows the cells
   the columns move over a second, hardly the pictures a second).
+- **The X6200, checked 2026-11-15**: Screensaver (min) 1 on the classic screen, the rain up after a minute in the
+  theme's colour, every glyph whole and the right way round, the GUI's CPU 3.5 % of all four cores (the same as the
+  3D waterfall it covers); an MFK press only brought the screen back (the MFK's mode unchanged), the 3D current. The
+  X6100 is still to check.
 
 ## X6200: the short pulse at the start of each transmission, register 32 (#53)
 
