@@ -583,7 +583,7 @@ static void build_done(void) {
         snprintf(s, sizeof(s), "http://%s.local, in a browser on the same network", name);
     }
     summary("Web configurator", TC(text_value), s);
-    summary("Manual", TC(text_value), "github.com/Guru-RF/OpenX6X00, and a PDF with each release");
+    summary("Manual", TC(text_value), "github.com/MAVProxyUser/X6200-claude-assist-UI, a PDF with each release");
     summary("This guide", TC(text_dim), "Settings > General > STATION runs it again");
 }
 

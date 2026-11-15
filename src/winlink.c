@@ -344,7 +344,7 @@ static void *rx_thread(void *arg) {
                                    .minreq = (uint32_t)-1, .fragsize = bytes};
             int            err  = 0;
 
-            pa = pa_simple_new(NULL, "OpenX6X00 Winlink", PA_STREAM_RECORD, BOARD_PA_SOURCE, "Winlink RX", &spec,
+            pa = pa_simple_new(NULL, "GoldCorpHF Winlink", PA_STREAM_RECORD, BOARD_PA_SOURCE, "Winlink RX", &spec,
                                NULL, &attr, &err);
             if (!pa) {
                 if (!said)

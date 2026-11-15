@@ -516,7 +516,7 @@ size_t ft8_udp_build_adif(char *out, size_t out_sz, time_t when,
     size_t o = 0;
     int n = snprintf(out, out_sz,
                      BOARD_NAME " ADIF export\n<adif_ver:5>3.1.0\n"
-                     "<programid:9>OpenX6X00\n<EOH>\n");
+                     "<programid:10>GoldCorpHF\n<EOH>\n");
     if (n < 0 || (size_t)n >= out_sz) { if (out_sz) out[0] = '\0'; return 0; }
     o = (size_t)n;
 
@@ -594,7 +594,7 @@ void ft8_udp_log_record(time_t when, const char *dx_call, const char *dx_grid,
             char adif[BUF_MAX];
             int  n = snprintf(adif, sizeof(adif),
                               BOARD_NAME " ADIF export\n<adif_ver:5>3.1.0\n"
-                              "<programid:9>OpenX6X00\n<EOH>\n%s", adif_record);
+                              "<programid:10>GoldCorpHF\n<EOH>\n%s", adif_record);
             if (n > 0 && (size_t)n < sizeof(adif))
                 ft8_udp_send_logged_adif(adif);
         }

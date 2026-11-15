@@ -8,7 +8,7 @@
  *  1802 and 180259, BAND 40M and 40m, FREQ 7.0740 and 7.074000, empty fields), and LoTW given both files took it for
  *  two QSOs. The record of #174's QSO is the one the Logs page exported for it; ft_log.adi reads back (adif_read, the
  *  import's reader) with its seconds. Both files start with the same header (field_adif_header): a line naming the
- *  log, ADIF 3.1.8, PROGRAMID OpenX6X00 and the firmware's version (X6100_FW, as the GUI sets it), where ft_log.adi
+ *  log, ADIF 3.1.8, PROGRAMID GoldCorpHF and the firmware's version (X6100_FW, as the GUI sets it), where ft_log.adi
  *  had PROGRAMVERSION 1.0.0 and ADIF_VER 3.14 and started with a tag (no header, to ADIF). An ft_log.adi the older
  *  firmware started goes on with the new records, and reads back whole.
  */
@@ -154,7 +154,7 @@ static void both_logs(void) {
 
 /* The two logs' headers, with the firmware's version and without (a PC test with no X6100_FW) */
 static void headers(void) {
-    static const char tail[] = "\n<ADIF_VER:5>3.1.8 <PROGRAMID:9>OpenX6X00 <PROGRAMVERSION:5>0.3.8 <eoh>\n";
+    static const char tail[] = "\n<ADIF_VER:5>3.1.8 <PROGRAMID:10>GoldCorpHF <PROGRAMVERSION:5>0.3.8 <eoh>\n";
     char              want[160], got[160];
     FILE             *f;
     size_t            n;
@@ -179,7 +179,7 @@ static void headers(void) {
     n = fread(got, 1, sizeof(got) - 1, f);
     got[n] = 0;
     fclose(f);
-    check(!strcmp(got, "X6100 FT8, FT4 and FT2 log\n<ADIF_VER:5>3.1.8 <PROGRAMID:9>OpenX6X00 <eoh>\n"),
+    check(!strcmp(got, "X6100 FT8, FT4 and FT2 log\n<ADIF_VER:5>3.1.8 <PROGRAMID:10>GoldCorpHF <eoh>\n"),
           "header without X6100_FW: not without PROGRAMVERSION");
     setenv("X6100_FW", "0.3.8", 1);
 }

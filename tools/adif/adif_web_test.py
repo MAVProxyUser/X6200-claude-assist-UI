@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests of the web configurator's ADIF export (#174: Logs > Export ADIF, /logs/export) on a PC, through bottle's
 WSGI app, the logs in a new temporary directory. The header is the one the radio's own logs have
-(src/field/flog.c field_adif_header): ADIF 3.1.8, PROGRAMID OpenX6X00 and the firmware's version; the records go
+(src/field/flog.c field_adif_header): ADIF 3.1.8, PROGRAMID GoldCorpHF and the firmware's version; the records go
 out as the day's log has them, the one for #174's QSO as ft_log.adi has it too (adif_test.c). A band edited on the
 Logs page goes in as the radio writes it, 20m. See the Makefile:
 
@@ -41,7 +41,7 @@ from x6100_webserver import apps, settings  # noqa: E402
 REC = (b"<CALL:6>EA5KDD <QSO_DATE:8>20261104 <TIME_ON:6>180259 <BAND:3>40m <FREQ:8>7.074000 <MODE:3>FT8 "
        b"<RST_SENT:3>+02 <RST_RCVD:3>-06 <GRIDSQUARE:4>IN81 <STATION_CALLSIGN:6>EA5JTT <OPERATOR:6>EA5JTT "
        b"<MY_GRIDSQUARE:6>IM99TL <eor>\n")
-DAY = b"X6200 Field Ops log\n<ADIF_VER:5>3.1.8 <PROGRAMID:9>OpenX6X00 <PROGRAMVERSION:5>0.3.8 <eoh>\n" + REC
+DAY = b"X6200 Field Ops log\n<ADIF_VER:5>3.1.8 <PROGRAMID:10>GoldCorpHF <PROGRAMVERSION:5>0.3.8 <eoh>\n" + REC
 
 
 class Export(unittest.TestCase):
@@ -79,7 +79,7 @@ class Export(unittest.TestCase):
     def test_export(self):
         code, out = self.export()
         self.assertEqual(code, 200)
-        self.assertEqual(out, b"OpenX6X00 log export\n<ADIF_VER:5>3.1.8 <PROGRAMID:9>OpenX6X00 "
+        self.assertEqual(out, b"GoldCorpHF log export\n<ADIF_VER:5>3.1.8 <PROGRAMID:10>GoldCorpHF "
                               b"<PROGRAMVERSION:5>0.3.8 <eoh>\n" + REC)
 
     def test_export_without_version(self):
@@ -87,7 +87,7 @@ class Export(unittest.TestCase):
         os.remove(settings.APP_VERSION)
         code, out = self.export()
         self.assertEqual(code, 200)
-        self.assertEqual(out, b"OpenX6X00 log export\n<ADIF_VER:5>3.1.8 <PROGRAMID:9>OpenX6X00 <eoh>\n" + REC)
+        self.assertEqual(out, b"GoldCorpHF log export\n<ADIF_VER:5>3.1.8 <PROGRAMID:10>GoldCorpHF <eoh>\n" + REC)
 
     def put(self, data):
         rid = apps.rec_id(apps.log_records("20261104.adi")[0])

@@ -1,6 +1,6 @@
-# X6200 Claude Assist UI
+# GoldCorpHF
 
-A fork of [OpenX6X00 by RF.Guru](https://github.com/Guru-RF/OpenX6X00), the open firmware for the Xiegu X6100 and
+GoldCorpHF (OpenX6X00 here up to v0.3.12.19) is a fork of [OpenX6X00 by RF.Guru](https://github.com/Guru-RF/OpenX6X00), the open firmware for the Xiegu X6100 and
 X6200, built around listening. It adds the **Sentry**, a receive-first home screen in amber on black, and a second
 receiver: an RTL-SDR stick on the HOST port, 24 MHz to 1.7 GHz, with its spectrum next to the X6200's and its
 audio on the speaker. NOAA Weather Radio alerts, ADS-B aircraft, a keyboard and a mouse, a boot video and a list
@@ -125,9 +125,9 @@ before it (the build trees' kernels carried Aether Radio's wolf), nor does the X
 right), so the screen stays dark until the video starts.
 [Manual](docs/MANUAL.md#boot-video).
 
-### The base firmware, updated from OpenX6X00
+### The base firmware, updated from GoldCorpHF
 
-The X6200's base, the radio board's own firmware from Xiegu, fetched and written from OpenX6X00, without Xiegu's
+The X6200's base, the radio board's own firmware from Xiegu, fetched and written from GoldCorpHF, without Xiegu's
 own system and its card swaps: [tools/base_update](tools/base_update/README.md).
 
 - **On the radio**: F SYSTEM > BASE FIRMWARE lists every release Xiegu has published (1.0.3, 1.0.6, 1.0.7, 1.0.8),
@@ -177,7 +177,7 @@ Found with recordings played into the radio and test signals from a HackRF on th
 - [tools/rtlsdr](tools/rtlsdr/build.sh) and [tools/bootvideo](tools/bootvideo/build.sh): the RTL-SDR programs
   and ffmpeg built for a radio running an older image.
 - [tools/base_update](tools/base_update/README.md): the X6200's base firmware fetched from Xiegu and written from
-  OpenX6X00, with its tests (a simulated base).
+  GoldCorpHF, with its tests (a simulated base).
 - [tools/adsb](tools/adsb/adsb_read.py), [tools/ft8_live](tools/ft8_live), [tools/js8_play](tools/js8_play),
   [tools/cw_trainer](tools/cw_trainer): ADS-B sticks read on the radio, FT8 decodes watched live, JS8 played
   in, CW test messages.
@@ -283,9 +283,9 @@ The radio board's own firmware, from Xiegu: upstream's README has the table of b
 ([README_original.md, The baseband](README_original.md#the-baseband)). On the X6200's base 1.0.7 the S-meter can
 stick at S1, -121.0; 1.0.8 fixes it, and also corrects the CW keyer's speed and brings back its macros.
 
-This fork updates the X6200's base from OpenX6X00 as well: on the radio, F SYSTEM > BASE FIRMWARE (Get, then
+This fork updates the X6200's base from GoldCorpHF as well: on the radio, F SYSTEM > BASE FIRMWARE (Get, then
 Flash); from a computer, as below ([tools/base_update](tools/base_update/README.md),
-[manual](docs/MANUAL.md#the-x6200s-base-firmware-from-openx6x00)):
+[manual](docs/MANUAL.md#the-x6200s-base-firmware-from-goldcorphf)):
 
 ```bash
 tools/base_update/fetch.sh && tools/base_update/build.sh

@@ -100,6 +100,15 @@ PENDING = os.path.join(STATE, "pending.json")
 LAST = os.path.join(STATE, "last.json")
 WORK = "/mnt/update"                  # the download and the staging: the DATA partition has the room
 PROGRESS = os.path.join(WORK, ".progress")
+# The bundle's manifest names its product: GoldCorpHF. The line in the sand is v0.3.12.20: the firmware's first under
+# that name, its bundle still marked OpenX6X00 (the name it had before), so the updaters of v0.3.12.19 and before
+# take it and bring this one. After it, GoldCorpHF only: no other OpenX6X00 bundle (upstream's) is taken here
+PRODUCT = "GoldCorpHF"
+BRIDGE = ("OpenX6X00", "0.3.12.20")
+
+
+def product_ok(m):
+    return m.get("product") == PRODUCT or (m.get("product"), str(m.get("version"))) == BRIDGE
 ALLOWED = ("/usr/sbin/", "/usr/bin/", "/usr/lib/", "/usr/share/x6100/",
            "/etc/init.d/", "/etc/")
 # The SD card the radio started from (OpenX6X00 runs from it; the internal eMMC, Xiegu's own system, mmcblk2, is
@@ -470,7 +479,7 @@ def restart_apps():
 # ---- check and download --------------------------------------------------------------------
 
 def http(url, timeout=TIMEOUT):
-    req = urllib.request.Request(url, headers={"User-Agent": f"OpenX6X00/{running_version()}", "Accept": "application/json"})
+    req = urllib.request.Request(url, headers={"User-Agent": f"GoldCorpHF/{running_version()}", "Accept": "application/json"})
     return urllib.request.urlopen(req, timeout=timeout)
 
 
@@ -498,7 +507,7 @@ def cmd_check(args):
         # bare SHA (the commit's JSON would carry its whole diff); none is no harm
         try:
             req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/commits/v{tag}",
-                                         headers={"User-Agent": f"OpenX6X00/{running_version()}",
+                                         headers={"User-Agent": f"GoldCorpHF/{running_version()}",
                                                   "Accept": "application/vnd.github.sha"})
             with urllib.request.urlopen(req, timeout=10) as r:
                 sha = r.read(64).decode(errors="replace").strip()
@@ -624,9 +633,9 @@ def check_manifest(mjson):
         m = json.loads(mjson)
     except ValueError:
         raise Fail("the manifest is not JSON")
-    if not isinstance(m, dict) or m.get("product") != "OpenX6X00" or not isinstance(m.get("files"), list) \
+    if not isinstance(m, dict) or not product_ok(m) or not isinstance(m.get("files"), list) \
             or not m.get("version"):
-        raise Fail("the manifest is not for OpenX6X00")
+        raise Fail("the manifest is not for this firmware")
     if m.get("model", "x6100") != radio_model():
         raise Fail(f"the bundle is for the {m.get('model', 'x6100').upper()}, this radio is a {radio_model().upper()}")
     for e in m["files"]:

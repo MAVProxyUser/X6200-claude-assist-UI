@@ -32,7 +32,7 @@
  *  (funnel_auth). Closed when its session is revoked; a wrong token counts towards Funnel's pause.
  *  TCI programs cannot pair and do not come over Funnel.
  *
- *  Over Bluetooth (tci_server_bt_take): the GUI's BlueZ service "OpenX6X00 TCI" (bt_dev.c, RFCOMM, paired devices
+ *  Over Bluetooth (tci_server_bt_take): the GUI's BlueZ service "GoldCorpHF TCI" (bt_dev.c, RFCOMM, paired devices
  *  only) hands each connection over as a socket, with the same WebSocket on it as over TCP: the VFO-Knob's Bluetooth
  *  firmware. It is a client on the network like any other, known by the device's address: asked about before it
  *  transmits, kept by that address with Always. A link that dies without a word (the knob carried out of range) is
@@ -937,7 +937,7 @@ static void send_greeting(client_t *c, const rstate_t *s) {
 
     filter_line(fb, sizeof(fb), s);
     client_text(c, "protocol:ExpertSDR3,1.9;");
-    client_text(c, "device:OpenX6X00;");
+    client_text(c, "device:GoldCorpHF;");
     client_text(c, "receive_only:false;");
     client_text(c, "trx_count:1;");
     client_text(c, "channels_count:1;");
@@ -2035,7 +2035,7 @@ static void *capture_thread(void *arg) {
         if (!s) {
             pa_sample_spec spec = {.format = PA_SAMPLE_S16LE, .rate = AUDIO_RATE, .channels = 1};
             pa_buffer_attr attr = {.maxlength = (uint32_t)-1, .fragsize = AUDIO_FRAMES * 2};
-            s = pa_simple_new(NULL, "OpenX6X00 TCI", PA_STREAM_RECORD, "alsa_input.platform-sound.stereo-fallback",
+            s = pa_simple_new(NULL, "GoldCorpHF TCI", PA_STREAM_RECORD, "alsa_input.platform-sound.stereo-fallback",
                               "TCI RX", &spec, NULL, &attr, NULL);
             if (!s) {
                 LV_LOG_ERROR("tci: no capture stream");

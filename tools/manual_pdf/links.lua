@@ -1,7 +1,7 @@
 -- Links in the manual that point into the repository (../README.md#the-baseband, THEMES.md, ../webserver/)
 -- go to GitHub in the PDF, at the ref the PDF is built for; links inside the manual (#first-steps) and
 -- web links stay as they are.
-local repo = "https://github.com/Guru-RF/OpenX6X00"
+local repo = "https://github.com/MAVProxyUser/X6200-claude-assist-UI"
 local ref = os.getenv("MANUAL_REF") or "main"
 local docs = os.getenv("MANUAL_DOCS") or "docs"
 

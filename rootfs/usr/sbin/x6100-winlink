@@ -576,13 +576,13 @@ def trim_logs():
 
 
 def note(text):
-    """A line of ours in Pat's log, which the mailbox's log pane shows: Pat's date and time, "OpenX6X00: ", the
+    """A line of ours in Pat's log, which the mailbox's log pane shows: Pat's date and time, "GoldCorpHF: ", the
     text. One write to a file Pat opened for appending (tools/pat, 0004); none before Pat made it, since Pat
     empties it as it starts. Never the password"""
     pw = read_password()
     if pw:
         text = text.replace(pw, "***")
-    line = f"{time.strftime('%Y/%m/%d %H:%M:%S')} OpenX6X00: {text.replace(chr(10), ' ')}\n".encode()
+    line = f"{time.strftime('%Y/%m/%d %H:%M:%S')} GoldCorpHF: {text.replace(chr(10), ' ')}\n".encode()
     try:
         fd = os.open(PAT_OWN_LOG, os.O_WRONLY | os.O_APPEND)
     except OSError:
@@ -1436,7 +1436,7 @@ def cmd_logs():
     Pat wrote to its output, ardopcf's console, Mercury's log, XARA's settings and log and Pat's event log, each its
     last LOG_MAX bytes, masked"""
     hidden = secrets()
-    parts = [f"OpenX6X00 Winlink logs, {time.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"]
+    parts = [f"GoldCorpHF Winlink logs, {time.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"]
     for title, path in (("status", STATUS), ("the radio (the GUI)", RADIO), ("Pat's log", PAT_OWN_LOG),
                         ("Pat's output", PAT_LOG), ("ardopcf", ARDOP_LOG), ("Mercury (x6x00-mercury)", MERCURY_LOG),
                         ("XARA's settings", XARA_CONF), ("XARA (xara)", XARA_LOG), ("Pat's event log", EVENT_LOG)):

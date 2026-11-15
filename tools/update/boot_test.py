@@ -154,7 +154,7 @@ class Card:
         with open(os.path.join(target, "lib", "modules", release, "modules.dep"), "wb") as f:
             f.write(b"kernel/wifi.ko:\n")
         part, members = runpy.run_path(MKBUNDLE)["boot_part"](images, target, "x6200")
-        manifest = {"product": "OpenX6X00", "model": "x6200", "version": version, "files": [],
+        manifest = {"product": "GoldCorpHF", "model": "x6200", "version": version, "files": [],
                     "boot": boot if boot is not None else part}
         out = os.path.join(self.root, f"bundle-{version}.tar.gz")
         buf = io.BytesIO()
@@ -192,6 +192,18 @@ class BootInstall(unittest.TestCase):
         self.assertEqual(self.c.boot_files(), self.c.old_kernel)
         self.assertEqual(read(self.c.old_mod), b"old wifi module")
         self.assertFalse(os.path.exists(os.path.join(self.c.rootfs, "lib", "modules", "6.1.90")))
+
+    # 0. The line in the sand: GoldCorpHF's bundles, and of the OpenX6X00-marked ones only v0.3.12.20's (the first
+    #    under the new name, marked as before so that the older updaters take it)
+
+    def test_product_line_in_the_sand(self):
+        ok = self.c.up["check_manifest"]
+        for product, version in (("GoldCorpHF", "0.3.12.21"), ("OpenX6X00", "0.3.12.20")):
+            ok(json.dumps({"product": product, "model": "x6200", "version": version, "files": []}))
+        for product, version in (("OpenX6X00", "0.3.12.19"), ("OpenX6X00", "0.3.12.21"), ("OpenX6X00", "0.4.0"),
+                                 ("Other", "0.3.12.20")):
+            with self.assertRaises(self.Fail):
+                ok(json.dumps({"product": product, "model": "x6200", "version": version, "files": []}))
 
     # 1. Refused before a byte is written
 

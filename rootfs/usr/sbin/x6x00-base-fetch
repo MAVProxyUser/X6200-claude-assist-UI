@@ -36,7 +36,7 @@ import time
 import urllib.parse
 import urllib.request
 
-UA = "Mozilla/5.0 (compatible; OpenX6X00 base_update)"     # xiegu.eu turns a bare "Mozilla/5.0" away
+UA = "Mozilla/5.0 (compatible; GoldCorpHF base_update)"     # xiegu.eu turns a bare "Mozilla/5.0" away
 DOWNLOADS = "https://xiegu.eu/downloads/"
 SDM = "https://xiegu.eu/?sdm_process_download=1&download_id=%s"
 HERE = os.path.dirname(os.path.abspath(__file__))

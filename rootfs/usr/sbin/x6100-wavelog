@@ -58,7 +58,7 @@ KEEP_SENT = 7 * 86400   # a QSO sent is remembered a week; older ones Wavelog it
 # (401): before, the line said only "key refused" (#73). The web page refuses them at Save; this is for a token
 # saved by v0.3.5 or v0.3.6
 V2_TOKEN = "the key is an API v2 token (wl2_): make a legacy API key (API v1)"
-user_agent = f"OpenX6X00/{os.environ.get('X6100_FW') or 'unknown'} (+https://github.com/Guru-RF/OpenX6X00)"
+user_agent = f"GoldCorpHF/{os.environ.get('X6100_FW') or 'unknown'} (+https://github.com/MAVProxyUser/X6200-claude-assist-UI)"
 
 
 class Fail(Exception):

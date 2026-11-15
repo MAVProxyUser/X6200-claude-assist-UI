@@ -206,7 +206,7 @@ def download():
         raise Fail("not enough room on the card (120 MB needed)")
     h = hashlib.sha256()
     got = 0
-    req = urllib.request.Request(TGZ_URL, headers={"User-Agent": "OpenX6X00"})
+    req = urllib.request.Request(TGZ_URL, headers={"User-Agent": "GoldCorpHF"})
     try:
         with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
             total = int(r.headers.get("Content-Length") or 0)

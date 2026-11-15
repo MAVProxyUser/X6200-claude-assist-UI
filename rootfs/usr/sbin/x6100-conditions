@@ -8,7 +8,7 @@ import re
 import urllib.request
 
 # The radio's Python has no xml package (buildroot leaves expat out): the few fields are read with re
-AGENT = f"OpenX6X00/{os.environ.get('X6100_FW') or 'unknown'} (+https://github.com/Guru-RF/OpenX6X00)"
+AGENT = f"GoldCorpHF/{os.environ.get('X6100_FW') or 'unknown'} (+https://github.com/MAVProxyUser/X6200-claude-assist-UI)"
 
 
 def clean(text):

@@ -16,7 +16,7 @@ prop() {
 }
 
 {
-    echo "== $(date '+%Y-%m-%d %H:%M:%S')  OpenX6X00 $(cat /usr/share/x6100/app-version 2>/dev/null)  $(uname -r)"
+    echo "== $(date '+%Y-%m-%d %H:%M:%S')  GoldCorpHF $(cat /usr/share/x6100/app-version 2>/dev/null)  $(uname -r)"
     echo "network: $SSID"
     echo "== module"
     for d in /sys/bus/usb/devices/*; do

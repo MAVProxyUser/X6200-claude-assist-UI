@@ -1,6 +1,6 @@
 % rebase('base.html', title='Update')
 <h2><svg class="i"><use href="#i-download"/></svg>Update</h2>
-<p class="sub">The radio installs a newer OpenX6X00 by itself: the GUI, the web pages, the helpers and their data, from the GitHub releases of the repository it was built from (<span id="repo">its own</span>) or from a bundle file. The files are checked against the bundle's own list of their SHA-256 sums, the previous version is kept, and the radio software restarts at the end (about a minute). A version that does not come up is put back automatically. A release's bundle also carries the SD card's kernel (with its modules, the WiFi driver among them) and U-Boot: they are written only when ticked below, only to the SD card the radio started from (never its internal memory), the old ones kept, and start at the next power-on.</p>
+<p class="sub">The radio installs a newer GoldCorpHF by itself: the GUI, the web pages, the helpers and their data, from the GitHub releases of the repository it was built from (<span id="repo">its own</span>) or from a bundle file. The files are checked against the bundle's own list of their SHA-256 sums, the previous version is kept, and the radio software restarts at the end (about a minute). A version that does not come up is put back automatically. A release's bundle also carries the SD card's kernel (with its modules, the WiFi driver among them) and U-Boot: they are written only when ticked below, only to the SD card the radio started from (never its internal memory), the old ones kept, and start at the next power-on.</p>
 
 <div class="dp-card">
   <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-cpu"/></svg></span><div><h3>Version</h3><p>What runs now, and the latest release</p></div></div>
@@ -19,7 +19,7 @@
 </div>
 
 <form class="dp-card" id="upl">
-  <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-upload"/></svg></span><div><h3>Bundle file</h3><p>An OpenX6X00-x6100-vX.Y.Z-update.tar.gz or OpenX6X00-x6200-vX.Y.Z-update.tar.gz from the releases page, for a radio without internet</p></div></div>
+  <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-upload"/></svg></span><div><h3>Bundle file</h3><p>A GoldCorpHF-x6200-vX.Y.Z-update.tar.gz (OpenX6X00-x6200-... up to v0.3.12.19) from the releases page, for a radio without internet</p></div></div>
   <div class="dp-row">
     <div class="dp-lbl"><label for="file"><b>File</b></label></div>
     <div class="dp-ctl"><input id="file" type="file" accept=".gz,.tar.gz"></div>

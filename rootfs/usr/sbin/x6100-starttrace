@@ -60,7 +60,7 @@ data_mounted() {
                 level) level=$v ;;
             esac
         done < /etc/openx6x00-image
-        text="boot: OpenX6X00 $(cat /usr/share/x6100/app-version), card image $model level $level"
+        text="boot: GoldCorpHF $(cat /usr/share/x6100/app-version), card image $model level $level"
         turn "$SYS_FILE"
         rm -f "$PENDING"
     else

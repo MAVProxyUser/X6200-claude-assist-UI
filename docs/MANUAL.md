@@ -1,8 +1,16 @@
-# OpenX6X00: manual
+# GoldCorpHF: manual
+
+GoldCorpHF is this fork's firmware for the Xiegu X6100 and X6200, from [OpenX6X00 by RF.Guru](https://github.com/Guru-RF/OpenX6X00).
+It was called OpenX6X00 here too up to v0.3.12.19, its updates and files under that name; from v0.3.12.20 the radio,
+its updates, the web pages and what it tells other programs (PSK Reporter, ADIF logs, TCI) say GoldCorpHF.
+v0.3.12.20 is the line in the sand: its update is the last one marked OpenX6X00, so every older radio takes it as
+ever, and with it the updater that takes GoldCorpHF's. The updates after it are GoldCorpHF's alone (an OpenX6X00
+bundle, upstream's, is refused): a radio still on v0.3.12.19 or older by then installs v0.3.12.20's bundle file
+first (the web page's Update, Bundle file), then updates as usual.
 
 How to use every part of the firmware, and the reference tables. The short
 overview is the [README](../README.md). Each release on GitHub has this
-manual as a PDF too, `OpenX6X00-manual-v<version>.pdf`, to read offline or
+manual as a PDF too, `GoldCorpHF-manual-v<version>.pdf`, to read offline or
 print (A4); `tools/manual_pdf/build.sh` makes it.
 
 Each option has a "Where:" line with its place on the radio, for example
@@ -13,7 +21,7 @@ Settings. Button and option names are written as the radio shows them.
 
 - [Getting started](#getting-started): [first-start guide](#first-start-guide), [first steps](#first-steps), [setting up the transmitter](#setting-up-the-transmitter), [buttons and knobs](#buttons-and-knobs), [hand mic](#hand-mic), [keyboard](#keyboard) ([mouse](#mouse), [quick QSO log](#quick-qso-log))
 - [The Sentry](#the-sentry) (this fork, X6200): [A and B](#a-and-b-the-spectrum-screens), [SCAN CFG](#scan-cfg), [C LOG](#c-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [AIRSPACE](#airspace)
-- [Updating the firmware](#updating-the-firmware): [the SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot), [the X6200's base firmware from OpenX6X00](#the-x6200s-base-firmware-from-openx6x00)
+- [Updating the firmware](#updating-the-firmware): [the SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot), [the X6200's base firmware from GoldCorpHF](#the-x6200s-base-firmware-from-goldcorphf)
 - [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
 - [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab)
 - [Transmitting](#transmitting): [amateur bands only](#amateur-bands-only), [no TX without data from the base](#no-tx-without-data-from-the-base), [TX shift](#tx-shift), [transverter TX power limit](#transverter-tx-power-limit), [SWR scan and the tuner](#swr-scan-and-the-tuner), [TUNE for an external tuner](#tune-for-an-external-tuner), [digital-mode TX level](#digital-mode-tx-level), [recording voice messages](#recording-voice-messages), [ALC in CW](#alc-in-cw), [PA bias](#pa-bias-x6200), [register 32](#register-32-x6200)
@@ -110,9 +118,9 @@ the TX level first, because the ALC figures further down assume it is set.
 Use a dummy load and a power meter, on a band where you may transmit.
 
 Which settings you have depends on the base, the radio board's own firmware
-(see [The baseband](../README.md#the-baseband) in the README). OpenX6X00
+(see [The baseband](../README.md#the-baseband) in the README). GoldCorpHF
 hides a setting the base can't do. The patched base is gdyuldin's
-x6100_base_patch, which you install apart from OpenX6X00; Settings > Info >
+x6100_base_patch, which you install apart from GoldCorpHF; Settings > Info >
 Baseband shows which base the radio runs.
 
 | Setting | Where | X6100, Xiegu's base | X6100, patched base | X6200 |
@@ -754,7 +762,7 @@ written through to the card before it replaces the last copy, so a power cut kee
   ago, within the half hour), else what the sun says at your QTH: OPEN, CLOSED, LOCAL, OPENING or CLOSING; `SET QTH`
   when no QTH locator is set.
 - **F SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the classic radio screen, a shell, the
-  [base firmware](#the-x6200s-base-firmware-from-openx6x00) and where the radio starts. F2 opens the item chosen
+  [base firmware](#the-x6200s-base-firmware-from-goldcorphf) and where the radio starts. F2 opens the item chosen
   (CLASSIC RADIO is on the list); the other F keys do nothing here. Its title says the release, the GUI's commit and the base's version. A's title names
   what its scope takes in: `MF/HF/VHF SPECTRUM` (the X6200 from 100 kHz to 55 MHz, and 87.5 to 137 MHz).
 
@@ -868,7 +876,7 @@ web configurator (System > Update).
 
 - **It asks by itself.** When the daily check finds a newer release, the radio
   fetches its bundle in the background and then asks, in a box over whatever
-  is on the screen: "Apply OpenX6X00 0.3.12.3?", with the version, the commit
+  is on the screen: "Apply GoldCorpHF 0.3.12.20?", with the version, the commit
   it was built from (the release tag's, from GitHub), the bundle's MD5 and the
   repository. The MFK turns between "Yes, apply it" and "No" (No is chosen when
   it opens, so a press meant for something else applies nothing) and its press
@@ -922,7 +930,7 @@ web configurator (System > Update).
     settings, interrupted or hand).
   - A step back to v0.3.10 or earlier shows nothing on the screen: those
     versions know nothing of it. Their web page shows the reason as before.
-- The web page can also take a bundle file (`OpenX6X00-x6100-vX.Y.Z-update.tar.gz` or `OpenX6X00-x6200-vX.Y.Z-update.tar.gz`
+- The web page can also take a bundle file (`GoldCorpHF-x6200-vX.Y.Z-update.tar.gz` or `GoldCorpHF-x6100-vX.Y.Z-update.tar.gz` (`GoldCorpHF-...` up to v0.3.12.19)
   from the releases page) for a radio without internet, and has a button to go
   back to the previous version by hand.
 - Once a day, online, the radio checks by itself (5 to 35 minutes after the
@@ -1057,13 +1065,13 @@ a bundle file), or over SSH `x6100-update install <bundle> --kernel --uboot`
   updater's `x6100-update rollback` (the web page's button) takes back the
   radio software only, never the card's parts.
 
-### The X6200's base firmware from OpenX6X00
+### The X6200's base firmware from GoldCorpHF
 
-This fork, X6200 only. The update above brings OpenX6X00; the base, the radio
+This fork, X6200 only. The update above brings GoldCorpHF; the base, the radio
 board's own firmware from Xiegu, is updated apart from it, and Xiegu's way
 takes its own system (two card swaps and its UPGRADE menu, see the README's
 [baseband](../README.md#the-baseband) section). Here it is done while
-OpenX6X00 runs, with Xiegu's own steps: the writer does on the radio what
+GoldCorpHF runs, with Xiegu's own steps: the writer does on the radio what
 Xiegu's app 1.0.8 does from MENU > SYSTEM > UPGRADE. More, and how it was
 worked out and tested: [tools/base_update](../tools/base_update/README.md).
 
@@ -3742,7 +3750,7 @@ sends what you decode in FT8, FT4, FT2 and JS8 to pskreporter.info, the way
 WSJT-X does: UDP to report.pskreporter.info:4739, batched about every 5 minutes
 (up to 30 s earlier or later, at random), each call once per band in 5 minutes.
 Your callsign goes with your QTH square cut to 4 characters (JN35, never the
-6-character locator) and "OpenX6X00 v0.x.y" as the software; each spot
+6-character locator) and "GoldCorpHF v0.x.y" as the software; each spot
 carries the call, its grid when the message had one, dial + audio frequency,
 SNR and mode. Your own transmissions are never reported. With no network the
 batch is dropped quietly; nothing waits on it, the decoding goes on. Search
@@ -5629,7 +5637,7 @@ that has no network to reach the radio by: the VFO-Knob's Bluetooth
 firmware. The knob tunes and keys the radio and transmits its microphone; the
 radio's speaker plays the receiver, as always.
 
-- **The service:** "OpenX6X00 TCI", a Bluetooth serial port (RFCOMM) on
+- **The service:** "GoldCorpHF TCI", a Bluetooth serial port (RFCOMM) on
   channel 22, with service class UUID
   `1d21eea1-57bf-4f53-9ad6-721d624f2e67`. A device looks it up by that UUID.
   Bluetooth CAT keeps channel 1.
@@ -6080,7 +6088,7 @@ Setting it up:
      left and where ("4 min left on 30m"); red while the radio is in the
      hold, not when it is on another band, where Winlink transmits.
    - Last no TX: the radio's last reason not to key, in the last 10 minutes.
-     It also goes into Pat's log ("OpenX6X00: no TX, FT8 is open, close it.
+     It also goes into Pat's log ("GoldCorpHF: no TX, FT8 is open, close it.
      Close the app on the radio, then connect again"), once, and again after
      a minute; so does a QSY not made.
 
@@ -6166,7 +6174,7 @@ Connecting to a gateway:
   refused key with the time left ("Winlink: no TX, high SWR on 30m, the hold
   ends in 4 min"; outside the bands "near 5.403.500 MHz"); the Winlink
   page's SWR hold row counts the minutes down and says where, and Pat's log
-  says when it ends ("OpenX6X00: high SWR stopped a Winlink transmission on
+  says when it ends ("GoldCorpHF: high SWR stopped a Winlink transmission on
   30m: no TX there for 5 minutes, until 14:32; another band transmits").
   A tune or an SWR scan does not end the hold: the scan's carrier is 1 W,
   and the SWR protection watches the transmissions themselves, at their
@@ -6258,7 +6266,7 @@ Connecting to a gateway:
   ahead on a busy frequency and the password when none is set, and gives up
   when nobody answers (after a minute for the password). The Connections
   card says in how many browsers the mailbox is open.
-- Lines in the mailbox's log that start with "OpenX6X00:" are the radio's:
+- Lines in the mailbox's log that start with "GoldCorpHF:" are the radio's:
   what Pat cannot see itself. No password set, a transmission or a QSY the
   radio refused and why, the SWR hold, and how each connection ended with
   what to do next.
@@ -6428,7 +6436,7 @@ When it does not work:
   Pat's Connect dialog, or ARDOP on the page), "Mercury was not ready", a
   bandwidth Mercury does not have (500, 2300 or 2750).
 - The Modem row says "Ready, but it fell behind the receiver lately" in red,
-  and Pat's log "OpenX6X00: Mercury could not keep up with the receiver": one
+  and Pat's log "GoldCorpHF: Mercury could not keep up with the receiver": one
   of Mercury's decoders dropped audio, or it threw away audio it had not
   decoded yet ("decoder ring full" or "RX backlog exceeded" in its log), and
   its connections fail. The radio's processor is short for it: use ARDOP, and send
@@ -6539,7 +6547,7 @@ When it does not work:
 - After a call that got no answer, or right after you cancel one, the radio
   keys once more for a few seconds: that is its CW ID, not another call.
 - The Modem row says "Ready, but it fell behind the receiver lately" in red,
-  and Pat's log "OpenX6X00: XARA could not keep up with the receiver": XARA
+  and Pat's log "GoldCorpHF: XARA could not keep up with the receiver": XARA
   fell behind the radio's audio ("xara is falling behind real time" in its
   log), and its connections fail. The radio's processor is short for it: use
   ARDOP, and send the logs download on
@@ -6925,7 +6933,7 @@ PTT options, under the Panel and under the Screen page, are kept per browser
   or Previous track, each a tap on, tap off; or Speaker mic, held to talk,
   for a Bluetooth speaker mic whose PTT sends forward when pressed and
   backward when let go: it keys while held. For this the page plays a few seconds of silence in a loop and is the
-  phone's media player ("PTT", OpenX6X00 in the notification), and the
+  phone's media player ("PTT", GoldCorpHF in the notification), and the
   headset's buttons come to it as to any player. A phone needs a tap on the
   page once before it plays. The buttons work while the page is on screen; a
   page out of sight lets PTT go and keys nothing. A phone's volume keys, and
@@ -7591,7 +7599,7 @@ Turning it on (the radio needs the internet for it):
    Enabled on the web configurator.
 2. The first time, the radio downloads Tailscale from Tailscale's own site
    (version 1.104.2 for 32-bit ARM, 37 MB, to the DATA partition) and checks
-   it against the checksum that comes with OpenX6X00. Status shows the
+   it against the checksum that comes with GoldCorpHF. Status shows the
    download.
 3. Status says "Waiting for your login". Scan the code on the radio's screen
    with a phone, or press Log in to Tailscale on the web page, and log in with
@@ -7644,7 +7652,7 @@ Good to know:
   `/run/tailscale/tailscaled.log` has tailscaled's own log.
 
 The tailscaled program is Tailscale's own build (BSD-3-Clause), fetched from
-pkgs.tailscale.com; OpenX6X00 does not include it.
+pkgs.tailscale.com; GoldCorpHF does not include it.
 
 ### Tailscale Funnel
 
@@ -7828,7 +7836,7 @@ DATA partition as it goes (the run's own log is kept in memory until the GUI
 ends, so a start that stops leaves nothing else). Each line has the time in
 UTC and the seconds since power-on:
 
-1. "boot: OpenX6X00 ..., card image ..." at the beginning of each start
+1. "boot: GoldCorpHF ..., card image ..." at the beginning of each start
 2. a line before and after each start script ("S00adata start", "S00adata
    end", ...), with ", exit N" after one that failed, and "init scripts done"
    after the last. S00adata checks the DATA partition at every start and makes
@@ -8170,12 +8178,12 @@ Meanwhile:
 
 Look at Settings > Info > Baseband and at the table of bases in the
 [README](../README.md#the-baseband). An X6200 base older than 1.0.7 sends
-its data in a form OpenX6X00 does not read: update it (README, Updating the
+its data in a form GoldCorpHF does not read: update it (README, Updating the
 baseband). On an X6200 with base 1.0.6 (issues #94 and #95) the waterfall
 stayed black, the needle at S1, with no battery reading and no tuner, until
 the base update.
 
-On an X6200 with base 1.0.7 or 1.0.8 the cause is not known yet. OpenX6X00
+On an X6200 with base 1.0.7 or 1.0.8 the cause is not known yet. GoldCorpHF
 reads 1.0.7's data (our X6200 ran it, and in issue #14 its battery and TX
 readings came through), yet the radio in issue #152 shows these signs on
 1.0.7. Update to 1.0.8 all the same: another X6200 with them got it all
@@ -8221,7 +8229,7 @@ second, band, frequency and mode, with the activation's reference fields
 besides. The records `ft_log.adi` got before stay as they were written. A
 band set on the Logs page goes in the same way (`20m`). `ft_log.adi`,
 the day's and the activations' logs and the export start with the same
-header: a line naming the file, ADIF_VER 3.1.8, PROGRAMID OpenX6X00 and
+header: a line naming the file, ADIF_VER 3.1.8, PROGRAMID GoldCorpHF and
 PROGRAMVERSION, the firmware's version (Settings > Info). An `ft_log.adi`
 begun before keeps the header it had (PROGRAMVERSION 1.0.0, ADIF_VER 3.14);
 `js8call_log.adi` keeps desktop JS8Call's.
@@ -8468,7 +8476,7 @@ using this repository's GUI, the vendored `webserver/`, the boot logo
 `boot/logo.png` (800x480) and the Bluetooth files in `rootfs/`.
 
 - Run it manually (`workflow_dispatch`) on `main` for a test image, uploaded
-  as the artifact `OpenX6X00-<ref>-sdcard.img.zip`.
+  as the artifact `GoldCorpHF-<ref>-sdcard.img.zip`.
 - Push a tag: the same image is attached to a GitHub Release.
 
 Locally: follow [docs/UPSTREAM_README.md](UPSTREAM_README.md): clone

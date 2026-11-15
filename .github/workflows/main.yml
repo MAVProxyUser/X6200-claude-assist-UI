@@ -30,10 +30,10 @@ jobs:
         include:
           - model: x6100
             tree: AetherX6100Buildroot
-            out: OpenX6X00-x6100
+            out: GoldCorpHF-x6100
           - model: x6200
             tree: AetherX6200Buildroot
-            out: OpenX6X00-x6200
+            out: GoldCorpHF-x6200
     defaults:
       run:
         shell: bash

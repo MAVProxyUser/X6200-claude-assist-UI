@@ -5381,7 +5381,7 @@ static void make_info_page() {
 
     row = card_begin("FIRMWARE");
     row = info_row(row, "Version", strrchr(VERSION, ' ') + 1);
-    row = info_row(row, "Project", "OpenX6X00 by RF.Guru");
+    row = info_row(row, "Project", "GoldCorpHF, from OpenX6X00 by RF.Guru");
     std::string source = std::string("github.com/") + update_repo();    /* the releases it updates from */
     row = info_row(row, "Source", source.c_str());
     row = info_row(row, "Baseband", radio_base_ver_str());

@@ -168,8 +168,8 @@ int field_adif_header(FILE *f, const char *title) {
     const char *ver = getenv("X6100_FW");
 
     if (!ver || !ver[0])
-        return fprintf(f, "%s\n<ADIF_VER:5>3.1.8 <PROGRAMID:9>OpenX6X00 <eoh>\n", title);
-    return fprintf(f, "%s\n<ADIF_VER:5>3.1.8 <PROGRAMID:9>OpenX6X00 <PROGRAMVERSION:%zu>%s <eoh>\n", title,
+        return fprintf(f, "%s\n<ADIF_VER:5>3.1.8 <PROGRAMID:10>GoldCorpHF <eoh>\n", title);
+    return fprintf(f, "%s\n<ADIF_VER:5>3.1.8 <PROGRAMID:10>GoldCorpHF <PROGRAMVERSION:%zu>%s <eoh>\n", title,
                    strlen(ver), ver);
 }
 

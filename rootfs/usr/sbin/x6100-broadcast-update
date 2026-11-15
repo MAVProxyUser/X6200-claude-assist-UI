@@ -72,7 +72,7 @@ def download(url):
     data = b""
     total = 0
     for attempt in range(RETRIES + 1):
-        h = {"User-Agent": "OpenX6X00"}
+        h = {"User-Agent": "GoldCorpHF"}
         if data:
             h["Range"] = f"bytes={len(data)}-"
         try:

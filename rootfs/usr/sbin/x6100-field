@@ -64,9 +64,9 @@ RETRIES = 5
 # time and would wait forever for a stuck one (a DNS lookup or a connect that never returns)
 RUN_LIMIT = {"update": 2700}   # ten lists, ~93 MB when none is unchanged (the web server waits 2760 s)
 RUN_LIMIT_DEFAULT = 600
-user_agent = "OpenX6X00/unknown"
+user_agent = "GoldCorpHF/unknown"
 # wwbota.org and cqhota.app: the firmware version (the GUI sets X6100_FW) and a contact
-site_agent = f"OpenX6X00/{os.environ.get('X6100_FW') or 'unknown'} (+https://github.com/Guru-RF/OpenX6X00)"
+site_agent = f"GoldCorpHF/{os.environ.get('X6100_FW') or 'unknown'} (+https://github.com/MAVProxyUser/X6200-claude-assist-UI)"
 
 
 class Fail(Exception):
@@ -582,7 +582,7 @@ def spot_args(args, ref_re):
 def cmd_pota_spot(args):
     call, ref, mode, _ = spot_args(args, r"[A-Z0-9]{1,4}-\d{4,5}")
     body = json.dumps({"activator": call, "spotter": call, "frequency": args.freq_khz.strip(), "reference": ref,
-                       "mode": mode, "source": "OpenX6X00", "comments": args.comments})
+                       "mode": mode, "source": "GoldCorpHF", "comments": args.comments})
     code, text = post(POTA_API.rstrip("/") + "/spot", body, "application/json")
     if code not in (200, 201):
         raise Fail(f"HTTP {code} {one_line(text, 60)}")
@@ -781,7 +781,7 @@ def main(argv):
     p.set_defaults(func=cmd_qrz_upload)
     try:
         args = parser.parse_args(argv)
-        user_agent = f"OpenX6X00/{args.call.strip().upper() or 'unknown'}"
+        user_agent = f"GoldCorpHF/{args.call.strip().upper() or 'unknown'}"
         signal.signal(signal.SIGALRM, lambda *_: (print("error timed out"), sys.exit(1)))
         signal.alarm(RUN_LIMIT.get(args.cmd, RUN_LIMIT_DEFAULT))
         print(args.func(args))

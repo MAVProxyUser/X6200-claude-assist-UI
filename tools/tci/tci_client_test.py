@@ -166,7 +166,7 @@ def main():
     print("greeting:", " ".join(greeting))
     assert greeting[0].startswith("protocol:"), greeting[0]
     assert greeting[-2] == "start;", "the state ends with start;, the radio runs"
-    assert "device:OpenX6X00;" in greeting
+    assert "device:GoldCorpHF;" in greeting
     assert any(g.startswith("vfo:0,0,") for g in greeting)
     assert any(g.startswith("modulation:0,") for g in greeting)
     assert any(g.startswith("rx_filter_band:0,") for g in greeting)

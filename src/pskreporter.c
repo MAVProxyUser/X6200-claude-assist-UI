@@ -276,7 +276,7 @@ void pskr_spot(const char *rcall, const char *rgrid, const char *version, const 
     snprintf(my_call, sizeof(my_call), "%s", rcall);
     snprintf(my_grid, sizeof(my_grid), "%.4s", rgrid);   /* the square only: privacy */
     const char *v = strrchr(version, ' ');
-    snprintf(software, sizeof(software), "OpenX6X00 %s", v ? v + 1 : version);
+    snprintf(software, sizeof(software), "GoldCorpHF %s", v ? v + 1 : version);
     pthread_mutex_unlock(&mutex);
 
     if (!dup) pthread_once(&once, start);

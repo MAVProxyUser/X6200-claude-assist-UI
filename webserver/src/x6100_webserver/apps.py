@@ -2232,7 +2232,7 @@ def adif_header(title):
     except OSError:
         ver = b""
     prog = b" <PROGRAMVERSION:%d>%s" % (len(ver), ver) if ver else b""
-    return title.encode() + b"\n<ADIF_VER:5>3.1.8 <PROGRAMID:9>OpenX6X00" + prog + b" <eoh>\n"
+    return title.encode() + b"\n<ADIF_VER:5>3.1.8 <PROGRAMID:10>GoldCorpHF" + prog + b" <eoh>\n"
 
 
 @app.post('/logs/export')
@@ -2259,7 +2259,7 @@ def export_logs():
         body, ext, mime = out.getvalue(), "csv", "text/csv"
     else:
         # The records' bytes, their lengths hold: an FT8 QSO as ft_log.adi has it too (#174)
-        body = adif_header("OpenX6X00 log export") + b"".join(rec.strip() + b" <eor>\n" for rec in recs)
+        body = adif_header("GoldCorpHF log export") + b"".join(rec.strip() + b" <eor>\n" for rec in recs)
         ext, mime = "adi", "text/plain"
     bottle.response.content_type = mime + "; charset=utf-8"
     bottle.response.set_header("Content-Disposition", f'attachment; filename="x6100-log-{stamp}.{ext}"')

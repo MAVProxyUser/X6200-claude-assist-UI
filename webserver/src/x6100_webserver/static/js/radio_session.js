@@ -603,7 +603,7 @@
       a.loop = true; a.setAttribute("playsinline", ""); a.src = silentWav();
       this.audio = a;
       HS_ACTIONS.forEach(function(n) { try { ms.setActionHandler(n, function() { self.action(n); }); } catch (e) {} });
-      try { ms.metadata = new window.MediaMetadata({title: "PTT", artist: "OpenX6X00"}); } catch (e) {}
+      try { ms.metadata = new window.MediaMetadata({title: "PTT", artist: "GoldCorpHF"}); } catch (e) {}
     } else if (ms && !on && this.audio) {
       const a = this.audio; this.audio = null;
       a.pause(); URL.revokeObjectURL(a.src); a.removeAttribute("src");

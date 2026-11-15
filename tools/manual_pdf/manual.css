@@ -14,7 +14,7 @@ body { margin: 0; }
 .title-page { page-break-after: always; padding-top: 70mm; text-align: center; }
 .title-page h1 { font-size: 30pt; margin: 0 0 6mm 0; border: 0; bookmark-level: none; }
 .title-page p { font-size: 12pt; margin: 2mm 0; color: #444; }
-.title-page .version { string-set: version "OpenX6X00 " content() " manual"; }
+.title-page .version { string-set: version "GoldCorpHF " content() " manual"; }
 h1, h2, h3, h4 { font-weight: 600; line-height: 1.2; page-break-after: avoid; }
 h1 { font-size: 20pt; }
 h2 { font-size: 15pt; page-break-before: always; border-bottom: 1px solid #bbb; padding-bottom: 1.5mm; }

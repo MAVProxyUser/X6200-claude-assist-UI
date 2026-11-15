@@ -6,7 +6,7 @@ fork's radios ask for none, so there is no key to keep (x6100-update).
 
   python3 tools/update/mkbundle.py --target <buildroot target dir> \\
       --manifest <build/x6100-gui-*/install_manifest.txt> --version 0.2.0 \\
-      --out OpenX6X00-x6100-v0.3.2-update.tar.gz [--notes "..."] [--boot-dir <buildroot images dir>]
+      --out GoldCorpHF-x6200-v0.3.12.20-update.tar.gz [--notes "..."] [--boot-dir <buildroot images dir>]
 
 --boot-dir also carries what the SD card has outside the root filesystem, for the radio to install only when asked
 (x6100-update install --kernel / --uboot, the GUI's checkboxes): the kernel set of the card's boot partition (zImage,
@@ -25,6 +25,8 @@ import os
 import sys
 import tarfile
 import time
+
+BRIDGE_VERSION = "0.3.12.20"     # the last bundle marked OpenX6X00, the first of GoldCorpHF
 
 WEB_FILES = ["/usr/bin/x6100_webserver"]
 WEB_DIRS = ["/usr/lib/python3.11/site-packages/x6100_webserver"]
@@ -122,7 +124,11 @@ def main():
             data = f.read()
         entries.append({"path": p, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
                         "mode": "%o" % (os.stat(src).st_mode & 0o777)})
-    manifest = {"product": "OpenX6X00", "model": a.model, "version": a.version.lstrip("v"),
+    # GoldCorpHF's bundles, but v0.3.12.20's, the line in the sand: marked OpenX6X00 as every one before it, so the
+    # updaters of v0.3.12.19 and before (which take no other) install it and with it the updater that takes
+    # GoldCorpHF's (x6100-update's PRODUCT and BRIDGE)
+    product = "OpenX6X00" if a.version.lstrip("v") == BRIDGE_VERSION else "GoldCorpHF"
+    manifest = {"product": product, "model": a.model, "version": a.version.lstrip("v"),
                 "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "notes": a.notes, "files": entries}
     boot_members = []
     if a.boot_dir:

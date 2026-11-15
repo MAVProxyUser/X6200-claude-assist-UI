@@ -321,7 +321,7 @@ static void prog_open(void) {
     lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(obj, VF(26), 0);
     lv_obj_set_style_text_color(obj, TC(text), 0);
-    lv_label_set_text_fmt(obj, "Applying OpenX6X00 %s", uw_ver);
+    lv_label_set_text_fmt(obj, "Applying GoldCorpHF %s", uw_ver);
 
     p_step = lv_label_create(pbox);
     lv_obj_set_width(p_step, LV_PCT(100));
@@ -373,7 +373,7 @@ static void install_done(const char *out, int status, void *user) {
         }
         return;
     }
-    msg_schedule_long_text_fmt("OpenX6X00 %s not applied: %.80s. Nothing changed.", uw_ver,
+    msg_schedule_long_text_fmt("GoldCorpHF %s not applied: %.80s. Nothing changed.", uw_ver,
                                strncmp(out, "error", 5) == 0 ? out + 6 : out);
     if (pbox) {
         lv_label_set_text_fmt(p_step, "Not applied: %.80s", strncmp(out, "error", 5) == 0 ? out + 6 : out);
@@ -398,7 +398,7 @@ static void pick_async(void *arg) {
         sh_run(cmd, install_done, NULL);
     } else {
         uw = UW_IDLE;
-        msg_schedule_long_text_fmt("OpenX6X00 %s not applied: Settings > Info > Update installs it", uw_ver);
+        msg_schedule_long_text_fmt("GoldCorpHF %s not applied: Settings > Info > Update installs it", uw_ver);
     }
 }
 
@@ -510,7 +510,7 @@ static void ask(void) {
     lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(obj, VF(26), 0);
     lv_obj_set_style_text_color(obj, TC(text), 0);
-    lv_label_set_text_fmt(obj, "Apply OpenX6X00 %s?", uw_ver);
+    lv_label_set_text_fmt(obj, "Apply GoldCorpHF %s?", uw_ver);
 
     obj = lv_label_create(box);
     lv_obj_set_width(obj, LV_PCT(100));
@@ -660,7 +660,7 @@ static void watch_cb(lv_timer_t *t) {
     if (!strcmp(seen, latest)) return;
     if (image || !url_ok(url)) {
         /* a card image wanted too (or no bundle to fetch): said, for Settings > Info > Update */
-        msg_schedule_long_text_fmt("OpenX6X00 %s is out: Settings > Info > Update", latest);
+        msg_schedule_long_text_fmt("GoldCorpHF %s is out: Settings > Info > Update", latest);
         announced_set(latest);
         return;
     }

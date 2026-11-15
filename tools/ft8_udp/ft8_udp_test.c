@@ -137,7 +137,7 @@ static void check_logged(const uint8_t *buf, int n) {
 
 static void check_adif(const uint8_t *buf, int n) {
     rd_t        r = {buf, n, 0, false};
-    const char *want = "host ADIF export\n<adif_ver:5>3.1.0\n<programid:9>OpenX6X00\n<EOH>\n" RECORD;
+    const char *want = "host ADIF export\n<adif_ver:5>3.1.0\n<programid:10>GoldCorpHF\n<EOH>\n" RECORD;
 
     CHECK(rd_head(&r) == 12, "type 12 second");
     CHECK(strcmp(rd_s(&r), want) == 0, "the ADIF text");

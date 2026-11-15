@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        One problem per issue. What to give, and why, is in the README's [Reporting a problem](https://github.com/Guru-RF/OpenX6X00#reporting-a-problem).
+        One problem per issue. What to give, and why, is in the README's [Reporting a problem](https://github.com/MAVProxyUser/X6200-claude-assist-UI#reporting-a-problem).
   - type: checkboxes
     id: checks
     attributes:
@@ -25,7 +25,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: OpenX6X00 version
+      label: GoldCorpHF version
       description: "Settings > Info."
       placeholder: v0.3.5
     validations:
@@ -34,7 +34,7 @@ body:
     id: baseband
     attributes:
       label: Baseband version
-      description: "Settings > Info > Baseband. See [The baseband](https://github.com/Guru-RF/OpenX6X00#the-baseband)."
+      description: "Settings > Info > Baseband. See [The baseband](https://github.com/MAVProxyUser/X6200-claude-assist-UI#the-baseband)."
       placeholder: "1.0.8"
     validations:
       required: true

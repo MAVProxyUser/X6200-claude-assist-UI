@@ -398,7 +398,7 @@ def adopt_old_ssh_keys():
 
 
 def options():
-    p = argparse.ArgumentParser(description="OpenX6X00 web configurator")
+    p = argparse.ArgumentParser(description="GoldCorpHF web configurator")
     p.add_argument("--db", required=True, help="params.db of the radio GUI")
     p.add_argument("--host", default="localhost", help="address to listen on")
     p.add_argument("--port", type=int, default=8080, help="HTTP port")
