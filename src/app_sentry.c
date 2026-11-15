@@ -1469,6 +1469,10 @@ static bool dial_held(void);    /* TX unlocked or on the air: the tuning knobs h
 static void w_say(const char *portrait, const char *title, const char *text);  /* G's message line, or the OSD */
 static void ws_view_next(void);
 static void ws_feed(void);      /* G's picture, a frame of the X6200's spectrum */
+static void g_gpu_draw(void);   /* G's two pictures by the GPU, when something of them changed */
+static bool       g_gpu;            /* G held up: its spectrum and voiceprint drawn by the GPU (g_gpu_draw) */
+static bool       g_dirty = true;   /* and something of them changed since they were drawn */
+static int        vp_head;          /* the GPU's voiceprint: its oldest column in the ring (the next written) */
 static void walkie_arm(bool on);
 
 static void show_track(void) {
@@ -2054,20 +2058,22 @@ static void rtl_gpu_draw(const lv_area_t *a) {
     int      view = spec_view(), x0 = a->x1, y0 = a->y1;
     uint32_t grid = argb(faint);
 
-    if (!gpu_frame_begin(x0, y0, RTL_COLS, rtl_img_h, argb(ink))) return;
+    if (!gpu_frame_begin(false)) return;
+    gpu_clear(x0, y0, RTL_COLS, rtl_img_h, argb(ink));
     if (view != VIEW_RTL) {
-        if (p_hf.floor > -250) gpu_trace(0, x0, y0 + p_hf.y0, RTL_COLS, p_hf.trace_h, p_hf.bot_db, p_hf.top_db, grid);
-        gpu_rows(0, x0, y0 + p_hf.wf_y0, RTL_COLS, p_hf.wf_h, p_hf.head, p_hf.count);
+        if (p_hf.floor > -250)
+            gpu_trace(0, x0, y0 + p_hf.y0, RTL_COLS, p_hf.trace_h, p_hf.bot_db, p_hf.top_db, grid, argb(ink));
+        gpu_rows(0, x0, y0 + p_hf.wf_y0, RTL_COLS, p_hf.wf_h, p_hf.head, p_hf.count, D3_ROWS);
         if (hf_bx >= 0) gpu_bracket(x0, y0 + p_hf.y0, hf_bx, p_hf.trace_h);
     }
     if (view != VIEW_X6200) {
         if (p_rtl.floor > -250)
-            gpu_trace(1, x0, y0 + p_rtl.y0, RTL_COLS, p_rtl.trace_h, p_rtl.bot_db, p_rtl.top_db, grid);
-        gpu_rows(1, x0, y0 + p_rtl.wf_y0, RTL_COLS, p_rtl.wf_h, p_rtl.head, p_rtl.count);
+            gpu_trace(1, x0, y0 + p_rtl.y0, RTL_COLS, p_rtl.trace_h, p_rtl.bot_db, p_rtl.top_db, grid, argb(ink));
+        gpu_rows(1, x0, y0 + p_rtl.wf_y0, RTL_COLS, p_rtl.wf_h, p_rtl.head, p_rtl.count, D3_ROWS);
         if (rtl_bx > -20 && rtl_bx < RTL_COLS + 20) gpu_bracket(x0, y0 + p_rtl.y0, rtl_bx, p_rtl.trace_h);
     }
     if (view == VIEW_SPLIT) gpu_rect(x0, y0 + p_rtl.y0 - 3, RTL_COLS, 2, argb(amb));
-    gpu_frame_end();
+    gpu_frame_end(x0, y0, RTL_COLS, rtl_img_h);
 }
 
 /* MHz without the zeros at the end: 118, 162.55, 467.725 */
@@ -2620,6 +2626,7 @@ static void rtl_timer_cb(lv_timer_t *t) {
         }
     }
     if (scr == SCR_WALKIE) ws_feed();   /* G's picture: the X6200's spectrum around the dial */
+    if (scr == SCR_WALKIE && g_dirty) g_gpu_draw();
     if (scr != SCR_RTL && scr != SCR_SCAN) {     /* the stick's rows read all the same: F's scan, SCAN CFG */
         bool got = false;
 
@@ -2791,7 +2798,7 @@ static void build_rtl(lv_obj_t *p) {
     rtl_direct = drm_planes();
 #endif
     rtl_gpu = rtl_direct && gpu_init(RTL_COLS, D3_ROWS);   /* the GPU there (Mesa on the image): it draws it */
-    if (rtl_gpu) gpu_palette(d3_pal);
+    if (rtl_gpu) gpu_palette(0, d3_pal);
     if (rtl_direct) {   /* the picture on the primary plane (rtl_present), the GUI a hole over it: the ticks, peaks
                          * and the bracket's labels drawn over the hole. LVGL drew it (a copy into its buffer), turned
                          * it onto the panel (a second) and copied that (a third), each frame: most of the GUI
@@ -5230,6 +5237,19 @@ static void vp_column(void) {
     memcpy(sorted, col, (size_t)h * sizeof(float));
     qsort(sorted, h, sizeof(float), cmp_f);
     vp_floor = 0.98f * vp_floor + 0.02f * sorted[h / 3];       /* the hiss, followed slowly */
+    if (g_gpu && wui == &w_port) {      /* one column into the GPU's ring: the picture is not moved a column (that
+                                         * moved all of it, 86 times a second) */
+        uint8_t lv[VP_MAXH];
+
+        for (int y = 0; y < h; y++) {
+            float v = (col[h - 1 - y] - vp_floor - 2) / 30;
+            lv[y]   = v <= 0 ? 0 : v >= 1 ? 255 : (uint8_t)(v * 255);
+        }
+        gpu_levels_col(3, vp_head, lv);
+        vp_head = (vp_head + 1) % w;
+        g_dirty = true;
+        return;
+    }
     for (int y = 0; y < h; y++) {
         uint32_t *row = px + y * w;
         float     v   = (col[h - 1 - y] - vp_floor - 2) / 30;
@@ -5263,7 +5283,7 @@ static void walkie_step(void) {
         }
         got += n;
     }
-    if (cols) lv_obj_invalidate(wui->vp_img);
+    if (cols && !(g_gpu && wui == &w_port)) lv_obj_invalidate(wui->vp_img);
     if (got) vp_rms = 0.7f * vp_rms + 0.3f * (float)sqrt(e / got);
 
     /* the S-meter: S0 -127 dBm to S9+40 -33 dBm; the audio: -60 to 0 dBFS */
@@ -5691,6 +5711,26 @@ static void ws_draw(void) {
     uint32_t *px = (uint32_t *)u->ws_frame->data, bg = argb(ink), grid = argb(faint), line = argb(amb);
     int       w = u->ws_w, h = u->ws_h, th = WS_TRACE, rh = h - th, prev = -1;
 
+    if (g_gpu) {        /* the GPU draws it (g_gpu_draw): the trace per column, as A/B's */
+        static uint8_t tr[PW][4];
+        int            hm = th - 1;
+
+        for (int x = 0; x < w; x++) {
+            int y = th - 1 - (int)((ws_cols[x] - ws_bot) / (ws_top - ws_bot) * (th - 1));
+            y     = y < 0 ? 0 : y > th - 1 ? th - 1 : y;
+            int y0 = prev < 0 ? y : prev < y ? prev : y, y1 = prev < 0 ? y : prev > y ? prev : y;
+
+            tr[x][0] = (uint8_t)((y * 255 + hm / 2) / hm);
+            tr[x][1] = (uint8_t)((y0 * 255 + hm / 2) / hm);
+            tr[x][2] = (uint8_t)((y1 * 255 + hm / 2) / hm);
+            tr[x][3] = ws_level(ws_cols[x]);
+            prev     = y;
+        }
+        gpu_trace_set(2, (const uint8_t (*)[4])tr);
+        g_dirty = true;
+        return;
+    }
+    (void)rh;
     for (int i = 0; i < w * h; i++) px[i] = bg;
     for (int d = (int)ceilf(ws_bot / 10) * 10; d < ws_top; d += 10) {
         int y = th - 1 - (int)((d - ws_bot) / (ws_top - ws_bot) * (th - 1));
@@ -5783,6 +5823,7 @@ static void ws_feed(void) {
             if (abs(dx) >= w) memset(row, 0, (size_t)w);
             else if (dx > 0) memmove(row, row + dx, (size_t)(w - dx)), memset(row + w - dx, 0, (size_t)dx);
             else if (dx < 0) memmove(row - dx, row, (size_t)(w + dx)), memset(row, 0, (size_t)-dx);
+            if (g_gpu) gpu_levels_row(2, r, row);
         }
         npend = 0;
     }
@@ -5803,15 +5844,51 @@ static void ws_feed(void) {
     if (++npend >= 2) {
         npend = 0;
         for (int x = 0; x < w; x++) ws_rows[ws_head][x] = ws_level(pend[x]);
+        if (g_gpu) gpu_levels_row(2, ws_head, ws_rows[ws_head]);
         ws_head = (ws_head + 1) % WS_ROWS;
         if (ws_count < WS_ROWS) ws_count++;
     }
     ws_draw();
 }
 
+/* G's two pictures by the GPU (G held up, Mesa there), into the display's plane under the GUI's holes: the
+ * spectrum's trace (once it has rows), its rows in 3D or flat and the dial's bracket, as ws_draw; the voiceprint's
+ * ring of columns, as vp_column made it. Both each time: the plane's two buffers take turns */
+static void g_gpu_draw(void) {
+    wui_t    *u  = &w_port;
+    uint32_t  bg = argb(ink), line = argb(amb);
+    lv_area_t a, v;
+
+    if (!g_gpu || !g_portrait || wui != u || !u->ws_img || !u->vp_img || !gpu_frame_begin(true)) return;
+    g_dirty = false;
+    lv_obj_update_layout(u->ws_img);
+    lv_obj_get_coords(u->ws_img, &a);
+    lv_obj_get_coords(u->vp_img, &v);
+
+    int w = u->ws_w, h = u->ws_h, th = WS_TRACE, rh = h - th, x = a.x1, y = a.y1, cx = x + w / 2;
+
+    gpu_clear(x, y, w, h, bg);
+    if (ws_count) gpu_trace(2, x, y, w, th, ws_bot, ws_top, argb(faint), bg);
+    if (ws_3d) gpu_rows(2, x, y + th, w, rh, ws_head, ws_count, D3_ROWS);
+    else gpu_flat(2, x, y + th, w, rh, ws_head, ws_count, rh / WS_ROWS > 0 ? rh / WS_ROWS : 1, bg);
+    gpu_rect(cx - 8, y + 2, 1, th - 3, line);       /* the dial: its sides, their ends turned in */
+    gpu_rect(cx + 8, y + 2, 1, th - 3, line);
+    gpu_rect(cx - 8, y + 2, 4, 1, line);
+    gpu_rect(cx + 5, y + 2, 4, 1, line);
+    gpu_rect(cx - 8, y + th - 2, 4, 1, line);
+    gpu_rect(cx + 5, y + th - 2, 4, 1, line);
+    gpu_clear(v.x1, v.y1, u->vp_w, u->vp_h, vp_pal[0]);
+    gpu_vp(3, v.x1, v.y1, u->vp_w, u->vp_h, vp_head);
+
+    int x0 = LV_MIN(a.x1, v.x1), y0 = LV_MIN(a.y1, v.y1);
+
+    gpu_frame_end(x0, y0, LV_MAX(a.x1 + w, v.x1 + u->vp_w) - x0, LV_MAX(a.y1 + h, v.y1 + u->vp_h) - y0);
+}
+
 /* F4 on G: the picture's rows in 3D or flat */
 static void ws_view_next(void) {
-    ws_3d = !ws_3d;
+    ws_3d   = !ws_3d;
+    g_dirty = true;
     if (wui->ws_cap_l) tag_text(wui->ws_cap_l, ws_3d ? "100 KHZ  3D" : "100 KHZ  2D", wui->ws_cap_x, wui->ws_cap_y, false);
     ws_draw();
     buttons_refresh(&btn[3]);
@@ -5960,13 +6037,21 @@ static void show_walkie(void) {
 }
 
 /* The voiceprint's picture, its kHz marks and its caption, at x, y in p */
-static void vp_make(wui_t *u, lv_obj_t *p, int x, int y, int w, int h) {
+static void vp_make(wui_t *u, lv_obj_t *p, int x, int y, int w, int h, bool direct) {
     rect(p, x - 4, y - 3, w + 8, h + 6, 3, false);
     u->vp_w     = w;
     u->vp_h     = h;
     u->vp_frame = lv_img_buf_alloc(w, h, LV_IMG_CF_TRUE_COLOR);
-    u->vp_img   = lv_img_create(p);
-    lv_img_set_src(u->vp_img, u->vp_frame);
+    if (direct) {       /* the GPU draws it on the display's plane (g_gpu_draw): a hole in the GUI over it */
+        u->vp_img = lv_obj_create(p);
+        lv_obj_remove_style_all(u->vp_img);
+        lv_obj_set_size(u->vp_img, w, h);
+        lv_obj_add_event_cb(u->vp_img, direct_hole_cb, LV_EVENT_DRAW_MAIN_END, NULL);
+        gpu_slot(3, w, h);
+    } else {
+        u->vp_img = lv_img_create(p);
+        lv_img_set_src(u->vp_img, u->vp_frame);
+    }
     lv_obj_set_pos(u->vp_img, x, y);
     {
         uint32_t *px = (uint32_t *)u->vp_frame->data;
@@ -6004,6 +6089,7 @@ static void vp_palette(void) {
                                  : lv_color_mix(lv_color_white(), amb, (uint8_t)((i - 200) * 120 / 55));
         vp_pal[i] = argb(c);
     }
+    if (gpu_ok()) gpu_palette(1, vp_pal);
 }
 
 /* Landscape, the Sentry's look: four boxes, the channel and lamp beside the voiceprint, the bars */
@@ -6030,7 +6116,7 @@ static void build_walkie(lv_obj_t *p) {
     u->lamp   = rect(p, 20, my + 108, 132, 62, 3, false);
     lv_obj_set_style_bg_color(u->lamp, amb, 0);
     u->lamp_l = label(p, &pixel_24, amb, 20, my + 114, 132, LV_TEXT_ALIGN_CENTER, "RX\nQUIET");
-    vp_make(u, p, 176, my + 3, 612, vh);
+    vp_make(u, p, 176, my + 3, 612, vh, false);
 
     int by = my + vh + 12, bw = (SW - 12 - 6) / 2;
 
@@ -6155,8 +6241,17 @@ static void build_walkie_portrait(void) {
         u->ws_w     = P_FW - 6;
         u->ws_h     = h - 6;
         u->ws_frame = lv_img_buf_alloc(u->ws_w, u->ws_h, LV_IMG_CF_TRUE_COLOR);
-        u->ws_img   = lv_img_create(g_scr);
-        lv_img_set_src(u->ws_img, u->ws_frame);
+        g_gpu       = rtl_gpu && gpu_slot(2, u->ws_w, WS_ROWS);    /* the GPU there: it draws G's two pictures */
+        if (g_gpu) {
+            u->ws_img = lv_obj_create(g_scr);
+            lv_obj_remove_style_all(u->ws_img);
+            lv_obj_set_size(u->ws_img, u->ws_w, u->ws_h);
+            lv_obj_add_event_cb(u->ws_img, direct_hole_cb, LV_EVENT_DRAW_MAIN_END, NULL);
+            for (int r = 0; r < WS_ROWS; r++) gpu_levels_row(2, r, ws_rows[r]);
+        } else {
+            u->ws_img = lv_img_create(g_scr);
+            lv_img_set_src(u->ws_img, u->ws_frame);
+        }
         lv_obj_set_pos(u->ws_img, P_FX + 3, y + 3);
         /* its captions framed, at the two ends of the trace, clear of the dial's bracket in the middle */
         tag_make(g_scr, amb, "SPECTRUM", P_FX + 6, y + 6, true);
@@ -6167,7 +6262,7 @@ static void build_walkie_portrait(void) {
     }
     /* the voiceprint, edge to edge, as tall as the spectrum, down to the lamp's row */
     yv = ys + hh + 6;
-    vp_make(u, g_scr, P_FX + 4, yv + 3, P_FW - 8, P_LAMPY - 6 - yv - 6);
+    vp_make(u, g_scr, P_FX + 4, yv + 3, P_FW - 8, P_LAMPY - 6 - yv - 6, g_gpu);
     /* the lamp's row: F4's box (buttons_vertical_place) beside its key, the lamp */
     u->lamp = rect(g_scr, P_FX + P_VW + 6, P_LAMPY, P_FW - P_VW - 6, P_LAMP, 3, false);
     lv_obj_set_style_bg_color(u->lamp, amb, 0);
@@ -6213,6 +6308,7 @@ static void walkie_show(bool on) {
         }
         for (int i = 0; i < 5; i++) buttons_refresh(&btn[i]);
         lv_scr_load(g_scr);
+        g_dirty = true;                 /* the GPU's pictures drawn at the next tick (g_gpu_draw) */
         show_walkie();
     } else if (!on && g_portrait) {
         if (g_prev_scr && lv_obj_is_valid(g_prev_scr)) buttons_horizontal(g_prev_scr);   /* under the Sentry again */

@@ -56,10 +56,11 @@ bool drm_wf_rotate(const uint32_t *src, int32_t lx, int32_t ly, int32_t w, int32
 /* The GPU's way to the same (gpu.c): the primary plane's two buffers as dma-bufs (fds the caller owns, their pitch),
  * portrait PANEL x PANEL pixels XRGB8888; false without planes or a turned panel */
 bool drm_wf_export(int fds[2], uint32_t pitch[2], int32_t *w, int32_t *h);
-/* Claimed and landscape: the back buffer's index (0, 1), free once the last flip is done (waited for here); -1 not
- * now. Then, drawn and finished, drm_wf_drawn(): shown at the next drm_commit(), the landscape area noted for a dump */
-int drm_wf_back(void);
-void drm_wf_drawn(int32_t lx, int32_t ly, int32_t w, int32_t h);
+/* Claimed, and the display turned as asked (landscape, or portrait: G held up): the back buffer's index (0, 1),
+ * free once the last flip is done (waited for here); -1 not now. Then, drawn and finished, drm_wf_drawn(): shown at
+ * the next drm_commit(), the area drawn (in the frame's own coordinates) noted for a dump */
+int drm_wf_back(bool portrait);
+void drm_wf_drawn(bool portrait, int32_t x, int32_t y, int32_t w, int32_t h);
 /* Shows what was flushed or presented since the last call, at the next vblank:
  * once per main loop, after lv_timer_handler() */
 void drm_commit(void);

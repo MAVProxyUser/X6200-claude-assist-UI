@@ -108,7 +108,8 @@ static bool                 portrait_mode;  /* LVGL renders 480x800: turned 180,
 static bool                 wf_claimed;     /* a picture drawn on the primary plane by its owner (drm_wf_rotate) */
 static const uint32_t       *wf_src;        /* its last one, landscape: into wf_shadow only for a dump */
 static lv_area_t            wf_src_a;
-static int                  wf_gpu_buf = -1;    /* the buffer the GPU drew last (drm_wf_drawn), its area wf_src_a */
+static int                  wf_gpu_buf = -1;    /* the buffer the GPU drew last (drm_wf_drawn) */
+static lv_area_t            wf_gpu_p;           /* and where, in the panel's own coordinates */
 
 /**********************
  *   STATIC FUNCTIONS
@@ -426,9 +427,9 @@ static void wf_src_shadow(void) {
         rotate_into(wf_shadow, PANEL_W, &wf_src_a, wf_src);
     } else if (wf_claimed && wf_gpu_buf >= 0 && wf_shadow) {
         const struct drm_buffer *b  = &primary.bufs[wf_gpu_buf];
-        int32_t                  px = wf_src_a.y1, pw = lv_area_get_height(&wf_src_a);
+        int32_t                  px = wf_gpu_p.x1, pw = lv_area_get_width(&wf_gpu_p);
 
-        for (int32_t y = LAND_W - 1 - wf_src_a.x2; y <= LAND_W - 1 - wf_src_a.x1; y++) {
+        for (int32_t y = wf_gpu_p.y1; y <= wf_gpu_p.y2; y++) {
             memcpy(wf_shadow + y * PANEL_W + px, b->map + y * b->pitch + px * 4, (size_t) pw * 4);
         }
     }
@@ -740,19 +741,29 @@ bool drm_wf_export(int fds[2], uint32_t pitch[2], int32_t *w, int32_t *h) {
 #endif
 }
 
-int drm_wf_back(void) {
-    if (!planes || !wf_claimed || portrait_mode || fd < 0) {
+int drm_wf_back(bool portrait) {
+    if (!planes || !wf_claimed || portrait_mode != portrait || fd < 0) {
         return -1;
     }
     wait_flip();                        /* the back buffer was on screen until this flip */
     return primary.back;
 }
 
-void drm_wf_drawn(int32_t lx, int32_t ly, int32_t w, int32_t h) {
+void drm_wf_drawn(bool portrait, int32_t x, int32_t y, int32_t w, int32_t h) {
+    lv_area_t p;
+
+    if (portrait) {                     /* the GUI turned 180 there: x, y the panel's PANEL_W - x, PANEL_H - y */
+        p = (lv_area_t){ PANEL_W - x - w, PANEL_H - y - h, PANEL_W - 1 - x, PANEL_H - 1 - y };
+    } else {                            /* landscape x, y: the panel's row LAND_W - 1 - x, column y */
+        p = (lv_area_t){ y, LAND_W - x - w, y + h - 1, LAND_W - 1 - x };
+    }
     wf_src     = NULL;
     wf_gpu_buf = primary.back;
-    wf_src_a   = (lv_area_t){ lx, ly, lx + w - 1, ly + h - 1 };
-    primary.ready = true;
+    if (_lv_area_intersect(&wf_gpu_p, &p, &(lv_area_t){ 0, 0, PANEL_W - 1, PANEL_H - 1 })) {
+        primary.ready = true;
+    } else {
+        wf_gpu_buf = -1;
+    }
 }
 
 uint32_t drm_frame_ms(void) {

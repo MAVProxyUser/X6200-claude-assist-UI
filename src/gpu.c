@@ -134,6 +134,7 @@ static void (*p_glEnableVertexAttribArray)(GLuint);
 static void (*p_glDrawArrays)(GLenum, GLint, GLsizei);
 static void (*p_glFinish)(void);
 static void (*p_glGenTextures)(GLsizei, GLuint *);
+static void (*p_glDeleteTextures)(GLsizei, const GLuint *);
 static void (*p_glBindTexture)(GLenum, GLuint);
 static void (*p_glTexImage2D)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *);
 static void (*p_glTexSubImage2D)(GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void *);
@@ -146,18 +147,24 @@ static void (*p_glBindBuffer)(GLenum, GLuint);
 
 /* ---- State ---- */
 
+#define SLOTS 4                     /* the pictures' data: A/B's halves (0, 1), G's spectrum (2), its voiceprint (3) */
+
+enum { P_ROWS, P_TRACE, P_RECT, P_FLAT, P_VP, P_N };
+
 static int    tried;                /* 0 not yet, 1 working, -1 not here */
-static int    n_cols, n_rows;       /* the pictures' columns, the levels' ring rows */
 static int    pw, ph;               /* the panel, portrait */
 static GLuint fbo[2];
-static GLuint prog_rows, prog_trace, prog_rect;
-static GLint  u_rows_panel, u_rows_lv, u_rows_pal, u_rows_t, u_rows_fade, u_rows_amp;
-static GLint  u_tr_panel, u_tr_tr, u_tr_pal, u_tr_bg, u_tr_grid, u_tr_h, u_tr_db;
-static GLint  u_rect_panel, u_rect_color;
-static GLuint tex_pal, tex_lv[2], tex_tr[2];
-static int    fx, fy, fw, fh;       /* this frame's picture, landscape */
-static bool   in_frame;
-static uint32_t frame_bg;
+static GLuint prog[P_N];
+static GLint  u_panel[P_N], u_port[P_N];
+static GLint  u_rows_lv, u_rows_pal, u_rows_t, u_rows_fade, u_rows_amp;
+static GLint  u_tr_tr, u_tr_pal, u_tr_bg, u_tr_grid, u_tr_h, u_tr_db;
+static GLint  u_rect_color;
+static GLint  u_fl_lv, u_fl_pal, u_fl_bg, u_fl_band, u_fl_head, u_fl_ring, u_fl_count;
+static GLint  u_vp_lv, u_vp_pal, u_vp_head, u_vp_cols;
+static GLuint tex_pal[2], tex_lv[SLOTS], tex_tr[SLOTS];
+static int    s_cols[SLOTS], s_rows[SLOTS];
+static bool   in_frame, portrait;
+static int    cx0, cy0, cw0, ch0;   /* the clip: the picture last cleared (gpu_clear) */
 
 static void *sym(void *lib, const char *name) {
     void *p = lib ? dlsym(lib, name) : NULL;
@@ -203,7 +210,7 @@ static bool load(void) {
           LOAD(gles, glGetUniformLocation) && LOAD(gles, glUniform1i) && LOAD(gles, glUniform1f) &&
           LOAD(gles, glUniform2f) && LOAD(gles, glUniform4f) && LOAD(gles, glVertexAttribPointer) &&
           LOAD(gles, glEnableVertexAttribArray) && LOAD(gles, glDrawArrays) && LOAD(gles, glFinish) &&
-          LOAD(gles, glGenTextures) && LOAD(gles, glBindTexture) && LOAD(gles, glTexImage2D) &&
+          LOAD(gles, glGenTextures) && LOAD(gles, glDeleteTextures) && LOAD(gles, glBindTexture) && LOAD(gles, glTexImage2D) &&
           LOAD(gles, glTexSubImage2D) && LOAD(gles, glTexParameteri) && LOAD(gles, glActiveTexture) &&
           LOAD(gles, glPixelStorei) && LOAD(gles, glGetString) && LOAD(gles, glGetError) &&
           LOAD(gles, glBindBuffer);
@@ -213,15 +220,17 @@ static bool load(void) {
 
 /* ---- Shaders ---- */
 
-/* Landscape pixel edges turned to the portrait panel: landscape x edge E is the panel's row edge LAND_W - E,
- * landscape y its column; GL's y 0 is the buffer's first row (the panel's top) */
+/* Pixel edges turned onto the portrait panel: landscape x edge E is the panel's row edge LAND_W - E, landscape y
+ * its column; portrait (G held up: the GUI turned 180) x, y are the panel's PANEL_W - x, PANEL_H - y. GL's y 0 is
+ * the buffer's first row (the panel's top) */
 static const char *vs_src =
     "attribute vec2 a_pos;\n"
     "attribute vec2 a_uv;\n"
     "uniform vec2 u_panel;\n"
+    "uniform float u_port;\n"
     "varying vec2 v_uv;\n"
     "void main() {\n"
-    "    vec2 p = vec2(a_pos.y, u_panel.y - a_pos.x);\n"
+    "    vec2 p = u_port > 0.5 ? u_panel - a_pos : vec2(a_pos.y, u_panel.y - a_pos.x);\n"
     "    gl_Position = vec4(p / u_panel * 2.0 - 1.0, 0.0, 1.0);\n"
     "    v_uv = a_uv;\n"
     "}\n";
@@ -282,6 +291,42 @@ static const char *fs_rect_src =
     "precision mediump float;\n"
     "uniform vec4 u_color;\n"
     "void main() { gl_FragColor = u_color; }\n";
+
+/* The rows flat, a waterfall (G's 2D, ws_draw): u_band pixels a row, the newest on top, each its level's colour
+ * dimmed by how weak it is; below the rows there are, the background */
+static const char *fs_flat_src =
+    "precision mediump float;\n"
+    "uniform sampler2D u_lv;\n"
+    "uniform sampler2D u_pal;\n"
+    "uniform vec4 u_bg;\n"
+    "uniform float u_band;\n"
+    "uniform float u_head;\n"
+    "uniform float u_ring;\n"
+    "uniform float u_count;\n"
+    "varying vec2 v_uv;\n"
+    "void main() {\n"
+    "    float r = floor(v_uv.y / u_band);\n"
+    "    if (r >= u_count) { gl_FragColor = u_bg; return; }\n"
+    "    float ring = mod(u_head - 1.0 - r + u_ring, u_ring);\n"
+    "    float v = texture2D(u_lv, vec2(v_uv.x, (ring + 0.5) / u_ring)).r;\n"
+    "    vec3 c = texture2D(u_pal, vec2(v * 0.99609375 + 0.001953125, 0.5)).rgb;\n"
+    "    gl_FragColor = vec4(c * (0.12 + 0.88 * v), 1.0);\n"
+    "}\n";
+
+/* The voiceprint (vp_column): a ring of columns, the oldest at the left from u_head on, each column's rows the
+ * levels from the top (the highest frequency) down, coloured by the voiceprint's own ramp */
+static const char *fs_vp_src =
+    "precision mediump float;\n"
+    "uniform sampler2D u_lv;\n"
+    "uniform sampler2D u_pal;\n"
+    "uniform float u_head;\n"
+    "uniform float u_cols;\n"
+    "varying vec2 v_uv;\n"
+    "void main() {\n"
+    "    float c = mod(u_head + floor(v_uv.x), u_cols);\n"
+    "    float v = texture2D(u_lv, vec2((c + 0.5) / u_cols, v_uv.y)).r;\n"
+    "    gl_FragColor = vec4(texture2D(u_pal, vec2(v * 0.99609375 + 0.001953125, 0.5)).rgb, 1.0);\n"
+    "}\n";
 
 static GLuint shader(GLenum type, const char *src) {
     GLuint s = p_glCreateShader(type);
@@ -419,30 +464,40 @@ static bool setup(void) {
         close(fds[i]);                  /* the image holds its own reference */
         fds[i] = -1;
     }
-    prog_rows  = program(fs_rows_src);
-    prog_trace = program(fs_trace_src);
-    prog_rect  = program(fs_rect_src);
-    if (!prog_rows || !prog_trace || !prog_rect) goto fail;
-    u_rows_panel = p_glGetUniformLocation(prog_rows, "u_panel");
-    u_rows_lv    = p_glGetUniformLocation(prog_rows, "u_lv");
-    u_rows_pal   = p_glGetUniformLocation(prog_rows, "u_pal");
-    u_rows_t     = p_glGetUniformLocation(prog_rows, "u_t");
-    u_rows_fade  = p_glGetUniformLocation(prog_rows, "u_fade");
-    u_rows_amp   = p_glGetUniformLocation(prog_rows, "u_amp");
-    u_tr_panel   = p_glGetUniformLocation(prog_trace, "u_panel");
-    u_tr_tr      = p_glGetUniformLocation(prog_trace, "u_tr");
-    u_tr_pal     = p_glGetUniformLocation(prog_trace, "u_pal");
-    u_tr_bg      = p_glGetUniformLocation(prog_trace, "u_bg");
-    u_tr_grid    = p_glGetUniformLocation(prog_trace, "u_grid");
-    u_tr_h       = p_glGetUniformLocation(prog_trace, "u_h");
-    u_tr_db      = p_glGetUniformLocation(prog_trace, "u_db");
-    u_rect_panel = p_glGetUniformLocation(prog_rect, "u_panel");
-    u_rect_color = p_glGetUniformLocation(prog_rect, "u_color");
-    tex_pal = texture(256, 1, GL_RGBA);
-    for (int s = 0; s < 2; s++) {
-        tex_lv[s] = texture(n_cols, n_rows, GL_LUMINANCE);
-        tex_tr[s] = texture(n_cols, 1, GL_RGBA);
+    {
+        const char *src[P_N] = {fs_rows_src, fs_trace_src, fs_rect_src, fs_flat_src, fs_vp_src};
+
+        for (int i = 0; i < P_N; i++) {
+            if (!(prog[i] = program(src[i]))) goto fail;
+            u_panel[i] = p_glGetUniformLocation(prog[i], "u_panel");
+            u_port[i]  = p_glGetUniformLocation(prog[i], "u_port");
+        }
     }
+    u_rows_lv    = p_glGetUniformLocation(prog[P_ROWS], "u_lv");
+    u_rows_pal   = p_glGetUniformLocation(prog[P_ROWS], "u_pal");
+    u_rows_t     = p_glGetUniformLocation(prog[P_ROWS], "u_t");
+    u_rows_fade  = p_glGetUniformLocation(prog[P_ROWS], "u_fade");
+    u_rows_amp   = p_glGetUniformLocation(prog[P_ROWS], "u_amp");
+    u_tr_tr      = p_glGetUniformLocation(prog[P_TRACE], "u_tr");
+    u_tr_pal     = p_glGetUniformLocation(prog[P_TRACE], "u_pal");
+    u_tr_bg      = p_glGetUniformLocation(prog[P_TRACE], "u_bg");
+    u_tr_grid    = p_glGetUniformLocation(prog[P_TRACE], "u_grid");
+    u_tr_h       = p_glGetUniformLocation(prog[P_TRACE], "u_h");
+    u_tr_db      = p_glGetUniformLocation(prog[P_TRACE], "u_db");
+    u_rect_color = p_glGetUniformLocation(prog[P_RECT], "u_color");
+    u_fl_lv      = p_glGetUniformLocation(prog[P_FLAT], "u_lv");
+    u_fl_pal     = p_glGetUniformLocation(prog[P_FLAT], "u_pal");
+    u_fl_bg      = p_glGetUniformLocation(prog[P_FLAT], "u_bg");
+    u_fl_band    = p_glGetUniformLocation(prog[P_FLAT], "u_band");
+    u_fl_head    = p_glGetUniformLocation(prog[P_FLAT], "u_head");
+    u_fl_ring    = p_glGetUniformLocation(prog[P_FLAT], "u_ring");
+    u_fl_count   = p_glGetUniformLocation(prog[P_FLAT], "u_count");
+    u_vp_lv      = p_glGetUniformLocation(prog[P_VP], "u_lv");
+    u_vp_pal     = p_glGetUniformLocation(prog[P_VP], "u_pal");
+    u_vp_head    = p_glGetUniformLocation(prog[P_VP], "u_head");
+    u_vp_cols    = p_glGetUniformLocation(prog[P_VP], "u_cols");
+    tex_pal[0] = texture(256, 1, GL_RGBA);
+    tex_pal[1] = texture(256, 1, GL_RGBA);
     p_glDisable(GL_DITHER);
     p_glDisable(GL_BLEND);
     p_glBindBuffer(GL_ARRAY_BUFFER, 0);     /* client-side vertex arrays */
@@ -461,57 +516,84 @@ fail:
     return false;
 }
 
-bool gpu_init(int cols, int rows) {
-    if (!tried) {
-        n_cols = cols, n_rows = rows;
-        tried  = setup() ? 1 : -1;
+static bool slot(int s, int cols, int rows) {
+    if (tried <= 0 || s < 0 || s >= SLOTS || cols < 1 || rows < 1) return false;
+    if (s_cols[s] == cols && s_rows[s] == rows) return true;
+    if (tex_lv[s]) {
+        p_glDeleteTextures(1, &tex_lv[s]);
+        p_glDeleteTextures(1, &tex_tr[s]);
     }
-    return tried > 0 && cols == n_cols && rows == n_rows;
+    tex_lv[s] = texture(cols, rows, GL_LUMINANCE);
+    tex_tr[s] = texture(cols, 1, GL_RGBA);
+    s_cols[s] = cols, s_rows[s] = rows;
+    return true;
+}
+
+bool gpu_init(int cols, int rows) {
+    if (!tried) tried = setup() ? 1 : -1;
+    return tried > 0 && slot(0, cols, rows) && slot(1, cols, rows);
 }
 
 bool gpu_ok(void) {
     return tried > 0;
 }
 
-void gpu_palette(const uint32_t *pal) {
+bool gpu_slot(int s, int cols, int rows) {
+    return slot(s, cols, rows);
+}
+
+void gpu_palette(int which, const uint32_t *pal) {
     uint8_t px[256 * 4];
 
-    if (tried <= 0) return;
+    if (tried <= 0 || which < 0 || which > 1) return;
     for (int i = 0; i < 256; i++) {
         px[i * 4]     = (uint8_t)(pal[i] >> 16);
         px[i * 4 + 1] = (uint8_t)(pal[i] >> 8);
         px[i * 4 + 2] = (uint8_t)pal[i];
         px[i * 4 + 3] = 255;
     }
-    p_glBindTexture(GL_TEXTURE_2D, tex_pal);
+    p_glBindTexture(GL_TEXTURE_2D, tex_pal[which]);
     p_glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
 }
 
+static bool slot_ok(int s) {
+    return tried > 0 && s >= 0 && s < SLOTS && tex_lv[s];
+}
+
 void gpu_levels_row(int s, int ring_row, const uint8_t *levels) {
-    if (tried <= 0 || s < 0 || s > 1 || ring_row < 0 || ring_row >= n_rows) return;
+    if (!slot_ok(s) || ring_row < 0 || ring_row >= s_rows[s]) return;
     p_glBindTexture(GL_TEXTURE_2D, tex_lv[s]);
     p_glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, ring_row, n_cols, 1, GL_LUMINANCE, GL_UNSIGNED_BYTE, levels);
+    p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, ring_row, s_cols[s], 1, GL_LUMINANCE, GL_UNSIGNED_BYTE, levels);
+}
+
+void gpu_levels_col(int s, int col, const uint8_t *levels) {
+    if (!slot_ok(s) || col < 0 || col >= s_cols[s]) return;
+    p_glBindTexture(GL_TEXTURE_2D, tex_lv[s]);
+    p_glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    p_glTexSubImage2D(GL_TEXTURE_2D, 0, col, 0, 1, s_rows[s], GL_LUMINANCE, GL_UNSIGNED_BYTE, levels);
 }
 
 void gpu_levels_all(int s, const uint8_t *levels) {
-    if (tried <= 0 || s < 0 || s > 1) return;
+    if (!slot_ok(s)) return;
     p_glBindTexture(GL_TEXTURE_2D, tex_lv[s]);
     p_glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, n_cols, n_rows, GL_LUMINANCE, GL_UNSIGNED_BYTE, levels);
+    p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s_cols[s], s_rows[s], GL_LUMINANCE, GL_UNSIGNED_BYTE, levels);
 }
 
 void gpu_trace_set(int s, const uint8_t (*cols)[4]) {
-    if (tried <= 0 || s < 0 || s > 1) return;
+    if (!slot_ok(s)) return;
     p_glBindTexture(GL_TEXTURE_2D, tex_tr[s]);
     p_glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, n_cols, 1, GL_RGBA, GL_UNSIGNED_BYTE, cols);
+    p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s_cols[s], 1, GL_RGBA, GL_UNSIGNED_BYTE, cols);
 }
 
-/* A landscape rectangle as the panel's scissor box: its columns are landscape y, its rows LAND_W - x */
+/* A rectangle of the frame's coordinates as the panel's scissor box: landscape, its columns are y and its rows
+ * LAND_W - x; portrait, turned 180 */
 static void scissor(int x, int y, int w, int h) {
-    p_glScissor(y, ph - (x + w), h, w);
+    if (portrait) p_glScissor(pw - (x + w), ph - (y + h), w, h);
+    else p_glScissor(y, ph - (x + w), h, w);
 }
 
 static void quad(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1) {
@@ -526,69 +608,112 @@ static void rgb4(uint32_t c, float *f) {
     f[0] = ((c >> 16) & 0xff) / 255.0f, f[1] = ((c >> 8) & 0xff) / 255.0f, f[2] = (c & 0xff) / 255.0f;
 }
 
-bool gpu_frame_begin(int x, int y, int w, int h, uint32_t bg) {
-    float c[3];
-    int   b;
+static void use(int i) {
+    p_glUseProgram(prog[i]);
+    p_glUniform2f(u_panel[i], (float)pw, (float)ph);
+    p_glUniform1f(u_port[i], portrait ? 1.0f : 0.0f);
+}
 
-    if (tried <= 0 || (b = drm_wf_back()) < 0) return false;
+static void bind(GLuint data, GLuint pal) {
+    p_glActiveTexture(GL_TEXTURE0);
+    p_glBindTexture(GL_TEXTURE_2D, data);
+    p_glActiveTexture(GL_TEXTURE0 + 1);
+    p_glBindTexture(GL_TEXTURE_2D, pal);
+}
+
+bool gpu_frame_begin(bool port) {
+    int b;
+
+    if (tried <= 0 || (b = drm_wf_back(port)) < 0) return false;
+    portrait = port;
     p_glBindFramebuffer(GL_FRAMEBUFFER, fbo[b]);
     p_glViewport(0, 0, pw, ph);
     p_glEnable(GL_SCISSOR_TEST);
-    scissor(x, y, w, h);
-    rgb4(bg, c);
-    p_glClearColor(c[0], c[1], c[2], 1.0f);
-    p_glClear(GL_COLOR_BUFFER_BIT);
-    fx = x, fy = y, fw = w, fh = h, frame_bg = bg;
     in_frame = true;
     return true;
 }
 
-void gpu_trace(int s, int x, int y, int w, int h, float bot_db, float top_db, uint32_t grid) {
-    float bg[3], gr[3];
+void gpu_clear(int x, int y, int w, int h, uint32_t bg) {
+    float c[3];
 
-    if (!in_frame || h < 2 || s < 0 || s > 1) return;
-    rgb4(frame_bg, bg);
+    if (!in_frame) return;
+    cx0 = x, cy0 = y, cw0 = w, ch0 = h;
+    scissor(x, y, w, h);
+    rgb4(bg, c);
+    p_glClearColor(c[0], c[1], c[2], 1.0f);
+    p_glClear(GL_COLOR_BUFFER_BIT);
+}
+
+void gpu_trace(int s, int x, int y, int w, int h, float bot_db, float top_db, uint32_t grid, uint32_t bg) {
+    float b[3], gr[3];
+
+    if (!in_frame || h < 2 || !slot_ok(s)) return;
+    rgb4(bg, b);
     rgb4(grid, gr);
-    scissor(fx, fy, fw, fh);
-    p_glUseProgram(prog_trace);
-    p_glUniform2f(u_tr_panel, (float)pw, (float)ph);
-    p_glActiveTexture(GL_TEXTURE0);
-    p_glBindTexture(GL_TEXTURE_2D, tex_tr[s]);
-    p_glActiveTexture(GL_TEXTURE0 + 1);
-    p_glBindTexture(GL_TEXTURE_2D, tex_pal);
+    scissor(cx0, cy0, cw0, ch0);
+    use(P_TRACE);
+    bind(tex_tr[s], tex_pal[0]);
     p_glUniform1i(u_tr_tr, 0);
     p_glUniform1i(u_tr_pal, 1);
-    p_glUniform4f(u_tr_bg, bg[0], bg[1], bg[2], 1);
+    p_glUniform4f(u_tr_bg, b[0], b[1], b[2], 1);
     p_glUniform4f(u_tr_grid, gr[0], gr[1], gr[2], 1);
     p_glUniform1f(u_tr_h, (float)h);
-    p_glUniform4f(u_tr_db, bot_db, top_db, (float)n_cols, 0);
+    p_glUniform4f(u_tr_db, bot_db, top_db, (float)s_cols[s], 0);
     quad((float)x, (float)y, (float)(x + w), (float)(y + h), 0, 0, 1, (float)h);
 }
 
-void gpu_rows(int s, int x, int y, int w, int h, int head, int count) {
+void gpu_rows(int s, int x, int y, int w, int h, int head, int count, int depth) {
     float cx = w / 2.0f;
+    int   ring = slot_ok(s) ? s_rows[s] : 0;
 
-    if (!in_frame || h < 8 || s < 0 || s > 1) return;
+    if (!in_frame || h < 8 || !ring || depth < 2) return;
+    if (count > depth) count = depth;
     scissor(x, y, w, h);                /* the back rows' tops clipped at the picture's top, as on the CPU */
-    p_glUseProgram(prog_rows);
-    p_glUniform2f(u_rows_panel, (float)pw, (float)ph);
-    p_glActiveTexture(GL_TEXTURE0);
-    p_glBindTexture(GL_TEXTURE_2D, tex_lv[s]);
-    p_glActiveTexture(GL_TEXTURE0 + 1);
-    p_glBindTexture(GL_TEXTURE_2D, tex_pal);
+    use(P_ROWS);
+    bind(tex_lv[s], tex_pal[0]);
     p_glUniform1i(u_rows_lv, 0);
     p_glUniform1i(u_rows_pal, 1);
     for (int r = count - 1; r >= 0; r--) {  /* the oldest first, at the back: the newer over them */
-        float t      = (float)r / (n_rows - 1);
+        float t      = (float)r / (depth - 1);
         int   yb     = y + h - 2 - (int)(t * h * 0.6f);
         float shrink = 1.0f - 0.36f * t, amp = h * 0.62f * (1.0f - 0.3f * t), fade = 1.0f - 0.62f * t;
-        int   ring   = ((head - 1 - r) % n_rows + n_rows) % n_rows;
+        int   rr     = ((head - 1 - r) % ring + ring) % ring;
 
-        p_glUniform1f(u_rows_t, (ring + 0.5f) / n_rows);
+        p_glUniform1f(u_rows_t, (rr + 0.5f) / ring);
         p_glUniform1f(u_rows_fade, fade);
         p_glUniform1f(u_rows_amp, amp);
         quad(x + cx - cx * shrink, yb - amp, x + cx + cx * shrink, yb + 1.0f, 0, 0, 1, amp + 1.0f);
     }
+}
+
+void gpu_flat(int s, int x, int y, int w, int h, int head, int count, int band, uint32_t bg) {
+    float b[3];
+
+    if (!in_frame || h < 1 || band < 1 || !slot_ok(s)) return;
+    rgb4(bg, b);
+    scissor(x, y, w, h);
+    use(P_FLAT);
+    bind(tex_lv[s], tex_pal[0]);
+    p_glUniform1i(u_fl_lv, 0);
+    p_glUniform1i(u_fl_pal, 1);
+    p_glUniform4f(u_fl_bg, b[0], b[1], b[2], 1);
+    p_glUniform1f(u_fl_band, (float)band);
+    p_glUniform1f(u_fl_head, (float)head);
+    p_glUniform1f(u_fl_ring, (float)s_rows[s]);
+    p_glUniform1f(u_fl_count, (float)(count < h / band ? count : h / band));
+    quad((float)x, (float)y, (float)(x + w), (float)(y + h), 0, 0, 1, (float)h);
+}
+
+void gpu_vp(int s, int x, int y, int w, int h, int head) {
+    if (!in_frame || !slot_ok(s)) return;
+    scissor(x, y, w, h);
+    use(P_VP);
+    bind(tex_lv[s], tex_pal[1]);
+    p_glUniform1i(u_vp_lv, 0);
+    p_glUniform1i(u_vp_pal, 1);
+    p_glUniform1f(u_vp_head, (float)head);
+    p_glUniform1f(u_vp_cols, (float)s_cols[s]);
+    quad((float)x, (float)y, (float)(x + w), (float)(y + h), 0, 0, (float)s_cols[s], 1);
 }
 
 void gpu_rect(int x, int y, int w, int h, uint32_t rgb) {
@@ -596,19 +721,18 @@ void gpu_rect(int x, int y, int w, int h, uint32_t rgb) {
 
     if (!in_frame || w <= 0 || h <= 0) return;
     rgb4(rgb, c);
-    scissor(fx, fy, fw, fh);
-    p_glUseProgram(prog_rect);
-    p_glUniform2f(u_rect_panel, (float)pw, (float)ph);
+    scissor(cx0, cy0, cw0, ch0);
+    use(P_RECT);
     p_glUniform4f(u_rect_color, c[0], c[1], c[2], 1);
     quad((float)x, (float)y, (float)(x + w), (float)(y + h), 0, 0, 0, 0);
 }
 
-void gpu_frame_end(void) {
+void gpu_frame_end(int x, int y, int w, int h) {
     if (!in_frame) return;
     in_frame = false;
     p_glDisable(GL_SCISSOR_TEST);
     p_glFinish();                       /* drawn before the plane is flipped to it */
-    drm_wf_drawn(fx, fy, fw, fh);
+    drm_wf_drawn(portrait, x, y, w, h);
 }
 
 #else  /* no DRM (the Mac's build): no GPU */
@@ -620,11 +744,18 @@ bool gpu_init(int cols, int rows) {
 bool gpu_ok(void) {
     return false;
 }
-void gpu_palette(const uint32_t *pal) {
-    (void)pal;
+bool gpu_slot(int s, int cols, int rows) {
+    (void)s, (void)cols, (void)rows;
+    return false;
+}
+void gpu_palette(int which, const uint32_t *pal) {
+    (void)which, (void)pal;
 }
 void gpu_levels_row(int s, int ring_row, const uint8_t *levels) {
     (void)s, (void)ring_row, (void)levels;
+}
+void gpu_levels_col(int s, int col, const uint8_t *levels) {
+    (void)s, (void)col, (void)levels;
 }
 void gpu_levels_all(int s, const uint8_t *levels) {
     (void)s, (void)levels;
@@ -632,19 +763,30 @@ void gpu_levels_all(int s, const uint8_t *levels) {
 void gpu_trace_set(int s, const uint8_t (*cols)[4]) {
     (void)s, (void)cols;
 }
-bool gpu_frame_begin(int x, int y, int w, int h, uint32_t bg) {
-    (void)x, (void)y, (void)w, (void)h, (void)bg;
+bool gpu_frame_begin(bool port) {
+    (void)port;
     return false;
 }
-void gpu_trace(int s, int x, int y, int w, int h, float bot_db, float top_db, uint32_t grid) {
-    (void)s, (void)x, (void)y, (void)w, (void)h, (void)bot_db, (void)top_db, (void)grid;
+void gpu_clear(int x, int y, int w, int h, uint32_t bg) {
+    (void)x, (void)y, (void)w, (void)h, (void)bg;
 }
-void gpu_rows(int s, int x, int y, int w, int h, int head, int count) {
-    (void)s, (void)x, (void)y, (void)w, (void)h, (void)head, (void)count;
+void gpu_trace(int s, int x, int y, int w, int h, float bot_db, float top_db, uint32_t grid, uint32_t bg) {
+    (void)s, (void)x, (void)y, (void)w, (void)h, (void)bot_db, (void)top_db, (void)grid, (void)bg;
+}
+void gpu_rows(int s, int x, int y, int w, int h, int head, int count, int depth) {
+    (void)s, (void)x, (void)y, (void)w, (void)h, (void)head, (void)count, (void)depth;
+}
+void gpu_flat(int s, int x, int y, int w, int h, int head, int count, int band, uint32_t bg) {
+    (void)s, (void)x, (void)y, (void)w, (void)h, (void)head, (void)count, (void)band, (void)bg;
+}
+void gpu_vp(int s, int x, int y, int w, int h, int head) {
+    (void)s, (void)x, (void)y, (void)w, (void)h, (void)head;
 }
 void gpu_rect(int x, int y, int w, int h, uint32_t rgb) {
     (void)x, (void)y, (void)w, (void)h, (void)rgb;
 }
-void gpu_frame_end(void) {}
+void gpu_frame_end(int x, int y, int w, int h) {
+    (void)x, (void)y, (void)w, (void)h;
+}
 
 #endif
