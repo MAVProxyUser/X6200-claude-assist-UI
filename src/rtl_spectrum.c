@@ -515,6 +515,159 @@ bool rtl_spectrum_frame(float *db, uint16_t cap, uint16_t *n, uint32_t *rate, in
     return got;
 }
 
+/* ---- BOTH's echo. The base sends the speaker's audio back with its receiver's while the GUI plays (base 1.0.8,
+ * measured 2026-11-14: what was played came back 406 ms later at 0.6 of its level), so the X6200's samples mixed in
+ * came back and were played again, over and over till they faded. Cancelled here: the played samples are kept, the
+ * delay of their return is found every 3 s (the captured against the played: their loudness in 10 ms steps, then
+ * sample by sample, decimated, then exact), and an adaptive filter (NLMS, EC_TAPS around that delay) takes their
+ * return out of what the receiver sends before it is mixed ---- */
+
+#define EC_HIST   131072                /* played and captured samples kept: 3 s (a power of two; the search wants 2.2) */
+#define EC_MASK   (EC_HIST - 1)
+#define EC_TAPS   48
+#define EC_PRIOR  20900                 /* the delay as the GUI sees it (474 ms: the base's 406 and the streams' own),
+                                         * used till one is found */
+#define EC_MINLAG 11025                 /* the delay looked for between 250 ms (the speech's own slow swells, nearer, */
+                                        /* are not it) and EC_MAXLAG, short of the echo's echo at twice the delay */
+#define EC_WIN    44100                 /* the delay looked for over the last second */
+#define EC_MAXLAG 33075                 /* 750 ms */
+static int16_t  ec_play[EC_HIST], ec_cap[EC_HIST];
+static uint32_t ec_n;                   /* samples captured (as many played) since BOTH started */
+static int      ec_lo;                  /* the filter's first tap: the return's delay, less half the taps */
+static int      ec_base = -1;           /* the delay less the two queues (the base's and the server's own part):
+                                         * calibrated by ec_find; -1 not yet */
+static int      ec_queues;              /* the queues at this pass: playback waiting + the tap's backlog */
+static float    ec_w[EC_TAPS];
+static uint32_t ec_next;                /* the next look for the delay */
+
+static void ec_reset(void) {
+    memset(ec_play, 0, sizeof(ec_play));
+    memset(ec_cap, 0, sizeof(ec_cap));
+    memset(ec_w, 0, sizeof(ec_w));
+    ec_n    = 0;
+    ec_lo   = EC_PRIOR - EC_TAPS / 2;
+    ec_base = -1;
+    ec_next = EC_WIN + EC_MAXLAG;       /* once there is a window and its lags kept */
+}
+
+/* corr of the captured from sample a (len n, step st) with the played lag samples earlier */
+static float ec_corr(uint32_t a, int n, int lag, int st) {
+    double sxy = 0, sxx = 0, syy = 0;
+
+    for (int i = 0; i < n; i += st) {
+        double y = ec_cap[(a + i) & EC_MASK], x = ec_play[(a + i - lag) & EC_MASK];
+        sxy += x * y, sxx += x * x, syy += y * y;
+    }
+    return (float)(sxy / (sqrt(sxx * syy) + 1e-9));
+}
+
+/* The return's delay, from the last EC_WIN samples: their loudness in 10 ms blocks against the played's over 0 to
+ * EC_MAXLAG, then every 10th sample around the best block, then each sample around that. 0: none clear */
+static float ec_found;                  /* the last search's correlation (for the log) */
+
+static int ec_find(void) {
+    static float ec[EC_WIN / 441], ep[(EC_WIN + EC_MAXLAG) / 441];
+    int          nb = EC_WIN / 441, np = (EC_WIN + EC_MAXLAG) / 441, bl = 0, best = -1;
+    uint32_t     a = ec_n - EC_WIN, ap = ec_n - EC_WIN - EC_MAXLAG;
+    float        bc = 0.2f, mc = 0, mp = 0;
+
+    for (int b = 0; b < nb; b++) {
+        double s = 0;
+        for (int i = 0; i < 441; i++) {
+            double v = ec_cap[(a + b * 441 + i) & EC_MASK];
+            s += v * v;
+        }
+        mc += (ec[b] = (float)sqrt(s / 441)) / nb;
+    }
+    for (int b = 0; b < np; b++) {
+        double s = 0;
+        for (int i = 0; i < 441; i++) {
+            double v = ec_play[(ap + b * 441 + i) & EC_MASK];
+            s += v * v;
+        }
+        mp += (ep[b] = (float)sqrt(s / 441)) / np;
+    }
+    for (int L = EC_MINLAG / 441; L < EC_MAXLAG / 441; L++) {   /* the captured block b against the played EC_MAXLAG/441-L+b */
+        double sxy = 0, sxx = 0, syy = 0;
+        for (int b = 0; b < nb; b++) {
+            double y = ec[b] - mc, x = ep[EC_MAXLAG / 441 - L + b] - mp;
+            sxy += x * y, sxx += x * x, syy += y * y;
+        }
+        float r = (float)(sxy / (sqrt(sxx * syy) + 1e-9));
+        if (r > bc) bc = r, bl = L;
+    }
+    ec_found = bc;
+    if (!bl) return 0;
+    bc = 0.15f;
+    for (int L = bl * 441 - 441; L <= bl * 441 + 441; L += 10) {
+        float r = ec_corr(a, EC_WIN, L, 10);
+        if (r > bc) bc = r, best = L;
+    }
+    if (best < 0) return 0;
+    ec_found = bc;
+    int coarse = best;
+    for (int L = coarse - 10; L <= coarse + 10; L++) {
+        float r = ec_corr(a, EC_WIN / 2, L, 1);
+        if (r > bc) bc = r, best = L;
+    }
+    ec_found = bc;
+    return best;
+}
+
+/* The receiver's n samples (rx) with the played audio's return taken out, into out; then the n samples played (play,
+ * written by the caller after) are kept with ec_played */
+static void ec_cancel(const int16_t *rx, float *out, int n) {
+    for (int k = 0; k < n; k++) {
+        uint32_t i  = ec_n + k;
+        float    y  = 0, nx = 1e4f;
+        float    xs[EC_TAPS];
+
+        ec_cap[i & EC_MASK] = rx[k];
+        for (int j = 0; j < EC_TAPS; j++) {
+            float x = ec_play[(i - ec_lo - j) & EC_MASK];
+            xs[j]   = x;
+            y += ec_w[j] * x;
+            nx += x * x;
+        }
+        float e = rx[k] - y, mu = 0.03f * e / nx;
+
+        for (int j = 0; j < EC_TAPS; j++) ec_w[j] += mu * xs[j];
+        out[k] = e;
+    }
+}
+
+/* Before each pass: the delay now, the base's part and what waits in the two queues (they grow and shrink by whole
+ * chunks as the tap's samples come in bursts: the delay jumped 476 -> 521 ms). The filter follows it; a move of more
+ * than a quarter of its taps starts it again */
+static void ec_track(void) {
+    int q = (int)audio_play_queued() + (int)audio_rx_tap_backlog();
+
+    ec_queues = q;
+    if (ec_base < 0) return;            /* not calibrated: the prior, or the last search's */
+    int lo = ec_base + q - EC_TAPS / 2;
+
+    if (abs(lo - ec_lo) > EC_TAPS / 4) memset(ec_w, 0, sizeof(ec_w));
+    ec_lo = lo;
+}
+
+static void ec_played(const int16_t *play, int n) {
+    for (int k = 0; k < n; k++) ec_play[(ec_n + k) & EC_MASK] = play[k];
+    ec_n += n;
+    if (ec_n >= ec_next) {              /* the delay looked for again: a clear one calibrates the base's part */
+        int d = ec_find();
+
+        ec_next = ec_n + 44100 * 3;
+        if (d > EC_TAPS && ec_found > 0.25f) {
+            int base = d - ec_queues;
+
+            if (ec_base < 0 || abs(base - ec_base) > EC_TAPS / 4)
+                fprintf(stderr, "rtl BOTH echo: the base's part %.1f ms (the queues %.1f), corr %.2f\n", base / 44.1,
+                        ec_queues / 44.1, ec_found);
+            ec_base = ec_base < 0 ? base : (ec_base * 3 + base) / 4;
+        }
+    }
+}
+
 /* The audio to the speaker while listening: one thread for good, that never has to be waited for. It takes the
  * speaker when listening starts (the base in play mode, as the recorder plays; or the Bluetooth headphones when they
  * stand in for it) and gives it back when it ends. audio_play() waits for room in CHUNK at most, so the codec paces
@@ -543,6 +696,7 @@ static void *player_thread(void *arg) {
         if (want_play && atomic_load(&mux) != tapping) {
             tapping = !tapping;
             audio_rx_tap(tapping);
+            if (tapping) ec_reset();    /* BOTH again: its echo's canceller from the start */
         } else if (!want_play && tapping) {
             tapping = false;
             audio_rx_tap(false);
@@ -569,22 +723,30 @@ static void *player_thread(void *arg) {
                 ring_len--;
             }
             pthread_mutex_unlock(&ring_lock);
+            static float rxc[CHUNK];    /* the receiver's, its played audio's return taken out (ec_cancel) */
+            ec_track();
+            ec_cancel(rx, rxc, n);
             double e = 0;
-            for (int k = 0; k < n; k++) e += (double)rx[k] * rx[k];
+            for (int k = 0; k < n; k++) e += (double)rxc[k] * rxc[k];
             rx_rms     = 0.97f * rx_rms + 0.03f * (float)sqrt(e / n);
             float gx   = rx_rms > 1 ? 6000 / rx_rms : 1;
             float to   = !atomic_load(&sql_db) || atomic_load(&sql_open) ? 1.0f : 0.0f;
 
-            gx = gx < 1 ? 1 : gx > 16 ? 16 : gx;
+            gx = gx < 1 ? 1 : gx > 8 ? 8 : gx;     /* 8, not 16: what the canceller misses is not raised past it */
             float ks = atomic_load(&g_stick) / 1000.0f, kx = atomic_load(&g_x62) / 1000.0f;
 
             gx *= kx;
             for (int k = 0; k < n; k++) {
                 if (g < to) g = g + 1.0f / 441 > to ? to : g + 1.0f / 441;
                 else if (g > to) g = g - 1.0f / 441 < to ? to : g - 1.0f / 441;
-                float v = 0.6f * (k < m ? chunk[k] * g * ks : 0) + 0.6f * rx[k] * gx;
-                chunk[k] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+                /* the stick as loud as when it is heard alone (it was at 0.6: A's BOTH under B's RTL), the X6200
+                 * added; a soft knee from 3/4 of full scale in place of a hard clip when both are loud */
+                float v = (k < m ? chunk[k] * g * ks : 0) + 0.6f * rxc[k] * gx, a = fabsf(v);
+
+                if (a > 24000) v = (v > 0 ? 1 : -1) * (24000 + (a - 24000) * 8767 / (a - 24000 + 8767));
+                chunk[k] = (int16_t)v;
             }
+            ec_played(chunk, n);
             audio_play(chunk, n);
             continue;
         }
