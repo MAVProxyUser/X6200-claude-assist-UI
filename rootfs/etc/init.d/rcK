@@ -61,7 +61,14 @@ if $x6200; then
     fi
     mount -o remount,ro / 2>/dev/null
     sync
-    stty -F /dev/ttyS1 1152000 && echo s > /dev/ttyS1
-    # The base cuts the power about 3 s after it. Still here after this, the shutdown goes on as before
-    sleep 6
+    # The base cuts the power about 3 s after it. Now and then it does not act on it: two POWER holds of three
+    # left the radio on (2026-11-15, 04:46 and 07:46; 05:50 went off), each trace the same to the second, the base
+    # at 1.0.8, play mode off the last time. So it is said again while Linux waits for the power to go: 3 times,
+    # 4 s apart (more than the base's 3 s, so a second "s" never comes during a cut it has begun). Still here after
+    # that, the shutdown goes on as before
+    stty -F /dev/ttyS1 1152000
+    for k in 1 2 3; do
+        echo s > /dev/ttyS1
+        sleep 4
+    done
 fi
