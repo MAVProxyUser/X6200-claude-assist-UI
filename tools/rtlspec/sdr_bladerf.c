@@ -242,7 +242,17 @@ static int bl_open(char *tuner, size_t n, uint64_t *lo, uint64_t *hi) {
             fpga_dir_at = dir_stamp();
             return 2;
         }
-        return e == BLADERF_ERR_NODEV ? -1 : 1;
+        if (e == BLADERF_ERR_NODEV) return -1;
+        /* It went while it started (a bladeRF 2.0 on the X6200's HOST port alone browns out as its AD9361 starts: the
+         * errors are "unexpected", "no devices" after it): gone, not busy. Still there after a failed start: said so,
+         * left till it is pulled out (up to v0.3.12.25 both said BUSY, as if another program had it) */
+        if (!bl_present()) {
+            fprintf(stderr, "rtlspec: the bladeRF dropped off USB as it started: it wants its own 5 V or a powered hub\n");
+            return -1;
+        }
+        if (e == BLADERF_ERR_IO || e == BLADERF_ERR_PERMISSION) return 1;     /* held by another program */
+        snprintf(tuner, n, "STARTFAIL");
+        return 2;
     }
     bd = d;
     if (L.fpga_ok(d) != 1) {

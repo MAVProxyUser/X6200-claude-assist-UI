@@ -2273,6 +2273,9 @@ static void stick_why(rtl_spec_state_t st, char *b, size_t n) {
             rtl_spectrum_tuner(tn, sizeof(tn));
             if (!strcmp(tn, "LIBBLADERF"))
                 snprintf(b, n, "THE BLADERF NEEDS LIBBLADERF\n\nNOT ON THIS IMAGE");
+            else if (!strcmp(tn, "STARTFAIL"))
+                snprintf(b, n, "THE BLADERF FAILED AS IT STARTED\n\nMOST LIKELY TOO LITTLE POWER: ITS OWN\n"
+                               "5 V OR A POWERED HUB, THEN PLUG IT IN AGAIN");
             else if (!strcmp(tn, "FIRMWARE") || !strcmp(tn, "FPGA-UPDATE"))
                 snprintf(b, n, "THE BLADERF'S FPGA IMAGE AND ITS\nFIRMWARE DO NOT GO TOGETHER\n\nNUAND'S bladeRF_fw_vX.Y.Z.img IN\n"
                                "/mnt/bladerf UPDATES ITS FIRMWARE");
