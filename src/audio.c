@@ -127,13 +127,6 @@ void audio_rx_tap(bool on) {
     pthread_mutex_unlock(&tap_lock);
 }
 
-size_t audio_rx_tap_backlog(void) {
-    pthread_mutex_lock(&tap_lock);
-    size_t n = tap_len;
-    pthread_mutex_unlock(&tap_lock);
-    return n;
-}
-
 size_t audio_rx_tap_read(int16_t *buf, size_t n) {
     pthread_mutex_lock(&tap_lock);
     if (n > tap_len) n = tap_len;
@@ -339,20 +332,6 @@ int audio_play(int16_t *samples_buf, size_t samples) {
     }
 
     return res;
-}
-
-size_t audio_play_queued(void) {
-    pa_stream            *stm = cur_stm();
-    const pa_buffer_attr *a;
-    size_t                w, q = 0;
-
-    if (!stm) return 0;
-    pa_threaded_mainloop_lock(mloop);
-    w = pa_stream_writable_size(stm);
-    a = pa_stream_get_buffer_attr(stm);
-    if (a && w != (size_t)-1 && a->tlength > w) q = (a->tlength - w) / 2;   /* s16 mono */
-    pa_threaded_mainloop_unlock(mloop);
-    return q;
 }
 
 /* Drops the queued audio, so a stop is immediate. */

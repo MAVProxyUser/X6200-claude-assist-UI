@@ -634,8 +634,14 @@ last seconds, the strongest signals named over it and the screen's channel brack
   (the base sends its receiver to the processor while it plays the GUI's audio), OFF silencing the speaker (neither radio, the volume kept).
   **Each radio keeps its own volume**: the VOL knob sets the X6200's on A and the stick's on B (on the other screens,
   the one heard), and each is played at its own wherever it is heard later; BOTH sets the speaker at the louder and
-  scales the other down in the mix, so equal volumes sound about equal (each radio's audio is levelled first): turn
-  either one to match them. While BOTH is heard the legend and the volume's word show the other's beside it
+  scales the other down in the mix. **BOTH plays each as it comes**, nothing levelled or raised: the stick exactly as
+  on B, the X6200 at A's volume, added (a soft knee only where the sum would clip). The stick's audio is buffered
+  150 ms there so its 50 ms packets never leave gaps. One thing is taken out: the base sends back whatever it plays
+  inside its receiver's audio (inverted, at about 0.8, half a second later), which mixed in again was the echo that
+  repeated till it faded. The GUI subtracts that copy before the mix: it learns the base's return from the stick's
+  part of the audio (never from the X6200's, which made it over-shoot and ring), follows the delay when it jumps,
+  and keeps what it learnt in `/mnt/both_echo.bin` for the next start. For the second or two it cannot (BOTH just
+  started, or the delay jumped), the X6200 is held back and fades back in. While BOTH is heard the legend and the volume's word show the other's beside it
   (`VOLUME 22 (RTL 29)`). The X6200's is the radio's own volume setting; the stick's is kept beside it. The speaker changes only when A
   or B is shown (or C plays an entry, or G a channel); the other screens keep what was heard last. RTL and BOTH can
   be chosen with no stick plugged in: the X6200 is heard alone till one is, and **the moment an RTL-SDR is plugged in

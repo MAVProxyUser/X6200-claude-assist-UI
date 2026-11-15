@@ -49,11 +49,6 @@ void audio_gain_db_transition(int16_t *buf, size_t samples, float gain1, float g
 /* The receiver's audio kept for the GUI's own playback (on), or not; read: up to n samples of it, as many as came */
 void audio_rx_tap(bool on);
 size_t audio_rx_tap_read(int16_t *buf, size_t samples);
-/* The tap's samples captured and not yet read (BOTH's echo: how late what is read now is) */
-size_t audio_rx_tap_backlog(void);
-/* The playback's samples written and not yet played out of the stream's buffer (BOTH's echo: how long one written
- * now waits to be heard) */
-size_t audio_play_queued(void);
 
 /* The receiver's audio for a picture of it (a voiceprint): kept while on; read as the tap above, apart from it */
 void audio_scope(bool on);
