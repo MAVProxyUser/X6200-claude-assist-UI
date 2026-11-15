@@ -3709,11 +3709,9 @@ static const char *f_label(int k) {
             else snprintf(s, sizeof(s), "Scan Cfg");
             return s;
         }
-        case SCR_WALKIE: {
-            if (k < 4) walkie_key_label(k, s, sizeof(s));
-            else snprintf(s, sizeof(s), "%s", g_armed ? "TX\nARM" : "TX");    /* narrow: the lamp says the rest */
+        case SCR_WALKIE:
+            walkie_key_label(k, s, sizeof(s));
             return s;
-        }
         case SCR_TRACK:         /* SCAN CFG: A's settings and its lock, or C's stick */
             if (cfg_from == SCR_SCAN) {
                 static const char *const m[] = {"Mode:\nAuto", "Mode:\nSemi", "Mode:\nManual"};
@@ -3950,12 +3948,11 @@ static void fkey(int k) {
                 go(SCR_TRACK);
             }
             break;
-        case SCR_WALKIE:                /* CH- and CH+ on CB only (walkie_ch says nothing elsewhere) */
+        case SCR_WALKIE:                /* CH- and CH+ on CB only (walkie_ch does nothing elsewhere); F3 nothing */
             if (k == 0) walkie_ch(-1, 0);
             if (k == 1) walkie_ch(1, 0);
-            if (k == 2) walkie_group_mode();
             if (k == 3) ws_view_next();
-            if (k == 4) walkie_tx_note();
+            if (k == 4) walkie_group_mode();
             break;
         case SCR_TRACK:
             if (k == 4) {
@@ -4746,11 +4743,14 @@ static void build_system(lv_obj_t *p) {
 #define P_VX    (PW - 3 - P_BAR)        /* the arm down the right: the landscape bar's place (3 px from the edge) */
 #define P_TOP   (6 + P_BAR + 6)         /* under the arm across the top */
 #define P_KEY   160                     /* the keys' pitch: F1 at the top */
-#define P_KW    76                      /* F3 (group and mode) and F4 (view): the only keys G names */
-#define P_X     (P_KW + 6)              /* beside them */
+#define P_KW    76                      /* F5 (group and mode): its name in two lines */
+#define P_VW    34                      /* F4 (view): 3D or 2D */
+#define P_X     (P_VW + 6)              /* beside F4 */
 #define P_W     (P_VX - 6 - P_X)
-#define P_FX    6                       /* beside F1, F2 and F5 (no box: CB's CH -/+, the TX lock, A/B's too):
-                                         * the widgets from the screen's edge */
+#define P_SX    (P_KW + 6)              /* beside F5 */
+#define P_SW    (P_VX - 6 - P_SX)
+#define P_FX    6                       /* beside F1, F2 and F3 (no box: CB's CH -/+ on F1 and F2): the widgets from
+                                         * the screen's edge */
 #define P_FW    (P_VX - 6 - P_FX)
 /* The arm down the right as the landscape bar: its name's line 3 px under the bar's top, the state's 24 px under it
  * (their middles across the arm), the text from 60 to 740 along it as the bar's from x 60 to 740 */
@@ -5249,7 +5249,7 @@ static void w_mode_here(int m) {
     tune((int32_t)w_hz(), w_x62(m, w_hz()));
     w_mode = m;
     show_walkie();
-    for (int k = 0; k < 4; k++) buttons_refresh(&btn[k]);
+    for (int k = 0; k < 5; k++) buttons_refresh(&btn[k]);
 }
 
 /* The next group (dir 1: BAND UP, the MFK off CB) or the one before, at its home channel in its own mode: every band
@@ -5324,17 +5324,20 @@ static bool dial_held(void) {
     return true;
 }
 
-/* F1 to F4's names on G: CH- and CH+ only on a service's channels, the group and mode (F3), the picture's view (F4) */
+/* The F keys' names on G: CH- and CH+ only on a service's channels (no box held up), nothing on F3, the picture's
+ * view on F4 (a slim box), the group and mode on F5 */
 static void walkie_key_label(int k, char *s, size_t n) {
     int i = w_match(), g;
 
     if (k <= 1) {
-        snprintf(s, n, "%s", w_chan(i) ? (k ? "CH +" : "CH -") : "");      /* no box on G held up */
+        snprintf(s, n, "%s", w_chan(i) ? (k ? "CH +" : "CH -") : "");
     } else if (k == 2) {
+        s[0] = 0;
+    } else if (k == 3) {
+        snprintf(s, n, "%s", ws_3d ? "3D" : "2D");
+    } else {
         g = i >= 0 ? i : w_start(w_hz());
         snprintf(s, n, "%s\n%s", g >= 0 ? w_chs[g].grp : "-", w_modes[w_mode_now()].name);
-    } else {
-        snprintf(s, n, "View:\n%s", ws_3d ? "3D" : "Flat");
     }
 }
 
@@ -5475,7 +5478,7 @@ static void ws_feed(void) {
 /* F4 on G: the picture's rows in 3D or flat */
 static void ws_view_next(void) {
     ws_3d = !ws_3d;
-    if (wui->ws_cap_l) tag_text(wui->ws_cap_l, ws_3d ? "100 KHZ  3D" : "100 KHZ  FLAT", wui->ws_cap_x, wui->ws_cap_y, false);
+    if (wui->ws_cap_l) tag_text(wui->ws_cap_l, ws_3d ? "100 KHZ  3D" : "100 KHZ  2D", wui->ws_cap_x, wui->ws_cap_y, false);
     ws_draw();
     buttons_refresh(&btn[3]);
 }
@@ -5506,7 +5509,7 @@ static void show_walkie(void) {
 
         if (k != said) {
             said = k;
-            for (int b = 0; b < 4; b++) buttons_refresh(&btn[b]);
+            for (int b = 0; b < 5; b++) buttons_refresh(&btn[b]);
         }
     }
     (void)ch;
@@ -5562,8 +5565,7 @@ static void show_walkie(void) {
 
         if (bc) snprintf(pwc, sizeof(pwc), "#%06X %s#", (unsigned)bc, pw1);
         else snprintf(pwc, sizeof(pwc), "%s", pw1);
-        lv_label_set_text_fmt(wui->info_l, "LINK    %s  %s\nPOWER   %s\n        %s\nSYSTEM  %s  %s\nTIME    %s",
-                              lk, tx, pwc, pw2, sy1, sy2, hm);
+        lv_label_set_text_fmt(wui->info_l, "%s  %s\n%s\n%s\n%s  %s", lk, tx, pwc, pw2, sy1, sy2);  /* the time: the bars' */
         lv_label_set_text(wui->ch.opt[0], nm);
         if (wui->status_l) {            /* the title bar's line, as the other screens' (show_head) */
             char        pre[96], line[192], tc[48] = "", dev[64] = "";
@@ -5788,8 +5790,8 @@ static void build_walkie_portrait(void) {
     badge_turned(PW - 43, PH - 50);     /* and the bar's other end */
 
     /* Three bands by the keys beside them. F1 and F2 have no box (CB's CH -/+ only; the knobs step CB too): the
-     * channel and the spectrum from the screen's edge; beside F3 and F4 the voiceprint and the lamp under it; F5 has
-     * none (A/B arms and locks): the radio's state from the edge */
+     * channel and the spectrum from the screen's edge; beside F3 (none) and F4 (slim) the voiceprint and the lamp
+     * under it; beside F5 (group and mode) the radio's state */
     int y1 = 2 * P_KEY - 2, y2 = 2 * P_KEY + 2, y3 = 4 * P_KEY - 2, y4 = 4 * P_KEY + 2;
 
     /* the channel: its number big, beside it the radio, the group and the frequency; under them what is there, and
@@ -5825,19 +5827,19 @@ static void build_walkie_portrait(void) {
         tag_make(g_scr, amb, "SPECTRUM", P_FX + 6, y + 6, true);
         u->ws_cap_x = P_FX + P_FW - 6;
         u->ws_cap_y = y + 6;
-        u->ws_cap_l = tag_make(g_scr, amb, ws_3d ? "100 KHZ  3D" : "100 KHZ  FLAT", u->ws_cap_x, u->ws_cap_y, false);
+        u->ws_cap_l = tag_make(g_scr, amb, ws_3d ? "100 KHZ  3D" : "100 KHZ  2D", u->ws_cap_x, u->ws_cap_y, false);
         ws_draw();
     }
-    /* beside F3 and F4: the voiceprint, the lamp under it */
+    /* beside F3 and F4: the voiceprint, the lamp under it, all but F4's slim box wide */
     vp_make(u, g_scr, P_X + 4, y2 + 3, P_W - 8, y3 - 52 - (y2 + 3) - 3);
     u->lamp = rect(g_scr, P_X, y3 - 46, P_W, 46, 3, false);
     lv_obj_set_style_bg_color(u->lamp, amb, 0);
     u->lamp_l = label(g_scr, &pixel_28, amb, P_X, y3 - 37, P_W, LV_TEXT_ALIGN_CENTER, "RX  QUIET");
-    /* beside F5: the radio's state and a word for what was refused, from the edge */
-    rect(g_scr, P_FX, y4, P_FW, PH - 6 - y4, 3, false);
-    u->info_l = label(g_scr, &pixel_20, amb, P_FX + 8, y4 + 6, P_FW - 16, LV_TEXT_ALIGN_LEFT, "");
+    /* beside F5: the radio's state and a word for what was refused */
+    rect(g_scr, P_SX, y4, P_SW, PH - 6 - y4, 3, false);
+    u->info_l = label(g_scr, &pixel_20, amb, P_SX + 8, y4 + 6, P_SW - 16, LV_TEXT_ALIGN_LEFT, "");
     lv_label_set_recolor(u->info_l, true);      /* the battery's line coloured as it runs down */
-    u->msg_l  = label(g_scr, &pixel_20, amb, P_FX + 8, PH - 6 - 28, P_FW - 16, LV_TEXT_ALIGN_LEFT, "");
+    u->msg_l  = label(g_scr, &pixel_20, amb, P_SX + 8, PH - 6 - 28, P_SW - 16, LV_TEXT_ALIGN_LEFT, "");
 }
 
 /* G shown (on) or left: held up in portrait where the build can, its own screen in place of the Sentry's */
@@ -5847,7 +5849,7 @@ static void walkie_show(bool on) {
         wui        = &w_port;
         g_prev_scr = lv_scr_act();
         {   /* the F keys reach only buttons on the screen shown; only F3 and F4 named (the others' keys work) */
-            static const lv_coord_t ws[5] = {0, 0, P_KW, P_KW, 0};
+            static const lv_coord_t ws[5] = {0, 0, 0, P_VW, P_KW};
 
             buttons_vertical_w(g_scr, ws, P_KEY, P_TOP);
         }
