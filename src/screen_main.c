@@ -19,6 +19,7 @@
 #include "waterfall_view.h"
 #include "util.h"
 #include "radio.h"
+#include "rtl_spectrum.h"
 #include "gui_events.h"
 #include "msg_box.h"
 #include "msg_note.h"
@@ -904,6 +905,20 @@ static void on_buttons_hide_change(Subject *subj, void *user_data) {
 }
 
 /* Front keys. Most act on the release (a press) or on the long press, not both */
+/* POWER held (on the radio, from the remote) or the battery spent: the same switch-off from any screen or app. What
+ * plays through the base stops first (the Sentry's stick: LISTEN RTL, BOTH and OFF keep the base playing the GUI's
+ * audio), then radio_poweroff() leaves the base with nothing set before Linux's shutdown and the "s" at its end */
+static void power_off_now(void) {
+    msg_update_text_fmt("Power off");
+    cluster_client_stop();          /* the cluster link closed, not left to time out at the node */
+    if (radio_get_state() == RADIO_RX)
+        band_keep_end();            /* the Scanner or Propagation open: the dials back first, never on the air */
+    rtl_spectrum_mux(false);
+    rtl_spectrum_listen(0, 0);
+    rtl_spectrum_mute(false);
+    radio_poweroff();
+}
+
 static void front_key_cb(lv_event_t *e) {
     event_keypad_t *ev   = lv_event_get_param(e);
     bool            tap  = ev->state == KEYPAD_RELEASE;
@@ -994,11 +1009,7 @@ static void front_key_cb(lv_event_t *e) {
             if (tap) {
                 backlight_switch();
             } else if (hold) {
-                msg_update_text_fmt("Power off");
-                cluster_client_stop();      /* the cluster link closed, not left to time out at the node */
-                if (radio_get_state() == RADIO_RX)
-                    band_keep_end();        /* the Scanner or Propagation open: the dials back first, never on the air */
-                radio_poweroff();
+                power_off_now();
             }
             break;
 
@@ -2022,12 +2033,8 @@ static lv_timer_t *power_off_timer;
 
 static void power_off_cb(lv_timer_t *t) {
     power_off_timer = NULL;     /* one shot: LVGL deletes it */
-    msg_update_text_fmt("Power off");
     radio_set_charger(true);
-    cluster_client_stop();
-    if (radio_get_state() == RADIO_RX)
-        band_keep_end();
-    radio_poweroff();
+    power_off_now();
 }
 
 void main_screen_notify_low_power(bool is_low) {

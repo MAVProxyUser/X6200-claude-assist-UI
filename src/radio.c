@@ -1079,7 +1079,21 @@ static void save_log(void) {
     fclose(in);
 }
 
+static void play_mode_apply(audio_play_mode_t mode);
+
 void radio_poweroff() {
+    /* Every switch-off from the same base state, whatever was showing (2026-11-15: one left the radio on, the screen
+     * and LISTEN it had not known). Nothing the GUI set is left set: the base gets the GUI's audio no more (play or
+     * record: the Sentry's RTL, BOTH and OFF, C's stick entries, AIRSPACE, a voice message or the recorder), the mics
+     * as set again, nothing on the air (PTT, the GUI's audio, a tune, an SWR scan), the CW key up. Base 1.0.8 ignores
+     * the "s" that switches it off with its power-off bit set (hw_poweroff); whether another bit of that register
+     * does is not known, so none is left on */
+    WITH_RADIO_LOCK(hw_set_i(HW_PTT, false));
+    WITH_RADIO_LOCK(hw_set_i(HW_MODEM, false));
+    WITH_RADIO_LOCK(hw_set_i(HW_ATU_TUNE, false));
+    WITH_RADIO_LOCK(hw_set_i(HW_SWRSCAN, false));
+    WITH_RADIO_LOCK(play_mode_apply(AUDIO_PLAY_OFF));
+    hw_pin_set(HW_PIN_MORSE_KEY, false);
     /* Quiet at once: the power goes only at the end of Linux's shutdown (hw_poweroff starts it; on the X6200 the base
      * is told by S11radio_daemon's stop, near the end), seconds after the screen went dark, and the speaker played the
      * band until then: "the radio went off, but I can still hear the traffic". The base's volume only: the setting is

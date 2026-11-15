@@ -4609,7 +4609,7 @@ static bool front_key(int key, int state) {
 
     if (help_on) {
         if (tap || hold) help_show(false);
-        return true;
+        return key != KEYPAD_POWER;     /* POWER held switches off from the help too, as from every screen */
     }
     switch (key) {
         case KEYPAD_GEN:
