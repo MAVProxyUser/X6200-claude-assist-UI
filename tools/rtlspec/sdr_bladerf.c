@@ -8,7 +8,10 @@
  *
  *  Its FPGA image: loaded by libbladeRF when the board has none (a board set to load its own from flash, bladeRF-cli
  *  -L, needs nothing), found in /mnt/bladerf (the DATA partition: BLADERF_SEARCH_DIR) or /usr/share/Nuand/bladeRF.
- *  None found: it opens and says so (2, tuner the file it wants: "hostedxA4.rbf"), and is left so till pulled out.
+ *  None found: it opens and says so (2, tuner the file it wants: "hostedxA4.rbf"), and is opened again once the file
+ *  is there (bl_ready_again) or it is pulled out. An image its USB firmware is too old for (FPGA v0.16 wants v2.6):
+ *  said so too ("FIRMWARE"), and tried again when another image is put in /mnt/bladerf; the one loaded stays in the
+ *  board till it loses power, so it has to be unplugged and plugged in for an older one.
  *
  *  Receiving: 12-bit I/Q (SC16 Q11, +-2048) cut to the RTL's 8 bits (one in 16), its DC taken out as the HackRF's;
  *  manual gain over the board's own range, its AGC for -1. Transmitting: the FM's signed 8 bits made SC16, the gain
@@ -29,7 +32,9 @@ const sdr_ops_t sdr_bladerf = {.kind = "BLADERF", .present = bl_none, .open = bl
 
 #else
 
+#include <dirent.h>
 #include <dlfcn.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <libbladeRF.h>
@@ -65,12 +70,31 @@ static volatile int             tx_end;
 static int16_t                  sbuf[N_SAMP * 2];
 static int8_t                   bbuf[N_SAMP * 2];
 
-/* libbladeRF loaded, once: false when it is not on this image */
-static bool lib(void) {
-    static int tried;
+static int  lib_tried;
+static long fpga_dir_at;                /* FPGA_DIR's state when the last open failed on versions (dir_stamp) */
 
-    if (L.so || tried) return L.so != NULL;
-    tried = 1;
+/* What is in FPGA_DIR, as one number: its files' sizes and times added (another image put there changes it) */
+static long dir_stamp(void) {
+    DIR           *d = opendir(FPGA_DIR);
+    struct dirent *e;
+    long           t = 0;
+
+    if (!d) return 0;
+    while ((e = readdir(d))) {
+        char        p[300];
+        struct stat st;
+
+        snprintf(p, sizeof(p), "%s/%s", FPGA_DIR, e->d_name);
+        if (e->d_name[0] != '.' && stat(p, &st) == 0) t += (long)st.st_mtime + (long)st.st_size;
+    }
+    closedir(d);
+    return t;
+}
+
+/* libbladeRF loaded, once (again after bl_ready_again saw it come): false when it is not on this image */
+static bool lib(void) {
+    if (L.so || lib_tried) return L.so != NULL;
+    lib_tried = 1;
     if (!(L.so = dlopen("libbladeRF.so.2", RTLD_NOW)) && !(L.so = dlopen("libbladeRF.so", RTLD_NOW))) {
         fprintf(stderr, "rtlspec: a bladeRF, and no libbladeRF on this image: %s\n", dlerror());
         return false;
@@ -100,9 +124,9 @@ static bool lib(void) {
     return true;
 }
 
-/* 2.0 micro (Nuand's own ID), x40/x115 (OpenMoko's) */
+/* Nuand's IDs: 5250 the bladeRF 2.0 micro, 5246 the bladeRF x40/x115 (OpenMoko's 1d50:6066 on older ones) */
 static int bl_present(void) {
-    return sdr_usb_has("2cf0", "5246") || sdr_usb_has("1d50", "6066");
+    return sdr_usb_has("2cf0", "5250") || sdr_usb_has("2cf0", "5246") || sdr_usb_has("1d50", "6066");
 }
 
 static const char *fpga_file(bladerf_fpga_size s) {
@@ -129,6 +153,13 @@ static int bl_open(char *tuner, size_t n, uint64_t *lo, uint64_t *hi) {
     setenv("BLADERF_SEARCH_DIR", FPGA_DIR, 0);      /* the FPGA image looked for there first, when the board has none */
     if ((e = L.fopen_(&d, NULL)) != 0) {
         fprintf(stderr, "rtlspec: the bladeRF does not open: %s\n", L.strerror_(e));
+        if (e == BLADERF_ERR_UPDATE_FW || e == BLADERF_ERR_UPDATE_FPGA) {
+            /* its FPGA image and its USB firmware do not go together (FPGA v0.16 wants firmware v2.6): said so, and
+             * left till it is unplugged or another image is put in place (an FPGA loaded stays till it loses power) */
+            snprintf(tuner, n, "%s", e == BLADERF_ERR_UPDATE_FW ? "FIRMWARE" : "FPGA-UPDATE");
+            fpga_dir_at = dir_stamp();
+            return 2;
+        }
         return e == BLADERF_ERR_NODEV ? -1 : 1;
     }
     bd = d;
@@ -248,6 +279,22 @@ static void bl_tx_stop(void) {
     tx_end = 1;
 }
 
+/* What the last open wanted is there now: libbladeRF on the image, or the FPGA image put where it is looked for */
+static int bl_ready_again(const char *tuner) {
+    char path[160];
+
+    if (!strcmp(tuner, "FIRMWARE") || !strcmp(tuner, "FPGA-UPDATE")) return dir_stamp() != fpga_dir_at;
+    if (!strcmp(tuner, "LIBBLADERF")) {
+        if (access("/usr/lib/libbladeRF.so.2", F_OK) != 0) return 0;
+        lib_tried = 0;
+        return 1;
+    }
+    snprintf(path, sizeof(path), "%s/%s", FPGA_DIR, tuner);
+    if (access(path, R_OK) == 0) return 1;
+    snprintf(path, sizeof(path), "/usr/share/Nuand/bladeRF/%s", tuner);
+    return access(path, R_OK) == 0;
+}
+
 static void bl_close(void) {
     struct bladerf *d = bd;
 
@@ -268,6 +315,7 @@ const sdr_ops_t sdr_bladerf = {
     .tx_stop     = bl_tx_stop,
     .tx_gain_max = 60,
     .close       = bl_close,
+    .ready_again = bl_ready_again,
 };
 
 #endif

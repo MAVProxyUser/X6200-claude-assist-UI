@@ -88,10 +88,11 @@ static const struct {
     {"1f4d", "b803", NULL, "RTL-SDR", false, NULL, true},
     {"1f4d", "c803", NULL, "RTL-SDR", false, NULL, true},
     {"1f4d", "d803", NULL, "RTL-SDR", false, NULL, true},
-    /* HackRF One, rad1o, Jawbreaker; bladeRF 2.0 micro, bladeRF x40/x115: through x6x00-rtlspec only */
+    /* HackRF One, rad1o, Jawbreaker; bladeRF 2.0 micro (5250), bladeRF x40/x115: through x6x00-rtlspec only */
     {"1d50", "6089", NULL, "HACKRF", false, NULL, true},
     {"1d50", "cc15", NULL, "HACKRF", false, NULL, true},
     {"1d50", "604b", NULL, "HACKRF", false, NULL, true},
+    {"2cf0", "5250", NULL, "BLADERF", false, NULL, true},
     {"2cf0", "5246", NULL, "BLADERF", false, NULL, true},
     {"1d50", "6066", NULL, "BLADERF", false, NULL, true},
 };

@@ -1035,7 +1035,7 @@ cellular, FRS/GMRS, MURS, ISM or any other non-amateur frequency is ever keyed, 
 ### The SDRs (RTL-SDR, HackRF, bladeRF), the GNS 5890 and the microADSB on USB
 
 A generic RTL-SDR stick (an RTL2832U with an R820T, R828D and the like, 24 MHz to 1.7 GHz), a HackRF One (1 MHz to
-6 GHz; its kin the rad1o and Jawbreaker too), a bladeRF (2.0 micro xA4/xA5/xA9, or x40/x115), a GNS 5890 or a
+6 GHz; its kin the rad1o and Jawbreaker too), a bladeRF (2.0 micro xA4/xA5/xA9, USB 2cf0:5250; or x40/x115), a GNS 5890 or a
 microADSB on the HOST port (a hub takes more than one); any can be swapped while the radio runs. The SDRs all work
 wherever the RTL-SDR did (B, BOTH, C, D, E, RDS, SAME, AIRSPACE), named as they are (RTL, HACKRF, BLADERF).
 
@@ -1049,7 +1049,16 @@ wherever the RTL-SDR did (B, BOTH, C, D, E, RDS, SAME, AIRSPACE), named as they 
   computer (`bladeRF-cli -L hostedxA4.rbf`, its "autoload"), or put the file Nuand gives for the board
   (`hostedxA4.rbf`, `hostedxA5.rbf`, `hostedxA9.rbf`, `hostedx40.rbf` or `hostedx115.rbf`, from
   https://www.nuand.com/fpga_images/) in a folder `bladerf` on the card's DATA partition (`/mnt/bladerf`). Without
-  it B says `THE BLADERF NEEDS ITS FPGA IMAGE` and the file's name. Its 12-bit samples are cut to the pipeline's 8.
+  it B says `THE BLADERF NEEDS ITS FPGA IMAGE` and the file's name, and the bladeRF is opened again by itself once the
+  file is there. **The image has to suit the board's USB firmware**: FPGA v0.16.0 wants firmware v2.6.0 or later; a
+  board on firmware v2.4.0 (the one tried here) takes v0.15.3 (https://www.nuand.com/fpga/v0.15.3/hostedxA9.rbf).
+  Otherwise B says `THE BLADERF'S FPGA IMAGE AND ITS FIRMWARE DO NOT GO TOGETHER`; an image once loaded stays in the
+  board till it loses power, so unplug it and plug it in after putting another one there. Its 12-bit samples are cut
+  to the pipeline's 8.
+- **A bladeRF 2.0 micro needs power of its own on the X6200** (its 5 V DC jack, or a powered hub on HOST): on the
+  HOST port's own power it dropped off USB as its RF chip started (2026-11-15, an xA9), and the radio's USB host saw
+  no device connect after that, the bladeRF on its own power included (switching the radio off and on is the likely
+  mend; not tried yet).
 
 - **The stick is opened once and never closed while it is plugged in.** Every stop and start of its stream is a
   chance for the radio's USB host to leave it sending nothing, so there are none: `x6x00-rtlspec` (tools/rtlspec),

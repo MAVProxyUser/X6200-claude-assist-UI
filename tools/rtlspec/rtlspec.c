@@ -1199,10 +1199,20 @@ static void *stick_thread(void *arg) {
         cur_rate   = 0;
         cur_gain   = INT_MIN;
         pthread_mutex_unlock(&tune_lock);
-        if (r == 2) {                   /* there and not usable as it is: said so (tuner), left so till pulled out */
+        bool again = false;             /* closed to be opened again at once, not pulled out */
+
+        if (r == 2) {                   /* there and not usable as it is: said so (tuner), left so till pulled out or
+                                         * till what it wants is there (then closed and opened again) */
             atomic_store(&s_now, S_NEEDS);
             fprintf(stderr, "rtlspec: the %s needs %s\n", o->kind, tn);
-            while (!stop && o->present() && !stick_pulled()) sleep(1);
+            while (!stop && o->present() && !stick_pulled()) {
+                sleep(2);
+                if (o->ready_again && o->ready_again(tn)) {
+                    fprintf(stderr, "rtlspec: what the %s needed (%s) changed: opened again\n", o->kind, tn);
+                    again = true;
+                    break;
+                }
+            }
         } else {
             apply_tuning();
             atomic_store(&last_ms, now_ms());
@@ -1221,7 +1231,8 @@ static void *stick_thread(void *arg) {
         dev_lo  = 1000000;
         dev_hi  = 6000000000ULL;
         pthread_mutex_unlock(&tune_lock);
-        fprintf(stderr, "rtlspec: the %s closed (%s)\n", o->kind, stop ? "the daemon ends" : "pulled out");
+        fprintf(stderr, "rtlspec: the %s closed (%s)\n", o->kind, stop ? "the daemon ends" : again ? "to open it again"
+                                                                                                : "pulled out");
         atomic_store(&s_now, S_NOSTICK);
     }
     atomic_store(&stick_done, true);

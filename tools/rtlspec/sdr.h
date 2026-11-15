@@ -48,6 +48,9 @@ typedef struct {
     void (*tx_stop)(void);
     int  tx_gain_max;               /* the transmitter's gain, 0 to this, dB */
     void (*close)(void);
+    /* After an open that said 2 (not usable as it is: tuner says what it wanted): 1 when that is there now (the FPGA
+     * image put in /mnt/bladerf), so it is closed and opened again; NULL: only a pull-out mends it */
+    int  (*ready_again)(const char *tuner);
 } sdr_ops_t;
 
 extern const sdr_ops_t sdr_rtl, sdr_hackrf, sdr_bladerf;
