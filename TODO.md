@@ -380,6 +380,12 @@ environment on the card for the choice and the counter, how the GUI's settings a
 found from either, what the X6100's smaller cards allow, and the image-required levels.
 
 
+## Time Signal: CHU and the European stations (#275)
+
+WWV and WWVH are in (Time Signal, aec9d17). CHU (3330, 7850 and 14670 kHz) sends its time as Bell 103 FSK (300 Bd,
+2025/2225 Hz) in seconds 31-39: a decoder beside wwv.c, once a recording of CHU actually heard exists to test it on
+(radio_captures/modes/chu_7850.wav is noise: no ticks, no FSK). DCF77, MSF, TDF, EBC and IAM as #275 lists them.
+
 ## Deep backlog: the radio as a Bluetooth microphone for a PC (#278)
 
 Not wanted now (the owner, 2026-11-15: no Bluetooth headset or Bluetooth audio in use). Kept only as a note: a PC

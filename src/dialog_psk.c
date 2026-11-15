@@ -126,7 +126,7 @@
 
 /* Received text: a ring of logical lines. LVGL wraps each one to the
  * width of the box; lines longer than this are broken by hand. */
-#define TXT_LINES       24
+#define TXT_LINES       200     /* scrolled back on the MFK (#143); all of it in the text log */
 #define TXT_LINE_LEN    96
 #define TXT_SHOW        10      /* labels; more than the box can hold */
 
@@ -239,7 +239,7 @@ static bool        sql_open = true;
 static int         sql_hang = 0;       /* lines left before it closes */
 /* What the multifunction knob does: 1 Hz fine tuning normally, or the
  * squelch threshold / the VFO while the SQL / Dial button has it. */
-typedef enum { KNOB_FINE, KNOB_SQL, KNOB_DIAL } knob_mode_t;
+typedef enum { KNOB_FINE, KNOB_SQL, KNOB_DIAL, KNOB_TEXT } knob_mode_t;
 static knob_mode_t knob = KNOB_FINE;
 static lv_timer_t *knob_timer = NULL;
 static int32_t     dial_offset_hz = 0; /* from the band's PSK31 dial */
@@ -377,6 +377,13 @@ static button_data_t btn_p5 = {
     .next = &page_6, .prev = &page_4,
 };
 /* TUNE for an external tuner, on the centre chosen for TX (ext_tune.h) */
+/* Text (#143): press, and the MFK scrolls the text back and forth; hold, back down to the newest */
+static const char *txt_label_getter(void);
+static void txt_press_cb(button_data_t *b);
+static void txt_hold_cb(button_data_t *b);
+static button_data_t btn_txt = {
+    .type = BTN_TEXT_FN, .label_fn = txt_label_getter, .press = txt_press_cb, .hold = txt_hold_cb,
+};
 static button_data_t btn_p6 = {
     .type = BTN_TEXT, .label = "(PSK 6:6)",
     .press = button_next_page_cb, .hold = button_prev_page_cb,
@@ -399,7 +406,7 @@ static buttons_page_t page_5 = {
     {&btn_p5, &btn_macro8, &btn_macro9, &btn_macro10, &btn_macro11}
 };
 static buttons_page_t page_6 = {
-    {&btn_p6, &btn_ext_tune, &btn_digi_rstr, &btn_digi_log}
+    {&btn_p6, &btn_ext_tune, &btn_digi_rstr, &btn_digi_log, &btn_txt}
 };
 
 static dialog_t dialog = {
@@ -436,12 +443,16 @@ static txt_line_t txt[TXT_LINES];
 static int        txt_head = 0;     /* line being written */
 static int        txt_cnt = 1;      /* lines in use, including head */
 static bool       txt_dirty = false;
+/* Scrolling back (#143): txt_back lines up from the newest, the MFK's while Text has it; the view stays on those lines
+ * as new ones come in, and Text's hold (or the newest reached) goes back down to them */
+static int        txt_back;
 
 static void txt_clear(void)
 {
     memset(txt, 0, sizeof(txt));
     txt_head = 0;
     txt_cnt = 1;
+    txt_back = 0;
     txt_dirty = true;
 }
 
@@ -453,6 +464,8 @@ static void txt_new_line(bool tx)
     txt[txt_head].tx = tx;
     if (txt_cnt < TXT_LINES)
         txt_cnt++;
+    if (txt_back > 0 && txt_back < txt_cnt - 2)
+        txt_back++;     /* the view stays where it was scrolled to */
     txt_dirty = true;
 }
 
@@ -508,6 +521,11 @@ static void txt_render(void)
     if (n > 0 && txt[txt_head].len == 0)
         n--;
 
+    /* Scrolled back: the newest txt_back lines left out */
+    if (txt_back > n - 1)
+        txt_back = n > 0 ? n - 1 : 0;
+    n -= txt_back;
+
     /* Only the newest few can be on screen. */
     if (n > TXT_SHOW) {
         first = (first + (n - TXT_SHOW)) % TXT_LINES;
@@ -543,6 +561,20 @@ static void txt_render(void)
         lv_obj_set_pos(lbl, 0, y);
         lv_obj_clear_flag(lbl, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+/* The MFK while Text has it: d < 0 further back, d > 0 towards the newest */
+static void txt_scroll(int d)
+{
+    int lines = txt_cnt - (txt[txt_head].len == 0 ? 1 : 0);
+
+    txt_back -= d;
+    if (txt_back > lines - 1)
+        txt_back = lines > 0 ? lines - 1 : 0;
+    if (txt_back < 0)
+        txt_back = 0;
+    txt_dirty = true;
+    refresh_btn(&btn_txt);
 }
 
 static void text_timer_cb(lv_timer_t *t)
@@ -713,7 +745,7 @@ static const char *sql_label_getter(void)
 
 static button_data_t *knob_btn(knob_mode_t m)
 {
-    return (m == KNOB_SQL) ? &btn_sql : &btn_dial;
+    return (m == KNOB_SQL) ? &btn_sql : (m == KNOB_TEXT) ? &btn_txt : &btn_dial;
 }
 
 static void knob_mark(knob_mode_t m, bool on)
@@ -775,6 +807,30 @@ static void knob_take(knob_mode_t m, const char *text)
     knob_mark(m, true);
     knob_timer_restart();
     msg_update_text_fmt("%s", text);
+}
+
+static const char *txt_label_getter(void)
+{
+    static char buf[24];
+
+    if (txt_back == 0)
+        snprintf(buf, sizeof(buf), "Text\nnewest");
+    else
+        snprintf(buf, sizeof(buf), "Text\n%d back", txt_back);
+    return buf;
+}
+
+static void txt_press_cb(button_data_t *b)
+{
+    (void)b;
+    knob_take(KNOB_TEXT, "Knob: the text, back and forth (hold Text: the newest)");
+}
+
+static void txt_hold_cb(button_data_t *b)
+{
+    txt_back = 0;
+    txt_dirty = true;
+    buttons_refresh(b);
 }
 
 /* Press: the multifunction knob sets the threshold; press again, or
@@ -1653,6 +1709,9 @@ static void key_cb(lv_event_t *e)
                 sql_change(d);
             } else if (knob == KNOB_DIAL) {
                 dial_change(d);
+            } else if (knob == KNOB_TEXT) {
+                txt_scroll(d);
+                knob_timer_restart();
             } else {
                 set_center((int)psk_tx_get_center() + d);
                 quiet_since = lv_tick_get();

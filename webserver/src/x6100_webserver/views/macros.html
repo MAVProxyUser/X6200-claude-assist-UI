@@ -2,8 +2,8 @@
 <h2><svg class="i"><use href="#i-list"/></svg>Macros</h2>
 <p class="sub">The macro buttons of the PSK31, Olivia and JTTY windows and the JS8 INFO and STATUS answers. The radio reads them the next time the window opens: close and reopen it to see a change. A row is saved with its own Save, or all at once; a deleted macro can be brought back for twenty seconds.</p>
 
-% for mode, label, help in (('psk', 'PSK31', 'Up to 12, name up to 23 characters, text up to 199. <MYCALL>, <CALL>, <RST> and <RSTR> are filled in when sent'),
-%                           ('olivia', 'Olivia', 'Up to 12, name up to 23 characters, text up to 199. <MYCALL>, <CALL>, <RST> and <RSTR> are filled in when sent'),
+% for mode, label, help in (('psk', 'PSK31', 'Up to 12, name up to 23 characters, text up to 199. <MYCALL>, <CALL>, <RST>, <RSTR> and <QTH> (your locator) are filled in when sent'),
+%                           ('olivia', 'Olivia', 'Up to 12, name up to 23 characters, text up to 199. <MYCALL>, <CALL>, <RST>, <RSTR> and <QTH> (your locator) are filled in when sent'),
 %                           ('jtty', 'JTTY', 'F1 to F8, text up to 80 characters. %M is your call, %H the DX call, %E 599 and the serial number')):
 <section class="dp-card">
 <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-list"/></svg></span><div><h3>{{label}}</h3><p>{{help}}</p></div><div class="dp-x"><button class="primary add" data-mode="{{mode}}"><svg class="i"><use href="#i-plus"/></svg>Add</button></div></div>

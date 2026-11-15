@@ -13,6 +13,7 @@
 
 #include "params/params.h"
 #include "digi_qso.h"         /* shared QSO state: DX call and RST */
+#include "station.h"          /* <QTH> */
 
 #ifndef OLIVIA_MACROS_PATH
 #define OLIVIA_MACROS_PATH BOARD_DATA "/olivia_macros.txt"
@@ -140,6 +141,7 @@ bool olivia_macro_expand(const char *in, char *out, size_t out_sz,
     } toks[] = {
         /* <RSTR> before <RST>: the shorter token is a prefix of it */
         {"<MYCALL>", 0}, {"<CALL>", 1}, {"<RSTR>", 3}, {"<RST>", 2},
+        {"<QTH>", 4},       /* the locator in Settings (#143), the GPS's while it has a fix */
     };
 
     size_t o = 0;
@@ -164,6 +166,7 @@ bool olivia_macro_expand(const char *in, char *out, size_t out_sz,
                 case 1: val = digi_qso_dx();         break;
                 case 2: val = digi_qso_rst_sent();   break;
                 case 3: val = digi_qso_rst_rcvd();   break;
+                case 4: val = station_qth();         break;
             }
             if (!val || !*val) {
                 if (ok && missing) *missing = toks[t].tok;

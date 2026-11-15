@@ -79,7 +79,7 @@
 #define TRACK_PERIOD_MS 500
 #define KNOB_HOLD_MS    8000
 
-#define TXT_LINES       24
+#define TXT_LINES       200     /* scrolled back on the MFK (#143); all of it in the text log */
 #define TXT_LINE_LEN    96
 #define TXT_SHOW        10
 
@@ -120,6 +120,7 @@ static bool        alive = false;
 static int         cur_band = -1;
 static int32_t     dial_offset_hz = 0;
 static bool        knob_dial = false;
+static bool        knob_text = false;     /* the MFK scrolls the text (#143) */
 static bool        input_active = false;
 static bool        was_tx = false;
 static int         tol_idx = 1;
@@ -169,11 +170,11 @@ static void tol_press_cb(button_data_t *b);
 static void clear_press_cb(button_data_t *b);
 static void fkey(int n);
 
-static buttons_page_t page_1, page_2, page_3, page_4, page_5;
+static buttons_page_t page_1, page_2, page_3, page_4, page_5, page_6;
 
 static button_data_t btn_p1 = {
-    .type = BTN_TEXT, .label = "(JTTY 1:5)",
-    .press = button_next_page_cb, .hold = button_prev_page_cb, .next = &page_2, .prev = &page_5,
+    .type = BTN_TEXT, .label = "(JTTY 1:6)",
+    .press = button_next_page_cb, .hold = button_prev_page_cb, .next = &page_2, .prev = &page_6,
 };
 static button_data_t btn_text = {.type = BTN_TEXT, .label = "Free\nText", .press = text_press_cb};
 static button_data_t btn_stop = {.type = BTN_TEXT, .label = "Stop\nTX", .press = stop_press_cb};
@@ -207,21 +208,32 @@ static button_data_t *const fkey_btns[FKEYS] = {&btn_f1, &btn_f2, &btn_f3, &btn_
                                                  &btn_f5, &btn_f6, &btn_f7, &btn_f8};
 
 static button_data_t btn_p2 = {
-    .type = BTN_TEXT, .label = "(JTTY 2:5)",
+    .type = BTN_TEXT, .label = "(JTTY 2:6)",
     .press = button_next_page_cb, .hold = button_prev_page_cb, .next = &page_3, .prev = &page_1,
 };
 static button_data_t btn_p3 = {
-    .type = BTN_TEXT, .label = "(JTTY 3:5)",
+    .type = BTN_TEXT, .label = "(JTTY 3:6)",
     .press = button_next_page_cb, .hold = button_prev_page_cb, .next = &page_4, .prev = &page_2,
 };
 static button_data_t btn_p4 = {
-    .type = BTN_TEXT, .label = "(JTTY 4:5)",
+    .type = BTN_TEXT, .label = "(JTTY 4:6)",
     .press = button_next_page_cb, .hold = button_prev_page_cb, .next = &page_5, .prev = &page_3,
 };
 /* TUNE for an external tuner, on the TX frequency chosen (ext_tune.h) */
 static button_data_t btn_p5 = {
-    .type = BTN_TEXT, .label = "(JTTY 5:5)",
-    .press = button_next_page_cb, .hold = button_prev_page_cb, .next = &page_1, .prev = &page_4,
+    .type = BTN_TEXT, .label = "(JTTY 5:6)",
+    .press = button_next_page_cb, .hold = button_prev_page_cb, .next = &page_6, .prev = &page_4,
+};
+static button_data_t btn_p6 = {
+    .type = BTN_TEXT, .label = "(JTTY 6:6)",
+    .press = button_next_page_cb, .hold = button_prev_page_cb, .next = &page_1, .prev = &page_5,
+};
+/* Text (#143): press, and the MFK scrolls the text back and forth; hold, back down to the newest */
+static const char *txt_label_getter(void);
+static void txt_press_cb(button_data_t *b);
+static void txt_hold_cb(button_data_t *b);
+static button_data_t btn_txt = {
+    .type = BTN_TEXT_FN, .label_fn = txt_label_getter, .press = txt_press_cb, .hold = txt_hold_cb,
 };
 static button_data_t btn_serial = {
     .type = BTN_TEXT_FN, .label_fn = serial_label_getter, .press = serial_press_cb, .hold = serial_hold_cb,
@@ -237,6 +249,7 @@ static buttons_page_t page_2 = {{&btn_p2, &btn_f1, &btn_f2, &btn_f3, &btn_f4}};
 static buttons_page_t page_3 = {{&btn_p3, &btn_f5, &btn_f6, &btn_f7, &btn_f8}};
 static buttons_page_t page_4 = {{&btn_p4, &btn_serial, &btn_tol, &btn_dial, &btn_clear}};
 static buttons_page_t page_5 = {{&btn_p5, &btn_ext_tune, &btn_digi_rsts, &btn_digi_rstr, &btn_digi_log}};
+static buttons_page_t page_6 = {{&btn_p6, &btn_txt}};
 
 static dialog_t dialog = {
     .run = false,
@@ -272,12 +285,16 @@ static txt_line_t txt[TXT_LINES];
 static int        txt_head = -1;
 static int        txt_cnt = 0;
 static bool       txt_dirty = false;
+/* Scrolling back (#143): txt_back lines up from the newest, the MFK's while Text has it; the view stays on those lines
+ * as new ones come in, and Text's hold goes back down to them */
+static int        txt_back;
 
 static void txt_clear(void)
 {
     memset(txt, 0, sizeof(txt));
     txt_head = -1;
     txt_cnt = 0;
+    txt_back = 0;
     txt_dirty = true;
 }
 
@@ -286,6 +303,8 @@ static txt_line_t *txt_add(uint8_t kind, uint32_t id)
     txt_head = (txt_head + 1) % TXT_LINES;
     if (txt_cnt < TXT_LINES)
         txt_cnt++;
+    if (txt_back > 0 && txt_back < txt_cnt - 1)
+        txt_back++;     /* the view stays where it was scrolled to */
     txt[txt_head].kind = kind;
     txt[txt_head].id = id;
     txt[txt_head].sig_sum = 0;
@@ -308,13 +327,16 @@ static txt_line_t *txt_find(uint32_t id)
 /* One label per line, stacked upwards from the bottom (as dialog_psk.c) */
 static void txt_render(void)
 {
-    int n = txt_cnt < TXT_SHOW ? txt_cnt : TXT_SHOW;
+    if (txt_back > txt_cnt - 1)
+        txt_back = txt_cnt > 0 ? txt_cnt - 1 : 0;
+
+    int n = txt_cnt - txt_back < TXT_SHOW ? txt_cnt - txt_back : TXT_SHOW;
     lv_coord_t y = text_h - 2 * TEXT_PAD - 2;
 
     for (int k = n; k < TXT_SHOW; k++)
         lv_obj_add_flag(line_lbl[k], LV_OBJ_FLAG_HIDDEN);
     for (int k = 0; k < n; k++) {
-        const txt_line_t *l = &txt[(txt_head - k + TXT_LINES) % TXT_LINES];
+        const txt_line_t *l = &txt[(txt_head - k - txt_back + 2 * TXT_LINES) % TXT_LINES];
         lv_obj_t *lbl = line_lbl[k];
         lv_point_t size;
 
@@ -567,6 +589,12 @@ static void knob_release(void)
             buttons_mark(&btn_dial, false);
         btn_dial.mark = false;
     }
+    if (knob_text) {
+        knob_text = false;
+        if (btn_txt.disp_btn)
+            buttons_mark(&btn_txt, false);
+        btn_txt.mark = false;
+    }
 }
 
 static void knob_timer_cb(lv_timer_t *t)
@@ -600,6 +628,53 @@ static const char *dial_label_getter(void)
     return buf;
 }
 
+static const char *txt_label_getter(void)
+{
+    static char buf[24];
+
+    if (txt_back == 0)
+        snprintf(buf, sizeof(buf), "Text\nnewest");
+    else
+        snprintf(buf, sizeof(buf), "Text\n%d back", txt_back);
+    return buf;
+}
+
+/* The MFK while Text has it: d < 0 further back, d > 0 towards the newest */
+static void txt_scroll(int d)
+{
+    txt_back -= d;
+    if (txt_back > txt_cnt - 1)
+        txt_back = txt_cnt > 0 ? txt_cnt - 1 : 0;
+    if (txt_back < 0)
+        txt_back = 0;
+    txt_dirty = true;
+    refresh_btn(&btn_txt);
+}
+
+/* Press: the MFK scrolls the text; press again, or leave the knob for 8 s, to get fine tuning back */
+static void txt_press_cb(button_data_t *b)
+{
+    if (knob_text) {
+        knob_release();
+        msg_update_text_fmt("Knob: fine tuning");
+        return;
+    }
+    knob_release();             /* from Dial */
+    knob_text = true;
+    if (b->disp_btn)
+        buttons_mark(b, true);
+    b->mark = true;
+    knob_timer_restart();
+    msg_update_text_fmt("Knob: the text, back and forth (hold Text: the newest)");
+}
+
+static void txt_hold_cb(button_data_t *b)
+{
+    txt_back = 0;
+    txt_dirty = true;
+    buttons_refresh(b);
+}
+
 /* Press: the multifunction knob moves the VFO in 1 kHz steps */
 static void dial_press_cb(button_data_t *b)
 {
@@ -608,6 +683,7 @@ static void dial_press_cb(button_data_t *b)
         msg_update_text_fmt("Knob: fine tuning");
         return;
     }
+    knob_release();             /* from Text */
     knob_dial = true;
     if (b->disp_btn)
         buttons_mark(b, true);
@@ -1137,7 +1213,10 @@ static void key_cb(lv_event_t *e)
             int d = (key == LV_KEY_RIGHT) ? 1 : -1;
             if (knob_dial)
                 dial_change(d);
-            else if (!jtty_tx_is_on())
+            else if (knob_text) {
+                txt_scroll(d);
+                knob_timer_restart();
+            } else if (!jtty_tx_is_on())
                 set_freq((int)jtty_tx_get_freq() + d);
             break;
         }
@@ -1271,7 +1350,7 @@ static void construct_cb(lv_obj_t *parent)
     draft_dirty = true;
     input_active = false;
     was_tx = false;
-    knob_dial = false;
+    knob_dial = knob_text = false;
 
     pthread_mutex_lock(&spec_mux);
     spec_ok = (psk_spec_init(&spec, (float)JTTY_RX_RATE) == 0);
@@ -1302,7 +1381,7 @@ static void destruct_cb(void)
     del_timer(&focus_timer);
     del_timer(&editor_timer);
     del_timer(&knob_timer);
-    knob_dial = false;
+    knob_dial = knob_text = false;
     btn_dial.mark = false;
 
     if (input_active) {

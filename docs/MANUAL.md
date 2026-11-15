@@ -4415,10 +4415,17 @@ Frequency and mode come back when the app closes.
   received text, or typed in; hold clears it.
 - TX: Free Text, or the macros (pages 3-5: press sends, hold edits; an empty
   text deletes). Page 6: Ext tune, a carrier at the TX frequency for an
-  external tuner. Tokens `<MYCALL>`, `<CALL>`, `<RST>`, `<RSTR>`. Stop TX ends
+  external tuner. Tokens `<MYCALL>`, `<CALL>`, `<RST>`, `<RSTR>`, `<QTH>` (your
+  locator from Settings, the GPS's while it has a fix; #143). Stop TX ends
   with a short carrier tail (PSK) or after the current block (Olivia, Contestia). Nothing is sent on
   opening. TX goes through the same path as FT8: power capped at 7 W, ALC
   levelling, SWR protection, the TX strip.
+- Text (page 6, F5; JTTY's page 6): press, and the MFK scrolls the received
+  and sent text back, up to 200 lines (#143); the button says how far back
+  ("Text 12 back"). New text does not move the view while it is scrolled
+  back; a hold of Text goes back down to the newest, and the knob goes back
+  to fine tuning after 8 s untouched, the view staying where it is. All of it
+  is in the text log on the card as well.
 - Files: `/mnt/psk_macros.txt`, `/mnt/olivia_macros.txt`, `/mnt/psk.conf`
   (squelch).
 - The macros can also be edited on the web configurator's Macros page.
@@ -6148,7 +6155,7 @@ SSTV and WeFax received and to send) with count and size.
 
 Macros page (Operating > Macros): the macro buttons of the PSK31 and Olivia
 windows (up to 12 each, name up to 23 characters, text up to 199, tokens
-`<MYCALL>`, `<CALL>`, `<RST>`, `<RSTR>`), the JTTY F1-F8 keys (text up to 80,
+`<MYCALL>`, `<CALL>`, `<RST>`, `<RSTR>`, `<QTH>`), the JTTY F1-F8 keys (text up to 80,
 tokens `%M`, `%H`, `%E`) and the JS8 answers to INFO? and STATUS? (up to 64
 characters each). Plain ASCII only. It writes `/mnt/psk_macros.txt`,
 `/mnt/olivia_macros.txt`, `/mnt/jtty_macros.txt` and the INFO and STATUS lines
