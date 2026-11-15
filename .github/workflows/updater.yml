@@ -1,0 +1,39 @@
+# The radio's software updater (rootfs/usr/sbin/x6100-update), tested without a radio (tools/update, `make test`):
+#   - rollback_test.py: what the radio says after a version was taken back (the start loop's step back, the one of a
+#     version that could not use the settings file, the one by hand, an install cut short), last.json and "notice";
+#   - boot_test.py: the SD card's kernel and U-Boot (install --kernel/--uboot, bundle-info, boot-rollback, boot-check)
+#     against a card of its own (a file for the raw U-Boot area, folders for the boot partition and the modules), with
+#     mkbundle.py's boot part: what it refuses (the eMMC, a radio not started from the card, files outside the boot
+#     partition and the modules), each part alone or both, going back, a power cut, the modules a build drops.
+# On the radio's Python (3.11). Seconds.
+name: Updater tests
+
+on:
+  push:
+    paths:
+      - 'tools/update/**'
+      - 'rootfs/usr/sbin/x6100-update'
+      - '.github/workflows/updater.yml'
+  pull_request:
+    paths:
+      - 'tools/update/**'
+      - 'rootfs/usr/sbin/x6100-update'
+      - '.github/workflows/updater.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Rollback and SD card tests
+        run: make -C tools/update test
