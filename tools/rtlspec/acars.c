@@ -35,7 +35,8 @@ enum { HUNT, BODY, BCS1, BCS2 };
 
 struct acars_s {
     float    rate;
-    float    vco, clk, df;          /* the oscillator's phase, the bit clock's (both radians), its correction a sample */
+    float    clk, df;               /* the bit clock's phase (radians), the oscillator's correction a sample */
+    float    pc, ps, stc, sts;      /* the oscillator: cos, sin of its phase, and of its step (set once a bit) */
     float    pllc;                  /* the loop's gain */
     float    mh[FMAX];              /* the half-sine filter */
     float    ib_r[FMAX], ib_i[FMAX];
@@ -73,6 +74,9 @@ acars_t *acars_new(float rate) {
     for (int j = 0; j < a->flen; j++)       /* half a turn of 600 Hz over two bits */
         a->mh[j] = cosf(2 * (float)M_PI * 600.0f * (j - (a->flen - 1) / 2.0f) / rate);
     a->pllc = PLL_BIT * BAUD / rate;
+    a->pc   = 1;
+    a->stc  = cosf(2 * (float)M_PI * FC / rate);
+    a->sts  = sinf(2 * (float)M_PI * FC / rate);
     return a;
 }
 
@@ -188,11 +192,12 @@ int acars_feed(acars_t *a, const float *x, size_t n, acars_msg_t *out, int max) 
 
     for (size_t s = 0; s < n; s++) {
         float st = w0 + a->df;
+        float c  = a->pc * a->stc - a->ps * a->sts, sn = a->pc * a->sts + a->ps * a->stc;   /* a step on, turned */
 
-        a->vco += st;
-        if (a->vco >= 2 * (float)M_PI) a->vco -= 2 * (float)M_PI;
-        a->ib_r[a->ib_at] = x[s] * cosf(a->vco);
-        a->ib_i[a->ib_at] = -x[s] * sinf(a->vco);
+        a->pc = c;
+        a->ps = sn;
+        a->ib_r[a->ib_at] = x[s] * c;
+        a->ib_i[a->ib_at] = -x[s] * sn;
         a->ib_at = (a->ib_at + 1) % a->flen;
         if (a->state != HUNT) {
             a->pow_sum += x[s] * x[s];
@@ -220,7 +225,12 @@ int acars_feed(acars_t *a, const float *x, size_t n, acars_msg_t *out, int max) 
         }
         int b = ((a->ms & 2) ? -vo : vo) > 0;
         a->ms++;
-        a->df = a->pllc * dphi;
+        a->df  = a->pllc * dphi;
+        a->stc = cosf(w0 + a->df);              /* the step for the bit to come; the length kept at 1 */
+        a->sts = sinf(w0 + a->df);
+        float g = 1.5f - 0.5f * (a->pc * a->pc + a->ps * a->ps);
+        a->pc *= g;
+        a->ps *= g;
         tone_in(a, b, out, max, &got);
     }
     return got;

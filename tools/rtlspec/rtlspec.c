@@ -201,7 +201,7 @@ struct chan {
     uint32_t ph, ph_inc;        /* the mixer's phase, 2^32 a turn */
     uint32_t i1r, i1i, i2r, i2i, c1r, c1i, c2r, c2i;     /* CIC: modular arithmetic */
     int      cic_n, r1;
-    float    hist_r[TAPS], hist_i[TAPS], taps[TAPS];
+    float    hist_r[2 * TAPS], hist_i[2 * TAPS], taps[TAPS];  /* each sample twice: the window in one piece */
     int      hist_at, fir_n;
     float    prev_r, prev_i, deemph, dc, avg_mag;
     bool     raw;               /* the demodulated FM as it is, no audio shaping (SAME's tones) */
@@ -419,17 +419,18 @@ static void at_264k(chan_t *c, float r, float i) {
         if (c->mpx) c->mpx(r);
         if (c->mpx_only) return;
     }
-    c->hist_r[c->hist_at] = r;
-    c->hist_i[c->hist_at] = i;
-    c->hist_at = (c->hist_at + 1) % TAPS;
+    c->hist_r[c->hist_at] = c->hist_r[c->hist_at + TAPS] = r;
+    c->hist_i[c->hist_at] = c->hist_i[c->hist_at + TAPS] = i;
+    c->hist_at = c->hist_at + 1 == TAPS ? 0 : c->hist_at + 1;
     if (++c->fir_n < R2) return;
     c->fir_n = 0;
 
-    float yr = 0, yi = 0;
+    /* the last TAPS samples, oldest first, in one piece: no modulo a tap (it was most of six ACARS channels' time) */
+    const float *hr = c->hist_r + c->hist_at, *hi = c->hist_i + c->hist_at;
+    float        yr = 0, yi = 0;
     for (int k = 0; k < TAPS; k++) {
-        int h = (c->hist_at + k) % TAPS;
-        yr += c->hist_r[h] * c->taps[k];
-        yi += c->hist_i[h] * c->taps[k];
+        yr += hr[k] * c->taps[k];
+        yi += hi[k] * c->taps[k];
     }
     if (c->mode == 1) {                 /* NFM: +-5 kHz full scale, a little low pass and no DC */
         float zr = yr * c->prev_r + yi * c->prev_i, zi = yi * c->prev_r - yr * c->prev_i;
@@ -486,113 +487,95 @@ static inline void chan_sample(chan_t *c, uint8_t ib, uint8_t qb) {
     chan_cic(c, r, i);
 }
 
-/* ACARS's six channels a block at a time: chan_sample's integer mixer for each of them, sample by sample, took a whole
- * core of the radio's Cortex-A7 and the stream fell behind (78% of the samples, 2026-11-16). Here the samples go to
- * floats once, and each channel's mixer runs four samples a step on NEON (four phasors, each a step of four samples
- * apart, its length kept at 128: chan_sample's +-16k), before the same CIC */
-#define ABLK 4096
-static float   abx[ABLK], aby[ABLK];
-static int32_t amr[ABLK], ami[ABLK];
+/* ACARS's channels four at a time on NEON, a lane each: every sample mixed down by each lane's phasor and summed over
+ * r1 samples (a boxcar, a CIC of order 1, aliases 264.6 kHz off a channel 34 dB down for the FIR after it), the sums
+ * into at_264k at 264.6 kHz as the other channels' CIC gives them. chan_sample's mixer and CIC of order 2, sample by
+ * sample for each channel, took a whole core of the radio's Cortex-A7 for six channels and fell behind the device */
 typedef struct {
-    float pr[4], pi[4];                 /* the next four samples' phasors */
-    float s4r, s4i;                     /* four samples' step */
-} amix_t;
-static amix_t amix[8];
+    float pr[4], pi[4];                 /* each lane's phasor, length 1 */
+    float sr[4], si[4];                 /* its step a sample */
+    float ar[4], ai[4];                 /* the sums so far */
+} aquad_t;
+#define AQ 2                            /* lanes for 8 channels */
+static aquad_t aq[AQ];
+static int     aq_n;                    /* samples summed since the last output */
 
-static void amix_set(amix_t *m, uint32_t ph_inc) {
-    double th = 2 * M_PI * (int32_t)ph_inc / 4294967296.0;
+static void aq_set(void) {
+    memset(aq, 0, sizeof(aq));
+    aq_n = 0;
+    for (int i = 0; i < ACARS_N && i < AQ * 4; i++) {
+        double th = 2 * M_PI * (int32_t)acrc[i].ph_inc / 4294967296.0;
+        aquad_t *q = &aq[i / 4];
 
-    for (int l = 0; l < 4; l++) {
-        m->pr[l] = (float)(128 * cos(th * l));
-        m->pi[l] = (float)(128 * sin(th * l));
+        q->pr[i % 4] = 1;
+        q->sr[i % 4] = (float)cos(th);
+        q->si[i % 4] = (float)sin(th);
     }
-    m->s4r = (float)cos(4 * th);
-    m->s4i = (float)sin(4 * th);
 }
 
-/* m samples (a multiple of 4) of abx/aby through the mixer into amr/ami */
-static void amix_run(amix_t *m, int n) {
+/* m samples (unsigned 8-bit I/Q) into every ACARS channel */
+static void acars_run(const uint8_t *b, int m) {
+    int   r1 = acrc[0].r1 > 0 ? acrc[0].r1 : 9;
+    float sc = 1.0f / (256.0f * r1);
 #if defined(__ARM_NEON)
-    float32x4_t pr = vld1q_f32(m->pr), pi = vld1q_f32(m->pi), sr = vdupq_n_f32(m->s4r), si = vdupq_n_f32(m->s4i);
-
-    for (int k = 0; k < n; k += 4) {
-        float32x4_t xr = vld1q_f32(abx + k), xi = vld1q_f32(aby + k);
-
-        vst1q_s32(amr + k, vcvtq_s32_f32(vmlsq_f32(vmulq_f32(xr, pr), xi, pi)));
-        vst1q_s32(ami + k, vcvtq_s32_f32(vmlaq_f32(vmulq_f32(xr, pi), xi, pr)));
-        float32x4_t nr = vmlsq_f32(vmulq_f32(pr, sr), pi, si);
-        pi = vmlaq_f32(vmulq_f32(pr, si), pi, sr);
-        pr = nr;
+    float32x4_t pr[AQ], pi[AQ], sr[AQ], si[AQ], ar[AQ], ai[AQ];
+    for (int g = 0; g < AQ; g++) {
+        pr[g] = vld1q_f32(aq[g].pr), pi[g] = vld1q_f32(aq[g].pi), sr[g] = vld1q_f32(aq[g].sr);
+        si[g] = vld1q_f32(aq[g].si), ar[g] = vld1q_f32(aq[g].ar), ai[g] = vld1q_f32(aq[g].ai);
     }
-    vst1q_f32(m->pr, pr);
-    vst1q_f32(m->pi, pi);
+#endif
+    for (int k = 0; k < m; k++) {
+        float x = b[2 * k] - 127.0f, y = b[2 * k + 1] - 127.0f;
+#if defined(__ARM_NEON)
+        float32x4_t xv = vdupq_n_f32(x), yv = vdupq_n_f32(y);
+        for (int g = 0; g < AQ; g++) {
+            ar[g] = vaddq_f32(ar[g], vmlsq_f32(vmulq_f32(xv, pr[g]), yv, pi[g]));
+            ai[g] = vaddq_f32(ai[g], vmlaq_f32(vmulq_f32(xv, pi[g]), yv, pr[g]));
+            float32x4_t nr = vmlsq_f32(vmulq_f32(pr[g], sr[g]), pi[g], si[g]);
+            pi[g] = vmlaq_f32(vmulq_f32(pr[g], si[g]), pi[g], sr[g]);
+            pr[g] = nr;
+        }
 #else
-    for (int k = 0; k < n; k += 4)
-        for (int l = 0; l < 4; l++) {
-            float xr = abx[k + l], xi = aby[k + l], pr = m->pr[l], pi = m->pi[l];
-
-            amr[k + l] = (int32_t)(xr * pr - xi * pi);
-            ami[k + l] = (int32_t)(xr * pi + xi * pr);
-            m->pr[l] = pr * m->s4r - pi * m->s4i;
-            m->pi[l] = pr * m->s4i + pi * m->s4r;
+        for (int g = 0; g < AQ; g++)
+            for (int l = 0; l < 4; l++) {
+                aquad_t *q = &aq[g];
+                float    p = q->pr[l], qi = q->pi[l];
+                q->ar[l] += x * p - y * qi;
+                q->ai[l] += x * qi + y * p;
+                q->pr[l] = p * q->sr[l] - qi * q->si[l];
+                q->pi[l] = p * q->si[l] + qi * q->sr[l];
+            }
+#endif
+        if (++aq_n < r1) continue;
+        aq_n = 0;
+#if defined(__ARM_NEON)
+        for (int g = 0; g < AQ; g++) {
+            vst1q_f32(aq[g].ar, ar[g]);
+            vst1q_f32(aq[g].ai, ai[g]);
+            ar[g] = ai[g] = vdupq_n_f32(0);
         }
 #endif
-    /* rounding makes the phasors grow or shrink a little each step: back to 128 once a block */
-    float g = 128 / sqrtf(m->pr[0] * m->pr[0] + m->pi[0] * m->pi[0]);
-    for (int l = 0; l < 4; l++) m->pr[l] *= g, m->pi[l] *= g;
-}
+        for (int i = 0; i < ACARS_N && i < AQ * 4; i++) {
+            aquad_t *q = &aq[i / 4];
 
-/* The CIC for a block of a channel's mixed samples, its state in registers: chan_cic's, sample by sample, without
- * loading and storing it each time */
-static void cic_block(chan_t *c, const int32_t *r, const int32_t *i, int n) {
-    uint32_t i1r = c->i1r, i1i = c->i1i, i2r = c->i2r, i2i = c->i2i;
-    int      k = 0, cn = c->cic_n, r1 = c->r1;
-    float    sc = 1.0f / (32768.0f * r1 * r1);
-
-    while (k < n) {
-        int run = r1 - 1 - cn;          /* samples before the next output */
-        if (run > n - k) run = n - k;
-        for (int e = k + run; k < e; k++) {
-            i1r += (uint32_t)r[k];
-            i1i += (uint32_t)i[k];
-            i2r += i1r;
-            i2i += i1i;
-        }
-        cn += run;
-        if (k == n) break;
-        i1r += (uint32_t)r[k];          /* the sample that makes an output */
-        i1i += (uint32_t)i[k];
-        i2r += i1r;
-        i2i += i1i;
-        k++;
-        cn = 0;
-        uint32_t a = i2r - c->c1r, b = i2i - c->c1i;
-        c->c1r = i2r;
-        c->c1i = i2i;
-        uint32_t cr = a - c->c2r, ci = b - c->c2i;
-        c->c2r = a;
-        c->c2i = b;
-        at_264k(c, (int32_t)cr * sc, (int32_t)ci * sc);
-    }
-    c->i1r = i1r, c->i1i = i1i, c->i2r = i2r, c->i2i = i2i;
-    c->cic_n = cn;
-}
-
-/* m samples (unsigned 8-bit I/Q, a multiple of 4) into every ACARS channel */
-static void acars_run(const uint8_t *b, int m) {
-    for (int at = 0; at < m; at += ABLK) {
-        int n = m - at < ABLK ? m - at : ABLK;
-
-        for (int k = 0; k < n; k++) {
-            abx[k] = b[2 * (at + k)] - 127.0f;
-            aby[k] = b[2 * (at + k) + 1] - 127.0f;
-        }
-        for (int i = 0; i < ACARS_N; i++) {
-            if (!acrc[i].mode) continue;
-            amix_run(&amix[i], n);
-            cic_block(&acrc[i], amr, ami, n);
+            if (acrc[i].mode) at_264k(&acrc[i], q->ar[i % 4] * sc, q->ai[i % 4] * sc);
+#if !defined(__ARM_NEON)
+            q->ar[i % 4] = q->ai[i % 4] = 0;
+#endif
         }
     }
+#if defined(__ARM_NEON)
+    for (int g = 0; g < AQ; g++) {
+        vst1q_f32(aq[g].pr, pr[g]), vst1q_f32(aq[g].pi, pi[g]);
+        vst1q_f32(aq[g].ar, ar[g]), vst1q_f32(aq[g].ai, ai[g]);
+    }
+#endif
+    /* rounding: each phasor back to length 1 once a block */
+    for (int g = 0; g < AQ; g++)
+        for (int l = 0; l < 4; l++) {
+            float n = sqrtf(aq[g].pr[l] * aq[g].pr[l] + aq[g].pi[l] * aq[g].pi[l]);
+            if (n > 0) aq[g].pr[l] /= n, aq[g].pi[l] /= n;
+        }
 }
 
 /* ACARS on a thread of its own, off the stream's: on it, six channels took a core of the radio and the stream fell
@@ -632,7 +615,7 @@ static void acars_put(const uint8_t *b, uint32_t n) {
 static uint32_t now_ms(void);
 
 static void *acars_thread(void *arg) {
-    static uint8_t chunk[ABLK * 2 * 4];
+    static uint8_t chunk[65536];
     uint32_t       seen = 0;
     (void)arg;
 
@@ -656,7 +639,7 @@ static void *acars_thread(void *arg) {
         if (stop) break;
         if (fresh) {                    /* other channels: what is in the ring was for the ones before */
             acars_set(on, c, rt);
-            for (int i = 0; i < ACARS_N; i++) amix_set(&amix[i], acrc[i].ph_inc);
+            aq_set();
             atomic_store(&a_rd, atomic_load(&a_wr));
             continue;
         }
