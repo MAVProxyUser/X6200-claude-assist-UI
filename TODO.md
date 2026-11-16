@@ -387,6 +387,16 @@ WWV and WWVH are in (Time Signal, aec9d17). CHU is off the list: Canada's NRC cl
 (77.5 kHz) and MSF (60 kHz) are below the radio's 100 kHz; TDF (162 kHz), EBC and IAM would need a European
 listener to test with.
 
+## A hardware watchdog for a hung radio (#146)
+
+The X6200's SoC has one: `sunxi-wdt` at boot ("Watchdog enabled (timeout=16 sec, nowayout=0)"), `/dev/watchdog`.
+Nothing feeds it, so it does nothing. A feeder (busybox's `watchdog -T 16 -t 5 /dev/watchdog`, or a thread of
+x6100_daemon) would have the SoC reset itself when Linux hangs, as it did twice on 2026-11-16 when a USB disconnect
+oopsed the musb host with its lock held (fixed since in the kernel, 9101/9102, but a net under any such hang).
+To find out with the owner at the radio, before it ships: what a SoC reset does to the base's power (a plain
+`reboot` switches the X6200 off; `x6x00-reboot` keeps the base on), whether the radio comes back by itself, and that
+a stopped feeder (killed GUI, a full disk) never resets a radio that is fine. Off by default, a setting to turn on.
+
 ## Deep backlog: the radio as a Bluetooth microphone for a PC (#278)
 
 Not wanted now (the owner, 2026-11-15: no Bluetooth headset or Bluetooth audio in use). Kept only as a note: a PC
