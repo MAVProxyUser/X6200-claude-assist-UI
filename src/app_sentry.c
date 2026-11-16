@@ -75,6 +75,7 @@
 #include "radio.h"
 #include "rtl_spectrum.h"
 #include "rtl_watch.h"
+#include "sdr_pool.h"
 #include "remote_server.h"
 #include "control_owner.h"
 #include "adsb_rx.h"
@@ -138,6 +139,7 @@ typedef enum { SCR_SCAN, SCR_TRACK, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_RTL, 
 static const scr_t ring[] = {SCR_SCAN, SCR_RTL, SCR_LOG, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_WALKIE};
 #define RING_N (int)(sizeof(ring) / sizeof(ring[0]))
 static scr_t open_at = SCR_SCAN;           /* the screen the Sentry opens on: A, or one app_sentry_open_at() said */
+static bool  open_pool;                    /* and the SDR pool's panel over it (app_sentry_open_pool: from H) */
 static scr_t cfg_from = SCR_SCAN;          /* the screen SCAN CFG was opened from: its radio's settings */
 typedef enum { MODE_AUTO, MODE_SEMI, MODE_MAN } sysmode_t;
 typedef enum { ROUT_BAND, ROUT_SWEEP, ROUT_SCAN } routine_t;
@@ -543,7 +545,8 @@ static lv_obj_t *d_head_l, *d_row_l[12];
 
 /* E SYSTEM: the rest of the radio, from here */
 typedef enum {
-    SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_CLASSIC, SYS_SHELL, SYS_BASEFW, SYS_HOME, SYS_N
+    SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_POOL, SYS_CLASSIC, SYS_SHELL, SYS_BASEFW, SYS_HOME,
+    SYS_N
 } sysitem_t;
 static const struct {
     const char *name, *about;
@@ -561,7 +564,11 @@ static const struct {
     {"VHF/UHF (SDR)", "B VHF/UHF: AN SDR'S SPECTRUM (AN RTL-SDR 24 MHZ TO 1.7 GHZ, A HACKRF 1 MHZ TO 6 GHZ, A BLADERF), "
                       "ALONE, SPLIT WITH THE X6200'S OR THE X6200'S ALONE (F3 VIEW), A'S KEYS: F1 SCANS THE BAND, F2 "
                       "CHOOSES IT, F4 LISTEN (X6200, THE SDR, BOTH OR OFF), F5 SCAN CFG. THE VFO TUNES ITS CHANNEL, THE "
-                      "MFK PANS. AIRSPACE HAS THE SDR WHILE IT IS OPEN. A HACKRF OR BLADERF ALSO TRANSMITS ON G."},
+                      "MFK PANS. AIRSPACE TAKES A SPARE SDR, ELSE B'S WHILE IT IS OPEN. A HACKRF OR BLADERF ALSO "
+                      "TRANSMITS ON G."},
+    {"SDR POOL", "EVERY SDR ON USB (EACH RTL BY ITS NUMBER, A HACKRF, A BLADERF), WHOSE IT IS (B, AIRSPACE, A WATCH "
+                 "CHANNEL, FREE) AND WHETHER IT IS HEARD: F1 USES ONE ON B, F2 STOPS OR STARTS IT, F3 HEARS OR MUTES IT, "
+                 "F4 WATCHES B'S CHANNEL. APP HELD OPENS IT FROM ANY SCREEN."},
     {"CLASSIC RADIO", "THE FULL RADIO SCREEN, WITH TRANSMIT. THE SENTRY STAYS AWAY TILL YOU OPEN IT AGAIN: APP, THEN "
                       "THE SENTRY TILE."},
     {"UNIX SHELL", "A SHELL ON THE RADIO ITSELF (/BIN/SH, AS ROOT): A KEYBOARD TYPES INTO IT, TYPE OPENS THE ON-SCREEN "
@@ -2810,7 +2817,7 @@ static const char *bu_word(int u) {
 static unsigned b_sdrs(void) {
     unsigned p = adsb_rx_present(), m = 0;
     int64_t  hz = listen_hz ? listen_hz : rtl_hz, lo, hi;
-    int      rtls = adsb_rx_rtl_count();
+    int      rtls = sdr_pool_rtl_count();
 
     for (int u = 0; u < BU_N; u++) {
         rtl_dev_t k = bu_kind(u);
@@ -2867,7 +2874,15 @@ static void sp_fill(void) {
         if (bu_kind(u) == RTL_DEV_RTL) {        /* each RTL by its serial and USB location */
             char sn[24], loc[24];
 
-            if (!adsb_rx_rtl_id(u - BU_RTL0, sn, sizeof(sn), loc, sizeof(loc))) sn[0] = loc[0] = 0;
+            sdr_unit_t pu[SDR_POOL_UNITS];
+            int        pn = sdr_pool_units(pu, SDR_POOL_UNITS);
+
+            sn[0] = loc[0] = 0;
+            for (int k = 0; k < pn; k++)
+                if (pu[k].kind == RTL_DEV_RTL && pu[k].rtl == u - BU_RTL0) {
+                    snprintf(sn, sizeof(sn), "%s", pu[k].sn);
+                    snprintf(loc, sizeof(loc), "%s", pu[k].loc);
+                }
             snprintf(what, sizeof(what), "SN %s, USB %s, RECEIVE ONLY", sn[0] ? sn : "-", loc[0] ? loc : "-");
         } else {
             snprintf(what, sizeof(what), "%s-6 GHZ, TRANSMITS ON G", lo < 10000000 ? "1 MHZ" : "70 MHZ");
@@ -2971,6 +2986,173 @@ static bool b_listen_next_sdr(void) {
             return true;
         }
     return false;                       /* the last: on to BOTH */
+}
+
+/* ---- The SDR pool's panel (sdr_pool.c): every SDR on USB, whose it is and whether it is heard, and keys to choose,
+ * stop, start and hear each, from any screen: APP held, or F SYSTEM's SDR POOL (the user, 2026-11-16: "the rest of
+ * the GUI tabs have the ability to select, start, stop, and mux their audio as needed"). F1 uses the one chosen on B
+ * (G's SDR channels, C's stick entries, A's SDR LISTEN and D's bands are B's SDR), F2 stops it (nobody's: AIRSPACE
+ * and the watch channels move off it; kept over restarts) or starts it again, F3 hears or mutes it (B's: the screen's
+ * LISTEN; a watch channel's: in the mix or not), F4 watches B's channel on a free RTL, F5 back ---- */
+static lv_obj_t  *pp_box, *pp_head_l, *pp_row_l[SDR_POOL_UNITS], *pp_foot_l;
+static bool       pp_on;
+static int        pp_sel, pp_n;
+static sdr_unit_t pp_u[SDR_POOL_UNITS];
+static void       show_keys(void);
+
+static bool b_heard(void) {
+    return heard == HEAR_RTL || heard == HEAR_BOTH;
+}
+
+static void pp_fill(void) {
+    static const char *const mn[] = {"", "NFM", "AM", "WFM"};
+
+    if (!pp_box) return;
+    pp_n = sdr_pool_units(pp_u, SDR_POOL_UNITS);
+    if (pp_sel >= pp_n) pp_sel = pp_n ? pp_n - 1 : 0;
+    lv_label_set_text_fmt(pp_head_l, "SDR POOL: %d ON USB, EACH ONE'S USER AND AUDIO", pp_n);
+    for (int r = 0; r < SDR_POOL_UNITS; r++) {
+        sdr_unit_t *u = &pp_u[r];
+        char        who[48], f[16];
+
+        if (r >= pp_n) {
+            lv_obj_add_flag(pp_row_l[r], LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        if (u->owner == SDR_OWN_B) {
+            int64_t hz = listen_hz ? listen_hz : rtl_hz;
+
+            fmt_mhz(f, sizeof(f), hz, 3);
+            snprintf(who, sizeof(who), "B %s %s %s", f, mn[rtl_mode_of(hz) & 3], b_heard() ? "HEARD" : "MUTED");
+        } else if (u->owner >= SDR_OWN_ADSB && u->owner < SDR_OWN_WATCH) {
+            snprintf(who, sizeof(who), "AIRSPACE ADS-B 1090");
+        } else if (u->owner >= SDR_OWN_WATCH && u->owner < SDR_OWNERS) {
+            rtl_watch_info_t w;
+
+            if (rtl_watch_get(u->owner - SDR_OWN_WATCH, &w)) {
+                fmt_mhz(f, sizeof(f), w.hz, 3);
+                snprintf(who, sizeof(who), "WATCH %s %s%s", f, w.open ? "OPEN" : "QUIET",
+                         sdr_pool_heard(u->owner) ? "" : " MUTED");
+            } else {
+                snprintf(who, sizeof(who), "WATCH");
+            }
+        } else {
+            snprintf(who, sizeof(who), "%s", u->stopped ? "STOPPED" : "FREE");
+        }
+        lv_label_set_text_fmt(pp_row_l[r], "%c %-7s %-6s %-7s %s%s", r == pp_sel ? '>' : ' ', u->name,
+                              u->sn[0] ? u->sn : "-", u->loc, who, u->own_power ? "" : "  (RADIO'S POWER)");
+        lv_obj_set_style_bg_opa(pp_row_l[r], r == pp_sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_text_color(pp_row_l[r], r == pp_sel ? ink : u->stopped ? dim : amb, 0);
+        lv_obj_clear_flag(pp_row_l[r], LV_OBJ_FLAG_HIDDEN);
+    }
+    int n = pp_n ? pp_n : 1;
+
+    lv_obj_set_y(pp_foot_l, 50 + n * 28 + 10);
+    lv_obj_set_height(pp_box, 50 + n * 28 + 10 + 50);
+    if (!pp_n) {
+        lv_obj_clear_flag(pp_row_l[0], LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(pp_row_l[0], "  NO SDR ON USB: AN RTL-SDR, KRAKENSDR, HACKRF OR BLADERF ON THE HOST PORT");
+    }
+}
+
+static void pp_keys(void) {
+    for (int k = 0; k < 5; k++) buttons_refresh(&btn[k]);
+    if (key_l[0]) show_keys();
+}
+
+static void pp_open(void) {
+    if (g_portrait) {                   /* drawn on the landscape screen: not over G held up */
+        w_say("SDR POOL: FROM ANOTHER SCREEN", "SDR POOL", "THE SDR POOL OPENS FROM ANY SCREEN BUT G HELD UP.");
+        return;
+    }
+    if (sp_on) sp_hide();
+    pp_on = true;
+    pp_fill();
+    lv_obj_clear_flag(pp_box, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(pp_box);
+    pp_keys();
+}
+
+static void pp_close(void) {
+    pp_on = false;
+    if (pp_box) lv_obj_add_flag(pp_box, LV_OBJ_FLAG_HIDDEN);
+    pp_keys();
+    show_screen();
+}
+
+static void b_watch_toggle(void);
+
+static void pp_action(int k) {
+    sdr_unit_t *u = pp_n ? &pp_u[pp_sel] : NULL;
+    char        t[160];
+
+    if (k == 4 || !u) {
+        pp_close();
+        return;
+    }
+    switch (k) {
+        case 0:                         /* this one B's */
+            if (u->stopped) {
+                osd("STOPPED", "START IT FIRST (F2), THEN USE IT ON B.", -1);
+                break;
+            }
+            b_use(bu_of(u->kind, u->rtl), b_sdrs());
+            break;
+        case 1:                         /* nobody's, or free again */
+            if (u->owner == SDR_OWN_B) {
+                osd("B'S SDR", "B KEEPS ONE: USE ANOTHER ON B (F1 ON IT), THEN STOP THIS ONE.", -1);
+                break;
+            }
+            sdr_pool_stop(pp_sel, !u->stopped);
+            snprintf(t, sizeof(t), u->stopped ? "FREE AGAIN: AIRSPACE, A WATCH CHANNEL OR B MAY TAKE IT."
+                                              : "NOBODY'S TILL STARTED AGAIN (F2), OVER RESTARTS TOO: WHOEVER HAD "
+                                                "IT MOVES TO ANOTHER OR WAITS.");
+            osd(u->stopped ? "STARTED" : "STOPPED", t, -1);
+            break;
+        case 2:                         /* in the mix or not */
+            if (u->owner == SDR_OWN_B) {    /* the screen's LISTEN (B's off A and B): the SDR, or the X6200 */
+                ParamInt *c  = scr == SCR_SCAN ? cfg_hear_a : cfg_hear_f;
+                int       to = b_heard() ? HEAR_X6200 : HEAR_RTL;
+
+                param_i_set(c, to);
+                hear_apply(to);
+                osd(to == HEAR_RTL ? "B'S SDR HEARD" : "B'S SDR MUTED",
+                    to == HEAR_RTL ? "ITS CHANNEL ON THE SPEAKER (THE X6200 OFF IT): F3 AGAIN, THE X6200."
+                                   : "THE X6200 ON THE SPEAKER AGAIN: F3 AGAIN, THE SDR.", -1);
+            } else if (u->owner >= SDR_OWN_WATCH && u->owner < SDR_OWNERS) {
+                bool on = !sdr_pool_heard(u->owner);
+
+                sdr_pool_hear(u->owner, on);
+                osd(on ? "WATCH HEARD" : "WATCH MUTED", on ? "ITS AUDIO ON THE SPEAKER WHEN IT OPENS."
+                                                           : "STILL WATCHED (ITS LINE ON B), NOT HEARD.", -1);
+            } else if (u->owner >= SDR_OWN_ADSB) {
+                osd("ADS-B", "NO AUDIO: DUMP1090 DECODES IT FOR AIRSPACE.", -1);
+            } else {
+                osd("FREE", "NOTHING TO HEAR: F1 USES IT ON B, F4 WATCHES B'S CHANNEL ON A FREE ONE.", -1);
+            }
+            break;
+        case 3:
+            b_watch_toggle();
+            break;
+    }
+    pp_fill();
+    pp_keys();
+}
+
+static const char *pp_label(int k) {
+    static char s[24];
+    sdr_unit_t *u = pp_n ? &pp_u[pp_sel] : NULL;
+
+    switch (k) {
+        case 0: return "Use\non B";
+        case 1: return u && u->stopped ? "Start" : "Stop";
+        case 2:
+            if (u && u->owner == SDR_OWN_B) return b_heard() ? "Mute" : "Hear";
+            if (u && u->owner >= SDR_OWN_WATCH && u->owner < SDR_OWNERS) return sdr_pool_heard(u->owner) ? "Mute" : "Hear";
+            return "Hear";
+        case 3: snprintf(s, sizeof(s), "%s", "Watch\nB's ch"); return s;
+        default: return "Back";
+    }
 }
 
 /* An RTL-SDR plugged in (its rows coming) while what is to be heard has the stick and the X6200 stands in for it:
@@ -4742,6 +4924,7 @@ static void blink_cb(lv_timer_t *t) {
     rtl_spectrum_rds_watch(rds_channel());          /* B's FM broadcast channel's RDS (C's stick entry's) */
     if (scr == SCR_SYSTEM && n % 2 == 0) sys_load_show();   /* its load each second */
     if (scr == SCR_RTL) watch_show();                       /* the watch channels, open or quiet */
+    if (pp_on) pp_fill();                                   /* the pool's panel: who has what, as it changes */
     rds_show(false);
     g_rds_take();                                   /* C's entries named by it */
     sp_check();                                     /* B: which SDR, when more than one tunes its channel */
@@ -4791,6 +4974,7 @@ static void blink_cb(lv_timer_t *t) {
 static const char *f_label(int k) {
     static char s[24];
 
+    if (pp_on) return pp_label(k);
     switch (scr) {
         case SCR_SCAN: {        /* C's keys, for the X6200: SCAN its band, the BAND, VIEW, LISTEN, SCAN CFG */
             static const char *const views[] = {"RTL", "Split", "X6200"};
@@ -4949,9 +5133,15 @@ static void sys_open_async(void *arg) {
     }
 }
 
+static void pp_open(void);
+
 static void sys_open(int i) {
     if (i == SYS_VHF) {
         go(SCR_RTL);
+        return;
+    }
+    if (i == SYS_POOL) {
+        pp_open();
         return;
     }
     if (i == SYS_HOME) {
@@ -5038,6 +5228,10 @@ static void key_tap_cb(lv_event_t *e) {
 
 static void fkey(int k) {
     if (k >= 0 && k < 5 && btn[k].disabled) return;     /* dimmed: a tap on its box does nothing either */
+    if (pp_on) {                        /* the SDR pool's panel: its keys */
+        pp_action(k);
+        return;
+    }
     if (sp_on) {                        /* B's SDR box: F4 (LISTEN) goes down it, the rest wait */
         if (k == 3) sp_step(1);
         return;
@@ -5313,6 +5507,17 @@ static void press(void) {
 static void key_cb(lv_event_t *e) {
     uint32_t key = *((uint32_t *)lv_event_get_param(e));
 
+    if (pp_on) {                        /* the SDR pool's panel: the MFK goes through it, its push uses one on B */
+        switch (key) {
+            case LV_KEY_LEFT:
+            case LV_KEY_UP: if (pp_n) pp_sel = (pp_sel + pp_n - 1) % pp_n; pp_fill(); pp_keys(); return;
+            case LV_KEY_RIGHT:
+            case LV_KEY_DOWN: if (pp_n) pp_sel = (pp_sel + 1) % pp_n; pp_fill(); pp_keys(); return;
+            case LV_KEY_ENTER: pp_action(0); return;
+            case LV_KEY_ESC: pp_close(); return;
+            default: break;
+        }
+    }
     if (sp_on) {                        /* B's SDR box: the MFK goes through it, its push (click_cb) chooses */
         switch (key) {
             case LV_KEY_LEFT:
@@ -5385,6 +5590,8 @@ static void click_cb(lv_event_t *e) {
     if (indev && lv_indev_get_type(indev) == LV_INDEV_TYPE_ENCODER) {
         if (help_on)
             help_show(false);
+        else if (pp_on)
+            pp_action(0);
         else if (sp_on)
             sp_close(sp_units[sp_sel]);
         else
@@ -5505,8 +5712,11 @@ static bool front_key(int key, int state) {
         case KEYPAD_GEN:
             if (tap && !g_portrait) help_show(true);    /* drawn on the landscape screen: none held up */
             return true;
-        case KEYPAD_APP:
-            if (tap) go(SCR_SYSTEM);
+        case KEYPAD_APP:                /* held: the SDR pool's panel, from any screen */
+            if (tap && pp_on) pp_close();
+            else if (tap) go(SCR_SYSTEM);
+            else if (hold && pp_on) pp_close();
+            else if (hold) pp_open();
             return true;
         case KEYPAD_BAND_UP:
         case KEYPAD_BAND_DOWN:
@@ -7675,6 +7885,20 @@ static void build_overlays(void) {
     lv_obj_add_flag(sp_box, LV_OBJ_FLAG_HIDDEN);
     sp_on = false;
 
+    pp_box = rect(root, 30, 56, SW - 60, 200, 3, false);
+    lv_obj_add_flag(pp_box, LV_OBJ_FLAG_CLICKABLE);
+    pp_head_l = label(pp_box, &pixel_20, amb, 12, 12, SW - 90, LV_TEXT_ALIGN_LEFT, "");
+    for (int r = 0; r < SDR_POOL_UNITS; r++) {
+        pp_row_l[r] = label(pp_box, &pixel_20, amb, 9, 50 + r * 28, SW - 84, LV_TEXT_ALIGN_LEFT, "");
+        lv_obj_set_style_bg_color(pp_row_l[r], amb, 0);
+        lv_obj_set_style_pad_ver(pp_row_l[r], 2, 0);
+    }
+    pp_foot_l = label(pp_box, &pixel_20, amb, 12, 0, SW - 90, LV_TEXT_ALIGN_LEFT,
+                      "MFK: CHOOSE   F1/PUSH: USE ON B   F2: STOP/START   F3: HEAR/MUTE\nF4: WATCH B'S CHANNEL   "
+                      "F5, BACK OR APP: CLOSE");
+    lv_obj_add_flag(pp_box, LV_OBJ_FLAG_HIDDEN);
+    pp_on = false;
+
     help_frame = rect(root, 14, 52, SW - 28, scr_h - 56, 3, false);
     lv_obj_add_flag(help_frame, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(help_frame, help_tap_cb, LV_EVENT_CLICKED, NULL);
@@ -7688,6 +7912,7 @@ static void build_overlays(void) {
                    "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (B: THE SDR'S); VOLUME AGAIN AFTER 5 S\n"
                    "LISTEN         A: X6200, THE SDR, BOTH, OFF; B: X6200, EACH SDR THAT TUNES IT, BOTH, OFF\n"
                    "F4 HELD ON B   WATCH B'S CHANNEL ON A SPARE RTL (KRAKENSDR): HEARD WHEN IT OPENS\n"
+                   "APP HELD       SDR POOL: EACH SDR, ITS USER; USE ON B, STOP/START, HEAR/MUTE (ANY SCREEN, H TOO)\n"
                    "BAND UP/DOWN   THE NEXT BAND, AS F2 (B: THE NEXT PRESET; G: A CHANNEL OR A STEP, MFK: GROUP)\n"
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
                    "DFN            NOISE REDUCTION ON/OFF. HOLD: NOISE BLANKER (CLICKS AND POPS)\n"
@@ -7793,6 +8018,10 @@ static void construct_cb(lv_obj_t *parent) {
         go(SCR_SCAN);
         if (s == SCR_TRACK && cfg_from == SCR_RTL) go(SCR_RTL);     /* B's SCAN CFG: from B, as its F5 */
         if (s != SCR_SCAN) go(s);       /* from A, as a turn of the ring would (G held up, B's picture) */
+    }
+    if (open_pool) {                    /* APP held on H: the pool's panel, over F */
+        open_pool = false;
+        pp_open();
     }
     if (!wide_ok) {
         opt_set(&b_band, 0, "THIS BASE SENDS NO SPECTRUM", 1);
@@ -8022,6 +8251,17 @@ static void state_restore(void) {
 }
 
 /* The Sentry on one of its screens by letter ("A" to "G"; "H" is AIRSPACE): AIRSPACE's ring comes back so */
+/* The SDR pool's panel from outside the Sentry (APP held on H, AIRSPACE): the Sentry opened on F with it */
+void app_sentry_open_pool(void) {
+    if (dialog_type_is_run(dialog_sentry)) {
+        pp_open();
+        return;
+    }
+    open_pool = true;
+    open_at   = SCR_SYSTEM;
+    main_screen_start_app(ACTION_APP_SENTRY);
+}
+
 void app_sentry_open_at(char letter) {
     static const scr_t by[] = {SCR_SCAN, SCR_RTL, SCR_LOG, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_WALKIE};
 

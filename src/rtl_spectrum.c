@@ -18,6 +18,7 @@
 #include "adsb_rx.h"
 #include "audio.h"
 #include "rtl_watch.h"
+#include "sdr_pool.h"
 #include "radio.h"
 
 #include <errno.h>
@@ -389,6 +390,9 @@ static void *spec_thread(void *arg) {
             say(k ? "r 1\n" : "r 0\n");
             asked = k;
         }
+        /* the SDR pool told what B has and asked for (it gives the rest to AIRSPACE and the watch channels) */
+        sdr_pool_b(atomic_load(&dev_kind) == RTL_DEV_NONE ? RTL_DEV_NONE : (rtl_dev_t)atomic_load(&dev_kind),
+                   atomic_load(&dev_rtl), (rtl_dev_t)atomic_load(&use_kind), atomic_load(&use_rtl));
         {   /* B asked for an RTL the daemon could not open (AIRSPACE's spare had it a moment ago, and lets it go):
              * asked again each 3 s while another RTL is open */
             static uint32_t again;
@@ -857,6 +861,16 @@ static void *player_thread(void *arg) {
                                                                      "line in (its monitor: /tmp/moni_test)" : "off");
             }
         }
+        /* the speaker taken back for us: another of the base's play mode's users (the recorder, a voice message,
+         * FreeDV) set it OFF as it ended while we still play (only from OFF: a recording's mode is left alone) */
+        if (atomic_load(&playing) && !bt && !moni && !atomic_load(&tx_mic) && radio_play_mode() == AUDIO_PLAY_OFF) {
+            static uint32_t again;
+
+            if (lv_tick_or_ms() - again >= 500) {
+                again = lv_tick_or_ms();
+                radio_set_play_mode(AUDIO_PLAY_ON);
+            }
+        }
         atomic_store(&on_bt, want_play && bt);
         atomic_store(&player_moni, moni);
         atomic_store(&on_moni, want_play && moni);
@@ -965,10 +979,15 @@ void rtl_spectrum_listen(int64_t hz, int mode) {
     }
     snprintf(cmd, sizeof(cmd), "l %lld %d\n", (long long)(mode ? hz : 0), mode);
     say(cmd);
-    if (mode && !player_started) {
-        player_started = pthread_create(&player, NULL, player_thread, NULL) == 0;
-        if (player_started) pthread_detach(player);
-    }
+    if (mode) rtl_spectrum_player_start();
+}
+
+/* The player running: at the first listen, or for the watch channels from the start (rtl_watch.c), so one restored
+ * at boot is heard when it opens though nothing listened yet. The LVGL thread's */
+void rtl_spectrum_player_start(void) {
+    if (player_started) return;
+    player_started = pthread_create(&player, NULL, player_thread, NULL) == 0;
+    if (player_started) pthread_detach(player);
 }
 
 bool rtl_spectrum_listening(void) {

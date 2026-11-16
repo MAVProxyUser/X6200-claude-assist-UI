@@ -1140,6 +1140,12 @@ static bool front_key(int key, int state) {
         if (state == KEYPAD_RELEASE) help_show(!help_on);
         return true;
     }
+    if (key == KEYPAD_APP && (state == KEYPAD_LONG || state == KEYPAD_LONG_RELEASE)) {
+        /* held: the SDR pool's panel, as on every screen of the Sentry (the Sentry opened on F for it); its release
+         * nothing (not the main screen's held APP) */
+        if (state == KEYPAD_LONG) app_sentry_open_pool();
+        return true;
+    }
     if (help_on && state == KEYPAD_RELEASE) {
         help_show(false);
         return true;

@@ -159,6 +159,7 @@ uint64_t radio_swr_trip_at(void);
 void radio_speaker_play(bool speaker);
 /* What the base streams: the receiver, our audio to the speaker, or the hand mic and our audio */
 void radio_set_play_mode(audio_play_mode_t mode);
+audio_play_mode_t radio_play_mode(void);
 /* The base's monitor at the level in /tmp/moni_test while it is there (a test); called each half second */
 void radio_moni_test_poll(void);
 

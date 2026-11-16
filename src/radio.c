@@ -1382,7 +1382,15 @@ bool radio_get_modem(void) {
 
 /* Under the lock: the record, PTT, modem, tune and split bits share one register, and the
  * library's read-modify-write of it from two threads lost a PTT or modem change */
+static _Atomic audio_play_mode_t play_mode_now = AUDIO_PLAY_OFF;
+
+/* The base's play mode as last set (any of its users: the SDR player, the recorder, voice messages, FreeDV) */
+audio_play_mode_t radio_play_mode(void) {
+    return atomic_load(&play_mode_now);
+}
+
 static void play_mode_apply(audio_play_mode_t mode) {
+    atomic_store(&play_mode_now, mode);
     switch (mode) {
     case AUDIO_PLAY_OFF:
         hw_set_i(HW_RECORD, false);

@@ -872,6 +872,35 @@ last seconds, the strongest signals named over it and the screen's channel brack
   B tunes what the stick does: an RTL-SDR 24 MHz to 1.7 GHz, a HackRF 1 MHz to 6 GHz, a bladeRF 2.0 47 MHz to
   6 GHz (as libbladeRF says it).
 
+### The SDR pool
+
+**Every SDR on USB has one user at a time, decided in one place** (`src/sdr_pool.c`, its own look at USB each
+second): each RTL-SDR by its number (RTL0, RTL1...: serial, then USB location), a HackRF, a bladeRF. In order:
+
+1. **B** keeps the one chosen on B (else the SDR daemon's own: a HackRF, a bladeRF, RTL0). A's SDR LISTEN, C's stick
+   entries, D's bands and G's SDR channels are B's SDR, retuned.
+2. **Watch channels** take RTLs of their own power from the last down (RTL4, RTL3...).
+3. **AIRSPACE's spares** take the rest from the first up: one with AIRSPACE closed, every free one while it is open.
+   **AIRSPACE borrows B's SDR only when it has no spare of that kind** (one SDR alone): with a KrakenSDR B goes on
+   while AIRSPACE is open.
+
+Power: an SDR on the radio's own HOST power streams alone; those behind a hub of their own power (a KrakenSDR's)
+stream beside it and each other (five did at once, about 24 MB/s, 2026-11-16). Beside B's HackRF or bladeRF with no
+such RTL, one RTL on the radio's power may be AIRSPACE's, as before.
+
+**The SDR POOL panel**, from any screen but G held up: **APP held**, or F SYSTEM's **SDR POOL**. A row each SDR: its
+number, serial, USB location and user (`B 106.700 WFM HEARD`, `AIRSPACE ADS-B 1090`, `WATCH 106.700 QUIET MUTED`,
+`FREE`, `STOPPED`; `(RADIO'S POWER)` for one on the radio's own). The MFK chooses; **F1** (or the push) uses it on
+B; **F2** stops it (nobody's: whoever had it moves to another or waits, kept over restarts in `/mnt/sdr_pool`) or
+starts it again (B's own cannot be stopped: use another on B first); **F3** hears or mutes it (B's: the screen's
+LISTEN, the SDR or the X6200; a watch channel's: in the mix or not; AIRSPACE's has no audio); **F4** watches B's
+channel on a free RTL (as F4 held on B); **F5**, BACK or APP closes it. It follows changes while open.
+
+**The speaker**: one player (`rtl_spectrum.c`) mixes B's SDR and the watch channels open, and runs from the start
+for watch channels restored at boot. Another of the base's play-mode users (the recorder, a voice message, FreeDV)
+that ends while it plays no longer leaves the speaker off: it takes it back within half a second (from off only, so
+a recording's mode is left alone).
+
 ### SCAN CFG
 
 F5 on A or B, F5 again (BACK) to return; on no ring, the badge says the screen it came from.

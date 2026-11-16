@@ -22,6 +22,7 @@
 #include "radio.h"
 #include "rtl_spectrum.h"
 #include "rtl_watch.h"
+#include "sdr_pool.h"
 #include "gui_events.h"
 #include "msg_box.h"
 #include "msg_note.h"
@@ -2091,6 +2092,7 @@ lv_obj_t * main_screen() {
 #ifdef BOARD_X6200
     lv_timer_create(receivers_watch_cb, 1000, NULL);
     /* B's SDR, chosen among more than one (app_sentry.c): the daemon told as soon as it is there, whatever opens */
+    sdr_pool_init();    /* who has which SDR (sdr_pool.c): before anyone asks */
     rtl_watch_init();   /* the watch channels on the spare RTLs (rtl_watch.c), saved from before */
     {   /* B's SDR as chosen (app_sentry.c's cfg_rtl_dev: the kind in bits 0-3, the RTL's number in bits 16-19) */
         int v = param_i_get(cfg_rtl_dev);

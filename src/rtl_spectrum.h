@@ -52,6 +52,8 @@ rtl_dev_t rtl_spectrum_used(void);
  * the one the daemon is to hold (rtl_spectrum_use with it); the one asked for; the one open (-1: no RTL open); the
  * name of RTL n ("RTL0") */
 void        rtl_spectrum_use_rtl(int n);
+/* The audio player running (it starts at the first listen; the watch channels start it at boot) */
+void        rtl_spectrum_player_start(void);
 int         rtl_spectrum_used_rtl(void);
 int         rtl_spectrum_dev_rtl(void);
 const char *rtl_spectrum_rtl_tag(int n);

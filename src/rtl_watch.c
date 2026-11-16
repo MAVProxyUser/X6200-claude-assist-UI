@@ -4,7 +4,8 @@
  *  OpenX6X00 - Watch channels (rtl_watch.h). The user, 2026-11-16, after five RTLs streamed at once on the radio
  *  through a KrakenSDR: "Tuners at once", then "Yes, build them". Each channel has an RTL of its own: one on a hub of
  *  its own power (the Kraken's), that B neither holds nor asked for, taken from the last (RTL4, RTL3...) so
- *  AIRSPACE's first spare keeps the first free one; AIRSPACE leaves them (adsb_rx_rtl_claim).
+ *  AIRSPACE's first spare keeps the first free one. The SDR pool (sdr_pool.c) decides which: a channel asks for one
+ *  (SDR_OWN_WATCH + i) and runs on what it is given.
  *
  *  Each is an x6x00-rtlspec of its own (-W: that RTL alone, under the socket "x6x00-rtlspec-w<i>"), at 1.0584 MS/s
  *  (4 x 264.6 kHz, what its audio chain takes), tuned W_OFF over the channel so the tuner's own spike at its middle
@@ -17,7 +18,7 @@
 
 #include "rtl_watch.h"
 
-#include "adsb_rx.h"
+#include "sdr_pool.h"
 #include "board.h"
 #include "rtl_spectrum.h"
 
@@ -85,36 +86,27 @@ static void save(void) {
     rename(WATCH_FILE ".new", WATCH_FILE);
 }
 
-/* Which RTL each channel has, said to AIRSPACE: from the last place down, one of its own power, not B's (held or
- * asked for). Under cfg_lock */
+/* Which RTL each channel has: asked of the SDR pool, each wanted while it is set. Under cfg_lock */
 static void alloc(void) {
-    int      n = adsb_rx_rtl_count(), held = rtl_spectrum_dev_rtl();
-    int      want = rtl_spectrum_used() == RTL_DEV_RTL ? rtl_spectrum_used_rtl() : -1, next = n - 1;
-    unsigned claim = 0;
-
     for (int i = 0; i < RTL_WATCH_N; i++) {
-        int p = -1;
+        sdr_unit_t u;
 
-        if (i < n_w) {
-            while (next >= 0 && (next == held || next == want || !adsb_rx_rtl_self(next))) next--;
-            if (next >= 0) p = next--;
-        }
-        if (p >= 0) claim |= 1u << p;
-        atomic_store(&w[i].place, p);
+        sdr_pool_want(SDR_OWN_WATCH + i, i < n_w);
+        atomic_store(&w[i].place, i < n_w && sdr_pool_held(SDR_OWN_WATCH + i, &u) >= 0 ? u.rtl : -1);
     }
-    adsb_rx_rtl_claim(claim);
 }
 
+/* RTLs another watch channel could have: of their own power, neither B's nor stopped nor a watch channel's (an
+ * AIRSPACE spare gives its one up) */
 int rtl_watch_free(void) {
-    int n = adsb_rx_rtl_count(), held = rtl_spectrum_dev_rtl(), free = 0;
-    int want = rtl_spectrum_used() == RTL_DEV_RTL ? rtl_spectrum_used_rtl() : -1;
+    sdr_unit_t u[SDR_POOL_UNITS];
+    int        n = sdr_pool_units(u, SDR_POOL_UNITS), free = 0;
 
-    for (int p = 0; p < n; p++)
-        if (p != held && p != want && adsb_rx_rtl_self(p)) free++;
-    pthread_mutex_lock(&cfg_lock);
-    free -= n_w;
-    pthread_mutex_unlock(&cfg_lock);
-    return free < 0 ? 0 : free;
+    for (int i = 0; i < n; i++)
+        if (u[i].kind == RTL_DEV_RTL && u[i].own_power && !u[i].stopped && u[i].owner != SDR_OWN_B &&
+            !(u[i].owner >= SDR_OWN_WATCH && u[i].owner < SDR_OWNERS))
+            free++;
+    return free;
 }
 
 /* ---- One channel's daemon ---- */
@@ -393,6 +385,7 @@ void rtl_watch_init(void) {
 
         if (pthread_create(&t, NULL, w_thread, (void *)(intptr_t)i) == 0) pthread_detach(t);
     }
+    rtl_spectrum_player_start();        /* heard when one opens, though nothing listened yet this run */
 }
 
 bool rtl_watch_has(int64_t hz) {
@@ -418,9 +411,11 @@ int rtl_watch_toggle(int64_t hz, int mode, int sql_db, int gain) {
                 w[k].mode = w[k + 1].mode;
                 w[k].sql  = w[k + 1].sql;
                 w[k].gain = w[k + 1].gain;
+                sdr_pool_hear(SDR_OWN_WATCH + k, sdr_pool_heard(SDR_OWN_WATCH + k + 1));   /* its mute with it */
                 atomic_fetch_add(&w[k].gen, 1);
             }
             n_w--;
+            sdr_pool_hear(SDR_OWN_WATCH + n_w, true);
             r = 0;
             break;
         }
@@ -429,6 +424,7 @@ int rtl_watch_toggle(int64_t hz, int mode, int sql_db, int gain) {
         w[n_w].mode = mode;
         w[n_w].sql  = sql_db > 0 ? sql_db : 10;     /* a watch channel is always squelched */
         w[n_w].gain = gain;
+        sdr_pool_hear(SDR_OWN_WATCH + n_w, true);       /* a new one heard */
         atomic_fetch_add(&w[n_w].gen, 1);
         n_w++;
         r = 1;
@@ -478,7 +474,8 @@ void rtl_watch_mix(int16_t *buf, int n) {
     for (int k = 0; k < n; k++) acc[k] = buf[k];
     for (int i = 0; i < RTL_WATCH_N; i++) {
         watch_t *c  = &w[i];
-        float    to = atomic_load(&c->open) && atomic_load(&c->place) >= 0 ? 1.0f : 0.0f;
+        float    to = atomic_load(&c->open) && atomic_load(&c->place) >= 0 && sdr_pool_heard(SDR_OWN_WATCH + i) ? 1.0f
+                                                                                                           : 0.0f;
 
         pthread_mutex_lock(&c->lock);
         if (to == 0 && c->g == 0) {             /* shut: what came meanwhile is old by the time it opens (50 ms kept) */

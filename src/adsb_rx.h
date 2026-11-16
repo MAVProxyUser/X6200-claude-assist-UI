@@ -33,8 +33,7 @@ void adsb_rx_name(char *name, size_t n);
  * Sentry's SDR, a spare RTL-SDR beside it */
 enum { ADSB_SLOT_SERIAL, ADSB_SLOT_SDR, ADSB_SLOT_SPARE };     /* then the further spares, ADSB_SLOT_SPARE + 1... */
 #define ADSB_SLOTS (ADSB_SLOT_SPARE + 5)
-/* The RTLs (places, a bit each) a watch channel has (rtl_watch.c): AIRSPACE's spares leave them */
-void adsb_rx_rtl_claim(unsigned places);
+
 
 /* The receivers listened on now, one by one: each one's slot and its name as adsb_rx_name joins them; the count */
 int adsb_rx_slots(int *slot, char (*name)[40], int max);
@@ -65,12 +64,6 @@ unsigned adsb_rx_choices(void);
 
 /* The kinds on USB, a bit each, whether they can be listened on or not (B's SDRs among them) */
 unsigned adsb_rx_present(void);
-/* How many RTL-SDRs are on USB (a KrakenSDR: five), looked at each second */
-int      adsb_rx_rtl_count(void);
-/* RTL n's serial and USB location ("1002", "3-1.3"), in the daemon's order (RTL0 the first); false: none */
-bool     adsb_rx_rtl_id(int n, char *sn, size_t sn_n, char *loc, size_t loc_n);
-/* RTL n behind a hub of its own power (a KrakenSDR's): it may stream beside another */
-bool     adsb_rx_rtl_self(int n);
 
 /* An RTL-SDR on USB is a spare (the daemon holds a HackRF or a bladeRF beside it) */
 bool adsb_rx_rtl_spare(void);

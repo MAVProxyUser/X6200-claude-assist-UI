@@ -52,7 +52,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     birdie.c dialog_birdie.c
     wwv.c dialog_timesig.c dialog_swl.c
     app_sentry.c gpu.c
-    adsb.c adsb_rx.c app_adsb.c rtl_spectrum.c rtl_watch.c
+    adsb.c adsb_rx.c app_adsb.c rtl_spectrum.c rtl_watch.c sdr_pool.c
     first_start.c first_start_rule.c
     dialog_cw_trainer.c
     dialog_cw_kbd.c recolor_rows.c
