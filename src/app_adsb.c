@@ -24,6 +24,8 @@
 #include "adsb_rx.h"
 #include "app_sentry.h"
 #include "rtl_spectrum.h"
+#include "remote_server.h"
+#include "control_owner.h"
 #include "buttons.h"
 #include "cfg/cfg_api.h"
 #include "gps.h"
@@ -705,11 +707,25 @@ static void show_head(double now, int nlive, int nghost) {
             snprintf(name + at, sizeof(name) - at, " #%06X %s#", (unsigned)(lv_color_to32(both_col) & 0xffffff),
                      n_rx > 2 ? "2+" : "BOTH");
     }
+    /* who works the radio from afar, as the Sentry's bars say it (dev_tags): WEB, WEB CTL, TCI CTL */
+    char       web[40] = "";
+    ctl_info_t c;
+
+    ctl_get(&c);
+    if (c.kind == CTL_BROWSER) snprintf(web, sizeof(web), "   WEB CTL");
+    else if (remote_server_viewers() > 0) snprintf(web, sizeof(web), "   WEB");
+    if (c.kind == CTL_TCI) snprintf(web + strlen(web), sizeof(web) - strlen(web), "   TCI CTL");
+
+    char line[300];
+
     localtime_r(&tt, &tm);              /* the radio's time zone, named, as the Sentry's header */
-    strftime(t, sizeof(t), "%H:%M %Z", &tm);
-    lv_label_set_text_fmt(status_l, "%s   %d LIVE   %d HISTORY   %s   %s",
-                          st == ADSB_RX_ON ? name : "NO RECEIVER", nlive, nghost,
-                          c_from, t);
+    for (int compact = 0; compact < 2; compact++) {     /* too long for the bar: the time without its zone */
+        strftime(t, sizeof(t), compact ? "%H:%M" : "%H:%M %Z", &tm);
+        snprintf(line, sizeof(line), "%s   %d LIVE   %d HISTORY   %s   %s%s", st == ADSB_RX_ON ? name : "NO RECEIVER",
+                 nlive, nghost, c_from, t, web);
+        if (lv_txt_get_width(line, strlen(line), &pixel_16, 0, LV_TEXT_FLAG_RECOLOR) <= SW - 120) break;
+    }
+    lv_label_set_text(status_l, line);
     const adsb_stats_t *s = adsb_stats();
     uint16_t            r[10];
     unsigned            sum = 0;

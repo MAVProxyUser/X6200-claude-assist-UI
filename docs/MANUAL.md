@@ -845,7 +845,11 @@ last seconds, the strongest signals named over it and the screen's channel brack
 - The title bar names what is on USB in the orange of the 3D picture's peaks (the theme's own): **RTL** for an
   RTL-SDR, **HACKRF** for a HackRF, **BLADERF** for a bladeRF, **ADS-B** for an ADS-B receiver (a GNS 5890 or
   microADSB, or dump1090 running), **WR12** for a ready WR12. The same names stand for the stick wherever RTL did
-  (C's and D's RX columns, B's history, LISTEN).
+  (C's and D's RX columns, B's history, LISTEN). After them, who works the radio from afar: **WEB** while a browser
+  is on the web configurator's Remote page, **WEB CTL** while that browser holds the control (what touches the RF
+  side is its until a key or knob on the radio takes it back, or it lets go), **TCI CTL** while a TCI program holds
+  it. AIRSPACE's head says them too, after the time. A line too long for its bar drops the time zone and says the
+  Sentry's mode in a word (AUTO, SEMI, MAN).
   After the processor's temperature it gives the battery's charge and an icon: the bolt while it charges, the plug on
   a supply without charging (full, Charger not On, or a supply under 12 V), the battery's level on the battery
   (`51C 34%`). As the battery runs down the two take the 3D picture's colours: yellow at 30%, orange at 20%, its

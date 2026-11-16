@@ -74,6 +74,8 @@
 #include "qth/qth.h"
 #include "radio.h"
 #include "rtl_spectrum.h"
+#include "remote_server.h"
+#include "control_owner.h"
 #include "adsb_rx.h"
 #include "wr12.h"
 #include "recorder.h"
@@ -1246,9 +1248,30 @@ static const char *batt_sym(float ext, uint8_t cap, bool chg) {
          : cap > 10 ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_EMPTY;
 }
 
+/* The title bars' tags, after the battery, in the tags' colour: the devices on USB (the stick, an ADS-B receiver, the
+ * WR12), then who works the radio from afar: WEB while a browser is on the radio's Remote page (remote_server.c),
+ * WEB CTL while one holds the control (control_owner.c: the radio's own keys and knobs take it back), TCI CTL a TCI
+ * program holding it. The user, 2026-11-16: "when web is connected, we know via the icon. that will help with doubts
+ * about the web interface locking a control" */
+static void dev_tags(char *dev, size_t n) {
+    ctl_info_t c;
+
+    dev[0] = 0;
+    if (sdr_here) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s %s#", tag_hex, rtl_spectrum_dev_tag());
+    if (adsb_here) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s ADS-B#", tag_hex);
+    if (wr12_here) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s WR12#", tag_hex);
+    ctl_get(&c);
+    if (c.kind == CTL_BROWSER) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s WEB CTL#", tag_hex);
+    else if (remote_server_viewers() > 0) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s WEB#", tag_hex);
+    if (c.kind == CTL_TCI) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s TCI CTL#", tag_hex);
+}
+
 /* The title bar's line as every screen has it (pre: up to the battery's %, then room for its icon and the devices):
  * the screen's radio's frequency and mode, the transmitter's lock, the Sentry's mode, the time, the processor, the
- * battery and the devices on USB */
+ * battery and the tags (dev_tags). Compact, for a line too long for its bar: the time without its zone, the Sentry's
+ * mode in a word (AUTO, SEMI, MAN) */
+static bool head_compact;
+
 static void head_status(char *pre, size_t pn, char *line, size_t ln, const char **icon_out, uint32_t *bc_out) {
     char       f[24], t[16], tc[32] = "";
     time_t     now = time(NULL);
@@ -1257,7 +1280,7 @@ static void head_status(char *pre, size_t pn, char *line, size_t ln, const char 
     int        c   = clock_cpu_temp();  /* the processor's, the kernel's cpu-thermal zone (sun4i-gpadc-iio) */
 
     localtime_r(&now, &tm);             /* the radio's time zone (Settings > General > DATE / TIME), named */
-    strftime(t, sizeof(t), "%H:%M %Z", &tm);
+    strftime(t, sizeof(t), head_compact ? "%H:%M" : "%H:%M %Z", &tm);
     if (c != CLOCK_NO_TEMP)             /* after the time, as the other clocks show it; none read: none shown */
         snprintf(tc, sizeof(tc), " %dC", c);
     /* the battery's % after it, and its icon after that: the bolt charging, the plug on a supply not charging, the
@@ -1282,14 +1305,11 @@ static void head_status(char *pre, size_t pn, char *line, size_t ln, const char 
         icon = batt_sym(l_ext, l_cap, l_chg);
     }
     snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
-    static const char *const modes[] = {"AUTO-SCAN", "SEMI-AUTO", "MAN-OVERRIDE"};
+    static const char *const full[] = {"AUTO-SCAN", "SEMI-AUTO", "MAN-OVERRIDE"}, *const word[] = {"AUTO", "SEMI", "MAN"};
+    const char *const       *modes  = head_compact ? word : full;
 
-    /* The devices on USB, at the end in Xiegu's blue (its WR12 logo): the stick, an ADS-B receiver, the WR12 */
-    char dev[96];
-    dev[0] = 0;
-    if (sdr_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s %s#", tag_hex, rtl_spectrum_dev_tag());
-    if (adsb_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s ADS-B#", tag_hex);
-    if (wr12_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s WR12#", tag_hex);
+    char dev[128];                      /* at the end, in the tags' colour */
+    dev_tags(dev, sizeof(dev));
 
     if (scr == SCR_RTL || g_stick_side()) {     /* the screen's radio: the stick */
         int64_t hz = scr == SCR_LOG ? g_hz : listen_hz;
@@ -1309,12 +1329,22 @@ static void head_status(char *pre, size_t pn, char *line, size_t ln, const char 
     *bc_out   = bc;
 }
 
+/* The head's line within w px of pixel_16: compact (head_compact) when the full one is wider */
+static void head_fit(char *pre, size_t pn, char *line, size_t ln, const char **icon, uint32_t *bc, lv_coord_t w) {
+    head_compact = false;
+    head_status(pre, pn, line, ln, icon, bc);
+    if (lv_txt_get_width(line, strlen(line), &pixel_16, 0, LV_TEXT_FLAG_RECOLOR) <= w) return;
+    head_compact = true;
+    head_status(pre, pn, line, ln, icon, bc);
+    head_compact = false;
+}
+
 static void show_head(void) {
     char        pre[160], line[240];
     const char *icon;
     uint32_t    bc;
 
-    head_status(pre, sizeof(pre), line, sizeof(line), &icon, &bc);
+    head_fit(pre, sizeof(pre), line, sizeof(line), &icon, &bc, SW - 120);
     lv_label_set_text(status_l, line);
     lv_label_set_text(batt_l, icon);
     lv_obj_set_style_text_color(batt_l, bc ? lv_color_hex(bc) : amb, 0);
@@ -7086,7 +7116,7 @@ static void show_walkie(void) {
                               txp);       /* three lines; the time: the bars' */
         lv_label_set_text(wui->ch.opt[0], nm);
         if (wui->status_l) {            /* the title bar's line, as the other screens' (show_head) */
-            char        pre[96], line[192], tc[48] = "", dev[64] = "";
+            char        pre[96], line[224], tc[48] = "", dev[128] = "";
             const char *icon = "";
             int         cpu  = clock_cpu_temp();
 
@@ -7096,13 +7126,16 @@ static void show_walkie(void) {
                 else snprintf(tc + strlen(tc), sizeof(tc) - strlen(tc), " %d%%", l_cap);
                 icon = batt_sym(l_ext, l_cap, l_chg);
             }
-            if (sdr_here)
-                snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s %s#", tag_hex, rtl_spectrum_dev_tag());
-            if (adsb_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s ADS-B#", tag_hex);
-            if (wr12_here) snprintf(dev + strlen(dev), sizeof(dev) - strlen(dev), "  #%s WR12#", tag_hex);
-            snprintf(pre, sizeof(pre), "%s  %s%s", (w_sdr_hz ? g_sdr_armed : g_armed) ? "TX ARMED"
-                                                   : rx_held ? "RX ONLY" : "TX NOT LOCKED", hm, tc);
-            snprintf(line, sizeof(line), "%s%s%s", pre, icon[0] ? "   " : "", dev);
+            dev_tags(dev, sizeof(dev));
+            for (int compact = 0; compact < 2; compact++) {     /* too long for the bar: the time without its zone */
+                char hs[16];
+
+                strftime(hs, sizeof(hs), compact ? "%H:%M" : "%H:%M %Z", &tm);
+                snprintf(pre, sizeof(pre), "%s  %s%s", (w_sdr_hz ? g_sdr_armed : g_armed) ? "TX ARMED"
+                                                       : rx_held ? "RX ONLY" : "TX NOT LOCKED", hs, tc);
+                snprintf(line, sizeof(line), "%s%s%s", pre, icon[0] ? "   " : "", dev);
+                if (lv_txt_get_width(line, strlen(line), &pixel_16, 0, LV_TEXT_FLAG_RECOLOR) <= P_VX - 18) break;
+            }
             lv_label_set_text(wui->status_l, line);
             lv_label_set_text(wui->batt_l, icon);
             lv_obj_set_style_text_color(wui->batt_l, bc ? lv_color_hex(bc) : amb, 0);
@@ -7118,7 +7151,7 @@ static void show_walkie(void) {
             const char *icon;
             uint32_t    c;
 
-            head_status(pre, sizeof(pre), line, sizeof(line), &icon, &c);
+            head_fit(pre, sizeof(pre), line, sizeof(line), &icon, &c, 680);
             lv_label_set_text(wui->vstatus_l, line);
             lv_label_set_text(wui->vbatt_l, icon);
             lv_obj_set_style_text_color(wui->vbatt_l, c ? lv_color_hex(c) : amb, 0);
