@@ -130,6 +130,8 @@ static void cpr_local(uint32_t yz, uint32_t xz, int odd, double rlat, double rlo
     *lon = dlon * (m + lon_c);
 }
 
+static int cur_src = -1;        /* the receiver of the frame being read (adsb_frame_from) */
+
 static void trail_add(adsb_plane_t *p, double now) {
     if (p->trail_n) {
         const adsb_point_t *last = &p->trail[(p->trail_head + ADSB_TRAIL - 1) % ADSB_TRAIL];
@@ -140,6 +142,7 @@ static void trail_add(adsb_plane_t *p, double now) {
     pt->lon = (float)p->lon;
     pt->alt = p->alt_ok ? p->alt : INT32_MIN;
     pt->t   = now;
+    pt->src1 = (uint8_t)(cur_src >= 0 && cur_src < ADSB_SRCS ? cur_src + 1 : 0);
     p->trail_head = (p->trail_head + 1) % ADSB_TRAIL;
     if (p->trail_n < ADSB_TRAIL) p->trail_n++;
 }
@@ -289,15 +292,8 @@ bool adsb_frame_from(const char *hex, size_t n, double now, int src) {
     adsb_plane_t *p = plane_of((uint32_t)msg[1] << 16 | (uint32_t)msg[2] << 8 | msg[3], now);
     p->msgs++;
     p->seen = now;
-    if (src >= 0 && src < ADSB_SRCS) {
-        p->src_t[src] = now;
-        p->src_n[src]++;
-        /* its receiver (AIRSPACE's colour of it): the one with most of its frames, changed only when another has a
-         * quarter more and four more, so two that hear it alike do not swap it at every frame */
-        int m = p->src_main - 1;
-
-        if (m < 0 || (src != m && p->src_n[src] > p->src_n[m] + p->src_n[m] / 4 + 4)) p->src_main = (uint8_t)(src + 1);
-    }
+    if (src >= 0 && src < ADSB_SRCS) p->src_t[src] = now;
+    cur_src = src;                              /* a position from it: its trail's point says so (trail_add) */
 
     uint64_t me = 0;
     for (int i = 4; i < 11; i++) me = me << 8 | msg[i];

@@ -22,6 +22,7 @@ typedef struct {
     float   lat, lon;
     int32_t alt;                /* ft, INT32_MIN unknown */
     double  t;                  /* adsb_now() */
+    uint8_t src1;               /* 1 + the receiver of the position that made it, 0 not said */
 } adsb_point_t;
 
 typedef struct {
@@ -37,8 +38,6 @@ typedef struct {
     uint32_t msgs;
     double   first, seen;
     double   src_t[ADSB_SRCS];  /* adsb_now() of each receiver's last good frame of it, 0 never */
-    uint32_t src_n[ADSB_SRCS];  /* each receiver's good frames of it */
-    uint8_t  src_main;          /* 1 + the receiver that heard most of it (kept till another has a quarter more), 0 none */
     adsb_point_t trail[ADSB_TRAIL];
     int      trail_head, trail_n;   /* a ring: the newest at trail_head - 1 */
 } adsb_plane_t;

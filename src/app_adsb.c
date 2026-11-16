@@ -196,23 +196,21 @@ static int        n_rx;                 /* receivers listened on, at the last he
  * 2026-11-16: "add a column to the decoded info to cover the device the info came from") */
 static char slot_nm[ADSB_SRCS][8];
 
-/* p's receiver: the one that heard most of it (adsb.c's src_main) while it still hears it, else the one of its last
- * frame; -1 none said */
-static int main_rx(const adsb_plane_t *p) {
-    unsigned m    = adsb_plane_srcs(p, SRC_S);
-    int      mr = p->src_main - 1, last = -1;
+/* p's receiver: the one of its last frame (the user, 2026-11-16: "change the color of each plane / trail every time a
+ * new radio sees it"); -1 none said */
+static int last_rx(const adsb_plane_t *p) {
+    int last = -1;
 
-    if (mr >= 0 && mr < ADSB_SRCS && (m & (1u << mr))) return mr;
     for (int i = 0; i < ADSB_SRCS; i++)
         if (p->src_t[i] > 0 && (last < 0 || p->src_t[i] > p->src_t[last])) last = i;
     return last;
 }
 
-/* Who heard p: its receiver (main_rx, its colour's), "+N" for the N others within SRC_S of its last frame ("RTL2+1");
- * with all, each of them by name ("RTL0 RTL2") */
+/* Who heard p: the receiver of its last frame (its colour's, last_rx); with all, each that heard it within SRC_S of
+ * its last frame, by name ("RTL0 RTL2") */
 static void rx_of(const adsb_plane_t *p, char *s, size_t n, bool all) {
     unsigned m    = adsb_plane_srcs(p, SRC_S);
-    int      last = main_rx(p);
+    int      last = last_rx(p);
 
     if (last < 0) {
         snprintf(s, n, "-");
@@ -230,22 +228,21 @@ static void rx_of(const adsb_plane_t *p, char *s, size_t n, bool all) {
         }
         return;
     }
-    int more = __builtin_popcount(m) - 1;
-
-    if (more) snprintf(s, n, "%.4s+%d", slot_nm[last][0] ? slot_nm[last] : "?", more);
-    else snprintf(s, n, "%.6s", slot_nm[last][0] ? slot_nm[last] : "?");
+    snprintf(s, n, "%.6s", slot_nm[last][0] ? slot_nm[last] : "?");
 }
 
 /* Two receivers: each one's colour, BOTH's for one both heard (the user, 2026-11-15). Three or more (a KrakenSDR's):
  * nearly every aircraft is heard by several, and BOTH's pale colour was nearly all there was ("each RTL sdr should get
- * it's own color scalable to infinity ... right now they are all using pale", 2026-11-16): each in its receiver's */
+ * it's own color scalable to infinity ... right now they are all using pale", 2026-11-16): each in the colour of the
+ * receiver that heard it last, changing as another hears it ("change the color of each plane / trail every time a new
+ * radio sees it"); each point of its track in the colour of the one that heard that position (draw_traffic) */
 static lv_color_t plane_col(const adsb_plane_t *p) {
     unsigned m = n_rx > 1 ? adsb_plane_srcs(p, SRC_S) : 0;
     int      r;
 
     if (!m) return amb;
     if (n_rx == 2) return m & (m - 1) ? both_col : src_col[__builtin_ctz(m)];
-    r = main_rx(p);
+    r = last_rx(p);
     return r >= 0 ? src_col[r] : amb;
 }
 static uint32_t plane_c(const adsb_plane_t *p) { return argb(plane_col(p)); }
@@ -486,8 +483,11 @@ static void draw_traffic(uint32_t *px, double now, const int *idx, int n) {
                 have = false;
                 continue;
             }
-            if (have) line(px, (int)lround(x0), (int)lround(y0), (int)lround(x), (int)lround(y), mix(pc, c_ink, a * 3 / 4));
-            else put(px, (int)lround(x), (int)lround(y), mix(pc, c_ink, a * 3 / 4));
+            /* two or more receivers: each point, and the stretch up to it, in its own receiver's colour */
+            uint32_t c = n_rx > 1 && pt->src1 && pt->src1 <= ADSB_SRCS ? argb(src_col[pt->src1 - 1]) : pc;
+
+            if (have) line(px, (int)lround(x0), (int)lround(y0), (int)lround(x), (int)lround(y), mix(c, c_ink, a * 3 / 4));
+            else put(px, (int)lround(x), (int)lround(y), mix(c, c_ink, a * 3 / 4));
             x0 = x, y0 = y, have = true;
         }
         double x, y;
@@ -692,7 +692,8 @@ static void show_detail(double now, const int *idx, int n) {
     char nm[12], alt[16], age[8], vr[16], rx[64];
 
     rx_of(p, rx, sizeof(rx), true);     /* the box's caption: each receiver that heard it */
-    if (strlen(rx) > 30) snprintf(rx, sizeof(rx), "%d RECEIVERS", __builtin_popcount(adsb_plane_srcs(p, SRC_S)));
+    if (strlen(rx) > 30)                /* many: "RTL0 1 3 4" (the RTL's own word once) */
+        for (char *r = strstr(rx + 3, " RTL"); r; r = strstr(r + 1, " RTL")) memmove(r + 1, r + 4, strlen(r + 4) + 1);
     lv_label_set_text_fmt(det_cap_l, "TARGET  RX %s", rx);
     fmt_alt(alt, sizeof(alt), p);
     fmt_age(age, sizeof(age), now - p->seen);
