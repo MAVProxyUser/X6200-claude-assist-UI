@@ -66,6 +66,18 @@ jobs:
       - name: User namespaces for the WiFi checks
         run: sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
 
+      # RADE (rade_c, Opus with FARGAN and its model data) for tools/freedv_text and the FreeDV checks: built here, out
+      # of the checks' 300 s each, and kept between runs. Downloaded and built inside freedv_text it ran past 300 s
+      # when the downloads were slow (run 43908520547)
+      - name: RADE, kept between runs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/openx6x00/rade
+          key: rade-${{ runner.os }}-${{ hashFiles('tools/rade/**') }}
+
+      - name: RADE built
+        run: tools/rade/build.sh > /dev/null
+
       - name: Host checks
         env:
           DEPS: /usr/local                 # liquid-dsp and libft8, where the checks' Makefiles look (DEPS)

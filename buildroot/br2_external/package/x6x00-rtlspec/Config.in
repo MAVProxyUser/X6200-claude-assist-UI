@@ -2,6 +2,7 @@ config BR2_PACKAGE_X6X00_RTLSPEC
 	bool "x6x00-rtlspec"
 	depends on BR2_TOOLCHAIN_HAS_THREADS
 	depends on !BR2_PACKAGE_HACKRF # libhackrf's own package instead
+	select BR2_PACKAGE_LIBUSB
 	select BR2_PACKAGE_RTLSDR_BLOG
 	select BR2_PACKAGE_LIBHACKRF
 	select BR2_PACKAGE_LIBBLADERF

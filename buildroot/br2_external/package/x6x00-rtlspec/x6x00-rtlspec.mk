@@ -14,10 +14,12 @@ X6X00_RTLSPEC_VERSION = local
 X6X00_RTLSPEC_SITE = @OPENX6X00@/tools/rtlspec
 X6X00_RTLSPEC_SITE_METHOD = local
 X6X00_RTLSPEC_LICENSE = LGPL-2.1+
-X6X00_RTLSPEC_DEPENDENCIES = rtlsdr-blog libhackrf libbladerf
+X6X00_RTLSPEC_DEPENDENCIES = libusb rtlsdr-blog libhackrf libbladerf
 
+# libusb's header too: sdr_rtl.c reads libusb's port list to number the RTLs by serial and USB location
 define X6X00_RTLSPEC_BUILD_CMDS
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -DSDR_BLADERF -I$(@D) -I$(STAGING_DIR)/usr/include/libhackrf \
+		-I$(STAGING_DIR)/usr/include/libusb-1.0 \
 		-o $(@D)/x6x00-rtlspec $(@D)/rtlspec.c $(@D)/same.c $(@D)/rds.c $(@D)/acars.c $(@D)/sdr.c $(@D)/sdr_rtl.c \
 		$(@D)/sdr_hackrf.c $(@D)/sdr_bladerf.c $(@D)/sdr_file.c -Wl,-Bstatic -lrtlsdr -lhackrf -Wl,-Bdynamic \
 		-lusb-1.0 -lpthread -lm -ldl

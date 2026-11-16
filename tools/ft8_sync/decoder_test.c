@@ -142,12 +142,17 @@ static struct {
 static int16_t        *ft4_tx;
 static uint32_t        ft4_ntx;
 static int64_t         base_s;      /* a minute's start: sample n is base_s + n / RATE */
+static int64_t         start_ns;    /* when the audio began (the feeder's first sample) */
 static atomic_bool     feeding;
 static audio_worker_t *worker;
 
 static void on_message(const char *text, int snr, float freq_hz, float time_sec, const slot_info_t *info,
                        void *ctx) {
     (void)text, (void)snr, (void)freq_hz, (void)ctx;
+    /* The test's first slot is a part of one when it starts after the slot's start: the decoder's audio of it begins
+     * there (+0.93 s into it on a CI runner) and can still hold the whole message. Not a slot the decoder took up on
+     * its own time, so not counted (it failed the checks below on about one run in eight) */
+    if (info->rx_start_ns < start_ns + NS / 2) return;
     pthread_mutex_lock(&heard.mux);
     if (heard.n < MAX_HEARD && info->rx_start_ns) {
         int64_t s   = info->rx_start_ns;
@@ -215,7 +220,8 @@ static void decoder_thread(void) {
         return;
     }
     clock_gettime(CLOCK_REALTIME, &now);
-    base_s = now.tv_sec - now.tv_sec % 60;
+    base_s   = now.tv_sec - now.tv_sec % 60;
+    start_ns = (int64_t)now.tv_sec * NS + now.tv_nsec;
     atomic_store(&feeding, true);
     pthread_create(&th, NULL, feeder, NULL);
     audio_worker_start(worker);
