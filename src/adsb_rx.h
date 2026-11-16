@@ -26,7 +26,7 @@ void adsb_rx_start(void);
 /* The state; dev gets the serial port ("/dev/ttyACM0") when there is one */
 adsb_rx_state_t adsb_rx_state(char *dev, size_t n);
 
-/* The receiver found: "MICROADSB FW 0E", "GNS 5890"; "" none */
+/* The receivers listened on: "MICROADSB FW 0E", "GNS 5890 + RTL-SDR R820T"; "" none */
 void adsb_rx_name(char *name, size_t n);
 
 /* Bytes read since the start */
@@ -47,25 +47,30 @@ typedef enum {
     ADSB_KIND_N
 } adsb_kind_t;
 
-/* Those AIRSPACE can listen on now, a bit (1 << kind) each: the serial receivers on USB; the Sentry's SDR (the daemon
- * has one: a HackRF, else a bladeRF, else an RTL-SDR); an RTL-SDR beside a HackRF or a bladeRF, a spare: dump1090 opens
- * it itself, so B keeps its SDR, and it listens with AIRSPACE closed as the serial ones do. From the thread that looks
- * at USB each second: 0 for the first second */
+/* Those AIRSPACE can listen on now, a bit (1 << kind) each: the serial receivers on USB; the Sentry's SDR (the one the
+ * daemon holds: B's choice, else a HackRF, a bladeRF, an RTL-SDR); an RTL-SDR beside a HackRF or a bladeRF it holds, a
+ * spare: dump1090 opens it itself, so B keeps its SDR, and it listens with AIRSPACE closed as the serial ones do. Only
+ * what tunes 1090 MHz. From the thread that looks at USB each second: 0 for the first second */
 unsigned adsb_rx_choices(void);
 
-/* An RTL-SDR on USB is a spare (a HackRF or a bladeRF beside it is the Sentry's) */
+/* The kinds on USB, a bit each, whether they can be listened on or not (B's SDRs among them) */
+unsigned adsb_rx_present(void);
+
+/* An RTL-SDR on USB is a spare (the daemon holds a HackRF or a bladeRF beside it) */
 bool adsb_rx_rtl_spare(void);
 
-/* Its name: "GNS 5890", "MICROADSB", "RTL-SDR", "HACKRF", "BLADERF"; "" NONE */
+/* Its name: "GNS 5890", "MICROADSB", "RTL-SDR", "HACKRF", "BLADERF"; short: "GNS", "MICRO", "RTL", ...; "" NONE */
 const char *adsb_rx_kind_name(adsb_kind_t k);
+const char *adsb_rx_kind_short(adsb_kind_t k);
 
-/* The one to listen on when it is there (the thread changes over within a second); NONE, or the one chosen not there:
- * the first of a GNS 5890, a microADSB, a spare RTL-SDR and the Sentry's SDR */
-void adsb_rx_choose(adsb_kind_t k);
+/* What to listen on, a bit each kind: one, or a serial one and an SDR at once (BOTH: both feed the aircraft); the thread
+ * changes over within a second. 0, or none of them there: the first serial one and the first SDR (a spare RTL-SDR,
+ * else the Sentry's) */
+void adsb_rx_choose(unsigned kinds);
 
-/* The one listened on (or being opened) now; NONE: none yet, the one it will be is adsb_rx_kind_next() */
-adsb_kind_t adsb_rx_kind_now(void);
-adsb_kind_t adsb_rx_kind_next(void);
+/* What is listened on (or being opened) now, a bit each; and what will be, as things are on USB */
+unsigned adsb_rx_kinds_now(void);
+unsigned adsb_rx_kinds_next(void);
 
 /* An RTL-SDR on USB, whoever has it. These three read what a thread of their own sees each second (no sysfs on the
  * caller's thread: a stuck USB host never hangs the GUI); false or 0 for the first second */

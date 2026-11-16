@@ -1119,18 +1119,20 @@ a bladeRF is a spare: dump1090 opens it itself, B keeps its SDR, and it keeps li
 the serial ones do (dump1090 takes about 4% of the processor). The VFO knob (or F1) sets
 the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on the scope.
 
-- **Two or more receivers**: a box asks which one to listen on ("3 RECEIVERS HERE CAN HEAR 1090 MHZ. WHICH ONE?"),
-  each with what it does to the rest (a serial one's own decoder, always listening; a spare RTL-SDR, B keeping its
-  HackRF; B's SDR, B pausing while AIRSPACE is open). The MFK goes through them, its push or a tap listens on one,
-  BACK leaves it as it is. It asks once for each set of receivers (one plugged in or pulled out makes another set,
-  standing 3 s, so a hub that flaps does not ask each time); the choice is kept, and a receiver chosen and pulled
-  out is used again when it is back. Till it is answered the first of a GNS 5890, a microADSB, a spare RTL-SDR and
-  B's SDR listens.
-- **F4 LISTEN** names the receiver listened on and goes to the next one that can hear 1090 MHz, round again past
-  the last (as A's and B's LISTEN name theirs). **F5** forgets the history (it was F4).
-- With AIRSPACE closed and B's SDR the one chosen, a GNS 5890 or a microADSB listens meanwhile, so the history covers
-  the time away; B's SDR is AIRSPACE's again when it opens. A spare RTL-SDR does not stand in so: its stream would
-  stop and start at each opening of AIRSPACE, which the radio's USB host does not take well.
+- **BOTH**: a GNS 5890 or a microADSB and an SDR at once, each read by a thread of its own, both feeding the same
+  scope and list (an aircraft heard by each counts the messages of both; the head names both, "GNS 5890 + RTL-SDR
+  R820T"). The X6200 is never offered: it does not tune 1090 MHz.
+- **Two or more receivers**: a box asks which to listen on ("2 RECEIVERS HERE CAN HEAR 1090 MHZ. WHICH?"): each
+  alone, then BOTH for each serial one with each SDR, each with what it does to the rest (a serial one's own decoder,
+  always listening; a spare RTL-SDR, B keeping its HackRF; B's SDR, B pausing while AIRSPACE is open). The MFK goes
+  through them, its push or a tap chooses, BACK leaves it as it is. It asks once for each set of receivers (one
+  plugged in or pulled out makes another set, standing 3 s, so a hub that flaps does not ask each time); the choice is
+  kept, and one chosen and pulled out is used again when it is back. Till it is answered, BOTH: the first serial one
+  and the first SDR (a spare RTL-SDR, else B's).
+- **F4 LISTEN** names what is listened on (GNS 5890, RTL-SDR, BOTH; with more than one pair, GNS+HACKRF and the
+  like) and goes to the next choice, round again past the last. **F5** forgets the history (it was F4).
+- With AIRSPACE closed, B's SDR is the Sentry's: a serial one chosen with it (BOTH) goes on listening, so the history
+  covers the time away, and B's SDR joins it again when AIRSPACE opens.
 
 ## Updating the firmware
 

@@ -102,17 +102,22 @@ static const struct {
 };
 #define N_RECEIVERS (int)(sizeof(receivers) / sizeof(receivers[0]))
 
-static pthread_t       thread;
-static atomic_bool     started;
-static atomic_int      state = ADSB_RX_OFF;
-static atomic_ullong   bytes;
-static atomic_bool     lent;            /* the RTL-SDR lent: adsb_rx_lend() */
-static pthread_mutex_t dev_lock = PTHREAD_MUTEX_INITIALIZER;
-static char            dev_path[32], dev_name[16], dev_info[48];
-static atomic_int      want_kind;       /* adsb_rx_choose()'s, NONE the first by order */
-static atomic_int      kind_now;        /* the one listened on or being opened */
+/* Two at once, each on a thread of its own: a serial receiver (GNS 5890, microADSB) and an SDR through dump1090. Both
+ * feed adsb.c (BOTH: the same aircraft heard by each, its messages counted from both) */
+enum { SLOT_SERIAL, SLOT_SDR, SLOTS };
 
-#define KB(k) (1u << (k))
+static atomic_bool     started;
+static atomic_int      st[SLOTS] = {ADSB_RX_OFF, ADSB_RX_OFF};
+static atomic_ullong   bytes;
+static atomic_bool     lent;            /* the Sentry's SDR lent to it: adsb_rx_lend() */
+static pthread_mutex_t dev_lock = PTHREAD_MUTEX_INITIALIZER;
+static char            dev_path[SLOTS][32], dev_name[SLOTS][16], dev_info[SLOTS][48];
+static atomic_uint     want_mask;       /* adsb_rx_choose()'s, 0 the first by order in each slot */
+static atomic_int      kind_now[SLOTS]; /* the one each listens on or is opening */
+
+#define KB(k)   (1u << (k))
+#define SERIALS (KB(ADSB_KIND_GNS) | KB(ADSB_KIND_MICRO))
+#define SDRS    (KB(ADSB_KIND_RTL) | KB(ADSB_KIND_HACKRF) | KB(ADSB_KIND_BLADERF))
 
 static adsb_kind_t kind_of(int r) {
     const char *n = receivers[r].name;
@@ -124,36 +129,58 @@ static adsb_kind_t kind_of(int r) {
                                    : ADSB_KIND_RTL;
 }
 
-/* An RTL-SDR beside a HackRF or a bladeRF: those are the daemon's (rtlspec.c takes a HackRF, then a bladeRF, then an
- * RTL-SDR), so the stick is free for a dump1090 of its own */
-static bool spare_in(unsigned present) {
-    return (present & KB(ADSB_KIND_RTL)) && (present & (KB(ADSB_KIND_HACKRF) | KB(ADSB_KIND_BLADERF)));
+static adsb_kind_t kind_of_dev(rtl_dev_t d) {
+    return d == RTL_DEV_HACKRF ? ADSB_KIND_HACKRF : d == RTL_DEV_BLADERF ? ADSB_KIND_BLADERF
+         : d == RTL_DEV_RTL    ? ADSB_KIND_RTL    : ADSB_KIND_NONE;
 }
 
-/* Of the kinds on USB (present), those that can be listened on: the serial ones; with dump1090, the daemon's SDR (with
- * the daemon) and an RTL-SDR (the daemon's, a spare, or opened by dump1090 itself with no daemon) */
-static unsigned usable_of(unsigned present, bool daemon, bool dump) {
-    unsigned u = present & (KB(ADSB_KIND_GNS) | KB(ADSB_KIND_MICRO));
+/* The daemon's SDR (NONE: no daemon): its word, or the one found on USB before it said */
+static rtl_dev_t daemon_dev(void) {
+    return rtl_spectrum_daemon() ? rtl_spectrum_dev() : RTL_DEV_NONE;
+}
+
+/* An RTL-SDR beside the daemon's HackRF or bladeRF (B's choice, or its order): free for a dump1090 of its own */
+static bool spare_of(unsigned present, rtl_dev_t dd) {
+    return (present & KB(ADSB_KIND_RTL)) && (dd == RTL_DEV_HACKRF || dd == RTL_DEV_BLADERF);
+}
+
+/* Of the kinds on USB (present), those that can be listened on: the serial ones; with dump1090, the daemon's SDR (dd)
+ * and an RTL-SDR beside it (a spare), or with no daemon an RTL-SDR (dump1090 opens it itself). Only what tunes 1090
+ * MHz is here: the X6200 does not */
+static unsigned usable_of(unsigned present, rtl_dev_t dd, bool dump) {
+    unsigned u = present & SERIALS;
 
     if (!dump) return u;
-    if (present & KB(ADSB_KIND_HACKRF)) {
-        if (daemon) u |= KB(ADSB_KIND_HACKRF);
-    } else if (present & KB(ADSB_KIND_BLADERF)) {
-        if (daemon) u |= KB(ADSB_KIND_BLADERF);
-    }
-    return u | (present & KB(ADSB_KIND_RTL));
+    if (dd != RTL_DEV_NONE) u |= present & KB(kind_of_dev(dd));
+    if (dd == RTL_DEV_NONE || spare_of(present, dd)) u |= present & KB(ADSB_KIND_RTL);
+    return u;
 }
 
-/* The one chosen when it can be listened on, else a GNS 5890, a microADSB, a spare RTL-SDR (B keeps its SDR), the
- * Sentry's SDR */
-static adsb_kind_t pick_kind(unsigned usable, unsigned present, adsb_kind_t want) {
-    static const adsb_kind_t order[] = {ADSB_KIND_GNS, ADSB_KIND_MICRO, ADSB_KIND_RTL, ADSB_KIND_HACKRF,
-                                        ADSB_KIND_BLADERF, ADSB_KIND_RTL};
+/* What a slot listens on: the kind chosen for it (want) when one chosen can be listened on, NONE when the others
+ * chosen can and its own not (the slot idle); none chosen can: the first by order (a GNS 5890, a microADSB; a spare
+ * RTL-SDR, the daemon's SDR). *direct: a spare RTL-SDR (its own dump1090); *held_back: the daemon's SDR lent to the
+ * Sentry (AIRSPACE closed) */
+static adsb_kind_t pick_of(int slot, unsigned present, rtl_dev_t dd, bool dump, unsigned want, bool is_lent,
+                           bool *direct, bool *held_back) {
+    static const adsb_kind_t serial_order[] = {ADSB_KIND_GNS, ADSB_KIND_MICRO};
+    unsigned    usable = usable_of(present, dd, dump), mine = usable & (slot == SLOT_SERIAL ? SERIALS : SDRS);
+    adsb_kind_t k = ADSB_KIND_NONE;
 
-    if (want > ADSB_KIND_NONE && want < ADSB_KIND_N && (usable & KB(want))) return want;
-    for (int i = 0; i < (int)(sizeof(order) / sizeof(order[0])); i++)
-        if ((usable & KB(order[i])) && (i != 2 || spare_in(present))) return order[i];
-    return ADSB_KIND_NONE;
+    want &= usable;
+    if (want) mine &= want;
+    if (slot == SLOT_SERIAL) {
+        for (int i = 0; i < 2 && !k; i++)
+            if (mine & KB(serial_order[i])) k = serial_order[i];
+    } else if ((mine & KB(ADSB_KIND_RTL)) && spare_of(present, dd)) {
+        k = ADSB_KIND_RTL;                              /* a spare first: B keeps its SDR */
+    } else if (dd != RTL_DEV_NONE && (mine & KB(kind_of_dev(dd)))) {
+        k = kind_of_dev(dd);
+    } else if (dd == RTL_DEV_NONE && (mine & KB(ADSB_KIND_RTL))) {
+        k = ADSB_KIND_RTL;                              /* no daemon: dump1090 on the stick itself */
+    }
+    *direct    = k == ADSB_KIND_RTL && spare_of(present, dd);
+    *held_back = slot == SLOT_SDR && k != ADSB_KIND_NONE && !*direct && dd != RTL_DEV_NONE && is_lent;
+    return k;
 }
 
 static bool read_line(const char *path, char *out, size_t n) {
@@ -215,23 +242,12 @@ static unsigned scan_usb(seen_t seen[ADSB_KIND_N]) {
     return present;
 }
 
-/* The one to listen on, as things are on USB now: its kind, NONE none; *direct, a spare RTL-SDR (dump1090 on it).
- * The Sentry's SDR chosen and lent to it (AIRSPACE closed): a serial one meanwhile, so the history goes on; none,
- * *held_back. Not a spare stick: its stream would stop and start at each opening of AIRSPACE, which the radio's USB host
- * does not take well (rtlspec.c) */
-static adsb_kind_t pick_now(seen_t seen[ADSB_KIND_N], bool *direct, bool *held_back) {
-    unsigned    present = scan_usb(seen);
-    unsigned    usable  = usable_of(present, rtl_spectrum_daemon(), access(DUMP1090, X_OK) == 0);
-    unsigned    sentry  = KB(ADSB_KIND_HACKRF) | KB(ADSB_KIND_BLADERF) | (spare_in(present) ? 0 : KB(ADSB_KIND_RTL));
-    adsb_kind_t k       = pick_kind(usable, present, (adsb_kind_t)atomic_load(&want_kind));
+/* What slot listens on, as things are on USB now (pick_of) */
+static adsb_kind_t pick_slot(int slot, seen_t seen[ADSB_KIND_N], bool *direct, bool *held_back) {
+    unsigned present = scan_usb(seen);
 
-    *held_back = false;
-    if (k != ADSB_KIND_NONE && (KB(k) & sentry) && atomic_load(&lent)) {
-        k          = pick_kind(usable & (KB(ADSB_KIND_GNS) | KB(ADSB_KIND_MICRO)), present, ADSB_KIND_NONE);
-        *held_back = k == ADSB_KIND_NONE;
-    }
-    *direct = k == ADSB_KIND_RTL && spare_in(present);
-    return k;
+    return pick_of(slot, present, daemon_dev(), access(DUMP1090, X_OK) == 0, atomic_load(&want_mask),
+                   atomic_load(&lent), direct, held_back);
 }
 
 /* A USB device's number ("3-1": its devnum), 0 when it is not there; plugged back, it has another */
@@ -285,21 +301,21 @@ static int open_port(const char *dev) {
     return fd;
 }
 
-static void set_dev(const char *dev, const char *name) {
+static void set_dev(int slot, const char *dev, const char *name) {
     pthread_mutex_lock(&dev_lock);
-    snprintf(dev_path, sizeof(dev_path), "%s", dev);
-    snprintf(dev_name, sizeof(dev_name), "%s", name);
-    dev_info[0] = 0;
+    snprintf(dev_path[slot], sizeof(dev_path[slot]), "%s", dev);
+    snprintf(dev_name[slot], sizeof(dev_name[slot]), "%s", name);
+    dev_info[slot][0] = 0;
     pthread_mutex_unlock(&dev_lock);
 }
 
 /* A receiver's answer to a command, "#00-00-0E-04-...": its firmware, said */
-static void set_info(const char *line) {
+static void set_info(int slot, const char *line) {
     unsigned a, b, fw;
 
     if (sscanf(line, "#%x-%x-%x", &a, &b, &fw) == 3 && a == 0) {
         pthread_mutex_lock(&dev_lock);
-        snprintf(dev_info, sizeof(dev_info), "FW %02X", fw);
+        snprintf(dev_info[slot], sizeof(dev_info[slot]), "FW %02X", fw);
         pthread_mutex_unlock(&dev_lock);
     }
 }
@@ -335,7 +351,7 @@ static bool command(int fd, const char *cmd, size_t n) {
                 line[ll] = 0;
                 in       = false;
                 if (ll >= 3 && !strncmp(line, cmd, 3)) {    /* "#43" for "#43-00" */
-                    set_info(line);
+                    set_info(SLOT_SERIAL, line);     /* the serial ones alone take commands */
                     return true;
                 }
             } else if (ll < sizeof(line) - 1) {
@@ -454,7 +470,7 @@ static void d1090_tuner(void) {
         rtl_spectrum_tuner(tuner, sizeof(tuner));
         if (tuner[0]) {
             pthread_mutex_lock(&dev_lock);
-            snprintf(dev_info, sizeof(dev_info), "%s", tuner);
+            snprintf(dev_info[SLOT_SDR], sizeof(dev_info[SLOT_SDR]), "%s", tuner);
             pthread_mutex_unlock(&dev_lock);
         }
         return;
@@ -472,13 +488,14 @@ static void d1090_tuner(void) {
     fclose(f);
     if (tuner[0]) {
         pthread_mutex_lock(&dev_lock);
-        snprintf(dev_info, sizeof(dev_info), "%s", tuner);
+        snprintf(dev_info[SLOT_SDR], sizeof(dev_info[SLOT_SDR]), "%s", tuner);
         pthread_mutex_unlock(&dev_lock);
     }
 }
 
+/* One slot's receiver: looked for, opened, read into adsb.c, let go when it goes or another is wanted */
 static void *rx_thread(void *arg) {
-    (void)arg;
+    const int slot = (int)(intptr_t)arg;
     int    fd = -1, rx = -1, held_num = 0;
     char   frame[56], reply[64], held[64] = "";     /* held: the receiver's USB device ("3-1"), held_num its number */
     size_t len = 0, rlen = 0;
@@ -497,32 +514,32 @@ static void *rx_thread(void *arg) {
         if (fd < 0) {
             seen_t      seen[ADSB_KIND_N];
             bool        held_back;
-            adsb_kind_t k = pick_now(seen, &direct, &held_back);
+            adsb_kind_t k = pick_slot(slot, seen, &direct, &held_back);
             const char *usb = k ? seen[k].usb : "";
             char        dev[32];
 
-            set_dev("", "");
+            set_dev(slot, "", "");
             rx = k ? seen[k].row : -1;
-            atomic_store(&kind_now, k);
+            atomic_store(&kind_now[slot], k);
             if (held_back) {                    /* the Sentry's SDR: AIRSPACE's only while its screen is open */
                 d1090_stop();
-                state = ADSB_RX_LENT;
+                st[slot] = ADSB_RX_LENT;
                 usleep(300000);
                 continue;
             }
             if (rx < 0) {
-                state = ADSB_RX_NO_STICK;
-                d1090_stop();                   /* the RTL-SDR went: its dump1090 too */
+                st[slot] = ADSB_RX_NO_STICK;
+                if (slot == SLOT_SDR) d1090_stop();     /* the RTL-SDR went, or none wanted: its dump1090 too */
             } else if (receivers[rx].sdr) {     /* dump1090 decodes it; its raw frames over TCP */
                 if (d1090_alive() && d1090_fed != (!direct && rtl_spectrum_daemon()))
                     d1090_stop();               /* on the daemon's samples, wanted on a spare stick, or the other way */
                 if (!d1090_alive()) {
                     if (!d1090_start(kind_of(rx) == ADSB_KIND_RTL, direct)) {
-                        state = ADSB_RX_NO_DRIVER;
+                        st[slot] = ADSB_RX_NO_DRIVER;
                         sleep(2);
                         continue;
                     }
-                    state = ADSB_RX_OPENING;
+                    st[slot] = ADSB_RX_OPENING;
                     /* its port as soon as it is up, looked for each 200 ms (5 s at most): a stick swapped in while
                      * the screen is open is heard within a second or two */
                     for (int i = 0; i < 25 && (fd = d1090_connect()) < 0 && d1090_alive(); i++) usleep(200000);
@@ -530,31 +547,31 @@ static void *rx_thread(void *arg) {
                 if (fd >= 0 || (fd = d1090_connect()) >= 0) {
                     snprintf(held, sizeof(held), "%s", usb);
                     held_num = usb_devnum(usb);
-                    set_dev("127.0.0.1:30002", receivers[rx].name);
+                    set_dev(slot, "127.0.0.1:30002", receivers[rx].name);
                     d1090_tuner();
-                    state  = ADSB_RX_ON;
+                    st[slot] = ADSB_RX_ON;
                     inside = replying = false;
                     last   = adsb_now();
                     init_at = 0;
                     continue;
                 }
-                state = ADSB_RX_OPENING;
+                st[slot] = ADSB_RX_OPENING;
             } else if (access(CDC_ACM, F_OK) != 0) {
-                state = ADSB_RX_NO_DRIVER;
+                st[slot] = ADSB_RX_NO_DRIVER;
             } else if (!find_tty(usb, dev, sizeof(dev))) {
-                state = ADSB_RX_OPENING;
+                st[slot] = ADSB_RX_OPENING;
                 if (receivers[rx].new_id) bind_stick(rx, usb);
             } else if ((fd = open_port(dev)) >= 0) {
                 snprintf(held, sizeof(held), "%s", usb);
                 held_num = usb_devnum(usb);
-                set_dev(dev, receivers[rx].name);
-                state   = ADSB_RX_ON;
+                set_dev(slot, dev, receivers[rx].name);
+                st[slot] = ADSB_RX_ON;
                 inside  = replying = false;
                 last    = adsb_now();
                 init_at = receivers[rx].init ? last + 1.0 : 0;     /* sent at once, the microADSB missed them */
                 continue;
             } else {
-                state = ADSB_RX_OPENING;
+                st[slot] = ADSB_RX_OPENING;
             }
             sleep(1);                           /* looked for each second: a swap is seen at once */
             continue;
@@ -564,7 +581,7 @@ static void *rx_thread(void *arg) {
             bool   d, hb;
 
             looked = adsb_now();
-            if (!held_num || usb_devnum(held) != held_num || pick_now(seen, &d, &hb) != atomic_load(&kind_now) ||
+            if (!held_num || usb_devnum(held) != held_num || pick_slot(slot, seen, &d, &hb) != atomic_load(&kind_now[slot]) ||
                 d != direct) {
                 close(fd);
                 fd = -1;
@@ -608,7 +625,7 @@ static void *rx_thread(void *arg) {
                 if (c == '\r' || c == '\n') {
                     reply[rlen] = 0;
                     replying    = false;
-                    set_info(reply);
+                    set_info(slot, reply);
                 } else if (rlen < sizeof(reply) - 1) {
                     reply[rlen++] = c;
                 }
@@ -646,28 +663,47 @@ void adsb_rx_start(void) {
     bool no = false;
 
     if (!atomic_compare_exchange_strong(&started, &no, true)) return;
-    state = ADSB_RX_NO_STICK;
-    if (pthread_create(&thread, NULL, rx_thread, NULL) != 0) {
-        state   = ADSB_RX_OFF;
-        started = false;
-        return;
+    for (int i = 0; i < SLOTS; i++) {
+        pthread_t t;
+
+        st[i] = ADSB_RX_NO_STICK;
+        if (pthread_create(&t, NULL, rx_thread, (void *)(intptr_t)i) == 0) pthread_detach(t);
+        else st[i] = ADSB_RX_OFF;
     }
-    pthread_detach(thread);
 }
 
+/* The two slots as one: on when either is (its port, the serial one's first), else lent, opening, no driver, none */
 adsb_rx_state_t adsb_rx_state(char *dev, size_t n) {
+    adsb_rx_state_t a = (adsb_rx_state_t)st[SLOT_SERIAL], b = (adsb_rx_state_t)st[SLOT_SDR], r;
+    int             from = a == ADSB_RX_ON ? SLOT_SERIAL : SLOT_SDR;
+
+    r = a == ADSB_RX_ON || b == ADSB_RX_ON               ? ADSB_RX_ON
+      : b == ADSB_RX_LENT                                ? ADSB_RX_LENT
+      : a == ADSB_RX_OPENING || b == ADSB_RX_OPENING     ? ADSB_RX_OPENING
+      : a == ADSB_RX_NO_DRIVER || b == ADSB_RX_NO_DRIVER ? ADSB_RX_NO_DRIVER
+      : a == ADSB_RX_OFF && b == ADSB_RX_OFF             ? ADSB_RX_OFF
+                                                         : ADSB_RX_NO_STICK;
     if (dev && n) {
         pthread_mutex_lock(&dev_lock);
-        snprintf(dev, n, "%s", dev_path);
+        snprintf(dev, n, "%s", r == ADSB_RX_ON ? dev_path[from] : "");
         pthread_mutex_unlock(&dev_lock);
     }
-    return (adsb_rx_state_t)state;
+    return r;
 }
 
+/* Each slot that listens: "GNS 5890", "RTL-SDR R820T", "GNS 5890 + RTL-SDR R820T" */
 void adsb_rx_name(char *name, size_t n) {
+    size_t at = 0;
+
+    if (!n) return;
+    name[0] = 0;
     pthread_mutex_lock(&dev_lock);
-    if (dev_info[0]) snprintf(name, n, "%s %s", dev_name, dev_info);
-    else snprintf(name, n, "%s", dev_name);
+    for (int i = 0; i < SLOTS && at < n; i++) {
+        if (st[i] != ADSB_RX_ON || !dev_name[i][0]) continue;
+        int w = snprintf(name + at, n - at, "%s%s%s%s", at ? " + " : "", dev_name[i], dev_info[i][0] ? " " : "",
+                         dev_info[i]);
+        if (w > 0) at += (size_t)w;
+    }
     pthread_mutex_unlock(&dev_lock);
 }
 
@@ -779,12 +815,17 @@ int adsb_rx_usb_looks(void) {
 
 unsigned adsb_rx_choices(void) {
     pthread_once(&p_once, presence_start);
-    return usable_of(atomic_load(&p_mask), rtl_spectrum_daemon(), atomic_load(&p_dump));
+    return usable_of(atomic_load(&p_mask), daemon_dev(), atomic_load(&p_dump));
+}
+
+unsigned adsb_rx_present(void) {
+    pthread_once(&p_once, presence_start);
+    return atomic_load(&p_mask);
 }
 
 bool adsb_rx_rtl_spare(void) {
     pthread_once(&p_once, presence_start);
-    return spare_in(atomic_load(&p_mask));
+    return spare_of(atomic_load(&p_mask), daemon_dev());
 }
 
 const char *adsb_rx_kind_name(adsb_kind_t k) {
@@ -793,17 +834,35 @@ const char *adsb_rx_kind_name(adsb_kind_t k) {
     return k >= 0 && k < ADSB_KIND_N ? names[k] : "";
 }
 
-void adsb_rx_choose(adsb_kind_t k) { atomic_store(&want_kind, k > ADSB_KIND_NONE && k < ADSB_KIND_N ? k : 0); }
+const char *adsb_rx_kind_short(adsb_kind_t k) {
+    static const char *const names[ADSB_KIND_N] = {"", "GNS", "MICRO", "RTL", "HACKRF", "BLADERF"};
 
-adsb_kind_t adsb_rx_kind_now(void) {
-    return state == ADSB_RX_OFF || state == ADSB_RX_NO_STICK ? ADSB_KIND_NONE : (adsb_kind_t)atomic_load(&kind_now);
+    return k >= 0 && k < ADSB_KIND_N ? names[k] : "";
 }
 
-adsb_kind_t adsb_rx_kind_next(void) {
-    unsigned present;
+void adsb_rx_choose(unsigned kinds) { atomic_store(&want_mask, kinds & (SERIALS | SDRS)); }
+
+unsigned adsb_rx_kinds_now(void) {
+    unsigned m = 0;
+
+    for (int i = 0; i < SLOTS; i++) {
+        int s = st[i], k = atomic_load(&kind_now[i]);
+
+        if (s != ADSB_RX_OFF && s != ADSB_RX_NO_STICK && k > ADSB_KIND_NONE && k < ADSB_KIND_N) m |= KB(k);
+    }
+    return m;
+}
+
+unsigned adsb_rx_kinds_next(void) {
+    unsigned m = 0;
 
     pthread_once(&p_once, presence_start);
-    present = atomic_load(&p_mask);
-    return pick_kind(usable_of(present, rtl_spectrum_daemon(), atomic_load(&p_dump)), present,
-                     (adsb_kind_t)atomic_load(&want_kind));
+    for (int i = 0; i < SLOTS; i++) {
+        bool        d, hb;
+        adsb_kind_t k = pick_of(i, atomic_load(&p_mask), daemon_dev(), atomic_load(&p_dump), atomic_load(&want_mask),
+                                false, &d, &hb);
+
+        if (k != ADSB_KIND_NONE) m |= KB(k);
+    }
+    return m;
 }

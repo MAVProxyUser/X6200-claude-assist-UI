@@ -228,9 +228,10 @@ class SettingsManager {
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_adsb_trails{"adsb_trails", true, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
-    // AIRSPACE's receiver: the one chosen (adsb_rx.h's adsb_kind_t, 0 the first by order) and, shifted by 4, the set
-    // of receivers it was chosen among (a bit each kind), so the chooser is not shown again for the same set
-    Parameter<int32_t> p_adsb_rx{"adsb_rx", 0, 0, 1023,
+    // AIRSPACE's receivers: those chosen (a bit each adsb_rx.h adsb_kind_t: one, or a serial one and an SDR at once;
+    // 0 the first serial one and the first SDR) and, shifted by 6, the set of receivers it was chosen among (a bit each
+    // kind), so the chooser is not shown again for the same set
+    Parameter<int32_t> p_adsb_rx{"adsb_rx", 0, 0, 4095,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     // Walkie Talkie: a portrait screen instead of the main one (live)
     Parameter<int32_t> p_walkie{"walkie", false, 0, 1,
