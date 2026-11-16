@@ -76,6 +76,7 @@ static int             cmd_fd = -1;
 
 /* The device, as the daemon's hello says it (rtlspec.c): its kind, what it tunes, whether it transmits */
 static atomic_int      dev_kind = RTL_DEV_NONE;
+static atomic_int      use_kind = RTL_DEV_NONE;     /* rtl_spectrum_use's */
 static atomic_llong    dev_lo = RTL_SPEC_MIN_HZ, dev_hi = RTL_SPEC_MAX_HZ;
 static atomic_bool     dev_tx;
 
@@ -358,6 +359,12 @@ static void *spec_thread(void *arg) {
                          atomic_load(&listen_mode));
                 say(cmd);
             }
+            if (atomic_load(&use_kind) != RTL_DEV_NONE) {
+                rtl_dev_t u = (rtl_dev_t)atomic_load(&use_kind);
+
+                snprintf(cmd, sizeof(cmd), "k %s\n", u == RTL_DEV_HACKRF ? "HACKRF" : u == RTL_DEV_BLADERF ? "BLADERF" : "RTL");
+                say(cmd);
+            }
         }
         if ((int)k != asked) {          /* rows asked for while wanted, and only then */
             say(k ? "r 1\n" : "r 0\n");
@@ -589,6 +596,23 @@ bool rtl_spectrum_feed(int fd) {
     }
     pthread_mutex_unlock(&lock);
     return ok;
+}
+
+void rtl_spectrum_use(rtl_dev_t d) {
+    char cmd[16];
+
+    atomic_store(&use_kind, d);
+    snprintf(cmd, sizeof(cmd), "k %s\n", d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : d == RTL_DEV_RTL ? "RTL" : "-");
+    say(cmd);
+}
+
+rtl_dev_t rtl_spectrum_used(void) {
+    return (rtl_dev_t)atomic_load(&use_kind);
+}
+
+void rtl_spectrum_kind_range(rtl_dev_t d, int64_t *lo, int64_t *hi) {
+    *lo = d == RTL_DEV_HACKRF ? 1000000LL : d == RTL_DEV_BLADERF ? 47000000LL : RTL_SPEC_MIN_HZ;
+    *hi = d == RTL_DEV_HACKRF || d == RTL_DEV_BLADERF ? 6000000000LL : RTL_SPEC_MAX_HZ;
 }
 
 void rtl_spectrum_tune(int64_t hz) {

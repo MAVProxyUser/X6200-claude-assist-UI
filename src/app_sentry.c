@@ -2575,10 +2575,19 @@ static void hear_how(int h, char *t, size_t n) {
 
 /* F4 on A or B: that screen's LISTEN, the next one, heard at once. RTL and BOTH with no stick yet: the X6200 alone
  * till one is plugged in, then the stick (hear_follow) */
+static bool b_listen_next_sdr(void);
+static void show_screen(void);
+
 static void hear_next(void) {
     ParamInt *c = scr == SCR_RTL ? cfg_hear_f : cfg_hear_a;
-    int       h = (param_i_get(c) + 1) % HEAR_N;
+    int       h;
     char      t[160], title[32];
+
+    if (scr == SCR_RTL && b_listen_next_sdr()) {    /* the next SDR (b_use said so); the LISTEN stays the SDR's */
+        hear_apply(HEAR_RTL);
+        return;
+    }
+    h = (param_i_get(c) + 1) % HEAR_N;
 
     param_i_set(c, h);
     hear_apply(h);
@@ -2589,6 +2598,182 @@ static void hear_next(void) {
     else
         hear_how(h, t, sizeof(t));
     osd(title, t, -1);
+}
+
+/* ---- B's SDR: which one the daemon holds, when more than one is on USB ----
+ * The user, 2026-11-15: B and G "should be compatible with all devices"; "needs the SDR daemon to switch between
+ * devices ... well work that out... and it should only use devices it can tune". The daemon holds one at a time
+ * (x6x00-rtlspec's "k": the one asked for closed and opened in its place); those that tune B's channel are offered:
+ * a box when two or more are on USB (once for each set), and B's LISTEN goes through them (X6200, each SDR, BOTH, OFF).
+ * cfg_rtl_dev keeps the one chosen (rtl_dev_t) and, shifted by 4, the set it was chosen among */
+#define DEVB(d) (1u << (d))
+static const rtl_dev_t b_order[] = {RTL_DEV_HACKRF, RTL_DEV_BLADERF, RTL_DEV_RTL};     /* the daemon's own order */
+static lv_obj_t *sp_box, *sp_head_l, *sp_row_l[3], *sp_foot_l;
+static bool      sp_on;
+static rtl_dev_t sp_devs[3];
+static int       sp_n, sp_sel;
+static unsigned  sp_set, sp_seen;
+static uint32_t  sp_seen_ms;
+
+static const char *dev_word(rtl_dev_t d) {
+    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : "RTL-SDR";
+}
+
+/* The SDRs on USB that tune B's channel, a bit each rtl_dev_t */
+static unsigned b_sdrs(void) {
+    static const adsb_kind_t as[] = {ADSB_KIND_HACKRF, ADSB_KIND_BLADERF, ADSB_KIND_RTL};
+    unsigned p = adsb_rx_present(), m = 0;
+    int64_t  hz = listen_hz ? listen_hz : rtl_hz;
+
+    for (int i = 0; i < 3; i++) {
+        int64_t lo, hi;
+
+        if (!(p & (1u << as[i]))) continue;
+        rtl_spectrum_kind_range(b_order[i], &lo, &hi);
+        if (!hz || (hz >= lo && hz <= hi)) m |= DEVB(b_order[i]);
+    }
+    return m;
+}
+
+/* The one B has: the one asked for while it is there (the daemon may still be opening it), else the daemon's */
+static rtl_dev_t b_dev(void) {
+    rtl_dev_t u = rtl_spectrum_used();
+
+    return u != RTL_DEV_NONE && (adsb_rx_present() & (1u << (u == RTL_DEV_HACKRF ? ADSB_KIND_HACKRF
+                                                             : u == RTL_DEV_BLADERF ? ADSB_KIND_BLADERF : ADSB_KIND_RTL)))
+               ? u : rtl_spectrum_dev();
+}
+
+/* d the daemon's from now on, kept with the set it was chosen among */
+static void b_use(rtl_dev_t d, unsigned set) {
+    char t[160], title[32];
+    bool was = b_dev() == d;
+
+    rtl_spectrum_use(d);
+    param_i_set(cfg_rtl_dev, (int)d | (int)(set << 4));
+    snprintf(title, sizeof(title), "B: THE %s", dev_word(d));
+    if (was) snprintf(t, sizeof(t), "THE %s STAYS B'S SDR.", dev_word(d));
+    else if (rtl_spectrum_dev() == RTL_DEV_NONE || rtl_spectrum_dev() == d)
+        snprintf(t, sizeof(t), "THE %s OPENS: A FEW SECONDS. G'S SDR CHANNELS AND AIRSPACE USE IT TOO.", dev_word(d));
+    else
+        snprintf(t, sizeof(t), "THE %s CLOSED AND THE %s OPENED IN ITS PLACE: A FEW SECONDS. G'S SDR CHANNELS AND "
+                 "AIRSPACE USE IT TOO.", dev_word(rtl_spectrum_dev()), dev_word(d));
+    osd(title, t, -1);
+}
+
+static void sp_fill(void) {
+    for (int r = 0; r < 3; r++) {
+        int64_t lo, hi;
+
+        if (r >= sp_n) {
+            lv_obj_add_flag(sp_row_l[r], LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        rtl_spectrum_kind_range(sp_devs[r], &lo, &hi);
+        lv_label_set_text_fmt(sp_row_l[r], "%c %-9s %s-%s, %s%s", r == sp_sel ? '>' : ' ', dev_word(sp_devs[r]),
+                              lo < 10000000 ? "1 MHZ" : lo < 30000000 ? "24 MHZ" : "47 MHZ",
+                              hi > 2000000000 ? "6 GHZ" : "1.766 GHZ",
+                              sp_devs[r] == RTL_DEV_RTL ? "RECEIVE ONLY" : "TRANSMITS ON G",
+                              sp_devs[r] == rtl_spectrum_dev() ? " (OPEN NOW)" : "");
+        lv_obj_set_style_bg_opa(sp_row_l[r], r == sp_sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_text_color(sp_row_l[r], r == sp_sel ? ink : amb, 0);
+        lv_obj_clear_flag(sp_row_l[r], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void sp_open(unsigned set) {
+    rtl_dev_t cur = b_dev();
+    char      f[16];
+
+    sp_set = set;
+    sp_n = sp_sel = 0;
+    for (int i = 0; i < 3; i++)
+        if (set & DEVB(b_order[i])) {
+            if (b_order[i] == cur) sp_sel = sp_n;
+            sp_devs[sp_n++] = b_order[i];
+        }
+    fmt_mhz(f, sizeof(f), listen_hz ? listen_hz : rtl_hz, 3);
+    lv_label_set_text_fmt(sp_head_l, "%d SDRS HERE TUNE B'S CHANNEL (%s MHZ). WHICH?", sp_n, f);
+    lv_obj_set_y(sp_foot_l, 50 + sp_n * 28 + 10);
+    lv_obj_set_height(sp_box, 50 + sp_n * 28 + 10 + 50);
+    sp_fill();
+    sp_on = true;
+    lv_obj_clear_flag(sp_box, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void sp_hide(void) {
+    sp_on = false;
+    if (sp_box) lv_obj_add_flag(sp_box, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* Closed: d B's SDR (NONE: as it is), this set answered */
+static void sp_close(rtl_dev_t d) {
+    sp_hide();
+    if (d != RTL_DEV_NONE) b_use(d, sp_set);
+    else param_i_set(cfg_rtl_dev, (param_i_get(cfg_rtl_dev) & 15) | (int)(sp_set << 4));
+    show_screen();
+}
+
+static void sp_step(int d) {
+    if (!sp_n) return;
+    sp_sel = (sp_sel + d + sp_n) % sp_n;
+    sp_fill();
+}
+
+static void sp_row_tap_cb(lv_event_t *e) {
+    int r = (int)(intptr_t)lv_event_get_user_data(e);
+
+    if (sp_on && r < sp_n) sp_close(sp_devs[r]);
+}
+
+/* On B, each blink: the box when a new set of two or more has stood 3 s and was not answered before */
+static void sp_check(void) {
+    unsigned m;
+
+    if (scr != SCR_RTL || help_on || !adsb_rx_usb_looks()) {
+        if (sp_on && scr != SCR_RTL) sp_hide();
+        return;
+    }
+    m = b_sdrs();
+    if (m != sp_seen) {
+        sp_seen    = m;
+        sp_seen_ms = lv_tick_get();
+        return;
+    }
+    if (lv_tick_get() - sp_seen_ms < 3000) return;
+    if (sp_on) {
+        if (m == sp_set) return;
+        if (__builtin_popcount(m) >= 2) sp_open(m);
+        else sp_hide();
+        return;
+    }
+    if (__builtin_popcount(m) >= 2 && ((unsigned)param_i_get(cfg_rtl_dev) >> 4) != m) sp_open(m);
+}
+
+/* B's LISTEN with two or more SDRs that tune its channel: X6200, then each SDR (the daemon switched to it), BOTH, OFF.
+ * true: it went to the next SDR (the LISTEN stays the SDR's) */
+static bool b_listen_next_sdr(void) {
+    unsigned  m = b_sdrs();
+    rtl_dev_t cur = b_dev();
+    int       h = param_i_get(cfg_hear_f), at = -1;
+
+    if (__builtin_popcount(m) < 2) return false;
+    for (int i = 0; i < 3; i++)
+        if (b_order[i] == cur) at = i;
+    if (h == HEAR_X6200) {              /* into the SDRs: the first that tunes it */
+        for (int i = 0; i < 3; i++)
+            if (m & DEVB(b_order[i])) {
+                if (b_order[i] != cur) b_use(b_order[i], m);
+                return false;           /* LISTEN goes on to the SDR as ever */
+            }
+    }
+    if (h != HEAR_RTL) return false;
+    for (int i = at + 1; i < 3; i++)
+        if (m & DEVB(b_order[i])) {
+            b_use(b_order[i], m);
+            return true;
+        }
+    return false;                       /* the last: on to BOTH */
 }
 
 /* An RTL-SDR plugged in (its rows coming) while what is to be heard has the stick and the X6200 stands in for it:
@@ -4279,6 +4464,7 @@ static void blink_cb(lv_timer_t *t) {
     rtl_spectrum_rds_watch(rds_channel());          /* B's FM broadcast channel's RDS (C's stick entry's) */
     rds_show(false);
     g_rds_take();                                   /* C's entries named by it */
+    sp_check();                                     /* B: which SDR, when more than one tunes its channel */
     g_scan_step();
     if (scr == SCR_LOG && g_clear_ms && lv_tick_get() - g_clear_ms > 3000) {
         g_clear_ms = 0;
@@ -4561,6 +4747,10 @@ static void key_tap_cb(lv_event_t *e) {
 
 static void fkey(int k) {
     if (k >= 0 && k < 5 && btn[k].disabled) return;     /* dimmed: a tap on its box does nothing either */
+    if (sp_on) {                        /* B's SDR box: F4 (LISTEN) goes down it, the rest wait */
+        if (k == 3) sp_step(1);
+        return;
+    }
     switch (scr) {
         case SCR_SCAN:
             if (k == 0) a_scan_set(routine != ROUT_SCAN);
@@ -4802,6 +4992,18 @@ static void press(void) {
 static void key_cb(lv_event_t *e) {
     uint32_t key = *((uint32_t *)lv_event_get_param(e));
 
+    if (sp_on) {                        /* B's SDR box: the MFK goes through it, its push (click_cb) chooses */
+        switch (key) {
+            case LV_KEY_LEFT:
+            case LV_KEY_UP: sp_step(-1); return;
+            case LV_KEY_RIGHT:
+            case LV_KEY_DOWN: sp_step(1); return;
+            case LV_KEY_ENTER: sp_close(sp_devs[sp_sel]); return;
+            case LV_KEY_ESC: sp_close(RTL_DEV_NONE); return;     /* the one open kept */
+            default: break;
+        }
+    }
+
     if (help_on && key != KEY_VOL_LEFT_EDIT && key != KEY_VOL_RIGHT_EDIT && key != KEY_VOL_LEFT_SELECT &&
         key != KEY_VOL_RIGHT_SELECT) {
         help_show(false);
@@ -4861,6 +5063,8 @@ static void click_cb(lv_event_t *e) {
     if (indev && lv_indev_get_type(indev) == LV_INDEV_TYPE_ENCODER) {
         if (help_on)
             help_show(false);
+        else if (sp_on)
+            sp_close(sp_devs[sp_sel]);
         else
             press();
     }
@@ -7064,6 +7268,23 @@ static void build_overlays(void) {
     }
     osd_hide_cb(lv_timer_create(osd_hide_cb, 100000, NULL));
 
+    sp_box = rect(root, 60, 100, SW - 120, 200, 3, false);
+    lv_obj_add_flag(sp_box, LV_OBJ_FLAG_CLICKABLE);         /* a tap beside its rows is not the picture's */
+    sp_head_l = label(sp_box, &pixel_20, amb, 12, 12, SW - 150, LV_TEXT_ALIGN_LEFT, "");
+    for (int r = 0; r < 3; r++) {
+        lv_obj_t *l = label(sp_box, &pixel_20, amb, 9, 50 + r * 28, SW - 144, LV_TEXT_ALIGN_LEFT, "");
+
+        lv_obj_set_style_bg_color(l, amb, 0);
+        lv_obj_set_style_pad_ver(l, 2, 0);
+        lv_obj_add_flag(l, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(l, sp_row_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)r);
+        sp_row_l[r] = l;
+    }
+    sp_foot_l = label(sp_box, &pixel_20, amb, 12, 0, SW - 150, LV_TEXT_ALIGN_LEFT,
+                      "MFK: CHOOSE   PUSH OR A TAP: USE IT   BACK: AS IT IS\nF4 (LISTEN) GOES THROUGH THEM LATER");
+    lv_obj_add_flag(sp_box, LV_OBJ_FLAG_HIDDEN);
+    sp_on = false;
+
     help_frame = rect(root, 14, 52, SW - 28, scr_h - 56, 3, false);
     lv_obj_add_flag(help_frame, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(help_frame, help_tap_cb, LV_EVENT_CLICKED, NULL);
@@ -7075,7 +7296,7 @@ static void build_overlays(void) {
                    "MFK RING       A X6200 B VHF/UHF C LOG D BANDS E DECODE F SYSTEM G WALKIE H AIRSPACE\n"
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"
                    "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON B THE SDR'S)\n"
-                   "LISTEN         A, B: X6200, THE SDR (RTL, HACKRF, BLADERF), BOTH, OFF; OTHERS KEEP IT\n"
+                   "LISTEN         A: X6200, THE SDR, BOTH, OFF; B: X6200, EACH SDR THAT TUNES IT, BOTH, OFF\n"
                    "BAND UP/DOWN   THE NEXT BAND, AS F2 (B: THE NEXT PRESET; G: CB CHANNEL, OR GROUP)\n"
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
                    "DFN            NOISE REDUCTION ON/OFF. HOLD: NOISE BLANKER (CLICKS AND POPS)\n"

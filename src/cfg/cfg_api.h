@@ -76,6 +76,7 @@ extern ParamInt         *cfg_adsb_range;         // p_adsb_range
 extern ParamInt         *cfg_adsb_decay;         // p_adsb_decay
 extern ParamInt         *cfg_adsb_trails;        // p_adsb_trails
 extern ParamInt         *cfg_adsb_rx;            // p_adsb_rx
+extern ParamInt         *cfg_rtl_dev;            // p_rtl_dev
 extern ParamInt         *cfg_walkie;             // p_walkie
 extern ParamInt         *cfg_walkie_mem;         // p_walkie_mem
 extern ParamInt         *cfg_walkie_ch;          // p_walkie_ch

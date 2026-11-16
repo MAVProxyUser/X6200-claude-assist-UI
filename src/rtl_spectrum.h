@@ -43,6 +43,15 @@ typedef enum {
 typedef enum { RTL_DEV_NONE, RTL_DEV_RTL, RTL_DEV_HACKRF, RTL_DEV_BLADERF } rtl_dev_t;
 
 rtl_dev_t rtl_spectrum_dev(void);
+
+/* The SDR the daemon is to hold when it is plugged in (RTL_DEV_NONE: a HackRF, else a bladeRF, else an RTL-SDR): the
+ * one open closed for it, said again to a daemon started anew. One that will not open leaves the one before */
+void rtl_spectrum_use(rtl_dev_t d);
+rtl_dev_t rtl_spectrum_used(void);
+
+/* What a kind of SDR tunes, Hz (an RTL-SDR's R820T 24 MHz-1.766 GHz, a HackRF 1 MHz-6 GHz, a bladeRF 2 47 MHz-6 GHz):
+ * for one not open, whether it could take a band */
+void rtl_spectrum_kind_range(rtl_dev_t d, int64_t *lo, int64_t *hi);
 /* Its name in a title bar's device tags and other short places: "RTL", "HACKRF", "BLADERF" ("RTL" for none) */
 const char *rtl_spectrum_dev_tag(void);
 /* Its name where the stick is named to the user: "RTL-SDR", "HACKRF", "BLADERF" ("RTL-SDR" for none) */

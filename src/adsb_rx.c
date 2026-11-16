@@ -700,8 +700,10 @@ void adsb_rx_name(char *name, size_t n) {
     pthread_mutex_lock(&dev_lock);
     for (int i = 0; i < SLOTS && at < n; i++) {
         if (st[i] != ADSB_RX_ON || !dev_name[i][0]) continue;
-        int w = snprintf(name + at, n - at, "%s%s%s%s", at ? " + " : "", dev_name[i], dev_info[i][0] ? " " : "",
-                         dev_info[i]);
+        /* the tuner alone when it says the name already: "HACKRF-ONE", not "HACKRF HACKRF-ONE" */
+        bool said = dev_info[i][0] && !strncmp(dev_info[i], dev_name[i], strlen(dev_name[i]));
+        int  w    = snprintf(name + at, n - at, "%s%s%s%s", at ? " + " : "", said ? "" : dev_name[i],
+                             dev_info[i][0] && !said ? " " : "", dev_info[i]);
         if (w > 0) at += (size_t)w;
     }
     pthread_mutex_unlock(&dev_lock);

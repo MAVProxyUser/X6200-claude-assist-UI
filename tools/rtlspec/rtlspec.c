@@ -65,6 +65,9 @@
  *                          meanwhile. "a 0", or dump1090 gone: the stick back to what the client asked
  *      "t <Hz> <gain dB> <amp 0|1>"   transmit FM there (a device that transmits, an amateur band); "t 0" ends it
  *      "TAUD", u32 count, s16 samples[count]       the voice to transmit, mono, 44.1 kHz, as it comes
+ *      "k <KIND>"          the device to hold, RTL, HACKRF or BLADERF, when it is plugged in; "k -" the first by the
+ *                          order below. The one open is closed for it (not while transmitting) and it is opened; one
+ *                          that will not open (another program holds it) leaves the one before, till "k" again
  *      "R"                 the receiver's stream stopped and started again, as a transmission does, without one (a
  *                          test of that on the radio's USB host)
  *      "Q"                 the daemon ends and closes the stick (a GUI that wants another version of it)
@@ -826,6 +829,8 @@ static void tx_run(const sdr_ops_t *o) {
 }
 
 static atomic_bool rx_restart;          /* "R" */
+static atomic_int  want_dev;            /* "k": kinds[] + 1 of the device to hold, 0 the first by order */
+static atomic_bool want_failed;         /* it would not open: the one before kept, till "k" again */
 
 /* ---- The client's commands, on its own thread ---- */
 
@@ -888,6 +893,12 @@ static void command(char *line, int fd) {
 
             tx_ask(hz, (int)g, strtol(e, NULL, 10) != 0);
         }
+    } else if (line[0] == 'k') {          /* "k <KIND>": the device to hold (kinds[]'s order), "k -" any */
+        char k[16] = "";
+
+        sscanf(line + 1, "%15s", k);
+        atomic_store(&want_dev, !strcmp(k, "HACKRF") ? 1 : !strcmp(k, "BLADERF") ? 2 : !strcmp(k, "RTL") ? 3 : 0);
+        atomic_store(&want_failed, false);
     } else if (line[0] == 'R') {          /* the stream stopped and started, as for a transmission */
         if (!atomic_load(&tx_on) && !atomic_load(&tx_req)) {
             atomic_store(&rx_restart, true);
@@ -1129,9 +1140,19 @@ static bool stick_pulled(void) {
     return gone;
 }
 
-/* What is looked for, in this order: those that transmit first, so one plugged in beside a stick is the one used */
+/* What is looked for, in this order: those that transmit first, so one plugged in beside a stick is the one used
+ * ("k" names another: its index here + 1) */
 static const sdr_ops_t *const kinds[] = {&sdr_hackrf, &sdr_bladerf, &sdr_rtl};
 static const sdr_ops_t *const test_kinds[] = {&sdr_file};      /* -T: that alone */
+
+/* The device "k" asked for, plugged in, not the one open (o), not while transmitting: o to be closed for it */
+static bool switch_due(const sdr_ops_t *o) {
+    int w = atomic_load(&want_dev);
+
+    if (!w || !o || sdr_file_path || replay || atomic_load(&want_failed)) return false;
+    if (kinds[w - 1] == o || atomic_load(&tx_on) || atomic_load(&tx_req)) return false;
+    return kinds[w - 1]->present();
+}
 
 /* The device's stream till it ends: made way for a transmission or a restart ("R"); ended by itself with the
  * device still there, it is left open and alone till it is pulled out (closed and opened again, it would not be
@@ -1145,13 +1166,14 @@ static void streaming(const sdr_ops_t *o) {
             continue;
         }
         if (atomic_exchange(&rx_restart, false)) fprintf(stderr, "rtlspec: the stream started again (R)\n");
+        if (switch_due(o)) return;
         int e = o->rx(on_samples, &rx_halt);
 
-        if (stop || stick_pulled()) return;
+        if (stop || stick_pulled() || switch_due(o)) return;
         if (e == 0 || atomic_load(&tx_req) || atomic_load(&rx_restart)) continue;
         fprintf(stderr, "rtlspec: the stream ended, the device still there: kept as it is till it is pulled out\n");
         atomic_store(&s_now, S_STALLED);
-        while (!stop && !stick_pulled()) sleep(1);
+        while (!stop && !stick_pulled() && !switch_due(o)) sleep(1);
         return;
     }
 }
@@ -1169,7 +1191,10 @@ static void *stick_thread(void *arg) {
             replay_run();
             continue;
         }
+        int w = atomic_load(&want_dev);
+
         if (sdr_file_path) o = test_kinds[0];
+        if (!o && w && !atomic_load(&want_failed) && kinds[w - 1]->present()) o = kinds[w - 1];   /* the one asked for */
         for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]) && !o; i++)
             if (kinds[i]->present()) o = kinds[i];
         if (!o) {
@@ -1177,13 +1202,15 @@ static void *stick_thread(void *arg) {
             sleep(1);
             continue;
         }
-        if ((r = o->open(tn, sizeof(tn), &lo, &hi)) < 0) {     /* gone again, or not one it can open */
-            atomic_store(&s_now, S_NOSTICK);
-            sleep(2);
-            continue;
-        }
-        if (r == 1) {                   /* another program has it: tried again, not forced */
-            atomic_store(&s_now, S_BUSY);
+        if ((r = o->open(tn, sizeof(tn), &lo, &hi)) < 0 || r == 1) {
+            if (w && o == kinds[w - 1] && !atomic_load(&want_failed)) {   /* the one asked for: the others then */
+                fprintf(stderr, "rtlspec: the %s asked for would not open (%s): the first by order kept\n", o->kind,
+                        r == 1 ? "another program has it" : "failed");
+                atomic_store(&want_failed, true);
+                continue;
+            }
+            atomic_store(&s_now, r == 1 ? S_BUSY : S_NOSTICK);  /* busy: another program has it, tried again, not
+                                                                 * forced; else gone again, or not one it opens */
             sleep(2);
             continue;
         }
@@ -1205,7 +1232,7 @@ static void *stick_thread(void *arg) {
                                          * till what it wants is there (then closed and opened again) */
             atomic_store(&s_now, S_NEEDS);
             fprintf(stderr, "rtlspec: the %s needs %s\n", o->kind, tn);
-            while (!stop && o->present() && !stick_pulled()) {
+            while (!stop && o->present() && !stick_pulled() && !switch_due(o)) {
                 sleep(2);
                 if (o->ready_again && o->ready_again(tn)) {
                     fprintf(stderr, "rtlspec: what the %s needed (%s) changed: opened again\n", o->kind, tn);
@@ -1232,7 +1259,7 @@ static void *stick_thread(void *arg) {
         dev_hi  = 6000000000ULL;
         pthread_mutex_unlock(&tune_lock);
         fprintf(stderr, "rtlspec: the %s closed (%s)\n", o->kind, stop ? "the daemon ends" : again ? "to open it again"
-                                                                                                : "pulled out");
+                                                                 : switch_due(o) ? "another asked for (k)" : "pulled out");
         atomic_store(&s_now, S_NOSTICK);
     }
     atomic_store(&stick_done, true);
@@ -1283,6 +1310,10 @@ static void *watch_thread(void *arg) {
             looked = now_ms();
             if (gone) {
                 tx_end("GONE");
+                halt_rx();
+            } else if (switch_due(dev_ops)) {
+                fprintf(stderr, "rtlspec: the %s asked for (k): the %s's stream ended for it\n",
+                        kinds[atomic_load(&want_dev) - 1]->kind, dev_ops->kind);
                 halt_rx();
             }
             if (!gone) {

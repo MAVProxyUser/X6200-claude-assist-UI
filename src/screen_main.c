@@ -2089,6 +2089,8 @@ lv_obj_t * main_screen() {
     lv_timer_create(channels_poll_cb, 2000, NULL);
 #ifdef BOARD_X6200
     lv_timer_create(receivers_watch_cb, 1000, NULL);
+    /* B's SDR, chosen among more than one (app_sentry.c): the daemon told as soon as it is there, whatever opens */
+    rtl_spectrum_use((rtl_dev_t)(param_i_get(cfg_rtl_dev) & 15));
 #endif
 
     freq_lock = subject_i_create(false);

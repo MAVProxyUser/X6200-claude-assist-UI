@@ -233,6 +233,10 @@ class SettingsManager {
     // kind), so the chooser is not shown again for the same set
     Parameter<int32_t> p_adsb_rx{"adsb_rx", 0, 0, 4095,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // B's SDR, the one x6x00-rtlspec holds with more than one on USB: rtl_spectrum.h's rtl_dev_t (0 its own order:
+    // HackRF, bladeRF, RTL-SDR) and, shifted by 4, the set it was chosen among (a bit each rtl_dev_t)
+    Parameter<int32_t> p_rtl_dev{"rtl_dev", 0, 0, 255,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     // Walkie Talkie: a portrait screen instead of the main one (live)
     Parameter<int32_t> p_walkie{"walkie", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};

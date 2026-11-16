@@ -789,7 +789,12 @@ last seconds, the strongest signals named over it and the screen's channel brack
 - **F3 VIEW**: the screen's radio alone, SPLIT (the X6200 above, the stick below) or the other radio alone. Each
   half says its radio, its channel and whether it is HEARD, MUTED or SQUELCHED.
 - **F4 LISTEN**, each screen's own: X6200, the SDR by its kind (RTL, HACKRF or BLADERF; SDR while none is plugged in), BOTH or OFF, OFF silencing the speaker (neither radio, the volume
-  kept). **BOTH mixes the two only on Bluetooth headphones.** On the speaker it is the stick alone, as RTL is, and its
+  kept). **Two or more SDRs on USB** (a HackRF and an RTL-SDR on a powered hub, say): B offers those that tune its
+  channel, in a box ("2 SDRS HERE TUNE B'S CHANNEL (162.400 MHZ). WHICH?", each with its range and whether it
+  transmits; asked once for each set), and its LISTEN goes X6200, each of them, BOTH, OFF. The daemon holds one SDR at
+  a time: the one chosen is opened in place of the other (a few seconds), and G's SDR channels and AIRSPACE use it
+  too (`rtl_dev` keeps the choice). One that does not tune B's channel is not offered (an RTL-SDR at 2.4 GHz); one
+  that will not open (another program holds it) leaves the one before. **BOTH mixes the two only on Bluetooth headphones.** On the speaker it is the stick alone, as RTL is, and its
   OSD says so: while the speaker plays the GUI's audio (the stick), the base is in play mode and sends the processor
   nothing of the X6200's receiver, only its own copy of what it plays (measured on base 1.0.8). Up to v0.3.12.20
   BOTH mixed that copy back in, and that was the echo that repeated till it faded; a canceller only made it fainter.
