@@ -2965,7 +2965,10 @@ static void rtl_labels_place(void) {
 /* RDS: the station on B's channel when that is a broadcast FM one (WFM), decoded by the stick's daemon (rds.c) whether it
  * is heard or not. RBDS's call letters and programme types in the Americas (the band plan's region 2, the US plans) */
 static int64_t rds_channel(void) {
-    return listen_hz && rtl_mode_of(listen_hz) == 3 ? listen_hz : 0;      /* WFM: broadcast FM */
+    int64_t hz = scr == SCR_LOG && g_onr >= 0 ? g_hz : listen_hz;   /* C playing a stick entry: that one's, so C's
+                                                                     * log learns its name */
+
+    return hz && rtl_mode_of(hz) == 3 ? hz : 0;     /* WFM: broadcast FM */
 }
 
 static bool rds_rbds(void) {
@@ -2978,24 +2981,30 @@ static void upper(char *t) {
     for (; *t; t++) *t = (char)toupper((unsigned char)*t);
 }
 
+/* The call letters from its PI (RBDS, the Americas; "" elsewhere or none) and its name (PS) trimmed, "" until whole */
+static void rds_names(const rtl_rds_t *d, char call[5], char ps[9]) {
+    call[0] = 0;
+    if (rds_rbds()) {
+        int pi = d->pi;
+        if (pi >= 0x1000 && pi <= 0x994F) {         /* K from 0x1000, W from 0x54A8 (NRSC-4) */
+            int k = pi >= 0x54A8 ? pi - 0x54A8 : pi - 0x1000;
+            snprintf(call, 5, "%c%c%c%c", pi >= 0x54A8 ? 'W' : 'K', 'A' + k / 676, 'A' + k % 676 / 26, 'A' + k % 26);
+        }
+    }
+    const char *p = d->ps;
+    while (*p == ' ') p++;
+    snprintf(ps, 9, "%s", p);
+    for (int i = (int)strlen(ps); i > 0 && ps[i - 1] == ' '; i--) ps[i - 1] = 0;
+    upper(ps);
+}
+
 /* "WOSU TESTFM12": the call letters (RBDS) and the name, or "PI 7B88" until the name came */
 static bool rds_tuned_note(char *t, size_t n) {
     rtl_rds_t d;
-    char      call[5] = "", ps[9];
+    char      call[5], ps[9], *p = ps;
 
     if (!rtl_spectrum_rds(&d)) return false;
-    if (rds_rbds()) {
-        int pi = d.pi;
-        if (pi >= 0x1000 && pi <= 0x994F) {         /* K from 0x1000, W from 0x54A8 (NRSC-4) */
-            int k = pi >= 0x54A8 ? pi - 0x54A8 : pi - 0x1000;
-            snprintf(call, sizeof(call), "%c%c%c%c", pi >= 0x54A8 ? 'W' : 'K', 'A' + k / 676, 'A' + k % 676 / 26,
-                     'A' + k % 26);
-        }
-    }
-    snprintf(ps, sizeof(ps), "%s", d.ps);
-    for (int i = (int)strlen(ps); i > 0 && ps[i - 1] == ' '; i--) ps[i - 1] = 0;
-    char *p = ps;
-    while (*p == ' ') p++;
+    rds_names(&d, call, ps);
     if (call[0] && *p) snprintf(t, n, "%s %s", call, p);
     else if (*p) snprintf(t, n, "%s", p);
     else if (call[0]) snprintf(t, n, "%s", call);
@@ -3613,6 +3622,12 @@ static void g_play(int i) {
         g_stick_on(g_hz);
         g_onr = i;
     } else {
+        if (!cfg_is_valid_hw_freq((int32_t)h->hz) || main_screen_freq_locked()) {
+            tune((int32_t)h->hz, h->mode);      /* says why */
+            return;
+        }
+        if (trk.on) track_end();        /* A's lock ended first: its end (AUTO) tuned back to its place while C played
+                                         * this one */
         if (!tune((int32_t)h->hz, h->mode)) return;
         g_onx = i;
     }
@@ -3659,10 +3674,43 @@ static void g_turn(int32_t diff) {
     show_head();
 }
 
+/* What C played when it is left is where A and B are when shown (the user, 2026-11-15: "anytime something is set on
+ * C, the transition survives to A and B"): the X6200's entry (or where the VFO took it on C) A's place, its lock's
+ * place to come back to, the stick's B's channel, B's picture over it (to it, and its preset, if it was out of
+ * view). Chosen by hand, that radio's own scan (A's band scan or sweep, B's scan) stops there, as a channel chosen
+ * by hand on B stops B's; the log's scan (C's F4) leaves A's and B's scans on, from there */
+static void g_hand_over(void) {
+    bool by_hand = !g_scan;
+
+    if (g_onx >= 0) {
+        if (by_hand && routine != ROUT_BAND) {
+            routine     = ROUT_BAND;
+            sweep_next  = 0;
+            scan_a_next = 0;
+        }
+        if (routine == ROUT_BAND) anchor = cparam_i_get(cfg_fg_freq);   /* a lock ends back there (track_end) */
+    }
+    if (g_onr >= 0 && g_hz && (by_hand || !rtl_scan)) {    /* B's scan going on: its own band and picture */
+        int64_t hz = rtl_snap(g_hz);
+
+        if (by_hand) rtl_scan_set(false);
+        if (llabs(hz - rtl_hz) > rtl_view_hz() / 2 * 85 / 100) {
+            if (hz < f_lo() || hz > f_hi()) {   /* out of B's band: the preset it is in, if one */
+                f_band = -1;
+                for (int i = RTL_PRESETS - 1; i >= 0; i--)
+                    if (hz >= rtl_presets[i].lo && hz <= rtl_presets[i].hi) rtl_preset = i;
+            }
+            rtl_tune_to(hz, true);      /* as B's own VFO does at its picture's edge */
+        }
+        listen_hz = hz;
+    }
+}
+
 /* G left: its scan stops; what it played goes on until A or F is shown (they set the speaker: hear_apply), as on
- * every screen that is not a spectrum. The stick runs on; F retunes it when shown */
+ * every screen that is not a spectrum, and stays A's and B's (g_hand_over). The stick runs on; F retunes it when
+ * shown */
 static void g_leave(bool to_f) {
-    (void)to_f;
+    g_hand_over();
     if ((g_onx >= 0 || g_onr >= 0) && g_hear >= 0 && !to_f) hear_apply(g_hear);     /* B (to_f) sets its own */
     g_stick = false;
     g_onx = g_onr = -1;
@@ -3758,6 +3806,72 @@ static void g_remove(int i) {
     if (g_onr > i) g_onr--;
     if (g_sel >= nhits) g_sel = nhits ? nhits - 1 : 0;
     hits_dirty = true;
+}
+
+/* A call sign in t, a word of its own ("WNCI" in "WNCI -", "WOSU" in "WOSU-FM"): K or W and two or three letters,
+ * into out; false none */
+static bool call_in(const char *t, char out[5]) {
+    while (*t) {
+        int n = 0;
+
+        while (t[n] >= 'A' && t[n] <= 'Z') n++;
+        if ((n == 3 || n == 4) && (t[0] == 'K' || t[0] == 'W') && !(t[n] >= '0' && t[n] <= '9')) {
+            memcpy(out, t, n);
+            out[n] = 0;
+            return true;
+        }
+        t += n ? n : 1;
+        while (*t && (*t == ' ' || *t == '-' || *t == '.' || *t == '/')) t++;
+    }
+    return false;
+}
+
+/* C's FM broadcast entries named by RDS (the user, 2026-11-15: "add RDS to what it was for FM radio stations. just
+ * the station name"): "FM" and the name, on the stick's entries and the X6200's at that channel, from the channel
+ * watched (B's, or the stick entry C plays). Its PS when it has stood RDS_STEADY_MS ("WOSU-FM"); many US stations
+ * scroll the song through it a few seconds a piece (97.9 WNCI: "WNCI -", "IT ALL -", "SWIMS", "97.9", 4 s each, the
+ * first whole one taken was "IT ALL -"), so in the Americas a call sign among its pieces names it at once (WNCI),
+ * and a steady PS then replaces that only when it holds the call. No call letters from the PI: WNCI's reads KCTC */
+#define RDS_STEADY_MS 10000
+static void g_rds_take(void) {
+    static int64_t  at_hz;
+    static char     last[9];
+    static uint32_t since;
+    rtl_rds_t       d;
+    char            pi_call[5], ps[9], call[5], had[5], steady[sizeof(hits[0].what)] = "", by_call[sizeof(hits[0].what)] = "";
+    bool            changed = false;
+
+    if (!rtl_spectrum_rds(&d)) {
+        at_hz = 0;
+        return;
+    }
+    rds_names(&d, pi_call, ps);
+    if (d.hz != at_hz || strcmp(ps, last)) {    /* a new channel, or its PS changed: steady from now */
+        at_hz = d.hz;
+        snprintf(last, sizeof(last), "%s", ps);
+        since = lv_tick_get();
+    }
+    if (ps[0] && lv_tick_get() - since >= RDS_STEADY_MS) snprintf(steady, sizeof(steady), "FM %s", ps);
+    if (ps[0] && rds_rbds() && call_in(ps, call)) snprintf(by_call, sizeof(by_call), "FM %s", call);
+    if (!steady[0] && !by_call[0]) return;
+    for (int i = 0; i < nhits; i++) {
+        char *w = hits[i].what;
+        bool  plain, named_by_call;
+
+        /* an FM broadcast channel's entry: "FM", "FM BROADCAST 97.1 MHZ", or a name of before */
+        if (rtl_mode_of(hits[i].hz) != 3 || llabs(hits[i].hz - d.hz) > 50000 || (w[0] && strncmp(w, "FM", 2))) continue;
+        plain         = !w[0] || !strcmp(w, "FM") || !strncmp(w, "FM BROADCAST", 12);
+        named_by_call = !plain && call_in(w + 2, had);
+        const char *to = steady[0] && (plain || !named_by_call || strstr(ps, had)) ? steady
+                       : by_call[0] && (plain || !named_by_call) ? by_call : NULL;
+
+        if (!to || !strcmp(w, to)) continue;
+        snprintf(w, sizeof(hits[i].what), "%s", to);
+        changed = true;
+    }
+    if (!changed) return;
+    hits_dirty = true;
+    if (scr == SCR_LOG) show_glog();
 }
 
 static void show_glog(void) {
@@ -4162,8 +4276,9 @@ static void blink_cb(lv_timer_t *t) {
     (void)t;
     if (hits_dirty && n % 120 == 0) hits_save();     /* G's log on DATA, a minute at most behind */
     state_keep();                                   /* for a restart of the GUI: gui_state.c */
-    rtl_spectrum_rds_watch(rds_channel());          /* B's FM broadcast channel's RDS */
+    rtl_spectrum_rds_watch(rds_channel());          /* B's FM broadcast channel's RDS (C's stick entry's) */
     rds_show(false);
+    g_rds_take();                                   /* C's entries named by it */
     g_scan_step();
     if (scr == SCR_LOG && g_clear_ms && lv_tick_get() - g_clear_ms > 3000) {
         g_clear_ms = 0;

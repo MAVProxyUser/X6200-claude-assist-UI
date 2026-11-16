@@ -876,7 +876,13 @@ written through to the card before it replaces the last copy, so a power cut kee
   schedule when one is on the air there), a ham band and its CW or phone part, else UNKNOWN SIGNAL; on the stick a
   known channel (NOAA WX1 to WX7, AIS, APRS, the ISS, marine 16, guard 121.500, the Meteor-M satellites) or the
   band (FM, NAV, AIR, SAT, 2M, MARINE, LMR, SONDE, ISM, 70CM, GMRS, UAT, ADS-B). A's SIGNAL PROFILE adds the width
-  (1.6 kHz or less: CARRIER / CW).
+  (1.6 kHz or less: CARRIER / CW). An FM broadcast entry takes its station's name from RDS, `FM` and the name,
+  from what the stick decodes there: on B's channel, or while C plays it (the X6200's entry for the same channel
+  gets it too). A name that stands 10 seconds is taken as it is (`FM WOSU-FM`). Many US stations scroll the song
+  through it a few seconds a piece (97.9 WNCI: `WNCI -`, `IT ALL -`, `SWIMS`, `97.9`), so in the Americas a call
+  sign among the pieces (K or W and three or four letters in all) names the station as soon as it comes
+  (`FM WNCI`), and a standing name replaces it later only when it holds that call. The call letters B shows from the
+  station's code are not used: some codes name another station (WNCI's reads KCTC).
 - **Listening**: the MFK's push (or F1) plays the one chosen on its own radio, or stops it if it plays. Each radio
   plays one entry at a time and both can play at once: an X6200 entry on the X6200 and a stick entry on the stick,
   mixed as BOTH is (on headphones; on the speaker the stick's entry is heard), each marked `>`. While one plays, the MFK plays each one it comes to on its radio. Only the radio
@@ -894,6 +900,11 @@ written through to the card before it replaces the last copy, so a power cut kee
 - **F5 DWELL** is every scan's dwell: 1, 2, 4 or 8 s on each 360 kHz of A's, each picture of B's and each quiet
   entry of the log's (SCAN CFG's DWELL is the same one), A's SWEEP's on each band, and AUTO's on each signal it
   locks on while A scans or sweeps (held, it stays).
+- **What C plays stays A's and B's**: leave C while an entry plays (to any screen) and the X6200 stays on it (or
+  where the VFO took it on C) for A, and the stick's entry becomes B's channel, B's picture moved over it when it
+  was out of view (and B's preset to the one it is in). Picked by hand, that radio's own scan stops there (A's band
+  scan or sweep, B's scan), and a lock A had ends as the entry starts, so nothing on A pulls the X6200 back. With
+  F4's scan on, A's and B's scans go on from there. What is heard on A and B is still each one's own LISTEN.
 - F2 removes the one chosen; F3 twice within 3 seconds clears the log.
 - Keys that can do nothing are dimmed and do nothing: Listen, Remove and Clear with the log empty (Scan and Dwell
   always act: they run A's and B's scans, which fill it).
