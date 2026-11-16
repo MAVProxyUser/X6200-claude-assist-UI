@@ -743,7 +743,7 @@ Its controls (GEN shows them, as does a tap on the title):
 | VFO knob | The screen's own radio: on A (and the other screens) the X6200 by hand, the Sentry going to MAN-OVERRIDE and A's scan stopping; on B the stick's channel (heard or not), and with F2 held B's presets, one a click, back when turned back; on C the stick while a stick entry plays |
 | MFK knob | On A and B it pans the picture by SCAN CFG's STEP, its push going to the strongest signal; elsewhere it chooses a band, a frequency, an item, a logged signal, G's group (its arrows step). Push: listen, open |
 | MFK inner ring | The screens, A to H and round again (H is AIRSPACE; its ring comes back to A or G) |
-| VOL/SQL/RFG knob | Volume; push: squelch, push: RF gain, push: volume again. On B the squelch and RF gain are the SDR's |
+| VOL/SQL/RFG knob | Volume; push: squelch, push: RF gain, push: volume again. Left on squelch or RF gain, it is the volume again 5 s after its last turn or push, so a reach for it finds the volume. On B the squelch and RF gain are the SDR's |
 | F1-F5 | The keys along the bottom: on A and B, F1 SCAN, F2 BAND (B: PRESET), F3 VIEW, F4 LISTEN, F5 SCAN CFG |
 | A/B | On A and G: arms the X6200's transmitter for PTT (`X6200 TX ARMED` blinks in A's RECEIVER box, G's lamp says TX ARMED, ON AIR while it transmits), at the power set; the Sentry's scans and AUTO wait meanwhile, so the dial stays put. A/B again, F5 on G, or any screen but A and G locks it again. KEY and MSG stay refused. The radio's own TX rules still apply (its bands and power). On G's SDR channels A/B arms the HackRF's or bladeRF's transmitter instead, the X6200 staying at 0 W ([G on a HackRF or bladeRF](#g-on-a-hackrf-or-bladerf)) |
 | APP | F SYSTEM |

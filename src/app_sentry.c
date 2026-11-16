@@ -583,6 +583,11 @@ static lv_obj_t *key_l[5];
 /* The knobs and keys, said: the legend, a word on screen for a moment (OSD), the list of them all (help) */
 typedef enum { VF_VOL, VF_SQL, VF_RFG } volfn_t;
 static volfn_t     vol_fn;
+/* The VOL knob is the volume again VOL_BACK_MS after its last turn or push (vol_back): the user, 2026-11-16, "ensure
+ * the volume squeltch RF gain button always reverts back to volume for its next use requiring presses to change to
+ * the others ... when I'm just trying to change the volume and expect it to be the default behavior" */
+#define VOL_BACK_MS 5000
+static uint32_t    vol_used_ms;
 static lv_obj_t   *legend_l, *osd_frame, *osd_title_l, *osd_text_l, *osd_bar_frame, *osd_bar, *help_frame, *help_l;
 static lv_timer_t *osd_timer;
 static bool        help_on;
@@ -3567,6 +3572,7 @@ static void vol_say(void) {
 static void vol_turn(int d) {
     int v;
 
+    vol_used_ms = lv_tick_get();
     switch (vol_fn) {
         case VF_SQL:
             if (vol_stick()) {
@@ -4657,6 +4663,10 @@ static void blink_cb(lv_timer_t *t) {
     }
     blink = !blink;
     radio_moni_test_poll();             /* a test of the base's monitor, while /tmp/moni_test is there */
+    if (vol_fn != VF_VOL && lv_tick_get() - vol_used_ms >= VOL_BACK_MS) {     /* left on SQL or RF GAIN: the volume */
+        vol_fn = VF_VOL;
+        show_legend();
+    }
     show_head();
     if (key_l[0]) show_keys();          /* a key's word that follows the dial (A's F2 BAND), tuned from elsewhere:
                                          * TCI, the main screen (it said 15 M on 40 M, 2026-11-14) */
@@ -5211,7 +5221,8 @@ static void key_cb(lv_event_t *e) {
     }
     switch (key) {
         case KEY_VOL_PRESS:
-            vol_fn = (volfn_t)((vol_fn + 1) % 3);
+            vol_fn      = (volfn_t)((vol_fn + 1) % 3);
+            vol_used_ms = lv_tick_get();
             vol_say();
             return;
         case KEY_MFK_PREV:
@@ -7547,7 +7558,7 @@ static void build_overlays(void) {
                    "MFK KNOB       CHOOSES A TARGET, A BAND, A FREQUENCY. PUSH: TRACK, LISTEN, OPEN\n"
                    "MFK RING       A X6200 B VHF/UHF C LOG D BANDS E DECODE F SYSTEM G WALKIE H AIRSPACE\n"
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS (SPUN: 3 OR 8 STEPS A CLICK)\n"
-                   "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON B THE SDR'S)\n"
+                   "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (B: THE SDR'S); VOLUME AGAIN AFTER 5 S\n"
                    "LISTEN         A: X6200, THE SDR, BOTH, OFF; B: X6200, EACH SDR THAT TUNES IT, BOTH, OFF\n"
                    "BAND UP/DOWN   THE NEXT BAND, AS F2 (B: THE NEXT PRESET; G: A CHANNEL OR A STEP, MFK: GROUP)\n"
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
