@@ -4525,7 +4525,14 @@ static const char *f_label(int k) {
             int bi = routine == ROUT_SCAN ? scan_a_band : a_band_now(centre ? centre : dial_centre());
 
             if (k == 0) snprintf(s, sizeof(s), "Scan:\n%s", routine == ROUT_SCAN ? "On" : "Off");
-            else if (k == 1) snprintf(s, sizeof(s), "Band:\n%s", bi >= 0 ? bands[bi].name : "-");
+            else if (k == 1 && bi >= 0) snprintf(s, sizeof(s), "Band:\n%s", bands[bi].name);
+            else if (k == 1) {          /* the dial between bands (7.804 MHz): the nearest, as the BAND box says it,
+                                         * not a "-" (the user: "the f2 band button has a - I've never seen that") */
+                bool in;
+                int  nb = band_near(centre ? centre : dial_centre(), &in);
+
+                snprintf(s, sizeof(s), "Band:\n%s%s", nb >= 0 ? "near " : "", nb >= 0 ? bands[nb].name : "-");
+            }
             else if (k == 2) snprintf(s, sizeof(s), "View:\n%s", spec_view() == VIEW_RTL ? rtl_spectrum_dev_tag()
                                                                                        : views[spec_view() % 3]);
             else if (k == 3) snprintf(s, sizeof(s), "Listen:\n%s", hear_name(param_i_get(cfg_hear_a)));
@@ -4904,14 +4911,28 @@ static void f3_cb(button_data_t *b) { (void)b; fkey(2); }
 static void f4_cb(button_data_t *b) { (void)b; fkey(3); }
 static void f5_cb(button_data_t *b) { (void)b; fkey(4); }
 
+/* The MFK's pan on A and B faster the faster it turns: a click within 100 ms of the last one the same way is 3 steps,
+ * within 45 ms 8, so a spin crosses the picture and a slow turn still places it (the user: "when we use MFK can we do
+ * better at scrolling the band spectrogram?": a step a click, A's 10 kHz of its 360, took 36 clicks across) */
+static int pan_steps(int dir) {
+    static uint32_t last;
+    static int      last_dir;
+    uint32_t        now = lv_tick_get(), dt = now - last;
+    int             m   = dir != last_dir ? 1 : dt < 45 ? 8 : dt < 100 ? 3 : 1;
+
+    last     = now;
+    last_dir = dir;
+    return m;
+}
+
 static void step(int dir) {
     if ((scr == SCR_SCAN || scr == SCR_WALKIE) && dial_held()) return;     /* the MFK tunes the X6200 here */
     switch (scr) {
-        case SCR_SCAN: {                /* as on C: it pans, by SCAN CFG's step; a scan stops there */
+        case SCR_SCAN: {                /* as on C: it pans, by SCAN CFG's step (more when spun); a scan stops there */
             int32_t st = a_steps[a_step], fq = cparam_i_get(cfg_fg_freq);
 
             if (routine == ROUT_SCAN) set_routine(ROUT_BAND);
-            tune(fq / st * st + dir * st, -1);
+            tune(fq / st * st + dir * pan_steps(dir) * st, -1);
             show_screen();
             break;
         }
@@ -4953,7 +4974,7 @@ static void step(int dir) {
             break;
         case SCR_RTL:
             rtl_scan_set(false);        /* panned by hand: the scan stops where it was */
-            rtl_tune(rtl_hz / rtl_steps[rtl_step] * rtl_steps[rtl_step] + (int64_t)dir * rtl_steps[rtl_step]);
+            rtl_tune(rtl_hz / rtl_steps[rtl_step] * rtl_steps[rtl_step] + (int64_t)dir * pan_steps(dir) * rtl_steps[rtl_step]);
             break;
         default:
             break;
@@ -7320,7 +7341,7 @@ static void build_overlays(void) {
                    "VFO KNOB       A, G: THE X6200 (MAN-OVERRIDE); B: THE SDR'S CHANNEL, F2 HELD: PRESETS\n"
                    "MFK KNOB       CHOOSES A TARGET, A BAND, A FREQUENCY. PUSH: TRACK, LISTEN, OPEN\n"
                    "MFK RING       A X6200 B VHF/UHF C LOG D BANDS E DECODE F SYSTEM G WALKIE H AIRSPACE\n"
-                   "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"
+                   "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS (SPUN: 3 OR 8 STEPS A CLICK)\n"
                    "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON B THE SDR'S)\n"
                    "LISTEN         A: X6200, THE SDR, BOTH, OFF; B: X6200, EACH SDR THAT TUNES IT, BOTH, OFF\n"
                    "BAND UP/DOWN   THE NEXT BAND, AS F2 (B: THE NEXT PRESET; G: CB CHANNEL, OR GROUP)\n"
