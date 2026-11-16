@@ -117,6 +117,7 @@ static uint32_t        alert_seq;
 
 /* Listening: the helper's audio, played on the speaker in the recorder's way (the base in play mode) */
 static atomic_llong    listen_hz;
+static rtl_dmr_t       dmr_now;         /* the listened channel's DMR (RDMR), under lock */
 static atomic_int      listen_mode;      /* 0 not listening */
 static pthread_mutex_t ring_lock = PTHREAD_MUTEX_INITIALIZER;
 static int16_t         ring[RING];
@@ -530,6 +531,36 @@ static void *spec_thread(void *arg) {
             memcpy(t, buf + 8, len);
             t[len] = 0;
             take_alert(t);
+            continue;
+        }
+        if (n >= 8 && memcmp(buf, "RDMR", 4) == 0) {   /* "<Hz>|<slot>|<cc>|<voice>|<lc>|<flco>|<src>|<dst>|<bs>|<voc>" */
+            uint32_t len;
+            char     t[160];
+            long long hz;
+            int      sl, cc, voice, lc, flco, bs, voc;
+            unsigned src, dst;
+
+            memcpy(&len, buf + 4, 4);
+            if (len >= sizeof(t) || len > (uint32_t)(n - 8)) continue;
+            memcpy(t, buf + 8, len);
+            t[len] = 0;
+            if (sscanf(t, "%lld|%d|%d|%d|%d|%d|%u|%u|%d|%d", &hz, &sl, &cc, &voice, &lc, &flco, &src, &dst, &bs,
+                       &voc) != 10 || sl < 0 || sl > 2)
+                continue;
+            uint32_t now = lv_tick_or_ms();
+
+            pthread_mutex_lock(&lock);
+            if (dmr_now.hz != hz) memset(&dmr_now, 0, sizeof(dmr_now));
+            dmr_now.hz      = hz;
+            if (cc >= 0) dmr_now.cc = cc;
+            else if (!dmr_now.at_ms) dmr_now.cc = -1;
+            dmr_now.bs      = bs;
+            dmr_now.vocoder = voc;
+            dmr_now.slot[sl] = (rtl_dmr_slot_t){.voice = voice, .lc = lc, .flco = flco, .src = src, .dst = dst,
+                                                .at_ms = now};
+            dmr_now.at_ms = now;
+            dmr_now.seq++;
+            pthread_mutex_unlock(&lock);
             continue;
         }
         if (n >= 8 && memcmp(buf, "RRDS", 4) == 0) {   /* "<Hz>|<PI>|<PTY>|<TP>|<TA>|<PS, 8>|<RT>" */
@@ -1086,6 +1117,16 @@ void rtl_spectrum_rds_watch(int64_t hz) {
     pthread_mutex_unlock(&lock);
     snprintf(cmd, sizeof(cmd), "d %lld\n", (long long)hz);
     say(cmd);
+}
+
+bool rtl_spectrum_dmr(rtl_dmr_t *out) {
+    bool got;
+
+    pthread_mutex_lock(&lock);
+    *out = dmr_now;
+    got  = dmr_now.at_ms && dmr_now.hz == atomic_load(&listen_hz) && lv_tick_or_ms() - dmr_now.at_ms < 4000;
+    pthread_mutex_unlock(&lock);
+    return got;
 }
 
 bool rtl_spectrum_rds(rtl_rds_t *out) {

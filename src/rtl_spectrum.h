@@ -148,6 +148,28 @@ typedef struct {
 /* What came for the channel watched; false: nothing yet */
 bool rtl_spectrum_rds(rtl_rds_t *out);
 
+/* DMR on the channel listened to in NFM (the daemon's dmr.c, found by its sync): each timeslot's call as the daemon
+ * last said it */
+typedef struct {
+    bool     voice;             /* a call going on */
+    bool     lc;                /* src and dst known */
+    int      flco;              /* 0 a group call (dst a talkgroup), 3 a private one */
+    uint32_t src, dst;
+    uint32_t at_ms;             /* when it was said (lv_tick_get), 0 never */
+} rtl_dmr_slot_t;
+
+typedef struct {
+    int64_t        hz;          /* the channel */
+    int            cc;          /* the colour code, -1 not known */
+    bool           bs;          /* a repeater's */
+    bool           vocoder;     /* its voice heard (a DVSI USB-3000), else silence for its buzz */
+    rtl_dmr_slot_t slot[3];     /* 1, 2; 0 a radio's whose slot is not said */
+    uint32_t       at_ms, seq;  /* the last word of it, one more at each */
+} rtl_dmr_t;
+
+/* The listened channel's DMR, heard within the last 4 s; false: none */
+bool rtl_spectrum_dmr(rtl_dmr_t *out);
+
 /* ACARS (the daemon's acars.c): the device at 130.8 MHz, the ACARS channels there decoded (AIRSPACE's ACARS view;
  * never with AIRSPACE's dump1090 on the same device: adsb_rx_lend first). Said again to a daemon started anew */
 void rtl_spectrum_acars(bool on);

@@ -1,0 +1,7 @@
+# The DVSI USB-3000 (an AMBE-3000R: the vocoder for DMR's voice, the SDR daemon's tools/rtlspec/ambe.c) is an FTDI
+# FT232R, 0403:6001, which gpsd's 25-gpsd.rules takes for a GPS: on the radio it linked the port as /dev/gps0,
+# started gpsd on it (the GUI starting it again each minute with no report) and put the PPS line discipline on it
+# (2026-11-16). Right after that rule (this udev, systemd's 243, has no last_rule to stop it before): its link and
+# its run taken back ("=" resets a list); the rules after this one (60-serial's /dev/serial/by-id) as ever. The
+# daemon finds the USB-3000 by itself
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTRS{manufacturer}=="DVSI", SYMLINK="", RUN="/bin/true"

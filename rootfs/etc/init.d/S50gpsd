@@ -41,6 +41,15 @@ is_smartcw() {
         return 1
 }
 
+# The DVSI USB-3000 (0403:6001, "DVSI"), DMR's vocoder for the SDR daemon (tools/rtlspec/ambe.c): an FTDI port gpsd's
+# rules take for a GPS (26-usb3000.rules keeps udev from linking it as /dev/gps*; this, a port of it at boot)
+is_usb3000() {
+        n=$(readlink -f $1)
+        n=/sys/class/tty/${n##*/}/device/../..
+        [ "$(cat $n/idVendor 2>/dev/null):$(cat $n/idProduct 2>/dev/null)" = "0403:6001" ] &&
+                grep -q DVSI $n/manufacturer 2>/dev/null
+}
+
 # The ports gpsd starts with: ttyACM0 and those udev knows as GPS receivers (/dev/gps*, 25-gpsd.rules), each once and
 # by its own name. /dev/gps0 is a link to the port of a GPS udev knows, ttyACM0 for most: both were handed over, and
 # gpsd opened the port twice, two readers each getting part of what the GPS sent. The hotplug script (gpsdctl) names
@@ -53,6 +62,7 @@ devices() {
                 is_wr12 $d && continue
                 is_adsb $d && continue
                 is_smartcw $d && continue
+                is_usb3000 $d && continue
                 case " $DEVICES " in
                         *" $d "*) ;;
                         *) DEVICES="$DEVICES $d" ;;

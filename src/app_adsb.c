@@ -196,6 +196,23 @@ static int        n_rx;                 /* receivers listened on, at the last he
  * 2026-11-16: "add a column to the decoded info to cover the device the info came from") */
 static char slot_nm[ADSB_SRCS][8];
 
+/* A receiver's colour by what it is, not by the slot it has (the user, 2026-11-16: "each RTL sdr should get it's own
+ * color"; with RTL0 stopped, RTL3 took another slot and another colour): RTL<n> its own (RTL0 orange, RTL1 green,
+ * RTL2 cyan, RTL3 periwinkle, RTL4 magenta, then hues the golden angle apart), a serial one (GNS 5890, microADSB) the
+ * amber, B's HackRF or bladeRF the deep orange */
+static lv_color_t rx_colour(const char *nm, int slot) {
+    static const uint32_t rtl[] = {0, 0x7cd65a, 0x45c8e0, 0x8f8bff, 0xe066d6};
+
+    if (!strncmp(nm, "RTL", 3) && nm[3] >= '0' && nm[3] <= '9') {
+        int n = atoi(nm + 3);
+
+        if (n == 0) return lv_color_mix(amb, TC(err), 190);
+        if (n < (int)(sizeof(rtl) / sizeof(rtl[0]))) return lv_color_hex(rtl[n]);
+        return lv_color_hsv_to_rgb((uint16_t)fmodf(15.0f + (n - 5) * 137.508f, 360.0f), 55, 95);
+    }
+    return slot == ADSB_SLOT_SERIAL ? amb : lv_color_mix(amb, TC(err), 110);
+}
+
 /* p's receiver: the one of its last frame (the user, 2026-11-16: "change the color of each plane / trail every time a
  * new radio sees it"); -1 none said */
 static int last_rx(const adsb_plane_t *p) {
@@ -759,8 +776,10 @@ static void show_head(double now, int nlive, int nghost) {
 
     adsb_rx_name(name, sizeof(name));
     n_rx = st == ADSB_RX_ON ? adsb_rx_slots(slot, names, ADSB_SRCS) : 0;
-    for (int i = 0; i < n_rx; i++)      /* the RX column's names (rx_of) */
+    for (int i = 0; i < n_rx; i++) {    /* the RX column's names (rx_of), and each one's colour by what it is */
         snprintf(slot_nm[slot[i]], sizeof(slot_nm[0]), "%.*s", (int)strcspn(names[i], " "), names[i]);
+        src_col[slot[i]] = rx_colour(slot_nm[slot[i]], slot[i]);
+    }
     if (n_rx > 1) {                     /* each receiver in its aircraft's colour, and BOTH's (HEARD BY 2+'s) */
         size_t at = 0;
         for (int i = 0; i < n_rx && at < sizeof(name); i++) {

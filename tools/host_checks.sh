@@ -161,6 +161,10 @@ if wanted rds; then
     res=$(run_one rds sh -c "$CC -O2 -o '$OUT/rds_test' tools/rtlspec/rds_test.c -lm && '$OUT/rds_test'")
     record rds "$res" "$(summary rds)"
 fi
+if wanted dmr; then
+    res=$(run_one dmr sh -c "$CC -O2 -Wall -Wextra -o '$OUT/dmr_test' tools/rtlspec/dmr_test.c tools/rtlspec/dmr.c -lm && '$OUT/dmr_test'")
+    record dmr "$res" "$(summary dmr)"
+fi
 # The audits' reproduction harnesses, now the regression suite of their fixes (docs/audit/repro-2026-10-24/README.md):
 # Python, Node.js, SQLite, libpng and ALSA's headers, LVGL; Linux
 if wanted audit; then

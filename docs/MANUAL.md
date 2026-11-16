@@ -1077,8 +1077,8 @@ the VFO) is by hand: the Sentry stops moving the dial (MAN-OVERRIDE, as a turn o
 
 #### G on an SDR: RTL-SDR, HackRF or bladeRF
 
-With an SDR on the HOST port, G's plan gets five more groups after the X6200's, FM simplex channels of the amateur
-bands, heard through it. A HackRF or a bladeRF (the daemon says it transmits) sends on them too; an RTL-SDR only
+With an SDR on the HOST port, G's plan gets six more groups after the X6200's: FM simplex channels of the amateur
+bands, and DMR's (below), heard through it. A HackRF or a bladeRF (the daemon says it transmits) sends on them too; an RTL-SDR only
 hears them: A/B there says "THE RTL-SDR ONLY RECEIVES". Up to v0.3.12.24 the groups came only with a HackRF or a
 bladeRF, so an RTL-SDR gave G none of them:
 
@@ -1089,6 +1089,7 @@ bladeRF, so an RTL-SDR gave G none of them:
 | 70 CM FM | CALL 446.000, S2 446.500, S3 445.950, S4 446.050, S5 446.100 |
 | 33 CM FM | CALL 927.500 |
 | 23 CM FM | CALL 1294.500 |
+| DMR | CALL 441.000, S2 446.500, S3 446.075, S4 433.450, 2M 145.790, 2M2 145.510 (receive only: no FM is sent on them) |
 
 They are Region 2's (North America's) simplex channels; the VFO tunes anywhere from there. **Only amateur bands**: the
 owner asked for "anything the HackRF can", and that is narrowed on purpose. No aviation, marine, NOAA, GPS,
@@ -1242,7 +1243,9 @@ the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on t
 - **Two or more RTL-SDRs** (a KrakenSDR's five): an RTL that B neither holds nor asked for, behind a hub of its own
   power, is AIRSPACE's spare, its dump1090 on that stick alone (by its serial). **With AIRSPACE open, every such
   free RTL listens too** (up to seven spares, each its own dump1090 on ports 30003 up), and **each radio has its own
-  colour**: the serial one amber, B's deep orange, then orange, green, cyan, periwinkle and magenta; an aircraft heard
+  colour, by what it is** (not by the place AIRSPACE gives it, so RTL3 stays periwinkle with RTL0 stopped): the serial
+  one amber, B's HackRF or bladeRF deep orange, RTL0 orange, RTL1 green, RTL2 cyan, RTL3 periwinkle, RTL4 magenta, and
+  a hue of its own for each RTL past those; an aircraft heard
   by two of them the pale one, with three or more each in its receiver's (above). With three or more the head names
   each by its first word in its colour (`RTL0 RTL1 RTL2 RTL3  RTL4 ON B`); closed, the first spare goes on alone. RTLs a watch channel has are left to it: the head names each RTL by its number
   (`RTL0 R820T + RTL1 R820T BOTH` with B's lent while AIRSPACE is open), and with AIRSPACE closed B has its own again
@@ -1272,6 +1275,29 @@ stays live; with B's SDR alone the scope has nothing new while ACARS is on. F5 a
   SDR's stream (on the stream's own thread it took a whole core and the stream fell behind the device).
 - The airband antenna matters more than for ADS-B: ground stations are strongest; aircraft are heard when high.
 - Reading ACARS is receive only, as is everything on AIRSPACE.
+
+### DMR
+
+DMR (ETSI TS 102 361) is the digital two-way radio of ham repeaters (Brandmeister, mostly on 70 cm), and of much of
+the business and public-service radio in 450-470 and 150-174 MHz. **It is found by itself in any narrow FM channel B's
+SDR listens to** (B, G's SDR channels, C's stick entries): there is no DMR mode to choose. The SDR daemon looks for
+DMR's sync in the channel's FM; once found, the channel is DMR's till no sync comes for 400 ms:
+
+- **Who talks**: B's line over its history (where RDS goes) says `DMR 443.450  COLOUR CODE 7  REPEATER`, then each
+  timeslot's call: `TS1 TG 3100 FROM 3112345 TALKING` (a group call to talkgroup 3100 from radio 3112345),
+  `TS2 TO 1234567 FROM 7654321` (a private one), `(ENDED)` after its end. The head and B's half say DMR in place of
+  NFM. On G the channel's name gives way to the talker and the talkgroup, and the mode says DMR.
+- **The voice**: DMR's AMBE+2 has no open decoder; a DVSI USB-3000 (an AMBE-3000R) on the HOST port (a powered hub)
+  decodes it. The daemon finds it by itself (it loads the kernel's ftdi_sio for it) and the first timeslot heard holds
+  the speaker till its call ends. Without one the channel is silent while it is DMR (not its buzz), and B's line says
+  `NO VOCODER: SILENT`.
+- **Where**: B's presets DMR 70 CM (441.000, the DMR simplex calling channel), UHF LMR (450-470 MHz) and VHF LMR
+  (150-174 MHz); G's DMR group (the simplex channels). Around Columbus the 70 cm repeaters are on 443.150, 443.425,
+  443.450 and 444.850 MHz (RepeaterBook).
+- **Receive only.** G never transmits FM on a DMR channel ("A DMR CHANNEL: RECEIVE ONLY", and on any channel with DMR
+  heard on it). Encrypted calls are not decoded.
+- It costs about 6% of one of the radio's four cores while B's SDR listens in narrow FM; watch channels do not look
+  for it.
 
 ## Updating the firmware
 

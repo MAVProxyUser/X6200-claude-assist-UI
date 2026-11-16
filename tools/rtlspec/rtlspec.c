@@ -51,13 +51,15 @@
  *                          each time it changes; "<Hz>|||||" at a new channel. PI "" and PTY -1 until they came
  *      "RACR", u32 length, "<Hz>|<mode>|<registration>|<ack>|<label>|<block>|<msn>|<flight>|<more>|<level dB>|<text>"
  *                          an ACARS message (acars.c) whose check passed, while "c 1"; the text last, "|" in it as "/"
+ *      "RDMR", u32 length, "<Hz>|<slot>|<cc>|<voice>|<lc>|<flco>|<src>|<dst>|<bs>|<vocoder>"   DMR on the channel
+ *                          listened to in NFM (dmr.c, found by its sync): a timeslot's call as it changes (dmr_call)
  *      "RTX <word> <Hz> <why>" the transmitter: ON (on the air), END (off again: ASKED, IDLE, TIMEOUT, GONE, FAILED),
  *                          NO (refused: NOT-AMATEUR, RECEIVE-ONLY, AIRSPACE, NO-DEVICE)
  *  A client that does not read misses messages: the stream never waits for it. From the client, a line each:
  *      "r 1", "r 0"        rows wanted, or not
  *      "f <Hz>"            the centre (within what the device tunes); "s <rate>" the sample rate; "g <tenths of dB>"
  *                          the gain, on the RTL's scale ("g -1": the AGC)
- *      "l <Hz> <mode>"     listen (mode 1 NFM, 2 AM, 3 WFM; "l 0 0" stops): mixed to 0 Hz, decimated to 264.6 kHz
+ *      "l <Hz> <mode>"     listen (mode 1 NFM, 2 AM, 3 WFM; "l 0 0" stops; NFM with DMR in it: its voice): mixed to 0 Hz, decimated to 264.6 kHz
  *                          (CIC, order 2) and by 6 (a 63-tap FIR) to 44.1 kHz and demodulated. Only at a sample rate
  *                          that is a multiple of 264.6 kHz (within 50 Hz: a device's own clock): 1058400 or 2116800
  *      "w <Hz>"            watch that channel (narrow FM, NOAA Weather Radio) for SAME alerts (same.c); "w 0" stops
@@ -121,6 +123,8 @@
 #endif
 
 #include "acars.h"
+#include "ambe.h"
+#include "dmr.h"
 #include "rds.h"
 #include "same.h"
 #include "sdr.h"
@@ -210,6 +214,8 @@ struct chan {
     float    prev_r, prev_i, deemph, dc, avg_mag;
     bool     raw;               /* the demodulated FM as it is, no audio shaping (SAME's tones) */
     bool     mpx_only;          /* WFM's multiplex only, no audio (RDS's own channel) */
+    bool     dmr_on;            /* NFM: DMR looked for in it (dmr.c), its speech in place of the FM while it is there */
+    dmr_t   *dmr;
     void   (*out)(float v);     /* each 44.1 kHz sample */
     void   (*mpx)(float v);     /* WFM: each 264.6 kHz sample of the multiplex, NULL none */
 };
@@ -217,7 +223,7 @@ struct chan {
 static void listen_out(float v);
 static void watch_out(float v);
 static void rds_mpx(float v);
-static chan_t lis    = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .out = listen_out};
+static chan_t lis    = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .dmr_on = true, .out = listen_out};
 static chan_t watch  = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .raw = true, .out = watch_out};
 static chan_t rdsc   = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .mpx_only = true, .mpx = rds_mpx};
 #define l_mode lis.mode
@@ -271,8 +277,76 @@ static void chan_set(chan_t *c, int mode, uint64_t hz, uint64_t centre, uint32_t
 }
 
 static void listen_set(int mode, uint64_t hz, uint64_t centre, uint32_t rate) {
+    if (lis.dmr && (hz != lis.hz || mode != 1)) {       /* another channel: what DMR it had is not this one's */
+        dmr_free(lis.dmr);
+        lis.dmr = NULL;
+    }
     chan_set(&lis, mode, hz, centre, rate);
 }
+
+/* ---- DMR on the listened channel (dmr.c): found in any narrow FM channel by its sync, its voice decoded instead of
+ * the FM's buzz; each slot's call said to the client as it changes:
+ *      "RDMR", u32 length, "<Hz>|<slot>|<cc>|<voice>|<lc>|<flco>|<src>|<dst>|<bs>|<vocoder>"
+ * slot 1 or 2 (0 not known), cc the colour code (-1 not known), voice 1 a call going on, lc 1 src and dst known, flco 0
+ * a group call (dst a talkgroup) or 3 a private one, bs 1 a repeater's, vocoder 1 its speech heard (a DVSI USB-3000:
+ * ambe.c), 0 none here (silence in place of the buzz) ---- */
+static int dmr_play;            /* the slot whose voice is heard, 0 none */
+
+static void dmr_call(void *ctx, const dmr_call_t *c) {
+    chan_t *ch = ctx;
+    char    t[160];
+    uint8_t msg[8 + sizeof(t)];
+    int     n;
+
+    if (c->slot == dmr_play && !c->voice) dmr_play = 0;
+    n = snprintf(t, sizeof(t), "%llu|%d|%d|%d|%d|%d|%u|%u|%d|%d", (unsigned long long)ch->hz, c->slot, c->cc, c->voice,
+                 c->lc, c->flco, c->src, c->dst, c->bs, ambe_ready());
+    if (n <= 0 || n >= (int)sizeof(t)) return;
+    fprintf(stderr, "rtlspec: DMR %.5f MHz TS%d CC%d %s%s", ch->hz / 1e6, c->slot, c->cc, c->voice ? "VOICE" : "END",
+            c->bs ? " (REPEATER)" : "");
+    if (c->lc) fprintf(stderr, " %s %u FROM %u", c->flco == 3 ? "TO" : "TG", c->dst, c->src);
+    fprintf(stderr, "\n");
+    uint32_t len = (uint32_t)n;
+
+    memcpy(msg, "RDMR", 4);
+    memcpy(msg + 4, &len, 4);
+    memcpy(msg + 8, t, len);
+    put(msg, 8 + len);
+}
+
+static void dmr_ambe(void *ctx, int slot, const uint8_t frame[9]) {
+    (void)ctx;
+    if (!dmr_play) {                    /* the first slot heard holds it till its call ends */
+        dmr_play = slot;
+        ambe_flush();
+    }
+    if (slot == dmr_play) ambe_frame(frame);
+}
+
+/* A test of DMR off the air: with /tmp/dmr_dump there, the next 20 s of a DMR channel's FM (the discriminator, float
+ * at 44.1 kHz, +-1 for +-5 kHz) into /tmp/dmr_dump.f32, the flag then taken away. Looked for once a second */
+static void dmr_dump(float d, bool active) {
+    static FILE    *f;
+    static uint32_t n, look;
+
+    if (!f) {
+        if (!active || ++look < AUD_RATE) return;
+        look = 0;
+        if (access("/tmp/dmr_dump", F_OK) || !(f = fopen("/tmp/dmr_dump.f32", "wb"))) return;
+        n = 0;
+        fprintf(stderr, "rtlspec: DMR's FM into /tmp/dmr_dump.f32 for 20 s\n");
+    }
+    fwrite(&d, sizeof(d), 1, f);
+    if (++n >= 20 * AUD_RATE) {
+        fclose(f);
+        f = NULL;
+        unlink("/tmp/dmr_dump");
+        fprintf(stderr, "rtlspec: /tmp/dmr_dump.f32 written\n");
+    }
+}
+
+/* The speech in place of the FM while DMR is there (ambe.c's USB-3000): silence without one */
+static float dmr_audio(void) { return ambe_audio(); }
 
 static void listen_out(float v) {
     static uint8_t msg[8 + AUD_CHUNK * 2];
@@ -442,6 +516,26 @@ static void at_264k(chan_t *c, float r, float i) {
 
         c->prev_r = yr;
         c->prev_i = yi;
+        if (c->dmr_on) {
+            static int off = -1;        /* RTLSPEC_NO_DMR in the environment: NFM alone (a test of what DMR costs) */
+
+            if (off < 0) off = getenv("RTLSPEC_NO_DMR") != NULL;
+            if (off) c->dmr_on = false;
+        }
+        if (c->dmr_on) {
+            if (!c->dmr) {
+                c->dmr = dmr_new(AUD_RATE, dmr_ambe, dmr_call, c);
+                ambe_start();           /* the vocoder looked for (once) */
+            }
+            if (c->dmr) {
+                dmr_feed(c->dmr, &d, 1);
+                dmr_dump(d, dmr_active(c->dmr));
+                if (dmr_active(c->dmr)) {
+                    c->out(dmr_audio());
+                    return;
+                }
+            }
+        }
         if (c->raw) {
             c->dc += 0.002f * (d - c->dc);
             c->out(d - c->dc);
@@ -1656,7 +1750,11 @@ int main(int argc, char **argv) {
             case 'g': gain = atoi(optarg); break;
             case 'i': replay = optarg; break;
             case 'S': sock_name = optarg; break;
-            case 'W': sdr_rtl_exact = true; break;      /* a watch channel's: RTL -d alone (rtl_watch.c) */
+            case 'W':                           /* a watch channel's: RTL -d alone (rtl_watch.c); no DMR (6% of a
+                                                 * core each, and the one vocoder is B's) */
+                sdr_rtl_exact = true;
+                lis.dmr_on    = getenv("RTLSPEC_DMR") != NULL;      /* (a test on a spare RTL: DMR all the same) */
+                break;
             case 'T': sdr_file_path = optarg; break;
             default: return 1;
         }

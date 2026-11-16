@@ -281,7 +281,7 @@ static const band_t bands[] = {
      "Marine VHF in narrow FM: channel 16 (156.800) for calls and distress, AIS data on 161.975 / 162.025."},
     {"NOAA WX", 162400, 162550, "WEATHER RADIO, ALERTS", "THE SDR'S OWN", 'L', 162550000, radio_mode_nfm, false,
      "NOAA Weather Radio around the clock, with SAME alerts the Sentry shows in its title."},
-    {"70 CM", 420000, 450000, "HAMS: REPEATERS, SIMPLEX", "THE SDR'S OWN", 'L', 446000000, radio_mode_nfm, false,
+    {"70 CM", 420000, 450000, "HAMS: REPEATERS, SIMPLEX, DMR", "THE SDR'S OWN", 'L', 446000000, radio_mode_nfm, false,
      "Local hams in narrow FM: repeaters 442-450, simplex 446.000."},
     {"GMRS", 462550, 467725, "FAMILY RADIOS: FRS, GMRS", "THE SDR'S OWN", 'L', 462562500, radio_mode_nfm, false,
      "Handheld family radios, FRS and GMRS, 12.5 kHz apart: a few miles at most."},
@@ -454,6 +454,15 @@ static void track_end(void);
 static void show_scan(void);
 static const target_t *target_near(int32_t hz, int32_t within);
 static const char *const rtl_mode_names[] = {"", "NFM", "AM", "WFM"};
+static int               rtl_mode_of(int64_t hz);
+
+/* B's channel's mode as heard: DMR while the daemon finds it there (in NFM), else the band's */
+static const char *rtl_mode_word(int64_t hz) {
+    rtl_dmr_t m;
+
+    if (rtl_spectrum_dmr(&m) && m.hz == hz) return "DMR";
+    return rtl_mode_names[rtl_mode_of(hz)];
+}
 
 /* The stick's demodulator for a frequency: broadcast FM wide, the airband AM, the rest narrow FM */
 static int rtl_mode_of(int64_t hz) {
@@ -1347,7 +1356,7 @@ static void head_status(char *pre, size_t pn, char *line, size_t ln, const char 
 
         snprintf(f, sizeof(f), "%s %lld.%03lld.%02lld", rtl_spectrum_dev_tag(), (long long)(hz / 1000000),
                  (long long)(hz / 1000 % 1000), (long long)(hz % 1000 / 10));
-        snprintf(pre, pn, "%s %s  %s  %s  %s%s", f, rtl_mode_names[rtl_mode_of(hz)],
+        snprintf(pre, pn, "%s %s  %s  %s  %s%s", f, rtl_mode_word(hz),
                  rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc);
     } else {
         snprintf(pre, pn, "%s %s%s%s  %s  %s  %s%s", f, mode_name(cparam_i_get(cfg_cur_mode)),
@@ -1935,6 +1944,11 @@ static const struct {
     {"WX SAT", 137500000, 137000000, 138000000, "METEOR-M WEATHER SATELLITES 137.100 / 137.900"},
     {"SONDES", 403000000, 400000000, 406000000, "WEATHER BALLOONS 400-406 MHZ"},
     {"70 CM", 446000000, 420000000, 450000000, "HAMS 420-450: SIMPLEX 446.000"},
+    /* DMR (the daemon's dmr.c finds it in any narrow FM channel): the ham simplex channels, and the business and public
+     * service bands where most of it is (the user, 2026-11-16: "ensure the band selection can tune in") */
+    {"DMR 70 CM", 441000000, 440000000, 450000000, "HAM DMR: SIMPLEX 441.000 (CALLING), 446.500, 446.075"},
+    {"UHF LMR", 460000000, 450000000, 470000000, "BUSINESS AND PUBLIC SERVICE RADIO 450-470 (MUCH OF IT DMR)"},
+    {"VHF LMR", 152000000, 150000000, 174000000, "BUSINESS AND PUBLIC SERVICE RADIO 150-174 (DMR AND FM)"},
     {"ISM 433", 433920000, 433050000, 434790000, "SENSORS, KEY FOBS, WEATHER STATIONS"},
     {"GMRS", 462600000, 462550000, 467725000, "GMRS AND FRS RADIOS"},
     {"ISM 915", 915000000, 902000000, 928000000, "METERS AND SENSORS 902-928 MHZ"},
@@ -3451,7 +3465,7 @@ static void rtl_timer_cb(lv_timer_t *t) {
         if (listen_hz) {
             char lf[16];
             fmt_mhz(lf, sizeof(lf), listen_hz, 3);
-            snprintf(s, sizeof(s), "%s  %s %s  %s", rtl_spectrum_dev_tag(), lf, rtl_mode_names[rtl_mode_of(listen_hz)],
+            snprintf(s, sizeof(s), "%s  %s %s  %s", rtl_spectrum_dev_tag(), lf, rtl_mode_word(listen_hz),
                      !listen_rtl ? "MUTED" : rtl_spectrum_squelch_open() ? "HEARD" : "SQUELCHED");
         } else {
             snprintf(s, sizeof(s), "%s  %s MHZ", rtl_spectrum_dev_name(), f);
@@ -3698,6 +3712,52 @@ static bool rds_tuned_note(char *t, size_t n) {
     return true;
 }
 
+/* DMR on B's channel (the daemon's dmr.c, found in any NFM channel by its sync): RDS's line says it while it is
+ * there, each timeslot's call: who talks (the radio's ID) to whom (a talkgroup, TG, or a radio), TALKING while it goes
+ * on. The user, 2026-11-16: "general DMR decode support (ensure the band selection can tune in)". True: shown */
+static bool dmr_shown;
+
+static bool dmr_show(bool now) {
+    static uint32_t seq = UINT32_MAX;
+    rtl_dmr_t       m;
+    char            f[16], line[200];
+    size_t          at;
+
+    if (!rtl_spectrum_dmr(&m) || !p_rtl.trace_h || (scr != SCR_RTL && scr != SCR_SCAN)) {
+        if (dmr_shown) {                /* gone: RDS's line as it was, or none */
+            dmr_shown = false;
+            lv_obj_add_flag(rds_l, LV_OBJ_FLAG_HIDDEN);
+        }
+        return false;
+    }
+    if (!now && dmr_shown && m.seq == seq) return true;
+    seq = m.seq;
+    fmt_mhz(f, sizeof(f), m.hz, 3);
+    at = (size_t)snprintf(line, sizeof(line), "DMR %s", f);
+    if (m.cc >= 0) at += (size_t)snprintf(line + at, sizeof(line) - at, "  COLOUR CODE %d", m.cc);
+    at += (size_t)snprintf(line + at, sizeof(line) - at, "%s%s", m.bs ? "  REPEATER" : "",
+                           m.vocoder ? "" : "  (NO VOCODER: SILENT)");
+    static const int order[3] = {1, 2, 0};      /* TS1, TS2, then a radio's whose slot is not said */
+    bool             first    = true;
+
+    for (int i = 0; i < 3 && at < sizeof(line); i++) {
+        const rtl_dmr_slot_t *sl = &m.slot[order[i]];
+        char                  who[48] = "";
+
+        if (!sl->at_ms) continue;
+        if (sl->lc && sl->flco == 3) snprintf(who, sizeof(who), " TO %u FROM %u", sl->dst, sl->src);
+        else if (sl->lc) snprintf(who, sizeof(who), " TG %u FROM %u", sl->dst, sl->src);
+        at += (size_t)snprintf(line + at, sizeof(line) - at, "%s%s%s %s", first ? "\n" : "   ",
+                               order[i] == 1 ? "TS1" : order[i] == 2 ? "TS2" : "TS?", who,
+                               sl->voice ? "TALKING" : sl->lc ? "(ENDED)" : "IDLE");
+        first = false;
+    }
+    lv_label_set_text(rds_l, line);
+    lv_obj_clear_flag(rds_l, LV_OBJ_FLAG_HIDDEN);
+    dmr_shown = true;
+    return true;
+}
+
 static void rds_show(bool now) {
     static uint32_t   seq = UINT32_MAX;
     static const char *const RBDS[32] = {
@@ -3715,6 +3775,10 @@ static void rds_show(bool now) {
     bool      got;
 
     if (!rds_l) return;
+    bool was = dmr_shown;
+
+    if (dmr_show(now)) return;          /* DMR on B's channel: its line in RDS's place */
+    if (was) now = true;                /* DMR gone: RDS's line again as it is */
     got = rtl_spectrum_rds(&d);
     if (!now && d.seq == seq) return;
     seq = d.seq;
@@ -6726,6 +6790,10 @@ static const struct {
     {"1.25 M FM", "CALL", 223500000}, {"1.25 M FM", "S2", 223420000}, {"1.25 M FM", "S3", 223460000},
     {"70 CM FM", "CALL", 446000000}, {"70 CM FM", "S2", 446500000}, {"70 CM FM", "S3", 445950000},
     {"70 CM FM", "S4", 446050000},   {"70 CM FM", "S5", 446100000},
+    /* DMR's ham simplex channels (North America's; 433.450 Europe's), heard as DMR (the daemon's dmr.c), never
+     * transmitted on in FM (w_sdr_refusal) */
+    {"DMR", "CALL", 441000000}, {"DMR", "S2", 446500000}, {"DMR", "S3", 446075000},
+    {"DMR", "S4", 433450000},   {"DMR", "2M", 145790000}, {"DMR", "2M2", 145510000},
     {"33 CM FM", "CALL", 927500000},
     {"23 CM FM", "CALL", 1294500000},
 };
@@ -6958,6 +7026,13 @@ static const char *w_sdr_refusal(void) {
         return only;
     }
     if (cfg_tx_block()) return "THE WR12 HOLDS TX";
+    for (int i = 0; i < (int)N_OF(w_sdr_plan); i++)     /* FM on a DMR channel: never (no DMR transmitter here) */
+        if (w_sdr_plan[i].hz == w_sdr_hz && !strcmp(w_sdr_plan[i].grp, "DMR")) return "A DMR CHANNEL: RECEIVE ONLY";
+    {
+        rtl_dmr_t m;
+
+        if (rtl_spectrum_dmr(&m) && m.hz == w_sdr_hz) return "DMR ON THE CHANNEL: RECEIVE ONLY";
+    }
     switch (tx_ranges_sdr_check((tx_ranges_t)param_i_get(cfg_tx_ranges), (int32_t)w_sdr_hz)) {
         case HAM_TX_OK: return NULL;
         case HAM_TX_OFF_RANGE: return "OUTSIDE THE TX RANGES (SETTINGS > TX CAL)";
@@ -7537,9 +7612,25 @@ static void show_walkie(void) {
     }
     (void)ch;
     snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
-    snprintf(fr, sizeof(fr), "%s %s", f, w_sdr_hz ? "FM" : mode_name(cparam_i_get(cfg_cur_mode)));
+    rtl_dmr_t dm;
+    bool      dmr = w_sdr_hz && rtl_spectrum_dmr(&dm) && dm.hz == w_sdr_hz;
+
+    snprintf(fr, sizeof(fr), "%s %s", f, dmr ? "DMR" : w_sdr_hz ? "FM" : mode_name(cparam_i_get(cfg_cur_mode)));
     identify_ex(fq, &id, false);
     snprintf(nm, sizeof(nm), "%s", id.name);
+    if (dmr) {                          /* who talks, in the channel's name's place */
+        int k = dm.slot[1].voice ? 1 : dm.slot[2].voice ? 2 : dm.slot[0].voice ? 0
+              : dm.slot[1].lc ? 1 : dm.slot[2].lc ? 2 : 0;
+        const rtl_dmr_slot_t *sl = &dm.slot[k];
+
+        if (sl->lc)
+            snprintf(nm, sizeof(nm), "%s%s %u FROM %u%s", k ? (k == 1 ? "TS1 " : "TS2 ") : "",
+                     sl->flco == 3 ? "TO" : "TG", sl->dst, sl->src, sl->voice ? "" : " (ENDED)");
+        else if (dm.cc >= 0)
+            snprintf(nm, sizeof(nm), "DMR COLOUR CODE %d", dm.cc);
+        else
+            snprintf(nm, sizeof(nm), "DMR");
+    }
     snprintf(via, sizeof(via), "VIA %s", w_sdr_hz ? rtl_spectrum_dev_name() : "X6200");
     if (wi >= 0) {
         const wch_t *c = &w_chs[wi];
