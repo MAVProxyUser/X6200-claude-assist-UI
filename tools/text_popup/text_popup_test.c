@@ -62,6 +62,8 @@ lv_style_t msg_style, dialog_item_focus_style;
 
 /* the keyboard layout setting (#236): only read once the settings are there, which they never are here */
 ParamInt *cfg_kbd_layout;
+/* KEYBOARD > Shortcuts (key_input.c, 4592f1a): read the same way, so off here as on a new radio */
+ParamInt *cfg_kbd_shortcuts;
 
 int32_t param_i_get(const ParamInt *p) {
     (void)p;
@@ -159,6 +161,10 @@ bool backlight_saver_on() {
 }
 
 /* The text window over the main screen */
+/* mouse_input.c (e7ab9f6): key_input.c's scan looks for a mouse too; there is none here */
+void mouse_check(void) {
+}
+
 bool main_screen_has_keys(void) {
     return false;
 }

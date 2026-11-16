@@ -296,7 +296,8 @@ def main():
                 b += 1
             return screen[a:b] + "\n"
 
-        (work / "mic_screen_keys.c").write_text(cut("static void ab_key(", "static void ab_key(") +
+        # ab_key() from its definition: screen_main.c declares it first (its callers come before it)
+        (work / "mic_screen_keys.c").write_text(cut("static void ab_key(bool tap, bool hold) {", "static void ab_key(") +
                                                 cut("#define MIC_VOL_DELAY_MS", "static void mic_key_cb("))
         # Built as the X6100's GUI and as the X6200's: the digits by the print of the mic they came from (#145)
         for board, flags, digits in (

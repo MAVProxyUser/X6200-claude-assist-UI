@@ -125,6 +125,11 @@ bool keyboard_ready() {
     return true;
 }
 
+/* key_input.c: a widget that takes the USB keyboard's typing (#175); none here */
+void keyboard_takes_typing(lv_obj_t *obj) {
+    (void)obj;
+}
+
 void msg_update_text_fmt(const char *fmt, ...) {
     (void)fmt;
 }
