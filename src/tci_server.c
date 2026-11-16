@@ -1082,12 +1082,16 @@ static int agc_index(const char *name) {
     return -1;
 }
 
-/* "name:a,b,c" split in place; returns the argument count */
+/* "name:a,b,c" split in place; returns the argument count. The name in lower case: TCI's command names are of
+ * either case (TCI 2.1, 3.1), and Hamlib's TCI backend sends capitals (VFO:, MODULATION:, TRX:), which every
+ * comparison here, made in lower case, passed by (#178) */
 static int split_args(char *cmd, char **name, char *args[], int max) {
     char *colon = strchr(cmd, ':');
     int   n     = 0;
 
     *name = cmd;
+    for (char *q = cmd; *q && *q != ':'; q++)
+        *q = (char)tolower((unsigned char)*q);
     if (!colon)
         return 0;
     *colon = 0;

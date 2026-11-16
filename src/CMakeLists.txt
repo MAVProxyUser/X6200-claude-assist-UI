@@ -95,6 +95,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     remote_server.c
     control_owner.c
     winlink.c
+    rigctld.c
 )
 
 # The X6200's base firmware screen (tools/base_update): built for the X6200 only, never in another radio's GUI

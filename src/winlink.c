@@ -39,6 +39,7 @@
 #define _GNU_SOURCE     /* accept4 */
 
 #include "winlink.h"
+#include "rigctld.h"
 
 #include "audio.h"
 #include "cfg/cfg_api.h"
@@ -1093,6 +1094,7 @@ typedef struct {
     int    fd;
     char   in[RIG_LINE];
     size_t len;
+    bool   local;       /* from the radio itself: Pat, its rules; else a program on the network (rigctld.c) */
 } rig_client_t;
 
 static rig_client_t rig_clients[RIG_CLIENTS];
@@ -1116,13 +1118,13 @@ static void rig_read(rig_client_t *c) {
     c->len += n;
     p = c->in;
     while ((nl = memchr(p, '\n', c->len - (size_t)(p - c->in)))) {
-        char reply[64];
+        char reply[1600];   /* \dump_state's */
         bool stay;
 
         *nl = 0;
         if (nl > p && nl[-1] == '\r')
             nl[-1] = 0;
-        stay = rig_answer(p, reply, sizeof(reply));
+        stay = c->local ? rig_answer(p, reply, sizeof(reply)) : rigctld_answer(p, reply, sizeof(reply));
         if (reply[0])
             send(c->fd, reply, strlen(reply), MSG_DONTWAIT | MSG_NOSIGNAL);
         if (!stay) {
@@ -1137,10 +1139,14 @@ static void rig_read(rig_client_t *c) {
         rig_close(c);   /* a line that never ends */
 }
 
+/* 127.0.0.1 for Pat alone, or every address when the network's rigctld is on (rigctld.c, TCI's switch) */
+static bool rig_any;
+
 static int rig_listen(void) {
     static bool        said;
+    bool               any = rigctld_network_on();
     struct sockaddr_in a   = {.sin_family = AF_INET, .sin_port = htons(WINLINK_RIG_PORT),
-                              .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+                              .sin_addr.s_addr = htonl(any ? INADDR_ANY : INADDR_LOOPBACK)};
     int                fd  = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     int                one = 1;
 
@@ -1154,7 +1160,9 @@ static int rig_listen(void) {
         close(fd);
         return -1;
     }
-    LV_LOG_USER("winlink: rigctld on 127.0.0.1:%d", WINLINK_RIG_PORT);
+    LV_LOG_USER("winlink: rigctld on %s:%d%s", any ? "0.0.0.0" : "127.0.0.1", WINLINK_RIG_PORT,
+                any ? " (Pat's on 127.0.0.1, the network's Hamlib NET rigctl from elsewhere)" : "");
+    rig_any = any;
     return fd;
 }
 
@@ -1178,7 +1186,7 @@ static void *rig_thread(void *arg) {
             slot[n]  = i;
             pfd[n++] = (struct pollfd){.fd = rig_clients[i].fd, .events = POLLIN};
         }
-        if (poll(pfd, n, atomic_load(&pending_hz) ? 100 : -1) < 0) {
+        if (poll(pfd, n, atomic_load(&pending_hz) ? 100 : 2000) < 0) {
             if (errno != EINTR)
                 usleep(100000);
             continue;
@@ -1189,17 +1197,34 @@ static void *rig_thread(void *arg) {
             if (pfd[k].revents)
                 rig_read(&rig_clients[slot[k]]);
         }
+        if (rigctld_network_on() != rig_any) {     /* TCI switched: listened on again, the network's programs gone */
+            close(lfd);
+            lfd = -1;
+            for (int i = 0; i < RIG_CLIENTS; i++)
+                if (rig_clients[i].fd >= 0 && !rig_clients[i].local)
+                    rig_close(&rig_clients[i]);
+            continue;
+        }
         if (pfd[0].revents & POLLIN) {
-            int fd  = accept4(lfd, NULL, NULL, SOCK_CLOEXEC);
-            int one = 1;
+            struct sockaddr_in peer;
+            socklen_t          pl  = sizeof(peer);
+            int                fd  = accept4(lfd, (struct sockaddr *)&peer, &pl, SOCK_CLOEXEC);
+            int                one = 1;
+            bool               local;
 
             if (fd < 0)
                 continue;
+            local = pl >= sizeof(peer) && peer.sin_family == AF_INET && ntohl(peer.sin_addr.s_addr) == INADDR_LOOPBACK;
+            if (!local && !rigctld_network_on()) {
+                close(fd);
+                continue;
+            }
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
             for (int i = 0; i < RIG_CLIENTS && fd >= 0; i++) {
                 if (rig_clients[i].fd < 0) {
-                    rig_clients[i].fd  = fd;
-                    rig_clients[i].len = 0;
+                    rig_clients[i].fd    = fd;
+                    rig_clients[i].len   = 0;
+                    rig_clients[i].local = local;
                     fd = -1;
                 }
             }

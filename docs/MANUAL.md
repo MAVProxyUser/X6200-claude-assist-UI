@@ -8007,6 +8007,34 @@ the radio, hears it, keys it and sends CW with it.
     each restart of the program, or a change in its Radio settings, which
     connects again, asks again.
 
+## Hamlib (NET rigctl)
+
+Programs that do their rig control through Hamlib (WSJT-X, fldigi, JS8Call,
+GPredict, loggers) follow and tune the radio over the network, with no cable:
+in the program, Rig **Hamlib NET rigctl** (Hamlib's model 2) and the radio's
+address with port 4532 (`x6100.local:4532`, or its IP address). With Hamlib's
+own tools: `rigctl -m 2 -r x6100.local:4532 f m`.
+
+- It answers Hamlib's own protocol as Hamlib's rigctld does (tried with
+  Hamlib 4.7.2's client): the frequency, the mode with its passband (USB, LSB,
+  PKTUSB and PKTLSB for USB-D and LSB-D, CW, CWR, AM, FM; on the X6200 SAM and
+  WFM too), VFO A or B, the S-meter (STRENGTH, dB over S9), AF, RF, squelch,
+  the preamp and the attenuator.
+- **Receive only.** A program that asks for PTT is refused ("Command rejected
+  by the rig"): set its PTT method to VOX or none, or key through TCI. Split
+  is off.
+- It follows the TCI server's switch and its Clients may (Settings > General
+  > TCI SERVER, or the TCI page): with TCI off it does not listen on the
+  network; with Listen only, programs read the radio and change nothing.
+- What it sets goes as TCI's does: not under LOCK, not while a digital app
+  (FT8, PSK...) holds the radio, not while it transmits, only a frequency the
+  radio tunes. The screen wakes as for a knob.
+- Pat (Winlink) on the radio keeps its own rigctld rules on the same port: a
+  connection from the radio itself gets those. So does one through Tailscale,
+  which hands each connection to the radio's own address (see Remote access).
+- It carries no audio: a program that needs the radio's audio over the
+  network takes it over TCI, or over the USB cable's sound card.
+
 ## Network name
 
 The radio announces itself on the LAN by mDNS (Avahi), so `http://x6100.local/`
