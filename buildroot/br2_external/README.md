@@ -35,7 +35,10 @@ also switch them on in the defconfig and the kernel configuration:
   `9101-usb-musb-host-...`: the musb host (the HOST port) recycles a qh left bound to its hardware
   endpoint with no URB when the endpoint is disabled, instead of dereferencing a NULL URB with the
   controller lock held and interrupts off; an X6200 hung that way when a hub of two streaming SDRs
-  browned out (`musb_h_disable+0x108`).
+  browned out (`musb_h_disable+0x108`). `9102-usb-musb-host-...`: the race that left it so is closed:
+  the musb host settles a qh (recycled, or its next URB started) before it drops its lock to give an
+  URB back, instead of saving, clearing and restoring `is_ready` around the giveback, which two CPUs
+  interleaved (stalled streams, an URB on the hardware given back, a qh freed twice).
 
 `local-build.sh` also gives both radios' device tree the processor's supply (`cpu-supply` on
 `cpu0`, the power chip's vdd-cpu rail), so the kernel lowers the voltage with the speed (when the

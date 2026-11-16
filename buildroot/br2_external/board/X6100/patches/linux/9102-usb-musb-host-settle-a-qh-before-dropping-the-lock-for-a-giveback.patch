@@ -1,0 +1,171 @@
+From: GoldCorpHF firmware project
+Subject: [PATCH] usb: musb: host: settle a qh before dropping the lock for a
+ giveback
+
+musb_advance_schedule() and musb_urb_dequeue() give an URB back with the
+controller lock dropped (the completion is called from there; HCD_BH is
+not set), with the qh's is_ready saved, cleared and restored around it;
+musb_advance_schedule() recycles the qh or starts its next URB after it,
+musb_urb_dequeue() recycles the qh after it when its list has emptied.
+Other CPUs run in that window, and the saves and restores of two CPUs do
+not nest:
+
+- An URB dequeued on one CPU while another gives the qh's head back: if
+  the dequeue restores is_ready last, it leaves 0 on a qh the other has
+  just started the next URB of. That URB, on the hardware, is then given
+  back by musb_urb_dequeue() without being aborted (its buffer still being
+  transferred into), and the qh is not recycled when its list empties: it
+  stalls, or stays bound to its hw_ep. Restored the other way round,
+  musb_advance_schedule() does not start the next URB of a qh that is
+  ready again with nothing on the hardware, and the stream stalls.
+- The same two, when they are the qh's last two URBs: the giveback of
+  the head recycles and frees the qh, and the dequeue then writes is_ready
+  into it, finds its list empty, clears the hw_ep's binding (to whatever
+  qh holds it now), list_del()s and kfree()s it a second time.
+- usbcore disables an endpoint once its URB list is empty, which it is
+  during the giveback of its last URB: musb_h_disable() found the qh still
+  bound with no URB and dereferenced a NULL URB with the lock held and
+  interrupts off (9101); with 9101 it frees the qh, which
+  musb_advance_schedule() then writes is_ready into.
+- musb_urb_dequeue() recycling a qh that waits on a shared bulk endpoint
+  (multiplexed, not bound) cleared the hw_ep's binding to the qh on the
+  hardware, whose next interrupt is then taken as bogus: its stream stops.
+
+On a Xiegu X6200 (Allwinner R16, four cores) these are reached with SDRs
+streaming on the HOST port when a hub browns out: the head URB completes
+with a three-strikes error on one CPU as usbcore unlinks the endpoint's
+URBs for the disconnect on another.
+
+Both now take the URB off the endpoint's queue and settle the qh and the
+hw_ep (recycle the qh, start the next URB or qh) before the lock is
+dropped, and touch nothing of the qh after the giveback. is_ready is
+cleared only by musb_h_disable(), so the head URB of a ready qh holding
+its hw_ep is on the hardware, and musb_urb_dequeue() aborts it
+(musb_cleanup_urb()). musb_urb_dequeue() recycles only a qh that does not
+hold the hw_ep, as a ready qh whose last URB it gives back directly never
+does, and leaves the hw_ep's binding alone. A completion that submits an
+URB to an endpoint whose queue has just emptied gets a new qh, as a first
+URB does, instead of the one being recycled. The backstop in
+musb_h_disable() from 9101 is kept.
+
+Not fixed upstream (6.1.y and mainline unchanged here).
+---
+--- a/drivers/usb/musb/musb_host.c
++++ b/drivers/usb/musb/musb_host.c
+@@ -290,6 +290,11 @@
+  * Advance this hardware endpoint's queue, completing the specified URB and
+  * advancing to either the next URB queued to that qh, or else invalidating
+  * that qh and advancing to the next qh scheduled after the current one.
++ *
++ * The URB is taken off the queue and the qh and hw_ep settled before the
++ * lock is dropped for the giveback, so that nothing of the qh is touched
++ * after it: while the lock is dropped, another CPU may dequeue an URB of
++ * this qh, give one back, or disable its endpoint and free it.
+  *
+  * Context: caller owns controller lock, IRQs are blocked
+  */
+@@ -298,7 +303,6 @@
+ {
+ 	struct musb_qh		*qh = musb_ep_get_qh(hw_ep, is_in);
+ 	struct musb_hw_ep	*ep = qh->hw_ep;
+-	int			ready = qh->is_ready;
+ 	int			status;
+ 	u16			toggle;
+ 
+@@ -317,15 +321,8 @@
+ 		break;
+ 	}
+ 
+-	qh->is_ready = 0;
+-	musb_giveback(musb, urb, status);
+-	qh->is_ready = ready;
+-
+-	/*
+-	 * musb->lock had been unlocked in musb_giveback, so qh may
+-	 * be freed, need to get it again
+-	 */
+-	qh = musb_ep_get_qh(hw_ep, is_in);
++	trace_musb_urb_gb(musb, urb);
++	usb_hcd_unlink_urb_from_ep(musb->hcd, urb);
+ 
+ 	/* reclaim resources (and bandwidth) ASAP; deschedule it, and
+ 	 * invalidate qh as soon as list_empty(&hep->urb_list)
+@@ -385,6 +382,10 @@
+ 		    hw_ep->epnum, is_in ? 'R' : 'T', next_urb(qh));
+ 		musb_start_urb(musb, is_in, qh);
+ 	}
++
++	spin_unlock(&musb->lock);
++	usb_hcd_giveback_urb(musb->hcd, urb, status);
++	spin_lock(&musb->lock);
+ }
+ 
+ static u16 musb_h_flush_rxfifo(struct musb_hw_ep *hw_ep, u16 csr)
+@@ -2390,25 +2391,32 @@
+ 	 * OK to hold off until after some IRQ, though.
+ 	 *
+ 	 * NOTE: qh is invalid unless !list_empty(&hep->urb_list)
++	 *
++	 * is_ready is cleared only by musb_h_disable(): the head URB of a
++	 * ready qh that holds its hw_ep is on the hardware.
+ 	 */
+ 	if (!qh->is_ready
+ 			|| urb->urb_list.prev != &qh->hep->urb_list
+ 			|| musb_ep_get_qh(qh->hw_ep, is_in) != qh) {
+-		int	ready = qh->is_ready;
++		trace_musb_urb_gb(musb, urb);
++		usb_hcd_unlink_urb_from_ep(hcd, urb);
+ 
+-		qh->is_ready = 0;
+-		musb_giveback(musb, urb, 0);
+-		qh->is_ready = ready;
+-
+-		/* If nothing else (usually musb_giveback) is using it
+-		 * and its URB list has emptied, recycle this qh.
++		/* If nothing else (musb_h_disable) is tearing it down and
++		 * its URB list has emptied, recycle this qh before the lock
++		 * is dropped for the giveback. The URB was its head, so a
++		 * ready qh holds no hw_ep here; the hw_ep's binding, which
++		 * on a shared endpoint is another qh's, is left alone.
+ 		 */
+-		if (ready && list_empty(&qh->hep->urb_list)) {
+-			musb_ep_set_qh(qh->hw_ep, is_in, NULL);
++		if (qh->is_ready && list_empty(&qh->hep->urb_list)
++				&& musb_ep_get_qh(qh->hw_ep, is_in) != qh) {
+ 			qh->hep->hcpriv = NULL;
+ 			list_del(&qh->ring);
+ 			kfree(qh);
+ 		}
++
++		spin_unlock(&musb->lock);
++		usb_hcd_giveback_urb(hcd, urb, 0);
++		spin_lock(&musb->lock);
+ 	} else
+ 		ret = musb_cleanup_urb(urb, qh);
+ done:
+@@ -2424,14 +2432,17 @@
+  *
+  * usbcore empties an endpoint's URB list before disabling it, so a qh
+  * musb_h_disable() finds bound is always one that was not recycled as its
+- * last URB went. That happens when two CPUs give URBs of one qh back at
+- * once: musb_advance_schedule() and musb_urb_dequeue() each save is_ready,
+- * clear it and drop the lock for the giveback, and the one restoring last
+- * can leave it 0 with the qh still bound; the URBs left are then given back
+- * by musb_urb_dequeue() without recycling it. Seen on an Allwinner R16 with
+- * two SDRs streaming through a hub in a brown-out (three-strikes errors,
+- * disconnects): next_urb() returned NULL here and the oops was taken with
+- * the controller lock held and interrupts off, hanging the system.
++ * last URB went. musb_advance_schedule() and musb_urb_dequeue() settle a
++ * qh before they drop the lock for a giveback, so none should be; this is
++ * a backstop. When they settled it after the giveback, with is_ready
++ * saved, cleared and restored around it, a qh was left bound by a disable
++ * on another CPU during the giveback of its last URB, or by two CPUs
++ * giving URBs of it back at once (is_ready left 0, the URBs left then
++ * given back by musb_urb_dequeue() without recycling it). Seen on an
++ * Allwinner R16 with two SDRs streaming through a hub in a brown-out
++ * (three-strikes errors, disconnects): next_urb() returned NULL here and
++ * the oops was taken with the controller lock held and interrupts off,
++ * hanging the system.
+  *
+  * Context: controller locked, irqs blocked
+  */

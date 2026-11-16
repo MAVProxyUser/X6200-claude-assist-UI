@@ -197,7 +197,9 @@ cp -a $GUI/buildroot/br2_external/board/X6100/linux/. $BOARD/
 # The kernel's patches (board/X6100/patches/linux here, both radios: the same 6.1.82 at both trees' buildroot pin) go
 # into the tree's global patch directory for the kernel, beside the X6100 tree's own (9001, 9002). 9101: the musb host
 # (the HOST port) no longer oopses with interrupts off when it disables an endpoint whose qh was left bound with no URB:
-# an X6200 hung for good as a hub of two streaming SDRs on that port browned out (November 2026)
+# an X6200 hung for good as a hub of two streaming SDRs on that port browned out (November 2026). 9102: the race that
+# left it so (is_ready saved and restored around each giveback on two CPUs; also stalls and a double free) is closed
+# by settling the qh before the lock is dropped for a giveback
 mkdir -p $EXT/board/$M/patches/linux
 cp $GUI/buildroot/br2_external/board/X6100/patches/linux/*.patch $EXT/board/$M/patches/linux/
 if [ $MODEL = x6200 ]; then
@@ -485,11 +487,15 @@ if [ $MODEL = x6200 ] && ls $BR/build/build/linux-[0-9]*/.config > /dev/null 2>&
                && grep -qs "^CONFIG_VIDEO_SUNXI_CEDRUS=m" $BR/build/build/linux-[0-9]*/.config; }; then
     make linux-dirclean
 fi
-# A kernel extracted here before this repository's kernel patches (above) is extracted, patched and built again:
-# buildroot applies patches at extraction only
-if ls -d $BR/build/build/linux-[0-9]*/ > /dev/null 2>&1 \
-        && ! grep -qs "9101-usb-musb-host" $BR/build/build/linux-[0-9]*/.applied_patches_list; then
-    make linux-dirclean
+# A kernel extracted here before one of this repository's kernel patches (above) is extracted, patched and built
+# again: buildroot applies patches at extraction only
+if ls -d $BR/build/build/linux-[0-9]*/ > /dev/null 2>&1; then
+    for p in $GUI/buildroot/br2_external/board/X6100/patches/linux/*.patch; do
+        if ! grep -qs "$(basename $p)" $BR/build/build/linux-[0-9]*/.applied_patches_list; then
+            make linux-dirclean
+            break
+        fi
+    done
 fi
 # A kernel built here before its board's DTS named the processor's supply (cpu-supply, above) builds its device tree
 # again: buildroot copies the DTS into the kernel's tree at the kernel's build step only, so the card image kept the

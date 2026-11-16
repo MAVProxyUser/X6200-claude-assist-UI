@@ -1097,8 +1097,11 @@ wherever the RTL-SDR did (B, BOTH, C, D, E, RDS, SAME, AIRSPACE), named as they 
   drops off and comes back, and the kernel log fills with `three-strikes error`. Up to that kernel, a device's
   disconnect in that storm could hang the whole radio (2026-11-16: no network, the screen frozen, only a power cycle
   brought it back): the USB host driver's endpoint disable met an endpoint left with nothing queued and stopped with
-  interrupts off. The kernel's patch (`buildroot/br2_external/board/X6100/patches/linux`, both radios) clears such an
-  endpoint up instead and lets an SDR sharing it go on. It reaches a radio only with the update box's **Also update
+  interrupts off. The kernel's patches (`buildroot/br2_external/board/X6100/patches/linux`, both radios) clear such an
+  endpoint up instead and let an SDR sharing it go on, and close the race between the driver's processor cores that
+  left it so: a transfer finishing on one core as another cancelled the device's transfers for the disconnect. The
+  same race could also stop an SDR's stream with nothing on screen saying why, or free the driver's record of an
+  endpoint twice. They reach a radio only with the update box's **Also update
   the kernel on the SD card** ticked (see [The SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot)) or with
   a new card image; the radio software alone does not bring it. The devices still drop off in a brown-out: a powered
   hub keeps them streaming. Not yet tried in a brown-out again.
