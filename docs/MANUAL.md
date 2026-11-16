@@ -8031,7 +8031,7 @@ own tools: `rigctl -m 2 -r x6100.local:4532 f m`.
   radio tunes. The screen wakes as for a knob.
 - Pat (Winlink) on the radio keeps its own rigctld rules on the same port: a
   connection from the radio itself gets those. So does one through Tailscale,
-  which hands each connection to the radio's own address (see Remote access).
+  which hands each connection to the radio's own address (see [Tailscale](#tailscale)).
 - It carries no audio: a program that needs the radio's audio over the
   network takes it over TCI, or over the USB cable's sound card.
 
