@@ -20,8 +20,12 @@
  *  reset so it starts the new firmware, then opened as ever. Nothing is written for an image as old as the board's or
  *  older. The FPGA image after it (v0.16 needs firmware v2.6) is the one in /mnt/bladerf.
  *
- *  Receiving: 12-bit I/Q (SC16 Q11, +-2048) cut to the RTL's 8 bits (one in 16), its DC taken out as the HackRF's;
- *  manual gain over the board's own range, its AGC for -1. Transmitting: the FM's signed 8 bits made SC16, the gain
+ *  Receiving: 8-bit I/Q from the FPGA itself (SC8 Q7, FPGA v0.15 on), its DC taken out as the HackRF's: 2 bytes a
+ *  sample over USB as the RTL-SDR's and the HackRF's. 12-bit SC16 (4 bytes a sample, cut to 8 bits here) only for an
+ *  FPGA without it: at 2.1 MS/s that was 8.5 MB/s, more than the radio's USB host carries (68% of the samples came,
+ *  2026-11-16, and B's picture was a comb of spikes, the gaps' own). Manual gain in dB as the RTL's (its tenths, 0-49.6
+ *  dB) and 10 dB more, within the board's own range (the RTL's 7.7 dB was -3 dB on the bladeRF, spread over its whole
+ *  range); its AGC for -1. Transmitting: the FM's signed 8 bits made SC16, the gain
  *  in dB over the board's lowest (0 is its least), no amplifier to switch.
  */
 
@@ -289,7 +293,8 @@ static int bl_freq(uint64_t hz) {
     return L.freq(bd, BLADERF_CHANNEL_RX(0), hz) == 0 ? 0 : -1;
 }
 
-/* The RTL's tenths (0-496) over the board's own range; -1 its AGC; 999 three quarters up (ADS-B) */
+/* The RTL's tenths (0-496), in dB as there and 10 dB more, within the board's own range; -1 its AGC; 999 three
+ * quarters up (ADS-B) */
 static void bl_gain(int tenths) {
     const struct bladerf_range *r = NULL;
     int64_t                     g;
@@ -303,23 +308,32 @@ static void bl_gain(int tenths) {
     double lo = r->min * r->scale, hi = r->max * r->scale;
 
     if (tenths == 999) g = (int64_t)(lo + (hi - lo) * 3 / 4);
-    else g = (int64_t)(lo + (hi - lo) * (tenths > 496 ? 496 : tenths) / 496);
+    else g = (int64_t)((tenths > 496 ? 496 : tenths) / 10 + 10);
+    if (g < lo) g = (int64_t)lo;
+    if (g > hi) g = (int64_t)hi;
     L.gain(bd, BLADERF_CHANNEL_RX(0), (bladerf_gain)g);
 }
 
 static int bl_rx(sdr_rx_cb cb, volatile int *halt) {
-    int e = 0;
+    static int said = -1;
+    int        e = 0;
+    bool       sc8;
 
     if (*halt) return 0;
-    if (L.sync_config(bd, BLADERF_RX_X1, BLADERF_FORMAT_SC16_Q11, 16, 8192, 8, 3500) != 0 ||
-        L.enable(bd, BLADERF_CHANNEL_RX(0), true) != 0)
-        return -1;
+    sc8 = L.sync_config(bd, BLADERF_RX_X1, BLADERF_FORMAT_SC8_Q7, 16, 8192, 8, 3500) == 0;
+    if (!sc8 && L.sync_config(bd, BLADERF_RX_X1, BLADERF_FORMAT_SC16_Q11, 16, 8192, 8, 3500) != 0) return -1;
+    if (L.enable(bd, BLADERF_CHANNEL_RX(0), true) != 0) return -1;
+    if (said != sc8) {
+        fprintf(stderr, "rtlspec: the bladeRF sends %s\n", sc8 ? "8-bit samples (SC8 Q7)"
+                                                                : "12-bit samples (SC16 Q11: its FPGA has no 8-bit format)");
+        said = sc8;
+    }
     while (!*halt) {
-        if ((e = L.sync_rx(bd, sbuf, N_SAMP, NULL, 2000)) != 0) {
+        if ((e = L.sync_rx(bd, sc8 ? (void *)bbuf : (void *)sbuf, N_SAMP, NULL, 2000)) != 0) {
             fprintf(stderr, "rtlspec: the bladeRF's stream ended: %s\n", L.strerror_(e));
             break;
         }
-        for (int k = 0; k < N_SAMP * 2; k++) {    /* +-2048 to +-128 */
+        for (int k = 0; !sc8 && k < N_SAMP * 2; k++) {     /* +-2048 to +-128 */
             int v = sbuf[k] / 16;
             bbuf[k] = (int8_t)(v > 127 ? 127 : v < -128 ? -128 : v);
         }

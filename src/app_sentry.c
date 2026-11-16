@@ -2671,7 +2671,7 @@ static void sp_fill(void) {
         }
         rtl_spectrum_kind_range(sp_devs[r], &lo, &hi);
         lv_label_set_text_fmt(sp_row_l[r], "%c %-9s %s-%s, %s%s", r == sp_sel ? '>' : ' ', dev_word(sp_devs[r]),
-                              lo < 10000000 ? "1 MHZ" : lo < 30000000 ? "24 MHZ" : "47 MHZ",
+                              lo < 10000000 ? "1 MHZ" : lo < 30000000 ? "24 MHZ" : "70 MHZ",
                               hi > 2000000000 ? "6 GHZ" : "1.766 GHZ",
                               sp_devs[r] == RTL_DEV_RTL ? "RECEIVE ONLY" : "TRANSMITS ON G",
                               sp_devs[r] == rtl_spectrum_dev() ? " (OPEN NOW)" : "");

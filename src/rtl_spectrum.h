@@ -49,14 +49,14 @@ rtl_dev_t rtl_spectrum_dev(void);
 void rtl_spectrum_use(rtl_dev_t d);
 rtl_dev_t rtl_spectrum_used(void);
 
-/* What a kind of SDR tunes, Hz (an RTL-SDR's R820T 24 MHz-1.766 GHz, a HackRF 1 MHz-6 GHz, a bladeRF 2 47 MHz-6 GHz):
+/* What a kind of SDR tunes, Hz (an RTL-SDR's R820T 24 MHz-1.766 GHz, a HackRF 1 MHz-6 GHz, a bladeRF 2 70 MHz-6 GHz):
  * for one not open, whether it could take a band */
 void rtl_spectrum_kind_range(rtl_dev_t d, int64_t *lo, int64_t *hi);
 /* Its name in a title bar's device tags and other short places: "RTL", "HACKRF", "BLADERF" ("RTL" for none) */
 const char *rtl_spectrum_dev_tag(void);
 /* Its name where the stick is named to the user: "RTL-SDR", "HACKRF", "BLADERF" ("RTL-SDR" for none) */
 const char *rtl_spectrum_dev_name(void);
-/* What it tunes, Hz: the device's own once the daemon has said (a HackRF 1 MHz-6 GHz, a bladeRF 2 47 MHz-6 GHz), an
+/* What it tunes, Hz: the device's own once the daemon has said (a HackRF 1 MHz-6 GHz, a bladeRF 2 70 MHz-6 GHz), an
  * RTL-SDR's before (RTL_SPEC_MIN_HZ, RTL_SPEC_MAX_HZ) */
 int64_t rtl_spectrum_min_hz(void);
 int64_t rtl_spectrum_max_hz(void);

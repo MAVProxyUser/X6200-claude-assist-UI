@@ -611,7 +611,8 @@ rtl_dev_t rtl_spectrum_used(void) {
 }
 
 void rtl_spectrum_kind_range(rtl_dev_t d, int64_t *lo, int64_t *hi) {
-    *lo = d == RTL_DEV_HACKRF ? 1000000LL : d == RTL_DEV_BLADERF ? 47000000LL : RTL_SPEC_MIN_HZ;
+    *lo = d == RTL_DEV_HACKRF ? 1000000LL : d == RTL_DEV_BLADERF ? 70000000LL : RTL_SPEC_MIN_HZ;     /* the bladeRF 2.0's
+                                                                                                * AD9361, as the daemon says */
     *hi = d == RTL_DEV_HACKRF || d == RTL_DEV_BLADERF ? 6000000000LL : RTL_SPEC_MAX_HZ;
 }
 
