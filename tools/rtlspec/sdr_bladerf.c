@@ -284,7 +284,9 @@ static int bl_rate(uint32_t want, uint32_t *got) {
     bladerf_bandwidth   b;
 
     if (L.rate(bd, BLADERF_CHANNEL_RX(0), want, &a) != 0) return -1;
-    L.bw(bd, BLADERF_CHANNEL_RX(0), want * 3 / 4, &b);
+    /* the AD9361's analog bandwidth (both sides): 9/10 of the rate, over B's picture (5/6 of it; 3/4 cut its edges)
+     * and most of ADS-B's 2.4 MS/s; its own half-band filters keep the aliases off */
+    L.bw(bd, BLADERF_CHANNEL_RX(0), want / 10 * 9, &b);
     *got = a;
     return 0;
 }

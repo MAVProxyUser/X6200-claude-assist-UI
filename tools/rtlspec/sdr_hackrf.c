@@ -58,9 +58,14 @@ static int hk_open(char *tuner, size_t n, uint64_t *lo, uint64_t *hi) {
     return 0;
 }
 
+/* The MAX2837's baseband filter: the widest no wider than the rate and 5%. 2.5 MHz at B's 2.646 MS/s (its picture
+ * 2.2 MHz, the aliases kept off it) and at ADS-B's 2.4 MS/s, where libhackrf's own rounding down to under the rate
+ * took 1.75 MHz: narrower than what dump1090 samples, the half-microsecond pulses blunted. 1.75 MHz at TX's 2.1168 */
+static uint32_t hk_bw(uint32_t rate) { return hackrf_compute_baseband_filter_bw(rate + rate / 20); }
+
 static int hk_rate(uint32_t want, uint32_t *got) {
     if (want < 2000000 || hackrf_set_sample_rate(hd, want) != HACKRF_SUCCESS) return -1;
-    hackrf_set_baseband_filter_bandwidth(hd, hackrf_compute_baseband_filter_bw(want));
+    hackrf_set_baseband_filter_bandwidth(hd, hk_bw(want));
     *got = want;
     return 0;
 }
@@ -137,7 +142,7 @@ static int hk_tx(uint64_t hz, uint32_t rate, int gain_db, bool amp, sdr_tx_fill 
     tx_fill = fill;
     tx_end  = 0;
     if (hackrf_set_sample_rate(hd, rate) == HACKRF_SUCCESS &&
-        hackrf_set_baseband_filter_bandwidth(hd, hackrf_compute_baseband_filter_bw(rate)) == HACKRF_SUCCESS &&
+        hackrf_set_baseband_filter_bandwidth(hd, hk_bw(rate)) == HACKRF_SUCCESS &&
         hackrf_set_freq(hd, hz) == HACKRF_SUCCESS && hackrf_set_txvga_gain(hd, (uint32_t)gain_db) == HACKRF_SUCCESS &&
         hackrf_set_amp_enable(hd, amp ? 1 : 0) == HACKRF_SUCCESS) {
         if (hackrf_set_tx_underrun_limit(hd, rate / 10) != HACKRF_SUCCESS)
