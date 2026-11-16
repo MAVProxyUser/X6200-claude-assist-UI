@@ -942,6 +942,9 @@ written through to the card before it replaces the last copy, so a power cut kee
   [base firmware](#the-x6200s-base-firmware) and where the radio starts. F2 opens the item chosen
   (CLASSIC RADIO is on the list); the other F keys do nothing here. Its title says the release, the GUI's commit and the base's version. A's title names
   what its scope takes in: `MF/HF/VHF SPECTRUM` (the X6200 from 100 kHz to 55 MHz, and 87.5 to 137 MHz).
+- **PROCESSOR, GRAPHICS, MEMORY** under WHAT IT DOES on F, each second with a bar: CPU, the four cores' load in all
+  and each (and the clock); GPU, the Mali-400's clock as its governor sets it from its load (144 MHz idle, 0%, to
+  384 MHz, 100%: the kernel gives no busy figure for it); RAM, what is in use of the 1 GB.
 
 ### G WALKIE
 

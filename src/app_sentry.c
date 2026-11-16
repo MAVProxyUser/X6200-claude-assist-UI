@@ -575,7 +575,7 @@ static const struct {
                  "SCREEN. PUSH TO SWITCH."},
 };
 static int       sys_sel;
-static box_t     s_list, s_what, s_look, s_home, s_keys;
+static box_t     s_list, s_what, s_look, s_home, s_keys, s_load;
 static lv_obj_t *key_l[5];
 
 /* The knobs and keys, said: the legend, a word on screen for a moment (OSD), the list of them all (help) */
@@ -1711,6 +1711,119 @@ static void show_decode(void) {
     }
 }
 
+/* F SYSTEM's load (the user: "on F the SYSTEM screen... add a CPU, GPU, and RAM display"): the processor's four cores
+ * (/proc/stat, its clock from cpufreq), the Mali-400 and the memory (MemAvailable), each a second, a bar in the
+ * spectrum's ramp beside each. The kernel gives no busy figure for the Mali-400, only the clock its governor sets from
+ * its load (devfreq): its % is where the last second's clock stood between its lowest and highest, 0 idle */
+#define MB_H   10                       /* the meter bars: G's and these */
+#define MB_SEG 6                        /* a segment and its gap */
+static lv_img_dsc_t *ld_frame[3];
+static lv_obj_t     *ld_img[3], *ld_val[3], *ld_more[3];
+static int           ld_w;
+static void          mbar_draw(lv_img_dsc_t *f, int w, float level);
+
+#define GPU_DEVFREQ "/sys/class/devfreq/1c40000.gpu"
+
+static void sys_load_show(void) {
+    static unsigned long long prev_t[5], prev_i[5];
+    static unsigned long long gpu_prev[8];
+    static unsigned long      gpu_hz[8];
+    static int                ngpu;
+    char                      line[256], t[48];
+    float                     pct[5] = {0};
+    FILE                     *f;
+
+    if (!ld_val[0]) return;
+    if ((f = fopen("/proc/stat", "r"))) {           /* cpu, cpu0..cpu3: user nice system idle iowait irq softirq steal */
+        for (int k = 0; k < 5 && fgets(line, sizeof(line), f); k++) {
+            unsigned long long v[8] = {0}, tot = 0;
+            char               name[8];
+
+            if (sscanf(line, "%7s %llu %llu %llu %llu %llu %llu %llu %llu", name, &v[0], &v[1], &v[2], &v[3], &v[4],
+                       &v[5], &v[6], &v[7]) < 5 || strncmp(name, "cpu", 3))
+                break;
+            for (int j = 0; j < 8; j++) tot += v[j];
+            unsigned long long idle = v[3] + v[4], dt = tot - prev_t[k], di = idle - prev_i[k];
+
+            pct[k]    = prev_t[k] && dt ? 100.0f * (float)(dt - di) / (float)dt : 0;
+            prev_t[k] = tot;
+            prev_i[k] = idle;
+        }
+        fclose(f);
+    }
+    int mhz = 0;
+    if ((f = fopen("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", "r"))) {
+        if (fscanf(f, "%d", &mhz) == 1) mhz /= 1000;
+        fclose(f);
+    }
+    snprintf(t, sizeof(t), "CPU %3.0f%%", pct[0]);
+    lv_label_set_text(ld_val[0], t);
+    snprintf(t, sizeof(t), "%.0f %.0f %.0f %.0f%% %.1f GHZ", pct[1], pct[2], pct[3], pct[4], mhz / 1000.0);
+    lv_label_set_text(ld_more[0], t);
+    mbar_draw(ld_frame[0], ld_w, pct[0] / 100);
+
+    /* the GPU: each clock's time (ms, the line's last number) in trans_stat, against the last second's */
+    float         gl  = -1;
+    unsigned long cur = 0, top = 0, low = 0;
+    if ((f = fopen(GPU_DEVFREQ "/trans_stat", "r"))) {
+        unsigned long long now[8], dsum = 0, wsum = 0;
+        int                n = 0;
+
+        while (fgets(line, sizeof(line), f) && n < 8) {
+            char *p = line;
+            while (*p == ' ' || *p == '*') p++;
+            char         *e;
+            unsigned long hz = strtoul(p, &e, 10);
+            if (!hz || *e != ':') continue;
+            char *last = NULL, *q = e + 1;
+            for (char *tok = strtok(q, " \t\n"); tok; tok = strtok(NULL, " \t\n")) last = tok;
+            if (!last) continue;
+            gpu_hz[n] = hz;
+            now[n]    = strtoull(last, NULL, 10);
+            if (hz > top) top = hz;
+            if (!low || hz < low) low = hz;
+            n++;
+        }
+        fclose(f);
+        if (n == ngpu)
+            for (int i = 0; i < n; i++) {
+                unsigned long long d = now[i] - gpu_prev[i];
+                dsum += d;
+                wsum += d * (gpu_hz[i] / 1000000);
+            }
+        if (n == ngpu && dsum && top > low)
+            gl = ((float)wsum / (float)dsum - low / 1000000.0f) / ((top - low) / 1000000.0f);
+        memcpy(gpu_prev, now, sizeof(now[0]) * (size_t)n);
+        ngpu = n;
+    }
+    if ((f = fopen(GPU_DEVFREQ "/cur_freq", "r"))) {
+        if (fscanf(f, "%lu", &cur) != 1) cur = 0;
+        fclose(f);
+    }
+    if (gl < 0 && cur && top > low) gl = (float)(cur - low) / (float)(top - low);
+    snprintf(t, sizeof(t), gl >= 0 ? "GPU %3.0f%%" : "GPU   -", gl * 100);
+    lv_label_set_text(ld_val[1], t);
+    snprintf(t, sizeof(t), "MALI %lu/%lu MHZ", cur / 1000000, top / 1000000);
+    lv_label_set_text(ld_more[1], cur ? t : "NO GPU CLOCK");
+    mbar_draw(ld_frame[1], ld_w, gl > 0 ? gl : 0);
+
+    unsigned long mt = 0, ma = 0;
+    if ((f = fopen("/proc/meminfo", "r"))) {
+        while (fgets(line, sizeof(line), f)) {
+            sscanf(line, "MemTotal: %lu", &mt);
+            sscanf(line, "MemAvailable: %lu", &ma);
+        }
+        fclose(f);
+    }
+    float used = mt ? (float)(mt - ma) / mt : 0;
+    snprintf(t, sizeof(t), "RAM %3.0f%%", used * 100);
+    lv_label_set_text(ld_val[2], t);
+    snprintf(t, sizeof(t), "%lu OF %lu MB", (mt - ma) / 1024, mt / 1024);
+    lv_label_set_text(ld_more[2], t);
+    mbar_draw(ld_frame[2], ld_w, used);
+    for (int i = 0; i < 3; i++) lv_obj_invalidate(ld_img[i]);
+}
+
 static void show_system(void) {
     char s[48];
     bool home = param_i_get(cfg_sentry_home);
@@ -1731,6 +1844,7 @@ static void show_system(void) {
     opt_set(&s_home, 1, home ? "APPS COME BACK HERE" : "APPS GO TO CLASSIC", 2);
     opt_set(&s_keys, 0, "APP: THIS SCREEN", 0);
     opt_set(&s_keys, 1, "F2 OR PRESS: OPEN", 2);
+    sys_load_show();
 }
 
 /* ---- F VHF/UHF: an RTL-SDR stick's spectrum (rtl_spectrum.c), alone or under the X6200's ---- */
@@ -4474,6 +4588,7 @@ static void blink_cb(lv_timer_t *t) {
     if (hits_dirty && n % 120 == 0) hits_save();     /* G's log on DATA, a minute at most behind */
     state_keep();                                   /* for a restart of the GUI: gui_state.c */
     rtl_spectrum_rds_watch(rds_channel());          /* B's FM broadcast channel's RDS (C's stick entry's) */
+    if (scr == SCR_SYSTEM && n % 2 == 0) sys_load_show();   /* its load each second */
     rds_show(false);
     g_rds_take();                                   /* C's entries named by it */
     sp_check();                                     /* B: which SDR, when more than one tunes its channel */
@@ -5622,9 +5737,26 @@ static void build_decode(lv_obj_t *p) {
 static void build_system(lv_obj_t *p) {
     int y = BODY_Y, h = scr_h - y - DLOW_H - 10, lw = 300;
 
+    int lh = 102, rx = lw + 12, rw = SW - lw - 18;     /* the load under what it does */
+
     box_make(&s_list, p, 6, y, lw, h, "SYSTEM", SYS_N, 5);
-    box_make(&s_what, p, lw + 12, y, SW - lw - 18, h, "WHAT IT DOES", 1, -1);
-    lv_obj_set_height(s_what.opt[0], h - 34);
+    box_make(&s_what, p, rx, y, rw, h - lh - 6, "WHAT IT DOES", 1, -1);
+    lv_obj_set_height(s_what.opt[0], h - lh - 6 - 34);
+    box_make(&s_load, p, rx, y + h - lh, rw, lh, "PROCESSOR, GRAPHICS, MEMORY", 0, -1);
+    ld_w = (rw - 8 - 104 - 176) / MB_SEG * MB_SEG;
+    for (int i = 0; i < 3; i++) {
+        int ry = y + h - lh + 34 + i * 22;
+
+        ld_val[i]   = label(p, &pixel_20, amb, rx + 8, ry - 4, 100, LV_TEXT_ALIGN_LEFT, "");
+        ld_frame[i] = lv_img_buf_alloc(ld_w, MB_H, LV_IMG_CF_TRUE_COLOR);
+        ld_img[i]   = lv_img_create(p);
+        mbar_draw(ld_frame[i], ld_w, 0);
+        lv_img_set_src(ld_img[i], ld_frame[i]);
+        lv_obj_set_pos(ld_img[i], rx + 108, ry + 1);
+        ld_more[i]  = label(p, &pixel_16, dim, rx + 116 + ld_w, ry - 2, rw - 124 - ld_w, LV_TEXT_ALIGN_LEFT, "");
+        lv_label_set_long_mode(ld_more[i], LV_LABEL_LONG_CLIP);
+        lv_obj_set_height(ld_more[i], 18);
+    }
     lv_obj_set_style_text_align(s_what.opt[0], LV_TEXT_ALIGN_LEFT, 0);
     lv_label_set_long_mode(s_what.opt[0], LV_LABEL_LONG_WRAP);
 
@@ -5770,8 +5902,6 @@ static lv_obj_t *arrow_make(lv_obj_t *p, lv_point_t *pts, int x0, int y0, int x1
 }
 
 /* A short bar: segments from the spectrum's deep orange to its yellow, lit up to level (0-1), the rest dim */
-#define MB_H   10
-#define MB_SEG 6                        /* a segment and its gap */
 static void mbar_draw(lv_img_dsc_t *f, int w, float level) {
     uint32_t *px = (uint32_t *)f->data, bg = argb(ink);
     int       n  = w / MB_SEG, lit = (int)(level * n + 0.5f);
@@ -7498,6 +7628,14 @@ static void destruct_cb(void) {
             }
         }
         memset(u, 0, sizeof(*u));
+    }
+    for (int i = 0; i < 3; i++) {       /* F SYSTEM's load bars */
+        if (ld_frame[i]) {
+            lv_img_cache_invalidate_src(ld_frame[i]);
+            lv_img_buf_free(ld_frame[i]);
+        }
+        ld_frame[i] = NULL;
+        ld_img[i] = ld_val[i] = ld_more[i] = NULL;
     }
     if (g_scr) lv_obj_del(g_scr);
     g_scr = NULL;
