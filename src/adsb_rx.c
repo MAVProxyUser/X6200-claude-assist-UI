@@ -38,6 +38,7 @@
 #include "adsb.h"
 #include "rtl_spectrum.h"
 
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -767,6 +768,32 @@ static atomic_int     p_sdr_id;         /* the RTL-SDR's bus * 1000 + device num
 static const char *_Atomic p_sdr_kind = "";     /* its kind: receivers[]'s name */
 static atomic_int     p_looks;          /* looks at USB so far: 0, nothing known yet */
 static atomic_uint    p_mask;           /* the receivers' kinds on USB, a bit each */
+static atomic_int     p_rtls;           /* RTL-SDRs on USB (a KrakenSDR is five): RTL0, RTL1... (rtl_spectrum.h) */
+/* Their serials and USB locations in RTL order, as x6x00-rtlspec orders them (sdr_rtl.c): serial, numbers as numbers,
+ * then the location ("3-1.4"), so RTL<n> is the same stick there and here */
+typedef struct { char sn[24], loc[24]; } rtl_id_t;
+static rtl_id_t        p_rtl_id[8];
+static pthread_mutex_t p_rtl_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int num_cmp(const char *a, const char *b) {       /* "3-1.10" after "3-1.9", 1004 after 1000 */
+    while (*a && *b) {
+        if (isdigit((unsigned char)*a) && isdigit((unsigned char)*b)) {
+            unsigned long long x = strtoull(a, (char **)&a, 10), y = strtoull(b, (char **)&b, 10);
+            if (x != y) return x < y ? -1 : 1;
+        } else {
+            if (*a != *b) return (unsigned char)*a - (unsigned char)*b;
+            a++, b++;
+        }
+    }
+    return *a ? 1 : *b ? -1 : 0;
+}
+
+static int rtl_id_cmp(const void *pa, const void *pb) {
+    const rtl_id_t *a = pa, *b = pb;
+    int             c = num_cmp(a->sn, b->sn);
+
+    return c ? c : num_cmp(a->loc, b->loc);
+}
 static atomic_bool    p_dump;           /* dump1090 there */
 static pthread_once_t p_once = PTHREAD_ONCE_INIT;
 
@@ -779,6 +806,8 @@ static void *presence_thread(void *arg) {
         int            id  = 0, rank = 0;
         const char    *kind = "";
         unsigned       mask = 0;
+        int            rtls = 0;
+        rtl_id_t       ids[8];
 
         while (d && (e = readdir(d))) {
             char path[300], v[8], p[8], prod[64], bus[8], dev[8];
@@ -795,6 +824,12 @@ static void *presence_thread(void *arg) {
                     (receivers[r].product && !strstr(prod, receivers[r].product)))
                     continue;
                 mask |= KB(kind_of(r));
+                if (kind_of(r) == ADSB_KIND_RTL && rtls < 8) {
+                    snprintf(ids[rtls].loc, sizeof(ids[rtls].loc), "%s", e->d_name);
+                    snprintf(path, sizeof(path), USB_DEVICES "/%s/serial", e->d_name);
+                    if (!read_line(path, ids[rtls].sn, sizeof(ids[rtls].sn))) ids[rtls].sn[0] = 0;
+                    rtls++;
+                }
                 if (receivers[r].sdr) {
                     /* more than one: the daemon's choice, a HackRF, then a bladeRF, then an RTL-SDR (rtlspec.c) */
                     int k = !strcmp(receivers[r].name, "HACKRF") ? 3 : !strcmp(receivers[r].name, "BLADERF") ? 2 : 1;
@@ -820,6 +855,11 @@ static void *presence_thread(void *arg) {
         atomic_store(&p_sdr_id, sdr ? id : 0);
         atomic_store(&p_sdr_kind, kind);
         atomic_store(&p_mask, mask);
+        qsort(ids, (size_t)rtls, sizeof(ids[0]), rtl_id_cmp);
+        pthread_mutex_lock(&p_rtl_lock);
+        memcpy(p_rtl_id, ids, sizeof(ids[0]) * (size_t)rtls);
+        pthread_mutex_unlock(&p_rtl_lock);
+        atomic_store(&p_rtls, rtls);
         atomic_store(&p_dump, access(DUMP1090, X_OK) == 0);
         atomic_fetch_add(&p_looks, 1);
         sleep(1);
@@ -867,6 +907,21 @@ unsigned adsb_rx_choices(void) {
 unsigned adsb_rx_present(void) {
     pthread_once(&p_once, presence_start);
     return atomic_load(&p_mask);
+}
+
+int adsb_rx_rtl_count(void) {
+    pthread_once(&p_once, presence_start);
+    return atomic_load(&p_rtls);
+}
+
+bool adsb_rx_rtl_id(int n, char *sn, size_t sn_n, char *loc, size_t loc_n) {
+    pthread_once(&p_once, presence_start);
+    if (n < 0 || n >= atomic_load(&p_rtls)) return false;
+    pthread_mutex_lock(&p_rtl_lock);
+    snprintf(sn, sn_n, "%s", p_rtl_id[n].sn);
+    snprintf(loc, loc_n, "%s", p_rtl_id[n].loc);
+    pthread_mutex_unlock(&p_rtl_lock);
+    return true;
 }
 
 bool adsb_rx_rtl_spare(void) {

@@ -792,10 +792,14 @@ last seconds, the strongest signals named over it and the screen's channel brack
   half says its radio, its channel and whether it is HEARD, MUTED or SQUELCHED. On A, the VFO, the MFK or a band
   chosen while the view is the SDR's alone puts it back on SPLIT (`VIEW: SPLIT`): A's knobs tune the X6200, and with
   the SDR's picture alone nothing on A showed them move but the TUNED box.
-- **F4 LISTEN**, each screen's own: X6200, the SDR by its kind (RTL, HACKRF or BLADERF; SDR while none is plugged in), BOTH or OFF, OFF silencing the speaker (neither radio, the volume
+- **F4 LISTEN**, each screen's own: X6200, the SDR by its name (RTL0, RTL1..., HACKRF or BLADERF; SDR while none is plugged in), BOTH or OFF, OFF silencing the speaker (neither radio, the volume
   kept). **Two or more SDRs on USB** (a HackRF and an RTL-SDR on a powered hub, say): B offers those that tune its
   channel, in a box ("2 SDRS HERE TUNE B'S CHANNEL (162.400 MHZ). WHICH?", each with its range and whether it
-  transmits; asked once for each set), and its LISTEN goes X6200, each of them, BOTH, OFF. The daemon holds one SDR at
+  transmits; asked once for each set), and its LISTEN goes X6200, each of them, BOTH, OFF. **Each RTL-SDR is one of
+  them on its own, numbered RTL0, RTL1...** in order of their serial numbers, then of their USB location (sticks that
+  all say 00000001): a stick alone is RTL0, and a **KrakenSDR**'s five (serials 1000-1004 behind its own hub) are
+  RTL0-RTL4, its CH0-CH4. The box gives each RTL's serial and USB location (`RTL2  SN 1002, USB 3-1.3, RECEIVE
+  ONLY`); the SDR daemon logs the one it opens the same way (`RTL2 of 5 (serial 1002, USB 3-1.3)`). The daemon holds one SDR at
   a time: the one chosen is opened in place of the other (a few seconds), and G's SDR channels and AIRSPACE use it
   too (`rtl_dev` keeps the choice). One that does not tune B's channel is not offered (an RTL-SDR at 2.4 GHz); one
   that will not open (another program holds it) leaves the one before.
@@ -842,8 +846,8 @@ last seconds, the strongest signals named over it and the screen's channel brack
   of them is watched for SAME headers, the bursts the National Weather Service sends before each alert and test.
   An alert takes the title of every Sentry screen, blinking, for its duration (15 minutes at least):
   `WX ALERT: TORNADO WARNING`, the rest in a message. Each is kept in `/mnt/wx_alerts.log`.
-- The title bar names what is on USB in the orange of the 3D picture's peaks (the theme's own): **RTL** for an
-  RTL-SDR, **HACKRF** for a HackRF, **BLADERF** for a bladeRF, **ADS-B** for an ADS-B receiver (a GNS 5890 or
+- The title bar names what is on USB in the orange of the 3D picture's peaks (the theme's own): **RTL0** (RTL1...,
+  the one B holds) for an RTL-SDR, **HACKRF** for a HackRF, **BLADERF** for a bladeRF, **ADS-B** for an ADS-B receiver (a GNS 5890 or
   microADSB, or dump1090 running), **WR12** for a ready WR12. The same names stand for the stick wherever RTL did
   (C's and D's RX columns, B's history, LISTEN). After them, who works the radio from afar: **WEB** while a browser
   is on the web configurator's Remote page, **WEB CTL** while that browser holds the control (what touches the RF

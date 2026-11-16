@@ -48,13 +48,20 @@ rtl_dev_t rtl_spectrum_dev(void);
  * one open closed for it, said again to a daemon started anew. One that will not open leaves the one before */
 void rtl_spectrum_use(rtl_dev_t d);
 rtl_dev_t rtl_spectrum_used(void);
+/* The RTLs by their place in serial order, RTL0 the first (a KrakenSDR's CH0-CH4 are RTL0-RTL4; a stick alone RTL0):
+ * the one the daemon is to hold (rtl_spectrum_use with it); the one asked for; the one open (-1: no RTL open); the
+ * name of RTL n ("RTL0") */
+void        rtl_spectrum_use_rtl(int n);
+int         rtl_spectrum_used_rtl(void);
+int         rtl_spectrum_dev_rtl(void);
+const char *rtl_spectrum_rtl_tag(int n);
 
 /* What a kind of SDR tunes, Hz (an RTL-SDR's R820T 24 MHz-1.766 GHz, a HackRF 1 MHz-6 GHz, a bladeRF 2 70 MHz-6 GHz):
  * for one not open, whether it could take a band */
 void rtl_spectrum_kind_range(rtl_dev_t d, int64_t *lo, int64_t *hi);
-/* Its name in a title bar's device tags and other short places: "RTL", "HACKRF", "BLADERF" ("RTL" for none) */
+/* Its name in a title bar's device tags and other short places: "RTL0" (RTL<n>), "HACKRF", "BLADERF" ("SDR" none) */
 const char *rtl_spectrum_dev_tag(void);
-/* Its name where the stick is named to the user: "RTL-SDR", "HACKRF", "BLADERF" ("RTL-SDR" for none) */
+/* Its name where the stick is named to the user: "RTL0" (RTL<n>), "HACKRF", "BLADERF" ("SDR" for none) */
 const char *rtl_spectrum_dev_name(void);
 /* What it tunes, Hz: the device's own once the daemon has said (a HackRF 1 MHz-6 GHz, a bladeRF 2 70 MHz-6 GHz), an
  * RTL-SDR's before (RTL_SPEC_MIN_HZ, RTL_SPEC_MAX_HZ) */

@@ -87,6 +87,8 @@ static int             cmd_fd = -1;
 /* The device, as the daemon's hello says it (rtlspec.c): its kind, what it tunes, whether it transmits */
 static atomic_int      dev_kind = RTL_DEV_NONE;
 static atomic_int      use_kind = RTL_DEV_NONE;     /* rtl_spectrum_use's */
+static atomic_int      use_rtl;                     /* and the RTL's place (RTL<n>) when it is an RTL */
+static atomic_int      dev_rtl  = -1;               /* the open RTL's place, the daemon's word (-1 none) */
 static atomic_llong    dev_lo = RTL_SPEC_MIN_HZ, dev_hi = RTL_SPEC_MAX_HZ;
 static atomic_bool     dev_tx;
 
@@ -377,7 +379,8 @@ static void *spec_thread(void *arg) {
             if (atomic_load(&use_kind) != RTL_DEV_NONE) {
                 rtl_dev_t u = (rtl_dev_t)atomic_load(&use_kind);
 
-                snprintf(cmd, sizeof(cmd), "k %s\n", u == RTL_DEV_HACKRF ? "HACKRF" : u == RTL_DEV_BLADERF ? "BLADERF" : "RTL");
+                if (u == RTL_DEV_RTL) snprintf(cmd, sizeof(cmd), "k RTL%d\n", atomic_load(&use_rtl));
+                else snprintf(cmd, sizeof(cmd), "k %s\n", u == RTL_DEV_HACKRF ? "HACKRF" : "BLADERF");
                 say(cmd);
             }
         }
@@ -409,13 +412,13 @@ static void *spec_thread(void *arg) {
 
         if (n > 8 && memcmp(buf, "RTLSPEC ", 8) == 0) {
             char               st[16] = "", tn[16] = "", kd[16] = "";
-            int                ver = 0, nb = 0, tx = 0;
+            int                ver = 0, nb = 0, tx = 0, rtl = -1;
             unsigned           rate = 0;
             unsigned long long lo = 0, hi = 0;
 
             buf[n] = 0;
-            int got = sscanf((char *)buf, "RTLSPEC %d %15s %15s %u %d %15s %llu %llu %d", &ver, st, tn, &rate, &nb,
-                             kd, &lo, &hi, &tx);
+            int got = sscanf((char *)buf, "RTLSPEC %d %15s %15s %u %d %15s %llu %llu %d %d", &ver, st, tn, &rate,
+                             &nb, kd, &lo, &hi, &tx, &rtl);
 
             if (got >= 1 && ver != PROTO) {
                 /* another version of the daemon, running since before an update: told to end (it closes the stick),
@@ -430,7 +433,8 @@ static void *spec_thread(void *arg) {
                 continue;
             }
             if (got < 5) continue;
-            if (got == 9) {             /* the device's kind, range and transmitter (a daemon of before says none) */
+            if (got >= 9) {             /* the device's kind, range and transmitter (a daemon of before says none) */
+                atomic_store(&dev_rtl, got >= 10 ? rtl : !strcmp(kd, "RTL") ? 0 : -1);    /* its RTL<n> */
                 atomic_store(&dev_kind, !strcmp(kd, "HACKRF") ? RTL_DEV_HACKRF : !strcmp(kd, "BLADERF") ? RTL_DEV_BLADERF
                                         : !strcmp(kd, "RTL") ? RTL_DEV_RTL : RTL_DEV_NONE);
                 bool none = !strcmp(kd, "-") || !strcmp(kd, "REPLAY");      /* an RTL-SDR's till one says */
@@ -650,8 +654,28 @@ void rtl_spectrum_use(rtl_dev_t d) {
     char cmd[16];
 
     atomic_store(&use_kind, d);
-    snprintf(cmd, sizeof(cmd), "k %s\n", d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : d == RTL_DEV_RTL ? "RTL" : "-");
+    if (d == RTL_DEV_RTL) snprintf(cmd, sizeof(cmd), "k RTL%d\n", atomic_load(&use_rtl));
+    else snprintf(cmd, sizeof(cmd), "k %s\n", d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : "-");
     say(cmd);
+}
+
+void rtl_spectrum_use_rtl(int n) {
+    atomic_store(&use_rtl, n < 0 ? 0 : n);
+    rtl_spectrum_use(RTL_DEV_RTL);
+}
+
+int rtl_spectrum_used_rtl(void) {
+    return atomic_load(&use_rtl);
+}
+
+int rtl_spectrum_dev_rtl(void) {
+    return rtl_spectrum_dev() == RTL_DEV_RTL ? (atomic_load(&dev_rtl) < 0 ? 0 : atomic_load(&dev_rtl)) : -1;
+}
+
+const char *rtl_spectrum_rtl_tag(int n) {
+    static const char *const t[] = {"RTL0", "RTL1", "RTL2", "RTL3", "RTL4", "RTL5", "RTL6", "RTL7"};
+
+    return n >= 0 && n < 8 ? t[n] : "RTL";
 }
 
 rtl_dev_t rtl_spectrum_used(void) {
@@ -1067,13 +1091,17 @@ rtl_dev_t rtl_spectrum_dev(void) {
 const char *rtl_spectrum_dev_tag(void) {
     rtl_dev_t d = rtl_spectrum_dev();
 
-    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : d == RTL_DEV_RTL ? "RTL" : "SDR";
+    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF"
+         : d == RTL_DEV_RTL    ? rtl_spectrum_rtl_tag(rtl_spectrum_dev_rtl()) : "SDR";
 }
 
 const char *rtl_spectrum_dev_name(void) {
     rtl_dev_t d = rtl_spectrum_dev();
 
-    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : d == RTL_DEV_RTL ? "RTL-SDR" : "SDR";
+    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF"
+         : d == RTL_DEV_RTL    ? rtl_spectrum_rtl_tag(rtl_spectrum_dev_rtl()) : "SDR";     /* RTL0, RTL1...: the user,
+                                                                         * 2026-11-16, "all single stick RTL should be
+                                                                         * called RTL0" */
 }
 
 int64_t rtl_spectrum_min_hz(void) {

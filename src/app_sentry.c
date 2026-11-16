@@ -2761,76 +2761,104 @@ static void hear_next(void) {
  * devices ... well work that out... and it should only use devices it can tune". The daemon holds one at a time
  * (x6x00-rtlspec's "k": the one asked for closed and opened in its place); those that tune B's channel are offered:
  * a box when two or more are on USB (once for each set), and B's LISTEN goes through them (X6200, each SDR, BOTH, OFF).
- * cfg_rtl_dev keeps the one chosen (rtl_dev_t) and, shifted by 4, the set it was chosen among */
-#define DEVB(d) (1u << (d))
-static const rtl_dev_t b_order[] = {RTL_DEV_HACKRF, RTL_DEV_BLADERF, RTL_DEV_RTL};     /* the daemon's own order */
-static lv_obj_t *sp_box, *sp_head_l, *sp_row_l[3], *sp_foot_l;
+ * Each RTL on its own (2026-11-16, a KrakenSDR's five: "labled with an index like RTL0 RTL1 RTL2", ordered "by serial
+ * and usb bus location"): the units below, a HackRF, a bladeRF, RTL0, RTL1... cfg_rtl_dev keeps the kind chosen
+ * (rtl_dev_t, bits 0-3: screen_main's start reads them), the set of units it was chosen among (bits 4-13) and the RTL
+ * chosen (bits 16-19) */
+enum { BU_HACKRF, BU_BLADERF, BU_RTL0 };
+#define BU_N          (BU_RTL0 + 8)
+#define DEVB(u)       (1u << (u))
+#define CFG_KIND(v)   ((rtl_dev_t)((v) & 15))
+#define CFG_SET(v)    (((unsigned)(v) >> 4) & 0x3ffu)
+#define CFG_RTL(v)    (((unsigned)(v) >> 16) & 15u)
+static lv_obj_t *sp_box, *sp_head_l, *sp_row_l[BU_N], *sp_foot_l;
 static bool      sp_on;
-static rtl_dev_t sp_devs[3];
+static int       sp_units[BU_N];
 static int       sp_n, sp_sel;
 static unsigned  sp_set, sp_seen;
 static uint32_t  sp_seen_ms;
 
-static const char *dev_word(rtl_dev_t d) {
-    return d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : "RTL-SDR";
+static rtl_dev_t bu_kind(int u) {
+    return u == BU_HACKRF ? RTL_DEV_HACKRF : u == BU_BLADERF ? RTL_DEV_BLADERF : RTL_DEV_RTL;
 }
 
-/* The SDRs on USB that tune B's channel, a bit each rtl_dev_t */
+static int bu_of(rtl_dev_t d, int rtl) {
+    return d == RTL_DEV_HACKRF ? BU_HACKRF : d == RTL_DEV_BLADERF ? BU_BLADERF
+         : d == RTL_DEV_RTL    ? BU_RTL0 + (rtl < 0 ? 0 : rtl > 7 ? 7 : rtl) : -1;
+}
+
+static const char *bu_word(int u) {
+    return u == BU_HACKRF ? "HACKRF" : u == BU_BLADERF ? "BLADERF" : rtl_spectrum_rtl_tag(u - BU_RTL0);
+}
+
+/* The SDRs on USB that tune B's channel, a bit each unit */
 static unsigned b_sdrs(void) {
-    static const adsb_kind_t as[] = {ADSB_KIND_HACKRF, ADSB_KIND_BLADERF, ADSB_KIND_RTL};
     unsigned p = adsb_rx_present(), m = 0;
-    int64_t  hz = listen_hz ? listen_hz : rtl_hz;
+    int64_t  hz = listen_hz ? listen_hz : rtl_hz, lo, hi;
+    int      rtls = adsb_rx_rtl_count();
 
-    for (int i = 0; i < 3; i++) {
-        int64_t lo, hi;
+    for (int u = 0; u < BU_N; u++) {
+        rtl_dev_t k = bu_kind(u);
 
-        if (!(p & (1u << as[i]))) continue;
-        rtl_spectrum_kind_range(b_order[i], &lo, &hi);
-        if (!hz || (hz >= lo && hz <= hi)) m |= DEVB(b_order[i]);
+        if (u == BU_HACKRF ? !(p & (1u << ADSB_KIND_HACKRF)) : u == BU_BLADERF ? !(p & (1u << ADSB_KIND_BLADERF))
+                                                                              : u - BU_RTL0 >= rtls)
+            continue;
+        rtl_spectrum_kind_range(k, &lo, &hi);
+        if (!hz || (hz >= lo && hz <= hi)) m |= DEVB(u);
     }
     return m;
 }
 
 /* The one B has: the one asked for while it is there (the daemon may still be opening it), else the daemon's */
-static rtl_dev_t b_dev(void) {
+static int b_dev(void) {
     rtl_dev_t u = rtl_spectrum_used();
+    int       want = u == RTL_DEV_NONE ? -1 : bu_of(u, rtl_spectrum_used_rtl());
 
-    return u != RTL_DEV_NONE && (adsb_rx_present() & (1u << (u == RTL_DEV_HACKRF ? ADSB_KIND_HACKRF
-                                                             : u == RTL_DEV_BLADERF ? ADSB_KIND_BLADERF : ADSB_KIND_RTL)))
-               ? u : rtl_spectrum_dev();
+    if (want >= 0 && (b_sdrs() & DEVB(want))) return want;
+    return bu_of(rtl_spectrum_dev(), rtl_spectrum_dev_rtl());
 }
 
-/* d the daemon's from now on, kept with the set it was chosen among */
-static void b_use(rtl_dev_t d, unsigned set) {
+/* Unit u the daemon's from now on, kept with the set it was chosen among */
+static void b_use(int u, unsigned set) {
     char t[160], title[32];
-    bool was = b_dev() == d;
+    int  was = b_dev();
 
-    rtl_spectrum_use(d);
-    param_i_set(cfg_rtl_dev, (int)d | (int)(set << 4));
-    snprintf(title, sizeof(title), "B: THE %s", dev_word(d));
-    if (was) snprintf(t, sizeof(t), "THE %s STAYS B'S SDR.", dev_word(d));
-    else if (rtl_spectrum_dev() == RTL_DEV_NONE || rtl_spectrum_dev() == d)
-        snprintf(t, sizeof(t), "THE %s OPENS: A FEW SECONDS. G'S SDR CHANNELS AND AIRSPACE USE IT TOO.", dev_word(d));
+    if (bu_kind(u) == RTL_DEV_RTL) rtl_spectrum_use_rtl(u - BU_RTL0);
+    else rtl_spectrum_use(bu_kind(u));
+    param_i_set(cfg_rtl_dev, (int)bu_kind(u) | (int)(set << 4) | (bu_kind(u) == RTL_DEV_RTL ? (u - BU_RTL0) << 16 : 0));
+    snprintf(title, sizeof(title), "B: THE %s", bu_word(u));
+    if (was == u) snprintf(t, sizeof(t), "THE %s STAYS B'S SDR.", bu_word(u));
+    else if (was < 0)
+        snprintf(t, sizeof(t), "THE %s OPENS: A FEW SECONDS. G'S SDR CHANNELS AND AIRSPACE USE IT TOO.", bu_word(u));
     else
         snprintf(t, sizeof(t), "THE %s CLOSED AND THE %s OPENED IN ITS PLACE: A FEW SECONDS. G'S SDR CHANNELS AND "
-                 "AIRSPACE USE IT TOO.", dev_word(rtl_spectrum_dev()), dev_word(d));
+                 "AIRSPACE USE IT TOO.", bu_word(was), bu_word(u));
     osd(title, t, -1);
 }
 
 static void sp_fill(void) {
-    for (int r = 0; r < 3; r++) {
-        int64_t lo, hi;
+    int cur = bu_of(rtl_spectrum_dev(), rtl_spectrum_dev_rtl());
 
-        if (r >= sp_n) {
+    for (int r = 0; r < BU_N; r++) {
+        int64_t lo, hi;
+        char    what[48];
+        int     u = r < sp_n ? sp_units[r] : -1;
+
+        if (u < 0) {
             lv_obj_add_flag(sp_row_l[r], LV_OBJ_FLAG_HIDDEN);
             continue;
         }
-        rtl_spectrum_kind_range(sp_devs[r], &lo, &hi);
-        lv_label_set_text_fmt(sp_row_l[r], "%c %-9s %s-%s, %s%s", r == sp_sel ? '>' : ' ', dev_word(sp_devs[r]),
-                              lo < 10000000 ? "1 MHZ" : lo < 30000000 ? "24 MHZ" : "70 MHZ",
-                              hi > 2000000000 ? "6 GHZ" : "1.766 GHZ",
-                              sp_devs[r] == RTL_DEV_RTL ? "RECEIVE ONLY" : "TRANSMITS ON G",
-                              sp_devs[r] == rtl_spectrum_dev() ? " (OPEN NOW)" : "");
+        rtl_spectrum_kind_range(bu_kind(u), &lo, &hi);
+        if (bu_kind(u) == RTL_DEV_RTL) {        /* each RTL by its serial and USB location */
+            char sn[24], loc[24];
+
+            if (!adsb_rx_rtl_id(u - BU_RTL0, sn, sizeof(sn), loc, sizeof(loc))) sn[0] = loc[0] = 0;
+            snprintf(what, sizeof(what), "SN %s, USB %s, RECEIVE ONLY", sn[0] ? sn : "-", loc[0] ? loc : "-");
+        } else {
+            snprintf(what, sizeof(what), "%s-6 GHZ, TRANSMITS ON G", lo < 10000000 ? "1 MHZ" : "70 MHZ");
+        }
+        lv_label_set_text_fmt(sp_row_l[r], "%c %-8s %s%s", r == sp_sel ? '>' : ' ', bu_word(u), what,
+                              u == cur ? " (OPEN)" : "");
         lv_obj_set_style_bg_opa(sp_row_l[r], r == sp_sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(sp_row_l[r], r == sp_sel ? ink : amb, 0);
         lv_obj_clear_flag(sp_row_l[r], LV_OBJ_FLAG_HIDDEN);
@@ -2838,20 +2866,21 @@ static void sp_fill(void) {
 }
 
 static void sp_open(unsigned set) {
-    rtl_dev_t cur = b_dev();
-    char      f[16];
+    int  cur = b_dev();
+    char f[16];
 
     sp_set = set;
     sp_n = sp_sel = 0;
-    for (int i = 0; i < 3; i++)
-        if (set & DEVB(b_order[i])) {
-            if (b_order[i] == cur) sp_sel = sp_n;
-            sp_devs[sp_n++] = b_order[i];
+    for (int u = 0; u < BU_N; u++)
+        if (set & DEVB(u)) {
+            if (u == cur) sp_sel = sp_n;
+            sp_units[sp_n++] = u;
         }
     fmt_mhz(f, sizeof(f), listen_hz ? listen_hz : rtl_hz, 3);
     lv_label_set_text_fmt(sp_head_l, "%d SDRS HERE TUNE B'S CHANNEL (%s MHZ). WHICH?", sp_n, f);
     lv_obj_set_y(sp_foot_l, 50 + sp_n * 28 + 10);
     lv_obj_set_height(sp_box, 50 + sp_n * 28 + 10 + 50);
+    lv_obj_set_y(sp_box, sp_n > 3 ? 60 : 100);
     sp_fill();
     sp_on = true;
     lv_obj_clear_flag(sp_box, LV_OBJ_FLAG_HIDDEN);
@@ -2862,11 +2891,11 @@ static void sp_hide(void) {
     if (sp_box) lv_obj_add_flag(sp_box, LV_OBJ_FLAG_HIDDEN);
 }
 
-/* Closed: d B's SDR (NONE: as it is), this set answered */
-static void sp_close(rtl_dev_t d) {
+/* Closed: unit u B's SDR (-1: as it is), this set answered */
+static void sp_close(int u) {
     sp_hide();
-    if (d != RTL_DEV_NONE) b_use(d, sp_set);
-    else param_i_set(cfg_rtl_dev, (param_i_get(cfg_rtl_dev) & 15) | (int)(sp_set << 4));
+    if (u >= 0) b_use(u, sp_set);
+    else param_i_set(cfg_rtl_dev, (int)(((unsigned)param_i_get(cfg_rtl_dev) & ~(0x3ffu << 4)) | (sp_set << 4)));
     show_screen();
 }
 
@@ -2879,7 +2908,7 @@ static void sp_step(int d) {
 static void sp_row_tap_cb(lv_event_t *e) {
     int r = (int)(intptr_t)lv_event_get_user_data(e);
 
-    if (sp_on && r < sp_n) sp_close(sp_devs[r]);
+    if (sp_on && r < sp_n) sp_close(sp_units[r]);
 }
 
 /* On B, each blink: the box when a new set of two or more has stood 3 s and was not answered before */
@@ -2903,30 +2932,27 @@ static void sp_check(void) {
         else sp_hide();
         return;
     }
-    if (__builtin_popcount(m) >= 2 && ((unsigned)param_i_get(cfg_rtl_dev) >> 4) != m) sp_open(m);
+    if (__builtin_popcount(m) >= 2 && CFG_SET(param_i_get(cfg_rtl_dev)) != m) sp_open(m);
 }
 
 /* B's LISTEN with two or more SDRs that tune its channel: X6200, then each SDR (the daemon switched to it), BOTH, OFF.
  * true: it went to the next SDR (the LISTEN stays the SDR's) */
 static bool b_listen_next_sdr(void) {
-    unsigned  m = b_sdrs();
-    rtl_dev_t cur = b_dev();
-    int       h = param_i_get(cfg_hear_f), at = -1;
+    unsigned m = b_sdrs();
+    int      cur = b_dev(), h = param_i_get(cfg_hear_f);
 
     if (__builtin_popcount(m) < 2) return false;
-    for (int i = 0; i < 3; i++)
-        if (b_order[i] == cur) at = i;
     if (h == HEAR_X6200) {              /* into the SDRs: the first that tunes it */
-        for (int i = 0; i < 3; i++)
-            if (m & DEVB(b_order[i])) {
-                if (b_order[i] != cur) b_use(b_order[i], m);
+        for (int u = 0; u < BU_N; u++)
+            if (m & DEVB(u)) {
+                if (u != cur) b_use(u, m);
                 return false;           /* LISTEN goes on to the SDR as ever */
             }
     }
     if (h != HEAR_RTL) return false;
-    for (int i = at + 1; i < 3; i++)
-        if (m & DEVB(b_order[i])) {
-            b_use(b_order[i], m);
+    for (int u = cur + 1; u < BU_N; u++)
+        if (m & DEVB(u)) {
+            b_use(u, m);
             return true;
         }
     return false;                       /* the last: on to BOTH */
@@ -5208,8 +5234,8 @@ static void key_cb(lv_event_t *e) {
             case LV_KEY_UP: sp_step(-1); return;
             case LV_KEY_RIGHT:
             case LV_KEY_DOWN: sp_step(1); return;
-            case LV_KEY_ENTER: sp_close(sp_devs[sp_sel]); return;
-            case LV_KEY_ESC: sp_close(RTL_DEV_NONE); return;     /* the one open kept */
+            case LV_KEY_ENTER: sp_close(sp_units[sp_sel]); return;
+            case LV_KEY_ESC: sp_close(-1); return;     /* the one open kept */
             default: break;
         }
     }
@@ -5275,7 +5301,7 @@ static void click_cb(lv_event_t *e) {
         if (help_on)
             help_show(false);
         else if (sp_on)
-            sp_close(sp_devs[sp_sel]);
+            sp_close(sp_units[sp_sel]);
         else
             press();
     }
@@ -7534,7 +7560,7 @@ static void build_overlays(void) {
     sp_box = rect(root, 60, 100, SW - 120, 200, 3, false);
     lv_obj_add_flag(sp_box, LV_OBJ_FLAG_CLICKABLE);         /* a tap beside its rows is not the picture's */
     sp_head_l = label(sp_box, &pixel_20, amb, 12, 12, SW - 150, LV_TEXT_ALIGN_LEFT, "");
-    for (int r = 0; r < 3; r++) {
+    for (int r = 0; r < BU_N; r++) {
         lv_obj_t *l = label(sp_box, &pixel_20, amb, 9, 50 + r * 28, SW - 144, LV_TEXT_ALIGN_LEFT, "");
 
         lv_obj_set_style_bg_color(l, amb, 0);

@@ -62,6 +62,10 @@ unsigned adsb_rx_choices(void);
 
 /* The kinds on USB, a bit each, whether they can be listened on or not (B's SDRs among them) */
 unsigned adsb_rx_present(void);
+/* How many RTL-SDRs are on USB (a KrakenSDR: five), looked at each second */
+int      adsb_rx_rtl_count(void);
+/* RTL n's serial and USB location ("1002", "3-1.3"), in the daemon's order (RTL0 the first); false: none */
+bool     adsb_rx_rtl_id(int n, char *sn, size_t sn_n, char *loc, size_t loc_n);
 
 /* An RTL-SDR on USB is a spare (the daemon holds a HackRF or a bladeRF beside it) */
 bool adsb_rx_rtl_spare(void);

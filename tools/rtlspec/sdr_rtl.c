@@ -8,15 +8,24 @@
 
 #include "sdr.h"
 
+#include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
+#include <libusb.h>
 #include <rtl-sdr.h>
 
 #define READ_LEN (16384 * 2)
 
-int sdr_rtl_index;                      /* -d: which stick */
+/* Which RTL: by its place among the RTLs on USB in serial order, then by USB location (sticks that all say 00000001),
+ * RTL0 the first (-d, or "k RTL<n>"). A KrakenSDR's five are serials 1000-1004, so RTL0-RTL4 are its CH0-CH4; a stick
+ * alone is RTL0 (the user, 2026-11-16: "labled with an index like RTL0 RTL1 RTL2 ... all single stick RTL should be
+ * called RTL0", "by serial and usb bus location"). One not there: RTL0 meanwhile. The GUI orders them the same way from
+ * sysfs (adsb_rx.c), so RTL<n> is the same stick on both sides */
+int sdr_rtl_index;
+int sdr_rtl_open_at = -1;               /* the open one's place (RTL<n>), -1 none */
 
 static rtlsdr_dev_t *volatile dev;
 static sdr_rx_cb              rx_cb;
@@ -35,13 +44,116 @@ static const char *tuner_name(enum rtlsdr_tuner t) {
 }
 
 static int rtl_present(void) {
-    return (int)rtlsdr_get_device_count() > sdr_rtl_index;
+    return rtlsdr_get_device_count() > 0;
+}
+
+int sdr_rtl_count(void) {
+    return (int)rtlsdr_get_device_count();
+}
+
+/* The order: serials, numbers as numbers (1000 before 1004, 9 before 10), else as text; then the USB location
+ * ("3-1.4"), its numbers as numbers; then librtlsdr's own order */
+typedef struct { int idx; char sn[64], loc[32]; } rtl_sn_t;
+
+static int num_cmp(const char *a, const char *b) {       /* "3-1.10" after "3-1.9" */
+    while (*a && *b) {
+        if (isdigit((unsigned char)*a) && isdigit((unsigned char)*b)) {
+            unsigned long long x = strtoull(a, (char **)&a, 10), y = strtoull(b, (char **)&b, 10);
+            if (x != y) return x < y ? -1 : 1;
+        } else {
+            if (*a != *b) return (unsigned char)*a - (unsigned char)*b;
+            a++, b++;
+        }
+    }
+    return *a ? 1 : *b ? -1 : 0;
+}
+
+static int sn_cmp(const void *pa, const void *pb) {
+    const rtl_sn_t *a = pa, *b = pb;
+    int             c = num_cmp(a->sn, b->sn);
+
+    if (!c) c = num_cmp(a->loc, b->loc);
+    return c ? c : a->idx - b->idx;
+}
+
+static bool read_sys(const char *loc, const char *what, char *out, size_t n) {
+    char  path[96];
+    FILE *f;
+
+    snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/%s", loc, what);
+    if (!(f = fopen(path, "r"))) return false;
+    bool ok = fgets(out, (int)n, f) != NULL;
+    fclose(f);
+    if (ok) out[strcspn(out, "\r\n")] = 0;
+    return ok;
+}
+
+/* Each librtlsdr index's serial and USB location: librtlsdr counts the known sticks in libusb's list order, so the k-th
+ * 0bda:2838 or 0bda:2832 there is its index k, and its ports give the location, the serial sysfs's. Another kind of
+ * stick in the list (the counts differ): serials from librtlsdr, no locations */
+static int rtl_list(rtl_sn_t *l, int max) {
+    int             cnt = (int)rtlsdr_get_device_count(), k = 0;
+    libusb_context *ctx = NULL;
+    libusb_device **list;
+
+    if (cnt > max) cnt = max;
+    if (cnt > 0 && libusb_init(&ctx) == 0) {
+        ssize_t n = libusb_get_device_list(ctx, &list);
+
+        for (ssize_t i = 0; i < n && k < max; i++) {
+            struct libusb_device_descriptor dd;
+            uint8_t                         ports[8];
+
+            if (libusb_get_device_descriptor(list[i], &dd) || dd.idVendor != 0x0bda ||
+                (dd.idProduct != 0x2838 && dd.idProduct != 0x2832))
+                continue;
+            int np = libusb_get_port_numbers(list[i], ports, 8), at;
+
+            l[k].idx = k;
+            at = snprintf(l[k].loc, sizeof(l[k].loc), "%u", libusb_get_bus_number(list[i]));
+            for (int p = 0; p < np && at < (int)sizeof(l[k].loc); p++)
+                at += snprintf(l[k].loc + at, sizeof(l[k].loc) - (size_t)at, "%c%u", p ? '.' : '-', ports[p]);
+            if (!read_sys(l[k].loc, "serial", l[k].sn, sizeof(l[k].sn))) l[k].sn[0] = 0;
+            k++;
+        }
+        if (n >= 0) libusb_free_device_list(list, 1);
+        libusb_exit(ctx);
+    }
+    if (k != cnt) {
+        for (k = 0; k < cnt; k++) {
+            char m[256] = "", p[256] = "", sn[256] = "";
+
+            rtlsdr_get_device_usb_strings((uint32_t)k, m, p, sn);
+            l[k].idx    = k;
+            l[k].loc[0] = 0;
+            snprintf(l[k].sn, sizeof(l[k].sn), "%s", sn);
+        }
+    }
+    qsort(l, (size_t)k, sizeof(l[0]), sn_cmp);
+    return k;
+}
+
+/* librtlsdr's index of RTL at (its serial and location in sn, loc), -1 none */
+static int rtl_at(int at, char *sn, size_t n, char *loc, size_t ln) {
+    rtl_sn_t l[16];
+    int      cnt = rtl_list(l, 16);
+
+    if (at < 0 || at >= cnt) return -1;
+    snprintf(sn, n, "%s", l[at].sn);
+    snprintf(loc, ln, "%s", l[at].loc);
+    return l[at].idx;
 }
 
 static int rtl_open(char *tuner, size_t n, uint64_t *lo, uint64_t *hi) {
     rtlsdr_dev_t *d;
+    char          sn[64], loc[32];
+    int           cnt = (int)rtlsdr_get_device_count(), at = sdr_rtl_index < cnt ? sdr_rtl_index : 0;
+    int           idx = rtl_at(at, sn, sizeof(sn), loc, sizeof(loc));
 
-    if (rtlsdr_open(&d, (uint32_t)sdr_rtl_index) != 0) return 1;     /* another program has it: tried again, not forced */
+    if (idx < 0 || rtlsdr_open(&d, (uint32_t)idx) != 0) return 1;  /* another program has it: tried again, not forced */
+    sdr_rtl_open_at = at;
+    fprintf(stderr, "rtlspec: RTL%d of %d (serial %s, USB %s)%s\n", at, cnt, sn, loc[0] ? loc : "?",
+            at != sdr_rtl_index ? ": the one asked for is not on USB" : "");
     rtlsdr_set_bias_tee(d, 0);
     snprintf(tuner, n, "%s", tuner_name(rtlsdr_get_tuner_type(d)));
     *lo = 24000000;
@@ -105,7 +217,8 @@ static void rtl_rx_stop(void) {
 static void rtl_close(void) {
     rtlsdr_dev_t *d = dev;
 
-    dev = NULL;
+    dev             = NULL;
+    sdr_rtl_open_at = -1;
     if (d) rtlsdr_close(d);
 }
 

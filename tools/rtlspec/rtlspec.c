@@ -35,13 +35,14 @@
  *
  *  The client: a UNIX socket in the abstract namespace, "@x6x00-rtlspec", SOCK_SEQPACKET, one client at a time (a
  *  new one replaces the old: the GUI started again). Each message is one thing. From the daemon, little endian:
- *      "RTLSPEC 2 <state> <tuner> <rate> <bins> <kind> <lo Hz> <hi Hz> <tx>"   on connecting and at each change:
+ *      "RTLSPEC 2 <state> <tuner> <rate> <bins> <kind> <lo Hz> <hi Hz> <tx> <rtl>"   on connecting and each change:
  *                          state NOSTICK, BUSY (another program has it), OPENING, ON (samples coming), STALLED (open,
  *                          nothing coming), ADSB (AIRSPACE's dump1090 has the samples), TX (transmitting), NEEDS
  *                          (there and not usable: tuner says what, "LIBBLADERF" or the FPGA image's file); tuner the
  *                          model ("R820T", "HACKRF-ONE", "BLADERF2"); kind RTL, HACKRF or BLADERF ("-" none); the
- *                          tuning range; tx 0 receive only, 1 it can transmit, 2 transmitting. The first five as
- *                          before: a GUI that reads only them still works
+ *                          tuning range; tx 0 receive only, 1 it can transmit, 2 transmitting; rtl the open RTL's
+ *                          place in serial order (RTL0 the first; -1 no RTL open). The first five as before: a GUI
+ *                          that reads only them still works
  *      "RSPC", u32 seq, u64 centre Hz, u32 rate, u16 bins, u16 flags (1: the first since a retune), f32 dB[bins]
  *      "RAUD", u32 count, s16 samples[count]       the channel listened to, mono, 44.1 kHz, 50 ms a message
  *      "RSAM", u32 length, the header's text and "|" and the event's name when known
@@ -72,7 +73,8 @@
  *      "t <Hz> <gain dB> <amp 0|1>"   transmit FM there (a device that transmits, an amateur band); "t 0" ends it
  *      "TAUD", u32 count, s16 samples[count]       the voice to transmit, mono, 44.1 kHz, as it comes
  *      "k <KIND>"          the device to hold, RTL, HACKRF or BLADERF, when it is plugged in; "k -" the first by the
- *                          order below. The one open is closed for it (not while transmitting) and it is opened; one
+ *                          order below. RTL<n>: the RTL at place n in serial order (sdr_rtl.c: a KrakenSDR's CH0-CH4
+ *                          are RTL0-RTL4), RTL0 while it is not on USB; another RTL asked for is switched to too. The one open is closed for it (not while transmitting) and it is opened; one
  *                          that will not open (another program holds it) leaves the one before, till "k" again
  *      "R"                 the receiver's stream stopped and started again, as a transmission does, without one (a
  *                          test of that on the radio's USB host)
@@ -727,7 +729,6 @@ static const char *sock_name = SOCK_NAME;   /* -S */
 static atomic_int  s_now = S_NOSTICK;
 static atomic_uint last_ms;             /* the device's last transfer, either way */
 static atomic_bool feeding;             /* AIRSPACE's dump1090 has the samples */
-extern int         sdr_rtl_index;       /* -d (sdr_rtl.c) */
 static atomic_bool stick_done;          /* the device's thread ended: the device closed */
 static const char *replay;              /* -i */
 
@@ -788,10 +789,10 @@ static void hello(char *s, size_t n) {
     const sdr_ops_t *o  = dev_ops;
     int              st = atomic_load(&s_now);
 
-    snprintf(s, n, "RTLSPEC %d %s %s %u %d %s %llu %llu %d", PROTO,
+    snprintf(s, n, "RTLSPEC %d %s %s %u %d %s %llu %llu %d %d", PROTO,
              atomic_load(&feeding) && st != S_TX ? "ADSB" : s_name[st], tuner_s, cur_rate ? cur_rate : want_rate,
              n_bins, o ? o->kind : replay ? "REPLAY" : "-", (unsigned long long)dev_lo, (unsigned long long)dev_hi,
-             st == S_TX ? 2 : o && o->tx && dev_open ? 1 : 0);
+             st == S_TX ? 2 : o && o->tx && dev_open ? 1 : 0, o == &sdr_rtl ? sdr_rtl_open_at : -1);
     pthread_mutex_unlock(&tune_lock);
 }
 
@@ -1176,7 +1177,10 @@ static void command(char *line, int fd) {
         char k[16] = "";
 
         sscanf(line + 1, "%15s", k);
-        atomic_store(&want_dev, !strcmp(k, "HACKRF") ? 1 : !strcmp(k, "BLADERF") ? 2 : !strcmp(k, "RTL") ? 3 : 0);
+        bool rtl = !strncmp(k, "RTL", 3);   /* "RTL<n>": RTL n in serial order (sdr_rtl.c); "RTL" RTL0 */
+
+        if (rtl) sdr_rtl_index = atoi(k + 3);
+        atomic_store(&want_dev, !strcmp(k, "HACKRF") ? 1 : !strcmp(k, "BLADERF") ? 2 : rtl ? 3 : 0);
         atomic_store(&want_failed, false);
     } else if (line[0] == 'R') {          /* the stream stopped and started, as for a transmission */
         if (!atomic_load(&tx_on) && !atomic_load(&tx_req)) {
@@ -1434,7 +1438,10 @@ static bool switch_due(const sdr_ops_t *o) {
     int w = atomic_load(&want_dev);
 
     if (!w || !o || sdr_file_path || replay || atomic_load(&want_failed)) return false;
-    if (kinds[w - 1] == o || atomic_load(&tx_on) || atomic_load(&tx_req)) return false;
+    if (atomic_load(&tx_on) || atomic_load(&tx_req)) return false;
+    if (kinds[w - 1] == o)              /* another RTL asked for (RTL<n>), and it is there */
+        return o == &sdr_rtl && sdr_rtl_open_at >= 0 && sdr_rtl_index != sdr_rtl_open_at &&
+               sdr_rtl_index < sdr_rtl_count();
     return kinds[w - 1]->present();
 }
 
