@@ -168,7 +168,7 @@ static bool resolve(void) {
         held_by[SDR_OWN_B] = b;
         bus                = !units[b].own_power;
     }
-    for (int k = 0; k < 4; k++) {       /* watch channels: an RTL of its own power each, from the last */
+    for (int k = 0; k < SDR_POOL_WATCH; k++) {    /* watch channels: an RTL of its own power each, from the last */
         int o = SDR_OWN_WATCH + k;
 
         if (!wants[o]) continue;
@@ -179,7 +179,7 @@ static bool resolve(void) {
                 held_by[o]     = i;
             }
     }
-    for (int k = 0; k < 5; k++) {       /* AIRSPACE's spares: from the first */
+    for (int k = 0; k < SDR_POOL_ADSB; k++) {     /* AIRSPACE's spares: from the first */
         int o = SDR_OWN_ADSB + k;
 
         if (!wants[o]) continue;

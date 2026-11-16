@@ -289,7 +289,15 @@ bool adsb_frame_from(const char *hex, size_t n, double now, int src) {
     adsb_plane_t *p = plane_of((uint32_t)msg[1] << 16 | (uint32_t)msg[2] << 8 | msg[3], now);
     p->msgs++;
     p->seen = now;
-    if (src >= 0 && src < ADSB_SRCS) p->src_t[src] = now;
+    if (src >= 0 && src < ADSB_SRCS) {
+        p->src_t[src] = now;
+        p->src_n[src]++;
+        /* its receiver (AIRSPACE's colour of it): the one with most of its frames, changed only when another has a
+         * quarter more and four more, so two that hear it alike do not swap it at every frame */
+        int m = p->src_main - 1;
+
+        if (m < 0 || (src != m && p->src_n[src] > p->src_n[m] + p->src_n[m] / 4 + 4)) p->src_main = (uint8_t)(src + 1);
+    }
 
     uint64_t me = 0;
     for (int i = 4; i < 11; i++) me = me << 8 | msg[i];

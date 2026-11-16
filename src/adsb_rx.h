@@ -32,7 +32,7 @@ void adsb_rx_name(char *name, size_t n);
 /* The receivers' slots, the src of their frames in adsb.c (adsb_frame_from): a serial one (GNS 5890, microADSB), the
  * Sentry's SDR, a spare RTL-SDR beside it */
 enum { ADSB_SLOT_SERIAL, ADSB_SLOT_SDR, ADSB_SLOT_SPARE };     /* then the further spares, ADSB_SLOT_SPARE + 1... */
-#define ADSB_SLOTS (ADSB_SLOT_SPARE + 5)
+#define ADSB_SLOTS (ADSB_SLOT_SPARE + 7)
 
 
 /* The receivers listened on now, one by one: each one's slot and its name as adsb_rx_name joins them; the count */

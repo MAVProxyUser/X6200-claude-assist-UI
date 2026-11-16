@@ -184,8 +184,9 @@ static uint32_t argb(lv_color_t c) { return lv_color_to32(c) | 0xff000000; }
 
 /* Each receiver's aircraft in a colour of the Sentry's spectrum ramp (yellow to deep orange-red, app_sentry.c's
  * d3_pal), with two or more listened on: the serial one's (GNS 5890, microADSB) the amber, B's SDR's the deep
- * orange-red, a spare RTL-SDR's the orange; one heard by two or more within SRC_S of its last frame, the ramp's pale
- * top. One receiver alone: all amber, as before. The header names each in its colour */
+ * orange-red, a spare RTL-SDR's the orange, the further spares green, cyan, periwinkle, magenta, then hues made for
+ * any number; with two, one heard by both within SRC_S of its last frame the ramp's pale top, with three or more each
+ * in its receiver's (plane_col). One receiver alone: all amber, as before. The header names each in its colour */
 #define SRC_S 60.0
 static lv_color_t src_col[ADSB_SRCS], both_col;
 static int        n_rx;                 /* receivers listened on, at the last header */
@@ -195,14 +196,24 @@ static int        n_rx;                 /* receivers listened on, at the last he
  * 2026-11-16: "add a column to the decoded info to cover the device the info came from") */
 static char slot_nm[ADSB_SRCS][8];
 
-/* Who heard p: the receiver of its last frame, "+N" for the N others within SRC_S of it ("RTL2+1"); with all, each of
- * them by name ("RTL0 RTL2") */
-static void rx_of(const adsb_plane_t *p, char *s, size_t n, bool all) {
+/* p's receiver: the one that heard most of it (adsb.c's src_main) while it still hears it, else the one of its last
+ * frame; -1 none said */
+static int main_rx(const adsb_plane_t *p) {
     unsigned m    = adsb_plane_srcs(p, SRC_S);
-    int      last = -1;
+    int      mr = p->src_main - 1, last = -1;
 
+    if (mr >= 0 && mr < ADSB_SRCS && (m & (1u << mr))) return mr;
     for (int i = 0; i < ADSB_SRCS; i++)
         if (p->src_t[i] > 0 && (last < 0 || p->src_t[i] > p->src_t[last])) last = i;
+    return last;
+}
+
+/* Who heard p: its receiver (main_rx, its colour's), "+N" for the N others within SRC_S of its last frame ("RTL2+1");
+ * with all, each of them by name ("RTL0 RTL2") */
+static void rx_of(const adsb_plane_t *p, char *s, size_t n, bool all) {
+    unsigned m    = adsb_plane_srcs(p, SRC_S);
+    int      last = main_rx(p);
+
     if (last < 0) {
         snprintf(s, n, "-");
         return;
@@ -225,10 +236,17 @@ static void rx_of(const adsb_plane_t *p, char *s, size_t n, bool all) {
     else snprintf(s, n, "%.6s", slot_nm[last][0] ? slot_nm[last] : "?");
 }
 
+/* Two receivers: each one's colour, BOTH's for one both heard (the user, 2026-11-15). Three or more (a KrakenSDR's):
+ * nearly every aircraft is heard by several, and BOTH's pale colour was nearly all there was ("each RTL sdr should get
+ * it's own color scalable to infinity ... right now they are all using pale", 2026-11-16): each in its receiver's */
 static lv_color_t plane_col(const adsb_plane_t *p) {
     unsigned m = n_rx > 1 ? adsb_plane_srcs(p, SRC_S) : 0;
+    int      r;
 
-    return !m ? amb : m & (m - 1) ? both_col : src_col[__builtin_ctz(m)];
+    if (!m) return amb;
+    if (n_rx == 2) return m & (m - 1) ? both_col : src_col[__builtin_ctz(m)];
+    r = main_rx(p);
+    return r >= 0 ? src_col[r] : amb;
 }
 static uint32_t plane_c(const adsb_plane_t *p) { return argb(plane_col(p)); }
 
@@ -751,11 +769,10 @@ static void show_head(double now, int nlive, int nghost) {
                              (unsigned)(lv_color_to32(src_col[slot[i]]) & 0xffffff), names[i]);
             if (w > 0) at += (size_t)w;
         }
-        /* the colour of an aircraft two or more of them heard: said so (the user, 2026-11-16, of "2+": "I'm not sure
-         * waht that means") */
-        if (at < sizeof(name))
-            snprintf(name + at, sizeof(name) - at, "  #%06X %s#", (unsigned)(lv_color_to32(both_col) & 0xffffff),
-                     n_rx > 2 ? "HEARD BY 2+" : "BOTH");
+        /* two: the colour of an aircraft both heard. Three or more colour each aircraft by its receiver, no shared
+         * colour (the user, 2026-11-16, of the "2+" that said it: "I'm not sure waht that means") */
+        if (at < sizeof(name) && n_rx == 2)
+            snprintf(name + at, sizeof(name) - at, "  #%06X BOTH#", (unsigned)(lv_color_to32(both_col) & 0xffffff));
     }
     /* The SDRs not on 1090 MHz, dim, and who has them (sdr_pool.c): B's, a watch channel's, stopped in the pool's
      * panel. The user, 2026-11-16: "I only see RTL0 RTL1 RTL2 RTL3 but no RTL4 ... there is plenty of space in the
@@ -1478,6 +1495,9 @@ static void construct_cb(lv_obj_t *parent) {
          * user, 2026-11-16: "every reception is color coded to the radio that recieved it") */
         static const uint32_t more[] = {0x7cd65a, 0x45c8e0, 0x8f8bff, 0xe066d6};
         for (int i = 0; i < 4 && ADSB_SLOT_SPARE + 1 + i < ADSB_SRCS; i++) src_col[ADSB_SLOT_SPARE + 1 + i] = lv_color_hex(more[i]);
+        /* past those, any number: hues the golden angle apart, each as far from those before as it can be */
+        for (int i = ADSB_SLOT_SPARE + 5; i < ADSB_SRCS; i++)
+            src_col[i] = lv_color_hsv_to_rgb((uint16_t)fmodf(15.0f + (i - ADSB_SLOT_SPARE - 5) * 137.508f, 360.0f), 55, 95);
         both_col                 = TC(accent_soft);                 /* its pale top: heard by two or more */
     }
     for (int i = 0; i < 64; i++) glow[i] = mix(c_amb, c_ink, i * 60 / 63);

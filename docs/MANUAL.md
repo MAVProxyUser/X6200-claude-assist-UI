@@ -1217,10 +1217,15 @@ the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on t
 - **Each receiver's aircraft in its own colour**, from the Sentry's spectrum ramp, with two or more listened on: the
   serial one's (GNS 5890, microADSB) amber, B's SDR's deep orange, a spare RTL-SDR's orange; an aircraft heard by two
   or more within a minute of its last message the ramp's pale top. The scope's mark, its track and label, and its row
-  in the list take it (dimmer once it is history). The head names each receiver in its colour, then BOTH (HEARD BY
-  2+ with three or more) in the pale one. One receiver alone: amber, as before.
-- **Who heard each aircraft**: the list's last column, RX, is the receiver of its last message, and +N for the N
-  others that heard it within a minute of that (`RTL2+1`: RTL2 and one more). The TARGET box's title names them all
+  in the list take it (dimmer once it is history). The head names each receiver in its colour, then BOTH in the pale
+  one. One receiver alone: amber, as before.
+- **Three or more receivers** (a KrakenSDR's RTLs): nearly every aircraft is heard by several, so there is no shared
+  colour: each aircraft is in its receiver's, the one that has heard most of its messages (another takes it over
+  only with a quarter more, so two that hear it alike do not swap it at every message). Past the seven colours above,
+  each further receiver gets a hue of its own, as many as there are. AIRSPACE takes up to seven spare RTLs (RTL0-RTL7
+  but B's).
+- **Who heard each aircraft**: the list's last column, RX, is its receiver (its colour's), and +N for the N
+  others that heard it within a minute of its last message (`RTL2+1`: RTL2 and one more). The TARGET box's title names them all
   (`TARGET  RX RTL0 RTL1 RTL2`).
 - **Every SDR in the head**: those not on 1090 MHz after the receivers, dim, with who has them: `RTL4 ON B` (B
   keeps its own while AIRSPACE has spares), WATCHING (a watch channel's), STOPPED (in the SDR pool's panel),
@@ -1237,10 +1242,10 @@ the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on t
   B's), never two SDRs. AIRSPACE takes no SDR before the GUI has reached the SDR daemon (its first seconds).
 - **Two or more RTL-SDRs** (a KrakenSDR's five): an RTL that B neither holds nor asked for, behind a hub of its own
   power, is AIRSPACE's spare, its dump1090 on that stick alone (by its serial). **With AIRSPACE open, every such
-  free RTL listens too** (up to five spares, each its own dump1090 on ports 30003 up), and **each radio has its own
+  free RTL listens too** (up to seven spares, each its own dump1090 on ports 30003 up), and **each radio has its own
   colour**: the serial one amber, B's deep orange, then orange, green, cyan, periwinkle and magenta; an aircraft heard
-  by two or more the pale one. With three or more the head names each by its first word in its colour (`RTL0 RTL1
-  RTL2 RTL3  HEARD BY 2+  RTL4 ON B`); closed, the first spare goes on alone. RTLs a watch channel has are left to it: the head names each RTL by its number
+  by two of them the pale one, with three or more each in its receiver's (above). With three or more the head names
+  each by its first word in its colour (`RTL0 RTL1 RTL2 RTL3  RTL4 ON B`); closed, the first spare goes on alone. RTLs a watch channel has are left to it: the head names each RTL by its number
   (`RTL0 R820T + RTL1 R820T BOTH` with B's lent while AIRSPACE is open), and with AIRSPACE closed B has its own again
   while the spare goes on decoding ADS-B. B choosing the spare's RTL moves the spare to the next free one. Two sticks
   on the radio's own power are not streamed at once, as before. On the radio with a KrakenSDR: RTL0 and RTL1 on ADS-B

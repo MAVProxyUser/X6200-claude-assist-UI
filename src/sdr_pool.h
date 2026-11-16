@@ -29,9 +29,11 @@ extern "C" {
 
 #define SDR_POOL_UNITS 10                       /* RTL0-RTL7, a HackRF, a bladeRF */
 
-/* Who has one: B, AIRSPACE's spares 0-4, the watch channels 0-3 */
-enum { SDR_OWN_NONE = -1, SDR_OWN_B = 0, SDR_OWN_ADSB = 1, SDR_OWN_WATCH = SDR_OWN_ADSB + 5,
-       SDR_OWNERS = SDR_OWN_WATCH + 4 };
+/* Who has one: B, AIRSPACE's spares 0-6 (every RTL but B's), the watch channels 0-3 */
+#define SDR_POOL_ADSB  7
+#define SDR_POOL_WATCH 4
+enum { SDR_OWN_NONE = -1, SDR_OWN_B = 0, SDR_OWN_ADSB = 1, SDR_OWN_WATCH = SDR_OWN_ADSB + SDR_POOL_ADSB,
+       SDR_OWNERS = SDR_OWN_WATCH + SDR_POOL_WATCH };
 
 typedef struct {
     rtl_dev_t kind;

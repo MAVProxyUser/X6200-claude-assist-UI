@@ -16,7 +16,7 @@
 #define ADSB_TRAIL      240     /* track points an aircraft keeps */
 #define ADSB_LIVE_S     60.0    /* heard this recently: live; after it a ghost of the history */
 #define ADSB_RATE_S     120     /* seconds of message rate kept */
-#define ADSB_SRCS       8       /* the receivers a frame can come from (adsb_rx.c's slots: up to 7), a bit each */
+#define ADSB_SRCS       10      /* the receivers a frame can come from (adsb_rx.c's slots: up to 9), a bit each */
 
 typedef struct {
     float   lat, lon;
@@ -37,6 +37,8 @@ typedef struct {
     uint32_t msgs;
     double   first, seen;
     double   src_t[ADSB_SRCS];  /* adsb_now() of each receiver's last good frame of it, 0 never */
+    uint32_t src_n[ADSB_SRCS];  /* each receiver's good frames of it */
+    uint8_t  src_main;          /* 1 + the receiver that heard most of it (kept till another has a quarter more), 0 none */
     adsb_point_t trail[ADSB_TRAIL];
     int      trail_head, trail_n;   /* a ring: the newest at trail_head - 1 */
 } adsb_plane_t;

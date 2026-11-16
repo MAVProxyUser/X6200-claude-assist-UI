@@ -111,7 +111,7 @@ enum { SLOT_SERIAL, SLOT_SDR, SLOT_SPARE };
 /* Spare RTLs at once (a KrakenSDR's four beside B's): the first listens with AIRSPACE closed too, the rest while its
  * screen is open (the user, 2026-11-16: every reception "color coded to the radio that recieved it ... scale for
  * however many are able to be connected") */
-#define SPARES 5
+#define SPARES 7   /* every RTL the pool numbers (RTL0-RTL7) but B's */
 #define SLOTS  (SLOT_SPARE + SPARES)
 
 static atomic_bool     started;
