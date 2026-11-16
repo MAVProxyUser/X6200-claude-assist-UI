@@ -15,7 +15,7 @@ CFLAGS := -std=gnu11 -O1 -g -pthread -DHOST_BUILD=1 -DBOARD_DATA='"$(DATA)"' $(I
 WARN   := -Wall -Wextra
 LIBS   := -L $(DEPS)/lib -lft8 -lliquid -lm -Wl,-rpath,$(DEPS)/lib
 OURS   := ft8/time_sync.c ft8/utils.c qth/qth.c
-GUI    := ft8/worker.c ft8/gfsk.c ft8/hound.c ft8/msg_encode.c ft8/audio_worker.c
+GUI    := ft8/worker.c ft8/gfsk.c ft8/hound.c ft8/contest_unpack.c ft8/msg_encode.c ft8/audio_worker.c
 HDRS   := $(wildcard $(SRC)/ft8/*.h) $(SRC)/qth/qth.h $(wildcard stub_include/*.h stub_include/*/*.h)
 
 all: test

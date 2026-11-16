@@ -28,8 +28,11 @@ jobs:
       - name: Libraries
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q build-essential autoconf automake libtool libsqlite3-dev libxkbcommon-dev \
-            libnm-dev python3-bottle fdisk util-linux network-manager dbus iproute2
+          sudo apt-get install -y -q build-essential autoconf automake libtool cmake ninja-build pkg-config \
+            libsqlite3-dev sqlite3 libxkbcommon-dev libnm-dev libpng-dev libasound2-dev python3-bottle \
+            fdisk util-linux parted dosfstools exfatprogs bsdextrautils network-manager dbus iproute2 \
+            libsdl2-dev libdrm-dev libdbus-glib-1-dev libsndfile1-dev libudev-dev libpulse-dev libjpeg-dev \
+            libglib2.0-dev libboost-dev
 
       # As host/build.sh's deps(), in /usr/local (DEPS below): liquid-dsp and ft8_lib at the radio's versions
       - name: liquid-dsp, the radio's version
@@ -47,6 +50,16 @@ jobs:
           sudo mkdir -p /usr/local/include/ft8lib
           sudo cp /tmp/ft8_lib/.build/libft8.so /usr/local/lib/ && sudo cp /tmp/ft8_lib/ft8/*.h /usr/local/include/ft8lib/
           sudo ldconfig
+
+      # The PC build's LVGL and its SDL drivers (build-host/lib, as host/build.sh leaves them): the checks that link
+      # the GUI's own files against them (cw_kbd, text_popup, tci_ask...). Configured as host/build.sh does, only
+      # those two built
+      - name: LVGL and lv_drivers, the PC build's
+        run: |
+          cmake -S . -B build-host -G Ninja -DHOST_BUILD=ON -DHOST_DEPS=/usr/local -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            > /dev/null
+          cmake --build build-host --target lvgl lv_drivers > /dev/null
+          ls -l build-host/lib/liblvgl.a build-host/lib/liblv_drivers.a
 
       # Ubuntu 24.04 keeps unprivileged user namespaces from writing their uid_map: tools/wifi_restore,
       # tools/wifi_steady and tools/smartcw run NetworkManager in namespaces of their own (unshare -rmn)

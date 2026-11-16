@@ -1,6 +1,6 @@
 #!/bin/bash
 # Every host check of the repository in one run (upstream #46): each tools/*/ with a Makefile (`make` there builds
-# its test and runs it), and the few built here (tools/adsb, tools/rtlspec). Each ends as one of:
+# its test and runs it), the few built here (tools/adsb, tools/rtlspec) and the audits' harnesses. Each ends as one of:
 #   PASS   built and ran, every case as it should be
 #   FAIL   built, and the test said a case was wrong (or it ran past its time)
 #   BUILD  did not build: a harness that no longer compiles, told apart from a failing case (the compiler's or the
@@ -94,9 +94,11 @@ missing() {
         echo "needs RADE built (tools/rade/build.sh: autotools)"
     elif grep -q -E "GPSD=.*needed" "$log"; then
         echo "needs a gpsd 3.25 build: GPSD=<its buildroot build folder>"
+    elif grep -q "no radio image found: give TARGETS" "$log"; then
+        echo "needs a radio image's buildroot target: TARGETS=<its folders>"
     elif grep -q "No X6200 control library sources" "$log"; then
         echo "needs the X6200 control library's sources: X6200_CONTROL=<folder>"
-    elif grep -q -E "build-host/lib/liblvgl\.a" "$log"; then
+    elif grep -q -E "build-host/lib/(liblvgl|liblv_drivers)\.a" "$log"; then
         echo "needs the GUI's host build (build-host, cmake with SDL)"
     elif [ "$(uname -s)" != Linux ] && grep -q -E "linux/[a-z_]+\.h.*(not found|No such file)|SOCK_NONBLOCK|SOCK_CLOEXEC|accept4|pipe2|pthread_condattr_setclock|unknown options: --wrap|epoll|timerfd|eventfd|signalfd|MSG_NOSIGNAL|TCP_KEEPIDLE|SO_BINDTODEVICE|clock_nanosleep|ppoll|mkfs|losetup|timeout: command not found|sed: -e|sed: 1:|sfdisk: command not found|unshare: (command not found|No such file)" "$log"; then
         echo "Linux only (this is $(uname -s))"
@@ -105,7 +107,7 @@ missing() {
 
 # The last line of a check's output that says how many cases, for the table
 summary() {
-    grep -i -E '[0-9]+ (of [0-9]+ |checks|cases|tests|passed|failed)|all .*(pass|as they should)|ok$' "$OUT/$1.log" 2> /dev/null |
+    grep -i -E '[0-9]+ (of [0-9]+ |checks|cases|tests|passed|failed)|all .*(pass|as they should|matched)|ok$' "$OUT/$1.log" 2> /dev/null |
         tail -n 1 | cut -c1-70
 }
 
@@ -157,6 +159,12 @@ fi
 if wanted rds; then
     res=$(run_one rds sh -c "$CC -O2 -o '$OUT/rds_test' tools/rtlspec/rds_test.c -lm && '$OUT/rds_test'")
     record rds "$res" "$(summary rds)"
+fi
+# The audits' reproduction harnesses, now the regression suite of their fixes (docs/audit/repro-2026-10-24/README.md):
+# Python, Node.js, SQLite, libpng and ALSA's headers, LVGL; Linux
+if wanted audit; then
+    res=$(run_one audit python3 docs/audit/repro-2026-10-24/run.py)
+    record audit "$res" "$(summary audit)"
 fi
 
 echo
