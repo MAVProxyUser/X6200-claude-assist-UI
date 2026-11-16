@@ -28,9 +28,11 @@ static uint16_t    rx_port;
     } while (0)
 
 static int open_fds(void) {
-    DIR *d = opendir("/proc/self/fd");
+    DIR *d = opendir("/proc/self/fd");      /* Linux; a Mac lists its open descriptors in /dev/fd */
     int  n = 0;
 
+    if (!d) d = opendir("/dev/fd");
+    if (!d) return -1;
     while (readdir(d))
         n++;
     closedir(d);

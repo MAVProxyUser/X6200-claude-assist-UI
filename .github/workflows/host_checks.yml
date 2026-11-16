@@ -1,0 +1,43 @@
+# Every host check of the repository (tools/host_checks.sh, upstream #46): each tools/*/ test built and run on
+# Linux, with what they need from outside the repository at the radio's own versions (liquid-dsp 1.4.0 and ft8_lib at
+# tools/cross_x6200/setup.sh's revision). A check that does not build fails the job as a failing case does, and the
+# table tells them apart (BUILD against FAIL); the ones that need a buildroot tree or the GUI's host build are SKIP,
+# each saying what. Minutes.
+name: Host checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Libraries
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q build-essential autoconf automake libtool libsqlite3-dev libxkbcommon-dev \
+            python3-bottle fdisk util-linux
+
+      - name: liquid-dsp, the radio's version
+        run: |
+          VER=$(sed -n 's/^LIQUID_VER=\([0-9.]*\).*/\1/p' tools/cross_x6200/setup.sh)
+          git clone -q --depth 1 --branch "v$VER" https://github.com/jgaeddert/liquid-dsp.git /tmp/liquid-dsp
+          cd /tmp/liquid-dsp && ./bootstrap.sh > /dev/null && ./configure -q && make -j"$(nproc)" > /dev/null
+          sudo make install > /dev/null && sudo ldconfig
+
+      - name: ft8_lib's headers, the radio's revision
+        run: |
+          REV=$(sed -n 's/^FT8LIB_REV=\([0-9a-f]*\).*/\1/p' tools/cross_x6200/setup.sh)
+          git clone -q https://github.com/gdyuldin/ft8_lib.git /tmp/ft8_lib && git -C /tmp/ft8_lib checkout -q "$REV"
+          mkdir -p /tmp/ft8inc/ft8lib && cp /tmp/ft8_lib/ft8/*.h /tmp/ft8inc/ft8lib/
+
+      - name: Host checks
+        run: FT8LIB_INC=/tmp/ft8inc tools/host_checks.sh
