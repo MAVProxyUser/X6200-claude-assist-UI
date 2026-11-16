@@ -24,7 +24,8 @@ ns = {'bottle': bottle, 'os': os, 'io': io, 'json': json, 're': re, 'tempfile': 
 wanted = {'replace_file', 'read_cluster_conf', 'read_cluster_options', 'cluster_option_lines',
           'write_cluster_conf', 'cluster_save', 'cluster_state', 'cluster_alerts_seen',
           'cluster_error', 'cluster_alert_input', 'cluster_alert_dup', 'add_cluster_alert', 'cluster_update',
-          'api_error', 'upload_update', 'update_reserve', 'update_release', 'update_launch', 'update_job_run'}
+          'api_error', 'upload_update', 'update_reserve', 'update_release', 'update_launch', 'update_job_run',
+          'update_boot_flags'}     # the upload's tick boxes (kernel, U-Boot, restart), read by upload_update
 selected = []
 for node in tree.body:
     if isinstance(node, ast.FunctionDef) and node.name in wanted:
@@ -87,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix='x6upload-') as td:
         body = ('application '+version).encode()
         vb = (version+'\n').encode()
         entries = [{'path':str(p), 'sha256':sha256(b).hexdigest(), 'mode':'644'} for p,b in ((app_path,body),(ver_path,vb))]
-        manifest = {'product':'OpenX6X00', 'model':'x6100','version':version,'files':entries}
+        manifest = {'product':'GoldCorpHF', 'model':'x6100','version':version,'files':entries}
         out = io.BytesIO()
         with tarfile.open(fileobj=out, mode='w:gz') as tar:
             for name,data in [('manifest.json',json.dumps(manifest).encode()), ('files'+str(app_path),body), ('files'+str(ver_path),vb)]:
@@ -107,6 +108,7 @@ with tempfile.TemporaryDirectory(prefix='x6upload-') as td:
         return ug['cmd_install'](args[1:])
     ns['update_run']=run
     ns['get_update']=lambda:{'running':True}
+    bottle.request.forms={}     # no tick box: the bundle's GUI side alone, as before them
     bottle.request.files={'file':SimpleNamespace(raw_filename='A.tar.gz',file=io.BytesIO(bundle('1')))}
     a_result=ns['upload_update']()
     job_started.wait()
@@ -458,7 +460,7 @@ import time
 
 wanted = {'ThreadingWSGIServer', 'RequestHandler', 'TlsContext', 'pipe', 'read_head', 'ws_port', 'Replay', 'Replayed',
           'make_https_server', 'forwarded', 'local_peer'}
-nodes = [n for n in main.body if isinstance(n, ast.ClassDef | ast.FunctionDef) and n.name in wanted or
+nodes = [n for n in main.body if isinstance(n, (ast.ClassDef, ast.FunctionDef)) and n.name in wanted or
          isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ('WS_PATHS', 'HEAD_MAX') for t in n.targets)]
 gui = {}   # what each stand-in of the GUI's sockets got: the bytes, from where
 

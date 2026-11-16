@@ -561,7 +561,7 @@ sys.exit(g['main'](sys.argv[1:]))
         def bundle(version):
             """A bundle of the two installed files, as tools/update/mkbundle.py makes it (unsigned)"""
             body, vb = ('application ' + version).encode(), (version + '\n').encode()
-            manifest = {'product': 'OpenX6X00', 'model': 'x6100', 'version': version,
+            manifest = {'product': 'GoldCorpHF', 'model': 'x6100', 'version': version,
                         'files': [{'path': str(p), 'sha256': hashlib.sha256(b).hexdigest(), 'mode': '644'}
                                   for p, b in ((app, body), (ver, vb))]}
             path = upd / f'bundle-{version}.tar.gz'
