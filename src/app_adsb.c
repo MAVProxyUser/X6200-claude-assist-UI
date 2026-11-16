@@ -165,6 +165,21 @@ static int decay_s(void) { return decays[param_i_get(cfg_adsb_decay)]; }
 
 static uint32_t argb(lv_color_t c) { return lv_color_to32(c) | 0xff000000; }
 
+/* Each receiver's aircraft in a colour of the Sentry's spectrum ramp (yellow to deep orange-red, app_sentry.c's
+ * d3_pal), with two or more listened on: the serial one's (GNS 5890, microADSB) the amber, B's SDR's the deep
+ * orange-red, a spare RTL-SDR's the orange; one heard by two or more within SRC_S of its last frame, the ramp's pale
+ * top. One receiver alone: all amber, as before. The header names each in its colour */
+#define SRC_S 60.0
+static lv_color_t src_col[ADSB_SRCS], both_col;
+static int        n_rx;                 /* receivers listened on, at the last header */
+
+static lv_color_t plane_col(const adsb_plane_t *p) {
+    unsigned m = n_rx > 1 ? adsb_plane_srcs(p, SRC_S) : 0;
+
+    return !m ? amb : m & (m - 1) ? both_col : src_col[__builtin_ctz(m)];
+}
+static uint32_t plane_c(const adsb_plane_t *p) { return argb(plane_col(p)); }
+
 /* fg over bg, a of 255 */
 static uint32_t mix(uint32_t fg, uint32_t bg, int a) {
     if (a <= 0) return bg;
@@ -392,6 +407,7 @@ static void draw_traffic(uint32_t *px, double now, const int *idx, int n) {
         const adsb_plane_t *p = adsb_plane(idx[k]);
         double              x0 = 0, y0 = 0;
         bool                have = false;
+        uint32_t            pc = plane_c(p);
         for (int j = 0; j < p->trail_n; j++) {
             const adsb_point_t *pt = &p->trail[(p->trail_head + ADSB_TRAIL - p->trail_n + j) % ADSB_TRAIL];
             double              x, y;
@@ -400,13 +416,13 @@ static void draw_traffic(uint32_t *px, double now, const int *idx, int n) {
                 have = false;
                 continue;
             }
-            if (have) line(px, (int)lround(x0), (int)lround(y0), (int)lround(x), (int)lround(y), mix(c_amb, c_ink, a * 3 / 4));
-            else put(px, (int)lround(x), (int)lround(y), mix(c_amb, c_ink, a * 3 / 4));
+            if (have) line(px, (int)lround(x0), (int)lround(y0), (int)lround(x), (int)lround(y), mix(pc, c_ink, a * 3 / 4));
+            else put(px, (int)lround(x), (int)lround(y), mix(pc, c_ink, a * 3 / 4));
             x0 = x, y0 = y, have = true;
         }
         double x, y;
         if (have && p->pos_ok && proj(p->lat, p->lon, &x, &y))
-            line(px, (int)lround(x0), (int)lround(y0), (int)lround(x), (int)lround(y), mix(c_amb, c_ink, 190));
+            line(px, (int)lround(x0), (int)lround(y0), (int)lround(x), (int)lround(y), mix(pc, c_ink, 190));
     }
     if (!px) gpu_prims_flush();         /* the aircraft over the tracks */
 
@@ -415,17 +431,18 @@ static void draw_traffic(uint32_t *px, double now, const int *idx, int n) {
         const adsb_plane_t *p = adsb_plane(idx[k]);
         double              x, y;
         if (!p->pos_ok || !proj(p->lat, p->lon, &x, &y)) continue;
-        int xi = (int)lround(x), yi = (int)lround(y);
+        int      xi = (int)lround(x), yi = (int)lround(y);
+        uint32_t pc = plane_c(p);
         if (live(p, now)) {
             double since = now - p->seen;
-            if (since < 1.5) circle(px, x, y, 5 + since * 8, 6, mix(c_amb, c_ink, (int)(255 * (1 - since / 1.5))));
-            if (p->vel_ok) arrow(px, x, y, p->trk, c_amb);
-            else square(px, xi, yi, 3, true, c_amb);
+            if (since < 1.5) circle(px, x, y, 5 + since * 8, 6, mix(pc, c_ink, (int)(255 * (1 - since / 1.5))));
+            if (p->vel_ok) arrow(px, x, y, p->trk, pc);
+            else square(px, xi, yi, 3, true, pc);
         } else {
             int a = fade(now - p->seen);
-            if (a > 0) square(px, xi, yi, 3, false, mix(c_amb, c_ink, a * 3 / 4));
+            if (a > 0) square(px, xi, yi, 3, false, mix(pc, c_ink, a * 3 / 4));
         }
-        if (p->icao == sel_icao) brackets(px, xi, yi, 11, c_amb);
+        if (p->icao == sel_icao) brackets(px, xi, yi, 11, pc);
     }
 }
 
@@ -486,7 +503,7 @@ static void show_labels(double now, const int *idx, int n) {
             if (ly < SC_Y) ly = SC_Y;
             if (ly > SC_Y + SC - 34) ly = SC_Y + SC - 34;
             lv_obj_set_pos(lbl[used], lx, ly);
-            lv_obj_set_style_text_color(lbl[used], on ? amb : dim, 0);
+            lv_obj_set_style_text_color(lbl[used], on ? plane_col(p) : lv_color_mix(plane_col(p), ink, 110), 0);
             lv_obj_clear_flag(lbl[used], LV_OBJ_FLAG_HIDDEN);
             used++;
         }
@@ -529,8 +546,10 @@ static void show_list(double now, const int *idx, int n) {
         lv_label_set_text_fmt(row_l[r], "%-8s %06X %5s %3s %3s %5s %3s %4s", name_of(p, nm, sizeof(nm)), p->icao, alt,
                               kt, trk, rng, brg, age);
         bool chosen = k == sel;
+        lv_color_t pcol   = plane_col(p);
         lv_obj_set_style_bg_opa(row_l[r], chosen ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_text_color(row_l[r], chosen ? ink : live(p, now) ? amb : dim, 0);
+        lv_obj_set_style_bg_color(row_l[r], pcol, 0);
+        lv_obj_set_style_text_color(row_l[r], chosen ? ink : live(p, now) ? pcol : lv_color_mix(pcol, ink, 110), 0);
     }
 }
 
@@ -600,12 +619,27 @@ static void show_scope_words(double now, int nlive) {
 }
 
 static void show_head(double now, int nlive, int nghost) {
-    char      dev[32], name[48], t[16];
+    char      dev[32], name[160], t[16];
     time_t    tt = time(NULL);
     struct tm tm;
     adsb_rx_state_t st = adsb_rx_state(dev, sizeof(dev));
 
+    int  slot[ADSB_SRCS];
+    char names[ADSB_SRCS][40];
+
     adsb_rx_name(name, sizeof(name));
+    n_rx = st == ADSB_RX_ON ? adsb_rx_slots(slot, names, ADSB_SRCS) : 0;
+    if (n_rx > 1) {                     /* each receiver in its aircraft's colour, and BOTH's (ALL's) */
+        size_t at = 0;
+        for (int i = 0; i < n_rx && at < sizeof(name); i++) {
+            int w = snprintf(name + at, sizeof(name) - at, "%s#%06X %s#", i ? " + " : "",
+                             (unsigned)(lv_color_to32(src_col[slot[i]]) & 0xffffff), names[i]);
+            if (w > 0) at += (size_t)w;
+        }
+        if (at < sizeof(name))
+            snprintf(name + at, sizeof(name) - at, " #%06X %s#", (unsigned)(lv_color_to32(both_col) & 0xffffff),
+                     n_rx > 2 ? "2+" : "BOTH");
+    }
     localtime_r(&tt, &tm);              /* the radio's time zone, named, as the Sentry's header */
     strftime(t, sizeof(t), "%H:%M %Z", &tm);
     lv_label_set_text_fmt(status_l, "%s   %d LIVE   %d HISTORY   %s   %s",
@@ -1082,6 +1116,7 @@ static void build(void) {
     snprintf(t, sizeof(t), "XIEGU X6200 AIRSPACE SENTRY: %s", app_sentry_release());   /* the release, as the Sentry's */
     title_l  = label(root, &pixel_20, amb, 60, 6, SW - 120, LV_TEXT_ALIGN_CENTER, t);
     status_l = label(root, &pixel_16, amb, 60, 27, SW - 120, LV_TEXT_ALIGN_CENTER, "");
+    lv_label_set_recolor(status_l, true);   /* the receivers' names in their aircraft's colours */
 
     /* the scope */
     rect(root, SC_X - 3, BODY_Y, SC + 6, SC + 6, 3, false);
@@ -1221,6 +1256,13 @@ static void construct_cb(lv_obj_t *parent) {
     c_ink   = argb(ink);
     c_dim   = argb(dim);
     c_faint = argb(faint);
+    {
+        lv_color_t red = TC(err);
+        for (int i = 0; i < ADSB_SRCS; i++) src_col[i] = amb;
+        src_col[ADSB_SLOT_SDR]   = lv_color_mix(amb, red, 110);     /* the ramp's deep orange-red */
+        src_col[ADSB_SLOT_SPARE] = lv_color_mix(amb, red, 190);     /* its orange */
+        both_col                 = TC(accent_soft);                 /* its pale top */
+    }
     for (int i = 0; i < 64; i++) glow[i] = mix(c_amb, c_ink, i * 60 / 63);
     n_fixed = 0;                        /* the theme's colours: the fixed points again */
 

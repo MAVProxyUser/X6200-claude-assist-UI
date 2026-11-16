@@ -1149,6 +1149,11 @@ the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on t
   its own. The X6200 is never offered: it does not tune 1090 MHz. **Two SDRs stream at once only when that is
   chosen**: a HackRF and an RTL-SDR streaming together on the HOST port's own power browned it out, and the
   disconnects that followed crashed the kernel (fixed in the kernel since, b053159); give them a powered hub.
+- **Each receiver's aircraft in its own colour**, from the Sentry's spectrum ramp, with two or more listened on: the
+  serial one's (GNS 5890, microADSB) amber, B's SDR's deep orange, a spare RTL-SDR's orange; an aircraft heard by two
+  or more within a minute of its last message the ramp's pale top. The scope's mark, its track and label, and its row
+  in the list take it (dimmer once it is history). The head names each receiver in its colour, then BOTH (or 2+ with
+  three) in the pale one. One receiver alone: amber, as before.
 - **A choice follows a swap**: what was chosen is that many receivers, the ones named first. BOTH of a GNS 5890 and a
   HackRF, the HackRF swapped for an RTL-SDR, is the GNS 5890 and the RTL-SDR, without asking.
 - **Two or more receivers**: a box asks which to listen on ("2 RECEIVERS HERE CAN HEAR 1090 MHZ. WHICH?"): each

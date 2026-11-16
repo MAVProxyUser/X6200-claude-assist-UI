@@ -16,6 +16,7 @@
 #define ADSB_TRAIL      240     /* track points an aircraft keeps */
 #define ADSB_LIVE_S     60.0    /* heard this recently: live; after it a ghost of the history */
 #define ADSB_RATE_S     120     /* seconds of message rate kept */
+#define ADSB_SRCS       4       /* the receivers a frame can come from (adsb_rx.c's slots), a bit each */
 
 typedef struct {
     float   lat, lon;
@@ -35,6 +36,7 @@ typedef struct {
     double   cpr_t[2];          /* 0: none yet; even [0], odd [1] */
     uint32_t msgs;
     double   first, seen;
+    double   src_t[ADSB_SRCS];  /* adsb_now() of each receiver's last good frame of it, 0 never */
     adsb_point_t trail[ADSB_TRAIL];
     int      trail_head, trail_n;   /* a ring: the newest at trail_head - 1 */
 } adsb_plane_t;
@@ -62,6 +64,12 @@ void adsb_set_ref(bool ok, double lat, double lon);
 /* A frame as the receiver sends it between '*' and ';' (after the 12-digit time of an '@' frame): 14 or 28 hex
  * digits. True when it was ADS-B with a good CRC */
 bool adsb_frame_hex(const char *hex, size_t n, double now);
+
+/* The same from receiver src (0 .. ADSB_SRCS - 1, -1 none said): each aircraft keeps when each one last heard it */
+bool adsb_frame_from(const char *hex, size_t n, double now, int src);
+
+/* The receivers that heard p within s seconds of its last frame, a bit each (1 << src) */
+unsigned adsb_plane_srcs(const adsb_plane_t *p, double s);
 
 /* Aircraft not heard for keep_s go (keep_s < 0: never), history older than trail_s too (trail_s < 0: kept) */
 void adsb_expire(double now, double keep_s, double trail_s);

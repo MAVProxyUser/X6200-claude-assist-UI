@@ -224,6 +224,18 @@ static int hexval(char c) {
 }
 
 bool adsb_frame_hex(const char *hex, size_t n, double now) {
+    return adsb_frame_from(hex, n, now, -1);
+}
+
+unsigned adsb_plane_srcs(const adsb_plane_t *p, double s) {
+    unsigned m = 0;
+
+    for (int i = 0; i < ADSB_SRCS; i++)
+        if (p->src_t[i] > 0 && p->seen - p->src_t[i] <= s) m |= 1u << i;
+    return m;
+}
+
+bool adsb_frame_from(const char *hex, size_t n, double now, int src) {
     uint8_t msg[14];
 
     if (n != 14 && n != 28) {
@@ -277,6 +289,7 @@ bool adsb_frame_hex(const char *hex, size_t n, double now) {
     adsb_plane_t *p = plane_of((uint32_t)msg[1] << 16 | (uint32_t)msg[2] << 8 | msg[3], now);
     p->msgs++;
     p->seen = now;
+    if (src >= 0 && src < ADSB_SRCS) p->src_t[src] = now;
 
     uint64_t me = 0;
     for (int i = 4; i < 11; i++) me = me << 8 | msg[i];

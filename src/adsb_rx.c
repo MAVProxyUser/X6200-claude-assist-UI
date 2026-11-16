@@ -664,9 +664,9 @@ static void *rx_thread(void *arg) {
                 inside = false;
                 last   = now;
                 if (stamped && len >= 12)       /* '@': a 48-bit time stamp first */
-                    adsb_frame_hex(frame + 12, len - 12, now);
+                    adsb_frame_from(frame + 12, len - 12, now, slot);
                 else if (!stamped)
-                    adsb_frame_hex(frame, len, now);
+                    adsb_frame_from(frame, len, now, slot);
             } else if (inside) {
                 if (len < sizeof(frame) && c != '\r' && c != '\n')
                     frame[len++] = c;
@@ -712,6 +712,30 @@ adsb_rx_state_t adsb_rx_state(char *dev, size_t n) {
 }
 
 /* Each slot that listens: "GNS 5890", "RTL-SDR R820T", "GNS 5890 + RTL-SDR R820T" */
+_Static_assert(SLOT_SERIAL == ADSB_SLOT_SERIAL && SLOT_SDR == ADSB_SLOT_SDR && SLOT_SPARE == ADSB_SLOT_SPARE &&
+                   SLOTS <= ADSB_SRCS, "adsb_rx.h's slots");
+
+/* Slot i's name, dev_lock held: the tuner alone when it says the name already ("HACKRF-ONE", not "HACKRF HACKRF-ONE") */
+static void slot_name(int i, char *s, size_t n) {
+    bool said = dev_info[i][0] && !strncmp(dev_info[i], dev_name[i], strlen(dev_name[i]));
+
+    snprintf(s, n, "%s%s%s", said ? "" : dev_name[i], dev_info[i][0] && !said ? " " : "", dev_info[i]);
+}
+
+int adsb_rx_slots(int *slot, char (*name)[40], int max) {
+    int k = 0;
+
+    pthread_mutex_lock(&dev_lock);
+    for (int i = 0; i < SLOTS && k < max; i++) {
+        if (st[i] != ADSB_RX_ON || !dev_name[i][0]) continue;
+        slot[k] = i;
+        slot_name(i, name[k], sizeof(name[k]));
+        k++;
+    }
+    pthread_mutex_unlock(&dev_lock);
+    return k;
+}
+
 void adsb_rx_name(char *name, size_t n) {
     size_t at = 0;
 
@@ -719,11 +743,11 @@ void adsb_rx_name(char *name, size_t n) {
     name[0] = 0;
     pthread_mutex_lock(&dev_lock);
     for (int i = 0; i < SLOTS && at < n; i++) {
+        char one[48];
+
         if (st[i] != ADSB_RX_ON || !dev_name[i][0]) continue;
-        /* the tuner alone when it says the name already: "HACKRF-ONE", not "HACKRF HACKRF-ONE" */
-        bool said = dev_info[i][0] && !strncmp(dev_info[i], dev_name[i], strlen(dev_name[i]));
-        int  w    = snprintf(name + at, n - at, "%s%s%s%s", at ? " + " : "", said ? "" : dev_name[i],
-                             dev_info[i][0] && !said ? " " : "", dev_info[i]);
+        slot_name(i, one, sizeof(one));
+        int w = snprintf(name + at, n - at, "%s%s", at ? " + " : "", one);
         if (w > 0) at += (size_t)w;
     }
     pthread_mutex_unlock(&dev_lock);

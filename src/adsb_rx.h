@@ -29,6 +29,13 @@ adsb_rx_state_t adsb_rx_state(char *dev, size_t n);
 /* The receivers listened on: "MICROADSB FW 0E", "GNS 5890 + RTL-SDR R820T"; "" none */
 void adsb_rx_name(char *name, size_t n);
 
+/* The receivers' slots, the src of their frames in adsb.c (adsb_frame_from): a serial one (GNS 5890, microADSB), the
+ * Sentry's SDR, a spare RTL-SDR beside it */
+enum { ADSB_SLOT_SERIAL, ADSB_SLOT_SDR, ADSB_SLOT_SPARE };
+
+/* The receivers listened on now, one by one: each one's slot and its name as adsb_rx_name joins them; the count */
+int adsb_rx_slots(int *slot, char (*name)[40], int max);
+
 /* Bytes read since the start */
 uint64_t adsb_rx_bytes(void);
 

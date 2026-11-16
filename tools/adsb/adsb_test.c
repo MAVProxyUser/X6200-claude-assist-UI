@@ -122,6 +122,19 @@ int main(void) {
         check(adsb_count() == ADSB_MAX_PLANES && find(0x100000) == NULL && find(0x100000 + ADSB_MAX_PLANES + 4),
               "full: the one heard longest ago makes room (%d)", adsb_count());
     }
+    {   /* which receivers heard each aircraft (AIRSPACE's colours): BOTH within the minute, one alone after */
+        adsb_clear();
+        adsb_frame_from("8D4840D6202CC371C32CE0576098", 28, 3000.0, 0);
+        const adsb_plane_t *p = find(0x4840D6);
+        check(p && adsb_plane_srcs(p, 60) == 1, "heard by receiver 0 (%u)", p ? adsb_plane_srcs(p, 60) : 99);
+        adsb_frame_from("8D4840D6202CC371C32CE0576098", 28, 3010.0, 1);
+        check(p && adsb_plane_srcs(p, 60) == 3, "and by 1: both (%u)", p ? adsb_plane_srcs(p, 60) : 99);
+        adsb_frame_from("8D4840D6202CC371C32CE0576098", 28, 3090.0, 1);
+        check(p && adsb_plane_srcs(p, 60) == 2, "0 last heard 90 s before: 1 alone (%u)", p ? adsb_plane_srcs(p, 60) : 99);
+        feed("8D4840D6202CC371C32CE0576098", 3091.0);
+        check(p && adsb_plane_srcs(p, 60) == 2, "a frame from no receiver said changes none (%u)",
+              p ? adsb_plane_srcs(p, 60) : 99);
+    }
 
     printf("%d of %d ADS-B cases as they should be\n", good, cases);
     return good == cases ? 0 : 1;
