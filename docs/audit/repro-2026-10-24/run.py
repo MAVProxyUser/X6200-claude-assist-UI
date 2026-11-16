@@ -335,7 +335,17 @@ def main():
             "int32_t subject_i_get(SubjectInt *s);\nvoid subject_i_set(SubjectInt *s, int32_t v);\n"
             "void freq_strip_set_lock(bool user_lock);\nvoid info_lock_mode(bool lock);\n"
             "static SubjectInt *freq_lock;\nstatic bool user_lock, app_lock;\n"
-            "static bool band_lock, mode_lock, ab_lock;\n" +
+            "static bool band_lock, mode_lock, ab_lock;\n"
+            # The lock per band and mode (Settings, off by default) the cut reads: off here, so these cases are
+            # the plain lock's; its settings and the screen's message as stand-ins
+            "typedef struct Subject Subject;\ntypedef struct { int32_t v; } Setting;\n"
+            "static Setting lock_modes, per_band, cur_mode;\n"
+            "static Setting *cfg_band_lock_modes = &lock_modes, *cfg_lock_per_band = &per_band, "
+            "*cfg_cur_mode = &cur_mode;\n"
+            "static int32_t param_i_get(Setting *p) { return p->v; }\n"
+            "static void param_i_set(Setting *p, int32_t v) { p->v = v; }\n"
+            "static int32_t cparam_i_get(Setting *p) { return p->v; }\n"
+            "static void msg_update_text_fmt(const char *fmt, ...) { (void)fmt; }\n" +
             screen[end_of("static bool cw_mode("):end_of("toggle_freq_lock(void) {")] + "\n" +
             screen[screen.index("void main_screen_lock_freq("):end_of("bool main_screen_freq_locked(")] + "\n"
             "void lock_key(void) { toggle_freq_lock(); }\n"
