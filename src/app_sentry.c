@@ -2236,7 +2236,11 @@ static void rtl_layout(void) {
         lv_obj_add_flag(hf_tick_l[i], LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(rtl_tick_l[i], LV_OBJ_FLAG_HIDDEN);
     }
-    for (int i = 0; i < RTL_PEAKS; i++) lv_obj_add_flag(rtl_peak_l[i], LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < RTL_PEAKS; i++) {      /* both halves' names: hf_labels() runs only with the X6200 shown, so
+                                                * A's (SPLIT) stayed over B's picture (RTL) when the ring went on */
+        lv_obj_add_flag(rtl_peak_l[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(hf_peak_l[i], LV_OBJ_FLAG_HIDDEN);
+    }
     rtl_present();
 }
 
