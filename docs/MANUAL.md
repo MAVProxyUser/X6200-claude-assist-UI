@@ -741,7 +741,7 @@ Its controls (GEN shows them, as does a tap on the title):
 | Control | Does |
 |---|---|
 | VFO knob | The screen's own radio: on A (and the other screens) the X6200 by hand, the Sentry going to MAN-OVERRIDE and A's scan stopping; on B the stick's channel (heard or not), and with F2 held B's presets, one a click, back when turned back; on C the stick while a stick entry plays |
-| MFK knob | On A and B it pans the picture by SCAN CFG's STEP, its push going to the strongest signal; elsewhere it chooses a band, a frequency, an item, a logged signal, a CB channel. Push: listen, open |
+| MFK knob | On A and B it pans the picture by SCAN CFG's STEP, its push going to the strongest signal; elsewhere it chooses a band, a frequency, an item, a logged signal, G's group (its arrows step). Push: listen, open |
 | MFK inner ring | The screens, A to H and round again (H is AIRSPACE; its ring comes back to A or G) |
 | VOL/SQL/RFG knob | Volume; push: squelch, push: RF gain, push: volume again. On B the squelch and RF gain are the SDR's |
 | F1-F5 | The keys along the bottom: on A and B, F1 SCAN, F2 BAND (B: PRESET), F3 VIEW, F4 LISTEN, F5 SCAN CFG |
@@ -789,7 +789,9 @@ last seconds, the strongest signals named over it and the screen's channel brack
   With a HackRF or bladeRF, F2 also takes D's bands it tunes from 1 MHz (the HackRF's) up; elsewhere HF stays the
   X6200's (below).
 - **F3 VIEW**: the screen's radio alone, SPLIT (the X6200 above, the stick below) or the other radio alone. Each
-  half says its radio, its channel and whether it is HEARD, MUTED or SQUELCHED.
+  half says its radio, its channel and whether it is HEARD, MUTED or SQUELCHED. On A, the VFO, the MFK or a band
+  chosen while the view is the SDR's alone puts it back on SPLIT (`VIEW: SPLIT`): A's knobs tune the X6200, and with
+  the SDR's picture alone nothing on A showed them move but the TUNED box.
 - **F4 LISTEN**, each screen's own: X6200, the SDR by its kind (RTL, HACKRF or BLADERF; SDR while none is plugged in), BOTH or OFF, OFF silencing the speaker (neither radio, the volume
   kept). **Two or more SDRs on USB** (a HackRF and an RTL-SDR on a powered hub, say): B offers those that tune its
   channel, in a box ("2 SDRS HERE TUNE B'S CHANNEL (162.400 MHZ). WHICH?", each with its range and whether it
@@ -952,7 +954,7 @@ The X6200 as a walkie-talkie, in the same look, **held up**: G turns the screen 
 Walkie app does). Only F4 (the spectrum's view) and F5 (the group and mode) have names, each in a box as long as its
 key along the screen's edge (the key's width with the radio lying flat) and centred on it (the keys are about 190 px
 apart on the X6200's screen): F4's `3D` (or `2D`) in the lamp's row, F5's beside the message box. F1, F2 and F3
-have no box (F1 and F2 still step CB's channels, as the knobs do), so the channel, the spectrum and the voiceprint
+have no box (F1 and F2 still step, as the arrows do), so the channel, the spectrum and the voiceprint
 (as tall as each other) and the radio's state run from edge to edge. G is the X6200's, but for the channels of a
 HackRF or bladeRF (below): an RTL-SDR only receives and has B for that, so G neither shows nor plays it (shown with
 LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back when shown).
@@ -995,15 +997,16 @@ the VFO) is by hand: the Sentry stops moving the dial (MAN-OVERRIDE, as a turn o
 | 6 M | 1: 50.125 | SSB, AM |
 | 6 M FM | 52.525 calling | FM |
 
-- **The VFO knob always tunes the dial, fine**, as on A (its step: FST), on CB too. On CB (anywhere in its span, on
-  a channel or tuned between two) the arrows step its 40 channels: **BAND UP and DOWN**, the F1 and F2 keys (CH -
-  and CH +, no box) and the MFK, a channel a click by number, the mode kept (tuned between two: the nearest one that
-  way). Anywhere else the MFK and the BAND keys go from group to group. The MFK's push goes to CB 19.
+- **The three controls**: the **VFO knob** tunes the dial, fine, as on A (its step: FST), on CB too; the **MFK**
+  goes from group to group (the preset bands: each band of D's, CB, 10 M FM, the SDR's), each at its home channel;
+  the **arrows** step either way: **BAND UP and DOWN** and the F1 and F2 keys (no box). On CB (anywhere in its span,
+  on a channel or tuned between two) they step its 40 channels (CH - and CH +), a channel a click by number, the mode
+  kept (tuned between two: the nearest one that way); anywhere else the dial by A's step (SCAN CFG's STEP, 10 kHz
+  unless set; STEP - and STEP +) to the step's next multiple that way, the mode kept. The MFK's push goes to CB 19.
+  Up to v0.3.12.27 the MFK stepped CB's channels and the arrows went from group to group off CB.
 - **F5** goes through the groups and each one's modes in turn: CB AM, CB SSB, CB FM, then 10 M SSB, 10 M AM, 10 M
-  FM... The mode changes where the dial is; past a group's last mode, the next group at its home channel.
-  Off CB, **BAND UP** and **BAND DOWN** go to the next and previous group, G staying shown (on CB they step its
-  channels: F5 leaves CB). SSB is single sideband: LSB on
-  160, 80 and 40 m as hams use it, USB everywhere else (60 m, the ship and utility stations, 20 m up).
+  FM... The mode changes where the dial is; past a group's last mode, the next group at its home channel. SSB is
+  single sideband: LSB on 160, 80 and 40 m as hams use it, USB everywhere else (60 m, the ship and utility stations, 20 m up).
 - **F4**: the spectrum in 3D or 2D (flat, a waterfall).
 - **A/B** arms the X6200's transmitter for PTT (as on A) and locks it again; leaving G for any screen but A locks
   it. **PTT while TX is locked** says what to press, on every screen of the Sentry: `PRESS A/B ON THE TOP PANEL TO
@@ -1033,9 +1036,8 @@ cellular, FRS/GMRS, MURS, ISM or any other non-amateur frequency is ever keyed, 
 
 - **On an SDR channel G is the SDR's**: `VIA HACKRF` (or `VIA BLADERF`, `VIA RTL-SDR`), FM, the channel heard on the speaker at B's
   volume and squelch, G's spectrum and voiceprint from the SDR (the device tuned 200 kHz over the channel, its
-  middle unused), the S-meter bar its level over the noise. The VFO moves the channel 5 kHz a click; CH - and CH +
-  (F1, F2) and the MFK step the group's channels; BAND UP and DOWN and F5 go from group to group, back to the X6200's
-  too. Leaving G, or an X6200 channel chosen, gives the speaker back to the X6200; G comes back to the SDR channel it
+  middle unused), the S-meter bar its level over the noise. The VFO moves the channel 5 kHz a click; the arrows (BAND UP and DOWN, CH - and CH +
+  on F1 and F2) step the group's channels; the MFK and F5 go from group to group, back to the X6200's too. Leaving G, or an X6200 channel chosen, gives the speaker back to the X6200; G comes back to the SDR channel it
   was on (after a restart too, once the SDR is there).
 - **A/B arms the SDR's transmitter** (`HACKRF ARMED: PTT TRANSMITS (TX 10 DB)`, the lamp TX ARMED): the X6200 is
   never let go for it, it stays receive only at 0 W. A/B again, leaving G, an X6200 channel, or the SDR pulled out

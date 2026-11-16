@@ -1474,6 +1474,7 @@ static void show_cfg_rtl(void);
 static void show_walkie(void);
 static void walkie_step(void);
 static void walkie_ch(int dir, int to);
+static void walkie_arrow(int dir);      /* G's arrows: a channel, or a step of the dial */
 static void walkie_show(bool on);
 static bool g_portrait;         /* G held up: its own portrait screen shows (walkie_show) */
 static bool g_armed;            /* G's transmitter armed (the A/B key): the Sentry's receive-only hold let go */
@@ -3460,7 +3461,7 @@ static int vol_bar(void) {
 static void show_legend(void) {
     static const char *const mfk[SCR_N] = {"PAN, PUSH STRONGEST", "NEXT TARGET, PUSH HOLD", "BAND, PUSH LISTEN",
                                            "FREQ, PUSH OPEN", "ITEM, PUSH OPEN", "PAN, PUSH STRONGEST",
-                                           "SIGNAL, PUSH LISTEN", "CHANNEL OR GROUP, PUSH CH 19"};
+                                           "SIGNAL, PUSH LISTEN", "GROUP, PUSH CB 19"};
 
     char v[24];
 
@@ -4903,10 +4904,10 @@ static void fkey(int k) {
                 go(SCR_TRACK);
             }
             break;
-        case SCR_WALKIE:                /* CH- and CH+ on CB and the SDR's groups (walkie_ch does nothing elsewhere);
+        case SCR_WALKIE:                /* F1 and F2 as the arrows: CH -/+ on CB and the SDR's groups, a step elsewhere;
                                          * F3 the SDR's TX gain */
-            if (k == 0) walkie_ch(-1, 0);
-            if (k == 1) walkie_ch(1, 0);
+            if (k == 0) walkie_arrow(-1);
+            if (k == 1) walkie_arrow(1);
             if (k == 2) w_sdr_gain_next();
             if (k == 3) ws_view_next();
             if (k == 4) walkie_group_mode();
@@ -5041,12 +5042,27 @@ static int pan_steps(int dir) {
     return m;
 }
 
+/* A's knobs tune the X6200, so A's picture shows it. With VIEW on RTL (the SDR's picture alone, one F3 from SPLIT)
+ * nothing on A moved as they did: the user, 2026-11-16, "on A when I twist the large dial it doesn't seem to tune
+ * the tuner ... it's like MFK and dial tuning on A got broken" (both tuned; only the TUNED box said so). Turned there,
+ * or a band chosen, A goes to SPLIT: the X6200's half again, the SDR's under it */
+static void a_view_x6200(void) {
+    if (scr != SCR_SCAN || param_i_get(cfg_a_view) != VIEW_RTL) return;
+    param_i_set(cfg_a_view, VIEW_SPLIT);
+    rtl_layout();
+    rtl_labels_place();
+    show_screen();
+    osd("VIEW: SPLIT", "THE X6200'S PICTURE IS BACK AS ITS DIAL MOVES (VIEW RTL SHOWED THE SDR'S ALONE). F3 CHANGES THE "
+                       "VIEW.", -1);
+}
+
 static void step(int dir) {
     if ((scr == SCR_SCAN || scr == SCR_WALKIE) && dial_held()) return;     /* the MFK tunes the X6200 here */
     switch (scr) {
         case SCR_SCAN: {                /* as on C: it pans, by SCAN CFG's step (more when spun); a scan stops there */
             int32_t st = a_steps[a_step], fq = cparam_i_get(cfg_fg_freq);
 
+            a_view_x6200();
             if (routine == ROUT_SCAN) set_routine(ROUT_BAND);
             tune(fq / st * st + dir * pan_steps(dir) * st, -1);
             show_screen();
@@ -5077,9 +5093,10 @@ static void step(int dir) {
             sys_sel = (sys_sel + dir + SYS_N) % SYS_N;
             show_screen();
             break;
-        case SCR_WALKIE:                /* on CB and the SDR's groups the channel, elsewhere the group */
-            if (w_cb_here() || w_sdr_hz) walkie_ch(dir, 0);
-            else walkie_group(dir);
+        case SCR_WALKIE:                /* the group (each band one, CB, the SDR's): the preset bands, as B's F2; the
+                                         * arrows step (the user, 2026-11-16: "MFK changes preset band, and dial for
+                                         * precise, and the left right channel arrows should do the step advancement") */
+            walkie_group(dir);
             break;
         case SCR_LOG:                   /* the next one; while one plays, it plays the next one; a scan stops */
             if (!nhits) break;
@@ -5240,6 +5257,7 @@ static void rotary_cb(int32_t diff) {
         else rtl_listen_turn(diff);
         return;
     }
+    a_view_x6200();                     /* on A: the X6200's picture, if VIEW was on the SDR's alone */
     if (smode != MODE_MAN) {
         smode = MODE_MAN;
         if (routine == ROUT_SCAN) routine = ROUT_BAND;      /* tuned by hand: the scan stops there, as F's */
@@ -5282,10 +5300,9 @@ static void filter_step(void) {
 }
 
 static void band_key(bool up) {
-    if (scr == SCR_WALKIE) {            /* G: on CB its channels (as CH -/+), elsewhere the groups (each band one; the
-                                         * SDR's after them, their channels on CH -/+ and the MFK) */
-        if (w_cb_here()) walkie_ch(up ? 1 : -1, 0);
-        else walkie_group(up ? 1 : -1);
+    if (scr == SCR_WALKIE) {            /* G: the arrows step: CB's and the SDR's channels, elsewhere the dial by A's
+                                         * step (the MFK goes from group to group) */
+        walkie_arrow(up ? 1 : -1);
         return;
     }
     if (scr == SCR_RTL) {               /* F: its presets, not the X6200's bands (and never A) */
@@ -5310,6 +5327,7 @@ static void band_key(bool up) {
 
     band_sel = i;
     listen_band_x6200(i);
+    a_view_x6200();
     if (scanning) {                     /* F2 or a BAND key while scanning: the new band, from its low end */
         scan_a_band = i;
         routine     = ROUT_SCAN;
@@ -6309,7 +6327,7 @@ static int w_match(void) {
     return -1;
 }
 
-/* A service with defined channels (on the X6200: CB): the arrows (BAND, CH -/+) and the MFK step them; the other
+/* A service with defined channels (on the X6200: CB): the arrows (BAND, CH -/+) step them; the other
  * groups are a place to start. The VFO always tunes the dial, fine, on CB too */
 static bool w_chan(int i) {
     return i >= 0 && i < w_n && !strcmp(w_chs[i].grp, "CB");
@@ -6620,7 +6638,7 @@ static void w_mode_here(int m) {
     for (int k = 0; k < 5; k++) buttons_refresh(&btn[k]);
 }
 
-/* The next group (dir 1: BAND UP, the MFK off CB) or the one before, at its home channel in its own mode: every band
+/* The next group (dir 1: the MFK clockwise, F5 past a group's last mode) or the one before, at its home channel in its own mode: every band
  * of D's the X6200 tunes is a group, so each has a channel to start on */
 static void walkie_group(int dir) {
     int         i = w_at < 0 ? w_start(w_hz()) : w_at;
@@ -6674,7 +6692,7 @@ static void walkie_enter(void) {
     w_mode = w_mode_now();
 }
 
-/* The arrows on CB (BAND UP/DOWN, CH -/+, the MFK): the next CB channel by number, the mode kept; tuned between two,
+/* The arrows on CB (BAND UP/DOWN, CH -/+): the next CB channel by number, the mode kept; tuned between two,
  * the nearest one that way; to: CB channel to (the MFK's push: 19) */
 static void walkie_ch(int dir, int to) {
     int     i = w_match(), k = -1;
@@ -6720,6 +6738,25 @@ static void walkie_ch(int dir, int to) {
     walkie_go(k, w_mode_now());
 }
 
+/* G's arrows (BAND UP/DOWN, F1 and F2): a step either way. On CB and the SDR's groups the next channel (walkie_ch);
+ * elsewhere the X6200's dial by A's step (SCAN CFG's STEP, 10 kHz unless set), to the step's next multiple that way,
+ * the mode kept: the VFO tunes fine, the MFK goes from group to group */
+static void walkie_arrow(int dir) {
+    if (w_cb_here() || w_sdr_hz) {
+        walkie_ch(dir, 0);
+        return;
+    }
+    if (dial_held()) return;
+    int32_t st = a_steps[a_step], fq = cparam_i_get(cfg_fg_freq);
+    int32_t to = dir > 0 ? (fq / st + 1) * st : (fq - 1) / st * st;
+
+    x62_by_hand();
+    if (!tune(to, -1)) return;
+    w_at = w_match();
+    show_walkie();
+    for (int k = 0; k < 5; k++) buttons_refresh(&btn[k]);
+}
+
 /* TX unlocked (armed) or on the air: the knobs that tune the X6200 are held, so a bump cannot move the transmitter */
 static bool dial_held(void) {
     if (!g_armed && !g_sdr_armed && radio_get_state() != RADIO_TX) return false;
@@ -6728,13 +6765,13 @@ static bool dial_held(void) {
     return true;
 }
 
-/* The F keys' names on G: CH- and CH+ only on a service's channels (no box held up), nothing on F3, the picture's
- * view on F4 (a slim box), the group and mode on F5 */
+/* The F keys' names on G: CH- and CH+ on a service's channels, STEP - and STEP + elsewhere (no box held up), nothing
+ * on F3, the picture's view on F4 (a slim box), the group and mode on F5 */
 static void walkie_key_label(int k, char *s, size_t n) {
     int i = w_match(), g;
 
     if (k <= 1) {
-        snprintf(s, n, "%s", w_cb_here() || w_sdr_hz ? (k ? "CH +" : "CH -") : "");
+        snprintf(s, n, "%s", w_cb_here() || w_sdr_hz ? (k ? "CH +" : "CH -") : (k ? "STEP +" : "STEP -"));
     } else if (k == 2) {
         if (w_sdr_hz) w_sdr_power(s, n);
         else s[0] = 0;
@@ -7283,7 +7320,7 @@ static void build_walkie_portrait(void) {
     badge_turned(PW - 43, 12);          /* the display's top left (held up, the top right): every screen's letter */
     badge_turned(PW - 43, PH - 50);     /* and the bar's other end */
 
-    /* F1, F2 and F3 have no box (CB's CH -/+ on F1 and F2; the knobs step CB too): the channel, the spectrum and the
+    /* F1, F2 and F3 have no box (CH -/+ or STEP -/+ on F1 and F2, as the arrows): the channel, the spectrum and the
      * voiceprint run from the screen's edge, the spectrum and the voiceprint as tall as each other; F4's box, as
      * small as "3D", beside its key in the lamp's row; under it the radio's state, then F5's box and the messages */
     int ys = P_TOP + 92 + 6, yv, hh = (P_LAMPY - 6 - ys - 6) / 2;
@@ -7475,7 +7512,7 @@ static void build_overlays(void) {
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS (SPUN: 3 OR 8 STEPS A CLICK)\n"
                    "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (ON B THE SDR'S)\n"
                    "LISTEN         A: X6200, THE SDR, BOTH, OFF; B: X6200, EACH SDR THAT TUNES IT, BOTH, OFF\n"
-                   "BAND UP/DOWN   THE NEXT BAND, AS F2 (B: THE NEXT PRESET; G: CB CHANNEL, OR GROUP)\n"
+                   "BAND UP/DOWN   THE NEXT BAND, AS F2 (B: THE NEXT PRESET; G: A CHANNEL OR A STEP, MFK: GROUP)\n"
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
                    "DFN            NOISE REDUCTION ON/OFF. HOLD: NOISE BLANKER (CLICKS AND POPS)\n"
                    "DFL            FILTER WIDE, NORMAL, NARROW (NARROW: LESS NOISE, MUFFLED)\n"
