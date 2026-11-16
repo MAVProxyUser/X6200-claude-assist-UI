@@ -30,7 +30,10 @@
 #define SLOT_SYM  144           /* a burst and the CACH after it: 30 ms */
 #define SYNC_AT   54            /* the sync's first symbol in its burst */
 #define QUEUE     8
-#define MIN_LEVEL 0.08f         /* the sync's symbols at least this far apart on average (+-400 Hz): not noise */
+#define MIN_LEVEL 0.12f         /* a sync's symbols (all +-3) at +-600 Hz at least, and +-3.75 kHz at most */
+#define MAX_LEVEL 0.75f
+#define MAX_CV    0.35f         /* and their sizes alike: their spread over their mean at most this (FM noise with no
+                                 * carrier, all clicks, matched a sync's 24 signs every minute or two, 2026-11-16) */
 #define LOCK_S    0.4
 
 enum { P_BS_VOICE, P_BS_DATA, P_MS_VOICE, P_MS_DATA, P_TS1_VOICE, P_TS1_DATA, P_TS2_VOICE, P_TS2_DATA, P_N };
@@ -74,6 +77,8 @@ struct dmr_s {
     int         cand_p, cand_left, hold;     /* hold: samples after a sync found before another is looked for */
     /* the clock */
     bool        locked, bs;
+    bool        confirmed;      /* a second sync on the first's 30 ms grid: DMR, not a chance match in noise */
+    double      first_start;    /* the first one's burst, while not confirmed (0 none) */
     double      next_bs, last_sync;
     float       centre, unit;   /* the levels: +-1 symbols at centre +- unit */
     pend_t      q[QUEUE];
@@ -318,9 +323,10 @@ static float at(const dmr_t *d, double pos) {
     return d->ring[i & (RING - 1)] * (1 - f) + d->ring[(i + 1) & (RING - 1)] * f;
 }
 
-/* The 24 symbols of a sync ending at pos, their DC off; their mean magnitude; their signs, bit k for x[k] > 0 */
-static float sync_syms(const dmr_t *d, double pos, float x[24], uint32_t *signs) {
-    float    mean = 0, sa = 0;
+/* The 24 symbols of a sync ending at pos, their DC off; their mean magnitude; their signs, bit k for x[k] > 0; the
+ * spread of their magnitudes over that mean (cv) */
+static float sync_syms(const dmr_t *d, double pos, float x[24], uint32_t *signs, float *cv) {
+    float    mean = 0, sa = 0, sq = 0;
     uint32_t m    = 0;
 
     if (pos == floor(pos) && pos + 1 < (double)d->n && pos > d->s_off[0]) {    /* a whole sample: the offsets made */
@@ -337,9 +343,15 @@ static float sync_syms(const dmr_t *d, double pos, float x[24], uint32_t *signs)
     mean /= 24;
     for (int k = 0; k < 24; k++) {
         sa += fabsf(x[k] -= mean);
+        sq += x[k] * x[k];
         if (x[k] > 0) m |= 1u << k;
     }
     if (signs) *signs = m;
+    if (cv) {
+        float l = sa / 24, var = sq / 24 - l * l;
+
+        *cv = l > 0 ? sqrtf(var > 0 ? var : 0) / l : 9;
+    }
     return sa / 24;
 }
 
@@ -361,7 +373,7 @@ static float sync_match(const dmr_t *d, const float x[24], float level, int p, i
 }
 
 static float sync_raw(const dmr_t *d, double pos, int p) {
-    float x[24], level = sync_syms(d, pos, x, NULL), raw;
+    float x[24], level = sync_syms(d, pos, x, NULL, NULL), raw;
     int   bad;
 
     sync_match(d, x, level, p, &bad, &raw);
@@ -527,6 +539,16 @@ static void queue(dmr_t *d, double start, int pat) {
 static void sync_commit(dmr_t *d, double end, int pat) {
     double start = end - (SYNC_AT + 23) * d->sps;
 
+    if (!d->confirmed) {                /* DMR only with a second sync a whole number of bursts after the first */
+        double gap = start - d->first_start, k = floor(gap / (SLOT_SYM * d->sps) + 0.5);
+
+        if (d->first_start > 0 && k >= 1 && k <= 13 && fabs(gap - k * SLOT_SYM * d->sps) < 2) {
+            d->confirmed = true;
+        } else {
+            d->first_start = start;
+            return;
+        }
+    }
     d->syncs++;
     d->last_sync = end;
     for (int i = 0; i < d->qn; i++)     /* one expected there: this is it */
@@ -545,7 +567,7 @@ static void step(dmr_t *d) {
     double t = (double)d->n - 2, expect = d->next_bs + (SYNC_AT + 23) * d->sps;   /* t: a sample behind the newest,
                                                                                          * which at() reads up to */
     bool   near = d->locked && fabs(t - expect) < 4;
-    float    x[24], level;
+    float    x[24], level, cv;
     uint32_t signs;
     int      ok_bad = near ? 2 : 0;
 
@@ -553,7 +575,8 @@ static void step(dmr_t *d) {
      * sample either side of its peak, which is then looked for at every one */
     if (d->hold > 0) d->hold--;
     else if (t > 26 * d->sps + 2 && (d->cand_c > 0 || near || d->sps < 8 || (d->n & 1)) &&
-             (level = sync_syms(d, t, x, &signs)) >= MIN_LEVEL) {
+             (level = sync_syms(d, t, x, &signs, &cv)) >= MIN_LEVEL && level <= MAX_LEVEL &&
+             cv <= (near ? 1.5f : 1.0f) * MAX_CV) {
         for (int p = 0; p < P_N; p++) {
             int   bad;
             float raw, c;
@@ -581,8 +604,11 @@ static void step(dmr_t *d) {
         queue(d, d->next_bs, P_NONE);
         d->next_bs += SLOT_SYM * d->sps;
     }
+    if (d->first_start > 0 && !d->confirmed && t - d->first_start > LOCK_S * d->rate) d->first_start = 0;
     if (d->locked && t - d->last_sync > LOCK_S * d->rate) {
-        d->locked = false;
+        d->locked    = false;
+        d->confirmed = false;
+        d->first_start = 0;
         for (int s = 1; s <= 2; s++) voice_end(d, &d->sl[s]);
     }
     for (int i = 0; i < d->qn;) {       /* those whole: read */
@@ -631,7 +657,7 @@ void dmr_feed(dmr_t *d, const float *x, size_t n) {
     }
 }
 
-bool dmr_active(const dmr_t *d) { return d->syncs && (double)d->n - d->last_sync < 0.5 * d->rate; }
+bool dmr_active(const dmr_t *d) { return d->confirmed && (double)d->n - d->last_sync < 0.5 * d->rate; }
 
 void dmr_counts(const dmr_t *d, uint32_t *syncs, uint32_t *bursts, uint32_t *lcs, uint32_t *elcs) {
     if (syncs) *syncs = d->syncs;

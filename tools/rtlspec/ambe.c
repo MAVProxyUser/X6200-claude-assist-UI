@@ -16,6 +16,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -180,6 +181,46 @@ static void low_latency(const char *path) {
     }
 }
 
+/* The chip tried as it is set up: 200 ms of a 1 kHz tone encoded at rate 33 (a speech packet: field 0x00, 160 samples)
+ * and each frame decoded again, the last 100 ms of what comes back measured (its zero crossings, its level). Said in
+ * the log; the codec's state set back after (PKT_INIT, 0x0B: encoder and decoder) */
+static void self_test(void) {
+    uint8_t r[340], q[2 + 320], c[11];
+    int     type, n, zc = 0, frames = 0;
+    double  energy = 0;
+    int16_t last = 0;
+
+    for (int f = 0; f < 10; f++) {
+        q[0] = 0x00;
+        q[1] = 160;
+        for (int i = 0; i < 160; i++) {
+            int16_t v = (int16_t)(8000 * sin(2 * M_PI * 1000 * (f * 160 + i) / 8000.0));
+
+            q[2 + 2 * i] = (uint8_t)(v >> 8);
+            q[3 + 2 * i] = (uint8_t)v;
+        }
+        if (!send_pkt(2, q, sizeof(q)) || (n = recv_pkt(&type, r, sizeof(r), 300)) < 11 || type != 1 || r[0] != 0x01)
+            break;
+        memcpy(c, r, 11);               /* field 0x01, 72 bits, the frame: as the decoder takes it */
+        if (!send_pkt(1, c, sizeof(c)) || (n = recv_pkt(&type, r, sizeof(r), 300)) < 2 || type != 2 || r[0] != 0x00)
+            break;
+        frames++;
+        for (int i = 0; f >= 5 && i < r[1] && 3 + 2 * i < n; i++) {
+            int16_t v = (int16_t)(r[2 + 2 * i] << 8 | r[3 + 2 * i]);
+
+            if ((v >= 0) != (last >= 0)) zc++;
+            last = v;
+            energy += (double)v * v;
+        }
+    }
+    if (frames < 10)
+        fprintf(stderr, "rtlspec: AMBE self-test: %d of 10 frames through\n", frames);
+    else
+        fprintf(stderr, "rtlspec: AMBE self-test: a 1 kHz tone (8000) encoded and decoded came back at %d Hz, level %.0f\n",
+                zc * 5, sqrt(energy / 800) * M_SQRT2);
+    ask((const uint8_t[]){0x0B, 0x03}, 2, r, sizeof(r), 300);
+}
+
 static bool set_up(const char *path, speed_t speed) {
     struct termios t;
     uint8_t        r[340];
@@ -235,6 +276,7 @@ static bool set_up(const char *path, speed_t speed) {
         return false;
     }
     snprintf(dev, sizeof(dev), "%s", path);
+    self_test();
     return true;
 }
 

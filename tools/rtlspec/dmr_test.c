@@ -262,6 +262,40 @@ static void run(const char *name, double sigma, double dc, double ppm) {
     free(x);
 }
 
+/* FM noise with no carrier, as the daemon makes it: complex noise at 264.6 kHz, its 9 kHz channel filter (63 taps,
+ * Blackman windowed sinc), every sixth sample, the discriminator (+-1 for +-5 kHz). All clicks: it matched a sync's 24
+ * signs every minute or two on the radio before the sync had to have its sizes alike and a second on its grid */
+static float fm_noise(void) {
+    static float  taps[63], hr[126], hi[126], pr = 1, pi = 0;
+    static int    at, made;
+
+    if (!made) {
+        float sum = 0, fc = 9000.0f / 264600.0f;
+
+        for (int i = 0; i < 63; i++) {
+            int   m = i - 31;
+            float s = m ? sinf(2 * (float)M_PI * fc * m) / ((float)M_PI * m) : 2 * fc;
+            float w = 0.42f - 0.5f * cosf(2 * (float)M_PI * i / 62) + 0.08f * cosf(4 * (float)M_PI * i / 62);
+            sum += taps[i] = s * w;
+        }
+        for (int i = 0; i < 63; i++) taps[i] /= sum;
+        made = 1;
+    }
+    for (int k = 0; k < 6; k++) {
+        hr[at] = hr[at + 63] = (float)gauss();
+        hi[at] = hi[at + 63] = (float)gauss();
+        at = at + 1 == 63 ? 0 : at + 1;
+    }
+    float yr = 0, yi = 0;
+
+    for (int k = 0; k < 63; k++) yr += hr[at + k] * taps[k], yi += hi[at + k] * taps[k];
+    float zr = yr * pr + yi * pi, zi = yi * pr - yr * pi;
+
+    pr = yr;
+    pi = yi;
+    return atan2f(zi, zr) * (float)(RATE / (2 * M_PI * 5000));
+}
+
 static void no_dmr(const char *name, int tone) {
     calls_t cs = {0};
     dmr_t  *d  = dmr_new((float)RATE, on_ambe, on_call, &cs);
@@ -270,16 +304,17 @@ static void no_dmr(const char *name, int tone) {
     char    w[128];
 
     memset(ngot, 0, sizeof(ngot));
-    for (int b = 0; b < 3000; b++) {    /* 30 s */
+    for (int b = 0; b < (tone == 2 ? 30000 : 3000); b++) {      /* 30 s; FM noise 5 minutes */
         for (int i = 0; i < 441; i++) {
             ph += 2 * M_PI * 1000 / RATE;
-            x[i] = tone ? (float)(0.6 * sin(ph) + 0.02 * gauss()) : (float)(0.5 * gauss());
+            x[i] = tone == 1 ? (float)(0.6 * sin(ph) + 0.02 * gauss()) : tone == 2 ? fm_noise() : (float)(0.5 * gauss());
         }
         dmr_feed(d, x, 441);
     }
     uint32_t sy;
     dmr_counts(d, &sy, NULL, NULL, NULL);
-    snprintf(w, sizeof(w), "%s, 30 s: no sync (%u), no call (%d), no frame (%d)", name, sy, cs.n, ngot[1] + ngot[2]);
+    snprintf(w, sizeof(w), "%s, %d s: no sync (%u), no call (%d), no frame (%d)", name, tone == 2 ? 300 : 30, sy, cs.n,
+             ngot[1] + ngot[2]);
     check(sy == 0 && cs.n == 0 && ngot[1] + ngot[2] == 0, w);
     dmr_free(d);
 }
@@ -291,6 +326,7 @@ int main(void) {
     run("noisier (about 14 dB), 300 Hz off, clock 20 ppm slow", 0.04, -300, -20);
     no_dmr("noise alone", 0);
     no_dmr("an FM tone (1 kHz, 3 kHz deviation)", 1);
+    no_dmr("FM noise with no carrier (the channel's filter and discriminator)", 2);
     printf("%d of %d right\n", checks - fails, checks);
     return fails != 0;
 }

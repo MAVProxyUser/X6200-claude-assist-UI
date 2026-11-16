@@ -1817,6 +1817,8 @@ int main(int argc, char **argv) {
     pthread_create(&stick, NULL, stick_thread, NULL);
     pthread_create(&wd, NULL, watch_thread, NULL);
     fprintf(stderr, "rtlspec: daemon %d running\n", (int)getpid());
+    if (lis.dmr_on) ambe_start();       /* DMR's vocoder looked for from the start (its self-test in the log), not
+                                         * by watch channels' daemons */
 
     while (!stop) {
         struct pollfd p = {.fd = ls, .events = POLLIN};
