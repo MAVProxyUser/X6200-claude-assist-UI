@@ -882,7 +882,7 @@ written through to the card before it replaces the last copy, so a power cut kee
   band's columns, marked `~`: 26.835 MHz, below CB's channel 1, is `~11 M CB` with CB's BEST, ANTENNA and NOW. A's
   BAND box says `NEAR 11 M CB` there.
 - **WHAT IT WAS** is what the frequency is known for, not a decoding of the signal: on the X6200 a time station (WWV,
-  WWVH, CHU), NAVTEX 518, an AM broadcast channel (9 or 10 kHz apart, as the carriers say), a CB channel (within
+  WWVH; CHU closed in June 2026), NAVTEX 518, an AM broadcast channel (9 or 10 kHz apart, as the carriers say), a CB channel (within
   3 kHz), an FM broadcast channel, an FT8 frequency, a shortwave broadcast band (with the station from the EiBi
   schedule when one is on the air there), a ham band and its CW or phone part, else UNKNOWN SIGNAL; on the stick a
   known channel (NOAA WX1 to WX7, AIS, APRS, the ISS, marine 16, guard 121.500, the Meteor-M satellites) or the
@@ -6078,8 +6078,10 @@ frequency and mode come back when it closes.
   X6200 by default). Tested on this radio's own 62 s recording of WWV on
   10 MHz (`radio_captures/modes/wwv_10000.wav`, played back into the app),
   and on made-up signals down to ticks 15 dB and the code 6 dB over the noise
-  (`tools/wwv`). CHU and the European stations (DCF77, MSF ...) are not read
-  yet.
+  (`tools/wwv`). CHU is gone: Canada's NRC closed it for good on 22 June
+  2026 (its time is now by telephone, the web and NTP only). The European
+  stations are not read: DCF77 (77.5 kHz) and MSF (60 kHz) lie below the
+  radio's 100 kHz, and the others are rarely heard outside Europe.
 
 ### Channels
 

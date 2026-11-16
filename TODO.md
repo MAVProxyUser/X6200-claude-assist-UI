@@ -380,11 +380,12 @@ environment on the card for the choice and the counter, how the GUI's settings a
 found from either, what the X6100's smaller cards allow, and the image-required levels.
 
 
-## Time Signal: CHU and the European stations (#275)
+## Time Signal: the European stations (#275)
 
-WWV and WWVH are in (Time Signal, aec9d17). CHU (3330, 7850 and 14670 kHz) sends its time as Bell 103 FSK (300 Bd,
-2025/2225 Hz) in seconds 31-39: a decoder beside wwv.c, once a recording of CHU actually heard exists to test it on
-(radio_captures/modes/chu_7850.wav is noise: no ticks, no FSK). DCF77, MSF, TDF, EBC and IAM as #275 lists them.
+WWV and WWVH are in (Time Signal, aec9d17). CHU is off the list: Canada's NRC closed it for good on 22 June 2026
+(a recording on 7.850 MHz at 03:00 EST on 16 November 2026 was noise, as it would be). Of #275's others, DCF77
+(77.5 kHz) and MSF (60 kHz) are below the radio's 100 kHz; TDF (162 kHz), EBC and IAM would need a European
+listener to test with.
 
 ## Deep backlog: the radio as a Bluetooth microphone for a PC (#278)
 

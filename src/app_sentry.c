@@ -676,8 +676,9 @@ static const struct { int32_t lo, hi; const char *name; } ham[] = {
 
 static const struct { int32_t hz; const char *name; } time_st[] = {
     {2500000, "WWV/WWVH 2.5 MHZ"}, {5000000, "WWV/WWVH 5 MHZ"}, {10000000, "WWV/WWVH 10 MHZ"},
-    {15000000, "WWV/WWVH 15 MHZ"}, {20000000, "WWV 20 MHZ"}, {25000000, "WWV 25 MHZ"},
-    {3330000, "CHU CANADA 3.330"}, {7850000, "CHU CANADA 7.850"}, {14670000, "CHU CANADA 14.670"}};
+    {15000000, "WWV/WWVH 15 MHZ"}, {20000000, "WWV 20 MHZ"}, {25000000, "WWV 25 MHZ"}};
+/* CHU (3.330, 7.850, 14.670 MHz) is not among them: Canada's NRC closed it for good on 22 June 2026, and what is
+ * heard there now is something else */
 
 /* The AM band's channels: 10 kHz apart in the Americas, 9 elsewhere. The band plan's region is not always the
  * radio's (a plan never chosen is Region 1's), so the strong carriers say: one within 600 Hz of one grid's channel
