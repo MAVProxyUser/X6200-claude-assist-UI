@@ -106,10 +106,15 @@ static const struct {
 /* Up to three at once, each on a thread of its own: a serial receiver (GNS 5890, microADSB), the daemon's SDR through
  * dump1090 on its samples, and a spare RTL-SDR (one beside the daemon's HackRF or bladeRF) through a dump1090 of its
  * own. All feed adsb.c (BOTH, ALL: the same aircraft heard by each, its messages counted from each) */
-enum { SLOT_SERIAL, SLOT_SDR, SLOT_SPARE, SLOTS };
+enum { SLOT_SERIAL, SLOT_SDR, SLOT_SPARE };
+/* Spare RTLs at once (a KrakenSDR's four beside B's): the first listens with AIRSPACE closed too, the rest while its
+ * screen is open (the user, 2026-11-16: every reception "color coded to the radio that recieved it ... scale for
+ * however many are able to be connected") */
+#define SPARES 5
+#define SLOTS  (SLOT_SPARE + SPARES)
 
 static atomic_bool     started;
-static atomic_int      st[SLOTS] = {ADSB_RX_OFF, ADSB_RX_OFF, ADSB_RX_OFF};
+static atomic_int      st[SLOTS];       /* ADSB_RX_OFF (0) at first */
 static atomic_ullong   bytes;
 static atomic_bool     lent;            /* the Sentry's SDR lent to it: adsb_rx_lend() */
 static pthread_mutex_t dev_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -147,7 +152,29 @@ static rtl_dev_t daemon_dev(void) {
                                                                                                       : DD_WAIT;
 }
 
-static int spare_rtl(bool self_only, char *sn, size_t sn_n, char *loc, size_t loc_n);
+static int spare_rtl(int nth, bool self_only, char *sn, size_t sn_n, char *loc, size_t loc_n);
+static rtl_dev_t daemon_dev(void);
+
+/* Spare nth (0 the first): an RTL on a hub of its own power that B's daemon neither holds nor was asked for and no
+ * watch channel has; beside a HackRF or bladeRF with none such, one RTL on the radio's own power as before. Its place
+ * (-1 none), serial and USB location */
+static int spare_pick(int nth, char *sn, size_t sn_n, char *loc, size_t loc_n) {
+    rtl_dev_t dd     = daemon_dev();
+    bool      beside = dd == RTL_DEV_HACKRF || dd == RTL_DEV_BLADERF;
+    int       r;
+
+    if (dd != RTL_DEV_RTL && !beside) return -1;
+    r = spare_rtl(nth, true, sn, sn_n, loc, loc_n);
+    if (r < 0 && beside && nth == 0 && spare_rtl(0, true, NULL, 0, NULL, 0) < 0) r = spare_rtl(0, false, sn, sn_n, loc, loc_n);
+    return r;
+}
+
+static int spare_avail(void) {
+    int n = 0;
+
+    while (n < SPARES && spare_pick(n, NULL, 0, NULL, 0) >= 0) n++;
+    return n;
+}
 
 /* A spare RTL-SDR, free for a dump1090 of its own: one beside the daemon's HackRF or bladeRF (B's choice, or its
  * order), or with two or more RTLs one that B neither holds nor asked for, behind a hub of its own power (a
@@ -155,9 +182,8 @@ static int spare_rtl(bool self_only, char *sn, size_t sn_n, char *loc, size_t lo
  * once on the radio). Two sticks on the radio's own power stay one at a time, as before (the brown-out of
  * 2026-11-15) */
 static bool spare_of(unsigned present, rtl_dev_t dd) {
-    if (!(present & KB(ADSB_KIND_RTL))) return false;
-    if (dd == RTL_DEV_HACKRF || dd == RTL_DEV_BLADERF) return true;
-    return dd == RTL_DEV_RTL && spare_rtl(true, NULL, 0, NULL, 0) >= 0;
+    (void)dd;
+    return (present & KB(ADSB_KIND_RTL)) && spare_pick(0, NULL, 0, NULL, 0) >= 0;
 }
 
 /* Of the kinds on USB (present), those that can be listened on: the serial ones; with dump1090, the daemon's SDR (dd)
@@ -198,6 +224,13 @@ static void assign(unsigned present, rtl_dev_t dd, bool dump, unsigned want, ads
         if (usable & KB(serial_order[i])) k[SLOT_SERIAL] = serial_order[i], got++;
     if (got < n && !k[SLOT_SPARE] && r_ok && !(one && k[SLOT_SDR])) k[SLOT_SPARE] = ADSB_KIND_RTL, got++;
     if (got < n && !k[SLOT_SDR] && d_ok && !(one && k[SLOT_SPARE])) k[SLOT_SDR] = dk, got++;
+    /* the further spares, each a stick of its own power, while AIRSPACE's screen is open on ADS-B (B's SDR not lent
+     * to the Sentry): every free one, whatever was chosen with the RTL */
+    if (k[SLOT_SPARE] && !atomic_load(&lent) && (!want || (want & KB(ADSB_KIND_RTL)))) {
+        int sp = spare_avail();
+
+        for (int i = 1; i < sp; i++) k[SLOT_SPARE + i] = ADSB_KIND_RTL;
+    }
 }
 
 static bool read_line(const char *path, char *out, size_t n) {
@@ -267,7 +300,7 @@ static adsb_kind_t pick_slot(int slot, seen_t seen[ADSB_KIND_N], bool *direct, b
     adsb_kind_t k[SLOTS];
 
     assign(present, dd, access(DUMP1090, X_OK) == 0, atomic_load(&want_mask), k);
-    *direct    = slot == SLOT_SPARE;
+    *direct    = slot >= SLOT_SPARE;
     *held_back = slot == SLOT_SDR && k[slot] != ADSB_KIND_NONE && dd != RTL_DEV_NONE && atomic_load(&lent);
     return k[slot];
 }
@@ -409,10 +442,20 @@ typedef struct {
 } d1090_t;
 
 static d1090_t d1090s[SLOTS] = {
-    [SLOT_SERIAL] = {-1, false, 0, NULL},
-    [SLOT_SDR]    = {-1, false, D1090_PORT, D1090_LOG},
-    [SLOT_SPARE]  = {-1, false, D1090_PORT + 1, "/tmp/dump1090-spare.log"},
+    [SLOT_SERIAL] = {-1, false, 0, NULL, ""},
+    [SLOT_SDR]    = {-1, false, D1090_PORT, D1090_LOG, ""},
+    [SLOT_SPARE]  = {-1, false, D1090_PORT + 1, "/tmp/dump1090-spare.log", ""},
 };
+
+/* The further spares: their ports after the first's (30004...), their logs /tmp/dump1090-spare2.log... */
+static void d1090_spares_init(void) {
+    static char logs[SPARES][32];
+
+    for (int i = 1; i < SPARES; i++) {
+        snprintf(logs[i], sizeof(logs[i]), "/tmp/dump1090-spare%d.log", i + 1);
+        d1090s[SLOT_SPARE + i] = (d1090_t){-1, false, D1090_PORT + 1 + i, logs[i], ""};
+    }
+}
 
 static bool d1090_alive(d1090_t *d) {
     if (d->pid <= 0) return false;
@@ -550,8 +593,8 @@ static void *rx_thread(void *arg) {
             int         sp = -1;
 
             D->sn[0] = 0;
-            if (slot == SLOT_SPARE && k == ADSB_KIND_RTL &&     /* the spare RTL itself: by its serial, where it is */
-                (sp = spare_rtl(daemon_dev() == RTL_DEV_RTL, D->sn, sizeof(D->sn), sp_loc, sizeof(sp_loc))) >= 0) {
+            if (slot >= SLOT_SPARE && k == ADSB_KIND_RTL &&     /* the spare RTL itself: by its serial, where it is */
+                (sp = spare_pick(slot - SLOT_SPARE, D->sn, sizeof(D->sn), sp_loc, sizeof(sp_loc))) >= 0) {
                 usb = sp_loc;
                 snprintf(sp_name, sizeof(sp_name), "%s", rtl_spectrum_rtl_tag(sp));
             }
@@ -585,7 +628,10 @@ static void *rx_thread(void *arg) {
                 if (fd >= 0 || (fd = d1090_connect(D)) >= 0) {
                     snprintf(held, sizeof(held), "%s", usb);
                     held_num = usb_devnum(usb);
-                    set_dev(slot, slot == SLOT_SPARE ? "127.0.0.1:30003" : "127.0.0.1:30002",
+                    char at[24];
+
+                    snprintf(at, sizeof(at), "127.0.0.1:%d", D->port);
+                    set_dev(slot, at,
                             sp_name[0]                              ? sp_name   /* RTL1... */
                             : kind_of(rx) == ADSB_KIND_RTL && !direct ? rtl_spectrum_dev_tag()     /* B's: RTL0 */
                                                                       : receivers[rx].name);
@@ -623,8 +669,8 @@ static void *rx_thread(void *arg) {
 
             looked = adsb_now();
             char sn_now[24] = "";
-            bool moved = slot == SLOT_SPARE && D->sn[0] &&
-                         (spare_rtl(daemon_dev() == RTL_DEV_RTL, sn_now, sizeof(sn_now), NULL, 0) < 0 ||
+            bool moved = slot >= SLOT_SPARE && D->sn[0] &&
+                         (spare_pick(slot - SLOT_SPARE, sn_now, sizeof(sn_now), NULL, 0) < 0 ||
                           strcmp(sn_now, D->sn) != 0);  /* B took it, or asked for it: another spare */
 
             if (!held_num || usb_devnum(held) != held_num || pick_slot(slot, seen, &d, &hb) != atomic_load(&kind_now[slot]) ||
@@ -709,6 +755,7 @@ void adsb_rx_start(void) {
     bool no = false;
 
     if (!atomic_compare_exchange_strong(&started, &no, true)) return;
+    d1090_spares_init();
     for (int i = 0; i < SLOTS; i++) {
         pthread_t t;
 
@@ -739,7 +786,7 @@ adsb_rx_state_t adsb_rx_state(char *dev, size_t n) {
 
 /* Each slot that listens: "GNS 5890", "RTL-SDR R820T", "GNS 5890 + RTL-SDR R820T" */
 _Static_assert(SLOT_SERIAL == ADSB_SLOT_SERIAL && SLOT_SDR == ADSB_SLOT_SDR && SLOT_SPARE == ADSB_SLOT_SPARE &&
-                   SLOTS <= ADSB_SRCS, "adsb_rx.h's slots");
+                   SLOTS <= ADSB_SRCS && SLOTS == ADSB_SLOTS, "adsb_rx.h's slots");
 
 /* Slot i's name, dev_lock held: the tuner alone when it says the name already ("HACKRF-ONE", not "HACKRF HACKRF-ONE") */
 static void slot_name(int i, char *s, size_t n) {
@@ -951,15 +998,21 @@ int adsb_rx_rtl_count(void) {
     return atomic_load(&p_rtls);
 }
 
-/* AIRSPACE's spare RTL: the first in RTL order that B's daemon neither holds nor was asked for (self_only: behind a
- * hub of its own power); its place, serial and location; -1 none */
-static int spare_rtl(bool self_only, char *sn, size_t sn_n, char *loc, size_t loc_n) {
-    int held = rtl_spectrum_dev_rtl(), want = rtl_spectrum_used() == RTL_DEV_RTL ? rtl_spectrum_used_rtl() : -1;
-    int n = atomic_load(&p_rtls), got = -1;
+/* RTLs the watch channels have (rtl_watch.c), a bit each place: no spare of AIRSPACE's takes them */
+static atomic_uint p_claimed;
+
+void adsb_rx_rtl_claim(unsigned places) { atomic_store(&p_claimed, places); }
+
+/* The nth RTL (0 the first) in RTL order that B's daemon neither holds nor was asked for and no watch channel has
+ * (self_only: behind a hub of its own power); its place, serial and location; -1 none */
+static int spare_rtl(int nth, bool self_only, char *sn, size_t sn_n, char *loc, size_t loc_n) {
+    int      held = rtl_spectrum_dev_rtl(), want = rtl_spectrum_used() == RTL_DEV_RTL ? rtl_spectrum_used_rtl() : -1;
+    int      n = atomic_load(&p_rtls), got = -1;
+    unsigned claimed = atomic_load(&p_claimed);
 
     pthread_mutex_lock(&p_rtl_lock);
     for (int i = 0; i < n && got < 0; i++)
-        if (i != held && i != want && (!self_only || p_rtl_id[i].self)) {
+        if (i != held && i != want && !(claimed & (1u << i)) && (!self_only || p_rtl_id[i].self) && nth-- == 0) {
             got = i;
             if (sn) snprintf(sn, sn_n, "%s", p_rtl_id[i].sn);
             if (loc) snprintf(loc, loc_n, "%s", p_rtl_id[i].loc);

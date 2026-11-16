@@ -1177,7 +1177,11 @@ the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on t
   swapped for another of its kind does not ask. Till it is answered: a serial one and one SDR (a spare RTL-SDR, else
   B's), never two SDRs. AIRSPACE takes no SDR before the GUI has reached the SDR daemon (its first seconds).
 - **Two or more RTL-SDRs** (a KrakenSDR's five): an RTL that B neither holds nor asked for, behind a hub of its own
-  power, is AIRSPACE's spare, its dump1090 on that stick alone (by its serial): the head names each RTL by its number
+  power, is AIRSPACE's spare, its dump1090 on that stick alone (by its serial). **With AIRSPACE open, every such
+  free RTL listens too** (up to five spares, each its own dump1090 on ports 30003 up), and **each radio has its own
+  colour**: the serial one amber, B's deep orange, then orange, green, cyan, periwinkle and magenta; an aircraft heard
+  by two or more the pale one. With three or more the head names each by its first word in its colour (`RTL0 RTL1
+  RTL2 RTL3 RTL4 2+`); closed, the first spare goes on alone. RTLs a watch channel has are left to it: the head names each RTL by its number
   (`RTL0 R820T + RTL1 R820T BOTH` with B's lent while AIRSPACE is open), and with AIRSPACE closed B has its own again
   while the spare goes on decoding ADS-B. B choosing the spare's RTL moves the spare to the next free one. Two sticks
   on the radio's own power are not streamed at once, as before. On the radio with a KrakenSDR: RTL0 and RTL1 on ADS-B

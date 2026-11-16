@@ -16,7 +16,7 @@
 #define ADSB_TRAIL      240     /* track points an aircraft keeps */
 #define ADSB_LIVE_S     60.0    /* heard this recently: live; after it a ghost of the history */
 #define ADSB_RATE_S     120     /* seconds of message rate kept */
-#define ADSB_SRCS       4       /* the receivers a frame can come from (adsb_rx.c's slots), a bit each */
+#define ADSB_SRCS       8       /* the receivers a frame can come from (adsb_rx.c's slots: up to 7), a bit each */
 
 typedef struct {
     float   lat, lon;

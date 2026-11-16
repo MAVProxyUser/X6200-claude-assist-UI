@@ -699,7 +699,9 @@ static void show_head(double now, int nlive, int nghost) {
     if (n_rx > 1) {                     /* each receiver in its aircraft's colour, and BOTH's (ALL's) */
         size_t at = 0;
         for (int i = 0; i < n_rx && at < sizeof(name); i++) {
-            int w = snprintf(name + at, sizeof(name) - at, "%s#%06X %s#", i ? " + " : "",
+            if (n_rx > 2) names[i][strcspn(names[i], " ")] = 0;     /* three or more: each by its first word (GNS,
+                                                                    * RTL0, RTL1...), the head's room */
+            int w = snprintf(name + at, sizeof(name) - at, "%s#%06X %s#", i ? (n_rx > 2 ? " " : " + ") : "",
                              (unsigned)(lv_color_to32(src_col[slot[i]]) & 0xffffff), names[i]);
             if (w > 0) at += (size_t)w;
         }
@@ -1388,7 +1390,11 @@ static void construct_cb(lv_obj_t *parent) {
         for (int i = 0; i < ADSB_SRCS; i++) src_col[i] = amb;
         src_col[ADSB_SLOT_SDR]   = lv_color_mix(amb, red, 110);     /* the ramp's deep orange-red */
         src_col[ADSB_SLOT_SPARE] = lv_color_mix(amb, red, 190);     /* its orange */
-        both_col                 = TC(accent_soft);                 /* its pale top */
+        /* the further spares (a KrakenSDR's RTL2-RTL4...): hues apart from the ramp's, each its own radio's (the
+         * user, 2026-11-16: "every reception is color coded to the radio that recieved it") */
+        static const uint32_t more[] = {0x7cd65a, 0x45c8e0, 0x8f8bff, 0xe066d6};
+        for (int i = 0; i < 4 && ADSB_SLOT_SPARE + 1 + i < ADSB_SRCS; i++) src_col[ADSB_SLOT_SPARE + 1 + i] = lv_color_hex(more[i]);
+        both_col                 = TC(accent_soft);                 /* its pale top: heard by two or more */
     }
     for (int i = 0; i < 64; i++) glow[i] = mix(c_amb, c_ink, i * 60 / 63);
     n_fixed = 0;                        /* the theme's colours: the fixed points again */
