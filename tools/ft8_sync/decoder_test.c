@@ -9,8 +9,10 @@
  *     average (within 0.1 symbol), each within 0.6 symbol of it (its time step is a quarter symbol).
  *  2. The decoder thread, in real time: FT4 audio in fragments of 0.1 s as PulseAudio gives them, a signal 0.3 s late
  *     in every slot by the clock, and every other slot the thread kept 0.3 to 0.5 s past the slot's end (a long last
- *     decode, a busy radio), so that its audio of the next slot starts that much later. The time the decoder gives
- *     moves with that start; the DT from the audio's stamp (slot_info_t's rx_start_ns) stays 0.3 s. Takes about 30 s.
+ *     decode, a busy radio). This fork files each block in the slot it came in during (066e465), so the slot after
+ *     a held one still starts on time, nothing of it drained: the time the decoder gives stays put, and the DT from
+ *     the audio's stamp (slot_info_t's rx_start_ns) is 0.3 s in both kinds of slot. (Upstream's worker started that
+ *     slot late, by the hold, and its test asked for that.) Takes about 30 s.
  *
  *    decoder_test
  */
@@ -134,6 +136,7 @@ static struct {
     pthread_mutex_t mux;
     int             n;
     float           dt[MAX_HEARD], into[MAX_HEARD], time_sec[MAX_HEARD];
+    bool            after_hold[MAX_HEARD];  /* an even slot: the thread was held past the end of the one before */
 } heard = {.mux = PTHREAD_MUTEX_INITIALIZER};
 
 static int16_t        *ft4_tx;
@@ -153,6 +156,7 @@ static void on_message(const char *text, int snr, float freq_hz, float time_sec,
         heard.dt[heard.n]       = ftx_sync_dt(FT4, info->rx_start_ns, time_sec);
         heard.into[heard.n]     = (float)off / 1e9f;
         heard.time_sec[heard.n] = time_sec;
+        heard.after_hold[heard.n] = !info->odd;
         heard.n++;
     }
     pthread_mutex_unlock(&heard.mux);
@@ -216,16 +220,16 @@ static void decoder_thread(void) {
     pthread_create(&th, NULL, feeder, NULL);
     audio_worker_start(worker);
 
-    /* Until two slots of each kind decoded, 45 s at most */
-    int early = 0, late = 0;
+    /* Until two slots of each kind decoded (after a held thread, and not), 45 s at most */
+    int held = 0, free_run = 0;
 
-    for (int i = 0; i < 450 && (early < 2 || late < 2); i++) {
+    for (int i = 0; i < 450 && (held < 2 || free_run < 2); i++) {
         usleep(100000);
         pthread_mutex_lock(&heard.mux);
-        early = late = 0;
+        held = free_run = 0;
         for (int k = 0; k < heard.n; k++) {
-            if (heard.into[k] < 0.2f) early++;
-            if (heard.into[k] >= 0.25f) late++;
+            if (heard.after_hold[k]) held++;
+            else free_run++;
         }
         pthread_mutex_unlock(&heard.mux);
     }
@@ -242,13 +246,16 @@ static void decoder_thread(void) {
         snprintf(what, sizeof(what), "audio from %+.2f s into its slot: DT %+.3f s, %.2f s within 0.05 s",
                  heard.into[k], heard.dt[k], LATE_S);
         check(fabsf(heard.dt[k] - LATE_S) <= 0.05f, what);
+        snprintf(what, sizeof(what), "a slot %s: its audio from %+.2f s into it, on time (under 0.1 s)",
+                 heard.after_hold[k] ? "after the thread was held" : "after a free one", heard.into[k]);
+        check(fabsf(heard.into[k]) < 0.1f, what);
         if (heard.time_sec[k] < tmin) tmin = heard.time_sec[k];
         if (heard.time_sec[k] > tmax) tmax = heard.time_sec[k];
     }
-    snprintf(what, sizeof(what), "slots whose audio started on time (%d) and late (%d), two each", early, late);
-    check(early >= 2 && late >= 2, what);
-    snprintf(what, sizeof(what), "the decoder's own time moved %.2f s with the audio's start", tmax - tmin);
-    check(tmax - tmin >= 0.2f, what);
+    snprintf(what, sizeof(what), "slots after a held thread (%d) and after a free one (%d), two each", held, free_run);
+    check(held >= 2 && free_run >= 2, what);
+    snprintf(what, sizeof(what), "the decoder's own time stayed put: %.2f s apart at most, under 0.1 s", tmax - tmin);
+    check(tmax - tmin < 0.1f, what);
 }
 
 int main(void) {
