@@ -3261,6 +3261,7 @@ static void rtl_fkey(int k) {
             else rtl_preset_next(1);
             rtl_tune(rtl_presets[rtl_preset].hz);
             scan_next = 0;              /* scanning: the new band, from its low end */
+            osd(rtl_presets[rtl_preset].name, rtl_presets[rtl_preset].about, -1);  /* named, as A's F2 names its band */
             break;
         case 2:
             rtl_step = (rtl_step + 1) % N_OF(rtl_steps);
