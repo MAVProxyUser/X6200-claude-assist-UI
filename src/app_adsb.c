@@ -24,6 +24,7 @@
 #include "adsb_rx.h"
 #include "app_sentry.h"
 #include "rtl_spectrum.h"
+#include "sdr_pool.h"
 #include "remote_server.h"
 #include "control_owner.h"
 #include "buttons.h"
@@ -123,7 +124,8 @@ static lv_obj_t    *root, *title_l, *status_l, *badge_l[2], *scope_img, *spark_i
 static lv_obj_t    *lbl[LABELS], *list_head_l, *row_l[ROWS], *det_l[3], *sig_l, *legend_l, *key_l[5], *help_l;
 static lv_obj_t    *list_cap_l, *det_cap_l;
 #define LIST_CAP  "AIRCRAFT: LIVE, THEN HISTORY"
-#define LIST_HEAD "CALL     ICAO     ALT  KT TRK    NM BRG  AGE"
+#define LIST_HEAD "CALL     ICAO     ALT  KT TRK    NM BRG  AGE RX"
+#define ACARS_HEAD "TIME  FLIGHT REG     LB RX     TEXT"
 
 /* ACARS (F5 VIEW): B's SDR on the ACARS channels at 130-132 MHz instead of 1090 (rtl_spectrum_acars, the daemon's
  * acars.c), the list its messages, newest first; the scope goes on with the others (a GNS 5890 beside it) */
@@ -187,6 +189,41 @@ static uint32_t argb(lv_color_t c) { return lv_color_to32(c) | 0xff000000; }
 #define SRC_S 60.0
 static lv_color_t src_col[ADSB_SRCS], both_col;
 static int        n_rx;                 /* receivers listened on, at the last header */
+
+/* Each receiver's short name by its slot (its first word, six letters at most: GNS, RTL0, HACKRF), kept for the
+ * history's aircraft after it goes: the list's RX column and the TARGET box say who heard each (the user,
+ * 2026-11-16: "add a column to the decoded info to cover the device the info came from") */
+static char slot_nm[ADSB_SRCS][8];
+
+/* Who heard p: the receiver of its last frame, "+N" for the N others within SRC_S of it ("RTL2+1"); with all, each of
+ * them by name ("RTL0 RTL2") */
+static void rx_of(const adsb_plane_t *p, char *s, size_t n, bool all) {
+    unsigned m    = adsb_plane_srcs(p, SRC_S);
+    int      last = -1;
+
+    for (int i = 0; i < ADSB_SRCS; i++)
+        if (p->src_t[i] > 0 && (last < 0 || p->src_t[i] > p->src_t[last])) last = i;
+    if (last < 0) {
+        snprintf(s, n, "-");
+        return;
+    }
+    m |= 1u << last;
+    if (all) {
+        size_t at = 0;
+
+        s[0] = 0;
+        for (int i = 0; i < ADSB_SRCS && at < n; i++) {
+            if (!(m & (1u << i))) continue;
+            int w = snprintf(s + at, n - at, "%s%s", at ? " " : "", slot_nm[i][0] ? slot_nm[i] : "?");
+            if (w > 0) at += (size_t)w;
+        }
+        return;
+    }
+    int more = __builtin_popcount(m) - 1;
+
+    if (more) snprintf(s, n, "%.4s+%d", slot_nm[last][0] ? slot_nm[last] : "?", more);
+    else snprintf(s, n, "%.6s", slot_nm[last][0] ? slot_nm[last] : "?");
+}
 
 static lv_color_t plane_col(const adsb_plane_t *p) {
     unsigned m = n_rx > 1 ? adsb_plane_srcs(p, SRC_S) : 0;
@@ -545,8 +582,8 @@ static void show_acars(void) {
         char      t[8];
         localtime_r(&m.at, &tm);
         strftime(t, sizeof(t), "%H:%M", &tm);
-        lv_label_set_text_fmt(row_l[r], "%s %-6s %-7s %-2s %s", t, m.flight[0] ? m.flight : "-", m.reg, m.label,
-                              m.text[0] ? m.text : "(NO TEXT)");
+        lv_label_set_text_fmt(row_l[r], "%s %-6s %-7s %-2s %-6.6s %s", t, m.flight[0] ? m.flight : "-", m.reg, m.label,
+                              m.dev[0] ? m.dev : "-", m.text[0] ? m.text : "(NO TEXT)");
         bool chosen = k == acars_sel;
         lv_obj_set_style_bg_opa(row_l[r], chosen ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_bg_color(row_l[r], amb, 0);
@@ -563,7 +600,8 @@ static void show_acars(void) {
     char      t[12], a[48] = "", b[48] = "";
     localtime_r(&m.at, &tm);
     strftime(t, sizeof(t), "%H:%M:%S", &tm);
-    lv_label_set_text_fmt(det_l[0], "%s %s %s %s %.3f", m.flight[0] ? m.flight : "-", m.reg, m.label, t, m.hz / 1e6);
+    lv_label_set_text_fmt(det_l[0], "%s %s %s %s %.3f %s", m.flight[0] ? m.flight : "-", m.reg, m.label, t, m.hz / 1e6,
+                          m.dev);
     snprintf(a, sizeof(a), "%.38s", m.text[0] ? m.text : "(NO TEXT)");
     if (strlen(m.text) > 38) snprintf(b, sizeof(b), "%.35s%s", m.text + 38, strlen(m.text) > 73 ? "..." : "");
     lv_label_set_text(det_l[1], a);
@@ -595,7 +633,7 @@ static void show_list(double now, const int *idx, int n) {
             continue;
         }
         const adsb_plane_t *p = adsb_plane(idx[k]);
-        char nm[12], alt[12], kt[8], trk[8], rng[10], brg[8], age[8];
+        char nm[12], alt[12], kt[8], trk[8], rng[10], brg[8], age[8], rx[12];
         double b = 0;
         fmt_alt(alt, sizeof(alt), p);
         snprintf(kt, sizeof(kt), p->vel_ok ? "%.0f" : "-", p->gs);
@@ -608,8 +646,9 @@ static void show_list(double now, const int *idx, int n) {
             snprintf(brg, sizeof(brg), "-");
         }
         fmt_age(age, sizeof(age), now - p->seen);
-        lv_label_set_text_fmt(row_l[r], "%-8s %06X %5s %3s %3s %5s %3s %4s", name_of(p, nm, sizeof(nm)), p->icao, alt,
-                              kt, trk, rng, brg, age);
+        rx_of(p, rx, sizeof(rx), false);
+        lv_label_set_text_fmt(row_l[r], "%-8s %06X %5s %3s %3s %5s %3s %4s %-6s", name_of(p, nm, sizeof(nm)), p->icao,
+                              alt, kt, trk, rng, brg, age, rx);
         bool chosen = k == sel;
         lv_color_t pcol   = plane_col(p);
         lv_obj_set_style_bg_opa(row_l[r], chosen ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
@@ -626,12 +665,17 @@ static void show_detail(double now, const int *idx, int n) {
     for (int k = 0; k < n; k++)
         if (adsb_plane(idx[k])->icao == sel_icao) p = adsb_plane(idx[k]);
     if (!p) {
+        lv_label_set_text(det_cap_l, "TARGET");
         lv_label_set_text(det_l[0], "NO TARGET");
         lv_label_set_text(det_l[1], "MFK: CHOOSE ONE");
         lv_label_set_text(det_l[2], "");
         return;
     }
-    char nm[12], alt[16], age[8], vr[16];
+    char nm[12], alt[16], age[8], vr[16], rx[64];
+
+    rx_of(p, rx, sizeof(rx), true);     /* the box's caption: each receiver that heard it */
+    if (strlen(rx) > 30) snprintf(rx, sizeof(rx), "%d RECEIVERS", __builtin_popcount(adsb_plane_srcs(p, SRC_S)));
+    lv_label_set_text_fmt(det_cap_l, "TARGET  RX %s", rx);
     fmt_alt(alt, sizeof(alt), p);
     fmt_age(age, sizeof(age), now - p->seen);
     lv_label_set_text_fmt(det_l[0], "%s  %06X  %s %s  %u MSGS", name_of(p, nm, sizeof(nm)), p->icao,
@@ -696,7 +740,9 @@ static void show_head(double now, int nlive, int nghost) {
 
     adsb_rx_name(name, sizeof(name));
     n_rx = st == ADSB_RX_ON ? adsb_rx_slots(slot, names, ADSB_SRCS) : 0;
-    if (n_rx > 1) {                     /* each receiver in its aircraft's colour, and BOTH's (ALL's) */
+    for (int i = 0; i < n_rx; i++)      /* the RX column's names (rx_of) */
+        snprintf(slot_nm[slot[i]], sizeof(slot_nm[0]), "%.*s", (int)strcspn(names[i], " "), names[i]);
+    if (n_rx > 1) {                     /* each receiver in its aircraft's colour, and BOTH's (HEARD BY 2+'s) */
         size_t at = 0;
         for (int i = 0; i < n_rx && at < sizeof(name); i++) {
             if (n_rx > 2) names[i][strcspn(names[i], " ")] = 0;     /* three or more: each by its first word (GNS,
@@ -705,9 +751,36 @@ static void show_head(double now, int nlive, int nghost) {
                              (unsigned)(lv_color_to32(src_col[slot[i]]) & 0xffffff), names[i]);
             if (w > 0) at += (size_t)w;
         }
+        /* the colour of an aircraft two or more of them heard: said so (the user, 2026-11-16, of "2+": "I'm not sure
+         * waht that means") */
         if (at < sizeof(name))
-            snprintf(name + at, sizeof(name) - at, " #%06X %s#", (unsigned)(lv_color_to32(both_col) & 0xffffff),
-                     n_rx > 2 ? "2+" : "BOTH");
+            snprintf(name + at, sizeof(name) - at, "  #%06X %s#", (unsigned)(lv_color_to32(both_col) & 0xffffff),
+                     n_rx > 2 ? "HEARD BY 2+" : "BOTH");
+    }
+    /* The SDRs not on 1090 MHz, dim, and who has them (sdr_pool.c): B's, a watch channel's, stopped in the pool's
+     * panel. The user, 2026-11-16: "I only see RTL0 RTL1 RTL2 RTL3 but no RTL4 ... there is plenty of space in the
+     * title bar to sho RTL4 and whatever else" (RTL4 was B's: B keeps its own while AIRSPACE has spares) */
+    char       others[2][120] = {"", ""};       /* with whose, and the names alone for a full bar */
+    sdr_unit_t u[SDR_POOL_UNITS];
+    int        nu = sdr_pool_units(u, SDR_POOL_UNITS);
+
+    for (int k = 0; k < nu; k++) {
+        bool on = false;
+
+        for (int i = 0; i < n_rx; i++)
+            if (!strncmp(slot_nm[slot[i]], u[k].name, sizeof(slot_nm[0]))) on = true;
+        if (on) continue;
+        const char *whose = u[k].stopped                   ? "STOPPED"
+                          : u[k].owner == SDR_OWN_B         ? "ON B"
+                          : u[k].owner >= SDR_OWN_WATCH     ? "WATCHING"
+                          : u[k].owner >= SDR_OWN_ADSB      ? "STARTING"
+                                                            : "IDLE";
+        for (int f = 0; f < 2; f++) {
+            size_t l = strlen(others[f]);
+
+            snprintf(others[f] + l, sizeof(others[f]) - l, "%s%s%s%s", l ? "  " : "", u[k].name, f ? "" : " ",
+                     f ? "" : whose);
+        }
     }
     /* who works the radio from afar, as the Sentry's bars say it (dev_tags): WEB, WEB CTL, TCI CTL */
     char       web[40] = "";
@@ -718,13 +791,18 @@ static void show_head(double now, int nlive, int nghost) {
     else if (remote_server_viewers() > 0) snprintf(web, sizeof(web), "   WEB");
     if (c.kind == CTL_TCI) snprintf(web + strlen(web), sizeof(web) - strlen(web), "   TCI CTL");
 
-    char line[300];
+    char line[420];
 
     localtime_r(&tt, &tm);              /* the radio's time zone, named, as the Sentry's header */
-    for (int compact = 0; compact < 2; compact++) {     /* too long for the bar: the time without its zone */
+    for (int compact = 0; compact < 4; compact++) {     /* too long for the bar: the time without its zone, the
+                                                         * others without whose, then without the centre */
+        const char *o = others[compact >= 2];
+        char        os[140] = "";
+
+        if (o[0]) snprintf(os, sizeof(os), "  #%06X %s#", (unsigned)(c_dim & 0xffffff), o);
         strftime(t, sizeof(t), compact ? "%H:%M" : "%H:%M %Z", &tm);
-        snprintf(line, sizeof(line), "%s   %d LIVE   %d HISTORY   %s   %s%s", st == ADSB_RX_ON ? name : "NO RECEIVER",
-                 nlive, nghost, c_from, t, web);
+        snprintf(line, sizeof(line), "%s%s   %d LIVE   %d HISTORY   %s%s%s%s", st == ADSB_RX_ON ? name : "NO RECEIVER",
+                 os, nlive, nghost, compact < 3 ? c_from : "", compact < 3 ? "   " : "", t, web);
         if (lv_txt_get_width(line, strlen(line), &pixel_16, 0, LV_TEXT_FLAG_RECOLOR) <= SW - 120) break;
     }
     lv_label_set_text(status_l, line);
@@ -1043,7 +1121,7 @@ static void view_set(bool acars) {
     acars_sel  = 0;
     rtl_spectrum_acars(acars);
     lv_label_set_text(list_cap_l, acars ? "ACARS: NEWEST FIRST" : LIST_CAP);
-    lv_label_set_text(list_head_l, acars ? "TIME  FLIGHT REG     LB TEXT" : LIST_HEAD);
+    lv_label_set_text(list_head_l, acars ? ACARS_HEAD : LIST_HEAD);
     lv_label_set_text(det_cap_l, acars ? "MESSAGE" : "TARGET");
 }
 

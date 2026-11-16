@@ -159,6 +159,7 @@ typedef struct {
     char    mode, ack, block;
     bool    more;               /* ETB: more blocks follow */
     char    reg[8], label[3], msn[5], flight[7];
+    char    dev[8];             /* the SDR that heard it: "RTL4", "HACKRF", "BLADERF" */
     int     level;              /* dB, the audio's */
     char    text[221];
 } rtl_acars_t;

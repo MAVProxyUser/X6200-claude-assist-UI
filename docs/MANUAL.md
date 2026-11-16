@@ -791,7 +791,14 @@ last seconds, the strongest signals named over it and the screen's channel brack
 - **F3 VIEW**: the screen's radio alone, SPLIT (the X6200 above, the stick below) or the other radio alone. Each
   half says its radio, its channel and whether it is HEARD, MUTED or SQUELCHED. On A, the VFO, the MFK or a band
   chosen while the view is the SDR's alone puts it back on SPLIT (`VIEW: SPLIT`): A's knobs tune the X6200, and with
-  the SDR's picture alone nothing on A showed them move but the TUNED box.
+  the SDR's picture alone nothing on A showed them move but the TUNED box. On B, the same with the X6200's picture
+  alone: B tuned goes to the SDR's picture (`VIEW: RTL4`).
+- **Tuning a screen puts its own radio on the speaker.** A is the X6200's screen: the VFO, the MFK (turned or pushed),
+  a band key, F2 or a tap on A's picture, while A's LISTEN is the SDR, BOTH or ALL, puts LISTEN on the X6200 and
+  says so (`A LISTEN: X6200`, "YOU TUNED A, THE X6200'S SCREEN: ITS RECEIVER IS ON THE SPEAKER AGAIN (LISTEN WAS
+  RTL4)"). B is its SDR's: the VFO, the MFK (turned or pushed), a preset (F1, F2 held with the VFO, a band key) while
+  B's LISTEN is the X6200 puts B's SDR on the speaker at B's channel (`B LISTEN: RTL4`). OFF stays OFF on both, and
+  F4 changes LISTEN again as ever.
 - **F4 LISTEN**, each screen's own: X6200, the SDR by its name (RTL0, RTL1..., HACKRF or BLADERF; SDR while none is plugged in), BOTH (**ALL** with more than two receivers, the X6200 and two or more SDRs that tune B's channel: the X6200, B's SDR and each watch channel as it opens) or OFF, OFF silencing the speaker (neither radio, the volume
   kept). **Two or more SDRs on USB** (a HackRF and an RTL-SDR on a powered hub, say): B offers those that tune its
   channel, in a box ("2 SDRS HERE TUNE B'S CHANNEL (162.400 MHZ). WHICH?", each with its range and whether it
@@ -1210,8 +1217,15 @@ the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on t
 - **Each receiver's aircraft in its own colour**, from the Sentry's spectrum ramp, with two or more listened on: the
   serial one's (GNS 5890, microADSB) amber, B's SDR's deep orange, a spare RTL-SDR's orange; an aircraft heard by two
   or more within a minute of its last message the ramp's pale top. The scope's mark, its track and label, and its row
-  in the list take it (dimmer once it is history). The head names each receiver in its colour, then BOTH (or 2+ with
-  three) in the pale one. One receiver alone: amber, as before.
+  in the list take it (dimmer once it is history). The head names each receiver in its colour, then BOTH (HEARD BY
+  2+ with three or more) in the pale one. One receiver alone: amber, as before.
+- **Who heard each aircraft**: the list's last column, RX, is the receiver of its last message, and +N for the N
+  others that heard it within a minute of that (`RTL2+1`: RTL2 and one more). The TARGET box's title names them all
+  (`TARGET  RX RTL0 RTL1 RTL2`).
+- **Every SDR in the head**: those not on 1090 MHz after the receivers, dim, with who has them: `RTL4 ON B` (B
+  keeps its own while AIRSPACE has spares), WATCHING (a watch channel's), STOPPED (in the SDR pool's panel),
+  STARTING, IDLE. A head too long for its bar drops the time's zone, then those words (the names stay), then the
+  centre.
 - **A choice follows a swap**: what was chosen is that many receivers, the ones named first. BOTH of a GNS 5890 and a
   HackRF, the HackRF swapped for an RTL-SDR, is the GNS 5890 and the RTL-SDR, without asking.
 - **Two or more receivers**: a box asks which to listen on ("2 RECEIVERS HERE CAN HEAR 1090 MHZ. WHICH?"): each
@@ -1226,7 +1240,7 @@ the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on t
   free RTL listens too** (up to five spares, each its own dump1090 on ports 30003 up), and **each radio has its own
   colour**: the serial one amber, B's deep orange, then orange, green, cyan, periwinkle and magenta; an aircraft heard
   by two or more the pale one. With three or more the head names each by its first word in its colour (`RTL0 RTL1
-  RTL2 RTL3 RTL4 2+`); closed, the first spare goes on alone. RTLs a watch channel has are left to it: the head names each RTL by its number
+  RTL2 RTL3  HEARD BY 2+  RTL4 ON B`); closed, the first spare goes on alone. RTLs a watch channel has are left to it: the head names each RTL by its number
   (`RTL0 R820T + RTL1 R820T BOTH` with B's lent while AIRSPACE is open), and with AIRSPACE closed B has its own again
   while the spare goes on decoding ADS-B. B choosing the spare's RTL moves the spare to the next free one. Two sticks
   on the radio's own power are not streamed at once, as before. On the radio with a KrakenSDR: RTL0 and RTL1 on ADS-B
@@ -1243,8 +1257,8 @@ ACARS (ARINC 618) is the airlines' datalink: short text messages between aircraf
 131.550 MHz in North America and a few channels beside it. **F5 VIEW** on AIRSPACE turns B's SDR (an RTL-SDR, a
 HackRF or a bladeRF) from 1090 MHz to them, and the list on the right becomes the messages, newest first: the time,
 the flight (from an aircraft), its registration, the label (what kind of message: H1 free text, Q0 a link test, _d
-nothing to say) and the text. The MFK or a tap chooses one, and the box below shows it whole: flight, registration,
-label, time and channel, then its text. A GNS 5890 or a microADSB beside the SDR goes on with ADS-B, so the scope
+nothing to say), the SDR that heard it (RX: RTL4, HACKRF, BLADERF) and the text. The MFK or a tap chooses one, and
+the box below shows it whole: flight, registration, label, time, channel and SDR, then its text. A GNS 5890 or a microADSB beside the SDR goes on with ADS-B, so the scope
 stays live; with B's SDR alone the scope has nothing new while ACARS is on. F5 again: ADS-B.
 
 - The SDR sits at 130.8 MHz and hears 131.550, 131.725, 131.125, 130.450, 130.425 and 130.025 MHz at once (129.125

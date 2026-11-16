@@ -581,6 +581,7 @@ static void *spec_thread(void *arg) {
             snprintf(m.msn, sizeof(m.msn), "%s", f[6]);
             snprintf(m.flight, sizeof(m.flight), "%s", f[7]);
             snprintf(m.text, sizeof(m.text), "%s", p);
+            snprintf(m.dev, sizeof(m.dev), "%s", rtl_spectrum_dev_tag());     /* the one the daemon has now */
             pthread_mutex_lock(&lock);
             acars_ring[acars_n % RTL_ACARS_KEEP] = m;
             acars_n++;

@@ -444,6 +444,8 @@ static void set_mode(sysmode_t m);
 static void set_routine(routine_t r);
 static void a_scan_hop(uint32_t now);
 static void band_key(bool up);
+static void a_tuned(void);
+static void b_tuned(void);
 static void hit_add(int64_t hz, int mode, bool rtl, const char *what, float peak);
 static void show_glog(void);
 static bool tune(int32_t hz, int mode);
@@ -3235,6 +3237,7 @@ static void rtl_listen_turn(int32_t diff) {
     if (listen_rtl) rtl_spectrum_listen(listen_hz, rtl_mode_of(listen_hz));     /* muted: the bracket moves alone */
     show_head();
     show_rtl();
+    b_tuned();                          /* on B with the X6200 heard: the SDR heard */
 }
 
 /* The VFO knob is the screen's radio's: on B the stick's channel always (heard or not), on C a stick entry playing,
@@ -3486,6 +3489,7 @@ static void rtl_touch_cb(lv_event_t *e) {
         if (routine == ROUT_SCAN) set_routine(ROUT_BAND);
         if (t) track_start(t->hz, false);
         else tune(hz / 100 * 100, -1);
+        a_tuned();
         return;
     }
     if (!rtl_rate) return;
@@ -3747,6 +3751,7 @@ static void rtl_preset_go(int dir) {
     scan_next = 0;
     osd(rtl_presets[rtl_preset].name, rtl_presets[rtl_preset].about, -1);
     show_screen();
+    b_tuned();
 }
 
 static void rtl_fkey(int k) {
@@ -3757,6 +3762,7 @@ static void rtl_fkey(int k) {
             rtl_tune(rtl_presets[rtl_preset].hz);
             scan_next = 0;              /* scanning: the new band, from its low end */
             osd(rtl_presets[rtl_preset].name, rtl_presets[rtl_preset].about, -1);  /* named, as A's F2 names its band */
+            b_tuned();
             break;
         case 2:
             rtl_step = (rtl_step + 1) % N_OF(rtl_steps);
@@ -5439,18 +5445,73 @@ static int pan_steps(int dir) {
     return m;
 }
 
-/* A's knobs tune the X6200, so A's picture shows it. With VIEW on RTL (the SDR's picture alone, one F3 from SPLIT)
- * nothing on A moved as they did: the user, 2026-11-16, "on A when I twist the large dial it doesn't seem to tune
- * the tuner ... it's like MFK and dial tuning on A got broken" (both tuned; only the TUNED box said so). Turned there,
- * or a band chosen, A goes to SPLIT: the X6200's half again, the SDR's under it */
-static void a_view_x6200(void) {
-    if (scr != SCR_SCAN || param_i_get(cfg_a_view) != VIEW_RTL) return;
-    param_i_set(cfg_a_view, VIEW_SPLIT);
-    rtl_layout();
-    rtl_labels_place();
+/* A's knobs tune the X6200, so A shows it and is heard on it. With VIEW on RTL (the SDR's picture alone, one F3 from
+ * SPLIT) nothing on A moved as they did: the user, 2026-11-16, "on A when I twist the large dial it doesn't seem to
+ * tune the tuner ... it's like MFK and dial tuning on A got broken" (both tuned; only the TUNED box said so). Turned
+ * there, or a band chosen, A goes to SPLIT: the X6200's half again, the SDR's under it. And LISTEN on an SDR (alone,
+ * BOTH or ALL) goes to the X6200, said so (the user, 2026-11-16: "IF we try to tune on A while listening to any other
+ * device, it should auto switch back to the internal radio and tell the user that is what it did, because A's screen
+ * is intended primarily for the internal SDR"). OFF stays off. Said last, over the tuning's own words */
+static void a_tuned(void) {
+    int  h    = param_i_get(cfg_hear_a);
+    bool view = param_i_get(cfg_a_view) == VIEW_RTL, hear = h == HEAR_RTL || h == HEAR_BOTH;
+    char title[32], t[200];
+
+    if (scr != SCR_SCAN || (!view && !hear)) return;
+    if (view) {
+        param_i_set(cfg_a_view, VIEW_SPLIT);
+        rtl_layout();
+        rtl_labels_place();
+    }
+    if (hear) {
+        snprintf(title, sizeof(title), "%s", hear_name(h));    /* what it was, before it changes */
+        snprintf(t, sizeof(t), "YOU TUNED A, THE X6200'S SCREEN: ITS RECEIVER IS ON THE SPEAKER AGAIN (LISTEN WAS %s)%s. "
+                 "F4 CHANGES IT.", title, view ? ", AND ITS PICTURE BACK (VIEW SPLIT)" : "");
+        param_i_set(cfg_hear_a, HEAR_X6200);
+        hear_apply(HEAR_X6200);
+    }
     show_screen();
-    osd("VIEW: SPLIT", "THE X6200'S PICTURE IS BACK AS ITS DIAL MOVES (VIEW RTL SHOWED THE SDR'S ALONE). F3 CHANGES THE "
-                       "VIEW.", -1);
+    if (hear)
+        osd("A LISTEN: X6200", t, -1);
+    else
+        osd("VIEW: SPLIT", "THE X6200'S PICTURE IS BACK AS ITS DIAL MOVES (VIEW RTL SHOWED THE SDR'S ALONE). F3 CHANGES "
+                           "THE VIEW.", -1);
+}
+
+/* B is its SDR's screen: tuned there by hand (the VFO, the MFK turned or pushed, a preset) while LISTEN is the
+ * X6200's, the SDR goes on the speaker at B's channel, said so; VIEW on the X6200 alone goes to the SDR's picture (the
+ * user, 2026-11-16: "on B if for some reason you happen to be listening to the X6200 internal radio, and you tune
+ * manually or use MFK to jump around, it should instantly switch the the selected radio view so there is no
+ * confusion"). BOTH, ALL and OFF stay; no SDR on USB, nothing changes */
+static void b_tuned(void) {
+    bool sdr  = sdr_here || rtl_spectrum_state() == RTL_SPEC_ON;
+    bool view = param_i_get(cfg_rtl_view) == VIEW_X6200, hear = param_i_get(cfg_hear_f) == HEAR_X6200;
+    char title[32], t[200], f[16];
+
+    if (scr != SCR_RTL || !sdr || (!view && !hear)) return;
+    if (view) {
+        param_i_set(cfg_rtl_view, VIEW_RTL);
+        rtl_layout();
+        rtl_labels_place();
+    }
+    if (hear) {
+        param_i_set(cfg_hear_f, HEAR_RTL);
+        hear_apply(HEAR_RTL);
+    }
+    show_screen();
+    if (hear) {
+        fmt_mhz(f, sizeof(f), listen_hz ? listen_hz : rtl_hz, 3);
+        snprintf(title, sizeof(title), "B LISTEN: %s", hear_name(HEAR_RTL));
+        snprintf(t, sizeof(t), "YOU TUNED B, THE SDR'S SCREEN: THE %s IS ON THE SPEAKER AT B'S CHANNEL (%s %s), NOT THE "
+                 "X6200%s. F4 CHANGES IT.", rtl_spectrum_dev_name(), f,
+                 rtl_mode_names[rtl_mode_of(listen_hz ? listen_hz : rtl_hz)],
+                 view ? ", AND ITS PICTURE SHOWN (VIEW X6200 SHOWED THE X6200'S ALONE)" : "");
+        osd(title, t, -1);
+    } else {
+        snprintf(title, sizeof(title), "VIEW: %s", rtl_spectrum_dev_tag());
+        osd(title, "THE SDR'S PICTURE IS BACK AS ITS CHANNEL MOVES (VIEW X6200 SHOWED THE X6200'S ALONE). F3 CHANGES THE "
+                   "VIEW.", -1);
+    }
 }
 
 static void step(int dir) {
@@ -5459,10 +5520,10 @@ static void step(int dir) {
         case SCR_SCAN: {                /* as on C: it pans, by SCAN CFG's step (more when spun); a scan stops there */
             int32_t st = a_steps[a_step], fq = cparam_i_get(cfg_fg_freq);
 
-            a_view_x6200();
             if (routine == ROUT_SCAN) set_routine(ROUT_BAND);
             tune(fq / st * st + dir * pan_steps(dir) * st, -1);
             show_screen();
+            a_tuned();
             break;
         }
         case SCR_TRACK:
@@ -5505,6 +5566,7 @@ static void step(int dir) {
         case SCR_RTL:
             rtl_scan_set(false);        /* panned by hand: the scan stops where it was */
             rtl_tune(rtl_hz / rtl_steps[rtl_step] * rtl_steps[rtl_step] + (int64_t)dir * pan_steps(dir) * rtl_steps[rtl_step]);
+            b_tuned();
             break;
         default:
             break;
@@ -5521,6 +5583,7 @@ static void press(void) {
             if (b >= 0 && tg[b].con >= 8) {
                 if (routine == ROUT_SCAN) set_routine(ROUT_BAND);
                 track_start(tg[b].hz, false);
+                a_tuned();
             } else {
                 osd("ONLY NOISE", "NO SIGNAL IN THE PICTURE TO LOCK ON.", -1);
             }
@@ -5540,6 +5603,7 @@ static void press(void) {
                 if (listen_rtl) rtl_spectrum_listen(listen_hz, rtl_mode_of(listen_hz));
                 show_head();
                 show_rtl();
+                b_tuned();
             } else {
                 osd("ONLY NOISE", "NO SIGNAL IN THE PICTURE TO GO TO.", -1);
             }
@@ -5673,7 +5737,6 @@ static void rotary_cb(int32_t diff) {
         else rtl_listen_turn(diff);
         return;
     }
-    a_view_x6200();                     /* on A: the X6200's picture, if VIEW was on the SDR's alone */
     if (smode != MODE_MAN) {
         smode = MODE_MAN;
         if (routine == ROUT_SCAN) routine = ROUT_BAND;      /* tuned by hand: the scan stops there, as F's */
@@ -5682,6 +5745,7 @@ static void rotary_cb(int32_t diff) {
         osd("MAN-OVERRIDE", "YOU TURNED THE VFO: THE SENTRY STOPS MOVING THE X6200'S DIAL AND ONLY MARKS. SCAN CFG F1: "
                             "BACK TO SEMI OR AUTO.", -1);
     }
+    a_tuned();                          /* on A: the X6200's picture and LISTEN, if they were the SDR's */
 }
 
 /* The filter: wide, normal, narrow, where the mode has a voice filter */
@@ -5743,7 +5807,6 @@ static void band_key(bool up) {
 
     band_sel = i;
     listen_band_x6200(i);
-    a_view_x6200();
     if (scanning) {                     /* F2 or a BAND key while scanning: the new band, from its low end */
         scan_a_band = i;
         routine     = ROUT_SCAN;
@@ -5751,6 +5814,7 @@ static void band_key(bool up) {
         show_screen();
     }
     osd(bands[i].name, bands[i].hear, -1);
+    a_tuned();
 }
 
 static bool front_key(int key, int state) {
