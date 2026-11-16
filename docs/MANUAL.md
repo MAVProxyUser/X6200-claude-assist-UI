@@ -794,7 +794,11 @@ last seconds, the strongest signals named over it and the screen's channel brack
   transmits; asked once for each set), and its LISTEN goes X6200, each of them, BOTH, OFF. The daemon holds one SDR at
   a time: the one chosen is opened in place of the other (a few seconds), and G's SDR channels and AIRSPACE use it
   too (`rtl_dev` keeps the choice). One that does not tune B's channel is not offered (an RTL-SDR at 2.4 GHz); one
-  that will not open (another program holds it) leaves the one before. **BOTH mixes the two only on Bluetooth headphones.** On the speaker it is the stick alone, as RTL is, and its
+  that will not open (another program holds it) leaves the one before.
+  **Each SDR as wide as the radio takes it**: B's picture is 5/6 of the SDR's sample rate, and each is asked for the
+  most the HOST port carries (about 5.8 MB/s, 2 bytes a sample) at a whole number of 264.6 kHz (the audio's chain):
+  an RTL-SDR 2.38 MS/s (a 2.0 MHz picture; past 2.4 MS/s it drops samples), a HackRF or a bladeRF 2.65 MS/s (2.2
+  MHz). The bladeRF sends 8-bit samples (SC8, FPGA v0.15 on): read as 12-bit, two thirds of them came. **BOTH mixes the two only on Bluetooth headphones.** On the speaker it is the stick alone, as RTL is, and its
   OSD says so: while the speaker plays the GUI's audio (the stick), the base is in play mode and sends the processor
   nothing of the X6200's receiver, only its own copy of what it plays (measured on base 1.0.8). Up to v0.3.12.20
   BOTH mixed that copy back in, and that was the echo that repeated till it faded; a canceller only made it fainter.

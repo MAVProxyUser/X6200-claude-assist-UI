@@ -56,7 +56,7 @@
  *                          the gain, on the RTL's scale ("g -1": the AGC)
  *      "l <Hz> <mode>"     listen (mode 1 NFM, 2 AM, 3 WFM; "l 0 0" stops): mixed to 0 Hz, decimated to 264.6 kHz
  *                          (CIC, order 2) and by 6 (a 63-tap FIR) to 44.1 kHz and demodulated. Only at a sample rate
- *                          that is a multiple of 264.6 kHz: 1058400 or 2116800
+ *                          that is a multiple of 264.6 kHz (within 50 Hz: a device's own clock): 1058400 or 2116800
  *      "w <Hz>"            watch that channel (narrow FM, NOAA Weather Radio) for SAME alerts (same.c); "w 0" stops
  *      "d <Hz>"            decode that FM broadcast channel's RDS (rds.c); "d 0" stops. Off the listened channel's
  *                          own multiplex when it listens there in WFM, else demodulated for it alone
@@ -237,13 +237,16 @@ static void design(float *taps, float cutoff) {
 
 /* What a channel takes, against the centre the stick is tuned to: the mixer's step, the filter; off outside */
 static void chan_set(chan_t *c, int mode, uint64_t hz, uint64_t centre, uint32_t rate) {
-    double off = (double)hz - (double)centre;
+    double   off = (double)hz - (double)centre;
+    uint32_t r1  = (rate + MID_RATE / 2) / MID_RATE;
+    /* a whole number of MID_RATE, give or take what a device's own clock makes of the rate asked: the bladeRF's AD9361
+     * gives 2116799 for 2116800, and an exact test left it without audio, RDS or SAME (2026-11-16) */
+    bool     whole = r1 >= 1 && r1 <= 16 && llabs((long long)rate - (long long)r1 * MID_RATE) <= 50;
 
-    c->mode = (mode >= 1 && mode <= 3 && rate % MID_RATE == 0 && rate / MID_RATE <= 16 && fabs(off) < rate * 0.45)
-              ? mode : 0;
+    c->mode = (mode >= 1 && mode <= 3 && whole && fabs(off) < rate * 0.45) ? mode : 0;
     c->hz = hz;
     if (!c->mode) return;
-    c->r1     = (int)(rate / MID_RATE);
+    c->r1     = (int)r1;
     c->cic_n  = 0;
     c->ph_inc = (uint32_t)(int64_t)llround(-off / rate * 4294967296.0);
     design(c->taps, c->mode == 2 ? 5000 : c->mode == 1 ? 9000 : 15000);   /* AM, NFM; WFM's: the audio's */

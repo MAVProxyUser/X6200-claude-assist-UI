@@ -44,6 +44,16 @@
 #define BINS      2048
 #define ROWS      20            /* a second */
 #define RATE        2116800     /* 48 x 44.1 kHz: the daemon's audio comes out at the codec's rate */
+
+/* Each device as wide as the radio can take it (the user, 2026-11-16: "ensure the spectrogram auto adjusts to max size
+ * for any of the connected devices based on their bandwidth"): a whole number of 264.6 kHz (the daemon's audio chain),
+ * under what the HOST port carries (about 5.8 MB/s, measured: 2.9 MS/s at the 2 bytes a sample all three send) and what
+ * the device keeps up with. An RTL-SDR 9 x 264.6 kHz (2.38 MS/s: past 2.4 it drops samples), a HackRF or a bladeRF 10 x
+ * (2.65 MS/s, 5.3 MB/s); B's picture is 5/6 of it (app_sentry.c rtl_view_hz): 2.0 and 2.2 MHz against 1.8 */
+static uint32_t rate_for(rtl_dev_t d) {
+    return d == RTL_DEV_RTL ? 2381400u : d == RTL_DEV_HACKRF || d == RTL_DEV_BLADERF ? 2646000u : RATE;
+}
+static uint32_t asked_rate;             /* the rate said to the daemon last */
 #define RING        (44100 * 2) /* audio waiting to play: two seconds at most */
 #define CHUNK       1024        /* audio_play() needs room for the whole write: a bigger one may never find it */
 #define ST_FILL     17640       /* the stick's audio buffered, 400 ms: its 50 ms messages come in clumps (and BOTH's
@@ -340,7 +350,8 @@ static void *spec_thread(void *arg) {
 
             /* What this GUI wants, said again: a daemon that ran before it is as the last GUI left it */
             char cmd[64];
-            snprintf(cmd, sizeof(cmd), "s %d\n", RATE);
+            asked_rate = rate_for((rtl_dev_t)atomic_load(&dev_kind));
+            snprintf(cmd, sizeof(cmd), "s %u\n", asked_rate);
             say(cmd);
             snprintf(cmd, sizeof(cmd), "g %d\n", atomic_load(&want_gain));
             say(cmd);
@@ -423,6 +434,13 @@ static void *spec_thread(void *arg) {
                 atomic_store(&dev_lo, none || !lo ? RTL_SPEC_MIN_HZ : (long long)lo);
                 atomic_store(&dev_hi, none || !hi ? RTL_SPEC_MAX_HZ : (long long)hi);
                 atomic_store(&dev_tx, tx != 0);
+                if (!none && rate_for((rtl_dev_t)atomic_load(&dev_kind)) != asked_rate) {  /* its own width */
+                    char rc[24];
+
+                    asked_rate = rate_for((rtl_dev_t)atomic_load(&dev_kind));
+                    snprintf(rc, sizeof(rc), "s %u\n", asked_rate);
+                    say(rc);
+                }
                 if (tx == 2) atomic_store(&tx_state, RTL_TX_ON);
             } else {
                 atomic_store(&dev_kind, strcmp(st, "NOSTICK") ? RTL_DEV_RTL : RTL_DEV_NONE);
