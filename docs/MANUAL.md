@@ -1497,6 +1497,12 @@ active bands of the band list, from the frequency up or down.
   covers part of it (a "60m CW" added on the web page). Whether the base lets
   you transmit there is the base's own band plan: both bases list a 60 m band
   around it. Not tried on the air yet.
+- CB C is the 40 CB channels, 26.965 MHz (channel 1) to 27.405 MHz (channel
+  40). Up to v0.3.12.27 it stopped at 27.195 MHz, so channels 20 to 40 were
+  in no band: none of CB C's settings (AM, the preamp), and the band keys
+  stepped past them. A radio updated from an older version gets the new edge
+  at its first start, unless CB C was changed on the web page or another band
+  of its own lies there.
 - A band with no mode saved opens in LSB under 10 MHz and USB above, USB on
   60 m; on the X6200 wide FM on FM broadcast, AM on the airband and NFM in
   what only the WR12 receives.

@@ -68,12 +68,32 @@ void ParamsTable::Shutdown() {
 // BandsTable
 // ---------------------------------------------------------------------------
 
+/* CB C was channels 1 to 19 (26.965-27.195 MHz): 20 to 40 fell in the gap before CB D at 27.415, with no band's
+ * settings and the band keys skipping them. It is all 40 now, to 27.405 (sql/params.sql). A saved list still on the
+ * old edges takes them once, as follow_region moves its rows: only the row with its id, name and edges as before,
+ * and not where another band (but an inactive broadcast one) now lies in 27.195-27.405 */
+static void cb_c_to_channel_40(sqlite3 *db) {
+    char *err = nullptr;
+
+    if (sqlite3_exec(db,
+                     "UPDATE bands SET stop_freq = 27405000 WHERE id = 203 AND name = 'CB C' AND start_freq = 26965000 "
+                     "AND stop_freq = 27195000 AND NOT EXISTS (SELECT 1 FROM bands AS o WHERE o.id != 203 AND "
+                     "o.start_freq < 27405000 AND o.stop_freq > 27195000 AND NOT (o.id BETWEEN 100 AND 199 AND o.type = 0))",
+                     NULL, NULL, &err) != SQLITE_OK) {
+        LV_LOG_ERROR("CB C not taken to channel 40: %s", err ? err : "?");
+        sqlite3_free(err);
+    } else if (sqlite3_changes(db) > 0) {
+        LV_LOG_USER("CB C now runs to channel 40 (27.405 MHz)");
+    }
+}
+
 bool BandsTable::Init(sqlite3 *database) {
     if (db_) {
         LV_LOG_ERROR("Repeated BandsTable initialization");
         return false;
     }
     db_ = database;
+    cb_c_to_channel_40(db_);
 
     int rc;
 
