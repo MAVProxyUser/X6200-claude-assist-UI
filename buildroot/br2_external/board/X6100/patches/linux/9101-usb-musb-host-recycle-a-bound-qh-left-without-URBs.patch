@@ -1,0 +1,129 @@
+From: GoldCorpHF firmware project
+Subject: [PATCH] usb: musb: host: recycle a bound qh left without URBs in
+ endpoint_disable
+
+A Xiegu X6200 (Allwinner R16, musb in host mode on its HOST port, Linux
+6.1.82) hung for good when a USB hub with a HackRF and an RTL-SDR, both
+streaming, browned out: about 117 "musb-hdrc ... epN RX three-strikes
+error" lines and repeated hub disconnects in 10 s, then
+
+  usb 3-1.1: USB disconnect, device number 39
+  Unable to handle kernel NULL pointer dereference at virtual address 00000004
+  Internal error: Oops: 5 [#1] PREEMPT SMP ARM
+  Workqueue: usb_hub_wq hub_event
+  PC is at musb_h_disable+0x108/0x17c [musb_hdrc]
+  LR is at musb_h_disable+0x18/0x17c [musb_hdrc]
+  r0 : 00000000 ... Flags: nZCv  IRQs off
+
+The oops is taken with musb->lock held and interrupts off on that CPU:
+no ping, screen frozen, power cycle needed.
+
+In the radio's musb_hdrc.ko, musb_h_disable+0x108 is "ldr r3, [r0, #4]",
+the load of urb->unlinked right after urb = next_urb(qh) in the branch
+where the hardware endpoint is still bound to this qh; r0 stays 0 when
+the endpoint's URB list is empty. usbcore always empties that list
+(usb_hcd_flush_endpoint) before it calls endpoint_disable, so any qh that
+musb_h_disable() finds still bound has no URB, and next_urb() is NULL.
+
+Such a qh is one that was not recycled as its last URB went. One way:
+musb_advance_schedule() and musb_urb_dequeue() each save qh->is_ready,
+clear it and drop the lock for the giveback, then restore it. When the
+interrupt handler completes one URB on one CPU while the class driver
+unlinks another on a second CPU, the side that saved the cleared value
+and restores last leaves is_ready at 0 with URBs still queued. Nothing
+starts them; musb_urb_dequeue() then gives each back down its
+"!qh->is_ready" path, which recycles the qh only when the saved
+is_ready was set, so the qh stays bound to the hardware endpoint with an
+empty list until the device goes.
+
+A NULL check alone (as posted to linux-usb in 2016, "usb: musb: host:
+Fix NULL pointer dereference in SMP environment", not merged) frees the
+qh but leaves hw_ep->in_qh/out_qh pointing at it. Recycle it the way
+musb_advance_schedule() does when a qh's last URB completes instead:
+abort and release its DMA channel, flush the endpoint, mark it for
+reprogramming, unbind and free the qh, and start the next qh waiting for
+that endpoint (control, multiplexed bulk), so a device that stays behind
+on a shared bulk endpoint keeps streaming.
+
+The is_ready race itself is left as it is: this only keeps endpoint
+disable from oopsing on what it leaves behind.
+---
+--- a/drivers/usb/musb/musb_host.c
++++ b/drivers/usb/musb/musb_host.c
+@@ -2416,6 +2416,65 @@
+ 	return ret;
+ }
+ 
++/*
++ * Recycle a qh that still holds its hardware endpoint with no URB queued,
++ * as musb_advance_schedule() does when a qh's last URB completes: stop the
++ * endpoint, unbind and free the qh, and start the next qh waiting for that
++ * endpoint (control, multiplexed bulk).
++ *
++ * usbcore empties an endpoint's URB list before disabling it, so a qh
++ * musb_h_disable() finds bound is always one that was not recycled as its
++ * last URB went. That happens when two CPUs give URBs of one qh back at
++ * once: musb_advance_schedule() and musb_urb_dequeue() each save is_ready,
++ * clear it and drop the lock for the giveback, and the one restoring last
++ * can leave it 0 with the qh still bound; the URBs left are then given back
++ * by musb_urb_dequeue() without recycling it. Seen on an Allwinner R16 with
++ * two SDRs streaming through a hub in a brown-out (three-strikes errors,
++ * disconnects): next_urb() returned NULL here and the oops was taken with
++ * the controller lock held and interrupts off, hanging the system.
++ *
++ * Context: controller locked, irqs blocked
++ */
++static void musb_h_disable_idle_qh(struct musb *musb, struct musb_qh *qh,
++				   int is_in)
++{
++	struct musb_hw_ep	*ep = qh->hw_ep;
++	struct dma_controller	*dma = musb->dma_controller;
++	struct dma_channel	**channel;
++	struct list_head	*head = NULL;
++	struct musb_qh		*next;
++
++	musb_ep_select(musb->mregs, ep->epnum);
++	channel = is_in ? &ep->rx_channel : &ep->tx_channel;
++	if (*channel) {
++		dma->channel_abort(*channel);
++		dma->channel_release(*channel);
++		*channel = NULL;
++	}
++	if (!ep->epnum)
++		musb_h_ep0_flush_fifo(ep);
++	else if (is_in)
++		musb_h_flush_rxfifo(ep, 0);
++	else
++		musb_h_tx_flush_fifo(ep);
++	if (is_in)
++		ep->rx_reinit = 1;
++	else
++		ep->tx_reinit = 1;
++
++	musb_ep_set_qh(ep, is_in, NULL);
++	qh->hep->hcpriv = NULL;
++	if (qh->mux == 1)
++		head = qh->type == USB_ENDPOINT_XFER_CONTROL ? &musb->control
++			: is_in ? &musb->in_bulk : &musb->out_bulk;
++	list_del(&qh->ring);
++	kfree(qh);
++
++	next = head ? first_qh(head) : NULL;
++	if (next && next->is_ready && next_urb(next))
++		musb_start_urb(musb, is_in, next);
++}
++
+ /* disable an endpoint */
+ static void
+ musb_h_disable(struct usb_hcd *hcd, struct usb_host_endpoint *hep)
+@@ -2438,6 +2497,10 @@
+ 	qh->is_ready = 0;
+ 	if (musb_ep_get_qh(qh->hw_ep, is_in) == qh) {
+ 		urb = next_urb(qh);
++		if (!urb) {
++			musb_h_disable_idle_qh(musb, qh, is_in);
++			goto exit;
++		}
+ 
+ 		/* make software (then hardware) stop ASAP */
+ 		if (!urb->unlinked)

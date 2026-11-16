@@ -1088,6 +1088,16 @@ wherever the RTL-SDR did (B, BOTH, C, D, E, RDS, SAME, AIRSPACE), named as they 
   HOST port's own power it dropped off USB as its RF chip started (2026-11-15, an xA9), and the radio's USB host saw
   no device connect after that, the bladeRF on its own power included (switching the radio off and on is the likely
   mend; not tried yet).
+- **A hub that browns out no longer hangs the radio**, with the SD card's kernel of the bundles built after
+  v0.3.12.26. A HackRF and an RTL-SDR streaming on an unpowered hub on HOST draw more than the port gives: the hub
+  drops off and comes back, and the kernel log fills with `three-strikes error`. Up to that kernel, a device's
+  disconnect in that storm could hang the whole radio (2026-11-16: no network, the screen frozen, only a power cycle
+  brought it back): the USB host driver's endpoint disable met an endpoint left with nothing queued and stopped with
+  interrupts off. The kernel's patch (`buildroot/br2_external/board/X6100/patches/linux`, both radios) clears such an
+  endpoint up instead and lets an SDR sharing it go on. It reaches a radio only with the update box's **Also update
+  the kernel on the SD card** ticked (see [The SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot)) or with
+  a new card image; the radio software alone does not bring it. The devices still drop off in a brown-out: a powered
+  hub keeps them streaming. Not yet tried in a brown-out again.
 
 - **The stick is opened once and never closed while it is plugged in.** Every stop and start of its stream is a
   chance for the radio's USB host to leave it sending nothing, so there are none: `x6x00-rtlspec` (tools/rtlspec),

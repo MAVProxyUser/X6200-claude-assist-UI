@@ -30,6 +30,13 @@ also switch them on in the defconfig and the kernel configuration:
   `S50pulseaudio` waits for the old daemon on restart; `S50gpsd` keeps running with no GPS
   attached and takes one plugged in later.
 
+- `board/X6100/patches/linux`: kernel patches for both radios, copied into each tree's global patch
+  directory for the kernel (`board/<model>/patches/linux`, beside the X6100 tree's own 9001 and 9002).
+  `9101-usb-musb-host-...`: the musb host (the HOST port) recycles a qh left bound to its hardware
+  endpoint with no URB when the endpoint is disabled, instead of dereferencing a NULL URB with the
+  controller lock held and interrupts off; an X6200 hung that way when a hub of two streaming SDRs
+  browned out (`musb_h_disable+0x108`).
+
 `local-build.sh` also gives both radios' device tree the processor's supply (`cpu-supply` on
 `cpu0`, the power chip's vdd-cpu rail), so the kernel lowers the voltage with the speed (when the
 temperature limit slows the processor); full speed keeps U-Boot's 1.2 V.

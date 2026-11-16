@@ -194,6 +194,12 @@ echo "== OpenX6X00 additions to the buildroot tree (buildroot/br2_external in th
 # the same files under its board
 cp -a $GUI/buildroot/br2_external/package $EXT/
 cp -a $GUI/buildroot/br2_external/board/X6100/linux/. $BOARD/
+# The kernel's patches (board/X6100/patches/linux here, both radios: the same 6.1.82 at both trees' buildroot pin) go
+# into the tree's global patch directory for the kernel, beside the X6100 tree's own (9001, 9002). 9101: the musb host
+# (the HOST port) no longer oopses with interrupts off when it disables an endpoint whose qh was left bound with no URB:
+# an X6200 hung for good as a hub of two streaming SDRs on that port browned out (November 2026)
+mkdir -p $EXT/board/$M/patches/linux
+cp $GUI/buildroot/br2_external/board/X6100/patches/linux/*.patch $EXT/board/$M/patches/linux/
 if [ $MODEL = x6200 ]; then
     rm -f $BOARD/rootfs-overlay/etc/modprobe.d/x6100-wifi.conf
     # module-bluez5-device with no path= in the X6200 tree's system.pa: upstream dropped it for the X6100 (ef0d395);
@@ -477,6 +483,12 @@ fi
 if [ $MODEL = x6200 ] && ls $BR/build/build/linux-[0-9]*/.config > /dev/null 2>&1 \
         && ! { grep -qs "^CONFIG_SUN4I_GPADC=y" $BR/build/build/linux-[0-9]*/.config \
                && grep -qs "^CONFIG_VIDEO_SUNXI_CEDRUS=m" $BR/build/build/linux-[0-9]*/.config; }; then
+    make linux-dirclean
+fi
+# A kernel extracted here before this repository's kernel patches (above) is extracted, patched and built again:
+# buildroot applies patches at extraction only
+if ls -d $BR/build/build/linux-[0-9]*/ > /dev/null 2>&1 \
+        && ! grep -qs "9101-usb-musb-host" $BR/build/build/linux-[0-9]*/.applied_patches_list; then
     make linux-dirclean
 fi
 # A kernel built here before its board's DTS named the processor's supply (cpu-supply, above) builds its device tree
