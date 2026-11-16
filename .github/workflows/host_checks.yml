@@ -19,13 +19,19 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true        # LVGL: the checks of the GUI's own files build against its headers
+
+      - name: v0.3.8, which tools/data_partition compares the boot script with
+        run: git fetch -q --no-tags --depth=1 origin +refs/tags/v0.3.8:refs/tags/v0.3.8
 
       - name: Libraries
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q build-essential autoconf automake libtool libsqlite3-dev libxkbcommon-dev \
-            python3-bottle fdisk util-linux
+            libnm-dev python3-bottle fdisk util-linux network-manager dbus iproute2
 
+      # As host/build.sh's deps(), in /usr/local (DEPS below): liquid-dsp and ft8_lib at the radio's versions
       - name: liquid-dsp, the radio's version
         run: |
           VER=$(sed -n 's/^LIQUID_VER=\([0-9.]*\).*/\1/p' tools/cross_x6200/setup.sh)
@@ -33,11 +39,23 @@ jobs:
           cd /tmp/liquid-dsp && ./bootstrap.sh > /dev/null && ./configure -q && make -j"$(nproc)" > /dev/null
           sudo make install > /dev/null && sudo ldconfig
 
-      - name: ft8_lib's headers, the radio's revision
+      - name: ft8_lib, the radio's revision
         run: |
           REV=$(sed -n 's/^FT8LIB_REV=\([0-9a-f]*\).*/\1/p' tools/cross_x6200/setup.sh)
           git clone -q https://github.com/gdyuldin/ft8_lib.git /tmp/ft8_lib && git -C /tmp/ft8_lib checkout -q "$REV"
-          mkdir -p /tmp/ft8inc/ft8lib && cp /tmp/ft8_lib/ft8/*.h /tmp/ft8inc/ft8lib/
+          make -C /tmp/ft8_lib lib CFLAGS="-O2 -fPIC -D_GNU_SOURCE" LDFLAGS="-lm" > /dev/null
+          sudo mkdir -p /usr/local/include/ft8lib
+          sudo cp /tmp/ft8_lib/.build/libft8.so /usr/local/lib/ && sudo cp /tmp/ft8_lib/ft8/*.h /usr/local/include/ft8lib/
+          sudo ldconfig
+
+      # Ubuntu 24.04 keeps unprivileged user namespaces from writing their uid_map: tools/wifi_restore,
+      # tools/wifi_steady and tools/smartcw run NetworkManager in namespaces of their own (unshare -rmn)
+      - name: User namespaces for the WiFi checks
+        run: sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Host checks
-        run: FT8LIB_INC=/tmp/ft8inc tools/host_checks.sh
+        env:
+          DEPS: /usr/local                 # liquid-dsp and libft8, where the checks' Makefiles look (DEPS)
+          FT8LIB: /tmp/ft8_lib             # ft8_lib's sources (tools/ft8_contest)
+          FT8LIB_INC: /usr/local/include
+        run: tools/host_checks.sh

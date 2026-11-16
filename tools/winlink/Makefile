@@ -13,7 +13,7 @@ BUILD  ?= ../../build-host
 PAT    ?= pat
 XARA   ?= $(shell bash ../xara/build.sh --host)
 CFLAGS := -std=gnu11 -Wall -Wextra -O1 -g -pthread -I stub_include -I $(DEPS)/include
-COPIED := winlink.c winlink.h
+COPIED := winlink.c winlink.h rigctld.h
 CLUSTER := cluster/spots.c cluster/spots.h
 
 all: test

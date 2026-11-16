@@ -38,6 +38,18 @@
 #include "screen_light.h"
 #include "screen_main.h"
 #include "stub_env.h"
+#include "rigctld.h"
+
+#include <stdio.h>
+
+/* The network's rigctld (src/rigctld.c, #178): off here, so winlink.c's server listens on 127.0.0.1 alone as it always
+ * did for Pat, and every client is Pat's */
+bool rigctld_network_on(void) { return false; }
+bool rigctld_answer(const char *line, char *reply, size_t size) {
+    (void)line;
+    snprintf(reply, size, "RPRT -11\n");
+    return true;
+}
 #include "tx_player.h"
 #include "winlink.h"
 

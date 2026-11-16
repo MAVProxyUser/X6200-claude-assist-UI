@@ -284,7 +284,7 @@ def case_handshake():
     check(hd.get("sec-websocket-version") == "13", "Sec-WebSocket-Version: 13")
     check(len(base64.b64decode(hd.get("sec-websocket-key", ""))) == 16, "a 16-byte Sec-WebSocket-Key")
     check(hd.get("host") == f"127.0.0.1:{srv.port}", f"Host ({hd.get('host')})")
-    check(hd.get("user-agent", "").startswith("OpenX6X00/0.3.12"), f"User-Agent ({hd.get('user-agent')})")
+    check(hd.get("user-agent", "").startswith("GoldCorpHF/0.3.12"), f"User-Agent ({hd.get('user-agent')})")
     ok, m = c.quiet(0.4)
     check(ok, f"nothing before the open packet ({m!r})")
     c.send(OPEN)

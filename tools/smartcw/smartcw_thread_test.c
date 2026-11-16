@@ -65,6 +65,11 @@ bool input_caps_id(dev_t dev, struct input_id *id) {
     return false;
 }
 
+/* KEYBOARD > Shortcuts as the radio has it by default: off, so the keyboard only types (4592f1a) */
+bool keyboard_shortcuts(void) {
+    return false;
+}
+
 /* The radio's /dev and /sys, in the test's folder */
 int   __real_glob(const char *pattern, int flags, int (*err)(const char *, int), glob_t *g);
 char *__real_realpath(const char *path, char *resolved);
