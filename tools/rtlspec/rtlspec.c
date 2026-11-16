@@ -48,6 +48,8 @@
  *                          ("ZCZC-WXR-TOR-039049+0030-3170815-KILN/NWS-|TORNADO WARNING"; "NNNN": a message's end)
  *      "RRDS", u32 length, "<Hz>|<PI hex>|<PTY>|<TP>|<TA>|<PS>|<RT>"   what the station decoded for RDS sends (rds.c),
  *                          each time it changes; "<Hz>|||||" at a new channel. PI "" and PTY -1 until they came
+ *      "RACR", u32 length, "<Hz>|<mode>|<registration>|<ack>|<label>|<block>|<msn>|<flight>|<more>|<level dB>|<text>"
+ *                          an ACARS message (acars.c) whose check passed, while "c 1"; the text last, "|" in it as "/"
  *      "RTX <word> <Hz> <why>" the transmitter: ON (on the air), END (off again: ASKED, IDLE, TIMEOUT, GONE, FAILED),
  *                          NO (refused: NOT-AMATEUR, RECEIVE-ONLY, AIRSPACE, NO-DEVICE)
  *  A client that does not read misses messages: the stream never waits for it. From the client, a line each:
@@ -60,6 +62,10 @@
  *      "w <Hz>"            watch that channel (narrow FM, NOAA Weather Radio) for SAME alerts (same.c); "w 0" stops
  *      "d <Hz>"            decode that FM broadcast channel's RDS (rds.c); "d 0" stops. Off the listened channel's
  *                          own multiplex when it listens there in WFM, else demodulated for it alone
+ *      "c 1", "c 0"        ACARS: the device at ACARS_HZ (130.8 MHz), the tuner's top gain and the rate as asked, each
+ *                          ACARS channel within it (131.550, 131.725, 131.125, 130.450, 130.425, 130.025 MHz) heard in AM
+ *                          and decoded, its messages out as "RACR"; rows as asked meanwhile, no listening. "c 0" (or the
+ *                          client gone): the device back to what the client asked. Never with "a": dump1090 comes first
  *      "a" and a file descriptor (SCM_RIGHTS)  the raw samples (unsigned 8-bit I/Q) written to it at 1090 MHz,
  *                          2.4 MS/s and the tuner's top gain, for AIRSPACE's dump1090 ("--ifile -"); no rows or audio
  *                          meanwhile. "a 0", or dump1090 gone: the stick back to what the client asked
@@ -71,7 +77,7 @@
  *      "R"                 the receiver's stream stopped and started again, as a transmission does, without one (a
  *                          test of that on the radio's USB host)
  *      "Q"                 the daemon ends and closes the stick (a GUI that wants another version of it)
- *  A client gone: its rows, listening, watch and transmission end; the device goes on, tuned as it was.
+ *  A client gone: its rows, listening, watch, ACARS and transmission end; the device goes on, tuned as it was.
  *
  *      x6x00-rtlspec [-F] [-d index] [-f Hz] [-s rate] [-n bins] [-r rows/s] [-g tenths] [-i FILE] [-S name]
  *                    [-T FILE]
@@ -106,6 +112,11 @@
 #include <time.h>
 #include <unistd.h>
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
+#include "acars.h"
 #include "rds.h"
 #include "same.h"
 #include "sdr.h"
@@ -335,6 +346,66 @@ static void rds_mpx(float v) {
     if (rds && rds_feed(rds, buf, sizeof(buf) / sizeof(buf[0]))) rds_say();
 }
 
+/* ACARS (acars.c): the channels within the span round ACARS_HZ, each one's AM audio into a decoder of its own; a
+ * message whose check passed goes out as "RACR". 129.125 MHz lies outside it at these rates (1.07 MHz either side) */
+#define ACARS_HZ 130800000u
+static const uint64_t acars_hz[] = {131550000, 131725000, 131125000, 130450000, 130425000, 130025000, 129125000};
+#define ACARS_N  ((int)(sizeof(acars_hz) / sizeof(acars_hz[0])))
+static atomic_bool acars_want;          /* "c 1" */
+static bool        acars_on;            /* some channel of it within the span (acars_thread's) */
+static chan_t      acrc[ACARS_N];
+static acars_t    *acd[ACARS_N];
+
+static void acars_out(int i, float v) {
+    static float buf[ACARS_N][441];
+    static int   n[ACARS_N];
+    acars_msg_t  m[2];
+    char         text[400];
+    uint8_t      msg[8 + sizeof(text)];
+
+    buf[i][n[i]++] = v;
+    if (n[i] < 441) return;
+    n[i] = 0;
+    if (!acd[i]) acd[i] = acars_new(AUD_RATE);
+    if (!acd[i]) return;
+    int got = acars_feed(acd[i], buf[i], 441, m, 2);
+    for (int k = 0; k < got; k++) {
+        for (char *t = m[k].text; *t; t++)
+            if (*t == '|') *t = '/';
+        snprintf(text, sizeof(text), "%llu|%c|%s|%c|%s|%c|%s|%s|%d|%.0f|%s", (unsigned long long)acars_hz[i], m[k].mode,
+                 m[k].reg, m[k].ack, m[k].label, m[k].block, m[k].msn, m[k].flight, m[k].more ? 1 : 0, m[k].level,
+                 m[k].text);
+        uint32_t len = (uint32_t)strlen(text);
+
+        memcpy(msg, "RACR", 4);
+        memcpy(msg + 4, &len, 4);
+        memcpy(msg + 8, text, len);
+        put(msg, 8 + len);
+    }
+}
+#define ACO(i) \
+    static void acars_out##i(float v) { acars_out(i, v); }
+ACO(0) ACO(1) ACO(2) ACO(3) ACO(4) ACO(5) ACO(6)
+static void (*const acars_outs[ACARS_N])(float) = {acars_out0, acars_out1, acars_out2, acars_out3, acars_out4,
+                                                   acars_out5, acars_out6};
+
+/* Each channel set against the centre now (off outside the span, or with ACARS off) */
+static void acars_set(bool on, uint64_t centre, uint32_t rate) {
+    acars_on = false;
+    for (int i = 0; i < ACARS_N; i++) {
+        chan_t *c = &acrc[i];
+
+        if (!c->out) {
+            c->r1      = 8;
+            c->prev_r  = 1;
+            c->avg_mag = 0.01f;
+            c->out     = acars_outs[i];
+        }
+        chan_set(c, on ? 2 : 0, acars_hz[i], centre, rate);
+        if (c->mode) acars_on = true;
+    }
+}
+
 /* One sample at 264.6 kHz: into the FIR, every sixth a 44.1 kHz one demodulated (WFM: demodulated here, then the
  * FIR on the audio; its multiplex to RDS when it decodes this channel) */
 static void at_264k(chan_t *c, float r, float i) {
@@ -386,14 +457,8 @@ static void at_264k(chan_t *c, float r, float i) {
     }
 }
 
-/* One stick sample into a channel: mixed down (integers, a 1024-step sine), into its CIC */
-static inline void chan_sample(chan_t *c, uint8_t ib, uint8_t qb) {
-    int      x = ib - 127, y = qb - 127;
-    uint32_t k = c->ph >> 22;
-    int      s = sin_lut[k], co = sin_lut[(k + 256) & 1023];
-    int      r = (x * co - y * s) >> 8, i = (x * s + y * co) >> 8;     /* +-32k */
-
-    c->ph += c->ph_inc;
+/* A sample mixed down (+-16k) into a channel's CIC */
+static inline void chan_cic(chan_t *c, int r, int i) {
     c->i1r += (uint32_t)r;
     c->i1i += (uint32_t)i;
     c->i2r += c->i1r;
@@ -410,6 +475,228 @@ static inline void chan_sample(chan_t *c, uint8_t ib, uint8_t qb) {
     at_264k(c, (int32_t)cr / (32768.0f * c->r1 * c->r1), (int32_t)ci / (32768.0f * c->r1 * c->r1));
 }
 
+/* One stick sample into a channel: mixed down (integers, a 1024-step sine), into its CIC */
+static inline void chan_sample(chan_t *c, uint8_t ib, uint8_t qb) {
+    int      x = ib - 127, y = qb - 127;
+    uint32_t k = c->ph >> 22;
+    int      s = sin_lut[k], co = sin_lut[(k + 256) & 1023];
+    int      r = (x * co - y * s) >> 8, i = (x * s + y * co) >> 8;     /* +-32k */
+
+    c->ph += c->ph_inc;
+    chan_cic(c, r, i);
+}
+
+/* ACARS's six channels a block at a time: chan_sample's integer mixer for each of them, sample by sample, took a whole
+ * core of the radio's Cortex-A7 and the stream fell behind (78% of the samples, 2026-11-16). Here the samples go to
+ * floats once, and each channel's mixer runs four samples a step on NEON (four phasors, each a step of four samples
+ * apart, its length kept at 128: chan_sample's +-16k), before the same CIC */
+#define ABLK 4096
+static float   abx[ABLK], aby[ABLK];
+static int32_t amr[ABLK], ami[ABLK];
+typedef struct {
+    float pr[4], pi[4];                 /* the next four samples' phasors */
+    float s4r, s4i;                     /* four samples' step */
+} amix_t;
+static amix_t amix[8];
+
+static void amix_set(amix_t *m, uint32_t ph_inc) {
+    double th = 2 * M_PI * (int32_t)ph_inc / 4294967296.0;
+
+    for (int l = 0; l < 4; l++) {
+        m->pr[l] = (float)(128 * cos(th * l));
+        m->pi[l] = (float)(128 * sin(th * l));
+    }
+    m->s4r = (float)cos(4 * th);
+    m->s4i = (float)sin(4 * th);
+}
+
+/* m samples (a multiple of 4) of abx/aby through the mixer into amr/ami */
+static void amix_run(amix_t *m, int n) {
+#if defined(__ARM_NEON)
+    float32x4_t pr = vld1q_f32(m->pr), pi = vld1q_f32(m->pi), sr = vdupq_n_f32(m->s4r), si = vdupq_n_f32(m->s4i);
+
+    for (int k = 0; k < n; k += 4) {
+        float32x4_t xr = vld1q_f32(abx + k), xi = vld1q_f32(aby + k);
+
+        vst1q_s32(amr + k, vcvtq_s32_f32(vmlsq_f32(vmulq_f32(xr, pr), xi, pi)));
+        vst1q_s32(ami + k, vcvtq_s32_f32(vmlaq_f32(vmulq_f32(xr, pi), xi, pr)));
+        float32x4_t nr = vmlsq_f32(vmulq_f32(pr, sr), pi, si);
+        pi = vmlaq_f32(vmulq_f32(pr, si), pi, sr);
+        pr = nr;
+    }
+    vst1q_f32(m->pr, pr);
+    vst1q_f32(m->pi, pi);
+#else
+    for (int k = 0; k < n; k += 4)
+        for (int l = 0; l < 4; l++) {
+            float xr = abx[k + l], xi = aby[k + l], pr = m->pr[l], pi = m->pi[l];
+
+            amr[k + l] = (int32_t)(xr * pr - xi * pi);
+            ami[k + l] = (int32_t)(xr * pi + xi * pr);
+            m->pr[l] = pr * m->s4r - pi * m->s4i;
+            m->pi[l] = pr * m->s4i + pi * m->s4r;
+        }
+#endif
+    /* rounding makes the phasors grow or shrink a little each step: back to 128 once a block */
+    float g = 128 / sqrtf(m->pr[0] * m->pr[0] + m->pi[0] * m->pi[0]);
+    for (int l = 0; l < 4; l++) m->pr[l] *= g, m->pi[l] *= g;
+}
+
+/* The CIC for a block of a channel's mixed samples, its state in registers: chan_cic's, sample by sample, without
+ * loading and storing it each time */
+static void cic_block(chan_t *c, const int32_t *r, const int32_t *i, int n) {
+    uint32_t i1r = c->i1r, i1i = c->i1i, i2r = c->i2r, i2i = c->i2i;
+    int      k = 0, cn = c->cic_n, r1 = c->r1;
+    float    sc = 1.0f / (32768.0f * r1 * r1);
+
+    while (k < n) {
+        int run = r1 - 1 - cn;          /* samples before the next output */
+        if (run > n - k) run = n - k;
+        for (int e = k + run; k < e; k++) {
+            i1r += (uint32_t)r[k];
+            i1i += (uint32_t)i[k];
+            i2r += i1r;
+            i2i += i1i;
+        }
+        cn += run;
+        if (k == n) break;
+        i1r += (uint32_t)r[k];          /* the sample that makes an output */
+        i1i += (uint32_t)i[k];
+        i2r += i1r;
+        i2i += i1i;
+        k++;
+        cn = 0;
+        uint32_t a = i2r - c->c1r, b = i2i - c->c1i;
+        c->c1r = i2r;
+        c->c1i = i2i;
+        uint32_t cr = a - c->c2r, ci = b - c->c2i;
+        c->c2r = a;
+        c->c2i = b;
+        at_264k(c, (int32_t)cr * sc, (int32_t)ci * sc);
+    }
+    c->i1r = i1r, c->i1i = i1i, c->i2r = i2r, c->i2i = i2i;
+    c->cic_n = cn;
+}
+
+/* m samples (unsigned 8-bit I/Q, a multiple of 4) into every ACARS channel */
+static void acars_run(const uint8_t *b, int m) {
+    for (int at = 0; at < m; at += ABLK) {
+        int n = m - at < ABLK ? m - at : ABLK;
+
+        for (int k = 0; k < n; k++) {
+            abx[k] = b[2 * (at + k)] - 127.0f;
+            aby[k] = b[2 * (at + k) + 1] - 127.0f;
+        }
+        for (int i = 0; i < ACARS_N; i++) {
+            if (!acrc[i].mode) continue;
+            amix_run(&amix[i], n);
+            cic_block(&acrc[i], amr, ami, n);
+        }
+    }
+}
+
+/* ACARS on a thread of its own, off the stream's: on it, six channels took a core of the radio and the stream fell
+ * behind the device (78% of the samples). The stream puts the samples in a ring (acars_put); this thread reads them
+ * on another core, its channels set as commands() last said (acars_cfg) */
+#define ARING (1u << 22)                /* 4 MB: 0.9 s at 2.38 MS/s */
+static uint8_t         aring[ARING];
+static atomic_uint     a_wr, a_rd;      /* bytes in and out, mod 2^32 */
+static atomic_uint     a_drop;          /* bytes the thread was too late for */
+static pthread_mutex_t a_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  a_cond = PTHREAD_COND_INITIALIZER;
+static struct {
+    bool     on;
+    uint64_t centre;
+    uint32_t rate;
+    uint32_t seq;
+} acars_cfg;                            /* under a_lock */
+static bool a_thread;
+
+static void acars_put(const uint8_t *b, uint32_t n) {
+    uint32_t w = atomic_load(&a_wr), r = atomic_load(&a_rd);
+
+    n &= ~1u;
+    if (w - r + n > ARING) {            /* the thread behind: these go */
+        atomic_fetch_add(&a_drop, n);
+        return;
+    }
+    uint32_t at = w % ARING, first = ARING - at < n ? ARING - at : n;
+    memcpy(aring + at, b, first);
+    memcpy(aring, b + first, n - first);
+    atomic_store(&a_wr, w + n);
+    pthread_mutex_lock(&a_lock);
+    pthread_cond_signal(&a_cond);
+    pthread_mutex_unlock(&a_lock);
+}
+
+static uint32_t now_ms(void);
+
+static void *acars_thread(void *arg) {
+    static uint8_t chunk[ABLK * 2 * 4];
+    uint32_t       seen = 0;
+    (void)arg;
+
+    for (;;) {
+        pthread_mutex_lock(&a_lock);
+        while (atomic_load(&a_wr) - atomic_load(&a_rd) < sizeof(chunk) && acars_cfg.seq == seen && !stop) {
+            struct timespec t;
+            clock_gettime(CLOCK_REALTIME, &t);
+            t.tv_nsec += 100000000;
+            if (t.tv_nsec >= 1000000000) t.tv_sec++, t.tv_nsec -= 1000000000;
+            pthread_cond_timedwait(&a_cond, &a_lock, &t);
+            if (acars_cfg.seq == seen && atomic_load(&a_wr) - atomic_load(&a_rd) > 0 && atomic_load(&a_wr) - atomic_load(&a_rd) < sizeof(chunk))
+                break;                  /* a short tail after 0.1 s: taken too, a multiple of 8 bytes */
+        }
+        bool     fresh = acars_cfg.seq != seen;
+        bool     on    = acars_cfg.on;
+        uint64_t c     = acars_cfg.centre;
+        uint32_t rt    = acars_cfg.rate;
+        seen           = acars_cfg.seq;
+        pthread_mutex_unlock(&a_lock);
+        if (stop) break;
+        if (fresh) {                    /* other channels: what is in the ring was for the ones before */
+            acars_set(on, c, rt);
+            for (int i = 0; i < ACARS_N; i++) amix_set(&amix[i], acrc[i].ph_inc);
+            atomic_store(&a_rd, atomic_load(&a_wr));
+            continue;
+        }
+        uint32_t r = atomic_load(&a_rd), avail = atomic_load(&a_wr) - r;
+        uint32_t n = (avail < sizeof(chunk) ? avail : (uint32_t)sizeof(chunk)) & ~7u;
+        if (!n) continue;
+        uint32_t at = r % ARING, first = ARING - at < n ? ARING - at : n;
+        memcpy(chunk, aring + at, first);
+        memcpy(chunk + first, aring, n - first);
+        atomic_store(&a_rd, r + n);
+        if (acars_on) acars_run(chunk, (int)(n / 2));
+        {                               /* behind the device: said at most once a minute */
+            static uint32_t last_ms, last_drop;
+            uint32_t        d = atomic_load(&a_drop), t = now_ms();
+            if (d != last_drop && t - last_ms > 60000) {
+                fprintf(stderr, "rtlspec: ACARS behind the device: %u bytes dropped\n", d - last_drop);
+                last_drop = d;
+                last_ms   = t;
+            }
+        }
+    }
+    return NULL;
+}
+
+/* commands(): the channels as they should be now, for the thread to set */
+static void acars_say(bool on, uint64_t centre, uint32_t rate) {
+    pthread_mutex_lock(&a_lock);
+    if (on && !a_thread) {
+        pthread_t t;
+        a_thread = pthread_create(&t, NULL, acars_thread, NULL) == 0;
+        if (a_thread) pthread_detach(t);
+    }
+    acars_cfg.on     = on;
+    acars_cfg.centre = centre;
+    acars_cfg.rate   = rate;
+    acars_cfg.seq++;
+    pthread_cond_signal(&a_cond);
+    pthread_mutex_unlock(&a_lock);
+}
+
 static long per_row_now;        /* samples a row at the rate now */
 static int  rows_now = 20;
 
@@ -418,7 +705,7 @@ static int  rows_now = 20;
  * through `pend` and taken at the start of its next transfer */
 static pthread_mutex_t pend_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
-    bool     centre, rate, listen, watch, rds;
+    bool     centre, rate, listen, watch, rds, acars;
     uint64_t centre_hz, listen_hz, watch_hz, rds_hz;
     uint32_t rate_sps;
     int      mode;
@@ -480,10 +767,10 @@ static atomic_bool     tx_on;           /* transmitting: the device is the trans
  * know is handed to it through pend. Nothing while it transmits: what is asked meanwhile is set after */
 static void apply_tuning(void) {
     pthread_mutex_lock(&tune_lock);
-    bool     ads = atomic_load(&feeding);
-    uint64_t c   = ads ? ADSB_HZ : want_centre;
+    bool     ads = atomic_load(&feeding), acr = !ads && atomic_load(&acars_want);
+    uint64_t c   = ads ? ADSB_HZ : acr ? ACARS_HZ : want_centre;
     uint32_t r   = ads ? ADSB_RATE : want_rate;
-    int      g   = ads ? 999 : want_gain;           /* the tuner's top, as dump1090 itself sets */
+    int      g   = ads || acr ? 999 : want_gain;    /* the tuner's top, as dump1090 itself sets */
     bool     dv  = dev_open && dev_ops && !atomic_load(&tx_on);
 
     if (c < dev_lo) c = dev_lo;
@@ -882,6 +1169,12 @@ static void command(char *line, int fd) {
         pend.rds    = true;
         pend.rds_hz = strtoull(line + 1, NULL, 10);
         pthread_mutex_unlock(&pend_lock);
+    } else if (line[0] == 'c') {          /* "c 1": ACARS; "c 0": no more */
+        atomic_store(&acars_want, atoi(line + 1) != 0);
+        apply_tuning();
+        pthread_mutex_lock(&pend_lock);
+        pend.acars = true;
+        pthread_mutex_unlock(&pend_lock);
     } else if (line[0] == 'a') {
         feed_set(fd);                   /* -1: "a 0", the samples dump1090's no more */
         fd = -1;
@@ -966,7 +1259,9 @@ static void *client_thread(void *arg) {
     pend.watch_hz  = 0;
     pend.rds       = true;
     pend.rds_hz    = 0;
+    pend.acars     = true;
     pthread_mutex_unlock(&pend_lock);
+    if (atomic_exchange(&acars_want, false)) apply_tuning();
     return NULL;
 }
 
@@ -1006,7 +1301,9 @@ static void commands(uint64_t *centre, bool *fresh) {
         if (shared || !rds_hz) rdsc.mode = 0;
         else if (pend.rds || pend.centre || pend.rate || rdsc.mode != 3) chan_set(&rdsc, 3, rds_hz, *centre, rate_now);
     }
-    pend.centre = pend.rate = pend.listen = pend.watch = pend.rds = false;
+    if (pend.acars || ((pend.centre || pend.rate) && atomic_load(&acars_want)))
+        acars_say(atomic_load(&acars_want), *centre, rate_now);
+    pend.centre = pend.rate = pend.listen = pend.watch = pend.rds = pend.acars = false;
     pthread_mutex_unlock(&pend_lock);
 }
 
@@ -1032,6 +1329,7 @@ static void on_samples(unsigned char *buf, uint32_t n) {
         feed_out(buf, n);
         return;
     }
+    if (atomic_load(&acars_want)) acars_put(buf, n);
     rows = atomic_load(&rows_on);
     if (!rows) {                        /* rows again later: from a clean start */
         nfft = fill = 0;

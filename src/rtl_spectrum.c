@@ -104,6 +104,9 @@ static bool            tx_thr_on;
 static atomic_llong    watch_hz;
 static atomic_llong    rds_hz;          /* the channel decoded for RDS, 0 none */
 static rtl_rds_t       rds_now;         /* what came for it, under lock */
+static atomic_bool     acars_on;        /* "c 1" asked */
+static rtl_acars_t     acars_ring[RTL_ACARS_KEEP];      /* under lock: newest at acars_n - 1 (mod) */
+static uint32_t        acars_n;         /* messages taken so far: the newest is acars_ring[(acars_n - 1) % KEEP] */
 static char            alert[300];
 static time_t          alert_at;
 static uint32_t        alert_seq;
@@ -323,7 +326,7 @@ static void *spec_thread(void *arg) {
         bool k = kept();
 
         /* AIRSPACE's dump1090 runs only while its screen is open, on the daemon's samples (adsb_rx.c) */
-        adsb_rx_lend(!atomic_load(&yielded));
+        adsb_rx_lend(!atomic_load(&yielded) || atomic_load(&acars_on));     /* ACARS: the SDR on 130 MHz */
         if (fd < 0) {
             if ((fd = daemon_connect()) < 0 && access(HELPER, X_OK) == 0) {
                 daemon_start();
@@ -365,6 +368,7 @@ static void *spec_thread(void *arg) {
                 snprintf(cmd, sizeof(cmd), "d %lld\n", (long long)atomic_load(&rds_hz));
                 say(cmd);
             }
+            if (atomic_load(&acars_on)) say("c 1\n");
             if (atomic_load(&listen_mode)) {
                 snprintf(cmd, sizeof(cmd), "l %lld %d\n", (long long)atomic_load(&listen_hz),
                          atomic_load(&listen_mode));
@@ -529,6 +533,32 @@ static void *spec_thread(void *arg) {
                 r.seq   = rds_now.seq + 1;
                 rds_now = r;
             }
+            pthread_mutex_unlock(&lock);
+            continue;
+        }
+        if (n >= 8 && memcmp(buf, "RACR", 4) == 0) {   /* "<Hz>|<mode>|<reg>|<ack>|<label>|<block>|<msn>|<flight>|
+                                                        *  <more>|<level>|<text>" */
+            uint32_t len;
+            char     t[420], *f[10], *p;
+            int      k = 0;
+
+            memcpy(&len, buf + 4, 4);
+            if (len >= sizeof(t) || len > (uint32_t)(n - 8)) continue;
+            memcpy(t, buf + 8, len);
+            t[len] = 0;
+            for (p = t; k < 10 && (f[k] = p) && (p = strchr(p, '|')); k++) *p++ = 0;
+            if (k < 10 || !p) continue;
+            rtl_acars_t m = {.hz = strtoll(f[0], NULL, 10), .at = time(NULL), .mode = f[1][0], .ack = f[3][0],
+                             .block = f[5][0], .more = atoi(f[8]) != 0, .level = atoi(f[9])};
+
+            snprintf(m.reg, sizeof(m.reg), "%s", f[2]);
+            snprintf(m.label, sizeof(m.label), "%s", f[4]);
+            snprintf(m.msn, sizeof(m.msn), "%s", f[6]);
+            snprintf(m.flight, sizeof(m.flight), "%s", f[7]);
+            snprintf(m.text, sizeof(m.text), "%s", p);
+            pthread_mutex_lock(&lock);
+            acars_ring[acars_n % RTL_ACARS_KEEP] = m;
+            acars_n++;
             pthread_mutex_unlock(&lock);
             continue;
         }
@@ -994,6 +1024,32 @@ bool rtl_spectrum_rds(rtl_rds_t *out) {
     got  = rds_now.pi && rds_now.hz && rds_now.hz == atomic_load(&rds_hz);
     pthread_mutex_unlock(&lock);
     return got;
+}
+
+void rtl_spectrum_acars(bool on) {
+    if (atomic_exchange(&acars_on, on) == on) return;
+    say(on ? "c 1\n" : "c 0\n");
+}
+
+bool rtl_spectrum_acars_on(void) { return atomic_load(&acars_on); }
+
+bool rtl_spectrum_acars_msg(int i, rtl_acars_t *out) {
+    bool got = false;
+
+    pthread_mutex_lock(&lock);
+    if (i >= 0 && (uint32_t)i < acars_n && i < RTL_ACARS_KEEP) {
+        *out = acars_ring[(acars_n - 1 - (uint32_t)i) % RTL_ACARS_KEEP];
+        got  = true;
+    }
+    pthread_mutex_unlock(&lock);
+    return got;
+}
+
+uint32_t rtl_spectrum_acars_seq(void) {
+    pthread_mutex_lock(&lock);
+    uint32_t n = acars_n;
+    pthread_mutex_unlock(&lock);
+    return n;
 }
 
 /* ---- The device ---- */

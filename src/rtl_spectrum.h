@@ -139,6 +139,26 @@ typedef struct {
 /* What came for the channel watched; false: nothing yet */
 bool rtl_spectrum_rds(rtl_rds_t *out);
 
+/* ACARS (the daemon's acars.c): the device at 130.8 MHz, the ACARS channels there decoded (AIRSPACE's ACARS view;
+ * never with AIRSPACE's dump1090 on the same device: adsb_rx_lend first). Said again to a daemon started anew */
+void rtl_spectrum_acars(bool on);
+bool rtl_spectrum_acars_on(void);
+
+typedef struct {
+    int64_t hz;                 /* the channel */
+    time_t  at;                 /* when it came */
+    char    mode, ack, block;
+    bool    more;               /* ETB: more blocks follow */
+    char    reg[8], label[3], msn[5], flight[7];
+    int     level;              /* dB, the audio's */
+    char    text[221];
+} rtl_acars_t;
+
+#define RTL_ACARS_KEEP 64
+/* The messages kept, newest first: i from 0, false past the last. rtl_spectrum_acars_seq: one more at each new one */
+bool     rtl_spectrum_acars_msg(int i, rtl_acars_t *out);
+uint32_t rtl_spectrum_acars_seq(void);
+
 /* The tuner the helper found ("R820T", "HACKRF-ONE", "BLADERF2"; for RTL_SPEC_NEEDS what is missing: "LIBBLADERF",
  * "hostedxA4.rbf"), "" before */
 void rtl_spectrum_tuner(char *s, size_t n);

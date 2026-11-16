@@ -1164,9 +1164,28 @@ the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on t
   swapped for another of its kind does not ask. Till it is answered: a serial one and one SDR (a spare RTL-SDR, else
   B's), never two SDRs. AIRSPACE takes no SDR before the GUI has reached the SDR daemon (its first seconds).
 - **F4 LISTEN** names what is listened on (GNS 5890, RTL-SDR, BOTH, ALL; with more than one pair, GNS+HACKRF and the
-  like) and goes to the next choice, round again past the last. **F5** forgets the history (it was F4).
+  like) and goes to the next choice, round again past the last. **F5 VIEW**: ADS-B or ACARS (below); **F5 held**
+  forgets the list shown, the aircraft's history or the ACARS messages (F5 alone did, up to v0.3.12.27).
 - With AIRSPACE closed, B's SDR is the Sentry's: a serial one chosen with it (BOTH) goes on listening, so the history
   covers the time away, and B's SDR joins it again when AIRSPACE opens.
+
+### ACARS
+
+ACARS (ARINC 618) is the airlines' datalink: short text messages between aircraft and ground stations on VHF AM,
+131.550 MHz in North America and a few channels beside it. **F5 VIEW** on AIRSPACE turns B's SDR (an RTL-SDR, a
+HackRF or a bladeRF) from 1090 MHz to them, and the list on the right becomes the messages, newest first: the time,
+the flight (from an aircraft), its registration, the label (what kind of message: H1 free text, Q0 a link test, _d
+nothing to say) and the text. The MFK or a tap chooses one, and the box below shows it whole: flight, registration,
+label, time and channel, then its text. A GNS 5890 or a microADSB beside the SDR goes on with ADS-B, so the scope
+stays live; with B's SDR alone the scope has nothing new while ACARS is on. F5 again: ADS-B.
+
+- The SDR sits at 130.8 MHz and hears 131.550, 131.725, 131.125, 130.450, 130.425 and 130.025 MHz at once (129.125
+  is outside its 2.1-2.6 MHz). Each channel is demodulated in AM and its 2400 bit/s MSK decoded (the daemon's
+  acars.c, a coherent receiver as acarsdec's); a message is shown only when its check (the BCS, a CRC) passed.
+- It takes about three quarters of one of the radio's four cores while it is on, on a thread of its own beside the
+  SDR's stream (on the stream's own thread it took a whole core and the stream fell behind the device).
+- The airband antenna matters more than for ADS-B: ground stations are strongest; aircraft are heard when high.
+- Reading ACARS is receive only, as is everything on AIRSPACE.
 
 ## Updating the firmware
 

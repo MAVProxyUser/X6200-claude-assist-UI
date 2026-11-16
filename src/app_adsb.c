@@ -119,6 +119,19 @@ static lv_color_t   amb, ink, dim, faint;
 static uint32_t     c_amb, c_ink, c_dim, c_faint, glow[64];
 static lv_obj_t    *root, *title_l, *status_l, *badge_l[2], *scope_img, *spark_img, *centre_l, *north_l, *ring_l[4];
 static lv_obj_t    *lbl[LABELS], *list_head_l, *row_l[ROWS], *det_l[3], *sig_l, *legend_l, *key_l[5], *help_l;
+static lv_obj_t    *list_cap_l, *det_cap_l;
+#define LIST_CAP  "AIRCRAFT: LIVE, THEN HISTORY"
+#define LIST_HEAD "CALL     ICAO     ALT  KT TRK    NM BRG  AGE"
+
+/* ACARS (F5 VIEW): B's SDR on the ACARS channels at 130-132 MHz instead of 1090 (rtl_spectrum_acars, the daemon's
+ * acars.c), the list its messages, newest first; the scope goes on with the others (a GNS 5890 beside it) */
+static bool     acars_view;
+static int      acars_sel;              /* the message chosen, from the newest */
+static uint32_t acars_from;             /* the count when F5 was held: older ones not shown */
+static int      acars_count(void) {
+    uint32_t n = rtl_spectrum_acars_seq() - acars_from;
+    return n > RTL_ACARS_KEEP ? RTL_ACARS_KEEP : (int)n;
+}
 static lv_img_dsc_t *scope, *spark;
 static bool          sc_gpu;        /* the GPU draws the scope on the display's plane under a hole (Mesa there): put()
                                      * and line() with no pixels are its points and lines, at sc_ox, sc_oy */
@@ -510,8 +523,58 @@ static void show_labels(double now, const int *idx, int n) {
     for (int i = used; i < LABELS; i++) lv_obj_add_flag(lbl[i], LV_OBJ_FLAG_HIDDEN);
 }
 
+static void show_acars(void) {
+    int n = acars_count();
+
+    if (acars_sel >= n) acars_sel = n ? n - 1 : 0;
+    int first = acars_sel < ROWS / 2 ? 0 : acars_sel - ROWS / 2;
+    if (first > n - ROWS) first = n - ROWS > 0 ? n - ROWS : 0;
+    for (int r = 0; r < ROWS; r++) {
+        rtl_acars_t m;
+        int         k = first + r;
+        if (k >= n || !rtl_spectrum_acars_msg(k, &m)) {
+            lv_label_set_text(row_l[r], r == 0 && !n ? "NOTHING HEARD YET: 131.550, 131.725, 131.125, 130.450, 130.425, "
+                                                       "130.025 MHZ" : "");
+            lv_obj_set_style_bg_opa(row_l[r], LV_OPA_TRANSP, 0);
+            lv_obj_set_style_text_color(row_l[r], dim, 0);
+            continue;
+        }
+        struct tm tm;
+        char      t[8];
+        localtime_r(&m.at, &tm);
+        strftime(t, sizeof(t), "%H:%M", &tm);
+        lv_label_set_text_fmt(row_l[r], "%s %-6s %-7s %-2s %s", t, m.flight[0] ? m.flight : "-", m.reg, m.label,
+                              m.text[0] ? m.text : "(NO TEXT)");
+        bool chosen = k == acars_sel;
+        lv_obj_set_style_bg_opa(row_l[r], chosen ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_bg_color(row_l[r], amb, 0);
+        lv_obj_set_style_text_color(row_l[r], chosen ? ink : amb, 0);
+    }
+    rtl_acars_t m;
+    if (!n || !rtl_spectrum_acars_msg(acars_sel, &m)) {
+        lv_label_set_text(det_l[0], "NO MESSAGE");
+        lv_label_set_text(det_l[1], "MFK: CHOOSE ONE");
+        lv_label_set_text(det_l[2], "");
+        return;
+    }
+    struct tm tm;
+    char      t[12], a[48] = "", b[48] = "";
+    localtime_r(&m.at, &tm);
+    strftime(t, sizeof(t), "%H:%M:%S", &tm);
+    lv_label_set_text_fmt(det_l[0], "%s %s %s %s %.3f", m.flight[0] ? m.flight : "-", m.reg, m.label, t, m.hz / 1e6);
+    snprintf(a, sizeof(a), "%.38s", m.text[0] ? m.text : "(NO TEXT)");
+    if (strlen(m.text) > 38) snprintf(b, sizeof(b), "%.35s%s", m.text + 38, strlen(m.text) > 73 ? "..." : "");
+    lv_label_set_text(det_l[1], a);
+    lv_label_set_text(det_l[2], b);
+}
+
 static void show_list(double now, const int *idx, int n) {
     int sel = -1;
+
+    if (acars_view) {
+        show_acars();
+        return;
+    }
 
     for (int k = 0; k < n; k++)
         if (adsb_plane(idx[k])->icao == sel_icao) sel = k;
@@ -555,6 +618,8 @@ static void show_list(double now, const int *idx, int n) {
 
 static void show_detail(double now, const int *idx, int n) {
     const adsb_plane_t *p = NULL;
+
+    if (acars_view) return;             /* show_acars has it */
 
     for (int k = 0; k < n; k++)
         if (adsb_plane(idx[k])->icao == sel_icao) p = adsb_plane(idx[k]);
@@ -650,8 +715,10 @@ static void show_head(double now, int nlive, int nghost) {
     unsigned            sum = 0;
     adsb_rate(now - 1, r, 10);              /* the last ten whole seconds */
     for (int i = 0; i < 10; i++) sum += r[i];
-    lv_label_set_text_fmt(sig_l, "1090 MHZ   %u.%u MSG/S   %u ADS-B   %u BAD CRC", sum / 10, sum % 10, s->adsb,
-                          s->crc_bad);
+    if (acars_view) lv_label_set_text_fmt(sig_l, "ACARS 130.0-131.7 MHZ   %d MESSAGES   1090: %u.%u MSG/S", acars_count(),
+                                          sum / 10, sum % 10);
+    else lv_label_set_text_fmt(sig_l, "1090 MHZ   %u.%u MSG/S   %u ADS-B   %u BAD CRC", sum / 10, sum % 10, s->adsb,
+                               s->crc_bad);
 }
 
 static void show_keys(void) {
@@ -914,7 +981,7 @@ static const char *f_label(int i) {
             if (adsb_rx_choices()) snprintf(s[3], sizeof(s[3]), "LISTEN\n%s", opt_name(keys_mask, adsb_rx_choices(), true));
             else s[3][0] = 0;
             break;
-        default: snprintf(s[4], sizeof(s[4]), "CLEAR\nHISTORY"); break;
+        default: snprintf(s[4], sizeof(s[4]), "VIEW\n%s", acars_view ? "ACARS" : "ADS-B"); break;
     }
     return s[i];
 }
@@ -930,6 +997,12 @@ static void set_range(int d) {
 }
 
 static void step_sel(int d) {
+    if (acars_view) {
+        int n = acars_count();
+        if (n) acars_sel = (acars_sel + d + n) % n;
+        refresh();
+        return;
+    }
     double now = adsb_now();
     int    idx[ADSB_MAX_PLANES], n, k = -1;
 
@@ -939,6 +1012,35 @@ static void step_sel(int d) {
         if (adsb_plane(idx[i])->icao == sel_icao) k = i;
     if (n) sel_icao = adsb_plane(idx[k < 0 ? 0 : (k + d + n) % n])->icao;
     adsb_unlock();
+    refresh();
+}
+
+/* F5: ADS-B or ACARS in the list. ACARS takes B's SDR off 1090 MHz (AIRSPACE's dump1090 lets it go): only with one */
+static void view_set(bool acars) {
+    if (acars && rtl_spectrum_dev() == RTL_DEV_NONE) {
+        lv_label_set_text(sig_l, "ACARS NEEDS AN SDR ON USB: AN RTL-SDR, A HACKRF OR A BLADERF");
+        return;
+    }
+    acars_view = acars;
+    acars_sel  = 0;
+    rtl_spectrum_acars(acars);
+    lv_label_set_text(list_cap_l, acars ? "ACARS: NEWEST FIRST" : LIST_CAP);
+    lv_label_set_text(list_head_l, acars ? "TIME  FLIGHT REG     LB TEXT" : LIST_HEAD);
+    lv_label_set_text(det_cap_l, acars ? "MESSAGE" : "TARGET");
+}
+
+/* F5 held: the list forgotten, the aircraft's or the messages' */
+static void clear_history(void) {
+    if (acars_view) {
+        acars_from = rtl_spectrum_acars_seq();
+        acars_sel  = 0;
+    } else {
+        adsb_lock();
+        adsb_clear();
+        adsb_unlock();
+        sel_icao = 0;
+    }
+    show_keys();
     refresh();
 }
 
@@ -962,12 +1064,7 @@ static void fkey(int k) {
         case 1: param_i_set(cfg_adsb_decay, (param_i_get(cfg_adsb_decay) + 1) % N_DECAYS); break;
         case 2: param_i_set(cfg_adsb_trails, !param_i_get(cfg_adsb_trails)); break;
         case 3: rx_next(); break;
-        default:
-            adsb_lock();
-            adsb_clear();
-            adsb_unlock();
-            sel_icao = 0;
-            break;
+        default: view_set(!acars_view); break;
     }
     show_keys();
     refresh();
@@ -1016,6 +1113,11 @@ static void rotary_cb(int32_t diff) {
 }
 
 static bool front_key(int key, int state) {
+    if (key == KEYPAD_F5 && !help_on && !pick_on) {     /* F5: a tap the view, a hold the history cleared */
+        if (state == KEYPAD_RELEASE) fkey(4);
+        else if (state == KEYPAD_LONG) clear_history();
+        return true;
+    }
     if (key == KEYPAD_GEN) {
         if (state == KEYPAD_RELEASE) help_show(!help_on);
         return true;
@@ -1053,6 +1155,14 @@ static void scope_tap_cb(lv_event_t *e) {
 static void row_tap_cb(lv_event_t *e) {
     int    r = (int)(intptr_t)lv_event_get_user_data(e), idx[ADSB_MAX_PLANES], n, sel = 0;
     double now = adsb_now();
+
+    if (acars_view) {
+        int na = acars_count(), first = acars_sel < ROWS / 2 ? 0 : acars_sel - ROWS / 2;
+        if (first > na - ROWS) first = na - ROWS > 0 ? na - ROWS : 0;
+        if (first + r < na) acars_sel = first + r;
+        refresh();
+        return;
+    }
 
     adsb_lock();
     n = order(idx, now);
@@ -1098,10 +1208,11 @@ static lv_obj_t *rect(lv_obj_t *parent, int x, int y, int w, int h, int border, 
 }
 
 /* A box: a frame, its caption over a line */
-static void box(int x, int y, int w, int h, const char *cap) {
+static lv_obj_t *box(int x, int y, int w, int h, const char *cap) {
     rect(root, x, y, w, h, 3, false);
-    label(root, &pixel_20, amb, x + 3, y + 3, w - 6, LV_TEXT_ALIGN_CENTER, cap);
+    lv_obj_t *l = label(root, &pixel_20, amb, x + 3, y + 3, w - 6, LV_TEXT_ALIGN_CENTER, cap);
     rect(root, x, y + 25, w, 3, 0, true);
+    return l;
 }
 
 static void build(void) {
@@ -1161,9 +1272,8 @@ static void build(void) {
     lv_label_set_long_mode(centre_l, LV_LABEL_LONG_WRAP);
 
     /* the list */
-    box(RX0, BODY_Y, RW, 196, "AIRCRAFT: LIVE, THEN HISTORY");
-    list_head_l = label(root, &pixel_16, dim, RX0 + 6, BODY_Y + 30, RW - 12, LV_TEXT_ALIGN_LEFT,
-                        "CALL     ICAO     ALT  KT TRK    NM BRG  AGE");
+    list_cap_l  = box(RX0, BODY_Y, RW, 196, LIST_CAP);
+    list_head_l = label(root, &pixel_16, dim, RX0 + 6, BODY_Y + 30, RW - 12, LV_TEXT_ALIGN_LEFT, LIST_HEAD);
     for (int r = 0; r < ROWS; r++) {
         row_l[r] = label(root, &pixel_16, amb, RX0 + 6, BODY_Y + 48 + r * 18, RW - 12, LV_TEXT_ALIGN_LEFT, "");
         lv_obj_set_height(row_l[r], 18);
@@ -1173,7 +1283,7 @@ static void build(void) {
     }
 
     /* the one chosen */
-    box(RX0, BODY_Y + 202, RW, 96, "TARGET");
+    det_cap_l = box(RX0, BODY_Y + 202, RW, 96, "TARGET");
     for (int i = 0; i < 3; i++) det_l[i] = label(root, &pixel_20, amb, RX0 + 6, BODY_Y + 232 + i * 21, RW - 12, LV_TEXT_ALIGN_LEFT, "");
 
     /* the signals */
@@ -1187,7 +1297,7 @@ static void build(void) {
     /* what the knobs do, and the F keys */
     int ky = 480 - KEYS_H - 3;
     legend_l = label(root, &pixel_16, dim, 6, ky - LEGEND_H, SW - 12, LV_TEXT_ALIGN_CENTER,
-                     "VFO: RANGE | MFK: AIRCRAFT | TAP: CHOOSE | RING: SCREEN | F2: HISTORY | GEN: HELP");
+                     "VFO: RANGE | MFK: AIRCRAFT | TAP: CHOOSE | RING: SCREEN | F5 HELD: CLEAR | GEN: HELP");
     int w = (SW - 12 - 4 * 6) / 5;
     for (int i = 0; i < 5; i++) {
         lv_obj_t *k = lv_label_create(root);
@@ -1230,8 +1340,9 @@ static void build(void) {
                    "ROUND IT FOR EACH MESSAGE. A SQUARE IS A GHOST: NOT HEARD FOR A MINUTE, FADING WITH ITS TRACK.\n\n"
                    "F1 / VFO: RANGE OF THE SCOPE, 0.5 TO 250 NM.  F2: DECAY, HOW LONG GHOSTS AND TRACKS STAY: OFF, 1 TO 60 "
                    "MINUTES, OR HOLD TILL CLEARED.  F3: TRACKS ON OR OFF.  F4 LISTEN: THE NEXT RECEIVER THAT CAN HEAR 1090 MHZ, "
-                   "OR BOTH (A GNS 5890 OR MICROADSB AND AN SDR AT ONCE); TWO OR MORE: A BOX ASKS WHICH.  F5: FORGET THE "
-                   "HISTORY.  "
+                   "OR BOTH (A GNS 5890 OR MICROADSB AND AN SDR AT ONCE); TWO OR MORE: A BOX ASKS WHICH.  F5: VIEW, "
+                   "ADS-B OR ACARS (THE AIRLINERS' DATALINK ON 131.550 MHZ AND BESIDE: B'S SDR LEAVES 1090 MHZ FOR IT, A "
+                   "GNS 5890 KEEPS THE SCOPE); F5 HELD: FORGET THE LIST.  "
                    "THE MFK'S RING: THE SENTRY'S A NEXT, ITS G BEFORE (THIS IS ITS H).\n\n"
                    "MFK OR A TAP CHOOSES AN AIRCRAFT. A GNS 5890, A MICROADSB OR A SPARE RTL-SDR (ONE BESIDE A HACKRF OR "
                    "BLADERF) GOES ON LISTENING WHEN THIS SCREEN CLOSES; B'S SDR IS THIS SCREEN'S WHILE IT IS OPEN AND THE "
@@ -1313,6 +1424,8 @@ static void destruct_cb(void) {
     if (sc_gpu) drm_wf_claim(false);    /* the main screen's waterfall and spectrum on the plane again */
 #endif
     sc_gpu = false;
+    rtl_spectrum_acars(false);      /* B's SDR off the ACARS channels */
+    acars_view = false;
     rtl_spectrum_yield(false);      /* the RTL-SDR back to the Sentry */
     rtl_spectrum_mute(false);       /* the Sentry's OFF let go: what opens next sets the speaker (the Sentry again) */
     lv_group_remove_obj(root);
