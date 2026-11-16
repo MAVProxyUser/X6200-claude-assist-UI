@@ -405,7 +405,11 @@ enum { HEAR_X6200, HEAR_RTL, HEAR_BOTH, HEAR_OFF, HEAR_N };
 static const char *const hear_names[] = {"X6200", "SDR", "BOTH", "OFF"};     /* the SDR's: its own name (hear_name) */
 
 /* LISTEN's choice as said: the stick's by its kind (RTL, HACKRF, BLADERF) */
+static bool hear_many(void);
+/* BOTH is ALL with more than two receivers (the X6200 and two or more SDRs that tune B's channel: a KrakenSDR's): the
+ * user, 2026-11-16, "B should say BOTH if only two are present, but ALL if more are" */
 static const char *hear_name(int h) {
+    if (h == HEAR_BOTH && hear_many()) return "ALL";
     return h == HEAR_RTL ? rtl_spectrum_dev_tag() : h >= 0 && h < HEAR_N ? hear_names[h] : "";
 }
 static int     heard = HEAR_X6200;
@@ -2741,7 +2745,14 @@ static void hear_how(int h, char *t, size_t n) {
     char    f[16], sink[128];
 
     fmt_mhz(f, sizeof(f), hz, 3);
-    if (h == HEAR_BOTH && !btaudio_hp_sink(sink, sizeof(sink)))
+    if (h == HEAR_BOTH && hear_many())  /* ALL: the X6200, B's SDR and the watch channels (rtl_watch.c) */
+        snprintf(t, n, btaudio_hp_sink(sink, sizeof(sink))
+                           ? "ALL TOGETHER ON THE HEADPHONES: THE X6200, THE %s AT B'S CHANNEL (%s %s) AND EACH WATCH "
+                             "CHANNEL AS IT OPENS (F4 HELD ON B ADDS ONE)."
+                           : "THE %s (%s %s) AND EACH WATCH CHANNEL AS IT OPENS ON THE SPEAKER: WHILE IT PLAYS THEM THE "
+                             "BASE SENDS NOTHING OF THE X6200 (ALL OF IT ON BLUETOOTH HEADPHONES).",
+                 rtl_spectrum_dev_name(), f, rtl_mode_names[rtl_mode_of(hz)]);
+    else if (h == HEAR_BOTH && !btaudio_hp_sink(sink, sizeof(sink)))
         snprintf(t, n, "THE %s ALONE (%s %s): WHILE THE SPEAKER PLAYS IT, THE BASE SENDS NOTHING OF THE X6200. "
                        "BOTH TOGETHER NEEDS BLUETOOTH HEADPHONES.", rtl_spectrum_dev_name(), f,
                  rtl_mode_names[rtl_mode_of(hz)]);
@@ -2829,6 +2840,43 @@ static unsigned b_sdrs(void) {
         if (!hz || (hz >= lo && hz <= hi)) m |= DEVB(u);
     }
     return m;
+}
+
+static bool hear_many(void) {
+    return __builtin_popcount(b_sdrs()) >= 2;
+}
+
+/* F4 held on B and the VFO turned: B's SDRs one a click (back when turned back), the one chosen used when F4 is let
+ * go (each switch opens a device: a few seconds), as F2 held rolls the presets (the user, 2026-11-16: "holding F4 and
+ * turning dial should handle same way as holding F2 and turning dial, but ... it scrolls the connected devices") */
+static bool f4_roll, f4_rolled;
+static int  f4_pick = -1;
+static int  b_dev(void);
+static void osd(const char *title, const char *text, int bar);
+
+static void b_roll(int diff) {
+    unsigned m = b_sdrs();
+    int      u, n = __builtin_popcount(m);
+    char     t[200], title[40];
+
+    if (n < 2) {
+        osd("ONE SDR", "B HAS THE ONLY SDR THAT TUNES ITS CHANNEL.", -1);
+        return;
+    }
+    u = f4_pick >= 0 ? f4_pick : b_dev();
+    for (int d = diff > 0 ? diff : -diff; d > 0; d--) {
+        int k = 0;
+
+        do {
+            u = (u + (diff > 0 ? 1 : BU_N - 1)) % BU_N;
+        } while (!(m & DEVB(u)) && ++k < BU_N);
+    }
+    f4_pick = u;
+    int at = snprintf(t, sizeof(t), "LET GO OF F4 TO USE IT (A FEW SECONDS):");   /* the list, the one chosen marked */
+    for (int k = 0; k < BU_N && at < (int)sizeof(t); k++)
+        if (m & DEVB(k)) at += snprintf(t + at, sizeof(t) - (size_t)at, k == u ? " [%s]" : " %s", bu_word(k));
+    snprintf(title, sizeof(title), "B: %s%s", bu_word(u), u == b_dev() ? " (HAS IT)" : "");
+    osd(title, t, -1);
 }
 
 /* The one B has: the one asked for while it is there (the daemon may still be opening it), else the daemon's */
@@ -5602,6 +5650,11 @@ static void click_cb(lv_event_t *e) {
 /* The main knob: the radio is the operator's again */
 static void rotary_cb(int32_t diff) {
     if (dial_held()) return;            /* TX unlocked: the dial is not moved by a bump */
+    if (f4_roll && scr == SCR_RTL) {    /* B's F4 held: its SDRs, one a click, used when F4 is let go */
+        f4_rolled = true;
+        b_roll(diff);
+        return;
+    }
     if (f2_roll && scr == SCR_RTL) {    /* B's F2 held: a preset a click, back when turned back */
         f2_rolled = true;
         rtl_preset_go(diff);
@@ -5827,21 +5880,33 @@ static bool front_key(int key, int state) {
                 return rolled;
             }
             return f2_roll && f2_rolled;    /* a hold that rolled: nothing more of it */
-        case KEYPAD_F4: {               /* B: held, its channel watched on a spare RTL, or no longer; the release
-                                         * after it nothing (a tap is LISTEN as ever) */
-            static bool held;
+        case KEYPAD_F4: {               /* B: a tap LISTEN as ever; held and the VFO turned, its SDRs (b_roll), the one
+                                         * chosen used on letting go; held and let go unturned, its channel watched
+                                         * on a spare RTL, or no longer */
+            if (scr != SCR_RTL || sp_on || pp_on) return false;
+            if (state == KEYPAD_PRESS) {
+                f4_roll   = true;
+                f4_rolled = false;
+                f4_pick   = -1;
+                return false;
+            }
+            if (state == KEYPAD_LONG) return true;      /* nothing yet: a turn rolls, letting go watches */
+            if (state == KEYPAD_RELEASE || state == KEYPAD_LONG_RELEASE) {
+                bool rolled = f4_roll && f4_rolled;
 
-            if (scr != SCR_RTL || sp_on) return false;
-            if (state == KEYPAD_LONG) {
-                held = true;
-                b_watch_toggle();
-                return true;
+                f4_roll = f4_rolled = false;
+                if (rolled) {
+                    if (f4_pick >= 0 && f4_pick != b_dev()) b_use(f4_pick, b_sdrs());
+                    f4_pick = -1;
+                    return true;
+                }
+                if (state == KEYPAD_LONG_RELEASE) {
+                    b_watch_toggle();
+                    return true;
+                }
+                return false;           /* a tap: LISTEN */
             }
-            if (state == KEYPAD_LONG_RELEASE && held) {
-                held = false;
-                return true;
-            }
-            return false;
+            return f4_roll && f4_rolled;
         }
         default:
             return false;       /* POWER, F1, F3, F5: as ever */
@@ -7911,7 +7976,7 @@ static void build_overlays(void) {
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS (SPUN: 3 OR 8 STEPS A CLICK)\n"
                    "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (B: THE SDR'S); VOLUME AGAIN AFTER 5 S\n"
                    "LISTEN         A: X6200, THE SDR, BOTH, OFF; B: X6200, EACH SDR THAT TUNES IT, BOTH, OFF\n"
-                   "F4 HELD ON B   WATCH B'S CHANNEL ON A SPARE RTL (KRAKENSDR): HEARD WHEN IT OPENS\n"
+                   "F4 HELD ON B   + VFO: B'S SDRS (USED ON LETTING GO); ALONE: WATCH B'S CHANNEL ON A SPARE RTL\n"
                    "APP HELD       SDR POOL: EACH SDR, ITS USER; USE ON B, STOP/START, HEAR/MUTE (ANY SCREEN, H TOO)\n"
                    "BAND UP/DOWN   THE NEXT BAND, AS F2 (B: THE NEXT PRESET; G: A CHANNEL OR A STEP, MFK: GROUP)\n"
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
@@ -8038,6 +8103,8 @@ static void destruct_cb(void) {
     if (rtl_timer) lv_timer_del(rtl_timer);
     timer = blink_timer = rtl_timer = NULL;
     f2_roll = f2_rolled = false;
+    f4_roll = f4_rolled = false;
+    f4_pick = -1;
     if (scr == SCR_LOG) g_leave(false);
     audio_scope(false);
     walkie_show(false);                 /* landscape again before anything else draws */

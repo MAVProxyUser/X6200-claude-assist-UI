@@ -792,7 +792,7 @@ last seconds, the strongest signals named over it and the screen's channel brack
   half says its radio, its channel and whether it is HEARD, MUTED or SQUELCHED. On A, the VFO, the MFK or a band
   chosen while the view is the SDR's alone puts it back on SPLIT (`VIEW: SPLIT`): A's knobs tune the X6200, and with
   the SDR's picture alone nothing on A showed them move but the TUNED box.
-- **F4 LISTEN**, each screen's own: X6200, the SDR by its name (RTL0, RTL1..., HACKRF or BLADERF; SDR while none is plugged in), BOTH or OFF, OFF silencing the speaker (neither radio, the volume
+- **F4 LISTEN**, each screen's own: X6200, the SDR by its name (RTL0, RTL1..., HACKRF or BLADERF; SDR while none is plugged in), BOTH (**ALL** with more than two receivers, the X6200 and two or more SDRs that tune B's channel: the X6200, B's SDR and each watch channel as it opens) or OFF, OFF silencing the speaker (neither radio, the volume
   kept). **Two or more SDRs on USB** (a HackRF and an RTL-SDR on a powered hub, say): B offers those that tune its
   channel, in a box ("2 SDRS HERE TUNE B'S CHANNEL (162.400 MHZ). WHICH?", each with its range and whether it
   transmits; asked once for each set), and its LISTEN goes X6200, each of them, BOTH, OFF. **Each RTL-SDR is one of
@@ -800,7 +800,12 @@ last seconds, the strongest signals named over it and the screen's channel brack
   all say 00000001): a stick alone is RTL0, and a **KrakenSDR**'s five (serials 1000-1004 behind its own hub) are
   RTL0-RTL4, its CH0-CH4. The box gives each RTL's serial and USB location (`RTL2  SN 1002, USB 3-1.3, RECEIVE
   ONLY`); the SDR daemon logs the one it opens the same way (`RTL2 of 5 (serial 1002, USB 3-1.3)`).
-- **Watch channels** (two or more RTLs on a hub of their own power, a KrakenSDR's): **F4 held on B** watches B's
+- **F4 held on B and the VFO turned** goes through B's SDRs one a click (back when turned back), as F2 held goes
+  through the presets: `B: RTL1` and the list (`RTL0 [RTL1] RTL2 RTL3 RTL4`); **letting go of F4 uses the one
+  chosen** (each switch opens a device, a few seconds, so not at each click). F4 held and let go without a turn is
+  the watch below; a tap is LISTEN as ever.
+- **Watch channels** (two or more RTLs on a hub of their own power, a KrakenSDR's): **F4 held on B** (let go
+  without turning the VFO) watches B's
   channel on a spare RTL of its own (from the last, RTL4, RTL3...: AIRSPACE's first spare keeps the first free one),
   squelched (B's SDR squelch, or 10 dB over the noise if it is off), in the mode B hears it in; F4 held on it again
   drops it; up to four. Each is an SDR daemon of its own (`x6x00-rtlspec -W -d <n>`, 1.0584 MS/s, tuned 250 kHz off
