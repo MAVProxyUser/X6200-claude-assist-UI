@@ -740,7 +740,7 @@ Its controls (GEN shows them, as does a tap on the title):
 
 | Control | Does |
 |---|---|
-| VFO knob | The screen's own radio: on A (and the other screens) the X6200 by hand, the Sentry going to MAN-OVERRIDE and A's scan stopping; on B the stick's channel (heard or not); on C the stick while a stick entry plays |
+| VFO knob | The screen's own radio: on A (and the other screens) the X6200 by hand, the Sentry going to MAN-OVERRIDE and A's scan stopping; on B the stick's channel (heard or not), and with F2 held B's presets, one a click, back when turned back; on C the stick while a stick entry plays |
 | MFK knob | On A and B it pans the picture by SCAN CFG's STEP, its push going to the strongest signal; elsewhere it chooses a band, a frequency, an item, a logged signal, a CB channel. Push: listen, open |
 | MFK inner ring | The screens, A to H and round again (H is AIRSPACE; its ring comes back to A or G) |
 | VOL/SQL/RFG knob | Volume; push: squelch, push: RF gain, push: volume again. On B the squelch and RF gain are the SDR's |
@@ -784,6 +784,8 @@ last seconds, the strongest signals named over it and the screen's channel brack
   2 m repeaters, the airband, FM broadcast, marine VHF, the weather satellites, the weather balloons, 70 cm, ISM 433,
   GMRS, ISM 915, UAT 978 and ADS-B 1090; then 6 m, 1.25 m, 23 cm and GPS L1, and with a HackRF or bladeRF Wi-Fi
   2.4 GHz, 13 cm, 5.8 GHz, and with a HackRF HF 20 m and 10 m: a preset past what the stick tunes is passed over).
+  To roll through them, hold F2 and turn the VFO knob: a preset a click, each tuned and named as it comes, and
+  backwards when the knob turns back; letting F2 go then steps no further (F2 let go unturned is the next preset).
   With a HackRF or bladeRF, F2 also takes D's bands it tunes from 1 MHz (the HackRF's) up; elsewhere HF stays the
   X6200's (below).
 - **F3 VIEW**: the screen's radio alone, SPLIT (the X6200 above, the stick below) or the other radio alone. Each

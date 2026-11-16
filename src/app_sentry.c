@@ -1799,6 +1799,7 @@ static lv_obj_t     *hf_peak_l[RTL_PEAKS];     /* the X6200's half: A's signals,
 static box_t         r_dev, r_tune, r_pre, r_sig;
 static lv_timer_t   *rtl_timer;
 static int           rtl_img_h, rtl_preset, rtl_step = 2, rtl_drop;
+static bool          f2_roll, f2_rolled;    /* B's F2 held: the VFO knob rolls the presets (rotary_cb); turned so */
 static bool          rtl_direct;    /* the picture turned straight onto the display's primary plane (rtl_present) */
 static bool          rtl_gpu;       /* and drawn there by the GPU (gpu.c): the CPU fills no pixels of it */
 static int           hf_bx = -1, rtl_bx = -1;  /* the GPU's brackets this frame: their columns, -1 none */
@@ -3241,6 +3242,16 @@ static void rtl_preset_next(int dir) {
         if (rtl_presets[rtl_preset].lo >= rtl_spectrum_min_hz() && rtl_presets[rtl_preset].hi <= rtl_spectrum_max_hz())
             break;
     }
+}
+
+/* B's presets: dir of them on (back when negative), tuned at once and named: BAND up/down, F2 held with the VFO knob */
+static void rtl_preset_go(int dir) {
+    f_band = -1;
+    for (int n = abs(dir) < (int)RTL_PRESETS ? abs(dir) : (int)RTL_PRESETS; n > 0; n--) rtl_preset_next(dir);
+    rtl_tune(rtl_presets[rtl_preset].hz);
+    scan_next = 0;
+    osd(rtl_presets[rtl_preset].name, rtl_presets[rtl_preset].about, -1);
+    show_screen();
 }
 
 static void rtl_fkey(int k) {
@@ -5073,6 +5084,11 @@ static void click_cb(lv_event_t *e) {
 /* The main knob: the radio is the operator's again */
 static void rotary_cb(int32_t diff) {
     if (dial_held()) return;            /* TX unlocked: the dial is not moved by a bump */
+    if (f2_roll && scr == SCR_RTL) {    /* B's F2 held: a preset a click, back when turned back */
+        f2_rolled = true;
+        rtl_preset_go(diff);
+        return;
+    }
     if (scr == SCR_WALKIE && w_sdr_hz) {    /* on the SDR: its channel, 5 kHz a click */
         w_sdr_turn(diff);
         return;
@@ -5135,12 +5151,7 @@ static void band_key(bool up) {
         return;
     }
     if (scr == SCR_RTL) {               /* F: its presets, not the X6200's bands (and never A) */
-        f_band = -1;
-        rtl_preset_next(up ? 1 : -1);
-        rtl_tune(rtl_presets[rtl_preset].hz);
-        scan_next = 0;
-        osd(rtl_presets[rtl_preset].name, rtl_presets[rtl_preset].about, -1);
-        show_screen();
+        rtl_preset_go(up ? 1 : -1);
         return;
     }
     int32_t khz = cparam_i_get(cfg_fg_freq) / 1000;
@@ -5280,8 +5291,22 @@ static bool front_key(int key, int state) {
             }
             if (rx_held && !g_armed && state != KEYPAD_RELEASE && state != KEYPAD_LONG_RELEASE) walkie_ptt();
             return false;
+        case KEYPAD_F2:                 /* B: held, the VFO knob rolls the presets (rotary_cb), and its release
+                                         * then steps none; let go unturned, the next preset as ever */
+            if (state == KEYPAD_PRESS) {
+                f2_roll   = scr == SCR_RTL && !sp_on;
+                f2_rolled = false;
+                return false;
+            }
+            if (state == KEYPAD_RELEASE || state == KEYPAD_LONG_RELEASE) {
+                bool rolled = f2_roll && f2_rolled;
+
+                f2_roll = f2_rolled = false;
+                return rolled;
+            }
+            return f2_roll && f2_rolled;    /* a hold that rolled: nothing more of it */
         default:
-            return false;       /* POWER, F1-F5: as ever */
+            return false;       /* POWER, F1, F3-F5: as ever */
     }
 }
 
@@ -7291,7 +7316,7 @@ static void build_overlays(void) {
     help_l = label(root, &pixel_16, amb, 26, 60, SW - 52, LV_TEXT_ALIGN_LEFT,
                    "CONTROLS IN THE SENTRY                        ANY KEY OR A TAP CLOSES THIS\n"
                    "\n"
-                   "VFO KNOB       A, G: THE X6200 (MAN-OVERRIDE), B: THE SDR'S CHANNEL\n"
+                   "VFO KNOB       A, G: THE X6200 (MAN-OVERRIDE); B: THE SDR'S CHANNEL, F2 HELD: PRESETS\n"
                    "MFK KNOB       CHOOSES A TARGET, A BAND, A FREQUENCY. PUSH: TRACK, LISTEN, OPEN\n"
                    "MFK RING       A X6200 B VHF/UHF C LOG D BANDS E DECODE F SYSTEM G WALKIE H AIRSPACE\n"
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS\n"
@@ -7417,6 +7442,7 @@ static void destruct_cb(void) {
     if (blink_timer) lv_timer_del(blink_timer);
     if (rtl_timer) lv_timer_del(rtl_timer);
     timer = blink_timer = rtl_timer = NULL;
+    f2_roll = f2_rolled = false;
     if (scr == SCR_LOG) g_leave(false);
     audio_scope(false);
     walkie_show(false);                 /* landscape again before anything else draws */
