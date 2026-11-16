@@ -228,9 +228,9 @@ class SettingsManager {
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_adsb_trails{"adsb_trails", true, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
-    // AIRSPACE's receivers: those chosen (a bit each adsb_rx.h adsb_kind_t: one, or a serial one and an SDR at once;
-    // 0 the first serial one and the first SDR) and, shifted by 6, the set of receivers it was chosen among (a bit each
-    // kind), so the chooser is not shown again for the same set
+    // AIRSPACE's receivers: those chosen (a bit each adsb_rx.h adsb_kind_t: one, two or three at once, followed onto
+    // another of their kind when swapped; 0 two) and, shifted by 6, the kind of setup it was chosen in (app_adsb.c
+    // shape_of: how many serial ones and SDRs), so the chooser asks again only when that changes
     Parameter<int32_t> p_adsb_rx{"adsb_rx", 0, 0, 4095,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     // B's SDR, the one x6x00-rtlspec holds with more than one on USB: rtl_spectrum.h's rtl_dev_t (0 its own order:
