@@ -288,6 +288,14 @@ static int bl_rate(uint32_t want, uint32_t *got) {
      * and most of ADS-B's 2.4 MS/s; its own half-band filters keep the aliases off */
     L.bw(bd, BLADERF_CHANNEL_RX(0), want / 10 * 9, &b);
     *got = a;
+    {   /* what the board took, said when it changes (B's 2.646 MS/s, ADS-B's 2.4): the filter is checkable */
+        static bladerf_sample_rate said_a;
+        static bladerf_bandwidth   said_b;
+        if (a != said_a || b != said_b)
+            fprintf(stderr, "rtlspec: the bladeRF at %u S/s, its analog filter %u Hz\n", (unsigned)a, (unsigned)b);
+        said_a = a;
+        said_b = b;
+    }
     return 0;
 }
 

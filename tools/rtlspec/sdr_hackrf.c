@@ -67,6 +67,13 @@ static int hk_rate(uint32_t want, uint32_t *got) {
     if (want < 2000000 || hackrf_set_sample_rate(hd, want) != HACKRF_SUCCESS) return -1;
     hackrf_set_baseband_filter_bandwidth(hd, hk_bw(want));
     *got = want;
+    {   /* said when it changes (B's 2.646 MS/s, ADS-B's 2.4), as the bladeRF's: the filter is checkable */
+        static uint32_t said_rate, said_bw;
+        if (want != said_rate || hk_bw(want) != said_bw)
+            fprintf(stderr, "rtlspec: the HackRF at %u S/s, its baseband filter %u Hz\n", want, hk_bw(want));
+        said_rate = want;
+        said_bw   = hk_bw(want);
+    }
     return 0;
 }
 
