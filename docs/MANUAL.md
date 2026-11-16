@@ -1176,6 +1176,12 @@ the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on t
   many serial receivers and how many SDRs, standing 3 s, so a hub that flaps does not ask each time): a receiver
   swapped for another of its kind does not ask. Till it is answered: a serial one and one SDR (a spare RTL-SDR, else
   B's), never two SDRs. AIRSPACE takes no SDR before the GUI has reached the SDR daemon (its first seconds).
+- **Two or more RTL-SDRs** (a KrakenSDR's five): an RTL that B neither holds nor asked for, behind a hub of its own
+  power, is AIRSPACE's spare, its dump1090 on that stick alone (by its serial): the head names each RTL by its number
+  (`RTL0 R820T + RTL1 R820T BOTH` with B's lent while AIRSPACE is open), and with AIRSPACE closed B has its own again
+  while the spare goes on decoding ADS-B. B choosing the spare's RTL moves the spare to the next free one. Two sticks
+  on the radio's own power are not streamed at once, as before. On the radio with a KrakenSDR: RTL0 and RTL1 on ADS-B
+  together with AIRSPACE open; closed, B on RTL0 and RTL1 still decoding (238 frames in 15 s).
 - **F4 LISTEN** names what is listened on (GNS 5890, RTL-SDR, BOTH, ALL; with more than one pair, GNS+HACKRF and the
   like) and goes to the next choice, round again past the last. **F5 VIEW**: ADS-B or ACARS (below); **F5 held**
   forgets the list shown, the aircraft's history or the ACARS messages (F5 alone did, up to v0.3.12.27).

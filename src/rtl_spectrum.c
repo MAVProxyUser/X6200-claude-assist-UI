@@ -388,6 +388,22 @@ static void *spec_thread(void *arg) {
             say(k ? "r 1\n" : "r 0\n");
             asked = k;
         }
+        {   /* B asked for an RTL the daemon could not open (AIRSPACE's spare had it a moment ago, and lets it go):
+             * asked again each 3 s while another RTL is open */
+            static uint32_t again;
+            struct timespec ts;
+
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            uint32_t now = (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+            if (atomic_load(&use_kind) == RTL_DEV_RTL && atomic_load(&dev_kind) == RTL_DEV_RTL &&
+                atomic_load(&dev_rtl) >= 0 && atomic_load(&dev_rtl) != atomic_load(&use_rtl) && now - again > 3000) {
+                char cmd[16];
+
+                again = now;
+                snprintf(cmd, sizeof(cmd), "k RTL%d\n", atomic_load(&use_rtl));
+                say(cmd);
+            }
+        }
         if (!k) state = RTL_SPEC_OFF;
         else if (state == RTL_SPEC_OFF && last_st[0]) state = daemon_state(last_st);   /* wanted again (AIRSPACE closed) */
 
