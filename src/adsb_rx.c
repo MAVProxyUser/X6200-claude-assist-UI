@@ -22,6 +22,10 @@
  *    it. Without the daemon, dump1090 opens the stick itself (rtl-sdr-blog's librtlsdr built in, which knows the
  *    Blog V4's R828D too; adaptive gain). It ends with the GUI (PR_SET_PDEATHSIG) and is started again when the stick
  *    changes. The tuner ("R820T", "R828D") is the daemon's word, or said from dump1090's log, /tmp/dump1090.log.
+ *  Which one, when more than one is on USB: the one AIRSPACE chose (adsb_rx_choose: its chooser, F4 LISTEN), else a
+ *  GNS 5890, a microADSB, a spare RTL-SDR (one beside a HackRF or a bladeRF, which the daemon takes: dump1090 opens the
+ *  stick itself, so B keeps its SDR, and it listens with AIRSPACE closed), then the daemon's SDR. With AIRSPACE closed
+ *  the daemon's SDR is the Sentry's: a serial one listens meanwhile, if there is one.
  *  The thread looks for a receiver every second while it has none, and each second that the one it has is still there
  *  under the USB device number it had: pulled out, or plugged back (another number), or another receiver in its
  *  place, it is let go (its dump1090 ended) and looked for again. A serial port's read fails when it goes; dump1090 on
@@ -105,6 +109,52 @@ static atomic_ullong   bytes;
 static atomic_bool     lent;            /* the RTL-SDR lent: adsb_rx_lend() */
 static pthread_mutex_t dev_lock = PTHREAD_MUTEX_INITIALIZER;
 static char            dev_path[32], dev_name[16], dev_info[48];
+static atomic_int      want_kind;       /* adsb_rx_choose()'s, NONE the first by order */
+static atomic_int      kind_now;        /* the one listened on or being opened */
+
+#define KB(k) (1u << (k))
+
+static adsb_kind_t kind_of(int r) {
+    const char *n = receivers[r].name;
+
+    return !strcmp(n, "GNS 5890")  ? ADSB_KIND_GNS
+         : !strcmp(n, "MICROADSB") ? ADSB_KIND_MICRO
+         : !strcmp(n, "HACKRF")    ? ADSB_KIND_HACKRF
+         : !strcmp(n, "BLADERF")   ? ADSB_KIND_BLADERF
+                                   : ADSB_KIND_RTL;
+}
+
+/* An RTL-SDR beside a HackRF or a bladeRF: those are the daemon's (rtlspec.c takes a HackRF, then a bladeRF, then an
+ * RTL-SDR), so the stick is free for a dump1090 of its own */
+static bool spare_in(unsigned present) {
+    return (present & KB(ADSB_KIND_RTL)) && (present & (KB(ADSB_KIND_HACKRF) | KB(ADSB_KIND_BLADERF)));
+}
+
+/* Of the kinds on USB (present), those that can be listened on: the serial ones; with dump1090, the daemon's SDR (with
+ * the daemon) and an RTL-SDR (the daemon's, a spare, or opened by dump1090 itself with no daemon) */
+static unsigned usable_of(unsigned present, bool daemon, bool dump) {
+    unsigned u = present & (KB(ADSB_KIND_GNS) | KB(ADSB_KIND_MICRO));
+
+    if (!dump) return u;
+    if (present & KB(ADSB_KIND_HACKRF)) {
+        if (daemon) u |= KB(ADSB_KIND_HACKRF);
+    } else if (present & KB(ADSB_KIND_BLADERF)) {
+        if (daemon) u |= KB(ADSB_KIND_BLADERF);
+    }
+    return u | (present & KB(ADSB_KIND_RTL));
+}
+
+/* The one chosen when it can be listened on, else a GNS 5890, a microADSB, a spare RTL-SDR (B keeps its SDR), the
+ * Sentry's SDR */
+static adsb_kind_t pick_kind(unsigned usable, unsigned present, adsb_kind_t want) {
+    static const adsb_kind_t order[] = {ADSB_KIND_GNS, ADSB_KIND_MICRO, ADSB_KIND_RTL, ADSB_KIND_HACKRF,
+                                        ADSB_KIND_BLADERF, ADSB_KIND_RTL};
+
+    if (want > ADSB_KIND_NONE && want < ADSB_KIND_N && (usable & KB(want))) return want;
+    for (int i = 0; i < (int)(sizeof(order) / sizeof(order[0])); i++)
+        if ((usable & KB(order[i])) && (i != 2 || spare_in(present))) return order[i];
+    return ADSB_KIND_NONE;
+}
 
 static bool read_line(const char *path, char *out, size_t n) {
     FILE *f = fopen(path, "r");
@@ -125,14 +175,20 @@ static bool write_str(const char *path, const char *s) {
     return ok;
 }
 
-/* A receiver's USB device ("3-1") and its row in receivers[], or -1 */
-static int find_stick(char *usb, size_t n) {
+/* What is on USB, a bit each kind; the first of each kind: its row in receivers[] (-1 none) and USB device ("3-1") */
+typedef struct {
+    int  row;
+    char usb[64];
+} seen_t;
+
+static unsigned scan_usb(seen_t seen[ADSB_KIND_N]) {
     DIR           *d = opendir(USB_DEVICES);
     struct dirent *e;
-    int            found = -1;
+    unsigned       present = 0;
 
-    if (!d) return -1;
-    while (found < 0 && (e = readdir(d))) {
+    for (int k = 0; k < ADSB_KIND_N; k++) seen[k].row = -1;
+    if (!d) return 0;
+    while ((e = readdir(d))) {
         char path[300], v[8], p[8], prod[64];
 
         if (e->d_name[0] == '.' || strchr(e->d_name, ':')) continue;     /* interfaces have a ':' */
@@ -142,15 +198,40 @@ static int find_stick(char *usb, size_t n) {
         if (!read_line(path, p, sizeof(p))) continue;
         snprintf(path, sizeof(path), USB_DEVICES "/%s/product", e->d_name);
         if (!read_line(path, prod, sizeof(prod))) prod[0] = 0;
-        for (int r = 0; r < N_RECEIVERS && found < 0; r++)
+        for (int r = 0; r < N_RECEIVERS; r++)
             if (!strcmp(v, receivers[r].vid) && !strcmp(p, receivers[r].pid) &&
                 (!receivers[r].product || strstr(prod, receivers[r].product))) {
-                snprintf(usb, n, "%s", e->d_name);
-                found = r;
+                adsb_kind_t k = kind_of(r);
+
+                present |= KB(k);
+                if (seen[k].row < 0) {
+                    seen[k].row = r;
+                    snprintf(seen[k].usb, sizeof(seen[k].usb), "%s", e->d_name);
+                }
+                break;
             }
     }
     closedir(d);
-    return found;
+    return present;
+}
+
+/* The one to listen on, as things are on USB now: its kind, NONE none; *direct, a spare RTL-SDR (dump1090 on it).
+ * The Sentry's SDR chosen and lent to it (AIRSPACE closed): a serial one meanwhile, so the history goes on; none,
+ * *held_back. Not a spare stick: its stream would stop and start at each opening of AIRSPACE, which the radio's USB host
+ * does not take well (rtlspec.c) */
+static adsb_kind_t pick_now(seen_t seen[ADSB_KIND_N], bool *direct, bool *held_back) {
+    unsigned    present = scan_usb(seen);
+    unsigned    usable  = usable_of(present, rtl_spectrum_daemon(), access(DUMP1090, X_OK) == 0);
+    unsigned    sentry  = KB(ADSB_KIND_HACKRF) | KB(ADSB_KIND_BLADERF) | (spare_in(present) ? 0 : KB(ADSB_KIND_RTL));
+    adsb_kind_t k       = pick_kind(usable, present, (adsb_kind_t)atomic_load(&want_kind));
+
+    *held_back = false;
+    if (k != ADSB_KIND_NONE && (KB(k) & sentry) && atomic_load(&lent)) {
+        k          = pick_kind(usable & (KB(ADSB_KIND_GNS) | KB(ADSB_KIND_MICRO)), present, ADSB_KIND_NONE);
+        *held_back = k == ADSB_KIND_NONE;
+    }
+    *direct = k == ADSB_KIND_RTL && spare_in(present);
+    return k;
 }
 
 /* A USB device's number ("3-1": its devnum), 0 when it is not there; plugged back, it has another */
@@ -309,13 +390,13 @@ static void d1090_stop(void) {
 
 /* On the daemon's samples when it is there (a pipe: dump1090 reads one end, the daemon is given the other), else on
  * the stick itself: an RTL-SDR only (rtl: dump1090 here has librtlsdr alone; a HackRF or a bladeRF waits for the
- * daemon) */
-static bool d1090_start(bool rtl) {
+ * daemon). direct: on the stick itself in any case (a spare RTL-SDR, the daemon holding a HackRF or a bladeRF) */
+static bool d1090_start(bool rtl, bool direct) {
     int  pp[2] = {-1, -1};
     bool fed;
 
     if (access(DUMP1090, X_OK) != 0) return false;
-    fed = rtl_spectrum_daemon() && pipe2(pp, O_CLOEXEC) == 0;
+    fed = !direct && rtl_spectrum_daemon() && pipe2(pp, O_CLOEXEC) == 0;
     if (!fed && !rtl) return false;
     if (fed) fcntl(pp[1], F_SETPIPE_SZ, 1 << 20);  /* room for 0.2 s of samples: dump1090 reads in big gulps */
     pid_t p = fork();
@@ -401,33 +482,42 @@ static void *rx_thread(void *arg) {
     int    fd = -1, rx = -1, held_num = 0;
     char   frame[56], reply[64], held[64] = "";     /* held: the receiver's USB device ("3-1"), held_num its number */
     size_t len = 0, rlen = 0;
-    bool   inside = false, stamped = false, replying = false;
+    bool   inside = false, stamped = false, replying = false, direct = false;  /* direct: a spare RTL-SDR's own
+                                                                                * dump1090, not the daemon's SDR */
     double last = 0, init_at = 0, looked = 0;       /* init_at: the start commands are due, 0 sent */
 
     for (;;) {
-        /* The RTL-SDR lent: its dump1090 stopped, not started again till it is back */
-        if (atomic_load(&lent) && (rx < 0 || receivers[rx].sdr)) {
-            if (fd >= 0) {
-                close(fd);
-                fd = -1;
-            }
+        /* The Sentry's SDR lent: its dump1090 stopped, not started again till it is back (a spare RTL-SDR's goes on) */
+        if (atomic_load(&lent) && fd >= 0 && rx >= 0 && receivers[rx].sdr && !direct) {
+            close(fd);
+            fd = -1;
             d1090_stop();
-            set_dev("", "");
-            state = ADSB_RX_LENT;
-            usleep(300000);
-            rx = -1;
             continue;
         }
         if (fd < 0) {
-            char usb[64], dev[32];
+            seen_t      seen[ADSB_KIND_N];
+            bool        held_back;
+            adsb_kind_t k = pick_now(seen, &direct, &held_back);
+            const char *usb = k ? seen[k].usb : "";
+            char        dev[32];
 
             set_dev("", "");
-            if ((rx = find_stick(usb, sizeof(usb))) < 0) {
+            rx = k ? seen[k].row : -1;
+            atomic_store(&kind_now, k);
+            if (held_back) {                    /* the Sentry's SDR: AIRSPACE's only while its screen is open */
+                d1090_stop();
+                state = ADSB_RX_LENT;
+                usleep(300000);
+                continue;
+            }
+            if (rx < 0) {
                 state = ADSB_RX_NO_STICK;
                 d1090_stop();                   /* the RTL-SDR went: its dump1090 too */
             } else if (receivers[rx].sdr) {     /* dump1090 decodes it; its raw frames over TCP */
+                if (d1090_alive() && d1090_fed != (!direct && rtl_spectrum_daemon()))
+                    d1090_stop();               /* on the daemon's samples, wanted on a spare stick, or the other way */
                 if (!d1090_alive()) {
-                    if (!d1090_start(!strcmp(receivers[rx].name, "RTL-SDR"))) {
+                    if (!d1090_start(kind_of(rx) == ADSB_KIND_RTL, direct)) {
                         state = ADSB_RX_NO_DRIVER;
                         sleep(2);
                         continue;
@@ -469,9 +559,13 @@ static void *rx_thread(void *arg) {
             sleep(1);                           /* looked for each second: a swap is seen at once */
             continue;
         }
-        if (adsb_now() - looked >= 1.0) {       /* still the receiver it opened, where it was */
+        if (adsb_now() - looked >= 1.0) {       /* still the receiver it opened, where it was, and the one wanted */
+            seen_t seen[ADSB_KIND_N];
+            bool   d, hb;
+
             looked = adsb_now();
-            if (!held_num || usb_devnum(held) != held_num) {
+            if (!held_num || usb_devnum(held) != held_num || pick_now(seen, &d, &hb) != atomic_load(&kind_now) ||
+                d != direct) {
                 close(fd);
                 fd = -1;
                 if (receivers[rx].sdr) d1090_stop();
@@ -590,6 +684,8 @@ static atomic_bool    p_sdr, p_rcv;
 static atomic_int     p_sdr_id;         /* the RTL-SDR's bus * 1000 + device number: another one once it is replugged */
 static const char *_Atomic p_sdr_kind = "";     /* its kind: receivers[]'s name */
 static atomic_int     p_looks;          /* looks at USB so far: 0, nothing known yet */
+static atomic_uint    p_mask;           /* the receivers' kinds on USB, a bit each */
+static atomic_bool    p_dump;           /* dump1090 there */
 static pthread_once_t p_once = PTHREAD_ONCE_INIT;
 
 static void *presence_thread(void *arg) {
@@ -600,6 +696,7 @@ static void *presence_thread(void *arg) {
         bool           sdr = false, rcv = false;
         int            id  = 0, rank = 0;
         const char    *kind = "";
+        unsigned       mask = 0;
 
         while (d && (e = readdir(d))) {
             char path[300], v[8], p[8], prod[64], bus[8], dev[8];
@@ -615,6 +712,7 @@ static void *presence_thread(void *arg) {
                 if (strcmp(v, receivers[r].vid) || strcmp(p, receivers[r].pid) ||
                     (receivers[r].product && !strstr(prod, receivers[r].product)))
                     continue;
+                mask |= KB(kind_of(r));
                 if (receivers[r].sdr) {
                     /* more than one: the daemon's choice, a HackRF, then a bladeRF, then an RTL-SDR (rtlspec.c) */
                     int k = !strcmp(receivers[r].name, "HACKRF") ? 3 : !strcmp(receivers[r].name, "BLADERF") ? 2 : 1;
@@ -639,6 +737,8 @@ static void *presence_thread(void *arg) {
         atomic_store(&p_rcv, rcv);
         atomic_store(&p_sdr_id, sdr ? id : 0);
         atomic_store(&p_sdr_kind, kind);
+        atomic_store(&p_mask, mask);
+        atomic_store(&p_dump, access(DUMP1090, X_OK) == 0);
         atomic_fetch_add(&p_looks, 1);
         sleep(1);
     }
@@ -676,3 +776,34 @@ int adsb_rx_usb_looks(void) {
     return atomic_load(&p_looks);
 }
 
+
+unsigned adsb_rx_choices(void) {
+    pthread_once(&p_once, presence_start);
+    return usable_of(atomic_load(&p_mask), rtl_spectrum_daemon(), atomic_load(&p_dump));
+}
+
+bool adsb_rx_rtl_spare(void) {
+    pthread_once(&p_once, presence_start);
+    return spare_in(atomic_load(&p_mask));
+}
+
+const char *adsb_rx_kind_name(adsb_kind_t k) {
+    static const char *const names[ADSB_KIND_N] = {"", "GNS 5890", "MICROADSB", "RTL-SDR", "HACKRF", "BLADERF"};
+
+    return k >= 0 && k < ADSB_KIND_N ? names[k] : "";
+}
+
+void adsb_rx_choose(adsb_kind_t k) { atomic_store(&want_kind, k > ADSB_KIND_NONE && k < ADSB_KIND_N ? k : 0); }
+
+adsb_kind_t adsb_rx_kind_now(void) {
+    return state == ADSB_RX_OFF || state == ADSB_RX_NO_STICK ? ADSB_KIND_NONE : (adsb_kind_t)atomic_load(&kind_now);
+}
+
+adsb_kind_t adsb_rx_kind_next(void) {
+    unsigned present;
+
+    pthread_once(&p_once, presence_start);
+    present = atomic_load(&p_mask);
+    return pick_kind(usable_of(present, rtl_spectrum_daemon(), atomic_load(&p_dump)), present,
+                     (adsb_kind_t)atomic_load(&want_kind));
+}

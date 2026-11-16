@@ -1112,10 +1112,25 @@ or the RTL-SDR pulled out from beside it), and when the radio starts so; not ove
 from, it stays away till the receivers change again. With no receiver at all its scope asks for one.
 Its receiver on the HOST port: a GNS 5890, a microADSB, or an RTL-SDR, HackRF or bladeRF
 decoded by dump1090-fa (in the image; a HackRF or bladeRF only through the daemon's samples). A GNS 5890 or
-microADSB keeps listening when it is closed; an SDR is
+microADSB keeps listening when it is closed. B's SDR (the daemon's: a HackRF, else a bladeRF, else an RTL-SDR) is
 AIRSPACE's only while its screen is open, the Sentry's the rest of the time: the stick's daemon tunes it to
-1090 MHz and hands dump1090 its samples, so the stick itself is never closed for it. The VFO knob (or F1) sets
+1090 MHz and hands dump1090 its samples, so the stick itself is never closed for it. An RTL-SDR beside a HackRF or
+a bladeRF is a spare: dump1090 opens it itself, B keeps its SDR, and it keeps listening when AIRSPACE is closed, as
+the serial ones do (dump1090 takes about 4% of the processor). The VFO knob (or F1) sets
 the range, 0.5 NM to 250 NM, the MFK chooses an aircraft, a tap chooses one on the scope.
+
+- **Two or more receivers**: a box asks which one to listen on ("3 RECEIVERS HERE CAN HEAR 1090 MHZ. WHICH ONE?"),
+  each with what it does to the rest (a serial one's own decoder, always listening; a spare RTL-SDR, B keeping its
+  HackRF; B's SDR, B pausing while AIRSPACE is open). The MFK goes through them, its push or a tap listens on one,
+  BACK leaves it as it is. It asks once for each set of receivers (one plugged in or pulled out makes another set,
+  standing 3 s, so a hub that flaps does not ask each time); the choice is kept, and a receiver chosen and pulled
+  out is used again when it is back. Till it is answered the first of a GNS 5890, a microADSB, a spare RTL-SDR and
+  B's SDR listens.
+- **F4 LISTEN** names the receiver listened on and goes to the next one that can hear 1090 MHz, round again past
+  the last (as A's and B's LISTEN name theirs). **F5** forgets the history (it was F4).
+- With AIRSPACE closed and B's SDR the one chosen, a GNS 5890 or a microADSB listens meanwhile, so the history covers
+  the time away; B's SDR is AIRSPACE's again when it opens. A spare RTL-SDR does not stand in so: its stream would
+  stop and start at each opening of AIRSPACE, which the radio's USB host does not take well.
 
 ## Updating the firmware
 

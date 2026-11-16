@@ -77,6 +77,7 @@ static void f3_cb(button_data_t *b) { (void)b; fkey(2); }
 static void f4_cb(button_data_t *b) { (void)b; fkey(3); }
 static void f5_cb(button_data_t *b) { (void)b; fkey(4); }
 static const char *f_label(int i);
+static void pick_check(void);
 static const char *f1_label(void) { return f_label(0); }
 static const char *f2_label(void) { return f_label(1); }
 static const char *f3_label(void) { return f_label(2); }
@@ -132,6 +133,20 @@ static bool         c_qth, c_ok;    /* the station's place (GPS or locator); any
 static char         c_from[40];     /* where the centre comes from, said in the head */
 
 #define FIX_MAX_S 600               /* a GPS or phone position this recent is the centre */
+
+/* The receivers' chooser (the user, 2026-11-15: "it should pop up and say there are two devices or more that can
+ * handle the band, and allow the user to select. the LISTEN button should be able to cycle through them all after
+ * the fact"): shown when two or more can hear 1090 MHz and that set was not answered before; cfg_adsb_rx keeps the
+ * one chosen and the set it was chosen among. F4 LISTEN goes through them at any time */
+#define RXB(k)    (1u << (k))
+#define PICK_ROWS (ADSB_KIND_N - 1)
+#define PICK_W    700
+static lv_obj_t   *pick_box, *pick_head_l, *pick_row_l[PICK_ROWS], *pick_foot_l;
+static bool        pick_on;
+static unsigned    pick_set, seen_set;      /* the receivers it offers; those seen last, since seen_ms */
+static uint32_t    seen_ms;
+static adsb_kind_t pick_kinds[PICK_ROWS], keys_kind;
+static int         pick_n, pick_sel;
 
 static double range_nm(void) { return ranges[param_i_get(cfg_adsb_range)]; }
 
@@ -635,6 +650,7 @@ static void refresh(void) {
     show_head(now, nlive, n - nlive);
     adsb_unlock();
     show_scope_words(now, nlive);
+    pick_check();
     if (!sc_gpu) lv_obj_invalidate(scope_img);     /* the GPU's is on the plane, under the hole */
     lv_obj_invalidate(spark_img);
 }
@@ -657,6 +673,138 @@ static void timer_cb(lv_timer_t *t) {
     refresh();
 }
 
+/* ---- The receiver ---- */
+
+/* The one listened on, or the one it will be */
+static adsb_kind_t rx_now(void) {
+    adsb_kind_t k = adsb_rx_kind_now();
+
+    return k != ADSB_KIND_NONE ? k : adsb_rx_kind_next();
+}
+
+/* What each does to the rest, in the chooser */
+static const char *rx_note(adsb_kind_t k, unsigned u) {
+    static char t[64];
+
+    if (k == ADSB_KIND_GNS || k == ADSB_KIND_MICRO) return "ITS OWN DECODER, ALWAYS LISTENING";
+    if (k == ADSB_KIND_RTL && adsb_rx_rtl_spare()) {
+        snprintf(t, sizeof(t), "A SPARE, ALWAYS LISTENING; B KEEPS ITS %s", u & RXB(ADSB_KIND_HACKRF) ? "HACKRF" : "BLADERF");
+        return t;
+    }
+    return "B'S SDR: B PAUSES WHILE THIS IS OPEN";
+}
+
+static void pick_fill(void) {
+    for (int r = 0; r < PICK_ROWS; r++) {
+        if (r >= pick_n) {
+            lv_obj_add_flag(pick_row_l[r], LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        lv_label_set_text_fmt(pick_row_l[r], "%c %-10s %s", r == pick_sel ? '>' : ' ', adsb_rx_kind_name(pick_kinds[r]),
+                              rx_note(pick_kinds[r], pick_set));
+        lv_obj_set_style_bg_opa(pick_row_l[r], r == pick_sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_text_color(pick_row_l[r], r == pick_sel ? ink : amb, 0);
+        lv_obj_clear_flag(pick_row_l[r], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void pick_open(unsigned u) {
+    adsb_kind_t cur = rx_now();
+
+    pick_set = u;
+    pick_n = pick_sel = 0;
+    for (int k = ADSB_KIND_NONE + 1; k < ADSB_KIND_N; k++)
+        if (u & RXB(k)) {
+            if (k == (int)cur) pick_sel = pick_n;
+            pick_kinds[pick_n++] = (adsb_kind_t)k;
+        }
+    lv_label_set_text_fmt(pick_head_l, "%d RECEIVERS HERE CAN HEAR 1090 MHZ. WHICH ONE?", pick_n);
+    lv_obj_set_y(pick_foot_l, 50 + pick_n * 28 + 10);
+    lv_obj_set_height(pick_box, 50 + pick_n * 28 + 10 + 50);
+    pick_fill();
+    pick_on = true;
+    lv_obj_clear_flag(pick_box, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* Closed: k listened on (NONE: as it is), and this set of receivers answered */
+static void pick_close(adsb_kind_t k) {
+    int v = param_i_get(cfg_adsb_rx);
+
+    if (k != ADSB_KIND_NONE) adsb_rx_choose(k);
+    param_i_set(cfg_adsb_rx, (k != ADSB_KIND_NONE ? (int)k : (v & 15)) | (int)(pick_set << 4));
+    pick_on = false;
+    lv_obj_add_flag(pick_box, LV_OBJ_FLAG_HIDDEN);
+    show_keys();
+}
+
+static void pick_step(int d) {
+    if (!pick_n) return;
+    pick_sel = (pick_sel + d + pick_n) % pick_n;
+    pick_fill();
+}
+
+/* Each refresh: the chooser when a new set of two or more has stood 3 s (a hub browning out flaps); F4's label when
+ * the receiver changed */
+static void pick_check(void) {
+    unsigned u;
+
+    if (rx_now() != keys_kind) {
+        keys_kind = rx_now();
+        show_keys();
+    }
+    if (!adsb_rx_usb_looks()) return;
+    u = adsb_rx_choices();
+    if (u != seen_set) {
+        seen_set = u;
+        seen_ms  = lv_tick_get();
+        return;
+    }
+    if (lv_tick_elaps(seen_ms) < 3000) return;
+    if (pick_on) {                      /* one came or went meanwhile */
+        if (u == pick_set) return;
+        if (__builtin_popcount(u) >= 2) {
+            pick_open(u);
+        } else {
+            pick_on = false;
+            lv_obj_add_flag(pick_box, LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
+    if (help_on || __builtin_popcount(u) < 2 || ((unsigned)param_i_get(cfg_adsb_rx) >> 4) == u) return;
+    pick_open(u);
+}
+
+static void pick_row_tap_cb(lv_event_t *e) {
+    int r = (int)(intptr_t)lv_event_get_user_data(e);
+
+    if (pick_on && r < pick_n) pick_close(pick_kinds[r]);
+}
+
+/* The MFK's push (the encoder sends a click): the one chosen */
+static void click_cb(lv_event_t *e) {
+    lv_indev_t *in = lv_indev_get_act();
+
+    (void)e;
+    if (pick_on && in && lv_indev_get_type(in) == LV_INDEV_TYPE_ENCODER) pick_close(pick_kinds[pick_sel]);
+}
+
+/* F4 LISTEN: the next receiver that can hear 1090 MHz, round again past the last */
+static void rx_next(void) {
+    unsigned    u   = adsb_rx_choices();
+    adsb_kind_t cur = rx_now();
+
+    for (int i = 1; i < ADSB_KIND_N; i++) {
+        int k = ((int)cur - 1 + i + (ADSB_KIND_N - 1)) % (ADSB_KIND_N - 1) + 1;
+
+        if (u & RXB(k)) {
+            adsb_rx_choose((adsb_kind_t)k);
+            param_i_set(cfg_adsb_rx, k | (int)(u << 4));
+            keys_kind = (adsb_kind_t)k;
+            return;
+        }
+    }
+}
+
 /* ---- Keys ---- */
 
 static const char *f_label(int i) {
@@ -666,8 +814,11 @@ static const char *f_label(int i) {
         case 0: snprintf(s[0], sizeof(s[0]), "RANGE\n%g NM", range_nm()); break;
         case 1: snprintf(s[1], sizeof(s[1]), "DECAY\n%s", decay_names[param_i_get(cfg_adsb_decay)]); break;
         case 2: snprintf(s[2], sizeof(s[2]), "TRACKS\n%s", param_i_get(cfg_adsb_trails) ? "ON" : "OFF"); break;
-        case 3: snprintf(s[3], sizeof(s[3]), "CLEAR\nHISTORY"); break;
-        default: s[4][0] = 0; break;       /* nothing: the MFK's ring goes back to the Sentry */
+        case 3:                         /* the receiver, as A's and B's LISTEN name theirs */
+            if (adsb_rx_choices()) snprintf(s[3], sizeof(s[3]), "LISTEN\n%s", adsb_rx_kind_name(keys_kind));
+            else s[3][0] = 0;
+            break;
+        default: snprintf(s[4], sizeof(s[4]), "CLEAR\nHISTORY"); break;
     }
     return s[i];
 }
@@ -706,17 +857,21 @@ static void fkey(int k) {
         help_show(false);
         return;
     }
+    if (pick_on) {                      /* the chooser: F4 (LISTEN) goes down it, the rest wait */
+        if (k == 3) pick_step(1);
+        return;
+    }
     switch (k) {
         case 0: set_range(range_pos() + 1 < N_RANGES ? 1 : -(N_RANGES - 1)); return;
         case 1: param_i_set(cfg_adsb_decay, (param_i_get(cfg_adsb_decay) + 1) % N_DECAYS); break;
         case 2: param_i_set(cfg_adsb_trails, !param_i_get(cfg_adsb_trails)); break;
-        case 3:
+        case 3: rx_next(); break;
+        default:
             adsb_lock();
             adsb_clear();
             adsb_unlock();
             sel_icao = 0;
             break;
-        default: return;                /* F5: nothing */
     }
     show_keys();
     refresh();
@@ -730,6 +885,17 @@ static void key_cb(lv_event_t *e) {
     if (help_on) {
         help_show(false);
         return;
+    }
+    if (pick_on) {                      /* the chooser: the MFK goes through it, its push (click_cb) chooses */
+        switch (key) {
+            case LV_KEY_LEFT:
+            case LV_KEY_UP: pick_step(-1); return;
+            case LV_KEY_RIGHT:
+            case LV_KEY_DOWN: pick_step(1); return;
+            case LV_KEY_ENTER: pick_close(pick_kinds[pick_sel]); return;
+            case LV_KEY_ESC: pick_close(ADSB_KIND_NONE); return;    /* the one listened on kept */
+            default: break;
+        }
     }
     switch (key) {
         case LV_KEY_LEFT:
@@ -945,15 +1111,33 @@ static void build(void) {
         lv_obj_add_event_cb(k, key_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
     }
 
+    pick_box = rect(root, (SW - PICK_W) / 2, 90, PICK_W, 200, 3, false);
+    lv_obj_add_flag(pick_box, LV_OBJ_FLAG_CLICKABLE);    /* a tap beside its rows is not the scope's */
+    pick_head_l = label(pick_box, &pixel_20, amb, 12, 12, PICK_W - 30, LV_TEXT_ALIGN_LEFT, "");
+    for (int r = 0; r < PICK_ROWS; r++) {
+        lv_obj_t *l = label(pick_box, &pixel_20, amb, 9, 50 + r * 28, PICK_W - 24, LV_TEXT_ALIGN_LEFT, "");
+
+        lv_obj_set_style_bg_color(l, amb, 0);
+        lv_obj_set_style_pad_ver(l, 2, 0);
+        lv_obj_add_flag(l, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(l, pick_row_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)r);
+        pick_row_l[r] = l;
+    }
+    pick_foot_l = label(pick_box, &pixel_20, amb, 12, 0, PICK_W - 30, LV_TEXT_ALIGN_LEFT,
+                        "MFK: CHOOSE   PUSH OR A TAP: LISTEN ON IT   BACK: AS IT IS\nF4 (LISTEN) CHANGES IT LATER");
+    lv_obj_add_flag(pick_box, LV_OBJ_FLAG_HIDDEN);
+
     help_l = label(root, &pixel_20, amb, 40, 70, SW - 80, LV_TEXT_ALIGN_LEFT,
                    "AIRSPACE: AIRCRAFT ON 1090 MHZ, FROM AN ADS-B RECEIVER ON USB (AN RTL-SDR STICK, A HACKRF, A BLADERF, A GNS 5890 OR A MICROADSB).\n\n"
                    "AN ARROW IS AN AIRCRAFT HEARD IN THE LAST MINUTE, POINTING ALONG ITS TRACK; A RING GROWS "
                    "ROUND IT FOR EACH MESSAGE. A SQUARE IS A GHOST: NOT HEARD FOR A MINUTE, FADING WITH ITS TRACK.\n\n"
                    "F1 / VFO: RANGE OF THE SCOPE, 0.5 TO 250 NM.  F2: DECAY, HOW LONG GHOSTS AND TRACKS STAY: OFF, 1 TO 60 "
-                   "MINUTES, OR HOLD TILL CLEARED.  F3: TRACKS ON OR OFF.  F4: FORGET THE HISTORY.  "
+                   "MINUTES, OR HOLD TILL CLEARED.  F3: TRACKS ON OR OFF.  F4 LISTEN: THE NEXT RECEIVER THAT CAN HEAR 1090 MHZ "
+                   "(TWO OR MORE: A BOX ASKS WHICH).  F5: FORGET THE HISTORY.  "
                    "THE MFK'S RING: THE SENTRY'S A NEXT, ITS G BEFORE (THIS IS ITS H).\n\n"
-                   "MFK OR A TAP CHOOSES AN AIRCRAFT. A GNS 5890 OR MICROADSB GOES ON LISTENING WHEN THIS SCREEN CLOSES; "
-                   "AN SDR (RTL-SDR, HACKRF, BLADERF) IS THIS SCREEN'S WHILE IT IS OPEN AND THE SENTRY'S THE REST OF THE TIME. RECEIVE ONLY.\n\n"
+                   "MFK OR A TAP CHOOSES AN AIRCRAFT. A GNS 5890, A MICROADSB OR A SPARE RTL-SDR (ONE BESIDE A HACKRF OR "
+                   "BLADERF) GOES ON LISTENING WHEN THIS SCREEN CLOSES; B'S SDR IS THIS SCREEN'S WHILE IT IS OPEN AND THE "
+                   "SENTRY'S THE REST OF THE TIME. RECEIVE ONLY.\n\n"
                    "THE CENTRE: A USB GPS, ELSE THE QTH LOCATOR (SETTINGS > GENERAL), ELSE THE TRAFFIC.\n\n"
                    "ANY KEY: CLOSE.");
     lv_label_set_long_mode(help_l, LV_LABEL_LONG_WRAP);
@@ -1001,12 +1185,16 @@ static void construct_cb(lv_obj_t *parent) {
 
     lv_group_add_obj(keyboard_group, root);
     lv_obj_add_event_cb(root, key_cb, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(root, click_cb, LV_EVENT_CLICKED, NULL);
     lv_group_focus_obj(root);
     lv_group_set_editing(keyboard_group, true);
 
     rtl_spectrum_yield(true);       /* an RTL-SDR: its daemon feeds dump1090 while this is open, no rows meanwhile */
+    adsb_rx_choose((adsb_kind_t)(param_i_get(cfg_adsb_rx) & 15));
     adsb_rx_start();
-    help_on = false;
+    help_on = pick_on = false;
+    seen_set  = 0;
+    keys_kind = rx_now();
     rot_acc = 0;
     show_keys();
     if (ang) refresh();

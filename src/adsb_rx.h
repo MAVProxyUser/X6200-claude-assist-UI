@@ -33,8 +33,39 @@ void adsb_rx_name(char *name, size_t n);
 uint64_t adsb_rx_bytes(void);
 
 /* An RTL-SDR lent to the Sentry's spectrum (on) or given to AIRSPACE (off): lent, dump1090 is stopped and not started
- * again until it comes back. The serial receivers (GNS 5890, microADSB) go on */
+ * again until it comes back. The serial receivers (GNS 5890, microADSB) go on, and so does a spare RTL-SDR (below) */
 void adsb_rx_lend(bool on);
+
+/* The kinds of receiver AIRSPACE listens on, one at a time */
+typedef enum {
+    ADSB_KIND_NONE,
+    ADSB_KIND_GNS,          /* GNS 5890 */
+    ADSB_KIND_MICRO,        /* microADSB */
+    ADSB_KIND_RTL,          /* an RTL-SDR: the Sentry's SDR, or a spare one beside a HackRF or a bladeRF */
+    ADSB_KIND_HACKRF,       /* the Sentry's SDR */
+    ADSB_KIND_BLADERF,      /* the Sentry's SDR (with no HackRF) */
+    ADSB_KIND_N
+} adsb_kind_t;
+
+/* Those AIRSPACE can listen on now, a bit (1 << kind) each: the serial receivers on USB; the Sentry's SDR (the daemon
+ * has one: a HackRF, else a bladeRF, else an RTL-SDR); an RTL-SDR beside a HackRF or a bladeRF, a spare: dump1090 opens
+ * it itself, so B keeps its SDR, and it listens with AIRSPACE closed as the serial ones do. From the thread that looks
+ * at USB each second: 0 for the first second */
+unsigned adsb_rx_choices(void);
+
+/* An RTL-SDR on USB is a spare (a HackRF or a bladeRF beside it is the Sentry's) */
+bool adsb_rx_rtl_spare(void);
+
+/* Its name: "GNS 5890", "MICROADSB", "RTL-SDR", "HACKRF", "BLADERF"; "" NONE */
+const char *adsb_rx_kind_name(adsb_kind_t k);
+
+/* The one to listen on when it is there (the thread changes over within a second); NONE, or the one chosen not there:
+ * the first of a GNS 5890, a microADSB, a spare RTL-SDR and the Sentry's SDR */
+void adsb_rx_choose(adsb_kind_t k);
+
+/* The one listened on (or being opened) now; NONE: none yet, the one it will be is adsb_rx_kind_next() */
+adsb_kind_t adsb_rx_kind_now(void);
+adsb_kind_t adsb_rx_kind_next(void);
 
 /* An RTL-SDR on USB, whoever has it. These three read what a thread of their own sees each second (no sysfs on the
  * caller's thread: a stuck USB host never hangs the GUI); false or 0 for the first second */

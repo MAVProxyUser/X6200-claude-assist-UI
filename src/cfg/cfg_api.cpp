@@ -50,6 +50,7 @@ ParamInt         *cfg_sentry_home         = nullptr;
 ParamInt         *cfg_adsb_range          = nullptr;
 ParamInt         *cfg_adsb_decay          = nullptr;
 ParamInt         *cfg_adsb_trails         = nullptr;
+ParamInt         *cfg_adsb_rx             = nullptr;
 ParamInt         *cfg_walkie              = nullptr;
 ParamInt         *cfg_walkie_mem          = nullptr;
 ParamInt         *cfg_walkie_ch           = nullptr;
@@ -273,6 +274,7 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_adsb_range       = &cfg_sm.p_adsb_range;
     cfg_adsb_decay       = &cfg_sm.p_adsb_decay;
     cfg_adsb_trails      = &cfg_sm.p_adsb_trails;
+    cfg_adsb_rx          = &cfg_sm.p_adsb_rx;
     cfg_walkie           = &cfg_sm.p_walkie;
     cfg_walkie_mem       = &cfg_sm.p_walkie_mem;
     cfg_walkie_ch        = &cfg_sm.p_walkie_ch;
