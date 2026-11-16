@@ -74,6 +74,7 @@
 #include "qth/qth.h"
 #include "radio.h"
 #include "rtl_spectrum.h"
+#include "rtl_watch.h"
 #include "remote_server.h"
 #include "control_owner.h"
 #include "adsb_rx.h"
@@ -1258,6 +1259,8 @@ static const char *batt_sym(float ext, uint8_t cap, bool chg) {
  * WEB CTL while one holds the control (control_owner.c: the radio's own keys and knobs take it back), TCI CTL a TCI
  * program holding it. The user, 2026-11-16: "when web is connected, we know via the icon. that will help with doubts
  * about the web interface locking a control" */
+static void fmt_mhz(char *s, size_t n, int64_t hz, int dec);
+
 static void dev_tags(char *dev, size_t n) {
     ctl_info_t c;
 
@@ -1269,6 +1272,16 @@ static void dev_tags(char *dev, size_t n) {
     if (c.kind == CTL_BROWSER) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s WEB CTL#", tag_hex);
     else if (remote_server_viewers() > 0) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s WEB#", tag_hex);
     if (c.kind == CTL_TCI) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s TCI CTL#", tag_hex);
+    for (int i = 0; i < rtl_watch_count(); i++) {   /* a watch channel heard (rtl_watch.c): on every screen */
+        rtl_watch_info_t w;
+        char             f[16];
+
+        if (rtl_watch_get(i, &w) && w.open) {
+            fmt_mhz(f, sizeof(f), w.hz, 3);
+            snprintf(dev + strlen(dev), n - strlen(dev), "  #%s W %s#", tag_hex, f);
+            break;
+        }
+    }
 }
 
 /* The title bar's line as every screen has it (pre: up to the battery's %, then room for its icon and the devices):
@@ -1945,6 +1958,8 @@ static uint8_t rows_rtl[D3_ROWS][RTL_COLS], rows_hf[D3_ROWS][RTL_COLS];
 static lv_img_dsc_t *rtl_frame;
 static lv_obj_t     *rtl_img, *rtl_why_l, *rtl_tick_l[RTL_TICKS], *hf_tick_l[RTL_TICKS], *rtl_peak_l[RTL_PEAKS], *rtl_src_l[2];
 static lv_obj_t     *rds_l;            /* B's channel's RDS, at the top of the stick's history */
+static lv_obj_t     *watch_l;          /* B's watch channels (rtl_watch.c), at the bottom of it */
+static void          watch_show(void);
 static bool          rds_tuned_note(char *t, size_t n);
 static lv_obj_t     *hf_peak_l[RTL_PEAKS];     /* the X6200's half: A's signals, named */
 static box_t         r_dev, r_tune, r_pre, r_sig;
@@ -3309,6 +3324,12 @@ static void build_rtl(lv_obj_t *p) {
     lv_obj_set_style_bg_opa(rds_l, LV_OPA_80, 0);     /* over the history, as it is drawn */
     lv_obj_set_style_pad_hor(rds_l, 3, 0);
     lv_obj_add_flag(rds_l, LV_OBJ_FLAG_HIDDEN);
+    watch_l = label(p, &pixel_16, amb, IMG_X + 6, iy + rtl_img_h - 24, 0, LV_TEXT_ALIGN_LEFT, "");
+    lv_obj_set_style_bg_color(watch_l, ink, 0);
+    lv_obj_set_style_bg_opa(watch_l, LV_OPA_80, 0);
+    lv_obj_set_style_pad_hor(watch_l, 3, 0);
+    lv_label_set_recolor(watch_l, true);
+    lv_obj_add_flag(watch_l, LV_OBJ_FLAG_HIDDEN);
     rtl_hz = param_i_get(cfg_rtl_freq);
     for (int i = RTL_PRESETS - 1; i >= 0; i--)  /* the preset the tuning is in (at, first), if one */
         if (rtl_hz >= rtl_presets[i].lo && rtl_hz <= rtl_presets[i].hi) rtl_preset = i;
@@ -3326,7 +3347,70 @@ static void rtl_labels_place(void) {
     lv_obj_set_y(rtl_src_l[1], iy + p_rtl.y0 + 3);
     lv_obj_set_y(rtl_src_l[0], iy + p_hf.y0 + 3);
     lv_obj_set_y(rds_l, iy + p_rtl.wf_y0 + 6);
+    if (watch_l) lv_obj_set_y(watch_l, iy + rtl_img_h - 24);
     rds_show(true);
+    watch_show();
+}
+
+/* B's watch channels, a line at the bottom of the stick's history: each RTL, channel and mode, OPEN lit in the pale
+ * of the tags' top while it is heard */
+static void watch_show(void) {
+    static const char *const mn[] = {"", "NFM", "AM", "WFM"};
+    char                     line[200], f[16];
+    int                      n = rtl_watch_count(), at;
+
+    if (!watch_l) return;
+    if (scr != SCR_RTL || !n) {
+        lv_obj_add_flag(watch_l, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    uint32_t pale = lv_color_to32(TC(accent_soft)) & 0xffffff;
+
+    at = snprintf(line, sizeof(line), "WATCH");
+    for (int i = 0; i < n && at < (int)sizeof(line); i++) {
+        rtl_watch_info_t w;
+
+        if (!rtl_watch_get(i, &w)) continue;
+        fmt_mhz(f, sizeof(f), w.hz, 3);
+        if (w.place < 0)
+            at += snprintf(line + at, sizeof(line) - (size_t)at, "  %s NO RTL FREE", f);
+        else if (w.open)
+            at += snprintf(line + at, sizeof(line) - (size_t)at, "  #%06X %s %s %s OPEN#", (unsigned)pale,
+                           rtl_spectrum_rtl_tag(w.place), f, mn[w.mode & 3]);
+        else
+            at += snprintf(line + at, sizeof(line) - (size_t)at, "  %s %s %s%s", rtl_spectrum_rtl_tag(w.place), f,
+                           mn[w.mode & 3], w.up ? "" : " (STARTING)");
+    }
+    lv_label_set_text(watch_l, line);
+    lv_obj_clear_flag(watch_l, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* F4 held on B: B's channel watched on a spare RTL of its own, or no longer (the user, 2026-11-16, "Tuners at once":
+ * the Kraken's free RTLs each on a channel, squelched, heard when it opens) */
+static void b_watch_toggle(void) {
+    int64_t hz = listen_hz ? listen_hz : rtl_hz;
+    int     r;
+    char    f[16], t[200], title[40];
+
+    if (rtl_watch_has(hz)) r = rtl_watch_toggle(hz, rtl_mode_of(hz), 0, 0);
+    else r = rtl_watch_toggle(hz, rtl_mode_of(hz), param_i_get(cfg_rtl_sql), param_i_get(cfg_rtl_gain));
+    fmt_mhz(f, sizeof(f), hz, 3);
+    if (r == 1) {
+        snprintf(title, sizeof(title), "WATCH: %s MHZ", f);
+        snprintf(t, sizeof(t), "ON A SPARE RTL OF ITS OWN, SQUELCHED: HEARD WHEN IT OPENS (THE X6200 OFF THE SPEAKER "
+                               "MEANWHILE). F4 HELD AGAIN ON IT: NO LONGER.");
+    } else if (r == 0) {
+        snprintf(title, sizeof(title), "NOT WATCHED: %s MHZ", f);
+        snprintf(t, sizeof(t), "ITS RTL IS FREE AGAIN (AIRSPACE MAY TAKE IT).");
+    } else {
+        snprintf(title, sizeof(title), "NO RTL FREE");
+        snprintf(t, sizeof(t), "%s", rtl_watch_count() >= RTL_WATCH_N
+                                         ? "4 WATCH CHANNELS ALREADY: F4 HELD ON ONE OF THEM DROPS IT."
+                                         : "A WATCH CHANNEL NEEDS AN RTL OF ITS OWN, NOT B'S, ON A HUB WITH ITS OWN "
+                                           "POWER (A KRAKENSDR'S).");
+    }
+    osd(title, t, -1);
+    watch_show();
 }
 
 /* RDS: the station on B's channel when that is a broadcast FM one (WFM), decoded by the stick's daemon (rds.c) whether it
@@ -4657,6 +4741,7 @@ static void blink_cb(lv_timer_t *t) {
     state_keep();                                   /* for a restart of the GUI: gui_state.c */
     rtl_spectrum_rds_watch(rds_channel());          /* B's FM broadcast channel's RDS (C's stick entry's) */
     if (scr == SCR_SYSTEM && n % 2 == 0) sys_load_show();   /* its load each second */
+    if (scr == SCR_RTL) watch_show();                       /* the watch channels, open or quiet */
     rds_show(false);
     g_rds_take();                                   /* C's entries named by it */
     sp_check();                                     /* B: which SDR, when more than one tunes its channel */
@@ -5532,8 +5617,24 @@ static bool front_key(int key, int state) {
                 return rolled;
             }
             return f2_roll && f2_rolled;    /* a hold that rolled: nothing more of it */
+        case KEYPAD_F4: {               /* B: held, its channel watched on a spare RTL, or no longer; the release
+                                         * after it nothing (a tap is LISTEN as ever) */
+            static bool held;
+
+            if (scr != SCR_RTL || sp_on) return false;
+            if (state == KEYPAD_LONG) {
+                held = true;
+                b_watch_toggle();
+                return true;
+            }
+            if (state == KEYPAD_LONG_RELEASE && held) {
+                held = false;
+                return true;
+            }
+            return false;
+        }
         default:
-            return false;       /* POWER, F1, F3-F5: as ever */
+            return false;       /* POWER, F1, F3, F5: as ever */
     }
 }
 
@@ -7586,6 +7687,7 @@ static void build_overlays(void) {
                    "A AND B        F1 SCAN  F2 BAND  F3 VIEW  F4 LISTEN  F5 SCAN CFG; MFK PANS (SPUN: 3 OR 8 STEPS A CLICK)\n"
                    "VOL KNOB       VOLUME, PUSH: SQUELCH, PUSH: RF GAIN (B: THE SDR'S); VOLUME AGAIN AFTER 5 S\n"
                    "LISTEN         A: X6200, THE SDR, BOTH, OFF; B: X6200, EACH SDR THAT TUNES IT, BOTH, OFF\n"
+                   "F4 HELD ON B   WATCH B'S CHANNEL ON A SPARE RTL (KRAKENSDR): HEARD WHEN IT OPENS\n"
                    "BAND UP/DOWN   THE NEXT BAND, AS F2 (B: THE NEXT PRESET; G: A CHANNEL OR A STEP, MFK: GROUP)\n"
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
                    "DFN            NOISE REDUCTION ON/OFF. HOLD: NOISE BLANKER (CLICKS AND POPS)\n"

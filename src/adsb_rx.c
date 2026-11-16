@@ -1021,6 +1021,16 @@ static int spare_rtl(int nth, bool self_only, char *sn, size_t sn_n, char *loc, 
     return got;
 }
 
+bool adsb_rx_rtl_self(int n) {
+    bool self = false;
+
+    pthread_once(&p_once, presence_start);
+    pthread_mutex_lock(&p_rtl_lock);
+    if (n >= 0 && n < atomic_load(&p_rtls)) self = p_rtl_id[n].self;
+    pthread_mutex_unlock(&p_rtl_lock);
+    return self;
+}
+
 bool adsb_rx_rtl_id(int n, char *sn, size_t sn_n, char *loc, size_t loc_n) {
     pthread_once(&p_once, presence_start);
     if (n < 0 || n >= atomic_load(&p_rtls)) return false;

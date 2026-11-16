@@ -69,6 +69,8 @@ unsigned adsb_rx_present(void);
 int      adsb_rx_rtl_count(void);
 /* RTL n's serial and USB location ("1002", "3-1.3"), in the daemon's order (RTL0 the first); false: none */
 bool     adsb_rx_rtl_id(int n, char *sn, size_t sn_n, char *loc, size_t loc_n);
+/* RTL n behind a hub of its own power (a KrakenSDR's): it may stream beside another */
+bool     adsb_rx_rtl_self(int n);
 
 /* An RTL-SDR on USB is a spare (the daemon holds a HackRF or a bladeRF beside it) */
 bool adsb_rx_rtl_spare(void);

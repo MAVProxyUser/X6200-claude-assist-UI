@@ -82,8 +82,10 @@
  *  A client gone: its rows, listening, watch, ACARS and transmission end; the device goes on, tuned as it was.
  *
  *      x6x00-rtlspec [-F] [-d index] [-f Hz] [-s rate] [-n bins] [-r rows/s] [-g tenths] [-i FILE] [-S name]
- *                    [-T FILE]
+ *                    [-T FILE] [-W]
  *
+ *  -W: a watch channel's (the GUI's rtl_watch.c, beside the radio's own under another -S): RTL -d alone, never
+ *  another kind nor RTL0 in its place; "k" is not for it.
  *  It goes into the background (-F: it stays in front); with one already running it says "RTLSPEC RUNNING" and ends.
  *  -d: which RTL-SDR stick. -i replays FILE (unsigned 8-bit I/Q at the rate, as rtl_sdr writes it) in place of the
  *  device, at its own pace and over again: the same rows, audio and alerts, to try the GUI without a signal on the air
@@ -1485,8 +1487,9 @@ static void *stick_thread(void *arg) {
         int w = atomic_load(&want_dev);
 
         if (sdr_file_path) o = test_kinds[0];
-        if (!o && w && !atomic_load(&want_failed) && kinds[w - 1]->present()) o = kinds[w - 1];   /* the one asked for */
-        for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]) && !o; i++)
+        if (!o && sdr_rtl_exact && sdr_rtl.present()) o = &sdr_rtl;     /* -W: that RTL, nothing else */
+        if (!o && !sdr_rtl_exact && w && !atomic_load(&want_failed) && kinds[w - 1]->present()) o = kinds[w - 1];
+        for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]) && !o && !sdr_rtl_exact; i++)
             if (kinds[i]->present()) o = kinds[i];
         if (!o) {
             atomic_store(&s_now, S_NOSTICK);
@@ -1642,7 +1645,7 @@ int main(int argc, char **argv) {
     uint32_t rate   = 2400000;
     uint64_t centre = 162550000;
 
-    while ((opt = getopt(argc, argv, "Fd:f:s:n:r:g:i:S:T:")) != -1) {
+    while ((opt = getopt(argc, argv, "Fd:f:s:n:r:g:i:S:T:W")) != -1) {
         switch (opt) {
             case 'F': front = true; break;
             case 'd': sdr_rtl_index = atoi(optarg); break;
@@ -1653,6 +1656,7 @@ int main(int argc, char **argv) {
             case 'g': gain = atoi(optarg); break;
             case 'i': replay = optarg; break;
             case 'S': sock_name = optarg; break;
+            case 'W': sdr_rtl_exact = true; break;      /* a watch channel's: RTL -d alone (rtl_watch.c) */
             case 'T': sdr_file_path = optarg; break;
             default: return 1;
         }

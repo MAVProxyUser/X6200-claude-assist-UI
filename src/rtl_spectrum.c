@@ -17,6 +17,7 @@
 
 #include "adsb_rx.h"
 #include "audio.h"
+#include "rtl_watch.h"
 #include "radio.h"
 
 #include <errno.h>
@@ -819,7 +820,10 @@ static void *player_thread(void *arg) {
     pthread_setname_np(pthread_self(), "rtl_player");   /* by name in top -H */
 
     for (;;) {
-        bool want_play = atomic_load(&listen_mode) != 0 || atomic_load(&mute);
+        /* a watch channel open (rtl_watch.c): the speaker taken for it too, the X6200 off it meanwhile (OFF
+         * keeps it silent) */
+        bool watch     = !atomic_load(&mute) && rtl_watch_active();
+        bool want_play = atomic_load(&listen_mode) != 0 || atomic_load(&mute) || watch;
 
         if (want_play && !atomic_load(&playing)) {
             bt   = audio_play_bt_begin();
@@ -864,6 +868,12 @@ static void *player_thread(void *arg) {
             tapping = false;
             audio_rx_tap(false);
         }
+        if (want_play && !atomic_load(&listen_mode) && watch) {   /* the watch channels alone: they pace it */
+            memset(chunk, 0, sizeof(chunk));
+            rtl_watch_mix(chunk, CHUNK);
+            audio_play(chunk, CHUNK);
+            continue;
+        }
         if (!want_play || !atomic_load(&listen_mode)) {     /* nothing, or OFF: the speaker silent */
             usleep(20000);
             continue;
@@ -904,6 +914,7 @@ static void *player_thread(void *arg) {
                 if (a > 24000) v = (v > 0 ? 1 : -1) * (24000 + (a - 24000) * 8767 / (a - 24000 + 8767));
                 chunk[k] = (int16_t)v;
             }
+            rtl_watch_mix(chunk, n);            /* the watch channels open, added */
             audio_play(chunk, n);
             continue;
         }
@@ -920,6 +931,7 @@ static void *player_thread(void *arg) {
                 else if (g > to) g = g - 1.0f / 441 < to ? to : g - 1.0f / 441;
                 chunk[k] = (int16_t)(chunk[k] * g);
             }
+            rtl_watch_mix(chunk, n);            /* the watch channels open, added */
             if (atomic_load(&rscope_on)) {
                 pthread_mutex_lock(&rscope_lock);
                 for (int k = 0; k < n; k++) {

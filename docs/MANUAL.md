@@ -799,7 +799,18 @@ last seconds, the strongest signals named over it and the screen's channel brack
   them on its own, numbered RTL0, RTL1...** in order of their serial numbers, then of their USB location (sticks that
   all say 00000001): a stick alone is RTL0, and a **KrakenSDR**'s five (serials 1000-1004 behind its own hub) are
   RTL0-RTL4, its CH0-CH4. The box gives each RTL's serial and USB location (`RTL2  SN 1002, USB 3-1.3, RECEIVE
-  ONLY`); the SDR daemon logs the one it opens the same way (`RTL2 of 5 (serial 1002, USB 3-1.3)`). The daemon holds one SDR at
+  ONLY`); the SDR daemon logs the one it opens the same way (`RTL2 of 5 (serial 1002, USB 3-1.3)`).
+- **Watch channels** (two or more RTLs on a hub of their own power, a KrakenSDR's): **F4 held on B** watches B's
+  channel on a spare RTL of its own (from the last, RTL4, RTL3...: AIRSPACE's first spare keeps the first free one),
+  squelched (B's SDR squelch, or 10 dB over the noise if it is off), in the mode B hears it in; F4 held on it again
+  drops it; up to four. Each is an SDR daemon of its own (`x6x00-rtlspec -W -d <n>`, 1.0584 MS/s, tuned 250 kHz off
+  the channel, `/tmp/rtlspec-w<i>.log`), kept in `/mnt/rtl_watch` over restarts. **While one is open its audio is on
+  the speaker**, added to B's when B is heard, else alone: then, as for B, the base sends none of the X6200's
+  receiver, which comes back a second and a half after the last one shuts (scanner priority); LISTEN OFF keeps the
+  speaker silent. B's picture has a line at the bottom of its history (`WATCH  RTL4 162.550 NFM OPEN  RTL3
+  146.520 NFM`, the open ones lit) and every screen's title bar a `W 162.550` tag while one is heard. No RTL of its
+  own free: `NO RTL FREE`. AIRSPACE leaves the watch channels' RTLs alone (its spares take the rest). AIRSPACE's own
+  receivers start the first time its screen opens after the GUI starts. The daemon holds one SDR at
   a time: the one chosen is opened in place of the other (a few seconds), and G's SDR channels and AIRSPACE use it
   too (`rtl_dev` keeps the choice). One that does not tune B's channel is not offered (an RTL-SDR at 2.4 GHz); one
   that will not open (another program holds it) leaves the one before.

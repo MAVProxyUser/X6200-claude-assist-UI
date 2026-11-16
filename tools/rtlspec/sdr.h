@@ -56,7 +56,8 @@ typedef struct {
 extern const sdr_ops_t sdr_rtl, sdr_hackrf, sdr_bladerf;
 /* The RTLs (sdr_rtl.c): which one, by its place in serial order (RTL0 the first); the open one's place, -1 none; how
  * many are on USB */
-extern int sdr_rtl_index, sdr_rtl_open_at;
+extern int  sdr_rtl_index, sdr_rtl_open_at;
+extern bool sdr_rtl_exact;              /* -W: RTL sdr_rtl_index alone, none in its place */
 int        sdr_rtl_count(void);
 
 /* The test device (sdr_file.c, -T FILE): transmits into the file, receives nothing; never a radio */

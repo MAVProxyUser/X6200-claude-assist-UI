@@ -26,6 +26,7 @@
  * sysfs (adsb_rx.c), so RTL<n> is the same stick on both sides */
 int sdr_rtl_index;
 int sdr_rtl_open_at = -1;               /* the open one's place (RTL<n>), -1 none */
+bool sdr_rtl_exact;
 
 static rtlsdr_dev_t *volatile dev;
 static sdr_rx_cb              rx_cb;
@@ -147,8 +148,10 @@ static int rtl_at(int at, char *sn, size_t n, char *loc, size_t ln) {
 static int rtl_open(char *tuner, size_t n, uint64_t *lo, uint64_t *hi) {
     rtlsdr_dev_t *d;
     char          sn[64], loc[32];
-    int           cnt = (int)rtlsdr_get_device_count(), at = sdr_rtl_index < cnt ? sdr_rtl_index : 0;
+    int           cnt = (int)rtlsdr_get_device_count(), at = sdr_rtl_index < cnt ? sdr_rtl_index : sdr_rtl_exact ? -1 : 0;
     int           idx = rtl_at(at, sn, sizeof(sn), loc, sizeof(loc));
+
+    if (at < 0) return -1;              /* -W and that RTL not on USB: none in its place */
 
     if (idx < 0 || rtlsdr_open(&d, (uint32_t)idx) != 0) return 1;  /* another program has it: tried again, not forced */
     sdr_rtl_open_at = at;
