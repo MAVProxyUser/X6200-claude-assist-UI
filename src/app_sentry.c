@@ -5573,6 +5573,11 @@ static void a_chan_hop(uint32_t now) {
     anchor = c->freq;
     if (cparam_i_get(cfg_fg_freq) != (int32_t)c->freq || cparam_i_get(cfg_cur_mode) != (int)c->mode)
         tune((int32_t)c->freq, (int)c->mode);
+    /* and the channel's own AGC, preamp and attenuator, as the CHANNELS app's recall sets them (on the cable 11-17 a
+     * channel's signal stood 8 dB over the noise with the band's preamp off, 22 dB with it on) */
+    cparam_i_set(cfg_cur_agc, c->agc);
+    cparam_i_set(cfg_cur_pre, c->pre ? radio_pre_on : radio_pre_off);
+    cparam_i_set(cfg_cur_att, c->att ? radio_att_on : radio_att_off);
     show_screen();
 }
 

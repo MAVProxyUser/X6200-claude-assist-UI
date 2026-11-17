@@ -983,7 +983,8 @@ Then two rows for both radios:
 
 - **F1 SCANS**: THE BAND, END TO END (A's and B's F1 as above), or **THE CHANNELS**: the channel list (the CHANNELS
   app and the web page's Channels keep it, /mnt/channels.json), each on the radio that takes it, as D's RX says: A's
-  F1 steps the X6200 through the channels it takes (HF, 6 m) on each one's own frequency and mode, B's F1 the SDR
+  F1 steps the X6200 through the channels it takes (HF, 6 m) on each one's own frequency, mode, AGC, preamp and
+  attenuator (as the CHANNELS app recalls them), B's F1 the SDR
   through the VHF/UHF ones, the step time on each. One that talks goes into C LOG, and the scan stops on it as the
   style says (BROWSE marks it and goes on); A stops only on a signal within 5 kHz of the channel. The row says how
   many channels each radio has; A's F1 says CHANS and its BAND box the channel's name while it runs. Changing the row
