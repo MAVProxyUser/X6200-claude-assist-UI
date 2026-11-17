@@ -734,7 +734,7 @@ spectrum screens:
 | **F SYSTEM** | Settings, the apps, the modes, the classic radio screen |
 | **G WALKIE** | The radio as a CB walkie-talkie, the voice drawn as it is heard; with a HackRF or bladeRF, VHF/UHF FM through it too |
 | **H AIRSPACE** | ADS-B aircraft from an RTL-SDR, a HackRF, a bladeRF, a GNS 5890 or a microADSB ([AIRSPACE](#airspace)) |
-| SCAN CFG | On no ring: F5 on A or B. How the scans behave (a style: BROWSE, SCANNER, SAMPLER, STOP & STAY, SURVEY), the radios' knob steps, B's gain and squelch, and what each scan does now |
+| SCAN CFG | On no ring: F5 on A or B. How the scans behave (a style: BROWSE, SCANNER, SAMPLER, STOP & STAY, SURVEY), what F1 scans (the band or the channel list), a priority channel, the radios' knob steps, B's gain and squelch, and what each scan does now |
 
 Its controls (GEN shows them, as does a tap on the title):
 
@@ -788,7 +788,7 @@ last seconds, the strongest signals named over it and the screen's channel brack
   then the next pass starts afresh. A pass at 72k gives about 6.5 lines a second (a strip of 8 every 1.23 s); the
   80k mode's interleaver holds the first lines back about 18 s. It needs an antenna for 137 MHz (a QFH or a V-dipole:
   the satellite is 7 W, 800 km up); the decoder costs about 15% of one of the processor's four cores while it runs.
-- **F1 SCAN** sweeps the band end to end: A 360 kHz at a time, B a picture at a time (SCAN CFG's STEP TIME, 2 s;
+- **F1 SCAN** sweeps the band end to end (or the channel list: SCAN CFG's F1 SCANS): A 360 kHz at a time, B a picture at a time (SCAN CFG's STEP TIME, 2 s;
   C's F5 sets it too), each
   a little overlapped, from the bottom again past the top; a band narrower than the picture stays in its middle.
   What each does on a signal is SCAN CFG's style: BROWSE marks it (A) or moves B's channel to each picture's
@@ -972,6 +972,25 @@ Changing one of the three settings by hand makes the style **CUSTOM**:
 "Talking" is, on A, the signal standing out of the noise in A's picture; on B, B's channel 10 dB over the noise of
 its picture, or B's squelch open when a squelch is set. B's scan now stops on signals too: before, it only moved its
 channel to each picture's strongest and went on after the step time.
+
+Then two rows for both radios:
+
+- **F1 SCANS**: THE BAND, END TO END (A's and B's F1 as above), or **THE CHANNELS**: the channel list (the CHANNELS
+  app and the web page's Channels keep it, /mnt/channels.json), each on the radio that takes it, as D's RX says: A's
+  F1 steps the X6200 through the channels it takes (HF, 6 m) on each one's own frequency and mode, B's F1 the SDR
+  through the VHF/UHF ones, the step time on each. One that talks goes into C LOG, and the scan stops on it as the
+  style says (BROWSE marks it and goes on); A stops only on a signal within 5 kHz of the channel. The row says how
+  many channels each radio has; A's F1 says CHANS and its BAND box the channel's name while it runs. Changing the row
+  while a scan runs switches that scan over at once. D's F1 SCAN still scans the band chosen there.
+- **PRIORITY**: OFF, or one channel: a push takes the channel heard now (A's dial and mode, or B's channel when SCAN
+  CFG was opened from B), a push again turns it off. While a scan moves on the radio that takes it (A's scan or
+  sweep, B's scan), the priority channel is looked at every 3 seconds: read off the picture when it is in it (A's
+  360 kHz, B's SDR picture; then also while the scan is stopped on another signal), else by tuning there for a moment
+  (A until its picture settles, about half a second; B for one picture, 1.2 s) and back. Heard there, the scan
+  leaves what it was on and stays on the priority channel while it talks, whatever the style, then goes on; NOW
+  says `STOPPED ON PRIORITY`. Looking elsewhere takes the radio's audio away for that moment, as on any scanner with
+  priority. F3 SKIP on a priority stop leaves the priority channel unlooked at till the Sentry closes; the push on
+  the row turns it off.
 
 The rows after them are each radio's own: **A: SWEEP D'S BANDS** (OFF, or ON: the X6200 hops between the bands
 marked `*` in D BANDS, the step time each; not A's F1 SCAN, which goes along one band end to end), **A: KNOB STEP**
