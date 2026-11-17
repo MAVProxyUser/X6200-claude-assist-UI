@@ -15,14 +15,17 @@ Meteor/SCAN CFG one, the Kraken DF one and its kernel one) were folded into one 
 3. **NXDN96 over the cable**: NXDN48 is tested (voice r 0.92-0.95); NXDN96 runs in the third dsd-fme but was never
    sent over the cable.
 4. **The Kraken's fifth stream** (D11): the radio's USB host has four receive endpoints of its own and one shared;
-   the Kraken's hub keeps one for its status channel, so the fourth and fifth stick share. Two answers on branch
-   claude/friendly-archimedes-252a82, not on main: 9103 (the shared endpoint taken in turns) and a hub-poll module (the
-   hub's status read over the control endpoint about once a second, so every stick has an endpoint of its own; five
-   sticks streamed with it on 2026-11-17). To finish: the 30-minute run and the port-bounce and churn checks, the
-   hub's status traffic logged under a heavy capture (the owner's question: how often it ever reports), then one of
-   the two into the image. Found on the way: on this Kraken, disabling hub port 2 (stick 1003) also disconnects port 5
-   (stick 1000) every time, both back in about 0.5 s, with or without the status channel. So the SDR daemon's bounce
-   of a stalled Kraken stick (x6x00-rtlspec, 017bfed) can drop another that is streaming, page I's CH0 among them.
+   the Kraken's hub kept one for its status channel, so the fourth and fifth stick shared and the fifth got nothing.
+   The answer is 9104, on branch claude/friendly-archimedes-252a82 (25b83c3; not on main, in no image; the earlier
+   9103 is withdrawn): the Kraken's hub (0424:2517) read over the control endpoint once a second instead of its status
+   channel, so each stick has an endpoint of its own. Measured on the radio with the GUI up: five streams full (B at
+   2.1168 MS/s, four at 1.024) in runs of 60, 219 and 81 s; the status channel never answered once in a clean
+   5-minute capture (the hardware asks every 256 ms); a dropped stick is seen at once either way, its return within a
+   second with polling instead of 0.3 s. Loaded on the bench radio as a test build (docs/plans/musb_hub_poll_9104.md on
+   the branch: the setup and how to undo it). To finish: the full 30-minute five-stream run and the churn check, then
+   the owner's call to bring 25b83c3 to main. Found on the way: on this Kraken, disabling hub port 2 (stick 1003) also
+   disconnects port 5 (stick 1000) every time, both back in about 0.5 s, so the SDR daemon's bounce of a stalled
+   Kraken stick (x6x00-rtlspec, 017bfed) can drop another that is streaming, page I's CH0 among them.
 5. **Kraken DF, page I** (docs/plans/kraken_df_plan.md; D1 approved; 40216c6, a94ab58): our own DF engine
    (x6x00-df) and page I, four channels calibrated on the radio (1.2-2.6 degrees, no slips, 11 % CPU). To do: the
    over-the-air check with all five channels (a 915 MHz ISM carrier from the HackRF, the 33 CM preset), then
