@@ -548,7 +548,35 @@ static const char *app_name(press_action_t a) {
 
 /* Whatever app is open goes: its window, RTTY (the radio back as it was before it), the
  * digital audio path, the panel */
+/* A decoder app hears the receiver only with the squelch open: at 4 it handed them silence even under an S5 signal
+ * (the X6200, cabled test 2026-11-17: WeFax drew nothing till it was 0; the user's "no sound on 7.8" too). So a
+ * decoder opens it, says so, and puts the user's back as it closes (left alone if they changed it meanwhile) */
+static int32_t sql_held = -1;
+
+static bool is_decoder_app(press_action_t a) {
+    return a == ACTION_APP_FT8 || a == ACTION_APP_JS8 || a == ACTION_APP_WSPR || a == ACTION_APP_SSTV ||
+           a == ACTION_APP_WEFAX || a == ACTION_APP_NAVTEX || a == ACTION_APP_FREEDV || a == ACTION_APP_PSK ||
+           a == ACTION_APP_OLIVIA || a == ACTION_APP_JTTY || a == ACTION_APP_RTTY || a == ACTION_APP_TIMESIG;
+}
+
+static void sql_open_for(press_action_t a) {
+    int32_t s = param_i_get(cfg_squelch);
+
+    if (!is_decoder_app(a) || s <= 0) return;
+    sql_held = s;
+    param_i_set(cfg_squelch, 0);
+    msg_schedule_long_text_fmt("Squelch %d opened for %s: it gives decoders silence. Back as it closes.", (int)s,
+                               app_name(a));
+}
+
+static void sql_give_back(void) {
+    if (sql_held < 0) return;
+    if (param_i_get(cfg_squelch) == 0) param_i_set(cfg_squelch, sql_held);
+    sql_held = -1;
+}
+
 static void close_apps(void) {
+    sql_give_back();
     dialog_destruct();
     freq_strip_set_app(NULL);
     if (rtty_get_state() != RTTY_OFF) {
@@ -621,6 +649,7 @@ void main_screen_start_app(press_action_t app_action) {
     }
     close_apps();
     last_app = app_action;      /* before the cap goes on: main_screen_digital_app reads the two together */
+    sql_open_for(app_action);
 
     /* The digital apps open where they were last used */
     switch (app_action) {
@@ -678,6 +707,7 @@ void main_screen_home_pause(bool on) {
 /* A window closed (app_window.c calls this after it): the Sentry again, the X6200's home screen, unless something
  * else took the screen (an app that opened in its place, RTTY without a window, the walkie screen) */
 void main_screen_dialog_closed(void) {
+    if (!dialog_is_run() && rtty_get_state() == RTTY_OFF) sql_give_back();     /* a decoder app closed */
 #ifdef BOARD_X6200
     if (!param_i_get(cfg_sentry_home) || home_paused) return;
     if (dialog_is_run() || rtty_get_state() != RTTY_OFF || walkie_on()) return;

@@ -4178,6 +4178,11 @@ Pressing Modes again closes the menu.
 - The apps reopen on their last frequency and mode.
 - Power is capped at 7 W while an app is open (see
   [Digital-mode TX level](#digital-mode-tx-level)).
+- The squelch opens while a decoder app is open (FT8, JS8, WSPR, SSTV, WeFax,
+  NavTex, RADE, PSK, Olivia, JTTY, RTTY, Time Signal): a closed squelch gives
+  the decoders silence, even under an S5 signal. The radio says so ("Squelch 4
+  opened for WeFax"), and your squelch comes back when the app closes, unless
+  you set one yourself meanwhile.
 
 ### FT8 and FT4
 
