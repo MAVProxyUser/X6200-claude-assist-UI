@@ -33,7 +33,9 @@
 #define OUT_RATE 48000.0
 #define CHUNK    960            /* 20 ms at 48 kHz a write */
 #define PCM      8000           /* a second of its 8 kHz speech in hand at most */
-#define START    480            /* 60 ms of it before it is played */
+#define START    800            /* 100 ms of it before it is played: dsd-fme's speech can come a YSF frame at a time
+                                 * (five voice frames each 100 ms). Over the cable B's speaker followed dsd-fme's own
+                                 * output second by second (r 0.94-1.00), 1% slower: the GUI's playback clock */
 #define GAIN     1.5f           /* its speech peaks at half scale on B (D-STAR, cabled test): DMR's level */
 
 extern char **environ;

@@ -336,8 +336,9 @@ static void dmr_ambe(void *ctx, int slot, const uint8_t frame[9]) {
     if (slot == dmr_play) ambe_frame(frame);
 }
 
-/* A test of DMR off the air: with /tmp/dmr_dump there, the next 20 s of a DMR channel's FM (the discriminator, float
- * at 44.1 kHz, +-1 for +-5 kHz) into /tmp/dmr_dump.f32, the flag then taken away. Looked for once a second */
+/* A test of DMR (or dsd-fme's protocols) off the air or over a cable: with /tmp/dmr_dump there, the next 20 s of a
+ * digital channel's FM (the discriminator, float at 44.1 kHz, +-1 for +-5 kHz) into /tmp/dmr_dump.f32, the flag then
+ * taken away. Looked for once a second */
 static void dmr_dump(float d, bool active) {
     static FILE    *f;
     static uint32_t n, look;
@@ -347,7 +348,7 @@ static void dmr_dump(float d, bool active) {
         look = 0;
         if (access("/tmp/dmr_dump", F_OK) || !(f = fopen("/tmp/dmr_dump.f32", "wb"))) return;
         n = 0;
-        fprintf(stderr, "rtlspec: DMR's FM into /tmp/dmr_dump.f32 for 20 s\n");
+        fprintf(stderr, "rtlspec: the digital channel's FM into /tmp/dmr_dump.f32 for 20 s\n");
     }
     fwrite(&d, sizeof(d), 1, f);
     if (++n >= 20 * AUD_RATE) {
@@ -568,7 +569,7 @@ static void at_264k(chan_t *c, float r, float i) {
             }
             if (c->dmr) {
                 dmr_feed(c->dmr, &d, 1);
-                dmr_dump(d, dmr_active(c->dmr));
+                dmr_dump(d, dmr_active(c->dmr) || (c == &lis && dsd_on && dsd_active()));
                 if (dmr_active(c->dmr)) {
                     c->out(dmr_audio());
                     return;
