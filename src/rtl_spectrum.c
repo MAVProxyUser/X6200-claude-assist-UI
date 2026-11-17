@@ -120,6 +120,15 @@ static uint32_t        alert_seq;
 static atomic_llong    listen_hz;
 static rtl_dmr_t       dmr_now;         /* the listened channel's DMR (RDMR), under lock */
 static rtl_dsd_t       dsd_now;         /* its other digital voice (RDSD), under lock */
+static atomic_llong    met_hz;          /* B's channel's Meteor satellite ("m"), 0 none */
+static rtl_lrpt_t      lrpt_now;        /* the LRPT decoder's state (RLPT), under lock */
+#define LP_LINE 784                     /* a half-size line of the satellite's pictures */
+#define LP_KEEP 128                     /* strips kept of each channel: 512 half-size lines, more than B shows */
+static uint8_t        *lp_px[6];        /* each channel's last strips (4 lines of 784), under lock */
+static int32_t         lp_strip[6][LP_KEEP];    /* the strip in each place, -1 none */
+static int32_t         lp_top = -1;     /* the newest strip of any channel */
+static unsigned        lp_pass;
+static uint32_t        lp_ver;
 static atomic_int      listen_mode;      /* 0 not listening */
 static pthread_mutex_t ring_lock = PTHREAD_MUTEX_INITIALIZER;
 static int16_t         ring[RING];
@@ -369,6 +378,11 @@ static void *spec_thread(void *arg) {
                 say(cmd);
             }
             if (atomic_load(&acars_on)) say("c 1\n");
+            if (atomic_load(&met_hz)) {
+                snprintf(cmd, sizeof(cmd), "m %lld\n", (long long)atomic_load(&met_hz));
+                say(cmd);
+            }
+            say("p\n");                /* the pictures' strips again, if a pass goes on */
             if (atomic_load(&listen_mode)) {
                 snprintf(cmd, sizeof(cmd), "l %lld %d\n", (long long)atomic_load(&listen_hz),
                          atomic_load(&listen_mode));
@@ -580,6 +594,73 @@ static void *spec_thread(void *arg) {
             snprintf(dsd_now.call[sl], sizeof(dsd_now.call[sl]), "%s", p3 + 1);
             dsd_now.at_ms = lv_tick_or_ms();
             dsd_now.seq++;
+            pthread_mutex_unlock(&lock);
+            continue;
+        }
+        if (n >= 8 && memcmp(buf, "RLPT", 4) == 0) {   /* "<Hz>|<pass>|<mode>|<lock>|<offset>|<quality>|<frames>|
+                                                        *  <good>|<packets>|<rows,...>|<file>|<dropped>" */
+            uint32_t len;
+            char     t[300], *f[12], *p = NULL;
+            int      k = 0;
+
+            memcpy(&len, buf + 4, 4);
+            if (len >= sizeof(t) || len > (uint32_t)(n - 8)) continue;
+            memcpy(t, buf + 8, len);
+            t[len] = 0;
+            for (p = t; k < 12 && (f[k] = p); k++) {
+                if (!(p = strchr(p, '|'))) {
+                    k++;
+                    break;
+                }
+                *p++ = 0;
+            }
+            if (k < 12) continue;
+            rtl_lrpt_t m = {.hz = strtoll(f[0], NULL, 10), .pass = (unsigned)strtoul(f[1], NULL, 10),
+                            .lock = atoi(f[3]) != 0, .offset = atoi(f[4]), .quality = atoi(f[5]),
+                            .frames = (uint32_t)strtoul(f[6], NULL, 10), .good = (uint32_t)strtoul(f[7], NULL, 10),
+                            .packets = (uint32_t)strtoul(f[8], NULL, 10), .dropped = (uint32_t)strtoul(f[11], NULL, 10)};
+            snprintf(m.mode, sizeof(m.mode), "%s", f[2]);
+            snprintf(m.file, sizeof(m.file), "%s", f[10]);
+            sscanf(f[9], "%d,%d,%d,%d,%d,%d", &m.rows[0], &m.rows[1], &m.rows[2], &m.rows[3], &m.rows[4], &m.rows[5]);
+            pthread_mutex_lock(&lock);
+            if (m.pass != lp_pass) {    /* another pass: the strips kept were the last one's */
+                lp_pass = m.pass;
+                lp_top  = -1;
+                for (int c = 0; c < 6; c++)
+                    for (int i = 0; i < LP_KEEP; i++) lp_strip[c][i] = -1;
+                lp_ver++;
+            }
+            m.at_ms  = lv_tick_or_ms();
+            m.seq    = lrpt_now.seq + 1;
+            lrpt_now = m;
+            pthread_mutex_unlock(&lock);
+            continue;
+        }
+        if (n >= 12 + 4 * LP_LINE && memcmp(buf, "RLPI", 4) == 0) {    /* u8 channel, u8 0, u16 pass, u32 strip,
+                                                                        * 784 x 4 */
+            uint16_t pass;
+            uint32_t strip;
+            int      c = buf[4];
+
+            memcpy(&pass, buf + 6, 2);
+            memcpy(&strip, buf + 8, 4);
+            if (c < 0 || c >= 6 || strip > 100000) continue;
+            pthread_mutex_lock(&lock);
+            if (pass != (uint16_t)lp_pass) {    /* a pass's strips before its state (a daemon started anew) */
+                lp_pass = pass;
+                lp_top  = -1;
+                for (int ch = 0; ch < 6; ch++)
+                    for (int i = 0; i < LP_KEEP; i++) lp_strip[ch][i] = -1;
+            }
+            if (!lp_px[c] && (lp_px[c] = malloc((size_t)LP_KEEP * 4 * LP_LINE))) {
+                for (int i = 0; i < LP_KEEP; i++) lp_strip[c][i] = -1;
+            }
+            if (lp_px[c]) {
+                memcpy(lp_px[c] + (size_t)(strip % LP_KEEP) * 4 * LP_LINE, buf + 12, 4 * LP_LINE);
+                lp_strip[c][strip % LP_KEEP] = (int32_t)strip;
+                if ((int32_t)strip > lp_top) lp_top = (int32_t)strip;
+                lp_ver++;
+            }
             pthread_mutex_unlock(&lock);
             continue;
         }
@@ -1167,6 +1248,54 @@ const char *rtl_dsd_name(const char *proto) {
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
         if (!strcmp(proto, names[i][0])) return names[i][1];
     return proto;
+}
+
+void rtl_spectrum_meteor(int64_t hz) {
+    char cmd[40];
+
+    if (atomic_load(&met_hz) == hz) return;
+    atomic_store(&met_hz, hz);
+    snprintf(cmd, sizeof(cmd), "m %lld\n", (long long)hz);
+    say(cmd);
+}
+
+bool rtl_spectrum_lrpt(rtl_lrpt_t *out) {
+    bool got;
+
+    pthread_mutex_lock(&lock);
+    *out = lrpt_now;
+    got  = lrpt_now.at_ms && lrpt_now.hz && lv_tick_or_ms() - lrpt_now.at_ms < 3000;
+    pthread_mutex_unlock(&lock);
+    return got;
+}
+
+bool rtl_spectrum_lrpt_picture(uint32_t *px, int w, int h, int stride, int view, uint32_t *ver) {
+    pthread_mutex_lock(&lock);
+    if (*ver == lp_ver) {
+        pthread_mutex_unlock(&lock);
+        return false;
+    }
+    *ver = lp_ver;
+    if (w > LP_LINE) w = LP_LINE;
+    int top = (lp_top + 1) * 4;                         /* the line after the newest */
+    for (int y = 0; y < h; y++) {
+        uint32_t *o    = px + (size_t)y * stride;
+        int       line = top - h + y, strip = line >= 0 ? line / 4 : -1, slot = strip >= 0 ? strip % LP_KEEP : 0;
+        const uint8_t *a = NULL, *b = NULL;             /* colour: 65 (red, green) and 64 (blue); else the channel */
+
+        if (strip >= 0) {
+            int ca = view ? view - 1 : 1, cb = view ? -1 : 0;
+            if (lp_px[ca] && lp_strip[ca][slot] == strip) a = lp_px[ca] + ((size_t)slot * 4 + line % 4) * LP_LINE;
+            if (cb >= 0 && lp_px[cb] && lp_strip[cb][slot] == strip)
+                b = lp_px[cb] + ((size_t)slot * 4 + line % 4) * LP_LINE;
+        }
+        for (int x = 0; x < w; x++) {
+            uint32_t g = a ? a[x] : 0, bl = view ? g : b ? b[x] : 0;
+            o[x] = 0xff000000u | g << 16 | g << 8 | bl;
+        }
+    }
+    pthread_mutex_unlock(&lock);
+    return true;
 }
 
 bool rtl_spectrum_rds(rtl_rds_t *out) {

@@ -10,7 +10,7 @@
 #     analogdevicesinc submodule for the bladeRF 2.0. No FPGA images: Nuand's, put by hand in /mnt/bladerf (or the
 #     board's own flash, bladeRF-cli -L) as docs/MANUAL.md says;
 #   - rtl_test, to say which stick and tuner is plugged in;
-#   - x6x00-rtlspec, the daemon that owns the device (tools/rtlspec);
+#   - x6x00-rtlspec, the daemon that owns the device (tools/rtlspec; the radio's zlib for Meteor's PNGs);
 #   - dump1090-fa (FlightAware), headless use only: its curses display is declared against the radio's own
 #     libncurses.so.6 (curses.h below), as the sysroot has the library and no header.
 # The radio's libusb-1.0 and ncurses are linked dynamically; libusb.h comes from libusb's 1.0.26 tag.
@@ -106,8 +106,8 @@ cp -L "$B/bladerf-build/output/libbladeRF.so.2" "$B/out/lib/libbladeRF.so.2"
 # run time (its header only here)
 RS=$TOP/tools/rtlspec
 $CC $CF -O3 -DSDR_BLADERF -I "$RS" -I "$H" -I "$BL/libraries/libbladeRF/include" -o "$B/out/bin/x6x00-rtlspec" \
-    "$RS/rtlspec.c" "$RS/same.c" "$RS/rds.c" "$RS/acars.c" "$RS/ambe.c" "$RS/dmr.c" "$RS/dsd.c" "$RS/sdr.c" "$RS/sdr_rtl.c" "$RS/sdr_hackrf.c" "$RS/sdr_bladerf.c" "$RS/sdr_file.c" \
-    "$B/out/lib/librtlsdr.a" "$B/out/lib/libhackrf.a" $LD -lusb-1.0 -lpthread -lm -ldl
+    "$RS/rtlspec.c" "$RS/same.c" "$RS/rds.c" "$RS/acars.c" "$RS/ambe.c" "$RS/dmr.c" "$RS/dsd.c" "$RS/lrpt.c" "$RS/sdr.c" "$RS/sdr_rtl.c" "$RS/sdr_hackrf.c" "$RS/sdr_bladerf.c" "$RS/sdr_file.c" \
+    "$B/out/lib/librtlsdr.a" "$B/out/lib/libhackrf.a" $LD -lusb-1.0 -lz -lpthread -lm -ldl
 
 # dump1090-fa: ARCH armv7l picks its NEON DSP flavours for the radio's Cortex-A7
 rm -f "$B/dump1090/dump1090"      # linked again: its Makefile does not see librtlsdr.a change

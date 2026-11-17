@@ -173,6 +173,8 @@ static GLint  u_wf_lv, u_wf_pal, u_wf_head, u_wf_ring;
 static GLint  u_rd_pal, u_rd_ink, u_rd_c, u_rd_r, u_rd_sweep;
 static GLint  u_img_img, u_d3_col, u_d3_pal, u_d3_dr, u_jn_col, u_jn_row, u_jn_c;
 static GLuint tex_d3col, tex_img;   /* the 3D picture's column records, its background */
+static GLuint tex_pic;              /* B's Meteor picture (gpu_pic) */
+static int    pic_w, pic_h;
 static GLint  u_gui_img;
 static GLuint ov_fbo[2];            /* the overlay plane's buffers: the GUI's layer (drm_gui_export) */
 static GLuint tex_gui[2];           /* LVGL's frame as the GPU reads it: landscape, portrait */
@@ -1173,6 +1175,29 @@ bool gpu_d3_bg(const uint32_t *xrgb, int w, int h) {
     return true;
 }
 
+bool gpu_pic(const uint32_t *xrgb, int w, int h) {
+    if (tried <= 0 || w < 1 || h < 1) return false;
+    if (pic_w != w || pic_h != h) {
+        if (tex_pic) p_glDeleteTextures(1, &tex_pic);
+        tex_pic = texture(w, h, GL_RGBA);
+        pic_w = w, pic_h = h;
+    }
+    p_glBindTexture(GL_TEXTURE_2D, tex_pic);
+    p_glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, xrgb);
+    return true;
+}
+
+void gpu_pic_draw(int x, int y, int w, int h) {
+    if (!in_frame || !tex_pic) return;
+    rect_flush();
+    scissor(x, y, w, h);
+    use(P_IMG);
+    bind(tex_pic, tex_pic);
+    p_glUniform1i(u_img_img, 0);
+    quad((float)x, (float)y, (float)(x + w), (float)(y + h), 0, 0, (float)w / pic_w, (float)h / pic_h);
+}
+
 void gpu_d3_draw_bg(int x, int y, int w, int h) {
     if (!in_frame || !tex_img) return;
     rect_flush();
@@ -1332,6 +1357,13 @@ bool gpu_d3_bg(const uint32_t *xrgb, int w, int h) {
     return false;
 }
 void gpu_d3_draw_bg(int x, int y, int w, int h) {
+    (void)x, (void)y, (void)w, (void)h;
+}
+bool gpu_pic(const uint32_t *xrgb, int w, int h) {
+    (void)xrgb, (void)w, (void)h;
+    return false;
+}
+void gpu_pic_draw(int x, int y, int w, int h) {
     (void)x, (void)y, (void)w, (void)h;
 }
 void gpu_d3_traces(int x, int y, int w, const gpu_d3_trace_t *t, int n) {

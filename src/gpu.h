@@ -86,6 +86,9 @@ void gpu_d3_cols(int row0, int rows, const uint8_t *rgba);
 bool gpu_d3_bg(const uint32_t *xrgb, int w, int h);
 void gpu_d3_draw_bg(int x, int y, int w, int h);
 void gpu_d3_traces(int x, int y, int w, const gpu_d3_trace_t *t, int n);
+/* B's Meteor picture (app_sentry.c): an XRGB picture of its own (uploaded when it changed), drawn at x, y, w x h */
+bool gpu_pic(const uint32_t *xrgb, int w, int h);
+void gpu_pic_draw(int x, int y, int w, int h);
 /* Record row `row` (each column's ends, quarter pixels) as a line of rgb at opacity op, rows y0..y1 of the picture */
 void gpu_d3_join(int x, int y, int w, int row, int y0, int y1, uint32_t rgb, float op);
 

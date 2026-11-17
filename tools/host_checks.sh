@@ -161,6 +161,12 @@ if wanted rds; then
     res=$(run_one rds sh -c "$CC -O2 -o '$OUT/rds_test' tools/rtlspec/rds_test.c -lm && '$OUT/rds_test'")
     record rds "$res" "$(summary rds)"
 fi
+# lrpt.c's Meteor-M LRPT, from a transmitter of its own: each layer, then frames, packets and pictures, through the
+# demodulator too (QPSK and offset QPSK, 72k and 80k, the carrier off)
+if wanted lrpt; then
+    res=$(run_one lrpt sh -c "$CC -O2 -Wall -Wextra -o '$OUT/lrpt_test' tools/rtlspec/lrpt_test.c tools/rtlspec/lrpt.c -lm && '$OUT/lrpt_test'")
+    record lrpt "$res" "$(summary lrpt)"
+fi
 if wanted dmr; then
     res=$(run_one dmr sh -c "$CC -O2 -Wall -Wextra -o '$OUT/dmr_test' tools/rtlspec/dmr_test.c tools/rtlspec/dmr.c -lm && '$OUT/dmr_test'")
     record dmr "$res" "$(summary dmr)"

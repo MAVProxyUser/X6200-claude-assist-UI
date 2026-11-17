@@ -56,6 +56,11 @@
  *                          to in NFM (dsd-fme, dsd.c): as it changes, and each second while it is there
  *      "RDMR", u32 length, "<Hz>|<slot>|<cc>|<voice>|<lc>|<flco>|<src>|<dst>|<bs>|<vocoder>"   DMR on the channel
  *                          listened to in NFM (dmr.c, found by its sync): a timeslot's call as it changes (dmr_call)
+ *      "RLPT", u32 length, "<Hz>|<pass>|<mode>|<lock>|<offset Hz>|<quality %>|<frames>|<good>|<packets>|<rows of each
+ *                          channel 64-69, by commas>|<file>|<dropped>"   Meteor-M LRPT (lrpt.c) on B's channel at
+ *                          137.100 or 137.900 MHz: once a second while it decodes (the section "Meteor-M LRPT" below)
+ *      "RLPI", u8 channel, u8 0, u16 pass, u32 strip, 784 x 4 bytes    a strip of 8 lines of its picture as it
+ *                          changes, at half size
  *      "RTX <word> <Hz> <why>" the transmitter: ON (on the air), END (off again: ASKED, IDLE, TIMEOUT, GONE, FAILED),
  *                          NO (refused: NOT-AMATEUR, RECEIVE-ONLY, AIRSPACE, NO-DEVICE)
  *  A client that does not read misses messages: the stream never waits for it. From the client, a line each:
@@ -68,6 +73,9 @@
  *      "w <Hz>"            watch that channel (narrow FM, NOAA Weather Radio) for SAME alerts (same.c); "w 0" stops
  *      "d <Hz>"            decode that FM broadcast channel's RDS (rds.c); "d 0" stops. Off the listened channel's
  *                          own multiplex when it listens there in WFM, else demodulated for it alone
+ *      "m <Hz>"            B's channel on a Meteor satellite's frequency (137.100 or 137.900 MHz, 30 kHz either side):
+ *                          LRPT decoded there whether it is listened to or not ("m 0" none; listened to in any mode
+ *                          there, it is decoded anyway); "p": the pictures' last strips again (a client new to them)
  *      "c 1", "c 0"        ACARS: the device at ACARS_HZ (130.8 MHz), the tuner's top gain and the rate as asked, each
  *                          ACARS channel within it (131.550, 131.725, 131.125, 130.450, 130.425, 130.025 MHz) heard in AM
  *                          and decoded, its messages out as "RACR"; rows as asked meanwhile, no listening. "c 0" (or the
@@ -84,7 +92,7 @@
  *      "R"                 the receiver's stream stopped and started again, as a transmission does, without one (a
  *                          test of that on the radio's USB host)
  *      "Q"                 the daemon ends and closes the stick (a GUI that wants another version of it)
- *  A client gone: its rows, listening, watch, ACARS and transmission end; the device goes on, tuned as it was.
+ *  A client gone: its rows, listening, watch, ACARS, Meteor and transmission end; the device goes on, tuned as it was.
  *
  *      x6x00-rtlspec [-F] [-d index] [-f Hz] [-s rate] [-n bins] [-r rows/s] [-g tenths] [-i FILE] [-S name]
  *                    [-T FILE] [-W]
@@ -115,11 +123,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
+#include <zlib.h>
 
 #if defined(__ARM_NEON)
 #include <arm_neon.h>
@@ -129,6 +140,7 @@
 #include "ambe.h"
 #include "dmr.h"
 #include "dsd.h"
+#include "lrpt.h"
 #include "rds.h"
 #include "same.h"
 #include "sdr.h"
@@ -222,14 +234,18 @@ struct chan {
     dmr_t   *dmr;
     void   (*out)(float v);     /* each 44.1 kHz sample */
     void   (*mpx)(float v);     /* WFM: each 264.6 kHz sample of the multiplex, NULL none */
+    void   (*iq)(float r, float i);     /* each 264.6 kHz sample as it is (Meteor LRPT's), NULL none */
+    bool     iq_only;           /* only that: no demodulation (LRPT's own channel) */
 };
 
 static void listen_out(float v);
 static void watch_out(float v);
 static void rds_mpx(float v);
+static void met_iq(float r, float i);
 static chan_t lis    = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .dmr_on = true, .out = listen_out};
 static chan_t watch  = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .raw = true, .out = watch_out};
 static chan_t rdsc   = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .mpx_only = true, .mpx = rds_mpx};
+static chan_t metc   = {.r1 = 8, .prev_r = 1, .avg_mag = 0.01f, .iq_only = true, .iq = met_iq};
 #define l_mode lis.mode
 #define l_hz   lis.hz
 
@@ -527,6 +543,10 @@ static void acars_set(bool on, uint64_t centre, uint32_t rate) {
 /* One sample at 264.6 kHz: into the FIR, every sixth a 44.1 kHz one demodulated (WFM: demodulated here, then the
  * FIR on the audio; its multiplex to RDS when it decodes this channel) */
 static void at_264k(chan_t *c, float r, float i) {
+    if (c->iq) {                        /* Meteor LRPT: the samples themselves */
+        c->iq(r, i);
+        if (c->iq_only) return;
+    }
     if (c->mode == 3) {
         float zr = r * c->prev_r + i * c->prev_i, zi = i * c->prev_r - r * c->prev_i;
 
@@ -841,6 +861,361 @@ static void acars_say(bool on, uint64_t centre, uint32_t rate) {
     pthread_mutex_unlock(&a_lock);
 }
 
+/* ---- Meteor-M LRPT (lrpt.c): the weather satellites' pictures on 137.100 and 137.900 MHz ----
+ * Decoded while B's channel is on one of them (within MET_NEAR): off the listened channel's own samples when it
+ * listens there, else on a channel of its own at the satellite's frequency ("m <Hz>": the GUI's B on it, listening or
+ * not). The channel's 264.6 kHz complex samples go into a ring and are decoded on a thread of their own. To the
+ * client, once a second while it decodes:
+ *      "RLPT", u32 length, "<Hz>|<pass>|<mode>|<lock>|<offset Hz>|<quality %>|<frames>|<good>|<packets>|<rows of 64>,
+ *                          <65>,<66>,<67>,<68>,<69>|<file>|<samples dropped>"
+ * pass a number each pass's own (the pictures before it are another pass's); mode 72K OQPSK, 80K OQPSK, 72K QPSK,
+ * 80K QPSK (AUTO tries each in turn until frames come); lock 1 frames coming; good the frames whose RS passed; file
+ * the pass's pictures saved so far ("/mnt/meteor/meteor-20261117-061500", "" none yet). And each strip of 8 lines of
+ * a channel as it changes, at half size (784 x 4: each pixel the average of four, 0 none received):
+ *      "RLPI", u8 channel 0-5 (APID 64-69), u8 0, u16 pass, u32 strip, 784 x 4 bytes
+ * Each pass saved in MET_DIR: meteor-YYYYmmdd-HHMMSS-64.png (each channel received, full size, grey) and
+ * -rgb.png (65 red and green, 64 blue: the false colour Meteor's own pictures have), every minute while pictures come
+ * and at the pass's end (nothing for MET_END_S), and forgotten then for the next */
+#define MET_NEAR  30000                 /* Hz from the satellite's frequency */
+#define MET_DIR   "/mnt/meteor"
+#define MRING     (1u << 20)            /* complex samples: 4 s at 264.6 kHz */
+#define MET_END_S 90
+#define MET_RESEND 160                  /* strips a client new to the pass gets again (its last 26 minutes or less) */
+
+static float           mring[2 * MRING];
+static atomic_uint     m_wr, m_rd, m_drop;
+static pthread_mutex_t m_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+    uint64_t hz;                        /* the satellite's frequency, 0 none */
+    float    shift;                     /* Hz the samples are turned by first (the listened channel's off it) */
+    uint32_t seq;
+    bool     resend;
+} met_cfg;                              /* under m_lock */
+static bool     m_thread;
+static uint64_t met_req;                /* "m": the GUI's B on a satellite's frequency, 0 none (the stream's) */
+
+/* The stream: a channel's sample into the ring (dropped when the thread is behind) */
+static void met_iq(float r, float i) {
+    uint32_t w = atomic_load(&m_wr);
+
+    if (w - atomic_load(&m_rd) >= MRING) {
+        atomic_fetch_add(&m_drop, 1);
+        return;
+    }
+    mring[2 * (w % MRING)]     = r;
+    mring[2 * (w % MRING) + 1] = i;
+    atomic_store(&m_wr, w + 1);
+}
+
+/* The satellite's frequency hz is on, 0 none */
+static uint64_t met_of(uint64_t hz) {
+    static const uint64_t f[] = {137100000, 137900000};
+
+    for (int i = 0; i < 2; i++)
+        if (hz && llabs((long long)hz - (long long)f[i]) <= MET_NEAR) return f[i];
+    return 0;
+}
+
+static void be32(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v >> 24), p[1] = (uint8_t)(v >> 16), p[2] = (uint8_t)(v >> 8), p[3] = (uint8_t)v;
+}
+
+static void png_chunk(FILE *f, const char *type, const uint8_t *d, uint32_t n) {
+    uint8_t  h[8];
+    uLong    crc = crc32(crc32(0, NULL, 0), (const Bytef *)type, 4);
+
+    be32(h, n);
+    memcpy(h + 4, type, 4);
+    fwrite(h, 1, 8, f);
+    if (n) fwrite(d, 1, n, f);
+    crc = crc32(crc, d, n);
+    be32(h, (uint32_t)crc);
+    fwrite(h, 1, 4, f);
+}
+
+/* A picture w x h, ch bytes a pixel (1 grey, 3 RGB), into path as a PNG (each row as the difference from the one
+ * above), through path.tmp: a reader never sees half of one */
+static bool png_write(const char *path, const uint8_t *px, int w, int h, int ch) {
+    size_t   stride = (size_t)w * ch, raw_n = (stride + 1) * h;
+    uLongf   zn  = compressBound(raw_n);
+    uint8_t *raw = malloc(raw_n), *z = malloc(zn);
+    char     tmp[300];
+    bool     ok = false;
+    FILE    *f;
+
+    if (raw && z) {
+        for (int y = 0; y < h; y++) {
+            uint8_t *o = raw + y * (stride + 1);
+            o[0] = y ? 2 : 0;
+            for (size_t x = 0; x < stride; x++) o[1 + x] = (uint8_t)(px[y * stride + x] - (y ? px[(y - 1) * stride + x] : 0));
+        }
+        snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+        if (compress2(z, &zn, raw, raw_n, 6) == Z_OK && (f = fopen(tmp, "wb"))) {
+            uint8_t ih[13];
+            be32(ih, (uint32_t)w);
+            be32(ih + 4, (uint32_t)h);
+            ih[8] = 8, ih[9] = ch == 3 ? 2 : 0, ih[10] = ih[11] = ih[12] = 0;
+            fwrite("\x89PNG\r\n\x1a\n", 1, 8, f);
+            png_chunk(f, "IHDR", ih, 13);
+            png_chunk(f, "IDAT", z, (uint32_t)zn);
+            png_chunk(f, "IEND", NULL, 0);
+            ok = !ferror(f);
+            ok &= fclose(f) == 0;
+            ok = ok && rename(tmp, path) == 0;
+            if (!ok) unlink(tmp);
+        }
+    }
+    free(raw);
+    free(z);
+    return ok;
+}
+
+typedef struct {
+    uint8_t *px[LRPT_CHANS];
+    int      h[LRPT_CHANS];
+    char     stem[96];
+} met_shot_t;
+static atomic_bool met_saving;
+
+/* The copies written on a thread of their own, niced: compressing a pass's pictures takes the Cortex-A7 seconds */
+static void *met_save_thread(void *arg) {
+    met_shot_t *s = arg;
+    char        path[160];
+    int         n = 0;
+
+    setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 10);
+    mkdir(MET_DIR, 0755);
+    for (int c = 0; c < LRPT_CHANS; c++) {
+        if (!s->px[c]) continue;
+        snprintf(path, sizeof(path), "%s-%d.png", s->stem, 64 + c);
+        n += png_write(path, s->px[c], LRPT_W, s->h[c], 1);
+    }
+    if (s->px[0] && s->px[1]) {
+        int      h   = s->h[0] < s->h[1] ? s->h[0] : s->h[1];
+        uint8_t *rgb = malloc((size_t)h * LRPT_W * 3);
+        if (rgb) {
+            for (size_t i = 0; i < (size_t)h * LRPT_W; i++) {
+                rgb[3 * i] = rgb[3 * i + 1] = s->px[1][i];
+                rgb[3 * i + 2]              = s->px[0][i];
+            }
+            snprintf(path, sizeof(path), "%s-rgb.png", s->stem);
+            n += png_write(path, rgb, LRPT_W, h, 3);
+            free(rgb);
+        }
+    }
+    fprintf(stderr, "rtlspec: Meteor pictures saved: %s (%d files)\n", s->stem, n);
+    for (int c = 0; c < LRPT_CHANS; c++) free(s->px[c]);
+    free(s);
+    atomic_store(&met_saving, false);
+    return NULL;
+}
+
+/* The pictures so far copied and saved as stem-*.png; false when the last save still runs (the next one then) */
+static bool met_save(lrpt_t *d, const char *stem) {
+    met_shot_t *s;
+    pthread_t   t;
+
+    if (atomic_exchange(&met_saving, true)) return false;
+    if (!(s = calloc(1, sizeof(*s)))) goto no;
+    snprintf(s->stem, sizeof(s->stem), "%s", stem);
+    for (int c = 0; c < LRPT_CHANS; c++) {
+        int            h;
+        const uint8_t *px = lrpt_image(d, c, &h);
+        if (!px || !h) continue;
+        if ((s->px[c] = malloc((size_t)h * LRPT_W))) memcpy(s->px[c], px, (size_t)h * LRPT_W);
+        s->h[c] = h;
+    }
+    if (pthread_create(&t, NULL, met_save_thread, s) == 0) {
+        pthread_detach(t);
+        return true;
+    }
+    for (int c = 0; c < LRPT_CHANS; c++) free(s->px[c]);
+    free(s);
+no:
+    atomic_store(&met_saving, false);
+    return false;
+}
+
+/* A strip of a channel to the client at half size */
+static void met_strip(lrpt_t *d, int c, int strip, uint16_t pass) {
+    static uint8_t msg[12 + (LRPT_W / 2) * 4];
+    int            h;
+    const uint8_t *px = lrpt_image(d, c, &h);
+    uint32_t       s  = (uint32_t)strip;
+
+    if (!px || (strip + 1) * 8 > h) return;
+    memcpy(msg, "RLPI", 4);
+    msg[4] = (uint8_t)c, msg[5] = 0;
+    memcpy(msg + 6, &pass, 2);
+    memcpy(msg + 8, &s, 4);
+    for (int y = 0; y < 4; y++) {
+        const uint8_t *a = px + ((size_t)strip * 8 + 2 * y) * LRPT_W, *b = a + LRPT_W;
+        uint8_t       *o = msg + 12 + y * (LRPT_W / 2);
+        for (int x = 0; x < LRPT_W / 2; x++) {
+            int n = !!a[2 * x] + !!a[2 * x + 1] + !!b[2 * x] + !!b[2 * x + 1];     /* 0: not received, not counted */
+            o[x] = n ? (uint8_t)((a[2 * x] + a[2 * x + 1] + b[2 * x] + b[2 * x + 1] + n / 2) / n) : 0;
+        }
+    }
+    put(msg, sizeof(msg));
+}
+
+static const char *const met_mode[LRPT_MODES] = {"AUTO", "72K OQPSK", "80K OQPSK", "72K QPSK", "80K QPSK"};
+
+static void *met_thread(void *arg) {
+    static float buf[2 * 8192];
+    lrpt_t      *dec = NULL;
+    lrpt_stat_t  st;
+    uint64_t     hz = 0;
+    uint32_t     seen = 0, said_ms = 0, saved_ms = 0, pkt_ms = 0, pkts = 0;
+    float        pr = 1, pi = 0, sr = 1, si = 0;
+    uint16_t     pass = 0;
+    char         stem[96] = "", file[96] = "";
+    int          again[LRPT_CHANS];     /* a resend: the next strip of each channel, -1 none */
+    (void)arg;
+
+    for (int c = 0; c < LRPT_CHANS; c++) again[c] = -1;
+    while (!stop) {
+        pthread_mutex_lock(&m_lock);
+        bool     fresh = met_cfg.seq != seen, resend = met_cfg.resend;
+        uint64_t nhz   = met_cfg.hz;
+        float    sh    = met_cfg.shift;
+        seen           = met_cfg.seq;
+        met_cfg.resend = false;
+        pthread_mutex_unlock(&m_lock);
+        if (fresh) {
+            if (nhz != hz) {            /* another satellite's frequency, or none: the pass so far saved and let go */
+                if (dec) {
+                    if (pkts) met_save(dec, stem);
+                    lrpt_free(dec);
+                    dec = NULL;
+                    fprintf(stderr, "rtlspec: Meteor LRPT off\n");
+                }
+                hz = nhz;
+                pkts = 0;
+                stem[0] = file[0] = 0;
+                if (hz && (dec = lrpt_new(MID_RATE, LRPT_AUTO))) {
+                    pass++;
+                    fprintf(stderr, "rtlspec: Meteor LRPT on %.3f MHz\n", hz / 1e6);
+                }
+            }
+            double a = -2 * M_PI * sh / MID_RATE;
+            sr = (float)cos(a), si = (float)sin(a), pr = 1, pi = 0;
+            atomic_store(&m_rd, atomic_load(&m_wr));        /* what is in the ring was the channel before's */
+        }
+        if (resend && dec)
+            for (int c = 0; c < LRPT_CHANS; c++) {
+                int h;
+                lrpt_image(dec, c, &h);
+                again[c] = h ? (h / 8 > MET_RESEND ? h / 8 - MET_RESEND : 0) : -1;
+            }
+        uint32_t r = atomic_load(&m_rd), avail = atomic_load(&m_wr) - r;
+        if (!dec || avail < 2048) {
+            usleep(20000);
+        } else {
+            uint32_t n = avail < 8192 ? avail : 8192;
+            for (uint32_t k = 0; k < n; k++) {
+                const float *x = mring + 2 * ((r + k) % MRING);
+                buf[2 * k]     = x[0] * pr - x[1] * pi;
+                buf[2 * k + 1] = x[0] * pi + x[1] * pr;
+                float t = pr * sr - pi * si;
+                pi = pr * si + pi * sr;
+                pr = t;
+            }
+            float m = sqrtf(pr * pr + pi * pi);
+            pr /= m, pi /= m;
+            atomic_store(&m_rd, r + n);
+            lrpt_feed(dec, buf, n);
+        }
+        if (!dec) continue;
+        for (int c = 0, sent = 0; c < LRPT_CHANS && sent < 16; c++)     /* a resend, a few strips at a time */
+            while (again[c] >= 0 && sent < 16) {
+                int h;
+                lrpt_image(dec, c, &h);
+                if (again[c] >= h / 8) {
+                    again[c] = -1;
+                    break;
+                }
+                met_strip(dec, c, again[c]++, pass);
+                sent++;
+            }
+        uint32_t now = now_ms();
+        if (now - said_ms < 1000) continue;
+        said_ms = now;
+        lrpt_stat(dec, &st);
+        if (st.packets != pkts) {
+            if (!pkts) {                /* a pass's first pictures: its name from now */
+                time_t    t = time(NULL);
+                struct tm tm;
+                localtime_r(&t, &tm);
+                snprintf(stem, sizeof(stem), MET_DIR "/meteor-%04d%02d%02d-%02d%02d%02d", tm.tm_year + 1900,
+                         tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+                saved_ms = now;
+                fprintf(stderr, "rtlspec: Meteor pictures coming (%s, spacecraft %d)\n", met_mode[st.mode], st.scid);
+            }
+            pkts   = st.packets;
+            pkt_ms = now;
+        }
+        for (int c = 0; c < LRPT_CHANS; c++) {
+            int lo, hi;
+            if (lrpt_changed(dec, c, &lo, &hi))
+                for (int k = hi - lo > 7 ? hi - 7 : lo; k <= hi; k++) met_strip(dec, c, k, pass);
+        }
+        if (pkts && now - saved_ms >= 60000 && met_save(dec, stem)) {
+            saved_ms = now;
+            snprintf(file, sizeof(file), "%s", stem);
+        }
+        if (pkts && now - pkt_ms >= MET_END_S * 1000u && met_save(dec, stem)) {    /* the pass is over */
+            fprintf(stderr, "rtlspec: Meteor pass over: %u packets\n", pkts);
+            lrpt_clear(dec);
+            pkts = 0;
+            pass++;
+            stem[0] = file[0] = 0;
+            for (int c = 0; c < LRPT_CHANS; c++) again[c] = -1;
+        }
+        char    t[256];
+        uint8_t msg[8 + sizeof(t)];
+        int     q = (int)lrintf(st.quality * 100);
+        int     n = snprintf(t, sizeof(t), "%llu|%u|%s|%d|%.0f|%d|%u|%u|%u|%d,%d,%d,%d,%d,%d|%s|%u",
+                             (unsigned long long)hz, pass, met_mode[st.mode], st.locked, st.freq, q, st.frames,
+                             st.frames_ok, st.packets, st.rows[0], st.rows[1], st.rows[2], st.rows[3], st.rows[4],
+                             st.rows[5], file, atomic_load(&m_drop));
+        if (n > 0 && n < (int)sizeof(t)) {
+            uint32_t len = (uint32_t)n;
+            memcpy(msg, "RLPT", 4);
+            memcpy(msg + 4, &len, 4);
+            memcpy(msg + 8, t, len);
+            put(msg, 8 + len);
+        }
+    }
+    if (dec) {
+        if (pkts) met_save(dec, stem);
+        lrpt_free(dec);
+    }
+    return NULL;
+}
+
+/* commands(): the satellite's frequency to decode (0 none) and the shift its samples need, for the thread */
+static void met_say(uint64_t hz, float shift) {
+    pthread_mutex_lock(&m_lock);
+    if (hz && !m_thread) {
+        pthread_t t;
+        m_thread = pthread_create(&t, NULL, met_thread, NULL) == 0;
+        if (m_thread) pthread_detach(t);
+    }
+    if (met_cfg.hz != hz || met_cfg.shift != shift) {
+        met_cfg.hz    = hz;
+        met_cfg.shift = shift;
+        met_cfg.seq++;
+    }
+    pthread_mutex_unlock(&m_lock);
+}
+
+static void met_resend(void) {
+    pthread_mutex_lock(&m_lock);
+    met_cfg.resend = true;
+    pthread_mutex_unlock(&m_lock);
+}
+
 static long per_row_now;        /* samples a row at the rate now */
 static int  rows_now = 20;
 
@@ -849,8 +1224,8 @@ static int  rows_now = 20;
  * through `pend` and taken at the start of its next transfer */
 static pthread_mutex_t pend_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
-    bool     centre, rate, listen, watch, rds, acars;
-    uint64_t centre_hz, listen_hz, watch_hz, rds_hz;
+    bool     centre, rate, listen, watch, rds, acars, met;
+    uint64_t centre_hz, listen_hz, watch_hz, rds_hz, met_hz;
     uint32_t rate_sps;
     int      mode;
 } pend;
@@ -1312,6 +1687,13 @@ static void command(char *line, int fd) {
         pend.rds    = true;
         pend.rds_hz = strtoull(line + 1, NULL, 10);
         pthread_mutex_unlock(&pend_lock);
+    } else if (line[0] == 'm') {          /* "m <Hz>": B on a Meteor satellite's frequency, LRPT decoded; "m 0" */
+        pthread_mutex_lock(&pend_lock);
+        pend.met    = true;
+        pend.met_hz = strtoull(line + 1, NULL, 10);
+        pthread_mutex_unlock(&pend_lock);
+    } else if (line[0] == 'p') {          /* "p": the Meteor pictures' strips again (a client new to them) */
+        met_resend();
     } else if (line[0] == 'c') {          /* "c 1": ACARS; "c 0": no more */
         atomic_store(&acars_want, atoi(line + 1) != 0);
         apply_tuning();
@@ -1406,6 +1788,8 @@ static void *client_thread(void *arg) {
     pend.rds       = true;
     pend.rds_hz    = 0;
     pend.acars     = true;
+    pend.met       = true;
+    pend.met_hz    = 0;
     pthread_mutex_unlock(&pend_lock);
     if (atomic_exchange(&acars_want, false)) apply_tuning();
     return NULL;
@@ -1449,7 +1833,20 @@ static void commands(uint64_t *centre, bool *fresh) {
     }
     if (pend.acars || ((pend.centre || pend.rate) && atomic_load(&acars_want)))
         acars_say(atomic_load(&acars_want), *centre, rate_now);
-    pend.centre = pend.rate = pend.listen = pend.watch = pend.rds = pend.acars = false;
+    if (pend.met || pend.listen || pend.centre || pend.rate) {
+        /* Meteor LRPT: off the listened channel when it is on the satellite's frequency, else a channel of its own;
+         * off outside the span */
+        if (pend.met) met_req = met_of(pend.met_hz);
+        uint64_t target = met_req ? met_req : met_of(lis.mode ? lis.hz : 0);
+        bool     shared = target && lis.mode && llabs((long long)lis.hz - (long long)target) <= MET_NEAR;
+
+        lis.iq = shared ? met_iq : NULL;
+        if (!target || shared) metc.mode = 0;
+        else chan_set(&metc, 1, target, *centre, rate_now);
+        if (!shared && !metc.mode) target = 0;
+        met_say(target, shared ? (float)((double)target - (double)lis.hz) : 0);
+    }
+    pend.centre = pend.rate = pend.listen = pend.watch = pend.rds = pend.acars = pend.met = false;
     pthread_mutex_unlock(&pend_lock);
 }
 
@@ -1481,12 +1878,13 @@ static void on_samples(unsigned char *buf, uint32_t n) {
         nfft = fill = 0;
         row_left = per_row_now;
         fresh    = true;
-        if (!lis.mode && !watch.mode && !rdsc.mode) return;
+        if (!lis.mode && !watch.mode && !rdsc.mode && !metc.mode) return;
     }
     for (uint32_t off = 0; off + 1 < n; off += 2) {
         if (lis.mode) chan_sample(&lis, buf[off], buf[off + 1]);
         if (watch.mode) chan_sample(&watch, buf[off], buf[off + 1]);
         if (rdsc.mode) chan_sample(&rdsc, buf[off], buf[off + 1]);
+        if (metc.mode) chan_sample(&metc, buf[off], buf[off + 1]);
         if (!rows) continue;
         /* The first BINS * AVG samples of each row's share go into its FFTs, the rest are passed over */
         if (nfft < AVG) {

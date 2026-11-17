@@ -2238,12 +2238,34 @@ static void panel_trace(panel_t *p, const float *cols) {
 }
 
 /* The 3D picture of the half's rows, back to front: A SCAN's render_3d in the half's own place */
+/* Meteor-M LRPT on B (the daemon's lrpt.c): while B's channel is on a satellite's frequency, its pictures decoded
+ * whether B is heard or not; once lines come, the pass's picture in place of the stick's history, the newest lines at
+ * the bottom, in colour or a channel's grey (F3 held), and its state on RDS's line. The user, 2026-11-17: the
+ * pictures in B's picture half, saved in /mnt/meteor */
+static rtl_lrpt_t met;                  /* the decoder's state as last said */
+static bool       met_on;               /* its picture shown in the history's place */
+static int        met_view;             /* 0 colour (65, 65, 64), 1-6 APID 64-69 */
+static uint32_t   met_ver_cpu = UINT32_MAX, met_ver_gpu = UINT32_MAX;
+static uint32_t  *met_px;               /* the GPU's copy of it */
+static void       met_update(void);
+
+/* The Meteor satellite's frequency a channel is on (within 30 kHz), 0 none */
+static int64_t met_of(int64_t hz) {
+    if (llabs(hz - 137100000) <= 30000) return 137100000;
+    if (llabs(hz - 137900000) <= 30000) return 137900000;
+    return 0;
+}
+
 static void panel_render(const panel_t *p) {
     uint32_t *px = (uint32_t *)rtl_frame->data, bg = argb(ink);
     int       h = p->wf_h, y0 = p->wf_y0, n = p->count;
     float     cx = RTL_COLS / 2.0f;
 
     if (h < 8 || rtl_gpu) return;       /* the GPU draws it from the rows (rtl_gpu_draw) */
+    if (p == &p_rtl && met_on) {        /* a Meteor pass: its picture in the history's place */
+        rtl_spectrum_lrpt_picture(px + (size_t)y0 * RTL_COLS, RTL_COLS, h, RTL_COLS, met_view, &met_ver_cpu);
+        return;
+    }
     for (int i = y0 * RTL_COLS; i < (y0 + h) * RTL_COLS; i++) px[i] = bg;
     for (int r = n - 1; r >= 0; r--) {
         const uint8_t *lv     = p->rows[(p->head - 1 - r + D3_ROWS) % D3_ROWS];
@@ -2312,6 +2334,8 @@ static void rtl_layout(void) {
     int  view  = spec_view();
     bool split = view == VIEW_SPLIT;
     int  h     = rtl_img_h;
+
+    met_ver_cpu = met_ver_gpu = UINT32_MAX;     /* the Meteor picture's height may be another */
 
     p_hf = (panel_t){.rows = rows_hf};
     memset(rows_hf, 0, sizeof(rows_hf));
@@ -2386,7 +2410,13 @@ static void rtl_gpu_draw(const lv_area_t *a) {
     if (view != VIEW_X6200) {
         if (p_rtl.floor > -250)
             gpu_trace(1, x0, y0 + p_rtl.y0, RTL_COLS, p_rtl.trace_h, p_rtl.bot_db, p_rtl.top_db, grid, argb(ink));
-        gpu_rows(1, x0, y0 + p_rtl.wf_y0, RTL_COLS, p_rtl.wf_h, p_rtl.head, p_rtl.count, D3_ROWS);
+        if (met_on && met_px) {         /* a Meteor pass: its picture in the history's place */
+            if (rtl_spectrum_lrpt_picture(met_px, RTL_COLS, p_rtl.wf_h, RTL_COLS, met_view, &met_ver_gpu))
+                gpu_pic(met_px, RTL_COLS, p_rtl.wf_h);
+            gpu_pic_draw(x0, y0 + p_rtl.wf_y0, RTL_COLS, p_rtl.wf_h);
+        } else {
+            gpu_rows(1, x0, y0 + p_rtl.wf_y0, RTL_COLS, p_rtl.wf_h, p_rtl.head, p_rtl.count, D3_ROWS);
+        }
         if (rtl_bx > -20 && rtl_bx < RTL_COLS + 20) gpu_bracket(x0, y0 + p_rtl.y0, rtl_bx, p_rtl.trace_h);
     }
     if (view == VIEW_SPLIT) gpu_rect(x0, y0 + p_rtl.y0 - 3, RTL_COLS, 2, argb(amb));
@@ -3428,6 +3458,8 @@ static void rtl_timer_cb(lv_timer_t *t) {
     }
     if (scr == SCR_WALKIE) ws_feed();   /* G's picture: the X6200's spectrum around the dial */
     if (scr == SCR_WALKIE && g_dirty) g_gpu_draw();
+    rtl_spectrum_meteor(met_of(listen_hz));     /* B on a Meteor satellite: its pictures, whatever the screen */
+    met_update();
     if (scr != SCR_RTL && scr != SCR_SCAN) {     /* the stick's rows read all the same: F's scan, SCAN CFG */
         bool got = false;
 
@@ -3777,6 +3809,90 @@ static bool rds_tuned_note(char *t, size_t n) {
     return true;
 }
 
+/* The Meteor decoder's state taken (each tick): its picture shown once a pass has lines and B's channel is on the
+ * satellite, B's own history again otherwise */
+static void met_update(void) {
+    bool    got = rtl_spectrum_lrpt(&met), lines = false;
+    int64_t sat = met_of(listen_hz);
+
+    for (int c = 0; c < 6; c++) lines |= met.rows[c] > 0;
+    bool on = got && sat && met.hz == sat && lines && spec_view() != VIEW_X6200;
+    if (on && !met_px) met_px = malloc((size_t)RTL_COLS * (rtl_img_h > 0 ? rtl_img_h : 480) * sizeof(uint32_t));
+    if (on == met_on) return;
+    met_on      = on;
+    met_ver_cpu = met_ver_gpu = UINT32_MAX;     /* drawn afresh */
+    if (on && met_view && !met.rows[met_view - 1]) met_view = 0;
+    if (!on) panel_render(&p_rtl);              /* the history again */
+    rds_show(true);
+}
+
+/* F3 held on B: the picture's next view: colour (with 64 and 65 there), then each channel received */
+static void met_next_view(void) {
+    static const char *const what[6] = {"VISIBLE 0.5-0.7 UM", "NEAR INFRARED 0.7-1.1 UM", "INFRARED 1.6-1.8 UM",
+                                        "INFRARED 3.5-4.1 UM", "THERMAL INFRARED 10.5-11.5 UM",
+                                        "THERMAL INFRARED 11.5-12.5 UM"};
+    char t[48];
+
+    for (int n = 0; n < 7; n++) {
+        met_view = (met_view + 1) % 7;
+        if (met_view ? met.rows[met_view - 1] > 0 : met.rows[0] > 0 && met.rows[1] > 0) break;
+    }
+    met_ver_cpu = met_ver_gpu = UINT32_MAX;
+    panel_render(&p_rtl);
+    rtl_present();
+    if (!met_view) {
+        osd("METEOR: COLOUR", "CHANNELS 65 (RED, GREEN) AND 64 (BLUE). F3 HELD: THE NEXT VIEW.", -1);
+    } else {
+        snprintf(t, sizeof(t), "METEOR: CHANNEL %d", 63 + met_view);
+        osd(t, what[met_view - 1], -1);
+    }
+    rds_show(true);
+}
+
+/* The decoder's line in RDS's place while B's channel is on a Meteor satellite: what it hears, and the pass's lines.
+ * True: shown */
+static bool met_shown;
+
+static bool met_show(bool now) {
+    static uint32_t seq = UINT32_MAX;
+    char            f[16], line[220], chans[24] = "";
+    int             lines = 0;
+    size_t          at;
+    int64_t         sat = met_of(listen_hz);
+
+    if (!sat || !met.at_ms || met.hz != sat || lv_tick_elaps(met.at_ms) > 3000 || !p_rtl.trace_h ||
+        (scr != SCR_RTL && scr != SCR_SCAN)) {
+        if (met_shown) {
+            met_shown = false;
+            lv_obj_add_flag(rds_l, LV_OBJ_FLAG_HIDDEN);
+        }
+        return false;
+    }
+    if (!now && met_shown && met.seq == seq) return true;
+    seq = met.seq;
+    for (int c = 0, k = 0; c < 6; c++) {
+        if (met.rows[c] > lines) lines = met.rows[c];
+        if (met.rows[c]) k += snprintf(chans + k, sizeof(chans) - (size_t)k, "%s%d", k ? " " : "", 64 + c);
+    }
+    fmt_mhz(f, sizeof(f), sat, 3);
+    at = (size_t)snprintf(line, sizeof(line), "METEOR %s  %s %s  CARRIER %+.1f KHZ  LOCK %d%%", f,
+                          met.lock ? "RECEIVING" : "LOOKING:", met.mode, met.offset / 1000.0, met.quality);
+    if (met.frames)
+        at += (size_t)snprintf(line + at, sizeof(line) - at, "\nFRAMES %u (%u GOOD)", met.frames, met.good);
+    if (lines)
+        at += (size_t)snprintf(line + at, sizeof(line) - at, "  LINES %d (%s)  %s", lines, chans,
+                               !met_on ? "" : met_view ? "GREY" : "COLOUR");
+    if (met.file[0]) {
+        const char *b = strrchr(met.file, '/');
+        snprintf(line + at, sizeof(line) - at, "  SAVED %s", b ? b + 1 : met.file);
+    }
+    upper(line);
+    lv_label_set_text(rds_l, line);
+    lv_obj_clear_flag(rds_l, LV_OBJ_FLAG_HIDDEN);
+    met_shown = true;
+    return true;
+}
+
 /* DMR on B's channel (the daemon's dmr.c, found in any NFM channel by its sync): RDS's line says it while it is
  * there, each timeslot's call: who talks (the radio's ID) to whom (a talkgroup, TG, or a radio), TALKING while it goes
  * on. The user, 2026-11-16: "general DMR decode support (ensure the band selection can tune in)". True: shown */
@@ -3863,6 +3979,7 @@ static void rds_show(bool now) {
     if (!rds_l) return;
     bool was = dmr_shown;
 
+    if (met_show(now)) return;          /* a Meteor satellite on B's channel: its decoder's line in RDS's place */
     if (dmr_show(now)) return;          /* DMR on B's channel: its line in RDS's place */
     if (was) now = true;                /* DMR gone: RDS's line again as it is */
     got = rtl_spectrum_rds(&d);
@@ -6094,6 +6211,13 @@ static bool front_key(int key, int state) {
                 return rolled;
             }
             return f2_roll && f2_rolled;    /* a hold that rolled: nothing more of it */
+        case KEYPAD_F3:                 /* B with a Meteor picture: held, its next view (colour, each channel) */
+            if (scr != SCR_RTL || !met_on || sp_on || pp_on) return false;
+            if (state == KEYPAD_LONG) {
+                met_next_view();
+                return true;
+            }
+            return state == KEYPAD_LONG_RELEASE;    /* a hold: nothing more of it (a tap is VIEW as ever) */
         case KEYPAD_F4: {               /* B: a tap LISTEN as ever; held and the VFO turned, its SDRs (b_roll), the one
                                          * chosen used on letting go; held and let go unturned, its channel watched
                                          * on a spare RTL, or no longer */

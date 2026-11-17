@@ -186,6 +186,34 @@ bool rtl_spectrum_dsd(rtl_dsd_t *out);
 /* A protocol's name for the screen: "P25", "P25 PHASE 2", "D-STAR", "YSF", "X2-TDMA", as it is else */
 const char *rtl_dsd_name(const char *proto);
 
+/* Meteor-M LRPT (the daemon's lrpt.c): the weather satellites' pictures while B's channel is on 137.100 or 137.900 MHz
+ * (rtl_spectrum_meteor), whether B is heard or not. Said again to a daemon started anew */
+void rtl_spectrum_meteor(int64_t hz);
+
+typedef struct {
+    int64_t  hz;                /* the satellite's frequency */
+    unsigned pass;              /* the pass's number: another's pictures are another pass's */
+    char     mode[12];          /* "72K OQPSK", "80K OQPSK", "72K QPSK", "80K QPSK" (tried in turn until frames come) */
+    bool     lock;              /* frames coming */
+    int      offset;            /* the carrier, Hz off the satellite's frequency (Doppler, the SDR's clock) */
+    int      quality;           /* the carrier's lock, 0-100 */
+    uint32_t frames, good;      /* frames found, and of them those whose RS passed */
+    uint32_t packets;           /* the imager's packets decoded */
+    int      rows[6];           /* each channel's lines (APID 64-69), 0 none */
+    char     file[96];          /* the pass saved as file-64.png ... file-rgb.png, "" not yet */
+    uint32_t dropped;           /* samples the decoder was too late for */
+    uint32_t at_ms, seq;        /* when the daemon said it last (lv_tick_get); one more at each */
+} rtl_lrpt_t;
+
+/* The decoder's state, said within the last 3 s; false: none */
+bool rtl_spectrum_lrpt(rtl_lrpt_t *out);
+
+/* The pass's picture, its last h lines at half size (the satellite's 1568 pixels as 784), the newest at the bottom,
+ * into px (XRGB, stride pixels a line, w at most 784 used): view 0 in colour (APID 65 red and green, 64 blue: the false
+ * colour Meteor's pictures are known by), 1-6 one channel's grey (APID 64-69); what was not received black. *ver: the
+ * version drawn last; false (nothing drawn) when it is the same */
+bool rtl_spectrum_lrpt_picture(uint32_t *px, int w, int h, int stride, int view, uint32_t *ver);
+
 /* ACARS (the daemon's acars.c): the device at 130.8 MHz, the ACARS channels there decoded (AIRSPACE's ACARS view;
  * never with AIRSPACE's dump1090 on the same device: adsb_rx_lend first). Said again to a daemon started anew */
 void rtl_spectrum_acars(bool on);

@@ -773,6 +773,21 @@ last seconds, the strongest signals named over it and the screen's channel brack
   station's. The X6200 cannot show RDS: its base gives the GUI the audio alone, 44.1 kHz, and RDS is at 57 kHz in the
   multiplex the base never sends. A station with RDS needs a decent signal: on the stock whip WVMX 107.9 decoded at
   once, a weak one shows nothing.
+- **Meteor-M weather pictures on B**: while B's channel is on a Meteor satellite's frequency, 137.100 or 137.900 MHz
+  (30 kHz either side; the **WX SAT** preset, then the VFO), the stick's daemon decodes its LRPT, heard or not and on
+  whatever screen ([tools/rtlspec/lrpt.c](../tools/rtlspec/lrpt.c)). The satellite sends 72k offset QPSK
+  (Meteor-M2-3, M2-4) or, now and then, the interleaved "80k" mode; the decoder tries each until frames come, and
+  finds the carrier within about 30 kHz (the pass's Doppler is 3.5 kHz either way). RDS's line says what it hears:
+  `METEOR 137.900  RECEIVING 72K OQPSK  CARRIER +2.8 KHZ  LOCK 76%`, then the frames (and how many passed their error
+  correction), the picture's lines and the channels coming (`LINES 640 (64 65 68)`). Once lines come, **B's picture
+  half shows the pass's picture** in place of its history, the newest lines at the bottom, in **colour** (channel 65
+  red and green, 64 blue: the false colour Meteor's pictures are known by); **F3 held** goes to each channel's grey
+  (64 visible, 65 near infrared, 68 thermal infrared...) and back (a tap of F3 is VIEW as ever). Each pass is saved
+  in `/mnt/meteor` as `meteor-YYYYmmdd-HHMMSS-64.png` (each channel at full size, 1568 pixels wide, grey) and
+  `-rgb.png` (the colour one), every minute while lines come and once more when nothing has come for 90 seconds;
+  then the next pass starts afresh. A pass at 72k gives about 6.5 lines a second (a strip of 8 every 1.23 s); the
+  80k mode's interleaver holds the first lines back about 18 s. It needs an antenna for 137 MHz (a QFH or a V-dipole:
+  the satellite is 7 W, 800 km up); the decoder costs about 15% of one of the processor's four cores while it runs.
 - **F1 SCAN** sweeps the band end to end: A 360 kHz at a time, B a picture at a time (the scans' DWELL, 2 s, set by
   C's F5 or SCAN CFG's), each
   a little overlapped, from the bottom again past the top; a band narrower than the picture stays in its middle.
