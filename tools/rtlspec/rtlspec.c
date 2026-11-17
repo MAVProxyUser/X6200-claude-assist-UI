@@ -13,8 +13,9 @@
  *  The device: opened when it is there (looked for each second; with more than one plugged in, a HackRF, then a
  *  bladeRF, then an RTL-SDR: those that transmit first), set as the GUI last asked, its I/Q read at the sample rate all
  *  the time. Closed only when it is pulled out (another one is opened when it is plugged in) or the daemon is told to
- *  end. One that opens and sends nothing, or whose stream ends with it still plugged in, is left open and said to be
- *  STALLED: only pulling it out mends that, and nothing here touches it in the meantime. Pulled out is its USB device
+ *  end. One that opens and sends nothing, or whose stream ends with it still plugged in, is said to be STALLED: an RTL
+ *  is then bounced on its hub port after 5 s, as pulling it out and back would (stall_bounce: a kernel with the musb
+ *  fixes only; "touch /tmp/rtlspec_stall" tries it), anything else waits to be pulled out. Pulled out is its USB device
  *  file gone ("/dev/bus/usb/003/002 (deleted)" among this process's files), which a device plugged back at once does
  *  not hide (it comes back under another number). The stream's transfers are all back before the stick is closed
  *  (librtlsdr patched for it: buildroot/br2_external/package/rtlsdr-blog); should the close hang anyway, the device
@@ -1654,10 +1655,84 @@ static void *stick_thread(void *arg) {
     return NULL;
 }
 
+/* ---- A stalled RTL put right as unplugging it would: its hub port disabled for a second (the kernel sees it go and
+ * come back; the stick's thread closes it as pulled out and opens it again). The user, 2026-11-16: "can't you bounce
+ * the bus on your own?" Tried on the radio: the port disabled while it streamed, the stick back and streaming again
+ * in 4 s, nothing in the kernel log but the disconnect and the new device. Only on a kernel whose musb host has the
+ * fixes for a disconnect with transfers in flight (9101, 9102: an unpatched one froze, and writing 0 to the device's
+ * "authorized" oopsed it): musb_h_disable 0x17c bytes unpatched, 0x348 with them, its size its distance to the next
+ * symbol of musb_hdrc in /proc/kallsyms. Once a minute at most, three times in ten minutes ---- */
+static bool musb_fixed(void) {
+    FILE         *f = fopen("/proc/kallsyms", "r");
+    char          l[256], name[128], mod[64];
+    unsigned long a, at = 0, next = ~0UL;
+    static int    known = -1;
+
+    if (known >= 0) return known;
+    if (!f) return false;
+    while (fgets(l, sizeof(l), f))
+        if (sscanf(l, "%lx %*s %127s %63s", &a, name, mod) == 3 && !strcmp(mod, "[musb_hdrc]") && !strcmp(name, "musb_h_disable"))
+            at = a;
+    rewind(f);
+    while (at && fgets(l, sizeof(l), f))
+        if (sscanf(l, "%lx %*s %127s %63s", &a, name, mod) == 3 && !strcmp(mod, "[musb_hdrc]") && a > at && a < next)
+            next = a;
+    fclose(f);
+    known = at && next != ~0UL && next - at > 0x200;
+    fprintf(stderr, "rtlspec: the musb host %s (musb_h_disable %#lx bytes): a stalled RTL %s\n",
+            known ? "has the disconnect fixes" : "is not known to have the disconnect fixes",
+            at && next != ~0UL ? next - at : 0UL, known ? "is bounced on its hub port" : "waits to be pulled out");
+    return known;
+}
+
+static void *bounce_thread(void *arg) {
+    char *loc = arg, path[160], *dot = strrchr(loc, '.'), *dash = strchr(loc, '-');
+    FILE *f;
+
+    if (dot)                            /* behind a hub: <hub>:1.0/<hub>-port<N> */
+        snprintf(path, sizeof(path), "/sys/bus/usb/devices/%.*s:1.0/%.*s-port%s/disable", (int)(dot - loc), loc,
+                 (int)(dot - loc), loc, dot + 1);
+    else if (dash)                      /* on a root port: <bus>-0:1.0/usb<bus>-port<N> */
+        snprintf(path, sizeof(path), "/sys/bus/usb/devices/%.*s-0:1.0/usb%.*s-port%s/disable", (int)(dash - loc), loc,
+                 (int)(dash - loc), loc, dash + 1);
+    else
+        path[0] = 0;
+    if (path[0] && (f = fopen(path, "w"))) {
+        fprintf(stderr, "rtlspec: the RTL at USB %s stalled: its port bounced (%s)\n", loc, path);
+        fputs("1", f);
+        fclose(f);
+        sleep(1);
+        if ((f = fopen(path, "w"))) {
+            fputs("0", f);
+            fclose(f);
+        }
+    } else {
+        fprintf(stderr, "rtlspec: the RTL at USB %s stalled: no port to bounce\n", loc);
+    }
+    free(loc);
+    return NULL;
+}
+
+static void stall_bounce(void) {
+    static uint32_t tries[3];
+    static int      next;
+    uint32_t        t = now_ms();
+    pthread_t       th;
+    char           *loc;
+
+    if (!sdr_rtl_open_loc[0] || sdr_file_path || t - tries[(next + 2) % 3] < 60000 ||
+        (tries[next] && t - tries[next] < 600000) || !musb_fixed())
+        return;
+    tries[next] = t;
+    next        = (next + 1) % 3;
+    if ((loc = strdup(sdr_rtl_open_loc)) && pthread_create(&th, NULL, bounce_thread, loc) == 0) pthread_detach(th);
+    else free(loc);
+}
+
 /* Each 200 ms: the state told when it changes, a stall seen, dump1090's samples taken back when it went */
 static void *watch_thread(void *arg) {
     char     said[128] = "", now[128];
-    uint32_t looked = 0, pulled_at = 0, rate_at = 0, rate_said = 0;
+    uint32_t looked = 0, pulled_at = 0, rate_at = 0, rate_said = 0, stalled_at = 0;
     uint64_t rate_from = 0;
     (void)arg;
 
@@ -1690,6 +1765,16 @@ static void *watch_thread(void *arg) {
         if ((s == S_ON || s == S_OPENING) && now_ms() - atomic_load(&last_ms) > STALL_MS &&
             atomic_compare_exchange_strong(&s_now, &s, S_STALLED))
             fprintf(stderr, "rtlspec: nothing from the stick for %d s\n", STALL_MS / 1000);
+        if (s == S_ON && !access("/tmp/rtlspec_stall", F_OK) && !unlink("/tmp/rtlspec_stall")) {
+            fprintf(stderr, "rtlspec: /tmp/rtlspec_stall: bounced as if stalled (a test of the bounce)\n");
+            stall_bounce();             /* at once: a stick that streams is ON again before 5 s */
+        }
+        if (atomic_load(&s_now) == S_STALLED) {     /* 5 s stalled: its port bounced */
+            if (!stalled_at) stalled_at = now_ms() | 1;
+            else if (now_ms() - stalled_at > 5000) stall_bounce(), stalled_at = 0;
+        } else {
+            stalled_at = 0;
+        }
         /* Pulled out, its stream not ended by it: ended here, so it is closed and the next one opened. Still held
          * HUNG_MS on, libusb hangs on it: the daemon ends (its end lets go of everything), the GUI starts it again */
         if (now_ms() - looked > 1000) {

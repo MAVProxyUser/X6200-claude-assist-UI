@@ -58,6 +58,7 @@ extern const sdr_ops_t sdr_rtl, sdr_hackrf, sdr_bladerf;
  * many are on USB */
 extern int  sdr_rtl_index, sdr_rtl_open_at;
 extern bool sdr_rtl_exact;              /* -W: RTL sdr_rtl_index alone, none in its place */
+extern char sdr_rtl_open_loc[32];       /* the open one's USB location ("3-1.1"), "" none */
 int        sdr_rtl_count(void);
 
 /* The test device (sdr_file.c, -T FILE): transmits into the file, receives nothing; never a radio */
