@@ -1,5 +1,68 @@
 # To do
 
+## The owner's backlog (from the conversations, audited 2026-11-16, brought up to date 2026-11-17)
+
+What the owner asked for in the working sessions, checked against git; GitHub issues are the sections below. Nothing
+here transmits until the owner says so (transmit work is not wanted for now). "New" marks what was added on
+2026-11-17.
+
+**Open**
+
+- **D BANDS and E DECODE in sync** (new): every function on both, the preamp default for each choice, the other
+  settings each combination needs, and which radio (the X6200 or the SDR) receives or transmits it shown with it.
+  Seen while testing: E's bottom line said VOLUME 0 while A's said VOLUME 2 at the same moment; check which
+  receiver's volume each one reads.
+- **SCAN CFG, a usability pass** (new): the screen revisited, with presets that behave like a scanner's: hop and dwell
+  combinations (dwell on a carrier until it drops, a resume delay, a fixed dwell then move on, search versus channel
+  scan, a priority channel), chosen in one step rather than built from the separate settings.
+- **Kraken DF, page I** (docs/plans/kraken_df_plan.md; D1 approved): a lean DF engine of our own (tools/rtlspec/df_*,
+  host check "df") instead of KrakenSDR's Heimdall stack. Phase 0b/0c done (the processor at about 45 % at 1.024 MS/s).
+  Phase 0a, the 30-minute sample-slip test (tools/rtlspec/df_slip_test.sh), needs all five Kraken tuners free: with
+  the Kraken now on the HOST port, AIRSPACE's dump1090 holds three and B one. Decisions D2-D10 wait for the owner.
+  The Kraken's hub dropped once and its tuners re-enumerated during the first try.
+- **Meteor-M LRPT on B** (a255320, c5e864b, d02958f): decoded from a real 2019 Meteor-M2-2 recording played into the
+  stick over a cable. The first live pass (2026-11-17, Meteor-M2-4) gave nothing on the antenna used. To do: a pass on
+  a 137 MHz antenna outdoors (QFH or V-dipole); the 80k mode is unverified on real data (no public M2-3/M2-4 recording
+  found).
+- **DVSI USB-3000 back on USB** (new): it came off when the Kraken took the HOST port, so DMR, P25, D-STAR, YSF and
+  NXDN voice is silent (the calls are still decoded). Untested behind one hub together with the Kraken.
+- **NXDN96 over the cable**: NXDN48 is tested (voice r 0.92-0.95); NXDN96 runs in the third dsd-fme but was never
+  sent over the cable.
+- **The x6x00-dsd-fme package in the CI image build** (51ab977): not yet seen built; check the next image build.
+- **TCI audio over the radio's Wi-Fi** (new): the stream to a client stalled 0.5-1.3 s at a time, worse while big
+  files went over the same link, even at -41 dBm and MCS 7; the server then drops what passes the ~1.4 s it queues
+  per client, so a listener loses speech or audio. The remote control port and TCI connects timed out now and then
+  at the same time. To look at: why the link stalls (the radio's Wi-Fi driver, the 2.4 GHz channel, USB noise from the
+  SDRs), and whether a client should be able to ask for a longer queue.
+- **RADE's decode time on the X6200** (new): 114-200 ms for the slowest 120 ms modem frame while searching, with no
+  gaps or losses seen; watch it on a busy band.
+- **Screenshots** of every menu for the README and the manual: later, at the owner's word.
+
+**Waiting on hardware**
+
+- The HackRF at 2.646 MS/s and the HackRF/bladeRF filters (c1c732a): each when plugged into the radio.
+- WSPR over the cable: the HackRF (no TCXO) drifts several Hz in two minutes, more than WSPR's 1.46 Hz tones; test
+  WSPR off the air, or with a TCXO-locked generator.
+
+**Parked or later**
+
+- P25 phase 2: its voice is scrambled with the system's WACN, SysID and colour code, so it needs trunk following
+  first; trunk following would be a feature of its own.
+- DMR transmit on G: later, with the owner's own DMR radio and ID, HackRF/bladeRF only.
+- Iridium (ACARS over Iridium): looked at only (gr-iridium, iridium-toolkit); not to be built.
+- Upstream #88 is the fork's static Wi-Fi (#17, 0ac3b6d): upstream not told yet, at the owner's word.
+
+**Done 2026-11-16 and 2026-11-17** (for the record; details in git)
+
+- Digital voice on B through dsd-fme and the DVSI chip (no mbelib): DMR, D-STAR, P25 phase 1, YSF, NXDN48 (three
+  dsd-fme), each sent over a cable and heard.
+- Cable tests on the X6200 (a HackRF through 70 dB of attenuators, receive only): WeFax with a grey ramp, Time Signal
+  (WWV read two minutes in a row), RADE. The other HF decoders were tested over the air on 2026-11-12 and not again.
+- Decoder apps open the squelch while open and give it back, also after a restart or power-off (0fd98b8, fd0b59c).
+- WeFax drawn in the theme's colours on screen, the saved PNGs black on white (859dffc).
+- The Mac cross build links RADE (4284ffc); before that a GUI built there had no RADE decoder.
+- ACARS on AIRSPACE, network rigctld, the CI host checks green, the GUI's CPU cut by a third on the Sentry.
+
 ## Waterfall: the 3D band scope on the radios (PR #161, merged)
 
 Merged on main 5 November (Calin Rigo, timerealm, PR #161, squashed): Settings > Display > WATERFALL > 3D, all
@@ -157,8 +220,10 @@ modes (1600, 700D) with it. No date.
   RADE's own power (`rade_pwr`, 0.5-3 W). The speech goes to Bluetooth headphones and to the TCI clients (the
   VFO-Knob, the browser's Panel and Remote pages: `tci_server_speech_write()` in place of the RX audio); the app opens
   only with one of them there. Built in the image and the bundle by tools/rade/build.sh from local-build.sh, every
-  download pinned. Still open: a decode of a real over on a radio (the X6100 or the air), the X6100's CPU, live speech
-  (needs the mic in Linux while transmitting, as below), RADE V2 and the Codec 2 modes.
+  download pinned. Decoded on an X6200 over a cable (2026-11-17): overs from the radio's own RADE TX code, sent by a
+  HackRF on 14.236 MHz through 70 dB of attenuators: sync 0.2-0.3 s into each over, 15-16 dB SNR, the End-of-Over
+  callsign, every over whole (docs/MANUAL.md, RADE). Still open: a real over off the air, the X6100 and its CPU, live
+  speech (needs the mic in Linux while transmitting, as below), RADE V2 and the Codec 2 modes.
 - **The audio path is there**: RADE is a modem in an SSB passband, and the digital apps (FT8, Winlink) already take
   the receiver's audio into Linux and transmit audio from Linux (`radio_set_modem()`). What is new: the decoded
   voice on the speaker while receiving, and the mic recorded in Linux while transmitting (`AUDIO_PLAY_VOICE_REC`),
