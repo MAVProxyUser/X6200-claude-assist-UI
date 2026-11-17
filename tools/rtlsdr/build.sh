@@ -105,9 +105,12 @@ cp -L "$B/bladerf-build/output/libbladeRF.so.2" "$B/out/lib/libbladeRF.so.2"
 # x6x00-rtlspec, the Sentry's VHF/UHF spectrum (tools/rtlspec): librtlsdr and libhackrf in it, libbladeRF opened at
 # run time (its header only here)
 RS=$TOP/tools/rtlspec
+SRCS=()     # tools/rtlspec/daemon_sources, the list the image's package compiles too
+while read -r f; do
+    case $f in ''|'#'*) ;; *) SRCS+=("$RS/$f") ;; esac
+done < "$RS/daemon_sources"
 $CC $CF -O3 -DSDR_BLADERF -I "$RS" -I "$H" -I "$BL/libraries/libbladeRF/include" -o "$B/out/bin/x6x00-rtlspec" \
-    "$RS/rtlspec.c" "$RS/same.c" "$RS/rds.c" "$RS/acars.c" "$RS/ambe.c" "$RS/dmr.c" "$RS/dsd.c" "$RS/lrpt.c" "$RS/sdr.c" "$RS/sdr_rtl.c" "$RS/sdr_hackrf.c" "$RS/sdr_bladerf.c" "$RS/sdr_file.c" \
-    "$B/out/lib/librtlsdr.a" "$B/out/lib/libhackrf.a" $LD -lusb-1.0 -lz -lpthread -lm -ldl
+    "${SRCS[@]}" "$B/out/lib/librtlsdr.a" "$B/out/lib/libhackrf.a" $LD -lusb-1.0 -lz -lpthread -lm -ldl
 
 # dump1090-fa: ARCH armv7l picks its NEON DSP flavours for the radio's Cortex-A7
 rm -f "$B/dump1090/dump1090"      # linked again: its Makefile does not see librtlsdr.a change

@@ -14,15 +14,18 @@ X6X00_RTLSPEC_VERSION = local
 X6X00_RTLSPEC_SITE = @OPENX6X00@/tools/rtlspec
 X6X00_RTLSPEC_SITE_METHOD = local
 X6X00_RTLSPEC_LICENSE = LGPL-2.1+
-X6X00_RTLSPEC_DEPENDENCIES = libusb rtlsdr-blog libhackrf libbladerf
+X6X00_RTLSPEC_DEPENDENCIES = libusb rtlsdr-blog libhackrf libbladerf zlib
 
-# libusb's header too: sdr_rtl.c reads libusb's port list to number the RTLs by serial and USB location
+# The sources: tools/rtlspec/daemon_sources, the list tools/rtlsdr/build.sh compiles for a hot install too (the two
+# lists were apart once: the image's had no lrpt.c). libusb's header too: sdr_rtl.c reads libusb's port list to
+# number the RTLs by serial and USB location. zlib: the Meteor pictures' PNGs (rtlspec.c)
+X6X00_RTLSPEC_SOURCES = $(addprefix $(@D)/,$(shell sed -e '/^\#/d' $(@D)/daemon_sources))
+
 define X6X00_RTLSPEC_BUILD_CMDS
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -DSDR_BLADERF -I$(@D) -I$(STAGING_DIR)/usr/include/libhackrf \
 		-I$(STAGING_DIR)/usr/include/libusb-1.0 \
-		-o $(@D)/x6x00-rtlspec $(@D)/rtlspec.c $(@D)/same.c $(@D)/rds.c $(@D)/acars.c $(@D)/ambe.c $(@D)/dmr.c $(@D)/dsd.c $(@D)/sdr.c $(@D)/sdr_rtl.c \
-		$(@D)/sdr_hackrf.c $(@D)/sdr_bladerf.c $(@D)/sdr_file.c -Wl,-Bstatic -lrtlsdr -lhackrf -Wl,-Bdynamic \
-		-lusb-1.0 -lpthread -lm -ldl
+		-o $(@D)/x6x00-rtlspec $(X6X00_RTLSPEC_SOURCES) \
+		-Wl,-Bstatic -lrtlsdr -lhackrf -Wl,-Bdynamic -lusb-1.0 -lz -lpthread -lm -ldl
 endef
 
 define X6X00_RTLSPEC_INSTALL_TARGET_CMDS

@@ -28,7 +28,6 @@ here transmits until the owner says so (transmit work is not wanted for now). "N
   NXDN voice is silent (the calls are still decoded). Untested behind one hub together with the Kraken.
 - **NXDN96 over the cable**: NXDN48 is tested (voice r 0.92-0.95); NXDN96 runs in the third dsd-fme but was never
   sent over the cable.
-- **The x6x00-dsd-fme package in the CI image build** (51ab977): not yet seen built; check the next image build.
 - **TCI audio over the radio's Wi-Fi** (new): the stream to a client stalled 0.5-1.3 s at a time, worse while big
   files went over the same link, even at -41 dBm and MCS 7; the server then drops what passes the ~1.4 s it queues
   per client, so a listener loses speech or audio. The remote control port and TCI connects timed out now and then
@@ -62,6 +61,9 @@ here transmits until the owner says so (transmit work is not wanted for now). "N
 - WeFax drawn in the theme's colours on screen, the saved PNGs black on white (859dffc).
 - The Mac cross build links RADE (4284ffc); before that a GUI built there had no RADE decoder.
 - ACARS on AIRSPACE, network rigctld, the CI host checks green, the GUI's CPU cut by a third on the Sentry.
+- The image builds dsd-fme (with our patch, against the DVSI shim) for both radios and the update bundle carries
+  it (seen in the 12065ef build). The image's SDR daemon had no lrpt.c and no zlib: both builds now take one source
+  list, tools/rtlspec/daemon_sources.
 
 ## Waterfall: the 3D band scope on the radios (PR #161, merged)
 
