@@ -56,7 +56,7 @@ index ec70e56..8b9a252 100644
        state->group_array[state->group_tally].groupNumber = rid;
        sprintf (state->group_array[state->group_tally].groupMode, "%s", "D");
 diff --git a/src/dsd_events.c b/src/dsd_events.c
-index 1bfd16f..0c03e8f 100644
+index 1bfd16f..64c9e79 100644
 --- a/src/dsd_events.c
 +++ b/src/dsd_events.c
 @@ -10,6 +10,7 @@
@@ -67,12 +67,12 @@ index 1bfd16f..0c03e8f 100644
  
  //init each event history struct passed into here
  void init_event_history (Event_History_I * event_struct, uint8_t start, uint8_t stop)
-@@ -121,6 +122,37 @@ void write_event_to_log_file (dsd_opts * opts, dsd_state * state, uint8_t slot,
+@@ -121,6 +122,38 @@ void write_event_to_log_file (dsd_opts * opts, dsd_state * state, uint8_t slot,
    fclose (event_log_file);
  }
  
 +//GoldCorpHF: what is heard, a line at a time to the descriptor in DSD_STATUS_FD (the SDR daemon's pipe): "SY 0 <frame
-+//type>" while a sync is found (at most twice a second), "EV <slot> <event>" while a call goes on (as it changes, else
++//type>" while a sync is found (at most ten times a second), "EV <slot> <event>" while a call goes on (as it changes, else
 +//once a second), "TX <slot> <text>" its text message, as EV. Never waits: the daemon makes the pipe non-blocking, a full one loses the line
 +void dsd_status (const char * kind, int slot, const char * text)
 +{
@@ -93,7 +93,8 @@ index 1bfd16f..0c03e8f 100644
 +  slot &= 1;
 +  clock_gettime (CLOCK_MONOTONIC, &ts);
 +  ms = (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-+  if (strncmp (last[k][slot], text, sizeof(last[k][slot]) - 1) == 0 && ms - at[k][slot] < (k ? 1000 : 500)) return;
++  //a sync said again each 100 ms at most (the daemon wants three within 1.2 s, as noise seldom gives), the rest each second
++  if (strncmp (last[k][slot], text, sizeof(last[k][slot]) - 1) == 0 && ms - at[k][slot] < (k ? 1000 : 100)) return;
 +  snprintf (last[k][slot], sizeof(last[k][slot]), "%s", text);
 +  at[k][slot] = ms;
 +  n = snprintf (line, sizeof(line), "%s %d %s", kind, slot, text);
@@ -105,7 +106,7 @@ index 1bfd16f..0c03e8f 100644
  // run once per loop to check for and push and update event history
  void watchdog_event_history (dsd_opts * opts, dsd_state * state, uint8_t slot)
  {
-@@ -813,6 +845,22 @@ void watchdog_event_current (dsd_opts * opts, dsd_state * state, uint8_t slot)
+@@ -813,6 +846,22 @@ void watchdog_event_current (dsd_opts * opts, dsd_state * state, uint8_t slot)
  
    sprintf (event_struct->Event_History_Items[0].event_string, "%s", event_string);
  
@@ -256,3 +257,41 @@ index aed07c6..1fcdf5f 100644
          }
        }
        strt[59] = '\0';
+diff --git a/src/dstar_header.c b/src/dstar_header.c
+index 608c758..b6563de 100644
+--- a/src/dstar_header.c
++++ b/src/dstar_header.c
+@@ -21,6 +21,20 @@
+ #include "dsd.h"
+ // #include "fcs.h" //error:  multiple definition of `calc_fcs'; CMakeFiles/dsd-fme.dir/src/dstar.c.o:dstar.c:(.text+0x0): first defined here
+ 
++//GoldCorpHF: the header's CRC-CCITT (reflected, 0xFFFF in, inverted out, its low byte first), which dsd-fme left as a
++//TODO: a header out of FM noise (a false sync) gave callsigns of garbage on the radio's screen
++static int dstar_header_crc_ok (const unsigned char * h)
++{
++  unsigned int crc = 0xFFFF;
++  for (int i = 0; i < 39; i++)
++  {
++    crc ^= h[i];
++    for (int b = 0; b < 8; b++) crc = (crc & 1) ? (crc >> 1) ^ 0x8408 : crc >> 1;
++  }
++  crc = ~crc & 0xFFFF;
++  return h[39] == (crc & 0xFF) && h[40] == (crc >> 8);
++}
++
+ void dstar_header_decode(dsd_state * state, int radioheaderbuffer[660])
+ {
+ 	int radioheaderbuffer2[660];
+@@ -87,6 +101,12 @@ void dstar_header_decode(dsd_state * state, int radioheaderbuffer[660])
+ 	if (radioheader[0] & 0x10) fprintf (stderr, " CONTROL SIGNAL");
+ 	if (radioheader[0] & 0x08) fprintf (stderr, " URGENT");
+ 
++	if (!dstar_header_crc_ok ((const unsigned char *)radioheader)) //GoldCorpHF: not a header: its callsigns not taken
++	{
++		fprintf (stderr, " (HEADER CRC ERR)");
++		return;
++	}
++
+ 	memcpy (state->dstar_rpt2, str1, sizeof(str1));
+ 	memcpy (state->dstar_rpt1, str2, sizeof(str2));
+ 	memcpy (state->dstar_dst, str3, sizeof(str3));

@@ -1311,12 +1311,14 @@ The other digital voice modes are found the same way, in any narrow FM channel B
   come twice), `SLOT 2 ...` for a TDMA system's second slot. The head, B's half and
   G say the protocol in place of NFM; G's lamp says `RX P25`, `RX D-STAR`.
 - **The voice** goes through the USB-3000 only (no software vocoder: dsd-fme is built against our libmbe-dvsi, which
-  hands its frames to the daemon's vocoder). D-STAR's is heard (the chip in its D-STAR mode; tested over the cable).
-  YSF's DN mode and P25 phase 2 carry the AMBE+2 that DMR does and go the same way (not yet tested: no test signal for
-  them). P25 phase 1's IMBE is not yet heard: those calls are silent (not their buzz).
+  hands its frames to the daemon's vocoder). D-STAR's and P25 phase 1's are heard (the chip in its D-STAR and P25
+  full-rate modes; both tested over the cable). YSF's DN mode and P25 phase 2 carry the AMBE+2 that DMR does and go
+  the same way (not yet tested: no test signal for them). A P25 frame too damaged to trust is replaced by the last
+  good one (three times, then silence): this USB-3000 restarts itself on some garbled P25 frames, and the daemon
+  picks it up again by itself if it does.
 - It is there when `/usr/bin/dsd-fme` is: about 4% of one core while B listens in narrow FM, started with it and
-  ended a minute after. Two syncs (or a call) within 1.5 s make a channel digital, so a sync found once in FM's
-  noise does not mute it.
+  ended a minute after. Three syncs within 1.2 s (or a decoded call) make a channel digital, so the odd sync FM's
+  noise gives does not mute it or put garbage on B's line; a D-STAR header must pass its CRC.
 
 ## Updating the firmware
 

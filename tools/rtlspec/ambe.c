@@ -383,6 +383,11 @@ static void serve_udp(void) {
         }
         int rn = recv_raw(r, sizeof(r), b[3] == 0 && b[4] == 0x33 ? 1500 : 400);
 
+        if (rn >= 5 && r[3] == 0 && r[4] == 0x39) {     /* READY: it rebooted (P25's full rate can make it), its
+                                                         * power-on rate again: DMR's set afresh before its frames */
+            chip_rate = -1;
+            fprintf(stderr, "rtlspec: the AMBE-3000 restarted itself (a client's request at P25 full rate)\n");
+        }
         if (rn > 0) sendto(udp, r, (size_t)rn, 0, (struct sockaddr *)&from, fl);
         fl = sizeof(from);
     }
@@ -462,6 +467,10 @@ static void *thread(void *arg) {
             continue;
         }
         misses = 0;
+        if (type == 0 && n >= 1 && r[0] == 0x39) {     /* READY: it rebooted, its rate the power-on one */
+            chip_rate = -1;
+            continue;
+        }
         if (type != 2 || n < 2 || r[0] != 0x00) continue;
         int ns = r[1];
 

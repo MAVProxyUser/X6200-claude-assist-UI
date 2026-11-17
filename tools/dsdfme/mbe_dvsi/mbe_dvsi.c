@@ -321,7 +321,72 @@ void mbe_processAmbe3600x2450Framef(float *aout_buf, int *errs, int *errs2, char
     mbe_processAmbe2450Dataf(aout_buf, errs, errs2, err_str, ambe_d, cur_mp, prev_mp, prev_mp_enhanced, uvquality);
 }
 
-/* ---- IMBE 7200x4400 (P25 phase 1): the codes; the voice once the chip's P25 mode is measured ---- */
+/* ---- IMBE 7200x4400 (P25 phase 1). The chip's P25 full-rate mode (rate words 0x0558 0x086B 0x1030 0 0 0x0190,
+ * 7200 bit/s with FEC) takes the 144 bits in P25's own order on the air (each IMBE frame's 72 dibits, a dibit's bit 1
+ * first): its frames all read as good codewords so (2026-11-17), and as nothing in plain codeword order. So the bits
+ * dsd-fme sorted into imbe_fr (p25p1_ldu.c: imbe_fr[iW][iX] = bit 1, imbe_fr[iY][iZ] = bit 0; its p25p1_const.h's
+ * tables, ISC) go back in that order, and the chip corrects them itself. Measured on this AMBE3000P25F: it reboots
+ * (READY, its power-on rate again) when (a) a frame comes at full rate before it has done any frame since it last
+ * started, (b) PKT_INIT asks for the encoder's reset at full rate, (c) its full-rate encoder is given quiet audio.
+ * Only decoding here: (a) is met by a frame at rate 33 first whenever the chip may have restarted ---- */
+
+static const int iW[72] = {0, 2, 4, 1, 3, 5, 0, 2, 4, 1, 3, 6, 0, 2, 4, 1, 3, 6, 0, 2, 4, 1, 3, 6,
+                       0, 2, 4, 1, 3, 6, 0, 2, 4, 1, 3, 6, 0, 2, 5, 1, 3, 6, 0, 2, 5, 1, 3, 6,
+                       0, 2, 5, 1, 3, 7, 0, 2, 5, 1, 3, 7, 0, 2, 5, 1, 4, 7, 0, 3, 5, 2, 4, 7};
+static const int iX[72] = {22, 20, 10, 20, 18, 0, 20, 18, 8, 18, 16, 13, 18, 16, 6, 16, 14, 11, 16, 14, 4, 14, 12, 9,
+                       14, 12, 2, 12, 10, 7, 12, 10, 0, 10, 8, 5, 10, 8, 13, 8, 6, 3, 8, 6, 11, 6, 4, 1,
+                       6, 4, 9, 4, 2, 6, 4, 2, 7, 2, 0, 4, 2, 0, 5, 0, 13, 2, 0, 21, 3, 21, 11, 0};
+static const int iY[72] = {1, 3, 5, 0, 2, 4, 1, 3, 6, 0, 2, 4, 1, 3, 6, 0, 2, 4, 1, 3, 6, 0, 2, 4,
+                       1, 3, 6, 0, 2, 4, 1, 3, 6, 0, 2, 5, 1, 3, 6, 0, 2, 5, 1, 3, 6, 0, 2, 5,
+                       1, 3, 6, 0, 2, 5, 1, 3, 7, 0, 2, 5, 1, 4, 7, 0, 3, 5, 2, 4, 7, 1, 3, 5};
+static const int iZ[72] = {21, 19, 1, 21, 19, 9, 19, 17, 14, 19, 17, 7, 17, 15, 12, 17, 15, 5, 15, 13, 10, 15, 13, 3,
+                       13, 11, 8, 13, 11, 1, 11, 9, 6, 11, 9, 14, 9, 7, 4, 9, 7, 12, 7, 5, 2, 7, 5, 10,
+                       5, 3, 0, 5, 3, 8, 3, 1, 5, 3, 1, 6, 1, 14, 3, 1, 22, 4, 22, 12, 1, 22, 20, 2};
+#define RATE_P25 1001                   /* rate's value in the P25 full-rate mode */
+
+static int decode_p25(const uint8_t b[18], float *out) {
+    static const uint8_t ratep[13] = {0x0A, 0x05, 0x58, 0x08, 0x6B, 0x10, 0x30, 0x00, 0x00, 0x00, 0x00, 0x01, 0x90};
+    static int           warm;          /* a frame done since the chip (may have) started */
+    uint8_t              q[20] = {0x01, 144}, r[340];
+    int                  t, n;
+
+    open_chip();
+    if (fd < 0) return 0;
+    if (rate == -1) warm = 0;           /* just found, or it rebooted */
+    if (!warm) {                        /* a frame at rate 33 first: full rate as the first frame reboots it */
+        uint8_t z[11] = {0x01, 72};
+
+        if (ctl((const uint8_t[]){0x09, 33}, 2) == 0 && xfer(1, z, sizeof(z), &t, r, sizeof(r)) >= 2) warm = 1;
+        rate = 33;
+    }
+    if ((rate != RATE_P25 || now_ms() - rate_ms > 100) && ctl(ratep, sizeof(ratep)) == 0) rate = RATE_P25;
+    rate_ms = now_ms();
+    memcpy(q + 2, b, 18);
+    {                                   /* DSD_DVSI_DUMP=file: each frame as given to the chip (a test's check) */
+        static FILE *dump;
+        static int   tried;
+        const char  *d = getenv("DSD_DVSI_DUMP");
+
+        if (!tried++ && d && *d) dump = fopen(d, "ab");
+        if (dump) fwrite(b, 1, 18, dump), fflush(dump);
+    }
+    n = xfer(1, q, sizeof(q), &t, r, sizeof(r));
+    if (n >= 1 && t == 0 && r[0] == 0x39) {     /* READY: it rebooted, at its power-on rate */
+        rate = -1;
+        return 0;
+    }
+    if (n < 2 || t != 2 || r[0] != 0x00) {
+        if (n < 0) {
+            close(fd);
+            fd = -1;
+        }
+        return 0;
+    }
+    int ns = r[1] > 160 ? 160 : r[1];
+
+    for (int i = 0; i < ns && 3 + 2 * i < n; i++) out[i] = (float)(int16_t)(r[2 + 2 * i] << 8 | r[3 + 2 * i]);
+    return ns;
+}
 
 int mbe_eccImbe7200x4400C0(char imbe_fr[8][23]) {
     return golay_fix(imbe_fr[0]);
@@ -344,6 +409,34 @@ void mbe_demodulateImbe7200x4400Data(char imbe_fr[8][23]) {
         }
 }
 
+/* Hamming (15,11) of c4-c6: bit 14..0 of a row of the parity checks, data in 14..4, parity in 3..0 (each data bit's
+ * checks distinct, two or more; the parity bits one each). The chip's own frames are all good codewords by it */
+static const int hamm_rows[4] = {0x7F08, 0x78E4, 0x66D2, 0x55B1};
+
+static int hamm_syn(const char *c) {
+    int w = 0, s = 0;
+
+    for (int i = 0; i < 15; i++) w |= (c[i] & 1) << i;
+    for (int r = 0; r < 4; r++) s = s << 1 | (__builtin_popcount((unsigned)(w & hamm_rows[r])) & 1);
+    return s;
+}
+
+static int hamm_fix(char *c) {
+    int s = hamm_syn(c);
+
+    if (!s) return 0;
+    for (int i = 0; i < 15; i++) {      /* the bit whose checks are the syndrome */
+        int col = 0;
+
+        for (int r = 0; r < 4; r++) col = col << 1 | (hamm_rows[r] >> i & 1);
+        if (col == s) {
+            c[i] ^= 1;
+            return 1;
+        }
+    }
+    return 2;                           /* more than one: left as it is */
+}
+
 int mbe_eccImbe7200x4400Data(char imbe_fr[8][23], char *imbe_d) {
     int n = 0, k = 0;
 
@@ -354,26 +447,103 @@ int mbe_eccImbe7200x4400Data(char imbe_fr[8][23], char *imbe_d) {
         if (i > 0) n += golay_fix(c);
         for (int j = 22; j >= 11; j--) imbe_d[k++] = c[j];
     }
-    for (int i = 4; i < 7; i++)                 /* Hamming (15,11): its data as it came, for now */
-        for (int j = 14; j >= 4; j--) imbe_d[k++] = imbe_fr[i][j];
+    for (int i = 4; i < 7; i++) {
+        char c[15];
+
+        memcpy(c, imbe_fr[i], 15);
+        n += hamm_fix(c);
+        for (int j = 14; j >= 4; j--) imbe_d[k++] = c[j];
+    }
     for (int j = 6; j >= 0; j--) imbe_d[k++] = imbe_fr[7][j];
     return n;
 }
 
+/* The 88 voice bits (u0-u3 12, u4-u6 11, u7 7) coded again into the 144 sent (Golay, Hamming, the scrambling from
+ * u0, P25's order): dsd-fme corrects a frame itself and hands on only those 88 */
+static void imbe_encode(const char imbe_d[88], uint8_t b[18]) {
+    char fr[8][23];
+    int  k = 0;
+
+    memset(fr, 0, sizeof(fr));
+    for (int i = 0; i < 4; i++) {
+        uint32_t w = 0;
+
+        for (int j = 22; j >= 11; j--) fr[i][j] = imbe_d[k++] & 1, w |= (uint32_t)fr[i][j] << j;
+        for (int j = 22; j >= 11; j--)
+            if (w >> j & 1) w ^= (uint32_t)GOLAY_G << (j - 11);
+        for (int j = 10; j >= 0; j--) fr[i][j] = (char)(w >> j & 1);
+    }
+    for (int i = 4; i < 7; i++) {
+        int w = 0;
+
+        for (int j = 14; j >= 4; j--) fr[i][j] = imbe_d[k++] & 1, w |= fr[i][j] << j;
+        for (int r = 0; r < 4; r++) fr[i][3 - r] = (char)(__builtin_popcount((unsigned)(w & hamm_rows[r])) & 1);
+    }
+    for (int j = 6; j >= 0; j--) fr[7][j] = imbe_d[k++] & 1;
+    mbe_demodulateImbe7200x4400Data(fr);        /* the scrambling: its own inverse */
+    memset(b, 0, 18);
+    for (int j = 0; j < 72; j++) {
+        if (fr[iW[j]][iX[j]]) b[(2 * j) / 8] |= (uint8_t)(0x80 >> ((2 * j) % 8));
+        if (fr[iY[j]][iZ[j]]) b[(2 * j + 1) / 8] |= (uint8_t)(0x80 >> ((2 * j + 1) % 8));
+    }
+}
+
+/* For the test (p25_test.c): the 88 bits coded again as the chip would send them, and 144 sent bits sorted into
+ * imbe_fr as dsd-fme sorts them */
+void mbe_dvsi_imbe_encode(const char imbe_d[88], unsigned char b[18]) { imbe_encode(imbe_d, b); }
+
+void mbe_dvsi_imbe_sort(const unsigned char b[18], char imbe_fr[8][23]) {
+    memset(imbe_fr, 0, 8 * 23);
+    for (int j = 0; j < 72; j++) {
+        imbe_fr[iW[j]][iX[j]] = (char)(b[(2 * j) / 8] >> (7 - (2 * j) % 8) & 1);
+        imbe_fr[iY[j]][iZ[j]] = (char)(b[(2 * j + 1) / 8] >> (7 - (2 * j + 1) % 8) & 1);
+    }
+}
+
+/* The 88 bits after dsd-fme's own error correction (how it plays P25 phase 1, and ProVoice converted, and .imb
+ * files): coded again into the 144 and to the chip in its P25 mode */
 void mbe_processImbe4400Dataf(float *aout_buf, int *errs, int *errs2, char *err_str, char imbe_d[88],
                               mbe_parms *cur_mp, mbe_parms *prev_mp, mbe_parms *prev_mp_enhanced, int uvquality) {
-    (void)errs, (void)errs2, (void)imbe_d, (void)cur_mp, (void)prev_mp, (void)prev_mp_enhanced, (void)uvquality;
+    static char last[88];
+    static int  again = 99;
+    uint8_t     b[18];
+
+    (void)errs, (void)prev_mp, (void)prev_mp_enhanced, (void)uvquality;
     memset(aout_buf, 0, 160 * sizeof(float));
     if (err_str) err_str[0] = 0;
+    if (!may(cur_mp)) return;
+    /* past what the codes put right (more than 5 bits changed in a frame: three in a Golay word may be a wrong
+     * "correction"): its 88 bits are next to random, and some random frames make this chip reboot in its P25 mode
+     * (5% of random frames, by the pitch with the rest; none of 471 the chip coded itself): the last good frame
+     * again, three times, then silence */
+    if ((errs2 ? *errs2 : 0) > 5) {
+        if (++again > 3) return;
+        if (err_str) strcpy(err_str, "R");
+        imbe_encode(last, b);
+    } else {
+        again = 0;
+        memcpy(last, imbe_d, 88);
+        imbe_encode(imbe_d, b);
+    }
+    decode_p25(b, aout_buf);
 }
 
 void mbe_processImbe7200x4400Framef(float *aout_buf, int *errs, int *errs2, char *err_str, char imbe_fr[8][23],
                                     char imbe_d[88], mbe_parms *cur_mp, mbe_parms *prev_mp,
                                     mbe_parms *prev_mp_enhanced, int uvquality) {
-    *errs = mbe_eccImbe7200x4400C0(imbe_fr);
+    uint8_t b[18] = {0};
+
+    (void)prev_mp, (void)prev_mp_enhanced, (void)uvquality;
+    for (int j = 0; j < 72; j++) {      /* as it came off the air, before the codes below change imbe_fr */
+        if (imbe_fr[iW[j]][iX[j]] & 1) b[(2 * j) / 8] |= (uint8_t)(0x80 >> ((2 * j) % 8));
+        if (imbe_fr[iY[j]][iZ[j]] & 1) b[(2 * j + 1) / 8] |= (uint8_t)(0x80 >> ((2 * j + 1) % 8));
+    }
+    *errs = mbe_eccImbe7200x4400C0(imbe_fr);    /* for dsd-fme's own counts and its imbe_d */
     mbe_demodulateImbe7200x4400Data(imbe_fr);
     *errs2 = *errs + mbe_eccImbe7200x4400Data(imbe_fr, imbe_d);
-    mbe_processImbe4400Dataf(aout_buf, errs, errs2, err_str, imbe_d, cur_mp, prev_mp, prev_mp_enhanced, uvquality);
+    memset(aout_buf, 0, 160 * sizeof(float));
+    if (err_str) err_str[0] = 0;
+    if (may(cur_mp)) decode_p25(b, aout_buf);
 }
 
 /* ---- AMBE 3600x2400 (D-STAR): the 72 bits as sent, back into the 9 bytes D-STAR carries them in (each byte sent

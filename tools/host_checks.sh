@@ -165,6 +165,11 @@ if wanted dmr; then
     res=$(run_one dmr sh -c "$CC -O2 -Wall -Wextra -o '$OUT/dmr_test' tools/rtlspec/dmr_test.c tools/rtlspec/dmr.c -lm && '$OUT/dmr_test'")
     record dmr "$res" "$(summary dmr)"
 fi
+# libmbe-dvsi's P25 path: the USB-3000's own IMBE frames through dsd-fme's corrections and coded back, bit for bit
+if wanted p25; then
+    res=$(run_one p25 sh -c "$CC -O2 -Wall -Wextra -o '$OUT/p25_test' tools/dsdfme/mbe_dvsi/p25_test.c tools/dsdfme/mbe_dvsi/mbe_dvsi.c && '$OUT/p25_test' tools/dsdfme/mbe_dvsi/p25_chip_frames.bin")
+    record p25 "$res" "$(summary p25)"
+fi
 # The audits' reproduction harnesses, now the regression suite of their fixes (docs/audit/repro-2026-10-24/README.md):
 # Python, Node.js, SQLite, libpng and ALSA's headers, LVGL; Linux
 if wanted audit; then

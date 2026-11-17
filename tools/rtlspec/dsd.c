@@ -43,7 +43,7 @@ static const char     *path;
 static pthread_mutex_t in_lock = PTHREAD_MUTEX_INITIALIZER;     /* in_fd closed under it: never written closed */
 static int             in_fd   = -1;                           /* dsd-fme's stdin, -1 none running */
 static atomic_uint     fed_ms;                                 /* the last sample given (each 23 ms) */
-static atomic_uint     sync_ms, sync2_ms;                      /* the last two syncs it said */
+static atomic_uint     sync_ms, sync2_ms, sync3_ms;            /* the last three syncs it said */
 
 static pthread_mutex_t pcm_lock = PTHREAD_MUTEX_INITIALIZER;
 static int16_t         pcm[PCM];
@@ -90,17 +90,24 @@ void dsd_feed(float d) {
     pthread_mutex_unlock(&in_lock);
 }
 
-/* Two syncs (or a sync and a call) within 1.5 s, the last within 1.3 s: a digital signal, not a sync found once in
- * FM's noise. A call is said at least each second while it goes on, as a sync is each half second: some (DMR, and
- * others that keep their frames in a loop of their own) say a sync only at the first frame */
+/* Three syncs within 1.2 s, the last within 1.3 s: a digital signal. FM's noise gave a lone sync now and then (YSF,
+ * D-STAR: 2026-11-17, a dozen in an hour and a half on 441.000), never three so close; dsd-fme says a sync each
+ * 100 ms at most. A call it decoded (its identity through the codes) is as good as three: some (DMR, and others that
+ * keep their frames in a loop of their own) say a sync only at the first frame, and a call each second */
 bool dsd_active(void) {
-    uint32_t t = ms_now(), a = atomic_load(&sync_ms), b = atomic_load(&sync2_ms);
+    uint32_t t = ms_now(), a = atomic_load(&sync_ms), c = atomic_load(&sync3_ms);
 
-    return a && b && t - a < 1300 && a - b < 1500;
+    return a && c && t - a < 1300 && a - c < 1200;
 }
 
-static void synced(uint32_t t) {
-    atomic_store(&sync2_ms, atomic_load(&sync_ms));
+static void synced(uint32_t t, bool call) {
+    if (call) {
+        atomic_store(&sync3_ms, t);
+        atomic_store(&sync2_ms, t);
+    } else {
+        atomic_store(&sync3_ms, atomic_load(&sync2_ms));
+        atomic_store(&sync2_ms, atomic_load(&sync_ms));
+    }
     atomic_store(&sync_ms, t);
 }
 
@@ -223,6 +230,9 @@ static bool tdma(void) {
 static void line(char *l) {
     uint32_t t = ms_now();
 
+    for (const char *q = l; *q; q++)    /* a garbled one (a header decoded out of noise): not taken */
+        if ((unsigned char)*q < 0x20 || (unsigned char)*q > 0x7E) return;
+
     if (!strncmp(l, "SY ", 3) && strlen(l) > 5) {   /* "SY 0 +P25p1 ": the protocol, its polarity off */
         char        p[16];
         const char *s = l + 5;
@@ -232,7 +242,7 @@ static void line(char *l) {
         while (*s && *s != ' ' && n < sizeof(p) - 1) p[n++] = (char)toupper((unsigned char)*s++);
         p[n] = 0;
         if (!strncmp(p, "DSTAR", 5)) p[5] = 0;     /* DSTAR_HD, its header: D-STAR */
-        synced(t);
+        synced(t, false);
         if (dsd_active() && strcmp(p, proto)) {
             snprintf(proto, sizeof(proto), "%s", p);
             say(0);
@@ -268,7 +278,7 @@ static void line(char *l) {
         if (!strncmp(call[s], "TG ", 3) && !strncmp(c, "TO ", 3) && !strcmp(call[s] + 3, c + 3))
             memcpy(c, "TG", 2);         /* a group call said without its "Group" (some of its reports): still one */
         call_ms[s] = t;
-        synced(t);
+        synced(t, true);
         if (!*proto && dsd_active()) {  /* no sync said (DMR's): the call's own system ("DMR TGT: ...") */
             size_t n = strcspn(l + 5, " ");
 
@@ -340,6 +350,7 @@ static pid_t spawn(int *st_rd) {
 }
 
 static void ended(int *st_rd) {
+    atomic_store(&sync3_ms, 0);
     pthread_mutex_lock(&in_lock);
     if (in_fd >= 0) close(in_fd);
     in_fd = -1;
