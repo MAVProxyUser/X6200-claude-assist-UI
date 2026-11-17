@@ -1473,10 +1473,13 @@ shows as a track).
   - **F1 held**: AUTO on or off.
 - **F2 ARRAY**: a panel. **BAND** presets: AIR 125, 2 M 146, MARINE 156.8, NOAA 162.55, 1.25 M 223.5, ISM 433.92, 70 CM
   440, FRS/GMRS 462.5625, 33 CM 915, 23 CM 1270 MHz (the Kraken a quarter of its rate under it, so the target sits
-  clear of the sticks' centre spike). **ARRAY**: UCA-5, UCA-4, UCA-3 (a circle), ULA-5, ULA-4, ULA-3 (a line); with
-  fewer than five, CH0 up are used. **RADIUS** or **SPACING** in 0.5 cm steps: the array as you set it out, which does
-  not change with the band, so the calculator line says what it gives at each. **PUSH: SIZE FOR S 0.50** sets the size
-  the calculator wants for the band. **HEADING**: ANT 0's compass bearing (0 = ANT 0 up).
+  clear of the sticks' centre spike). **ARRAY**: UCA-5, UCA-4, UCA-3 (a circle), ULA-5, ULA-4, ULA-3 (a line), or
+  **CUSTOM** (any layout of two to five antennas, drawn on the web page: see
+  [Direction finder in the browser](#direction-finder-in-the-browser); offered once one is saved); with fewer than
+  five, CH0 up are used. **RADIUS** or **SPACING** in 0.5 cm steps: the array as you set it out, which does not change
+  with the band, so the calculator line says what it gives at each (for CUSTOM, its closest pair). **PUSH: SIZE FOR S
+  0.50** sets the size the calculator wants for the band (not for CUSTOM). **HEADING**: ANT 0's compass bearing (0 =
+  ANT 0 up).
 - **gpsd**: when it runs and has a GPS or a compass (on USB), the heading comes from it instead of the one set by
   hand: a compass first, else the course over the ground while moving faster than 2 m/s (a vehicle with the array
   on it, ANT 0 forward), kept two minutes after it slows. The ARRAY panel's HEADING row says which is in use
@@ -1537,6 +1540,13 @@ settings: a change on either shows on the other.
   bearings are drawn as needles too); **forward-backward** averaging (a ULA, for multipath); rate, gain, squelch,
   how often to calibrate, Calibrate now; the array's layout, its radius or spacing, ANT 0's heading, and Size for
   this band (KrakenRF's calculator, spacing 0.5 wavelength). Sources and forward-backward are set here only.
+- **Custom layout**: any layout of two to five antennas, each where it stands from the middle: **forward** (ANT 0's
+  heading, up on the drawing) and **left**, in cm. Drag an antenna on the drawing (0.5 cm steps) or type it; **Add an
+  antenna** (five at most), x to remove one, **From the layout in use** to start from the circle or line set now.
+  The line under it gives the closest pair in wavelengths at the target (0.5 or under, or the bearing can be
+  ambiguous) and the widest. **Save and use** writes it to the card (`df_array.txt`, a line an antenna: forward and
+  left in cm) and picks CUSTOM, here and on page I. Measure the positions to the antennas' feed points: the bearing
+  is only as good as they are.
 - **GPS**: gpsd's fix, position, speed and the heading it gives.
 - **Bearing log** (Settings, or page I's F5 SET LOG): each bearing over the squelch, two a second at most, in a CSV
   file a day (UTC) in `df_log` on the card (the Files page has them): `utc, freq_hz, bearing_ant0, heading,

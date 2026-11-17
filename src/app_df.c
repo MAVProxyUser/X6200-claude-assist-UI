@@ -147,8 +147,33 @@ typedef struct {
 } kind_t;
 
 static const kind_t kinds[] = {{"UCA-5", false, 5}, {"UCA-4", false, 4}, {"UCA-3", false, 3},
-                               {"ULA-5", true, 5},  {"ULA-4", true, 4},  {"ULA-3", true, 3}};
+                               {"ULA-5", true, 5},  {"ULA-4", true, 4},  {"ULA-3", true, 3},
+                               {"CUSTOM", false, 0}};
 #define N_KINDS (int)(sizeof(kinds) / sizeof(kinds[0]))
+#define K_CUSTOM (N_KINDS - 1)
+
+/* CUSTOM: any layout of up to five antennas, x forward and y left in cm, ANT 0 first, one a line in /mnt/df_array.txt
+ * (the web page's Array editor writes it; # starts a comment). Read when CUSTOM is chosen and at each start */
+#define ARRAY_FILE "/mnt/df_array.txt"
+static double cust_x[DF_PROTO_MAXCH], cust_y[DF_PROTO_MAXCH];     /* metres */
+static int    cust_n;
+
+static int cust_load(void) {
+    FILE *f = fopen(ARRAY_FILE, "r");
+    char  l[128];
+    int   n = 0;
+
+    if (!f) return cust_n = 0;
+    while (n < NANT && fgets(l, sizeof(l), f)) {
+        double x, y;
+        char  *h = strchr(l, '#');
+        if (h) *h = 0;
+        if (sscanf(l, "%lf %lf", &x, &y) == 2 && fabs(x) < 2000 && fabs(y) < 2000) cust_x[n] = x / 100, cust_y[n] = y / 100, n++;
+    }
+    fclose(f);
+    return cust_n = n >= 2 ? n : 0;
+}
+
 
 static const char *const methods[] = {"MUSIC", "BARTLETT", "CAPON", "MEM", "TNA"};
 #define N_METHODS (int)(sizeof(methods) / sizeof(methods[0]))
@@ -173,6 +198,9 @@ static struct {
     bool    log;                /* the bearing log, /mnt/df_log (x6x00-df's l) */
 } cfg;
 
+/* the elements the chosen layout has */
+static int kind_n(void) { return cfg.kind == K_CUSTOM ? cust_n : kinds[cfg.kind].n; }
+
 static void cfg_load(void) {
     cfg.band    = gui_state_get("df.band", 6);
     if (cfg.band < -1 || cfg.band >= N_BANDS) cfg.band = 6;
@@ -184,6 +212,7 @@ static void cfg_load(void) {
     if (cfg.bw < 0 || cfg.bw >= N_BWS) cfg.bw = 2;
     cfg.kind    = gui_state_get("df.kind", 0);
     if (cfg.kind < 0 || cfg.kind >= N_KINDS) cfg.kind = 0;
+    if (cfg.kind == K_CUSTOM && !cust_load()) cfg.kind = 0;      /* the file gone: the circle */
     cfg.size_mm = gui_state_get("df.size", 290);
     if (cfg.size_mm < 10 || cfg.size_mm > 5000) cfg.size_mm = 290;
     cfg.heading = gui_state_get("df.head", 0) % 360;
@@ -250,7 +279,16 @@ static void send_gain(void)   { df_rx_cmd("g %d", gains[cfg.gain]); }
 static uint32_t own_tune_ms;
 static void send_fc(void)     { own_tune_ms = lv_tick_get(); df_rx_cmd("f %d", cfg.fc); }
 static void send_target(void) { own_tune_ms = lv_tick_get(); df_rx_cmd("t %d %u", cfg.off, bws[cfg.bw]); }
-static void send_array(void)  { df_rx_cmd("a %s %d %d", kinds[cfg.kind].ula ? "ula" : "uca", kinds[cfg.kind].n, cfg.size_mm); }
+static void send_array(void) {
+    if (cfg.kind == K_CUSTOM && cust_n >= 2) {
+        char a[200];
+        int  l = snprintf(a, sizeof(a), "a custom %d", cust_n);
+        for (int m = 0; m < cust_n; m++) l += snprintf(a + l, sizeof(a) - (size_t)l, " %ld %ld", lround(cust_x[m] * 1000), lround(cust_y[m] * 1000));
+        df_rx_cmd("%s", a);
+        return;
+    }
+    df_rx_cmd("a %s %d %d", kinds[cfg.kind].ula ? "ula" : "uca", kinds[cfg.kind].n, cfg.size_mm);
+}
 static void send_method(void) { df_rx_cmd("m %d", cfg.method); }
 static void send_sql(void)    { df_rx_cmd("q %d", cfg.sql_ddb); }
 static void send_cal(void)    { df_rx_cmd("i %d", cal_every[cfg.cal]); }
@@ -420,11 +458,24 @@ static calc_t calc_at(double f) {
     calc_t        c;
 
     c.lambda = 299792458.0 / f;
-    double d  = k->ula ? size : 2 * size * sin(M_PI / k->n);
-    double ap = k->ula ? (k->n - 1) * size : 2 * size;
+    double d, ap;
+    if (cfg.kind == K_CUSTOM) {                 /* its closest pair and its widest */
+        d = 1e9, ap = 0;
+        for (int a = 0; a < cust_n; a++)
+            for (int b = a + 1; b < cust_n; b++) {
+                double r = hypot(cust_x[a] - cust_x[b], cust_y[a] - cust_y[b]);
+                if (r < d) d = r;
+                if (r > ap) ap = r;
+            }
+        if (cust_n < 2) d = 0;
+        c.want_m = 0;
+    } else {
+        d  = k->ula ? size : 2 * size * sin(M_PI / k->n);
+        ap = k->ula ? (k->n - 1) * size : 2 * size;
+        c.want_m = k->ula ? 0.5 * c.lambda : 0.5 * c.lambda / (2 * sin(M_PI / k->n));
+    }
     c.s      = d / c.lambda;
     c.res    = ap > 0 ? (180 / M_PI) * (1.22 / (ap / c.lambda)) / 10 : 999;
-    c.want_m = k->ula ? 0.5 * c.lambda : 0.5 * c.lambda / (2 * sin(M_PI / k->n));
     if (c.s > 0.5) c.word = "AMBIGUOUS", c.level = 2;
     else if (c.res > 20 || c.s < 0.2) c.word = "COARSE", c.level = 1;
     else c.word = "OK", c.level = 0;
@@ -437,7 +488,10 @@ static void elem(int k, double *x, double *y) {
     const kind_t *kd = &kinds[cfg.kind];
     double        size = cfg.size_mm / 1000.0;
 
-    if (kd->ula) {
+    if (cfg.kind == K_CUSTOM) {
+        *x = k < cust_n ? cust_x[k] : 0;
+        *y = k < cust_n ? cust_y[k] : 0;
+    } else if (kd->ula) {
         *x = 0;
         *y = (kd->n - 1) * size / 2 - k * size;
     } else {
@@ -617,7 +671,7 @@ static void draw_scope(void) {
     const kind_t *kd = &kinds[cfg.kind];
     double        ext = c.lambda / 4, ex[DF_PROTO_MAXCH], ey[DF_PROTO_MAXCH];
 
-    for (int k = 0; k < kd->n; k++) {
+    for (int k = 0; k < kind_n(); k++) {
         double x, y;
         elem(k, &x, &y);
         ex[k] = x, ey[k] = y;
@@ -632,7 +686,7 @@ static void draw_scope(void) {
     if (kd->ula) {                      /* the line itself */
         double x0, y0, x1, y1;
         elem(0, &x0, &y0);
-        elem(kd->n - 1, &x1, &y1);
+        elem(kind_n() - 1, &x1, &y1);
         double a0 = atan2(-y0, x0) + head * M_PI / 180, a1 = atan2(-y1, x1) + head * M_PI / 180;
         double r0 = hypot(x0, y0) * sc, r1 = hypot(x1, y1) * sc;
         line(px, SC, SC, (int)lround(cx + r0 * sin(a0)), (int)lround(cy - r0 * cos(a0)), (int)lround(cx + r1 * sin(a1)),
@@ -667,7 +721,7 @@ static void draw_scope(void) {
 
     /* the antennas: filled in their state's colour while in the bearing, a ring alone when not; a bar of the
      * target's level on each (0-40 dB over its floor) */
-    for (int k = 0; k < kd->n; k++) {
+    for (int k = 0; k < kind_n(); k++) {
         bool     used;
         int      cond = ant_cond(k, &used);
         double   a = atan2(-ey[k], ex[k]) + head * M_PI / 180, r = hypot(ex[k], ey[k]) * sc;
@@ -685,7 +739,7 @@ static void draw_scope(void) {
         lv_obj_set_style_text_color(ant_l[k], used ? ink : lv_color_hex(col & 0xffffff), 0);
         lv_obj_clear_flag(ant_l[k], LV_OBJ_FLAG_HIDDEN);
     }
-    for (int k = kd->n; k < DF_PROTO_MAXCH; k++) lv_obj_add_flag(ant_l[k], LV_OBJ_FLAG_HIDDEN);
+    for (int k = kind_n(); k < DF_PROTO_MAXCH; k++) lv_obj_add_flag(ant_l[k], LV_OBJ_FLAG_HIDDEN);
 
     /* the middle */
     line(px, SC, SC, (int)cx - 3, (int)cy, (int)cx + 3, (int)cy, c_dim, 0);
@@ -752,18 +806,26 @@ static void show_array(void) {
     uint32_t      wc = c.level == 0 ? c_green : c.level == 1 ? c_amb : c_red;
 
     lv_label_set_text_fmt(arr_cap_l, "ARRAY AGAINST THE BAND: %s", b >= 0 ? bands[b].name : "TUNED");
-    snprintf(t[0], sizeof(t[0]), "%s %s %.1f CM  S %.2f  RES %.0f DEG  #%06X %s#", k->name, k->ula ? "D" : "R",
-             cfg.size_mm / 10.0, c.s, c.res, (unsigned)(wc & 0xffffff), c.word);
-    snprintf(t[1], sizeof(t[1]), "FOR S 0.50: %s %.1f CM  HALF WAVE %.1f CM  %s", k->ula ? "D" : "R", c.want_m * 100,
-             c.lambda * 50, !*heading_from() ? "ANT0 UP" : !strcmp(heading_from(), "SET") ? "N UP"
-                            : !strcmp(heading_from(), "COMPASS") ? "N UP CMP" : "N UP GPS");
+    if (cfg.kind == K_CUSTOM)
+        snprintf(t[0], sizeof(t[0]), "CUSTOM %d ANT  S %.2f  RES %.0f DEG  #%06X %s#", cust_n, c.s, c.res,
+                 (unsigned)(wc & 0xffffff), c.word);
+    else
+        snprintf(t[0], sizeof(t[0]), "%s %s %.1f CM  S %.2f  RES %.0f DEG  #%06X %s#", k->name, k->ula ? "D" : "R",
+                 cfg.size_mm / 10.0, c.s, c.res, (unsigned)(wc & 0xffffff), c.word);
+    const char *up = !*heading_from() ? "ANT0 UP" : !strcmp(heading_from(), "SET") ? "N UP"
+                     : !strcmp(heading_from(), "COMPASS") ? "N UP CMP" : "N UP GPS";
+    if (cfg.kind == K_CUSTOM)
+        snprintf(t[1], sizeof(t[1]), "CLOSEST PAIR %.1f CM  HALF WAVE %.1f CM  %s", c.s * c.lambda * 100, c.lambda * 50, up);
+    else
+        snprintf(t[1], sizeof(t[1]), "FOR S 0.50: %s %.1f CM  HALF WAVE %.1f CM  %s", k->ula ? "D" : "R", c.want_m * 100,
+                 c.lambda * 50, up);
     lv_label_set_text(arr_l[0], t[0]);
     lv_label_set_text(arr_l[1], t[1]);
 }
 
 static void show_ants(void) {
     uint32_t *px = (uint32_t *)bars->data;
-    int       n = kinds[cfg.kind].n;
+    int       n = kind_n();
 
     for (int i = 0; i < BAR_W * NANT * ROW_H; i++) px[i] = c_ink;
     for (int r = 0; r < NANT; r++) {
@@ -878,9 +940,14 @@ static void pan_fill(void) {
         lv_label_set_text(panel_head_l, "ARRAY: HOW THE ANTENNAS ARE SET OUT, AGAINST WHICH BAND");
         fmt_mhz(f, sizeof(f), cfg.band >= 0 ? bands[cfg.band].hz : target_hz());
         snprintf(t[A_BAND], sizeof(t[0]), "BAND      < %s %s MHZ >", cfg.band >= 0 ? bands[cfg.band].name : "TUNED", f);
-        snprintf(t[A_KIND], sizeof(t[0]), "ARRAY     < %s >  ANT 0 FORWARD, THE REST CLOCKWISE", kinds[cfg.kind].name);
-        snprintf(t[A_SIZE], sizeof(t[0]), "%s    < %.1f CM >  S %.2f  RES %.0f DEG  %s", kinds[cfg.kind].ula ? "SPACING" : "RADIUS ",
-                 cfg.size_mm / 10.0, c.s, c.res, c.word);
+        snprintf(t[A_KIND], sizeof(t[0]), "ARRAY     < %s >  %s", kinds[cfg.kind].name,
+                 cfg.kind == K_CUSTOM ? "WHERE THE WEB PAGE'S ARRAY EDITOR PUT THEM" : "ANT 0 FORWARD, THE REST CLOCKWISE");
+        if (cfg.kind == K_CUSTOM)
+            snprintf(t[A_SIZE], sizeof(t[0]), "LAYOUT    %d ANTENNAS FROM DF_ARRAY.TXT  S %.2f  RES %.0f DEG  %s", cust_n,
+                     c.s, c.res, c.word);
+        else
+            snprintf(t[A_SIZE], sizeof(t[0]), "%s    < %.1f CM >  S %.2f  RES %.0f DEG  %s", kinds[cfg.kind].ula ? "SPACING" : "RADIUS ",
+                     cfg.size_mm / 10.0, c.s, c.res, c.word);
         snprintf(t[A_FIT], sizeof(t[0]), "PUSH: SIZE FOR S 0.50 AT THIS BAND (%.1f CM)", c.want_m * 100);
         if (!strcmp(heading_from(), "COMPASS") || !strcmp(heading_from(), "GPS COURSE"))
             snprintf(t[A_HEAD], sizeof(t[0]), "HEADING   < %d >  IN USE: %s %d (GPSD)", cfg.heading, heading_from(), heading_now());
@@ -950,8 +1017,19 @@ static void pan_change(int d) {
                 follow_off();
                 band_set(((cfg.band < 0 ? 0 : cfg.band) + d + N_BANDS) % N_BANDS);
                 break;
-            case A_KIND: cfg.kind = (cfg.kind + d + N_KINDS) % N_KINDS; send_array(); break;
+            case A_KIND:
+                cfg.kind = (cfg.kind + d + N_KINDS) % N_KINDS;
+                if (cfg.kind == K_CUSTOM && !cust_load()) {     /* no layout of your own yet: past it */
+                    msg("CUSTOM: NO /MNT/DF_ARRAY.TXT YET (THE WEB PAGE'S ARRAY EDITOR WRITES IT)");
+                    cfg.kind = (cfg.kind + d + N_KINDS) % N_KINDS;
+                }
+                send_array();
+                break;
             case A_SIZE:
+                if (cfg.kind == K_CUSTOM) {
+                    msg("CUSTOM: ITS LAYOUT IS THE FILE'S (THE WEB PAGE'S ARRAY EDITOR)");
+                    break;
+                }
                 cfg.size_mm += 5 * d;
                 if (cfg.size_mm < 10) cfg.size_mm = 10;
                 if (cfg.size_mm > 5000) cfg.size_mm = 5000;
@@ -1037,6 +1115,10 @@ static void pan_change(int d) {
 static void pan_push(void) {
     if (pan == P_ARRAY && pan_sel == A_FIT) {
         calc_t c = calc_at(target_hz());
+        if (cfg.kind == K_CUSTOM) {
+            msg("CUSTOM: ITS LAYOUT IS THE FILE'S (THE WEB PAGE'S ARRAY EDITOR)");
+            return;
+        }
         cfg.size_mm = (int)lround(c.want_m * 200) * 5;          /* to the half centimetre */
         send_array();
         msg("ARRAY SIZE SET FOR S 0.50: SET THE ANTENNAS OUT SO");
@@ -1705,7 +1787,12 @@ int app_df_web_set(const char *k, double v) {
         send_cal();
     } else if (!strcmp(k, "kind")) {
         if (idx_ok(v, N_KINDS) < 0) return -1;
+        if (i == K_CUSTOM && !cust_load()) return -1;           /* no layout file */
         cfg.kind = i;
+        send_array();
+    } else if (!strcmp(k, "custom")) {                  /* the web page wrote df_array.txt: read it, use it */
+        if (!cust_load()) return -1;
+        cfg.kind = K_CUSTOM;
         send_array();
     } else if (!strcmp(k, "size_mm")) {
         if (i < 10 || i > 5000) return -1;
@@ -1789,10 +1876,18 @@ int app_df_web_json(char *out, size_t n) {
        cfg.fc, cfg.off, target_hz(), cfg.bw, bnd, cfg.follow, cfg.autot, cfg.kind, cfg.size_mm, cfg.heading, cfg.method,
        cfg.rate, cfg.gain, cfg.sql_ddb / 10.0, cfg.cal, cfg.off_mask, cfg.nsrc, cfg.fb, cfg.log, heading_now());
     jstr(&b, heading_from(), 16);
+    jb(&b, ",\"xy\":[");                    /* the antennas where they are, mm (x forward, y left) */
+    for (int m = 0; m < kind_n(); m++) {
+        double x, y;
+        elem(m, &x, &y);
+        jb(&b, "%s[%ld,%ld]", m ? "," : "", lround(x * 1000), lround(y * 1000));
+    }
+    jb(&b, "]");
     jb(&b, "},\"lists\":{\"bands\":[");
     for (int i = 0; i < N_BANDS; i++) jb(&b, "%s[\"%s\",%u,%u]", i ? "," : "", bands[i].name, bands[i].hz, bands[i].step);
     jb(&b, "],\"kinds\":[");
-    for (int i = 0; i < N_KINDS; i++) jb(&b, "%s[\"%s\",%d,%d]", i ? "," : "", kinds[i].name, kinds[i].ula, kinds[i].n);
+    for (int i = 0; i < N_KINDS; i++)
+        jb(&b, "%s[\"%s\",%d,%d]", i ? "," : "", kinds[i].name, kinds[i].ula, i == K_CUSTOM ? cust_n : kinds[i].n);
     jb(&b, "],\"methods\":[");
     for (int i = 0; i < N_METHODS; i++) jb(&b, "%s\"%s\"", i ? "," : "", methods[i]);
     jb(&b, "],\"rates\":[");

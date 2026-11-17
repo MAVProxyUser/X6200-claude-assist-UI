@@ -11,6 +11,7 @@ import hashlib
 import io
 import ipaddress
 import json
+import math
 import os
 import re
 import secrets
@@ -2534,6 +2535,71 @@ def df_set():
         return api_error(503, "Radio GUI not reachable")
     if reply.get("t") != "ok":
         return api_error(409, reply.get("err", "Rejected by the radio"))
+    return {"status": "OK"}
+
+
+# A custom array (page I's CUSTOM): up to five antennas, x forward and y left in cm, ANT 0 first, one a line in
+# df_array.txt on the card; the GUI reads it when CUSTOM is chosen ("custom", app_df.c) and sends it to x6x00-df
+DF_ARRAY = "/mnt/df_array.txt"
+
+
+def df_array_read():
+    pts = []
+    try:
+        with open(DF_ARRAY) as f:
+            for line in f:
+                part = line.split("#", 1)[0].split()
+                if len(part) >= 2 and len(pts) < 5:
+                    try:
+                        x, y = float(part[0]), float(part[1])
+                    except ValueError:
+                        continue
+                    if math.isfinite(x) and math.isfinite(y) and abs(x) < 2000 and abs(y) < 2000:
+                        pts.append([x, y])
+    except OSError:
+        pass
+    return pts
+
+
+@app.get('/api/df/array')
+def df_array_get():
+    bottle.response.set_header("Cache-Control", "no-store")
+    return {"xy": df_array_read()}
+
+
+@app.post('/api/df/array')
+def df_array_set():
+    try:
+        data = bottle.request.json
+    except ValueError:
+        data = None
+    xy = data.get("xy") if isinstance(data, dict) else None
+    if not isinstance(xy, list) or not 2 <= len(xy) <= 5:
+        return api_error(400, "Two to five antennas")
+    pts = []
+    for p in xy:
+        if (not isinstance(p, list) or len(p) != 2
+                or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                       or abs(v) >= 2000 for v in p)):
+            return api_error(400, "Each antenna: x and y in cm, under 20 m")
+        pts.append((round(p[0], 1), round(p[1], 1)))
+    for i in range(len(pts)):
+        for j in range(i + 1, len(pts)):
+            if math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) < 1:
+                return api_error(400, f"ANT {i} and ANT {j} are in the same place")
+
+    def write(f):
+        f.write("# x6x00-df custom array (the web configurator's Array editor): x forward, y left, cm; ANT 0 first\n")
+        for m, (x, y) in enumerate(pts):
+            f.write(f"{x:g} {y:g}  # ANT {m}\n")
+
+    with config_lock:
+        replace_file(DF_ARRAY, write)
+    reply = display_call({"cmd": "df_set", "key": "custom", "val": 1})
+    if reply is None:
+        return api_error(503, "Saved, but the radio GUI is not reachable")
+    if reply.get("t") != "ok":
+        return api_error(409, reply.get("err", "Saved, but the radio did not take it"))
     return {"status": "OK"}
 
 
