@@ -289,13 +289,47 @@ int df_cal_run(float complex *const x[], int nch, int n, int maxlag, const int *
 
         tau -= cc / (2 * M_PI);
         phi = wrap(phi + a);
-        for (int b = -DF_CAL_SEG / 2; b < DF_CAL_SEG / 2; b++) {
-            if (!fit_bin(b, DF_CAL_SEG)) continue;
-            double complex v = CS(b);
-            double         u = (double)b / DF_CAL_SEG, w = cabs(v), r = wrap(carg(v) + 2 * M_PI * u * tau - phi);
+        /* the ripple: what the line leaves, smoothed over +-4 bins (the tuners' IF filters are not the same: on the
+         * radio's Kraken a line alone missed CH1 by 3 degrees rms every time, 2026-11-17); the residual is what is
+         * left after it, the noise and anything broken */
+        double  sr2 = 0;
+        double *rb = malloc(sizeof(double) * DF_CAL_SEG);
+        double complex *eb = malloc(sizeof(double complex) * DF_CAL_SEG);
 
-            se += w * r * r;
+        if (!rb || !eb) {
+            free(rb);
+            free(eb);
+            snprintf(o->why, sizeof(o->why), "out of memory");
+            goto out;
         }
+        for (int b = -DF_CAL_SEG / 2; b < DF_CAL_SEG / 2; b++) {
+            int            i = (b + DF_CAL_SEG) % DF_CAL_SEG;
+            double complex v = CS(b);
+            double         u = (double)b / DF_CAL_SEG;
+
+            rb[i] = wrap(carg(v) + 2 * M_PI * u * tau - phi);
+            eb[i] = fit_bin(b, DF_CAL_SEG) ? cabs(v) * cexp(I * rb[i]) : 0;
+        }
+        for (int b = -DF_CAL_SEG / 2; b < DF_CAL_SEG / 2; b++) {
+            int            i = (b + DF_CAL_SEG) % DF_CAL_SEG, at = b + DF_CAL_SEG / 2;
+            double complex z4 = 0;
+
+            for (int d = -4; d <= 4; d++) {
+                int bb = b + d;
+
+                if (bb >= -DF_CAL_SEG / 2 && bb < DF_CAL_SEG / 2) z4 += eb[(bb + DF_CAL_SEG) % DF_CAL_SEG];
+            }
+            double rip = fit_bin(b, DF_CAL_SEG) && cabs(z4) > 0 ? carg(z4) : 0;
+
+            o->ripple[m][at] = (float)rip;
+            if (!fit_bin(b, DF_CAL_SEG)) continue;
+            double w = cabs(CS(b)), e = wrap(rb[i] - rip);
+
+            se += w * e * e;
+            sr2 += w * rip * rip;
+        }
+        free(rb);
+        free(eb);
 #undef CS
         int kk = (int)lround(tau);                  /* keep tau within +-0.5: the whole sample may sit either side */
 
@@ -304,8 +338,13 @@ int df_cal_run(float complex *const x[], int nch, int n, int maxlag, const int *
         o->phi[m] = (float)phi;
         o->gain[m] = (float)sqrt(p[0] / p[m]);
         o->resid_deg[m] = (float)(sqrt(se / sw) * 180 / M_PI);
+        o->ripple_deg[m] = (float)(sqrt(sr2 / sw) * 180 / M_PI);
         if (o->resid_deg[m] > DF_CAL_RESID) {
-            snprintf(o->why, sizeof(o->why), "channel %d: phase fit off by %.1f deg rms", m, o->resid_deg[m]);
+            snprintf(o->why, sizeof(o->why), "channel %d: phase off the fit by %.1f deg rms", m, o->resid_deg[m]);
+            goto out;
+        }
+        if (o->ripple_deg[m] > DF_CAL_RIPPLE) {
+            snprintf(o->why, sizeof(o->why), "channel %d: phase ripple %.1f deg rms", m, o->ripple_deg[m]);
             goto out;
         }
     }
@@ -324,6 +363,15 @@ out:
 float complex df_cal_corr(const df_cal_t *c, int m, double f, double fs) {
     if (m <= 0 || m >= c->nch) return 1;
     double a = -(c->phi[m] - 2 * M_PI * (f / fs) * c->tau[m]);
+    double x = f / fs * DF_CAL_SEG + DF_CAL_SEG / 2;        /* the ripple at f, between its two bins */
+    int    i = (int)floor(x);
+
+    if (i >= 0 && i + 1 < DF_CAL_SEG) {
+        double w = x - i;
+        double complex r = (1 - w) * cexp(I * c->ripple[m][i]) + w * cexp(I * c->ripple[m][i + 1]);
+
+        a -= carg(r);
+    }
 
     return CMPLXF((float)(c->gain[m] * cos(a)), (float)(c->gain[m] * sin(a)));
 }

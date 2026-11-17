@@ -79,6 +79,7 @@
 #include "rtl_spectrum.h"
 #include "rtl_watch.h"
 #include "sdr_pool.h"
+#include "df_rx.h"
 #include "remote_server.h"
 #include "control_owner.h"
 #include "adsb_rx.h"
@@ -3295,6 +3296,8 @@ static void pp_fill(void) {
 
             fmt_mhz(f, sizeof(f), hz, 3);
             snprintf(who, sizeof(who), "B %s %s %s", f, mn[rtl_mode_of(hz) & 3], b_heard() ? "HEARD" : "MUTED");
+        } else if (u->owner == SDR_OWN_DF) {
+            snprintf(who, sizeof(who), "PAGE I DIRECTION FINDER CH%d", sdr_pool_array_ch(u));
         } else if (u->owner >= SDR_OWN_ADSB && u->owner < SDR_OWN_WATCH) {
             snprintf(who, sizeof(who), "AIRSPACE ADS-B 1090");
         } else if (u->owner >= SDR_OWN_WATCH && u->owner < SDR_OWNERS) {
@@ -3396,6 +3399,8 @@ static void pp_action(int k) {
                 sdr_pool_hear(u->owner, on);
                 osd(on ? "WATCH HEARD" : "WATCH MUTED", on ? "ITS AUDIO ON THE SPEAKER WHEN IT OPENS."
                                                            : "STILL WATCHED (ITS LINE ON B), NOT HEARD.", -1);
+            } else if (u->owner == SDR_OWN_DF) {
+                osd("PAGE I", "NO AUDIO: THE DIRECTION FINDER HAS THE WHOLE KRAKEN WHILE PAGE I IS OPEN.", -1);
             } else if (u->owner >= SDR_OWN_ADSB) {
                 osd("ADS-B", "NO AUDIO: DUMP1090 DECODES IT FOR AIRSPACE.", -1);
             } else {
@@ -6046,7 +6051,8 @@ static void key_cb(lv_event_t *e) {
 
             while (i < RING_N && ring[i] != at) i++;
             i = (i % RING_N + (key == KEY_MFK_NEXT ? 1 : RING_N)) % (RING_N + 1);
-            if (i == RING_N) app_sentry_open_at('H');   /* H: AIRSPACE, in the Sentry's place */
+            /* H: AIRSPACE, in the Sentry's place; before A, I (the direction finder) while a Kraken is there */
+            if (i == RING_N) app_sentry_open_at(key == KEY_MFK_PREV && df_rx_present() ? 'I' : 'H');
             else go(ring[i]);
             return;
         }
@@ -9103,6 +9109,11 @@ void app_sentry_open_at(char letter) {
     if (letter == 'H') {
         to_airspace = dialog_type_is_run(dialog_sentry);    /* the Sentry closing for its H */
         main_screen_start_app(ACTION_APP_ADSB);
+        return;
+    }
+    if (letter == 'I') {                /* the direction finder (app_df.c), after H while a Kraken is on USB */
+        to_airspace = dialog_type_is_run(dialog_sentry);    /* as for H: the Sentry's speaker left as it was */
+        main_screen_start_app(ACTION_APP_DF);
         return;
     }
     if (letter < 'A' || letter > 'G') return;

@@ -100,6 +100,7 @@
 #include "main_walk.h"
 #include "app_sentry.h"
 #include "app_adsb.h"
+#include "app_df.h"
 #include "adsb_rx.h"
 #include "first_start.h"
 #include "control_owner.h"
@@ -541,6 +542,7 @@ static const char *app_name(press_action_t a) {
         case ACTION_APP_TIMESIG:    return "Time Signal";
         case ACTION_APP_SWL:        return "On the Air";
         case ACTION_APP_ADSB:       return "Airspace";
+        case ACTION_APP_DF:         return "Direction finder";
         case ACTION_APP_FIRST_START: return "First start";
         default:                   return NULL;    /* Modes menu: a menu, not an app */
     }
@@ -632,6 +634,7 @@ static const struct {
     {ACTION_APP_FREEDV, &dialog_freedv},
     {ACTION_APP_SENTRY, &dialog_sentry},
     {ACTION_APP_ADSB, &dialog_adsb},
+    {ACTION_APP_DF, &dialog_df},
     {ACTION_APP_FIRST_START, &dialog_first_start},
 };
 #define WINDOWS_N (sizeof(windows) / sizeof(windows[0]))

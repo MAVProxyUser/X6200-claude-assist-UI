@@ -96,15 +96,15 @@ static void alloc(void) {
     }
 }
 
-/* RTLs another watch channel could have: of their own power, neither B's nor stopped nor a watch channel's (an
- * AIRSPACE spare gives its one up) */
+/* RTLs another watch channel could have: of their own power, neither B's nor page I's nor stopped nor a watch
+ * channel's (an AIRSPACE spare gives its one up) */
 int rtl_watch_free(void) {
     sdr_unit_t u[SDR_POOL_UNITS];
     int        n = sdr_pool_units(u, SDR_POOL_UNITS), free = 0;
 
     for (int i = 0; i < n; i++)
         if (u[i].kind == RTL_DEV_RTL && u[i].own_power && !u[i].stopped && u[i].owner != SDR_OWN_B &&
-            !(u[i].owner >= SDR_OWN_WATCH && u[i].owner < SDR_OWNERS))
+            u[i].owner != SDR_OWN_DF && !(u[i].owner >= SDR_OWN_WATCH && u[i].owner < SDR_OWNERS))
             free++;
     return free;
 }

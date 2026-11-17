@@ -141,14 +141,30 @@ static int scan(sdr_unit_t *out, int *rtls) {
     return n;
 }
 
+int sdr_pool_array_ch(const sdr_unit_t *u) {
+    if (u->kind != RTL_DEV_RTL || strlen(u->sn) != 4 || strncmp(u->sn, "100", 3) || u->sn[3] < '0' || u->sn[3] > '4')
+        return -1;
+    return u->sn[3] - '0';
+}
+
+int sdr_pool_array_count(void) {
+    int n = 0;
+
+    sdr_pool_init();
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < n_units; i++) n += sdr_pool_array_ch(&units[i]) >= 0;
+    pthread_mutex_unlock(&lock);
+    return n;
+}
+
 static int find(rtl_dev_t kind, int rtl) {
     for (int i = 0; i < n_units; i++)
         if (units[i].kind == kind && (kind != RTL_DEV_RTL || units[i].rtl == (rtl < 0 ? 0 : rtl))) return i;
     return -1;
 }
 
-/* Who has which, from scratch: B; the watch channels from the last RTL down; AIRSPACE's spares from the first up.
- * Under lock; true when anything changed */
+/* Who has which, from scratch: B; page I's array; the watch channels from the last RTL down; AIRSPACE's spares from the
+ * first up. Under lock; true when anything changed */
 static bool resolve(void) {
     int  before[SDR_OWNERS];
     bool bus = false;                   /* one on the radio's own power streams already */
@@ -168,6 +184,12 @@ static bool resolve(void) {
         held_by[SDR_OWN_B] = b;
         bus                = !units[b].own_power;
     }
+    if (wants[SDR_OWN_DF])                      /* page I: every stick of the Kraken B has not (B is lent to it) */
+        for (int i = 0; i < n_units; i++)
+            if (sdr_pool_array_ch(&units[i]) >= 0 && units[i].owner == SDR_OWN_NONE && !units[i].stopped) {
+                units[i].owner = SDR_OWN_DF;
+                if (held_by[SDR_OWN_DF] < 0) held_by[SDR_OWN_DF] = i;
+            }
     for (int k = 0; k < SDR_POOL_WATCH; k++) {    /* watch channels: an RTL of its own power each, from the last */
         int o = SDR_OWN_WATCH + k;
 
@@ -333,6 +355,7 @@ bool sdr_pool_heard(int owner) {
 
 void sdr_pool_owner_name(int owner, char *s, size_t n) {
     if (owner == SDR_OWN_B) snprintf(s, n, "B");
+    else if (owner == SDR_OWN_DF) snprintf(s, n, "PAGE I");
     else if (owner >= SDR_OWN_ADSB && owner < SDR_OWN_WATCH) snprintf(s, n, "AIRSPACE");
     else if (owner >= SDR_OWN_WATCH && owner < SDR_OWNERS) snprintf(s, n, "WATCH %d", owner - SDR_OWN_WATCH + 1);
     else snprintf(s, n, "FREE");

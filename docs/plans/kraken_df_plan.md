@@ -1,7 +1,9 @@
 # Direction finding (DF) with a KrakenSDR: plan for approval
 
-Status: **approved 2026-11-17 (D1); Phase 0 under way** (results in 5.1). The engine's device-free core is in
-`tools/rtlspec/df*.c`; nothing on the radio has changed.
+Status: **approved 2026-11-17 (D1); Phase 0 done, Phase 1 first light, page I built** (results in 5.1). The
+daemon `x6x00-df` (`tools/rtlspec/df.c`, `df_proto.h`) calibrates the radio's Kraken with its noise source and holds a
+bearing within 0.6 degree on a carrier with the PLL dither off (rtlsdr-blog patch 0002). The radio's USB feeds four
+RTL streams at most (D11). Page I (`src/app_df.c`, `src/df_rx.c`) is built; not yet on the radio.
 Read for it: Heimdall DAQ (`krakenrf/heimdall_daq_fw`, branch development, 58c4068), the DoA software
 (`krakenrf/krakensdr_doa`, 2e1c4e6), KrakenRF's Antenna Array Size Calculator (xlsx), and ours (`tools/rtlspec/`,
 `src/sdr_pool.c`, `src/rtl_spectrum.c`, `src/app_sentry.c`, `src/adsb_rx.c`, `docs/MANUAL.md`).
@@ -550,7 +552,7 @@ user's OK for that step; no GUI or daemon restarts while another session is test
     refused and the new search finding the 256; one sample also caught. This changed the slip detector (1.7).
 - **0c. CPU: measured** (2.3): 45-50 % of a core at 1.024 MS/s, 21-23 % at 0.25, 89-96 % at 2.4; a calibration 145 ms
   of CPU (58 ms with the delays known). The bench binary ran in /tmp at nice 19 and was removed.
-- **0a. Slip rate: the Kraken plugged in 2026-11-17, sticks not yet free.** Ready:
+- **0a. Slip rate: under way (2026-11-17).** The script:
   `tools/rtlspec/df_slip_test.sh -h root@<radio> -s 1024000 -m 30`, then `-s 250000` and `-s 2400000`. It refuses to
   start while a watch channel or AIRSPACE holds a Kraken stick.
   - First look (read only, before the test): with the Kraken alone on HOST, the SDR pool gave AIRSPACE three spares
@@ -560,6 +562,51 @@ user's OK for that step; no GUI or daemon restarts while another session is test
     dump1090s did not come back. That is less than the 24 MB/s streamed cleanly on 2026-11-16, so the bytes alone are
     not the limit: dump1090 opening sticks and writing gain registers while the others stream is the suspect. To be
     told apart by the test (five steady streams, no register writes).
+  - **Five at once need small transfers.** `rtl_test` keeps 15 transfers of 256 KiB per stick (3.8 MB): five of
+    them pass the radio's `usbfs_memory_mb` of 16 and the fifth stick cannot start ("Failed to submit transfer",
+    library error -5). The script now asks for 64 KiB (1 MB a stick); x6x00-df uses 15 x 64 KiB too.
+  - **The radio froze 10 minutes into five streams** (08:25-08:35 UTC: 5 x `rtl_test` at 1.024 MS/s, 64 KiB, the GUI
+    and B's daemon stopped at the user's word): no ping, no ARP; the user switched it off and on (no shutdown trace,
+    the DATA partition needed fsck). Its kernel log was lost (no pstore, no live `dmesg -w` was running). Not yet
+    told apart: the MUSB under five streams (risk 6.1.2), or the radio with its GUI stopped that long.
+  - **Second run, with the GUI up** (08:39-09:09 UTC): B on CH4 (1004, 2.1168 MS/s) as the GUI started it, four
+    `rtl_test` on 1000-1003 at 1.024 MS/s, `dmesg -w` captured live: 0 loss events on all four, no USB errors, the
+    radio fine. **But see the next point: one of the four delivered nothing**, so this is B plus three sticks.
+  - **The radio's USB feeds four RTL streams at most, B's included.** Measured with `tools/rtlspec/df_rate.c` (each
+    stick's real samples a second): B at 2.38 MS/s and 1000-1002 at 1.024 MS/s all 100 %; 1003, the fifth stream,
+    **0**, at 1.024 MS/s and at 0.25 MS/s alike; opened in the other order, 1000 (then the last) got nothing. The
+    MUSB has five receive endpoints and the Kraken's hub keeps one for its status; a fifth bulk stream shares an
+    endpoint that the kernel hands over only after 16 ms of NAKs, which a streaming RTL never gives. And `rtl_test`
+    prints "Samples per million lost: 0" for a stick that delivered nothing at all, so its slip count alone cannot
+    tell a starved stick from a perfect one (the 2026-11-16 "five at once" counts were the same tool: to be taken
+    again with df_rate). **So on this radio: four Kraken channels with B off the Kraken, three with B on it.** Five
+    need a kernel change (the shared bulk endpoint taken in turns per transfer), a decision for the user (D11).
+- **Phase 1 first light (2026-11-17, x6x00-df on the radio's Kraken, CH0-CH2, B on CH4):**
+  - Opening: each stick opened, set up and started before the next, 1 s apart (four opened first, then started 0.3
+    or 1 s apart, left the fourth with nothing). The streams start about 2.5 s apart (2.6 and 5.2 million samples):
+    the transfers' arrival times put the first guess within the noise correlation's reach, and every calibration
+    found the delays. A channel that sends nothing is let go and shown GONE with the reason.
+  - **Calibration with the noise source works**: +34 to +40 dB on every channel at 914.9 MHz, 1.024 MS/s, gain 28;
+    the tuners' filter ripple about 1 degree rms (now corrected per frequency, `df_cal.c`); what is left, 2.1-2.7
+    degrees rms per 1 kHz bin, is the noise (the correction, smoothed over 9 bins, is good to about 1 degree). The
+    gate for a broken block is 5 degrees per bin (a slip inside the block gives tens).
+  - **The PLL dither must be off (test 1g).** Over the air, the HackRF on the Mac (ANT500, 915.0 MHz carrier, amp
+    off, `-x 0`, 5 s on / 3 s off; the 902-928 MHz ISM band, far under Part 15.249) came in 30 dB over the floor on
+    CH1 and CH2 and 17 dB on CH0. With our librtlsdr as it was (dither on), the bearing swept the whole circle every
+    ~3 s (one tuner's phase turning on the others at ~0.3 Hz). With the dither switched off (new rtlsdr-blog patch
+    0002, `rtlsdr_set_dithering`), 209 bearings in 30 s lay within **312.2-312.8 degrees**, eigenvalue ratio 21 dB.
+    The bearing's value means nothing yet: the array was declared (UCA-5, 139 mm, three of its elements) without
+    knowing how the antennas really stand, which is also why the fit is 70 % rather than near 100.
+  - A dead-antenna rule of 12 dB was too tight indoors (CH0 heard the HackRF 12-13 dB under the others, nothing
+    wrong with it); now 20 dB down for a second, back in within 12.
+  - **Drift (1d) and repeatability (1c)**: one calibration, then 10 minutes with none, the carrier on: the bearing's
+    median in each minute 312.2-312.8 degrees (3,577 bearings, no slip). Opened again later with quite different raw
+    tuner phases (-58.8/+43.0 against +116.8/+113.4 degrees), the same bearing, 312.6. So a calibration holds for ten
+    minutes at least and comes out the same each time: D4's 2 minutes is cautious (10 would do; still in gaps).
+  - CPU: x6x00-df with three channels at 1.024 MS/s about 8-11 % of the whole processor in `top` (a third of a core);
+    at 2.4 MS/s 27 % (a whole core), calibration fine. **At 0.25 MS/s the calibration fails** (phase 45 degrees rms
+    off the fit, every time): not looked into yet (the RTL's own filter edges inside the fitted bins are the first
+    suspect). D3: 1.024 MS/s stays the default.
 
 ### Phase 1: the DAQ alone (x6x00-df, command-line output, no page I)
 
@@ -641,8 +688,10 @@ scanning DF through a frequency list (0.5 s per stop); declared plain-RTL groups
   The other way, copying code into the daemon, makes `x6x00-df` GPL-3 (allowed, since it is a separate program and the
   source is public, but their notices must be kept). Not legal advice.
 - **D3. Default sample rate**: 1.024 MS/s (proposed), 0.25 or 2.4, after test 0a. CPU measured: 45-50 % / 21-23 % /
-  89-96 % of a core.
-- **D4. Calibration interval**: 2 minutes (proposed), waiting for the squelch to close; final value after test 1d.
+  89-96 % of a core (bench); on the radio with three channels a third of a core at 1.024, a whole core at 2.4; 0.25
+  does not calibrate yet.
+- **D4. Calibration interval**: 2 minutes (proposed), waiting for the squelch to close. Test 1d (10 minutes, no
+  drift seen) says 10 minutes would do; a slip or a retune calibrates anyway.
 - **D5. B on a Kraken stick when I opens**: move B to another SDR if one is free, else lend B to I (proposed); or I
   waits until B is moved by hand.
 - **D6. DF only while I is open** (proposed: the Kraken goes back to AIRSPACE and watch channels on leaving), or in
@@ -651,8 +700,11 @@ scanning DF through a frequency list (0.5 s per stop); declared plain-RTL groups
 - **D8. Hardware on hand**: a splitter (1:4/1:5 or 1:2s) and five equal SMA cables for Phase 2? Antennas and a mount
   for an array (five identical whips on a ground plane, radius from 2.4)? Which band first (70 cm fits a 29 cm
   radius; 2 m needs 87 cm)?
-- **D9. Downloads**: OK to read `krakenrf/librtlsdr` (or keenerd's) for the exact dithering register? Anything else
-  beyond the three links given is asked first.
+- **D9. Downloads**: answered 2026-11-17 ("I don't care what you read to level up your knowledge"). The dither
+  register (R820T 0x12 bit 4) is now our own patch 0002 to rtlsdr-blog.
+- **D11. Five channels on the X6200** (found 2026-11-17): its USB host feeds four RTL streams. Choices: DF on four
+  channels (UCA-4 or ULA-4; B must be off the Kraken), or a kernel change to the MUSB driver so the fifth stream
+  shares an endpoint in turns (a new kernel on the card, tested like 9101/9102), or B on another SDR and four.
 - **D10. Plain RTL-SDRs**: drop phase DF for them (proposed), or plan the clock-mod group / amplitude DF as Phase 4.
 
 ---

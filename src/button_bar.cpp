@@ -459,6 +459,7 @@ static const char *user_label_of(int32_t a) {
         case ACTION_APP_FREEDV:     return "RADE";
         case ACTION_APP_SENTRY:     return "Sentry";
         case ACTION_APP_ADSB:       return "Airspace";
+        case ACTION_APP_DF:         return "Direction\nfinder";
         case ACTION_APP_TIMESIG:    return "Time\nSignal";
         case ACTION_APP_SWL:        return "On the\nAir";
         default:                    return "?";

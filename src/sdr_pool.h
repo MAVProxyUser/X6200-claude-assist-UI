@@ -7,6 +7,8 @@
  *  - B (the Sentry's VHF/UHF screen) through the SDR daemon x6x00-rtlspec: the one chosen on B, else the daemon's own
  *    order (a HackRF, a bladeRF, RTL0). G's SDR channels and C's stick entries are B's SDR, retuned.
  *  - Watch channels (rtl_watch.c): an RTL each, from the last down.
+ *  - Page I, the direction finder (df_rx.c), while it is open: every stick of a KrakenSDR (serials 1000-1004), the
+ *    whole array or nothing that B holds (B lent to it first, df_rx.c), before the watch channels and AIRSPACE.
  *  - AIRSPACE (adsb_rx.c): its spares, an RTL each, from the first up; B's SDR itself only with no spare at all (one
  *    SDR), and only while AIRSPACE's screen is open.
  *  - What the user stopped in the pool's panel stays stopped (kept by serial in BOARD_DATA "/sdr_pool").
@@ -29,11 +31,12 @@ extern "C" {
 
 #define SDR_POOL_UNITS 10                       /* RTL0-RTL7, a HackRF, a bladeRF */
 
-/* Who has one: B, AIRSPACE's spares 0-6 (every RTL but B's), the watch channels 0-3 */
+/* Who has one: B, page I (the direction finder: the whole KrakenSDR), AIRSPACE's spares 0-6 (every RTL but B's), the
+ * watch channels 0-3. Page I's owner holds several units: sdr_pool_held() gives its first */
 #define SDR_POOL_ADSB  7
 #define SDR_POOL_WATCH 4
-enum { SDR_OWN_NONE = -1, SDR_OWN_B = 0, SDR_OWN_ADSB = 1, SDR_OWN_WATCH = SDR_OWN_ADSB + SDR_POOL_ADSB,
-       SDR_OWNERS = SDR_OWN_WATCH + SDR_POOL_WATCH };
+enum { SDR_OWN_NONE = -1, SDR_OWN_B = 0, SDR_OWN_DF = 1, SDR_OWN_ADSB = 2,
+       SDR_OWN_WATCH = SDR_OWN_ADSB + SDR_POOL_ADSB, SDR_OWNERS = SDR_OWN_WATCH + SDR_POOL_WATCH };
 
 typedef struct {
     rtl_dev_t kind;
@@ -55,8 +58,13 @@ int  sdr_pool_rtl_count(void);
 /* What an owner should hold now: the unit's index in sdr_pool_units (-1 none), its serial and location for an RTL */
 int  sdr_pool_held(int owner, sdr_unit_t *u);
 
-/* An owner wanting one or not: AIRSPACE's spares as AIRSPACE wants them, the watch channels as they are set */
+/* An owner wanting one or not: AIRSPACE's spares as AIRSPACE wants them, the watch channels as they are set, page I
+ * while it is open */
 void sdr_pool_want(int owner, bool want);
+
+/* A KrakenSDR's stick (an RTL with serial 1000-1004: CH0-CH4, its channel; -1 not one); how many of them are on USB */
+int  sdr_pool_array_ch(const sdr_unit_t *u);
+int  sdr_pool_array_count(void);
 
 /* B's SDR as the daemon has it, and as asked for (rtl_spectrum.c), said to the pool */
 void sdr_pool_b(rtl_dev_t held, int held_rtl, rtl_dev_t want, int want_rtl);
@@ -70,7 +78,7 @@ unsigned sdr_pool_gen(void);
 void sdr_pool_hear(int owner, bool on);
 bool sdr_pool_heard(int owner);
 
-/* An owner's name for the panel: "B", "AIRSPACE", "WATCH 162.550" */
+/* An owner's name for the panel: "B", "PAGE I", "AIRSPACE", "WATCH 162.550" */
 void sdr_pool_owner_name(int owner, char *s, size_t n);
 
 #ifdef __cplusplus

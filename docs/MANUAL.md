@@ -20,7 +20,7 @@ Settings. Button and option names are written as the radio shows them.
 ## Contents
 
 - [Getting started](#getting-started): [first-start guide](#first-start-guide), [first steps](#first-steps), [setting up the transmitter](#setting-up-the-transmitter), [buttons and knobs](#buttons-and-knobs), [hand mic](#hand-mic), [keyboard](#keyboard) ([mouse](#mouse), [quick QSO log](#quick-qso-log))
-- [The Sentry](#the-sentry) (this fork, X6200): [A and B](#a-and-b-the-spectrum-screens), [SCAN CFG](#scan-cfg), [C LOG](#c-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [AIRSPACE](#airspace)
+- [The Sentry](#the-sentry) (this fork, X6200): [A and B](#a-and-b-the-spectrum-screens), [SCAN CFG](#scan-cfg), [C LOG](#c-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [AIRSPACE](#airspace), [I DIRECTION FINDER](#i-direction-finder)
 - [Updating the firmware](#updating-the-firmware): [the SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot), [the X6200's base firmware](#the-x6200s-base-firmware), [the X6100's base firmware](#the-x6100s-base-firmware)
 - [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
 - [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab)
@@ -908,8 +908,11 @@ second): each RTL-SDR by its number (RTL0, RTL1...: serial, then USB location), 
 
 1. **B** keeps the one chosen on B (else the SDR daemon's own: a HackRF, a bladeRF, RTL0). A's SDR LISTEN, C's stick
    entries, D's bands and G's SDR channels are B's SDR, retuned.
-2. **Watch channels** take RTLs of their own power from the last down (RTL4, RTL3...).
-3. **AIRSPACE's spares** take the rest from the first up: one with AIRSPACE closed, every free one while it is open.
+2. **Page I** (the [direction finder](#i-direction-finder)), while it is open, takes **every stick of a KrakenSDR**
+   (serials 1000-1004). B on one of them moves to another SDR first, or with none free is lent to I (its daemon
+   ended till I closes, B saying BUSY).
+3. **Watch channels** take RTLs of their own power from the last down (RTL4, RTL3...).
+4. **AIRSPACE's spares** take the rest from the first up: one with AIRSPACE closed, every free one while it is open.
    **AIRSPACE borrows B's SDR only when it has no spare of that kind** (one SDR alone): with a KrakenSDR B goes on
    while AIRSPACE is open.
 
@@ -918,9 +921,9 @@ stream beside it and each other (five did at once, about 24 MB/s, 2026-11-16). B
 such RTL, one RTL on the radio's power may be AIRSPACE's, as before.
 
 **The SDR POOL panel**, from any screen but G held up: **APP held**, or F SYSTEM's **SDR POOL**. A row each SDR: its
-number, serial, USB location and user (`B 106.700 WFM HEARD`, `AIRSPACE ADS-B 1090`, `WATCH 106.700 QUIET MUTED`,
-`FREE`, `STOPPED`; `(RADIO'S POWER)` for one on the radio's own). The MFK chooses; **F1** (or the push) uses it on
-B; **F2** stops it (nobody's: whoever had it moves to another or waits, kept over restarts in `/mnt/sdr_pool`) or
+number, serial, USB location and user (`B 106.700 WFM HEARD`, `PAGE I DIRECTION FINDER CH0`, `AIRSPACE ADS-B 1090`,
+`WATCH 106.700 QUIET MUTED`, `FREE`, `STOPPED`; `(RADIO'S POWER)` for one on the radio's own). The MFK chooses;
+**F1** (or the push) uses it on B; **F2** stops it (nobody's: whoever had it moves to another or waits, kept over restarts in `/mnt/sdr_pool`) or
 starts it again (B's own cannot be stopped: use another on B first); **F3** hears or mutes it (B's: the screen's
 LISTEN, the SDR or the X6200; a watch channel's: in the mix or not; AIRSPACE's has no audio); **F4** watches B's
 channel on a free RTL (as F4 held on B); **F5**, BACK or APP closes it. It follows changes while open.
@@ -1374,6 +1377,79 @@ stays live; with B's SDR alone the scope has nothing new while ACARS is on. F5 a
   SDR's stream (on the stream's own thread it took a whole core and the stream fell behind the device).
 - The airband antenna matters more than for ADS-B: ground stations are strongest; aircraft are heard when high.
 - Reading ACARS is receive only, as is everything on AIRSPACE.
+
+### I DIRECTION FINDER
+
+**Page I points at a transmitter** with a KrakenSDR: five RTL-SDR receivers on one clock (serials 1000-1004) and a
+noise source to line them up. It is on the Sentry's ring **after H (AIRSPACE), before A, only while a Kraken is on
+USB** (three or more of its five sticks), or while its test source is chosen. The daemon waits for all five to be
+on USB (I says which are missing: "waiting for the Kraken's sticks: 1003"), then uses as many as the radio can feed:
+**the X6200's USB carries four RTL streams at once, B's included**, so with B lent to I it is CH0-CH3 (CH4 shows
+GONE, with the reason), and three with B still on a Kraken stick. Set the array out for four (UCA-4 or ULA-4) to use
+them all; a five-element circle with ANT 4 left out works too, a little less well. Written 2026-11-17 from the plan in
+`docs/plans/kraken_df_plan.md`; **not yet tried with real antennas**. Receive only: the Kraken has no transmitter and
+the X6200 is not touched (the VFO knob is this page's).
+
+While I is open the Kraken is its alone: AIRSPACE's spares and watch channels on Kraken sticks let go (they come back
+when I closes), and B on a Kraken stick moves to another SDR, or with none free is lent to I. The daemon,
+`/usr/bin/x6x00-df` (log `/tmp/x6x00-df.log`), runs only while I is open: it streams the five, switches the noise
+source on for a moment to calibrate (the antennas are off for that moment), and works out the bearing ten times a
+second. It is our own, not KrakenRF's Heimdall and DoA software.
+
+**The compass** (left): the array drawn to scale in the middle, numbered as KrakenRF's Antenna Array Size Calculator
+numbers it: ANT 0 forward (up), the rest clockwise; a line (ULA) from ANT 0 on the left. **Which antennas are
+receiving and used**: an antenna **filled** is in the bearing, a **ring** alone is left out; its colour says what it
+is doing:
+
+| Colour | Means |
+|---|---|
+| Green | streaming, calibrated, in the bearing |
+| Amber | in the bearing, the target under the squelch on it |
+| Red | the target 20 dB or more under the others (a dead antenna or cable: left out), or this channel lost samples |
+| Magenta | clipping: turn the gain down (F5) |
+| Dim | not calibrated yet, left out by you (F5), or its stick is gone |
+
+The short bar beside each antenna is the target over that channel's floor (0-40 dB). The **dashed circle is half a
+wavelength across** at the target, so the array is seen against the band. Round it: the method's spectrum (where the
+signal seems to come from, filled outward), the **needle** at the bearing with its +- wedge (green for a fit of 80 %
+up, amber 50-80 %, red under), other peaks as ticks, the last bearings as dots on the rim (fading over two minutes);
+a line's other side dashed (a line cannot tell front from back). When the signal stops the last bearing stays,
+fading over 30 s (HOLD). With a heading set (F2) north is up and bearings are compass bearings.
+
+**The right**: the target (frequency, bandwidth, state: CALIBRATING, LISTENING, TRACKING, HOLD, SLIP), the bearing,
+its +-, the fit and the method, the level over the floor and the calibration's age; **the array against the band**:
+KrakenRF's calculator at the target's frequency, the spacing over the wavelength `s`, its estimated resolution and a
+word, **OK** (`s` 0.2-0.5), **AMBIGUOUS** (`s` over 0.5: the bearing can be wrong by a mirror) or **COARSE**
+(resolution over 20 degrees, or `s` under 0.2), and the size the calculator would want (`s` = 0.5); the **antennas'
+box**, a row each with its serial, its bar and what it is doing; CH0's spectrum across the passband with the target
+band marked, over a waterfall of bearings (0-359 across, the newest on top: a moving or intermittent transmitter
+shows as a track).
+
+**Keys**:
+
+- **F1 TARGET**: the bandwidth (2.5, 6, 12.5, 25, 200 kHz). **F1 held**: AUTO, the strongest signal in the passband
+  (moved to when it stands 6 dB over the one held).
+- **F2 ARRAY**: a panel. **BAND** presets: AIR 125, 2 M 146, MARINE 156.8, NOAA 162.55, 1.25 M 223.5, ISM 433.92, 70 CM
+  440, FRS/GMRS 462.5625, 33 CM 915, 23 CM 1270 MHz (the Kraken a quarter of its rate under it, so the target sits
+  clear of the sticks' centre spike). **ARRAY**: UCA-5, UCA-4, UCA-3 (a circle), ULA-5, ULA-4, ULA-3 (a line); with
+  fewer than five, CH0 up are used. **RADIUS** or **SPACING** in 0.5 cm steps: the array as you set it out, which does
+  not change with the band, so the calculator line says what it gives at each. **PUSH: SIZE FOR S 0.50** sets the size
+  the calculator wants for the band. **HEADING**: ANT 0's compass bearing (0 = ANT 0 up).
+- **F3 METHOD**: MUSIC (default), Bartlett, Capon, MEM.
+- **F4 CAL**: calibrate now (a moment of noise, the antennas off). **F4 held**: how often (off, 30 s to 10 minutes,
+  2 minutes by default), always in a gap in the signal.
+- **F5 SET**: a panel: RATE (0.25, 1.024, 2.048, 2.4 MS/s; wider sees more of the band and costs more processor;
+  1.024 is the one tried, about a third of a core for four channels; **0.25 does not calibrate yet**, I says why),
+  GAIN (the same on every channel), SQUELCH (dB over the floor to take a bearing), CALIBRATE (as F4 held), each
+  ANT USED or LEFT OUT, and SOURCE: KRAKEN or TEST SIGNAL (a made-up transmitter turning round the array, for trying
+  the page with no Kraken; also chosen by a file `/mnt/df_synth`).
+- In a panel the MFK goes down the rows, the VFO changes the one chosen, the push does it or closes; BACK closes.
+- **VFO**: the target, 1 kHz a click. **MFK**: the target a channel (the band's step). **Arrows** (BAND): the Kraken
+  half a passband up or down, the target kept where it is while it stays inside. **Ring**: H before, A after.
+  **APP held**: the SDR pool's panel. **GEN**: help.
+
+What it keeps: the band, the array and its size, the heading, the method, rate, gain, squelch and calibration
+interval, the antennas left out, in `/mnt/gui_state.conf` (`df.*`).
 
 ### DMR
 

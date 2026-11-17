@@ -70,6 +70,7 @@ static pthread_t       thread;
 static bool            started;
 static atomic_bool     want;
 static atomic_bool     yielded;          /* AIRSPACE's screen open: its dump1090 has the stick's samples */
+static atomic_bool     lent_df;          /* page I has the KrakenSDR B was on: the daemon ended and not started */
 
 /* Wanted and not yielded: rows asked for */
 static bool kept(void) {
@@ -336,6 +337,25 @@ static void *spec_thread(void *arg) {
 
         /* AIRSPACE's dump1090 runs only while its screen is open, on the daemon's samples (adsb_rx.c) */
         adsb_rx_lend(!atomic_load(&yielded) || atomic_load(&acars_on));     /* ACARS: the SDR on 130 MHz */
+        if (atomic_load(&lent_df)) {    /* B lent to page I (df_rx.c): its daemon told to end (it closes the stick),
+                                         * none started, B holding nothing in the pool till it is given back */
+            if (fd >= 0) {
+                (void)send(fd, "Q\n", 2, MSG_DONTWAIT | MSG_NOSIGNAL);
+                pthread_mutex_lock(&lock);
+                cmd_fd = -1;
+                pthread_mutex_unlock(&lock);
+                close(fd);
+                fd = -1;
+                last_st[0] = 0;
+                atomic_store(&tx_state, RTL_TX_OFF);
+            }
+            atomic_store(&dev_kind, RTL_DEV_NONE);
+            atomic_store(&dev_rtl, -1);
+            sdr_pool_b(RTL_DEV_NONE, -1, RTL_DEV_NONE, -1);
+            state = RTL_SPEC_BUSY;
+            usleep(200000);
+            continue;
+        }
         if (fd < 0) {
             if ((fd = daemon_connect()) < 0 && access(HELPER, X_OK) == 0) {
                 daemon_start();
@@ -762,6 +782,14 @@ void rtl_spectrum_want(bool on, int64_t hz, int gain) {
 /* AIRSPACE open: its dump1090 has the daemon's samples, so the daemon is connected now even if no Sentry screen ever
  * wanted rows (a GUI started again straight into AIRSPACE: dump1090 found the stick busy, held by the daemon, and
  * AIRSPACE said OPENING ITS PORT till the Sentry was opened; a HackRF or bladeRF it cannot open at all) */
+void rtl_spectrum_lend_df(bool on) {
+    atomic_store(&lent_df, on);
+}
+
+bool rtl_spectrum_lent_df(void) {
+    return atomic_load(&lent_df);
+}
+
 void rtl_spectrum_yield(bool on) {
     atomic_store(&yielded, on);
     if (on && !started) {

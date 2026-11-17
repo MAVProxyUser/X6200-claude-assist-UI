@@ -459,6 +459,44 @@ static void test_no_bearing(void) {
 
 /* a stick loses `lost` samples on channel 3 halfway: the slip must be caught, no wrong bearing shown meanwhile, and a
  * new calibration (the hardware's delay now `lost` shorter) brings the bearing back */
+/* A dead antenna (the target 30 dB down on CH3, its noise as before): left out of the bearing after a second, the
+ * bearing from the other four still right, and never taken for a slip (no calibration asked for) */
+static void test_dead_antenna(void) {
+    df_array_t  arr;
+    hw_t        hw[5], dead[5];
+    df_cal_t    cal;
+    df_engine_t e;
+    df_est_t    est;
+    src_t       s = nfm(70, 20);
+    int         nb = 25, slip_cal = 0, was_used = 0;
+
+    df_array_uca(&arr, 5, 0.5 * DF_C / (FC + FOFF) / (2 * sin(M_PI / 5)));
+    hw_random(hw, 5);
+    calibrate(hw, 5, &cal);
+    memcpy(dead, hw, sizeof(hw));
+    dead[3].g *= 0.03;
+    uint8_t **ch = gen(dead, &arr, &s, 1, START * 2 + (nb + 1) * BLOCK, 0);
+
+    engine_for(&e, &arr);
+    df_engine_set_cal(&e, &cal);
+    for (int b = 0; b < nb; b++) {
+        run(&e, ch, &cal, b, 1, &est);
+        slip_cal += est.cal_wanted == 1;
+        if (b == 2) was_used = (est.used >> 3) & 1;
+    }
+    check(was_used && !((est.used >> 3) & 1) && est.nused == 4, "dead CH3: in at first, left out after a second (used %02x)",
+          est.used);
+    check(est.gate && angdiff(est.doa.bearing, 70) < 1, "dead CH3: bearing %.2f (70) from the other four, fit %.2f, gate %d",
+          est.doa.bearing, est.doa.fit, est.gate);
+    check(!slip_cal, "dead CH3: not taken for a slip (%d calibrations asked for)", slip_cal);
+    e.user_off = 1u << 1;                                   /* the user leaves CH1 out as well */
+    run(&e, ch, &cal, nb - 3, 3, &est);
+    check(est.nused == 3 && est.gate && angdiff(est.doa.bearing, 70) < 2,
+          "CH1 left out by the user too: %d in use, bearing %.2f (70), gate %d", est.nused, est.doa.bearing, est.gate);
+    df_engine_free(&e);
+    free_ch(ch, 5);
+}
+
 static void test_slip(int lost, int must_catch) {
     df_array_t  arr;
     hw_t        hw[5];
@@ -525,6 +563,7 @@ int main(int argc, char **argv) {
     test_methods();
     test_interferer();
     test_no_bearing();
+    test_dead_antenna();
     test_slip(256, 1);
     test_slip(1, 0);
     printf("df_test: %d checks, %d failed\n", checks, fails);

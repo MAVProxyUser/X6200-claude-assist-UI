@@ -48,7 +48,10 @@ typedef struct {
     float phi[DF_MAXCH];        /* phase at 0 Hz, radians */
     float gain[DF_MAXCH];       /* amplitude correction */
     float margin_db[DF_MAXCH];  /* cross-correlation peak over the mean of the rest */
-    float resid_deg[DF_MAXCH];  /* rms of the phase fit's residual */
+    float resid_deg[DF_MAXCH];  /* rms of what is left of the phase once the line and the ripple are taken off */
+    float ripple_deg[DF_MAXCH]; /* rms of the ripple: the tuners' filters' own phase, off the line */
+    float ripple[DF_MAXCH][1024];   /* the ripple per cross-spectrum bin (DF_CAL_SEG, 0 Hz in the middle), radians:
+                                     * smoothed over +-4 bins; added to the line at the target (df_cal_corr) */
     float level_db[DF_MAXCH];   /* the noise's power, dB full scale */
     bool  ok;
     char  why[80];
@@ -57,7 +60,10 @@ typedef struct {
 #define DF_CAL_N        65536   /* samples per channel for a calibration */
 #define DF_CAL_SEG      1024    /* the cross-spectrum's FFT */
 #define DF_CAL_MARGIN   20.0f   /* dB the correlation peak must stand over the rest (as Heimdall) */
-#define DF_CAL_RESID    2.0f    /* degrees rms the phase fit may miss by */
+#define DF_CAL_RESID    5.0f    /* degrees rms a bin's phase may miss the line + ripple by: a slip inside the block
+                                 * gives tens of degrees. On the radio's Kraken the noise alone left 2.3-2.7 per bin
+                                 * at 915 MHz (2026-11-17), so the correction (+-4 bins smoothed) is good to about 1 */
+#define DF_CAL_RIPPLE   20.0f   /* degrees rms of ripple beyond which the block is not trusted */
 
 /* x: nch channels of n samples (a power of two, DF_CAL_N), all read at the same index; their means already off.
  * maxlag: the largest whole-sample delay looked for (searched in the first DF_CAL_XN samples, all n if that fails).
@@ -166,7 +172,7 @@ typedef struct {
     double      sql_db;                 /* the squelch: target over the floor (default 8) */
     double      eig_min_db;             /* one source across the array (default 6) */
     double      fit_min;                /* a plane wave explains it (default 0.5) */
-    double      cal_every_s;            /* the timer (default 120) */
+    double      cal_every_s;            /* the timer (default 120; negative: never) */
 
     /* inside */
     df_chan_t      chan;
@@ -181,16 +187,39 @@ typedef struct {
     double         since_cal, low_fit, last_slip_cal, now, sql_closed;
     double         hist[10];
     int            nhist;
+
+    /* which channels go into the bearing: all but those the user left out and those the target is 12 dB or more
+     * under the rest on for a second (a dead antenna or cable: back in once within 6 dB) */
+    unsigned       user_off;            /* set by the caller: bit m leaves channel m out */
+    bool           low[DF_MAXCH];
+    double         low_t[DF_MAXCH];
+    unsigned       sub_mask;            /* the elements sub and sub_steer were made for */
+    df_array_t     sub;
+    df_steer_t     sub_steer;
+    float          spec_db[1024];       /* CH0's last spectrum, dBFS, lowest frequency first */
+    float          win[1024];           /* Hann */
+    double         floor_db;            /* its median bin */
 } df_engine_t;
+
+/* A dead antenna: the target this far under the median of the others for a second; back in once within the second.
+ * Not 12: indoors one element of the radio's Kraken heard the HackRF 12 dB under the rest with nothing wrong with it
+ * (2026-11-17); a dead or unplugged one is 20-30 dB down */
+#define DF_LOW_DB       20.0
+#define DF_LOW_BACK_DB  12.0
 
 typedef struct {
     bool     gate;                      /* a bearing worth showing */
-    double   level_db;                  /* the target's strongest 1 kHz over the floor (CH0) */
+    double   level_db;                  /* the target over the floor: the median of the channels in use */
     double   uncert_deg;
     int      cal_wanted;                /* 0 no, 1 a slip, 2 the timer */
     int      bad_ch;                    /* the channel that looks slipped, -1 none */
     int      k;                         /* snapshots behind it */
-    df_doa_t doa;
+    bool     have_doa;                  /* doa is there (enough elements, enough samples) */
+    unsigned used;                      /* the channels in the bearing (bit m) */
+    int      nused;
+    double   ch_db[DF_MAXCH];           /* the target's strongest bin over each channel's own floor */
+    double   clip[DF_MAXCH];            /* share of each channel's bytes at 0 or 255 */
+    df_doa_t doa;                       /* bad_ch and the bearing are in whole-array channel numbers */
 } df_est_t;
 
 int  df_engine_init(df_engine_t *e, int cap);

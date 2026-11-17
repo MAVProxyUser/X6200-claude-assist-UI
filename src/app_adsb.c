@@ -23,6 +23,7 @@
 #include "adsb.h"
 #include "adsb_rx.h"
 #include "app_sentry.h"
+#include "df_rx.h"
 #include "rtl_spectrum.h"
 #include "sdr_pool.h"
 #include "remote_server.h"
@@ -809,6 +810,7 @@ static void show_head(double now, int nlive, int nghost) {
         if (on) continue;
         const char *whose = u[k].stopped                   ? "STOPPED"
                           : u[k].owner == SDR_OWN_B         ? "ON B"
+                          : u[k].owner == SDR_OWN_DF        ? "ON I"
                           : u[k].owner >= SDR_OWN_WATCH     ? "WATCHING"
                           : u[k].owner >= SDR_OWN_ADSB      ? "STARTING"
                                                             : "IDLE";
@@ -1229,8 +1231,9 @@ static void key_cb(lv_event_t *e) {
         case LV_KEY_RIGHT:
         case LV_KEY_DOWN: step_sel(1); break;
         case LV_KEY_ESC: dialog_destruct(); break;
-        /* The MFK's inner ring: this is the Sentry's H, between its G and its A */
-        case KEY_MFK_NEXT: app_sentry_open_at('A'); break;
+        /* The MFK's inner ring: this is the Sentry's H, between its G and its A (its I, the direction finder, between
+         * while a Kraken is on USB) */
+        case KEY_MFK_NEXT: app_sentry_open_at(df_rx_present() ? 'I' : 'A'); break;
         case KEY_MFK_PREV: app_sentry_open_at('G'); break;
         default: break;
     }

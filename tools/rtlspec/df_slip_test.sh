@@ -8,7 +8,8 @@
 # one opened at a time, all streaming together, then counts the loss EVENTS per channel per hour. Receive only:
 # nothing is transmitted, nothing on the radio is changed but files in /tmp/df_slip (removed at the end).
 #
-#     tools/rtlspec/df_slip_test.sh [-h root@radio] [-s rate] [-m minutes]      (defaults 1024000, 30)
+#     tools/rtlspec/df_slip_test.sh [-h root@radio] [-s rate] [-m minutes] [-l 'serials']   (defaults 1024000, 30,
+#                                                                                          all five)
 #
 # Before: the Kraken on its own power on the HOST port; no watch channel and no AIRSPACE receiver on its sticks (the
 # script stops if one of them is held). B on another SDR may keep running (that is the realistic case).
@@ -16,17 +17,18 @@
 HOST=root@x6200
 RATE=1024000
 MIN=30
-while getopts "h:s:m:" o; do
+SERIALS="1000 1001 1002 1003 1004"
+while getopts "h:s:m:l:" o; do
     case $o in
         h) HOST=$OPTARG;;
         s) RATE=$OPTARG;;
         m) MIN=$OPTARG;;
+        l) SERIALS=$OPTARG;;
         *) sed -n '3,15p' "$0"; exit 2;;
     esac
 done
 
-ssh -o ConnectTimeout=5 "$HOST" RATE="$RATE" SECS=$((MIN * 60)) sh -s << 'EOF'
-SER="1000 1001 1002 1003 1004"
+ssh -o ConnectTimeout=5 "$HOST" RATE="$RATE" SECS=$((MIN * 60)) SER="'$SERIALS'" sh -s << 'EOF'
 D=/tmp/df_slip
 # each serial on USB, and nobody holding it
 for s in $SER; do
@@ -44,9 +46,12 @@ for s in $SER; do
     done
 done
 rm -rf $D && mkdir -p $D
+T0=$(cut -d. -f1 /proc/uptime)
 echo "rate $RATE S/s, $SECS s, started $(date -u +%H:%M:%S) UTC"
+# 64 KiB transfers (rtl_test keeps 15 of them): its default 256 KiB makes 3.8 MB a stick, and five of those are over
+# the radio's usbfs_memory_mb of 16 (the fifth stick could not start, 2026-11-17)
 for s in $SER; do
-    ( rtl_test -d "$s" -s "$RATE" 2>&1 | while IFS= read -r l; do echo "$(date +%s) $l"; done > $D/$s.log ) &
+    ( rtl_test -d "$s" -s "$RATE" -b 65536 2>&1 | while IFS= read -r l; do echo "$(date +%s) $l"; done > $D/$s.log ) &
     sleep 2                                         # one at a time: opening five at once left one with no samples
 done
 sleep "$SECS"
@@ -58,9 +63,13 @@ for s in $SER; do
     ev=$(grep -c 'lost at least' $D/$s.log)
     by=$(grep 'lost at least' $D/$s.log | awk '{s += $5} END {print s + 0}')
     sum=$(grep -i 'per million' $D/$s.log | tail -1 | cut -d' ' -f2-)
+    grep -q 'Failed to submit\|Library error' $D/$s.log && sum="FAILED: $(grep -m1 'Failed\|error' $D/$s.log | cut -d' ' -f2-)"
     echo "$s  $ev  $(awk -v e="$ev" -v t="$SECS" 'BEGIN {printf "%.1f", e * 3600 / t}')  $by  ${sum:-?}"
 done
 echo "first events:"
 grep -h 'lost at least\|error\|Error' $D/*.log | head -10
+echo "kernel USB messages during the test:"
+dmesg | awk -v t0="$T0" '{t = $0; sub(/^\[ */, "", t); sub(/\].*/, "", t); if (t + 0 >= t0) print}' |
+    grep -i 'usb\|musb' | head -20
 rm -rf $D
 EOF

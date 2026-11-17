@@ -86,6 +86,11 @@ rtl_spec_state_t rtl_spectrum_state(void);
  * again. The stick stays open and streaming either way */
 void rtl_spectrum_yield(bool on);
 
+/* Page I (df_rx.c) has the KrakenSDR and B was on one of its sticks with no other SDR to go to: B's daemon told to
+ * end (it closes the stick) and not started again till B is given back (false); B says BUSY meanwhile */
+void rtl_spectrum_lend_df(bool on);
+bool rtl_spectrum_lent_df(void);
+
 /* Connected to the daemon: the stick's samples can be had through it */
 bool rtl_spectrum_daemon(void);
 

@@ -96,6 +96,7 @@ typedef enum {
                              * General; no key gets it, so its number is saved nowhere */
     ACTION_APP_TIMESIG,  /* 132: Time Signal, the clock from WWV and WWVH (dialog_timesig.c) */
     ACTION_APP_SWL,      /* 133: On the Air, the broadcast list's stations on the air now (dialog_swl.c) */
+    ACTION_APP_DF,       /* 134: page I, the Sentry's direction finder with a KrakenSDR (app_df.c) */
 } press_action_t;
 
 typedef enum {
