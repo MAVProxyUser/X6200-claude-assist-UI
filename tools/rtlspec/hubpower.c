@@ -7,6 +7,9 @@
  *  that switches each port's power (wHubCharacteristics bits 1-0 = 01) is asked; "info" says what the hub can.
  *  The Genesys hub in the X6200 (05e3:0610) says it does, but a hung USB-3000 stayed hung through off 3 s, so its
  *  VBUS does not really follow (2026-11-16): a hub that does is still worth this.
+ *  The port is disabled in the kernel first (sysfs <hub>-port<N>/disable), and enabled after: cut under a bound
+ *  ftdi_sio, the kernel went on writing into it, hundreds of -71/-110 errors in a second, and their printing on the
+ *  115200 baud console held a CPU long enough for the display to miss a vblank (a WARNING, a moment's freeze).
  *
  *      hubpower <hub USB path, "3-1"> info
  *      hubpower <hub USB path> <port> [off seconds, 3]
@@ -65,13 +68,23 @@ int main(int argc, char **argv) {
                 sw != 1 ? "this hub does not switch each port's power" : "no such port");
         goto out;
     }
+    char  dis[96];
+    FILE *f;
+
+    snprintf(dis, sizeof(dis), "/sys/bus/usb/devices/%s:1.0/%s-port%d/disable", argv[1], argv[1], port);
+    if (!(f = fopen(dis, "w")) || fputs("1", f) < 0 || fclose(f)) {     /* the kernel lets the device go first */
+        fprintf(stderr, "hubpower: %s not written: not cutting a port the kernel still uses\n", dis);
+        goto out;
+    }
     if (libusb_control_transfer(h, 0x23, 1, 8, (uint16_t)port, NULL, 0, 1000) < 0) {      /* ClearPortFeature POWER */
         fprintf(stderr, "hubpower: port %d's power not cut\n", port);
+        if ((f = fopen(dis, "w"))) fputs("0", f), fclose(f);
         goto out;
     }
     printf("port %d off for %d s\n", port, secs);
     sleep((unsigned)secs);
     r = libusb_control_transfer(h, 0x23, 3, 8, (uint16_t)port, NULL, 0, 1000) < 0;       /* SetPortFeature POWER */
+    if ((f = fopen(dis, "w"))) fputs("0", f), fclose(f);                                    /* and the kernel's again */
     printf("port %d %s\n", port, r ? "NOT powered again" : "on again");
 out:
     if (h) libusb_close(h);
