@@ -376,15 +376,48 @@ void mbe_processImbe7200x4400Framef(float *aout_buf, int *errs, int *errs2, char
     mbe_processImbe4400Dataf(aout_buf, errs, errs2, err_str, imbe_d, cur_mp, prev_mp, prev_mp_enhanced, uvquality);
 }
 
-/* ---- IMBE 7100x4400 (ProVoice) and AMBE 3600x2400 (D-STAR): silent for now ---- */
+/* ---- AMBE 3600x2400 (D-STAR): the 72 bits as sent, back into the 9 bytes D-STAR carries them in (each byte sent
+ * least significant bit first), to the chip as they are in its D-STAR mode (rate words 0x0130 0x0763 0x4000 0 0
+ * 0x0048: 2400 bit/s of speech, 1200 of FEC, which the chip corrects itself), as DV3000s are used for D-STAR. Where
+ * dsd-fme put each bit sent (dstar.c: ambe_fr[dW[i]][dX[i]] = bit i; its dstar_const.h's tables, ISC) ---- */
 
-int  mbe_eccImbe7100x4400C0(char imbe_fr[7][24]) { (void)imbe_fr; return 0; }
-void mbe_demodulateImbe7100x4400Data(char imbe_fr[7][24]) { (void)imbe_fr; }
-int  mbe_eccImbe7100x4400Data(char imbe_fr[7][24], char *imbe_d) { (void)imbe_fr; memset(imbe_d, 0, 88); return 0; }
-void mbe_convertImbe7100to7200(char *imbe_d) { (void)imbe_d; }
+static const int dW[72] = {0, 0, 3, 2, 1, 1, 0, 0, 1, 1, 0, 0, 3, 2, 1, 1, 3, 2, 1, 1, 0, 0, 3, 2,
+                           0, 0, 3, 2, 1, 1, 0, 0, 1, 1, 0, 0, 3, 2, 1, 1, 3, 2, 1, 1, 0, 0, 3, 2,
+                           0, 0, 3, 2, 1, 1, 0, 0, 1, 1, 0, 0, 3, 2, 1, 1, 3, 3, 2, 1, 0, 0, 3, 3};
+static const int dX[72] = {10, 22, 11, 9,  10, 22, 11, 23, 8,  20, 9,  21, 10, 8,  9,  21, 8,  6,
+                           7,  19, 8,  20, 9,  7,  6,  18, 7,  5,  6,  18, 7,  19, 4,  16, 5,  17,
+                           6,  4,  5,  17, 4,  2,  3,  15, 4,  16, 5,  3,  2,  14, 3,  1,  2,  14,
+                           3,  15, 0,  12, 1,  13, 2,  0,  1,  13, 0,  12, 10, 11, 0,  12, 1,  13};
+#define RATE_DSTAR 1000                 /* rate's value while the chip is in D-STAR's mode (not a rate index) */
+
+static int decode_dstar(char ambe_fr[4][24], float *out) {
+    static const uint8_t ratep[13] = {0x0A, 0x01, 0x30, 0x07, 0x63, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48};
+    uint8_t              q[11] = {0x01, 72}, r[340];
+    int                  t, n;
+
+    open_chip();
+    if (fd < 0) return 0;
+    if ((rate != RATE_DSTAR || now_ms() - rate_ms > 100) && ctl(ratep, sizeof(ratep)) == 0) rate = RATE_DSTAR;
+    rate_ms = now_ms();
+    for (int i = 0; i < 72; i++)
+        if (ambe_fr[dW[i]][dX[i]] & 1) q[2 + i / 8] |= (uint8_t)(1 << (i % 8));
+    n = xfer(1, q, sizeof(q), &t, r, sizeof(r));
+    if (n < 2 || t != 2 || r[0] != 0x00) {
+        if (n < 0) {
+            close(fd);
+            fd = -1;
+        }
+        return 0;
+    }
+    int ns = r[1] > 160 ? 160 : r[1];
+
+    for (int i = 0; i < ns && 3 + 2 * i < n; i++) out[i] = (float)(int16_t)(r[2 + 2 * i] << 8 | r[3 + 2 * i]);
+    return ns;
+}
 
 void mbe_processAmbe2400Dataf(float *aout_buf, int *errs, int *errs2, char *err_str, char ambe_d[49],
                               mbe_parms *cur_mp, mbe_parms *prev_mp, mbe_parms *prev_mp_enhanced, int uvquality) {
+    /* 49 bits with no FEC (dsd-fme's .amb files of D-STAR): the chip's order for them not measured: silence */
     (void)errs, (void)errs2, (void)ambe_d, (void)cur_mp, (void)prev_mp, (void)prev_mp_enhanced, (void)uvquality;
     memset(aout_buf, 0, 160 * sizeof(float));
     if (err_str) err_str[0] = 0;
@@ -393,9 +426,19 @@ void mbe_processAmbe2400Dataf(float *aout_buf, int *errs, int *errs2, char *err_
 void mbe_processAmbe3600x2400Framef(float *aout_buf, int *errs, int *errs2, char *err_str, char ambe_fr[4][24],
                                     char ambe_d[49], mbe_parms *cur_mp, mbe_parms *prev_mp,
                                     mbe_parms *prev_mp_enhanced, int uvquality) {
-    (void)ambe_fr;
-    mbe_processAmbe2400Dataf(aout_buf, errs, errs2, err_str, ambe_d, cur_mp, prev_mp, prev_mp_enhanced, uvquality);
+    (void)ambe_d, (void)prev_mp, (void)prev_mp_enhanced, (void)uvquality;
+    memset(aout_buf, 0, 160 * sizeof(float));
+    if (err_str) err_str[0] = 0;
+    *errs = *errs2 = 0;                 /* the chip's own FEC: what it put right is not told */
+    if (may(cur_mp)) decode_dstar(ambe_fr, aout_buf);
 }
+
+/* ---- IMBE 7100x4400 (ProVoice): silent for now ---- */
+
+int  mbe_eccImbe7100x4400C0(char imbe_fr[7][24]) { (void)imbe_fr; return 0; }
+void mbe_demodulateImbe7100x4400Data(char imbe_fr[7][24]) { (void)imbe_fr; }
+int  mbe_eccImbe7100x4400Data(char imbe_fr[7][24], char *imbe_d) { (void)imbe_fr; memset(imbe_d, 0, 88); return 0; }
+void mbe_convertImbe7100to7200(char *imbe_d) { (void)imbe_d; }
 
 /* ---- The rest ---- */
 

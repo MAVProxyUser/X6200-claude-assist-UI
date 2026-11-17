@@ -6,7 +6,12 @@ every 21st frame and a slow-data text message, then the terminator. GMSK BT 0.5 
 
     dstar_gen.py disc OUT.s16 [seconds]      48 kHz s16 FM discriminator audio (+-5 kHz = +-16000), for dsd-fme's stdin
     dstar_gen.py iq OUT.iq OFFSET_HZ [seconds]   2 Msps int8 IQ for hackrf_transfer -t, the signal OFFSET_HZ off centre
+
+DSTAR_VOICE=FILE in the environment: the voice frames from FILE (9 bytes each, as D-STAR carries them: an AMBE-3000
+in D-STAR mode, rate words 0x0130 0x0763 0x4000 0 0 0x0048, gives them so), its length the transmission's; AMBE
+silence else.
 """
+import os
 import sys
 import numpy as np
 
@@ -81,8 +86,11 @@ def stream(seconds):
     for i in range(4):                          # the message: four blocks of 0x40+i and five characters
         sd += bytes([0x40 + i]) + txt[i * 5:(i + 1) * 5].encode()
     frames = int(seconds / 0.02)
+    voice = open(os.environ["DSTAR_VOICE"], "rb").read() if os.environ.get("DSTAR_VOICE") else None
+    if voice:
+        frames = len(voice) // 9
     for f in range(frames):
-        bits += lsb_bits(silence)
+        bits += lsb_bits(voice[f * 9:f * 9 + 9] if voice else silence)
         n = f % 21
         if n == 0:
             bits += lsb_bits([0x55, 0x2D, 0x16])    # data sync

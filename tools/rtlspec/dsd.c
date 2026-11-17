@@ -34,6 +34,7 @@
 #define CHUNK    960            /* 20 ms at 48 kHz a write */
 #define PCM      8000           /* a second of its 8 kHz speech in hand at most */
 #define START    480            /* 60 ms of it before it is played */
+#define GAIN     1.5f           /* its speech peaks at half scale on B (D-STAR, cabled test): DMR's level */
 
 extern char **environ;
 
@@ -125,7 +126,7 @@ float dsd_audio(void) {
             playing = false;
         }
     }
-    v = a + (b - a) * (float)ph;
+    v = (a + (b - a) * (float)ph) * GAIN;
     pthread_mutex_unlock(&pcm_lock);
     return v;
 }
