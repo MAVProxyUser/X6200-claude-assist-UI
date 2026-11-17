@@ -385,8 +385,17 @@ static void serve_udp(void) {
 
         if (rn >= 5 && r[3] == 0 && r[4] == 0x39) {     /* READY: it rebooted (P25's full rate can make it), its
                                                          * power-on rate again: DMR's set afresh before its frames */
+            static long said;
+            static int  since;
+
             chip_rate = -1;
-            fprintf(stderr, "rtlspec: the AMBE-3000 restarted itself (a client's request at P25 full rate)\n");
+            since++;
+            if (now_ms() - said > 60000) {              /* said once a minute at most, with how many */
+                said = now_ms();
+                fprintf(stderr, "rtlspec: the AMBE-3000 restarted itself %d time%s (a client's request at P25 full "
+                                "rate); taken up again\n", since, since == 1 ? "" : "s");
+                since = 0;
+            }
         }
         if (rn > 0) sendto(udp, r, (size_t)rn, 0, (struct sockaddr *)&from, fl);
         fl = sizeof(from);
