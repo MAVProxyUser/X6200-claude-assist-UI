@@ -326,16 +326,34 @@ static const band_t bands[] = {
      false, "Meteor-M weather satellites on 137.1 and 137.9, a few passes a day: B decodes their pictures (/mnt/meteor)."},
     {"2 M", 144000, 148000, "HAMS: REPEATERS, APRS", "DIPOLE 2X49 CM", 'L', 146520000, radio_mode_nfm, false,
      "Local hams in narrow FM: repeaters 145-148, simplex 146.520, APRS packets on 144.390."},
+    /* B's presets D had no band for (the owner's backlog, 2026-11-17): the land mobile bands round MARINE and GMRS
+     * (a frequency in both is the narrower band's: band_of), 1.25 m, the sondes, the ISM bands, UAT and 23 cm */
+    {"VHF LMR", 150000, 174000, "BUSINESS, PUBLIC SERVICE", "DIPOLE 2X44 CM", 'L', 152000000, radio_mode_nfm, false,
+     "Land mobile radio 150-174: businesses, utilities, public services, in narrow FM and DMR (B finds DMR itself)."},
     {"MARINE", 156000, 162025, "BOATS; CHANNEL 16 CALLS", "DIPOLE 2X45 CM", 'L', 156800000, radio_mode_nfm, false,
      "Marine VHF in narrow FM: channel 16 (156.800) for calls and distress, AIS data on 161.975 / 162.025."},
     {"NOAA WX", 162400, 162550, "WEATHER RADIO, ALERTS", "DIPOLE 2X44 CM", 'L', 162550000, radio_mode_nfm, false,
      "NOAA Weather Radio around the clock, with SAME alerts the Sentry shows in its title."},
+    {"1.25 M", 222000, 225000, "HAMS: REPEATERS, SIMPLEX", "DIPOLE 2X32 CM", 'L', 223500000, radio_mode_nfm, false,
+     "The 222 MHz ham band in narrow FM: a few repeaters, simplex calling on 223.500. Quiet most of the time."},
+    {"SONDES", 400000, 406000, "WEATHER BALLOONS' DATA", "DIPOLE 2X18 CM", 'A', 403000000, radio_mode_nfm, false,
+     "Radiosondes on weather balloons, launched twice a day (00 and 12 UTC): their data bursts, from up to 200 km."},
     {"70 CM", 420000, 450000, "HAMS: REPEATERS, SIMPLEX, DMR", "DIPOLE 2X16 CM", 'L', 446000000, radio_mode_nfm, false,
      "Local hams in narrow FM: repeaters 442-450, simplex 446.000."},
+    {"ISM 433", 433050, 434790, "SENSORS, KEY FOBS", "DIPOLE 2X16 CM", 'L', 433920000, radio_mode_nfm, false,
+     "Short bursts from weather stations, tyre sensors, doorbells and key fobs on 433.92, inside the 70 cm band."},
+    {"UHF LMR", 450000, 470000, "BUSINESS, PUBLIC SERVICE", "DIPOLE 2X15 CM", 'L', 460000000, radio_mode_nfm, false,
+     "Land mobile radio 450-470: businesses and public services, much of it DMR (B finds DMR itself)."},
     {"GMRS", 462550, 467725, "FAMILY RADIOS: FRS, GMRS", "DIPOLE 2X15 CM", 'L', 462562500, radio_mode_nfm, false,
      "Handheld family radios, FRS and GMRS, 12.5 kHz apart: a few miles at most."},
+    {"ISM 915", 902000, 928000, "METERS AND SENSORS", "DIPOLE 2X78 MM", 'L', 915000000, radio_mode_nfm, false,
+     "Utility meters, sensors and LoRa in 902-928 (the 33 cm ham band shares it): bursts and hopping signals."},
+    {"UAT 978", 977000, 979000, "LIGHT AIRCRAFT, UAT DATA", "DIPOLE 2X73 MM", 'L', 978000000, radio_mode_nfm, false,
+     "US light aircraft's position reports on 978 MHz (UAT): seen as bursts here; AIRSPACE decodes 1090 only."},
     {"ADS-B", 1089000, 1091000, "AIRCRAFT ON A MAP", "DIPOLE 2X65 MM", 'L', 1090000000, radio_mode_nfm, false,
      "Aircraft send their position, height and flight on 1090 MHz. LISTEN opens H AIRSPACE, which draws them."},
+    {"23 CM", 1240000, 1300000, "HAMS: FM, ATV", "DIPOLE 2X56 MM", 'L', 1294500000, radio_mode_nfm, false,
+     "The 1.2 GHz ham band: FM calling on 1294.500, repeaters and amateur TV. Needs a short, high antenna."},
 };
 
 #define BANDS_N ((int)(sizeof(bands) / sizeof(bands[0])))
@@ -396,7 +414,7 @@ static bool band_uses_rtl(int i) {
  *   the X6200: the preamp off under 8 MHz (the band's own noise is louder than the receiver's there: the preamp only
  *     adds overload from the big signals) and on AM and FM broadcast (strong locals), on from 8 MHz up and on the
  *     airband; the attenuator off; AGC FAST for CW, SLOW for a decoder app, AUTO (the mode's own) for listening
- *   the SDR: its gain: 19.7 dB on FM broadcast, 49.6 on the weather satellites and from 960 MHz up (weak), 37.2 on the
+ *   the SDR: its gain: 19.7 dB on FM broadcast, 49.6 on the weather satellites, the sondes and from 960 MHz up (weak), 37.2 on the
  *     airband, marine and NOAA (far transmitters), 28.0 elsewhere (local repeaters and handhelds) */
 typedef struct {
     int pre, att, agc;          /* the X6200's (radio_pre_t, radio_att_t, radio_agc_t), -1 none */
@@ -414,7 +432,7 @@ static rxset_t rx_setup_on(int64_t hz, int agc, bool sdr) {
     if (sdr) {
         s.pre = s.att = s.agc = -1;
         s.gain = bc                                             ? 197
-               : (k >= 137000 && k <= 138000) || k >= 960000    ? 496
+               : (k >= 137000 && k <= 138000) || (k >= 400000 && k <= 406000) || k >= 960000 ? 496
                : (k >= 118000 && k < 137000) || (k >= 156000 && k <= 162550) ? 372
                                                                 : 280;
         return s;
@@ -922,12 +940,17 @@ static uint32_t argb(lv_color_t c) {
     return lv_color_to32(c) | 0xff000000;
 }
 
+/* The band hz is in: the narrowest of those it is in (VHF LMR has MARINE and NOAA WX in it, 70 CM ISM 433, UHF LMR
+ * GMRS), -1 none */
 static int band_of(int64_t hz) {
     int32_t khz = (int32_t)(hz / 1000);
+    int     best = -1;
 
     for (int i = 0; i < BANDS_N; i++)
-        if (khz >= bands[i].lo && khz <= bands[i].hi) return i;
-    return -1;
+        if (khz >= bands[i].lo && khz <= bands[i].hi &&
+            (best < 0 || bands[i].hi - bands[i].lo < bands[best].hi - bands[best].lo))
+            best = i;
+    return best;
 }
 
 /* A's band now: the one the dial is in, or the one chosen last (BAND, D) while the dial is at its listening place:
@@ -945,14 +968,13 @@ static int a_band_now(int64_t hz) {
 static int band_near(int64_t hz, bool *in) {
     int32_t khz = (int32_t)(hz / 1000), best = -1, d = 0;
 
-    *in = false;
+    int in_b = band_of(hz);
+
+    *in = in_b >= 0;
+    if (*in) return in_b;
     for (int i = 0; i < BANDS_N; i++) {
         int32_t e = khz < bands[i].lo ? bands[i].lo - khz : khz > bands[i].hi ? khz - bands[i].hi : 0;
 
-        if (!e) {
-            *in = true;
-            return i;
-        }
         if (best < 0 || e < d) best = i, d = e;
     }
     return best;
@@ -7661,7 +7683,8 @@ static int w_start(int64_t hz) {
         bool    has = false;
 
         for (int k = 0; k < w_n && !has; k++) has = w_chs[k].hz >= lo && w_chs[k].hz <= hi;
-        if (has && d < best) best = d, b = i;
+        if (has && (d < best || (d == best && b >= 0 && bands[i].hi - bands[i].lo < bands[b].hi - bands[b].lo)))
+            best = d, b = i;                            /* in two (MARINE in VHF LMR): the narrower, as band_of */
     }
     if (b < 0) return w_find("CB", "19");
     int64_t lo = (int64_t)bands[b].lo * 1000, hi = (int64_t)bands[b].hi * 1000;
@@ -9140,6 +9163,23 @@ static int64_t state_hz(const char *hz, const char *khz) {
 
 #define SWEEP_KEYS ((BANDS_N + 29) / 30)
 
+/* D's bands as a state saved before the evening of 2026-11-17 numbered them (s.tabs 2; 1 before WX SAT went in after
+ * AIR): read by their names now, so the bands put in since move no choice */
+static const char *const bands_v2[] = {"SHIP MF", "AM BC", "160 M", "80 M", "SHIP 4", "60 M BC", "60 M", "49 M BC",
+    "SHIP 6", "40 M", "41 M BC", "SHIP 8", "UTIL 9", "31 M BC", "30 M", "25 M BC", "SHIP 12", "20 M", "19 M BC",
+    "SHIP 16", "17 M", "15 M", "12 M", "11 M CB", "10 M", "6 M", "FM BC", "AIR", "WX SAT", "2 M", "MARINE",
+    "NOAA WX", "70 CM", "GMRS", "ADS-B"};
+
+/* a band number kept under s.tabs t, as a number now; -1 none */
+static int band_load(int v, int t) {
+    int wx = 0;
+
+    if (v < 0 || t >= 3) return v < BANDS_N ? v : -1;
+    while (wx < (int)N_OF(bands_v2) - 1 && strcmp(bands_v2[wx], "WX SAT")) wx++;
+    if (t < 2 && v >= wx) v++;
+    return v < (int)N_OF(bands_v2) ? band_named(bands_v2[v]) : -1;
+}
+
 /* What the Sentry has going, kept every half second (blink_cb): its screen, A's and B's scans and C's, the bands
  * marked for A's sweep, the choices on each screen. Not an armed transmitter (G's A/B), a lock on a signal, help or
  * the OSD, nor what C was playing (its scan plays again). The dial, the volumes, LISTEN and the views are settings */
@@ -9167,7 +9207,8 @@ static void state_keep(void) {
     gui_state_set("s.gscan", g_scan);
     gui_state_set("s.gsel", g_sel);
     gui_state_set("s.bsel", band_sel);
-    gui_state_set("s.tabs", 2);                 /* D's and E's tables as saved: 2 since WX SAT and E's new types */
+    gui_state_set("s.tabs", 3);                 /* D's and E's tables as saved: 2 since WX SAT and E's new types, 3
+                                                 * since B's presets' bands (band_load) */
     gui_state_set("s.dsel", dec_sel);
     gui_state_set("s.drow", dec_row);
     gui_state_set("s.sys", sys_sel);
@@ -9208,18 +9249,21 @@ static void state_restore(void) {
     if (v == 1000 || v == 2000 || v == 4000 || v == 8000) scan_dwell_ms = v;
     v = gui_state_get("s.astep", a_step);
     if (v >= 0 && v < N_OF(a_steps)) a_step = v;
+    /* A state from before the bands put in since (band_load), and before E's types were put in order (2026-11-17):
+     * its band numbers by their names, its type by its name */
+    int  tabs     = gui_state_get("s.tabs", 1);
+    bool old_tabs = tabs < 2;
+
     for (int j = 0; j < SWEEP_KEYS; j++) {
         snprintf(k, sizeof(k), "s.sweep%d", j);
         if ((v = gui_state_get(k, -1)) == -1) continue;
-        for (int i = j * 30; i < BANDS_N && i < j * 30 + 30; i++) band_rt[i].sweep = (v >> (i - j * 30)) & 1;
-    }
-    /* A state from before WX SAT went in after AIR, and E's types were put in order (2026-11-17): its band numbers
-     * from WX SAT's on one up, its type by its name */
-    bool old_tabs = gui_state_get("s.tabs", 1) < 2;
-    int  wx       = 0;
+        for (int i = j * 30; i < j * 30 + 30; i++) {
+            int b = band_load(i, tabs);
 
-    while (wx < BANDS_N - 1 && strcmp(bands[wx].name, "WX SAT")) wx++;
-#define BAND_LOAD(v) ((v) >= 0 && old_tabs && (v) >= wx ? (v) + 1 : (v))
+            if (b >= 0 && b < BANDS_N) band_rt[b].sweep = (v >> (i - j * 30)) & 1;
+        }
+    }
+#define BAND_LOAD(v) band_load((v), tabs)
     v = BAND_LOAD(gui_state_get("s.bsel", band_sel));
     if (v >= 0 && v < BANDS_N) band_sel = v;
     v = gui_state_get("s.dsel", dec_sel);

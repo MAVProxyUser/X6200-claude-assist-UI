@@ -1069,7 +1069,10 @@ written through to the card before it replaces the last copy, so a power cut kee
 - **D BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry heard there
   last. The bands: the ham bands (60 m too), the broadcast bands, CB, FM, the marine bands the weather decoders use
   (SHIP MF, 4, 6, 8, 12, 16; UTIL 9 for NOAA's Boston fax on 9110), and the SDR's: the airband, WX SAT (the Meteor
-  satellites), 2 m, marine VHF, NOAA weather, 70 cm, GMRS and ADS-B. **RX** names the radio that takes each band
+  satellites), 2 m, VHF LMR (business and public service, 150-174), marine VHF, NOAA weather, 1.25 m, SONDES (weather
+  balloons, 400-406), 70 cm, ISM 433, UHF LMR (450-470), GMRS, ISM 915, UAT 978, ADS-B and 23 cm: every band B has a
+  preset for. A frequency in two bands (marine VHF inside VHF LMR, ISM 433 inside 70 cm, GMRS inside UHF LMR) is the
+  narrower one's. **RX** names the radio that takes each band
   by its kind (X6200, RTL, HACK, BLADE; SDR with none plugged in: no stick numbers, as on C), one rule on D and E
   alike:
   - **HF and 6 m (up to 60 MHz): the X6200**, whose receiver and antennas they are, even with an SDR plugged in
@@ -1079,8 +1082,8 @@ written through to the card before it replaces the last copy, so a power cut kee
 
   **ANTENNA** for the SDR's bands is a dipole and the length of each arm: `DIPOLE 2X49 CM` (2 m) is the telescopic
   dipole that comes in an RTL-SDR kit, each arm pulled out to 49 cm, held upright (these stations send upright).
-  The lengths: AIR 56 cm, 2 M 49, MARINE 45, NOAA WX 44, 70 CM 16, GMRS 15, ADS-B 6.5 (a quarter wave at the
-  band's middle, less 5 %). Any antenna made for the band (a 2 m/70 cm whip, a discone) does as well. WX SAT's is a
+  The lengths: AIR 56 cm, 2 M 49, VHF LMR 44, MARINE 45, NOAA WX 44, 1.25 M 32, SONDES 18, 70 CM 16, ISM 433 16,
+  UHF LMR 15, GMRS 15, ISM 915 7.8, UAT 978 7.3, ADS-B 6.5, 23 CM 5.6 (a quarter wave at the band's middle, less 5 %). Any antenna made for the band (a 2 m/70 cm whip, a discone) does as well. WX SAT's is a
   `V-DIPOLE 2X53 CM`: the same dipole laid flat, its arms 53 cm and 120 degrees apart, open towards north or south.
 
   **The last lines** under the list say, for the band chosen, what it is and then one line of what you get:
@@ -1095,7 +1098,7 @@ written through to the card before it replaces the last copy, so a power cut kee
     only adds overload from the big signals) **and on AM and FM broadcast** (strong local stations), **on from 8 MHz
     up** and on the airband; the **attenuator off**; **AGC** FAST for CW and the beacons, SLOW for a decoder app,
     AUTO (the mode's own) for listening;
-  - on the SDR, its **gain**: 19.7 dB on FM broadcast, 49.6 dB on the weather satellites and from 960 MHz up (weak
+  - on the SDR, its **gain**: 19.7 dB on FM broadcast, 49.6 dB on the weather satellites, the sondes and from 960 MHz up (weak
     signals), 37.2 dB on the airband, marine and NOAA weather (far transmitters), 28.0 dB elsewhere (local repeaters
     and handhelds).
 
