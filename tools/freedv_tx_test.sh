@@ -9,9 +9,11 @@ P=$("$TOP/tools/rade/build.sh")
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 INC=(-I "$TOP/src" -I "$TOP" -I "$P/include/rade" -I "$P/include/opus" -I "$P/include/opus/dnn" -I "$P/include/opus/celt" -I "$P/include/opus/include")
 LIBS=("$P/lib/librade.a" -Wl,--whole-archive "$P/lib/libopus.a" -Wl,--no-whole-archive -lm -lpthread)
+# a Mac's linker has its own words for all of libopus.a
+[ "$(uname)" = Darwin ] && LIBS=("$P/lib/librade.a" -Wl,-force_load,"$P/lib/libopus.a" -lm -lpthread)
 ffmpeg -loglevel error -y -i "$1" -ar 44100 -ac 1 -c:a pcm_s16le "$T/mic.wav"
 gcc -O2 -Wall -Wextra -DRADE_ENABLED=1 "${INC[@]}" "$TOP/tools/freedv_tx_test.c" "$TOP/src/freedv_tx.c" "$TOP/src/olivia_resamp.c" -o "$T/tx" "${LIBS[@]}"
-gcc -O2 -Wall -Wextra -DRADE_ENABLED=1 "${INC[@]}" "$TOP/tools/freedv_test.c" "$TOP/src/freedv_rx.c" "$TOP/src/olivia_resamp.c" -o "$T/rx" "${LIBS[@]}"
+gcc -O2 -Wall -Wextra -DRADE_ENABLED=1 "${INC[@]}" "$TOP/tools/freedv_test.c" "$TOP/src/freedv_rx.c" "$TOP/src/freedv_text.c" "$TOP/src/olivia_resamp.c" -o "$T/rx" "${LIBS[@]}"
 "$T/tx" "$T/mic.wav" "$T/over.wav" "${2:-TEST}"
 ffmpeg -loglevel error -y -i "$T/over.wav" -af "apad=pad_dur=2" -ar 11025 -c:a pcm_s16le "$T/over11.wav"
 "$T/rx" "$T/over11.wav" "$T/decoded.wav" 10

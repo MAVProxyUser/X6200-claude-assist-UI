@@ -296,7 +296,10 @@ tools/cross_x6200/build.sh && tools/cross_x6200/install.sh root@<radio>
 ```
 
 `setup.sh` runs once (again after the radio's image changes). The radio's first GUI is kept as
-`/usr/sbin/x6100_gui.orig`.
+`/usr/sbin/x6100_gui.orig`. `build.sh` links in RADE (the RADE app's decoder), built once by
+`tools/rade/build.sh` with three pinned downloads (rade_c, Opus and Opus's model, about 275 MB in all, kept in
+`~/.cache/openx6x00/rade`). That needs `brew install autoconf automake libtool`; without them the GUI is built
+without RADE, and `build.sh` warns about it.
 
 **A radio on an older image** gets the RTL-SDR programs and the boot video's ffmpeg with
 `tools/rtlsdr/install.sh` and `tools/bootvideo/install.sh` (after their `build.sh`).

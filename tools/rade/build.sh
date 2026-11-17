@@ -30,7 +30,7 @@
 # the prefix, under a name made of the two commits, the target and the hash of this script, of rade_v2_none.c, of
 # rade_acq_fft.patch and of the compiler's version. A second run with nothing changed prints that path and downloads
 # nothing.
-# Needs curl or wget, autoconf, automake, libtool (libtoolize), m4, perl, make and patch.
+# Needs curl or wget, autoconf, automake, libtool (libtoolize, or Homebrew's glibtoolize), m4, perl, make and patch.
 #
 # rade_c is BSD-2-Clause, Opus BSD-3-Clause.
 set -eo pipefail
@@ -68,7 +68,10 @@ esac
 BINU=${CC%gcc}
 [ "$BINU" != "$CC" ] && command -v "${BINU}ar" > /dev/null || BINU=""
 AR=${BINU}ar; RANLIB=${BINU}ranlib; NM=${BINU}nm; STRIP=${BINU}strip
-for t in "$AR" "$RANLIB" "$NM" "$STRIP" autoreconf autoconf automake libtoolize m4 perl make patch tar gunzip sha256sum; do
+# Homebrew's libtool calls it glibtoolize (a Mac); autoreconf takes the name from LIBTOOLIZE
+if ! command -v libtoolize > /dev/null && command -v glibtoolize > /dev/null; then export LIBTOOLIZE=glibtoolize; fi
+for t in "$AR" "$RANLIB" "$NM" "$STRIP" autoreconf autoconf automake "${LIBTOOLIZE:-libtoolize}" m4 perl make patch tar \
+         gunzip sha256sum; do
     command -v "$t" > /dev/null || { echo "tools/rade/build.sh: $t is needed"; exit 1; }
 done
 command -v curl > /dev/null || command -v wget > /dev/null || { echo "tools/rade/build.sh: curl or wget is needed"; exit 1; }
@@ -191,9 +194,14 @@ int main(void)
     return !(v1 && !v2);
 }
 EOF
-# As src/CMakeLists.txt links it: all of libopus.a (its references must all resolve), the unused dropped
-"$CC" "${CFLAGS[@]}" -fPIE -pie check.c -o check -Wl,--gc-sections \
-    librade.a -Wl,--whole-archive opus/.libs/libopus.a -Wl,--no-whole-archive -lm
+# As src/CMakeLists.txt links it: all of libopus.a (its references must all resolve), the unused dropped. A Mac's
+# linker (a host build there, for the tools/freedv_*test.sh) says the same with its own words
+if [ $CROSS = 0 ] && [ "$(uname)" = Darwin ]; then
+    "$CC" "${CFLAGS[@]}" check.c -o check -Wl,-dead_strip librade.a -Wl,-force_load,opus/.libs/libopus.a -lm
+else
+    "$CC" "${CFLAGS[@]}" -fPIE -pie check.c -o check -Wl,--gc-sections \
+        librade.a -Wl,--whole-archive opus/.libs/libopus.a -Wl,--no-whole-archive -lm
+fi
 "$STRIP" -o check.stripped check
 echo "   RADE and Opus in a program: $(wc -c < check.stripped) bytes stripped"
 if [ $CROSS = 0 ]; then
