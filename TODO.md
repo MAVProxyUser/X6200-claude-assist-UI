@@ -11,9 +11,11 @@ approved that day.
 
 *The Kraken and USB first*
 
-1. **Page I over the air with five channels** (docs/plans/kraken_df_plan.md; D1 approved; 40216c6, a94ab58): our own
-   DF engine (x6x00-df) and page I, four channels calibrated on the radio (1.2-2.6 degrees, no slips, 11 % CPU), never
-   a bearing on screen over the air. The check: a 915 MHz ISM carrier from the HackRF, the 33 CM preset.
+1. **Page I with five channels, longer**: over the air at 915 MHz (2026-11-17) one sample slip on CH2 in the first
+   70 s (page I recalibrated in about 6 s and went on), none in the next 76 s; the processor at about 80 % with five
+   channels at 1.024 MS/s. To do: the 30-minute slip test (tools/rtlspec/df_slip_test.sh) with all five on 9104, and
+   where the slip came from (the processor or the USB) if it comes back.
+
 *Small things on the Sentry*
 
 2. **D's and E's RX columns name the stick** (`RTL4`): C names the kind of receiver only, at the owner's word; the same
@@ -77,6 +79,11 @@ approved that day.
 
 **Done 2026-11-16 and 2026-11-17** (for the record; details in git)
 
+- Page I over the air with five channels (2026-11-17, 9104, a 915 MHz ISM carrier from the HackRF on an ANT500,
+  5 s on and 3 s off): all five calibrated and in the bearing at +21 to +31 dB, TRACKING 054.3-057.3 degrees +-1.0
+  (fit 73-83 %), HOLD in the gaps; HOLD now keeps the last bearing with a fit worth holding (it once showed 198.7
+  degrees, an estimate across a burst's end). Screenshots in radio_captures/kraken_df. The absolute bearing waits for
+  the array's real layout (D8).
 - The KrakenSDR's fifth stream (D11): kernel patch 9104 (08957fb) asks the Kraken's hub about its ports over ep0
   once a second instead of keeping one of the R16 musb's receive endpoints for its status, so each of its five
   sticks has an endpoint of its own; five streamed whole for 20 minutes. The bench radio boots with it (the test

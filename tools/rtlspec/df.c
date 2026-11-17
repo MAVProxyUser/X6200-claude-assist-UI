@@ -117,6 +117,12 @@ static double   cal_at = -1;
 static int64_t  kb[DF_MAXCH];                   /* channel m read kb[m] later than CH0 */
 static df_est_t last;
 static double   last_good_at = -1, last_bearing = -1, last_mirror = -1, last_uncert;
+/* What HOLD shows once the signal is under the squelch: the last estimate over it whose fit is worth holding, with its
+ * own fit and +-. An estimate taken across a burst's end (half signal, half noise) is over the squelch too, and held as
+ * it was it put a wild bearing on screen at a red fit: 198.7 degrees after bursts at 057 (2026-11-17, page I at 915
+ * MHz). With none such since the signal came, the last one over the squelch, as before */
+#define HOLD_FIT    0.50
+static double   held_bearing = -1, held_mirror = -1, held_uncert, held_fit;
 static bool     slip_shown;
 
 static double now_s(void) {
@@ -797,14 +803,28 @@ static void send_estimate(const df_est_t *e, uint32_t seq) {
     d.used_mask = (uint8_t)e->used;
     d.fit_pct = (uint8_t)lrint(fmin(1, fmax(0, e->doa.fit)) * 100);
     if (e->gate) {
+        if (last_good_at < 0 || t - last_good_at >= HOLD_S) held_bearing = -1;     /* a signal anew */
         last_good_at = t;
         last_bearing = e->doa.bearing;
         last_mirror = e->doa.mirror;
         last_uncert = e->uncert_deg;
+        if (e->doa.fit >= HOLD_FIT) {
+            held_bearing = e->doa.bearing;
+            held_mirror = e->doa.mirror;
+            held_uncert = e->uncert_deg;
+            held_fit = e->doa.fit;
+        }
     }
-    d.bearing_ddeg = ddeg(last_bearing);
-    d.mirror_ddeg = ddeg(last_mirror);
-    d.uncert_ddeg = clamp16(last_uncert * 10);
+    if (!e->gate && held_bearing >= 0) {    /* HOLD: the held one, its fit and +- */
+        d.bearing_ddeg = ddeg(held_bearing);
+        d.mirror_ddeg = ddeg(held_mirror);
+        d.uncert_ddeg = clamp16(held_uncert * 10);
+        d.fit_pct = (uint8_t)lrint(fmin(1, fmax(0, held_fit)) * 100);
+    } else {
+        d.bearing_ddeg = ddeg(last_bearing);
+        d.mirror_ddeg = ddeg(last_mirror);
+        d.uncert_ddeg = clamp16(last_uncert * 10);
+    }
     d.level_ddb = clamp16(e->level_db * 10);
     d.snr_ddb = clamp16(e->doa.snr_db * 10);
     d.eig_ddb = clamp16(e->doa.eig_db * 10);

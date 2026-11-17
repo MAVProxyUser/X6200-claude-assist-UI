@@ -1446,7 +1446,8 @@ signal seems to come from, filled outward; dimmed while nothing is over the sque
 **needle** at the bearing with its +- wedge (green for a fit of 80 %
 up, amber 50-80 %, red under), other peaks as ticks, the last bearings as dots on the rim (fading over two minutes);
 a line's other side dashed (a line cannot tell front from back). When the signal stops the last bearing stays,
-fading over 30 s (HOLD). With a heading set (F2) north is up and bearings are compass bearings.
+fading over 30 s (HOLD): the last one with a fit of 50 % up, shown with its own fit and +- (one taken across the
+signal's end, half signal and half noise, is not held). With a heading set (F2) north is up and bearings are compass bearings.
 
 **The right**: the target (frequency, bandwidth, state: CALIBRATING, LISTENING, TRACKING, HOLD, SLIP), the bearing,
 its +-, the fit and the method, the level over the floor and the calibration's age; **the array against the band**:
