@@ -992,11 +992,14 @@ MFK's push) on the X6200, B's scan pictures' strongest on the stick. The same si
 X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`,
 written through to the card before it replaces the last copy, so a power cut keeps one whole).
 
-- Its columns: FREQ, BAND, WHAT IT WAS, BEST, ANTENNA and NOW (D's for the band), LAST, SEEN, RX: the radio that
-  found it, X6200 or the SDR by its name (RTL0 to RTL4, HACKRF, BLADERF) in the tags' orange. An entry from before
-  2026-11-17 says SDR: which one found it was not kept then (before, every SDR row showed the SDR B had at the time).
-  The line under the list says `FOUND ON RTL0` and where a push plays it: `PUSH: HEAR IT ON RTL4` (B's SDR now). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest
-  band's columns, marked `~`: 26.835 MHz, below CB's channel 1, is `~11 M CB` with CB's BEST, ANTENNA and NOW. A's
+- Its columns: FREQ, BAND, WHAT IT WAS, ANTENNA (D's for the band), LAST, SEEN and **RX: WHAT RECEIVES IT**, every
+  kind of receiver that takes the frequency, whether you have it or not: X6200 (0.1-55 MHz, and FM broadcast and the
+  airband to 137 MHz), RTL (an RTL-SDR, 24-1766 MHz), HACKRF (1 MHz-6 GHz), BLADERF (70 MHz-6 GHz), WR12 (54 MHz-1
+  GHz). The ones here now (the X6200, an SDR of that kind on USB, a WR12 that is set up) are in the tags' orange:
+  `RTL HACKRF BLADERF WR12` on 2 m, `X6200 HACKRF` on 20 m, all five on FM broadcast. BEST and NOW are D's, for the
+  band. The line under the list says which kind found it (`FOUND ON RTL`; `SDR` for an entry from before
+  2026-11-17) and where a push plays it (`PUSH: HEAR IT ON THE RTL`, B's SDR now). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest
+  band's columns, marked `~`: 26.835 MHz, below CB's channel 1, is `~11 M CB` with CB's ANTENNA. A's
   BAND box says `NEAR 11 M CB` there.
 - **WHAT IT WAS** is what the frequency is known for, not a decoding of the signal: on the X6200 a time station (WWV,
   WWVH; CHU closed in June 2026), NAVTEX 518, an AM broadcast channel (9 or 10 kHz apart, as the carriers say), a CB channel (within

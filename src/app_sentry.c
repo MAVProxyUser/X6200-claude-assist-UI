@@ -4511,7 +4511,7 @@ static void show_title(void) {
 
 /* ---- G LOG: what the scans locked on ---- */
 
-#define LOG_ROW "%c%-10.10s %-8.8s %-20.20s %-5.5s %-16.16s %-13.13s %-5.5s %4.4s %s"  /* 97 at most: RX 7 (BLADERF) */
+#define LOG_ROW "%c%-10.10s %-8.8s %-18.18s %-16.16s %-5.5s %4.4s %s"    /* 97 at most: RX 29, all five kinds */
 #define G_STICK_OFF 200000      /* the stick tuned this far under what it plays: its middle is not used */
 
 static void hits_save(void) {
@@ -4565,8 +4565,47 @@ static int sdr_code(void) {
     return d == RTL_DEV_HACKRF ? 2 : d == RTL_DEV_BLADERF ? 3 : d == RTL_DEV_RTL ? 10 + rtl_spectrum_dev_rtl() : 1;
 }
 
-static const char *sdr_code_tag(int c) {
-    return c == 2 ? "HACKRF" : c == 3 ? "BLADERF" : c >= 10 && c < 18 ? rtl_spectrum_rtl_tag(c - 10) : "SDR";
+static const char *sdr_code_tag(int c) {     /* its kind, no stick number (the owner: "drop the 4") */
+    return c == 2 ? "HACKRF" : c == 3 ? "BLADERF" : c >= 10 ? "RTL" : "SDR";
+}
+
+/* Every kind of receiver that takes hz, as C's RX column names them (the owner, 2026-11-17: "all *Valid* reception
+ * types", no stick numbers, the WR12 too): the X6200 (0.1-55 MHz, and FM broadcast and the airband, 87.5-137), an
+ * RTL-SDR (24-1766 MHz), a HackRF (1 MHz-6 GHz), a bladeRF (70 MHz-6 GHz), the WR12 (54 MHz-1 GHz). Those here now
+ * (the X6200; an SDR of that kind on USB; a WR12 set up) in the tags' orange, unless lit is false (the chosen row) */
+enum { RXK_X6200, RXK_RTL, RXK_HACKRF, RXK_BLADERF, RXK_WR12, RXK_N };
+
+static bool rxk_takes(int k, int64_t hz) {
+    int64_t lo, hi;
+
+    switch (k) {
+        case RXK_X6200: return (hz >= BOARD_HF_MIN_HZ && hz <= BOARD_HF_MAX_HZ) || (hz >= 87500000 && hz <= 137000000);
+        case RXK_WR12: return hz >= 54000000 && hz <= 1000000000;
+        default:
+            rtl_spectrum_kind_range(k == RXK_RTL ? RTL_DEV_RTL : k == RXK_HACKRF ? RTL_DEV_HACKRF : RTL_DEV_BLADERF,
+                                    &lo, &hi);
+            return hz >= lo && hz <= hi;
+    }
+}
+
+static void rx_kinds_text(int64_t hz, bool lit, char *s, size_t n) {
+    static const char *const name[RXK_N] = {"X6200", "RTL", "HACKRF", "BLADERF", "WR12"};
+    bool       here[RXK_N] = {true, false, false, false, wr12_here};
+    sdr_unit_t u[SDR_POOL_UNITS];
+    int        un = lit ? sdr_pool_units(u, SDR_POOL_UNITS) : 0;
+    size_t     at = 0;
+
+    for (int j = 0; j < un; j++) {
+        if (u[j].kind == RTL_DEV_RTL) here[RXK_RTL] = true;
+        if (u[j].kind == RTL_DEV_HACKRF) here[RXK_HACKRF] = true;
+        if (u[j].kind == RTL_DEV_BLADERF) here[RXK_BLADERF] = true;
+    }
+    s[0] = 0;
+    for (int k = 0; k < RXK_N && at < n; k++) {
+        if (!rxk_takes(k, hz)) continue;
+        if (lit && here[k]) at += (size_t)snprintf(s + at, n - at, "%s#%s %s#", at ? " " : "", tag_hex, name[k]);
+        else at += (size_t)snprintf(s + at, n - at, "%s%s", at ? " " : "", name[k]);
+    }
 }
 
 /* A lock: a new entry, or the same signal again (2 kHz on the X6200, half a channel on the stick) brought to the top;
@@ -4928,7 +4967,7 @@ static void g_rds_take(void) {
 }
 
 static void show_glog(void) {
-    char s[200];
+    char s[240];
     int  top = g_sel - lg_rows / 2;
 
     if (top > nhits - lg_rows) top = nhits - lg_rows;
@@ -4945,26 +4984,20 @@ static void show_glog(void) {
         const hit_t *h = &hits[i];
         bool         in;
         int          bi = band_near(h->hz, &in);
-        char         f[16], now[16] = "", last[8], bn[12];
+        char         f[16], last[8], bn[12];
         struct tm    tm;
 
         snprintf(f, sizeof(f), "%lld.%03lld.%02lld", (long long)(h->hz / 1000000), (long long)(h->hz / 1000 % 1000),
                  (long long)(h->hz % 1000 / 10));
-        if (bi >= 0) band_now(bi, now, sizeof(now));
         localtime_r(&h->last, &tm);
         strftime(last, sizeof(last), "%H:%M", &tm);
         char n[8];
         snprintf(n, sizeof(n), "%d", h->times);
         snprintf(bn, sizeof(bn), "%s%s", in ? "" : "~", bi >= 0 ? bands[bi].name : "-");
-        char rxs[24];
-        if (h->rtl && sdr_here && i != g_sel) snprintf(rxs, sizeof(rxs), "#%s %s#", tag_hex, sdr_code_tag(h->sdr));
-        else if (h->rtl) snprintf(rxs, sizeof(rxs), "%s", sdr_code_tag(h->sdr));    /* the SDR that found it (not
-                                                                                    * B's now); the chosen row: in its
-                                                                                    * ink */
-        else snprintf(rxs, sizeof(rxs), "X6200");
-        snprintf(s, sizeof(s), LOG_ROW, g_playing(i) ? '>' : ' ', f, bn,
-                 h->what, bi >= 0 ? best_name(bands[bi].when) : "", bi >= 0 ? bands[bi].ant : "", now, last, n,
-                 rxs);
+        char rxs[96];
+        rx_kinds_text(h->hz, i != g_sel, rxs, sizeof(rxs));    /* every kind that takes it; the chosen row in its ink */
+        snprintf(s, sizeof(s), LOG_ROW, g_playing(i) ? '>' : ' ', f, bn, h->what, bi >= 0 ? bands[bi].ant : "", last,
+                 n, rxs);
         lv_label_set_text(lg_row_l[r], s);
     }
     if (!nhits) {
@@ -4985,7 +5018,9 @@ static void show_glog(void) {
     snprintf(on, sizeof(on), "%s", h->rtl ? sdr_code_tag(h->sdr) : "X6200");
     if (!h->rtl) snprintf(push, sizeof(push), "PUSH: HEAR IT ON THE X6200");
     else if (rtl_spectrum_dev() == RTL_DEV_NONE) snprintf(push, sizeof(push), "PUSH: HEAR IT ON AN SDR");
-    else snprintf(push, sizeof(push), "PUSH: HEAR IT ON %s", rtl_spectrum_dev_tag());   /* B's SDR now */
+    else snprintf(push, sizeof(push), "PUSH: HEAR IT ON THE %s",                         /* B's SDR now */
+                  rtl_spectrum_dev() == RTL_DEV_HACKRF ? "HACKRF" : rtl_spectrum_dev() == RTL_DEV_BLADERF ? "BLADERF"
+                                                                                                         : "RTL");
     snprintf(s, sizeof(s), h->rtl ? "%s: FOUND ON %s, FIRST %s, LAST %s, %d TIME%s, %.0f DB. %s"
                                   : "%s: FOUND ON %s, FIRST %s, LAST %s, %d TIME%s, +%.0f DB. %s",
              h->what[0] ? h->what : "THIS ONE", on, a, b, h->times, h->times == 1 ? "" : "S", h->peak,
@@ -6851,7 +6886,8 @@ static void build_log(lv_obj_t *p) {
     rect(p, 6, y - 2, SW - 12, scr_h - y - 2, 3, false);
     char h[128];
 
-    snprintf(h, sizeof(h), LOG_ROW, ' ', "FREQ", "BAND", "WHAT IT WAS", "BEST", "ANTENNA", "NOW", "LAST", "SEEN", "RX");
+    snprintf(h, sizeof(h), LOG_ROW, ' ', "FREQ", "BAND", "WHAT IT WAS", "ANTENNA", "LAST", "SEEN",
+             "RX: WHAT RECEIVES IT");
     lg_head_l = label(p, &pixel_16, amb, 9, y + 2, 0, 0, h);
     rect(p, 6, y + 20, SW - 12, 3, 0, true);
     lg_rows = (scr_h - (y + 26) - 50) / rh;
