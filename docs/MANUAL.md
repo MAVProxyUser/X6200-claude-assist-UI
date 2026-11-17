@@ -992,13 +992,22 @@ MFK's push) on the X6200, B's scan pictures' strongest on the stick. The same si
 X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`,
 written through to the card before it replaces the last copy, so a power cut keeps one whole).
 
-- Its columns: FREQ, BAND, WHAT IT WAS, ANTENNA (D's for the band), LAST, SEEN and **RX: WHAT RECEIVES IT**, every
-  kind of receiver that takes the frequency, whether you have it or not: X6200 (0.1-55 MHz, and FM broadcast and the
-  airband to 137 MHz), RTL (an RTL-SDR, 24-1766 MHz), HACKRF (1 MHz-6 GHz), BLADERF (70 MHz-6 GHz), WR12 (54 MHz-1
-  GHz). The ones here now (the X6200, an SDR of that kind on USB, a WR12 that is set up) are in the tags' orange:
-  `RTL HACKRF BLADERF WR12` on 2 m, `X6200 HACKRF` on 20 m, all five on FM broadcast. BEST and NOW are D's, for the
-  band. The line under the list says which kind found it (`FOUND ON RTL`; `SDR` for an entry from before
-  2026-11-17) and where a push plays it (`PUSH: HEAR IT ON THE RTL`, B's SDR now). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest
+- Its columns: FREQ, BAND, WHAT IT WAS, BEST and ANTENNA (D's for the band), LAST, SEEN and, in smaller letters,
+  **RX: WHAT RECEIVES IT**. Green, yellow and red say what is available now (the one place the Sentry is not amber):
+  - **BEST** (when the band is at its best: DAY, NIGHT, ANY, LOCAL) is coloured by D's NOW: **green** open now
+    (signals heard there lately, a local or always-open band, a day band by day, a night band by night, a band
+    opening at dawn or dusk), **yellow** about to close (within 6 degrees of sunset for a day band, of sunrise for a
+    night band), **red** closed (a day band by night). In the row's amber: a night band by day (short range only),
+    or no QTH set.
+  - **RX** is every kind of receiver that takes the frequency, whether you have it or not: X6200 (0.1-55 MHz, and FM
+    broadcast and the airband to 137 MHz), RTL (an RTL-SDR, 24-1766 MHz), HACK (a HackRF, 1 MHz-6 GHz), BLADE (a
+    bladeRF, 70 MHz-6 GHz), WR12 (54 MHz-1 GHz). **Green**: you have it now (the X6200, an SDR of that kind on USB,
+    a WR12 that is set up); **red**: you don't. `RTL HACK BLADE WR12` on 2 m, `X6200 HACK` on 20 m, all five on FM
+    broadcast.
+
+  The line under the list says which kind found it (`FOUND ON RTL`; `SDR` for an entry from before 2026-11-17) and
+  the radios here that can play it: `PUSH: HEAR IT ON THE X6200, THE RTL OR BOTH`. These colours are the theme's
+  `avail_on`, `avail_soon` and `avail_off` (docs/THEMES.md). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest
   band's columns, marked `~`: 26.835 MHz, below CB's channel 1, is `~11 M CB` with CB's ANTENNA. A's
   BAND box says `NEAR 11 M CB` there.
 - **WHAT IT WAS** is what the frequency is known for, not a decoding of the signal: on the X6200 a time station (WWV,
@@ -1014,9 +1023,14 @@ written through to the card before it replaces the last copy, so a power cut kee
   sign among the pieces (K or W and three or four letters in all) names the station as soon as it comes
   (`FM WNCI`), and a standing name replaces it later only when it holds that call. The call letters B shows from the
   station's code are not used: some codes name another station (WNCI's reads KCTC).
-- **Listening**: the MFK's push (or F1) plays the one chosen on its own radio, or stops it if it plays. Each radio
-  plays one entry at a time and both can play at once: an X6200 entry on the X6200 and a stick entry on the stick,
-  mixed as BOTH is (on headphones; on the speaker the stick's entry is heard), each marked `>`. While one plays, the MFK plays each one it comes to on its radio. Only the radio
+- **Listening**: the MFK's push (or F1, or a tap on the row chosen) plays the one chosen, or stops it if it plays.
+  It plays on the radio here that takes it: the X6200 (the WR12 above the X6200's own receiver, with one on) or B's
+  SDR. When both take it (FM broadcast, the airband, a WR12's band) it asks which: **F1 ALL** (both tune in to it
+  together, mixed), **F2** the X6200 only, **F3** the SDR only, **F5 BACK**; the push again is ALL. When no radio
+  here takes it, it says which kinds would. Each radio plays one entry at a time and both can play at once (two
+  entries, or the same one on both), mixed as BOTH is (on headphones; on the speaker the stick's entry is heard),
+  each marked `>`. While some play, the MFK plays each one it comes to on the radios playing that take it, else on
+  the one that found it. Only the radio
   with an entry waits in its own scan meanwhile (an X6200 entry holds A's, a stick entry B's). With one radio's
   entry alone and LISTEN on BOTH, the other radio stays heard too, mixed in (on headphones); on X6200 or RTL only
   the entry's radio is heard.

@@ -141,6 +141,9 @@ static const theme_set_t sentry_colors[] = {
     {TC_age_mid, SY_SOFT},      {TC_age_old, SY_DIM},        {TC_row_alert, SY_FAINT},      {TC_row_alert_text, SY_SOFT},
     {TC_row_heard, SY_FAINT},   {TC_row_tx, 0x3a1010},       {TC_row_to_me, 0x5a1414},      {TC_row_cq, SY_ROW},
     {TC_row_group, SY_FAINT},   {TC_row_sel_bar, SY_AMB},    {TC_title_text, SY_INK},       {TC_vfo_line, SY_SOFT},
+    /* availability in traffic-light colours, the one place the Sentry is not amber (the owner, 2026-11-17, C LOG: "indicate
+     * availability with a green / red", "add a yellow for any band that is about to close too!") */
+    {TC_avail_on, 0x40e040},    {TC_avail_soon, 0xffe030},   {TC_avail_off, 0xff4040},
     /* the FT8 list: a CQ amber-lit, worked ones darker, a call to us and our own sending dark red and brown */
     {TC_ft8_cq, 0x4a3810},      {TC_ft8_cq_worked, 0x2a200a}, {TC_ft8_cq_same, 0x1c1508},  {TC_ft8_to_me, 0x6a1a10},
     {TC_ft8_tx, 0x4a3008},

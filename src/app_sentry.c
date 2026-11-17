@@ -97,7 +97,7 @@
 #include <string.h>
 #include <time.h>
 
-extern const lv_font_t pixel_16, pixel_20, pixel_24, pixel_28, pixel_32, pixel_44;
+extern const lv_font_t pixel_12, pixel_16, pixel_20, pixel_24, pixel_28, pixel_32, pixel_44;
 
 /* A label's text set only when it is another: LVGL 8.3 lays a label out again and redraws it (with all under it) for
  * any text set, the same one too, and the Sentry sets its boxes' texts at every tick. On G the meters' two numbers
@@ -783,6 +783,8 @@ static bool     g_stick, hits_dirty, hits_loaded;
 static uint32_t g_clear_ms;                 /* F3 pressed once: a second press within 3 s clears it */
 static bool     g_scan;                     /* F4: the log's scans, one on each radio (each its own entries), with
                                              * A's and B's scans that fill it */
+static int      g_pick = -1;               /* Listen on an entry two radios here take: which (F1 ALL, F2 the X6200,
+                                             * F3 B's SDR, F5 BACK), -1 none asked */
 static int      g_hear = -1;                /* the LISTEN in force when C began playing entries (BOTH keeps the other
                                              * radio heard meanwhile), put back when it stops; -1 none */
 static uint32_t g_nx, g_nr;                 /* when each radio's log scan moves on */
@@ -822,7 +824,7 @@ static void      cr_hold(void);
 static void      cr_skip(void);
 static lv_obj_t *bd_head_l, *bd_row_l[20], *bd_about_l;
 static int       bd_rows;
-static lv_obj_t *lg_head_l, *lg_row_l[20], *lg_about_l;
+static lv_obj_t *lg_head_l, *lg_row_l[20], *lg_rx_l[20], *lg_about_l;   /* lg_rx_l: a row's RX, in pixel_12 */
 static int       lg_rows;
 static box_t     d_sel, d_how, d_ant, d_now;
 static lv_obj_t *d_head_l, *d_row_l[12];
@@ -1807,6 +1809,21 @@ static void band_now(int i, char *s, size_t n) {
     } else {
         snprintf(s, n, "SET QTH");      /* Settings > General: QTH locator */
     }
+}
+
+/* NOW as a colour, for C's BEST (the owner: "indicate availability with a green / red instead of a NOW column", "add
+ * a yellow for any band that is about to close too!"): its theme role, green open now (signals heard there lately, an
+ * always-open or local band, a day band by day, a night band by night, a band opening at dawn or dusk), yellow about
+ * to close (CLOSING: within 6 degrees of sunset for a day band, of sunrise for a night band), red closed (a day band
+ * by night); -1 none, the row's amber: a night band by day (short range only), no QTH */
+static int band_now_role(int i) {
+    char s[16];
+
+    band_now(i, s, sizeof(s));
+    if (strstr(s, "SIG") || !strcmp(s, "OPEN") || !strcmp(s, "OPENING") || (!strcmp(s, "LOCAL") && bands[i].when == 'L'))
+        return TC_avail_on;
+    if (!strcmp(s, "CLOSING")) return TC_avail_soon;
+    return strcmp(s, "CLOSED") ? -1 : TC_avail_off;
 }
 
 /* A frequency's band in D: the one it is in, or the one listening there (WWV's 10 and 15 MHz, just outside 30 M and
@@ -4511,7 +4528,9 @@ static void show_title(void) {
 
 /* ---- G LOG: what the scans locked on ---- */
 
-#define LOG_ROW "%c%-10.10s %-8.8s %-18.18s %-16.16s %-5.5s %4.4s %s"    /* 97 at most: RX 29, all five kinds */
+#define LOG_ROW "%c%-10.10s %-8.8s %-22.22s %s %-16.16s %-5.5s %4.4s"  /* 78 in pixel_16 (BEST 5, given padded); RX
+                                                                         * after it in pixel_12: 25 of 26 */
+#define LOG_RX_X  (9 + 78 * 8)  /* where RX starts: the row's 78 characters of 8 px */
 #define G_STICK_OFF 200000      /* the stick tuned this far under what it plays: its middle is not used */
 
 static void hits_save(void) {
@@ -4570,9 +4589,10 @@ static const char *sdr_code_tag(int c) {     /* its kind, no stick number (the o
 }
 
 /* Every kind of receiver that takes hz, as C's RX column names them (the owner, 2026-11-17: "all *Valid* reception
- * types", no stick numbers, the WR12 too): the X6200 (0.1-55 MHz, and FM broadcast and the airband, 87.5-137), an
- * RTL-SDR (24-1766 MHz), a HackRF (1 MHz-6 GHz), a bladeRF (70 MHz-6 GHz), the WR12 (54 MHz-1 GHz). Those here now
- * (the X6200; an SDR of that kind on USB; a WR12 set up) in the tags' orange, unless lit is false (the chosen row) */
+ * types", no stick numbers, the WR12 too; HACK and BLADE, "leave off the RF"): the X6200 (0.1-55 MHz, and FM broadcast
+ * and the airband, 87.5-137), an RTL-SDR (24-1766 MHz), a HackRF (1 MHz-6 GHz), a bladeRF (70 MHz-6 GHz), the WR12
+ * (54 MHz-1 GHz). Those here now (the X6200; an SDR of that kind on USB; a WR12 set up) in green, the others in red,
+ * unless lit is false (the chosen row, in its ink) */
 enum { RXK_X6200, RXK_RTL, RXK_HACKRF, RXK_BLADERF, RXK_WR12, RXK_N };
 
 static bool rxk_takes(int k, int64_t hz) {
@@ -4589,7 +4609,7 @@ static bool rxk_takes(int k, int64_t hz) {
 }
 
 static void rx_kinds_text(int64_t hz, bool lit, char *s, size_t n) {
-    static const char *const name[RXK_N] = {"X6200", "RTL", "HACKRF", "BLADERF", "WR12"};
+    static const char *const name[RXK_N] = {"X6200", "RTL", "HACK", "BLADE", "WR12"};
     bool       here[RXK_N] = {true, false, false, false, wr12_here};
     sdr_unit_t u[SDR_POOL_UNITS];
     int        un = lit ? sdr_pool_units(u, SDR_POOL_UNITS) : 0;
@@ -4603,8 +4623,11 @@ static void rx_kinds_text(int64_t hz, bool lit, char *s, size_t n) {
     s[0] = 0;
     for (int k = 0; k < RXK_N && at < n; k++) {
         if (!rxk_takes(k, hz)) continue;
-        if (lit && here[k]) at += (size_t)snprintf(s + at, n - at, "%s#%s %s#", at ? " " : "", tag_hex, name[k]);
-        else at += (size_t)snprintf(s + at, n - at, "%s%s", at ? " " : "", name[k]);
+        if (lit)
+            at += (size_t)snprintf(s + at, n - at, "%s#%06X %s#", at ? " " : "",
+                                   (unsigned)theme_hex(here[k] ? TC_avail_on : TC_avail_off), name[k]);
+        else
+            at += (size_t)snprintf(s + at, n - at, "%s%s", at ? " " : "", name[k]);
     }
 }
 
@@ -4638,6 +4661,7 @@ static void hit_add(int64_t hz, int mode, bool rtl, const char *what, float peak
         j = nhits - 1;                  /* full: the oldest goes */
         if (g_onx == j) g_onx = -1;
         if (g_onr == j) g_onr = -1;
+        if (g_pick == j) g_pick = -1;
     }
     memmove(&hits[1], &hits[0], (size_t)j * sizeof(hit_t));
     hits[0] = h;
@@ -4647,6 +4671,8 @@ static void hit_add(int64_t hz, int mode, bool rtl, const char *what, float peak
     else if (g_onx >= 0 && g_onx < j) g_onx++;
     if (g_onr == j) g_onr = 0;
     else if (g_onr >= 0 && g_onr < j) g_onr++;
+    if (g_pick == j) g_pick = 0;
+    else if (g_pick >= 0 && g_pick < j) g_pick++;
     hits_dirty = true;
     if (scr == SCR_LOG) {
         show_glog();
@@ -4661,6 +4687,8 @@ static void g_stick_on(int64_t hz) {
     stick_at = hz + G_STICK_OFF;
     g_stick  = true;
 }
+
+static int g_stick_mode(const hit_t *h);
 
 /* The speaker for the entries C plays (g_onx, g_onr): both, the two mixed (BOTH); the stick's alone, the stick (mixed
  * with the X6200 if BOTH was the LISTEN); the X6200's alone, the X6200 (BOTH: the stick on B's channel mixed in);
@@ -4678,13 +4706,13 @@ static void g_route(void) {
     if (g_hear < 0) g_hear = hear_want; /* the LISTEN in force, given back when the log stops */
     if (r) {
         bool both = x || g_hear == HEAR_BOTH;
-        int  m    = hits[g_onr].mode;
+        int  m    = g_stick_mode(&hits[g_onr]);
 
         heard = hear_want = both ? HEAR_BOTH : HEAR_RTL;
         hear_vol_refresh();
         rtl_spectrum_mute(false);
         rtl_spectrum_mux(both);
-        rtl_spectrum_listen(g_hz, m ? m : rtl_mode_of(g_hz));
+        rtl_spectrum_listen(g_hz, m);
     } else {
         bool both = g_hear == HEAR_BOTH && (sdr_here || rtl_spectrum_state() == RTL_SPEC_ON);
 
@@ -4699,37 +4727,113 @@ static void g_route(void) {
     show_screen();
 }
 
-/* Entry i on its own receiver (the stick's on the stick, the X6200's on the X6200), in place of the one that radio
- * played; the other radio's goes on */
-static void g_play(int i) {
+/* The radios here that take entry i, for C's Listen (the owner: "the hear it on should list sources that work. and
+ * when selected we should get to choose which ones tune in, or have all tune"): the X6200 (with a WR12 on, above its
+ * own receiver too) and B's SDR (the one B has: RTL, HACK or BLADE) */
+static bool g_x_takes(int i) {
+    int64_t hz = hits[i].hz;
+
+    return hz > 0 && hz <= INT32_MAX && cfg_is_valid_hw_freq((int32_t)hz);
+}
+
+static bool g_r_takes(int i) {
+    int64_t   lo, hi, hz = hits[i].hz;
+    rtl_dev_t d = rtl_spectrum_dev();
+
+    if (!sdr_here || d == RTL_DEV_NONE) return false;
+    rtl_spectrum_kind_range(d, &lo, &hi);
+    return hz >= lo && hz + G_STICK_OFF <= hi;      /* the stick sits G_STICK_OFF above what it plays */
+}
+
+static const char *g_x_name(int i) {
+    return rxk_takes(RXK_X6200, hits[i].hz) ? "X6200" : "WR12";
+}
+
+static const char *g_r_name(void) {
+    rtl_dev_t d = rtl_spectrum_dev();
+
+    return d == RTL_DEV_HACKRF ? "HACK" : d == RTL_DEV_BLADERF ? "BLADE" : "RTL";
+}
+
+/* An entry's mode on the other radio: the stick's demodulator (1 NFM, 2 AM, 3 WFM) for the X6200's mode, the X6200's
+ * mode for the stick's; its band's own when it has none */
+static int g_stick_mode(const hit_t *h) {
+    if (h->rtl) return h->mode > 0 ? h->mode : rtl_mode_of(h->hz);
+    return h->mode == radio_mode_am ? 2 : h->mode == radio_mode_nfm ? 1 : h->mode == radio_mode_wfm ? 3
+                                                                                               : rtl_mode_of(h->hz);
+}
+
+static int g_x_mode(const hit_t *h) {
+    if (!h->rtl) return h->mode;
+    int m = h->mode > 0 ? h->mode : rtl_mode_of(h->hz);
+
+    return m == 2 ? radio_mode_am : m == 3 ? radio_mode_wfm : radio_mode_nfm;
+}
+
+/* Entry i on the radios asked (x the X6200, r B's SDR), each in place of the one it played; a radio not asked goes on
+ * with its own */
+static void g_play_on(int i, bool x, bool r) {
     if (i < 0 || i >= nhits) return;
     const hit_t *h = &hits[i];
 
-    if (h->rtl) {
-        if (!sdr_here) {
-            osd("NO SDR", "THIS ONE WAS HEARD ON AN SDR: PLUG AN RTL-SDR, HACKRF OR BLADERF INTO THE HOST PORT.", -1);
-            return;
-        }
+    if (r) {
         g_hz = h->hz;
         g_stick_on(g_hz);
         g_onr = i;
-    } else {
-        if (!cfg_is_valid_hw_freq((int32_t)h->hz) || main_screen_freq_locked()) {
-            tune((int32_t)h->hz, h->mode);      /* says why */
-            return;
-        }
-        if (trk.on) track_end();        /* A's lock ended first: its end (AUTO) tuned back to its place while C played
+    }
+    if (x) {
+        if (!g_x_takes(i) || main_screen_freq_locked()) {
+            tune((int32_t)h->hz, g_x_mode(h));      /* says why */
+        } else {
+            if (trk.on) track_end();    /* A's lock ended first: its end (AUTO) tuned back to its place while C played
                                          * this one */
-        if (!tune((int32_t)h->hz, h->mode)) return;
-        g_onx = i;
+            if (tune((int32_t)h->hz, g_x_mode(h))) g_onx = i;
+        }
     }
     g_route();
 }
 
-/* The stick's entry (rtl) or the X6200's stopped; the other's goes on */
-static void g_stop(bool rtl) {
-    if (rtl) g_onr = -1;
-    else g_onx = -1;
+/* Entry i on the radio that found it (the log's scan, each radio its own entries) */
+static void g_play(int i) {
+    if (i < 0 || i >= nhits) return;
+    if (hits[i].rtl && !sdr_here) {
+        osd("NO SDR", "THIS ONE WAS HEARD ON AN SDR: PLUG AN RTL-SDR, HACKRF OR BLADERF INTO THE HOST PORT.", -1);
+        return;
+    }
+    g_play_on(i, !hits[i].rtl, hits[i].rtl);
+}
+
+/* Another entry chosen while some play: on the radios playing that take it, else on the one that found it */
+static void g_follow(int i) {
+    bool x = g_onx >= 0 && g_x_takes(i), r = g_onr >= 0 && g_r_takes(i);
+
+    if (x || r) g_play_on(i, x, r);
+    else g_play(i);
+}
+
+/* Listen on entry i by hand: on the one radio here that takes it, or asked which when two do; none, who would */
+static void g_listen(int i) {
+    bool x = g_x_takes(i), r = g_r_takes(i);
+
+    if (x && r) {
+        g_pick = i;
+        show_screen();
+    } else if (x || r) {
+        g_play_on(i, x, r);
+    } else {
+        char k[48], t[160];
+
+        rx_kinds_text(hits[i].hz, false, k, sizeof(k));
+        snprintf(t, sizeof(t), "%s TAKE IT; NONE OF THEM IS HERE NOW (B'S SDR: %s).", k,
+                 sdr_here ? g_r_name() : "NONE PLUGGED IN");
+        osd("NO RECEIVER FOR IT", t, -1);
+    }
+}
+
+/* Entry i stopped on every radio playing it */
+static void g_stop_entry(int i) {
+    if (g_onx == i) g_onx = -1;
+    if (g_onr == i) g_onr = -1;
     g_route();
 }
 
@@ -4747,8 +4851,17 @@ static bool g_playing(int i) {
 static void g_toggle(int i) {
     if (i < 0 || i >= nhits) return;
     g_scan = false;
-    if (g_playing(i)) g_stop(hits[i].rtl);
-    else g_play(i);
+    if (g_pick >= 0) {                  /* asked which radios: the push again is ALL */
+        int p  = g_pick;
+
+        g_pick = -1;
+        if (p == i) {
+            g_play_on(i, true, true);
+            return;
+        }
+    }
+    if (g_playing(i)) g_stop_entry(i);
+    else g_listen(i);
 }
 
 /* C's radio: the stick while it plays a stick entry and that one is chosen, or nothing of the X6200's plays */
@@ -4805,7 +4918,7 @@ static void g_leave(bool to_f) {
     g_hand_over();
     if ((g_onx >= 0 || g_onr >= 0) && g_hear >= 0 && !to_f) hear_apply(g_hear);     /* B (to_f) sets its own */
     g_stick = false;
-    g_onx = g_onr = -1;
+    g_onx = g_onr = g_pick = -1;
     g_hear  = -1;                       /* F4's scans stay on: A's and B's go on, the log's again when C is back */
 }
 
@@ -4891,7 +5004,8 @@ static void g_scan_set(bool on) {
 
 static void g_remove(int i) {
     if (i < 0 || i >= nhits) return;
-    if (g_playing(i)) g_stop(hits[i].rtl);
+    if (g_playing(i)) g_stop_entry(i);
+    g_pick = -1;
     memmove(&hits[i], &hits[i + 1], (size_t)(nhits - i - 1) * sizeof(hit_t));
     nhits--;
     if (g_onx > i) g_onx--;
@@ -4979,6 +5093,7 @@ static void show_glog(void) {
         lv_obj_set_style_text_color(lg_row_l[r], i == g_sel ? ink : amb, 0);
         if (i >= nhits) {
             lv_label_set_text(lg_row_l[r], "");
+            lv_label_set_text(lg_rx_l[r], "");
             continue;
         }
         const hit_t *h = &hits[i];
@@ -4994,10 +5109,16 @@ static void show_glog(void) {
         char n[8];
         snprintf(n, sizeof(n), "%d", h->times);
         snprintf(bn, sizeof(bn), "%s%s", in ? "" : "~", bi >= 0 ? bands[bi].name : "-");
-        char rxs[96];
+        char rxs[96], b5[8], best[24];
         rx_kinds_text(h->hz, i != g_sel, rxs, sizeof(rxs));    /* every kind that takes it; the chosen row in its ink */
-        snprintf(s, sizeof(s), LOG_ROW, g_playing(i) ? '>' : ' ', f, bn, h->what, bi >= 0 ? bands[bi].ant : "", last,
-                 n, rxs);
+        snprintf(b5, sizeof(b5), "%-5.5s", bi >= 0 ? best_name(bands[bi].when) : "");
+        int role = bi >= 0 && i != g_sel ? band_now_role(bi) : -1;    /* NOW: green open, yellow closing, red closed */
+        if (role >= 0) snprintf(best, sizeof(best), "#%06X %s#", (unsigned)theme_hex((theme_color_t)role), b5);
+        else snprintf(best, sizeof(best), "%s", b5);
+        snprintf(s, sizeof(s), LOG_ROW, g_playing(i) ? '>' : ' ', f, bn, h->what, best, bi >= 0 ? bands[bi].ant : "",
+                 last, n);
+        lv_label_set_text(lg_rx_l[r], rxs);
+        lv_obj_set_style_text_color(lg_rx_l[r], i == g_sel ? ink : amb, 0);
         lv_label_set_text(lg_row_l[r], s);
     }
     if (!nhits) {
@@ -5013,14 +5134,21 @@ static void show_glog(void) {
     strftime(a, sizeof(a), "%H:%M %b %d", &tm);
     localtime_r(&h->last, &tm);
     strftime(b, sizeof(b), "%H:%M %b %d", &tm);
-    char on[24], push[40];
+    char on[24], push[64];
+    bool x = g_x_takes(g_sel), r = g_r_takes(g_sel);
 
     snprintf(on, sizeof(on), "%s", h->rtl ? sdr_code_tag(h->sdr) : "X6200");
-    if (!h->rtl) snprintf(push, sizeof(push), "PUSH: HEAR IT ON THE X6200");
-    else if (rtl_spectrum_dev() == RTL_DEV_NONE) snprintf(push, sizeof(push), "PUSH: HEAR IT ON AN SDR");
-    else snprintf(push, sizeof(push), "PUSH: HEAR IT ON THE %s",                         /* B's SDR now */
-                  rtl_spectrum_dev() == RTL_DEV_HACKRF ? "HACKRF" : rtl_spectrum_dev() == RTL_DEV_BLADERF ? "BLADERF"
-                                                                                                         : "RTL");
+    if (g_pick == g_sel) {              /* which radios: the line says the keys */
+        snprintf(s, sizeof(s), "HEAR %s ON: F1 ALL (THE %s AND THE %s TUNE IN TOGETHER), F2 THE %s ONLY, F3 THE %s "
+                               "ONLY. PUSH AGAIN: ALL. F5: BACK",
+                 h->what[0] ? h->what : "IT", g_x_name(g_sel), g_r_name(), g_x_name(g_sel), g_r_name());
+        lv_label_set_text(lg_about_l, s);
+        return;
+    }
+    if (x && r) snprintf(push, sizeof(push), "PUSH: HEAR IT ON THE %s, THE %s OR BOTH", g_x_name(g_sel), g_r_name());
+    else if (x) snprintf(push, sizeof(push), "PUSH: HEAR IT ON THE %s", g_x_name(g_sel));
+    else if (r) snprintf(push, sizeof(push), "PUSH: HEAR IT ON THE %s", g_r_name());     /* B's SDR now */
+    else snprintf(push, sizeof(push), "NO RECEIVER HERE TAKES IT");
     snprintf(s, sizeof(s), h->rtl ? "%s: FOUND ON %s, FIRST %s, LAST %s, %d TIME%s, %.0f DB. %s"
                                   : "%s: FOUND ON %s, FIRST %s, LAST %s, %d TIME%s, +%.0f DB. %s",
              h->what[0] ? h->what : "THIS ONE", on, a, b, h->times, h->times == 1 ? "" : "S", h->peak,
@@ -5481,6 +5609,14 @@ static const char *f_label(int k) {
             return s;
         }
         case SCR_LOG: {
+            if (g_pick >= 0 && g_pick < nhits) {    /* which radios tune in */
+                if (k == 0) snprintf(s, sizeof(s), "Hear on:\nAll");
+                else if (k == 1) snprintf(s, sizeof(s), "Hear on:\n%s", g_x_name(g_pick));
+                else if (k == 2) snprintf(s, sizeof(s), "Hear on:\n%s", g_r_name());
+                else if (k == 4) snprintf(s, sizeof(s), "Back");
+                else s[0] = 0;
+                return s;
+            }
             if (k == 3) snprintf(s, sizeof(s), "Scan:\n%s", g_scanning() ? "On" : "Off");
             else if (k == 4) snprintf(s, sizeof(s), "Dwell:\n%d s", scan_dwell_ms / 1000);
             else if (k == 2) snprintf(s, sizeof(s), g_clear_ms && lv_tick_get() - g_clear_ms < 3000 ? "Clear:\nSure?" : "Clear");
@@ -5830,6 +5966,18 @@ static void fkey(int k) {
             if (scr == SCR_RTL) show_screen();
             break;
         case SCR_LOG:
+            if (g_pick >= 0) {                  /* F1 ALL, F2 the X6200, F3 B's SDR, F5 BACK */
+                int p  = g_pick;
+
+                g_pick = -1;
+                if (p < nhits && k <= 2) {
+                    g_scan = false;
+                    g_play_on(p, k != 2, k != 1);
+                } else {
+                    show_screen();
+                }
+                break;
+            }
             if (k == 0) g_toggle(g_sel);
             if (k == 1) {
                 g_remove(g_sel);
@@ -5985,8 +6133,9 @@ static void step(int dir) {
         case SCR_LOG:                   /* the next one; while one plays, it plays the next one; a scan stops */
             if (!nhits) break;
             g_scan = false;
+            g_pick = -1;
             g_sel = (g_sel + dir + nhits) % nhits;
-            if (g_onx >= 0 || g_onr >= 0) g_play(g_sel);
+            if (g_onx >= 0 || g_onr >= 0) g_follow(g_sel);
             else show_screen();
             break;
         case SCR_RTL:
@@ -6491,10 +6640,11 @@ static void row_tap_cb(lv_event_t *e) {
         if (i == g_sel)
             g_toggle(i);
         else {
-            g_sel = i;
+            g_sel  = i;
+            g_pick = -1;
             if (g_onx >= 0 || g_onr >= 0) {
                 g_scan = false;
-                g_play(i);
+                g_follow(i);
             } else {
                 show_screen();
             }
@@ -6886,20 +7036,24 @@ static void build_log(lv_obj_t *p) {
     rect(p, 6, y - 2, SW - 12, scr_h - y - 2, 3, false);
     char h[128];
 
-    snprintf(h, sizeof(h), LOG_ROW, ' ', "FREQ", "BAND", "WHAT IT WAS", "ANTENNA", "LAST", "SEEN",
-             "RX: WHAT RECEIVES IT");
+    snprintf(h, sizeof(h), LOG_ROW, ' ', "FREQ", "BAND", "WHAT IT WAS", "BEST ", "ANTENNA", "LAST", "SEEN");
     lg_head_l = label(p, &pixel_16, amb, 9, y + 2, 0, 0, h);
+    label(p, &pixel_12, amb, LOG_RX_X, y + 5, 0, 0, "RX: WHAT RECEIVES IT");
     rect(p, 6, y + 20, SW - 12, 3, 0, true);
     lg_rows = (scr_h - (y + 26) - 50) / rh;
     if (lg_rows > 20) lg_rows = 20;
     for (int r = 0; r < lg_rows; r++) {
         lg_row_l[r] = label(p, &pixel_16, amb, 9, y + 26 + r * rh, SW - 18, LV_TEXT_ALIGN_LEFT, "");
-        lv_label_set_recolor(lg_row_l[r], true);        /* RX: RTL in the stick's blue */
+        lv_label_set_recolor(lg_row_l[r], true);        /* BEST: green open now, yellow closing, red closed */
         lv_obj_set_height(lg_row_l[r], rh);
         lv_label_set_long_mode(lg_row_l[r], LV_LABEL_LONG_CLIP);
         lv_obj_set_style_bg_color(lg_row_l[r], amb, 0);
         lv_obj_add_flag(lg_row_l[r], LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(lg_row_l[r], row_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)r);
+        lg_rx_l[r] = label(p, &pixel_12, amb, LOG_RX_X, y + 26 + r * rh + 3, SW - 9 - LOG_RX_X, LV_TEXT_ALIGN_LEFT,
+                           "");        /* over the row's end, not clickable: a tap goes to the row */
+        lv_label_set_recolor(lg_rx_l[r], true);
+        lv_label_set_long_mode(lg_rx_l[r], LV_LABEL_LONG_CLIP);
     }
     rect(p, 6, scr_h - 50, SW - 12, 3, 0, true);
     lg_about_l = label(p, &pixel_16, amb, 14, scr_h - 44, SW - 28, LV_TEXT_ALIGN_LEFT, "");

@@ -170,7 +170,11 @@ extern "C" {
     X(ft8_cq_worked,     0x1f4a2e, 0x2e5a00, 0xd3ffa5, 0x2e5a00) \
     X(ft8_cq_same,       0x163a24, 0x224400, 0xddffbb, 0x224400) /* worked in this mode */ \
     X(ft8_to_me,         0xef4444, 0xff0000, 0xff0000, 0xd01010) \
-    X(ft8_tx,            0x0082fc, 0x0000ff, 0x0000ff, 0x1f5fbf)
+    X(ft8_tx,            0x0082fc, 0x0000ff, 0x0000ff, 0x1f5fbf) \
+    X(avail_on,          0x34d399, 0x40e040, 0x007a00, 0x40e040) /* available: the Sentry's C LOG, a band open now, \
+                                                                  * a receiver here */ \
+    X(avail_soon,        0xfacc15, 0xffff30, 0x8a7a00, 0xffff30) /* a band about to close */ \
+    X(avail_off,         0xf87171, 0xff4040, 0xd00000, 0xff4040) /* a band closed, a receiver not here */
 
 typedef enum {
 #define THEME_ENUM(name, a, b, c, d) TC_##name,

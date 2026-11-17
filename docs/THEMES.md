@@ -129,7 +129,9 @@ The authoritative list, with the value of each built-in theme, is
 - Text: `text`, `text_value`, `text_dim`, `text_soft`, `text_mute`, `text_faint`, `text_head`, `line`, `action`,
   `accent`, `accent_soft`, `title_text`
 - State: `ok`, `ok_bg`, `ok_bar`, `warn`, `warn_bg`, `err`, `err_strong`, `err_bg`, `tx`, `tx_bg`, `info`, `digi`,
-  `alert`, `alert_text`, `alert_bg`, `new`
+  `alert`, `alert_text`, `alert_bg`, `new`; `avail_on`, `avail_soon`, `avail_off` (availability, the Sentry's C LOG:
+  a band open now or a receiver here, a band about to close, a band closed or a receiver not here; green, yellow and
+  red in every built-in theme, the Sentry's too)
 - Main screen: `icon_off`, `mode_dig`, `mode_text`, `mode_bg`, `mode_border`, `pill_off_text`, `pill_border`,
   `meter_weak`, `meter_bar`, `meter_over`, `meter_low`, `meter_high`, `bar_high`, `bar_mid`, `alc`, `tx_box`, `vfo_line`, `spot`,
   `tune_good`, `bp_cw`, `bp_dig`, `bp_ssb`, `bp_bcn`, `bp_out`, `bp_text`, `finder_band`, `finder_cursor`
