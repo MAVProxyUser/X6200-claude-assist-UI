@@ -1,0 +1,14 @@
+config BR2_PACKAGE_X6X00_DSD_FME
+	bool "x6x00-dsd-fme"
+	depends on BR2_INSTALL_LIBSTDCPP
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_LIBSNDFILE
+	select BR2_PACKAGE_NCURSES
+	select BR2_PACKAGE_PULSEAUDIO
+	help
+	  dsd-fme (lwvmobile) for the OpenX6X00 SDR daemon: P25,
+	  D-STAR, YSF and X2-TDMA found and decoded in the narrow FM
+	  channel the Sentry's B listens to. Its voice through a DVSI
+	  USB-3000 only (libmbe-dvsi, this repository's
+	  tools/dsdfme/mbe_dvsi): never a software vocoder.
+	  Installed as /usr/bin/dsd-fme.

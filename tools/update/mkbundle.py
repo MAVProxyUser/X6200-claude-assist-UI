@@ -41,7 +41,9 @@ LIB_FILES = ["/usr/lib/libft8.so"]
 # only libusb) and the libbladeRF it opens for a bladeRF: a radio updated in place keeps its card image's daemon
 # otherwise, RTL-SDR only (v0.3.12.23 and before) or none. The GUI tells a daemon running from another file to end and
 # starts this one (src/rtl_spectrum.c); a GUI of before reads this daemon's hello all the same (its first five words)
-SDR_FILES = ["/usr/bin/x6x00-rtlspec", "/usr/lib/libbladeRF.so.2"]
+# and dsd-fme, which the daemon runs on B's narrow FM (buildroot's x6x00-dsd-fme; libsndfile, PulseAudio and ncurses,
+# which every image has): without it the daemon decodes DMR alone
+SDR_FILES = ["/usr/bin/x6x00-rtlspec", "/usr/lib/libbladeRF.so.2", "/usr/bin/dsd-fme"]
 SKIP_PREFIXES = ("/usr/include/",)       # the GUI package installs headers too
 UBOOT = "u-boot-sunxi-with-spl.bin"
 UBOOT_OFFSET = 8 * 1024                  # genimage's u-boot partition: offset 8K, size 1016K
