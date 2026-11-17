@@ -175,7 +175,8 @@ bool rtl_spectrum_dmr(rtl_dmr_t *out);
 typedef struct {
     int64_t  hz;
     char     proto[16];         /* as dsd-fme names it: "P25P1", "P25P2", "DSTAR", "YSF", "X2-TDMA" */
-    char     call[2][160];      /* who talks to whom ("TG 1234 FROM 5678901 NAC 293"), per slot; "" no one */
+    char     call[2][224];      /* who talks to whom ("TG 1234 FROM 5678901 NAC 293"), per slot, its text message in
+                                 * quotes after it (D-STAR's slow data); "" no one */
     uint32_t at_ms, seq;
 } rtl_dsd_t;
 

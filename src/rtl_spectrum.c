@@ -566,7 +566,7 @@ static void *spec_thread(void *arg) {
         }
         if (n >= 8 && memcmp(buf, "RDSD", 4) == 0) {   /* "<Hz>|<protocol>|<slot>|<call>" */
             uint32_t  len;
-            char      t[240], *p1, *p2, *p3;
+            char      t[320], *p1, *p2, *p3;
             long long hz;
             int       sl;
 

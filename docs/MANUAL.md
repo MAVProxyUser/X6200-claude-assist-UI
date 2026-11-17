@@ -1307,7 +1307,8 @@ The other digital voice modes are found the same way, in any narrow FM channel B
 (Yaesu System Fusion) and X2-TDMA. DMR stays the daemon's own.
 
 - **Who talks**: B's line says `P25 453.250` (or `D-STAR`, `YSF`...), then the call: `TG 1234 FROM 5678901 NAC 293
-  TALKING`, `TO CQCQCQ FROM N0CALL /ID51 TALKING`, `SLOT 2 ...` for a TDMA system's second slot. The head, B's half and
+  TALKING`, `TO CQCQCQ FROM N0CALL /ID51 "HELLO FROM DUBLIN" TALKING` (D-STAR's text message in quotes, once it has
+  come twice), `SLOT 2 ...` for a TDMA system's second slot. The head, B's half and
   G say the protocol in place of NFM; G's lamp says `RX P25`, `RX D-STAR`.
 - **The voice** goes through the USB-3000 only (no software vocoder: dsd-fme is built against our libmbe-dvsi, which
   hands its frames to the daemon's vocoder). P25's and D-STAR's voice through it is still to come: their calls are

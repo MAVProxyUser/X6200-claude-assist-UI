@@ -370,7 +370,7 @@ static bool dsd_on;             /* dsd-fme there (/usr/bin/dsd-fme), B's daemon 
 
 static void dsd_heard(const char *proto, int slot, const char *call) {
     static char was[16];
-    char        t[220];
+    char        t[320];
     uint8_t     msg[8 + sizeof(t)];
     int         n = snprintf(t, sizeof(t), "%llu|%s|%d|%s", (unsigned long long)lis.hz, proto, slot, call);
 

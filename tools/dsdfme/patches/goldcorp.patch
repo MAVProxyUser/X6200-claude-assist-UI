@@ -56,7 +56,7 @@ index ec70e56..8b9a252 100644
        state->group_array[state->group_tally].groupNumber = rid;
        sprintf (state->group_array[state->group_tally].groupMode, "%s", "D");
 diff --git a/src/dsd_events.c b/src/dsd_events.c
-index 1bfd16f..a1afc62 100644
+index 1bfd16f..0c03e8f 100644
 --- a/src/dsd_events.c
 +++ b/src/dsd_events.c
 @@ -10,6 +10,7 @@
@@ -73,15 +73,15 @@ index 1bfd16f..a1afc62 100644
  
 +//GoldCorpHF: what is heard, a line at a time to the descriptor in DSD_STATUS_FD (the SDR daemon's pipe): "SY 0 <frame
 +//type>" while a sync is found (at most twice a second), "EV <slot> <event>" while a call goes on (as it changes, else
-+//once a second). Never waits: the daemon makes the pipe non-blocking, a full one loses the line
++//once a second), "TX <slot> <text>" its text message, as EV. Never waits: the daemon makes the pipe non-blocking, a full one loses the line
 +void dsd_status (const char * kind, int slot, const char * text)
 +{
 +  static int fd = -2;
-+  static char last[2][2][512];
-+  static long at[2][2];
++  static char last[3][2][512];
++  static long at[3][2];
 +  struct timespec ts;
 +  char line[600];
-+  int k = kind[0] == 'E', n;
++  int k = kind[0] == 'E' ? 1 : kind[0] == 'T' ? 2 : 0, n;
 +  long ms;
 +
 +  if (fd == -2)
@@ -105,7 +105,7 @@ index 1bfd16f..a1afc62 100644
  // run once per loop to check for and push and update event history
  void watchdog_event_history (dsd_opts * opts, dsd_state * state, uint8_t slot)
  {
-@@ -813,6 +845,18 @@ void watchdog_event_current (dsd_opts * opts, dsd_state * state, uint8_t slot)
+@@ -813,6 +845,22 @@ void watchdog_event_current (dsd_opts * opts, dsd_state * state, uint8_t slot)
  
    sprintf (event_struct->Event_History_Items[0].event_string, "%s", event_string);
  
@@ -119,6 +119,10 @@ index 1bfd16f..a1afc62 100644
 +      for (s += 5; *s && *s != ' ' && *s != ';' && !who; s++)
 +        who = (*s >= '1' && *s <= '9') || (*s >= 'A' && *s <= 'Z') || (*s >= 'a' && *s <= 'z');
 +    if (who) dsd_status ("EV", slot, e);
++    //and the call's text (D-STAR's slow data message, YSF's, a DMR talker alias's), when it has one
++    if (who && strncmp (event_struct->Event_History_Items[0].text_message, "BUMBLEBEETUNA", 13) != 0 &&
++        event_struct->Event_History_Items[0].text_message[0])
++      dsd_status ("TX", slot, event_struct->Event_History_Items[0].text_message);
 +  }
 +
    if (timestr != NULL)
@@ -207,3 +211,48 @@ index 64744e4..3ee26cb 100644
          if(result == 0)
          {
            sf_close(opts->audio_in_file);
+diff --git a/src/dstar.c b/src/dstar.c
+index aed07c6..1fcdf5f 100644
+--- a/src/dstar.c
++++ b/src/dstar.c
+@@ -86,7 +86,7 @@ uint8_t sd_d[48] =
+ void processDSTAR_SD(dsd_opts * opts, dsd_state * state, uint8_t * sd)
+ {
+ 
+-  int i, j, len;
++  int i, j, len, tl;
+   uint8_t sd_bytes[60]; //raw slow data packed into bytes
+   uint8_t hd_bytes[60]; //storage for packed bytes sans the header indicator byte (0x55)
+   uint8_t payload[60]; //unchanged copy of sd_bytes for payload printing
+@@ -346,13 +346,13 @@ void processDSTAR_SD(dsd_opts * opts, dsd_state * state, uint8_t * sd)
+         // fprintf (stderr, " %s: ", type);
+         memset (strt, 0x20, sizeof(strt)); //space fill
+         fprintf (stderr, " TEXT: ");
+-        for (i = 1; i < 59; i++)
++        for (i = 1, tl = 0; i < 59; i++) //GoldCorpHF: the text kept whole (strt[i] left a space at each block's head)
+         {
+           if (i%6==0) i++;
+           if ( (sd_bytes[i] > 0x19) && (sd_bytes[i] < 0x7F) )
+           {
+             fprintf (stderr, "%c", sd_bytes[i]);
+-            strt[i] = sd_bytes[i];
++            strt[tl++] = sd_bytes[i];
+           }
+         }
+         strt[59] = '\0';
+@@ -366,13 +366,13 @@ void processDSTAR_SD(dsd_opts * opts, dsd_state * state, uint8_t * sd)
+     {
+       memset (strt, 0x20, sizeof(strt)); //space fill
+       fprintf (stderr, " TEXT: ");
+-      for (i = 1; i < 59; i++)
++      for (i = 1, tl = 0; i < 59; i++) //GoldCorpHF: the text kept whole (strt[i] left a space at each block's head)
+       {
+         if (i%6==0) i++;
+         if ( (sd_bytes[i] > 0x19) && (sd_bytes[i] < 0x7F) )
+         {
+           fprintf (stderr, "%c", sd_bytes[i]);
+-          strt[i] = sd_bytes[i];
++          strt[tl++] = sd_bytes[i];
+         }
+       }
+       strt[59] = '\0';

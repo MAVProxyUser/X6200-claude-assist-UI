@@ -203,11 +203,20 @@ static void pretty(const char *ev, char *out, size_t max) {
     for (char *c = out; *c; c++) *c = (char)toupper((unsigned char)*c);
 }
 
-static char     proto[16], call[2][160];
+static char     proto[16], call[2][160], text[2][48];
 static uint32_t call_ms[2], said_ms;
 
+/* The call, its text message after it in quotes (D-STAR's slow data, YSF's, a talker alias) */
 static void say(int slot) {
-    if (heard_cb) heard_cb(proto, slot, call[slot]);
+    char c[220];
+
+    snprintf(c, sizeof(c), call[slot][0] && text[slot][0] ? "%s  \"%s\"" : "%s", call[slot], text[slot]);
+    if (heard_cb) heard_cb(proto, slot, c);
+}
+
+/* Two timeslots (or a second channel): dsd-fme's second slot means something only there */
+static bool tdma(void) {
+    return !strcmp(proto, "P25P2") || !strncmp(proto, "X2", 2) || !strcmp(proto, "DMR");
 }
 
 static void line(char *l) {
@@ -227,11 +236,33 @@ static void line(char *l) {
             snprintf(proto, sizeof(proto), "%s", p);
             say(0);
         }
+    } else if (!strncmp(l, "TX ", 3) && (l[3] == '0' || l[3] == '1') && l[4] == ' ') {
+        int    s = l[3] - '0';
+        char   x[48];
+        size_t n = 0;
+
+        if (s && !tdma()) return;
+        for (const char *q = l + 5; *q && n < sizeof(x) - 1; q++)    /* printable, upper case, spaces as one */
+            if (isprint((unsigned char)*q) && *q != '"' && !(*q == ' ' && (!n || x[n - 1] == ' ')))
+                x[n++] = (char)toupper((unsigned char)*q);
+        while (n && x[n - 1] == ' ') n--;
+        x[n] = 0;
+        static char seen[2][48];        /* taken when said twice running: a superframe read out of step (the first
+                                         * after a header) gives a garbled one once */
+        bool        twice = !strcmp(x, seen[s]);
+
+        snprintf(seen[s], sizeof(seen[s]), "%s", x);
+        if (twice && strcmp(x, text[s])) {
+            snprintf(text[s], sizeof(text[s]), "%s", x);
+            if (*x) fprintf(stderr, "rtlspec: dsd-fme %s%s says \"%s\"\n", proto, s ? " SLOT 2" : "", x);
+            if (*proto && call[s][0]) say(s);
+        }
     } else if (!strncmp(l, "EV ", 3) && (l[3] == '0' || l[3] == '1') && l[4] == ' ') {
         int         s = l[3] - '0';
         char        c[160];
         static char logged[2][64];
 
+        if (s && *proto && !tdma()) return;     /* D-STAR, YSF, P25 phase 1: one channel, said twice */
         pretty(l + 5, c, sizeof(c));
         if (!strncmp(call[s], "TG ", 3) && !strncmp(c, "TO ", 3) && !strcmp(call[s] + 3, c + 3))
             memcpy(c, "TG", 2);         /* a group call said without its "Group" (some of its reports): still one */
@@ -393,11 +424,11 @@ static void *run(void *arg) {
         t = ms_now();
         for (int i = 0; i < 2; i++)
             if (call[i][0] && t - call_ms[i] > 2000) {
-                call[i][0] = 0;
+                call[i][0] = text[i][0] = 0;
                 say(i);
             }
         if (proto[0] && !dsd_active() && t - atomic_load(&sync_ms) > 1500) {
-            proto[0] = call[0][0] = call[1][0] = 0;
+            proto[0] = call[0][0] = call[1][0] = text[0][0] = text[1][0] = 0;
             say(0);
         }
         if (proto[0] && t - said_ms >= 1000) {
