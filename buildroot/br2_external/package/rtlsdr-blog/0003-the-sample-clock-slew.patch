@@ -1,0 +1,64 @@
+From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
+Subject: [PATCH] rtlsdr_set_sample_slew: the sample clock a fraction of a ppm off, while streaming
+
+The RTL2832U's sample frequency correction (demod page 1, 0x3e-0x3f) has
+steps of 2^-24, about 0.06 ppm; the library only ever sets it to a whole
+ppm, with the frequency correction. New call rtlsdr_set_sample_slew(dev,
+ppm) sets it to the device's correction plus any ppm, at once and without
+the demodulator reset a new sample rate takes. Receivers on one clock (a
+KrakenSDR's five) are lined up by it to a fraction of a sample: one stick
+run fast or slow for a moment slides its samples against the others. The
+default is unchanged. The register's meaning is the library's own; no code
+taken from elsewhere.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+diff --git a/include/rtl-sdr.h b/include/rtl-sdr.h
+--- a/include/rtl-sdr.h
++++ b/include/rtl-sdr.h
+@@ -418,6 +418,19 @@
+  */
+ RTLSDR_API int rtlsdr_set_dithering(rtlsdr_dev_t *dev, int dither);
+ 
++/*!
++ * The sample clock this many ppm off the rate set (on top of the device's own
++ * correction, rtlsdr_set_freq_correction), in the RTL2832U's steps of 2^-24
++ * (0.06 ppm), while it streams: no reset, no gap. Receivers on one clock (a
++ * KrakenSDR) are lined up by it: a stick run 1 ppm fast for a second gains
++ * 1.024 samples at 1.024 MS/s on the others. 0 puts it back.
++ *
++ * \param dev the device handle given by rtlsdr_open()
++ * \param ppm the offset, -480 to 480
++ * \return -EINVAL out of range, -1 no device, 0 otherwise
++ */
++RTLSDR_API int rtlsdr_set_sample_slew(rtlsdr_dev_t *dev, double ppm);
++
+ RTLSDR_API int rtlsdr_check_dongle_model(void *dev, char *manufact_check, char *product_check);
+ 
+ #ifdef __cplusplus
+diff --git a/src/librtlsdr.c b/src/librtlsdr.c
+--- a/src/librtlsdr.c
++++ b/src/librtlsdr.c
+@@ -2180,4 +2180,22 @@
+ 		return -1;
+ 	r82xx_set_dither(&dev->r82xx_p, dither);
+ 	return dev->freq ? rtlsdr_set_center_freq(dev, dev->freq) : 0;
++}
++
++int rtlsdr_set_sample_slew(rtlsdr_dev_t *dev, double ppm)
++{
++	int r = 0;
++	double v;
++	int32_t offs;
++
++	if (!dev)
++		return -1;
++	/* as rtlsdr_set_sample_freq_correction, finer than a whole ppm */
++	v = -(dev->corr + ppm) * TWO_POW(24) / 1000000.0;
++	offs = (int32_t)(v < 0 ? v - 0.5 : v + 0.5);
++	if (offs < -8192 || offs > 8191)	/* the register's 14 bits */
++		return -EINVAL;
++	r |= rtlsdr_demod_write_reg(dev, 1, 0x3f, offs & 0xff, 1);
++	r |= rtlsdr_demod_write_reg(dev, 1, 0x3e, (offs >> 8) & 0x3f, 1);
++	return r;
+ }

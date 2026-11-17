@@ -1551,6 +1551,11 @@ computer can take them from the radio over the network:
   around the DF target, at 64 kS/s**, each channel lined up and corrected by the radio's own calibration. The header
   says so (`sampling_freq` 64000, the band's centre in `rf_center_freq`) and marks frames: DATA once calibrated,
   CAL while the noise source was on, DUMMY before a calibration.
+- **The sticks lined up in hardware** while a program reads it, as Heimdall does: after a calibration (and as soon as
+  a program connects) each stick more than 0.03 of a sample off CH0 runs a ppm fast or slow for as long as it takes
+  (under half a second), then a calibration checks it; three rounds at most, one usually does (tried: from up to
+  0.49 of a sample to 0.02 at most). So its band lines up across, not only at its middle. Direction finding itself
+  needs none of it (it corrects the fraction exactly at each target) and does not slew without a program.
 - Over the radio's WiFi a program got about 2.5 frames a second (0.8 MB/s) of the 7.8 the radio makes; a slow program
   gets the newest frame each time. One program at a time; page I shows `IQ CLIENT`, the browser page says so.
 - Receive only. The ports are open only while direction finding runs.

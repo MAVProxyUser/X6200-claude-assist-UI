@@ -11,9 +11,10 @@ approved that day.
 
 *The Kraken and USB first*
 
-1. **The Kraken roadmap** (tools/rtlspec/x6x00-df/ROADMAP.md, the owner's asks of 2026-11-17): done through item 9
+1. **The Kraken roadmap** (tools/rtlspec/x6x00-df/ROADMAP.md, the owner's asks of 2026-11-17): done, items 1-9
    (cores, page I's tuning and FOLLOW, the web page, gpsd, the bearing log, TNA/sources/FB/smoothing/ROOT-MUSIC,
-   custom arrays, targets 2-4, the IQ server). Left: sample-rate slewing (10); the other targets in the bearing log.
+   custom arrays, targets 2-4, the IQ server) and 10 (sample-rate slewing, 2026-11-17 evening). Left: the other
+   targets in the bearing log.
 
 2. **A Bluetooth GPS for gpsd, beside Bluetooth CAT**: built 2026-11-17 (btgps-ctl, Settings > Bluetooth's GPS for
    gpsd, the web page's Direction finder GPS card): beside CAT rather than instead of it, as the radio is CAT's

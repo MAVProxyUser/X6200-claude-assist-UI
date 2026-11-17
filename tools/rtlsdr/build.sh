@@ -37,9 +37,17 @@ if [ ! -d "$B/rtl-sdr-blog" ]; then
     git clone -q https://github.com/rtlsdrblog/rtl-sdr-blog.git "$B/rtl-sdr-blog"
     git -C "$B/rtl-sdr-blog" checkout -q "$RTLSDR_REV"
 fi
-for p in "$(dirname "$RTLSDR_MK")"/*.patch; do
-    git -C "$B/rtl-sdr-blog" apply --reverse --check "$p" 2> /dev/null || git -C "$B/rtl-sdr-blog" apply "$p"
-done
+# the patches as a set: whenever they (or the commit) change, the checkout is put back to the commit and all of them
+# applied in order (one by one, a patch whose lines the next one touches no longer reverses alone)
+RTLSDR_SET=$( (echo "$RTLSDR_REV"; cat "$(dirname "$RTLSDR_MK")"/*.patch) | shasum | cut -c1-16)
+if [ "$(cat "$B/rtl-sdr-blog/.patched" 2> /dev/null)" != "$RTLSDR_SET" ]; then
+    git -C "$B/rtl-sdr-blog" checkout -q "$RTLSDR_REV" -- .
+    git -C "$B/rtl-sdr-blog" checkout -q -- .
+    for p in "$(dirname "$RTLSDR_MK")"/*.patch; do
+        git -C "$B/rtl-sdr-blog" apply "$p"
+    done
+    echo "$RTLSDR_SET" > "$B/rtl-sdr-blog/.patched"
+fi
 [ -d "$B/hackrf" ] || git clone -q --depth 1 --branch "$HACKRF_TAG" https://github.com/greatscottgadgets/hackrf.git "$B/hackrf"
 [ -d "$B/bladeRF" ] || git clone -q --depth 1 --branch "$BLADERF_TAG" --recurse-submodules --shallow-submodules \
     https://github.com/Nuand/bladeRF.git "$B/bladeRF"
