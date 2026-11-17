@@ -42,20 +42,14 @@ approved that day.
 7. **A GUI that hangs** (its process alive, its radio thread stuck) still lets the X6200's base switch the radio off
     after about three minutes: the base keeper runs only while no GUI process does. Whether to cover it is the owner's
     call (a hung radio switching itself off may be wanted).
-8. **The SDR daemon's fallback while its stick is away**: while the stick the GUI asked for is gone (pulled out, or
-   in the second a port reset takes), the daemon opens another one, even one in the stopped list (/mnt/sdr_pool): seen
-   2026-11-17, stick 1000 opened for a moment during a reset of B's 1004 on the Kraken. It can open only a stick
-   nobody holds (page I's are safe), and the GUI asks again every 3 s, which brought 1004 back. The root of it: the
-   GUI and the daemon name RTLs by their place in serial order (RTL<n>), which shifts when one goes; by serial would
-   be exact, a change to the GUI's pool and the daemon together.
-9. **Meteor-M LRPT on B** (a255320, c5e864b, d02958f): decoded from a real 2019 Meteor-M2-2 recording played into
+8. **Meteor-M LRPT on B** (a255320, c5e864b, d02958f): decoded from a real 2019 Meteor-M2-2 recording played into
     the stick over a cable. The first live pass (2026-11-17, Meteor-M2-4) gave nothing on the antenna used. To do: a
     pass on a 137 MHz antenna outdoors (QFH or V-dipole); the 80k mode is unverified on real data.
-10. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
+9. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
     Waterfall section below).
-11. **RADE's decode time on the X6200**: 114-200 ms for the slowest 120 ms modem frame while searching, with no
+10. **RADE's decode time on the X6200**: 114-200 ms for the slowest 120 ms modem frame while searching, with no
     gaps or losses seen; watch it on a busy band.
-12. **Screenshots** of every menu for the README and the manual: later, at the owner's word.
+11. **Screenshots** of every menu for the README and the manual: later, at the owner's word.
 
 **Waiting on hardware**
 

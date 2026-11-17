@@ -60,6 +60,14 @@ extern int  sdr_rtl_index, sdr_rtl_open_at;
 extern bool sdr_rtl_exact;              /* -W: RTL sdr_rtl_index alone, none in its place */
 extern char sdr_rtl_open_loc[32];       /* the open one's USB location ("3-1.1"), "" none */
 int        sdr_rtl_count(void);
+/* The RTL asked for by its serial (and USB location, for sticks that share a serial): "k RTL<n> SERIAL LOC". Then that
+ * stick alone is opened, and while it is away (a port reset, pulled out) or busy, none in its place: the GUI's pool
+ * decides, the daemon does not (2026-11-17: stick 1000, stopped in the pool, opened for a moment while B's 1004 was
+ * reset, its place RTL4 having gone). "" for both: by place, as before */
+void       sdr_rtl_want(const char *sn, const char *loc);
+bool       sdr_rtl_want_sn(void);                   /* asked for by serial */
+bool       sdr_rtl_wanted_there(void);              /* that stick is on USB */
+bool       sdr_rtl_wanted_open(void);               /* and it is the one open */
 
 /* The test device (sdr_file.c, -T FILE): transmits into the file, receives nothing; never a radio */
 extern const sdr_ops_t sdr_file;

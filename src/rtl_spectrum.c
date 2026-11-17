@@ -92,6 +92,18 @@ static int             cmd_fd = -1;
 static atomic_int      dev_kind = RTL_DEV_NONE;
 static atomic_int      use_kind = RTL_DEV_NONE;     /* rtl_spectrum_use's */
 static atomic_int      use_rtl;                     /* and the RTL's place (RTL<n>) when it is an RTL */
+static char            use_sn[24], use_loc[24];     /* and that RTL's serial and USB location as the pool had them when
+                                                     * it was asked for: the daemon opens that stick or none, so a
+                                                     * place that shifts (a stick gone in a port reset) moves nothing */
+static pthread_mutex_t use_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* "k RTL<n> SERIAL LOC" (or "k RTL<n>" with no serial known) */
+static void k_rtl_cmd(char *cmd, size_t n) {
+    pthread_mutex_lock(&use_lock);
+    if (use_sn[0]) snprintf(cmd, n, "k RTL%d %s %s\n", atomic_load(&use_rtl), use_sn, use_loc[0] ? use_loc : "-");
+    else snprintf(cmd, n, "k RTL%d\n", atomic_load(&use_rtl));
+    pthread_mutex_unlock(&use_lock);
+}
 static atomic_int      dev_rtl  = -1;               /* the open RTL's place, the daemon's word (-1 none) */
 static atomic_llong    dev_lo = RTL_SPEC_MIN_HZ, dev_hi = RTL_SPEC_MAX_HZ;
 static atomic_bool     dev_tx;
@@ -226,7 +238,7 @@ static bool daemon_outdated(int fd) {
 /* The daemon started, on what is wanted now: it goes into the background at once (the child waited for here is gone
  * in a moment), nobody's child, so no GUI's end is its end. One already running: this one ends at once */
 static void daemon_start(void) {
-    char  f[24], g[16], n[16], r[16], s[16];
+    char  f[24], g[16], n[16], r[16], s[16], d[16], k[64] = "";
     pid_t p;
 
     snprintf(f, sizeof(f), "%lld", (long long)atomic_load(&want_hz));
@@ -234,6 +246,12 @@ static void daemon_start(void) {
     snprintf(n, sizeof(n), "%d", BINS);
     snprintf(r, sizeof(r), "%d", ROWS);
     snprintf(s, sizeof(s), "%d", RATE);
+    snprintf(d, sizeof(d), "%d", atomic_load(&use_rtl));
+    if (atomic_load(&use_kind) == RTL_DEV_RTL) {    /* B's stick from the start, by its serial: not RTL0 meanwhile */
+        pthread_mutex_lock(&use_lock);
+        if (use_sn[0]) snprintf(k, sizeof(k), "%s@%s", use_sn, use_loc);
+        pthread_mutex_unlock(&use_lock);
+    }
     if ((p = fork()) < 0) return;
     if (p == 0) {
         int nul = open("/dev/null", O_RDWR), log = open(LOG, O_WRONLY | O_CREAT | O_APPEND, 0644);
@@ -241,7 +259,8 @@ static void daemon_start(void) {
         if (nul >= 0) dup2(nul, 0), dup2(nul, 1);
         if (log >= 0) dup2(log, 2);
         for (int fd = 3; fd < 1024; fd++) close(fd);
-        execl(HELPER, HELPER, "-f", f, "-g", g, "-n", n, "-r", r, "-s", s, (char *)NULL);
+        if (k[0]) execl(HELPER, HELPER, "-f", f, "-g", g, "-n", n, "-r", r, "-s", s, "-d", d, "-K", k, (char *)NULL);
+        else execl(HELPER, HELPER, "-f", f, "-g", g, "-n", n, "-r", r, "-s", s, (char *)NULL);
         _exit(127);
     }
     waitpid(p, NULL, 0);
@@ -411,7 +430,7 @@ static void *spec_thread(void *arg) {
             if (atomic_load(&use_kind) != RTL_DEV_NONE) {
                 rtl_dev_t u = (rtl_dev_t)atomic_load(&use_kind);
 
-                if (u == RTL_DEV_RTL) snprintf(cmd, sizeof(cmd), "k RTL%d\n", atomic_load(&use_rtl));
+                if (u == RTL_DEV_RTL) k_rtl_cmd(cmd, sizeof(cmd));
                 else snprintf(cmd, sizeof(cmd), "k %s\n", u == RTL_DEV_HACKRF ? "HACKRF" : "BLADERF");
                 say(cmd);
             }
@@ -432,10 +451,10 @@ static void *spec_thread(void *arg) {
             uint32_t now = (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
             if (atomic_load(&use_kind) == RTL_DEV_RTL && atomic_load(&dev_kind) == RTL_DEV_RTL &&
                 atomic_load(&dev_rtl) >= 0 && atomic_load(&dev_rtl) != atomic_load(&use_rtl) && now - again > 3000) {
-                char cmd[16];
+                char cmd[80];
 
                 again = now;
-                snprintf(cmd, sizeof(cmd), "k RTL%d\n", atomic_load(&use_rtl));
+                k_rtl_cmd(cmd, sizeof(cmd));
                 say(cmd);
             }
         }
@@ -833,16 +852,28 @@ bool rtl_spectrum_feed(int fd) {
 }
 
 void rtl_spectrum_use(rtl_dev_t d) {
-    char cmd[16];
+    char cmd[80];
 
     atomic_store(&use_kind, d);
-    if (d == RTL_DEV_RTL) snprintf(cmd, sizeof(cmd), "k RTL%d\n", atomic_load(&use_rtl));
+    if (d == RTL_DEV_RTL) k_rtl_cmd(cmd, sizeof(cmd));
     else snprintf(cmd, sizeof(cmd), "k %s\n", d == RTL_DEV_HACKRF ? "HACKRF" : d == RTL_DEV_BLADERF ? "BLADERF" : "-");
     say(cmd);
 }
 
 void rtl_spectrum_use_rtl(int n) {
+    sdr_unit_t u[16];
+    int        k = sdr_pool_units(u, 16);
+
     atomic_store(&use_rtl, n < 0 ? 0 : n);
+    pthread_mutex_lock(&use_lock);
+    use_sn[0] = use_loc[0] = 0;
+    for (int i = 0; i < k; i++)         /* that place's stick as the pool sees it now */
+        if (u[i].kind == RTL_DEV_RTL && u[i].rtl == (n < 0 ? 0 : n) && u[i].sn[0] && !strchr(u[i].sn, ' ')) {
+            snprintf(use_sn, sizeof(use_sn), "%s", u[i].sn);
+            snprintf(use_loc, sizeof(use_loc), "%s", u[i].loc);
+            break;
+        }
+    pthread_mutex_unlock(&use_lock);
     rtl_spectrum_use(RTL_DEV_RTL);
 }
 

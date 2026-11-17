@@ -10,6 +10,7 @@
 
 #include <ctype.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +29,8 @@ int sdr_rtl_index;
 int sdr_rtl_open_at = -1;               /* the open one's place (RTL<n>), -1 none */
 char sdr_rtl_open_loc[32];
 bool sdr_rtl_exact;
+static char            want_sn[64], want_loc[32], open_sn[64];     /* sdr_rtl_want; the open one's serial */
+static pthread_mutex_t want_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static rtlsdr_dev_t *volatile dev;
 static sdr_rx_cb              rx_cb;
@@ -135,6 +138,53 @@ static int rtl_list(rtl_sn_t *l, int max) {
     return k;
 }
 
+/* The place of the RTL with serial sn (and location loc when several share the serial; one alone may have moved to
+ * another port), -1 none or not told apart */
+static int rtl_by_sn(const rtl_sn_t *l, int cnt, const char *sn, const char *loc) {
+    int found = -1, n = 0;
+
+    for (int i = 0; i < cnt; i++)
+        if (!strcmp(l[i].sn, sn)) {
+            n++;
+            if (found < 0 || (loc[0] && !strcmp(l[i].loc, loc))) found = i;
+        }
+    if (n > 1 && !(loc[0] && found >= 0 && !strcmp(l[found].loc, loc))) return -1;
+    return found;
+}
+
+void sdr_rtl_want(const char *sn, const char *loc) {
+    pthread_mutex_lock(&want_lock);
+    snprintf(want_sn, sizeof(want_sn), "%s", sn ? sn : "");
+    snprintf(want_loc, sizeof(want_loc), "%s", loc && strcmp(loc, "-") ? loc : "");
+    pthread_mutex_unlock(&want_lock);
+}
+
+bool sdr_rtl_want_sn(void) {
+    pthread_mutex_lock(&want_lock);
+    bool w = want_sn[0] != 0;
+    pthread_mutex_unlock(&want_lock);
+    return w;
+}
+
+bool sdr_rtl_wanted_there(void) {
+    char     sn[64], loc[32];
+    rtl_sn_t l[16];
+
+    pthread_mutex_lock(&want_lock);
+    snprintf(sn, sizeof(sn), "%s", want_sn);
+    snprintf(loc, sizeof(loc), "%s", want_loc);
+    pthread_mutex_unlock(&want_lock);
+    return sn[0] && rtl_by_sn(l, rtl_list(l, 16), sn, loc) >= 0;
+}
+
+bool sdr_rtl_wanted_open(void) {
+    pthread_mutex_lock(&want_lock);
+    bool o = want_sn[0] && sdr_rtl_open_at >= 0 && !strcmp(want_sn, open_sn) &&
+             (!want_loc[0] || !strcmp(want_loc, sdr_rtl_open_loc));
+    pthread_mutex_unlock(&want_lock);
+    return o;
+}
+
 /* librtlsdr's index of RTL at (its serial and location in sn, loc), -1 none */
 static int rtl_at(int at, char *sn, size_t n, char *loc, size_t ln) {
     rtl_sn_t l[16];
@@ -148,17 +198,32 @@ static int rtl_at(int at, char *sn, size_t n, char *loc, size_t ln) {
 
 static int rtl_open(char *tuner, size_t n, uint64_t *lo, uint64_t *hi) {
     rtlsdr_dev_t *d;
-    char          sn[64], loc[32];
+    char          sn[64], loc[32], wsn[64], wloc[32];
     int           cnt = (int)rtlsdr_get_device_count(), at = sdr_rtl_index < cnt ? sdr_rtl_index : sdr_rtl_exact ? -1 : 0;
-    int           idx = rtl_at(at, sn, sizeof(sn), loc, sizeof(loc));
+    int           idx;
 
+    pthread_mutex_lock(&want_lock);
+    snprintf(wsn, sizeof(wsn), "%s", want_sn);
+    snprintf(wloc, sizeof(wloc), "%s", want_loc);
+    pthread_mutex_unlock(&want_lock);
+    if (wsn[0]) {                       /* by its serial: that stick or none */
+        rtl_sn_t l[16];
+        int      k = rtl_list(l, 16);
+
+        if ((at = rtl_by_sn(l, k, wsn, wloc)) < 0) return -1;
+        cnt = k;
+    }
+    idx = rtl_at(at, sn, sizeof(sn), loc, sizeof(loc));
     if (at < 0) return -1;              /* -W and that RTL not on USB: none in its place */
 
     if (idx < 0 || rtlsdr_open(&d, (uint32_t)idx) != 0) return 1;  /* another program has it: tried again, not forced */
+    pthread_mutex_lock(&want_lock);
     sdr_rtl_open_at = at;
     snprintf(sdr_rtl_open_loc, sizeof(sdr_rtl_open_loc), "%s", loc);
+    snprintf(open_sn, sizeof(open_sn), "%s", sn);
+    pthread_mutex_unlock(&want_lock);
     fprintf(stderr, "rtlspec: RTL%d of %d (serial %s, USB %s)%s\n", at, cnt, sn, loc[0] ? loc : "?",
-            at != sdr_rtl_index ? ": the one asked for is not on USB" : "");
+            wsn[0] ? ", asked for by its serial" : at != sdr_rtl_index ? ": the one asked for is not on USB" : "");
     rtlsdr_set_bias_tee(d, 0);
     snprintf(tuner, n, "%s", tuner_name(rtlsdr_get_tuner_type(d)));
     *lo = 24000000;
@@ -223,8 +288,11 @@ static void rtl_close(void) {
     rtlsdr_dev_t *d = dev;
 
     dev                 = NULL;
+    pthread_mutex_lock(&want_lock);
     sdr_rtl_open_at     = -1;
     sdr_rtl_open_loc[0] = 0;
+    open_sn[0]          = 0;
+    pthread_mutex_unlock(&want_lock);
     if (d) rtlsdr_close(d);
 }
 

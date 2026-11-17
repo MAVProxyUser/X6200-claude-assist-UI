@@ -938,6 +938,12 @@ starts it again (B's own cannot be stopped: use another on B first); **F3** hear
 LISTEN, the SDR or the X6200; a watch channel's: in the mix or not; AIRSPACE's has no audio); **F4** watches B's
 channel on a free RTL (as F4 held on B); **F5**, BACK or APP closes it. It follows changes while open.
 
+B's SDR and each watch channel's are held **by their serial** (and USB location), not only by their number: the
+numbers follow the order of the sticks on USB, and one that drops out for a moment (a port reset) moves the others'
+numbers. While a stick is away its daemon waits for it rather than opening another one in its place (before, B's
+daemon could open a stopped stick for a moment), and B's daemon starts on its own stick rather than on RTL0 till the
+GUI says which.
+
 **The speaker**: one player (`rtl_spectrum.c`) mixes B's SDR and the watch channels open, and runs from the start
 for watch channels restored at boot. Another of the base's play-mode users (the recorder, a voice message, FreeDV)
 that ends while it plays no longer leaves the speaker off: it takes it back within half a second (from off only, so

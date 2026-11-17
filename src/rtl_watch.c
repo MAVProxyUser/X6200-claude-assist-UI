@@ -56,6 +56,8 @@ typedef struct {
     int64_t         hz;
     int             mode, sql, gain;
     atomic_int      place;                  /* RTL<n> it has, -1 none */
+    char            sn[24], loc[24];        /* and that stick's serial and USB location (cfg_lock): its daemon opens
+                                             * that stick or none (-K), whatever happens to the places meanwhile */
     atomic_bool     up, open;
     atomic_int      over10;
     atomic_uint     gen;                    /* its settings changed: said again to its daemon */
@@ -92,7 +94,11 @@ static void alloc(void) {
         sdr_unit_t u;
 
         sdr_pool_want(SDR_OWN_WATCH + i, i < n_w);
-        atomic_store(&w[i].place, i < n_w && sdr_pool_held(SDR_OWN_WATCH + i, &u) >= 0 ? u.rtl : -1);
+        bool held = i < n_w && sdr_pool_held(SDR_OWN_WATCH + i, &u) >= 0;
+
+        snprintf(w[i].sn, sizeof(w[i].sn), "%s", held && !strchr(u.sn, ' ') ? u.sn : "");
+        snprintf(w[i].loc, sizeof(w[i].loc), "%s", held ? u.loc : "");
+        atomic_store(&w[i].place, held ? u.rtl : -1);
     }
 }
 
@@ -131,8 +137,8 @@ static int w_connect(int i) {
 }
 
 /* Started in the background (it leaves at once, nobody's child), on RTL place, tuned for channel i */
-static void w_start(int i, int place, int64_t hz, int gain) {
-    char  name[32], d[8], f[24], g[16], nb[8], r[8], s[16], log[40];
+static void w_start(int i, int place, const char *sn, const char *loc, int64_t hz, int gain) {
+    char  name[32], d[8], f[24], g[16], nb[8], r[8], s[16], log[40], k[56];
     pid_t p;
 
     sock_name(i, name, sizeof(name));
@@ -143,6 +149,7 @@ static void w_start(int i, int place, int64_t hz, int gain) {
     snprintf(r, sizeof(r), "%d", W_ROWS);
     snprintf(s, sizeof(s), "%d", W_RATE);
     snprintf(log, sizeof(log), "/tmp/rtlspec-w%d.log", i);
+    snprintf(k, sizeof(k), "%s@%s", sn, loc);
     if ((p = fork()) < 0) return;
     if (p == 0) {
         int nul = open("/dev/null", O_RDWR), lg = open(log, O_WRONLY | O_CREAT | O_APPEND, 0644);
@@ -150,7 +157,10 @@ static void w_start(int i, int place, int64_t hz, int gain) {
         if (nul >= 0) dup2(nul, 0), dup2(nul, 1);
         if (lg >= 0) dup2(lg, 2);
         for (int fd = 3; fd < 1024; fd++) close(fd);
-        execl(HELPER, HELPER, "-W", "-S", name, "-d", d, "-f", f, "-g", g, "-n", nb, "-r", r, "-s", s, (char *)NULL);
+        if (sn[0])
+            execl(HELPER, HELPER, "-W", "-S", name, "-d", d, "-K", k, "-f", f, "-g", g, "-n", nb, "-r", r, "-s", s,
+                  (char *)NULL);
+        else execl(HELPER, HELPER, "-W", "-S", name, "-d", d, "-f", f, "-g", g, "-n", nb, "-r", r, "-s", s, (char *)NULL);
         _exit(127);
     }
     waitpid(p, NULL, 0);
@@ -232,11 +242,15 @@ static void *w_thread(void *arg) {
                 continue;
             }
             usleep(500000);                     /* the old one gone (its socket name free) */
+            char sn[24], loc[24];
+
             pthread_mutex_lock(&cfg_lock);
             hz   = c->hz;
             gain = c->gain;
+            snprintf(sn, sizeof(sn), "%s", c->sn);
+            snprintf(loc, sizeof(loc), "%s", c->loc);
             pthread_mutex_unlock(&cfg_lock);
-            w_start(i, place, hz, gain);
+            w_start(i, place, sn, loc, hz, gain);
             ran      = place;
             said_gen = ~0u;
             continue;

@@ -1724,12 +1724,14 @@ static void command(char *line, int fd) {
             tx_ask(hz, (int)g, strtol(e, NULL, 10) != 0);
         }
     } else if (line[0] == 'k') {          /* "k <KIND>": the device to hold (kinds[]'s order), "k -" any */
-        char k[16] = "";
+        char k[16] = "", sn[64] = "", loc[32] = "";
 
-        sscanf(line + 1, "%15s", k);
-        bool rtl = !strncmp(k, "RTL", 3);   /* "RTL<n>": RTL n in serial order (sdr_rtl.c); "RTL" RTL0 */
+        sscanf(line + 1, "%15s %63s %31s", k, sn, loc);
+        bool rtl = !strncmp(k, "RTL", 3);   /* "RTL<n> [SERIAL [LOC]]": RTL n in serial order (sdr_rtl.c), or that
+                                             * stick by its serial when given; "RTL" RTL0 */
 
         if (rtl) sdr_rtl_index = atoi(k + 3);
+        sdr_rtl_want(rtl ? sn : "", rtl ? loc : "");
         atomic_store(&want_dev, !strcmp(k, "HACKRF") ? 1 : !strcmp(k, "BLADERF") ? 2 : rtl ? 3 : 0);
         atomic_store(&want_failed, false);
     } else if (line[0] == 'R') {          /* the stream stopped and started, as for a transmission */
@@ -2005,6 +2007,8 @@ static bool switch_due(const sdr_ops_t *o) {
 
     if (!w || !o || sdr_file_path || replay || atomic_load(&want_failed)) return false;
     if (atomic_load(&tx_on) || atomic_load(&tx_req)) return false;
+    if (kinds[w - 1] == o && o == &sdr_rtl && sdr_rtl_want_sn())   /* by serial: another one, and it is there */
+        return sdr_rtl_open_at >= 0 && !sdr_rtl_wanted_open() && sdr_rtl_wanted_there();
     if (kinds[w - 1] == o)              /* another RTL asked for (RTL<n>), and it is there */
         return o == &sdr_rtl && sdr_rtl_open_at >= 0 && sdr_rtl_index != sdr_rtl_open_at &&
                sdr_rtl_index < sdr_rtl_count();
@@ -2053,7 +2057,11 @@ static void *stick_thread(void *arg) {
         if (sdr_file_path) o = test_kinds[0];
         if (!o && sdr_rtl_exact && sdr_rtl.present()) o = &sdr_rtl;     /* -W: that RTL, nothing else */
         if (!o && !sdr_rtl_exact && w && !atomic_load(&want_failed) && kinds[w - 1]->present()) o = kinds[w - 1];
-        for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]) && !o && !sdr_rtl_exact; i++)
+        bool by_sn = w && kinds[w - 1] == &sdr_rtl && sdr_rtl_want_sn();    /* that stick or nothing: not a HackRF
+                                                                            * while it is away either */
+
+        if (!o && by_sn && sdr_rtl.present()) o = &sdr_rtl;
+        for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]) && !o && !sdr_rtl_exact && !by_sn; i++)
             if (kinds[i]->present()) o = kinds[i];
         if (!o) {
             atomic_store(&s_now, S_NOSTICK);
@@ -2061,6 +2069,12 @@ static void *stick_thread(void *arg) {
             continue;
         }
         if ((r = o->open(tn, sizeof(tn), &lo, &hi)) < 0 || r == 1) {
+            if (w && o == kinds[w - 1] && o == &sdr_rtl && sdr_rtl_want_sn()) {    /* that stick away or busy: none
+                                                                                 * in its place, the GUI decides */
+                atomic_store(&s_now, r == 1 ? S_BUSY : S_NOSTICK);
+                sleep(1);
+                continue;
+            }
             if (w && o == kinds[w - 1] && !atomic_load(&want_failed)) {   /* the one asked for: the others then */
                 fprintf(stderr, "rtlspec: the %s asked for would not open (%s): the first by order kept\n", o->kind,
                         r == 1 ? "another program has it" : "failed");
@@ -2331,10 +2345,20 @@ int main(int argc, char **argv) {
     uint32_t rate   = 2400000;
     uint64_t centre = 162550000;
 
-    while ((opt = getopt(argc, argv, "Fd:f:s:n:r:g:i:S:T:W")) != -1) {
+    while ((opt = getopt(argc, argv, "Fd:f:s:n:r:g:i:S:T:WK:")) != -1) {
         switch (opt) {
             case 'F': front = true; break;
             case 'd': sdr_rtl_index = atoi(optarg); break;
+            case 'K': {                 /* SERIAL[@LOC]: that stick from the start, as "k RTL<n> SERIAL LOC" (the GUI's:
+                                         * it opened RTL0 first, a Kraken's CH0, till the GUI said which) */
+                char sn[64], *at;
+
+                snprintf(sn, sizeof(sn), "%s", optarg);
+                if ((at = strchr(sn, '@'))) *at++ = 0;
+                sdr_rtl_want(sn, at ? at : "");
+                atomic_store(&want_dev, 3);
+                break;
+            }
             case 'f': centre = strtoull(optarg, NULL, 10); break;
             case 's': rate = (uint32_t)strtoul(optarg, NULL, 10); break;
             case 'n': bins = atoi(optarg); break;
