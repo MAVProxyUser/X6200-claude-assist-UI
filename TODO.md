@@ -15,12 +15,10 @@ approved that day.
    (cores, page I's tuning and FOLLOW, the web page, gpsd, the bearing log, TNA/sources/FB/smoothing/ROOT-MUSIC,
    custom arrays, targets 2-4, the IQ server). Left: sample-rate slewing (10); the other targets in the bearing log.
 
-2. **A Bluetooth GPS for gpsd, beside Bluetooth CAT** (new, 2026-11-17: the owner ordered a Garmin GLO 2): the radio's
-   Bluetooth serial link (RFCOMM, btcat) carries CAT today. A choice to give it to a Bluetooth GPS instead (pair the
-   GLO 2, bind it to an rfcomm device, `gpsdctl add` it) and back to CAT, in Settings and on the web page; page I's
-   heading and position then come from it through gpsd (x6x00-df reads gpsd since 75f2868). Found on the way: this
-   image's gpsd quits about 10 s after its last GPS is removed while nothing reads it (gpsd: "no subscribers or
-   devices, shutting down"); a hotplug starts one again. The link's own come and go must start and keep it.
+2. **A Bluetooth GPS for gpsd, beside Bluetooth CAT**: built 2026-11-17 (btgps-ctl, Settings > Bluetooth's GPS for
+   gpsd, the web page's Direction finder GPS card): beside CAT rather than instead of it, as the radio is CAT's
+   serial port and the GPS is its own. Tried on the radio with an address that is not there (it keeps trying, CAT
+   untouched). Left: the Garmin GLO 2 itself when it comes (pair, choose, a fix on page I).
 
 *Hardware to plug in*
 

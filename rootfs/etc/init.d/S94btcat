@@ -21,6 +21,8 @@ start() {
 		usleep 200000
 	done
 	( /usr/sbin/btcat-setup >/tmp/btcat-setup.log 2>&1 & )
+	# a Bluetooth GPS for gpsd when one is chosen (Settings > Bluetooth): kept connected by btgps-ctl
+	( /usr/sbin/btgps-ctl run >>/tmp/btgps.log 2>&1 </dev/null & )
 	[ "$status" -eq 0 ] && echo "OK" || echo "FAIL"
 	return "$status"
 }
@@ -29,6 +31,7 @@ stop() {
 	printf 'Stopping btcat: '
 	start-stop-daemon -K -q -p "$PIDFILE"
 	rm -f "$PIDFILE" /tmp/btcat.clients
+	/usr/sbin/btgps-ctl stop
 	killall bt-agent 2>/dev/null
 	umount -l /dev/ttyS2 2>/dev/null
 	echo "OK"

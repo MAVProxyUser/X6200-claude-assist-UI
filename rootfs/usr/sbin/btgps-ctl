@@ -1,0 +1,119 @@
+#!/bin/sh
+# btgps-ctl set MAC [CHANNEL] | off | status | run
+#
+# A Bluetooth GPS for gpsd (an NMEA receiver on the Serial Port Profile, such as
+# Garmin's GLO 2), beside Bluetooth CAT. btcat is a serial port of the radio's
+# that phones and PCs connect to; a GPS is the other way round, a serial port of
+# its own that the radio connects to, so the two run at once. The GPS is paired
+# in Settings > Bluetooth first; "set" makes it gpsd's, "off" lets it go.
+#
+# "run" (started by S94btcat) keeps it: rfcomm connect to the GPS on /dev/rfcomm1,
+# the tty given to gpsd (gpsdctl add) while it is connected and taken back when it
+# drops; a GPS switched off or out of range is tried again every 10 s, so nothing
+# is done by hand when it comes back. Not "rfcomm bind": gpsd opening a bound tty
+# waits for the connection, and a GPS switched off would stall gpsd for the rest.
+# gpsd quits a few seconds after its last device goes while nothing reads it
+# (this image's): started again with the next connection.
+CONF=/mnt/btcat.conf
+DEV=1
+TTY=/dev/rfcomm$DEV
+PIDF=/var/run/btgps.pid
+STATE=/tmp/btgps.state		# connected | trying | off, for the GUI and the web page
+BTGPS_MAC=
+BTGPS_CH=1
+
+load() {
+	BTGPS_MAC=
+	BTGPS_CH=1
+	[ -r $CONF ] && eval "$(grep -E '^BTGPS_(MAC|CH)=' $CONF)"
+}
+
+set_kv() {
+	touch $CONF
+	if grep -q "^$1=" $CONF; then
+		sed -i "s/^$1=.*/$1=$2/" $CONF
+	else
+		echo "$1=$2" >> $CONF
+	fi
+	sync
+}
+
+log() { echo "$(date '+%H:%M:%S') $*"; }
+
+gpsd_up() {
+	pidof gpsd >/dev/null || /etc/init.d/S50gpsd start >/dev/null 2>&1
+}
+
+keep() {
+	echo $$ > $PIDF
+	trap 'kill $pid 2>/dev/null; gpsdctl remove $TTY >/dev/null 2>&1; echo off > $STATE; rm -f $PIDF; exit 0' TERM INT
+	while :; do
+		load
+		if [ -z "$BTGPS_MAC" ]; then
+			echo off > $STATE
+			sleep 5
+			continue
+		fi
+		mac=$BTGPS_MAC
+		echo trying > $STATE
+		rfcomm release $DEV >/dev/null 2>&1
+		rfcomm connect $DEV "$mac" "$BTGPS_CH" >/dev/null 2>&1 &
+		pid=$!
+		i=0
+		while [ $i -lt 20 ] && [ ! -e $TTY ] && kill -0 $pid 2>/dev/null; do
+			sleep 1
+			i=$((i + 1))
+		done
+		if [ -e $TTY ] && kill -0 $pid 2>/dev/null; then
+			chmod 666 $TTY			# gpsd reads as nobody
+			gpsd_up
+			gpsdctl add $TTY >/dev/null 2>&1
+			echo connected > $STATE
+			log "connected to $mac (channel $BTGPS_CH), $TTY to gpsd"
+			while kill -0 $pid 2>/dev/null; do
+				sleep 5
+				load
+				[ "$BTGPS_MAC" = "$mac" ] || break		# another GPS chosen, or off
+				pidof gpsd >/dev/null || { gpsd_up; gpsdctl add $TTY >/dev/null 2>&1; }
+			done
+			gpsdctl remove $TTY >/dev/null 2>&1
+			log "$mac gone"
+		fi
+		kill $pid 2>/dev/null
+		wait $pid 2>/dev/null
+		rfcomm release $DEV >/dev/null 2>&1
+		echo trying > $STATE
+		load
+		[ "$BTGPS_MAC" = "$mac" ] && sleep 10		# off or out of range: again in a while
+	done
+}
+
+case "$1" in
+	set)
+		mac=$(echo "$2" | tr 'a-f' 'A-F')
+		echo "$mac" | grep -qE '^([0-9A-F]{2}:){5}[0-9A-F]{2}$' || { echo "not a Bluetooth address: $2"; exit 1; }
+		ch=$3
+		if [ -z "$ch" ]; then		# the GPS's own record says its channel, when it answers now
+			ch=$(sdptool search --bdaddr "$mac" SP 2>/dev/null | sed -n 's/.*Channel: \([0-9]*\).*/\1/p' | head -n 1)
+		fi
+		case "$ch" in ''|*[!0-9]*) ch=1;; esac
+		bluetoothctl trust "$mac" >/dev/null 2>&1	# it reconnects without asking
+		set_kv BTGPS_MAC "$mac"
+		set_kv BTGPS_CH "$ch"
+		echo "GPS $mac, channel $ch";;
+	off)
+		set_kv BTGPS_MAC ""
+		echo "GPS off";;
+	status)
+		load
+		echo "BTGPS_MAC=$BTGPS_MAC"
+		echo "BTGPS_CH=$BTGPS_CH"
+		echo "STATE=$(cat $STATE 2>/dev/null || echo off)";;
+	run)
+		kill "$(cat $PIDF 2>/dev/null)" 2>/dev/null
+		keep;;
+	stop)
+		kill "$(cat $PIDF 2>/dev/null)" 2>/dev/null
+		rm -f $PIDF;;
+	*) echo "Usage: $0 {set MAC [CHANNEL]|off|status|run|stop}"; exit 1;;
+esac

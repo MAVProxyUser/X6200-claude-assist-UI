@@ -1587,7 +1587,8 @@ settings: a change on either shows on the other.
   ambiguous) and the widest. **Save and use** writes it to the card (`df_array.txt`, a line an antenna: forward and
   left in cm) and picks CUSTOM, here and on page I. Measure the positions to the antennas' feed points: the bearing
   is only as good as they are.
-- **GPS**: gpsd's fix, position, speed and the heading it gives.
+- **GPS**: gpsd's fix, position, speed and the heading it gives; under it the **Bluetooth GPS** choice (a paired
+  device, or Off) and its link, as Settings > Bluetooth sets it ([a Bluetooth GPS](#a-bluetooth-gps)).
 - **Bearing log** (Settings, or page I's F5 SET LOG): each bearing over the squelch, two a second at most, in a CSV
   file a day (UTC) in `df_log` on the card (the Files page has them): `utc, freq_hz, bearing_ant0, heading,
   heading_from, bearing, plus_minus, fit_pct, level_db, snr_db, method, sources, other_bearings, lat, lon`. The
@@ -3306,8 +3307,8 @@ by itself. The 20 MHz and channel 12 and 13 settings in `x6100-wifi.conf` are
 - Pairing (3 min): the radio is visible and pairable for 3 minutes, the label
   counts down. Outside the window every pairing request is refused.
 - The list: paired devices first, then what Scan found. Tags: *headphones*,
-  *keyboard*, *phone*, *CAT* (a PC or other CAT client), *new* (not paired
-  yet), *connected*. When a scan moves the devices around, the MFK stays on
+  *keyboard*, *phone*, *CAT* (a PC or other CAT client), *GPS* (the
+  Bluetooth GPS gpsd reads), *new* (not paired yet), *connected*. When a scan moves the devices around, the MFK stays on
   the device it was on.
 - MFK press on a *new* device: pair and connect (headphones in pairing mode;
   for a keyboard press its pairing key). A keyboard that never sends its
@@ -3315,11 +3316,12 @@ by itself. The 20 MHz and channel 12 and 13 settings in `x6100-wifi.conf` are
   the code to type on a keyboard (then Enter), or "not found - is it in
   pairing mode?".
 - MFK press on a paired device: a menu with Connect or Disconnect, Connect at
-  startup (headphones) and Forget. Forget asks again (Cancel is first); after
+  startup (headphones), **GPS for gpsd** (anything but headphones and
+  keyboards: see [a Bluetooth GPS](#a-bluetooth-gps)) and Forget. Forget asks again (Cancel is first); after
   it the device has to be paired again.
 - One pair of headphones at a time: connecting one disconnects the others. A
   keyboard and a CAT phone stay connected.
-- Details: [Bluetooth headphones](#bluetooth-headphones), [Bluetooth CAT](#bluetooth-cat), [a PC on Bluetooth](#a-pc-on-bluetooth).
+- Details: [Bluetooth headphones](#bluetooth-headphones), [Bluetooth CAT](#bluetooth-cat), [a PC on Bluetooth](#a-pc-on-bluetooth), [a Bluetooth GPS](#a-bluetooth-gps).
 
 ### Keys tab
 
@@ -6813,6 +6815,29 @@ On Linux: `rfcomm connect /dev/rfcomm0
 device exposes an outgoing COM/SPP port. Log files: `/tmp/btcat.log`,
 `/tmp/btcat-setup.log`. Connection details: [reference](#bluetooth-cat-connection).
 
+### A Bluetooth GPS
+
+A GPS that sends NMEA over Bluetooth's serial profile (Garmin's GLO 2 and the
+like) feeds gpsd, and through it page I's position and heading (the course
+while moving), the bearing log's positions and anything else that reads gpsd.
+It runs beside Bluetooth CAT, not instead of it: CAT is a serial port of the
+radio's that phones and PCs connect to, a GPS is a serial port of its own that
+the radio connects to, so both work at once.
+
+1. Switch the GPS on and put it in pairing mode (the GLO 2: hold its power
+   button till the light blinks fast).
+2. Settings > Bluetooth: Scan, then press the GPS when it shows as *new*
+   (Activity may say it could not connect: that is fine, the pairing is made).
+3. Press it again: **GPS for gpsd** on. Its tag becomes *GPS*, and the note
+   says *gpsd reads it* once it is connected.
+
+The radio keeps connecting to it (`btgps-ctl`, started with the CAT bridge):
+switched off or out of range it is tried again every 10 seconds, so switching
+it on again is all it takes. Its channel is read from the GPS when it is
+chosen (1 otherwise). The same choice is on the web page's Direction finder,
+in its GPS card (Bluetooth GPS: a paired device, or Off). Log:
+`/tmp/btgps.log`; its link: `/tmp/btgps.state` (connected, trying, off).
+
 ### TCI over Bluetooth
 
 The [TCI server](#tci-server) is also offered over Bluetooth, for a device
@@ -9545,7 +9570,10 @@ Example, read frequency: `FE FE A4 E0 03 FD` →
 | `btcat-ctl discoverable on\|off` | Open / close the 3-minute pairing window: visible and pairable, the GUI's agent accepts pairing (= Pairing (3 min)) |
 | `btcat-ctl status` | Print power and the time left in the pairing window |
 | `btcat-ctl apply` | Re-apply power from `/mnt/btcat.conf`, close the pairing window |
-| `/etc/init.d/S94btcat start\|stop\|restart` | Start/stop the bridge (set `BTCAT_ENABLE=no` in `/etc/default/btcat` to disable) |
+| `/etc/init.d/S94btcat start\|stop\|restart` | Start/stop the bridge (set `BTCAT_ENABLE=no` in `/etc/default/btcat` to disable), and the Bluetooth GPS's keeper |
+| `btgps-ctl set MAC [CHANNEL]` | The Bluetooth GPS gpsd reads (= Settings > Bluetooth > a device > GPS for gpsd); the channel from the GPS when not given |
+| `btgps-ctl off` | No Bluetooth GPS |
+| `btgps-ctl status` | The GPS chosen, its channel, its link (connected, trying, off) |
 
 ### btaudio-ctl
 
@@ -9575,7 +9603,7 @@ The DATA partition, readable on a PC.
 | `cw_trainer.json` | CW trainer statistics and Calls best score |
 | `tci.conf` | TCI server on/off, port, Clients and Ask before TX |
 | `tci_allowed.conf` | the TCI clients allowed to transmit without asking (Always), one a line: address, name, when allowed, when last seen |
-| `btcat.conf` | Bluetooth power, written by `btcat-ctl` |
+| `btcat.conf` | Bluetooth power, written by `btcat-ctl`; the Bluetooth GPS (`BTGPS_MAC`, `BTGPS_CH`), by `btgps-ctl` |
 | `btaudio.conf` | headphones settings (RX loopback, speaker mute, Connect at startup devices) |
 | `ft_log.adi`, `js8call_log.adi` | FT8/FT4 and JS8 logs (ADIF) |
 | `ft8_udp.conf` | WSJT-X UDP output (FT8/FT4/FT2, and every logged QSO): `enabled=`, `host=`, `port=`, `id=` |

@@ -149,6 +149,12 @@ table.xy input{width:100%;min-width:60px;font:14px ui-monospace,monospace}
     <section class="df-card">
       <h3>GPS (gpsd)</h3>
       <div class="kv" id="gps"></div>
+      <h3 style="margin-top:14px">Bluetooth GPS</h3>
+      <div class="frow"><select id="btgps"></select><button id="btgpsgo">Use</button></div>
+      <p class="note" id="btgpsnote"></p>
+      <p class="note">An NMEA GPS on Bluetooth (a Garmin GLO 2 and the like), for gpsd beside Bluetooth CAT: the radio
+      keeps connecting to it, so switching it on is all it takes. Pair it first in the radio's Settings &gt; Bluetooth
+      (Scan, then press it).</p>
     </section>
   </div>
 </div>
@@ -407,7 +413,7 @@ function show() {
   $('chs').innerHTML = rows.join('');
   /* gpsd */
   const gp = D.gp;
-  $('gps').innerHTML = !gp || !gp.gpsd ? '<b>gpsd</b><span>not answering (a GPS or a compass on USB starts it)</span>' :
+  $('gps').innerHTML = !gp || !gp.gpsd ? '<b>gpsd</b><span>not answering (a GPS or a compass on USB, or the Bluetooth GPS below, starts it)</span>' :
     `<b>Fix</b><span>${gp.mode >= 3 ? '3D' : gp.mode === 2 ? '2D' : 'none'}</span>` +
     (gp.mode >= 2 ? `<b>Position</b><span>${gp.lat.toFixed(5)}, ${gp.lon.toFixed(5)}</span>` : '') +
     (gp.speed >= 0 ? `<b>Speed</b><span>${(gp.speed * 3.6).toFixed(1)} km/h</span>` : '') +
@@ -530,6 +536,37 @@ $('xysave').onclick = async () => {
   } catch (e) { say('The radio did not answer', true); }
   edCalc(); poll();
 };
+
+/* The Bluetooth GPS (btgps-ctl): read when the page opens and every 5 s */
+let bt = null, btEdit = false;
+async function btgpsGet() {
+  try { const r = await fetch('/api/btgps', {cache: 'no-store'}); if (r.ok) bt = await r.json(); } catch (e) {}
+  if (!bt) { $('btgpsnote').textContent = 'The radio did not answer.'; return; }
+  const sel = $('btgps');
+  if (!btEdit) {
+    sel.innerHTML = '';
+    sel.add(new Option('Off (none)', ''));
+    for (const p of bt.paired) sel.add(new Option(`${p.name} (${p.mac})`, p.mac));
+    if (bt.mac && !bt.paired.some(p => p.mac === bt.mac)) sel.add(new Option(`${bt.mac} (not paired now)`, bt.mac));
+    sel.value = bt.mac || '';
+  }
+  $('btgpsnote').textContent = !bt.mac ? 'None chosen.' :
+    bt.state === 'connected' ? `Connected (channel ${bt.channel}): gpsd reads it.` :
+    'Chosen; not connected now (switched off or out of range): the radio tries again every few seconds.';
+}
+$('btgps').onfocus = () => btEdit = true;
+$('btgps').onblur = () => btEdit = false;
+$('btgpsgo').onclick = async () => {
+  btEdit = false;
+  try {
+    const r = await fetch('/api/btgps', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mac: $('btgps').value})});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) say(j.msg || 'Not taken', true); else say($('btgps').value ? 'GPS chosen' : 'Bluetooth GPS off');
+  } catch (e) { say('The radio did not answer', true); }
+  btgpsGet();
+};
+btgpsGet();
+setInterval(() => { if (!document.hidden) btgpsGet(); }, 5000);
 
 async function poll() {
   if (inFlight || document.hidden) return;

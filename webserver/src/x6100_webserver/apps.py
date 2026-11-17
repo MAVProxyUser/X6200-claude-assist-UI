@@ -2603,6 +2603,50 @@ def df_array_set():
     return {"status": "OK"}
 
 
+# A Bluetooth GPS for gpsd (btgps-ctl, beside Bluetooth CAT): which paired device it is, how its link is, and the
+# choice. Paired in the radio's Settings > Bluetooth (a pairing needs the radio's screen for its code)
+BTGPS_CTL = "/usr/sbin/btgps-ctl"
+MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+
+
+def run_out(cmd, timeout=6):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+@app.get('/api/btgps')
+def btgps_get():
+    st = {}
+    for line in run_out([BTGPS_CTL, "status"]).splitlines():
+        k, _, v = line.partition("=")
+        st[k] = v.strip().strip('"')
+    paired = []
+    for line in run_out(["bluetoothctl", "devices", "Paired"]).splitlines():
+        part = line.split(" ", 2)
+        if len(part) >= 2 and part[0] == "Device" and MAC_RE.match(part[1]):
+            paired.append({"mac": part[1].upper(), "name": part[2] if len(part) > 2 else part[1]})
+    bottle.response.set_header("Cache-Control", "no-store")
+    return {"mac": st.get("BTGPS_MAC", "").upper(), "channel": st.get("BTGPS_CH", ""),
+            "state": st.get("STATE", "off") or "off", "paired": paired}
+
+
+@app.post('/api/btgps')
+def btgps_set():
+    try:
+        data = bottle.request.json
+    except ValueError:
+        data = None
+    mac = data.get("mac", "") if isinstance(data, dict) else None
+    if not isinstance(mac, str) or (mac and not MAC_RE.match(mac)):
+        return api_error(400, "Not a Bluetooth address")
+    out = run_out([BTGPS_CTL, "set", mac.upper()] if mac else [BTGPS_CTL, "off"], timeout=20)
+    if mac and not out.startswith("GPS "):
+        return api_error(500, out.strip() or "btgps-ctl did not answer")
+    return {"status": "OK", "said": out.strip()}
+
+
 @app.post('/api/df/run')
 def df_run():
     try:

@@ -1491,6 +1491,7 @@ static void wl_pill(lv_obj_t *obj, const char *text, uint32_t bg, uint32_t fg) {
 #define PILL_PHONE  "phone", theme_hex(TC_pill_cat), theme_hex(TC_pill_cat_text)
 #define PILL_KBD    "keyboard", theme_hex(TC_pill_kbd), theme_hex(TC_pill_kbd_text)
 #define PILL_NEW    "new", theme_hex(TC_chip), theme_hex(TC_text_value)
+#define PILL_GPS    "GPS", theme_hex(TC_pill_kbd), theme_hex(TC_pill_kbd_text)
 
 /* Sections: a spaced title with a line to the right edge, then the rows on
  * their own grid. `grid` is the section being filled, the rows go from row 1. */
@@ -2314,11 +2315,52 @@ static std::vector<std::string> split(const std::string &s, char sep) {
     return out;
 }
 
+/* The Bluetooth GPS gpsd reads (btgps-ctl): its address from btcat.conf, "" none; and how its link is (/tmp/btgps.state:
+ * connected, trying, off) */
+#define BTGPS_CTL "/usr/sbin/btgps-ctl"
+
+static std::string btgps_mac() {
+    char        line[128];
+    std::string mac;
+    FILE       *f = fopen(BOARD_DATA "/btcat.conf", "r");
+
+    if (!f) {
+        return mac;
+    }
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "BTGPS_MAC=", 10) == 0) {
+            mac = std::string(line + 10);
+            while (!mac.empty() && (mac.back() == '\n' || mac.back() == '\r' || mac.back() == '"')) mac.pop_back();
+            if (!mac.empty() && mac[0] == '"') mac.erase(0, 1);
+        }
+    }
+    fclose(f);
+    return mac;
+}
+
+static std::string btgps_state() {
+    char  s[16] = "";
+    FILE *f = fopen("/tmp/btgps.state", "r");
+
+    if (f) {
+        if (!fgets(s, sizeof(s), f)) s[0] = 0;
+        fclose(f);
+    }
+    s[strcspn(s, "\n")] = 0;
+    return s;
+}
+
+static void btgps_run(const std::string &args) {
+    std::string cmd = std::string(BTGPS_CTL " ") + args + " >/dev/null 2>&1";
+    std::thread([cmd]() { system(cmd.c_str()); }).detach();
+}
+
 static void bt_update_view() {
     if (!bt.scan_btn) {
         return;     /* page gone */
     }
-    size_t n = bt.devs.size();
+    size_t      n = bt.devs.size();
+    std::string gps = btgps_mac(), gps_st = gps.empty() ? "" : btgps_state();
 
     for (size_t i = 0; i < BT_ROWS; i++) {
         wl_row_t *r = &bt.rows[i];
@@ -2330,8 +2372,12 @@ static void bt_update_view() {
         bt_dev_t *d = &bt.devs[i];
 
         lv_label_set_text(r->name, d->name);
+        bool is_gps = !gps.empty() && strcasecmp(gps.c_str(), d->addr) == 0;
+
         if (!d->paired) {
             wl_pill(r->pill_1, PILL_NEW);
+        } else if (is_gps) {
+            wl_pill(r->pill_1, PILL_GPS);
         } else if (d->audio) {
             wl_pill(r->pill_1, PILL_HP);
         } else if (d->input) {
@@ -2344,6 +2390,8 @@ static void bt_update_view() {
         wl_pill(r->pill_2, d->connected ? "connected" : NULL, theme_hex(TC_ok_bg), theme_hex(TC_ok));
         if (!d->paired) {
             lv_label_set_text(r->note, "press to pair");
+        } else if (is_gps) {
+            lv_label_set_text(r->note, gps_st == "connected" ? "gpsd reads it" : "GPS, waiting for it");
         } else if (!d->connected) {
             lv_label_set_text(r->note, "not connected");
         } else {
@@ -2413,7 +2461,7 @@ static void bt_update() {
         }
     }
     if (bt.was_scanning && !scanning && bt.found.empty()) {
-        bt.note = "no headphones or keyboards found";
+        bt.note = "nothing found (headphones, keyboards, a GPS: in pairing mode?)";
     }
     bt.was_scanning = scanning;
 
@@ -2477,6 +2525,13 @@ static void bt_row_cb(lv_event_t *e) {
         items.push_back({"Disconnect", "", [d] { bt_dev_disconnect(d.addr); }});
     } else if (d.audio || d.input) {
         items.push_back({"Connect", "", [d] { bt_dev_connect(d.addr); }});
+    }
+    if (!d.audio && !d.input) {     /* a GPS (NMEA on the serial profile, a Garmin GLO): gpsd's, beside CAT */
+        bool gps = strcasecmp(btgps_mac().c_str(), d.addr) == 0;
+
+        items.push_back({"GPS for gpsd", gps ? "on" : "off", [d, gps] {
+            btgps_run(gps ? std::string("off") : std::string("set ") + d.addr);
+        }});
     }
     if (d.audio) {
         bool on = bt_autoconn(d.addr);
