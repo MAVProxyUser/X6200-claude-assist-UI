@@ -93,7 +93,12 @@ table.ch td{padding:5px 6px;border-bottom:1px solid #1c2a3d;font-family:ui-monos
         <div><label for="sql">Squelch, dB</label><input id="sql" type="number" min="3" max="40" step="1"></div>
         <div><label for="cal">Calibrate every</label><select id="cal"></select></div>
         <div><label>&nbsp;</label><button id="calnow">Calibrate now</button></div>
+        <div><label for="log">Bearing log</label><select id="log"><option value="0">Off</option><option value="1">On</option></select></div>
+        <div><label>&nbsp;</label><a class="btn" href="/files/df_log/">The log files</a></div>
       </div>
+      <p class="note">The log: each bearing over the squelch, two a second at most, in a CSV file a day on the card
+      (df_log): the time, the frequency, the bearing, the heading and the compass bearing, its fit, and gpsd's position
+      when there is one. It stays on the radio.</p>
       <h3 style="margin-top:16px">Array</h3>
       <div class="sets">
         <div><label for="kind">Layout</label><select id="kind"></select></div>
@@ -289,6 +294,7 @@ function show() {
   fill('kind', lists.kinds.map(k => k[0]), c.kind);
   if (document.activeElement !== $('nsrc')) $('nsrc').value = c.nsrc;
   if (document.activeElement !== $('fb')) $('fb').value = c.fb;
+  if (document.activeElement !== $('log')) $('log').value = c.log;
   if (editing !== 'sql') $('sql').value = c.sql;
   if (editing !== 'size') $('size').value = (c.size_mm / 10).toFixed(1);
   if (editing !== 'heading') $('heading').value = c.heading;
@@ -347,7 +353,7 @@ $('freq').onkeydown = e => { if (e.key === 'Enter') $('go').click(); if (e.key =
 function step(d) { const b = D.cfg.band >= 0 ? lists.bands[D.cfg.band][2] : lists.bws[D.cfg.bw]; set('target', D.cfg.target + d * b); }
 $('dn').onclick = () => step(-1); $('up').onclick = () => step(1);
 $('band').onchange = e => { if (+e.target.value < lists.bands.length) set('band', +e.target.value); };
-for (const [id, key] of [['bw', 'bw'], ['method', 'method'], ['rate', 'rate'], ['gain', 'gain'], ['cal', 'cal'], ['kind', 'kind'], ['nsrc', 'nsrc'], ['fb', 'fb']])
+for (const [id, key] of [['bw', 'bw'], ['method', 'method'], ['rate', 'rate'], ['gain', 'gain'], ['cal', 'cal'], ['kind', 'kind'], ['nsrc', 'nsrc'], ['fb', 'fb'], ['log', 'log']])
   $(id).onchange = e => set(key, +e.target.value);
 for (const [id, key, scale] of [['sql', 'sql', 1], ['size', 'size_mm', 10], ['heading', 'heading', 1]]) {
   $(id).onfocus = () => editing = id;

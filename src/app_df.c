@@ -170,6 +170,7 @@ static struct {
     int     follow;             /* FOLLOW: 0 off, 1 A (the X6200's dial), 2 B (B's frequency) */
     int     nsrc;               /* the sources to look for: 1-3, 0 AUTO (x6x00-df's k) */
     bool    fb;                 /* forward-backward averaging (a ULA) */
+    bool    log;                /* the bearing log, /mnt/df_log (x6x00-df's l) */
 } cfg;
 
 static void cfg_load(void) {
@@ -200,6 +201,7 @@ static void cfg_load(void) {
     cfg.nsrc    = gui_state_get("df.nsrc", 1);
     if (cfg.nsrc < 0 || cfg.nsrc > 3) cfg.nsrc = 1;
     cfg.fb      = gui_state_get("df.fb", 0) != 0;
+    cfg.log     = gui_state_get("df.log", 0) != 0;
 }
 
 static void cfg_save(void) {
@@ -220,6 +222,7 @@ static void cfg_save(void) {
     gui_state_set("df.follow", cfg.follow);
     gui_state_set("df.nsrc", cfg.nsrc);
     gui_state_set("df.fb", cfg.fb);
+    gui_state_set("df.log", cfg.log);
 }
 
 static uint32_t target_hz(void) { return (uint32_t)(cfg.fc + cfg.off); }
@@ -254,6 +257,7 @@ static void send_cal(void)    { df_rx_cmd("i %d", cal_every[cfg.cal]); }
 static void send_mask(void)   { df_rx_cmd("x %d", cfg.off_mask); }
 static void send_nsrc(void)   { df_rx_cmd("k %d", cfg.nsrc); }
 static void send_fb(void)     { df_rx_cmd("w %d", cfg.fb); }
+static void send_log(void)    { df_rx_cmd("l %d", cfg.log); df_rx_cmd("h %d", cfg.heading); }
 static void send_all(void) {
     send_rate();
     send_gain();
@@ -266,6 +270,7 @@ static void send_all(void) {
     send_mask();
     send_nsrc();
     send_fb();
+    send_log();
 }
 
 /* The target kept inside the passband, clear of its edges (the filters' skirts) */
@@ -856,7 +861,7 @@ static panel_t pan;
 static int     pan_sel;
 
 enum { A_BAND, A_KIND, A_SIZE, A_FIT, A_HEAD, A_N };
-enum { S_RATE, S_GAIN, S_SQL, S_CAL, S_ANT0, S_SRC = S_ANT0 + NANT, S_N };
+enum { S_RATE, S_GAIN, S_SQL, S_CAL, S_ANT0, S_SRC = S_ANT0 + NANT, S_LOG, S_N };
 enum { T_FOLLOW, T_BAND, T_FREQ, T_WIDTH, T_AUTO, T_N };
 
 static int pan_rows(void) { return pan == P_ARRAY ? A_N : pan == P_SET ? S_N : pan == P_TUNE ? T_N : 0; }
@@ -904,6 +909,7 @@ static void pan_fill(void) {
         for (int k = 0; k < NANT; k++)
             snprintf(t[S_ANT0 + k], sizeof(t[0]), "ANT %d     < %s >", k, cfg.off_mask >> k & 1 ? "LEFT OUT" : "USED");
         snprintf(t[S_SRC], sizeof(t[0]), "SOURCE    < %s >", df_rx_synth() ? "TEST SIGNAL" : "KRAKEN");
+        snprintf(t[S_LOG], sizeof(t[0]), "LOG       < %s >  EACH BEARING TO /MNT/DF_LOG, A CSV A DAY", cfg.log ? "ON" : "OFF");
     }
     for (int r = 0; r < PANEL_ROWS; r++) {
         if (r >= n) {
@@ -951,7 +957,7 @@ static void pan_change(int d) {
                 if (cfg.size_mm > 5000) cfg.size_mm = 5000;
                 send_array();
                 break;
-            case A_HEAD: cfg.heading = (cfg.heading + d + 360) % 360; break;
+            case A_HEAD: cfg.heading = (cfg.heading + d + 360) % 360; send_log(); break;
             default: break;
         }
     } else if (pan == P_TUNE) {
@@ -1004,6 +1010,10 @@ static void pan_change(int d) {
                 cfg.cal = cfg.cal + d < 0 ? 0 : cfg.cal + d >= N_CALS ? N_CALS - 1 : cfg.cal + d;
                 send_cal();
                 break;
+            case S_LOG:
+                cfg.log = !cfg.log;
+                send_log();
+                break;
             case S_SRC:
                 df_rx_set_synth(!df_rx_synth());
                 df_rx_close();          /* the daemon started again with the other source; the pool and B as fits */
@@ -1034,7 +1044,7 @@ static void pan_push(void) {
         refresh();
         return;
     }
-    if ((pan == P_SET && (pan_sel == S_SRC || (pan_sel >= S_ANT0 && pan_sel < S_ANT0 + NANT))) ||
+    if ((pan == P_SET && (pan_sel == S_SRC || pan_sel == S_LOG || (pan_sel >= S_ANT0 && pan_sel < S_ANT0 + NANT))) ||
         (pan == P_TUNE && (pan_sel == T_FOLLOW || pan_sel == T_AUTO))) {
         pan_change(1);
         return;
@@ -1703,6 +1713,10 @@ int app_df_web_set(const char *k, double v) {
         send_array();
     } else if (!strcmp(k, "heading")) {
         cfg.heading = ((i % 360) + 360) % 360;
+        send_log();
+    } else if (!strcmp(k, "log")) {
+        cfg.log = i != 0;
+        send_log();
     } else if (!strcmp(k, "mask")) {
         if (i < 0 || i > 0xff) return -1;
         cfg.off_mask = i;
@@ -1771,9 +1785,9 @@ int app_df_web_json(char *out, size_t n) {
        df_rx_b_lent(), s.have_st && (s.st.iq_clients & 1), s.have_st && (s.st.iq_clients & 2) ? 1 : 0);
     jb(&b, "\"cfg\":{\"fc\":%d,\"off\":%d,\"target\":%u,\"bw\":%d,\"band\":%d,\"follow\":%d,\"auto\":%d,\"kind\":%d,"
            "\"size_mm\":%d,\"heading\":%d,\"method\":%d,\"rate\":%d,\"gain\":%d,\"sql\":%.1f,\"cal\":%d,\"mask\":%d,"
-           "\"nsrc\":%d,\"fb\":%d,\"heading_now\":%d,\"heading_from\":",
+           "\"nsrc\":%d,\"fb\":%d,\"log\":%d,\"heading_now\":%d,\"heading_from\":",
        cfg.fc, cfg.off, target_hz(), cfg.bw, bnd, cfg.follow, cfg.autot, cfg.kind, cfg.size_mm, cfg.heading, cfg.method,
-       cfg.rate, cfg.gain, cfg.sql_ddb / 10.0, cfg.cal, cfg.off_mask, cfg.nsrc, cfg.fb, heading_now());
+       cfg.rate, cfg.gain, cfg.sql_ddb / 10.0, cfg.cal, cfg.off_mask, cfg.nsrc, cfg.fb, cfg.log, heading_now());
     jstr(&b, heading_from(), 16);
     jb(&b, "},\"lists\":{\"bands\":[");
     for (int i = 0; i < N_BANDS; i++) jb(&b, "%s[\"%s\",%u,%u]", i ? "," : "", bands[i].name, bands[i].hz, bands[i].step);

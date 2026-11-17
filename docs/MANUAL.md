@@ -1538,6 +1538,11 @@ settings: a change on either shows on the other.
   how often to calibrate, Calibrate now; the array's layout, its radius or spacing, ANT 0's heading, and Size for
   this band (KrakenRF's calculator, spacing 0.5 wavelength). Sources and forward-backward are set here only.
 - **GPS**: gpsd's fix, position, speed and the heading it gives.
+- **Bearing log** (Settings, or page I's F5 SET LOG): each bearing over the squelch, two a second at most, in a CSV
+  file a day (UTC) in `df_log` on the card (the Files page has them): `utc, freq_hz, bearing_ant0, heading,
+  heading_from, bearing, plus_minus, fit_pct, level_db, snr_db, method, sources, other_bearings, lat, lon`. The
+  compass bearing and the heading are filled when a heading is known (gpsd's, or the one set by hand); the position
+  when gpsd has a fix. Off by default; it stays on the radio.
 
 While the page is open the radio keeps direction finding running even when page I is not on its screen (B lent as
 for page I); **Start direction finding** starts it when nothing has, **Let the Kraken go** ends it, and about 20
