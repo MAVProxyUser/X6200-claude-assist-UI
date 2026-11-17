@@ -15,7 +15,8 @@
  *  the time. Closed only when it is pulled out (another one is opened when it is plugged in) or the daemon is told to
  *  end. One that opens and sends nothing, or whose stream ends with it still plugged in, is said to be STALLED: an RTL
  *  is then bounced on its hub port after 5 s, as pulling it out and back would (stall_bounce: a kernel with the musb
- *  fixes only; "touch /tmp/rtlspec_stall" tries it), anything else waits to be pulled out. Pulled out is its USB device
+ *  fixes only, and not while another device on its hub is in use: hub_mates_busy; "touch /tmp/rtlspec_stall" tries
+ *  it), anything else waits to be pulled out. Pulled out is its USB device
  *  file gone ("/dev/bus/usb/003/002 (deleted)" among this process's files), which a device plugged back at once does
  *  not hide (it comes back under another number). The stream's transfers are all back before the stick is closed
  *  (librtlsdr patched for it: buildroot/br2_external/package/rtlsdr-blog); should the close hang anyway, the device
@@ -2153,10 +2154,48 @@ static bool musb_fixed(void) {
     return known;
 }
 
+/* Another device on the stick's hub in use: an interface of it with a driver (usbfs for a program through libusb, as
+ * the other Kraken sticks are under page I's x6x00-df, dump1090 or a bench tool; ftdi_sio, cdc_acm and the like; a
+ * nested hub). On the KrakenSDR's hub, disabling one port took another down with it (port 2 and port 5, every time,
+ * 2026-11-17), so a stalled stick there is not bounced while a mate is in use: one stalled stick must not cost page I
+ * its reference channel. Its name into mate. On a root port there are no mates */
+static const char *usb_devices = "/sys/bus/usb/devices";
+
+static bool hub_mates_busy(const char *loc, char *mate, size_t n) {
+    const char    *dot = strrchr(loc, '.');
+    size_t         hl, ll = strlen(loc);
+    DIR           *d;
+    struct dirent *e;
+    char           path[320];
+    bool           busy = false;
+
+    if (!dot || !(d = opendir(usb_devices))) return false;
+    hl = (size_t)(dot - loc) + 1;       /* "3-1." of "3-1.2": every device behind the same hub, deeper ones too */
+    while (!busy && (e = readdir(d))) {
+        const char *nm = e->d_name, *colon = strchr(nm, ':');
+
+        if (!colon || strncmp(nm, loc, hl)) continue;                       /* not an interface behind the hub */
+        if ((size_t)(colon - nm) == ll && !strncmp(nm, loc, ll)) continue;  /* the stick's own */
+        snprintf(path, sizeof(path), "%s/%s/driver", usb_devices, nm);
+        if (access(path, F_OK) == 0) {
+            snprintf(mate, n, "%.*s", (int)(colon - nm), nm);
+            busy = true;
+        }
+    }
+    closedir(d);
+    return busy;
+}
+
 static void *bounce_thread(void *arg) {
-    char *loc = arg, path[160], *dot = strrchr(loc, '.'), *dash = strchr(loc, '-');
+    char *loc = arg, path[160], mate[64], *dot = strrchr(loc, '.'), *dash = strchr(loc, '-');
     FILE *f;
 
+    if (hub_mates_busy(loc, mate, sizeof(mate))) {
+        fprintf(stderr, "rtlspec: the RTL at USB %s stalled: not bounced, as %s on its hub is in use (on the Kraken's "
+                        "hub a bounce took another port down with it): it waits to be pulled out\n", loc, mate);
+        free(loc);
+        return NULL;
+    }
     if (dot)                            /* behind a hub: <hub>:1.0/<hub>-port<N> */
         snprintf(path, sizeof(path), "/sys/bus/usb/devices/%.*s:1.0/%.*s-port%s/disable", (int)(dot - loc), loc,
                  (int)(dot - loc), loc, dot + 1);

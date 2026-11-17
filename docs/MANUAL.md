@@ -1254,6 +1254,10 @@ wherever the RTL-SDR did (B, BOTH, C, D, E, RDS, SAME, AIRSPACE), named as they 
 
 - **One SDR at a time**: with more than one plugged in, the daemon takes a HackRF, then a bladeRF, then an RTL-SDR
   (those that transmit first), when it opens one; the one open stays till it is pulled out.
+- **A stuck RTL-SDR** (open, but nothing coming for 5 s) is switched off and on at its hub port, as pulling it out
+  and back would, once a minute at most. Not while another device on the same hub is in use, such as another of a
+  KrakenSDR's sticks under page I: on the Kraken's hub, switching one port off took another down with it. It then
+  waits to be pulled out.
 - **A HackRF**: its samples are made the RTL's (signed to unsigned 8 bits), and the spike its receiver puts in the
   middle of its picture (its own DC) is taken out there. Its RF amplifier is never on to receive. It needs 2 MS/s
   and up (B's 2.1168 and AIRSPACE's 2.4 MS/s are). Its bias tee is off.
