@@ -22,6 +22,9 @@ jobs:
         with:
           submodules: true        # LVGL: the checks of the GUI's own files build against its headers
 
+      - name: x6x00-df at its latest (its own repository, a submodule that follows its main)
+        run: git submodule update --init --remote tools/rtlspec/x6x00-df
+
       - name: v0.3.8, which tools/data_partition compares the boot script with
         run: git fetch -q --no-tags --depth=1 origin +refs/tags/v0.3.8:refs/tags/v0.3.8
 

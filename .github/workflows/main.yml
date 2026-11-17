@@ -67,6 +67,11 @@ jobs:
         submodules: true
         path: x6100_gui
 
+    # x6x00-df (the KrakenSDR's direction finder, page I) is its own repository, the submodule tools/rtlspec/x6x00-df,
+    # which follows its main: every image is built from its latest commit, whatever commit this one records
+    - name: x6x00-df at its latest
+      run: git -C x6100_gui submodule update --init --remote tools/rtlspec/x6x00-df
+
     # Our forks of Aether Radio's trees: an upstream change reaches an image only once merged into
     # the fork. local-build.sh warns on the run (and in its summary) when upstream has commits the
     # fork has not

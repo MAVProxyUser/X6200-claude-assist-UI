@@ -1,7 +1,7 @@
 # Direction finding (DF) with a KrakenSDR: plan for approval
 
 Status: **approved 2026-11-17 (D1); Phase 0 done, Phase 1 first light, page I built** (results in 5.1). The
-daemon `x6x00-df` (`tools/rtlspec/df.c`, `df_proto.h`) calibrates the radio's Kraken with its noise source and holds a
+daemon `x6x00-df` (`tools/rtlspec/x6x00-df/df.c`, `df_proto.h`) calibrates the radio's Kraken with its noise source and holds a
 bearing within 0.6 degree on a carrier with the PLL dither off (rtlsdr-blog patch 0002). The radio's USB feeds four
 RTL streams at most (D11). Page I (`src/app_df.c`, `src/df_rx.c`) is built; not yet on the radio.
 Read for it: Heimdall DAQ (`krakenrf/heimdall_daq_fw`, branch development, 58c4068), the DoA software
@@ -321,7 +321,7 @@ for plain sticks that need no mod:
 
 ### 2.3 Cost on the radio (Allwinner R16, 4 x Cortex-A7 at 1.008 GHz, NEON)
 
-**Measured on the radio** (2026-11-17, `tools/rtlspec/df_bench.c` cross-built, one thread at nice 19 beside B's
+**Measured on the radio** (2026-11-17, `tools/rtlspec/x6x00-df/df_bench.c` cross-built, one thread at nice 19 beside B's
 daemon and the GUI; five channels, a 12.5 kHz target, 0.1 s blocks); "core" means one of the four.
 
 | Job | 0.25 MS/s | 1.024 MS/s | 2.4 MS/s |
@@ -529,7 +529,7 @@ user's OK for that step; no GUI or daemon restarts while another session is test
   samples: every gap is a lost sample), 30 minutes each at 0.25, 1.024 and 2.4 MS/s, with B's daemon running and
   without. Count **events per hour per channel**, not samples per million. Pass: 1.024 MS/s under one event per 10
   minutes across all five. Needs the user's OK to hold watch channels and AIRSPACE off the Kraken meanwhile.
-- **0b. Synthetic tests on the Mac** (`tools/rtlspec/df_test.c`, part of the Mac-runnable tests): five channels
+- **0b. Synthetic tests on the Mac** (`tools/rtlspec/x6x00-df/df_test.c`, part of the Mac-runnable tests): five channels
   made up with a plane wave from a known bearing for each array kind, noise, random per-channel delays (whole and
   fractional), phases and gains, a noise-source burst, injected slips, a second weaker source. Pass: calibration
   recovers phases under 0.5 degree and delays under 0.02 sample; bearing within 1 degree at 20 dB SNR (UCA-5,
@@ -539,7 +539,7 @@ user's OK for that step; no GUI or daemon restarts while another session is test
 
 ### 5.1 Phase 0 results (2026-11-17)
 
-- **0b. Synthetic tests: pass**, 40 checks (`tools/rtlspec/df_test.c`, in `tools/host_checks.sh` as `df`, about 9 s;
+- **0b. Synthetic tests: pass**, 40 checks (`tools/rtlspec/x6x00-df/df_test.c`, in `tools/host_checks.sh` as `df`, about 9 s;
   the NEON code and the plain loops (`-DDF_NO_NEON`) both pass; the radio's 32-bit build compiles clean with -Werror):
   - the calculator's own numbers (UCA 416 MHz s 0.5: 8.2173 degrees; ULA 440 MHz: 3.4950) and its ANT layout;
   - calibration over 10 random sets of delays (up to 3,000 samples), phases and gains: delays within 0.0006 sample,
@@ -553,7 +553,7 @@ user's OK for that step; no GUI or daemon restarts while another session is test
 - **0c. CPU: measured** (2.3): 45-50 % of a core at 1.024 MS/s, 21-23 % at 0.25, 89-96 % at 2.4; a calibration 145 ms
   of CPU (58 ms with the delays known). The bench binary ran in /tmp at nice 19 and was removed.
 - **0a. Slip rate: under way (2026-11-17).** The script:
-  `tools/rtlspec/df_slip_test.sh -h root@<radio> -s 1024000 -m 30`, then `-s 250000` and `-s 2400000`. It refuses to
+  `tools/rtlspec/x6x00-df/df_slip_test.sh -h root@<radio> -s 1024000 -m 30`, then `-s 250000` and `-s 2400000`. It refuses to
   start while a watch channel or AIRSPACE holds a Kraken stick.
   - First look (read only, before the test): with the Kraken alone on HOST, the SDR pool gave AIRSPACE three spares
     (dump1090 on 1000, 1001, 1003 at 2.4 MS/s, adaptive gain) and B took 1004 at 2.1168 MS/s: 9.3 MS/s, about 18.6
@@ -572,7 +572,7 @@ user's OK for that step; no GUI or daemon restarts while another session is test
   - **Second run, with the GUI up** (08:39-09:09 UTC): B on CH4 (1004, 2.1168 MS/s) as the GUI started it, four
     `rtl_test` on 1000-1003 at 1.024 MS/s, `dmesg -w` captured live: 0 loss events on all four, no USB errors, the
     radio fine. **But see the next point: one of the four delivered nothing**, so this is B plus three sticks.
-  - **The radio's USB feeds four RTL streams at most, B's included.** Measured with `tools/rtlspec/df_rate.c` (each
+  - **The radio's USB feeds four RTL streams at most, B's included.** Measured with `tools/rtlspec/x6x00-df/df_rate.c` (each
     stick's real samples a second): B at 2.38 MS/s and 1000-1002 at 1.024 MS/s all 100 %; 1003, the fifth stream,
     **0**, at 1.024 MS/s and at 0.25 MS/s alike; opened in the other order, 1000 (then the last) got nothing. The
     MUSB has five receive endpoints and the Kraken's hub keeps one for its status; a fifth bulk stream shares an

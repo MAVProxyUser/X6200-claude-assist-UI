@@ -1,8 +1,0 @@
-# x6x00-df's sources (the Kraken direction finder, docs/plans/kraken_df_plan.md), one a line: tools/rtlsdr/build.sh and
-# the image's buildroot package (x6x00-rtlspec, which builds both daemons) compile these. df_test.c and df_bench.c
-# are the host checks', not the daemon's.
-df.c
-df_cal.c
-df_chan.c
-df_doa.c
-df_engine.c

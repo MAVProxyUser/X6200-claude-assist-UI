@@ -1425,7 +1425,8 @@ While I is open the Kraken is its alone: AIRSPACE's spares and watch channels on
 when I closes), and B on a Kraken stick moves to another SDR, or with none free is lent to I. The daemon,
 `/usr/bin/x6x00-df` (log `/tmp/x6x00-df.log`), runs only while I is open: it streams the five, switches the noise
 source on for a moment to calibrate (the antennas are off for that moment), and works out the bearing ten times a
-second. It is our own, not KrakenRF's Heimdall and DoA software.
+second. It is our own, not KrakenRF's Heimdall and DoA software, and has a repository of its own:
+[github.com/MAVProxyUser/x6x00-df](https://github.com/MAVProxyUser/x6x00-df).
 
 **The compass** (left): the array drawn to scale in the middle, numbered as KrakenRF's Antenna Array Size Calculator
 numbers it: ANT 0 forward (up), the rest clockwise; a line (ULA) from ANT 0 on the left. **Which antennas are

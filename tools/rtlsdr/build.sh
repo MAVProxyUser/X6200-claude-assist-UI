@@ -11,7 +11,7 @@
 #     board's own flash, bladeRF-cli -L) as docs/MANUAL.md says;
 #   - rtl_test, to say which stick and tuner is plugged in;
 #   - x6x00-rtlspec, the daemon that owns the device (tools/rtlspec; the radio's zlib for Meteor's PNGs);
-#   - x6x00-df, the KrakenSDR's direction finder for page I (tools/rtlspec/df_sources);
+#   - x6x00-df, the KrakenSDR's direction finder for page I (the submodule tools/rtlspec/x6x00-df);
 #   - dump1090-fa (FlightAware), headless use only: its curses display is declared against the radio's own
 #     libncurses.so.6 (curses.h below), as the sysroot has the library and no header.
 # The radio's libusb-1.0 and ncurses are linked dynamically; libusb.h comes from libusb's 1.0.26 tag.
@@ -112,12 +112,15 @@ while read -r f; do
 done < "$RS/daemon_sources"
 $CC $CF -O3 -DSDR_BLADERF -I "$RS" -I "$H" -I "$BL/libraries/libbladeRF/include" -o "$B/out/bin/x6x00-rtlspec" \
     "${SRCS[@]}" "$B/out/lib/librtlsdr.a" "$B/out/lib/libhackrf.a" $LD -lusb-1.0 -lz -lpthread -lm -ldl
-# x6x00-df, the KrakenSDR's direction finder (page I): tools/rtlspec/df_sources, librtlsdr in it
+# x6x00-df, the KrakenSDR's direction finder (page I): its own repository, the submodule tools/rtlspec/x6x00-df (fetched
+# here when it is empty), compiled from its df_sources; librtlsdr in it
+DF=$RS/x6x00-df
+[ -f "$DF/df_sources" ] || git -C "$TOP" submodule update --init tools/rtlspec/x6x00-df
 DSRCS=()
 while read -r f; do
-    case $f in ''|'#'*) ;; *) DSRCS+=("$RS/$f") ;; esac
-done < "$RS/df_sources"
-$CC $CF -O3 -I "$RS" -o "$B/out/bin/x6x00-df" "${DSRCS[@]}" "$B/out/lib/librtlsdr.a" $LD -lusb-1.0 -lpthread -lm
+    case $f in ''|'#'*) ;; *) DSRCS+=("$DF/$f") ;; esac
+done < "$DF/df_sources"
+$CC $CF -O3 -I "$DF" -o "$B/out/bin/x6x00-df" "${DSRCS[@]}" "$B/out/lib/librtlsdr.a" $LD -lusb-1.0 -lpthread -lm
 
 # dump1090-fa: ARCH armv7l picks its NEON DSP flavours for the radio's Cortex-A7
 rm -f "$B/dump1090/dump1090"      # linked again: its Makefile does not see librtlsdr.a change

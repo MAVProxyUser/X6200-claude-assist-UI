@@ -2,3 +2,7 @@
 	path = lvgl
 	url = https://github.com/gdyuldin/lvgl.git
 	branch = neon_draw
+[submodule "tools/rtlspec/x6x00-df"]
+	path = tools/rtlspec/x6x00-df
+	url = https://github.com/MAVProxyUser/x6x00-df.git
+	branch = main

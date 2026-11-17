@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
- *  GoldCorpHF - Page I's link to the direction finder, /usr/bin/x6x00-df (tools/rtlspec/df.c; the wire format in
- *  tools/rtlspec/df_proto.h). Started when page I opens, told to end ("Q") when it closes; a thread here connects to
+ *  GoldCorpHF - Page I's link to the direction finder, /usr/bin/x6x00-df (its own repository, the submodule
+ *  tools/rtlspec/x6x00-df; the wire format in its df_proto.h). Started when page I opens, told to end ("Q") when it closes; a thread here connects to
  *  it, keeps the newest of each of its messages and sends the GUI's settings again to a daemon started anew.
  *  While page I is open the SDR pool gives it the whole KrakenSDR (SDR_OWN_DF: AIRSPACE's spares and the watch
  *  channels let go of its sticks) and B, if it was on one of them, moves to another SDR or is lent (its daemon ended
@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "../tools/rtlspec/df_proto.h"
+#include "../tools/rtlspec/x6x00-df/df_proto.h"
 
 #include <stdbool.h>
 #include <stdint.h>

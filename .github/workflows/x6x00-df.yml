@@ -1,0 +1,44 @@
+# x6x00-df (the KrakenSDR's direction finder, page I) is its own repository, github.com/MAVProxyUser/x6x00-df, kept
+# here as the submodule tools/rtlspec/x6x00-df following its main (.gitmodules). The image build and the host checks
+# take its latest commit whatever this repository records; this keeps the recorded commit at the latest too, so a
+# clone or a checkout has it: every hour, or by hand (Actions > x6x00-df at its latest > Run workflow), it moves the
+# submodule to x6x00-df's main and commits that here when it changed. Nothing is committed when it is already there.
+name: x6x00-df at its latest
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+  repository_dispatch:
+    types: [x6x00-df]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: x6x00-df-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: The submodule at x6x00-df's main
+        run: |
+          git submodule update --init --remote tools/rtlspec/x6x00-df
+          if git diff --quiet -- tools/rtlspec/x6x00-df; then
+            echo "x6x00-df: already at its latest ($(git -C tools/rtlspec/x6x00-df rev-parse --short HEAD))"
+            exit 0
+          fi
+          sha=$(git -C tools/rtlspec/x6x00-df rev-parse --short HEAD)
+          subject=$(git -C tools/rtlspec/x6x00-df log -1 --format=%s)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/rtlspec/x6x00-df
+          git commit -m "x6x00-df: the submodule at $sha, its latest ($subject)"
+          git push origin HEAD:main

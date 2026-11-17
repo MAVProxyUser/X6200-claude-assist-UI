@@ -207,6 +207,9 @@ Found with recordings played into the radio and test signals from a HackRF on th
   it, to test a decoder against real signals.
 - [tools/rtlsdr](tools/rtlsdr/build.sh) and [tools/bootvideo](tools/bootvideo/build.sh): the RTL-SDR programs
   and ffmpeg built for a radio running an older image.
+- [x6x00-df](https://github.com/MAVProxyUser/x6x00-df): page I's direction finder for a KrakenSDR, a repository of
+  its own kept here as the submodule `tools/rtlspec/x6x00-df` on its latest commit (clone with
+  `--recurse-submodules`, or `git submodule update --init`; the image build and CI take its newest main by themselves).
 - [tools/base_update](tools/base_update/README.md): the X6200's base firmware fetched from Xiegu and written from
   GoldCorpHF, with its tests (a simulated base).
 - [tools/adsb](tools/adsb/adsb_read.py), [tools/ft8_live](tools/ft8_live), [tools/js8_play](tools/js8_play),

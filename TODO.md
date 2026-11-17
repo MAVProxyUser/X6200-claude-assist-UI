@@ -13,7 +13,7 @@ approved that day.
 
 1. **Page I with five channels, longer**: over the air at 915 MHz (2026-11-17) one sample slip on CH2 in the first
    70 s (page I recalibrated in about 6 s and went on), none in the next 76 s; the processor at about 80 % with five
-   channels at 1.024 MS/s. To do: the 30-minute slip test (tools/rtlspec/df_slip_test.sh) with all five on 9104, and
+   channels at 1.024 MS/s. To do: the 30-minute slip test (tools/rtlspec/x6x00-df/df_slip_test.sh) with all five on 9104, and
    where the slip came from (the processor or the USB) if it comes back.
 
 *Small things on the Sentry*

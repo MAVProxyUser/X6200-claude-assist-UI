@@ -163,7 +163,8 @@ if wanted rds; then
 fi
 # x6x00-df's engine on made-up KrakenSDR data: calibration, bearings for each array, slips (docs/plans/kraken_df_plan.md)
 if wanted df; then
-    res=$(run_one df sh -c "$CC -O2 -Wall -Wextra -o '$OUT/df_test' tools/rtlspec/df_test.c tools/rtlspec/df_cal.c tools/rtlspec/df_chan.c tools/rtlspec/df_doa.c tools/rtlspec/df_engine.c -lm && '$OUT/df_test'")
+    D=tools/rtlspec/x6x00-df      # its own repository, a submodule
+    res=$(run_one df sh -c "$CC -O2 -Wall -Wextra -o '$OUT/df_test' $D/df_test.c $D/df_cal.c $D/df_chan.c $D/df_doa.c $D/df_engine.c -lm && '$OUT/df_test'")
     record df "$res" "$(summary df)"
 fi
 # lrpt.c's Meteor-M LRPT, from a transmitter of its own: each layer, then frames, packets and pictures, through the

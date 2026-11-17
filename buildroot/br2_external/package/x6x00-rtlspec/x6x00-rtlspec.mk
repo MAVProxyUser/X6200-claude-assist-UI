@@ -20,16 +20,20 @@ X6X00_RTLSPEC_DEPENDENCIES = libusb rtlsdr-blog libhackrf libbladerf zlib
 # lists were apart once: the image's had no lrpt.c). libusb's header too: sdr_rtl.c reads libusb's port list to
 # number the RTLs by serial and USB location. zlib: the Meteor pictures' PNGs (rtlspec.c)
 X6X00_RTLSPEC_SOURCES = $(addprefix $(@D)/,$(shell sed -e '/^\#/d' $(@D)/daemon_sources))
-# x6x00-df, the KrakenSDR's direction finder (page I): tools/rtlspec/df_sources, librtlsdr linked in the same way;
-# NEON asked for (both radios' SoCs, Cortex-A7, have it): df_chan.c's filter is written for it, plain C otherwise
-X6X00_RTLSPEC_DF_SOURCES = $(addprefix $(@D)/,$(shell sed -e '/^\#/d' $(@D)/df_sources))
+# x6x00-df, the KrakenSDR's direction finder (page I): its own repository (github.com/MAVProxyUser/x6x00-df), the
+# submodule tools/rtlspec/x6x00-df, compiled from its df_sources; librtlsdr linked in the same way. NEON asked for
+# (both radios' SoCs, Cortex-A7, have it): df_chan.c's filter is written for it, plain C otherwise
+X6X00_RTLSPEC_DF = $(@D)/x6x00-df
+X6X00_RTLSPEC_DF_SOURCES = $(addprefix $(X6X00_RTLSPEC_DF)/,$(shell sed -e '/^\#/d' $(X6X00_RTLSPEC_DF)/df_sources))
 
 define X6X00_RTLSPEC_BUILD_CMDS
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -DSDR_BLADERF -I$(@D) -I$(STAGING_DIR)/usr/include/libhackrf \
 		-I$(STAGING_DIR)/usr/include/libusb-1.0 \
 		-o $(@D)/x6x00-rtlspec $(X6X00_RTLSPEC_SOURCES) \
 		-Wl,-Bstatic -lrtlsdr -lhackrf -Wl,-Bdynamic -lusb-1.0 -lz -lpthread -lm -ldl
-	$(TARGET_CC) $(TARGET_CFLAGS) -O3 -mfpu=neon-vfpv4 $(TARGET_LDFLAGS) -I$(@D) \
+	@test -f $(X6X00_RTLSPEC_DF)/df_sources || { echo "x6x00-df: the submodule tools/rtlspec/x6x00-df is empty:" \
+		"git submodule update --init tools/rtlspec/x6x00-df"; exit 1; }
+	$(TARGET_CC) $(TARGET_CFLAGS) -O3 -mfpu=neon-vfpv4 $(TARGET_LDFLAGS) -I$(X6X00_RTLSPEC_DF) \
 		-I$(STAGING_DIR)/usr/include/libusb-1.0 -o $(@D)/x6x00-df $(X6X00_RTLSPEC_DF_SOURCES) \
 		-Wl,-Bstatic -lrtlsdr -Wl,-Bdynamic -lusb-1.0 -lpthread -lm
 endef

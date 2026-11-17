@@ -1,6 +1,6 @@
 # x6x00-rtlspec's sources, one a line: tools/rtlsdr/build.sh (the Mac's build for a hot install) and the image's
 # buildroot package (buildroot/br2_external/package/x6x00-rtlspec) both compile these, so a file added here is in
-# both. The *_test.c and df_* files are not the daemon's (x6x00-df's are in df_sources).
+# both. The *_test.c files are not the daemon's; x6x00-df is the submodule x6x00-df (its df_sources).
 rtlspec.c
 same.c
 rds.c
