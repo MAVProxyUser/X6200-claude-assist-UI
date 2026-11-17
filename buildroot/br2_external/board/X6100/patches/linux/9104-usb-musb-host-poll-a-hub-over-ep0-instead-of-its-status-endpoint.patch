@@ -1,0 +1,194 @@
+From: GoldCorpHF firmware project
+Subject: [PATCH] usb: musb: host: poll a hub over ep0 instead of its status
+ endpoint
+
+An external hub keeps an interrupt-in URB queued on its status-change
+endpoint for as long as it is configured, and musb_schedule() gives every
+queued interrupt endpoint a hardware endpoint of its own, for good. On an
+Allwinner A33/R16 (sun8i-a33-musb: ep1-ep5 receive, ep1 kept for bulk as
+musb->bulk_ep) that leaves three of ep2-ep5 for bulk-in streams behind a
+hub; the fourth and fifth share ep1, which changes queues only after the
+one on it has NAKed for 16 ms, so with streams that never pause (RTL-SDRs)
+the fifth gets nothing. On a Xiegu X6200 with a KrakenSDR (an SMSC USB2517
+hub and five RTL2832U) on its HOST port, the fifth stick got exactly 0
+samples (November 2026).
+
+With hub_poll_ms set (a module parameter, default 1000, writable at any
+time), the status URB of the hub hub_poll_id names (vendor << 16 |
+product, default 0x04242517, the USB2517) is linked to its endpoint but
+never put on the hardware: a timer gives it back every hub_poll_ms
+milliseconds with every port and the hub itself marked as changed
+(memset 0xff, the buffer unmapped first as musb_host_rx() does before a
+PIO write). hub_irq() takes that as a status change and kicks hub_wq, and
+hub_event() reads the hub's and each port's status over ep0, acting only
+on what really changed: connects, disconnects, resets and over-current are
+found up to hub_poll_ms late, at the cost of eight control transfers a
+second for a seven-port hub. The hub driver resubmits the URB from its
+completion and it is held again. A dequeue (usb_kill_urb() at a quiesce or
+a disconnect) gives the held URB back at once; the timer finds nothing.
+Only in PIO (no DMA controller), only one hub at a time (another stays on
+the hardware as before), and hub_poll_ms 0 puts the hub's next status URB
+back on the hardware.
+
+With it the KrakenSDR's five sticks get ep1-ep5 to themselves, one each,
+and each streams as a lone queue does.
+
+Also: a notice (rate-limited) when a bulk-in queue joins another on the
+shared bulk endpoint, as the one that joins gets nothing while the other
+streams.
+
+Not fixed upstream (6.1.y and mainline unchanged here).
+---
+--- a/drivers/usb/musb/musb_host.c
++++ b/drivers/usb/musb/musb_host.c
+@@ -69,6 +69,38 @@
+  * "claimed" until its software queue is no longer refilled.  No multiplexing
+  * of transfers between endpoints, or anything clever.
+  */
++
++/*
++ * A hub polled over ep0 instead of on its status endpoint.
++ *
++ * An external hub keeps an interrupt-in URB queued on its status-change
++ * endpoint for good, and every queued interrupt endpoint gets a hardware
++ * endpoint of its own for as long as it is queued: on a controller with few
++ * receive endpoints (an Allwinner A33/R16: ep1-ep5, ep1 kept for bulk) the
++ * hub holds one that a bulk stream could have had. With hub_poll_ms set, the
++ * status URB of the hub hub_poll_id names (vendor << 16 | product: by
++ * default 0x04242517, the SMSC USB2517 of a KrakenSDR) is never put on the
++ * hardware: it is completed every hub_poll_ms milliseconds with every port
++ * marked as changed, and the hub driver reads the hub's and each port's
++ * status over ep0, as it does after a real change, so it finds connects,
++ * disconnects and over-current that much later. Only in PIO, only one hub
++ * at a time. 0 for hub_poll_ms (at the hub's next status URB) turns it off.
++ */
++static unsigned int hub_poll_ms = 1000;
++module_param(hub_poll_ms, uint, 0644);
++MODULE_PARM_DESC(hub_poll_ms,
++	"poll the hub hub_poll_id names over ep0 every so many ms instead of on its status endpoint (0: off)");
++
++static unsigned int hub_poll_id = 0x04242517;
++module_param(hub_poll_id, uint, 0644);
++MODULE_PARM_DESC(hub_poll_id,
++	"USB vendor << 16 | product of the hub polled with hub_poll_ms (default: SMSC USB2517, a KrakenSDR's hub)");
++
++static void musb_hub_poll_fire(struct timer_list *t);
++static DEFINE_TIMER(musb_hub_poll_timer, musb_hub_poll_fire);
++/* the held status URB and its controller; under that controller's lock */
++static struct urb	*musb_hub_poll_urb;
++static struct musb	*musb_hub_poll_musb;
+ 
+ struct musb *hcd_to_musb(struct usb_hcd *hcd)
+ {
+@@ -284,6 +316,54 @@
+ 	spin_unlock(&musb->lock);
+ 	usb_hcd_giveback_urb(musb->hcd, urb, status);
+ 	spin_lock(&musb->lock);
++}
++
++/*
++ * Should urb, submitted to musb, be held for polling: the polled hub's
++ * status URB, in PIO, with no other held?
++ *
++ * Context: controller locked
++ */
++static bool musb_hub_poll_wanted(struct musb *musb, struct urb *urb)
++{
++	struct usb_device	*udev = urb->dev;
++	u32			id;
++
++	if (!READ_ONCE(hub_poll_ms) || musb->dma_controller
++			|| !usb_pipeint(urb->pipe) || !usb_pipein(urb->pipe)
++			|| udev->descriptor.bDeviceClass != USB_CLASS_HUB
++			|| !urb->transfer_buffer || !urb->transfer_buffer_length
++			|| musb_hub_poll_urb
++			|| (musb_hub_poll_musb && musb_hub_poll_musb != musb))
++		return false;
++	id = (u32)le16_to_cpu(udev->descriptor.idVendor) << 16
++		| le16_to_cpu(udev->descriptor.idProduct);
++	return id == READ_ONCE(hub_poll_id);
++}
++
++/*
++ * The poll: the held status URB given back with every port and the hub
++ * itself (bit 0) marked as changed. The buffer is unmapped first, as
++ * musb_host_rx() does before PIO writes into one.
++ */
++static void musb_hub_poll_fire(struct timer_list *t)
++{
++	struct musb	*musb = READ_ONCE(musb_hub_poll_musb);
++	struct urb	*urb;
++	unsigned long	flags;
++
++	if (!musb)
++		return;
++	spin_lock_irqsave(&musb->lock, flags);
++	urb = musb_hub_poll_urb;
++	musb_hub_poll_urb = NULL;
++	if (urb) {
++		usb_hcd_unmap_urb_for_dma(musb->hcd, urb);
++		memset(urb->transfer_buffer, 0xff, urb->transfer_buffer_length);
++		urb->actual_length = urb->transfer_buffer_length;
++		musb_giveback(musb, urb, 0);
++	}
++	spin_unlock_irqrestore(&musb->lock, flags);
+ }
+ 
+ /*
+@@ -2100,6 +2180,10 @@
+ 	musb_dbg(musb, "qh %p periodic slot %d", qh, best_end);
+ success:
+ 	if (head) {
++		if (head == &musb->in_bulk && !list_empty(head))
++			dev_notice_ratelimited(musb->controller,
++				"bulk-in queues share ep%d: %s ep%d waits its turn\n",
++				hw_ep->epnum, dev_name(&qh->dev->dev), qh->epnum);
+ 		idle = list_empty(head);
+ 		list_add_tail(&qh->ring, head);
+ 		qh->mux = 1;
+@@ -2132,6 +2216,18 @@
+ 	trace_musb_urb_enq(musb, urb);
+ 
+ 	spin_lock_irqsave(&musb->lock, flags);
++	if (musb_hub_poll_wanted(musb, urb)) {
++		ret = usb_hcd_link_urb_to_ep(hcd, urb);
++		if (!ret) {
++			urb->hcpriv = &musb_hub_poll_urb;
++			musb_hub_poll_urb = urb;
++			musb_hub_poll_musb = musb;
++			mod_timer(&musb_hub_poll_timer, jiffies
++				  + msecs_to_jiffies(READ_ONCE(hub_poll_ms)));
++		}
++		spin_unlock_irqrestore(&musb->lock, flags);
++		return ret;
++	}
+ 	ret = usb_hcd_link_urb_to_ep(hcd, urb);
+ 	qh = ret ? NULL : hep->hcpriv;
+ 	if (qh)
+@@ -2374,7 +2470,15 @@
+ 	spin_lock_irqsave(&musb->lock, flags);
+ 	ret = usb_hcd_check_unlink_urb(hcd, urb, status);
+ 	if (ret)
++		goto done;
++
++	/* the hub status URB held for polling: given back as it is */
++	if (urb->hcpriv == (void *)&musb_hub_poll_urb) {
++		if (musb_hub_poll_urb == urb)
++			musb_hub_poll_urb = NULL;
++		musb_giveback(musb, urb, 0);
+ 		goto done;
++	}
+ 
+ 	qh = urb->hcpriv;
+ 	if (!qh)
+@@ -2787,6 +2891,10 @@
+ 	if (musb->port_mode == MUSB_PERIPHERAL)
+ 		return;
+ 	usb_remove_hcd(musb->hcd);
++	if (READ_ONCE(musb_hub_poll_musb) == musb) {
++		del_timer_sync(&musb_hub_poll_timer);
++		musb_hub_poll_musb = NULL;
++	}
+ }
+ 
+ void musb_host_free(struct musb *musb)

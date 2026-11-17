@@ -917,8 +917,18 @@ second): each RTL-SDR by its number (RTL0, RTL1...: serial, then USB location), 
    while AIRSPACE is open.
 
 Power: an SDR on the radio's own HOST power streams alone; those behind a hub of their own power (a KrakenSDR's)
-stream beside it and each other (five did at once, about 24 MB/s, 2026-11-16). Beside B's HackRF or bladeRF with no
-such RTL, one RTL on the radio's power may be AIRSPACE's, as before.
+stream beside it and each other. Beside B's HackRF or bladeRF with no such RTL, one RTL on the radio's power may be
+AIRSPACE's, as before.
+
+**Five streams at once on the X6200** (a KrakenSDR's five sticks): the radio's USB host has five receive endpoints, and
+a hub's status endpoint used to keep one of them, so the fifth stream got nothing at all (2026-11-17; the "five at
+once" of 2026-11-16 was counted by a tool that reports a starved stick as perfect). The host now asks the KrakenSDR's
+hub how its ports are once a second over its control endpoint instead (kernel patch 9104), so each stick has an
+endpoint of its own and all five stream whole (B at 2.1168 MS/s and four at 1.024 MS/s, every sample). A stick
+plugged into the KrakenSDR, or dropping off it, is seen up to a second later (half a second when measured). Other
+hubs are as before. Over SSH, `/sys/module/musb_hdrc/parameters/hub_poll_ms` (1000) sets the interval; 0 gives the
+hub its status endpoint back at its next report. The kernel log says `bulk-in queues share ep1` when a sixth stream
+would starve.
 
 **The SDR POOL panel**, from any screen but G held up: **APP held**, or F SYSTEM's **SDR POOL**. A row each SDR: its
 number, serial, USB location and user (`B 106.700 WFM HEARD`, `PAGE I DIRECTION FINDER CH0`, `AIRSPACE ADS-B 1090`,

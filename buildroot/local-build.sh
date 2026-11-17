@@ -199,7 +199,8 @@ cp -a $GUI/buildroot/br2_external/board/X6100/linux/. $BOARD/
 # (the HOST port) no longer oopses with interrupts off when it disables an endpoint whose qh was left bound with no URB:
 # an X6200 hung for good as a hub of two streaming SDRs on that port browned out (November 2026). 9102: the race that
 # left it so (is_ready saved and restored around each giveback on two CPUs; also stalls and a double free) is closed
-# by settling the qh before the lock is dropped for a giveback
+# by settling the qh before the lock is dropped for a giveback. 9104: a KrakenSDR's hub asked about its ports over
+# ep0 once a second instead of keeping one of the R16's five receive endpoints for its status, so its fifth RTL streams
 mkdir -p $EXT/board/$M/patches/linux
 cp $GUI/buildroot/br2_external/board/X6100/patches/linux/*.patch $EXT/board/$M/patches/linux/
 if [ $MODEL = x6200 ]; then
