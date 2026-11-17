@@ -8480,6 +8480,16 @@ the radio, hears it, keys it and sends CW with it.
   rate with a filter, flat to 9 kHz. The greeting gives the client's format,
   a change is answered with what moved, and every frame's header says its
   rate, type, length and channels.
+- Over the radio's Wi-Fi: it sends about 1 MB/s at most (8 Mbit/s, measured
+  2026-11-17 on a 2.4 GHz link at -57 dBm; the radio's Wi-Fi chip is 2.4 GHz
+  only), and TCI's default audio is 0.38 MB/s of that. Alone it comes through
+  whole; a file copied off the radio at the same time leaves too little, and
+  the radio drops frames for that client rather than let its audio fall
+  behind (5.8 % of it during a 40 MB copy). A client that can ask for less
+  helps: 24 kHz mono int16 is 48 kB/s, an eighth of the default. Wired
+  Ethernet on the radio, or an access point close by on a quiet channel
+  (an old 802.11b device in range slows a 2.4 GHz network down for everyone),
+  gives more room.
 - TCI audio on the air (`trx:0,true,tci;`): in every mode but CW and CW-R,
   where the key is refused (CW goes as text, below). DIGU and DIGL take it as the radio's own FT8,
   PSK and Winlink take theirs in USB-D. Every 21.3 ms a `TX_CHRONO`

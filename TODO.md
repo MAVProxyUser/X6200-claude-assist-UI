@@ -34,11 +34,16 @@ approved that day.
 5. **Page I's decisions D2-D10** (the plan's list): licence, rate, calibration interval, B on a Kraken stick, DF
     only while I is open, I on the ring only with an array, the hardware (D8: the antennas and their layout; the
     absolute bearing means nothing till the array is known), plain RTLs.
-6. **TCI audio over the radio's Wi-Fi**: the stream to a client stalled 0.5-1.3 s at a time, worse while big
-    files went over the same link, even at -41 dBm and MCS 7; the server then drops what passes the ~1.4 s it queues
-    per client, so a listener loses speech or audio. The remote control port and TCI connects timed out now and then
-    at the same time. To look at: why the link stalls (the radio's Wi-Fi driver, the 2.4 GHz channel, USB noise from
-    the SDRs), and whether a client should be able to ask for a longer queue.
+6. **TCI audio over the radio's Wi-Fi**: looked at 2026-11-17 evening. No stalls of 0.5-1.3 s then (the longest gap
+    between frames 280 ms, all the audio there); the limit is how much the radio sends: about 1 MB/s (8 Mbit/s raw
+    TCP), the same with no SDR, B's stick or all five Kraken sticks streaming, the CPU 70 % idle; the WiFi chip is on
+    the SoC's EHCI (not the MUSB with the SDRs), one bulk-out endpoint. The link: TX MCS 5, RX MCS 1-3, CTS
+    protection on (an 802.11b device on channel 6), -57 dBm, 2.4 GHz only. TCI's default audio (0.38 MB/s) then
+    loses 5.8 % to a 40 MB copy at the same time. Tried and dropped: DSCP EF on TCI's socket made it far worse (74 %
+    over 0.6 s late against 20 %, Wi-Fi's video class going out unaggregated). A longer queue would not help a link
+    that is short for minutes. What would: a client asking for less (24 kHz mono int16), the AP on a quieter
+    channel, wired Ethernet; perhaps a newer rtw88 (pinned at 461b696, 2025-05) if its USB TX ever gains throughput.
+    The manual's TCI section says so.
 7. **A GUI that hangs** (its process alive, its radio thread stuck) still lets the X6200's base switch the radio off
     after about three minutes: the base keeper runs only while no GUI process does. Whether to cover it is the owner's
     call (a hung radio switching itself off may be wanted).
