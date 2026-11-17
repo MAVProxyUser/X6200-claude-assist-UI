@@ -91,6 +91,12 @@ approved that day.
 
 **Done 2026-11-16 and 2026-11-17** (for the record; details in git)
 
+- A Direction finder page in the web configurator (Remote > Direction finder, /df): page I's compass, bearing,
+  band, channels, tuning (a frequency typed, a click on the spectrum, FOLLOW) and every setting, the sources and
+  forward-backward included, and gpsd; it runs DF on its own while open (page I closed) and lets the Kraken go 20 s
+  after the page closes. Through the GUI's configurator socket (df_get, df_set, df_run), so page I and the page share
+  one set of settings. Tried on the radio through its API (DF started from it, a setting set and refused); the page
+  drawn in a browser from the radio's own data.
 - Kraken roadmap, first pieces (x6x00-df 75f2868): its own cores (the musb interrupt off CPU0, readers on CPU2 at
   SCHED_FIFO 10, the engine on CPU3); gpsd's compass or course as page I's heading (tried with a made-up GPS on the
   radio's gpsd: north up, GPS COURSE 135); TNA; several sources (2, 3, AUTO) and forward-backward averaging; page I's

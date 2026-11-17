@@ -24,6 +24,12 @@
  *    {"cmd":"keys_set","key":name,"val":v}            -> {"t":"ok"} or {"t":"err",...}; name press_<key>, hold_<key>
  *                                                        (v -1 its own), long_gen.., mic_f1.., user_f1..5,
  *                                                        lock_per_band; "reset_top" every key its own job
+ *    {"cmd":"df_get"}                                 -> {"t":"df", ...}: the direction finder (page I, x6x00-df) as the
+ *                                                        web page draws it: settings, state, bearing, spectra, gpsd
+ *    {"cmd":"df_set","key":k,"val":v}                 -> {"t":"ok"} or {"t":"err",...}: one of page I's settings
+ *                                                        (app_df.c app_df_web_set: target, band, follow, bw, ...)
+ *    {"cmd":"df_run","on":0|1}                        -> {"t":"ok"}: the web page holds the Kraken (DF runs without page
+ *                                                        I open) while its df_get keep coming, or lets it go
  *  The values are checked here and applied on the LVGL thread through the scheduler, as the
  *  Settings pages apply them.
  *
@@ -42,6 +48,10 @@
 #include <cmath>
 
 extern "C" {
+    /* app_df.h's web page functions (its own header brings the dialog's, C++ unfriendly here) */
+    void app_df_web_run(bool on);
+    int  app_df_web_set(const char *key, double val);
+    int  app_df_web_json(char *out, size_t n);
     #include "band_plan.h"
     #include "cJSON.h"
     #include "digi_freqs.h"
@@ -66,7 +76,7 @@ extern "C" {
 
 #define SOCK_PATH "/tmp/x6100_cfg.sock"
 #define IN_SIZE   1024
-#define OUT_SIZE  8192      /* keys_get: the lists of actions with their names */
+#define OUT_SIZE  16384     /* keys_get: the lists of actions with their names; df_get: page I's state, ~6 KB */
 
 /* Screen options of Settings > Display, by name: the ranges the page may set */
 static const struct {
@@ -469,6 +479,43 @@ static void tune_cb(void *arg) {
     t->err = wavelog_cat_tune(t->hz, t->mode);
 }
 
+/* ---- The direction finder's web page (app_df.c) ---- */
+
+typedef struct {
+    char   key[16];
+    double val;
+    int    rc;
+} df_set_t;
+
+static void df_set_cb(void *arg) {
+    df_set_t *d = (df_set_t *)arg;
+    d->rc = app_df_web_set(d->key, d->val);
+}
+
+static void df_run_on_cb(void *arg) {
+    (void)arg;
+    app_df_web_run(true);
+}
+
+static void df_run_off_cb(void *arg) {
+    (void)arg;
+    app_df_web_run(false);
+}
+
+/* A setting from the web page: the key checked here, the value by page I on the LVGL thread (scheduler_call waits) */
+static const char *df_set(cJSON *req) {
+    cJSON   *k = cJSON_GetObjectItem(req, "key"), *v = cJSON_GetObjectItem(req, "val");
+    df_set_t d = {};
+
+    if (!cJSON_IsString(k) || strlen(k->valuestring) >= sizeof(d.key)) return "Bad key";
+    if (v && !cJSON_IsNumber(v)) return "Bad value";
+    snprintf(d.key, sizeof(d.key), "%s", k->valuestring);
+    d.val = v ? v->valuedouble : 0;
+    d.rc  = -1;
+    if (!scheduler_call(df_set_cb, &d)) return "Busy, try again";
+    return d.rc ? "Not a setting, or out of range" : NULL;
+}
+
 static const char *tune(cJSON *req) {
     cJSON     *hz   = cJSON_GetObjectItemCaseSensitive(req, "hz");
     cJSON     *mode = cJSON_GetObjectItemCaseSensitive(req, "mode");
@@ -630,6 +677,19 @@ static int handle_line(const char *line, char *out, size_t size) {
         l = wavelog_cat_state(out, size);
     } else if (!strcmp(name->valuestring, "tune")) {
         err = tune(req);
+    } else if (!strcmp(name->valuestring, "df_get")) {
+        l = app_df_web_json(out, size);
+        if (l < 0) {
+            l   = 0;
+            err = "Too long";
+        }
+    } else if (!strcmp(name->valuestring, "df_set")) {
+        err = df_set(req);
+    } else if (!strcmp(name->valuestring, "df_run")) {
+        cJSON *on = cJSON_GetObjectItem(req, "on");
+        if (!scheduler_put_noargs(cJSON_IsTrue(on) || (cJSON_IsNumber(on) && on->valuedouble != 0) ? df_run_on_cb
+                                                                                                : df_run_off_cb))
+            err = "Busy, try again";
     } else if (!strcmp(name->valuestring, "keys_get")) {
         l = keys_get(out, size);
     } else if (!strcmp(name->valuestring, "keys_set")) {

@@ -1,0 +1,354 @@
+% rebase('base.html', title='Direction finder')
+<h2><svg class="i"><use href="#i-compass"/></svg>Direction finder</h2>
+<p class="sub">The radio's page I with a KrakenSDR on its HOST port, at the browser's size: the bearing, the method's
+spectrum round the array, the band and every channel, and all of page I's settings (the same ones: a change here shows
+on the radio's screen too). While this page is open the radio keeps direction finding running, page I on its screen or
+not, and lets the Kraken go about 20 seconds after you close the page. Receive only.</p>
+
+<style>
+.df-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:-8px 0 16px}
+.df-top .st{font-weight:700;letter-spacing:.5px}
+.df-top .dim{color:var(--dim);font-size:14px}
+.df-grid{display:grid;grid-template-columns:minmax(300px,520px) minmax(300px,1fr);gap:18px;align-items:start}
+@media (max-width:900px){.df-grid{grid-template-columns:1fr}}
+.df-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin:0 0 18px}
+.df-card h3{margin:0 0 10px;font-size:15px;color:var(--dim);font-weight:600;letter-spacing:.3px;display:flex;align-items:center;gap:8px}
+#compass{width:100%;aspect-ratio:1;display:block}
+.brg{font:700 40px/1.1 ui-monospace,monospace;letter-spacing:1px}
+.brg small{font-size:16px;color:var(--dim);font-weight:500}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:14px}
+.kv b{color:var(--dim);font-weight:500}
+.tune{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tune label{font-size:13px;color:var(--dim);display:block;margin-bottom:3px}
+.frow{display:flex;gap:8px}
+.frow input{flex:1;font:600 16px ui-monospace,monospace}
+.seg2{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg2 button{border:0;border-radius:0;background:#0b1422;color:var(--dim);padding:7px 14px}
+.seg2 button.on{background:var(--accent);color:#111}
+canvas.wide{width:100%;display:block;border-radius:6px;background:#08101b}
+#spec{height:120px;cursor:crosshair}
+#wf{height:150px}
+table.ch{width:100%;border-collapse:collapse;font-size:13.5px}
+table.ch th{color:var(--dim);font-weight:500;text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}
+table.ch td{padding:5px 6px;border-bottom:1px solid #1c2a3d;font-family:ui-monospace,monospace}
+.c-IN{color:var(--ok)}.c-QUIET{color:var(--accent)}.c-LOW,.c-SLIPPED{color:var(--err)}.c-CLIPPING{color:#e066d6}
+.c-GONE,.c-OFF,.c-NO{color:var(--dim)}
+.sets{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.sets label{font-size:13px;color:var(--dim);display:block;margin-bottom:3px}
+.note{color:var(--dim);font-size:13px;margin:6px 0 0}
+.gone{opacity:.45;pointer-events:none}
+</style>
+
+<div class="df-top">
+  <span class="st" id="state">…</span>
+  <span class="dim" id="who"></span>
+  <button id="run" class="primary" hidden>Start direction finding</button>
+  <button id="stop" hidden>Let the Kraken go</button>
+  <span class="status" id="status"></span>
+</div>
+
+<div class="df-grid">
+  <div>
+    <section class="df-card">
+      <canvas id="compass" width="520" height="520" aria-label="The compass: the array, the method's spectrum and the bearing"></canvas>
+    </section>
+    <section class="df-card">
+      <h3>Channels</h3>
+      <table class="ch"><thead><tr><th>Ant</th><th>Serial</th><th>State</th><th>Target</th><th>Phase</th><th>Gain</th><th>Fit</th><th>Use</th></tr></thead><tbody id="chs"></tbody></table>
+      <p class="note">Target: the signal over that channel's floor. Phase, Gain and Fit: the last calibration's correction and how well its line fit (degrees rms). Use: leave an antenna out of the bearing.</p>
+    </section>
+  </div>
+  <div>
+    <section class="df-card">
+      <div class="brg" id="brg">---</div>
+      <div class="kv" id="brgkv"></div>
+    </section>
+    <section class="df-card" id="tunecard">
+      <h3>Tune</h3>
+      <div class="tune">
+        <div style="grid-column:1/-1"><label for="freq">Frequency, MHz (24 to 1766)</label>
+          <div class="frow"><input id="freq" inputmode="decimal" autocomplete="off"><button id="go" class="primary">Tune</button>
+          <button id="dn" title="A channel down">&minus;</button><button id="up" title="A channel up">+</button></div></div>
+        <div><label for="band">Band</label><select id="band"></select></div>
+        <div><label>Follow</label><div class="seg2" id="follow"><button data-v="0">Off</button><button data-v="1">A (X6200)</button><button data-v="2">B (SDR)</button></div></div>
+        <div><label for="bw">Width</label><select id="bw"></select></div>
+        <div><label>Auto (strongest in the band)</label><div class="seg2" id="auto"><button data-v="0">Off</button><button data-v="1">On</button></div></div>
+      </div>
+      <p class="note">Follow takes the X6200's dial (A) or B's frequency as they change. A click on the spectrum below tunes there.</p>
+    </section>
+    <section class="df-card">
+      <h3>The band</h3>
+      <canvas class="wide" id="spec" width="900" height="120" aria-label="CH0's spectrum across the Kraken's passband"></canvas>
+      <canvas class="wide" id="wf" width="720" height="150" aria-label="The bearings over time, 0 to 359 degrees across, newest on top" style="margin-top:8px"></canvas>
+      <p class="note">Top: CH0's spectrum across the passband, the target's window in amber. Below: the method's spectrum over time, 0-359 degrees across (newest on top, dim while the squelch is shut).</p>
+    </section>
+    <section class="df-card">
+      <h3>Settings</h3>
+      <div class="sets">
+        <div><label for="method">Method</label><select id="method"></select></div>
+        <div><label for="nsrc">Sources</label><select id="nsrc"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="0">Auto</option></select></div>
+        <div><label for="fb">Forward-backward (ULA)</label><select id="fb"><option value="0">Off</option><option value="1">On</option></select></div>
+        <div><label for="rate">Rate</label><select id="rate"></select></div>
+        <div><label for="gain">Gain</label><select id="gain"></select></div>
+        <div><label for="sql">Squelch, dB</label><input id="sql" type="number" min="3" max="40" step="1"></div>
+        <div><label for="cal">Calibrate every</label><select id="cal"></select></div>
+        <div><label>&nbsp;</label><button id="calnow">Calibrate now</button></div>
+      </div>
+      <h3 style="margin-top:16px">Array</h3>
+      <div class="sets">
+        <div><label for="kind">Layout</label><select id="kind"></select></div>
+        <div><label for="size">Radius / spacing, cm</label><input id="size" type="number" min="1" max="500" step="0.5"></div>
+        <div><label for="heading">Heading (ANT 0), degrees</label><input id="heading" type="number" min="0" max="359" step="1"></div>
+        <div><label>&nbsp;</label><button id="fitsize">Size for this band</button></div>
+      </div>
+      <p class="note" id="calc"></p>
+    </section>
+    <section class="df-card">
+      <h3>GPS (gpsd)</h3>
+      <div class="kv" id="gps"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let D = null, lists = null, lastSeq = -1, inFlight = false, editing = null, joined = false;
+const wfRows = [], trail = [];
+const WF_N = 150, TRAIL_MS = 120000;
+
+function say(t, bad) { const s = $('status'); s.textContent = t; s.style.color = bad ? 'var(--err)' : ''; }
+
+async function set(key, val) {
+  try {
+    const r = await fetch('/api/df/set', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key, val})});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) say(j.error || j.message || 'Not taken', true); else say('Applied on the radio');
+  } catch (e) { say('The radio did not answer', true); }
+  poll();
+}
+
+async function run(on) {
+  try { await fetch('/api/df/run', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({on})}); } catch (e) {}
+  poll();
+}
+
+function fill(sel, items, val) {
+  const s = $(sel);
+  if (s.options.length !== items.length) { s.innerHTML = ''; items.forEach((t, i) => s.add(new Option(t, i))); }
+  if (document.activeElement !== s) s.value = val;
+}
+
+function segOn(id, v) { for (const b of $(id).children) b.classList.toggle('on', +b.dataset.v === +v); }
+
+function mhz(hz) { return (hz / 1e6).toFixed(4); }
+
+/* The array as it is set out, in metres: x forward (up), y left; ANT 0 forward, the rest clockwise (KrakenRF's) */
+function layout(c) {
+  const k = lists.kinds[c.kind], n = k[2], s = c.size_mm / 1000, pts = [];
+  for (let m = 0; m < n; m++) {
+    if (k[1]) pts.push([0, ((n - 1) / 2 - m) * s]);                                  /* a line across, ANT 0 left */
+    else { const a = 2 * Math.PI * m / n; pts.push([s * Math.cos(a), -s * Math.sin(a)]); }
+  }
+  return pts;
+}
+
+function drawCompass() {
+  const cv = $('compass'), g = cv.getContext('2d'), W = cv.width, c = W / 2, R = W / 2 - 26, Rin = R * 0.62;
+  const css = getComputedStyle(document.documentElement), acc = css.getPropertyValue('--accent').trim() || '#ffb020';
+  g.clearRect(0, 0, W, W);
+  if (!D || !D.cfg) return;
+  const head = D.cfg.heading_from ? D.cfg.heading_now : 0;          /* north up with a heading, else ANT 0 up */
+  const rot = deg => (deg + head - 90) * Math.PI / 180;               /* the daemon's degrees (0 = ANT 0) on screen */
+  const live = D.do && D.connected, gate = live && D.do.gate;
+  /* the method's spectrum as a ring between Rin and R */
+  if (live && D.do.p) {
+    for (let d = 0; d < 360; d++) {
+      const v = D.do.p[d] / 255, r = Rin + (R - Rin) * v;
+      g.beginPath(); g.moveTo(c + Rin * Math.cos(rot(d - 0.6)), c + Rin * Math.sin(rot(d - 0.6)));
+      g.arc(c, c, r, rot(d - 0.6), rot(d + 0.6)); g.arc(c, c, Rin, rot(d + 0.6), rot(d - 0.6), true);
+      g.fillStyle = `rgba(255,176,32,${(gate ? 0.15 : 0.06) + v * (gate ? 0.75 : 0.3)})`; g.fill();
+    }
+  }
+  /* rings and ticks */
+  g.strokeStyle = '#3a4d66'; g.lineWidth = 1;
+  g.beginPath(); g.arc(c, c, R, 0, 2 * Math.PI); g.stroke();
+  g.beginPath(); g.arc(c, c, Rin, 0, 2 * Math.PI); g.stroke();
+  for (let a = 0; a < 360; a += 10) {
+    const l = a % 30 ? 6 : 12;
+    g.beginPath(); g.moveTo(c + R * Math.cos(rot(a - head)), c + R * Math.sin(rot(a - head)));
+    g.lineTo(c + (R + l) * Math.cos(rot(a - head)), c + (R + l) * Math.sin(rot(a - head))); g.stroke();
+  }
+  g.fillStyle = css.getPropertyValue('--dim').trim() || '#8fa3b8'; g.font = '600 14px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(D.cfg.heading_from ? 'N' : 'FWD', c, 12);
+  /* the trail: the last good bearings as dots on the rim */
+  const now = Date.now();
+  for (const t of trail) {
+    const a = 1 - (now - t.ms) / TRAIL_MS; if (a <= 0) continue;
+    g.fillStyle = `rgba(255,176,32,${a * 0.8})`; g.beginPath();
+    g.arc(c + (R + 18) * Math.cos(rot(t.brg)), c + (R + 18) * Math.sin(rot(t.brg)), 3, 0, 2 * Math.PI); g.fill();
+  }
+  /* the antennas to scale: the array's widest point at a third of the ring */
+  const pts = layout(D.cfg), span = Math.max(...pts.map(p => Math.hypot(p[0], p[1])), 0.01), sc = Rin * 0.55 / span;
+  const used = live ? D.do.used : 0;
+  pts.forEach((p, m) => {
+    const a = Math.atan2(-p[1], p[0]) * 180 / Math.PI, r = Math.hypot(p[0], p[1]) * sc;   /* x forward, y left */
+    const x = c + r * Math.cos(rot(a)), y = c + r * Math.sin(rot(a)), ch = D.st && D.st.ch ? D.st.ch[m] : null;
+    const col = !ch ? '#56657a' : ch.cond === 'IN' ? '#5fd38a' : ch.cond === 'QUIET' ? acc : (ch.cond === 'LOW, OUT' || ch.cond === 'SLIPPED') ? '#ff6b6b' : '#56657a';
+    g.beginPath(); g.arc(x, y, 13, 0, 2 * Math.PI);
+    if (used >> m & 1) { g.fillStyle = col; g.fill(); } else { g.strokeStyle = col; g.lineWidth = 2; g.stroke(); }
+    g.fillStyle = used >> m & 1 ? '#111' : col; g.font = '700 14px system-ui'; g.fillText(m, x, y + 1);
+  });
+  /* the needle */
+  if (live && D.do.bearing >= 0 && (gate || D.st && D.st.state === 'HOLD')) {
+    const fit = D.do.fit, col = fit >= 80 ? '#5fd38a' : fit >= 50 ? acc : '#ff6b6b', b = D.do.bearing;
+    const w = Math.max(D.do.uncert, 1);
+    g.fillStyle = col.startsWith('#') ? col + '40' : col; g.beginPath(); g.moveTo(c, c);
+    g.arc(c, c, R, rot(b - w), rot(b + w)); g.closePath(); g.fill();
+    g.strokeStyle = col; g.lineWidth = 4; g.globalAlpha = gate ? 1 : 0.5;
+    g.beginPath(); g.moveTo(c, c); g.lineTo(c + R * Math.cos(rot(b)), c + R * Math.sin(rot(b))); g.stroke();
+    if (D.do.mirror >= 0) { g.setLineDash([8, 6]); g.lineWidth = 2; g.beginPath(); g.moveTo(c, c); g.lineTo(c + R * Math.cos(rot(D.do.mirror)), c + R * Math.sin(rot(D.do.mirror))); g.stroke(); g.setLineDash([]); }
+    g.globalAlpha = 1;
+    for (const pk of D.do.peaks || []) {
+      g.strokeStyle = D.do.nsrc > 1 ? col : '#8fa3b8'; g.lineWidth = D.do.nsrc > 1 ? 3 : 2;
+      g.beginPath(); g.moveTo(c + Rin * Math.cos(rot(pk)), c + Rin * Math.sin(rot(pk))); g.lineTo(c + R * Math.cos(rot(pk)), c + R * Math.sin(rot(pk))); g.stroke();
+    }
+  }
+}
+
+function drawSpec() {
+  const cv = $('spec'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  g.clearRect(0, 0, W, H);
+  if (!D || !D.sp || !D.cfg) return;
+  const n = D.sp.db.length, rate = D.sp.rate, lo = D.sp.fc - rate / 2;
+  const tx = (D.cfg.target - lo) / rate * W, bw = lists.bws[D.cfg.bw] / rate * W;
+  g.fillStyle = 'rgba(255,176,32,.18)'; g.fillRect(tx - bw / 2, 0, Math.max(bw, 2), H);
+  g.strokeStyle = '#ffb020'; g.beginPath(); g.moveTo(tx, 0); g.lineTo(tx, H); g.stroke();
+  g.strokeStyle = '#7fb0e0'; g.lineWidth = 1.2; g.beginPath();
+  for (let i = 0; i < n; i++) { const x = i / (n - 1) * W, y = H - D.sp.db[i] / 255 * H; i ? g.lineTo(x, y) : g.moveTo(x, y); }
+  g.stroke();
+  g.fillStyle = '#8fa3b8'; g.font = '12px system-ui'; g.textAlign = 'left'; g.fillText(mhz(lo), 4, 14);
+  g.textAlign = 'right'; g.fillText(mhz(lo + rate), W - 4, 14);
+}
+
+function drawWf() {
+  const cv = $('wf'), g = cv.getContext('2d'), W = cv.width, H = cv.height, rh = H / WF_N;
+  g.clearRect(0, 0, W, H);
+  if (!D || !D.cfg) return;
+  const head = D.cfg.heading_from ? D.cfg.heading_now : 0;
+  wfRows.forEach((r, i) => {
+    for (let x = 0; x < W; x += 2) {
+      const d = ((Math.floor(x * 360 / W) - head) % 360 + 360) % 360, v = r.p[d] / 255;
+      g.fillStyle = `rgba(255,176,32,${v * (r.gate ? 0.95 : 0.3)})`; g.fillRect(x, i * rh, 2, Math.ceil(rh));
+    }
+  });
+  g.fillStyle = '#56657a'; for (let k = 1; k < 4; k++) g.fillRect(k * W / 4, 0, 1, H);
+}
+
+function show() {
+  const c = D.cfg;
+  $('state').textContent = !D.present ? 'NO KRAKEN ON USB' : !D.run ? 'NOT RUNNING' : D.st ? D.st.state : 'STARTING';
+  $('who').textContent = !D.run ? (D.present ? 'Start it here, or open page I on the radio.' : 'Plug the KrakenSDR into the HOST port.') :
+    (D.page ? 'Page I is open on the radio. ' : '') + (D.web && !D.page ? 'Running for this page. ' : '') +
+    (D.st ? `CPU ${D.st.cpu}%, slips ${D.st.slips}, calibrated ${D.st.cal_age < 0 ? 'not yet' : D.st.cal_age + ' s ago'}` : '') +
+    (D.st && D.st.why ? ' — ' + D.st.why : '');
+  $('run').hidden = !D.present || D.run; $('stop').hidden = !(D.web && !D.page);
+  for (const id of ['tunecard']) $(id).classList.toggle('gone', !D.run);
+  /* the bearing */
+  const live = D.do && D.connected;
+  if (live && D.do.bearing >= 0 && (D.do.gate || D.st && D.st.state === 'HOLD')) {
+    const b = c.heading_from ? (D.do.bearing + c.heading_now) % 360 : D.do.bearing;
+    $('brg').innerHTML = `${b.toFixed(1).padStart(5, '0')}&deg; <small>&plusmn;${D.do.uncert.toFixed(1)} ${c.heading_from ? 'N' : 'REL'}</small>`;
+  } else $('brg').innerHTML = '---';
+  $('brgkv').innerHTML = `<b>Target</b><span>${mhz(c.target)} MHz, ${lists.bws[c.bw] / 1000} kHz${c.auto ? ', AUTO' : ''}${c.follow ? ', FOLLOW ' + ['', 'A', 'B'][c.follow] : ''}</span>` +
+    (live ? `<b>Fit</b><span>${D.do.fit}% (${lists.methods[c.method]}${D.do.nsrc > 1 ? ', ' + D.do.nsrc + ' sources' : ''})</span><b>Level</b><span>${D.do.level.toFixed(1)} dB over the floor, SNR ${D.do.snr.toFixed(1)}</span>` : '') +
+    `<b>Heading</b><span>${c.heading_from ? c.heading_from + ' ' + c.heading_now + '&deg;' : 'none: bearings from ANT 0'}</span>` +
+    (live && D.do.peaks.length ? `<b>${D.do.nsrc > 1 ? 'Other sources' : 'Other peaks'}</b><span>${D.do.peaks.map(p => p.toFixed(0) + '&deg;').join(', ')}</span>` : '');
+  /* tuning and settings */
+  if (editing !== 'freq') $('freq').value = mhz(c.target);
+  fill('band', lists.bands.map(b => `${b[0]} ${mhz(b[1])}`).concat(c.band < 0 ? ['(tuned between)'] : []), c.band < 0 ? lists.bands.length : c.band);
+  fill('bw', lists.bws.map(b => b / 1000 + ' kHz'), c.bw);
+  fill('method', lists.methods, c.method);
+  fill('rate', lists.rates.map(r => (r / 1e6).toFixed(3) + ' MS/s'), c.rate);
+  fill('gain', lists.gains.map(g => g.toFixed(1) + ' dB'), c.gain);
+  fill('cal', lists.cals.map(s => s ? (s < 60 ? s + ' s' : s / 60 + ' min') : 'only when asked'), c.cal);
+  fill('kind', lists.kinds.map(k => k[0]), c.kind);
+  if (document.activeElement !== $('nsrc')) $('nsrc').value = c.nsrc;
+  if (document.activeElement !== $('fb')) $('fb').value = c.fb;
+  if (editing !== 'sql') $('sql').value = c.sql;
+  if (editing !== 'size') $('size').value = (c.size_mm / 10).toFixed(1);
+  if (editing !== 'heading') $('heading').value = c.heading;
+  segOn('follow', c.follow); segOn('auto', c.auto);
+  /* the calculator: KrakenRF's spacing over the wavelength */
+  const k = lists.kinds[c.kind], lam = 299.792458 / (c.target / 1e6), n = k[2];
+  const d = k[1] ? c.size_mm / 1000 : 2 * (c.size_mm / 1000) * Math.sin(Math.PI / n), s = d / lam;
+  const want = k[1] ? 0.5 * lam : 0.5 * lam / (2 * Math.sin(Math.PI / n));
+  $('calc').textContent = `Spacing ${s.toFixed(2)} wavelengths (0.5 is right; over 0.5 the bearing can be ambiguous). For 0.5 here: ${(want * 100).toFixed(1)} cm. Half a wavelength: ${(lam * 50).toFixed(1)} cm.`;
+  $('fitsize').dataset.mm = Math.round(want * 2000) * 0.5;
+  /* channels */
+  const rows = [];
+  for (let m = 0; m < n; m++) {
+    const ch = D.st && D.st.ch ? D.st.ch[m] : null, lvl = live && D.do.ch ? D.do.ch[m] : null, off = c.mask >> m & 1;
+    rows.push(`<tr><td>${m}</td><td>${ch ? ch.serial : '-'}</td><td class="c-${ch ? ch.cond.split(/[ ,(]/)[0] : 'GONE'}">${ch ? ch.cond : 'GONE'}</td>` +
+      `<td>${lvl == null ? '' : (lvl >= 0 ? '+' : '') + lvl.toFixed(1) + ' dB'}</td><td>${ch ? ch.phase.toFixed(1) + '&deg;' : ''}</td>` +
+      `<td>${ch ? ch.gain_db.toFixed(2) : ''}</td><td>${ch ? ch.resid.toFixed(2) : ''}</td>` +
+      `<td><input type="checkbox" data-m="${m}" ${off ? '' : 'checked'} aria-label="Antenna ${m} in the bearing"></td></tr>`);
+  }
+  $('chs').innerHTML = rows.join('');
+  /* gpsd */
+  const gp = D.gp;
+  $('gps').innerHTML = !gp || !gp.gpsd ? '<b>gpsd</b><span>not answering (a GPS or a compass on USB starts it)</span>' :
+    `<b>Fix</b><span>${gp.mode >= 3 ? '3D' : gp.mode === 2 ? '2D' : 'none'}</span>` +
+    (gp.mode >= 2 ? `<b>Position</b><span>${gp.lat.toFixed(5)}, ${gp.lon.toFixed(5)}</span>` : '') +
+    (gp.speed >= 0 ? `<b>Speed</b><span>${(gp.speed * 3.6).toFixed(1)} km/h</span>` : '') +
+    `<b>Heading</b><span>${gp.src === 2 ? 'compass ' + gp.heading.toFixed(1) + '&deg;' : gp.src === 1 ? 'course ' + gp.heading.toFixed(1) + '&deg;' : 'none (standing still, no compass)'}</span>`;
+}
+
+async function poll() {
+  if (inFlight || document.hidden) return;
+  inFlight = true;
+  try {
+    const r = await fetch('/api/df', {cache: 'no-store'});
+    D = await r.json();
+    if (!r.ok || !D.loaded) { $('state').textContent = r.ok ? 'READING PAGE I\'S SETTINGS…' : 'THE RADIO DID NOT ANSWER'; D = null; return; }
+    lists = D.lists;
+    if (D.do && D.do.seq !== lastSeq) {
+      lastSeq = D.do.seq;
+      wfRows.unshift({p: D.do.p, gate: D.do.gate}); if (wfRows.length > WF_N) wfRows.pop();
+      if (D.do.gate && D.do.bearing >= 0) { trail.push({brg: D.do.bearing, ms: Date.now()}); while (trail.length > 60) trail.shift(); }
+    }
+    /* already running (page I open): this page holds it too, so closing page I on the radio leaves it running */
+    if (D.run && !D.web && !joined) { joined = true; run(1); }
+    show(); drawCompass(); drawSpec(); drawWf();
+  } catch (e) { $('state').textContent = 'THE RADIO DID NOT ANSWER'; }
+  finally { inFlight = false; }
+}
+
+/* controls */
+$('run').onclick = () => { joined = true; run(1); };
+$('stop').onclick = () => { joined = true; run(0); };
+$('go').onclick = () => { const f = parseFloat($('freq').value); if (f >= 24 && f <= 1766) set('target', Math.round(f * 1e6)); else say('24 to 1766 MHz', true); editing = null; };
+$('freq').onfocus = () => editing = 'freq';
+$('freq').onkeydown = e => { if (e.key === 'Enter') $('go').click(); if (e.key === 'Escape') { editing = null; $('freq').blur(); } };
+function step(d) { const b = D.cfg.band >= 0 ? lists.bands[D.cfg.band][2] : lists.bws[D.cfg.bw]; set('target', D.cfg.target + d * b); }
+$('dn').onclick = () => step(-1); $('up').onclick = () => step(1);
+$('band').onchange = e => { if (+e.target.value < lists.bands.length) set('band', +e.target.value); };
+for (const [id, key] of [['bw', 'bw'], ['method', 'method'], ['rate', 'rate'], ['gain', 'gain'], ['cal', 'cal'], ['kind', 'kind'], ['nsrc', 'nsrc'], ['fb', 'fb']])
+  $(id).onchange = e => set(key, +e.target.value);
+for (const [id, key, scale] of [['sql', 'sql', 1], ['size', 'size_mm', 10], ['heading', 'heading', 1]]) {
+  $(id).onfocus = () => editing = id;
+  $(id).onchange = e => { editing = null; set(key, Math.round(parseFloat(e.target.value) * scale)); };
+}
+$('follow').onclick = e => { if (e.target.dataset.v != null) set('follow', +e.target.dataset.v); };
+$('auto').onclick = e => { if (e.target.dataset.v != null) set('auto', +e.target.dataset.v); };
+$('calnow').onclick = () => set('cal_now', 1);
+$('fitsize').onclick = () => set('size_mm', Math.round(+$('fitsize').dataset.mm));
+$('chs').onchange = e => { const m = +e.target.dataset.m; if (!isNaN(m)) set('mask', D.cfg.mask ^ (1 << m)); };
+$('spec').onclick = e => {
+  if (!D || !D.sp) return;
+  const r = e.target.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
+  set('target', Math.round(D.sp.fc - D.sp.rate / 2 + x * D.sp.rate));
+};
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+setInterval(poll, 250);
+poll();
+</script>

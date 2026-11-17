@@ -1497,6 +1497,32 @@ shows as a track).
 What it keeps: the band, the array and its size, the heading, the method, rate, gain, squelch and calibration
 interval, the antennas left out, in `/mnt/gui_state.conf` (`df.*`).
 
+
+#### Direction finder in the browser
+
+The web configurator's **Remote > Direction finder** (`/df`) is page I at the browser's size, with the same
+settings: a change on either shows on the other.
+
+- **The compass**: the array to scale, the method's spectrum round it, the needle with its +- wedge (green, amber or
+  red by the fit), the other peaks or the other sources, the last bearings as dots on the rim; north up when a
+  heading is known (set by hand, or from gpsd).
+- **The bearing**: degrees with +- (REL from ANT 0, or N), the fit and method, the level and SNR, the heading's source.
+- **Tune**: a frequency typed (24 to 1766 MHz) with Tune and a channel down or up, the band presets, FOLLOW (Off, A,
+  B), the width, AUTO. A click on the band's spectrum tunes there.
+- **The band**: CH0's spectrum across the Kraken's passband with the target's window, and the bearings over time
+  (0-359 degrees across, newest on top).
+- **Channels**: each antenna's stick, state, the target on it, the calibration's phase, gain and fit, and Use (an
+  antenna left out of the bearing).
+- **Settings**: method; **sources** (1, 2, 3, or Auto: as many as the eigenvalues show; with more than one the others'
+  bearings are drawn as needles too); **forward-backward** averaging (a ULA, for multipath); rate, gain, squelch,
+  how often to calibrate, Calibrate now; the array's layout, its radius or spacing, ANT 0's heading, and Size for
+  this band (KrakenRF's calculator, spacing 0.5 wavelength). Sources and forward-backward are set here only.
+- **GPS**: gpsd's fix, position, speed and the heading it gives.
+
+While the page is open the radio keeps direction finding running even when page I is not on its screen (B lent as
+for page I); **Start direction finding** starts it when nothing has, **Let the Kraken go** ends it, and about 20
+seconds after the last browser closes the page the radio lets the Kraken go by itself. Receive only.
+
 ### DMR
 
 DMR (ETSI TS 102 361) is the digital two-way radio of ham repeaters (Brandmeister, mostly on 70 cm), and of much of
@@ -6858,6 +6884,7 @@ The menu has General and five groups:
 | | General | index of the pages |
 | Remote | Panel | the radio's own controls in the browser, for a touch screen (see [Browser panel](#browser-panel)) |
 | | Screen | the radio's screen live, its keys and knobs, the audio both ways (see [Browser remote](#browser-remote)) |
+| | Direction finder | page I with a KrakenSDR in the browser: the compass, the band, every channel, tuning and every setting (see [Direction finder in the browser](#direction-finder-in-the-browser)) |
 | | Tailscale | Enabled, status, Log in to Tailscale, the radio on your tailnet, Log out, and Funnel (see [Tailscale](#tailscale) and [Tailscale Funnel](#tailscale-funnel)) |
 | Frequencies | Bands | band edges, default modes and TX shifts ([TX shift](#tx-shift)); the band plan the radio uses, whose region 160m, 80m, 40m SSB and 6m follow unless edited ([Band plan](#band-plan)). A band may overlap an inactive broadcast band (80m to 4 MHz over Broadcast 75m): the radio takes the band |
 | | Digital modes | add, edit and delete the FT8/FT4, JS8, WSPR and FT2 frequencies, and your own for PSK, Olivia and JTTY in the place of their built-in ones; a card shows what the band keys of those three step through, with the band plan ([Frequencies of PSK, Olivia and JTTY](#frequencies-of-psk-olivia-and-jtty)); WSPR band hopping: Hop and each band's Off, RX or RX+TX, set live (see [Band hopping](#band-hopping)) |

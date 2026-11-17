@@ -36,11 +36,14 @@
 #include "keyboard.h"
 #include "main_screen.h"
 #include "rtl_spectrum.h"
+#include "scheduler.h"
 #include "sdr_pool.h"
 #include "styles.h"
 #include "theme.h"
 
 #include <math.h>
+#include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -165,6 +168,8 @@ static struct {
     int     bw, band, kind, size_mm, heading, method, rate, gain, sql_ddb, cal, off_mask;
     bool    autot;              /* the target: the strongest signal in the passband */
     int     follow;             /* FOLLOW: 0 off, 1 A (the X6200's dial), 2 B (B's frequency) */
+    int     nsrc;               /* the sources to look for: 1-3, 0 AUTO (x6x00-df's k) */
+    bool    fb;                 /* forward-backward averaging (a ULA) */
 } cfg;
 
 static void cfg_load(void) {
@@ -192,6 +197,9 @@ static void cfg_load(void) {
     cfg.autot   = gui_state_get("df.auto", 0) != 0;
     cfg.follow  = gui_state_get("df.follow", 0);
     if (cfg.follow < 0 || cfg.follow > 2) cfg.follow = 0;
+    cfg.nsrc    = gui_state_get("df.nsrc", 1);
+    if (cfg.nsrc < 0 || cfg.nsrc > 3) cfg.nsrc = 1;
+    cfg.fb      = gui_state_get("df.fb", 0) != 0;
 }
 
 static void cfg_save(void) {
@@ -210,6 +218,8 @@ static void cfg_save(void) {
     gui_state_set("df.mask", cfg.off_mask);
     gui_state_set("df.auto", cfg.autot);
     gui_state_set("df.follow", cfg.follow);
+    gui_state_set("df.nsrc", cfg.nsrc);
+    gui_state_set("df.fb", cfg.fb);
 }
 
 static uint32_t target_hz(void) { return (uint32_t)(cfg.fc + cfg.off); }
@@ -239,6 +249,8 @@ static void send_method(void) { df_rx_cmd("m %d", cfg.method); }
 static void send_sql(void)    { df_rx_cmd("q %d", cfg.sql_ddb); }
 static void send_cal(void)    { df_rx_cmd("i %d", cal_every[cfg.cal]); }
 static void send_mask(void)   { df_rx_cmd("x %d", cfg.off_mask); }
+static void send_nsrc(void)   { df_rx_cmd("k %d", cfg.nsrc); }
+static void send_fb(void)     { df_rx_cmd("w %d", cfg.fb); }
 static void send_all(void) {
     send_rate();
     send_gain();
@@ -249,6 +261,8 @@ static void send_all(void) {
     send_sql();
     send_cal();
     send_mask();
+    send_nsrc();
+    send_fb();
 }
 
 /* The target kept inside the passband, clear of its edges (the filters' skirts) */
@@ -282,6 +296,30 @@ static int band_of_target(void) {
         if (d < bd) bd = d, best = i;
     }
     return bd <= 0.03 * bands[best].hz ? best : -1;
+}
+
+/* ---- Who has the Kraken for DF: page I and the web page (cfg_socket df_run); the daemon runs while either does ---- */
+
+enum { DF_USER_PAGE = 1, DF_USER_WEB = 2 };
+static int  df_users;
+static bool cfg_loaded;
+
+static void send_all(void);
+static void clamp_target(void);
+
+static void df_use(int who, bool on) {
+    int before = df_users;
+
+    df_users = on ? df_users | who : df_users & ~who;
+    if (!before && df_users) {
+        if (!cfg_loaded) cfg_load(), cfg_loaded = true;
+        df_rx_open();
+        clamp_target();
+        send_all();
+    } else if (before && !df_users) {
+        cfg_save();
+        df_rx_close();
+    }
 }
 
 /* ---- Tuning: a frequency anywhere the Kraken goes, and FOLLOW ---- */
@@ -453,6 +491,7 @@ static lv_timer_t *timer;
 static bool        help_on;
 static int         rot_acc;
 static uint32_t    msg_until;
+static bool        built;           /* page I's objects exist: what touches them waits for it */
 static struct {
     double   brg;               /* screen degrees as the daemon said them (before the heading) */
     uint32_t ms;
@@ -462,6 +501,7 @@ static uint32_t last_do;        /* the DFDO seq taken into the trail */
 static uint32_t auto_ms;
 
 static void msg(const char *t) {
+    if (!built) return;
     lv_label_set_text(msg_l, t);
     lv_obj_clear_flag(msg_l, LV_OBJ_FLAG_HIDDEN);
     msg_until = lv_tick_get() + 4000;
@@ -818,6 +858,7 @@ enum { T_FOLLOW, T_BAND, T_FREQ, T_WIDTH, T_AUTO, T_N };
 static int pan_rows(void) { return pan == P_ARRAY ? A_N : pan == P_SET ? S_N : pan == P_TUNE ? T_N : 0; }
 
 static void pan_fill(void) {
+    if (!built) return;
     char t[PANEL_ROWS][96];
     int  n = pan_rows();
 
@@ -1025,6 +1066,7 @@ static const char *f_label(int i) {
 }
 
 static void show_keys(void) {
+    if (!built) return;
     for (int i = 0; i < 5; i++) {
         char        t[48];
         const char *l = f_label(i);
@@ -1238,6 +1280,7 @@ static void auto_target(void) {
 }
 
 static void refresh(void) {
+    if (!built) return;
     df_rx_snapshot(&sn);
     if (sn.have_do && sn.dd.seq != last_do) {       /* a new good bearing to the rim's dots */
         last_do = sn.dd.seq;
@@ -1475,6 +1518,7 @@ static void construct_cb(lv_obj_t *parent) {
     }
 
     cfg_load();
+    cfg_loaded = true;
     root       = lv_obj_create(parent);
     dialog.obj = root;
     lv_obj_remove_style_all(root);
@@ -1498,7 +1542,8 @@ static void construct_cb(lv_obj_t *parent) {
     n_trail = 0;
     last_do = 0;
     memset(&sn, 0, sizeof(sn));
-    df_rx_open();
+    built = true;
+    df_use(DF_USER_PAGE, true);         /* the daemon started, or kept as the web page has it */
     clamp_target();
     send_all();
     show_keys();
@@ -1509,8 +1554,10 @@ static void construct_cb(lv_obj_t *parent) {
 static void destruct_cb(void) {
     if (timer) lv_timer_del(timer);
     timer = NULL;
+    built = false;
     cfg_save();
-    df_rx_close();                      /* the daemon ended, the Kraken everyone's again, B back */
+    df_use(DF_USER_PAGE, false);        /* the daemon ended (the Kraken everyone's again, B back), unless the web page
+                                         * still has it */
     rtl_spectrum_mute(false);           /* the Sentry's OFF let go: what opens next sets the speaker (as AIRSPACE) */
     lv_group_remove_obj(root);
     lv_img_dsc_t **d[] = {&scope, &bars, &spec, &wf};
@@ -1526,3 +1573,244 @@ static void destruct_cb(void) {
     rad  = NULL;
     root = NULL;
 }
+
+/* ---- The web page: the web configurator's Direction finder page, through cfg_socket.cpp (df_get, df_set, df_run) ----
+ * The web page holds the Kraken as page I does (df_use): started by df_run, kept while df_get keeps coming (the page
+ * asks a few times a second), let go WEB_IDLE_MS after the last one. Its settings are page I's own (gui_state df.*),
+ * so the screen and the browser always agree. df_set and df_run run on the LVGL thread (the scheduler); df_get on the
+ * socket's thread, from the snapshot (its own lock) and the settings (whole ints, written on the LVGL thread) */
+
+#define WEB_IDLE_MS 20000
+
+static lv_timer_t  *bg_timer;
+static atomic_uint  web_last_ms;
+
+static void web_load_cb(void *arg) {
+    (void)arg;
+    if (!cfg_loaded) cfg_load(), cfg_loaded = true;
+}
+
+static uint32_t mono_ms(void) {
+    struct timespec t;
+
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
+}
+
+static void bg_timer_cb(lv_timer_t *t) {
+    (void)t;
+    if (!built) {                           /* page I's own timer does these while it is open */
+        df_rx_snapshot(&sn);
+        auto_target();
+        follow_tick();
+    }
+    if (mono_ms() - atomic_load(&web_last_ms) > WEB_IDLE_MS) {
+        lv_timer_del(bg_timer);
+        bg_timer = NULL;
+        df_use(DF_USER_WEB, false);
+    }
+}
+
+void app_df_web_run(bool on) {
+    atomic_store(&web_last_ms, mono_ms());
+    if (on) {
+        df_use(DF_USER_WEB, true);
+        if (!bg_timer) bg_timer = lv_timer_create(bg_timer_cb, 200, NULL);
+    } else {
+        if (bg_timer) lv_timer_del(bg_timer);
+        bg_timer = NULL;
+        df_use(DF_USER_WEB, false);
+    }
+}
+
+static int idx_ok(double v, int n) {
+    int i = (int)lround(v);
+    return i >= 0 && i < n ? i : -1;
+}
+
+int app_df_web_set(const char *k, double v) {
+    int i = (int)lround(v);
+
+    if (!cfg_loaded) cfg_load(), cfg_loaded = true;
+    atomic_store(&web_last_ms, mono_ms());
+    if (!strcmp(k, "target")) {
+        follow_off();
+        cfg.autot = false;
+        if (!tune_to((int64_t)llround(v))) return -1;
+    } else if (!strcmp(k, "band")) {
+        if (idx_ok(v, N_BANDS) < 0) return -1;
+        follow_off();
+        band_set(i);
+    } else if (!strcmp(k, "follow")) {
+        if (i < 0 || i > 2) return -1;
+        cfg.follow = i;
+    } else if (!strcmp(k, "bw")) {
+        if (idx_ok(v, N_BWS) < 0) return -1;
+        cfg.bw = i;
+        clamp_target();
+        send_target();
+    } else if (!strcmp(k, "auto")) {
+        cfg.autot = i != 0;
+    } else if (!strcmp(k, "method")) {
+        if (idx_ok(v, N_METHODS) < 0) return -1;
+        cfg.method = i;
+        send_method();
+    } else if (!strcmp(k, "rate")) {
+        if (idx_ok(v, N_RATES) < 0) return -1;
+        cfg.rate = i;
+        clamp_target();
+        send_rate();
+        send_target();
+    } else if (!strcmp(k, "gain")) {
+        if (idx_ok(v, N_GAINS) < 0) return -1;
+        cfg.gain = i;
+        send_gain();
+    } else if (!strcmp(k, "sql")) {                     /* dB over the floor */
+        if (v < 3 || v > 40) return -1;
+        cfg.sql_ddb = (int)lround(v * 10);
+        send_sql();
+    } else if (!strcmp(k, "cal")) {
+        if (idx_ok(v, N_CALS) < 0) return -1;
+        cfg.cal = i;
+        send_cal();
+    } else if (!strcmp(k, "kind")) {
+        if (idx_ok(v, N_KINDS) < 0) return -1;
+        cfg.kind = i;
+        send_array();
+    } else if (!strcmp(k, "size_mm")) {
+        if (i < 10 || i > 5000) return -1;
+        cfg.size_mm = i;
+        send_array();
+    } else if (!strcmp(k, "heading")) {
+        cfg.heading = ((i % 360) + 360) % 360;
+    } else if (!strcmp(k, "mask")) {
+        if (i < 0 || i > 0xff) return -1;
+        cfg.off_mask = i;
+        send_mask();
+    } else if (!strcmp(k, "nsrc")) {
+        if (i < 0 || i > 3) return -1;
+        cfg.nsrc = i;
+        send_nsrc();
+    } else if (!strcmp(k, "fb")) {
+        cfg.fb = i != 0;
+        send_fb();
+    } else if (!strcmp(k, "cal_now")) {
+        df_rx_cmd("c");
+    } else {
+        return -1;
+    }
+    cfg_save();
+    show_keys();
+    pan_fill();
+    refresh();
+    return 0;
+}
+
+/* JSON, appended with the room left */
+typedef struct {
+    char  *p;
+    size_t n, l;
+} jbuf_t;
+
+static void jb(jbuf_t *b, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+static void jb(jbuf_t *b, const char *fmt, ...) {
+    va_list ap;
+
+    if (b->l + 1 >= b->n) return;
+    va_start(ap, fmt);
+    int r = vsnprintf(b->p + b->l, b->n - b->l, fmt, ap);
+    va_end(ap);
+    if (r > 0) b->l = b->l + (size_t)r < b->n ? b->l + (size_t)r : b->n - 1;
+}
+
+static void jstr(jbuf_t *b, const char *s, size_t max) {
+    jb(b, "\"");
+    for (size_t i = 0; i < max && s[i]; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '"' || c == '\\') jb(b, "\\%c", c);
+        else if (c >= 32 && c < 127) jb(b, "%c", c);
+    }
+    jb(b, "\"");
+}
+
+int app_df_web_json(char *out, size_t n) {
+    jbuf_t    b = {out, n, 0};
+    df_snap_t s;
+    int       bnd = band_of_target();
+
+    if (!cfg_loaded) {                  /* page I's settings read on the LVGL thread; the next df_get has them */
+        scheduler_put_noargs(web_load_cb);
+        jb(&b, "{\"t\":\"df\",\"loaded\":0}\n");
+        return (int)b.l;
+    }
+    atomic_store(&web_last_ms, mono_ms());
+    df_rx_snapshot(&s);
+    jb(&b, "{\"t\":\"df\",\"loaded\":1,\"present\":%d,\"run\":%d,\"page\":%d,\"web\":%d,\"connected\":%d,\"lent\":%d,",
+       df_rx_present(), df_users != 0, (df_users & DF_USER_PAGE) != 0, (df_users & DF_USER_WEB) != 0, s.connected,
+       df_rx_b_lent());
+    jb(&b, "\"cfg\":{\"fc\":%d,\"off\":%d,\"target\":%u,\"bw\":%d,\"band\":%d,\"follow\":%d,\"auto\":%d,\"kind\":%d,"
+           "\"size_mm\":%d,\"heading\":%d,\"method\":%d,\"rate\":%d,\"gain\":%d,\"sql\":%.1f,\"cal\":%d,\"mask\":%d,"
+           "\"nsrc\":%d,\"fb\":%d,\"heading_now\":%d,\"heading_from\":",
+       cfg.fc, cfg.off, target_hz(), cfg.bw, bnd, cfg.follow, cfg.autot, cfg.kind, cfg.size_mm, cfg.heading, cfg.method,
+       cfg.rate, cfg.gain, cfg.sql_ddb / 10.0, cfg.cal, cfg.off_mask, cfg.nsrc, cfg.fb, heading_now());
+    jstr(&b, heading_from(), 16);
+    jb(&b, "},\"lists\":{\"bands\":[");
+    for (int i = 0; i < N_BANDS; i++) jb(&b, "%s[\"%s\",%u,%u]", i ? "," : "", bands[i].name, bands[i].hz, bands[i].step);
+    jb(&b, "],\"kinds\":[");
+    for (int i = 0; i < N_KINDS; i++) jb(&b, "%s[\"%s\",%d,%d]", i ? "," : "", kinds[i].name, kinds[i].ula, kinds[i].n);
+    jb(&b, "],\"methods\":[");
+    for (int i = 0; i < N_METHODS; i++) jb(&b, "%s\"%s\"", i ? "," : "", methods[i]);
+    jb(&b, "],\"rates\":[");
+    for (int i = 0; i < N_RATES; i++) jb(&b, "%s%u", i ? "," : "", rates[i]);
+    jb(&b, "],\"bws\":[");
+    for (int i = 0; i < N_BWS; i++) jb(&b, "%s%u", i ? "," : "", bws[i]);
+    jb(&b, "],\"gains\":[");
+    for (int i = 0; i < N_GAINS; i++) jb(&b, "%s%.1f", i ? "," : "", gains[i] / 10.0);
+    jb(&b, "],\"cals\":[");
+    for (int i = 0; i < N_CALS; i++) jb(&b, "%s%d", i ? "," : "", cal_every[i]);
+    jb(&b, "]}");
+    if (s.have_st) {
+        jb(&b, ",\"st\":{\"state\":\"%s\",\"nch\":%d,\"synth\":%d,\"cal_age\":%d,\"cals\":%u,\"cal_fails\":%u,"
+               "\"slips\":%u,\"overruns\":%u,\"cpu\":%d,\"fc\":%u,\"rate\":%u,\"why\":",
+           state_name(s.st.state), s.st.nch, s.st.synth, s.st.cal_age_s == 0xffff ? -1 : s.st.cal_age_s, s.st.cals,
+           s.st.cal_fails, s.st.slips, s.st.overruns, s.st.cpu_pct, s.st.fc_hz, s.st.rate);
+        jstr(&b, s.st.why, sizeof(s.st.why));
+        jb(&b, ",\"ch\":[");
+        for (int m = 0; m < s.st.nch && m < DF_PROTO_MAXCH; m++) {
+            jb(&b, "%s{\"serial\":", m ? "," : "");
+            jstr(&b, s.st.ch[m].serial, sizeof(s.st.ch[m].serial));
+            jb(&b, ",\"cond\":\"%s\",\"used\":%d,\"phase\":%.1f,\"gain_db\":%.2f,\"margin\":%.1f,\"resid\":%.2f,"
+                   "\"noise\":%.1f}",
+               cond_name(s.st.ch[m].cond), s.st.ch[m].used, s.st.ch[m].cal_phase_ddeg / 10.0,
+               s.st.ch[m].cal_gain_mdb / 100.0, s.st.ch[m].cal_margin_ddb / 10.0, s.st.ch[m].cal_resid_cdeg / 100.0,
+               s.st.ch[m].noise_ddbfs / 10.0);
+        }
+        jb(&b, "]}");
+    }
+    if (s.have_do) {
+        jb(&b, ",\"do\":{\"seq\":%u,\"gate\":%d,\"bearing\":%.1f,\"mirror\":%.1f,\"uncert\":%.1f,\"fit\":%d,"
+               "\"level\":%.1f,\"snr\":%.1f,\"age\":%.1f,\"used\":%d,\"bad_ch\":%d,\"nsrc\":%d,\"peaks\":[",
+           s.dd.seq, s.dd.gate, s.dd.bearing_ddeg / 10.0, s.dd.mirror_ddeg / 10.0, s.dd.uncert_ddeg / 10.0, s.dd.fit_pct,
+           s.dd.level_ddb / 10.0, s.dd.snr_ddb / 10.0, s.dd.age_ds == 0xffff ? -1 : s.dd.age_ds / 10.0, s.dd.used_mask,
+           s.dd.bad_ch, s.dd.nsrc ? s.dd.nsrc : 1);
+        for (int i = 0; i < s.dd.npeaks && i < 3; i++) jb(&b, "%s%.1f", i ? "," : "", s.dd.peaks_ddeg[i] / 10.0);
+        jb(&b, "],\"ch\":[");
+        for (int m = 0; m < DF_PROTO_MAXCH && (!s.have_st || m < s.st.nch); m++)
+            jb(&b, "%s%.1f", m ? "," : "", s.dd.ch_ddb[m] / 10.0);
+        jb(&b, "],\"p\":[");
+        for (int g = 0; g < 360; g++) jb(&b, "%s%u", g ? "," : "", s.dd.p[g]);
+        jb(&b, "]}");
+    }
+    if (s.have_sp && s.sp.n) {
+        jb(&b, ",\"sp\":{\"fc\":%u,\"rate\":%u,\"floor\":%.1f,\"db\":[", s.sp.fc_hz, s.sp.rate, s.sp.floor_ddbfs / 10.0);
+        for (int i = 0; i < s.sp.n && i < DF_PROTO_SPEC; i++) jb(&b, "%s%u", i ? "," : "", s.sp.db[i]);
+        jb(&b, "]}");
+    }
+    if (s.have_gp)
+        jb(&b, ",\"gp\":{\"gpsd\":%d,\"mode\":%d,\"src\":%d,\"heading\":%.1f,\"speed\":%.2f,\"lat\":%.7f,\"lon\":%.7f}",
+           s.gp.gpsd, s.gp.mode, s.gp.head_src, s.gp.head_ddeg / 10.0, s.gp.speed_cms == 0xffff ? -1 : s.gp.speed_cms / 100.0,
+           s.gp.lat_e7 / 1e7, s.gp.lon_e7 / 1e7);
+    jb(&b, "}\n");
+    return b.l + 1 < n ? (int)b.l : -1;
+}
+

@@ -2496,6 +2496,62 @@ def display():
     return bottle.template('display')
 
 
+# The direction finder (page I on the radio, x6x00-df with a KrakenSDR): its page reads the state a few times a second
+# and changes page I's own settings (df_get / df_set / df_run, src/cfg_socket.cpp, app_df.c). While the page reads,
+# the radio keeps DF running even with page I closed (df_run on); 20 s after the last read it lets the Kraken go
+DF_KEYS = {"target", "band", "follow", "bw", "auto", "method", "rate", "gain", "sql", "cal", "kind", "size_mm",
+           "heading", "mask", "nsrc", "fb", "cal_now"}
+
+
+@app.route('/df')
+def df_page():
+    return bottle.template('df')
+
+
+@app.get('/api/df')
+def df_get():
+    reply = display_call({"cmd": "df_get"})
+    if not reply or reply.get("t") != "df":
+        return api_error(503, "Radio GUI not reachable")
+    reply.pop("t", None)
+    bottle.response.set_header("Cache-Control", "no-store")
+    return reply
+
+
+@app.post('/api/df/set')
+def df_set():
+    try:
+        data = bottle.request.json
+    except ValueError:
+        data = None
+    if not isinstance(data, dict) or data.get("key") not in DF_KEYS:
+        return api_error(400, "Not a setting")
+    val = data.get("val", 0)
+    if isinstance(val, bool) or not isinstance(val, (int, float)):
+        return api_error(400, "Invalid value")
+    reply = display_call({"cmd": "df_set", "key": data["key"], "val": val})
+    if reply is None:
+        return api_error(503, "Radio GUI not reachable")
+    if reply.get("t") != "ok":
+        return api_error(409, reply.get("err", "Rejected by the radio"))
+    return {"status": "OK"}
+
+
+@app.post('/api/df/run')
+def df_run():
+    try:
+        data = bottle.request.json
+    except ValueError:
+        data = None
+    on = 1 if isinstance(data, dict) and data.get("on") else 0
+    reply = display_call({"cmd": "df_run", "on": on})
+    if reply is None:
+        return api_error(503, "Radio GUI not reachable")
+    if reply.get("t") != "ok":
+        return api_error(409, reply.get("err", "Rejected by the radio"))
+    return {"status": "OK"}
+
+
 @app.get('/api/display')
 def display_get():
     reply = display_call({"cmd": "disp_get"})

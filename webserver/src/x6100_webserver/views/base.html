@@ -72,6 +72,7 @@
       <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></symbol>
       <symbol id="i-antenna" viewBox="0 0 24 24"><path d="M12 10v11M8 21l4-11 4 11"/><circle cx="12" cy="8" r="2"/><path d="M7.8 4.2a6 6 0 0 0 0 7.6M16.2 4.2a6 6 0 0 1 0 7.6"/></symbol>
       <symbol id="i-knob" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v5"/></symbol>
+      <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></symbol>
       <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
       <symbol id="i-mountain" viewBox="0 0 24 24"><path d="M2 20l7-12 4 7 2-3 7 8z"/></symbol>
       <symbol id="i-cw" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 10.5h1M12 10.5h4"/></symbol>
@@ -114,7 +115,7 @@
         <nav>
           % sc = smartcw_link()   # SmartCW's page, on a port of its own: in a new tab
           % menu = [('General', 'home', [('/', 'General', 'home')]),
-          %         ('Remote', 'sliders', [('/panel', 'Panel', 'sliders'), ('/remote', 'Screen', 'monitor'), ('/tailscale', 'Tailscale', 'lock')]),
+          %         ('Remote', 'sliders', [('/panel', 'Panel', 'sliders'), ('/remote', 'Screen', 'monitor'), ('/df', 'Direction finder', 'compass'), ('/tailscale', 'Tailscale', 'lock')]),
           %         ('Frequencies', 'wave', [('/bands', 'Bands', 'bands'), ('/digital_modes', 'Digital modes', 'pulse'), ('/memories', 'Memories', 'bookmark')]),
           %         ('Operating', 'antenna', [('/cluster', 'Cluster', 'globe'), ('/field', 'Field Ops', 'mountain'), ('/wavelog', 'Wavelog', 'upload'), ('/winlink', 'Winlink', 'file'), ('/cw_messages', 'CW messages', 'cw'), ('/macros', 'Macros', 'list'), ('/logs', 'Logs', 'book')] + ([(sc, 'SmartCW', 'paddle')] if sc else [])),
           %         ('Files', 'folder', [('/files/', 'Files', 'sd'), ('/gallery', 'Gallery', 'image'), ('/backup', 'Backup', 'archive')]),
