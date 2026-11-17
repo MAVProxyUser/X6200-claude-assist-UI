@@ -142,6 +142,15 @@ function segOn(id, v) { for (const b of $(id).children) b.classList.toggle('on',
 
 function mhz(hz) { return (hz / 1e6).toFixed(4); }
 
+/* The bearing to show: a live one (the squelch open), or the last good one HELD for 30 s, fading (its own age, from
+ * every estimate: the state comes only twice a second, and going by it made the needle blink) */
+function shown() {
+  if (!D || !D.do || !D.connected || D.do.bearing < 0) return null;
+  if (D.do.gate) return {b: D.do.bearing, hold: 0, a: 1};
+  if (D.do.age >= 0 && D.do.age < 30) return {b: D.do.bearing, hold: D.do.age, a: Math.max(0.3, 1 - D.do.age / 40)};
+  return null;
+}
+
 /* The array as it is set out, in metres: x forward (up), y left; ANT 0 forward, the rest clockwise (KrakenRF's) */
 function layout(c) {
   const k = lists.kinds[c.kind], n = k[2], s = c.size_mm / 1000, pts = [];
@@ -166,7 +175,7 @@ function drawCompass() {
       const v = D.do.p[d] / 255, r = Rin + (R - Rin) * v;
       g.beginPath(); g.moveTo(c + Rin * Math.cos(rot(d - 0.6)), c + Rin * Math.sin(rot(d - 0.6)));
       g.arc(c, c, r, rot(d - 0.6), rot(d + 0.6)); g.arc(c, c, Rin, rot(d + 0.6), rot(d - 0.6), true);
-      g.fillStyle = `rgba(255,176,32,${(gate ? 0.15 : 0.06) + v * (gate ? 0.75 : 0.3)})`; g.fill();
+      g.fillStyle = `rgba(255,176,32,${(gate ? 0.15 : 0.08) + v * (gate ? 0.75 : 0.45)})`; g.fill();
     }
   }
   /* rings and ticks */
@@ -199,12 +208,14 @@ function drawCompass() {
     g.fillStyle = used >> m & 1 ? '#111' : col; g.font = '700 14px system-ui'; g.fillText(m, x, y + 1);
   });
   /* the needle */
-  if (live && D.do.bearing >= 0 && (gate || D.st && D.st.state === 'HOLD')) {
-    const fit = D.do.fit, col = fit >= 80 ? '#5fd38a' : fit >= 50 ? acc : '#ff6b6b', b = D.do.bearing;
+  const sh = shown();
+  if (sh) {
+    const fit = D.do.fit, col = fit >= 80 ? '#5fd38a' : fit >= 50 ? acc : '#ff6b6b', b = sh.b;
     const w = Math.max(D.do.uncert, 1);
+    g.globalAlpha = sh.a;
     g.fillStyle = col.startsWith('#') ? col + '40' : col; g.beginPath(); g.moveTo(c, c);
     g.arc(c, c, R, rot(b - w), rot(b + w)); g.closePath(); g.fill();
-    g.strokeStyle = col; g.lineWidth = 4; g.globalAlpha = gate ? 1 : 0.5;
+    g.strokeStyle = col; g.lineWidth = 4;
     g.beginPath(); g.moveTo(c, c); g.lineTo(c + R * Math.cos(rot(b)), c + R * Math.sin(rot(b))); g.stroke();
     if (D.do.mirror >= 0) { g.setLineDash([8, 6]); g.lineWidth = 2; g.beginPath(); g.moveTo(c, c); g.lineTo(c + R * Math.cos(rot(D.do.mirror)), c + R * Math.sin(rot(D.do.mirror))); g.stroke(); g.setLineDash([]); }
     g.globalAlpha = 1;
@@ -249,16 +260,20 @@ function show() {
   $('state').textContent = !D.present ? 'NO KRAKEN ON USB' : !D.run ? 'NOT RUNNING' : D.st ? D.st.state : 'STARTING';
   $('who').textContent = !D.run ? (D.present ? 'Start it here, or open page I on the radio.' : 'Plug the KrakenSDR into the HOST port.') :
     (D.page ? 'Page I is open on the radio. ' : '') + (D.web && !D.page ? 'Running for this page. ' : '') +
+    (D.iq && D.iq.client ? 'A program reads the IQ server (port 5000). ' : '') + (D.iq && D.iq.tuned ? 'Tuned by that program. ' : '') +
     (D.st ? `CPU ${D.st.cpu}%, slips ${D.st.slips}, calibrated ${D.st.cal_age < 0 ? 'not yet' : D.st.cal_age + ' s ago'}` : '') +
     (D.st && D.st.why ? ' — ' + D.st.why : '');
   $('run').hidden = !D.present || D.run; $('stop').hidden = !(D.web && !D.page);
   for (const id of ['tunecard']) $(id).classList.toggle('gone', !D.run);
   /* the bearing */
   const live = D.do && D.connected;
-  if (live && D.do.bearing >= 0 && (D.do.gate || D.st && D.st.state === 'HOLD')) {
-    const b = c.heading_from ? (D.do.bearing + c.heading_now) % 360 : D.do.bearing;
-    $('brg').innerHTML = `${b.toFixed(1).padStart(5, '0')}&deg; <small>&plusmn;${D.do.uncert.toFixed(1)} ${c.heading_from ? 'N' : 'REL'}</small>`;
-  } else $('brg').innerHTML = '---';
+  const sh = shown();
+  if (sh) {
+    const b = c.heading_from ? (sh.b + c.heading_now) % 360 : sh.b;
+    $('brg').innerHTML = `${b.toFixed(1).padStart(5, '0')}&deg; <small>&plusmn;${D.do.uncert.toFixed(1)} ${c.heading_from ? 'N' : 'REL'}` +
+      `${sh.hold ? ' &middot; HOLD ' + Math.round(sh.hold) + ' s' : ''}</small>`;
+    $('brg').style.opacity = sh.a;
+  } else { $('brg').innerHTML = '---'; $('brg').style.opacity = 1; }
   $('brgkv').innerHTML = `<b>Target</b><span>${mhz(c.target)} MHz, ${lists.bws[c.bw] / 1000} kHz${c.auto ? ', AUTO' : ''}${c.follow ? ', FOLLOW ' + ['', 'A', 'B'][c.follow] : ''}</span>` +
     (live ? `<b>Fit</b><span>${D.do.fit}% (${lists.methods[c.method]}${D.do.nsrc > 1 ? ', ' + D.do.nsrc + ' sources' : ''})</span><b>Level</b><span>${D.do.level.toFixed(1)} dB over the floor, SNR ${D.do.snr.toFixed(1)}</span>` : '') +
     `<b>Heading</b><span>${c.heading_from ? c.heading_from + ' ' + c.heading_now + '&deg;' : 'none: bearings from ANT 0'}</span>` +

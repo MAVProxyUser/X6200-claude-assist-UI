@@ -91,6 +91,12 @@ approved that day.
 
 **Done 2026-11-16 and 2026-11-17** (for the record; details in git)
 
+- x6x00-df's IQ server in Heimdall's format (ports 5000 and 5001; x6x00-df e1b5d2f): 25 kHz round the target at
+  64 kS/s, calibrated, typed frames; FREQ and GAIN from a program, page I and the web page taking its tuning. Tried
+  from a computer with a client written as KrakenRF's receiver (2.45 frames a second over WiFi, FREQ retuned); not
+  yet with KrakenRF's own software.
+- The web page's bearing no longer blinks: it held by the state (twice a second) while bearings come ten times a
+  second; now by each bearing's own age, fading over 30 s with HOLD n s.
 - A Direction finder page in the web configurator (Remote > Direction finder, /df): page I's compass, bearing,
   band, channels, tuning (a frequency typed, a click on the spectrum, FOLLOW) and every setting, the sources and
   forward-backward included, and gpsd; it runs DF on its own while open (page I closed) and lets the Kraken go 20 s

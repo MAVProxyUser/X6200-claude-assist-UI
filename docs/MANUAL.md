@@ -1498,6 +1498,24 @@ What it keeps: the band, the array and its size, the heading, the method, rate, 
 interval, the antennas left out, in `/mnt/gui_state.conf` (`df.*`).
 
 
+#### The IQ server: KrakenRF's software on a computer
+
+While direction finding runs (page I or the browser page), the radio also serves the Kraken's samples the way
+KrakenRF's Heimdall does, so KrakenRF's own DoA software (or another program that speaks Heimdall's protocol) on a
+computer can take them from the radio over the network:
+
+- **Port 5000**, the samples: the program sends `streaming`, then reads frames (a 1024-byte header, then each channel's
+  samples as complex float 32) and asks for each next one with `IQDownload`. **Port 5001**, the control: `INIT`,
+  `FREQ` (it tunes the Kraken: page I and the browser page follow it, FOLLOW off), `GAIN`, `AGC ` (taken, the gain
+  stays manual), `EXIT`.
+- What it sends: not the whole 1.024 MHz (five channels of it are 41 MB/s, far over the radio's WiFi) but **25 kHz
+  around the DF target, at 64 kS/s**, each channel lined up and corrected by the radio's own calibration. The header
+  says so (`sampling_freq` 64000, the band's centre in `rf_center_freq`) and marks frames: DATA once calibrated,
+  CAL while the noise source was on, DUMMY before a calibration.
+- Over the radio's WiFi a program got about 2.5 frames a second (0.8 MB/s) of the 7.8 the radio makes; a slow program
+  gets the newest frame each time. One program at a time; page I shows `IQ CLIENT`, the browser page says so.
+- Receive only. The ports are open only while direction finding runs.
+
 #### Direction finder in the browser
 
 The web configurator's **Remote > Direction finder** (`/df`) is page I at the browser's size, with the same

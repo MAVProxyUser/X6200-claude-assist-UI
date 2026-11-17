@@ -842,6 +842,7 @@ static void show_head(void) {
              sn.have_st ? (sn.st.synth ? "DAEMON: TEST" : "DAEMON: KRAKEN") : "DAEMON: -",
              lent == 2 ? "B LENT TO I" : lent == 1 ? "B ON ANOTHER SDR" : "B AS IT WAS", t);
     if (sn.have_st && sn.st.cpu_pct) snprintf(line + strlen(line), sizeof(line) - strlen(line), "   CPU %d%%", sn.st.cpu_pct);
+    if (sn.have_st && (sn.st.iq_clients & 1)) snprintf(line + strlen(line), sizeof(line) - strlen(line), "   IQ CLIENT");
     lv_label_set_text(status_l, line);
 }
 
@@ -1279,9 +1280,24 @@ static void auto_target(void) {
     send_target();
 }
 
+/* A program on the IQ server tuned the Kraken (its control's FREQ, x6x00-df's DFST iq_clients bit 1): page I's
+ * settings take where it is, so the screen, the web page and that program agree; FOLLOW stops */
+static void iq_adopt(void) {
+    if (!sn.connected || !sn.have_st || !(sn.st.iq_clients & 2)) return;
+    if (cfg.fc == (int32_t)sn.st.fc_hz && cfg.off == sn.st.f_off_hz) return;
+    cfg.fc     = (int32_t)sn.st.fc_hz;
+    cfg.off    = sn.st.f_off_hz;
+    cfg.band   = band_of_target();
+    cfg.follow = 0;
+    cfg.autot  = false;
+    cfg_save();
+    show_keys();
+}
+
 static void refresh(void) {
     if (!built) return;
     df_rx_snapshot(&sn);
+    iq_adopt();
     if (sn.have_do && sn.dd.seq != last_do) {       /* a new good bearing to the rim's dots */
         last_do = sn.dd.seq;
         if (sn.dd.gate && sn.dd.bearing_ddeg >= 0) {
@@ -1601,6 +1617,7 @@ static void bg_timer_cb(lv_timer_t *t) {
     (void)t;
     if (!built) {                           /* page I's own timer does these while it is open */
         df_rx_snapshot(&sn);
+        iq_adopt();
         auto_target();
         follow_tick();
     }
@@ -1745,9 +1762,10 @@ int app_df_web_json(char *out, size_t n) {
     }
     atomic_store(&web_last_ms, mono_ms());
     df_rx_snapshot(&s);
-    jb(&b, "{\"t\":\"df\",\"loaded\":1,\"present\":%d,\"run\":%d,\"page\":%d,\"web\":%d,\"connected\":%d,\"lent\":%d,",
+    jb(&b, "{\"t\":\"df\",\"loaded\":1,\"present\":%d,\"run\":%d,\"page\":%d,\"web\":%d,\"connected\":%d,\"lent\":%d,"
+           "\"iq\":{\"client\":%d,\"tuned\":%d},",
        df_rx_present(), df_users != 0, (df_users & DF_USER_PAGE) != 0, (df_users & DF_USER_WEB) != 0, s.connected,
-       df_rx_b_lent());
+       df_rx_b_lent(), s.have_st && (s.st.iq_clients & 1), s.have_st && (s.st.iq_clients & 2) ? 1 : 0);
     jb(&b, "\"cfg\":{\"fc\":%d,\"off\":%d,\"target\":%u,\"bw\":%d,\"band\":%d,\"follow\":%d,\"auto\":%d,\"kind\":%d,"
            "\"size_mm\":%d,\"heading\":%d,\"method\":%d,\"rate\":%d,\"gain\":%d,\"sql\":%.1f,\"cal\":%d,\"mask\":%d,"
            "\"nsrc\":%d,\"fb\":%d,\"heading_now\":%d,\"heading_from\":",
