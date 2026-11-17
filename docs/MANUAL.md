@@ -6256,7 +6256,10 @@ frequency and mode come back when it closes.
   X6200 by default). Tested on this radio's own 62 s recording of WWV on
   10 MHz (`radio_captures/modes/wwv_10000.wav`, played back into the app),
   and on made-up signals down to ticks 15 dB and the code 6 dB over the noise
-  (`tools/wwv`). CHU is gone: Canada's NRC closed it for good on 22 June
+  (`tools/wwv`), and on the radio itself over a cable: a made-up WWV with
+  the real time, sent in AM on 10 MHz from a HackRF through 70 dB of
+  attenuators, read two minutes in a row with the clock left to NTP
+  (`radio_captures/hackrf_tests/timesig_wwv_cable_decoded.png`). CHU is gone: Canada's NRC closed it for good on 22 June
   2026 (its time is now by telephone, the web and NTP only). The European
   stations are not read: DCF77 (77.5 kHz) and MSF (60 kHz) lie below the
   radio's 100 kHz, and the others are rarely heard outside Europe.
