@@ -1485,7 +1485,9 @@ shows as a track).
   on it, ANT 0 forward), kept two minutes after it slows. The ARRAY panel's HEADING row says which is in use
   (`IN USE: GPS COURSE 135 (GPSD)`), the array line says N UP GPS or N UP CMP, the compass turns north up, and
   bearings are compass bearings.
-- **F3 METHOD**: MUSIC (default), Bartlett, Capon, MEM, TNA (the thermal noise algorithm: Capon's peaks made sharper).
+- **F3 METHOD**: MUSIC (default), Bartlett, Capon, MEM, TNA (the thermal noise algorithm: Capon's peaks made sharper),
+  ROOT-MUSIC (a line, ULA, with every antenna in use: the bearing worked out exactly rather than read off a
+  one-degree scan; on a circle or with an antenna left out it is MUSIC).
 - **F4 CAL**: calibrate now (a moment of noise, the antennas off). **F4 held**: how often (off, 30 s to 10 minutes,
   2 minutes by default), always in a gap in the signal.
 - **F5 SET**: a panel: RATE (0.25, 1.024, 2.048, 2.4 MS/s; wider sees more of the band and costs more processor;
@@ -1537,9 +1539,12 @@ settings: a change on either shows on the other.
 - **Channels**: each antenna's stick, state, the target on it, the calibration's phase, gain and fit, and Use (an
   antenna left out of the bearing).
 - **Settings**: method; **sources** (1, 2, 3, or Auto: as many as the eigenvalues show; with more than one the others'
-  bearings are drawn as needles too); **forward-backward** averaging (a ULA, for multipath); rate, gain, squelch,
-  how often to calibrate, Calibrate now; the array's layout, its radius or spacing, ANT 0's heading, and Size for
-  this band (KrakenRF's calculator, spacing 0.5 wavelength). Sources and forward-backward are set here only.
+  bearings are drawn as needles too); **forward-backward** averaging and **smoothing** (2 or 3 subarrays), both for a
+  ULA with every antenna in use: multipath, the same signal arriving from two bearings at once, which MUSIC alone
+  reads as one wrong bearing; with both on and Sources 2 the two come out apart (smoothing trades the line's length
+  for it, so one bearing alone is a little broader); rate, gain, squelch, how often to calibrate, Calibrate now; the
+  array's layout, its radius or spacing, ANT 0's heading, and Size for this band (KrakenRF's calculator, spacing 0.5
+  wavelength). Sources, forward-backward and smoothing are set here only.
 - **Custom layout**: any layout of two to five antennas, each where it stands from the middle: **forward** (ANT 0's
   heading, up on the drawing) and **left**, in cm. Drag an antenna on the drawing (0.5 cm steps) or type it; **Add an
   antenna** (five at most), x to remove one, **From the layout in use** to start from the circle or line set now.

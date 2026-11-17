@@ -175,7 +175,7 @@ static int cust_load(void) {
 }
 
 
-static const char *const methods[] = {"MUSIC", "BARTLETT", "CAPON", "MEM", "TNA"};
+static const char *const methods[] = {"MUSIC", "BARTLETT", "CAPON", "MEM", "TNA", "ROOT-MUSIC"};
 #define N_METHODS (int)(sizeof(methods) / sizeof(methods[0]))
 static const uint32_t    rates[] = {250000, 1024000, 2048000, 2400000};
 #define N_RATES (int)(sizeof(rates) / sizeof(rates[0]))
@@ -195,6 +195,7 @@ static struct {
     int     follow;             /* FOLLOW: 0 off, 1 A (the X6200's dial), 2 B (B's frequency) */
     int     nsrc;               /* the sources to look for: 1-3, 0 AUTO (x6x00-df's k) */
     bool    fb;                 /* forward-backward averaging (a ULA) */
+    int     smooth;             /* spatial smoothing's subarrays, 0 off, 2 or 3 (a ULA; the web page sets it) */
     bool    log;                /* the bearing log, /mnt/df_log (x6x00-df's l) */
 } cfg;
 
@@ -230,6 +231,8 @@ static void cfg_load(void) {
     cfg.nsrc    = gui_state_get("df.nsrc", 1);
     if (cfg.nsrc < 0 || cfg.nsrc > 3) cfg.nsrc = 1;
     cfg.fb      = gui_state_get("df.fb", 0) != 0;
+    cfg.smooth  = gui_state_get("df.smooth", 0);
+    if (cfg.smooth != 2 && cfg.smooth != 3) cfg.smooth = 0;
     cfg.log     = gui_state_get("df.log", 0) != 0;
 }
 
@@ -251,6 +254,7 @@ static void cfg_save(void) {
     gui_state_set("df.follow", cfg.follow);
     gui_state_set("df.nsrc", cfg.nsrc);
     gui_state_set("df.fb", cfg.fb);
+    gui_state_set("df.smooth", cfg.smooth);
     gui_state_set("df.log", cfg.log);
 }
 
@@ -295,6 +299,7 @@ static void send_cal(void)    { df_rx_cmd("i %d", cal_every[cfg.cal]); }
 static void send_mask(void)   { df_rx_cmd("x %d", cfg.off_mask); }
 static void send_nsrc(void)   { df_rx_cmd("k %d", cfg.nsrc); }
 static void send_fb(void)     { df_rx_cmd("w %d", cfg.fb); }
+static void send_smooth(void) { df_rx_cmd("o %d", cfg.smooth); }
 static void send_log(void)    { df_rx_cmd("l %d", cfg.log); df_rx_cmd("h %d", cfg.heading); }
 static void send_all(void) {
     send_rate();
@@ -308,6 +313,7 @@ static void send_all(void) {
     send_mask();
     send_nsrc();
     send_fb();
+    send_smooth();
     send_log();
 }
 
@@ -1815,6 +1821,10 @@ int app_df_web_set(const char *k, double v) {
     } else if (!strcmp(k, "fb")) {
         cfg.fb = i != 0;
         send_fb();
+    } else if (!strcmp(k, "smooth")) {
+        if (i != 0 && i != 2 && i != 3) return -1;
+        cfg.smooth = i;
+        send_smooth();
     } else if (!strcmp(k, "cal_now")) {
         df_rx_cmd("c");
     } else {
@@ -1872,9 +1882,9 @@ int app_df_web_json(char *out, size_t n) {
        df_rx_b_lent(), s.have_st && (s.st.iq_clients & 1), s.have_st && (s.st.iq_clients & 2) ? 1 : 0);
     jb(&b, "\"cfg\":{\"fc\":%d,\"off\":%d,\"target\":%u,\"bw\":%d,\"band\":%d,\"follow\":%d,\"auto\":%d,\"kind\":%d,"
            "\"size_mm\":%d,\"heading\":%d,\"method\":%d,\"rate\":%d,\"gain\":%d,\"sql\":%.1f,\"cal\":%d,\"mask\":%d,"
-           "\"nsrc\":%d,\"fb\":%d,\"log\":%d,\"heading_now\":%d,\"heading_from\":",
+           "\"nsrc\":%d,\"fb\":%d,\"smooth\":%d,\"log\":%d,\"heading_now\":%d,\"heading_from\":",
        cfg.fc, cfg.off, target_hz(), cfg.bw, bnd, cfg.follow, cfg.autot, cfg.kind, cfg.size_mm, cfg.heading, cfg.method,
-       cfg.rate, cfg.gain, cfg.sql_ddb / 10.0, cfg.cal, cfg.off_mask, cfg.nsrc, cfg.fb, cfg.log, heading_now());
+       cfg.rate, cfg.gain, cfg.sql_ddb / 10.0, cfg.cal, cfg.off_mask, cfg.nsrc, cfg.fb, cfg.smooth, cfg.log, heading_now());
     jstr(&b, heading_from(), 16);
     jb(&b, ",\"xy\":[");                    /* the antennas where they are, mm (x forward, y left) */
     for (int m = 0; m < kind_n(); m++) {

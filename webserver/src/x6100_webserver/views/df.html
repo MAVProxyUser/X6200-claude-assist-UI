@@ -96,6 +96,7 @@ table.xy input{width:100%;min-width:60px;font:14px ui-monospace,monospace}
         <div><label for="method">Method</label><select id="method"></select></div>
         <div><label for="nsrc">Sources</label><select id="nsrc"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="0">Auto</option></select></div>
         <div><label for="fb">Forward-backward (ULA)</label><select id="fb"><option value="0">Off</option><option value="1">On</option></select></div>
+        <div><label for="smooth">Smoothing (ULA)</label><select id="smooth"><option value="0">Off</option><option value="2">2 subarrays</option><option value="3">3 subarrays</option></select></div>
         <div><label for="rate">Rate</label><select id="rate"></select></div>
         <div><label for="gain">Gain</label><select id="gain"></select></div>
         <div><label for="sql">Squelch, dB</label><input id="sql" type="number" min="3" max="40" step="1"></div>
@@ -321,6 +322,7 @@ function show() {
   fill('kind', lists.kinds.map(k => k[0]), c.kind);
   if (document.activeElement !== $('nsrc')) $('nsrc').value = c.nsrc;
   if (document.activeElement !== $('fb')) $('fb').value = c.fb;
+  if (document.activeElement !== $('smooth')) $('smooth').value = c.smooth || 0;
   if (document.activeElement !== $('log')) $('log').value = c.log;
   if (editing !== 'sql') $('sql').value = c.sql;
   if (editing !== 'size') $('size').value = (c.size_mm / 10).toFixed(1);
@@ -505,7 +507,7 @@ $('freq').onkeydown = e => { if (e.key === 'Enter') $('go').click(); if (e.key =
 function step(d) { const b = D.cfg.band >= 0 ? lists.bands[D.cfg.band][2] : lists.bws[D.cfg.bw]; set('target', D.cfg.target + d * b); }
 $('dn').onclick = () => step(-1); $('up').onclick = () => step(1);
 $('band').onchange = e => { if (+e.target.value < lists.bands.length) set('band', +e.target.value); };
-for (const [id, key] of [['bw', 'bw'], ['method', 'method'], ['rate', 'rate'], ['gain', 'gain'], ['cal', 'cal'], ['kind', 'kind'], ['nsrc', 'nsrc'], ['fb', 'fb'], ['log', 'log']])
+for (const [id, key] of [['bw', 'bw'], ['method', 'method'], ['rate', 'rate'], ['gain', 'gain'], ['cal', 'cal'], ['kind', 'kind'], ['nsrc', 'nsrc'], ['fb', 'fb'], ['smooth', 'smooth'], ['log', 'log']])
   $(id).onchange = e => set(key, +e.target.value);
 for (const [id, key, scale] of [['sql', 'sql', 1], ['size', 'size_mm', 10], ['heading', 'heading', 1]]) {
   $(id).onfocus = () => editing = id;
