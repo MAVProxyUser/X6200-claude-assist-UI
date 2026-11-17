@@ -9,67 +9,57 @@ approved that day.
 
 **Open, in the order they are worked**
 
-*The Kraken and USB first: the bench radio is in a test state*
+*The Kraken and USB first*
 
-1. **The Kraken's fifth stream** (D11): the radio's USB host has four receive endpoints of its own and one shared;
-   the Kraken's hub kept one for its status channel, so the fourth and fifth stick shared and the fifth got nothing.
-   The answer is 9104, on branch claude/friendly-archimedes-252a82 (25b83c3; not on main, in no image; the earlier
-   9103 is withdrawn): the Kraken's hub (0424:2517) read over the control endpoint once a second instead of its status
-   channel, so each stick has an endpoint of its own. Measured on the radio with the GUI up: five streams full (B at
-   2.1168 MS/s, four at 1.024) in runs of 60, 219 and 81 s; the status channel never answered once in a clean
-   5-minute capture (the hardware asks every 256 ms); a dropped stick is seen at once either way, its return within a
-   second with polling instead of 0.3 s. To finish: the 20-minute run, the owner's call to bring 25b83c3 to main,
-   then the bench radio's test setup undone (docs/plans/musb_hub_poll_9104.md on the branch: sunxi blacklisted at
-   boot, the Kraken's sticks stopped in /mnt/sdr_pool).
-2. **Page I over the air with five channels** (docs/plans/kraken_df_plan.md; D1 approved; 40216c6, a94ab58): our own
+1. **Page I over the air with five channels** (docs/plans/kraken_df_plan.md; D1 approved; 40216c6, a94ab58): our own
    DF engine (x6x00-df) and page I, four channels calibrated on the radio (1.2-2.6 degrees, no slips, 11 % CPU), never
    a bearing on screen over the air. The check: a 915 MHz ISM carrier from the HackRF, the 33 CM preset.
 *Small things on the Sentry*
 
-3. **D's and E's RX columns name the stick** (`RTL4`): C names the kind of receiver only, at the owner's word; the same
+2. **D's and E's RX columns name the stick** (`RTL4`): C names the kind of receiver only, at the owner's word; the same
    on D and E, with the owner's OK.
 *Hardware to plug in*
 
-4. **DVSI USB-3000 back on USB**: it came off when the Kraken took the HOST port, so DMR, P25, D-STAR, YSF and NXDN
+3. **DVSI USB-3000 back on USB**: it came off when the Kraken took the HOST port, so DMR, P25, D-STAR, YSF and NXDN
    voice is silent (the calls are still decoded). With five Kraken sticks streaming it would share an endpoint again;
    with page I closed B uses one stick, which leaves room.
-5. **NXDN96 over the cable**: NXDN48 is tested (voice r 0.92-0.95); NXDN96 runs in the third dsd-fme but was never
+4. **NXDN96 over the cable**: NXDN48 is tested (voice r 0.92-0.95); NXDN96 runs in the third dsd-fme but was never
    sent over the cable (the HackRF's cable to an RTL stick, not the X6200).
 
 *The scanner's leftovers* (from the SCAN CFG and D/E passes, 2026-11-17)
 
-6. **B's presets D has no band for** (SONDES, ISM 433 and 915, VHF and UHF LMR, 1.25 m, 23 cm, UAT 978), if the owner
+5. **B's presets D has no band for** (SONDES, ISM 433 and 915, VHF and UHF LMR, 1.25 m, 23 cm, UAT 978), if the owner
    wants them.
-7. **JTTY on E** once it has calling frequencies; **a priority channel** (looked at every few seconds while a scan
+6. **JTTY on E** once it has calling frequencies; **a priority channel** (looked at every few seconds while a scan
     runs); **a channel-list scan** beside the band search.
 
 *The owner's decisions and longer work*
 
-8. **Page I's decisions D2-D10** (the plan's list): licence, rate, calibration interval, B on a Kraken stick, DF
+7. **Page I's decisions D2-D10** (the plan's list): licence, rate, calibration interval, B on a Kraken stick, DF
     only while I is open, I on the ring only with an array, the hardware (D8: the antennas and their layout; the
     absolute bearing means nothing till the array is known), plain RTLs.
-9. **TCI audio over the radio's Wi-Fi**: the stream to a client stalled 0.5-1.3 s at a time, worse while big
+8. **TCI audio over the radio's Wi-Fi**: the stream to a client stalled 0.5-1.3 s at a time, worse while big
     files went over the same link, even at -41 dBm and MCS 7; the server then drops what passes the ~1.4 s it queues
     per client, so a listener loses speech or audio. The remote control port and TCI connects timed out now and then
     at the same time. To look at: why the link stalls (the radio's Wi-Fi driver, the 2.4 GHz channel, USB noise from
     the SDRs), and whether a client should be able to ask for a longer queue.
-10. **A GUI that hangs** (its process alive, its radio thread stuck) still lets the X6200's base switch the radio off
+9. **A GUI that hangs** (its process alive, its radio thread stuck) still lets the X6200's base switch the radio off
     after about three minutes: the base keeper runs only while no GUI process does. Whether to cover it is the owner's
     call (a hung radio switching itself off may be wanted).
-11. **The SDR daemon's fallback while its stick is away**: while the stick the GUI asked for is gone (pulled out, or
+10. **The SDR daemon's fallback while its stick is away**: while the stick the GUI asked for is gone (pulled out, or
    in the second a port reset takes), the daemon opens another one, even one in the stopped list (/mnt/sdr_pool): seen
    2026-11-17, stick 1000 opened for a moment during a reset of B's 1004 on the Kraken. It can open only a stick
    nobody holds (page I's are safe), and the GUI asks again every 3 s, which brought 1004 back. The root of it: the
    GUI and the daemon name RTLs by their place in serial order (RTL<n>), which shifts when one goes; by serial would
    be exact, a change to the GUI's pool and the daemon together.
-12. **Meteor-M LRPT on B** (a255320, c5e864b, d02958f): decoded from a real 2019 Meteor-M2-2 recording played into
+11. **Meteor-M LRPT on B** (a255320, c5e864b, d02958f): decoded from a real 2019 Meteor-M2-2 recording played into
     the stick over a cable. The first live pass (2026-11-17, Meteor-M2-4) gave nothing on the antenna used. To do: a
     pass on a 137 MHz antenna outdoors (QFH or V-dipole); the 80k mode is unverified on real data.
-13. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
+12. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
     Waterfall section below).
-14. **RADE's decode time on the X6200**: 114-200 ms for the slowest 120 ms modem frame while searching, with no
+13. **RADE's decode time on the X6200**: 114-200 ms for the slowest 120 ms modem frame while searching, with no
     gaps or losses seen; watch it on a busy band.
-15. **Screenshots** of every menu for the README and the manual: later, at the owner's word.
+14. **Screenshots** of every menu for the README and the manual: later, at the owner's word.
 
 **Waiting on hardware**
 
@@ -87,6 +77,10 @@ approved that day.
 
 **Done 2026-11-16 and 2026-11-17** (for the record; details in git)
 
+- The KrakenSDR's fifth stream (D11): kernel patch 9104 (08957fb) asks the Kraken's hub about its ports over ep0
+  once a second instead of keeping one of the R16 musb's receive endpoints for its status, so each of its five
+  sticks has an endpoint of its own; five streamed whole for 20 minutes. The bench radio boots with it (the test
+  setup undone 17:44 UTC 11-17, the HOST port up by itself, all five sticks there). 9103 (ep1 in turns) withdrawn.
 - C LOG's Listen choice seen on the radio (00e4d5a): an FM entry both radios take asks "F1 ALL, F2 THE X6200 ONLY,
   F3 THE RTL ONLY, F5 BACK"; BACK tunes nothing (radio_captures/sentry/c_log_listen_choice.png).
 - The SDR daemon resets a stuck stick's hub port only while no other device on its hub is in use: on the Kraken's
