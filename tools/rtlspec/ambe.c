@@ -26,6 +26,9 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -33,6 +36,9 @@
 #define PCM    8192             /* 8 kHz speech kept: 1 s */
 #define START  480              /* 60 ms of it in before a call is heard: DMR's frames come three at a time */
 #define GAIN   1.5f             /* the vocoder's speech about as loud as narrow FM's audio here */
+#define PORT   2460             /* the chip for other programs (dsd-fme through its DVSI libmbe, tests), as
+                                 * AMBEserver gives it: a datagram an AMBE-3000 packet, its answer the one back.
+                                 * 127.0.0.1 only */
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  more = PTHREAD_COND_INITIALIZER;
@@ -43,6 +49,8 @@ static unsigned        pcm_w, pcm_r;
 static bool            playing;
 static atomic_bool     ready, started;
 static int             fd = -1;
+static int             udp = -1;
+static int             chip_rate = -1;  /* the rate it was set to last (33 DMR's), -1 another or not known */
 static char            dev[32], prod[48];
 
 static long now_ms(void) {
@@ -103,20 +111,29 @@ static bool get_all(uint8_t *b, int n, long end) {
     return true;
 }
 
-/* A packet within ms: its type and fields (its parity field off), their length; -1 none */
-static int recv_pkt(int *type, uint8_t *p, int max, int ms) {
-    long    end = now_ms() + ms;
-    uint8_t h[4];
+/* A packet within ms, whole as it came (its 0x61 and header too): its length; -1 none */
+static int recv_raw(uint8_t *b, int max, int ms) {
+    long end = now_ms() + ms;
 
     do {                                /* to its start */
-        if (!get_all(h, 1, end)) return -1;
-    } while (h[0] != 0x61);
-    if (!get_all(h + 1, 3, end)) return -1;
-    int len = h[1] << 8 | h[2];
+        if (!get_all(b, 1, end)) return -1;
+    } while (b[0] != 0x61);
+    if (!get_all(b + 1, 3, end)) return -1;
+    int len = b[1] << 8 | b[2];
 
-    if (len < 0 || len > max) return -1;
-    if (!get_all(p, len, end)) return -1;
-    *type = h[3];
+    if (len < 0 || len + 4 > max || !get_all(b + 4, len, end)) return -1;
+    return len + 4;
+}
+
+/* A packet within ms: its type and fields (its parity field off), their length; -1 none */
+static int recv_pkt(int *type, uint8_t *p, int max, int ms) {
+    uint8_t b[400];
+    int     n = recv_raw(b, sizeof(b), ms), len;
+
+    if (n < 0 || n - 4 > max) return -1;
+    len   = n - 4;
+    *type = b[3];
+    memcpy(p, b + 4, (size_t)len);
     if (len >= 2 && p[len - 2] == 0x2F) len -= 2;
     return len;
 }
@@ -335,6 +352,42 @@ static bool find(void) {
     return ok;
 }
 
+/* The UDP port: one request at a time, the chip's answer back to its sender. A rate set through it is noted: DMR's
+ * own frames set 33 again first */
+static void udp_open(void) {
+    struct sockaddr_in a = {.sin_family = AF_INET, .sin_port = htons(PORT)};
+
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if ((udp = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0)) < 0) return;
+    if (bind(udp, (struct sockaddr *)&a, sizeof(a)) < 0) {
+        fprintf(stderr, "rtlspec: the AMBE port 127.0.0.1:%d: %s\n", PORT, strerror(errno));
+        close(udp);
+        udp = -1;
+    }
+}
+
+static void lost(void);
+
+static void serve_udp(void) {
+    uint8_t            b[400], r[400];
+    struct sockaddr_in from;
+    socklen_t          fl = sizeof(from);
+    ssize_t            n;
+
+    while (udp >= 0 && (n = recvfrom(udp, b, sizeof(b), 0, (struct sockaddr *)&from, &fl)) > 0) {
+        if (n < 5 || b[0] != 0x61 || (b[1] << 8 | b[2]) + 4 != n || fd < 0) continue;     /* no chip: no answer */
+        if (b[3] == 0) chip_rate = b[4] == 0x09 && n >= 6 ? b[5] : b[4] == 0x0A || b[4] == 0x33 ? -1 : chip_rate;
+        if (!put_all(b, (size_t)n)) {
+            lost();
+            return;
+        }
+        int rn = recv_raw(r, sizeof(r), b[3] == 0 && b[4] == 0x33 ? 1500 : 400);
+
+        if (rn > 0) sendto(udp, r, (size_t)rn, 0, (struct sockaddr *)&from, fl);
+        fl = sizeof(from);
+    }
+}
+
 static void lost(void) {
     fprintf(stderr, "rtlspec: the AMBE vocoder on %s gone\n", dev);
     close(fd);
@@ -363,18 +416,14 @@ static void *thread(void *arg) {
                 any = access("/sys/bus/usb-serial/devices/ttyUSB0", F_OK) == 0;
                 continue;
             }
-            fprintf(stderr, "rtlspec: AMBE vocoder %s on %s, rate 33 (DMR)\n", prod, dev);
+            fprintf(stderr, "rtlspec: AMBE vocoder %s on %s, rate 33 (DMR); 127.0.0.1:%d for others\n", prod, dev,
+                    PORT);
             atomic_store(&ready, true);
-            misses = 0;
+            chip_rate = -1;
+            misses    = 0;
         }
+        serve_udp();
         pthread_mutex_lock(&lock);
-        while (!fq_n) {
-            struct timespec ts;
-
-            clock_gettime(CLOCK_REALTIME, &ts);
-            ts.tv_sec += 2;
-            if (pthread_cond_timedwait(&more, &lock, &ts) == ETIMEDOUT) break;
-        }
         bool have = fq_n > 0;
 
         if (have) {
@@ -383,9 +432,24 @@ static void *thread(void *arg) {
             fq_n--;
         }
         pthread_mutex_unlock(&lock);
-        if (!have) {                    /* idle: still there? */
-            if (access(dev, F_OK)) lost();
+        if (!have) {                    /* idle: a request on the port, or 20 ms; still there? */
+            static long looked;
+            struct pollfd pf = {.fd = udp, .events = POLLIN};
+
+            if (udp < 0 || poll(&pf, 1, 20) <= 0) {
+                if (now_ms() - looked > 2000) {
+                    looked = now_ms();
+                    if (access(dev, F_OK)) lost();
+                }
+            }
             continue;
+        }
+        if (chip_rate != 33) {          /* another rate set through the port: DMR's again */
+            if (ask((const uint8_t[]){0x09, 33}, 2, r, sizeof(r), 300) < 2 || r[1] != 0) {
+                if (++misses >= 5) lost();
+                continue;
+            }
+            chip_rate = 33;
         }
         memcpy(q + 2, f, 9);
         if (!send_pkt(1, q, sizeof(q))) {
@@ -417,6 +481,7 @@ void ambe_start(void) {
     pthread_t t;
 
     if (!atomic_compare_exchange_strong(&started, &no, true)) return;
+    udp_open();
     if (pthread_create(&t, NULL, thread, NULL) == 0) pthread_detach(t);
 }
 
