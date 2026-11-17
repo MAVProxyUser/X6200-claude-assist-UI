@@ -1596,7 +1596,9 @@ settings: a change on either shows on the other.
   device, or Off) and its link, as Settings > Bluetooth sets it ([a Bluetooth GPS](#a-bluetooth-gps)).
 - **Bearing log** (Settings, or page I's F5 SET LOG): each bearing over the squelch, two a second at most, in a CSV
   file a day (UTC) in `df_log` on the card (the Files page has them): `utc, freq_hz, bearing_ant0, heading,
-  heading_from, bearing, plus_minus, fit_pct, level_db, snr_db, method, sources, other_bearings, lat, lon`. The
+  heading_from, bearing, plus_minus, fit_pct, level_db, snr_db, method, sources, other_bearings, lat, lon, target`
+  (target 1 the main one, 2-4 the other targets, each with its own frequency; theirs leave sources and the other
+  bearings empty). The
   compass bearing and the heading are filled when a heading is known (gpsd's, or the one set by hand); the position
   when gpsd has a fix. Off by default; it stays on the radio.
 
