@@ -13,12 +13,14 @@ import sys
 import numpy as np
 
 LEVEL = {0: 1.0, 1: 3.0, 2: -1.0, 3: -3.0}
+BAUD = int(os.environ.get("BAUD", "4800"))      # NXDN48: BAUD=2400 DEV=350 (+-1050 Hz outer)
+DEV = float(os.environ.get("DEV", "600"))        # Hz for a +-1 symbol
 
 
 def freq(dibits, fs):
-    sps = fs // 4800
+    sps = fs // BAUD
     imp = np.zeros(len(dibits) * sps)
-    imp[::sps] = [LEVEL[d] * 600.0 for d in dibits]
+    imp[::sps] = [LEVEL[d] * DEV for d in dibits]
     a, span = 0.2, 8
     t = np.arange(-span * sps, span * sps + 1) / sps
     with np.errstate(divide="ignore", invalid="ignore"):

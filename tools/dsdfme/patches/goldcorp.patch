@@ -1,13 +1,14 @@
 diff --git a/include/dsd.h b/include/dsd.h
-index b917b43..5b7282c 100644
+index b917b43..0d05c69 100644
 --- a/include/dsd.h
 +++ b/include/dsd.h
-@@ -176,6 +176,8 @@ typedef struct
+@@ -176,6 +176,9 @@ typedef struct
    char groupMode[3];
    char groupName[100];
  } groupinfo;
 +#define GROUP_MAX 65536 /* the rows of state->group_array */
 +void dsd_status (const char * kind, int slot, const char * text); //GoldCorpHF: what is heard, to DSD_STATUS_FD
++extern time_t nxdn_good_time; //GoldCorpHF: the last NXDN frame with a good LICH (nxdn_frame.c)
  
  
  typedef struct
@@ -130,7 +131,7 @@ index 1bfd16f..64c9e79 100644
    {
      free (timestr);
 diff --git a/src/dsd_frame_sync.c b/src/dsd_frame_sync.c
-index f38a991..f48fff8 100644
+index f38a991..4c66872 100644
 --- a/src/dsd_frame_sync.c
 +++ b/src/dsd_frame_sync.c
 @@ -23,6 +23,7 @@ void
@@ -141,6 +142,28 @@ index f38a991..f48fff8 100644
  
    char * timestr = getTimeC();
    if (opts->verbose > 0)
+@@ -1235,8 +1236,19 @@ getFrameSync (dsd_opts * opts, dsd_state * state)
+             {
+ 
+               state->offset = synctest_pos;
+-              state->max = ((state->max) + lmax) / 2;
+-              state->min = ((state->min) + lmin) / 2;
++              //GoldCorpHF: with no NXDN frame decoded for 2 s, the levels from this FSW alone: averaged in, the FSW's
++              //chance matches in FM noise pushed them out to the noise's extremes over a few minutes, and a call
++              //that came then (its levels a sixth of those) was never decoded
++              if (time(NULL) - nxdn_good_time > 2)
++              {
++                state->max = lmax;
++                state->min = lmin;
++              }
++              else
++              {
++                state->max = ((state->max) + lmax) / 2;
++                state->min = ((state->min) + lmin) / 2;
++              }
+ 
+               //debug
+               // fprintf (stderr, " %s ", synctest10);
 diff --git a/src/dsd_import.c b/src/dsd_import.c
 index 0260881..4fc2263 100644
 --- a/src/dsd_import.c
@@ -295,3 +318,27 @@ index 608c758..b6563de 100644
  	memcpy (state->dstar_rpt2, str1, sizeof(str1));
  	memcpy (state->dstar_rpt1, str2, sizeof(str2));
  	memcpy (state->dstar_dst, str3, sizeof(str3));
+diff --git a/src/nxdn_frame.c b/src/nxdn_frame.c
+index ce6df3d..8d2e37a 100644
+--- a/src/nxdn_frame.c
++++ b/src/nxdn_frame.c
+@@ -13,6 +13,10 @@
+ #include "dsd.h"
+ #include "nxdn_const.h"
+ 
++//GoldCorpHF: the last frame with a good LICH of a known kind; dsd_frame_sync.c takes the symbol levels from an FSW
++//alone when there has been none for 2 s
++time_t nxdn_good_time;
++
+ #define LICH_ERR_THRESHOLD 7 //Threshold for lich dibit "dividing" errors (8 is perfect, 7 is 1 bit error)
+ // #define NXDN_DEBUG_LICH      //print LICH debug info on err on payload == 1
+ // #define NXDN_LICH_OFFBITS    //use the offbits to help determine sync status (disable if bad signal / bad sample)
+@@ -561,6 +565,8 @@ void nxdn_frame (dsd_opts * opts, dsd_state * state)
+ 			state->bit_counterL += 49*2;
+ 	}
+ 
++	if ((voice || facch || sacch || facch2 || udch || cac || idas || sacch2) && lich_parity_received == lich_parity_computed)
++		nxdn_good_time = time(NULL); //GoldCorpHF: a frame of a known kind, its LICH good
+ 	if (lich == 0x20 || lich == 0x21 || lich == 0x61 || lich == 0x40 || lich == 0x41) state->nxdn_sacch_non_superframe = TRUE;
+ 	else state->nxdn_sacch_non_superframe = FALSE;
+ 

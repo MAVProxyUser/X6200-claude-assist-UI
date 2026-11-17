@@ -25,7 +25,8 @@ bool dsd_init(dsd_heard_fn heard);
 /* One 44.1 kHz sample of the narrow FM channel (+-1 for +-5 kHz): from the stick's thread, never waits */
 void dsd_feed(float d);
 
-/* A digital signal heard in the last second: its speech (or silence) in place of the FM's buzz */
+/* A digital signal heard in the last second: its speech (or silence) in place of the FM's buzz. A flag (dsd.c's
+ * thread keeps it each 50 ms), cheap enough for each sample */
 bool dsd_active(void);
 
 /* Its speech at 44.1 kHz, a sample (about +-1), 0 when none */

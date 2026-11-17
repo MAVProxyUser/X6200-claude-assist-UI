@@ -1300,24 +1300,30 @@ DMR's sync in the channel's FM; once found, the channel is DMR's till no sync co
 - It costs about 6% of one of the radio's four cores while B's SDR listens in narrow FM; watch channels do not look
   for it.
 
-### P25, D-STAR, YSF and the other digital voice (dsd-fme)
+### P25, D-STAR, YSF, NXDN and the other digital voice (dsd-fme)
 
 The other digital voice modes are found the same way, in any narrow FM channel B's SDR listens to, by dsd-fme
 (lwvmobile's, ISC licence), which the SDR daemon runs beside its own DMR decoder: P25 (phases 1 and 2), D-STAR, YSF
-(Yaesu System Fusion) and X2-TDMA. DMR stays the daemon's own.
+(Yaesu System Fusion), X2-TDMA, and NXDN at both its rates (NXDN48, 6.25 kHz; NXDN96, 12.5 kHz). DMR stays the
+daemon's own. Three of dsd-fme run, each fed the same channel: one for the first five, one for each NXDN rate (no one
+mode of it hears them all). NXDN's sync is short and turns up in FM's noise, so an NXDN channel counts as digital only
+once a call is decoded (who to whom, through its codes).
 
 - **Who talks**: B's line says `P25 453.250` (or `D-STAR`, `YSF`...), then the call: `TG 1234 FROM 5678901 NAC 293
   TALKING`, `TO CQCQCQ FROM N0CALL /ID51 "HELLO FROM DUBLIN" TALKING` (D-STAR's text message in quotes, once it has
   come twice), `SLOT 2 ...` for a TDMA system's second slot. The head, B's half and
   G say the protocol in place of NFM; G's lamp says `RX P25`, `RX D-STAR`.
 - **The voice** goes through the USB-3000 only (no software vocoder: dsd-fme is built against our libmbe-dvsi, which
-  hands its frames to the daemon's vocoder). D-STAR's, P25 phase 1's and YSF's (its DN mode, V/D type 2: the AMBE+2
-  that DMR carries) are heard, each tested over the cable; YSF's header and data channel give the callsigns. P25
-  phase 2 carries the same AMBE+2 and should go the same way (not yet tested). A P25 frame too damaged to trust is replaced by the last
+  hands its frames to the daemon's vocoder). D-STAR's, P25 phase 1's, YSF's (its DN mode, V/D type 2: the AMBE+2
+  that DMR carries) and NXDN48's are heard, each tested over the cable; YSF's header and data channel give the
+  callsigns, NXDN's VCALL the talkgroup, the radio and the RAN (`NXDN48 441.000 / TG 100 FROM 1234 RAN 1`). NXDN96
+  is decoded the same way but not yet tested over the cable. P25 phase 2 is found but its voice is not heard: it is
+  scrambled with the trunked system's own IDs, which dsd-fme learns only by following the control channel, and B
+  listens to one channel. A P25 frame too damaged to trust is replaced by the last
   good one (three times, then silence): this USB-3000 restarts itself on some garbled P25 frames, and the daemon
   picks it up again by itself if it does.
-- It is there when `/usr/bin/dsd-fme` is: about 4% of one core while B listens in narrow FM, started with it and
-  ended a minute after. Three syncs within 1.2 s (or a decoded call) make a channel digital, so the odd sync FM's
+- It is there when `/usr/bin/dsd-fme` is (the firmware has it): about 11% of one core for the three while B listens
+  in narrow FM (2.7-5% each, 12-13 MB each), started with it and ended a minute after. Three syncs within 1.2 s (or a decoded call) make a channel digital, so the odd sync FM's
   noise gives does not mute it or put garbage on B's line; a D-STAR header must pass its CRC.
 
 ## Updating the firmware
