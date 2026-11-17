@@ -11,8 +11,8 @@
  *              channel, CB channel, FM station, time signal, shortwave broadcaster from the EiBi list, FT8, ham
  *              band). Its keys are C's: F1 SCAN the band end to end, F2 BAND, F3 VIEW (X6200, SPLIT, RTL), F4 LISTEN
  *              (X6200, RTL, BOTH mixed or OFF), F5 SCAN CFG. The MFK pans, its push locks on the strongest; the VFO tunes
- *              the X6200 (MAN-OVERRIDE). AUTO-SCAN locks on the strongest target not seen lately and tracks it, then
- *              goes on; SEMI-AUTO only marks. Routines: BAND, the 360 kHz at the dial; SCAN, the band end to end,
+ *              the X6200 (MANUAL). SCAN CFG's style says what its scans do on a signal: stop on it (AUTO: the strongest
+ *              target not seen lately, tracked) or only mark it (SEMI). Routines: BAND, the 360 kHz at the dial; SCAN, the band end to end,
  *              360 kHz at a time; SWEEP, the bands marked in D BANDS, a few seconds each.
  *    B VHF/UHF an RTL-SDR stick's spectrum (rtl_spectrum.c): its presets or D's bands, scanned end to end (F1); the
  *              VFO tunes its channel (a bracket), the MFK pans, its push goes to the strongest.
@@ -29,10 +29,11 @@
  *    E DECODE  the decoders and the frequencies they work on; OPEN takes the radio there in the radio's own app.
  *    F SYSTEM  the rest of the radio, in this look: its settings, the other apps, the digital modes menu, the
  *              classic radio screen (with transmit), and where the radio starts. The APP key comes here.
- *    SCAN CFG  (on no ring: F5 on A or C) A's: the boxes A had (SYSTEM MODE, TRANSMITTER, SIGNAL STATUS, SCAN
- *              ROUTINE, TARGET BAND, SIGNAL PROFILE, TARGETS) and the lock: HOLD (the MFK's push), NEXT (the MFK),
- *              REC (F4), IGNORE (a tap on its frequency); F1 MODE, F2 SWEEP, F3 STEP. C's: the stick and its scan,
- *              F1 GAIN, F2 DWELL, F3 STEP, F4 SQUELCH. F5 goes back.
+ *    SCAN CFG  (on no ring: F5 on A or B) how the scans behave, A's and B's alike, as rows the MFK goes through and
+ *              its push changes: the SCAN STYLE (BROWSE, SCANNER, SAMPLER, STOP & STAY, SURVEY) or its three settings
+ *              (STEP TIME, STAY ON A SIGNAL, GO ON AFTER), A's SWEEP and knob step, B's knob step, gain and squelch;
+ *              what the chosen row does, and each radio's scan now. F1 STYLE, F2 HOLD / GO ON and F3 SKIP for the
+ *              radio it was opened from, F4 REC (A), F5 back.
  *
  *  On the X6200 the Sentry is the home screen (cfg_sentry_home): the radio starts in it, and an app or a menu opened
  *  from it comes back to it when it closes (screen_main.c main_screen_dialog_closed). CLASSIC RADIO leaves it till it
@@ -43,6 +44,7 @@
  */
 
 #include "app_sentry.h"
+#include "app_adsb.h"
 
 #ifdef BOARD_X6200
 #include "dialog_base_update.h"     /* the X6200's base firmware: never on another radio */
@@ -168,8 +170,6 @@ static void flag_clear(lv_obj_t *o, lv_obj_flag_t f) {
 
 /* The sentry */
 #define SETTLE_FRAMES 8         /* frames after a move before AUTO decides */
-#define LOST_MS     4000        /* tracked, gone this long: lost */
-#define DWELL_MS    20000       /* AUTO: this long on a target unless held */
 #define REVISIT_MS  120000      /* AUTO: a target visited comes again after this */
 #define VISITED     16
 #define IGNORED     32
@@ -318,7 +318,9 @@ static const band_t bands[] = {
      "Local FM stations, one or two 200 kHz-wide ones in the picture at a time."},
     /* Above the X6200's own receiver: the RTL-SDR's (F VHF/UHF), or a WR12's */
     {"AIR", 118000, 137000, "AIRCRAFT VOICE (AM)", "THE SDR'S OWN", 'L', 121500000, radio_mode_am, false,
-     "Pilots and controllers in AM, 25 kHz apart; 121.500 is the emergency guard. Aircraft are heard far off."},
+     "Pilots and controllers in AM, 25 kHz apart; 121.500 is the emergency guard. Airliners' ACARS texts on E."},
+    {"WX SAT", 137000, 138000, "METEOR WEATHER PICTURES", "A V-DIPOLE ON THE SDR", 'A', 137100000, radio_mode_nfm,
+     false, "Meteor-M weather satellites on 137.1 and 137.9, a few passes a day: B decodes their pictures (/mnt/meteor)."},
     {"2 M", 144000, 148000, "HAMS: REPEATERS, APRS", "THE SDR'S OWN", 'L', 146520000, radio_mode_nfm, false,
      "Local hams in narrow FM: repeaters 145-148, simplex 146.520, APRS packets on 144.390."},
     {"MARINE", 156000, 162025, "BOATS; CHANNEL 16 CALLS", "THE SDR'S OWN", 'L', 156800000, radio_mode_nfm, false,
@@ -329,6 +331,8 @@ static const band_t bands[] = {
      "Local hams in narrow FM: repeaters 442-450, simplex 446.000."},
     {"GMRS", 462550, 467725, "FAMILY RADIOS: FRS, GMRS", "THE SDR'S OWN", 'L', 462562500, radio_mode_nfm, false,
      "Handheld family radios, FRS and GMRS, 12.5 kHz apart: a few miles at most."},
+    {"ADS-B", 1089000, 1091000, "AIRCRAFT ON A MAP", "THE SDR'S OWN", 'L', 1090000000, radio_mode_nfm, false,
+     "Aircraft send their position, height and flight on 1090 MHz. LISTEN opens H AIRSPACE, which draws them."},
 };
 
 #define BANDS_N ((int)(sizeof(bands) / sizeof(bands[0])))
@@ -340,7 +344,7 @@ static struct {
     uint32_t ms;            /* lv_tick of that, 0 never */
 } band_rt[BANDS_N];
 
-/* The bands the stick takes: in C, any it can tune when one is plugged in (its RX column says RTL, LISTEN opens F on
+/* The bands the SDR takes (rx_of): VHF and UHF when one is plugged in (D's RX column says its name, LISTEN opens B on
  * it), and those only it reaches (above the X6200's own receiver, without a WR12) always */
 static char tag_hex[8] = "E07020";      /* the tags' colour (RTL, ADS-B, WR12, RX): the 3D picture's orange, set from
                                           * the theme at the Sentry's start (construct_cb) */
@@ -354,65 +358,209 @@ static bool band_in_rtl(int i) {
     return (int64_t)bands[i].lo * 1000 >= rtl_spectrum_min_hz() && (int64_t)bands[i].hi * 1000 <= rtl_spectrum_max_hz();
 }
 
-/* Elsewhere a band goes to the stick from where an RTL-SDR's reach starts (24 MHz) when one is plugged in, and where
- * only it reaches always: HF stays the X6200's, whose receiver it is, even with a HackRF that tunes it too */
+/* Which radio receives a frequency, on D and E alike (the user, 2026-11-17: "the radio required to receive or transmit
+ * them is represented"): HF and 6 m the X6200's, whose receiver and antennas they are (with an SDR plugged in, 12 m,
+ * CB, 10 m and 6 m went to it before, on its VHF antenna, while their rows said CB WHIP); above, the SDR's when one is
+ * plugged in, the X6200's where it tunes alone (FM broadcast, the airband, a WR12), the SDR's where only it reaches */
+#define HF_TOP_HZ 60000000
+enum { RX_NONE, RX_X6200, RX_SDR };
+
+static int rx_of(int64_t hz) {
+    bool x = hz <= INT32_MAX && cfg_is_valid_hw_freq((int32_t)hz);
+    bool s = hz >= rtl_spectrum_min_hz() && hz <= rtl_spectrum_max_hz();
+
+    if (x && hz <= HF_TOP_HZ) return RX_X6200;
+    if (s && (sdr_here || !x)) return RX_SDR;
+    return x ? RX_X6200 : RX_NONE;
+}
+
 static bool band_uses_rtl(int i) {
-    return band_in_rtl(i) && (!cfg_is_valid_hw_freq(bands[i].listen_hz) ||
-                              (sdr_here && (int64_t)bands[i].lo * 1000 >= RTL_SPEC_MIN_HZ));
+    return band_in_rtl(i) && rx_of(bands[i].listen_hz) == RX_SDR;
+}
+
+/* What a choice on D (LISTEN, SCAN) or E (OPEN) sets besides the frequency and the mode, one rule for both screens and
+ * shown on both (the user, 2026-11-17: "pre-amp defaults for each selection, and any other settings permutations that
+ * are applicable"):
+ *   the X6200: the preamp off under 8 MHz (the band's own noise is louder than the receiver's there: the preamp only
+ *     adds overload from the big signals) and on AM and FM broadcast (strong locals), on from 8 MHz up and on the
+ *     airband; the attenuator off; AGC FAST for CW, SLOW for a decoder app, AUTO (the mode's own) for listening
+ *   the SDR: its gain: 19.7 dB on FM broadcast, 49.6 on the weather satellites and from 960 MHz up (weak), 37.2 on the
+ *     airband, marine and NOAA (far transmitters), 28.0 elsewhere (local repeaters and handhelds) */
+typedef struct {
+    int pre, att, agc;          /* the X6200's (radio_pre_t, radio_att_t, radio_agc_t), -1 none */
+    int gain;                   /* the SDR's, tenths of a dB; -2 none; -3 AIRSPACE's own (ADS-B) */
+} rxset_t;
+
+#define ADSB_HZ 1090000000             /* D's ADS-B band: LISTEN opens H AIRSPACE (dump1090 or the stick: their gain) */
+
+/* sdr: on the SDR (E's types say which), else on the radio that receives hz (rx_of) */
+static rxset_t rx_setup_on(int64_t hz, int agc, bool sdr) {
+    rxset_t s = {radio_pre_off, radio_att_off, agc, -2};
+    int64_t k = hz / 1000;
+    bool    bc = (k >= 530 && k <= 1700) || (k >= 87500 && k <= 108000);
+
+    if (sdr) {
+        s.pre = s.att = s.agc = -1;
+        s.gain = bc                                             ? 197
+               : (k >= 137000 && k <= 138000) || k >= 960000    ? 496
+               : (k >= 118000 && k < 137000) || (k >= 156000 && k <= 162550) ? 372
+                                                                : 280;
+        return s;
+    }
+    if (!bc && hz >= 8000000) s.pre = radio_pre_on;
+    return s;
+}
+
+static rxset_t rx_setup(int64_t hz, int agc) {
+    return rx_setup_on(hz, agc, rx_of(hz) == RX_SDR);
+}
+
+static void rx_setup_text(const rxset_t *s, char *t, size_t n) {
+    static const char *const agc[] = {"OFF", "SLOW", "FAST", "AUTO"};
+
+    if (s->gain == -3)
+        snprintf(t, n, "AIRSPACE'S OWN");
+    else if (s->gain > -2)
+        snprintf(t, n, "GAIN %d.%d DB", s->gain / 10, s->gain % 10);
+    else
+        snprintf(t, n, "PRE %s%s, AGC %s", s->pre == radio_pre_on ? "ON" : "OFF", s->att == radio_att_on ? ", ATT" : "",
+                 agc[s->agc & 3]);
+}
+
+/* Who may send there: the X6200 where its TX ranges let it (Settings > TX Cal), a transmitting SDR (a HackRF's, G
+ * WALKIE's FM) on the amateur bands only, no one else (and no one for a mode only received: NAVTEX, weather fax) */
+static void tx_text(int64_t hz, bool two_way, char *t, size_t n) {
+    bool i32 = hz <= INT32_MAX;
+
+    if (two_way && i32 && cfg_is_tx_freq((int32_t)hz) && !cfg_tx_refusal((int32_t)hz))
+        snprintf(t, n, "TX X6200");
+    else if (two_way && i32 && hz > HF_TOP_HZ && rtl_spectrum_can_tx() &&
+             tx_ranges_sdr_check((tx_ranges_t)param_i_get(cfg_tx_ranges), (int32_t)hz) == HAM_TX_OK)
+        snprintf(t, n, "TX %s ON G", rtl_spectrum_dev_tag());
+    else
+        snprintf(t, n, "RX ONLY");
 }
 
 /* ---- The decoders and where they work ---- */
 
+/* E holds every receiving function of the radio, the X6200's apps and the SDR's decoders (the user, 2026-11-17: "E & D
+ * fully in sync with all the available functions"); each frequency's band is one of D's, and D names E's types in
+ * each band. Not here: JTTY (no calling frequencies yet), On the Air (a list of its own), the Scanner */
 static const int32_t f_ft8[] = {1840000, 3573000, 5357000, 7074000, 10136000, 14074000, 18100000, 21074000,
                                 24915000, 28074000, 50313000};
 static const int32_t f_ft4[] = {3575000, 7047500, 10140000, 14080000, 18104000, 21140000, 24919000, 28180000,
                                 50318000};
 static const int32_t f_wspr[] = {1836600, 3568600, 5364700, 7038600, 10138700, 14095600, 18104600, 21094600,
                                  24924600, 28124600, 50293000};
-static const int32_t f_cw[] = {3530000, 7030000, 10115000, 14030000, 18080000, 21030000, 24900000, 28030000};
+static const int32_t f_js8[] = {3578000, 7078000, 10130000, 14078000, 18104000, 21078000, 28078000};
+static const int32_t f_psk[] = {3580000, 7070000, 10142000, 14070000, 18100000, 21070000, 24920000, 28120000};
+static const int32_t f_rtty[] = {3585000, 7085000, 14085000, 21085000, 28085000};
+static const int32_t f_olivia[] = {3583000, 7072500, 10141000, 14072500, 18102000, 21072500, 28075000};
 static const int32_t f_sstv[] = {3845000, 7171000, 14230000, 21340000, 28680000};
+static const int32_t f_cw[] = {3530000, 7030000, 10115000, 14030000, 18080000, 21030000, 24900000, 28030000};
+static const int32_t f_rade[] = {3625000, 7177000, 14236000, 21313000, 28330000};
 static const int32_t f_navtex[] = {518000, 490000, 4209500};
+static const int32_t f_dsc[] = {2187500, 4207500, 6312000, 8414500, 12577000, 16804500};
 static const int32_t f_wefax[] = {4235000, 6340500, 9110000, 12750000, 4317900, 8503900, 12789900, 4346000,
                                   8682000, 12786000, 17151200};      /* NOAA's: Boston, New Orleans, Pt Reyes */
-static const int32_t f_js8[] = {3578000, 7078000, 10130000, 14078000, 18104000, 21078000, 28078000};
+static const int32_t f_time[] = {2500000, 5000000, 10000000, 15000000, 20000000, 25000000};  /* WWV (dialog_timesig.c) */
+static const int32_t f_beacon[] = {14100000, 18110000, 21150000, 24930000, 28200000};      /* NCDXF's */
+static const int32_t f_same[] = {162400000, 162425000, 162450000, 162475000, 162500000, 162525000, 162550000};
+static const int32_t f_rds[] = {92300000};
+static const int32_t f_acars[] = {129125000, 130025000, 130425000, 130450000, 131125000, 131550000, 131725000};
+static const int32_t f_adsb[] = {1090000000};
+static const int32_t f_dv[] = {441000000, 446500000, 446075000};       /* DMR's simplex channels (B's DMR 70 CM) */
+static const int32_t f_meteor[] = {137100000, 137900000};
+
+#define N_OF(a) ((int)(sizeof(a) / sizeof(a[0])))
+#define HZ(a)   a, N_OF(a)
 
 typedef struct {
     const char     *name;
-    const char     *mem;        /* the app's memory (app_window.c app_mem_save): it opens where that says */
-    press_action_t  app;        /* 0: none, the main screen */
+    const char     *mem;        /* the app's memory (app_window.c app_mem_save): it opens where that says; "": none */
+    press_action_t  app;        /* 0: none (the main screen; B or H for the SDR's) */
     int             mode, proto;
     const int32_t  *hz;
     int             n;
     const char     *about;
     int             audio;      /* where the app's decoder listens, Hz: the dial that far under the station (USB) */
+    char            rx;         /* X the X6200, B the SDR on B, H AIRSPACE (ADS-B), C AIRSPACE's ACARS on the SDR */
+    int             agc;        /* the X6200's AGC for it (rx_setup) */
+    bool            two_way;    /* hams send it too: the X6200 may, where its TX ranges let it */
+    const char     *opens;      /* E's OPENS IN */
 } decoder_t;
 
-#define N_OF(a) ((int)(sizeof(a) / sizeof(a[0])))
-
 static const decoder_t decoders[] = {
-    {"FT8", "FT8", ACTION_APP_FT8, radio_mode_usb_dig, 1, f_ft8, N_OF(f_ft8),
-     "15-SECOND DIGITAL MESSAGES FROM HAMS WORLDWIDE: CALLS, GRIDS, SIGNAL REPORTS. THE BUSIEST MODE ON THE AIR."},
-    {"FT4", "FT4", ACTION_APP_FT8, radio_mode_usb_dig, 0, f_ft4, N_OF(f_ft4),
-     "FT8'S FASTER COUSIN, 7.5-SECOND SLOTS, USED IN CONTESTS. THE FT8 APP DECODES IT."},
-    {"WSPR", "WSPR", ACTION_APP_WSPR, radio_mode_usb_dig, -1, f_wspr, N_OF(f_wspr),
-     "WEAK BEACONS: WHO IS HEARD WHERE, EVERY 2 MINUTES. THE WSPR APP CHOOSES ITS OWN BAND."},
-    {"CW", "", 0, radio_mode_cw, -1, f_cw, N_OF(f_cw),
-     "MORSE CODE. THE MAIN SCREEN DECODES IT IN CW MODE; THE SLOWER, THE BETTER IT COPIES."},
-    {"SSTV", "SSTV", ACTION_APP_SSTV, -1, -1, f_sstv, N_OF(f_sstv),
-     "SLOW-SCAN TV: PICTURES SENT BY HAMS, ONE EVERY MINUTE OR TWO. 14.230 IS THE PLACE."},
-    {"NAVTEX", "NavTex", ACTION_APP_NAVTEX, radio_mode_usb, -1, f_navtex, N_OF(f_navtex),
-     "WEATHER AND NAVIGATION WARNINGS FOR SHIPS, AS TEXT. NEEDS A LONG WIRE FOR 518 KHZ.", 1000},
-    {"WEFAX", "WeFax", ACTION_APP_WEFAX, radio_mode_usb, -1, f_wefax, N_OF(f_wefax),
-     "WEATHER MAPS BY RADIO FROM NOAA: BOSTON, NEW ORLEANS, PT REYES. A MAP TAKES 10 MINUTES.", 1500},
-    {"JS8", "JS8", ACTION_APP_JS8, radio_mode_usb_dig, -1, f_js8, N_OF(f_js8),
-     "KEYBOARD CHAT BUILT ON FT8: SLOW, BUT IT GETS THROUGH. FEW STATIONS ON THE AIR."},
+    {"FT8", "FT8", ACTION_APP_FT8, radio_mode_usb_dig, 1, HZ(f_ft8),
+     "15-SECOND DIGITAL MESSAGES FROM HAMS WORLDWIDE: CALLS, GRIDS, SIGNAL REPORTS. THE BUSIEST MODE ON THE AIR.", 0,
+     'X', radio_agc_slow, true, "THE FT8 APP"},
+    {"FT4", "FT4", ACTION_APP_FT8, radio_mode_usb_dig, 0, HZ(f_ft4),
+     "FT8'S FASTER COUSIN, 7.5-SECOND SLOTS, USED IN CONTESTS. THE FT8 APP DECODES IT.", 0,
+     'X', radio_agc_slow, true, "THE FT8 APP"},
+    {"WSPR", "WSPR", ACTION_APP_WSPR, radio_mode_usb_dig, -1, HZ(f_wspr),
+     "WEAK BEACONS: WHO IS HEARD WHERE, EVERY 2 MINUTES. THE WSPR APP CHOOSES ITS OWN BAND.", 0,
+     'X', radio_agc_slow, true, "THE WSPR APP"},
+    {"JS8", "JS8", ACTION_APP_JS8, radio_mode_usb_dig, -1, HZ(f_js8),
+     "KEYBOARD CHAT BUILT ON FT8: SLOW, BUT IT GETS THROUGH. FEW STATIONS ON THE AIR.", 0,
+     'X', radio_agc_slow, true, "THE JS8 APP"},
+    {"PSK", "PSK", ACTION_APP_PSK, radio_mode_usb_dig, -1, HZ(f_psk),
+     "PSK31: KEYBOARD CHAT, A LINE OF TEXT AT A TIME, THE CLASSIC DIGITAL CHAT. 14.070 IS THE BUSIEST.", 0,
+     'X', radio_agc_slow, true, "THE PSK APP"},
+    {"RTTY", "RTTY", ACTION_APP_RTTY, radio_mode_usb_dig, -1, HZ(f_rtty),
+     "RADIOTELETYPE: TEXT IN TWO TONES, HAMS' CONTESTS AND CHATS. BUSIEST ON CONTEST WEEKENDS.", 0,
+     'X', radio_agc_slow, true, "THE RTTY PANEL"},
+    {"OLIVIA", "Olivia", ACTION_APP_OLIVIA, radio_mode_usb_dig, -1, HZ(f_olivia),
+     "SLOW, VERY ROBUST TEXT THAT GETS THROUGH NOISE AND FADING. FEW STATIONS; WEEKENDS ARE BEST.", 0,
+     'X', radio_agc_slow, true, "THE OLIVIA APP"},
+    {"SSTV", "SSTV", ACTION_APP_SSTV, -1, -1, HZ(f_sstv),
+     "SLOW-SCAN TV: PICTURES SENT BY HAMS, ONE EVERY MINUTE OR TWO. 14.230 IS THE PLACE.", 0,
+     'X', radio_agc_slow, true, "THE SSTV APP"},
+    {"CW", "", 0, radio_mode_cw, -1, HZ(f_cw),
+     "MORSE CODE. THE MAIN SCREEN DECODES IT IN CW MODE; THE SLOWER, THE BETTER IT COPIES.", 0,
+     'X', radio_agc_fast, true, "THE MAIN SCREEN"},
+    {"RADE", "RADE", ACTION_APP_FREEDV, radio_mode_usb, -1, HZ(f_rade),
+     "FREEDV'S DIGITAL VOICE: CLEAR SPEECH, NO HISS. IT NEEDS BLUETOOTH HEADPHONES, TCI OR THE BROWSER.", 0,
+     'X', radio_agc_slow, true, "THE RADE APP"},
+    {"NAVTEX", "NavTex", ACTION_APP_NAVTEX, radio_mode_usb, -1, HZ(f_navtex),
+     "WEATHER AND NAVIGATION WARNINGS FOR SHIPS, AS TEXT. NEEDS A LONG WIRE FOR 518 KHZ.", 1000,
+     'X', radio_agc_slow, false, "THE NAVTEX APP"},
+    {"DSC", "NavTex", ACTION_APP_NAVTEX, radio_mode_usb, -1, HZ(f_dsc),
+     "SHIPS' DIGITAL SELECTIVE CALLS: DISTRESS AND SAFETY, WITH THEIR NUMBERS AND POSITIONS.", 1000,
+     'X', radio_agc_slow, false, "THE NAVTEX APP"},
+    {"WEFAX", "WeFax", ACTION_APP_WEFAX, radio_mode_usb, -1, HZ(f_wefax),
+     "WEATHER MAPS BY RADIO FROM NOAA: BOSTON, NEW ORLEANS, PT REYES. A MAP TAKES 10 MINUTES.", 1500,
+     'X', radio_agc_slow, false, "THE WEFAX APP"},
+    {"TIME SIGNAL", "", ACTION_APP_TIMESIG, radio_mode_am, -1, HZ(f_time),
+     "WWV'S TIME FROM COLORADO: THE APP SETS THE CLOCK FROM ITS SECOND TICKS. 10 MHZ DAY AND NIGHT.", 0,
+     'X', radio_agc_slow, false, "TIME SIGNAL"},
+    {"BEACONS", "", ACTION_APP_PROPAGATION, radio_mode_cw, -1, HZ(f_beacon),
+     "THE NCDXF BEACONS: 18 STATIONS ROUND THE WORLD IN TURN, SHOWING WHERE EACH BAND IS OPEN.", 0,
+     'X', radio_agc_fast, false, "PROPAGATION"},
+    {"NOAA ALERTS", "", 0, -1, -1, HZ(f_same),
+     "NOAA WEATHER RADIO ON B'S SDR: THE FORECAST, AND ITS SAME ALERTS (WARNINGS) IN THE TITLE.", 0,
+     'B', -1, false, "B ON THE SDR"},
+    {"FM RDS", "", 0, -1, -1, HZ(f_rds),
+     "AN FM STATION'S NAME, SONG AND CLOCK (RDS) ON B'S SDR. TURN B'S DIAL TO ANY STRONG STATION.", 0,
+     'B', -1, false, "B ON THE SDR"},
+    {"ACARS", "", 0, -1, -1, HZ(f_acars),
+     "AIRLINERS' TEXT MESSAGES ON 129-132 MHZ: FLIGHT, REGISTRATION, TEXT. ALL CHANNELS AT ONCE.", 0,
+     'C', -1, false, "H AIRSPACE"},
+    {"ADS-B", "", 0, -1, -1, HZ(f_adsb),
+     "AIRCRAFT POSITIONS, HEIGHTS AND FLIGHTS ON H AIRSPACE'S MAP: FROM AN SDR OR A GNS 5890 STICK.", 0,
+     'H', -1, false, "H AIRSPACE"},
+    {"DIGITAL VOICE", "", 0, -1, -1, HZ(f_dv),
+     "DMR, P25, NXDN, D-STAR AND FUSION ON B'S SDR: WHO TALKS, ON WHICH TALKGROUP. ANY NARROW FM CHANNEL.", 0,
+     'B', -1, false, "B ON THE SDR"},
+    {"METEOR", "", 0, -1, -1, HZ(f_meteor),
+     "WEATHER SATELLITES' PICTURES (LRPT) ON B'S SDR WHILE ONE PASSES: 10 MINUTES, A FEW TIMES A DAY.", 0,
+     'B', -1, false, "B ON THE SDR"},
 };
 
 #define DECODERS_N N_OF(decoders)
 
 /* The tables' rows, in the monospaced font: their heads take the same format */
 #define BAND_ROW "%c%-8.8s %-11.11s %-24.24s %-5.5s %-24.24s %-13.13s %s"   /* 97 of the row's 97 at most: RX 5 wide (X6200) */
-#define DEC_ROW  " %-12s %-9s %-5s %-20.20s %-13.13s %s"   /* D's columns in D's order, RX last: 70 of 72 */
+#define DEC_ROW  " %-12s %-9s %-5s %-20.20s %-13.13s %s"   /* D's band, then what OPEN sets, RX last: 70 of 72 */
 
 /* ---- State ---- */
 
@@ -495,9 +643,65 @@ static void show_glog(void);
 static bool tune(int32_t hz, int mode);
 static void track_start(int32_t hz, bool auto_);
 static void track_end(void);
-static void show_scan(void);
 static const target_t *target_near(int32_t hz, int32_t within);
 static const char *const rtl_mode_names[] = {"", "NFM", "AM", "WFM"};
+
+/* How the scans behave on a signal, A's X6200 and B's SDR alike (SCAN CFG; the user, 2026-11-17: "default algorithms
+ * that mimic normal scanner behaviors hop and dwell permutations", and "as simple and idiot proof user friendly for a
+ * new operator"). Three settings, and the styles that set them at once:
+ *   STEP TIME         scan_dwell_ms: each step of a band (A's 360 kHz, B's picture) watched this long when nothing
+ *                     stops it: 1, 2, 4 or 8 s
+ *   STAY ON A SIGNAL  scan_stay: DOESN'T STOP (A only marks what it finds: SEMI-AUTO), 2 S, 15 S, 1 MIN, WHILE IT TALKS
+ *                     (5 minutes at most: a carrier that never ends does not keep it for good), UNTIL YOU MOVE ON
+ *                     (held: SCAN CFG's F2 GO ON or F3 SKIP)
+ *   GO ON AFTER       scan_quiet: a signal quiet this long is left: 1, 3, 5 or 10 s
+ * A stops on a signal by its AUTO lock (track_step), B by holding its scan on the channel (rtl_scan_step) */
+enum { STY_BROWSE, STY_SCANNER, STY_SAMPLER, STY_STAY, STY_SURVEY, STY_CUSTOM, STY_N };
+enum { STAY_NONE, STAY_2S, STAY_15S, STAY_1MIN, STAY_TALKS, STAY_HOLD, STAY_N };
+static const uint32_t    stay_ms[STAY_N]   = {0, 2000, 15000, 60000, 300000, UINT32_MAX};
+static const char *const stay_word[STAY_N] = {"DOESN'T STOP", "2 S", "15 S", "1 MIN", "WHILE IT TALKS",
+                                              "UNTIL YOU MOVE ON"};
+static const uint32_t    quiet_ms[]        = {1000, 3000, 5000, 10000};
+static int               scan_stay = STAY_NONE, scan_quiet = 1;
+static const struct {
+    const char *name, *word, *about;
+    int         dwell, stay, quiet;
+} styles[STY_N] = {
+    {"BROWSE", "BROWSE", "LOOKS AROUND AND NEVER STOPS: A MOMENT ON EACH STEP OF THE BAND, WHAT IS THERE MARKED. THE "
+     "CALMEST.", 2000, STAY_NONE, 1},
+    {"SCANNER", "SCANNER", "LIKE A POLICE SCANNER: STOPS ON EACH SIGNAL, STAYS WHILE IT TALKS, GOES ON 3 S AFTER IT "
+     "STOPS.", 2000, STAY_TALKS, 1},
+    {"SAMPLER", "SAMPLER", "STOPS ON EACH SIGNAL FOR 15 S, THEN GOES ON EVEN IF IT STILL TALKS: A TASTE OF "
+     "EVERYTHING.", 2000, STAY_15S, 1},
+    {"STOP & STAY", "STAY", "STOPS ON THE FIRST SIGNAL IT FINDS AND STAYS THERE TILL YOU SAY: F2 GO ON, F3 SKIP.", 2000,
+     STAY_HOLD, 1},
+    {"SURVEY", "SURVEY", "TOUCHES EACH SIGNAL FOR 2 S AND WRITES IT IN C LOG: A QUICK LIST OF WHAT IS ON THE AIR.", 1000,
+     STAY_2S, 0},
+    {"CUSTOM", "CUSTOM", "YOUR OWN MIX OF STEP TIME, STAY AND GO ON AFTER (THE ROWS UNDER IT).", 0, 0, 0},
+};
+
+/* The style the three settings make; CUSTOM when none does */
+static int scan_style(void) {
+    for (int k = 0; k < STY_CUSTOM; k++)
+        if (styles[k].dwell == scan_dwell_ms && styles[k].stay == scan_stay &&
+            (scan_stay == STAY_NONE || scan_stay == STAY_HOLD || styles[k].quiet == scan_quiet))
+            return k;
+    return STY_CUSTOM;
+}
+
+/* A's mode as the settings have it: AUTO to stop on signals, SEMI to only mark them (MAN-OVERRIDE, a hand on the
+ * VFO, left by it too) */
+static void scan_mode_sync(void) {
+    set_mode(scan_stay == STAY_NONE ? MODE_SEMI : MODE_AUTO);
+}
+
+static void style_apply(int k) {
+    if (k < 0 || k >= STY_CUSTOM) return;
+    scan_dwell_ms = styles[k].dwell;
+    scan_stay     = styles[k].stay;
+    scan_quiet    = styles[k].quiet;
+    scan_mode_sync();
+}
 static int               rtl_mode_of(int64_t hz);
 
 /* B's channel's mode as heard: DMR, P25, D-STAR, YSF while the daemon finds it there (in NFM), else the band's */
@@ -524,6 +728,12 @@ static int rtl_mode_of(int64_t hz) {
 /* The sentry */
 static scr_t     scr;
 static sysmode_t smode;
+
+/* The title bar's word for the scans: the style, MANUAL while a hand on the VFO has the X6200 */
+static const char *scan_word(bool full) {
+    if (smode == MODE_MAN) return full ? "MANUAL" : "MAN";
+    return styles[scan_style()].word;
+}
 static routine_t routine;
 static int32_t   cursor_hz;
 static int64_t   anchor;
@@ -572,13 +782,13 @@ static bool     g_scan;                     /* F4: the log's scans, one on each 
 static int      g_hear = -1;                /* the LISTEN in force when C began playing entries (BOTH keeps the other
                                              * radio heard meanwhile), put back when it stops; -1 none */
 static uint32_t g_nx, g_nr;                 /* when each radio's log scan moves on */
-static lv_obj_t *t_log_l;
 static int     visited_i;
 static int32_t ignored[IGNORED];
 static int     n_ignored;
 static int     band_sel, dec_sel, dec_row;
 static int32_t last_tap_hz;
 static uint32_t last_tap_ms;
+static uint32_t tap_pause;              /* a tap on A's picture: AUTO's locks wait till then */
 
 /* The widgets */
 static lv_obj_t *root, *scr_obj[SCR_N];
@@ -596,11 +806,16 @@ static lv_obj_t *ab_arrow, *ab_tag;     /* PTT refused: where the A/B key is (la
 extern const lv_font_t power_sym_14;    /* the clock's: Montserrat's battery and bolt, and a plug (clock.c) */
 #define SYMBOL_PLUG "\xEF\x87\xA6"     /* U+F1E6 */
 typedef struct { lv_obj_t *frame, *cap, *line, *opt[12]; int n; } box_t;     /* opt: E SYSTEM's 9 rows the most */
-static box_t     b_mode, b_tx, b_sig, b_rout, b_band, b_prof, b_tgts;
 static lv_obj_t *tick_l[TICKS], *tgt_l[LABELS];
-static lv_obj_t *t_state_l, *t_crit_frame, *t_crit_l, *t_time_cap_l, *t_big_l, *t_sub_l, *t_time_l, *t_id_l, *t_db_l;
-static lv_obj_t *t_sig_fill, *t_noise_fill;
-static int       t_bar_y, t_bar_h;
+/* SCAN CFG: its rows (the MFK goes through them, its push or a tap changes the one chosen), what the chosen one does,
+ * and what each radio's scan does now */
+enum { CR_STYLE, CR_STEP, CR_STAY, CR_QUIET, CR_SWEEP, CR_ASTEP, CR_BSTEP, CR_BGAIN, CR_BSQL, CR_N };
+static lv_obj_t *cr_row_l[CR_N], *cr_val_l[CR_N], *cr_about_l, *cr_now_l;
+static int       cr_sel;
+static void      show_track(void);
+static void      cr_change(int r);
+static void      cr_hold(void);
+static void      cr_skip(void);
 static lv_obj_t *bd_head_l, *bd_row_l[20], *bd_about_l;
 static int       bd_rows;
 static lv_obj_t *lg_head_l, *lg_row_l[20], *lg_about_l;
@@ -1302,12 +1517,6 @@ static void opt_set(box_t *b, int i, const char *text, int how) {
     lv_obj_set_style_text_color(b->opt[i], how == 1 ? ink : how == 2 ? dim : amb, 0);
 }
 
-static void cap_set(box_t *b, bool on) {
-    lv_obj_set_style_bg_opa(b->cap, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_color(b->cap, amb, 0);
-    lv_obj_set_style_text_color(b->cap, on ? ink : amb, 0);
-}
-
 static lv_obj_t *screen_obj(void) {
     lv_obj_t *o = lv_obj_create(root);
 
@@ -1410,8 +1619,7 @@ static void head_status(char *pre, size_t pn, char *line, size_t ln, const char 
         icon = batt_sym(l_ext, l_cap, l_chg);
     }
     snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
-    static const char *const full[] = {"AUTO-SCAN", "SEMI-AUTO", "MAN-OVERRIDE"}, *const word[] = {"AUTO", "SEMI", "MAN"};
-    const char *const       *modes  = head_compact ? word : full;
+    const char *mw = scan_word(!head_compact);     /* the scans' style (SCAN CFG), MANUAL with a hand on the VFO */
 
     char dev[128];                      /* at the end, in the tags' colour */
     dev_tags(dev, sizeof(dev));
@@ -1422,11 +1630,11 @@ static void head_status(char *pre, size_t pn, char *line, size_t ln, const char 
         snprintf(f, sizeof(f), "%s %lld.%03lld.%02lld", rtl_spectrum_dev_tag(), (long long)(hz / 1000000),
                  (long long)(hz / 1000 % 1000), (long long)(hz % 1000 / 10));
         snprintf(pre, pn, "%s %s  %s  %s  %s%s", f, rtl_mode_word(hz),
-                 rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc);
+                 rx_held ? "RX ONLY" : "TX NOT LOCKED", mw, t, tc);
     } else {
         snprintf(pre, pn, "%s %s%s%s  %s  %s  %s%s", f, mode_name(cparam_i_get(cfg_cur_mode)),
                  cparam_i_get(cfg_cur_pre) ? " PRE" : "", cparam_i_get(cfg_cur_att) ? " ATT" : "",
-                 rx_held ? "RX ONLY" : "TX NOT LOCKED", modes[smode], t, tc);
+                 rx_held ? "RX ONLY" : "TX NOT LOCKED", mw, t, tc);
     }
     /* the line, room for the icon after the %, then the devices */
     snprintf(line, ln, "%s%s%s", pre, icon[0] ? "   " : "", dev);
@@ -1461,86 +1669,6 @@ static void show_head(void) {
 
         lv_obj_set_pos(batt_l, 60 + (SW - 120 - w) / 2 + p + 6, 27);
     }
-}
-
-static void show_scan(void) {
-    static const char *const modes[] = {"AUTO-SCAN", "SEMI-AUTO", "MAN-OVERRIDE"};
-    char                      s[64];
-
-    for (int i = 0; i < 3; i++) opt_set(&b_mode, i, modes[i], smode == (sysmode_t)i);
-    opt_set(&b_tx, 0, rx_held ? "SAFE" : "NOT LOCKED", 1);
-    opt_set(&b_tx, 1, "ARMED", 2);
-    opt_set(&b_tx, 2, rx_held ? "(LOCKED)" : "", 2);
-    opt_set(&b_sig, 0, blink && !trk.on ? "SEARCH_" : "SEARCH", !trk.on);
-    opt_set(&b_sig, 1, "TRACK", trk.on);
-    opt_set(&b_sig, 2, "DECODE", scr == SCR_DECODE);
-    opt_set(&b_rout, 0, "SCAN", routine == ROUT_SCAN);
-    opt_set(&b_rout, 1, "SWEEP", routine == ROUT_SWEEP);
-    {
-        int n = 0;
-        for (int i = 0; i < BANDS_N; i++) n += band_rt[i].sweep;
-        if (smode == MODE_MAN)
-            snprintf(s, sizeof(s), "KNOB HAS IT");
-        else if (routine == ROUT_SWEEP)
-            snprintf(s, sizeof(s), "%d BANDS", n);
-        else if (routine == ROUT_SCAN && scan_a_band >= 0)
-            snprintf(s, sizeof(s), "ALL OF %s", bands[scan_a_band].name);
-        else
-            snprintf(s, sizeof(s), "360 KHZ");
-        opt_set(&b_rout, 2, s, 2);
-    }
-    cap_set(&b_mode, true);
-
-    int  bi = band_of(centre);
-    char a[16], b[16];
-
-    fmt_freq(a, sizeof(a), centre - VIEW_HZ / 2);
-    fmt_freq(b, sizeof(b), centre + VIEW_HZ / 2);
-    if (bi >= 0)
-        snprintf(s, sizeof(s), "%s  %s - %s", bands[bi].name, a, b);
-    else
-        snprintf(s, sizeof(s), "%s - %s %s", a, b, centre < 2000000 ? "KHZ" : "MHZ");
-    opt_set(&b_band, 0, s, 0);
-    if (bi >= 0 && strcmp(bands[bi].name, "11 M CB") == 0) {     /* CB: the channels in the picture */
-        int lo = 0, hi = 0;
-        for (int i = 0; i < 40; i++)
-            if (llabs(cb_khz[i] * 1000LL - centre) <= VIEW_HZ / 2) {
-                if (!lo) lo = i + 1;
-                hi = i + 1;
-            }
-        snprintf(s, sizeof(s), "CB CH %d TO %d IN VIEW", lo, hi);
-    } else {
-        snprintf(s, sizeof(s), "%s", bi >= 0 ? bands[bi].hear : "384 KHZ WIDE");
-    }
-    opt_set(&b_band, 1, s, 2);
-
-    const target_t *t = target_near(cursor_hz, 3000);
-
-    cap_set(&b_prof, trk.on);
-    lv_label_set_text(b_prof.cap, trk.on ? (trk.auto_ ? "LOCKED ON" : "TRACKING") : "SIGNAL PROFILE");
-    if (trk.on) {
-        bool lost = lv_tick_get() - trk.last_seen > 1500;
-
-        opt_set(&b_prof, 0, trk.id.label, lost ? 2 : 1);
-        snprintf(s, sizeof(s), lost ? "%.1f S  LOST" : "%.1f S  +%.0f DB", trk.heard_s, trk.con);
-        opt_set(&b_prof, 1, s, 0);
-    } else if (t) {
-        ident_t id;
-
-        identify_ex(t->hz, &id, false);
-        opt_set(&b_prof, 0, profile(t), 1);
-        snprintf(s, sizeof(s), "%s  +%.0f DB", id.label, t->con);
-        opt_set(&b_prof, 1, s, 0);
-    } else {
-        opt_set(&b_prof, 0, "NO TARGET", 2);
-        opt_set(&b_prof, 1, "A'S MFK PUSH LOCKS ON", 2);
-    }
-
-    snprintf(s, sizeof(s), "%02d LIVE  /  %02d LOGGED", nlive, logged);
-    opt_set(&b_tgts, 0, s, 0);
-    snprintf(s, sizeof(s), "NOISE REJECTED: %d", rejected);
-    if (n_ignored) snprintf(s + strlen(s), sizeof(s) - strlen(s), "  IGN %d", n_ignored);
-    opt_set(&b_tgts, 1, s, 2);
 }
 
 static void show_labels(void) {
@@ -1580,32 +1708,6 @@ static void show_labels(void) {
     for (; l < LABELS; l++) lv_obj_add_flag(tgt_l[l], LV_OBJ_FLAG_HIDDEN);
 }
 
-/* SCAN CFG's last lines: the latest the scans locked on, A's and C's (B LOG has them all) */
-static void show_log(void) {
-    char s[320] = "";
-
-    for (int i = 0; i < nhits && i < 3; i++) {
-        struct tm tm;
-        char      t[8];
-
-        localtime_r(&hits[i].last, &tm);
-        strftime(t, sizeof(t), "%H:%M", &tm);
-        snprintf(s + strlen(s), sizeof(s) - strlen(s), "%s %-5s %4lld.%03lld %.22s\n", t, hits[i].rtl ? rtl_spectrum_dev_tag() : "X6200",
-                 (long long)(hits[i].hz / 1000000), (long long)(hits[i].hz / 1000 % 1000), hits[i].what);
-    }
-    lv_label_set_text(t_log_l, s);
-}
-
-/* A tap on the locked frequency (SCAN CFG from A): never locked on again until the Sentry closes */
-static void ignore_tap_cb(lv_event_t *e) {
-    (void)e;
-    if (scr != SCR_TRACK || cfg_from != SCR_SCAN || !trk.on) return;
-    if (n_ignored < IGNORED) ignored[n_ignored++] = trk.hz;
-    osd("IGNORED", "NOT LOCKED ON AGAIN UNTIL THE SENTRY CLOSES.", -1);
-    track_end();
-}
-
-static void show_cfg_rtl(void);
 static void show_walkie(void);
 static void walkie_step(void);
 static void walkie_ch(int dir, int to);
@@ -1647,61 +1749,6 @@ static bool       g_gpu;            /* G held up: its spectrum and voiceprint dr
 static bool       g_dirty = true;   /* and something of them changed since they were drawn */
 static int        vp_head;          /* the GPU's voiceprint: its oldest column in the ring (the next written) */
 static void walkie_arm(bool on);
-
-static void show_track(void) {
-    char s[96];
-
-    if (cfg_from == SCR_RTL) {
-        show_cfg_rtl();
-        return;
-    }
-    lv_label_set_text(b_mode.cap, "SYSTEM MODE");
-    lv_label_set_text(b_sig.cap, "SIGNAL STATUS");
-    lv_label_set_text(b_rout.cap, "SCAN ROUTINE");
-    lv_label_set_text(b_band.cap, "TARGET BAND");
-    lv_label_set_text(b_tgts.cap, "TARGETS");
-    show_scan();
-    show_log();
-
-    if (!trk.on) {
-        lv_label_set_text(t_state_l, "NO TARGET");
-        lv_label_set_text(t_crit_l, "SEARCHING");
-        lv_label_set_text(t_big_l, "---");
-        lv_label_set_text(t_sub_l, "");
-        lv_label_set_text(t_time_l, "0.00");
-        lv_label_set_text(t_id_l, "AUTO (F1) LOCKS ON WHAT A'S SCAN FINDS");
-        lv_label_set_text(t_db_l, "");
-        lv_obj_set_height(t_sig_fill, 0);
-        return;
-    }
-    bool lost = lv_tick_get() - trk.last_seen > 1500;
-
-    lv_label_set_text(t_state_l, lost ? "TARGET\nLOST" : trk.auto_ ? "TARGET\nLOCKED" : "TARGET\nTRACKED");
-    lv_label_set_text(t_crit_l, lost ? "SIGNAL LOST" : trk.con >= 20 ? "STRONG SIGNAL" : trk.con >= 10 ? "SIGNAL" : "WEAK SIGNAL");
-    bool inv = (lost || trk.con >= 20) ? blink : true;
-    lv_obj_set_style_bg_opa(t_crit_l, inv ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-    lv_obj_set_style_text_color(t_crit_l, inv ? ink : amb, 0);
-
-    lv_label_set_text(t_big_l, trk.id.label);
-    snprintf(s, sizeof(s), "%d.%03d.%d %s", trk.id.tune_hz / 1000000, (trk.id.tune_hz / 1000) % 1000,
-             (trk.id.tune_hz % 1000) / 100, mode_name(cparam_i_get(cfg_cur_mode)));
-    lv_label_set_text(t_sub_l, s);
-    snprintf(s, sizeof(s), "%.2f", trk.heard_s);
-    lv_label_set_text(t_time_l, s);
-    snprintf(s, sizeof(s), "ID: %s", trk.id.name);
-    lv_label_set_text(t_id_l, s);
-    snprintf(s, sizeof(s), "+%.0f DB NOW  +%.0f PEAK%s%s", trk.con > 0 ? trk.con : 0, trk.peak, trk.held ? "  HELD" : "",
-             recorder_is_on() ? "  REC" : "");
-    lv_label_set_text(t_db_l, s);
-
-    float sig = trk.con / 40, noise = (floor_med + 130) / 50;
-    sig   = sig < 0 ? 0 : sig > 1 ? 1 : sig;
-    noise = noise < 0 ? 0 : noise > 1 ? 1 : noise;
-    lv_obj_set_height(t_sig_fill, (int)(sig * t_bar_h));
-    lv_obj_set_y(t_sig_fill, t_bar_y + t_bar_h - (int)(sig * t_bar_h));
-    lv_obj_set_height(t_noise_fill, (int)(noise * t_bar_h));
-    lv_obj_set_y(t_noise_fill, t_bar_y + t_bar_h - (int)(noise * t_bar_h));
-}
 
 /* NOW for a band: what the Sentry heard there in the last half hour, else what the sun says at the station's QTH.
  * One set of words on C and D: "3 SIG LIVE", "3 SIG 12 MIN", OPEN, CLOSED, OPENING, CLOSING, LOCAL, SET QTH */
@@ -1758,8 +1805,49 @@ static void band_now(int i, char *s, size_t n) {
     }
 }
 
+/* A frequency's band in D: the one it is in, or the one listening there (WWV's 10 and 15 MHz, just outside 30 M and
+ * 19 M BC); -1 none (WWV's 2.5, 20 and 25 MHz, DSC's 2187.5 kHz) */
+static int band_for(int64_t hz) {
+    int i = band_of(hz);
+
+    for (int k = 0; i < 0 && k < BANDS_N; k++)
+        if (llabs(hz - bands[k].listen_hz) < 5000) i = k;
+    return i;
+}
+
+/* The radio that receives D's band i: its RX column, and what LISTEN opens */
+static int band_rx(int i) {
+    return band_uses_rtl(i) ? RX_SDR : cfg_is_valid_hw_freq(bands[i].listen_hz) ? RX_X6200 : RX_NONE;
+}
+
+/* D's last line: the radio that receives the band and what LISTEN sets on it, who may send there, and E's types in
+ * it (the two screens in sync: E's rows name D's bands) */
+static void band_more(int i, char *s, size_t n) {
+    const band_t *b  = &bands[i];
+    rxset_t       st = rx_setup(b->listen_hz, radio_agc_auto);
+    char          set[32], tx[32], e[96] = "";
+
+    if (b->listen_hz == ADSB_HZ) st.gain = -3;
+    size_t        k = 0;
+    int           rx = band_rx(i);
+
+    rx_setup_text(&st, set, sizeof(set));
+    tx_text(b->listen_hz, true, tx, sizeof(tx));
+    for (int d = 0; d < DECODERS_N; d++)
+        for (int j = 0; j < decoders[d].n; j++) {
+            if (band_for(decoders[d].hz[j]) != i) continue;
+            if (k + strlen(decoders[d].name) + 2 < sizeof(e)) k += snprintf(e + k, sizeof(e) - k, " %s", decoders[d].name);
+            break;
+        }
+    if (rx == RX_NONE)
+        snprintf(s, n, "NO RADIO HERE TUNES IT%s%s", e[0] ? " | E:" : "", e);
+    else
+        snprintf(s, n, "RX %s, %s | %s%s%s", rx == RX_SDR ? rtl_spectrum_dev_tag() : "X6200", set, tx,
+                 e[0] ? " | E:" : "", e);
+}
+
 static void show_bands(void) {
-    char s[128], now[16];
+    char s[400], now[16];
     int  top = band_sel - bd_rows / 2;
 
     if (top > BANDS_N - bd_rows) top = BANDS_N - bd_rows;
@@ -1791,17 +1879,40 @@ static void show_bands(void) {
         lv_obj_set_style_bg_opa(bd_row_l[r], i == band_sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(bd_row_l[r], i == band_sel ? ink : amb, 0);
     }
-    snprintf(s, sizeof(s), "%s: %s", bands[band_sel].name, bands[band_sel].about);
+    {
+        char more[200];
+
+        band_more(band_sel, more, sizeof(more));
+        snprintf(s, sizeof(s), "%s: %s\n%s", bands[band_sel].name, bands[band_sel].about, more);
+    }
     for (char *c = s; *c; c++)
         if (*c >= 'a' && *c <= 'z') *c -= 32;
     lv_label_set_text(bd_about_l, s);
 }
 
+/* E's TYPE list: its rows shown, the chosen one kept in the middle once the list is longer than the box */
+static int dec_top(void) {
+    int top = dec_sel - d_sel.n / 2;
+
+    if (top > DECODERS_N - d_sel.n) top = DECODERS_N - d_sel.n;
+    return top < 0 ? 0 : top;
+}
+
+/* The radio a type is received on, as its RX column says it: the X6200's apps, else the SDR's (by its name, "SDR"
+ * with none plugged in; ADS-B's GNS 5890 stick when only it is there) */
+static const char *dec_rx(const decoder_t *d, int32_t f) {
+    if (d->rx == 'X') return cfg_is_valid_hw_freq(f) ? "X6200" : "";
+    if (d->rx == 'H' && !sdr_here && adsb_here) return "STICK";
+    return rtl_spectrum_dev_tag();
+}
+
 static void show_decode(void) {
     const decoder_t *d = &decoders[dec_sel];
-    char             s[96], now[16];
+    char             s[128], now[16];
+    int              top = dec_top();
 
-    for (int i = 0; i < DECODERS_N && i < d_sel.n; i++) opt_set(&d_sel, i, decoders[i].name, i == dec_sel);
+    for (int r = 0; r < d_sel.n; r++)
+        opt_set(&d_sel, r, top + r < DECODERS_N ? decoders[top + r].name : "", top + r == dec_sel);
     for (int r = 0; r < 12; r++) {
         if (r >= d->n) {
             lv_label_set_text(d_row_l[r], "");
@@ -1809,45 +1920,43 @@ static void show_decode(void) {
             continue;
         }
         int32_t f  = d->hz[r];
-        int     bi = band_of(f);
-        char    fs[16];
+        int     bi = band_for(f);
+        char    fs[16], set[32];
+        rxset_t st = rx_setup_on(f, d->agc, d->rx != 'X');
 
         if (f < 1000000)
             snprintf(fs, sizeof(fs), "%d.%d KHZ", f / 1000, (f % 1000) / 100);
         else
             snprintf(fs, sizeof(fs), "%d.%04d", f / 1000000, (f % 1000000) / 100);
-        if (bi >= 0)
-            band_now(bi, now, sizeof(now));
-        else
-            snprintf(now, sizeof(now), "NO BAND");     /* a frequency added without one in bands[]: says so */
-        char rx[24];                    /* the radio it is heard on: the X6200 (its apps), else the stick */
-        if (cfg_is_valid_hw_freq(f)) snprintf(rx, sizeof(rx), "X6200");
-        else if (f < rtl_spectrum_min_hz() || f > rtl_spectrum_max_hz()) rx[0] = 0;
-        else if (r != dec_row) snprintf(rx, sizeof(rx), "#%s %s#", tag_hex, rtl_spectrum_dev_tag());
-        else snprintf(rx, sizeof(rx), "%s", rtl_spectrum_dev_tag());
+        if (bi >= 0) band_now(bi, now, sizeof(now));
+        else now[0] = 0;                /* WWV's 2.5, 20 and 25 MHz, DSC's 2187.5: in none of D's bands */
+        if (d->rx == 'H') st.gain = -3;     /* dump1090's gain, or the stick's */
+        rx_setup_text(&st, set, sizeof(set));
+        const char *who = dec_rx(d, f);
+        char        rx[24];             /* the radio it is heard on: the X6200 (its apps), else the SDR, in the tags'
+                                         * orange but on the chosen row */
+        if (d->rx == 'X' || r == dec_row) snprintf(rx, sizeof(rx), "%s", who);
+        else snprintf(rx, sizeof(rx), "#%s %s#", tag_hex, who);
         snprintf(s, sizeof(s), DEC_ROW, fs, bi >= 0 ? bands[bi].name : "", bi >= 0 ? best_name(bands[bi].when) : "",
-                 bi >= 0 ? bands[bi].ant : "", now, rx);
+                 set, now, rx);
         lv_label_set_text(d_row_l[r], s);
         lv_obj_set_style_bg_opa(d_row_l[r], r == dec_row ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(d_row_l[r], r == dec_row ? ink : amb, 0);
     }
     opt_set(&d_how, 0, d->about, 0);
-    snprintf(s, sizeof(s), "%s", d->app == ACTION_APP_FT8    ? "THE FT8 APP"
-                                 : d->app == ACTION_APP_WSPR  ? "THE WSPR APP"
-                                 : d->app == ACTION_APP_SSTV  ? "THE SSTV APP"
-                                 : d->app == ACTION_APP_NAVTEX ? "THE NAVTEX APP"
-                                 : d->app == ACTION_APP_WEFAX ? "THE WEFAX APP"
-                                 : d->app == ACTION_APP_JS8   ? "THE JS8 APP"
-                                                              : "THE MAIN SCREEN");   /* in CW: the text says so */
-    opt_set(&d_ant, 0, s, 0);
-    opt_set(&d_ant, 1, "F2 OR PRESS: OPEN", 2);
+    opt_set(&d_ant, 0, d->opens, 0);
     {
-        int bi = dec_row < d->n ? band_of(d->hz[dec_row]) : -1;
+        int32_t f = dec_row < d->n ? d->hz[dec_row] : 0;
+        char    tx[32];
+
+        tx_text(f, d->two_way, tx, sizeof(tx));
+        snprintf(s, sizeof(s), "%s: %s", dec_rx(d, f), strcmp(tx, "RX ONLY") ? "RX AND TX" : "RX ONLY");
+        opt_set(&d_ant, 1, s, 0);
+        int bi = f ? band_for(f) : -1;
         opt_set(&d_now, 0, bi >= 0 ? bands[bi].ant : "", 0);
         opt_set(&d_now, 1, bi >= 0 ? bands[bi].name : "", 2);
     }
 }
-
 /* F SYSTEM's load (the user: "on F the SYSTEM screen... add a CPU, GPU, and RAM display"): the processor's four cores
  * (/proc/stat, its clock from cpufreq), the Mali-400 and the memory (MemAvailable), each a second, a bar in the
  * spectrum's ramp beside each. The kernel gives no busy figure for the Mali-400, only the clock its governor sets from
@@ -2625,10 +2734,10 @@ static void show_a_boxes(void) {
         identify_ex(tg[b].hz, &id, false);
         snprintf(t, sizeof(t), "%d.%03d %s", tg[b].hz / 1000000, (tg[b].hz / 1000) % 1000, id.label);
         opt_set(&r_sig, 0, t, 0);
-        snprintf(t, sizeof(t), "+%.0f DB  %s", tg[b].con, smode == MODE_AUTO ? "AUTO" : smode == MODE_SEMI ? "SEMI" : "MANUAL");
+        snprintf(t, sizeof(t), "+%.0f DB  %s", tg[b].con, scan_word(false));
     } else {
         opt_set(&r_sig, 0, "ONLY NOISE", 0);
-        snprintf(t, sizeof(t), "%s", smode == MODE_AUTO ? "AUTO-SCAN" : smode == MODE_SEMI ? "SEMI-AUTO" : "MAN-OVERRIDE");
+        snprintf(t, sizeof(t), "SCAN STYLE: %s", scan_word(true));
     }
     opt_set(&r_sig, 1, t, 2);
     /* the stick's half, split: why it is empty, as C says */
@@ -3382,9 +3491,27 @@ static void rtl_want(bool on) {
  * nine tenths of a picture on so nothing falls between two; the last one ends at the band's top. A band within one
  * picture is just shown. Listening, the speaker goes to the middle of each new picture and then to its strongest
  * signal, once its rows are in */
+/* B's scan stopped on a signal (SCAN CFG's STAY ON A SIGNAL): its channel, since when, when it last talked; held: till
+ * SCAN CFG's F2 GO ON or F3 SKIP. And the channels F3 SKIP passed over, till the Sentry closes */
+static struct { bool on, held; int64_t hz; uint32_t start, heard; } b_stop;
+static int64_t b_skip[16];
+static int     b_nskip;
+#define B_TALK_DB 10                    /* B's channel this far over its picture's noise talks (B's squelch, when set) */
+
+static bool b_skipped(int64_t hz) {
+    for (int i = 0; i < b_nskip; i++)
+        if (llabs(b_skip[i] - hz) < rtl_step_of(hz)) return true;
+    return false;
+}
+
+static bool b_talking(void) {
+    return param_i_get(cfg_rtl_sql) ? rtl_spectrum_squelch_open() : rtl_spectrum_level() >= B_TALK_DB;
+}
+
 static void rtl_scan_set(bool on) {
     if (on == rtl_scan) return;
-    rtl_scan = on;
+    rtl_scan  = on;
+    b_stop.on = false;
     if (on) {
         scan_next = 0;                  /* at once: to the band's low end */
         scan_pick = 0;
@@ -3402,15 +3529,34 @@ static void rtl_scan_step(void) {
     if (!rtl_scan || rtl_spectrum_state() != RTL_SPEC_ON || (scr == SCR_LOG && g_onr >= 0)) return;
     if (scan_pick && now >= scan_pick) {
         scan_pick = 0;
-        if (rtl_best) {                 /* the picture's strongest: locked on, into G's log */
+        if (rtl_best && !b_skipped(rtl_snap(rtl_best))) {  /* the picture's strongest (10 dB over its noise), not
+                                                             * skipped: into C's log, B's channel to it, heard if B is */
             int64_t hz = rtl_snap(rtl_best);
 
             hit_add(hz, rtl_mode_of(hz), true, rtl_name(hz), rtl_best_db);
-        }
-        if (rtl_best) {                 /* F's channel to it; heard if the stick is */
-            listen_hz = rtl_snap(rtl_best);
+            listen_hz = hz;
             if (listen_rtl) rtl_spectrum_listen(listen_hz, rtl_mode_of(listen_hz));
             show_head();
+            if (scan_stay != STAY_NONE) {   /* and stopped there, as the style says */
+                b_stop.on    = true;
+                b_stop.held  = scan_stay == STAY_HOLD;
+                b_stop.hz    = hz;
+                b_stop.start = b_stop.heard = now;
+            }
+        }
+    }
+    if (b_stop.on) {                    /* stopped: while it talks (or as long as STAY says), or held */
+        if (listen_hz != b_stop.hz) {
+            b_stop.on = false;          /* B's channel moved by hand: on from there */
+        } else {
+            uint32_t stay = stay_ms[scan_stay];
+
+            if (b_talking()) b_stop.heard = now;
+            if (b_stop.held ||
+                (now - b_stop.heard <= quiet_ms[scan_quiet] && (stay == UINT32_MAX || now - b_stop.start <= stay)))
+                return;
+            b_stop.on = false;
+            scan_next = now;            /* quiet, or its time up: on at once */
         }
     }
     if (scan_next && now < scan_next) return;
@@ -4111,17 +4257,24 @@ static int vol_bar(void) {
 }
 
 static void show_legend(void) {
-    static const char *const mfk[SCR_N] = {"PAN, PUSH STRONGEST", "NEXT TARGET, PUSH HOLD", "BAND, PUSH LISTEN",
+    static const char *const mfk[SCR_N] = {"PAN, PUSH STRONGEST", "ROW, PUSH CHANGE", "BAND, PUSH LISTEN",
                                            "FREQ, PUSH OPEN", "ITEM, PUSH OPEN", "PAN, PUSH STRONGEST",
                                            "SIGNAL, PUSH LISTEN", "GROUP, PUSH CB 19"};
 
     char v[24];
 
     vol_text(v, sizeof(v));
-    lv_label_set_text_fmt(legend_l, "VFO: %s | MFK: %s | RING: SCREEN | VOL: %s %s, PUSH %s | GEN: HELP",
-                          "TUNE",
-                          scr == SCR_TRACK && cfg_from == SCR_RTL ? "-" : mfk[scr], vol_short[vol_fn], v,
-                          vol_short[(vol_fn + 1) % 3]);
+    /* VOL names its radio: E said VOLUME 0 while A said VOLUME 2 (2026-11-17), the SDR's and the X6200's. Past the
+     * line's 98 characters (RF GAIN's) without what its push gives: the VOL pop-up says it */
+    char        l[160];
+    const char *who = vol_stick() ? rtl_spectrum_dev_tag() : "X6200";
+
+    snprintf(l, sizeof(l), "VFO: TUNE | MFK: %s | RING: SCREEN | VOL: %s %s %s, PUSH %s | GEN: HELP", mfk[scr], who,
+             vol_short[vol_fn], v, vol_short[(vol_fn + 1) % 3]);
+    if (strlen(l) > 98)
+        snprintf(l, sizeof(l), "VFO: TUNE | MFK: %s | RING: SCREEN | VOL: %s %s %s | GEN: HELP", mfk[scr], who,
+                 vol_short[vol_fn], v);
+    lv_label_set_text(legend_l, l);
 }
 
 static void osd_hide_cb(lv_timer_t *t) {
@@ -4260,96 +4413,6 @@ static void show_keys(void) {
         lv_obj_set_style_text_color(key_l[i], lit ? amb : dim, 0);     /* dimmed: nothing to do */
         lv_obj_set_style_border_color(key_l[i], btn[i].disabled ? dim : amb, 0);
     }
-}
-
-/* SCAN CFG opened from C: the stick as A's boxes show the X6200, and C's scan as the lock below them */
-static void show_cfg_rtl(void) {
-    char             t[64], tn[16], f[16];
-    int              g = param_i_get(cfg_rtl_gain), q = param_i_get(cfg_rtl_sql), seen = 0;
-    static int64_t   pick;
-    static uint32_t  pick_ms;
-    static const char *const steps[] = {"12.5 KHZ", "25 KHZ", "100 KHZ", "500 KHZ", "1 MHZ"};
-
-    lv_label_set_text_fmt(b_mode.cap, "THE %s", rtl_spectrum_dev_tag());
-    lv_label_set_text(b_sig.cap, "SIGNAL STATUS");
-    lv_label_set_text(b_rout.cap, "SCAN ROUTINE");
-    lv_label_set_text(b_band.cap, "TARGET BAND");
-    lv_label_set_text(b_prof.cap, "SIGNAL PROFILE");
-    lv_label_set_text(b_tgts.cap, "TARGETS");
-    rtl_spectrum_tuner(tn, sizeof(tn));
-    if (rtl_spectrum_dev() == RTL_DEV_RTL || rtl_spectrum_dev() == RTL_DEV_NONE) {
-        snprintf(t, sizeof(t), "%s %s", rtl_spectrum_dev_name(), tn);
-    } else {                            /* the model says it: "HACKRF-ONE" as HACKRF ONE */
-        snprintf(t, sizeof(t), "%s", tn[0] ? tn : rtl_spectrum_dev_name());
-        for (char *c = t; *c; c++) if (*c == '-') *c = ' ';
-    }
-    opt_set(&b_mode, 0, t, 0);
-    if (g < 0) snprintf(t, sizeof(t), "GAIN AUTO");
-    else snprintf(t, sizeof(t), "GAIN %d.%d DB", g / 10, g % 10);
-    opt_set(&b_mode, 1, t, 2);
-    if (q) snprintf(t, sizeof(t), "SQUELCH %d DB", q);
-    else snprintf(t, sizeof(t), "SQUELCH OFF");
-    opt_set(&b_mode, 2, t, 2);
-    cap_set(&b_mode, true);
-    opt_set(&b_tx, 0, rx_held ? "SAFE" : "NOT LOCKED", 1);
-    opt_set(&b_tx, 1, "ARMED", 2);
-    opt_set(&b_tx, 2, rx_held ? "(LOCKED)" : "", 2);
-    opt_set(&b_sig, 0, rtl_scan ? (blink ? "SCANNING_" : "SCANNING") : "HOLDING", rtl_scan);
-    opt_set(&b_sig, 1, listen_rtl ? "HEARD" : "MUTED", listen_rtl);
-    opt_set(&b_sig, 2, listen_rtl && !rtl_spectrum_squelch_open() ? "SQUELCHED" : "", 2);
-    opt_set(&b_rout, 0, "SCAN", rtl_scan);
-    snprintf(t, sizeof(t), "DWELL %d S", scan_dwell_ms / 1000);
-    opt_set(&b_rout, 1, t, 2);
-    snprintf(t, sizeof(t), "STEP %s", steps[rtl_step]);
-    opt_set(&b_rout, 2, t, 2);
-    {
-        char lo[16], hi[16];
-
-        mhz_short(lo, sizeof(lo), f_lo());
-        mhz_short(hi, sizeof(hi), f_hi());
-        snprintf(t, sizeof(t), "%s  %s - %s", f_name(), lo, hi);
-        opt_set(&b_band, 0, t, 0);
-        opt_set(&b_band, 1, f_about(), 2);
-    }
-    if (rtl_best) {
-        fmt_mhz(f, sizeof(f), rtl_best, 3);
-        snprintf(t, sizeof(t), "%s %s", rtl_name(rtl_best), rtl_mode_names[rtl_mode_of(rtl_best)]);
-        opt_set(&b_prof, 0, t, 1);
-        snprintf(t, sizeof(t), "%s  %.0f DB", f, rtl_best_db);
-        opt_set(&b_prof, 1, t, 0);
-    } else {
-        opt_set(&b_prof, 0, "NO SIGNAL", 2);
-        opt_set(&b_prof, 1, "", 0);
-    }
-    for (int i = 0; i < nhits; i++) seen += hits[i].rtl;
-    snprintf(t, sizeof(t), "%02d LOGGED ON THE %s", seen, rtl_spectrum_dev_tag());
-    opt_set(&b_tgts, 0, t, 0);
-    opt_set(&b_tgts, 1, "C LOG HAS THEM", 2);
-    /* the lock: C's channel and its scan's pick */
-    if (rtl_best && llabs(rtl_best - pick) > rtl_step_of(rtl_best)) {
-        pick    = rtl_best;
-        pick_ms = lv_tick_get();
-    }
-    lv_label_set_text(t_state_l, rtl_best ? "SIGNAL\nPICKED" : "NO\nSIGNAL");
-    lv_label_set_text(t_crit_l, rtl_scan ? "SCANNING" : listen_rtl ? "LISTENING" : "HOLDING");
-    lv_obj_set_style_bg_opa(t_crit_l, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_text_color(t_crit_l, amb, 0);
-    fmt_mhz(f, sizeof(f), listen_hz ? listen_hz : rtl_hz, 3);
-    lv_label_set_text(t_big_l, f);
-    snprintf(t, sizeof(t), "B'S CHANNEL, %s %s", rtl_mode_names[rtl_mode_of(listen_hz ? listen_hz : rtl_hz)],
-             listen_rtl ? "HEARD" : "MUTED");
-    lv_label_set_text(t_sub_l, t);
-    snprintf(t, sizeof(t), "%.1f", rtl_best ? (lv_tick_get() - pick_ms) / 1000.0 : 0.0);
-    lv_label_set_text(t_time_l, t);
-    lv_label_set_text(t_id_l, rtl_scan ? "B'S SCAN GOES ON BEHIND THE OTHER SCREENS" : "B'S F1 SCANS ITS BAND");
-    snprintf(t, sizeof(t), rtl_best ? "LEVEL %.0f DB" : "", rtl_best_db);
-    lv_label_set_text(t_db_l, t);
-    float sig = rtl_best ? (rtl_best_db + 100) / 60 : 0;
-    sig = sig < 0 ? 0 : sig > 1 ? 1 : sig;
-    lv_obj_set_height(t_sig_fill, (int)(sig * t_bar_h));
-    lv_obj_set_y(t_sig_fill, t_bar_y + t_bar_h - (int)(sig * t_bar_h));
-    lv_obj_set_height(t_noise_fill, 0);
-    show_log();
 }
 
 static char scr_letter(scr_t s) {
@@ -4756,7 +4819,7 @@ static void g_scan_set(bool on) {
         g_nx = g_nr = 0;
     } else {
         if (routine == ROUT_SCAN) set_routine(ROUT_BAND);
-        if (smode == MODE_AUTO) set_mode(MODE_SEMI);
+        if (smode != MODE_MAN) scan_mode_sync();       /* the style's own again (it set SEMI before) */
         rtl_scan_set(false);
         g_stop_all();
     }
@@ -4956,6 +5019,7 @@ static void track_start(int32_t hz, bool auto_) {
     trk.hz        = hz;
     trk.id        = id;
     trk.start     = trk.last_seen = trk.last_ms = lv_tick_get();
+    trk.held      = auto_ && scan_stay == STAY_HOLD;      /* STOP & STAY: there till F2 or F3 in SCAN CFG */
     cursor_hz     = hz;
     logged++;
     visit(hz);
@@ -5001,11 +5065,12 @@ static void track_step(void) {
         }
     }
     trk.last_ms = now;
-    /* on a lock: DWELL_MS watching one place; scanning or sweeping, the scans' dwell (C's F5, SCAN CFG's DWELL): 20 s
-     * on each FM station made A's scan of FM BC look stuck */
-    uint32_t stay = routine == ROUT_BAND ? DWELL_MS : (uint32_t)scan_dwell_ms;
+    /* on a lock: as SCAN CFG's STAY ON A SIGNAL and GO ON AFTER say (DOESN'T STOP, with a lock C's log scan made AUTO
+     * for: the step time) */
+    uint32_t stay = scan_stay == STAY_NONE ? (uint32_t)scan_dwell_ms : stay_ms[scan_stay];
 
-    if (smode == MODE_AUTO && !trk.held && (now - trk.last_seen > LOST_MS || now - trk.start > stay))
+    if (smode == MODE_AUTO && !trk.held &&
+        (now - trk.last_seen > quiet_ms[scan_quiet] || (stay != UINT32_MAX && now - trk.start > stay)))
         track_end();
 }
 
@@ -5050,13 +5115,14 @@ static void a_scan_set(bool on) {
         return;
     }
     scan_a_band = i;
-    if (smode == MODE_MAN) smode = MODE_SEMI;
+    if (smode == MODE_MAN) smode = scan_stay == STAY_NONE ? MODE_SEMI : MODE_AUTO;     /* the style's own again */
     set_routine(ROUT_SCAN);
     char t[24];
     snprintf(t, sizeof(t), "SCAN: %s", bands[i].name);
-    osd(t, smode == MODE_AUTO ? "THE BAND END TO END, 360 KHZ AT A TIME, LOCKING ON WHAT IT FINDS (AUTO)."
-                              : "THE BAND END TO END, 360 KHZ AT A TIME, MARKING WHAT IT FINDS (SEMI: SCAN CFG F1 "
-                                "FOR AUTO).", -1);
+    osd(t, smode == MODE_AUTO ? "THE BAND END TO END, 360 KHZ AT A TIME, STOPPING ON WHAT IT FINDS AS SCAN CFG'S "
+                                "STYLE SAYS."
+                              : "THE BAND END TO END, 360 KHZ AT A TIME, MARKING WHAT IT FINDS (BROWSE: SCAN CFG'S "
+                                "STYLE MAKES IT STOP).", -1);
 }
 
 /* AUTO: lock on the strongest target not ignored nor seen lately, in the routine's place; SWEEP hops on */
@@ -5085,7 +5151,7 @@ static void sentry_step(void) {
         }
         return;
     }
-    if (smode != MODE_AUTO || since_move < SETTLE_FRAMES) return;
+    if (smode != MODE_AUTO || since_move < SETTLE_FRAMES || (int32_t)(now - tap_pause) < 0) return;
     for (int i = 0; i < ntg; i++) {
         if (tg[i].ignored || tg[i].con < LOCK_DB || was_visited(tg[i].hz)) continue;
         if (routine != ROUT_SWEEP && anchor && llabs(tg[i].hz - anchor) > VIEW_HZ / 2) continue;
@@ -5097,19 +5163,6 @@ static void sentry_step(void) {
     }
 }
 
-static void move_cursor(int dir) {
-    int     best = -1;
-    int64_t from = cursor_hz;
-
-    if (!centre) return;
-    for (int i = 0; i < ntg; i++) {
-        int64_t d = (int64_t)(tg[i].hz - from) * dir;
-        if (!tg[i].ignored && d > bin_hz && (best < 0 || d < (int64_t)(tg[best].hz - from) * dir)) best = i;
-    }
-    cursor_hz = best >= 0 ? tg[best].hz : (int32_t)(from + dir * 5000);
-    if (llabs(cursor_hz - centre) > VIEW_HZ / 2) cursor_hz = (int32_t)(centre + dir * VIEW_HZ / 2);
-}
-
 static void set_mode(sysmode_t m) {
     smode = m;
     if (m == MODE_AUTO) {
@@ -5119,15 +5172,21 @@ static void set_mode(sysmode_t m) {
     show_screen();
 }
 
-/* SCAN CFG's F1 (from A): AUTO and SEMI by turns; MAN-OVERRIDE comes only from turning the VFO, and goes to SEMI.
- * Each said in words as it is chosen */
-static void a_mode_next(void) {
-    set_mode(smode == MODE_SEMI ? MODE_AUTO : MODE_SEMI);
-    if (smode == MODE_AUTO)
-        osd("AUTO-SCAN", "LOCKS ON EACH SIGNAL IT FINDS BY ITSELF, LISTENS A WHILE, THEN GOES ON (WITH A'S SCAN, ALONG "
-                         "THE BAND).", -1);
-    else
-        osd("SEMI-AUTO", "MARKS THE SIGNALS IT FINDS AND WAITS: A'S MFK PUSH OR A TAP LOCKS ON ONE.", -1);
+/* SCAN CFG's SWEEP row: the X6200 hops between D's marked bands, the step time each (not along one band: A's F1, the
+ * two easily taken for each other); the bands named as it starts */
+static void a_sweep_toggle(void) {
+    static char t[200];
+    int         n = snprintf(t, sizeof(t), "THE X6200 HOPS BETWEEN D'S MARKED BANDS, THE STEP TIME EACH (A'S F1 "
+                                           "SCANS ONE BAND END TO END INSTEAD):");
+
+    set_routine(routine == ROUT_SWEEP ? ROUT_BAND : ROUT_SWEEP);
+    for (int b = 0, any = 0; b < BANDS_N && n < (int)sizeof(t) - 16; b++)
+        if (band_rt[b].sweep && cfg_is_valid_hw_freq(bands[b].listen_hz))
+            n += snprintf(t + n, sizeof(t) - n, "%s %s", any++ ? "," : "", bands[b].name);
+    if (routine == ROUT_SWEEP && sweep_next_band(-1) < 0)
+        snprintf(t, sizeof(t), "NO BAND IS MARKED IN D BANDS (F3 THERE): IT STAYS WHERE IT IS.");
+    osd(routine == ROUT_SWEEP ? "SWEEP ON" : "SWEEP OFF",
+        routine == ROUT_SWEEP ? t : "THE X6200 STAYS ON THE 360 KHZ AT THE DIAL (A'S F1 SCANS ITS BAND).", -1);
 }
 
 static void set_routine(routine_t r) {
@@ -5319,28 +5378,16 @@ static const char *f_label(int k) {
         case SCR_WALKIE:
             walkie_key_label(k, s, sizeof(s));
             return s;
-        case SCR_TRACK:         /* SCAN CFG: A's settings and its lock, or C's stick */
-            if (cfg_from == SCR_SCAN) {
-                static const char *const m[] = {"Mode:\nAuto", "Mode:\nSemi", "Mode:\nManual"};
+        case SCR_TRACK: {       /* SCAN CFG: the style, HOLD or GO ON and SKIP for the radio it was opened from */
+            bool b = cfg_from == SCR_RTL, held = b ? b_stop.on && b_stop.held : trk.on && trk.held;
 
-                if (k == 0) return m[smode];
-                if (k == 1) snprintf(s, sizeof(s), "Sweep:\n%s", routine == ROUT_SWEEP ? "On" : "Off");
-                else if (k == 2) snprintf(s, sizeof(s), "Step:\n%s", a_step_n[a_step]);
-                else if (k == 3) snprintf(s, sizeof(s), "%s", recorder_is_on() ? "Rec:\nOn" : "Rec");
-                else snprintf(s, sizeof(s), "Back");
-            } else {
-                static const char *const steps[] = {"12.5K", "25K", "100K", "500K", "1M"};
-                int                      g       = param_i_get(cfg_rtl_gain), q = param_i_get(cfg_rtl_sql);
-
-                if (k == 0 && g < 0) snprintf(s, sizeof(s), "Gain:\nAuto");
-                else if (k == 0) snprintf(s, sizeof(s), "Gain:\n%d.%d dB", g / 10, g % 10);
-                else if (k == 1) snprintf(s, sizeof(s), "Dwell:\n%d s", scan_dwell_ms / 1000);
-                else if (k == 2) snprintf(s, sizeof(s), "Step:\n%s", steps[rtl_step]);
-                else if (k == 3 && !q) snprintf(s, sizeof(s), "Sql:\nOff");
-                else if (k == 3) snprintf(s, sizeof(s), "Sql:\n%d dB", q);
-                else snprintf(s, sizeof(s), "Back");
-            }
+            if (k == 0) snprintf(s, sizeof(s), "Style:\n%s", styles[scan_style()].word);
+            else if (k == 1) snprintf(s, sizeof(s), "%s:\n%s", b ? "B" : "A", held ? "Go on" : "Hold");
+            else if (k == 2) snprintf(s, sizeof(s), "%s:\nSkip", b ? "B" : "A");
+            else if (k == 3) snprintf(s, sizeof(s), "%s", b ? "" : recorder_is_on() ? "Rec:\nOn" : "Rec");
+            else snprintf(s, sizeof(s), "Back");
             return s;
+        }
         case SCR_BANDS:
             if (k == 2) {
                 snprintf(s, sizeof(s), "Sweep:\n%s", band_rt[band_sel].sweep ? "In" : "Out");
@@ -5349,14 +5396,10 @@ static const char *f_label(int k) {
                 const char *const l[] = {"Scan", "Listen", "", "", ""};    /* F4, F5: nothing here */
                 return l[k];
             }
-        case SCR_DECODE:
-            if (k == 3) {
-                snprintf(s, sizeof(s), "Type:\n%s", decoders[dec_sel].name);
-                return s;
-            } else {
-                const char *const l[] = {"", "Open", "", "", ""};    /* no keys that only go to another screen */
-                return l[k];
-            }
+        case SCR_DECODE: {          /* F3 and F4 go up and down the TYPE list */
+            const char *const l[] = {"", "Open", "Type:\nUp", "Type:\nDown", ""};
+            return l[k];
+        }
         case SCR_SYSTEM: {
             const char *const l[] = {"", "Open", "", "", ""};    /* the ring and the list reach the rest */
             return l[k];
@@ -5396,7 +5439,38 @@ static const char *f5_label(void) { return f_label(4); }
 
 /* The decoder chosen opened in its app (or the main screen for CW), on the frequency chosen */
 static int32_t open_hz;
-static int     open_mode;
+static int     open_mode, open_agc;
+
+/* The X6200 set as D or E chose: the preamp, the attenuator and AGC (rx_setup), on the band just tuned (they are each
+ * band's own); the SDR its gain */
+static void rx_set(rxset_t st) {
+    if (st.gain == -3) return;
+    if (st.gain > -2) {
+        param_i_set(cfg_rtl_gain, st.gain);
+        rtl_spectrum_gain(st.gain);
+        p_rtl.floor = -300;             /* the noise looked for again, as the gain key does */
+        return;
+    }
+    cparam_i_set(cfg_cur_pre, st.pre);
+    cparam_i_set(cfg_cur_att, st.att);
+    if (st.agc >= 0) cparam_i_set(cfg_cur_agc, st.agc);
+}
+
+static void rx_setup_apply(int64_t hz, int agc) {
+    rx_set(rx_setup(hz, agc));
+}
+
+/* CW on the main screen: its decoder hears nothing under the squelch either (screen_main.c's decoder apps open it):
+ * held in the same place, so the main screen gives it back as the next app (the Sentry) opens */
+static void sql_open_for_cw(void) {
+    int32_t s = param_i_get(cfg_squelch);
+
+    if (s <= 0 || param_i_get(cfg_sql_held) >= 0) return;
+    param_i_set(cfg_sql_held, s);
+    param_i_set(cfg_squelch, 0);
+    msg_schedule_long_text_fmt("Squelch %d opened for CW: it gives the decoder silence. Back as the Sentry opens.",
+                               (int)s);
+}
 
 static void open_tune_cb(lv_timer_t *t) {
     lv_timer_del(t);
@@ -5406,11 +5480,18 @@ static void open_tune_cb(lv_timer_t *t) {
     }
     main_screen_set_freq(open_hz);
     if (open_mode >= 0 && !main_screen_mode_locked()) cparam_i_set(cfg_cur_mode, open_mode);
+    rx_setup_apply(open_hz, open_agc);
+    sql_open_for_cw();
 }
 
 static void open_async(void *arg) {
     const decoder_t *d = &decoders[(intptr_t)arg];
 
+    if (d->rx == 'H' || d->rx == 'C') {     /* AIRSPACE: ADS-B, or its ACARS view on B's SDR */
+        app_adsb_open_view(d->rx == 'C');
+        app_sentry_open_at('H');
+        return;
+    }
     if (d->proto >= 0) param_i_set(cfg_ft8_protocol, d->proto);    /* the FT8 app: 0 FT4, 1 FT8 */
     if (!d->app) {                          /* CW: the main screen, there, till the Sentry opens again */
         main_screen_home_pause(true);
@@ -5419,17 +5500,35 @@ static void open_async(void *arg) {
         return;
     }
     /* A digital app opens where its memory says and then holds the frequency (the FT8 app on the preset nearest
-     * it): the frequency chosen goes there first */
-    if (tune(open_hz, open_mode)) app_mem_save(d->mem);
+     * it): the frequency chosen goes there first. Time Signal and Propagation have none: they start on the dial */
+    if (tune(open_hz, open_mode)) {
+        rx_setup_apply(open_hz, open_agc);
+        if (d->mem[0]) app_mem_save(d->mem);
+    }
     main_screen_start_app(d->app);          /* closes the Sentry first */
 }
+
+static void b_listen_at(int64_t hz, int band);
 
 static void open_decoder(void) {
     const decoder_t *d = &decoders[dec_sel];
 
     if (dec_row >= d->n) return;
+    if (d->rx == 'B') {                     /* the SDR's decoders: B on the channel, heard there, decoding by itself */
+        if (rtl_spectrum_dev() == RTL_DEV_NONE) {
+            osd("NO SDR", "THIS ONE IS DECODED BY AN SDR ON USB: AN RTL-SDR, A HACKRF OR A BLADERF.", -1);
+            return;
+        }
+        b_listen_at(d->hz[dec_row], band_for(d->hz[dec_row]));
+        rx_set(rx_setup_on(d->hz[dec_row], -1, true));
+        osd(d->name, d->about, -1);
+        return;
+    }
+    if (d->rx == 'C' && rtl_spectrum_dev() != RTL_DEV_NONE)  /* ACARS on B's SDR: the airband's gain */
+        rx_set(rx_setup_on(d->hz[dec_row], -1, true));
     open_hz   = d->hz[dec_row] - d->audio;     /* the dial: the station that far up in the audio */
     open_mode = d->mode;
+    open_agc  = d->agc;
     if (d->mode < 0) open_mode = open_hz < 10000000 ? radio_mode_lsb : radio_mode_usb;
     lv_async_call(open_async, (void *)(intptr_t)dec_sel);
 }
@@ -5473,35 +5572,69 @@ static void sys_open(int i) {
     lv_async_call(sys_open_async, (void *)(intptr_t)i);
 }
 
-static void listen_band_x6200(int i) {
+static bool listen_band_x6200(int i) {
     const band_t *b = &bands[i];
+    bool          tuned;
 
     if (!cfg_is_valid_hw_freq(b->listen_hz)) {
         msg_update_text_fmt("The radio can't tune %s", b->name);
-        return;
+        return false;
     }
     /* the new band the place to come back to before a lock ends: track_end goes back there */
     routine = ROUT_BAND;
     anchor  = b->listen_hz;
-    if (smode == MODE_MAN) smode = MODE_SEMI;   /* the Sentry's dial again; AUTO or SEMI as SCAN CFG has it (it was
-                                                 * set to AUTO here, on every BAND key, 2026-11-14) */
+    if (smode == MODE_MAN) smode = scan_stay == STAY_NONE ? MODE_SEMI : MODE_AUTO;   /* the Sentry's dial again, as
+                                                 * SCAN CFG's style has it (it was set to AUTO here, on every BAND
+                                                 * key, 2026-11-14) */
     if (trk.on) track_end();
-    tune(b->listen_hz, b->mode);
+    tuned = tune(b->listen_hz, b->mode);
     go(SCR_SCAN);
+    return tuned;
 }
+
+/* D's LISTEN or SCAN on the X6200: the band set as rx_setup says and heard (A's LISTEN OFF, or on the SDR, played
+ * nothing of it). A's BAND keys tune a band alone: its preamp and AGC as the user left them there */
+static void d_listen_x6200(int i) {
+    if (!listen_band_x6200(i)) return;
+    rx_setup_apply(bands[i].listen_hz, radio_agc_auto);
+    int h = param_i_get(cfg_hear_a);
+
+    if (h == HEAR_OFF || h == HEAR_RTL) {
+        param_i_set(cfg_hear_a, HEAR_X6200);
+        if (scr == SCR_SCAN) hear_apply(HEAR_X6200);
+    }
+}
+
+/* B on the SDR at hz, heard there, its scan off: D's LISTEN for a band the SDR takes (band: B's band from then on, its
+ * F1 scans it; -1 B's presets), E's OPEN for the SDR's decoders */
+static void b_listen_at(int64_t hz, int band) {
+    f_band = band;
+    rtl_scan_set(false);
+    rtl_tune(hz);
+    listen_hz = rtl_snap(hz);
+    {
+        int h = param_i_get(cfg_hear_f);
+
+        if (h == HEAR_X6200 || h == HEAR_OFF) param_i_set(cfg_hear_f, HEAR_RTL);    /* LISTEN: to hear it */
+    }
+    if (scr == SCR_RTL) hear_apply(param_i_get(cfg_hear_f));
+    go(SCR_RTL);
+}
+
+static void listen_band(void);
 
 /* D's SCAN (F1): the band chosen set on its radio first, then scanned end to end there: the X6200's on A (its F1
  * scan, on this band), the stick's on B (its scan, from the band's low end, heard as LISTEN would have it) */
 static void scan_band(void) {
     const band_t *b = &bands[band_sel];
 
+    if (b->listen_hz == ADSB_HZ) {      /* ADS-B: AIRSPACE's, not a scan */
+        listen_band();
+        return;
+    }
     if (band_uses_rtl(band_sel)) {
-        f_band = band_sel;
-        rtl_scan_set(false);
-        rtl_tune(b->listen_hz);
-        listen_hz = rtl_snap(b->listen_hz);
-        if (param_i_get(cfg_hear_f) == HEAR_X6200 || param_i_get(cfg_hear_f) == HEAR_OFF) param_i_set(cfg_hear_f, HEAR_RTL);
-        go(SCR_RTL);
+        b_listen_at(b->listen_hz, band_sel);
+        rx_setup_apply(b->listen_hz, -1);
         rtl_scan_set(true);
         show_screen();
         return;
@@ -5510,35 +5643,37 @@ static void scan_band(void) {
         msg_update_text_fmt("The radio can't tune %s", b->name);
         return;
     }
-    listen_band_x6200(band_sel);        /* tuned there, A shown */
+    d_listen_x6200(band_sel);           /* tuned there, A shown */
     scan_a_band = band_sel;             /* this band, not the one the old picture still shows */
-    if (smode == MODE_MAN) smode = MODE_SEMI;
+    if (smode == MODE_MAN) smode = scan_stay == STAY_NONE ? MODE_SEMI : MODE_AUTO;
     set_routine(ROUT_SCAN);
     {
         char t[24];
 
         snprintf(t, sizeof(t), "SCAN: %s", b->name);
-        osd(t, smode == MODE_AUTO ? "THE BAND END TO END, 360 KHZ AT A TIME, LOCKING ON WHAT IT FINDS (AUTO)."
-                                  : "THE BAND END TO END, 360 KHZ AT A TIME, MARKING WHAT IT FINDS (SEMI: SCAN CFG F1 "
-                                    "FOR AUTO).", -1);
+        osd(t, smode == MODE_AUTO ? "THE BAND END TO END, 360 KHZ AT A TIME, STOPPING ON WHAT IT FINDS AS SCAN "
+                                    "CFG'S STYLE SAYS."
+                                  : "THE BAND END TO END, 360 KHZ AT A TIME, MARKING WHAT IT FINDS (BROWSE: SCAN CFG'S "
+                                    "STYLE MAKES IT STOP).", -1);
     }
 }
 
-/* C's LISTEN (F2 or a press): F for a band the stick takes, its listening frequency on the speaker, the scan off */
+/* D's LISTEN (F2 or a press): B for a band the SDR takes, its listening frequency on the speaker, the scan off; A for
+ * the X6200's; H AIRSPACE for ADS-B. Each set as rx_setup says (the preamp, AGC; the SDR's gain) */
 static void listen_band(void) {
     const band_t *b = &bands[band_sel];
 
-    if (!band_uses_rtl(band_sel)) {
-        listen_band_x6200(band_sel);
+    if (b->listen_hz == ADSB_HZ) {      /* ADS-B: AIRSPACE draws it (a GNS 5890 stick or the SDR's dump1090) */
+        app_adsb_open_view(false);
+        lv_async_call(sys_open_async, (void *)(intptr_t)SYS_AIRSPACE);
         return;
     }
-    f_band = band_sel;
-    rtl_scan_set(false);
-    rtl_tune(b->listen_hz);
-    listen_hz = rtl_snap(b->listen_hz);
-    if (param_i_get(cfg_hear_f) == HEAR_X6200) param_i_set(cfg_hear_f, HEAR_RTL);     /* LISTEN: to hear it */
-    if (scr == SCR_RTL) hear_apply(param_i_get(cfg_hear_f));
-    go(SCR_RTL);
+    if (!band_uses_rtl(band_sel)) {
+        d_listen_x6200(band_sel);
+        return;
+    }
+    b_listen_at(b->listen_hz, band_sel);
+    rx_setup_apply(b->listen_hz, -1);
 }
 
 static void fkey(int k);
@@ -5587,43 +5722,12 @@ static void fkey(int k) {
                 go(cfg_from);           /* BACK */
                 break;
             }
-            if (cfg_from == SCR_SCAN) {
-                if (k == 0) a_mode_next();
-                if (k == 1) {           /* hops between D's marked bands, one picture each: not along one band (A's
-                                         * F1), the two easily taken for each other; the bands named as it starts */
-                    static char t[200];
-                    int         n = snprintf(t, sizeof(t), "THE X6200 HOPS BETWEEN D'S MARKED BANDS, A DWELL EACH (A'S F1 "
-                                                           "SCANS ONE BAND END TO END INSTEAD):");
-
-                    set_routine(routine == ROUT_SWEEP ? ROUT_BAND : ROUT_SWEEP);
-                    for (int b = 0, any = 0; b < BANDS_N && n < (int)sizeof(t) - 16; b++)
-                        if (band_rt[b].sweep && cfg_is_valid_hw_freq(bands[b].listen_hz))
-                            n += snprintf(t + n, sizeof(t) - n, "%s %s", any++ ? "," : "", bands[b].name);
-                    if (routine == ROUT_SWEEP && sweep_next_band(-1) < 0)
-                        snprintf(t, sizeof(t), "NO BAND IS MARKED IN D BANDS (F3 THERE): IT STAYS WHERE IT IS.");
-                    osd(routine == ROUT_SWEEP ? "SWEEP ON" : "SWEEP OFF",
-                        routine == ROUT_SWEEP ? t : "THE X6200 STAYS ON THE 360 KHZ AT THE DIAL (A'S F1 SCANS ITS BAND).",
-                        -1);
-                }
-                if (k == 2) a_step = (a_step + 1) % (int)N_OF(a_steps);
-                if (k == 3) {
-                    recorder_set_on(!recorder_is_on());
-                    rec_ours = recorder_is_on();
-                }
-            } else {
-                static const int sqls[] = {0, 6, 10, 15, 20};
-
-                if (k == 0) rtl_fkey(5);        /* the gain, the next one up */
-                if (k == 1) dwell_next();
-                if (k == 2) rtl_fkey(2);        /* the step */
-                if (k == 3) {
-                    int q = param_i_get(cfg_rtl_sql), i = 0;
-
-                    while (i < (int)N_OF(sqls) && sqls[i] <= q) i++;
-                    q = sqls[i % (int)N_OF(sqls)];
-                    param_i_set(cfg_rtl_sql, q);
-                    rtl_spectrum_squelch(q);
-                }
+            if (k == 0) cr_change(CR_STYLE);
+            if (k == 1) cr_hold();
+            if (k == 2) cr_skip();
+            if (k == 3 && cfg_from == SCR_SCAN) {
+                recorder_set_on(!recorder_is_on());
+                rec_ours = recorder_is_on();
             }
             if (scr == SCR_TRACK) show_screen();
             break;
@@ -5640,10 +5744,10 @@ static void fkey(int k) {
                 show_screen();
             }
             break;                      /* F4, F5: nothing */
-        case SCR_DECODE:                /* F1, F3, F5: nothing (no key only goes to another screen) */
+        case SCR_DECODE:                /* F1, F5: nothing (no key only goes to another screen) */
             if (k == 1) open_decoder();
-            if (k == 3) {
-                dec_sel = (dec_sel + 1) % DECODERS_N;
+            if (k == 2 || k == 3) {
+                dec_sel = (dec_sel + (k == 2 ? DECODERS_N - 1 : 1)) % DECODERS_N;
                 dec_row = 0;
                 show_screen();
             }
@@ -5793,16 +5897,9 @@ static void step(int dir) {
             a_tuned();
             break;
         }
-        case SCR_TRACK:
-            if (cfg_from == SCR_SCAN && trk.on) {
-                move_cursor(dir);
-                if (target_near(cursor_hz, 2000) && labs(cursor_hz - trk.hz) > 2000) {
-                    int32_t next = cursor_hz;
-                    trk.auto_    = false;
-                    trk.on       = false;
-                    track_start(next, false);
-                }
-            }
+        case SCR_TRACK:                 /* SCAN CFG: the next row, or the one before */
+            cr_sel = (cr_sel + dir + CR_N) % CR_N;
+            show_screen();
             break;
         case SCR_BANDS:
             band_sel = (band_sel + dir + BANDS_N) % BANDS_N;
@@ -5856,8 +5953,8 @@ static void press(void) {
             }
             break;
         }
-        case SCR_TRACK:
-            if (cfg_from == SCR_SCAN && trk.on) trk.held = !trk.held;
+        case SCR_TRACK:                 /* SCAN CFG: the chosen row to its next value */
+            cr_change(cr_sel);
             show_screen();
             break;
         case SCR_BANDS: listen_band(); break;
@@ -6009,8 +6106,8 @@ static void rotary_cb(int32_t diff) {
         if (routine == ROUT_SCAN) routine = ROUT_BAND;      /* tuned by hand: the scan stops there, as F's */
         if (trk.on) trk.held = true;
         show_screen();
-        osd("MAN-OVERRIDE", "YOU TURNED THE VFO: THE SENTRY STOPS MOVING THE X6200'S DIAL AND ONLY MARKS. SCAN CFG F1: "
-                            "BACK TO SEMI OR AUTO.", -1);
+        osd("MANUAL", "YOU TURNED THE VFO: THE SENTRY STOPS MOVING THE X6200'S DIAL. A'S F1 (SCAN) OR A BAND KEY "
+                      "HANDS IT BACK, IN SCAN CFG'S STYLE.", -1);
     }
     a_tuned();                          /* on A: the X6200's picture and LISTEN, if they were the SDR's */
 }
@@ -6271,27 +6368,21 @@ static void img_touch_cb(lv_event_t *e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
         if (best && last_tap_hz == hz && lv_tick_get() - last_tap_ms < 1500) {
             track_start(hz, false);
+            trk.held = true;            /* chosen by hand: there till SCAN CFG's F2 or F3, or another choice */
             return;
         }
         last_tap_hz = hz;
         last_tap_ms = lv_tick_get();
     }
-    if (smode == MODE_AUTO) smode = MODE_SEMI;
+    tap_pause = lv_tick_get() + 10000;  /* AUTO locks on nothing else for 10 s: a second tap locks on this one (it
+                                         * turned SEMI before, and the style with it) */
     cursor_hz = hz;
-    show_scan();
 }
 
 static void tap_cb(lv_event_t *e) {
     int tag = (int)(intptr_t)lv_event_get_user_data(e), box = tag / 16, i = tag % 16;
 
-    if (scr == SCR_TRACK && cfg_from == SCR_RTL && box <= 4) return;     /* the stick's view: shown, not chosen */
     switch (box) {
-        case 0: set_mode((sysmode_t)i); break;                     /* SYSTEM MODE */
-        case 1:                                                    /* SCAN ROUTINE: SCAN or SWEEP, on or off */
-            if (i == 0) a_scan_set(routine != ROUT_SCAN);
-            if (i == 1) set_routine(routine == ROUT_SWEEP ? ROUT_BAND : ROUT_SWEEP);
-            break;
-        case 4: break;                                             /* SIGNAL STATUS: shown, no more */
         case 5:                                                    /* a SYSTEM item */
             if (i < SYS_N) {
                 if (i == sys_sel) {
@@ -6302,9 +6393,9 @@ static void tap_cb(lv_event_t *e) {
                 }
             }
             break;
-        case 3:                                                    /* a decoder */
-            if (i < DECODERS_N) {
-                dec_sel = i;
+        case 3:                                                    /* a decoder (the list scrolls) */
+            if (dec_top() + i < DECODERS_N) {
+                dec_sel = dec_top() + i;
                 dec_row = 0;
                 show_screen();
             }
@@ -6403,58 +6494,302 @@ static void build_scan(lv_obj_t *p) {
 }
 
 /* SCAN CFG: A's boxes as A had them (or the stick's, opened from C), and the lock under them */
-static void build_track(lv_obj_t *p) {
-    int w = (SW - 12 - 18) / 4;
+/* SCAN CFG's NOW: what A's X6200 and B's SDR scans do, and the latest the scans locked on (C LOG has them all) */
+static void cr_now(char *s, size_t n) {
+    char   f[16], g[16];
+    size_t at;
 
-    box_make(&b_mode, p, 6, BODY_Y, w, BOX_H, "SYSTEM MODE", 3, 0);
-    box_make(&b_tx, p, 6 + (w + 6), BODY_Y, w, BOX_H, "TRANSMITTER", 3, -1);
-    box_make(&b_sig, p, 6 + 2 * (w + 6), BODY_Y, w, BOX_H, "SIGNAL STATUS", 3, 4);
-    box_make(&b_rout, p, 6 + 3 * (w + 6), BODY_Y, w, BOX_H, "SCAN ROUTINE", 3, 1);
+    if (!wide_ok)
+        at = (size_t)snprintf(s, n, "A  X6200  THIS BASE SENDS NO SPECTRUM: THE SENTRY NEEDS AN X6200'S");
+    else if (smode == MODE_MAN)
+        at = (size_t)snprintf(s, n, "A  X6200  TUNED BY HAND: IT STAYS THERE. A'S F1 OR A BAND KEY SCANS AGAIN");
+    else if (trk.on) {
+        bool lost = lv_tick_get() - trk.last_seen > 1500;
 
-    int ly = BODY_Y + BOX_H + 6, w1 = 300, w2 = 200, w3 = SW - 12 - w1 - w2 - 12;
+        const target_t *tg_ = target_near(trk.hz, 3000);
 
-    box_make(&b_band, p, 6, ly, w1, LOW_H, "TARGET BAND", 2, -1);
-    box_make(&b_prof, p, 6 + w1 + 6, ly, w2, LOW_H, "SIGNAL PROFILE", 2, -1);
-    box_make(&b_tgts, p, 6 + w1 + w2 + 12, ly, w3, LOW_H, "TARGETS", 2, -1);
-
-    int y0 = ly + LOW_H + 6, h = scr_h - y0 - 6;
-
-    t_state_l    = label(p, &pixel_24, amb, 6, y0 + 2, 230, LV_TEXT_ALIGN_CENTER, "");
-    t_crit_frame = rect(p, 12, y0 + 56, 218, 40, 3, false);
-    t_crit_l     = label(p, &pixel_20, amb, 18, y0 + 60, 206, LV_TEXT_ALIGN_CENTER, "");
-    lv_obj_set_height(t_crit_l, 32);
-    lv_obj_set_style_pad_top(t_crit_l, 6, 0);
-    lv_obj_set_style_bg_color(t_crit_l, amb, 0);
-    t_time_cap_l = label(p, &pixel_16, amb, 6, y0 + 104, 230, LV_TEXT_ALIGN_CENTER, "TIME ON TARGET (SECS)");
-    t_time_l     = label(p, &pixel_32, amb, 6, y0 + 124, 230, LV_TEXT_ALIGN_CENTER, "");
-
-    int mx = 244, mw = 390;
-    rect(p, mx, y0, mw, 72, 3, false);
-    t_big_l = label(p, &pixel_32, amb, mx + 3, y0 + 6, mw - 6, LV_TEXT_ALIGN_CENTER, "");
-    lv_obj_add_flag(t_big_l, LV_OBJ_FLAG_CLICKABLE);                 /* a tap: IGNORE it */
-    lv_obj_add_event_cb(t_big_l, ignore_tap_cb, LV_EVENT_CLICKED, NULL);
-    t_sub_l = label(p, &pixel_20, amb, mx + 3, y0 + 44, mw - 6, LV_TEXT_ALIGN_CENTER, "");
-    t_id_l  = label(p, &pixel_16, amb, mx, y0 + 78, mw, LV_TEXT_ALIGN_CENTER, "");
-    lv_label_set_long_mode(t_id_l, LV_LABEL_LONG_DOT);
-    lv_obj_set_height(t_id_l, 18);
-    t_db_l  = label(p, &pixel_16, dim, mx, y0 + 98, mw, LV_TEXT_ALIGN_CENTER, "");
-    t_log_l = label(p, &pixel_16, amb, mx, y0 + 118, mw, LV_TEXT_ALIGN_LEFT, "");
-
-    int bx = 650;
-    label(p, &pixel_16, amb, bx, y0, 64, LV_TEXT_ALIGN_CENTER, "SIG");
-    label(p, &pixel_16, amb, bx + 74, y0, 70, LV_TEXT_ALIGN_CENTER, "NOISE");
-    t_bar_y = y0 + 20;
-    t_bar_h = h - 22;
-    for (int i = 0; i < 2; i++) {
-        int x = bx + 8 + i * 74;
-        rect(p, x, t_bar_y, 50, t_bar_h, 3, false);
-        for (int k = 1; k < 10; k++) rect(p, x + 50, t_bar_y + k * t_bar_h / 10, 10, 2, 0, true);
-        lv_obj_t *f = rect(p, x + 6, t_bar_y + t_bar_h, 38, 0, 0, true);
-        if (i == 0)
-            t_sig_fill = f;
-        else
-            t_noise_fill = f;
+        fmt_freq(f, sizeof(f), trk.id.tune_hz);
+        at = (size_t)snprintf(s, n, "A  X6200  STOPPED ON %s %s%s%s%s, %.0f S HEARD%s%s", trk.id.label, f,
+                              tg_ ? " (" : "", tg_ ? profile(tg_) : "", tg_ ? ")" : "", trk.heard_s,
+                              lost ? ", QUIET NOW" : "", trk.held ? ", HELD" : "");
+    } else if (routine == ROUT_SCAN && scan_a_band >= 0) {
+        fmt_freq(f, sizeof(f), centre);
+        at = (size_t)snprintf(s, n, "A  X6200  SCANNING %s, NOW AT %s%s", bands[scan_a_band].name, f,
+                              smode == MODE_AUTO ? "" : " (MARKS ONLY)");
+    } else if (routine == ROUT_SWEEP) {
+        int k = 0;
+        for (int i = 0; i < BANDS_N; i++) k += band_rt[i].sweep;
+        fmt_freq(f, sizeof(f), centre);
+        at = (size_t)snprintf(s, n, "A  X6200  SWEEPING D'S %d BANDS, NOW AT %s", k, f);
+    } else {
+        fmt_freq(f, sizeof(f), centre);
+        at = (size_t)snprintf(s, n, "A  X6200  WATCHING THE 360 KHZ AT %s%s", f,
+                              smode == MODE_AUTO ? ", STOPS ON WHAT IT FINDS" : " (A'S F1 SCANS THE BAND)");
     }
+    if (at >= n) return;
+    char dev[16];
+    snprintf(dev, sizeof(dev), "%-5s", rtl_spectrum_dev_tag());
+    fmt_mhz(f, sizeof(f), listen_hz, 3);
+    if (rtl_spectrum_state() != RTL_SPEC_ON)
+        at += (size_t)snprintf(s + at, n - at, "\nB  %s  NOT RECEIVING: %s", dev, rtl_spectrum_dev_name());
+    else if (b_stop.on)
+        at += (size_t)snprintf(s + at, n - at, "\nB  %s  STOPPED ON %s %s, %u S%s", dev, rtl_name(b_stop.hz), f,
+                               (unsigned)((lv_tick_get() - b_stop.start) / 1000), b_stop.held ? ", HELD" : "");
+    else if (rtl_scan)
+        at += (size_t)snprintf(s + at, n - at, "\nB  %s  SCANNING %s, NOW AT %s", dev, f_name(), f);
+    else
+        at += (size_t)snprintf(s + at, n - at, "\nB  %s  ON %s %s (B'S F1 SCANS %s)", dev, f, rtl_name(listen_hz), f_name());
+    if (at >= n) return;
+    at += (size_t)snprintf(s + at, n - at, "\nLAST:");
+    for (int i = 0; i < nhits && i < 3 && at < n; i++) {
+        struct tm tm;
+        char      t[8];
+
+        localtime_r(&hits[i].last, &tm);
+        strftime(t, sizeof(t), "%H:%M", &tm);
+        fmt_mhz(g, sizeof(g), hits[i].hz, 3);
+        at += (size_t)snprintf(s + at, n - at, "%s %s %s %s %.12s", i ? "  " : " ", t,
+                               hits[i].rtl ? rtl_spectrum_dev_tag() : "X6200", g, hits[i].what);
+    }
+    if (!nhits) snprintf(s + at, n - at, " NOTHING YET");
+}
+
+/* A row's value, as SCAN CFG shows it */
+static void cr_value(int r, char *v, size_t n) {
+    static const char *const bsteps[] = {"12.5 KHZ", "25 KHZ", "100 KHZ", "500 KHZ", "1 MHZ"};
+    int                      g = param_i_get(cfg_rtl_gain), q = param_i_get(cfg_rtl_sql), k = 0;
+
+    switch (r) {
+        case CR_STYLE: snprintf(v, n, "%s", styles[scan_style()].name); break;
+        case CR_STEP: snprintf(v, n, "%d S A STEP", scan_dwell_ms / 1000); break;
+        case CR_STAY: snprintf(v, n, "%s", stay_word[scan_stay]); break;
+        case CR_QUIET:
+            if (scan_stay == STAY_NONE || scan_stay == STAY_HOLD) snprintf(v, n, "(NOT WITH THIS STAY)");
+            else snprintf(v, n, "%u S OF QUIET", (unsigned)(quiet_ms[scan_quiet] / 1000));
+            break;
+        case CR_SWEEP:
+            for (int i = 0; i < BANDS_N; i++) k += band_rt[i].sweep && cfg_is_valid_hw_freq(bands[i].listen_hz);
+            if (routine == ROUT_SWEEP) snprintf(v, n, "ON, %d BANDS", k);
+            else snprintf(v, n, k ? "OFF (%d MARKED IN D)" : "OFF (NONE MARKED IN D)", k);
+            break;
+        case CR_ASTEP: snprintf(v, n, "%d KHZ A CLICK", (int)(a_steps[a_step] / 1000)); break;
+        case CR_BSTEP: snprintf(v, n, "%s A CLICK", bsteps[rtl_step]); break;
+        case CR_BGAIN:
+            if (g < 0) snprintf(v, n, "AUTO (ITS AGC)");
+            else snprintf(v, n, "%d.%d DB", g / 10, g % 10);
+            break;
+        case CR_BSQL:
+            if (q) snprintf(v, n, "%d DB OVER THE NOISE", q);
+            else snprintf(v, n, "OFF: ALWAYS HEARD");
+            break;
+        default: v[0] = 0;
+    }
+}
+
+/* What the chosen row does, in words */
+static const char *cr_about(int r) {
+    static char s[200];
+
+    switch (r) {
+        case CR_STYLE: return styles[scan_style()].about;
+        case CR_STEP:
+            return "HOW LONG EACH STEP OF A BAND IS WATCHED WHEN NOTHING STOPS THE SCAN (A'S 360 KHZ, B'S PICTURE). "
+                   "SHORTER IS FASTER, LONGER CATCHES MORE.";
+        case CR_STAY:
+            switch (scan_stay) {
+                case STAY_NONE:
+                    return "IT NEVER STOPS: A MARKS WHAT IT FINDS, B'S CHANNEL GOES TO EACH PICTURE'S STRONGEST, "
+                           "AND BOTH GO ON.";
+                case STAY_TALKS:
+                    return "IT STOPS ON A SIGNAL AS LONG AS IT TALKS (5 MINUTES AT MOST, FOR A CARRIER THAT NEVER "
+                           "ENDS), THEN GOES ON.";
+                case STAY_HOLD:
+                    return "IT STOPS ON THE FIRST SIGNAL AND STAYS. F2 GO ON LETS IT GO, F3 SKIP PASSES IT OVER TILL "
+                           "THE SENTRY CLOSES.";
+                default:
+                    snprintf(s, sizeof(s), "IT STOPS ON A SIGNAL FOR %s AT MOST, LESS IF THE SIGNAL GOES QUIET FIRST.",
+                             stay_word[scan_stay]);
+                    return s;
+            }
+        case CR_QUIET:
+            return "A SIGNAL QUIET THIS LONG IS LEFT FOR THE NEXT ONE. SHORT FOR BUSY CHANNELS, LONGER TO CATCH THE "
+                   "REPLY.";
+        case CR_SWEEP:
+            return "ON: THE X6200 HOPS BETWEEN THE BANDS MARKED * IN D BANDS (F3 THERE). OFF: IT STAYS ON ITS BAND, "
+                   "AND A'S F1 SCANS THAT ONE END TO END.";
+        case CR_ASTEP: return "HOW FAR ONE CLICK OF A'S MFK MOVES THE X6200'S PICTURE.";
+        case CR_BSTEP: return "HOW FAR ONE CLICK OF B'S MFK MOVES THE SDR'S PICTURE.";
+        case CR_BGAIN:
+            return "THE SDR'S GAIN: UP FOR WEAK SIGNALS, DOWN WHEN STRONG ONES SWAMP IT. AUTO: ITS OWN AGC.";
+        case CR_BSQL:
+            return "B STAYS SILENT TILL ITS CHANNEL IS THIS FAR OVER THE NOISE. OFF: ALWAYS HEARD (B'S SCAN THEN "
+                   "TAKES 10 DB AS TALKING).";
+        default: return "";
+    }
+}
+
+static void show_track(void) {
+    static const char *const names[CR_N] = {"SCAN STYLE", "STEP TIME", "STAY ON A SIGNAL", "GO ON AFTER",
+                                            "A: SWEEP D'S BANDS", "A: KNOB STEP", "B: KNOB STEP", "B: GAIN",
+                                            "B: SQUELCH"};
+    char v[48], now[400];
+
+    for (int r = 0; r < CR_N; r++) {
+        bool on   = r == cr_sel;
+        bool idle = r == CR_QUIET && (scan_stay == STAY_NONE || scan_stay == STAY_HOLD);
+
+        label_set_text(cr_row_l[r], names[r]);
+        cr_value(r, v, sizeof(v));
+        label_set_text(cr_val_l[r], v);
+        lv_obj_set_style_bg_opa(cr_row_l[r], on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_text_color(cr_row_l[r], on ? ink : amb, 0);
+        lv_obj_set_style_text_color(cr_val_l[r], on ? ink : idle ? dim : amb, 0);
+    }
+    label_set_text(cr_about_l, cr_about(cr_sel));
+    cr_now(now, sizeof(now));
+    label_set_text(cr_now_l, now);
+}
+
+/* The chosen row changed to its next value, and said in words */
+static void cr_change(int r) {
+    static const int sqls[] = {0, 6, 10, 15, 20};
+    char             v[48], t[48];
+
+    switch (r) {
+        case CR_STYLE: {
+            int k = scan_style();
+            style_apply(k >= STY_SURVEY ? STY_BROWSE : k + 1);
+            break;
+        }
+        case CR_STEP: dwell_next(); break;
+        case CR_STAY:
+            scan_stay = (scan_stay + 1) % STAY_N;
+            scan_mode_sync();
+            break;
+        case CR_QUIET:
+            if (scan_stay == STAY_NONE || scan_stay == STAY_HOLD) {
+                osd("GO ON AFTER", "NOT USED WITH THIS STAY: CHOOSE A STAY THAT ENDS (2 S TO WHILE IT TALKS) FIRST.",
+                    -1);
+                return;
+            }
+            scan_quiet = (scan_quiet + 1) % (int)N_OF(quiet_ms);
+            break;
+        case CR_SWEEP: a_sweep_toggle(); return;           /* says it itself */
+        case CR_ASTEP: a_step = (a_step + 1) % (int)N_OF(a_steps); break;
+        case CR_BSTEP: rtl_fkey(2); break;
+        case CR_BGAIN: rtl_fkey(5); break;
+        case CR_BSQL: {
+            int q = param_i_get(cfg_rtl_sql), i = 0;
+
+            while (i < (int)N_OF(sqls) && sqls[i] <= q) i++;
+            q = sqls[i % (int)N_OF(sqls)];
+            param_i_set(cfg_rtl_sql, q);
+            rtl_spectrum_squelch(q);
+            break;
+        }
+        default: return;
+    }
+    static const char *const names[CR_N] = {"STYLE", "STEP TIME", "STAY", "GO ON AFTER", "SWEEP", "A'S STEP",
+                                            "B'S STEP", "B'S GAIN", "B'S SQUELCH"};
+    cr_value(r, v, sizeof(v));
+    snprintf(t, sizeof(t), "%s: %s", names[r], v);
+    osd(t, cr_about(r), -1);
+}
+
+/* SCAN CFG's F2 and F3 on the radio it was opened from: HOLD the signal it stopped on, or GO ON from it; SKIP it (A
+ * locks on it no more, B's scan passes it over, till the Sentry closes) */
+static void cr_hold(void) {
+    if (cfg_from == SCR_RTL) {
+        if (!b_stop.on) {
+            osd("NOTHING TO HOLD", rtl_scan ? "B'S SCAN IS STILL LOOKING: IT STOPS ON THE NEXT SIGNAL (SCAN STYLE)."
+                                            : "B IS NOT SCANNING: F1 ON B STARTS IT.", -1);
+            return;
+        }
+        if (b_stop.held) {
+            b_stop.on = b_stop.held = false;
+            scan_next = lv_tick_get();
+            osd("GO ON", "B'S SCAN GOES ON TO THE NEXT SIGNAL.", -1);
+        } else {
+            b_stop.held = true;
+            osd("HELD", "B STAYS ON THIS CHANNEL TILL F2 AGAIN (GO ON) OR F3 (SKIP).", -1);
+        }
+        return;
+    }
+    if (!trk.on) {
+        osd("NOTHING TO HOLD", smode == MODE_AUTO ? "A IS STILL LOOKING: IT STOPS ON THE NEXT SIGNAL IT FINDS."
+                                                  : "A ONLY MARKS SIGNALS IN THIS STYLE (BROWSE): A'S MFK PUSH STOPS "
+                                                    "ON THE STRONGEST.", -1);
+        return;
+    }
+    if (trk.held) {
+        trk.held = false;
+        track_end();
+        osd("GO ON", "A GOES ON TO THE NEXT SIGNAL.", -1);
+    } else {
+        trk.held = true;
+        osd("HELD", "A STAYS ON THIS SIGNAL TILL F2 AGAIN (GO ON) OR F3 (SKIP).", -1);
+    }
+}
+
+static void cr_skip(void) {
+    if (cfg_from == SCR_RTL) {
+        if (!b_stop.on) {
+            osd("NOTHING TO SKIP", "B IS NOT STOPPED ON A SIGNAL.", -1);
+            return;
+        }
+        if (b_nskip < (int)N_OF(b_skip)) b_skip[b_nskip++] = b_stop.hz;
+        b_stop.on = b_stop.held = false;
+        scan_next = lv_tick_get();
+        osd("SKIPPED", "B'S SCAN PASSES THIS CHANNEL OVER TILL THE SENTRY CLOSES.", -1);
+        return;
+    }
+    if (!trk.on) {
+        osd("NOTHING TO SKIP", "A IS NOT STOPPED ON A SIGNAL.", -1);
+        return;
+    }
+    if (n_ignored < IGNORED) ignored[n_ignored++] = trk.hz;
+    trk.held = false;
+    track_end();
+    osd("SKIPPED", "A LOCKS ON IT NO MORE TILL THE SENTRY CLOSES.", -1);
+}
+
+static void cr_tap_cb(lv_event_t *e) {
+    int r = (int)(intptr_t)lv_event_get_user_data(e);
+
+    if (scr != SCR_TRACK || r < 0 || r >= CR_N) return;
+    if (r == cr_sel) cr_change(r);      /* the chosen one tapped again: changed, as the MFK's push */
+    cr_sel = r;
+    show_screen();
+}
+
+/* SCAN CFG: how the scans behave, a row each setting, the chosen one explained under them, the scans' NOW at the
+ * bottom (the user, 2026-11-17: the old boxes were "super robust, but makes zero sense to me usability wise") */
+static void build_track(lv_obj_t *p) {
+    int y = BODY_Y + 2, rh = 22, h = 24 + CR_N * rh + 6;
+
+    rect(p, 6, y - 2, SW - 12, h, 3, false);
+    label(p, &pixel_16, amb, 14, y + 2, SW - 28, LV_TEXT_ALIGN_LEFT,
+          "HOW THE SCANS BEHAVE, A'S X6200 AND B'S SDR ALIKE.   MFK: CHOOSE A ROW   PUSH OR TAP: CHANGE IT");
+    for (int r = 0; r < CR_N; r++) {
+        int ry = y + 24 + r * rh;
+
+        cr_row_l[r] = label(p, &pixel_20, amb, 10, ry, SW - 20, LV_TEXT_ALIGN_LEFT, "");
+        lv_obj_set_height(cr_row_l[r], rh);
+        lv_obj_set_style_pad_left(cr_row_l[r], 6, 0);
+        lv_obj_set_style_bg_color(cr_row_l[r], amb, 0);
+        lv_obj_add_flag(cr_row_l[r], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(cr_row_l[r], cr_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)r);
+        cr_val_l[r] = label(p, &pixel_20, amb, 330, ry, SW - 340, LV_TEXT_ALIGN_LEFT, "");
+        lv_obj_add_flag(cr_val_l[r], LV_OBJ_FLAG_EVENT_BUBBLE);     /* a tap on the value is the row's */
+        lv_obj_clear_flag(cr_val_l[r], LV_OBJ_FLAG_CLICKABLE);
+    }
+    int ay = y - 2 + h + 6, ah = 46;
+    rect(p, 6, ay, SW - 12, ah, 3, false);
+    cr_about_l = label(p, &pixel_16, amb, 14, ay + 5, SW - 28, LV_TEXT_ALIGN_LEFT, "");
+    lv_label_set_long_mode(cr_about_l, LV_LABEL_LONG_WRAP);
+    cr_now_l = label(p, &pixel_16, amb, 14, ay + ah + 6, SW - 28, LV_TEXT_ALIGN_LEFT, "");
+    lv_label_set_long_mode(cr_now_l, LV_LABEL_LONG_CLIP);
+    lv_obj_set_height(cr_now_l, scr_h - (ay + ah + 6) - 2);
 }
 
 static void build_bands(lv_obj_t *p) {
@@ -6466,7 +6801,7 @@ static void build_bands(lv_obj_t *p) {
     snprintf(h, sizeof(h), BAND_ROW, ' ', "BAND", "MHZ", "WHAT YOU'LL HEAR", "BEST", "ANTENNA", "NOW", "RX");
     bd_head_l = label(p, &pixel_16, amb, 9, y + 2, 0, 0, h);
     rect(p, 6, y + 20, SW - 12, 3, 0, true);
-    bd_rows = (scr_h - (y + 26) - 50) / rh;
+    bd_rows = (scr_h - (y + 26) - 68) / rh;    /* three lines under them: the band, and what LISTEN sets */
     if (bd_rows > 20) bd_rows = 20;
     for (int r = 0; r < bd_rows; r++) {
         bd_row_l[r] = label(p, &pixel_16, amb, 9, y + 26 + r * rh, SW - 18, LV_TEXT_ALIGN_LEFT, "");
@@ -6477,8 +6812,9 @@ static void build_bands(lv_obj_t *p) {
         lv_obj_add_flag(bd_row_l[r], LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(bd_row_l[r], row_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)r);
     }
-    rect(p, 6, scr_h - 50, SW - 12, 3, 0, true);
-    bd_about_l = label(p, &pixel_16, amb, 14, scr_h - 44, SW - 28, LV_TEXT_ALIGN_LEFT, "");
+    rect(p, 6, scr_h - 68, SW - 12, 3, 0, true);
+    bd_about_l = label(p, &pixel_16, amb, 14, scr_h - 62, SW - 28, LV_TEXT_ALIGN_LEFT, "");
+    lv_obj_set_height(bd_about_l, 56);  /* three lines, wrapped (CLIP would keep each on one line) */
 }
 
 static void build_log(lv_obj_t *p) {
@@ -6508,11 +6844,13 @@ static void build_log(lv_obj_t *p) {
 static void build_decode(lv_obj_t *p) {
     int y = BODY_Y, h = scr_h - y - DLOW_H - 10, lw = 196;
 
-    box_make(&d_sel, p, 6, y, lw, h, "TYPE SELECT", DECODERS_N < 8 ? DECODERS_N : 8, 3);
+    int tn = (h - 34) / 20;             /* the TYPE list's rows: as many as the box holds, 12 at most (tap_cb's 16) */
+
+    box_make(&d_sel, p, 6, y, lw, h, "TYPE SELECT", DECODERS_N < tn ? DECODERS_N : tn, 3);
     rect(p, lw + 12, y, SW - lw - 18, h, 3, false);
     char hd[96];
 
-    snprintf(hd, sizeof(hd), DEC_ROW, "KNOWN FREQ", "BAND", "BEST", "ANTENNA", "NOW", "RX");
+    snprintf(hd, sizeof(hd), DEC_ROW, "KNOWN FREQ", "BAND", "BEST", "OPEN SETS", "NOW", "RX");
     d_head_l = label(p, &pixel_16, amb, lw + 15, y + 5, 0, 0, hd);
     rect(p, lw + 12, y + 25, SW - lw - 18, 3, 0, true);
     for (int r = 0; r < 12; r++) {
@@ -8439,6 +8777,7 @@ static void construct_cb(lv_obj_t *parent) {
     memset(&trk, 0, sizeof(trk));
     memset(visited, 0, sizeof(visited));
     n_ignored = logged = 0;
+    b_nskip   = 0;                      /* B's skips too: forgotten as the Sentry opens, as A's */
     smode     = MODE_SEMI;
     routine   = ROUT_BAND;
     sweep_i   = -1;
@@ -8472,10 +8811,6 @@ static void construct_cb(lv_obj_t *parent) {
     if (open_pool) {                    /* APP held on H: the pool's panel, over F */
         open_pool = false;
         pp_open();
-    }
-    if (!wide_ok) {
-        opt_set(&b_band, 0, "THIS BASE SENDS NO SPECTRUM", 1);
-        opt_set(&b_band, 1, "THE SENTRY NEEDS AN X6200", 2);
     }
 }
 
@@ -8595,9 +8930,12 @@ static void state_keep(void) {
     gui_state_set("s.preset", rtl_preset);
     gui_state_set("s.fband", f_band);
     gui_state_set("s.dwell", scan_dwell_ms);
+    gui_state_set("s.stay", scan_stay);         /* SCAN CFG's STAY ON A SIGNAL and GO ON AFTER (the style with them) */
+    gui_state_set("s.quiet", scan_quiet);
     gui_state_set("s.gscan", g_scan);
     gui_state_set("s.gsel", g_sel);
     gui_state_set("s.bsel", band_sel);
+    gui_state_set("s.tabs", 2);                 /* D's and E's tables as saved: 2 since WX SAT and E's new types */
     gui_state_set("s.dsel", dec_sel);
     gui_state_set("s.drow", dec_row);
     gui_state_set("s.sys", sys_sel);
@@ -8643,9 +8981,23 @@ static void state_restore(void) {
         if ((v = gui_state_get(k, -1)) == -1) continue;
         for (int i = j * 30; i < BANDS_N && i < j * 30 + 30; i++) band_rt[i].sweep = (v >> (i - j * 30)) & 1;
     }
-    v = gui_state_get("s.bsel", band_sel);
+    /* A state from before WX SAT went in after AIR, and E's types were put in order (2026-11-17): its band numbers
+     * from WX SAT's on one up, its type by its name */
+    bool old_tabs = gui_state_get("s.tabs", 1) < 2;
+    int  wx       = 0;
+
+    while (wx < BANDS_N - 1 && strcmp(bands[wx].name, "WX SAT")) wx++;
+#define BAND_LOAD(v) ((v) >= 0 && old_tabs && (v) >= wx ? (v) + 1 : (v))
+    v = BAND_LOAD(gui_state_get("s.bsel", band_sel));
     if (v >= 0 && v < BANDS_N) band_sel = v;
     v = gui_state_get("s.dsel", dec_sel);
+    if (old_tabs && v >= 0 && v < 8) {
+        static const char *const was[] = {"FT8", "FT4", "WSPR", "CW", "SSTV", "NAVTEX", "WEFAX", "JS8"};
+        int                      k     = 0;
+
+        while (k < DECODERS_N - 1 && strcmp(decoders[k].name, was[v])) k++;
+        v = k;
+    }
     if (v >= 0 && v < DECODERS_N) dec_sel = v;
     v = gui_state_get("s.drow", 0);
     dec_row = v >= 0 && v < decoders[dec_sel].n ? v : 0;
@@ -8660,7 +9012,7 @@ static void state_restore(void) {
     if (v >= 0 && v <= 47) w_sdr_gain = v;
 
     /* B: its preset or C's band, its tuning, the channel heard (hear_apply, as the screen opens, puts it on) */
-    v = gui_state_get("s.fband", -1);
+    v = BAND_LOAD(gui_state_get("s.fband", -1));
     f_band = v >= 0 && v < BANDS_N ? v : -1;
     v = gui_state_get("s.preset", rtl_preset);
     if (v >= 0 && v < RTL_PRESETS) rtl_preset = v;
@@ -8676,10 +9028,18 @@ static void state_restore(void) {
     }
 
     /* A: AUTO or SEMI, its band scan (on from the dial: the base kept it) or the sweep of the marked bands */
-    smode = gui_state_get("s.mode", MODE_SEMI) == MODE_AUTO ? MODE_AUTO : MODE_SEMI;
+    /* the scans' style: STAY and GO ON AFTER as kept (STEP TIME is s.dwell above); a state of before them: AUTO as
+     * SAMPLER (it stayed a while on each), SEMI as BROWSE. A's mode from the stay */
+    v = gui_state_get("s.stay", -1);
+    if (v >= 0 && v < STAY_N) scan_stay = v;
+    else scan_stay = gui_state_get("s.mode", MODE_SEMI) == MODE_AUTO ? STAY_15S : STAY_NONE;
+    v = gui_state_get("s.quiet", scan_quiet);
+    if (v >= 0 && v < (int)N_OF(quiet_ms)) scan_quiet = v;
+    smode = scan_stay == STAY_NONE ? MODE_SEMI : MODE_AUTO;
     if (smode == MODE_AUTO) sweep_next = 0;
-    v = gui_state_get("s.aband", -1);
+    v = BAND_LOAD(gui_state_get("s.aband", -1));
     if (v >= 0 && v < BANDS_N) scan_a_band = v;
+#undef BAND_LOAD
     switch (gui_state_get("s.rout", ROUT_BAND)) {
         case ROUT_SCAN:
             if (scan_a_band >= 0 && cfg_is_valid_hw_freq(bands[scan_a_band].listen_hz)) {
@@ -8702,7 +9062,8 @@ static void state_restore(void) {
             routine, smode == MODE_AUTO ? "AUTO" : "SEMI", rtl_scan ? "on" : "off", g_scan ? "on" : "off");
 }
 
-/* The Sentry on one of its screens by letter ("A" to "G"; "H" is AIRSPACE): AIRSPACE's ring comes back so */
+/* The Sentry on one of its screens by letter ("A" to "G"; "H" is AIRSPACE, "I" the direction finder): their rings come
+ * back so */
 /* The SDR pool's panel from outside the Sentry (APP held on H, AIRSPACE): the Sentry opened on F with it */
 void app_sentry_open_pool(void) {
     if (dialog_type_is_run(dialog_sentry)) {

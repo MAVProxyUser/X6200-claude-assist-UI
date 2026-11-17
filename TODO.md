@@ -8,13 +8,6 @@ here transmits until the owner says so (transmit work is not wanted for now). "N
 
 **Open**
 
-- **D BANDS and E DECODE in sync** (new): every function on both, the preamp default for each choice, the other
-  settings each combination needs, and which radio (the X6200 or the SDR) receives or transmits it shown with it.
-  Seen while testing: E's bottom line said VOLUME 0 while A's said VOLUME 2 at the same moment; check which
-  receiver's volume each one reads.
-- **SCAN CFG, a usability pass** (new): the screen revisited, with presets that behave like a scanner's: hop and dwell
-  combinations (dwell on a carrier until it drops, a resume delay, a fixed dwell then move on, search versus channel
-  scan, a priority channel), chosen in one step rather than built from the separate settings.
 - **Kraken DF, page I** (docs/plans/kraken_df_plan.md; D1 approved): a lean DF engine of our own (tools/rtlspec/df_*,
   host check "df") instead of KrakenSDR's Heimdall stack. Phase 0b/0c done (the processor at about 45 % at 1.024 MS/s).
   Phase 0a, the 30-minute sample-slip test (tools/rtlspec/df_slip_test.sh), needs all five Kraken tuners free: with
@@ -36,6 +29,9 @@ here transmits until the owner says so (transmit work is not wanted for now). "N
 - **RADE's decode time on the X6200** (new): 114-200 ms for the slowest 120 ms modem frame while searching, with no
   gaps or losses seen; watch it on a busy band.
 - **Screenshots** of every menu for the README and the manual: later, at the owner's word.
+- **Left out of the SCAN CFG and D/E passes** (2026-11-17): a priority channel (looked at every few seconds while a
+  scan runs) and a channel-list scan beside the band search; JTTY on E once it has calling frequencies; B's presets
+  D has no band for (SONDES, ISM 433 and 915, VHF and UHF LMR, 1.25 m, 23 cm, UAT 978), if the owner wants them.
 
 **Waiting on hardware**
 
@@ -53,6 +49,11 @@ here transmits until the owner says so (transmit work is not wanted for now). "N
 
 **Done 2026-11-16 and 2026-11-17** (for the record; details in git)
 
+- SCAN CFG in plain styles (BROWSE, SCANNER, SAMPLER, STOP & STAY, SURVEY, CUSTOM) over three plain settings, A
+  and B alike (B stops on a signal too), with what each scan is doing on the screen.
+- D BANDS and E DECODE in sync: one rule for which radio receives what (HF and 6 m the X6200, VHF/UHF the SDR), the
+  preamp, attenuator, AGC and SDR gain each choice sets shown on both, who may transmit, E with every receiving
+  function of both radios (21 types), VOL naming its radio.
 - Digital voice on B through dsd-fme and the DVSI chip (no mbelib): DMR, D-STAR, P25 phase 1, YSF, NXDN48 (three
   dsd-fme), each sent over a cable and heard.
 - Cable tests on the X6200 (a HackRF through 70 dB of attenuators, receive only): WeFax with a grey ramp, Time Signal

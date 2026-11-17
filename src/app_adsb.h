@@ -10,3 +10,6 @@
 #include "app_window.h"
 
 extern dialog_t *dialog_adsb;
+
+/* The next opening on the ACARS view (true: E's ACARS) or the map's */
+void app_adsb_open_view(bool acars);

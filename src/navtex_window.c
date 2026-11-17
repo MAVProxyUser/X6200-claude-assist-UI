@@ -594,6 +594,16 @@ static void app_open(lv_obj_t *parent)
         fprintf(stderr, "NAVTEX: unable to create decoder\n");
     }
     dsc_reset = true;
+    /* Opened on a channel (the Sentry's E: NAVTEX or DSC): that channel's mode. The decoder hears 1000 Hz up */
+    {
+        int32_t f = (int32_t)cparam_i_get(cfg_fg_freq) + 1000;
+
+        for (int i = 0; i < NAVTEX_N + DSC_N; i++)
+            if (navtex_freqs[i].freq_hz && abs(navtex_freqs[i].freq_hz - f) < 500) {
+                dsc_mode = i >= NAVTEX_N;
+                break;
+            }
+    }
 
     /* Full screen in the common app look; the main waterfall is hidden */
     dialog.obj = dialog_init(parent);

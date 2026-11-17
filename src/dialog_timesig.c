@@ -289,6 +289,8 @@ static void construct_cb(lv_obj_t *parent) {
     pthread_mutex_lock(&mux);
     if (!wwv) wwv = wwv_new(RATE);
     pthread_mutex_unlock(&mux);
+    for (int i = 0; i < FREQS_N; i++)   /* opened on one (the Sentry's E: TIME SIGNAL): there */
+        if (cparam_i_get(cfg_fg_freq) == FREQS[i]) freq_i = i;
     tune();
     timer = lv_timer_create(timer_cb, 500, NULL);
     timer_cb(NULL);

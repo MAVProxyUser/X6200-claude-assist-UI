@@ -1497,6 +1497,13 @@ static void build(void) {
     lv_obj_add_flag(help_l, LV_OBJ_FLAG_HIDDEN);
 }
 
+/* The view the next opening starts on: E's ACARS opens on the ACARS view, its ADS-B and D's ADS-B on the map's */
+static bool want_acars;
+
+void app_adsb_open_view(bool acars) {
+    want_acars = acars;
+}
+
 static void construct_cb(lv_obj_t *parent) {
     amb     = TC(accent);
     ink     = TC(bg);
@@ -1558,6 +1565,8 @@ static void construct_cb(lv_obj_t *parent) {
     seen_set  = 0;
     keys_mask = rx_now();
     rot_acc = 0;
+    if (want_acars) view_set(true);
+    want_acars = false;
     show_keys();
     if (ang) refresh();
     timer = lv_timer_create(timer_cb, sc_gpu ? 200 / SCOPE_DIV : 200, NULL);
