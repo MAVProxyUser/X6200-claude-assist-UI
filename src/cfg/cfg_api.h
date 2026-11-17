@@ -45,6 +45,7 @@ extern "C" {
 // --- GLOBAL params (flat `params` table) ---
 extern ParamInt         *cfg_volume;            // p_volume
 extern ParamInt         *cfg_squelch;           // p_squelch
+extern ParamInt         *cfg_sql_held;          // p_sql_held
 extern ParamInt         *cfg_rfgain;            // p_rfgain
 extern ParamInt         *cfg_rit;               // p_rit
 extern ParamInt         *cfg_xit;               // p_xit

@@ -4182,7 +4182,9 @@ Pressing Modes again closes the menu.
   NavTex, RADE, PSK, Olivia, JTTY, RTTY, Time Signal): a closed squelch gives
   the decoders silence, even under an S5 signal. The radio says so ("Squelch 4
   opened for WeFax"), and your squelch comes back when the app closes, unless
-  you set one yourself meanwhile.
+  you set one yourself meanwhile. It is kept through a restart or a power-off
+  with the app open: the app comes back with the squelch open, and closing it
+  still gives yours back.
 
 ### FT8 and FT4
 

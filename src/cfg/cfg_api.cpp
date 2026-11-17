@@ -22,6 +22,7 @@ ParamInt         *cfg_lock_per_band       = nullptr;
 ParamInt         *cfg_band_lock_modes     = nullptr;
 ParamInt         *cfg_volume              = nullptr;
 ParamInt         *cfg_squelch             = nullptr;
+ParamInt         *cfg_sql_held            = nullptr;
 ParamInt         *cfg_rfgain              = nullptr;
 ParamInt         *cfg_rit                 = nullptr;
 ParamInt         *cfg_xit                 = nullptr;
@@ -247,6 +248,7 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     // GLOBAL
     cfg_volume           = &cfg_sm.p_volume;
     cfg_squelch          = &cfg_sm.p_squelch;
+    cfg_sql_held         = &cfg_sm.p_sql_held;
     cfg_rfgain           = &cfg_sm.p_rfgain;
     cfg_rit              = &cfg_sm.p_rit;
     cfg_xit              = &cfg_sm.p_xit;

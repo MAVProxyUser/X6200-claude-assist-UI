@@ -120,6 +120,10 @@ class SettingsManager {
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_squelch{"sql", 0, 0, BOARD_SQL_MAX,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The user's squelch while a decoder app holds it open (screen_main.c), -1 when none is: kept, so a restart or a
+    // power-off with the app open (it comes back with the squelch at 0) still gives it back
+    Parameter<int32_t> p_sql_held{"sql_held", -1, -1, BOARD_SQL_MAX,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_rfgain{"rfgain", 63, 0, BOARD_RFG_MAX,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_wefax_align{"wefax_align", 0, -1300, 1300, StorageType::GLOBAL, pending_writes_, &global_params_};

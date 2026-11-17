@@ -550,8 +550,9 @@ static const char *app_name(press_action_t a) {
  * digital audio path, the panel */
 /* A decoder app hears the receiver only with the squelch open: at 4 it handed them silence even under an S5 signal
  * (the X6200, cabled test 2026-11-17: WeFax drew nothing till it was 0; the user's "no sound on 7.8" too). So a
- * decoder opens it, says so, and puts the user's back as it closes (left alone if they changed it meanwhile) */
-static int32_t sql_held = -1;
+ * decoder opens it, says so, and puts the user's back as it closes (left alone if they changed it meanwhile). The
+ * held squelch is a setting (cfg_sql_held): an app open at a restart or a power-off comes back with the squelch at 0,
+ * and the user's is still given back */
 
 static bool is_decoder_app(press_action_t a) {
     return a == ACTION_APP_FT8 || a == ACTION_APP_JS8 || a == ACTION_APP_WSPR || a == ACTION_APP_SSTV ||
@@ -563,16 +564,18 @@ static void sql_open_for(press_action_t a) {
     int32_t s = param_i_get(cfg_squelch);
 
     if (!is_decoder_app(a) || s <= 0) return;
-    sql_held = s;
+    param_i_set(cfg_sql_held, s);
     param_i_set(cfg_squelch, 0);
     msg_schedule_long_text_fmt("Squelch %d opened for %s: it gives decoders silence. Back as it closes.", (int)s,
                                app_name(a));
 }
 
 static void sql_give_back(void) {
-    if (sql_held < 0) return;
-    if (param_i_get(cfg_squelch) == 0) param_i_set(cfg_squelch, sql_held);
-    sql_held = -1;
+    int32_t held = param_i_get(cfg_sql_held);
+
+    if (held < 0) return;
+    if (param_i_get(cfg_squelch) == 0) param_i_set(cfg_squelch, held);
+    param_i_set(cfg_sql_held, -1);
 }
 
 static void close_apps(void) {
@@ -767,6 +770,9 @@ bool main_screen_restore(void) {
             }
         }
     }
+    /* a decoder app that held the squelch and is not back: the user's squelch again */
+    if (!(back && place == GUI_PLACE_APP && is_decoder_app((press_action_t)gui_state_get("app", ACTION_NONE))))
+        sql_give_back();
     if (back) fprintf(stderr, "gui state: back at place %d (1 the Sentry, 2 app %d, 3 the main screen)\n", place,
                       (int)gui_state_get("app", 0));
     return back;
