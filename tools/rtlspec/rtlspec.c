@@ -552,6 +552,22 @@ static void at_264k(chan_t *c, float r, float i) {
     }
     if (c->mode == 1) {                 /* NFM: +-5 kHz full scale, a little low pass and no DC */
         float zr = yr * c->prev_r + yi * c->prev_i, zi = yi * c->prev_r - yr * c->prev_i;
+
+        if (c == &lis) {                /* a test: with /tmp/rtl_level there, the channel's power each second in the
+                                         * log (dBFS of the stick's samples, its gain as set): an attenuator measured
+                                         * against another, the same carrier through each (2026-11-17) */
+            static double   pw;
+            static uint32_t pn;
+
+            pw += (double)yr * yr + (double)yi * yi;
+            if (++pn == AUD_RATE) {
+                if (!access("/tmp/rtl_level", F_OK))
+                    fprintf(stderr, "rtlspec: level %.1f dBFS at %.5f MHz (the channel, 1 s)\n",
+                            10 * log10(pw / pn + 1e-20), c->hz / 1e6);
+                pw = 0;
+                pn = 0;
+            }
+        }
         float d  = atan2f(zi, zr) * (AUD_RATE / (2 * (float)M_PI * 5000));
 
         c->prev_r = yr;
