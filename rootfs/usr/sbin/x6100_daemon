@@ -36,6 +36,9 @@ pulse_ensure() {
     return 1
 }
 
+X6200=false
+grep -q "xiegu,x6200" /proc/device-tree/compatible 2> /dev/null && X6200=true
+
 mkdir -p /mnt/app_logs/
 # The newest 50 run logs are kept (one per restart and, since v0.3.4, one per power-off)
 ls -t /mnt/app_logs/x6100_log_*.txt 2>/dev/null | tail -n +51 | while read -r f; do rm -f "$f"; done
@@ -55,9 +58,14 @@ while true; do
         /usr/sbin/x6100-starttrace "x6100_daemon: GUI start 11, the next ones are not traced"
         export X6100_START_TRACE=off    # the GUI's own lines (start_trace.c) too
     fi
+    $X6200 && /usr/sbin/x6200-base-keeper stop     # one fed the base while no GUI ran: the GUI does it again
     /usr/sbin/x6100_gui > /tmp/x6100_log.txt 2>&1
     code=$?
     key_up
+    # The X6200's base switches the radio off about three minutes after the GUI's register block stops coming: fed by
+    # the keeper (the GUI's last block, TX off) till the next GUI, in case the way to it is long (PulseAudio started
+    # again, an update rolled back)
+    $X6200 && /usr/sbin/x6200-base-keeper start
     # The X6200's WR12 back in its bypass should this GUI have left it out (a crash, an exit): the GUI after it may
     # know no WR12 (#134). Its line, if any, at the end of this GUI's log
     /usr/sbin/x6100-wr12-bypass >> /tmp/x6100_log.txt 2>&1

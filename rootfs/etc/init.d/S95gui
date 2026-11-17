@@ -33,6 +33,8 @@ start() {
 		exec 8>&-
 		return 0
 	fi
+	# The base keeper of a stop before (x6200-base-keeper) ended: the GUI talks to the base again
+	/usr/sbin/x6200-base-keeper stop 8>&-
 	start-stop-daemon -S -b -q -m -p "$PIDFILE" -x "/usr/sbin/$DAEMON" 8>&-
 	status=$?
 	# Under its own name before the lock goes, or the next start would not see it yet
@@ -70,6 +72,14 @@ stop() {
 	# And the X6200's WR12 back in its bypass should the GUI have left it out, as the loop does too (#134): the GUI
 	# does it itself at SIGTERM, this is for one that could not
 	/usr/sbin/x6100-wr12-bypass | logger -t S95gui 2> /dev/null
+	# The X6200's base switches the radio off about three minutes after the GUI's register block stops coming: a
+	# GUI stopped by hand took the radio with it (2026-11-17). The keeper sends the GUI's last block, TX off, every
+	# second till a GUI runs again. Not at a power-off or restart (rcK sets X6X00_SHUTDOWN): the base is told then
+	if [ -n "$X6X00_SHUTDOWN" ]; then
+		/usr/sbin/x6200-base-keeper stop
+	else
+		/usr/sbin/x6200-base-keeper start
+	fi
 	return "$status"
 }
 

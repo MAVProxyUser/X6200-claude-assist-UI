@@ -793,6 +793,36 @@ void hw_poweroff(void) {
     kill(1, SIGUSR2);
 }
 
+/* The register block as the keepalive sends it (the address 0, then registers 0 to x6200_last as the library holds
+ * them), for x6200-base-keeper (rootfs/usr/sbin): the base switches the radio off about three minutes after its host
+ * goes quiet, and while no GUI runs (S95gui stop, the gap before the next GUI) the keeper sends this block every
+ * second instead, its TX bits cleared. On /run (tmpfs), written only when it changed, whole: a new file renamed over */
+#define BLOCK_FILE "/run/x6200-base-block"
+
+static void block_save(void) {
+    static uint8_t last[2 + 4 * (x6200_last + 1)];
+    static bool    saved;
+    uint8_t        buf[sizeof(last)] = {0};
+
+    for (int i = 0; i <= x6200_last; i++) {
+        uint32_t v = x6200_control_get((x6200_cmd_enum_t)i);
+        memcpy(buf + 2 + 4 * i, &v, sizeof(v));
+    }
+    if (saved && memcmp(buf, last, sizeof(buf)) == 0) {
+        return;
+    }
+    int fd = open(BLOCK_FILE ".new", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) {
+        return;
+    }
+    bool ok = write(fd, buf, sizeof(buf)) == (ssize_t)sizeof(buf);
+    close(fd);
+    if (ok && rename(BLOCK_FILE ".new", BLOCK_FILE) == 0) {
+        memcpy(last, buf, sizeof(buf));
+        saved = true;
+    }
+}
+
 /* The library reopens the bus and tries once more on its own, and reports nothing but errno */
 bool hw_resend_all(void) {
     if (atomic_load(&held)) {
@@ -800,7 +830,11 @@ bool hw_resend_all(void) {
     }
     errno = 0;
     x6200_control_idle();
-    return errno == 0;
+    bool ok = errno == 0;
+    if (ok) {
+        block_save();
+    }
+    return ok;
 }
 
 bool hw_tx_keyed_by_gui(void) {

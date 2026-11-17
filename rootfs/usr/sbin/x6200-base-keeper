@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""The X6200's base kept fed while no GUI runs.
+
+The base switches the radio off about three minutes after its host goes quiet: the GUI sends it the whole register
+block every second (its keepalive, hw_resend_all), and with the GUI stopped (/etc/init.d/S95gui stop, over SSH for a
+test) nothing did, so the radio went dark and had to be switched on again by hand (2026-11-17, three times: about
+3.2 minutes after each stop, with or without USB load). This sends the GUI's last block instead, every second, with
+every TX bit cleared, until a GUI runs again; then it ends by itself.
+
+    x6200-base-keeper start     detached, unless one runs already (S95gui stop, x6100_daemon between two GUIs)
+    x6200-base-keeper stop      the running one ended (S95gui start, x6100_daemon before a GUI, a power-off)
+    x6200-base-keeper run       in the foreground (what start runs)
+
+The block is /run/x6200-base-block, which the GUI writes when it changes (hw_x6200.c, block_save): the address 0
+and registers 0 to 53, as the base control library sends them. Without it (no GUI has run since the start) the base
+is only read (its ready register), which feeds nothing known but changes nothing either. The X6100 has no such base:
+there it does nothing. Never anything but the base's own address on /dev/i2c-0, never a scan of the bus.
+"""
+import fcntl
+import os
+import signal
+import subprocess
+import sys
+import time
+
+BLOCK = "/run/x6200-base-block"
+PIDFILE = "/run/x6200-base-keeper.pid"
+LOG = "/tmp/x6200-base-keeper.log"
+I2C = "/dev/i2c-0"
+ADDR = 0x72
+I2C_SLAVE = 0x0703
+I2C_SLAVE_FORCE = 0x0706
+REGS = 54                                   # registers 0 to x6200_last (53)
+BLOCK_LEN = 2 + 4 * REGS
+TRX = 12                                    # x6200_sple_atue_trx
+# Its bits that key the base or switch it off, cleared: iptt, modem_trx, atu_tune, swrscan_trx, calibration_trx
+# (the GUI's TX_BITS) and power_off
+TX_OFF = 0x40000 | 0x4000 | 0x2000 | 0x10 | 0x100000 | 0x10000
+READY = 0x2000
+PERIOD = 1.0
+GUI = "x6100_gui"
+
+
+def is_x6200():
+    try:
+        with open("/proc/device-tree/compatible", "rb") as f:
+            return b"xiegu,x6200" in f.read()
+    except OSError:
+        return False
+
+
+def log(text):
+    try:
+        with open(LOG, "a") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + text + "\n")
+    except OSError:
+        pass
+
+
+def running_pid():
+    try:
+        with open(PIDFILE) as f:
+            pid = int(f.read().strip())
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            if b"x6200-base-keeper" not in f.read():
+                return None
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
+def gui_running():
+    for p in os.listdir("/proc"):
+        if not p.isdigit():
+            continue
+        try:
+            with open(f"/proc/{p}/comm") as f:
+                if f.read().strip() == GUI:
+                    return True
+        except OSError:
+            pass
+    return False
+
+
+def block():
+    """The GUI's last block with its TX bits cleared, or None"""
+    try:
+        with open(BLOCK, "rb") as f:
+            b = bytearray(f.read(BLOCK_LEN + 1))
+    except OSError:
+        return None
+    if len(b) != BLOCK_LEN or b[0] or b[1]:
+        return None
+    o = 2 + 4 * TRX
+    v = int.from_bytes(b[o:o + 4], "little") & ~TX_OFF
+    b[o:o + 4] = v.to_bytes(4, "little")
+    return bytes(b)
+
+
+def bus():
+    fd = os.open(I2C, os.O_RDWR)
+    try:
+        try:
+            fcntl.ioctl(fd, I2C_SLAVE, ADDR)
+        except OSError:
+            fcntl.ioctl(fd, I2C_SLAVE_FORCE, ADDR)
+    except OSError:
+        os.close(fd)
+        raise
+    return fd
+
+
+def feed(data):
+    """One block written, or the ready register read when there is none: True when the base took it"""
+    fd = bus()
+    try:
+        if data:
+            return os.write(fd, data) == len(data)
+        os.write(fd, READY.to_bytes(2, "big"))
+        return len(os.read(fd, 1)) == 1
+    finally:
+        os.close(fd)
+
+
+def run():
+    if not is_x6200():
+        return 0
+    with open(PIDFILE, "w") as f:
+        f.write(f"{os.getpid()}\n")
+    stop = []
+    signal.signal(signal.SIGTERM, lambda *_: stop.append(1))
+    signal.signal(signal.SIGINT, lambda *_: stop.append(1))
+    data = block()
+    log("started: " + ("the GUI's last block, TX bits cleared, every second" if data else
+                       f"no block in {BLOCK}: the base's ready register read every second"))
+    sent = fails = 0
+    try:
+        while not stop:
+            if gui_running():
+                log(f"a GUI runs: ended ({sent} sent)")
+                break
+            data = block() or data
+            try:
+                ok = feed(data)
+            except OSError as e:
+                ok = False
+                if fails == 0:
+                    log(f"the base did not take it: {e}")
+            if ok:
+                sent += 1
+                if fails:
+                    log(f"the base takes it again after {fails} failures")
+                fails = 0
+            else:
+                fails += 1
+            time.sleep(PERIOD)
+        else:
+            log(f"stopped ({sent} sent)")
+    finally:
+        if running_pid() in (None, os.getpid()):
+            try:
+                os.remove(PIDFILE)
+            except OSError:
+                pass
+    return 0
+
+
+def start():
+    if not is_x6200() or running_pid() or gui_running():
+        return 0
+    with open(os.devnull, "rb") as nul_in, open(os.devnull, "wb") as nul_out:
+        subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "run"], stdin=nul_in, stdout=nul_out,
+                         stderr=nul_out, start_new_session=True, close_fds=True)
+    return 0
+
+
+def stop():
+    pid = running_pid()
+    if not pid:
+        return 0
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return 0
+    for _ in range(30):                     # its sleep is a second at most
+        if not os.path.exists(f"/proc/{pid}"):
+            break
+        time.sleep(0.1)
+    return 0
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else ""
+    if cmd == "run":
+        return run()
+    if cmd == "start":
+        return start()
+    if cmd == "stop":
+        return stop()
+    print("usage: x6200-base-keeper start|stop|run", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -1724,6 +1724,17 @@ a bundle file), or over SSH `x6100-update install <bundle> --kernel --uboot`
   base now and then let one pass and stayed on). The start trace
   (`/mnt/app_logs/start_trace.txt`) says which it was: "restart
   (x6x00-reboot)... the base kept on, no s" or "the base's power off".
+- **Stopping the GUI over SSH (X6200).** The X6200's base switches the radio
+  off about three minutes after the GUI stops sending it its settings, which
+  the GUI does every second. Up to now `/etc/init.d/S95gui stop` took the
+  radio with it: dark, not answering, switched on again by hand. Now
+  `x6200-base-keeper` sends the base the GUI's last settings every second while
+  no GUI runs, with transmit always off. It starts at `S95gui stop` and in the
+  gap before the GUI starts again after a crash, and it ends by itself when a
+  GUI runs. A power-off or `x6x00-reboot` starts none. Its log is
+  `/tmp/x6200-base-keeper.log`. The radio stays as it was set (frequency,
+  mode, volume) but receives with no screen or sound of its own till
+  `S95gui start`.
 - **Old modules go.** A kernel's modules take about 15 MB of the root
   filesystem. After a new kernel is written, the folders in `/lib/modules` of
   kernels nothing can start any more are removed; kept are the running

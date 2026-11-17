@@ -19,6 +19,9 @@
 trace=/usr/sbin/x6100-starttrace
 [ -x "$trace" ] || trace=:
 "$trace" "power off: stopping the init scripts"
+# S95gui's stop starts no base keeper (x6200-base-keeper) then and ends one a stop by hand left: the base is to switch
+# the radio off at the "s" below, or stay on for a restart
+export X6X00_SHUTDOWN=1
 
 x6200=false
 grep -q "xiegu,x6200" /proc/device-tree/compatible 2>/dev/null && [ -c /dev/ttyS1 ] && x6200=true
