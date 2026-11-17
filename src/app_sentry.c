@@ -352,6 +352,15 @@ static struct {
 static char tag_hex[8] = "E07020";      /* the tags' colour (RTL, ADS-B, WR12, RX): the 3D picture's orange, set from
                                           * the theme at the Sentry's start (construct_cb) */
 static bool sdr_here;           /* an RTL-SDR on USB (adsb_rx_sdr_present), looked at every 2 s */
+
+/* B's SDR by its kind on D and E, as C names receivers (the owner, 2026-11-17: no stick numbers there): RTL, HACK or
+ * BLADE, SDR with none plugged in */
+static const char *b_kind(void) {
+    rtl_dev_t d = rtl_spectrum_dev();
+
+    if (!sdr_here && d == RTL_DEV_NONE) return "SDR";
+    return d == RTL_DEV_HACKRF ? "HACK" : d == RTL_DEV_BLADERF ? "BLADE" : "RTL";
+}
 static bool adsb_here;          /* an ADS-B receiver on USB, or AIRSPACE decoding (the stick's dump1090) */
 static bool wr12_here;          /* the WR12 on HOST, found and set up */
 
@@ -1868,7 +1877,7 @@ static void band_more(int i, char *s, size_t n) {
     if (rx == RX_NONE)
         snprintf(s, n, "NO RADIO HERE TUNES IT%s%s", e[0] ? " | E:" : "", e);
     else
-        snprintf(s, n, "RX %s, %s | %s%s%s", rx == RX_SDR ? rtl_spectrum_dev_tag() : "X6200", set, tx,
+        snprintf(s, n, "RX %s, %s | %s%s%s", rx == RX_SDR ? b_kind() : "X6200", set, tx,
                  e[0] ? " | E:" : "", e);
 }
 
@@ -1894,8 +1903,8 @@ static void show_bands(void) {
         char rx[24];                    /* which radio takes it: the stick (in the tags' orange, but in the row's ink
                                          * on the chosen row: orange on amber hardly showed) or the X6200 */
         if (band_uses_rtl(i)) {
-            if (sdr_here && i != band_sel) snprintf(rx, sizeof(rx), "#%s %s#", tag_hex, rtl_spectrum_dev_tag());
-            else snprintf(rx, sizeof(rx), "%s", rtl_spectrum_dev_tag());
+            if (sdr_here && i != band_sel) snprintf(rx, sizeof(rx), "#%s %s#", tag_hex, b_kind());
+            else snprintf(rx, sizeof(rx), "%s", b_kind());
         }
         else snprintf(rx, sizeof(rx), "%s", cfg_is_valid_hw_freq(bands[i].listen_hz) ? "X6200" : "");
         snprintf(s, sizeof(s), BAND_ROW, band_rt[i].sweep ? '*' : ' ',
@@ -1924,12 +1933,12 @@ static int dec_top(void) {
     return top < 0 ? 0 : top;
 }
 
-/* The radio a type is received on, as its RX column says it: the X6200's apps, else the SDR's (by its name, "SDR"
+/* The radio a type is received on, as its RX column says it: the X6200's apps, else the SDR's (by its kind, "SDR"
  * with none plugged in; ADS-B's GNS 5890 stick when only it is there) */
 static const char *dec_rx(const decoder_t *d, int32_t f) {
     if (d->rx == 'X') return cfg_is_valid_hw_freq(f) ? "X6200" : "";
     if (d->rx == 'H' && !sdr_here && adsb_here) return "STICK";
-    return rtl_spectrum_dev_tag();
+    return b_kind();
 }
 
 static void show_decode(void) {

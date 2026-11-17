@@ -1069,8 +1069,9 @@ written through to the card before it replaces the last copy, so a power cut kee
 - **D BANDS**: what each band carries, when it is open and what antenna it wants, with what the Sentry heard there
   last. The bands: the ham bands (60 m too), the broadcast bands, CB, FM, the marine bands the weather decoders use
   (SHIP MF, 4, 6, 8, 12, 16; UTIL 9 for NOAA's Boston fax on 9110), and the SDR's: the airband, WX SAT (the Meteor
-  satellites), 2 m, marine VHF, NOAA weather, 70 cm, GMRS and ADS-B. **RX** names the radio that takes each band,
-  one rule on D and E alike:
+  satellites), 2 m, marine VHF, NOAA weather, 70 cm, GMRS and ADS-B. **RX** names the radio that takes each band
+  by its kind (X6200, RTL, HACK, BLADE; SDR with none plugged in: no stick numbers, as on C), one rule on D and E
+  alike:
   - **HF and 6 m (up to 60 MHz): the X6200**, whose receiver and antennas they are, even with an SDR plugged in
     (before, an SDR took 12 m, CB, 10 m and 6 m on its VHF antenna while the row said CB WHIP);
   - **VHF and UHF: the SDR** (RTL0, HACKRF or BLADERF, in the tags' orange) when one is plugged in; without one, the
@@ -1102,7 +1103,8 @@ written through to the card before it replaces the last copy, so a power cut kee
 - **E DECODE**: every receiving function of the radio, the X6200's apps and the SDR's decoders, each with the
   frequencies it works on. The **TYPE** list on the left (F3 UP, F4 DOWN, or a tap) scrolls; the rows on the right
   give each frequency's BAND (D's), BEST (NIGHT, DAY, ANY or LOCAL), **OPEN SETS** (the preamp and AGC, or the SDR's
-  gain, as above), NOW and **RX** (the radio it is heard on). Under them: WHAT IT IS, OPENS IN (where F2 takes you,
+  gain, as above), NOW and **RX** (the radio it is heard on, by its kind: X6200, RTL, HACK, BLADE, SDR with none
+  plugged in, as on D and C). Under them: WHAT IT IS, OPENS IN (where F2 takes you,
   and `X6200: RX AND TX` where hams send it too and the TX ranges let the X6200, else `RX ONLY`) and the row's
   ANTENNA. F2 (OPEN, or a press, or a tap on the row chosen) opens it there. The types:
 
