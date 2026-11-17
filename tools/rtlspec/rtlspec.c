@@ -1172,7 +1172,8 @@ static void *met_thread(void *arg) {
             snprintf(file, sizeof(file), "%s", stem);
         }
         if (pkts && now - pkt_ms >= MET_END_S * 1000u && (pkts == saved_pkts || met_save(dec, stem))) {
-            fprintf(stderr, "rtlspec: Meteor pass over: %u packets\n", pkts);   /* the pass is over: saved, forgotten */
+            fprintf(stderr, "rtlspec: Meteor pass over: %u packets, %u of %u frames good, %u samples the decoder was "
+                    "too late for\n", pkts, st.frames_ok, st.frames, atomic_load(&m_drop));   /* saved, forgotten */
             lrpt_clear(dec);
             pkts = saved_pkts = 0;
             pass++;
