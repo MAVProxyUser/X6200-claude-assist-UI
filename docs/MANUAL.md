@@ -3309,7 +3309,7 @@ by itself. The 20 MHz and channel 12 and 13 settings in `x6100-wifi.conf` are
 | Card | Options |
 |---|---|
 | ADAPTER | Bluetooth (power), Status, Address, Pairing (3 min) |
-| DEVICES | Scan (headphones and keyboards, 16 s), Activity, the device list |
+| DEVICES | Scan (headphones, keyboards, a GPS; 16 s), Activity, the device list |
 | HEADPHONES | RX to headphones, Volume, Mute speaker |
 | BLUETOOTH CAT | Clients connected, Port |
 

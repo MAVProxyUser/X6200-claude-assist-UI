@@ -2591,7 +2591,7 @@ static void bt_mute_cb(lv_event_t *e) {
 static uint8_t make_bt_devices(uint8_t row) {
     lv_obj_t *obj;
 
-    wl_row_label(row, "Headphones, keyboards");
+    wl_row_label(row, "Headphones, keyboards, GPS");
     bt.scan_btn = wl_button(row, "Scan", bt_scan_cb);
     lv_label_set_text(wl_note(row), "16 s");
     row++;
