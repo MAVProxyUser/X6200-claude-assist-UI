@@ -29,6 +29,8 @@ typedef struct {
     df_st_msg_t st;
     df_do_msg_t dd;             /* the newest estimate */
     df_sp_msg_t sp;
+    bool        have_gp;
+    df_gp_msg_t gp;             /* gpsd's fix and heading (DFGP), once a second */
     uint32_t    do_n;           /* estimates taken since page I opened (the history's newest is hist[(do_n-1) % H]) */
     uint32_t    st_ms;          /* when DFST last came (lv_tick-like ms), 0 never */
 } df_snap_t;

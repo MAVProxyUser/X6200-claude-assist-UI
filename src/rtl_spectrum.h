@@ -103,6 +103,8 @@ bool rtl_spectrum_feed(int fd);
  * the X6200. Within the helper's span only: outside it is silent until the stick is retuned there */
 void rtl_spectrum_listen(int64_t hz, int mode);
 bool rtl_spectrum_listening(void);
+/* The frequency B is tuned to (what LISTEN plays there), whether it plays now or not: page I's FOLLOW B */
+int64_t rtl_spectrum_listen_hz(void);
 
 /* While listening: the X6200's receiver mixed in with the stick (on: BOTH), or the stick alone. Mixed only on the
  * Bluetooth headphones: on the speaker the base, playing the stick, sends none of its receiver (rtl_spectrum.c) */

@@ -15,9 +15,13 @@
  *  - The right: the target and the bearing; the array against the band (the calculator's s, its resolution and the
  *    word OK / AMBIGUOUS / COARSE, and the size it would want); each antenna's signal and state; CH0's spectrum with
  *    the target marked over a waterfall of bearings.
- *  - Keys: F1 TARGET (bandwidth; held AUTO: the strongest signal in the passband), F2 ARRAY (band, kind, size,
- *    heading), F3 METHOD, F4 CAL (now; held: how often), F5 SET (rate, gain, squelch, antennas left out, the test
- *    source). VFO: the target finely; MFK: a channel; arrows: the Kraken half a passband; the ring: H before, A after.
+ *  - Keys: F1 TUNE (FOLLOW A or B, the band, the frequency, the bandwidth, AUTO; held: AUTO, the strongest signal in
+ *    the passband), F2 ARRAY (band, kind, size, heading), F3 METHOD, F4 CAL (now; held: how often), F5 SET (rate,
+ *    gain, squelch, antennas left out, the test source). VFO: the target finely, the Kraken following past its
+ *    passband's edge; MFK: a channel; the BAND keys: the band presets; the ring: H before, A after.
+ *  - FOLLOW (the owner, 2026-11-17: no easy way to tune to the band to DF, nor to follow a radio's tune from another
+ *    screen): A takes the X6200's dial, B the frequency B is tuned to, as they change, once they rest half a second
+ *    (each retune is a calibration). The VFO, the band keys or a band chosen set it OFF.
  *  Receive only: the Kraken has no transmitter, and the X6200 is not touched (the VFO is this screen's).
  */
 
@@ -25,6 +29,7 @@
 
 #include "app_sentry.h"
 #include "buttons.h"
+#include "cfg/cfg_api.h"
 #include "df_rx.h"
 #include "gui_events.h"
 #include "gui_state.h"
@@ -142,7 +147,8 @@ static const kind_t kinds[] = {{"UCA-5", false, 5}, {"UCA-4", false, 4}, {"UCA-3
                                {"ULA-5", true, 5},  {"ULA-4", true, 4},  {"ULA-3", true, 3}};
 #define N_KINDS (int)(sizeof(kinds) / sizeof(kinds[0]))
 
-static const char *const methods[] = {"MUSIC", "BARTLETT", "CAPON", "MEM"};
+static const char *const methods[] = {"MUSIC", "BARTLETT", "CAPON", "MEM", "TNA"};
+#define N_METHODS (int)(sizeof(methods) / sizeof(methods[0]))
 static const uint32_t    rates[] = {250000, 1024000, 2048000, 2400000};
 #define N_RATES (int)(sizeof(rates) / sizeof(rates[0]))
 static const uint32_t bws[] = {2500, 6000, 12500, 25000, 200000};
@@ -158,6 +164,7 @@ static struct {
     int32_t fc, off;            /* the Kraken's centre, the target's offset from it (Hz) */
     int     bw, band, kind, size_mm, heading, method, rate, gain, sql_ddb, cal, off_mask;
     bool    autot;              /* the target: the strongest signal in the passband */
+    int     follow;             /* FOLLOW: 0 off, 1 A (the X6200's dial), 2 B (B's frequency) */
 } cfg;
 
 static void cfg_load(void) {
@@ -174,7 +181,8 @@ static void cfg_load(void) {
     cfg.size_mm = gui_state_get("df.size", 290);
     if (cfg.size_mm < 10 || cfg.size_mm > 5000) cfg.size_mm = 290;
     cfg.heading = gui_state_get("df.head", 0) % 360;
-    cfg.method  = gui_state_get("df.meth", 0) & 3;
+    cfg.method  = gui_state_get("df.meth", 0);
+    if (cfg.method < 0 || cfg.method >= N_METHODS) cfg.method = 0;
     cfg.gain    = gui_state_get("df.gain", 15);
     if (cfg.gain < 0 || cfg.gain >= N_GAINS) cfg.gain = 15;
     cfg.sql_ddb = gui_state_get("df.sql", 80);
@@ -182,6 +190,8 @@ static void cfg_load(void) {
     if (cfg.cal < 0 || cfg.cal >= N_CALS) cfg.cal = 3;
     cfg.off_mask = gui_state_get("df.mask", 0) & 0xff;
     cfg.autot   = gui_state_get("df.auto", 0) != 0;
+    cfg.follow  = gui_state_get("df.follow", 0);
+    if (cfg.follow < 0 || cfg.follow > 2) cfg.follow = 0;
 }
 
 static void cfg_save(void) {
@@ -199,9 +209,25 @@ static void cfg_save(void) {
     gui_state_set("df.cal", cfg.cal);
     gui_state_set("df.mask", cfg.off_mask);
     gui_state_set("df.auto", cfg.autot);
+    gui_state_set("df.follow", cfg.follow);
 }
 
 static uint32_t target_hz(void) { return (uint32_t)(cfg.fc + cfg.off); }
+
+/* The newest of what the daemon said (df_rx_snap, each refresh) */
+/* The heading the bearings take (degrees, ANT 0's compass bearing): gpsd's when x6x00-df has one (a compass behind
+ * gpsd, or the course while moving: DFGP), else the one set by hand (F2 ARRAY's HEADING); heading_from() says which */
+static df_snap_t sn;
+static int heading_now(void) {
+    if (sn.connected && sn.have_gp && sn.gp.head_src && sn.gp.head_ddeg >= 0) return (sn.gp.head_ddeg + 5) / 10 % 360;
+    return cfg.heading;
+}
+
+static const char *heading_from(void) {
+    if (sn.connected && sn.have_gp && sn.gp.head_src == 2) return "COMPASS";
+    if (sn.connected && sn.have_gp && sn.gp.head_src == 1) return "GPS COURSE";
+    return cfg.heading ? "SET" : "";
+}
 
 /* What each setting means to the daemon (df_proto.h): kept by df_rx.c and said again to a daemon started anew */
 static void send_rate(void)   { df_rx_cmd("s %u", rates[cfg.rate]); }
@@ -256,6 +282,82 @@ static int band_of_target(void) {
         if (d < bd) bd = d, best = i;
     }
     return bd <= 0.03 * bands[best].hz ? best : -1;
+}
+
+/* ---- Tuning: a frequency anywhere the Kraken goes, and FOLLOW ---- */
+
+#define KRAKEN_LO   24000000LL
+#define KRAKEN_HI   1766000000LL
+
+static void msg(const char *t);
+static void show_keys(void);
+
+/* The target to hz: inside the passband as it is when hz is clear of its edges and of the sticks' DC in the middle,
+ * else the Kraken moved (a quarter of the rate under hz, as a band chosen), which means a calibration. false: out of
+ * the Kraken's range */
+static bool tune_to(int64_t hz) {
+    int32_t lim = (int32_t)(rates[cfg.rate] / 2) - (int32_t)bws[cfg.bw] / 2 - (int32_t)(rates[cfg.rate] / 20);
+    int64_t off = hz - cfg.fc;
+
+    if (hz < KRAKEN_LO || hz > KRAKEN_HI) return false;
+    if (llabs(off) <= lim && llabs(off) >= (int64_t)bws[cfg.bw]) {
+        cfg.off = (int32_t)off;
+    } else {
+        cfg.off = (int32_t)(rates[cfg.rate] / 4);
+        cfg.fc  = (int32_t)(hz - cfg.off);
+        send_fc();
+    }
+    cfg.band = band_of_target();
+    send_target();
+    return true;
+}
+
+static const char *const follow_names[] = {"OFF", "A", "B"};
+
+static int64_t follow_hz(void) {
+    return cfg.follow == 1 ? (int64_t)cparam_i_get(cfg_fg_freq) : cfg.follow == 2 ? rtl_spectrum_listen_hz() : 0;
+}
+
+/* FOLLOW off by the user's own tuning, said once */
+static void follow_off(void) {
+    if (!cfg.follow) return;
+    cfg.follow = 0;
+    msg("FOLLOW OFF: TUNED HERE");
+}
+
+/* Each 200 ms: the followed radio's frequency taken once it has rested half a second (each retune calibrates) */
+static void follow_tick(void) {
+    static int64_t  seen, took;
+    static uint32_t since;
+    static int      said;
+    int64_t         hz = follow_hz();
+    uint32_t        now = lv_tick_get();
+
+    if (!cfg.follow || hz <= 0) {
+        seen = took = 0;
+        said = 0;
+        return;
+    }
+    if (hz != seen) {
+        seen  = hz;
+        since = now;
+        return;
+    }
+    if (hz == took || now - since < 500) return;
+    took = hz;
+    if (hz == (int64_t)target_hz()) return;
+    if (tune_to(hz)) {
+        said = 0;
+        cfg_save();
+        show_keys();
+    } else if (said != cfg.follow) {
+        char t[96];
+
+        snprintf(t, sizeof(t), "FOLLOW %s: %.3f MHZ IS OUTSIDE THE KRAKEN'S 24-1766 MHZ: WAITING", follow_names[cfg.follow],
+                 hz / 1e6);
+        msg(t);
+        said = cfg.follow;
+    }
 }
 
 /* ---- The calculator (KrakenRF's Antenna Array Size Calculator) ---- */
@@ -351,7 +453,6 @@ static lv_timer_t *timer;
 static bool        help_on;
 static int         rot_acc;
 static uint32_t    msg_until;
-static df_snap_t   sn;
 static struct {
     double   brg;               /* screen degrees as the daemon said them (before the heading) */
     uint32_t ms;
@@ -409,7 +510,7 @@ static uint32_t fit_c(void) {
 static void draw_scope(void) {
     uint32_t *px = (uint32_t *)scope->data;
     double    cx = SC / 2.0 - 0.5, cy = SC / 2.0 - 0.5, R = SC / 2.0 - 18, Rin = R * 0.62;
-    int       head = cfg.heading;
+    int       head = heading_now();
     bool      have = sn.connected && sn.have_do;
     calc_t    c = calc_at(target_hz());
     uint8_t   p[360];
@@ -577,10 +678,10 @@ static void show_target(void) {
              (unsigned)((st == DF_ST_TRACK ? c_green : st == DF_ST_SLIP || st == DF_ST_ERROR ? c_red : c_amb) & 0xffffff),
              st < 0 ? "NO DAEMON" : state_name(st));
     if (sn.have_do && sn.dd.bearing_ddeg >= 0 && (sn.dd.gate || st == DF_ST_HOLD)) {
-        int b = sn.dd.bearing_ddeg;
-        if (cfg.heading) b = (b + cfg.heading * 10) % 3600;
+        int b = sn.dd.bearing_ddeg, h = heading_now();
+        if (*heading_from()) b = (b + h * 10) % 3600;
         snprintf(t[1], sizeof(t[1]), "#%06X BRG %03d.%d%s +-%d.%d#  FIT %d%%  %s", (unsigned)(fit_c() & 0xffffff), b / 10,
-                 b % 10, cfg.heading ? " N" : "", sn.dd.uncert_ddeg / 10, sn.dd.uncert_ddeg % 10, sn.dd.fit_pct,
+                 b % 10, *heading_from() ? " N" : "", sn.dd.uncert_ddeg / 10, sn.dd.uncert_ddeg % 10, sn.dd.fit_pct,
                  methods[cfg.method]);
     } else {
         snprintf(t[1], sizeof(t[1]), "BRG ---  %s", methods[cfg.method]);
@@ -606,7 +707,8 @@ static void show_array(void) {
     snprintf(t[0], sizeof(t[0]), "%s %s %.1f CM  S %.2f  RES %.0f DEG  #%06X %s#", k->name, k->ula ? "D" : "R",
              cfg.size_mm / 10.0, c.s, c.res, (unsigned)(wc & 0xffffff), c.word);
     snprintf(t[1], sizeof(t[1]), "FOR S 0.50: %s %.1f CM  HALF WAVE %.1f CM  %s", k->ula ? "D" : "R", c.want_m * 100,
-             c.lambda * 50, cfg.heading ? "N UP" : "ANT0 UP");
+             c.lambda * 50, !*heading_from() ? "ANT0 UP" : !strcmp(heading_from(), "SET") ? "N UP"
+                            : !strcmp(heading_from(), "COMPASS") ? "N UP CMP" : "N UP GPS");
     lv_label_set_text(arr_l[0], t[0]);
     lv_label_set_text(arr_l[1], t[1]);
 }
@@ -678,7 +780,7 @@ static void show_spec(void) {
         bool     ok = sn.do_n > (uint32_t)(r * WF_STEP) && df_rx_hist(n, p, &g);
 
         for (int x = 0; x < SPEC_W; x++) {
-            int deg = (x * 360 / SPEC_W - cfg.heading + 360) % 360;   /* as the compass: by the heading */
+            int deg = (x * 360 / SPEC_W - heading_now() + 360) % 360;   /* as the compass: by the heading */
             w[r * SPEC_W + x] = ok ? (g ? glow[p[deg] * 63 / 255] : mix(glow[p[deg] * 63 / 255], c_ink, 110)) : c_ink;
         }
     }
@@ -705,14 +807,15 @@ static void show_head(void) {
 
 /* ---- The panels: F2 ARRAY, F5 SET. MFK goes down the rows, the VFO changes the one chosen, a push does it ---- */
 
-typedef enum { P_NONE, P_ARRAY, P_SET } panel_t;
+typedef enum { P_NONE, P_ARRAY, P_SET, P_TUNE } panel_t;
 static panel_t pan;
 static int     pan_sel;
 
 enum { A_BAND, A_KIND, A_SIZE, A_FIT, A_HEAD, A_N };
 enum { S_RATE, S_GAIN, S_SQL, S_CAL, S_ANT0, S_SRC = S_ANT0 + NANT, S_N };
+enum { T_FOLLOW, T_BAND, T_FREQ, T_WIDTH, T_AUTO, T_N };
 
-static int pan_rows(void) { return pan == P_ARRAY ? A_N : pan == P_SET ? S_N : 0; }
+static int pan_rows(void) { return pan == P_ARRAY ? A_N : pan == P_SET ? S_N : pan == P_TUNE ? T_N : 0; }
 
 static void pan_fill(void) {
     char t[PANEL_ROWS][96];
@@ -729,7 +832,23 @@ static void pan_fill(void) {
         snprintf(t[A_SIZE], sizeof(t[0]), "%s    < %.1f CM >  S %.2f  RES %.0f DEG  %s", kinds[cfg.kind].ula ? "SPACING" : "RADIUS ",
                  cfg.size_mm / 10.0, c.s, c.res, c.word);
         snprintf(t[A_FIT], sizeof(t[0]), "PUSH: SIZE FOR S 0.50 AT THIS BAND (%.1f CM)", c.want_m * 100);
-        snprintf(t[A_HEAD], sizeof(t[0]), "HEADING   < %d >  ANT 0'S COMPASS BEARING, 0 = ANT 0 UP", cfg.heading);
+        if (!strcmp(heading_from(), "COMPASS") || !strcmp(heading_from(), "GPS COURSE"))
+            snprintf(t[A_HEAD], sizeof(t[0]), "HEADING   < %d >  IN USE: %s %d (GPSD)", cfg.heading, heading_from(), heading_now());
+        else snprintf(t[A_HEAD], sizeof(t[0]), "HEADING   < %d >  ANT 0'S COMPASS BEARING, 0 = ANT 0 UP", cfg.heading);
+    } else if (pan == P_TUNE) {
+        char f[16];
+        int  b = band_of_target();
+
+        lv_label_set_text(panel_head_l, "TUNE: WHERE TO TAKE A BEARING");
+        snprintf(t[T_FOLLOW], sizeof(t[0]), "FOLLOW    < %s >  %s", follow_names[cfg.follow],
+                 cfg.follow == 1 ? "THE X6200'S DIAL, AS IT CHANGES" : cfg.follow == 2 ? "B'S FREQUENCY, AS IT CHANGES"
+                                                                       : "TUNED HERE");
+        fmt_mhz(f, sizeof(f), b >= 0 ? bands[b].hz : target_hz());
+        snprintf(t[T_BAND], sizeof(t[0]), "BAND      < %s %s MHZ >", b >= 0 ? bands[b].name : "-", b >= 0 ? f : "");
+        fmt_mhz(f, sizeof(f), target_hz());
+        snprintf(t[T_FREQ], sizeof(t[0]), "FREQUENCY < %s MHZ >  A CHANNEL A STEP", f);
+        snprintf(t[T_WIDTH], sizeof(t[0]), "WIDTH     < %g KHZ >", bws[cfg.bw] / 1000.0);
+        snprintf(t[T_AUTO], sizeof(t[0]), "AUTO      < %s >  THE STRONGEST SIGNAL IN THE PASSBAND", cfg.autot ? "ON" : "OFF");
     } else if (pan == P_SET) {
         lv_label_set_text(panel_head_l, "SET: THE KRAKEN AND THE BEARING");
         snprintf(t[S_RATE], sizeof(t[0]), "RATE      < %.3f MS/S >  WIDER SEES MORE, COSTS CPU", rates[cfg.rate] / 1e6);
@@ -776,7 +895,10 @@ static void refresh(void);
 static void pan_change(int d) {
     if (pan == P_ARRAY) {
         switch (pan_sel) {
-            case A_BAND: band_set(((cfg.band < 0 ? 0 : cfg.band) + d + N_BANDS) % N_BANDS); break;
+            case A_BAND:
+                follow_off();
+                band_set(((cfg.band < 0 ? 0 : cfg.band) + d + N_BANDS) % N_BANDS);
+                break;
             case A_KIND: cfg.kind = (cfg.kind + d + N_KINDS) % N_KINDS; send_array(); break;
             case A_SIZE:
                 cfg.size_mm += 5 * d;
@@ -785,6 +907,34 @@ static void pan_change(int d) {
                 send_array();
                 break;
             case A_HEAD: cfg.heading = (cfg.heading + d + 360) % 360; break;
+            default: break;
+        }
+    } else if (pan == P_TUNE) {
+        switch (pan_sel) {
+            case T_FOLLOW:
+                cfg.follow = (cfg.follow + d + 3) % 3;
+                break;
+            case T_BAND: {
+                int b = band_of_target();
+
+                follow_off();
+                band_set(b < 0 ? (d > 0 ? 0 : N_BANDS - 1) : (b + d + N_BANDS) % N_BANDS);
+                break;
+            }
+            case T_FREQ: {
+                int b = band_of_target();
+
+                follow_off();
+                cfg.autot = false;
+                tune_to((int64_t)target_hz() + d * (int64_t)(b >= 0 ? bands[b].step : bws[cfg.bw]));
+                break;
+            }
+            case T_WIDTH:
+                cfg.bw = cfg.bw + d < 0 ? 0 : cfg.bw + d >= N_BWS ? N_BWS - 1 : cfg.bw + d;
+                clamp_target();
+                send_target();
+                break;
+            case T_AUTO: cfg.autot = !cfg.autot; break;
             default: break;
         }
     } else if (pan == P_SET) {
@@ -839,7 +989,8 @@ static void pan_push(void) {
         refresh();
         return;
     }
-    if (pan == P_SET && (pan_sel == S_SRC || (pan_sel >= S_ANT0 && pan_sel < S_ANT0 + NANT))) {
+    if ((pan == P_SET && (pan_sel == S_SRC || (pan_sel >= S_ANT0 && pan_sel < S_ANT0 + NANT))) ||
+        (pan == P_TUNE && (pan_sel == T_FOLLOW || pan_sel == T_AUTO))) {
         pan_change(1);
         return;
     }
@@ -854,7 +1005,10 @@ static const char *f_label(int i) {
     static char s[5][32];
 
     switch (i) {
-        case 0: snprintf(s[0], sizeof(s[0]), "TARGET\n%s%gK", cfg.autot ? "AUTO " : "", bws[cfg.bw] / 1000.0); break;
+        case 0:
+            if (cfg.follow) snprintf(s[0], sizeof(s[0]), "TUNE\nFOLLOW %s", follow_names[cfg.follow]);
+            else snprintf(s[0], sizeof(s[0]), "TUNE\n%s%gK", cfg.autot ? "AUTO " : "", bws[cfg.bw] / 1000.0);
+            break;
         case 1: {
             int b = band_of_target();
             snprintf(s[1], sizeof(s[1]), "ARRAY\n%s %s", b >= 0 ? bands[b].name : "", kinds[cfg.kind].name);
@@ -889,11 +1043,17 @@ static void help_show(bool on) {
 }
 
 static void target_move(int32_t d) {
+    int32_t lim = (int32_t)(rates[cfg.rate] / 2) - (int32_t)bws[cfg.bw] / 2 - (int32_t)(rates[cfg.rate] / 20);
+
+    follow_off();
     cfg.autot = false;
-    cfg.off += d;
-    clamp_target();
-    cfg.band = band_of_target();
-    send_target();
+    if (llabs((int64_t)cfg.off + d) > lim) {        /* past the passband's edge: the Kraken goes with it */
+        tune_to((int64_t)target_hz() + d);
+    } else {
+        cfg.off += d;
+        cfg.band = band_of_target();
+        send_target();
+    }
     show_keys();
 }
 
@@ -903,12 +1063,15 @@ static void fkey(int k) {
         return;
     }
     switch (k) {
-        case 0: cfg.bw = (cfg.bw + 1) % N_BWS; clamp_target(); send_target(); break;
+        case 0:
+            if (pan == P_TUNE) pan_close();
+            else pan_open(P_TUNE);
+            break;
         case 1:
             if (pan == P_ARRAY) pan_close();
             else pan_open(P_ARRAY);
             break;
-        case 2: cfg.method = (cfg.method + 1) % 4; send_method(); break;
+        case 2: cfg.method = (cfg.method + 1) % N_METHODS; send_method(); break;
         case 3: df_rx_cmd("c"); msg("CALIBRATING: THE NOISE SOURCE ON FOR A MOMENT, THE ANTENNAS OFF"); break;
         default:
             if (pan == P_SET) pan_close();
@@ -980,26 +1143,28 @@ static void rotary_cb(int32_t diff) {
     refresh();
 }
 
-/* The arrows: the Kraken half a passband up or down, the target kept where it is while it stays inside */
-static void retune(int d) {
-    uint32_t t = target_hz();
-    int64_t  fc = cfg.fc + (int64_t)d * (int64_t)(rates[cfg.rate] / 2);
+/* The BAND keys: the band presets, as on every other screen (they moved the Kraken half a passband before) */
+static void band_step(int d) {
+    int b = band_of_target();
 
-    if (fc < 25000000 || fc > 1760000000) return;
-    cfg.fc  = (int32_t)fc;
-    cfg.off = (int32_t)((int64_t)t - fc);
-    if (labs(cfg.off) > (long)(rates[cfg.rate] / 2 - bws[cfg.bw])) cfg.off = (int32_t)(rates[cfg.rate] / 4);
-    clamp_target();
-    cfg.band = band_of_target();
-    send_fc();
-    send_target();
+    follow_off();
+    if (b < 0) {                                    /* off the presets: the next one up or down from here */
+        uint32_t t = target_hz();
+
+        for (b = d > 0 ? 0 : N_BANDS - 1; b >= 0 && b < N_BANDS; b += d)
+            if (d > 0 ? bands[b].hz > t : bands[b].hz < t) break;
+        if (b < 0 || b >= N_BANDS) b = d > 0 ? 0 : N_BANDS - 1;
+    } else {
+        b = (b + d + N_BANDS) % N_BANDS;
+    }
+    band_set(b);
     cfg_save();
     show_keys();
     refresh();
 }
 
 static bool front_key(int key, int state) {
-    if (key == KEYPAD_F1 && !help_on) {                 /* F1: a tap the bandwidth, held AUTO */
+    if (key == KEYPAD_F1 && !help_on) {                 /* F1: a tap TUNE, held AUTO */
         if (state == KEYPAD_RELEASE) fkey(0);
         else if (state == KEYPAD_LONG) {
             cfg.autot = !cfg.autot;
@@ -1020,7 +1185,7 @@ static bool front_key(int key, int state) {
         return true;
     }
     if (key == KEYPAD_BAND_UP || key == KEYPAD_BAND_DOWN) {
-        if (state == KEYPAD_RELEASE && !help_on) retune(key == KEYPAD_BAND_UP ? 1 : -1);
+        if (state == KEYPAD_RELEASE && !help_on) band_step(key == KEYPAD_BAND_UP ? 1 : -1);
         return true;
     }
     if (key == KEYPAD_GEN) {
@@ -1099,7 +1264,9 @@ static void refresh(void) {
 
 static void timer_cb(lv_timer_t *t) {
     (void)t;
-    if (dialog.run) refresh();
+    if (!dialog.run) return;
+    follow_tick();
+    refresh();
 }
 
 /* ---- Building ---- */
@@ -1211,7 +1378,7 @@ static void build(void) {
     /* what the knobs do, and the F keys */
     int ky = 480 - KEYS_H - 3;
     legend_l = label(root, &pixel_16, dim, 6, ky - LEGEND_H, SW - 12, LV_TEXT_ALIGN_CENTER,
-                     "VFO: TARGET FINE | MFK: CHANNEL | ARROWS: RETUNE | RING: SCREEN | F1 HELD: AUTO | GEN: HELP");
+                     "VFO: TARGET FINE | MFK: CHANNEL | BAND KEYS: BAND | RING: SCREEN | F1 HELD: AUTO | GEN: HELP");
     int w = (SW - 12 - 4 * 6) / 5;
     for (int i = 0; i < 5; i++) {
         lv_obj_t *k = lv_label_create(root);
@@ -1263,9 +1430,10 @@ static void build(void) {
                    "GREEN IN, AMBER QUIET, RED LOW OR SLIPPED, MAGENTA CLIPPING, DIM NOT CALIBRATED, OFF OR GONE. ITS BAR: "
                    "THE TARGET OVER ITS FLOOR. THE DASHED CIRCLE IS HALF A WAVELENGTH ACROSS. ROUND IT THE METHOD'S "
                    "SPECTRUM, THE NEEDLE (GREEN FIT 80% UP, AMBER 50-80, RED UNDER) AND ITS +- WEDGE; DOTS: LAST BEARINGS.\n\n"
-                   "F1 TARGET: BANDWIDTH (HELD: AUTO).  F2 ARRAY: BAND, KIND, SIZE, SIZE FOR THE BAND, HEADING.  F3 METHOD.  "
-                   "F4 CAL NOW (HELD: HOW OFTEN).  F5 SET: RATE, GAIN, SQUELCH, ANTENNAS LEFT OUT, TEST SOURCE.  VFO: "
-                   "TARGET 1 KHZ.  MFK: A CHANNEL.  ARROWS: THE KRAKEN HALF A PASSBAND.  RING: H BEFORE, A AFTER.\n\n"
+                   "F1 TUNE: FOLLOW A OR B (THE X6200'S DIAL OR B'S FREQUENCY, AS THEY CHANGE), BAND, FREQUENCY, WIDTH, AUTO "
+                   "(HELD: AUTO).  F2 ARRAY: BAND, KIND, SIZE, SIZE FOR THE BAND, HEADING.  F3 METHOD.  F4 CAL NOW (HELD: "
+                   "HOW OFTEN).  F5 SET: RATE, GAIN, SQUELCH, ANTENNAS LEFT OUT, TEST SOURCE.  VFO: TARGET 1 KHZ (THE KRAKEN "
+                   "FOLLOWS PAST THE EDGE).  MFK: A CHANNEL.  BAND KEYS: THE BAND PRESETS.  RING: H BEFORE, A AFTER.\n\n"
                    "WHILE I IS OPEN THE KRAKEN IS ITS ALONE: AIRSPACE AND WATCH CHANNELS LET GO, B MOVES OR IS LENT. "
                    "RECEIVE ONLY.  ANY KEY: CLOSE.");
     lv_label_set_long_mode(help_l, LV_LABEL_LONG_WRAP);

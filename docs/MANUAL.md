@@ -1461,15 +1461,26 @@ shows as a track).
 
 **Keys**:
 
-- **F1 TARGET**: the bandwidth (2.5, 6, 12.5, 25, 200 kHz). **F1 held**: AUTO, the strongest signal in the passband
-  (moved to when it stands 6 dB over the one held).
+- **F1 TUNE**: a panel for where to take the bearing.
+  - **FOLLOW**: OFF, **A** or **B**. A takes the X6200's dial, B the frequency B is tuned to, and keeps taking them
+    as they change, once they have rested half a second (each retune is a calibration). Tune A or B to a signal,
+    then go to I: the bearing is on it. Outside the Kraken's 24-1766 MHz it says so and waits. The VFO, the BAND keys
+    or a band chosen turn it OFF; F1 shows FOLLOW A or FOLLOW B while it is on.
+  - **BAND**: the presets, as F2's (below). **FREQUENCY**: a channel a step. **WIDTH**: the bandwidth (2.5, 6, 12.5,
+    25, 200 kHz). **AUTO**: the strongest signal in the passband (moved to when it stands 6 dB over the one held).
+  - **F1 held**: AUTO on or off.
 - **F2 ARRAY**: a panel. **BAND** presets: AIR 125, 2 M 146, MARINE 156.8, NOAA 162.55, 1.25 M 223.5, ISM 433.92, 70 CM
   440, FRS/GMRS 462.5625, 33 CM 915, 23 CM 1270 MHz (the Kraken a quarter of its rate under it, so the target sits
   clear of the sticks' centre spike). **ARRAY**: UCA-5, UCA-4, UCA-3 (a circle), ULA-5, ULA-4, ULA-3 (a line); with
   fewer than five, CH0 up are used. **RADIUS** or **SPACING** in 0.5 cm steps: the array as you set it out, which does
   not change with the band, so the calculator line says what it gives at each. **PUSH: SIZE FOR S 0.50** sets the size
   the calculator wants for the band. **HEADING**: ANT 0's compass bearing (0 = ANT 0 up).
-- **F3 METHOD**: MUSIC (default), Bartlett, Capon, MEM.
+- **gpsd**: when it runs and has a GPS or a compass (on USB), the heading comes from it instead of the one set by
+  hand: a compass first, else the course over the ground while moving faster than 2 m/s (a vehicle with the array
+  on it, ANT 0 forward), kept two minutes after it slows. The ARRAY panel's HEADING row says which is in use
+  (`IN USE: GPS COURSE 135 (GPSD)`), the array line says N UP GPS or N UP CMP, the compass turns north up, and
+  bearings are compass bearings.
+- **F3 METHOD**: MUSIC (default), Bartlett, Capon, MEM, TNA (the thermal noise algorithm: Capon's peaks made sharper).
 - **F4 CAL**: calibrate now (a moment of noise, the antennas off). **F4 held**: how often (off, 30 s to 10 minutes,
   2 minutes by default), always in a gap in the signal.
 - **F5 SET**: a panel: RATE (0.25, 1.024, 2.048, 2.4 MS/s; wider sees more of the band and costs more processor;
@@ -1478,8 +1489,9 @@ shows as a track).
   ANT USED or LEFT OUT, and SOURCE: KRAKEN or TEST SIGNAL (a made-up transmitter turning round the array, for trying
   the page with no Kraken; also chosen by a file `/mnt/df_synth`).
 - In a panel the MFK goes down the rows, the VFO changes the one chosen, the push does it or closes; BACK closes.
-- **VFO**: the target, 1 kHz a click. **MFK**: the target a channel (the band's step). **Arrows** (BAND): the Kraken
-  half a passband up or down, the target kept where it is while it stays inside. **Ring**: H before, A after.
+- **VFO**: the target, 1 kHz a click; past the passband's edge the Kraken moves with it (a calibration). **MFK**: the
+  target a channel (the band's step). **BAND keys**: the band presets up and down, as on the other screens (up to
+  2026-11-17 they moved the Kraken half a passband). **Ring**: H before, A after.
   **APP held**: the SDR pool's panel. **GEN**: help.
 
 What it keeps: the band, the array and its size, the heading, the method, rate, gain, squelch and calibration

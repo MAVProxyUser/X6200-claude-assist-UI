@@ -137,6 +137,9 @@ static void take(const uint8_t *b, ssize_t n) {
         memcpy(&snap.sp, b, (size_t)n < sizeof(snap.sp) ? (size_t)n : sizeof(snap.sp));
         if (snap.sp.n > DF_PROTO_SPEC) snap.sp.n = DF_PROTO_SPEC;
         snap.have_sp = true;
+    } else if (n >= (ssize_t)sizeof(df_gp_msg_t) && !memcmp(b, "DFGP", 4)) {
+        memcpy(&snap.gp, b, sizeof(snap.gp));
+        snap.have_gp = true;
     }
     pthread_mutex_unlock(&lock);
 }

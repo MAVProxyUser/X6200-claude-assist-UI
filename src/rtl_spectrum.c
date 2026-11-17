@@ -1155,6 +1155,10 @@ bool rtl_spectrum_listening(void) {
     return atomic_load(&listen_mode) != 0;
 }
 
+int64_t rtl_spectrum_listen_hz(void) {
+    return atomic_load(&listen_hz);
+}
+
 bool rtl_spectrum_on_headphones(void) {
     return atomic_load(&on_bt);
 }
