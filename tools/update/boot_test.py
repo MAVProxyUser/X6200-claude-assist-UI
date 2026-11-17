@@ -23,6 +23,9 @@ from 8 KiB to 1 MiB, something else before and after), a folder for its FAT boot
    without them it is still wanted, with the parts that would reach it.
 10. The modules of kernels nothing can start go: kept are the running one's, the card's and the one it replaced.
 11. upgrade passes --kernel/--uboot to the install.
+12. The root filesystem's room (the system partition is 512 MB), checked before anything changes: each new file and
+    a copy of each one it replaces, against the room there and the previous install's kept copies (they go first).
+    Without the room, nothing is changed on the card or the root.
 """
 import gzip
 import hashlib
@@ -40,6 +43,7 @@ UPDATER = os.path.join(HERE, "..", "..", "rootfs", "usr", "sbin", "x6100-update"
 MKBUNDLE = os.path.join(HERE, "mkbundle.py")
 
 KIB = 1024
+MIB = 1024 * KIB
 AREA = 1016 * KIB
 
 
@@ -513,6 +517,48 @@ class BootInstall(unittest.TestCase):
         self.assertEqual(out, "ok 0.3.13 (the kernel on the SD card: from the next power-on)")
         with self.assertRaisesRegex(self.Fail, "upgrade takes"):
             self.c.run("upgrade", "--all")
+
+    # 12. The root filesystem's room, checked before anything changes
+
+    def test_no_room_on_the_root_filesystem_changes_nothing(self):
+        self.c.up.update(root_free=lambda: self.c.up["ROOM_MARGIN"])        # the margin, nothing for the modules
+        with self.assertRaisesRegex(self.Fail, "no room on the root filesystem"):
+            self.c.run("install", self.c.bundle(), "--kernel", "--uboot")
+        self.assertCardAsBefore()
+        for p in ("BOOT_JOURNAL", "JOURNAL", "PENDING", "POWERON"):
+            self.assertFalse(os.path.exists(self.c.up[p]), p)
+        self.assertFalse(os.path.exists(os.path.join(self.c.up["WORK"], "stage")))
+        self.assertFalse(os.path.exists(os.path.join(self.c.up["WORK"], "stage-boot")))
+        self.assertEqual(self.c.restarts, 0)
+
+    def test_room_counts_the_previous_installs_copies(self):
+        """prev and boot-prev go first: their room counts as free"""
+        for d in (self.c.up["PREV"], self.c.up["BOOT_PREV"]):
+            os.makedirs(d)
+            with open(os.path.join(d, "kept"), "wb") as f:
+                f.write(b"k" * 64 * KIB)
+        self.c.up.update(root_free=lambda: self.c.up["ROOM_MARGIN"])
+        self.assertTrue(self.c.run("install", self.c.bundle(), "--kernel").startswith("ok 0.3.13"))
+        self.assertEqual(read(os.path.join(self.c.rootfs, "lib", "modules", "6.1.90", "kernel", "wifi.ko")),
+                         b"new wifi module")
+
+    def test_room_counts_new_files_and_the_copies_kept(self):
+        """Each new file and a copy of each file it replaces: nothing counted as freed by the replace, as a running
+        program keeps its old blocks"""
+        up = self.c.up
+        target = os.path.join(self.tmp, "x6100_gui")
+        with open(target, "wb") as f:
+            f.write(b"o" * 3 * MIB)
+        staged = os.path.join(up["WORK"], "stage", target.lstrip("/"))
+        os.makedirs(os.path.dirname(staged))
+        with open(staged, "wb") as f:
+            f.write(b"n" * 5 * MIB)
+        m = {"files": [{"path": target}]}
+        up.update(root_free=lambda: up["ROOM_MARGIN"] + 8 * MIB - 4096)
+        with self.assertRaisesRegex(self.Fail, r"it needs 16 MB, 15 MB is free"):
+            up["root_room"](m)
+        up.update(root_free=lambda: up["ROOM_MARGIN"] + 8 * MIB)
+        up["root_room"](m)
 
 
 if __name__ == "__main__":

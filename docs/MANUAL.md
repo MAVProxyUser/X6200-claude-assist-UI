@@ -1463,6 +1463,16 @@ web configurator (System > Update).
   with the previous ones kept, and restarts the radio software: the screen
   goes dark for a few seconds. Settings, logs and everything on the DATA
   partition stay as they are, your own [boot picture](#boot-picture) too.
+- **Room on the system partition.** The radio software lives on the SD card's
+  root filesystem, a 512 MB partition (`df -h /` over SSH); `/mnt`, the DATA
+  partition, is the rest of the card. Before it changes anything, Install
+  checks the root filesystem has room for every new file and for the copy of
+  each file it replaces, kept for a rollback. The copies kept from the install
+  before go first, so their room counts as free. Short of room, it stops with
+  "no room on the root filesystem for the update: it needs N MB, M MB is free"
+  and changes nothing. What fills it is usually what was put there by hand over
+  SSH (old copies of programs, `perf`'s `/root/.debug`): keep such files on
+  `/mnt` instead.
 - The new version is "pending" until it has run a minute; then it is
   confirmed. If it does not stay up for a minute three times in a row, the
   start loop puts the previous version back by itself. A power cut during the

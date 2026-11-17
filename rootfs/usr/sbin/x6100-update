@@ -138,6 +138,7 @@ BOOT_PARTS = ("kernel", "uboot")
 MAX_STARTS = 3                        # GUI starts without a confirm before the rollback
 TIMEOUT = 30
 RUN_LIMIT = 1800
+ROOM_MARGIN = 8 * 1024 * 1024         # kept free on the root filesystem by an install: the journal, logs, settings
 LOCK = os.path.join(STATE, "lock")    # one updater at a time: the browser, the GUI and the start loop share it
 LOCK_WAIT = int(os.environ.get("X6100_UPDATE_LOCK_WAIT", "120"))
 TAILSCALE = "/usr/sbin/x6100-tailscale"
@@ -1072,6 +1073,50 @@ def prune_modules(keep):
     return gone
 
 
+def root_free():
+    """The room left on the root filesystem: the files go there, and STATE with the copies kept for a rollback"""
+    return shutil.disk_usage(STATE).free
+
+
+def _blocks(path, follow=False):
+    """The room a file takes on its filesystem, 0 when there is no file"""
+    try:
+        return (os.stat(path) if follow else os.lstat(path)).st_blocks * 512
+    except OSError:
+        return 0
+
+
+def _tree_blocks(top):
+    return sum(_blocks(os.path.join(d, n)) for d, _, names in os.walk(top) for n in names)
+
+
+def root_room(m, kernel=False):
+    """The install refused before it changes anything when the root filesystem cannot hold it. Counted: each new
+    file, and the copy kept of each file it replaces, with nothing freed by the replace (a program or library still
+    running keeps its old blocks till the apps restart, after the install). Against the room there now and the
+    previous install's kept copies, which go first (prev; boot-prev too with the kernel). The system partition is
+    512 MB (the image's BR2_TARGET_ROOTFS_EXT2_SIZE); an install that filled it would stop part way, with its
+    journal perhaps unwritten"""
+    def size(path):
+        try:
+            return -(-os.path.getsize(path) // 4096) * 4096
+        except OSError:
+            return 0
+    st, bst = os.path.join(WORK, "stage"), os.path.join(WORK, "stage-boot")
+    need = sum(size(os.path.join(st, e["path"].lstrip("/"))) + _blocks(e["path"], True) for e in m["files"])
+    freed = _tree_blocks(PREV)
+    if kernel:
+        for e in m["boot"]["kernel"].get("modules", []):
+            rel = e["path"].lstrip("/")
+            need += size(os.path.join(bst, "modules", rel)) + _blocks(os.path.join(MODULES_ROOT, rel), True)
+        freed += _tree_blocks(BOOT_PREV)
+    have = root_free() + freed
+    if have < need + ROOM_MARGIN:
+        mb = 1024 * 1024
+        raise Fail(f"no room on the root filesystem for the update: it needs {-(-(need + ROOM_MARGIN) // mb)} MB, "
+                   f"{have // mb} MB is free")
+
+
 def apply(m):
     """The staged files into place, one by one, the previous ones kept and the journal ahead of each step."""
     st = os.path.join(WORK, "stage")
@@ -1182,6 +1227,7 @@ def cmd_install(args):
     progress("verify")
     m = stage(bundle, kernel, uboot)
     try:
+        root_room(m, kernel)            # before anything changes
         note = funnel_off_before(m["version"], "not installed")     # an older version's bundle (#58)
     except Fail:
         shutil.rmtree(os.path.join(WORK, "stage"), ignore_errors=True)
