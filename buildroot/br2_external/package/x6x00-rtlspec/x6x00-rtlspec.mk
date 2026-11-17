@@ -22,7 +22,9 @@ X6X00_RTLSPEC_DEPENDENCIES = libusb rtlsdr-blog libhackrf libbladerf zlib
 X6X00_RTLSPEC_SOURCES = $(addprefix $(@D)/,$(shell sed -e '/^\#/d' $(@D)/daemon_sources))
 # x6x00-df, the KrakenSDR's direction finder (page I): its own repository (github.com/MAVProxyUser/x6x00-df), the
 # submodule tools/rtlspec/x6x00-df, compiled from its df_sources; librtlsdr linked in the same way. NEON asked for
-# (both radios' SoCs, Cortex-A7, have it): df_chan.c's filter is written for it, plain C otherwise
+# (both radios' SoCs, Cortex-A7, have it): df_chan.c's filter is written for it, plain C otherwise. Linked to
+# x6x00-df.bin: $(@D)/x6x00-df is the submodule's folder (every image build from 4ad2691 to 2026-11-17 evening failed
+# on "cannot open output file .../x6x00-df: Is a directory")
 X6X00_RTLSPEC_DF = $(@D)/x6x00-df
 X6X00_RTLSPEC_DF_SOURCES = $(addprefix $(X6X00_RTLSPEC_DF)/,$(shell sed -e '/^\#/d' $(X6X00_RTLSPEC_DF)/df_sources))
 
@@ -34,13 +36,13 @@ define X6X00_RTLSPEC_BUILD_CMDS
 	@test -f $(X6X00_RTLSPEC_DF)/df_sources || { echo "x6x00-df: the submodule tools/rtlspec/x6x00-df is empty:" \
 		"git submodule update --init tools/rtlspec/x6x00-df"; exit 1; }
 	$(TARGET_CC) $(TARGET_CFLAGS) -O3 -mfpu=neon-vfpv4 $(TARGET_LDFLAGS) -I$(X6X00_RTLSPEC_DF) \
-		-I$(STAGING_DIR)/usr/include/libusb-1.0 -o $(@D)/x6x00-df $(X6X00_RTLSPEC_DF_SOURCES) \
+		-I$(STAGING_DIR)/usr/include/libusb-1.0 -o $(@D)/x6x00-df.bin $(X6X00_RTLSPEC_DF_SOURCES) \
 		-Wl,-Bstatic -lrtlsdr -Wl,-Bdynamic -lusb-1.0 -lpthread -lm
 endef
 
 define X6X00_RTLSPEC_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/x6x00-rtlspec $(TARGET_DIR)/usr/bin/x6x00-rtlspec
-	$(INSTALL) -D -m 0755 $(@D)/x6x00-df $(TARGET_DIR)/usr/bin/x6x00-df
+	$(INSTALL) -D -m 0755 $(@D)/x6x00-df.bin $(TARGET_DIR)/usr/bin/x6x00-df
 endef
 
 $(eval $(generic-package))
