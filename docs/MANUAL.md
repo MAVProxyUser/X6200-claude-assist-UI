@@ -1470,6 +1470,16 @@ shows as a track).
     or a band chosen turn it OFF; F1 shows FOLLOW A or FOLLOW B while it is on.
   - **BAND**: the presets, as F2's (below). **FREQUENCY**: a channel a step. **WIDTH**: the bandwidth (2.5, 6, 12.5,
     25, 200 kHz). **AUTO**: the strongest signal in the passband (moved to when it stands 6 dB over the one held).
+  - **TARGET 2, 3, 4**: more bearings at once, anywhere in the Kraken's passband (about 0.9 MHz at 1.024 MS/s round
+    the main target), each with its own filter and squelch. A push on an OFF row puts one on the main target's
+    frequency, with its width; then tune the main one elsewhere and both are followed. The VFO moves one a channel a
+    step; a push clears it. Each is kept by its frequency: one the passband leaves when the Kraken retunes says OUT
+    OF THE PASSBAND and comes back when it is in again. On the compass each is a thin needle in its own colour (2
+    blue, 3 magenta, 4 grey) with its number at the tip, dashed while it holds; on the spectrum a dotted line; in
+    the right-hand column the ARRAY lines give way to OTHER TARGETS, each with its bearing and fit (H holding, OUT
+    outside the passband), while any is set (F2 still shows the array). They run on the radio's spare cores below
+    everything else: with five sticks streaming targets 2 and 3 keep up with every block, target 4 with about 60 % (a
+    bearing about six times a second); **CPU SHORT** (SLOW in the right-hand column) says when one falls under 90 %.
   - **F1 held**: AUTO on or off.
 - **F2 ARRAY**: a panel. **BAND** presets: AIR 125, 2 M 146, MARINE 156.8, NOAA 162.55, 1.25 M 223.5, ISM 433.92, 70 CM
   440, FRS/GMRS 462.5625, 33 CM 915, 23 CM 1270 MHz (the Kraken a quarter of its rate under it, so the target sits
@@ -1534,6 +1544,9 @@ settings: a change on either shows on the other.
 - **The bearing**: degrees with +- (REL from ANT 0, or N), the fit and method, the level and SNR, the heading's source.
 - **Tune**: a frequency typed (24 to 1766 MHz) with Tune and a channel down or up, the band presets, FOLLOW (Off, A,
   B), the width, AUTO. A click on the band's spectrum tunes there.
+- **Other targets**: targets 2-4 (as F1 TUNE's), each with its frequency (type one, or clear it), bearing, fit, level
+  and how many blocks it kept up with; **Watch the target too** keeps the main target's frequency as the next free
+  one, and a shift-click on the spectrum puts one there. Their needles are on the compass in their colours.
 - **The band**: CH0's spectrum across the Kraken's passband with the target's window, and the bearings over time
   (0-359 degrees across, newest on top).
 - **Channels**: each antenna's stick, state, the target on it, the calibration's phase, gain and fit, and Use (an

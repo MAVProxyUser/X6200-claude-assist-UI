@@ -197,6 +197,8 @@ static struct {
     bool    fb;                 /* forward-backward averaging (a ULA) */
     int     smooth;             /* spatial smoothing's subarrays, 0 off, 2 or 3 (a ULA; the web page sets it) */
     bool    log;                /* the bearing log, /mnt/df_log (x6x00-df's l) */
+    uint32_t tg_hz[DF_PROTO_TARGETS];   /* the other targets (x6x00-df's 1-3), Hz, 0 none */
+    int     tg_bw[DF_PROTO_TARGETS];    /* their widths (bws[]) */
 } cfg;
 
 /* the elements the chosen layout has */
@@ -234,6 +236,17 @@ static void cfg_load(void) {
     cfg.smooth  = gui_state_get("df.smooth", 0);
     if (cfg.smooth != 2 && cfg.smooth != 3) cfg.smooth = 0;
     cfg.log     = gui_state_get("df.log", 0) != 0;
+    for (int i = 0; i < DF_PROTO_TARGETS; i++) {
+        char k[16];
+
+        snprintf(k, sizeof(k), "df.tg%d", i + 2);
+        int32_t hz = gui_state_get(k, 0);
+
+        cfg.tg_hz[i] = hz >= 24000000 && hz <= 1766000000 ? (uint32_t)hz : 0;
+        snprintf(k, sizeof(k), "df.tg%dbw", i + 2);
+        cfg.tg_bw[i] = gui_state_get(k, 2);
+        if (cfg.tg_bw[i] < 0 || cfg.tg_bw[i] >= N_BWS) cfg.tg_bw[i] = 2;
+    }
 }
 
 static void cfg_save(void) {
@@ -256,6 +269,14 @@ static void cfg_save(void) {
     gui_state_set("df.fb", cfg.fb);
     gui_state_set("df.smooth", cfg.smooth);
     gui_state_set("df.log", cfg.log);
+    for (int i = 0; i < DF_PROTO_TARGETS; i++) {
+        char k[16];
+
+        snprintf(k, sizeof(k), "df.tg%d", i + 2);
+        gui_state_set(k, (int32_t)cfg.tg_hz[i]);
+        snprintf(k, sizeof(k), "df.tg%dbw", i + 2);
+        gui_state_set(k, cfg.tg_bw[i]);
+    }
 }
 
 static uint32_t target_hz(void) { return (uint32_t)(cfg.fc + cfg.off); }
@@ -276,12 +297,88 @@ static const char *heading_from(void) {
 }
 
 /* What each setting means to the daemon (df_proto.h): kept by df_rx.c and said again to a daemon started anew */
-static void send_rate(void)   { df_rx_cmd("s %u", rates[cfg.rate]); }
+static uint32_t mono_ms(void) {
+    struct timespec t;
+
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
+}
+
+static void send_tgs(void);
+static void send_rate(void)   { df_rx_cmd("s %u", rates[cfg.rate]); send_tgs(); }
+/* ---- The other targets (x6x00-df's 1-3, page I's TARGET 2-4): each kept by its frequency, so a retune leaves it
+ * where it was; one the passband has left is off till the Kraken is back round it ---- */
+#define N_TG DF_PROTO_TARGETS
+static const uint32_t tg_col[N_TG] = {0x4fc3f7, 0xe066d6, 0xd8d8d8};
+
+/* its offset from the Kraken's centre; false outside the passband (the main target's margins) */
+static bool tg_off(int i, int32_t *off) {
+    int64_t o   = (int64_t)cfg.tg_hz[i] - cfg.fc;
+    int32_t lim = (int32_t)(rates[cfg.rate] / 2) - (int32_t)bws[cfg.tg_bw[i]] / 2 - (int32_t)(rates[cfg.rate] / 20);
+
+    if (!cfg.tg_hz[i] || llabs(o) > lim) return false;
+    *off = (int32_t)o;
+    return true;
+}
+
+static void send_tg(int i) {
+    int32_t off;
+
+    if (tg_off(i, &off)) df_rx_cmd("%d %d %u", i + 1, off, bws[cfg.tg_bw[i]]);
+    else df_rx_cmd("%d 0 0", i + 1);
+}
+static void send_tgs(void) {
+    for (int i = 0; i < N_TG; i++) send_tg(i);
+}
+
+/* the right-hand column's few characters: the bearing and fit, H holding, SLOW its core short, OUT */
+static void tg_short(int i, char *s, size_t n);
+
+/* the daemon's newest for target i in snapshot x: NULL while it has none (set, inside the passband, DFTG under 1.5 s
+ * old) */
+static const df_tg_t *tg_now_in(const df_snap_t *x, int i) {
+    if (!cfg.tg_hz[i] || !x->tg_ms || mono_ms() - x->tg_ms > 1500 || !x->tg.tg[i].on) return NULL;
+    return &x->tg.tg[i];
+}
+static const df_tg_t *tg_now(int i) { return tg_now_in(&sn, i); }
+
+/* its bearing to show (tenths, by the heading when there is one), -1 none; hold: the held one */
+static int tg_brg(int i, bool *hold) {
+    const df_tg_t *t = tg_now(i);
+
+    *hold = false;
+    if (!t || t->bearing_ddeg < 0 || (!t->gate && t->age_ds >= 300)) return -1;
+    *hold = !t->gate;
+    return *heading_from() ? (t->bearing_ddeg + heading_now() * 10) % 3600 : t->bearing_ddeg;
+}
+
+static void tg_short(int i, char *s, size_t n) {
+    int32_t        off;
+    bool           hold;
+    int            b = tg_brg(i, &hold);
+    const df_tg_t *t = tg_now(i);
+
+    if (!tg_off(i, &off)) snprintf(s, n, "OUT");
+    else if (b < 0) snprintf(s, n, "---%s", t && t->done_pct < 90 ? " SLOW" : "");
+    else snprintf(s, n, "%03d.%d %d%%%s", b / 10, b % 10, t->fit_pct, hold ? "H" : "");
+}
+
+static void tg_text(int i, char *s, size_t n) {
+    int32_t        off;
+    bool           hold;
+    int            b = tg_brg(i, &hold);
+    const df_tg_t *t = tg_now(i);
+
+    if (!tg_off(i, &off)) snprintf(s, n, "OUT OF THE PASSBAND");
+    else if (b < 0) snprintf(s, n, "BRG ---%s", t && t->done_pct < 90 ? "  CPU SHORT" : "");
+    else snprintf(s, n, "BRG %03d.%d%s FIT %d%%%s", b / 10, b % 10, *heading_from() ? " N" : "", t->fit_pct, hold ? " HOLD" : "");
+}
+
 static void send_gain(void)   { df_rx_cmd("g %d", gains[cfg.gain]); }
 /* when page I last tuned the daemon itself: an IQ program's tuning is not taken over it till x6x00-df has said where
  * it is since (iq_adopt), or a DFST from before page I's own tuning would take it back */
 static uint32_t own_tune_ms;
-static void send_fc(void)     { own_tune_ms = lv_tick_get(); df_rx_cmd("f %d", cfg.fc); }
+static void send_fc(void)     { own_tune_ms = lv_tick_get(); df_rx_cmd("f %d", cfg.fc); send_tgs(); }
 static void send_target(void) { own_tune_ms = lv_tick_get(); df_rx_cmd("t %d %u", cfg.off, bws[cfg.bw]); }
 static void send_array(void) {
     if (cfg.kind == K_CUSTOM && cust_n >= 2) {
@@ -399,6 +496,15 @@ static bool tune_to(int64_t hz) {
     }
     cfg.band = band_of_target();
     send_target();
+    return true;
+}
+
+/* another target set to hz (0: cleared), its width the main one's when new; false outside the Kraken's range */
+static bool tg_set_hz(int i, int64_t hz) {
+    if (hz && (hz < KRAKEN_LO || hz > KRAKEN_HI)) return false;
+    if (hz && !cfg.tg_hz[i]) cfg.tg_bw[i] = cfg.bw;
+    cfg.tg_hz[i] = (uint32_t)hz;
+    send_tg(i);
     return true;
 }
 
@@ -553,6 +659,7 @@ static void disc(uint32_t *px, double cx, double cy, double r, bool fill, uint32
 /* ---- What page I shows ---- */
 
 static lv_obj_t   *root, *title_l, *status_l, *badge_l[2], *scope_img, *centre_l, *up_l, *ant_l[DF_PROTO_MAXCH];
+static lv_obj_t   *tgn_l[DF_PROTO_TARGETS];
 static lv_obj_t   *tgt_l[3], *arr_cap_l, *arr_l[2], *row_l[NANT], *row_r[NANT], *bars_img, *spec_img, *wf_img;
 static lv_obj_t   *legend_l, *key_l[5], *help_l, *msg_l, *panel, *panel_head_l, *panel_row_l[PANEL_ROWS], *panel_foot_l;
 static lv_timer_t *timer;
@@ -712,6 +819,24 @@ static void draw_scope(void) {
                  (int)lround(cy - (R + 6) * cos(m)), mix(nc, c_ink, 160), 4);
         }
     }
+    for (int i = 0; i < N_TG; i++) {               /* the other targets: a thin needle each, its number at the tip */
+        bool hold;
+        int  tb = tg_brg(i, &hold);
+
+        if (tb < 0) {
+            lv_obj_add_flag(tgn_l[i], LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        tb = sn.tg.tg[i].bearing_ddeg;              /* drawn as the main one is: the daemon's, turned by head */
+        double   a = (tb / 10.0 + head) * M_PI / 180;
+        uint32_t tc = 0xff000000u | tg_col[i];
+
+        if (hold) tc = mix(tc, c_ink, 150);
+        line(px, SC, SC, (int)lround(cx + 18 * sin(a)), (int)lround(cy - 18 * cos(a)), (int)lround(cx + (R - 4) * sin(a)),
+             (int)lround(cy - (R - 4) * cos(a)), tc, hold ? 4 : 0);
+        lv_obj_set_pos(tgn_l[i], SC_X + (int)lround(cx + (R - 16) * sin(a)) - 9, SC_Y + (int)lround(cy - (R - 16) * cos(a)) - 8);
+        lv_obj_clear_flag(tgn_l[i], LV_OBJ_FLAG_HIDDEN);
+    }
     for (int i = 0; have && i < sn.dd.npeaks && i < 3; i++) {
         double a = (sn.dd.peaks_ddeg[i] / 10.0 + head) * M_PI / 180;
         line(px, SC, SC, (int)lround(cx + (R - 8) * sin(a)), (int)lround(cy - (R - 8) * cos(a)),
@@ -811,6 +936,29 @@ static void show_array(void) {
     char          t[2][140];
     uint32_t      wc = c.level == 0 ? c_green : c.level == 1 ? c_amb : c_red;
 
+    int any = 0;
+
+    for (int i = 0; i < N_TG; i++) any += cfg.tg_hz[i] != 0;
+    if (any) {                                      /* the other targets in its place (F2 still shows the array) */
+        char l[2][160] = {"", ""};
+
+        lv_label_set_text(arr_cap_l, "OTHER TARGETS (F1 TUNE)");
+        for (int i = 0, k = 0; i < N_TG; i++) {
+            char f[16], b[48];
+            int  row = k < 2 ? 0 : 1;
+
+            if (!cfg.tg_hz[i]) continue;
+            fmt_mhz(f, sizeof(f), cfg.tg_hz[i]);
+            tg_short(i, b, sizeof(b));
+            size_t u = strlen(l[row]);
+
+            snprintf(l[row] + u, sizeof(l[row]) - u, "%s#%06X %d# %s %s", u ? "   " : "", (unsigned)tg_col[i], i + 2, f, b);
+            k++;
+        }
+        lv_label_set_text(arr_l[0], l[0]);
+        lv_label_set_text(arr_l[1], l[1]);
+        return;
+    }
     lv_label_set_text_fmt(arr_cap_l, "ARRAY AGAINST THE BAND: %s", b >= 0 ? bands[b].name : "TUNED");
     if (cfg.kind == K_CUSTOM)
         snprintf(t[0], sizeof(t[0]), "CUSTOM %d ANT  S %.2f  RES %.0f DEG  #%06X %s#", cust_n, c.s, c.res,
@@ -885,6 +1033,14 @@ static void show_spec(void) {
     }
     int xc = (int)((cfg.off / (double)rate + 0.5) * SPEC_W);   /* the target */
     for (int y = 0; y < SPEC_H; y += 2) put(px, SPEC_W, SPEC_H, xc, y, c_green);
+    for (int i = 0; i < N_TG; i++) {                            /* the other targets */
+        int32_t off;
+
+        if (!tg_off(i, &off)) continue;
+        int xt = (int)((off / (double)rate + 0.5) * SPEC_W);
+
+        for (int y = 1; y < SPEC_H; y += 2) put(px, SPEC_W, SPEC_H, xt, y, 0xff000000u | tg_col[i]);
+    }
     lv_obj_invalidate(spec_img);
 
     /* the bearings' waterfall: 0-359 across, the newest on top, a row each WF_STEP estimates */
@@ -930,7 +1086,7 @@ static int     pan_sel;
 
 enum { A_BAND, A_KIND, A_SIZE, A_FIT, A_HEAD, A_N };
 enum { S_RATE, S_GAIN, S_SQL, S_CAL, S_ANT0, S_SRC = S_ANT0 + NANT, S_LOG, S_N };
-enum { T_FOLLOW, T_BAND, T_FREQ, T_WIDTH, T_AUTO, T_N };
+enum { T_FOLLOW, T_BAND, T_FREQ, T_WIDTH, T_AUTO, T_TG0, T_N = T_TG0 + N_TG };
 
 static int pan_rows(void) { return pan == P_ARRAY ? A_N : pan == P_SET ? S_N : pan == P_TUNE ? T_N : 0; }
 
@@ -972,6 +1128,19 @@ static void pan_fill(void) {
         snprintf(t[T_FREQ], sizeof(t[0]), "FREQUENCY < %s MHZ >  A CHANNEL A STEP", f);
         snprintf(t[T_WIDTH], sizeof(t[0]), "WIDTH     < %g KHZ >", bws[cfg.bw] / 1000.0);
         snprintf(t[T_AUTO], sizeof(t[0]), "AUTO      < %s >  THE STRONGEST SIGNAL IN THE PASSBAND", cfg.autot ? "ON" : "OFF");
+        for (int i = 0; i < N_TG; i++) {
+            char b[48];
+
+            if (!cfg.tg_hz[i]) {
+                snprintf(t[T_TG0 + i], sizeof(t[0]), "TARGET %d  < OFF >  PUSH: ONE MORE ON THE FREQUENCY ABOVE", i + 2);
+                continue;
+            }
+            fmt_mhz(f, sizeof(f), cfg.tg_hz[i]);
+            tg_text(i, b, sizeof(b));
+            int l = snprintf(t[T_TG0 + i], sizeof(t[0]), "TARGET %d  < %s MHZ >  %s", i + 2, f, b);
+
+            if (l <= 44) snprintf(t[T_TG0 + i] + l, sizeof(t[0]) - (size_t)l, "  PUSH: CLEAR");    /* as it fits */
+        }
     } else if (pan == P_SET) {
         lv_label_set_text(panel_head_l, "SET: THE KRAKEN AND THE BEARING");
         snprintf(t[S_RATE], sizeof(t[0]), "RATE      < %.3f MS/S >  WIDER SEES MORE, COSTS CPU", rates[cfg.rate] / 1e6);
@@ -1070,7 +1239,25 @@ static void pan_change(int d) {
                 send_target();
                 break;
             case T_AUTO: cfg.autot = !cfg.autot; break;
-            default: break;
+            default:
+                if (pan_sel >= T_TG0 && pan_sel < T_TG0 + N_TG) {          /* a channel a step, in the passband */
+                    int     i = pan_sel - T_TG0, b = band_of_target();
+                    int32_t off;
+
+                    if (!cfg.tg_hz[i]) {
+                        msg("PUSH TO SET IT ON THE FREQUENCY ABOVE, THEN TURN TO MOVE IT");
+                        break;
+                    }
+                    uint32_t was = cfg.tg_hz[i];
+
+                    cfg.tg_hz[i] += d * (int32_t)(b >= 0 ? bands[b].step : bws[cfg.tg_bw[i]]);
+                    if (!tg_off(i, &off)) {
+                        cfg.tg_hz[i] = was;
+                        msg("THE PASSBAND ENDS THERE: TUNE THE MAIN TARGET NEARER, OR A WIDER RATE (F5)");
+                    }
+                    send_tg(i);
+                }
+                break;
         }
     } else if (pan == P_SET) {
         switch (pan_sel) {
@@ -1128,6 +1315,26 @@ static void pan_push(void) {
         cfg.size_mm = (int)lround(c.want_m * 200) * 5;          /* to the half centimetre */
         send_array();
         msg("ARRAY SIZE SET FOR S 0.50: SET THE ANTENNAS OUT SO");
+        pan_fill();
+        refresh();
+        return;
+    }
+    if (pan == P_TUNE && pan_sel >= T_TG0 && pan_sel < T_TG0 + N_TG) {
+        int i = pan_sel - T_TG0;
+
+        if (cfg.tg_hz[i]) {
+            tg_set_hz(i, 0);
+            msg("TARGET CLEARED");
+        } else {
+            for (int k = 0; k < N_TG; k++)
+                if (cfg.tg_hz[k] == target_hz()) {
+                    msg("THAT FREQUENCY HAS A TARGET ALREADY: TUNE THE MAIN ONE ELSEWHERE FIRST");
+                    return;
+                }
+            tg_set_hz(i, target_hz());
+            msg("TARGET SET HERE: NOW TUNE THE MAIN ONE ELSEWHERE IN THE PASSBAND");
+        }
+        cfg_save();
         pan_fill();
         refresh();
         return;
@@ -1499,6 +1706,12 @@ static void build(void) {
         ant_l[k] = label(root, &pixel_16, ink, 0, 0, 18, LV_TEXT_ALIGN_CENTER, n);
         lv_obj_add_flag(ant_l[k], LV_OBJ_FLAG_HIDDEN);
     }
+    for (int i = 0; i < N_TG; i++) {
+        char n[4] = {(char)('2' + i), 0};
+
+        tgn_l[i] = label(root, &pixel_16, lv_color_hex(tg_col[i]), 0, 0, 18, LV_TEXT_ALIGN_CENTER, n);
+        lv_obj_add_flag(tgn_l[i], LV_OBJ_FLAG_HIDDEN);
+    }
     centre_l = label(root, &pixel_20, amb, SC_X + 30, SC_Y + SC / 2 + 40, SC - 60, LV_TEXT_ALIGN_CENTER, "");
     lv_obj_set_style_bg_color(centre_l, ink, 0);
     lv_obj_set_style_bg_opa(centre_l, LV_OPA_COVER, 0);
@@ -1707,12 +1920,6 @@ static void web_load_cb(void *arg) {
     if (!cfg_loaded) cfg_load(), cfg_loaded = true;
 }
 
-static uint32_t mono_ms(void) {
-    struct timespec t;
-
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
-}
 
 static void bg_timer_cb(lv_timer_t *t) {
     (void)t;
@@ -1825,6 +2032,13 @@ int app_df_web_set(const char *k, double v) {
         if (i != 0 && i != 2 && i != 3) return -1;
         cfg.smooth = i;
         send_smooth();
+    } else if (!strncmp(k, "tg", 2) && k[2] >= '2' && k[2] < '2' + N_TG && !k[3]) {   /* tg2-tg4: Hz, 0 clears */
+        int     t = k[2] - '2';
+        int64_t hz = llround(v);
+
+        for (int o = 0; o < N_TG && hz; o++)
+            if (o != t && cfg.tg_hz[o] == (uint32_t)hz) return -1;
+        if (!tg_set_hz(t, hz)) return -1;
     } else if (!strcmp(k, "cal_now")) {
         df_rx_cmd("c");
     } else {
@@ -1891,6 +2105,19 @@ int app_df_web_json(char *out, size_t n) {
         double x, y;
         elem(m, &x, &y);
         jb(&b, "%s[%ld,%ld]", m ? "," : "", lround(x * 1000), lround(y * 1000));
+    }
+    jb(&b, "]");
+    jb(&b, ",\"tg\":[");                    /* the other targets: Hz 0 none; in the passband; the daemon's newest */
+    for (int i = 0; i < N_TG; i++) {
+        int32_t        off;
+        const df_tg_t *t = s.connected ? tg_now_in(&s, i) : NULL;
+
+        jb(&b, "%s{\"hz\":%u,\"bw\":%u,\"in\":%d", i ? "," : "", cfg.tg_hz[i], bws[cfg.tg_bw[i]], tg_off(i, &off));
+        if (t)
+            jb(&b, ",\"gate\":%d,\"bearing\":%.1f,\"mirror\":%.1f,\"uncert\":%.1f,\"fit\":%d,\"level\":%.1f,\"age\":%.1f,"
+                   "\"done\":%d", t->gate, t->bearing_ddeg / 10.0, t->mirror_ddeg / 10.0, t->uncert_ddeg / 10.0, t->fit_pct,
+               t->level_ddb / 10.0, t->age_ds == 0xffff ? -1.0 : t->age_ds / 10.0, t->done_pct);
+        jb(&b, "}");
     }
     jb(&b, "]");
     jb(&b, "},\"lists\":{\"bands\":[");

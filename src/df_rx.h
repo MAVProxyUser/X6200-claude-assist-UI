@@ -33,6 +33,8 @@ typedef struct {
     df_gp_msg_t gp;             /* gpsd's fix and heading (DFGP), once a second */
     uint32_t    do_n;           /* estimates taken since page I opened (the history's newest is hist[(do_n-1) % H]) */
     uint32_t    st_ms;          /* when DFST last came (lv_tick-like ms), 0 never */
+    df_tg_msg_t tg;             /* the other targets (DFTG) */
+    uint32_t    tg_ms;          /* when DFTG last came, 0 never: none set when it is over a second old */
 } df_snap_t;
 
 /* A KrakenSDR on USB (three or more of serials 1000-1004), or the test source chosen (df_rx_synth): page I on the

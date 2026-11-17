@@ -2501,7 +2501,7 @@ def display():
 # and changes page I's own settings (df_get / df_set / df_run, src/cfg_socket.cpp, app_df.c). While the page reads,
 # the radio keeps DF running even with page I closed (df_run on); 20 s after the last read it lets the Kraken go
 DF_KEYS = {"target", "band", "follow", "bw", "auto", "method", "rate", "gain", "sql", "cal", "kind", "size_mm",
-           "heading", "mask", "nsrc", "fb", "smooth", "log", "cal_now"}
+           "heading", "mask", "nsrc", "fb", "smooth", "log", "cal_now", "tg2", "tg3", "tg4"}
 
 
 @app.route('/df')

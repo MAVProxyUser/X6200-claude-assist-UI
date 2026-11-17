@@ -43,7 +43,7 @@ static int             cmd_fd = -1;
 static df_snap_t       snap;
 static uint8_t         hist[DF_RX_HIST][360];
 static uint8_t         hist_gate[DF_RX_HIST];
-static char            kept[128][64];       /* the last command of each letter, said again to a new daemon */
+static char            kept[128][160];      /* the last command of each letter, said again to a new daemon */
 static int             b_lent;              /* 0, 1 moved, 2 lent */
 static rtl_dev_t       b_prev = RTL_DEV_NONE;
 static int             b_prev_rtl;
@@ -74,7 +74,7 @@ static void say_locked(const char *cmd) {
 }
 
 void df_rx_cmd(const char *fmt, ...) {
-    char    c[64];
+    char    c[160];                 /* a custom array of five is about 80 */
     va_list ap;
 
     va_start(ap, fmt);
@@ -137,6 +137,9 @@ static void take(const uint8_t *b, ssize_t n) {
         memcpy(&snap.sp, b, (size_t)n < sizeof(snap.sp) ? (size_t)n : sizeof(snap.sp));
         if (snap.sp.n > DF_PROTO_SPEC) snap.sp.n = DF_PROTO_SPEC;
         snap.have_sp = true;
+    } else if (n >= (ssize_t)sizeof(df_tg_msg_t) && !memcmp(b, "DFTG", 4)) {
+        memcpy(&snap.tg, b, sizeof(snap.tg));
+        snap.tg_ms = now_ms() | 1;
     } else if (n >= (ssize_t)sizeof(df_gp_msg_t) && !memcmp(b, "DFGP", 4)) {
         memcpy(&snap.gp, b, sizeof(snap.gp));
         snap.have_gp = true;
@@ -178,8 +181,10 @@ static void *df_thread(void *arg) {
             pthread_mutex_lock(&lock);
             cmd_fd         = fd;
             snap.connected = true;
-            /* the settings again, in an order that keeps the daemon from tuning twice */
-            static const char order[] = "sgftamqix";
+            /* the settings again, in an order that keeps the daemon from tuning twice; every letter page I sends
+             * (a fresh daemon had only the first nine: sources, FB, smoothing, the log, the heading and the other
+             * targets never reached it) */
+            static const char order[] = "sgftamqixkwolh123";
             for (const char *o = order; *o; o++)
                 if (kept[(unsigned char)*o][0]) say_locked(kept[(unsigned char)*o]);
             pthread_mutex_unlock(&lock);

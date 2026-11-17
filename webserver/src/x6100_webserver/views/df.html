@@ -41,6 +41,8 @@ table.ch td{padding:5px 6px;border-bottom:1px solid #1c2a3d;font-family:ui-monos
 @media (max-width:600px){.ared{grid-template-columns:1fr}}
 #arred{width:100%;aspect-ratio:1;display:block;border-radius:6px;background:#08101b;touch-action:none;cursor:grab}
 table.xy{border-collapse:collapse;font-size:13.5px;width:100%}
+.tgdot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+#tgrows input{width:7.5em;font:14px ui-monospace,monospace}
 table.xy th{color:var(--dim);font-weight:500;text-align:left;padding:3px 4px}
 table.xy td{padding:3px 4px}
 table.xy input{width:100%;min-width:60px;font:14px ui-monospace,monospace}
@@ -83,6 +85,16 @@ table.xy input{width:100%;min-width:60px;font:14px ui-monospace,monospace}
         <div><label>Auto (strongest in the band)</label><div class="seg2" id="auto"><button data-v="0">Off</button><button data-v="1">On</button></div></div>
       </div>
       <p class="note">Follow takes the X6200's dial (A) or B's frequency as they change. A click on the spectrum below tunes there.</p>
+    </section>
+    <section class="df-card" id="tgcard">
+      <h3>Other targets</h3>
+      <table class="ch"><thead><tr><th>Target</th><th>Frequency, MHz</th><th>Bearing</th><th>Fit</th><th>Level</th><th>Kept up</th><th></th></tr></thead><tbody id="tgrows"></tbody></table>
+      <div class="btns"><button id="tgadd">Watch the target too</button></div>
+      <p class="note">Up to three more bearings at once in the Kraken's passband, each with its own filter and squelch,
+      on the radio's spare cores. <b>Watch the target too</b> keeps the main target's frequency as another one, so the
+      main one can be tuned elsewhere; a shift-click on the spectrum puts one there. Kept up: the share of blocks its
+      core kept up with (under 90 %: the processor is short, fewer or a lower rate helps). A target outside the
+      passband waits till the Kraken is tuned back round it.</p>
     </section>
     <section class="df-card">
       <h3>The band</h3>
@@ -240,6 +252,7 @@ function drawCompass() {
     if (used >> m & 1) { g.fillStyle = col; g.fill(); } else { g.strokeStyle = col; g.lineWidth = 2; g.stroke(); }
     g.fillStyle = used >> m & 1 ? '#111' : col; g.font = '700 14px system-ui'; g.fillText(m, x, y + 1);
   });
+  drawTargets(g, c, R, rot);
   /* the needle */
   const sh = shown();
   if (sh) {
@@ -259,6 +272,24 @@ function drawCompass() {
   }
 }
 
+const TGC = ['#4fc3f7', '#e066d6', '#d8d8d8'];
+
+/* the other targets drawn on the compass: a thin needle each, its number at the tip */
+function drawTargets(g, c, R, rot) {
+  if (!D.connected || !D.cfg.tg) return;
+  D.cfg.tg.forEach((t, i) => {
+    if (!t.hz || t.bearing == null || t.bearing < 0 || (!t.gate && !(t.age >= 0 && t.age < 30))) return;
+    const a = rot(t.bearing);
+    g.globalAlpha = t.gate ? 1 : 0.5;
+    g.strokeStyle = TGC[i]; g.lineWidth = 2; if (!t.gate) g.setLineDash([6, 5]);
+    g.beginPath(); g.moveTo(c + 24 * Math.cos(a), c + 24 * Math.sin(a)); g.lineTo(c + (R - 6) * Math.cos(a), c + (R - 6) * Math.sin(a)); g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = TGC[i]; g.font = '700 15px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(i + 2, c + (R - 20) * Math.cos(a), c + (R - 20) * Math.sin(a));
+    g.globalAlpha = 1;
+  });
+}
+
 function drawSpec() {
   const cv = $('spec'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
   g.clearRect(0, 0, W, H);
@@ -267,6 +298,12 @@ function drawSpec() {
   const tx = (D.cfg.target - lo) / rate * W, bw = lists.bws[D.cfg.bw] / rate * W;
   g.fillStyle = 'rgba(255,176,32,.18)'; g.fillRect(tx - bw / 2, 0, Math.max(bw, 2), H);
   g.strokeStyle = '#ffb020'; g.beginPath(); g.moveTo(tx, 0); g.lineTo(tx, H); g.stroke();
+  (D.cfg.tg || []).forEach((t, i) => {
+    if (!t.hz || !t.in) return;
+    const x = (t.hz - lo) / rate * W;
+    g.strokeStyle = TGC[i]; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); g.setLineDash([]);
+    g.fillStyle = TGC[i]; g.font = '700 12px system-ui'; g.textAlign = 'center'; g.fillText(i + 2, x, H - 6);
+  });
   g.strokeStyle = '#7fb0e0'; g.lineWidth = 1.2; g.beginPath();
   for (let i = 0; i < n; i++) { const x = i / (n - 1) * W, y = H - D.sp.db[i] / 255 * H; i ? g.lineTo(x, y) : g.moveTo(x, y); }
   g.stroke();
@@ -342,6 +379,22 @@ function show() {
   }
   if (!ed) edStart();
   edCalc();
+  /* the other targets */
+  const tg = c.tg || [];
+  if (editing === null || !String(editing).startsWith('tg')) {
+    $('tgrows').innerHTML = tg.map((t, i) => {
+      const brg = t.bearing == null || t.bearing < 0 || (!t.gate && !(t.age >= 0 && t.age < 30)) ? '---' :
+        ((c.heading_from ? (t.bearing + c.heading_now) % 360 : t.bearing).toFixed(1) + '&deg;' + (c.heading_from ? ' N' : '') +
+         (t.gate ? '' : ' HOLD'));
+      return `<tr><td><span class="tgdot" style="background:${TGC[i]}"></span>${i + 2}</td>` +
+        `<td><input data-tg="${i}" inputmode="decimal" value="${t.hz ? mhz(t.hz) : ''}" placeholder="off" aria-label="Target ${i + 2}, MHz"></td>` +
+        (t.hz ? (t.in ? `<td>${brg}</td><td>${t.fit != null ? t.fit + '%' : ''}</td><td>${t.level != null ? t.level.toFixed(1) + ' dB' : ''}</td>` +
+                        `<td>${t.done != null ? t.done + '%' : ''}</td>` : `<td colspan="4">outside the passband</td>`) +
+                `<td><button data-tgclear="${i}" aria-label="Clear target ${i + 2}">&times;</button></td>` : `<td colspan="5"></td>`) + `</tr>`;
+    }).join('');
+  }
+  $('tgadd').disabled = !tg.some(t => !t.hz);
+  $('tgcard').classList.toggle('gone', !D.run);
   /* channels */
   const rows = [];
   for (let m = 0; m < n; m++) {
@@ -518,11 +571,28 @@ $('auto').onclick = e => { if (e.target.dataset.v != null) set('auto', +e.target
 $('calnow').onclick = () => set('cal_now', 1);
 $('fitsize').onclick = () => set('size_mm', Math.round(+$('fitsize').dataset.mm));
 $('chs').onchange = e => { const m = +e.target.dataset.m; if (!isNaN(m)) set('mask', D.cfg.mask ^ (1 << m)); };
+function freeTg() { return (D.cfg.tg || []).findIndex(t => !t.hz); }
 $('spec').onclick = e => {
   if (!D || !D.sp) return;
   const r = e.target.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
-  set('target', Math.round(D.sp.fc - D.sp.rate / 2 + x * D.sp.rate));
+  const hz = Math.round(D.sp.fc - D.sp.rate / 2 + x * D.sp.rate);
+  if (e.shiftKey) { const i = freeTg(); if (i < 0) say('Three other targets already', true); else set('tg' + (i + 2), hz); }
+  else set('target', hz);
 };
+$('tgadd').onclick = () => { const i = freeTg(); if (i >= 0) set('tg' + (i + 2), D.cfg.target); };
+$('tgrows').onfocusin = e => { if (e.target.dataset.tg != null) editing = 'tg' + e.target.dataset.tg; };
+$('tgrows').onfocusout = () => { editing = null; };
+$('tgrows').onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
+$('tgrows').onchange = e => {
+  const i = e.target.dataset.tg;
+  if (i == null) return;
+  const v = e.target.value.trim(), f = parseFloat(v);
+  editing = null;
+  if (!v) set('tg' + (+i + 2), 0);
+  else if (f >= 24 && f <= 1766) set('tg' + (+i + 2), Math.round(f * 1e6));
+  else say('24 to 1766 MHz', true);
+};
+$('tgrows').onclick = e => { const i = e.target.dataset.tgclear; if (i != null) set('tg' + (+i + 2), 0); };
 document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 setInterval(poll, 250);
 poll();
