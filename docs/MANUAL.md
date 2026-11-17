@@ -4825,7 +4825,12 @@ amateur radio: send only on the bands and with the privileges you hold.
 **Receiving.** "Lost": "input" and "speech" count samples thrown away because
 the decoder or the player was behind, "gaps" the breaks in the speech;
 "decode" and "synth" are the slowest ms for one 120 ms modem frame, and above
-120 the speech breaks up. The callsign that the last End-of-Over carried is
+120 the speech breaks up. Tested on an X6200 over a cable: three overs made by
+this radio's own RADE transmitter code (callsign Q1TST), sent from a HackRF
+on 14.236 MHz USB through 70 dB of attenuators. They gave SYNC at 16 dB SNR,
+the callsign, and speech to the TCI client the same as the overs decoded on a
+PC (the last over whole). The first over after a long quiet lost its first
+seconds while the sync came (AGC was on, which this section says to turn off). The callsign that the last End-of-Over carried is
 shown after "last over", and only when it reads as a callsign (3 to 8
 letters, digits and /, with a letter and a digit). The app reads it in
 either form:
