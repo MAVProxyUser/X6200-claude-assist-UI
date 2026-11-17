@@ -1034,8 +1034,9 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
 - **The voiceprint**: the receiver's audio as a sonogram, 0 to 4 kHz up and the last seconds across, in amber:
   voices show as their harmonics stacked, a tone as a line, the hiss as speckle. Its captions and kHz marks, as the
   spectrum's, are framed, so they read over the picture.
-- **The lamp**, under the voiceprint: RX SIGNAL when the audio stands 6 dB over its own noise, RX QUIET, TX ARMED, ON
-  AIR, TX LOCKED for a moment after PTT.
+- **The lamp**, under the voiceprint: RX SIGNAL when the audio stands 6 dB over its own noise, RX DMR while a DMR call
+  is on the SDR's channel (lit even when its voice is silent, with no vocoder), RX QUIET, TX ARMED, ON AIR, TX LOCKED
+  for a moment after PTT.
 - The radio's state in three larger lines: the squelch, the volume and the transmitter's lock; the battery and the
   supply; the processor, the base's version and the TX power setting (the time is in both title bars), refreshed
   each second.

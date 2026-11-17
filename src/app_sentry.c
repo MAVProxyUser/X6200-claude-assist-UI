@@ -6680,16 +6680,22 @@ static void walkie_step(void) {
     static float floor_rms = 1000;
     if (got) floor_rms = vp_rms < floor_rms ? 0.9f * floor_rms + 0.1f * vp_rms : 0.998f * floor_rms + 0.002f * vp_rms;
     bool on = from_rtl && param_i_get(cfg_rtl_sql) > 0 ? rtl_spectrum_squelch_open() : vp_rms > 2 * floor_rms + 100;
+    /* a DMR call on the channel lights it too, whatever the audio: without the vocoder its voice is silence */
+    rtl_dmr_t dmv;
+    bool      dmr = w_sdr_hz && rtl_spectrum_dmr(&dmv) && dmv.hz == w_sdr_hz &&
+                    (dmv.slot[0].voice || dmv.slot[1].voice || dmv.slot[2].voice);
     bool ptt = ptt_ms && lv_tick_get() - ptt_ms < 1500;
     /* on the air: the X6200 (not on the SDR's channels, where it is held at 0 W whatever keys it), or the SDR */
     bool air   = w_sdr_hz ? w_sdr_ptt && rtl_spectrum_tx_state() == RTL_TX_ON : radio_get_state() == RADIO_TX;
     bool armed = w_sdr_hz ? g_sdr_armed : g_armed;
 
+    on = on || dmr;
     lv_obj_set_style_bg_opa(wui->lamp, air || ptt || on || (armed && blink) ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(wui->lamp_l, air || ptt || on || (armed && blink) ? ink : amb, 0);
     lv_label_set_text(wui->lamp_l, air ? (g_portrait ? "TX  ON AIR" : "TX\nON AIR")
                                    : ptt ? (g_portrait ? "TX LOCKED" : "TX\nLOCKED")
                                    : armed ? (g_portrait ? "TX  ARMED" : "TX\nARMED")
+                                   : dmr ? (g_portrait ? "RX  DMR" : "RX\nDMR")
                                    : on ? (g_portrait ? "RX  SIGNAL" : "RX\nSIGNAL")
                                         : (g_portrait ? "RX  QUIET" : "RX\nQUIET"));
     char cap[48];
