@@ -989,8 +989,10 @@ MFK's push) on the X6200, B's scan pictures' strongest on the stick. The same si
 X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`,
 written through to the card before it replaces the last copy, so a power cut keeps one whole).
 
-- Its columns: FREQ, BAND, WHAT IT WAS, BEST, ANTENNA and NOW (D's for the band), LAST, SEEN, RX (X6200, or RTL,
-  HACKRF or BLADERF in the tags' orange). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest
+- Its columns: FREQ, BAND, WHAT IT WAS, BEST, ANTENNA and NOW (D's for the band), LAST, SEEN, RX: the radio that
+  found it, X6200 or the SDR by its name (RTL0 to RTL4, HACKRF, BLADERF) in the tags' orange. An entry from before
+  2026-11-17 says SDR: which one found it was not kept then (before, every SDR row showed the SDR B had at the time).
+  The line under the list says `FOUND ON RTL0` and where a push plays it: `PUSH: HEAR IT ON RTL4` (B's SDR now). A frequency in none of D's bands (a lock at the edge of a picture, past the band's end) takes the nearest
   band's columns, marked `~`: 26.835 MHz, below CB's channel 1, is `~11 M CB` with CB's BEST, ANTENNA and NOW. A's
   BAND box says `NEAR 11 M CB` there.
 - **WHAT IT WAS** is what the frequency is known for, not a decoding of the signal: on the X6200 a time station (WWV,
@@ -1043,6 +1045,12 @@ written through to the card before it replaces the last copy, so a power cut kee
     (before, an SDR took 12 m, CB, 10 m and 6 m on its VHF antenna while the row said CB WHIP);
   - **VHF and UHF: the SDR** (RTL0, HACKRF or BLADERF, in the tags' orange) when one is plugged in; without one, the
     X6200 where it tunes alone (FM broadcast, the airband, a WR12), the SDR's name where only an SDR reaches.
+
+  **ANTENNA** for the SDR's bands is a dipole and the length of each arm: `DIPOLE 2X49 CM` (2 m) is the telescopic
+  dipole that comes in an RTL-SDR kit, each arm pulled out to 49 cm, held upright (these stations send upright).
+  The lengths: AIR 56 cm, 2 M 49, MARINE 45, NOAA WX 44, 70 CM 16, GMRS 15, ADS-B 6.5 (a quarter wave at the
+  band's middle, less 5 %). Any antenna made for the band (a 2 m/70 cm whip, a discone) does as well. WX SAT's is a
+  `V-DIPOLE 2X53 CM`: the same dipole laid flat, its arms 53 cm and 120 degrees apart, open towards north or south.
 
   **The last lines** under the list say, for the band chosen, what it is and then one line of what you get:
   `RX X6200, PRE OFF, AGC AUTO | TX X6200 | E: FT8 FT4 WSPR JS8 PSK RTTY OLIVIA SSTV CW RADE` (40 m) - the radio,

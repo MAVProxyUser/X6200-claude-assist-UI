@@ -316,22 +316,24 @@ static const band_t bands[] = {
      "The magic band: mostly quiet, with sudden summer openings."},
     {"FM BC", 88000, 108000, "FM RADIO, LOCAL", "ANY SHORT WHIP", 'L', 92300000, radio_mode_wfm, false,
      "Local FM stations, one or two 200 kHz-wide ones in the picture at a time."},
-    /* Above the X6200's own receiver: the RTL-SDR's (F VHF/UHF), or a WR12's */
-    {"AIR", 118000, 137000, "AIRCRAFT VOICE (AM)", "THE SDR'S OWN", 'L', 121500000, radio_mode_am, false,
+    /* Above the X6200's own receiver: the RTL-SDR's (F VHF/UHF), or a WR12's. Their antenna: a dipole (the telescopic
+     * one in an RTL-SDR's kit does them all) with each arm the length given, a quarter wave at the band's middle less
+     * 5 %; WX SAT's the V-dipole of 53.4 cm arms, 120 degrees apart, flat */
+    {"AIR", 118000, 137000, "AIRCRAFT VOICE (AM)", "DIPOLE 2X56 CM", 'L', 121500000, radio_mode_am, false,
      "Pilots and controllers in AM, 25 kHz apart; 121.500 is the emergency guard. Airliners' ACARS texts on E."},
-    {"WX SAT", 137000, 138000, "METEOR WEATHER PICTURES", "A V-DIPOLE ON THE SDR", 'A', 137100000, radio_mode_nfm,
+    {"WX SAT", 137000, 138000, "METEOR WEATHER PICTURES", "V-DIPOLE 2X53 CM", 'A', 137100000, radio_mode_nfm,
      false, "Meteor-M weather satellites on 137.1 and 137.9, a few passes a day: B decodes their pictures (/mnt/meteor)."},
-    {"2 M", 144000, 148000, "HAMS: REPEATERS, APRS", "THE SDR'S OWN", 'L', 146520000, radio_mode_nfm, false,
+    {"2 M", 144000, 148000, "HAMS: REPEATERS, APRS", "DIPOLE 2X49 CM", 'L', 146520000, radio_mode_nfm, false,
      "Local hams in narrow FM: repeaters 145-148, simplex 146.520, APRS packets on 144.390."},
-    {"MARINE", 156000, 162025, "BOATS; CHANNEL 16 CALLS", "THE SDR'S OWN", 'L', 156800000, radio_mode_nfm, false,
+    {"MARINE", 156000, 162025, "BOATS; CHANNEL 16 CALLS", "DIPOLE 2X45 CM", 'L', 156800000, radio_mode_nfm, false,
      "Marine VHF in narrow FM: channel 16 (156.800) for calls and distress, AIS data on 161.975 / 162.025."},
-    {"NOAA WX", 162400, 162550, "WEATHER RADIO, ALERTS", "THE SDR'S OWN", 'L', 162550000, radio_mode_nfm, false,
+    {"NOAA WX", 162400, 162550, "WEATHER RADIO, ALERTS", "DIPOLE 2X44 CM", 'L', 162550000, radio_mode_nfm, false,
      "NOAA Weather Radio around the clock, with SAME alerts the Sentry shows in its title."},
-    {"70 CM", 420000, 450000, "HAMS: REPEATERS, SIMPLEX, DMR", "THE SDR'S OWN", 'L', 446000000, radio_mode_nfm, false,
+    {"70 CM", 420000, 450000, "HAMS: REPEATERS, SIMPLEX, DMR", "DIPOLE 2X16 CM", 'L', 446000000, radio_mode_nfm, false,
      "Local hams in narrow FM: repeaters 442-450, simplex 446.000."},
-    {"GMRS", 462550, 467725, "FAMILY RADIOS: FRS, GMRS", "THE SDR'S OWN", 'L', 462562500, radio_mode_nfm, false,
+    {"GMRS", 462550, 467725, "FAMILY RADIOS: FRS, GMRS", "DIPOLE 2X15 CM", 'L', 462562500, radio_mode_nfm, false,
      "Handheld family radios, FRS and GMRS, 12.5 kHz apart: a few miles at most."},
-    {"ADS-B", 1089000, 1091000, "AIRCRAFT ON A MAP", "THE SDR'S OWN", 'L', 1090000000, radio_mode_nfm, false,
+    {"ADS-B", 1089000, 1091000, "AIRCRAFT ON A MAP", "DIPOLE 2X65 MM", 'L', 1090000000, radio_mode_nfm, false,
      "Aircraft send their position, height and flight on 1090 MHz. LISTEN opens H AIRSPACE, which draws them."},
 };
 
@@ -765,6 +767,7 @@ typedef struct {
     int64_t hz;
     int     mode;           /* the X6200's radio_mode_t (-1 its own); the stick's 1 NFM, 2 AM, 3 WFM */
     bool    rtl;            /* the stick's (F), else the X6200's (A) */
+    int8_t  sdr;            /* the stick's: which SDR found it (sdr_code), 1 one not kept (a log of before) */
     char    what[28];       /* what it was taken for */
     time_t  first, last;
     int     times;
@@ -4503,7 +4506,7 @@ static void show_title(void) {
 
 /* ---- G LOG: what the scans locked on ---- */
 
-#define LOG_ROW "%c%-10.10s %-8.8s %-22.22s %-5.5s %-12.12s %-13.13s %-5.5s %4.4s %s"
+#define LOG_ROW "%c%-10.10s %-8.8s %-20.20s %-5.5s %-16.16s %-13.13s %-5.5s %4.4s %s"  /* 97 at most: RX 7 (BLADERF) */
 #define G_STICK_OFF 200000      /* the stick tuned this far under what it plays: its middle is not used */
 
 static void hits_save(void) {
@@ -4513,7 +4516,8 @@ static void hits_save(void) {
     snprintf(tmp, sizeof(tmp), "%s.new", HITS_FILE);
     if (!(f = fopen(tmp, "w"))) return;
     for (int i = 0; i < nhits; i++)
-        fprintf(f, "%lld\t%d\t%d\t%lld\t%lld\t%d\t%.1f\t%s\n", (long long)hits[i].hz, hits[i].mode, hits[i].rtl,
+        fprintf(f, "%lld\t%d\t%d\t%lld\t%lld\t%d\t%.1f\t%s\n", (long long)hits[i].hz, hits[i].mode,
+                hits[i].rtl ? (hits[i].sdr > 0 ? hits[i].sdr : 1) : 0,
                 (long long)hits[i].first, (long long)hits[i].last, hits[i].times, hits[i].peak, hits[i].what);
     /* on the card before the rename: DATA is FAT, and a power cut after a rename of data still in memory left the
      * log empty (2026-11-14, a radio switched off at its battery's end) */
@@ -4538,6 +4542,7 @@ static void hits_load(void) {
             continue;
         h.hz    = hz;
         h.rtl   = rtl != 0;
+        h.sdr   = (int8_t)(rtl > 0 && rtl < 18 ? rtl : rtl ? 1 : 0);
         h.first = (time_t)first;
         h.last  = (time_t)last;
         snprintf(h.what, sizeof(h.what), "%s", line + n);
@@ -4545,6 +4550,18 @@ static void hits_load(void) {
         hits[nhits++] = h;
     }
     fclose(f);
+}
+
+/* The SDR a log entry was found on, kept in the log file's RX number: 0 the X6200, 1 an SDR not named (a log of
+ * before 2026-11-17), 2 the HackRF, 3 the bladeRF, 10 + n RTLn. A GUI of before reads any but 0 as the stick's */
+static int sdr_code(void) {
+    rtl_dev_t d = rtl_spectrum_dev();
+
+    return d == RTL_DEV_HACKRF ? 2 : d == RTL_DEV_BLADERF ? 3 : d == RTL_DEV_RTL ? 10 + rtl_spectrum_dev_rtl() : 1;
+}
+
+static const char *sdr_code_tag(int c) {
+    return c == 2 ? "HACKRF" : c == 3 ? "BLADERF" : c >= 10 && c < 18 ? rtl_spectrum_rtl_tag(c - 10) : "SDR";
 }
 
 /* A lock: a new entry, or the same signal again (2 kHz on the X6200, half a channel on the stick) brought to the top;
@@ -4561,12 +4578,14 @@ static void hit_add(int64_t hz, int mode, bool rtl, const char *what, float peak
         h = hits[j];
         h.times++;
         h.last = now;
+        if (rtl) h.sdr = (int8_t)sdr_code();    /* heard again: on the SDR it was heard on now */
         if (peak > h.peak) h.peak = peak;
     } else {
         memset(&h, 0, sizeof(h));
         h.hz    = hz;
         h.mode  = mode;
         h.rtl   = rtl;
+        h.sdr   = (int8_t)(rtl ? sdr_code() : 0);
         h.first = h.last = now;
         h.times = 1;
         h.peak  = peak;
@@ -4904,7 +4923,7 @@ static void g_rds_take(void) {
 }
 
 static void show_glog(void) {
-    char s[160];
+    char s[200];
     int  top = g_sel - lg_rows / 2;
 
     if (top > nhits - lg_rows) top = nhits - lg_rows;
@@ -4933,9 +4952,10 @@ static void show_glog(void) {
         snprintf(n, sizeof(n), "%d", h->times);
         snprintf(bn, sizeof(bn), "%s%s", in ? "" : "~", bi >= 0 ? bands[bi].name : "-");
         char rxs[24];
-        if (h->rtl && sdr_here && i != g_sel) snprintf(rxs, sizeof(rxs), "#%s %s#", tag_hex, rtl_spectrum_dev_tag());
-        else if (h->rtl) snprintf(rxs, sizeof(rxs), "%s", rtl_spectrum_dev_tag());  /* the
-                                                                                    * chosen row: in its ink */
+        if (h->rtl && sdr_here && i != g_sel) snprintf(rxs, sizeof(rxs), "#%s %s#", tag_hex, sdr_code_tag(h->sdr));
+        else if (h->rtl) snprintf(rxs, sizeof(rxs), "%s", sdr_code_tag(h->sdr));    /* the SDR that found it (not
+                                                                                    * B's now); the chosen row: in its
+                                                                                    * ink */
         else snprintf(rxs, sizeof(rxs), "X6200");
         snprintf(s, sizeof(s), LOG_ROW, g_playing(i) ? '>' : ' ', f, bn,
                  h->what, bi >= 0 ? best_name(bands[bi].when) : "", bi >= 0 ? bands[bi].ant : "", now, last, n,
@@ -4955,14 +4975,16 @@ static void show_glog(void) {
     strftime(a, sizeof(a), "%H:%M %b %d", &tm);
     localtime_r(&h->last, &tm);
     strftime(b, sizeof(b), "%H:%M %b %d", &tm);
-    snprintf(s, sizeof(s), h->rtl ? "%s: FIRST %s, LAST %s, %d TIME%s, %.0f DB. %s" : "%s: FIRST %s, LAST %s, %d TIME%s, +%.0f DB. %s",
-             h->what[0] ? h->what : "THIS ONE", a, b, h->times, h->times == 1 ? "" : "S", h->peak,
-             g_scan ? "SCANNING THE LIST ON EACH RADIO (F4: STOP)" : g_playing(g_sel) ? "HEARD NOW (PUSH: STOP)"
-             : h->rtl ? (rtl_spectrum_dev() == RTL_DEV_NONE ? "PUSH: HEAR IT ON AN SDR"
-                                                             : rtl_spectrum_dev() == RTL_DEV_HACKRF ? "PUSH: HEAR IT ON THE HACKRF"
-                                                             : rtl_spectrum_dev() == RTL_DEV_BLADERF ? "PUSH: HEAR IT ON THE BLADERF"
-                                                                                                    : "PUSH: HEAR IT ON THE RTL")
-             : "PUSH: HEAR IT ON THE X6200");
+    char on[24], push[40];
+
+    snprintf(on, sizeof(on), "%s", h->rtl ? sdr_code_tag(h->sdr) : "X6200");
+    if (!h->rtl) snprintf(push, sizeof(push), "PUSH: HEAR IT ON THE X6200");
+    else if (rtl_spectrum_dev() == RTL_DEV_NONE) snprintf(push, sizeof(push), "PUSH: HEAR IT ON AN SDR");
+    else snprintf(push, sizeof(push), "PUSH: HEAR IT ON %s", rtl_spectrum_dev_tag());   /* B's SDR now */
+    snprintf(s, sizeof(s), h->rtl ? "%s: FOUND ON %s, FIRST %s, LAST %s, %d TIME%s, %.0f DB. %s"
+                                  : "%s: FOUND ON %s, FIRST %s, LAST %s, %d TIME%s, +%.0f DB. %s",
+             h->what[0] ? h->what : "THIS ONE", on, a, b, h->times, h->times == 1 ? "" : "S", h->peak,
+             g_scan ? "SCANNING THE LIST ON EACH RADIO (F4: STOP)" : g_playing(g_sel) ? "HEARD NOW (PUSH: STOP)" : push);
     for (char *c = s; *c; c++)
         if (*c >= 'a' && *c <= 'z') *c -= 32;
     lv_label_set_text(lg_about_l, s);
@@ -6549,7 +6571,7 @@ static void cr_now(char *s, size_t n) {
         strftime(t, sizeof(t), "%H:%M", &tm);
         fmt_mhz(g, sizeof(g), hits[i].hz, 3);
         at += (size_t)snprintf(s + at, n - at, "%s %s %s %s %.12s", i ? "  " : " ", t,
-                               hits[i].rtl ? rtl_spectrum_dev_tag() : "X6200", g, hits[i].what);
+                               hits[i].rtl ? sdr_code_tag(hits[i].sdr) : "X6200", g, hits[i].what);
     }
     if (!nhits) snprintf(s + at, n - at, " NOTHING YET");
 }
