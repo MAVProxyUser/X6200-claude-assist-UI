@@ -118,6 +118,7 @@ static uint32_t        alert_seq;
 /* Listening: the helper's audio, played on the speaker in the recorder's way (the base in play mode) */
 static atomic_llong    listen_hz;
 static rtl_dmr_t       dmr_now;         /* the listened channel's DMR (RDMR), under lock */
+static rtl_dsd_t       dsd_now;         /* its other digital voice (RDSD), under lock */
 static atomic_int      listen_mode;      /* 0 not listening */
 static pthread_mutex_t ring_lock = PTHREAD_MUTEX_INITIALIZER;
 static int16_t         ring[RING];
@@ -560,6 +561,31 @@ static void *spec_thread(void *arg) {
                                                 .at_ms = now};
             dmr_now.at_ms = now;
             dmr_now.seq++;
+            pthread_mutex_unlock(&lock);
+            continue;
+        }
+        if (n >= 8 && memcmp(buf, "RDSD", 4) == 0) {   /* "<Hz>|<protocol>|<slot>|<call>" */
+            uint32_t  len;
+            char      t[240], *p1, *p2, *p3;
+            long long hz;
+            int       sl;
+
+            memcpy(&len, buf + 4, 4);
+            if (len >= sizeof(t) || len > (uint32_t)(n - 8)) continue;
+            memcpy(t, buf + 8, len);
+            t[len] = 0;
+            if (!(p1 = strchr(t, '|')) || !(p2 = strchr(p1 + 1, '|')) || !(p3 = strchr(p2 + 1, '|'))) continue;
+            *p1 = *p2 = *p3 = 0;
+            hz = atoll(t);
+            sl = atoi(p2 + 1);
+            if (sl < 0 || sl > 1) continue;
+            pthread_mutex_lock(&lock);
+            if (dsd_now.hz != hz || !*(p1 + 1)) memset(&dsd_now, 0, sizeof(dsd_now));
+            dsd_now.hz = hz;
+            snprintf(dsd_now.proto, sizeof(dsd_now.proto), "%s", p1 + 1);
+            snprintf(dsd_now.call[sl], sizeof(dsd_now.call[sl]), "%s", p3 + 1);
+            dsd_now.at_ms = lv_tick_or_ms();
+            dsd_now.seq++;
             pthread_mutex_unlock(&lock);
             continue;
         }
@@ -1127,6 +1153,26 @@ bool rtl_spectrum_dmr(rtl_dmr_t *out) {
     got  = dmr_now.at_ms && dmr_now.hz == atomic_load(&listen_hz) && lv_tick_or_ms() - dmr_now.at_ms < 4000;
     pthread_mutex_unlock(&lock);
     return got;
+}
+
+bool rtl_spectrum_dsd(rtl_dsd_t *out) {
+    bool got;
+
+    pthread_mutex_lock(&lock);
+    *out = dsd_now;
+    got  = dsd_now.at_ms && dsd_now.proto[0] && dsd_now.hz == atomic_load(&listen_hz) &&
+          lv_tick_or_ms() - dsd_now.at_ms < 3000;
+    pthread_mutex_unlock(&lock);
+    return got;
+}
+
+const char *rtl_dsd_name(const char *proto) {
+    static const char *const names[][2] = {{"P25P1", "P25"}, {"P25P2", "P25 PHASE 2"}, {"DSTAR", "D-STAR"},
+                                           {"X2TDMA", "X2-TDMA"}, {"EDACS/PV", "PROVOICE"}};
+
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if (!strcmp(proto, names[i][0])) return names[i][1];
+    return proto;
 }
 
 bool rtl_spectrum_rds(rtl_rds_t *out) {

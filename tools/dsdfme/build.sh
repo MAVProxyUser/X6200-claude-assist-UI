@@ -27,6 +27,10 @@ if [ ! -d "$B/src/.git" ]; then
 fi
 git -C "$B/src" fetch -q origin audio_work 2>/dev/null || true
 git -C "$B/src" checkout -q -f "$REV"
+# Ours (patches/goldcorp.patch): the talkgroup table at 65536 rows, every write into it bounded (16778000 rows asked
+# for 1.8 GB, NULL on a 32-bit system, then written into on a talker alias); stdin read a buffer at a time (a sample a
+# read(2) was two thirds of its time); DSD_NO_DMR in the environment leaves DMR to the SDR daemon's own decoder
+git -C "$B/src" apply "$TOP/tools/dsdfme/patches/goldcorp.patch"
 # The radio's ncurses is the narrow one (libncurses.so.6.4, no ncursesw): dsd-fme asks for the wide one
 sed -i '' 's/set(CURSES_NEED_WIDE TRUE)/set(CURSES_NEED_WIDE FALSE)/' "$B/src/CMakeLists.txt"
 

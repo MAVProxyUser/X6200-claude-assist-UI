@@ -106,7 +106,7 @@ cp -L "$B/bladerf-build/output/libbladeRF.so.2" "$B/out/lib/libbladeRF.so.2"
 # run time (its header only here)
 RS=$TOP/tools/rtlspec
 $CC $CF -O3 -DSDR_BLADERF -I "$RS" -I "$H" -I "$BL/libraries/libbladeRF/include" -o "$B/out/bin/x6x00-rtlspec" \
-    "$RS/rtlspec.c" "$RS/same.c" "$RS/rds.c" "$RS/acars.c" "$RS/ambe.c" "$RS/dmr.c" "$RS/sdr.c" "$RS/sdr_rtl.c" "$RS/sdr_hackrf.c" "$RS/sdr_bladerf.c" "$RS/sdr_file.c" \
+    "$RS/rtlspec.c" "$RS/same.c" "$RS/rds.c" "$RS/acars.c" "$RS/ambe.c" "$RS/dmr.c" "$RS/dsd.c" "$RS/sdr.c" "$RS/sdr_rtl.c" "$RS/sdr_hackrf.c" "$RS/sdr_bladerf.c" "$RS/sdr_file.c" \
     "$B/out/lib/librtlsdr.a" "$B/out/lib/libhackrf.a" $LD -lusb-1.0 -lpthread -lm -ldl
 
 # dump1090-fa: ARCH armv7l picks its NEON DSP flavours for the radio's Cortex-A7

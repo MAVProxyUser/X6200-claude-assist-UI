@@ -456,11 +456,17 @@ static const target_t *target_near(int32_t hz, int32_t within);
 static const char *const rtl_mode_names[] = {"", "NFM", "AM", "WFM"};
 static int               rtl_mode_of(int64_t hz);
 
-/* B's channel's mode as heard: DMR while the daemon finds it there (in NFM), else the band's */
+/* B's channel's mode as heard: DMR, P25, D-STAR, YSF while the daemon finds it there (in NFM), else the band's */
 static const char *rtl_mode_word(int64_t hz) {
-    rtl_dmr_t m;
+    static char word[16];
+    rtl_dmr_t   m;
+    rtl_dsd_t   d;
 
     if (rtl_spectrum_dmr(&m) && m.hz == hz) return "DMR";
+    if (rtl_spectrum_dsd(&d) && d.hz == hz) {
+        snprintf(word, sizeof(word), "%s", rtl_dsd_name(d.proto));
+        return word;
+    }
     return rtl_mode_names[rtl_mode_of(hz)];
 }
 
@@ -3718,17 +3724,38 @@ static bool rds_tuned_note(char *t, size_t n) {
 static bool dmr_shown;
 
 static bool dmr_show(bool now) {
-    static uint32_t seq = UINT32_MAX;
+    static uint32_t seq = UINT32_MAX, dseq = UINT32_MAX;
+    static bool     was_dsd;
     rtl_dmr_t       m;
+    rtl_dsd_t       ds;
     char            f[16], line[200];
     size_t          at;
+    bool            dmr = rtl_spectrum_dmr(&m), dsd = !dmr && rtl_spectrum_dsd(&ds);
 
-    if (!rtl_spectrum_dmr(&m) || !p_rtl.trace_h || (scr != SCR_RTL && scr != SCR_SCAN)) {
+    if ((!dmr && !dsd) || !p_rtl.trace_h || (scr != SCR_RTL && scr != SCR_SCAN)) {
         if (dmr_shown) {                /* gone: RDS's line as it was, or none */
             dmr_shown = false;
             lv_obj_add_flag(rds_l, LV_OBJ_FLAG_HIDDEN);
         }
         return false;
+    }
+    if (dsd != was_dsd) now = true;     /* DMR for the others, or the others for DMR: said afresh */
+    was_dsd = dsd;
+    if (dsd) {                          /* P25, D-STAR, YSF, X2-TDMA (the daemon's dsd-fme): who talks to whom */
+        if (!now && dmr_shown && ds.seq == dseq) return true;
+        dseq = ds.seq;
+        fmt_mhz(f, sizeof(f), ds.hz, 3);
+        at = (size_t)snprintf(line, sizeof(line), "%s %s", rtl_dsd_name(ds.proto), f);
+        for (int i = 0, first = 1; i < 2 && at < sizeof(line); i++) {
+            if (!ds.call[i][0]) continue;
+            at += (size_t)snprintf(line + at, sizeof(line) - at, "%s%s%s TALKING", first ? "\n" : "   ",
+                                   i ? "SLOT 2 " : "", ds.call[i]);
+            first = 0;
+        }
+        lv_label_set_text(rds_l, line);
+        lv_obj_clear_flag(rds_l, LV_OBJ_FLAG_HIDDEN);
+        dmr_shown = true;
+        return true;
     }
     if (!now && dmr_shown && m.seq == seq) return true;
     seq = m.seq;
@@ -6682,20 +6709,26 @@ static void walkie_step(void) {
     bool on = from_rtl && param_i_get(cfg_rtl_sql) > 0 ? rtl_spectrum_squelch_open() : vp_rms > 2 * floor_rms + 100;
     /* a DMR call on the channel lights it too, whatever the audio: without the vocoder its voice is silence */
     rtl_dmr_t dmv;
+    rtl_dsd_t ddv;
     bool      dmr = w_sdr_hz && rtl_spectrum_dmr(&dmv) && dmv.hz == w_sdr_hz &&
                     (dmv.slot[0].voice || dmv.slot[1].voice || dmv.slot[2].voice);
+    bool      dsd = !dmr && w_sdr_hz && rtl_spectrum_dsd(&ddv) && ddv.hz == w_sdr_hz;     /* P25, D-STAR... */
+    char      dlamp[32];
+
+    if (dsd) snprintf(dlamp, sizeof(dlamp), g_portrait ? "RX  %s" : "RX\n%s", rtl_dsd_name(ddv.proto));
     bool ptt = ptt_ms && lv_tick_get() - ptt_ms < 1500;
     /* on the air: the X6200 (not on the SDR's channels, where it is held at 0 W whatever keys it), or the SDR */
     bool air   = w_sdr_hz ? w_sdr_ptt && rtl_spectrum_tx_state() == RTL_TX_ON : radio_get_state() == RADIO_TX;
     bool armed = w_sdr_hz ? g_sdr_armed : g_armed;
 
-    on = on || dmr;
+    on = on || dmr || dsd;
     lv_obj_set_style_bg_opa(wui->lamp, air || ptt || on || (armed && blink) ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(wui->lamp_l, air || ptt || on || (armed && blink) ? ink : amb, 0);
     lv_label_set_text(wui->lamp_l, air ? (g_portrait ? "TX  ON AIR" : "TX\nON AIR")
                                    : ptt ? (g_portrait ? "TX LOCKED" : "TX\nLOCKED")
                                    : armed ? (g_portrait ? "TX  ARMED" : "TX\nARMED")
                                    : dmr ? (g_portrait ? "RX  DMR" : "RX\nDMR")
+                                   : dsd ? dlamp
                                    : on ? (g_portrait ? "RX  SIGNAL" : "RX\nSIGNAL")
                                         : (g_portrait ? "RX  QUIET" : "RX\nQUIET"));
     char cap[48];
@@ -7619,9 +7652,12 @@ static void show_walkie(void) {
     (void)ch;
     snprintf(f, sizeof(f), "%d.%03d.%02d", fq / 1000000, (fq / 1000) % 1000, (fq % 1000) / 10);
     rtl_dmr_t dm;
+    rtl_dsd_t dd;
     bool      dmr = w_sdr_hz && rtl_spectrum_dmr(&dm) && dm.hz == w_sdr_hz;
+    bool      dsd = !dmr && w_sdr_hz && rtl_spectrum_dsd(&dd) && dd.hz == w_sdr_hz;     /* P25, D-STAR, YSF... */
 
-    snprintf(fr, sizeof(fr), "%s %s", f, dmr ? "DMR" : w_sdr_hz ? "FM" : mode_name(cparam_i_get(cfg_cur_mode)));
+    snprintf(fr, sizeof(fr), "%s %s", f, dmr ? "DMR" : dsd ? rtl_dsd_name(dd.proto)
+                                         : w_sdr_hz ? "FM" : mode_name(cparam_i_get(cfg_cur_mode)));
     identify_ex(fq, &id, false);
     snprintf(nm, sizeof(nm), "%s", id.name);
     if (dmr) {                          /* who talks, in the channel's name's place */
@@ -7636,6 +7672,8 @@ static void show_walkie(void) {
             snprintf(nm, sizeof(nm), "DMR COLOUR CODE %d", dm.cc);
         else
             snprintf(nm, sizeof(nm), "DMR");
+    } else if (dsd) {                   /* who talks, else the protocol's name */
+        snprintf(nm, sizeof(nm), "%s", dd.call[0][0] ? dd.call[0] : dd.call[1][0] ? dd.call[1] : rtl_dsd_name(dd.proto));
     }
     snprintf(via, sizeof(via), "VIA %s", w_sdr_hz ? rtl_spectrum_dev_name() : "X6200");
     if (wi >= 0) {

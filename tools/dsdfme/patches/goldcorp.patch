@@ -1,0 +1,209 @@
+diff --git a/include/dsd.h b/include/dsd.h
+index b917b43..5b7282c 100644
+--- a/include/dsd.h
++++ b/include/dsd.h
+@@ -176,6 +176,8 @@ typedef struct
+   char groupMode[3];
+   char groupName[100];
+ } groupinfo;
++#define GROUP_MAX 65536 /* the rows of state->group_array */
++void dsd_status (const char * kind, int slot, const char * text); //GoldCorpHF: what is heard, to DSD_STATUS_FD
+ 
+ 
+ typedef struct
+diff --git a/src/dmr_flco.c b/src/dmr_flco.c
+index 3ed8b31..0b52a8d 100644
+--- a/src/dmr_flco.c
++++ b/src/dmr_flco.c
+@@ -678,7 +678,7 @@ void dmr_flco (dsd_opts * opts, dsd_state * state, uint8_t lc_bits[], uint32_t C
+         }
+ 
+         //if group doesn't exist, or isn't locked out, then do so now.
+-        if (lo == 0)
++        if (lo == 0 && state->group_tally < GROUP_MAX)
+         { //changing from DE to B to fit the rest of the lockout logic ("Buzzer Fix")
+           state->group_array[state->group_tally].groupNumber = target;
+           sprintf (state->group_array[state->group_tally].groupMode, "%s", "B");
+diff --git a/src/dsd_alias.c b/src/dsd_alias.c
+index ec70e56..8b9a252 100644
+--- a/src/dsd_alias.c
++++ b/src/dsd_alias.c
+@@ -448,7 +448,7 @@ void apx_embedded_alias_dump (dsd_opts * opts, dsd_state * state, uint8_t slot,
+     }
+   }
+ 
+-  if (wr == 0) //not already in there, so save it there now
++  if (wr == 0 && state->group_tally < GROUP_MAX) //not already in there, so save it there now
+   {
+     state->group_array[state->group_tally].groupNumber = rid;
+     sprintf (state->group_array[state->group_tally].groupMode, "%s", "D");
+@@ -543,7 +543,7 @@ void l3h_embedded_alias_decode (dsd_opts * opts, dsd_state * state, uint8_t slot
+       }
+     }
+ 
+-    if (wr == 0) //not already in there, so save it there now
++    if (wr == 0 && state->group_tally < GROUP_MAX) //not already in there, so save it there now
+     {
+       state->group_array[state->group_tally].groupNumber = tsrc;
+       sprintf (state->group_array[state->group_tally].groupMode, "%s", "D");
+@@ -611,7 +611,7 @@ void tait_iso7_embedded_alias_decode (dsd_opts * opts, dsd_state * state, uint8_
+       }
+     }
+ 
+-    if (wr == 0) //not already in there, so save it there now
++    if (wr == 0 && state->group_tally < GROUP_MAX) //not already in there, so save it there now
+     {
+       state->group_array[state->group_tally].groupNumber = rid;
+       sprintf (state->group_array[state->group_tally].groupMode, "%s", "D");
+diff --git a/src/dsd_events.c b/src/dsd_events.c
+index 1bfd16f..a1afc62 100644
+--- a/src/dsd_events.c
++++ b/src/dsd_events.c
+@@ -10,6 +10,7 @@
+ #include "dsd.h" 
+ #include "git_ver.h"
+ #include "synctype.h"
++#include <errno.h>
+ 
+ //init each event history struct passed into here
+ void init_event_history (Event_History_I * event_struct, uint8_t start, uint8_t stop)
+@@ -121,6 +122,37 @@ void write_event_to_log_file (dsd_opts * opts, dsd_state * state, uint8_t slot,
+   fclose (event_log_file);
+ }
+ 
++//GoldCorpHF: what is heard, a line at a time to the descriptor in DSD_STATUS_FD (the SDR daemon's pipe): "SY 0 <frame
++//type>" while a sync is found (at most twice a second), "EV <slot> <event>" while a call goes on (as it changes, else
++//once a second). Never waits: the daemon makes the pipe non-blocking, a full one loses the line
++void dsd_status (const char * kind, int slot, const char * text)
++{
++  static int fd = -2;
++  static char last[2][2][512];
++  static long at[2][2];
++  struct timespec ts;
++  char line[600];
++  int k = kind[0] == 'E', n;
++  long ms;
++
++  if (fd == -2)
++  {
++    const char * e = getenv ("DSD_STATUS_FD");
++    fd = e ? atoi (e) : -1;
++  }
++  if (fd < 0) return;
++  slot &= 1;
++  clock_gettime (CLOCK_MONOTONIC, &ts);
++  ms = (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
++  if (strncmp (last[k][slot], text, sizeof(last[k][slot]) - 1) == 0 && ms - at[k][slot] < (k ? 1000 : 500)) return;
++  snprintf (last[k][slot], sizeof(last[k][slot]), "%s", text);
++  at[k][slot] = ms;
++  n = snprintf (line, sizeof(line), "%s %d %s", kind, slot, text);
++  if (n > (int)sizeof(line) - 2) n = (int)sizeof(line) - 2;
++  line[n++] = '\n';
++  if (write (fd, line, n) < 0 && errno == EPIPE) fd = -1;
++}
++
+ // run once per loop to check for and push and update event history
+ void watchdog_event_history (dsd_opts * opts, dsd_state * state, uint8_t slot)
+ {
+@@ -813,6 +845,18 @@ void watchdog_event_current (dsd_opts * opts, dsd_state * state, uint8_t slot)
+ 
+   sprintf (event_struct->Event_History_Items[0].event_string, "%s", event_string);
+ 
++  //GoldCorpHF: a call with someone talking in it (its SRC's first word has a letter or a digit not 0) to the daemon,
++  //the date and the time left off
++  {
++    const char * e = event_string, * s;
++    int sp = 0, who = 0;
++    while (*e && sp < 2) if (*e++ == ' ') sp++;
++    if ((s = strstr (e, "SRC: ")) != NULL)
++      for (s += 5; *s && *s != ' ' && *s != ';' && !who; s++)
++        who = (*s >= '1' && *s <= '9') || (*s >= 'A' && *s <= 'Z') || (*s >= 'a' && *s <= 'z');
++    if (who) dsd_status ("EV", slot, e);
++  }
++
+   if (timestr != NULL)
+   {
+     free (timestr);
+diff --git a/src/dsd_frame_sync.c b/src/dsd_frame_sync.c
+index f38a991..f48fff8 100644
+--- a/src/dsd_frame_sync.c
++++ b/src/dsd_frame_sync.c
+@@ -23,6 +23,7 @@ void
+ printFrameSync (dsd_opts * opts, dsd_state * state, char *frametype, int offset, char *modulation)
+ {
+   UNUSED3(state, offset, modulation);
++  dsd_status ("SY", 0, frametype); //GoldCorpHF: a sync, to the SDR daemon
+ 
+   char * timestr = getTimeC();
+   if (opts->verbose > 0)
+diff --git a/src/dsd_import.c b/src/dsd_import.c
+index 0260881..4fc2263 100644
+--- a/src/dsd_import.c
++++ b/src/dsd_import.c
+@@ -22,7 +22,7 @@ int csvGroupImport(dsd_opts * opts, dsd_state * state)
+   int field_count = 0;
+ 
+   unsigned int i = 0;
+-  while (fgets(buffer, BSIZE, fp))
++  while (state->group_tally < GROUP_MAX && fgets(buffer, BSIZE, fp))
+   {
+ 
+     field_count = 0;
+diff --git a/src/dsd_main.c b/src/dsd_main.c
+index 68021d9..eb29098 100644
+--- a/src/dsd_main.c
++++ b/src/dsd_main.c
+@@ -1203,7 +1203,7 @@
+    memset (state->trunk_lcn_freq, 0, sizeof(state->trunk_lcn_freq));
+    memset (state->trunk_chan_map, 0, sizeof(state->trunk_chan_map));
+    //allocate max 24-bit address w/ memory with zero fill (termination) for end of strings, import will only copy 98, leaving the terminator intact
+-   state->group_array = calloc(16778000, sizeof(groupinfo));
++   state->group_array = calloc(GROUP_MAX + 1, sizeof(groupinfo)); //16778000 rows asked for 1.8 GB, never had on a 32-bit system
+    state->group_tally = 0; //is an unsigned int
+    state->lcn_freq_count = 0; //number of frequncies imported as an enumerated lcn list
+    state->lcn_freq_roll = 0; //needs reset if sync is found?
+@@ -3240,6 +3240,12 @@
+          }
+      }
+ 
++     if (getenv ("DSD_NO_DMR")) //DMR decoded elsewhere (the SDR daemon's own decoder, with the vocoder)
++     {
++       opts.frame_dmr = 0;
++       fprintf (stderr, "DMR left to another decoder (DSD_NO_DMR)\n");
++     }
++
+      // Set optind after getopt completes so -r works regardless of argument order
+      if (opts.playfiles == 1)
+        state.optind = optind;
+diff --git a/src/dsd_symbol.c b/src/dsd_symbol.c
+index 64744e4..3ee26cb 100644
+--- a/src/dsd_symbol.c
++++ b/src/dsd_symbol.c
+@@ -16,6 +16,7 @@
+  */
+ 
+ #include "dsd.h"
++#include <errno.h>
+ 
+ int
+ getSymbol (dsd_opts * opts, dsd_state * state, int have_sync)
+@@ -95,7 +96,18 @@ getSymbol (dsd_opts * opts, dsd_state * state, int have_sync)
+       //stdin only, wav files moving to new number
+       else if (opts->audio_in_type == 1) //won't work in windows, needs posix pipe (mintty)
+       {
+-        result = sf_read_short(opts->audio_in_file, &sample, 1);
++        //a buffer at a time, not a sample a read(2): two thirds of its time went to the system calls
++        static unsigned char ib[8192]; static int in_n, in_at;
++        if (in_n - in_at < 2)
++        {
++          int k = in_n - in_at; ssize_t r;
++          memmove (ib, ib + in_at, k);
++          in_n = k; in_at = 0;
++          do r = read (0, ib + in_n, sizeof(ib) - in_n); while (r < 0 && errno == EINTR);
++          if (r > 0) in_n += r;
++        }
++        result = in_n - in_at >= 2;
++        if (result) { sample = (short)(ib[in_at] | ib[in_at + 1] << 8); in_at += 2; }
+         if(result == 0)
+         {
+           sf_close(opts->audio_in_file);

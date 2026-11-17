@@ -52,6 +52,8 @@
  *                          each time it changes; "<Hz>|||||" at a new channel. PI "" and PTY -1 until they came
  *      "RACR", u32 length, "<Hz>|<mode>|<registration>|<ack>|<label>|<block>|<msn>|<flight>|<more>|<level dB>|<text>"
  *                          an ACARS message (acars.c) whose check passed, while "c 1"; the text last, "|" in it as "/"
+ *      "RDSD", u32 length, "<Hz>|<protocol>|<slot>|<call>"     P25, D-STAR, YSF or X2-TDMA on the channel listened
+ *                          to in NFM (dsd-fme, dsd.c): as it changes, and each second while it is there
  *      "RDMR", u32 length, "<Hz>|<slot>|<cc>|<voice>|<lc>|<flco>|<src>|<dst>|<bs>|<vocoder>"   DMR on the channel
  *                          listened to in NFM (dmr.c, found by its sync): a timeslot's call as it changes (dmr_call)
  *      "RTX <word> <Hz> <why>" the transmitter: ON (on the air), END (off again: ASKED, IDLE, TIMEOUT, GONE, FAILED),
@@ -126,6 +128,7 @@
 #include "acars.h"
 #include "ambe.h"
 #include "dmr.h"
+#include "dsd.h"
 #include "rds.h"
 #include "same.h"
 #include "sdr.h"
@@ -358,6 +361,32 @@ static void dmr_dump(float d, bool active) {
 /* The speech in place of the FM while DMR is there (ambe.c's USB-3000): silence without one */
 static float dmr_audio(void) { return ambe_audio(); }
 
+/* ---- dsd-fme on the listened channel (dsd.c): the digital voice dmr.c does not decode, P25, D-STAR, YSF, X2-TDMA:
+ *      "RDSD", u32 length, "<Hz>|<protocol>|<slot>|<call>"
+ * the protocol ("P25P1", "DSTAR", "YSF"...; "" none now), slot 0 or 1 (a TDMA system's second), the call ("TG 1234
+ * FROM 5678901 NAC 293", "TO CQCQCQ FROM N0CALL"; "" no one talking): as it changes, and each second while it is
+ * there ---- */
+static bool dsd_on;             /* dsd-fme there (/usr/bin/dsd-fme), B's daemon */
+
+static void dsd_heard(const char *proto, int slot, const char *call) {
+    static char was[16];
+    char        t[220];
+    uint8_t     msg[8 + sizeof(t)];
+    int         n = snprintf(t, sizeof(t), "%llu|%s|%d|%s", (unsigned long long)lis.hz, proto, slot, call);
+
+    if (strcmp(was, proto)) {
+        snprintf(was, sizeof(was), "%s", proto);
+        fprintf(stderr, "rtlspec: dsd-fme %s at %.5f MHz\n", *proto ? proto : "no digital voice now", lis.hz / 1e6);
+    }
+    if (n <= 0 || n >= (int)sizeof(t)) return;
+    uint32_t len = (uint32_t)n;
+
+    memcpy(msg, "RDSD", 4);
+    memcpy(msg + 4, &len, 4);
+    memcpy(msg + 8, t, len);
+    put(msg, 8 + len);
+}
+
 static void listen_out(float v) {
     static uint8_t msg[8 + AUD_CHUNK * 2];
     static int     aud_n;
@@ -544,6 +573,13 @@ static void at_264k(chan_t *c, float r, float i) {
                     c->out(dmr_audio());
                     return;
                 }
+            }
+        }
+        if (c == &lis && dsd_on) {      /* the other digital voice: dsd-fme's speech (or silence) for its buzz */
+            dsd_feed(d);
+            if (dsd_active()) {
+                c->out(dsd_audio());
+                return;
             }
         }
         if (c->raw) {
@@ -1913,6 +1949,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "rtlspec: daemon %d running\n", (int)getpid());
     if (lis.dmr_on) ambe_start();       /* DMR's vocoder looked for from the start (its self-test in the log), not
                                          * by watch channels' daemons */
+    if (lis.dmr_on) dsd_on = dsd_init(dsd_heard);      /* dsd-fme: B's daemon's alone, as DMR is */
 
     while (!stop) {
         struct pollfd p = {.fd = ls, .events = POLLIN};

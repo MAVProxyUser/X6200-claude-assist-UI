@@ -170,6 +170,21 @@ typedef struct {
 /* The listened channel's DMR, heard within the last 4 s; false: none */
 bool rtl_spectrum_dmr(rtl_dmr_t *out);
 
+/* The other digital voice on the channel listened to in NFM (the daemon's dsd-fme: P25, D-STAR, YSF, X2-TDMA), as
+ * the daemon last said it (RDSD, each second while it is there) */
+typedef struct {
+    int64_t  hz;
+    char     proto[16];         /* as dsd-fme names it: "P25P1", "P25P2", "DSTAR", "YSF", "X2-TDMA" */
+    char     call[2][160];      /* who talks to whom ("TG 1234 FROM 5678901 NAC 293"), per slot; "" no one */
+    uint32_t at_ms, seq;
+} rtl_dsd_t;
+
+/* That, heard within the last 3 s; false: none */
+bool rtl_spectrum_dsd(rtl_dsd_t *out);
+
+/* A protocol's name for the screen: "P25", "P25 PHASE 2", "D-STAR", "YSF", "X2-TDMA", as it is else */
+const char *rtl_dsd_name(const char *proto);
+
 /* ACARS (the daemon's acars.c): the device at 130.8 MHz, the ACARS channels there decoded (AIRSPACE's ACARS view;
  * never with AIRSPACE's dump1090 on the same device: adsb_rx_lend first). Said again to a daemon started anew */
 void rtl_spectrum_acars(bool on);

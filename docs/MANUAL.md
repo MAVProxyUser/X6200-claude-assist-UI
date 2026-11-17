@@ -1300,6 +1300,22 @@ DMR's sync in the channel's FM; once found, the channel is DMR's till no sync co
 - It costs about 6% of one of the radio's four cores while B's SDR listens in narrow FM; watch channels do not look
   for it.
 
+### P25, D-STAR, YSF and the other digital voice (dsd-fme)
+
+The other digital voice modes are found the same way, in any narrow FM channel B's SDR listens to, by dsd-fme
+(lwvmobile's, ISC licence), which the SDR daemon runs beside its own DMR decoder: P25 (phases 1 and 2), D-STAR, YSF
+(Yaesu System Fusion) and X2-TDMA. DMR stays the daemon's own.
+
+- **Who talks**: B's line says `P25 453.250` (or `D-STAR`, `YSF`...), then the call: `TG 1234 FROM 5678901 NAC 293
+  TALKING`, `TO CQCQCQ FROM N0CALL /ID51 TALKING`, `SLOT 2 ...` for a TDMA system's second slot. The head, B's half and
+  G say the protocol in place of NFM; G's lamp says `RX P25`, `RX D-STAR`.
+- **The voice** goes through the USB-3000 only (no software vocoder: dsd-fme is built against our libmbe-dvsi, which
+  hands its frames to the daemon's vocoder). P25's and D-STAR's voice through it is still to come: their calls are
+  silent for now (not their buzz).
+- It is there when `/usr/bin/dsd-fme` is: about 4% of one core while B listens in narrow FM, started with it and
+  ended a minute after. Two syncs (or a call) within 1.5 s make a channel digital, so a sync found once in FM's
+  noise does not mute it.
+
 ## Updating the firmware
 
 The radio updates itself: Settings > Info > Update, or the Update page of the
