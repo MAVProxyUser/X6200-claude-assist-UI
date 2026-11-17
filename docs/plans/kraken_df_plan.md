@@ -686,26 +686,30 @@ scanning DF through a frequency list (0.5 s per stop); declared plain-RTL groups
   GPL-2.0-or-later (already static in `x6x00-rtlspec`). **Recommended: reimplement** from the published maths (MUSIC,
   Capon, Bartlett, Burg) and the measurements described above, copying no code, so our new files stay LGPL-2.1.
   The other way, copying code into the daemon, makes `x6x00-df` GPL-3 (allowed, since it is a separate program and the
-  source is public, but their notices must be kept). Not legal advice.
+  source is public, but their notices must be kept). Not legal advice. **Answered 2026-11-17: reimplement only.**
 - **D3. Default sample rate**: 1.024 MS/s (proposed), 0.25 or 2.4, after test 0a. CPU measured: 45-50 % / 21-23 % /
   89-96 % of a core (bench); on the radio with three channels a third of a core at 1.024, a whole core at 2.4; 0.25
-  does not calibrate yet.
+  does not calibrate yet. **Answered 2026-11-17: 1.024 MS/s.**
 - **D4. Calibration interval**: 2 minutes (proposed), waiting for the squelch to close. Test 1d (10 minutes, no
-  drift seen) says 10 minutes would do; a slip or a retune calibrates anyway.
+  drift seen) says 10 minutes would do; a slip or a retune calibrates anyway. **Answered 2026-11-17: 2 minutes.**
 - **D5. B on a Kraken stick when I opens**: move B to another SDR if one is free, else lend B to I (proposed); or I
-  waits until B is moved by hand.
+  waits until B is moved by hand. As built (move or lend); not answered, so kept.
 - **D6. DF only while I is open** (proposed: the Kraken goes back to AIRSPACE and watch channels on leaving), or in
-  the background with bearings logged.
+  the background with bearings logged. **Answered 2026-11-17: only while page I or the web page is open.**
 - **D7. Page I on the ring only when an array is present** (proposed, as asked), or always there with "NO ARRAY".
+  As built (only with a Kraken); not answered, so kept.
 - **D8. Hardware on hand**: a splitter (1:4/1:5 or 1:2s) and five equal SMA cables for Phase 2? Antennas and a mount
   for an array (five identical whips on a ground plane, radius from 2.4)? Which band first (70 cm fits a 29 cm
-  radius; 2 m needs 87 cm)?
+  radius; 2 m needs 87 cm)? **Answered 2026-11-17:** the five KrakenRF whips; "the antenna array layout should be
+  suggested / dictated by the I page" (done: F2 ARRAY sketches every layout with its size for the band); for now five
+  in a line, not to spec (page I set to ULA-5).
 - **D9. Downloads**: answered 2026-11-17 ("I don't care what you read to level up your knowledge"). The dither
   register (R820T 0x12 bit 4) is now our own patch 0002 to rtlsdr-blog.
 - **D11. Five channels on the X6200** (found 2026-11-17): its USB host feeds four RTL streams. Choices: DF on four
   channels (UCA-4 or ULA-4; B must be off the Kraken), or a kernel change to the MUSB driver so the fifth stream
   shares an endpoint in turns (a new kernel on the card, tested like 9101/9102), or B on another SDR and four.
 - **D10. Plain RTL-SDRs**: drop phase DF for them (proposed), or plan the clock-mod group / amplitude DF as Phase 4.
+  **Answered 2026-11-17: dropped.**
 
 ---
 

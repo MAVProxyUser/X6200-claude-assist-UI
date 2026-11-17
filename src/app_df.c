@@ -1088,6 +1088,99 @@ enum { A_BAND, A_KIND, A_SIZE, A_FIT, A_HEAD, A_N };
 enum { S_RATE, S_GAIN, S_SQL, S_CAL, S_ANT0, S_SRC = S_ANT0 + NANT, S_LOG, S_N };
 enum { T_FOLLOW, T_BAND, T_FREQ, T_WIDTH, T_AUTO, T_TG0, T_N = T_TG0 + N_TG };
 
+/* F2 ARRAY's sketch: the layout chosen, to scale, and in words how to set it out for the band (the owner, 2026-11-17:
+ * "the antenna array layout should be suggested / dictated by the I page. give all available choices and roughly
+ * approximate what it looks like"). Turning the ARRAY row goes through them all */
+#define SK_W 200
+#define SK_H 132
+static lv_img_dsc_t *sk;
+static lv_obj_t     *sk_img, *sk_t, *sk_l[NANT];
+
+static void sk_disc(uint32_t *px, double cx, double cy, double r, uint32_t c) {
+    for (int y = (int)floor(cy - r - 1); y <= (int)ceil(cy + r + 1); y++)
+        for (int x = (int)floor(cx - r - 1); x <= (int)ceil(cx + r + 1); x++)
+            if (hypot(x - cx, y - cy) <= r + 0.5) put(px, SK_W, SK_H, x, y, c);
+}
+
+static void sketch_text(char *t, size_t n) {
+    calc_t        c = calc_at(cfg.band >= 0 ? bands[cfg.band].hz : target_hz());
+    const kind_t *k = &kinds[cfg.kind];
+    char          f[16];
+
+    fmt_mhz(f, sizeof(f), cfg.band >= 0 ? bands[cfg.band].hz : target_hz());
+    if (cfg.kind == K_CUSTOM)
+        snprintf(t, n, "%d ANTENNAS WHERE THE WEB PAGE'S ARRAY EDITOR PUT THEM (DF_ARRAY.TXT). CLOSEST PAIR %.1f CM: "
+                       "HALF A WAVE AT %s MHZ IS %.1f.", cust_n, c.s * c.lambda * 100, f, c.lambda * 50);
+    else if (k->ula)
+        snprintf(t, n, "A LINE OF %d, %.1f CM APART AS SET (HALF A WAVE AT %s MHZ: %.1f CM), ACROSS THE WAY YOU FACE, "
+                       "ANT 0 AT THE LEFT END. A LINE CANNOT TELL FRONT FROM BACK: THE MIRROR SHOWS DASHED.",
+                 k->n, cfg.size_mm / 10.0, f, c.want_m * 100);
+    else
+        snprintf(t, n, "A CIRCLE OF %d SEEN FROM ABOVE, ANT 0 FORWARD, THE REST CLOCKWISE. RADIUS %.1f CM AS SET; FOR %s "
+                       "MHZ %.1f CM (NEIGHBOURS HALF A WAVE APART). WHIPS UPRIGHT ON ONE GROUND PLANE.",
+                 k->n, cfg.size_mm / 10.0, f, c.want_m * 100);
+}
+
+static void draw_sketch(int y0) {
+    uint32_t *px = (uint32_t *)sk->data;
+    int       n = kind_n();
+    double    xs[NANT], ys[NANT], ex = 0.001, ey = 0.001, cx = SK_W / 2.0, cy = SK_H / 2.0 + 7;
+    char      t[320];
+
+    for (int i = 0; i < SK_W * SK_H; i++) px[i] = c_ink;
+    for (int k = 0; k < n && k < NANT; k++) {
+        elem(k, &xs[k], &ys[k]);
+        ex = fmax(ex, fabs(xs[k]));
+        ey = fmax(ey, fabs(ys[k]));
+    }
+    double sc  = fmin((SK_H / 2.0 - 20) / ex, (SK_W / 2.0 - 14) / ey);  /* to scale, as big as it fits (a line uses
+                                                                         * the width) */
+    double ext = fmax(ex, ey);
+
+    /* forward: an arrow at the top */
+    line(px, SK_W, SK_H, (int)cx, 13, (int)cx, 2, c_dim, 0);
+    line(px, SK_W, SK_H, (int)cx - 4, 6, (int)cx, 2, c_dim, 0);
+    line(px, SK_W, SK_H, (int)cx + 4, 6, (int)cx, 2, c_dim, 0);
+    if (cfg.kind != K_CUSTOM && !kinds[cfg.kind].ula)       /* the circle they stand on */
+        for (int a = 0; a < 360; a += 4) {
+            double r = ext * sc, ra = a * M_PI / 180;
+            put(px, SK_W, SK_H, (int)lround(cx + r * sin(ra)), (int)lround(cy - r * cos(ra)), c_faint);
+        }
+    else if (cfg.kind != K_CUSTOM && n >= 2)                 /* the line */
+        line(px, SK_W, SK_H, (int)lround(cx - ys[0] * sc), (int)lround(cy - xs[0] * sc), (int)lround(cx - ys[n - 1] * sc),
+             (int)lround(cy - xs[n - 1] * sc), c_faint, 3);
+    line(px, SK_W, SK_H, (int)cx - 3, (int)cy, (int)cx + 3, (int)cy, c_dim, 0);
+    line(px, SK_W, SK_H, (int)cx, (int)cy - 3, (int)cx, (int)cy + 3, c_dim, 0);
+    for (int k = 0; k < NANT; k++) {
+        if (k >= n) {
+            lv_obj_add_flag(sk_l[k], LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        double sx = cx - ys[k] * sc, sy = cy - xs[k] * sc;     /* x forward is up, y left is left */
+
+        sk_disc(px, sx, sy, 9, c_amb);
+        lv_obj_set_pos(sk_l[k], 12 + (int)lround(sx) - 9, y0 + (int)lround(sy) - 8);
+        lv_obj_clear_flag(sk_l[k], LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_set_y(sk_img, y0);
+    lv_obj_set_y(sk_t, y0 + 4);
+    sketch_text(t, sizeof(t));
+    lv_label_set_text(sk_t, t);
+    lv_obj_invalidate(sk_img);
+}
+
+static void sketch_show(bool on) {
+    if (!sk_img) return;
+    if (on) {
+        lv_obj_clear_flag(sk_img, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(sk_t, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_obj_add_flag(sk_img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(sk_t, LV_OBJ_FLAG_HIDDEN);
+    for (int k = 0; k < NANT; k++) lv_obj_add_flag(sk_l[k], LV_OBJ_FLAG_HIDDEN);
+}
+
 static int pan_rows(void) { return pan == P_ARRAY ? A_N : pan == P_SET ? S_N : pan == P_TUNE ? T_N : 0; }
 
 static void pan_fill(void) {
@@ -1103,7 +1196,9 @@ static void pan_fill(void) {
         fmt_mhz(f, sizeof(f), cfg.band >= 0 ? bands[cfg.band].hz : target_hz());
         snprintf(t[A_BAND], sizeof(t[0]), "BAND      < %s %s MHZ >", cfg.band >= 0 ? bands[cfg.band].name : "TUNED", f);
         snprintf(t[A_KIND], sizeof(t[0]), "ARRAY     < %s >  %s", kinds[cfg.kind].name,
-                 cfg.kind == K_CUSTOM ? "WHERE THE WEB PAGE'S ARRAY EDITOR PUT THEM" : "ANT 0 FORWARD, THE REST CLOCKWISE");
+                 cfg.kind == K_CUSTOM      ? "WHERE THE WEB PAGE'S ARRAY EDITOR PUT THEM"
+                 : kinds[cfg.kind].ula     ? "A LINE, ANT 0 AT ITS LEFT END"
+                                           : "A CIRCLE, ANT 0 FORWARD, CLOCKWISE");
         if (cfg.kind == K_CUSTOM)
             snprintf(t[A_SIZE], sizeof(t[0]), "LAYOUT    %d ANTENNAS FROM DF_ARRAY.TXT  S %.2f  RES %.0f DEG  %s", cust_n,
                      c.s, c.res, c.word);
@@ -1164,8 +1259,12 @@ static void pan_fill(void) {
         lv_obj_set_style_bg_opa(panel_row_l[r], on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(panel_row_l[r], on ? ink : amb, 0);
     }
-    lv_obj_set_height(panel, 50 + n * 28 + 40);
-    lv_obj_set_y(panel_foot_l, 50 + n * 28 + 8);
+    int extra = pan == P_ARRAY ? SK_H + 10 : 0;        /* F2 ARRAY: the layout sketched under its rows */
+
+    if (pan == P_ARRAY) draw_sketch(50 + n * 28 + 4);
+    sketch_show(pan == P_ARRAY);
+    lv_obj_set_height(panel, 50 + n * 28 + 40 + extra);
+    lv_obj_set_y(panel_foot_l, 50 + n * 28 + 8 + extra);
 }
 
 static void pan_open(panel_t p) {
@@ -1794,6 +1893,18 @@ static void build(void) {
     }
     panel_foot_l = label(panel, &pixel_20, amb, 12, 0, PANEL_W - 30, LV_TEXT_ALIGN_LEFT,
                          "MFK: A ROW   VFO: CHANGE IT   PUSH: DO IT / CLOSE");
+    sk     = lv_img_buf_alloc(SK_W, SK_H, LV_IMG_CF_TRUE_COLOR);
+    sk_img = lv_img_create(panel);
+    lv_img_set_src(sk_img, sk);
+    lv_obj_set_pos(sk_img, 12, 0);
+    sk_t = label(panel, &pixel_16, amb, 12 + SK_W + 14, 0, PANEL_W - 30 - SK_W - 14, LV_TEXT_ALIGN_LEFT, "");
+    lv_label_set_long_mode(sk_t, LV_LABEL_LONG_WRAP);
+    for (int k = 0; k < NANT; k++) {
+        char d[4] = {(char)('0' + k), 0};
+
+        sk_l[k] = label(panel, &pixel_16, ink, 0, 0, 18, LV_TEXT_ALIGN_CENTER, d);
+    }
+    sketch_show(false);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
 
     help_l = label(root, &pixel_20, amb, 30, 56, SW - 60, LV_TEXT_ALIGN_LEFT,

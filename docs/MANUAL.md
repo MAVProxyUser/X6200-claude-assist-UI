@@ -1518,7 +1518,11 @@ shows as a track).
   five, CH0 up are used. **RADIUS** or **SPACING** in 0.5 cm steps: the array as you set it out, which does not change
   with the band, so the calculator line says what it gives at each (for CUSTOM, its closest pair). **PUSH: SIZE FOR S
   0.50** sets the size the calculator wants for the band (not for CUSTOM). **HEADING**: ANT 0's compass bearing (0 =
-  ANT 0 up).
+  ANT 0 up). Under the rows, a **sketch** of the layout chosen, to scale and seen from above with forward up (each
+  antenna numbered, the circle or the line they stand on), and beside it how to set it out for the band: a circle's
+  radius as set and the one the band wants (neighbours half a wave apart), or a line's spacing as set and half a wave,
+  with ANT 0 at the left end. Turning the ARRAY row goes through every layout, so the sketch shows each before the
+  antennas are moved. Five KrakenRF whips in a line across the way you face is ULA-5; in a circle, UCA-5.
 - **gpsd**: when it runs and has a GPS or a compass (on USB), the heading comes from it instead of the one set by
   hand: a compass first, else the course over the ground while moving faster than 2 m/s (a vehicle with the array
   on it, ANT 0 forward), kept two minutes after it slows. The ARRAY panel's HEADING row says which is in use
