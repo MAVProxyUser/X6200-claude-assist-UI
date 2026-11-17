@@ -16,6 +16,7 @@
 #include "rtl_spectrum.h"
 
 #include "adsb_rx.h"
+#include "kth.h"
 #include "audio.h"
 #include "rtl_watch.h"
 #include "sdr_pool.h"
@@ -236,12 +237,6 @@ static void daemon_start(void) {
     waitpid(p, NULL, 0);
 }
 
-static int cmp_float(const void *a, const void *b) {
-    float x = *(const float *)a, y = *(const float *)b;
-
-    return (x > y) - (x < y);
-}
-
 /* A row in: the squelch decided on it (the reader's thread) */
 static void squelch_row(const float *db, uint16_t n, uint32_t rate, int64_t centre) {
     static float sorted[MAX_BINS];
@@ -269,8 +264,7 @@ static void squelch_row(const float *db, uint16_t n, uint32_t rate, int64_t cent
     for (int k = lo; k <= hi; k++)
         if (db[k] > peak) peak = db[k];
     memcpy(sorted, db, (size_t)n * sizeof(float));
-    qsort(sorted, n, sizeof(float), cmp_float);
-    float over = peak - sorted[n / 2];
+    float over = peak - float_kth(sorted, n, n / 2);     /* over the row's median: its noise */
     bool  open = atomic_load(&sql_open);
 
     atomic_store(&chan_over, (int)(over * 10));

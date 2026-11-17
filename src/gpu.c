@@ -164,7 +164,7 @@ static int    pw, ph;               /* the panel, portrait */
 static GLuint fbo[2];
 static GLuint prog[P_N];
 static GLint  u_panel[P_N], u_port[P_N];
-static GLint  u_rows_lv, u_rows_pal, u_rows_t, u_rows_fade, u_rows_amp;
+static GLint  u_rows_lv, u_rows_pal;
 static GLint  u_tr_tr, u_tr_pal, u_tr_bg, u_tr_grid, u_tr_h, u_tr_db;
 static GLint  u_rect_color;
 static GLint  u_fl_lv, u_fl_pal, u_fl_bg, u_fl_band, u_fl_head, u_fl_ring, u_fl_count;
@@ -257,23 +257,40 @@ static const char *vs_src =
     "    v_uv = a_uv;\n"
     "}\n";
 
+/* The 3D picture's rows, all in one draw (gpu_rows): each row's quad carries its ring row, fade and height (a_t1),
+ * the same at its four corners */
+static const char *vs_rows_src =
+    "attribute vec2 a_pos;\n"
+    "attribute vec2 a_uv;\n"
+    "attribute vec4 a_t1;\n"
+    "uniform vec2 u_panel;\n"
+    "uniform float u_port;\n"
+    "varying vec2 v_uv;\n"
+    "varying vec3 v_row;\n"
+    "void main() {\n"
+    "    vec2 p = u_port > 0.5 ? u_panel - a_pos : vec2(a_pos.y, u_panel.y - a_pos.x);\n"
+    "    gl_Position = vec4(p / u_panel * 2.0 - 1.0, 0.0, 1.0);\n"
+    "    v_uv = a_uv;\n"
+    "    v_row = a_t1.xyz;\n"
+    "}\n";
+
 /* One row of the 3D picture (panel_render): x across the row's own width (0..1, the source columns), y in pixels
  * down from where a full-scale level's top would be. Covered from its level's top down to the baseline: the top
- * pixel the ramp's colour, the next at 0.8 of it, the rest the half level's colour at 0.45; all faded with depth */
+ * pixel the ramp's colour, the next at 0.8 of it, the rest the half level's colour at 0.45; all faded with depth.
+ * v_row: its ring row (texture t), its fade, its height in pixels */
 static const char *fs_rows_src =
     "precision mediump float;\n"
     "uniform sampler2D u_lv;\n"
     "uniform sampler2D u_pal;\n"
-    "uniform float u_t;\n"
-    "uniform float u_fade;\n"
-    "uniform float u_amp;\n"
     "varying vec2 v_uv;\n"
+    "varying vec3 v_row;\n"
     "vec3 pal(float v) { return texture2D(u_pal, vec2(v * 0.99609375 + 0.001953125, 0.5)).rgb; }\n"
     "void main() {\n"
-    "    float v = texture2D(u_lv, vec2(v_uv.x, u_t)).r;\n"
-    "    float d = v_uv.y - (1.0 - v) * u_amp;\n"
+    "    float v = texture2D(u_lv, vec2(v_uv.x, v_row.x)).r;\n"
+    "    float d = v_uv.y - (1.0 - v) * v_row.z;\n"
     "    if (d < 0.0) discard;\n"
-    "    vec3 c = d < 1.0 ? pal(v) * u_fade : d < 2.0 ? pal(v) * (u_fade * 0.8) : pal(v * 0.5) * (u_fade * 0.45);\n"
+    "    float fade = v_row.y;\n"
+    "    vec3 c = d < 1.0 ? pal(v) * fade : d < 2.0 ? pal(v) * (fade * 0.8) : pal(v * 0.5) * (fade * 0.45);\n"
     "    gl_FragColor = vec4(c, 1.0);\n"
     "}\n";
 
@@ -705,7 +722,7 @@ static bool setup(void) {
                                 fs_radar_src, fs_prim_src, fs_img_src, fs_d3_src, fs_join_src, fs_gui_src};
 
         for (int i = 0; i < P_N; i++) {
-            const char *v = i == P_PRIM ? vs_prim_src : i == P_D3 ? vs_d3_src : vs_src;
+            const char *v = i == P_PRIM ? vs_prim_src : i == P_D3 ? vs_d3_src : i == P_ROWS ? vs_rows_src : vs_src;
 
             if (!(prog[i] = program_vs(v, src[i]))) goto fail;
             u_panel[i] = p_glGetUniformLocation(prog[i], "u_panel");
@@ -714,9 +731,6 @@ static bool setup(void) {
     }
     u_rows_lv    = p_glGetUniformLocation(prog[P_ROWS], "u_lv");
     u_rows_pal   = p_glGetUniformLocation(prog[P_ROWS], "u_pal");
-    u_rows_t     = p_glGetUniformLocation(prog[P_ROWS], "u_t");
-    u_rows_fade  = p_glGetUniformLocation(prog[P_ROWS], "u_fade");
-    u_rows_amp   = p_glGetUniformLocation(prog[P_ROWS], "u_amp");
     u_tr_tr      = p_glGetUniformLocation(prog[P_TRACE], "u_tr");
     u_tr_pal     = p_glGetUniformLocation(prog[P_TRACE], "u_pal");
     u_tr_bg      = p_glGetUniformLocation(prog[P_TRACE], "u_bg");
@@ -885,6 +899,27 @@ static void bind(GLuint data, GLuint pal) {
     p_glBindTexture(GL_TEXTURE_2D, pal);
 }
 
+/* gpu_rect's rectangles not drawn yet: those of one colour in a row (a bracket's six) go in one draw, before anything
+ * else is drawn or the clip changes; each draw costs Mesa's driver more CPU than the GPU's work on them */
+#define RECTS_MAX 32
+static float    rect_v[RECTS_MAX * 6 * 4];
+static int      rect_n;
+static uint32_t rect_rgb;
+
+static void rect_flush(void) {
+    float c[3];
+
+    if (!rect_n) return;
+    rgb4(rect_rgb, c);
+    scissor(cx0, cy0, cw0, ch0);
+    use(P_RECT);
+    p_glUniform4f(u_rect_color, c[0], c[1], c[2], 1);
+    p_glVertexAttribPointer(0, 2, GL_FLOAT, 0, 16, rect_v);
+    p_glVertexAttribPointer(1, 2, GL_FLOAT, 0, 16, rect_v + 2);
+    p_glDrawArrays(0x0004, 0, rect_n * 6);  /* GL_TRIANGLES */
+    rect_n = 0;
+}
+
 static bool begin_on(int b, bool port) {
     portrait = port;
     p_glBindFramebuffer(GL_FRAMEBUFFER, fbo[b]);
@@ -911,6 +946,7 @@ bool gpu_frame_begin_buf(int buf, bool port) {
 
 void gpu_frame_finish(int x, int y, int w, int h) {
     if (!in_frame) return;
+    rect_flush();
     in_frame = false;
     p_glDisable(GL_SCISSOR_TEST);
     p_glFinish();                       /* drawn before the plane is flipped to it */
@@ -919,6 +955,7 @@ void gpu_frame_finish(int x, int y, int w, int h) {
 
 void gpu_wf(int s, int pal, int x, int y, int w, int h, int head) {
     if (!in_frame || !slot_ok(s) || pal < 0 || pal >= PALS) return;
+    rect_flush();
     scissor(x, y, w, h);
     use(P_WF);
     bind(tex_lv[s], tex_pal[pal]);
@@ -933,6 +970,7 @@ void gpu_clear(int x, int y, int w, int h, uint32_t bg) {
     float c[3];
 
     if (!in_frame) return;
+    rect_flush();
     cx0 = x, cy0 = y, cw0 = w, ch0 = h;
     scissor(x, y, w, h);
     rgb4(bg, c);
@@ -944,6 +982,7 @@ void gpu_trace(int s, int x, int y, int w, int h, float bot_db, float top_db, ui
     float b[3], gr[3];
 
     if (!in_frame || h < 2 || !slot_ok(s)) return;
+    rect_flush();
     rgb4(bg, b);
     rgb4(grid, gr);
     scissor(cx0, cy0, cw0, ch0);
@@ -958,34 +997,55 @@ void gpu_trace(int s, int x, int y, int w, int h, float bot_db, float top_db, ui
     quad((float)x, (float)y, (float)(x + w), (float)(y + h), 0, 0, 1, (float)h);
 }
 
+#define ROWS_MAX 128                    /* rows of one 3D picture in one draw */
+
+/* All the rows in one draw, the oldest first (at the back) and the newer over them: GL draws a draw's triangles in
+ * their order. A draw a row was 40 to 80 draws a frame, Mesa's lima driver's CPU time a fifth of G's GUI thread
+ * (most of it its job's buffer list searched again for each draw: perf, 2026-11-17) */
 void gpu_rows(int s, int x, int y, int w, int h, int head, int count, int depth) {
-    float cx = w / 2.0f;
-    int   ring = slot_ok(s) ? s_rows[s] : 0;
+    static float v[ROWS_MAX * 6 * 8];
+    float        cx = w / 2.0f;
+    int          ring = slot_ok(s) ? s_rows[s] : 0, k = 0;
 
     if (!in_frame || h < 8 || !ring || depth < 2) return;
+    rect_flush();
     if (count > depth) count = depth;
-    scissor(x, y, w, h);                /* the back rows' tops clipped at the picture's top, as on the CPU */
-    use(P_ROWS);
-    bind(tex_lv[s], tex_pal[0]);
-    p_glUniform1i(u_rows_lv, 0);
-    p_glUniform1i(u_rows_pal, 1);
+    if (count > ROWS_MAX) count = ROWS_MAX;
     for (int r = count - 1; r >= 0; r--) {  /* the oldest first, at the back: the newer over them */
         float t      = (float)r / (depth - 1);
         int   yb     = y + h - 2 - (int)(t * h * 0.6f);
         float shrink = 1.0f - 0.36f * t, amp = h * 0.62f * (1.0f - 0.3f * t), fade = 1.0f - 0.62f * t;
         int   rr     = ((head - 1 - r) % ring + ring) % ring;
+        float x0 = x + cx - cx * shrink, x1 = x + cx + cx * shrink, y0 = yb - amp, y1 = yb + 1.0f;
+        float q[6][4] = {{x0, y0, 0, 0}, {x1, y0, 1, 0}, {x0, y1, 0, amp + 1.0f},
+                         {x1, y0, 1, 0}, {x1, y1, 1, amp + 1.0f}, {x0, y1, 0, amp + 1.0f}};
 
-        p_glUniform1f(u_rows_t, (rr + 0.5f) / ring);
-        p_glUniform1f(u_rows_fade, fade);
-        p_glUniform1f(u_rows_amp, amp);
-        quad(x + cx - cx * shrink, yb - amp, x + cx + cx * shrink, yb + 1.0f, 0, 0, 1, amp + 1.0f);
+        for (int j = 0; j < 6; j++, k++) {
+            float *o = v + k * 8;
+
+            o[0] = q[j][0], o[1] = q[j][1], o[2] = q[j][2], o[3] = q[j][3];
+            o[4] = (rr + 0.5f) / ring, o[5] = fade, o[6] = amp, o[7] = 0;
+        }
     }
+    if (!k) return;
+    scissor(x, y, w, h);                /* the back rows' tops clipped at the picture's top, as on the CPU */
+    use(P_ROWS);
+    bind(tex_lv[s], tex_pal[0]);
+    p_glUniform1i(u_rows_lv, 0);
+    p_glUniform1i(u_rows_pal, 1);
+    p_glEnableVertexAttribArray(3);
+    p_glVertexAttribPointer(0, 2, GL_FLOAT, 0, 32, v);
+    p_glVertexAttribPointer(1, 2, GL_FLOAT, 0, 32, v + 2);
+    p_glVertexAttribPointer(3, 4, GL_FLOAT, 0, 32, v + 4);
+    p_glDrawArrays(0x0004, 0, k);       /* GL_TRIANGLES */
+    p_glDisableVertexAttribArray(3);
 }
 
 void gpu_flat(int s, int x, int y, int w, int h, int head, int count, int band, uint32_t bg) {
     float b[3];
 
     if (!in_frame || h < 1 || band < 1 || !slot_ok(s)) return;
+    rect_flush();
     rgb4(bg, b);
     scissor(x, y, w, h);
     use(P_FLAT);
@@ -1002,6 +1062,7 @@ void gpu_flat(int s, int x, int y, int w, int h, int head, int count, int band, 
 
 void gpu_vp(int s, int x, int y, int w, int h, int head) {
     if (!in_frame || !slot_ok(s)) return;
+    rect_flush();
     scissor(x, y, w, h);
     use(P_VP);
     bind(tex_lv[s], tex_pal[1]);
@@ -1016,6 +1077,7 @@ void gpu_radar(int x, int y, int size, float r, float sweep, uint32_t ink) {
     float c[3];
 
     if (!in_frame || size < 2) return;
+    rect_flush();
     rgb4(ink, c);
     scissor(x, y, size, size);
     use(P_RADAR);
@@ -1064,6 +1126,7 @@ void gpu_prims_flush(void) {
     static const GLenum mode[3] = {0x0000, 0x0001, 0x0004};    /* GL_POINTS, GL_LINES, GL_TRIANGLES */
 
     if (!in_frame) return;
+    rect_flush();
     scissor(cx0, cy0, cw0, ch0);
     use(P_PRIM);
     p_glDisableVertexAttribArray(1);
@@ -1112,6 +1175,7 @@ bool gpu_d3_bg(const uint32_t *xrgb, int w, int h) {
 
 void gpu_d3_draw_bg(int x, int y, int w, int h) {
     if (!in_frame || !tex_img) return;
+    rect_flush();
     cx0 = x, cy0 = y, cw0 = w, ch0 = h;
     scissor(x, y, w, h);
     use(P_IMG);
@@ -1125,6 +1189,7 @@ void gpu_d3_traces(int x, int y, int w, const gpu_d3_trace_t *t, int n) {
     int          k = 0;
 
     if (!in_frame || !tex_d3col || n < 1) return;
+    rect_flush();
     if (n > 72) n = 72;
     for (int i = 0; i < n; i++) {
         float x0 = (float)x, x1 = (float)(x + w), y0 = (float)(y + t[i].y0), y1 = (float)(y + t[i].y1);
@@ -1165,6 +1230,7 @@ void gpu_d3_join(int x, int y, int w, int row, int y0, int y1, uint32_t rgb, flo
     float c[3];
 
     if (!in_frame || !tex_d3col || y1 <= y0) return;
+    rect_flush();
     rgb4(rgb, c);
     scissor(cx0, cy0, cw0, ch0);
     use(P_JOIN);
@@ -1177,19 +1243,25 @@ void gpu_d3_join(int x, int y, int w, int row, int y0, int y1, uint32_t rgb, flo
     p_glDisable(GL_BLEND);
 }
 
+/* Drawn with the next one of its colour, or before the next other drawing (rect_flush): in the clip of now */
 void gpu_rect(int x, int y, int w, int h, uint32_t rgb) {
-    float c[3];
+    float x0 = (float)x, y0 = (float)y, x1 = (float)(x + w), y1 = (float)(y + h);
+    float q[6][2] = {{x0, y0}, {x1, y0}, {x0, y1}, {x1, y0}, {x1, y1}, {x0, y1}};
 
     if (!in_frame || w <= 0 || h <= 0) return;
-    rgb4(rgb, c);
-    scissor(cx0, cy0, cw0, ch0);
-    use(P_RECT);
-    p_glUniform4f(u_rect_color, c[0], c[1], c[2], 1);
-    quad((float)x, (float)y, (float)(x + w), (float)(y + h), 0, 0, 0, 0);
+    if (rect_n && (rgb != rect_rgb || rect_n == RECTS_MAX)) rect_flush();
+    rect_rgb = rgb;
+    for (int j = 0; j < 6; j++) {
+        float *o = rect_v + (rect_n * 6 + j) * 4;
+
+        o[0] = q[j][0], o[1] = q[j][1], o[2] = 0, o[3] = 0;
+    }
+    rect_n++;
 }
 
 void gpu_frame_end(int x, int y, int w, int h) {
     if (!in_frame) return;
+    rect_flush();
     in_frame = false;
     p_glDisable(GL_SCISSOR_TEST);
     p_glFinish();                       /* drawn before the plane is flipped to it */

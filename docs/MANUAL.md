@@ -9368,6 +9368,17 @@ The GUI's main thread, as a share of one core (measured on the radio, over
 | Main screen, flat waterfall | 10.6 % | 5.0 % |
 | Main screen, 3D waterfall | 24.6 % | 11.3 % |
 
+From the release after v0.3.12.27 the GPU gets each 3D picture's rows in one
+draw instead of one a row (Mesa's driver spent more processor time on each draw
+than the GPU on its pixels), the Sentry redraws a text, a colour or a box only
+when it changes (G's meters had LVGL redraw the screen 20 times a second while
+nothing moved), and the medians behind the noise floors and the SDR's squelch
+are found without sorting. The whole GUI, all its threads, as a share of one
+core (2026-11-17, 10 s each, the screen standing): B 30.5 to 21 %, G 28-29 to
+17 %, A 22-24 to 17 %, C to F 19-20 to 16-17 %. One core is a quarter of the
+processor; `top`'s `%VSZ` column is memory (mostly Mesa's and the libraries'
+mapped files), not processor time.
+
 Everything else on the screen (the text, the buttons, the meters) is drawn by
 LVGL in memory as before, then turned onto the panel, which is portrait
 (480x800) under the landscape picture: by the GPU with a kernel that has

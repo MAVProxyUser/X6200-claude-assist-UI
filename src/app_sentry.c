@@ -67,6 +67,7 @@
 #include "main.h"             /* VERSION, the release in the title */
 #include "waterfall_view.h"   /* direct_hole_cb */
 #include "gpu.h"
+#include "kth.h"
 #include "lv_drivers/display/drm.h"
 #include "main_screen.h"
 #include "msg_box.h"
@@ -94,6 +95,49 @@
 #include <time.h>
 
 extern const lv_font_t pixel_16, pixel_20, pixel_24, pixel_28, pixel_32, pixel_44;
+
+/* A label's text set only when it is another: LVGL 8.3 lays a label out again and redraws it (with all under it) for
+ * any text set, the same one too, and the Sentry sets its boxes' texts at every tick. On G the meters' two numbers
+ * 20 times a second were a frame of the GUI each, 20 frames a second for a screen standing still (2026-11-17).
+ * Every lv_label_set_text below is this one; NULL or the label's own text (a refresh) still go through. The text is
+ * translated here, as i18n_hook.h's lv_label_set_text does, and compared translated */
+static void label_set_text(lv_obj_t *l, const char *t) {
+    const char *now = l ? lv_label_get_text(l) : NULL;
+
+    t = i18n_tr(t);
+    if (t && now && t != now && !strcmp(now, t)) return;
+    (lv_label_set_text)(l, t);          /* LVGL's own (the name in brackets: no macro) */
+}
+#undef lv_label_set_text
+#define lv_label_set_text label_set_text
+
+/* The same for the styles set at every tick: a style set restyles and redraws the object even when the value is the
+ * one it has (G's lamp, a box a third of the screen, 20 times a second; the title bar's battery each half second on
+ * every screen; G's turned one, drawn through LVGL's slow turn). Set as LVGL's own setter does (lv_obj_style_gen.c),
+ * only when the object's own value for that selector is another */
+static void style_set(lv_obj_t *o, lv_style_prop_t p, lv_style_value_t v, lv_style_selector_t sel, bool color) {
+    lv_style_value_t now;
+
+    if (lv_obj_get_local_style_prop(o, p, &now, sel) == LV_RES_OK &&
+        (color ? lv_color_to32(now.color) == lv_color_to32(v.color) : now.num == v.num))
+        return;
+    lv_obj_set_local_style_prop(o, p, v, sel);
+}
+#define lv_obj_set_style_text_color(o, c, sel)   style_set(o, LV_STYLE_TEXT_COLOR, (lv_style_value_t){.color = (c)}, sel, true)
+#define lv_obj_set_style_bg_color(o, c, sel)     style_set(o, LV_STYLE_BG_COLOR, (lv_style_value_t){.color = (c)}, sel, true)
+#define lv_obj_set_style_border_color(o, c, sel) style_set(o, LV_STYLE_BORDER_COLOR, (lv_style_value_t){.color = (c)}, sel, true)
+#define lv_obj_set_style_bg_opa(o, a, sel)       style_set(o, LV_STYLE_BG_OPA, (lv_style_value_t){.num = (a)}, sel, false)
+
+/* And flags: showing a shown object (or any flag cleared that is not set) redraws it all the same */
+static void flag_add(lv_obj_t *o, lv_obj_flag_t f) {
+    if (!lv_obj_has_flag(o, f)) lv_obj_add_flag(o, f);
+}
+
+static void flag_clear(lv_obj_t *o, lv_obj_flag_t f) {
+    if (lv_obj_has_flag_any(o, f)) lv_obj_clear_flag(o, f);
+}
+#define lv_obj_add_flag   flag_add
+#define lv_obj_clear_flag flag_clear
 
 /* The picture */
 #define VIEW_HZ     360000      /* the middle of the base's 384 kHz: its filter rolls off in the last 12 kHz each side */
@@ -878,48 +922,63 @@ static void visit(int32_t hz) {
 
 /* ---- The spectrum ---- */
 
-/* The k-th smallest of v (reordered), found without sorting it all (Hoare's selection): qsort did it 86 times a
- * second for the voiceprint and for each of the stick's rows, glibc's merge sort 4% of G's GUI thread (perf,
- * 2026-11-15) */
-static float kth(float *v, int n, int k) {
-    int lo = 0, hi = n - 1;
-
-    while (lo < hi) {
-        float p = v[k];
-        int   i = lo, j = hi;
-
-        while (i <= j) {
-            while (v[i] < p) i++;
-            while (v[j] > p) j--;
-            if (i <= j) {
-                float t = v[i];
-                v[i++]  = v[j];
-                v[j--]  = t;
-            }
-        }
-        if (j < k) lo = i;
-        if (k < i) hi = j;
-    }
-    return v[k];
+static float median(float *v, int n) {
+    return float_kth(v, n, n / 2);  /* kth.h */
 }
 
-static float median(float *v, int n) {
-    return kth(v, n, n / 2);
+/* v into the sorted s (n of them) */
+static void sorted_in(float *s, int *n, float v) {
+    int lo = 0, hi = *n;
+
+    while (lo < hi) {
+        int m = (lo + hi) / 2;
+
+        if (s[m] < v) lo = m + 1;
+        else hi = m;
+    }
+    memmove(s + lo + 1, s + lo, (size_t)(*n - lo) * sizeof(float));
+    s[lo] = v;
+    (*n)++;
+}
+
+/* v out of the sorted s: false when it is not there (a NaN) */
+static bool sorted_out(float *s, int *n, float v) {
+    int lo = 0, hi = *n;
+
+    while (lo < hi) {
+        int m = (lo + hi) / 2;
+
+        if (s[m] < v) lo = m + 1;
+        else hi = m;
+    }
+    if (lo == *n || s[lo] != v) return false;
+    memmove(s + lo, s + lo + 1, (size_t)(*n - lo - 1) * sizeof(float));
+    (*n)--;
+    return true;
 }
 
 /* The noise around each bin: the median of the bins +-FLOOR_HALF. FM broadcast (anything 200 kHz wide) would be
- * its own floor there: then the floor is the picture's, the targets 100 kHz apart and placed at their middle */
+ * its own floor there: then the floor is the picture's, the targets 100 kHz apart and placed at their middle. The
+ * window kept sorted as it slides, a bin out and a bin in, each a short move: the same medians as each window's own
+ * selection gave, which was 4% of G's GUI thread at every frame of the X6200's spectrum (perf, 2026-11-17) */
 static void find_floor(void) {
-    float w[2 * FLOOR_HALF + 1], all[MAX_BINS];
+    float w[2 * FLOOR_HALF + 2], all[MAX_BINS];
+    int   wn = 0;
 
     broad = centre > 87000000 && centre < 108500000;
+    for (int i = 0; i <= FLOOR_HALF && i < nbins && !broad; i++) sorted_in(w, &wn, avg_db[i]);
     for (int i = 0; i < nbins && !broad; i++) {
-        int lo = i - FLOOR_HALF < 0 ? 0 : i - FLOOR_HALF;
-        int hi = i + FLOOR_HALF >= nbins ? nbins - 1 : i + FLOOR_HALF;
-        int n  = hi - lo + 1;
+        int out = i - FLOOR_HALF, in = i + FLOOR_HALF + 1;
 
-        memcpy(w, avg_db + lo, n * sizeof(float));
-        floor_db[i] = median(w, n);
+        floor_db[i] = w[wn / 2];        /* the window lo..hi, wn = hi - lo + 1: as median() of it */
+        if (out >= 0 && !sorted_out(w, &wn, avg_db[out])) {
+            /* not found (a NaN in the levels): the next window gathered again */
+            int lo = out + 1, hi = in < nbins ? in - 1 : nbins - 1;
+
+            wn = 0;
+            for (int k = lo; k <= hi; k++) sorted_in(w, &wn, avg_db[k]);
+        }
+        if (in < nbins) sorted_in(w, &wn, avg_db[in]);
     }
     int b0 = bin_of(centre - VIEW_HZ / 2), b1 = bin_of(centre + VIEW_HZ / 2), n = 0;
 
@@ -6589,14 +6648,15 @@ static void vp_fft(float *re, float *im, int n) {
 
 /* One column of the voiceprint from the last VP_FFT samples, shifted in at the right */
 static void vp_column(void) {
-    static float re[VP_FFT], im[VP_FFT];
+    static float re[VP_FFT], im[VP_FFT], win[VP_FFT];
     float        col[VP_MAXH], sorted[VP_MAXH], bin_hz = 44100.0f / VP_FFT;
     int          w = wui->vp_w, h = wui->vp_h;
     uint32_t    *px = (uint32_t *)wui->vp_frame->data;
 
+    if (win[VP_FFT / 2] == 0)           /* the Hann window once, not a cosf a sample 86 times a second */
+        for (int i = 0; i < VP_FFT; i++) win[i] = 0.5f - 0.5f * cosf(2 * (float)M_PI * i / (VP_FFT - 1));
     for (int i = 0; i < VP_FFT; i++) {
-        float win = 0.5f - 0.5f * cosf(2 * (float)M_PI * i / (VP_FFT - 1));
-        re[i] = vp_in[i] * win, im[i] = 0;
+        re[i] = vp_in[i] * win[i], im[i] = 0;
     }
     vp_fft(re, im, VP_FFT);
     for (int r = 0; r < h; r++) {
@@ -6608,7 +6668,7 @@ static void vp_column(void) {
         col[r] = 10 * log10f(m0 * (1 - t) + m1 * t + 1);
     }
     memcpy(sorted, col, (size_t)h * sizeof(float));
-    vp_floor = 0.98f * vp_floor + 0.02f * kth(sorted, h, h / 3);   /* the hiss, followed slowly */
+    vp_floor = 0.98f * vp_floor + 0.02f * float_kth(sorted, h, h / 3);     /* the hiss, followed slowly */
     if (g_gpu && wui == &w_port) {      /* one column into the GPU's ring: the picture is not moved a column (that
                                          * moved all of it, 86 times a second) */
         uint8_t lv[VP_MAXH];
@@ -7728,8 +7788,10 @@ static void show_walkie(void) {
 
         if (bc) snprintf(pwc, sizeof(pwc), "#%06X %s#", (unsigned)bc, pw1);
         else snprintf(pwc, sizeof(pwc), "%s", pw1);
-        lv_label_set_text_fmt(wui->info_l, "%s  %s\n%s  EXT %.1f V\n%s  %s  %s", lk, tx, pwc, l_ext, sy1, sy2,
-                              txp);       /* three lines; the time: the bars' */
+        char info[256];                 /* three lines; the time: the bars'. Set when it is other text */
+
+        snprintf(info, sizeof(info), "%s  %s\n%s  EXT %.1f V\n%s  %s  %s", lk, tx, pwc, l_ext, sy1, sy2, txp);
+        lv_label_set_text(wui->info_l, info);
         lv_label_set_text(wui->ch.opt[0], nm);
         if (wui->status_l) {            /* the title bar's line, as the other screens' (show_head) */
             char        pre[96], line[224], tc[48] = "", dev[128] = "";
