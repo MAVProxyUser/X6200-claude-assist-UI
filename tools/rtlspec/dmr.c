@@ -485,12 +485,11 @@ static void burst(dmr_t *d, double start, int pat) {
         voice_end(d, s);                /* it, an idle or a control burst: no voice */
         return;
     }
-    if (pat != P_NONE) {                /* voice A */
-        if (!s->voice || !s->call.voice) {
-            s->voice      = true;
-            s->call.voice = true;
-            emit(d, s);
-        }
+    if (pat != P_NONE) {                /* voice A: the call said again at each superframe (360 ms), so a screen
+                                         * that forgets a call not heard of for a few seconds keeps a long one */
+        s->voice      = true;
+        s->call.voice = true;
+        emit(d, s);
         s->vf    = 0;
         s->elc_n = -1;
     } else {                            /* B-F, expected */

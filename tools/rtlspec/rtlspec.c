@@ -303,10 +303,19 @@ static void dmr_call(void *ctx, const dmr_call_t *c) {
     n = snprintf(t, sizeof(t), "%llu|%d|%d|%d|%d|%d|%u|%u|%d|%d", (unsigned long long)ch->hz, c->slot, c->cc, c->voice,
                  c->lc, c->flco, c->src, c->dst, c->bs, ambe_ready());
     if (n <= 0 || n >= (int)sizeof(t)) return;
-    fprintf(stderr, "rtlspec: DMR %.5f MHz TS%d CC%d %s%s", ch->hz / 1e6, c->slot, c->cc, c->voice ? "VOICE" : "END",
-            c->bs ? " (REPEATER)" : "");
-    if (c->lc) fprintf(stderr, " %s %u FROM %u", c->flco == 3 ? "TO" : "TG", c->dst, c->src);
-    fprintf(stderr, "\n");
+    {                                   /* the log: a call's changes only (it is said again each superframe) */
+        static char said[3][96];
+        char        l[96];
+
+        snprintf(l, sizeof(l), "%.5f MHz TS%d CC%d %s%s", ch->hz / 1e6, c->slot, c->cc, c->voice ? "VOICE" : "END",
+                 c->bs ? " (REPEATER)" : "");
+        if (c->lc)
+            snprintf(l + strlen(l), sizeof(l) - strlen(l), " %s %u FROM %u", c->flco == 3 ? "TO" : "TG", c->dst, c->src);
+        if (c->slot >= 0 && c->slot <= 2 && strcmp(said[c->slot], l)) {
+            snprintf(said[c->slot], sizeof(said[0]), "%s", l);
+            fprintf(stderr, "rtlspec: DMR %s\n", l);
+        }
+    }
     uint32_t len = (uint32_t)n;
 
     memcpy(msg, "RDMR", 4);
