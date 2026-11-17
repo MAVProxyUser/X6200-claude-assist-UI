@@ -442,7 +442,9 @@ static void draw_scope(void) {
             int    deg = ((a / 10) - head + 720) % 360;              /* the daemon's degree under this pixel */
             double reach = Rin + (R - Rin) * p[deg] / 255.0;
 
-            if (have && r <= reach) col = glow[8 + p[deg] * 40 / 255];
+            /* dimmed while no signal is over the squelch (LISTENING): the ring is then the noise's, as the
+             * bearings' waterfall dims those rows */
+            if (have && r <= reach) col = gate ? glow[8 + p[deg] * 40 / 255] : mix(glow[8 + p[deg] * 40 / 255], c_ink, 110);
             if (brg >= 0 && (gate || hold)) {
                 double d = fabs(fmod(deg - brg + 540, 360) - 180);
                 if (d <= unc && r > reach) col = wedge;

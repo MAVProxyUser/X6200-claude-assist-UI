@@ -1428,7 +1428,8 @@ is doing:
 
 The short bar beside each antenna is the target over that channel's floor (0-40 dB). The **dashed circle is half a
 wavelength across** at the target, so the array is seen against the band. Round it: the method's spectrum (where the
-signal seems to come from, filled outward), the **needle** at the bearing with its +- wedge (green for a fit of 80 %
+signal seems to come from, filled outward; dimmed while nothing is over the squelch, as it is then the noise's), the
+**needle** at the bearing with its +- wedge (green for a fit of 80 %
 up, amber 50-80 %, red under), other peaks as ticks, the last bearings as dots on the rim (fading over two minutes);
 a line's other side dashed (a line cannot tell front from back). When the signal stops the last bearing stays,
 fading over 30 s (HOLD). With a heading set (F2) north is up and bearings are compass bearings.
