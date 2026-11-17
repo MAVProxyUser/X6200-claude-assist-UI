@@ -985,6 +985,7 @@ void lrpt_clear(lrpt_t *l) {
         memset(&l->pic[c], 0, sizeof(l->pic[c]));
         l->st.rows[c] = 0;
     }
+    l->st.frames = l->st.frames_ok = l->st.rs_fixed = l->st.packets = 0;     /* the counts are the pass's */
     l->have_t = false;
     l->period = 1232;
 }

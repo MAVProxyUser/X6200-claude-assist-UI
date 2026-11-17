@@ -1036,6 +1036,12 @@ no:
     return false;
 }
 
+/* The last save of a pass (the channel left, the daemon ending): after the one still running, if one is (10 s at
+ * most) */
+static void met_save_last(lrpt_t *d, const char *stem) {
+    for (int i = 0; i < 100 && !met_save(d, stem); i++) usleep(100000);
+}
+
 /* A strip of a channel to the client at half size */
 static void met_strip(lrpt_t *d, int c, int strip, uint16_t pass) {
     static uint8_t msg[12 + (LRPT_W / 2) * 4];
@@ -1066,7 +1072,7 @@ static void *met_thread(void *arg) {
     lrpt_t      *dec = NULL;
     lrpt_stat_t  st;
     uint64_t     hz = 0;
-    uint32_t     seen = 0, said_ms = 0, saved_ms = 0, pkt_ms = 0, pkts = 0;
+    uint32_t     seen = 0, said_ms = 0, saved_ms = 0, pkt_ms = 0, pkts = 0, saved_pkts = 0;
     float        pr = 1, pi = 0, sr = 1, si = 0;
     uint16_t     pass = 0;
     char         stem[96] = "", file[96] = "";
@@ -1085,13 +1091,13 @@ static void *met_thread(void *arg) {
         if (fresh) {
             if (nhz != hz) {            /* another satellite's frequency, or none: the pass so far saved and let go */
                 if (dec) {
-                    if (pkts) met_save(dec, stem);
+                    if (pkts != saved_pkts) met_save_last(dec, stem);
                     lrpt_free(dec);
                     dec = NULL;
                     fprintf(stderr, "rtlspec: Meteor LRPT off\n");
                 }
                 hz = nhz;
-                pkts = 0;
+                pkts = saved_pkts = 0;
                 stem[0] = file[0] = 0;
                 if (hz && (dec = lrpt_new(MID_RATE, LRPT_AUTO))) {
                     pass++;
@@ -1160,14 +1166,15 @@ static void *met_thread(void *arg) {
             if (lrpt_changed(dec, c, &lo, &hi))
                 for (int k = hi - lo > 7 ? hi - 7 : lo; k <= hi; k++) met_strip(dec, c, k, pass);
         }
-        if (pkts && now - saved_ms >= 60000 && met_save(dec, stem)) {
-            saved_ms = now;
+        if (pkts != saved_pkts && now - saved_ms >= 60000 && met_save(dec, stem)) {    /* new lines: saved again */
+            saved_ms   = now;
+            saved_pkts = pkts;
             snprintf(file, sizeof(file), "%s", stem);
         }
-        if (pkts && now - pkt_ms >= MET_END_S * 1000u && met_save(dec, stem)) {    /* the pass is over */
-            fprintf(stderr, "rtlspec: Meteor pass over: %u packets\n", pkts);
+        if (pkts && now - pkt_ms >= MET_END_S * 1000u && (pkts == saved_pkts || met_save(dec, stem))) {
+            fprintf(stderr, "rtlspec: Meteor pass over: %u packets\n", pkts);   /* the pass is over: saved, forgotten */
             lrpt_clear(dec);
-            pkts = 0;
+            pkts = saved_pkts = 0;
             pass++;
             stem[0] = file[0] = 0;
             for (int c = 0; c < LRPT_CHANS; c++) again[c] = -1;
@@ -1188,7 +1195,7 @@ static void *met_thread(void *arg) {
         }
     }
     if (dec) {
-        if (pkts) met_save(dec, stem);
+        if (pkts != saved_pkts) met_save_last(dec, stem);
         lrpt_free(dec);
     }
     return NULL;

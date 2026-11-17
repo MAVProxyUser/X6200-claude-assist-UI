@@ -71,7 +71,7 @@ const uint8_t *lrpt_image(const lrpt_t *l, int ch, int *h);
 /* The strips (8 rows each) of channel ch changed since the last call: from and to (inclusive); false none */
 bool lrpt_changed(lrpt_t *l, int ch, int *from, int *to);
 
-/* The pictures dropped (a new pass) */
+/* The pictures dropped, and the counts (frames, packets) with them: a new pass */
 void lrpt_clear(lrpt_t *l);
 
 /* ---- The layers, for lrpt_test.c's transmitter ---- */
