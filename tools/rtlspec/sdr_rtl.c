@@ -177,12 +177,24 @@ bool sdr_rtl_wanted_there(void) {
     return sn[0] && rtl_by_sn(l, rtl_list(l, 16), sn, loc) >= 0;
 }
 
+/* The stick asked for is the one open: the one rtl_by_sn finds now (a stick alone with its serial may have moved to
+ * another port: by its location then, not the location asked for, or a moved stick was opened and closed in a loop) */
 bool sdr_rtl_wanted_open(void) {
+    char     sn[64], loc[32], osn[64], oloc[32];
+    int      at;
+    rtl_sn_t l[16];
+
     pthread_mutex_lock(&want_lock);
-    bool o = want_sn[0] && sdr_rtl_open_at >= 0 && !strcmp(want_sn, open_sn) &&
-             (!want_loc[0] || !strcmp(want_loc, sdr_rtl_open_loc));
+    snprintf(sn, sizeof(sn), "%s", want_sn);
+    snprintf(loc, sizeof(loc), "%s", want_loc);
+    snprintf(osn, sizeof(osn), "%s", open_sn);
+    snprintf(oloc, sizeof(oloc), "%s", sdr_rtl_open_loc);
+    at = sdr_rtl_open_at;
     pthread_mutex_unlock(&want_lock);
-    return o;
+    if (!sn[0] || at < 0 || strcmp(sn, osn)) return false;
+    int f = rtl_by_sn(l, rtl_list(l, 16), sn, loc);
+
+    return f >= 0 && !strcmp(l[f].loc, oloc);
 }
 
 /* librtlsdr's index of RTL at (its serial and location in sn, loc), -1 none */

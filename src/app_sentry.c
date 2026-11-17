@@ -3700,6 +3700,7 @@ static void b_listen(int64_t hz) {
  * on it while it talks. true: the step is the priority's (the scan waits) */
 
 static void b_prio_stop(uint32_t now) {
+    scan_pick = 0;                      /* the band scan's pick waiting from its last hop: not over this stop */
     b_listen(prio_hz);
     hit_add(prio_hz, rtl_mode_of(prio_hz), true, rtl_name(prio_hz), b_level_at(prio_hz));
     b_stop.on    = true;
@@ -3789,7 +3790,7 @@ static void rtl_scan_step(void) {
         b_chan_step(now);
         return;
     }
-    if (scan_pick && now >= scan_pick) {
+    if (scan_pick && now >= scan_pick && !b_stop.on) {     /* stopped (the priority among others): no new pick */
         scan_pick = 0;
         if (rtl_best && !b_skipped(rtl_snap(rtl_best))) {  /* the picture's strongest (10 dB over its noise), not
                                                              * skipped: into C's log, B's channel to it, heard if B is */
@@ -5429,6 +5430,7 @@ static void track_start(int32_t hz, bool auto_) {
     identify(hz, &id);
     if (!tune(id.tune_hz, id.mode)) return;
     memset(&trk, 0, sizeof(trk));
+    trk_prio      = false;      /* a new lock is not the priority's till a_prio_lock says so */
     trk.on        = true;
     trk.auto_     = auto_;
     trk.hz        = hz;
@@ -9406,6 +9408,7 @@ static void construct_cb(lv_obj_t *parent) {
     centre = anchor = 0;
     cursor_hz = 0;
     memset(&trk, 0, sizeof(trk));
+    trk_prio = false;
     memset(visited, 0, sizeof(visited));
     n_ignored = logged = 0;
     b_nskip   = 0;                      /* B's skips too: forgotten as the Sentry opens, as A's */
@@ -9509,6 +9512,7 @@ static void destruct_cb(void) {
     if (rec_ours) recorder_set_on(false);
     rec_ours = false;
     trk.on   = false;
+    trk_prio = false;
     if (osd_timer) lv_timer_del(osd_timer);
     osd_timer = NULL;
     help_on   = false;

@@ -40,18 +40,38 @@ set_kv() {
 
 log() { echo "$(date '+%H:%M:%S') $*"; }
 
+# a wait a TERM ends at once (a plain sleep holds the trap till it is over)
+nap() {
+	sleep "$1" &
+	wait $!
+}
+
+# the keeper running now ended, waited for (up to 3 s)
+end_keeper() {
+	p=$(cat $PIDF 2>/dev/null)
+	[ -n "$p" ] || return 0
+	kill "$p" 2>/dev/null
+	i=0
+	while [ $i -lt 30 ] && kill -0 "$p" 2>/dev/null; do
+		usleep 100000
+		i=$((i + 1))
+	done
+	rm -f $PIDF
+}
+
 gpsd_up() {
 	pidof gpsd >/dev/null || /etc/init.d/S50gpsd start >/dev/null 2>&1
 }
 
 keep() {
 	echo $$ > $PIDF
-	trap 'kill $pid 2>/dev/null; gpsdctl remove $TTY >/dev/null 2>&1; echo off > $STATE; rm -f $PIDF; exit 0' TERM INT
+	trap 'kill $pid 2>/dev/null; gpsdctl remove $TTY >/dev/null 2>&1; echo off > $STATE
+	      [ "$(cat $PIDF 2>/dev/null)" = "$$" ] && rm -f $PIDF; exit 0' TERM INT
 	while :; do
 		load
 		if [ -z "$BTGPS_MAC" ]; then
 			echo off > $STATE
-			sleep 5
+			nap 5
 			continue
 		fi
 		mac=$BTGPS_MAC
@@ -61,7 +81,7 @@ keep() {
 		pid=$!
 		i=0
 		while [ $i -lt 20 ] && [ ! -e $TTY ] && kill -0 $pid 2>/dev/null; do
-			sleep 1
+			nap 1
 			i=$((i + 1))
 		done
 		if [ -e $TTY ] && kill -0 $pid 2>/dev/null; then
@@ -71,11 +91,12 @@ keep() {
 			echo connected > $STATE
 			log "connected to $mac (channel $BTGPS_CH), $TTY to gpsd"
 			while kill -0 $pid 2>/dev/null; do
-				sleep 5
+				nap 5
 				load
 				[ "$BTGPS_MAC" = "$mac" ] || break		# another GPS chosen, or off
-				pidof gpsd >/dev/null || { gpsd_up; gpsdctl add $TTY >/dev/null 2>&1; }
-			done
+				gpsd_up					# gpsd quit, or restarted without it (a USB
+				gpsdctl add $TTY >/dev/null 2>&1		# GPS's restart_gpsd): in again; an add
+			done						# of one it has does nothing
 			gpsdctl remove $TTY >/dev/null 2>&1
 			log "$mac gone"
 		fi
@@ -84,7 +105,7 @@ keep() {
 		rfcomm release $DEV >/dev/null 2>&1
 		echo trying > $STATE
 		load
-		[ "$BTGPS_MAC" = "$mac" ] && sleep 10		# off or out of range: again in a while
+		[ "$BTGPS_MAC" = "$mac" ] && nap 10		# off or out of range: again in a while
 	done
 }
 
@@ -110,10 +131,9 @@ case "$1" in
 		echo "BTGPS_CH=$BTGPS_CH"
 		echo "STATE=$(cat $STATE 2>/dev/null || echo off)";;
 	run)
-		kill "$(cat $PIDF 2>/dev/null)" 2>/dev/null
+		end_keeper
 		keep;;
 	stop)
-		kill "$(cat $PIDF 2>/dev/null)" 2>/dev/null
-		rm -f $PIDF;;
+		end_keeper;;
 	*) echo "Usage: $0 {set MAC [CHANNEL]|off|status|run|stop}"; exit 1;;
 esac

@@ -97,6 +97,16 @@ static char            use_sn[24], use_loc[24];     /* and that RTL's serial and
                                                      * place that shifts (a stick gone in a port reset) moves nothing */
 static pthread_mutex_t use_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* The serial of the RTL at place n as the pool sees it now, "" none */
+static void sn_at(int n, char *sn, size_t len) {
+    sdr_unit_t u[16];
+    int        k = sdr_pool_units(u, 16);
+
+    sn[0] = 0;
+    for (int i = 0; i < k; i++)
+        if (u[i].kind == RTL_DEV_RTL && u[i].rtl == n) snprintf(sn, len, "%s", u[i].sn);
+}
+
 /* "k RTL<n> SERIAL LOC" (or "k RTL<n>" with no serial known) */
 static void k_rtl_cmd(char *cmd, size_t n) {
     pthread_mutex_lock(&use_lock);
@@ -451,11 +461,21 @@ static void *spec_thread(void *arg) {
             uint32_t now = (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
             if (atomic_load(&use_kind) == RTL_DEV_RTL && atomic_load(&dev_kind) == RTL_DEV_RTL &&
                 atomic_load(&dev_rtl) >= 0 && atomic_load(&dev_rtl) != atomic_load(&use_rtl) && now - again > 3000) {
-                char cmd[80];
+                char cmd[80], sn[24], want[24];
 
                 again = now;
-                k_rtl_cmd(cmd, sizeof(cmd));
-                say(cmd);
+                sn_at(atomic_load(&dev_rtl), sn, sizeof(sn));
+                pthread_mutex_lock(&use_lock);
+                snprintf(want, sizeof(want), "%s", use_sn);
+                pthread_mutex_unlock(&use_lock);
+                if (want[0] && !strcmp(sn, want)) {
+                    /* the stick asked for by its serial, at another place now (one before it went or came): its
+                     * place taken, so the pool sees B on its real stick; nothing asked again */
+                    atomic_store(&use_rtl, atomic_load(&dev_rtl));
+                } else {
+                    k_rtl_cmd(cmd, sizeof(cmd));
+                    say(cmd);
+                }
             }
         }
         if (!k) state = RTL_SPEC_OFF;

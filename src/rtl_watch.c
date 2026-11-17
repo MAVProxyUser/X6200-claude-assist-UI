@@ -212,6 +212,7 @@ static void *w_thread(void *arg) {
     int          i  = (int)(intptr_t)arg;
     watch_t     *c  = &w[i];
     int          fd = -1, ran = -1, quiet = 0;      /* ran: the place its daemon was started on */
+    char         ran_sn[24] = "";                   /* and that stick's serial */
     unsigned     said_gen = ~0u;
     int64_t      hz = 0;                            /* its channel as last said: the thread's own copy */
     int          mode = 0, sql = 10, gain = 0;
@@ -227,9 +228,15 @@ static void *w_thread(void *arg) {
             alloc();
             pthread_mutex_unlock(&cfg_lock);
         }
-        int place = atomic_load(&c->place);
+        int  place = atomic_load(&c->place);
+        char now_sn[24];
 
-        if (place != ran) {                     /* none now, or another RTL: its daemon ends (it lets the RTL go) */
+        pthread_mutex_lock(&cfg_lock);
+        snprintf(now_sn, sizeof(now_sn), "%s", c->sn);
+        pthread_mutex_unlock(&cfg_lock);
+        if (place != ran || (ran >= 0 && strcmp(now_sn, ran_sn))) {   /* none now, or another RTL (by its place
+                                                                       * or, at the same place, its serial): its
+                                                                       * daemon ends (it lets the RTL go) */
             if (fd < 0) fd = w_connect(i);
             say(fd, "Q\n");
             if (fd >= 0) close(fd);
@@ -252,6 +259,7 @@ static void *w_thread(void *arg) {
             pthread_mutex_unlock(&cfg_lock);
             w_start(i, place, sn, loc, hz, gain);
             ran      = place;
+            snprintf(ran_sn, sizeof(ran_sn), "%s", sn);
             said_gen = ~0u;
             continue;
         }
