@@ -459,6 +459,8 @@ static const int32_t f_js8[] = {3578000, 7078000, 10130000, 14078000, 18104000, 
 static const int32_t f_psk[] = {3580000, 7070000, 10142000, 14070000, 18100000, 21070000, 24920000, 28120000};
 static const int32_t f_rtty[] = {3585000, 7085000, 14085000, 21085000, 28085000};
 static const int32_t f_olivia[] = {3583000, 7072500, 10141000, 14072500, 18102000, 21072500, 28075000};
+static const int32_t f_jtty[] = {1838000, 3575000, 7090000, 10140000, 14090000, 18100000, 21090000, 24920000,
+                                 28090000};                         /* WSJT-X's, as the JTTY app's list */
 static const int32_t f_sstv[] = {3845000, 7171000, 14230000, 21340000, 28680000};
 static const int32_t f_cw[] = {3530000, 7030000, 10115000, 14030000, 18080000, 21030000, 24900000, 28030000};
 static const int32_t f_rade[] = {3625000, 7177000, 14236000, 21313000, 28330000};
@@ -515,6 +517,9 @@ static const decoder_t decoders[] = {
     {"OLIVIA", "Olivia", ACTION_APP_OLIVIA, radio_mode_usb_dig, -1, HZ(f_olivia),
      "SLOW, VERY ROBUST TEXT THAT GETS THROUGH NOISE AND FADING. FEW STATIONS; WEEKENDS ARE BEST.", 0,
      'X', radio_agc_slow, true, "THE OLIVIA APP"},
+    {"JTTY", "JTTY", ACTION_APP_JTTY, radio_mode_usb_dig, -1, HZ(f_jtty),
+     "WSJT-X'S KEYBOARD CHAT: TEXT AS YOU TYPE IT, DOWN IN THE NOISE AS FT8 GOES. NEW, SO FEW STATIONS YET.", 0,
+     'X', radio_agc_slow, true, "THE JTTY APP"},
     {"SSTV", "SSTV", ACTION_APP_SSTV, -1, -1, HZ(f_sstv),
      "SLOW-SCAN TV: PICTURES SENT BY HAMS, ONE EVERY MINUTE OR TWO. 14.230 IS THE PLACE.", 0,
      'X', radio_agc_slow, true, "THE SSTV APP"},

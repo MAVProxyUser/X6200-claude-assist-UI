@@ -1109,7 +1109,7 @@ written through to the card before it replaces the last copy, so a power cut kee
   | Type | Opens | Radio |
   |---|---|---|
   | FT8, FT4 | the FT8 app | X6200 |
-  | WSPR, JS8, PSK, OLIVIA, SSTV, RADE, WEFAX | that app | X6200 |
+  | WSPR, JS8, PSK, OLIVIA, JTTY, SSTV, RADE, WEFAX | that app | X6200 |
   | RTTY | the RTTY panel on the main screen | X6200 |
   | CW | the main screen in CW (its squelch opened, given back as the Sentry opens) | X6200 |
   | NAVTEX, DSC | the NAVTEX app, in NAVTEX or DSC as the channel is | X6200 |
@@ -1120,7 +1120,7 @@ written through to the card before it replaces the last copy, so a power cut kee
   | ADS-B | H AIRSPACE | the SDR or a GNS 5890 stick |
 
   The apps open on the frequency chosen (it goes into their memory first) and open their squelch themselves.
-  Not on E: JTTY (no calling frequencies yet), On the Air (its own list of broadcasts) and the Scanner. F1 and F5 do
+  JTTY's are WSJT-X's (as the JTTY app's list). Not on E: On the Air (its own list of broadcasts) and the Scanner. F1 and F5 do
   nothing here (no F key on any screen only goes to another screen: the ring does that).
 - **VOL** at the foot of every screen names the radio it sets: `VOL: X6200 VOLUME 2` or `VOL: RTL0 VOLUME 0` (D, E
   and F follow the radio heard last; E once said VOLUME 0 while A said VOLUME 2, the SDR's and the X6200's). When the
