@@ -451,8 +451,17 @@ static void syn_close(void) {
 /* ------------------------------------------------------------------------------------------- the device, either */
 
 static bool dev_there(void) { return synth || kraken_there(); }
-static int  dev_open(void) { return synth ? syn_open() : hw_open(); }
-static void dev_close(void) { synth ? syn_close() : hw_close(); }
+static bool dev_is_open;                       /* apply() leaves the sticks and the engine alone while not */
+static int  dev_open(void) {
+    int r = synth ? syn_open() : hw_open();
+
+    dev_is_open = r == 0;
+    return r;
+}
+static void dev_close(void) {
+    synth ? syn_close() : hw_close();
+    dev_is_open = false;
+}
 static void dev_noise(bool on) { synth ? atomic_store(&synth_noise, on) : hw_noise(on); }
 static void dev_tune(void) { synth ? atomic_store(&syn_retuned, 1) : hw_tune(); }
 static void dev_gain(void) { synth ? atomic_store(&syn_retuned, 1) : hw_gain(); }
@@ -463,6 +472,14 @@ static int             ls = -1, cl = -1;
 static pthread_mutex_t cmd_lock = PTHREAD_MUTEX_INITIALIZER;
 static char            cmds[16][160];
 static int             ncmds;
+static double          cmd_t;                   /* the last command's time (cmd_lock) */
+static bool            had_client;              /* (cmd_lock) */
+/* Started by page I (not -F): it ends when page I lets go, also while it still waits for the Kraken, and on its own
+ * when no client has been there for NO_CLIENT_S (the GUI gone without a Q: a crash, a restart off page I). Page I
+ * connects again within a second or two while it is open. Before 2026-11-17 a Q sent while it waited for the sticks
+ * was queued and never read: the daemon outlived page I and took the whole Kraken when it came back on USB */
+static bool            on_its_own;
+#define NO_CLIENT_S 15
 
 static void send_msg(const void *m, size_t n) {
     if (cl >= 0 && send(cl, m, n, MSG_DONTWAIT | MSG_NOSIGNAL) < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -472,10 +489,17 @@ static void send_msg(const void *m, size_t n) {
 }
 
 static void *sock_thread(void *arg) {
+    double lost_t = now_s();
+
     (void)arg;
     while (!atomic_load(&quit_now)) {
         struct pollfd p[2] = {{.fd = ls, .events = POLLIN}, {.fd = cl, .events = POLLIN}};
 
+        if (!on_its_own && cl < 0 && had_client && now_s() - lost_t > NO_CLIENT_S) {
+            logf_("no client for %d s: ending", NO_CLIENT_S);
+            atomic_store(&quit_now, true);
+            break;
+        }
         if (poll(p, cl >= 0 ? 2 : 1, 500) <= 0) continue;
         if (p[0].revents & POLLIN) {
             int c = accept(ls, NULL, NULL);
@@ -483,6 +507,10 @@ static void *sock_thread(void *arg) {
             if (c >= 0) {                       /* one client: a new one replaces the old */
                 if (cl >= 0) close(cl);
                 cl = c;
+                pthread_mutex_lock(&cmd_lock);
+                had_client = true;
+                cmd_t = now_s();
+                pthread_mutex_unlock(&cmd_lock);
                 logf_("a client");
             }
         }
@@ -493,11 +521,17 @@ static void *sock_thread(void *arg) {
             if (n <= 0) {
                 close(cl);
                 cl = -1;
+                lost_t = now_s();
                 continue;
             }
             b[n] = 0;
+            if (b[0] == 'Q') {                  /* at once: the worker may be waiting for the sticks */
+                atomic_store(&quit_now, true);
+                break;
+            }
             pthread_mutex_lock(&cmd_lock);
             if (ncmds < 16) snprintf(cmds[ncmds++], sizeof(cmds[0]), "%s", b);
+            cmd_t = now_s();
             pthread_mutex_unlock(&cmd_lock);
         }
     }
@@ -848,7 +882,7 @@ static int apply(const char *c) {
         case 'f':
             if (sscanf(c + 1, "%lf", &a) == 1 && a >= 24e6 && a <= 1766e6 && (uint32_t)a != fc) {
                 fc = (uint32_t)a;
-                dev_tune();
+                if (dev_is_open) dev_tune();
                 eng.fc = fc;
                 if (eng_on) df_engine_retarget(&eng, f_off);
                 return 1;
@@ -860,7 +894,7 @@ static int apply(const char *c) {
 
                 f_off = (int32_t)a;
                 bw = (uint32_t)b;
-                if (newbw) engine_setup();
+                if (newbw && dev_is_open) engine_setup();
                 else if (eng_on) df_engine_retarget(&eng, f_off);
             }
             break;
@@ -875,14 +909,14 @@ static int apply(const char *c) {
         case 'g':
             if (sscanf(c + 1, "%lf", &a) == 1 && a >= 0 && a <= 500 && (int)a != gain) {
                 gain = (int)a;
-                dev_gain();
+                if (dev_is_open) dev_gain();
                 return 1;
             }
             break;
         case 'a':
             if (parse_array(c + 1, &na)) {
                 arr = na;
-                engine_setup();
+                if (dev_is_open) engine_setup();
             }
             break;
         case 'm':
@@ -922,6 +956,28 @@ static void print_est(const df_est_t *e) {
     fflush(stdout);
 }
 
+/* Commands while nothing is open: only the settings taken, for the next open */
+static void take_cmds_closed(void) {
+    pthread_mutex_lock(&cmd_lock);
+    for (int i = 0; i < ncmds; i++) (void)apply(cmds[i]);
+    ncmds = 0;
+    pthread_mutex_unlock(&cmd_lock);
+}
+
+/* Started by page I: its settings (replayed as soon as it connects) before the sticks open, so they open and calibrate
+ * once, on its band, not first on the defaults; 4 s at most */
+static void wait_settings(void) {
+    for (int i = 0; i < 40 && !atomic_load(&quit_now); i++) {
+        pthread_mutex_lock(&cmd_lock);
+        bool settled = had_client && now_s() - cmd_t > 0.4;
+
+        pthread_mutex_unlock(&cmd_lock);
+        if (settled) break;
+        usleep(100000);
+    }
+    take_cmds_closed();
+}
+
 static void run(bool print) {
     uint32_t seq = 0;
     double   last_st = 0, cpu_t = now_s(), cpu_wall = 0;
@@ -933,9 +989,12 @@ static void run(bool print) {
         st = DF_ST_NODEV;
         why[0] = 0;
         while (!atomic_load(&quit_now) && !dev_there()) {
+            take_cmds_closed();
             send_state();
             sleep(2);
         }
+        if (on_its_own) take_cmds_closed();
+        else wait_settings();
         if (atomic_load(&quit_now)) break;
         st = DF_ST_OPENING;
         send_state();
@@ -1144,6 +1203,7 @@ int main(int argc, char **argv) {
     (void)sock_name;
     front = true;
 #endif
+    on_its_own = front;
     if (!front) {
         pid_t p = fork();
 
