@@ -4829,10 +4829,14 @@ the decoder or the player was behind, "gaps" the breaks in the speech;
 this radio's own RADE transmitter code (callsign Q1TST), sent from a HackRF
 on 14.236 MHz USB through 70 dB of attenuators. They gave SYNC at 16 dB SNR,
 the callsign, and speech to the TCI client the same as the overs decoded on a
-PC (the overs after the first whole). The first over after a long quiet lost
-its first 5 to 7 seconds while the sync came, with AGC on and with it off; a
-PC decodes the same over after 30 s of noise whole, so the delay is this
-radio's, not the signal's. The callsign that the last End-of-Over carried is
+PC. The decoder took the sync 0.2 to 0.3 s into each over and decoded every
+over whole, with AGC on or off.
+A TCI client hears the speech only as well as its link carries it. The radio
+keeps about 1.4 s of audio waiting for each client, and when the link stalls
+for longer the client loses those frames for good. A client on the radio's
+Wi-Fi lost seconds of speech that way while big files went over the same link
+(the test's screenshots), and the speech it got came seconds late. Over a
+link that keeps up, the speech comes whole. The callsign that the last End-of-Over carried is
 shown after "last over", and only when it reads as a callsign (3 to 8
 letters, digits and /, with a letter and a digit). The app reads it in
 either form:
