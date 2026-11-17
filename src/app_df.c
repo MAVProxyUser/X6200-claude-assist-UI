@@ -242,8 +242,11 @@ static const char *heading_from(void) {
 /* What each setting means to the daemon (df_proto.h): kept by df_rx.c and said again to a daemon started anew */
 static void send_rate(void)   { df_rx_cmd("s %u", rates[cfg.rate]); }
 static void send_gain(void)   { df_rx_cmd("g %d", gains[cfg.gain]); }
-static void send_fc(void)     { df_rx_cmd("f %d", cfg.fc); }
-static void send_target(void) { df_rx_cmd("t %d %u", cfg.off, bws[cfg.bw]); }
+/* when page I last tuned the daemon itself: an IQ program's tuning is not taken over it till x6x00-df has said where
+ * it is since (iq_adopt), or a DFST from before page I's own tuning would take it back */
+static uint32_t own_tune_ms;
+static void send_fc(void)     { own_tune_ms = lv_tick_get(); df_rx_cmd("f %d", cfg.fc); }
+static void send_target(void) { own_tune_ms = lv_tick_get(); df_rx_cmd("t %d %u", cfg.off, bws[cfg.bw]); }
 static void send_array(void)  { df_rx_cmd("a %s %d %d", kinds[cfg.kind].ula ? "ula" : "uca", kinds[cfg.kind].n, cfg.size_mm); }
 static void send_method(void) { df_rx_cmd("m %d", cfg.method); }
 static void send_sql(void)    { df_rx_cmd("q %d", cfg.sql_ddb); }
@@ -1283,7 +1286,7 @@ static void auto_target(void) {
 /* A program on the IQ server tuned the Kraken (its control's FREQ, x6x00-df's DFST iq_clients bit 1): page I's
  * settings take where it is, so the screen, the web page and that program agree; FOLLOW stops */
 static void iq_adopt(void) {
-    if (!sn.connected || !sn.have_st || !(sn.st.iq_clients & 2)) return;
+    if (!sn.connected || !sn.have_st || !(sn.st.iq_clients & 2) || lv_tick_get() - own_tune_ms < 2000) return;
     if (cfg.fc == (int32_t)sn.st.fc_hz && cfg.off == sn.st.f_off_hz) return;
     cfg.fc     = (int32_t)sn.st.fc_hz;
     cfg.off    = sn.st.f_off_hz;
