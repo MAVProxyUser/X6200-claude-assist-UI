@@ -320,15 +320,39 @@ static int tilt_px(int64_t from_newest, int tilt, unsigned width)
     return (int)(from_newest * tilt * VIEW_W / (1000LL * width));
 }
 
+/* The screen shows the fax inverted, in the theme's own colours: its text colour for the black of the chart, its
+ * background for the paper (on the Sentry the amber on its black). The user, 2026-11-17: a white chart was the one
+ * bright thing on a dark screen. A grey (satellite pictures, shaded charts) is the colour in between. Only the
+ * screen: the saved PNGs stay as sent, black on white */
+static lv_color_t shade[256];   /* fax grey -> screen colour */
+
+#define PAPER shade[255]
+
 static void fill_view(lv_color_t c)
 {
     for (unsigned i = 0; i < VIEW_W * VIEW_H; i++)
         view_buf[i] = c;
 }
 
+static void shades_init(void)
+{
+    uint32_t ink = theme_hex(TC_text), paper = theme_hex(TC_bg);
+
+    for (unsigned g = 0; g < 256; g++) {        /* g = 255: all paper; in 8 bits (lv_color_mix keeps 5 in 16) */
+        uint8_t c[3];
+
+        for (int k = 0; k < 3; k++) {
+            unsigned i = (ink >> (16 - 8 * k)) & 0xFF, p = (paper >> (16 - 8 * k)) & 0xFF;
+
+            c[k] = (uint8_t)((p * g + i * (255 - g) + 127) / 255);
+        }
+        shade[g] = lv_color_make(c[0], c[1], c[2]);
+    }
+}
+
 static void put_px(unsigned x, unsigned y, uint8_t g)
 {
-    view_buf[y * VIEW_W + x] = lv_color_make(g, g, g);
+    view_buf[y * VIEW_W + x] = shade[g];
 }
 
 /* ---- kept rows ---- */
@@ -357,7 +381,7 @@ static void store_add(const uint8_t *row)
 /* Empty view, kept rows and the row in the box */
 static void clear_fax(void)
 {
-    fill_view(lv_color_make(255, 255, 255));
+    fill_view(PAPER);
     shown_acc = shown_n = shown_head = 0;
     if (canvas)
         lv_obj_invalidate(canvas);
@@ -377,7 +401,7 @@ static void draw_full(void)
     if (!canvas)
         return;
 
-    fill_view(lv_color_white());
+    fill_view(PAPER);
     if (!store || !store_n) {
         lv_obj_invalidate(canvas);
         return;
@@ -430,7 +454,7 @@ static void draw_live(void)
     unsigned first = (shown_head + VIEW_H - shown_n) % VIEW_H;
     unsigned y0    = VIEW_H - shown_n;
 
-    fill_view(lv_color_make(255, 255, 255));
+    fill_view(PAPER);
     for (unsigned r = 0; r < shown_n; r++) {
         const uint8_t *src   = shown[(first + r) % VIEW_H];
         int            shift = ((int)r - (int)(shown_n - 1)) * tilt / 1000;
@@ -449,7 +473,7 @@ static void draw_live(void)
         lv_obj_invalidate(canvas);
 }
 
-/* Browser: the opened picture with its own corrections, fitted and centred on black */
+/* Browser: the opened picture with its own corrections, fitted and centred on the paper */
 static void draw_picture(void)
 {
     if (!pic || !pic_w || !pic_h)
@@ -468,7 +492,7 @@ static void draw_picture(void)
 
     unsigned x0 = (VIEW_W - w) / 2, y0 = (VIEW_H - h) / 2;
 
-    fill_view(lv_color_make(0, 0, 0));
+    fill_view(PAPER);
     for (unsigned y = 0; y < h; y++) {
         unsigned sy = (unsigned)((uint64_t)y * pic_h / h);
 
@@ -968,6 +992,7 @@ static void app_open(lv_obj_t *parent)
         wefax_decoder_set_mode(decoder, WEFAX_MODE_AUTO);      /* open in Auto, as the header and the RX button say */
     }
 
+    shades_init();
     dialog.obj = dialog_init(parent);
     lv_obj_set_size(dialog.obj, 795, DIALOG_H);
     lv_obj_align(dialog.obj, LV_ALIGN_TOP_MID, 0, DIALOG_Y);

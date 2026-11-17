@@ -4681,6 +4681,16 @@ frequency and the receiver state. Leaving the app gives the VFO back.
   stations above (the WEFAX channels a new radio starts with) is not listed
   twice. View (page 2) chooses Big (default), Full (the whole fax) or Small,
   the old low panel that keeps the main waterfall visible above it.
+  The screen shows the fax inverted, in the theme's colours: what is black on
+  the chart is drawn in the text colour, the white paper is the background
+  (the Sentry's amber on black), and greys (satellite pictures, shading) are
+  the shades in between. The Fax Browser shows the saved faxes the same way.
+  The PNGs in `/mnt/wefax` and the web gallery stay as sent, black on white.
+  Before each fax a station sends a start tone, then about 30 s of black lines
+  with a short white pulse at their ends, which set where a line starts; the
+  end of that band can show above the picture as a solid bar (white on a
+  real chart, the text colour on the screen) with a notch. At the stop tone
+  the fax is saved and the screen clears for the next one.
 - SSTV: calling frequencies, LSB on 80 and 40 m (3.735, 3.845, 7.165,
   7.171 MHz) and USB above (14.230, 14.233, 18.160, 21.340, 24.975, 28.680,
   50.510 MHz). The picture is on the left, the decoder state on the right,
