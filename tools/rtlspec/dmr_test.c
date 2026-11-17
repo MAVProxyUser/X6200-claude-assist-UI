@@ -46,10 +46,36 @@ static void put_hex48(uint64_t v) {
     for (int k = 0; k < 24; k++) put_dibit((uint8_t)(v >> (46 - 2 * k)));
 }
 
-static void cach(int slot) {
-    uint8_t b[24] = {0};
+/* The standard's small codes, as their generator matrices give them (each row the codeword of one data bit, the data
+ * first; ETSI TS 102 361-1 B.3; as dsd-fme's fec.c has them): the CACH's TACT Hamming (7,4), the slot type's Golay
+ * (20,8), the EMB's QR (16,7,6). dsd-fme checks them; dmr.c only reads their data */
+static const uint8_t ham74_g[4][3] = {{1, 0, 1}, {1, 1, 1}, {1, 1, 0}, {0, 1, 1}};
+static const uint8_t gol208_g[8][12] = {
+    {0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0}, {1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1}, {0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1},
+    {0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1}, {1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0}, {1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1},
+    {1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0}, {1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1}};
+static const uint8_t qr167_g[7][9] = {
+    {0, 0, 1, 0, 0, 1, 1, 1, 1}, {1, 0, 0, 0, 1, 1, 1, 1, 0}, {1, 1, 0, 1, 1, 0, 1, 1, 1}, {1, 1, 1, 1, 0, 0, 0, 1, 0},
+    {1, 1, 1, 0, 0, 1, 0, 0, 1}, {0, 1, 1, 1, 0, 0, 1, 0, 1}, {0, 0, 1, 1, 1, 0, 0, 1, 1}};
 
-    b[4] = (uint8_t)(slot - 1);         /* TC */
+/* k data bits in d, their n - k parity after them, by the matrix */
+static void code(uint8_t *d, int k, int np, const uint8_t *g) {
+    for (int j = 0; j < np; j++) {
+        uint8_t p = 0;
+
+        for (int i = 0; i < k; i++) p ^= (uint8_t)(d[i] & g[i * np + j]);
+        d[k + j] = p;
+    }
+}
+
+/* The CACH before a burst of this slot: its TACT (AT busy, TC the slot, LCSS 0) and Hamming parity at bits 0, 4, 8,
+ * 12, 14, 18, 22; the short LC's bits between left 0 */
+static void cach(int slot) {
+    static const int at[7] = {0, 4, 8, 12, 14, 18, 22};
+    uint8_t          b[24] = {0}, t[7] = {1, (uint8_t)(slot - 1), 0, 0};
+
+    code(t, 4, 3, &ham74_g[0][0]);
+    for (int i = 0; i < 7; i++) b[at[i]] = t[i];
     put_bits(b, 24);
 }
 
@@ -63,6 +89,7 @@ static void data_burst(int slot, const uint8_t info[196], int dt) {
 
     for (int i = 0; i < 4; i++) st[i] = (uint8_t)(1 >> (3 - i) & 1);
     for (int i = 0; i < 4; i++) st[4 + i] = (uint8_t)(dt >> (3 - i) & 1);
+    code(st, 8, 12, &gol208_g[0][0]);
     cach(slot);
     put_bits(info, 98);
     put_bits(st, 10);
@@ -116,6 +143,7 @@ static void voice_burst(int slot, int vf, const uint8_t elc[128]) {
         emb[3] = 1;                     /* colour code 1 */
         emb[5] = (uint8_t)(lcss >> 1);
         emb[6] = (uint8_t)(lcss & 1);
+        code(emb, 7, 9, &qr167_g[0][0]);
         put_bits(emb, 8);
         if (vf <= 4) put_bits(elc + (vf - 1) * 32, 32);
         else for (int i = 0; i < 16; i++) put_dibit(0);
