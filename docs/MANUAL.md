@@ -20,7 +20,7 @@ Settings. Button and option names are written as the radio shows them.
 ## Contents
 
 - [Getting started](#getting-started): [first-start guide](#first-start-guide), [first steps](#first-steps), [setting up the transmitter](#setting-up-the-transmitter), [buttons and knobs](#buttons-and-knobs), [hand mic](#hand-mic), [keyboard](#keyboard) ([mouse](#mouse), [quick QSO log](#quick-qso-log))
-- [The Sentry](#the-sentry) (this fork, X6200): [A and B](#a-and-b-the-spectrum-screens), [SCAN CFG](#scan-cfg), [C LOG](#c-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [AIRSPACE](#airspace), [I DIRECTION FINDER](#i-direction-finder)
+- [The Sentry](#the-sentry) (this fork, X6200): [A and B](#a-and-b-the-spectrum-screens), [SCAN CFG](#scan-cfg), [C LOG](#c-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [the GPS panel](#the-gps-panel), [AIRSPACE](#airspace), [I DIRECTION FINDER](#i-direction-finder)
 - [Updating the firmware](#updating-the-firmware): [the SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot), [the X6200's base firmware](#the-x6200s-base-firmware), [the X6100's base firmware](#the-x6100s-base-firmware)
 - [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
 - [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab)
@@ -1220,15 +1220,35 @@ written through to the card before it replaces the last copy, so a power cut kee
   and F follow the radio heard last; E once said VOLUME 0 while A said VOLUME 2, the SDR's and the X6200's). When the
   line is full (an SDR's RF GAIN) it leaves out what the next push gives; the VOL pop-up says it.
 - **NOW** (D and E), one set of words: `3 SIG LIVE` (the band in the picture), `3 SIG 12 MIN` (heard 12 minutes
-  ago, within the half hour), else what the sun says at your QTH: OPEN, CLOSED, LOCAL, OPENING or CLOSING; `SET QTH`
-  when no QTH locator is set.
-- **F SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the classic radio screen, a shell, the
-  [base firmware](#the-x6200s-base-firmware) and where the radio starts. F2 opens the item chosen
+  ago, within the half hour), else what the sun says where you are (the GPS's fix, else the phone's position from
+  the Panel page, else the QTH locator): OPEN, CLOSED, LOCAL, OPENING or CLOSING; `SET QTH` when none of those is
+  there.
+- **F SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the SDR pool, the [GPS](#the-gps-panel),
+  the classic radio screen, a shell, the [base firmware](#the-x6200s-base-firmware) and where the radio starts. F2 opens the item chosen
   (CLASSIC RADIO is on the list); the other F keys do nothing here. Its title says the release, the GUI's commit and the base's version. A's title names
   what its scope takes in: `MF/HF/VHF SPECTRUM` (the X6200 from 100 kHz to 55 MHz, and 87.5 to 137 MHz).
 - **PROCESSOR, GRAPHICS, MEMORY** under WHAT IT DOES on F, each second with a bar: CPU, the four cores' load in all
   and each (and the clock); GPU, the Mali-400's clock as its governor sets it from its load (144 MHz idle, 0%, to
   384 MHz, 100%: the kernel gives no busy figure for it); RAM, what is in use of the 1 GB.
+
+#### The GPS panel
+
+F SYSTEM > **GPS** shows how the GPS gpsd reads is doing (one on USB, or a
+[Bluetooth GPS](#a-bluetooth-gps)), each second; F5, BACK, APP or the MFK's push closes it. While a GPS reports,
+every title bar says **GPS** (**GPS NO FIX** till it has one).
+
+- **LINK**: the Bluetooth GPS's name and address and its link (CONNECTED, TRYING: switched off or out of range), or
+  the USB port, or NONE.
+- **GPSD**: the device gpsd reads (`/dev/pts/N` for the Bluetooth one), its driver, how many positions a second
+  (before the first fix, its reports a second), and how long ago the last came.
+- **FIX**: none, 2D or 3D, the satellites used of those in view, HDOP (GOOD to 1.5, FAIR to 4, else POOR) and PDOP.
+- **ACCURACY**: gpsd's estimate of the error, across and up, in metres.
+- **POSITION**, the grid and the height; **MOVING**: the speed and heading, or standing still; **TIME**: the
+  GPS's own clock.
+- **SATELLITES**: each by system and number (G GPS, R GLONASS, E Galileo, B BeiDou, Q QZSS, S SBAS) with its
+  signal in dB-Hz, the best first: green those in the fix, orange those heard, dim those not heard.
+- **USED FOR**: what takes its position now (AIRSPACE's centre, page I, the FT8, JS8 and WSPR grids, C and D's
+  sun, the weather, and NTP's clock), or what the apps use till it has a fix (the phone's position, the locator).
 
 ### G WALKIE
 
@@ -1426,7 +1446,8 @@ wherever the RTL-SDR did (B, BOTH, C, D, E, RDS, SAME, AIRSPACE), named as they 
 
 ### AIRSPACE
 
-ADS-B aircraft on a scope around your position (a USB GPS, else the QTH locator, else the traffic), their
+ADS-B aircraft on a scope around your position (a GPS's fix, on USB or [Bluetooth](#a-bluetooth-gps), else the
+phone's position from the Panel page, both under 10 minutes old, else the QTH locator, else the traffic), their
 calls, heights and tracks, and the history fading out (F2 DECAY, 5 minutes by default). Where: F SYSTEM >
 AIRSPACE (ADS-B), APP > Airspace, or the Sentry's ring past G: AIRSPACE is its H. It opens by itself when a GNS
 5890 or a microADSB becomes the only ADS-B receiver on USB (put in the RTL-SDR's place, plugged in with no RTL-SDR,
@@ -7836,7 +7857,8 @@ switched off or out of range it is tried again every 10 seconds, so switching
 it on again is all it takes. Its channel is read from the GPS when it is
 chosen (1 otherwise). The same choice is on the web page's Direction finder,
 in its GPS card (Bluetooth GPS: a paired device, or Off). Log:
-`/tmp/btgps.log`; its link: `/tmp/btgps.state` (connected, trying, off).
+`/tmp/btgps.log`; its link: `/tmp/btgps.state` (connected, trying, off). How it is doing: the Sentry's
+[GPS panel](#the-gps-panel).
 gpsd reads it through a pseudo-terminal (`btgps-bridge`; `/var/run/btgps.tty`
 points to it while connected), as the radio's kernel makes no Bluetooth serial
 devices. Tried with a Garmin GLO 2: it pairs without a PIN, sends 10 positions

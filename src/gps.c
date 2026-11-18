@@ -94,6 +94,15 @@ static int64_t now_ms(void) {
 
 /* The phone's position, from the Panel page's GPS button (remote_server.c "pos"), under the same lock; its age on
  * the monotonic clock too, as the phone's own clock may set the wall clock (clk) */
+/* gpsd's last report, for gps_health(), under pos_lock: copied as it comes, its rate counted */
+static gps_health_t health;
+static int64_t      health_at = -1;     /* now_ms() of the last report */
+static int64_t      fix_at = -1;        /* of the last 2D/3D fix */
+static int64_t      rate_from;          /* the rate's window: from when, how many new positions in it */
+static int          rate_n, reports_n;
+static long         rate_last_ns;       /* the last position's GPS time, to count each once */
+static long         rate_last_s;
+
 static double  phone_lat, phone_lon;
 static int     phone_acc;           /* m, as the phone says */
 static int64_t phone_time;          /* when it came (now_ms) */
@@ -136,6 +145,59 @@ static void gpsd_disconnect(void) {
     gps_close(&gpsdata);
 }
 
+/* The health of it all, from the report in gpsdata (libgps keeps each part from its own last message) */
+static void health_take(void) {
+    static const char sys[] = {'G', 'S', 'E', 'B', '?', 'Q', 'R', 'I'};      /* by u-blox gnssid */
+    int64_t           now   = now_ms();
+    int               n     = 0;
+
+    pthread_mutex_lock(&pos_lock);
+    health_at = now;
+    snprintf(health.path, sizeof(health.path), "%s", gpsdata.dev.path[0] ? gpsdata.dev.path : port);
+    if (gpsdata.dev.driver[0]) snprintf(health.driver, sizeof(health.driver), "%s", gpsdata.dev.driver);
+    health.mode = gpsdata.fix.mode;
+    health.seen = gpsdata.satellites_visible;
+    health.used = gpsdata.satellites_used;
+    for (int i = 0; i < gpsdata.satellites_visible && i < MAXCHANNELS && n < GPS_SATS; i++) {
+        const struct satellite_t *v = &gpsdata.skyview[i];
+
+        if (v->PRN <= 0) continue;
+        health.sat[n].prn  = v->PRN;
+        health.sat[n].ss   = isfinite(v->ss) && v->ss > 0 ? (short)lround(v->ss) : 0;
+        health.sat[n].used = v->used;
+        health.sat[n].sys  = v->gnssid < sizeof(sys) ? sys[v->gnssid] : '?';
+        n++;
+    }
+    health.nsat  = n;
+    health.hdop  = gpsdata.dop.hdop;
+    health.pdop  = gpsdata.dop.pdop;
+    health.eph   = gpsdata.fix.eph;
+    health.epv   = gpsdata.fix.epv;
+    health.speed = gpsdata.fix.speed;
+    health.track = gpsdata.fix.track;
+    health.utc   = gpsdata.fix.time.tv_sec > 0 ? (long)gpsdata.fix.time.tv_sec : health.utc;
+    if (gpsdata.fix.mode >= MODE_2D && isfinite(gpsdata.fix.latitude) && isfinite(gpsdata.fix.longitude)) {
+        health.lat = gpsdata.fix.latitude;
+        health.lon = gpsdata.fix.longitude;
+        health.alt = gpsdata.fix.mode == MODE_3D ? gpsdata.fix.altMSL : NAN;
+        fix_at     = now;
+    }
+    if (gpsdata.fix.time.tv_sec > 0 &&                  /* a new position: counted once, for the rate */
+        (gpsdata.fix.time.tv_sec != rate_last_s || gpsdata.fix.time.tv_nsec != rate_last_ns)) {
+        rate_last_s  = (long)gpsdata.fix.time.tv_sec;
+        rate_last_ns = gpsdata.fix.time.tv_nsec;
+        rate_n++;
+    }
+    reports_n++;
+    if (now - rate_from >= 3000) {                      /* over three seconds */
+        health.rate    = rate_from ? rate_n * 1000.0 / (double)(now - rate_from) : 0;
+        health.reports = rate_from ? reports_n * 1000.0 / (double)(now - rate_from) : 0;
+        rate_from      = now;
+        rate_n = reports_n = 0;
+    }
+    pthread_mutex_unlock(&pos_lock);
+}
+
 /* A report from gpsd: the position for the other threads; for the GPS window, its flags into the next copy */
 static void report(void) {
     status = GPS_STATUS_WORKING;
@@ -150,6 +212,7 @@ static void report(void) {
         gpsd_fix = true;
         pthread_mutex_unlock(&pos_lock);
     }
+    health_take();
     win_set |= gpsdata.set;
 }
 
@@ -365,6 +428,58 @@ bool gps_last_fix(double *lat, double *lon, int *age) {
     }
     pthread_mutex_unlock(&pos_lock);
     return have;
+}
+
+void gps_health(gps_health_t *h) {
+    int64_t now = now_ms();
+
+    pthread_mutex_lock(&pos_lock);
+    *h = health;
+    h->report_age_ms = health_at < 0 ? -1 : (int)(now - health_at);
+    h->fix_age_ms    = fix_at < 0 ? -1 : (int)(now - fix_at);
+    h->reporting     = health_at >= 0 && now - health_at < 5000;
+    if (fix_at < 0) h->lat = h->lon = h->alt = NAN;
+    pthread_mutex_unlock(&pos_lock);
+}
+
+/* The first line of a file, its end cut */
+static void first_line(const char *path, char *out, size_t n) {
+    FILE *f = fopen(path, "r");
+
+    out[0] = 0;
+    if (!f) return;
+    if (!fgets(out, (int)n, f)) out[0] = 0;
+    fclose(f);
+    out[strcspn(out, "\r\n")] = 0;
+}
+
+void gps_bt_link(char *mac, size_t mac_n, char *name, size_t name_n, char *state, size_t state_n) {
+    FILE  *f = fopen("/mnt/btcat.conf", "r");
+    char   l[128];
+    glob_t g;
+
+    mac[0] = name[0] = 0;
+    while (f && fgets(l, sizeof(l), f))
+        if (!strncmp(l, "BTGPS_MAC=", 10)) {
+            snprintf(mac, mac_n, "%s", l + 10);
+            mac[strcspn(mac, "\r\n \"'")] = 0;
+        }
+    if (f) fclose(f);
+    first_line("/tmp/btgps.state", state, state_n);
+    if (!mac[0]) return;
+    snprintf(l, sizeof(l), "/var/lib/bluetooth/*/%s/info", mac);   /* BlueZ's own record of it: its name */
+    if (glob(l, 0, NULL, &g) == 0) {
+        FILE *i = fopen(g.gl_pathv[0], "r");
+
+        while (i && fgets(l, sizeof(l), i))
+            if (!strncmp(l, "Name=", 5)) {
+                snprintf(name, name_n, "%s", l + 5);
+                name[strcspn(name, "\r\n")] = 0;
+                break;
+            }
+        if (i) fclose(i);
+        globfree(&g);
+    }
 }
 
 void gps_phone_set(double lat, double lon, int acc) {

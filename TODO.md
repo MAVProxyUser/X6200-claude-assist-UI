@@ -23,7 +23,9 @@ approved that day.
    serial port and the GPS is its own. Tried on the radio with an address that is not there (it keeps trying, CAT
    untouched). The Garmin GLO 2 paired 2026-11-18 (no PIN, channel 1, NMEA at 10 Hz): the kernel makes no RFCOMM
    TTYs, so `rfcomm connect` could never have worked; btgps-bridge (a socket onto a pty) feeds gpsd instead, which
-   reads it (NMEA0183). Left: its first fix under open sky, and that fix on page I.
+   reads it (NMEA0183). F SYSTEM > GPS shows its health (link, fix, accuracy, satellites, time, what uses it) and
+   the titles say GPS; C/D's sun and AIRSPACE take the GPS, then the phone, then the locator. Left: its first fix
+   under open sky, and that fix on page I.
 
 *Hardware to plug in*
 

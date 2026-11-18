@@ -32,6 +32,7 @@
 #include "buttons.h"
 #include "cfg/cfg_api.h"
 #include "gps.h"
+#include "station.h"          /* station_position: the GPS, the phone, the locator */
 #include "gui_events.h"
 #include "keyboard.h"
 #include "main_screen.h"
@@ -153,7 +154,6 @@ static double       c_lat, c_lon;   /* the scope's centre */
 static bool         c_qth, c_ok;    /* the station's place (GPS or locator); any centre at all */
 static char         c_from[40];     /* where the centre comes from, said in the head */
 
-#define FIX_MAX_S 600               /* a GPS or phone position this recent is the centre */
 
 /* The receivers' chooser (the user, 2026-11-15: "it should pop up and say there are two devices or more that can
  * handle the band, and allow the user to select. the LISTEN button should be able to cycle through them all after
@@ -366,16 +366,16 @@ static bool proj(double lat, double lon, double *x, double *y) {
     return *x >= -20 && *y >= -20 && *x < SC + 20 && *y < SC + 20;
 }
 
-/* The centre: a USB GPS (gpsd), else the QTH locator (Settings > General), else the traffic's middle, moved there
- * slowly */
+/* The centre: a GPS's fix (gpsd: one on USB, or on Bluetooth through btgps-bridge), else the phone's position (the
+ * Panel page's), both under 10 minutes old (station_position), else the QTH locator (Settings > General), else the
+ * traffic's middle, moved there slowly */
 static void find_centre(double now) {
-    const char *q = params.qth.x;
+    const char *q = params.qth.x, *src;
     double      lat, lon;
-    int         age;
 
-    if (gps_last_fix(&lat, &lon, &age) && age < FIX_MAX_S) {
+    if (station_position(&lat, &lon, &src) && strcmp(src, "Locator")) {
         c_lat = lat, c_lon = lon, c_ok = c_qth = true;
-        snprintf(c_from, sizeof(c_from), "GPS %.4f %.4f", lat, lon);
+        snprintf(c_from, sizeof(c_from), "%s %.4f %.4f", strcmp(src, "GPS") ? "PHONE" : "GPS", lat, lon);
         adsb_set_ref(true, c_lat, c_lon);
         return;
     }

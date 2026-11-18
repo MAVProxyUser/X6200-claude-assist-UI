@@ -92,6 +92,8 @@
 #include "theme.h"
 #include "gui_state.h"
 #include "btaudio.h"
+#include "gps.h"
+#include "station.h"          /* station_position: the GPS, the phone, else the locator */
 
 #include <math.h>
 #include <stdio.h>
@@ -1066,9 +1068,10 @@ static lv_obj_t *d_head_l, *d_row_l[12];
 static list_sbar_t *sb_bd, *sb_lg, *sb_dsel, *sb_drow;     /* D's bands, C's log, E's types and rows (list_sbar.h) */
 #define SBAR_X (SW - 15)                /* past the rows' widest text (97 of pixel_16's 8), inside the frame */
 
-/* E SYSTEM: the rest of the radio, from here */
+/* F SYSTEM: the rest of the radio, from here */
 typedef enum {
-    SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_POOL, SYS_CLASSIC, SYS_SHELL, SYS_BASEFW, SYS_HOME,
+    SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_POOL, SYS_GPS, SYS_CLASSIC, SYS_SHELL, SYS_BASEFW,
+    SYS_HOME,
     SYS_N
 } sysitem_t;
 static const struct {
@@ -1092,6 +1095,9 @@ static const struct {
     {"SDR POOL", "EVERY SDR ON USB (EACH RTL BY ITS NUMBER, A HACKRF, A BLADERF), WHOSE IT IS (B, AIRSPACE, A WATCH "
                  "CHANNEL, FREE) AND WHETHER IT IS HEARD: F1 USES ONE ON B, F2 STOPS OR STARTS IT, F3 HEARS OR MUTES IT, "
                  "F4 WATCHES B'S CHANNEL. APP HELD OPENS IT FROM ANY SCREEN."},
+    {"GPS", "HOW THE GPS IS DOING (ON USB, OR BLUETOOTH: SETTINGS > BLUETOOTH): ITS LINK, ITS FIX AND HOW GOOD, "
+            "EACH SATELLITE'S SIGNAL, ITS TIME, AND WHAT USES IT: AIRSPACE, PAGE I, THE GRIDS, C AND D'S SUN, THE "
+            "CLOCK. THE TITLE SAYS GPS WHILE ONE REPORTS."},
     {"CLASSIC RADIO", "THE FULL RADIO SCREEN, WITH TRANSMIT. THE SENTRY STAYS AWAY TILL YOU OPEN IT AGAIN: APP, THEN "
                       "THE SENTRY TILE."},
     {"UNIX SHELL", "A SHELL ON THE RADIO ITSELF (/BIN/SH, AS ROOT): A KEYBOARD TYPES INTO IT, TYPE OPENS THE ON-SCREEN "
@@ -1811,6 +1817,12 @@ static void dev_tags(char *dev, size_t n) {
     if (sdr_here) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s %s#", tag_hex, rtl_spectrum_dev_tag());
     if (adsb_here) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s ADS-B#", tag_hex);
     if (wr12_here) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s WR12#", tag_hex);
+    {                                   /* a GPS reporting through gpsd (F SYSTEM's GPS: how it is doing) */
+        gps_health_t g;
+
+        gps_health(&g);
+        if (g.reporting) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s GPS%s#", tag_hex, g.mode >= 2 ? "" : " NO FIX");
+    }
     ctl_get(&c);
     if (c.kind == CTL_BROWSER) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s WEB CTL#", tag_hex);
     else if (remote_server_viewers() > 0) snprintf(dev + strlen(dev), n - strlen(dev), "  #%s WEB#", tag_hex);
@@ -2001,11 +2013,10 @@ static void w_sdr_arm(bool on);
 /* NOW for a band: what the Sentry heard there in the last half hour, else what the sun says at the station's QTH.
  * One set of words on C and D: "3 SIG LIVE", "3 SIG 12 MIN", OPEN, CLOSED, OPENING, CLOSING, LOCAL, SET QTH */
 static bool sun_elev(time_t t, double *elev) {
-    const char *q = params.qth.x;
+    const char *src;
     double      lat, lon;
 
-    if (!q || strlen(q) < 4) return false;
-    qth_str_to_pos(q, &lat, &lon);
+    if (!station_position(&lat, &lon, &src)) return false;     /* the GPS's fix, the phone's, else the locator */
     double n   = t / 86400.0 + 2440587.5 - 2451545.0;
     double L   = fmod(280.460 + 0.9856474 * n, 360);
     double g   = fmod(357.528 + 0.9856003 * n, 360) * M_PI / 180;
@@ -3759,6 +3770,169 @@ static const char *pp_label(int k) {
         case 3: snprintf(s, sizeof(s), "%s", "Watch\nB's ch"); return s;
         default: return "Back";
     }
+}
+
+/* ---- The GPS panel, F SYSTEM's GPS (the user, 2026-11-18: "IF GPS is connected there should be a screen to view
+ * it's health"): what gpsd reads (gps_health) and the Bluetooth GPS's link (btgps-ctl), each second. F5, BACK, APP
+ * or the push closes it ---- */
+#define GP_ROWS 10
+#define GP_STEP 24
+static lv_obj_t *gp_box, *gp_head_l, *gp_row_l[GP_ROWS], *gp_foot_l;
+static bool      gp_on;
+
+/* The satellites, the best heard first (those in the fix before the rest), from the n-th: "G05 42" each, green in
+ * the fix, the tags' colour heard, dim not heard. How many went in */
+static int gp_sats(char *s, size_t sz, gps_health_t *h, int from, int most) {
+    int k = 0;
+
+    s[0] = 0;
+    for (int i = from; i < h->nsat && k < most; i++, k++) {
+        char hex[8];
+
+        if (h->sat[i].used) snprintf(hex, sizeof(hex), "%06X", (unsigned)theme_hex(TC_avail_on));
+        else if (h->sat[i].ss) snprintf(hex, sizeof(hex), "%s", tag_hex);
+        else snprintf(hex, sizeof(hex), "%06X", (unsigned)theme_hex(TC_text_dim));
+        snprintf(s + strlen(s), sz - strlen(s), "#%s %c%02d %2d# ", hex, h->sat[i].sys, h->sat[i].prn % 100,
+                 h->sat[i].ss);
+    }
+    return k;
+}
+
+static int gp_sat_cmp(const void *a, const void *b) {
+    const gps_sat_t *x = a, *y = b;
+
+    if (x->used != y->used) return x->used ? -1 : 1;
+    return y->ss - x->ss;
+}
+
+static void gp_fill(void) {
+    gps_health_t h;
+    char         mac[24], name[64], st[16], t[GP_ROWS][320], head[160], s[64];
+    const char  *src = "";
+    double       plat, plon;
+    bool         bt, have = station_position(&plat, &plon, &src);
+
+    if (!gp_box) return;
+    gps_health(&h);
+    gps_bt_link(mac, sizeof(mac), name, sizeof(name), st, sizeof(st));
+    qsort(h.sat, (size_t)h.nsat, sizeof(h.sat[0]), gp_sat_cmp);
+    for (char *c = st; *c; c++) *c = (char)toupper((unsigned char)*c);
+    for (char *c = name; *c; c++) *c = (char)toupper((unsigned char)*c);
+    bt = mac[0] && (!h.path[0] || !strncmp(h.path, "/dev/pts/", 9));
+    for (int r = 0; r < GP_ROWS; r++) t[r][0] = 0;
+
+    if (mac[0])
+        snprintf(t[0], sizeof(t[0]), "LINK       BLUETOOTH %s %s: %s", name[0] ? name : "GPS", mac,
+                 !strcmp(st, "TRYING") ? "TRYING (SWITCHED OFF OR OUT OF RANGE?)" : st[0] ? st : "NOT STARTED");
+    else if (h.reporting)
+        snprintf(t[0], sizeof(t[0]), "LINK       USB, %s", h.path);
+    else
+        snprintf(t[0], sizeof(t[0]), "LINK       NONE: A GPS ON USB, OR A BLUETOOTH ONE (SETTINGS > BLUETOOTH)");
+    if (h.reporting)
+        snprintf(t[1], sizeof(t[1]), "GPSD       READS %s%s%s%s, %.1f %s A SECOND, LAST %.1f S AGO", h.path,
+                 h.driver[0] ? " (" : "", h.driver, h.driver[0] ? ")" : "", h.rate > 0 ? h.rate : h.reports,
+                 h.rate > 0 ? "POSITIONS" : "REPORTS", h.report_age_ms / 1000.0);
+    else if (h.report_age_ms >= 0)
+        snprintf(t[1], sizeof(t[1]), "GPSD       NOTHING FOR %d S (GPSD %s)", h.report_age_ms / 1000,
+                 gps_status() == GPS_STATUS_WORKING ? "THERE" : "NOT ANSWERING");
+    else
+        snprintf(t[1], sizeof(t[1]), "GPSD       NO REPORT YET (GPSD %s)",
+                 gps_status() == GPS_STATUS_WORKING ? "THERE" : "NOT ANSWERING");
+    if (h.reporting) {
+        snprintf(t[2], sizeof(t[2]), "FIX        %s, %d OF %d SATELLITES USED", h.mode == 3 ? "3D" : h.mode == 2 ? "2D" :
+                 "NONE YET", h.used, h.seen);
+        if (isfinite(h.hdop) && h.mode >= 2)
+            snprintf(t[2] + strlen(t[2]), sizeof(t[2]) - strlen(t[2]), "   HDOP %.1f%s", h.hdop,
+                     h.hdop <= 1.5 ? " GOOD" : h.hdop <= 4 ? " FAIR" : " POOR");
+        if (isfinite(h.pdop) && h.mode >= 2)
+            snprintf(t[2] + strlen(t[2]), sizeof(t[2]) - strlen(t[2]), "   PDOP %.1f", h.pdop);
+        if (h.mode == 3 && isfinite(h.eph) && isfinite(h.epv))
+            snprintf(t[3], sizeof(t[3]), "ACCURACY   ABOUT %.0f M ACROSS, %.0f M UP (GPSD'S ESTIMATE)", h.eph, h.epv);
+        else if (h.mode >= 2 && isfinite(h.eph))
+            snprintf(t[3], sizeof(t[3]), "ACCURACY   ABOUT %.0f M ACROSS (GPSD'S ESTIMATE)", h.eph);
+        else
+            snprintf(t[3], sizeof(t[3]), "ACCURACY   - (NO FIX)");
+    }
+    if (isfinite(h.lat) && isfinite(h.lon)) {
+        char grid[16] = "";
+
+        qth_pos_to_str(h.lat, h.lon, grid);
+        snprintf(t[4], sizeof(t[4]), "POSITION   %.5f %c  %.5f %c   GRID %s", fabs(h.lat), h.lat < 0 ? 'S' : 'N',
+                 fabs(h.lon), h.lon < 0 ? 'W' : 'E', grid);
+        if (isfinite(h.alt))
+            snprintf(t[4] + strlen(t[4]), sizeof(t[4]) - strlen(t[4]), "   %.0f M UP", h.alt);
+        if (h.fix_age_ms > 5000)
+            snprintf(t[4] + strlen(t[4]), sizeof(t[4]) - strlen(t[4]), "   (%d S OLD)", h.fix_age_ms / 1000);
+    } else if (h.reporting) {
+        snprintf(t[4], sizeof(t[4]), "POSITION   NONE YET: IT NEEDS OPEN SKY (A WINDOW AT LEAST)");
+        snprintf(t[5], sizeof(t[5]), "           A FIRST FIX CAN TAKE A FEW MINUTES; ITS TIME COMES FIRST");
+    }
+    if (h.reporting && h.mode >= 2 && isfinite(h.speed))
+        snprintf(t[5], sizeof(t[5]), h.speed < 0.5 ? "MOVING     STANDING STILL (UNDER 2 KM/H)" :
+                 "MOVING     %.0f KM/H, HEADING %.0f DEG", h.speed * 3.6, isfinite(h.track) ? h.track : 0.0);
+    if (h.utc > 0) {
+        time_t    u = (time_t)h.utc;
+        struct tm g;
+
+        gmtime_r(&u, &g);
+        strftime(s, sizeof(s), "%Y-%m-%d %H:%M:%S UTC", &g);
+        snprintf(t[6], sizeof(t[6]), "TIME       %s, THE GPS'S OWN", s);
+    } else if (h.reporting) {
+        snprintf(t[6], sizeof(t[6]), "TIME       NONE YET (IT COMES WITH THE FIRST SATELLITES)");
+    }
+    if (h.nsat) {
+        char a[200], b[200];
+        int  n1 = gp_sats(a, sizeof(a), &h, 0, 9), n2 = gp_sats(b, sizeof(b), &h, n1, 9);
+
+        snprintf(t[7], sizeof(t[7]), "SATELLITES %s", a);
+        if (n2) snprintf(t[8], sizeof(t[8]), "           %s%s", b, n1 + n2 < h.nsat ? "AND MORE" : "");
+    } else if (h.reporting) {
+        snprintf(t[7], sizeof(t[7]), "SATELLITES NONE HEARD YET");
+    }
+    if (have && !strcmp(src, "GPS"))
+        snprintf(t[9], sizeof(t[9]), "USED FOR   AIRSPACE, PAGE I, THE GRIDS (FT8, JS8, WSPR), C/D'S SUN, WEATHER, NTP");
+    else if (have)
+        snprintf(t[9], sizeof(t[9]), "USED FOR   NOTHING YET: THE APPS USE %s TILL THE GPS HAS A FIX",
+                 !strcmp(src, "Phone") ? "THE PHONE'S POSITION" : "THE LOCATOR");
+    else
+        snprintf(t[9], sizeof(t[9]), "USED FOR   NOTHING YET: NO FIX, NO LOCATOR SET (SETTINGS > GENERAL)");
+
+    if (!h.reporting && !mac[0])
+        snprintf(head, sizeof(head), "GPS: NONE REPORTING");
+    else
+        snprintf(head, sizeof(head), "GPS: %s%s%s", h.reporting ? (h.mode == 3 ? "3D FIX" : h.mode == 2 ? "2D FIX" :
+                 "NO FIX YET") : "NOT REPORTING", bt ? ", BLUETOOTH " : h.reporting ? ", USB" : "",
+                 bt ? (name[0] ? name : mac) : "");
+    lv_label_set_text(gp_head_l, head);
+    for (int r = 0; r < GP_ROWS; r++) lv_label_set_text(gp_row_l[r], t[r]);
+    lv_label_set_text_fmt(gp_foot_l, "SATELLITES: #%06X IN THE FIX#, #%s HEARD#, #%06X NOT HEARD#; THEIR SIGNAL IN DB-HZ",
+                          (unsigned)theme_hex(TC_avail_on), tag_hex,
+                          (unsigned)theme_hex(TC_text_dim));
+}
+
+static const char *gp_label(int k) {
+    return k == 4 ? "Back" : "";
+}
+
+static void gp_open(void) {
+    if (g_portrait) {                   /* drawn on the landscape screen: not over G held up */
+        w_say("GPS: FROM ANOTHER SCREEN", "GPS", "THE GPS PANEL OPENS FROM F SYSTEM.");
+        return;
+    }
+    if (sp_on) sp_hide();
+    if (pp_on) pp_close();
+    gp_on = true;
+    gp_fill();
+    lv_obj_clear_flag(gp_box, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(gp_box);
+    pp_keys();
+}
+
+static void gp_close(void) {
+    gp_on = false;
+    if (gp_box) lv_obj_add_flag(gp_box, LV_OBJ_FLAG_HIDDEN);
+    pp_keys();
+    show_screen();
 }
 
 /* An RTL-SDR plugged in (its rows coming) while what is to be heard has the stick and the X6200 stands in for it:
@@ -6130,6 +6304,7 @@ static void blink_cb(lv_timer_t *t) {
     if (scr == SCR_SYSTEM && n % 2 == 0) sys_load_show();   /* its load each second */
     if (scr == SCR_RTL) watch_show();                       /* the watch channels, open or quiet */
     if (pp_on) pp_fill();                                   /* the pool's panel: who has what, as it changes */
+    if (gp_on && n % 2 == 0) gp_fill();                     /* the GPS panel: each second */
     rds_show(false);
     g_rds_take();                                   /* C's entries named by it */
     sp_check();                                     /* B: which SDR, when more than one tunes its channel */
@@ -6182,6 +6357,7 @@ static const char *f_label(int k) {
     static char s[24];
 
     if (pp_on) return pp_label(k);
+    if (gp_on) return gp_label(k);
     switch (scr) {
         case SCR_SCAN: {        /* C's keys, for the X6200: SCAN its band, the BAND, VIEW, LISTEN, SCAN CFG */
             static const char *const views[] = {"RTL", "Split", "X6200"};
@@ -6533,6 +6709,7 @@ static void sys_open_async(void *arg) {
 }
 
 static void pp_open(void);
+static void gp_open(void);
 
 static void sys_open(int i) {
     if (i == SYS_VHF) {
@@ -6541,6 +6718,10 @@ static void sys_open(int i) {
     }
     if (i == SYS_POOL) {
         pp_open();
+        return;
+    }
+    if (i == SYS_GPS) {
+        gp_open();
         return;
     }
     if (i == SYS_HOME) {
@@ -6665,6 +6846,10 @@ static void fkey(int k) {
     if (k >= 0 && k < 5 && btn[k].disabled) return;     /* dimmed: a tap on its box does nothing either */
     if (pp_on) {                        /* the SDR pool's panel: its keys */
         pp_action(k);
+        return;
+    }
+    if (gp_on) {                        /* the GPS panel: F5 closes it, the rest nothing */
+        if (k == 4) gp_close();
         return;
     }
     if (sp_on) {                        /* B's SDR box: F4 (LISTEN) goes down it, the rest wait */
@@ -6985,6 +7170,10 @@ static void press(void) {
 static void key_cb(lv_event_t *e) {
     uint32_t key = *((uint32_t *)lv_event_get_param(e));
 
+    if (gp_on) {                        /* the GPS panel: BACK or the push closes it, the MFK nothing */
+        if (key == LV_KEY_ESC || key == LV_KEY_ENTER) gp_close();
+        return;
+    }
     if (pp_on) {                        /* the SDR pool's panel: the MFK goes through it, its push uses one on B */
         switch (key) {
             case LV_KEY_LEFT:
@@ -7069,6 +7258,8 @@ static void click_cb(lv_event_t *e) {
     if (indev && lv_indev_get_type(indev) == LV_INDEV_TYPE_ENCODER) {
         if (help_on)
             help_show(false);
+        else if (gp_on)
+            gp_close();
         else if (pp_on)
             pp_action(0);
         else if (sp_on)
@@ -7197,7 +7388,8 @@ static bool front_key(int key, int state) {
             if (tap && !g_portrait) help_show(true);    /* drawn on the landscape screen: none held up */
             return true;
         case KEYPAD_APP:                /* held: the SDR pool's panel, from any screen */
-            if (tap && pp_on) pp_close();
+            if (tap && gp_on) gp_close();
+            else if (tap && pp_on) pp_close();
             else if (tap) go(SCR_SYSTEM);
             else if (hold && pp_on) pp_close();
             else if (hold) pp_open();
@@ -7312,7 +7504,7 @@ static bool front_key(int key, int state) {
             }
             return f2_roll && f2_rolled;    /* a hold that rolled: nothing more of it */
         case KEYPAD_F3:                 /* B with a Meteor picture: held, its next view (colour, each channel) */
-            if (scr != SCR_RTL || !met_on || sp_on || pp_on) return false;
+            if (scr != SCR_RTL || !met_on || sp_on || pp_on || gp_on) return false;
             if (state == KEYPAD_LONG) {
                 met_next_view();
                 return true;
@@ -7321,7 +7513,7 @@ static bool front_key(int key, int state) {
         case KEYPAD_F4: {               /* B: a tap LISTEN as ever; held and the VFO turned, its SDRs (b_roll), the one
                                          * chosen used on letting go; held and let go unturned, its channel watched
                                          * on a spare RTL, or no longer */
-            if (scr != SCR_RTL || sp_on || pp_on) return false;
+            if (scr != SCR_RTL || sp_on || pp_on || gp_on) return false;
             if (state == KEYPAD_PRESS) {
                 f4_roll   = true;
                 f4_rolled = false;
@@ -9820,6 +10012,20 @@ static void build_overlays(void) {
                       "F5, BACK OR APP: CLOSE");
     lv_obj_add_flag(pp_box, LV_OBJ_FLAG_HIDDEN);
     pp_on = false;
+
+    gp_box = rect(root, 30, 56, SW - 60, 50 + GP_ROWS * GP_STEP + 44, 3, false);
+    lv_obj_add_flag(gp_box, LV_OBJ_FLAG_CLICKABLE);
+    gp_head_l = label(gp_box, &pixel_20, amb, 12, 12, SW - 90, LV_TEXT_ALIGN_LEFT, "");
+    for (int r = 0; r < GP_ROWS; r++) {
+        gp_row_l[r] = label(gp_box, &pixel_20, amb, 9, 50 + r * GP_STEP, SW - 84, LV_TEXT_ALIGN_LEFT, "");
+        lv_label_set_recolor(gp_row_l[r], true);            /* the satellites in the fix, heard, not heard */
+        lv_label_set_long_mode(gp_row_l[r], LV_LABEL_LONG_CLIP);
+        lv_obj_set_height(gp_row_l[r], GP_STEP);
+    }
+    gp_foot_l = label(gp_box, &pixel_20, amb, 12, 50 + GP_ROWS * GP_STEP + 8, SW - 90, LV_TEXT_ALIGN_LEFT, "");
+    lv_label_set_recolor(gp_foot_l, true);
+    lv_obj_add_flag(gp_box, LV_OBJ_FLAG_HIDDEN);
+    gp_on = false;
 
     help_frame = rect(root, 14, 52, SW - 28, scr_h - 56, 3, false);
     lv_obj_add_flag(help_frame, LV_OBJ_FLAG_CLICKABLE);
