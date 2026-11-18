@@ -164,8 +164,10 @@ params_t params = {
     .base_daily_check       = { .x = false, .name = "base_daily_check" },
 
     .theme                  = { .x = THEME_SIMPLE, .name="theme"},
-#ifdef BOARD_X6200
-    .theme_name             = { .x = "Sentry", .max_len = 31, .name = "theme_name" },   /* the Sentry's look, all over */
+#ifndef BOARD_GSOC
+    /* The Sentry's look, all over: the X6200's and, from 2026-11-18, the X6100's (the owner: "both radios should have
+     * fully replaced the old look and feel everywhere"); a radio that chose another theme keeps it */
+    .theme_name             = { .x = "Sentry", .max_len = 31, .name = "theme_name" },
 #else
     .theme_name             = { .x = "RF.Guru", .max_len = 31, .name = "theme_name" },
 #endif

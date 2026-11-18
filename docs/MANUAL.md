@@ -7983,7 +7983,8 @@ restart.
 
 | Theme | Look |
 |---|---|
-| RF.Guru | default: near-black surfaces, gold for what is on, electric blue as the second accent |
+| Sentry | default on the X6200 and the X6100 (a card that chose another keeps it): the Sentry's amber on black all over the radio, every app and menu, the spectrum and waterfall in its gradient |
+| RF.Guru | near-black surfaces, gold for what is on, electric blue as the second accent (the GSOC head's default) |
 | Classic | black, grey keys, the look of a classic transceiver; Arial, its own font |
 | Outdoor | for the sun: light, black text, grey waterfall, S-meter in one grey gradient |
 | Outdoor-Negative | Outdoor with the lightness inverted: dark, white text, the hues kept |
