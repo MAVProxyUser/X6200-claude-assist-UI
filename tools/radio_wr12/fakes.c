@@ -535,6 +535,11 @@ int gui_run(void) {
 
 static uint64_t clock_ms = 1000000;
 
+/* util.cpp's heartbeat for x6x00-gui-watch (radio.c marks one a second): nothing here */
+void alive_mark(const char *path) {
+    (void)path;
+}
+
 uint64_t get_time() {
     return clock_ms;
 }
