@@ -46,6 +46,9 @@ table.xy{border-collapse:collapse;font-size:13.5px;width:100%}
 .tscroll{overflow-x:auto}
 #tgcard table.ch th,#tgcard table.ch td{padding:4px 4px}
 #tgrows button{padding:3px 9px}
+#laytab td{font-family:inherit;white-space:nowrap}
+#laytab td small,#laytab th small{color:var(--dim);font-weight:400}
+#laytab button{padding:3px 10px}
 table.xy th{color:var(--dim);font-weight:500;text-align:left;padding:3px 4px}
 table.xy td{padding:3px 4px}
 table.xy input{width:100%;min-width:60px;font:14px ui-monospace,monospace}
@@ -79,7 +82,7 @@ table.xy input{width:100%;min-width:60px;font:14px ui-monospace,monospace}
     <section class="df-card" id="tunecard">
       <h3>Tune</h3>
       <div class="tune">
-        <div style="grid-column:1/-1"><label for="freq">Frequency, MHz (24 to 1766)</label>
+        <div style="grid-column:1/-1"><label for="freq" id="freqlbl">Frequency, MHz (100 to 1000)</label>
           <div class="frow"><input id="freq" inputmode="decimal" autocomplete="off"><button id="go" class="primary">Tune</button>
           <button id="dn" title="A channel down">&minus;</button><button id="up" title="A channel up">+</button></div></div>
         <div><label for="band">Band</label><select id="band"></select></div>
@@ -125,12 +128,40 @@ table.xy input{width:100%;min-width:60px;font:14px ui-monospace,monospace}
       when there is one. It stays on the radio.</p>
       <h3 style="margin-top:16px">Array</h3>
       <div class="sets">
+        <div><label for="ant">Antennas</label><select id="ant"><option value="0">KrakenRF's whips</option><option value="1">Others</option></select></div>
         <div><label for="kind">Layout</label><select id="kind"></select></div>
-        <div id="sizebox"><label for="size">Radius / spacing, cm</label><input id="size" type="number" min="1" max="500" step="0.5"></div>
+        <div id="sizebox"><label for="size" id="sizelbl">Radius / spacing, cm</label><input id="size" type="number" min="1" max="500" step="0.5"></div>
         <div><label for="heading">Heading (ANT 0), degrees</label><input id="heading" type="number" min="0" max="359" step="1"></div>
         <div id="fitbox"><label>&nbsp;</label><button id="fitsize">Size for this band</button></div>
       </div>
       <p class="note" id="calc"></p>
+      <p class="note" id="whipnote"></p>
+      <h3 style="margin-top:16px">Every layout at <span id="laysf"></span> MHz</h3>
+      <div class="tscroll"><table class="ch" id="laytab"><thead><tr><th>Layout</th><th>Size, cm<br><small>s <b id="laystyp">0.33</b> (0.2-0.5)</small></th><th>Apart, cm<br><small>(widest)</small></th><th>Res.</th><th></th></tr></thead><tbody id="layrows"></tbody></table></div>
+      <p class="note">Five antennas set out in any of these, sized for the target. Size: a circle's (and 4+1's)
+      radius, a line's (and the L's) spacing, the minimum-redundancy line's unit; KrakenRF's spacing over the wavelength
+      s under 0.5 (over it the bearing can be ambiguous), over about 0.2 (under it coarse), 0.33 its usual choice, which
+      Use sets (r a radius, d a spacing). Apart: neighbours, and in brackets the widest pair, at 0.33; Res.: the
+      resolution there, roughly; even: ROOT-MUSIC and smoothing work on it. <b>UCA</b>: KrakenRF's circles, all round. <b>ULA</b>: a line across the
+      way you face, 180 degrees, front and back alike, best straight out. <b>4+1</b>: four round one in the middle, the
+      Adcock square with its sense antenna. <b>L-5</b>: two short lines at a right angle, all round with no mirror.
+      <b>MRL-5</b>: a minimum-redundancy line (Moffet, 1968), antennas at 0, 1, 4, 7 and 9 units: every spacing from 1
+      to 9 units, so the width of a ten-antenna line from five; still a line, and uneven, so MUSIC on the grid only (no
+      ROOT-MUSIC, smoothing or FB). Equal antenna cables for all of them, within a centimetre.</p>
+      <h3 style="margin-top:16px">Antenna calibration</h3>
+      <div class="sets">
+        <div><label for="acbrg">The source's bearing, degrees</label><input id="acbrg" type="number" min="0" max="359" step="1" value="0"></div>
+        <div><label>&nbsp;</label><button id="acgo" class="primary">Calibrate on it</button></div>
+        <div id="acforgetbox"><label>&nbsp;</label><button id="acforget">Forget this one</button></div>
+      </div>
+      <div class="kv" id="ackv"></div>
+      <p class="note">The noise source lines up the Kraken's receivers, not what is in front of them: antenna cables of
+      unequal lengths, unlike whips. A transmitter at a bearing you know measures that. Put one you may use there (a
+      handheld on low power on a band you are licensed for, an ISM-band device) on the target's frequency, ten wavelengths or more away in the clear, at the bearing above
+      from the array's forward (0: straight out in front; a line's 0 is straight out from it), key it, and press
+      Calibrate on it: a few seconds of it over the squelch are taken, each antenna's phase against what the layout
+      gives there. It is kept on the card for this frequency and used within 2 % of it (a cable's phase grows with the
+      frequency): take one a band. Equal cables are still best; this mends what they cannot.</p>
       <h3 style="margin-top:16px">Custom layout</h3>
       <div class="ared">
         <canvas id="arred" width="300" height="300" aria-label="The custom layout: forward up, drag an antenna to move it"></canvas>
@@ -190,6 +221,18 @@ function fill(sel, items, val) {
   if (document.activeElement !== s) s.value = val;
 }
 
+/* the band presets, those the antennas do not hear greyed out */
+function fillBands(c) {
+  const s = $('band'), items = lists.bands.map(b => `${b[0]} ${mhz(b[1])}${b[3] ? '' : ' (other antennas)'}`).concat(c.band < 0 ? ['(tuned between)'] : []);
+  const key = items.join('|');
+  if (s.dataset.key !== key) {
+    s.innerHTML = '';
+    items.forEach((t, i) => { const o = new Option(t, i); if (i < lists.bands.length && !lists.bands[i][3]) o.disabled = true; s.add(o); });
+    s.dataset.key = key;
+  }
+  if (document.activeElement !== s) s.value = c.band < 0 ? lists.bands.length : c.band;
+}
+
 function segOn(id, v) { for (const b of $(id).children) b.classList.toggle('on', +b.dataset.v === +v); }
 
 function mhz(hz) { return (hz / 1e6).toFixed(4); }
@@ -209,7 +252,7 @@ function layout(c) {
   if (Array.isArray(c.xy) && c.xy.length) return c.xy.map(p => [p[0] / 1000, p[1] / 1000]);
   const k = lists.kinds[c.kind], n = k[2], s = c.size_mm / 1000, pts = [];
   for (let m = 0; m < n; m++) {
-    if (k[1]) pts.push([0, ((n - 1) / 2 - m) * s]);                                  /* a line across, ANT 0 left */
+    if (k[1] === 1) pts.push([0, ((n - 1) / 2 - m) * s]);                            /* a line across, ANT 0 left */
     else { const a = 2 * Math.PI * m / n; pts.push([s * Math.cos(a), -s * Math.sin(a)]); }
   }
   return pts;
@@ -359,7 +402,7 @@ function show() {
     (live && D.do.peaks.length ? `<b>${D.do.nsrc > 1 ? 'Other sources' : 'Other peaks'}</b><span>${D.do.peaks.map(p => p.toFixed(0) + '&deg;').join(', ')}</span>` : '');
   /* tuning and settings */
   if (editing !== 'freq') $('freq').value = mhz(c.target);
-  fill('band', lists.bands.map(b => `${b[0]} ${mhz(b[1])}`).concat(c.band < 0 ? ['(tuned between)'] : []), c.band < 0 ? lists.bands.length : c.band);
+  fillBands(c);
   fill('bw', lists.bws.map(b => b / 1000 + ' kHz'), c.bw);
   fill('method', lists.methods, c.method);
   fill('rate', lists.rates.map(r => (r / 1e6).toFixed(3) + ' MS/s'), c.rate);
@@ -374,18 +417,47 @@ function show() {
   if (editing !== 'size') $('size').value = (c.size_mm / 10).toFixed(1);
   if (editing !== 'heading') $('heading').value = c.heading;
   segOn('follow', c.follow); segOn('auto', c.auto);
-  /* the calculator: KrakenRF's spacing over the wavelength */
+  /* the calculator: KrakenRF's spacing over the wavelength, and every layout at the target (the radio's numbers) */
   const k = lists.kinds[c.kind], lam = 299.792458 / (c.target / 1e6), n = k[2], custom = k[0] === 'CUSTOM';
+  const A = D.arr || {layouts: [], s_typ: 0.33, lo: 24e6, hi: 1766e6, ant: 0, whip: '', qw_cm: 0};
   $('sizebox').classList.toggle('gone', custom); $('fitbox').classList.toggle('gone', custom);
+  $('sizelbl').textContent = k[1] === 0 || k[1] === 2 ? 'Radius, cm' : k[1] === 4 ? 'Unit (the gaps are 1, 3, 3, 2 of it), cm' : 'Spacing, cm';
+  $('freqlbl').textContent = `Frequency, MHz (${A.lo / 1e6} to ${A.hi / 1e6})`;
+  if (document.activeElement !== $('ant')) $('ant').value = A.ant;
   if (custom) {
     const pr = pairs(layout(c).map(p => [p[0] * 100, p[1] * 100]));
-    $('calc').textContent = `Custom, ${n} antennas: the closest pair ${pr.near.toFixed(1)} cm apart, ${(pr.near / 100 / lam).toFixed(2)} wavelengths (0.5 or under is right; over it the bearing can be ambiguous), the widest ${pr.far.toFixed(1)} cm. Half a wavelength: ${(lam * 50).toFixed(1)} cm.`;
+    $('calc').textContent = `Custom, ${n} antennas: the closest pair ${pr.near.toFixed(1)} cm apart, ${(pr.near / 100 / lam).toFixed(2)} wavelengths (0.5 or under is right; over it the bearing can be ambiguous), the widest ${pr.far.toFixed(1)} cm. Half a wavelength: ${(lam * 50).toFixed(1)} cm. All on one line across, it is taken as a line.`;
   } else {
-    const d = k[1] ? c.size_mm / 1000 : 2 * (c.size_mm / 1000) * Math.sin(Math.PI / n), s = d / lam;
-    const want = k[1] ? 0.5 * lam : 0.5 * lam / (2 * Math.sin(Math.PI / n));
-    $('calc').textContent = `Spacing ${s.toFixed(2)} wavelengths (0.5 is right; over 0.5 the bearing can be ambiguous). For 0.5 here: ${(want * 100).toFixed(1)} cm. Half a wavelength: ${(lam * 50).toFixed(1)} cm.`;
-    $('fitsize').dataset.mm = Math.round(want * 2000) * 0.5;
+    const L = A.layouts.find(l => l[0] === k[0]);
+    if (L) {
+      const s = A.s_typ * (c.size_mm / 10) / (L[4] / 10);
+      $('calc').textContent = `Spacing ${s.toFixed(2)} wavelengths (under 0.5, or the bearing can be ambiguous; under about 0.2 it is coarse). For KrakenRF's ${A.s_typ} here: ${(L[4] / 10).toFixed(1)} cm (0.2 to 0.5: ${(L[3] / 10).toFixed(1)} to ${(L[5] / 10).toFixed(1)} cm). Half a wavelength: ${(lam * 50).toFixed(1)} cm.`;
+      $('fitsize').dataset.mm = L[4];
+    }
   }
+  $('whipnote').textContent = A.ant ? 'Your own antennas: any frequency the Kraken tunes (24-1766 MHz) is offered; the bearing is only as good as they hear and match.'
+    : `KrakenRF's whips hear 100 MHz to 1 GHz (bands outside are greyed out). Here ${A.whip ? 'pull out ' + A.whip + ' sections (KrakenRF\'s table)' : 'KrakenRF\'s table has no setting: about a quarter wave, ' + A.qw_cm.toFixed(0) + ' cm'}, every whip the same, on a ground plane (a car roof, a metal sheet).`;
+  $('laysf').textContent = mhz(c.target);
+  $('laystyp').textContent = A.s_typ;
+  const lk = A.layouts.map(l => l.join()).join('|') + c.kind;
+  if ($('layrows').dataset.key !== lk) {
+    $('layrows').dataset.key = lk;
+    $('layrows').innerHTML = A.layouts.map((l, i) => `<tr${lists.kinds[c.kind][0] === l[0] ? ' style="background:#1c2a3d"' : ''}>` +
+      `<td><b>${l[0]}</b><br><small>${l[9]}&deg;${l[10] ? ', even' : ''}</small></td>` +
+      `<td><b>${(l[4] / 10).toFixed(1)}</b> ${l[1] === 0 || l[1] === 2 ? 'r' : l[1] === 4 ? 'unit' : 'd'}<br><small>${(l[3] / 10).toFixed(1)}-${(l[5] / 10).toFixed(1)}</small></td>` +
+      `<td>${(l[6] / 10).toFixed(1)}<br><small>(${(l[7] / 10).toFixed(1)})</small></td><td>${l[8].toFixed(0)}&deg;</td>` +
+      `<td><button data-lay="${i}" data-mm="${l[4]}">Use</button></td></tr>`).join('');
+  }
+  /* the antenna side's calibration */
+  const ac = D.ac;
+  if (ac) {
+    const st = ['', 'Taking the source: ' + ac.pct + ' %', `Taken: the fit at its bearing ${ac.fit0} % before, ${ac.fit1} % with it`, 'Not taken: ' + ac.why][ac.state] || '';
+    const age = ac.use_age < 0 ? '' : ac.use_age < 3600 ? Math.round(ac.use_age / 60) + ' min ago' : ac.use_age < 172800 ? Math.round(ac.use_age / 3600) + ' h ago' : Math.round(ac.use_age / 86400) + ' days ago';
+    $('ackv').innerHTML = (st ? `<b>Last</b><span>${st}</span>` : '') +
+      `<b>In use</b><span>${ac.use ? `taken at ${mhz(ac.use_hz)} MHz on a source at ${ac.use_brg.toFixed(0)}&deg;${age ? ', ' + age : ''}: ` + ac.ph.map((p, m) => 'CH' + m + ' ' + (p >= 0 ? '+' : '') + p.toFixed(1) + '&deg;').slice(1).join(', ') : 'none near this frequency'}</span>` +
+      `<b>Kept</b><span>${ac.n} (one a frequency)</span>`;
+    $('acforgetbox').classList.toggle('gone', !ac.use);
+  } else $('ackv').innerHTML = '<b>In use</b><span>-- (direction finding not running)</span>';
   if (!ed) edStart();
   edCalc();
   /* the other targets */
@@ -610,6 +682,18 @@ $('follow').onclick = e => { if (e.target.dataset.v != null) set('follow', +e.ta
 $('auto').onclick = e => { if (e.target.dataset.v != null) set('auto', +e.target.dataset.v); };
 $('calnow').onclick = () => set('cal_now', 1);
 $('fitsize').onclick = () => set('size_mm', Math.round(+$('fitsize').dataset.mm));
+$('ant').onchange = e => set('ant', +e.target.value);
+$('layrows').onclick = async e => {
+  const b = e.target.closest('button[data-lay]'); if (!b) return;
+  await set('kind', +b.dataset.lay);
+  await set('size_mm', Math.round(+b.dataset.mm));
+};
+$('acgo').onclick = () => {
+  const v = +$('acbrg').value;
+  if (!(v >= 0 && v < 360)) { say('A bearing 0-359', true); return; }
+  set('acal', v);
+};
+$('acforget').onclick = () => { if (confirm('Forget the antenna calibration in use here?')) set('acal_forget', 1); };
 $('chs').onchange = e => { const m = +e.target.dataset.m; if (!isNaN(m)) set('mask', D.cfg.mask ^ (1 << m)); };
 function freeTg() { return (D.cfg.tg || []).findIndex(t => !t.hz); }
 $('spec').onclick = e => {

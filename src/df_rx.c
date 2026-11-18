@@ -82,7 +82,7 @@ void df_rx_cmd(const char *fmt, ...) {
     va_end(ap);
     pthread_mutex_lock(&lock);
     unsigned char k = (unsigned char)c[0];
-    if (k < 128 && k != 'c' && k != 'Q') snprintf(kept[k], sizeof(kept[k]), "%s", c);
+    if (k < 128 && !strchr("cQbB", k)) snprintf(kept[k], sizeof(kept[k]), "%s", c);
     say_locked(c);
     pthread_mutex_unlock(&lock);
 }
@@ -143,6 +143,9 @@ static void take(const uint8_t *b, ssize_t n) {
     } else if (n >= (ssize_t)sizeof(df_gp_msg_t) && !memcmp(b, "DFGP", 4)) {
         memcpy(&snap.gp, b, sizeof(snap.gp));
         snap.have_gp = true;
+    } else if (n >= (ssize_t)sizeof(df_ac_msg_t) && !memcmp(b, "DFAC", 4)) {
+        memcpy(&snap.ac, b, sizeof(snap.ac));
+        snap.have_ac = true;
     }
     pthread_mutex_unlock(&lock);
 }

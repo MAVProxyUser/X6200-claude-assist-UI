@@ -35,6 +35,8 @@ typedef struct {
     uint32_t    st_ms;          /* when DFST last came (lv_tick-like ms), 0 never */
     df_tg_msg_t tg;             /* the other targets (DFTG) */
     uint32_t    tg_ms;          /* when DFTG last came, 0 never: none set when it is over a second old */
+    bool        have_ac;
+    df_ac_msg_t ac;             /* the antenna side's calibration (DFAC) */
 } df_snap_t;
 
 /* A KrakenSDR on USB (three or more of serials 1000-1004), or the test source chosen (df_rx_synth): page I on the
@@ -52,7 +54,8 @@ void df_rx_close(void);
 /* What B does now because of page I: 0 nothing, 1 moved to another SDR, 2 lent (no SDR for B till page I closes) */
 int  df_rx_b_lent(void);
 
-/* A command to the daemon (df_proto.h), kept and said again to a daemon started anew (all but "c" and "Q") */
+/* A command to the daemon (df_proto.h), kept and said again to a daemon started anew (all but the actions "c", "Q",
+ * "b" and "B") */
 void df_rx_cmd(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /* The newest of everything; false while there is no daemon */

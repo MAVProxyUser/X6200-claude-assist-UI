@@ -1489,7 +1489,7 @@ TO SEE) is a fit that fell as a stick losing samples makes it fall, and the cali
 look waits twice as long each time, up to 10 minutes; **the array against the band**:
 KrakenRF's calculator at the target's frequency, the spacing over the wavelength `s`, its estimated resolution and a
 word, **OK** (`s` 0.2-0.5), **AMBIGUOUS** (`s` over 0.5: the bearing can be wrong by a mirror) or **COARSE**
-(resolution over 20 degrees, or `s` under 0.2), and the size the calculator would want (`s` = 0.5); the **antennas'
+(resolution over 20 degrees, or `s` under 0.2), and the size for KrakenRF's usual `s` 0.33; the **antennas'
 box**, a row each with its serial, its bar and what it is doing; CH0's spectrum across the passband with the target
 band marked, over a waterfall of bearings (0-359 across, the newest on top: a moving or intermittent transmitter
 shows as a track).
@@ -1516,17 +1516,42 @@ shows as a track).
   - **F1 held**: AUTO on or off.
 - **F2 ARRAY**: a panel. **BAND** presets: AIR 125, 2 M 146, MARINE 156.8, NOAA 162.55, 1.25 M 223.5, ISM 433.92, 70 CM
   440, FRS/GMRS 462.5625, 33 CM 915, 23 CM 1270 MHz (the Kraken a quarter of its rate under it, so the target sits
-  clear of the sticks' centre spike). **ARRAY**: UCA-5, UCA-4, UCA-3 (a circle), ULA-5, ULA-4, ULA-3 (a line), or
-  **CUSTOM** (any layout of two to five antennas, drawn on the web page: see
-  [Direction finder in the browser](#direction-finder-in-the-browser); offered once one is saved); with fewer than
-  five, CH0 up are used. **RADIUS** or **SPACING** in 0.5 cm steps: the array as you set it out, which does not change
-  with the band, so the calculator line says what it gives at each (for CUSTOM, its closest pair). **PUSH: SIZE FOR S
-  0.50** sets the size the calculator wants for the band (not for CUSTOM). **HEADING**: ANT 0's compass bearing (0 =
-  ANT 0 up). Under the rows, a **sketch** of the layout chosen, to scale and seen from above with forward up (each
-  antenna numbered, the circle or the line they stand on), and beside it how to set it out for the band: a circle's
-  radius as set and the one the band wants (neighbours half a wave apart), or a line's spacing as set and half a wave,
-  with ANT 0 at the left end. Turning the ARRAY row goes through every layout, so the sketch shows each before the
-  antennas are moved. Five KrakenRF whips in a line across the way you face is ULA-5; in a circle, UCA-5.
+  clear of the sticks' centre spike); only those the antennas hear are offered (ANTENNAS, below). **ARRAY**: the
+  layouts for five antennas (fewer: CH0 up are used):
+  - **UCA-5, UCA-4, UCA-3**: KrakenRF's circles, ANT 0 forward and the rest clockwise; all round, its recommended layout.
+  - **ULA-5, ULA-4, ULA-3**: a line across the way you face, ANT 0 at the left end; 180 degrees only (a line cannot
+    tell front from back: the mirror shows dashed), best straight out from it and poor along it.
+  - **4+1**: four on a circle (ANT 0 forward, 1-3 clockwise) and ANT 4 in the middle: the Adcock square with its
+    sense antenna (Watson-Watt's centre element); all round.
+  - **L-5**: an L, ANT 0 at the corner, 1 and 2 forward, 3 and 4 to the right: two short lines at a right angle, all
+    round with no mirror.
+  - **MRL-5**: a minimum-redundancy line (Moffet, 1968), antennas at 0, 1, 4, 7 and 9 units (gaps 1, 3, 3, 2): every
+    spacing from 1 to 9 units, so the width, and the fine bearing, of a ten-antenna line from five; still a line (180
+    degrees, front and back alike), and uneven, so MUSIC on the grid only (ROOT-MUSIC, smoothing and forward-backward
+    need even spacing).
+  - **CUSTOM**: any layout of two to five antennas, drawn on the web page (see
+    [Direction finder in the browser](#direction-finder-in-the-browser); offered once one is saved). One standing on
+    a single line across (every forward the same) is taken as a line: its mirror, front only, at whatever spacings
+    (a line measured by hand).
+
+  **RADIUS** (a circle, 4+1), **SPACING** (a line, the L) or **UNIT** (the MRL) in 0.5 cm steps: the array as you set
+  it out, which does not change with the band, so the calculator line says what it gives at each (for CUSTOM, its
+  closest pair). **PUSH: SIZE FOR S 0.33** sets the size for KrakenRF's usual spacing of a third of a wave at the
+  band (under 0.5, or the bearing can be ambiguous; under about 0.2 it is coarse; not for CUSTOM). **HEADING**: ANT
+  0's compass bearing (0 = ANT 0 up). **ANTENNAS**: **KRAKEN WHIPS** (KrakenRF's set of five telescopic whips on
+  magnetic bases, the default) or **OTHERS**. KrakenRF rates its whips usable from 100 MHz to 1 GHz, so with them
+  page I offers no band and takes no frequency outside that (23 CM, and FM broadcast under 100 MHz, are not offered;
+  a target outside goes to 70 CM), and the row says how many sections to pull out for the band, from KrakenRF's SWR
+  table (settings 0-7: 0 for 440-1050 MHz, 3-7 for 2 m, 0-2 for 70 cm), or about a quarter wave where the table has
+  none; every whip the same, on a ground plane (a car roof, a metal sheet). OTHERS takes the Kraken's whole 24-1766
+  MHz. **ANT CAL**: the antenna side's calibration ([below](#the-antenna-side-cables-and-whips)): the VFO sets the
+  source's bearing (5 degree steps, 0 straight out in front), the push takes it; the row says the one in use for the
+  frequency, or taking and how far. Under the rows, a **sketch** of the layout chosen, to scale and seen from above
+  with forward up (each antenna numbered, the circle, line or L they stand on), and beside it how to set it out for
+  the band: the size as set and the one for `s` 0.33, and what the layout covers. Turning the ARRAY row goes through
+  every layout, so the sketch shows each before the antennas are moved. Five KrakenRF whips in a line across the way
+  you face is ULA-5; in a circle, UCA-5.
+
 - **gpsd**: when it runs and has a GPS or a compass (on USB), the heading comes from it instead of the one set by
   hand: a compass first, else the course over the ground while moving faster than 2 m/s (a vehicle with the array
   on it, ANT 0 forward), kept two minutes after it slows. The ARRAY panel's HEADING row says which is in use
@@ -1548,8 +1573,26 @@ shows as a track).
   2026-11-17 they moved the Kraken half a passband). **Ring**: H before, A after.
   **APP held**: the SDR pool's panel. **GEN**: help.
 
-What it keeps: the band, the array and its size, the heading, the method, rate, gain, squelch and calibration
-interval, the antennas left out, in `/mnt/gui_state.conf` (`df.*`).
+What it keeps: the band, the array and its size, the heading, the antennas (whips or others), the method, rate,
+gain, squelch and calibration interval, the antennas left out, in `/mnt/gui_state.conf` (`df.*`); the antenna side's
+calibrations in `/mnt/df_antcal.txt`.
+
+#### The antenna side: cables and whips
+
+The noise source comes in behind the antenna sockets, so its calibration lines up the Kraken's five receivers but
+not what is in front of them: antenna cables of unequal lengths (KrakenRF wants them equal within a centimetre to
+900 MHz), whips set unlike. A transmitter at a bearing you know measures that. Put one you may use there (a handheld
+on low power on a band you are licensed for, an ISM-band device) on the target's frequency, ten wavelengths or more
+away in the clear, at a bearing from the array's forward you know (0: straight out in front; for a line, straight
+out from it), key it, and take it: F2 ARRAY's ANT CAL push, or the web page's **Calibrate on it**. A few seconds of
+it over the squelch are gathered and each antenna's phase measured against what the layout gives at that bearing
+(one source, its eigenvalue 6 dB or more over the next, or it is refused; nothing over the squelch for 18 s, or a
+retune, ends it). From then on that phase is taken out of each antenna, with the noise source's, for every bearing:
+the fit at the source's bearing says how much it mended (the message gives before and after). Phase only: a weaker
+antenna is left as it is. It is kept on the card (`df_antcal.txt`, a line a frequency: delete one to forget it, or
+the web page's **Forget this one**) and used within 2 % of the frequency it was taken at, since a cable's phase grows
+with the frequency: take one a band. A new one near the same frequency replaces the old. Set the layout first; one
+taken on a source straight out in front of a line holds whatever its spacing is set to. Equal cables are still best.
 
 
 #### The IQ server: KrakenRF's software on a computer
@@ -1563,7 +1606,8 @@ computer can take them from the radio over the network:
   `FREQ` (it tunes the Kraken: page I and the browser page follow it, FOLLOW off), `GAIN`, `AGC ` (taken, the gain
   stays manual), `EXIT`.
 - What it sends: not the whole 1.024 MHz (five channels of it are 41 MB/s, far over the radio's WiFi) but **25 kHz
-  around the DF target, at 64 kS/s**, each channel lined up and corrected by the radio's own calibration. The header
+  around the DF target, at 64 kS/s**, each channel lined up and corrected by the noise source's calibration (not the
+  antenna side's: the program has its own array settings). The header
   says so (`sampling_freq` 64000, the band's centre in `rf_center_freq`) and marks frames: DATA once calibrated,
   CAL while the noise source was on, DUMMY before a calibration.
 - **The sticks lined up in hardware** while a program reads it, as Heimdall does: after a calibration (and as soon as
@@ -1598,8 +1642,16 @@ settings: a change on either shows on the other.
   ULA with every antenna in use: multipath, the same signal arriving from two bearings at once, which MUSIC alone
   reads as one wrong bearing; with both on and Sources 2 the two come out apart (smoothing trades the line's length
   for it, so one bearing alone is a little broader); rate, gain, squelch, how often to calibrate, Calibrate now; the
-  array's layout, its radius or spacing, ANT 0's heading, and Size for this band (KrakenRF's calculator, spacing 0.5
-  wavelength). Sources, forward-backward and smoothing are set here only.
+  **antennas** (KrakenRF's whips, 100 MHz-1 GHz, bands outside greyed out and the sections to pull out said; or
+  others, 24-1766 MHz), the array's layout, its radius, spacing or unit, ANT 0's heading, and Size for this band
+  (KrakenRF's spacing of 0.33 wavelength). Sources, forward-backward and smoothing are set here only.
+- **Every layout at the target**: a row for each of the layouts above with the size for `s` 0.33 (r a radius, d a
+  spacing, or the MRL's unit) and the 0.2-0.5 range, the neighbours' distance and the widest pair, the resolution
+  there and what it covers (360 or 180 degrees; even: ROOT-MUSIC and smoothing work on it); **Use** sets that layout
+  at that size, here and on page I.
+- **Antenna calibration**: the source's bearing, **Calibrate on it**, how the last one went (taking, its fit before
+  and with it, or why not), the one in use here (its frequency, bearing, age and each antenna's phase), how many are
+  kept, and **Forget this one** ([the antenna side](#the-antenna-side-cables-and-whips)).
 - **Custom layout**: any layout of two to five antennas, each where it stands from the middle: **forward** (ANT 0's
   heading, up on the drawing) and **left**, in cm. Drag an antenna on the drawing (0.5 cm steps) or type it; **Add an
   antenna** (five at most), x to remove one, **From the layout in use** to start from the circle or line set now.

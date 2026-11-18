@@ -140,17 +140,53 @@ static const band_t bands[] = {
 };
 #define N_BANDS (int)(sizeof(bands) / sizeof(bands[0]))
 
+/* The layouts. KrakenRF's circles and lines, and three from the older DF literature for five antennas:
+ *   4+1    four on a circle and one in the middle: the Adcock square with its sense antenna (Watson-Watt's centre
+ *          element), 360 degrees, the centre a short baseline for the ring's;
+ *   L-5    an L of 2 + 2 with the corner shared: a planar array, 360 degrees with no mirror, from two short lines;
+ *   MRL-5  a minimum-redundancy line (Moffet 1968), elements at 0, 1, 4, 7 and 9 units: every spacing from 1 to 9
+ *          units once or more, so the aperture of a 10-element line from five; a line still (front and back alike),
+ *          and not uniform, so MUSIC on the grid (ROOT-MUSIC, smoothing and FB need even spacing).
+ * size: a circle's (and 4+1's) radius, a line's (and the L's, the MRL's unit) spacing. x6x00-df gets the three new
+ * ones as positions (a custom), and takes a custom one standing on one line across as a line */
+enum { SH_CIRCLE, SH_LINE, SH_4P1, SH_L, SH_MRL, SH_CUSTOM };
+
 typedef struct {
     const char *name;
-    bool        ula;
+    int         shape;
     int         n;
 } kind_t;
 
-static const kind_t kinds[] = {{"UCA-5", false, 5}, {"UCA-4", false, 4}, {"UCA-3", false, 3},
-                               {"ULA-5", true, 5},  {"ULA-4", true, 4},  {"ULA-3", true, 3},
-                               {"CUSTOM", false, 0}};
+static const kind_t kinds[] = {{"UCA-5", SH_CIRCLE, 5}, {"UCA-4", SH_CIRCLE, 4}, {"UCA-3", SH_CIRCLE, 3},
+                               {"ULA-5", SH_LINE, 5},   {"ULA-4", SH_LINE, 4},   {"ULA-3", SH_LINE, 3},
+                               {"4+1", SH_4P1, 5},      {"L-5", SH_L, 5},        {"MRL-5", SH_MRL, 5},
+                               {"CUSTOM", SH_CUSTOM, 0}};
 #define N_KINDS (int)(sizeof(kinds) / sizeof(kinds[0]))
 #define K_CUSTOM (N_KINDS - 1)
+#define K_CUSTOM_V1 6                   /* CUSTOM's number before 4+1, L-5 and MRL-5 came (df.kv 1) */
+static const int mrl_at[5] = {0, 1, 4, 7, 9};
+
+static bool kind_line(int k) { return kinds[k].shape == SH_LINE || kinds[k].shape == SH_MRL; }
+static bool kind_round(int k) { return kinds[k].shape == SH_CIRCLE || kinds[k].shape == SH_4P1; }
+
+/* KrakenRF's spacing over the wavelength, s: under 0.5 or the bearing can be ambiguous, under about 0.2 coarse; 0.33
+ * its usual choice (its wiki, 04. Antenna Array Setup), the size F2's FIT and the web page's table give */
+#define S_TYP 0.33
+
+/* A layout's numbers at a size: the spacing that rules ambiguity (a circle's neighbours, 4+1's ring neighbours, a
+ * line's or the L's or the MRL's unit), the aperture (the widest), and the size a spacing of one wavelength wants
+ * (so s wants s times it) */
+static void kind_geom(int k, double size, double *d, double *ap, double *per_s_lambda) {
+    int n = kinds[k].n;
+
+    switch (kinds[k].shape) {
+        case SH_CIRCLE: *d = 2 * size * sin(M_PI / n), *ap = 2 * size, *per_s_lambda = 1 / (2 * sin(M_PI / n)); break;
+        case SH_4P1: *d = size * M_SQRT2, *ap = 2 * size, *per_s_lambda = 1 / M_SQRT2; break;
+        case SH_L: *d = size, *ap = 2 * M_SQRT2 * size, *per_s_lambda = 1; break;
+        case SH_MRL: *d = size, *ap = 9 * size, *per_s_lambda = 1; break;
+        default: *d = size, *ap = (n - 1) * size, *per_s_lambda = 1; break;
+    }
+}
 
 /* CUSTOM: any layout of up to five antennas, x forward and y left in cm, ANT 0 first, one a line in /mnt/df_array.txt
  * (the web page's Array editor writes it; # starts a comment). Read when CUSTOM is chosen and at each start */
@@ -199,10 +235,50 @@ static struct {
     bool    log;                /* the bearing log, /mnt/df_log (x6x00-df's l) */
     uint32_t tg_hz[DF_PROTO_TARGETS];   /* the other targets (x6x00-df's 1-3), Hz, 0 none */
     int     tg_bw[DF_PROTO_TARGETS];    /* their widths (bws[]) */
+    int     ant;                /* the antennas: 0 KrakenRF's whips (100-1000 MHz), 1 others (the Kraken's 24-1766) */
 } cfg;
 
 /* the elements the chosen layout has */
 static int kind_n(void) { return cfg.kind == K_CUSTOM ? cust_n : kinds[cfg.kind].n; }
+
+/* ---- The antennas: KrakenRF's whips (the default) or others. The Kraken itself tunes 24-1766 MHz; its set of five
+ * telescopic whips on magnetic bases is "usable from 100 MHz to 1 GHz" (krakenrf.com), so with them page I offers no
+ * band and takes no frequency outside that. Its wiki's SWR table (04. Antenna Array Setup, over a ground plane) says
+ * how many sections to pull out: settings 0-7, each good over these ranges (MHz) ---- */
+
+#define KRAKEN_LO   24000000LL
+#define KRAKEN_HI   1766000000LL
+#define WHIP_LO     100000000LL
+#define WHIP_HI     1000000000LL
+
+static const short whip_tab[8][3][2] = {
+    {{440, 1050}},                                  {{366, 950}},                                   {{330, 1000}},
+    {{145, 158}, {290, 420}, {612, 1050}},          {{140, 156}, {270, 360}, {595, 1030}},
+    {{135, 155}, {250, 330}, {520, 1050}},          {{130, 150}, {240, 290}, {460, 1050}},
+    {{127, 150}, {235, 282}, {450, 1050}}};
+
+static int64_t df_lo(void) { return cfg.ant ? KRAKEN_LO : WHIP_LO; }
+static int64_t df_hi(void) { return cfg.ant ? KRAKEN_HI : WHIP_HI; }
+static bool    hz_ok(int64_t hz) { return hz >= df_lo() && hz <= df_hi(); }
+static bool    band_ok(int b) { return b >= 0 && b < N_BANDS && hz_ok(bands[b].hz); }
+static const char *range_text(void) { return cfg.ant ? "THE KRAKEN'S 24-1766 MHZ" : "THE KRAKEN WHIPS' 100-1000 MHZ"; }
+
+/* how far to pull the whips out at hz: "0, 1, 2 OR 7" from the table, "" none there; and a quarter wave in cm */
+static void whip_sections(uint32_t hz, char *t, size_t n, double *qw_cm) {
+    double mhz = hz / 1e6;
+    int    got[8], k = 0;
+
+    for (int st = 0; st < 8; st++)
+        for (int r = 0; r < 3; r++)
+            if (whip_tab[st][r][1] && mhz >= whip_tab[st][r][0] && mhz <= whip_tab[st][r][1]) {
+                got[k++] = st;
+                break;
+            }
+    t[0] = 0;
+    for (int i = 0, l = 0; i < k; i++)
+        l += snprintf(t + l, n - (size_t)l, "%s%d", i == 0 ? "" : i == k - 1 ? " OR " : ", ", got[i]);
+    *qw_cm = 29979.2458 / mhz / 4;
+}
 
 static void cfg_load(void) {
     cfg.band    = gui_state_get("df.band", 6);
@@ -214,7 +290,9 @@ static void cfg_load(void) {
     cfg.bw      = gui_state_get("df.bw", 2);
     if (cfg.bw < 0 || cfg.bw >= N_BWS) cfg.bw = 2;
     cfg.kind    = gui_state_get("df.kind", 0);
+    if (gui_state_get("df.kv", 1) < 2 && cfg.kind == K_CUSTOM_V1) cfg.kind = K_CUSTOM;     /* kept by number */
     if (cfg.kind < 0 || cfg.kind >= N_KINDS) cfg.kind = 0;
+    cfg.ant     = gui_state_get("df.ant", 0) ? 1 : 0;
     if (cfg.kind == K_CUSTOM && !cust_load()) cfg.kind = 0;      /* the file gone: the circle */
     cfg.size_mm = gui_state_get("df.size", 290);
     if (cfg.size_mm < 10 || cfg.size_mm > 5000) cfg.size_mm = 290;
@@ -242,10 +320,15 @@ static void cfg_load(void) {
         snprintf(k, sizeof(k), "df.tg%d", i + 2);
         int32_t hz = gui_state_get(k, 0);
 
-        cfg.tg_hz[i] = hz >= 24000000 && hz <= 1766000000 ? (uint32_t)hz : 0;
+        cfg.tg_hz[i] = hz_ok(hz) ? (uint32_t)hz : 0;
         snprintf(k, sizeof(k), "df.tg%dbw", i + 2);
         cfg.tg_bw[i] = gui_state_get(k, 2);
         if (cfg.tg_bw[i] < 0 || cfg.tg_bw[i] >= N_BWS) cfg.tg_bw[i] = 2;
+    }
+    if (!hz_ok((int64_t)cfg.fc + cfg.off)) {            /* where the antennas do not hear: 70 CM */
+        cfg.band = 6;
+        cfg.off  = (int32_t)(rates[cfg.rate] / 4);
+        cfg.fc   = (int32_t)bands[6].hz - cfg.off;
     }
 }
 
@@ -256,6 +339,8 @@ static void cfg_save(void) {
     gui_state_set("df.off", cfg.off);
     gui_state_set("df.bw", cfg.bw);
     gui_state_set("df.kind", cfg.kind);
+    gui_state_set("df.kv", 2);
+    gui_state_set("df.ant", cfg.ant);
     gui_state_set("df.size", cfg.size_mm);
     gui_state_set("df.head", cfg.heading);
     gui_state_set("df.meth", cfg.method);
@@ -380,6 +465,7 @@ static void send_gain(void)   { df_rx_cmd("g %d", gains[cfg.gain]); }
 static uint32_t own_tune_ms;
 static void send_fc(void)     { own_tune_ms = lv_tick_get(); df_rx_cmd("f %d", cfg.fc); send_tgs(); }
 static void send_target(void) { own_tune_ms = lv_tick_get(); df_rx_cmd("t %d %u", cfg.off, bws[cfg.bw]); }
+static void elem(int k, double *x, double *y);
 static void send_array(void) {
     if (cfg.kind == K_CUSTOM && cust_n >= 2) {
         char a[200];
@@ -388,7 +474,20 @@ static void send_array(void) {
         df_rx_cmd("%s", a);
         return;
     }
-    df_rx_cmd("a %s %d %d", kinds[cfg.kind].ula ? "ula" : "uca", kinds[cfg.kind].n, cfg.size_mm);
+    if (kinds[cfg.kind].shape == SH_CIRCLE || kinds[cfg.kind].shape == SH_LINE) {
+        df_rx_cmd("a %s %d %d", kinds[cfg.kind].shape == SH_LINE ? "ula" : "uca", kinds[cfg.kind].n, cfg.size_mm);
+        return;
+    }
+    char a[200];                        /* 4+1, L-5, MRL-5: as positions (the MRL, on one line across, a line) */
+    int  l = snprintf(a, sizeof(a), "a custom %d", kinds[cfg.kind].n);
+
+    for (int m = 0; m < kinds[cfg.kind].n; m++) {
+        double x, y;
+
+        elem(m, &x, &y);
+        l += snprintf(a + l, sizeof(a) - (size_t)l, " %ld %ld", lround(x * 1000), lround(y * 1000));
+    }
+    df_rx_cmd("%s", a);
 }
 static void send_method(void) { df_rx_cmd("m %d", cfg.method); }
 static void send_sql(void)    { df_rx_cmd("q %d", cfg.sql_ddb); }
@@ -421,6 +520,16 @@ static void clamp_target(void) {
     if (lim < 0) lim = 0;
     if (cfg.off > lim) cfg.off = lim;
     if (cfg.off < -lim) cfg.off = -lim;
+}
+
+/* the next band from b (d +1 or -1) the antennas hear, round the list; b itself when none */
+static int band_next(int b, int d) {
+    for (int i = 1; i <= N_BANDS; i++) {
+        int c = ((b < 0 ? (d > 0 ? -1 : 0) : b) + d * i + 2 * N_BANDS) % N_BANDS;
+
+        if (band_ok(c)) return c;
+    }
+    return b;
 }
 
 /* A band chosen: the Kraken a quarter of the rate under its frequency, so the target sits clear of the sticks' DC */
@@ -471,10 +580,7 @@ static void df_use(int who, bool on) {
     }
 }
 
-/* ---- Tuning: a frequency anywhere the Kraken goes, and FOLLOW ---- */
-
-#define KRAKEN_LO   24000000LL
-#define KRAKEN_HI   1766000000LL
+/* ---- Tuning: a frequency anywhere the antennas hear (hz_ok), and FOLLOW ---- */
 
 static void msg(const char *t);
 static void show_keys(void);
@@ -486,7 +592,7 @@ static bool tune_to(int64_t hz) {
     int32_t lim = (int32_t)(rates[cfg.rate] / 2) - (int32_t)bws[cfg.bw] / 2 - (int32_t)(rates[cfg.rate] / 20);
     int64_t off = hz - cfg.fc;
 
-    if (hz < KRAKEN_LO || hz > KRAKEN_HI) return false;
+    if (!hz_ok(hz)) return false;
     if (llabs(off) <= lim && llabs(off) >= (int64_t)bws[cfg.bw]) {
         cfg.off = (int32_t)off;
     } else {
@@ -501,11 +607,25 @@ static bool tune_to(int64_t hz) {
 
 /* another target set to hz (0: cleared), its width the main one's when new; false outside the Kraken's range */
 static bool tg_set_hz(int i, int64_t hz) {
-    if (hz && (hz < KRAKEN_LO || hz > KRAKEN_HI)) return false;
+    if (hz && !hz_ok(hz)) return false;
     if (hz && !cfg.tg_hz[i]) cfg.tg_bw[i] = cfg.bw;
     cfg.tg_hz[i] = (uint32_t)hz;
     send_tg(i);
     return true;
+}
+
+/* The antennas chosen (F2 ARRAY's ANTENNAS, the web page): KrakenRF's whips or others. A target or another one
+ * outside what they hear goes: the main one to 70 CM */
+static void ant_set(int ant) {
+    cfg.ant = ant ? 1 : 0;
+    for (int i = 0; i < N_TG; i++)
+        if (cfg.tg_hz[i] && !hz_ok(cfg.tg_hz[i])) tg_set_hz(i, 0);
+    if (!hz_ok(target_hz())) {
+        cfg.follow = 0;
+        cfg.autot  = false;
+        band_set(6);
+        msg("THE TARGET WAS OUTSIDE WHAT THE KRAKEN WHIPS HEAR (100-1000 MHZ): NOW 70 CM");
+    }
 }
 
 static const char *const follow_names[] = {"OFF", "A", "B"};
@@ -549,8 +669,8 @@ static void follow_tick(void) {
     } else if (said != cfg.follow) {
         char t[96];
 
-        snprintf(t, sizeof(t), "FOLLOW %s: %.3f MHZ IS OUTSIDE THE KRAKEN'S 24-1766 MHZ: WAITING", follow_names[cfg.follow],
-                 hz / 1e6);
+        snprintf(t, sizeof(t), "FOLLOW %s: %.3f MHZ IS OUTSIDE %s: WAITING", follow_names[cfg.follow], hz / 1e6,
+                 range_text());
         msg(t);
         said = cfg.follow;
     }
@@ -559,15 +679,14 @@ static void follow_tick(void) {
 /* ---- The calculator (KrakenRF's Antenna Array Size Calculator) ---- */
 
 typedef struct {
-    double lambda, s, res, want_m;      /* wavelength; spacing over it; est. resolution (deg); size for s = 0.5 */
+    double lambda, s, res, want_m;      /* wavelength; spacing over it; est. resolution (deg); size for s = S_TYP */
     const char *word;
     int    level;                       /* 0 OK, 1 COARSE, 2 AMBIGUOUS */
 } calc_t;
 
 static calc_t calc_at(double f) {
-    const kind_t *k = &kinds[cfg.kind];
-    double        size = cfg.size_mm / 1000.0;
-    calc_t        c;
+    double size = cfg.size_mm / 1000.0;
+    calc_t c;
 
     c.lambda = 299792458.0 / f;
     double d, ap;
@@ -582,9 +701,10 @@ static calc_t calc_at(double f) {
         if (cust_n < 2) d = 0;
         c.want_m = 0;
     } else {
-        d  = k->ula ? size : 2 * size * sin(M_PI / k->n);
-        ap = k->ula ? (k->n - 1) * size : 2 * size;
-        c.want_m = k->ula ? 0.5 * c.lambda : 0.5 * c.lambda / (2 * sin(M_PI / k->n));
+        double per;
+
+        kind_geom(cfg.kind, size, &d, &ap, &per);
+        c.want_m = S_TYP * c.lambda * per;
     }
     c.s      = d / c.lambda;
     c.res    = ap > 0 ? (180 / M_PI) * (1.22 / (ap / c.lambda)) / 10 : 999;
@@ -600,15 +720,27 @@ static void elem(int k, double *x, double *y) {
     const kind_t *kd = &kinds[cfg.kind];
     double        size = cfg.size_mm / 1000.0;
 
-    if (cfg.kind == K_CUSTOM) {
-        *x = k < cust_n ? cust_x[k] : 0;
-        *y = k < cust_n ? cust_y[k] : 0;
-    } else if (kd->ula) {
-        *x = 0;
-        *y = (kd->n - 1) * size / 2 - k * size;
-    } else {
-        *x = size * cos(2 * M_PI * k / kd->n);
-        *y = -size * sin(2 * M_PI * k / kd->n);
+    *x = *y = 0;
+    switch (kd->shape) {
+        case SH_CUSTOM:
+            *x = k < cust_n ? cust_x[k] : 0;
+            *y = k < cust_n ? cust_y[k] : 0;
+            break;
+        case SH_LINE: *y = (kd->n - 1) * size / 2 - k * size; break;
+        case SH_MRL: *y = (mrl_at[4] / 2.0 - mrl_at[k < 5 ? k : 4]) * size; break;      /* ANT 0 at the left end */
+        case SH_4P1:                    /* ANT 0-3 round the circle from forward, clockwise; ANT 4 in the middle */
+            if (k < 4) *x = size * cos(M_PI / 2 * k), *y = -size * sin(M_PI / 2 * k);
+            break;
+        case SH_L: {                    /* ANT 0 at the corner, 1 and 2 forward, 3 and 4 to the right; centred */
+            static const double lx[5] = {0, 1, 2, 0, 0}, ly[5] = {0, 0, 0, -1, -2};
+
+            *x = (lx[k < 5 ? k : 0] - 0.6) * size;
+            *y = (ly[k < 5 ? k : 0] + 0.6) * size;
+            break;
+        }
+        default:
+            *x = size * cos(2 * M_PI * k / kd->n);
+            *y = -size * sin(2 * M_PI * k / kd->n);
     }
 }
 
@@ -796,10 +928,16 @@ static void draw_scope(void) {
         put(px, SC, SC, (int)lround(cx + r * s), (int)lround(cy - r * co), c_faint);
         put(px, SC, SC, (int)lround(cx + r * s) + 1, (int)lround(cy - r * co), c_faint);
     }
-    if (kd->ula) {                      /* the line itself */
+    int pr[2][2], np = 0;                /* a line end to end; the L's two arms */
+
+    if (kd->shape == SH_LINE || kd->shape == SH_MRL) pr[0][0] = 0, pr[0][1] = kind_n() - 1, np = 1;
+    else if (kd->shape == SH_L) pr[0][0] = 2, pr[0][1] = 0, pr[1][0] = 0, pr[1][1] = 4, np = 2;
+    for (int i = 0; i < np; i++) {
         double x0, y0, x1, y1;
-        elem(0, &x0, &y0);
-        elem(kind_n() - 1, &x1, &y1);
+        int    a = pr[i][0], b = pr[i][1];
+
+        elem(a, &x0, &y0);
+        elem(b, &x1, &y1);
         double a0 = atan2(-y0, x0) + head * M_PI / 180, a1 = atan2(-y1, x1) + head * M_PI / 180;
         double r0 = hypot(x0, y0) * sc, r1 = hypot(x1, y1) * sc;
         line(px, SC, SC, (int)lround(cx + r0 * sin(a0)), (int)lround(cy - r0 * cos(a0)), (int)lround(cx + r1 * sin(a1)),
@@ -964,15 +1102,15 @@ static void show_array(void) {
         snprintf(t[0], sizeof(t[0]), "CUSTOM %d ANT  S %.2f  RES %.0f DEG  #%06X %s#", cust_n, c.s, c.res,
                  (unsigned)(wc & 0xffffff), c.word);
     else
-        snprintf(t[0], sizeof(t[0]), "%s %s %.1f CM  S %.2f  RES %.0f DEG  #%06X %s#", k->name, k->ula ? "D" : "R",
-                 cfg.size_mm / 10.0, c.s, c.res, (unsigned)(wc & 0xffffff), c.word);
+        snprintf(t[0], sizeof(t[0]), "%s %s %.1f CM  S %.2f  RES %.0f DEG  #%06X %s#", k->name,
+                 kind_round(cfg.kind) ? "R" : "D", cfg.size_mm / 10.0, c.s, c.res, (unsigned)(wc & 0xffffff), c.word);
     const char *up = !*heading_from() ? "ANT0 UP" : !strcmp(heading_from(), "SET") ? "N UP"
                      : !strcmp(heading_from(), "COMPASS") ? "N UP CMP" : "N UP GPS";
     if (cfg.kind == K_CUSTOM)
         snprintf(t[1], sizeof(t[1]), "CLOSEST PAIR %.1f CM  HALF WAVE %.1f CM  %s", c.s * c.lambda * 100, c.lambda * 50, up);
     else
-        snprintf(t[1], sizeof(t[1]), "FOR S 0.50: %s %.1f CM  HALF WAVE %.1f CM  %s", k->ula ? "D" : "R", c.want_m * 100,
-                 c.lambda * 50, up);
+        snprintf(t[1], sizeof(t[1]), "FOR S %.2f: %s %.1f CM  HALF WAVE %.1f CM  %s", S_TYP, kind_round(cfg.kind) ? "R" : "D",
+                 c.want_m * 100, c.lambda * 50, up);
     lv_label_set_text(arr_l[0], t[0]);
     lv_label_set_text(arr_l[1], t[1]);
 }
@@ -1084,7 +1222,7 @@ typedef enum { P_NONE, P_ARRAY, P_SET, P_TUNE } panel_t;
 static panel_t pan;
 static int     pan_sel;
 
-enum { A_BAND, A_KIND, A_SIZE, A_FIT, A_HEAD, A_N };
+enum { A_BAND, A_KIND, A_SIZE, A_FIT, A_HEAD, A_ANT, A_ACAL, A_N };
 enum { S_RATE, S_GAIN, S_SQL, S_CAL, S_ANT0, S_SRC = S_ANT0 + NANT, S_LOG, S_N };
 enum { T_FOLLOW, T_BAND, T_FREQ, T_WIDTH, T_AUTO, T_TG0, T_N = T_TG0 + N_TG };
 
@@ -1092,7 +1230,7 @@ enum { T_FOLLOW, T_BAND, T_FREQ, T_WIDTH, T_AUTO, T_TG0, T_N = T_TG0 + N_TG };
  * "the antenna array layout should be suggested / dictated by the I page. give all available choices and roughly
  * approximate what it looks like"). Turning the ARRAY row goes through them all */
 #define SK_W 200
-#define SK_H 132
+#define SK_H 112
 static lv_img_dsc_t *sk;
 static lv_obj_t     *sk_img, *sk_t, *sk_l[NANT];
 
@@ -1103,22 +1241,43 @@ static void sk_disc(uint32_t *px, double cx, double cy, double r, uint32_t c) {
 }
 
 static void sketch_text(char *t, size_t n) {
-    calc_t        c = calc_at(cfg.band >= 0 ? bands[cfg.band].hz : target_hz());
+    uint32_t      hz = cfg.band >= 0 ? bands[cfg.band].hz : target_hz();
+    calc_t        c = calc_at(hz);
     const kind_t *k = &kinds[cfg.kind];
+    double        cm = cfg.size_mm / 10.0, want = c.want_m * 100;
     char          f[16];
 
-    fmt_mhz(f, sizeof(f), cfg.band >= 0 ? bands[cfg.band].hz : target_hz());
-    if (cfg.kind == K_CUSTOM)
-        snprintf(t, n, "%d ANTENNAS WHERE THE WEB PAGE'S ARRAY EDITOR PUT THEM (DF_ARRAY.TXT). CLOSEST PAIR %.1f CM: "
-                       "HALF A WAVE AT %s MHZ IS %.1f.", cust_n, c.s * c.lambda * 100, f, c.lambda * 50);
-    else if (k->ula)
-        snprintf(t, n, "A LINE OF %d, %.1f CM APART AS SET (HALF A WAVE AT %s MHZ: %.1f CM), ACROSS THE WAY YOU FACE, "
-                       "ANT 0 AT THE LEFT END. A LINE CANNOT TELL FRONT FROM BACK: THE MIRROR SHOWS DASHED.",
-                 k->n, cfg.size_mm / 10.0, f, c.want_m * 100);
-    else
-        snprintf(t, n, "A CIRCLE OF %d SEEN FROM ABOVE, ANT 0 FORWARD, THE REST CLOCKWISE. RADIUS %.1f CM AS SET; FOR %s "
-                       "MHZ %.1f CM (NEIGHBOURS HALF A WAVE APART). WHIPS UPRIGHT ON ONE GROUND PLANE.",
-                 k->n, cfg.size_mm / 10.0, f, c.want_m * 100);
+    fmt_mhz(f, sizeof(f), hz);
+    switch (k->shape) {
+        case SH_CUSTOM:
+            snprintf(t, n, "%d ANTENNAS WHERE THE WEB PAGE'S ARRAY EDITOR PUT THEM (DF_ARRAY.TXT). CLOSEST PAIR %.1f CM: "
+                           "HALF A WAVE AT %s MHZ IS %.1f. ALL ON ONE LINE ACROSS: TAKEN AS A LINE.",
+                     cust_n, c.s * c.lambda * 100, f, c.lambda * 50);
+            break;
+        case SH_LINE:
+            snprintf(t, n, "A LINE OF %d, %.1f CM APART AS SET (FOR %s MHZ %.1f CM, S %.2f), ACROSS THE WAY YOU FACE, "
+                           "ANT 0 AT THE LEFT END. 180 DEG: A LINE CANNOT TELL FRONT FROM BACK (THE MIRROR DASHED); BEST "
+                           "STRAIGHT OUT, POOR ALONG IT.", k->n, cm, f, want, S_TYP);
+            break;
+        case SH_MRL:
+            snprintf(t, n, "A LINE WITH GAPS OF 1, 3, 3 AND 2 UNITS (MINIMUM REDUNDANCY): UNIT %.1f CM AS SET (FOR %s MHZ "
+                           "%.1f CM), %.1f CM END TO END, ANT 0 LEFT. FINER THAN A ULA-5; 180 DEG, FRONT AND BACK ALIKE; "
+                           "MUSIC ON THE GRID ONLY.", cm, f, want, 9 * cm);
+            break;
+        case SH_4P1:
+            snprintf(t, n, "FOUR ON A CIRCLE, ANT 0 FORWARD, 1-3 CLOCKWISE, ANT 4 IN THE MIDDLE (ADCOCK WITH A SENSE "
+                           "ANTENNA). RADIUS %.1f CM AS SET; FOR %s MHZ %.1f CM, RING NEIGHBOURS %.1f CM APART. 360 DEG.",
+                     cm, f, want, want * M_SQRT2);
+            break;
+        case SH_L:
+            snprintf(t, n, "AN L: ANT 0 AT THE CORNER, 1 AND 2 FORWARD, 3 AND 4 TO THE RIGHT, %.1f CM APART AS SET (FOR "
+                           "%s MHZ %.1f CM). 360 DEG WITH NO MIRROR, FROM TWO SHORT LINES.", cm, f, want);
+            break;
+        default:
+            snprintf(t, n, "A CIRCLE OF %d SEEN FROM ABOVE, ANT 0 FORWARD, THE REST CLOCKWISE. RADIUS %.1f CM AS SET; FOR %s "
+                           "MHZ %.1f CM, NEIGHBOURS %.1f CM APART (S %.2f). 360 DEG. WHIPS UPRIGHT ON ONE GROUND PLANE.",
+                     k->n, cm, f, want, S_TYP * c.lambda * 100, S_TYP);
+    }
 }
 
 static void draw_sketch(int y0) {
@@ -1133,7 +1292,7 @@ static void draw_sketch(int y0) {
         ex = fmax(ex, fabs(xs[k]));
         ey = fmax(ey, fabs(ys[k]));
     }
-    double sc  = fmin((SK_H / 2.0 - 20) / ex, (SK_W / 2.0 - 14) / ey);  /* to scale, as big as it fits (a line uses
+    double sc  = fmin((SK_H / 2.0 - 18) / ex, (SK_W / 2.0 - 14) / ey);  /* to scale, as big as it fits (a line uses
                                                                          * the width) */
     double ext = fmax(ex, ey);
 
@@ -1141,14 +1300,18 @@ static void draw_sketch(int y0) {
     line(px, SK_W, SK_H, (int)cx, 13, (int)cx, 2, c_dim, 0);
     line(px, SK_W, SK_H, (int)cx - 4, 6, (int)cx, 2, c_dim, 0);
     line(px, SK_W, SK_H, (int)cx + 4, 6, (int)cx, 2, c_dim, 0);
-    if (cfg.kind != K_CUSTOM && !kinds[cfg.kind].ula)       /* the circle they stand on */
+    if (kind_round(cfg.kind))                               /* the circle they stand on */
         for (int a = 0; a < 360; a += 4) {
             double r = ext * sc, ra = a * M_PI / 180;
             put(px, SK_W, SK_H, (int)lround(cx + r * sin(ra)), (int)lround(cy - r * cos(ra)), c_faint);
         }
-    else if (cfg.kind != K_CUSTOM && n >= 2)                 /* the line */
+    else if (kind_line(cfg.kind) && n >= 2)                 /* the line */
         line(px, SK_W, SK_H, (int)lround(cx - ys[0] * sc), (int)lround(cy - xs[0] * sc), (int)lround(cx - ys[n - 1] * sc),
              (int)lround(cy - xs[n - 1] * sc), c_faint, 3);
+    else if (kinds[cfg.kind].shape == SH_L)                 /* the L's arms */
+        for (int e = 2; e <= 4; e += 2)
+            line(px, SK_W, SK_H, (int)lround(cx - ys[0] * sc), (int)lround(cy - xs[0] * sc), (int)lround(cx - ys[e] * sc),
+                 (int)lround(cy - xs[e] * sc), c_faint, 3);
     line(px, SK_W, SK_H, (int)cx - 3, (int)cy, (int)cx + 3, (int)cy, c_dim, 0);
     line(px, SK_W, SK_H, (int)cx, (int)cy - 3, (int)cx, (int)cy + 3, c_dim, 0);
     for (int k = 0; k < NANT; k++) {
@@ -1183,6 +1346,56 @@ static void sketch_show(bool on) {
 
 static int pan_rows(void) { return pan == P_ARRAY ? A_N : pan == P_SET ? S_N : pan == P_TUNE ? T_N : 0; }
 
+static void pan_fill(void);
+
+/* F2 ARRAY's ANT CAL: the antenna side (cables, whips: what the noise source cannot see) taken on one source at a
+ * known bearing, as the bearings count them (0 = the array's forward). The VFO sets the bearing, a push takes it at
+ * the target; the daemon keeps one a frequency on the card (/mnt/df_antcal.txt), used within 2 % of it */
+static int      acal_brg;
+static uint8_t  acal_seen = DF_AC_IDLE;
+
+static void acal_text(char *t, size_t n) {
+    char f[16];
+
+    if (sn.have_ac && sn.ac.state == DF_AC_TAKING)
+        snprintf(t, n, "ANT CAL   < %d DEG >  TAKING: %d %%", acal_brg, sn.ac.pct);
+    else if (sn.have_ac && sn.ac.in_use) {
+        fmt_mhz(f, sizeof(f), sn.ac.use_hz);
+        snprintf(t, n, "ANT CAL   < %d DEG >  IN USE: %s, %d DEG", acal_brg, f, (int)lround(sn.ac.use_brg_ddeg / 10.0));
+    } else
+        snprintf(t, n, "ANT CAL   < %d DEG >  NONE HERE  PUSH: TAKE IT", acal_brg);
+}
+
+/* the last take's outcome said once */
+static void acal_watch(void) {
+    char t[120];
+
+    if (!sn.have_ac || sn.ac.state == acal_seen) return;
+    acal_seen = sn.ac.state;
+    if (sn.ac.state == DF_AC_DONE) {
+        snprintf(t, sizeof(t), "ANTENNA SIDE TAKEN AND IN USE: FIT AT ITS BEARING %d %% -> %d %%", sn.ac.fit0_pct,
+                 sn.ac.fit1_pct);
+        msg(t);
+    } else if (sn.ac.state == DF_AC_FAILED) {
+        snprintf(t, sizeof(t), "ANTENNA SIDE NOT TAKEN: %.55s", sn.ac.why);
+        msg(t);
+    }
+    if (pan == P_ARRAY) pan_fill();
+}
+
+static void acal_take(void) {
+    if (!sn.have_st || sn.st.state < DF_ST_LISTEN || sn.st.state == DF_ST_NOCAL) {
+        msg("ANT CAL: WAIT FOR THE NOISE SOURCE'S CALIBRATION FIRST");
+        return;
+    }
+    char t[100];
+
+    df_rx_cmd("b %d", acal_brg);
+    acal_seen = DF_AC_TAKING;
+    snprintf(t, sizeof(t), "ANT CAL: KEEP THE SOURCE AT %d DEG ON THE TARGET FOR A FEW SECONDS", acal_brg);
+    msg(t);
+}
+
 static void pan_fill(void) {
     if (!built) return;
     char t[PANEL_ROWS][96];
@@ -1195,20 +1408,31 @@ static void pan_fill(void) {
         lv_label_set_text(panel_head_l, "ARRAY: HOW THE ANTENNAS ARE SET OUT, AGAINST WHICH BAND");
         fmt_mhz(f, sizeof(f), cfg.band >= 0 ? bands[cfg.band].hz : target_hz());
         snprintf(t[A_BAND], sizeof(t[0]), "BAND      < %s %s MHZ >", cfg.band >= 0 ? bands[cfg.band].name : "TUNED", f);
-        snprintf(t[A_KIND], sizeof(t[0]), "ARRAY     < %s >  %s", kinds[cfg.kind].name,
-                 cfg.kind == K_CUSTOM      ? "WHERE THE WEB PAGE'S ARRAY EDITOR PUT THEM"
-                 : kinds[cfg.kind].ula     ? "A LINE, ANT 0 AT ITS LEFT END"
-                                           : "A CIRCLE, ANT 0 FORWARD, CLOCKWISE");
+        static const char *const shape_w[] = {"A CIRCLE, ANT 0 FORWARD", "A LINE, ANT 0 AT ITS LEFT END",
+                                              "4 ROUND 1 IN THE MIDDLE", "AN L, ANT 0 AT THE CORNER",
+                                              "A LINE, GAPS OF 1-3-3-2 UNITS", "FROM THE WEB PAGE'S EDITOR"};
+        snprintf(t[A_KIND], sizeof(t[0]), "ARRAY     < %s >  %s", kinds[cfg.kind].name, shape_w[kinds[cfg.kind].shape]);
         if (cfg.kind == K_CUSTOM)
-            snprintf(t[A_SIZE], sizeof(t[0]), "LAYOUT    %d ANTENNAS FROM DF_ARRAY.TXT  S %.2f  RES %.0f DEG  %s", cust_n,
+            snprintf(t[A_SIZE], sizeof(t[0]), "LAYOUT    %d FROM DF_ARRAY.TXT  S %.2f  RES %.0f DEG  %s", cust_n,
                      c.s, c.res, c.word);
         else
-            snprintf(t[A_SIZE], sizeof(t[0]), "%s    < %.1f CM >  S %.2f  RES %.0f DEG  %s", kinds[cfg.kind].ula ? "SPACING" : "RADIUS ",
-                     cfg.size_mm / 10.0, c.s, c.res, c.word);
-        snprintf(t[A_FIT], sizeof(t[0]), "PUSH: SIZE FOR S 0.50 AT THIS BAND (%.1f CM)", c.want_m * 100);
+            snprintf(t[A_SIZE], sizeof(t[0]), "%s    < %.1f CM >  S %.2f  RES %.0f DEG  %s",
+                     kind_round(cfg.kind) ? "RADIUS " : kinds[cfg.kind].shape == SH_MRL ? "UNIT   " : "SPACING", cfg.size_mm / 10.0,
+                     c.s, c.res, c.word);
+        snprintf(t[A_FIT], sizeof(t[0]), "PUSH: SIZE FOR S %.2f HERE (%.1f CM)", S_TYP, c.want_m * 100);
+        {
+            char   w[24];
+            double qw;
+
+            whip_sections(cfg.band >= 0 ? bands[cfg.band].hz : target_hz(), w, sizeof(w), &qw);
+            if (cfg.ant) snprintf(t[A_ANT], sizeof(t[0]), "ANTENNAS  < OTHERS >  24-1766 MHZ");
+            else if (w[0]) snprintf(t[A_ANT], sizeof(t[0]), "ANTENNAS  < KRAKEN WHIPS >  PULL OUT %s", w);
+            else snprintf(t[A_ANT], sizeof(t[0]), "ANTENNAS  < KRAKEN WHIPS >  ABOUT %.0f CM OUT", qw);
+        }
         if (!strcmp(heading_from(), "COMPASS") || !strcmp(heading_from(), "GPS COURSE"))
             snprintf(t[A_HEAD], sizeof(t[0]), "HEADING   < %d >  IN USE: %s %d (GPSD)", cfg.heading, heading_from(), heading_now());
         else snprintf(t[A_HEAD], sizeof(t[0]), "HEADING   < %d >  ANT 0'S COMPASS BEARING, 0 = ANT 0 UP", cfg.heading);
+        acal_text(t[A_ACAL], sizeof(t[0]));
     } else if (pan == P_TUNE) {
         char f[16];
         int  b = band_of_target();
@@ -1289,7 +1513,7 @@ static void pan_change(int d) {
         switch (pan_sel) {
             case A_BAND:
                 follow_off();
-                band_set(((cfg.band < 0 ? 0 : cfg.band) + d + N_BANDS) % N_BANDS);
+                band_set(band_next(cfg.band, d));
                 break;
             case A_KIND:
                 cfg.kind = (cfg.kind + d + N_KINDS) % N_KINDS;
@@ -1310,6 +1534,12 @@ static void pan_change(int d) {
                 send_array();
                 break;
             case A_HEAD: cfg.heading = (cfg.heading + d + 360) % 360; send_log(); break;
+            case A_ACAL: acal_brg = (acal_brg + 5 * d + 360) % 360; break;
+            case A_ANT:
+                msg(!cfg.ant ? "ANTENNAS: YOUR OWN, ANY OF THE KRAKEN'S 24-1766 MHZ"
+                             : "ANTENNAS: KRAKENRF'S WHIPS, 100-1000 MHZ: BANDS OUTSIDE ARE NOT OFFERED");
+                ant_set(!cfg.ant);              /* its own word if the target had to move */
+                break;
             default: break;
         }
     } else if (pan == P_TUNE) {
@@ -1321,7 +1551,7 @@ static void pan_change(int d) {
                 int b = band_of_target();
 
                 follow_off();
-                band_set(b < 0 ? (d > 0 ? 0 : N_BANDS - 1) : (b + d + N_BANDS) % N_BANDS);
+                band_set(band_next(b, d));
                 break;
             }
             case T_FREQ: {
@@ -1405,6 +1635,11 @@ static void pan_change(int d) {
 }
 
 static void pan_push(void) {
+    if (pan == P_ARRAY && pan_sel == A_ACAL) {
+        acal_take();
+        pan_fill();
+        return;
+    }
     if (pan == P_ARRAY && pan_sel == A_FIT) {
         calc_t c = calc_at(target_hz());
         if (cfg.kind == K_CUSTOM) {
@@ -1497,6 +1732,13 @@ static void target_move(int32_t d) {
 
     follow_off();
     cfg.autot = false;
+    if (!hz_ok((int64_t)target_hz() + d)) {
+        char t[96];
+
+        snprintf(t, sizeof(t), "OUTSIDE %s", range_text());
+        msg(t);
+        return;
+    }
     if (llabs((int64_t)cfg.off + d) > lim) {        /* past the passband's edge: the Kraken goes with it */
         tune_to((int64_t)target_hz() + d);
     } else {
@@ -1602,10 +1844,14 @@ static void band_step(int d) {
         uint32_t t = target_hz();
 
         for (b = d > 0 ? 0 : N_BANDS - 1; b >= 0 && b < N_BANDS; b += d)
-            if (d > 0 ? bands[b].hz > t : bands[b].hz < t) break;
-        if (b < 0 || b >= N_BANDS) b = d > 0 ? 0 : N_BANDS - 1;
+            if ((d > 0 ? bands[b].hz > t : bands[b].hz < t) && band_ok(b)) break;
+        if (b < 0 || b >= N_BANDS) b = band_next(-1, d);
     } else {
-        b = (b + d + N_BANDS) % N_BANDS;
+        b = band_next(b, d);
+    }
+    if (!band_ok(b)) {
+        msg("NO BAND HERE THE ANTENNAS HEAR (F2 ARRAY: ANTENNAS)");
+        return;
     }
     band_set(b);
     cfg_save();
@@ -1714,6 +1960,7 @@ static void refresh(void) {
         }
     }
     auto_target();
+    acal_watch();
     draw_scope();
     show_centre();
     show_target();
@@ -2074,7 +2321,7 @@ int app_df_web_set(const char *k, double v) {
         cfg.autot = false;
         if (!tune_to((int64_t)llround(v))) return -1;
     } else if (!strcmp(k, "band")) {
-        if (idx_ok(v, N_BANDS) < 0) return -1;
+        if (idx_ok(v, N_BANDS) < 0 || !band_ok(i)) return -1;
         follow_off();
         band_set(i);
     } else if (!strcmp(k, "follow")) {
@@ -2152,6 +2399,14 @@ int app_df_web_set(const char *k, double v) {
         if (!tg_set_hz(t, hz)) return -1;
     } else if (!strcmp(k, "cal_now")) {
         df_rx_cmd("c");
+    } else if (!strcmp(k, "acal")) {                   /* the antenna side on a source at v degrees, now */
+        if (!(v > -360 && v < 720)) return -1;
+        df_rx_cmd("b %.1f", v);
+    } else if (!strcmp(k, "acal_forget")) {
+        df_rx_cmd("B");
+    } else if (!strcmp(k, "ant")) {                    /* 0 KrakenRF's whips, 1 others */
+        if (i != 0 && i != 1) return -1;
+        ant_set(i);
     } else {
         return -1;
     }
@@ -2232,10 +2487,11 @@ int app_df_web_json(char *out, size_t n) {
     }
     jb(&b, "]");
     jb(&b, "},\"lists\":{\"bands\":[");
-    for (int i = 0; i < N_BANDS; i++) jb(&b, "%s[\"%s\",%u,%u]", i ? "," : "", bands[i].name, bands[i].hz, bands[i].step);
+    for (int i = 0; i < N_BANDS; i++)
+        jb(&b, "%s[\"%s\",%u,%u,%d]", i ? "," : "", bands[i].name, bands[i].hz, bands[i].step, band_ok(i));
     jb(&b, "],\"kinds\":[");
     for (int i = 0; i < N_KINDS; i++)
-        jb(&b, "%s[\"%s\",%d,%d]", i ? "," : "", kinds[i].name, kinds[i].ula, i == K_CUSTOM ? cust_n : kinds[i].n);
+        jb(&b, "%s[\"%s\",%d,%d]", i ? "," : "", kinds[i].name, kinds[i].shape, i == K_CUSTOM ? cust_n : kinds[i].n);
     jb(&b, "],\"methods\":[");
     for (int i = 0; i < N_METHODS; i++) jb(&b, "%s\"%s\"", i ? "," : "", methods[i]);
     jb(&b, "],\"rates\":[");
@@ -2247,6 +2503,26 @@ int app_df_web_json(char *out, size_t n) {
     jb(&b, "],\"cals\":[");
     for (int i = 0; i < N_CALS; i++) jb(&b, "%s%d", i ? "," : "", cal_every[i]);
     jb(&b, "]}");
+    {   /* the antennas, and every layout at the target: its size for s 0.2, S_TYP and 0.5 (mm), its neighbours and
+         * widest at S_TYP (mm), the resolution there (deg), 360 or 180 degrees, even spacing (ROOT-MUSIC, smoothing) */
+        char   w[24];
+        double qw, lam = 299792458.0 / target_hz();
+
+        whip_sections(target_hz(), w, sizeof(w), &qw);
+        jb(&b, ",\"arr\":{\"ant\":%d,\"lo\":%lld,\"hi\":%lld,\"whip\":\"%s\",\"qw_cm\":%.1f,\"s_typ\":%.2f,\"layouts\":[",
+           cfg.ant, (long long)df_lo(), (long long)df_hi(), w, qw, S_TYP);
+        for (int k = 0; k < K_CUSTOM; k++) {
+            double d, ap, per;
+
+            kind_geom(k, 1, &d, &ap, &per);     /* per metre of size: d and ap scale with it */
+            double typ = S_TYP * lam * per;
+
+            jb(&b, "%s[\"%s\",%d,%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.1f,%d,%d]", k ? "," : "", kinds[k].name, kinds[k].shape,
+               kinds[k].n, 200 * lam * per, typ * 1000, 500 * lam * per, d * typ * 1000, ap * typ * 1000,
+               (180 / M_PI) * (1.22 / (ap * typ / lam)) / 10, kind_line(k) ? 180 : 360, kinds[k].shape == SH_LINE);
+        }
+        jb(&b, "]}");
+    }
     if (s.have_st) {
         jb(&b, ",\"st\":{\"state\":\"%s\",\"nch\":%d,\"synth\":%d,\"cal_age\":%d,\"cals\":%u,\"cal_fails\":%u,"
                "\"slips\":%u,\"overruns\":%u,\"cpu\":%d,\"fc\":%u,\"rate\":%u,\"why\":",
@@ -2288,6 +2564,16 @@ int app_df_web_json(char *out, size_t n) {
         jb(&b, ",\"gp\":{\"gpsd\":%d,\"mode\":%d,\"src\":%d,\"heading\":%.1f,\"speed\":%.2f,\"lat\":%.7f,\"lon\":%.7f}",
            s.gp.gpsd, s.gp.mode, s.gp.head_src, s.gp.head_ddeg / 10.0, s.gp.speed_cms == 0xffff ? -1 : s.gp.speed_cms / 100.0,
            s.gp.lat_e7 / 1e7, s.gp.lon_e7 / 1e7);
+    if (s.have_ac) {                        /* the antenna side's calibration */
+        jb(&b, ",\"ac\":{\"state\":%d,\"pct\":%d,\"fit0\":%d,\"fit1\":%d,\"n\":%d,\"use\":%d,\"use_hz\":%u,"
+               "\"use_brg\":%.1f,\"use_age\":%lld,\"take_brg\":%.1f,\"ph\":[",
+           s.ac.state, s.ac.pct, s.ac.fit0_pct, s.ac.fit1_pct, s.ac.n, s.ac.in_use, s.ac.use_hz, s.ac.use_brg_ddeg / 10.0,
+           s.ac.use_age_s == 0xffffffffu ? -1LL : (long long)s.ac.use_age_s, s.ac.take_brg_ddeg / 10.0);
+        for (int m = 0; m < kind_n() && m < DF_PROTO_MAXCH; m++) jb(&b, "%s%.1f", m ? "," : "", s.ac.ph_ddeg[m] / 10.0);
+        jb(&b, "],\"why\":");
+        jstr(&b, s.ac.why, sizeof(s.ac.why));
+        jb(&b, "}");
+    }
     jb(&b, "}\n");
     return b.l + 1 < n ? (int)b.l : -1;
 }
