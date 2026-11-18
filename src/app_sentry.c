@@ -3435,32 +3435,6 @@ static void b_use(int u, unsigned set) {
     osd(title, t, -1);
 }
 
-/* B's SDR gone from USB and another there that tunes B's channel: that one taken in its place, an RTL first, after 3 s
- * (a replug or a port reset passes). The owner swapped a KrakenSDR for one stick (2026-11-17): B went on asking for the
- * Kraken's stick (by its serial) and heard nothing till the GUI was restarted */
-static void b_gone_follow(void) {
-    static uint32_t gone_since;
-    unsigned        m = b_sdrs();
-    rtl_dev_t       k = rtl_spectrum_used();
-    int             want = k == RTL_DEV_NONE ? -1 : bu_of(k, rtl_spectrum_used_rtl()), u = -1;
-
-    if (want < 0 || (m & DEVB(want)) || !m || df_rx_b_lent()) {   /* there, nothing to take, or lent to page I */
-        gone_since = 0;
-        return;
-    }
-    if (!gone_since) {
-        gone_since = lv_tick_get() | 1;
-        return;
-    }
-    if (lv_tick_get() - gone_since < 3000) return;
-    gone_since = 0;
-    for (int c = BU_RTL0; c < BU_N && u < 0; c++)
-        if (m & DEVB(c)) u = c;
-    for (int c = 0; c < BU_RTL0 && u < 0; c++)
-        if (m & DEVB(c)) u = c;
-    if (u >= 0) b_use(u, 0);
-}
-
 static void sp_fill(void) {
     int cur = bu_of(rtl_spectrum_dev(), rtl_spectrum_dev_rtl());
 
@@ -6129,7 +6103,6 @@ static void blink_cb(lv_timer_t *t) {
     state_keep();                                   /* for a restart of the GUI: gui_state.c */
     rtl_spectrum_rds_watch(rds_channel());          /* B's FM broadcast channel's RDS (C's stick entry's) */
     if (scr == SCR_SYSTEM && n % 2 == 0) sys_load_show();   /* its load each second */
-    if (n % 2 == 0) b_gone_follow();                        /* B's SDR pulled out: another in its place */
     if (scr == SCR_RTL) watch_show();                       /* the watch channels, open or quiet */
     if (pp_on) pp_fill();                                   /* the pool's panel: who has what, as it changes */
     rds_show(false);

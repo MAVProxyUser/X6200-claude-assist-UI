@@ -20,6 +20,8 @@
 #include "audio.h"
 #include "rtl_watch.h"
 #include "sdr_pool.h"
+#include "scheduler.h"
+#include "cfg/cfg_api.h"
 #include "radio.h"
 
 #include <errno.h>
@@ -355,6 +357,9 @@ static void take_alert(const char *t) {
     }
 }
 
+static void b_gone_follow(void);
+static bool b_want_there(const sdr_unit_t *u, int n);
+
 static void *spec_thread(void *arg) {
     static uint8_t buf[24 + MAX_BINS * 4 + 64];
     int            fd = -1, asked = -1, failed = 0;
@@ -459,8 +464,12 @@ static void *spec_thread(void *arg) {
 
             clock_gettime(CLOCK_MONOTONIC, &ts);
             uint32_t now = (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+            sdr_unit_t pu[16];
+            int        pn = sdr_pool_units(pu, 16);
+
             if (atomic_load(&use_kind) == RTL_DEV_RTL && atomic_load(&dev_kind) == RTL_DEV_RTL &&
-                atomic_load(&dev_rtl) >= 0 && atomic_load(&dev_rtl) != atomic_load(&use_rtl) && now - again > 3000) {
+                atomic_load(&dev_rtl) >= 0 && atomic_load(&dev_rtl) != atomic_load(&use_rtl) && now - again > 3000 &&
+                b_want_there(pu, pn)) {        /* one gone for good: b_gone_follow's, not asked for in a loop */
                 char cmd[80], sn[24], want[24];
 
                 again = now;
@@ -478,6 +487,7 @@ static void *spec_thread(void *arg) {
                 }
             }
         }
+        b_gone_follow();
         if (!k) state = RTL_SPEC_OFF;
         else if (state == RTL_SPEC_OFF && last_st[0]) state = daemon_state(last_st);   /* wanted again (AIRSPACE closed) */
 
@@ -869,6 +879,74 @@ bool rtl_spectrum_feed(int fd) {
     }
     pthread_mutex_unlock(&lock);
     return ok;
+}
+
+/* B's SDR taken in place of one gone (b_gone_follow), kept as its choice (screen_main reads it at the start) */
+static void b_choice_keep(void *arg) {
+    param_i_set(cfg_rtl_dev, *(int *)arg);
+}
+
+/* B's own SDR in the pool now: the one asked for by its serial (by its place when none was known); true for a kind
+ * other than an RTL that is there */
+static bool b_want_there(const sdr_unit_t *u, int n) {
+    rtl_dev_t k = (rtl_dev_t)atomic_load(&use_kind);
+    char      want[24];
+
+    pthread_mutex_lock(&use_lock);
+    snprintf(want, sizeof(want), "%s", use_sn);
+    pthread_mutex_unlock(&use_lock);
+    for (int i = 0; i < n; i++)
+        if (u[i].kind == k && (k != RTL_DEV_RTL || (want[0] ? !strcmp(u[i].sn, want) : u[i].rtl == atomic_load(&use_rtl))))
+            return true;
+    return false;
+}
+
+/* B's SDR gone from USB for good (the owner swapped a KrakenSDR for one stick, 2026-11-17). B was pinned to its stick by
+ * serial, and two things went wrong: with nothing open, nothing asked again, so B waited on a stick that was not coming
+ * back till the GUI restarted; and a GUI starting with a place that no longer exists ("k RTL4" of one stick) had the
+ * daemon fall back to RTL0, which the re-ask above took for the wrong stick and asked RTL4 again every 3 s. Here, on
+ * every screen: B's own not on USB for 3 s (a replug or a port reset comes back sooner), B takes the one the daemon has
+ * open if it may, else another free or B's own, an RTL first, as if chosen. Never one page I, AIRSPACE or a watch
+ * channel holds, nor one stopped in the pool's panel; not while B has none on purpose (page I lent it: use_kind NONE) */
+static void b_gone_follow(void) {
+    static uint32_t gone_ms;
+    struct timespec ts;
+    sdr_unit_t      u[16];
+    rtl_dev_t       k = (rtl_dev_t)atomic_load(&use_kind), dk = (rtl_dev_t)atomic_load(&dev_kind);
+    int             n, pick = -1;
+
+    n = sdr_pool_units(u, 16);
+    if (k == RTL_DEV_NONE || b_want_there(u, n)) {     /* none wanted, or it is there */
+        gone_ms = 0;
+        return;
+    }
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint32_t now = (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+
+    if (!gone_ms) {
+        gone_ms = now | 1;
+        return;
+    }
+    if (now - gone_ms < 3000) return;
+    for (int i = 0; i < n; i++) {
+        bool free_ = !u[i].stopped && (u[i].owner == SDR_OWN_NONE || u[i].owner == SDR_OWN_B);
+        bool open_ = u[i].kind == dk && (dk != RTL_DEV_RTL || u[i].rtl == atomic_load(&dev_rtl));
+
+        if (!free_) continue;
+        if (open_) {                    /* the one the daemon has: kept, nothing reopened */
+            pick = i;
+            break;
+        }
+        if (pick < 0 || (u[i].kind == RTL_DEV_RTL && u[pick].kind != RTL_DEV_RTL)) pick = i;
+    }
+    if (pick < 0) return;               /* nothing free: asked again in 3 s */
+    gone_ms = 0;
+    fprintf(stderr, "rtl: B's SDR gone from USB: %s (%s) in its place\n", u[pick].name, u[pick].sn[0] ? u[pick].sn : "-");
+    if (u[pick].kind == RTL_DEV_RTL) rtl_spectrum_use_rtl(u[pick].rtl);
+    else rtl_spectrum_use(u[pick].kind);
+    int v = (int)u[pick].kind | (u[pick].kind == RTL_DEV_RTL ? u[pick].rtl << 16 : 0);   /* app_sentry.c's cfg_rtl_dev */
+
+    scheduler_put(b_choice_keep, &v, sizeof(v));      /* kept as B's choice, on the GUI thread: the next start opens it */
 }
 
 void rtl_spectrum_use(rtl_dev_t d) {

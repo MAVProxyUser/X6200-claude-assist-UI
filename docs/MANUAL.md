@@ -942,9 +942,11 @@ B's SDR and each watch channel's are held **by their serial** (and USB location)
 numbers follow the order of the sticks on USB, and one that drops out for a moment (a port reset) moves the others'
 numbers. While a stick is away its daemon waits for it rather than opening another one in its place (before, B's
 daemon could open a stopped stick for a moment), and B's daemon starts on its own stick rather than on RTL0 till the
-GUI says which. When B's stick is gone for good (unplugged, a KrakenSDR swapped for one stick) and another SDR that
-tunes B's channel is on USB, B takes that one after 3 s (an RTL first), as if chosen; a stick back in a moment (a
-replug, a port reset) is waited for. Before, B went on asking for the one gone till the GUI was restarted.
+GUI says which. When B's stick is gone for good (unplugged, a KrakenSDR swapped for one stick, or the GUI starting
+with a stick that is no longer there) and another SDR is on USB, B takes it after 3 s, as if chosen and kept so: the
+one B's daemon has open if any (nothing reopened), else a free one, an RTL first; never one page I, AIRSPACE or a watch
+channel holds. A stick back in a moment (a replug, a port reset) is waited for. Before, B went on asking for the one
+gone till the GUI was restarted, and a GUI started with it asked for it again every 3 s while the daemon held another.
 
 **The speaker**: one player (`rtl_spectrum.c`) mixes B's SDR and the watch channels open, and runs from the start
 for watch channels restored at boot. Another of the base's play-mode users (the recorder, a voice message, FreeDV)
