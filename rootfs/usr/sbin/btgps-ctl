@@ -7,16 +7,16 @@
 # its own that the radio connects to, so the two run at once. The GPS is paired
 # in Settings > Bluetooth first; "set" makes it gpsd's, "off" lets it go.
 #
-# "run" (started by S94btcat) keeps it: rfcomm connect to the GPS on /dev/rfcomm1,
-# the tty given to gpsd (gpsdctl add) while it is connected and taken back when it
-# drops; a GPS switched off or out of range is tried again every 10 s, so nothing
-# is done by hand when it comes back. Not "rfcomm bind": gpsd opening a bound tty
-# waits for the connection, and a GPS switched off would stall gpsd for the rest.
-# gpsd quits a few seconds after its last device goes while nothing reads it
-# (this image's): started again with the next connection.
+# "run" (started by S94btcat) keeps it: btgps-bridge connects to the GPS and gives
+# its words a pseudo-terminal, given to gpsd (gpsdctl add) while it is connected and
+# taken back when it drops; a GPS switched off or out of range is tried again every
+# 10 s, so nothing is done by hand when it comes back. Not "rfcomm connect": this
+# kernel makes no RFCOMM TTYs ("Can't create RFCOMM TTY: Operation not supported",
+# the first GPS here, a GLO 2, 2026-11-18). gpsd quits a few seconds after its last
+# device goes while nothing reads it (this image's): started again with the next
+# connection.
 CONF=/mnt/btcat.conf
-DEV=1
-TTY=/dev/rfcomm$DEV
+LINK=/var/run/btgps.tty		# btgps-bridge's: a symlink to the pty while connected
 PIDF=/var/run/btgps.pid
 STATE=/tmp/btgps.state		# connected | trying | off, for the GUI and the web page
 BTGPS_MAC=
@@ -65,7 +65,7 @@ gpsd_up() {
 
 keep() {
 	echo $$ > $PIDF
-	trap 'kill $pid 2>/dev/null; gpsdctl remove $TTY >/dev/null 2>&1; echo off > $STATE
+	trap 'kill $pid 2>/dev/null; [ -n "$tty" ] && gpsdctl remove $tty >/dev/null 2>&1; echo off > $STATE
 	      [ "$(cat $PIDF 2>/dev/null)" = "$$" ] && rm -f $PIDF; exit 0' TERM INT
 	while :; do
 		load
@@ -75,34 +75,35 @@ keep() {
 			continue
 		fi
 		mac=$BTGPS_MAC
+		tty=
 		echo trying > $STATE
-		rfcomm release $DEV >/dev/null 2>&1
-		rfcomm connect $DEV "$mac" "$BTGPS_CH" >/dev/null 2>&1 &
+		rm -f $LINK
+		/usr/sbin/btgps-bridge "$mac" "$BTGPS_CH" $LINK &	# says why it ends in the log
 		pid=$!
 		i=0
-		while [ $i -lt 20 ] && [ ! -e $TTY ] && kill -0 $pid 2>/dev/null; do
+		while [ $i -lt 25 ] && [ ! -e $LINK ] && kill -0 $pid 2>/dev/null; do
 			nap 1
 			i=$((i + 1))
 		done
-		if [ -e $TTY ] && kill -0 $pid 2>/dev/null; then
-			chmod 666 $TTY			# gpsd reads as nobody
+		if [ -e $LINK ] && kill -0 $pid 2>/dev/null; then
+			tty=$(readlink $LINK)		# the pty itself: gpsd keeps the name it was given
 			gpsd_up
-			gpsdctl add $TTY >/dev/null 2>&1
+			gpsdctl add $tty >/dev/null 2>&1
 			echo connected > $STATE
-			log "connected to $mac (channel $BTGPS_CH), $TTY to gpsd"
+			log "connected to $mac (channel $BTGPS_CH), $tty to gpsd"
 			while kill -0 $pid 2>/dev/null; do
 				nap 5
 				load
 				[ "$BTGPS_MAC" = "$mac" ] || break		# another GPS chosen, or off
 				gpsd_up					# gpsd quit, or restarted without it (a USB
-				gpsdctl add $TTY >/dev/null 2>&1		# GPS's restart_gpsd): in again; an add
+				gpsdctl add $tty >/dev/null 2>&1		# GPS's restart_gpsd): in again; an add
 			done						# of one it has does nothing
-			gpsdctl remove $TTY >/dev/null 2>&1
+			gpsdctl remove $tty >/dev/null 2>&1
 			log "$mac gone"
 		fi
 		kill $pid 2>/dev/null
 		wait $pid 2>/dev/null
-		rfcomm release $DEV >/dev/null 2>&1
+		tty=
 		echo trying > $STATE
 		load
 		[ "$BTGPS_MAC" = "$mac" ] && nap 10		# off or out of range: again in a while

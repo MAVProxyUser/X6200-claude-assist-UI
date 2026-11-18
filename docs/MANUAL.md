@@ -7837,6 +7837,10 @@ it on again is all it takes. Its channel is read from the GPS when it is
 chosen (1 otherwise). The same choice is on the web page's Direction finder,
 in its GPS card (Bluetooth GPS: a paired device, or Off). Log:
 `/tmp/btgps.log`; its link: `/tmp/btgps.state` (connected, trying, off).
+gpsd reads it through a pseudo-terminal (`btgps-bridge`; `/var/run/btgps.tty`
+points to it while connected), as the radio's kernel makes no Bluetooth serial
+devices. Tried with a Garmin GLO 2: it pairs without a PIN, sends 10 positions
+a second on channel 1, and needs open sky for its first fix.
 
 ### TCI over Bluetooth
 

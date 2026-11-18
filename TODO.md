@@ -21,7 +21,9 @@ approved that day.
 2. **A Bluetooth GPS for gpsd, beside Bluetooth CAT**: built 2026-11-17 (btgps-ctl, Settings > Bluetooth's GPS for
    gpsd, the web page's Direction finder GPS card): beside CAT rather than instead of it, as the radio is CAT's
    serial port and the GPS is its own. Tried on the radio with an address that is not there (it keeps trying, CAT
-   untouched). Left: the Garmin GLO 2 itself when it comes (pair, choose, a fix on page I).
+   untouched). The Garmin GLO 2 paired 2026-11-18 (no PIN, channel 1, NMEA at 10 Hz): the kernel makes no RFCOMM
+   TTYs, so `rfcomm connect` could never have worked; btgps-bridge (a socket onto a pty) feeds gpsd instead, which
+   reads it (NMEA0183). Left: its first fix under open sky, and that fix on page I.
 
 *Hardware to plug in*
 
