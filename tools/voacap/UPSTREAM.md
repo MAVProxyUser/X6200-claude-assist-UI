@@ -32,6 +32,11 @@ binary) say it in full. In short, what this binary carries, 544 KB of coefficien
 hfcast's own crate on crates.io ships without the coefficients for that reason, and its repository carries them.
 Using them on one's own radio is not redistributing them; an image or update bundle given to others is.
 
+**Decided 2026-11-18 by the owner ("Ship it")**: the image and the update bundle carry voacapl with them, on the
+reading above (the ITU's own free publication of the CCIR data, NTIA/ITS's US Government status for the rest), with
+hfcast's NOTICE and licence notes beside the binary. If that reading is ever shown wrong, the fallback is hfcast's:
+build without `embedded-coefficients` and give voacapl an itshfbc tree the owner supplies.
+
 ## How Pat runs it
 
 `x6100-winlink` sets Pat's `prediction.engine` to `voacap` with `/usr/bin/voacapl` and `/usr/share/voacapl` (a note

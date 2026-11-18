@@ -535,9 +535,9 @@ x6100-winlink turns Pat's engine on with it, GOMAXPROCS=2, the power capped at 7
 nine Fortran listings' MUF columns identical (the operating frequency's within 0.1 degree and 1 km, their sample
 antenna against the isotrope), Pat's own parser reads its listings, on the X6200 `pat rmslist -m ardop -b 40m -q`
 rated 243 gateways in 9.5 s (about 50 ms a prediction). Host check `voacap`; image: buildroot/local-build.sh builds
-it as XARA is built. **Left for the owner**: whether the public image and bundle carry the CCIR coefficients
-(tools/voacap/UPSTREAM.md: the ITU publishes them free from copyright assertions for implementers of its
-Recommendations, VOACAP not one; hfcast's crate leaves them out of crates.io for that reason).
+it as XARA is built. The public image and bundle carry it with the CCIR coefficients: the owner's decision,
+2026-11-18, "Ship it" (tools/voacap/UPSTREAM.md: the ITU publishes them free from copyright assertions for
+implementers of its Recommendations, VOACAP not one; hfcast's crate leaves them out of crates.io for that reason).
 
 Asked 2026-11-02 (km4gkd, #153). Pat's gateway list (the mailbox's Connect dialog) has a VOACAP column with each
 gateway's predicted path quality; on the radio it stays hidden, because x6100-winlink sets Pat's `prediction` engine
