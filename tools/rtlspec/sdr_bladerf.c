@@ -76,6 +76,8 @@ static struct {
     __typeof__(&bladerf_fw_version)          fwver;
     __typeof__(&bladerf_flash_firmware)      flashfw;
     __typeof__(&bladerf_device_reset)        reset;
+    __typeof__(&bladerf_get_power_source)    psrc;      /* bladeRF 2.0 only; NULL in a library without them */
+    __typeof__(&bladerf_get_pmic_register)   pmic;
 } L;
 
 static struct bladerf *volatile bd;
@@ -137,6 +139,8 @@ static bool lib(void) {
     SYM(flashfw, "bladerf_flash_firmware");
     SYM(reset, "bladerf_device_reset");
 #undef SYM
+    *(void **)&L.psrc = dlsym(L.so, "bladerf_get_power_source");
+    *(void **)&L.pmic = dlsym(L.so, "bladerf_get_pmic_register");
     L.verbosity(BLADERF_LOG_LEVEL_WARNING);
     return true;
 }
@@ -225,6 +229,20 @@ static const char *fpga_file(bladerf_fpga_size s) {
     }
 }
 
+/* Which power the bladeRF 2.0 runs on (its TPS2115A: the DC jack or USB's VBUS) and what it draws (its INA219), said
+ * at each open: a board that dropped off USB as it started was put down to bus power (2026-11-15), and on 2026-11-18
+ * it did so with its own supply plugged in, as the owner said. This says which it was */
+static void bl_power_say(struct bladerf *d, const char *when) {
+    bladerf_power_sources ps;
+    float                 v = 0, a = 0;
+
+    if (!L.psrc || strcmp(L.board(d), "bladerf2") || L.psrc(d, &ps) != 0) return;
+    if (!L.pmic || L.pmic(d, BLADERF_PMIC_VOLTAGE_BUS, &v) != 0 || L.pmic(d, BLADERF_PMIC_CURRENT, &a) != 0) v = a = 0;
+    fprintf(stderr, "rtlspec: the bladeRF %s on %s: %.2f V, %.2f A\n", when,
+            ps == BLADERF_PS_DC ? "its DC jack" : ps == BLADERF_PS_USB_VBUS ? "USB power (VBUS)" : "an unknown supply",
+            (double)v, (double)a);
+}
+
 static int bl_open(char *tuner, size_t n, uint64_t *lo, uint64_t *hi) {
     struct bladerf             *d;
     const struct bladerf_range *r = NULL;
@@ -247,11 +265,12 @@ static int bl_open(char *tuner, size_t n, uint64_t *lo, uint64_t *hi) {
             return 2;
         }
         if (e == BLADERF_ERR_NODEV) return -1;
-        /* It went while it started (a bladeRF 2.0 on the X6200's HOST port alone browns out as its AD9361 starts: the
-         * errors are "unexpected", "no devices" after it): gone, not busy. Still there after a failed start: said so,
-         * left till it is pulled out (up to v0.3.12.25 both said BUSY, as if another program had it) */
+        /* It went while it started (a bladeRF 2.0 off USB as its AD9361 started: 2026-11-15 on the HOST port's power,
+         * 2026-11-18 with its own supply plugged in, the owner said; the errors are "unexpected", "no devices" after
+         * it): gone, not busy. Still there after a failed start: said so, left till it is pulled out (up to v0.3.12.25
+         * both said BUSY, as if another program had it). bl_power_say tells which power it opens on */
         if (!bl_present()) {
-            fprintf(stderr, "rtlspec: the bladeRF dropped off USB as it started: it wants its own 5 V or a powered hub\n");
+            fprintf(stderr, "rtlspec: the bladeRF dropped off USB as it started\n");
             return -1;
         }
         if (e == BLADERF_ERR_IO || e == BLADERF_ERR_PERMISSION) return 1;     /* held by another program */
@@ -276,6 +295,7 @@ static int bl_open(char *tuner, size_t n, uint64_t *lo, uint64_t *hi) {
     }
     L.gmode(d, BLADERF_CHANNEL_RX(0), BLADERF_GAIN_MGC);
     memset(&dc, 0, sizeof(dc));
+    bl_power_say(d, "open");
     return 0;
 }
 
@@ -338,11 +358,12 @@ static int bl_rx(sdr_rx_cb cb, volatile int *halt) {
                                                                 : "12-bit samples (SC16 Q11: its FPGA has no 8-bit format)");
         said = sc8;
     }
-    while (!*halt) {
+    for (int nb = 0; !*halt; nb++) {
         if ((e = L.sync_rx(bd, sc8 ? (void *)bbuf : (void *)sbuf, N_SAMP, NULL, 2000)) != 0) {
             fprintf(stderr, "rtlspec: the bladeRF's stream ended: %s\n", L.strerror_(e));
             break;
         }
+        if (nb == 50) bl_power_say(bd, "receiving");      /* its receiver's current in it too */
         for (int k = 0; !sc8 && k < N_SAMP * 2; k++) {     /* +-2048 to +-128 */
             int v = sbuf[k] / 16;
             bbuf[k] = (int8_t)(v > 127 ? 127 : v < -128 ? -128 : v);

@@ -1362,7 +1362,11 @@ wherever the RTL-SDR did (B, BOTH, C, D, E, RDS, SAME, AIRSPACE), named as they 
 - **A bladeRF 2.0 micro needs power of its own on the X6200** (its 5 V DC jack, or a powered hub on HOST): on the
   HOST port's own power it dropped off USB as its RF chip started (2026-11-15, an xA9), and the radio's USB host saw
   no device connect after that, the bladeRF on its own power included (switching the radio off and on is the likely
-  mend; not tried yet).
+  mend; not tried yet). B takes a bladeRF plugged in on the go (2026-11-18), and when it drops off USB as it starts,
+  B's picture says so ("THE BLADERF DROPPED OFF USB AS IT STARTED"), kept until an SDR opens (it said "NO SDR ON
+  USB" a moment after up to v0.3.12.28). It did so on 2026-11-18 with its own supply plugged in too, so the cause is
+  not settled: the SDR daemon's log (`/tmp/rtlspec.log`) now says at each open which power the board runs on and
+  what it draws ("the bladeRF open on its DC jack: 4.95 V, 0.65 A"; 0.68 A receiving).
 - **A hub that browns out no longer hangs the radio**, with the SD card's kernel of the bundles built after
   v0.3.12.26. A HackRF and an RTL-SDR streaming on an unpowered hub on HOST draw more than the port gives: the hub
   drops off and comes back, and the kernel log fills with `three-strikes error`. Up to that kernel, a device's

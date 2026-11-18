@@ -62,10 +62,15 @@ approved that day.
 
 **Waiting on hardware**
 
-- The bladeRF's filter (c1c732a): its 2.646 MS/s, RDS and picture were tried with v0.3.12.27; the filter it takes is
-  read off rtlspec's log when it is next plugged in. The HackRF's done 2026-11-17 night: 2.646 MS/s at 99 % (5.29
-  MB/s), its baseband filter 2.5 MHz there (1.75 at 2.1168), B's picture 2.2 MHz wide, heard, RDS PI on 92.3; B took
-  it by itself when the RTL was swapped for it (bd5592a).
+- The bladeRF dropping off USB as it started (2026-11-18 00:05 local, with its own supply plugged in, the owner
+  said): the drop has been put down to bus power since 2026-11-15, which this one contradicts. Plugged in again at
+  00:14 it opened on its DC jack (4.95 V, 0.65 A; 0.68 A receiving, now logged at each open). The one difference
+  seen: the first time its FPGA had no image and the radio loaded it; the second it kept the one it had. To try: DC
+  and USB both out, DC in, then USB, and read /tmp/rtlspec.log and dmesg.
+- Done 2026-11-18: the bladeRF's filter at 2.646 MS/s is 2.3814 MHz (9/10 of the rate; 1.905 at 2.1168), 99 % of the
+  samples (5.29 MB/s). The HackRF's done 2026-11-17 night: 2.646 MS/s at 99 % (5.29 MB/s), its baseband filter 2.5
+  MHz there (1.75 at 2.1168), B's picture 2.2 MHz wide, heard, RDS PI on 92.3; B took it by itself when the RTL was
+  swapped for it (bd5592a).
 
 **Parked or later**
 

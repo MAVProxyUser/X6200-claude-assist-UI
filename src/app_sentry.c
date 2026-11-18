@@ -2973,9 +2973,16 @@ static void stick_why(rtl_spec_state_t st, char *b, size_t n) {
 
     switch (st) {
         case RTL_SPEC_NO_HELPER: snprintf(b, n, "THE SDR'S DAEMON DOES NOT START\n\n/USR/BIN/X6X00-RTLSPEC"); break;
-        case RTL_SPEC_NO_STICK:
-            snprintf(b, n, "NO SDR ON USB\n\nPLUG AN RTL-SDR, A HACKRF OR A BLADERF\nINTO THE HOST PORT");
+        case RTL_SPEC_NO_STICK: {
+            char gone[12];
+
+            if (rtl_spectrum_dropped(gone, sizeof(gone)))      /* gone as it started: kept said, not "no SDR" */
+                snprintf(b, n, "THE %s DROPPED OFF USB AS IT STARTED\n\nUNPLUG IT AND PLUG IT IN AGAIN\n"
+                               "(ON THE HOST PORT'S POWER ALONE: GIVE IT ITS OWN 5 V)", gone);
+            else
+                snprintf(b, n, "NO SDR ON USB\n\nPLUG AN RTL-SDR, A HACKRF OR A BLADERF\nINTO THE HOST PORT");
             break;
+        }
         case RTL_SPEC_BUSY: snprintf(b, n, "THE %s IS BUSY\n\nWAITING FOR IT", d); break;
         case RTL_SPEC_OPENING: snprintf(b, n, "OPENING THE %s", d); break;
         case RTL_SPEC_STALLED: snprintf(b, n, "THE %s SENDS NOTHING\n\nUNPLUG IT AND PLUG IT IN AGAIN", d); break;
@@ -2985,8 +2992,8 @@ static void stick_why(rtl_spec_state_t st, char *b, size_t n) {
             if (!strcmp(tn, "LIBBLADERF"))
                 snprintf(b, n, "THE BLADERF NEEDS LIBBLADERF\n\nNOT ON THIS IMAGE");
             else if (!strcmp(tn, "STARTFAIL"))
-                snprintf(b, n, "THE BLADERF FAILED AS IT STARTED\n\nMOST LIKELY TOO LITTLE POWER: ITS OWN\n"
-                               "5 V OR A POWERED HUB, THEN PLUG IT IN AGAIN");
+                snprintf(b, n, "THE BLADERF FAILED AS IT STARTED\n\nUNPLUG IT AND PLUG IT IN AGAIN\n"
+                               "(ON THE HOST PORT'S POWER ALONE: GIVE IT ITS OWN 5 V)");
             else if (!strcmp(tn, "FIRMWARE") || !strcmp(tn, "FPGA-UPDATE"))
                 snprintf(b, n, "THE BLADERF'S FPGA IMAGE AND ITS\nFIRMWARE DO NOT GO TOGETHER\n\nNUAND'S bladeRF_fw_vX.Y.Z.img IN\n"
                                "/mnt/bladerf UPDATES ITS FIRMWARE");

@@ -79,6 +79,11 @@ static bool kept(void) {
     return atomic_load(&want) && !atomic_load(&yielded);
 }
 static atomic_int      state = RTL_SPEC_OFF;
+/* An SDR gone from USB as it started (a bladeRF 2.0 did, 2026-11-15 on bus power and 2026-11-18 with its own supply
+ * plugged in, the owner said): B said "failed as it started" for a moment and then only "no SDR on USB" (the owner,
+ * 2026-11-18: "bladeRF didn't seem to get gracefully detected"). Its name kept till another SDR opens (lock) */
+static char            dropped_name[12], starting_name[12];
+static uint32_t        starting_ms;
 static atomic_llong    want_hz = 162475000;
 static atomic_int      want_gain = 280;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;       /* the row, the tuner, cmd_fd */
@@ -559,6 +564,24 @@ static void *spec_thread(void *arg) {
             snprintf(last_st, sizeof(last_st), "%s", st);
             pthread_mutex_lock(&lock);
             snprintf(tuner, sizeof(tuner), "%s", strcmp(tn, "-") ? tn : "");
+            {   /* one starting, one up, or one gone within 20 s of starting (dropped_name) */
+                struct timespec ts;
+
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                uint32_t ms = (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+
+                if (got >= 9 && strcmp(kd, "-") && strcmp(kd, "REPLAY") &&
+                    (!strcmp(st, "OPENING") || (!strcmp(st, "NEEDS") && !strcmp(tn, "STARTFAIL")))) {
+                    starting_ms = ms | 1;
+                    snprintf(starting_name, sizeof(starting_name), "%s", kd);
+                } else if (!strcmp(st, "ON")) {
+                    starting_ms     = 0;
+                    dropped_name[0] = 0;
+                } else if (!strcmp(st, "NOSTICK") && starting_ms && ms - starting_ms < 20000) {
+                    snprintf(dropped_name, sizeof(dropped_name), "%s", starting_name);
+                    starting_ms = 0;
+                }
+            }
             pthread_mutex_unlock(&lock);
             if (k && !(state == RTL_SPEC_ON && !strcmp(st, "ON"))) state = daemon_state(st);
             continue;
@@ -1019,6 +1042,15 @@ void rtl_spectrum_gain(int tenths) {
 
 rtl_spec_state_t rtl_spectrum_state(void) {
     return (rtl_spec_state_t)atomic_load(&state);
+}
+
+bool rtl_spectrum_dropped(char *name, size_t n) {
+    pthread_mutex_lock(&lock);
+    bool d = dropped_name[0] != 0;
+
+    if (name && n) snprintf(name, n, "%s", dropped_name);
+    pthread_mutex_unlock(&lock);
+    return d;
 }
 
 void rtl_spectrum_tuner(char *s, size_t n) {

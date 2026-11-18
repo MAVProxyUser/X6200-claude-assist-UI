@@ -245,6 +245,9 @@ uint32_t rtl_spectrum_acars_seq(void);
 /* The tuner the helper found ("R820T", "HACKRF-ONE", "BLADERF2"; for RTL_SPEC_NEEDS what is missing: "LIBBLADERF",
  * "hostedxA4.rbf"), "" before */
 void rtl_spectrum_tuner(char *s, size_t n);
+/* An SDR that went from USB as it started (a bladeRF 2.0 as its AD9361 started): true and its name ("BLADERF")
+ * till another SDR opens */
+bool rtl_spectrum_dropped(char *name, size_t n);
 
 /* ---- Transmitting: a HackRF or a bladeRF, narrow FM, the hand mic's voice ----
  *
