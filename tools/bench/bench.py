@@ -11,6 +11,8 @@ own; SSH (root) only for provisioning, the test callsigns and cleaning the logs.
   bench.py preflight PROFILE           every check before a transmission; nothing sent
   bench.py stop                        the emergency stop: the HackRF ended, every radio unkeyed, apps' TX stopped
   bench.py hackrf-ft8 [--band 20m] [--x 30] [--text "CQ Q9TST FN00"] [--audio 1500]
+  bench.py hackrf-iq FILE --at HZ --offset HZ [--fs 2000000] [--mode 7] [--x 30] [--during "CMD"]
+                                       an I/Q file into the radio tuned to HZ (7 NFM), CMD run beside it
   bench.py radios-ft8 TX RX [--band 20m]          (at 0.1 W, the first probe's power, throughout)
   bench.py testcall NAME CALL|--restore   the radio's callsign for the tests (Q<digit>TST), or back
   bench.py cleanlog NAME               the test callsigns' QSOs out of the radio's logs
@@ -458,6 +460,74 @@ def run_hackrf_ft8(c, args):
     say(f"PASS: {name} decoded {found['x']!r}, SNR {found['snr']} dB, {found['f']} Hz")
 
 
+def run_hackrf_iq(c, args):
+    """A signal made elsewhere (int8 I/Q at args.fs, the signal args.offset Hz above the HackRF's centre) into the
+    radio tuned to args.at in args.mode (7 NFM): the radio's dial, mode and squelch put back after. What the radio
+    makes of it is looked at by the caller (args.during: a command run beside it, its output said)"""
+    p, total = chain_gate(c, "hackrf")
+    hackrf_gate(args.x)
+    name = p["to"]
+    radio = Radio(name, c["radios"][name], want_tx=False)
+    rx_only_gate(radio)
+    secs = os.path.getsize(args.file) / 2 / args.fs
+    radio.take_control()
+    was = {k: radio.state.get(k) for k in ("freq", "mode", "sql")}
+    hk, watch, during, was_filter = None, None, None, None
+    try:
+        radio.send(f"set freq {args.at}")          # the frequency first: a new band brings its own mode back
+        radio.wait(f"{args.at} Hz", lambda: int(radio.state.get("freq", 0)) == args.at, 5)
+        radio.send(f"set mode {args.mode}")
+        radio.send("set sql 0")
+        radio.wait(f"mode {args.mode}", lambda: int(radio.state.get("mode", -1)) == args.mode, 5)
+        if args.filter:                         # the mode's own filter, put back before the mode is
+            was_filter = (radio.state.get("flo"), radio.state.get("fhi"))
+            radio.send(f"set filter {args.filter[0]} {args.filter[1]}")
+            radio.wait(f"the filter {args.filter}", lambda: [radio.state.get("flo"), radio.state.get("fhi")] ==
+                       list(args.filter), 5)
+        rx_only_gate(radio)
+        if args.during:
+            during = subprocess.Popen(args.during, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      text=True)
+            time.sleep(args.lead)
+        quiet = radio.meter
+        cmd = ["hackrf_transfer", "-t", args.file, "-f", str(args.at - args.offset), "-s", str(args.fs), "-a", "0",
+               "-p", "0", "-x", str(args.x)]
+        say(f"{name}: {args.at} Hz mode {args.mode}, receive only; the HackRF sends {os.path.basename(args.file)} "
+            f"({secs:.1f} s), -x {args.x}, {total} dB of pads")
+        hk = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        tx_log({"who": "hackrf", "to": name, "f": args.at - args.offset, "x": args.x,
+                "file": os.path.basename(args.file), "secs": round(secs, 1)})
+        watch = Watch([radio], c, hackrf=hk)
+        peak = -999.0
+        t_end = time.time() + secs + 10
+        while hk.poll() is None and time.time() < t_end and not watch.why:
+            if radio.meter is not None:
+                peak = max(peak, radio.meter)
+            time.sleep(0.05)
+        if hk.poll() is None and not watch.why:
+            watch.trip("hackrf_transfer ran past its file")
+        say(f"{name}: S-meter {quiet} dBm before, {peak:.1f} at most while the HackRF sent (exit {hk.returncode})")
+    finally:
+        if watch:
+            watch.close()
+        if hk and hk.poll() is None:
+            hk.kill()
+        if was_filter and None not in was_filter:
+            radio.send(f"set filter {int(was_filter[0])} {int(was_filter[1])}")
+            time.sleep(0.4)
+        for k in ("freq", "mode", "sql"):        # the frequency first, as above
+            if was.get(k) is not None:
+                radio.send(f"set {k} {int(was[k])}")
+                time.sleep(0.4)
+        time.sleep(0.5)
+        radio.close()
+    if during:
+        out, _ = during.communicate(timeout=120)
+        say("beside it:\n" + out.rstrip())
+    if watch.why:
+        raise Refused(watch.why)
+
+
 def run_radios_ft8(c, args):
     """Untried until both radios are on the bench: A calls CQ once, B must decode it and reply once, A must decode
     the reply. The first transmission of the session at FIRST_PROBE_W whatever was asked"""
@@ -643,6 +713,11 @@ def main():
     s = sub.add_parser("hackrf-ft8")
     s.add_argument("--band", default="20m", choices=FT8_DIAL); s.add_argument("--x", type=int, default=None)
     s.add_argument("--text", default="CQ Q9TST FN00"); s.add_argument("--audio", type=int, default=1500)
+    s = sub.add_parser("hackrf-iq"); s.add_argument("file"); s.add_argument("--at", type=int, required=True)
+    s.add_argument("--offset", type=int, required=True); s.add_argument("--fs", type=int, default=2000000)
+    s.add_argument("--mode", type=int, default=7); s.add_argument("--x", type=int, default=None)
+    s.add_argument("--during", default=None); s.add_argument("--lead", type=float, default=3.0)
+    s.add_argument("--filter", type=int, nargs=2, default=None, metavar=("LO", "HI"))
     s = sub.add_parser("radios-ft8"); s.add_argument("tx"); s.add_argument("rx")
     s.add_argument("--band", default="20m", choices=FT8_DIAL)
     s = sub.add_parser("testcall"); s.add_argument("name"); s.add_argument("call")
@@ -658,10 +733,10 @@ def main():
     signal.signal(signal.SIGTERM, on_signal)
     try:
         c = conf()
-        if a.cmd == "hackrf-ft8" and a.x is None:
+        if a.cmd in ("hackrf-ft8", "hackrf-iq") and a.x is None:
             a.x = c["limits"]["hackrf_x"]
         {"provision": cmd_provision, "status": cmd_status, "chain-ok": cmd_chain_ok, "preflight": cmd_preflight,
-         "stop": lambda c, a: emergency_stop(c), "hackrf-ft8": run_hackrf_ft8, "radios-ft8": run_radios_ft8,
+         "stop": lambda c, a: emergency_stop(c), "hackrf-ft8": run_hackrf_ft8, "hackrf-iq": run_hackrf_iq, "radios-ft8": run_radios_ft8,
          "testcall": cmd_testcall, "cleanlog": lambda c, a: clean_log(c["radios"][a.name]["host"])}[a.cmd](c, a)
     except Refused as e:
         say(f"REFUSED: {e}")

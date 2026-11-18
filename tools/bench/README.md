@@ -46,6 +46,11 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
     bench.py hackrf-ft8 --band 20m --x 30
     bench.py radios-ft8 x6100 x6200      # both radios on the cable, test callsigns set: CQ, then a reply
 
+`hackrf-iq FILE --at HZ --offset HZ` sends an I/Q file made elsewhere (int8, 2 MS/s by default, the signal OFFSET
+above the HackRF's centre) into the radio tuned to HZ in a mode (7: narrow FM; `--filter LO HI` for the test),
+puts the radio's frequency, mode, filter and squelch back after, and runs `--during "CMD"` beside it (for example a
+capture on the radio over SSH) and shows its output.
+
 `hackrf-ft8` makes the message with ft8_lib's `gen_ft8` (`gen_ft8` in the configuration), turns it into upper
 sideband I/Q at 2.004 MS/s (100 kHz above the HackRF's centre, clear of its DC spike), starts on the next FT8 slot
 and passes when the radio's FT8 app shows the text. `radios-ft8` is untried until two radios are on the bench.

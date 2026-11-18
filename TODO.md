@@ -28,7 +28,15 @@ approved that day.
 3. **DVSI USB-3000 back on USB**: back on the HOST port 2026-11-18 (the owner): the SDR daemon found it
    (AMBE3000P25F on /dev/ttyUSB0, DMR rate 33) and its self-test passed (a 1 kHz tone encoded and decoded came back
    at 1000 Hz). It has the HOST port alone now, so B has no SDR: the voice heard again on B waits for an SDR beside
-   it (a powered hub). With five Kraken sticks streaming it would share an endpoint again.
+   it (a powered hub). With five Kraken sticks streaming it would share an endpoint again. Tried through the X6200
+   instead (2026-11-18 02:48, the bench harness's `hackrf-iq`): the D-STAR test transmission from the HackRF on
+   29.600 MHz FM (-x 40, 70 dB of pads, -102 dBm at the radio), the X6200's receiver audio into dsd-fme on the radio
+   by hand, its voice frames to this USB-3000 through the daemon (libmbe-dvsi: AMBE3000P25F at 127.0.0.1:2460):
+   D-STAR synced all through, 14 s of speech back (radio_captures/bench/dstar_via_x6200_usb3000.wav), its slow
+   data ("CABLE TST") with bit errors in every frame, the speech's envelope 0.54 alike the clean decode from the
+   RTL. The errors are the X6200's FM audio (de-emphasised, through the codec; a 0-6 kHz filter changed nothing):
+   GMSK wants the FM discriminator's flat output, which B's SDR gives. The X6200's own audio is not a source the
+   daemon's decoders take; that would be a feature of its own (10 m and 6 m FM digital voice).
 4. **NXDN96 over the cable**: done 2026-11-17 night (HackRF -> attenuators -> the one RTL, receive only): the generated
    call (TG 100, source 1234, RAN 1) decoded by the third dsd-fme, B showing "NXDN96 441.000 / TG 100 FROM 1234 RAN 1
    TALKING". Its voice waits for the USB-3000 (3), as every AMBE mode's does. Every HackRF -> X6200 cable test is done
