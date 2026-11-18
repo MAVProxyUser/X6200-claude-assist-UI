@@ -1171,11 +1171,15 @@ written through to the card before it replaces the last copy, so a power cut kee
   the speaker is the radio that stopped last. The list marks the row each radio is on (A, B, or `*` where B has
   stopped) and WHAT IT IS says where both are; the finds go into C's Signal Log under the channel's name. F1 again,
   or A's or B's F1, or SCAN CFG's SCANS, ends it, the radios staying where they are. Receive only throughout.
+  **F5 LISTEN** (with EMERGENCY) chooses what the speaker plays: **AUTO** (the default: the radio in use, the one
+  the scan stopped on or the one a row opens on), **X6200**, the SDR by its name (RTL4, HACK, BLADE; offered with
+  one plugged in), or **ALL** (both together in headphones or over TCI; on the speaker the SDR alone, as the base
+  gives the processor none of the X6200's audio there). Back to AUTO, what was heard before comes back.
 
   The apps open on the frequency chosen (it goes into their memory first) and open their squelch themselves.
   JTTY's are WSJT-X's (as the JTTY app's list). Not on E: On the Air (its own list of broadcasts) and the Scanner. F1
-  is EMERGENCY's SCAN ALL (nothing for the other types), F5 nothing (no F key on any screen only goes to another
-  screen: the ring does that).
+  and F5 are EMERGENCY's SCAN ALL and LISTEN, nothing for the other types (no F key on any screen only goes to
+  another screen: the ring does that).
 - **Scroll bars**: a list holding more than it shows (D's bands, C's Signal Log, E's TYPE list and E's rows, as
   EMERGENCY's 65) has a thin bar at its right, its thumb as long as the share in sight and where that part is, as a
   web browser's. The MFK goes down the list as ever; a press or a drag on the bar (the mouse, or a finger) chooses

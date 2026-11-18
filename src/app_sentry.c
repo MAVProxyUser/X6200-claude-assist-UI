@@ -842,6 +842,17 @@ static int  emer_ord[EMER_N];
 static int  emer_smode = -1;                    /* A's mode before it, given back after */
 static bool b_stopped(void);
 static void rx_setup_apply(int64_t hz, int agc);
+
+/* E's LISTEN (F5, with EMERGENCY; the owner: "the LISTEN button that selects the radio, ... each radio that can be
+ * used, and an ALL function. And when scanning it should default to whatever radio it is using"): -1 AUTO, the radio
+ * the scan stopped on or the row opened on; else that one (HEAR_X6200, HEAR_RTL) or both (HEAR_BOTH, ALL) */
+static int  e_listen = -1, e_before = -1;     /* e_before: what was heard as E's LISTEN left AUTO, given back at AUTO */
+static void hear_apply(int h);
+static void e_hear(int radio) {
+    int h = e_listen >= 0 ? e_listen : radio;
+
+    if (h != heard) hear_apply(h);
+}
 #define A_CHAN_NEAR 5000                        /* A's lock on a channel: a signal this near it */
 
 /* The channel list's next entry after from (-1: the first) that the radio takes, the X6200's or the SDR's (rx_of);
@@ -4001,10 +4012,7 @@ static void b_chan_step(uint32_t now) {
             hit_add(listen_hz, rtl_mode_of(listen_hz), true, emer_scan ? scan_ch_name(b_chan) : rtl_name(listen_hz),
                     b_level_at(listen_hz));
             if (scan_stay != STAY_NONE || emer_scan) {     /* EMERGENCY: always, while it talks */
-                if (emer_scan && heard != HEAR_RTL && heard != HEAR_BOTH) {     /* heard: the one that stopped */
-                    param_i_set(cfg_hear_f, HEAR_RTL);
-                    hear_apply(HEAR_RTL);
-                }
+                if (emer_scan) e_hear(HEAR_RTL);       /* heard: the one that stopped (E's LISTEN AUTO) */
                 b_stop.on    = true;
                 b_stop.held  = !emer_scan && scan_stay == STAY_HOLD;
                 b_stop.prio  = false;
@@ -5725,10 +5733,7 @@ static void track_start(int32_t hz, bool auto_) {
 
     identify(hz, &id);
     if (!tune(id.tune_hz, id.mode)) return;
-    if (emer_scan && heard != HEAR_X6200 && heard != HEAR_BOTH) {   /* EMERGENCY's scan: heard, the one that stopped */
-        param_i_set(cfg_hear_f, HEAR_X6200);
-        hear_apply(HEAR_X6200);
-    }
+    if (emer_scan) e_hear(HEAR_X6200);  /* EMERGENCY's scan: heard, the one that stopped (E's LISTEN AUTO) */
     memset(&trk, 0, sizeof(trk));
     trk_prio      = false;      /* a new lock is not the priority's till a_prio_lock says so */
     trk.on        = true;
@@ -6252,6 +6257,11 @@ static const char *f_label(int k) {
                 snprintf(s, sizeof(s), "Scan all:\n%s", emer_scan ? "On" : "Off");
                 return s;
             }
+            if (k == 4 && decoders[dec_sel].rx == 'E') {
+                snprintf(s, sizeof(s), "Listen:\n%s", e_listen < 0 ? "Auto" : e_listen == HEAR_BOTH ? "All"
+                                                       : hear_name(e_listen));
+                return s;
+            }
             return l[k];
         }
         case SCR_SYSTEM: {
@@ -6372,6 +6382,30 @@ static void open_async(void *arg) {
 
 static void b_listen_at(int64_t hz, int band);
 
+/* E's F5 LISTEN with EMERGENCY: AUTO, the X6200, the SDR, ALL (the SDR's two only with one plugged in), heard at once */
+static void e_listen_next(void) {
+    char t[220], title[40];
+
+    if (e_listen < 0) e_before = heard, e_listen = HEAR_X6200;
+    else if (e_listen == HEAR_X6200 && sdr_here) e_listen = HEAR_RTL;
+    else if (e_listen == HEAR_RTL) e_listen = HEAR_BOTH;
+    else e_listen = -1;
+    if (e_listen >= 0) hear_apply(e_listen);
+    else if (e_before >= 0 && !emer_scan) hear_apply(e_before), e_before = -1;    /* as it was */
+    if (e_listen < 0)
+        snprintf(t, sizeof(t), "THE RADIO IN USE: THE ONE THE SCAN STOPPED ON, OR THE ONE A ROW OPENS ON (THE X6200 FOR "
+                               "HF AND 6 M, THE SDR FOR THE REST).");
+    else if (e_listen == HEAR_BOTH)
+        snprintf(t, sizeof(t), "THE X6200 AND THE %s TOGETHER IN HEADPHONES OR TCI; ON THE SPEAKER THE %s ALONE (THE "
+                               "BASE GIVES THE PROCESSOR NONE OF THE X6200'S AUDIO THERE).", rtl_spectrum_dev_tag(),
+                 rtl_spectrum_dev_tag());
+    else
+        snprintf(t, sizeof(t), "THE %s ALONE, WHATEVER THE SCAN OR A ROW USES.", hear_name(e_listen));
+    snprintf(title, sizeof(title), "LISTEN: %s", e_listen < 0 ? "AUTO" : e_listen == HEAR_BOTH ? "ALL" : hear_name(e_listen));
+    osd(title, t, -1);
+    show_screen();
+}
+
 /* E's EMERGENCY F1: A and B scan its list (emer_scan), or stop; the transmitters let go of first */
 static void emer_scan_set(bool on) {
     if (on == emer_scan) return;
@@ -6431,6 +6465,12 @@ static void open_decoder(void) {
             if (trk.on) track_end();
             smode = MODE_MAN;
             if (tune(e->hz, e->mode)) rx_setup_apply(e->hz, radio_agc_slow);
+            {                           /* A's LISTEN: E's, or the X6200 (AUTO) where it heard the SDR or nothing */
+                int h = param_i_get(cfg_hear_a);
+
+                if (e_listen >= 0) param_i_set(cfg_hear_a, e_listen);
+                else if (h == HEAR_RTL || h == HEAR_OFF) param_i_set(cfg_hear_a, HEAR_X6200);
+            }
             go(SCR_SCAN);
         } else {
             if (rtl_spectrum_dev() == RTL_DEV_NONE) {
@@ -6439,6 +6479,10 @@ static void open_decoder(void) {
             }
             b_listen_at(e->hz, band_for(e->hz));
             rx_set(rx_setup_on(e->hz, -1, true));
+            if (e_listen >= 0) {        /* E's LISTEN, not B's AUTO choice */
+                param_i_set(cfg_hear_f, e_listen);
+                hear_apply(e_listen);
+            }
         }
         osd(e->ch, e->what, -1);
         return;
@@ -6676,6 +6720,7 @@ static void fkey(int k) {
             break;                      /* F4, F5: nothing */
         case SCR_DECODE:                /* F1 EMERGENCY's scan; F5 nothing */
             if (k == 0 && decoders[dec_sel].rx == 'E') emer_scan_set(!emer_scan);
+            if (k == 4 && decoders[dec_sel].rx == 'E') e_listen_next();
             if (k == 1) open_decoder();
             if (k == 2 || k == 3) {
                 dec_sel = (dec_sel + (k == 2 ? DECODERS_N - 1 : 1)) % DECODERS_N;
