@@ -141,7 +141,7 @@ static void message_styles(void) {
 
     /* RTTY, NavTex and the SWL panel: 24 px text */
     lv_style_set_text_font(&panel_style, &sony_24);
-    place(&panel_style, CENTRED(PANEL_W), 230, PANEL_W, BOARD_DISP_H - BUTTONS_H - TOP_BAR_MARGIN - 230);
+    place(&panel_style, CENTRED(DIALOG_PANEL_W), 230, DIALOG_PANEL_W, BOARD_DISP_H - BUTTONS_H - TOP_BAR_MARGIN - 230);
     lv_style_set_pad_ver(&panel_style, 10);
     lv_style_set_pad_hor(&panel_style, 10);
     lv_style_set_radius(&panel_style, 0);

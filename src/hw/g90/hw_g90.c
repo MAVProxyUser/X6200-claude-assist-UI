@@ -402,3 +402,12 @@ bool hw_flow_read(hw_pack_t *p) {
 
 void hw_flow_restart(void) {
 }
+
+/* Settings held back while the radio transmitted: the X6100 test base's (test_base.h, hw.h); the G90's body takes
+ * them as they come, none held (added in the port onto GoldCorpHF's main, as hw_stub.c's) */
+bool hw_settings_held(void) {
+    return false;
+}
+
+void hw_send_held(void) {
+}

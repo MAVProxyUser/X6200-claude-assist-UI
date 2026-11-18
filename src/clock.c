@@ -63,11 +63,15 @@ static lv_coord_t       power_half = 4; /* (power_gaps) */
 static void check_time_sync_cb(lv_timer_t * t);
 static time_t get_last_sync_time();
 
+#if BOARD_GSOC
+/* The GSOC: a tap on the clock opens APP (cjlawson02's, for its touch panel); on the X6100 and X6200 a tap there
+ * does nothing, as before the GSOC port */
 static void clock_apps_key_cb(lv_event_t *e) {
     if (lv_event_get_code(e) == LV_EVENT_SHORT_CLICKED) {
         main_screen_apps_key();
     }
 }
+#endif
 
 /* The time and the voltages sit on top of the clock. A tap there has to reach the clock. */
 static void pass_clicks(lv_obj_t *o) {
@@ -328,8 +332,10 @@ lv_obj_t * clock_init(lv_obj_t * parent) {
     lv_obj_add_style(obj, &clock_style, 0);
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     if (theme_shape.ops_room) lv_obj_add_event_cb(obj, draw_cb, LV_EVENT_DRAW_MAIN_END, NULL);
+#if BOARD_GSOC
     lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(obj, clock_apps_key_cb, LV_EVENT_SHORT_CLICKED, NULL);
+#endif
 
     lv_obj_t *row = lv_obj_create(obj);
     lv_obj_remove_style_all(row);

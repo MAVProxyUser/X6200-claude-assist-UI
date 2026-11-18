@@ -61,7 +61,7 @@ extern int buttons_h;
 #define F_BAR_BTNS          5
 #define F_BAR_BTN_W         (BOARD_DISP_W / F_BAR_BTNS)
 #define DIALOG_W            (BOARD_DISP_W - 4)
-#define PANEL_W             (BOARD_DISP_W - 5)
+#define DIALOG_PANEL_W             (BOARD_DISP_W - 5)
 
 /* App windows fill the space between the frequency strip and the buttons */
 #define DIALOG_Y            (TOP_BAR_STD_H + FREQ_STRIP_STD_H + TOP_BAR_MARGIN)   /* VISION adds up the same */
