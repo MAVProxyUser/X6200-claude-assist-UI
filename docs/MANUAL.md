@@ -942,7 +942,9 @@ B's SDR and each watch channel's are held **by their serial** (and USB location)
 numbers follow the order of the sticks on USB, and one that drops out for a moment (a port reset) moves the others'
 numbers. While a stick is away its daemon waits for it rather than opening another one in its place (before, B's
 daemon could open a stopped stick for a moment), and B's daemon starts on its own stick rather than on RTL0 till the
-GUI says which.
+GUI says which. When B's stick is gone for good (unplugged, a KrakenSDR swapped for one stick) and another SDR that
+tunes B's channel is on USB, B takes that one after 3 s (an RTL first), as if chosen; a stick back in a moment (a
+replug, a port reset) is waited for. Before, B went on asking for the one gone till the GUI was restarted.
 
 **The speaker**: one player (`rtl_spectrum.c`) mixes B's SDR and the watch channels open, and runs from the start
 for watch channels restored at boot. Another of the base's play-mode users (the recorder, a voice message, FreeDV)
@@ -1185,7 +1187,7 @@ written through to the card before it replaces the last copy, so a power cut kee
   With EMERGENCY, F1, F2 and F5 are SCAN ALL, SCAN SEL and LISTEN (OPEN the push); with the other types F2 is OPEN
   and F1 and F5 nothing (no F key on any screen only goes to another screen: the ring does that).
 - **Scroll bars**: a list holding more than it shows (D's bands, C's Signal Log, E's TYPE list and E's rows, as
-  EMERGENCY's 65) has a thin bar at its right, its thumb as long as the share in sight and where that part is, as a
+  EMERGENCY's 65, and H AIRSPACE's aircraft and ACARS lists) has a thin bar at its right, its thumb as long as the share in sight and where that part is, as a
   web browser's. The MFK goes down the list as ever; a press or a drag on the bar (the mouse, or a finger) chooses
   the item at that height, the list following.
 - **VOL** at the foot of every screen names the radio it sets: `VOL: X6200 VOLUME 2` or `VOL: RTL0 VOLUME 0` (D, E
@@ -1975,6 +1977,21 @@ a bundle file), or over SSH `x6100-update install <bundle> --kernel --uboot`
   `/tmp/x6200-base-keeper.log`. The radio stays as it was set (frequency,
   mode, volume) but receives with no screen or sound of its own till
   `S95gui start`.
+- **A hung GUI restarts the radio.** The GUI's process can live on with its
+  threads stuck: the screen frozen, and on the X6200 the base, no longer fed,
+  switches the radio off three minutes later (the base keeper only feeds it
+  while no GUI process runs). The GUI now marks two heartbeats each second, its
+  radio thread's and its screen loop's (`/run/x6100_gui.radio`,
+  `/run/x6100_gui.ui`); `x6x00-gui-watch` (started with the GUI by `S95gui`)
+  looks every 5 s, and when either has stood still for 60 s while the same GUI
+  has run two minutes or more, it restarts the radio with `x6x00-reboot`,
+  gracefully, the base kept on. A GUI stopped by hand (`S95gui stop`) or under
+  a debugger is left alone, and so is everything while `/mnt/no-gui-watch`
+  exists. The radio thread's heartbeat goes on while the base is lent for a
+  base firmware flash, so a flash is never cut short. Its log, on the card so
+  the restart keeps it: `/mnt/app_logs/gui_watch.log`. Tried on the radio
+  (2026-11-17): the GUI frozen on purpose, the radio restarting itself 70 s
+  later and back, GUI and all, 146 s after the freeze, no POWER press.
 - **Old modules go.** A kernel's modules take about 15 MB of the root
   filesystem. After a new kernel is written, the folders in `/lib/modules` of
   kernels nothing can start any more are removed; kept are the running

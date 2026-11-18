@@ -18,6 +18,7 @@
  *  the radio. Without a QTH locator (Settings > General) the scope centres on the traffic.
  */
 
+#include "list_sbar.h"
 #include "app_adsb.h"
 
 #include "adsb.h"
@@ -132,6 +133,8 @@ static lv_obj_t    *list_cap_l, *det_cap_l;
  * acars.c), the list its messages, newest first; the scope goes on with the others (a GNS 5890 beside it) */
 static bool     acars_view;
 static int      acars_sel;              /* the message chosen, from the newest */
+static list_sbar_t *list_sb;            /* the list's scroll bar (aircraft or ACARS), list_sbar.h */
+static int      list_idx[ADSB_MAX_PLANES], list_n;     /* the aircraft as the list last stood: the bar's picks */
 static uint32_t acars_from;             /* the count when F5 was held: older ones not shown */
 static int      acars_count(void) {
     uint32_t n = rtl_spectrum_acars_seq() - acars_from;
@@ -604,6 +607,7 @@ static void show_acars(void) {
     if (acars_sel >= n) acars_sel = n ? n - 1 : 0;
     int first = acars_sel < ROWS / 2 ? 0 : acars_sel - ROWS / 2;
     if (first > n - ROWS) first = n - ROWS > 0 ? n - ROWS : 0;
+    list_sbar_set(list_sb, n, ROWS, first);
     for (int r = 0; r < ROWS; r++) {
         rtl_acars_t m;
         int         k = first + r;
@@ -660,6 +664,9 @@ static void show_list(double now, const int *idx, int n) {
     }
     int first = sel < ROWS / 2 ? 0 : sel - ROWS / 2;
     if (first > n - ROWS) first = n - ROWS > 0 ? n - ROWS : 0;
+    list_sbar_set(list_sb, n, ROWS, first);
+    list_n = n < ADSB_MAX_PLANES ? n : ADSB_MAX_PLANES;
+    for (int k = 0; k < list_n; k++) list_idx[k] = idx[k];
     for (int r = 0; r < ROWS; r++) {
         int k = first + r;
         if (k >= n) {
@@ -1294,6 +1301,24 @@ static void scope_tap_cb(lv_event_t *e) {
     refresh();
 }
 
+static void refresh(void);
+
+/* the scroll bar's pick: the aircraft or message at that height chosen, as a tap on its row would */
+static void list_pick(int i) {
+    if (acars_view) {
+        if (i == acars_sel) return;
+        acars_sel = i;
+    } else {
+        if (i < 0 || i >= list_n) return;
+        adsb_lock();
+        uint32_t icao = adsb_plane(list_idx[i])->icao;
+        adsb_unlock();
+        if (icao == sel_icao) return;
+        sel_icao = icao;
+    }
+    refresh();
+}
+
 static void row_tap_cb(lv_event_t *e) {
     int    r = (int)(intptr_t)lv_event_get_user_data(e), idx[ADSB_MAX_PLANES], n, sel = 0;
     double now = adsb_now();
@@ -1423,6 +1448,7 @@ static void build(void) {
         lv_obj_add_flag(row_l[r], LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(row_l[r], row_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)r);
     }
+    list_sb = list_sbar_new(root, RX0 + RW - 10, BODY_Y + 48, ROWS * 18, amb, list_pick);
 
     /* the one chosen */
     det_cap_l = box(RX0, BODY_Y + 202, RW, 96, "TARGET");

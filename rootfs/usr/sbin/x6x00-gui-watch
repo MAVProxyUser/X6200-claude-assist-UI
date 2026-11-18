@@ -1,0 +1,74 @@
+#!/bin/sh
+#
+# GoldCorpHF: a hung GUI restarts the radio, gracefully. The GUI's process can live on with its threads stuck (a
+# deadlock, a driver call that never returns): the screen frozen, and on the X6200 the base, fed by the GUI's radio
+# thread every second, switches the radio off about three minutes later, to be switched on again by hand (the base
+# keeper, x6200-base-keeper, only feeds it while no GUI process runs). The GUI marks two heartbeats each second, its
+# radio thread's (/run/x6100_gui.radio) and its screen loop's (/run/x6100_gui.ui); either one still for STALE seconds
+# while the same GUI process has run for GRACE seconds or more is a hung GUI, and the radio restarts with
+# x6x00-reboot (the base kept on, Linux, U-Boot and the GUI again: about a minute). The owner, 2026-11-17: "if the UI
+# hangs a reboot would be more graceful". A GUI under a debugger (a tracer on it) is left alone, and so is everything
+# while /mnt/no-gui-watch exists.
+#
+#     x6x00-gui-watch start | stop | run
+#
+PIDFILE=/var/run/x6x00-gui-watch.pid
+LOG=/mnt/app_logs/gui_watch.log             # on the card: the restart it makes would wipe /tmp
+STALE=60
+GRACE=120
+
+log() {
+	mkdir -p "${LOG%/*}" 2> /dev/null
+	echo "$(date '+%F %T') $*" >> $LOG
+	sync
+	logger -t x6x00-gui-watch "$*" 2> /dev/null
+}
+
+age() {         # seconds since the file's time, or a big number when it is missing
+	t=$(date -r "$1" +%s 2> /dev/null) || { echo 99999; return; }     # BusyBox has no stat
+	echo $(( $(date +%s) - t ))
+}
+
+run() {
+	echo $$ > $PIDFILE
+	seen=""; since=0
+	while :; do
+		sleep 5
+		[ -e /mnt/no-gui-watch ] && continue
+		pid=$(pidof x6100_gui) || { seen=""; continue; }
+		case "$pid" in *" "*) continue;; esac            # two at once: a restart under way
+		now=$(date +%s)
+		if [ "$pid" != "$seen" ]; then                  # a new GUI: its heartbeats given time to start
+			seen=$pid; since=$now
+			continue
+		fi
+		[ $(( now - since )) -lt $GRACE ] && continue
+		grep -q '^TracerPid:[[:space:]]*0$' /proc/$pid/status 2> /dev/null || continue    # a debugger has it
+		grep -q '^State:[[:space:]]*Z' /proc/$pid/status 2> /dev/null && continue        # ending: the loop's turn
+		r=$(age /run/x6100_gui.radio); u=$(age /run/x6100_gui.ui)
+		if [ "$r" -ge $STALE ] || [ "$u" -ge $STALE ]; then
+			log "GUI $pid hung: radio thread still for ${r} s, screen loop for ${u} s: restarting the radio (x6x00-reboot)"
+			sync
+			/usr/sbin/x6x00-reboot
+			exit 0
+		fi
+	done
+}
+
+case "$1" in
+	start)
+		p=$(cat $PIDFILE 2> /dev/null)
+		[ -n "$p" ] && grep -q x6x00-gui-watch /proc/$p/cmdline 2> /dev/null && exit 0
+		"$0" run < /dev/null > /dev/null 2>&1 &
+		;;
+	stop)
+		p=$(cat $PIDFILE 2> /dev/null)
+		[ -n "$p" ] && kill "$p" 2> /dev/null
+		rm -f $PIDFILE
+		;;
+	run)
+		run
+		;;
+	*)
+		echo "Usage: $0 {start|stop|run}"; exit 1;;
+esac

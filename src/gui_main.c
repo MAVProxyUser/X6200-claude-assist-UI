@@ -291,6 +291,11 @@ static void test_base_note_cb(lv_timer_t *t) {
 
 /* A minute up on settings that loaded: the last good copy of params.db (params/db.c), what a damaged one is replaced
  * with at a start, made in a thread of its own. The update's confirm comes at the same moment */
+static void ui_alive_cb(lv_timer_t *t) {
+    (void)t;
+    alive_mark(ALIVE_UI);
+}
+
 static void settings_keep_cb(lv_timer_t *t) {
     (void)t;
     database_keep_later();
@@ -531,6 +536,8 @@ int main(void) {
         sh_run(UPDATE_CTL " fault settings", NULL, NULL);
     }
     lv_timer_set_repeat_count(lv_timer_create(settings_keep_cb, 60000, NULL), 1);
+    alive_mark(ALIVE_UI);
+    lv_timer_create(ui_alive_cb, 1000, NULL);       /* the screen loop's heartbeat (x6x00-gui-watch) */
     dialog_field_wavelog_start();
     first_start_init();     /* a new card or a settings reset: the guide, once the screen is up */
     gui_loop();

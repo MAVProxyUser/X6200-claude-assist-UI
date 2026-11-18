@@ -45,6 +45,13 @@ void sleep_usec(uint32_t msec);
 
 int32_t util_compare_version(radio_base_ver_t a, radio_base_ver_t b);
 
+/* A heartbeat for x6x00-gui-watch: the file's time set to now (made when missing). ALIVE_RADIO the radio thread's
+ * (with the X6200's base keepalive), ALIVE_UI the screen loop's: either still for long while the GUI's process is
+ * there is a hung GUI, and the radio is restarted (x6x00-reboot) before the base switches it off */
+#define ALIVE_RADIO "/run/x6100_gui.radio"
+#define ALIVE_UI    "/run/x6100_gui.ui"
+void alive_mark(const char *path);
+
 #ifdef __cplusplus
 }
 #endif

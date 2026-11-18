@@ -37,6 +37,9 @@ start() {
 	/usr/sbin/x6200-base-keeper stop 8>&-
 	start-stop-daemon -S -b -q -m -p "$PIDFILE" -x "/usr/sbin/$DAEMON" 8>&-
 	status=$?
+	# A hung GUI (its process there, its heartbeats still) restarts the radio rather than letting the X6200's base
+	# switch it off three minutes later (x6x00-gui-watch)
+	/usr/sbin/x6x00-gui-watch start 8>&-
 	# Under its own name before the lock goes, or the next start would not see it yet
 	for _ in 1 2 3 4 5 6 7 8 9 10; do
 		pidof "$DAEMON" > /dev/null && break
@@ -49,6 +52,7 @@ start() {
 
 stop() {
 	printf 'Stopping %s: ' "$DAEMON"
+	/usr/sbin/x6x00-gui-watch stop          # a GUI stopped by hand is not a hung one
 	start-stop-daemon -K -q -p "$PIDFILE"
 	status=$?
 	[ "$status" -eq 0 ] && rm -f "$PIDFILE"

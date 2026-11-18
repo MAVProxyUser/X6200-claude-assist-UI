@@ -82,6 +82,7 @@
 #include "rtl_watch.h"
 #include "sdr_pool.h"
 #include "df_rx.h"
+#include "list_sbar.h"
 #include "remote_server.h"
 #include "control_owner.h"
 #include "adsb_rx.h"
@@ -1061,8 +1062,8 @@ static lv_obj_t *lg_head_l, *lg_row_l[20], *lg_rx_l[20], *lg_about_l;   /* lg_rx
 static int       lg_rows;
 static box_t     d_sel, d_how, d_ant, d_now;
 static lv_obj_t *d_head_l, *d_row_l[12];
-typedef struct sbar_s sbar_t;
-static struct sbar_s *sb_bd, *sb_lg, *sb_dsel, *sb_drow;     /* D's bands, C's log, E's types and rows */
+static list_sbar_t *sb_bd, *sb_lg, *sb_dsel, *sb_drow;     /* D's bands, C's log, E's types and rows (list_sbar.h) */
+#define SBAR_X (SW - 15)                /* past the rows' widest text (97 of pixel_16's 8), inside the frame */
 
 /* E SYSTEM: the rest of the radio, from here */
 typedef enum {
@@ -1762,77 +1763,6 @@ static void opt_set(box_t *b, int i, const char *text, int how) {
     lv_obj_set_style_text_color(b->opt[i], how == 1 ? ink : how == 2 ? dim : amb, 0);
 }
 
-/* A list's scroll bar (the owner, 2026-11-17: "a slight scroll bar indicator ... to help know the position in the
- * overall list like a web browser normally does ... our mouse when active can click and drag here. any list box with
- * too many items should handle the same way"): a thin track at the list's right with a thumb as long as the share of
- * the list in sight and where that part is; shown only while the list holds more than it shows. A press or a drag on
- * it (the mouse, a finger) chooses the item at that height, the window following as the MFK's would */
-struct sbar_s {
-    lv_obj_t *track, *thumb;
-    int       total, shown, top;
-    void    (*pick)(int i);
-};
-
-#define SBAR_W 5
-#define SBAR_X (SW - 15)                /* past the rows' widest text (97 of pixel_16's 8), inside the frame */
-
-static void sbar_drag_cb(lv_event_t *e) {
-    sbar_t     *b = lv_event_get_user_data(e);
-    lv_indev_t *in = lv_indev_get_act();
-    lv_point_t  pt;
-    lv_area_t   a;
-
-    if (!b || !in || b->total <= b->shown || !b->pick) return;
-    lv_indev_get_point(in, &pt);
-    lv_obj_get_coords(b->track, &a);
-    int h = lv_area_get_height(&a), i = h > 1 ? (int)((int64_t)(pt.y - a.y1) * b->total / h) : 0;
-
-    if (i < 0) i = 0;
-    if (i >= b->total) i = b->total - 1;
-    b->pick(i);
-}
-
-static void sbar_make(sbar_t *b, lv_obj_t *parent, int x, int y, int h, void (*pick)(int)) {
-    b->track = lv_obj_create(parent);
-    lv_obj_remove_style_all(b->track);
-    lv_obj_set_pos(b->track, x, y);
-    lv_obj_set_size(b->track, SBAR_W, h);
-    lv_obj_set_style_bg_color(b->track, amb, 0);
-    lv_obj_set_style_bg_opa(b->track, LV_OPA_20, 0);
-    lv_obj_set_style_radius(b->track, 2, 0);
-    lv_obj_set_ext_click_area(b->track, 6);         /* a mouse or a finger finds it */
-    lv_obj_add_flag(b->track, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(b->track, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(b->track, sbar_drag_cb, LV_EVENT_PRESSED, b);
-    lv_obj_add_event_cb(b->track, sbar_drag_cb, LV_EVENT_PRESSING, b);
-    b->thumb = lv_obj_create(b->track);
-    lv_obj_remove_style_all(b->thumb);
-    lv_obj_set_style_bg_color(b->thumb, amb, 0);
-    lv_obj_set_style_bg_opa(b->thumb, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(b->thumb, 2, 0);
-    lv_obj_clear_flag(b->thumb, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    b->pick = pick;
-    lv_obj_add_flag(b->track, LV_OBJ_FLAG_HIDDEN);
-}
-
-/* total items, shown at once, the first shown */
-static void sbar_set(sbar_t *b, int total, int shown, int top) {
-    if (!b->track) return;
-    b->total = total, b->shown = shown, b->top = top;
-    if (total <= shown || shown <= 0) {
-        lv_obj_add_flag(b->track, LV_OBJ_FLAG_HIDDEN);
-        return;
-    }
-    int h = lv_obj_get_height(b->track), th = h * shown / total;
-
-    if (th < 10) th = 10;
-    if (top > total - shown) top = total - shown;
-    if (top < 0) top = 0;
-    lv_obj_set_size(b->thumb, SBAR_W, th);
-    lv_obj_set_pos(b->thumb, 0, (h - th) * top / (total - shown));
-    lv_obj_clear_flag(b->track, LV_OBJ_FLAG_HIDDEN);
-}
-
 static lv_obj_t *screen_obj(void) {
     lv_obj_t *o = lv_obj_create(root);
 
@@ -2179,15 +2109,13 @@ static void band_more(int i, char *s, size_t n) {
                  e[0] ? " | E:" : "", e);
 }
 
-static void sbar_set(sbar_t *b, int total, int shown, int top);
-
 static void show_bands(void) {
     char s[400], now[16];
     int  top = band_sel - bd_rows / 2;
 
     if (top > BANDS_N - bd_rows) top = BANDS_N - bd_rows;
     if (top < 0) top = 0;
-    if (sb_bd) sbar_set(sb_bd, BANDS_N, bd_rows, top);
+    if (sb_bd) list_sbar_set(sb_bd, BANDS_N, bd_rows, top);
     for (int r = 0; r < bd_rows; r++) {
         int i = top + r;
 
@@ -2262,8 +2190,8 @@ static void show_decode(void) {
         opt_set(&d_sel, r, top + r < DECODERS_N ? decoders[top + r].name : "", top + r == dec_sel);
     int rtop = dec_rtop();
 
-    if (sb_dsel) sbar_set(sb_dsel, DECODERS_N, d_sel.n, top);
-    if (sb_drow) sbar_set(sb_drow, d->n, 12, rtop);
+    if (sb_dsel) list_sbar_set(sb_dsel, DECODERS_N, d_sel.n, top);
+    if (sb_drow) list_sbar_set(sb_drow, d->n, 12, rtop);
     for (int rr = 0; rr < 12; rr++) {
         int r = rtop + rr;              /* the row of the type's list (more than 12 scroll: EMERGENCY) */
 
@@ -3505,6 +3433,32 @@ static void b_use(int u, unsigned set) {
         snprintf(t, sizeof(t), "THE %s CLOSED AND THE %s OPENED IN ITS PLACE: A FEW SECONDS. G'S SDR CHANNELS AND "
                  "AIRSPACE USE IT TOO.", bu_word(was), bu_word(u));
     osd(title, t, -1);
+}
+
+/* B's SDR gone from USB and another there that tunes B's channel: that one taken in its place, an RTL first, after 3 s
+ * (a replug or a port reset passes). The owner swapped a KrakenSDR for one stick (2026-11-17): B went on asking for the
+ * Kraken's stick (by its serial) and heard nothing till the GUI was restarted */
+static void b_gone_follow(void) {
+    static uint32_t gone_since;
+    unsigned        m = b_sdrs();
+    rtl_dev_t       k = rtl_spectrum_used();
+    int             want = k == RTL_DEV_NONE ? -1 : bu_of(k, rtl_spectrum_used_rtl()), u = -1;
+
+    if (want < 0 || (m & DEVB(want)) || !m || df_rx_b_lent()) {   /* there, nothing to take, or lent to page I */
+        gone_since = 0;
+        return;
+    }
+    if (!gone_since) {
+        gone_since = lv_tick_get() | 1;
+        return;
+    }
+    if (lv_tick_get() - gone_since < 3000) return;
+    gone_since = 0;
+    for (int c = BU_RTL0; c < BU_N && u < 0; c++)
+        if (m & DEVB(c)) u = c;
+    for (int c = 0; c < BU_RTL0 && u < 0; c++)
+        if (m & DEVB(c)) u = c;
+    if (u >= 0) b_use(u, 0);
 }
 
 static void sp_fill(void) {
@@ -5632,7 +5586,7 @@ static void show_glog(void) {
 
     if (top > nhits - lg_rows) top = nhits - lg_rows;
     if (top < 0) top = 0;
-    if (sb_lg) sbar_set(sb_lg, nhits, lg_rows, top);
+    if (sb_lg) list_sbar_set(sb_lg, nhits, lg_rows, top);
     for (int r = 0; r < lg_rows; r++) {
         int i = top + r;
 
@@ -6175,6 +6129,7 @@ static void blink_cb(lv_timer_t *t) {
     state_keep();                                   /* for a restart of the GUI: gui_state.c */
     rtl_spectrum_rds_watch(rds_channel());          /* B's FM broadcast channel's RDS (C's stick entry's) */
     if (scr == SCR_SYSTEM && n % 2 == 0) sys_load_show();   /* its load each second */
+    if (n % 2 == 0) b_gone_follow();                        /* B's SDR pulled out: another in its place */
     if (scr == SCR_RTL) watch_show();                       /* the watch channels, open or quiet */
     if (pp_on) pp_fill();                                   /* the pool's panel: who has what, as it changes */
     rds_show(false);
@@ -7948,11 +7903,8 @@ static void drow_pick(int i) {
     show_screen();
 }
 
-static sbar_t *sbar_new(lv_obj_t *parent, int x, int y, int h, void (*pick)(int)) {
-    sbar_t *b = calloc(1, sizeof(*b));
-
-    if (b) sbar_make(b, parent, x, y, h, pick);
-    return b;
+static list_sbar_t *sbar_new(lv_obj_t *parent, int x, int y, int h, void (*pick)(int)) {
+    return list_sbar_new(parent, x, y, h, amb, pick);
 }
 
 static void build_bands(lv_obj_t *p) {

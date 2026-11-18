@@ -26,8 +26,10 @@ approved that day.
 3. **DVSI USB-3000 back on USB**: it came off when the Kraken took the HOST port, so DMR, P25, D-STAR, YSF and NXDN
    voice is silent (the calls are still decoded). With five Kraken sticks streaming it would share an endpoint again;
    with page I closed B uses one stick, which leaves room.
-4. **NXDN96 over the cable**: NXDN48 is tested (voice r 0.92-0.95); NXDN96 runs in the third dsd-fme but was never
-   sent over the cable (the HackRF's cable to an RTL stick, not the X6200).
+4. **NXDN96 over the cable**: done 2026-11-17 night (HackRF -> attenuators -> the one RTL, receive only): the generated
+   call (TG 100, source 1234, RAN 1) decoded by the third dsd-fme, B showing "NXDN96 441.000 / TG 100 FROM 1234 RAN 1
+   TALKING". Its voice waits for the USB-3000 (3), as every AMBE mode's does. Every HackRF -> X6200 cable test is done
+   (WeFax, Time Signal, RADE, the channel scan's levels; WSPR cannot be, the HackRF drifts): that cable can go.
 
 *The owner's decisions and longer work*
 
@@ -44,23 +46,29 @@ approved that day.
     that is short for minutes. What would: a client asking for less (24 kHz mono int16), the AP on a quieter
     channel, wired Ethernet; perhaps a newer rtw88 (pinned at 461b696, 2025-05) if its USB TX ever gains throughput.
     The manual's TCI section says so.
-7. **A GUI that hangs** (its process alive, its radio thread stuck) still lets the X6200's base switch the radio off
-    after about three minutes: the base keeper runs only while no GUI process does. Whether to cover it is the owner's
-    call (a hung radio switching itself off may be wanted).
+7. **A GUI that hangs**: the owner chose a restart ("a reboot would be more graceful"). Done 2026-11-17 night:
+    x6x00-gui-watch restarts the radio with x6x00-reboot when the GUI's radio-thread or screen-loop heartbeat stands
+    still 60 s (MANUAL: A hung GUI restarts the radio).
 8. **Meteor-M LRPT on B** (a255320, c5e864b, d02958f): decoded from a real 2019 Meteor-M2-2 recording played into
     the stick over a cable. The first live pass (2026-11-17, Meteor-M2-4) gave nothing on the antenna used. To do: a
     pass on a 137 MHz antenna outdoors (QFH or V-dipole); the 80k mode is unverified on real data.
 9. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
     Waterfall section below).
-10. **RADE's decode time on the X6200**: 114-200 ms for the slowest 120 ms modem frame while searching, with no
-    gaps or losses seen; watch it on a busy band.
-11. **Screenshots** of every menu for the README and the manual: later, at the owner's word.
+10. **Screenshots** of every menu for the README and the manual: later, at the owner's word.
+11. **WSPR**: never tested. Off the air is the real test (the X6200 on its antenna, 14.0956 USB by day, 7.0386 by
+    night: spots every two minutes). Over a cable it needs a steadier source than the HackRF: a bladeRF 2.0's
+    VCTCXO, but it tunes from 47 MHz, so 6 m (50.293) only.
+12. **The upstream merge** (Guru-RF, 73 commits on 2026-11-17: SVXConnect, Zello, the Weather, Internet radio, CB and
+    HF Air Band apps, Flights, Field Ops' NOTA and maps, GhostNet, the first-start guide's language and country, the
+    APP grid's scrolling, the spectrum's fill by level, translations, SSH security keys, the speaker's one play-mode
+    owner): last, after everything else. A trial merge (git merge-tree) conflicts in 14 files: README, TODO, MANUAL,
+    local-build.sh, image-required, src/CMakeLists.txt, apps_menu.c, button_bar.cpp, cfg_socket.cpp, gui_main.c,
+    params.h, remote_server.c, screen_main.c, settings_window.cpp.
 
 **Waiting on hardware**
 
-- The HackRF at 2.646 MS/s and the HackRF/bladeRF filters (c1c732a): each when plugged into the radio.
-- WSPR over the cable: the HackRF (no TCXO) drifts several Hz in two minutes, more than WSPR's 1.46 Hz tones; test
-  WSPR off the air, or with a TCXO-locked generator.
+- The HackRF at 2.646 MS/s and the HackRF/bladeRF filters (c1c732a): each when plugged into the radio's HOST port
+  (the HackRF is on the Mac; the radio has one RTL now).
 
 **Parked or later**
 

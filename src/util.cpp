@@ -24,6 +24,9 @@ extern "C" {
     #include <string.h>
     #include <string.h>
     #include <errno.h>
+    #include <fcntl.h>
+    #include <sys/stat.h>
+    #include <unistd.h>
 }
 
 /**
@@ -148,4 +151,11 @@ int32_t util_compare_version(radio_base_ver_t a, radio_base_ver_t b) {
         }
     }
     return ret;
+}
+
+void alive_mark(const char *path) {
+    if (utimensat(AT_FDCWD, path, NULL, 0) == 0) return;
+    int fd = open(path, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
+
+    if (fd >= 0) close(fd);
 }

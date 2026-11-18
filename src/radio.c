@@ -3339,7 +3339,14 @@ static void * radio_thread(void *arg) {
     while (true) {
 #ifdef BOARD_X6200
         if (atomic_load(&base_lent)) {  /* base_flash has the base: nothing read, nothing sent, not even the keepalive */
+            static uint64_t lent_alive;
+
             atomic_store(&base_lent_seen, true);
+            if (get_time() - lent_alive >= 1000) {     /* alive, only lent: x6x00-gui-watch must never restart the
+                                                         * radio in the middle of a base flash */
+                lent_alive = get_time();
+                alive_mark(ALIVE_RADIO);
+            }
             usleep(20000);
             continue;
         }
@@ -3358,6 +3365,15 @@ static void * radio_thread(void *arg) {
         }
 
         int32_t idle = now_time - idle_time;
+
+        {   /* this thread's heartbeat, each second (x6x00-gui-watch) */
+            static uint64_t alive_at;
+
+            if (now_time - alive_at >= 1000) {
+                alive_at = now_time;
+                alive_mark(ALIVE_RADIO);
+            }
+        }
 
         /* Every 3 s in RX as always (every second in every state for a base that wants it, the X6200, which
          * otherwise takes the RF away about a second into TX: issues #1, #8); after a write error or an un-key
