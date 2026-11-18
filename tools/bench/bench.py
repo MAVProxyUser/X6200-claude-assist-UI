@@ -14,7 +14,7 @@ own; SSH (root) only for provisioning, the test callsigns and cleaning the logs.
   bench.py hackrf-iq FILE --at HZ --offset HZ [--fs 2000000] [--mode 7] [--x 30] [--during "CMD"]
                                        an I/Q file into the radio tuned to HZ (7 NFM), CMD run beside it
   bench.py radios-ft8 TX RX [--band 20m]          (at 0.1 W, the first probe's power, throughout)
-  bench.py testcall NAME CALL|--restore   the radio's callsign for the tests (Q<digit>TST), or back
+  bench.py testcall NAME CALL|restore     the radio's callsign for the tests (Q<digit>TST), or back
   bench.py cleanlog NAME               the test callsigns' QSOs out of the radio's logs
 
 The configuration is ~/.config/x6x00-bench/bench.json (bench.example.json says what goes in it); the tokens, the
@@ -23,6 +23,7 @@ owner's confirmations, the TX log and the runs are kept beside it, never in the 
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
 import argparse
+import base64
 import json
 import math
 import os
@@ -419,10 +420,11 @@ def run_hackrf_ft8(c, args):
     radio.take_control()
     found, watch, hk = None, None, None
     try:
+        radio.send(f"set freq {dial}")      # first: the app holds the dial once open
         radio.send("ft8 open")
         radio.wait("the FT8 app", lambda: radio.ft8.get("open") == 1, 10)
         rx_only_gate(radio)
-        radio.send(f"set freq {dial}")
+        ft8_to_band(radio, dial)
         radio.wait(f"the dial on {dial}", lambda: int(radio.state.get("freq", 0)) == dial, 5)
         start = next_slot()
         say(f"{name}: FT8 on {dial} Hz, receive only; the HackRF sends {text!r} at {args.audio} Hz, -x {args.x}, "
@@ -537,6 +539,22 @@ def run_hackrf_iq(c, args):
         raise Refused(watch.why)
 
 
+def ft8_to_band(r, dial):
+    """The FT8 app opens on the band it had last and holds the dial there ("freq: locked"): the band keys move it,
+    as at the radio (found 2026-11-18, the first run on two radios: both opened on 20 m, 7.074 MHz refused)"""
+    for _ in range(12):
+        f = int(r.state.get("freq", 0))
+        if f == dial:
+            return
+        k = "BAND_DOWN" if f > dial else "BAND_UP"
+        r.send(f"key {k} 1")
+        time.sleep(0.15)
+        r.send(f"key {k} 0")
+        r.wait("the next band", lambda f=f: int(r.state.get("freq", 0)) != f, 5)
+        time.sleep(0.3)
+    raise Refused(f"{r.name}: the FT8 app did not come to {dial} Hz (on {r.state.get('freq')})")
+
+
 def run_radios_ft8(c, args):
     """Untried until both radios are on the bench: A calls CQ once, B must decode it and reply once, A must decode
     the reply. The first transmission of the session at FIRST_PROBE_W whatever was asked"""
@@ -554,14 +572,17 @@ def run_radios_ft8(c, args):
         calls[r.name] = call
     dial = FT8_DIAL[args.band]
     radios = [a, b]
+    was_pwr = {}
     for r in radios:
         r.take_control()
+        was_pwr[r.name] = r.pwr()          # put back after (the first run left both at 0.1 W, 2026-11-18)
+        r.send(f"set freq {dial}")          # first: the app holds the dial once open
         r.send("ft8 open")
         r.wait("the FT8 app", lambda r=r: r.ft8.get("open") == 1, 10)
+        ft8_to_band(r, dial)
         if r.ft8.get("auto"):
             r.send("ft8 auto")
             r.wait("Auto off", lambda r=r: not r.ft8.get("auto"), 5)
-        r.send(f"set freq {dial}")
         r.send(f"set pwr {round(FIRST_PROBE_W * 10)}")
         r.wait("the dial and the power", lambda r=r: int(r.state.get("freq", 0)) == dial and
                abs(r.pwr() - FIRST_PROBE_W) < 0.05, 5)
@@ -597,6 +618,9 @@ def run_radios_ft8(c, args):
         time.sleep(1)
         for r in radios:
             r.send("ft8 close")
+            if r.name in was_pwr and was_pwr[r.name] < 99:
+                r.send(f"set pwr {round(was_pwr[r.name] * 10)}")
+            time.sleep(0.3)
             r.close()
         for r in radios:
             clean_log(r.host)
@@ -606,9 +630,9 @@ def run_radios_ft8(c, args):
 
 
 def clean_log(host):
-    py = ("import re,sqlite3;d=sqlite3.connect('/mnt/qso_log.db');"
-          "n=d.execute(\"delete from qso_log where remote_callsign glob 'Q[0-9]TST*' or local_callsign glob "
-          "'Q[0-9]TST*'\").rowcount;d.commit();"
+    py = ("import re,sqlite3\nn=0\ntry:\n d=sqlite3.connect('/mnt/qso_log.db')\n"
+          " n=d.execute(\"delete from qso_log where remote_callsign glob 'Q[0-9]TST*' or local_callsign glob "
+          "'Q[0-9]TST*'\").rowcount;d.commit()\nexcept sqlite3.Error:\n pass\n"
           "p='/mnt/ft_log.adi'\ntry:\n s=open(p).read()\nexcept OSError:\n s=''\n"
           "parts=re.split(r'(?i)(<eor>)',s);keep=[];m=0\n"
           "for i in range(0,len(parts)-1,2):\n"
@@ -617,7 +641,9 @@ def clean_log(host):
           " else: keep.append(r)\n"
           "keep.append(parts[-1] if len(parts)%2 else '')\n"
           "open(p,'w').write(''.join(keep)) if m else None\nprint(n,m)")
-    out = ssh(host, f"python3 -c {json.dumps(py)}").split()
+    # base64: the script's newlines and quotes through two shells came out as "\n" and broke it (2026-11-18)
+    b64 = base64.b64encode(py.encode()).decode()
+    out = ssh(host, f"python3 -c \"import base64;exec(base64.b64decode('{b64}'))\"").split()
     if out and out != ["0", "0"]:
         say(f"{host}: test QSOs out of the logs: {out[0]} from the database, {out[1]} from the ADIF")
 
@@ -693,7 +719,7 @@ def cmd_testcall(c, a):
     rc = c["radios"][a.name]
     saved = load_json(os.path.join(STATE, "calls.json"), {})
     cur = ssh(rc["host"], "sqlite3 /mnt/params.db \"select val from params where name='callsign'\"").strip()
-    if a.call == "--restore":
+    if a.call in ("restore", "--restore"):
         old = saved.pop(a.name, None)
         if old is None:
             raise Refused(f"{a.name}: no callsign kept to go back to")
@@ -708,7 +734,7 @@ def cmd_testcall(c, a):
     save_json(os.path.join(STATE, "calls.json"), saved)
     ssh(rc["host"], f"/etc/init.d/S95gui stop >/dev/null 2>&1; sqlite3 /mnt/params.db \"{q}\"; "
                     f"/etc/init.d/S95gui start >/dev/null 2>&1")
-    say(f"{a.name}: callsign {cur or 'none'} -> {a.call if a.call != '--restore' else (old or 'none')}")
+    say(f"{a.name}: callsign {cur or 'none'} -> {a.call if a.call not in ('restore', '--restore') else (old or 'none')}")
 
 
 def main():
@@ -729,7 +755,8 @@ def main():
     s.add_argument("--filter", type=int, nargs=2, default=None, metavar=("LO", "HI"))
     s = sub.add_parser("radios-ft8"); s.add_argument("tx"); s.add_argument("rx")
     s.add_argument("--band", default="20m", choices=FT8_DIAL)
-    s = sub.add_parser("testcall"); s.add_argument("name"); s.add_argument("call")
+    s = sub.add_parser("testcall"); s.add_argument("name")
+    s.add_argument("call", help="Q<digit>TST, or restore (argparse took --restore for an option: 2026-11-18)")
     s = sub.add_parser("cleanlog"); s.add_argument("name")
     a = ap.parse_args()
     c = None

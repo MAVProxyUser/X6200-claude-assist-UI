@@ -181,6 +181,16 @@ class SimRadio:
             self.send(f"m {self.heard_dbm if self.heard_dbm is not None else -121.0:.1f}")
 
 
+def settled(cond, secs=3.0):
+    """cond() true within secs: what the simulated radios do on a command comes on their own threads"""
+    end = time.time() + secs
+    while not cond():
+        if time.time() > end:
+            return False
+        time.sleep(0.02)
+    return True
+
+
 def run_case(fault, sender_fault=True):
     a = SimRadio("simA", "Q1TST", fault if sender_fault else None)
     b = SimRadio("simB", "Q2TST")
@@ -223,13 +233,16 @@ def main():
     check(any(g.startswith("set pwr 1") for g in a.got) and any(g.startswith("set pwr 1") for g in b.got),
           "both radios set to 0.1 W (the first probe's power) before keying")
     check(any(g == "ft8 auto" for g in a.got), "a radio's FT8 Auto turned off before the test")
-    check(not a.state["tx"] and not b.state["tx"] and a.ft8["open"] == 0 and b.ft8["open"] == 0,
+    # The harness sends "ft8 close" and hangs up: the simulated radios' threads handle it a moment later, longer on a
+    # busy CI runner (2026-11-18: checked before it, on a run of 26 minutes against the usual 17)
+    check(settled(lambda: not a.state["tx"] and not b.state["tx"] and a.ft8["open"] == 0 and b.ft8["open"] == 0),
           "both off the air and their FT8 apps closed after")
     for fault, word in (("stuck", "on the air for over"), ("swr", "SWR"), ("power", "W on the air"),
                         ("loud", "pads missing")):
         why, a, b = run_case(fault)
         check(why is not None and word in why, f"{fault}: refused ({why})")
-        check(not a.state["tx"] and any(g == "ft8 stop" for g in a.got), f"{fault}: the sender stopped, off the air")
+        check(settled(lambda: not a.state["tx"] and any(g == "ft8 stop" for g in a.got)),
+              f"{fault}: the sender stopped, off the air")
     for d in DIRS:
         __import__("shutil").rmtree(d, ignore_errors=True)
     bad = results.count(False)

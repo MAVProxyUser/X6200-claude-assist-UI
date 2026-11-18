@@ -34,12 +34,12 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
    transmission), its SWR over 2.0, more power than asked, or a receiver hearing 20 dB more than the chain lets
    through (pads missing) stops everything at once: the HackRF killed, every radio unkeyed, the apps' TX stopped.
    The browser remote's PTT is a lease besides: without its renewal the radio unkeys within 3 s.
-6. **Test callsigns only.** `Q<digit>TST` (`bench.py testcall NAME Q1TST`, `--restore` after), never a real
+6. **Test callsigns only.** `Q<digit>TST` (`bench.py testcall NAME Q1TST`, `restore` after), never a real
    call; FT8 grids FN00. The test QSOs are taken out of the radio's logs after each run (`cleanlog`).
 7. **Everything logged.** Each HackRF and radio transmission and each stop goes to `tx_log.jsonl`.
 8. **Stop on demand.** Ctrl-C or `bench.py stop` is the emergency stop (rule 5's actions).
 9. **The radios as found.** A test closes the apps it opened (the X6200 goes back to the Sentry) and releases
-   control; a callsign set for the tests is put back with `testcall NAME --restore`.
+   control; a callsign set for the tests is put back with `testcall NAME restore`.
 
 ## Use
 
@@ -48,6 +48,12 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
     bench.py preflight hackrf            # every gate, nothing sent
     bench.py hackrf-ft8 --band 20m --x 30
     bench.py radios-ft8 x6100 x6200      # both radios on the cable, test callsigns set: CQ, then a reply
+
+`radios-ft8` first ran 2026-11-18 (the X6100 and the X6200 through 40 + 30 dB, 0.1 W, 20 m), both ways: PASS. The
+X6200 decoded the X6100 at +11 to +15 dB, the X6100 the X6200 at -2 to -3 dB (the X6200's preamp on, the X6100's
+off: a parity run sets them alike). Found by it: the FT8 app opens on its last band and holds the dial (the band keys
+move it now, `ft8_to_band`), the log cleaning's script broke through the shells (base64 now), `testcall NAME
+restore`, and the radios' power put back after.
 
 `hackrf-iq FILE --at HZ --offset HZ` sends an I/Q file made elsewhere (int8, 2 MS/s by default, the signal OFFSET
 above the HackRF's centre) into the radio tuned to HZ in a mode (7: narrow FM; `--filter LO HI` for the test),
