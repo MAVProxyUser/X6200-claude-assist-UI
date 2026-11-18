@@ -83,8 +83,12 @@ approved that day.
     against the result; none of upstream's updater taken (it changed none). 14 files in conflict, all kept both
     ways; the image's one ffmpeg made for the Internet radio's audio and our boot video's video together; User keys
     kept on APP 4 (upstream's apps on APP 4-6); the new helpers name themselves GoldCorpHF. Tried on the radio:
-    pages A-E, B on the bladeRF, the APP grid with the new tiles. Not tried: the new apps themselves (Zello and
-    SVXConnect transmit; the Internet radio's AAC stations want a new card image, level 3).
+    pages A-E, B on the bladeRF, the APP grid with the new tiles; and 2026-11-18 ~17:45 UTC, from the receive-only
+    remote session (the radio held receive only): Weather (now and 5 days, NWS warnings), Flights (71 aircraft
+    from adsb.lol), HF Air Band (VOLMET list, TUNE to 2950 kHz USB), CB (the FCC plan, a channel tuned), Web radio
+    (radio-browser.info's countries and stations, an MP3 stream played and stopped), Zello and SVXConnect opened
+    (not set up: nothing sent). Fixed: CB's chosen row lost its name in the Sentry's theme. Not tried: AAC
+    stations (a new card image, level 3), GhostNet (JS8's), Zello and SVXConnect connected.
 
 **Waiting on hardware**
 

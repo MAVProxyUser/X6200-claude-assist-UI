@@ -399,7 +399,10 @@ static void draw_cb(lv_event_t *e) {
             dsc->rect_dsc->border_side  = LV_BORDER_SIDE_LEFT;
         }
     }
-    dsc->label_dsc->color = c == 1 ? TC(text_value) : c == 0 ? TC(text) : r == sel || cur ? TC(sel_text) : TC(accent);
+    /* The chosen row's words in sel_text, every column: in a theme whose text is its selection's colour (the Sentry's
+     * amber) the name went into the bar unseen (2026-11-18) */
+    dsc->label_dsc->color = r == sel ? TC(sel_text) : c == 1 ? TC(text_value) : c == 0 ? TC(text) : cur ? TC(sel_text) :
+                            TC(accent);
 }
 
 static void freq_changed(Subject *subj, void *user_data) {

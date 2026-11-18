@@ -1223,7 +1223,9 @@ written through to the card before it replaces the last copy, so a power cut kee
   ago, within the half hour), else what the sun says where you are (the GPS's fix, else the phone's position from
   the Panel page, else the QTH locator): OPEN, CLOSED, LOCAL, OPENING or CLOSING; `SET QTH` when none of those is
   there.
-- **F SYSTEM**: Settings, the apps, the digital modes, AIRSPACE, VHF/UHF, the SDR pool, the [GPS](#the-gps-panel),
+- **F SYSTEM**: Settings, the apps (APPS: the APP grid; its WHAT IT DOES names them, Weather, Flights, HF Air Band,
+  CB, Web radio, Zello and SVXConnect among them), the digital modes, AIRSPACE, VHF/UHF, the SDR pool, the
+  [GPS](#the-gps-panel),
   the classic radio screen, a shell, the [base firmware](#the-x6200s-base-firmware) and where the radio starts. F2 opens the item chosen
   (CLASSIC RADIO is on the list); the other F keys do nothing here. Its title says the release, the GUI's commit and the base's version. A's title names
   what its scope takes in: `MF/HF/VHF SPECTRUM` (the X6200 from 100 kHz to 55 MHz, and 87.5 to 137 MHz).
@@ -7193,7 +7195,8 @@ countries).
 | Band A, B, D, E | Europe's 40 moved 900 or 450 kHz down (A, B) or up (D, E; E 11 channels, below 28 MHz) | AM | the export sets' band names, no country's plan |
 
 Channel 23 sits between 22 and 24 in frequency in every plan with the 40,
-as the plans number them.
+as the plans number them. The chosen row is in the selection's colours,
+its name with the rest.
 
 - Plan goes to the next plan; the choice is kept. Until one is chosen it is
   the plan of the country set in Settings > General > STATION > Country
