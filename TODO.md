@@ -13,8 +13,10 @@ approved that day.
 
 1. **The Kraken roadmap** (tools/rtlspec/x6x00-df/ROADMAP.md, the owner's asks of 2026-11-17): done, items 1-9
    (cores, page I's tuning and FOLLOW, the web page, gpsd, the bearing log, TNA/sources/FB/smoothing/ROOT-MUSIC,
-   custom arrays, targets 2-4 (in the bearing log too), the IQ server) and 10 (sample-rate slewing, 2026-11-17
-   evening). Nothing left but passive radar (parked).
+   custom arrays, targets 2-4 (in the bearing log too), the IQ server), 10 (sample-rate slewing) and 11 (the antenna
+   side calibrated on a source at a known bearing; 4+1, L and minimum-redundancy layouts; KrakenRF's whips' range).
+   Left, with the owner's hands: a bearing over the air on the real array (a transmitter at a known bearing, the
+   whips' spacing). The Kraken is unplugged for now (one RTL on the radio). Passive radar parked.
 
 2. **A Bluetooth GPS for gpsd, beside Bluetooth CAT**: built 2026-11-17 (btgps-ctl, Settings > Bluetooth's GPS for
    gpsd, the web page's Direction finder GPS card): beside CAT rather than instead of it, as the radio is CAT's
@@ -33,10 +35,9 @@ approved that day.
 
 *The owner's decisions and longer work*
 
-5. **Page I's decisions D2-D10** (the plan's list): licence, rate, calibration interval, B on a Kraken stick, DF
-    only while I is open, I on the ring only with an array, the hardware (D8: the antennas and their layout; the
-    absolute bearing means nothing till the array is known), plain RTLs.
-6. **TCI audio over the radio's Wi-Fi**: looked at 2026-11-17 evening. No stalls of 0.5-1.3 s then (the longest gap
+5. **Page I's decisions** (docs/plans/kraken_df_plan.md): answered 2026-11-17 but D5 (B moved or lent when I opens)
+    and D7 (I on the ring only with a Kraken), both kept as built; D11 (five channels) settled by 9104.
+6. **TCI audio over the radio's Wi-Fi** (nothing more to do on the radio; kept for the record): looked at 2026-11-17 evening. No stalls of 0.5-1.3 s then (the longest gap
     between frames 280 ms, all the audio there); the limit is how much the radio sends: about 1 MB/s (8 Mbit/s raw
     TCP), the same with no SDR, B's stick or all five Kraken sticks streaming, the CPU 70 % idle; the WiFi chip is on
     the SoC's EHCI (not the MUSB with the SDRs), one bulk-out endpoint. The link: TX MCS 5, RX MCS 1-3, CTS

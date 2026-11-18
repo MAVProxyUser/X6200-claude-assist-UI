@@ -2219,12 +2219,15 @@ static void show_decode(void) {
                                          * orange but on the chosen row */
         if (on_x || r == dec_row) snprintf(rx, sizeof(rx), "%s", who);
         else snprintf(rx, sizeof(rx), "#%s %s#", tag_hex, who);
+        if (d->rx == 'E' && emer_scan) {        /* the scan's place: A or B after the frequency, *B where B stopped */
+            size_t l = strlen(fs);
+
+            if (routine == ROUT_SCAN && a_chan >= 0 && emer_ord[a_chan] == r) snprintf(fs + l, sizeof(fs) - l, " A");
+            else if (rtl_scan && b_chan >= 0 && emer_ord[b_chan] == r)
+                snprintf(fs + l, sizeof(fs) - l, " %s", b_stopped() ? "*B" : "B");
+        }
         snprintf(s, sizeof(s), DEC_ROW, fs, d->rx == 'E' ? emer[r].ch : bi >= 0 ? bands[bi].name : "",
                  bi >= 0 ? best_name(bands[bi].when) : "", set, now, rx);
-        if (d->rx == 'E' && emer_scan) {        /* the scan's place: A's or B's letter before the frequency */
-            if (routine == ROUT_SCAN && a_chan >= 0 && emer_ord[a_chan] == r) s[0] = 'A';
-            if (rtl_scan && b_chan >= 0 && emer_ord[b_chan] == r) s[0] = b_stopped() ? '*' : 'B';
-        }
         lv_label_set_text(d_row_l[rr], s);
         lv_obj_set_style_bg_opa(d_row_l[rr], r == dec_row ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(d_row_l[rr], r == dec_row ? ink : amb, 0);

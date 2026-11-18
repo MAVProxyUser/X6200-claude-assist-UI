@@ -1172,8 +1172,8 @@ written through to the card before it replaces the last copy, so a power cut kee
   transmitter armed on A or G; OPENS IN says `RX ONLY` on each. **F1 SCAN ALL** (with EMERGENCY chosen) scans all
   of them at once: A the X6200's seven (CB, the HF nets, 6 m), B the SDR's 58 in frequency order (its stick moves
   least), each stopping on one that talks and staying as long as it talks, whatever SCAN CFG's style says; heard on
-  the speaker is the radio that stopped last. The list marks the row each radio is on (A, B, or `*` where B has
-  stopped) and WHAT IT IS says where both are; the finds go into C's Signal Log under the channel's name. F1 again,
+  the speaker is the radio that stopped last. The list marks the row each radio is on (`A` or `B` after the
+  frequency, `*B` where B has stopped) and WHAT IT IS says where both are; the finds go into C's Signal Log under the channel's name. F1 again,
   or A's or B's F1, or SCAN CFG's SCANS, ends it, the radios staying where they are. Receive only throughout.
   **F2 SCAN SEL** scans the chosen row's band only, the same way: NOAA WX, CB, FRS, MURS, GMRS, HAM CALL, HF NETS,
   MARINE, AIR, MUTUAL AID (VHF), LOW BAND, UHF MUTUAL, FEDERAL or RELIEF (Red Cross, business); its key names the
