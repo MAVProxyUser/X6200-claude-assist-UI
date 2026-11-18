@@ -1151,6 +1151,20 @@ written through to the card before it replaces the last copy, so a power cut kee
   | NOAA ALERTS, FM RDS, DIGITAL VOICE, METEOR | B, on the channel, heard; B decodes by itself | the SDR |
   | ACARS | H AIRSPACE, on its ACARS view | the SDR |
   | ADS-B | H AIRSPACE | the SDR or a GNS 5890 stick |
+  | EMERGENCY | A on the frequency (held there, MANUAL), or B on it | X6200 for HF and 6 m, else the SDR |
+
+  **EMERGENCY**: the emergency frequencies to listen to, 65 of them, from a guide to emergency radio frequencies
+  (buckhorncliffs.com): NOAA weather WX1-WX7; CB 9, 19 and 3 (AM); FRS 3 and 17; MURS 1-5; GMRS 20 and its
+  repeater input; the ham calling frequencies (2 m 146.52, 70 cm 446.000, 6 m 52.525, 1.25 m 223.5); the Maritime
+  Mobile Service Net (14.300 USB) and the Hurricane Watch Net (14.325 USB by day, 7.268 LSB by night); marine 16,
+  22A, 9, 13, 6, 68, 69, 71, 72 and 70 (DSC, no voice); air guard 121.5 and military guard 243.0, SAR 123.1 and
+  122.9 (AM); the 406 MHz beacons (bursts, no voice); the public-safety mutual aid channels (VCALL10, VTAC11-14,
+  VFIRE21-23, VMED28, VLAW31, VSAR16, the low band LLAW1, LFIRE2, LLAW3, LFIRE4, the UHF UCALL40 and UTAC41-43); the
+  federal NC 1, LE A and 168.55; Red Cross 47.42 and business 151.625. Not those the guide calls gone or wrong or
+  could not confirm. Its BAND column names the channel; the MFK goes down all 65, twelve in sight; WHAT IT IS says
+  the one chosen. **Every one is receive only**: OPEN listens on it, the X6200 for HF and 6 m (A held there, MANUAL,
+  till its scan is started again), B's SDR for the rest (AM on the airbands, 243.0 too, else FM), and lets go of a
+  transmitter armed on A or G; OPENS IN says `RX ONLY` on each.
 
   The apps open on the frequency chosen (it goes into their memory first) and open their squelch themselves.
   JTTY's are WSJT-X's (as the JTTY app's list). Not on E: On the Air (its own list of broadcasts) and the Scanner. F1 and F5 do

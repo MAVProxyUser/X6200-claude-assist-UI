@@ -506,6 +506,90 @@ static const int32_t f_adsb[] = {1090000000};
 static const int32_t f_dv[] = {441000000, 446500000, 446075000};       /* DMR's simplex channels (B's DMR 70 CM) */
 static const int32_t f_meteor[] = {137100000, 137900000};
 
+/* EMERGENCY (the owner, 2026-11-17: "another page that sits on E that is labeled emergency and has all these
+ * frequencies set to be listened to ALL with TX disabled", from buckhorncliffs.com's guide to emergency radio
+ * frequencies): every one the guide gives, in its groups, and the chart rows it calls right; not those it calls gone
+ * (the Shuttle's, the ICC's), wrong (156.75 as marine weather) or unconfirmed. Each a channel's name for D's BAND
+ * column, its own mode, and a line for WHAT IT IS. Receive only, every one: OPEN listens (HF and 6 m on A's X6200,
+ * the rest on B's SDR) and lets go of an armed transmitter */
+typedef struct {
+    int32_t     hz;
+    const char *ch;             /* its channel's name, 9 letters at most */
+    int         mode;           /* the X6200's (HF, 6 m); B's SDR takes its band's (AM on the airbands, else FM) */
+    const char *what;
+} emer_t;
+
+#define E_FM radio_mode_nfm
+static const emer_t emer[] = {
+    {162550000, "NOAA WX1", E_FM, "NOAA WEATHER RADIO WX1: FORECASTS AND CIVIL ALERTS. LISTEN ONLY."},
+    {162400000, "NOAA WX2", E_FM, "NOAA WEATHER RADIO WX2. LISTEN ONLY."},
+    {162475000, "NOAA WX3", E_FM, "NOAA WEATHER RADIO WX3. LISTEN ONLY."},
+    {162425000, "NOAA WX4", E_FM, "NOAA WEATHER RADIO WX4. LISTEN ONLY."},
+    {162450000, "NOAA WX5", E_FM, "NOAA WEATHER RADIO WX5. LISTEN ONLY."},
+    {162500000, "NOAA WX6", E_FM, "NOAA WEATHER RADIO WX6. LISTEN ONLY."},
+    {162525000, "NOAA WX7", E_FM, "NOAA WEATHER RADIO WX7. LISTEN ONLY."},
+    {27065000, "CB 9", radio_mode_am, "CB CHANNEL 9 (AM): EMERGENCIES AND TRAVELER ASSISTANCE."},
+    {27185000, "CB 19", radio_mode_am, "CB CHANNEL 19 (AM): THE HIGHWAY CHANNEL."},
+    {26985000, "CB 3", radio_mode_am, "CB CHANNEL 3 (AM): THE 3-3-3 CHANNEL ON CB."},
+    {462612500, "FRS 3", E_FM, "FRS CHANNEL 3: THE 3-3-3 CALLING CHANNEL."},
+    {462600000, "FRS 17", E_FM, "FRS CHANNEL 17: A SECOND GROUP CHANNEL."},
+    {151820000, "MURS 1", E_FM, "MURS CHANNEL 1 (NO LICENCE)."},
+    {151880000, "MURS 2", E_FM, "MURS CHANNEL 2 (NO LICENCE)."},
+    {151940000, "MURS 3", E_FM, "MURS CHANNEL 3: THE 3-3-3 CHANNEL."},
+    {154570000, "MURS 4", E_FM, "MURS CHANNEL 4, SHARED WITH BUSINESSES."},
+    {154600000, "MURS 5", E_FM, "MURS CHANNEL 5, SHARED WITH BUSINESSES."},
+    {462675000, "GMRS 20", E_FM, "GMRS CHANNEL 20 (TONE 141.3): TRAVEL AND EMERGENCY. EMERGENCY TRAFFIC FIRST ON ALL GMRS."},
+    {467675000, "GMRS20 IN", E_FM, "GMRS CHANNEL 20'S REPEATER INPUT: THOSE TALKING INTO A REPEATER ON 462.675."},
+    {146520000, "2 M CALL", E_FM, "HAM 2 M: THE NATIONAL SIMPLEX CALLING FREQUENCY."},
+    {446000000, "70CM CALL", E_FM, "HAM 70 CM: THE NATIONAL SIMPLEX CALLING FREQUENCY."},
+    {52525000, "6 M CALL", radio_mode_nfm, "HAM 6 M: THE FM SIMPLEX CALLING FREQUENCY."},
+    {223500000, "1.25 CALL", E_FM, "HAM 1.25 M: THE SIMPLEX CALLING FREQUENCY."},
+    {14300000, "MMSN 20 M", radio_mode_usb, "THE MARITIME MOBILE SERVICE NET, 20 M (USB)."},
+    {14325000, "HWN DAY", radio_mode_usb, "THE HURRICANE WATCH NET BY DAY, 20 M (USB)."},
+    {7268000, "HWN NIGHT", radio_mode_lsb, "THE HURRICANE WATCH NET BY NIGHT, 40 M (LSB)."},
+    {156800000, "MARINE 16", E_FM, "MARINE CHANNEL 16: DISTRESS, SAFETY AND CALLING. LISTEN ONLY FROM LAND."},
+    {157100000, "MAR 22A", E_FM, "MARINE CHANNEL 22A: COAST GUARD LIAISON AND SAFETY BROADCASTS."},
+    {156450000, "MARINE 9", E_FM, "MARINE CHANNEL 9: BOATERS' CALLING."},
+    {156650000, "MARINE 13", E_FM, "MARINE CHANNEL 13: BRIDGE TO BRIDGE."},
+    {156300000, "MARINE 6", E_FM, "MARINE CHANNEL 6: SHIP-TO-SHIP SAFETY."},
+    {156425000, "MARINE 68", E_FM, "MARINE CHANNEL 68: RECREATIONAL."},
+    {156475000, "MARINE 69", E_FM, "MARINE CHANNEL 69: RECREATIONAL."},
+    {156575000, "MARINE 71", E_FM, "MARINE CHANNEL 71: RECREATIONAL."},
+    {156625000, "MARINE 72", E_FM, "MARINE CHANNEL 72: RECREATIONAL."},
+    {156525000, "MARINE 70", E_FM, "MARINE CHANNEL 70: DIGITAL DISTRESS CALLS (DSC), BURSTS, NO VOICE."},
+    {121500000, "GUARD", radio_mode_am, "AIR GUARD (AM): CIVIL AIRCRAFT EMERGENCY AND DISTRESS."},
+    {243000000, "MIL GUARD", radio_mode_am, "MILITARY AIR GUARD (AM), GUARD'S MILITARY COUNTERPART."},
+    {123100000, "SAR", radio_mode_am, "SEARCH AND RESCUE AIRCRAFT (AM)."},
+    {122900000, "SAR 2", radio_mode_am, "SEARCH AND RESCUE, SECONDARY AND TRAINING (AM)."},
+    {406025000, "406 BCN", E_FM, "406.0-406.1: SATELLITE LOCATOR BEACONS (EPIRB, PLB), DIGITAL BURSTS, NO VOICE."},
+    {155752500, "VCALL10", E_FM, "POLICE, FIRE AND EMS MUTUAL AID: CALLING AND CHECK-IN (TONE 156.7)."},
+    {151137500, "VTAC11", E_FM, "MUTUAL AID, VHF TACTICAL 11 (TONE 156.7)."},
+    {154452500, "VTAC12", E_FM, "MUTUAL AID, VHF TACTICAL 12 (TONE 156.7)."},
+    {158737500, "VTAC13", E_FM, "MUTUAL AID, VHF TACTICAL 13 (TONE 156.7)."},
+    {159472500, "VTAC14", E_FM, "MUTUAL AID, VHF TACTICAL 14 (TONE 156.7)."},
+    {154280000, "VFIRE21", E_FM, "FIRE MUTUAL AID 21."},
+    {154265000, "VFIRE22", E_FM, "FIRE MUTUAL AID 22."},
+    {154295000, "VFIRE23", E_FM, "FIRE MUTUAL AID 23."},
+    {155340000, "VMED28", E_FM, "AMBULANCE TO HOSPITAL."},
+    {155475000, "VLAW31", E_FM, "LAW ENFORCEMENT MUTUAL AID."},
+    {155160000, "VSAR16", E_FM, "SEARCH AND RESCUE."},
+    {39460000, "LLAW1", E_FM, "LAW ENFORCEMENT, LOW BAND."},
+    {39480000, "LFIRE2", E_FM, "FIRE, LOW BAND."},
+    {45860000, "LLAW3", E_FM, "LAW ENFORCEMENT, LOW BAND."},
+    {45880000, "LFIRE4", E_FM, "FIRE, LOW BAND."},
+    {453212500, "UCALL40", E_FM, "MUTUAL AID, UHF CALLING."},
+    {453462500, "UTAC41", E_FM, "MUTUAL AID, UHF TACTICAL 41."},
+    {453712500, "UTAC42", E_FM, "MUTUAL AID, UHF TACTICAL 42."},
+    {453862500, "UTAC43", E_FM, "MUTUAL AID, UHF TACTICAL 43."},
+    {169537500, "NC 1", E_FM, "FEDERAL INCIDENT RESPONSE: CALLING."},
+    {167087500, "LE A", E_FM, "FEDERAL LAW ENFORCEMENT: CALLING."},
+    {168550000, "FED CIV", E_FM, "FEDERAL CIVILIAN EMERGENCIES."},
+    {47420000, "RED CROSS", E_FM, "RED CROSS RELIEF, LOW BAND."},
+    {151625000, "BUSINESS", E_FM, "MOBILE BUSINESS CHANNEL (151.625)."},
+};
+#define EMER_N ((int)(sizeof(emer) / sizeof(emer[0])))
+static int32_t f_emer[EMER_N];          /* their frequencies, filled from emer[] (decoders[]'s hz) */
+
 #define N_OF(a) ((int)(sizeof(a) / sizeof(a[0])))
 #define HZ(a)   a, N_OF(a)
 
@@ -591,6 +675,9 @@ static const decoder_t decoders[] = {
     {"METEOR", "", 0, -1, -1, HZ(f_meteor),
      "WEATHER SATELLITES' PICTURES (LRPT) ON B'S SDR WHILE ONE PASSES: 10 MINUTES, A FEW TIMES A DAY.", 0,
      'B', -1, false, "B ON THE SDR"},
+    {"EMERGENCY", "", 0, -1, -1, f_emer, EMER_N,
+     "EMERGENCY FREQUENCIES TO LISTEN TO: WEATHER, CB, FRS, MURS, GMRS, HAM CALLING, MARINE, AIR, MUTUAL AID.", 0,
+     'E', radio_agc_slow, false, "A OR B, RX ONLY"},
 };
 
 #define DECODERS_N N_OF(decoders)
@@ -802,6 +889,7 @@ static const char *rtl_mode_word(int64_t hz) {
 static int rtl_mode_of(int64_t hz) {
     if (hz >= 87500000 && hz < 108000000) return 3;                 /* FM broadcast: wide FM */
     if ((hz >= 108000000 && hz < 137000000) || hz < 29500000) return 2;     /* the airband, and CB and HF: AM */
+    if (hz >= 225000000 && hz < 400000000) return 2;               /* the military airband (243.0 guard): AM */
     return 1;                                                       /* 10 m's FM segment and up: narrow FM */
 }
 
@@ -1837,6 +1925,7 @@ static bool       g_gpu;            /* G held up: its spectrum and voiceprint dr
 static bool       g_dirty = true;   /* and something of them changed since they were drawn */
 static int        vp_head;          /* the GPU's voiceprint: its oldest column in the ring (the next written) */
 static void walkie_arm(bool on);
+static void w_sdr_arm(bool on);
 
 /* NOW for a band: what the Sentry heard there in the last half hour, else what the sun says at the station's QTH.
  * One set of words on C and D: "3 SIG LIVE", "3 SIG 12 MIN", OPEN, CLOSED, OPENING, CLOSING, LOCAL, SET QTH */
@@ -1995,6 +2084,14 @@ static void show_bands(void) {
 }
 
 /* E's TYPE list: its rows shown, the chosen one kept in the middle once the list is longer than the box */
+/* the first of E's 12 rows shown: the chosen one kept in sight (only EMERGENCY has more than 12) */
+static int dec_rtop(void) {
+    int n = decoders[dec_sel].n, top = dec_row - 6;
+
+    if (top > n - 12) top = n - 12;
+    return top < 0 ? 0 : top;
+}
+
 static int dec_top(void) {
     int top = dec_sel - d_sel.n / 2;
 
@@ -2004,8 +2101,11 @@ static int dec_top(void) {
 
 /* The radio a type is received on, as its RX column says it: the X6200's apps, else the SDR's (by its kind, "SDR"
  * with none plugged in; ADS-B's GNS 5890 stick when only it is there) */
+/* EMERGENCY's rows: on the X6200 where D and E put it (HF and 6 m, its own receiver), else on B's SDR */
+static bool emer_on_x6200(int32_t f) { return cfg_is_valid_hw_freq(f) && (f < 30000000 || (f >= 50000000 && f <= 54000000)); }
+
 static const char *dec_rx(const decoder_t *d, int32_t f) {
-    if (d->rx == 'X') return cfg_is_valid_hw_freq(f) ? "X6200" : "";
+    if (d->rx == 'X' || (d->rx == 'E' && emer_on_x6200(f))) return cfg_is_valid_hw_freq(f) ? "X6200" : "";
     if (d->rx == 'H' && !sdr_here && adsb_here) return "STICK";
     return b_kind();
 }
@@ -2017,16 +2117,21 @@ static void show_decode(void) {
 
     for (int r = 0; r < d_sel.n; r++)
         opt_set(&d_sel, r, top + r < DECODERS_N ? decoders[top + r].name : "", top + r == dec_sel);
-    for (int r = 0; r < 12; r++) {
+    int rtop = dec_rtop();
+
+    for (int rr = 0; rr < 12; rr++) {
+        int r = rtop + rr;              /* the row of the type's list (more than 12 scroll: EMERGENCY) */
+
         if (r >= d->n) {
-            lv_label_set_text(d_row_l[r], "");
-            lv_obj_set_style_bg_opa(d_row_l[r], LV_OPA_TRANSP, 0);
+            lv_label_set_text(d_row_l[rr], "");
+            lv_obj_set_style_bg_opa(d_row_l[rr], LV_OPA_TRANSP, 0);
             continue;
         }
         int32_t f  = d->hz[r];
         int     bi = band_for(f);
         char    fs[16], set[32];
-        rxset_t st = rx_setup_on(f, d->agc, d->rx != 'X');
+        bool    on_x = d->rx == 'X' || (d->rx == 'E' && emer_on_x6200(f));
+        rxset_t st = rx_setup_on(f, d->agc, !on_x);
 
         if (f < 1000000)
             snprintf(fs, sizeof(fs), "%d.%d KHZ", f / 1000, (f % 1000) / 100);
@@ -2039,16 +2144,24 @@ static void show_decode(void) {
         const char *who = dec_rx(d, f);
         char        rx[24];             /* the radio it is heard on: the X6200 (its apps), else the SDR, in the tags'
                                          * orange but on the chosen row */
-        if (d->rx == 'X' || r == dec_row) snprintf(rx, sizeof(rx), "%s", who);
+        if (on_x || r == dec_row) snprintf(rx, sizeof(rx), "%s", who);
         else snprintf(rx, sizeof(rx), "#%s %s#", tag_hex, who);
-        snprintf(s, sizeof(s), DEC_ROW, fs, bi >= 0 ? bands[bi].name : "", bi >= 0 ? best_name(bands[bi].when) : "",
-                 set, now, rx);
-        lv_label_set_text(d_row_l[r], s);
-        lv_obj_set_style_bg_opa(d_row_l[r], r == dec_row ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_text_color(d_row_l[r], r == dec_row ? ink : amb, 0);
+        snprintf(s, sizeof(s), DEC_ROW, fs, d->rx == 'E' ? emer[r].ch : bi >= 0 ? bands[bi].name : "",
+                 bi >= 0 ? best_name(bands[bi].when) : "", set, now, rx);
+        lv_label_set_text(d_row_l[rr], s);
+        lv_obj_set_style_bg_opa(d_row_l[rr], r == dec_row ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_text_color(d_row_l[rr], r == dec_row ? ink : amb, 0);
     }
-    opt_set(&d_how, 0, d->about, 0);
-    opt_set(&d_ant, 0, d->opens, 0);
+    if (d->rx == 'E' && dec_row < d->n) {          /* EMERGENCY: the chosen one's own line, and where it opens */
+        char w[160];
+
+        snprintf(w, sizeof(w), "%s (%d OF %d). %s", emer[dec_row].ch, dec_row + 1, d->n, emer[dec_row].what);
+        opt_set(&d_how, 0, w, 0);
+        opt_set(&d_ant, 0, emer_on_x6200(d->hz[dec_row]) ? "A ON THE X6200" : "B ON THE SDR", 0);
+    } else {
+        opt_set(&d_how, 0, d->about, 0);
+        opt_set(&d_ant, 0, d->opens, 0);
+    }
     {
         int32_t f = dec_row < d->n ? d->hz[dec_row] : 0;
         char    tx[32];
@@ -6097,6 +6210,31 @@ static void open_decoder(void) {
     const decoder_t *d = &decoders[dec_sel];
 
     if (dec_row >= d->n) return;
+    if (d->rx == 'E') {                     /* EMERGENCY: listened to, never sent on */
+        const emer_t *e = &emer[dec_row];
+
+        if (g_armed) walkie_arm(false);
+        if (g_sdr_armed) w_sdr_arm(false);
+        if (emer_on_x6200(e->hz)) {         /* A's X6200, held there (MANUAL) till its scan is started again */
+            if (main_screen_freq_locked()) {
+                tune(e->hz, e->mode);       /* says why */
+                return;
+            }
+            if (trk.on) track_end();
+            smode = MODE_MAN;
+            if (tune(e->hz, e->mode)) rx_setup_apply(e->hz, radio_agc_slow);
+            go(SCR_SCAN);
+        } else {
+            if (rtl_spectrum_dev() == RTL_DEV_NONE) {
+                osd("NO SDR", "THIS ONE IS ABOVE THE X6200: AN RTL-SDR, A HACKRF OR A BLADERF ON USB HEARS IT.", -1);
+                return;
+            }
+            b_listen_at(e->hz, band_for(e->hz));
+            rx_set(rx_setup_on(e->hz, -1, true));
+        }
+        osd(e->ch, e->what, -1);
+        return;
+    }
     if (d->rx == 'B') {                     /* the SDR's decoders: B on the channel, heard there, decoding by itself */
         if (rtl_spectrum_dev() == RTL_DEV_NONE) {
             osd("NO SDR", "THIS ONE IS DECODED BY AN SDR ON USB: AN RTL-SDR, A HACKRF OR A BLADERF.", -1);
@@ -7040,11 +7178,13 @@ static void row_tap_cb(lv_event_t *e) {
             }
         }
     } else if (scr == SCR_DECODE) {
-        if (tag >= decoders[dec_sel].n) return;
-        if (tag == dec_row)
+        int r = dec_rtop() + tag;       /* the label tapped, as the list stands */
+
+        if (r >= decoders[dec_sel].n) return;
+        if (r == dec_row)
             open_decoder();
         else {
-            dec_row = tag;
+            dec_row = r;
             show_screen();
         }
     }
@@ -7513,6 +7653,7 @@ static void build_log(lv_obj_t *p) {
 }
 
 static void build_decode(lv_obj_t *p) {
+    for (int i = 0; i < EMER_N; i++) f_emer[i] = emer[i].hz;      /* EMERGENCY's frequencies, as decoders[] reads them */
     int y = BODY_Y, h = scr_h - y - DLOW_H - 10, lw = 196;
 
     int tn = (h - 34) / 20;             /* the TYPE list's rows: as many as the box holds, 12 at most (tap_cb's 16) */
