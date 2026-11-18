@@ -125,8 +125,9 @@ elseif(HW_BACKEND STREQUAL "stub")
     set(HW_LIBS m)
 elseif(HW_BACKEND STREQUAL "g90")
     # Xiegu G90 body on the DE-9 head link (115200 8N1), stock firmware, behind hw.h.
-    # libg90 is C++20; g90_link is the C face. An empty LIBG90_DIR fetches the pin below
-    # (same pattern as aether_x6100_control). -DLIBG90_DIR=<tree> uses that tree instead.
+    # libg90 is C++20; g90_link is the C face. It is in the tree (third-party/libg90, MIT, the
+    # pin below, UPSTREAM.md): nothing is fetched at build time. -DLIBG90_DIR=<tree> uses another
+    # tree; an empty LIBG90_DIR fetches the pin (as aether_x6100_control is).
     # -DLIBG90_USE_INSTALLED=ON is find_package(libg90) when a package is already installed.
     # Profile defaults to auto, the body's reported firmware (G90_PROFILE). PTT and ATU tune
     # stay off unless G90_ALLOW_TX=1.
@@ -136,7 +137,8 @@ elseif(HW_BACKEND STREQUAL "g90")
     # with profile_for_body_version (libg90 #2, the body's firmware picks the profile).
     set(LIBG90_GIT_TAG "4eefd6e9fa43c554c1de502c2b3d2ed6b08d6f39" CACHE STRING
         "libg90 revision fetched when LIBG90_DIR is empty")
-    set(LIBG90_DIR "" CACHE PATH "libg90 source tree; empty fetches LIBG90_GIT_TAG")
+    set(LIBG90_DIR "${CMAKE_SOURCE_DIR}/third-party/libg90" CACHE PATH
+        "libg90 source tree (the vendored one); empty fetches LIBG90_GIT_TAG")
     option(LIBG90_USE_INSTALLED "find_package(libg90) instead of fetching it" OFF)
     set(LIBG90_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(LIBG90_BUILD_CLI OFF CACHE BOOL "" FORCE)
