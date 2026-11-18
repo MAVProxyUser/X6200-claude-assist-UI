@@ -121,7 +121,7 @@ class Radio:
         if not tok:
             raise Refused(f"{name}: no {'tx' if want_tx else 'rx'} session: bench.py provision {name} "
                           f"{'tx' if want_tx else 'rx'}")
-        self.r = Remote(self.host)
+        self.r = Remote(self.host, int(rc.get("port", 50002)))     # another port: the simulated radios' (sim_test.py)
         self.state, self.meter, self.txm, self.ft8 = {}, None, None, {}
         self.rows, self.errs, self.lock = [], [], threading.Lock()
         self.tx, self.tx_since, self.ctl_mine, self.role = False, None, False, None

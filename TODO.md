@@ -86,6 +86,9 @@ approved that day.
   the FT8 app is on Auto (allowed now on a radio with no callsign, which sends nothing), then PASS at -x 30 (SNR
   9 dB, 1447 Hz; the S-meter -121 -> -108 dBm) and decoded at -x 40 (-100 dBm), the radio back in the Sentry each
   time. To try: `radios-ft8` once the X6100 is on the bench (arrives 2026-11-19; a 10 W pad on each radio's jack).
+  Its logic tried against two simulated radios (tools/bench/sim_test.py, a host check now): a CQ and its reply
+  pass; a radio that stays keyed, an SWR of 3, 5 W for 0.1 asked, and a receiver hearing +10 dBm (pads missing)
+  each stop everything and refuse.
 - Done 2026-11-18: the bladeRF dropping off USB as it started (00:05 local; its own supply plugged in, the owner
   said) not reproduced on its DC jack. Plugged in again at 00:14 it opened on DC (now logged at each open), and at
   05:57 UTC the radio loaded its FPGA image again (2.0 s, 0.53 A after it), opened it so its AD9361 started (1.8 s,
