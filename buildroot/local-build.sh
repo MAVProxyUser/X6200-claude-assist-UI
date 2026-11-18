@@ -469,6 +469,15 @@ else
     grep -q "^${GUI_VAR}_CONF_OPTS += -DXARA_BINARY=$XARA_BIN" $GUI_MK
 fi
 
+echo "== voacapl, Pat's VOACAP column (tools/voacap/build.sh): one ARMv7 binary, the same Rust and gcc as XARA's"
+# hfcast-engine at its pinned commit with this repository's crate (tools/voacap), kept in $HOME/.cache/openx6x00; the
+# GUI's CMake installs it as /usr/bin/voacapl, so it is in the image and in the update bundle
+VOACAPL_BIN=$(CC=$XARA_CC bash $GUI/tools/voacap/build.sh)
+[ -x "$VOACAPL_BIN" ]
+sed -i "/_CONF_OPTS += -DVOACAPL_BINARY=/d" $GUI_MK
+sed -i "s|^\$(eval \$(cmake-package))|${GUI_VAR}_CONF_OPTS += -DVOACAPL_BINARY=$VOACAPL_BIN\n&|" $GUI_MK
+grep -q "^${GUI_VAR}_CONF_OPTS += -DVOACAPL_BINARY=$VOACAPL_BIN" $GUI_MK
+
 echo "== RADE, the RADE app's modem (tools/rade/build.sh): static libraries for the GUI, built with the same gcc"
 # rade_c (RADE V1) and the Opus fork with FARGAN, pinned and checked, kept in $HOME/.cache/openx6x00/rade; the GUI's
 # CMake links them (-DRADE_PREFIX) and installs their licences in /usr/share/x6100/licenses/rade. Opus is configured

@@ -1,0 +1,4 @@
+Pat's own VOACAP test data (Pat v1.0.1, https://github.com/la5nta/pat, internal/propagation/voacap/testdata; MIT,
+Copyright (c) 2020 Martin Hebnes Pedersen, LA5NTA): input.dat, a deck as Pat writes it, and LA5NTA_to_*.out, listings
+the Fortran voacapl printed for the decks echoed at their tops. voacap_test.py runs tools/voacap's voacapl on those
+decks and checks it against them.

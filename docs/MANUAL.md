@@ -8595,6 +8595,15 @@ Connecting to a gateway:
 - The gateway list: the first time, Pat fetches it from winlink.org when the
   radio has internet, and keeps it on the SD card. Without internet it uses
   the list built into Pat (November 2026). Updating it needs the internet.
+- The gateway list's quality column (sort by it with "link quality"): each
+  gateway's predicted path from your locator at this hour, worked out on the
+  radio by VOACAP (`/usr/bin/voacapl`, hfcast-engine's VOACAP with its data
+  built in: no internet needed for it). About 10 seconds for a band's list
+  (243 gateways on 40 m), two predictions at a time, behind the GUI and the
+  modem. It is for 7 W, not Pat's usual 50 W (a different power:
+  `X6100_VOACAP_W` in Pat's environment). From a shell: `pat rmslist -m
+  ardop -b 40m -q`. The column is a guide: a gateway it rates low may still
+  answer, one it rates high may not.
 - With the radio on the internet (WiFi, Ethernet), Pat's Telnet transport
   (Connect, Telnet) sends and fetches the mail with no radio at all: a first
   test of the account and the mailbox.

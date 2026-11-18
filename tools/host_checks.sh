@@ -93,6 +93,8 @@ missing() {
         echo "needs Python's bottle (python3-bottle)"
     elif grep -q -E "ft8lib/[a-z_]+\.h.*(not found|No such file)" "$log"; then
         echo "needs ft8_lib's headers: FT8LIB_INC=<a folder holding ft8lib/>"
+    elif grep -q "needs Rust's cargo" "$log"; then
+        echo "needs Rust's cargo"
     elif grep -q "autoreconf is needed" "$log"; then
         echo "needs RADE built (tools/rade/build.sh: autotools)"
     elif grep -q -E "GPSD=.*needed" "$log"; then

@@ -103,6 +103,22 @@ class Modem(Root):
             self.assertEqual(cfg["listen"], [])                     # no P2P call answered
             self.assertEqual(cfg["ardop"]["addr"], "127.0.0.1:8515")  # ARDOP's kept for a change back
 
+    def test_voacap_when_voacapl_is_there(self):
+        """Pat's VOACAP column: on, with tools/voacap's voacapl, when /usr/bin/voacapl is installed; off without it"""
+        self.wl.write_config(dict(WANT), "")
+        self.assertEqual(self.pat_config()["prediction"], {"engine": "disabled"})
+        os.makedirs(os.path.dirname(self.wl.VOACAPL), exist_ok=True)
+        with open(self.wl.VOACAPL, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(self.wl.VOACAPL, 0o755)
+        self.wl.write_config(dict(WANT), "")
+        self.assertEqual(self.pat_config()["prediction"],
+                         {"engine": "voacap", "voacap": {"executable": self.wl.VOACAPL,
+                                                         "data_dir": self.wl.VOACAP_DATA}})
+        os.remove(self.wl.VOACAPL)
+        self.wl.write_config(dict(WANT), "")
+        self.assertEqual(self.pat_config()["prediction"]["engine"], "disabled")
+
     def test_varahf_merged(self):
         self.wl.write_config(dict(WANT), "")
         cfg = self.pat_config()

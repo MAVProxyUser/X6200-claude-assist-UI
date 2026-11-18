@@ -529,6 +529,16 @@ the PC build's window.
 
 ## Winlink: VOACAP predictions in Pat's gateway list (#153)
 
+**Done 2026-11-18** (the owner's go-ahead for the downloads): tools/voacap, a `voacapl` of ours on hfcast-engine
+(2.14.0, bf34e8f, Apache-2.0, its coefficients compiled in) that Pat runs as it runs the Fortran one, no Pat patch;
+x6100-winlink turns Pat's engine on with it, GOMAXPROCS=2, the power capped at 7 W (X6100_VOACAP_W). Checked: Pat's
+nine Fortran listings' MUF columns identical (the operating frequency's within 0.1 degree and 1 km, their sample
+antenna against the isotrope), Pat's own parser reads its listings, on the X6200 `pat rmslist -m ardop -b 40m -q`
+rated 243 gateways in 9.5 s (about 50 ms a prediction). Host check `voacap`; image: buildroot/local-build.sh builds
+it as XARA is built. **Left for the owner**: whether the public image and bundle carry the CCIR coefficients
+(tools/voacap/UPSTREAM.md: the ITU publishes them free from copyright assertions for implementers of its
+Recommendations, VOACAP not one; hfcast's crate leaves them out of crates.io for that reason).
+
 Asked 2026-11-02 (km4gkd, #153). Pat's gateway list (the mailbox's Connect dialog) has a VOACAP column with each
 gateway's predicted path quality; on the radio it stays hidden, because x6100-winlink sets Pat's `prediction` engine
 to `disabled` (the image has no `voacapl`). The wish: that column on the radio, to choose a gateway and a frequency in

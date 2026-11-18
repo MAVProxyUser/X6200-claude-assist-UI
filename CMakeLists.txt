@@ -157,6 +157,18 @@ else()
                 install(FILES ${XARA_DIR}/doc/LICENSE ${XARA_DIR}/doc/THIRD-PARTY
                         ${XARA_DIR}/doc/rust-std-COPYRIGHT.html.gz DESTINATION share/x6100/licenses/xara)
         endif()
+        # voacapl, Pat's VOACAP column (tools/voacap: hfcast-engine, its coefficients compiled in): built outside too, by
+        # tools/voacap/build.sh with the Rust XARA's build pins, and installed as /usr/bin/voacapl; its notices (hfcast's
+        # licence and NOTICE, its licence notes, UPSTREAM.md, the Rust standard library's) go to
+        # /usr/share/x6100/licenses/voacapl. x6100-winlink turns Pat's prediction on when it is there
+        set(VOACAPL_BINARY "" CACHE FILEPATH "voacapl for the radio (tools/voacap/build.sh)")
+        if(VOACAPL_BINARY)
+                get_filename_component(VOACAPL_DIR ${VOACAPL_BINARY} DIRECTORY)
+                install(PROGRAMS ${VOACAPL_BINARY} DESTINATION bin RENAME voacapl)
+                install(FILES ${VOACAPL_DIR}/doc/LICENSE ${VOACAPL_DIR}/doc/NOTICE ${VOACAPL_DIR}/doc/hfcast-licence.md
+                        ${VOACAPL_DIR}/doc/UPSTREAM.md ${VOACAPL_DIR}/doc/rust-std-COPYRIGHT.html.gz
+                        DESTINATION share/x6100/licenses/voacapl)
+        endif()
         # SVXConnect, the SVXConnect app's reflector client: built outside too, by tools/svxconnect/build.sh, and
         # installed as /usr/bin/svxconnect. Its licence and notices (the doc/ beside the binary) go to
         # /usr/share/x6100/licenses/svxconnect

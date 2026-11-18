@@ -89,6 +89,10 @@ RADIO_FRESH = 15                      # s: an older radio file is from a GUI tha
 NOTE_AGAIN = 60                       # s: the same refusal goes into Pat's log again only after this
 LOG_MAX = 256 * 1024
 PAT = ROOT + "/usr/bin/pat"
+# Pat's VOACAP column (the gateway list's predicted path quality): tools/voacap's voacapl, hfcast-engine's VOACAP with
+# its coefficients compiled in, so the data folder Pat looks for holds only a note (#153)
+VOACAPL = ROOT + "/usr/bin/voacapl"
+VOACAP_DATA = ROOT + "/usr/share/voacapl"
 ARDOPCF = ROOT + "/usr/bin/ardopcf"
 MERCURY = ROOT + "/usr/bin/x6x00-mercury"
 XARA = ROOT + "/usr/bin/xara"
@@ -328,7 +332,11 @@ def write_config(want, password):
         # keys through the GUI's socket as ardopcf does. The bandwidth is the chosen one's
         vbw = want.get("xara_bandwidth", 2300) if want.get("modem") == "xara" else want["mercury_bandwidth"]
         sub("varahf").update({"addr": f"127.0.0.1:{MERCURY_PORT}", "bandwidth": vbw, "rig": RIG, "ptt_ctrl": False})
-        sub("prediction")["engine"] = "disabled"
+        if os.access(VOACAPL, os.X_OK):
+            sub("prediction").update({"engine": "voacap",
+                                      "voacap": {"executable": VOACAPL, "data_dir": VOACAP_DATA}})
+        else:
+            sub("prediction").update({"engine": "disabled"})
         body = json.dumps(cfg, indent=2) + "\n"
         if body == old:
             return False
@@ -547,6 +555,10 @@ def start_pat(pat, want):
     # Pat takes PAT_* variables over its config file: none from outside
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PAT_", "ARDOP_", "XDG_"))}
     env.update(XDG_CONFIG_HOME=LIB, XDG_DATA_HOME=DATA, XDG_STATE_HOME=STATE)
+    # Pat runs a prediction on each of GOMAXPROCS workers: two of the four cores, beside the GUI and the modem (and
+    # each voacapl at Pat's nice 10, about 50 ms on an A33). X6100_VOACAP_W: the power they are for (voacapl's 7 W
+    # unless set), not Pat's fixed 50 W
+    env.update(GOMAXPROCS="2")
     # Pat empties its log as it opens it, a moment after it starts: emptied here first, so that the Watch, which
     # reads it from the start from now on, does not take the last run's lines for new ones meanwhile
     try:

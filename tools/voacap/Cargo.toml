@@ -1,0 +1,22 @@
+[package]
+name = "x6x00-voacapl"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "LGPL-2.1-or-later"
+description = "A voacapl for Pat's VOACAP column on the radio: Pat's deck in, the method-30 listing out, by hfcast-engine"
+
+[[bin]]
+name = "voacapl"
+path = "src/main.rs"
+
+# hfcast-engine (Apache-2.0), cloned by build.sh at its pinned commit; its coefficients compiled in, so no itshfbc tree
+[dependencies]
+hfcast = { path = "../../build/voacap/hfcast-engine", default-features = false, features = ["embedded-coefficients"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -378,6 +378,12 @@ The GSOC head driving a G90 is Chris Lawson's (cjlawson02) work: his port of Ope
 ([cjlawson02/OpenX6X00](https://github.com/cjlawson02/OpenX6X00), branch `gsoc/g90-probe`) and his
 [libg90](https://github.com/cjlawson02/libg90) (MIT, in `third-party/libg90`).
 
+Pat's VOACAP column (Winlink's gateway list) is worked out on the radio by
+[hfcast-engine](https://github.com/jonathanmcsweet/hfcast-engine) by Jonathan McSweet (Apache-2.0, built by
+`tools/voacap`), a Rust translation of VOACAP: the Voice of America Coverage Analysis Program, by NTIA/ITS from their
+IONCAP, maintained by Greg Hand, with J.A. Watson's Linux port `voacapl`. NTIA/ITS make no warranty for it and its use
+implies no endorsement by them or the US Government.
+
 The licences are upstream's ([README_original.md, Licences](README_original.md#licences)): the GUI is
 LGPL-2.1-or-later, the image as a whole GPLv3. This fork's additions to the GUI and `x6x00-rtlspec` are
 LGPL-2.1-or-later; the image also carries dump1090-fa and RTL-SDR Blog's librtlsdr (both GPL-2.0-or-later) and a

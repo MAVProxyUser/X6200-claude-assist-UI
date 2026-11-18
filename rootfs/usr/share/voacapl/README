@@ -1,0 +1,3 @@
+Pat's VOACAP data folder (its "data_dir"). Nothing is needed here: /usr/bin/voacapl (tools/voacap in GoldCorpHF's
+source) is hfcast-engine's VOACAP with its coefficients and antennas compiled in. Pat only checks that the folder is
+there, and gives voacapl a run folder of its own in /tmp for each prediction.
