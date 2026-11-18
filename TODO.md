@@ -67,8 +67,10 @@ approved that day.
 
 - The bench harness (tools/bench, 2026-11-18: the owner, "YOU will be running the automated tests"): bench.py with
   the rules in code (README.md). Tried: a receive-only remote session on the X6200, status, the preflight refusing
-  without the owner's word on the cable. To try: `hackrf-ft8` (HackRF -> X6200, once the owner confirms the cable),
-  and `radios-ft8` once the X6100 is on the bench (arrives 2026-11-19; a 10 W pad on each radio's jack).
+  without the owner's word on the cable; then, with it (02:27 local), `hackrf-ft8` on 20 m: refused first because
+  the FT8 app is on Auto (allowed now on a radio with no callsign, which sends nothing), then PASS at -x 30 (SNR
+  9 dB, 1447 Hz; the S-meter -121 -> -108 dBm) and decoded at -x 40 (-100 dBm), the radio back in the Sentry each
+  time. To try: `radios-ft8` once the X6100 is on the bench (arrives 2026-11-19; a 10 W pad on each radio's jack).
 - Done 2026-11-18: the bladeRF dropping off USB as it started (00:05 local; its own supply plugged in, the owner
   said) not reproduced on its DC jack. Plugged in again at 00:14 it opened on DC (now logged at each open), and at
   05:57 UTC the radio loaded its FPGA image again (2.0 s, 0.53 A after it), opened it so its AD9361 started (1.8 s,

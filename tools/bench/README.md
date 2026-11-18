@@ -20,8 +20,8 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
    for exactly that.
 3. **The HackRF profile: the radio only listens.** It is worked with a session that may not transmit (the radio
    itself refuses PTT, TUNE and the FT8 app's CQ, Auto, reply and call from it); the harness refuses to start while
-   the radio is on the air or its FT8 app is set to send; a radio that goes on the air while the HackRF feeds it
-   stops the HackRF at once. HackRF: `-a 0` (the amp never), `-p 0`, `-x` 40 at most (the owner's approved
+   the radio is on the air or its FT8 app is set to send (CQ, or Auto on a radio with a callsign: without one the
+   app sends nothing); a radio that goes on the air while the HackRF feeds it stops the HackRF at once. HackRF: `-a 0` (the amp never), `-p 0`, `-x` 40 at most (the owner's approved
    maximum).
 4. **The radios profile: low power, power-rated pads.** At most `limits.radio_w` (the configuration; 5 W
    whatever it says), and the first transmission of a session at 0.1 W whatever is asked. Each radio's own jack

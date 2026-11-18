@@ -246,8 +246,10 @@ def rx_only_gate(radio):
                       f"(bench.py provision {radio.name} rx), never one that may")
     if radio.tx:
         raise Refused(f"{radio.name}: on the air")
-    if radio.ft8.get("auto") or radio.ft8.get("cq") or radio.ft8.get("sending"):
-        raise Refused(f"{radio.name}: its FT8 app is set to send (Auto or CQ): turn it off at the radio")
+    if radio.ft8.get("sending") or radio.ft8.get("cq") or (radio.ft8.get("auto") and not radio.ft8.get("nocall")):
+        # Auto on a radio without a callsign answers nothing: its FT8 app cannot send at all ("nocall")
+        raise Refused(f"{radio.name}: its FT8 app is set to send (Auto or CQ, with a callsign): turn it off at the "
+                      f"radio")
 
 
 def radio_tx_gate(radio, c, w):
@@ -382,6 +384,11 @@ def norm(s):
     return " ".join((s or "").upper().split())
 
 
+def msg(row):
+    """A decoded row's message: the FT8 list shows it after its slot's time ("07:29:00 CQ Q9TST FN00")"""
+    return re.sub(r"^\d\d:\d\d:\d\d ", "", norm(row.get("x")))
+
+
 # ---- Tests ----
 
 def run_hackrf_ft8(c, args):
@@ -399,45 +406,54 @@ def run_hackrf_ft8(c, args):
     fs, offset = 2004000, 100000
     secs = audio_to_iq(wav, iq, fs, offset, lead_s=0.25)
     radio.take_control()
-    radio.send("ft8 open")
-    radio.wait("the FT8 app", lambda: radio.ft8.get("open") == 1, 10)
-    rx_only_gate(radio)
-    radio.send(f"set freq {dial}")
-    radio.wait(f"the dial on {dial}", lambda: int(radio.state.get("freq", 0)) == dial, 5)
-    start = next_slot()
-    say(f"{name}: FT8 on {dial} Hz, receive only; the HackRF sends {text!r} at {args.audio} Hz, -x {args.x}, "
-        f"{total} dB of pads, at {time.strftime('%H:%M:%S', time.localtime(start + 0.25))}")
-    while time.time() < start:
-        rx_only_gate(radio)
-        time.sleep(0.05)
-    rows0 = len(radio.rows)
-    cmd = ["hackrf_transfer", "-t", iq, "-f", str(dial - offset), "-s", str(fs), "-a", "0", "-p", "0",
-           "-x", str(args.x)]
-    hk = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-    tx_log({"who": "hackrf", "to": name, "f": dial - offset, "x": args.x, "text": text, "secs": round(secs, 1)})
-    watch = Watch([radio], c, hackrf=hk)
-    found = None
+    found, watch, hk = None, None, None
     try:
-        try:
-            hk.wait(timeout=secs + 10)
-        except subprocess.TimeoutExpired:
+        radio.send("ft8 open")
+        radio.wait("the FT8 app", lambda: radio.ft8.get("open") == 1, 10)
+        rx_only_gate(radio)
+        radio.send(f"set freq {dial}")
+        radio.wait(f"the dial on {dial}", lambda: int(radio.state.get("freq", 0)) == dial, 5)
+        start = next_slot()
+        say(f"{name}: FT8 on {dial} Hz, receive only; the HackRF sends {text!r} at {args.audio} Hz, -x {args.x}, "
+            f"{total} dB of pads, at {time.strftime('%H:%M:%S', time.localtime(start + 0.25))}")
+        while time.time() < start:
+            rx_only_gate(radio)
+            time.sleep(0.05)
+        rows0 = len(radio.rows)
+        cmd = ["hackrf_transfer", "-t", iq, "-f", str(dial - offset), "-s", str(fs), "-a", "0", "-p", "0",
+               "-x", str(args.x)]
+        hk = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        tx_log({"who": "hackrf", "to": name, "f": dial - offset, "x": args.x, "text": text, "secs": round(secs, 1)})
+        watch = Watch([radio], c, hackrf=hk)
+        quiet = radio.meter
+        peak = -999.0
+        t_end = time.time() + secs + 10
+        while hk.poll() is None and time.time() < t_end and not watch.why:
+            if radio.meter is not None:
+                peak = max(peak, radio.meter)
+            time.sleep(0.05)
+        if hk.poll() is None and not watch.why:
             watch.trip("hackrf_transfer ran past its file")
+        hk_said = (hk.stderr.read() if hk.stderr else "").strip().splitlines()
+        say(f"{name}: S-meter {quiet} dBm before, {peak:.1f} at most while the HackRF sent; hackrf_transfer: "
+            f"{hk_said[-1] if hk_said else '-'} (exit {hk.returncode})")
         end = time.time() + 6
         while time.time() < end and not watch.why and not found:
             with radio.lock:
-                found = next((r for r in radio.rows[rows0:] if norm(r.get("x")) == text), None)
+                found = next((r for r in radio.rows[rows0:] if msg(r) == text), None)
             time.sleep(0.1)
+        others = [r.get("x") for r in radio.rows[rows0:]]
     finally:
-        watch.close()
-        if hk.poll() is None:
+        if watch:
+            watch.close()
+        if hk and hk.poll() is None:
             hk.kill()
-        radio.send("ft8 close")
+        radio.send("ft8 close")             # the app opened for the test closed, refused or not (the X6200: the Sentry)
         time.sleep(0.5)
         radio.close()
     if watch.why:
         raise Refused(watch.why)
     if not found:
-        others = [r.get("x") for r in radio.rows[rows0:]]
         raise Refused(f"{name} did not decode {text!r}" + (f" (it decoded {others})" if others else " (nothing)"))
     say(f"PASS: {name} decoded {found['x']!r}, SNR {found['snr']} dB, {found['f']} Hz")
 
@@ -488,11 +504,11 @@ def run_radios_ft8(c, args):
             return next(r for r in listener.rows[n0:] if want(r))
 
         ca, cb = calls[a.name], calls[b.name]
-        row = one_tx(a, b, "ft8 cq", lambda r: norm(r.get("x")).startswith(f"CQ {ca}"), "CQ")
+        row = one_tx(a, b, "ft8 cq", lambda r: msg(r).startswith(f"CQ {ca}"), "CQ")
         result["cq"] = row
         say(f"{b.name} decoded {row['x']!r}, SNR {row['snr']} dB")
         watch.listener, watch.expect_dbm = a, expect
-        row = one_tx(b, a, f"ft8 reply {row['id']}", lambda r: norm(r.get("x")).startswith(f"{ca} {cb}"), "reply")
+        row = one_tx(b, a, f"ft8 reply {row['id']}", lambda r: msg(r).startswith(f"{ca} {cb}"), "reply")
         result["reply"] = row
         say(f"{a.name} decoded {row['x']!r}, SNR {row['snr']} dB")
     finally:
