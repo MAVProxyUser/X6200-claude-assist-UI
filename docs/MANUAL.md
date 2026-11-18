@@ -8988,7 +8988,10 @@ the code is for the eyes at the radio); an admin's `sessions` lists the paired b
 ends one; `unpair` forgets the caller's own; `tx 0|1` goes to every client
 when the radio keys or unkeys. A session without TX is refused what sends:
 `key PTT`, `tune 1`, and the FT8 app's `cq`, `auto`, `reply` and `txcall`
-(up to v0.3.12.28 those four were let through). `key PTT 1 N` keys the radio's own microphone,
+(up to v0.3.12.28 those four were let through), and while it controls the
+radio the radio holds itself receive only (its keys and knobs cannot send
+either); the state's `rxo` is 1 while the radio holds itself receive only,
+for the Sentry or for such a session. `key PTT 1 N` keys the radio's own microphone,
 N the page's number for this press, and is repeated every second as the
 lease; `key PTT 0` lets go (see Transmitting from the browser). `tune 1 N`
 starts a TUNE for an external tuner the same way, repeated every second while
@@ -9187,6 +9190,15 @@ from a page older than the radio: reload the page". With Mic on (the
 browser's microphone, through the TCI) such a page still transmits, once
 allowed on the radio, which asks about it as about any TCI client (Ask
 before TX, under [TCI server](#tci-server)).
+
+While a browser whose session may not transmit has control, the whole radio
+is receive only, as in the Sentry: the base held at 0 W, and PTT, the CW key,
+the apps, MSG's messages and the ATU's tuning all refused, whichever key or
+knob asked. Its Screen page's keys work the radio as yours do, so without this
+a long ATU press or MSG from it could transmit (up to v0.3.12.28). The hold
+lets go the moment control is elsewhere: a key or knob at the radio takes it back.
+Meanwhile the hand mic's PTT keys the base at 0 W, and the screen says "0 W:
+receive only (Sentry, or a remote without TX)".
 
 #### PTT options
 

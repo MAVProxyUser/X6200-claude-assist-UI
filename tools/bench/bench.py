@@ -248,6 +248,12 @@ def rx_only_gate(radio):
                       f"(bench.py provision {radio.name} rx), never one that may")
     if radio.tx:
         raise Refused(f"{radio.name}: on the air")
+    if radio.ctl_mine and radio.state.get("rxo") != 1:
+        # The radio's own hold (rxo: radio_rx_only), held while a session without TX controls it: every way to the
+        # air refused there, its keys' too, the base at 0 W. A GUI without "rxo" is older than that hold (v0.3.12.28
+        # and before: such a session's ATU or MSG key could send)
+        raise Refused(f"{radio.name}: the radio does not hold itself receive only with this session in control "
+                      f"(rxo {radio.state.get('rxo', 'missing: its GUI is older than the hold')})")
     if radio.ft8.get("sending") or radio.ft8.get("cq") or (radio.ft8.get("auto") and not radio.ft8.get("nocall")):
         # Auto on a radio without a callsign answers nothing: its FT8 app cannot send at all ("nocall")
         raise Refused(f"{radio.name}: its FT8 app is set to send (Auto or CQ, with a callsign): turn it off at the "
@@ -285,6 +291,9 @@ class Watch:
                     since, txm, meter = r.tx_since, r.txm, (self.listener.meter if self.listener else None)
                 if self.hackrf is not None and r.tx:
                     self.trip(f"{r.name} went on the air while the HackRF fed it")
+                elif self.hackrf is not None and (not r.ctl_mine or r.state.get("rxo") != 1):
+                    self.trip(f"{r.name}: control taken from the harness or the receive-only hold gone while the "
+                              f"HackRF fed it")
                 elif since and time.time() - since > self.c["limits"]["max_key_s"]:
                     self.trip(f"{r.name} on the air for over {self.c['limits']['max_key_s']:.0f} s")
                 elif since and txm and time.time() - since > 1.0:

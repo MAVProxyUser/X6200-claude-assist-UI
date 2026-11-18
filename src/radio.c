@@ -1284,7 +1284,8 @@ static bool no_data_refused(tx_by_t by) {
  * (ptt_moves); the GUI's CW key in split on the dial too (split_keys_dial), and PTT with split held off and the dial
  * back. Where it may, not without data from the base either */
 static bool tx_refused(tx_by_t by) {
-    if (atomic_load(&rx_only) > 0) {    /* refused quietly: the Sentry (its only user) says what to press, and where */
+    if (atomic_load(&rx_only) > 0) {    /* refused quietly: the Sentry says what to press, and where; a remote session
+                                         * without TX in control (remote_server.c) is refused its TX commands there */
         return true;
     }
     return tx_refused_at(radio_tx_freq(), by) ||
@@ -1817,7 +1818,7 @@ static void band_note(void) {
         return;
     }
     if (atomic_load(&rx_only) > 0) {
-        msg_schedule_text_fmt("0 W: receive only (Sentry)");
+        msg_schedule_text_fmt("0 W: receive only (Sentry, or a remote without TX)");
     } else if (radio_key_refused(&f)) {
         radio_say_no_tx("0 W", f, false);
     } else {
@@ -3418,6 +3419,10 @@ static void * radio_thread(void *arg) {
         open_tx_tick();     /* the X6200's open TX when due, after the keepalive's block: its 0.2 s holds none up */
     }
     return NULL;
+}
+
+bool radio_rx_only_held(void) {
+    return atomic_load(&rx_only) > 0;
 }
 
 bool radio_rx_only(bool on) {

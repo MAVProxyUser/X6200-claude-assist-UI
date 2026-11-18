@@ -272,6 +272,8 @@ static atomic_bool     forget_all_due;       /* Settings: every session revoked 
 typedef struct {
     int32_t freq, mode, flo, fhi, kt, agc, pre, att, nb, nr, sql, rfg, vol, pwr10, step, zoom, vfo, atu, bat;
     int32_t tune, tune_s;   /* TUNE for an external tuner on, its time limit */
+    int32_t rxo;            /* the radio holds itself receive only (radio_rx_only_held: the Sentry, or a session
+                             * without TX in control); an int, not a bool: no padding for memcmp to see */
     bool    tx, lock;
     bool    ulock;          /* the user's lock alone (LOCK), not an app's hold: the page's LOCK button */
     bool    cwrise;         /* CW's tone rises with the dial, as CW-R's (the X6200): its CW passband the other side */
@@ -628,6 +630,7 @@ bool remote_server_session_check(const char *token, int *role, bool *tx, char *n
 }
 
 static void client_close(client_t *c);
+static void rx_hold_sync(void);
 static void client_text(client_t *c, const char *text);
 static void client_textf(client_t *c, const char *fmt, ...);
 
@@ -964,6 +967,7 @@ static void client_close(client_t *c) {
     c->panel   = false;
     c->out_len = c->in_len = c->text_len = 0;
     pthread_mutex_unlock(&c->lock);
+    rx_hold_sync();                 /* a session without TX gone from control: its hold with it */
 }
 
 /* ---- The panel: the radio's state, the spectrum, the spots ---------------------------- */
@@ -1101,6 +1105,7 @@ static void pstate_read(pstate_t *s) {
     s->ulock = main_screen_freq_user_locked();
     s->tune  = ext_tune_on();
     s->tune_s = ext_tune_limit_s();
+    s->rxo   = radio_rx_only_held();
     const char *app = main_screen_digital_app();
     memset(s->app, 0, sizeof(s->app));      /* compared whole with memcmp */
     snprintf(s->app, sizeof(s->app), "%s", app ? app : "");
@@ -1111,10 +1116,10 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "state {\"freq\":%d,\"mode\":%d,\"flo\":%d,\"fhi\":%d,\"kt\":%d,\"agc\":%d,\"pre\":%d,\"att\":%d,"
              "\"nb\":%d,\"nr\":%d,\"sql\":%d,\"rfg\":%d,\"vol\":%d,\"pwr\":%d.%d,\"step\":%d,\"zoom\":%d,"
              "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d,"
-             "\"cwrise\":%d,\"zmin\":%d,\"app\":\"%s\"}",
+             "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"app\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
-             s->ulock, s->cwrise, ZOOM_MIN, s->app);
+             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->app);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */
@@ -1855,6 +1860,27 @@ static void role_tell(client_t *c) {
 
 /* The client may do this: the role, and control of the radio for what touches the RF side
  * (taken when free, else the holder is named and the page offers Take control) */
+/* A session that may not transmit, in control: the whole radio receive only (radio_rx_only: the base at 0 W, and the
+ * GUI's every way to the air refused: PTT, the CW key, the apps' modem, the ATU's tune), not only this server's own
+ * TX commands. Its keys and knobs reach the GUI as the radio's own, and up to v0.3.12.28 they could send: a long ATU
+ * press tunes, MSG plays a message, an app's keys call (2026-11-18). Held from before its first command in control
+ * till control is elsewhere (taken back at the radio, by TCI, released, the session gone); socket thread */
+static bool rx_hold;
+
+static void rx_hold_sync(void) {
+    ctl_info_t o;
+    bool       want;
+
+    ctl_get(&o);
+    want = o.kind == CTL_BROWSER && o.id >= 0 && o.id < MAX_CLIENTS && clients[o.id].fd >= 0 && !clients[o.id].tx_ok;
+    if (want == rx_hold)
+        return;
+    rx_hold = want;
+    radio_rx_only(want);
+    LV_LOG_USER("remote: %s", want ? "a session without TX in control: the radio receive only" :
+                                     "control away from the session without TX: receive only off");
+}
+
 static bool allowed(client_t *c, uint8_t role, bool control) {
     if (c->role < role) {
         client_text(c, role == ROLE_ADMIN ? "err admin only" : "err view only: pair this browser to operate");
@@ -1868,6 +1894,8 @@ static bool allowed(client_t *c, uint8_t role, bool control) {
         ctl_tell(c);
         return false;
     }
+    if (control)
+        rx_hold_sync();             /* before what it asks reaches the radio */
     return true;
 }
 
@@ -2228,6 +2256,7 @@ static void handle_text(client_t *c, char *text) {
         } else if (!strcmp(a[1], "release")) {
             ctl_release(CTL_BROWSER, (int)(c - clients));
         }
+        rx_hold_sync();
         ctl_tell(c);
     } else if (!strcmp(a[0], "sessions")) {
         if (allowed(c, ROLE_ADMIN, false))
@@ -2652,6 +2681,7 @@ static void *server_thread(void *arg) {
             continue;
         }
         power_post();
+        rx_hold_sync();             /* control taken back at the radio or by TCI: the hold off within a poll */
         if (pfd[0].revents & POLLIN) {
             char buf[64];
             while (read(wake_fd[0], buf, sizeof(buf)) > 0) {}

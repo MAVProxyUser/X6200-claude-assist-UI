@@ -117,6 +117,8 @@ enum { radio_mode_sam = 8, radio_mode_last = 9 };
 #define HW_CAP_SAM_WFM 1
 static int  radio_caps(void) { return 0; }
 static bool radio_psd_wide(bool on) { (void)on; return true; }     /* "wide 1", the base's whole spectrum */
+static bool radio_rx_only(bool on) { return on; }                 /* a session without TX in control */
+static bool radio_rx_only_held(void) { return false; }
 static bool radio_ptt_refused(int32_t *f) { *f = 14074000; return false; }     /* in band: the PTT's #121 check passes */
 static const char *cfg_tx_refusal_text(int32_t f, char *b, size_t n) { (void)f; (void)b; (void)n; return NULL; }
 static bool base_silent;    /* the base sends no data (#152): the PTT refused */
