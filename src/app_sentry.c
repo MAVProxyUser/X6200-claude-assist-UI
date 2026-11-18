@@ -2172,8 +2172,10 @@ static int dec_top(void) {
 
 /* The radio a type is received on, as its RX column says it: the X6200's apps, else the SDR's (by its kind, "SDR"
  * with none plugged in; ADS-B's GNS 5890 stick when only it is there) */
-/* EMERGENCY's rows: on the X6200 where D and E put it (HF and 6 m, its own receiver), else on B's SDR */
-static bool emer_on_x6200(int32_t f) { return cfg_is_valid_hw_freq(f) && (f < 30000000 || (f >= 50000000 && f <= 54000000)); }
+/* EMERGENCY's rows: on the radio D and E's one rule puts them on (rx_of: the X6200 for what it tunes up to 60 MHz, HF,
+ * the low band and 6 m; else B's SDR), as its scan does: the list and the scan had told them apart differently, so the
+ * scan sent A to 39.46 while the row said the SDR (2026-11-17) */
+static bool emer_on_x6200(int32_t f) { return rx_of(f) == RX_X6200; }
 
 static const char *dec_rx(const decoder_t *d, int32_t f) {
     if (d->rx == 'X' || (d->rx == 'E' && emer_on_x6200(f))) return cfg_is_valid_hw_freq(f) ? "X6200" : "";

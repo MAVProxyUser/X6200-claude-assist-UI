@@ -56,10 +56,7 @@ approved that day.
 9. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
     Waterfall section below).
 10. **Screenshots** of every menu for the README and the manual: later, at the owner's word.
-11. **WSPR**: never tested. Off the air is the real test (the X6200 on its antenna, 14.0956 USB by day, 7.0386 by
-    night: spots every two minutes). Over a cable it needs a steadier source than the HackRF: a bladeRF 2.0's
-    VCTCXO, but it tunes from 47 MHz, so 6 m (50.293) only.
-12. **The upstream merge** (Guru-RF, 73 commits on 2026-11-17: SVXConnect, Zello, the Weather, Internet radio, CB and
+11. **The upstream merge** (Guru-RF, 73 commits on 2026-11-17: SVXConnect, Zello, the Weather, Internet radio, CB and
     HF Air Band apps, Flights, Field Ops' NOTA and maps, GhostNet, the first-start guide's language and country, the
     APP grid's scrolling, the spectrum's fill by level, translations, SSH security keys, the speaker's one play-mode
     owner): last, after everything else. A trial merge (git merge-tree) conflicts in 14 files: README, TODO, MANUAL,
@@ -72,6 +69,10 @@ approved that day.
   (the HackRF is on the Mac; the radio has one RTL now).
 
 **Parked or later**
+
+- WSPR (deferred, the owner 2026-11-17): never tested. Off the air is the real test (the X6200 on its antenna, 14.0956
+  USB by day, 7.0386 by night: spots every two minutes). Over a cable it needs a steadier source than the HackRF: a
+  bladeRF 2.0's VCTCXO, but it tunes from 47 MHz, so 6 m (50.293) only.
 
 - Passive radar with the KrakenSDR (KrakenRF's krakensdr_pr, a fork at github.com/mfkiwl/krakensdr_pr; the older
   pyapril had the clutter cancellation and cross-ambiguity): back burner, till the owner has a use for it. With the IQ

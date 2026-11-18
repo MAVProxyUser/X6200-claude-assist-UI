@@ -1146,7 +1146,7 @@ written through to the card before it replaces the last copy, so a power cut kee
 
   | Type | Opens | Radio |
   |---|---|---|
-  | EMERGENCY (first) | A on the frequency (held there, MANUAL), or B on it | X6200 for HF and 6 m, else the SDR |
+  | EMERGENCY (first) | A on the frequency (held there, MANUAL), or B on it | X6200 up to 60 MHz, else the SDR |
   | FT8, FT4 | the FT8 app | X6200 |
   | WSPR, JS8, PSK, OLIVIA, JTTY, SSTV, RADE, WEFAX | that app | X6200 |
   | RTTY | the RTTY panel on the main screen | X6200 |
@@ -1167,11 +1167,11 @@ written through to the card before it replaces the last copy, so a power cut kee
   VFIRE21-23, VMED28, VLAW31, VSAR16, the low band LLAW1, LFIRE2, LLAW3, LFIRE4, the UHF UCALL40 and UTAC41-43); the
   federal NC 1, LE A and 168.55; Red Cross 47.42 and business 151.625. Not those the guide calls gone or wrong or
   could not confirm. Its BAND column names the channel; the MFK goes down all 65, twelve in sight; WHAT IT IS says
-  the one chosen. **Every one is receive only**: OPEN listens on it, the X6200 for HF and 6 m (A held there, MANUAL,
-  till its scan is started again), B's SDR for the rest (AM on the airbands, 243.0 too, else FM), and lets go of a
+  the one chosen. **Every one is receive only**: OPEN listens on it, the X6200 for what it tunes up to 60 MHz (HF,
+  the low band, 6 m: A held there, MANUAL, till its scan is started again), B's SDR for the rest (AM on the airbands, 243.0 too, else FM), and lets go of a
   transmitter armed on A or G; OPENS IN says `RX ONLY` on each. **F1 SCAN ALL** (with EMERGENCY chosen) scans all
-  of them at once: A the X6200's seven (CB, the HF nets, 6 m), B the SDR's 58 in frequency order (its stick moves
-  least), each stopping on one that talks and staying as long as it talks, whatever SCAN CFG's style says; heard on
+  of them at once: A the X6200's twelve (CB, the HF nets, the low band, Red Cross, 6 m), B the SDR's 53 in frequency
+  order (its stick moves least), each stopping on one that talks and staying as long as it talks, whatever SCAN CFG's style says; heard on
   the speaker is the radio that stopped last. The list marks the row each radio is on (`A` or `B` after the
   frequency, `*B` where B has stopped) and WHAT IT IS says where both are; the finds go into C's Signal Log under the channel's name. F1 again,
   or A's or B's F1, or SCAN CFG's SCANS, ends it, the radios staying where they are. Receive only throughout.
