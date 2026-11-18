@@ -1028,7 +1028,9 @@ MFK's push) on the X6200, B's scan pictures' strongest on the stick. The same si
 X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`,
 written through to the card before it replaces the last copy, so a power cut keeps one whole).
 
-- Its columns: FREQ, BAND, WHAT IT WAS, BEST and ANTENNA (D's for the band), LAST, SEEN and, in smaller letters,
+- Its columns: FREQ, BAND, WHAT IT WAS (12 letters: a longer one ends in `...`, and on the chosen row goes slowly
+  back and forth to show the whole of it; the line under the list gives it all too), BEST and ANTENNA (D's for the
+  band), LAST, SEEN and, in smaller letters,
   **RX: WHAT RECEIVES IT**. Green, yellow and red say what is available now (the one place the Sentry is not amber):
   - **BEST** (when the band is at its best: DAY, NIGHT, ANY, ALWAYS) is coloured by D's NOW: **green** open now
     (signals heard there lately, a local or always-open band, a day band by day, a night band by night, a band

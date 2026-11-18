@@ -4755,8 +4755,10 @@ static void show_title(void) {
 
 /* ---- G LOG: what the scans locked on ---- */
 
-#define LOG_ROW "%c%-10.10s %-8.8s %-21.21s %s %-16.16s %-5.5s %4.4s"  /* 78 in pixel_16 (BEST 6, given padded); RX
-                                                                         * after it in pixel_12: 25 of 26 */
+#define LOG_ROW "%c%-10.10s %-8.8s %-12.12s %s %-25.25s %-5.5s %4.4s"  /* 78 in pixel_16 (BEST 6, given padded); RX
+                                                                         * after it in pixel_12: 25 of 26. WHAT IT WAS
+                                                                         * 12 (the owner: it took too much; the line
+                                                                         * under the list gives all of it), ANTENNA 25 */
 #define LOG_RX_X  (9 + 78 * 8)  /* where RX starts: the row's 78 characters of 8 px */
 #define G_STICK_OFF 200000      /* the stick tuned this far under what it plays: its middle is not used */
 
@@ -5307,6 +5309,38 @@ static void g_rds_take(void) {
     if (scr == SCR_LOG) show_glog();
 }
 
+/* WHAT IT WAS in its 12 letters (the owner, 2026-11-17): longer is cut with "..." on a row, and on the chosen row goes
+ * slowly back and forth instead, a letter each half second (blink_cb), two seconds still at each end, from its start
+ * each time a row is chosen */
+#define WHAT_W 12
+
+static int      what_sel = -1;
+static uint32_t what_t0;
+
+static void what_cell(int i, const char *w, bool chosen, char *out, size_t n) {
+    int len = (int)strlen(w);
+
+    if (len <= WHAT_W) {
+        snprintf(out, n, "%s", w);
+        return;
+    }
+    if (!chosen) {
+        snprintf(out, n, "%.*s...", WHAT_W - 3, w);
+        return;
+    }
+    if (i != what_sel) what_sel = i, what_t0 = lv_tick_get();
+    int span = len - WHAT_W, hold = 4, k = (int)(((lv_tick_get() - what_t0) / 500) % (uint32_t)(2 * (span + hold))), off;
+
+    if (k < hold) off = 0;
+    else if (k < hold + span) off = k - hold;
+    else if (k < 2 * hold + span) off = span;
+    else off = span - (k - 2 * hold - span);
+    snprintf(out, n, "%.*s", WHAT_W, w + off);
+}
+
+/* the chosen row's WHAT IT WAS is longer than its column: C is drawn again each half second to move it */
+static bool what_moves(void) { return g_sel >= 0 && g_sel < nhits && (int)strlen(hits[g_sel].what) > WHAT_W; }
+
 static void show_glog(void) {
     char s[240];
     int  top = g_sel - lg_rows / 2;
@@ -5342,7 +5376,10 @@ static void show_glog(void) {
         int role = bi >= 0 && i != g_sel ? band_now_role(bi) : -1;    /* NOW: green open, yellow closing, red closed */
         if (role >= 0) snprintf(best, sizeof(best), "#%06X %s#", (unsigned)theme_hex((theme_color_t)role), b5);
         else snprintf(best, sizeof(best), "%s", b5);
-        snprintf(s, sizeof(s), LOG_ROW, g_playing(i) ? '>' : ' ', f, bn, h->what, best, bi >= 0 ? bands[bi].ant : "",
+        char wc[WHAT_W + 4];
+
+        what_cell(i, h->what, i == g_sel, wc, sizeof(wc));
+        snprintf(s, sizeof(s), LOG_ROW, g_playing(i) ? '>' : ' ', f, bn, wc, best, bi >= 0 ? bands[bi].ant : "",
                  last, n);
         lv_label_set_text(lg_rx_l[r], rxs);
         lv_obj_set_style_text_color(lg_rx_l[r], i == g_sel ? ink : amb, 0);
@@ -5846,6 +5883,7 @@ static void blink_cb(lv_timer_t *t) {
     g_rds_take();                                   /* C's entries named by it */
     sp_check();                                     /* B: which SDR, when more than one tunes its channel */
     g_scan_step();
+    if (scr == SCR_LOG && what_moves()) show_glog();         /* the chosen row's WHAT IT WAS, back and forth */
     if (scr == SCR_LOG && g_clear_ms && lv_tick_get() - g_clear_ms > 3000) {
         g_clear_ms = 0;
         buttons_refresh(&btn[2]);
