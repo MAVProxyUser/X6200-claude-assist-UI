@@ -55,6 +55,7 @@ names = ['role_name', 'sess_key', 'log_sum', 'log_slot', 'log_queued', 'log_answ
          'sess_find', 'sess_revoke', 'sess_held_locked', 'sess_away_of', 'sess_away', 'handle_text']
 pre = r'''
 #include <ctype.h>
+#include <math.h>
 #include <fcntl.h>
 #include <time.h>
 #include <unistd.h>
@@ -91,6 +92,13 @@ static bool knob_emit(const char *name, int n) { (void)name; (void)n; return tru
 typedef int ft8_rc_t;
 typedef struct { int unused; } cell_data_t;
 static bool app_ft8_cmd(const char *what, const char *arg) { (void)what; (void)arg; return true; }
+/* upstream's (merged 2026-11-18): the WeFax app's commands, the phone's position and clock */
+typedef int wefax_rc_t;
+static int  dialog_wefax;
+#define ACTION_APP_WEFAX 1
+static bool app_wefax_cmd(const char *what) { (void)what; return true; }
+static bool wefax_window_remote(wefax_rc_t rc) { (void)rc; return true; }
+static void gps_phone_set(double lat, double lon, int acc) { (void)lat; (void)lon; (void)acc; }
 static bool dialog_type_is_run(int d) { (void)d; return false; }
 static int  dialog_ft8;
 #define ACTION_APP_FT8 0
@@ -196,6 +204,7 @@ static void client_textf(client_t *c, const char *fmt, ...) __attribute__((forma
 static void client_textf(client_t *c, const char *fmt, ...) {
     char b[256]; va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof(b), fmt, ap); va_end(ap); client_text(c, b);
 }
+static void clock_from_phone(client_t *c, const char *ms_s, const char *rtt_s) { (void)c; (void)ms_s; (void)rtt_s; }
 static void sessions_tell(client_t *c) { (void)c; }
 '''
 (p / 'remote-commands.c').write_text(pre + '\n'.join(parts) + post + '\n'.join(fn(n) for n in names)

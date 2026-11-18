@@ -58,3 +58,11 @@ build-docker/
 # the commit buildroot/local-build.sh hands the build (cmake/git_commit.cmake)
 /build-commit.txt
 /generated/
+
+# test programs and files the host checks leave (upstream's suites, merged 2026-11-18)
+tools/dsp_math/dsp_math_test
+tools/ghostnet/data/
+tools/ghostnet/ghostnet_test
+tools/i18n/test/i18n_test
+tools/iradio/iradio_list_test
+tools/meteo/meteo_c_test

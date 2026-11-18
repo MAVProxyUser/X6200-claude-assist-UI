@@ -10,6 +10,9 @@
 #
 #   tools/host_checks.sh [-v] [name ...]     -v: each check's output; names: only those (ham_bands adsb ...)
 #
+# The audits' harnesses (audit) run only when named: tools/host_checks.sh audit. Out of the full run, and so out of
+# CI, at the owner's word (2026-11-18): failing with every upstream merge that changes what they stand in for.
+#
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
 cd "$(dirname "$0")/.." || exit 2
@@ -133,13 +136,13 @@ record() {
     ROWS+=("$(printf '%-5s  %-16s %s' "$res" "$name" "$note")")
     printf '%-5s  %-16s %s\n' "$res" "$name" "$note"
     if [ "$res" != FAIL ] && [ -f "$OUT/$name.log" ]; then     # a check that failed once and passed when run again
-        grep -E '^(WARNING: .* failed once|  (FAIL|FAILED|not ok)([ :]|$))' "$OUT/$name.log" | head -n 12 | sed 's/^/        /'
+        grep -E '^(WARNING: .* failed once|  (FAIL|FAILED|BAD|WRONG|not ok)([ :]|$))' "$OUT/$name.log" | head -n 12 | sed 's/^/        /'
     fi
     if [ "$VERBOSE" = 1 ] || { [ "$res" != PASS ] && [ "$res" != SKIP ]; }; then
         if [ -f "$OUT/$name.log" ]; then
             # the failed cases themselves, wherever they are in a long log (the audit's Tailscale case of 2026-11-18
             # was above its last 25 lines, so which one failed was lost), then the log's end
-            [ "$res" = FAIL ] && grep -E '^ *(FAIL|FAILED|not ok)([ :]|$)' "$OUT/$name.log" | head -n 10 | sed 's/^/        /'
+            [ "$res" = FAIL ] && grep -E '^ *(FAIL|FAILED|BAD|WRONG|not ok)([ :]|$)' "$OUT/$name.log" | head -n 10 | sed 's/^/        /'
             sed 's/^/        /' "$OUT/$name.log" | tail -n 25
         fi
     fi
@@ -198,7 +201,7 @@ if wanted p25; then
 fi
 # The audits' reproduction harnesses, now the regression suite of their fixes (docs/audit/repro-2026-10-24/README.md):
 # Python, Node.js, SQLite, libpng and ALSA's headers, LVGL; Linux
-if wanted audit; then
+if [[ "$ONLY" == *" audit "* ]]; then     # named only (the header says why)
     res=$(run_one audit python3 docs/audit/repro-2026-10-24/run.py)
     record audit "$res" "$(summary audit)"
 fi

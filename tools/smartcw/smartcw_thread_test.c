@@ -66,9 +66,12 @@ bool input_caps_id(dev_t dev, struct input_id *id) {
     return false;
 }
 
-/* KEYBOARD > Shortcuts as the radio has it by default: off, so the keyboard only types (4592f1a) */
+/* KEYBOARD > Shortcuts as the radio has it by default: off, so the keyboard only types (4592f1a); upstream's boot
+ * keyboard case turns it on for its [ (in this fork the typing keyboard is a paddle only with Shortcuts on) */
+static atomic_bool shortcuts;
+
 bool keyboard_shortcuts(void) {
-    return false;
+    return atomic_load(&shortcuts);
 }
 
 /* The radio's /dev and /sys, in the test's folder */
@@ -304,11 +307,16 @@ static void boot(void) {
 static void boot_keyboard(void) {
     long el;
 
+    kbd_event(EV_KEY, KEY_LEFTBRACE, 1);       /* Shortcuts off, the radio's default: the keyboard only types */
+    check(key_stays(false, 300), "the keyboard from before the scan, Shortcuts off: [ keys nothing");
+    kbd_event(EV_KEY, KEY_LEFTBRACE, 0);
+    atomic_store(&shortcuts, true);
     kbd_event(EV_KEY, KEY_LEFTBRACE, 1);
     el = next_element(400);
     check(el >= 40 && el <= 90, "the keyboard from before the scan: [ held gives dits (%ld ms)", el);
     kbd_event(EV_KEY, KEY_LEFTBRACE, 0);
     check(key_within(false, 200) && key_stays(false, 200), "[ let go: the keyer stops");
+    atomic_store(&shortcuts, false);
 }
 
 static void keyed(void) {
