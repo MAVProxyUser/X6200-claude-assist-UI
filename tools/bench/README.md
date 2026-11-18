@@ -51,6 +51,10 @@ above the HackRF's centre) into the radio tuned to HZ in a mode (7: narrow FM; `
 puts the radio's frequency, mode, filter and squelch back after, and runs `--during "CMD"` beside it (for example a
 capture on the radio over SSH) and shows its output.
 
+`dv_replay.py HOST FILE.iq` tries B's digital voice with no SDR plugged in: a recorded transmission replayed into a
+test SDR daemon beside B's, whose dsd-fme decodes it with the voice through the USB-3000 B's daemon holds; it passes
+when a call is decoded and its voice heard (receive only, nothing on the air).
+
 `hackrf-ft8` makes the message with ft8_lib's `gen_ft8` (`gen_ft8` in the configuration), turns it into upper
 sideband I/Q at 2.004 MS/s (100 kHz above the HackRF's centre, clear of its DC spike), starts on the next FT8 slot
 and passes when the radio's FT8 app shows the text. `radios-ft8` is untried until two radios are on the bench.

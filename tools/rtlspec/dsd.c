@@ -539,6 +539,9 @@ bool dsd_init(dsd_heard_fn heard) {
     const char *p = getenv("RTLSPEC_DSD");
 
     if (getenv("RTLSPEC_NO_DSD")) return false;
+    if ((p = getenv("RTLSPEC_DSD_PORT")) && atoi(p) > 1024)    /* a test daemon beside B's: its speech ports */
+        for (int i = 0; i < KIDS; i++) kids[i].port = atoi(p) + i;
+    p = getenv("RTLSPEC_DSD");
     path = p && *p ? p : "/usr/bin/dsd-fme";
     if (access(path, X_OK)) {
         fprintf(stderr, "rtlspec: no %s: P25, D-STAR, YSF and NXDN not decoded (DMR is)\n", path);

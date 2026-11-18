@@ -37,6 +37,13 @@ approved that day.
    RTL. The errors are the X6200's FM audio (de-emphasised, through the codec; a 0-6 kHz filter changed nothing):
    GMSK wants the FM discriminator's flat output, which B's SDR gives. The X6200's own audio is not a source the
    daemon's decoders take; that would be a feature of its own (10 m and 6 m FM digital voice).
+   B's own chain tried with no SDR (2026-11-18 03:35-03:45, tools/bench/dv_replay.py): the cable tests' recordings
+   replayed into a test SDR daemon beside B's (resampled to 2.1168 MS/s), its dsd-fme's voice through this USB-3000
+   via B's daemon: D-STAR (TO CQCQCQ FROM N0CALL TEST, "GOLDCORPHF CABLE TST", no bit errors), YSF (TO CQCQCQ FROM
+   N0CALL), P25 phase 1 (TG 4321 FROM 1234567 NAC 123), NXDN48 and NXDN96 (TG 100 FROM 1234 RAN 1): every call
+   decoded, speech peaks 25000-31000. DMR not this way (its decoder in a test daemon has no vocoder). Found with it:
+   a second daemon opened the chip's serial port beside B's (two writers wedge it): it now leaves the chip to the
+   daemon that serves 127.0.0.1:2460; RTLSPEC_DSD_PORT gives a test daemon's dsd-fme speech ports of its own.
 4. **NXDN96 over the cable**: done 2026-11-17 night (HackRF -> attenuators -> the one RTL, receive only): the generated
    call (TG 100, source 1234, RAN 1) decoded by the third dsd-fme, B showing "NXDN96 441.000 / TG 100 FROM 1234 RAN 1
    TALKING". Its voice waits for the USB-3000 (3), as every AMBE mode's does. Every HackRF -> X6200 cable test is done

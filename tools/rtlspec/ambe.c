@@ -354,13 +354,16 @@ static bool find(void) {
 
 /* The UDP port: one request at a time, the chip's answer back to its sender. A rate set through it is noted: DMR's
  * own frames set 33 again first */
+static int udp_err;     /* why the port could not be had: EADDRINUSE, another daemon serves the chip */
+
 static void udp_open(void) {
     struct sockaddr_in a = {.sin_family = AF_INET, .sin_port = htons(PORT)};
 
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if ((udp = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0)) < 0) return;
     if (bind(udp, (struct sockaddr *)&a, sizeof(a)) < 0) {
-        fprintf(stderr, "rtlspec: the AMBE port 127.0.0.1:%d: %s\n", PORT, strerror(errno));
+        udp_err = errno;
+        fprintf(stderr, "rtlspec: the AMBE port 127.0.0.1:%d: %s\n", PORT, strerror(udp_err));
         close(udp);
         udp = -1;
     }
@@ -500,6 +503,13 @@ void ambe_start(void) {
 
     if (!atomic_compare_exchange_strong(&started, &no, true)) return;
     udp_open();
+    if (udp < 0 && udp_err == EADDRINUSE) {
+        /* Another daemon serves the chip already (B's, and this a test daemon beside it: -S, -i, RTLSPEC_DMR): its
+         * serial port left alone, as two writers on it wedge the chip (a 0x61 half read). Its DMR here silent; the
+         * dsd-fme modes reach the chip through that daemon's port as ever */
+        fprintf(stderr, "rtlspec: the AMBE vocoder is another daemon's (127.0.0.1:%d in use): not opened here\n", PORT);
+        return;
+    }
     if (pthread_create(&t, NULL, thread, NULL) == 0) pthread_detach(t);
 }
 
