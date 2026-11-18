@@ -52,8 +52,7 @@ approved that day.
     still 60 s (MANUAL: A hung GUI restarts the radio).
 8. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
     Waterfall section below).
-9. **Screenshots** of every menu for the README and the manual: later, at the owner's word.
-10. **The upstream merge** (Guru-RF, 73 commits on 2026-11-17: SVXConnect, Zello, the Weather, Internet radio, CB and
+9. **The upstream merge** (Guru-RF, 73 commits on 2026-11-17: SVXConnect, Zello, the Weather, Internet radio, CB and
     HF Air Band apps, Flights, Field Ops' NOTA and maps, GhostNet, the first-start guide's language and country, the
     APP grid's scrolling, the spectrum's fill by level, translations, SSH security keys, the speaker's one play-mode
     owner): last, after everything else. A trial merge (git merge-tree) conflicts in 14 files: README, TODO, MANUAL,
@@ -62,11 +61,13 @@ approved that day.
 
 **Waiting on hardware**
 
-- The bladeRF dropping off USB as it started (2026-11-18 00:05 local, with its own supply plugged in, the owner
-  said): the drop has been put down to bus power since 2026-11-15, which this one contradicts. Plugged in again at
-  00:14 it opened on its DC jack (4.95 V, 0.65 A; 0.68 A receiving, now logged at each open). The one difference
-  seen: the first time its FPGA had no image and the radio loaded it; the second it kept the one it had. To try: DC
-  and USB both out, DC in, then USB, and read /tmp/rtlspec.log and dmesg.
+- Done 2026-11-18: the bladeRF dropping off USB as it started (00:05 local; its own supply plugged in, the owner
+  said) not reproduced on its DC jack. Plugged in again at 00:14 it opened on DC (now logged at each open), and at
+  05:57 UTC the radio loaded its FPGA image again (2.0 s, 0.53 A after it), opened it so its AD9361 started (1.8 s,
+  0.66 A) and received 5 s at 100 % of 2.646 MS/s (0.69 A), on USB throughout (a test program, B's daemon held off
+  for it). The start the first plug died in works on DC. Its 0.66-0.69 A at 5 V is more than USB 2.0's 0.5 A, so
+  the first plug fits the board having been on the HOST port's power at that moment (DC plugged after USB, say). If
+  it drops again, rtlspec's log says which power it opened on; B keeps "DROPPED OFF USB AS IT STARTED".
 - Done 2026-11-18: the bladeRF's filter at 2.646 MS/s is 2.3814 MHz (9/10 of the rate; 1.905 at 2.1168), 99 % of the
   samples (5.29 MB/s). The HackRF's done 2026-11-17 night: 2.646 MS/s at 99 % (5.29 MB/s), its baseband filter 2.5
   MHz there (1.75 at 2.1168), B's picture 2.2 MHz wide, heard, RDS PI on 92.3; B took it by itself when the RTL was
@@ -77,6 +78,7 @@ approved that day.
 - Meteor-M LRPT outdoors (deferred, the owner 2026-11-17): decoded from a real 2019 Meteor-M2-2 recording played
   into the stick over a cable (a255320, c5e864b, d02958f); the first live pass (Meteor-M2-4) gave nothing on the
   antenna used. A pass on a 137 MHz antenna outdoors (QFH or V-dipole) is the test; the 80k mode is unverified.
+- Screenshots of every menu for the README and the manual (deferred, the owner 2026-11-18): at the owner's word.
 - WSPR (deferred, the owner 2026-11-17): never tested. Off the air is the real test (the X6200 on its antenna, 14.0956
   USB by day, 7.0386 by night: spots every two minutes). Over a cable it needs a steadier source than the HackRF: a
   bladeRF 2.0's VCTCXO, but it tunes from 47 MHz, so 6 m (50.293) only.

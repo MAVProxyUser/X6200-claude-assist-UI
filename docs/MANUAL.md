@@ -1364,9 +1364,10 @@ wherever the RTL-SDR did (B, BOTH, C, D, E, RDS, SAME, AIRSPACE), named as they 
   no device connect after that, the bladeRF on its own power included (switching the radio off and on is the likely
   mend; not tried yet). B takes a bladeRF plugged in on the go (2026-11-18), and when it drops off USB as it starts,
   B's picture says so ("THE BLADERF DROPPED OFF USB AS IT STARTED"), kept until an SDR opens (it said "NO SDR ON
-  USB" a moment after up to v0.3.12.28). It did so on 2026-11-18 with its own supply plugged in too, so the cause is
-  not settled: the SDR daemon's log (`/tmp/rtlspec.log`) now says at each open which power the board runs on and
-  what it draws ("the bladeRF open on its DC jack: 4.95 V, 0.65 A"; 0.68 A receiving).
+  USB" a moment after up to v0.3.12.28). The SDR daemon's log (`/tmp/rtlspec.log`) says at each open which power
+  the board runs on and what it draws ("the bladeRF open on its DC jack: 4.95 V, 0.65 A"; 0.68 A receiving). On its
+  DC jack the whole start (its FPGA image loaded by the radio, its RF chip started, receiving) was tried on
+  2026-11-18 and stays on USB; its 0.66-0.69 A is more than a USB 2.0 port gives (0.5 A).
 - **A hub that browns out no longer hangs the radio**, with the SD card's kernel of the bundles built after
   v0.3.12.26. A HackRF and an RTL-SDR streaming on an unpowered hub on HOST draw more than the port gives: the hub
   drops off and comes back, and the kernel log fills with `three-strikes error`. Up to that kernel, a device's
