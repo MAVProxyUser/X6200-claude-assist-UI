@@ -176,7 +176,11 @@ static const char *dig_pwr_label() {
     static char buf[20];
     float p = LV_MIN(cfg_sm.p_pwr.get(), TX_PLAYER_MAX_PWR_W);
 
+#ifdef HW_BACKEND_G90
     snprintf(buf, sizeof(buf), "Power\n" BOARD_PWR_LABEL_FMT " W", p);
+#else
+    snprintf(buf, sizeof(buf), "Power\n%g W", p);     /* "5 W", "0.5 W" on the X6100 and X6200, as before the G90 */
+#endif
     return buf;
 }
 
