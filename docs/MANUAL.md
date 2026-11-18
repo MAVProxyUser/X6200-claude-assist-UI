@@ -21,6 +21,7 @@ Settings. Button and option names are written as the radio shows them.
 
 - [Getting started](#getting-started): [first-start guide](#first-start-guide), [first steps](#first-steps), [setting up the transmitter](#setting-up-the-transmitter), [buttons and knobs](#buttons-and-knobs), [hand mic](#hand-mic), [keyboard](#keyboard) ([mouse](#mouse), [quick QSO log](#quick-qso-log))
 - [The Sentry](#the-sentry) (this fork, X6200): [A and B](#a-and-b-the-spectrum-screens), [SCAN CFG](#scan-cfg), [C LOG](#c-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [the GPS panel](#the-gps-panel), [AIRSPACE](#airspace), [I DIRECTION FINDER](#i-direction-finder)
+- [The GSOC head with a G90](#the-gsoc-head-with-a-g90-from-source) (from source, untried here)
 - [Updating the firmware](#updating-the-firmware): [the SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot), [the X6200's base firmware](#the-x6200s-base-firmware), [the X6100's base firmware](#the-x6100s-base-firmware)
 - [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
 - [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab)
@@ -1816,6 +1817,31 @@ once a call is decoded (who to whom, through its codes).
 - It is there when `/usr/bin/dsd-fme` is (the firmware has it): about 11% of one core for the three while B listens
   in narrow FM (2.7-5% each, 12-13 MB each), started with it and ended a minute after. Three syncs within 1.2 s (or a decoded call) make a channel digital, so the odd sync FM's
   noise gives does not mute it or put garbage on B's line; a D-STAR header must pass its CRC.
+
+## The GSOC head with a G90 (from source)
+
+Xiegu's GSOC touchscreen head driving a G90's body over the G90's DE-9 cable, as a third board beside the X6100 and
+X6200: Chris Lawson's (cjlawson02) port, taken into this firmware on 2026-11-18 from his branch `gsoc/g90-probe`
+with his library for the cable, libg90 (MIT, `third-party/libg90`). It builds (`tools/cross_x6200/check_g90.sh`:
+`HW_BACKEND=g90`, `BOARD_GSOC=ON`), but has not been tried on a GSOC and a G90 here, and there is no card image or
+update bundle for it yet: build it from source for the GSOC's Linux. The X6100 and X6200 are not changed by it.
+
+- **The panel**: 1024 x 600 landscape; the dialogs, the F keys and the meter fit its width; the boot logo centred.
+  Its keys and knobs through `gsoc_input` (one detent of a knob one step); a tap on the clock opens APP. Dimmer
+  backlight defaults than the radios', and it blanks after 10 minutes (Settings > Display).
+- **The body**: found when it answers. The GUI starts without it, and the S-meter says **Connected** or
+  **Disconnected** (no "No data from the base" notice); the cable's encoding follows the body's own firmware
+  (1.78 or 1.81). PWR in whole watts, 1 to 20 W; SQL 0-9, MIC 0-20 and RIT +-512 Hz as the G90 has them.
+- **Audio**: the receiver on the cabinet speaker (the head's codec; VOL is the body's volume), or on the
+  headphones.
+- **Spectrum and waterfall**: the body's own spectrum; the waterfall, the spectrum and the 3D waterfall drawn on
+  planes of the landscape panel, the 3D picture on a thread of its own.
+- **WiFi**: the head's USB adapter has no power switch, so WiFi off disconnects and On joins the best saved network.
+- **Settings for its start** (environment variables): `G90_DEV` the body's serial port (`/dev/ttyS1`),
+  `G90_PROFILE` `auto` or `1.78`/`1.81`, `G90_ALLOW_TX=1` to let PTT and the ATU's tune reach the body (off by
+  default: nothing transmits), `G90_FUSE_IQ=1` the body's spectrum joined with the head's own IQ at its edges,
+  `G90_AF_ANALOG=1` the receiver's audio on the codec's analog path instead of PulseAudio, `G90_IQ_MMAP=1` the
+  head's IQ read straight from its DMA buffer.
 
 ## Updating the firmware
 

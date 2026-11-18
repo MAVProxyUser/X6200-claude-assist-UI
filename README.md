@@ -329,6 +329,8 @@ without RADE, and `build.sh` warns about it.
   amateur bands only, armed with A/B; [the manual](docs/MANUAL.md#g-on-a-hackrf-or-bladerf)).
 - **ADS-B**: a GNS 5890, a microADSB, or an RTL-SDR, HackRF or bladeRF.
 - **Keyboard and mouse**: Bluetooth (paired in Settings > Bluetooth) or USB on the HOST port.
+- **Xiegu GSOC head with a G90**: Chris Lawson's port, built from source (`HW_BACKEND=g90`, `BOARD_GSOC=ON`);
+  untried here and no image yet ([the manual](docs/MANUAL.md#the-gsoc-head-with-a-g90-from-source)).
 
 ## The baseband
 
@@ -371,6 +373,10 @@ This fork stands entirely on [OpenX6X00](https://github.com/Guru-RF/OpenX6X00) b
 (RF.Guru), and through it on the R1CBU GUI by Oleg Belousov R1CBU and Georgy Dyuldin R2RFE and the work of everyone
 credited in [README_original.md](README_original.md#credits). Support upstream:
 [Buy me a coffee](https://buymeacoffee.com/on6ure).
+
+The GSOC head driving a G90 is Chris Lawson's (cjlawson02) work: his port of OpenX6X00 to it
+([cjlawson02/OpenX6X00](https://github.com/cjlawson02/OpenX6X00), branch `gsoc/g90-probe`) and his
+[libg90](https://github.com/cjlawson02/libg90) (MIT, in `third-party/libg90`).
 
 The licences are upstream's ([README_original.md, Licences](README_original.md#licences)): the GUI is
 LGPL-2.1-or-later, the image as a whole GPLv3. This fork's additions to the GUI and `x6x00-rtlspec` are

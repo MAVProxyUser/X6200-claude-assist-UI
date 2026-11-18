@@ -599,6 +599,17 @@ drop WiFi while SCO runs.
 
 ## GSOC: the G90 driven from Xiegu's GSOC touchscreen head (this week, from cjlawson02's fork)
 
+**Ported 2026-11-18** (the owner's go-ahead): the branch's 24 commits not yet on main, each with Chris Lawson as its
+author, conflicts kept both ways (our GPU waterfall, the Sentry's claimed plane, the key-speed limits, upstream's
+fill by level all as they were; his strip-plane calls renamed drm_strip_back*, as main has a drm_wf_back of its
+own); libg90 vendored at 4eefd6e (third-party/libg90, MIT, nothing fetched at build time). The X6100 and X6200
+unchanged: the Power button's label, WiFi off/on (BOARD_WIFI_NO_POWER_PIN) and the clock's tap (BOARD_GSOC) kept
+to the G90 and GSOC. `tools/cross_x6200/check_g90.sh` builds and links the GSOC/G90 GUI; the X6200's builds,
+check_x6100.sh passes. Manual: "The GSOC head with a G90"; README credits him. **Left**: a GSOC and a G90 on the
+bench to try it; a buildroot tree, card image and bundle for the GSOC (none in his branch); his
+tools/d3_colmajor_test and drm_landscape_test extract parts of waterfall_view.c and drm.c by text, and ours carry
+the GPU and Sentry code there, so they do not build against our files yet.
+
 Planned 2026-11-16. cjlawson02's fork (cjlawson02/OpenX6X00, branch `gsoc/g90-probe`, 25 commits on our main of
 about 13 Nov) runs OpenX6X00 on the GSOC head driving a G90 over its DE-9 cable: a third board next to the X6100 and
 X6200 (`HW_BACKEND=g90`, `hw_g90`, a GSOC panel profile and `gsoc_input`). We take it in ourselves and credit them;
