@@ -127,16 +127,7 @@ class HelperCase(unittest.TestCase):
 
     def env(self, **kw):
         return dict(os.environ, X6100_FLIGHTS_TMP=self.tmp, X6100_FLIGHTS_URLS=kw.pop("urls", self.urls),
-                    X6100_FLIGHTS_OFF=os.path.join(self.tmp, "off"), X6100_FW=VERSION, **kw)
-
-    def switch(self, name, on):
-        r = subprocess.run([sys.executable, "-I", HELPER, "source", name, "on" if on else "off"],
-                           capture_output=True, text=True, timeout=60, env=self.env())
-        return r.stdout.strip()
-
-    def sources(self):
-        return subprocess.run([sys.executable, "-I", HELPER, "sources"], capture_output=True, text=True, timeout=60,
-                              env=self.env()).stdout.strip().splitlines()
+                    X6100_FW=VERSION, **kw)
 
     def run_helper(self, lat, lon, km, out=None, **kw):
         out = out or os.path.join(self.tmp, "out.json")
@@ -273,36 +264,6 @@ class Helper(HelperCase):
         line, _ = self.run_helper(51.5, 4.4, 100)
         self.assertEqual(line, "error airplanes.live: next try in 30 s; adsb.lol: next try in 60 s")
         self.assertEqual(len(Stand.seen), 2, "nothing asked")
-
-    def test_adsb_lol_switched_off(self):
-        """The Flights app's adsb.lol button: switched off it is never asked, its last answer not served from the
-        cache, and on again it is asked as before"""
-        Stand.answers["a"] = (500, b"oops", {})
-        line, out = self.run_helper(*HOME, 100)
-        self.assertEqual((line, self.read(out)["src"]), ("ok 2 60", "adsb.lol"))
-        self.assertEqual(self.switch("adsb.lol", False), "ok adsb.lol off")
-        self.assertEqual(self.sources(), ["airplanes.live on", "adsb.lol off"])
-        Stand.answers["a"] = (200, sample("airplanes_live.json"), {})
-        Stand.seen = []
-        os.remove(os.path.join(self.tmp, "x6100-flights-state.json"))     # airplanes.live's 30 s after its 500 over
-        line, out = self.run_helper(*HOME, 100)
-        self.assertTrue(line.startswith("ok "), line)
-        self.assertEqual(self.read(out)["src"], "airplanes.live", "adsb.lol's cached answer not served")
-        self.assertEqual([r["svc"] for r in Stand.seen], ["a"])
-        Stand.answers["a"] = (500, b"oops", {})
-        Stand.seen = []
-        os.remove(os.path.join(self.tmp, "x6100-flights-state.json"))     # its 1 s between requests over
-        line, _ = self.run_helper(51.5, 4.4, 100)
-        self.assertTrue(line.startswith("error airplanes.live"), line)
-        self.assertNotIn("adsb.lol", line)
-        self.assertEqual([r["svc"] for r in Stand.seen], ["a"], "adsb.lol not asked while off")
-        self.assertEqual(self.switch("airplanes.live", False), "ok airplanes.live off")
-        line, _ = self.run_helper(49.0, 2.0, 100)
-        self.assertEqual(line, "error every source switched off")
-        self.assertEqual(self.switch("adsb.lol", True), "ok adsb.lol on")
-        self.assertEqual(self.switch("airplanes.live", True), "ok airplanes.live on")
-        self.assertEqual(self.sources(), ["airplanes.live on", "adsb.lol on"])
-        self.assertEqual(self.switch("nowhere", False), "error no source nowhere")
 
     def test_429_and_its_retry_after(self):
         Stand.answers["a"] = (429, b'{"msg": "slow down"}', {"Retry-After": "120"})

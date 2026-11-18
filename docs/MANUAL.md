@@ -7288,16 +7288,6 @@ nothing retunes it; ESC closes.
   for personal, non-commercial use, without a key; adsb.lol's data are under
   the Open Database Licence (ODbL 1.0). The bottom line always names the
   source of what is shown, and when it was fetched.
-- What adsb.lol sent is in a rainbow: each entry of the list (flight, type,
-  altitude, speed, distance) runs red to violet from its first letter to its
-  last, pixel by pixel, and each aircraft's stroke on the plot from its dot
-  out; the chosen one and an emergency keep their own colours.
-  airplanes.live's are in the usual colours.
-- **adsb.lol: On / Off** (F3) switches adsb.lol as a source; Off asks
-  airplanes.live alone (and shows nothing while it does not answer). The web
-  page's Flights follows the same switch, which stays over a restart
-  (`/mnt/x6100-flights-off`; from a shell `x6100-flights source adsb.lol
-  on|off`, `x6100-flights sources` lists them).
 - What is sent: your position rounded to 0.1 degree (about 11 km) and the
   range, with the firmware's name and version (`OpenX6X00/0.3.12`); never
   your callsign. The distances and bearings are worked out on the radio

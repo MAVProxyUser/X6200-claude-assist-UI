@@ -33,9 +33,6 @@ CACHE = os.path.join(TMP, "x6100-flights-cache.json")
 STATE = os.path.join(TMP, "x6100-flights-state.json")
 LOCK = os.path.join(TMP, "x6100-flights.lock")
 CACHE_S = 10
-# The services switched off, a name a line (the Flights app's adsb.lol button, `x6100-flights source NAME on|off`): on
-# the data partition, so it stays over a restart and the GUI and the web page follow the same switch
-OFF = os.environ.get("X6100_FLIGHTS_OFF", "/mnt/x6100-flights-off")
 TIMEOUT_S = 10
 KM_PER_NM = 1.852
 FT_M = 0.3048
@@ -70,25 +67,7 @@ def version():
 AGENT = f"GoldCorpHF/{version()} (+https://github.com/MAVProxyUser/X6200-claude-assist-UI)"
 
 
-def switched_off():
-    """The names of the services switched off (OFF)"""
-    try:
-        with open(OFF) as f:
-            return {line.strip() for line in f if line.strip()}
-    except OSError:
-        return set()
-
-
-def set_source(name, on):
-    """A service switched on or off (OFF rewritten whole, then renamed over it)"""
-    off = switched_off() - {name} if on else switched_off() | {name}
-    tmp = "%s.%d" % (OFF, os.getpid())
-    with open(tmp, "w") as f:
-        f.write("".join(n + "\n" for n in sorted(off)))
-    os.replace(tmp, OFF)
-
-
-def all_services():
+def services():
     """SERVICES, or X6100_FLIGHTS_URLS="name=url|name=url" in their place (the host test's stand-ins)"""
     alt = os.environ.get("X6100_FLIGHTS_URLS")
     if not alt:
@@ -99,12 +78,6 @@ def all_services():
         known = next((s for s in SERVICES if s[0] == name), None)
         out.append((name, url) + (known[2:] if known else (1, 20, name)))
     return out
-
-
-def services():
-    """all_services() but those switched off"""
-    off = switched_off()
-    return [s for s in all_services() if s[0] not in off]
 
 
 def rounded(lat, lon):
@@ -265,7 +238,7 @@ def fetch(qlat, qlon, nm, now, state):
             why.append("%s: %s" % (name, short(e)))
     if why and all(w.endswith("no internet") for w in why):
         raise RuntimeError("no internet (WiFi?)")
-    raise RuntimeError("; ".join(why) or ("every source switched off" if all_services() else "no service"))
+    raise RuntimeError("; ".join(why) or "no service")
 
 
 def update(lat, lon, km, out=OUT, now=None):
@@ -277,7 +250,6 @@ def update(lat, lon, km, out=OUT, now=None):
         fcntl.flock(lock, fcntl.LOCK_EX)
         cache = read_json(CACHE, {})
         if (cache.get("at") == [qlat, qlon] and number(cache.get("nm")) and cache["nm"] >= nm and
-                cache.get("src", "") not in switched_off() and
                 number(cache.get("t")) and 0 <= now - cache["t"] < CACHE_S and isinstance(cache.get("ac"), list)):
             src, aircraft = cache.get("src", ""), cache["ac"]
         else:
@@ -287,7 +259,7 @@ def update(lat, lon, km, out=OUT, now=None):
             finally:
                 write_json(STATE, state)
             write_json(CACHE, {"at": [qlat, qlon], "nm": nm, "t": now, "src": src, "ac": aircraft})
-    service = next((s for s in all_services() if s[0] == src), (src, "", 1, RETRY_S, src))
+    service = next((s for s in services() if s[0] == src), (src, "", 1, RETRY_S, src))
     ac = place(aircraft, lat, lon, km)
     write_json(out, {"t": int(now), "time": time.strftime("%H:%M:%S", time.localtime(now)), "src": src,
                      "credit": service[4], "km": km, "next": service[3], "ac": ac})
@@ -305,19 +277,7 @@ def main():
         except Exception as e:      # noqa: BLE001 (one line for the GUI and the web page)
             print("error %s" % str(e)[:110])
         return
-    if len(sys.argv) == 4 and sys.argv[1] == "source" and sys.argv[3] in ("on", "off"):
-        if sys.argv[2] not in [s[0] for s in all_services()]:
-            print("error no source %s" % sys.argv[2][:40])
-            sys.exit(1)
-        set_source(sys.argv[2], sys.argv[3] == "on")
-        print("ok %s %s" % (sys.argv[2], sys.argv[3]))
-        return
-    if len(sys.argv) == 2 and sys.argv[1] == "sources":
-        off = switched_off()
-        for s in all_services():
-            print("%s %s" % (s[0], "off" if s[0] in off else "on"))
-        return
-    print("Usage: x6100-flights update LAT LON KM [OUT] | source NAME on|off | sources")
+    print("Usage: x6100-flights update LAT LON KM [OUT]")
     sys.exit(1)
 
 

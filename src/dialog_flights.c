@@ -12,12 +12,10 @@
  */
 #include "dialog_flights.h"
 
-#include "board.h"
 #include "buttons.h"
 #include "cJSON.h"
 #include "events.h"
 #include "keyboard.h"
-#include "msg_box.h"
 #include "params/params.h"
 #include "radio.h"
 #include "scheduler.h"
@@ -34,7 +32,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
 
 #ifndef X6100_SBIN
 #define X6100_SBIN "/usr/sbin"
@@ -58,20 +55,6 @@ static int range_i = 2;
 
 static app_frame_t frame;
 static lv_obj_t   *plot, *rows[ROWS], *cells[ROWS][5], *detail;
-
-/* x and width of the columns: flight, type, altitude, speed, distance and bearing */
-static const lv_coord_t col_x[5] = {6, 116, 166, 266, 376};
-static lv_coord_t       col_w[5] = {108, 48, 92, 102, 0};       /* the last: LIST_W - 382, set at the start */
-
-/* adsb.lol's rows in a rainbow (the owner, 2026-11-18: "adsb.lol entries should be rainbow coded like the pixels
- * from the frist to last letter shuold spread like a rainbow multiple colors per letter"): the row's words drawn
- * white into a see-through canvas of its own over the row, then each lit pixel given the hue of its place between
- * the row's first lit column and its last, red to violet, its coverage kept, so a letter has several colours. The
- * chosen row keeps the selection's colours, an emergency its red; airplanes.live's rows the theme's text */
-static lv_obj_t *rain[ROWS];
-static uint8_t  *rain_buf[ROWS];         /* LIST_W x ROW_H each, kept from the first start */
-
-static bool from_adsb_lol(void);
 static lv_timer_t *timer;
 static cJSON      *data;
 static bool        updating;
@@ -87,20 +70,12 @@ static void destruct_cb(void);
 static void key_cb(lv_event_t *e);
 static void range_cb(button_data_t *b);
 static void update_cb(button_data_t *b);
-static void lol_cb(button_data_t *b);
 static const char *range_label(void);
-static const char *lol_label(void);
 
 static button_data_t btn_range  = {.type = BTN_TEXT_FN, .label_fn = range_label, .press = range_cb};
 static button_data_t btn_update = {.type = BTN_TEXT, .label = "Update", .press = update_cb};
-static button_data_t btn_lol    = {.type = BTN_TEXT_FN, .label_fn = lol_label, .press = lol_cb};
 
-static buttons_page_t page = {{&btn_range, &btn_update, &btn_lol}};
-
-/* The services switched off, a name a line: the helper's file (x6100-flights source NAME on|off), which the web
- * page's Flights follows too; F3 switches adsb.lol (the owner, 2026-11-18: "an enable / disable for adsb.lol as a
- * source that can be easily toggled") */
-#define OFF_FILE  BOARD_DATA "/x6100-flights-off"
+static buttons_page_t page = {{&btn_range, &btn_update}};
 
 static dialog_t dialog = {
     .run          = false,
@@ -236,24 +211,11 @@ static void plot_draw_cb(lv_event_t *e) {
         lv_color_t col = emerg ? TC(err) : is_sel ? TC(text_head) : ground ? TC(text_dim) : TC(ok);
 
         if (num(ac, "trk", &trk) && !ground) {
-            double sx = sin(trk * M_PI / 180), sy = cos(trk * M_PI / 180);
-
-            if (from_adsb_lol() && !emerg && !is_sel) {     /* adsb.lol's: the stroke a rainbow from the dot's edge out,
-                                                             * red to violet in six steps of 2 px */
-                for (int k = 0; k < 6; k++) {
-                    double r0 = 3 + 2 * k, r1 = r0 + 2;
-
-                    line.color = lv_color_hsv_to_rgb((uint16_t)(k * 60), 100, 100);
-                    p1 = (lv_point_t){x + (lv_coord_t)lround(r0 * sx), y - (lv_coord_t)lround(r0 * sy)};
-                    p2 = (lv_point_t){x + (lv_coord_t)lround(r1 * sx), y - (lv_coord_t)lround(r1 * sy)};
-                    lv_draw_line(ctx, &line, &p1, &p2);
-                }
-            } else {
-                line.color = col;
-                p1 = (lv_point_t){x, y};
-                p2 = (lv_point_t){x + (lv_coord_t)lround(12 * sx), y - (lv_coord_t)lround(12 * sy)};
-                lv_draw_line(ctx, &line, &p1, &p2);
-            }
+            line.color = col;
+            p1 = (lv_point_t){x, y};
+            p2 = (lv_point_t){x + (lv_coord_t)lround(12 * sin(trk * M_PI / 180)),
+                              y - (lv_coord_t)lround(12 * cos(trk * M_PI / 180))};
+            lv_draw_line(ctx, &line, &p1, &p2);
         }
         int s = is_sel ? 5 : 3;
 
@@ -269,50 +231,6 @@ static void plot_draw_cb(lv_event_t *e) {
 }
 
 /* ---- the list, the chosen one, the header and the status line ---- */
-
-static bool from_adsb_lol(void) {
-    return data && !strncmp(str(data, "credit"), "adsb.lol", 8);
-}
-
-static void rain_draw(int r) {
-    lv_obj_t           *c  = rain[r];
-    lv_color_t         *px = (lv_color_t *)rain_buf[r];
-    lv_draw_label_dsc_t d;
-    int                 x0 = LIST_W, x1 = -1;
-
-    lv_draw_label_dsc_init(&d);
-    d.font  = &sony_18;
-    d.color = lv_color_white();         /* replaced pixel by pixel below: the coverage is what counts */
-    lv_canvas_fill_bg(c, lv_color_black(), LV_OPA_TRANSP);
-    for (int k = 0; k < 5; k++) {
-        d.align = k >= 2 ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT;
-        lv_canvas_draw_text(c, col_x[k], 1, col_w[k], &d, lv_label_get_text(cells[r][k]));
-    }
-    for (int k = 0; k < 5; k++) {      /* each entry its own rainbow, its first lit column to its last */
-        int c0 = LV_MAX(col_x[k], 0), c1 = LV_MIN(col_x[k] + col_w[k], LIST_W);
-
-        x0 = LIST_W, x1 = -1;
-        for (int y = 0; y < ROW_H; y++)
-            for (int x = c0; x < c1; x++)
-                if (px[y * LIST_W + x].ch.alpha) {
-                    if (x < x0) x0 = x;
-                    if (x > x1) x1 = x;
-                }
-        for (int x = x0; x <= x1; x++) {
-            lv_color_t h = lv_color_hsv_to_rgb((uint16_t)(x1 > x0 ? (x - x0) * 300 / (x1 - x0) : 0), 100, 100);
-
-            for (int y = 0; y < ROW_H; y++) {
-                lv_color_t *p = &px[y * LIST_W + x];
-                uint8_t     a = p->ch.alpha;
-
-                if (!a) continue;
-                *p          = h;
-                p->ch.alpha = a;
-            }
-        }
-    }
-    lv_obj_invalidate(c);
-}
 
 static void show_rows(void) {
     int n = aircraft_n();
@@ -352,22 +270,6 @@ static void show_rows(void) {
         lv_label_set_text(cells[r][2], alt);
         lv_label_set_text(cells[r][3], sp);
         lv_label_set_text(cells[r][4], dist);
-    }
-    for (int r = 0; r < ROWS; r++) {    /* adsb.lol's in a rainbow, the labels under it hidden */
-        int    i = top + r;
-        cJSON *a = i < aircraft_n() ? cJSON_GetArrayItem(aircraft(), i) : NULL;
-        bool   on = a && rain_buf[r] && from_adsb_lol() && i != sel && !cJSON_IsTrue(item(a, "emerg"));
-
-        for (int k = 0; k < 5; k++) {
-            if (on) lv_obj_add_flag(cells[r][k], LV_OBJ_FLAG_HIDDEN);
-            else lv_obj_clear_flag(cells[r][k], LV_OBJ_FLAG_HIDDEN);
-        }
-        if (on) {
-            rain_draw(r);
-            lv_obj_clear_flag(rain[r], LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(rain[r], LV_OBJ_FLAG_HIDDEN);
-        }
     }
 }
 
@@ -609,62 +511,6 @@ static void update_cb(button_data_t *b) {
     start_update();
 }
 
-/* adsb.lol switched off in OFF_FILE */
-static bool lol_off(void) {
-    FILE *f = fopen(OFF_FILE, "r");
-    char  l[64];
-    bool  off = false;
-
-    while (f && fgets(l, sizeof(l), f)) {
-        l[strcspn(l, "\r\n")] = 0;
-        if (!strcmp(l, "adsb.lol")) off = true;
-    }
-    if (f) fclose(f);
-    return off;
-}
-
-static const char *lol_label(void) {
-    return lol_off() ? "adsb.lol:\nOff" : "adsb.lol:\nOn";
-}
-
-/* OFF_FILE rewritten with adsb.lol in or out, the other names as they were; then asked again at once */
-static void lol_cb(button_data_t *b) {
-    bool  off = !lol_off();
-    char  names[8][64], tmp[96];
-    int   n = 0;
-    FILE *f = fopen(OFF_FILE, "r");
-
-    (void)b;
-    while (f && n < 8 && fgets(names[n], sizeof(names[n]), f)) {
-        names[n][strcspn(names[n], "\r\n")] = 0;
-        if (names[n][0] && strcmp(names[n], "adsb.lol")) n++;
-    }
-    if (f) fclose(f);
-    snprintf(tmp, sizeof(tmp), "%s.%d", OFF_FILE, (int)getpid());
-    f = fopen(tmp, "w");
-    if (!f) {
-        msg_update_text_fmt("%s", _("Could not switch adsb.lol"));
-        return;
-    }
-    for (int i = 0; i < n; i++) fprintf(f, "%s\n", names[i]);
-    if (off) fprintf(f, "adsb.lol\n");
-    fclose(f);
-    if (rename(tmp, OFF_FILE) != 0) {
-        remove(tmp);
-        msg_update_text_fmt("%s", _("Could not switch adsb.lol"));
-        return;
-    }
-    buttons_refresh(&btn_lol);
-    msg_update_text_fmt("%s", off ? _("adsb.lol off: airplanes.live only") : _("adsb.lol on"));
-    gen++;                  /* an answer on its way is from before */
-    updating = false;
-    cJSON_Delete(data);
-    data = NULL;
-    sel = top = 0;
-    show();
-    start_update();
-}
-
 static void key_cb(lv_event_t *e) {
     switch (*((uint32_t *)lv_event_get_param(e))) {
         case LV_KEY_ESC:
@@ -708,8 +554,9 @@ static lv_obj_t *cell(lv_obj_t *parent, const lv_font_t *font, lv_coord_t x, lv_
 }
 
 static void construct_cb(lv_obj_t *parent) {
-    /* the columns: col_x, col_w (the plot's size, and so where the list starts, follows the buttons' height) */
-    col_w[4] = LIST_W - 382;
+    /* x and width of the columns: flight, type, altitude, speed, distance and bearing (the plot's size, and so where
+     * the list starts, follows the buttons' height) */
+    const lv_coord_t        col_x[5] = {6, 116, 166, 266, 376}, col_w[5] = {108, 48, 92, 102, LIST_W - 382};
     static const char *const heads[5] = {"Flight", "Type", "Altitude", "Speed", "Distance"};
 
     dialog.obj = dialog_init(parent);
@@ -747,12 +594,6 @@ static void construct_cb(lv_obj_t *parent) {
         lv_obj_set_style_bg_color(rows[r], TC(sel_bg), 0);
         lv_obj_clear_flag(rows[r], LV_OBJ_FLAG_SCROLLABLE);
         for (int k = 0; k < 5; k++) cells[r][k] = cell(rows[r], &sony_18, col_x[k], col_w[k], k >= 2);
-        rain[r] = lv_canvas_create(rows[r]);
-        if (!rain_buf[r]) rain_buf[r] = malloc(LV_CANVAS_BUF_SIZE_TRUE_COLOR_ALPHA(LIST_W, ROW_H));
-        if (rain_buf[r]) lv_canvas_set_buffer(rain[r], rain_buf[r], LIST_W, ROW_H, LV_IMG_CF_TRUE_COLOR_ALPHA);
-        lv_obj_set_pos(rain[r], 0, 0);
-        lv_obj_clear_flag(rain[r], LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_flag(rain[r], LV_OBJ_FLAG_HIDDEN);
     }
     detail = lv_label_create(body);
     lv_obj_set_style_text_font(detail, &sony_18, 0);
