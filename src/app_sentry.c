@@ -588,6 +588,21 @@ static const emer_t emer[] = {
     {151625000, "BUSINESS", E_FM, "MOBILE BUSINESS CHANNEL (151.625)."},
 };
 #define EMER_N ((int)(sizeof(emer) / sizeof(emer[0])))
+
+/* its bands, the guide's groups, in emer[]'s order: F2 SCAN SELECTED scans the chosen row's band only */
+static const struct {
+    const char *name;
+    int         n;
+} emer_grps[] = {{"NOAA WX", 7},  {"CB", 3},       {"FRS", 2},        {"MURS", 5},     {"GMRS", 2},
+                 {"HAM CALL", 4}, {"HF NETS", 3}, {"MARINE", 10},  {"AIR", 5},      {"MUTUAL AID", 11},
+                 {"LOW BAND", 4},  {"UHF MUTUAL", 4}, {"FEDERAL", 3},  {"RELIEF", 2}};
+#define EMER_GRPS ((int)(sizeof(emer_grps) / sizeof(emer_grps[0])))
+
+static int emer_grp_of(int row) {
+    for (int g = 0, end = 0; g < EMER_GRPS; g++)
+        if (row < (end += emer_grps[g].n)) return g;
+    return EMER_GRPS - 1;
+}
 static int32_t f_emer[EMER_N];          /* their frequencies, filled from emer[] (decoders[]'s hz) */
 
 #define N_OF(a) ((int)(sizeof(a) / sizeof(a[0])))
@@ -840,6 +855,7 @@ static int  a_chan = -1, b_chan = -1;           /* the channel each radio's scan
 static bool emer_scan;
 static int  emer_ord[EMER_N];
 static int  emer_smode = -1;                    /* A's mode before it, given back after */
+static int  emer_grp = -1;                      /* SCAN SELECTED's band (emer_grps), -1 SCAN ALL */
 static bool b_stopped(void);
 static void rx_setup_apply(int64_t hz, int agc);
 
@@ -862,7 +878,9 @@ static int chan_next(bool sdr, int from) {
         for (int k = 1; k <= EMER_N; k++) {
             int p = ((from + k) % EMER_N + EMER_N) % EMER_N;
 
-            if (rx_of(emer[emer_ord[p]].hz) == (sdr ? RX_SDR : RX_X6200)) return p;
+            if (rx_of(emer[emer_ord[p]].hz) == (sdr ? RX_SDR : RX_X6200) &&
+                (emer_grp < 0 || emer_grp_of(emer_ord[p]) == emer_grp))
+                return p;
         }
         return -1;
     }
@@ -897,7 +915,8 @@ static int chan_count(bool sdr) {
     int k = 0, n;
 
     if (emer_scan) {
-        for (int i = 0; i < EMER_N; i++) k += rx_of(emer[i].hz) == (sdr ? RX_SDR : RX_X6200);
+        for (int i = 0; i < EMER_N; i++)
+            k += rx_of(emer[i].hz) == (sdr ? RX_SDR : RX_X6200) && (emer_grp < 0 || emer_grp_of(i) == emer_grp);
         return k;
     }
     channels_reload_if_changed();
@@ -2290,7 +2309,8 @@ static void show_decode(void) {
 
             fmt_mhz(fa, sizeof(fa), a_chan >= 0 ? scan_ch_hz(a_chan) : 0, 3);
             fmt_mhz(fb, sizeof(fb), b_chan >= 0 ? scan_ch_hz(b_chan) : 0, 3);
-            snprintf(w, sizeof(w), "SCANNING ALL: A %s %s%s, B %s %s%s. CHOSEN: %s, %s", a_chan >= 0 ? scan_ch_name(a_chan) : "-",
+            snprintf(w, sizeof(w), "SCANNING %s: A %s %s%s, B %s %s%s. CHOSEN: %s, %s",
+                     emer_grp >= 0 ? emer_grps[emer_grp].name : "ALL", a_chan >= 0 ? scan_ch_name(a_chan) : "-",
                      a_chan >= 0 ? fa : "", trk.on ? " (STOPPED)" : "", b_chan >= 0 ? scan_ch_name(b_chan) : "-",
                      b_chan >= 0 ? fb : "", b_stopped() ? " (STOPPED)" : "", emer[dec_row].ch, emer[dec_row].what);
         } else
@@ -6254,7 +6274,13 @@ static const char *f_label(int k) {
             const char *const l[] = {"", "Open", "Type:\nUp", "Type:\nDown", ""};
 
             if (k == 0 && (decoders[dec_sel].rx == 'E' || emer_scan)) {
-                snprintf(s, sizeof(s), "Scan all:\n%s", emer_scan ? "On" : "Off");
+                snprintf(s, sizeof(s), "Scan all:\n%s", emer_scan && emer_grp < 0 ? "On" : "Off");
+                return s;
+            }
+            if (k == 1 && decoders[dec_sel].rx == 'E') {   /* the chosen row's band; OPEN is the push or a tap */
+                int g = emer_scan && emer_grp >= 0 ? emer_grp : emer_grp_of(dec_row);
+
+                snprintf(s, sizeof(s), "Scan sel:\n%s %s", emer_grps[g].name, emer_scan && emer_grp >= 0 ? "On" : "Off");
                 return s;
             }
             if (k == 4 && decoders[dec_sel].rx == 'E') {
@@ -6407,6 +6433,24 @@ static void e_listen_next(void) {
 }
 
 /* E's EMERGENCY F1: A and B scan its list (emer_scan), or stop; the transmitters let go of first */
+static void emer_scan_set(bool on);
+
+/* F1 SCAN ALL (grp -1) and F2 SCAN SELECTED (the chosen row's band): on, the other kind in its place, or off when
+ * the same is on */
+static void emer_scan_toggle(int grp) {
+    if (emer_scan && emer_grp == grp) {
+        emer_scan_set(false);
+        return;
+    }
+    if (emer_scan) {                    /* the other kind: from the start of its list */
+        emer_scan = false;
+        a_chan = b_chan = -1;
+        b_stop.on = false;
+    }
+    emer_grp = grp;
+    emer_scan_set(true);
+}
+
 static void emer_scan_set(bool on) {
     if (on == emer_scan) return;
     if (on) {
@@ -6431,13 +6475,22 @@ static void emer_scan_set(bool on) {
         }
         char t[220];
 
-        snprintf(t, sizeof(t), "%s%s, EACH STOPPING ON ONE THAT TALKS AS LONG AS IT TALKS; HEARD: THE ONE THAT STOPPED. "
-                               "RECEIVE ONLY. F1 HERE, OR A'S OR B'S F1, ENDS IT.",
-                 na ? "A: THE X6200'S HF AND 6 M ONES" : "", b_on ? (na ? "; B: THE SDR'S OTHERS" : "B: THE SDR'S ONES")
-                                                              : "; NO SDR FOR THE REST");
-        osd("EMERGENCY SCAN", t, -1);
+        char title[40];
+
+        if (!na && !b_on) {             /* nothing here takes this band now (no SDR) */
+            emer_scan = false;
+            osd("NOTHING TO SCAN", "NO RADIO HERE TAKES THIS BAND NOW: AN RTL-SDR, A HACKRF OR A BLADERF ON USB HEARS IT.", -1);
+            return;
+        }
+        snprintf(t, sizeof(t), "%s%s%s, EACH STOPPING ON ONE THAT TALKS AS LONG AS IT TALKS; HEARD: AS F5 LISTEN SAYS. "
+                               "RECEIVE ONLY. THE SAME KEY AGAIN, OR A'S OR B'S F1, ENDS IT.",
+                 na ? "A: THE X6200'S" : "", na && b_on ? "; " : "", b_on ? "B: THE SDR'S" : "");
+        if (emer_grp >= 0) snprintf(title, sizeof(title), "SCAN: %s (%d)", emer_grps[emer_grp].name, na + nb);
+        else snprintf(title, sizeof(title), "SCAN ALL: EMERGENCY (%d)", na + nb);
+        osd(title, t, -1);
     } else {
         emer_scan = false;
+        emer_grp  = -1;
         a_chan = b_chan = -1;
         if (rtl_scan) rtl_scan_set(false);
         b_stop.on = false;
@@ -6719,9 +6772,10 @@ static void fkey(int k) {
             }
             break;                      /* F4, F5: nothing */
         case SCR_DECODE:                /* F1 EMERGENCY's scan; F5 nothing */
-            if (k == 0 && decoders[dec_sel].rx == 'E') emer_scan_set(!emer_scan);
+            if (k == 0 && decoders[dec_sel].rx == 'E') emer_scan_toggle(-1);
             if (k == 4 && decoders[dec_sel].rx == 'E') e_listen_next();
-            if (k == 1) open_decoder();
+            if (k == 1 && decoders[dec_sel].rx == 'E') emer_scan_toggle(emer_grp_of(dec_row));  /* OPEN: the push */
+            else if (k == 1) open_decoder();
             if (k == 2 || k == 3) {
                 dec_sel = (dec_sel + (k == 2 ? DECODERS_N - 1 : 1)) % DECODERS_N;
                 dec_row = 0;
