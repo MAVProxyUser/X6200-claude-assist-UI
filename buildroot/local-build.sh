@@ -282,9 +282,9 @@ done
 # The GPU (the R16's Mali-400 MP2; the kernel's lima driver is in already: /dev/dri/renderD128): Mesa's lima with EGL
 # (GBM, no window system) and OpenGL ES 2, for the GUI to move its pixel work there (the picture turned and composed
 # onto the portrait panel, the 3D waterfall: the GUI thread's time is mostly copying and rotating pixels, perf on the
-# radio 2026-11-14). Mesa adds its kmsro glue for the display (sun4i-drm) by itself with lima. The X6200's image
-# only for now: the radio it is tried on
-if [ $MODEL = x6200 ] && ! grep -q "^BR2_PACKAGE_MESA3D=y" $DEFCONFIG; then
+# radio 2026-11-14). Mesa adds its kmsro glue for the display (sun4i-drm) by itself with lima. Both radios (the X6100
+# the same R16 and GPU, its kernel with lima too: the X6200's image only until 2026-11-18, when the X6100 came)
+if ! grep -q "^BR2_PACKAGE_MESA3D=y" $DEFCONFIG; then
     cat >> $DEFCONFIG << 'MESA'
 BR2_PACKAGE_MESA3D=y
 BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_LIMA=y
@@ -295,15 +295,14 @@ fi
 # The boot video decoded by the video engine (Cedrus, the kernel's sunxi-cedrus module) and shown as it comes:
 # GStreamer's stateless H.264 decoder (gst1-plugins-bad's v4l2codecs: v4l2slh264dec) into kmssink, the MP4 read by
 # isomp4 and parsed by videoparsers, run by gst-launch-1.0 (rootfs/etc/init.d/S94bootvideo, with ffmpeg as before
-# when any of it is missing). v4l2codecs needs udev, which the image has (eudev). The X6200's image only
-if [ $MODEL = x6200 ]; then
-    for o in BR2_PACKAGE_GSTREAMER1=y BR2_PACKAGE_GSTREAMER1_INSTALL_TOOLS=y BR2_PACKAGE_GST1_PLUGINS_BASE=y \
-             BR2_PACKAGE_GST1_PLUGINS_GOOD=y BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_ISOMP4=y \
-             BR2_PACKAGE_GST1_PLUGINS_BAD=y BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_VIDEOPARSERS=y \
-             BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_V4L2CODECS=y BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_KMS=y; do
-        grep -q "^${o%%=*}=" $DEFCONFIG || echo "$o" >> $DEFCONFIG
-    done
-fi
+# when any of it is missing). v4l2codecs needs udev, which the image has (eudev). Both radios (the X6200's only until
+# 2026-11-18)
+for o in BR2_PACKAGE_GSTREAMER1=y BR2_PACKAGE_GSTREAMER1_INSTALL_TOOLS=y BR2_PACKAGE_GST1_PLUGINS_BASE=y \
+         BR2_PACKAGE_GST1_PLUGINS_GOOD=y BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_ISOMP4=y \
+         BR2_PACKAGE_GST1_PLUGINS_BAD=y BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_VIDEOPARSERS=y \
+         BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_V4L2CODECS=y BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_KMS=y; do
+    grep -q "^${o%%=*}=" $DEFCONFIG || echo "$o" >> $DEFCONFIG
+done
 # ffmpeg for the boot video (rootfs/etc/init.d/S94bootvideo), with what it needs only, not buildroot's every codec:
 # MP4/MKV/AVI, H.264, HEVC, MPEG-4 and VP8/VP9 video, scaled and turned into the framebuffer (fbdev). 4.4 looks
 # for linux/fb.h only with v4l2-m2m on. tools/bootvideo/build.sh builds the same for a radio on an older image
@@ -365,34 +364,33 @@ done
 echo "== Kernel: UHID for Bluetooth Low Energy keyboards"
 grep -q "^CONFIG_UHID=" $KERNEL_DEFCONFIG || echo "CONFIG_UHID=m" >> $KERNEL_DEFCONFIG
 
-if [ $MODEL = x6200 ]; then
-    # The processor's temperature sensor (the R16's, an A33's: ths@1c25000 in sun8i-a33.dtsi). The DT's cpu-thermal
-    # zone reads it, slows the CPU down from 75 °C and powers the radio off at 110 °C, and its iio-hwmon node shows it
-    # under hwmon. The tree's kernel has sun8i_thermal, which knows the H3, A64 and their kin but not the A33, whose
-    # sensor is sun4i-gpadc-iio's: without it the sensor had no driver and there was no thermal zone at all.
-    # The X6100's kernel config is not changed
-    echo "== Kernel: the X6200's processor temperature sensor and its thermal zone"
-    for o in CONFIG_SUN4I_GPADC=y CONFIG_SENSORS_IIO_HWMON=y; do
-        grep -q "^${o%%=*}=" $KERNEL_DEFCONFIG || echo "$o" >> $KERNEL_DEFCONFIG
-    done
-    # The R16's video engine (Cedrus: video-codec@1c0e000 in sun8i-a33.dtsi, 6.1's staging driver): H.264, H.265,
-    # MPEG-2 and VP8 decoded in hardware through V4L2's stateless (request) API, /dev/video0 and /dev/media0. Nothing
-    # decodes through it yet (the boot video is ffmpeg's, in software: ffmpeg knows only stateful V4L2 decoders); the
-    # driver is there for the first that does. A module, loaded by its node; memory taken only while a decoder runs
-    echo "== Kernel: the video engine (Cedrus)"
-    for o in CONFIG_MEDIA_SUPPORT=y CONFIG_MEDIA_SUPPORT_FILTER=y CONFIG_MEDIA_PLATFORM_SUPPORT=y CONFIG_VIDEO_DEV=y \
-             CONFIG_STAGING=y CONFIG_STAGING_MEDIA=y CONFIG_VIDEO_SUNXI=y CONFIG_VIDEO_SUNXI_CEDRUS=m; do
-        sed -i "/^# ${o%%=*} is not set/d" $KERNEL_DEFCONFIG
-        grep -q "^${o%%=*}=" $KERNEL_DEFCONFIG || echo "$o" >> $KERNEL_DEFCONFIG
-    done
-    # udmabuf: ordinary memory (a memfd) handed to the GPU as a dma-buf. The GUI's picture is drawn by LVGL in cached
-    # memory; with this the GPU can read it where it is, to turn it and compose it onto the panel with no copy by the
-    # processor (drawn straight into the display's write-combined buffers instead, LVGL's blending reads back and is
-    # slow). Asked for 2026-11-15; nothing uses it yet
-    echo "== Kernel: udmabuf (the GUI's memory shared with the GPU)"
-    sed -i "/^# CONFIG_UDMABUF is not set/d" $KERNEL_DEFCONFIG
-    grep -q "^CONFIG_UDMABUF=" $KERNEL_DEFCONFIG || echo "CONFIG_UDMABUF=y" >> $KERNEL_DEFCONFIG
-fi
+# The processor's temperature sensor (the R16's, an A33's: ths@1c25000 in sun8i-a33.dtsi). The DT's cpu-thermal
+# zone reads it, slows the CPU down from 75 °C and powers the radio off at 110 °C, and its iio-hwmon node shows it
+# under hwmon. The tree's kernel has sun8i_thermal, which knows the H3, A64 and their kin but not the A33, whose
+# sensor is sun4i-gpadc-iio's: without it the sensor had no driver and there was no thermal zone at all.
+# Both radios: the X6100's device tree has the same sensor and zone (seen on one 2026-11-18, which had no thermal
+# zone), and its kernel the same options from then on, the video engine and udmabuf below too
+echo "== Kernel: the processor temperature sensor and its thermal zone"
+for o in CONFIG_SUN4I_GPADC=y CONFIG_SENSORS_IIO_HWMON=y; do
+    grep -q "^${o%%=*}=" $KERNEL_DEFCONFIG || echo "$o" >> $KERNEL_DEFCONFIG
+done
+# The R16's video engine (Cedrus: video-codec@1c0e000 in sun8i-a33.dtsi, 6.1's staging driver): H.264, H.265,
+# MPEG-2 and VP8 decoded in hardware through V4L2's stateless (request) API, /dev/video0 and /dev/media0. Nothing
+# decodes through it yet (the boot video is ffmpeg's, in software: ffmpeg knows only stateful V4L2 decoders); the
+# driver is there for the first that does. A module, loaded by its node; memory taken only while a decoder runs
+echo "== Kernel: the video engine (Cedrus)"
+for o in CONFIG_MEDIA_SUPPORT=y CONFIG_MEDIA_SUPPORT_FILTER=y CONFIG_MEDIA_PLATFORM_SUPPORT=y CONFIG_VIDEO_DEV=y \
+         CONFIG_STAGING=y CONFIG_STAGING_MEDIA=y CONFIG_VIDEO_SUNXI=y CONFIG_VIDEO_SUNXI_CEDRUS=m; do
+    sed -i "/^# ${o%%=*} is not set/d" $KERNEL_DEFCONFIG
+    grep -q "^${o%%=*}=" $KERNEL_DEFCONFIG || echo "$o" >> $KERNEL_DEFCONFIG
+done
+# udmabuf: ordinary memory (a memfd) handed to the GPU as a dma-buf. The GUI's picture is drawn by LVGL in cached
+# memory; with this the GPU can read it where it is, to turn it and compose it onto the panel with no copy by the
+# processor (drawn straight into the display's write-combined buffers instead, LVGL's blending reads back and is
+# slow). Asked for 2026-11-15; nothing uses it yet
+echo "== Kernel: udmabuf (the GUI's memory shared with the GPU)"
+sed -i "/^# CONFIG_UDMABUF is not set/d" $KERNEL_DEFCONFIG
+grep -q "^CONFIG_UDMABUF=" $KERNEL_DEFCONFIG || echo "CONFIG_UDMABUF=y" >> $KERNEL_DEFCONFIG
 
 echo "== No kernel boot logo"
 # The kernel draws no picture of its own: the screen stays dark until the boot video (S94bootvideo) or the boot
@@ -403,15 +401,14 @@ sed -i 's|^BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH=.*|BR2_LINUX_KERNEL_CUSTOM_LOGO_PAT
 sed -i '/^CONFIG_LOGO[A-Z0-9_]*=/d; /^# CONFIG_LOGO is not set/d' $KERNEL_DEFCONFIG
 echo "# CONFIG_LOGO is not set" >> $KERNEL_DEFCONFIG
 
-if [ $MODEL = x6200 ]; then
-    # Nor does U-Boot: its 2023.01 turns CONFIG_VIDEO_LOGO on by default and drew its submarine (160x160) at the top
-    # right of the screen as it switched the display on, before the kernel. Its text console on the screen stays
-    # (stdout=serial,vidconsole). The X6100's U-Boot (2026.07, above) is not changed
-    echo "== No U-Boot logo"
-    UBOOT_DEFCONFIG=$EXT/board/$M/u-boot/sun8i-r16-$MODEL\_defconfig
-    sed -i '/^CONFIG_VIDEO_LOGO=/d; /^# CONFIG_VIDEO_LOGO is not set/d' $UBOOT_DEFCONFIG
-    echo "# CONFIG_VIDEO_LOGO is not set" >> $UBOOT_DEFCONFIG
-fi
+# Nor does U-Boot: its 2023.01 (the X6200's) and 2026.07 (the X6100's, above) turn CONFIG_VIDEO_LOGO on by default
+# and drew its submarine (160x160) at the top right of the screen as it switched the display on, before the
+# kernel. Its text console on the screen stays (stdout=serial,vidconsole). The X6100's too from 2026-11-18 (the
+# owner saw the submarine on one)
+echo "== No U-Boot logo"
+UBOOT_DEFCONFIG=$EXT/board/$M/u-boot/sun8i-r16-$MODEL\_defconfig
+sed -i '/^CONFIG_VIDEO_LOGO=/d; /^# CONFIG_VIDEO_LOGO is not set/d' $UBOOT_DEFCONFIG
+echo "# CONFIG_VIDEO_LOGO is not set" >> $UBOOT_DEFCONFIG
 
 echo "== The kernel set and U-Boot without the time they were built at"
 # Built again from the same sources and configs, the SD card's kernel set (zImage, the DTB, boot.scr) and U-Boot are
@@ -534,9 +531,9 @@ if [ $MODEL = x6100 ]; then
     # A U-Boot configured here before its defconfig turned mkeficapsule off is configured again
     grep -qs "^CONFIG_TOOLS_MKEFICAPSULE=y" $BR/build/build/uboot-2026.07/.config && make uboot-dirclean
 fi
-# An X6200 kernel configured here before its defconfig had the temperature sensor's driver, or the video engine's,
-# is configured again
-if [ $MODEL = x6200 ] && ls $BR/build/build/linux-[0-9]*/.config > /dev/null 2>&1 \
+# A kernel configured here before its defconfig had the temperature sensor's driver, or the video engine's, is
+# configured again (the X6100's from 2026-11-18)
+if ls $BR/build/build/linux-[0-9]*/.config > /dev/null 2>&1 \
         && ! { grep -qs "^CONFIG_SUN4I_GPADC=y" $BR/build/build/linux-[0-9]*/.config \
                && grep -qs "^CONFIG_VIDEO_SUNXI_CEDRUS=m" $BR/build/build/linux-[0-9]*/.config; }; then
     make linux-dirclean
@@ -575,7 +572,7 @@ if ls -d $BR/build/build/ft8lib-*/ > /dev/null 2>&1 \
     make ft8lib-dirclean
 fi
 # and U-Boot built before its logo was turned off (above) is built again with its new config
-if [ $MODEL = x6200 ] && ls -d $BR/build/build/uboot-*/ > /dev/null 2>&1 \
+if ls -d $BR/build/build/uboot-*/ > /dev/null 2>&1 \
         && ! grep -qs "^# CONFIG_VIDEO_LOGO is not set" $BR/build/build/uboot-*/.config; then
     make uboot-dirclean
 fi
