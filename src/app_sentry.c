@@ -699,7 +699,8 @@ static const decoder_t decoders[] = {
 #define DECODERS_N N_OF(decoders)
 
 /* The tables' rows, in the monospaced font: their heads take the same format */
-#define BAND_ROW "%c%-8.8s %-11.11s %-23.23s %-6.6s %-24.24s %-13.13s %s"   /* 97 of the row's 97 at most: RX 5 wide (X6200) */
+#define BAND_ROW "%c%-8.8s %-11.11s %-23.23s %s %-24.24s %s %s"   /* 97 of the row's 97 at most: RX 5 wide (X6200);
+                                                                   * BEST and NOW padded (6, 13) before their colour */
 #define DEC_ROW  " %-12s %-9s %-6s %-20.20s %-13.13s %s"   /* D's band, then what OPEN sets, RX last: 71 of 72 */
 
 /* ---- State ---- */
@@ -2129,16 +2130,28 @@ static void show_bands(void) {
         else
             snprintf(mhz, sizeof(mhz), "%.1f-%.1f", bands[i].lo / 1000.0, bands[i].hi / 1000.0);
         band_now(i, now, sizeof(now));
-        char rx[24];                    /* which radio takes it: the stick (in the tags' orange, but in the row's ink
-                                         * on the chosen row: orange on amber hardly showed) or the X6200 */
-        if (band_uses_rtl(i)) {
-            if (sdr_here && i != band_sel) snprintf(rx, sizeof(rx), "#%s %s#", tag_hex, b_kind());
-            else snprintf(rx, sizeof(rx), "%s", b_kind());
+        /* Coloured as C's log (the owner, 2026-11-18): BEST, and NOW beside it, green open now, yellow closing, red
+         * closed; RX the receiver's own colour as C's, there (plugged in) or not; the chosen row in its ink */
+        bool   lit  = i != band_sel;
+        int    role = lit ? band_now_role(i) : -1;
+        char   b6[8], n13[16], best[32], nowc[32], rx[40];
+        snprintf(b6, sizeof(b6), "%-6.6s", best_name(bands[i].when));
+        snprintf(n13, sizeof(n13), "%-13.13s", now);
+        if (role >= 0) {
+            snprintf(best, sizeof(best), "#%06X %s#", (unsigned)theme_hex((theme_color_t)role), b6);
+            snprintf(nowc, sizeof(nowc), "#%06X %s#", (unsigned)theme_hex((theme_color_t)role), n13);
+        } else {
+            snprintf(best, sizeof(best), "%s", b6);
+            snprintf(nowc, sizeof(nowc), "%s", n13);
         }
-        else snprintf(rx, sizeof(rx), "%s", cfg_is_valid_hw_freq(bands[i].listen_hz) ? "X6200" : "");
+        const char *rxn = band_uses_rtl(i) ? b_kind() : cfg_is_valid_hw_freq(bands[i].listen_hz) ? "X6200" : "";
+        bool        rx_here = !band_uses_rtl(i) || sdr_here;    /* the X6200 always; the SDR when one is plugged in */
+        if (lit && *rxn)
+            snprintf(rx, sizeof(rx), "#%06X %s#", (unsigned)theme_hex(rx_here ? TC_avail_on : TC_avail_off), rxn);
+        else
+            snprintf(rx, sizeof(rx), "%s", rxn);
         snprintf(s, sizeof(s), BAND_ROW, band_rt[i].sweep ? '*' : ' ',
-                 bands[i].name, mhz, bands[i].hear, best_name(bands[i].when), bands[i].ant, now,
-                 rx);
+                 bands[i].name, mhz, bands[i].hear, best, bands[i].ant, nowc, rx);
         lv_label_set_text(bd_row_l[r], s);
         lv_obj_set_style_bg_opa(bd_row_l[r], i == band_sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(bd_row_l[r], i == band_sel ? ink : amb, 0);
@@ -7898,7 +7911,8 @@ static void build_bands(lv_obj_t *p) {
     rect(p, 6, y - 2, SW - 12, scr_h - y - 2, 3, false);
     char h[128];
 
-    snprintf(h, sizeof(h), BAND_ROW, ' ', "BAND", "MHZ", "WHAT YOU'LL HEAR", "BEST", "ANTENNA", "NOW", "RX");
+    snprintf(h, sizeof(h), BAND_ROW, ' ', "BAND", "MHZ", "WHAT YOU'LL HEAR", "BEST  ", "ANTENNA", "NOW          ",
+             "RX");                         /* BEST and NOW padded as the rows pad them (6, 13) */
     bd_head_l = label(p, &pixel_16, amb, 9, y + 2, 0, 0, h);
     rect(p, 6, y + 20, SW - 12, 3, 0, true);
     bd_rows = (scr_h - (y + 26) - 68) / rh;    /* three lines under them: the band, and what LISTEN sets */

@@ -1127,7 +1127,9 @@ written through to the card before it replaces the last copy, so a power cut kee
   satellites), 2 m, VHF LMR (business and public service, 150-174), marine VHF, NOAA weather, 1.25 m, SONDES (weather
   balloons, 400-406), 70 cm, ISM 433, UHF LMR (450-470), GMRS, ISM 915, UAT 978, ADS-B and 23 cm: every band B has a
   preset for. A frequency in two bands (marine VHF inside VHF LMR, ISM 433 inside 70 cm, GMRS inside UHF LMR) is the
-  narrower one's. **RX** names the radio that takes each band
+  narrower one's. Coloured as C's log (2026-11-18): **BEST** and **NOW** green when the band is open now, yellow
+  closing, red closed (the same rule as C's BEST, below), and **RX** green when that radio is there, dim when its SDR
+  is not plugged in; the chosen row in its own ink. **RX** names the radio that takes each band
   by its kind (X6200, RTL, HACK, BLADE; SDR with none plugged in: no stick numbers, as on C), one rule on D and E
   alike:
   - **HF and 6 m (up to 60 MHz): the X6200**, whose receiver and antennas they are, even with an SDR plugged in
