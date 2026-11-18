@@ -1482,7 +1482,11 @@ fading over 30 s (HOLD): the last one with a fit of 50 % up, shown with its own 
 signal's end, half signal and half noise, is not held). With a heading set (F2) north is up and bearings are compass bearings.
 
 **The right**: the target (frequency, bandwidth, state: CALIBRATING, LISTENING, TRACKING, HOLD, SLIP), the bearing,
-its +-, the fit and the method, the level over the floor and the calibration's age; **the array against the band**:
+its +-, the fit and the method, the level over the floor and the calibration's age; SLIP (SAMPLES LOST? CALIBRATING
+TO SEE) is a fit that fell as a stick losing samples makes it fall, and the calibration it asks for counts a slip
+(SLIPS) only when it finds a stick moved. With every stick where it was, the antennas or the signal fit no plane wave
+(unequal antenna cables, the array's geometry set wrong, multipath indoors), which calibrating does not cure: the next
+look waits twice as long each time, up to 10 minutes; **the array against the band**:
 KrakenRF's calculator at the target's frequency, the spacing over the wavelength `s`, its estimated resolution and a
 word, **OK** (`s` 0.2-0.5), **AMBIGUOUS** (`s` over 0.5: the bearing can be wrong by a mirror) or **COARSE**
 (resolution over 20 degrees, or `s` under 0.2), and the size the calculator would want (`s` = 0.5); the **antennas'

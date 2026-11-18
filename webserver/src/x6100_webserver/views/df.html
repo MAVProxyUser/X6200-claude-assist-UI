@@ -42,7 +42,10 @@ table.ch td{padding:5px 6px;border-bottom:1px solid #1c2a3d;font-family:ui-monos
 #arred{width:100%;aspect-ratio:1;display:block;border-radius:6px;background:#08101b;touch-action:none;cursor:grab}
 table.xy{border-collapse:collapse;font-size:13.5px;width:100%}
 .tgdot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
-#tgrows input{width:7.5em;font:14px ui-monospace,monospace}
+#tgrows input{width:6.4em;font:14px ui-monospace,monospace}
+.tscroll{overflow-x:auto}
+#tgcard table.ch th,#tgcard table.ch td{padding:4px 4px}
+#tgrows button{padding:3px 9px}
 table.xy th{color:var(--dim);font-weight:500;text-align:left;padding:3px 4px}
 table.xy td{padding:3px 4px}
 table.xy input{width:100%;min-width:60px;font:14px ui-monospace,monospace}
@@ -88,7 +91,7 @@ table.xy input{width:100%;min-width:60px;font:14px ui-monospace,monospace}
     </section>
     <section class="df-card" id="tgcard">
       <h3>Other targets</h3>
-      <table class="ch"><thead><tr><th>Target</th><th>Frequency, MHz</th><th>Bearing</th><th>Fit</th><th>Level</th><th>Kept up</th><th></th></tr></thead><tbody id="tgrows"></tbody></table>
+      <div class="tscroll"><table class="ch"><thead><tr><th>Target</th><th>MHz</th><th>Bearing</th><th>Fit</th><th>Level, dB</th><th>Kept up</th><th></th></tr></thead><tbody id="tgrows"></tbody></table></div>
       <div class="btns"><button id="tgadd">Watch the target too</button></div>
       <p class="note">Up to three more bearings at once in the Kraken's passband, each with its own filter and squelch,
       on the radio's spare cores. <b>Watch the target too</b> keeps the main target's frequency as another one, so the
@@ -394,7 +397,7 @@ function show() {
          (t.gate ? '' : ' HOLD'));
       return `<tr><td><span class="tgdot" style="background:${TGC[i]}"></span>${i + 2}</td>` +
         `<td><input data-tg="${i}" inputmode="decimal" value="${t.hz ? mhz(t.hz) : ''}" placeholder="off" aria-label="Target ${i + 2}, MHz"></td>` +
-        (t.hz ? (t.in ? `<td>${brg}</td><td>${t.fit != null ? t.fit + '%' : ''}</td><td>${t.level != null ? t.level.toFixed(1) + ' dB' : ''}</td>` +
+        (t.hz ? (t.in ? `<td>${brg}</td><td>${t.fit != null ? t.fit + '%' : ''}</td><td>${t.level != null ? t.level.toFixed(1) : ''}</td>` +
                         `<td>${t.done != null ? t.done + '%' : ''}</td>` : `<td colspan="4">outside the passband</td>`) +
                 `<td><button data-tgclear="${i}" aria-label="Clear target ${i + 2}">&times;</button></td>` : `<td colspan="5"></td>`) + `</tr>`;
     }).join('');

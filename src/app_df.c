@@ -889,7 +889,7 @@ static void show_centre(void) {
     else if (sn.st.state == DF_ST_OPENING) snprintf(t, sizeof(t), "OPENING THE STICKS");
     else if (sn.st.state == DF_ST_CAL) snprintf(t, sizeof(t), "CALIBRATING\nNOISE SOURCE ON");
     else if (sn.st.state == DF_ST_NOCAL || sn.st.state == DF_ST_ERROR) snprintf(t, sizeof(t), "%s\n%s", state_name(sn.st.state), sn.st.why);
-    else if (sn.st.state == DF_ST_SLIP) snprintf(t, sizeof(t), "SAMPLES LOST\nCALIBRATING AGAIN");
+    else if (sn.st.state == DF_ST_SLIP) snprintf(t, sizeof(t), "SAMPLES LOST?\nCALIBRATING TO SEE");
     if (t[0]) {
         lv_label_set_text(centre_l, t);
         lv_obj_clear_flag(centre_l, LV_OBJ_FLAG_HIDDEN);
