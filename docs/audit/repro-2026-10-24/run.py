@@ -25,6 +25,21 @@ def command(args, env, *, failure=False, contains=()):
     return result.stdout
 
 
+def python_check(script, env):
+    """One of the Python checks, run again once when it fails: a case that fails twice fails the audit, one that fails
+    once and then passes is said (WARNING, with the cases that failed) and not counted. tailscale_checks.py failed one
+    case once on a Mac on 2026-11-18 and in none of ~30 runs there since nor in 40 on CI (Linux); which case it was
+    was lost above the host check's last 25 lines: now kept in the WARNING"""
+    first = subprocess.run([sys.executable, str(script)], cwd=REPO, env=env, text=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if first.returncode == 0:
+        return first.stdout
+    failed = [line for line in first.stdout.splitlines() if line.startswith("FAIL")]
+    print(f"WARNING: {script.name} failed once; run again:\n  " +
+          "\n  ".join(failed or first.stdout.strip().splitlines()[-8:]))
+    return command([sys.executable, script], env)
+
+
 def main():
     env = os.environ.copy()
     # LeakSanitizer needs tracing permissions; this audit uses access checks only.
@@ -39,7 +54,7 @@ def main():
         gc = ["-Wl,--gc-sections"]
 
         for script in ("web_checks.py", "log_checks.py", "updater_checks.py", "backup_checks.py", "tailscale_checks.py"):
-            output = command([sys.executable, HERE / script], env)
+            output = python_check(HERE / script, env)
             print(script + ":\n" + output.strip())
 
         print("B10 PTT renewal:\n" + command(["node", HERE / "ptt-renewal.js"], env).strip())

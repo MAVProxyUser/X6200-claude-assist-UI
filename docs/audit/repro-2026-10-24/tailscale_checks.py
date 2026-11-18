@@ -60,7 +60,8 @@ class LocalAPI(http.server.BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if body:            # none after a POST's 200: the client has its whole answer and may have closed (EPIPE)
+            self.wfile.write(body)
 
     def do_GET(self):
         assert self.headers.get('Sec-Tailscale') == 'localapi'

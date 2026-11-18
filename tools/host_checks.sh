@@ -126,8 +126,16 @@ record() {
     esac
     ROWS+=("$(printf '%-5s  %-16s %s' "$res" "$name" "$note")")
     printf '%-5s  %-16s %s\n' "$res" "$name" "$note"
+    if [ "$res" != FAIL ] && [ -f "$OUT/$name.log" ]; then     # a check that failed once and passed when run again
+        grep -E '^(WARNING: .* failed once|  (FAIL|FAILED|not ok)([ :]|$))' "$OUT/$name.log" | head -n 12 | sed 's/^/        /'
+    fi
     if [ "$VERBOSE" = 1 ] || { [ "$res" != PASS ] && [ "$res" != SKIP ]; }; then
-        [ -f "$OUT/$name.log" ] && sed 's/^/        /' "$OUT/$name.log" | tail -n 25
+        if [ -f "$OUT/$name.log" ]; then
+            # the failed cases themselves, wherever they are in a long log (the audit's Tailscale case of 2026-11-18
+            # was above its last 25 lines, so which one failed was lost), then the log's end
+            [ "$res" = FAIL ] && grep -E '^ *(FAIL|FAILED|not ok)([ :]|$)' "$OUT/$name.log" | head -n 10 | sed 's/^/        /'
+            sed 's/^/        /' "$OUT/$name.log" | tail -n 25
+        fi
     fi
 }
 
