@@ -11,6 +11,166 @@ msgstr ""
 "X-OpenX6X00-Font: NotoSansCJKsc-GB2312.otf\n"
 "X-OpenX6X00-Status: draft\n"
 
+#: src/aero.c
+msgid "VOLMET AFI"
+msgstr ""
+
+#: src/aero.c
+msgid "Africa, Indian Ocean"
+msgstr "非洲、印度洋"
+
+#: src/aero.c
+msgid "VOLMET CAR"
+msgstr ""
+
+#: src/aero.c
+msgid "Caribbean"
+msgstr "加勒比"
+
+#: src/aero.c
+msgid "VOLMET EUR"
+msgstr ""
+
+#: src/aero.c src/app_sstv.c
+msgid "Europe"
+msgstr "欧洲"
+
+#: src/aero.c
+msgid "VOLMET MID"
+msgstr ""
+
+#: src/aero.c
+msgid "Middle East"
+msgstr "中东"
+
+#: src/aero.c
+msgid "VOLMET NAT"
+msgstr ""
+
+#: src/aero.c
+msgid "North Atlantic"
+msgstr "北大西洋"
+
+#: src/aero.c
+msgid "VOLMET NCA"
+msgstr ""
+
+#: src/aero.c
+msgid "North Central Asia"
+msgstr "亚洲中北部"
+
+#: src/aero.c
+msgid "VOLMET PAC"
+msgstr ""
+
+#: src/aero.c
+msgid "Pacific"
+msgstr "太平洋"
+
+#: src/aero.c
+msgid "VOLMET SAM"
+msgstr ""
+
+#: src/aero.c
+msgid "South America"
+msgstr "南美"
+
+#: src/aero.c
+msgid "VOLMET SEA"
+msgstr ""
+
+#: src/aero.c
+msgid "South East Asia"
+msgstr "东南亚"
+
+#: src/aero.c
+msgid "VOLMET"
+msgstr ""
+
+#: src/aero.c
+msgid "Shannon, Ireland"
+msgstr "香农, 爱尔兰"
+
+#: src/aero.c
+msgid "RAF, United Kingdom (military)"
+msgstr "RAF, 英国 (军用)"
+
+#: src/aero.c
+msgid "Ezeiza, Argentina"
+msgstr "埃塞萨, 阿根廷"
+
+#: src/aero.c
+msgid "Cordoba, Argentina"
+msgstr "科尔多瓦, 阿根廷"
+
+#: src/aero.c
+msgid "Trenton, Canada (military)"
+msgstr "特伦顿, 加拿大 (军用)"
+
+#: src/aero.c
+msgid "Africa"
+msgstr "非洲"
+
+#: src/aero.c
+msgid "Central East Pacific"
+msgstr "太平洋中东部"
+
+#: src/aero.c
+msgid "Central West Pacific"
+msgstr "太平洋中西部"
+
+#: src/aero.c
+msgid "East Asia"
+msgstr "东亚"
+
+#: src/aero.c
+msgid "Indian Ocean"
+msgstr "印度洋"
+
+#: src/aero.c
+msgid "North Pacific"
+msgstr "北太平洋"
+
+#: src/aero.c
+msgid "South Atlantic"
+msgstr "南大西洋"
+
+#: src/aero.c
+msgid "South Pacific"
+msgstr "南太平洋"
+
+#: src/aero.c
+msgid "Common, search and rescue"
+msgstr "通用、搜索救援"
+
+#: src/aero.c
+msgid "LDOC"
+msgstr ""
+
+#: src/aero.c
+msgid "Airline operational control"
+msgstr "航空公司运行控制"
+
+#: src/aero.c
+msgid "Europe, Africa, Middle East"
+msgstr "欧洲、非洲、中东"
+
+#: src/aero.c src/app_sstv.c
+msgid "Americas"
+msgstr "美洲"
+
+#: src/aero.c
+msgid "Asia and Pacific"
+msgstr "亚洲和太平洋"
+
+#: src/aero.c
+msgid "Worldwide LDOC"
+msgstr "全球 LDOC"
+
+#: src/aero.c
+msgid "All areas"
+msgstr "全部区域"
+
 #: src/app_sstv.c
 msgid ""
 "Start\n"
@@ -77,14 +237,6 @@ msgstr ""
 #: src/js8_window.c src/navtex_window.c src/voice_messages.c src/wefax_window.c
 msgid "Close"
 msgstr "关闭"
-
-#: src/app_sstv.c
-msgid "Europe"
-msgstr "欧洲"
-
-#: src/app_sstv.c
-msgid "Americas"
-msgstr "美洲"
 
 #: src/app_sstv.c src/knob_info.cpp src/wifi_window.c
 msgid "Unknown"
@@ -515,8 +667,8 @@ msgstr "传播"
 msgid "Conditions, beacons"
 msgstr "条件、信标"
 
-#: src/apps_menu.c src/button_bar.cpp src/dialog_scan.c src/screen_main.c
-#: src/wefax_window.c
+#: src/apps_menu.c src/button_bar.cpp src/dialog_cb.c src/dialog_scan.c
+#: src/screen_main.c src/wefax_window.c
 msgid "Channels"
 msgstr "频道"
 
@@ -592,6 +744,58 @@ msgstr "杂散校准"
 msgid "Find birdies, antenna off"
 msgstr "查找杂散(断开天线)"
 
+#: src/apps_menu.c
+msgid "Web radio"
+msgstr "网络广播"
+
+#: src/apps_menu.c
+msgid "Internet stations"
+msgstr "互联网电台"
+
+#: src/apps_menu.c src/button_bar.cpp src/screen_main.c src/zello.c
+msgid "Zello"
+msgstr ""
+
+#: src/apps_menu.c
+msgid "Internet voice"
+msgstr "网络语音"
+
+#: src/apps_menu.c src/button_bar.cpp src/screen_main.c
+msgid "SVXConnect"
+msgstr ""
+
+#: src/apps_menu.c
+msgid "Reflector talkgroups"
+msgstr "反射器通话组"
+
+#: src/apps_menu.c src/button_bar.cpp src/screen_main.c
+msgid "Flights"
+msgstr "航班"
+
+#: src/apps_menu.c
+msgid "Aircraft around"
+msgstr "周边飞机"
+
+#: src/apps_menu.c src/screen_main.c
+msgid "HF Air Band"
+msgstr "短波航空"
+
+#: src/apps_menu.c
+msgid "Oceanic routes, VOLMET"
+msgstr "远洋航路、VOLMET"
+
+#: src/apps_menu.c
+msgid "27 MHz channels"
+msgstr "27 MHz 频道"
+
+#: src/apps_menu.c src/button_bar.cpp src/screen_main.c
+msgid "Weather"
+msgstr "天气"
+
+#: src/apps_menu.c
+msgid "Forecast, warnings"
+msgstr "预报、预警"
+
 #: src/apps_menu.c src/button_bar.cpp src/js8_window.c src/screen_main.c
 msgid "Settings"
 msgstr "设置"
@@ -622,6 +826,18 @@ msgstr ""
 
 #: src/audio.c
 msgid "X6100 GUI Local"
+msgstr ""
+
+#: src/audio.c
+msgid "X6100 GUI Station"
+msgstr ""
+
+#: src/audio.c
+msgid "X6100 GUI Zello"
+msgstr ""
+
+#: src/audio.c
+msgid "X6100 GUI SVXConnect"
 msgstr ""
 
 #: src/audio.c
@@ -674,7 +890,7 @@ msgstr "正在扫描 %s, %.3f MHz, 已找到 %d 个"
 msgid "%s: %d new"
 msgstr "%s: 新增 %d"
 
-#: src/birdie.c src/dialog_cluster.c
+#: src/birdie.c src/dialog_cluster.c src/dialog_iradio.c
 msgid "Stopped"
 msgstr "已停止"
 
@@ -1440,7 +1656,25 @@ msgstr ""
 msgid ""
 "Propa-\n"
 "gation"
-msgstr "传播"
+msgstr ""
+"电波\n"
+"传播"
+
+#: src/button_bar.cpp
+msgid ""
+"Internet\n"
+"radio"
+msgstr ""
+"网络\n"
+"广播"
+
+#: src/button_bar.cpp
+msgid ""
+"HF Air\n"
+"Band"
+msgstr ""
+"短波\n"
+"航空"
 
 #: src/button_bar.cpp
 msgid "Rate"
@@ -1457,6 +1691,78 @@ msgstr "居中"
 #: src/button_bar.cpp
 msgid "Reverse"
 msgstr "反向"
+
+#: src/cb.c
+msgid "Europe (CEPT)"
+msgstr "欧洲 (CEPT)"
+
+#: src/cb.c
+msgid "Germany (80 channels)"
+msgstr "德国 (80 频道)"
+
+#: src/cb.c
+msgid "United Kingdom 27/81"
+msgstr "英国 27/81"
+
+#: src/cb.c
+msgid "USA, Americas (FCC)"
+msgstr "美国、美洲 (FCC)"
+
+#: src/cb.c
+msgid "Australia"
+msgstr "澳大利亚"
+
+#: src/cb.c
+msgid "Poland (PL)"
+msgstr "波兰 (PL)"
+
+#: src/cb.c
+msgid "Band A (export)"
+msgstr "A 段 (出口)"
+
+#: src/cb.c
+msgid "Band B (export)"
+msgstr "B 段 (出口)"
+
+#: src/cb.c
+msgid "Band D (export)"
+msgstr "D 段 (出口)"
+
+#: src/cb.c
+msgid "Band E (export)"
+msgstr "E 段 (出口)"
+
+#: src/cb.c
+msgid "Emergency, travellers"
+msgstr "紧急、旅行者"
+
+#: src/cb.c
+msgid "Highway"
+msgstr "公路"
+
+#: src/cb.c
+msgid "Emergency only"
+msgstr "仅限紧急"
+
+#: src/cb.c
+msgid "Calling, AM"
+msgstr "呼叫, AM"
+
+#: src/cb.c
+msgid "Calling, LSB"
+msgstr "呼叫, LSB"
+
+#: src/cb.c
+msgid "FM only"
+msgstr "仅 FM"
+
+#: src/cb.c
+msgid "Emergency"
+msgstr "紧急"
+
+#: src/cb.c
+msgid "Road"
+msgstr "道路"
 
 #: src/cfg_socket.cpp
 msgid "Invalid option"
@@ -1503,6 +1809,10 @@ msgid "Busy, try again"
 msgstr "忙, 请重试"
 
 #: src/cfg_socket.cpp
+msgid "No memory"
+msgstr "内存不足"
+
+#: src/cfg_socket.cpp
 msgid "Bad request"
 msgstr "错误请求"
 
@@ -1514,7 +1824,7 @@ msgstr "未知命令"
 msgid "SHANNON VOLMET"
 msgstr ""
 
-#: src/channel_list.c src/info_bar.c
+#: src/channel_list.c src/field_map.c src/info_bar.c
 msgid "AUTO"
 msgstr "自动"
 
@@ -1757,8 +2067,8 @@ msgid "From %02i:%02i %s, %s"
 msgstr "从 %02i:%02i %s, %s"
 
 #: src/cw_messages.c src/dialog_birdie.c src/dialog_cw_kbd.c
-#: src/dialog_freedv.c src/settings_window.cpp src/swrscan_window.c
-#: src/voice_messages.c
+#: src/dialog_freedv.c src/dialog_iradio.c src/settings_window.cpp
+#: src/swrscan_window.c src/voice_messages.c
 msgid "Stop"
 msgstr "停止"
 
@@ -2031,6 +2341,48 @@ msgstr ""
 #: src/cw_parse.c
 msgid "TEST"
 msgstr ""
+
+#: src/dialog_aero.c
+msgid "Area"
+msgstr "区域"
+
+#: src/dialog_aero.c src/dialog_cluster.c
+msgid "Tune"
+msgstr "调谐"
+
+#: src/dialog_aero.c src/dialog_cb.c
+msgid ""
+"Save\n"
+"channel"
+msgstr ""
+"保存\n"
+"频道"
+
+#: src/dialog_aero.c src/dialog_cb.c src/settings_window.cpp src/wifi_window.c
+msgid "Scan"
+msgstr "扫描"
+
+#: src/dialog_aero.c
+#, c-format
+msgid "HF AIR BAND   #%06x %s#"
+msgstr "短波航空   #%06x %s#"
+
+#: src/dialog_aero.c src/dialog_cb.c src/freq_list.c
+msgid "MFK: choose - press: tune"
+msgstr "MFK: 选择 - 按下: 调谐"
+
+#: src/dialog_aero.c
+msgid "HF Air Band: not while transmitting"
+msgstr "短波航空: 发射时不可用"
+
+#: src/dialog_aero.c src/dialog_cb.c src/screen_main.c
+#, c-format
+msgid "Saved channel %s"
+msgstr "已保存频道 %s"
+
+#: src/dialog_aero.c src/dialog_cb.c
+msgid "Channel not saved"
+msgstr "频道未保存"
 
 #: src/dialog_bands.c
 msgid "(BANDS 1:1)"
@@ -2435,6 +2787,43 @@ msgstr "杂散是电台内部产生的稳定载波. 此扫描在每个启用的�
 msgid "Disconnect the antenna, then press Start. A few minutes: every active band the radio transmits on."
 msgstr "断开天线, 然后按\"开始\". 需要几分钟: 扫描电台可发射的每个启用波段."
 
+#: src/dialog_cb.c
+msgid "Plan"
+msgstr "频道表"
+
+#: src/dialog_cb.c src/settings_window.cpp
+msgid "Mode"
+msgstr "模式"
+
+#: src/dialog_cb.c
+msgid "Knob"
+msgstr "旋钮"
+
+#: src/dialog_cb.c
+msgid "Free"
+msgstr "自由"
+
+#: src/dialog_cb.c
+msgid "main knob: channels"
+msgstr "主旋钮: 频道"
+
+#: src/dialog_cb.c
+msgid "main knob: frequency"
+msgstr "主旋钮: 频率"
+
+#: src/dialog_cb.c
+msgid "Channel"
+msgstr "频道"
+
+#: src/dialog_cb.c
+msgid "CB: not while transmitting"
+msgstr "CB: 发射时不可用"
+
+#: src/dialog_cb.c
+#, c-format
+msgid "%s: %s only"
+msgstr "%s: 仅 %s"
+
 #: src/dialog_channels.c
 msgid "Add"
 msgstr "添加"
@@ -2492,10 +2881,6 @@ msgstr ""
 #: src/dialog_cluster.c src/settings_window.cpp
 msgid "Server"
 msgstr "服务器"
-
-#: src/dialog_cluster.c
-msgid "Tune"
-msgstr "调谐"
 
 #: src/dialog_cluster.c
 msgid "CLUSTER ALERT"
@@ -3222,7 +3607,27 @@ msgid "LAKE"
 msgstr "湖泊"
 
 #: src/dialog_field.c
-msgid "SPBHFTCMLGK"
+msgid ""
+"Your own\n"
+"places"
+msgstr ""
+"自己的\n"
+"地点"
+
+#: src/dialog_field.c
+msgid "SPOT"
+msgstr "地点"
+
+#: src/dialog_field.c
+msgid ""
+"All places\n"
+"nearby"
+msgstr ""
+"附近的\n"
+"全部地点"
+
+#: src/dialog_field.c
+msgid "SPBHFTCMLGKXN"
 msgstr ""
 
 #: src/dialog_field.c
@@ -3244,6 +3649,10 @@ msgid ""
 msgstr ""
 "活动\n"
 "RBN, 信标"
+
+#: src/dialog_field.c
+msgid "PHONE"
+msgstr "手机"
 
 #: src/dialog_field.c
 msgid "error no answer"
@@ -3293,6 +3702,22 @@ msgid ""
 msgstr ""
 "查看\n"
 "日志"
+
+#: src/dialog_field.c
+msgid ""
+"Zoom\n"
+"-"
+msgstr ""
+"缩放\n"
+"-"
+
+#: src/dialog_field.c
+msgid ""
+"Zoom\n"
+"+"
+msgstr ""
+"缩放\n"
+"+"
 
 #: src/dialog_field.c
 msgid "LOGBOOK"
@@ -3367,6 +3792,14 @@ msgstr "报告"
 
 #: src/dialog_field.c
 msgid ""
+"View:\n"
+"map only"
+msgstr ""
+"视图:\n"
+"仅地图"
+
+#: src/dialog_field.c
+msgid ""
 "Re-spot\n"
 "On"
 msgstr ""
@@ -3390,6 +3823,42 @@ msgid "MFK: choose, press to open.   GEN: back to the radio"
 msgstr "MFK: 选择, 按下打开.   GEN: 返回电台"
 
 #: src/dialog_field.c
+msgid "Bunker:"
+msgstr ""
+
+#: src/dialog_field.c
+msgid "Ruin:"
+msgstr ""
+
+#: src/dialog_field.c
+msgid "Ruine:"
+msgstr ""
+
+#: src/dialog_field.c
+msgid "Remains:"
+msgstr ""
+
+#: src/dialog_field.c
+msgid "Vestige:"
+msgstr ""
+
+#: src/dialog_field.c
+msgid "Memorial:"
+msgstr ""
+
+#: src/dialog_field.c
+msgid "Memoire:"
+msgstr ""
+
+#: src/dialog_field.c
+msgid "Abandoned:"
+msgstr ""
+
+#: src/dialog_field.c
+msgid "Abandonne:"
+msgstr ""
+
+#: src/dialog_field.c
 msgid "No reference list"
 msgstr "无编号列表"
 
@@ -3402,12 +3871,20 @@ msgid "Ref...: type your tile"
 msgstr "编号...: 输入你的方格"
 
 #: src/dialog_field.c
+msgid "Your xota.tsv is empty"
+msgstr "你的 xota.tsv 是空的"
+
+#: src/dialog_field.c
 msgid "None in the list: Update list"
 msgstr "列表中没有: 更新列表"
 
 #: src/dialog_field.c
 msgid "Looking..."
 msgstr "查找中..."
+
+#: src/dialog_field.c
+msgid " (old)"
+msgstr " (旧)"
 
 #: src/dialog_field.c
 #, c-format
@@ -3425,12 +3902,40 @@ msgid "GPS, phone or locator needed"
 msgstr "需要 GPS, 手机或网格"
 
 #: src/dialog_field.c
-msgid " (old)"
-msgstr " (旧)"
-
-#: src/dialog_field.c
 msgid "NOT ACTIVE"
 msgstr "未激活"
+
+#: src/dialog_field.c
+msgid "Downloading the reference lists..."
+msgstr "正在下载编号列表..."
+
+#: src/dialog_field.c
+msgid "4-character locator: Ref... your tile, or GPS"
+msgstr "4 位网格: 用\"编号...\"输入方格, 或用 GPS"
+
+#: src/dialog_field.c
+msgid "MFK: a tile (km: to its edge).  Ref...: any tile"
+msgstr "MFK: 选方格 (km: 到其边缘).  编号...: 任意方格"
+
+#: src/dialog_field.c
+msgid "XOTA is your own list: copy your xota.tsv to /mnt/field (see the manual)"
+msgstr "XOTA 是你自己的列表: 把 xota.tsv 复制到 /mnt/field (见手册)"
+
+#: src/dialog_field.c
+msgid "No reference list yet: Update list (page 2), with WiFi"
+msgstr "还没有编号列表: 连 WiFi 后按\"更新列表\" (第 2 页)"
+
+#: src/dialog_field.c
+msgid "MFK: choose the castle.  Ref...: any castle by its number (most have no position)"
+msgstr "MFK: 选择城堡.  编号...: 按编号选任意城堡 (多数没有位置)"
+
+#: src/dialog_field.c
+msgid "Every programme, nearest first.  Press: open it in its own.  Start: activate it"
+msgstr "全部活动, 最近的在前.  按下: 在其活动中打开.  Start: 激活"
+
+#: src/dialog_field.c
+msgid "MFK: choose the reference, press to use it.  Start: begin the activation"
+msgstr "MFK: 选择编号, 按下使用.  开始: 开始激活"
 
 #: src/dialog_field.c
 #, c-format
@@ -3446,30 +3951,6 @@ msgstr "状态"
 #, c-format
 msgid "%s\tKM\tNAME"
 msgstr "%s\tKM\t名称"
-
-#: src/dialog_field.c
-msgid "Downloading the reference lists..."
-msgstr "正在下载编号列表..."
-
-#: src/dialog_field.c
-msgid "4-character locator: Ref... your tile, or GPS"
-msgstr "4 位网格: 用\"编号...\"输入方格, 或用 GPS"
-
-#: src/dialog_field.c
-msgid "MFK: a tile (km: to its edge).  Ref...: any tile"
-msgstr "MFK: 选方格 (km: 到其边缘).  编号...: 任意方格"
-
-#: src/dialog_field.c
-msgid "No reference list yet: Update list (page 2), with WiFi"
-msgstr "还没有编号列表: 连 WiFi 后按\"更新列表\" (第 2 页)"
-
-#: src/dialog_field.c
-msgid "MFK: choose the castle.  Ref...: any castle by its number (most have no position)"
-msgstr "MFK: 选择城堡.  编号...: 按编号选任意城堡 (多数没有位置)"
-
-#: src/dialog_field.c
-msgid "MFK: choose the reference, press to use it.  Start: begin the activation"
-msgstr "MFK: 选择编号, 按下使用.  开始: 开始激活"
 
 #: src/dialog_field.c
 #, c-format
@@ -3548,6 +4029,10 @@ msgid " %s --call %s --freq-khz %.1f --ref %s --mode %s%s"
 msgstr ""
 
 #: src/dialog_field.c
+msgid "NOTA: no reference near yet (a position is needed)"
+msgstr "NOTA: 附近还没有编号 (需要位置)"
+
+#: src/dialog_field.c
 #, c-format
 msgid "Choose the %s reference first"
 msgstr "请先选择 %s 编号"
@@ -3574,6 +4059,14 @@ msgstr "再按\"结束\"结束激活"
 #, c-format
 msgid "%s spot: %s"
 msgstr "%s 报告: %s"
+
+#: src/dialog_field.c
+msgid "NOTA: press the row to open it in its programme first"
+msgstr "NOTA: 先按该行, 在其活动中打开"
+
+#: src/dialog_field.c
+msgid "XOTA is a list of your own: no spot"
+msgstr "XOTA 是你自己的列表: 不发报告"
 
 #: src/dialog_field.c
 #, c-format
@@ -3908,6 +4401,84 @@ msgstr "QRZ 配置未保存"
 msgid "QRZ profile: %s"
 msgstr "QRZ 配置: %s"
 
+#: src/dialog_field.c
+msgid "You are there: Start to activate it"
+msgstr "你在这里: 按 Start 激活"
+
+#: src/dialog_flights.c src/dialog_meteo.c src/settings_window.cpp
+msgid "Update"
+msgstr "更新"
+
+#: src/dialog_flights.c
+msgid "No aircraft in range just now: only those a volunteer's receiver nearby picks up are there"
+msgstr "目前范围内没有飞机: 只显示附近志愿者的接收机收到的飞机"
+
+#: src/dialog_flights.c
+msgid "EMERGENCY"
+msgstr "紧急"
+
+#: src/dialog_flights.c
+msgid "FLIGHTS"
+msgstr "航班"
+
+#: src/dialog_flights.c src/dialog_meteo.c src/first_start.c src/station.c
+msgid "Locator"
+msgstr "网格"
+
+#: src/dialog_flights.c
+#, c-format
+msgid "%d aircraft   %d km"
+msgstr "%d 架飞机   %d km"
+
+#: src/dialog_flights.c
+msgid "airplanes.live, adsb.lol (ODbL)"
+msgstr ""
+
+#: src/dialog_flights.c
+msgid "No position: set the QTH locator in Settings > General, or plug in a GPS"
+msgstr "无位置: 请在 设置 > 常规 中设置 QTH 网格, 或插入 GPS"
+
+#: src/dialog_flights.c
+msgid "Asking for the aircraft..."
+msgstr "正在查询飞机..."
+
+#: src/dialog_flights.c
+msgid "Data:"
+msgstr "数据:"
+
+#: src/dialog_flights.c src/dialog_meteo.c
+msgid "No answer from the helper"
+msgstr "辅助程序无应答"
+
+#: src/dialog_flights.c
+#, c-format
+msgid ""
+"Range:\n"
+"%d km"
+msgstr ""
+"范围:\n"
+"%d km"
+
+#: src/dialog_flights.c
+msgid "Flight"
+msgstr "航班"
+
+#: src/dialog_flights.c
+msgid "Type"
+msgstr "机型"
+
+#: src/dialog_flights.c
+msgid "Altitude"
+msgstr "高度"
+
+#: src/dialog_flights.c src/settings_window.cpp
+msgid "Speed"
+msgstr "速度"
+
+#: src/dialog_flights.c
+msgid "Distance"
+msgstr "距离"
+
 #: src/dialog_freedv.c
 msgid "Discard"
 msgstr "丢弃"
@@ -4127,6 +4698,148 @@ msgstr "FreeDV Reporter: 消息未保存"
 msgid "Reporter message:"
 msgstr "Reporter 消息:"
 
+#: src/dialog_iradio.c
+msgid "Favourite"
+msgstr "收藏"
+
+#: src/dialog_iradio.c
+msgid "List"
+msgstr "列表"
+
+#: src/dialog_iradio.c src/dialog_meteo.c src/first_start.c src/meteo.c
+#: src/settings_window.cpp
+msgid "Country"
+msgstr "国家"
+
+#: src/dialog_iradio.c
+msgid "Search"
+msgstr "搜索"
+
+#: src/dialog_iradio.c
+msgid "The list could not be fetched"
+msgstr "无法获取列表"
+
+#: src/dialog_iradio.c
+msgid "Loading the list from radio-browser.info..."
+msgstr "正在从 radio-browser.info 加载列表..."
+
+#: src/dialog_iradio.c
+msgid "The directory sent no list"
+msgstr "目录未返回列表"
+
+#: src/dialog_iradio.c
+msgid "Stopped: the radio transmits"
+msgstr "已停止: 电台正在发射"
+
+#: src/dialog_iradio.c
+msgid "the station stopped sending"
+msgstr "电台已停止播送"
+
+#: src/dialog_iradio.c
+msgid "the speaker took no audio"
+msgstr "扬声器未接收音频"
+
+#: src/dialog_iradio.c
+msgid "the audio could not be played"
+msgstr "无法播放音频"
+
+#: src/dialog_iradio.c
+msgid "the player did not start"
+msgstr "播放器未能启动"
+
+#: src/dialog_iradio.c
+#, c-format
+msgid "%s: not on this card image (MP3 only), a newer image plays it"
+msgstr "%s: 此存储卡镜像不支持 (仅 MP3), 新镜像可以播放"
+
+#: src/dialog_iradio.c
+msgid "Countries"
+msgstr "国家列表"
+
+#: src/dialog_iradio.c
+msgid "Favourites"
+msgstr "收藏"
+
+#: src/dialog_iradio.c
+msgid "Most listened"
+msgstr "最多收听"
+
+#: src/dialog_iradio.c
+msgid "No favourites yet: Favourite keeps the station selected in a list, the web page takes any stream address"
+msgstr "还没有收藏: 按\"收藏\"保存列表中选中的电台, 网页可添加任意流地址"
+
+#: src/dialog_iradio.c
+msgid "No stations"
+msgstr "无电台"
+
+#: src/dialog_iradio.c
+msgid "not playable"
+msgstr "无法播放"
+
+#: src/dialog_iradio.c
+msgid "Connecting"
+msgstr "正在连接"
+
+#: src/dialog_iradio.c
+msgid "Playing"
+msgstr "正在播放"
+
+#: src/dialog_iradio.c
+msgid "Error"
+msgstr "错误"
+
+#: src/dialog_iradio.c
+msgid "Loading"
+msgstr "正在加载"
+
+#: src/dialog_iradio.c
+#, c-format
+msgid "Internet radio - %s"
+msgstr "网络广播 - %s"
+
+#: src/dialog_iradio.c
+msgid "Nothing playing"
+msgstr "未在播放"
+
+#: src/dialog_iradio.c src/dialog_snake.c src/recorder_window.c
+msgid "Play"
+msgstr "播放"
+
+#: src/dialog_iradio.c
+#, c-format
+msgid "Favourites: %d at most"
+msgstr "收藏: 最多 %d 个"
+
+#: src/dialog_iradio.c
+msgid "Favourites could not be saved"
+msgstr "无法保存收藏"
+
+#: src/dialog_iradio.c
+#, c-format
+msgid "Out of the favourites: %s"
+msgstr "已移出收藏: %s"
+
+#: src/dialog_iradio.c
+#, c-format
+msgid "In the favourites: %s"
+msgstr "已加入收藏: %s"
+
+#: src/dialog_iradio.c
+msgid "Not a stream address"
+msgstr "不是流地址"
+
+#: src/dialog_iradio.c
+msgid "Station, genre or a stream address (http://...): "
+msgstr "电台, 类型或流地址 (http://...): "
+
+#: src/dialog_iradio.c
+msgid "Stations from the directory of radio-browser.info"
+msgstr "电台来自 radio-browser.info 的目录"
+
+#: src/dialog_iradio.c
+msgid "MP3 stations only: a newer card image plays the others - radio-browser.info"
+msgstr "仅 MP3 电台: 新的存储卡镜像可以播放其他电台 - radio-browser.info"
+
 #: src/dialog_jtty.c src/dialog_olivia.c src/dialog_psk.c
 msgid ""
 "Free\n"
@@ -4273,6 +4986,303 @@ msgstr "DX 呼号:"
 #: src/dialog_jtty.c src/dialog_olivia.c src/dialog_psk.c
 msgid "QSO cleared"
 msgstr "QSO 已清除"
+
+#: src/dialog_meteo.c
+msgid "Now"
+msgstr "当前"
+
+#: src/dialog_meteo.c
+msgid "5 days"
+msgstr "5 天"
+
+#: src/dialog_meteo.c
+msgid "Warnings"
+msgstr "预警"
+
+#: src/dialog_meteo.c
+msgid "Clear sky"
+msgstr "晴朗"
+
+#: src/dialog_meteo.c
+msgid "Mainly clear"
+msgstr "大部晴朗"
+
+#: src/dialog_meteo.c
+msgid "Partly cloudy"
+msgstr "局部多云"
+
+#: src/dialog_meteo.c
+msgid "Overcast"
+msgstr "阴天"
+
+#: src/dialog_meteo.c
+msgid "Fog"
+msgstr "雾"
+
+#: src/dialog_meteo.c
+msgid "Rime fog"
+msgstr "冻雾"
+
+#: src/dialog_meteo.c
+msgid "Light drizzle"
+msgstr "小毛毛雨"
+
+#: src/dialog_meteo.c
+msgid "Drizzle"
+msgstr "毛毛雨"
+
+#: src/dialog_meteo.c
+msgid "Dense drizzle"
+msgstr "浓毛毛雨"
+
+#: src/dialog_meteo.c
+msgid "Freezing drizzle"
+msgstr "冻毛毛雨"
+
+#: src/dialog_meteo.c
+msgid "Dense freezing drizzle"
+msgstr "浓冻毛毛雨"
+
+#: src/dialog_meteo.c
+msgid "Light rain"
+msgstr "小雨"
+
+#: src/dialog_meteo.c
+msgid "Rain"
+msgstr "中雨"
+
+#: src/dialog_meteo.c
+msgid "Heavy rain"
+msgstr "大雨"
+
+#: src/dialog_meteo.c
+msgid "Freezing rain"
+msgstr "冻雨"
+
+#: src/dialog_meteo.c
+msgid "Heavy freezing rain"
+msgstr "强冻雨"
+
+#: src/dialog_meteo.c
+msgid "Light snow"
+msgstr "小雪"
+
+#: src/dialog_meteo.c
+msgid "Snow"
+msgstr "中雪"
+
+#: src/dialog_meteo.c
+msgid "Heavy snow"
+msgstr "大雪"
+
+#: src/dialog_meteo.c
+msgid "Snow grains"
+msgstr "米雪"
+
+#: src/dialog_meteo.c
+msgid "Light showers"
+msgstr "小阵雨"
+
+#: src/dialog_meteo.c
+msgid "Showers"
+msgstr "阵雨"
+
+#: src/dialog_meteo.c
+msgid "Violent showers"
+msgstr "强阵雨"
+
+#: src/dialog_meteo.c
+msgid "Snow showers"
+msgstr "阵雪"
+
+#: src/dialog_meteo.c
+msgid "Heavy snow showers"
+msgstr "强阵雪"
+
+#: src/dialog_meteo.c
+msgid "Thunderstorm"
+msgstr "雷暴"
+
+#: src/dialog_meteo.c
+msgid "Thunderstorm with hail"
+msgstr "雷暴伴冰雹"
+
+#: src/dialog_meteo.c
+msgid "Thunderstorm with heavy hail"
+msgstr "雷暴伴强冰雹"
+
+#: src/dialog_meteo.c
+msgid "very high"
+msgstr "很高"
+
+#: src/dialog_meteo.c
+#, c-format
+msgid "%s   %s   (%d warnings: Warnings)"
+msgstr "%s   %s   (%d 条预警: 见\"预警\")"
+
+#: src/dialog_meteo.c
+#, c-format
+msgid "#%06x %.*s did not answer:# none worked out from the forecast either"
+msgstr "#%06x %.*s 无应答:# 也未能从预报中推算出预警"
+
+#: src/dialog_meteo.c
+#, c-format
+msgid "#%06x No warnings in force here# (%s)"
+msgstr "#%06x 此处无生效的预警# (%s)"
+
+#: src/dialog_meteo.c
+#, c-format
+msgid "#%06x None worked out from the forecast# (no official warnings asked for this country)"
+msgstr "#%06x 未从预报中推算出预警# (此国家不查询官方预警)"
+
+#: src/dialog_meteo.c
+#, c-format
+msgid "Feels like %s"
+msgstr "体感 %s"
+
+#: src/dialog_meteo.c
+#, c-format
+msgid "Low %s, high %s"
+msgstr "最低 %s, 最高 %s"
+
+#: src/dialog_meteo.c
+#, c-format
+msgid "Sun %s to %s"
+msgstr "日出 %s, 日落 %s"
+
+#: src/dialog_meteo.c
+msgid "Wind"
+msgstr "风"
+
+#: src/dialog_meteo.c
+msgid "Gusts"
+msgstr "阵风"
+
+#: src/dialog_meteo.c
+msgid "Humidity"
+msgstr "湿度"
+
+#: src/dialog_meteo.c
+msgid "Pressure"
+msgstr "气压"
+
+#: src/dialog_meteo.c
+msgid " hPa"
+msgstr ""
+
+#: src/dialog_meteo.c
+msgid "Rain today"
+msgstr "今日降水"
+
+#: src/dialog_meteo.c
+msgid "Clouds"
+msgstr "云量"
+
+#: src/dialog_meteo.c
+msgid "Dew point"
+msgstr "露点"
+
+#: src/dialog_meteo.c
+msgid "Visibility"
+msgstr "能见度"
+
+#: src/dialog_meteo.c
+msgid "UV index"
+msgstr "紫外线指数"
+
+#: src/dialog_meteo.c
+msgid "Today"
+msgstr "今天"
+
+#: src/dialog_meteo.c
+msgid "No forecast in the answer"
+msgstr "返回内容中没有预报"
+
+#: src/dialog_meteo.c
+msgid "(here)"
+msgstr "(本地)"
+
+#: src/dialog_meteo.c
+msgid "(nearby)"
+msgstr "(附近)"
+
+#: src/dialog_meteo.c
+#, c-format
+msgid "#%06x %.*s did not answer:# the warnings below are worked out from the forecast, not official"
+msgstr "#%06x %.*s 无应答:# 以下预警由预报推算, 非官方发布"
+
+#: src/dialog_meteo.c
+#, c-format
+msgid "%s: %d for this place, %d nearby; their texts as the service gives them"
+msgstr "%s: 本地 %d 条, 附近 %d 条; 文字按服务原文显示"
+
+#: src/dialog_meteo.c
+msgid "No official warnings are asked for this country: these are worked out from Open-Meteo's forecast, not official"
+msgstr "此国家不查询官方预警: 以下由 Open-Meteo 的预报推算, 非官方发布"
+
+#: src/dialog_meteo.c
+msgid "Times may lag meteoalarm.org: the latest warnings are there"
+msgstr "时间可能落后于 meteoalarm.org: 最新预警以该网站为准"
+
+#: src/dialog_meteo.c
+msgid "No warnings in force here"
+msgstr "此处无生效的预警"
+
+#: src/dialog_meteo.c
+msgid "None worked out from the forecast"
+msgstr "未从预报中推算出预警"
+
+#: src/dialog_meteo.c
+msgid "WEATHER"
+msgstr "天气"
+
+#: src/dialog_meteo.c
+msgid "No position: plug in a GPS, or set the QTH locator or the country in Settings > General"
+msgstr "无位置: 请插入 GPS, 或在 设置 > 常规 中设置 QTH 网格或国家"
+
+#: src/dialog_meteo.c
+msgid "Asking for the weather..."
+msgstr "正在查询天气..."
+
+#: src/dialog_meteo.c
+msgid "Notices on: the warnings asked every 30 minutes"
+msgstr "通知开: 每 30 分钟查询一次预警"
+
+#: src/dialog_meteo.c
+msgid "No position: plug in a GPS, or set the QTH locator or the country in Settings > General > STATION"
+msgstr "无位置: 请插入 GPS, 或在 设置 > 常规 > 电台 中设置 QTH 网格或国家"
+
+#: src/dialog_meteo.c
+msgid "No weather yet: Update (it needs the internet)"
+msgstr "还没有天气: 按\"更新\" (需要互联网)"
+
+#: src/dialog_meteo.c
+msgid ""
+"Notices:\n"
+"On"
+msgstr ""
+"通知:\n"
+"开"
+
+#: src/dialog_meteo.c
+msgid ""
+"Notices:\n"
+"Off"
+msgstr ""
+"通知:\n"
+"关"
+
+#: src/dialog_meteo.c
+msgid ""
+"Weather warning notices on\n"
+"the warnings asked every 30 minutes"
+msgstr ""
+"天气预警通知已开\n"
+"每 30 分钟查询一次预警"
+
+#: src/dialog_meteo.c
+msgid "Weather warning notices off"
+msgstr "天气预警通知已关"
 
 #: src/dialog_modes.c src/field/flog.c src/olivia_tx.c src/screen_main.c
 msgid "Olivia"
@@ -4594,6 +5604,10 @@ msgid "Airband"
 msgstr "航空波段"
 
 #: src/dialog_scan.c
+msgid "HF Air"
+msgstr "短波航空"
+
+#: src/dialog_scan.c
 msgid "Segment"
 msgstr "频段"
 
@@ -4763,9 +5777,360 @@ msgstr ""
 "瀑布贪吃蛇\n"
 "#%06x 转动旋钮控制方向 - 按 MFK 开始#"
 
-#: src/dialog_snake.c src/recorder_window.c
-msgid "Play"
-msgstr "播放"
+#: src/dialog_svx.c src/dialog_zello.c src/settings_window.cpp
+#: src/wifi_window.c
+msgid "Disconnect"
+msgstr "断开"
+
+#: src/dialog_svx.c src/dialog_zello.c src/settings_window.cpp
+#: src/wifi_window.c
+msgid "Connect"
+msgstr "连接"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid ""
+"Stop\n"
+"talking"
+msgstr ""
+"停止\n"
+"讲话"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid ""
+"No BT\n"
+"mic"
+msgstr ""
+"无蓝牙\n"
+"话筒"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid "Talk"
+msgstr "讲话"
+
+#: src/dialog_svx.c
+msgid ""
+"Lock:\n"
+"On"
+msgstr ""
+"锁定:\n"
+"开"
+
+#: src/dialog_svx.c
+msgid ""
+"Lock:\n"
+"Off"
+msgstr ""
+"锁定:\n"
+"关"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid ""
+"Talk via:\n"
+"Bluetooth"
+msgstr ""
+"讲话用:\n"
+"蓝牙"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid ""
+"Talk via:\n"
+"Hand mic"
+msgstr ""
+"讲话用:\n"
+"手咪"
+
+#: src/dialog_svx.c
+msgid ""
+"SVX>RF:\n"
+"Off"
+msgstr ""
+"SVX>RF:\n"
+"关"
+
+#: src/dialog_svx.c
+msgid ""
+"SVX>RF:\n"
+"Stopped"
+msgstr ""
+"SVX>RF:\n"
+"已停止"
+
+#: src/dialog_svx.c
+msgid ""
+"SVX>RF:\n"
+"No ham band"
+msgstr ""
+"SVX>RF:\n"
+"非业余波段"
+
+#: src/dialog_svx.c
+msgid ""
+"SVX>RF:\n"
+"On"
+msgstr ""
+"SVX>RF:\n"
+"开"
+
+#: src/dialog_svx.c
+msgid ""
+"RF>SVX:\n"
+"Off"
+msgstr ""
+"RF>SVX:\n"
+"关"
+
+#: src/dialog_svx.c
+msgid ""
+"RF>SVX:\n"
+"No ham band"
+msgstr ""
+"RF>SVX:\n"
+"非业余波段"
+
+#: src/dialog_svx.c
+msgid ""
+"RF>SVX:\n"
+"Outside bands"
+msgstr ""
+"RF>SVX:\n"
+"业余波段外"
+
+#: src/dialog_svx.c
+msgid ""
+"RF>SVX:\n"
+"On"
+msgstr ""
+"RF>SVX:\n"
+"开"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid ""
+"CW ID:\n"
+"Off"
+msgstr ""
+"CW ID:\n"
+"关"
+
+#: src/dialog_svx.c src/dialog_zello.c
+#, c-format
+msgid ""
+"TX limit:\n"
+"%d s"
+msgstr ""
+"发射上限:\n"
+"%d s"
+
+#: src/dialog_svx.c src/dialog_zello.c
+#, c-format
+msgid ""
+"Pause:\n"
+"%d s"
+msgstr ""
+"间隔:\n"
+"%d s"
+
+#: src/dialog_svx.c
+#, c-format
+msgid "SVXConnect: %s"
+msgstr ""
+
+#: src/dialog_svx.c src/svx.c
+msgid "not on the reflector yet"
+msgstr "尚未连上反射器"
+
+#: src/dialog_svx.c
+msgid "SVXConnect: talk through a Bluetooth headset's mic"
+msgstr "SVXConnect: 用蓝牙耳麦的话筒讲话"
+
+#: src/dialog_svx.c
+msgid "SVXConnect: talk through the hand mic"
+msgstr "SVXConnect: 用手咪讲话"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid "link is on"
+msgstr "链路已开启"
+
+#: src/dialog_svx.c
+msgid "SVX to RF"
+msgstr "SVX 转射频"
+
+#: src/dialog_svx.c
+msgid "SVX to RF: set your callsign first (Settings), the link sends it as its CW ID"
+msgstr "SVX 转射频: 请先设置呼号 (设置), 链路用它作为 CW ID 发送"
+
+#: src/dialog_svx.c
+msgid "SVX to RF: set the squelch (SQL) first, the link keys only while it is closed"
+msgstr "SVX 转射频: 请先设置静噪 (SQL), 链路只在静噪关闭时发射"
+
+#: src/dialog_svx.c
+msgid "SVX to RF: it transmits in LSB, USB, AM or FM only"
+msgstr "SVX 转射频: 只在 LSB, USB, AM 或 FM 中发射"
+
+#: src/dialog_svx.c
+msgid "SVX to RF on: the talkgroup's overs are transmitted on this frequency"
+msgstr "SVX 转射频开: 通话组里的讲话将在此频率发射"
+
+#: src/dialog_svx.c
+msgid "SVX to RF off"
+msgstr "SVX 转射频关"
+
+#: src/dialog_svx.c
+msgid "RF to SVX"
+msgstr "射频转 SVX"
+
+#: src/dialog_svx.c
+msgid "RF to SVX: set the squelch (SQL) first, it tells when a station is on"
+msgstr "射频转 SVX: 请先设置静噪 (SQL), 用它判断是否有电台在发射"
+
+#: src/dialog_svx.c
+msgid "RF to SVX on: what the squelch opens on goes to the talkgroup"
+msgstr "射频转 SVX 开: 静噪打开时收到的声音会送到通话组"
+
+#: src/dialog_svx.c
+msgid "RF to SVX off"
+msgstr "射频转 SVX 关"
+
+#: src/dialog_svx.c
+msgid "SVX link: the CW ID can be off where your licence lets an unattended station go without it"
+msgstr "SVX 链路: 若你的执照允许无人值守电台不发识别, 可关闭 CW ID"
+
+#: src/dialog_svx.c
+msgid "Not set up: the radio's web page, SVXConnect"
+msgstr "未设置: 请在电台网页的 SVXConnect 中设置"
+
+#: src/dialog_svx.c
+msgid "No talkgroups yet"
+msgstr "还没有通话组"
+
+#: src/dialog_svx.c
+msgid "Connect: the talkgroups come from the web page"
+msgstr "连接: 通话组来自网页上的设置"
+
+#: src/dialog_svx.c
+msgid "Recent"
+msgstr "最近讲话"
+
+#: src/dialog_svx.c
+msgid "nobody yet"
+msgstr "还没有人"
+
+#: src/dialog_svx.c
+#, c-format
+msgid "#%06x SVXCONNECT#  #%06x %s#"
+msgstr ""
+
+#: src/dialog_svx.c
+msgid "reflector talkgroups on the internet, never on the air"
+msgstr "互联网上的反射器通话组, 不经无线发射"
+
+#: src/dialog_svx.c
+msgid "on the air: the talkgroup"
+msgstr "正在发射: 通话组"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid "on the air: CW ID"
+msgstr "正在发射: CW ID"
+
+#: src/dialog_svx.c
+msgid "receiver to the talkgroup"
+msgstr "接收机送往通话组"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid "amateur bands only"
+msgstr "仅限业余波段"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid "outside the amateur bands"
+msgstr "业余波段外"
+
+#: src/dialog_svx.c
+#, c-format
+msgid "#%06x SVXCONNECT#  #%06x %s%s%s#  #%06x %s#"
+msgstr ""
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid "SIMPLEX REPEATER"
+msgstr "单工中继"
+
+#: src/dialog_svx.c
+msgid "No certificate: request one on the web page (SVXConnect)"
+msgstr "无证书: 请在网页上申请 (SVXConnect)"
+
+#: src/dialog_svx.c
+msgid "Certificate expired: request a new one on the web page"
+msgstr "证书已过期: 请在网页上申请新证书"
+
+#: src/dialog_svx.c
+msgid "Certificate unreadable: request a new one on the web page"
+msgstr "证书无法读取: 请在网页上申请新证书"
+
+#: src/dialog_svx.c
+msgid "Certificate not valid yet: is the radio's clock right?"
+msgstr "证书尚未生效: 电台时钟是否正确?"
+
+#: src/dialog_svx.c
+msgid "Set up the reflector on the radio's web page: SVXConnect"
+msgstr "请在电台网页上设置反射器: SVXConnect"
+
+#: src/dialog_svx.c
+msgid "Not connected: press Connect"
+msgstr "未连接: 按\"连接\""
+
+#: src/dialog_svx.c
+msgid "Not connected"
+msgstr "未连接"
+
+#: src/dialog_svx.c
+msgid "Connecting to the reflector"
+msgstr "正在连接反射器"
+
+#: src/dialog_svx.c
+msgid "Talking on"
+msgstr "正在讲话"
+
+#: src/dialog_svx.c
+msgid "speak into the Bluetooth headset"
+msgstr "请对蓝牙耳麦说话"
+
+#: src/dialog_svx.c
+msgid "speak into the hand mic"
+msgstr "请对手咪说话"
+
+#: src/dialog_svx.c
+msgid "No audio: talking on SVXConnect uses the hand mic"
+msgstr "无音频: 在 SVXConnect 上讲话使用手咪"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid "Talking now:"
+msgstr "正在讲话:"
+
+#: src/dialog_svx.c
+msgid "Choose a talkgroup with the MFK to talk on it"
+msgstr "用 MFK 选择要讲话的通话组"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid "PTT or Talk: speak into the Bluetooth headset"
+msgstr "PTT 或\"讲话\": 请对蓝牙耳麦说话"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid "No Bluetooth mic: a headset on its headset profile"
+msgstr "无蓝牙话筒: 请以耳麦模式连接耳麦"
+
+#: src/dialog_svx.c src/dialog_zello.c
+msgid "PTT or Talk: speak into the hand mic, without its own PTT"
+msgstr "PTT 或\"讲话\": 请对手咪说话, 不要按手咪自己的 PTT"
+
+#: src/dialog_svx.c
+msgid "SVXConnect: set up the reflector on the radio's web page first"
+msgstr "SVXConnect: 请先在电台网页上设置反射器"
+
+#: src/dialog_svx.c
+msgid "SVXConnect: the helper could not start"
+msgstr "SVXConnect: 辅助程序无法启动"
+
+#: src/dialog_svx.c
+msgid "listened to only, not switchable (web page)"
+msgstr "仅收听, 不可切换 (网页)"
 
 #: src/dialog_wspr.c
 msgid "WSPR: no band of the hop here, beacon stopped"
@@ -5019,6 +6384,213 @@ msgstr "呼号"
 msgid "Grid"
 msgstr "网格"
 
+#: src/dialog_zello.c
+msgid ""
+"Reload\n"
+"channels"
+msgstr ""
+"刷新\n"
+"频道"
+
+#: src/dialog_zello.c
+msgid "(ZELLO 1:3)"
+msgstr ""
+
+#: src/dialog_zello.c
+msgid "(ZELLO 2:3)"
+msgstr ""
+
+#: src/dialog_zello.c
+msgid "(ZELLO 3:3)"
+msgstr ""
+
+#: src/dialog_zello.c
+msgid ""
+"Zello>RF:\n"
+"Off"
+msgstr ""
+"Zello>RF:\n"
+"关"
+
+#: src/dialog_zello.c
+msgid ""
+"Zello>RF:\n"
+"Stopped"
+msgstr ""
+"Zello>RF:\n"
+"已停止"
+
+#: src/dialog_zello.c
+msgid ""
+"Zello>RF:\n"
+"No ham band"
+msgstr ""
+"Zello>RF:\n"
+"非业余波段"
+
+#: src/dialog_zello.c
+msgid ""
+"Zello>RF:\n"
+"On"
+msgstr ""
+"Zello>RF:\n"
+"开"
+
+#: src/dialog_zello.c
+msgid ""
+"RF>Zello:\n"
+"Off"
+msgstr ""
+"RF>Zello:\n"
+"关"
+
+#: src/dialog_zello.c
+msgid ""
+"RF>Zello:\n"
+"No ham band"
+msgstr ""
+"RF>Zello:\n"
+"非业余波段"
+
+#: src/dialog_zello.c
+msgid ""
+"RF>Zello:\n"
+"Outside bands"
+msgstr ""
+"RF>Zello:\n"
+"业余波段外"
+
+#: src/dialog_zello.c
+msgid ""
+"RF>Zello:\n"
+"On"
+msgstr ""
+"RF>Zello:\n"
+"开"
+
+#: src/dialog_zello.c
+msgid "Zello: talk through a Bluetooth headset's mic"
+msgstr "Zello: 用蓝牙耳麦的话筒讲话"
+
+#: src/dialog_zello.c
+msgid "Zello: talk through the hand mic"
+msgstr "Zello: 用手咪讲话"
+
+#: src/dialog_zello.c
+msgid "Zello to RF"
+msgstr "Zello 转射频"
+
+#: src/dialog_zello.c
+msgid "Zello to RF: set your callsign first (Settings), the link sends it as its CW ID"
+msgstr "Zello 转射频: 请先设置呼号 (设置), 链路用它作为 CW ID 发送"
+
+#: src/dialog_zello.c
+msgid "Zello to RF: set the squelch (SQL) first, the link keys only while it is closed"
+msgstr "Zello 转射频: 请先设置静噪 (SQL), 链路只在静噪关闭时发射"
+
+#: src/dialog_zello.c
+msgid "Zello to RF: it transmits in LSB, USB, AM or FM only"
+msgstr "Zello 转射频: 只在 LSB, USB, AM 或 FM 中发射"
+
+#: src/dialog_zello.c
+msgid "Zello to RF on: the channel's messages are transmitted on this frequency"
+msgstr "Zello 转射频开: 频道里的消息将在此频率发射"
+
+#: src/dialog_zello.c
+msgid "Zello to RF off"
+msgstr "Zello 转射频关"
+
+#: src/dialog_zello.c
+msgid "RF to Zello"
+msgstr "射频转 Zello"
+
+#: src/dialog_zello.c
+msgid "RF to Zello: set the squelch (SQL) first, it tells when a station is on"
+msgstr "射频转 Zello: 请先设置静噪 (SQL), 用它判断是否有电台在发射"
+
+#: src/dialog_zello.c
+msgid "RF to Zello on: what the squelch opens on goes to the channel"
+msgstr "射频转 Zello 开: 静噪打开时收到的声音会送到频道"
+
+#: src/dialog_zello.c
+msgid "RF to Zello off"
+msgstr "射频转 Zello 关"
+
+#: src/dialog_zello.c
+msgid "Zello link: the CW ID can be off where your licence lets an unattended station go without it"
+msgstr "Zello 链路: 若你的执照允许无人值守电台不发识别, 可关闭 CW ID"
+
+#: src/dialog_zello.c
+msgid "No channels: add them on the radio's web page, Zello"
+msgstr "无频道: 请在电台网页的 Zello 中添加"
+
+#: src/dialog_zello.c
+#, c-format
+msgid "#%06x ZELLO#  #%06x %s#"
+msgstr ""
+
+#: src/dialog_zello.c
+msgid "voice channels on the internet, never on the air"
+msgstr "互联网上的语音频道, 不经无线发射"
+
+#: src/dialog_zello.c
+msgid "on the air: the channel"
+msgstr "正在发射: 频道"
+
+#: src/dialog_zello.c
+msgid "receiver to the channel"
+msgstr "接收机送往频道"
+
+#: src/dialog_zello.c
+#, c-format
+msgid "#%06x ZELLO#  #%06x %s%s%s#  #%06x %s#"
+msgstr ""
+
+#: src/dialog_zello.c
+msgid " Zello>RF"
+msgstr ""
+
+#: src/dialog_zello.c
+msgid " RF>Zello"
+msgstr ""
+
+#: src/dialog_zello.c
+msgid "Not connected: choose a channel and press the MFK"
+msgstr "未连接: 选择频道后按 MFK"
+
+#: src/dialog_zello.c
+msgid "again in"
+msgstr "重试倒计时"
+
+#: src/dialog_zello.c
+msgid "Connecting to"
+msgstr "正在连接"
+
+#: src/dialog_zello.c
+msgid "Talking on Zello: speak into the Bluetooth headset"
+msgstr "正在 Zello 上讲话: 请对蓝牙耳麦说话"
+
+#: src/dialog_zello.c
+msgid "Talking on Zello: speak into the hand mic"
+msgstr "正在 Zello 上讲话: 请对手咪说话"
+
+#: src/dialog_zello.c
+msgid "No audio: talking on Zello uses the hand mic"
+msgstr "无音频: 在 Zello 上讲话使用手咪"
+
+#: src/dialog_zello.c
+msgid "Zello: the helper could not start"
+msgstr "Zello: 辅助程序无法启动"
+
+#: src/dialog_zello.c
+msgid "Zello: add channels on the radio's web page first"
+msgstr "Zello: 请先在电台网页上添加频道"
+
+#: src/dialog_zello.c
+#, c-format
+msgid "Zello channels: %d"
+msgstr "Zello 频道: %d"
+
 #: src/digi_freqs.c
 msgid "20m wide"
 msgstr "20m 宽"
@@ -5172,6 +6744,18 @@ msgstr ""
 msgid "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYTsaaaaaaaceeeeiiiidnooooo/ouuuuytyAaAaAaCcCcCcCcDdDdEeEeEeEeEeGgGgGgGgHhHhIiIiIiIiIiIiJjKkkLlLlLlLlLlNnNnNnnNnOoOoOoOoRrRrRrSsSsSsSsTtTtTtUuUuUuUuUuUuWwYyYZzZzZzs"
 msgstr ""
 
+#: src/field_map.c
+msgid "ZOOM"
+msgstr "缩放"
+
+#: src/field_map.c
+msgid "No map here"
+msgstr "此处无地图"
+
+#: src/field_map.c
+msgid "outside the area of the tiles on the card"
+msgstr "超出存储卡上地图瓦片的范围"
+
 #: src/first_start.c
 msgid "the GPS"
 msgstr "GPS"
@@ -5207,6 +6791,26 @@ msgstr "已连接到 %s"
 msgid "Not connected: Networks lists the networks in reach"
 msgstr "未连接: 按\"网络\"列出可用网络"
 
+#: src/first_start.c src/settings_window.cpp
+msgid "Language file not found: English"
+msgstr "未找到语言文件: 使用英语"
+
+#: src/first_start.c
+msgid "The language of the screens: this guide, the menus and the apps take it at once. Settings > Display has it too."
+msgstr "屏幕显示的语言: 本向导, 菜单和应用会立即使用它. 设置 > 显示 中也有此项."
+
+#: src/first_start.c src/settings_window.cpp
+msgid " (draft)"
+msgstr " (草稿)"
+
+#: src/first_start.c src/settings_window.cpp
+msgid "Language"
+msgstr "语言"
+
+#: src/first_start.c
+msgid "A language marked draft is still being checked by a speaker."
+msgstr "标为\"草稿\"的语言仍在由母语者校对."
+
 #: src/first_start.c
 msgid "WiFi sets the clock, and the DX Cluster, the uploads and the web configurator need it. Networks opens the WiFi window: choose a network there, then ESC or GEN comes back here."
 msgstr "WiFi 用于校准时钟, DX 集群, 上传和网页配置也需要它. \"网络\"打开 WiFi 窗口: 在那里选择网络, 然后按 ESC 或 GEN 回到这里."
@@ -5229,10 +6833,6 @@ msgid "Callsign"
 msgstr "呼号"
 
 #: src/first_start.c
-msgid "Locator"
-msgstr "网格"
-
-#: src/first_start.c
 #, c-format
 msgid "Use %s"
 msgstr "使用 %s"
@@ -5247,16 +6847,58 @@ msgstr "GPS 定位后, 这里会给出其网格."
 
 #: src/first_start.c
 #, c-format
+msgid "Band plan: %s, as chosen in Settings > General"
+msgstr "波段规划: %s, 按 设置 > 常规 中的选择"
+
+#: src/first_start.c
+#, c-format
+msgid "Band plan: Auto, Region %i from the GPS"
+msgstr "波段规划: 自动, 第 %i 区 (来自 GPS)"
+
+#: src/first_start.c
+#, c-format
+msgid "Band plan: Auto, Region %i from the locator %s"
+msgstr "波段规划: 自动, 第 %i 区 (来自网格 %s)"
+
+#: src/first_start.c
+#, c-format
+msgid "Band plan: Auto, Region %i from the country"
+msgstr "波段规划: 自动, 第 %i 区 (来自国家)"
+
+#: src/first_start.c
+#, c-format
+msgid "Band plan: Auto, Region %i from the callsign %s"
+msgstr "波段规划: 自动, 第 %i 区 (来自呼号 %s)"
+
+#: src/first_start.c
+#, c-format
+msgid "Band plan: Auto, Region %i: nothing tells where the radio is"
+msgstr "波段规划: 自动, 第 %i 区: 无法判断电台在哪里"
+
+#: src/first_start.c
+msgid "The country you operate from. The band plan's Auto takes its IARU region when the GPS and the locator do not tell, and the clock its time zone when none was chosen. Settings > General has it too."
+msgstr "你开台所在的国家. GPS 和网格无法判断时, 波段规划的\"自动\"按它确定 IARU 分区; 未选时区时, 时钟按它确定时区. 设置 > 常规 中也有此项."
+
+#: src/first_start.c
+msgid "From the callsign"
+msgstr "按呼号"
+
+#: src/first_start.c
+#, c-format
 msgid "Set by %s: right to the second, nothing to do here"
 msgstr "由 %s 设置: 精确到秒, 这里无需操作"
 
 #: src/first_start.c
-msgid "Not set by NTP or a GPS: set it below, or join WiFi (step 1)"
-msgstr "未由 NTP 或 GPS 设置: 在下面设置, 或连接 WiFi (第 1 步)"
+msgid "Not set by NTP or a GPS: set it below, or join WiFi in the WiFi step"
+msgstr "未由 NTP 或 GPS 设置: 请在下方设置, 或在 WiFi 步骤中连接 WiFi"
 
 #: src/first_start.c
 msgid "Time zone"
 msgstr "时区"
+
+#: src/first_start.c
+msgid "From the country: choose another zone here if yours differs."
+msgstr "按国家确定: 如果你的时区不同, 请在这里另选."
 
 #: src/first_start.c
 msgid "Date, time"
@@ -5307,6 +6949,19 @@ msgstr "已跳过: 呼号在 设置 > 常规 > 电台"
 #: src/first_start.c
 msgid "No callsign: Settings > General > STATION has it"
 msgstr "无呼号: 在 设置 > 常规 > 电台 设置"
+
+#: src/first_start.c
+#, c-format
+msgid "%s, band plan Region %i"
+msgstr "%s, 波段规划第 %i 区"
+
+#: src/first_start.c
+msgid "Skipped: Settings > General > STATION has it"
+msgstr "已跳过: 在 设置 > 常规 > 电台 设置"
+
+#: src/first_start.c
+msgid "Not set: Settings > General > STATION has it"
+msgstr "未设置: 在 设置 > 常规 > 电台 设置"
 
 #: src/first_start.c
 msgid "Kept by the GPS"
@@ -5383,10 +7038,6 @@ msgstr "频率错误"
 #: src/freq_entry.c
 msgid "Freq in MHz"
 msgstr "频率 (MHz)"
-
-#: src/freq_list.c
-msgid "MFK: choose - press: tune"
-msgstr "MFK: 选择 - 按下: 调谐"
 
 #: src/freq_strip.c src/remote_server.c
 msgid "LOCK"
@@ -5759,6 +7410,60 @@ msgstr ""
 #: src/ft8_window.c
 msgid "Stopped: nothing transmits until TX Call, CQ or a call is pressed"
 msgstr "已停止: 按下 TX 呼叫, CQ 或某个呼号前不会发射"
+
+#: src/ghostnet.c
+msgid "Own net"
+msgstr "自己的点名"
+
+#: src/ghostnet.c src/meteo.c
+msgid "Sun"
+msgstr "周日"
+
+#: src/ghostnet.c src/meteo.c
+msgid "Mon"
+msgstr "周一"
+
+#: src/ghostnet.c src/meteo.c
+msgid "Tue"
+msgstr "周二"
+
+#: src/ghostnet.c src/meteo.c
+msgid "Wed"
+msgstr "周三"
+
+#: src/ghostnet.c src/meteo.c
+msgid "Thu"
+msgstr "周四"
+
+#: src/ghostnet.c src/meteo.c
+msgid "Fri"
+msgstr "周五"
+
+#: src/ghostnet.c src/meteo.c
+msgid "Sat"
+msgstr "周六"
+
+#: src/ghostnet.c
+msgid "@GHOSTNET"
+msgstr ""
+
+#: src/ghostnet.c src/js8_window.c
+msgid "@GSTFLASH"
+msgstr ""
+
+#: src/ghostnet_gui.c
+#, c-format
+msgid "GhostNet %s in %d min, %s %d.%03d"
+msgstr "GhostNet %s %d 分钟后开始, %s %d.%03d"
+
+#: src/ghostnet_gui.c
+#, c-format
+msgid "GhostNet %s in %d min, %s"
+msgstr "GhostNet %s %d 分钟后开始, %s"
+
+#: src/ghostnet_gui.c
+msgid "GhostNet RTTY: 7.077 MHz, 45.45 baud, 170 Hz"
+msgstr ""
 
 #: src/gps_window.c
 msgid "Sat in view/in use:"
@@ -6262,12 +7967,37 @@ msgid "Map"
 msgstr "地图"
 
 #: src/js8_window.c
+msgid ""
+"Trans-\n"
+"late"
+msgstr ""
+"翻译\n"
+"消息"
+
+#: src/js8_window.c
 msgid "  (bad checksum)"
 msgstr "  (校验和错误)"
 
 #: src/js8_window.c
 msgid "Listening for JS8..."
 msgstr "正在收听 JS8..."
+
+#: src/js8_window.c
+msgid "In your language already"
+msgstr "已经是你的语言"
+
+#: src/js8_window.c
+msgid "No answer from MyMemory"
+msgstr "MyMemory 无应答"
+
+#: src/js8_window.c
+#, c-format
+msgid "MyMemory's free translations of today are used up: more in %s h"
+msgstr "MyMemory 今天的免费翻译额度已用完: %s h 后恢复"
+
+#: src/js8_window.c
+msgid "MyMemory gave no translation"
+msgstr "MyMemory 未返回翻译"
 
 #: src/js8_window.c
 #, c-format
@@ -6379,6 +8109,35 @@ msgstr "%s已排队: %d 帧%.0s, %.0f s"
 #, c-format
 msgid "%d frame%s, %.0f s"
 msgstr "%d 帧%.0s, %.0f s"
+
+#: src/js8_window.c
+msgid "In English: check, OK sends"
+msgstr "已译成英文: 请检查, 按 OK 发送"
+
+#: src/js8_window.c
+msgid "English already: OK sends it"
+msgstr "已是英文: 按 OK 发送"
+
+#: src/js8_window.c
+msgid "No MyMemory: OK sends as typed"
+msgstr "连不上 MyMemory: 按 OK 原样发送"
+
+#: src/js8_window.c
+#, c-format
+msgid "Limit (%s h): OK sends as typed"
+msgstr "已达上限 (%s h): 按 OK 原样发送"
+
+#: src/js8_window.c
+msgid "Not translated: OK sends as is"
+msgstr "未翻译: 按 OK 原样发送"
+
+#: src/js8_window.c
+msgid "Busy: OK sends as typed"
+msgstr "忙: 按 OK 原样发送"
+
+#: src/js8_window.c
+msgid "Into English..."
+msgstr "正在译成英文..."
 
 #: src/js8_window.c
 #, c-format
@@ -7550,6 +9309,11 @@ msgstr "驻波比过高 %.1f:1: AUTO, HB, HB ACK 和自动 CQ 已关闭. 请检�
 
 #: src/js8_window.c
 #, c-format
+msgid "#%06x EMERGENCY @GSTFLASH:# %s"
+msgstr "#%06x 紧急 @GSTFLASH:# %s"
+
+#: src/js8_window.c
+#, c-format
 msgid "Alert %s: %s"
 msgstr "提醒 %s: %s"
 
@@ -7674,6 +9438,74 @@ msgstr ""
 "JS8"
 
 #: src/js8_window.c
+#, c-format
+msgid "GhostNet groups: %s"
+msgstr "GhostNet 群组: %s"
+
+#: src/js8_window.c
+#, c-format
+msgid "Reminder %d min before: %s"
+msgstr "提前 %d 分钟提醒: %s"
+
+#: src/js8_window.c
+#, c-format
+msgid "Translate arriving messages: %s"
+msgstr "翻译收到的消息: %s"
+
+#: src/js8_window.c
+#, c-format
+msgid "Mine into English first: %s"
+msgstr "发送前先译成英文: %s"
+
+#: src/js8_window.c
+msgid "RTTY 7.077 MHz, 45.45 baud (closes JS8)"
+msgstr "RTTY 7.077 MHz, 45.45 baud (关闭 JS8)"
+
+#: src/js8_window.c
+msgid "Can't write the GhostNet settings"
+msgstr "无法写入 GhostNet 设置"
+
+#: src/js8_window.c
+#, c-format
+msgid "%s marked, Reminder off"
+msgstr "%s 已标记, 提醒为关"
+
+#: src/js8_window.c
+#, c-format
+msgid "%s: reminder set"
+msgstr "%s: 已设提醒"
+
+#: src/js8_window.c
+#, c-format
+msgid "%s: no reminder"
+msgstr "%s: 无提醒"
+
+#: src/js8_window.c
+msgid "Their texts go to MyMemory"
+msgstr "对方的文字会发送到 MyMemory"
+
+#: src/js8_window.c
+msgid "OK: English first, OK sends"
+msgstr "OK: 先译成英文, 再按 OK 发送"
+
+#: src/js8_window.c
+#, c-format
+msgid "GhostNet: groups @GHOSTNET @GSTFLASH %s"
+msgstr "GhostNet: 群组 @GHOSTNET @GSTFLASH %s"
+
+#: src/js8_window.c
+msgid "The next 7 days; * reminded: press a net to set or clear it"
+msgstr "未来 7 天; * 为已提醒: 按某个点名可设置或清除提醒"
+
+#: src/js8_window.c
+msgid "No schedule: ghostnet_nets.txt is missing"
+msgstr "无日程: 缺少 ghostnet_nets.txt"
+
+#: src/js8_window.c
+msgid "Own net, reminder time, regional group: web page GhostNet"
+msgstr "自己的点名, 提醒时间, 地区群组: 网页的 GhostNet"
+
+#: src/js8_window.c
 msgid "Type the dial frequency in kHz, e.g. 7107"
 msgstr "输入拨盘频率 (kHz), 例如 7107"
 
@@ -7695,8 +9527,12 @@ msgid "JS8Call frequencies (7.078, 14.078...)"
 msgstr "JS8Call 频率 (7.078, 14.078...)"
 
 #: src/js8_window.c
-msgid "GhostNet (3.575, 7.107, 14.107)"
-msgstr ""
+msgid "GhostNet mode: 7.107 + its groups"
+msgstr "GhostNet 模式: 7.107 + 其群组"
+
+#: src/js8_window.c
+msgid "GhostNet: nets, reminder, RTTY..."
+msgstr "GhostNet: 点名, 提醒, RTTY..."
 
 #: src/js8_window.c
 msgid "Custom kHz..."
@@ -7711,6 +9547,34 @@ msgstr "自定义 kHz... (上次 %s)"
 #, c-format
 msgid "%s: not heard on this band"
 msgstr "%s: 本波段未收到"
+
+#: src/js8_window.c
+msgid "Translate: Show Messages first"
+msgstr "翻译: 请先按\"显示消息\""
+
+#: src/js8_window.c
+msgid "Turn the MFK onto a message"
+msgstr "转动 MFK 选择一条消息"
+
+#: src/js8_window.c
+msgid "Your own message"
+msgstr "这是你自己的消息"
+
+#: src/js8_window.c
+msgid "Still arriving: wait"
+msgstr "仍在接收: 请稍候"
+
+#: src/js8_window.c
+msgid "Translated already"
+msgstr "已翻译"
+
+#: src/js8_window.c
+msgid "Busy: try again shortly"
+msgstr "忙: 请稍后重试"
+
+#: src/js8_window.c
+msgid "Translating..."
+msgstr "正在翻译..."
 
 #: src/jtty.c
 msgid "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ +-./?!\"#$%,&*()_'=[]{}<>|:;"
@@ -8023,6 +9887,82 @@ msgstr ""
 #: src/main.h
 msgid "OpenX6X00 - v0.3.12"
 msgstr ""
+
+#: src/meteo.c
+msgid "Notice"
+msgstr "提示"
+
+#: src/meteo.c
+msgid "Minor"
+msgstr "轻微"
+
+#: src/meteo.c
+msgid "Yellow"
+msgstr "黄色"
+
+#: src/meteo.c
+msgid "Orange"
+msgstr "橙色"
+
+#: src/meteo.c
+msgid "Red"
+msgstr "红色"
+
+#: src/meteo.c
+msgid "Moderate"
+msgstr "中等"
+
+#: src/meteo.c
+msgid "Severe"
+msgstr "严重"
+
+#: src/meteo.c
+msgid "Extreme"
+msgstr "极端"
+
+#: src/meteo.c
+#, c-format
+msgid "gusts up to %d km/h"
+msgstr "阵风最高 %d km/h"
+
+#: src/meteo.c
+#, c-format
+msgid "%d mm of rain"
+msgstr "%d mm 降水"
+
+#: src/meteo.c
+msgid "thunderstorms with hail"
+msgstr "雷暴伴冰雹"
+
+#: src/meteo.c
+#, c-format
+msgid "heat, a high of %d °C"
+msgstr "高温, 最高 %d °C"
+
+#: src/meteo.c
+#, c-format
+msgid "cold, a low of %d °C"
+msgstr "低温, 最低 %d °C"
+
+#: src/meteo.c
+#, c-format
+msgid "extreme UV, index %d"
+msgstr "极强紫外线, 指数 %d"
+
+#: src/meteo.c
+#, c-format
+msgid "%s: %s, from the forecast"
+msgstr "%s: %s, 来自预报"
+
+#: src/meteo.c
+#, c-format
+msgid "%s to %s %s"
+msgstr "%s 至 %s %s"
+
+#: src/meteo_alerts.c
+#, c-format
+msgid "Weather warning. %s"
+msgstr "天气预警. %s"
 
 #: src/mic_keys.c
 msgid "SPCH"
@@ -8805,6 +10745,36 @@ msgid "a TCI client"
 msgstr "TCI 客户端"
 
 #: src/remote_server.c
+#, c-format
+msgid "clk slow %lld"
+msgstr ""
+
+#: src/remote_server.c
+#, c-format
+msgid "clk ntp %lld"
+msgstr ""
+
+#: src/remote_server.c
+#, c-format
+msgid "clk gps %lld"
+msgstr ""
+
+#: src/remote_server.c
+#, c-format
+msgid "clk ok %lld"
+msgstr ""
+
+#: src/remote_server.c
+#, c-format
+msgid "Clock set from the phone: %+.1f s"
+msgstr "已从手机设置时钟: %+.1f s"
+
+#: src/remote_server.c
+#, c-format
+msgid "clk set %lld"
+msgstr ""
+
+#: src/remote_server.c
 msgid "pairing code shown on the radio for 2 min"
 msgstr "配对码在电台上显示 2 分钟"
 
@@ -8885,11 +10855,6 @@ msgid "CHANNEL SAVED"
 msgstr "频道已保存"
 
 #: src/screen_main.c
-#, c-format
-msgid "Saved channel %s"
-msgstr "已保存频道 %s"
-
-#: src/screen_main.c
 msgid "Saved channel"
 msgstr "已保存频道"
 
@@ -8915,6 +10880,10 @@ msgstr "贪吃蛇"
 #: src/screen_main.c
 msgid "First start"
 msgstr "首次启动"
+
+#: src/screen_main.c
+msgid "Internet radio"
+msgstr "网络广播"
 
 #: src/screen_main.c
 msgid "RADE needs headphones, TCI or the browser"
@@ -9286,6 +11255,30 @@ msgid " APP Scanner "
 msgstr " APP 扫描 "
 
 #: src/settings_window.cpp
+msgid " APP Internet radio "
+msgstr " APP 网络广播 "
+
+#: src/settings_window.cpp
+msgid " APP Zello "
+msgstr ""
+
+#: src/settings_window.cpp
+msgid " APP SVXConnect "
+msgstr ""
+
+#: src/settings_window.cpp
+msgid " APP Flights "
+msgstr " APP 航班 "
+
+#: src/settings_window.cpp
+msgid " APP HF Air Band "
+msgstr " APP 短波航空 "
+
+#: src/settings_window.cpp
+msgid " APP Weather "
+msgstr " APP 天气 "
+
+#: src/settings_window.cpp
 msgid " APP RX recorder "
 msgstr " APP 接收录音 "
 
@@ -9339,10 +11332,6 @@ msgstr "发射偏移 %s, kHz"
 #: src/settings_window.cpp
 msgid "Spectrum"
 msgstr "频谱"
-
-#: src/settings_window.cpp
-msgid "Mode"
-msgstr "模式"
 
 #: src/settings_window.cpp
 msgid ""
@@ -9484,18 +11473,6 @@ msgid "Theme"
 msgstr "主题"
 
 #: src/settings_window.cpp
-msgid "Language file not found: English"
-msgstr "未找到语言文件: 使用英语"
-
-#: src/settings_window.cpp
-msgid " (draft)"
-msgstr " (草稿)"
-
-#: src/settings_window.cpp
-msgid "Language"
-msgstr "语言"
-
-#: src/settings_window.cpp
 msgid "Font"
 msgstr "字体"
 
@@ -9532,14 +11509,6 @@ msgstr "WPA 密码为 8 到 63 个字符"
 msgid " Password"
 msgstr " 密码"
 
-#: src/settings_window.cpp src/wifi_window.c
-msgid "Disconnect"
-msgstr "断开"
-
-#: src/settings_window.cpp src/wifi_window.c
-msgid "Connect"
-msgstr "连接"
-
 #: src/settings_window.cpp
 msgid "Change password"
 msgstr "修改密码"
@@ -9559,10 +11528,6 @@ msgstr "状态"
 #: src/settings_window.cpp
 msgid "IP / Gateway"
 msgstr "IP / 网关"
-
-#: src/settings_window.cpp src/wifi_window.c
-msgid "Scan"
-msgstr "扫描"
 
 #: src/settings_window.cpp
 msgid "press to pair"
@@ -10367,6 +12332,10 @@ msgid "Fill gradient"
 msgstr "填充渐变"
 
 #: src/settings_window.cpp
+msgid "Fill by level"
+msgstr "按电平填充"
+
+#: src/settings_window.cpp
 msgid "Filter colour"
 msgstr "滤波器颜色"
 
@@ -10433,10 +12402,6 @@ msgstr "瀑布"
 #: src/settings_window.cpp
 msgid "Smooth scroll"
 msgstr "平滑滚动"
-
-#: src/settings_window.cpp
-msgid "Speed"
-msgstr "速度"
 
 #: src/settings_window.cpp
 msgid "MAIN SCREEN"
@@ -10927,10 +12892,6 @@ msgid "Asking GitHub for the latest release..."
 msgstr "正在向 GitHub 查询最新版本..."
 
 #: src/settings_window.cpp
-msgid "Update"
-msgstr "更新"
-
-#: src/settings_window.cpp
 msgid "A new version was just installed: it is confirmed once the radio has run a minute."
 msgstr "刚安装了新版本: 电台运行一分钟后确认."
 
@@ -11136,6 +13097,22 @@ msgstr "QTH 网格"
 msgid "Incorrect QTH Grid"
 msgstr "QTH 网格不正确"
 
+#: src/station.c
+msgid "Phone"
+msgstr "手机"
+
+#: src/svx.c
+msgid "the Bluetooth mic gives no audio"
+msgstr "蓝牙话筒没有音频"
+
+#: src/svx.c
+msgid "the Bluetooth mic did not start"
+msgstr "蓝牙话筒未能启动"
+
+#: src/svx.c
+msgid "SVX LINK"
+msgstr "SVX 链路"
+
 #: src/swrscan_window.c
 msgid "SWR scan: not while transmitting or tuning"
 msgstr "驻波扫描: 发射或调谐时不可用"
@@ -11320,6 +13297,48 @@ msgstr "发射已停止: %d s 无音频"
 msgid "TX 0 W: level %.0f dB, Line-in %u"
 msgstr "发射 0 W: 电平 %.0f dB, 线路输入 %u"
 
+#: src/voice_link.c
+msgid "Net"
+msgstr "网络"
+
+#: src/voice_link.c
+#, c-format
+msgid "%s to RF stopped: the radio ended the transmission"
+msgstr "%s 转射频已停止: 电台结束了发射"
+
+#: src/voice_link.c
+msgid "Link: amateur bands only, unkeyed"
+msgstr "链路: 仅限业余波段, 已停止发射"
+
+#: src/voice_link.c
+#, c-format
+msgid "%s to RF: time limit, unkeyed"
+msgstr "%s 转射频: 达到时间上限, 已停止发射"
+
+#: src/voice_link.c
+#, c-format
+msgid "Link: amateur bands only, RF to %s ended"
+msgstr "链路: 仅限业余波段, 射频转 %s 已结束"
+
+#: src/voice_link.c
+#, c-format
+msgid "RF to %s: time limit, until the squelch closes"
+msgstr "射频转 %s: 达到时间上限, 静噪关闭前暂停"
+
+#: src/voice_link.c
+#, c-format
+msgid "Link: amateur bands only, nothing to %s"
+msgstr "链路: 仅限业余波段, 不送往 %s"
+
+#: src/voice_link.c
+msgid "Link: amateur bands only"
+msgstr "链路: 仅限业余波段"
+
+#: src/voice_link.c
+#, c-format
+msgid "RF>%s: outside the amateur bands, check your licence"
+msgstr "RF>%s: 业余波段外, 请检查你的执照"
+
 #: src/voice_messages.c
 msgid "No messages yet: press Rec"
 msgstr "暂无消息: 按\"录制\""
@@ -11484,6 +13503,72 @@ msgstr ""
 #, c-format
 msgid "VOICE KEYER (TX) - #%06x %s#"
 msgstr "语音键控 (发射) - #%06x %s#"
+
+#: src/voice_net.c
+msgid "not sent"
+msgstr "未发送"
+
+#: src/voice_net.c
+#, c-format
+msgid "RF to %s: %s: %s"
+msgstr "射频转 %s: %s: %s"
+
+#: src/voice_net.c
+#, c-format
+msgid "%s link: the transmission hung, unkeyed"
+msgstr "%s 链路: 发射卡住, 已停止发射"
+
+#: src/voice_net.c
+msgid "message ended, the radio transmits"
+msgstr "消息结束, 电台正在发射"
+
+#: src/voice_net.c
+msgid "message ended, disconnected"
+msgstr "消息结束, 已断开"
+
+#: src/voice_net.c
+msgid "(off)"
+msgstr "(关)"
+
+#: src/voice_net.c
+msgid "(no SQL)"
+msgstr "(无静噪)"
+
+#: src/voice_net.c
+msgid "(no ham band)"
+msgstr "(非业余波段)"
+
+#: src/voice_net.c
+msgid "(outside bands)"
+msgstr "(业余波段外)"
+
+#: src/voice_net.c
+msgid "Simplex repeater on"
+msgstr "单工中继开"
+
+#: src/voice_net.c
+msgid " to RF "
+msgstr " 转射频 "
+
+#: src/voice_net.c
+msgid "RF to "
+msgstr "射频转 "
+
+#: src/voice_net.c
+msgid "link stays on"
+msgstr "链路保持开启"
+
+#: src/voice_net.c
+msgid "link unkeyed: press again to talk"
+msgstr "链路已停止发射: 再按一次讲话"
+
+#: src/voice_net.c
+msgid "not while the radio transmits"
+msgstr "电台发射时不可用"
+
+#: src/voice_net.c
+msgid "no Bluetooth mic connected"
+msgstr "未连接蓝牙话筒"
 
 #: src/walkie.c
 msgid "Band +"
@@ -12115,7 +14200,69 @@ msgid ""
 "User-Agent: "
 msgstr ""
 
+#: src/zello.c
+msgid "ZELLO LINK"
+msgstr "ZELLO 链路"
+
+#: src/zello.c
+msgid "not on a channel yet"
+msgstr "尚未进入频道"
+
 #. not in the list: a line or a word of a longer text
 msgid "SETTINGS"
 msgstr "设置"
+
+#~ msgid "Zello: not sent"
+#~ msgstr "Zello: 未发送"
+
+#~ msgid "RF to Zello: not sent"
+#~ msgstr "射频转 Zello: 未发送"
+
+#~ msgid "Zello link: the transmission hung, unkeyed"
+#~ msgstr "Zello 链路: 发射卡住, 已停止发射"
+
+#~ msgid "Zello: message ended, the radio transmits"
+#~ msgstr "Zello: 消息结束, 电台正在发射"
+
+#~ msgid "Zello: message ended, off the channel"
+#~ msgstr "Zello: 消息结束, 已离开频道"
+
+#~ msgid " Z>RF(no SQL)"
+#~ msgstr " Z>RF(无静噪)"
+
+#~ msgid " RF>Z(no SQL)"
+#~ msgstr " RF>Z(无静噪)"
+
+#~ msgid "Simplex repeater on: %s%s"
+#~ msgstr "单工中继开: %s%s"
+
+#~ msgid "Zello to RF "
+#~ msgstr "Zello 转射频 "
+
+#~ msgid "Zello link stays on"
+#~ msgstr "Zello 链路保持开启"
+
+#~ msgid "Zello: not on a channel yet"
+#~ msgstr "Zello: 尚未进入频道"
+
+#~ msgid "Zello link unkeyed: press again to talk"
+#~ msgstr "Zello 链路已停止发射: 再按一次讲话"
+
+#~ msgid "Zello: not while the radio transmits"
+#~ msgstr "Zello: 电台发射时不可用"
+
+#~ msgid "Zello: no Bluetooth mic connected"
+#~ msgstr "Zello: 未连接蓝牙话筒"
+
+#~ msgid "Zello to RF stopped: the radio ended the transmission"
+#~ msgstr "Zello 转射频已停止: 电台结束了发射"
+
+#~ msgid "Zello to RF: time limit, unkeyed"
+#~ msgstr "Zello 转射频: 达到时间上限, 已停止发射"
+
+#~ msgid "RF to Zello: time limit, until the squelch closes"
+#~ msgstr "射频转 Zello: 达到时间上限, 静噪关闭前暂停"
+
+#~ msgid "Not set by NTP or a GPS: set it below, or join WiFi (step 1)"
+#~ msgstr "未由 NTP 或 GPS 设置: 在下面设置, 或连接 WiFi (第 1 步)"
 

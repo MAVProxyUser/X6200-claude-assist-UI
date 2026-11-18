@@ -56,6 +56,9 @@
 #include "dialog_bands.h"
 #include "dialog_propagation.h"
 #include "dialog_scan.h"
+#include "dialog_iradio.h"
+#include "dialog_aero.h"
+#include "dialog_cb.h"
 #include "ops_room.h"
 #include "dialog_snake.h"
 #include "qth_entry.h"
@@ -102,6 +105,11 @@
 #include "app_adsb.h"
 #include "app_df.h"
 #include "adsb_rx.h"
+#include "dialog_flights.h"
+#include "dialog_zello.h"
+#include "dialog_meteo.h"
+#include "dialog_svx.h"
+#include "voice_net.h"
 #include "first_start.h"
 #include "control_owner.h"
 #include "kbd_hyper.h"
@@ -544,6 +552,13 @@ static const char *app_name(press_action_t a) {
         case ACTION_APP_ADSB:       return "Airspace";
         case ACTION_APP_DF:         return "Direction finder";
         case ACTION_APP_FIRST_START: return "First start";
+        case ACTION_APP_IRADIO:     return "Internet radio";
+        case ACTION_APP_ZELLO:      return "Zello";
+        case ACTION_APP_SVX:        return "SVXConnect";
+        case ACTION_APP_FLIGHTS:    return "Flights";
+        case ACTION_APP_AERO:       return "HF Air Band";
+        case ACTION_APP_CB:         return "CB";
+        case ACTION_APP_METEO:      return "Weather";
         default:                   return NULL;    /* Modes menu: a menu, not an app */
     }
 }
@@ -636,6 +651,13 @@ static const struct {
     {ACTION_APP_ADSB, &dialog_adsb},
     {ACTION_APP_DF, &dialog_df},
     {ACTION_APP_FIRST_START, &dialog_first_start},
+    {ACTION_APP_IRADIO, &dialog_iradio},
+    {ACTION_APP_ZELLO, &dialog_zello},
+    {ACTION_APP_SVX, &dialog_svx},
+    {ACTION_APP_FLIGHTS, &dialog_flights},
+    {ACTION_APP_AERO, &dialog_aero},
+    {ACTION_APP_CB, &dialog_cb},
+    {ACTION_APP_METEO, &dialog_meteo},
 };
 #define WINDOWS_N (sizeof(windows) / sizeof(windows[0]))
 
@@ -875,6 +897,9 @@ void main_screen_action(press_action_t action) {
              * (up to v0.3.12.23 RADE, Birdie Cal and the newer apps did nothing from a key) */
             if (action >= ACTION_APP_RTTY && action <= ACTION_APP_SWL) {
                 main_screen_start_app(action);
+            } else if (action == ACTION_APP_IRADIO || action == ACTION_APP_ZELLO || action == ACTION_APP_FLIGHTS ||
+                       action == ACTION_APP_AERO || action == ACTION_APP_CB || action == ACTION_APP_METEO) {
+                main_screen_start_app(action);      /* upstream's apps (the CX8ANM numbers, 200 on), as upstream */
             }
             break;
     }
@@ -1264,7 +1289,12 @@ static void front_key_cb(lv_event_t *e) {
             break;
 
         case KEYPAD_PTT:
-            ptt_key(ev->state);
+            /* With an internet voice app open (Zello, SVXConnect) the key talks on its network and never keys the
+             * radio; a release goes where its press went, so the radio's own press is let go even if the app opened
+             * meanwhile (voice_ptt.h) */
+            if (!vnet_ptt_key(ev->state)) {
+                ptt_key(ev->state);
+            }
             break;
 
         case KEYPAD_VM:
@@ -1525,6 +1555,8 @@ static void freq_shift(int16_t diff, uint16_t dt) {
     int32_t old  = cparam_i_get(cfg_fg_freq);
     int32_t spot;
     int     hold = cw_mode() ? 0 : param_i_get(cfg_spot_snap_hold);
+
+    if (dialog_cb_knob(old, diff)) return;     /* the CB app open with Knob on channels: a channel a detent */
     bool    slow = hold > 0 && (dt == 0 || dt * param_i_get(cfg_spot_snap_slow) >= 33);
 
     if (slow && snap_hold > 0 && old == snap_hz) {

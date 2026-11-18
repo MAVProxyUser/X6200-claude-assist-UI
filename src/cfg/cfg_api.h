@@ -116,6 +116,7 @@ extern ParamInt         *cfg_filter_shade_where; // p_filter_shade_where: 0 the 
 extern ParamInt         *cfg_spectrum_line_color; // p_spectrum_line_color
 extern ParamInt         *cfg_spectrum_fill_color; // p_spectrum_fill_color
 extern ParamInt         *cfg_spectrum_fill_gradient; // p_spectrum_fill_gradient
+extern ParamInt         *cfg_spectrum_fill_level; // p_spectrum_fill_level
 extern ParamInt         *cfg_smeter_bar_color;   // p_smeter_bar_color
 extern ParamInt         *cfg_swr_color;          // p_swr_color
 extern ParamInt         *cfg_swr_protect;        // p_swr_protect
@@ -174,6 +175,20 @@ extern ParamInt *cfg_wspr_bands;     // p_wspr_bands
 extern ParamInt *cfg_rade_pwr;       // p_rade_pwr
 extern ParamInt *cfg_rade_report;    // p_rade_report
 extern ParamInt *cfg_pskreporter;    // p_pskreporter
+extern ParamInt *cfg_zello_talk_bt;  // p_zello_talk_bt
+extern ParamInt *cfg_zello_to_rf;    // p_zello_to_rf
+extern ParamInt *cfg_zello_to_zello; // p_zello_to_zello
+extern ParamInt *cfg_zello_limit;    // p_zello_limit
+extern ParamInt *cfg_zello_pause;    // p_zello_pause
+extern ParamInt *cfg_zello_id;       // p_zello_id
+extern ParamInt *cfg_zello_id_min;   // p_zello_id_min
+extern ParamInt *cfg_svx_talk_bt;    // p_svx_talk_bt
+extern ParamInt *cfg_svx_to_rf;      // p_svx_to_rf
+extern ParamInt *cfg_svx_to_svx;     // p_svx_to_svx
+extern ParamInt *cfg_svx_limit;      // p_svx_limit
+extern ParamInt *cfg_svx_pause;      // p_svx_pause
+extern ParamInt *cfg_svx_id;         // p_svx_id
+extern ParamInt *cfg_svx_id_min;     // p_svx_id_min
 extern ParamInt *cfg_field_boot;     // p_field_boot
 extern ParamInt *cfg_field_respot;   // p_field_respot
 extern ParamInt *cfg_voice_msg_gain; // p_voice_msg_gain
@@ -242,6 +257,12 @@ extern ParamInt   *cfg_textlog_mb;           // p_textlog_mb
 
 // The first-start guide had
 extern ParamInt   *cfg_first_start_done;     // p_first_start_done
+
+// The country the radio is used in: ISO 3166-1 alpha-2 in capitals, "" none set (countries.h reads it)
+extern ParamText  *cfg_country;              // p_country
+
+// APP > Weather > Notices: the warnings checked in the background, a new one as a notice
+extern ParamInt   *cfg_meteo_alerts;         // p_meteo_alerts
 
 // Waterfall Mode Fixed: when the view moves on, and where the line goes
 extern ParamInt   *cfg_wf_fixed_jump;        // p_wf_fixed_jump

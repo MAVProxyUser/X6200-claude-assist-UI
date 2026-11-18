@@ -30,6 +30,13 @@
  *                                                        (app_df.c app_df_web_set: target, band, follow, bw, ...)
  *    {"cmd":"df_run","on":0|1}                        -> {"t":"ok"}: the web page holds the Kraken (DF runs without page
  *                                                        I open) while its df_get keep coming, or lets it go
+ *    {"cmd":"pos_get"}                                -> {"t":"pos","lat":..,"lon":..,"src":"GPS"|"Phone"|"Locator"|
+ *                                                        "Country","cc":"BE","country":..,"lang":"nl","notices":0|1}:
+ *                                                        where the radio is (station_position), else the place of its
+ *                                                        country (meteo_position), "src":"" without either; the
+ *                                                        country, the GUI's language and APP > Weather > Notices. For
+ *                                                        the web Flights page (which leaves "Country" aside) and the
+ *                                                        web Weather page
  *  The values are checked here and applied on the LVGL thread through the scheduler, as the
  *  Settings pages apply them.
  *
@@ -44,6 +51,7 @@
 #include "wifi.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cmath>
 
@@ -54,7 +62,10 @@ extern "C" {
     int  app_df_web_json(char *out, size_t n);
     #include "band_plan.h"
     #include "cJSON.h"
+    #include "countries.h"
     #include "digi_freqs.h"
+    #include "i18n.h"
+    #include "meteo.h"
     #include "params/params.h"
     #include "radio.h"
     #include "scheduler.h"
@@ -112,6 +123,7 @@ static const struct {
     {"spectrum_line_color", &cfg_sm.p_spectrum_line_color, -1, 0xffffff},
     {"spectrum_fill_color", &cfg_sm.p_spectrum_fill_color, -1, 0xffffff},
     {"spectrum_fill_gradient", &cfg_sm.p_spectrum_fill_gradient, 0, 1},
+    {"spectrum_fill_level", &cfg_sm.p_spectrum_fill_level, 0, 1},
     {"smeter_bar_color", &cfg_sm.p_smeter_bar_color, -1, 0xffffff},
     {"swr_color", &cfg_sm.p_swr_color, -1, 0xffffff},
     {"smeter_lamp", &cfg_sm.p_smeter_lamp, 0, 1},
@@ -640,6 +652,48 @@ static const char *keys_set(cJSON *req, keys_set_t *k) {
     return "Unknown key";
 }
 
+/* The web Flights and Weather pages: where the radio is, read on the LVGL thread (the locator is a setting), this
+ * thread waiting */
+typedef struct {
+    double      lat, lon;
+    const char *src;
+    bool        ok;
+} pos_req_t;
+
+static void pos_cb(void *arg) {
+    pos_req_t *p = (pos_req_t *)arg;
+
+    p->ok = meteo_position(&p->lat, &p->lon, &p->src);
+}
+
+static const char *pos_get(char *out, size_t size, int *l) {
+    pos_req_t   p = {0, 0, "", false};
+    char        cc[3];
+    cJSON      *o;
+    char       *text;
+
+    if (!scheduler_call(pos_cb, &p))
+        return "Busy, try again";
+    o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "t", "pos");
+    if (p.ok) {
+        cJSON_AddNumberToObject(o, "lat", p.lat);
+        cJSON_AddNumberToObject(o, "lon", p.lon);
+    }
+    cJSON_AddStringToObject(o, "src", p.ok ? p.src : "");
+    cJSON_AddStringToObject(o, "cc", country_code(cc));
+    cJSON_AddStringToObject(o, "country", country_name(country_now()));
+    cJSON_AddStringToObject(o, "lang", i18n_code()[0] ? i18n_code() : "en");
+    cJSON_AddNumberToObject(o, "notices", cfg_sm.p_meteo_alerts.get());
+    text = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    if (!text)
+        return "No memory";
+    *l = snprintf(out, size, "%s\n", text);
+    free(text);
+    return NULL;
+}
+
 /* The answer to one request line */
 static int handle_line(const char *line, char *out, size_t size) {
     cJSON      *req  = cJSON_Parse(line);
@@ -696,6 +750,8 @@ static int handle_line(const char *line, char *out, size_t size) {
         keys_set_t k;
         if (!(err = keys_set(req, &k)) && !scheduler_put(keys_apply, &k, sizeof(k)))
             err = "Busy, try again";
+    } else if (!strcmp(name->valuestring, "pos_get")) {
+        err = pos_get(out, size, &l);
     } else if (!strcmp(name->valuestring, "tx_ranges_read")) {
         if (!scheduler_call(tx_ranges_read_cb, NULL)) {
             err = "Busy, try again";

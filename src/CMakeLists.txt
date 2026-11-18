@@ -22,13 +22,13 @@ target_sources(${PROJECT_NAME} PUBLIC
     gui_events.c msg_box.c msg_note.c front_keys.c kbd_rollover.c kbd_hyper.c kbd_keymap.c kbd_layout.c kbd_ptt.c
     mic_keys.c clock.c bat_est.c bat_watch.c info_bar.c smeter.c
     band_names.cpp tx_meters.c
-    audio.c mfk_control.cpp cw.cpp cw_decoder.c cw_parse.c text_panel.cpp
+    audio.c audio_owner.c mfk_control.cpp cw.cpp cw_decoder.c cw_parse.c text_panel.cpp
     rtty.c screen_shot.c screen_rec.c avi_writer.c screen_light.c screen_idle.c screen_saver.c gps.c
     cat.cpp tci_ws.c tci_audio.c tci_server.c tci_ask.c cfg_socket.cpp wavelog_cat.c
     app_window.c settings_window.cpp swrscan_window.c ft8_window.c
     freq_entry.c gps_window.c cw_messages.c
     voice_messages.c recorder_window.c qth_entry.c station.c dialog_channels.c
-    js8_window.c js8_map.c map_geo.c
+    js8_window.c js8_map.c map_geo.c ghostnet.c ghostnet_gui.c ghostnet_tr.c
     dialog_psk.c psk_rx.c psk_tx.c psk_spec.c psk_macro.c digi_qso.c
     dialog_olivia.c olivia.c olivia_app.c olivia_demod.c olivia_macro.c olivia_mod.c olivia_resamp.c
     olivia_rx.c olivia_tx.c
@@ -46,14 +46,16 @@ target_sources(${PROJECT_NAME} PUBLIC
     ft8_udp.c
     pskreporter.c
     freedv_report.c
-    dxcc.c
+    dxcc.c countries.c
     dialog_modes.c
     apps_menu.c
-    birdie.c dialog_birdie.c
     wwv.c dialog_timesig.c dialog_swl.c
     app_sentry.c gpu.c
     adsb.c adsb_rx.c app_adsb.c rtl_spectrum.c rtl_watch.c sdr_pool.c
     df_rx.c app_df.c
+    birdie.c dialog_birdie.c dialog_flights.c
+    dialog_zello.c zello.c voice_net.c voice_link.c voice_ptt.c dialog_svx.c svx.c svx_proto.c
+    dialog_meteo.c meteo.c meteo_alerts.c
     first_start.c first_start_rule.c
     dialog_cw_trainer.c
     dialog_cw_kbd.c recolor_rows.c
@@ -88,11 +90,13 @@ target_sources(${PROJECT_NAME} PUBLIC
     usb_devices.cpp knob_info.cpp main_walk.cpp key_settings.cpp
     wr12.c pa_bias.c
     dialog_wspr.c app_frame.c
-    dialog_field.c
+    dialog_field.c field_map.c
     dialog_bands.c
     sun.c prop_map.c conditions.c beacons.c dialog_propagation.c
     scan.c dialog_scan.c band_keep.c
+    aero.c dialog_aero.c cb.c dialog_cb.c
     dialog_snake.c
+    dialog_iradio.c iradio_list.c
     remote_server.c
     control_owner.c
     winlink.c

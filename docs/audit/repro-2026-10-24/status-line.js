@@ -28,7 +28,8 @@ function stand(p) {
     var micOn = false, txOn = false, micStream = null, micState = "off", greeted = true, awayless = false, unreachable = false, updating = null;
     var held = {}, lastFrame = Date.now(), frames = 0, bytes = 0;
     function showHealth() {} function view() {} function txStart() { return false; } function txStop() {}
-    function tciKey() {}  /* the pairing key on the TCI link, which these pages stand in for down (tlink) */`);
+    function tciKey() {}  /* the pairing key on the TCI link, which these pages stand in for down (tlink) */
+    function gpsSend() {} /* the phone's position to the radio (upstream's Panel, 2026-11-17: its session's onChange) */`);
   return {
     st: () => p.doc.getElementById('st').textContent,
     error: () => p.doc.getElementById('st').classList.contains('error'),

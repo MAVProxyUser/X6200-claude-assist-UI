@@ -13,5 +13,5 @@
 # updater installs the software alone and then says a card image is wanted.
 #   x6200 3 the kernel 6.1.90 (a WiFi fix)
 #   x6200-boot 3 kernel
-x6100 2 the WiFi driver fix (MediaTek and UniFi access points)
-x6200 2 the WiFi driver fix
+x6100 3 the Internet radio's AAC, Ogg, Opus, FLAC and HLS stations (ffmpeg), and the WiFi driver fix (MediaTek and UniFi access points)
+x6200 3 the Internet radio's AAC, Ogg, Opus, FLAC and HLS stations (ffmpeg), and the WiFi driver fix

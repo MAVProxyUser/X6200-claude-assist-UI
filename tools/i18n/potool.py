@@ -38,7 +38,7 @@ SKIP_FILES = {'src/i18n.cpp', 'src/i18n.h', 'src/i18n_hook.h', 'src/navtex/dsc.c
 SKIP_CALLS = re.compile(
     r'^(LV_LOG_\w*|f?printf|fputs|puts|perror|syslog|v?dprintf|fopen|freopen|open|openat|popen|system|getenv|setenv|'
     r'str(n|case|ncase)?cmp|strn?case|strstr|strcasestr|strchr|strrchr|strspn|strcspn|strtok\w*|s?scanf|sqlite3_\w+|'
-    r'cJSON_\w+|json_\w+|\w*_json\w*|remote_\w*send\w*|tci_\w*send\w*|send_\w+|reply\w*|log_\w+|\w+_log|\w+_log_\w*|'
+    r'cJSON_\w+|json_\w+|vnet_send|\w*_json\w*|remote_\w*send\w*|tci_\w*send\w*|send_\w+|reply\w*|log_\w+|\w+_log|\w+_log_\w*|'
     r'base_guard_log|unlink|rename|remove|mkdir|rmdir|access|stat|lstat|opendir|chdir|exec\w*|spawn\w*|run_cmd\w*|'
     r'params_\w+|cfg_\w+|db_\w+|sql\w*|memcmp|strlen|starts_with|ends_with|has_prefix|prefix\w*|regcomp|'
     r'pthread_setname_np|prctl|dlsym|dlopen|ioctl|write_file|read_file|file_\w+|path_\w+|kv_\w+|ini_\w+|'
@@ -79,6 +79,8 @@ def not_shown(s):
         return True
     for line in t.split('\n'):                      # vfo:0,0,%d;  org.bluez.Device1  (ssv)  AT+BYPASS=1
         line = line.strip(' \t()')                # a page button's "(SETTINGS" "1:3)" is words
+        if re.match(r'^[A-Za-z0-9]+>[A-Za-z0-9]+:?$', line):   # a link's direction ("RF>SVX:"): words
+            continue
         if LETTERS.search(line) and ' ' not in line and re.search(r'[;=+(){}\[\]<>|\\]|:.|[a-z]\.[a-zA-Z]', line):
             return True
     if re.match(r'^[A-Z0-9_]+=', t) or re.match(r'^-{1,2}[a-z]', t):           # KEY=, --option

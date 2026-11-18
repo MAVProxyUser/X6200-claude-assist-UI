@@ -392,12 +392,19 @@ static button_data_t btn_chans = app_btn("Channels", ACTION_APP_CHANNELS);
 static button_data_t btn_bands = app_btn("Bands", ACTION_APP_BANDS);
 static button_data_t btn_prop = app_btn("Propa-\ngation", ACTION_APP_PROPAGATION);
 static button_data_t btn_scan = app_btn("Scanner", ACTION_APP_SCAN);
+static button_data_t btn_iradio = app_btn("Internet\nradio", ACTION_APP_IRADIO);
+static button_data_t btn_zello = app_btn("Zello", ACTION_APP_ZELLO);
+static button_data_t btn_svx = app_btn("SVXConnect", ACTION_APP_SVX);
+static button_data_t btn_flights = app_btn("Flights", ACTION_APP_FLIGHTS);
+static button_data_t btn_aero = app_btn("HF Air\nBand", ACTION_APP_AERO);
+static button_data_t btn_cb = app_btn("CB", ACTION_APP_CB);
+static button_data_t btn_meteo = app_btn("Weather", ACTION_APP_METEO);
 static button_data_t btn_gps = {.type = BTN_TEXT, .label = "GPS", .press = app_press,
                                 .hold = [](button_data_t *) { main_screen_start_app(ACTION_APP_SNAKE); },  /* the hidden game */
                                 .ctrl = ACTION_APP_GPS};
 
 /* USER (#111): F1-F5 of the user's own, an action each (Settings > Keys > USER PAGE), named after it. Shown by a key
- * given "USER page" or APP 4:4's User keys; it has no page button, a page key goes on as from any page */
+ * given "USER page" or APP 4:6's User keys; it has no page button, a page key goes on as from any page */
 static const char *user_label_of(int32_t a) {
     switch (a) {
         case ACTION_NONE:           return "-";
@@ -517,8 +524,9 @@ buttons_page_t buttons_page_rtty = {{&btn_rtty_p1, &btn_rtty_rate, &btn_rtty_shi
 static button_data_t btn_vol_p1 = page_btn("(VOL 1:2)"), btn_vol_p2 = page_btn("(VOL 2:2)");
 static button_data_t btn_mfk_p1 = page_btn("(MFK 1:4)"), btn_mfk_p2 = page_btn("(MFK 2:4)"),
                      btn_mfk_p3 = page_btn("(MFK 3:4)"), btn_mfk_p4 = page_btn("(MFK 4:4)");
-static button_data_t btn_app_p1 = page_btn("(APP 1:4)"), btn_app_p2 = page_btn("(APP 2:4)"),
-                     btn_app_p3 = page_btn("(APP 3:4)"), btn_app_p4 = page_btn("(APP 4:4)");
+static button_data_t btn_app_p1 = page_btn("(APP 1:6)"), btn_app_p2 = page_btn("(APP 2:6)"),
+                     btn_app_p3 = page_btn("(APP 3:6)"), btn_app_p4 = page_btn("(APP 4:6)"),
+                     btn_app_p5 = page_btn("(APP 5:6)"), btn_app_p6 = page_btn("(APP 6:6)");
 static button_data_t btn_key_p1 = page_btn("(KEY 1:2)"), btn_key_p2 = page_btn("(KEY 2:2)");
 static button_data_t btn_cw_p1 = page_btn("(CW 1:2)"), btn_cw_p2 = page_btn("(CW 2:2)");
 static button_data_t btn_dfn_p1 = page_btn("(DFN 1:3)"), btn_dfn_p2 = page_btn("(DFN 2:3)"),
@@ -536,7 +544,11 @@ static buttons_page_t page_app_1 = {{&btn_app_p1, &btn_modes, &btn_cluster, &btn
 static buttons_page_t page_app_2 = {{&btn_app_p2, &btn_settings, &btn_cwt, &btn_field, &btn_chans}};
 /* Screen rec: the MFK 3:4 one too */
 static buttons_page_t page_app_3 = {{&btn_app_p3, &btn_bands, &btn_gps, &btn_screen_rec, &btn_cwkbd}};
-static buttons_page_t page_app_4 = {{&btn_app_p4, &btn_prop, &btn_scan, &btn_user_keys}};
+static buttons_page_t page_app_4 = {{&btn_app_p4, &btn_prop, &btn_scan, &btn_user_keys, &btn_iradio}};
+/* SVXConnect next to Zello, the voice links one after the other (GoldCorpHF: User keys kept on APP 4, so Zello
+ * opens page 5 and CB moves to page 6 beside Weather) */
+static buttons_page_t page_app_5 = {{&btn_app_p5, &btn_zello, &btn_svx, &btn_flights, &btn_aero}};
+static buttons_page_t page_app_6 = {{&btn_app_p6, &btn_cb, &btn_meteo}};
 
 static buttons_page_t page_key_1 = {{&btn_key_p1, &btn_key_speed, &btn_key_vol, &btn_key_train, &btn_key_tone}};
 static buttons_page_t page_key_2 = {{&btn_key_p2, &btn_key_mode, &btn_iambic, &btn_qsk, &btn_ratio}};
@@ -555,7 +567,7 @@ static buttons_page_t page_mem_2 = {{&btn_mem_p2, &btn_mem[4], &btn_mem[5], &btn
 
 buttons_group_t buttons_group_gen = {&buttons_page_vol_1, &page_vol_2,
                                      &page_mfk_1, &page_mfk_2, &page_mfk_3, &page_mfk_4};
-buttons_group_t buttons_group_app = {&page_app_1, &page_app_2, &page_app_3, &page_app_4};
+buttons_group_t buttons_group_app = {&page_app_1, &page_app_2, &page_app_3, &page_app_4, &page_app_5, &page_app_6};
 buttons_group_t buttons_group_key = {&page_key_1, &page_key_2, &page_cw_1, &page_cw_2};
 buttons_group_t buttons_group_dfn = {&page_dfn_1, &page_dfn_2, &page_dfn_3};
 buttons_group_t buttons_group_dfl = {&page_dfl};

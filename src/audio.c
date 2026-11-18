@@ -15,6 +15,7 @@
 #include <math.h>
 
 #include <pulse/pulseaudio.h>
+#include <pulse/rtclock.h>
 #include <alsa/asoundlib.h>
 #include <alsa/mixer.h>
 
@@ -26,6 +27,8 @@
 #include "params/params.h"
 #include "cfg/cfg_api.h"
 #include "btaudio.h"
+#include "audio_owner.h"
+#include "radio.h"
 
 #define AUDIO_RATE_MS   100
 #define PA_CONNECT_TRIES 20     /* a second apart: PulseAudio still coming up, or x6100_daemon restarting it */
@@ -49,6 +52,15 @@ static bool                 monitor_wanted; /* the Recorder window is open (audi
 
 static float                peak_db = -60.0f;
 static bool                 connected;      /* the context was READY once */
+
+/* The apps' own streams (audio_user_*) and who has the speaker (audio_owner.h). owner_lock first, the mainloop's
+ * lock inside it; the speaker's mode is set with owner_lock held, the radio's lock inside it (radio_set_play_mode) */
+static pthread_mutex_t      owner_lock = PTHREAD_MUTEX_INITIALIZER;
+static audio_owner_t        owner;
+static audio_owner_out_t    owner_now = {AUDIO_PLAY_OFF, false};    /* as applied */
+static pa_stream            *user_stm[AUDIO_USERS];
+static bool                 listen_cut;     /* a key cut the station since its begin */
+#define LISTEN_PIECE        1024    /* samples a write: a stream may never have room for a much bigger one */
 
 
 /* On the mainloop thread, with its lock held */
@@ -424,25 +436,48 @@ static void on_stream_state(pa_stream *s, void *userdata) {
  * on the codec (the modulator input). */
 /* RX quiet in the headphones while a local sound plays there, as upstream does (SP2KMO): the
  * btaudio-ctl loopback ("Loopback from ...") into the same sink is muted, then unmuted.
- * ponytail: one local playback at a time; a GUI crash mid-play leaves it muted until btaudio-ctl
- * loads the loopback again (headphones reconnect) */
-static struct { uint32_t sink, self; int mute; } loop_mute_req;
+ * Counted: muted from the first local playback (audio_play_bt_begin, a claim of audio_user_* on the headphones) to
+ * the end of the last, so one ending never unmutes it under another. A GUI crash mid-play leaves it muted until
+ * btaudio-ctl loads the loopback again (headphones reconnect) */
+static int      loop_mute_refs;     /* with the mainloop locked */
+static uint32_t loop_mute_sink;
 
+/* The request in the userdata: the sink's index and the mute bit, so a quick mute and unmute keep their own */
 static void loop_mute_cb(pa_context *c, const pa_sink_input_info *i, int eol, void *u) {
-    (void)u;
-    if (eol || !i || i->sink != loop_mute_req.sink || i->index == loop_mute_req.self ||
-        !i->name || strncmp(i->name, "Loopback", 8)) {
+    uintptr_t req = (uintptr_t)u;
+
+    if (eol || !i || i->sink != (uint32_t)(req >> 1) || !i->name || strncmp(i->name, "Loopback", 8)) {
         return;
     }
-    pa_operation_unref(pa_context_set_sink_input_mute(c, i->index, loop_mute_req.mute, NULL, NULL));
+    pa_operation_unref(pa_context_set_sink_input_mute(c, i->index, (int)(req & 1), NULL, NULL));
 }
 
 /* With the mainloop locked */
-static void loop_mute(bool mute) {
-    loop_mute_req.sink = pa_stream_get_device_index(bt_stm);
-    loop_mute_req.self = pa_stream_get_index(bt_stm);
-    loop_mute_req.mute = mute;
-    pa_operation_unref(pa_context_get_sink_input_info_list(ctx, loop_mute_cb, NULL));
+static void loop_mute_set(uint32_t sink, bool mute) {
+    uintptr_t req = ((uintptr_t)sink << 1) | (mute ? 1 : 0);
+
+    pa_operation_unref(pa_context_get_sink_input_info_list(ctx, loop_mute_cb, (void *)req));
+}
+
+/* With the mainloop locked: one local playback more (d > 0, on the sink of s) or one less */
+static void loop_mute_ref(pa_stream *s, int d) {
+    if (d > 0) {
+        if (loop_mute_refs++ == 0) {
+            loop_mute_sink = pa_stream_get_device_index(s);
+            loop_mute_set(loop_mute_sink, true);
+        }
+    } else if (loop_mute_refs > 0 && --loop_mute_refs == 0) {
+        loop_mute_set(loop_mute_sink, false);
+    }
+}
+
+#define STREAM_OPEN_LIMIT_US (3 * PA_USEC_PER_SEC)
+
+/* The mainloop's timer at the end of stream_open's wait */
+static void stream_open_late(pa_mainloop_api *a, pa_time_event *e, const struct timeval *tv, void *late) {
+    (void)a; (void)e; (void)tv;
+    *(bool *)late = true;
+    pa_threaded_mainloop_signal(mloop, 0);
 }
 
 /* A playback stream on sink, ready, or NULL. With the mainloop locked */
@@ -451,13 +486,25 @@ static pa_stream *stream_open(const char *name, const char *sink, const pa_buffe
     pa_stream_state_t st = PA_STREAM_FAILED;
     pa_stream         *s = pa_stream_new(ctx, name, &spec, NULL);
 
+    bool              late = false;
+    pa_time_event     *limit;
+
     pa_stream_set_state_callback(s, on_stream_state, NULL);
+    /* the wait has an end: a stream PulseAudio never readies (or never fails) would hold its caller, and with it
+     * owner_lock and every app's sound, for ever */
+    limit = pa_context_rttime_new(ctx, pa_rtclock_now() + STREAM_OPEN_LIMIT_US, stream_open_late, &late);
     if (pa_stream_connect_playback(s, sink, attr, PA_STREAM_ADJUST_LATENCY | PA_STREAM_DONT_MOVE, NULL, NULL) == 0) {
-        while ((st = pa_stream_get_state(s)) == PA_STREAM_CREATING) {
+        while ((st = pa_stream_get_state(s)) == PA_STREAM_CREATING && !late) {
             pa_threaded_mainloop_wait(mloop);
         }
     }
+    if (limit) {
+        mlapi->time_free(limit);
+    }
     pa_stream_set_state_callback(s, NULL, NULL);
+    if (late) {
+        LV_LOG_ERROR("Play on %s: not ready in %d s", sink, (int)(STREAM_OPEN_LIMIT_US / PA_USEC_PER_SEC));
+    }
     if (st != PA_STREAM_READY) {
         LV_LOG_ERROR("Play on %s failed", sink);
         pa_stream_disconnect(s);
@@ -527,7 +574,7 @@ bool audio_play_bt_begin(void) {
     s = stream_open("X6100 GUI Local", sink, &attr);
     bt_stm = s;
     if (s) {
-        loop_mute(true);
+        loop_mute_ref(s, 1);
     }
     pa_threaded_mainloop_unlock(mloop);
 
@@ -540,11 +587,263 @@ void audio_play_bt_end(void) {
         return;
     }
     pa_threaded_mainloop_lock(mloop);
-    loop_mute(false);
+    loop_mute_ref(bt_stm, -1);
     pa_stream_disconnect(bt_stm);
     pa_stream_unref(bt_stm);
     pa_threaded_mainloop_unlock(mloop);
     bt_stm = NULL;
+}
+
+/* ---- the apps' own streams and who has the speaker (audio_owner.h) ---- */
+
+/* With owner_lock held: what s has queued dropped */
+static void stm_flush(pa_stream *s) {
+    if (!s) {
+        return;
+    }
+    pa_threaded_mainloop_lock(mloop);
+    pa_operation *op = pa_stream_flush(s, NULL, NULL);
+
+    if (op) {
+        pa_operation_unref(op);
+    }
+    pa_threaded_mainloop_unlock(mloop);
+}
+
+/* With owner_lock held: the speaker's mode and the receiver in the headphones as the claims want them now */
+static void owner_apply(void) {
+    audio_owner_out_t out = audio_owner_out(&owner);
+
+    if (out.rx_mute != owner_now.rx_mute) {
+        pa_stream *s = NULL;
+
+        for (int u = 0; u < AUDIO_USERS && !s; u++) {
+            if (owner.phones[u] && owner.claims[u]) {
+                s = user_stm[u];
+            }
+        }
+        pa_threaded_mainloop_lock(mloop);
+        if (!out.rx_mute) {
+            loop_mute_ref(NULL, -1);
+        } else if (s) {
+            loop_mute_ref(s, 1);
+        } else {
+            out.rx_mute = false;    /* no stream on the headphones to find their sink by: tried again at the next */
+        }
+        pa_threaded_mainloop_unlock(mloop);
+    }
+    if (out.mode != owner_now.mode) {
+        radio_set_play_mode(out.mode);
+    }
+    owner_now = out;
+}
+
+int audio_user_open(audio_user_t u) {
+    static const char *const names[AUDIO_USERS] = {"X6100 GUI Station", "X6100 GUI Zello", "X6100 GUI SVXConnect"};
+    pa_sample_spec spec = { .format = PA_SAMPLE_S16NE, .rate = AUDIO_PLAY_RATE, .channels = 1 };
+    pa_buffer_attr attr;
+    char           sink[128];
+    pa_stream      *s;
+    bool           phones;
+
+    if (u >= AUDIO_USERS || !mloop) {
+        return -1;
+    }
+    audio_user_close(u);    /* one stream a user */
+    phones = btaudio_hp_sink(sink, sizeof(sink));
+    memset(&attr, 0xff, sizeof(attr));
+    attr.tlength = pa_usec_to_bytes(AUDIO_RATE_MS * PA_USEC_PER_MSEC, &spec) * 8;     /* 800 ms, as the speaker's */
+
+    pthread_mutex_lock(&owner_lock);
+    pa_threaded_mainloop_lock(mloop);
+    s = stream_open(names[u], phones ? sink : play_device, &attr);
+    if (!s && phones) {
+        phones = false;     /* the headphones refused it: the speaker, as without them */
+        s = stream_open(names[u], play_device, &attr);
+    }
+    pa_threaded_mainloop_unlock(mloop);
+    user_stm[u] = s;
+    audio_owner_place(&owner, u, phones);
+    pthread_mutex_unlock(&owner_lock);
+    return s ? phones : -1;
+}
+
+void audio_user_close(audio_user_t u) {
+    if (u >= AUDIO_USERS) {
+        return;
+    }
+    pthread_mutex_lock(&owner_lock);
+    audio_owner_release_all(&owner, u);
+    owner_apply();              /* while its stream is still there */
+    pa_stream *s = user_stm[u];
+
+    user_stm[u] = NULL;
+    if (s) {
+        pa_threaded_mainloop_lock(mloop);
+        pa_stream_disconnect(s);
+        pa_stream_unref(s);
+        pa_threaded_mainloop_unlock(mloop);
+    }
+    pthread_mutex_unlock(&owner_lock);
+}
+
+void audio_user_claim(audio_user_t u) {
+    if (u >= AUDIO_USERS) {
+        return;
+    }
+    pthread_mutex_lock(&owner_lock);
+    if (audio_owner_claim(&owner, u)) {
+        stm_flush(user_stm[AUDIO_USER_STATION]);   /* a voice link's message: the station's queue out at once */
+    }
+    owner_apply();
+    pthread_mutex_unlock(&owner_lock);
+}
+
+void audio_user_release(audio_user_t u) {
+    if (u >= AUDIO_USERS) {
+        return;
+    }
+    pthread_mutex_lock(&owner_lock);
+    audio_owner_release(&owner, u);
+    owner_apply();
+    pthread_mutex_unlock(&owner_lock);
+}
+
+void audio_user_rec(audio_user_t u, bool on) {
+    if (u >= AUDIO_USERS) {
+        return;
+    }
+    pthread_mutex_lock(&owner_lock);
+    if (audio_owner_rec(&owner, u, on)) {
+        stm_flush(user_stm[AUDIO_USER_STATION]);
+    }
+    owner_apply();
+    pthread_mutex_unlock(&owner_lock);
+}
+
+size_t audio_user_write(audio_user_t u, const int16_t *buf, size_t samples) {
+    size_t took = 0;
+
+    if (u >= AUDIO_USERS) {
+        return 0;
+    }
+    pthread_mutex_lock(&owner_lock);
+    pa_stream *s = user_stm[u];
+
+    if (s && audio_owner_held(&owner, u)) {
+        took = samples;     /* a voice link has the speaker: dropped */
+    } else if (s) {
+        pa_threaded_mainloop_lock(mloop);
+        size_t room  = pa_stream_writable_size(s);
+        size_t bytes = (room == (size_t)-1 ? 0 : LV_MIN(room, samples * 2)) & ~(size_t)1;
+
+        if (bytes && pa_stream_write(s, buf, bytes, NULL, 0, PA_SEEK_RELATIVE) == 0) {
+            took = bytes / 2;
+        }
+        pa_threaded_mainloop_unlock(mloop);
+    }
+    pthread_mutex_unlock(&owner_lock);
+    return took;
+}
+
+void audio_user_flush(audio_user_t u) {
+    if (u >= AUDIO_USERS) {
+        return;
+    }
+    pthread_mutex_lock(&owner_lock);
+    stm_flush(user_stm[u]);
+    pthread_mutex_unlock(&owner_lock);
+}
+
+/* The station */
+
+void audio_listen_begin(void) {
+    pthread_mutex_lock(&owner_lock);
+    listen_cut = false;
+    pthread_mutex_unlock(&owner_lock);
+}
+
+int audio_listen_open(void) {
+    int r = audio_user_open(AUDIO_USER_STATION);
+
+    pthread_mutex_lock(&owner_lock);
+    if (r >= 0 && !listen_cut) {    /* a key that came meanwhile: no claim */
+        audio_owner_claim(&owner, AUDIO_USER_STATION);
+        owner_apply();
+    }
+    pthread_mutex_unlock(&owner_lock);
+    return r;
+}
+
+/* Each piece written with owner_lock held from the check of the cut on, so a key's cut comes either before it (no
+ * write) or after it (the piece flushed with the rest) */
+int audio_listen_play(const int16_t *buf, size_t samples, bool (*go_on)(void), int timeout_ms) {
+    while (samples) {
+        size_t n      = samples > LISTEN_PIECE ? LISTEN_PIECE : samples;
+        int    waited = 0;
+
+        while (true) {
+            if (!go_on()) {
+                return -1;
+            }
+            pthread_mutex_lock(&owner_lock);
+            pa_stream *s = user_stm[AUDIO_USER_STATION];
+
+            if (listen_cut) {
+                pthread_mutex_unlock(&owner_lock);
+                return -1;
+            }
+            if (!s) {
+                pthread_mutex_unlock(&owner_lock);
+                return -3;
+            }
+            if (audio_owner_held(&owner, AUDIO_USER_STATION)) {
+                pthread_mutex_unlock(&owner_lock);
+                usleep(n * 1000000 / AUDIO_PLAY_RATE);     /* a voice link's message: dropped, at the station's pace */
+                break;
+            }
+            pa_threaded_mainloop_lock(mloop);
+            size_t room = pa_stream_writable_size(s);
+
+            if (room != (size_t)-1 && room >= n * 2) {
+                int res = pa_stream_write(s, buf, n * 2, NULL, 0, PA_SEEK_RELATIVE);
+
+                pa_threaded_mainloop_unlock(mloop);
+                pthread_mutex_unlock(&owner_lock);
+                if (res < 0) {
+                    return -3;
+                }
+                break;
+            }
+            pa_threaded_mainloop_unlock(mloop);
+            pthread_mutex_unlock(&owner_lock);
+            if (waited >= timeout_ms) {
+                return -2;
+            }
+            usleep(2000);
+            waited += 2;
+        }
+        buf += n;
+        samples -= n;
+    }
+    return 0;
+}
+
+/* Its stream closes: what is still queued goes with it, so a stop is heard at once */
+void audio_listen_end(void) {
+    audio_user_close(AUDIO_USER_STATION);
+}
+
+void audio_listen_cut(void) {
+    if (!mloop) {
+        return;
+    }
+    pthread_mutex_lock(&owner_lock);
+    listen_cut = true;
+    stm_flush(user_stm[AUDIO_USER_STATION]);
+    audio_owner_release_all(&owner, AUDIO_USER_STATION);
+    owner_apply();      /* the speaker the receiver's again before the key, unless a voice link still has it */
+    pthread_mutex_unlock(&owner_lock);
 }
 
 void audio_gain_db(int16_t *buf, size_t samples, float gain, int16_t *out) {

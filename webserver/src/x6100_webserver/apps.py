@@ -16,6 +16,7 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import socket
 import sqlite3
 import subprocess
@@ -28,6 +29,7 @@ import zipfile
 
 import bottle
 
+from . import ghostnet_web
 from . import settings
 from . import sites
 from . import smartcw
@@ -1146,7 +1148,11 @@ def set_winlink():
 SSH_DIR = "/root/.ssh"
 SSH_AUTHORIZED_KEYS = os.path.join(SSH_DIR, "authorized_keys")
 SSH_BACKUP = ["/etc/init.d/S04restore_backup_config", "stop"]
-SSH_KEY_TYPES = ("ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "ssh-rsa")
+# sk-: a FIDO2 security key, ssh-keygen -t ed25519-sk / ecdsa-sk; sshd checks its signatures itself
+SSH_SK_TYPES = ("sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com")
+SSH_KEY_TYPES = ("ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521",
+                 "ssh-rsa") + SSH_SK_TYPES
+SSH_SK_OPTIONS = ("verify-required", "no-touch-required")   # the only options added before a key: sk- keys only
 SSH_EC_CURVES = {"nistp256": (256, 65), "nistp384": (384, 97), "nistp521": (521, 133)}   # bits, point 04|x|y
 SSH_RSA_MIN_BITS = 3072
 SSH_MAX_KEYS = 32
@@ -1168,7 +1174,8 @@ def ssh_blob_fields(blob):
 
 def ssh_key(kind, b64):
     """{type, bits, fingerprint} of a public key as authorized_keys has it (type, base64), None when the base64 is
-    not a key of that type. A type this page does not add (sk-, ssh-dss) is listed with bits None"""
+    not a key of that type. A type this page does not add (ssh-dss) is listed with bits None. An sk- key ends with
+    its application, ssh: and maybe a name (ssh-keygen -O application=)"""
     try:
         blob = base64.b64decode(b64, validate=True)
     except ValueError:
@@ -1176,9 +1183,17 @@ def ssh_key(kind, b64):
     f = ssh_blob_fields(blob)
     if not f or f[0] != kind.encode():
         return None
+    if kind in SSH_SK_TYPES:
+        name = f.pop() if len(f) > 1 else b""
+        if not name.startswith(b"ssh:") or len(name) > 256 or any(c < 33 or c > 126 for c in name):
+            return None
     bits = None
-    if kind == "ssh-ed25519":
+    if kind in ("ssh-ed25519", "sk-ssh-ed25519@openssh.com"):
         if len(f) != 2 or len(f[1]) != 32:
+            return None
+        bits = 256
+    elif kind == "sk-ecdsa-sha2-nistp256@openssh.com":
+        if len(f) != 3 or f[1] != b"nistp256" or len(f[2]) != 65 or f[2][:1] != b"\x04":
             return None
         bits = 256
     elif kind.startswith("ecdsa-sha2-") and kind in SSH_KEY_TYPES:
@@ -1225,7 +1240,8 @@ def ssh_parse_line(line):
 
 
 def ssh_new_key(text):
-    """(key, line to add) for a pasted public key; ValueError says what is wrong with it"""
+    """(key, line to add) for a pasted public key; ValueError says what is wrong with it. Options before the key:
+    only SSH_SK_OPTIONS, on a security key (sshd 8.4 or later; the radio's is 9.6)"""
     text = text.strip() if isinstance(text, str) else ""
     if not text:
         raise ValueError("Paste a public key: one line, ssh-ed25519 AAAA... you@computer")
@@ -1236,9 +1252,19 @@ def ssh_new_key(text):
     if len(text) > 8192:
         raise ValueError("Too long for a public key")
     parts = text.split(None, 2)
+    options = ""
+    if parts[0] not in SSH_KEY_TYPES and len(parts) > 1 and parts[1] in SSH_KEY_TYPES:
+        options, text = parts[0], text[len(parts[0]):].strip()
+        parts = text.split(None, 2)
+        names = options.split(",")
+        if (parts[0] not in SSH_SK_TYPES or any(o not in SSH_SK_OPTIONS for o in names)
+                or len(set(names)) != len(names)):
+            raise ValueError("Before the key the page takes only verify-required and no-touch-required, and only "
+                             "for a security key (sk-ssh-ed25519@openssh.com, sk-ecdsa-sha2-nistp256@openssh.com)")
     if parts[0] not in SSH_KEY_TYPES:
-        raise ValueError("The line starts with the key type: ssh-ed25519, ecdsa-sha2-nistp256 (384, 521) or ssh-rsa, "
-                         "with nothing before it")
+        raise ValueError("The line starts with the key type: ssh-ed25519, ecdsa-sha2-nistp256 (384, 521), ssh-rsa, "
+                         "or a security key's sk-ssh-ed25519@openssh.com or sk-ecdsa-sha2-nistp256@openssh.com, with "
+                         "nothing before it but a security key's verify-required or no-touch-required")
     key = ssh_key(parts[0], parts[1]) if len(parts) >= 2 else None
     if not key:
         raise ValueError(f"Not a whole {parts[0]} key: copy the line again")
@@ -1248,7 +1274,7 @@ def ssh_new_key(text):
     comment = parts[2] if len(parts) > 2 else ""
     if len(comment) > 200 or any(ord(c) < 32 or ord(c) == 127 for c in comment):
         raise ValueError("The comment after the key: up to 200 characters, no tabs or control characters")
-    return key, " ".join(parts)
+    return key, (options + " " if options else "") + " ".join(parts)
 
 
 def ssh_read():
@@ -1382,6 +1408,38 @@ def set_tci():
         bottle.response.status = 500
         return {"status": "error", "msg": f"Can't save: {e}"}
     return read_tci_conf()
+
+
+# GhostNet (ghostnet_web.py): the nets' schedule, the settings the JS8 app's GhostNet popup shares
+# (/mnt/ghostnet.conf, read again by the radio when it changes) and the messages the JS8 app wrote
+@app.route('/ghostnet')
+def ghostnet_page():
+    return bottle.template('ghostnet')
+
+
+@app.get('/api/ghostnet')
+def ghostnet_get():
+    return ghostnet_web.state()
+
+
+@app.post('/api/ghostnet')
+def ghostnet_set():
+    try:
+        data = bottle.request.json
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        return api_error(400, "A JSON object of the settings")
+    with config_lock:
+        nets, _ = ghostnet_web.read_schedule()
+        conf, err = ghostnet_web.change_conf(ghostnet_web.read_conf(), data, nets)
+        if err:
+            return api_error(400, err)
+        try:
+            replace_file(settings.GHOSTNET_CONF, lambda f: f.write(ghostnet_web.conf_text(conf)), encoding="utf-8")
+        except OSError as e:
+            return api_error(500, f"Can't save: {e}")
+    return ghostnet_web.state()
 
 
 # Field Ops routes: x6100-field (rootfs/usr/sbin) does the downloads, same files as the GUI:
@@ -1520,12 +1578,14 @@ def winlink_secrets():
 
 def stored_secrets():
     """Every secret the radio keeps: the Wavelog key and its live link's secret path, the QRZ, HOTA and WWFF keys, the
-    Winlink passwords, the WiFi passwords"""
+    Winlink passwords, the WiFi passwords, the Zello password and developer key, SVXConnect's private key"""
     wl = wavelog_read()
     found = {wl.get("key", ""), wl.get("cat_token", ""), field_key("hota.conf"), field_key("wwff.conf")}
     found.update(qrz_read()[2])
     found.update(winlink_secrets())
     found.update(wifi_secrets())
+    found.update(zello_secrets())
+    found.update(svx_secrets())
     return found
 
 
@@ -1947,14 +2007,16 @@ SOTA_REF = r'[A-Z0-9]{1,4}/[A-Z]{2}-[0-9]{3}'     # I/LO-123 ([0-9]: \d takes an
 POTA_REF = r'[A-Z0-9]{1,4}-[0-9]{4,5}'            # IT-1234
 # The ADIF SIG of each programme but SOTA (SOTA_REF), by the letter ref_prog gives
 REF_SIG = {"P": "POTA", "B": "WWBOTA", "H": "HOTA", "F": "WWFF", "T": "TOTA", "C": "WCA", "M": "MOTA", "L": "ARLHS",
-           "G": "TILES", "K": "LLOTA"}
+           "G": "TILES", "K": "LLOTA", "X": "XOTA"}
 TILE = r'[A-R]{2}[0-9]{2}[A-X]{2}'                # a Tiles tile, JO20ab (the references come here in capitals)
 
 
 def ref_prog(ref):
     """The programme of a reference by its shape, as the radio tells it (src/field/flog.c field_ref_prog): S SOTA,
     P POTA, B WWBOTA, H HOTA, F WWFF, T TOTA, C WCA, M MOTA, L a lighthouse (BEL 002), G a Tiles tile (JO20ab),
-    K an LLOTA lake (LLPL-0001); "" when it is none of them"""
+    K an LLOTA lake (LLPL-0001), X a place of your own (XOTA-W13ZWYH); "" when it is none of them"""
+    if re.fullmatch(r'XOTA-[0-9A-Z]{2,10}', ref):                      # XOTA-W13ZWYH, before the parks
+        return "X"
     if re.fullmatch(r'X[0-9]{5}', ref):                                # X42018
         return "M"
     if re.fullmatch(TILE, ref.upper()):                                # JO20ab
@@ -3282,6 +3344,149 @@ def set_js8_texts():
     return read_js8_texts()
 
 
+# Internet radio (APP > Internet radio, src/dialog_iradio.c): its favourites, one station a line of IRADIO_FAV_FILE,
+# name<TAB>address<TAB>codec<TAB>kbps<TAB>country<TAB>uuid as src/iradio_list.c reads and writes them; the window
+# reads the file each time it shows the favourites. The uuid is radio-browser.info's, kept while the address stays
+IRADIO_FAV_MAX = 150    # src/dialog_iradio.c MAX_ST
+IRADIO_NAME_MAX = 63    # bytes of UTF-8: iradio_station_t
+IRADIO_URL_MAX = 255
+IRADIO_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+@app.route('/iradio')
+def iradio_page():
+    return bottle.template('iradio')
+
+
+def iradio_cut(text, most):
+    """text in at most most bytes of UTF-8, cut on a whole character, as the GUI cuts it"""
+    return text.encode("utf-8")[:most].decode("utf-8", "ignore")
+
+
+def iradio_url_ok(url):
+    return (url.lower().startswith(("http://", "https://")) and len(url.encode("utf-8")) <= IRADIO_URL_MAX
+            and not any(c in url for c in " \t\"'") and all(" " < c for c in url))
+
+
+def read_iradio():
+    """The favourites the GUI would read: lines without a name or an http(s) address skipped"""
+    items = []
+    try:
+        with open(settings.IRADIO_FAV_FILE, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                p = line.rstrip("\r\n").split("\t")
+                p += [""] * (6 - len(p))
+                if p[0] and iradio_url_ok(p[1]) and len(items) < IRADIO_FAV_MAX:
+                    items.append({"name": iradio_cut(p[0], IRADIO_NAME_MAX), "url": p[1], "codec": p[2].upper()[:8],
+                                  "kbps": p[3] if p[3].isdigit() and len(p[3]) < 8 else "",
+                                  "cc": p[4].upper() if re.fullmatch(r"[A-Za-z]{2}", p[4]) else "",
+                                  "uuid": p[5] if IRADIO_UUID_RE.fullmatch(p[5]) else ""})
+    except FileNotFoundError:
+        pass
+    return items
+
+
+def iradio_state():
+    return {"stations": [dict(s, id=i) for i, s in enumerate(read_iradio())], "max": IRADIO_FAV_MAX,
+            "every": os.access(settings.FFMPEG, os.X_OK)}
+
+
+def write_iradio(items):
+    os.makedirs(os.path.dirname(settings.IRADIO_FAV_FILE), exist_ok=True)
+    replace_file(settings.IRADIO_FAV_FILE,
+                 lambda f: f.write("".join("\t".join([s["name"], s["url"], s["codec"], s["kbps"], s["cc"], s["uuid"]])
+                                           + "\n" for s in items)), encoding="utf-8")
+
+
+def iradio_entry(old=None):
+    """The station of the request: a name, an http(s) address, and the codec, kbps and country when given. The uuid
+    of old stays while the address does"""
+    data = bottle.request.json
+    if not isinstance(data, dict):
+        raise ValueError("Invalid request")
+    one = lambda k: " ".join(str(data.get(k) or "").split())
+    s = {"name": one("name"), "url": one("url"), "codec": one("codec").upper(), "kbps": one("kbps"),
+         "cc": one("cc").upper(), "uuid": ""}
+    if not s["name"] or len(s["name"].encode("utf-8")) > IRADIO_NAME_MAX:
+        raise ValueError("Name: 1 to %d bytes" % IRADIO_NAME_MAX)
+    if not iradio_url_ok(s["url"]):
+        raise ValueError("Address: http:// or https://, up to %d characters, no spaces or quotes" % IRADIO_URL_MAX)
+    if not re.fullmatch(r"[A-Z0-9+]{0,8}", s["codec"]):
+        raise ValueError("Format: up to 8 letters, MP3, AAC, OGG...")
+    if not re.fullmatch(r"[0-9]{0,6}", s["kbps"]):
+        raise ValueError("kbps: a number, 128")
+    if not re.fullmatch(r"(?:[A-Z]{2})?", s["cc"]):
+        raise ValueError("Country: its two letters (BE, UY) or empty")
+    if old and old["url"] == s["url"]:
+        s["uuid"] = old["uuid"]
+    return s
+
+
+def change_iradio(fn):
+    """Read the file, let fn change the list (ValueError: refused), write it back"""
+    try:
+        with config_lock:
+            items = read_iradio()
+            fn(items)
+            write_iradio(items)
+    except ValueError as ex:
+        return api_error(400, str(ex))
+    except OSError as ex:
+        return api_error(500, f"Can't save: {ex}")
+    return iradio_state()
+
+
+def iradio_index(items, id):
+    if not 0 <= id < len(items):
+        raise ValueError("That station is gone, reload the page")
+    return id
+
+
+def iradio_unique(items, s, but=-1):
+    if any(x["url"] == s["url"] for i, x in enumerate(items) if i != but):
+        raise ValueError("That address is in the list already")
+
+
+@app.get('/api/iradio')
+def get_iradio():
+    return iradio_state()
+
+
+@app.post('/api/iradio')
+def add_iradio():
+    def add(items):
+        if len(items) >= IRADIO_FAV_MAX:
+            raise ValueError("All %d places are used, delete a station first" % IRADIO_FAV_MAX)
+        s = iradio_entry()
+        iradio_unique(items, s)
+        items.append(s)
+    return change_iradio(add)
+
+
+@app.put('/api/iradio/<id:int>')
+def set_iradio(id):
+    def put(items):
+        i = iradio_index(items, id)
+        s = iradio_entry(items[i])
+        iradio_unique(items, s, i)
+        items[i] = s
+    return change_iradio(put)
+
+
+@app.delete('/api/iradio/<id:int>')
+def delete_iradio(id):
+    return change_iradio(lambda items: items.pop(iradio_index(items, id)))
+
+
+@app.post('/api/iradio/<id:int>/up')
+def move_iradio_up(id):
+    def up(items):
+        i = iradio_index(items, id)
+        if i > 0:
+            items[i - 1], items[i] = items[i], items[i - 1]
+    return change_iradio(up)
+
+
 CJSON_NESTING_LIMIT = 1000   # src/cJSON.h: lists and objects within each other, at most
 # A \u escape of half a UTF-16 pair (1: high, 2: the low after it, 3: a low alone), or any other escape
 SURROGATE_ESCAPE_RE = re.compile(r"\\(?:u([dD][89abAB][0-9a-fA-F]{2})(?:\\u([dD][c-fC-F][0-9a-fA-F]{2}))?"
@@ -4035,7 +4240,16 @@ def backup_files():
             "tci.conf": ("tci", settings.TCI_CONF),
             "qso_log.db": ("qso", settings.QSO_LOG_DB),
             "cw_trainer.json": ("cw", settings.CW_TRAINER_FILE),
-            "bootlogo.png": ("bootpic", settings.BOOT_PICTURE)}
+            "bootlogo.png": ("bootpic", settings.BOOT_PICTURE),
+            # The apps' own lists and settings, none of their accounts or keys (Zello's account.conf and
+            # private_key.pem, SVXConnect's pki/ stay out): the GUI reads each again when its app opens, GhostNet's
+            # when it changes
+            "ghostnet.conf": ("apps", settings.GHOSTNET_CONF),
+            "ghostnet_nets.txt": ("apps", settings.GHOSTNET_NETS_USER),
+            "iradio/favorites.tsv": ("apps", settings.IRADIO_FAV_FILE),
+            "iradio/country": ("apps", settings.IRADIO_COUNTRY_FILE),
+            "zello/channels.txt": ("apps", os.path.join(settings.ZELLO_DIR, "channels.txt")),
+            "svxconnect/svxconnect.conf": ("apps", os.path.join(settings.SVX_DIR, "svxconnect.conf"))}
 
 
 def backup_member(name):
@@ -4202,6 +4416,23 @@ def describe_backup(files, date=None):
             out["wifi"] = plural(len(wifi), "network")
         if "bootlogo.png" in files:
             out["bootpic"] = "your own, " + fmt_size(os.path.getsize(files["bootlogo.png"]))
+        apps_in = []
+        if "ghostnet.conf" in files or "ghostnet_nets.txt" in files:
+            apps_in.append("GhostNet " + " and ".join(w for n, w in (("ghostnet.conf", "settings"),
+                                                                     ("ghostnet_nets.txt", "nets")) if n in files))
+        if "iradio/favorites.tsv" in files:
+            favs = sum(1 for x in read_text(files["iradio/favorites.tsv"]).splitlines()
+                       if x.split("\t")[0] and iradio_url_ok((x.split("\t") + [""])[1]))
+            apps_in.append(plural(favs, "favourite station"))
+        elif "iradio/country" in files:
+            apps_in.append("Internet radio country")
+        if "zello/channels.txt" in files:
+            chans = {" ".join(x.split()) for x in read_text(files["zello/channels.txt"]).splitlines()} - {""}
+            apps_in.append(plural(len(chans), "Zello channel"))
+        if "svxconnect/svxconnect.conf" in files:
+            apps_in.append("SVXConnect settings")
+        if apps_in:
+            out["apps"] = ", ".join(apps_in)
     except (OSError, ValueError, KeyError, TypeError, sqlite3.Error):
         pass   # a part that can't be read just has no summary
     return out
@@ -4251,6 +4482,12 @@ def check_member(name, path):
                 data = f.read()
             if b"\0" in data or (name.endswith(".nmconnection") and b"[connection]" not in data):
                 raise ValueError
+        elif backup_member(name)[0] == "apps":   # the apps' lists: lines of text
+            with open(path, "rb") as f:
+                data = f.read()
+            if b"\0" in data:
+                raise ValueError
+            data.decode("utf-8")
     except (OSError, ValueError, KeyError, TypeError):
         raise BackupError(f"{name} in the file is not valid")
 
@@ -4604,6 +4841,648 @@ def restore_backup():
         return {"restored": restored, "failed": failed, "gui_restarted": gui_up}
     finally:
         backup_lock.release()
+
+
+# Flights: the aircraft around the radio, as APP > Flights shows them (src/dialog_flights.c), from the same helper
+# (rootfs/usr/sbin/x6100-flights: airplanes.live, else adsb.lol; the position sent rounded to 0.1 degree). Asked only
+# while the page is open and seen: its script asks again when the helper says, nothing runs here between.
+
+FLIGHTS_RANGES = (25, 50, 100, 200, 400)
+
+
+def locator_center(grid):
+    """The centre of a Maidenhead locator of 4, 6 or 8 characters as (lat, lon); None when it is not one. The Flights
+    and the Weather pages"""
+    g = (grid or "").strip().upper()
+    if len(g) not in (4, 6, 8) or not re.fullmatch(r"[A-R]{2}[0-9]{2}([A-X]{2}([0-9]{2})?)?", g):
+        return None
+    lon = (ord(g[0]) - 65) * 20 - 180 + int(g[2]) * 2
+    lat = (ord(g[1]) - 65) * 10 - 90 + int(g[3])
+    w, h = 2.0, 1.0
+    if len(g) >= 6:
+        w, h = w / 24, h / 24
+        lon += (ord(g[4]) - 65) * w
+        lat += (ord(g[5]) - 65) * h
+    if len(g) == 8:
+        w, h = w / 10, h / 10
+        lon += int(g[6]) * w
+        lat += int(g[7]) * h
+    return lat + h / 2, lon + w / 2
+
+
+def flights_position(grid):
+    """(lat, lon, where) for the page: the locator typed on it, else where the radio is as the GUI says (its GPS, the
+    phone's, the QTH locator: station_position; not the place of its country, which the Weather page takes), else the
+    QTH locator of params.db while the GUI does not answer. None without any"""
+    if grid:
+        c = locator_center(grid)
+        return (c[0], c[1], grid.strip().upper()) if c else None
+    reply = display_call({"cmd": "pos_get"}) or {}
+    if reply.get("t") == "pos" and reply.get("src") != "Country" and isinstance(reply.get("lat"), (int, float)) \
+            and isinstance(reply.get("lon"), (int, float)):
+        src = str(reply.get("src") or "")
+        return reply["lat"], reply["lon"], f"Locator {read_param('qth')}" if src == "Locator" else src
+    qth = read_param("qth")
+    c = locator_center(qth)
+    return (c[0], c[1], f"Locator {qth}") if c else None
+
+
+@app.route('/flights')
+def flights_page():
+    return bottle.template('flights', ranges=FLIGHTS_RANGES)
+
+
+@app.get('/api/flights')
+def flights_get():
+    q = bottle.request.query
+    try:
+        km = int(q.get("km", "100"))
+    except ValueError:
+        km = 0
+    if km not in FLIGHTS_RANGES:
+        return api_error(400, "Range: one of " + ", ".join(map(str, FLIGHTS_RANGES)) + " km")
+    grid = q.get("grid", "").strip()
+    pos = flights_position(grid)
+    if not pos:
+        return api_error(400 if grid else 409, "Not a locator: 4, 6 or 8 characters (JO20, JO20ab)" if grid else
+                         "No position: set the QTH locator on the radio (Settings > General), or plug in a GPS")
+    try:
+        with open(settings.APP_VERSION) as f:
+            ver = f.read().strip()
+    except OSError:
+        ver = ""
+    env = dict(os.environ, X6100_FW=ver) if ver else dict(os.environ)
+    try:
+        # the helper's two services at 10 s each, a wait for the GUI's request at most: a little longer here
+        r = subprocess.run([settings.FLIGHTS_CMD, "update", "%.5f" % pos[0], "%.5f" % pos[1], str(km),
+                            settings.FLIGHTS_FILE], capture_output=True, text=True, timeout=45, env=env)
+        line = (r.stdout or "").strip().splitlines()[-1:] or [""]
+    except (OSError, subprocess.SubprocessError) as e:
+        line = [f"error {e}"]
+    if not line[0].startswith("ok "):
+        return api_error(502, line[0][6:] if line[0].startswith("error ") else "No answer from x6100-flights")
+    try:
+        with open(settings.FLIGHTS_FILE, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as e:
+        return api_error(502, f"Can't read the answer: {e}")
+    doc["where"] = pos[2]
+    return doc
+
+
+# Weather: as APP > Weather shows it (src/dialog_meteo.c), from the same helper (rootfs/usr/sbin/x6100-meteo: Open-Meteo,
+# OpenStreetMap's Nominatim for the place's name, the country's weather service for its warnings; the position sent
+# rounded to 0.1 degree). Asked only while the page is open and seen: its script asks again every 15 minutes, and
+# only the first ask and Update let the helper look up a place's name (Nominatim's policy). The country and the QTH
+# locator are set on the radio, Settings > General > STATION: this page only reads them.
+
+
+def meteo_position(grid):
+    """{lat, lon, src, where, cc, lang, notices} for the page: the locator typed on it, else what the radio asks for
+    (its GPS, the phone's, the QTH locator, else the country's capital: pos_get on the GUI's socket, as the Flights
+    page asks), else the QTH locator of params.db while the GUI does not answer. None without any. notices: APP >
+    Weather > Notices is on"""
+    reply = display_call({"cmd": "pos_get"}) or {}
+    ok = reply.get("t") == "pos"
+    cc = str(reply.get("cc") or "") if ok else read_param("country")
+    lang = str(reply.get("lang") or "") if ok else read_param("language")
+    pos = {"cc": cc if re.fullmatch(r"[A-Z]{2}", cc or "") else "-", "lang": lang or "en",
+           "notices": bool(reply.get("notices")) if ok else read_param("meteo_alerts") == "1"}
+    if grid:
+        c = locator_center(grid)
+        return dict(pos, lat=c[0], lon=c[1], src="Locator", where=grid.strip().upper()) if c else None
+    if ok and isinstance(reply.get("lat"), (int, float)) and isinstance(reply.get("lon"), (int, float)):
+        src = str(reply.get("src") or "")
+        where = {"Locator": f"Locator {read_param('qth')}",
+                 "Country": f"Country {reply.get('country') or cc}"}.get(src, src)
+        return dict(pos, lat=reply["lat"], lon=reply["lon"], src=src, where=where)
+    qth = read_param("qth")
+    c = locator_center(qth)
+    return dict(pos, lat=c[0], lon=c[1], src="Locator", where=f"Locator {qth}") if c else None
+
+
+@app.route('/meteo')
+def meteo_page():
+    return bottle.template('meteo')
+
+
+@app.get('/api/meteo')
+def meteo_get():
+    q = bottle.request.query
+    grid = q.get("grid", "").strip()
+    pos = meteo_position(grid)
+    if not pos:
+        return api_error(400 if grid else 409, "Not a locator: 4, 6 or 8 characters (JO20, JO20ab)" if grid else
+                         "No position: plug in a GPS, or set the QTH locator or the country on the radio "
+                         "(Settings > General > STATION)")
+    out = settings.METEO_WEB_FILE if grid else settings.METEO_FILE
+    try:
+        with open(settings.APP_VERSION) as f:
+            ver = f.read().strip()
+    except OSError:
+        ver = ""
+    env = dict(os.environ, X6100_FW=ver) if ver else dict(os.environ)
+    cmd = [settings.METEO_CMD, "update"] + (["--asked"] if q.get("asked") == "1" else []) + \
+        ["%.5f" % pos["lat"], "%.5f" % pos["lon"], pos["cc"], pos["src"] or "-", pos["lang"], out]
+    try:
+        # its services at 20 s each and a country's warnings: a run of the GUI's before it at most
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=150, env=env)
+        line = (r.stdout or "").strip().splitlines()[-1:] or [""]
+    except (OSError, subprocess.SubprocessError) as e:
+        line = [f"error {e}"]
+    if line[0] != "ok":
+        return api_error(502, line[0][6:] if line[0].startswith("error ") else "No answer from x6100-meteo")
+    try:
+        with open(out, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as e:
+        return api_error(502, f"Can't read the answer: {e}")
+    doc["where"] = pos["where"]
+    doc["notices"] = pos["notices"]
+    return doc
+
+
+# Zello routes: the Zello app (APP > Zello, src/dialog_zello.c) and its helper x6100-zello (rootfs/usr/sbin), the
+# only one that talks to zello.io, and only while the app is on a channel. In ZELLO_DIR: account.conf (user, password,
+# issuer: the Zello developer key's Issuer) and private_key.pem (its Private Key), the radio's own secrets, written
+# for root alone and never handed back (the page says Set or Not set, the user name as its first two characters), not
+# in a backup (backup_files) and not on the Files page (config_pages.secret_places); channels.txt, a channel a line,
+# which the app lists. The account goes to zello.io and nowhere else: the Test here runs the helper.
+
+ZELLO_ACCOUNT_KEYS = ("user", "password", "issuer")
+ZELLO_CHANNELS_MAX = 20
+ZELLO_KEY_MAX = 8192        # bytes of a pasted Private Key: a 4096-bit one is about 3300
+ZELLO_PEM = re.compile(r"-----BEGIN (RSA )?PRIVATE KEY-----\s+([A-Za-z0-9+/=\s]+?)\s*-----END (RSA )?PRIVATE KEY-----")
+zello_lock = threading.Lock()
+
+
+def zello_path(name):
+    return os.path.join(settings.ZELLO_DIR, name)
+
+
+def zello_read():
+    """account.conf as the helper reads it: "" for what is missing"""
+    acc = dict.fromkeys(ZELLO_ACCOUNT_KEYS, "")
+    try:
+        with open(zello_path("account.conf"), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                k, sep, v = line.rstrip("\r\n").partition("=")
+                if sep and k.strip() in acc:
+                    acc[k.strip()] = v if k.strip() == "password" else v.strip()
+    except OSError:
+        pass
+    return acc
+
+
+def zello_key_text():
+    try:
+        with open(zello_path("private_key.pem"), encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def zello_secrets():
+    """The password, the Issuer and the Private Key's lines: hidden in whatever a helper or a server says. Not the
+    user name, often the callsign, which the other pages show: the Zello page never shows it whole"""
+    acc = zello_read()
+    found = {acc["password"], acc["issuer"]}
+    found.update(line.strip() for line in zello_key_text().splitlines()
+                 if len(line.strip()) >= 8 and "-----" not in line)
+    return found
+
+
+def zello_channels():
+    out = []
+    try:
+        with open(zello_path("channels.txt"), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                name = " ".join(line.split())
+                if name and name not in out:
+                    out.append(name)
+    except OSError:
+        pass
+    return out[:ZELLO_CHANNELS_MAX]
+
+
+def zello_write_file(name, text, mode):
+    os.makedirs(settings.ZELLO_DIR, exist_ok=True)
+    path = zello_path(name)
+    tmp = path + ".tmp"
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode), "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def zello_user_shown(user):
+    """The first two characters and an ellipsis: enough to tell which account, not the name"""
+    return user[:2] + "\u2026" if len(user) > 2 else "\u2026" if user else ""
+
+
+def zello_state(result=None):
+    acc = zello_read()
+    return {"user": zello_user_shown(acc["user"]), "user_set": bool(acc["user"]),
+            "password_set": bool(acc["password"]), "issuer_set": bool(acc["issuer"]),
+            "key_set": bool(ZELLO_PEM.search(zello_key_text())), "channels": zello_channels(), "result": result}
+
+
+def zello_text(value, limit, what):
+    """A typed value: str, no control characters, at most limit characters; "" when not sent"""
+    if value is None:
+        return ""
+    if not isinstance(value, str) or len(value) > limit or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise ValueError(f"{what}: at most {limit} characters, on one line")
+    return value
+
+
+@app.route('/zello')
+def zello_page():
+    return bottle.template('zello')
+
+
+@app.get('/api/zello')
+def get_zello():
+    return zello_state()
+
+
+@app.post('/api/zello')
+def set_zello():
+    """{"user", "password", "issuer", "private_key", "channels": [...]}: an empty or missing account field keeps the
+    one stored, channels replace the list when sent. {"clear": true} takes the account and the key away"""
+    try:
+        body = bottle.request.json
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return api_error(400, "Send the settings as JSON")
+    try:
+        with zello_lock:
+            if body.get("clear") is True:
+                for name in ("account.conf", "private_key.pem"):
+                    if os.path.exists(zello_path(name)):
+                        os.remove(zello_path(name))
+                return zello_state("Account and key cleared")
+            acc = zello_read()
+            user = zello_text(body.get("user"), 64, "User name").strip()
+            password = zello_text(body.get("password"), 128, "Password")
+            issuer = zello_text(body.get("issuer"), 300, "Issuer").strip()
+            if issuer and not re.fullmatch(r"[!-~]+", issuer):
+                raise ValueError("Issuer: printable characters, no spaces")
+            pem = body.get("private_key") or ""
+            if not isinstance(pem, str) or len(pem) > ZELLO_KEY_MAX:
+                raise ValueError("Private Key: too long")
+            pem = pem.replace("\\n", "\n").replace("\r\n", "\n").strip()
+            if pem and not ZELLO_PEM.fullmatch(pem):
+                raise ValueError("Private Key: paste all of it, from -----BEGIN PRIVATE KEY----- to "
+                                 "-----END PRIVATE KEY-----")
+            channels = None
+            if "channels" in body:
+                if not isinstance(body["channels"], list):
+                    raise ValueError("Channels: a list")
+                channels = []
+                for c in body["channels"]:
+                    c = " ".join(zello_text(c, 64, "A channel's name").split())
+                    if c and c not in channels:
+                        channels.append(c)
+                if len(channels) > ZELLO_CHANNELS_MAX:
+                    raise ValueError(f"Channels: {ZELLO_CHANNELS_MAX} at most")
+            for k, v in (("user", user), ("password", password), ("issuer", issuer)):
+                if v:
+                    acc[k] = v
+            if user or password or issuer:
+                zello_write_file("account.conf", "".join(f"{k}={acc[k]}\n" for k in ZELLO_ACCOUNT_KEYS if acc[k]),
+                                 0o600)
+            if pem:
+                zello_write_file("private_key.pem", pem + "\n", 0o600)
+            if channels is not None:
+                zello_write_file("channels.txt", "".join(c + "\n" for c in channels), 0o644)
+    except ValueError as e:
+        return api_error(400, str(e))
+    except OSError as e:
+        return api_error(500, f"Can't save: {e}")
+    return zello_state("Saved. On the radio: APP > Zello, Reload channels")
+
+
+@app.post('/api/zello/test')
+def test_zello():
+    """x6100-zello test with the account saved: it logs on to zello.io and off again. Its line, the secrets hidden"""
+    if not zello_lock.acquire(blocking=False):
+        return api_error(409, "A test is running")
+    try:
+        acc = zello_read()
+        env = dict(os.environ, X6100_ZELLO_DIR=settings.ZELLO_DIR)
+        try:
+            r = subprocess.run([settings.ZELLO_CMD, "test"], capture_output=True, text=True, timeout=40, env=env)
+            lines = r.stdout.strip().splitlines()
+            line = lines[-1] if lines else f"error exit code {r.returncode}"
+        except subprocess.TimeoutExpired:
+            line = "error no answer in 40 s: check the radio's network"
+        except (OSError, subprocess.SubprocessError) as e:
+            line = f"error {e}"
+        line = hide_secrets(line, acc["user"])
+    finally:
+        zello_lock.release()
+    ok = line.startswith("ok ")
+    return {"ok": ok, "msg": line[3:] if ok else line[6:] if line.startswith("error ") else line}
+
+
+# SVXConnect routes: the SVXConnect app (APP > SVXConnect, src/dialog_svx.c) and its helper /usr/bin/svxconnect
+# (SVXConnect-CLI, tools/svxconnect), which talks to the SvxLink reflector set here, and only while the app is
+# connected. In SVX_DIR: svxconnect.conf, the settings this page writes whole (the reflector, the callsign, the
+# talkgroups; the paths the radio needs), and pki/: the private key, the signing request, the certificate the
+# reflector's sysop signed and the reflector's CA, written by svxconnect itself. pki/ is the radio's own: for root
+# alone, never handed back (the page says what the certificate is, from svxconnect --cert-status), not in a backup
+# (backup_files) and not on the Files page (config_pages.secret_places); the key's lines are hidden in whatever a
+# helper says. The enrolment: svxconnect --enroll in the background, which sends the request and waits for the sysop
+# (minutes or days, asking again every 30 s), or with a certificate asks the reflector whether it still takes it.
+
+SVX_CONF_NAME = "svxconnect.conf"
+SVX_TGS_MAX = 32                # talkgroups in the two lists together: the app's table holds as many
+SVX_CALL = re.compile(r"[A-Z0-9]{3,10}(-[A-Z0-9]{1,4})?")    # also the key's file name: no '/'
+SVX_HOST = re.compile(r"(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,62})(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}))*\.?")
+SVX_EMAIL = re.compile(r"[^\s@#;\"'\\]{1,64}@[^\s@#;\"'\\]+\.[^\s@#;\"'\\]+")
+SVX_TG = re.compile(r"([1-9][0-9]{0,9})(\+{0,3})")
+SVX_TEXT_BAD = re.compile(r"[#;\"'\\\x00-\x1f\x7f]")       # svxconnect.conf's comments and quotes
+# What the page sets: name -> (default, the type: "int" lo hi, "bool", "tgs", "text")
+SVX_FIELDS = {
+    "callsign": ("", "call"), "email": ("", "email"), "reflector": ("", "host"), "port": (5300, "int", 1, 65535),
+    "switchable": ("", "tgs"), "monitored": ("", "tgs"), "default_tg": (0, "int", 0, 4294967295),
+    "lock_on_start": (False, "bool"), "linger_seconds": (30, "int", 10, 300), "idle_seconds": (0, "int", 0, 3600),
+    "tx_timeout_sec": (120, "int", 30, 600), "roger_beep": (True, "bool"), "location": ("", "text"),
+}
+svx_lock = threading.Lock()
+svx_enroll = {"proc": None, "rc": None, "started": 0.0}
+
+
+def svx_path(*names):
+    return os.path.join(settings.SVX_DIR, *names)
+
+
+def svx_read():
+    """svxconnect.conf as this page wrote it: the defaults for what is missing"""
+    out = {k: v[0] for k, v in SVX_FIELDS.items()}
+    try:
+        with open(svx_path(SVX_CONF_NAME), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                k, sep, v = line.split("#", 1)[0].partition("=")
+                k, v = k.strip().lower(), v.strip()
+                if not sep or k not in SVX_FIELDS:
+                    continue
+                kind = SVX_FIELDS[k][1]
+                if kind == "int":
+                    try:
+                        out[k] = int(v)
+                    except ValueError:
+                        pass
+                elif kind == "bool":
+                    out[k] = v.lower() in ("on", "yes", "true", "1")
+                else:
+                    out[k] = v
+    except OSError:
+        pass
+    return out
+
+
+def svx_tg_list(value, what):
+    """"8, 1745+, 9990" or a list: [(id, '+'s)], checked as svxconnect reads it"""
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, str):
+        items = value.replace(",", " ").split()
+    else:
+        raise ValueError(f"{what}: talkgroups as 8, 1745+, 9990")
+    out = []
+    for it in items:
+        m = SVX_TG.fullmatch(str(it).strip())
+        if not m or int(m.group(1)) > 4294967295:
+            raise ValueError(f"{what}: {str(it)[:20]!r} is not a talkgroup (a number, up to three + for priority)")
+        if all(t != m.group(1) for t, _ in out):
+            out.append((m.group(1), m.group(2)))
+    return out
+
+
+def svx_conf_text(c):
+    """The whole file: what the page sets, and the paths the radio needs (no FIFO, status file or log file of its own:
+    the app reads its lines and keeps its log in /mnt/app_logs)"""
+    lines = ["# Written by the radio's web page (SVXConnect): edit it there, it is written whole at each Save",
+             f"callsign = {c['callsign']}", f"email = {c['email']}", f"reflector = {c['reflector']}",
+             f"port = {c['port']}", f"pki_dir = {svx_path('pki')}"]
+    if c["location"]:
+        lines.append(f"location = {c['location']}")
+    lines += [f"switchable = {c['switchable']}", f"monitored = {c['monitored']}", f"default_tg = {c['default_tg']}",
+              f"lock_on_start = {'on' if c['lock_on_start'] else 'off'}", f"linger_seconds = {c['linger_seconds']}",
+              f"idle_seconds = {c['idle_seconds']}", f"tx_timeout_sec = {c['tx_timeout_sec']}",
+              f"roger_beep = {'on' if c['roger_beep'] else 'off'}",
+              "ctl_fifo =", "status_file =", "log_file =", "lock_file = /tmp/svxconnect.lock", "log_level = info"]
+    return "\n".join(lines) + "\n"
+
+
+def svx_key_text():
+    """The private key svxconnect made, "" when none: <callsign>.key in pki/"""
+    call = svx_read()["callsign"]
+    if not SVX_CALL.fullmatch(call):
+        return ""
+    try:
+        with open(svx_path("pki", call + ".key"), encoding="utf-8", errors="replace") as f:
+            return f.read(16384)
+    except OSError:
+        return ""
+
+
+def svx_secrets():
+    """The private key's lines: hidden in whatever svxconnect says"""
+    return {line.strip() for line in svx_key_text().splitlines() if len(line.strip()) >= 8 and "-----" not in line}
+
+
+def svx_enroll_running():
+    """The enrolment's svxconnect still running; when it has ended, its exit code kept"""
+    p = svx_enroll["proc"]
+    if p is not None and p.poll() is not None:
+        svx_enroll["rc"], svx_enroll["proc"] = p.returncode, None
+    return svx_enroll["proc"] is not None
+
+
+def svx_enroll_log(n=12):
+    """The enrolment's last lines, the secrets hidden"""
+    try:
+        with open(settings.SVX_ENROLL_LOG, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 6000))
+            text = f.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    hide = secret_hider()
+    return [hide(line[:300]) for line in text.splitlines()[-n:] if line.strip()]
+
+
+def svx_cert():
+    """svxconnect --cert-status with the saved settings: {"status", "usable", "request", "not_after", "renew_at",
+    "days"}, or {"status": "unknown", "why": ...} when it cannot tell"""
+    if not os.path.exists(svx_path(SVX_CONF_NAME)):
+        return {"status": "unknown", "why": "Save the settings first"}
+    try:
+        r = subprocess.run([settings.SVX_CMD, "--cert-status", "-c", svx_path(SVX_CONF_NAME)], capture_output=True,
+                           text=True, timeout=15, stdin=subprocess.DEVNULL)
+    except FileNotFoundError:
+        return {"status": "unknown", "why": "svxconnect is not on this radio: install the update"}
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"status": "unknown", "why": hide_secrets(str(e))}
+    out = {}
+    for item in r.stdout.split():
+        k, sep, v = item.partition("=")
+        if sep:
+            out[k] = v
+    if "status" not in out:
+        return {"status": "unknown", "why": "the callsign, e-mail and reflector are needed"}
+    num = lambda k: int(out[k]) if out.get(k, "").lstrip("-").isdigit() else 0   # noqa: E731
+    return {"status": out["status"].replace("_", " "), "usable": out.get("usable") == "1",
+            "request": out.get("request") == "1", "not_after": num("not_after"), "renew_at": num("renew_at"),
+            "days": num("days")}
+
+
+def svx_state(result=None):
+    c = svx_read()
+    running = svx_enroll_running()
+    return {"conf": c, "saved": os.path.exists(svx_path(SVX_CONF_NAME)), "cert": svx_cert(),
+            "enroll": {"running": running, "rc": None if running else svx_enroll["rc"], "log": svx_enroll_log()},
+            "result": result}
+
+
+def svx_text(value, limit, what):
+    if value is None:
+        return ""
+    if not isinstance(value, str) or len(value) > limit or SVX_TEXT_BAD.search(value):
+        raise ValueError(f"{what}: at most {limit} characters, on one line, without # ; quotes or backslashes")
+    return value.strip()
+
+
+def svx_int(value, lo, hi, what):
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{what}: a whole number")
+    if not lo <= v <= hi:
+        raise ValueError(f"{what}: {lo} to {hi}")
+    return v
+
+
+def svx_write_conf(c):
+    os.makedirs(settings.SVX_DIR, exist_ok=True)
+    path = svx_path(SVX_CONF_NAME)
+    tmp = path + ".tmp"
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644), "w", encoding="utf-8") as f:
+        f.write(svx_conf_text(c))
+    os.replace(tmp, path)
+
+
+@app.route('/svxconnect')
+def svx_page():
+    return bottle.template('svxconnect')
+
+
+@app.get('/api/svxconnect')
+def get_svx():
+    with svx_lock:
+        return svx_state()
+
+
+@app.post('/api/svxconnect')
+def set_svx():
+    """The settings, all of them (svxconnect.conf is written whole). Not while an enrolment runs: it reads them"""
+    try:
+        body = bottle.request.json
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return api_error(400, "Send the settings as JSON")
+    try:
+        with svx_lock:
+            if svx_enroll_running():
+                raise ValueError("A certificate request is running: Stop it first")
+            c = svx_read()
+            call = svx_text(body.get("callsign", c["callsign"]), 16, "Callsign").upper()
+            if call and not SVX_CALL.fullmatch(call):
+                raise ValueError("Callsign: letters and digits, as ON6URE (a -suffix may follow; no /P)")
+            email = svx_text(body.get("email", c["email"]), 100, "E-mail")
+            if email and not SVX_EMAIL.fullmatch(email):
+                raise ValueError("E-mail: an address the reflector's sysop can write to")
+            host = svx_text(body.get("reflector", c["reflector"]), 253, "Reflector")
+            if host and not SVX_HOST.fullmatch(host):
+                raise ValueError("Reflector: a host name or address, as reflector.example.org")
+            sw = svx_tg_list(body.get("switchable", c["switchable"]), "Switchable")
+            mon = svx_tg_list(body.get("monitored", c["monitored"]), "Monitored")
+            if len({t for t, _ in sw} | {t for t, _ in mon}) > SVX_TGS_MAX:
+                raise ValueError(f"Talkgroups: {SVX_TGS_MAX} at most in the two lists together")
+            if call and host and not sw and not mon:
+                raise ValueError("Talkgroups: at least one, switchable or monitored")
+            new = {"callsign": call, "email": email, "reflector": host.rstrip("."),
+                   "port": svx_int(body.get("port", c["port"]), 1, 65535, "Port"),
+                   "switchable": ", ".join(t + p for t, p in sw), "monitored": ", ".join(t + p for t, p in mon),
+                   "default_tg": svx_int(body.get("default_tg", c["default_tg"]), 0, 4294967295, "Start on"),
+                   "lock_on_start": bool(body.get("lock_on_start", c["lock_on_start"])),
+                   "linger_seconds": svx_int(body.get("linger_seconds", c["linger_seconds"]), 10, 300, "Linger"),
+                   "idle_seconds": svx_int(body.get("idle_seconds", c["idle_seconds"]), 0, 3600, "Idle"),
+                   "tx_timeout_sec": svx_int(body.get("tx_timeout_sec", c["tx_timeout_sec"]), 30, 600,
+                                             "TX time-out"),
+                   "roger_beep": bool(body.get("roger_beep", c["roger_beep"])),
+                   "location": svx_text(body.get("location", c["location"]), 60, "Location")}
+            if new["default_tg"] and all(t != str(new["default_tg"]) for t, _ in sw):
+                raise ValueError("Start on: one of the switchable talkgroups, or 0 for the first of them")
+            svx_write_conf(new)
+            return svx_state("Saved. On the radio: APP > SVXConnect, Connect")
+    except ValueError as e:
+        return api_error(400, str(e))
+    except OSError as e:
+        return api_error(500, f"Can't save: {e}")
+
+
+@app.post('/api/svxconnect/enroll')
+def svx_enroll_cmd():
+    """{"action": "start"}: svxconnect --enroll in the background (a request to the sysop, or the check of the
+    certificate there is). {"action": "stop"}: it ends; the key and the request stay, a new start carries on.
+    {"action": "remove"}: the key, the request and the certificate gone (a new callsign, another reflector)"""
+    try:
+        body = bottle.request.json
+    except ValueError:
+        body = None
+    action = body.get("action") if isinstance(body, dict) else None
+    with svx_lock:
+        running = svx_enroll_running()
+        if action == "start":
+            if running:
+                return api_error(409, "A request is running already")
+            c = svx_read()
+            if not (os.path.exists(svx_path(SVX_CONF_NAME)) and c["callsign"] and c["email"] and c["reflector"]):
+                return api_error(400, "Save the callsign, the e-mail and the reflector first")
+            try:
+                os.makedirs(os.path.dirname(settings.SVX_ENROLL_LOG), exist_ok=True)
+                with open(settings.SVX_ENROLL_LOG, "w") as log:
+                    svx_enroll["proc"] = subprocess.Popen(
+                        [settings.SVX_CMD, "--enroll", "-c", svx_path(SVX_CONF_NAME)], stdin=subprocess.DEVNULL,
+                        stdout=log, stderr=log, start_new_session=True, close_fds=True)
+            except OSError as e:
+                return api_error(500, hide_secrets(f"svxconnect did not start: {e}"))
+            svx_enroll["rc"], svx_enroll["started"] = None, time.time()
+            return svx_state("Request started")
+        if action == "stop":
+            p = svx_enroll["proc"]
+            if p is not None and running:
+                try:
+                    os.killpg(p.pid, signal.SIGTERM)
+                    p.wait(10)
+                except (OSError, subprocess.TimeoutExpired):
+                    try:
+                        os.killpg(p.pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                svx_enroll_running()
+            return svx_state("Stopped: the key and the request are kept")
+        if action == "remove":
+            if running:
+                return api_error(409, "A request is running: Stop it first")
+            shutil.rmtree(svx_path("pki"), ignore_errors=True)
+            return svx_state("Key, request and certificate removed")
+    return api_error(400, "action: start, stop or remove")
 
 
 # The Bands, Digital modes, Time and Files pages, static files: config_pages.py adds their routes to app

@@ -181,6 +181,35 @@ done
 mkdir -p $BOARD/rootfs-overlay/usr/bin
 cp $GUI/buildroot/bt_start.sh $BOARD/rootfs-overlay/usr/bin/bt_start.sh
 
+echo "== ffmpeg for the Internet radio: the audio decoders and stream formats it plays, nothing else"
+# x6100-iradio plays MP3 with mpg123 and hands AAC, Ogg Vorbis, Opus, FLAC and HLS streams to the ffmpeg
+# command line: decoded to s16le PCM on its standard output. Only those parts are built (no video, no
+# devices, no swscale); TLS comes from the image's GnuTLS (buildroot's ffmpeg.mk picks it). An image
+# without it plays MP3 stations only (image-required, level 3)
+# GoldCorpHF (merge of 2026-11-18): the same one ffmpeg also plays the boot video (S94bootvideo, the block "ffmpeg
+# for the boot video" below, which this one would otherwise have left out): its video decoders, demuxers, parsers,
+# swscale, filters, the framebuffer output and v4l2-m2m are added to the Internet radio's audio parts
+sed -i "/BR2_PACKAGE_FFMPEG/d" $DEFCONFIG
+cat >> $DEFCONFIG <<'FFMPEG'
+BR2_PACKAGE_FFMPEG=y
+BR2_PACKAGE_FFMPEG_FFMPEG=y
+# BR2_PACKAGE_FFMPEG_FFPLAY is not set
+# BR2_PACKAGE_FFMPEG_FFPROBE is not set
+BR2_PACKAGE_FFMPEG_SWSCALE=y
+# BR2_PACKAGE_FFMPEG_INDEVS is not set
+BR2_PACKAGE_FFMPEG_OUTDEVS=y
+BR2_PACKAGE_FFMPEG_ENCODERS="pcm_s16le rawvideo"
+BR2_PACKAGE_FFMPEG_DECODERS="aac aac_latm mp3 mp3float vorbis opus flac pcm_s16le h264 hevc mpeg4 vp8 vp9"
+BR2_PACKAGE_FFMPEG_MUXERS="pcm_s16le"
+BR2_PACKAGE_FFMPEG_DEMUXERS="aac ogg flac mp3 wav mov mpegts hls matroska avi"
+BR2_PACKAGE_FFMPEG_PARSERS="aac aac_latm mpegaudio vorbis opus flac h264 hevc mpeg4video vp8 vp9"
+BR2_PACKAGE_FFMPEG_BSFS="aac_adtstoasc"
+BR2_PACKAGE_FFMPEG_PROTOCOLS="pipe file http https httpproxy tcp tls crypto hls"
+BR2_PACKAGE_FFMPEG_FILTERS="aresample aformat anull atrim abuffer abuffersink format null trim scale pad transpose fps crop setsar"
+BR2_PACKAGE_FFMPEG_EXTRACONF="--enable-v4l2-m2m"
+FFMPEG
+grep -q '^BR2_PACKAGE_FFMPEG_DECODERS="aac ' $DEFCONFIG
+
 # rootfs/ is synced into the GUI package and installed as is: a __pycache__ left there by running
 # one of its scripts on the host (tests) would land in the image
 find $GUI/rootfs -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
@@ -452,6 +481,19 @@ sed -i "/_CONF_OPTS += -DRADE_PREFIX=/d" $GUI_MK
 sed -i "s|^\$(eval \$(cmake-package))|${GUI_VAR}_CONF_OPTS += -DRADE_PREFIX=$RADE_PREFIX\n&|" $GUI_MK
 grep -q "^${GUI_VAR}_CONF_OPTS += -DRADE_PREFIX=$RADE_PREFIX" $GUI_MK
 
+echo "== SVXConnect, the SVXConnect app's reflector client (tools/svxconnect/build.sh): one ARMv7 binary, same gcc"
+# SVXConnect-CLI at the pinned tag with our patches, kept in $HOME/.cache/openx6x00/svxconnect; the GUI's CMake
+# installs it as /usr/bin/svxconnect, so it is in the image and in the update bundle. It links the tree's OpenSSL
+# and Opus, both in the image already (the checks below), which a tree built for the first time builds here, and
+# finds them with buildroot's pkg-config (host/bin, first on the PATH): the build container has none of its own
+for o in BR2_PACKAGE_LIBOPENSSL BR2_PACKAGE_OPUS; do grep -q "^$o=y" $BR/build/.config; done
+(cd $BR/build && make host-pkgconf libopenssl opus)
+SVX_BIN=$(PATH=$BR/build/host/bin:$PATH CC=$XARA_CC bash $GUI/tools/svxconnect/build.sh)
+[ -x "$SVX_BIN" ]
+sed -i "/_CONF_OPTS += -DSVXCONNECT_BINARY=/d" $GUI_MK
+sed -i "s|^\$(eval \$(cmake-package))|${GUI_VAR}_CONF_OPTS += -DSVXCONNECT_BINARY=$SVX_BIN\n&|" $GUI_MK
+grep -q "^${GUI_VAR}_CONF_OPTS += -DSVXCONNECT_BINARY=$SVX_BIN" $GUI_MK
+
 echo "== Build"
 cd $BR/build
 # U-Boot's release tarball comes from ftp.denx.de (buildroot's mirror has the X6100's 2026.07, not the X6200's
@@ -527,6 +569,17 @@ fi
 if [ $MODEL = x6200 ] && ls -d $BR/build/build/uboot-*/ > /dev/null 2>&1 \
         && ! grep -qs "^# CONFIG_VIDEO_LOGO is not set" $BR/build/build/uboot-*/.config; then
     make uboot-dirclean
+fi
+# ffmpeg configured with another list of parts than the one in the defconfig now (ffmpeg's own config.h says what
+# it was built with): buildroot builds a package once and never looks at its options again
+if ls -d $BR/build/build/ffmpeg-[0-9]*/ > /dev/null 2>&1 \
+        && ! grep -qs "^#define CONFIG_PCM_S16LE_MUXER 1" $BR/build/build/ffmpeg-[0-9]*/config.h; then
+    make ffmpeg-dirclean
+fi
+# and one built for the Internet radio alone (no H.264 decoder: the boot video's, GoldCorpHF)
+if ls -d $BR/build/build/ffmpeg-[0-9]*/ > /dev/null 2>&1 \
+        && ! grep -qs "^#define CONFIG_H264_DECODER 1" $BR/build/build/ffmpeg-[0-9]*/config.h; then
+    make ffmpeg-dirclean
 fi
 # The GUI and the web server come from this repository (a local site): buildroot syncs them
 # once and never again on its own, so they are re-synced and rebuilt every run

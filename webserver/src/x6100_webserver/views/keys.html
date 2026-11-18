@@ -69,7 +69,7 @@ var render = function() {
   K.page.forEach(function(k) { c.append(row(k.label, "", select(k.id, K.actions, k.val))); });
   cards.append(c);
 
-  c = card("USER page", "F1-F5 of your own, named after their actions: APP 4:4 User keys, or a key given USER page");
+  c = card("USER page", "F1-F5 of your own, named after their actions: APP 4:6 User keys, or a key given USER page");
   K.user.forEach(function(v, i) { c.append(row("F" + (i + 1), "", select("user_f" + (i + 1), K.actions, v))); });
   cards.append(c);
 

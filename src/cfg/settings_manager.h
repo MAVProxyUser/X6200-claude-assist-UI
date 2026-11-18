@@ -276,6 +276,10 @@ class SettingsManager {
     // The fill fading from its colour at the trace to the background at the bottom (0 = solid)
     Parameter<int32_t> p_spectrum_fill_gradient{"spectrum_fill_gradient", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The fill by level: each height in the waterfall's colour for that level, over the colour and the gradient
+    // (0 = off, the fill as before; from condoruy's CX8ANM edition)
+    Parameter<int32_t> p_spectrum_fill_level{"spectrum_fill_level", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     // S-meter colours: 0 the theme, 1 the scale (green, yellow, red along it), 2 the level (all lit bars)
     Parameter<int32_t> p_smeter_color{"smeter_color", 0, 0, 2,
         StorageType::GLOBAL, pending_writes_, &global_params_};
@@ -542,6 +546,44 @@ class SettingsManager {
     // Decodes (FT8 FT4 FT2 JS8 PSK31 PSK63 Olivia) to PSK Reporter, on by default
     Parameter<int32_t> p_pskreporter{"pskreporter", true, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The Zello app (dialog_zello.c): talk on Zello from a Bluetooth headset's mic instead of the hand mic
+    Parameter<int32_t> p_zello_talk_bt{"zello_talk_bt", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The Zello app's Simplex repeater (voice_link.h, shared with SVXConnect), off by default: a channel's messages
+    // transmitted on the frequency the radio is on (it keys the radio), and what the receiver hears with the squelch
+    // open sent to it
+    Parameter<int32_t> p_zello_to_rf{"zello_to_rf", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_zello_to_zello{"zello_to_zello", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // A transmission's longest, and a message's to Zello, s; the pause between two relayed transmissions, s
+    Parameter<int32_t> p_zello_limit{"zello_limit", 120, 30, 300,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_zello_pause{"zello_pause", 3, 1, 30,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The link's CW ID of the callsign, on by default, at least every zello_id_min minutes while it transmits
+    Parameter<int32_t> p_zello_id{"zello_id", true, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_zello_id_min{"zello_id_min", 60, 5, 120,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The SVXConnect app (dialog_svx.c): talk on the reflector from a Bluetooth headset's mic instead of the hand mic
+    Parameter<int32_t> p_svx_talk_bt{"svx_talk_bt", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Its Simplex repeater, the same rules as Zello's (voice_link.h), off by default: a talkgroup's overs transmitted
+    // on the frequency the radio is on, and what the receiver hears with the squelch open sent to the talkgroup. One
+    // app's link at a time (dialog_svx.c, dialog_zello.c)
+    Parameter<int32_t> p_svx_to_rf{"svx_to_rf", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_svx_to_svx{"svx_to_svx", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_svx_limit{"svx_limit", 120, 30, 300,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_svx_pause{"svx_pause", 3, 1, 30,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_svx_id{"svx_id", true, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_svx_id_min{"svx_id_min", 60, 5, 120,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
 
     // Field Ops: start in Field Ops at power on
     Parameter<int32_t> p_field_boot{"field_boot", false, 0, 1,
@@ -713,6 +755,15 @@ class SettingsManager {
     // The first-start guide had (first_start.c): finished, skipped or left once. No row on a new card or after a
     // settings reset, nor on a radio updated from before the guide: there the callsign decides (first_start_rule.h)
     Parameter<int32_t> p_first_start_done{"first_start_done", 0, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The country the radio is used in (Settings > General > STATION, the first-start guide): its ISO 3166-1 alpha-2
+    // code in capitals ("BE"), "" when none is set. The band plan's Auto takes its IARU region when the GPS and the
+    // locator do not tell (band_plan.c); the list and the C getters are in countries.h
+    Parameter<std::string> p_country{"country", "", country_validate,
+        StorageType::GLOBAL, pending_writes_, {}, &global_params_};
+    // APP > Weather > Notices (meteo_alerts.c): every 30 minutes the warnings where the radio is, a new one of its
+    // own as a notice on any screen. Off by default: it asks the services in the background
+    Parameter<int32_t> p_meteo_alerts{"meteo_alerts", 0, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
 
     // Waterfall Mode Fixed (Settings > Display > WATERFALL, live, #10): the view moves on when 0 the line (or what is
@@ -1214,6 +1265,9 @@ class SettingsManager {
     // Validate/pad the encoder-bind string to CTRL_FAST_ACCESS_LAST chars
     // (filling any shorter input with ENCODER_BIND_NONE). Pure function.
     static std::string encoder_bind_validate(const std::string &val);
+
+    // A country code as p_country keeps it: two letters in capitals, anything else "" (none set). Pure function
+    static std::string country_validate(const std::string &val);
 
     // Filter category of a mode (SSB/AM/FM/CW; unknown/default -> SSB).
     enum class FilterMode {

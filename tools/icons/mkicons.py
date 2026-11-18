@@ -237,6 +237,63 @@ def i_scan(p):       # a sweep through the channels, stopped on one
     p.line([(57, 22), (57, 88)])
     p.poly([(49, 12), (65, 12), (57, 24)])
 
+def i_aero(p):       # an aeroplane from above with radio waves: the HF air band
+    p.poly([(30, 30), (36, 34), (36, 52), (58, 64), (58, 70), (36, 62), (36, 76), (44, 84), (44, 88),
+            (30, 84), (16, 88), (16, 84), (24, 76), (24, 62), (2, 70), (2, 64), (24, 52), (24, 34)])
+    for r in (16, 28):
+        p.ring(66, 36, r, w=p.w // 2 + 1, start=-60, end=60)
+
+def i_cb(p):         # a mobile set with its hand microphone: CB
+    p.box(6, 30, 70, 64, r=6)
+    p.dot(24, 47, 7)
+    p.line([(42, 42), (58, 42)], w=p.w // 2 + 1)
+    p.line([(42, 53), (58, 53)], w=p.w // 2 + 1)
+    p.line([(70, 47), (83, 56), (83, 68)], w=p.w // 2 + 1)
+    p.fill_box(73, 68, 93, 94, r=8)
+
+def i_flights(p):    # an aircraft seen from above, nose up: the Flights app
+    p.line([(50, 8), (57, 18), (57, 38), (92, 58), (92, 66), (57, 56), (57, 76), (70, 86), (70, 92), (50, 87),
+            (30, 92), (30, 86), (43, 76), (43, 56), (8, 66), (8, 58), (43, 38), (43, 18), (50, 8)], w=p.w // 2 + 2)
+
+def i_iradio(p):     # a radio set with its antenna and a wave: the Internet radio (the CX8ANM edition's drawing)
+    p.box(10, 40, 90, 86, r=8)
+    p.ring(36, 63, 11)
+    for y in (56, 70):
+        p.line([(58, y), (78, y)], w=p.w // 2 + 1)
+    p.line([(30, 40), (70, 12)], w=p.w // 2 + 1)
+    p.ring(74, 12, 8, w=p.w // 2 + 1, start=200, end=340)
+
+def i_zello(p):      # a cloud with a voice in it: talk over the internet (the Zello app; not the service's logo)
+    p.ring(26, 56, 16, start=90, end=270)
+    p.ring(46, 38, 20, start=180, end=320)
+    p.ring(72, 54, 18, start=235, end=90)
+    p.line([(26, 72), (72, 72)])
+    for x, h in ((38, 7), (50, 14), (62, 5)):
+        p.line([(x, 52 - h), (x, 52 + h)], w=p.w // 2 + 1)
+
+def i_svx(p):        # a reflector: stations around a hub, each linked to it (the SVXConnect app)
+    p.ring(50, 50, 12)
+    for x, y in ((16, 18), (84, 18), (16, 82), (84, 82)):
+        dx, dy = 50 - x, 50 - y
+        k = 12 / math.hypot(dx, dy)
+        p.line([(x + dx * 0.2, y + dy * 0.2), (50 - dx * k, 50 - dy * k)], w=p.w // 2 + 1)
+        p.dot(x, y, 7)
+
+
+def i_meteo(p):      # a sun behind a cloud: the Weather app
+    p.ring(66, 30, 13)
+    for a in (200, 245, 290, 335, 20):
+        c, s = math.cos(math.radians(a)), math.sin(math.radians(a))
+        p.line([(66 + 20 * c, 30 + 20 * s), (66 + 26 * c, 30 + 26 * s)])
+    # the cloud: the outline of three rounds on a flat base, the sun hidden behind it
+    lobes, base = ((24, 68, 14), (46, 56, 18), (66, 68, 14)), (24, 58, 66, 82)
+    for grow, fill in ((p.w / 2, WHITE), (-p.w / 2, (0, 0, 0, 0))):
+        for x, y, r in lobes:
+            (cx, cy), rr = p.p(x, y), r * p.s / 100 + grow
+            p.d.ellipse([cx - rr, cy - rr, cx + rr, cy + rr], fill=fill)
+        (x0, y0), (x1, y1) = p.p(base[0], base[1]), p.p(base[2], base[3])
+        p.d.rectangle([x0, y0 - grow, x1, y1 + grow], fill=fill)
+
 
 def i_adsb(p):       # an aircraft over two range rings, a sweep from the middle: AIRSPACE (ADS-B)
     p.ring(50, 50, 44, w=p.w // 2 + 1, start=200, end=340)

@@ -101,6 +101,12 @@ missing() {
     elif grep -q -E "(No rule to make target|[Nn]o such file or directory)[^a-z]*[^ ]*build-host/lib/(liblvgl|liblv_drivers)\.a" "$log"; then
         # the library missing, not its path on a command line that failed for another reason
         echo "needs the GUI's host build (build-host, cmake with SDL)"
+    elif grep -q "'staticmethod' object is not callable" "$log"; then
+        # a staticmethod called in its class's body: Python 3.10 on (the radio has 3.11; upstream's x6100-iradio)
+        echo "needs Python 3.10 or newer (the radio has 3.11)"
+    elif [ "$(uname -s)" != Linux ] && grep -q -E "\[Errno 43\] Protocol not supported" "$log"; then
+        # socketpair(AF_UNIX, SOCK_SEQPACKET): Linux's (upstream's Zello and SVXConnect tests)
+        echo "Linux only (this is $(uname -s))"
     elif [ "$(uname -s)" != Linux ] && grep -q -E "linux/[a-z_]+\.h.*(not found|No such file)|SOCK_NONBLOCK|SOCK_CLOEXEC|accept4|pipe2|pthread_condattr_setclock|unknown options: --wrap|epoll|timerfd|eventfd|signalfd|MSG_NOSIGNAL|TCP_KEEPIDLE|SO_BINDTODEVICE|clock_nanosleep|ppoll|mkfs|losetup|timeout: command not found|sed: -e|sed: 1:|sfdisk: command not found|unshare: (command not found|No such file)" "$log"; then
         echo "Linux only (this is $(uname -s))"
     fi

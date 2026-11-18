@@ -97,6 +97,15 @@ typedef enum {
     ACTION_APP_TIMESIG,  /* 132: Time Signal, the clock from WWV and WWVH (dialog_timesig.c) */
     ACTION_APP_SWL,      /* 133: On the Air, the broadcast list's stations on the air now (dialog_swl.c) */
     ACTION_APP_DF,       /* 134: page I, the Sentry's direction finder with a KrakenSDR (app_df.c) */
+
+    /* The CX8ANM edition's numbers (condoruy's fork), so a key given one of its apps there opens it here as well */
+    ACTION_APP_METEO = 200,   /* Weather (dialog_meteo.c) */
+    ACTION_APP_IRADIO = 201,  /* Internet radio (dialog_iradio.c) */
+    ACTION_APP_ZELLO = 202,   /* Zello (dialog_zello.c) */
+    ACTION_APP_FLIGHTS = 203, /* Flights */
+    ACTION_APP_AERO = 204,  /* HF Air Band */
+    ACTION_APP_CB = 205,    /* CB */
+    ACTION_APP_SVX = 206,   /* SVXConnect (dialog_svx.c) */
 } press_action_t;
 
 typedef enum {
@@ -200,6 +209,12 @@ typedef struct {
     params_bool_t       sstv_denoise;    /* clean received pictures, keep the original too */
     params_bool_t       sstv_reply_rx;   /* Reply and Replay in the mode of the last picture received (#230) */
     params_uint8_t      sstv_tx_mode;    /* sstv_mode_t TX Mode was set to last, 0 none yet (#229) */
+
+    /* HF Air Band and CB (aero.h, cb.h) */
+    params_uint8_t      aero_area;       /* aero_area_t + 1 the list shown, 0 the radio's region's */
+    params_uint8_t      cb_plan;         /* cb_plan_t + 1, 0 the radio's region's */
+    params_uint8_t      cb_mode;         /* cb_mode_t + 1 chosen with Mode, 0 the plan's own */
+    params_bool_t       cb_knob;         /* the main knob steps the channels while the CB app is open */
 
     // FT8 gain offset for different radios/bands/modes
     params_float_t      ft8_output_gain_offset;

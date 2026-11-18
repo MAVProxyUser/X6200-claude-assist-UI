@@ -52,12 +52,15 @@ approved that day.
     still 60 s (MANUAL: A hung GUI restarts the radio).
 8. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
     Waterfall section below).
-9. **The upstream merge** (Guru-RF, 73 commits on 2026-11-17: SVXConnect, Zello, the Weather, Internet radio, CB and
-    HF Air Band apps, Flights, Field Ops' NOTA and maps, GhostNet, the first-start guide's language and country, the
-    APP grid's scrolling, the spectrum's fill by level, translations, SSH security keys, the speaker's one play-mode
-    owner): last, after everything else. A trial merge (git merge-tree) conflicts in 14 files: README, TODO, MANUAL,
-    local-build.sh, image-required, src/CMakeLists.txt, apps_menu.c, button_bar.cpp, cfg_socket.cpp, gui_main.c,
-    params.h, remote_server.c, screen_main.c, settings_window.cpp.
+9. **The upstream merge**: done 2026-11-18 (Guru-RF's 73 commits: SVXConnect, Zello, the Weather, Internet radio,
+    CB and HF Air Band apps, Flights, Field Ops' NOTA and maps, GhostNet, the first-start guide's language and
+    country, the APP grid's scrolling, the spectrum's fill by level, translations, SSH security keys, the speaker's
+    one play-mode owner). None of ours lost: every line this fork added or removed since the last merge checked
+    against the result; none of upstream's updater taken (it changed none). 14 files in conflict, all kept both
+    ways; the image's one ffmpeg made for the Internet radio's audio and our boot video's video together; User keys
+    kept on APP 4 (upstream's apps on APP 4-6); the new helpers name themselves GoldCorpHF. Tried on the radio:
+    pages A-E, B on the bladeRF, the APP grid with the new tiles. Not tried: the new apps themselves (Zello and
+    SVXConnect transmit; the Internet radio's AAC stations want a new card image, level 3).
 
 **Waiting on hardware**
 
@@ -556,3 +559,33 @@ paired with an X6200 sees an audio output and no input, because the radio offers
 X6100's chip SCO gives no audio and drops the WiFi; the X6200's is a Realtek RTL8723DU on USB (btusb, SCO over HCI:
 SCO MTU 255:12), so the headset role might work there. A test needs a PC or tablet paired with the radio, and may
 drop WiFi while SCO runs.
+
+## GSOC: the G90 driven from Xiegu's GSOC touchscreen head (this week, from cjlawson02's fork)
+
+Planned 2026-11-16. cjlawson02's fork (cjlawson02/OpenX6X00, branch `gsoc/g90-probe`, 25 commits on our main of
+about 13 Nov) runs OpenX6X00 on the GSOC head driving a G90 over its DE-9 cable: a third board next to the X6100 and
+X6200 (`HW_BACKEND=g90`, `hw_g90`, a GSOC panel profile and `gsoc_input`). We take it in ourselves and credit them;
+no pull request asked. What their branch has, to port onto main as it is then:
+
+- **The board**: board.h ranges for the G90 body, the dialogs, F-bar and meter widths from `BOARD_DISP_W` (the GSOC
+  panel is landscape, 1024 x 600), the rotary encoder (one detent one step), the clock tap opening APP, the boot
+  animation centred, dimmer defaults, the shutdown pulse.
+- **The link to the body**: their `libg90` library (github.com/cjlawson02/libg90, pinned by commit through
+  FetchContent; check its licence and build it like our other libraries, not fetched at build time), the body's
+  firmware profiles 1.78/1.81 picked from its replies, starting without the body and picking it up when it answers
+  (`BOARD_BASE_DETACHABLE`, Connected/Disconnected by the S-meter).
+- **Audio**: the head's codec unmuted, the headphones bit, the AF on the cabinet speaker through a loopback or an
+  analog path (`G90_AF_ANALOG`), VOL on the body's VOL byte.
+- **IQ and spectrum**: the IQ from the head's DMA buffer (`G90_IQ_MMAP`), the body band + codec skirts fuse
+  (`G90_FUSE_IQ`) with its quickselect percentile.
+- **Display speed**: DRM planes on the landscape panel with the strips on planes of their own, and the 3D waterfall
+  drawn in columns and turned over in 64 x 64 tiles on a thread of its own (on the GSOC: the GUI from a full core to
+  about 42 %; tools/d3_colmajor_test checks the pictures). Only landscape framebuffers take that path; the X6100 and
+  X6200 (portrait, `BOARD_FB_ROTATE_90`) draw as today.
+- **WiFi**: the head's WiFi is a USB adapter with no power pin; Off also disconnects it and turns autoconnect off,
+  On asks NetworkManager to join again (the rfkill switch left that adapter dead until replugged).
+- **Images and updates**: a buildroot tree for the GSOC (theirs or ours), its card image and update bundle, the
+  model name in x6100-update and the web server, and an image level line in rootfs/usr/share/x6100/image-required.
+- **Already on main** from that branch: dB <-> power without powf/log10f, and the paddle keyer's start after the
+  settings (both 16 Nov).
+- **Needs**: a GSOC head and a G90 on the bench.
