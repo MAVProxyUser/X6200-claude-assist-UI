@@ -108,6 +108,8 @@
 /* The body on a DE-9 cable, not in the case: the GUI starts without it (radio_init), the S-meter
  * says whether it answers (smeter.c), and the "No data from the base" notice is not shown */
 #define BOARD_BASE_DETACHABLE   1
+/* Its WiFi a USB adapter with no power pin: WiFi off is a disconnect, on a join (wifi.cpp) */
+#define BOARD_WIFI_NO_POWER_PIN 1
 #else
 /* The rest of the radio's ranges. The same on the X6100 and the X6200; the settings manager reads them. */
 #define BOARD_PWR_MIN       0.1f        /* PWR and the external tuner's TUNE power */

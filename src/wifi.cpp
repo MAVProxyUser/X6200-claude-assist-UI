@@ -96,8 +96,10 @@ static void connection_delete_cb(GObject *connection, GAsyncResult *result, gpoi
 static void connection_activating_cb(GObject *client, GAsyncResult *result, gpointer user_data);
 static void eth_refresh_cb(lv_timer_t *t);
 static void wifi_radio_enable(bool on);
+#ifdef BOARD_WIFI_NO_POWER_PIN
 static void wifi_device_autoconnect(bool on);
 static void wifi_rejoin_cb(GObject *client, GAsyncResult *result, gpointer user_data);
+#endif
 
 static void power_on_cb(lv_timer_t *t) {
     wifi_power_on();
@@ -185,6 +187,7 @@ void wifi_power_on() {
     LV_LOG_USER("Power on wifi/bt");
     params_bool_set(&params.wifi_enabled, true);
     radio_wifi_power(false);
+#ifdef BOARD_WIFI_NO_POWER_PIN
     /* A WiFi device NetworkManager already has (the G90 has no WiFi power pin: its USB adapter stayed up and
      * no device-added comes), or else the one device-added brings once the chip is up */
     if (!device && client) {
@@ -203,6 +206,11 @@ void wifi_power_on() {
     } else {
         set_status(WIFI_STARTING);
     }
+#else
+    if (!device) {                      /* the chip powered up again: device-added brings it */
+        set_status(WIFI_STARTING);
+    }
+#endif
     lv_msg_send(MSG_WIFI_STATE_CHANGED, NULL);
 }
 
@@ -210,6 +218,7 @@ void wifi_power_off() {
     LV_LOG_USER("Power off wifi/bt");
     set_status(WIFI_OFF);
     if (device) {
+#ifdef BOARD_WIFI_NO_POWER_PIN
         /* Where the chip has no power pin (G90) its adapter stays up: off is a disconnect, and no joins until on.
          * Not WiFi's rfkill: the G90's rtw88 USB adapter does not always come back from it (USB errors -71 at
          * the chip's power on, until it is replugged) */
@@ -223,7 +232,8 @@ void wifi_power_off() {
             g_signal_handlers_disconnect_by_func(active_con, (gpointer)active_con_state_changed_sig_cb, NULL);
         }
         g_signal_handlers_disconnect_by_func(device, (gpointer)device_state_changed_sig_cb, NULL);
-        device = NULL;
+#endif
+        device = NULL;                  /* the X6100's and X6200's chip goes with its power: a new one at power on */
     }
     params_bool_set(&params.wifi_enabled, false);
     radio_wifi_power(true);
@@ -255,6 +265,7 @@ static void wifi_radio_enable(bool on) {
                                 g_variant_new_boolean(on), -1, NULL, NULL, NULL);
 }
 
+#ifdef BOARD_WIFI_NO_POWER_PIN
 static void wifi_rejoin_cb(GObject *client, GAsyncResult *result, gpointer user_data) {
     GError             *error = NULL;
     NMActiveConnection *ac = nm_client_activate_connection_finish(NM_CLIENT(client), result, &error);
@@ -273,6 +284,7 @@ static void wifi_device_autoconnect(bool on) {
     nm_client_dbus_set_property(client, nm_object_get_path(NM_OBJECT(device)), NM_DBUS_INTERFACE_DEVICE,
                                 "Autoconnect", g_variant_new_boolean(on), -1, NULL, NULL, NULL);
 }
+#endif
 
 void wifi_start_scan() {
     if (device != NULL) {
