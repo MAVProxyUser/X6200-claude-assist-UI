@@ -609,6 +609,9 @@ typedef struct {
 } decoder_t;
 
 static const decoder_t decoders[] = {
+    {"EMERGENCY", "", 0, -1, -1, f_emer, EMER_N,
+     "EMERGENCY FREQUENCIES TO LISTEN TO: WEATHER, CB, FRS, MURS, GMRS, HAM CALLING, MARINE, AIR, MUTUAL AID.", 0,
+     'E', radio_agc_slow, false, "A OR B, RX ONLY"},
     {"FT8", "FT8", ACTION_APP_FT8, radio_mode_usb_dig, 1, HZ(f_ft8),
      "15-SECOND DIGITAL MESSAGES FROM HAMS WORLDWIDE: CALLS, GRIDS, SIGNAL REPORTS. THE BUSIEST MODE ON THE AIR.", 0,
      'X', radio_agc_slow, true, "THE FT8 APP"},
@@ -675,9 +678,6 @@ static const decoder_t decoders[] = {
     {"METEOR", "", 0, -1, -1, HZ(f_meteor),
      "WEATHER SATELLITES' PICTURES (LRPT) ON B'S SDR WHILE ONE PASSES: 10 MINUTES, A FEW TIMES A DAY.", 0,
      'B', -1, false, "B ON THE SDR"},
-    {"EMERGENCY", "", 0, -1, -1, f_emer, EMER_N,
-     "EMERGENCY FREQUENCIES TO LISTEN TO: WEATHER, CB, FRS, MURS, GMRS, HAM CALLING, MARINE, AIR, MUTUAL AID.", 0,
-     'E', radio_agc_slow, false, "A OR B, RX ONLY"},
 };
 
 #define DECODERS_N N_OF(decoders)
@@ -832,11 +832,29 @@ static void style_apply(int k) {
  * it): A the channels the X6200 takes, B the SDR's, the step time on each, stopping on a signal as the style says */
 static bool scan_chans;
 static int  a_chan = -1, b_chan = -1;           /* the channel each radio's scan is on, -1 none yet */
+
+/* E's EMERGENCY F1 (the owner, 2026-11-17: "scan them"): A and B scan its list in place of the channel list, A the
+ * rows the X6200 takes (HF, 6 m), B the SDR's, each stopping on one that talks for as long as it talks whatever
+ * SCAN CFG's style says, receive only. a_chan and b_chan are then places in emer_ord, the list by frequency (B's stick
+ * moves least) */
+static bool emer_scan;
+static int  emer_ord[EMER_N];
+static int  emer_smode = -1;                    /* A's mode before it, given back after */
+static bool b_stopped(void);
+static void rx_setup_apply(int64_t hz, int agc);
 #define A_CHAN_NEAR 5000                        /* A's lock on a channel: a signal this near it */
 
 /* The channel list's next entry after from (-1: the first) that the radio takes, the X6200's or the SDR's (rx_of);
  * -1 none */
 static int chan_next(bool sdr, int from) {
+    if (emer_scan) {
+        for (int k = 1; k <= EMER_N; k++) {
+            int p = ((from + k) % EMER_N + EMER_N) % EMER_N;
+
+            if (rx_of(emer[emer_ord[p]].hz) == (sdr ? RX_SDR : RX_X6200)) return p;
+        }
+        return -1;
+    }
     channels_reload_if_changed();
 
     int n = channels_count();
@@ -849,9 +867,28 @@ static int chan_next(bool sdr, int from) {
     return -1;
 }
 
+/* the scan's channel i (a_chan, b_chan): its frequency and name, the emergency list's or the channel list's */
+static int64_t scan_ch_hz(int i) {
+    if (emer_scan) return i >= 0 && i < EMER_N ? emer[emer_ord[i]].hz : 0;
+    const channel_t *c = i >= 0 ? channels_get((uint16_t)i) : NULL;
+
+    return c ? c->freq : 0;
+}
+
+static const char *scan_ch_name(int i) {
+    if (emer_scan) return i >= 0 && i < EMER_N ? emer[emer_ord[i]].ch : "";
+    const channel_t *c = i >= 0 ? channels_get((uint16_t)i) : NULL;
+
+    return c ? c->name : "";
+}
+
 static int chan_count(bool sdr) {
     int k = 0, n;
 
+    if (emer_scan) {
+        for (int i = 0; i < EMER_N; i++) k += rx_of(emer[i].hz) == (sdr ? RX_SDR : RX_X6200);
+        return k;
+    }
     channels_reload_if_changed();
     n = channels_count();
     for (int i = 0; i < n; i++) {
@@ -994,6 +1031,8 @@ static lv_obj_t *lg_head_l, *lg_row_l[20], *lg_rx_l[20], *lg_about_l;   /* lg_rx
 static int       lg_rows;
 static box_t     d_sel, d_how, d_ant, d_now;
 static lv_obj_t *d_head_l, *d_row_l[12];
+typedef struct sbar_s sbar_t;
+static struct sbar_s *sb_bd, *sb_lg, *sb_dsel, *sb_drow;     /* D's bands, C's log, E's types and rows */
 
 /* E SYSTEM: the rest of the radio, from here */
 typedef enum {
@@ -1693,6 +1732,77 @@ static void opt_set(box_t *b, int i, const char *text, int how) {
     lv_obj_set_style_text_color(b->opt[i], how == 1 ? ink : how == 2 ? dim : amb, 0);
 }
 
+/* A list's scroll bar (the owner, 2026-11-17: "a slight scroll bar indicator ... to help know the position in the
+ * overall list like a web browser normally does ... our mouse when active can click and drag here. any list box with
+ * too many items should handle the same way"): a thin track at the list's right with a thumb as long as the share of
+ * the list in sight and where that part is; shown only while the list holds more than it shows. A press or a drag on
+ * it (the mouse, a finger) chooses the item at that height, the window following as the MFK's would */
+struct sbar_s {
+    lv_obj_t *track, *thumb;
+    int       total, shown, top;
+    void    (*pick)(int i);
+};
+
+#define SBAR_W 5
+#define SBAR_X (SW - 15)                /* past the rows' widest text (97 of pixel_16's 8), inside the frame */
+
+static void sbar_drag_cb(lv_event_t *e) {
+    sbar_t     *b = lv_event_get_user_data(e);
+    lv_indev_t *in = lv_indev_get_act();
+    lv_point_t  pt;
+    lv_area_t   a;
+
+    if (!b || !in || b->total <= b->shown || !b->pick) return;
+    lv_indev_get_point(in, &pt);
+    lv_obj_get_coords(b->track, &a);
+    int h = lv_area_get_height(&a), i = h > 1 ? (int)((int64_t)(pt.y - a.y1) * b->total / h) : 0;
+
+    if (i < 0) i = 0;
+    if (i >= b->total) i = b->total - 1;
+    b->pick(i);
+}
+
+static void sbar_make(sbar_t *b, lv_obj_t *parent, int x, int y, int h, void (*pick)(int)) {
+    b->track = lv_obj_create(parent);
+    lv_obj_remove_style_all(b->track);
+    lv_obj_set_pos(b->track, x, y);
+    lv_obj_set_size(b->track, SBAR_W, h);
+    lv_obj_set_style_bg_color(b->track, amb, 0);
+    lv_obj_set_style_bg_opa(b->track, LV_OPA_20, 0);
+    lv_obj_set_style_radius(b->track, 2, 0);
+    lv_obj_set_ext_click_area(b->track, 6);         /* a mouse or a finger finds it */
+    lv_obj_add_flag(b->track, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(b->track, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(b->track, sbar_drag_cb, LV_EVENT_PRESSED, b);
+    lv_obj_add_event_cb(b->track, sbar_drag_cb, LV_EVENT_PRESSING, b);
+    b->thumb = lv_obj_create(b->track);
+    lv_obj_remove_style_all(b->thumb);
+    lv_obj_set_style_bg_color(b->thumb, amb, 0);
+    lv_obj_set_style_bg_opa(b->thumb, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(b->thumb, 2, 0);
+    lv_obj_clear_flag(b->thumb, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    b->pick = pick;
+    lv_obj_add_flag(b->track, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* total items, shown at once, the first shown */
+static void sbar_set(sbar_t *b, int total, int shown, int top) {
+    if (!b->track) return;
+    b->total = total, b->shown = shown, b->top = top;
+    if (total <= shown || shown <= 0) {
+        lv_obj_add_flag(b->track, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    int h = lv_obj_get_height(b->track), th = h * shown / total;
+
+    if (th < 10) th = 10;
+    if (top > total - shown) top = total - shown;
+    if (top < 0) top = 0;
+    lv_obj_set_size(b->thumb, SBAR_W, th);
+    lv_obj_set_pos(b->thumb, 0, (h - th) * top / (total - shown));
+    lv_obj_clear_flag(b->track, LV_OBJ_FLAG_HIDDEN);
+}
+
 static lv_obj_t *screen_obj(void) {
     lv_obj_t *o = lv_obj_create(root);
 
@@ -2039,12 +2149,15 @@ static void band_more(int i, char *s, size_t n) {
                  e[0] ? " | E:" : "", e);
 }
 
+static void sbar_set(sbar_t *b, int total, int shown, int top);
+
 static void show_bands(void) {
     char s[400], now[16];
     int  top = band_sel - bd_rows / 2;
 
     if (top > BANDS_N - bd_rows) top = BANDS_N - bd_rows;
     if (top < 0) top = 0;
+    if (sb_bd) sbar_set(sb_bd, BANDS_N, bd_rows, top);
     for (int r = 0; r < bd_rows; r++) {
         int i = top + r;
 
@@ -2119,6 +2232,8 @@ static void show_decode(void) {
         opt_set(&d_sel, r, top + r < DECODERS_N ? decoders[top + r].name : "", top + r == dec_sel);
     int rtop = dec_rtop();
 
+    if (sb_dsel) sbar_set(sb_dsel, DECODERS_N, d_sel.n, top);
+    if (sb_drow) sbar_set(sb_drow, d->n, 12, rtop);
     for (int rr = 0; rr < 12; rr++) {
         int r = rtop + rr;              /* the row of the type's list (more than 12 scroll: EMERGENCY) */
 
@@ -2148,14 +2263,27 @@ static void show_decode(void) {
         else snprintf(rx, sizeof(rx), "#%s %s#", tag_hex, who);
         snprintf(s, sizeof(s), DEC_ROW, fs, d->rx == 'E' ? emer[r].ch : bi >= 0 ? bands[bi].name : "",
                  bi >= 0 ? best_name(bands[bi].when) : "", set, now, rx);
+        if (d->rx == 'E' && emer_scan) {        /* the scan's place: A's or B's letter before the frequency */
+            if (routine == ROUT_SCAN && a_chan >= 0 && emer_ord[a_chan] == r) s[0] = 'A';
+            if (rtl_scan && b_chan >= 0 && emer_ord[b_chan] == r) s[0] = b_stopped() ? '*' : 'B';
+        }
         lv_label_set_text(d_row_l[rr], s);
         lv_obj_set_style_bg_opa(d_row_l[rr], r == dec_row ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(d_row_l[rr], r == dec_row ? ink : amb, 0);
     }
     if (d->rx == 'E' && dec_row < d->n) {          /* EMERGENCY: the chosen one's own line, and where it opens */
-        char w[160];
+        char w[320];
 
-        snprintf(w, sizeof(w), "%s (%d OF %d). %s", emer[dec_row].ch, dec_row + 1, d->n, emer[dec_row].what);
+        if (emer_scan) {
+            char fa[16], fb[16];
+
+            fmt_mhz(fa, sizeof(fa), a_chan >= 0 ? scan_ch_hz(a_chan) : 0, 3);
+            fmt_mhz(fb, sizeof(fb), b_chan >= 0 ? scan_ch_hz(b_chan) : 0, 3);
+            snprintf(w, sizeof(w), "SCANNING ALL: A %s %s%s, B %s %s%s. CHOSEN: %s, %s", a_chan >= 0 ? scan_ch_name(a_chan) : "-",
+                     a_chan >= 0 ? fa : "", trk.on ? " (STOPPED)" : "", b_chan >= 0 ? scan_ch_name(b_chan) : "-",
+                     b_chan >= 0 ? fb : "", b_stopped() ? " (STOPPED)" : "", emer[dec_row].ch, emer[dec_row].what);
+        } else
+            snprintf(w, sizeof(w), "%s (%d OF %d). %s", emer[dec_row].ch, dec_row + 1, d->n, emer[dec_row].what);
         opt_set(&d_how, 0, w, 0);
         opt_set(&d_ant, 0, emer_on_x6200(d->hz[dec_row]) ? "A ON THE X6200" : "B ON THE SDR", 0);
     } else {
@@ -2930,10 +3058,10 @@ static void show_a_boxes(void) {
         snprintf(bn, sizeof(bn), "%s%s", in || routine == ROUT_SCAN ? "" : "NEAR ", bi >= 0 ? bands[bi].name : "-");
         opt_set(&r_pre, 0, bn, 0);
     }
-    if (routine == ROUT_SCAN && scan_a_band < 0 && scan_chans) {
-        const channel_t *c = a_chan >= 0 ? channels_get((uint16_t)a_chan) : NULL;
+    if (routine == ROUT_SCAN && scan_a_band < 0 && (scan_chans || emer_scan)) {
+        const char *nm = scan_ch_name(a_chan);
 
-        snprintf(t, sizeof(t), "CH %.13s", c && c->name[0] ? c->name : "SCAN");
+        snprintf(t, sizeof(t), "%s %.13s", emer_scan ? "EMG" : "CH", nm[0] ? nm : "SCAN");
         opt_set(&r_pre, 1, t, 1);
     } else if (routine == ROUT_SCAN && bi >= 0) {
         char lo[16], hi[16];
@@ -3720,6 +3848,7 @@ static void rtl_want(bool on) {
 /* B's scan stopped on a signal (SCAN CFG's STAY ON A SIGNAL): its channel, since when, when it last talked; held: till
  * SCAN CFG's F2 GO ON or F3 SKIP. And the channels F3 SKIP passed over, till the Sentry closes */
 static struct { bool on, held, prio; int64_t hz; uint32_t start, heard; } b_stop;
+static bool b_stopped(void) { return b_stop.on; }
 /* B's PRIORITY look (b_prio_step): when next, a look under way since t, where the scan was */
 static struct {
     uint32_t next, t;
@@ -3793,7 +3922,7 @@ static bool b_stop_step(uint32_t now) {
         b_stop.on = false;              /* B's channel moved by hand: on from there */
         return false;
     }
-    uint32_t stay = stay_ms[b_stop.prio ? STAY_TALKS : scan_stay];
+    uint32_t stay = stay_ms[b_stop.prio || emer_scan ? STAY_TALKS : scan_stay];
 
     if (b_busy_at(b_stop.hz)) b_stop.heard = now;
     if (b_stop.held || (now - b_stop.heard <= quiet_ms[scan_quiet] && (stay == UINT32_MAX || now - b_stop.start <= stay)))
@@ -3869,10 +3998,15 @@ static void b_chan_step(uint32_t now) {
     if (scan_pick && now >= scan_pick) {
         scan_pick = 0;
         if (b_chan >= 0 && listen_hz && !b_skipped(listen_hz) && b_busy_at(listen_hz)) {
-            hit_add(listen_hz, rtl_mode_of(listen_hz), true, rtl_name(listen_hz), b_level_at(listen_hz));
-            if (scan_stay != STAY_NONE) {
+            hit_add(listen_hz, rtl_mode_of(listen_hz), true, emer_scan ? scan_ch_name(b_chan) : rtl_name(listen_hz),
+                    b_level_at(listen_hz));
+            if (scan_stay != STAY_NONE || emer_scan) {     /* EMERGENCY: always, while it talks */
+                if (emer_scan && heard != HEAR_RTL && heard != HEAR_BOTH) {     /* heard: the one that stopped */
+                    param_i_set(cfg_hear_f, HEAR_RTL);
+                    hear_apply(HEAR_RTL);
+                }
                 b_stop.on    = true;
-                b_stop.held  = scan_stay == STAY_HOLD;
+                b_stop.held  = !emer_scan && scan_stay == STAY_HOLD;
                 b_stop.prio  = false;
                 b_stop.hz    = listen_hz;
                 b_stop.start = b_stop.heard = now;
@@ -3885,7 +4019,7 @@ static void b_chan_step(uint32_t now) {
 
     scan_next = now + SCAN_DWELL_MS;
     if (i < 0) return;
-    int64_t hz = channels_get((uint16_t)i)->freq;
+    int64_t hz = scan_ch_hz(i);
 
     b_chan = i;
     if (llabs(hz - rtl_hz) > rtl_view_hz() / 2 - rtl_view_hz() / 10)     /* not in the picture: the stick round it */
@@ -3900,7 +4034,7 @@ static void rtl_scan_step(void) {
     /* on whatever screen (B's log and SCAN CFG see it), but not while C plays a stick entry of its own */
     if (!rtl_scan || rtl_spectrum_state() != RTL_SPEC_ON || (scr == SCR_LOG && g_onr >= 0)) return;
     if (b_prio_step(now)) return;
-    if (scan_chans) {
+    if (scan_chans || emer_scan) {
         b_chan_step(now);
         return;
     }
@@ -5422,37 +5556,47 @@ static void g_rds_take(void) {
     if (scr == SCR_LOG) show_glog();
 }
 
-/* WHAT IT WAS in its 12 letters (the owner, 2026-11-17): longer is cut with "..." on a row, and on the chosen row goes
- * slowly back and forth instead, a letter each half second (blink_cb), two seconds still at each end, from its start
- * each time a row is chosen */
+/* WHAT IT WAS in its 12 letters and ANTENNA in its 25 (the owner, 2026-11-17): longer is cut with "..." on a row, and
+ * on the chosen row goes slowly back and forth instead, a letter each half second (blink_cb), two seconds still at
+ * each end, from its start each time a row is chosen */
 #define WHAT_W 12
+#define ANT_W  25
 
 static int      what_sel = -1;
 static uint32_t what_t0;
 
-static void what_cell(int i, const char *w, bool chosen, char *out, size_t n) {
+static void slide_cell(int i, const char *w, bool chosen, int width, char *out, size_t n) {
     int len = (int)strlen(w);
 
-    if (len <= WHAT_W) {
+    if (len <= width) {
         snprintf(out, n, "%s", w);
         return;
     }
     if (!chosen) {
-        snprintf(out, n, "%.*s...", WHAT_W - 3, w);
+        snprintf(out, n, "%.*s...", width - 3, w);
         return;
     }
     if (i != what_sel) what_sel = i, what_t0 = lv_tick_get();
-    int span = len - WHAT_W, hold = 4, k = (int)(((lv_tick_get() - what_t0) / 500) % (uint32_t)(2 * (span + hold))), off;
+    int span = len - width, hold = 4, k = (int)(((lv_tick_get() - what_t0) / 500) % (uint32_t)(2 * (span + hold))), off;
 
     if (k < hold) off = 0;
     else if (k < hold + span) off = k - hold;
     else if (k < 2 * hold + span) off = span;
     else off = span - (k - 2 * hold - span);
-    snprintf(out, n, "%.*s", WHAT_W, w + off);
+    snprintf(out, n, "%.*s", width, w + off);
 }
 
-/* the chosen row's WHAT IT WAS is longer than its column: C is drawn again each half second to move it */
-static bool what_moves(void) { return g_sel >= 0 && g_sel < nhits && (int)strlen(hits[g_sel].what) > WHAT_W; }
+static const char *hit_ant(int i) {
+    bool in;
+    int  bi = band_near(hits[i].hz, &in);
+
+    return bi >= 0 ? bands[bi].ant : "";
+}
+
+/* the chosen row's WHAT IT WAS or ANTENNA is longer than its column: C is drawn again each half second to move it */
+static bool what_moves(void) {
+    return g_sel >= 0 && g_sel < nhits && ((int)strlen(hits[g_sel].what) > WHAT_W || (int)strlen(hit_ant(g_sel)) > ANT_W);
+}
 
 static void show_glog(void) {
     char s[240];
@@ -5460,6 +5604,7 @@ static void show_glog(void) {
 
     if (top > nhits - lg_rows) top = nhits - lg_rows;
     if (top < 0) top = 0;
+    if (sb_lg) sbar_set(sb_lg, nhits, lg_rows, top);
     for (int r = 0; r < lg_rows; r++) {
         int i = top + r;
 
@@ -5489,11 +5634,11 @@ static void show_glog(void) {
         int role = bi >= 0 && i != g_sel ? band_now_role(bi) : -1;    /* NOW: green open, yellow closing, red closed */
         if (role >= 0) snprintf(best, sizeof(best), "#%06X %s#", (unsigned)theme_hex((theme_color_t)role), b5);
         else snprintf(best, sizeof(best), "%s", b5);
-        char wc[WHAT_W + 4];
+        char wc[WHAT_W + 4], ac[ANT_W + 4];
 
-        what_cell(i, h->what, i == g_sel, wc, sizeof(wc));
-        snprintf(s, sizeof(s), LOG_ROW, g_playing(i) ? '>' : ' ', f, bn, wc, best, bi >= 0 ? bands[bi].ant : "",
-                 last, n);
+        slide_cell(i, h->what, i == g_sel, WHAT_W, wc, sizeof(wc));
+        slide_cell(i, bi >= 0 ? bands[bi].ant : "", i == g_sel, ANT_W, ac, sizeof(ac));
+        snprintf(s, sizeof(s), LOG_ROW, g_playing(i) ? '>' : ' ', f, bn, wc, best, ac, last, n);
         lv_label_set_text(lg_rx_l[r], rxs);
         lv_obj_set_style_text_color(lg_rx_l[r], i == g_sel ? ink : amb, 0);
         lv_label_set_text(lg_row_l[r], s);
@@ -5580,6 +5725,10 @@ static void track_start(int32_t hz, bool auto_) {
 
     identify(hz, &id);
     if (!tune(id.tune_hz, id.mode)) return;
+    if (emer_scan && heard != HEAR_X6200 && heard != HEAR_BOTH) {   /* EMERGENCY's scan: heard, the one that stopped */
+        param_i_set(cfg_hear_f, HEAR_X6200);
+        hear_apply(HEAR_X6200);
+    }
     memset(&trk, 0, sizeof(trk));
     trk_prio      = false;      /* a new lock is not the priority's till a_prio_lock says so */
     trk.on        = true;
@@ -5636,7 +5785,8 @@ static void track_step(void) {
     trk.last_ms = now;
     /* on a lock: as SCAN CFG's STAY ON A SIGNAL and GO ON AFTER say (DOESN'T STOP, with a lock C's log scan made AUTO
      * for: the step time) */
-    uint32_t stay = trk_prio ? stay_ms[STAY_TALKS] : scan_stay == STAY_NONE ? (uint32_t)scan_dwell_ms : stay_ms[scan_stay];
+    uint32_t stay = trk_prio || emer_scan ? stay_ms[STAY_TALKS]
+                  : scan_stay == STAY_NONE ? (uint32_t)scan_dwell_ms : stay_ms[scan_stay];
 
     if ((smode == MODE_AUTO || trk_prio) && !trk.held &&
         (now - trk.last_seen > quiet_ms[scan_quiet] || (stay != UINT32_MAX && now - trk.start > stay)))
@@ -5720,6 +5870,16 @@ static void a_chan_hop(uint32_t now) {
 
     scan_a_next = now + scan_dwell_ms;
     if (i < 0) return;                  /* none left (the list changed): it stays */
+    if (emer_scan) {                    /* EMERGENCY's: its own mode, D's preamp and AGC for it */
+        const emer_t *e = &emer[emer_ord[i]];
+
+        a_chan = i;
+        anchor = e->hz;
+        if (cparam_i_get(cfg_fg_freq) != e->hz || cparam_i_get(cfg_cur_mode) != e->mode) tune(e->hz, e->mode);
+        rx_setup_apply(e->hz, radio_agc_slow);
+        show_screen();
+        return;
+    }
     const channel_t *c = channels_get((uint16_t)i);
 
     a_chan = i;
@@ -5822,7 +5982,7 @@ static void sentry_step(void) {
         a_scan_hop(now);
         return;
     }
-    if (routine == ROUT_SCAN && scan_a_band < 0 && scan_chans && (scan_a_next == 0 || now > scan_a_next)) {
+    if (routine == ROUT_SCAN && scan_a_band < 0 && (scan_chans || emer_scan) && (scan_a_next == 0 || now > scan_a_next)) {
         a_chan_hop(now);
         return;
     }
@@ -5997,6 +6157,7 @@ static void blink_cb(lv_timer_t *t) {
     sp_check();                                     /* B: which SDR, when more than one tunes its channel */
     g_scan_step();
     if (scr == SCR_LOG && what_moves()) show_glog();         /* the chosen row's WHAT IT WAS, back and forth */
+    if (scr == SCR_DECODE && emer_scan) show_decode();       /* EMERGENCY's scan: where A and B are */
     if (scr == SCR_LOG && g_clear_ms && lv_tick_get() - g_clear_ms > 3000) {
         g_clear_ms = 0;
         buttons_refresh(&btn[2]);
@@ -6084,8 +6245,13 @@ static const char *f_label(int k) {
                 const char *const l[] = {"Scan", "Listen", "", "", ""};    /* F4, F5: nothing here */
                 return l[k];
             }
-        case SCR_DECODE: {          /* F3 and F4 go up and down the TYPE list */
+        case SCR_DECODE: {          /* F3 and F4 go up and down the TYPE list; F1 EMERGENCY's scan */
             const char *const l[] = {"", "Open", "Type:\nUp", "Type:\nDown", ""};
+
+            if (k == 0 && (decoders[dec_sel].rx == 'E' || emer_scan)) {
+                snprintf(s, sizeof(s), "Scan all:\n%s", emer_scan ? "On" : "Off");
+                return s;
+            }
             return l[k];
         }
         case SCR_SYSTEM: {
@@ -6205,6 +6371,48 @@ static void open_async(void *arg) {
 }
 
 static void b_listen_at(int64_t hz, int band);
+
+/* E's EMERGENCY F1: A and B scan its list (emer_scan), or stop; the transmitters let go of first */
+static void emer_scan_set(bool on) {
+    if (on == emer_scan) return;
+    if (on) {
+        if (g_armed) walkie_arm(false);
+        if (g_sdr_armed) w_sdr_arm(false);
+        emer_scan = true;
+        a_chan = b_chan = -1;
+        int nb = chan_count(true), na = chan_count(false);
+        bool b_on = nb && sdr_here && rtl_spectrum_dev() != RTL_DEV_NONE;
+
+        if (b_on) {
+            rtl_scan_set(false);
+            rtl_scan_set(true);
+        }
+        if (na) {
+            if (trk.on) track_end();
+            if (emer_smode < 0) emer_smode = smode;
+            smode = MODE_AUTO;          /* it stops on one that talks */
+            scan_a_band = -1;
+            set_routine(ROUT_SCAN);
+            scan_a_next = 0;
+        }
+        char t[220];
+
+        snprintf(t, sizeof(t), "%s%s, EACH STOPPING ON ONE THAT TALKS AS LONG AS IT TALKS; HEARD: THE ONE THAT STOPPED. "
+                               "RECEIVE ONLY. F1 HERE, OR A'S OR B'S F1, ENDS IT.",
+                 na ? "A: THE X6200'S HF AND 6 M ONES" : "", b_on ? (na ? "; B: THE SDR'S OTHERS" : "B: THE SDR'S ONES")
+                                                              : "; NO SDR FOR THE REST");
+        osd("EMERGENCY SCAN", t, -1);
+    } else {
+        emer_scan = false;
+        a_chan = b_chan = -1;
+        if (rtl_scan) rtl_scan_set(false);
+        b_stop.on = false;
+        if (routine == ROUT_SCAN) set_routine(ROUT_BAND);
+        if (emer_smode >= 0) smode = (sysmode_t)emer_smode, emer_smode = -1;
+        osd("EMERGENCY SCAN OFF", "A AND B STAY WHERE THEY ARE.", -1);
+    }
+    show_screen();
+}
 
 static void open_decoder(void) {
     const decoder_t *d = &decoders[dec_sel];
@@ -6415,7 +6623,8 @@ static void fkey(int k) {
     }
     switch (scr) {
         case SCR_SCAN:
-            if (k == 0) a_scan_set(routine != ROUT_SCAN);
+            if (k == 0 && emer_scan) emer_scan_set(false);              /* EMERGENCY's scan: ended */
+            else if (k == 0) a_scan_set(routine != ROUT_SCAN);
             if (k == 1) band_key(true);
             if (k == 2) {
                 rtl_fkey(3);            /* VIEW: A's own */
@@ -6465,7 +6674,8 @@ static void fkey(int k) {
                 show_screen();
             }
             break;                      /* F4, F5: nothing */
-        case SCR_DECODE:                /* F1, F5: nothing (no key only goes to another screen) */
+        case SCR_DECODE:                /* F1 EMERGENCY's scan; F5 nothing */
+            if (k == 0 && decoders[dec_sel].rx == 'E') emer_scan_set(!emer_scan);
             if (k == 1) open_decoder();
             if (k == 2 || k == 3) {
                 dec_sel = (dec_sel + (k == 2 ? DECODERS_N - 1 : 1)) % DECODERS_N;
@@ -6482,7 +6692,8 @@ static void fkey(int k) {
                                        "THEM (OR SCAN CFG'S F1 SCANS: THE BAND).", -1);
                 return;
             }
-            if (k == 0) rtl_scan_set(!rtl_scan);     /* the preset's band swept here, not A's scan */
+            if (k == 0 && emer_scan) emer_scan_set(false);      /* EMERGENCY's scan: ended */
+            else if (k == 0) rtl_scan_set(!rtl_scan);     /* the preset's band swept here, not A's scan */
             if (k == 1) rtl_fkey(1);                 /* PRESET */
             if (k == 2) rtl_fkey(3);                 /* VIEW */
             if (k == 3) rtl_fkey(4);                 /* LISTEN */
@@ -7260,6 +7471,10 @@ static void cr_now(char *s, size_t n) {
         fmt_freq(f, sizeof(f), centre);
         at = (size_t)snprintf(s, n, "A  X6200  SCANNING %s, NOW AT %s%s", bands[scan_a_band].name, f,
                               smode == MODE_AUTO ? "" : " (MARKS ONLY)");
+    } else if (routine == ROUT_SCAN && emer_scan) {
+        fmt_freq(f, sizeof(f), a_chan >= 0 ? scan_ch_hz(a_chan) : centre);
+        at = (size_t)snprintf(s, n, "A  X6200  SCANNING EMERGENCY'S %d, NOW ON %s %s", chan_count(false),
+                              scan_ch_name(a_chan), f);
     } else if (routine == ROUT_SCAN && scan_chans) {
         const channel_t *c = a_chan >= 0 ? channels_get((uint16_t)a_chan) : NULL;
 
@@ -7286,6 +7501,9 @@ static void cr_now(char *s, size_t n) {
         at += (size_t)snprintf(s + at, n - at, "\nB  %s  STOPPED ON %s%s %s, %u S%s", dev, b_stop.prio ? "PRIORITY " : "",
                                rtl_name(b_stop.hz), f, (unsigned)((lv_tick_get() - b_stop.start) / 1000),
                                b_stop.held ? ", HELD" : "");
+    else if (rtl_scan && emer_scan)
+        at += (size_t)snprintf(s + at, n - at, "\nB  %s  SCANNING EMERGENCY'S %d, NOW ON %s %s", dev, chan_count(true),
+                               scan_ch_name(b_chan), f);
     else if (rtl_scan && scan_chans) {
         const channel_t *c = b_chan >= 0 ? channels_get((uint16_t)b_chan) : NULL;
 
@@ -7452,6 +7670,7 @@ static void cr_change(int r) {
             scan_quiet = (scan_quiet + 1) % (int)N_OF(quiet_ms);
             break;
         case CR_WHAT: {
+            if (emer_scan) emer_scan_set(false);        /* EMERGENCY's scan: SCAN CFG's own kind again */
             bool a_on = routine == ROUT_SCAN, b_on = rtl_scan;
 
             scan_chans = !scan_chans;
@@ -7598,6 +7817,45 @@ static void build_track(lv_obj_t *p) {
     lv_obj_set_height(cr_now_l, scr_h - (ay + ah + 6) - 2);
 }
 
+/* the scroll bars' picks: the item at the height pressed or dragged to, chosen as a tap on its row would (not opened) */
+static void bd_pick(int i) {
+    if (i == band_sel) return;
+    band_sel = i;
+    show_screen();
+}
+
+static void lg_pick(int i) {
+    if (i == g_sel) return;
+    g_sel  = i;
+    g_pick = -1;
+    if (g_onx >= 0 || g_onr >= 0) {
+        g_scan = false;
+        g_follow(i);
+    } else {
+        show_screen();
+    }
+}
+
+static void dsel_pick(int i) {
+    if (i == dec_sel) return;
+    dec_sel = i;
+    dec_row = 0;
+    show_screen();
+}
+
+static void drow_pick(int i) {
+    if (i == dec_row) return;
+    dec_row = i;
+    show_screen();
+}
+
+static sbar_t *sbar_new(lv_obj_t *parent, int x, int y, int h, void (*pick)(int)) {
+    sbar_t *b = calloc(1, sizeof(*b));
+
+    if (b) sbar_make(b, parent, x, y, h, pick);
+    return b;
+}
+
 static void build_bands(lv_obj_t *p) {
     int y = BODY_Y + 2, rh = 18;
 
@@ -7618,6 +7876,7 @@ static void build_bands(lv_obj_t *p) {
         lv_obj_add_flag(bd_row_l[r], LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(bd_row_l[r], row_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)r);
     }
+    sb_bd = sbar_new(p, SBAR_X, y + 26, bd_rows * rh, bd_pick);
     rect(p, 6, scr_h - 68, SW - 12, 3, 0, true);
     bd_about_l = label(p, &pixel_16, amb, 14, scr_h - 62, SW - 28, LV_TEXT_ALIGN_LEFT, "");
     lv_obj_set_height(bd_about_l, 56);  /* three lines, wrapped (CLIP would keep each on one line) */
@@ -7648,12 +7907,21 @@ static void build_log(lv_obj_t *p) {
         lv_label_set_recolor(lg_rx_l[r], true);
         lv_label_set_long_mode(lg_rx_l[r], LV_LABEL_LONG_CLIP);
     }
+    sb_lg = sbar_new(p, SBAR_X, y + 26, lg_rows * rh, lg_pick);
     rect(p, 6, scr_h - 50, SW - 12, 3, 0, true);
     lg_about_l = label(p, &pixel_16, amb, 14, scr_h - 44, SW - 28, LV_TEXT_ALIGN_LEFT, "");
 }
 
 static void build_decode(lv_obj_t *p) {
     for (int i = 0; i < EMER_N; i++) f_emer[i] = emer[i].hz;      /* EMERGENCY's frequencies, as decoders[] reads them */
+    for (int i = 0; i < EMER_N; i++) emer_ord[i] = i;               /* its scan's order: by frequency */
+    for (int i = 1; i < EMER_N; i++)
+        for (int j = i; j > 0 && emer[emer_ord[j]].hz < emer[emer_ord[j - 1]].hz; j--) {
+            int t = emer_ord[j];
+
+            emer_ord[j] = emer_ord[j - 1];
+            emer_ord[j - 1] = t;
+        }
     int y = BODY_Y, h = scr_h - y - DLOW_H - 10, lw = 196;
 
     int tn = (h - 34) / 20;             /* the TYPE list's rows: as many as the box holds, 12 at most (tap_cb's 16) */
@@ -7665,6 +7933,7 @@ static void build_decode(lv_obj_t *p) {
     snprintf(hd, sizeof(hd), DEC_ROW, "KNOWN FREQ", "BAND", "BEST", "OPEN SETS", "NOW", "RX");
     d_head_l = label(p, &pixel_16, amb, lw + 15, y + 5, 0, 0, hd);
     rect(p, lw + 12, y + 25, SW - lw - 18, 3, 0, true);
+    sb_dsel = sbar_new(p, 6 + lw - 11, y + 30, d_sel.n * 20, dsel_pick);
     for (int r = 0; r < 12; r++) {
         d_row_l[r] = label(p, &pixel_16, amb, lw + 15, y + 30 + r * 18, SW - lw - 24, LV_TEXT_ALIGN_LEFT, "");
         lv_label_set_recolor(d_row_l[r], true);         /* RX: RTL in the tags' orange */
@@ -7674,6 +7943,8 @@ static void build_decode(lv_obj_t *p) {
         lv_obj_add_flag(d_row_l[r], LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(d_row_l[r], row_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)r);
     }
+
+    sb_drow = sbar_new(p, SBAR_X, y + 30, 12 * 18, drow_pick);
 
     int ly = scr_h - DLOW_H - 4, w1 = 380, w2 = 190, w3 = SW - 12 - w1 - w2 - 12;
 
@@ -9775,6 +10046,7 @@ static void state_keep(void) {
                                                  * since B's presets' bands (band_load) */
     gui_state_set("s.dsel", dec_sel);
     gui_state_set("s.drow", dec_row);
+    gui_state_set("s.dv", 2);
     gui_state_set("s.sys", sys_sel);
     gui_state_set("s.3d", ws_3d);
     for (int j = 0; j < SWEEP_KEYS; j++) {
@@ -9838,6 +10110,8 @@ static void state_restore(void) {
         while (k < DECODERS_N - 1 && strcmp(decoders[k].name, was[v])) k++;
         v = k;
     }
+    if (!old_tabs && gui_state_get("s.dv", 1) < 2 && v >= 0 && v < DECODERS_N)   /* EMERGENCY came first: the rest */
+        v = v == DECODERS_N - 1 ? 0 : v + 1;    /* one down; the last was EMERGENCY itself (a build that had it last) */
     if (v >= 0 && v < DECODERS_N) dec_sel = v;
     v = gui_state_get("s.drow", 0);
     dec_row = v >= 0 && v < decoders[dec_sel].n ? v : 0;

@@ -1028,10 +1028,11 @@ MFK's push) on the X6200, B's scan pictures' strongest on the stick. The same si
 X6200, half a channel on the stick) moves up with its count. Up to 64, kept on DATA (`/mnt/sentry_log.txt`,
 written through to the card before it replaces the last copy, so a power cut keeps one whole).
 
-- Its columns: FREQ, BAND, WHAT IT WAS (12 letters: a longer one ends in `...`, and on the chosen row goes slowly
-  back and forth to show the whole of it; the line under the list gives it all too), BEST and ANTENNA (D's for the
-  band), LAST, SEEN and, in smaller letters,
-  **RX: WHAT RECEIVES IT**. Green, yellow and red say what is available now (the one place the Sentry is not amber):
+- Its columns: FREQ, BAND, WHAT IT WAS (12 letters), BEST and ANTENNA (D's for the band, 25 letters), LAST, SEEN and,
+  in smaller letters,
+  **RX: WHAT RECEIVES IT**. A WHAT IT WAS or ANTENNA longer than its column ends in `...`, and on the chosen row goes
+  slowly back and forth to show the whole of it (the line under the list gives WHAT IT WAS whole too). Green, yellow
+  and red say what is available now (the one place the Sentry is not amber):
   - **BEST** (when the band is at its best: DAY, NIGHT, ANY, ALWAYS) is coloured by D's NOW: **green** open now
     (signals heard there lately, a local or always-open band, a day band by day, a night band by night, a band
     opening at dawn or dusk), **yellow** about to close (within 6 degrees of sunset for a day band, of sunrise for a
@@ -1141,6 +1142,7 @@ written through to the card before it replaces the last copy, so a power cut kee
 
   | Type | Opens | Radio |
   |---|---|---|
+  | EMERGENCY (first) | A on the frequency (held there, MANUAL), or B on it | X6200 for HF and 6 m, else the SDR |
   | FT8, FT4 | the FT8 app | X6200 |
   | WSPR, JS8, PSK, OLIVIA, JTTY, SSTV, RADE, WEFAX | that app | X6200 |
   | RTTY | the RTTY panel on the main screen | X6200 |
@@ -1151,7 +1153,6 @@ written through to the card before it replaces the last copy, so a power cut kee
   | NOAA ALERTS, FM RDS, DIGITAL VOICE, METEOR | B, on the channel, heard; B decodes by itself | the SDR |
   | ACARS | H AIRSPACE, on its ACARS view | the SDR |
   | ADS-B | H AIRSPACE | the SDR or a GNS 5890 stick |
-  | EMERGENCY | A on the frequency (held there, MANUAL), or B on it | X6200 for HF and 6 m, else the SDR |
 
   **EMERGENCY**: the emergency frequencies to listen to, 65 of them, from a guide to emergency radio frequencies
   (buckhorncliffs.com): NOAA weather WX1-WX7; CB 9, 19 and 3 (AM); FRS 3 and 17; MURS 1-5; GMRS 20 and its
@@ -1164,11 +1165,21 @@ written through to the card before it replaces the last copy, so a power cut kee
   could not confirm. Its BAND column names the channel; the MFK goes down all 65, twelve in sight; WHAT IT IS says
   the one chosen. **Every one is receive only**: OPEN listens on it, the X6200 for HF and 6 m (A held there, MANUAL,
   till its scan is started again), B's SDR for the rest (AM on the airbands, 243.0 too, else FM), and lets go of a
-  transmitter armed on A or G; OPENS IN says `RX ONLY` on each.
+  transmitter armed on A or G; OPENS IN says `RX ONLY` on each. **F1 SCAN ALL** (with EMERGENCY chosen) scans all
+  of them at once: A the X6200's seven (CB, the HF nets, 6 m), B the SDR's 58 in frequency order (its stick moves
+  least), each stopping on one that talks and staying as long as it talks, whatever SCAN CFG's style says; heard on
+  the speaker is the radio that stopped last. The list marks the row each radio is on (A, B, or `*` where B has
+  stopped) and WHAT IT IS says where both are; the finds go into C's Signal Log under the channel's name. F1 again,
+  or A's or B's F1, or SCAN CFG's SCANS, ends it, the radios staying where they are. Receive only throughout.
 
   The apps open on the frequency chosen (it goes into their memory first) and open their squelch themselves.
-  JTTY's are WSJT-X's (as the JTTY app's list). Not on E: On the Air (its own list of broadcasts) and the Scanner. F1 and F5 do
-  nothing here (no F key on any screen only goes to another screen: the ring does that).
+  JTTY's are WSJT-X's (as the JTTY app's list). Not on E: On the Air (its own list of broadcasts) and the Scanner. F1
+  is EMERGENCY's SCAN ALL (nothing for the other types), F5 nothing (no F key on any screen only goes to another
+  screen: the ring does that).
+- **Scroll bars**: a list holding more than it shows (D's bands, C's Signal Log, E's TYPE list and E's rows, as
+  EMERGENCY's 65) has a thin bar at its right, its thumb as long as the share in sight and where that part is, as a
+  web browser's. The MFK goes down the list as ever; a press or a drag on the bar (the mouse, or a finger) chooses
+  the item at that height, the list following.
 - **VOL** at the foot of every screen names the radio it sets: `VOL: X6200 VOLUME 2` or `VOL: RTL0 VOLUME 0` (D, E
   and F follow the radio heard last; E once said VOLUME 0 while A said VOLUME 2, the SDR's and the X6200's). When the
   line is full (an SDR's RF GAIN) it leaves out what the next push gives; the VOL pop-up says it.
