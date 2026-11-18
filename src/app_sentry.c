@@ -596,8 +596,8 @@ static const decoder_t decoders[] = {
 #define DECODERS_N N_OF(decoders)
 
 /* The tables' rows, in the monospaced font: their heads take the same format */
-#define BAND_ROW "%c%-8.8s %-11.11s %-24.24s %-5.5s %-24.24s %-13.13s %s"   /* 97 of the row's 97 at most: RX 5 wide (X6200) */
-#define DEC_ROW  " %-12s %-9s %-5s %-20.20s %-13.13s %s"   /* D's band, then what OPEN sets, RX last: 70 of 72 */
+#define BAND_ROW "%c%-8.8s %-11.11s %-23.23s %-6.6s %-24.24s %-13.13s %s"   /* 97 of the row's 97 at most: RX 5 wide (X6200) */
+#define DEC_ROW  " %-12s %-9s %-6s %-20.20s %-13.13s %s"   /* D's band, then what OPEN sets, RX last: 71 of 72 */
 
 /* ---- State ---- */
 
@@ -1861,7 +1861,8 @@ static bool sun_elev(time_t t, double *elev) {
 
 /* BEST, C's and D's column: when a band is at its best (bands[].when) */
 static const char *best_name(char when) {
-    return when == 'N' ? "NIGHT" : when == 'D' ? "DAY" : when == 'A' ? "ANY" : "LOCAL";
+    return when == 'N' ? "NIGHT" : when == 'D' ? "DAY" : when == 'A' ? "ANY" : "ALWAYS";  /* L: VHF/UHF, in range any time
+                                                                                      * (the owner: ALWAYS, not LOCAL) */
 }
 
 static void band_now(int i, char *s, size_t n) {
@@ -4754,7 +4755,7 @@ static void show_title(void) {
 
 /* ---- G LOG: what the scans locked on ---- */
 
-#define LOG_ROW "%c%-10.10s %-8.8s %-22.22s %s %-16.16s %-5.5s %4.4s"  /* 78 in pixel_16 (BEST 5, given padded); RX
+#define LOG_ROW "%c%-10.10s %-8.8s %-21.21s %s %-16.16s %-5.5s %4.4s"  /* 78 in pixel_16 (BEST 6, given padded); RX
                                                                          * after it in pixel_12: 25 of 26 */
 #define LOG_RX_X  (9 + 78 * 8)  /* where RX starts: the row's 78 characters of 8 px */
 #define G_STICK_OFF 200000      /* the stick tuned this far under what it plays: its middle is not used */
@@ -5337,7 +5338,7 @@ static void show_glog(void) {
         snprintf(bn, sizeof(bn), "%s%s", in ? "" : "~", bi >= 0 ? bands[bi].name : "-");
         char rxs[96], b5[8], best[24];
         rx_kinds_text(h->hz, i != g_sel, rxs, sizeof(rxs));    /* every kind that takes it; the chosen row in its ink */
-        snprintf(b5, sizeof(b5), "%-5.5s", bi >= 0 ? best_name(bands[bi].when) : "");
+        snprintf(b5, sizeof(b5), "%-6.6s", bi >= 0 ? best_name(bands[bi].when) : "");
         int role = bi >= 0 && i != g_sel ? band_now_role(bi) : -1;    /* NOW: green open, yellow closing, red closed */
         if (role >= 0) snprintf(best, sizeof(best), "#%06X %s#", (unsigned)theme_hex((theme_color_t)role), b5);
         else snprintf(best, sizeof(best), "%s", b5);
@@ -7450,7 +7451,7 @@ static void build_log(lv_obj_t *p) {
     rect(p, 6, y - 2, SW - 12, scr_h - y - 2, 3, false);
     char h[128];
 
-    snprintf(h, sizeof(h), LOG_ROW, ' ', "FREQ", "BAND", "WHAT IT WAS", "BEST ", "ANTENNA", "LAST", "SEEN");
+    snprintf(h, sizeof(h), LOG_ROW, ' ', "FREQ", "BAND", "WHAT IT WAS", "BEST  ", "ANTENNA", "LAST", "SEEN");
     lg_head_l = label(p, &pixel_16, amb, 9, y + 2, 0, 0, h);
     label(p, &pixel_12, amb, LOG_RX_X, y + 5, 0, 0, "RX: WHAT RECEIVES IT");
     rect(p, 6, y + 20, SW - 12, 3, 0, true);

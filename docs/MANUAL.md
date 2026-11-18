@@ -1030,7 +1030,7 @@ written through to the card before it replaces the last copy, so a power cut kee
 
 - Its columns: FREQ, BAND, WHAT IT WAS, BEST and ANTENNA (D's for the band), LAST, SEEN and, in smaller letters,
   **RX: WHAT RECEIVES IT**. Green, yellow and red say what is available now (the one place the Sentry is not amber):
-  - **BEST** (when the band is at its best: DAY, NIGHT, ANY, LOCAL) is coloured by D's NOW: **green** open now
+  - **BEST** (when the band is at its best: DAY, NIGHT, ANY, ALWAYS) is coloured by D's NOW: **green** open now
     (signals heard there lately, a local or always-open band, a day band by day, a night band by night, a band
     opening at dawn or dusk), **yellow** about to close (within 6 degrees of sunset for a day band, of sunrise for a
     night band), **red** closed (a day band by night). In the row's amber: a night band by day (short range only),
@@ -1131,7 +1131,7 @@ written through to the card before it replaces the last copy, so a power cut kee
   They are only where each choice starts: the PRE, ATT and AGC keys and B's gain change them as ever after.
 - **E DECODE**: every receiving function of the radio, the X6200's apps and the SDR's decoders, each with the
   frequencies it works on. The **TYPE** list on the left (F3 UP, F4 DOWN, or a tap) scrolls; the rows on the right
-  give each frequency's BAND (D's), BEST (NIGHT, DAY, ANY or LOCAL), **OPEN SETS** (the preamp and AGC, or the SDR's
+  give each frequency's BAND (D's), BEST (NIGHT, DAY, ANY or ALWAYS), **OPEN SETS** (the preamp and AGC, or the SDR's
   gain, as above), NOW and **RX** (the radio it is heard on, by its kind: X6200, RTL, HACK, BLADE, SDR with none
   plugged in, as on D and C). Under them: WHAT IT IS, OPENS IN (where F2 takes you,
   and `X6200: RX AND TX` where hams send it too and the TX ranges let the X6200, else `RX ONLY`) and the row's
