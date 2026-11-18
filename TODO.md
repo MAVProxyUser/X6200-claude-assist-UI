@@ -67,7 +67,9 @@ approved that day.
     x6x00-gui-watch restarts the radio with x6x00-reboot when the GUI's radio-thread or screen-loop heartbeat stands
     still 60 s (MANUAL: A hung GUI restarts the radio).
 8. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
-    Waterfall section below).
+    Waterfall section below). The X6100 arrives 2026-11-19. Its side of the GUI after the upstream merge compiles and
+    links with no warning (tools/cross_x6200/check_x6100.sh, 2026-11-18: the stub backend, every shared source on
+    its X6100 paths; its driver, src/hw/x6100, unchanged since v0.3.12.28).
 9. **The upstream merge**: done 2026-11-18 (Guru-RF's 73 commits: SVXConnect, Zello, the Weather, Internet radio,
     CB and HF Air Band apps, Flights, Field Ops' NOTA and maps, GhostNet, the first-start guide's language and
     country, the APP grid's scrolling, the spectrum's fill by level, translations, SSH security keys, the speaker's
