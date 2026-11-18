@@ -50,13 +50,10 @@ approved that day.
 7. **A GUI that hangs**: the owner chose a restart ("a reboot would be more graceful"). Done 2026-11-17 night:
     x6x00-gui-watch restarts the radio with x6x00-reboot when the GUI's radio-thread or screen-loop heartbeat stands
     still 60 s (MANUAL: A hung GUI restarts the radio).
-8. **Meteor-M LRPT on B** (a255320, c5e864b, d02958f): decoded from a real 2019 Meteor-M2-2 recording played into
-    the stick over a cable. The first live pass (2026-11-17, Meteor-M2-4) gave nothing on the antenna used. To do: a
-    pass on a 137 MHz antenna outdoors (QFH or V-dipole); the 80k mode is unverified on real data.
-9. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
+8. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
     Waterfall section below).
-10. **Screenshots** of every menu for the README and the manual: later, at the owner's word.
-11. **The upstream merge** (Guru-RF, 73 commits on 2026-11-17: SVXConnect, Zello, the Weather, Internet radio, CB and
+9. **Screenshots** of every menu for the README and the manual: later, at the owner's word.
+10. **The upstream merge** (Guru-RF, 73 commits on 2026-11-17: SVXConnect, Zello, the Weather, Internet radio, CB and
     HF Air Band apps, Flights, Field Ops' NOTA and maps, GhostNet, the first-start guide's language and country, the
     APP grid's scrolling, the spectrum's fill by level, translations, SSH security keys, the speaker's one play-mode
     owner): last, after everything else. A trial merge (git merge-tree) conflicts in 14 files: README, TODO, MANUAL,
@@ -65,11 +62,16 @@ approved that day.
 
 **Waiting on hardware**
 
-- The HackRF at 2.646 MS/s and the HackRF/bladeRF filters (c1c732a): each when plugged into the radio's HOST port
-  (the HackRF is on the Mac; the radio has one RTL now).
+- The bladeRF's filter (c1c732a): its 2.646 MS/s, RDS and picture were tried with v0.3.12.27; the filter it takes is
+  read off rtlspec's log when it is next plugged in. The HackRF's done 2026-11-17 night: 2.646 MS/s at 99 % (5.29
+  MB/s), its baseband filter 2.5 MHz there (1.75 at 2.1168), B's picture 2.2 MHz wide, heard, RDS PI on 92.3; B took
+  it by itself when the RTL was swapped for it (bd5592a).
 
 **Parked or later**
 
+- Meteor-M LRPT outdoors (deferred, the owner 2026-11-17): decoded from a real 2019 Meteor-M2-2 recording played
+  into the stick over a cable (a255320, c5e864b, d02958f); the first live pass (Meteor-M2-4) gave nothing on the
+  antenna used. A pass on a 137 MHz antenna outdoors (QFH or V-dipole) is the test; the 80k mode is unverified.
 - WSPR (deferred, the owner 2026-11-17): never tested. Off the air is the real test (the X6200 on its antenna, 14.0956
   USB by day, 7.0386 by night: spots every two minutes). Over a cable it needs a steadier source than the HackRF: a
   bladeRF 2.0's VCTCXO, but it tunes from 47 MHz, so 6 m (50.293) only.

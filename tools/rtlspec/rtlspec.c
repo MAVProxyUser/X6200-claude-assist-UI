@@ -2263,7 +2263,9 @@ static void *watch_thread(void *arg) {
         /* Each 10 s streaming: what came against the rate; said when under 95% (once a minute at most), and the first
          * time after an open */
         if (s != S_ON) {
-            rate_at = 0;
+            rate_at   = 0;
+            rate_said = 0;              /* the next open's rate said too, as the comment above has it (it was said
+                                         * once in the daemon's life: a HackRF after an RTL never was) */
         } else if (!rate_at) {
             rate_at   = now_ms();
             rate_from = atomic_load(&rx_bytes);
