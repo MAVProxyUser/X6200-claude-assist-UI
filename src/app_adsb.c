@@ -22,6 +22,7 @@
 #include "app_adsb.h"
 
 #include "adsb.h"
+#include "mfk_device.h"      /* mfk_paged_take: the X6100's MFK held turned the pages */
 #include "adsb_rx.h"
 #include "app_sentry.h"
 #include "df_rx.h"
@@ -1094,6 +1095,7 @@ static void click_cb(lv_event_t *e) {
     lv_indev_t *in = lv_indev_get_act();
 
     (void)e;
+    if (in && lv_indev_get_type(in) == LV_INDEV_TYPE_ENCODER && mfk_paged_take()) return;     /* it turned pages */
     if (pick_on && in && lv_indev_get_type(in) == LV_INDEV_TYPE_ENCODER) pick_close(pick_opts[pick_sel]);
 }
 
@@ -1391,7 +1393,7 @@ static void build(void) {
         badge_l[i] = label(root, &pixel_28, amb, i ? SW - 50 : 12, 10, 36, LV_TEXT_ALIGN_CENTER, "H");   /* the Sentry's H */
     }
     char t[80];
-    snprintf(t, sizeof(t), "XIEGU X6200 AIRSPACE SENTRY: %s", app_sentry_release());   /* the release, as the Sentry's */
+    snprintf(t, sizeof(t), "XIEGU " BOARD_NAME " AIRSPACE SENTRY: %s", app_sentry_release());   /* the release, as the Sentry's */
     title_l  = label(root, &pixel_20, amb, 60, 6, SW - 120, LV_TEXT_ALIGN_CENTER, t);
     status_l = label(root, &pixel_16, amb, 60, 27, SW - 120, LV_TEXT_ALIGN_CENTER, "");
     lv_label_set_recolor(status_l, true);   /* the receivers' names in their aircraft's colours */
@@ -1465,7 +1467,7 @@ static void build(void) {
     /* what the knobs do, and the F keys */
     int ky = 480 - KEYS_H - 3;
     legend_l = label(root, &pixel_16, dim, 6, ky - LEGEND_H, SW - 12, LV_TEXT_ALIGN_CENTER,
-                     "VFO: RANGE | MFK: AIRCRAFT | TAP: CHOOSE | RING: SCREEN | F5 HELD: CLEAR | GEN: HELP");
+                     "VFO: RANGE | MFK: AIRCRAFT | TAP: CHOOSE | " SENTRY_RING_HINT " | F5 HELD: CLEAR | GEN: HELP");
     int w = (SW - 12 - 4 * 6) / 5;
     for (int i = 0; i < 5; i++) {
         lv_obj_t *k = lv_label_create(root);
@@ -1511,7 +1513,7 @@ static void build(void) {
                    "OR BOTH (A GNS 5890 OR MICROADSB AND AN SDR AT ONCE); TWO OR MORE: A BOX ASKS WHICH.  F5: VIEW, "
                    "ADS-B OR ACARS (THE AIRLINERS' DATALINK ON 131.550 MHZ AND BESIDE: B'S SDR LEAVES 1090 MHZ FOR IT, A "
                    "GNS 5890 KEEPS THE SCOPE); F5 HELD: FORGET THE LIST.  "
-                   "THE MFK'S RING: THE SENTRY'S A NEXT, ITS G BEFORE (THIS IS ITS H).\n\n"
+                   SENTRY_RING_NAME ": THE SENTRY'S A NEXT, ITS G BEFORE (THIS IS ITS H).\n\n"
                    "MFK OR A TAP CHOOSES AN AIRCRAFT. A GNS 5890, A MICROADSB OR A SPARE RTL-SDR (ONE BESIDE A HACKRF OR "
                    "BLADERF) GOES ON LISTENING WHEN THIS SCREEN CLOSES; B'S SDR IS THIS SCREEN'S WHILE IT IS OPEN AND THE "
                    "SENTRY'S THE REST OF THE TIME. RECEIVE ONLY.\n\n"

@@ -7,6 +7,19 @@
 #pragma once
 
 #include "app_window.h"
+#include "board.h"
+
+/* The pages' control as the screens name it, the Sentry's and AIRSPACE's and the direction finder's: the X6200's MFK
+ * inner ring; the X6100's knob has none, the MFK held and the main dial turned stand in (screen_main.c) */
+#ifdef BOARD_DEV_MFK_INNER
+#define SENTRY_RING_HINT  "RING: SCREEN"        /* the footers */
+#define SENTRY_RING_SHORT "RING"
+#define SENTRY_RING_NAME  "THE MFK'S RING"
+#else
+#define SENTRY_RING_HINT  "MFK+VFO: PAGE"
+#define SENTRY_RING_SHORT "MFK HELD + VFO"
+#define SENTRY_RING_NAME  "THE MFK HELD AND THE VFO TURNED"
+#endif
 
 #ifdef __cplusplus
 extern "C" {

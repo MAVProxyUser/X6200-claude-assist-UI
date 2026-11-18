@@ -153,6 +153,7 @@ static void keypad_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
                 }
             } else if (in.code == MFK_PRESS) {
                 mfk->pressed = in.value != 0;
+                if (in.value == 1) mfk->paged = false;      /* a new press: a push again (mfk_paged_take) */
                 /* The encoder samples it at its next read: a quick press and release
                  * in the same pass would be lost */
                 data->continue_reading = false;

@@ -20,7 +20,7 @@ Settings. Button and option names are written as the radio shows them.
 ## Contents
 
 - [Getting started](#getting-started): [first-start guide](#first-start-guide), [first steps](#first-steps), [setting up the transmitter](#setting-up-the-transmitter), [buttons and knobs](#buttons-and-knobs), [hand mic](#hand-mic), [keyboard](#keyboard) ([mouse](#mouse), [quick QSO log](#quick-qso-log))
-- [The Sentry](#the-sentry) (this fork, X6200): [A and B](#a-and-b-the-spectrum-screens), [SCAN CFG](#scan-cfg), [C LOG](#c-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [the GPS panel](#the-gps-panel), [AIRSPACE](#airspace), [I DIRECTION FINDER](#i-direction-finder)
+- [The Sentry](#the-sentry) (this fork, X6200 and X6100): [A and B](#a-and-b-the-spectrum-screens), [SCAN CFG](#scan-cfg), [C LOG](#c-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [the GPS panel](#the-gps-panel), [AIRSPACE](#airspace), [I DIRECTION FINDER](#i-direction-finder)
 - [The GSOC head with a G90](#the-gsoc-head-with-a-g90-from-source) (from source, untried here)
 - [Updating the firmware](#updating-the-firmware): [the SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot), [the X6200's base firmware](#the-x6200s-base-firmware), [the X6100's base firmware](#the-x6100s-base-firmware)
 - [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
@@ -431,7 +431,7 @@ lock per band and mode, from the radio's own lists.
 | Keys' jobs | mode: next, mode: back, VFO A/B, band up, band down, AGC (Off, Slow, Fast, Auto), split on/off, USER page (#111), charger on/off (Settings > General > Charger On, or Off when it is On; from Shadow On; #276) |
 | Quick | none, screenshot, RX recorder on/off, screen rec on/off, mute, frequency lock on/off, step up, step down, WF mode, WF 3D on/off, CW decoder on/off, CW ZAP (in CW and CW-R, the dial onto the signal the CW Tuner hears, as the CW 1:2 ZAP button; up to v0.3.9 neither was a key action, #196), SWL panel (as the X6100 hand mic's GENE: the broadcast stations on the air within 2 kHz, again the next one), SWL: save channel (as its NW: the station shown saved as a channel; up to v0.3.11 neither was a key action, so an X6200 could not open the panel, #155), ATT on/off, PRE on/off, tuner on/off, tuner tune (transmits a carrier), TUNE ext. tuner on/off (a carrier for a tuner at the antenna, see [TUNE for an external tuner](#tune-for-an-external-tuner)) |
 | Digital modes | RTTY, FT8, WSPR, JS8, SSTV, WeFax, NavTex, RADE, PSK, Olivia, JTTY, the Modes menu |
-| Tools | Cluster, CW Trainer, CW Keyboard, Field Ops, Bands, Propagation, Channels, Scanner, Internet radio, Zello, SVXConnect, Flights, HF Air Band, CB, Weather, RX recorder, SWR Scan, GPS, QTH grid, Settings, Sentry (X6200), Airspace, Birdie Cal, Time Signal, On the Air |
+| Tools | Cluster, CW Trainer, CW Keyboard, Field Ops, Bands, Propagation, Channels, Scanner, Internet radio, Zello, SVXConnect, Flights, HF Air Band, CB, Weather, RX recorder, SWR Scan, GPS, QTH grid, Settings, Sentry, Airspace, Birdie Cal, Time Signal, On the Air |
 
 Up to v0.3.12.23 RADE was on the list but did nothing from a key.
 
@@ -722,11 +722,25 @@ reads CW 1:2, then F5), opens a one-line box near the top,
 
 ## The Sentry
 
-This fork's home screen on the X6200: a receive-first view of the radio in amber on black, after the remote
-sentry guns of *Aliens* (1986). The radio starts in it and comes back to it when an app closes (F SYSTEM >
+This fork's home screen on the X6200 and the X6100: a receive-first view of the radio in amber on black, after the
+remote sentry guns of *Aliens* (1986). The radio starts in it and comes back to it when an app closes (F SYSTEM >
 START IN chooses the classic radio screen instead). Transmit is locked while it is open: PTT, KEY and MSG are
 refused, and tuning the antenna tuner too, as it transmits; on A and G the A/B key arms the X6200's transmitter for
 PTT (below).
+
+**On an X6100** the Sentry is the same, with these differences (this page says X6200 for the radio's own receiver;
+on an X6100 the screens say X6100):
+
+- **A** shows 50 kHz around the dial instead of 360: the X6100's base sends no spectrum of its own, so A draws the
+  radio's own (the classic screen's waterfall), the middle 50 kHz of its 100 kHz. Its noise climbs from about
+  27 kHz either side of the dial outwards (the base's IQ, at any frequency; the classic screen shows it too), and
+  A would take that for signals. A's scans step 50 kHz at a time, so a band takes seven times the X6200's steps.
+  The classic screen's zoom narrows it: at x8 and narrower A waits (it says ZOOM AT X4 OR WIDER).
+- **The pages**: the X6100's MFK has no inner ring. **Hold the MFK and turn the main dial** instead: one page a
+  turn (a steady turn about three a second), the same order as the X6200's ring, AIRSPACE and the direction
+  finder too. The dial does not tune while the MFK is held, and letting the MFK go then is not a push.
+- No FM broadcast or airband on its own receiver, no WR12 and no base firmware updater (all the X6200's): above
+  6 m it is the SDR's alone.
 
 When the radio software starts again (a crash, an update, a hot install, or the radio switched off and on), it
 comes back where it was. That means the Sentry on the same screen (SCAN CFG too) with A's, B's and C's scans running as they
@@ -765,7 +779,7 @@ Its controls (GEN shows them, as does a tap on the title):
 |---|---|
 | VFO knob | The screen's own radio: on A (and the other screens) the X6200 by hand, the Sentry going to MANUAL and A's scan stopping; on B the stick's channel (heard or not), and with F2 held B's presets, one a click, back when turned back; on C the stick while a stick entry plays |
 | MFK knob | On A and B it pans the picture by SCAN CFG's KNOB STEP, its push going to the strongest signal; elsewhere it chooses a band, a frequency, an item, a logged signal, G's group (its arrows step). Push: listen, open |
-| MFK inner ring | The screens, A to H and round again (H is AIRSPACE; its ring comes back to A or G) |
+| MFK inner ring | The screens, A to H and round again (H is AIRSPACE; its ring comes back to A or G). On an X6100: hold the MFK and turn the main dial |
 | VOL/SQL/RFG knob | Volume; push: squelch, push: RF gain, push: volume again. Left on squelch or RF gain, it is the volume again 5 s after its last turn or push, so a reach for it finds the volume. On B the squelch and RF gain are the SDR's |
 | F1-F5 | The keys along the bottom: on A and B, F1 SCAN, F2 BAND (B: PRESET), F3 VIEW, F4 LISTEN, F5 SCAN CFG |
 | A/B | On A and G: arms the X6200's transmitter for PTT (`X6200 TX ARMED` blinks in A's RECEIVER box, G's lamp says TX ARMED, ON AIR while it transmits), at the power set; the Sentry's scans and AUTO wait meanwhile, so the dial stays put. A/B again, F5 on G, or any screen but A and G locks it again. KEY and MSG stay refused. The radio's own TX rules still apply (its bands and power). On G's SDR channels A/B arms the HackRF's or bladeRF's transmitter instead, the X6200 staying at 0 W ([G on a HackRF or bladeRF](#g-on-a-hackrf-or-bladerf)) |

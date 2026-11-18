@@ -736,11 +736,11 @@ void main_screen_home_pause(bool on) {
     home_paused = on;
 }
 
-/* A window closed (app_window.c calls this after it): the Sentry again, the X6200's home screen, unless something
- * else took the screen (an app that opened in its place, RTTY without a window, the walkie screen) */
+/* A window closed (app_window.c calls this after it): the Sentry again, the X6200's and the X6100's home screen,
+ * unless something else took the screen (an app that opened in its place, RTTY without a window, the walkie screen) */
 void main_screen_dialog_closed(void) {
     if (!dialog_is_run() && rtty_get_state() == RTTY_OFF) sql_give_back();     /* a decoder app closed */
-#ifdef BOARD_X6200
+#ifndef BOARD_GSOC
     if (!param_i_get(cfg_sentry_home) || home_paused) return;
     if (dialog_is_run() || rtty_get_state() != RTTY_OFF || walkie_on()) return;
     main_screen_start_app(ACTION_APP_SENTRY);
@@ -1618,9 +1618,37 @@ static void plan_mode(int32_t old, int32_t freq) {
     }
 }
 
+#ifndef BOARD_DEV_MFK_INNER
+/* No inner ring on the MFK (the X6100): in an app, the MFK held and the main dial turned step what the X6200's inner
+ * ring steps, the Sentry's pages (and AIRSPACE's and the direction finder's way back to them), as its KEY_MFK_PREV and
+ * KEY_MFK_NEXT (the owner, 2026-11-18). One a turn, the same way again only after 300 ms: the dial's many clicks a
+ * turn would fly through the pages. The MFK let go after that is no push (mfk_paged_take) */
+static bool mfk_page_turn(int32_t diff) {
+    static uint32_t last;
+    static int      dir;
+    int             d = diff > 0 ? 1 : -1;
+
+    if (!mfk || !mfk->pressed || !dialog_is_run()) return false;
+    mfk->paged = true;
+    if (!diff || (d == dir && lv_tick_elaps(last) < 300)) return true;
+    last = lv_tick_get();
+    dir  = d;
+    uint32_t key = d > 0 ? KEY_MFK_NEXT : KEY_MFK_PREV;
+
+    lv_group_send_data(keyboard_group, key);
+    return true;
+}
+#endif
+
 static void main_knob_cb(lv_event_t *e) {
     rotary_data_t *turn = lv_event_get_param(e);
 
+#ifndef BOARD_DEV_MFK_INNER
+    if (mfk_page_turn(turn->diff)) {
+        free(turn);
+        return;
+    }
+#endif
     if (!dialog_rotary_taken()) freq_shift(turn->diff, turn->dt);     /* the Sentry's RTL-SDR may have it */
     dialog_rotary(turn->diff);
     free(turn);     /* rotary.c allocates one per event */
@@ -2180,7 +2208,7 @@ lv_obj_t * main_screen() {
     broadcast_db_init();      /* SWL list for the GENE key, copied to /mnt the first time */
     channels_load();    /* creates channels.json with the defaults when missing */
     lv_timer_create(channels_poll_cb, 2000, NULL);
-#ifdef BOARD_X6200
+#ifndef BOARD_GSOC      /* the X6200 and the X6100: an SDR on the HOST port */
     lv_timer_create(receivers_watch_cb, 1000, NULL);
     /* B's SDR, chosen among more than one (app_sentry.c): the daemon told as soon as it is there, whatever opens */
     sdr_pool_init();    /* who has which SDR (sdr_pool.c): before anyone asks */

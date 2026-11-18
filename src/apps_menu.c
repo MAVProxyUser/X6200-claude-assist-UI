@@ -53,7 +53,7 @@ static const struct {
     {"Field Ops", "SOTA, POTA, WWFF", "field", OPEN_APP, ACTION_APP_FIELD},
     {"Bands", "Band activity", "bands", OPEN_APP, ACTION_APP_BANDS},
     {"Propagation", "Conditions, beacons", "prop", OPEN_APP, ACTION_APP_PROPAGATION},
-#ifdef BOARD_X6200
+#ifndef BOARD_GSOC     /* the X6200 and the X6100 (the GSOC head untried) */
     {"Sentry", "Scan, track, bands, decoders", "sentry", OPEN_APP, ACTION_APP_SENTRY},
     {"Airspace", "ADS-B aircraft on USB", "adsb", OPEN_APP, ACTION_APP_ADSB},
 #endif

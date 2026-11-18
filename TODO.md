@@ -75,7 +75,12 @@ approved that day.
 8. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
     Waterfall section below). The X6100 arrives 2026-11-19. Its side of the GUI after the upstream merge compiles and
     links with no warning (tools/cross_x6200/check_x6100.sh, 2026-11-18: the stub backend, every shared source on
-    its X6100 paths; its driver, src/hw/x6100, unchanged since v0.3.12.28).
+    its X6100 paths; its driver, src/hw/x6100, unchanged since v0.3.12.28). The X6100 came early (2026-11-18 evening,
+    card image v0.3.12.28, base V1.1.8 unpatched): the classic screen's 3D waterfall runs on it, drawn by the
+    processor (its image had no Mesa; the next one has, local-build.sh). Its own GUI now builds here too
+    (tools/cross_x6200/build_x6100.sh) and the Sentry runs on it (A from its own spectrum, B and AIRSPACE on its
+    RTL-SDR, the pages with the MFK held and the main dial turned). Found there: its spectrum climbs from about
+    27 kHz either side of the dial outwards (A shows the middle 50 kHz); `radios-ft8` still to run.
 9. **The upstream merge**: done 2026-11-18 (Guru-RF's 73 commits: SVXConnect, Zello, the Weather, Internet radio,
     CB and HF Air Band apps, Flights, Field Ops' NOTA and maps, GhostNet, the first-start guide's language and
     country, the APP grid's scrolling, the spectrum's fill by level, translations, SSH security keys, the speaker's
@@ -89,6 +94,21 @@ approved that day.
     (radio-browser.info's countries and stations, an MP3 stream played and stopped), Zello and SVXConnect opened
     (not set up: nothing sent). Fixed: CB's chosen row lost its name in the Sentry's theme. Not tried: AAC
     stations (a new card image, level 3), GhostNet (JS8's), Zello and SVXConnect connected.
+10. **WiFi kept from the first start** (the owner, 2026-11-18: "we should account for that somewhere later probably
+    on both radios ... put it in the backlog for now"): after a restart the owner had to open Settings, turn WiFi on,
+    type the password, connect and save, on the X6100 (its first start had been cut short) and earlier on the X6200.
+    To find: whether the first-start guide's WiFi step keeps WiFi on (params wifi_enabled) and its network saved
+    (/etc/NetworkManager/system-connections, the backup in /mnt/backups) when the guide is left early, and over a
+    restart and a power cut. Note: the X6100's case that evening was on Xiegu's own system (its SD card had come out,
+    so it started from its internal memory: OpenSSH 8.1, no web page), which has none of our WiFi settings; the
+    X6200's is ours. Seen the same evening on the X6100 with our card: a GUI restart powered WiFi up again, the join
+    failed ("handshake failed", reason 7) and nothing tried again, so it stayed off the network until a restart.
+11. **The X6100's keys against the X6200's, for 1:1 features** (the owner, 2026-11-18: "The 6100 UI buttons are a
+    hair different than 6200 so we'll need to plan the analog use between the two for 1:1 features. we can do that
+    in the backlog"): a plan of which X6100 key or gesture does each X6200 key's job in the Sentry and the apps.
+    Done so far: the X6200's MFK inner ring (the Sentry's pages) is the MFK held and the main dial turned on the
+    X6100 (tried by the owner: "seems to work fine"). To map: the X6200's keys the X6100 lacks or has elsewhere
+    (APP/KEY and MSG/DFN swapped, ATU and FST moved; the X6100's own PRE, VM, AGC and LOCK), the H-22 mic's F3.
 
 **Waiting on hardware**
 

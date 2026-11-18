@@ -72,7 +72,7 @@ const key_action_t key_front_actions[] = {
     {" APP GPS ", ACTION_APP_GPS},
     {" APP QTH grid ", ACTION_APP_QTH},
     {" APP Settings ", ACTION_APP_SETTINGS},
-#ifdef BOARD_X6200
+#ifndef BOARD_GSOC
     {" APP Sentry ", ACTION_APP_SENTRY},
 #endif
     {" APP Airspace ", ACTION_APP_ADSB},

@@ -29,6 +29,7 @@
 
 #include "app_sentry.h"
 #include "buttons.h"
+#include "mfk_device.h"      /* mfk_paged_take: the X6100's MFK held turned the pages */
 #include "cfg/cfg_api.h"
 #include "df_rx.h"
 #include "gui_events.h"
@@ -1816,7 +1817,10 @@ static void key_cb(lv_event_t *e) {
 
 /* The MFK's push: the chosen row of a panel */
 static void click_cb(lv_event_t *e) {
+    lv_indev_t *in = lv_indev_get_act();
+
     (void)e;
+    if (in && lv_indev_get_type(in) == LV_INDEV_TYPE_ENCODER && mfk_paged_take()) return;     /* it turned pages */
     if (pan != P_NONE) pan_push();
 }
 
@@ -2038,7 +2042,7 @@ static void build(void) {
         badge_l[i] = label(root, &pixel_28, amb, i ? SW - 50 : 12, 10, 36, LV_TEXT_ALIGN_CENTER, "I");
     }
     char t[96];
-    snprintf(t, sizeof(t), "XIEGU X6200 DIRECTION FINDER SENTRY: %s", app_sentry_release());
+    snprintf(t, sizeof(t), "XIEGU " BOARD_NAME " DIRECTION FINDER SENTRY: %s", app_sentry_release());
     title_l  = label(root, &pixel_20, amb, 60, 6, SW - 120, LV_TEXT_ALIGN_CENTER, t);
     status_l = label(root, &pixel_16, amb, 60, 27, SW - 120, LV_TEXT_ALIGN_CENTER, "");
 
@@ -2097,7 +2101,7 @@ static void build(void) {
     /* what the knobs do, and the F keys */
     int ky = 480 - KEYS_H - 3;
     legend_l = label(root, &pixel_16, dim, 6, ky - LEGEND_H, SW - 12, LV_TEXT_ALIGN_CENTER,
-                     "VFO: TARGET FINE | MFK: CHANNEL | BAND KEYS: BAND | RING: SCREEN | F1 HELD: AUTO | GEN: HELP");
+                     "VFO: TARGET FINE | MFK: CHANNEL | BAND KEYS: BAND | " SENTRY_RING_HINT " | F1 HELD: AUTO | GEN: HELP");
     int w = (SW - 12 - 4 * 6) / 5;
     for (int i = 0; i < 5; i++) {
         lv_obj_t *k = lv_label_create(root);
@@ -2164,7 +2168,8 @@ static void build(void) {
                    "F1 TUNE: FOLLOW A OR B (THE X6200'S DIAL OR B'S FREQUENCY, AS THEY CHANGE), BAND, FREQUENCY, WIDTH, AUTO "
                    "(HELD: AUTO).  F2 ARRAY: BAND, KIND, SIZE, SIZE FOR THE BAND, HEADING.  F3 METHOD.  F4 CAL NOW (HELD: "
                    "HOW OFTEN).  F5 SET: RATE, GAIN, SQUELCH, ANTENNAS LEFT OUT, TEST SOURCE.  VFO: TARGET 1 KHZ (THE KRAKEN "
-                   "FOLLOWS PAST THE EDGE).  MFK: A CHANNEL.  BAND KEYS: THE BAND PRESETS.  RING: H BEFORE, A AFTER.\n\n"
+                   "FOLLOWS PAST THE EDGE).  MFK: A CHANNEL.  BAND KEYS: THE BAND PRESETS.  " SENTRY_RING_SHORT ": H BEFORE, A "
+                   "AFTER.\n\n"
                    "WHILE I IS OPEN THE KRAKEN IS ITS ALONE: AIRSPACE AND WATCH CHANNELS LET GO, B MOVES OR IS LENT. "
                    "RECEIVE ONLY.  ANY KEY: CLOSE.");
     lv_label_set_long_mode(help_l, LV_LABEL_LONG_WRAP);

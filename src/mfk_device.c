@@ -47,6 +47,14 @@ static void mfk_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     data->state    = knob->pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 
+bool mfk_paged_take(void) {
+    extern encoder_t *mfk;      /* gui_main.c */
+
+    if (!mfk || !mfk->paged) return false;
+    mfk->paged = false;
+    return true;
+}
+
 encoder_t *encoder_init(char *dev_name) {
     int fd = open(dev_name, O_RDWR | O_NOCTTY | O_NDELAY);
 

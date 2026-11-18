@@ -538,9 +538,9 @@ int main(void) {
     } else if (!walkie_on() && param_i_get(cfg_field_boot)) {
         main_screen_start_app(ACTION_APP_FIELD);
     }
-#ifdef BOARD_X6200
-    /* The Sentry is the home screen: the radio starts in it (cfg_sentry_home). The first-start guide waits while it
-     * is open (first_start.c start_cb), so it is had from Settings > General there */
+#ifndef BOARD_GSOC
+    /* The Sentry is the home screen, the X6200's and the X6100's: the radio starts in it (cfg_sentry_home). The
+     * first-start guide waits while it is open (first_start.c start_cb), so it is had from Settings > General there */
     else if (!walkie_on() && param_i_get(cfg_sentry_home)) {
         main_screen_start_app(ACTION_APP_SENTRY);
     }

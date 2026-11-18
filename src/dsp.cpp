@@ -668,6 +668,10 @@ void dsp_init() {
     cfg_sm.cp_cur_mode.subscribe_and_notify(on_filter_change);
     cfg_sm.cp_cur_mode.subscribe_and_notify(on_mode_change);
     cfg_sm.cp_fg_freq.subscribe(on_freq_change);
+    /* The dial from the start: an X6100 with Xiegu's base (rev < 8) says no frequency in its packets, and until the
+     * first turn the spectrum's snapshot (the Sentry's A, the browser's picture) was centred on 0 Hz (2026-11-18). A
+     * base that says its frequency puts its own here at its first packet */
+    cur_freq = cfg_sm.cp_fg_freq.get();
 #ifdef BOARD_X6200
     cfg_sm.p_key_vol.subscribe_and_notify(on_key_vol_change);
 #endif
