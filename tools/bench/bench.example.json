@@ -1,0 +1,13 @@
+{
+  "radios": {
+    "x6200": {"host": "192.168.1.20", "model": "x6200"},
+    "x6100": {"host": "192.168.1.21", "model": "x6100"}
+  },
+  "profiles": {
+    "hackrf": {"to": "x6200", "pads": [{"db": 30, "watts": 10}, {"db": 40, "watts": 10, "at": "x6200"}]},
+    "radios": {"between": ["x6100", "x6200"],
+               "pads": [{"db": 40, "watts": 10, "at": "x6100"}, {"db": 30, "watts": 10, "at": "x6200"}]}
+  },
+  "limits": {"radio_w": 1.0, "max_key_s": 16, "hackrf_x": 30},
+  "gen_ft8": "/path/to/ft8_lib/gen_ft8"
+}

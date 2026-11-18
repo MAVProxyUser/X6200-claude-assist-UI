@@ -25,9 +25,10 @@ approved that day.
 
 *Hardware to plug in*
 
-3. **DVSI USB-3000 back on USB**: it came off when the Kraken took the HOST port, so DMR, P25, D-STAR, YSF and NXDN
-   voice is silent (the calls are still decoded). With five Kraken sticks streaming it would share an endpoint again;
-   with page I closed B uses one stick, which leaves room.
+3. **DVSI USB-3000 back on USB**: back on the HOST port 2026-11-18 (the owner): the SDR daemon found it
+   (AMBE3000P25F on /dev/ttyUSB0, DMR rate 33) and its self-test passed (a 1 kHz tone encoded and decoded came back
+   at 1000 Hz). It has the HOST port alone now, so B has no SDR: the voice heard again on B waits for an SDR beside
+   it (a powered hub). With five Kraken sticks streaming it would share an endpoint again.
 4. **NXDN96 over the cable**: done 2026-11-17 night (HackRF -> attenuators -> the one RTL, receive only): the generated
    call (TG 100, source 1234, RAN 1) decoded by the third dsd-fme, B showing "NXDN96 441.000 / TG 100 FROM 1234 RAN 1
    TALKING". Its voice waits for the USB-3000 (3), as every AMBE mode's does. Every HackRF -> X6200 cable test is done
@@ -64,6 +65,10 @@ approved that day.
 
 **Waiting on hardware**
 
+- The bench harness (tools/bench, 2026-11-18: the owner, "YOU will be running the automated tests"): bench.py with
+  the rules in code (README.md). Tried: a receive-only remote session on the X6200, status, the preflight refusing
+  without the owner's word on the cable. To try: `hackrf-ft8` (HackRF -> X6200, once the owner confirms the cable),
+  and `radios-ft8` once the X6100 is on the bench (arrives 2026-11-19; a 10 W pad on each radio's jack).
 - Done 2026-11-18: the bladeRF dropping off USB as it started (00:05 local; its own supply plugged in, the owner
   said) not reproduced on its DC jack. Plugged in again at 00:14 it opened on DC (now logged at each open), and at
   05:57 UTC the radio loaded its FPGA image again (2.0 s, 0.53 A after it), opened it so its AD9361 started (1.8 s,

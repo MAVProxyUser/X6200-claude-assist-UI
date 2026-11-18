@@ -2292,6 +2292,13 @@ static void handle_text(client_t *c, char *text) {
     } else if (!strcmp(a[0], "ft8") && n >= 2) {
         if (!allowed(c, ROLE_OPERATE, true))
             return;
+        /* The ones that send (a CQ, Auto answering, a reply, calling the station chosen) need a session that may
+         * transmit, as PTT and TUNE do: up to v0.3.12.28 a session without TX could start them (2026-11-18) */
+        if (!c->tx_ok && (!strcasecmp(a[1], "cq") || !strcasecmp(a[1], "auto") || !strcasecmp(a[1], "reply") ||
+                          !strcasecmp(a[1], "txcall"))) {
+            client_text(c, "err this session may not transmit");
+            return;
+        }
         if (!app_ft8_cmd(a[1], n >= 3 ? a[2] : NULL))
             client_textf(c, "err ft8 %s", a[1]);
     } else if (!strcmp(a[0], "wefax") && n >= 2) {

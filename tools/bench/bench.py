@@ -1,0 +1,656 @@
+#!/usr/bin/env python3
+"""The bench harness: automated tests through attenuators, between the HackRF on this computer and a radio
+("hackrf" profile, the radio receive only), or between two radios keying into each other ("radios" profile). Every
+rule of README.md is enforced here: nothing is sent unless every gate passes, and every transmission is watched and
+logged. The radios are worked through their browser remote (src/remote_server.c) with a session of the harness's
+own; SSH (root) only for provisioning, the test callsigns and cleaning the logs.
+
+  bench.py provision NAME rx|tx        a remote session for the harness on radio NAME (the GUI restarts once)
+  bench.py status [NAME...]            frequency, mode, power, TX, app and S-meter of each radio
+  bench.py chain-ok PROFILE "WORDS"    the owner's word that the cable of PROFILE is in place (12 hours)
+  bench.py preflight PROFILE           every check before a transmission; nothing sent
+  bench.py stop                        the emergency stop: the HackRF ended, every radio unkeyed, apps' TX stopped
+  bench.py hackrf-ft8 [--band 20m] [--x 30] [--text "CQ Q9TST FN00"] [--audio 1500]
+  bench.py radios-ft8 TX RX [--band 20m]          (at 0.1 W, the first probe's power, throughout)
+  bench.py testcall NAME CALL|--restore   the radio's callsign for the tests (Q<digit>TST), or back
+  bench.py cleanlog NAME               the test callsigns' QSOs out of the radio's logs
+
+The configuration is ~/.config/x6x00-bench/bench.json (bench.example.json says what goes in it); the tokens, the
+owner's confirmations, the TX log and the runs are kept beside it, never in the repository.
+
+SPDX-License-Identifier: LGPL-2.1-or-later
+"""
+import argparse
+import json
+import math
+import os
+import re
+import secrets
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import wave
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from remote_ws import Remote  # noqa: E402
+
+STATE = os.path.expanduser("~/.config/x6x00-bench")
+CONF = os.path.join(STATE, "bench.json")
+
+# ---- The rules' numbers (README.md): the configuration can lower them, never raise them ----
+HARD_MAX_W = 5.0            # no radio test above this, whatever the configuration says
+FIRST_PROBE_W = 0.1         # a session's first transmission, whatever the test asks
+HACKRF_MAX_X = 40           # the owner's approved maximum TX gain; the amp (-a 1) is never used
+HACKRF_MIN_DB = 70          # the HackRF only into at least this much attenuation
+RADIOS_MIN_DB = 60          # two radios only through at least this much
+CHAIN_VALID_S = 12 * 3600   # the owner's word on the cable holds this long
+MAX_KEY_S = 16              # longer than an FT8 transmission: a radio still on the air after it is stopped
+MAX_SWR = 2.0               # higher on a radio's TX meter: the chain is not the load it should be
+TOO_STRONG_DB = 20          # a receiver hearing this much more than the chain lets through: pads missing
+TEST_CALL = re.compile(r"^Q[0-9]TST$")
+
+FT8_DIAL = {"40m": 7074000, "30m": 10136000, "20m": 14074000, "17m": 18100000, "15m": 21074000,
+            "12m": 24915000, "10m": 28074000, "6m": 50313000}
+HAM_HF = [(1800000, 2000000), (3500000, 4000000), (5330500, 5406500), (7000000, 7300000), (10100000, 10150000),
+          (14000000, 14350000), (18068000, 18168000), (21000000, 21450000), (24890000, 24990000),
+          (28000000, 29700000), (50000000, 54000000)]
+
+
+class Refused(Exception):
+    """A gate that did not pass: nothing was sent"""
+
+
+def say(*a):
+    print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+
+def load_json(path, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def save_json(path, doc, mode=0o600):
+    os.makedirs(STATE, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(doc, f, indent=1)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+def conf():
+    c = load_json(CONF, None)
+    if not c:
+        raise Refused(f"no configuration: copy tools/bench/bench.example.json to {CONF} and fill it in")
+    lim = c.setdefault("limits", {})
+    lim["radio_w"] = min(float(lim.get("radio_w", 1.0)), HARD_MAX_W)
+    lim["max_key_s"] = min(float(lim.get("max_key_s", MAX_KEY_S)), MAX_KEY_S)
+    lim["hackrf_x"] = min(int(lim.get("hackrf_x", 30)), HACKRF_MAX_X)
+    return c
+
+
+def tx_log(entry):
+    os.makedirs(STATE, exist_ok=True)
+    entry = dict(entry, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+    with open(os.path.join(STATE, "tx_log.jsonl"), "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def ssh(host, cmd, timeout=60):
+    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", f"root@{host}", cmd],
+                       capture_output=True, text=True, timeout=timeout)
+    if r.returncode:
+        raise Refused(f"{host}: {cmd.split()[0]}: {(r.stderr or r.stdout).strip()[-200:]}")
+    return r.stdout
+
+
+# ---- A radio through its remote ----
+
+class Radio:
+    def __init__(self, name, rc, want_tx):
+        self.name, self.host = name, rc["host"]
+        tok = load_json(os.path.join(STATE, "tokens.json"), {}).get(name, {}).get("tx" if want_tx else "rx")
+        if not tok:
+            raise Refused(f"{name}: no {'tx' if want_tx else 'rx'} session: bench.py provision {name} "
+                          f"{'tx' if want_tx else 'rx'}")
+        self.r = Remote(self.host)
+        self.state, self.meter, self.txm, self.ft8 = {}, None, None, {}
+        self.rows, self.errs, self.lock = [], [], threading.Lock()
+        self.tx, self.tx_since, self.ctl_mine, self.role = False, None, False, None
+        self.r.send(f"auth {tok}")
+        self.r.send("panel 1")
+        self.r.send("screen 0")
+        threading.Thread(target=self._read, daemon=True).start()
+        t = time.time()
+        while time.time() - t < 8 and (self.role is None or not self.state):
+            time.sleep(0.05)
+        if self.role is None:
+            raise Refused(f"{name}: the remote did not take the harness's session")
+        if self.role[0] == "view":
+            raise Refused(f"{name}: the harness's session is not paired any more (role view): provision it again")
+        self.may_tx = self.role[1] == "1"
+
+    def _read(self):
+        while True:
+            t = self.r.recv()
+            if t is None:
+                return
+            k, _, rest = t.partition(" ")
+            with self.lock:
+                if k == "state":
+                    self.state = json.loads(rest)
+                    self._tx(bool(self.state.get("tx")))
+                elif k == "m":
+                    self.meter = float(rest)
+                elif k == "t":
+                    self.txm = [float(v) for v in rest.split()]
+                elif k == "tx":
+                    self._tx(rest.strip() == "1")
+                elif k == "ft8":
+                    self.ft8 = json.loads(rest)
+                elif k == "ft8r":
+                    self.rows.append(dict(json.loads(rest), at=time.time()))
+                elif k == "ctl":
+                    self.ctl_mine = rest.rsplit(" ", 1)[-1] == "1"
+                elif k == "role":
+                    self.role = rest.split(" ", 2)
+                elif k == "err":
+                    self.errs.append(rest)
+
+    def _tx(self, on):
+        if on and not self.tx:
+            self.tx_since = time.time()
+        if not on:
+            self.tx_since = None
+        self.tx = on
+
+    def send(self, cmd):
+        self.r.send(cmd)
+
+    def wait(self, what, cond, timeout):
+        t = time.time()
+        while time.time() - t < timeout:
+            with self.lock:
+                if cond():
+                    return True
+            time.sleep(0.05)
+        raise Refused(f"{self.name}: {what} did not come within {timeout:.0f} s"
+                      + (f" (the radio said: {self.errs[-1]})" if self.errs else ""))
+
+    def take_control(self):
+        self.send("control take")
+        self.wait("control", lambda: self.ctl_mine, 5)
+
+    def pwr(self):
+        return float(self.state.get("pwr", 99))
+
+    def stop(self):
+        """Everything that may send stopped, as far as this session may"""
+        for cmd in ("ft8 stop", "key PTT 0", "tune 0"):
+            try:
+                self.send(cmd)
+            except OSError:
+                pass
+
+    def close(self):
+        try:
+            self.send("control release")
+        except OSError:
+            pass
+        self.r.close()
+
+
+# ---- The gates ----
+
+def chain_gate(c, profile):
+    ok = load_json(os.path.join(STATE, "chain.json"), {}).get(profile)
+    if not ok or time.time() - ok["at"] > CHAIN_VALID_S:
+        raise Refused(f"the owner has not said the {profile} cable is in place in the last 12 hours: ask, then "
+                      f"bench.py chain-ok {profile} \"their words\"")
+    p = c.get("profiles", {}).get(profile)
+    if not p:
+        raise Refused(f"no profile {profile} in the configuration")
+    pads = p.get("pads", [])
+    total = sum(x["db"] for x in pads)
+    if profile == "hackrf":
+        if total < HACKRF_MIN_DB:
+            raise Refused(f"the HackRF profile's pads add up to {total} dB, under {HACKRF_MIN_DB}")
+    else:
+        if total < RADIOS_MIN_DB:
+            raise Refused(f"the radios profile's pads add up to {total} dB, under {RADIOS_MIN_DB}")
+        for name in p.get("between", []):
+            at = [x for x in pads if x.get("at") == name]
+            if not at or at[0].get("watts", 0) < c["limits"]["radio_w"] * 2:
+                raise Refused(f"no pad rated for twice the test power on {name}'s antenna jack")
+    return p, total
+
+
+def hackrf_gate(x):
+    if x > HACKRF_MAX_X or x < 0:
+        raise Refused(f"HackRF gain -x {x}: 0 to {HACKRF_MAX_X} only")
+    r = subprocess.run(["hackrf_info"], capture_output=True, text=True)
+    if "Found HackRF" not in r.stdout:
+        raise Refused("no HackRF on this computer")
+
+
+def rx_only_gate(radio):
+    """The radio the HackRF feeds: a session that may not transmit, nothing on the air, no app answering by itself"""
+    if radio.may_tx:
+        raise Refused(f"{radio.name}: the HackRF profile works the radio with a session that may NOT transmit "
+                      f"(bench.py provision {radio.name} rx), never one that may")
+    if radio.tx:
+        raise Refused(f"{radio.name}: on the air")
+    if radio.ft8.get("auto") or radio.ft8.get("cq") or radio.ft8.get("sending"):
+        raise Refused(f"{radio.name}: its FT8 app is set to send (Auto or CQ): turn it off at the radio")
+
+
+def radio_tx_gate(radio, c, w):
+    if not radio.may_tx:
+        raise Refused(f"{radio.name}: the harness's session there may not transmit")
+    if w > c["limits"]["radio_w"] or w > HARD_MAX_W:
+        raise Refused(f"{w} W is over the limit ({c['limits']['radio_w']} W)")
+    if radio.state.get("atu"):
+        raise Refused(f"{radio.name}: the ATU is on (it tunes by transmitting): off first")
+    freq = int(radio.state.get("freq", 0))
+    if not any(lo <= freq <= hi for lo, hi in HAM_HF):
+        raise Refused(f"{radio.name}: {freq} Hz is outside the amateur bands")
+    if abs(radio.pwr() - w) > 0.05:
+        raise Refused(f"{radio.name}: its power reads {radio.pwr()} W, not the {w} W asked")
+
+
+class Watch:
+    """While a test runs: a radio on the air past max_key_s, on a bad SWR, or above the power asked, or a receiver
+    hearing far more than the chain lets through, stops everything at once"""
+
+    def __init__(self, radios, c, hackrf=None, expect_dbm=None, listener=None, w=None):
+        self.radios, self.c, self.hackrf, self.why = radios, c, hackrf, None
+        self.expect_dbm, self.listener, self.w = expect_dbm, listener, w
+        self.on = True
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        while self.on and not self.why:
+            for r in self.radios:
+                with r.lock:
+                    since, txm, meter = r.tx_since, r.txm, (self.listener.meter if self.listener else None)
+                if self.hackrf is not None and r.tx:
+                    self.trip(f"{r.name} went on the air while the HackRF fed it")
+                elif since and time.time() - since > self.c["limits"]["max_key_s"]:
+                    self.trip(f"{r.name} on the air for over {self.c['limits']['max_key_s']:.0f} s")
+                elif since and txm and time.time() - since > 1.0:
+                    w, swr = txm[0], txm[1]
+                    if swr > MAX_SWR:
+                        self.trip(f"{r.name}: SWR {swr:.2f} on the air: the chain is not a load")
+                    elif self.w is not None and w > max(self.w * 2, self.w + 0.5):
+                        self.trip(f"{r.name}: {w:.1f} W on the air, {self.w} W asked")
+                if since and self.expect_dbm is not None and meter is not None and \
+                        time.time() - since > 1.0 and meter > self.expect_dbm + TOO_STRONG_DB:
+                    self.trip(f"{self.listener.name} hears {meter:.0f} dBm, the chain should let through about "
+                              f"{self.expect_dbm:.0f}: pads missing?")
+            time.sleep(0.05)
+
+    def trip(self, why):
+        if self.why:
+            return
+        self.why = why
+        say("STOP:", why)
+        if self.hackrf is not None and self.hackrf.poll() is None:
+            self.hackrf.kill()
+        for r in self.radios:
+            r.stop()
+        tx_log({"stop": why})
+
+    def close(self):
+        self.on = False
+
+
+def emergency_stop(c):
+    subprocess.run(["pkill", "-f", "hackrf_transfer"], capture_output=True)
+    toks = load_json(os.path.join(STATE, "tokens.json"), {})
+    for name, rc in c.get("radios", {}).items():
+        for kind in ("tx", "rx"):
+            if toks.get(name, {}).get(kind):
+                try:
+                    r = Radio(name, rc, kind == "tx")
+                    r.take_control()
+                    r.stop()
+                    time.sleep(0.5)
+                    say(f"{name}: stopped ({'on the air' if r.tx else 'not on the air'})")
+                    r.close()
+                    break
+                except (Refused, OSError) as e:
+                    say(f"{name}: {e}")
+
+
+# ---- Signals for the HackRF ----
+
+def gen_ft8_wav(c, text, audio_hz, path):
+    gen = c.get("gen_ft8") or "gen_ft8"
+    r = subprocess.run([gen, text, path, str(audio_hz)], capture_output=True, text=True)
+    if r.returncode or not os.path.exists(path):
+        raise Refused(f"gen_ft8: {(r.stderr or r.stdout).strip()[-200:]}")
+
+
+def audio_to_iq(wav_path, iq_path, fs, offset, lead_s):
+    """A 12 kHz audio file as upper sideband: analytic, upsampled to fs (an integer multiple), moved up by offset Hz,
+    into signed 8-bit I/Q for hackrf_transfer; lead_s of silence first. In one-second pieces (a 15 s file is 30
+    million samples)"""
+    import numpy as np
+    with wave.open(wav_path) as w:
+        rate = w.getframerate()
+        a = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0
+    up = fs // rate
+    if up * rate != fs:
+        raise ValueError("fs must be a multiple of the audio rate")
+    a = np.concatenate([np.zeros(int(lead_s * rate)), a])
+    n = len(a)
+    h = np.zeros(n)
+    h[0] = 1
+    h[1:(n + 1) // 2] = 2
+    if n % 2 == 0:
+        h[n // 2] = 1
+    z = np.fft.ifft(np.fft.fft(a) * h)
+    z /= max(np.abs(z).max(), 1e-9)
+    src = np.arange(n)
+    with open(iq_path, "wb") as f:
+        total = n * up
+        for s0 in range(0, total, fs):
+            k = np.arange(s0, min(s0 + fs, total))
+            x = (np.interp(k / up, src, z.real) + 1j * np.interp(k / up, src, z.imag)) * \
+                np.exp(2j * np.pi * offset * k / fs) * 90.0
+            out = np.empty(2 * len(k), dtype=np.int8)
+            out[0::2] = np.clip(np.round(x.real), -127, 127)
+            out[1::2] = np.clip(np.round(x.imag), -127, 127)
+            f.write(out.tobytes())
+    return n * up / fs
+
+
+def next_slot(period=15.0, lead=0.25, margin=3.0):
+    """The wall-clock time to start at: the next FT8 slot at least margin seconds away, minus the HackRF's lead"""
+    now = time.time()
+    t = math.ceil((now + margin) / period) * period
+    return t - lead
+
+
+def norm(s):
+    return " ".join((s or "").upper().split())
+
+
+# ---- Tests ----
+
+def run_hackrf_ft8(c, args):
+    p, total = chain_gate(c, "hackrf")
+    hackrf_gate(args.x)
+    name = p["to"]
+    radio = Radio(name, c["radios"][name], want_tx=False)
+    rx_only_gate(radio)
+    dial = FT8_DIAL[args.band]
+    text = norm(args.text)
+    os.makedirs(os.path.join(STATE, "runs"), exist_ok=True)
+    run = tempfile.mkdtemp(prefix="ft8-", dir=os.path.join(STATE, "runs"))
+    wav, iq = os.path.join(run, "ft8.wav"), os.path.join(run, "ft8.s8")
+    gen_ft8_wav(c, text, args.audio, wav)
+    fs, offset = 2004000, 100000
+    secs = audio_to_iq(wav, iq, fs, offset, lead_s=0.25)
+    radio.take_control()
+    radio.send("ft8 open")
+    radio.wait("the FT8 app", lambda: radio.ft8.get("open") == 1, 10)
+    rx_only_gate(radio)
+    radio.send(f"set freq {dial}")
+    radio.wait(f"the dial on {dial}", lambda: int(radio.state.get("freq", 0)) == dial, 5)
+    start = next_slot()
+    say(f"{name}: FT8 on {dial} Hz, receive only; the HackRF sends {text!r} at {args.audio} Hz, -x {args.x}, "
+        f"{total} dB of pads, at {time.strftime('%H:%M:%S', time.localtime(start + 0.25))}")
+    while time.time() < start:
+        rx_only_gate(radio)
+        time.sleep(0.05)
+    rows0 = len(radio.rows)
+    cmd = ["hackrf_transfer", "-t", iq, "-f", str(dial - offset), "-s", str(fs), "-a", "0", "-p", "0",
+           "-x", str(args.x)]
+    hk = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    tx_log({"who": "hackrf", "to": name, "f": dial - offset, "x": args.x, "text": text, "secs": round(secs, 1)})
+    watch = Watch([radio], c, hackrf=hk)
+    found = None
+    try:
+        try:
+            hk.wait(timeout=secs + 10)
+        except subprocess.TimeoutExpired:
+            watch.trip("hackrf_transfer ran past its file")
+        end = time.time() + 6
+        while time.time() < end and not watch.why and not found:
+            with radio.lock:
+                found = next((r for r in radio.rows[rows0:] if norm(r.get("x")) == text), None)
+            time.sleep(0.1)
+    finally:
+        watch.close()
+        if hk.poll() is None:
+            hk.kill()
+        radio.send("ft8 close")
+        time.sleep(0.5)
+        radio.close()
+    if watch.why:
+        raise Refused(watch.why)
+    if not found:
+        others = [r.get("x") for r in radio.rows[rows0:]]
+        raise Refused(f"{name} did not decode {text!r}" + (f" (it decoded {others})" if others else " (nothing)"))
+    say(f"PASS: {name} decoded {found['x']!r}, SNR {found['snr']} dB, {found['f']} Hz")
+
+
+def run_radios_ft8(c, args):
+    """Untried until both radios are on the bench: A calls CQ once, B must decode it and reply once, A must decode
+    the reply. The first transmission of the session at FIRST_PROBE_W whatever was asked"""
+    p, total = chain_gate(c, "radios")
+    for n in (args.tx, args.rx):
+        if n not in p.get("between", []):
+            raise Refused(f"{n} is not on the radios profile's cable")
+    a, b = Radio(args.tx, c["radios"][args.tx], True), Radio(args.rx, c["radios"][args.rx], True)
+    calls = {}
+    for r in (a, b):
+        call = ssh(r.host, "sqlite3 /mnt/params.db \"select val from params where name='callsign'\"").strip()
+        if not TEST_CALL.match(call):
+            raise Refused(f"{r.name}: its callsign is {call or 'none'}: a test call first (bench.py testcall "
+                          f"{r.name} Q1TST)")
+        calls[r.name] = call
+    dial = FT8_DIAL[args.band]
+    radios = [a, b]
+    for r in radios:
+        r.take_control()
+        r.send("ft8 open")
+        r.wait("the FT8 app", lambda r=r: r.ft8.get("open") == 1, 10)
+        if r.ft8.get("auto"):
+            r.send("ft8 auto")
+            r.wait("Auto off", lambda r=r: not r.ft8.get("auto"), 5)
+        r.send(f"set freq {dial}")
+        r.send(f"set pwr {round(FIRST_PROBE_W * 10)}")
+        r.wait("the dial and the power", lambda r=r: int(r.state.get("freq", 0)) == dial and
+               abs(r.pwr() - FIRST_PROBE_W) < 0.05, 5)
+        radio_tx_gate(r, c, FIRST_PROBE_W)
+    expect = 10 * math.log10(FIRST_PROBE_W * 1000) - total
+    watch = Watch(radios, c, expect_dbm=expect, listener=b, w=FIRST_PROBE_W)
+    result = {}
+    try:
+        def one_tx(sender, listener, start_cmd, want, what):
+            n0 = len(listener.rows)
+            sender.send(start_cmd)
+            tx_log({"who": sender.name, "f": dial, "w": sender.pwr(), "what": what})
+            sender.wait("its transmission", lambda: sender.tx or watch.why, 32)
+            sender.wait("the end of its transmission", lambda: not sender.tx or watch.why, MAX_KEY_S + 2)
+            sender.send("ft8 stop")
+            listener.wait(f"{what} decoded", lambda: watch.why or any(want(r) for r in listener.rows[n0:]), 8)
+            if watch.why:
+                raise Refused(watch.why)
+            return next(r for r in listener.rows[n0:] if want(r))
+
+        ca, cb = calls[a.name], calls[b.name]
+        row = one_tx(a, b, "ft8 cq", lambda r: norm(r.get("x")).startswith(f"CQ {ca}"), "CQ")
+        result["cq"] = row
+        say(f"{b.name} decoded {row['x']!r}, SNR {row['snr']} dB")
+        watch.listener, watch.expect_dbm = a, expect
+        row = one_tx(b, a, f"ft8 reply {row['id']}", lambda r: norm(r.get("x")).startswith(f"{ca} {cb}"), "reply")
+        result["reply"] = row
+        say(f"{a.name} decoded {row['x']!r}, SNR {row['snr']} dB")
+    finally:
+        watch.close()
+        for r in radios:
+            r.stop()
+        time.sleep(1)
+        for r in radios:
+            r.send("ft8 close")
+            r.close()
+        for r in radios:
+            clean_log(r.host)
+    if watch.why:
+        raise Refused(watch.why)
+    say(f"PASS: {a.name} -> {b.name} -> {a.name} at {FIRST_PROBE_W} W through {total} dB")
+
+
+def clean_log(host):
+    py = ("import re,sqlite3;d=sqlite3.connect('/mnt/qso_log.db');"
+          "n=d.execute(\"delete from qso_log where remote_callsign glob 'Q[0-9]TST*' or local_callsign glob "
+          "'Q[0-9]TST*'\").rowcount;d.commit();"
+          "p='/mnt/ft_log.adi'\ntry:\n s=open(p).read()\nexcept OSError:\n s=''\n"
+          "parts=re.split(r'(?i)(<eor>)',s);keep=[];m=0\n"
+          "for i in range(0,len(parts)-1,2):\n"
+          " r=parts[i]+parts[i+1]\n"
+          " if re.search(r'(?i)<(call|station_callsign|operator):\\d+>Q\\dTST',r): m+=1\n"
+          " else: keep.append(r)\n"
+          "keep.append(parts[-1] if len(parts)%2 else '')\n"
+          "open(p,'w').write(''.join(keep)) if m else None\nprint(n,m)")
+    out = ssh(host, f"python3 -c {json.dumps(py)}").split()
+    if out and out != ["0", "0"]:
+        say(f"{host}: test QSOs out of the logs: {out[0]} from the database, {out[1]} from the ADIF")
+
+
+# ---- Commands ----
+
+def cmd_provision(c, a):
+    rc = c["radios"][a.name]
+    tok = secrets.token_hex(16)
+    tx = 1 if a.kind == "tx" else 0
+    now = int(time.time())
+    # the token in the clear (the GUI hashes it as it loads the file, sess_load), operate, TX or not; the session of
+    # the same name made before replaced; then the GUI restarted to load it (printf's \t: no tab through the shell)
+    line = f"{tok}\\tbench-{a.kind}\\t1\\t{tx}\\t{now}\\t{now}\\t-\\t0\\n"
+    ssh(rc["host"], f"f=/mnt/remote_sessions.conf; touch $f; awk -F'\\t' '$2 != \"bench-{a.kind}\"' $f > /tmp/rs.$$ "
+                    f"&& printf '{line}' >> /tmp/rs.$$ && cat /tmp/rs.$$ > $f && rm /tmp/rs.$$ && "
+                    f"kill $(pidof x6100_gui)")
+    toks = load_json(os.path.join(STATE, "tokens.json"), {})
+    toks.setdefault(a.name, {})[a.kind] = tok
+    save_json(os.path.join(STATE, "tokens.json"), toks)
+    say(f"{a.name}: session bench-{a.kind} ({'may' if tx else 'may NOT'} transmit); the GUI restarts")
+    time.sleep(15)
+    r = Radio(a.name, rc, a.kind == "tx")
+    say(f"{a.name}: role {' '.join(r.role)}")
+    r.close()
+
+
+def cmd_status(c, a):
+    for name in a.names or list(c["radios"]):
+        try:
+            toks = load_json(os.path.join(STATE, "tokens.json"), {}).get(name, {})
+            r = Radio(name, c["radios"][name], "rx" not in toks)
+            time.sleep(1.5)
+            s = r.state
+            say(f"{name}: {s.get('freq')} Hz mode {s.get('mode')} pwr {s.get('pwr')} W atu {s.get('atu')} "
+                f"tx {int(r.tx)} app {s.get('app') or '-'} S {r.meter} dBm; session may transmit: {r.may_tx}")
+            r.close()
+        except (Refused, OSError) as e:
+            say(f"{name}: {e}")
+
+
+def cmd_chain_ok(c, a):
+    p = c.get("profiles", {}).get(a.profile)
+    if not p:
+        raise Refused(f"no profile {a.profile}")
+    doc = load_json(os.path.join(STATE, "chain.json"), {})
+    doc[a.profile] = {"at": time.time(), "words": a.words, "pads": p.get("pads")}
+    save_json(os.path.join(STATE, "chain.json"), doc)
+    say(f"{a.profile}: the owner's word recorded ({sum(x['db'] for x in p.get('pads', []))} dB), good for 12 hours")
+
+
+def cmd_preflight(c, a):
+    p, total = chain_gate(c, a.profile)
+    say(f"{a.profile}: cable confirmed, {total} dB of pads")
+    if a.profile == "hackrf":
+        hackrf_gate(c["limits"]["hackrf_x"])
+        say("HackRF found")
+        r = Radio(p["to"], c["radios"][p["to"]], False)
+        rx_only_gate(r)
+        say(f"{r.name}: receive-only session, not on the air, FT8 not set to send")
+        r.close()
+    else:
+        for n in p.get("between", []):
+            r = Radio(n, c["radios"][n], True)
+            call = ssh(r.host, "sqlite3 /mnt/params.db \"select val from params where name='callsign'\"").strip()
+            say(f"{n}: may transmit {r.may_tx}, ATU {r.state.get('atu')}, {r.pwr()} W, callsign {call or 'none'}"
+                f"{'' if TEST_CALL.match(call) else ' (NOT a test call)'}")
+            r.close()
+    say("preflight passed: nothing was sent")
+
+
+def cmd_testcall(c, a):
+    rc = c["radios"][a.name]
+    saved = load_json(os.path.join(STATE, "calls.json"), {})
+    cur = ssh(rc["host"], "sqlite3 /mnt/params.db \"select val from params where name='callsign'\"").strip()
+    if a.call == "--restore":
+        old = saved.pop(a.name, None)
+        if old is None:
+            raise Refused(f"{a.name}: no callsign kept to go back to")
+        q = (f"insert or replace into params(name,val) values('callsign','{old}')" if old else
+             "delete from params where name='callsign'")
+    else:
+        if not TEST_CALL.match(a.call):
+            raise Refused("a test callsign is Q<digit>TST")
+        if not TEST_CALL.match(cur):
+            saved[a.name] = cur
+        q = f"insert or replace into params(name,val) values('callsign','{a.call}')"
+    save_json(os.path.join(STATE, "calls.json"), saved)
+    ssh(rc["host"], f"/etc/init.d/S95gui stop >/dev/null 2>&1; sqlite3 /mnt/params.db \"{q}\"; "
+                    f"/etc/init.d/S95gui start >/dev/null 2>&1")
+    say(f"{a.name}: callsign {cur or 'none'} -> {a.call if a.call != '--restore' else (old or 'none')}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("provision"); s.add_argument("name"); s.add_argument("kind", choices=["rx", "tx"])
+    s = sub.add_parser("status"); s.add_argument("names", nargs="*")
+    s = sub.add_parser("chain-ok"); s.add_argument("profile", choices=["hackrf", "radios"]); s.add_argument("words")
+    s = sub.add_parser("preflight"); s.add_argument("profile", choices=["hackrf", "radios"])
+    sub.add_parser("stop")
+    s = sub.add_parser("hackrf-ft8")
+    s.add_argument("--band", default="20m", choices=FT8_DIAL); s.add_argument("--x", type=int, default=None)
+    s.add_argument("--text", default="CQ Q9TST FN00"); s.add_argument("--audio", type=int, default=1500)
+    s = sub.add_parser("radios-ft8"); s.add_argument("tx"); s.add_argument("rx")
+    s.add_argument("--band", default="20m", choices=FT8_DIAL)
+    s = sub.add_parser("testcall"); s.add_argument("name"); s.add_argument("call")
+    s = sub.add_parser("cleanlog"); s.add_argument("name")
+    a = ap.parse_args()
+    c = None
+
+    def on_signal(*_):
+        say("interrupted: the emergency stop")
+        emergency_stop(c or {})
+        os._exit(130)
+    signal.signal(signal.SIGINT, on_signal)
+    signal.signal(signal.SIGTERM, on_signal)
+    try:
+        c = conf()
+        if a.cmd == "hackrf-ft8" and a.x is None:
+            a.x = c["limits"]["hackrf_x"]
+        {"provision": cmd_provision, "status": cmd_status, "chain-ok": cmd_chain_ok, "preflight": cmd_preflight,
+         "stop": lambda c, a: emergency_stop(c), "hackrf-ft8": run_hackrf_ft8, "radios-ft8": run_radios_ft8,
+         "testcall": cmd_testcall, "cleanlog": lambda c, a: clean_log(c["radios"][a.name]["host"])}[a.cmd](c, a)
+    except Refused as e:
+        say(f"REFUSED: {e}")
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

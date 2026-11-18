@@ -8984,7 +8984,9 @@ and the radio's `ctl none|local|tci|browser NAME MINE` say who controls the
 radio (while the code shows, the screen mirror of unpaired viewers pauses:
 the code is for the eyes at the radio); an admin's `sessions` lists the paired browsers as JSON and `revoke N`
 ends one; `unpair` forgets the caller's own; `tx 0|1` goes to every client
-when the radio keys or unkeys. `key PTT 1 N` keys the radio's own microphone,
+when the radio keys or unkeys. A session without TX is refused what sends:
+`key PTT`, `tune 1`, and the FT8 app's `cq`, `auto`, `reply` and `txcall`
+(up to v0.3.12.28 those four were let through). `key PTT 1 N` keys the radio's own microphone,
 N the page's number for this press, and is repeated every second as the
 lease; `key PTT 0` lets go (see Transmitting from the browser). `tune 1 N`
 starts a TUNE for an external tuner the same way, repeated every second while
