@@ -46,6 +46,10 @@ screens:
   that takes each band: X6200, or RTL (in the spectrum's orange) for the stick's, and LISTEN opens those on B. **F1 SCAN** sets the band chosen on its
   radio and scans it end to end (A for the X6200's, B for the stick's).
 - **E DECODE**: the decoders and the frequencies they work on, each a key away, and the radio each is heard on.
+  First on its list, **EMERGENCY**: 65 emergency frequencies to listen to (NOAA weather, CB, FRS, MURS, GMRS, the ham
+  calling frequencies and HF nets, marine, air guard and SAR, the police, fire and EMS mutual aid channels), every one
+  receive only; **F1 SCAN ALL** scans them on both radios at once, **F2 SCAN SEL** the chosen one's band, each
+  stopping on what talks, and **F5 LISTEN** picks the radio heard (AUTO, the X6200, the SDR or ALL).
 - **F SYSTEM**: the rest of the radio in the same look: Settings, the apps, the digital modes, AIRSPACE,
   VHF/UHF, the classic radio screen, a UNIX shell on the radio's own screen, the base firmware, and which screen the
   radio starts in. The title says the release, the GUI's commit and the base's version; A's says what its scope
@@ -125,6 +129,15 @@ APP > Time Signal sets the clock from **WWV and WWVH** for a radio with neither 
 give the second, the 100 Hz BCD code the minute, and once two minutes in a row agree the clock (and the clock
 chip) moves to theirs. A clock NTP keeps is only compared. The decoder is [src/wwv.c](src/wwv.c), tested in
 [tools/wwv](tools/wwv) on this radio's own recording of WWV on 10 MHz.
+
+### Direction finding (page I)
+
+With a KrakenSDR on the HOST port, page I takes bearings from its five coherent receivers: MUSIC, Capon, Bartlett,
+MEM, TNA or ROOT-MUSIC, up to four signals at once, on a circle, a line or any layout of up to five antennas (the
+layouts' sizes for the band worked out, KrakenRF's whips' range respected), calibrated on the Kraken's noise source
+and, for the cables and whips in front of it, on a transmitter at a known bearing; a bearing log, gpsd's heading,
+and KrakenRF's IQ protocol for their software on a computer. The same on the web configurator's Direction finder
+page. Its daemon is [x6x00-df](https://github.com/MAVProxyUser/x6x00-df).
 
 ### AIRSPACE
 
