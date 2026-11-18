@@ -106,9 +106,9 @@
  *  (a SAME alert, say); a retune only moves what the rows say. -S: another socket name (a test beside the radio's own
  *  daemon). -T: a test device in place of any (sdr_file.c): it "transmits" into FILE (signed 8-bit I/Q) and hears
  *  nothing, to check the transmitter with nothing on the air (tools/rtlspec/tx_check.py).
- *  A test daemon beside B's (-S): the AMBE vocoder stays B's daemon's (its port 127.0.0.1:2460 in use, ambe.c: DMR
- *  silent here, the dsd-fme modes through that port), and RTLSPEC_DSD_PORT=N gives its dsd-fme speech ports N, N+1,
- *  N+2 in place of B's 23470-23472.
+ *  A test daemon beside B's (-S): the AMBE vocoder stays B's daemon's (its port 127.0.0.1:2460 in use, ambe.c: DMR's
+ *  frames and the dsd-fme modes both reach the chip through that port), and RTLSPEC_DSD_PORT=N gives its dsd-fme
+ *  speech ports N, N+1, N+2 in place of B's 23470-23472.
  */
 
 #define _GNU_SOURCE

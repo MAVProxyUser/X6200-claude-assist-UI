@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """B's digital voice with no SDR plugged in: a recorded transmission (int8 I/Q, as the HackRF sends it) replayed into a
 test SDR daemon on the radio (x6x00-rtlspec -S x6x00-dvtest -i, beside B's own daemon), which runs B's decoders on it:
-dsd-fme's P25, D-STAR, YSF and NXDN, their voice through the USB-3000 that B's daemon holds (127.0.0.1:2460). What the
-test daemon says of the call, and the audio it makes, are counted; the audio kept as a WAV.
+its own DMR and dsd-fme's P25, D-STAR, YSF and NXDN, their voice through the USB-3000 that B's daemon holds
+(127.0.0.1:2460). What the test daemon says of the call, and the audio it makes, are counted; the audio kept as a WAV.
 
     dv_replay.py HOST FILE.iq [--fs 2000000] [--offset 200000] [--at 441000000] [--secs 20] [--daemon PATH]
                  [--wav OUT.wav]
 
 FILE.iq is resampled to 2.1168 MS/s (the daemon listens only at multiples of 264.6 kHz) as unsigned 8-bit I/Q with its
 signal OFFSET above centre. The test daemon is the radio's own /usr/bin/x6x00-rtlspec unless --daemon names a build to
-copy over (it must leave the vocoder to B's daemon: ambe.c's "another daemon's" rule, 2026-11-18). Receive only:
-nothing goes on the air. DMR is not tried this way (its decoder in a test daemon has no vocoder).
+copy over (it must leave the vocoder's serial port to B's daemon and reach the chip through its port: ambe.c's
+"another daemon's" rule, DMR's frames too from 2026-11-18). Receive only: nothing goes on the air.
 
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
@@ -37,6 +37,11 @@ while time.time() < end:
     if m[:4] == b"RDSD":
         l = struct.unpack("<I", m[4:8])[0]; t = m[8:8 + l].decode(errors="replace").split("|")
         if len(t) > 3 and t[1] and t[3]: calls[t[1] + " " + t[3]] = calls.get(t[1] + " " + t[3], 0) + 1
+    elif m[:4] == b"RDMR":      # Hz|slot|cc|voice|lc|flco|src|dst|bs|vocoder
+        l = struct.unpack("<I", m[4:8])[0]; t = m[8:8 + l].decode(errors="replace").split("|")
+        if len(t) > 9 and t[3] == "1" and t[4] == "1":
+            k = "DMR TS%s CC%s %s %s FROM %s (vocoder %s)" % (t[1], t[2], "TO" if t[5] == "3" else "TG", t[7], t[6], t[9])
+            calls[k] = calls.get(k, 0) + 1
     elif m[:4] == b"RAUD":
         c = struct.unpack("<I", m[4:8])[0]; d = m[8:8 + 2 * c]; f.write(d); aud += 1
         v = struct.unpack("<%dh" % c, d); peak = max(peak, max(abs(x) for x in v) if v else 0)

@@ -45,7 +45,9 @@ approved that day.
    replayed into a test SDR daemon beside B's (resampled to 2.1168 MS/s), its dsd-fme's voice through this USB-3000
    via B's daemon: D-STAR (TO CQCQCQ FROM N0CALL TEST, "GOLDCORPHF CABLE TST", no bit errors), YSF (TO CQCQCQ FROM
    N0CALL), P25 phase 1 (TG 4321 FROM 1234567 NAC 123), NXDN48 and NXDN96 (TG 100 FROM 1234 RAN 1): every call
-   decoded, speech peaks 25000-31000. DMR not this way (its decoder in a test daemon has no vocoder). Found with it:
+   decoded, speech peaks 25000-31000. DMR too from 2026-11-18 16:55 (a test daemon's DMR frames through B's
+   daemon's port, as dsd-fme's go): TS1 CC1 TG 3100 FROM 3112345, the voice heard (peak 30000, 76% of it in
+   300-3400 Hz). Found with it:
    a second daemon opened the chip's serial port beside B's (two writers wedge it): it now leaves the chip to the
    daemon that serves 127.0.0.1:2460; RTLSPEC_DSD_PORT gives a test daemon's dsd-fme speech ports of its own.
 4. **NXDN96 over the cable**: done 2026-11-17 night (HackRF -> attenuators -> the one RTL, receive only): the generated

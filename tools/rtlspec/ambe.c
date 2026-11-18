@@ -78,11 +78,12 @@ static bool put_all(const uint8_t *b, size_t n) {
     return true;
 }
 
-static bool send_pkt(int type, const uint8_t *p, int n) {
-    uint8_t b[16 + 340], par = 0;
+/* A packet in b (16 + 340 bytes): its length, -1 too long */
+static int build_pkt(uint8_t *b, int type, const uint8_t *p, int n) {
+    uint8_t par = 0;
     int     len = n + 2;
 
-    if (n > 330) return false;
+    if (n > 330) return -1;
     b[0] = 0x61;
     b[1] = (uint8_t)(len >> 8);
     b[2] = (uint8_t)len;
@@ -91,7 +92,14 @@ static bool send_pkt(int type, const uint8_t *p, int n) {
     b[4 + n] = 0x2F;
     for (int i = 1; i < 5 + n; i++) par ^= b[i];
     b[5 + n] = par;
-    return put_all(b, (size_t)(6 + n));
+    return 6 + n;
+}
+
+static bool send_pkt(int type, const uint8_t *p, int n) {
+    uint8_t b[16 + 340];
+    int     len = build_pkt(b, type, p, n);
+
+    return len > 0 && put_all(b, (size_t)len);
 }
 
 /* n bytes by the deadline */
@@ -369,6 +377,48 @@ static void udp_open(void) {
     }
 }
 
+/* Another daemon's port (a test daemon's, beside B's: ambe_start): DMR's frames go to the chip through it, as the
+ * dsd-fme modes' do, the chip's serial port being that daemon's alone */
+static int cli = -1;
+
+static void cli_open(void) {
+    struct sockaddr_in a = {.sin_family = AF_INET, .sin_port = htons(PORT)};
+
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if ((cli = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0)) < 0) return;
+    if (connect(cli, (struct sockaddr *)&a, sizeof(a)) < 0) {
+        close(cli);
+        cli = -1;
+    }
+}
+
+/* One packet through that port and its answer within ms: its type and fields (its parity field off), their length;
+ * -1 none. Answers late from an earlier one are passed over first */
+static int port_pkt(int type, const uint8_t *p, int n, int *rtype, uint8_t *r, int max, int ms) {
+    uint8_t b[16 + 340], a[400];
+    int     len = build_pkt(b, type, p, n);
+    long    end = now_ms() + ms;
+
+    if (len < 0 || cli < 0) return -1;
+    while (recv(cli, a, sizeof(a), MSG_DONTWAIT) > 0) {}
+    if (send(cli, b, (size_t)len, 0) != len) return -1;
+    while (now_ms() < end) {
+        struct pollfd pf = {.fd = cli, .events = POLLIN};
+        ssize_t       k;
+
+        if (poll(&pf, 1, (int)(end - now_ms())) <= 0) return -1;
+        k = recv(cli, a, sizeof(a), 0);
+        if (k < 6 || a[0] != 0x61 || (a[1] << 8 | a[2]) + 4 != k || k - 4 > max) continue;
+        int l = (int)k - 4;
+
+        *rtype = a[3];
+        memcpy(r, a + 4, (size_t)l);
+        if (l >= 2 && r[l - 2] == 0x2F) l -= 2;
+        return l;
+    }
+    return -1;
+}
+
 static void lost(void);
 
 static void serve_udp(void) {
@@ -410,6 +460,19 @@ static void lost(void) {
     close(fd);
     fd = -1;
     atomic_store(&ready, false);
+}
+
+/* A speech packet's samples (field 0x00, their count, 16-bit big endian) into the speech heard */
+static void pcm_put(const uint8_t *r, int n) {
+    int ns = r[1];
+
+    if (2 + 2 * ns > n) ns = (n - 2) / 2;
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < ns; i++) {
+        if (pcm_w - pcm_r >= PCM) pcm_r++;     /* behind: the oldest goes */
+        pcm[pcm_w++ % PCM] = (int16_t)(r[2 + 2 * i] << 8 | r[3 + 2 * i]);
+    }
+    pthread_mutex_unlock(&lock);
 }
 
 static void *thread(void *arg) {
@@ -484,15 +547,62 @@ static void *thread(void *arg) {
             continue;
         }
         if (type != 2 || n < 2 || r[0] != 0x00) continue;
-        int ns = r[1];
+        pcm_put(r, n);
+    }
+    return NULL;
+}
 
-        if (2 + 2 * ns > n) ns = (n - 2) / 2;
+/* A test daemon's (another daemon has the chip): each DMR frame through that daemon's port. Rate 33 set at the start,
+ * after the chip restarted, and after an answer missed (another of its clients may have set another rate between
+ * calls); said in the log when that daemon stops answering and when it answers again */
+static void *port_thread(void *arg) {
+    int misses = 0;
+
+    (void)arg;
+    {
+        uint8_t r[340];
+        int     type, n = port_pkt(0, (const uint8_t[]){0x30}, 1, &type, r, sizeof(r), 1000);
+
+        if (n >= 2 && type == 0 && memmem(r + 1, (size_t)(n - 1), "AMBE", 4))
+            snprintf(prod, sizeof(prod), "%.*s", n - 1, (const char *)r + 1);
+        fprintf(stderr, "rtlspec: DMR's frames through the other daemon's AMBE port 127.0.0.1:%d (%s)\n", PORT,
+                prod[0] ? prod : "no answer yet");
+        atomic_store(&ready, true);     /* frames queued for it from now on, answered or not (said in the log) */
+    }
+    chip_rate = -1;
+    for (;;) {
+        uint8_t f[9], q[11] = {0x01, 72}, r[340];
+        int     type, n;
+
         pthread_mutex_lock(&lock);
-        for (int i = 0; i < ns; i++) {
-            if (pcm_w - pcm_r >= PCM) pcm_r++;     /* behind: the oldest goes */
-            pcm[pcm_w++ % PCM] = (int16_t)(r[2 + 2 * i] << 8 | r[3 + 2 * i]);
-        }
+        while (fq_n == 0) pthread_cond_wait(&more, &lock);
+        memcpy(f, fq[fq_r], 9);
+        fq_r = (fq_r + 1) % FRAMES;
+        fq_n--;
         pthread_mutex_unlock(&lock);
+        if (chip_rate != 33) {
+            if ((n = port_pkt(0, (const uint8_t[]){0x09, 33}, 2, &type, r, sizeof(r), 500)) < 2 || type != 0 ||
+                r[0] != 0x09 || r[1] != 0) {
+                if (++misses == 5) fprintf(stderr, "rtlspec: the other daemon's AMBE port does not answer\n");
+                continue;
+            }
+            chip_rate = 33;
+        }
+        memcpy(q + 2, f, 9);
+        n = port_pkt(1, q, sizeof(q), &type, r, sizeof(r), 500);
+        if (n < 0) {
+            chip_rate = -1;
+            if (++misses == 5) fprintf(stderr, "rtlspec: the other daemon's AMBE port does not answer\n");
+            continue;
+        }
+        if (misses >= 5) fprintf(stderr, "rtlspec: the other daemon's AMBE port answers again\n");
+        misses = 0;
+        if (type == 0 && n >= 1 && r[0] == 0x39) {     /* READY: the chip restarted, its power-on rate */
+            chip_rate = -1;
+            continue;
+        }
+        if (type != 2 || n < 2 || r[0] != 0x00) continue;
+        pcm_put(r, n);
     }
     return NULL;
 }
@@ -505,9 +615,12 @@ void ambe_start(void) {
     udp_open();
     if (udp < 0 && udp_err == EADDRINUSE) {
         /* Another daemon serves the chip already (B's, and this a test daemon beside it: -S, -i, RTLSPEC_DMR): its
-         * serial port left alone, as two writers on it wedge the chip (a 0x61 half read). Its DMR here silent; the
-         * dsd-fme modes reach the chip through that daemon's port as ever */
+         * serial port left alone, as two writers on it wedge the chip (a 0x61 half read). DMR's frames go through
+         * that daemon's port (port_thread), as the dsd-fme modes' do; up to 2026-11-18 a test daemon's DMR was
+         * silent */
         fprintf(stderr, "rtlspec: the AMBE vocoder is another daemon's (127.0.0.1:%d in use): not opened here\n", PORT);
+        cli_open();
+        if (cli >= 0 && pthread_create(&t, NULL, port_thread, NULL) == 0) pthread_detach(t);
         return;
     }
     if (pthread_create(&t, NULL, thread, NULL) == 0) pthread_detach(t);
