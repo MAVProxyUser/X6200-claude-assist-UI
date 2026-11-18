@@ -37,6 +37,7 @@ bool gps_phone_fix(double *lat, double *lon, int *age, int *acc);
 #define GPS_SATS 32
 typedef struct {
     short prn, ss;              /* ss: signal, dB-Hz (0: not heard) */
+    short el, az;               /* elevation, azimuth (degrees true); el -99 where gpsd gives none */
     bool  used;
     char  sys;                  /* G GPS, R GLONASS, E Galileo, B BeiDou, Q QZSS, S SBAS, I NavIC, ? */
 } gps_sat_t;

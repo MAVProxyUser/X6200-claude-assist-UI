@@ -3773,29 +3773,56 @@ static const char *pp_label(int k) {
 }
 
 /* ---- The GPS panel, F SYSTEM's GPS (the user, 2026-11-18: "IF GPS is connected there should be a screen to view
- * it's health"): what gpsd reads (gps_health) and the Bluetooth GPS's link (btgps-ctl), each second. F5, BACK, APP
- * or the push closes it ---- */
-#define GP_ROWS 10
-#define GP_STEP 24
-static lv_obj_t *gp_box, *gp_head_l, *gp_row_l[GP_ROWS], *gp_foot_l;
-static bool      gp_on;
+ * it's health ... I want a dedicated panel to see the sat constellation and signal values"): the sky as the GPS sees
+ * it (each satellite where it is, by its system's colour: filled in the fix, a ring heard, a dot not heard), each
+ * one's signal as a bar (the best first, dimmer those not in the fix), and what gpsd says of the fix; each second,
+ * from gps_health and btgps-ctl's link. F5, BACK, APP or the push closes it ---- */
+#define GP_W     (SW - 28)              /* the panel: as the help's frame */
+#define GP_SKY   248                    /* the sky plot, square */
+#define GP_RX    290                    /* the right column */
+#define GP_RW    (GP_W - GP_RX - 12)
+#define GP_BW    20                     /* a bar's room */
+#define GP_BARS  (GP_RW / GP_BW)
+#define GP_BH    100                    /* the bars' height at GP_SS_TOP */
+#define GP_SS_TOP 50                    /* dB-Hz at the top */
+#define GP_INFO  7
+static lv_obj_t     *gp_box, *gp_head_l, *gp_info_l[GP_INFO], *gp_sys_l, *gp_sky_img, *gp_bar_img, *gp_none_l;
+static lv_obj_t     *gp_sky_l[GPS_SATS], *gp_val_l[GP_BARS], *gp_prn_l[GP_BARS];
+static lv_img_dsc_t *gp_sky, *gp_bars;
+static bool          gp_on;
 
-/* The satellites, the best heard first (those in the fix before the rest), from the n-th: "G05 42" each, green in
- * the fix, the tags' colour heard, dim not heard. How many went in */
-static int gp_sats(char *s, size_t sz, gps_health_t *h, int from, int most) {
-    int k = 0;
-
-    s[0] = 0;
-    for (int i = from; i < h->nsat && k < most; i++, k++) {
-        char hex[8];
-
-        if (h->sat[i].used) snprintf(hex, sizeof(hex), "%06X", (unsigned)theme_hex(TC_avail_on));
-        else if (h->sat[i].ss) snprintf(hex, sizeof(hex), "%s", tag_hex);
-        else snprintf(hex, sizeof(hex), "%06X", (unsigned)theme_hex(TC_text_dim));
-        snprintf(s + strlen(s), sz - strlen(s), "#%s %c%02d %2d# ", hex, h->sat[i].sys, h->sat[i].prn % 100,
-                 h->sat[i].ss);
+/* A system's colour (theme roles): GPS green, Galileo yellow, BeiDou red (as the owner's phone shows them), GLONASS
+ * blue, QZSS cyan, SBAS violet */
+static uint32_t gp_hex(char sys) {
+    switch (sys) {
+        case 'G': return theme_hex(TC_avail_on);
+        case 'E': return theme_hex(TC_avail_soon);
+        case 'B': return theme_hex(TC_avail_off);
+        case 'R': return theme_hex(TC_info);
+        case 'Q': return theme_hex(TC_spot);
+        case 'S': return theme_hex(TC_digi);
+        default: return theme_hex(TC_text_dim);
     }
-    return k;
+}
+
+static uint32_t gp_px(uint32_t hex, bool full) {
+    lv_color_t c = lv_color_hex(hex);
+
+    return lv_color_to32(full ? c : lv_color_mix(c, ink, 120)) | 0xff000000;
+}
+
+static void gp_put(uint32_t *px, int w, int h, int x, int y, uint32_t c) {
+    if (x >= 0 && y >= 0 && x < w && y < h) px[y * w + x] = c;
+}
+
+/* A disc (filled) or a ring of radius r */
+static void gp_disc(uint32_t *px, int w, int h, int cx, int cy, int r, bool filled, uint32_t c) {
+    for (int dy = -r; dy <= r; dy++)
+        for (int dx = -r; dx <= r; dx++) {
+            int d = dx * dx + dy * dy;
+
+            if (d <= r * r && (filled || d >= (r - 1) * (r - 1))) gp_put(px, w, h, cx + dx, cy + dy, c);
+        }
 }
 
 static int gp_sat_cmp(const void *a, const void *b) {
@@ -3805,9 +3832,84 @@ static int gp_sat_cmp(const void *a, const void *b) {
     return y->ss - x->ss;
 }
 
+/* The sky: rings at the horizon, 30 and 60 degrees up, the cross through the zenith, each satellite on it */
+static void gp_draw_sky(const gps_health_t *h) {
+    uint32_t *px = (uint32_t *)gp_sky->data, bg = lv_color_to32(ink) | 0xff000000;
+    uint32_t  ring = lv_color_to32(dim) | 0xff000000, cross = lv_color_to32(faint) | 0xff000000;
+    double    c = GP_SKY / 2.0, R = GP_SKY / 2.0 - 8;
+    int       k = 0;
+
+    for (int i = 0; i < GP_SKY * GP_SKY; i++) px[i] = bg;
+    for (int i = (int)(c - R); i <= (int)(c + R); i++) {
+        gp_put(px, GP_SKY, GP_SKY, i, (int)c, cross);
+        gp_put(px, GP_SKY, GP_SKY, (int)c, i, cross);
+    }
+    for (int e = 0; e <= 60; e += 30)
+        for (double a = 0; a < 360; a += e ? 1.5 : 0.75)
+            gp_put(px, GP_SKY, GP_SKY, (int)lround(c + R * (90 - e) / 90 * sin(a * M_PI / 180)),
+                   (int)lround(c - R * (90 - e) / 90 * cos(a * M_PI / 180)), ring);
+    for (int i = 0; i < h->nsat && i < GPS_SATS; i++) {
+        const gps_sat_t *s = &h->sat[i];
+
+        if (s->el < 0 || s->el > 90) continue;      /* not placed (no position of it yet), or below the horizon */
+        double r = R * (90 - s->el) / 90;
+        int    x = (int)lround(c + r * sin(s->az * M_PI / 180)), y = (int)lround(c - r * cos(s->az * M_PI / 180));
+        uint32_t col = gp_px(gp_hex(s->sys), true);
+
+        if (s->used) gp_disc(px, GP_SKY, GP_SKY, x, y, 6, true, col);
+        else if (s->ss) gp_disc(px, GP_SKY, GP_SKY, x, y, 6, false, col);
+        else gp_disc(px, GP_SKY, GP_SKY, x, y, 2, true, col);
+        if (k < GPS_SATS) {
+            lv_obj_set_pos(gp_sky_l[k], 16 + x + 8, 40 + y - 8);
+            lv_obj_set_style_text_color(gp_sky_l[k], lv_color_hex(gp_hex(s->sys)), 0);
+            lv_label_set_text_fmt(gp_sky_l[k], "%c%d", s->sys, s->prn % 100);
+            lv_obj_clear_flag(gp_sky_l[k], LV_OBJ_FLAG_HIDDEN);
+            k++;
+        }
+    }
+    for (; k < GPS_SATS; k++) lv_obj_add_flag(gp_sky_l[k], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_invalidate(gp_sky_img);
+}
+
+/* The signals: a bar each, the best first (those in the fix before the rest), its dB-Hz over it, its satellite
+ * under it; a grid line every 10 dB-Hz */
+static void gp_draw_bars(const gps_health_t *h) {
+    uint32_t *px = (uint32_t *)gp_bars->data, bg = lv_color_to32(ink) | 0xff000000;
+    uint32_t  grid = lv_color_to32(faint) | 0xff000000;
+    int       n = h->nsat < GP_BARS ? h->nsat : GP_BARS;
+
+    for (int i = 0; i < GP_RW * GP_BH; i++) px[i] = bg;
+    for (int db = 10; db <= GP_SS_TOP; db += 10)
+        for (int x = 0; x < GP_RW; x += 2) gp_put(px, GP_RW, GP_BH, x, GP_BH - 1 - db * (GP_BH - 1) / GP_SS_TOP, grid);
+    for (int i = 0; i < GP_BARS; i++) {
+        if (i >= n) {
+            lv_obj_add_flag(gp_val_l[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(gp_prn_l[i], LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        const gps_sat_t *s   = &h->sat[i];
+        int              top = s->ss > GP_SS_TOP ? GP_BH : s->ss * GP_BH / GP_SS_TOP;
+        uint32_t         col = gp_px(gp_hex(s->sys), s->used);
+        lv_color_t       tc  = lv_color_hex(gp_hex(s->sys));
+
+        for (int y = GP_BH - top; y < GP_BH; y++)
+            for (int x = i * GP_BW + 3; x < (i + 1) * GP_BW - 3; x++) gp_put(px, GP_RW, GP_BH, x, y, col);
+        lv_label_set_text_fmt(gp_val_l[i], "%d", s->ss);
+        lv_obj_set_y(gp_val_l[i], 214 + GP_BH - top - 18);
+        lv_obj_set_style_text_color(gp_val_l[i], s->used ? tc : lv_color_mix(tc, ink, 150), 0);
+        lv_label_set_text_fmt(gp_prn_l[i], "%c\n%02d", s->sys, s->prn % 100);
+        lv_obj_set_style_text_color(gp_prn_l[i], s->used ? tc : lv_color_mix(tc, ink, 150), 0);
+        lv_obj_clear_flag(gp_val_l[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(gp_prn_l[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_invalidate(gp_bar_img);
+}
+
 static void gp_fill(void) {
+    static const char sys_order[] = "GRESBQI";
+    static const char *const sys_name[] = {"GPS", "GLO", "GAL", "BDS", "SBAS", "QZSS", "NAVIC"};
     gps_health_t h;
-    char         mac[24], name[64], st[16], t[GP_ROWS][320], head[160], s[64];
+    char         mac[24], name[64], st[16], t[GP_INFO][128], head[160], s[64], sy[400] = "";
     const char  *src = "";
     double       plat, plon;
     bool         bt, have = station_position(&plat, &plon, &src);
@@ -3819,95 +3921,88 @@ static void gp_fill(void) {
     for (char *c = st; *c; c++) *c = (char)toupper((unsigned char)*c);
     for (char *c = name; *c; c++) *c = (char)toupper((unsigned char)*c);
     bt = mac[0] && (!h.path[0] || !strncmp(h.path, "/dev/pts/", 9));
-    for (int r = 0; r < GP_ROWS; r++) t[r][0] = 0;
+    for (int r = 0; r < GP_INFO; r++) t[r][0] = 0;
 
     if (mac[0])
-        snprintf(t[0], sizeof(t[0]), "LINK       BLUETOOTH %s %s: %s", name[0] ? name : "GPS", mac,
-                 !strcmp(st, "TRYING") ? "TRYING (SWITCHED OFF OR OUT OF RANGE?)" : st[0] ? st : "NOT STARTED");
+        snprintf(t[0], sizeof(t[0]), "LINK  BLUETOOTH, %s", !strcmp(st, "TRYING") ? "TRYING (OFF OR OUT OF RANGE?)" :
+                 st[0] ? st : "NOT STARTED");
     else if (h.reporting)
-        snprintf(t[0], sizeof(t[0]), "LINK       USB, %s", h.path);
+        snprintf(t[0], sizeof(t[0]), "LINK  USB");
     else
-        snprintf(t[0], sizeof(t[0]), "LINK       NONE: A GPS ON USB, OR A BLUETOOTH ONE (SETTINGS > BLUETOOTH)");
+        snprintf(t[0], sizeof(t[0]), "LINK  NONE: ON USB, OR BLUETOOTH (SETTINGS > BLUETOOTH)");
     if (h.reporting)
-        snprintf(t[1], sizeof(t[1]), "GPSD       READS %s%s%s%s, %.1f %s A SECOND, LAST %.1f S AGO", h.path,
-                 h.driver[0] ? " (" : "", h.driver, h.driver[0] ? ")" : "", h.rate > 0 ? h.rate : h.reports,
-                 h.rate > 0 ? "POSITIONS" : "REPORTS", h.report_age_ms / 1000.0);
-    else if (h.report_age_ms >= 0)
-        snprintf(t[1], sizeof(t[1]), "GPSD       NOTHING FOR %d S (GPSD %s)", h.report_age_ms / 1000,
-                 gps_status() == GPS_STATUS_WORKING ? "THERE" : "NOT ANSWERING");
+        snprintf(t[1], sizeof(t[1]), "GPSD  %s%s%s, %.1f %s/S, %.1f S AGO", h.path, h.driver[0] ? " " : "", h.driver,
+                 h.rate > 0 ? h.rate : h.reports, h.rate > 0 ? "FIXES" : "REPORTS", h.report_age_ms / 1000.0);
     else
-        snprintf(t[1], sizeof(t[1]), "GPSD       NO REPORT YET (GPSD %s)",
-                 gps_status() == GPS_STATUS_WORKING ? "THERE" : "NOT ANSWERING");
-    if (h.reporting) {
-        snprintf(t[2], sizeof(t[2]), "FIX        %s, %d OF %d SATELLITES USED", h.mode == 3 ? "3D" : h.mode == 2 ? "2D" :
-                 "NONE YET", h.used, h.seen);
-        if (isfinite(h.hdop) && h.mode >= 2)
-            snprintf(t[2] + strlen(t[2]), sizeof(t[2]) - strlen(t[2]), "   HDOP %.1f%s", h.hdop,
-                     h.hdop <= 1.5 ? " GOOD" : h.hdop <= 4 ? " FAIR" : " POOR");
-        if (isfinite(h.pdop) && h.mode >= 2)
-            snprintf(t[2] + strlen(t[2]), sizeof(t[2]) - strlen(t[2]), "   PDOP %.1f", h.pdop);
-        if (h.mode == 3 && isfinite(h.eph) && isfinite(h.epv))
-            snprintf(t[3], sizeof(t[3]), "ACCURACY   ABOUT %.0f M ACROSS, %.0f M UP (GPSD'S ESTIMATE)", h.eph, h.epv);
-        else if (h.mode >= 2 && isfinite(h.eph))
-            snprintf(t[3], sizeof(t[3]), "ACCURACY   ABOUT %.0f M ACROSS (GPSD'S ESTIMATE)", h.eph);
-        else
-            snprintf(t[3], sizeof(t[3]), "ACCURACY   - (NO FIX)");
-    }
+        snprintf(t[1], sizeof(t[1]), "GPSD  %s (%s)", h.report_age_ms >= 0 ? "NOTHING NOW" : "NO REPORT YET",
+                 gps_status() == GPS_STATUS_WORKING ? "GPSD THERE" : "GPSD NOT ANSWERING");
+    snprintf(t[2], sizeof(t[2]), "FIX   %s, %d OF %d USED", h.mode == 3 ? "3D" : h.mode == 2 ? "2D" : "NONE YET", h.used,
+             h.seen);
+    if (h.mode >= 2 && isfinite(h.hdop))
+        snprintf(t[2] + strlen(t[2]), sizeof(t[2]) - strlen(t[2]), ", HDOP %.1f %s", h.hdop,
+                 h.hdop <= 1.5 ? "GOOD" : h.hdop <= 4 ? "FAIR" : "POOR");
+    if (h.mode >= 2 && isfinite(h.pdop))
+        snprintf(t[2] + strlen(t[2]), sizeof(t[2]) - strlen(t[2]), ", PDOP %.1f", h.pdop);
+    if (h.mode == 3 && isfinite(h.eph) && isfinite(h.epv))
+        snprintf(t[3], sizeof(t[3]), "ERROR ABOUT %.0f M ACROSS, %.0f M UP (GPSD'S GUESS)", h.eph, h.epv);
+    else if (h.mode >= 2 && isfinite(h.eph))
+        snprintf(t[3], sizeof(t[3]), "ERROR ABOUT %.0f M ACROSS (GPSD'S GUESS)", h.eph);
+    else
+        snprintf(t[3], sizeof(t[3]), "ERROR -");
     if (isfinite(h.lat) && isfinite(h.lon)) {
         char grid[16] = "";
 
         qth_pos_to_str(h.lat, h.lon, grid);
-        snprintf(t[4], sizeof(t[4]), "POSITION   %.5f %c  %.5f %c   GRID %s", fabs(h.lat), h.lat < 0 ? 'S' : 'N',
-                 fabs(h.lon), h.lon < 0 ? 'W' : 'E', grid);
-        if (isfinite(h.alt))
-            snprintf(t[4] + strlen(t[4]), sizeof(t[4]) - strlen(t[4]), "   %.0f M UP", h.alt);
+        snprintf(t[4], sizeof(t[4]), "AT    %.5f %c %.5f %c  %s", fabs(h.lat), h.lat < 0 ? 'S' : 'N', fabs(h.lon),
+                 h.lon < 0 ? 'W' : 'E', grid);
+        if (isfinite(h.alt)) snprintf(t[4] + strlen(t[4]), sizeof(t[4]) - strlen(t[4]), "  %.0f M", h.alt);
         if (h.fix_age_ms > 5000)
-            snprintf(t[4] + strlen(t[4]), sizeof(t[4]) - strlen(t[4]), "   (%d S OLD)", h.fix_age_ms / 1000);
-    } else if (h.reporting) {
-        snprintf(t[4], sizeof(t[4]), "POSITION   NONE YET: IT NEEDS OPEN SKY (A WINDOW AT LEAST)");
-        snprintf(t[5], sizeof(t[5]), "           A FIRST FIX CAN TAKE A FEW MINUTES; ITS TIME COMES FIRST");
+            snprintf(t[4] + strlen(t[4]), sizeof(t[4]) - strlen(t[4]), " (%d S OLD)", h.fix_age_ms / 1000);
+    } else {
+        snprintf(t[4], sizeof(t[4]), "AT    NO FIX YET: IT NEEDS OPEN SKY (MINUTES AT FIRST)");
     }
-    if (h.reporting && h.mode >= 2 && isfinite(h.speed))
-        snprintf(t[5], sizeof(t[5]), h.speed < 0.5 ? "MOVING     STANDING STILL (UNDER 2 KM/H)" :
-                 "MOVING     %.0f KM/H, HEADING %.0f DEG", h.speed * 3.6, isfinite(h.track) ? h.track : 0.0);
     if (h.utc > 0) {
         time_t    u = (time_t)h.utc;
         struct tm g;
 
         gmtime_r(&u, &g);
         strftime(s, sizeof(s), "%Y-%m-%d %H:%M:%S UTC", &g);
-        snprintf(t[6], sizeof(t[6]), "TIME       %s, THE GPS'S OWN", s);
-    } else if (h.reporting) {
-        snprintf(t[6], sizeof(t[6]), "TIME       NONE YET (IT COMES WITH THE FIRST SATELLITES)");
-    }
-    if (h.nsat) {
-        char a[200], b[200];
-        int  n1 = gp_sats(a, sizeof(a), &h, 0, 9), n2 = gp_sats(b, sizeof(b), &h, n1, 9);
-
-        snprintf(t[7], sizeof(t[7]), "SATELLITES %s", a);
-        if (n2) snprintf(t[8], sizeof(t[8]), "           %s%s", b, n1 + n2 < h.nsat ? "AND MORE" : "");
-    } else if (h.reporting) {
-        snprintf(t[7], sizeof(t[7]), "SATELLITES NONE HEARD YET");
+        snprintf(t[5], sizeof(t[5]), "TIME  %s", s);
+        if (h.mode >= 2 && isfinite(h.speed))
+            snprintf(t[5] + strlen(t[5]), sizeof(t[5]) - strlen(t[5]), h.speed < 0.5 ? "  STILL" : "  %.0f KM/H %.0f DEG",
+                     h.speed * 3.6, isfinite(h.track) ? h.track : 0.0);
+    } else {
+        snprintf(t[5], sizeof(t[5]), "TIME  NONE YET (GPSD GIVES IT WITH A FIX)");
     }
     if (have && !strcmp(src, "GPS"))
-        snprintf(t[9], sizeof(t[9]), "USED FOR   AIRSPACE, PAGE I, THE GRIDS (FT8, JS8, WSPR), C/D'S SUN, WEATHER, NTP");
-    else if (have)
-        snprintf(t[9], sizeof(t[9]), "USED FOR   NOTHING YET: THE APPS USE %s TILL THE GPS HAS A FIX",
-                 !strcmp(src, "Phone") ? "THE PHONE'S POSITION" : "THE LOCATOR");
+        snprintf(t[6], sizeof(t[6]), "USES  AIRSPACE, PAGE I, GRIDS, C/D SUN, WEATHER, NTP");
     else
-        snprintf(t[9], sizeof(t[9]), "USED FOR   NOTHING YET: NO FIX, NO LOCATOR SET (SETTINGS > GENERAL)");
+        snprintf(t[6], sizeof(t[6]), "USES  NONE YET: THE APPS USE %s", !have ? "NOTHING (NO LOCATOR SET)" :
+                 !strcmp(src, "Phone") ? "THE PHONE'S POSITION" : "THE LOCATOR");
+    for (int r = 0; r < GP_INFO; r++) lv_label_set_text(gp_info_l[r], t[r]);
+
+    for (int k = 0; k < (int)sizeof(sys_order) - 1; k++) {      /* each system's satellites: used of seen */
+        int seen = 0, used = 0;
+
+        for (int i = 0; i < h.nsat; i++)
+            if (h.sat[i].sys == sys_order[k]) seen++, used += h.sat[i].used;
+        if (seen)
+            snprintf(sy + strlen(sy), sizeof(sy) - strlen(sy), "#%06X %s %d/%d#  ", (unsigned)gp_hex(sys_order[k]),
+                     sys_name[k], used, seen);
+    }
+    lv_label_set_text(gp_sys_l, sy[0] ? sy : "NO SATELLITES IN VIEW YET");
 
     if (!h.reporting && !mac[0])
         snprintf(head, sizeof(head), "GPS: NONE REPORTING");
     else
-        snprintf(head, sizeof(head), "GPS: %s%s%s", h.reporting ? (h.mode == 3 ? "3D FIX" : h.mode == 2 ? "2D FIX" :
-                 "NO FIX YET") : "NOT REPORTING", bt ? ", BLUETOOTH " : h.reporting ? ", USB" : "",
-                 bt ? (name[0] ? name : mac) : "");
+        snprintf(head, sizeof(head), "GPS: %s%s%s%s%s", h.reporting ? (h.mode == 3 ? "3D FIX" : h.mode == 2 ? "2D FIX" :
+                 "NO FIX YET") : "NOT REPORTING", bt ? "   BLUETOOTH " : h.reporting ? "   USB " : "",
+                 bt ? (name[0] ? name : "GPS") : h.reporting ? h.path : "", bt ? " " : "", bt ? mac : "");
     lv_label_set_text(gp_head_l, head);
-    for (int r = 0; r < GP_ROWS; r++) lv_label_set_text(gp_row_l[r], t[r]);
-    lv_label_set_text_fmt(gp_foot_l, "SATELLITES: #%06X IN THE FIX#, #%s HEARD#, #%06X NOT HEARD#; THEIR SIGNAL IN DB-HZ",
-                          (unsigned)theme_hex(TC_avail_on), tag_hex,
-                          (unsigned)theme_hex(TC_text_dim));
+    gp_draw_sky(&h);
+    gp_draw_bars(&h);
+    if (h.nsat) lv_obj_add_flag(gp_none_l, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_clear_flag(gp_none_l, LV_OBJ_FLAG_HIDDEN);
 }
 
 static const char *gp_label(int k) {
@@ -10013,17 +10108,50 @@ static void build_overlays(void) {
     lv_obj_add_flag(pp_box, LV_OBJ_FLAG_HIDDEN);
     pp_on = false;
 
-    gp_box = rect(root, 30, 56, SW - 60, 50 + GP_ROWS * GP_STEP + 44, 3, false);
+    gp_box = rect(root, 14, 52, GP_W, scr_h - 56, 3, false);
     lv_obj_add_flag(gp_box, LV_OBJ_FLAG_CLICKABLE);
-    gp_head_l = label(gp_box, &pixel_20, amb, 12, 12, SW - 90, LV_TEXT_ALIGN_LEFT, "");
-    for (int r = 0; r < GP_ROWS; r++) {
-        gp_row_l[r] = label(gp_box, &pixel_20, amb, 9, 50 + r * GP_STEP, SW - 84, LV_TEXT_ALIGN_LEFT, "");
-        lv_label_set_recolor(gp_row_l[r], true);            /* the satellites in the fix, heard, not heard */
-        lv_label_set_long_mode(gp_row_l[r], LV_LABEL_LONG_CLIP);
-        lv_obj_set_height(gp_row_l[r], GP_STEP);
+    gp_head_l = label(gp_box, &pixel_20, amb, 12, 8, GP_W - 30, LV_TEXT_ALIGN_LEFT, "");
+    gp_sky    = lv_img_buf_alloc(GP_SKY, GP_SKY, LV_IMG_CF_TRUE_COLOR);
+    gp_sky_img = lv_img_create(gp_box);
+    lv_img_set_src(gp_sky_img, gp_sky);
+    lv_obj_set_pos(gp_sky_img, 16, 40);
+    {                                   /* the sky's directions and its rings' elevations */
+        static const char *const dir[] = {"N", "E", "S", "W"};
+        const int xs[] = {16 + GP_SKY / 2 - 4, 16 + GP_SKY + 2, 16 + GP_SKY / 2 - 4, 4};
+        const int ys[] = {30, 40 + GP_SKY / 2 - 8, 40 + GP_SKY - 4, 40 + GP_SKY / 2 - 8};
+        const int R    = GP_SKY / 2 - 8;    /* as gp_draw_sky's */
+
+        for (int i = 0; i < 4; i++) label(gp_box, &pixel_16, amb, xs[i], ys[i], 12, LV_TEXT_ALIGN_LEFT, dir[i]);
+        label(gp_box, &pixel_16, dim, 16 + GP_SKY / 2 + 3, 40 + GP_SKY / 2 - R / 3 - 16, 30, LV_TEXT_ALIGN_LEFT, "60");
+        label(gp_box, &pixel_16, dim, 16 + GP_SKY / 2 + 3, 40 + GP_SKY / 2 - 2 * R / 3 - 16, 30, LV_TEXT_ALIGN_LEFT, "30");
     }
-    gp_foot_l = label(gp_box, &pixel_20, amb, 12, 50 + GP_ROWS * GP_STEP + 8, SW - 90, LV_TEXT_ALIGN_LEFT, "");
-    lv_label_set_recolor(gp_foot_l, true);
+    for (int k = 0; k < GPS_SATS; k++) {
+        gp_sky_l[k] = label(gp_box, &pixel_16, amb, 0, 0, 40, LV_TEXT_ALIGN_LEFT, "");
+        lv_obj_add_flag(gp_sky_l[k], LV_OBJ_FLAG_HIDDEN);
+    }
+    label(gp_box, &pixel_16, dim, 12, 40 + GP_SKY + 16, GP_RX - 20, LV_TEXT_ALIGN_LEFT,
+          "FILLED: IN THE FIX   RING: HEARD\nDOT: NOT HEARD   CENTRE: OVERHEAD");
+    for (int r = 0; r < GP_INFO; r++) gp_info_l[r] = label(gp_box, &pixel_16, amb, GP_RX, 40 + r * 18, GP_RW, LV_TEXT_ALIGN_LEFT, "");
+    gp_sys_l = label(gp_box, &pixel_16, amb, GP_RX, 40 + GP_INFO * 18 + 6, GP_RW, LV_TEXT_ALIGN_LEFT, "");
+    lv_label_set_recolor(gp_sys_l, true);
+    lv_label_set_long_mode(gp_sys_l, LV_LABEL_LONG_CLIP);
+    lv_obj_set_height(gp_sys_l, 18);
+    for (int r = 0; r < GP_INFO; r++) {
+        lv_label_set_long_mode(gp_info_l[r], LV_LABEL_LONG_CLIP);
+        lv_obj_set_height(gp_info_l[r], 18);
+    }
+    gp_bars    = lv_img_buf_alloc(GP_RW, GP_BH, LV_IMG_CF_TRUE_COLOR);
+    gp_bar_img = lv_img_create(gp_box);
+    lv_img_set_src(gp_bar_img, gp_bars);
+    lv_obj_set_pos(gp_bar_img, GP_RX, 214);
+    for (int i = 0; i < GP_BARS; i++) {
+        gp_val_l[i] = label(gp_box, &pixel_16, amb, GP_RX + i * GP_BW - 2, 214, GP_BW + 4, LV_TEXT_ALIGN_CENTER, "");
+        gp_prn_l[i] = label(gp_box, &pixel_16, amb, GP_RX + i * GP_BW - 2, 214 + GP_BH + 2, GP_BW + 4, LV_TEXT_ALIGN_CENTER, "");
+        lv_obj_add_flag(gp_val_l[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(gp_prn_l[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    gp_none_l = label(gp_box, &pixel_20, dim, GP_RX, 214 + GP_BH / 2 - 10, GP_RW, LV_TEXT_ALIGN_CENTER,
+                      "NO SATELLITES HEARD YET");
     lv_obj_add_flag(gp_box, LV_OBJ_FLAG_HIDDEN);
     gp_on = false;
 

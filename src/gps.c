@@ -165,6 +165,8 @@ static void health_take(void) {
         health.sat[n].prn  = v->PRN;
         health.sat[n].ss   = isfinite(v->ss) && v->ss > 0 ? (short)lround(v->ss) : 0;
         health.sat[n].used = v->used;
+        health.sat[n].el   = isfinite(v->elevation) ? (short)lround(v->elevation) : -99;
+        health.sat[n].az   = isfinite(v->azimuth) ? (short)lround(v->azimuth) : 0;
         health.sat[n].sys  = v->gnssid < sizeof(sys) ? sys[v->gnssid] : '?';
         n++;
     }

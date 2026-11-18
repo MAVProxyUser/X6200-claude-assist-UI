@@ -1233,22 +1233,26 @@ written through to the card before it replaces the last copy, so a power cut kee
 
 #### The GPS panel
 
-F SYSTEM > **GPS** shows how the GPS gpsd reads is doing (one on USB, or a
-[Bluetooth GPS](#a-bluetooth-gps)), each second; F5, BACK, APP or the MFK's push closes it. While a GPS reports,
-every title bar says **GPS** (**GPS NO FIX** till it has one).
+F SYSTEM > **GPS** (F2 or the MFK's push) shows the GPS gpsd reads (one on USB, or a
+[Bluetooth GPS](#a-bluetooth-gps)) and how it is doing, each second; F5, BACK, APP or the push closes it. While a
+GPS reports, every title bar says **GPS** (**GPS NO FIX** till it has one).
 
-- **LINK**: the Bluetooth GPS's name and address and its link (CONNECTED, TRYING: switched off or out of range), or
-  the USB port, or NONE.
-- **GPSD**: the device gpsd reads (`/dev/pts/N` for the Bluetooth one), its driver, how many positions a second
-  (before the first fix, its reports a second), and how long ago the last came.
-- **FIX**: none, 2D or 3D, the satellites used of those in view, HDOP (GOOD to 1.5, FAIR to 4, else POOR) and PDOP.
-- **ACCURACY**: gpsd's estimate of the error, across and up, in metres.
-- **POSITION**, the grid and the height; **MOVING**: the speed and heading, or standing still; **TIME**: the
-  GPS's own clock.
-- **SATELLITES**: each by system and number (G GPS, R GLONASS, E Galileo, B BeiDou, Q QZSS, S SBAS) with its
-  signal in dB-Hz, the best first: green those in the fix, orange those heard, dim those not heard.
-- **USED FOR**: what takes its position now (AIRSPACE's centre, page I, the FT8, JS8 and WSPR grids, C and D's
-  sun, the weather, and NTP's clock), or what the apps use till it has a fix (the phone's position, the locator).
+- **The sky**, on the left, as the GPS sees it: the centre overhead, the rings 60 and 30 degrees up and the
+  horizon, north at the top. Each satellite where it is, in its system's colour (GPS green, Galileo yellow, BeiDou
+  red, GLONASS blue, QZSS cyan, SBAS violet) with its number: filled in the fix, a ring heard but not used, a dot
+  not heard.
+- **The signals**, bottom right: a bar for each satellite, the best first (those in the fix before the rest, dimmer
+  those not in it), its signal in dB-Hz over it (the lines every 10, up to 50) and its system and number under it.
+- Over them, each system's satellites used of those in view (`GPS 9/12  GLO 4/7 ...`), and gpsd's words:
+  - **LINK**: Bluetooth (CONNECTED, TRYING: switched off or out of range) or USB, or NONE;
+  - **GPSD**: the device it reads (`/dev/pts/N` for the Bluetooth one), its driver, its fixes a second (before the
+    first fix, its reports a second) and how long ago the last came;
+  - **FIX**: none, 2D or 3D, the satellites used of those in view, HDOP (GOOD to 1.5, FAIR to 4, else POOR), PDOP;
+  - **ERROR**: gpsd's guess of it, across and up, in metres;
+  - **AT**: the position, the grid and the height;
+  - **TIME**: the GPS's own clock, and the speed and heading (or STILL);
+  - **USES**: what takes its position now (AIRSPACE's centre, page I, the FT8, JS8 and WSPR grids, C and D's sun,
+    the weather, and NTP's clock), or what the apps use till it has a fix (the phone's position, the locator).
 
 ### G WALKIE
 
