@@ -84,4 +84,13 @@ every app and every Sentry page on both through the remote (`apps`, `open`, `clo
 each picture's colours: cyan, blue or purple (an old theme's accents) is flagged, the Sentry's warm gradient and
 green status words are not. On the X6100 it presses the MFK and turns the main dial through the remote and checks
 the page moved and the dial did not (the stand-in for the X6200's inner ring). The hardware batches run the
-harness's own tests (`rtl`: AIRSPACE on both; `cable`: `radios-ft8` both ways).
+harness's own tests: `rtl` (AIRSPACE on both for 90 s, photographed), `cable` (`radios-ft8 --rx-alike` both ways:
+test callsigns set and any ATU off first, all put back after; the cable's `chain-ok` first), `update` (each
+radio's `x6100-update check`: the newest release for its model; nothing downloaded or installed).
+
+    suite.py align x6200 x6100           # the X6200's look-and-behaviour settings and time zone onto the X6100
+    suite.py align x6200 x6100 --undo FILE
+
+`align` writes the settings core lists as different into the second radio's params.db with its GUI stopped (a GUI
+writes its own back as it ends) and copies `/mnt/tz.conf`; the second radio's values before are kept in the run's
+folder for `--undo`.

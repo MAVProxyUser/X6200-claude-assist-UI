@@ -383,16 +383,51 @@ def rtl(run, only):
 
 
 def cable(run, only):
-    """radios-ft8 both ways, the receivers set alike first (preamp and attenuator off) and put back"""
+    """radios-ft8 both ways with the receivers alike, at 0.1 W: test callsigns set first and any ATU off (it tunes by
+    transmitting), all put back after"""
     run.close()
     run.radios = {}
-    for tx, rx in (("x6100", "x6200"), ("x6200", "x6100")):
-        cmd = [sys.executable, "-B", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench.py"),
-               "radios-ft8", tx, rx, "--band", "20m"]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        out = (r.stdout + r.stderr).strip().splitlines()
-        run.result("cable", f"ft8 {tx}->{rx}", r.returncode == 0 and any("PASS" in x for x in out),
-                   " | ".join(x.split(" ", 1)[-1] for x in out[-3:]))
+
+    class A:
+        pass
+
+    calls, atu = {}, {}
+    try:
+        for n, call in zip(run.names, ("Q1TST", "Q2TST")):
+            a = A()
+            a.name, a.call = n, call
+            bench.cmd_testcall(run.c, a)
+            calls[n] = True
+        time.sleep(15)                                  # the GUIs started again
+        for n in run.names:
+            r = bench.Radio(n, run.c["radios"][n], want_tx=True)
+            time.sleep(1)
+            r.take_control()
+            atu[n] = r.state.get("atu")
+            if atu[n]:
+                r.send("set atu 0")
+                r.wait("ATU off", lambda r=r: not r.state.get("atu"), 5)
+            r.close()
+        for tx, rx in ((run.names[0], run.names[1]), (run.names[1], run.names[0])):
+            cmd = [sys.executable, "-B", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench.py"),
+                   "radios-ft8", tx, rx, "--band", "20m", "--rx-alike"]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            out = (r.stdout + r.stderr).strip().splitlines()
+            run.result("cable", f"ft8 {tx}->{rx}", r.returncode == 0 and any("PASS" in x for x in out),
+                       " | ".join(x.split(" ", 1)[-1] for x in out[-3:]))
+    finally:
+        for n in calls:
+            a = A()
+            a.name, a.call = n, "restore"
+            bench.cmd_testcall(run.c, a)
+        time.sleep(15)
+        for n, was in atu.items():
+            if was:
+                r = bench.Radio(n, run.c["radios"][n], want_tx=True)
+                time.sleep(1)
+                r.take_control()
+                r.send("set atu 1")
+                r.close()
 
 
 def align(names, src, dst, undo=None):
@@ -420,17 +455,41 @@ def align(names, src, dst, undo=None):
         say("nothing to align")
         return 0
     script = "".join(sql)
-    ssh(run, dst, f"/etc/init.d/S95gui stop >/dev/null 2>&1; sqlite3 /mnt/params.db \"{script}\"; "
+    # the time zone too: the clock's POSIX TZ string, /mnt/tz.conf (clock.c), not a params row
+    tz = "" if undo else ssh(run, src, "cat /mnt/tz.conf 2>/dev/null").strip()
+    script_tz = f"echo '{tz}' > /mnt/tz.conf; " if tz and re.fullmatch(r"[A-Za-z0-9<>+\-:,./]+", tz) else ""
+    ssh(run, dst, f"/etc/init.d/S95gui stop >/dev/null 2>&1; {script_tz}sqlite3 /mnt/params.db \"{script}\"; "
                   f"/etc/init.d/S95gui start >/dev/null 2>&1", timeout=120)
+    if script_tz:
+        say(f"{dst}: time zone {tz}")
     for r in rows:
         say(f"{dst}: {r['name']} {r['was']} -> {r['to']}")
     return 0
+
+
+def update(run, only):
+    """Each radio's updater asked what is newest (x6100-update check: it reads, changes nothing): the newest release
+    for its model, newer than what runs, and whether that one wants a card image"""
+    seen = {}
+    for n in run.names:
+        try:
+            j = json.loads(ssh(run, n, "x6100-update check", timeout=180).strip().splitlines()[-1])
+        except (bench.Refused, ValueError, IndexError) as e:
+            run.result("update", "check", False, f"{n}: {e}", radio=n)
+            continue
+        seen[n] = j.get("latest")
+        run.result("update", "check", bool(j.get("url")),
+                   f"{n}: running {j.get('running')}, latest {j.get('latest')} (newer {j.get('newer')}, "
+                   f"card image needed {j.get('image_needed')}), {j.get('url') or 'no bundle for it'}", radio=n)
+    if len(seen) == 2:
+        run.result("update", "same-latest", len(set(seen.values())) == 1, f"the newest each is offered: {seen}")
 
 
 BATCHES = {
     "core": ("both radios on the network", core),
     "rtl": ("an RTL-SDR on each HOST port, antennas side by side", rtl),
     "cable": ("the radios joined through >= 60 dB (bench.py chain-ok radios), test callsigns", cable),
+    "update": ("a release published (the updater's check on each radio; nothing installed)", update),
 }
 
 
