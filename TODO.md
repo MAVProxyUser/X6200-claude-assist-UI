@@ -30,6 +30,12 @@ approved that day.
     learned in the other modes (dsp.cpp psd_meter): an X6100 AM over now reads -117 -> -69 dBm on 10 m;
   - the X6200's reports to a page (meter, spectrum, state) stall for seconds now and then, and an A/B tap over WiFi
     is missed now and then (the remote's key press and release).
+- The X6100's processor temperature sensor (2026-11-19, the owner's heater run: 16 min at 5 readings a second, a
+  heater on both radios from 35 s): its raw values sit on round binary steps around mid-scale (2048, 2176, 2240, 1984,
+  2016: 0x800, 0x880, 0x8C0, 0x7C0, 0x7E0), the ADC's conversion not settling, not a temperature with noise; a 30 s
+  median, a 60 s mean and a Kalman filter followed which steps came up, not the heat. The X6200's in steps of one
+  (2031-2036), 59.8 -> 60.2 °C under the heater (the processor's own heat rules it). Fixed by leaving the driver out
+  of the X6100's kernel (fbe9d59c, v0.3.12.35).
 - The X6100 switches off at a restart (x6x00-reboot, a plain reboot there; 2026-11-19 after its update, the owner
   switched it on): the X6200's fix is its base's "s" left out, the X6100's base has no such word. Likely the base's
   control lines the GUI holds (bb_reset among them) let go while the processor resets, the base restarting off;
