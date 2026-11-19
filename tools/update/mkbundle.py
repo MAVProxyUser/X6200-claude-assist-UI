@@ -20,6 +20,7 @@ Copyright (c) 2026 Joeri Van Dooren ON6URE / Guru-RF
 import argparse
 import ast
 import hashlib
+import struct
 import io
 import json
 import os
@@ -63,9 +64,83 @@ LIB_FILES = ["/usr/lib/libft8.so"]
 SDR_FILES = ["/usr/bin/x6x00-rtlspec", "/usr/lib/libbladeRF.so.2", "/usr/bin/dsd-fme",
              "/usr/bin/x6x00-df"]      # the KrakenSDR's direction finder (page I), from the same package
 SKIP_PREFIXES = ("/usr/include/",)       # the GUI package installs headers too
+# The image's own packages that a card of before them lacks, carried whole (the owner, 2026-11-19: "I should not have
+# to write this to the card myself"): Mesa (the GPU drawing the screen, the X6100's card v0.3.12.28 had none),
+# GStreamer and its plugins (the boot video in hardware), ffmpeg (the Internet radio's AAC, Ogg, Opus, FLAC and HLS).
+# Their files from buildroot's packages-file-list.txt (--packages-file-list), the libraries and programs only (the
+# folders every updater writes), and every library they load from /usr/lib, followed (DT_NEEDED): the same buildroot
+# built every card, so a library a card has already is the same one. The C library's, in /lib, are every card's
+CARRY_PKGS = ("mesa3d", "gstreamer1", "gst1-plugins-base", "gst1-plugins-good", "gst1-plugins-bad", "ffmpeg")
+CARRY_DIRS = ("/usr/lib/", "/usr/bin/")
+CARRY_SKIP = ("/usr/lib/pkgconfig/", "/usr/lib/cmake/", "/usr/lib/gstreamer-1.0/include/")
 UBOOT = "u-boot-sunxi-with-spl.bin"
 UBOOT_OFFSET = 8 * 1024                  # genimage's u-boot partition: offset 8K, size 1016K
 UBOOT_AREA = 1016 * 1024
+
+
+def elf_needed(path):
+    """The libraries an ELF file loads (its DT_NEEDED names), [] for a file that is not one"""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return []
+    if data[:4] != b"\x7fELF":
+        return []
+    is64, le = data[4] == 2, data[5] == 1
+    e = "<" if le else ">"
+    if is64:
+        phoff, phentsize, phnum = struct.unpack_from(e + "Q", data, 32)[0], *struct.unpack_from(e + "HH", data, 54)
+    else:
+        phoff, phentsize, phnum = struct.unpack_from(e + "I", data, 28)[0], *struct.unpack_from(e + "HH", data, 42)
+    loads, dyn = [], None
+    for i in range(phnum):
+        o = phoff + i * phentsize
+        if is64:
+            ptype, _, poff, pvaddr, _, pfilesz = struct.unpack_from(e + "IIQQQQ", data, o)
+        else:
+            ptype, poff, pvaddr, _, pfilesz = struct.unpack_from(e + "IIIII", data, o)
+        if ptype == 1:
+            loads.append((pvaddr, poff, pfilesz))
+        elif ptype == 2:
+            dyn = (poff, pfilesz)
+    if not dyn:
+        return []
+    ent, fmt = (16, e + "qQ") if is64 else (8, e + "iI")
+    needed, strtab = [], None
+    for o in range(dyn[0], dyn[0] + dyn[1] - ent + 1, ent):
+        tag, val = struct.unpack_from(fmt, data, o)
+        if tag == 0:
+            break
+        if tag == 1:
+            needed.append(val)
+        elif tag == 5:
+            strtab = val
+    off = next((poff + strtab - va for va, poff, sz in loads if strtab is not None and va <= strtab < va + sz), None)
+    if off is None:
+        return []
+    return [data[off + n:data.index(b"\0", off + n)].decode(errors="replace") for n in needed]
+
+
+def carried(target, file_list, pkgs=CARRY_PKGS):
+    """The paths of pkgs' libraries and programs in target (packages-file-list.txt: "pkg,./path" a line), with the
+    libraries of /usr/lib they load, followed"""
+    out = set()
+    with open(file_list) as f:
+        for line in f:
+            pkg, _, rel = line.strip().partition(",")
+            p = "/" + os.path.normpath(rel).lstrip("./")
+            if pkg in pkgs and p.startswith(CARRY_DIRS) and not p.startswith(CARRY_SKIP) \
+                    and not p.endswith((".a", ".la", ".h")) and os.path.isfile(os.path.join(target, p.lstrip("/"))):
+                out.add(p)
+    todo = list(out)
+    while todo:
+        for name in elf_needed(os.path.join(target, todo.pop().lstrip("/"))):
+            p = "/usr/lib/" + name
+            if p not in out and os.path.isfile(os.path.join(target, p.lstrip("/"))):
+                out.add(p)
+                todo.append(p)
+    return out
 
 
 def sha_size(path):
@@ -122,6 +197,8 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--notes", default="")
     ap.add_argument("--model", default="x6100", choices=["x6100", "x6200"], help="the radio the bundle is built for")
+    ap.add_argument("--packages-file-list", help="buildroot's packages-file-list.txt: Mesa, GStreamer and ffmpeg "
+                    "carried (CARRY_PKGS) with the libraries they load")
     ap.add_argument("--boot-dir", help="buildroot's images dir: the SD card's kernel set and U-Boot, and the target's "
                     "kernel modules, carried for the radio to install only when asked")
     a = ap.parse_args()
@@ -136,6 +213,10 @@ def main():
     paths.update(WEB_FILES)
     paths.update(LIB_FILES)
     paths.update(SDR_FILES)
+    extra = set()
+    if a.packages_file_list:
+        extra = carried(a.target, a.packages_file_list) - paths
+        paths.update(extra)
     for d in WEB_DIRS:
         for root, _, files in os.walk(os.path.join(a.target, d.lstrip("/"))):
             for n in files:
@@ -174,12 +255,19 @@ def main():
 
     with tarfile.open(a.out, "w:gz") as tar:
         add_bytes(tar, "manifest.json", mjson)
-        for e in entries:
-            tar.add(os.path.join(a.target, e["path"].lstrip("/")), "files" + e["path"], recursive=False)
+        for e in entries:      # each a plain file, a link's (a library's soname) its target's bytes: the updater
+            src = os.path.realpath(os.path.join(a.target, e["path"].lstrip("/")))     # reads each member's content
+            ti = tar.gettarinfo(src, "files" + e["path"])
+            ti.type, ti.linkname, ti.size = tarfile.REGTYPE, "", os.path.getsize(src)   # a hard link's too (Mesa's
+            with open(src, "rb") as f:                                                  # two drivers are one file)
+                tar.addfile(ti, f)
         for member, src in boot_members:
             tar.add(src, member, recursive=False)
     total = sum(e["size"] for e in entries)
     print(f"{a.out}: {len(entries)} files, {total / 1e6:.1f} MB")
+    if extra:
+        print(f"   carried from the image's packages ({', '.join(CARRY_PKGS)}) and what they load: {len(extra)} files, "
+              f"{sum(e['size'] for e in entries if e['path'] in extra) / 1e6:.1f} MB")
     if boot_members:
         b = manifest["boot"]
         print(f"   for the SD card, when asked: kernel {b['kernel']['release'] or '(no modules)'} "

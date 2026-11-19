@@ -19,7 +19,11 @@ approved that day.
   The pictures to take again once v0.3.12.32 is on both (the X6100's Weather, Flights and Internet radio helpers).
 - Waiting on the release: v0.3.12.32 on both radios through their updaters, the X6100's kernel set with it
   (v0.3.12.29-.31 were refused by every updater; fixed 3a3755ce).
-- To do, with the owner's word on the cable and pads: the Walkie (G) on both radios sending to and hearing each
+- Done in the bundle (the owner: "I should not have to write it, the updater should"): the image's Mesa, GStreamer
+  and ffmpeg with the libraries they load (mkbundle.py CARRY_PKGS), and level 3 reached by the bundle's kernel and
+  U-Boot (image-required's x6100-boot and x6200-boot lines): the X6100's card v0.3.12.28 gets the GPU through its
+  update, no card to write. In the release after v0.3.12.32.
+- To do, with the owner's word on the cable and pads (given 2026-11-19, "cable is confirmed"): the Walkie (G) on both radios sending to and hearing each
   other on every band and mode G offers, at 0.1 W through the pads (CB refused by both radios' TX ranges).
 
 **Open, in the order they are worked**
@@ -202,13 +206,15 @@ approved that day.
 
 **Parked or later**
 
-- Meteor-M LRPT outdoors (deferred, the owner 2026-11-17): decoded from a real 2019 Meteor-M2-2 recording played
+- Closed by the owner 2026-11-19 ("we literally don't care"): Meteor off the air on a real antenna, WSPR off the air,
+  and the board variant check for Franco's base firmware or CESSB; the GLO 2's outdoor fix is confirmed.
+- Meteor-M LRPT outdoors (closed 2026-11-19, kept for the record; deferred by the owner 2026-11-17): decoded from a real 2019 Meteor-M2-2 recording played
   into the stick over a cable (a255320, c5e864b, d02958f); the first live pass (Meteor-M2-4) gave nothing on the
   antenna used. A pass on a 137 MHz antenna outdoors (QFH or V-dipole) is the test; the 80k mode is unverified.
 - Screenshots of every menu for the README and the manual (deferred, the owner 2026-11-18): at the owner's word.
   Every app and Sentry page of both radios is in docs/parity/2026-11-18 (redacted); the classic screen, the Modes
   menu, RADE and Settings' own pages are not.
-- WSPR (deferred, the owner 2026-11-17): never tested. Off the air is the real test (the X6200 on its antenna, 14.0956
+- WSPR (closed 2026-11-19; deferred by the owner 2026-11-17): never tested. Off the air is the real test (the X6200 on its antenna, 14.0956
   USB by day, 7.0386 by night: spots every two minutes). Over a cable it needs a steadier source than the HackRF: a
   bladeRF 2.0's VCTCXO, but it tunes from 47 MHz, so 6 m (50.293) only.
 

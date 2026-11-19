@@ -9,6 +9,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
 import os
 import re
 import runpy
+import struct
 import subprocess
 import sys
 import tempfile
@@ -75,6 +76,60 @@ class Paths(unittest.TestCase):
             self.assertFalse(mkbundle.path_refused(p, self.allowed), p)
         for p in ("/usr/share/voacapl/README", "usr/bin/x", "/usr/bin/../../root/x", "/usr/bin/", "/opt/x"):
             self.assertTrue(mkbundle.path_refused(p, self.allowed), p)
+
+
+def tiny_elf(needed):
+    """A 32-bit little-endian ELF (ARM's) with one PT_LOAD over the file and a PT_DYNAMIC naming needed (DT_NEEDED),
+    as mkbundle.elf_needed reads a library"""
+    strtab = b"\0" + b"".join(n.encode() + b"\0" for n in needed)
+    offs, at = [], 1
+    for n in needed:
+        offs.append(at)
+        at += len(n) + 1
+    ehdr, phdr = 52, 32
+    dyn_off = ehdr + 2 * phdr
+    dyn = b"".join(struct.pack("<iI", 1, o) for o in offs)
+    str_off = dyn_off + len(dyn) + 16
+    dyn += struct.pack("<iI", 5, str_off) + struct.pack("<iI", 0, 0)
+    size = str_off + len(strtab)
+    head = b"\x7fELF" + bytes([1, 1, 1]) + bytes(9) + struct.pack("<HHIIIIIHHHHHH", 3, 40, 1, 0, ehdr, 0, 0, ehdr,
+                                                                    phdr, 2, 0, 0, 0)
+    ph = struct.pack("<IIIIIIII", 1, 0, 0, 0, size, size, 5, 0x1000)
+    ph += struct.pack("<IIIIIIII", 2, dyn_off, dyn_off, dyn_off, len(dyn), len(dyn), 6, 4)
+    return head + ph + dyn + strtab
+
+
+class Carry(unittest.TestCase):
+    """mkbundle's carried packages (Mesa, GStreamer, ffmpeg) with the libraries they load"""
+
+    def test_elf_needed(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "libEGL.so.1")
+            open(p, "wb").write(tiny_elf(["libgbm.so.1", "libc.so.6"]))
+            self.assertEqual(mkbundle.elf_needed(p), ["libgbm.so.1", "libc.so.6"])
+            open(p, "w").write("not an ELF")
+            self.assertEqual(mkbundle.elf_needed(p), [])
+
+    def test_carried(self):
+        """The packages' libraries and programs, what they load from /usr/lib followed, nothing else: not the C
+        library's (/lib), not headers, pkgconfig or /usr/share, not another package's files"""
+        with tempfile.TemporaryDirectory() as t:
+            files = {"usr/lib/libEGL.so.1": ["libgbm.so.1", "libc.so.6"], "usr/lib/libgbm.so.1": ["libdrm.so.2"],
+                     "usr/lib/libdrm.so.2": [], "lib/libc.so.6": [], "usr/lib/dri/lima_dri.so": ["libexpat.so.1"],
+                     "usr/lib/libexpat.so.1": [], "usr/bin/gst-launch-1.0": [], "usr/lib/libunrelated.so": [],
+                     "usr/share/drirc.d/00-mesa-defaults.conf": None, "usr/lib/pkgconfig/egl.pc": None}
+            for rel, need in files.items():
+                os.makedirs(os.path.dirname(os.path.join(t, rel)), exist_ok=True)
+                open(os.path.join(t, rel), "wb").write(tiny_elf(need) if need is not None else b"x\n")
+            pfl = os.path.join(t, "packages-file-list.txt")
+            open(pfl, "w").write("mesa3d,./usr/lib/libEGL.so.1\nmesa3d,./usr/lib/dri/lima_dri.so\n"
+                                 "mesa3d,./usr/share/drirc.d/00-mesa-defaults.conf\nmesa3d,./usr/lib/pkgconfig/egl.pc\n"
+                                 "gstreamer1,./usr/bin/gst-launch-1.0\nother,./usr/lib/libunrelated.so\n")
+            got = mkbundle.carried(t, pfl)
+            self.assertEqual(got, {"/usr/lib/libEGL.so.1", "/usr/lib/libgbm.so.1", "/usr/lib/libdrm.so.2",
+                                   "/usr/lib/dri/lima_dri.so", "/usr/lib/libexpat.so.1", "/usr/bin/gst-launch-1.0"})
+            allowed = mkbundle.updater_allowed()
+            self.assertEqual([p for p in got if mkbundle.path_refused(p, allowed)], [])
 
 
 if __name__ == "__main__":

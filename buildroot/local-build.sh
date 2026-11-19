@@ -690,8 +690,14 @@ echo "   ft8_lib ${FT8LIB_VER:0:7}: /usr/lib/libft8.so $(sha256sum $BR/build/tar
 # The SDR's daemon and libbladeRF go in too (mkbundle.py SDR_FILES), from the x6x00-rtlspec and libbladerf packages
 # The SD card's kernel set, its modules and U-Boot go in too (--boot-dir), in the manifest's "boot" part: the radio
 # installs them only when asked (its update question's checkboxes; x6100-update install --kernel/--uboot)
+# The image's Mesa, GStreamer and ffmpeg go in too (mkbundle.py CARRY_PKGS, with the libraries they load), from
+# buildroot's own list of each package's files: a card of before them (the X6100's v0.3.12.28, no Mesa) gets them
+# from its update, no card to write (the owner, 2026-11-19)
+PFL=$BR/build/build/packages-file-list.txt
+[ -f $PFL ] || { echo "no $PFL: buildroot writes it at each make"; exit 1; }
 python3 $GUI/tools/update/mkbundle.py --target $BR/build/target --manifest $(ls -d $BR/build/build/$GUI_PKG-*/install_manifest.txt | head -1) \
-    --version $VER --model $MODEL --out $BR/build/images/$OUT-v$VER-update.tar.gz --boot-dir $BR/build/images
+    --version $VER --model $MODEL --out $BR/build/images/$OUT-v$VER-update.tar.gz --boot-dir $BR/build/images \
+    --packages-file-list $PFL
 
 cp $BR/build/images/sdcard.img $BR/build/images/$OUT-local-sdcard.img
 ls -la $BR/build/images/$OUT-local-sdcard.img
