@@ -2350,6 +2350,268 @@ static lv_obj_t     *ld_img[3], *ld_val[3], *ld_more[3];
 static int           ld_w;
 static void          mbar_draw(lv_img_dsc_t *f, int w, float level);
 
+/* The radio's S-meter box in the Sentry's look, every figure of it (the user: "we should see that on any screen we are
+ * able to receive signal on"; "is the S meter you added showing the same information the stock meter shows? all data
+ * points because it should"): the box's 25 bars on its scale (meter_bar_db: 3 dB each to S9, 5 dB each to S9+40), lit
+ * to its smoothed level as its bars, those under the noise floor dim as its grey, its peak bar bright above the level
+ * (held 1.5 s, then falling faster and faster), the scale's numbers under them, and its value: S units as VISION says
+ * them and dBm to a tenth as the other themes do, TX while transmitting (meter_state). Drawn into f, w wide: n segments
+ * at seg_db[i] dB, lit from slack under it; the peak in the pale of the tags below bar bright_from, in its own colour
+ * from it (the box's: white under S9, coloured from it). Drawn again only when a bar changes (*drawn) */
+#define SM_N 25
+#define SM_RTL_SLACK (20.0f / (SM_N - 1))
+
+/* The bars at level: how many lit */
+static int sm_lit(const float *seg_db, float slack, float level) {
+    int lit = 0;
+
+    for (int i = 0; i < SM_N; i++)
+        if (level >= seg_db[i] - slack) lit = i + 1;
+    return lit;
+}
+
+static bool smeter_draw(lv_img_dsc_t *f, int w, const float *seg_db, float slack, float level, float peak, float noise,
+                        bool tx, int bright_from, int *drawn) {
+    int lit = sm_lit(seg_db, slack, level), pk = 0, nz = 0;
+
+    for (int i = 0; i < SM_N; i++) {
+        if (peak >= seg_db[i] - slack) pk = i;
+        if (seg_db[i] <= noise) nz = i + 1;
+    }
+    if (tx) lit = pk = 0;
+    if (pk < lit) pk = 0;               /* the peak drawn only above the level, as the box's */
+    int key = lit | pk << 8 | nz << 16;
+    if (key == *drawn) return false;
+    *drawn = key;
+
+    uint32_t *px = (uint32_t *)f->data, bg = argb(ink), pale = lv_color_to32(TC(accent_soft)) | 0xff000000;
+    int       pitch = w / SM_N;
+
+    for (int i = 0; i < w * MB_H; i++) px[i] = bg;
+    for (int k = 0; k < SM_N; k++) {
+        uint32_t c = 0xff000000 | d3_pal[k * 255 / (SM_N - 1)];
+
+        if (k == pk && pk > 0) c = k >= bright_from ? c : pale;
+        else if (k >= lit) c = scale_rgb(c, 0.15f);
+        else if (k < nz) c = scale_rgb(c, 0.4f);        /* under the noise: the box's grey */
+        for (int y = 0; y < MB_H; y++)
+            for (int x = k * pitch; x < k * pitch + pitch - 2; x++) px[y * w + x] = c;
+    }
+    return true;
+}
+
+/* Each bar's dB: the X6200's the box's, the stick's 0-40 dB over its noise */
+static const float *sm_db(bool stick) {
+    static float x62[SM_N], rtl[SM_N];
+    static bool  ok;
+
+    if (!ok) {
+        for (int i = 0; i < SM_N; i++) {
+            x62[i] = meter_bar_db(i);
+            rtl[i] = i * 40.0f / (SM_N - 1);
+        }
+        ok = true;
+    }
+    return stick ? rtl : x62;
+}
+
+/* A stick's channel over its noise as a meter: its readings smoothed (Settings' spectrum beta, one a reading) and
+ * peak-held as the box's (1.5 s, then falling faster and faster), the last as read its value */
+typedef struct {
+    float    raw, level, peak;
+    uint32_t peak_ms, at;               /* at: the last reading's tick, 0 none */
+} rtlm_t;
+
+static void rtlm_feed(rtlm_t *r, float o) {
+    float    beta = params.spectrum_beta.x * 0.01f;
+    uint32_t ms   = lv_tick_get();
+
+    o = o < 0 ? 0 : o > 40 ? 40 : o;
+    if (!r->at || lv_tick_elaps(r->at) > 1500) r->level = r->peak = o;     /* from nothing: at once */
+    if (o > r->peak) {
+        r->peak    = o;
+        r->peak_ms = ms;
+    } else if (ms - r->peak_ms > 1500) {
+        r->peak -= (float)(ms - r->peak_ms - 1500) * 20 / 1000;
+    }
+    r->raw   = o;
+    r->level = r->level * beta + o * (1 - beta);
+    r->at    = ms ? ms : 1;
+}
+
+static bool rtlm_fresh(const rtlm_t *r) {
+    return r->at && lv_tick_elaps(r->at) < 1500;
+}
+
+/* Its value: "S4  -104.0 DBM", "S9+12  -61.0 DBM", "TX" */
+static void sm_value(const meter_state_t *s, char *t, size_t n) {
+    char u[12];
+
+    if (s->tx) {
+        snprintf(t, n, "TX");
+        return;
+    }
+    meter_s_text(s->raw, u, sizeof(u));
+    snprintf(t, n, "%s  %.1f DBM", u, s->raw);
+}
+
+/* A and B: each half of the picture this meter at the top left of its trace. The X6200's half (A, B's SPLIT) the box's
+ * own; the stick's half (B, A's SPLIT) its bracketed channel over the noise of its picture (rtl_spectrum_over, as its
+ * squelch measures it), listened to or not: a stick says no dBm, so dB over its noise, 0 to 40 on the 25 bars (0 10 20
+ * 30 40 under them), smoothed (Settings' spectrum beta, a row a reading), peak-held and its value to a tenth as the
+ * box's. Peak names keep clear of it (LM_W, LM_H) */
+#define LM_CAP   40                     /* the caption: S, SNR */
+#define LM_PITCH 7
+#define LM_BAR   (SM_N * LM_PITCH)
+#define LM_IMG_H (MB_H + 13)            /* the bars, ink under them for the scale's numbers */
+#define LM_VAL   150                    /* its value: S9+40  -33.0 DBM */
+#define LM_W     (6 + LM_CAP + LM_BAR + 6 + LM_VAL)
+#define LM_H     (3 + LM_IMG_H + 2)
+typedef struct {
+    lv_obj_t     *cap, *img, *val, *num[7];
+    lv_img_dsc_t *f;
+    int           drawn, x, y;
+    bool          shown, stick;         /* stick: SNR and 0-40, else S and the box's scale */
+    char          txt[28];
+} lmeter_t;
+static lmeter_t lm[2];                  /* 0 the X6200's half, 1 the stick's */
+static rtlm_t   lm_rtl;                 /* the stick's channel, a row a reading */
+static float    lm_scratch[8192];
+
+static lv_obj_t *lm_tag(lv_obj_t *p, int w, const char *t) {     /* readable over the trace, as RDS's line */
+    lv_obj_t *l = label(p, &pixel_16, amb, 0, 0, w, LV_TEXT_ALIGN_LEFT, t);
+
+    lv_obj_set_style_bg_color(l, ink, 0);
+    lv_obj_set_style_bg_opa(l, LV_OPA_80, 0);
+    lv_obj_set_style_pad_hor(l, 3, 0);
+    lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+    return l;
+}
+
+static void lm_place(lmeter_t *m, int x, int y);
+
+static void lm_text(lmeter_t *m, const char *t) {
+    if (strcmp(t, m->txt)) {
+        snprintf(m->txt, sizeof(m->txt), "%s", t);
+        lv_label_set_text(m->val, t);
+    }
+}
+
+/* The X6200's meter (S, the box's scale) or the stick's (SNR, 0-40 dB): G turns from one to the other with its channel */
+static void lm_kind(lmeter_t *m, bool stick) {
+    static const char *const rtl_text[7] = {"0", "10", "20", "30", "40", "", ""};
+
+    if (!m->img || m->stick == stick) return;
+    m->stick = stick;
+    lv_label_set_text(m->cap, stick ? "SNR" : "S");
+    for (int k = 0; k < 7; k++) {
+        lv_label_set_text(m->num[k], stick ? rtl_text[k] : meter_scale_text[k]);
+        lv_obj_set_style_text_color(m->num[k], stick || k < 5 ? dim : amb, 0);     /* +20 and +40 as the box's red zone */
+        if (m->shown && !lv_label_get_text(m->num[k])[0]) lv_obj_add_flag(m->num[k], LV_OBJ_FLAG_HIDDEN);
+        else if (m->shown) lv_obj_clear_flag(m->num[k], LV_OBJ_FLAG_HIDDEN);
+    }
+    m->drawn = -1;
+    lm_place(m, m->x, m->y);
+}
+
+static void lm_make(lmeter_t *m, lv_obj_t *p, bool stick) {
+    m->cap = lm_tag(p, LM_CAP, "S");
+    m->f   = lv_img_buf_alloc(LM_BAR, LM_IMG_H, LV_IMG_CF_TRUE_COLOR);
+    {
+        uint32_t *px = (uint32_t *)m->f->data;
+        for (int i = 0; i < LM_BAR * LM_IMG_H; i++) px[i] = argb(ink);
+    }
+    m->img = lv_img_create(p);
+    lv_img_set_src(m->img, m->f);
+    lv_obj_add_flag(m->img, LV_OBJ_FLAG_HIDDEN);
+    for (int k = 0; k < 7; k++) {       /* the box's every 4th bar; the stick's every 6th */
+        m->num[k] = label(p, &pixel_12, k < 5 ? dim : amb, 0, 0, 0, LV_TEXT_ALIGN_LEFT, meter_scale_text[k]);
+        lv_obj_add_flag(m->num[k], LV_OBJ_FLAG_HIDDEN);
+    }
+    m->val   = lm_tag(p, LM_VAL, "");
+    m->drawn = -1;
+    m->stick = false;
+    lm_kind(m, stick);
+}
+
+static void lm_free(lmeter_t *m) {
+    if (m->f) {
+        lv_img_cache_invalidate_src(m->f);
+        lv_img_buf_free(m->f);
+    }
+    memset(m, 0, sizeof(*m));
+}
+
+static void lm_place(lmeter_t *m, int x, int y) {
+    if (!m->img) return;
+    m->x = x;
+    m->y = y;
+    lv_obj_set_pos(m->cap, x, y);
+    lv_obj_set_pos(m->img, x + LM_CAP, y + 3);
+    lv_obj_set_pos(m->val, x + LM_CAP + LM_BAR + 6, y);
+    for (int k = 0; k < 7; k++) {
+        const char *t   = lv_label_get_text(m->num[k]);
+        int         bar = k * (m->stick ? 6 : 4), tw = lv_txt_get_width(t, strlen(t), &pixel_12, 0, LV_TEXT_FLAG_NONE);
+        int         cx  = bar * LM_PITCH + (LM_PITCH - 2) / 2, nx = cx - tw / 2;
+
+        nx = nx < 0 ? 0 : nx + tw > LM_BAR ? LM_BAR - tw : nx;
+        lv_obj_set_pos(m->num[k], x + LM_CAP + nx, y + 3 + MB_H);
+    }
+}
+
+/* The X6200's reading (the box's: meter_state) or the stick's (r) drawn and said */
+static void lm_draw(lmeter_t *m, const meter_state_t *s, const rtlm_t *r) {
+    char t[28];
+
+    if (m->stick) {
+        bool on = r && rtlm_fresh(r);
+
+        if (smeter_draw(m->f, LM_BAR, sm_db(true), SM_RTL_SLACK, on ? r->level : 0, on ? r->peak : 0, -1, false, SM_N,
+                        &m->drawn))
+            lv_obj_invalidate(m->img);
+        snprintf(t, sizeof(t), "+%.1f DB", on ? r->raw : 0);
+    } else {
+        if (smeter_draw(m->f, LM_BAR, sm_db(false), METER_LIT_SLACK, s->level, s->peak, s->noise, s->tx, 16, &m->drawn))
+            lv_obj_invalidate(m->img);
+        sm_value(s, t, sizeof(t));
+    }
+    lm_text(m, t);
+}
+
+static void lm_show(lmeter_t *m, bool on) {
+    if (!m->img || m->shown == on) return;
+    m->shown = on;
+    lv_obj_t *o[] = {m->cap, m->img, m->val};
+    for (size_t i = 0; i < N_OF(o); i++) {
+        if (on) lv_obj_clear_flag(o[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(o[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    for (int k = 0; k < 7; k++) {       /* the stick's unused numbers stay hidden */
+        if (on && lv_label_get_text(m->num[k])[0]) lv_obj_clear_flag(m->num[k], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(m->num[k], LV_OBJ_FLAG_HIDDEN);
+    }
+    if (!on) m->drawn = -1;
+}
+
+/* A tick's */
+static void lm_update(int view) {
+    if (view != VIEW_RTL) {
+        meter_state_t s;
+
+        meter_state(&s);
+        lm_show(&lm[0], true);
+        lm_draw(&lm[0], &s, NULL);
+    } else {
+        lm_show(&lm[0], false);
+    }
+    if (view != VIEW_X6200 && listen_hz && rtlm_fresh(&lm_rtl)) {
+        lm_show(&lm[1], true);
+        lm_draw(&lm[1], NULL, &lm_rtl);
+    } else {
+        lm_show(&lm[1], false);
+    }
+}
+
 #define GPU_DEVFREQ "/sys/class/devfreq/1c40000.gpu"
 
 static void sys_load_show(void) {
@@ -2873,6 +3135,8 @@ static void rtl_layout(void) {
     hf_bx = rtl_bx = -1;
     lv_label_set_text(rtl_src_l[0], "");
     lv_label_set_text(rtl_src_l[1], "");
+    lm_show(&lm[0], false);
+    lm_show(&lm[1], false);
     for (int i = 0; i < RTL_TICKS; i++) {
         lv_obj_add_flag(hf_tick_l[i], LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(rtl_tick_l[i], LV_OBJ_FLAG_HIDDEN);
@@ -3130,6 +3394,7 @@ static int rtl_peaks(int64_t lo, double px_hz, int32_t *best_hz, float *best_db,
 
         x = x < IMG_X ? IMG_X : x + w > IMG_X + RTL_COLS ? IMG_X + RTL_COLS - w : x;
         if (y < 22 && x + w > IMG_X + RTL_COLS - 250) y = 22;       /* clear of the half's name at the top right */
+        if (y < LM_H && x < IMG_X + LM_W) y = LM_H;                   /* and of its meter at the top left */
         lv_label_set_text(rtl_peak_l[np], s);
         lv_obj_set_pos(rtl_peak_l[np], x, iy + p_rtl.y0 + (y < 0 ? 0 : y));
         lv_obj_clear_flag(rtl_peak_l[np], LV_OBJ_FLAG_HIDDEN);
@@ -3162,7 +3427,8 @@ static void hf_labels(void) {
         ident_t id;
         identify_ex(tg[b].hz, &id, false);
         lv_label_set_text(hf_peak_l[nl], id.label);
-        lv_obj_set_pos(hf_peak_l[nl], IMG_X + x - 28, iy + p_hf.y0 + 4 + near * 16);
+        lv_obj_set_pos(hf_peak_l[nl], IMG_X + x - 28,     /* under the meter at the top left */
+                       iy + p_hf.y0 + (x - 28 < LM_W ? LM_H : 4) + near * 16);
         lv_obj_clear_flag(hf_peak_l[nl], LV_OBJ_FLAG_HIDDEN);
         nl++;
     }
@@ -4610,6 +4876,11 @@ static void rtl_timer_cb(lv_timer_t *t) {
             continue;
         }
         panel_trace(&p_rtl, rtl_cols);
+        if (listen_hz) {                    /* its meter: the bracketed channel over the row's noise */
+            float o = rtl_spectrum_over(rtl_db, n, rate, c, listen_hz, rtl_mode_of(listen_hz), lm_scratch);
+
+            if (o != RTL_OVER_NONE) rtlm_feed(&lm_rtl, o);
+        }
         rtl_bx = -100;
         if (listen_hz && rtl_gpu) {
             rtl_bx = (int)lround((listen_hz - lo) / px_hz);     /* the GPU's bracket (rtl_gpu_draw) */
@@ -4659,6 +4930,7 @@ static void rtl_timer_cb(lv_timer_t *t) {
             lv_label_set_text(r_sig.cap, s);
         }
     }
+    lm_update(view);
     if (drew) rtl_present();
 }
 
@@ -4754,6 +5026,8 @@ static void build_rtl(lv_obj_t *p) {
     lv_obj_set_style_pad_hor(watch_l, 3, 0);
     lv_label_set_recolor(watch_l, true);
     lv_obj_add_flag(watch_l, LV_OBJ_FLAG_HIDDEN);
+    lm_make(&lm[0], p, false);
+    lm_make(&lm[1], p, true);
     rtl_hz = param_i_get(cfg_rtl_freq);
     for (int i = RTL_PRESETS - 1; i >= 0; i--)  /* the preset the tuning is in (at, first), if one */
         if (rtl_hz >= rtl_presets[i].lo && rtl_hz <= rtl_presets[i].hi) rtl_preset = i;
@@ -4772,6 +5046,8 @@ static void rtl_labels_place(void) {
     lv_obj_set_y(rtl_src_l[0], iy + p_hf.y0 + 3);
     lv_obj_set_y(rds_l, iy + p_rtl.wf_y0 + 6);
     if (watch_l) lv_obj_set_y(watch_l, iy + rtl_img_h - 24);
+    lm_place(&lm[0], IMG_X + 6, iy + p_hf.y0 + 3);
+    lm_place(&lm[1], IMG_X + 6, iy + p_rtl.y0 + 3);
     rds_show(true);
     watch_show();
 }
@@ -8602,6 +8878,7 @@ static void build_system(lv_obj_t *p) {
 #define P_BAR   44                      /* the L's arms, as thick as every screen's title bar */
 #define P_VX    (PW - 3 - P_BAR)        /* the arm down the right: the landscape bar's place (3 px from the edge) */
 #define P_TOP   (6 + P_BAR + 6)         /* under the arm across the top */
+#define P_CHH   (70 + LM_H + 2 + 20)    /* the channel's box: the channel, its S-meter, the audio's bar */
 #define P_KEY   160                     /* the keys' pitch: F1 at the top */
 #define P_KEYLEN 80                     /* a physical F key's length along the screen's edge (its width with the radio
                                          * lying flat): F4's and F5's boxes as long, each centred on its key */
@@ -8640,9 +8917,10 @@ typedef struct {
     int           ws_w, ws_h, ws_cap_x, ws_cap_y;
     int           cap_x, cap_y;                       /* the voiceprint's caption: its right edge, its top */
     lv_obj_t     *ab_arrow, *ab_tag;                  /* portrait: an arrow to the A/B key, while PTT is refused */
-    lv_obj_t     *sm_img, *am_img;                    /* portrait: the S-meter and the audio as short bars */
+    lv_obj_t     *sm_img, *am_img;                    /* portrait: the audio as short bars (sm_ unused) */
     lv_img_dsc_t *sm_frame, *am_frame;
     int           mb_w, sm_lit, am_lit;
+    lmeter_t      sm;                                 /* portrait: the S-meter, A's and B's own (lm_make) */
     lv_obj_t     *num_l, *band_l, *lamp, *lamp_l, *vp_img, *s_fill, *a_fill, *s_l, *a_l, *cap_l;
     lv_img_dsc_t *vp_frame;
     int           vp_w, vp_h, bar_w;
@@ -8731,22 +9009,22 @@ static void mbar_draw(lv_img_dsc_t *f, int w, float level) {
     }
 }
 
-/* Its name, the bar and its value (a_l, s_l), at x, y, w wide in all */
-static void mbar_make(wui_t *u, lv_obj_t *p, int x, int y, int w, bool audio) {
-    int bw = (w - 30 - 72) / MB_SEG * MB_SEG;
-
-    label(p, &pixel_16, amb, x, y - 3, 28, LV_TEXT_ALIGN_LEFT, audio ? "AF" : "S");
-    lv_img_dsc_t *f   = lv_img_buf_alloc(bw, MB_H, LV_IMG_CF_TRUE_COLOR);
+/* G's audio bar, under its S-meter and as it (the same caption, bar and value, at x, y): 25 segments, -60 to 0 dBFS */
+static void mbar_make(wui_t *u, lv_obj_t *p, int x, int y) {
+    lv_obj_t     *cap = lm_tag(p, LM_CAP, "AF");
+    lv_img_dsc_t *f   = lv_img_buf_alloc(LM_BAR, MB_H, LV_IMG_CF_TRUE_COLOR);
     lv_obj_t     *img = lv_img_create(p);
 
-    mbar_draw(f, bw, 0);
+    lv_obj_clear_flag(cap, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(cap, x, y);
+    mbar_draw(f, LM_BAR, 0);
     lv_img_set_src(img, f);
-    lv_obj_set_pos(img, x + 26, y);
-    lv_obj_t *vl = label(p, &pixel_16, amb, x + 34 + bw, y - 3, w - 34 - bw, LV_TEXT_ALIGN_LEFT, "");    /* by its bar */
-
-    u->mb_w = bw;
-    if (audio) u->am_frame = f, u->am_img = img, u->a_l = vl, u->am_lit = -1;
-    else u->sm_frame = f, u->sm_img = img, u->s_l = vl, u->sm_lit = -1;
+    lv_obj_set_pos(img, x + LM_CAP, y + 3);
+    u->a_l = lm_tag(p, LM_VAL, "");
+    lv_obj_clear_flag(u->a_l, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(u->a_l, x + LM_CAP + LM_BAR + 6, y);
+    u->mb_w     = LM_BAR;
+    u->am_frame = f, u->am_img = img, u->am_lit = -1;
 }
 
 /* In place, radix 2 */
@@ -8854,44 +9132,39 @@ static void walkie_step(void) {
     if (cols && !(g_gpu && wui == &w_port)) lv_obj_invalidate(wui->vp_img);
     if (got) vp_rms = 0.7f * vp_rms + 0.3f * (float)sqrt(e / got);
 
-    /* the S-meter: S0 -127 dBm to S9+40 -33 dBm; the audio: -60 to 0 dBFS */
-    float db = meter_get_db(), s = (db + 127) / 94, a = vp_rms > 1 ? (20 * log10f(vp_rms / 32768) + 60) / 60 : 0;
-    char  t[24];
+    /* the S-meter: the radio's own box, every figure of it (meter_state: its bars, smoothed level, peak, noise floor
+     * and value), or the stick's channel over its noise as its squelch measures it, smoothed and peak-held as B's; the
+     * audio: -60 to 0 dBFS */
+    static rtlm_t g_rtl;
+    meter_state_t ms;
+    float         a = vp_rms > 1 ? (20 * log10f(vp_rms / 32768) + 60) / 60 : 0;
+    char          t[28];
 
-    if (from_rtl) {                     /* the stick's: its channel over the noise, as its squelch measures it */
-        float o = rtl_spectrum_level();
+    meter_state(&ms);
+    if (from_rtl && rtl_spectrum_level() >= 0) rtlm_feed(&g_rtl, rtl_spectrum_level());
+    bool rtl_on = from_rtl && rtlm_fresh(&g_rtl);
 
-        s  = o < 0 ? 0 : o / 40;
-        db = o < 0 ? -127 : -121 + o;
-    }
-
-    s = s < 0 ? 0 : s > 1 ? 1 : s;
     a = a < 0 ? 0 : a > 1 ? 1 : a;
-    if (wui->sm_frame) {                /* the short bars, redrawn when a segment more or less is lit */
-        int n = wui->mb_w / MB_SEG, ls = (int)(s * n + 0.5f), la = (int)(a * n + 0.5f);
+    if (wui->sm.img) {                  /* portrait: A's and B's meter, and the audio's bar under it */
+        static float af_db[SM_N];       /* the audio's 25 segments: -60 to 0 dBFS, 2.5 dB each */
 
-        if (ls != wui->sm_lit) {
-            wui->sm_lit = ls;
-            mbar_draw(wui->sm_frame, wui->mb_w, s);
-            lv_obj_invalidate(wui->sm_img);
-        }
-        if (la != wui->am_lit) {
-            wui->am_lit = la;
-            mbar_draw(wui->am_frame, wui->mb_w, a);
+        if (!af_db[SM_N - 1])
+            for (int i = 0; i < SM_N; i++) af_db[i] = i * 60.0f / (SM_N - 1);
+        lm_kind(&wui->sm, from_rtl);
+        lm_show(&wui->sm, true);
+        lm_draw(&wui->sm, &ms, &g_rtl);
+        if (smeter_draw(wui->am_frame, wui->mb_w, af_db, 1.25f, a * 60, 0, -1, false, SM_N, &wui->am_lit))
             lv_obj_invalidate(wui->am_img);
-        }
-        if (db >= -73) snprintf(t, sizeof(t), "S9+%d", (int)(db + 73));
-        else snprintf(t, sizeof(t), "S%d", db <= -127 ? 0 : (int)((db + 127) / 6));
-        lv_label_set_text(wui->s_l, t);
-        snprintf(t, sizeof(t), "%d DB", vp_rms > 1 ? (int)(20 * log10f(vp_rms / 32768)) : -90);
+        snprintf(t, sizeof(t), "%d DBFS", vp_rms > 1 ? (int)(20 * log10f(vp_rms / 32768)) : -90);
         lv_label_set_text(wui->a_l, t);
     } else {
-        lv_obj_set_width(wui->s_fill, (int)(s * wui->bar_w) + 1);
+        int lit = from_rtl ? (rtl_on ? sm_lit(sm_db(true), SM_RTL_SLACK, g_rtl.level) : 0)
+                           : ms.tx ? 0 : sm_lit(sm_db(false), METER_LIT_SLACK, ms.level);
+
+        lv_obj_set_width(wui->s_fill, lit * wui->bar_w / SM_N + 1);     /* on the box's scale */
         lv_obj_set_width(wui->a_fill, (int)(a * wui->bar_w) + 1);
-        if (from_rtl) snprintf(t, sizeof(t), "%s +%.0f DB", rtl_spectrum_dev_tag(),
-                               rtl_spectrum_level() < 0 ? 0 : rtl_spectrum_level());
-        else if (db >= -73) snprintf(t, sizeof(t), "S9+%d  %.0f DBM", (int)(db + 73), db);
-        else snprintf(t, sizeof(t), "S%d  %.0f DBM", db <= -127 ? 0 : (int)((db + 127) / 6), db);
+        if (from_rtl) snprintf(t, sizeof(t), "%s +%.1f DB", rtl_spectrum_dev_tag(), rtl_on ? g_rtl.raw : 0);
+        else sm_value(&ms, t, sizeof(t));
         lv_label_set_text(wui->s_l, t);
         snprintf(t, sizeof(t), "%d DBFS", vp_rms > 1 ? (int)(20 * log10f(vp_rms / 32768)) : -90);
         lv_label_set_text(wui->a_l, t);
@@ -10170,23 +10443,22 @@ static void build_walkie_portrait(void) {
     /* F1, F2 and F3 have no box (CH -/+ or STEP -/+ on F1 and F2, as the arrows): the channel, the spectrum and the
      * voiceprint run from the screen's edge, the spectrum and the voiceprint as tall as each other; F4's box, as
      * small as "3D", beside its key in the lamp's row; under it the radio's state, then F5's box and the messages */
-    int ys = P_TOP + 92 + 6, yv, hh = (P_LAMPY - 6 - ys - 6) / 2;
+    int ys = P_TOP + P_CHH + 6, yv, hh = (P_LAMPY - 6 - ys - 6) / 2;
 
     /* the channel: its number big, beside it the radio, the group and the frequency; under them the S-meter and the
      * audio as short bars in the spectrum's colours */
-    rect(g_scr, P_FX, P_TOP, P_FW, 92, 3, false);
+    rect(g_scr, P_FX, P_TOP, P_FW, P_CHH, 3, false);
     u->num_l  = label(g_scr, &pixel_44, amb, P_FX + 4, P_TOP + 10, 120, LV_TEXT_ALIGN_CENTER, "--");
     u->via_l  = label(g_scr, &pixel_16, amb, P_FX + 130, P_TOP + 6, P_FW - 138, LV_TEXT_ALIGN_LEFT, "");
     lv_label_set_recolor(u->via_l, true);
     u->band_l = label(g_scr, &pixel_20, amb, P_FX + 130, P_TOP + 24, P_FW - 138, LV_TEXT_ALIGN_LEFT, "");
     u->freq_l = label(g_scr, &pixel_20, amb, P_FX + 130, P_TOP + 46, P_FW - 138, LV_TEXT_ALIGN_LEFT, "");
     u->info_l = NULL;
-    {
-        int half = (P_FW - 24) / 2;
-
-        mbar_make(u, g_scr, P_FX + 8, P_TOP + 74, half, false);
-        mbar_make(u, g_scr, P_FX + 16 + half, P_TOP + 74, half, true);
-    }
+    /* the S-meter as A's and B's, the same widget (its scale's numbers under its bars: the user, "the smeters on a / b
+     * don't match the one on G. G lacks the labels"); the audio's bar under it, as long */
+    lm_make(&u->sm, g_scr, false);
+    lm_place(&u->sm, P_FX + 8, P_TOP + 70);
+    mbar_make(u, g_scr, P_FX + 8, P_TOP + 70 + LM_H);
     /* the X6200's spectrum around the dial (3D or 2D: F4), edge to edge */
     {
         int y = ys, h = hh;
@@ -10589,6 +10861,7 @@ static void destruct_cb(void) {
                 lv_img_buf_free(f);
             }
         }
+        lm_free(&u->sm);
         memset(u, 0, sizeof(*u));
     }
     if (f_frame) {                      /* F SYSTEM's spectrogram */
@@ -10634,6 +10907,8 @@ static void destruct_cb(void) {
         lv_img_buf_free(rtl_frame);
         rtl_frame = NULL;
     }
+    lm_free(&lm[0]);
+    lm_free(&lm[1]);
     root = img = rtl_img = NULL;
 }
 

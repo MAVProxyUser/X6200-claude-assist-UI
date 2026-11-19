@@ -124,6 +124,13 @@ size_t rtl_spectrum_scope_read(int16_t *buf, size_t n);
 /* The channel listened to over the noise of the stick's picture, dB (as the squelch measures it); -1 none */
 float rtl_spectrum_level(void);
 
+/* That measure on any row of the stick's picture (n bins, rate wide, at centre): the channel at hz (mode 1 NFM, 2 AM,
+ * 3 WFM: its width) over the row's noise (its median), dB, as the squelch takes it; RTL_OVER_NONE when the channel is
+ * not in the row. scratch: n floats. B's meter measures the bracketed channel with it, listened to or not */
+#define RTL_OVER_NONE (-1000.0f)
+float rtl_spectrum_over(const float *db, uint16_t n, uint32_t rate, int64_t centre, int64_t hz, int mode,
+                        float *scratch);
+
 /* BOTH: each receiver's share of the mix (0-1), the louder at 1 and the base's speaker at its volume */
 void rtl_spectrum_levels(float stick, float x6200);
 

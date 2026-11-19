@@ -283,6 +283,24 @@ static void daemon_start(void) {
     waitpid(p, NULL, 0);
 }
 
+float rtl_spectrum_over(const float *db, uint16_t n, uint32_t rate, int64_t centre, int64_t hz, int mode,
+                        float *scratch) {
+    if (!n || !rate) return RTL_OVER_NONE;
+    int64_t low  = centre - (int64_t)rate / 2;
+    int64_t half = mode == 3 ? 90000 : mode == 2 ? 4000 : 6000;      /* the channel: WFM, AM, NFM */
+    double  per  = (double)rate / n;
+    int     lo   = (int)((hz - half - low) / per), hi = (int)((hz + half - low) / per);
+
+    if (hi < 0 || lo >= n) return RTL_OVER_NONE;
+    if (lo < 0) lo = 0;
+    if (hi >= n) hi = n - 1;
+    float peak = -1e9f;
+    for (int k = lo; k <= hi; k++)
+        if (db[k] > peak) peak = db[k];
+    memcpy(scratch, db, (size_t)n * sizeof(float));
+    return peak - float_kth(scratch, n, n / 2);         /* over the row's median: its noise */
+}
+
 /* A row in: the squelch decided on it (the reader's thread) */
 static void squelch_row(const float *db, uint16_t n, uint32_t rate, int64_t centre) {
     static float sorted[MAX_BINS];
@@ -295,23 +313,13 @@ static void squelch_row(const float *db, uint16_t n, uint32_t rate, int64_t cent
         quiet = 0;
         return;
     }
-    int64_t hz    = atomic_load(&listen_hz), low = centre - (int64_t)rate / 2;
-    int64_t half  = mode == 3 ? 90000 : mode == 2 ? 4000 : 6000;      /* the channel: WFM, AM, NFM */
-    double  per   = (double)rate / n;
-    int     lo    = (int)((hz - half - low) / per), hi = (int)((hz + half - low) / per);
+    float over = rtl_spectrum_over(db, n, rate, centre, atomic_load(&listen_hz), mode, sorted);
 
-    if (hi < 0 || lo >= n) {            /* not in the picture (a retune on its way): shut */
+    if (over == RTL_OVER_NONE) {        /* not in the picture (a retune on its way): shut */
         atomic_store(&sql_open, false);
         return;
     }
-    if (lo < 0) lo = 0;
-    if (hi >= n) hi = n - 1;
-    float peak = -1e9f;
-    for (int k = lo; k <= hi; k++)
-        if (db[k] > peak) peak = db[k];
-    memcpy(sorted, db, (size_t)n * sizeof(float));
-    float over = peak - float_kth(sorted, n, n / 2);     /* over the row's median: its noise */
-    bool  open = atomic_load(&sql_open);
+    bool open = atomic_load(&sql_open);
 
     atomic_store(&chan_over, (int)(over * 10));
     if (!sql) {                         /* no squelch: always open, the level measured all the same */

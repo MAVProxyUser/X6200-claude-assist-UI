@@ -78,10 +78,22 @@ static lv_obj_t         *db_val_label;
 #define BARS            25
 #define S9_BAR          16
 
-static const char *const scale_text[] = {"S1", "3", "5", "7", "9", "+20", "+40"};
+const char *const meter_scale_text[7] = {"S1", "3", "5", "7", "9", "+20", "+40"};
+#define scale_text meter_scale_text
 
 static int16_t bar_db(int i) {
     return i <= S9_BAR ? S1 + 3 * i : S9 + 5 * (i - S9_BAR);
+}
+
+int16_t meter_bar_db(int i) {
+    return bar_db(i);
+}
+
+void meter_s_text(float db, char *s, size_t n) {
+    if (db < S9 + 1)    /* 6 dB a unit */
+        snprintf(s, n, "S%d", (int)LV_CLAMP(1, 1 + (db - S1 + 3) / 6, 9));
+    else
+        snprintf(s, n, "S9+%d", (int)(db - S9 + 0.5f));
 }
 
 static void keep_bool(Subject *subj, void *user_data) {
@@ -92,10 +104,11 @@ static void show_value(void *unused) {
     if (in_tx) return;     /* TX: "TX" stays, or the value stays hidden and the TX readings are drawn */
     if (!theme_shape.vision) {
         lv_label_set_text_fmt(db_val_label, "%.1f", meter_db_raw);
-    } else if (meter_db_raw < S9 + 1) {   /* 6 dB a unit */
-        lv_label_set_text_fmt(db_val_label, "S%d", (int)LV_CLAMP(1, 1 + (meter_db_raw - S1 + 3) / 6, 9));
     } else {
-        lv_label_set_text_fmt(db_val_label, "S9+%d", (int)(meter_db_raw - S9 + 0.5f));
+        char s[12];
+
+        meter_s_text(meter_db_raw, s, sizeof(s));
+        lv_label_set_text(db_val_label, s);
     }
 }
 
@@ -846,6 +859,14 @@ int16_t meter_get_raw_db(void) {
 
 float meter_get_db(void) {
     return meter_db_raw;
+}
+
+void meter_state(meter_state_t *s) {
+    s->raw   = meter_db_raw;
+    s->level = isfinite(meter_db) ? meter_db : S1;
+    s->peak  = isfinite(meter_peak) ? meter_peak : S1;
+    s->noise = noise_level;
+    s->tx    = in_tx;
 }
 
 uint32_t meter_seq(void) {

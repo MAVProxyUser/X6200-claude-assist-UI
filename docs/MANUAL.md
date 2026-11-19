@@ -806,6 +806,16 @@ shown), B for an SDR on the HOST port, an RTL-SDR stick, a HackRF or a bladeRF (
 2.1 MHz; "the stick" below, whichever it is). Each draws a trace over a 3D picture of the
 last seconds, the strongest signals named over it and the screen's channel bracketed (A's dial, B's channel).
 
+- **The S-meter, on each half of the picture** (top left of its trace): the X6200's half (A, and B's SPLIT) carries
+  the radio's own [S-meter](#s-meter), every figure of it: its 25 bars on its scale (3 dB each up to S9, then 5 dB
+  each to S9+40, the numbers `S1 3 5 7 9 +20 +40` under them), lit to its smoothed level (Settings' spectrum beta),
+  the bars under the noise floor dim as the box's grey, its peak bar bright above the level (held 1.5 s, then falling
+  faster and faster), and its value as S units and dBm to a tenth, `S4  -103.4 DBM` (`TX` while transmitting): the
+  same reading as the box, with its PRE, ATT and calibration. The stick's half (B, and A's SPLIT) has `SNR`: its
+  bracketed channel over the noise of its picture, as its squelch measures it, listened to or not, 0 to 40 dB on the
+  same 25 bars (`0 10 20 30 40`), smoothed and peak-held as the box's, `+13.7 DB`. An SDR stick gives no dBm, so
+  the stick's meter says how far its channel stands over its noise, not S units. The X6100's A carries its own box's
+  meter alike.
 - **The boxes**: RECEIVER (the radio, its model: `RTL-SDR R820T`, `HACKRF ONE`, `BLADERF2`; and what the speaker
   plays: `HEARD: X6200`, `RTL` (`HACKRF`, `BLADERF`) or `BOTH`), TUNED (the
   frequency, the span and the MFK's step), BAND (A: the band the dial is in; B: PRESET, the preset or D's band) and
@@ -1307,9 +1317,11 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
   walkie's own line (the transmitter's lock, the time, the processor, the battery's % and icon, the devices). F1's
   key sits under it.
 - **The channel**: the channel big on the left (or `VFO` off the list's channels); beside it `VIA X6200`, its group
-  (CB EMERGENCY for CB 9, CB TRUCKERS for 19) and the frequency and mode; under them what is there, and the S-meter
-  (S0 to S9+40) and the audio's level as two short bars of segments in the spectrum's colours, deep orange to
-  yellow, with their values.
+  (CB EMERGENCY for CB 9, CB TRUCKERS for 19) and the frequency and mode; under them what is there, then the S-meter
+  and under it the audio's level, each a bar of 25 segments in the spectrum's colours, deep orange to yellow, with its
+  value. The S-meter is A's and B's own, the same in every figure: the radio's own box's 25 bars on its scale with
+  `S1 3 5 7 9 +20 +40` under them, its smoothed level, the bars under the noise floor dim, its peak bar bright, and
+  its value `S4  -103.4 DBM` (`TX` while transmitting); on an SDR channel B's `SNR` meter. AF: -60 to 0 dBFS.
 - **The spectrum**, edge to edge: the X6200's, 100 kHz around the dial (bracketed in the middle): its trace over the
   last rows, in 3D as A's picture or 2D, a flat waterfall with the newest on top (**F4**).
 - **The voiceprint**: the receiver's audio as a sonogram, 0 to 4 kHz up and the last seconds across, in amber:
@@ -1379,7 +1391,8 @@ cellular, FRS/GMRS, MURS, ISM or any other non-amateur frequency is ever keyed, 
 
 - **On an SDR channel G is the SDR's**: `VIA HACKRF` (or `VIA BLADERF`, `VIA RTL-SDR`), FM, the channel heard on the speaker at B's
   volume and squelch, G's spectrum and voiceprint from the SDR (the device tuned 200 kHz over the channel, its
-  middle unused), the S-meter bar its level over the noise. The VFO moves the channel 5 kHz a click; the arrows (BAND UP and DOWN, CH - and CH +
+  middle unused), the S-meter bar its channel over the noise as B's `SNR` (0 to 40 dB, smoothed and peak-held), its
+  value `+12 DB`. The VFO moves the channel 5 kHz a click; the arrows (BAND UP and DOWN, CH - and CH +
   on F1 and F2) step the group's channels; the MFK and F5 go from group to group, back to the X6200's too. Leaving G, or an X6200 channel chosen, gives the speaker back to the X6200; G comes back to the SDR channel it
   was on (after a restart too, once the SDR is there).
 - **A/B arms the SDR's transmitter** (`HACKRF ARMED: PTT TRANSMITS (TX 10 DB)`, the lamp TX ARMED): the X6200 is
