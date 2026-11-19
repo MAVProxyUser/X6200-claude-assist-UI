@@ -39,7 +39,7 @@ build without `embedded-coefficients` and give voacapl an itshfbc tree the owner
 
 ## How Pat runs it
 
-`x6100-winlink` sets Pat's `prediction.engine` to `voacap` with `/usr/bin/voacapl` and `/usr/share/voacapl` (a note
+`x6100-winlink` sets Pat's `prediction.engine` to `voacap` with `/usr/bin/voacapl` and `/usr/share/x6100/voacapl` (a note
 only: Pat checks the folder is there) when the program is installed, else `disabled` as before; Pat with
 `GOMAXPROCS=2`, so two predictions at a time, each at Pat's nice 10. One prediction (all 24 hours of one frequency)
 takes about 50 ms on an X6200; 243 gateways on 40 m about 10 s. The power: Pat asks at a fixed 50 W, voacapl caps it

@@ -18,28 +18,69 @@ LVGL   ?= $(TOP)/lvgl
 DEFS   := -DBOARD_X6200=1 -DHOST_BUILD=1 -DLV_CONF_INCLUDE_SIMPLE -DLV_LVGL_H_INCLUDE_SIMPLE -DUSE_SDL=1 -DUSE_DRM=0 \
           -DUSE_FBDEV=0 -DBOARD_DATA='"$(CURDIR)/build"' -DBOARD_SHARE='"$(CURDIR)/build"' \
           -DBASE_GUARD_LOG='"$(CURDIR)/build/base_i2c.log"'
-INC    := -I $(TOP) -I $(SRC) -I $(SRC)/cfg -I $(DEPS)/include -isystem $(LVGL) $(shell pkg-config --cflags libnm)
+UNAME  := $(shell uname -s)
+# A Mac (2026-11-19): CI was the only place this test ran, so a call radio.c gained that fakes.c has no stand-in for
+# showed first there, three times. On a Mac now too, so tools/host_checks.sh finds it before a push: libnm's header is
+# the two names wifi.h takes from it (mac_include), liquid-dsp's headers Homebrew's when DEPS has none
+ifeq ($(UNAME),Darwin)
+  ifeq ($(wildcard $(DEPS)/include/liquid/liquid.h),)
+    DEPS := $(shell brew --prefix 2> /dev/null)
+  endif
+  NM_INC := -I mac_include $(shell pkg-config --cflags glib-2.0)
+else
+  NM_INC := $(shell pkg-config --cflags libnm)
+endif
+INC    := -I $(TOP) -I $(SRC) -I $(SRC)/cfg -I $(DEPS)/include -isystem $(LVGL) $(NM_INC)
 # radio.c as the PC build has it, without its warnings; the test's own files with them (but params/types.h's comment)
 GUI    := -std=gnu11 -O1 -g -pthread $(DEFS) $(INC)
 CFLAGS := $(GUI) -Wall -Wextra -Wno-comment
-WRAPS  := -Wl,--wrap=hw_vfo_set_freq -Wl,--wrap=hw_set_i -Wl,--wrap=hw_set_f -Wl,--wrap=pthread_create \
-          -Wl,--wrap=pthread_detach -Wl,--wrap=base_no_data -Wl,--wrap=base_guard_log_free -Wl,--wrap=hw_pin_set \
-          -Wl,--wrap=hw_flow_read
+# The calls caught (above), by the file that has them: hw_stub.c's, base_guard.c's and the C library's. On Linux GNU
+# ld's --wrap=S sends every call of S to __wrap_S (fakes.c) and gives the real one as __real_S. A Mac's linker has no
+# --wrap: there each file is compiled with S named __wrap_S, and the file that defines S with it named __real_S, which
+# comes to the same (mac_real.c: the C library's __real_)
+HW_WRAPPED    := hw_vfo_set_freq hw_set_i hw_set_f hw_pin_set hw_flow_read
+GUARD_WRAPPED := base_no_data base_guard_log_free
+LIBC_WRAPPED  := pthread_create pthread_detach
+WRAPPED       := $(HW_WRAPPED) $(GUARD_WRAPPED) $(LIBC_WRAPPED)
+wrap_as        = $(foreach s,$(2),-D$(s)=$(1)$(s))
+
+# A function radio.c calls that fakes.c has no stand-in for yet is a warning in the log on Linux, not a build that
+# fails (the GUI itself links fine), bound lazily, so a missing stand-in the test does reach still stops it ("symbol
+# lookup error": a FAIL, as it should be). On a Mac the link stays strict: a missing stand-in shows before a push.
+# ifeq, not $(if ...): the commas of -Wl split $(if)'s arguments (a bare -Wl, 2026-11-19)
+ifeq ($(UNAME),Darwin)
+  RENAME   := $(call wrap_as,__wrap_,$(WRAPPED))
+  WRAPS    :=
+  TOLERANT :=
+  WRAPPERS := build/hw_stub.o build/base_guard.o build/mac_real.o
+else
+  RENAME   :=
+  WRAPS    := $(foreach s,$(WRAPPED),-Wl,--wrap=$(s))
+  TOLERANT := -Wl,--warn-unresolved-symbols -Wl,-z,lazy
+  WRAPPERS := $(SRC)/hw/stub/hw_stub.c $(SRC)/base_guard.c
+endif
 
 all: test
 
 build/radio.o: radio_thread.c $(SRC)/radio.c $(wildcard $(SRC)/*.h $(SRC)/hw/*.h $(SRC)/cfg/*.h)
-	mkdir -p build && $(CC) $(GUI) -c -o $@ radio_thread.c
+	mkdir -p build && $(CC) $(GUI) $(RENAME) -c -o $@ radio_thread.c
 
-radio_wr12_test: radio_wr12_test.c fakes.c fakes.h build/radio.o $(SRC)/hw/stub/hw_stub.c $(SRC)/base_guard.c \
+radio_wr12_test: radio_wr12_test.c fakes.c fakes.h build/radio.o $(WRAPPERS) \
                  $(SRC)/pa_bias.c $(SRC)/cfg/ham_bands.c $(SRC)/cfg/tx_ranges.c $(SRC)/bat_watch.c
-	$(CC) $(CFLAGS) -o $@ radio_wr12_test.c fakes.c build/radio.o $(SRC)/hw/stub/hw_stub.c $(SRC)/base_guard.c \
+	$(CC) $(CFLAGS) $(RENAME) -o $@ radio_wr12_test.c fakes.c build/radio.o $(WRAPPERS) \
 	    $(SRC)/pa_bias.c $(SRC)/cfg/ham_bands.c $(SRC)/cfg/tx_ranges.c $(SRC)/bat_watch.c -lm $(WRAPS) $(TOLERANT)
 
-# A function radio.c calls that fakes.c has no stand-in for yet is a warning in the log, not a build that fails: three
-# CI runs failed so (2026-11-18/19: dsp_zoom_refresh and others), the GUI itself linking fine each time. Bound lazily,
-# so a missing stand-in the test does reach still stops it ("symbol lookup error": a FAIL, as it should be)
-TOLERANT := $(if $(filter Linux,$(shell uname -s)),-Wl,--warn-unresolved-symbols -Wl,-z,lazy)
+# A Mac's: the files that define what is caught, each with its own names as __real_ and the rest as __wrap_
+build/hw_stub.o: $(SRC)/hw/stub/hw_stub.c $(wildcard $(SRC)/hw/*.h)
+	mkdir -p build && $(CC) $(GUI) $(call wrap_as,__real_,$(HW_WRAPPED)) \
+	    $(call wrap_as,__wrap_,$(GUARD_WRAPPED) $(LIBC_WRAPPED)) -c -o $@ $<
+
+build/base_guard.o: $(SRC)/base_guard.c $(SRC)/base_guard.h
+	mkdir -p build && $(CC) $(GUI) $(call wrap_as,__real_,$(GUARD_WRAPPED)) \
+	    $(call wrap_as,__wrap_,$(HW_WRAPPED) $(LIBC_WRAPPED)) -c -o $@ $<
+
+build/mac_real.o: mac_real.c
+	mkdir -p build && $(CC) $(CFLAGS) -c -o $@ $<
 
 test: radio_wr12_test
 	./radio_wr12_test

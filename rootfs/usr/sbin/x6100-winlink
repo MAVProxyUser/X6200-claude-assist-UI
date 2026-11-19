@@ -90,9 +90,11 @@ NOTE_AGAIN = 60                       # s: the same refusal goes into Pat's log 
 LOG_MAX = 256 * 1024
 PAT = ROOT + "/usr/bin/pat"
 # Pat's VOACAP column (the gateway list's predicted path quality): tools/voacap's voacapl, hfcast-engine's VOACAP with
-# its coefficients compiled in, so the data folder Pat looks for holds only a note (#153)
+# its coefficients compiled in, so the data folder Pat looks for holds only a note (#153). Under /usr/share/x6100: the
+# updater writes nothing else in /usr/share (x6100-update ALLOWED); /usr/share/voacapl made v0.3.12.29-.31's bundles
+# refused by every updater (2026-11-19)
 VOACAPL = ROOT + "/usr/bin/voacapl"
-VOACAP_DATA = ROOT + "/usr/share/voacapl"
+VOACAP_DATA = ROOT + "/usr/share/x6100/voacapl"
 ARDOPCF = ROOT + "/usr/bin/ardopcf"
 MERCURY = ROOT + "/usr/bin/x6x00-mercury"
 XARA = ROOT + "/usr/bin/xara"

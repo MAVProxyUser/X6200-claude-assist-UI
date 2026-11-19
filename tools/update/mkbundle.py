@@ -18,6 +18,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
 Copyright (c) 2026 Joeri Van Dooren ON6URE / Guru-RF
 """
 import argparse
+import ast
 import hashlib
 import io
 import json
@@ -27,6 +28,22 @@ import tarfile
 import time
 
 BRIDGE_VERSION = "0.3.12.20"     # the last bundle marked OpenX6X00, the first of GoldCorpHF
+UPDATER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "rootfs", "usr", "sbin", "x6100-update")
+
+
+def updater_allowed(updater=UPDATER):
+    """The folders the radio's updater writes (its ALLOWED), read from it: a bundle with a file elsewhere is refused
+    whole on the radio. v0.3.12.29 to .31 carried /usr/share/voacapl/README and no updater took them (2026-11-19);
+    every updater since the first has the same ALLOWED, so a file outside it is refused here, at the build"""
+    for node in ast.parse(open(updater).read()).body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "ALLOWED" for t in node.targets):
+            return tuple(ast.literal_eval(node.value))
+    sys.exit(f"no ALLOWED in {updater}")
+
+
+def path_refused(p, allowed):
+    """As x6100-update's bundle check: True when the radio's updater would refuse a file at path p"""
+    return not p.startswith("/") or ".." in p.split("/") or not p.startswith(allowed) or p.endswith("/")
 
 WEB_FILES = ["/usr/bin/x6100_webserver"]
 WEB_DIRS = ["/usr/lib/python3.11/site-packages/x6100_webserver"]
@@ -123,6 +140,12 @@ def main():
         for root, _, files in os.walk(os.path.join(a.target, d.lstrip("/"))):
             for n in files:
                 paths.add("/" + os.path.relpath(os.path.join(root, n), a.target))
+
+    allowed = updater_allowed()
+    refused = sorted(p for p in paths if path_refused(p, allowed))
+    if refused:
+        sys.exit("the radio's updater would refuse this bundle whole (x6100-update ALLOWED: "
+                 + " ".join(allowed) + "), it has:\n  " + "\n  ".join(refused))
 
     entries = []
     for p in sorted(paths):

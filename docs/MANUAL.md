@@ -7,6 +7,9 @@ v0.3.12.20 is the line in the sand: its update is the last one marked OpenX6X00,
 ever, and with it the updater that takes GoldCorpHF's. The updates after it are GoldCorpHF's alone (an OpenX6X00
 bundle, upstream's, is refused): a radio still on v0.3.12.19 or older by then installs v0.3.12.20's bundle file
 first (the web page's Update, Bundle file), then updates as usual.
+The updates of v0.3.12.29, v0.3.12.30 and v0.3.12.31 are refused by every radio's updater ("the bundle wants to write
+/usr/share/voacapl/README: refused": one file outside the folders the updater writes), and nothing on the radio
+changes: a radio takes the release after them as usual. Their SD card images are fine.
 
 How to use every part of the firmware, and the reference tables. The short
 overview is the [README](../README.md). Each release on GitHub has this

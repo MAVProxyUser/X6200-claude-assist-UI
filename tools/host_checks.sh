@@ -43,7 +43,10 @@ n_pass=0 n_fail=0 n_build=0 n_skip=0
 skip_why() {
     case $1 in
         cw_trainer) [ -n "$DEPS" ] || echo "needs liquid-dsp: DEPS=<dir with include/liquid and lib>";;
-        update|base_update) echo "CI runs these in workflows of their own (updater.yml, base_update.yml)";;
+        # The updater's own tests run on a Mac too (they caught nothing before 2026-11-19 only because they never ran
+        # here: paths_test.py would have stopped v0.3.12.29's bundle); in CI their workflow runs them
+        update) [ -n "$GITHUB_ACTIONS" ] && echo "CI runs these in a workflow of their own (updater.yml)";;
+        base_update) echo "CI runs these in a workflow of their own (base_update.yml)";;
         cross_x6200|manual_pdf|logo|icons|fonts|bootvideo|secrets|tailscale|data_partition|first_start|wifi_restore|wifi_steady|winlink|pat|channels|iambic_default|smeter_share|ft8_qso)
             # tools, not host checks: their Makefiles build images, files or programs for the radio
             [ -f "tools/$1/Makefile" ] && grep -q -E '^test:' "tools/$1/Makefile" || echo "a tool, not a host check";;

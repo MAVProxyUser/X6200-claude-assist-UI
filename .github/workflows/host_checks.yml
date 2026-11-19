@@ -16,7 +16,9 @@ permissions:
 jobs:
   host-checks:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    # The checks take about 18 minutes and the setup 3; 60 leaves room for a slow mirror on a run with nothing kept
+    # (2026-11-19: Ubuntu's took 23 minutes over the packages and the job hit the old 40)
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,15 +30,42 @@ jobs:
       - name: v0.3.8, which tools/data_partition compares the boot script with
         run: git fetch -q --no-tags --depth=1 origin +refs/tags/v0.3.8:refs/tags/v0.3.8
 
-      # The network steps tried again on a failure: a mirror's or GitHub's hiccup failed the run before any check
+      # The packages Ubuntu's mirror gave, kept between runs: on 2026-11-19 it took 23 minutes over them (45 s as a rule)
+      # and the job ran out of time. A run with them kept downloads only what is newer; the key changes with this file,
+      # and the last run's packages come back for a new key too
+      - name: Ubuntu's packages, kept between runs
+        id: apt-kept
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/openx6x00/apt
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/host_checks.yml') }}
+          restore-keys: apt-${{ runner.os }}-
+
+      # The network steps tried again on a failure: a mirror's or GitHub's hiccup failed the run before any check.
+      # apt keeps what it downloads in the folder above (its own archives folder may be cleaned by the runner image)
       - name: Libraries
         run: |
+          A=$HOME/.cache/openx6x00/apt
+          mkdir -p "$A/partial"
           for i in 1 2 3; do sudo apt-get update -q -o Acquire::Retries=3 && break; sleep 20; done
-          for i in 1 2 3; do sudo apt-get install -y -q -o Acquire::Retries=3 build-essential autoconf automake libtool cmake ninja-build pkg-config \
+          for i in 1 2 3; do sudo apt-get install -y -q -o Acquire::Retries=3 -o Dir::Cache::Archives="$A" \
+            -o APT::Keep-Downloaded-Packages=true \
+            build-essential autoconf automake libtool cmake ninja-build pkg-config \
             libsqlite3-dev sqlite3 libxkbcommon-dev libnm-dev libpng-dev libasound2-dev python3-bottle \
             fdisk util-linux parted dosfstools exfatprogs bsdextrautils network-manager dbus iproute2 \
             libsdl2-dev libdrm-dev libdbus-glib-1-dev libsndfile1-dev libudev-dev libpulse-dev libjpeg-dev \
             libglib2.0-dev libboost-dev && break; sleep 20; [ $i = 3 ] && exit 1; done
+          sudo rm -rf "$A/partial" "$A/lock"
+          sudo chown -R "$(id -u):$(id -g)" "$A"
+          echo "packages kept: $(ls "$A" | wc -l) ($(du -sh "$A" | cut -f1))"
+
+      # Kept as soon as they are in, not at the job's end: a check that fails later still leaves them for the next run
+      - name: Ubuntu's packages kept for the next run
+        if: steps.apt-kept.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/openx6x00/apt
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/host_checks.yml') }}
 
       # As host/build.sh's deps(), in /usr/local (DEPS below): liquid-dsp and ft8_lib at the radio's versions
       - name: liquid-dsp, the radio's version
