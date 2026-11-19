@@ -118,6 +118,7 @@
 #include "scheduler.h"
 #include "screen_light.h"
 #include "screen_main.h"
+#include "app_sentry.h"      /* "open sentry L" */
 #include "smeter.h"
 #include "tci_server.h"
 #include "tci_ws.h"
@@ -278,6 +279,8 @@ typedef struct {
     bool    ulock;          /* the user's lock alone (LOCK), not an app's hold: the page's LOCK button */
     bool    cwrise;         /* CW's tone rises with the dial, as CW-R's (the X6200): its CW passband the other side */
     char    app[16];        /* the digital app open (main_screen_digital_app), "" for none */
+    char    win[24];        /* the app whose window is open (main_screen_window_name), "" for none */
+    char    pg[2];          /* the Sentry's page, "A"-"G" or "S" (app_sentry_page), "" when it is not open */
 } pstate_t;
 
 /* A change asked by a panel client, for the LVGL thread */
@@ -1109,6 +1112,10 @@ static void pstate_read(pstate_t *s) {
     const char *app = main_screen_digital_app();
     memset(s->app, 0, sizeof(s->app));      /* compared whole with memcmp */
     snprintf(s->app, sizeof(s->app), "%s", app ? app : "");
+    memset(s->win, 0, sizeof(s->win));
+    snprintf(s->win, sizeof(s->win), "%s", main_screen_window_name());
+    memset(s->pg, 0, sizeof(s->pg));
+    s->pg[0] = app_sentry_page();
 }
 
 static void pstate_line(char *buf, size_t n, const pstate_t *s) {
@@ -1116,10 +1123,10 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "state {\"freq\":%d,\"mode\":%d,\"flo\":%d,\"fhi\":%d,\"kt\":%d,\"agc\":%d,\"pre\":%d,\"att\":%d,"
              "\"nb\":%d,\"nr\":%d,\"sql\":%d,\"rfg\":%d,\"vol\":%d,\"pwr\":%d.%d,\"step\":%d,\"zoom\":%d,"
              "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d,"
-             "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"app\":\"%s\"}",
+             "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
-             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->app);
+             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->app, s->win, s->pg);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */
@@ -1418,7 +1425,8 @@ static void ft8_status_line(char *buf, size_t n, const ft8_status_t *s) {
 }
 
 /* What the panel asks of the apps, on the LVGL thread */
-typedef enum { A_FT8_OPEN, A_FT8_CLOSE, A_FT8, A_WEFAX_OPEN, A_WEFAX_CLOSE, A_WEFAX, A_LOG } acmd_id_t;
+typedef enum { A_FT8_OPEN, A_FT8_CLOSE, A_FT8, A_WEFAX_OPEN, A_WEFAX_CLOSE, A_WEFAX, A_LOG, A_APP_OPEN, A_APP_CLOSE,
+               A_SENTRY } acmd_id_t;
 
 typedef struct {
     acmd_id_t   id;
@@ -1566,6 +1574,17 @@ static void app_apply(void *arg) {
             break;
         case A_LOG:
             log_answer(a->who, a->log_id, a->sum, dialog_field_qso_log(a->text));
+            break;
+        case A_APP_OPEN:
+            backlight_tick();
+            main_screen_start_app((press_action_t)a->arg);
+            break;
+        case A_APP_CLOSE:
+            if (dialog_is_run()) main_screen_close_app();
+            break;
+        case A_SENTRY:
+            backlight_tick();
+            app_sentry_open_at((char)a->arg);
             break;
     }
 }
@@ -1835,7 +1854,7 @@ static void *panel_thread(void *arg) {
 }
 
 /* "key NAME 1|0", "knob main|vol|mfk N", "ping", "screen 0|1", "panel 0|1", "wide 0|1", "set NAME VALUE",
- * "ft8 WHAT [ARG]", "log TEXT" */
+ * "ft8 WHAT [ARG]", "log TEXT", "apps", "open ACTION|sentry L", "close" */
 /* "ctl WHO MINE": who controls the radio, and whether it is this client */
 static void ctl_tell(client_t *c) {
     ctl_info_t o;
@@ -2335,6 +2354,51 @@ static void handle_text(client_t *c, char *text) {
             return;
         if (!app_wefax_cmd(a[1]))
             client_textf(c, "err wefax %s", a[1]);
+    } else if (!strcmp(a[0], "apps")) {
+        /* "apps": the apps this radio has, "apps [[ACTION,"Name"],...]" (the end-to-end suite, tools/bench/suite.py) */
+        press_action_t ids[96];
+        const char    *names[96];
+        size_t         k = main_screen_apps(ids, names, 96), at;
+        char           out[4096];
+
+        at = (size_t)snprintf(out, sizeof(out), "apps [");
+        for (size_t i = 0; i < k && at < sizeof(out) - 48; i++) {
+            at += (size_t)snprintf(out + at, sizeof(out) - at, "%s[%d,", i ? "," : "", (int)ids[i]);
+            at += json_str(out + at, sizeof(out) - at, names[i] ? names[i] : "");
+            at += (size_t)snprintf(out + at, sizeof(out) - at, "]");
+        }
+        snprintf(out + at, sizeof(out) - at, "]");
+        client_text(c, out);
+    } else if (!strcmp(a[0], "open") && n >= 2) {
+        /* "open ACTION": an app of "apps"; "open sentry L": the Sentry on its page L (A-G; H AIRSPACE, I the direction
+         * finder). Never the two that put the radio on the air by opening (SWR scan, WSPR) nor the first-start guide */
+        if (!allowed(c, ROLE_OPERATE, true))
+            return;
+        acmd_t q = {.id = A_APP_OPEN};
+
+        if (!strcasecmp(a[1], "sentry") && n >= 3 && strlen(a[2]) == 1 && toupper((unsigned char)a[2][0]) >= 'A' &&
+            toupper((unsigned char)a[2][0]) <= 'I') {
+            q.id  = A_SENTRY;
+            q.arg = toupper((unsigned char)a[2][0]);
+        } else {
+            char *end;
+            long  v = strtol(a[1], &end, 10);
+
+            if (*end || !main_screen_app_known((press_action_t)v) || v == ACTION_APP_SWRSCAN || v == ACTION_APP_WSPR ||
+                v == ACTION_APP_FIRST_START) {
+                client_textf(c, "err open %s", a[1]);
+                return;
+            }
+            q.arg = (int32_t)v;
+        }
+        scheduler_put(app_apply, &q, sizeof(q));
+    } else if (!strcmp(a[0], "close")) {
+        /* "close": the app open closed (the X6200's and X6100's Sentry, their home screen, comes back) */
+        if (!allowed(c, ROLE_OPERATE, true))
+            return;
+        acmd_t q = {.id = A_APP_CLOSE};
+
+        scheduler_put(app_apply, &q, sizeof(q));
     } else if (!strcmp(a[0], "clk?") && n >= 2) {
         /* the phone's clock, step 1: its time sent back with ours, so the page knows the round trip */
         struct timespec ts;

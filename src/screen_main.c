@@ -665,6 +665,32 @@ static const struct {
 };
 #define WINDOWS_N (sizeof(windows) / sizeof(windows[0]))
 
+/* The apps this radio has (its windows: every app but RTTY), for the browser remote's "apps": the end-to-end suite
+ * opens each on both radios (tools/bench/suite.py). n at most; how many written */
+size_t main_screen_apps(press_action_t *ids, const char **names, size_t n) {
+    size_t k = 0;
+
+    for (size_t i = 0; i < WINDOWS_N && k < n; i++) {
+        ids[k]   = windows[i].app;
+        names[k] = app_name(windows[i].app);
+        k++;
+    }
+    return k;
+}
+
+/* The app whose window is open ("" none: the main screen, the APP grid, RTTY), for the browser remote's state "win" */
+const char *main_screen_window_name(void) {
+    for (size_t i = 0; i < WINDOWS_N; i++)
+        if (dialog_type_is_run(*windows[i].window)) return app_name(windows[i].app);
+    return "";
+}
+
+bool main_screen_app_known(press_action_t app) {
+    for (size_t i = 0; i < WINDOWS_N; i++)
+        if (windows[i].app == app) return true;
+    return false;
+}
+
 void main_screen_start_app(press_action_t app_action) {
     main_screen_buttons_wake();     /* the app's buttons seen, also when it is opened from afar */
 

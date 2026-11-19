@@ -29,6 +29,8 @@ extern dialog_t *dialog_sentry;
 
 /* The Sentry opened on a screen of its ring by its letter, "A" to "G"; "H" opens AIRSPACE (app_adsb.c), its eighth */
 void app_sentry_open_at(char letter);
+/* The page shown, "A" to "G" (SCAN CFG "S"), 0 when the Sentry is not open */
+char app_sentry_page(void);
 /* The SDR pool's panel (sdr_pool.h), the Sentry opened on F for it when it is not open (APP held on H) */
 void app_sentry_open_pool(void);
 

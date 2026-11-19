@@ -10677,6 +10677,15 @@ void app_sentry_open_pool(void) {
     main_screen_start_app(ACTION_APP_SENTRY);
 }
 
+/* The page the Sentry shows, "A" to "G" (SCAN CFG: "S"), 0 when it is not open: the browser remote's state "pg" */
+char app_sentry_page(void) {
+    if (!root || !dialog_type_is_run(dialog_sentry)) return 0;
+    if (scr == SCR_TRACK) return 'S';
+    for (int i = 0; i < (int)(sizeof(ring) / sizeof(ring[0])); i++)
+        if (ring[i] == scr) return (char)('A' + i);
+    return 0;
+}
+
 void app_sentry_open_at(char letter) {
     static const scr_t by[] = {SCR_SCAN, SCR_RTL, SCR_LOG, SCR_BANDS, SCR_DECODE, SCR_SYSTEM, SCR_WALKIE};
 

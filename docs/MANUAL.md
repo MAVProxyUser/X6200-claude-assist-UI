@@ -9035,7 +9035,15 @@ the CW decoder's text as `cw "..."`; `ft8 open|close|cq|stop|auto|hold|mode`,
 open|close|auto|cont|save|clear` works the WeFax app as its buttons do (RX
 Auto, RX Cont, Save, Clear; operate and control, `err wefax WHAT` for one it
 does not know), and the panel state's `app` names the digital app open
-(`"FT8"`, `"WeFax"`, `""` for none); the FT8 state
+(`"FT8"`, `"WeFax"`, `""` for none), `win` the app whose window is open
+(any app: `"Cluster"`, `"Sentry"`, `""` for the main screen) and `pg` the
+Sentry's page (`"A"` to `"G"`, `"S"` for SCAN CFG, `""` when it is not
+open). `apps` is answered `apps [[ACTION,"Name"],...]`, the apps this radio
+has; `open ACTION` opens one of them, `open sentry L` the Sentry on its page
+L (`H` AIRSPACE, `I` the direction finder) and `close` closes the app open
+(operate and control; never the SWR scan, WSPR or the first-start guide,
+`err open ACTION`): what the two-radio suite (tools/bench/suite.py)
+photographs every screen with; the FT8 state
 carries the timeline too (`in` ms to our next slot, `slot` its length, `rep`
 the sends left, `qso`, `hound`, `nocall`, `logged` and `logged_s`), once a
 second while a countdown runs; `log CALL|RSTS|RSTR|NAME`

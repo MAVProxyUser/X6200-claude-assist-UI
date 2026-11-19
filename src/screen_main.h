@@ -50,6 +50,11 @@ bool main_screen_buttons_wake(void);
 
 /* Apps and the actions a long press or a hand mic F key can be given */
 void main_screen_start_app(press_action_t app);
+/* The apps this radio has, actions and names (n at most; how many), and whether an action is one of them */
+size_t main_screen_apps(press_action_t *ids, const char **names, size_t n);
+bool   main_screen_app_known(press_action_t app);
+/* The app whose window is open, "" for none */
+const char *main_screen_window_name(void);
 void main_screen_close_app(void);
 /* The X6200's home screen, the Sentry (cfg_sentry_home): main_screen_dialog_closed() after a window closed brings
  * it back when nothing else took the screen; paused while the main screen was chosen in it, till it opens again */
