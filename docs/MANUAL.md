@@ -3628,6 +3628,15 @@ preamp's gain is taken off the reading, the attenuator's depth added, and
 for every RF gain step under 100 a fraction of a dB added. The three values
 are settings, with the figures measured on one radio as defaults.
 
+On the X6200 the meter is the base's own reading, but in AM, synchronous AM
+and wide FM the base's reading does not follow a signal (an AM carrier its
+spectrum showed 41 dB up left it at the floor). In those modes the meter is
+the power inside the filter from the spectrum, as the X6100's always is,
+matched to the base's reading by the difference the radio learns in the
+other modes (a few minutes in USB, LSB, CW or FM after a start); before
+that it reads on the spectrum's own scale. Up to v0.3.12.34 the X6200's
+meter stood still in AM.
+
 | Setting | Range | Default |
 |---|---|---|
 | Preamp | 0 to 40 dB | 19 dB (X6200: 16 dB) |

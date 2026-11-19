@@ -457,6 +457,30 @@ void dsp_samples(cfloat *buf_samples, uint16_t size, bool tx, uint32_t base_freq
     frame_out(now, tx, base_freq);
 }
 
+/* The X6200's S-meter: the base's own reading, but in AM, synchronous AM and wide FM, where the base's does not follow
+ * (2026-11-19, the bench's walkie test: an X6100's AM over the X6200's spectrum showed 41 dB up left its meter at the
+ * floor; wide FM likewise, 11-14), the power inside the filter from the spectrum, as the X6100's meter is
+ * (s_meter), set against the base's reading by their difference, learned slowly in the modes where the base's
+ * follows. Until it is learned (a start in AM) the spectrum's own level, SMETER_DB's scale */
+static float psd_meter_off = NAN;
+
+static float psd_meter(int16_t smeter_dbm) {
+    float bin_hz = (float)wf_span() / WATERFALL_NFFT;
+    float p      = dsp_band_power(wf_lin, WATERFALL_NFFT, bin_hz, filter_from, filter_to);
+    float spec   = p > 0 ? 10.0f * log10f(p) + SMETER_DB : NAN;
+    bool  blind  = cur_mode == radio_mode_am || cur_mode == radio_mode_sam || cur_mode == radio_mode_wfm;
+
+    if (!isfinite(spec))
+        return smeter_dbm;
+    if (!blind) {
+        float d = (float)smeter_dbm - spec;
+
+        psd_meter_off = std::isnan(psd_meter_off) ? d : psd_meter_off * 0.99f + d * 0.01f;
+        return smeter_dbm;
+    }
+    return spec + (std::isnan(psd_meter_off) ? 0.0f : psd_meter_off);
+}
+
 /* The base's own spectrum (HW_CAP_PSD, the X6200): n bins in dB over span_hz around the tuned
  * frequency, the lowest first, one packet of the base. The base's steps are wider than the
  * screen's span: its middle part is shown. The base's S-meter reading replaces the one summed
@@ -524,7 +548,7 @@ void dsp_psd(const float *db, uint16_t n, uint32_t span_hz, bool tx, int16_t sme
     wf_time = now;
 
     if (dialog_msg_voice_get_state() != MSG_VOICE_RECORD)
-        meter_update(smeter_dbm, params.spectrum_beta.x * 0.01f);
+        meter_update(psd_meter(smeter_dbm), params.spectrum_beta.x * 0.01f);
     frame_out(now, tx, 0);
 }
 
