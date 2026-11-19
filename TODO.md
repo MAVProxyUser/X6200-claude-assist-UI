@@ -23,7 +23,19 @@ approved that day.
   and ffmpeg with the libraries they load (mkbundle.py CARRY_PKGS), and level 3 reached by the bundle's kernel and
   U-Boot (image-required's x6100-boot and x6200-boot lines): the X6100's card v0.3.12.28 gets the GPU through its
   update, no card to write. In the release after v0.3.12.32.
-- To do, with the owner's word on the cable and pads (given 2026-11-19, "cable is confirmed"): the Walkie (G) on both radios sending to and hearing each
+- Found by the Walkie test (bench.py radios-walkie, 2026-11-19), to fix:
+  - the X6100 sends 0.9 W asked for 0.1 W on 6 m (its own meter; the watch stopped it): its low-power setting on 6 m
+    (TX Cal?) before G's 6 m from the X6100 is tried again;
+  - the X6200's S-meter does not follow AM (the base's own reading: an X6100 AM over its spectrum showed 41 dB up left
+    it at the floor; wide FM likewise, 11-14): the meter from the spectrum in AM and WFM, as the X6100's, set
+    against the base's in USB/FM;
+  - the X6200's reports to a page (meter, spectrum, state) stall for seconds now and then, and an A/B tap over WiFi
+    is missed now and then (the remote's key press and release).
+- Host checks on the Mac (item 6, "wrap 6 up"): liquid-dsp 1.4.0 built here; align and tx_meters run here now;
+  cw_trainer (one case: a character decoded in silence, Mac arithmetic) and settings_keep (its copy under macOS's own
+  SQLite) fail on a Mac only; cw_kbd, direct_hole, screen_saver, tci_ask and wf_image want the GUI's PC build (libnm);
+  18 need Linux itself (a Linux VM here would close them: the owner's call).
+- Walkie, done with the owner's word on the cable and pads (given 2026-11-19, "cable is confirmed"): the Walkie (G) on both radios sending to and hearing each
   other on every band and mode G offers, at 0.1 W through the pads (CB refused by both radios' TX ranges).
 
 **Open, in the order they are worked**
