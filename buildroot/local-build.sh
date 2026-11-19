@@ -164,6 +164,10 @@ grep -q "^BR2_PACKAGE_AVAHI_DAEMON=y" $DEFCONFIG || echo "BR2_PACKAGE_AVAHI_DAEM
 grep -q "select BR2_PACKAGE_AVAHI_DAEMON" $GUI_CONFIG_IN || sed -i "s/^\tselect BR2_PACKAGE_LIBPNG$/\tselect BR2_PACKAGE_LIBPNG\n\tselect BR2_PACKAGE_AVAHI\n\tselect BR2_PACKAGE_AVAHI_DAEMON/" $GUI_CONFIG_IN
 grep -q "avahi" $GUI_MK || sed -i "/^${GUI_VAR}_DEPENDENCIES/s/$/ avahi/" $GUI_MK
 grep -q "libdrm" $GUI_MK || sed -i "/^${GUI_VAR}_DEPENDENCIES/s/$/ libdrm/" $GUI_MK
+# libgpiod: the X6100's GUI holds its control lines itself (src/hw/x6100/hw_x6100.c, 2026-11-19: the control
+# library started the WiFi chip's power line at off), so it links libgpiod, which the control library never declared
+grep -q "^BR2_PACKAGE_LIBGPIOD=y" $DEFCONFIG || echo "BR2_PACKAGE_LIBGPIOD=y" >> $DEFCONFIG
+grep -q "libgpiod" $GUI_MK || sed -i "/^${GUI_VAR}_DEPENDENCIES/s/$/ libgpiod/" $GUI_MK
 
 echo "== No RHVoice: PulseAudio selected by the GUI itself"
 sed -i "/^${GUI_VAR}_DEPENDENCIES/s/\brhvoice\b/pulseaudio/" $GUI_MK
