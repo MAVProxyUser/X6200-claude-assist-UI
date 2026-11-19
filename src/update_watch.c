@@ -31,6 +31,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+/* Whether a restart brings this radio back by itself (x6x00-reboot): the X6200's base stays on; the X6100's switches
+ * the radio off when the processor resets, so it comes back only where the running kernel can jump to the card's
+ * (kexec: /sys/kernel/kexec_loaded, and the tool). An X6100 still on a kernel from before switches off: the box says so
+ * (2026-11-19, the X6100's first restart into the kexec kernel) */
+static bool back_by_itself(void) {
+#ifdef BOARD_X6200
+    return true;
+#else
+    return access("/sys/kernel/kexec_loaded", F_OK) == 0 && access("/usr/sbin/kexec", X_OK) == 0;
+#endif
+}
 
 #define CHECK_JSON   BOARD_DATA "/update/check.json"     /* x6100-update check, from S99updatecheck */
 #define ANNOUNCED    BOARD_DATA "/update/announced"      /* the version it was said for */
@@ -295,7 +308,8 @@ static void prog_timer_cb(lv_timer_t *t) {
         snprintf(s, sizeof(s), "Putting the new files in place, the old ones kept: %ld of %ld", got, total);
     } else if (!strcmp(step, "done")) {
         pct = 100;
-        snprintf(s, sizeof(s), "%s", opt_on[OPT_REBOOT] ? "Installed. The radio restarts now and comes back by itself"
+        snprintf(s, sizeof(s), "%s", opt_on[OPT_REBOOT] ? (back_by_itself() ? "Installed. The radio restarts now and comes back by itself"
+                                                                            : "Installed. The radio switches off now: switch it on again")
                                      : opt_on[OPT_KERNEL] || opt_on[OPT_UBOOT]
                                          ? "Installed. The radio's software restarts now; the SD card's part from the "
                                            "next power-on"
@@ -379,7 +393,8 @@ static void install_done(const char *out, int status, void *user) {
     uw = UW_IDLE;           /* "ok": the software restarts, this GUI with it; anything else is why not */
     if (strncmp(out, "ok", 2) == 0) {
         if (pbox) {
-            lv_label_set_text(p_step, opt_on[OPT_REBOOT] ? "Installed. The radio restarts now and comes back by itself"
+            lv_label_set_text(p_step, opt_on[OPT_REBOOT] ? (back_by_itself() ? "Installed. The radio restarts now and comes back by itself"
+                                                                             : "Installed. The radio switches off now: switch it on again")
                                       : opt_on[OPT_KERNEL] || opt_on[OPT_UBOOT]
                                           ? "Installed. The radio's software restarts now; the SD card's part from the "
                                             "next power-on"
@@ -794,8 +809,9 @@ static void poweron_cb(lv_timer_t *t) {
     lv_obj_set_style_text_font(obj, VF(18), 0);
     lv_obj_set_style_text_color(obj, TC(text), 0);
     lv_label_set_text_fmt(obj, "The update put %s on the SD card. %s only when the radio restarts: press the MFK to "
-                          "restart it now (it comes back by itself), or hold POWER till it is off and switch it on.",
-                          what[0] ? what : "the kernel", strstr(what, " and ") ? "They start" : "It starts");
+                          "restart it now (%s), or hold POWER till it is off and switch it on.",
+                          what[0] ? what : "the kernel", strstr(what, " and ") ? "They start" : "It starts",
+                          back_by_itself() ? "it comes back by itself" : "it switches off: switch it on again");
 
     obj = lv_label_create(pon);
     lv_obj_set_style_text_font(obj, VF(16), 0);
