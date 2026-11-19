@@ -78,6 +78,13 @@ CARRY_SKIP = ("/usr/lib/pkgconfig/", "/usr/lib/cmake/", "/usr/lib/gstreamer-1.0/
 # two only: the Mali-400's and the R16 display's (what an X6200 card has, and what the GUI's EGL opens)
 CARRY_DRI = ("/usr/lib/dri/lima_dri.so", "/usr/lib/dri/sun4i-drm_dri.so")
 CARRY_MAX_MB = 80                        # the carried part at most (about 40 MB: Mesa 26, GStreamer and ffmpeg)
+# Which radios get them: the X6100's cards up to v0.3.12.31 have no Mesa nor GStreamer; every X6200 card has both
+# (and ffmpeg). And not what every X6100 card has already: an updater of before v0.3.12.36 counts each file of a
+# bundle, the same or not, and the system partition is 488 MB (v0.3.12.34/.35's 129 MB did not fit: "no room")
+CARRY_MODELS = ("x6100",)
+CARRY_PKGS_MODEL = ("mesa3d", "gstreamer1", "gst1-plugins-base", "gst1-plugins-good", "gst1-plugins-bad")
+CARRY_HAVE = ("libglib-2.0.so", "libgobject-2.0.so", "libgmodule-2.0.so", "libgio-2.0.so", "libgthread-2.0.so",
+              "libffi.so", "libz.so", "libexpat.so", "libdrm.so", "libpcre2-8.so", "libav", "libsw", "libpostproc")
 UBOOT = "u-boot-sunxi-with-spl.bin"
 UBOOT_OFFSET = 8 * 1024                  # genimage's u-boot partition: offset 8K, size 1016K
 UBOOT_AREA = 1016 * 1024
@@ -127,9 +134,9 @@ def elf_needed(path):
     return [data[off + n:data.index(b"\0", off + n)].decode(errors="replace") for n in needed]
 
 
-def carried(target, file_list, pkgs=CARRY_PKGS):
+def carried(target, file_list, pkgs=CARRY_PKGS, have=()):
     """The paths of pkgs' libraries and programs in target (packages-file-list.txt: "pkg,./path" a line), with the
-    libraries of /usr/lib they load, followed"""
+    libraries of /usr/lib they load, followed; not those named in have (a name's start: what the cards have)"""
     out = set()
     with open(file_list) as f:
         for line in f:
@@ -143,6 +150,8 @@ def carried(target, file_list, pkgs=CARRY_PKGS):
     while todo:
         for name in elf_needed(os.path.join(target, todo.pop().lstrip("/"))):
             p = "/usr/lib/" + name
+            if name.startswith(have):
+                continue
             if p not in out and os.path.isfile(os.path.join(target, p.lstrip("/"))):
                 out.add(p)
                 todo.append(p)
@@ -220,8 +229,8 @@ def main():
     paths.update(LIB_FILES)
     paths.update(SDR_FILES)
     extra = set()
-    if a.packages_file_list:
-        extra = carried(a.target, a.packages_file_list) - paths
+    if a.packages_file_list and a.model in CARRY_MODELS:
+        extra = carried(a.target, a.packages_file_list, CARRY_PKGS_MODEL, CARRY_HAVE) - paths
         paths.update(extra)
     for d in WEB_DIRS:
         for root, _, files in os.walk(os.path.join(a.target, d.lstrip("/"))):
@@ -277,7 +286,7 @@ def main():
         sys.exit(f"the image's packages carried come to {carried_mb:.0f} MB, over {CARRY_MAX_MB}: an X6100's root "
                  f"filesystem has about 190 MB free (v0.3.12.33's 355 MB were Mesa's driver copied 29 times)")
     if extra:
-        print(f"   carried from the image's packages ({', '.join(CARRY_PKGS)}) and what they load: {len(extra)} files, "
+        print(f"   carried from the image's packages ({', '.join(CARRY_PKGS_MODEL)}) and what they load: {len(extra)} files, "
               f"{sum(e['size'] for e in entries if e['path'] in extra) / 1e6:.1f} MB")
     if boot_members:
         b = manifest["boot"]

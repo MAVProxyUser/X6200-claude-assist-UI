@@ -140,6 +140,10 @@ class Carry(unittest.TestCase):
                                    "/usr/bin/gst-launch-1.0"})
             allowed = mkbundle.updater_allowed()
             self.assertEqual([p for p in got if mkbundle.path_refused(p, allowed)], [])
+            # what every X6100 card has already, left out (an older updater counts each file of the bundle)
+            got = mkbundle.carried(t, pfl, have=("libdrm.so", "libexpat.so"))
+            self.assertFalse({"/usr/lib/libdrm.so.2", "/usr/lib/libexpat.so.1"} & got)
+            self.assertIn("/usr/lib/dri/lima_dri.so", got)
 
 
 if __name__ == "__main__":
