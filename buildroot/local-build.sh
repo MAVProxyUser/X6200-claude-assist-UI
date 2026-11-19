@@ -372,12 +372,20 @@ grep -q "^CONFIG_UHID=" $KERNEL_DEFCONFIG || echo "CONFIG_UHID=m" >> $KERNEL_DEF
 # zone reads it, slows the CPU down from 75 °C and powers the radio off at 110 °C, and its iio-hwmon node shows it
 # under hwmon. The tree's kernel has sun8i_thermal, which knows the H3, A64 and their kin but not the A33, whose
 # sensor is sun4i-gpadc-iio's: without it the sensor had no driver and there was no thermal zone at all.
-# Both radios: the X6100's device tree has the same sensor and zone (seen on one 2026-11-18, which had no thermal
-# zone), and its kernel the same options from then on, the video engine and udmabuf below too
-echo "== Kernel: the processor temperature sensor and its thermal zone"
-for o in CONFIG_SUN4I_GPADC=y CONFIG_SENSORS_IIO_HWMON=y; do
-    grep -q "^${o%%=*}=" $KERNEL_DEFCONFIG || echo "$o" >> $KERNEL_DEFCONFIG
-done
+# The X6200 only. The X6100's device tree has the same sensor and zone, but on the owner's X6100 (2026-11-19, its
+# first kernel with the driver) the sensor's raw value jumped between 1920 and 2272 a fifth of a second apart (42 to
+# 99 °C; the X6200's within 6, +-1 °C at 60): the zone slowed its CPU at random (648-1008 MHz) and a spike past 110
+# would have powered it off. No driver there, no zone, as the X6100 always had; the video engine and udmabuf below
+# for both
+echo "== Kernel: the processor temperature sensor and its thermal zone (the X6200's)"
+if [ "$MODEL" = x6200 ]; then
+    for o in CONFIG_SUN4I_GPADC=y CONFIG_SENSORS_IIO_HWMON=y; do
+        grep -q "^${o%%=*}=" $KERNEL_DEFCONFIG || echo "$o" >> $KERNEL_DEFCONFIG
+    done
+else
+    sed -i "/^CONFIG_SUN4I_GPADC=/d; /^# CONFIG_SUN4I_GPADC is not set/d" $KERNEL_DEFCONFIG
+    echo "# CONFIG_SUN4I_GPADC is not set" >> $KERNEL_DEFCONFIG     # said, so no default brings it back
+fi
 # The R16's video engine (Cedrus: video-codec@1c0e000 in sun8i-a33.dtsi, 6.1's staging driver): H.264, H.265,
 # MPEG-2 and VP8 decoded in hardware through V4L2's stateless (request) API, /dev/video0 and /dev/media0. Nothing
 # decodes through it yet (the boot video is ffmpeg's, in software: ffmpeg knows only stateful V4L2 decoders); the

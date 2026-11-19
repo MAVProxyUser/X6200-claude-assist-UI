@@ -525,6 +525,18 @@ def cable(run, only):
                     run.result("cable", "restore", False, f"{n}: ATU not switched on again ({e})", radio=n)
 
 
+def band_rows(run, n):
+    """Each band's memories (band_params: the VFOs' frequency and mode on it...), as "band<ID>.<name>": an app that
+    goes to its band takes them (SSTV opened on 14.0627 CW on one radio, 14.230 USB on the other, 2026-11-19)"""
+    out = ssh(run, n, "sqlite3 -separator '|' /mnt/params.db 'select bands_id,name,val from band_params'")
+    rows = {}
+    for line in out.splitlines():
+        parts = line.split("|")
+        if len(parts) == 3 and parts[0].isdigit():
+            rows[f"band{parts[0]}.{parts[1]}"] = parts[2]
+    return rows
+
+
 def gui_state(run, n):
     out = ssh(run, n, "cat /mnt/gui_state.conf 2>/dev/null")
     return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
@@ -539,6 +551,9 @@ def photo_sync(run, src, dst):
             if ps.get(k) != pd.get(k) and not PHOTO_OWN.search(k)]
     ms, md = mode_params(run, src), mode_params(run, dst)
     rows += [(k, md.get(k), ms.get(k)) for k in sorted(set(ms) | set(md)) if ms.get(k) != md.get(k)]
+    bs, bd = band_rows(run, src), band_rows(run, dst)
+    rows += [(k, bd.get(k), bs.get(k)) for k in sorted(set(bs) | set(bd))
+             if bs.get(k) != bd.get(k) and not PHOTO_OWN.search(k.split(".", 1)[1])]
     gs, gd = gui_state(run, src), gui_state(run, dst)
     state = {k: v for k, v in gs.items() if not STATE_OWN.match(k)}
     keep = {"rows": [{"name": k, "was": was, "to": to} for k, was, to in rows], "state": gd}
@@ -567,6 +582,14 @@ def write_rows(run, dst, rows, state=None):
             elif re.fullmatch(r"-?\d+", str(r["to"])):
                 sql.append(f"insert or replace into mode_params(mode,name,val) values({int(m.group(1))},"
                            f"'{m.group(2)}',{int(r['to'])});")
+            continue
+        b = re.fullmatch(r"band(\d+)\.(\w+)", r["name"])
+        if b:                                           # a band's memory (band_params: bands_id, name, val)
+            if r["to"] is None:
+                sql.append(f"delete from band_params where bands_id={int(b.group(1))} and name='{b.group(2)}';")
+            elif re.fullmatch(r"-?\d+", str(r["to"])):
+                sql.append(f"insert or replace into band_params(bands_id,name,val) values({int(b.group(1))},"
+                           f"'{b.group(2)}',{int(r['to'])});")
             continue
         k = r["name"].replace("'", "''")
         if r["to"] is None:

@@ -10943,6 +10943,14 @@ for i in $(seq 600); do cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_
 
 ### Processor temperature (X6200)
 
+The X6100 has no temperature reading: its kernel leaves the sensor's driver
+out. The sensor is the same as the X6200's, but on an X6100 (2026-11-19, the
+first kernel with the driver there, from v0.3.12.32's update) its raw value
+jumped by up to 57 °C from one fifth of a second to the next (42 to 99 °C,
+where the X6200's moves by 1 °C), so the thermal zone below slowed its
+processor at random and a spike past 110 °C would have powered it off. The
+title bars and clocks show no temperature on it, as before.
+
 The X6200's kernel reads its processor's temperature sensor (with the
 `sun4i-gpadc-iio` driver) on a card written from the v0.3.10 card image or
 later (PR #216). The card images up to v0.3.9 have no driver for it, so
