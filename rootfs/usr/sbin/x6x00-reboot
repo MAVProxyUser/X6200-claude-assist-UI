@@ -3,7 +3,8 @@
 # GoldCorpHF: the radio restarted, not switched off. On the X6200 every shutdown ends with "s" to the base, which cuts
 # the power (/etc/init.d/rcK): a plain reboot switched the radio off, and it had to be switched on again by hand. This
 # leaves a mark rcK reads: the "s" left out, the base stays on, and Linux restarts (U-Boot, the kernel, the GUI) with
-# the radio on all the while. The X6100 restarts the same way as ever. Used by the updater (install --reboot), the
+# the radio on all the while. The X6100 switches off at a restart all the same (2026-11-19, after its update: the
+# owner switched it on again; why is open, TODO): it must be switched on by hand. Used by the updater (install --reboot), the
 # GUI (the power-on box's Restart now) and over SSH: x6x00-reboot
 #
 touch /run/x6x00-reboot

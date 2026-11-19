@@ -56,6 +56,7 @@ CHAIN_VALID_S = 12 * 3600   # the owner's word on the cable holds this long
 MAX_KEY_S = 16              # longer than an FT8 transmission: a radio still on the air after it is stopped
 MAX_SWR = 2.0               # higher on a radio's TX meter: the chain is not the load it should be
 TOO_STRONG_DB = 20          # a receiver hearing this much more than the chain lets through: pads missing
+SOFT_POWER_MAX_W = 2.0      # more than asked up to this ends only that over (radios-walkie); over it stops all
 TEST_CALL = re.compile(r"^Q[0-9]TST$")
 
 FT8_DIAL = {"40m": 7074000, "30m": 10136000, "20m": 14074000, "17m": 18100000, "15m": 21074000,
@@ -130,6 +131,7 @@ class Radio:
         self.rows, self.errs, self.lock = [], [], threading.Lock()
         self.tx, self.tx_since, self.ctl_mine, self.role = False, None, False, None
         self.tx_off_at = 0.0       # when it last left TX (the radios' gate: one on the air at a time)
+        self.last_msg = time.time()
         self.r.send(f"auth {tok}")
         self.r.send("panel 1")
         self.r.send("screen 0")
@@ -151,6 +153,7 @@ class Radio:
             if t is None:
                 return
             k, _, rest = t.partition(" ")
+            self.last_msg = time.time()        # anything at all from it: a stall is measured, not guessed
             with self.lock:
                 if k == "state":
                     self.state = json.loads(rest)
@@ -293,6 +296,8 @@ class Watch:
         self.radios, self.c, self.hackrf, self.why = radios, c, hackrf, None
         self.expect_dbm, self.listener, self.w = expect_dbm, listener, w
         self.tx_peak = {}       # each radio's own forward-power meter, its highest while on the air (W)
+        self.soft_power = False   # more power than asked (under SOFT_POWER_MAX_W) ends that radio's over, no stop
+        self.over_power = {}      # the radios that did so, and how much
         self.rx_peak = None     # the listener's S-meter, its highest while another radio is on the air (dBm)
         self.on = True
         threading.Thread(target=self._run, daemon=True).start()
@@ -318,7 +323,15 @@ class Watch:
                     if swr > MAX_SWR:
                         self.trip(f"{r.name}: SWR {swr:.2f} on the air: the chain is not a load")
                     elif self.w is not None and w > max(self.w * 2, self.w + 0.5):
-                        self.trip(f"{r.name}: {w:.1f} W on the air, {self.w} W asked")
+                        if self.soft_power and w <= SOFT_POWER_MAX_W:
+                            # the owner, 2026-11-19: "we want end-to-end tests, not stoppages". More than asked but
+                            # far under what the pads take: that radio's over ends, said and kept, the test goes on
+                            if r.name not in self.over_power:
+                                self.over_power[r.name] = w
+                                say(f"{r.name}: {w:.1f} W on the air, {self.w} W asked: its over ended, the test goes on")
+                                r.stop()
+                        else:
+                            self.trip(f"{r.name}: {w:.1f} W on the air, {self.w} W asked")
                 if since and txm and time.time() - since > 1.0:
                     self.tx_peak[r.name] = max(self.tx_peak.get(r.name, 0.0), txm[0])
                 if since and meter is not None and r is not self.listener and time.time() - since > 1.0:
@@ -741,6 +754,7 @@ def run_radios_walkie(c, args):
         r.wait("the power", lambda r=r: abs(r.pwr() - FIRST_PROBE_W) < 0.05, 5)
     expect = 10 * math.log10(FIRST_PROBE_W * 1000) - total
     watch = Watch(radios, c, expect_dbm=expect, listener=b, w=FIRST_PROBE_W)
+    watch.soft_power = True
     results, hold = [], [int(time.time()) % 100000]
 
     def tap(r, key):
@@ -760,6 +774,18 @@ def run_radios_walkie(c, args):
                 if tries == 3:
                     raise
 
+    def caught_up(r, wait=10):
+        """r's link to this computer current again: a message within the last half second, for a second"""
+        t, fresh = time.time(), None
+        while time.time() - t < wait:
+            if time.time() - r.last_msg < 0.5:
+                fresh = fresh or time.time()
+                if time.time() - fresh >= 1.0:
+                    return
+            else:
+                fresh = None
+            time.sleep(0.1)
+
     def on_g(r):
         """r on G, the Walkie: there the Sentry's scans leave the dial on the channel (sentry_step); on any other page
         A's routine retunes it (the owner, 2026-11-19: "why aren't BOTH radios on the walkie screen?")"""
@@ -777,11 +803,13 @@ def run_radios_walkie(c, args):
             r.send(f"banner {line}")
         radio_tx_gate(sender, c, FIRST_PROBE_W)
         watch.listener = listener
+        caught_up(listener)                           # what it held back (WiFi) in, not counted as quiet
         q0 = time.time()
         time.sleep(1.5)                               # the listener settled on the channel
         quiet, sq = listener.meter, spectrum_peak(listener, hz, q0, time.time())
         watch.tx_peak.pop(sender.name, None)
         watch.rx_peak = None
+        watch.over_power.pop(sender.name, None)
         listener.wait("the other radio out of TX for a second",
                       lambda: not listener.tx and time.time() - listener.tx_off_at >= 1.0, 10)
         arm(sender, True)
@@ -791,21 +819,26 @@ def run_radios_walkie(c, args):
         t0 = time.time()
         on_at = None
         ltx = []                                      # the listener's own TX flags and hold through the over
+        gap = 0.0                                     # the longest the listener sent nothing at all, through it
         # the lease renewed each half second till the radio has been on the air WALKIE_KEY_S (the X6200 came on the air
         # after 4 s on 17 m once, 2026-11-19), WALKIE_KEY_WAIT_S at most for it to come
         while not watch.why and (on_at is None and time.time() - t0 < WALKIE_KEY_WAIT_S or
                                  on_at is not None and time.time() - on_at < WALKIE_KEY_S):
-            if listener.tx:                           # the other radio on the air: never key over it
-                break
+            if listener.tx or sender.name in watch.over_power:     # the other on the air: never key over it;
+                break                                               # more power than asked: the over ends
             sender.send(f"key PTT 1 {n}")
             if on_at is None and sender.tx:
                 on_at = time.time()
             ltx.append((int(listener.tx), listener.state.get("tx"), listener.state.get("rxo")))
+            gap = max(gap, time.time() - listener.last_msg)
             time.sleep(0.5)
         keyed = on_at is not None
-        sp = spectrum_peak(listener, hz, (on_at or t0) + 1.0, time.time())
         stayed = listener.state.get("pg") == "G" and int(listener.state.get("freq", 0)) == hz
         sender.send("key PTT 0")
+        t_end = time.time()
+        if gap >= 1.5:                                # its frames of the over come late, in a burst: waited for
+            caught_up(listener, 10)
+        sp = spectrum_peak(listener, hz, (on_at or t0) + 1.0, t_end if gap < 1.5 else time.time())
         try:
             sender.wait("the end of its over", lambda: not sender.tx or watch.why, 8)
         finally:
@@ -816,16 +849,25 @@ def run_radios_walkie(c, args):
         peak, w = watch.rx_peak, watch.tx_peak.get(sender.name, 0.0)
         # heard: the listener's own spectrum at the dial up WALKIE_RISE_DB (its S-meter beside it: the X6200's did not
         # follow an AM signal, 2026-11-19)
-        spec_rise = keyed and sq is not None and sp is not None and sp - sq >= WALKIE_RISE_DB
+        # no quiet reading (the listener's link silent before the over): the signal against what the chain lets through
+        spec_rise = keyed and sp is not None and (sp - sq >= WALKIE_RISE_DB if sq is not None
+                                                  else sp >= expect - 30)
         meter_rise = keyed and quiet is not None and peak is not None and peak - quiet >= WALKIE_RISE_DB
-        heard = stayed and (spec_rise or meter_rise)  # either is the listener's receiver
-        mute = keyed and sp is None and peak == quiet  # nothing came from the listener while it was sent to (the X6100's own spike at the dial in
-                                              # AM raises its spectrum's quiet level; the X6200's S-meter in AM stays)
+        # either is the listener's receiver (the X6100's own spike at the dial in AM raises its spectrum's quiet level;
+        # the X6200's S-meter in AM stays)
+        heard = stayed and (spec_rise or meter_rise)
+        if sender.name in watch.over_power:
+            say(f"FINDING {band} {mode}: {sender.name} sent {watch.over_power[sender.name]:.1f} W asked for "
+                f"{FIRST_PROBE_W} W")
+        mute = keyed and sp is None and peak == quiet  # nothing came from the listener while it was sent to
+        if gap >= 2.0:
+            say(f"{listener.name} sent nothing at all for {gap:.1f} s during the over (its link to this computer)")
         res = {"band": band, "hz": hz, "mode": mode, "from": sender.name, "to": listener.name, "keyed": keyed,
                "w": round(w, 2), "quiet": quiet, "peak": peak, "spec_quiet": sq, "spec_peak": sp, "heard": heard,
                "meter_rose": meter_rise, "spec_rose": spec_rise,
                "key_s": round(on_at - t0, 1) if on_at else None, "listener_stayed": stayed,
-               "listener_tx": sorted(set(ltx)), "listener_silent": mute}
+               "listener_tx": sorted(set(ltx)), "listener_silent": mute,
+               "over_power_w": watch.over_power.get(sender.name), "listener_silent_s": round(gap, 1)}
         results.append(res)
         where = f"page {listener.state.get('pg')}, {listener.state.get('freq')} Hz"
         say(f"{'PASS' if heard else 'FAIL'} {band} {mode} {sender.name} -> {listener.name}: keyed {keyed}"

@@ -26,15 +26,23 @@ approved that day.
 - Found by the Walkie test (bench.py radios-walkie, 2026-11-19), to fix:
   - the X6100 sends 0.9 W asked for 0.1 W on 6 m (its own meter; the watch stopped it): its low-power setting on 6 m
     (TX Cal?) before G's 6 m from the X6100 is tried again;
-  - the X6200's S-meter does not follow AM (the base's own reading: an X6100 AM over its spectrum showed 41 dB up left
-    it at the floor; wide FM likewise, 11-14): the meter from the spectrum in AM and WFM, as the X6100's, set
-    against the base's in USB/FM;
+  - DONE: the X6200's S-meter in AM, SAM and WFM from its spectrum inside the filter, set against the base's reading
+    learned in the other modes (dsp.cpp psd_meter): an X6100 AM over now reads -117 -> -69 dBm on 10 m;
   - the X6200's reports to a page (meter, spectrum, state) stall for seconds now and then, and an A/B tap over WiFi
     is missed now and then (the remote's key press and release).
+- The X6100 switches off at a restart (x6x00-reboot, a plain reboot there; 2026-11-19 after its update, the owner
+  switched it on): the X6200's fix is its base's "s" left out, the X6100's base has no such word. Likely the base's
+  control lines the GUI holds (bb_reset among them) let go while the processor resets, the base restarting off;
+  to find out with the owner at the radio (each try switches it off). Meanwhile the update question's restart on an
+  X6100 means switching it on again.
 - Host checks on the Mac (item 6, "wrap 6 up"): liquid-dsp 1.4.0 built here; align and tx_meters run here now;
   cw_trainer (one case: a character decoded in silence, Mac arithmetic) and settings_keep (its copy under macOS's own
   SQLite) fail on a Mac only; cw_kbd, direct_hole, screen_saver, tci_ask and wf_image want the GUI's PC build (libnm);
   18 need Linux itself (a Linux VM here would close them: the owner's call).
+- Walkie, end to end 2026-11-19 (both on G, one channel, one on the air at a time, no stops): the X6200 heard by the
+  X6100 on every band 160 m - 6 m in AM and FM (26 of 26); the X6100 by the X6200 on every band and mode, its misses
+  each an over the X6200 sent nothing to this computer for 2-8 s (measured), heard when run again with the harness
+  waiting for what it held back. Open: the X6100's 0.7-0.9 W on 6 m asked for 0.1 W.
 - Walkie, done with the owner's word on the cable and pads (given 2026-11-19, "cable is confirmed"): the Walkie (G) on both radios sending to and hearing each
   other on every band and mode G offers, at 0.1 W through the pads (CB refused by both radios' TX ranges).
 

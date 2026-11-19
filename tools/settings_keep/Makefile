@@ -12,7 +12,14 @@ DEPS     ?= $(TOP)/build-host/deps
 BUILD    := $(CURDIR)/build
 DEFS     := -DHOST_BUILD=1 -DLV_CONF_INCLUDE_SIMPLE -DBUILD='"$(BUILD)"' -DBOARD_DATA='"$(BUILD)/data"' -DBOARD_SHARE='"$(BUILD)/share"' \
             -DPARAMS_KEEP='"$(BUILD)/sys/params-good.db"' -DSPARE_DB='"$(BUILD)/tmp/x6100-params.db"'
-CFLAGS   := -std=gnu11 -Wall -Wextra -Wno-unused-parameter -O1 -g -pthread $(DEFS) -I $(TOP) -I $(SRC) -I $(DEPS)/include
+# SQLite as the radios have it (buildroot's, upstream): on a Mac Homebrew's when there. macOS's own will not open a WAL
+# database read-only while another connection has it (SQLITE_CANTOPEN in the copy's backup step, 2026-11-19), which
+# the radios' does: the copy failed on a Mac only
+comma    := ,
+SQLITE   := $(if $(and $(filter Darwin,$(shell uname -s)),$(wildcard /opt/homebrew/opt/sqlite/lib/libsqlite3.dylib)),/opt/homebrew/opt/sqlite)
+CFLAGS   := -std=gnu11 -Wall -Wextra -Wno-unused-parameter -O1 -g -pthread $(DEFS) $(if $(SQLITE),-I $(SQLITE)/include) \
+            -I $(TOP) -I $(SRC) -I $(DEPS)/include
+SQLITE_L := $(if $(SQLITE),-L $(SQLITE)/lib -Wl$(comma)-rpath$(comma)$(SQLITE)/lib) -lsqlite3
 PARAMS   := $(SRC)/params/db.c $(SRC)/params/db_keep.c
 HEADERS  := $(SRC)/params/db.h $(SRC)/params/db_keep.h $(SRC)/params/migrations.h $(SRC)/board.h
 
@@ -23,7 +30,7 @@ build/migrations.o: $(SRC)/params/migrations.c $(HEADERS)
 	mkdir -p build && $(CC) $(CFLAGS) -w -c -o $@ $<
 
 settings_keep_test: settings_keep_test.c stubs.c $(PARAMS) build/migrations.o $(HEADERS)
-	$(CC) $(CFLAGS) -o $@ settings_keep_test.c stubs.c $(PARAMS) build/migrations.o -lsqlite3
+	$(CC) $(CFLAGS) -o $@ settings_keep_test.c stubs.c $(PARAMS) build/migrations.o $(SQLITE_L)
 
 test: settings_keep_test
 	./settings_keep_test $(TOP)/sql/params.sql
