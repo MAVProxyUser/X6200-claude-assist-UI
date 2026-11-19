@@ -54,7 +54,9 @@ mkdir -p "$DL" "$CACHE/voacap"
 fetch() {   # URL FILE SHA256: downloaded once, kept only with the pinned hash
     [ -f "$2" ] && echo "$3  $2" | sha256sum -c --quiet - 2> /dev/null && return 0
     echo "== $1"
-    curl -fsSL --retry 3 -o "$2.tmp.$$" "$1"
+    # every error retried: one HTTP/2 stream error from static.rust-lang.org failed the X6100's image build of
+    # 4f7f874f (curl 92), which --retry alone does not retry
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$2.tmp.$$" "$1"
     echo "$3  $2.tmp.$$" | sha256sum -c --quiet - \
         || { echo "tools/voacap/build.sh: $1 does not have the pinned SHA-256"; rm -f "$2.tmp.$$"; exit 1; }
     mv -f "$2.tmp.$$" "$2"

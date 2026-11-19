@@ -932,6 +932,9 @@ void dsp_psd(const float *db, uint16_t n, uint32_t span_hz, bool tx, int16_t sme
 void dsp_reset() {
 }
 
+void dsp_zoom_refresh(void) {      /* radio_zoom_wide() (the X6100's Sentry): the spectrum's span, dsp's */
+}
+
 void dsp_samples(cfloat *buf_samples, uint16_t size, bool tx, uint32_t base_freq, bool vary_freq, uint8_t fft_dec) {
     (void)buf_samples;
     (void)size;

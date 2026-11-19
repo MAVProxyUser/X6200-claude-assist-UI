@@ -97,7 +97,7 @@ fetch() {   # URL FILE SHA256: downloaded once, kept only with the pinned hash
     [ -f "$2" ] && echo "$3  $2" | sha256sum -c --quiet - 2> /dev/null && return 0
     echo "== $1"
     if command -v curl > /dev/null; then
-        curl -fsSL --retry 3 -o "$2.tmp.$$" "$1"
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$2.tmp.$$" "$1"     # every error retried
     else
         wget -q -O "$2.tmp.$$" "$1"
     fi
