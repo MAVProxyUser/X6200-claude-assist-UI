@@ -48,6 +48,21 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
     bench.py preflight hackrf            # every gate, nothing sent
     bench.py hackrf-ft8 --band 20m --x 30
     bench.py radios-ft8 x6100 x6200      # both radios on the cable, test callsigns set: CQ, then a reply
+    bench.py radios-walkie x6200 x6100   # G on both: each band's channel, AM and FM, each sends, the other hears
+
+`radios-walkie` (2026-11-19, the owner: "BOTH radios should be able to TX & RX to each other across like any band
+selected ... across the wire + PAD setup"): both radios on G (held there: on any other page A's scans retune the
+dial), on each band's channel G offers (160 to 10 m, 10 m and 6 m FM calling; never CB or the other services, outside
+the amateur bands) in AM and FM (SSB without a voice sends nothing), each in turn armed with A/B and keyed 4 s on the
+air at 0.1 W while the other listens. Heard: the listener's own spectrum within 3 kHz of the dial or its S-meter up
+15 dB (the panel's spectrum frames, kept by remote_ws.py: the X6200's S-meter does not follow an AM signal its
+spectrum shows 40 dB up). One radio on the air at a time: the sender is armed only when the other has been out of TX
+a second, the watch stops everything when two are on the air at once (sim_test.py's case "both"). A tap of A/B or a
+key the radio missed over WiFi is tried again, an over during which the listener sent nothing (the X6200's reports
+stalled for seconds now and then) is tried once more; afterwards both on the first radio's channel, on G, each its own
+power and tuner back. `--senders`, `--keep-armed` (each radio armed through a channel's overs, as an operator keeps
+it). First runs: the X6200 heard by the X6100 on every band and mode; the X6100 by the X6200 on every band and mode
+while the X6200 only listened. The X6100 put out 0.9 W asked for 0.1 W on 6 m, and the watch stopped it there.
 
 `radios-ft8` first ran 2026-11-18 (the X6100 and the X6200 through 40 + 30 dB, 0.1 W, 20 m), both ways: PASS. The
 X6200 decoded the X6100 at +11 to +15 dB, the X6100 the X6200 at -2 to -3 dB (the X6200's preamp on, the X6100's

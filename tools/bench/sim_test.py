@@ -142,6 +142,8 @@ class SimRadio:
         self.state["tx"] = 1
         self.send("tx 1")
         self._state()
+        if self.peer and self.peer.fault == "both" and not self.peer.state["tx"]:
+            threading.Timer(0.3, self.peer._key).start()     # the listener keys over the sender
 
     def _unkey(self):
         if self.state["tx"]:
@@ -193,7 +195,7 @@ def settled(cond, secs=3.0):
 
 def run_case(fault, sender_fault=True):
     a = SimRadio("simA", "Q1TST", fault if sender_fault else None)
-    b = SimRadio("simB", "Q2TST")
+    b = SimRadio("simB", "Q2TST", None if sender_fault else fault)
     a.peer, b.peer = b, a
     state = tempfile.mkdtemp(prefix="bench-sim-")
     DIRS.append(state)
@@ -243,6 +245,11 @@ def main():
         check(why is not None and word in why, f"{fault}: refused ({why})")
         check(settled(lambda: not a.state["tx"] and any(g == "ft8 stop" for g in a.got)),
               f"{fault}: the sender stopped, off the air")
+    # the owner, 2026-11-19 ("won't that damage the radios? don't do that again"): a listener that keys while the
+    # sender is on the air stops everything, both off the air
+    why, a, b = run_case("both", sender_fault=False)
+    check(why is not None and "two radios on the air at once" in why, f"both: refused ({why})")
+    check(settled(lambda: not a.state["tx"] and not b.state["tx"]), "both: both off the air")
     for d in DIRS:
         __import__("shutil").rmtree(d, ignore_errors=True)
     bad = results.count(False)

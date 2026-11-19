@@ -5,11 +5,13 @@ header: a program, not a page, as TCI programs are (tci_ws.c). The standard libr
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
 import base64
+import collections
 import os
 import queue
 import socket
 import struct
 import threading
+import time
 
 
 class Remote:
@@ -30,6 +32,10 @@ class Remote:
             raise ConnectionError(f"{host}: no WebSocket: {head[:120]!r}")
         self.s.settimeout(None)
         self.texts = queue.Queue()
+        # The panel's spectrum frames (binary: u16 0xFFFF, u16 bins, u32 centre Hz, u32 width Hz, u32 sequence, an int8
+        # dB a bin), the last 300 with when they came: (time, centre, width, dBs). What the receiver itself takes in
+        # (the radios' walkie test: the X6200's S-meter did not follow an AM signal its spectrum showed 41 dB up)
+        self.spectra = collections.deque(maxlen=300)
         self.alive = True
         self.wlock = threading.Lock()
         threading.Thread(target=self._reader, daemon=True).start()
@@ -67,6 +73,10 @@ class Remote:
                     data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
                 if op == 1:
                     self.texts.put(data.decode(errors="replace"))
+                elif op == 2 and len(data) > 16 and data[:2] == b"\xff\xff":
+                    nb, cen, wid, _ = struct.unpack_from("<HIII", data, 2)
+                    if len(data) >= 16 + nb:
+                        self.spectra.append((time.time(), cen, wid, struct.unpack_from(f"<{nb}b", data, 16)))
                 elif op == 8:
                     break
                 elif op == 9:           # ping: pong with its data

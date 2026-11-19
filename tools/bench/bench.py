@@ -14,6 +14,9 @@ own; SSH (root) only for provisioning, the test callsigns and cleaning the logs.
   bench.py hackrf-iq FILE --at HZ --offset HZ [--fs 2000000] [--mode 7] [--x 30] [--during "CMD"]
                                        an I/Q file into the radio tuned to HZ (7 NFM), CMD run beside it
   bench.py radios-ft8 TX RX [--band 20m]          (at 0.1 W, the first probe's power, throughout)
+  bench.py radios-walkie A B [--bands 20m,40m] [--modes am,fm]
+                                       G (Walkie) on both: each band's channel, each mode, A sends and B hears,
+                                       then B sends and A hears (0.1 W)
   bench.py testcall NAME CALL|restore     the radio's callsign for the tests (Q<digit>TST), or back
   bench.py cleanlog NAME               the test callsigns' QSOs out of the radio's logs
 
@@ -126,6 +129,7 @@ class Radio:
         self.state, self.meter, self.txm, self.ft8, self.apps = {}, None, None, {}, None
         self.rows, self.errs, self.lock = [], [], threading.Lock()
         self.tx, self.tx_since, self.ctl_mine, self.role = False, None, False, None
+        self.tx_off_at = 0.0       # when it last left TX (the radios' gate: one on the air at a time)
         self.r.send(f"auth {tok}")
         self.r.send("panel 1")
         self.r.send("screen 0")
@@ -174,6 +178,8 @@ class Radio:
         if on and not self.tx:
             self.tx_since = time.time()
         if not on:
+            if self.tx:
+                self.tx_off_at = time.time()
             self.tx_since = None
         self.tx = on
 
@@ -192,7 +198,7 @@ class Radio:
 
     def take_control(self):
         self.send("control take")
-        self.wait("control", lambda: self.ctl_mine, 5)
+        self.wait("control", lambda: self.ctl_mine, 10)     # the X6200 took 3-5 s now and then (2026-11-19)
 
     def pwr(self):
         return float(self.state.get("pwr", 99))
@@ -293,6 +299,10 @@ class Watch:
 
     def _run(self):
         while self.on and not self.why:
+            if self.hackrf is None and sum(1 for r in self.radios if r.tx) > 1:
+                # the owner, 2026-11-19: "won't that damage the radios? don't do that again" (at 0.1 W through 70 dB
+                # each hears the other at -50 dBm, no harm; never all the same): one on the air at a time
+                self.trip("two radios on the air at once: " + ", ".join(r.name for r in self.radios if r.tx))
             for r in self.radios:
                 with r.lock:
                     since, txm, meter = r.tx_since, r.txm, (self.listener.meter if self.listener else None)
@@ -675,6 +685,227 @@ def run_radios_ft8(c, args):
     say(f"PASS: {a.name} -> {b.name} -> {a.name} at {FIRST_PROBE_W} W through {total} dB")
 
 
+# G's channels on the amateur bands (its band groups' channels, app_sentry.c bands[] and w_plan; 30 m's is WWV on
+# 10.000, outside the band: its channel here in it), and the FM calling channels of 10 m and 6 m
+WALKIE_BANDS = [("160m", 1900000), ("80m", 3850000), ("60m", 5357000), ("40m", 7150000), ("30m", 10120000),
+                ("20m", 14200000), ("17m", 18120000), ("15m", 21300000), ("12m", 24940000), ("10m", 28400000),
+                ("10m-fm", 29600000), ("6m", 50125000), ("6m-fm", 52525000)]
+WALKIE_MODES = {"am": 6, "fm": 7}       # radio_mode_t: the modes with a carrier (SSB without a voice sends nothing)
+WALKIE_KEY_S = 4.0                      # each over, on the air
+WALKIE_KEY_WAIT_S = 8.0                 # for the radio to come on the air after PTT
+WALKIE_RISE_DB = 15                     # the listener's spectrum at the dial over its quiet level: heard
+WALKIE_SPAN_HZ = 3000                   # how far from the dial its spectrum is looked at
+
+
+def spectrum_peak(r, hz, t0, t1, span=WALKIE_SPAN_HZ):
+    """The strongest bin within span of hz in r's spectrum frames between t0 and t1 (dB), None without frames"""
+    best = None
+    for t, cen, wid, v in list(r.r.spectra):
+        if not t0 <= t <= t1 or not v:
+            continue
+        per = wid / len(v)
+        lo, hi = int((hz - span - (cen - wid / 2)) / per), int((hz + span - (cen - wid / 2)) / per)
+        for i in range(max(lo, 0), min(hi + 1, len(v))):
+            best = v[i] if best is None else max(best, v[i])
+    return best
+
+
+def run_radios_walkie(c, args):
+    """G (Walkie) on both radios (the owner, 2026-11-19: "BOTH radios should be able to TX & RX to each other across
+    like any band selected ... tested across the wire + PAD setup"): on each band's channel and each mode, A armed
+    with A/B and keyed with PTT for WALKIE_KEY_S while B listens on G, then the other way round. Heard: B's S-meter
+    WALKIE_RISE_DB over its level before. At FIRST_PROBE_W throughout, the radios profile's pads, every gate and the
+    watch as radios-ft8's; CB and the other services' channels G offers are never keyed (outside the amateur bands:
+    the harness's gate and the radios' TX ranges refuse them)"""
+    p, total = chain_gate(c, "radios")
+    for n in (args.a, args.b):
+        if n not in p.get("between", []):
+            raise Refused(f"{n} is not on the radios profile's cable")
+    bands = [x for x in WALKIE_BANDS if not args.bands or x[0] in args.bands.split(",")]
+    modes = [m for m in (args.modes or "am,fm").split(",") if m in WALKIE_MODES]
+    if not bands or not modes:
+        raise Refused("no band or mode to try")
+    a, b = Radio(args.a, c["radios"][args.a], True), Radio(args.b, c["radios"][args.b], True)
+    radios = [a, b]
+    was = {}
+    for r in radios:
+        r.take_control()
+        was[r.name] = {k: r.state.get(k) for k in ("freq", "mode", "pg", "atu")}
+        was[r.name]["pwr"] = r.pwr()
+        if r.state.get("atu"):                       # the tuner out for the test (it tunes by sending), back after
+            r.send("set atu 0")
+            r.wait("the tuner out", lambda r=r: not r.state.get("atu"), 10)
+        r.send("open sentry G")
+        r.wait("G, the Walkie", lambda r=r: r.state.get("pg") == "G", 10)
+        r.send(f"set pwr {round(FIRST_PROBE_W * 10)}")
+        r.wait("the power", lambda r=r: abs(r.pwr() - FIRST_PROBE_W) < 0.05, 5)
+    expect = 10 * math.log10(FIRST_PROBE_W * 1000) - total
+    watch = Watch(radios, c, expect_dbm=expect, listener=b, w=FIRST_PROBE_W)
+    results, hold = [], [int(time.time()) % 100000]
+
+    def tap(r, key):
+        r.send(f"key {key} 1")
+        time.sleep(0.15)
+        r.send(f"key {key} 0")
+
+    def arm(r, on):
+        for tries in (1, 2, 3):                 # a tap the radio missed (over WiFi): again, then refused
+            if (r.state.get("rxo") == 0) == on:
+                return
+            tap(r, "AB")
+            try:
+                r.wait("TX " + ("armed" if on else "locked again"), lambda r=r: (r.state.get("rxo") == 0) == on, 5)
+                return
+            except Refused:
+                if tries == 3:
+                    raise
+
+    def on_g(r):
+        """r on G, the Walkie: there the Sentry's scans leave the dial on the channel (sentry_step); on any other page
+        A's routine retunes it (the owner, 2026-11-19: "why aren't BOTH radios on the walkie screen?")"""
+        if r.state.get("pg") != "G":
+            r.send("open sentry G")
+            r.wait("G, the Walkie", lambda r=r: r.state.get("pg") == "G", 6)
+
+    def over(sender, listener, band, hz, mode):
+        for r in radios:
+            on_g(r)
+            tune(r, band, hz, mode)
+        line = (f"BENCH WALKIE (G) radio to radio, {band} {mode.upper()} {hz / 1e6:.3f} MHZ, {FIRST_PROBE_W} W through "
+                f"{total} DB: {sender.name.upper()} SENDS, {listener.name.upper()} LISTENS")
+        for r in radios:
+            r.send(f"banner {line}")
+        radio_tx_gate(sender, c, FIRST_PROBE_W)
+        watch.listener = listener
+        q0 = time.time()
+        time.sleep(1.5)                               # the listener settled on the channel
+        quiet, sq = listener.meter, spectrum_peak(listener, hz, q0, time.time())
+        watch.tx_peak.pop(sender.name, None)
+        watch.rx_peak = None
+        listener.wait("the other radio out of TX for a second",
+                      lambda: not listener.tx and time.time() - listener.tx_off_at >= 1.0, 10)
+        arm(sender, True)
+        hold[0] += 1
+        n = hold[0]
+        tx_log({"who": sender.name, "f": hz, "w": sender.pwr(), "what": f"walkie {mode}"})
+        t0 = time.time()
+        on_at = None
+        ltx = []                                      # the listener's own TX flags and hold through the over
+        # the lease renewed each half second till the radio has been on the air WALKIE_KEY_S (the X6200 came on the air
+        # after 4 s on 17 m once, 2026-11-19), WALKIE_KEY_WAIT_S at most for it to come
+        while not watch.why and (on_at is None and time.time() - t0 < WALKIE_KEY_WAIT_S or
+                                 on_at is not None and time.time() - on_at < WALKIE_KEY_S):
+            if listener.tx:                           # the other radio on the air: never key over it
+                break
+            sender.send(f"key PTT 1 {n}")
+            if on_at is None and sender.tx:
+                on_at = time.time()
+            ltx.append((int(listener.tx), listener.state.get("tx"), listener.state.get("rxo")))
+            time.sleep(0.5)
+        keyed = on_at is not None
+        sp = spectrum_peak(listener, hz, (on_at or t0) + 1.0, time.time())
+        stayed = listener.state.get("pg") == "G" and int(listener.state.get("freq", 0)) == hz
+        sender.send("key PTT 0")
+        try:
+            sender.wait("the end of its over", lambda: not sender.tx or watch.why, 8)
+        finally:
+            if not args.keep_armed:
+                arm(sender, False)
+        if watch.why:
+            raise Refused(watch.why)
+        peak, w = watch.rx_peak, watch.tx_peak.get(sender.name, 0.0)
+        # heard: the listener's own spectrum at the dial up WALKIE_RISE_DB (its S-meter beside it: the X6200's did not
+        # follow an AM signal, 2026-11-19)
+        spec_rise = keyed and sq is not None and sp is not None and sp - sq >= WALKIE_RISE_DB
+        meter_rise = keyed and quiet is not None and peak is not None and peak - quiet >= WALKIE_RISE_DB
+        heard = stayed and (spec_rise or meter_rise)  # either is the listener's receiver
+        mute = keyed and sp is None and peak == quiet  # nothing came from the listener while it was sent to (the X6100's own spike at the dial in
+                                              # AM raises its spectrum's quiet level; the X6200's S-meter in AM stays)
+        res = {"band": band, "hz": hz, "mode": mode, "from": sender.name, "to": listener.name, "keyed": keyed,
+               "w": round(w, 2), "quiet": quiet, "peak": peak, "spec_quiet": sq, "spec_peak": sp, "heard": heard,
+               "meter_rose": meter_rise, "spec_rose": spec_rise,
+               "key_s": round(on_at - t0, 1) if on_at else None, "listener_stayed": stayed,
+               "listener_tx": sorted(set(ltx)), "listener_silent": mute}
+        results.append(res)
+        where = f"page {listener.state.get('pg')}, {listener.state.get('freq')} Hz"
+        say(f"{'PASS' if heard else 'FAIL'} {band} {mode} {sender.name} -> {listener.name}: keyed {keyed}"
+            f"{f' after {on_at - t0:.1f} s' if on_at else ''}, "
+            f"{w:.2f} W by its meter; {listener.name}'s spectrum at the dial {sq} -> {sp} dB, its S-meter {quiet} -> "
+            f"{peak} dBm{'' if meter_rise else ' (the S-meter did not follow)'}"
+            f"{'' if stayed else ' (the listener left G or the channel: ' + where + ')'}"
+            f" (the chain: about {expect:.0f}); the listener's tx/hold {sorted(set(ltx))}")
+
+    try:
+        def tune(r, band, hz, mode):
+            """The channel and its mode on r, each asked again once; what r has when it does not come"""
+            m = WALKIE_MODES[mode]
+            for k, v, get in (("freq", hz, lambda: int(r.state.get("freq", 0))),
+                              ("mode", m, lambda: int(r.state.get("mode", -1)))):
+                for tries in (1, 2):
+                    if get() == v:                    # there already: asked again, the X6200's receiver paused
+                        break                         # its spectrum and meter for the over (2026-11-19)
+                    r.send(f"set {k} {v}")
+                    try:
+                        r.wait(f"{band} {mode}: {k} {v}", lambda get=get, v=v: get() == v, 6)
+                        break
+                    except Refused:
+                        if tries == 2:
+                            raise Refused(f"{r.name}: {k} {v} not taken (it has freq {r.state.get('freq')} mode "
+                                          f"{r.state.get('mode')} rxo {r.state.get('rxo')} pg {r.state.get('pg')}; "
+                                          f"it said {r.errs[-1:] or 'nothing'})")
+
+        for band, hz in bands:
+            for mode in modes:
+                for r in radios:
+                    arm(r, False)                     # an armed radio holds its dial (dial_held): locked to retune
+                for s_, l_ in ((a, b), (b, a)):
+                    if args.senders and s_.name not in args.senders.split(","):
+                        continue
+                    over(s_, l_, band, hz, mode)
+                    last = results[-1]
+                    if not watch.why and (not last["keyed"] or last["listener_silent"]):
+                        say(f"{s_.name} did not key on {band} {mode}: once more" if not last["keyed"] else
+                            f"{l_.name} sent nothing (no spectrum, the meter still) while {s_.name} sent: once more")
+                        results.pop()
+                        over(s_, l_, band, hz, mode)
+    finally:
+        watch.close()
+        for r in radios:
+            r.stop()
+        time.sleep(1)
+        for r in radios:
+            try:
+                arm(r, False)
+            except Refused:
+                pass
+            r.send("banner")
+            if was[r.name]["pwr"] < 99:
+                r.send(f"set pwr {round(was[r.name]['pwr'] * 10)}")
+            for k in ("freq", "mode"):          # both on the first radio's channel after (the owner: the radios
+                if was[a.name].get(k) is not None:  # side by side, on the same frequency)
+                    r.send(f"set {k} {int(was[a.name][k])}")
+                    time.sleep(0.3)
+            if was[r.name].get("atu"):
+                r.send("set atu 1")
+            r.send("open sentry G")               # both left on G alike (their frequency, mode and power back)
+            time.sleep(0.3)
+            r.close()
+        out = os.path.join(STATE, "runs", time.strftime("%Y%m%d-%H%M%S-walkie.json"))
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out, "w") as f:
+            json.dump(results, f, indent=1)
+        say(f"the overs: {out}")
+    bad = [x for x in results if not x["heard"]]
+    still = [x for x in results if x["heard"] and not x["meter_rose"]]
+    if still:
+        say("heard but the S-meter did not follow: " + ", ".join(f"{x['band']} {x['mode']} {x['from']}->{x['to']}"
+                                                                 for x in still))
+    say(f"{len(results) - len(bad)} of {len(results)} overs heard" + (f"; not: " + ", ".join(
+        f"{x['band']} {x['mode']} {x['from']}->{x['to']}" for x in bad) if bad else ""))
+    if bad:
+        raise Refused(f"{len(bad)} overs not heard")
+
+
 def clean_log(host):
     py = ("import re,sqlite3\nn=0\ntry:\n d=sqlite3.connect('/mnt/qso_log.db')\n"
           " n=d.execute(\"delete from qso_log where remote_callsign glob 'Q[0-9]TST*' or local_callsign glob "
@@ -799,6 +1030,11 @@ def main():
     s.add_argument("--mode", type=int, default=7); s.add_argument("--x", type=int, default=None)
     s.add_argument("--during", default=None); s.add_argument("--lead", type=float, default=3.0)
     s.add_argument("--filter", type=int, nargs=2, default=None, metavar=("LO", "HI"))
+    s = sub.add_parser("radios-walkie"); s.add_argument("a"); s.add_argument("b")
+    s.add_argument("--bands", default=""); s.add_argument("--modes", default="am,fm")
+    s.add_argument("--senders", default="", help="only these send (the others listen): A,B")
+    s.add_argument("--keep-armed", action="store_true", help="each radio armed through a channel's overs, as an "
+                   "operator keeps it (locked again only to retune), not locked after each over")
     s = sub.add_parser("radios-ft8"); s.add_argument("tx"); s.add_argument("rx")
     s.add_argument("--rx-alike", action="store_true", help="both receivers' preamp and attenuator off, put back after")
     s.add_argument("--band", default="20m", choices=FT8_DIAL)
@@ -820,6 +1056,7 @@ def main():
             a.x = c["limits"]["hackrf_x"]
         {"provision": cmd_provision, "status": cmd_status, "chain-ok": cmd_chain_ok, "preflight": cmd_preflight,
          "stop": lambda c, a: emergency_stop(c), "hackrf-ft8": run_hackrf_ft8, "hackrf-iq": run_hackrf_iq, "radios-ft8": run_radios_ft8,
+         "radios-walkie": run_radios_walkie,
          "testcall": cmd_testcall, "cleanlog": lambda c, a: clean_log(c["radios"][a.name]["host"])}[a.cmd](c, a)
     except Refused as e:
         say(f"REFUSED: {e}")
