@@ -72,15 +72,11 @@ approved that day.
 7. **A GUI that hangs**: the owner chose a restart ("a reboot would be more graceful"). Done 2026-11-17 night:
     x6x00-gui-watch restarts the radio with x6x00-reboot when the GUI's radio-thread or screen-loop heartbeat stands
     still 60 s (MANUAL: A hung GUI restarts the radio).
-8. **The 3D waterfall on an X6100** before the next release (the X6200 was checked on 2026-11-15; see the
-    Waterfall section below). The X6100 arrives 2026-11-19. Its side of the GUI after the upstream merge compiles and
-    links with no warning (tools/cross_x6200/check_x6100.sh, 2026-11-18: the stub backend, every shared source on
-    its X6100 paths; its driver, src/hw/x6100, unchanged since v0.3.12.28). The X6100 came early (2026-11-18 evening,
-    card image v0.3.12.28, base V1.1.8 unpatched): the classic screen's 3D waterfall runs on it, drawn by the
-    processor (its image had no Mesa; the next one has, local-build.sh). Its own GUI now builds here too
-    (tools/cross_x6200/build_x6100.sh) and the Sentry runs on it (A from its own spectrum, B and AIRSPACE on its
-    RTL-SDR, the pages with the MFK held and the main dial turned). Found there: its spectrum climbs from about
-    27 kHz either side of the dial outwards (A shows the middle 50 kHz); `radios-ft8` still to run.
+8. **The 3D waterfall on an X6100**: done 2026-11-18/19 on the owner's X6100 (card image v0.3.12.28): the classic
+    screen's 3D waterfall runs (drawn by the processor: that image has no Mesa), the Sentry's A, B and AIRSPACE run on
+    it, the suite's every screen passes on both radios (item 12). Left for the X6100's new card image (Mesa, level 3:
+    v0.3.12.29 on asks for it in the update box): the same waterfall drawn by the GPU, and the video decoder and CPU
+    temperature its old kernel lacks (item 12's devices).
 9. **The upstream merge**: done 2026-11-18 (Guru-RF's 73 commits: SVXConnect, Zello, the Weather, Internet radio,
     CB and HF Air Band apps, Flights, Field Ops' NOTA and maps, GhostNet, the first-start guide's language and
     country, the APP grid's scrolling, the spectrum's fill by level, translations, SSH security keys, the speaker's
@@ -94,47 +90,77 @@ approved that day.
     (radio-browser.info's countries and stations, an MP3 stream played and stopped), Zello and SVXConnect opened
     (not set up: nothing sent). Fixed: CB's chosen row lost its name in the Sentry's theme. Not tried: AAC
     stations (a new card image, level 3), GhostNet (JS8's), Zello and SVXConnect connected.
-10. **WiFi kept from the first start** (the owner, 2026-11-18: "we should account for that somewhere later probably
-    on both radios ... put it in the backlog for now"): after a restart the owner had to open Settings, turn WiFi on,
-    type the password, connect and save, on the X6100 (its first start had been cut short) and earlier on the X6200.
-    To find: whether the first-start guide's WiFi step keeps WiFi on (params wifi_enabled) and its network saved
-    (/etc/NetworkManager/system-connections, the backup in /mnt/backups) when the guide is left early, and over a
-    restart and a power cut. Note: the X6100's case that evening was on Xiegu's own system (its SD card had come out,
-    so it started from its internal memory: OpenSSH 8.1, no web page), which has none of our WiFi settings; the
-    X6200's is ours. Seen the same evening on the X6100 with our card: a GUI restart powered WiFi up again, the join
-    failed ("handshake failed", reason 7) and nothing tried again, so it stayed off the network until a restart.
-11. **The X6100's keys against the X6200's, for 1:1 features** (the owner, 2026-11-18: "The 6100 UI buttons are a
-    hair different than 6200 so we'll need to plan the analog use between the two for 1:1 features. we can do that
-    in the backlog"): a plan of which X6100 key or gesture does each X6200 key's job in the Sentry and the apps.
-    Done so far: the X6200's MFK inner ring (the Sentry's pages) is the MFK held and the main dial turned on the
-    X6100 (tried by the owner: "seems to work fine"). To map: the X6200's keys the X6100 lacks or has elsewhere
-    (APP/KEY and MSG/DFN swapped, ATU and FST moved; the X6100's own PRE, VM, AGC and LOCK), the H-22 mic's F3.
-12. **The X6100 against the X6200, what the first 1:1 runs found** (2026-11-18 evening, tools/bench/suite.py and
-    radios-ft8 through 40 + 30 dB): to look into, none fixed yet:
-    - FT8 radio to radio at 0.1 W, both ways, receivers alike (preamp and attenuator off): the X6200 hears the
-      X6100 at +10/+11 dB, the X6100 the X6200 at -3/-4 dB. 14 dB apart through a passive chain: one radio's 0.1 W
-      is not the other's, or the X6100's receiver (or its FT8 SNR) is that much worse. A power meter on each, or a
-      HackRF at a known level into each, tells which.
-    - The X6100's own spectrum climbs from about 27 kHz either side of the dial (its base V1.1.8's IQ): the Sentry's
-      A shows the middle 50 kHz. Look again after base V1.1.9 (its own zoom path).
-    - AIRSPACE with the two RTL-SDRs' antennas side by side: the X6100's decodes about 2/3 of the X6200's messages
-      (382 against 573 in two minutes), the same software, no dropped samples: swap the sticks to tell stick from
-      radio.
-    - The AM filter's default: 0-5000 Hz on the X6200, 0-4000 on the X6100.
+10. **WiFi kept from the first start**: closed by the owner 2026-11-19 ("we can close 10"). What it came to: the
+    X6100 dropped off WiFi after GUI restarts. The X6100 control library's x6100_gpio_init asks for the WiFi chip's
+    power line (gpiochip0 line 5) at 1, off (the radio's own libaether_x6100_control.so.0.15.3: `mov r2, #1`), the
+    X6200's at 0; so each X6100 GUI start cut the chip's power for about a second, and now and then it came back
+    unable to see the saved network (2026-11-18 23:21: 680 joins "not in range", 27 s apart, for 2.6 hours, until
+    WiFi off and on). The X6100 driver now holds its five control lines itself (src/hw/x6100/hw_x6100.c pins_init,
+    WiFi at 0 as the X6200's): five GUI restarts on the X6100 2026-11-19 with no USB disconnect of the chip and no
+    WiFi state change. Kept as safety nets (src/wifi.cpp): a failed join NetworkManager started is asked for again
+    (rejoin_later; reason 7, "no secrets", blocks the network otherwise) and six failed joins in a row with networks
+    in sight restart the chip (no_network_cb; untried against a real wedge). The first-start guide left early (the
+    owner's first report) was on Xiegu's own system, its SD card out.
+11. **The X6100's keys against the X6200's**: audited 2026-11-19 (the owner: "do that audit and decide if we are
+    good"): we are. Both radios turn their key codes into the same key names and the same handlers, so a key of the
+    same label does the same job; the X6200's MFK inner ring is the MFK held + the main dial on the X6100. Fixed from
+    the audit: that gesture took the dial in every app (in the APP grid the MFK let go opened the tile under it): now
+    only in the windows with pages (the Sentry, AIRSPACE, I; app_window.c dialog_has_own_keys); the X6100's AGC hold
+    switched split while an app held the VFOs (as ACTION_SPLIT now, not then); the X6100's PRE, AGC and LOCK in the
+    Sentry were in no help (GEN's list and the manual name them now). Left as they are: the classic screen's MFK
+    control picked in two more presses on the X6100 (push, turn, push); the H-22's F3 has no X6100 slot (its own
+    mic); V/M does nothing in the Sentry; the X6100's key codes are a rotation of four (APP, KEY, DFN, MSG), the
+    labels doing the same jobs on both.
+12. **The X6100 against the X6200, what the 1:1 runs found** (2026-11-18/19, tools/bench/suite.py, radios-ft8 through
+    40 + 30 dB):
+    - FT8 radio to radio at 0.1 W, "14 dB apart": not the radios. Settled 2026-11-19 with the levels radios-ft8
+      reports now: each radio hears the other at about the same level by its own S-meter (the X6100 -69.7 dBm, the
+      X6200 -72.0), each sender's meter at its 0.1 W (the X6100's reads 0.2 at that end of its scale). With both at RF
+      gain 100 the decodes ran -10 to +11 dB on either radio for that same level, transmission to transmission, so
+      FT8's SNR of a strong signal is no measure of a receiver; the earlier gap sat inside that spread. One real setup
+      difference found: the X6100 ran RF gain 63, its default, and below 100 its base switches in a stepped
+      attenuator (100 - rfg steps; strijar/x6100-base docs/protocol.md); its reply decodes went from -7..-3 to +10/+11
+      with 100. `--rx-alike` sets RF gain 100 on both now (and puts it back). A weak-signal 1:1 needs a HackRF at a
+      known level near the noise into each radio (the pads to the other radio off).
+    - The X6100's own spectrum climbing from about 27 kHz either side of the dial: normal for the model, not this
+      unit. Its IQ is a Cirrus CS4272 audio codec at 100 kHz (Georgy Dyuldin, OpenX6100/x6100_gui#192; his base patch
+      source), whose filter cuts only from 0.68 fs: what lies 50-68 kHz off the dial folds onto the edges. groups.io
+      xiegu-x6100 topic 108431112 (2024-09): strong signals near +-50 kHz show on the opposite edge, on every band,
+      with R1CBU's firmware too, confirmed by other owners; his proposal, hiding the outer 10-12 kHz. Base V1.1.9 does
+      not change it. The Sentry's A shows the middle 50 kHz; the classic screen still shows all 100 kHz (hiding the
+      edges there: declined by the owner 2026-11-19). The CS4272's ADC filter (datasheet): double speed, as now, flat
+      to 0.45 Fs and stopped from 0.68 Fs, so only +-32 kHz is free of aliases; quad speed at 200 kHz (flat to
+      0.24 Fs, stopped from 0.78 Fs) with a sharp /2 in the STM32 would give about +-45 kHz clean. Not as a patch to
+      Xiegu's base: the TLV320's one frame clock runs all four streams (RX and TX I/Q, speaker, mic), each would need
+      a /2 or x2 stage, both converters are 192 kHz parts, and the gain is the display's edges only. An open base
+      (fventuri/x6100-bbfw) is where it would belong.
+    - AIRSPACE about 2/3 of the X6200's messages: the antennas' places (the owner, 2026-11-19), not the radio.
+    - The AM filter, 0-5000 Hz on the X6200 and 0-4000 on the X6100: not a default (both radios' code has 0-4000 for
+      AM), a value kept on the X6200 (mode_params, mode 6; mode 1 too, 200-3200 against 100-2900). suite.py align and
+      core's same-settings now take the per-mode filter edges too.
+    - The classic screen in CW: the decoders' text panel lies over the waterfall; the picture themes draw it
+      see-through, the flat ones (the Sentry's gold on black) filled it, so with the CW decoder on there was no
+      waterfall. See-through (60 %) in every theme now, solid in High contrast (gui_styles.c message_colours).
     - The S-meters cannot be compared between the two (the X6200's base meter floors at -121 dBm in coarse steps,
-      the X6100's is summed from its IQ): a 1:1 goes by decodes and SNRs.
-    - The X6100's WiFi crawled at 5-10 KB/s on another access point (d0:21:f9..., channel 6, -64 dBm) while the
-      X6200 sat on e4:38:83... at -51 dBm: where the radio stands.
-    - Base V1.1.9 (written on the owner's X6100 that evening, tools/base_update/README.md) does not take the humps
-      away. It zooms the spectrum in the base: at the X6100's zoom x4 the Sentry's A would get 25 kHz (12 kHz
-      shown); the Sentry should hold the base at its widest while open, as HW_PSD_WIDE does on the X6200 (the X6100
-      left at zoom x1 for now).
-    - The classic screen in CW: the CW decoder's text panel covers the whole waterfall, translucent in RF.Guru,
-      opaque black in the Sentry theme (so no waterfall at all in CW): both radios, the theme's.
-    - Done that evening: Sentry home, A, pages, AIRSPACE and the theme on the X6100 (v0.3.12.29), the base flasher's
-      X6100 path checked against Xiegu's own X6100 app (tools/base_update/README.md) and its dry run on the
-      owner's X6100 (the bootloader answered 'a' in 1.0 s), the X6100's look-and-behaviour settings set as the
-      X6200's (suite.py align; undo file kept).
+      the X6100's is summed from its IQ).
+    - The X6100's WiFi crawls (10-30 KB/s) on the farther access point (channel 6, -64 dBm): where it stands.
+    - Devices, 2026-11-19 (dmesg and device tree on both): the same SoC (R16), board tree, codec, panel, keys,
+      encoders but one (the X6200's rotary2, its MFK inner ring), PMIC, RTC, watchdog and regulators. Different by
+      design: I2C (the X6200 the SoC's controllers, the X6100 bit-banged GPIO), WiFi (the X6200 RTL8723DU on rtw88 on
+      the EHCI; the X6100 RTL8723BU on Realtek's own driver on the MUSB, the RTL-SDR on the EHCI), eMMC 4 against 8 GB.
+      Missing on the X6100 until its kernel set comes with the update (v0.3.12.29 on): the video decoder (Cedrus,
+      /dev/video0), the CPU temperature sensor (sun4i-gpadc: no thermal zone) and iio-hwmon.
+    - Done: the Sentry, its pages, AIRSPACE and the theme on the X6100; the base flasher's X6100 path checked
+      against Xiegu's own app, base V1.1.9 written; the Sentry holding the base at its widest (166f3f08); every app
+      and page photographed on both and published redacted (docs/parity/2026-11-18); settings aligned (undo kept).
+    - The suite: 2026-11-19 03:37 core,rtl,update,cable on both radios' new builds, the per-mode filters aligned
+      first: 62 pass, 0 fail, 2 to look at (RADE needs Bluetooth headphones or TCI; AIRSPACE goes by its picture);
+      0 settings differ; both offered v0.3.12.30, "card image needed" on both; FT8 both ways at -70/-72 dBm. Field
+      Ops, the one screen with colour left (0.4-0.6 % cool: its tiles' pictures), is tinted gold in the Sentry theme
+      now: 0.0 %. Both
+      radios run hot-installed GUIs: the release itself, through the updater on each, is the test still to do (the
+      owner's YES on each radio). While the suite runs each radio shows a banner: the test, which radio sends and
+      which listens, with the radio's own TX or RX in front (bench_banner.c, "banner TEXT").
 
 **Waiting on hardware**
 
@@ -143,7 +169,7 @@ approved that day.
   without the owner's word on the cable; then, with it (02:27 local), `hackrf-ft8` on 20 m: refused first because
   the FT8 app is on Auto (allowed now on a radio with no callsign, which sends nothing), then PASS at -x 30 (SNR
   9 dB, 1447 Hz; the S-meter -121 -> -108 dBm) and decoded at -x 40 (-100 dBm), the radio back in the Sentry each
-  time. To try: `radios-ft8` once the X6100 is on the bench (arrives 2026-11-19; a 10 W pad on each radio's jack).
+  time. `radios-ft8` ran 2026-11-18 evening, the X6100 and the X6200 through 40 + 30 dB at 0.1 W: PASS both ways.
   Its logic tried against two simulated radios (tools/bench/sim_test.py, a host check now): a CQ and its reply
   pass; a radio that stays keyed, an SWR of 3, 5 W for 0.1 asked, and a receiver hearing +10 dBm (pads missing)
   each stop everything and refuse.
@@ -165,6 +191,8 @@ approved that day.
   into the stick over a cable (a255320, c5e864b, d02958f); the first live pass (Meteor-M2-4) gave nothing on the
   antenna used. A pass on a 137 MHz antenna outdoors (QFH or V-dipole) is the test; the 80k mode is unverified.
 - Screenshots of every menu for the README and the manual (deferred, the owner 2026-11-18): at the owner's word.
+  Every app and Sentry page of both radios is in docs/parity/2026-11-18 (redacted); the classic screen, the Modes
+  menu, RADE and Settings' own pages are not.
 - WSPR (deferred, the owner 2026-11-17): never tested. Off the air is the real test (the X6200 on its antenna, 14.0956
   USB by day, 7.0386 by night: spots every two minutes). Over a cable it needs a steadier source than the HackRF: a
   bladeRF 2.0's VCTCXO, but it tunes from 47 MHz, so 6 m (50.293) only.
@@ -379,8 +407,23 @@ Xiegu's newest bases, X6100 V1.1.9 and X6200 1.0.8, have no CESSB, and the X6200
   owner's go), and that a radio without it keeps working as today. The flashing half is there for the X6200:
   tools/base_update writes any of Xiegu's .xgf files from OpenX6X00 as Xiegu's own UPGRADE screen does, from the
   radio's screen or a computer (on the bench radio 2026-11-13: 1.0.7 to 1.0.8, back to 1.0.7, to 1.0.8 again; each
-  time the base switched the radio off about three minutes after the write). A patched base would
-  still have to be encrypted with Xiegu's key for the bootloader, which we don't have.
+  time the base switched the radio off about three minutes after the write). A patched base has to be
+  encrypted for the bootloader with Xiegu's key: AES-256-ECB, no padding, the key in fventuri/x6100-bbfw
+  common/build_common.sh (MIT; `openssl enc -d -aes-256-ecb -nopad -K KEY` reads an .xgf, the same without
+  `-d` makes one).
+- **Others' base work, read 2026-11-19** (the owner's links; tools/base_update/README.md has the details):
+  strijar/x6100-base (R1CBU) maps Xiegu's X6100 base V1.1.9, the build this radio runs, from Ghidra (no code, no
+  licence: read, not copied); fventuri/x6100-base branch WIP-franco adds bench-checked pins, the libraries
+  identified and a dump of the IAP bootloader; fventuri/x6100-bbfw (MIT) is a clean-room base built on them:
+  receive only so far (AM, SSB, FT8, the panadapter), no TX, charging, attenuator/preamp or filter edges, and
+  not the PCA9535 board variant. Georgy Dyuldin's method (groups.io xiegu-x6100 topic 112186023, April 2025):
+  code built for the STM32 placed past the end of Xiegu's image with jumps into it, his addresses for 1.1.8.
+  On 1.1.9 the TX chain is: /8 with a 64-tap FIR, 300/3000 Hz biquads at 12.5 kHz, a 101-tap Hilbert,
+  x8 interpolation, a block ALC (one gain per 128 samples on I and Q), Q31 out. CESSB would go after the
+  Hilbert and before the interpolator, where the block ALC does not undo it. So the nearer way for this radio is a
+  Dyuldin-style patch on 1.1.9 from WIP-franco's map (Xiegu's TX, ATU and charger kept); bbfw is the long-term open
+  base once it transmits and charges. First: which board variant this X6100 is (PCA9535 or direct GPIO for the band
+  switching; CS4272 or another converter).
 
 ## FreeDV: RADE and the Codec 2 modes (#37, #52)
 

@@ -28,27 +28,31 @@ jobs:
       - name: v0.3.8, which tools/data_partition compares the boot script with
         run: git fetch -q --no-tags --depth=1 origin +refs/tags/v0.3.8:refs/tags/v0.3.8
 
+      # The network steps tried again on a failure: a mirror's or GitHub's hiccup failed the run before any check
       - name: Libraries
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q build-essential autoconf automake libtool cmake ninja-build pkg-config \
+          for i in 1 2 3; do sudo apt-get update -q -o Acquire::Retries=3 && break; sleep 20; done
+          for i in 1 2 3; do sudo apt-get install -y -q -o Acquire::Retries=3 build-essential autoconf automake libtool cmake ninja-build pkg-config \
             libsqlite3-dev sqlite3 libxkbcommon-dev libnm-dev libpng-dev libasound2-dev python3-bottle \
             fdisk util-linux parted dosfstools exfatprogs bsdextrautils network-manager dbus iproute2 \
             libsdl2-dev libdrm-dev libdbus-glib-1-dev libsndfile1-dev libudev-dev libpulse-dev libjpeg-dev \
-            libglib2.0-dev libboost-dev
+            libglib2.0-dev libboost-dev && break; sleep 20; [ $i = 3 ] && exit 1; done
 
       # As host/build.sh's deps(), in /usr/local (DEPS below): liquid-dsp and ft8_lib at the radio's versions
       - name: liquid-dsp, the radio's version
         run: |
           VER=$(sed -n 's/^LIQUID_VER=\([0-9.]*\).*/\1/p' tools/cross_x6200/setup.sh)
-          git clone -q --depth 1 --branch "v$VER" https://github.com/jgaeddert/liquid-dsp.git /tmp/liquid-dsp
+          for i in 1 2 3; do rm -rf /tmp/liquid-dsp; git clone -q --depth 1 --branch "v$VER" \
+            https://github.com/jgaeddert/liquid-dsp.git /tmp/liquid-dsp && break; sleep 20; [ $i = 3 ] && exit 1; done
           cd /tmp/liquid-dsp && ./bootstrap.sh > /dev/null && ./configure -q && make -j"$(nproc)" > /dev/null
           sudo make install > /dev/null && sudo ldconfig
 
       - name: ft8_lib, the radio's revision
         run: |
           REV=$(sed -n 's/^FT8LIB_REV=\([0-9a-f]*\).*/\1/p' tools/cross_x6200/setup.sh)
-          git clone -q https://github.com/gdyuldin/ft8_lib.git /tmp/ft8_lib && git -C /tmp/ft8_lib checkout -q "$REV"
+          for i in 1 2 3; do rm -rf /tmp/ft8_lib; git clone -q https://github.com/gdyuldin/ft8_lib.git /tmp/ft8_lib \
+            && break; sleep 20; [ $i = 3 ] && exit 1; done
+          git -C /tmp/ft8_lib checkout -q "$REV"
           make -C /tmp/ft8_lib lib CFLAGS="-O2 -fPIC -D_GNU_SOURCE" LDFLAGS="-lm" > /dev/null
           sudo mkdir -p /usr/local/include/ft8lib
           sudo cp /tmp/ft8_lib/.build/libft8.so /usr/local/lib/ && sudo cp /tmp/ft8_lib/ft8/*.h /usr/local/include/ft8lib/

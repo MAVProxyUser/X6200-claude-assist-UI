@@ -266,6 +266,12 @@ bool dialog_front_key(int key, int state) {
     return dialog_is_run() && shown->front_key_cb && shown->front_key_cb(key, state);
 }
 
+/* The open window gives the front keys jobs of its own (the Sentry, AIRSPACE, the direction finder): the windows with
+ * pages, which the X6100 steps with the MFK held and the main dial turned (screen_main.c mfk_page_turn) */
+bool dialog_has_own_keys(void) {
+    return dialog_is_run() && shown->front_key_cb;
+}
+
 bool dialog_rotary_taken(void) {
     return dialog_is_run() && shown->rotary_takes_cb && shown->rotary_takes_cb();
 }

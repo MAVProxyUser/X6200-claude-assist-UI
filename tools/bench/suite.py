@@ -71,6 +71,7 @@ class Run:
         os.makedirs(os.path.join(self.dir, "shots"), exist_ok=True)
         self.results = []          # {"batch", "test", "ok": True|False|None, "says", "radio"?}
         self.radios = {}
+        self.shown = {}            # each radio's banner text now ("banner TEXT")
 
     def host(self, name):
         return self.c["radios"][name]["host"]
@@ -79,6 +80,16 @@ class Run:
         if name not in self.radios:
             self.radios[name] = bench.Radio(name, self.c["radios"][name], want_tx=False)
         return self.radios[name]
+
+    def banner(self, text, names=None):
+        """The line across each radio's screen while the suite runs (the owner, 2026-11-19: which radio sends, which
+        listens, which test): the radio puts its own TX or RX in front; it goes when the suite's connection does"""
+        for n in names or self.names:
+            try:
+                self.radio(n).send(f"banner {text}")
+                self.shown[n] = text
+            except (bench.Refused, OSError):
+                pass
 
     def result(self, batch, test, ok, says, **kw):
         self.results.append(dict(batch=batch, test=test, ok=ok, says=says, **kw))
@@ -98,6 +109,10 @@ class Run:
         if Image is None:
             return None
         host = self.host(name)
+        text = self.shown.get(name) if name in self.radios else None
+        if text:                                        # the screen as the radio has it, without the suite's banner
+            self.radios[name].send("banner")
+            time.sleep(0.4)
         cmd = ("rm -f /tmp/screen.raw /tmp/suite.raw.gz; kill -USR1 $(pidof x6100_gui); "
                "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do [ -f /tmp/screen.raw ] && break; sleep 0.2; done; "
                "sleep 0.3; gzip -1 -c /tmp/screen.raw")
@@ -108,6 +123,9 @@ class Run:
         except (subprocess.TimeoutExpired, OSError, EOFError) as e:
             say(f"{name}: no screenshot ({e})")
             return None
+        finally:
+            if text:
+                self.radios[name].send(f"banner {text}")
         if len(data) != PANEL[0] * PANEL[1] * 4:
             say(f"{name}: a screenshot of {len(data)} bytes, not a whole panel")
             return None
@@ -210,6 +228,23 @@ def params(run, n):
     return dict(line.split("|", 1) for line in out.splitlines() if "|" in line)
 
 
+MODE_ROWS = ("filter_low", "filter_high")   # per mode (mode_params): the AM filter 0-5000 on one, 0-4000 on the other
+
+
+def mode_params(run, n):
+    """The per-mode rows compared and aligned as well, as "mode<N>.<name>" (the X6200's AM filter 0-5000 against the
+    X6100's 0-4000, 2026-11-18, was a value kept on one radio, not a default: params alone did not show it)"""
+    names = ",".join(f"'{x}'" for x in MODE_ROWS)
+    out = ssh(run, n, f"sqlite3 -separator '|' /mnt/params.db \"select mode,name,val from mode_params where name in "
+                      f"({names})\"")
+    rows = {}
+    for line in out.splitlines():
+        parts = line.split("|")
+        if len(parts) == 3 and parts[0].isdigit():
+            rows[f"mode{parts[0]}.{parts[1]}"] = parts[2]
+    return rows
+
+
 def t_settings(run):
     if len(run.names) != 2:
         return
@@ -218,6 +253,9 @@ def t_settings(run):
     keys = sorted(set(pa) | set(pb))
     diff = [(k, pa.get(k, "(default)"), pb.get(k, "(default)")) for k in keys
             if pa.get(k) != pb.get(k) and not OWN.search(k)]
+    ma, mb = mode_params(run, a), mode_params(run, b)
+    diff += [(k, ma.get(k, "(default)"), mb.get(k, "(default)")) for k in sorted(set(ma) | set(mb))
+             if ma.get(k) != mb.get(k)]
     with open(os.path.join(run.dir, "settings_diff.json"), "w") as f:
         json.dump([{"name": k, a: x, b: y} for k, x, y in diff], f, indent=1)
     run.result("core", "same-settings", None if diff else True,
@@ -249,15 +287,17 @@ def gate_rx(r):
 
 
 def screens_pair(run, label, setup, check):
-    """setup(r) on each radio; check(r) true on each within 8 s; both photographed, side by side, colours counted"""
+    """setup(r) on each radio; check(r) true on each within 15 s (the X6100's SSTV took 9-17 s to open, 2026-11-18);
+    both photographed, side by side, colours counted"""
     paths, shut = {}, []
+    run.banner(f"SUITE core: screen {label} on both, photographed side by side (receive only, nothing sent)")
     for n in run.names:
         r = run.radio(n)
         setup(r)
     for n in run.names:
         r = run.radio(n)
         try:
-            r.wait(label, lambda r=r: check(r), 8)
+            r.wait(label, lambda r=r: check(r), 15)
         except bench.Refused:
             shut.append(n)
         gate_rx(r)
@@ -353,10 +393,12 @@ def core(run, only):
              ("hold", t_hold)]
     for name, fn in tests:
         if not only or name in only:
+            run.banner(f"SUITE core: {name} (both radios receive only, nothing sent)")
             fn(run)
     if not only or {"apps", "screens", "pages", "gesture"} & set(only):
         for n in run.names:
             run.radio(n).take_control()
+        run.banner("SUITE core: the apps each radio has (receive only)")
         apps = t_apps(run)
         if not only or "pages" in only:
             t_pages(run)
@@ -373,6 +415,7 @@ def rtl(run, only):
     for n in run.names:
         run.radio(n).take_control()
         run.radio(n).send("open sentry H")
+    run.banner("SUITE rtl: AIRSPACE on both for 90 s, the RTL-SDRs side by side (receive only, nothing sent)")
     time.sleep(90)
     with concurrent.futures.ThreadPoolExecutor(2) as ex:
         paths = {n: f.result() for n, f in {n: ex.submit(run.shot, n, "rtl_airspace") for n in run.names}.items()}
@@ -381,6 +424,21 @@ def rtl(run, only):
                shot=os.path.relpath(pair, run.dir) if pair else None)
     for n in run.names:
         run.radio(n).send("open sentry A")
+
+
+def back(run, n, secs=90):
+    """n's GUI up and its remote answering again after a GUI restart, within secs"""
+    end = time.time() + secs
+    time.sleep(10)
+    while time.time() < end:
+        try:
+            if ssh(run, n, "pidof x6100_gui x6200_gui >/dev/null && echo up", timeout=15).strip() == "up":
+                time.sleep(5)                           # its remote server's port
+                return True
+        except (bench.Refused, OSError, subprocess.SubprocessError):
+            pass
+        time.sleep(5)
+    return False
 
 
 def cable(run, only):
@@ -394,12 +452,16 @@ def cable(run, only):
 
     calls, atu = {}, {}
     try:
+        # the GUIs restart for the test callsigns: the banner comes with each step's own connection (bench.py's
+        # radios-ft8 sets its own: which radio sends, which listens)
         for n, call in zip(run.names, ("Q1TST", "Q2TST")):
             a = A()
             a.name, a.call = n, call
             bench.cmd_testcall(run.c, a)
             calls[n] = True
-        time.sleep(15)                                  # the GUIs started again
+        for n in run.names:                             # the GUIs started again; the network too (TODO 10)
+            if not back(run, n):
+                raise bench.Refused(f"{n} not back on the network 90 s after its GUI restart (TODO 10)")
         for n in run.names:
             r = bench.Radio(n, run.c["radios"][n], want_tx=True)
             time.sleep(1)
@@ -414,21 +476,34 @@ def cable(run, only):
                    "radios-ft8", tx, rx, "--band", "20m", "--rx-alike"]
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             out = (r.stdout + r.stderr).strip().splitlines()
+            with open(os.path.join(run.dir, f"ft8_{tx}_{rx}.txt"), "w") as f:      # the whole run, kept
+                f.write("\n".join(out) + "\n")
+            # both transmissions' levels and decodes (the last three lines alone lost the CQ's, 2026-11-19)
+            keep = [x for x in out if " sent " in x or " decoded " in x or "PASS" in x or "STOP" in x or "Refused" in x]
             run.result("cable", f"ft8 {tx}->{rx}", r.returncode == 0 and any("PASS" in x for x in out),
-                       " | ".join(x.split(" ", 1)[-1] for x in out[-3:]))
+                       " | ".join(x.split(" ", 1)[-1] for x in (keep or out[-3:])))
     finally:
+        # each radio put back on its own: one off the network must not leave the other with a test callsign
         for n in calls:
             a = A()
             a.name, a.call = n, "restore"
-            bench.cmd_testcall(run.c, a)
-        time.sleep(15)
+            try:
+                bench.cmd_testcall(run.c, a)
+            except (bench.Refused, OSError, subprocess.SubprocessError) as e:
+                run.result("cable", "restore", False, f"{n}: its own callsign not put back ({e}): "
+                           f"bench.py testcall {n} restore", radio=n)
+        for n in calls:
+            back(run, n)
         for n, was in atu.items():
             if was:
-                r = bench.Radio(n, run.c["radios"][n], want_tx=True)
-                time.sleep(1)
-                r.take_control()
-                r.send("set atu 1")
-                r.close()
+                try:
+                    r = bench.Radio(n, run.c["radios"][n], want_tx=True)
+                    time.sleep(1)
+                    r.take_control()
+                    r.send("set atu 1")
+                    r.close()
+                except (bench.Refused, OSError) as e:
+                    run.result("cable", "restore", False, f"{n}: ATU not switched on again ({e})", radio=n)
 
 
 def align(names, src, dst, undo=None):
@@ -441,11 +516,22 @@ def align(names, src, dst, undo=None):
         ps, pd = params(run, src), params(run, dst)
         rows = [{"name": k, "was": pd.get(k), "to": ps.get(k)} for k in sorted(set(ps) | set(pd))
                 if ps.get(k) != pd.get(k) and not OWN.search(k)]
+        ms, md = mode_params(run, src), mode_params(run, dst)
+        rows += [{"name": k, "was": md.get(k), "to": ms.get(k)} for k in sorted(set(ms) | set(md))
+                 if ms.get(k) != md.get(k)]
         path = os.path.join(run.dir, f"align_{dst}_undo.json")
         json.dump([{"name": r["name"], "was": r["to"], "to": r["was"]} for r in rows], open(path, "w"), indent=1)
         say(f"{dst}'s values before: {path} (suite.py align {src} {dst} --undo {path})")
     sql = []
     for r in rows:
+        m = re.fullmatch(r"mode(\d+)\.(\w+)", r["name"])
+        if m and m.group(2) in MODE_ROWS:              # a per-mode row (mode_params: mode, name, val)
+            if r["to"] is None:
+                sql.append(f"delete from mode_params where mode={int(m.group(1))} and name='{m.group(2)}';")
+            elif re.fullmatch(r"-?\d+", str(r["to"])):
+                sql.append(f"insert or replace into mode_params(mode,name,val) values({int(m.group(1))},"
+                           f"'{m.group(2)}',{int(r['to'])});")
+            continue
         k = r["name"].replace("'", "''")
         if r["to"] is None:
             sql.append(f"delete from params where name='{k}';")

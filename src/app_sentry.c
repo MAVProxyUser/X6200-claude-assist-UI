@@ -10263,6 +10263,12 @@ static void build_overlays(void) {
                    "AM  CW  SSB    THE MODE: AM BROADCAST AND CB, SSB HAM VOICE, CW MORSE\n"
                    "DFN            NOISE REDUCTION ON/OFF. HOLD: NOISE BLANKER (CLICKS AND POPS)\n"
                    "DFL            FILTER WIDE, NORMAL, NARROW (NARROW: LESS NOISE, MUFFLED)\n"
+#ifndef BOARD_X6200
+                   /* the X6100's own keys (the key audit, 2026-11-19: they worked here but were in no help) */
+                   "PRE            PREAMP ON/OFF. HOLD: ATTENUATOR ON/OFF\n"
+                   "AGC            AGC OFF, SLOW, FAST, AUTO\n"
+                   "LOCK           THE VFO KNOB LOCKED/FREE. HOLD 5 S: THE BASE BOARD RESTARTED\n"
+#endif
                    "FST            HOW FAR ONE CLICK OF THE VFO KNOB MOVES\n"
                    "ATU            ANTENNA TUNER IN/OUT. TUNING ITSELF TRANSMITS: NOT HERE\n"
                    "A/B            ON A, G: ARMS TX FOR PTT, KNOBS LOCKED (G'S HACKRF CHANNELS: ITS TX)\n"

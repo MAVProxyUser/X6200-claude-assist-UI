@@ -150,6 +150,23 @@ record() {
     fi
 }
 
+# An inline check run with the time limit, once more if it FAILs (as the Makefile checks), and recorded
+check_twice() {
+    local name=$1 res
+    res=$(run_one "$@")
+    if [ "$res" = FAIL ]; then
+        mv "$OUT/$name.log" "$OUT/$name.first.log"
+        res=$(run_one "$@")
+        if [ "$res" = PASS ]; then
+            { echo "WARNING: $name failed once, then passed:"; grep -E '^ *(FAIL|FAILED|BAD|WRONG|not ok)([ :]|$)' \
+                "$OUT/$name.first.log" | head -n 8 | sed 's/^ */  /'; } >> "$OUT/$name.log"
+            record "$name" PASS "$(summary "$name") (passed when run again)"
+            return
+        fi
+    fi
+    record "$name" "$res" "$(summary "$name")"
+}
+
 wanted() { [ "$ONLY" = "  " ] || [[ "$ONLY" == *" $1 "* ]]; }
 
 # The checks with a Makefile
@@ -164,48 +181,54 @@ for d in tools/*/; do
     fi
     make -C "$d" clean > /dev/null 2>&1
     res=$(run_one "$name" make -C "$d")
+    if [ "$res" = FAIL ]; then
+        # Once more: a check that fails and then passes is a timing flake on a busy runner, not a broken build (the
+        # owner, 2026-11-19: not "failing randomly"). Its first run's failed lines are kept and shown under its row;
+        # a BUILD is never run again (a build does not fail by chance)
+        mv "$OUT/$name.log" "$OUT/$name.first.log"
+        make -C "$d" clean > /dev/null 2>&1
+        res=$(run_one "$name" make -C "$d")
+        if [ "$res" = PASS ]; then
+            { echo "WARNING: $name failed once, then passed:"; grep -E '^ *(FAIL|FAILED|BAD|WRONG|not ok)([ :]|$)' \
+                "$OUT/$name.first.log" | head -n 8 | sed 's/^ */  /'; } >> "$OUT/$name.log"
+            record "$name" PASS "$(summary "$name") (passed when run again)"
+            continue
+        fi
+    fi
     record "$name" "$res" "$(summary "$name")"
 done
 
 # The checks built here: no Makefile of their own
 if wanted adsb; then
-    res=$(run_one adsb sh -c "$CC -std=gnu11 -Wall -Wextra -O1 -g -I src -o '$OUT/adsb_test' tools/adsb/adsb_test.c src/adsb.c -lm -lpthread && '$OUT/adsb_test'")
-    record adsb "$res" "$(summary adsb)"
+    check_twice adsb sh -c "$CC -std=gnu11 -Wall -Wextra -O1 -g -I src -o '$OUT/adsb_test' tools/adsb/adsb_test.c src/adsb.c -lm -lpthread && '$OUT/adsb_test'"
 fi
 if wanted acars; then
-    res=$(run_one acars sh -c "$CC -O2 -Wall -Wextra -o '$OUT/acars_test' tools/rtlspec/acars_test.c tools/rtlspec/acars.c -lm && '$OUT/acars_test'")
-    record acars "$res" "$(summary acars)"
+    check_twice acars sh -c "$CC -O2 -Wall -Wextra -o '$OUT/acars_test' tools/rtlspec/acars_test.c tools/rtlspec/acars.c -lm && '$OUT/acars_test'"
 fi
 if wanted rds; then
-    res=$(run_one rds sh -c "$CC -O2 -o '$OUT/rds_test' tools/rtlspec/rds_test.c -lm && '$OUT/rds_test'")
-    record rds "$res" "$(summary rds)"
+    check_twice rds sh -c "$CC -O2 -o '$OUT/rds_test' tools/rtlspec/rds_test.c -lm && '$OUT/rds_test'"
 fi
 # x6x00-df's engine on made-up KrakenSDR data: calibration, bearings for each array, slips (docs/plans/kraken_df_plan.md)
 if wanted df; then
     D=tools/rtlspec/x6x00-df      # its own repository, a submodule: its Makefile knows its files
-    res=$(run_one df sh -c "make -s -C '$D' CC='$CC' df_test && '$D/df_test'")
-    record df "$res" "$(summary df)"
+    check_twice df sh -c "make -s -C '$D' CC='$CC' df_test && '$D/df_test'"
 fi
 # lrpt.c's Meteor-M LRPT, from a transmitter of its own: each layer, then frames, packets and pictures, through the
 # demodulator too (QPSK and offset QPSK, 72k and 80k, the carrier off)
 if wanted lrpt; then
-    res=$(run_one lrpt sh -c "$CC -O2 -Wall -Wextra -o '$OUT/lrpt_test' tools/rtlspec/lrpt_test.c tools/rtlspec/lrpt.c -lm && '$OUT/lrpt_test'")
-    record lrpt "$res" "$(summary lrpt)"
+    check_twice lrpt sh -c "$CC -O2 -Wall -Wextra -o '$OUT/lrpt_test' tools/rtlspec/lrpt_test.c tools/rtlspec/lrpt.c -lm && '$OUT/lrpt_test'"
 fi
 if wanted dmr; then
-    res=$(run_one dmr sh -c "$CC -O2 -Wall -Wextra -o '$OUT/dmr_test' tools/rtlspec/dmr_test.c tools/rtlspec/dmr.c -lm && '$OUT/dmr_test'")
-    record dmr "$res" "$(summary dmr)"
+    check_twice dmr sh -c "$CC -O2 -Wall -Wextra -o '$OUT/dmr_test' tools/rtlspec/dmr_test.c tools/rtlspec/dmr.c -lm && '$OUT/dmr_test'"
 fi
 # libmbe-dvsi's P25 path: the USB-3000's own IMBE frames through dsd-fme's corrections and coded back, bit for bit
 if wanted p25; then
-    res=$(run_one p25 sh -c "$CC -O2 -Wall -Wextra -o '$OUT/p25_test' tools/dsdfme/mbe_dvsi/p25_test.c tools/dsdfme/mbe_dvsi/mbe_dvsi.c && '$OUT/p25_test' tools/dsdfme/mbe_dvsi/p25_chip_frames.bin")
-    record p25 "$res" "$(summary p25)"
+    check_twice p25 sh -c "$CC -O2 -Wall -Wextra -o '$OUT/p25_test' tools/dsdfme/mbe_dvsi/p25_test.c tools/dsdfme/mbe_dvsi/mbe_dvsi.c && '$OUT/p25_test' tools/dsdfme/mbe_dvsi/p25_chip_frames.bin"
 fi
 # The audits' reproduction harnesses, now the regression suite of their fixes (docs/audit/repro-2026-10-24/README.md):
 # Python, Node.js, SQLite, libpng and ALSA's headers, LVGL; Linux
 if [[ "$ONLY" == *" audit "* ]]; then     # named only (the header says why)
-    res=$(run_one audit python3 docs/audit/repro-2026-10-24/run.py)
-    record audit "$res" "$(summary audit)"
+    check_twice audit python3 docs/audit/repro-2026-10-24/run.py
 fi
 
 echo

@@ -119,6 +119,7 @@
 #include "screen_light.h"
 #include "screen_main.h"
 #include "app_sentry.h"      /* "open sentry L" */
+#include "bench_banner.h"    /* "banner TEXT" */
 #include "smeter.h"
 #include "tci_server.h"
 #include "tci_ws.h"
@@ -633,6 +634,8 @@ bool remote_server_session_check(const char *token, int *role, bool *tx, char *n
 }
 
 static void client_close(client_t *c);
+static atomic_int banner_by = -1;  /* the session whose bench banner shows ("banner TEXT"), -1 none */
+static void banner_drop(int who);
 static void rx_hold_sync(void);
 static void client_text(client_t *c, const char *text);
 static void client_textf(client_t *c, const char *fmt, ...);
@@ -945,6 +948,7 @@ static void client_textf(client_t *c, const char *fmt, ...) {
 }
 
 static void client_close(client_t *c) {
+    banner_drop((int)(c - clients));    /* its bench banner goes with it */
     client_release_keys(c);
     atomic_store(&c->tune_want, 0);
     if (c->tune_on) {               /* its TUNE goes with it */
@@ -1426,7 +1430,7 @@ static void ft8_status_line(char *buf, size_t n, const ft8_status_t *s) {
 
 /* What the panel asks of the apps, on the LVGL thread */
 typedef enum { A_FT8_OPEN, A_FT8_CLOSE, A_FT8, A_WEFAX_OPEN, A_WEFAX_CLOSE, A_WEFAX, A_LOG, A_APP_OPEN, A_APP_CLOSE,
-               A_SENTRY } acmd_id_t;
+               A_SENTRY, A_BANNER } acmd_id_t;
 
 typedef struct {
     acmd_id_t   id;
@@ -1586,6 +1590,18 @@ static void app_apply(void *arg) {
             backlight_tick();
             app_sentry_open_at((char)a->arg);
             break;
+        case A_BANNER:
+            bench_banner_set(a->text);
+            break;
+    }
+}
+
+/* Session WHO's bench banner, if it is the one showing, taken away */
+static void banner_drop(int who) {
+    if (atomic_compare_exchange_strong(&banner_by, &who, -1)) {
+        acmd_t q = {.id = A_BANNER};
+
+        scheduler_put(app_apply, &q, sizeof(q));
     }
 }
 
@@ -1854,7 +1870,7 @@ static void *panel_thread(void *arg) {
 }
 
 /* "key NAME 1|0", "knob main|vol|mfk N", "ping", "screen 0|1", "panel 0|1", "wide 0|1", "set NAME VALUE",
- * "ft8 WHAT [ARG]", "log TEXT", "apps", "open ACTION|sentry L", "close" */
+ * "ft8 WHAT [ARG]", "log TEXT", "apps", "open ACTION|sentry L", "close", "banner [TEXT]" */
 /* "ctl WHO MINE": who controls the radio, and whether it is this client */
 static void ctl_tell(client_t *c) {
     ctl_info_t o;
@@ -2161,6 +2177,18 @@ static void handle_text(client_t *c, char *text) {
      * The code is neither shown, nor burned, nor waited for from there */
     if (c->funnel && !strncmp(text, "pair", 4) && (text[4] == ' ' || text[4] == '?')) {
         client_text(c, "err pairing refused over the internet: pair this browser at home, then Use away from home");
+        return;
+    }
+    if (!strncmp(text, "banner", 6) && (text[6] == ' ' || !text[6])) {
+        /* "banner TEXT": the bench suite's line across the screen (the test, which radio sends, which listens), the
+         * text as it is; "banner" alone takes it away, and so does the session that set it going (bench_banner.c) */
+        if (!allowed(c, ROLE_OPERATE, false))
+            return;
+        acmd_t q = {.id = A_BANNER};
+
+        snprintf(q.text, sizeof(q.text), "%s", text[6] ? text + 7 : "");
+        atomic_store(&banner_by, q.text[0] ? (int)(c - clients) : -1);
+        scheduler_put(app_apply, &q, sizeof(q));
         return;
     }
     if (!strncmp(text, "log ", 4)) {        /* the text as it is: names have spaces */

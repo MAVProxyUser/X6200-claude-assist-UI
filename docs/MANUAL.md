@@ -409,7 +409,9 @@ Band up, AM, CW and SSB (on the X6100 PRE and AGC too) can each be given an
 action of the list below in place of the key's own job; "Own" (the
 default) keeps the job the key has always had, named in the list ("Own:
 step up", "Own: copy VFO"...). The band keys' hold has no job of its own,
-so it is the place for one. POWER, PTT and the X6100's LOCK are not on the
+so it is the place for one. The X6100's AGC held switches split, as the
+Split action does, and like it not while an app holds the VFOs (up to
+v0.3.12.30 the AGC hold switched it there too). POWER, PTT and the X6100's LOCK are not on the
 list: they never do another job. On the main screen only: an app that gives
 the keys its own jobs keeps them. "Reset to own" puts every key back.
 Up to v0.3.12.23 only FST's hold could be given another action.
@@ -740,7 +742,11 @@ on an X6100 the screens say X6100):
   x8 and narrower A waits (it says ZOOM AT X4 OR WIDER).
 - **The pages**: the X6100's MFK has no inner ring. **Hold the MFK and turn the main dial** instead: one page a
   turn (a steady turn about three a second), the same order as the X6200's ring, AIRSPACE and the direction
-  finder too. The dial does not tune while the MFK is held, and letting the MFK go then is not a push.
+  finder too. The dial does not tune while the MFK is held, and letting the MFK go then is not a push. Only
+  there: in any other app the MFK held changes nothing, the dial tunes and letting the MFK go is a push.
+- The X6100's own keys in the Sentry: PRE (preamp; held, the attenuator), AGC (off, slow, fast, auto; held, split
+  is not used here) and LOCK (the VFO knob locked; held, the base board restarted) do what they do on the main
+  screen, with a word on the screen; V/M does nothing here. GEN's list names them.
 - No FM broadcast or airband on its own receiver, no WR12 and no base firmware updater (all the X6200's): above
   6 m it is the SDR's alone.
 
@@ -3448,6 +3454,22 @@ Joining a network:
 - After a failed join the radio writes what its WiFi module, NetworkManager and
   the supplicant said to `app_logs/wifi.txt` on the card's DATA partition (no
   password is in it). Attach that file to a report.
+- A join the radio started by itself that failed (at power-on, when the GUI
+  starts again, or when the network comes back) is tried again with the best
+  saved network in reach: 15 s after, then 30 s, 1, 2 and 5 minutes, then
+  every 10 minutes, while WiFi is on and nothing is joined. Before, a failed
+  handshake left the network blocked until it was picked by hand.
+- When the radio sees other networks but six joins in a row fail (about
+  three minutes), the WiFi chip is switched off and on again, as WiFi off and
+  on in Settings does; at most once in 10 minutes, and not while a cable is
+  connected. Bluetooth shares the chip and drops for those seconds too.
+- X6100: up to v0.3.12.30 every start of the GUI (a restart, an update) cut
+  the WiFi chip's power for about a second, as the X6100 control library
+  started its power line at off (the X6200's starts it at on). Now and then
+  the chip came back unable to see the saved network, and the radio stayed
+  off it for hours (2026-11-18) until WiFi was switched off and on. The GUI
+  now holds the X6100's control lines itself, the WiFi chip powered as it
+  was, as on the X6200.
 - The saved networks, the SSH host keys and root's SSH keys are copied to
   `backups/backup.tgz` on the DATA partition at every clean shutdown, and when
   a key is added or removed on the web configurator ([SSH](#ssh)). At the first
@@ -5822,7 +5844,10 @@ Train is for practice: the key, the paddle, the CW messages and the
 In CW mode the decoder buttons are on the CW pages: CW 1:2 has ZAP, CW
 peak, CW peak Q and Log QSO (the [quick QSO log](#quick-qso-log)), CW 2:2 Decoder on/off, Tuner (tuning
 indicator), Dec SNR and Parse. Text and speed (WPM) appear in the panel
-over the waterfall.
+over the waterfall. The panel is see-through in every theme (up to v0.3.12.30 the
+flat themes, the Sentry's gold on black among them, filled it solid, so with the
+decoder on the classic screen showed no waterfall in CW); High contrast keeps it
+solid.
 
 - The receiver comes from gdyuldin x6100_gui 1.0.1: a coherent tone tracker
   that follows the station inside the CW filter, a detector with a noise
@@ -6492,7 +6517,9 @@ remove servers from the [web configurator](#web-configurator) or in the file
 ### Field Ops (SOTA / POTA)
 
 A full-screen interface for portable activations: APP (page 2) > Field Ops,
-or a long-press action. GEN or Radio goes back to the normal screen.
+or a long-press action. GEN or Radio goes back to the normal screen. Its
+tiles' pictures are in colour, but in the Sentry theme they are tinted in
+its gold (and in Codec's green), as the rest of the screen.
 
 - Everything (the reference, the activation running, its log, the screen you
   were on) is kept on the SD card in `/mnt/field`. Coming back, or a restart
@@ -9409,6 +9436,11 @@ here it is a web page, nothing to install.
   carries 150 kB/s, Sharp gives about 4 and Fast about 9. The choice is kept
   in the browser. A frame goes out only when the last one has reached the
   browser, so a slow link shows fewer, current frames rather than late ones.
+- A line across the top of the screen with TX or RX in a box in front is the
+  bench test suite's (tools/bench): it names the test running and which radio
+  sends and which listens; the box is the radio's own word, TX on red while it
+  is on the air. A session that may operate sets it with `banner TEXT` and
+  clears it with `banner`; it goes by itself when that session disconnects.
 - F1-F5 under the screen, the key block to its right (GEN, KEY, DFN / APP,
   MSG, DFL / AM, CW, SSB / A/B, PRE, ATU / V/M, AGC, FST), BAND up and down,
   LOCK, POWER and PTT. A key is held as long as it is pressed, so long presses

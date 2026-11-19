@@ -97,7 +97,7 @@ fetch() {   # URL FILE SHA256 [tar]: downloaded once, kept only with the pinned 
     [ -f "$2" ] && [ "$(sha "$2" $4)" = "$3" ] && return 0
     echo "== $1"
     if command -v curl > /dev/null; then
-        curl -fsSL --retry 3 -o "$2.tmp.$$" "$1"
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$2.tmp.$$" "$1"   # HTTP/2 resets too
     else
         wget -q -O "$2.tmp.$$" "$1"
     fi

@@ -351,6 +351,46 @@ GUI read `V1.1.9` on its start. The radio stayed on. What V1.1.9 changes here: t
 (the GUI's zoom and IF shift for it, hw_x6100.c), and the IQ's noise still climbs from about 27 kHz either side of
 the dial (TODO 12).
 
+## Others' base work, read 2026-11-19
+
+The owner's links, read through GitHub's API and groups.io (nothing cloned, no binaries fetched):
+
+- [strijar/x6100-base](https://github.com/strijar/x6100-base) (R1CBU): Xiegu's X6100 base V1.1.9
+  (X6100_BBFW_V1.1.9_251127001, the build on the owner's X6100) mapped from Ghidra, for a clean-room replacement:
+  an STM32F427, the CS4272 converter at I2C2 0x10 in double-speed mode clocked from the TLV320AIC3204 at 100 kHz,
+  the RX and TX chains, the control registers. No code and no licence: read, not copied. It agrees with what this
+  tool and the GUI assume (the bootloader's GPIO 203/204, `A`/`a`, `r`/`p`, XMODEM-1K; i2c-0 0x72 and its 56
+  registers); it finds registers 48/49 (RX phase and magnitude correction) in use, which the X6100 control
+  library's header calls unused.
+- [fventuri/x6100-base, WIP-franco](https://github.com/fventuri/x6100-base/tree/WIP-franco) (K4VZ): the same notes
+  plus pins checked on a radio, the libraries in the image identified, and a dump of the 128 KiB IAP bootloader
+  (made by flashing a dumper; the application still cannot be read back).
+- [fventuri/x6100-bbfw](https://github.com/fventuri/x6100-bbfw) (MIT): a clean-room base built on those notes,
+  receive only so far (AM, SSB, FT8, the panadapter, the battery), driven by the stock GUI or ours unchanged.
+  Its `common/build_common.sh` makes .xgf files: AES-256-ECB, no padding, with Xiegu's key. The same key opens
+  the X6200's: its 2026-08-20 base decrypts to an STM32H7's vector table (stack at 0x24050000, AXI SRAM), the
+  X6100's V1.1.9 to an STM32F4's (0x20030000).
+- Georgy Dyuldin's patch method (groups.io xiegu-x6100 topic 112186023, April 2025; gdyuldin/x6100_base_patch):
+  code built for the STM32 placed past the end of Xiegu's image, jumps into it; his TX chain addresses are for
+  1.1.8. The spectrum's edges (topic 108431112, September 2024): strong signals within 10-12 kHz of +-50 kHz show
+  on the opposite edge on every X6100, the converter's own filter the only anti-alias filter.
+
+The two radios' current bases side by side (decrypted 2026-11-19 from the radios' own .xgf files; nothing kept in the
+repository): the X6100's V1.1.9 (built Nov 27 2025) is 391 KB for an STM32F427 (Cortex-M4, about 91 interrupt
+vectors, stack top 0x20030000): an analog quadrature detector fed a 4x LO from the VersaClock (26 MHz reference), the
+CS4272 bringing I/Q at 100 kHz, the DSP and audio in the STM32 (debug text for TX power, NR, the digital notch, AGC
+time constants, the LO; the BQ24715 charger and MAX17205 fuel gauge; PA bias calibration). The X6200's 1.0.8 (built
+Aug 19 2026) fills 512 KiB for an STM32H72x/H73x (Cortex-M7, about 163 vectors, stack top 0x24050000 in AXI SRAM):
+an FPGA in front ("FPGA FW Version", "Check FPGA BUS", its own flash written from the base), clocks from a
+VersaClock 6 (245.76 and 61.44 MHz in it), selectable I/Q rates of 96, 192 and 384 kHz to the STM32, audio at
+48 kHz (12.288/49.152 MHz master clocks); and much more done in the base: a CW decoder, keyer and trainer, a
+compressor, 5-band RX, WFM and mic equalisers, FM squelch, line in/out gains, voice record, a serial console with a
+login, power-off timers ("host offline, powering off in %d s": what x6200-base-keeper answers), readout protection
+set at start and a bootloader it can rewrite. Both use CMSIS-DSP-style FFT twiddle tables.
+
+For this tool: any of these bases is an .xgf like Xiegu's and goes on with the same write; a clean-room base
+that names itself as a patched one (bbfw says `,r8`) would get capabilities from `hw_caps()` it does not have.
+
 ## Files
 
 | File | |

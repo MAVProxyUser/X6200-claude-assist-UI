@@ -98,6 +98,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     dialog_snake.c
     dialog_iradio.c iradio_list.c
     remote_server.c
+    bench_banner.c
     control_owner.c
     winlink.c
     rigctld.c
@@ -116,7 +117,7 @@ endif()
 # The radio behind src/hw/hw.h (HW_BACKEND, chosen in the top-level CMakeLists.txt)
 if(HW_BACKEND STREQUAL "x6100")
     target_sources(${PROJECT_NAME} PUBLIC hw/x6100/hw_x6100.c hw/x6100/test_base.c)
-    set(HW_LIBS aether_x6100_control)
+    set(HW_LIBS aether_x6100_control gpiod)   # gpiod: its control lines held by the GUI (hw_x6100.c pins_init)
 elseif(HW_BACKEND STREQUAL "x6200")
     target_sources(${PROJECT_NAME} PUBLIC hw/x6200/hw_x6200.c)
     set(HW_LIBS aether_x6200_control)

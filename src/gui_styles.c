@@ -386,7 +386,10 @@ static void message_colours(bool strong) {
             continue;
         }
         lv_style_remove_prop(s, LV_STYLE_BG_IMG_SRC);
-        lv_style_set_bg_opa(s, LV_OPA_COVER);
+        /* The panel (the CW and RTTY decoders' text on the classic screen) lies over the waterfall: see-through, as
+         * the picture themes' panel is, or in CW with the decoder on the waterfall was gone (the Sentry theme,
+         * 2026-11-18); solid in high contrast */
+        lv_style_set_bg_opa(s, s == &panel_style && !strong ? LV_OPA_60 : LV_OPA_COVER);
         lv_style_set_bg_color(s, TC(popup));
         lv_style_set_border_width(s, strong ? 3 : theme_shape.border);
         lv_style_set_border_color(s, TC(popup_border));

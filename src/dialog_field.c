@@ -864,7 +864,9 @@ static lv_obj_t *icon(lv_obj_t *parent, const char *name, int size, lv_coord_t x
     lv_obj_t *img = lv_img_create(parent);
     lv_img_set_src(img, d);
     lv_obj_set_pos(img, x, y);
-    if (theme_shape.codec) {    /* the colour artwork in the theme's phosphor green */
+    /* the colour artwork in the theme's own colour: Codec's phosphor green; the Sentry's gold, its shading kept (the
+     * owner, 2026-11-18: gold on black everywhere; the tiles were the one screen with greens and blues left) */
+    if (theme_shape.codec || theme_shape.sentry) {
         lv_obj_set_style_img_recolor(img, TC(accent), 0);
         lv_obj_set_style_img_recolor_opa(img, LV_OPA_80, 0);
     }

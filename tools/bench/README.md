@@ -53,7 +53,12 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
 X6200 decoded the X6100 at +11 to +15 dB, the X6100 the X6200 at -2 to -3 dB (the X6200's preamp on, the X6100's
 off: a parity run sets them alike). Found by it: the FT8 app opens on its last band and holds the dial (the band keys
 move it now, `ft8_to_band`), the log cleaning's script broke through the shells (base64 now), `testcall NAME
-restore`, and the radios' power put back after.
+restore`, and the radios' power put back after. From 2026-11-19 it says for each transmission the sender's own
+power meter (W, its highest on the air) and the listener's S-meter before and at its highest, beside the chain's
+expected level: a weak transmitter and a deaf receiver read differently there, while FT8's SNR of a -50 dBm signal
+is the decoder's measure of a strong one, not sensitivity (2026-11-19: -10 to +11 dB on either radio for the same
+-70 dBm). `--rx-alike` sets the preamp and attenuator off and RF gain to 100 on both, each put back after: below 100
+the X6100's base switches in a stepped attenuator, and it had run at 63, its default.
 
 `hackrf-iq FILE --at HZ --offset HZ` sends an I/Q file made elsewhere (int8, 2 MS/s by default, the signal OFFSET
 above the HackRF's centre) into the radio tuned to HZ in a mode (7: narrow FM; `--filter LO HI` for the test),
@@ -66,7 +71,7 @@ when a call is decoded and its voice heard (receive only, nothing on the air).
 
 `hackrf-ft8` makes the message with ft8_lib's `gen_ft8` (`gen_ft8` in the configuration), turns it into upper
 sideband I/Q at 2.004 MS/s (100 kHz above the HackRF's centre, clear of its DC spike), starts on the next FT8 slot
-and passes when the radio's FT8 app shows the text. `radios-ft8` is untried until two radios are on the bench.
+and passes when the radio's FT8 app shows the text.
 
 ## The two-radio suite (suite.py)
 
@@ -88,12 +93,21 @@ harness's own tests: `rtl` (AIRSPACE on both for 90 s, photographed), `cable` (`
 test callsigns set and any ATU off first, all put back after; the cable's `chain-ok` first), `update` (each
 radio's `x6100-update check`: the newest release for its model; nothing downloaded or installed).
 
+While the suite or a bench test runs, each radio shows a banner across the top of its screen (the owner,
+2026-11-19: "which device is TXing and which is RXing and exactly which test"): the remote's `banner TEXT`
+(`banner` alone clears it), its text the test and both radios' parts ("SUITE core: screen app112_SSTV ...",
+"BENCH FT8 radio to radio, 20m, 0.1 W through 70 dB: X6100 SENDS CQ, X6200 LISTENS"), and in front of it the
+radio's own TX (on red) or RX, from its transmit state. It goes when the suite's connection closes, so a run that
+dies leaves none; the suite hides it for the second each screenshot takes.
+
     suite.py align x6200 x6100           # the X6200's look-and-behaviour settings and time zone onto the X6100
     suite.py align x6200 x6100 --undo FILE
 
 `align` writes the settings core lists as different into the second radio's params.db with its GUI stopped (a GUI
 writes its own back as it ends) and copies `/mnt/tz.conf`; the second radio's values before are kept in the run's
-folder for `--undo`.
+folder for `--undo`. Each mode's filter edges (mode_params: `mode<N>.filter_low/high`) are compared and aligned too
+(2026-11-19: the X6200's AM 0-5000 against the X6100's 0-4000 was a value kept on one radio, which the general
+settings did not show).
 
 `redact_shots.py RUN_DIR OUT_DIR` makes a suite run's screenshots fit to publish: what would place the station
 pixelated (or a map flattened) on both radios alike, each screen's pair side by side. The first gallery:

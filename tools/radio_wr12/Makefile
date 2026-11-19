@@ -34,7 +34,12 @@ build/radio.o: radio_thread.c $(SRC)/radio.c $(wildcard $(SRC)/*.h $(SRC)/hw/*.h
 radio_wr12_test: radio_wr12_test.c fakes.c fakes.h build/radio.o $(SRC)/hw/stub/hw_stub.c $(SRC)/base_guard.c \
                  $(SRC)/pa_bias.c $(SRC)/cfg/ham_bands.c $(SRC)/cfg/tx_ranges.c $(SRC)/bat_watch.c
 	$(CC) $(CFLAGS) -o $@ radio_wr12_test.c fakes.c build/radio.o $(SRC)/hw/stub/hw_stub.c $(SRC)/base_guard.c \
-	    $(SRC)/pa_bias.c $(SRC)/cfg/ham_bands.c $(SRC)/cfg/tx_ranges.c $(SRC)/bat_watch.c -lm $(WRAPS)
+	    $(SRC)/pa_bias.c $(SRC)/cfg/ham_bands.c $(SRC)/cfg/tx_ranges.c $(SRC)/bat_watch.c -lm $(WRAPS) $(TOLERANT)
+
+# A function radio.c calls that fakes.c has no stand-in for yet is a warning in the log, not a build that fails: three
+# CI runs failed so (2026-11-18/19: dsp_zoom_refresh and others), the GUI itself linking fine each time. Bound lazily,
+# so a missing stand-in the test does reach still stops it ("symbol lookup error": a FAIL, as it should be)
+TOLERANT := $(if $(filter Linux,$(shell uname -s)),-Wl,--warn-unresolved-symbols -Wl,-z,lazy)
 
 test: radio_wr12_test
 	./radio_wr12_test

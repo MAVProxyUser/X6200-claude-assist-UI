@@ -1286,10 +1286,10 @@ static void front_key_cb(lv_event_t *e) {
             }
             break;
 
-        case KEYPAD_AGC:    /* long: split */
+        case KEYPAD_AGC:    /* long: split (not while an app holds the VFOs, as ACTION_SPLIT) */
             if (tap) {
                 main_screen_agc_next();
-            } else if (hold) {
+            } else if (hold && !ab_lock) {
                 toggle_param(cfg_band_split);
                 spectrum_clear();
                 tiny_vfo();
@@ -1648,13 +1648,15 @@ static void plan_mode(int32_t old, int32_t freq) {
 /* No inner ring on the MFK (the X6100): in an app, the MFK held and the main dial turned step what the X6200's inner
  * ring steps, the Sentry's pages (and AIRSPACE's and the direction finder's way back to them), as its KEY_MFK_PREV and
  * KEY_MFK_NEXT (the owner, 2026-11-18). One a turn, the same way again only after 300 ms: the dial's many clicks a
- * turn would fly through the pages. The MFK let go after that is no push (mfk_paged_take) */
+ * turn would fly through the pages. The MFK let go after that is no push (mfk_paged_take). Only in those windows
+ * (dialog_has_own_keys): in any other app the dial tuned nothing while the MFK was held and the MFK let go opened the
+ * APP grid's tile under it (the key audit, 2026-11-19) */
 static bool mfk_page_turn(int32_t diff) {
     static uint32_t last;
     static int      dir;
     int             d = diff > 0 ? 1 : -1;
 
-    if (!mfk || !mfk->pressed || !dialog_is_run()) return false;
+    if (!mfk || !mfk->pressed || !dialog_has_own_keys()) return false;
     mfk->paged = true;
     if (!diff || (d == dir && lv_tick_elaps(last) < 300)) return true;
     last = lv_tick_get();

@@ -46,6 +46,7 @@ typedef struct {
 
 /* The open window has the main knob to itself (rotary_takes_cb) */
 bool dialog_rotary_taken(void);
+bool dialog_has_own_keys(void);
 
 /* A window that has no APP action (the Sentry's UNIX SHELL), opened as the APP grid is (screen_main.c) */
 void main_screen_open_dialog(dialog_t *d);

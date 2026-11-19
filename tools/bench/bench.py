@@ -286,6 +286,8 @@ class Watch:
     def __init__(self, radios, c, hackrf=None, expect_dbm=None, listener=None, w=None):
         self.radios, self.c, self.hackrf, self.why = radios, c, hackrf, None
         self.expect_dbm, self.listener, self.w = expect_dbm, listener, w
+        self.tx_peak = {}       # each radio's own forward-power meter, its highest while on the air (W)
+        self.rx_peak = None     # the listener's S-meter, its highest while another radio is on the air (dBm)
         self.on = True
         threading.Thread(target=self._run, daemon=True).start()
 
@@ -307,6 +309,10 @@ class Watch:
                         self.trip(f"{r.name}: SWR {swr:.2f} on the air: the chain is not a load")
                     elif self.w is not None and w > max(self.w * 2, self.w + 0.5):
                         self.trip(f"{r.name}: {w:.1f} W on the air, {self.w} W asked")
+                if since and txm and time.time() - since > 1.0:
+                    self.tx_peak[r.name] = max(self.tx_peak.get(r.name, 0.0), txm[0])
+                if since and meter is not None and r is not self.listener and time.time() - since > 1.0:
+                    self.rx_peak = meter if self.rx_peak is None else max(self.rx_peak, meter)
                 if since and self.expect_dbm is not None and meter is not None and \
                         time.time() - since > 1.0 and meter > self.expect_dbm + TOO_STRONG_DB:
                     self.trip(f"{self.listener.name} hears {meter:.0f} dBm, the chain should let through about "
@@ -422,6 +428,8 @@ def run_hackrf_ft8(c, args):
     fs, offset = 2004000, 100000
     secs = audio_to_iq(wav, iq, fs, offset, lead_s=0.25)
     radio.take_control()
+    radio.send(f"banner BENCH HackRF into {name.upper()} through the pads, {name.upper()} RECEIVES ONLY: FT8 "
+               f"'{text}' on {args.band}")
     found, watch, hk = None, None, None
     try:
         radio.send(f"set freq {dial}")      # first: the app holds the dial once open
@@ -486,6 +494,8 @@ def run_hackrf_iq(c, args):
     rx_only_gate(radio)
     secs = os.path.getsize(args.file) / 2 / args.fs
     radio.take_control()
+    radio.send(f"banner BENCH HackRF into {name.upper()} through the pads, {name.upper()} RECEIVES ONLY: "
+               f"{os.path.basename(args.file)} at {args.at} Hz")
     was = {k: radio.state.get(k) for k in ("freq", "mode", "sql")}
     hk, watch, during, was_filter = None, None, None, None
     try:
@@ -584,9 +594,12 @@ def run_radios_ft8(c, args):
         if getattr(args, "rx_alike", False):
             # the receivers alike for a 1:1 of the two: preamp and attenuator off (the first run had the X6200's preamp
             # on and the X6100's off, 13-18 dB apart); put back after
-            was_rx[r.name].update({k: r.state.get(k) for k in ("pre", "att")})
+            was_rx[r.name].update({k: r.state.get(k) for k in ("pre", "att", "rfg")})
             r.send("set pre 0")
             r.send("set att 0")
+            # and RF gain at its top: below 100 the X6100's base switches in its stepped attenuator (100 - rfg steps,
+            # strijar/x6100-base docs/protocol.md), and the X6100 had run at 63, its default, through every 1:1 so far
+            r.send("set rfg 100")
         r.send(f"set freq {dial}")          # first: the app holds the dial once open
         r.send("ft8 open")
         r.wait("the FT8 app", lambda r=r: r.ft8.get("open") == 1, 10)
@@ -604,11 +617,22 @@ def run_radios_ft8(c, args):
     try:
         def one_tx(sender, listener, start_cmd, want, what):
             n0 = len(listener.rows)
+            line = (f"BENCH FT8 radio to radio, {args.band}, {FIRST_PROBE_W} W through {total} dB: "
+                    f"{sender.name.upper()} SENDS {what.upper()}, {listener.name.upper()} LISTENS")
+            for r in (sender, listener):                # the line across both screens (bench_banner.c)
+                r.send(f"banner {line}")
+            quiet = listener.meter
+            watch.tx_peak.pop(sender.name, None)
+            watch.rx_peak = None
             sender.send(start_cmd)
             tx_log({"who": sender.name, "f": dial, "w": sender.pwr(), "what": what})
             sender.wait("its transmission", lambda: sender.tx or watch.why, 32)
             sender.wait("the end of its transmission", lambda: not sender.tx or watch.why, MAX_KEY_S + 2)
             sender.send("ft8 stop")
+            # the levels, to tell a weak transmitter from a deaf receiver (TODO 12: the FT8 SNRs 14 dB apart)
+            say(f"{sender.name} sent {watch.tx_peak.get(sender.name, 0):.2f} W by its own meter; {listener.name}'s "
+                f"S-meter {quiet} dBm before, {watch.rx_peak} dBm at most while it sent (the chain: about "
+                f"{expect:.0f})")
             listener.wait(f"{what} decoded", lambda: watch.why or any(want(r) for r in listener.rows[n0:]), 8)
             if watch.why:
                 raise Refused(watch.why)
@@ -628,10 +652,16 @@ def run_radios_ft8(c, args):
             r.stop()
         time.sleep(1)
         for r in radios:
+            r.send("banner")
             r.send("ft8 close")
+            try:        # the app gives the dial back as it closes: ours after it (it took the X6100 to 14.074, 11-19)
+                r.wait("the FT8 app closed", lambda r=r: r.ft8.get("open") != 1, 5)
+            except Refused:
+                pass
+            time.sleep(0.5)
             if r.name in was_pwr and was_pwr[r.name] < 99:
                 r.send(f"set pwr {round(was_pwr[r.name] * 10)}")
-            for k in ("freq", "mode", "pre", "att"):     # the frequency first: a band brings its own mode back
+            for k in ("freq", "mode", "pre", "att", "rfg"):  # the frequency first: a band brings its own mode back
                 v = was_rx.get(r.name, {}).get(k)
                 if v is not None:
                     r.send(f"set {k} {int(v)}")

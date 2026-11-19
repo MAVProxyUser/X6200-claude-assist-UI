@@ -16,7 +16,6 @@
 
 #include <aether_radio/x6100_control/control.h>
 #include <aether_radio/x6100_control/low/flow.h>
-#include <aether_radio/x6100_control/low/gpio.h>
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -26,6 +25,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#if __has_include(<gpiod.h>)
+#include <gpiod.h>
+#else
+/* libgpiod 1.x (the radio's libgpiod.so.2), where its header is not at hand (the Mac's cross build) */
+struct gpiod_chip;
+struct gpiod_line;
+struct gpiod_chip *gpiod_chip_open_by_name(const char *name);
+struct gpiod_line *gpiod_chip_get_line(struct gpiod_chip *chip, unsigned int offset);
+int gpiod_line_request_output(struct gpiod_line *line, const char *consumer, int default_val);
+int gpiod_line_set_value(struct gpiod_line *line, int value);
+#endif
 
 /* The GUI's enums (radio_types.h) are the library's numbers: handed straight to it below */
 #define SAME(a, b) _Static_assert((int)(a) == (int)(b), #a " is not " #b)
@@ -122,11 +133,47 @@ bool x6100_control_cmd(x6100_cmd_enum_t cmd, uint32_t arg) {
 
 /* ---- Init ----------------------------------------------------------------------------- */
 
+/* The X6100's control lines, held here rather than by the X6100 control library's own GPIO set-up: the same pins,
+ * names and start values but WiFi's. The library asks for the WiFi chip's power line at 1, off, so every start of the
+ * GUI cut the chip's power for about a second until the WiFi setup gave it back; now and then it came back unable to
+ * see the saved network and the radio stayed off it for hours (2026-11-18). The X6200's library asks for it at 0, on,
+ * and the WiFi setup then switches it as Settings say: the same here. The library's GPIO is never set up then, so its
+ * setter must not be called (its lines would be NULL) */
+static struct gpiod_line *pin_key, *pin_bb_reset, *pin_usb, *pin_light, *pin_wifi;
+
+static struct gpiod_line *pin_out(struct gpiod_chip *chip, unsigned int line, const char *name, int val) {
+    struct gpiod_line *l = chip ? gpiod_chip_get_line(chip, line) : NULL;
+
+    if (!l || gpiod_line_request_output(l, name, val) != 0) {
+        fprintf(stderr, "GPIO %s (line %u): %s\n", name, line, strerror(errno));
+        return NULL;
+    }
+    return l;
+}
+
+static bool pins_init(void) {
+    struct gpiod_chip *chip0 = gpiod_chip_open_by_name("gpiochip0");
+    struct gpiod_chip *chip1 = gpiod_chip_open_by_name("gpiochip1");
+
+    pin_key      = pin_out(chip1, 203, "X6100_morse_key", 1);   /* the key up (active low) */
+    pin_bb_reset = pin_out(chip1, 204, "X6100_bb_reset", 0);
+    pin_usb      = pin_out(chip1, 138, "X6100_usb", 0);
+    pin_light    = pin_out(chip1, 143, "X6100_light", 0);
+    pin_wifi     = pin_out(chip0, 5, "X6100_wifi", 0);         /* the chip powered, as it was (the library: 1) */
+    return pin_key && pin_bb_reset && pin_usb && pin_light && pin_wifi;
+}
+
+static void pin_set(struct gpiod_line *l, int val) {
+    if (l) {
+        gpiod_line_set_value(l, val);
+    }
+}
+
 bool hw_init(void) {
-    if (!x6100_gpio_init()) {
+    if (!pins_init()) {
         return false;
     }
-    x6100_gpio_set(x6100_pin_morse_key, 1);     /* Morse key off */
+    pin_set(pin_key, 1);                        /* Morse key off */
     if (!x6100_flow_init()) {
         return false;
     }
@@ -163,9 +210,9 @@ void hw_bb_reset(void) {
     if (test_base) {
         test_base_fault(&tb);   /* its settings again once it is back (hw_resend_all, hw_send_held) */
     }
-    x6100_gpio_set(x6100_pin_bb_reset, 1);
+    pin_set(pin_bb_reset, 1);
     usleep(100000);
-    x6100_gpio_set(x6100_pin_bb_reset, 0);
+    pin_set(pin_bb_reset, 0);
 }
 
 static int32_t ver_cmp(x6100_base_ver_t a, x6100_base_ver_t b) {
@@ -475,11 +522,11 @@ bool hw_tx_keyed_by_gui(void) {
 
 void hw_pin_set(hw_pin_t pin, bool on) {
     switch (pin) {
-        case HW_PIN_WIFI:       x6100_gpio_set(x6100_pin_wifi, on ? 1 : 0); break;
-        case HW_PIN_LIGHT:      x6100_gpio_set(x6100_pin_light, on ? 1 : 0); break;
-        case HW_PIN_USB_CAT:    x6100_gpio_set(x6100_pin_usb, on ? 1 : 0); break;
-        case HW_PIN_MORSE_KEY:  x6100_gpio_set(x6100_pin_morse_key, on ? 0 : 1); break;  /* active low */
-        case HW_PIN_BB_RESET:   x6100_gpio_set(x6100_pin_bb_reset, on ? 1 : 0); break;
+        case HW_PIN_WIFI:       pin_set(pin_wifi, on ? 1 : 0); break;
+        case HW_PIN_LIGHT:      pin_set(pin_light, on ? 1 : 0); break;
+        case HW_PIN_USB_CAT:    pin_set(pin_usb, on ? 1 : 0); break;
+        case HW_PIN_MORSE_KEY:  pin_set(pin_key, on ? 0 : 1); break;  /* active low */
+        case HW_PIN_BB_RESET:   pin_set(pin_bb_reset, on ? 1 : 0); break;
     }
 }
 

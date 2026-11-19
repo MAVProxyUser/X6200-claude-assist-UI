@@ -119,6 +119,13 @@ static void wifi_log(const char *ssid) {
 /* No network in reach for three minutes, WiFi on and not connected: the chip is powered off
  * and on again, two seconds apart. Now and then it stops seeing any network until it is. Not
  * while a cable is connected: the radio has a network then, and the restart would cut Bluetooth */
+static int    join_fails;      /* joins NetworkManager started by itself that failed in a row, since the last join or
+                                * the chip's last restart */
+static gint64 cycled_us;       /* the chip's last restart for them */
+
+#define JOIN_FAILS_CYCLE 6                          /* ~2.7 min of NetworkManager's tries, 27 s apart */
+#define CYCLE_GAP_US     (600 * G_USEC_PER_SEC)     /* at most one restart for them in 10 minutes */
+
 static void no_network_cb(lv_timer_t *t) {
     static int empty;
 
@@ -129,6 +136,18 @@ static void no_network_cb(lv_timer_t *t) {
     const GPtrArray *aps = nm_device_wifi_get_access_points(NM_DEVICE_WIFI(device));
     if (aps && aps->len > 0) {
         empty = 0;
+        /* Networks in sight, but every join fails: the X6100's RTL8723BU, powered up again with a GUI start (the GUI's
+         * pins let go as it ends), now and then sees the other networks but never the saved one ("not in range" 680
+         * times in 2.6 hours, 2026-11-18) until its power is cut and given back, as WiFi off and on does */
+        gint64 now = g_get_monotonic_time();
+
+        if (join_fails >= JOIN_FAILS_CYCLE && !retry_uuid[0] && (!cycled_us || now - cycled_us > CYCLE_GAP_US)) {
+            LV_LOG_WARN("WiFi: %d joins failed in a row: the chip is restarted", join_fails);
+            join_fails = 0;
+            cycled_us = now;
+            wifi_power_off();
+            lv_timer_set_repeat_count(lv_timer_create(power_on_cb, 2000, NULL), 1);
+        }
         return;
     }
     if (++empty < 3) {
@@ -970,6 +989,53 @@ static bool fail_retry(guint reason) {
         || reason == NM_DEVICE_STATE_REASON_SUPPLICANT_DISCONNECT || reason == NM_DEVICE_STATE_REASON_SSID_NOT_FOUND;
 }
 
+/* A join NetworkManager started by itself that failed (the chip powered up again with the GUI's start, the network
+ * gone a while) is tried again by the GUI: after a failed handshake NetworkManager asks for a new password ("no
+ * secrets", reason 7), the GUI is no secret agent, and the saved network stays blocked until a join is asked for.
+ * The X6100 stayed off the network after a GUI restart that way (2026-11-18, TODO 10). The best saved network in
+ * reach, as a pick from the list would be: 15 s after the failure, then 30 s, 1, 2 and 5 minutes, then every 10,
+ * while WiFi is on, no cable holds it off and nothing is joined or being joined */
+static lv_timer_t *rejoin_timer;
+static int         rejoin_n;
+
+static void rejoin_later(void);
+
+static void rejoin_done_cb(GObject *cl, GAsyncResult *result, gpointer user_data) {
+    GError             *error = NULL;
+    NMActiveConnection *ac = nm_client_activate_connection_finish(NM_CLIENT(cl), result, &error);
+
+    if (ac) {
+        LV_LOG_USER("WiFi: joining %s again", nm_active_connection_get_id(ac));
+        g_signal_connect(ac, "state-changed", G_CALLBACK(active_con_state_changed_sig_cb), NULL);
+        g_object_unref(ac);
+    } else {
+        LV_LOG_USER("WiFi: no saved network to join again (%s)", error->message);
+        g_error_free(error);
+        rejoin_later();             /* none in reach now: later */
+    }
+}
+
+static void rejoin_cb(lv_timer_t *t) {
+    rejoin_timer = NULL;
+    if (!params.wifi_enabled.x || !client || !device || eth_holds_wifi || status == WIFI_CONNECTED || retry_uuid[0]
+        || nm_device_get_active_connection(device)) {
+        return;
+    }
+    LV_LOG_USER("WiFi: the saved networks tried again (%d)", rejoin_n);
+    nm_client_activate_connection_async(client, NULL, device, NULL, NULL, rejoin_done_cb, NULL);
+}
+
+static void rejoin_later(void) {
+    static const uint32_t ms[] = {15000, 30000, 60000, 120000, 300000, 600000};
+
+    if (rejoin_timer || !params.wifi_enabled.x) {
+        return;
+    }
+    rejoin_timer = lv_timer_create(rejoin_cb, ms[rejoin_n < 5 ? rejoin_n : 5], NULL);
+    lv_timer_set_repeat_count(rejoin_timer, 1);
+    rejoin_n++;
+}
+
 static void device_state_changed_sig_cb(NMDevice *device, guint new_state, guint old_state, guint reason,
                                         gpointer user_data) {
     LV_LOG_USER("WiFi state %u -> %u, reason %u", old_state, new_state, reason);
@@ -985,6 +1051,8 @@ static void device_state_changed_sig_cb(NMDevice *device, guint new_state, guint
 
         if (!ours) {
             LV_LOG_WARN("WiFi join failed (reason %u%s%s)", reason, why ? ": " : "", why ? why : "");
+            join_fails++;
+            rejoin_later();
             break;
         }
         NMRemoteConnection *rc = nm_client_get_connection_by_uuid(client, retry_uuid);
@@ -1013,6 +1081,8 @@ static void device_state_changed_sig_cb(NMDevice *device, guint new_state, guint
     case NM_DEVICE_STATE_ACTIVATED:
         retry_uuid[0] = '\0';
         retry_n = 0;
+        rejoin_n = 0;
+        join_fails = 0;
         set_status(WIFI_CONNECTED);
         break;
     case NM_DEVICE_STATE_DISCONNECTED:
