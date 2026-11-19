@@ -111,4 +111,7 @@ settings did not show).
 
 `redact_shots.py RUN_DIR OUT_DIR` makes a suite run's screenshots fit to publish: what would place the station
 pixelated (or a map flattened) on both radios alike, each screen's pair side by side. The first gallery:
-[docs/parity/2026-11-18](../../docs/parity/2026-11-18/README.md). Look at every pair before publishing another run.
+[docs/parity/2026-11-18](../../docs/parity/2026-11-18/README.md); the second, after the fixes those pictures led to:
+[docs/parity/2026-11-19](../../docs/parity/2026-11-19/README.md) (the X6100's Weather and Flights showed the locator in
+their header with no GPS and no helper answer: boxed since). Look at every pair before publishing another run, and
+read them with OCR for locators and coordinates too (a picture left unredacted on purpose is the check that it reads).

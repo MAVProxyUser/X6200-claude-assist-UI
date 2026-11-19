@@ -1,5 +1,7 @@
 # The X6100 and the X6200 side by side, 2026-11-18
 
+A newer run, after the fixes these pictures led to: [../2026-11-19](../2026-11-19/README.md).
+
 Every screen of both radios at the same moment, from `tools/bench/suite.py run core`: each app the radios have
 (the remote's `apps`, opened with `open N`) and every page of the Sentry, photographed on both over SSH and put
 side by side, the X6100 on the left. Both radios ran the same GUI build (main at 1c9d9bb, hot-installed; the
