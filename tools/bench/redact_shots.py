@@ -27,8 +27,11 @@ BOXES = {
     "app108_WiFi": [(303, 123, 797, 422)],       # the networks seen (names)
     "app126_Propagation": [("flat", 10, 168, 422, 394)],   # the map and its markers
     "app130_Airspace": AIR, "sentry_H": AIR,
-    "app200_Weather": [(113, 126, 470, 152), (18, 296, 205, 322)],   # the place's name; sunrise and sunset
-    "app203_Flights": [("flat", 18, 172, 238, 385), (656, 188, 794, 338)],   # the map; the distances and directions
+    "app200_Weather": [(113, 126, 470, 152), (18, 296, 205, 322),    # the place's name; sunrise and sunset
+                       (560, 126, 798, 152)],    # the header's right: the locator, shown when the helper gave nothing
+                                                 # (the X6100, 2026-11-19)
+    "app203_Flights": [("flat", 18, 172, 238, 385), (656, 188, 794, 338),   # the map; the distances and directions
+                       (113, 126, 470, 152)],    # the header: the locator when there is no GPS (the X6100, 2026-11-19)
     "sentry_B": [(8, 238, 270, 264), (228, 96, 362, 120)],           # the FM station's RDS name and call letters
 }
 SKIP = {"app114_menu", "app128_RADE"}           # the X6200's menu shot caught the Sentry; RADE did not open
