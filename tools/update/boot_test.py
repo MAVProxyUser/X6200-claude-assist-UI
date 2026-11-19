@@ -278,7 +278,7 @@ class BootInstall(unittest.TestCase):
         self.assertTrue(out.endswith("(the radio restarts)"), out)
         self.assertEqual((self.c.reboots, self.c.restarts), (1, 0))
         self.assertFalse(os.path.exists(self.c.up["POWERON"]))
-        with self.assertRaisesRegex(self.Fail, "install takes --kernel, --uboot and --reboot"):
+        with self.assertRaisesRegex(self.Fail, "install takes --kernel, --uboot, --reboot and --force"):
             self.c.run("install", self.c.bundle(), "--now")
 
     def test_kernel_and_uboot(self):
@@ -404,6 +404,42 @@ class BootInstall(unittest.TestCase):
             self.assertEqual(f.read(), self.c.old_uboot)
         self.c.run("boot-rollback")
         self.assertCardAsBefore()
+
+    # 8b. --force (the owner, 2026-11-19: "a method to force an install without user interaction")
+
+    def test_force_writes_a_part_the_card_has(self):
+        b = self.c.bundle()
+        self.c.run("install", b, "--kernel")
+        out = self.c.run("install", b, "--kernel", "--force")
+        self.assertEqual(out, "ok 0.3.13 (the kernel on the SD card: from the next power-on)")
+        self.assertEqual(self.c.boot_files()["zImage"], b"new kernel")
+
+    def test_force_puts_an_interrupted_install_back_first(self):
+        up = self.c.up
+        up["save"](up["JOURNAL"], {"version": "0.3.12", "from": "0.3.11", "state": "applying", "files": []})
+        with self.assertRaisesRegex(self.Fail, "an interrupted install must be rolled back first"):
+            self.c.run("install", self.c.bundle())
+        out = self.c.run("install", self.c.bundle(), "--force")
+        self.assertTrue(out.startswith("ok 0.3.13"), out)
+        self.assertEqual(up["load"](up["JOURNAL"])["state"], "applied")
+
+    def test_install_from_a_url(self):
+        b, up, got = self.c.bundle(), self.c.up, []
+
+        def download(args):
+            got.append(args[0])
+            return b
+        up["cmd_download"] = download
+        out = self.c.run("install", "https://example.invalid/GoldCorpHF-x6200-v0.3.13-update.tar.gz")
+        self.assertTrue(out.startswith("ok 0.3.13"), out)
+        self.assertEqual(got, ["https://example.invalid/GoldCorpHF-x6200-v0.3.13-update.tar.gz"])
+
+    def test_upgrade_force_reinstalls_the_running_release(self):
+        b, up = self.c.bundle(), self.c.up
+        up["cmd_check"] = lambda args: {"running": "0.3.13", "latest": "0.3.13", "newer": False, "url": "https://x/b"}
+        up["cmd_download"] = lambda args: b
+        self.assertEqual(self.c.run("upgrade"), "ok up to date")
+        self.assertTrue(self.c.run("upgrade", "--force").startswith("ok 0.3.13"))
 
     # 9. The card image level
 

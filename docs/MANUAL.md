@@ -2041,6 +2041,15 @@ the web Update page's "Also the kernel" and "Also U-Boot" (for Install and for
 a bundle file), or over SSH `x6100-update install <bundle> --kernel --uboot`
 (`x6100-update upgrade --kernel --uboot` checks, downloads and installs).
 
+Over SSH nothing is asked: `x6100-update install <bundle file or URL>
+[--kernel] [--uboot] [--reboot] [--force]` installs at once, a URL (a
+release's bundle) downloaded first. `--force` puts an interrupted install
+back first instead of refusing, and writes the SD card's parts asked for even
+when the card has them already; the bundle's product, model and checksums,
+the room and the SD card's checks still apply, and a file already in place
+byte for byte is still left as it is. `x6100-update upgrade --force`
+installs the newest release even when it is the one running.
+
 - **Only what differs.** The box offers a part only when the bundle's differs
   from the card's. A part ticked on the web page or given over SSH that the
   bundle does not carry, or that the card has already byte for byte, is left

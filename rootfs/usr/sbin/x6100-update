@@ -16,8 +16,12 @@
 # says whether it also wants a newer card image (or which of the bundle's parts instead); "status" says whether the
 # running software does.
 #   download <url>           the bundle into /mnt/update, progress in /mnt/update/.progress
-#   install <file> [--kernel] [--uboot] [--reboot]
-#                            verify, stage, swap in, restart the GUI and the web server; with --kernel the bundle's
+#   install <file|url> [--kernel] [--uboot] [--reboot] [--force]
+#                            no question asked: what the GUI's Yes and the web page's Install run, and what to run
+#                            over SSH. A URL (a release's bundle) is downloaded first. --force: an interrupted
+#                            install put back first instead of refused, and the SD card's parts asked for written
+#                            even when the card has them already (the product, model, checksums, room and SD card
+#                            checks stay). Verify, stage, swap in, restart the GUI and the web server; with --kernel the bundle's
 #                            kernel set (zImage, the DTB, boot.scr) onto the SD card's boot partition and its modules
 #                            into /lib/modules, with --uboot its U-Boot into the card's raw area: only on the SD
 #                            card the radio started from (never the internal eMMC), each only when asked (the GUI's
@@ -30,8 +34,9 @@
 #                            "image_needed":..}: whether the bundle's kernel set and U-Boot differ from the SD card's
 #                            (what the GUI offers to tick), and whether its version needs them (its card image level)
 #   boot-rollback            the kernel set, modules and U-Boot the last --kernel/--uboot replaced, back on the card
-#   upgrade [--kernel] [--uboot] [--reboot]
-#                            check, download and install the newer release (the flags as install's)
+#   upgrade [--kernel] [--uboot] [--reboot] [--force]
+#                            check, download and install the newer release (the flags as install's); with --force
+#                            the newest release even when it is the one running
 #   rollback                 the previous files back, restart
 #   confirm                  the new version runs: the pending mark goes (the GUI, after a minute)
 #   boot-check               before each GUI start (x6100_daemon): a pending version that keeps
@@ -1232,16 +1237,35 @@ def undo(journal):
 def cmd_install(args):
     flags = [a for a in args if a.startswith("--")]
     rest = [a for a in args if not a.startswith("--")]
-    if any(f not in ("--kernel", "--uboot", "--reboot") for f in flags):
-        raise Fail("install takes --kernel, --uboot and --reboot")
+    if any(f not in ("--kernel", "--uboot", "--reboot", "--force") for f in flags):
+        raise Fail("install takes --kernel, --uboot, --reboot and --force")
     if not rest:
         raise Fail("install needs the bundle's path")
     kernel, uboot, reboot = "--kernel" in flags, "--uboot" in flags, "--reboot" in flags
+    # --force (the owner, 2026-11-19: "a method to force an install without user interaction"): an interrupted
+    # install put back first instead of refused, and the SD card's parts asked for written even when the card has
+    # them already. Nothing else is forced: the product, the model, the checksums, the room and the SD card's checks
+    # stay, and a file in place byte for byte is still left as it is
+    force = "--force" in flags
     bundle = rest[0]
-    if load(JOURNAL, {}).get("state") == "applying":
-        raise Fail("an interrupted install must be rolled back first")
-    if (kernel or uboot) and load(BOOT_JOURNAL, {}).get("state") == "applying":
-        raise Fail("an interrupted kernel or U-Boot install must be undone first (boot-check)")
+    if bundle.startswith(("https://", "http://")):      # a release's or a build's address: fetched first
+        bundle = cmd_download([bundle])
+    j0 = load(JOURNAL, {})
+    if j0.get("state") == "applying":
+        if not force:
+            raise Fail("an interrupted install must be rolled back first")
+        undo(j0)
+        j0["state"] = "rolled back"
+        save(JOURNAL, j0)
+        if os.path.exists(PENDING):
+            os.remove(PENDING)
+    bj0 = load(BOOT_JOURNAL, {})
+    if (kernel or uboot) and bj0.get("state") == "applying":
+        if not force:
+            raise Fail("an interrupted kernel or U-Boot install must be undone first (boot-check)")
+        boot_undo(bj0)
+        bj0["state"] = "rolled back"
+        save(BOOT_JOURNAL, bj0)
     left = []
     if kernel or uboot:
         sd_card_check()                 # before anything: only the SD card the radio started from
@@ -1253,7 +1277,7 @@ def cmd_install(args):
                 continue
             if not b.get(part):
                 left.append(f"the bundle carries no {'kernel' if part == 'kernel' else 'U-Boot'}")
-            elif same[part]:
+            elif same[part] and not force:
                 left.append(f"{what} on the SD card is the bundle's already")
             else:
                 continue
@@ -1397,11 +1421,16 @@ def cmd_boot_rollback(args):
 
 def cmd_upgrade(args):
     flags = [a for a in args if a.startswith("--")]
-    if any(f not in ("--kernel", "--uboot", "--reboot") for f in flags) or len(flags) != len(args):
-        raise Fail("upgrade takes --kernel, --uboot and --reboot")
+    if any(f not in ("--kernel", "--uboot", "--reboot", "--force") for f in flags) or len(flags) != len(args):
+        raise Fail("upgrade takes --kernel, --uboot, --reboot and --force")
     c = cmd_check([])
-    if not c["newer"]:
-        return "ok up to date" if c["latest"] else "ok no release"
+    # --force: the newest release installed even when it is the one running (or an older one), as install --force
+    if not c["latest"]:
+        return "ok no release"
+    if not c["url"]:
+        return "ok no bundle for this radio in the newest release"
+    if not c["newer"] and "--force" not in flags:
+        return "ok up to date"
     bundle = cmd_download([c["url"]])
     return cmd_install([bundle] + flags)
 
