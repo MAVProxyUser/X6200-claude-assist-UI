@@ -125,6 +125,12 @@ approved that day.
       the X6100's is summed from its IQ): a 1:1 goes by decodes and SNRs.
     - The X6100's WiFi crawled at 5-10 KB/s on another access point (d0:21:f9..., channel 6, -64 dBm) while the
       X6200 sat on e4:38:83... at -51 dBm: where the radio stands.
+    - Base V1.1.9 (written on the owner's X6100 that evening, tools/base_update/README.md) does not take the humps
+      away. It zooms the spectrum in the base: at the X6100's zoom x4 the Sentry's A would get 25 kHz (12 kHz
+      shown); the Sentry should hold the base at its widest while open, as HW_PSD_WIDE does on the X6200 (the X6100
+      left at zoom x1 for now).
+    - The classic screen in CW: the CW decoder's text panel covers the whole waterfall, translucent in RF.Guru,
+      opaque black in the Sentry theme (so no waterfall at all in CW): both radios, the theme's.
     - Done that evening: Sentry home, A, pages, AIRSPACE and the theme on the X6100 (v0.3.12.29), the base flasher's
       X6100 path checked against Xiegu's own X6100 app (tools/base_update/README.md) and its dry run on the
       owner's X6100 (the bootloader answered 'a' in 1.0 s), the X6100's look-and-behaviour settings set as the

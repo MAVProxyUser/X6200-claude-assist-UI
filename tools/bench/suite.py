@@ -289,8 +289,9 @@ def t_screens(run, apps):
         if i in NEVER_OPEN or i == 129 or not all(i in apps[n] for n in run.names):
             continue                  # never opened here, the Sentry (its pages below), or on one radio only
         label = re.sub(r"[^A-Za-z0-9]+", "_", f"app{i}_{name or 'menu'}").strip("_")
+        # a window with no name (the Modes menu): opened when the Sentry, the home screen, is no longer what shows
         screens_pair(run, label, lambda r, i=i: r.send(f"open {i}"),
-                     lambda r, name=name: r.state.get("win") == name or (not name and r.state.get("win") == ""))
+                     lambda r, name=name: r.state.get("win") == name if name else r.state.get("win") != "Sentry")
         for n in run.names:
             run.radio(n).send("close")
         time.sleep(1.0)

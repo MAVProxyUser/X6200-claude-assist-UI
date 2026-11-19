@@ -340,6 +340,17 @@ The bench X6100, OpenX6X00 running, from a computer over SSH:
 | the GUI's version | after a restart (the fix above came after) | on its third read |
 | the calibration block (I2C 0xF000, 816 bytes) | the same | the same, and the same as on 24 October |
 
+### A third, 18 November 2026: an owner's X6100, V1.1.8 -> V1.1.9
+
+The file from the radio's own internal memory (`/usr/firmware` of Xiegu's system there, copied to
+`/mnt/base_update`), the GUI stopped, from a computer over SSH (the writer detached on the radio, its log on DATA),
+11.9 V from the supply with the battery in at 99 %. A dry run first (the bootloader answered `a` in
+1.0 s, the base back on V1.1.8), then the write: greeting `a` 1.0 s, erase answered 6.6 s later, 383 packets in
+6.7 s, the base answering on I2C 4 s after with `V1.1.9 Nov 27 2025,10:31:57`, the writer's exit 0 at 75 s; the
+GUI read `V1.1.9` on its start. The radio stayed on. What V1.1.9 changes here: the base zooms the spectrum itself
+(the GUI's zoom and IF shift for it, hw_x6100.c), and the IQ's noise still climbs from about 27 kHz either side of
+the dial (TODO 12).
+
 ## Files
 
 | File | |
