@@ -17,6 +17,7 @@ state in a folder of its own under build/tmp for each case, the files an update 
    rollback gives the earlier file its own mode back.
 """
 import io
+import hashlib
 import json
 import os
 import runpy
@@ -268,6 +269,69 @@ class Modes(unittest.TestCase):
         self.assertEqual(mode(before), oct(0o640), "the earlier file's own mode")
         for e in entries[1:]:
             self.assertFalse(os.path.exists(e["path"]), e["path"])
+
+
+class Unchanged(unittest.TestCase):
+    """7: a file in place already, byte for byte (2026-11-19: v0.3.12.35's bundle, 129 MB unpacked, most of it on the
+    radios already, counted twice did not fit the 488 MB system partition): not rewritten, no copy kept, not counted
+    in the room, left alone by a rollback; the others as ever"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="same-", dir=os.environ.get("TMPDIR"))
+        self.u = Updater(self.tmp)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def entries(self):
+        u, root = self.u, os.path.join(self.tmp, "root")
+        os.makedirs(root, exist_ok=True)
+        with open(u.version, "w") as f:
+            f.write("0.3.12\n")
+        same, changed = os.path.join(root, "libbig.so"), os.path.join(root, "x6100_gui")
+        big = os.urandom(2 * 1024 * 1024)
+        with open(same, "wb") as f:              # the library the bundle carries, the radio's copy the same bytes
+            f.write(big)
+        os.chmod(same, 0o700)
+        with open(changed, "wb") as f:
+            f.write(b"old gui")
+        entries = [{"path": same, "sha256": hashlib.sha256(big).hexdigest(), "size": len(big), "mode": "755"},
+                   {"path": changed, "sha256": hashlib.sha256(b"new gui").hexdigest(), "size": 7, "mode": "755"}]
+        stage = os.path.join(u.up["WORK"], "stage")
+        for e, body in zip(entries, (big, b"new gui")):
+            staged = os.path.join(stage, e["path"].lstrip("/"))
+            os.makedirs(os.path.dirname(staged), exist_ok=True)
+            with open(staged, "wb") as f:
+                f.write(body)
+        return same, changed, entries
+
+    def test_not_rewritten_not_kept(self):
+        same, changed, entries = self.entries()
+        ino = os.stat(same).st_ino
+        m = {"version": "0.3.13", "files": entries}
+        self.assertEqual(self.u.up["unchanged"](m), {same})
+        self.u.up["apply"](m)
+        self.assertEqual(os.stat(same).st_ino, ino, "the file in place not replaced")
+        self.assertEqual(stat.S_IMODE(os.stat(same).st_mode), 0o755, "its mode the manifest's")
+        prev = self.u.up["PREV"]
+        self.assertFalse(os.path.exists(os.path.join(prev, same.lstrip("/"))), "no copy kept of it")
+        self.assertTrue(os.path.exists(os.path.join(prev, changed.lstrip("/"))), "the changed one's kept")
+        with open(changed, "rb") as f:
+            self.assertEqual(f.read(), b"new gui")
+        self.assertEqual(self.u.run("rollback")[0], 0)
+        self.assertTrue(os.path.exists(same), "a rollback leaves it (it is no new file)")
+        with open(changed, "rb") as f:
+            self.assertEqual(f.read(), b"old gui", "the changed one back")
+
+    def test_room(self):
+        same, changed, entries = self.entries()
+        up = self.u.up
+        up["ROOM_MARGIN"] = 0
+        up["root_free"] = lambda: 64 * 1024        # room for the small file and its copy, not for 2 MB twice
+        up["root_room"]({"version": "0.3.13", "files": entries})
+        entries[0]["sha256"] = "0" * 64             # the radio's copy differs: counted, and too big
+        with self.assertRaises(up["Fail"]):
+            up["root_room"]({"version": "0.3.13", "files": entries})
 
 
 if __name__ == "__main__":

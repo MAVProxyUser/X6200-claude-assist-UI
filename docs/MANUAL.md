@@ -1887,11 +1887,22 @@ web configurator (System > Update).
   repository. The MFK turns between "Yes, apply it" and "No" (No is chosen when
   it opens, so a press meant for something else applies nothing) and its press
   confirms; the keyboard's arrows and Enter work too, Esc is No, a touch takes
-  either. Yes installs it as Install below does; No leaves it for Settings >
-  Info > Update and does not ask about that version again. A release that wants
+  either. The box keeps the MFK and the keys for as long as it is open, also
+  when the screen under it is built again (up to v0.3.12.35 the Sentry
+  opening under it took them, and on an X6100 the MFK's turn and press reached
+  nothing in the box). Yes installs it as Install below does; No leaves it for
+  Settings > Info > Update and does not ask about that version again. A release that wants
   a newer card image is only said in a message: the bundle alone cannot bring it
   (unless its own kernel and U-Boot do, below). After Yes a box shows what it is
   doing, step by step with a bar, till the radio software restarts.
+- **Room.** The radio software lives on the card's system partition, about
+  490 MB of the card whatever its size (the rest is DATA, `/mnt`). An install
+  needs room for each file it changes and a copy of the one before (for going
+  back); a file the radio has already, byte for byte, is left as it is and
+  counted for nothing (from v0.3.12.36's updater: up to then every file of the
+  bundle was counted, and v0.3.12.34's carried 73 MB of the image's own
+  libraries, most of them on the radio already, so it did not fit: "no room on
+  the root filesystem for the update", nothing changed).
 - **The SD card's kernel and bootloader, when ticked.** A bundle can also carry
   the kernel (with its modules) and U-Boot: when they differ from what the SD
   card has, the box shows a tick box for each, unticked: "Also update the

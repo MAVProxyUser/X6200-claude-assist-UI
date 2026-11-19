@@ -1090,6 +1090,30 @@ def _tree_blocks(top):
     return sum(_blocks(os.path.join(d, n)) for d, _, names in os.walk(top) for n in names)
 
 
+def unchanged(m):
+    """The bundle's files already in place byte for byte (their SHA-256 the manifest's): an install neither rewrites
+    nor keeps a copy of them, nor counts them in its room. v0.3.12.34's carried the image's Mesa, GStreamer and ffmpeg,
+    73 MB, most of it an X6200's already, and counted twice it needed about 250 MB of a 488 MB system partition with
+    about 160 free (2026-11-19: "not applied" on both radios). Worked out once an install, kept in the manifest"""
+    if "_same" not in m:
+        same = set()
+        for e in m["files"]:
+            p = e["path"]
+            try:
+                if not os.path.isfile(p) or os.path.islink(p) or os.path.getsize(p) != int(e.get("size", -1)):
+                    continue
+                h = hashlib.sha256()
+                with open(p, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 16), b""):
+                        h.update(chunk)
+                if h.hexdigest() == e["sha256"]:
+                    same.add(p)
+            except (OSError, ValueError, KeyError):
+                pass
+        m["_same"] = same
+    return m["_same"]
+
+
 def root_room(m, kernel=False):
     """The install refused before it changes anything when the root filesystem cannot hold it. Counted: each new
     file, and the copy kept of each file it replaces, with nothing freed by the replace (a program or library still
@@ -1103,7 +1127,9 @@ def root_room(m, kernel=False):
         except OSError:
             return 0
     st, bst = os.path.join(WORK, "stage"), os.path.join(WORK, "stage-boot")
-    need = sum(size(os.path.join(st, e["path"].lstrip("/"))) + _blocks(e["path"], True) for e in m["files"])
+    same = unchanged(m)
+    need = sum(size(os.path.join(st, e["path"].lstrip("/"))) + _blocks(e["path"], True) for e in m["files"]
+               if e["path"] not in same)
     freed = _tree_blocks(PREV)
     if kernel:
         for e in m["boot"]["kernel"].get("modules", []):
@@ -1122,7 +1148,11 @@ def apply(m):
     st = os.path.join(WORK, "stage")
     shutil.rmtree(PREV, ignore_errors=True)
     modes = {e["path"]: int(str(e.get("mode", "644")), 8) for e in m["files"]}
-    files = [{"path": e["path"], "prev": os.path.exists(e["path"]), "done": False} for e in m["files"]]
+    same = unchanged(m)
+    # A file in place already is neither replaced nor kept: never "done" nor "replacing", so a rollback passes it by
+    # (undo would take a done file with no copy kept for a new one and delete it); only its mode set
+    files = [{"path": e["path"], "prev": os.path.exists(e["path"]), "done": False, "same": e["path"] in same}
+             for e in m["files"]]
     journal = {"version": m["version"], "from": running_version(), "state": "applying", "files": files,
                "started": time.time()}
     save(JOURNAL, journal)
@@ -1130,6 +1160,13 @@ def apply(m):
     for i, f in enumerate(files):
         progress("install", i, n)
         p = f["path"]
+        if f["same"]:
+            try:
+                if os.stat(p).st_mode & 0o7777 != modes[p]:
+                    os.chmod(p, modes[p])
+            except OSError:
+                pass
+            continue
         if f["prev"]:
             keep = os.path.join(PREV, p.lstrip("/"))
             os.makedirs(os.path.dirname(keep), exist_ok=True)

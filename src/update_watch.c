@@ -148,6 +148,7 @@ enum { OPT_KERNEL, OPT_UBOOT, OPT_REBOOT, OPTS };
 static int         uw = UW_IDLE;
 static char        uw_ver[24], uw_commit[48], uw_md5[40], uw_krel[32];
 static lv_obj_t   *box, *btn[PICKS];
+static void        keep_focus_start(void);
 static lv_obj_t   *opt_row[OPTS];   /* a tick box's row, NULL when not offered */
 static bool        opt_offer[OPTS], opt_on[OPTS];
 static bool        opt_need[OPTS];  /* the version's card image level wants it on the card */
@@ -367,6 +368,7 @@ static void prog_open(void) {
     lv_obj_add_event_cb(pbox, prog_key_cb, LV_EVENT_KEY, NULL);
     lv_group_focus_obj(pbox);
     lv_group_set_editing(keyboard_group, true);
+    keep_focus_start();
     p_end   = 0;
     p_timer = lv_timer_create(prog_timer_cb, 250, NULL);
 }
@@ -605,6 +607,7 @@ static void ask(void) {
     lv_obj_add_event_cb(box, box_click_cb, LV_EVENT_CLICKED, NULL);
     lv_group_focus_obj(box);
     lv_group_set_editing(keyboard_group, true);
+    keep_focus_start();
 }
 
 /* x6100-update bundle-info: {"version": .., "sd": .., "kernel": .., "uboot": .., "kernel_release": ..}, then the
@@ -806,6 +809,32 @@ static void poweron_cb(lv_timer_t *t) {
     lv_obj_add_event_cb(pon, pon_key_cb, LV_EVENT_CLICKED, NULL);
     lv_group_focus_obj(pon);
     lv_group_set_editing(keyboard_group, true);
+    keep_focus_start();
+}
+
+/* The keys kept on whichever box is open (the question, the install's progress, the restart's): the owner's X6100,
+ * 2026-11-19, the update question open over the Sentry and the MFK's turn and press reaching nothing in it. What opens
+ * under a box takes the keys for itself (the Sentry built again, an app given back to it, its construct_cb focusing
+ * its own screen), the box still showing; each quarter second it has them back, the knob turning its choice */
+static lv_timer_t *keep_t;
+
+static void keep_cb(lv_timer_t *t) {
+    lv_obj_t *o = box ? box : pbox ? pbox : pon;
+
+    (void)t;
+    if (!o) {
+        lv_timer_del(keep_t);
+        keep_t = NULL;
+        return;
+    }
+    if (lv_obj_get_group(o) == keyboard_group && lv_group_get_focused(keyboard_group) != o) {
+        lv_group_focus_obj(o);
+        lv_group_set_editing(keyboard_group, true);
+    }
+}
+
+static void keep_focus_start(void) {
+    if (!keep_t) keep_t = lv_timer_create(keep_cb, 250, NULL);
 }
 
 void update_watch_init(void) {
