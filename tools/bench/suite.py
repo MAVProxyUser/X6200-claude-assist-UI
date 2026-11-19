@@ -6,6 +6,8 @@ bench harness's sessions (bench.py: the same configuration, gates and logs), SSH
     suite.py list                          the batches, what each needs plugged in, their tests
     suite.py run BATCH[,BATCH] [--only T]  run them; a report in ~/.config/x6x00-bench/runs/<time>-<batches>/
     suite.py release                       core, then every batch bench.json's "attached" names: the gate for a tag
+    suite.py align FROM TO [--undo FILE]   FROM's look-and-behaviour settings onto TO (its GUI stopped meanwhile),
+                                           TO's old values kept in a file for --undo: the radios set alike
 
 Batches, by the hardware they need (the hardware ones in a batch of their own, run when it is on the bench):
 
@@ -393,6 +395,38 @@ def cable(run, only):
                    " | ".join(x.split(" ", 1)[-1] for x in out[-3:]))
 
 
+def align(names, src, dst, undo=None):
+    """src's look-and-behaviour settings (every row core's same-settings lists) written into dst's params.db, dst's
+    GUI stopped meanwhile (it writes its own back as it ends) and started again; dst's rows before kept for undo"""
+    run = Run(names, ["align"])
+    if undo:
+        rows = json.load(open(undo))
+    else:
+        ps, pd = params(run, src), params(run, dst)
+        rows = [{"name": k, "was": pd.get(k), "to": ps.get(k)} for k in sorted(set(ps) | set(pd))
+                if ps.get(k) != pd.get(k) and not OWN.search(k)]
+        path = os.path.join(run.dir, f"align_{dst}_undo.json")
+        json.dump([{"name": r["name"], "was": r["to"], "to": r["was"]} for r in rows], open(path, "w"), indent=1)
+        say(f"{dst}'s values before: {path} (suite.py align {src} {dst} --undo {path})")
+    sql = []
+    for r in rows:
+        k = r["name"].replace("'", "''")
+        if r["to"] is None:
+            sql.append(f"delete from params where name='{k}';")
+        else:
+            v = str(r["to"]).replace("'", "''")
+            sql.append(f"insert or replace into params(name,val) values('{k}','{v}');")
+    if not sql:
+        say("nothing to align")
+        return 0
+    script = "".join(sql)
+    ssh(run, dst, f"/etc/init.d/S95gui stop >/dev/null 2>&1; sqlite3 /mnt/params.db \"{script}\"; "
+                  f"/etc/init.d/S95gui start >/dev/null 2>&1", timeout=120)
+    for r in rows:
+        say(f"{dst}: {r['name']} {r['was']} -> {r['to']}")
+    return 0
+
+
 BATCHES = {
     "core": ("both radios on the network", core),
     "rtl": ("an RTL-SDR on each HOST port, antennas side by side", rtl),
@@ -428,7 +462,13 @@ def main():
     s.add_argument("--only", default="", help="core's tests by name, comma-separated")
     s.add_argument("--radios", default="x6100,x6200")
     sub.add_parser("release")
+    s = sub.add_parser("align")
+    s.add_argument("src")
+    s.add_argument("dst")
+    s.add_argument("--undo", default=None)
     a = ap.parse_args()
+    if a.cmd == "align":
+        return align([a.src, a.dst], a.src, a.dst, a.undo)
     if a.cmd == "list":
         for k, (needs, fn) in BATCHES.items():
             print(f"{k:8s} needs {needs}")

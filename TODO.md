@@ -109,6 +109,26 @@ approved that day.
     Done so far: the X6200's MFK inner ring (the Sentry's pages) is the MFK held and the main dial turned on the
     X6100 (tried by the owner: "seems to work fine"). To map: the X6200's keys the X6100 lacks or has elsewhere
     (APP/KEY and MSG/DFN swapped, ATU and FST moved; the X6100's own PRE, VM, AGC and LOCK), the H-22 mic's F3.
+12. **The X6100 against the X6200, what the first 1:1 runs found** (2026-11-18 evening, tools/bench/suite.py and
+    radios-ft8 through 40 + 30 dB): to look into, none fixed yet:
+    - FT8 radio to radio at 0.1 W, both ways, receivers alike (preamp and attenuator off): the X6200 hears the
+      X6100 at +10/+11 dB, the X6100 the X6200 at -3/-4 dB. 14 dB apart through a passive chain: one radio's 0.1 W
+      is not the other's, or the X6100's receiver (or its FT8 SNR) is that much worse. A power meter on each, or a
+      HackRF at a known level into each, tells which.
+    - The X6100's own spectrum climbs from about 27 kHz either side of the dial (its base V1.1.8's IQ): the Sentry's
+      A shows the middle 50 kHz. Look again after base V1.1.9 (its own zoom path).
+    - AIRSPACE with the two RTL-SDRs' antennas side by side: the X6100's decodes about 2/3 of the X6200's messages
+      (382 against 573 in two minutes), the same software, no dropped samples: swap the sticks to tell stick from
+      radio.
+    - The AM filter's default: 0-5000 Hz on the X6200, 0-4000 on the X6100.
+    - The S-meters cannot be compared between the two (the X6200's base meter floors at -121 dBm in coarse steps,
+      the X6100's is summed from its IQ): a 1:1 goes by decodes and SNRs.
+    - The X6100's WiFi crawled at 5-10 KB/s on another access point (d0:21:f9..., channel 6, -64 dBm) while the
+      X6200 sat on e4:38:83... at -51 dBm: where the radio stands.
+    - Done that evening: Sentry home, A, pages, AIRSPACE and the theme on the X6100 (v0.3.12.29), the base flasher's
+      X6100 path checked against Xiegu's own X6100 app (tools/base_update/README.md) and its dry run on the
+      owner's X6100 (the bootloader answered 'a' in 1.0 s), the X6100's look-and-behaviour settings set as the
+      X6200's (suite.py align; undo file kept).
 
 **Waiting on hardware**
 

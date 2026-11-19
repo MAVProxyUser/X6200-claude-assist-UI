@@ -576,10 +576,17 @@ def run_radios_ft8(c, args):
         calls[r.name] = call
     dial = FT8_DIAL[args.band]
     radios = [a, b]
-    was_pwr = {}
+    was_pwr, was_rx = {}, {}
     for r in radios:
         r.take_control()
         was_pwr[r.name] = r.pwr()          # put back after (the first run left both at 0.1 W, 2026-11-18)
+        was_rx[r.name] = {"freq": r.state.get("freq"), "mode": r.state.get("mode")}    # and where they were tuned
+        if getattr(args, "rx_alike", False):
+            # the receivers alike for a 1:1 of the two: preamp and attenuator off (the first run had the X6200's preamp
+            # on and the X6100's off, 13-18 dB apart); put back after
+            was_rx[r.name].update({k: r.state.get(k) for k in ("pre", "att")})
+            r.send("set pre 0")
+            r.send("set att 0")
         r.send(f"set freq {dial}")          # first: the app holds the dial once open
         r.send("ft8 open")
         r.wait("the FT8 app", lambda r=r: r.ft8.get("open") == 1, 10)
@@ -624,6 +631,11 @@ def run_radios_ft8(c, args):
             r.send("ft8 close")
             if r.name in was_pwr and was_pwr[r.name] < 99:
                 r.send(f"set pwr {round(was_pwr[r.name] * 10)}")
+            for k in ("freq", "mode", "pre", "att"):     # the frequency first: a band brings its own mode back
+                v = was_rx.get(r.name, {}).get(k)
+                if v is not None:
+                    r.send(f"set {k} {int(v)}")
+                    time.sleep(0.3)
             time.sleep(0.3)
             r.close()
         for r in radios:
@@ -758,6 +770,7 @@ def main():
     s.add_argument("--during", default=None); s.add_argument("--lead", type=float, default=3.0)
     s.add_argument("--filter", type=int, nargs=2, default=None, metavar=("LO", "HI"))
     s = sub.add_parser("radios-ft8"); s.add_argument("tx"); s.add_argument("rx")
+    s.add_argument("--rx-alike", action="store_true", help="both receivers' preamp and attenuator off, put back after")
     s.add_argument("--band", default="20m", choices=FT8_DIAL)
     s = sub.add_parser("testcall"); s.add_argument("name")
     s.add_argument("call", help="Q<digit>TST, or restore (argparse took --restore for an option: 2026-11-18)")

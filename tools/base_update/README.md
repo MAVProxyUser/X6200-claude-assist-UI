@@ -307,6 +307,17 @@ tools/base_update/flash.sh root@<x6100> --flash --file X6100_BBFW_V1.1.8_2409150
   strap) held low while the base's reset line (204) is pulsed for 100 ms; the port at 1500000 baud; the bootloader's
   greeting `A`; the key line let go; `r` (the erase, up to 60 s) and `p`, each answered by any byte but 0; then
   XMODEM-1K as on the X6200 (steps 4 and 5 above). The X6200's `c` handshake and I2C host command are not used.
+- **Checked against Xiegu's own X6100 app** (2026-11-18: APP V1.2.0 of 13 Dec 2025, `/usr/app_qt/x6100_ui_v100` on
+  an X6100's internal memory, not stripped): `xradio_start_xmodem()` pauses its serial thread and drains the port,
+  sets GPIO 203 (sysfs numbering: our kernel's `/dev/gpiochip1` line 203) out low, 204 high for 100 ms then low and
+  lets 204 go, drains the port again, then reads for the greeting (`byte & 0xDF == 'A'`, 51 tries) and lets 203 go
+  high; `XMWorker::slot_start` sends `r` with 60 s for an answer ("IAP failed, can't erase flash"), `p` with 1 s
+  ("can't start xmodem"), each answered by any byte but 0 (`_comm_send_cmd`), then 1K XMODEM. Its port is
+  `/dev/ttyS1` asked for 1152000 baud, which the R16's 24 MHz UART can only make as 1500000 (divisor 1): the writer
+  asks 1500000. Step for step the writer's X6100 path; the X6200's way in (I2C host command, `c`/`y`, `g` answers)
+  is its own. The base file that system carries, `/usr/firmware/X6100_BBFW_V1.1.9_251127001.xgf`, is the V1.1.9 in
+  the writer's list (SHA-256 `87a3e96e...`): an X6100 that left the factory with base V1.1.8 may have V1.1.9 on its
+  own internal memory, never written to its base.
 - **After the write** the bootloader starts the new firmware by itself: it answered on I2C 4 s after the transfer.
   For about a minute its version text (I2C register 0) then mostly read without its first three bytes
   (`1.8 Sep 15 2024,...`), and empty once; the writer says so, and the GUI reads it again at its start
