@@ -2,6 +2,10 @@
 # a 100 kHz detent (#234), or 5 kHz turned fast on Strong (75 kHz), was cut to step % 65536 and landed off the grid:
 # 7.020 MHz turned down one 100 kHz detent read 6.892.800 on the bench X6100 (11 Nov). The real util.cpp, with LVGL's
 # and the deps' headers as tools/tx_meters builds it.
+# What nothing calls drops out of the link: GNU ld's --gc-sections, a Mac's -dead_strip (ld64 has no --gc-sections)
+comma := ,
+# (and its calls left unbound on a Mac, where ld64 resolves them even from code it drops: bound only if reached)
+GC_SECTIONS := $(if $(filter Darwin,$(shell uname -s)),-Wl$(comma)-dead_strip -Wl$(comma)-undefined$(comma)dynamic_lookup,-Wl$(comma)--gc-sections)
 TOP      := ../..
 SRC      := $(TOP)/src
 DEPS     ?= $(TOP)/build-host/deps
@@ -19,7 +23,7 @@ build/util.o: $(SRC)/util.cpp $(SRC)/util.h $(SRC)/common/math.h
 	mkdir -p build && $(CXX) $(CXXFLAGS) -c -o $@ $<
 
 align_test: align_test.c $(SRC)/util.h build/util.o
-	$(CC) $(CFLAGS) -o $@ align_test.c build/util.o -Wl,--gc-sections -lstdc++ -lm
+	$(CC) $(CFLAGS) -o $@ align_test.c build/util.o $(GC_SECTIONS) -lstdc++ -lm
 
 test: align_test
 	./align_test

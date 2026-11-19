@@ -5,6 +5,10 @@
 # the keyer, the theme's colours) the test stands in for; a link error names what it now reaches. LVGL's headers
 # beside src/ (LVGL), liquid-dsp's for the GUI's headers (DEPS, as host/build.sh puts them in build-host/deps). See
 # cw_kbd_test.c for the cases.
+# What nothing calls drops out of the link: GNU ld's --gc-sections, a Mac's -dead_strip (ld64 has no --gc-sections)
+comma := ,
+# (and its calls left unbound on a Mac, where ld64 resolves them even from code it drops: bound only if reached)
+GC_SECTIONS := $(if $(filter Darwin,$(shell uname -s)),-Wl$(comma)-dead_strip -Wl$(comma)-undefined$(comma)dynamic_lookup,-Wl$(comma)--gc-sections)
 TOP      := ../..
 SRC      := $(TOP)/src
 DEPS     ?= $(TOP)/build-host/deps
@@ -30,7 +34,7 @@ build/%.o: $(SRC)/%.c $(wildcard $(SRC)/*.h)
 	mkdir -p $(dir $@) && $(CC) $(GUI) -c -o $@ $<
 
 cw_kbd_test: cw_kbd_test.c $(OBJS) $(LVGL_LIB)
-	$(CC) $(CFLAGS) -o $@ cw_kbd_test.c $(OBJS) $(LVGL_LIB) -Wl,--gc-sections -lm -pthread
+	$(CC) $(CFLAGS) -o $@ cw_kbd_test.c $(OBJS) $(LVGL_LIB) $(GC_SECTIONS) -lm -pthread
 
 test: cw_kbd_test
 	./cw_kbd_test

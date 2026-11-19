@@ -5,6 +5,10 @@
 # waterfall_view.c drops out of the link (--gc-sections), and its calls into the GUI and the DSP with it. A link
 # error names what the hole now reaches. LVGL's headers beside src/ (LVGL), liquid-dsp's for dsp.h (DEPS, as
 # host/build.sh puts them in build-host/deps). See direct_hole_test.c for the cases.
+# What nothing calls drops out of the link: GNU ld's --gc-sections, a Mac's -dead_strip (ld64 has no --gc-sections)
+comma := ,
+# (and its calls left unbound on a Mac, where ld64 resolves them even from code it drops: bound only if reached)
+GC_SECTIONS := $(if $(filter Darwin,$(shell uname -s)),-Wl$(comma)-dead_strip -Wl$(comma)-undefined$(comma)dynamic_lookup,-Wl$(comma)--gc-sections)
 TOP      := ../..
 SRC      := $(TOP)/src
 DEPS     ?= $(TOP)/build-host/deps
@@ -23,7 +27,7 @@ build/waterfall_view.o: $(SRC)/waterfall_view.c $(wildcard $(SRC)/*.h)
 	mkdir -p build && $(CC) $(GUI) -c -o $@ $(SRC)/waterfall_view.c
 
 direct_hole_test: direct_hole_test.c build/waterfall_view.o $(LVGL_LIB)
-	$(CC) $(CFLAGS) -o $@ direct_hole_test.c build/waterfall_view.o $(LVGL_LIB) -Wl,--gc-sections -lm -pthread
+	$(CC) $(CFLAGS) -o $@ direct_hole_test.c build/waterfall_view.o $(LVGL_LIB) $(GC_SECTIONS) -lm -pthread
 
 test: direct_hole_test
 	./direct_hole_test

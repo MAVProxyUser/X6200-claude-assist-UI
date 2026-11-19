@@ -5,6 +5,10 @@
 # them in build-host/deps), and the real lpf (src/util.cpp). The views' job is counted, not run: with it the drawing
 # drops out of the link (--gc-sections), and its calls into LVGL and the rest of the GUI with it. A link error names
 # what the readings now reach: a stand-in for it goes in the test.
+# What nothing calls drops out of the link: GNU ld's --gc-sections, a Mac's -dead_strip (ld64 has no --gc-sections)
+comma := ,
+# (and its calls left unbound on a Mac, where ld64 resolves them even from code it drops: bound only if reached)
+GC_SECTIONS := $(if $(filter Darwin,$(shell uname -s)),-Wl$(comma)-dead_strip -Wl$(comma)-undefined$(comma)dynamic_lookup,-Wl$(comma)--gc-sections)
 TOP      := ../..
 SRC      := $(TOP)/src
 DEPS     ?= $(TOP)/build-host/deps
@@ -23,7 +27,7 @@ build/util.o: $(SRC)/util.cpp $(SRC)/util.h
 	mkdir -p build && $(CXX) $(CXXFLAGS) -c -o $@ $<
 
 tx_meters_test: tx_meters_test.c $(SRC)/tx_meters.c $(SRC)/tx_meters.h build/util.o
-	$(CC) $(CFLAGS) -o $@ tx_meters_test.c build/util.o -Wl,--gc-sections -lstdc++ -lm
+	$(CC) $(CFLAGS) -o $@ tx_meters_test.c build/util.o $(GC_SECTIONS) -lstdc++ -lm
 
 test: tx_meters_test
 	./tx_meters_test
