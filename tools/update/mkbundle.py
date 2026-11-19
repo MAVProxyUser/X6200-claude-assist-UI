@@ -64,6 +64,9 @@ LIB_FILES = ["/usr/lib/libft8.so"]
 SDR_FILES = ["/usr/bin/x6x00-rtlspec", "/usr/lib/libbladeRF.so.2", "/usr/bin/dsd-fme",
              "/usr/bin/x6x00-df"]      # the KrakenSDR's direction finder (page I), from the same package
 SKIP_PREFIXES = ("/usr/include/",)       # the GUI package installs headers too
+# kexec-tools' program (the X6100's image): its restart without the processor's reset (x6x00-reboot); carried when the
+# target has it, so a radio gets it with the kernel that can use it
+OPTIONAL_FILES = ["/usr/sbin/kexec"]
 # The image's own packages that a card of before them lacks, carried whole (the owner, 2026-11-19: "I should not have
 # to write this to the card myself"): Mesa (the GPU drawing the screen, the X6100's card v0.3.12.28 had none),
 # GStreamer and its plugins (the boot video in hardware), ffmpeg (the Internet radio's AAC, Ogg, Opus, FLAC and HLS).
@@ -228,6 +231,7 @@ def main():
     paths.update(WEB_FILES)
     paths.update(LIB_FILES)
     paths.update(SDR_FILES)
+    paths.update(p for p in OPTIONAL_FILES if os.path.isfile(os.path.join(a.target, p.lstrip("/"))))
     extra = set()
     if a.packages_file_list and a.model in CARRY_MODELS:
         extra = carried(a.target, a.packages_file_list, CARRY_PKGS_MODEL, CARRY_HAVE) - paths

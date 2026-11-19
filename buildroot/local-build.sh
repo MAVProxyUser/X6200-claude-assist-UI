@@ -167,6 +167,12 @@ grep -q "libdrm" $GUI_MK || sed -i "/^${GUI_VAR}_DEPENDENCIES/s/$/ libdrm/" $GUI
 # libgpiod: the X6100's GUI holds its control lines itself (src/hw/x6100/hw_x6100.c, 2026-11-19: the control
 # library started the WiFi chip's power line at off), so it links libgpiod, which the control library never declared
 grep -q "^BR2_PACKAGE_LIBGPIOD=y" $DEFCONFIG || echo "BR2_PACKAGE_LIBGPIOD=y" >> $DEFCONFIG
+# The X6100's restart without the chip's reset (x6x00-reboot, rcK): its base switches the whole radio off when the
+# processor resets (2026-11-19: off at every reboot, at 1.2 V and 1.04 V alike, its reset line not the cause), so
+# a restart there loads the new kernel with kexec and jumps to it, the pins as they were. kexec-tools for it
+if [ "$MODEL" = x6100 ]; then
+    grep -q "^BR2_PACKAGE_KEXEC=y" $DEFCONFIG || echo "BR2_PACKAGE_KEXEC=y" >> $DEFCONFIG
+fi
 grep -q "libgpiod" $GUI_MK || sed -i "/^${GUI_VAR}_DEPENDENCIES/s/$/ libgpiod/" $GUI_MK
 
 echo "== No RHVoice: PulseAudio selected by the GUI itself"
@@ -377,6 +383,13 @@ grep -q "^CONFIG_UHID=" $KERNEL_DEFCONFIG || echo "CONFIG_UHID=m" >> $KERNEL_DEF
 # 99 °C; the X6200's within 6, +-1 °C at 60): the zone slowed its CPU at random (648-1008 MHz) and a spike past 110
 # would have powered it off. No driver there, no zone, as the X6100 always had; the video engine and udmabuf below
 # for both
+echo "== Kernel: kexec (the X6100's restart: x6x00-reboot)"
+# The X6100's base switches the radio off when the processor resets: kexec starts the new kernel without the reset.
+# The secondary cores go down and come back through U-Boot's PSCI (cpu_off/cpu_on, seen working on the radio)
+if [ "$MODEL" = x6100 ]; then
+    sed -i "/^# CONFIG_KEXEC is not set/d" $KERNEL_DEFCONFIG
+    grep -q "^CONFIG_KEXEC=y" $KERNEL_DEFCONFIG || echo "CONFIG_KEXEC=y" >> $KERNEL_DEFCONFIG
+fi
 echo "== Kernel: the processor temperature sensor and its thermal zone (the X6200's)"
 if [ "$MODEL" = x6200 ]; then
     for o in CONFIG_SUN4I_GPADC=y CONFIG_SENSORS_IIO_HWMON=y; do

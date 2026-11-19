@@ -1,12 +1,32 @@
 #!/bin/sh
 #
-# GoldCorpHF: the radio restarted, not switched off. On the X6200 every shutdown ends with "s" to the base, which cuts
-# the power (/etc/init.d/rcK): a plain reboot switched the radio off, and it had to be switched on again by hand. This
-# leaves a mark rcK reads: the "s" left out, the base stays on, and Linux restarts (U-Boot, the kernel, the GUI) with
-# the radio on all the while. The X6100 switches off at a restart all the same (2026-11-19, after its update: the
-# owner switched it on again; why is open, TODO): it must be switched on by hand. Used by the updater (install --reboot), the
-# GUI (the power-on box's Restart now) and over SSH: x6x00-reboot
+# GoldCorpHF: the radio restarted, not switched off. Used by the updater (install --reboot), the GUI (the power-on
+# box's Restart now) and over SSH: x6x00-reboot
+#
+# The X6200: every shutdown ends with "s" to the base, which cuts the power (/etc/init.d/rcK); a plain reboot switched
+# the radio off. This leaves a mark rcK reads: the "s" left out, the base stays on, and Linux restarts (U-Boot, the
+# kernel, the GUI) with the radio on all the while.
+#
+# The X6100: its base switches the whole radio off when the processor resets, whatever Linux says (2026-11-19: off at
+# every reboot, the CPU at 1.2 V and at 1.04 V alike; its base-reset line not the cause, nothing sent to the base). So
+# the processor is not reset: the kernel on the SD card is loaded now with kexec, with the device tree as it runs
+# (/sys/firmware/fdt: U-Boot's, with the PSCI node the card's .dtb has not, which the new kernel needs for its other
+# cores) and the same command line, and rcK jumps to it at the end of the shutdown (kexec -e). U-Boot is not run:
+# a new U-Boot on the card starts at the next power-on. Where kexec is not there (an image before it) or the load
+# fails, the plain reboot as before: the radio switches off, to be switched on by hand
 #
 touch /run/x6x00-reboot
+if [ -x /usr/sbin/kexec ] && ! grep -q "xiegu,x6200" /proc/device-tree/compatible 2>/dev/null &&
+   [ -r /sys/firmware/fdt ] && [ -e /sys/kernel/kexec_loaded ]; then
+    boot=/tmp/x6x00-reboot-boot
+    mkdir -p $boot
+    if mount -o ro /dev/mmcblk0p1 $boot 2>/dev/null; then
+        if /usr/sbin/kexec -l $boot/zImage --dtb=/sys/firmware/fdt --command-line="$(cat /proc/cmdline)" &&
+           [ "$(cat /sys/kernel/kexec_loaded)" = 1 ]; then
+            touch /run/x6x00-kexec
+        fi
+        umount $boot
+    fi
+fi
 sync
 exec reboot
