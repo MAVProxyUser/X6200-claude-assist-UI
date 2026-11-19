@@ -1063,6 +1063,16 @@ static lv_obj_t *root, *scr_obj[SCR_N];
 static uint8_t  d3_lv[D3_ROWS][IMG_W];
 static int      d3_head, d3_count;
 static uint32_t d3_pal[256];
+/* F SYSTEM's spectrogram (the owner, 2026-11-19: "a mini spectrogram display in the available space so the GPU %
+ * value shows a real value"): A's rows again, a longer history of them, flat, the newest on top, drawn by the GPU
+ * (slot 5) where it can, by the CPU where it cannot (sys_spec_draw) */
+#define F_ROWS 200
+static uint8_t  f_lv[F_ROWS][IMG_W];
+static int      f_head, f_count;
+static void     sys_spec_row(const uint8_t *row);
+static void     sys_spec_shift(int dx);
+static void     sys_spec_layout(void);
+static void     sys_spec_draw(void);
 static lv_obj_t *badge_l[2], *title_l, *status_l, *batt_l;
 static lv_obj_t *ab_arrow, *ab_tag;     /* PTT refused: where the A/B key is (landscape) */
 extern const lv_font_t power_sym_14;    /* the clock's: Montserrat's battery and bolt, and a plug (clock.c) */
@@ -1706,6 +1716,7 @@ static void render_3d(void) {
 static void wf_clear(void) {
     d3_count = d3_head = 0;
     memset(d3_lv, 0, sizeof(d3_lv));
+    sys_spec_shift(IMG_W);
     render_3d();
 }
 
@@ -1715,6 +1726,7 @@ static void wf_shift(int dx) {
         wf_clear();
         return;
     }
+    sys_spec_shift(dx);
     for (int r = 0; r < D3_ROWS; r++) {
         uint8_t *row = d3_lv[r];
 
@@ -1738,6 +1750,7 @@ static void wf_row(void) {
     }
     d3_head = (d3_head + 1) % D3_ROWS;
     if (d3_count < D3_ROWS) d3_count++;
+    sys_spec_row(row);
     if (scr == SCR_SCAN) render_3d();
 }
 
@@ -2327,7 +2340,9 @@ static void show_decode(void) {
 /* F SYSTEM's load (the user: "on F the SYSTEM screen... add a CPU, GPU, and RAM display"): the processor's four cores
  * (/proc/stat, its clock from cpufreq), the Mali-400 and the memory (MemAvailable), each a second, a bar in the
  * spectrum's ramp beside each. The kernel gives no busy figure for the Mali-400, only the clock its governor sets from
- * its load (devfreq): its % is where the last second's clock stood between its lowest and highest, 0 idle */
+ * its load (devfreq): where the GPU draws for the GUI (Mesa), its % is the time it spent drawing in the last second
+ * (gpu_busy_us); elsewhere where the last second's clock stood between its lowest and highest, 0 idle. Its clock
+ * beside it either way */
 #define MB_H   10                       /* the meter bars: G's and these */
 #define MB_SEG 6                        /* a segment and its gap */
 static lv_img_dsc_t *ld_frame[3];
@@ -2414,7 +2429,19 @@ static void sys_load_show(void) {
         fclose(f);
     }
     if (gl < 0 && cur && top > low) gl = (float)(cur - low) / (float)(top - low);
-    snprintf(t, sizeof(t), gl >= 0 ? "GPU %3.0f%%" : "GPU   -", gl * 100);
+    if (gpu_ok()) {     /* the GPU drawing here: the share of the last second it spent drawing (gpu_busy_us), not
+                         * where its clock stood, which stays at its lowest under a light load (0 %, 2026-11-19) */
+        static uint64_t busy_prev, at_prev;
+        struct timespec ts;
+        uint64_t        busy = gpu_busy_us(), at;
+
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        at = (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec / 1000;
+        gl = at_prev && at > at_prev ? (float)(busy - busy_prev) / (float)(at - at_prev) : 0;
+        if (gl > 1) gl = 1;
+        busy_prev = busy, at_prev = at;
+    }
+    snprintf(t, sizeof(t), gl < 0 ? "GPU   -" : gl < 0.1f ? "GPU %4.1f%%" : "GPU %3.0f%%", gl * 100);
     lv_label_set_text(ld_val[1], t);
     snprintf(t, sizeof(t), "MALI %lu/%lu MHZ", cur / 1000000, top / 1000000);
     lv_label_set_text(ld_more[1], cur ? t : "NO GPU CLOCK");
@@ -2457,7 +2484,9 @@ static void show_system(void) {
     opt_set(&s_home, 1, home ? "APPS COME BACK HERE" : "APPS GO TO CLASSIC", 2);
     opt_set(&s_keys, 0, "APP: THIS SCREEN", 0);
     opt_set(&s_keys, 1, "F2 OR PRESS: OPEN", 2);
+    sys_spec_layout();                  /* the spectrogram under the text, as much as it leaves */
     sys_load_show();
+    sys_spec_draw();
 }
 
 /* ---- F VHF/UHF: an RTL-SDR stick's spectrum (rtl_spectrum.c), alone or under the X6200's ---- */
@@ -2897,6 +2926,127 @@ static void rtl_gpu_draw(const lv_area_t *a) {
     }
     if (view == VIEW_SPLIT) gpu_rect(x0, y0 + p_rtl.y0 - 3, RTL_COLS, 2, argb(amb));
     gpu_frame_end(x0, y0, RTL_COLS, rtl_img_h);
+}
+
+/* ---- F SYSTEM's spectrogram: A's rows (the X6200's spectrum around the dial) under what the chosen item does ---- */
+
+#define F_MIN_H 40                      /* less room than this under the text: none */
+static lv_obj_t     *f_obj;             /* the picture: a hole over the GPU's drawing, or the CPU's image */
+static lv_img_dsc_t *f_frame;           /* the CPU's (no GPU here), as large as it can be */
+static bool          f_gpu;             /* the GPU draws it: slot 5 */
+static int           f_x, f_w, f_ty, f_tw, f_bot, f_hmax, f_h;  /* the box's inside: left, width, the text's top
+                                                                 * and width, the bottom; the picture's height now */
+
+static void sys_spec_draw(void) {
+    if (scr != SCR_SYSTEM || !f_obj || f_h < F_MIN_H) return;
+    if (f_gpu) {        /* into the display's plane under the hole: the picture flat, the newest row on top */
+        lv_area_t a;
+
+        lv_obj_get_coords(f_obj, &a);
+        if (!gpu_frame_begin(false)) return;
+        gpu_clear(a.x1, a.y1, f_w, f_h, argb(ink));
+        gpu_flat(5, a.x1, a.y1, f_w, f_h, f_head, f_count, 1, argb(ink));
+        gpu_frame_end(a.x1, a.y1, f_w, f_h);
+        return;
+    }
+    uint32_t *px = (uint32_t *)f_frame->data, bg = argb(ink);   /* the CPU: as the GPU's flat shader colours it */
+
+    for (int y = 0; y < f_h; y++) {
+        uint32_t *line = px + (size_t)y * f_w;
+
+        if (y >= f_count) {
+            for (int x = 0; x < f_w; x++) line[x] = bg;
+            continue;
+        }
+        const uint8_t *lv = f_lv[(f_head - 1 - y + F_ROWS) % F_ROWS];
+
+        for (int x = 0; x < f_w; x++) {        /* the strongest of the columns a pixel covers */
+            int     c0 = x * IMG_W / f_w, c1 = (x + 1) * IMG_W / f_w;
+            uint8_t v  = lv[c0];
+
+            for (int c = c0 + 1; c < c1 && c < IMG_W; c++)
+                if (lv[c] > v) v = lv[c];
+            line[x] = scale_rgb(d3_pal[v], 0.12f + 0.88f * v / 255.0f) | 0xff000000;
+        }
+    }
+    lv_obj_invalidate(f_obj);
+}
+
+static void sys_spec_row(const uint8_t *row) {
+    memcpy(f_lv[f_head], row, IMG_W);
+    if (f_gpu) gpu_levels_row(5, f_head, row);
+    f_head = (f_head + 1) % F_ROWS;
+    if (f_count < F_ROWS) f_count++;
+    sys_spec_draw();
+}
+
+/* Its rows follow the dial as A's do: what they showed moves aside, or goes */
+static void sys_spec_shift(int dx) {
+    if (abs(dx) >= IMG_W) {
+        memset(f_lv, 0, sizeof(f_lv));
+        f_head = f_count = 0;
+    } else {
+        for (int r = 0; r < F_ROWS; r++) {
+            uint8_t *row = f_lv[r];
+
+            if (dx > 0) {
+                memmove(row, row + dx, IMG_W - dx);
+                memset(row + IMG_W - dx, 0, dx);
+            } else if (dx < 0) {
+                memmove(row - dx, row, IMG_W + dx);
+                memset(row, 0, -dx);
+            }
+        }
+    }
+    if (f_gpu) gpu_levels_all(5, &f_lv[0][0]);
+}
+
+/* Under the chosen item's text (the small font), the rest of the box; none when that is under F_MIN_H */
+static void sys_spec_layout(void) {
+    lv_obj_t        *l = s_what.opt[0];
+    const char      *t = lv_label_get_text(l);
+    const lv_font_t *font = &pixel_16;   /* every item's text in it: the large one left SETTINGS' picture 30 px */
+    lv_point_t       sz;
+
+    lv_txt_get_size(&sz, t, font, 0, 0, f_tw, LV_TEXT_FLAG_NONE);
+    lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_set_height(l, sz.y);
+    if (!f_obj) return;
+    int y = f_ty + sz.y + 8;
+
+    f_h = LV_MIN(f_bot - y, f_hmax);
+    if (f_h < F_MIN_H) {
+        lv_obj_add_flag(f_obj, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    if (!f_gpu) {       /* the image as tall as the room: its buffer the tallest's */
+        f_frame->header.h = (uint32_t)f_h;
+        f_frame->data_size = (uint32_t)(f_w * f_h * sizeof(uint32_t));
+        lv_img_cache_invalidate_src(f_frame);
+        lv_img_set_src(f_obj, f_frame);
+    }
+    lv_obj_set_pos(f_obj, f_x, y);
+    lv_obj_set_size(f_obj, f_w, f_h);
+    lv_obj_clear_flag(f_obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* After B's (build_rtl): whether the GPU draws is known there */
+static void build_sys_spec(lv_obj_t *p) {
+    f_gpu = rtl_gpu && gpu_slot(5, IMG_W, F_ROWS);
+    if (f_gpu) {
+        gpu_palette(0, d3_pal);
+        gpu_levels_all(5, &f_lv[0][0]);
+        f_obj = lv_obj_create(p);
+        lv_obj_remove_style_all(f_obj);
+        lv_obj_add_event_cb(f_obj, direct_hole_cb, LV_EVENT_DRAW_MAIN_END, NULL);
+    } else {
+        f_frame = lv_img_buf_alloc(f_w, f_hmax, LV_IMG_CF_TRUE_COLOR);
+        if (!f_frame) return;
+        f_obj = lv_img_create(p);
+        lv_img_set_src(f_obj, f_frame);
+    }
+    lv_obj_add_flag(f_obj, LV_OBJ_FLAG_HIDDEN);
+    sys_spec_layout();
 }
 
 /* MHz without the zeros at the end: 118, 162.55, 467.725 */
@@ -5259,13 +5409,14 @@ const char *app_sentry_release(void) {
     return s;
 }
 
-/* The base's firmware version, its first word: the X6200's "1.0.8", the X6100's "V1.1.8" of "V1.1.8 Sep 15
- * 2024,15:22:37" (its build time cut the title off) */
+/* The base's firmware version, its first word without a V: "1.0.8" of the X6200's "1.0.8", "1.1.9" of the X6100's
+ * "V1.1.9 Sep 15 2024,15:22:37" (its build time cut the title off); the titles write it "v1.1.9" on both */
 static const char *base_ver_short(void) {
     static char v[24];
     const char *b = radio_base_ver_str();
     size_t      n = 0;
 
+    if (b && (*b == 'V' || *b == 'v')) b++;
     while (b && b[n] && b[n] != ' ' && n < sizeof(v) - 1) n++;
     memcpy(v, b ? b : "", n);
     v[n] = 0;
@@ -5284,13 +5435,14 @@ static void show_title(void) {
     if (alert_until && time(NULL) < alert_until && (time(NULL) & 1))
         lv_label_set_text_fmt(title_l, "WX ALERT: %s", alert_event);
     else {
-        /* every screen's name, then the release (src/main.h's version, the tag it is built for) and the commit; F
-         * SYSTEM adds the base's firmware, "... SYSTEM CONTROL: v0.3.9.4 c6e93af - base 1.0.8". One line between the
-         * badges, 68 of pixel_20's 10 px characters: a long one gives up "XIEGU " for it */
+        /* every screen's name, then the release (src/main.h's version, the tag it is built for), the commit and the
+         * base's firmware (the owner, 2026-11-19: on every screen again, "base - v1.1.9"; F alone had it, "V1.1.9" on
+         * the X6100 and "1.0.8" on the X6200): "... DECODER SENTRY: v0.3.12.32 62273334 - base v1.1.9". One line
+         * between the badges, 68 of pixel_20's 10 px characters: a long one gives up "XIEGU " for it */
         const char *t = titles[scr], *ver = base_ver_short();
-        char        s[128], more[24] = "";
+        char        s[128], more[24];
 
-        if (strstr(t, "SYSTEM")) snprintf(more, sizeof(more), " - base %s", ver[0] ? ver : "?");
+        snprintf(more, sizeof(more), ver[0] ? " - base v%s" : " - base ?", ver);
         title_text(s, sizeof(s), t, more, lv_obj_get_style_text_font(title_l, 0),
                    lv_obj_get_style_width(title_l, LV_PART_MAIN));     /* the width given, laid out or not yet */
         lv_label_set_text(title_l, s);
@@ -6483,6 +6635,15 @@ static void blink_cb(lv_timer_t *t) {
     state_keep();                                   /* for a restart of the GUI: gui_state.c */
     rtl_spectrum_rds_watch(rds_channel());          /* B's FM broadcast channel's RDS (C's stick entry's) */
     if (scr == SCR_SYSTEM && n % 2 == 0) sys_load_show();   /* its load each second */
+    {                                               /* the title again when the base's version comes (after a start) */
+        static char titled_ver[24];
+        const char *ver = base_ver_short();
+
+        if (strcmp(ver, titled_ver)) {
+            snprintf(titled_ver, sizeof(titled_ver), "%s", ver);
+            show_title();
+        }
+    }
     if (scr == SCR_RTL) watch_show();                       /* the watch channels, open or quiet */
     if (pp_on) pp_fill();                                   /* the pool's panel: who has what, as it changes */
     if (gp_on && n % 2 == 0) gp_fill();                     /* the GPS panel: each second */
@@ -8394,6 +8555,8 @@ static void build_system(lv_obj_t *p) {
     box_make(&s_list, p, 6, y, lw, h, "SYSTEM", SYS_N, 5);
     box_make(&s_what, p, rx, y, rw, h - lh - 6, "WHAT IT DOES", 1, -1);
     lv_obj_set_height(s_what.opt[0], h - lh - 6 - 34);
+    f_x = rx + 6, f_w = rw - 12, f_ty = y + 30, f_tw = rw - 6, f_bot = y + h - lh - 6 - 6;   /* its spectrogram's */
+    f_hmax = f_bot - f_ty;
     box_make(&s_load, p, rx, y + h - lh, rw, lh, "PROCESSOR, GRAPHICS, MEMORY", 0, -1);
     ld_w = (rw - 8 - 104 - 176) / MB_SEG * MB_SEG;
     for (int i = 0; i < 3; i++) {
@@ -9747,7 +9910,7 @@ static void show_walkie(void) {
     }
     const char *ver = base_ver_short();
 
-    snprintf(sy2, sizeof(sy2), "BASE %s", ver[0] ? ver : "?");
+    snprintf(sy2, sizeof(sy2), ver[0] ? "BASE V%s" : "BASE ?", ver);
     if (g_portrait) {
         time_t    now = time(NULL);
         struct tm tm;
@@ -10311,6 +10474,7 @@ static void construct_cb(lv_obj_t *parent) {
     build_decode(scr_obj[SCR_DECODE]);
     build_system(scr_obj[SCR_SYSTEM]);
     build_rtl(scr_obj[SCR_RTL]);
+    build_sys_spec(scr_obj[SCR_SYSTEM]);    /* after B's: whether the GPU draws is known there */
 #if USE_DRM
     drm_wf_claim(rtl_direct);           /* the plane is the Sentry's picture's while it is open (drm_wf_rotate) */
 #endif
@@ -10427,6 +10591,13 @@ static void destruct_cb(void) {
         }
         memset(u, 0, sizeof(*u));
     }
+    if (f_frame) {                      /* F SYSTEM's spectrogram */
+        lv_img_cache_invalidate_src(f_frame);
+        lv_img_buf_free(f_frame);
+    }
+    f_frame = NULL;
+    f_obj   = NULL;
+    f_gpu   = false;
     for (int i = 0; i < 3; i++) {       /* F SYSTEM's load bars */
         if (ld_frame[i]) {
             lv_img_cache_invalidate_src(ld_frame[i]);

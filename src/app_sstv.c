@@ -385,7 +385,7 @@ static void show_picture(void)
     int                     ow, oh, x0, y0;
 
     if (!sstv_canvas || pic_rows <= 0 || !mi) return;
-    lv_canvas_fill_bg(sstv_canvas, lv_color_white(), LV_OPA_COVER);
+    lv_canvas_fill_bg(sstv_canvas, TC(bg), LV_OPA_COVER);
     fit(mi->width, mi->height, &ow, &oh, &x0, &y0);
     for (int y = 0; y < oh; ++y) {
         int sy = (int)((int64_t)y * mi->height / oh);
@@ -729,7 +729,7 @@ static void timer_cb(lv_timer_t *t)
     if (auto_clear) {
         auto_clear = false;
         if (sstv_canvas) {
-            lv_canvas_fill_bg(sstv_canvas, lv_color_white(), LV_OPA_COVER);
+            lv_canvas_fill_bg(sstv_canvas, TC(bg), LV_OPA_COVER);
             lv_obj_invalidate(sstv_canvas);
         }
     }
@@ -952,7 +952,7 @@ static void manual_cb(button_data_t *b)
     man_rec = true;
     pthread_mutex_unlock(&rx_lock);
 
-    if (sstv_canvas) lv_canvas_fill_bg(sstv_canvas, lv_color_white(), LV_OPA_COVER);
+    if (sstv_canvas) lv_canvas_fill_bg(sstv_canvas, TC(bg), LV_OPA_COVER);
     if (sstv_mode_auto)
         snprintf(s, sizeof(s), "SSTV Manual decoder is running\n\nSearching the line syncs for the SSTV mode\n\n"
                                "Press Stop Manual RX to render received picture");
@@ -1061,13 +1061,14 @@ static void construct_cb(lv_obj_t *parent)
         msg_schedule_text_fmt("Power is limited to %0.0fW", MAX_PWR);
     }
 
-    /* white sheet with the picture, at the left of the body */
+    /* the picture, at the left of the body, on the theme's background as WeFax's (the owner, 2026-11-19: dark, as
+     * the rest of the theme; a white sheet before) */
     sstv_canvas = lv_canvas_create(dialog.obj);
     lv_canvas_set_buffer(sstv_canvas, sstv_pixels, SSTV_PIC_W, SSTV_PIC_H, LV_IMG_CF_TRUE_COLOR);
     lv_obj_move_background(body);
     lv_obj_align(sstv_canvas, LV_ALIGN_TOP_LEFT, SSTV_PIC_X, SSTV_PIC_Y);
     lv_obj_set_size(sstv_canvas, SSTV_PIC_W, SSTV_PIC_H);
-    lv_canvas_fill_bg(sstv_canvas, lv_color_white(), LV_OPA_COVER);
+    lv_canvas_fill_bg(sstv_canvas, TC(bg), LV_OPA_COVER);
     /* the canvas holds the focus so the volume keys reach sstv_key_cb() */
     lv_obj_add_event_cb(sstv_canvas, sstv_key_cb, LV_EVENT_KEY, NULL);
     sstv_focus_picture();

@@ -330,14 +330,18 @@ static void set_txpwr(float w) {
     hw_set_f(HW_TXPWR_F, w);
 }
 
-/* Whether the base's charging flag counts: on the X6200 only when charging was asked for, as its base (1.0.8)
- * raises the flag with external power in whatever the setting (#33). The X6100's flag is taken as its base
- * gives it: nobody has seen that base raise it with the charger off */
-static bool charge_flag_counts(void) {
+/* Whether the base charges, the same on both models: a supply in and charging asked for. The X6200's base (1.0.8)
+ * raises its flag with external power in whatever the setting (#33), so its flag counts only when charging was asked
+ * for. The X6100's base (V1.1.9) hardly ever raises it, charging or not: on 2026-11-19 it was up in 2 of 1134
+ * minutes on a supply while the battery climbed from 7.7 to 8.3 V, so its top bar showed the plug ("on a supply, not
+ * charging") where the X6200 on the same supply showed the bolt (the owner: "one is a lightning bolt the other a
+ * plug"). There a supply in counts as the flag */
+static bool charging_now(bool flag, bool ext_in) {
 #ifdef BOARD_X6200
-    return charger_asked;
+    (void)ext_in;
+    return flag && charger_asked;
 #else
-    return true;
+    return (flag || ext_in) && charger_asked;
 #endif
 }
 
@@ -1186,7 +1190,7 @@ void radio_poweroff() {
 void radio_set_charger(bool on) {
     charger_asked = on;
     WITH_RADIO_LOCK(hw_set_i(HW_CHARGER, on));
-    if (!charge_flag_counts() && pack_vext >= 30) {
+    if (!on && pack_vext >= 30) {
         clock_update_estimate(-1, false);   /* no time to full in the top bar right away */
     }
 }
@@ -2645,7 +2649,7 @@ static void battery_log(const hw_pack_t *p, bool volts_ext) {
     bat_est_feed(&s);
     int min = bat_est_minutes(0, &chg, &approx);
 
-    if (volts_ext || (s.vext >= 3.0f && !charge_flag_counts())) {
+    if (volts_ext || (s.vext >= 3.0f && !charger_asked)) {
         /* The charger is off: no time to full. Nor from the base's % next to the voltage's: #223's full pack on
          * the supply, the base at 2 %, would have shown 98 % and 8 h to full */
         min = -1;
@@ -2973,8 +2977,8 @@ static bool radio_tick() {
              * with the charger off, when it does not charge (measured on the radio: the battery stays
              * flat). bat_watch above still takes the flag as a sign of external power; from here on
              * it counts only if charging was asked for, as in Xiegu's app: the top bar, the time to
-             * full and the battery log (charge_flag_counts: the X6100's as its base gives it) */
-            pack->charging = pack->charging && charge_flag_counts();
+             * full and the battery log; on the X6100 a supply in counts as its flag (charging_now) */
+            pack->charging = charging_now(pack->charging, pack->vext_flag || pack->vext >= BAT_EXT);
             clock_update_no_battery(pack->bat_missing);
 
             /* The % sags under the TX current and comes back slowly: the last RX reading holds

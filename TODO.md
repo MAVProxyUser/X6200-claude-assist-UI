@@ -7,6 +7,21 @@ here transmits until the owner says so (transmit work is not wanted for now). On
 Meteor/SCAN CFG one, the Kraken DF one and its kernel one) were folded into one backlog, in the order the owner
 approved that day.
 
+**2026-11-19 afternoon: the owner's new list** (asked while v0.3.12.32 was pushed to the radios)
+
+- Done (hot build on both radios, in the next release): F SYSTEM's spectrogram under WHAT IT DOES, A's rows drawn by
+  the GPU, and the GPU % the time it spent drawing (13 % on the X6200 where the clock's place read 0 %; the X6100 has
+  no Mesa till its card image: 0 % there is true); the base's firmware on every Sentry title, "base v1.1.9" on both;
+  the X6100's bolt (its base's charging flag hardly ever up: a supply in with Charger On counts, as on the X6200);
+  SSTV's picture starting dark as WeFax's (the owner chose dark).
+- Done in the suite: the pictures taken with the X6100 made like the X6200 first (dial, bands, volumes, the apps'
+  frequencies, the GUI state: B's frequency, the pages, the Direction finder's target and array), its own back after.
+  The pictures to take again once v0.3.12.32 is on both (the X6100's Weather, Flights and Internet radio helpers).
+- Waiting on the release: v0.3.12.32 on both radios through their updaters, the X6100's kernel set with it
+  (v0.3.12.29-.31 were refused by every updater; fixed 3a3755ce).
+- To do, with the owner's word on the cable and pads: the Walkie (G) on both radios sending to and hearing each
+  other on every band and mode G offers, at 0.1 W through the pads (CB refused by both radios' TX ranges).
+
 **Open, in the order they are worked**
 
 *The Kraken and USB first*

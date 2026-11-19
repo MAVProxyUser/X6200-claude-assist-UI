@@ -109,6 +109,13 @@ folder for `--undo`. Each mode's filter edges (mode_params: `mode<N>.filter_low/
 (2026-11-19: the X6200's AM 0-5000 against the X6100's 0-4000 was a value kept on one radio, which the general
 settings did not show).
 
+Before core's pictures (`pages`, `screens`) the X6100 is made like the X6200 further than `align` goes (photo_sync,
+2026-11-19: A and B on different frequencies, the Direction finder's resting state not the same): every params row
+but the radio's own hardware and identity (calibrations, PA bias, TX power, ATU, callsign, QTH, WiFi), so the dial,
+bands, volumes, the receiver's switches and each app's frequency too, and the GUI state file (`/mnt/gui_state.conf`:
+B's frequency, the Sentry's pages, the Direction finder's target and array), its GUI stopped and started again. Its
+own come back after the pictures (`photo_sync_x6100_undo.json` in the run's folder).
+
 `redact_shots.py RUN_DIR OUT_DIR` makes a suite run's screenshots fit to publish: what would place the station
 pixelated (or a map flattened) on both radios alike, each screen's pair side by side. The first gallery:
 [docs/parity/2026-11-18](../../docs/parity/2026-11-18/README.md); the second, after the fixes those pictures led to:

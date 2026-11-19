@@ -19,10 +19,12 @@ extern "C" {
  * a call failing, said once in the log); the caller draws with the CPU. Called again it answers as the first time */
 bool gpu_init(int cols, int rows);
 bool gpu_ok(void);
+/* The time the GPU has spent drawing since the start, in microseconds (each frame's wait for it): the load it carries */
+uint64_t gpu_busy_us(void);
 /* The context alone (no slots): what the main screen's waterfall needs */
 bool gpu_start(void);
 
-/* Slot s's data (0..4): rows of cols levels (a ring of rows, or of columns for a voiceprint) and one trace of cols
+/* Slot s's data (0..5): rows of cols levels (a ring of rows, or of columns for a voiceprint) and one trace of cols
  * columns; made again when the size changes */
 bool gpu_slot(int s, int cols, int rows);
 

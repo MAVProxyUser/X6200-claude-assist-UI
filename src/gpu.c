@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #if USE_DRM
@@ -151,13 +152,31 @@ static void (*p_glBlendFunc)(GLenum, GLenum);
 
 /* ---- State ---- */
 
-#define SLOTS 5                     /* the pictures' data: A/B's halves (0, 1), G's spectrum (2), its voiceprint (3), the
-                                     * main screen's waterfall (4) */
+#define SLOTS 6                     /* the pictures' data: A/B's halves (0, 1), G's spectrum (2), its voiceprint (3), the
+                                     * main screen's waterfall (4), F SYSTEM's spectrogram (5) */
 #define PALS  5                     /* the ramps: the pictures' levels, the voiceprint's, the main waterfall's, the
                                      * radar's afterglow (AIRSPACE), the classic 3D picture's */
 #define PRIMS 8192                  /* points, lines' ends, triangles' corners a frame (each kind) */
 
 enum { P_ROWS, P_TRACE, P_RECT, P_FLAT, P_VP, P_WF, P_RADAR, P_PRIM, P_IMG, P_D3, P_JOIN, P_GUI, P_N };
+
+/* The time the GPU drew, summed (gpu_busy_us): each frame's wait for it in glFinish, the commands sent before it
+ * (lima starts them at the flush). F SYSTEM's GPU % (the owner, 2026-11-19: "so the GPU % value shows a real
+ * value"): the clock the governor sets stays at its lowest under a light load, which read 0 % however much was drawn */
+static uint64_t busy_us;
+
+static void finish(void) {
+    struct timespec t0, t1;
+
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    p_glFinish();
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    busy_us += (uint64_t)((t1.tv_sec - t0.tv_sec) * 1000000LL + (t1.tv_nsec - t0.tv_nsec) / 1000);
+}
+
+uint64_t gpu_busy_us(void) {
+    return busy_us;
+}
 
 static int    tried;                /* 0 not yet, 1 working, -1 not here */
 static int    pw, ph;               /* the panel, portrait */
@@ -951,7 +970,7 @@ void gpu_frame_finish(int x, int y, int w, int h) {
     rect_flush();
     in_frame = false;
     p_glDisable(GL_SCISSOR_TEST);
-    p_glFinish();                       /* drawn before the plane is flipped to it */
+    finish();                           /* drawn before the plane is flipped to it */
     drm_wf_gpu_area(portrait, cur_buf, x, y, w, h);
 }
 
@@ -1289,7 +1308,7 @@ void gpu_frame_end(int x, int y, int w, int h) {
     rect_flush();
     in_frame = false;
     p_glDisable(GL_SCISSOR_TEST);
-    p_glFinish();                       /* drawn before the plane is flipped to it */
+    finish();                           /* drawn before the plane is flipped to it */
     drm_wf_drawn(portrait, x, y, w, h);
 }
 
@@ -1323,11 +1342,14 @@ static bool gui_draw(int back, bool port, const lv_area_t *r, int n) {
     p_glVertexAttribPointer(0, 2, GL_FLOAT, 0, 16, v);
     p_glVertexAttribPointer(1, 2, GL_FLOAT, 0, 16, v + 2);
     p_glDrawArrays(0x0004, 0, k);       /* GL_TRIANGLES */
-    p_glFinish();                       /* turned before the plane is flipped to it */
+    finish();                           /* turned before the plane is flipped to it */
     return !p_glGetError();
 }
 
 #else  /* no DRM (the Mac's build): no GPU */
+uint64_t gpu_busy_us(void) {
+    return 0;
+}
 
 bool gpu_start(void) {
     return false;

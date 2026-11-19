@@ -1253,11 +1253,18 @@ written through to the card before it replaces the last copy, so a power cut kee
   CB, Web radio, Zello and SVXConnect among them), the digital modes, AIRSPACE, VHF/UHF, the SDR pool, the
   [GPS](#the-gps-panel),
   the classic radio screen, a shell, the [base firmware](#the-x6200s-base-firmware) and where the radio starts. F2 opens the item chosen
-  (CLASSIC RADIO is on the list); the other F keys do nothing here. Its title says the release, the GUI's commit and the base's version. A's title names
+  (CLASSIC RADIO is on the list); the other F keys do nothing here. Every Sentry title says the release, the GUI's
+  commit and the base's firmware, written the same on both radios: `... DECODER SENTRY: v0.3.12.32 62273334 - base
+  v1.1.9` (G held up says BASE V1.0.8 under its clock). Under the chosen item's text (in the small font), WHAT IT
+  DOES shows a spectrogram of A's: the X6200's spectrum around the dial as A takes it, flat, the newest row on top,
+  following the dial as A's rows do; the GPU draws it where the image has Mesa, the processor elsewhere. A's title names
   what its scope takes in: `MF/HF/VHF SPECTRUM` (the X6200 from 100 kHz to 55 MHz, and 87.5 to 137 MHz).
 - **PROCESSOR, GRAPHICS, MEMORY** under WHAT IT DOES on F, each second with a bar: CPU, the four cores' load in all
-  and each (and the clock); GPU, the Mali-400's clock as its governor sets it from its load (144 MHz idle, 0%, to
-  384 MHz, 100%: the kernel gives no busy figure for it); RAM, what is in use of the 1 GB.
+  and each (and the clock); GPU, the share of the last second the Mali-400 spent drawing (the Sentry's pictures, F's
+  spectrogram among them, and the GUI turned onto the display), its clock beside it (144 to 384 MHz as its governor
+  sets it). Under a light load the governor keeps the lowest clock, so up to v0.3.12.32 the figure, then the clock's
+  place between its lowest and highest, read 0% however much was drawn; on an image without Mesa (no drawing by the
+  GPU) it is still that; RAM, what is in use of the 1 GB.
 
 #### The GPS panel
 
@@ -3144,11 +3151,14 @@ the battery stayed at 7.8 V and 65 % for 42 minutes, with On it went from 57 to
 64 % in 45 minutes. So on the X6200 the radio takes the base's "charging" only
 with Charger On, as Xiegu's own firmware does: with Off or Shadow, External
 says "12.1 V" and the top right shows the plug sign with no time to full (up
-to v0.3.6 they said "charging" and showed the lightning sign). The X6100 shows
-what its base reports: with Charger Off the plug sign from the moment the
-supply is in. (Up to v0.3.7 an X6100 with Charger Off showed the lightning
-sign and a time to full for its first minute on the supply, then the plug,
-issue #108.)
+to v0.3.6 they said "charging" and showed the lightning sign). The X6100 goes
+the same way: with Charger On and a supply in it shows the lightning sign, with
+Off or Shadow the plug. Its base (V1.1.9) hardly ever reports charging, charging
+or not (measured 2026-11-19: 2 minutes of 1134 on a supply, the battery
+climbing from 7.7 to 8.3 V meanwhile), so up to v0.3.12.32 it showed the plug
+on a supply where the X6200 beside it showed the lightning sign. (Up to v0.3.7
+an X6100 with Charger Off showed the lightning sign and a time to full for its
+first minute on the supply, then the plug, issue #108.)
 
 Zone. Where: Settings > General > DATE / TIME > Zone. The change applies at
 once; summer time follows by itself where the zone has it. 24 zones, UTC then
@@ -5440,6 +5450,10 @@ The VOL knob works as on the main screen: turned it changes what it is on
 (volume, squelch, RF gain, the filter edges...), a press of VOL switches
 between that and choosing what it is on. Up to v0.3.9 it was the volume only
 in WeFax (#226).
+
+SSTV's picture, on the left, starts in the theme's background colour as WeFax's
+does (black in the Sentry theme), and a received picture is drawn on it; up to
+v0.3.12.32 it started as a white sheet.
 
 SSTV buttons:
 

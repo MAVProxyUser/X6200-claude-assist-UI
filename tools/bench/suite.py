@@ -57,6 +57,16 @@ OWN = re.compile(r"(freq|vfo|band|_hz$|^vol|volume|rfg|rfgain|^pre|^att|^agc|fil
                  r"lhz|_time$|_at$|last_|gain|^step|zoom|mode_|split|rit|xit|key_|_dac)", re.I)
 
 
+# For the pictures (the owner, 2026-11-19: A and B "weren't even tuned to the same frequency", the Direction finder's
+# "resting state ... differed", "that should all be sync'd up when you take photos"): everything copied but what is
+# the radio's own hardware or identity. The dial, the bands, the volumes and the receiver's switches, each app's
+# frequency and choices go too, and the GUI's state file (B's frequency, the Sentry's pages, the Direction finder's
+# target and array: gui_state.conf), undone after the pictures
+PHOTO_OWN = re.compile(r"(_cal|calib|smeter|pa_bias|tx_|^pwr|power|^atu|offset|^qth|callsign|^ver|first_start|wifi|"
+                       r"_time$|_at$|last_|key_|_dac)", re.I)
+STATE_OWN = re.compile(r"^(tries|paused|place|app|s\.scr)$")
+
+
 def say(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
@@ -400,12 +410,21 @@ def core(run, only):
             run.radio(n).take_control()
         run.banner("SUITE core: the apps each radio has (receive only)")
         apps = t_apps(run)
-        if not only or "pages" in only:
-            t_pages(run)
-        if not only or "gesture" in only:
-            t_gesture(run)
-        if not only or "screens" in only:
-            t_screens(run, apps)
+        keep = None
+        if len(run.names) == 2 and (not only or {"pages", "screens"} & set(only)):
+            src, dst = ("x6200", "x6100") if set(run.names) == {"x6100", "x6200"} else run.names
+            run.banner(f"SUITE core: {dst} made like {src} for the pictures (its own back after; receive only)")
+            keep = photo_sync(run, src, dst)
+        try:
+            if not only or "pages" in only:
+                t_pages(run)
+            if not only or "gesture" in only:
+                t_gesture(run)
+            if not only or "screens" in only:
+                t_screens(run, apps)
+        finally:
+            if keep is not None:
+                photo_undo(run, dst, keep)
 
 
 # ---- the hardware batches: the bench harness's tests ----
@@ -504,6 +523,76 @@ def cable(run, only):
                     r.close()
                 except (bench.Refused, OSError) as e:
                     run.result("cable", "restore", False, f"{n}: ATU not switched on again ({e})", radio=n)
+
+
+def gui_state(run, n):
+    out = ssh(run, n, "cat /mnt/gui_state.conf 2>/dev/null")
+    return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+
+
+def photo_sync(run, src, dst):
+    """dst made like src for the pictures (PHOTO_OWN, STATE_OWN): its params rows, per-mode rows and GUI state
+    written with its GUI stopped (it writes both back as it ends), then started again and back on the network; what
+    it had kept for photo_undo"""
+    ps, pd = params(run, src), params(run, dst)
+    rows = [(k, pd.get(k), ps.get(k)) for k in sorted(set(ps) | set(pd))
+            if ps.get(k) != pd.get(k) and not PHOTO_OWN.search(k)]
+    ms, md = mode_params(run, src), mode_params(run, dst)
+    rows += [(k, md.get(k), ms.get(k)) for k in sorted(set(ms) | set(md)) if ms.get(k) != md.get(k)]
+    gs, gd = gui_state(run, src), gui_state(run, dst)
+    state = {k: v for k, v in gs.items() if not STATE_OWN.match(k)}
+    keep = {"rows": [{"name": k, "was": was, "to": to} for k, was, to in rows], "state": gd}
+    with open(os.path.join(run.dir, f"photo_sync_{dst}_undo.json"), "w") as f:
+        json.dump(keep, f, indent=1)
+    write_rows(run, dst, keep["rows"], dict(gd, **state))
+    say(f"{dst}: made like {src} for the pictures: {len(rows)} settings, {len(state)} GUI state keys")
+    return keep
+
+
+def photo_undo(run, dst, keep):
+    """dst's own values back after the pictures"""
+    write_rows(run, dst, [{"name": r["name"], "was": r["to"], "to": r["was"]} for r in keep["rows"]], keep["state"])
+    say(f"{dst}: its own settings and GUI state back")
+
+
+def write_rows(run, dst, rows, state=None):
+    """rows ({name, to}; to None deletes) into dst's params.db, and its GUI state file whole when given, its GUI
+    stopped meanwhile and started again; back when its remote answers"""
+    sql = []
+    for r in rows:
+        m = re.fullmatch(r"mode(\d+)\.(\w+)", r["name"])
+        if m and m.group(2) in MODE_ROWS:
+            if r["to"] is None:
+                sql.append(f"delete from mode_params where mode={int(m.group(1))} and name='{m.group(2)}';")
+            elif re.fullmatch(r"-?\d+", str(r["to"])):
+                sql.append(f"insert or replace into mode_params(mode,name,val) values({int(m.group(1))},"
+                           f"'{m.group(2)}',{int(r['to'])});")
+            continue
+        k = r["name"].replace("'", "''")
+        if r["to"] is None:
+            sql.append(f"delete from params where name='{k}';")
+        else:
+            v = str(r["to"]).replace("'", "''")
+            sql.append(f"insert or replace into params(name,val) values('{k}','{v}');")
+    st = ""
+    if state is not None:
+        body = "".join(f"{k}={v}\n" for k, v in state.items() if re.fullmatch(r"[\w.]+", k) and "'" not in v)
+        st = f"printf '%s' '{body}' > /mnt/gui_state.conf; "
+    db = f"sqlite3 /mnt/params.db \"{''.join(sql)}\"; " if sql else ""
+    if run.radios.get(dst):
+        run.radios.pop(dst).close()
+    ssh(run, dst, f"/etc/init.d/S95gui stop >/dev/null 2>&1; {db}{st}/etc/init.d/S95gui start >/dev/null 2>&1",
+        timeout=120)
+    t = time.time()
+    while True:                         # its remote back (the GUI's start, then the Sentry's)
+        try:
+            time.sleep(3)
+            run.radio(dst).take_control()
+            break
+        except (bench.Refused, OSError):
+            run.radios.pop(dst, None)
+            if time.time() - t > 120:
+                raise
 
 
 def align(names, src, dst, undo=None):
