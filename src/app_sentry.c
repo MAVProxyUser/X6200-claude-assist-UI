@@ -730,7 +730,7 @@ static lv_img_dsc_t *frame;
 static lv_obj_t     *img;
 static lv_timer_t   *timer, *blink_timer;
 static int           scr_h, img_h, wf_y0;
-static bool          wide_ok, rx_held, rec_ours, blink;
+static bool          wide_ok, rx_held, rec_ours, blink, zoom_held;
 static int32_t       view_hz = VIEW_WIDE;
 static lv_color_t    amb, dim, ink, faint;
 
@@ -10348,6 +10348,9 @@ static void construct_cb(lv_obj_t *parent) {
 
     rx_held = radio_rx_only(true);
     wide_ok = radio_psd_wide(true);     /* the X6200's base; the X6100's A is the GUI's own spectrum (own_psd_get) */
+    /* The X6100 on a base that zooms (V1.1.9): its widest, 100 kHz, while the Sentry is open (A would get the mode's
+     * zoom: 25 kHz at x4); the zoom chosen comes back as it closes */
+    zoom_held = !wide_ok && radio_zoom_wide(true);
     timer   = lv_timer_create(timer_cb, 60, NULL);
     blink_timer = lv_timer_create(blink_cb, 500, NULL);
     rtl_timer   = lv_timer_create(rtl_timer_cb, 50, NULL);
@@ -10432,6 +10435,8 @@ static void destruct_cb(void) {
     rtl_want(false);
     if (hits_dirty) hits_save();
     if (wide_ok) radio_psd_wide(false);
+    if (zoom_held) radio_zoom_wide(false);
+    zoom_held = false;
     if (rx_held) radio_rx_only(false);
     wide_ok = rx_held = false;
     if (rec_ours) recorder_set_on(false);

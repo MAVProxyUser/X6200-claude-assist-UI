@@ -186,6 +186,12 @@ uint32_t radio_caps(void);
 /* The base's whole spectrum (384 kHz on the X6200, dsp_psd_raw()) while one or more users want it: each on is
  * matched by an off. Any thread; false (nothing done) on a base without its own spectrum (HW_CAP_PSD) */
 bool radio_psd_wide(bool on);
+/* A base that zooms its IQ but sends no spectrum of its own (the X6100 on Xiegu's V1.1.9 and later): while held, the
+ * base at x1 (100 kHz) whatever the mode's zoom, which comes back as the last holder lets go; the setting itself is
+ * never changed (it is the mode's, and the Sentry's scans change modes). False: not such a base (the X6200 has
+ * radio_psd_wide). The zoom the spectrum and the base work at: radio_zoom_effective() */
+bool    radio_zoom_wide(bool on);
+int32_t radio_zoom_effective(void);
 /* Receive only while one or more users want it (the Sentry; the browser remote while a session without TX controls
  * the radio): the base held at 0 W, VOX off and KEY Train on, as where
  * the radio may not transmit, and the GUI's PTT and CW key refused (the screen says so). Each on is matched by an

@@ -2469,9 +2469,35 @@ bool radio_psd_wide(bool on) {
 
 /* The base asked for 100 kHz over 2^val (it sends one step wider, hw_x6200.c). The X6200's wider zooms (#131): 0
  * asks what zoom 1 does (192 kHz, shown whole), -1 one step wider still (384 kHz, the base's widest) */
+/* radio_zoom_wide(): its users; while any, the base zooms at x1 whatever the mode's zoom says */
+static atomic_int zoom_wide;
+
+int32_t radio_zoom_effective(void) {
+    return atomic_load(&zoom_wide) > 0 ? 1 : param_i_get(cfg_mode_zoom);
+}
+
+bool radio_zoom_wide(bool on) {
+    uint32_t caps = radio_caps();
+
+    if ((caps & HW_CAP_PSD) || !(caps & HW_CAP_ZOOM))
+        return false;                   /* the X6200 has radio_psd_wide; a base that cannot zoom shows 100 kHz anyway */
+    int n = on ? atomic_fetch_add(&zoom_wide, 1) + 1 : atomic_fetch_sub(&zoom_wide, 1) - 1;
+    if (n < 0) {                        /* an off without its on: none */
+        atomic_store(&zoom_wide, 0);
+        n = 0;
+    }
+    if ((on && n == 1) || (!on && n == 0)) {
+        on_fw_zoom_change(NULL, NULL);  /* the base's decimation */
+        dsp_zoom_refresh();             /* and the spectrum's span and levels */
+    }
+    return true;
+}
+
 static void on_fw_zoom_change(Subject *subj, void *user_data) {
-    int32_t zoom = subject_i_get((SubjectInt*)subj);
+    int32_t zoom = radio_zoom_effective();      /* the mode's zoom, x1 while radio_zoom_wide() holds it */
     int32_t val  = zoom < 0 ? -1 : 0;
+
+    (void)subj;
 
     while (zoom > 1) {
         val++;

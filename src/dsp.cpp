@@ -558,7 +558,7 @@ static void set_zoom(uint8_t z) {
 }
 
 static void on_zoom_change(Subject *subj, void *user_data) {
-    int32_t z = cfg_sm.p_mode_zoom.get();
+    int32_t z = radio_zoom_effective();     /* the mode's zoom, x1 while the Sentry holds the base wide */
 
     shown_span = zoom_span_hz(z);
     if (!(caps & HW_CAP_ZOOM)) {    /* an OEM X6100 base, the stub: the IQ is decimated here */
@@ -773,6 +773,10 @@ void dsp_put_audio_samples(size_t nsamples, int16_t *samples) {
 #endif
     if (out)
         sink(out, audio);
+}
+
+void dsp_zoom_refresh(void) {
+    on_zoom_change(NULL, NULL);
 }
 
 bool dsp_psd_raw(float *db, uint16_t cap, uint16_t *n, uint32_t *span_hz, bool *tx, uint32_t *seq) {

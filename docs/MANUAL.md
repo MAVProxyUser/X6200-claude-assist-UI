@@ -735,7 +735,9 @@ on an X6100 the screens say X6100):
   radio's own (the classic screen's waterfall), the middle 50 kHz of its 100 kHz. Its noise climbs from about
   27 kHz either side of the dial outwards (the base's IQ, at any frequency; the classic screen shows it too), and
   A would take that for signals. A's scans step 50 kHz at a time, so a band takes seven times the X6200's steps.
-  The classic screen's zoom narrows it: at x8 and narrower A waits (it says ZOOM AT X4 OR WIDER).
+  On Xiegu's base V1.1.9, which zooms the spectrum itself, the Sentry holds the base at its widest while it is open
+  and the classic screen gets its own zoom back as it closes; on V1.1.8 the classic screen's zoom narrows A, and at
+  x8 and narrower A waits (it says ZOOM AT X4 OR WIDER).
 - **The pages**: the X6100's MFK has no inner ring. **Hold the MFK and turn the main dial** instead: one page a
   turn (a steady turn about three a second), the same order as the X6200's ring, AIRSPACE and the direction
   finder too. The dial does not tune while the MFK is held, and letting the MFK go then is not a push.
