@@ -385,10 +385,16 @@ grep -q "^CONFIG_UHID=" $KERNEL_DEFCONFIG || echo "CONFIG_UHID=m" >> $KERNEL_DEF
 # for both
 echo "== Kernel: kexec (the X6100's restart: x6x00-reboot)"
 # The X6100's base switches the radio off when the processor resets: kexec starts the new kernel without the reset.
-# The secondary cores go down and come back through U-Boot's PSCI (cpu_off/cpu_on, seen working on the radio)
+# The secondary cores go down and come back through U-Boot's PSCI (cpu_off/cpu_on, seen working on the radio).
+# On 32-bit ARM with SMP, KEXEC depends on PM_SLEEP_SMP, that on PM_SLEEP, that on SUSPEND: the X6100's defconfig has
+# "# CONFIG_SUSPEND is not set", and c50c083a's CONFIG_KEXEC=y was dropped by Kconfig without a word (2026-11-19: the
+# kernel the radio booted had no /sys/kernel/kexec_loaded). SUSPEND on: nothing on the radio asks to suspend
+# (/sys/power/state is written by nothing here); the check after the build stops it if kexec is missing again
 if [ "$MODEL" = x6100 ]; then
-    sed -i "/^# CONFIG_KEXEC is not set/d" $KERNEL_DEFCONFIG
-    grep -q "^CONFIG_KEXEC=y" $KERNEL_DEFCONFIG || echo "CONFIG_KEXEC=y" >> $KERNEL_DEFCONFIG
+    sed -i "/^# CONFIG_KEXEC is not set/d; /^# CONFIG_SUSPEND is not set/d" $KERNEL_DEFCONFIG
+    for o in CONFIG_SUSPEND=y CONFIG_KEXEC=y; do
+        grep -q "^$o" $KERNEL_DEFCONFIG || echo "$o" >> $KERNEL_DEFCONFIG
+    done
 fi
 echo "== Kernel: the processor temperature sensor and its thermal zone (the X6200's)"
 if [ "$MODEL" = x6200 ]; then
@@ -695,6 +701,14 @@ rm -rf $BR/build/target/usr/sbin/x6200_gui $BR/build/target/usr/share/x6200
 # and the RS theme the GUI installed up to v0.3.5 (cut from an Icom RS-BA1 screenshot: not shipped any more)
 rm -rf $BR/build/target/usr/share/x6100/themes
 make
+# The X6100's kernel as built: kexec in it (x6x00-reboot), not dropped by Kconfig as when SUSPEND was off
+if [ "$MODEL" = x6100 ]; then
+    KCONF=$(ls $BR/build/build/linux-[0-9]*/.config | head -1)
+    for o in CONFIG_KEXEC=y CONFIG_PM_SLEEP_SMP=y; do
+        grep -q "^$o" "$KCONF" || { echo "the X6100's kernel has no $o ($KCONF): x6x00-reboot would switch it off"; exit 1; }
+    done
+    echo "   the X6100's kernel: kexec in it"
+fi
 
 echo "== Update bundle (tools/update/mkbundle.py): what x6100-update installs on a running radio"
 # Not signed: the radio checks each file against the bundle's own SHA-256 list (x6100-update), and there is no key
