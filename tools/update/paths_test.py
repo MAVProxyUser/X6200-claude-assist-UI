@@ -110,6 +110,11 @@ class Carry(unittest.TestCase):
             open(p, "w").write("not an ELF")
             self.assertEqual(mkbundle.elf_needed(p), [])
 
+    def test_carried_size(self):
+        """A bundle's carried part stays small: what it costs on a radio's root filesystem (the X6100's has 191 MB
+        free), each name a copy"""
+        self.assertLessEqual(len(mkbundle.CARRY_DRI), 2)
+
     def test_carried(self):
         """The packages' libraries and programs, what they load from /usr/lib followed, nothing else: not the C
         library's (/lib), not headers, pkgconfig or /usr/share, not another package's files"""
@@ -117,17 +122,22 @@ class Carry(unittest.TestCase):
             files = {"usr/lib/libEGL.so.1": ["libgbm.so.1", "libc.so.6"], "usr/lib/libgbm.so.1": ["libdrm.so.2"],
                      "usr/lib/libdrm.so.2": [], "lib/libc.so.6": [], "usr/lib/dri/lima_dri.so": ["libexpat.so.1"],
                      "usr/lib/libexpat.so.1": [], "usr/bin/gst-launch-1.0": [], "usr/lib/libunrelated.so": [],
-                     "usr/share/drirc.d/00-mesa-defaults.conf": None, "usr/lib/pkgconfig/egl.pc": None}
+                     "usr/share/drirc.d/00-mesa-defaults.conf": None, "usr/lib/pkgconfig/egl.pc": None,
+                     "usr/lib/dri/sun4i-drm_dri.so": [], "usr/lib/dri/rockchip_dri.so": [], "usr/lib/dri/meson_dri.so": []}
             for rel, need in files.items():
                 os.makedirs(os.path.dirname(os.path.join(t, rel)), exist_ok=True)
                 open(os.path.join(t, rel), "wb").write(tiny_elf(need) if need is not None else b"x\n")
             pfl = os.path.join(t, "packages-file-list.txt")
             open(pfl, "w").write("mesa3d,./usr/lib/libEGL.so.1\nmesa3d,./usr/lib/dri/lima_dri.so\n"
+                                 "mesa3d,./usr/lib/dri/sun4i-drm_dri.so\nmesa3d,./usr/lib/dri/rockchip_dri.so\n"
+                                 "mesa3d,./usr/lib/dri/meson_dri.so\n"
                                  "mesa3d,./usr/share/drirc.d/00-mesa-defaults.conf\nmesa3d,./usr/lib/pkgconfig/egl.pc\n"
                                  "gstreamer1,./usr/bin/gst-launch-1.0\nother,./usr/lib/libunrelated.so\n")
             got = mkbundle.carried(t, pfl)
+            # Mesa's driver names but the radios' two left out (v0.3.12.33 carried 29 copies of it: 355 MB)
             self.assertEqual(got, {"/usr/lib/libEGL.so.1", "/usr/lib/libgbm.so.1", "/usr/lib/libdrm.so.2",
-                                   "/usr/lib/dri/lima_dri.so", "/usr/lib/libexpat.so.1", "/usr/bin/gst-launch-1.0"})
+                                   "/usr/lib/dri/lima_dri.so", "/usr/lib/dri/sun4i-drm_dri.so", "/usr/lib/libexpat.so.1",
+                                   "/usr/bin/gst-launch-1.0"})
             allowed = mkbundle.updater_allowed()
             self.assertEqual([p for p in got if mkbundle.path_refused(p, allowed)], [])
 

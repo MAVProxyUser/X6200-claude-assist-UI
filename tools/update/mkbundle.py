@@ -73,6 +73,11 @@ SKIP_PREFIXES = ("/usr/include/",)       # the GUI package installs headers too
 CARRY_PKGS = ("mesa3d", "gstreamer1", "gst1-plugins-base", "gst1-plugins-good", "gst1-plugins-bad", "ffmpeg")
 CARRY_DIRS = ("/usr/lib/", "/usr/bin/")
 CARRY_SKIP = ("/usr/lib/pkgconfig/", "/usr/lib/cmake/", "/usr/lib/gstreamer-1.0/include/")
+# Mesa's driver is one file under a name for each display controller it knows (29: rockchip, imx-drm, meson...), hard
+# links on the card; in a bundle every name is a copy of it (11.7 MB), and v0.3.12.33's carried 355 MB so. The radios'
+# two only: the Mali-400's and the R16 display's (what an X6200 card has, and what the GUI's EGL opens)
+CARRY_DRI = ("/usr/lib/dri/lima_dri.so", "/usr/lib/dri/sun4i-drm_dri.so")
+CARRY_MAX_MB = 80                        # the carried part at most (about 40 MB: Mesa 26, GStreamer and ffmpeg)
 UBOOT = "u-boot-sunxi-with-spl.bin"
 UBOOT_OFFSET = 8 * 1024                  # genimage's u-boot partition: offset 8K, size 1016K
 UBOOT_AREA = 1016 * 1024
@@ -131,7 +136,8 @@ def carried(target, file_list, pkgs=CARRY_PKGS):
             pkg, _, rel = line.strip().partition(",")
             p = "/" + os.path.normpath(rel).lstrip("./")
             if pkg in pkgs and p.startswith(CARRY_DIRS) and not p.startswith(CARRY_SKIP) \
-                    and not p.endswith((".a", ".la", ".h")) and os.path.isfile(os.path.join(target, p.lstrip("/"))):
+                    and not p.endswith((".a", ".la", ".h")) and os.path.isfile(os.path.join(target, p.lstrip("/"))) \
+                    and (not p.startswith("/usr/lib/dri/") or p in CARRY_DRI):
                 out.add(p)
     todo = list(out)
     while todo:
@@ -265,6 +271,11 @@ def main():
             tar.add(src, member, recursive=False)
     total = sum(e["size"] for e in entries)
     print(f"{a.out}: {len(entries)} files, {total / 1e6:.1f} MB")
+    carried_mb = sum(e["size"] for e in entries if e["path"] in extra) / 1e6
+    if carried_mb > CARRY_MAX_MB:
+        os.remove(a.out)
+        sys.exit(f"the image's packages carried come to {carried_mb:.0f} MB, over {CARRY_MAX_MB}: an X6100's root "
+                 f"filesystem has about 190 MB free (v0.3.12.33's 355 MB were Mesa's driver copied 29 times)")
     if extra:
         print(f"   carried from the image's packages ({', '.join(CARRY_PKGS)}) and what they load: {len(extra)} files, "
               f"{sum(e['size'] for e in entries if e['path'] in extra) / 1e6:.1f} MB")
