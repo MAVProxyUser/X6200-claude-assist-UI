@@ -67,3 +67,21 @@ when a call is decoded and its voice heard (receive only, nothing on the air).
 `hackrf-ft8` makes the message with ft8_lib's `gen_ft8` (`gen_ft8` in the configuration), turns it into upper
 sideband I/Q at 2.004 MS/s (100 kHz above the HackRF's centre, clear of its DC spike), starts on the next FT8 slot
 and passes when the radio's FT8 app shows the text. `radios-ft8` is untried until two radios are on the bench.
+
+## The two-radio suite (suite.py)
+
+`suite.py` runs batches against both radios at once and writes a report with every screen photographed side by
+side (`~/.config/x6x00-bench/runs/<time>-<batches>/report.md`), for a release to break neither radio:
+
+    suite.py list                 # the batches and what each needs plugged in
+    suite.py run core             # both radios on the network: versions, services, settings, apps, every screen
+    suite.py run rtl,cable        # the hardware batches, when that hardware is on the bench
+    suite.py release              # core and the batches bench.json's "attached" names
+
+`core` keys nothing: receive-only sessions, each radio held receive only while the suite has control. It checks
+both run the same version, the same services and apps, lists the look-and-behaviour settings that differ, opens
+every app and every Sentry page on both through the remote (`apps`, `open`, `close`), photographs them and counts
+each picture's colours: cyan, blue or purple (an old theme's accents) is flagged, the Sentry's warm gradient and
+green status words are not. On the X6100 it presses the MFK and turns the main dial through the remote and checks
+the page moved and the dial did not (the stand-in for the X6200's inner ring). The hardware batches run the
+harness's own tests (`rtl`: AIRSPACE on both; `cable`: `radios-ft8` both ways).

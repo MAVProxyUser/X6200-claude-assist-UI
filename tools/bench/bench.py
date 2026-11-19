@@ -123,7 +123,7 @@ class Radio:
             raise Refused(f"{name}: no {'tx' if want_tx else 'rx'} session: bench.py provision {name} "
                           f"{'tx' if want_tx else 'rx'}")
         self.r = Remote(self.host, int(rc.get("port", 50002)))     # another port: the simulated radios' (sim_test.py)
-        self.state, self.meter, self.txm, self.ft8 = {}, None, None, {}
+        self.state, self.meter, self.txm, self.ft8, self.apps = {}, None, None, {}, None
         self.rows, self.errs, self.lock = [], [], threading.Lock()
         self.tx, self.tx_since, self.ctl_mine, self.role = False, None, False, None
         self.r.send(f"auth {tok}")
@@ -135,6 +135,8 @@ class Radio:
             time.sleep(0.05)
         if self.role is None:
             raise Refused(f"{name}: the remote did not take the harness's session")
+        while time.time() - t < 8 and self.role[0] == "view":
+            time.sleep(0.05)        # the radio's first word can be the unpaired "view", before it has read the token
         if self.role[0] == "view":
             raise Refused(f"{name}: the harness's session is not paired any more (role view): provision it again")
         self.may_tx = self.role[1] == "1"
@@ -157,6 +159,8 @@ class Radio:
                     self._tx(rest.strip() == "1")
                 elif k == "ft8":
                     self.ft8 = json.loads(rest)
+                elif k == "apps":
+                    self.apps = json.loads(rest)      # [[ACTION, "Name"], ...] (the remote's "apps")
                 elif k == "ft8r":
                     self.rows.append(dict(json.loads(rest), at=time.time()))
                 elif k == "ctl":
