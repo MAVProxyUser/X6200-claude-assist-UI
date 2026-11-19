@@ -94,3 +94,7 @@ radio's `x6100-update check`: the newest release for its model; nothing download
 `align` writes the settings core lists as different into the second radio's params.db with its GUI stopped (a GUI
 writes its own back as it ends) and copies `/mnt/tz.conf`; the second radio's values before are kept in the run's
 folder for `--undo`.
+
+`redact_shots.py RUN_DIR OUT_DIR` makes a suite run's screenshots fit to publish: what would place the station
+pixelated (or a map flattened) on both radios alike, each screen's pair side by side. The first gallery:
+[docs/parity/2026-11-18](../../docs/parity/2026-11-18/README.md). Look at every pair before publishing another run.
