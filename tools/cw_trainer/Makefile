@@ -29,7 +29,7 @@ SRC      := ../../src
 DEPS     ?= ../../build-host/deps
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -g -I $(SRC)/cw_decoder -I $(SRC) -I $(DEPS)/include
 DECODER  := morse_text.cpp tone_finder.cpp tone_lock.cpp key_detector.cpp element_timer.cpp receiver.cpp
-HEADERS  := $(wildcard $(SRC)/cw_decoder/*.h) $(SRC)/cw_trainer_answer.h $(SRC)/cw_own_tone.h
+HEADERS  := $(wildcard $(SRC)/cw_decoder/*.h) $(SRC)/cw_trainer_answer.h $(SRC)/cw_own_tone.h portable_random.h
 
 all: test
 

@@ -31,6 +31,7 @@
 
 #include "cw_own_tone.h"
 #include "cw_trainer_answer.h"
+#include "portable_random.h"     /* the distributions as libstdc++ draws them, on a Mac too */
 #include "morse_code.h"
 
 namespace cw {
@@ -376,8 +377,8 @@ static Result learn(const Scenario &sc, unsigned seed) {
     std::mt19937      rng(seed);
     std::vector<Mark> marks;
     Result            r;
-    auto              urand = [&](double a, double b) { return std::uniform_real_distribution<double>(a, b)(rng); };
-    std::normal_distribution<double> gauss(0.0, 1.0);
+    auto              urand = [&](double a, double b) { return portable::uniform(rng, a, b); };
+    portable::normal                 gauss(0.0, 1.0);
 
     struct Text {
         std::string s;
@@ -740,7 +741,7 @@ struct OwnStart {
 static std::string own_keying(int key_vol, bool raise, double late_ms, OwnStart st = {}) {
     static const double BAND = 0.04, FLOOR = 3.5e-5;   /* the band's noise (~-47 dBFS at 700 Hz), the cut audio's */
     std::mt19937        rng(7);
-    std::normal_distribution<double> gauss(0.0, 1.0);
+    portable::normal                 gauss(0.0, 1.0);
     std::vector<Mark>   marks;
     double              dit = 1200.0 / 15, k = 3000.0;
 
@@ -840,7 +841,7 @@ static void own_keying_x6200(void) {
  * lock takes the first characters, as after any quiet band) */
 static std::string after_silence(double silence_ms, bool tx) {
     std::mt19937                     rng(11);
-    std::normal_distribution<double> gauss(0.0, 1.0);
+    portable::normal                 gauss(0.0, 1.0);
     std::vector<Mark>                marks;
     double                           dit = 1200.0 / 20, start = (tx ? 3000.0 : 0.0) + silence_ms, k = start + 500.0;
 

@@ -36,6 +36,12 @@ if [ -z "$FT8LIB_INC" ] && [ -f build/x6200/sysroot/usr/include/ft8lib/constants
 fi
 [ -n "$FT8LIB_INC" ] && export CPATH="$FT8LIB_INC${CPATH:+:$CPATH}"
 
+# liquid-dsp at the radio's version where host/build.sh (or a hand) built it here, build-host/deps: the checks that
+# want DEPS run then (cw_trainer); CI gives its own (/usr/local)
+if [ -z "$DEPS" ] && [ -f build-host/deps/include/liquid/liquid.h ]; then
+    export DEPS=$TOP/build-host/deps
+fi
+
 declare -a ROWS
 n_pass=0 n_fail=0 n_build=0 n_skip=0
 
