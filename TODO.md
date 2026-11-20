@@ -48,6 +48,15 @@ approved that day.
     base has no TX phase/gain correction (registers 48/49, x6100_rphscmp/rmagcmp, correct the receiver only, stored
     at 0x200078c0..c8): a TX I/Q balance would be a second hook (Q' = g Q + p I on the block before the DAC) with
     per-band values found by a sweep. The owner's call.
+  - the X6200's WiFi, 2026-11-20 morning (v0.3.12.39): pinged at 10 Hz, 4-19% of replies over 100 ms, spikes of
+    0.5-1.5 s, 0-7% lost (the X6100 beside it, same router: max 18-48 ms); its TCI audio reaches a client at 10-76%
+    of real time (parec on the radio itself: full rate; the TCI queue holds 0.6 s and drops the rest). Not the GPS
+    keeper (6-10 tries in 7-29 min) nor the RTL stream (the WiFi/Bluetooth chip is on the EHCI port, the RTL on the
+    MUSB one). `bluetoothctl power off` made it seconds-long stalls till a restart: never again. Left to look at: the
+    chip's WiFi/Bluetooth coexistence and the 2.4 GHz channel; the TCI queue could hold longer for audio-only clients.
+  - the X6200's squelch (Xiegu's, in its base): at 4 it kept a steady -50 dBm tone muted for its whole 6 s with the
+    AGC off (with the attenuator in too), and opened only after ~4 s with the AGC on (2026-11-20). Muted, the TCI
+    audio is a flat -48 dBFS; tones.py and the decoders open it for their runs.
   - the X6100's 6 m over-power, studied 2026-11-20 (tools/base_update/README.md "Every base compared"): Xiegu's loop
     has 34 dB of range on 6 m and the meter is its own detector, so 0.8 W at 0.1 W means its floor or a carrier the
     loop cannot touch (the DC offsets are added after its gain; this radio's are all zero, never calibrated). The
