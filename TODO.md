@@ -36,20 +36,44 @@ approved that day.
   median, a 60 s mean and a Kalman filter followed which steps came up, not the heat. The X6200's in steps of one
   (2031-2036), 59.8 -> 60.2 °C under the heater (the processor's own heat rules it). Fixed by leaving the driver out
   of the X6100's kernel (fbe9d59c, v0.3.12.35).
-- The X6100 switches off at a restart (x6x00-reboot, a plain reboot there; 2026-11-19 after its update, the owner
+- DONE 2026-11-19 (v0.3.12.36): the X6100 restarts by kexec and stays on, the default of x6x00-reboot (the update's
+  restart, the power-on box's, x6x00-gui-watch's); the box says it comes back by itself where kexec can run. The
+  fifth try: rcS at 3.4 s, the GUI at 23.9 s on DRM ("drm: 480x800"), usb 3-1 at 25 s, TCON0's divider 0x80000001.
+  Was: the X6100 switches off at a restart (x6x00-reboot, a plain reboot there; 2026-11-19 after its update, the owner
   switched it on): the X6200's fix is its base's "s" left out, the X6100's base has no such word. Likely the base's
   control lines the GUI holds (bb_reset among them) let go while the processor resets, the base restarting off;
-  to find out with the owner at the radio (each try switches it off). Meanwhile the update question's restart on an
-  X6100 means switching it on again.
+  to find out with the owner at the radio (each try switches it off).
   - kexec (the processor not reset), 2026-11-19 on the 977abb1c kernel (CONFIG_KEXEC in, kexec -l / -u fine): the
     card's kernel started (start trace: rcS at "up 67 s", 64 s later than a power-on's 3.4 s; the GUI at 117 s,
     "base answered", the relays clicked), but the GUI had no screen ("drm: no usable device, fbdev is used"; a
     power-on finds the JLT4013A panel on SPI, sun4i-drm) and the WiFi never answered; the owner held POWER. Its
     kernel log went with the power. Now a test only, `x6x00-reboot --kexec`: the start marked x6x00.kexec=1, both
-    kernels' logs kept on DATA (app_logs/dmesg_before_kexec.txt, dmesg_kexec.txt at 0, 60 and 180 s). Suspects to
-    read them for: the AXP223 on the RSB bus (its init sequence at a PMIC already in RSB mode: every regulator
-    behind it missing, the panel's and the WiFi's among them, the probes deferred), the SD card and the WiFi chip
-    not power-cycled. Not U-Boot's simplefb node: it is in /chosen, but "disabled".
+    kernels' logs kept on DATA (app_logs/dmesg_before_kexec.txt, dmesg_kexec.txt at 0, 60 and 180 s).
+  - Second try with those logs (2026-11-19 19:37): the same, and why. The display: the panel's power, reset and SPI
+    set-up fine, but the controller never gave a vblank (WARNING "vblank wait timed out" from sun4i_tcon_probe's first
+    modeset, then "flip_done timed out" every 10 s, sun4i_backend.c:461 its register load never latched): the old
+    kernel left the pipeline running (6.1's sun4i-drm has no shutdown hook), the new one found it so. That first
+    modeset ran in the deferred-probe worker and held it 64 s: the SD card, rootfs and USB probed only at 66 s. The
+    WiFi: the PMIC's regulators kept their voltages (no "Bringing ... into 3300000" lines) and the chip its power
+    (gpiochip0 line 5, 0 = on, the GUI's pin_wifi), so it was on the MUSB port all along and never attached again
+    ("unhandled DISCONNECT transition (a_idle)", no usb 3-1). Fix to try: rcK unbinds sun4i-drm before kexec -e (the
+    driver's own stop, its resets asserted); rcS of a kexec start puts the WiFi power off before anything binds
+    the chip, the GUI's start powering it as at a power-on.
+  - Third try with both (2026-11-19 21:42): no better. The unbind ran ("sun4i-drm unbound: done") and the new kernel
+    still had no vblank, the same 64 s; the WiFi off at 67 s and on at the GUI's start (119.9 s), and still no usb
+    3-1, the MUSB driver's "unhandled DISCONNECT transition (a_idle)" at its load again. A power-on start's clock
+    tree, CCU, TCON0, backend and DRC registers saved as the baseline (pll-video 165 MHz, pll-mipi 27.5 MHz,
+    lcd-ch0 27.5 MHz; CCU 0x040 0x90C00005). Next try: rcK powers the WiFi off and unbinds musb-sunxi (its reset
+    asserted) before kexec, and x6x00-kexec-state saves the clocks and registers running, at the handover and in the
+    kexec start, to set beside the power-on baseline: what a reset clears that the unbind does not.
+  - Fourth try (2026-11-19 22:00): the WiFi came back by itself (usb 3-1, SSH answered at 136 s): the MUSB unbind
+    was the fix. The display: the clock unit's display settings identical to a power-on's, but TCON0's dot-clock
+    divider (0x044) 0x80000000 against 0x80000001, the line counter (0x0fc) standing. The TCON's reset leaves the
+    divider 0, sun4i_dclk_recalc_rate reads 0 as 1, the inherited PLL-MIPI and lcd-ch0 already give the panel's
+    27.5 MHz, so clk_set_rate(27.5 MHz) returns early and never writes the divider. `devmem 0x01c0c044 32
+    0x80000001` on the running kexec start: the line counter ran and the 10 s flip_done timeouts stopped. Fix: rcK
+    moves PLL-MIPI's M while it is off, so the next kernel's rate differs and it sets the clocks as at a power-on.
+    The kernel-side fix, should this one fall short: sun4i_dclk_recalc_rate to return 0 for a divider of 0.
 - Host checks on the Mac (item 6, "wrap 6 up"): liquid-dsp 1.4.0 built here; align and tx_meters run here now;
   cw_trainer (one case: a character decoded in silence, Mac arithmetic) and settings_keep (its copy under macOS's own
   SQLite) fail on a Mac only; cw_kbd, direct_hole, screen_saver, tci_ask and wf_image want the GUI's PC build (libnm);

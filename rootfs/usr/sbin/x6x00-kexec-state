@@ -1,0 +1,41 @@
+#!/bin/sh
+#
+# The X6100's restart test (x6x00-reboot --kexec): the clocks and the display's registers saved to a file, so a kexec
+# start (2026-11-19: no vblank from the display controller, even with its driver unbound first) can be set beside a
+# power-on start. Read only: the clock tree, the clock unit (CCU), and with --display the LCD controller (TCON0), the
+# display backend and the DRC, read only while their driver holds their clocks on (an unbound display is not read).
+#
+#   x6x00-kexec-state FILE [--display]
+#
+
+f=$1
+[ -n "$f" ] || { echo "usage: x6x00-kexec-state FILE [--display]" >&2; exit 2; }
+display=false
+[ "$2" = --display ] && display=true
+
+grep -q " /sys/kernel/debug debugfs" /proc/mounts || mount -t debugfs none /sys/kernel/debug 2>/dev/null
+
+dump() {
+    a=$(($1)); n=$(($2)); i=0
+    while [ $i -lt $n ]; do
+        printf "%08x %s\n" $((a + i)) "$(devmem $((a + i)) 32)"
+        i=$((i + 4))
+    done
+}
+
+{
+    echo "## $(date -u '+%F %T')Z, up $(cut -d' ' -f1 /proc/uptime) s, $(cat /proc/cmdline)"
+    echo "## clk_summary"
+    cat /sys/kernel/debug/clk/clk_summary
+    echo "## CCU"
+    dump 0x01c20000 0x300
+    if $display; then
+        echo "## TCON0"
+        dump 0x01c0c000 0x100
+        echo "## DEBE"
+        dump 0x01e60800 0x60
+        echo "## DRC"
+        dump 0x01e70000 0x20
+    fi
+} > "$f" 2>&1
+sync

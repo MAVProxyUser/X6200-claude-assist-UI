@@ -6,7 +6,8 @@
 # keeper, x6200-base-keeper, only feeds it while no GUI process runs). The GUI marks two heartbeats each second, its
 # radio thread's (/run/x6100_gui.radio) and its screen loop's (/run/x6100_gui.ui); either one still for STALE seconds
 # while the same GUI process has run for GRACE seconds or more is a hung GUI, and the radio restarts with
-# x6x00-reboot (the base kept on, Linux, U-Boot and the GUI again: about a minute). The owner, 2026-11-17: "if the UI
+# x6x00-reboot (the radio kept on: the X6200's base kept on, Linux, U-Boot and the GUI again, about a minute; the
+# X6100 by kexec, the card's kernel and the GUI again, about 35 s). The owner, 2026-11-17: "if the UI
 # hangs a reboot would be more graceful". A GUI under a debugger (a tracer on it) is left alone, and so is everything
 # while /mnt/no-gui-watch exists.
 #

@@ -88,11 +88,52 @@ if $x6200; then
     fi
 fi
 
-# The X6100's restart test (x6x00-reboot --kexec, not its default): its base switches the radio off when the processor
-# resets, so the kernel on the SD card, loaded with kexec there, is jumped to with the processor not reset. DATA unmounted and the system read-only
-# first, as a power-off leaves them. kexec -e returns only when it failed: then the plain reboot (the radio off)
+# The X6100's restart (x6x00-reboot): its base switches the radio off when the processor resets, so the kernel on the
+# SD card, loaded with kexec there, is jumped to with the processor not reset. The WiFi, the MUSB controller, the
+# display and PLL-MIPI left as a power-on finds them (below), DATA unmounted and the system read-only, as a power-off
+# leaves them. kexec -e returns only when it failed: then the plain reboot (the radio off)
 if ! $x6200 && $reboot && [ -e /run/x6x00-kexec ] && [ "$(cat /sys/kernel/kexec_loaded 2>/dev/null)" = 1 ]; then
     "$trace" "restart (x6x00-reboot): kexec into the SD card's kernel, the processor not reset"
+    # x6x00-reboot --state: the clocks and the display as this kernel leaves them, beside a power-on start's
+    state=:
+    [ -e /run/x6x00-kexec-state ] && [ -x /usr/sbin/x6x00-kexec-state ] && state=/usr/sbin/x6x00-kexec-state
+    $state /mnt/app_logs/kexec_state_running.txt --display
+    # The WiFi chip (USB, on the MUSB port) off, and the MUSB controller put in reset by its driver's unbind, so the next
+    # kernel finds both as a power-on does: the chip off at the kexec start alone was not enough (2026-11-19 21:43: an
+    # "unhandled DISCONNECT transition (a_idle)" as the MUSB driver loaded, then no usb 3-1 when the GUI powered it)
+    gpioset gpiochip0 5=1 2>/dev/null && w=off || w="not switched: gpioset failed"
+    sleep 1
+    if [ -e /sys/bus/platform/drivers/musb-sunxi/1c19000.usb ]; then
+        echo 1c19000.usb > /sys/bus/platform/drivers/musb-sunxi/unbind 2>/dev/null
+        u=$([ -e /sys/bus/platform/drivers/musb-sunxi/1c19000.usb ] && echo "still bound" || echo "unbound, in reset")
+    else
+        u="not bound"
+    fi
+    "$trace" "restart (x6x00-reboot): the WiFi chip's power $w, the MUSB controller $u"
+    # The display stopped as its driver stops it, the controller's resets asserted, as a power-on finds it: left
+    # running into the next kernel it gave no vblank (2026-11-19: "flip_done timed out" at every frame, 10 s each, the
+    # first modeset 64 s, which held up the deferred probes, the SD card and USB among them, and no picture)
+    if [ -e /sys/bus/platform/drivers/sun4i-drm/display-engine ]; then
+        echo display-engine > /sys/bus/platform/drivers/sun4i-drm/unbind 2>/dev/null
+        "$trace" "restart (x6x00-reboot): the display stopped (sun4i-drm unbound: $([ -e /sys/bus/platform/drivers/sun4i-drm/display-engine ] && echo still bound || echo done))"
+    fi
+    # The pixel clock. kexec leaves the clock unit as it is: PLL-MIPI and the LCD clock still at the panel's 27.5 MHz.
+    # The next kernel's TCON comes out of its reset with its own dot-clock divider at 0, sun4i_dclk reads that as 1,
+    # finds 27.5 MHz already, and clk_set_rate(27.5 MHz) then changes nothing and writes nothing: no dot clock, no
+    # vblank, the 10 s flip_done waits and the 64 s stall (2026-11-19 22:02: TCON0 0x044 0x80000000 against a
+    # power-on's 0x80000001; the 1 written by hand started the line counter and ended the timeouts). So PLL-MIPI's M
+    # (bits 3:0) is moved while the PLL is off (its user unbound just above): the next kernel computes another rate,
+    # sets the clocks, and writes the divider, as at a power-on
+    v=$(devmem 0x01c20040 32 2>/dev/null)
+    if [ -n "$v" ] && [ $((v & 0x80000000)) = 0 ]; then
+        if [ $((v & 0xf)) = 0 ]; then m=1; else m=0; fi
+        devmem 0x01c20040 32 "$(printf 0x%08x $(( (v & ~0xf) | m )))"
+        "$trace" "restart (x6x00-reboot): PLL-MIPI $v -> $(devmem 0x01c20040 32), its rate other than the panel's for the next kernel"
+    else
+        "$trace" "restart (x6x00-reboot): PLL-MIPI left as it is (${v:-unread}: on, or devmem missing)"
+    fi
+    # What the next kernel inherits, the clocks alone (--state)
+    $state /mnt/app_logs/kexec_state_handover.txt
     dmesg > /mnt/app_logs/dmesg_before_kexec.txt 2>/dev/null     # this kernel's last words (x6x00-reboot --kexec)
     sync
     if ! umount /mnt 2>/dev/null; then

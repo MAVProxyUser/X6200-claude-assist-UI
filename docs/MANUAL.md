@@ -2096,15 +2096,11 @@ installs the newest release even when it is the one running.
   radio when done**, ticked by itself with the kernel or U-Boot (the web
   Update page: Restart the radio after; over SSH `x6100-update install
   <bundle> --kernel --reboot`): the whole radio restarts at the end of the
-  install and comes back by itself in about a minute, the X6200's base kept on.
-  The X6100's base switches the radio off whenever the processor resets, so
-  a restart there switches it off, and the box says so ("it switches off:
-  switch it on again"). Starting the card's new kernel without a reset
-  (kexec, `x6x00-reboot --kexec` over SSH) is a test only: tried 2026-11-19,
-  the new kernel started, but with a dark screen and no WiFi, the radio on
-  till POWER was held. That start keeps its kernel log on DATA
-  (`app_logs/dmesg_kexec.txt`, the old kernel's in
-  `app_logs/dmesg_before_kexec.txt`).
+  install and comes back by itself: the X6200 in about a minute, its base
+  kept on; the X6100 in about 35 s, by kexec (next item). The box says which
+  ("comes back by itself", or "switches off: switch it on again" where kexec
+  cannot run: an X6100 still on a kernel up to v0.3.12.35's, which has no
+  kexec, so the first restart after updating from one switches it off once).
   Without it, at each start of the radio's software in the same power-on a box
   asks for a restart: the MFK's press restarts the radio now, any other key
   leaves it for later (asked again at the next start); the same after
@@ -2123,6 +2119,26 @@ installs the newest release even when it is the one running.
   base now and then let one pass and stayed on). The start trace
   (`/mnt/app_logs/start_trace.txt`) says which it was: "restart
   (x6x00-reboot)... the base kept on, no s" or "the base's power off".
+  The X6100's base switches the radio off whenever the processor resets, so
+  there `x6x00-reboot` does not reset it: it loads the SD card's kernel with
+  kexec and jumps to it at the end of the shutdown, U-Boot left out. The new
+  kernel finds the hardware as the old one left it, so the shutdown first
+  leaves three things as a power-on finds them: the WiFi chip switched off
+  and its USB controller reset (else the WiFi never came back), the display
+  stopped, and the display's clock moved off the panel's 27.5 MHz (else the
+  new kernel never set its pixel clock: a dark screen, and a start held up
+  for a minute). The screen is back a few seconds into the new kernel and
+  the GUI at about 24 s, the radio back about 35 s after the restart began,
+  never switched off (proven 2026-11-19, from v0.3.12.36; the four tries
+  before the fixes had a dark screen and no WiFi). Without kexec (no kexec
+  program, a kernel up to v0.3.12.35's) it is a plain reboot, and the X6100
+  switches off. Over SSH: `x6x00-reboot --plain` is that plain reboot on
+  purpose; `x6x00-reboot --state` also saves the clocks and the display's
+  registers at each step (`app_logs/kexec_state_running.txt`,
+  `_handover.txt`, `_after.txt`, from `x6x00-kexec-state`). Every kexec start
+  keeps both kernels' logs on DATA (`app_logs/dmesg_before_kexec.txt`,
+  `app_logs/dmesg_kexec.txt`), and its start trace says "kexec into the SD
+  card's kernel" with each step.
 - **Stopping the GUI over SSH (X6200).** The X6200's base switches the radio
   off about three minutes after the GUI stops sending it its settings, which
   the GUI does every second. Up to now `/etc/init.d/S95gui stop` took the
@@ -2142,7 +2158,7 @@ installs the newest release even when it is the one running.
   `/run/x6100_gui.ui`); `x6x00-gui-watch` (started with the GUI by `S95gui`)
   looks every 5 s, and when either has stood still for 60 s while the same GUI
   has run two minutes or more, it restarts the radio with `x6x00-reboot`,
-  gracefully, the base kept on. A GUI stopped by hand (`S95gui stop`) or under
+  gracefully, the base kept on (the X6100 by kexec, above, so it too stays on). A GUI stopped by hand (`S95gui stop`) or under
   a debugger is left alone, and so is everything while `/mnt/no-gui-watch`
   exists. The radio thread's heartbeat goes on while the base is lent for a
   base firmware flash, so a flash is never cut short. Its log, on the card so

@@ -12,6 +12,14 @@ trace=/usr/sbin/x6100-starttrace
 [ -x "$trace" ] || trace=:
 "$trace" --boot
 
+# A start by kexec (x6x00-reboot, the X6100's restart): the WiFi chip (USB, on the MUSB port) is put off here too, as
+# rcK put it before the jump (2026-11-19: powered through it, it never attached again), before anything is bound to it
+# (its power line gpiochip0 line 5, 1 = off); the GUI powers it at its start, as at a power-on
+if grep -q "x6x00\.kexec=1" /proc/cmdline 2>/dev/null && ! grep -q "xiegu,x6200" /proc/device-tree/compatible 2>/dev/null; then
+    gpioset gpiochip0 5=1 2>/dev/null && w=off || w="not switched: gpioset failed"
+    "$trace" "kexec start: the WiFi chip's power $w till the GUI's start"
+fi
+
 for i in /etc/init.d/S??* ;do
 
      # Ignore dangling symlinks (if any).
@@ -42,11 +50,13 @@ for i in /etc/init.d/S??* ;do
 done
 "$trace" "init scripts done"
 
-# A start by kexec (x6x00-reboot --kexec, the X6100's restart test, x6x00.kexec=1 on the command line): the kernel's
-# log kept on DATA now, a minute on and three minutes on, its screen and WiFi perhaps missing (2026-11-19: dark, no
-# WiFi), so it is read at the next start
+# A start by kexec (x6x00-reboot, the X6100's restart, x6x00.kexec=1 on the command line): the kernel's log kept on
+# DATA now, a minute on and three minutes on, for a look should the start have gone wrong (the first tries, 2026-11-19:
+# a dark screen and no WiFi, nothing else to read them by); with x6x00-reboot --state the clocks and the display too
 if grep -q "x6x00\.kexec=1" /proc/cmdline 2>/dev/null; then
     (
+        grep -q "x6x00\.kexec_state=1" /proc/cmdline && [ -x /usr/sbin/x6x00-kexec-state ] &&
+            /usr/sbin/x6x00-kexec-state /mnt/app_logs/kexec_state_after.txt --display
         for wait in 0 60 120; do
             sleep $wait
             dmesg > /mnt/app_logs/dmesg_kexec.txt 2>/dev/null

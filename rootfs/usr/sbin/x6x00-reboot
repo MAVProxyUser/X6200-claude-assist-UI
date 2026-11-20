@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # GoldCorpHF: the radio restarted, not switched off. Used by the updater (install --reboot), the GUI (the power-on
-# box's Restart now) and over SSH: x6x00-reboot [--kexec]
+# box's Restart now), x6x00-gui-watch and over SSH: x6x00-reboot [--plain] [--state]
 #
 # The X6200: every shutdown ends with "s" to the base, which cuts the power (/etc/init.d/rcK); a plain reboot switched
 # the radio off. This leaves a mark rcK reads: the "s" left out, the base stays on, and Linux restarts (U-Boot, the
@@ -9,25 +9,49 @@
 #
 # The X6100: its base switches the whole radio off when the processor resets, whatever Linux says (2026-11-19: off at
 # every reboot, the CPU at 1.2 V and at 1.04 V alike; its base-reset line not the cause, nothing sent to the base). So
-# a plain reboot there switches it off, to be switched on by hand. `x6x00-reboot --kexec` is the try at keeping it on,
-# a test only: the kernel on the SD card loaded with kexec, with the device tree as it runs (/sys/firmware/fdt:
-# U-Boot's, with the PSCI node the card's .dtb has not, which the new kernel needs for its other cores) and the same
-# command line, and rcK jumps to it at the end of the shutdown (kexec -e), the processor not reset. Tried 2026-11-19:
-# the card's kernel started, but 64 s late to its first script, the GUI found no screen (drm: no usable device) and
-# the WiFi did not come back, the radio on with a dark screen till POWER was held. So not the default (the updater,
-# the GUI's box and x6x00-gui-watch call it without --kexec) till that is understood. The kexec'd start is marked on
-# its command line (x6x00.kexec=1): rcK keeps the old kernel's log (app_logs/dmesg_before_kexec.txt) and rcS the
-# new one's (app_logs/dmesg_kexec.txt, again a minute and three minutes on), on DATA, for the next look
+# the processor is not reset: the kernel on the SD card is loaded with kexec, with the device tree as it runs
+# (/sys/firmware/fdt: U-Boot's, with the PSCI node the card's .dtb has not, which the new kernel needs for its other
+# cores) and the same command line, and rcK jumps to it at the end of the shutdown (kexec -e). The new kernel finds
+# the hardware as the old one left it, not as a power-on does, so rcK first leaves three things as a power-on finds
+# them (2026-11-19, five tries): the WiFi chip off and the MUSB controller in reset (else the chip never attached
+# again: no WiFi), the display stopped by its driver's unbind, and PLL-MIPI's divider moved, so that the new kernel
+# writes the LCD controller's dot-clock divider (else it stayed 0: no vblank, a dark screen, every frame a 10 s wait
+# and the first one holding up the SD card and USB for 64 s). Back in about 35 s, the GUI 24 s into the new kernel.
+# Should kexec not load (no kexec program, a kernel without kexec as up to v0.3.12.35's, the card's kernel not
+# readable), a plain reboot: the X6100 switches off, to be switched on by hand.
 #
+#   --plain   that plain reboot on purpose (the X6100 switches off)
+#   --state   the clocks and the display's registers saved at each step (x6x00-kexec-state: app_logs/
+#             kexec_state_running.txt and _handover.txt from rcK, _after.txt from the new start's rcS)
+#   --kexec   the default since v0.3.12.36; still taken
+#
+# The kexec'd start is marked on its command line (x6x00.kexec=1): rcK keeps the old kernel's log
+# (app_logs/dmesg_before_kexec.txt) and rcS the new one's (app_logs/dmesg_kexec.txt, again a minute and three minutes
+# on), on DATA, for a look should a start go wrong.
+#
+kexec=true
+state=false
+for a in "$@"; do
+    case "$a" in
+        --plain) kexec=false ;;
+        --state) state=true ;;
+        --kexec) ;;
+    esac
+done
+
 touch /run/x6x00-reboot
-if [ "$1" = --kexec ] && [ -x /usr/sbin/kexec ] && ! grep -q "xiegu,x6200" /proc/device-tree/compatible 2>/dev/null &&
+if $kexec && [ -x /usr/sbin/kexec ] && ! grep -q "xiegu,x6200" /proc/device-tree/compatible 2>/dev/null &&
    [ -r /sys/firmware/fdt ] && [ -e /sys/kernel/kexec_loaded ]; then
+    mark=" x6x00.kexec=1"
+    $state && mark="$mark x6x00.kexec_state=1"
     boot=/tmp/x6x00-reboot-boot
     mkdir -p $boot
     if mount -o ro /dev/mmcblk0p1 $boot 2>/dev/null; then
-        if /usr/sbin/kexec -l $boot/zImage --dtb=/sys/firmware/fdt --command-line="$(sed 's/ *x6x00\.kexec=1//g' /proc/cmdline) x6x00.kexec=1" &&
+        if /usr/sbin/kexec -l $boot/zImage --dtb=/sys/firmware/fdt \
+               --command-line="$(sed -e 's/ *x6x00\.kexec=1//g' -e 's/ *x6x00\.kexec_state=1//g' /proc/cmdline)$mark" &&
            [ "$(cat /sys/kernel/kexec_loaded)" = 1 ]; then
             touch /run/x6x00-kexec
+            $state && touch /run/x6x00-kexec-state
         fi
         umount $boot
     fi
