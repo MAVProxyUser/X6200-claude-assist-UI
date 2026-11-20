@@ -44,19 +44,19 @@ LIBC_WRAPPED  := pthread_create pthread_detach
 WRAPPED       := $(HW_WRAPPED) $(GUARD_WRAPPED) $(LIBC_WRAPPED)
 wrap_as        = $(foreach s,$(2),-D$(s)=$(1)$(s))
 
-# A function radio.c calls that fakes.c has no stand-in for yet is a warning in the log on Linux, not a build that
-# fails (the GUI itself links fine), bound lazily, so a missing stand-in the test does reach still stops it ("symbol
-# lookup error": a FAIL, as it should be). On a Mac the link stays strict: a missing stand-in shows before a push.
+# A setting or a function radio.c came to use that fakes.c has no stand-in for yet no longer stops the build (it did,
+# on CI, four times 2026-11-18..20; Linux's lazy binding of a missing name could not take a setting: "unexpected PLT
+# reloc type"): the link is run by tools/host_link/autolink.py, which makes a stand-in for each name the linker says
+# it lacks (a setting like the rest, through build/auto_settings.h; a function that answers 0 and says so once when
+# called) and links again, saying which it made. A case that needs the real thing still FAILs, by its own check.
 # ifeq, not $(if ...): the commas of -Wl split $(if)'s arguments (a bare -Wl, 2026-11-19)
 ifeq ($(UNAME),Darwin)
   RENAME   := $(call wrap_as,__wrap_,$(WRAPPED))
   WRAPS    :=
-  TOLERANT :=
   WRAPPERS := build/hw_stub.o build/base_guard.o build/mac_real.o
 else
   RENAME   :=
   WRAPS    := $(foreach s,$(WRAPPED),-Wl,--wrap=$(s))
-  TOLERANT := -Wl,--warn-unresolved-symbols -Wl,-z,lazy
   WRAPPERS := $(SRC)/hw/stub/hw_stub.c $(SRC)/base_guard.c
 endif
 
@@ -67,8 +67,11 @@ build/radio.o: radio_thread.c $(SRC)/radio.c $(wildcard $(SRC)/*.h $(SRC)/hw/*.h
 
 radio_wr12_test: radio_wr12_test.c fakes.c fakes.h build/radio.o $(WRAPPERS) \
                  $(SRC)/pa_bias.c $(SRC)/cfg/ham_bands.c $(SRC)/cfg/tx_ranges.c $(SRC)/bat_watch.c
-	$(CC) $(CFLAGS) $(RENAME) -o $@ radio_wr12_test.c fakes.c build/radio.o $(WRAPPERS) \
-	    $(SRC)/pa_bias.c $(SRC)/cfg/ham_bands.c $(SRC)/cfg/tx_ranges.c $(SRC)/bat_watch.c -lm $(WRAPS) $(TOLERANT)
+	python3 $(TOP)/tools/host_link/autolink.py --src $(SRC) --stubs build/auto_stubs.c \
+	    --settings build/auto_settings.h -- \
+	    $(CC) $(CFLAGS) -I build $(RENAME) -o $@ radio_wr12_test.c fakes.c build/radio.o $(WRAPPERS) \
+	    $(SRC)/pa_bias.c $(SRC)/cfg/ham_bands.c $(SRC)/cfg/tx_ranges.c $(SRC)/bat_watch.c build/auto_stubs.c \
+	    -lm $(WRAPS)
 
 # A Mac's: the files that define what is caught, each with its own names as __real_ and the rest as __wrap_
 build/hw_stub.o: $(SRC)/hw/stub/hw_stub.c $(wildcard $(SRC)/hw/*.h)

@@ -84,7 +84,10 @@ typedef struct fake_subj {
     X(ParamInt, cfg_band_if_shift) \
     X(ParamInt, cfg_band_split) \
     X(ParamInt, cfg_band_tx_i_offset) \
+    X(ParamInt, cfg_band_tx_iq_gain) \
+    X(ParamInt, cfg_band_tx_iq_phase) \
     X(ParamInt, cfg_band_tx_q_offset) \
+    X(ParamInt, cfg_tx_cal_radio) \
     X(ParamInt, cfg_band_tx_shift) \
     X(ParamInt, cfg_band_vfoa_agc) \
     X(ParamInt, cfg_band_vfoa_att) \
@@ -162,8 +165,13 @@ typedef struct fake_subj {
     X(ParamInt, cfg_wr12) \
     X(ParamInt, cfg_xit) \
 
+/* And those radio.c came to use since that the list above lacks, made by the link (tools/host_link/autolink.py,
+ * build/auto_settings.h): a new setting no longer stops the build, the link says its name (2026-11-20) */
+#include "auto_settings.h"
+
 #define X(type, n) static fake_subj_t s_##n = {.name = #n}; type *n = (type *)&s_##n;
 SETTINGS
+AUTO_SETTINGS
 #undef X
 
 static fake_subj_t *subj(const void *p) {
@@ -499,6 +507,14 @@ static bool put(scheduler_fn_t fn, void *arg, size_t size, bool coalesced) {
     }
     n_queue++;
     return true;
+}
+
+/* The TX calibration's radio (radio.c tx_cal_check): its record, the clearing of another radio's, the hash the
+ * fingerprint is made with (tci_ws.c, not built here) */
+void cfg_tx_cal_forget(void) {}
+void ws_sha256(const uint8_t *data, size_t len, uint8_t digest[32]) {
+    (void)data, (void)len;
+    memset(digest, 0, 32);
 }
 
 bool scheduler_put(scheduler_fn_t fn, void *arg, size_t arg_size) {
