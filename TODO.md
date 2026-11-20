@@ -36,6 +36,17 @@ approved that day.
     ~16 s, each try taking the WiFi's shared chip and antenna for 1-3.6 s (17% of pings lost; 0 with the keeper
     stopped, 0 on the X6100 and the router at the same time). btgps-ctl backs off now (10 s doubling to 300 s,
     back to 10 s after a connection): 1.2% lost over 200 s while backing off, one stall per 5 min at the cap.
+  - DONE 2026-11-20 night: the X6100's base patched (gcfix3, tools/base_update/README.md): 0.1 W right on 6, 10, 20
+    and 40 m, the codec PLL fixed; shipped as a block patch applied on the radio to Xiegu's own file
+    (x6x00-base-patch), no base distributed. Found and left: Xiegu's loop overshoot after silence (1.0 W at 0.1 W on
+    Xiegu's base: a hold while silent would need a hook), and the X6200's receiver with AGC off dropping changing
+    tones after ~2.5 s (its spectrum has them).
+  - the X6100's 6 m over-power, studied 2026-11-20 (tools/base_update/README.md "Every base compared"): Xiegu's loop
+    has 34 dB of range on 6 m and the meter is its own detector, so 0.8 W at 0.1 W means its floor or a carrier the
+    loop cannot touch (the DC offsets are added after its gain; this radio's are all zero, never calibrated). The
+    test (TX, the owner's go, the X6200 listening through the pads): 6 m USB with no audio at 0.1 W (a carrier =
+    the leak: null it with TX Cal's IQ offsets on 6 m), and FM at 0.1/0.3/0.5/1 W (the same ~0.8 W = the floor: a
+    base patch, the +6 dB at band >= 20 to 0 or the -40 dB clamp lower). Earlier notes:
   - the X6100's 6 m over-power, looked at 2026-11-19 night: real, not its meter (the X6200 heard its 6 m at
     -64/-66 dBm at a 0.1 W setting against -70/-71 on 10 and 12 m; the path back loses the same on 6 m). Its power
     is the base's (x6100_control_txpwr_set); the one Linux handle, the band output gain (dac_gain_set), works on
@@ -446,7 +457,8 @@ answers a CQ it decodes when that station is not in the log yet for this band an
 
 ## X6100: the patched base (gdyuldin/x6100_base_patch r13) on radios that came with base V1.1.8
 
-Tested 2026-10-24 on the bench X6100 (shipped with stock base V1.1.8), then put back on stock V1.1.8,
+Tested 2026-10-24 on RF.Guru's bench X6100 (upstream, Joeri Van Dooren; shipped with stock base V1.1.8; not the
+owner's X6100, which came 2026-11-18), then put back on stock V1.1.8,
 where it stays for now. Backups, test tools and full measurements: ../x6100-baseband-backup/ on the
 build PC (tx-test-2026-10-24.txt, i2c-baseline-2026-10-24.txt) and /mnt/baseband/ on the radio.
 
@@ -468,6 +480,13 @@ build PC (tx-test-2026-10-24.txt, i2c-baseline-2026-10-24.txt) and /mnt/baseband
   - The calibration window over I2C (0xF000) reads zeros on r13; the stock calibration came back intact.
   - Linux-side I2C to the base: no errors (1000 reads), RTC fine; RX not compared (no antenna on the
     bench).
+- **2026-11-20, studied again** (tools/base_update/README.md "Georgy Dyuldin's patched base"): r13 is still built on
+  V1.1.6 only, and 1.1.6 code on V1.1.8-generation boards misreads the battery and supply and loses power on band
+  changes (#3, and RF.Guru's test below on their bench X6100, not the owner's): not for this X6100. The 6 m floor (0.7-0.9 W at 0.1 W) is Xiegu's ALC-only power
+  control, which r1's true power control fixes. The way for this radio: that power control as a hook on V1.1.9,
+  next to RF.Guru's GPL hooks (Guru-RF/X6100-Baseband), written new (gdyuldin's code has no licence), delivered by
+  base_flash (it writes X6100 bases; the radio's screen and fetch are the X6200's only, the owner's choice of
+  2026-11-13). Waits for the owner's go.
 - **To look at later**: whether the band-change dropout is the patch's band/PA switching on this board
   revision (issue #3 reports I2C trouble on V1.1.8 radios, base-side), a TX hold-off after a band change
   in the GUI as a workaround, the external-voltage report, and Xiegu's stock V1.1.9 base (found unflashed

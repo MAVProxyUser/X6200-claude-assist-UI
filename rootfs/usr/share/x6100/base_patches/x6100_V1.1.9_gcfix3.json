@@ -1,0 +1,52 @@
+{
+ "format": "x6x00-base-patch 1",
+ "name": "gcfix3",
+ "model": "x6100",
+ "about": "Xiegu's X6100 base V1.1.9 (251127001) with GoldCorpHF's fixes: the codec's PLL fraction written as Xiegu meant it (the I/Q rate 100 kHz, not 99,932 Hz), no +6 dB on the TX power loop from 29.7 MHz up, the TX power loop's floor -60 dB, not -40 (0.1 W reached on every band; 6 m gave 0.8 W, HF 0.2-0.3)",
+ "fixes": [
+  "pll",
+  "6m",
+  "alc"
+ ],
+ "source": {
+  "file": "X6100_BBFW_V1.1.9_251127001.xgf",
+  "size": 392048,
+  "sha256": "87a3e96ea21abf16a14b0fb771aad19a9e0bf8c267f93ec71a09d38e59c25737",
+  "md5": "e23107cd7d4522d6a42d07b196953c9f",
+  "version": "V1.1.9 Nov 27 2025,10:31:57"
+ },
+ "result": {
+  "file": "X6100_BBFW_V1.1.9_251127001_gcfix3.xgf",
+  "size": 392048,
+  "sha256": "d34985d04f32771eb9bfdc871e2a207173af177cfa7305ce8b206f8ac0453f83",
+  "md5": "37ac1b1c084f7dfbbffcf56bc92440b1",
+  "version": "V1.1.9 Nov 27 2025,gcfix3"
+ },
+ "blocks": [
+  {
+   "offset": 18080,
+   "from": "2c4004c4a3cadc389322084ed0a10149",
+   "to": "6f81225928c91a544fe8725766579a9a"
+  },
+  {
+   "offset": 32656,
+   "from": "0a7f743367b44b9eb663ce68d7d22280",
+   "to": "3fbb8c5c4c6c0424156f6ebd8cf3438c"
+  },
+  {
+   "offset": 32688,
+   "from": "bf6edd739de9dc9f224cc61e69c3a36e",
+   "to": "e026308102934be714bf0b3392d5c854"
+  },
+  {
+   "offset": 62416,
+   "from": "fe23028a68f3e9bfc3777fced0985006",
+   "to": "11ada6e263481f4d3abd592ede1afbb6"
+  },
+  {
+   "offset": 119728,
+   "from": "7f1d6f7cdd230e83e8846ca075c0deac",
+   "to": "9174a458dfe82a1222bf079c85d99339"
+  }
+ ]
+}

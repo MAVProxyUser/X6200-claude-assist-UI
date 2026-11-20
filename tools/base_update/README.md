@@ -388,6 +388,106 @@ compressor, 5-band RX, WFM and mic equalisers, FM squelch, line in/out gains, vo
 login, power-off timers ("host offline, powering off in %d s": what x6200-base-keeper answers), readout protection
 set at start and a bootloader it can rewrite. Both use CMSIS-DSP-style FFT twiddle tables.
 
+### Georgy Dyuldin's patched base, studied 2026-11-20
+
+[gdyuldin/x6100_base_patch](https://github.com/gdyuldin/x6100_base_patch) (branch `1.1.6`, no licence: read, not
+copied; read through GitHub's API, no binary fetched). Releases r9-r13 (r13 2026-09-30:
+`X6100_BBFW_V1.1.6_230307001_r13.xgf`, 465728 bytes, SHA-256 `ed3ee7338401e62f5890599252deed6949f756a7deffcf9829fec5b30d9067b7`),
+all built on **Xiegu's V1.1.6** (two builds, 221112001 and 230307001, told apart by the plain image's MD5): there is
+no patch for V1.1.8 or V1.1.9. The repository moved on in November 2026 (installers, a desktop/Android uploader),
+not the firmware.
+
+- **The method** (`patch.py`, `asm/helper.s`, `Core/`): a binary patch, not a rebuild. Per OEM build, a table of
+  addresses (hook points, OEM functions, filter tables, the build-time string). New C (compressor, modulation, ANF,
+  NR, NB, IF shift, VOX, CW peak, CESSB, the AIC3204 set-up, the I2C command handler) is built with
+  arm-none-eabi-gcc and linked past the end of Xiegu's image; Xiegu's own CMSIS-DSP and helper functions
+  (`arm_fir_f32`, `arm_biquad_cascade_df1_f32`, `write_i2c`, `setup_tx`...) are pinned at their OEM addresses so the
+  new code calls them. Each hook overwrites 4 bytes of an OEM function with a branch to a wrapper placed right after
+  the OEM image: the wrapper saves the core and FPU registers, calls the new function, restores them, runs the OEM
+  instructions the branch displaced and jumps back. Data patches replace FIR and IIR coefficient tables in place
+  and swap two filter calls (the CW AGC fix); the build-time string becomes `r13`. The GUI drives the new features
+  through I2C registers it hijacks (`Core/Inc/comm.h`: 12, 15, 18, 19, 22-25, 35, 36, 38, 44-47; the X6100 control
+  library and OpenX6X00's `hw_caps()` know them). Then the image is encrypted to .xgf with Xiegu's key.
+- **What r1-r13 add**: TX compressor and gate, true power control (below), fixed AM and FM (10x FM depth, rewritten
+  FM, pre/de-emphasis, squelch), TX high-pass 160 Hz and an adjustable TX band-pass, adaptive notch, spectral NR,
+  a noise blanker, VOX, IF shift, `fft_span` zoom and a bf16 spectrum flow, RX IQ balancing (AM hum), the ghost RX
+  after TX gone, CW AGC, a CW peak filter, CESSB (r12), the AIC PLL at a true 100 kHz and a battery % from a
+  discharge curve (r13), TX codec gain and per-band output gain.
+- **True power control** (issue #4, 2026-02): Xiegu's base does not change its TX level with the power setting, it
+  only moves the ALC's target. The patch scales the I/Q by the power asked (k = 1 at 10 W), times the codec gain and
+  the band's output gain. That is what an X6100 lacks where its ALC cannot pull the drive down far enough: the owner's
+  gives 0.7-0.9 W at a 0.1 W setting on 6 m (2026-11-19).
+- **On radios that shipped with base V1.1.8** (issue #3, 2025-12; and RF.Guru's bench X6100, tried by Joeri Van
+  Dooren 2026-10-24, TODO.md: not the owner's X6100, which came 2026-11-18): 1.1.6 code on the newer board shows the
+  battery always full (a hard shutdown at 5.8 V), I2C errors and the RTC losing time (#3); on RF.Guru's the external
+  supply read 0 V and the first carrier after a band change came with next to no power (6 m nearly always). gdyuldin (#3): porting means finding every address again in the new version and sometimes new assembly.
+- **RF.Guru's port to V1.1.9** ([Guru-RF/X6100-Baseband](https://github.com/Guru-RF/X6100-Baseband), GPL-3.0,
+  v0.1.0-alpha.2 2026-11-15, TEST ONLY): the same method on V1.1.9 (five guarded hooks, payload at 0x08080000 and
+  CCM at 0x10000000, the builder checking the stock image's hashes and every displaced instruction): CESSB, the
+  compressor and the TX band-pass, Xiegu's power scaling, ALC, calibration and telemetry kept. Known to `base_flash`
+  (`--test-ok`). It does not bring true power control.
+
+### GoldCorpHF's patch to Xiegu's X6100 V1.1.9 (gcfix3), 2026-11-20
+
+`x6100_patch.py` (here, with Xiegu's key, never in the repository) makes it; `rootfs/usr/share/x6100/base_patches/
+x6100_V1.1.9_gcfix3.json` is what ships: the 16-byte blocks of the encrypted .xgf that change, Xiegu's and ours (AES-ECB
+encrypts each block alone, so no key and nothing of Xiegu's readable), with the SHA-256 and MD5 of Xiegu's file and of
+the result. `x6x00-base-patch apply gcfix3` (rootfs/usr/sbin) makes the file on the radio from Xiegu's; base_flash
+knows the result by its SHA-256 (d34985d0...). Three fixes, 15 bytes of Xiegu's image:
+
+| Fix | Where | Bytes | Why |
+|---|---|---|---|
+| pll | 0x0802f3d8 | `movs r3,#8` -> `ldr r3,[r7,#0x40]` | the codec PLL's D low byte written as computed: 100 kHz, not 99,932 Hz |
+| 6m | 0x080246aa | `it hs; vmovhs s15,s13` -> 3 x `nop` | no +6 dB on the loop's gain from band index 20: it only raised 6 m's floor |
+| alc | 0x08027f90, 0x08027fb6 | `movt r3,#0xc220` -> `#0xc270` | the loop's floor -60 dB, not -40 |
+
+Measured on the owner's X6100 through 70 dB of pads (bench.py's gates; tools/bench/tones.py): 0.1 W on 6, 10, 20 and 40
+m (Xiegu's: 0.8 W on 6 m, 0.2-0.3 W on HF); SSB tones 300-2900 Hz within 4 dB at 0.1 W on 20 and 6 m, the other
+sideband 101-110 dB down; the receiver identical to Xiegu's V1.1.9 in the same sweep (passband, image). Withdrawn on
+the way: gcfix1 (floor only) and gcfix2 (no floor change), after a lost-tone run first blamed on the floor turned out
+to be the X6200's receiver (below).
+
+Found by the sweeps, not fixed (Xiegu's): the power loop climbs while the transmitter is silent (0.01 x 50 dB a block)
+and overshoots at the next sound: 1.0 W at 0.1 W asked on Xiegu's own base; and the X6200's receiver with its AGC off
+drops tones that keep changing after about 2.5 s (its spectrum shows them all along; a steady tone, or gaps, keep).
+
+### Every base compared, 2026-11-20
+
+Decrypted with the public key (nothing of Xiegu's kept in the repository): Xiegu's X6100 V1.1.6 (230307001, from its
+v1.1.7 package; MD5 f19fb85d, the exact image gdyuldin patches), V1.1.8 (240915003, from the v1.1.9 package) and
+V1.1.9 (251127001); gdyuldin's r1-r13 and RF.Guru's alpha.2; Xiegu's X6200 1.0.3, 1.0.6, 1.0.7 (both), 1.0.8.
+Static analysis only (Ghidra headless); V1.1.7 (only in Xiegu's withdrawn v1.1.8 package) not available.
+
+- **X6100 1.1.6 -> 1.1.8**: the hardware preamp never used (PRE = +15 dB digital), RF gain remapped onto the step
+  attenuator, an adaptive RX I/Q image balance, the spectrum zoom in the base (register 15 bits 16-19), NR rewritten,
+  a PA bias self-check at every start (idle currents measured, bias ramped and saved; likely Xiegu's "TX problem with
+  specific hardware"), the fuel gauge no longer reset at each power-on and its own state of charge used (charging
+  90-98 %), a new compiler. **1.1.8 -> 1.1.9**: IF shift (register 35: the LO moved, an NCO back), the AGC rewritten
+  (register 28's times), the FM demodulator on atan2f; TX power, PA bias, calibration and filters byte-identical.
+- **TX power in every X6100 version**: the setting only sets an ALC target in dBm; a closed loop on the forward
+  detector (one polynomial for all bands) integrates its gain within -40..0 dB, faster down (0.5) than up (0.01),
+  resets to -40 on a band, mode or power change, runs in every mode but CW; from band index 20 (29.7 MHz up) it
+  reads 0.9 x the power and adds +6 dB, which raises 6 m's floor to -34 dB. 1.1.6 read 0.9 x on every band (about
+  11 % over on HF); 1.1.8 and 1.1.9 1.0 x. The GUI's meter is the same detector.
+- **A Xiegu bug in every X6100 version**: the codec's PLL fraction register is written with a constant, so the base
+  samples at about 99,932 Hz, not 100 kHz (-676 ppm). gdyuldin's r13 fixes it.
+- **gdyuldin's r13**: 25 hooks into V1.1.6, the code from 0x0807f100, its state in CCM RAM; true power control =
+  the I/Q scaled by sqrt(P/10) x codec gain x band gain before Xiegu's loop, which then only limits (P = 0 gives full
+  drive). On boards shipped with 1.1.8 the battery and I2C trouble come from 1.1.6 itself (its gauge handling), the
+  0 V supply from r13 not updating it for about two minutes, the weak first carrier after a band change from Xiegu's
+  loop restarting at -40 dB. Its VOX switches TX from the DMA interrupt.
+- **RF.Guru alpha.2**: 25 bytes of V1.1.9 changed: five hooks (start-up, per-block set-up, a compressor before the
+  TX band-pass, CESSB and r13's interpolation at the TX interpolator), payload 0x08080000, state in CCM, armed only
+  by 0x5458 in register 36's upper half, voice LSB/USB only; Xiegu's power control untouched.
+- **X6200**: 1.0.6 added the CW decoder (register 32 = its threshold and switch, not the TX pulse of #53); 1.0.7
+  SLIP-encodes the 552-byte packets to Linux, rewrote the S-meter (WFM measured only on the raw wideband stream,
+  +70 dB) and the AGC; the Sep 2025 1.0.7 and older rewrite the bootloader from a copy at every start (the Jan 2026
+  factory build no longer); 1.0.8 fixed the keyer's timing (20 % fast) and the S-meter's -255. Any I2C transaction
+  to 0x72 ending in STOP is the keepalive: 1.2 s without one disables TX, then 10 s + 180 s to power-off.
+- **The owner's X6100's calibration block** (read 2026-11-20 at I2C 0x100, 816 bytes, the GUI stopped; a copy in
+  app_logs/base_cal_x6100_20261120_0100.bin): magic, two words (605, 720), a checksum, and zeros everywhere else:
+  no per-band TX I/Q amplitude, phase or DC offset was ever set, so the GUI's zeros overwrite nothing.
+
 For this tool: any of these bases is an .xgf like Xiegu's and goes on with the same write; a clean-room base
 that names itself as a patched one (bbfw says `,r8`) would get capabilities from `hw_caps()` it does not have.
 
@@ -400,5 +500,6 @@ that names itself as a patched one (bbfw says `,r8`) would get capabilities from
 | [fetch.sh](fetch.sh) | releases from xiegu.eu into build/base_update, by x6x00-base-fetch |
 | [flash.sh](flash.sh) | from a computer: `--check`, `--flash`, `--recover`, `--dry-run` (X6100), `--to VERSION`, `--file FILE`, `--test-ok` |
 | [run_on_radio.sh](run_on_radio.sh) | on the radio, apart from the SSH session: GUI off, lock, write, GUI on |
+| [x6100_patch.py](x6100_patch.py) | the X6100 V1.1.9 patch (gcfix3) made from Xiegu's file and key: `--patch-out` writes the block patch the radios apply with `x6x00-base-patch` |
 | [install.sh](install.sh) | the 1.0.8 file to `/usr/firmware` on the internal memory, for Xiegu's own UPGRADE screen |
 | [test/](test) | run.sh, the unit tests (units.c), the simulated bases (sim.py, sim6100.py), the synthetic update zips (synth.py) |

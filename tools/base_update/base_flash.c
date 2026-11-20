@@ -166,6 +166,11 @@ static const struct {
      "87a3e96ea21abf16a14b0fb771aad19a9e0bf8c267f93ec71a09d38e59c25737", 392048, "V1.1.9", MODEL_X6100, false},
     {"X6100_BBFW_V1.1.8_240915003.xgf (base V1.1.8, Sep 2024)",
      "8516de0bdcb4a3dcbba1605a482250d17acad2402f89f5d3719db33d6c48348d", 391584, "V1.1.8", MODEL_X6100, false},
+    /* Xiegu's V1.1.9 with GoldCorpHF's fixes, made on the radio from Xiegu's own file by x6x00-base-patch
+     * (/usr/share/x6100/base_patches/x6100_V1.1.9_gcfix3.json): the codec PLL as Xiegu meant it, no +6 dB on the TX
+     * power loop from 29.7 MHz up, the loop's floor -60 dB (0.1 W on every band). Its version "V1.1.9 Nov 27 2025,gcfix3" */
+    {"X6100_BBFW_V1.1.9_251127001_gcfix3.xgf (base V1.1.9 with GoldCorpHF's fixes gcfix3)",
+     "d34985d04f32771eb9bfdc871e2a207173af177cfa7305ce8b206f8ac0453f83", 392048, "V1.1.9-gcfix3", MODEL_X6100, false},
     /* RF.Guru's X6100-Baseband v0.1.0-alpha.2: Xiegu's V1.1.9 with CESSB, a compressor and a TX filter, its build
      * text "Nov 27 2025,tx1a2-test". TEST ONLY: not validated on a radio */
     {"X6100_BBFW_V1.1.9_251127001_tx1_alpha2_TEST.xgf (RF.Guru X6100-Baseband v0.1.0-alpha.2, a TEST build)",
