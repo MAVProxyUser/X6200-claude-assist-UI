@@ -447,8 +447,10 @@ and 224 appended):
 
 Measured on the owner's X6100 through 70 dB of pads (bench.py's gates; tools/bench/tones.py): 0.1 W on 6, 10, 20 and 40
 m (Xiegu's: 0.8 W on 6 m, 0.2-0.3 W on HF), 0.3, 0.5 and 1.1 W on 6 m as asked, the same to the dB with gcfix4; SSB
-tones 300-2900 Hz within 3.5 dB at 0.1 W; the other sideband about 42 dB down (the X6100's TX I/Q never calibrated:
-its calibration block is empty); the receiver identical to Xiegu's V1.1.9 in the same sweep (passband, image).
+tones 300-2900 Hz within 3.5 dB at 0.1 W; the other sideband about 42 dB down (the X6100's transmit image and the
+X6200's receive image together; the X6100's calibration block is empty, its TX I/Q balance never set, and its base
+has no TX phase or gain correction: registers 48/49 correct the receiver only); the receiver identical to Xiegu's
+V1.1.9 in the same sweep (passband, image).
 Withdrawn on the way: gcfix1 (floor only) and gcfix2 (no floor change), after a lost-tone run first blamed on the floor.
 
 The hold (gcfix4), measured with `tones.py --bursts` (1 kHz bursts with 2 ms starts after pauses of 50 ms to 3.2 s,

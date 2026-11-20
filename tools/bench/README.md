@@ -73,8 +73,8 @@ At 0.1 W, the first transmission of the session; the watch as radios-walkie's (m
 the sender killed, since the remote's PTT release does not end a TCI transmission). Faded tones with short gaps
 measure the passband. The listener's AGC is off and its squelch open for the run (a shut squelch mutes the audio
 whole: the X6200's, at 4, faked a silent transmitter and an image 101-110 dB down on 2026-11-20). The X6100 (gcfix4)
-into the X6200, 20 m: 300-2900 Hz within 3.5 dB, the other sideband about 42 dB down, the two radios' oscillators
-7.2 Hz apart, the slope 8 ppm.
+into the X6200, 20 m: 300-2900 Hz within 3.5 dB, the other sideband about 42 dB down (the two radios' images
+together), the two radios' oscillators 7.2 Hz apart, the slope 8 ppm.
 
 `tones.py TX RX --bursts 0.05,0.1,0.2,0.4,0.8,1.6,3.2`: the transmitter's power loop on the first sound after a
 pause. 1 kHz bursts of 0.5 s with 2 ms starts, each after the pause given; in the tone's band of the listener's audio

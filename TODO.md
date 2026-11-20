@@ -43,9 +43,11 @@ approved that day.
     bursts after 50 ms to 3.2 s of pause start within 1 dB (Xiegu's: +5 to +18 dB, 0.7-1.0 W at 0.1 W, then 6-14 dB
     under). The X6200 "dropping changing tones with AGC off" was its squelch (at 4) muting its audio, and so was the
     image "101-110 dB down": tones.py opens the listener's squelch now.
-  - the X6100's transmit image is about 42 dB down (tones.py, its USB tones heard on the X6200's LSB, 20 m): its
-    calibration block is empty, so its TX I/Q balance was never set. TX Cal's I/Q values per band, measured with the
-    same sweep, could bring it to 60 dB; it means writing the base's calibration memory (I2C 0x72): the owner's call.
+  - the other sideband is about 42 dB down (tones.py, the X6100's USB tones heard on the X6200's LSB, 20 m): the
+    X6100's transmit image and the X6200's receive image together. The X6100's calibration block is empty and its
+    base has no TX phase/gain correction (registers 48/49, x6100_rphscmp/rmagcmp, correct the receiver only, stored
+    at 0x200078c0..c8): a TX I/Q balance would be a second hook (Q' = g Q + p I on the block before the DAC) with
+    per-band values found by a sweep. The owner's call.
   - the X6100's 6 m over-power, studied 2026-11-20 (tools/base_update/README.md "Every base compared"): Xiegu's loop
     has 34 dB of range on 6 m and the meter is its own detector, so 0.8 W at 0.1 W means its floor or a carrier the
     loop cannot touch (the DC offsets are added after its gain; this radio's are all zero, never calibrated). The

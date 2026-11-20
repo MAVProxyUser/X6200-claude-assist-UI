@@ -2314,8 +2314,9 @@ What gcfix4 changes (`V1.1.9 Nov 27 2025,gcfix4` in Settings > Info):
 - Tested with tones from 200 to 3100 Hz and with bursts after pauses, sent
   from one radio into the other through the pads (`tools/bench/tones.py`):
   300 to 2900 Hz within 3.5 dB; the other sideband about 42 dB down, as with
-  Xiegu's base (the X6100's transmit I/Q balance was never calibrated: its
-  calibration memory is empty); the receiver the same as Xiegu's.
+  Xiegu's base (the sending and the listening radio's image together; the
+  X6100's calibration memory is empty, so its I/Q balance was never set);
+  the receiver the same as Xiegu's.
 
 gcfix3 is the same without the hold (the power and clock fixes only).
 
