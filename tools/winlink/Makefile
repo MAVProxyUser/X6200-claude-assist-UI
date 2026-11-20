@@ -16,13 +16,17 @@ CFLAGS := -std=gnu11 -Wall -Wextra -O1 -g -pthread -I stub_include -I $(DEPS)/in
 COPIED := winlink.c winlink.h rigctld.h
 CLUSTER := cluster/spots.c cluster/spots.h
 
+# The link runs through tools/host_link/autolink.py: a call winlink.c gains that stubs.c has no stand-in for yet gets
+# one made (it answers 0 and says so when called), and the link says which, instead of failing the host checks
 all: test
 
 build/.copied: $(addprefix $(SRC)/,$(COPIED) $(CLUSTER))
 	mkdir -p build/cluster && cp $(addprefix $(SRC)/,$(COPIED)) build/ && cp $(addprefix $(SRC)/,$(CLUSTER)) build/cluster/ && touch $@
 
 winlink_host: stubs.c build/.copied $(wildcard stub_include/*.h stub_include/*/*.h)
-	$(CC) $(CFLAGS) -I build -include stub_include/stub_env.h -o $@ stubs.c build/winlink.c build/cluster/spots.c -L $(DEPS)/lib -Wl,-rpath,$(abspath $(DEPS))/lib -lliquid -lm
+	python3 ../host_link/autolink.py --src $(SRC) --stubs build/auto_stubs.c -- \
+	    $(CC) $(CFLAGS) -I build -include stub_include/stub_env.h -o $@ stubs.c build/winlink.c build/cluster/spots.c \
+	    build/auto_stubs.c -L $(DEPS)/lib -Wl,-rpath,$(abspath $(DEPS))/lib -lliquid -lm
 
 # ardopcf's clock 10 minutes on at each SIGUSR1 (LD_PRELOAD), for its 10 minute ID in winlink_modems_test.py
 clockskip.so: clockskip.c

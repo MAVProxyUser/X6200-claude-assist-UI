@@ -26,6 +26,8 @@ KEYED   ?= $(CONF).keyed
 ENV    := TCI_TEST_PORT=$(PORT) TCI_TEST_PLAYED=$(PLAYED) TCI_TEST_REVOKED=$(REVOKED) TCI_TEST_ASK=$(ASK) \
           TCI_TEST_ANSWER=$(ANSWER) TCI_TEST_ALLOWED=$(ALLOWED) TCI_TEST_KEYED=$(KEYED)
 
+# The links run through tools/host_link/autolink.py: a call the copied sources gain that stubs.c has no stand-in for yet
+# gets one made (it answers 0 and says so when called), and the link says which, instead of failing the host checks
 all: test
 
 build/.copied: $(addprefix $(SRC)/,$(COPIED) $(MORSE))
@@ -41,15 +43,17 @@ audio_test: tci_audio_test
 # Who owns a transmission (audit C01): the server included whole, its socket thread's steps and
 # the LVGL thread's work run in the order each case sets (stub_defer), socket pairs for clients
 tci_own_test: tci_own_test.c stubs.c build/.copied
-	$(CC) $(CFLAGS) -I build -DTCI_STUBS_NO_MAIN -o $@ tci_own_test.c stubs.c build/tci_audio.c build/tci_ws.c build/control_owner.c \
-	    build/cw_decoder/morse_code.c -lm
+	python3 ../host_link/autolink.py --src $(SRC) --stubs build/auto_stubs_own.c -- \
+	    $(CC) $(CFLAGS) -I build -DTCI_STUBS_NO_MAIN -o $@ tci_own_test.c stubs.c build/tci_audio.c build/tci_ws.c \
+	    build/control_owner.c build/cw_decoder/morse_code.c build/auto_stubs_own.c -lm
 
 own_test: tci_own_test
 	./tci_own_test; r=$$?; rm -f $(ALLOWED) $(ALLOWED).tmp; exit $$r
 
 tci_host: stubs.c build/.copied
-	$(CC) $(CFLAGS) -I build -o $@ stubs.c build/tci_server.c build/tci_audio.c build/tci_ws.c build/control_owner.c \
-	    build/cw_decoder/morse_code.c -lm
+	python3 ../host_link/autolink.py --src $(SRC) --stubs build/auto_stubs_host.c -- \
+	    $(CC) $(CFLAGS) -I build -o $@ stubs.c build/tci_server.c build/tci_audio.c build/tci_ws.c build/control_owner.c \
+	    build/cw_decoder/morse_code.c build/auto_stubs_host.c -lm
 
 syntax: build/.copied
 	$(CC) $(CFLAGS) -I build -fsyntax-only build/tci_server.c build/tci_audio.c build/tci_ws.c build/control_owner.c \

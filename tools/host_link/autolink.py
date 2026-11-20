@@ -29,7 +29,7 @@ HEAD = """/* Made by tools/host_link/autolink.py at each link: stand-ins for wha
  * fakes do not have yet. Answer 0, say so once. Not to be edited: write a real stand-in in the fakes instead. */
 #include <stdio.h>
 
-static void autolink_said(const char *name, int *said) {
+__attribute__((unused)) static void autolink_said(const char *name, int *said) {
     if (!*said) {
         *said = 1;
         fprintf(stderr, "autolink: %s called: no stand-in for it in this check's fakes, it answered 0\\n", name);
@@ -79,7 +79,10 @@ def write(stubs, settings, made):
             if k == "function":
                 f.write(f"\nlong {name}(void);\nlong {name}(void) {{\n    static int said;\n\n"
                         f"    autolink_said(\"{name}\", &said);\n    AUTOLINK_ZERO_FP();\n    return 0;\n}}\n")
-            elif k == "data" or (k == "setting" and not settings):
+            elif k == "setting" and not settings:
+                # a pointer to a zeroed object (these fakes have no subjects of their own)
+                f.write(f"\n__attribute__((aligned(64))) static char {name}_obj[4096];\nvoid *{name} = {name}_obj;\n")
+            elif k == "data":
                 f.write(f"\n__attribute__((aligned(64))) char {name}[65536];\n")
     if settings:
         with open(settings, "w") as f:
