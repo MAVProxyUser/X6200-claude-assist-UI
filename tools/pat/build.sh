@@ -45,7 +45,9 @@ mkdir -p "$CACHE/pat"
 
 fetch() {   # URL FILE
     if command -v curl > /dev/null; then
-        curl -fsSL --retry 3 -o "$2" "$1"
+        # every error retried: go.dev's HTTP/2 stream reset (curl 92) is not one curl counts as transient, and it stopped
+        # the X6200's image build (2026-11-20, run 44791366472)
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o "$2" "$1"
     else
         wget -q -O "$2" "$1"
     fi
