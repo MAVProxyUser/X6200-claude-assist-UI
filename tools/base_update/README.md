@@ -583,7 +583,7 @@ band is a compromise), 15 and 12 m vary from run to run by more than the search'
 found offsets that measure worse apart. The dBc figures are against the wanted tone in the X6200's audio, whose level
 at 2.1 and 2.4 kHz differs (a 10 dB step at the tone change in one over, carrier and image together).
 
-#### Why 15 m varied: the image moves with the radio's heat (2026-11-20 evening)
+#### Why 15 m varied: its image shifts after a while on the air (2026-11-20 evening)
 
 Followed up (the owner: "dive deeper into your theory then and find a novel solution that *works*"), on 15 m, the X6100
 sending 900 Hz tones (0.1 W unless said), the X6200 listening through the pads (receive only):
@@ -598,7 +598,7 @@ sending 900 Hz tones (0.1 W unless said), the X6200 listening through the pads (
   eighth of the codec's rate, then each interpolated x8 by the same coefficients (0x0803e3e4). Its coefficients are an
   equiripple Hilbert transformer: computed from them, the opposite sideband is 84.5 dB or more under from 150 to
   2850 Hz (at 6 kHz). Nor a sample of skew between I and Q: in the bad state 300 Hz's image was the worse, not 1200's.
-- **The radio's heat.** At fixed settings the image is steady within an over (+-0.2 dB at 5 W) but not from one to
+- **A shift with time on the air** (first read as the radio's heat; see the last point). At fixed settings the image is steady within an over (+-0.2 dB at 5 W) but not from one to
   the next: from cold (6.5 min receiving) 15 m stood at -44 to -48 dBc for the first ~40 s of transmitting, moved
   within the next ~25 s and stood at -29 from there on (twice, the same); after receiving it came back (-31 at 2 min,
   -36 to -38 at 3.5 min, -45 at 5 min). 20 m's overs made 15 m warm too, but 20 m's own image did not move
@@ -607,12 +607,21 @@ sending 900 Hz tones (0.1 W unless said), the X6200 listening through the pads (
   P 1570 (twice: -7696/1574 and -7494/1567, -45.7 and -43.1 dBc there): the warm shift is mostly gain, 9 %. With the
   radio warm, alternating them: cold's -29 to -32 dBc, warm's -39 to -48, cold's -29, warm's -41 to -48.
 
-So the GUI keeps a second, warm balance per band (tx_iq_hot_gain/phase, Settings > TX Cal "IQ balance warm", remote
+- **Not heat, or not only** (later, the pads 80 dB, the X6200's attenuator off at 0.1-1 W for the margin): from
+  an unshifted radio, 0.1 W overs alone shifted it again over ~100 s (-53 to -29.5 dBc at the cold balance) and two
+  runs of 1 W overs after did not bring it back; but a run of 1 W overs (with 0.1 W probes) from cold never shifted
+  (its best balance stayed by the cold one, -56.8 dBc at G 235, P 435), so there the warm balance made it -27. The
+  base's power and ALC readings are the same shifted or not, and the shifted image is the X6100's (it stays at the
+  same RF frequency and level when the X6200's offset moves 300 Hz). The cause is open; what starts the shift is not
+  transmitting time alone.
+
+So the GUI keeps a second, warm balance per band, experimental and off (0, 0) on every band (tx_iq_hot_gain/phase, Settings > TX Cal "IQ balance warm", remote
 txhg/txhp; 0, 0 = none) and estimates the radio's heat from its transmitting (radio.c tx_heat: TX seconds added,
 receiving cooling them exponentially, 240 s; 0 % under 40 s, 100 % from 65 s), blending from the band's balance to its warm
 one and sending register 52 again while it receives (the base takes it between transmissions). tools/bench/txcal.py
 --state hot|cold calibrates either (waiting for the GUI's estimate to be wholly warm or cold); txcal_store.py saves
-both.
+both. With the trigger not known, the X6100's file has no warm balance; the heat estimate is a tool for a radio
+whose shift does follow its transmitting.
 
 ### Every base compared, 2026-11-20
 

@@ -61,6 +61,8 @@ def main():
                          "(txhg/txhp, once the radio is warm: the GUI's heat estimate at 100 %%, warmed up first)")
     ap.add_argument("--from-zero", action="store_true",
                     help="start each band at 0, 0 (uncalibrated) instead of its present values")
+    ap.add_argument("--rx-att", type=int, default=1, help="RX's attenuator for the run (1; 0 when the pads leave "
+                                                           "the image near RX's floor: 80 dB at 1 W)")
     ap.add_argument("--tag", default="")
     a = ap.parse_args()
     c = bench.conf()
@@ -312,7 +314,7 @@ def main():
                 r.wait("G, the Walkie", lambda r=r: r.state.get("pg") == "G", 10)
         setv(rxr, "sql", 0)
         setv(rxr, "agc", 3)
-        setv(rxr, "att", 1)
+        setv(rxr, "att", a.rx_att)
         audio_live()
         bands = a.bands.split(",")
         over(BANDS[bands[0]], bench.FIRST_PROBE_W, 1.0, "probe")     # the session's first over: 0.1 W

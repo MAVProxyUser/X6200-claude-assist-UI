@@ -65,12 +65,11 @@ approved that day.
     would not know gcfix5 is in it (a marker of its own needed); the image's change across the audio band (one G, P
     per band).
     Later the same evening (the owner: "dive deeper ... find a novel solution that *works*"): 15 m's varying image is
-    the radio's heat, not the audio band, the base's Hilbert filter (equiripple, 84.5 dB) or an I/Q skew. From cold it
-    stands at -46 dBc for ~40 s of transmitting, then steps to -29 (gain shift 9 %), back after ~5 min of receiving;
-    20 m does not move. Two balances per band now (IQ balance warm, tx_iq_hot_gain/phase) and the GUI's heat estimate
-    from its transmitting (radio.c tx_heat) blending between them; txcal.py --state hot|cold. Results and the method:
-    tools/base_update/README.md, "Why 15 m varied". Left: the other high bands (17, 12, 10, 6 m) checked warm and cold;
-    the warm balance at 5 W against 0.1 W's.
+    a shift after time on the air, not the audio band, the base's Hilbert filter (equiripple, 84.5 dB) or an I/Q skew:
+    -46..-53 dBc, then -29 (a 9 % gain shift) after a minute or two at 0.1 W, back after ~5 min of receiving; 20 m does
+    not move. First read as heat, but a run of 1 W overs never shifted (and 1 W after a shift did not undo it): the
+    trigger is OPEN. A warm balance per band (tx_iq_hot_gain/phase) and a heat estimate (radio.c tx_heat) are in the
+    GUI, off (0, 0) everywhere; txcal.py --state hot|cold. tools/base_update/README.md, "Why 15 m varied".
     Also seen (both bases, before the Hilbert, so the audio's way in): the tone's 2nd harmonic at -32..-35 dBc and 3rd
     at -42 (0.1 and 5 W alike). FT8 at 700 Hz would carry a -35 dBc copy at 1400 Hz. The GUI's TCI path is linear
     (linear interpolation to 48 kHz, no processing); the X6100's TX audio leaves the processor's own codec (Headphone

@@ -262,17 +262,15 @@ The rest, left as it is unless you have a reason:
   calibration against a second receiver (`tools/bench/txcal.py`, see
   [gcfix5](#goldcorphfs-fixes-to-xiegus-v119-gcfix5)); the sliders show it in
   steps of 0.0001.
-- **IQ balance warm** (the same radios) is a band's IQ balance once the
-  radio has warmed up from transmitting. On some bands the image moves with
-  the radio's heat: on the owner's X6100, 15 m's image sat 46 dB under the
-  signal for the first ~40 s of transmitting from cold, then within half a
-  minute rose to 29 dB under at the same settings, and came back after a few
-  minutes of receiving; 20 m did not move. The radio estimates its heat from
-  how long it has transmitted (receiving cools it) and moves from the band's
-  IQ balance to its warm one as it warms, between transmissions. 0, 0 (the
-  default): no warm balance, the band's own whatever the heat. Found by
-  `tools/bench/txcal.py --state hot`. The radio starts counting from cold
-  when it starts.
+- **IQ balance warm** (the same radios; experimental, 0, 0 = off on every
+  band) is a second IQ balance the radio moves to as its estimate of its own
+  heat (from how long it has transmitted) rises. On the owner's X6100, 15 m's
+  image moved from 46-53 to 29 dB under after a minute or two of transmitting
+  at 0.1 W and came back after minutes of receiving, and a balance found in
+  that state put it back. But it did not happen in a run of 1 W overs, so
+  transmitting time alone does not predict it, and a warm balance set from
+  it made 1 W worse: leave it at 0, 0 unless your radio's shift follows its
+  transmitting. `tools/bench/txcal.py --state hot` finds one.
 - A band never calibrated has none of these (0): before v0.3.12.41 it took
   the values of the band you came from.
 - **The calibration belongs to its radio.** The IQ offsets and IQ balance
@@ -2373,10 +2371,10 @@ What gcfix5 changes (`V1.1.9 Nov 27 2025,gcfix5` in Settings > Info):
   signal to 55-69 dB under on 160 to 17 m and 10 m, and the carrier from
   30-35 to 44-59 dB under on 160 to 15 m; 15 and 12 m improved less (and
   vary from one run to the next), 6 m not at all yet (its offsets left at
-  0). Why 15 m varied: its image moves with the radio's heat (a step after
-  ~40 s of transmitting, 46 to 29 dB under; a balance found warm put it back
-  to 39-48 dB under, 2026-11-20), so it has a second, warm balance the
-  radio moves to as it warms (IQ balance warm, Settings > TX Cal).
+  0). Why 15 m varied: after a minute or two of transmitting at 0.1 W its
+  image moves from 46-53 to 29 dB under at the same balance and comes back
+  after minutes of receiving (not in a run of 1 W overs; the cause is not
+  known yet), so a calibration depends on when it is made.
   Uncalibrated (0, 0) it is Xiegu's as before. A new value takes effect
   at the next transmission. gcfix5 also keeps the offsets through band
   changes: Xiegu's base loaded its own table's (zeros) over them at each.

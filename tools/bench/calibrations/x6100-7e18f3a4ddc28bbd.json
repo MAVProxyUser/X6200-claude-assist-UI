@@ -3,7 +3,7 @@
  "fingerprint": "x6100-7e18f3a4ddc28bbd",
  "model": "x6100",
  "storage": "d10dde40e43a0efa",
- "saved": "2026-11-20 17:35 EST",
+ "saved": "2026-11-20 18:38 EST",
  "units": {
   "tx_i_offset": "register 50 (x 5000 in the base)",
   "tx_q_offset": "register 51",
@@ -73,8 +73,8 @@
    "tx_q_offset": -440,
    "tx_iq_gain": 1081,
    "tx_iq_phase": 683,
-   "tx_iq_hot_gain": -7600,
-   "tx_iq_hot_phase": 1570
+   "tx_iq_hot_gain": 0,
+   "tx_iq_hot_phase": 0
   },
   "12": {
    "freq": 24950000,
