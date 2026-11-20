@@ -52,8 +52,20 @@ approved that day.
     0.5-1.5 s, 0-7% lost (the X6100 beside it, same router: max 18-48 ms); its TCI audio reaches a client at 10-76%
     of real time (parec on the radio itself: full rate; the TCI queue holds 0.6 s and drops the rest). Not the GPS
     keeper (6-10 tries in 7-29 min) nor the RTL stream (the WiFi/Bluetooth chip is on the EHCI port, the RTL on the
-    MUSB one). `bluetoothctl power off` made it seconds-long stalls till a restart: never again. Left to look at: the
-    chip's WiFi/Bluetooth coexistence and the 2.4 GHz channel; the TCI queue could hold longer for audio-only clients.
+    MUSB one). `bluetoothctl power off` made it seconds-long stalls till a restart: never again.
+    Afternoon (2026-11-20): the network has several access points under one name. The X6200 joined the channel-11
+    one at the morning's start (its log), so that was the morning's link; the X6100 is on that one too. Measured 60 s at 5 Hz:
+    the X6200 on channel 11 at -58 dBm averaged 668 ms (stalls to 4.5 s), the access point sending to it at 2 Mbit/s;
+    on the channel-6 one at -70 dBm, 30 ms (max 347 ms, 0 lost); the X6100 on channel 11 at -51 dBm, 5-7 ms.
+    Worse on the stronger signal = something on channel 11 at the X6200, not the link. Suspect: the X6200's own clocks,
+    whose common harmonic 2457.6 MHz (10 x 245.76 = 40 x 61.44 = 200 x 12.288 MHz) sits inside channel 11 (to check
+    with a receiver beside it, radio on and off). Its firmware is not it: WiFi 48.0 and Bluetooth 0x828A96F1
+    are the only ones Realtek ever put in linux-firmware (2019), and the driver's coexistence report (debugfs
+    coex_info) says they match; the coexistence runs TDMA case 3 (Bluetooth idle, table 10) on both channels. The
+    driver (lwfinger/rtw88, pinned 461b696, May 2025) is 134 commits behind, a coexistence update (26020420) among
+    them. With background scans off it stays on whatever access point it joined at the start. Left as found: the X6200 on the
+    channel-6 one. Left to look at: the 2457.6 MHz check, the driver update, a way for the X6200 to prefer
+    another channel when it has one; the TCI queue could hold longer for audio-only clients.
   - the X6200's squelch (Xiegu's, in its base): at 4 it kept a steady -50 dBm tone muted for its whole 6 s with the
     AGC off (with the attenuator in too), and opened only after ~4 s with the AGC on (2026-11-20). Muted, the TCI
     audio is a flat -48 dBFS; tones.py and the decoders open it for their runs.
