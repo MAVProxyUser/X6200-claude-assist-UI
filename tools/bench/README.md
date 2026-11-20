@@ -64,6 +64,17 @@ power and tuner back. `--senders`, `--keep-armed` (each radio armed through a ch
 it). First runs: the X6200 heard by the X6100 on every band and mode; the X6100 by the X6200 on every band and mode
 while the X6200 only listened. The X6100 put out 0.9 W asked for 0.1 W on 6 m, and the watch stopped it there.
 
+`tones.py TX RX` (2026-11-20, the owner: "step some tones across the audio range and see if they come through the other
+side the same way"): tones from 200 to 3100 Hz in USB into one radio's transmitter through its own TCI server
+(tci_tone_tx.py, run on that radio: a client from the radio itself is not asked about on its screen), the other radio's
+TCI audio recorded here with its AGC off, then the same with it on LSB: each tone's frequency (offset and slope fitted;
+a few hundredths of a hertz), level, harmonics, the other sideband, and the listener's own spectrum at each tone's RF.
+At 0.1 W, the first transmission of the session; the watch as radios-walkie's (more power than asked ends the over:
+the sender killed, since the remote's PTT release does not end a TCI transmission). Faded tones with short gaps
+measure the passband; tones back to back show how a receiver copes with a signal that keeps changing (the X6200's, AGC
+off, drops them after about 2.5 s while its spectrum has them). First runs: the X6100 (gcfix3) into the X6200, 20 and
+6 m: 300-2900 Hz within 4 dB, the other sideband 101-110 dB down, the two radios' oscillators 0.48 ppm apart.
+
 `radios-ft8` first ran 2026-11-18 (the X6100 and the X6200 through 40 + 30 dB, 0.1 W, 20 m), both ways: PASS. The
 X6200 decoded the X6100 at +11 to +15 dB, the X6100 the X6200 at -2 to -3 dB (the X6200's preamp on, the X6100's
 off: a parity run sets them alike). Found by it: the FT8 app opens on its last band and holds the dial (the band keys
