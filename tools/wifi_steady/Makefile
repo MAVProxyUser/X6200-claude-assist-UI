@@ -4,10 +4,19 @@
 # /sys/class/net on tmpfs), so nothing of this PC's network is touched. iw and logger are stand-ins that note what
 # they were asked. Needs unshare (util-linux), wpa_supplicant with D-Bus (-u), gdbus (GLib), dbus-daemon and ip.
 # See wifi_steady_test.sh for the cases.
+#
+# `make channel` (a part of `make test`, and the one part that runs on a Mac): dispatcher.d/30-wifi-channel, the X6200
+# leaving channels 9-11 for another access point of the network, with stand-ins for iw, gdbus and logger
+# (wifi_channel_test.sh says the cases). Needs only sh and awk.
 
 all: test
 
-test:
+test: channel steady
+
+steady:
 	unshare -rmn sh wifi_steady_test.sh ../../rootfs/etc/NetworkManager/dispatcher.d/20-wifi-steady
 
-.PHONY: all test
+channel:
+	sh wifi_channel_test.sh ../../rootfs/etc/NetworkManager/dispatcher.d/30-wifi-channel
+
+.PHONY: all test steady channel

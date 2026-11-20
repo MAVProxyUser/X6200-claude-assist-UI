@@ -3610,6 +3610,14 @@ Once joined:
   30 s on a weak signal. A scan runs when the WiFi window or this tab opens,
   and on Scan. When the access point is lost the radio still looks for it,
   and joins it again.
+- The X6200 keeps off WiFi channels 9, 10 and 11 when your network has an
+  access point on another channel at -80 dBm or better: on channel 11 its
+  WiFi stalled for seconds (668 ms on average, against 30 ms on channel 6 with
+  a weaker signal), most likely its own clocks, whose harmonic at 2457.6 MHz
+  falls there. Joined on one of those channels, it moves to the strongest
+  other one within a few seconds (2 s without a link, the same address) and
+  stays there until it next joins. With no other, it stays where it is. The
+  X6100 joins as before. What it did is in `/var/log/messages` ("wifi:").
 - The clock is set from the internet (NTP), with three tries 10 s apart, and
   written into the clock chip. ntpd, which keeps the clock from then on, is
   started again if it has found no time server yet: it starts with the

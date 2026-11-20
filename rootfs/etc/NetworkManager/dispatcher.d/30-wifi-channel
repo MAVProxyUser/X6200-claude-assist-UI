@@ -1,0 +1,126 @@
+#!/bin/sh
+# A WiFi link up on an X6200: off channels 9, 10 and 11 when the network has an access point on another channel.
+#
+# Measured 2026-11-20 on a network of several access points under one name (60 s of pings at 5 Hz): the X6200 on
+# the channel-11 one at -58 dBm averaged 668 ms with stalls to 4.5 s, the access point sending to it at 2 Mbit/s;
+# on the channel-6 one at -70 dBm, 30 ms. The X6100 beside it on channel 11: 5-7 ms. Worse on the stronger signal,
+# and on the X6200 only, points at the X6200 itself: its clocks (245.76, 61.44 and 12.288 MHz) share a harmonic at
+# 2457.6 MHz, inside channels 9, 10 and 11. Its WiFi firmware is Realtek's newest.
+#
+# So, on an X6200 joined on one of those channels: the strongest access point of the same network on another
+# channel at -80 dBm or better (from the join's scan; one more scan if that has gone stale) becomes the one it uses.
+# The supplicant's network is limited to the other channels (freq_list), so a later scan (the WiFi window's) does
+# not take it back. That change makes the supplicant leave the access point and join the strongest one left
+# (2 s without a link, the same address after, tried on the X6200 2026-11-20); should it not, it is asked to roam
+# there. With none, it stays where it is. NetworkManager hands the supplicant the network again, unlimited, at each
+# join, and this runs again then: if that access point goes away, the next join may take channel 11 again.
+
+IF=$1
+[ "$2" = up ] || exit 0
+[ -e "${X6X00_NET:-/sys/class/net}/$IF/phy80211" ] || exit 0         # WiFi only
+grep -q "xiegu,x6200" "${X6X00_DT:-/proc/device-tree/compatible}" 2> /dev/null || exit 0     # the X6200 only
+
+AVOID="2452 2457 2462"      # channels 9, 10, 11: within 9 MHz of 2457.6 (a 20 MHz channel's OFDM spans +-8.3)
+FLOOR=-80                   # dBm: an access point weaker than this is no better a link
+SUP=fi.w1.wpa_supplicant1
+
+say() {
+    logger -t wifi "$IF: $*"
+}
+call() {
+    gdbus call --system --dest $SUP --timeout 5 "$@" 2> /dev/null
+}
+object() {
+    sed -n "s/.*objectpath '\([^']*\)'.*/\1/p"
+}
+# The strongest access point of network $1 off the avoided channels, at FLOOR or better: "bssid freq signal"
+best() {
+    # The name through the environment: awk -v would turn iw's \xNN escapes into bytes, the dump's stay text
+    iw dev "$IF" scan dump 2> /dev/null | SSID=$1 awk -v avoid=" $AVOID " -v floor=$FLOOR '
+        function done() {
+            if (b != "" && s == ENVIRON["SSID"] && f != "" && index(avoid, " " f " ") == 0 && g >= floor &&
+                    (best == "" || g > bg)) {
+                best = b; bf = f; bg = g
+            }
+        }
+        /^BSS / { done(); b = substr($2, 1, 17); f = ""; g = -999; s = "" }
+        /^[ \t]*freq: / { f = int($2) }
+        /^[ \t]*signal: / { g = $2 + 0 }
+        /^\tSSID: / { s = substr($0, index($0, ": ") + 2) }
+        END { done(); if (best != "") print best, bf, int(bg) }'
+}
+
+link=$(iw dev "$IF" link 2> /dev/null)
+freq=$(printf '%s\n' "$link" | sed -n 's/^[[:space:]]*freq: \([0-9]*\).*/\1/p')
+ssid=$(printf '%s\n' "$link" | sed -n 's/^[[:space:]]*SSID: //p')      # printf: an echo may read iw's \x escapes
+[ -n "$freq" ] && [ -n "$ssid" ] || exit 0
+case " $AVOID " in
+    *" $freq "*) ;;
+    *) exit 0 ;;
+esac
+ch=$(( (freq - 2407) / 5 ))
+
+iface=$(call --object-path /fi/w1/wpa_supplicant1 --method $SUP.GetInterface "$IF" | object)
+[ -n "$iface" ] || { say "on channel $ch, the X6200's own: the supplicant does not have it, staying"; exit 0; }
+
+pick=$(best "$ssid")
+if [ -z "$pick" ]; then
+    # The join's scan may have gone stale in the kernel's list (30 s) by now: one more, read as it comes in
+    call --object-path "$iface" --method $SUP.Interface.Scan "{'Type': <'active'>}" > /dev/null
+    i=0
+    while [ $i -lt 12 ] && [ -z "$pick" ]; do
+        sleep 0.5
+        pick=$(best "$ssid")
+        i=$((i + 1))
+    done
+fi
+if [ -z "$pick" ]; then
+    say "on channel $ch, the X6200's own: no other access point of this network at $FLOOR dBm or better, staying"
+    exit 0
+fi
+set -- $pick
+bssid=$1 to=$(( ($2 - 2407) / 5 )) sig=$3
+
+# The link now as "bssid channel dBm", once it is on a channel not avoided; nothing while not (6 s at most)
+settled() {
+    i=0
+    while [ $i -lt 12 ]; do
+        sleep 0.5
+        printf '%s\n' "$(iw dev "$IF" link 2> /dev/null)" | awk -v avoid=" $AVOID " '
+            /^Connected to / { b = $3 }
+            /^[ \t]*freq: / { f = int($2) }
+            /^[ \t]*signal: / { g = int($2) }
+            END { if (b != "" && f != "" && index(avoid, " " f " ") == 0) print b, (f - 2407) / 5, g }' | grep . &&
+            return 0
+        i=$((i + 1))
+    done
+    return 1
+}
+
+# The network limited to every 2.4 GHz channel but the avoided ones (the X6200's chip has no 5 GHz)
+list=
+for f in 2412 2417 2422 2427 2432 2437 2442 2447 2452 2457 2462 2467 2472 2484; do
+    case " $AVOID " in *" $f "*) continue ;; esac
+    list="${list:+$list }$f"
+done
+net=$(call --object-path "$iface" --method org.freedesktop.DBus.Properties.Get $SUP.Interface CurrentNetwork | object)
+case "$net" in
+    */Networks/*)
+        call --object-path "$net" --method org.freedesktop.DBus.Properties.Set $SUP.Network Properties \
+            "<{'freq_list': <'$list'>}>" > /dev/null ||
+            say "the network not limited to other channels (the supplicant refused)"
+        ;;
+esac
+# The supplicant leaves on that change and joins the strongest one left; if it has not, it is asked to roam
+now=$(settled)
+if [ -z "$now" ]; then
+    call --object-path "$iface" --method $SUP.Interface.Roam "$bssid" > /dev/null
+    now=$(settled)
+fi
+if [ -n "$now" ]; then
+    set -- $now
+    say "off channel $ch, the X6200's own: on channel $2 now ($1, $3 dBm)"
+else
+    say "off channel $ch, the X6200's own: not moved to $bssid on channel $to ($sig dBm), the supplicant did not"
+fi
+exit 0
