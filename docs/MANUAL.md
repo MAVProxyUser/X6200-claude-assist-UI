@@ -2307,16 +2307,27 @@ What gcfix4 changes (`V1.1.9 Nov 27 2025,gcfix4` in Settings > Info):
   radio is switched on still behaves as Xiegu's until the base has heard
   some audio.
 - **The codec's clock as Xiegu meant it.** Xiegu's base sets its audio
-  converter's clock with one wrong byte, so the base samples at 99,932 Hz,
-  not 100 kHz: the spectrum's frequency scale was 0.07 % off (up to 34 Hz at
-  its edges). Audio frequencies are not changed by it (the receiver's and the
-  transmitter's converters share that clock).
+  converter's clock with one wrong byte, so by the values it writes the base
+  samples at 99,932 Hz, not 100 kHz, which would put the spectrum's frequency
+  scale 0.07 % off (up to 34 Hz at its edges). Audio frequencies are not
+  changed by it: tones measured the same on Xiegu's base and gcfix4 (the
+  receiver's and the transmitter's converters share that clock).
 - Tested with tones from 200 to 3100 Hz and with bursts after pauses, sent
-  from one radio into the other through the pads (`tools/bench/tones.py`):
-  300 to 2900 Hz within 3.5 dB; the other sideband about 42 dB down, as with
-  Xiegu's base (the sending and the listening radio's image together; the
-  X6100's calibration memory is empty, so its I/Q balance was never set);
-  the receiver the same as Xiegu's.
+  from one radio into the other through the pads (`tools/bench/tones.py`),
+  at 0.1 W and at 5 W: 300 to 2900 Hz within 3.5 dB, the power as set
+  (4.7-4.8 W on every band at 5 W, 5.2 W on 6 m), at 5 W each sound after a
+  pause within 0.6 dB, the receiver the same as Xiegu's.
+- **What gcfix does not change: the other sideband and the carrier.** Every
+  X6100 also sends a weak mirror image of its signal on the other side of
+  the dial (a 600 Hz tone in USB also appears at 600 Hz below the dial), and
+  a carrier on the dial itself. Measured on this X6100 at 5 W on every band
+  from 160 to 6 m (`tools/bench/image.py`): the image 42 to 54 dB under the
+  signal (15 and 12 m the worst), the carrier 30 to 48 dB under. Xiegu's own
+  base measured the same. The carrier stays at the same few milliwatts
+  whatever the power, so at a 0.1 W setting it is only about 12 dB under the
+  signal on HF. Neither base has a correction for them, and the X6100's
+  calibration memory is empty. Both stay within about 3 kHz of the dial;
+  they leave a band only if you work right at its edge.
 
 gcfix3 is the same without the hold (the power and clock fixes only).
 

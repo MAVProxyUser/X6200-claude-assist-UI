@@ -84,6 +84,24 @@ within +1.1 dB (tools/base_update/README.md). A burst too hot for the watch (0.6
 Xiegu's loop is seen on its first bursts only. The sender on the radio is stopped by its pid file (the X6100's
 BusyBox has no pkill).
 
+`--w 5` (2026-11-20, the owner: gcfix "needs a run at 5-10 W into a dummy load"): every pass at 0.1 W first (rule 4),
+then at the power asked, up to `limits.radio_w` and never over 5 W, a pad of twice that on each radio's jack. The
+X6100 at 5 W, 20 m: gcfix4 within +0.3 dB after every pause, 4.7 W; Xiegu's loop (gcfix3) +0.9 dB, and its own
+noise in the pauses 9-10 dB higher; 6 m, gcfix4, within +0.6 dB. So the bursts are a low-power problem.
+
+`image.py TX RX [--bands ...] [--w 5]` (2026-11-20, the owner: "you MUST prove this via testing"): where the
+transmitter's opposite-sideband image and its carrier leak land and how strong they are, band by band. TX sends USB
+tones fa (600, 900 Hz), RX listens in USB with its dial OFF Hz below (1500; 20 and 80 m also 1200). In RX's audio the
+wanted tone is at OFF + fa, TX's carrier at OFF, and TX's tone mirrored around its dial at OFF - fa. RX's own image
+mirrors around RX's dial into RX's other sideband, which its USB demodulator leaves out. The image's measured place
+is checked against 2 x carrier - wanted (mirror error in Hz), and two offsets move RX against TX. RX's panadapter is
+read for anything else the over brought up. The session's first over is at 0.1 W, the rest at --w; RX's squelch
+open, AGC 3, attenuator on (--rx-att, --rx-rfg). If RX's TCI audio stops (its WiFi), a new connection is made.
+The X6100 into the X6200 at 5 W, all bands 160-6 m: the image at the dial minus fa to within 0.09 Hz, -42.5 to
+-54.5 dBc (15 and 12 m the worst); Xiegu's own V1.1.9 the same (-45.2 to -46.6 dBc on 20, 15 and 6 m). The
+carrier: -30 to -48 dBc at 5 W, about -12 dBc at 0.1 W on HF (it does not scale with power). Details:
+tools/base_update/README.md.
+
 `radios-ft8` first ran 2026-11-18 (the X6100 and the X6200 through 40 + 30 dB, 0.1 W, 20 m), both ways: PASS. The
 X6200 decoded the X6100 at +11 to +15 dB, the X6100 the X6200 at -2 to -3 dB (the X6200's preamp on, the X6100's
 off: a parity run sets them alike). Found by it: the FT8 app opens on its last band and holds the dial (the band keys

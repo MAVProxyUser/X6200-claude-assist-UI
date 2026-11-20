@@ -43,11 +43,19 @@ approved that day.
     bursts after 50 ms to 3.2 s of pause start within 1 dB (Xiegu's: +5 to +18 dB, 0.7-1.0 W at 0.1 W, then 6-14 dB
     under). The X6200 "dropping changing tones with AGC off" was its squelch (at 4) muting its audio, and so was the
     image "101-110 dB down": tones.py opens the listener's squelch now.
-  - the other sideband is about 42 dB down (tones.py, the X6100's USB tones heard on the X6200's LSB, 20 m): the
-    X6100's transmit image and the X6200's receive image together. The X6100's calibration block is empty and its
-    base has no TX phase/gain correction (registers 48/49, x6100_rphscmp/rmagcmp, correct the receiver only, stored
-    at 0x200078c0..c8): a TX I/Q balance would be a second hook (Q' = g Q + p I on the block before the DAC) with
-    per-band values found by a sweep. The owner's call.
+  - the X6100's transmit image and carrier, MEASURED 2026-11-20 afternoon (tools/bench/image.py, 5 W, every band
+    160-6 m; tools/base_update/README.md has the table): the image is the signal mirrored around the dial (to 0.09 Hz),
+    -42.5 to -54.5 dBc (15 and 12 m worst), Xiegu's own V1.1.9 the same; the carrier -30 to -48 dBc at 5 W but about
+    -12 dBc at 0.1 W on HF (constant milliwatts). The owner (2026-11-20): "that feels like something we'd want to
+    fix ... a calibration tool for screen F seems relevant"; the X6200 not wanted. To do: TX CAL on F SYSTEM (a
+    dummy load, the lowest power, a second receiver: the other radio or an SDR on the X6100's USB) nulling the carrier
+    with registers 50/51 (exist, zero, not yet tried) and the image with a second base hook (Q' = g Q + p I on the
+    block before the DAC, per band, values from the GUI through a register). The X6100's calibration block is empty
+    and its base has no TX phase/gain correction (registers 48/49, x6100_rphscmp/rmagcmp, correct the receiver only).
+    Seen, not explained: the tone's 2nd harmonic at dial + 2 fa (-34 to -38 dBc, both bases); humps 38-41 kHz either
+    side on the X6200's panadapter on 80, 10 and 6 m. 10 W not run (the bench's twice-the-power pad rule: the owner's
+    word needed). A draft PR to RF.Guru's X6100-Baseband (the errata as an opt-in patcher, these findings) is in
+    drafts/x6100-baseband-errata/, NOT submitted (the owner: "do NOT submit it").
   - the X6200's WiFi, 2026-11-20 morning (v0.3.12.39): pinged at 10 Hz, 4-19% of replies over 100 ms, spikes of
     0.5-1.5 s, 0-7% lost (the X6100 beside it, same router: max 18-48 ms); its TCI audio reaches a client at 10-76%
     of real time (parec on the radio itself: full rate; the TCI queue holds 0.6 s and drops the rest). Not the GPS

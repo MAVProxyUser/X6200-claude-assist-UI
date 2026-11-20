@@ -447,10 +447,12 @@ and 224 appended):
 
 Measured on the owner's X6100 through 70 dB of pads (bench.py's gates; tools/bench/tones.py): 0.1 W on 6, 10, 20 and 40
 m (Xiegu's: 0.8 W on 6 m, 0.2-0.3 W on HF), 0.3, 0.5 and 1.1 W on 6 m as asked, the same to the dB with gcfix4; SSB
-tones 300-2900 Hz within 3.5 dB at 0.1 W; the other sideband about 42 dB down (the X6100's transmit image and the
-X6200's receive image together; the X6100's calibration block is empty, its TX I/Q balance never set, and its base
-has no TX phase or gain correction: registers 48/49 correct the receiver only); the receiver identical to Xiegu's
-V1.1.9 in the same sweep (passband, image).
+tones 300-2900 Hz within 3.5 dB at 0.1 W; the other sideband about 42 dB down in that 20 m sweep, the X6200 on LSB at
+the same dial (the X6100's transmit image and the X6200's receive image together; the X6100's own, measured apart
+below: -42.5 to -54.5 dBc); the receiver identical to Xiegu's V1.1.9 in the same sweep (passband, image).
+At 5 W (2026-11-20 afternoon, the owner's 10 W 30 and 40 dB pads): 4.7-4.8 W on all ten bands 160-10 m and 5.2 W on
+6 m by the X6100's meter (Xiegu's V1.1.9: 4.9 W on 20 and 15 m, 5.35 W on 6 m); the X6200's S-meter +16 dB from 0.1 to
+5 W on 20 m (+17 expected). 10 W not tested: the bench needs a pad of twice the test power on each jack.
 Withdrawn on the way: gcfix1 (floor only) and gcfix2 (no floor change), after a lost-tone run first blamed on the floor.
 
 The hold (gcfix4), measured with `tones.py --bursts` (1 kHz bursts with 2 ms starts after pauses of 50 ms to 3.2 s,
@@ -468,6 +470,47 @@ Two misreadings on the way, both the listening X6200's squelch (at 4: with its A
 muted its audio whole, a flat -48 dBFS): runs that looked like the hook holding the transmitter quiet, and the other
 sideband "101-110 dB down" (it was the muted audio). tones.py opens the listener's squelch now. The X6200 "dropping
 changing tones after 2.5 s with its AGC off" was most likely the same.
+
+At 5 W (tones.py --w 5, 2026-11-20): gcfix4 within +0.3 dB after every pause on 20 m (dips -0.1 dB) and +0.6 dB on
+6 m; gcfix3 (Xiegu's loop) +0.9 dB on 20 m, and its own noise in long pauses -33 dB against gcfix4's -43. At 5 W
+Xiegu's loop has little room to climb: the burst is a low-power problem (QRP, a transverter's drive, an amplifier fed
+a low setting).
+
+The codec PLL ("pll"): by the values Xiegu writes the I/Q rate is 99,932 Hz (-676 ppm), but no tone shows it.
+Xiegu's base sent a 600 -> 900 Hz step as 299.99 Hz on 20 m and 299.98 on 15 m at 5 W (-676 ppm: 299.80); the X6100
+receiving the X6200 measured +50.7 ppm on Xiegu's base and +53.1 on gcfix3. Where it may still show (the spectrum's
+scale, the IF shift's NCO) is not measured. The fix stays: the code clearly means the computed byte, and gdyuldin's
+r13 made the same change.
+
+### The X6100's transmit image and carrier, measured 2026-11-20
+
+`tools/bench/image.py` (tools/bench/README.md): the X6100 sends USB tones of 600 and 900 Hz at 5 W, the X6200 listens
+in USB with its dial 1500 Hz (20 and 80 m also 1200 Hz) below; the image's place is checked against 2 x carrier -
+wanted. Every band 160-6 m, gcfix4; Xiegu's V1.1.9 on 20, 15 and 6 m (flashed for it, gcfix4 back after):
+
+| Band | Image, dBc | Mirror error | Carrier, dBc |
+|---|---|---|---|
+| 160 m | -52.1 to -54.0 | 0.01 Hz | -31.3 to -32.1 |
+| 80 m | -51.6 to -54.5 | 0.02 Hz | -30.0 to -30.3 |
+| 40 m | -49.0 to -50.8 | 0.09 Hz | -30.2 to -30.5 |
+| 30 m | -48.8 to -49.0 | 0.09 Hz | -30.8 to -31.0 |
+| 20 m | -45.5 to -49.1 | 0.04 Hz | -34.4 to -34.9 |
+| 17 m | -48.1 to -49.0 | 0.05 Hz | -32.9 to -33.0 |
+| 15 m | -42.6 to -42.9 | 0.03 Hz | -33.1 to -33.2 |
+| 12 m | -42.5 to -43.1 | 0.03 Hz | -34.2 to -34.8 |
+| 10 m | -43.6 to -44.3 | 0.09 Hz | -37.4 to -38.2 |
+| 6 m | -46.0 to -50.9 | 0.01 Hz | -38.8 to -47.7 |
+| Xiegu's, 20 / 15 / 6 m | -46.1 to -46.6 / -45.5 to -45.7 / -45.2 to -45.5 | 0.12 Hz | -34.5 / -32.4 to -32.8 / -38.1 to -40.3 |
+
+The image is the signal mirrored around the dial (the X6100's oscillator): within the audio's 3 kHz of the dial, in
+the other sideband; out of a band only right at its edge, out of a channel on channelised 60 m. Xiegu's base has the
+same image; no X6100 base we decrypted corrects transmit I/Q. The carrier is a few milliwatts whatever the power (the
+DC offsets come after the loop's gain): -11.4 to -13.9 dBc at 0.1 W on HF, -22 dBc on 6 m (Xiegu's at its 0.2 W
+floor: -18 to -21 dBc). The fix would be a second hook (Q' = g Q + p I before the DAC, per band) and nulling the
+carrier with registers 50/51 (they exist, zero here; not yet tried), set by a calibration on the radio (TODO.md).
+Seen, not explained: the tone's second harmonic at the dial + 2 fa, -34 to -38 dBc on both bases; broad humps
+38-41 kHz either side on the X6200's panadapter on 80, 10 and 6 m, about -42 dB per 100 Hz bin, the same with the
+X6200's attenuator out, no tone when the X6200 is tuned onto them.
 
 ### Every base compared, 2026-11-20
 

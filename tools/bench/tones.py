@@ -8,6 +8,7 @@ the first transmission at 0.1 W). The receiver's AGC is off and its squelch open
 are the chain's, not the AGC's (--rx-rfg and --rx-att set its gain); everything is put back after.
 
     tones.py TX RX [--freq HZ] [--w W] [--passes usb,lsb] [--tones 200,300,...] [--amp 0.3]
+                                 --w over 0.1: every pass at 0.1 W first, then at W (limits.radio_w, 5 W at most)
     tones.py TX RX --bursts 0.05,0.1,0.2,0.4,0.8,1.6,3.2 [--burst-hz 1000] [--burst-s 0.5] [--fade 0.002]
 
 --bursts: the transmitter's power loop on the first sound after a pause. Bursts of one tone with hard starts (2 ms),
@@ -16,7 +17,8 @@ against its steady level at its end: the overshoot (dB) and how long it takes to
 raises its gain through a pause, so its bursts start hot (x6100_patch.py, fix "hold").
 
 Frequency: each tone's measured minus asked is fitted to offset + slope x tone; the offset is the two radios'
-oscillators apart, the slope a sample-rate error (the X6100's base before gcfix1: -676 ppm). A report (JSON, the
+oscillators apart, the slope a sample-rate error (the X6100's PLL error, -676 ppm by its values, does not show in
+it: Xiegu's base and gcfix both within the measurement's ~30 ppm, 2026-11-20). A report (JSON, the
 recording) in ~/.config/x6x00-bench/runs/<time>-tones/.
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
@@ -51,6 +53,9 @@ class TciRx:
         head, self.buf = resp.split(b"\r\n\r\n", 1)
         if b" 101" not in head.split(b"\r\n")[0]:
             raise Refused(f"{host}: TCI did not answer")
+        # No timeout from here: create_connection's 5 s ended the reader at the first stall that long (the X6200's
+        # WiFi, 2026-11-20: every over after it "no audio"); image.py opens a new one when frames stop
+        self.s.settimeout(None)
         self.frames, self.on = [], True
         self.lock = threading.Lock()
         threading.Thread(target=self._run, daemon=True).start()
@@ -252,9 +257,12 @@ def main():
         a.passes, tones = "usb", [a.burst_hz]
     c = bench.conf()
     p, total = chain_gate(c, "radios")
-    if a.w != bench.FIRST_PROBE_W:
-        say(f"the session's first transmission is at {bench.FIRST_PROBE_W} W, not {a.w}: {bench.FIRST_PROBE_W} W")
-        a.w = bench.FIRST_PROBE_W
+    # The session's first transmission at 0.1 W whatever is asked (bench.py's rule 4): above it, every pass runs at
+    # 0.1 W first, then at the power asked (the owner, 2026-11-20: gcfix at 5 W), each its own label
+    if a.w > c["limits"]["radio_w"]:
+        raise Refused(f"{a.w} W is over the limit ({c['limits']['radio_w']} W)")
+    powers = [bench.FIRST_PROBE_W] + ([a.w] if a.w > bench.FIRST_PROBE_W else [])
+    cur_w = [bench.FIRST_PROBE_W]
     txr, rxr = Radio(a.tx, c["radios"][a.tx], True), Radio(a.rx, c["radios"][a.rx], True)
     radios = [txr, rxr]
     run_dir = os.path.join(bench.STATE, "runs", time.strftime("%Y%m%d-%H%M%S-tones") + (f"-{a.tag}" if a.tag else ""))
@@ -313,13 +321,14 @@ def main():
         rx_mode = {"usb": 2, "lsb": 0}[sideband]
         setv(txr, "mode", 2)
         setv(rxr, "mode", rx_mode)
-        radio_tx_gate(txr, c, a.w)
-        line = (f"BENCH TONES: {a.tx.upper()} SENDS {len(tones)} TONES USB {a.w} W, {a.rx.upper()} LISTENS "
+        w = cur_w[0]
+        radio_tx_gate(txr, c, w)
+        line = (f"BENCH TONES: {a.tx.upper()} SENDS {len(tones)} TONES USB {w} W, {a.rx.upper()} LISTENS "
                 f"{sideband.upper()}, {a.freq / 1e6:.3f} MHZ THROUGH {total} DB")
         for r in radios:
             r.send(f"banner {line}")
         time.sleep(1.0)
-        watch = Watch(radios, c, expect_dbm=10 * math.log10(a.w * 1000) - total, listener=rxr, w=a.w)
+        watch = Watch(radios, c, expect_dbm=10 * math.log10(w * 1000) - total, listener=rxr, w=w)
         watch.soft_power = True
         arm(txr, True)
         tx_log({"who": txr.name, "f": a.freq, "w": txr.pwr(), "what": f"tones {label}"})
@@ -422,9 +431,6 @@ def main():
                 r.send("open sentry G")
                 r.wait("G, the Walkie", lambda r=r: r.state.get("pg") == "G", 10)
             setv(r, "freq", a.freq)
-        r = txr
-        r.send(f"set pwr {round(a.w * 10)}")
-        r.wait("the power", lambda: abs(txr.pwr() - a.w) < 0.05, 5)
         setv(rxr, "agc", 0)                        # off: the chain's levels, not the AGC's
         setv(rxr, "sql", 0)                        # open: a squelch shut on the receiver mutes its audio whole (the
                                                    # X6200's at 4, 2026-11-20: "no tone found" runs)
@@ -434,8 +440,12 @@ def main():
             setv(rxr, "att", a.rx_att)
         tci = TciRx(rxr.host)
         time.sleep(1.0)
-        for pas in a.passes.split(","):
-            one_over(pas, pas)
+        for w in powers:
+            cur_w[0] = w
+            txr.send(f"set pwr {round(w * 10)}")
+            txr.wait("the power", lambda: abs(txr.pwr() - w) < 0.05, 5)
+            for pas in a.passes.split(","):
+                one_over(pas, pas if len(powers) == 1 else f"{pas}-{w}W")
         summary = {}
         for label, res in results["passes"].items():
             if "bursts" in res:
