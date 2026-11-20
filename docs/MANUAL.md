@@ -8012,8 +8012,16 @@ the radio connects to, so both work at once.
    says *gpsd reads it* once it is connected.
 
 The radio keeps connecting to it (`btgps-ctl`, started with the CAT bridge):
-switched off or out of range it is tried again every 10 seconds, so switching
-it on again is all it takes. Its channel is read from the GPS when it is
+switched off or out of range it is tried again, so switching it on again is
+all it takes: 10 seconds after it dropped, then each wait twice the last, up
+to 5 minutes (choosing a GPS again starts over at 10 s). So a GPS switched on
+again may take up to 5 minutes to be found. Each try calls the GPS for about
+5 seconds, and on the X6200 the WiFi shares its chip and antenna with the
+Bluetooth: tried every 10 seconds (up to v0.3.12.36), a GPS that was not
+there stalled the WiFi for 1 to 3.6 s every 16 s, a sixth of the radio's
+packets lost, the web page's meter and spectrum stalling and taps from it
+missed. Off (Settings > Bluetooth, GPS for gpsd: Off) there are no tries
+at all. Its channel is read from the GPS when it is
 chosen (1 otherwise). The same choice is on the web page's Direction finder,
 in its GPS card (Bluetooth GPS: a paired device, or Off). Log:
 `/tmp/btgps.log`; its link: `/tmp/btgps.state` (connected, trying, off). How it is doing: the Sentry's

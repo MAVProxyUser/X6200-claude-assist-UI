@@ -16,9 +16,12 @@ approved that day.
   SSTV's picture starting dark as WeFax's (the owner chose dark).
 - Done in the suite: the pictures taken with the X6100 made like the X6200 first (dial, bands, volumes, the apps'
   frequencies, the GUI state: B's frequency, the pages, the Direction finder's target and array), its own back after.
-  The pictures to take again once v0.3.12.32 is on both (the X6100's Weather, Flights and Internet radio helpers).
-- Waiting on the release: v0.3.12.32 on both radios through their updaters, the X6100's kernel set with it
-  (v0.3.12.29-.31 were refused by every updater; fixed 3a3755ce).
+  DONE 2026-11-19 23:44: taken again on v0.3.12.36 (docs/parity/v0.3.12.36, redacted, OCR-checked): the X6100's
+  Weather, Flights and Internet radio helpers answer; 56 pass, RADE to look at (headphones/TCI), SSTV on the X6100
+  slower than the suite's 15 s (pictured before it tuned to 14.230).
+- DONE 2026-11-19 23:28: both radios on v0.3.12.36 through their own updaters (`x6100-update upgrade --kernel --uboot
+  --reboot`, "confirmed"), each back by itself in under 2 minutes, the X6100 by kexec; the cards had the bundle's
+  kernel and U-Boot already. The X6100's SSTV opening in 9-17 s is still to look at.
 - Done in the bundle (the owner: "I should not have to write it, the updater should"): the image's Mesa, GStreamer
   and ffmpeg with the libraries they load (mkbundle.py CARRY_PKGS), and level 3 reached by the bundle's kernel and
   U-Boot (image-required's x6100-boot and x6200-boot lines): the X6100's card v0.3.12.28 gets the GPU through its
@@ -28,8 +31,16 @@ approved that day.
     (TX Cal?) before G's 6 m from the X6100 is tried again;
   - DONE: the X6200's S-meter in AM, SAM and WFM from its spectrum inside the filter, set against the base's reading
     learned in the other modes (dsp.cpp psd_meter): an X6100 AM over now reads -117 -> -69 dBm on 10 m;
-  - the X6200's reports to a page (meter, spectrum, state) stall for seconds now and then, and an A/B tap over WiFi
-    is missed now and then (the remote's key press and release).
+  - DONE 2026-11-19 night: the X6200's reports to a page (meter, spectrum, state) stalling for seconds and A/B taps
+    over WiFi missed: its Bluetooth GPS keeper paging the GLO 2 (not there, 2205 tries since the start) every
+    ~16 s, each try taking the WiFi's shared chip and antenna for 1-3.6 s (17% of pings lost; 0 with the keeper
+    stopped, 0 on the X6100 and the router at the same time). btgps-ctl backs off now (10 s doubling to 300 s,
+    back to 10 s after a connection): 1.2% lost over 200 s while backing off, one stall per 5 min at the cap.
+  - the X6100's 6 m over-power, looked at 2026-11-19 night: real, not its meter (the X6200 heard its 6 m at
+    -64/-66 dBm at a 0.1 W setting against -70/-71 on 10 and 12 m; the path back loses the same on 6 m). Its power
+    is the base's (x6100_control_txpwr_set); the one Linux handle, the band output gain (dac_gain_set), works on
+    gdyuldin's patched base r8+ only, not Xiegu's V1.1.9 this X6100 runs. The owner's call: the patched base, or
+    the Walkie saying the X6100's 6 m floor (about 0.8 W), or leave it.
 - The X6100's processor temperature sensor (2026-11-19, the owner's heater run: 16 min at 5 readings a second, a
   heater on both radios from 35 s): its raw values sit on round binary steps around mid-scale (2048, 2176, 2240, 1984,
   2016: 0x800, 0x880, 0x8C0, 0x7C0, 0x7E0), the ADC's conversion not settling, not a temperature with noise; a 30 s

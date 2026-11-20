@@ -9,8 +9,13 @@
 #
 # "run" (started by S94btcat) keeps it: btgps-bridge connects to the GPS and gives
 # its words a pseudo-terminal, given to gpsd (gpsdctl add) while it is connected and
-# taken back when it drops; a GPS switched off or out of range is tried again every
-# 10 s, so nothing is done by hand when it comes back. Not "rfcomm connect": this
+# taken back when it drops; a GPS switched off or out of range is tried again, so
+# nothing is done by hand when it comes back: 10 s after it dropped, then each wait
+# twice the last, up to 5 minutes. Each try pages the GPS for about 5 s, and the
+# X6200's WiFi shares its chip and antenna with the Bluetooth: tried every 10 s, a GPS
+# not there stalled the WiFi for 1-3.6 s every 16 s, 17% of pings lost, the page's
+# reports and A/B taps over WiFi with them (2026-11-19; none with the keeper stopped).
+# Another GPS chosen (set) starts the waits over. Not "rfcomm connect": this
 # kernel makes no RFCOMM TTYs ("Can't create RFCOMM TTY: Operation not supported",
 # the first GPS here, a GLO 2, 2026-11-18). gpsd quits a few seconds after its last
 # device goes while nothing reads it (this image's): started again with the next
@@ -67,13 +72,18 @@ keep() {
 	echo $$ > $PIDF
 	trap 'kill $pid 2>/dev/null; [ -n "$tty" ] && gpsdctl remove $tty >/dev/null 2>&1; echo off > $STATE
 	      [ "$(cat $PIDF 2>/dev/null)" = "$$" ] && rm -f $PIDF; exit 0' TERM INT
+	wait_s=10
+	last=
 	while :; do
 		load
 		if [ -z "$BTGPS_MAC" ]; then
 			echo off > $STATE
+			last=
 			nap 5
 			continue
 		fi
+		[ "$BTGPS_MAC" = "$last" ] || wait_s=10		# another GPS chosen: tried soon
+		last=$BTGPS_MAC
 		mac=$BTGPS_MAC
 		tty=
 		echo trying > $STATE
@@ -86,6 +96,7 @@ keep() {
 			i=$((i + 1))
 		done
 		if [ -e $LINK ] && kill -0 $pid 2>/dev/null; then
+			wait_s=10			# it was there: when it drops, tried again soon
 			tty=$(readlink $LINK)		# the pty itself: gpsd keeps the name it was given
 			gpsd_up
 			gpsdctl add $tty >/dev/null 2>&1
@@ -106,7 +117,16 @@ keep() {
 		tty=
 		echo trying > $STATE
 		load
-		[ "$BTGPS_MAC" = "$mac" ] && nap 10		# off or out of range: again in a while
+		# off or out of range: again in a while, each wait twice the last (up to 300 s), in
+		# 5 s naps that end early when another GPS is chosen or it is switched off
+		waited=0
+		while [ $waited -lt $wait_s ] && [ "$BTGPS_MAC" = "$mac" ]; do
+			nap 5
+			waited=$((waited + 5))
+			load
+		done
+		wait_s=$((wait_s * 2))
+		[ $wait_s -gt 300 ] && wait_s=300
 	done
 }
 
