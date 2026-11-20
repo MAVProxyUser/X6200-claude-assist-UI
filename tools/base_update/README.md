@@ -583,6 +583,37 @@ band is a compromise), 15 and 12 m vary from run to run by more than the search'
 found offsets that measure worse apart. The dBc figures are against the wanted tone in the X6200's audio, whose level
 at 2.1 and 2.4 kHz differs (a 10 dB step at the tone change in one over, carrier and image together).
 
+#### Why 15 m varied: the image moves with the radio's heat (2026-11-20 evening)
+
+Followed up (the owner: "dive deeper into your theory then and find a novel solution that *works*"), on 15 m, the X6100
+sending 900 Hz tones (0.1 W unless said), the X6200 listening through the pads (receive only):
+
+- **The correction works there.** A deliberate gain error (txig 15000, 15 %) took the image from -45 to -24 dBc, the
+  -22.5 the hook's arithmetic predicts; the bowl's curvature at 0.1 W, 3.0e-11 per unit squared, against 2.5e-11 by
+  the same arithmetic.
+- **Not the audio band.** Five settings (0, 0 and +-5000 on each axis), six tones 300-1300 Hz each: one G, P suits
+  them all within the measurement's scatter (at 5 W, G 1100-1900, P 1220-1520), the floor left under it -48 to -66 dBc.
+- **Not the base's Hilbert filter.** The base makes I and Q from the audio itself: I the audio 50 samples late, Q
+  through a 101-tap FIR (copied at start from flash 0x0803e130, arm_fir_f32 at 0x080357c0, instance 0x200078d8), at an
+  eighth of the codec's rate, then each interpolated x8 by the same coefficients (0x0803e3e4). Its coefficients are an
+  equiripple Hilbert transformer: computed from them, the opposite sideband is 84.5 dB or more under from 150 to
+  2850 Hz (at 6 kHz). Nor a sample of skew between I and Q: in the bad state 300 Hz's image was the worse, not 1200's.
+- **The radio's heat.** At fixed settings the image is steady within an over (+-0.2 dB at 5 W) but not from one to
+  the next: from cold (6.5 min receiving) 15 m stood at -44 to -48 dBc for the first ~40 s of transmitting, moved
+  within the next ~25 s and stood at -29 from there on (twice, the same); after receiving it came back (-31 at 2 min,
+  -36 to -38 at 3.5 min, -45 at 5 min). 20 m's overs made 15 m warm too, but 20 m's own image did not move
+  (-47 to -50 dBc through 78 s of tones, its best balance where it was). Nothing in the base reports a temperature.
+- **Two balances.** Cold, 15 m's best is G 1464, P 750 (its saved one, 1081, 683, is beside it); warm, G -7600,
+  P 1570 (twice: -7696/1574 and -7494/1567, -45.7 and -43.1 dBc there): the warm shift is mostly gain, 9 %. With the
+  radio warm, alternating them: cold's -29 to -32 dBc, warm's -39 to -48, cold's -29, warm's -41 to -48.
+
+So the GUI keeps a second, warm balance per band (tx_iq_hot_gain/phase, Settings > TX Cal "IQ balance warm", remote
+txhg/txhp; 0, 0 = none) and estimates the radio's heat from its transmitting (radio.c tx_heat: TX seconds added,
+receiving cooling them exponentially, 240 s; 0 % under 40 s, 100 % from 65 s), blending from the band's balance to its warm
+one and sending register 52 again while it receives (the base takes it between transmissions). tools/bench/txcal.py
+--state hot|cold calibrates either (waiting for the GUI's estimate to be wholly warm or cold); txcal_store.py saves
+both.
+
 ### Every base compared, 2026-11-20
 
 Decrypted with the public key (nothing of Xiegu's kept in the repository): Xiegu's X6100 V1.1.6 (230307001, from its

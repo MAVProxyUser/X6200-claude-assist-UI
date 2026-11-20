@@ -494,6 +494,8 @@ void radio_start() {
     subject_subscribe_and_notify((Subject*)cfg_band_tx_q_offset, on_change_i, (void*)HW_TX_Q_OFFSET);
     subject_subscribe((Subject*)cfg_band_tx_iq_gain, on_tx_iq_bal_change, NULL);
     subject_subscribe_and_notify((Subject*)cfg_band_tx_iq_phase, on_tx_iq_bal_change, NULL);
+    subject_subscribe((Subject*)cfg_band_tx_iq_hot_gain, on_tx_iq_bal_change, NULL);
+    subject_subscribe((Subject*)cfg_band_tx_iq_hot_phase, on_tx_iq_bal_change, NULL);
 
     subject_subscribe((Subject*)cfg_band_id, on_band_change, NULL);
 
@@ -1658,14 +1660,75 @@ static void on_change_i(Subject *subj, void *user_data) {
 }
 
 /* The band's TX I/Q balance, its two halves in one register (HW_TX_IQ_BAL): only to a base that reads it */
+/* The radio's heat, estimated from how long it has transmitted: on the owner's X6100 15 m's transmit image stood at
+ * -46 dBc for the first ~40 s of transmitting from cold, moved over the next ~25 s and stood at -29 dBc from there on
+ * (at the band's calibration; 0.1 W tones, 2026-11-20, tools/bench/image.py), and was back after minutes of receiving.
+ * The heat of another band's transmitting counted the same (20 m's overs made 15 m's move). Transmitting adds its
+ * seconds; receiving cools it exponentially. 0 % before TX_HEAT_ON_S, 100 % from TX_HEAT_ON_S + TX_HEAT_SPAN_S: the
+ * blend from a band's own I/Q balance to its warm one (tx_iq_hot_gain/phase, where it has one) */
+#define TX_HEAT_ON_S    40.0f
+#define TX_HEAT_SPAN_S  25.0f
+#define TX_HEAT_MAX_S   (TX_HEAT_ON_S + TX_HEAT_SPAN_S + 60.0f)    /* hot: more transmitting adds nothing */
+/* Receiving: the heat's e-folding time. After a long session 15 m was still warm 2 min on (-31 dBc), halfway at
+ * 3.5 min (-36..-38), cold at 5 min (-45): 240 s from TX_HEAT_MAX_S gives 100 %, 48 %, 0 % there */
+#define TX_HEAT_COOL_S  240.0f
+static float      tx_heat_s;        /* the radio thread's */
+static atomic_int tx_heat_pct;      /* 0 cold .. 100 warm */
+
+int radio_tx_heat_pct(void) {
+    return atomic_load(&tx_heat_pct);
+}
+
 static void on_tx_iq_bal_change(Subject *subj, void *user_data) {
     (void)subj, (void)user_data;
     if (!(radio_caps() & HW_CAP_TX_IQ_BAL)) {
         return;
     }
-    uint32_t g = (uint16_t)(int16_t)param_i_get(cfg_band_tx_iq_gain);
-    uint32_t p = (uint16_t)(int16_t)param_i_get(cfg_band_tx_iq_phase);
-    WITH_RADIO_LOCK(hw_set_i(HW_TX_IQ_BAL, (int32_t)((p << 16) | g)));
+    int32_t g  = param_i_get(cfg_band_tx_iq_gain);
+    int32_t p  = param_i_get(cfg_band_tx_iq_phase);
+    int32_t hg = param_i_get(cfg_band_tx_iq_hot_gain);
+    int32_t hp = param_i_get(cfg_band_tx_iq_hot_phase);
+    if (hg || hp) {                 /* a band with a warm balance: as far towards it as the radio is warm */
+        int h = atomic_load(&tx_heat_pct);
+
+        g += (hg - g) * h / 100;
+        p += (hp - p) * h / 100;
+    }
+    uint32_t ug = (uint16_t)(int16_t)g;
+    uint32_t up = (uint16_t)(int16_t)p;
+    WITH_RADIO_LOCK(hw_set_i(HW_TX_IQ_BAL, (int32_t)((up << 16) | ug)));
+}
+
+static void tx_heat_cb(void *arg) {
+    (void)arg;
+    on_tx_iq_bal_change(NULL, NULL);
+}
+
+/* Each pass of the radio thread: the heat, and the band's balance sent again when the blend moved (the base takes
+ * register 52 between transmissions only, so it goes while receiving and is in place for the next) */
+static void tx_heat_tick(void) {
+    static uint64_t last, checked;
+    static int      sent = -1;
+    bool            on_air = state != RADIO_RX || atomic_load(&modem_on);
+
+    if (last) {
+        float dt = (now_time - last) / 1000.0f;
+
+        tx_heat_s = on_air ? fminf(tx_heat_s + dt, TX_HEAT_MAX_S) : tx_heat_s * expf(-dt / TX_HEAT_COOL_S);
+    }
+    last = now_time;
+    if (now_time - checked < 1000) {
+        return;
+    }
+    checked = now_time;
+    float h   = (tx_heat_s - TX_HEAT_ON_S) / TX_HEAT_SPAN_S;
+    int   pct = (int)lroundf(100.0f * fminf(fmaxf(h, 0.0f), 1.0f));
+
+    atomic_store(&tx_heat_pct, pct);
+    if (!on_air && pct != sent && (sent < 0 || abs(pct - sent) >= 5 || pct == 0 || pct == 100)) {
+        sent = pct;
+        scheduler_put(tx_heat_cb, NULL, 0);
+    }
 }
 
 /* RIT to the base. On the X6200's WR12's IF the base takes I and Q the other way round (wr12_follow), and that mirrors
@@ -3520,6 +3583,7 @@ static void * radio_thread(void *arg) {
 
         guard_events();
         morse_limit_check();
+        tx_heat_tick();
 
         if (radio_tick()) {
             usleep(2000);

@@ -22,7 +22,8 @@ from bench import Radio, Refused, say  # noqa: E402
 from image import BANDS  # noqa: E402
 
 FORMAT = "goldcorphf-txcal 1"
-KEYS = {"txio": "tx_i_offset", "txqo": "tx_q_offset", "txig": "tx_iq_gain", "txip": "tx_iq_phase"}
+KEYS = {"txio": "tx_i_offset", "txqo": "tx_q_offset", "txig": "tx_iq_gain", "txip": "tx_iq_phase",
+        "txhg": "tx_iq_hot_gain", "txhp": "tx_iq_hot_phase"}       # the last two: once the radio is warm (radio.c)
 DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibrations")
 
 
@@ -59,7 +60,8 @@ def save(a, c):
         doc = {"format": FORMAT, "fingerprint": fp, "model": fp.split("-")[0], "storage": storage,
                "saved": time.strftime("%Y-%m-%d %H:%M %Z"),
                "units": {"tx_i_offset": "register 50 (x 5000 in the base)", "tx_q_offset": "register 51",
-                         "tx_iq_gain": "1e-5 (register 52, low half)", "tx_iq_phase": "1e-5 (register 52, high half)"},
+                         "tx_iq_gain": "1e-5 (register 52, low half)", "tx_iq_phase": "1e-5 (register 52, high half)",
+                         "tx_iq_hot_gain": "the same, once the radio is warm (0, 0: none)", "tx_iq_hot_phase": "the same"},
                "bands": {}}
         if a.note:
             doc["note"] = a.note
@@ -103,6 +105,8 @@ def apply(a, c):
         for band, v in doc["bands"].items():
             tune(r, int(v["freq"]))
             for k, name in KEYS.items():
+                if name not in v:           # a file from before the warm balance: that pair left as it is
+                    continue
                 r.send(f"set {k} {int(v[name])}")
                 r.wait(f"{k} {v[name]}", lambda k=k, x=int(v[name]): int(r.state.get(k, -99999)) == x, 6)
             say(f"{band:>3} m: set {v}")
@@ -119,7 +123,7 @@ def show(a, c):
     if doc.get("note"):
         print(doc["note"])
     for band, v in doc["bands"].items():
-        print(f"  {band:>3} m: " + ", ".join(f"{n} {v[n]}" for n in KEYS.values()))
+        print(f"  {band:>3} m: " + ", ".join(f"{n} {v[n]}" for n in KEYS.values() if n in v))
 
 
 def main():

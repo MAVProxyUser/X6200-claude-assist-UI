@@ -64,6 +64,18 @@ approved that day.
     it is a V4 or in direct sampling); a combined build with RF.Guru's payload keeps their build name, so the GUI
     would not know gcfix5 is in it (a marker of its own needed); the image's change across the audio band (one G, P
     per band).
+    Later the same evening (the owner: "dive deeper ... find a novel solution that *works*"): 15 m's varying image is
+    the radio's heat, not the audio band, the base's Hilbert filter (equiripple, 84.5 dB) or an I/Q skew. From cold it
+    stands at -46 dBc for ~40 s of transmitting, then steps to -29 (gain shift 9 %), back after ~5 min of receiving;
+    20 m does not move. Two balances per band now (IQ balance warm, tx_iq_hot_gain/phase) and the GUI's heat estimate
+    from its transmitting (radio.c tx_heat) blending between them; txcal.py --state hot|cold. Results and the method:
+    tools/base_update/README.md, "Why 15 m varied". Left: the other high bands (17, 12, 10, 6 m) checked warm and cold;
+    the warm balance at 5 W against 0.1 W's.
+    Also seen (both bases, before the Hilbert, so the audio's way in): the tone's 2nd harmonic at -32..-35 dBc and 3rd
+    at -42 (0.1 and 5 W alike). FT8 at 700 Hz would carry a -35 dBc copy at 1400 Hz. The GUI's TCI path is linear
+    (linear interpolation to 48 kHz, no processing); the X6100's TX audio leaves the processor's own codec (Headphone
+    63/63) for the base's ADC: the analog hop is the suspect, not yet tested (a tone level sweep: a square law falls
+    10 dB for 10 dB).
   - the X6200's WiFi, 2026-11-20 morning (v0.3.12.39): pinged at 10 Hz, 4-19% of replies over 100 ms, spikes of
     0.5-1.5 s, 0-7% lost (the X6100 beside it, same router: max 18-48 ms); its TCI audio reaches a client at 10-76%
     of real time (parec on the radio itself: full rate; the TCI queue holds 0.6 s and drops the rest). Not the GPS

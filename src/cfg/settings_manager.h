@@ -802,17 +802,28 @@ class SettingsManager {
     // A band that never saved one has none, not the last band's
     Parameter<int32_t> p_band_tx_shift{"tx_shift", 0, [](int32_t v) { return clip(v, -TX_SHIFT_MAX, TX_SHIFT_MAX); },
         StorageType::BAND, pending_writes_, [this] { p_band_tx_shift.set_quiet(0); }, &band_params_};
+    // The band's TX calibration (these two, the I/Q balance and its warm one below): a band that never saved one has
+    // none (0), not the last band's. With {} here a band without a value kept the one before it: 15 m's warm balance
+    // went out on 17, 12 and 10 m after 15 m (2026-11-20), and an uncalibrated band took its neighbour's offsets
     Parameter<int32_t> p_band_tx_i_offset{"tx_i_offset", 0, {},
-        StorageType::BAND, pending_writes_, {}, &band_params_};
+        StorageType::BAND, pending_writes_, [this] { p_band_tx_i_offset.set_quiet(0); }, &band_params_};
     Parameter<int32_t> p_band_tx_q_offset{"tx_q_offset", 0, {},
-        StorageType::BAND, pending_writes_, {}, &band_params_};
+        StorageType::BAND, pending_writes_, [this] { p_band_tx_q_offset.set_quiet(0); }, &band_params_};
     // The transmitter's I/Q balance of this band, 1e-5 each (+-0.33): Q' = Q + (gain Q + phase I) x 1e-5 in the
     // X6100's base from gcfix5 on (register 52). 0, 0: as Xiegu's. Set by the TX calibration (Settings > TX CAL,
     // tools/bench/txcal.py), which nulls the image on the other side of the dial
     Parameter<int32_t> p_band_tx_iq_gain{"tx_iq_gain", 0, [](int32_t v) { return clip(v, -32767, 32767); },
-        StorageType::BAND, pending_writes_, {}, &band_params_};
+        StorageType::BAND, pending_writes_, [this] { p_band_tx_iq_gain.set_quiet(0); }, &band_params_};
     Parameter<int32_t> p_band_tx_iq_phase{"tx_iq_phase", 0, [](int32_t v) { return clip(v, -32767, 32767); },
-        StorageType::BAND, pending_writes_, {}, &band_params_};
+        StorageType::BAND, pending_writes_, [this] { p_band_tx_iq_phase.set_quiet(0); }, &band_params_};
+    // The same once the radio is warm: on the owner's X6100 15 m's image moved from -46 to -29 dBc after about 45 s
+    // of transmitting (a step, the radio's heat: 20 m's on the air made 15 m's move too) and back after minutes of
+    // receiving, its best balance 9000 gain units away (2026-11-20). radio.c blends from these to the band's own as
+    // its estimate of the heat says (tx_heat). 0, 0: none, the band's own values whatever the heat (20 m kept still)
+    Parameter<int32_t> p_band_tx_iq_hot_gain{"tx_iq_hot_gain", 0, [](int32_t v) { return clip(v, -32767, 32767); },
+        StorageType::BAND, pending_writes_, [this] { p_band_tx_iq_hot_gain.set_quiet(0); }, &band_params_};
+    Parameter<int32_t> p_band_tx_iq_hot_phase{"tx_iq_hot_phase", 0, [](int32_t v) { return clip(v, -32767, 32767); },
+        StorageType::BAND, pending_writes_, [this] { p_band_tx_iq_hot_phase.set_quiet(0); }, &band_params_};
     // dB offset of the front panel audio chain (float, scaled x10 to an int
     // in the DB: 0.2 dB <-> 2).
     Parameter<float, int32_t, 10> p_band_dac_offset{"dac_offset", 0.0f, {},

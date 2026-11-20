@@ -1194,10 +1194,13 @@ static void iq_bal_follow(Subject *subj, void *slider) {
     lv_event_send((lv_obj_t *)slider, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
-static uint8_t make_iq_balance(uint8_t row) {
-    ParamInt *p[2] = {&cfg_sm.p_band_tx_iq_gain, &cfg_sm.p_band_tx_iq_phase};
+/* The band's I/Q balance (gain, phase), and the same once the radio is warm (radio.c tx_heat: 15 m's image moves
+ * with the radio's heat on the owner's X6100; 0, 0 there: the band's own whatever the heat) */
+static uint8_t make_iq_balance(uint8_t row, bool warm) {
+    ParamInt *p[2] = {warm ? &cfg_sm.p_band_tx_iq_hot_gain : &cfg_sm.p_band_tx_iq_gain,
+                      warm ? &cfg_sm.p_band_tx_iq_hot_phase : &cfg_sm.p_band_tx_iq_phase};
 
-    wl_row_label(row, "IQ balance");
+    wl_row_label(row, warm ? "IQ balance warm" : "IQ balance");
     for (int i = 0; i < 2; i++) {
         int32_t   v = p[i]->get() / TX_IQ_BAL_SCALE;
         lv_obj_t *s = row_slider(row_cell(row, 1 + 3 * i, 3, SMALL_3), v, -32767 / TX_IQ_BAL_SCALE,
@@ -4472,7 +4475,8 @@ static void make_txcal_page() {
             row = make_iq_offsets(row);
         }
         if (caps & HW_CAP_TX_IQ_BAL) {
-            row = make_iq_balance(row);
+            row = make_iq_balance(row, false);
+            row = make_iq_balance(row, true);
         }
         if (caps & HW_CAP_BAND_GAIN) {
             row = make_band_gain(row);

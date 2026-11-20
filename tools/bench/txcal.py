@@ -13,14 +13,21 @@ during an over came out at the next, 2026-11-20), so each point is an over of it
 measured). The two pairs come out at their own audio frequencies and do not touch each other, so each over moves one
 of each and measures both. Each pair's residual power is a bowl, P = k ((a - a0)^2 + (b - b0)^2) + floor (the
 residual phasor's two parts): five points (the centre and +-D on each axis) give its bottom by a parabola on each
-axis, a second pass at D/3 refines it, and the last point measures it: 11 overs a band. The session's first over is a short one at 0.1 W (bench rule 4),
+axis, a second pass refines it (the carrier's at D/3, the image's at D/2 but never under 2500: its bowl has to stand
+well above an over's wander), and the last point measures it: 11 overs a band. The session's first over is a short one at 0.1 W (bench rule 4),
 then everything at --w (5 W). What is found stays in TX's band settings (the GUI saves them) when it is better than
 what was there; --dry measures and puts the old values back. Afterwards every band's values are saved to
 calibrations/<the radio's fingerprint>.json (txcal_store.py: tied to that radio's processor, put back on it alone). The bench rules throughout (bench.py); RX's squelch open,
 AGC 3, attenuator on, everything put back after. A report in ~/.config/x6x00-bench/runs/<time>-txcal/.
 
+A band's image has two calibrations where the radio's heat moves it (15 m on the owner's X6100: -46 dBc cold, -29
+warm at the cold values, 2026-11-20): --state cold sets the band's own (txig, txip), --state hot its warm ones (txhg,
+txhp), which the GUI blends to as its estimate of the heat rises (radio.c tx_heat). Each waits for the GUI's estimate
+to be wholly cold (receiving) or wholly warm (tones sent first); a cold calibration has to be done in the first ~40 s
+of transmitting.
+
     txcal.py TX RX [--bands 160,80,...] [--w 5] [--fa 1000] [--off 1500] [--dry] [--d-image N] [--d-carrier N]
-                   [--passes 2] [--from-zero]
+                   [--passes 2] [--from-zero] [--state cold|hot]
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
 import argparse, json, math, os, subprocess, sys, threading, time
@@ -33,7 +40,7 @@ from image import BANDS, band_onset  # noqa: E402
 
 LEAD_S, TAIL_S = 0.4, 0.6
 POINT_TONE_S = 1.6                            # a carrier point's over: its tone's middle second measured
-KEYS = {"carrier": ("txio", "txqo", 1500, 10000), "image": ("txig", "txip", 1500, 32767)}
+KEYS = {"carrier": ("txio", "txqo", 1500, 10000), "image": ("txig", "txip", 5000, 32767)}
 
 
 def main():
@@ -49,6 +56,9 @@ def main():
     ap.add_argument("--d-carrier", type=int, default=None, help="the carrier search's first step (1500)")
     ap.add_argument("--d-image", type=int, default=None, help="the image search's first step (800)")
     ap.add_argument("--passes", type=int, default=2, help="passes of five points before the last (2)")
+    ap.add_argument("--state", choices=("cold", "hot"), default="cold",
+                    help="the radio's state the image is calibrated for: cold (txig/txip, the band's own) or hot "
+                         "(txhg/txhp, once the radio is warm: the GUI's heat estimate at 100 %%, warmed up first)")
     ap.add_argument("--from-zero", action="store_true",
                     help="start each band at 0, 0 (uncalibrated) instead of its present values")
     ap.add_argument("--tag", default="")
@@ -189,21 +199,43 @@ def main():
             return dd if pp < pm else -dd
         return max(-2 * dd, min(2 * dd, dd * (pm - pp) / (2 * curv)))
 
+    def heat_ready(f):
+        """The radio as warm or as cold as --state asks, by the GUI's estimate ("hot", %): warmed with tones, or
+        waited for (receiving) to cool. The image of 15 m on the owner's X6100 moves between the two (radio.c)"""
+        if "hot" not in txr.state:
+            raise Refused(f"{txr.name}: its GUI has no heat estimate (hot): too old for --state")
+        want = 100 if a.state == "hot" else 0
+        t_end = time.time() + 900
+        while int(txr.state.get("hot", -1)) != want:
+            if time.time() > t_end:
+                raise Refused(f"{txr.name}: not {a.state} after 15 min (hot {txr.state.get('hot')} %)")
+            if a.state == "hot":
+                say(f"   warming up: hot {txr.state.get('hot')} %")
+                over(f, a.w, 10.0, "warm-up")
+            else:
+                say(f"   cooling: hot {txr.state.get('hot')} %, receiving")
+                time.sleep(20)
+
     def search(band, f):
         """The band's image (txig, txip) and carrier (txio, txqo) together: they come out at their own audio
         frequencies and do not touch each other, so each over moves one of each and measures both. One over a point:
         the base takes registers 50-52 between transmissions only"""
         ki, kc = KEYS["image"], KEYS["carrier"]
+        if a.state == "hot":
+            ki = ("txhg", "txhp") + ki[2:]
         setv(txr, "freq", f)                         # the band first: its own values are the ones read and set
-        time.sleep(0.5)
+        time.sleep(1.5)                              # (the state a panel tick behind the band change)
+        heat_ready(f)
         si = (int(txr.state.get(ki[0], 0)), int(txr.state.get(ki[1], 0)))
+        if a.state == "hot" and si == (0, 0):        # no warm balance yet: the band's own is what goes out
+            si = (int(txr.state.get("txig", 0)), int(txr.state.get("txip", 0)))
         sc = (int(txr.state.get(kc[0], 0)), int(txr.state.get(kc[1], 0)))
         if a.from_zero:
             # (the state may still show the last band's values a moment after the band changed: a search from
             # there began far off on 15 and 12 m, 2026-11-20)
             si, sc = (0, 0), (0, 0)
         di, dc = a.d_image or ki[2], a.d_carrier or kc[2]
-        rec = {"band": band, "w": a.w, "start": {"image": si, "carrier": sc}, "points": []}
+        rec = {"band": band, "w": a.w, "state": a.state, "start": {"image": si, "carrier": sc}, "points": []}
 
         def clamp(v, lim):
             return int(max(-lim, min(lim, round(v))))
@@ -244,7 +276,9 @@ def main():
             ib += vertex(pm_b[0], p0[0], pp_b[0], di)
             ca += vertex(pm_a[1], p0[1], pp_a[1], dc)
             cb += vertex(pm_b[1], p0[1], pp_b[1], dc)
-            di, dc = max(di / 3, 40), max(dc / 3, 40)
+            # the image's steps kept large: one over's image wanders by a dB or two, and a bowl only a few dB deep
+            # let that steer the search (15 m, 2026-11-20); +-5000 measures it 15 dB up the sides
+            di, dc = max(di / 2, 2500), max(dc / 3, 40)
         point(ia, ib, ca, cb)
         pts = rec["points"]
         out = {}

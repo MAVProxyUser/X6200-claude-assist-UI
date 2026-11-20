@@ -189,6 +189,8 @@ uint32_t radio_caps(void);
  * "" when the ID cannot be read. radio_fingerprint_id: its first 7 hex digits as a number, 0 for none */
 const char *radio_fingerprint(void);
 int32_t radio_fingerprint_id(void);
+/* How warm the radio is, 0 cold .. 100 warm, from how long it has transmitted (the warm I/Q balance's share) */
+int radio_tx_heat_pct(void);
 /* The base's whole spectrum (384 kHz on the X6200, dsp_psd_raw()) while one or more users want it: each on is
  * matched by an off. Any thread; false (nothing done) on a base without its own spectrum (HW_CAP_PSD) */
 bool radio_psd_wide(bool on);

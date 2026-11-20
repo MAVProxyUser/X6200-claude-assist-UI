@@ -3,12 +3,14 @@
  "fingerprint": "x6100-7e18f3a4ddc28bbd",
  "model": "x6100",
  "storage": "d10dde40e43a0efa",
- "saved": "2026-11-20 15:45 EST",
+ "saved": "2026-11-20 17:35 EST",
  "units": {
   "tx_i_offset": "register 50 (x 5000 in the base)",
   "tx_q_offset": "register 51",
   "tx_iq_gain": "1e-5 (register 52, low half)",
-  "tx_iq_phase": "1e-5 (register 52, high half)"
+  "tx_iq_phase": "1e-5 (register 52, high half)",
+  "tx_iq_hot_gain": "the same, once the radio is warm (0, 0: none)",
+  "tx_iq_hot_phase": "the same"
  },
  "bands": {
   "160": {
@@ -16,70 +18,90 @@
    "tx_i_offset": -645,
    "tx_q_offset": -680,
    "tx_iq_gain": 589,
-   "tx_iq_phase": -156
+   "tx_iq_phase": -156,
+   "tx_iq_hot_gain": 0,
+   "tx_iq_hot_phase": 0
   },
   "80": {
    "freq": 3700000,
    "tx_i_offset": -624,
    "tx_q_offset": -546,
    "tx_iq_gain": 625,
-   "tx_iq_phase": -56
+   "tx_iq_phase": -56,
+   "tx_iq_hot_gain": 0,
+   "tx_iq_hot_phase": 0
   },
   "40": {
    "freq": 7150000,
    "tx_i_offset": -577,
    "tx_q_offset": -554,
    "tx_iq_gain": 767,
-   "tx_iq_phase": 59
+   "tx_iq_phase": 59,
+   "tx_iq_hot_gain": 0,
+   "tx_iq_hot_phase": 0
   },
   "30": {
    "freq": 10130000,
    "tx_i_offset": -517,
    "tx_q_offset": -544,
    "tx_iq_gain": 891,
-   "tx_iq_phase": 199
+   "tx_iq_phase": 199,
+   "tx_iq_hot_gain": 0,
+   "tx_iq_hot_phase": 0
   },
   "20": {
    "freq": 14200000,
    "tx_i_offset": -491,
    "tx_q_offset": -609,
    "tx_iq_gain": 1287,
-   "tx_iq_phase": 172
+   "tx_iq_phase": 172,
+   "tx_iq_hot_gain": 0,
+   "tx_iq_hot_phase": 0
   },
   "17": {
    "freq": 18130000,
    "tx_i_offset": -455,
    "tx_q_offset": -607,
    "tx_iq_gain": 735,
-   "tx_iq_phase": 548
+   "tx_iq_phase": 548,
+   "tx_iq_hot_gain": 0,
+   "tx_iq_hot_phase": 0
   },
   "15": {
    "freq": 21300000,
-   "tx_i_offset": -780,
-   "tx_q_offset": -640,
+   "tx_i_offset": -680,
+   "tx_q_offset": -440,
    "tx_iq_gain": 1081,
-   "tx_iq_phase": 683
+   "tx_iq_phase": 683,
+   "tx_iq_hot_gain": -7600,
+   "tx_iq_hot_phase": 1570
   },
   "12": {
    "freq": 24950000,
    "tx_i_offset": -313,
    "tx_q_offset": -792,
    "tx_iq_gain": -580,
-   "tx_iq_phase": 407
+   "tx_iq_phase": 407,
+   "tx_iq_hot_gain": 0,
+   "tx_iq_hot_phase": 0
   },
   "10": {
    "freq": 28500000,
    "tx_i_offset": -343,
    "tx_q_offset": -724,
    "tx_iq_gain": 1115,
-   "tx_iq_phase": 1236
+   "tx_iq_phase": 1236,
+   "tx_iq_hot_gain": 0,
+   "tx_iq_hot_phase": 0
   },
   "6": {
    "freq": 50200000,
    "tx_i_offset": 0,
    "tx_q_offset": 0,
    "tx_iq_gain": 1167,
-   "tx_iq_phase": -963
+   "tx_iq_phase": -963,
+   "tx_iq_hot_gain": 0,
+   "tx_iq_hot_phase": 0
   }
  },
  "note": "The owner's X6100 (base gcfix5), calibrated 2026-11-20 with tools/bench/txcal.py at 5 W against the X6200 through 70 dB of pads (a 1000 Hz tone); 12 m from a 3-pass search, 6 m's DC offsets left at 0 (its search measured worse in the check). Checked with image.py: tools/base_update/README.md."
