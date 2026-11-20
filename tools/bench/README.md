@@ -71,9 +71,18 @@ TCI audio recorded here with its AGC off, then the same with it on LSB: each ton
 a few hundredths of a hertz), level, harmonics, the other sideband, and the listener's own spectrum at each tone's RF.
 At 0.1 W, the first transmission of the session; the watch as radios-walkie's (more power than asked ends the over:
 the sender killed, since the remote's PTT release does not end a TCI transmission). Faded tones with short gaps
-measure the passband; tones back to back show how a receiver copes with a signal that keeps changing (the X6200's, AGC
-off, drops them after about 2.5 s while its spectrum has them). First runs: the X6100 (gcfix3) into the X6200, 20 and
-6 m: 300-2900 Hz within 4 dB, the other sideband 101-110 dB down, the two radios' oscillators 0.48 ppm apart.
+measure the passband. The listener's AGC is off and its squelch open for the run (a shut squelch mutes the audio
+whole: the X6200's, at 4, faked a silent transmitter and an image 101-110 dB down on 2026-11-20). The X6100 (gcfix4)
+into the X6200, 20 m: 300-2900 Hz within 3.5 dB, the other sideband about 42 dB down, the two radios' oscillators
+7.2 Hz apart, the slope 8 ppm.
+
+`tones.py TX RX --bursts 0.05,0.1,0.2,0.4,0.8,1.6,3.2`: the transmitter's power loop on the first sound after a
+pause. 1 kHz bursts of 0.5 s with 2 ms starts, each after the pause given; in the tone's band of the listener's audio
+each burst's first 80 ms against its steady end (the overshoot), its lowest after that (the dip), how long it takes
+to settle within 1 dB, and what came in the pause. Xiegu's X6100 loop: +5 to +18 dB, then 6-14 dB under; with gcfix4
+within +1.1 dB (tools/base_update/README.md). A burst too hot for the watch (0.6 W at 0.1 W) ends the over, so
+Xiegu's loop is seen on its first bursts only. The sender on the radio is stopped by its pid file (the X6100's
+BusyBox has no pkill).
 
 `radios-ft8` first ran 2026-11-18 (the X6100 and the X6200 through 40 + 30 dB, 0.1 W, 20 m), both ways: PASS. The
 X6200 decoded the X6100 at +11 to +15 dB, the X6100 the X6200 at -2 to -3 dB (the X6200's preamp on, the X6100's

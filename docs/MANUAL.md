@@ -2271,7 +2271,7 @@ low while the base is reset, as Xiegu's own X6100 updater does. More in
   writes (about 15 seconds), starts the GUI again. The base starts its new
   firmware by itself; the radio does not switch itself off.
 - Files known by their SHA-256: Xiegu's V1.1.8 and V1.1.9, GoldCorpHF's
-  gcfix3 (below), and RF.Guru's [test base](#the-x6100-test-base) with
+  gcfix3 and gcfix4 (below), and RF.Guru's [test base](#the-x6100-test-base) with
   `--test-ok` (TEST to be typed).
   An X6200 file is refused.
 - As Xiegu asks: a 13.8 V supply of 3 A or more, the battery out, and the
@@ -2279,7 +2279,7 @@ low while the base is reset, as Xiegu's own X6100 updater does. More in
 - Checked on one X6100 on 15 November 2026: the test base written and
   Xiegu's V1.1.8 back, the base's calibration the same after each.
 
-#### GoldCorpHF's fixes to Xiegu's V1.1.9 (gcfix3)
+#### GoldCorpHF's fixes to Xiegu's V1.1.9 (gcfix4)
 
 GoldCorpHF ships no base firmware. It ships a patch: the few encrypted blocks
 of Xiegu's own V1.1.9 file that change, with the SHA-256 and MD5 of Xiegu's
@@ -2288,29 +2288,42 @@ from Xiegu's, and writes nothing unless Xiegu's file and the result are exactly
 the ones the patch names. Xiegu's V1.1.9 file is on the X6100's internal
 memory (`/usr/firmware` of Xiegu's own system) and in Xiegu's V1.2.0 update.
 
-What gcfix3 changes (`V1.1.9 Nov 27 2025,gcfix3` in Settings > Info):
+What gcfix4 changes (`V1.1.9 Nov 27 2025,gcfix4` in Settings > Info):
 
 - **Low power is right on every band.** Xiegu's power control only sets a
   target and lets its loop pull the drive down by 40 dB at most, plus a 6 dB
   head start on 6 m. Through 70 dB of pads, 0.1 W asked gave 0.8 W on 6 m
-  and 0.2-0.3 W on 10, 20 and 40 m (FM, 20 November 2026). With gcfix3 the
+  and 0.2-0.3 W on 10, 20 and 40 m (FM, 20 November 2026). With the fix the
   loop goes down 60 dB and 6 m starts like the other bands: 0.1 W gives
   0.1 W (the other radio hears it 9-10 dB under 1 W on each band), and 0.3,
   0.5 and 1 W are as asked.
+- **No burst of power after a pause.** Xiegu's loop keeps raising the drive
+  while you are silent, so the first sound after a pause went out hot: 5 dB
+  after 50 ms, 10 dB after a tenth of a second, 18 dB after most of a second
+  (1 W on the meter at a 0.1 W setting), then 6-14 dB too low for a fifth of
+  a second while the loop pulled back. gcfix4 holds the drive through
+  pauses: after pauses of 50 ms to 3 s each sound starts within 1 dB of its
+  level. A hold never lasts over 5 seconds. The first transmission after the
+  radio is switched on still behaves as Xiegu's until the base has heard
+  some audio.
 - **The codec's clock as Xiegu meant it.** Xiegu's base sets its audio
   converter's clock with one wrong byte, so the base samples at 99,932 Hz,
   not 100 kHz: the spectrum's frequency scale was 0.07 % off (up to 34 Hz at
   its edges). Audio frequencies are not changed by it (the receiver's and the
   transmitter's converters share that clock).
-- Tested with tones from 200 to 3100 Hz sent from one radio into the other
-  through the pads (`tools/bench/tones.py`): 300 to 2900 Hz within 4 dB, the
-  other sideband over 100 dB down, the receiver the same as Xiegu's.
+- Tested with tones from 200 to 3100 Hz and with bursts after pauses, sent
+  from one radio into the other through the pads (`tools/bench/tones.py`):
+  300 to 2900 Hz within 3.5 dB; the other sideband about 42 dB down, as with
+  Xiegu's base (the X6100's transmit I/Q balance was never calibrated: its
+  calibration memory is empty); the receiver the same as Xiegu's.
+
+gcfix3 is the same without the hold (the power and clock fixes only).
 
 To put it on, from a computer:
 
-    ssh root@x6100.local x6x00-base-patch apply gcfix3
-    scp root@x6100.local:/mnt/base_update/X6100_BBFW_V1.1.9_251127001_gcfix3.xgf .
-    tools/base_update/flash.sh root@x6100.local --flash --file X6100_BBFW_V1.1.9_251127001_gcfix3.xgf
+    ssh root@x6100.local x6x00-base-patch apply gcfix4
+    scp root@x6100.local:/mnt/base_update/X6100_BBFW_V1.1.9_251127001_gcfix4.xgf .
+    tools/base_update/flash.sh root@x6100.local --flash --file X6100_BBFW_V1.1.9_251127001_gcfix4.xgf
 
 `x6x00-base-patch list` says whether Xiegu's file is on the card
 (`/mnt/base_update`); copy it there first if not. Xiegu's V1.1.9 back the same

@@ -5,11 +5,15 @@ from 127.0.0.1 is not asked about on the screen (src/tci_server.c), one from the
 plan's tone (made whole before keying), then "trx:0,false;". Its own deadline besides: past MAX_S it unkeys and leaves, and the
 server itself unkeys 500 ms after the audio stops. Standard library only (the radios have no WebSocket package).
 
-    tci_tone_tx.py PLAN_JSON AMPLITUDE MAX_S [PORT]      PLAN: [[hz, seconds], ...]; 0 Hz is silence
+    tci_tone_tx.py PLAN_JSON AMPLITUDE MAX_S [PORT [FADE_S]]   PLAN: [[hz, seconds], ...]; 0 Hz is silence; FADE_S the
+                                                               fade in and out of each stretch of tone (0.3 s; tones.py
+                                                               --bursts: a hard start, 2 ms)
 Prints "start EPOCH" at the first frame sent and "end EPOCH SAMPLES" at the unkey.
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
-import base64, hashlib, json, math, os, socket, struct, sys, time
+import base64, hashlib, json, math, os, signal, socket, struct, sys, time
+
+PID_FILE = "/tmp/tci_tone_tx.pid"     # tones.py stops a run with kill (the X6100's BusyBox has no pkill)
 
 FS, N = 24000, 512
 
@@ -71,11 +75,11 @@ def main():
     plan = json.loads(sys.argv[1])
     amp, max_s = float(sys.argv[2]), float(sys.argv[3])
     port = int(sys.argv[4]) if len(sys.argv) > 4 else 50001
+    fade_s = float(sys.argv[5]) if len(sys.argv) > 5 else 0.3
     # The whole plan made before keying (a frame is then a slice): the radio's Python is too slow for 512 sines
     # inside each 21.3 ms
     # The phase carried across tone changes (no click: a click is a burst the transmitter's ALC answers by cutting its
-    # gain), and the audio faded in and out over FADE_S (an onset from silence is what the ALC overshoots on)
-    FADE_S = 0.3
+    # gain), and the audio faded in and out over fade_s (an onset from silence is what the ALC overshoots on)
     from array import array
     sin, a = math.sin, amp * 32767
     out, phase, first, pos = array("h"), 0.0, None, 0
@@ -103,7 +107,7 @@ def main():
     if cur is not None:
         runs.append(cur)
     for r0, r1 in runs:
-        nf = max(1, min(int(FADE_S * FS), (r1 - r0) // 8))
+        nf = max(1, min(int(fade_s * FS), (r1 - r0) // 8))
         for i in range(nf):
             g = i / nf
             out[r0 + i] = int(out[r0 + i] * g)
@@ -112,6 +116,10 @@ def main():
         out.byteswap()
     pcm = out.tobytes()
     total = len(pcm) // 2
+    with open(PID_FILE, "w") as f:
+        f.write(f"{os.getpid()}\n")
+    # killed: the finally below unkeys (else the server would, 500 ms after the audio stops)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
     ws = WS(port)
     ws.send(1, b"trx:0,true,tci;")
     t0, sent, start = time.time(), 0, None
@@ -148,6 +156,10 @@ def main():
         except OSError:
             pass
         print(f"end {time.time():.3f} {sent}", flush=True)
+        try:
+            os.unlink(PID_FILE)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

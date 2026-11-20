@@ -4,10 +4,16 @@ pads, and what came out measured: each tone's frequency (to a few hundredths of 
 and with the receiver on the other sideband its image. The transmitter is fed through its own TCI server by
 tci_tone_tx.py run on it (a client on the radio is not asked about on the screen); the receiver's TCI audio is
 recorded here. The bench harness's rules throughout (bench.py: the owner's word on the cable, the TX gate, the watch;
-the first transmission at 0.1 W). The receiver's AGC is off for the run, so the levels
+the first transmission at 0.1 W). The receiver's AGC is off and its squelch open for the run, so the levels
 are the chain's, not the AGC's (--rx-rfg and --rx-att set its gain); everything is put back after.
 
     tones.py TX RX [--freq HZ] [--w W] [--passes usb,lsb] [--tones 200,300,...] [--amp 0.3]
+    tones.py TX RX --bursts 0.05,0.1,0.2,0.4,0.8,1.6,3.2 [--burst-hz 1000] [--burst-s 0.5] [--fade 0.002]
+
+--bursts: the transmitter's power loop on the first sound after a pause. Bursts of one tone with hard starts (2 ms),
+each after the pause given (the first after the key-down); for each, the receiver's envelope over its first 80 ms
+against its steady level at its end: the overshoot (dB) and how long it takes to settle within 1 dB. Xiegu's loop
+raises its gain through a pause, so its bursts start hot (x6100_patch.py, fix "hold").
 
 Frequency: each tone's measured minus asked is fitted to offset + slope x tone; the offset is the two radios'
 oscillators apart, the slope a sample-rate error (the X6100's base before gcfix1: -676 ppm). A report (JSON, the
@@ -26,6 +32,9 @@ TONES = [200, 300, 400, 600, 800, 1000, 1500, 2000, 2400, 2700, 2900, 3100]
 TONE_S, GAP_S, LEAD_S = 0.9, 0.0, 0.4
 MARK_HZ, MARK_S, MARK_GAP_S = 1000, 0.3, 0.0     # a strong first tone the sweep is timed from
 SENDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tci_tone_tx.py")
+# The sender stopped on the radio: by its pid file (the X6100's BusyBox has no pkill), else by name
+STOP_SENDER = ("kill $(cat /tmp/tci_tone_tx.pid) 2>/dev/null || "
+               "kill $(ps | grep '[t]ci_tone_tx.py' | awk '{print $1}') 2>/dev/null || echo 'no sender to stop'")
 
 
 class TciRx:
@@ -153,6 +162,72 @@ def onset(x, f0=None):
     return None
 
 
+def envelope(x, hop=24, win=48):
+    """RMS over win samples every hop (1 ms frames of 2 ms at 24 kHz): (times s, levels)"""
+    if len(x) < win:
+        return np.zeros(0), np.zeros(0)
+    c = np.concatenate(([0.0], np.cumsum(x * x)))
+    i = np.arange(0, len(x) - win, hop)
+    return (i + win / 2) / FS, np.sqrt((c[i + win] - c[i]) / win)
+
+
+def analyse_bursts(x, on, bursts, burst_s, txlog=None, tx_t0=None, tone_hz=None):
+    """bursts: [(start in the plan s, the pause before it s)]; on: the first burst's start in x (s, coarse). Each
+    burst's start found in the envelope (the next 1 ms frame up through half the bursts' level, past the burst
+    before), its steady level the median of its last 300 ms but 50, its overshoot the highest frame
+    of its first 80 ms over that, its dip the lowest after 10 ms, its settling the last frame before its steady part
+    more than 1 dB off it; pause_db: what the transmitter sent in the pause before it, under the burst's level"""
+    if tone_hz:
+        # the tone's band only (a zero-phase FFT mask of +-400 Hz: still 2 ms of resolution), so the transmitter's
+        # broadband noise in the pauses counts less
+        X = np.fft.rfft(x)
+        f = np.fft.rfftfreq(len(x), 1 / FS)
+        X[(f < tone_hz - 400) | (f > tone_hz + 400)] = 0
+        x = np.fft.irfft(X, len(x))
+    t, e = envelope(x)
+    out = []
+    if not len(e):
+        return out
+    # The bursts' level: the median of the frames within 20 dB of the loudest; their edges: where the envelope comes
+    # up through half of it. Each burst is the first edge past the burst before it (the first: past the coarse onset
+    # less 0.2 s), so a drift of the radios' timing never shifts the rest
+    top = float(np.max(e))
+    level = float(np.median(e[e > top * 0.1]))
+    up = np.where((e[1:] > 0.5 * level) & (e[:-1] <= 0.5 * level))[0] + 1
+    down = np.where((e[1:] <= 0.5 * level) & (e[:-1] > 0.5 * level))[0] + 1
+    after = on - 0.2
+    for b0, pause in bursts:
+        w = up[t[up] >= after]
+        if not len(w) or t[w[0]] > after + pause + 0.6:
+            out.append({"pause_s": pause, "found": False})
+            continue
+        st = float(t[w[0]])
+        # the next burst comes after this one's fall (the first past its middle: a dip early in it is no end, and a
+        # start found late, on a slow rise, does not push past the next one)
+        f_ = down[t[down] >= st + burst_s * 0.5]
+        after = float(t[f_[0]]) if len(f_) else st + burst_s - 0.02
+        m = (t >= st + burst_s - 0.3) & (t <= st + burst_s - 0.05)
+        steady = float(np.median(e[m])) if m.any() else level
+        head = (t >= st) & (t <= st + 0.08)
+        top_b = float(np.max(e[head]))
+        body = (t >= st + 0.01) & (t <= st + burst_s - 0.3)
+        off = np.where((t >= st) & (t <= st + burst_s - 0.3) & (np.abs(20 * np.log10(e / steady + 1e-12)) > 1))[0]
+        quiet = (t >= st - pause + 0.02) & (t <= st - 0.02)
+        seg = x[int(st * FS):int((st + burst_s) * FS)]
+        r = {"pause_s": pause, "found": True, "start_s": round(st, 3), "steady_dbfs": round(20 * math.log10(steady), 1),
+             "overshoot_db": round(20 * math.log10(top_b / steady), 1),
+             "dip_db": round(20 * math.log10(float(np.min(e[body])) / steady + 1e-12), 1) if body.any() else None,
+             "settle_ms": round((float(t[off[-1]]) - st) * 1000) if len(off) else 0,
+             "pause_db": round(20 * math.log10(float(np.median(e[quiet])) / steady + 1e-12), 1)
+             if pause >= 0.05 and quiet.any() else None,
+             "clipped": bool(len(seg) and np.max(np.abs(seg)) > 0.97)}
+        if txlog and tx_t0 is not None:
+            ws = [w_ for s_, w_, *_ in txlog if tx_t0 + b0 - 0.05 <= s_ <= tx_t0 + b0 + burst_s]
+            r["tx_meter_max_w"] = max(ws) if ws else None
+        out.append(r)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("tx")
@@ -165,8 +240,16 @@ def main():
     ap.add_argument("--tag", default="")
     ap.add_argument("--rx-rfg", type=int, default=None, help="the receiver's RF gain for the run")
     ap.add_argument("--rx-att", type=int, default=None, help="the receiver's attenuator for the run (0/1)")
+    ap.add_argument("--bursts", default=None, help="the pauses (s) before each burst after the first: the loop's overshoot")
+    ap.add_argument("--burst-hz", type=int, default=1000)
+    ap.add_argument("--burst-s", type=float, default=0.5)
+    ap.add_argument("--fade", type=float, default=None, help="each stretch of tone faded in and out (s): 0.3, bursts 0.002")
     a = ap.parse_args()
     tones = [int(t) for t in a.tones.split(",")]
+    gaps = [float(g) for g in a.bursts.split(",")] if a.bursts else None
+    fade = a.fade if a.fade is not None else (0.002 if gaps else 0.3)
+    if gaps:
+        a.passes, tones = "usb", [a.burst_hz]
     c = bench.conf()
     p, total = chain_gate(c, "radios")
     if a.w != bench.FIRST_PROBE_W:
@@ -176,11 +259,23 @@ def main():
     radios = [txr, rxr]
     run_dir = os.path.join(bench.STATE, "runs", time.strftime("%Y%m%d-%H%M%S-tones") + (f"-{a.tag}" if a.tag else ""))
     os.makedirs(run_dir, exist_ok=True)
-    keys = ("freq", "mode", "pg", "atu", "agc", "att", "pre", "rfg")
+    keys = ("freq", "mode", "pg", "atu", "agc", "att", "pre", "rfg", "sql")
     was, results = {}, {"tx": a.tx, "rx": a.rx, "f": a.freq, "w": a.w, "tones": tones, "passes": {}}
     tci = None
     delay = [None]
     plan = [[0, LEAD_S], [MARK_HZ, MARK_S], [0, MARK_GAP_S]] + [x for t in tones for x in ([t, TONE_S], [0, GAP_S])]
+    bursts = None
+    if gaps:
+        plan, bursts, at = [[0, LEAD_S]], [], LEAD_S
+        for pause in [None] + gaps:                 # the first burst right after the key-down's lead
+            if pause is not None:
+                plan.append([0, pause])
+                at += pause
+            bursts.append((at, LEAD_S if pause is None else pause))
+            plan.append([a.burst_hz, a.burst_s])
+            at += a.burst_s
+        plan.append([0, 0.6])                       # the radio's audio buffer played out before the unkey (the X6100
+                                                    # cut the last burst short without it)
     key_s = sum(s for _, s in plan) + 1.0
     if key_s > c["limits"]["max_key_s"] - 1:
         raise Refused(f"{key_s:.1f} s on the air is over the limit")
@@ -202,7 +297,7 @@ def main():
         raise Refused(f"{r.name}: TX not {'armed' if on else 'locked'}")
 
     def setv(r, k, v):
-        get = (lambda: int(r.state.get(k, -1))) if k in ("freq", "mode", "agc", "att", "pre", "rfg") else None
+        get = (lambda: int(r.state.get(k, -1))) if k in ("freq", "mode", "agc", "att", "pre", "rfg", "sql") else None
         for _ in range(2):
             if get and get() == v:
                 return
@@ -230,7 +325,7 @@ def main():
         tx_log({"who": txr.name, "f": a.freq, "w": txr.pwr(), "what": f"tones {label}"})
         t_begin = time.time()
         proc = subprocess.Popen(["ssh", "-n", "-o", "BatchMode=yes", f"root@{txr.host}",
-                                 f"python3 /tmp/tci_tone_tx.py '{json.dumps(plan)}' {a.amp} {key_s:.1f}"],
+                                 f"python3 /tmp/tci_tone_tx.py '{json.dumps(plan)}' {a.amp} {key_s:.1f} 50001 {fade}"],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         txlog = []                                  # the sender's own meter through the over: (s, W, SWR, ALC)
         while proc.poll() is None:
@@ -240,7 +335,9 @@ def main():
             # a stop, the other on the air, or more power than asked (the watch's soft stop releases only the remote's
             # PTT, not a TCI transmission): the sender killed, the server unkeys within 0.5 s
             if watch.why or rxr.tx or txr.name in watch.over_power:
-                subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", f"root@{txr.host}", "pkill -f tci_tone_tx.py"])
+                r = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", f"root@{txr.host}", STOP_SENDER],
+                                   capture_output=True, text=True)
+                say(f"{txr.name}: the sender stopped ({(r.stdout + r.stderr).strip() or 'killed'})")
                 break
             time.sleep(0.05)
         out = proc.communicate(timeout=30)[0]
@@ -268,7 +365,28 @@ def main():
         elif start is not None and delay[0] is not None:
             on = start + delay[0] - x_t0                # the other sideband: timed from the USB pass's delay
         if on is None:
+            results["passes"][label] = {"error": "no tone found", "sender": out.strip().splitlines()[-5:],
+                                        "tx_peak_w": watch.tx_peak.get(txr.name), "txlog": txlog, "wav": path}
+            say(f"{label}: sender said {out.strip().splitlines()[-3:]}, TX peak {watch.tx_peak.get(txr.name)} W, "
+                f"meter log {txlog[:6]}...{txlog[-3:]}")
             raise Refused(f"{label}: no tone found in {a.rx}'s audio (and no earlier pass to time it from)")
+        if bursts:
+            res = {"sender": out.strip().splitlines()[-3:], "onset_s": round(on, 3), "wav": path, "fade_s": fade,
+                   "tx_peak_w": watch.tx_peak.get(txr.name), "over_power_w": watch.over_power.get(txr.name),
+                   "txlog": txlog, "bursts": analyse_bursts(x, on, bursts, a.burst_s, txlog,
+                                                            None if start is None else start - t_begin, a.burst_hz)}
+            results["passes"][label] = res
+            say(f"{label}: TX peak {res['tx_peak_w']} W by its own meter"
+                f"{', OVER POWER ' + str(res['over_power_w']) + ' W: ended' if res['over_power_w'] else ''}")
+            for b in res["bursts"]:
+                if not b["found"]:
+                    say(f"   after {b['pause_s']:5.2f} s: burst not found")
+                    continue
+                say(f"   after {b['pause_s']:5.2f} s: overshoot {b['overshoot_db']:+5.1f} dB, dip {b['dip_db']} dB, "
+                    f"settled in {b['settle_ms']:4d} ms, steady {b['steady_dbfs']} dBFS, pause {b['pause_db']} dB"
+                    f"{' CLIPPED' if b['clipped'] else ''}, TX meter max {b.get('tx_meter_max_w')} W")
+            time.sleep(1.5)
+            return res
         res = {"sender": out.strip().splitlines()[-3:], "onset_s": round(on, 3), "peak_dbfs":
                round(20 * math.log10(np.max(np.abs(x)) + 1e-12), 1), "tx_peak_w": watch.tx_peak.get(txr.name),
                "tones": analyse(x, on + MARK_S + MARK_GAP_S, tones), "wav": path,
@@ -308,6 +426,8 @@ def main():
         r.send(f"set pwr {round(a.w * 10)}")
         r.wait("the power", lambda: abs(txr.pwr() - a.w) < 0.05, 5)
         setv(rxr, "agc", 0)                        # off: the chain's levels, not the AGC's
+        setv(rxr, "sql", 0)                        # open: a squelch shut on the receiver mutes its audio whole (the
+                                                   # X6200's at 4, 2026-11-20: "no tone found" runs)
         if a.rx_rfg is not None:
             setv(rxr, "rfg", a.rx_rfg)
         if a.rx_att is not None:
@@ -318,6 +438,16 @@ def main():
             one_over(pas, pas)
         summary = {}
         for label, res in results["passes"].items():
+            if "bursts" in res:
+                found = [b for b in res["bursts"] if b["found"]]
+                summary[label] = {"overshoot_max_db": max((b["overshoot_db"] for b in found[1:]), default=None),
+                                  "dip_min_db": min((b["dip_db"] for b in found[1:] if b["dip_db"] is not None),
+                                                    default=None),
+                                  "pause_max_db": max((b["pause_db"] for b in found[1:] if b["pause_db"] is not None),
+                                                      default=None),
+                                  "first_overshoot_db": found[0]["overshoot_db"] if found else None,
+                                  "bursts_found": len(found), "bursts": len(res["bursts"])}
+                continue
             ok = [t for t in res["tones"] if t["err_hz"] is not None and t["dbfs"] is not None and t["dbfs"] > -60 and
                   abs(t["err_hz"]) < 30]
             if len(ok) >= 3:
@@ -344,7 +474,7 @@ def main():
                 v = was.get(r.name, {})
                 if v.get("pwr") is not None and v["pwr"] < 99:
                     r.send(f"set pwr {round(v['pwr'] * 10)}")
-                for k in ("freq", "mode", "agc", "att", "pre", "rfg"):
+                for k in ("freq", "mode", "agc", "att", "pre", "rfg", "sql"):
                     if v.get(k) is not None:
                         r.send(f"set {k} {int(v[k])}")
                         time.sleep(0.3)

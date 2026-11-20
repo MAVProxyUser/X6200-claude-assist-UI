@@ -3,7 +3,8 @@
 x6x00-base-patch: GoldCorpHF's fixes put into Xiegu's own base firmware file on the radio. GoldCorpHF ships no base:
 a patch (/usr/share/x6100/base_patches/*.json) holds only the 16-byte blocks of the encrypted .xgf that change, Xiegu's
 and its own (AES-ECB encrypts each block alone, so no key is needed here and nothing of Xiegu's is readable in it),
-with the SHA-256 and MD5 of Xiegu's file it applies to and of the result. Nothing is written unless Xiegu's file is
+with the SHA-256 and MD5 of Xiegu's file it applies to and of the result (format 2: blocks past the end of Xiegu's
+file, with no "from", are appended: code GoldCorpHF adds). Nothing is written unless Xiegu's file is
 exactly the one the patch names and the result exactly the one it promises; the result goes to the base with
 x6x00-base-flash, as any base file does.
 
@@ -23,6 +24,7 @@ import glob, hashlib, json, os, sys
 PATCH_DIRS = ["/usr/share/x6100/base_patches",
               os.path.join(os.path.dirname(os.path.abspath(__file__)), "../share/x6100/base_patches")]
 SEARCH = ["/mnt/base_update", "/usr/firmware", "/tmp/base_update", "."]
+FORMATS = ("x6x00-base-patch 1", "x6x00-base-patch 2")
 
 
 def patches():
@@ -33,7 +35,7 @@ def patches():
                 doc = json.load(open(p))
             except (OSError, ValueError):
                 continue
-            if doc.get("format") == "x6x00-base-patch 1" and doc.get("name") not in seen:
+            if doc.get("format") in FORMATS and doc.get("name") not in seen:
                 seen.add(doc["name"])
                 out.append((p, doc))
     return out
@@ -62,9 +64,18 @@ def apply(doc, src, out):
     s = doc["source"]
     if (size, sha, md5) != (s["size"], s["sha256"], s["md5"]):
         sys.exit(f"{src} is not {s['file']} ({s['version']}): size {size}, sha256 {sha}; nothing written")
-    for blk in doc["blocks"]:
-        o, old, new = blk["offset"], bytes.fromhex(blk["from"]), bytes.fromhex(blk["to"])
-        if len(old) != 16 or len(new) != 16 or o % 16 or bytes(data[o:o + 16]) != old:
+    if doc.get("format") not in FORMATS:
+        sys.exit(f"a patch of format {doc.get('format')!r}: this x6x00-base-patch knows {', '.join(FORMATS)}")
+    for blk in sorted(doc["blocks"], key=lambda b: b["offset"]):
+        o, new = blk["offset"], bytes.fromhex(blk["to"])
+        if len(new) != 16 or o % 16:
+            sys.exit(f"block at {o}: not a 16-byte block; nothing written")
+        if "from" not in blk:                   # appended (format 2): right at the end so far
+            if doc["format"] == FORMATS[0] or o != len(data):
+                sys.exit(f"block at {o}: an appended block not at the end ({len(data)}); nothing written")
+            data += new
+            continue
+        if o + 16 > s["size"] or bytes(data[o:o + 16]) != bytes.fromhex(blk["from"]):
             sys.exit(f"block at {o}: not as the patch expects; nothing written")
         data[o:o + 16] = new
     r = doc["result"]

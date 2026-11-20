@@ -100,6 +100,12 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#ifndef B1500000                        /* a Mac building the tests (test/run.sh): its speeds are the numbers */
+#define B1500000 1500000
+#endif
+#ifndef B1152000
+#define B1152000 1152000
+#endif
 
 #ifndef UART                        /* other paths only for a test against a simulated bootloader */
 #define UART        "/dev/ttyS1"
@@ -171,6 +177,10 @@ static const struct {
      * power loop from 29.7 MHz up, the loop's floor -60 dB (0.1 W on every band). Its version "V1.1.9 Nov 27 2025,gcfix3" */
     {"X6100_BBFW_V1.1.9_251127001_gcfix3.xgf (base V1.1.9 with GoldCorpHF's fixes gcfix3)",
      "d34985d04f32771eb9bfdc871e2a207173af177cfa7305ce8b206f8ac0453f83", 392048, "V1.1.9-gcfix3", MODEL_X6100, false},
+    /* gcfix3 and the TX power loop held while the transmitter is silent (x6100_V1.1.9_gcfix4.json, 224 bytes of
+     * code appended): "V1.1.9 Nov 27 2025,gcfix4" */
+    {"X6100_BBFW_V1.1.9_251127001_gcfix4.xgf (base V1.1.9 with GoldCorpHF's fixes gcfix4)",
+     "fc6edfe529f9f92842dc96a30f4803119a3781a6e98dfed75f73cf79e1eb5f46", 392272, "V1.1.9-gcfix4", MODEL_X6100, false},
     /* RF.Guru's X6100-Baseband v0.1.0-alpha.2: Xiegu's V1.1.9 with CESSB, a compressor and a TX filter, its build
      * text "Nov 27 2025,tx1a2-test". TEST ONLY: not validated on a radio */
     {"X6100_BBFW_V1.1.9_251127001_tx1_alpha2_TEST.xgf (RF.Guru X6100-Baseband v0.1.0-alpha.2, a TEST build)",

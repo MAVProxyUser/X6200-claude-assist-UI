@@ -38,9 +38,14 @@ approved that day.
     back to 10 s after a connection): 1.2% lost over 200 s while backing off, one stall per 5 min at the cap.
   - DONE 2026-11-20 night: the X6100's base patched (gcfix3, tools/base_update/README.md): 0.1 W right on 6, 10, 20
     and 40 m, the codec PLL fixed; shipped as a block patch applied on the radio to Xiegu's own file
-    (x6x00-base-patch), no base distributed. Found and left: Xiegu's loop overshoot after silence (1.0 W at 0.1 W on
-    Xiegu's base: a hold while silent would need a hook), and the X6200's receiver with AGC off dropping changing
-    tones after ~2.5 s (its spectrum has them).
+    (x6x00-base-patch), no base distributed.
+  - DONE 2026-11-20 morning: gcfix4, the X6100's power loop held through pauses (a hook, x6100_hooks/alc_hold.s):
+    bursts after 50 ms to 3.2 s of pause start within 1 dB (Xiegu's: +5 to +18 dB, 0.7-1.0 W at 0.1 W, then 6-14 dB
+    under). The X6200 "dropping changing tones with AGC off" was its squelch (at 4) muting its audio, and so was the
+    image "101-110 dB down": tones.py opens the listener's squelch now.
+  - the X6100's transmit image is about 42 dB down (tones.py, its USB tones heard on the X6200's LSB, 20 m): its
+    calibration block is empty, so its TX I/Q balance was never set. TX Cal's I/Q values per band, measured with the
+    same sweep, could bring it to 60 dB; it means writing the base's calibration memory (I2C 0x72): the owner's call.
   - the X6100's 6 m over-power, studied 2026-11-20 (tools/base_update/README.md "Every base compared"): Xiegu's loop
     has 34 dB of range on 6 m and the meter is its own detector, so 0.8 W at 0.1 W means its floor or a carrier the
     loop cannot touch (the DC offsets are added after its gain; this radio's are all zero, never calibrated). The

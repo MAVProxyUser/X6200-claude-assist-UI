@@ -427,29 +427,45 @@ not the firmware.
   compressor and the TX band-pass, Xiegu's power scaling, ALC, calibration and telemetry kept. Known to `base_flash`
   (`--test-ok`). It does not bring true power control.
 
-### GoldCorpHF's patch to Xiegu's X6100 V1.1.9 (gcfix3), 2026-11-20
+### GoldCorpHF's patches to Xiegu's X6100 V1.1.9 (gcfix3, gcfix4), 2026-11-20
 
-`x6100_patch.py` (here, with Xiegu's key, never in the repository) makes it; `rootfs/usr/share/x6100/base_patches/
-x6100_V1.1.9_gcfix3.json` is what ships: the 16-byte blocks of the encrypted .xgf that change, Xiegu's and ours (AES-ECB
-encrypts each block alone, so no key and nothing of Xiegu's readable), with the SHA-256 and MD5 of Xiegu's file and of
-the result. `x6x00-base-patch apply gcfix3` (rootfs/usr/sbin) makes the file on the radio from Xiegu's; base_flash
-knows the result by its SHA-256 (d34985d0...). Three fixes, 15 bytes of Xiegu's image:
+`x6100_patch.py` (here, with Xiegu's key, never in the repository) makes them; `rootfs/usr/share/x6100/base_patches/
+x6100_V1.1.9_gcfix3.json` and `x6100_V1.1.9_gcfix4.json` are what ships: the 16-byte blocks of the encrypted .xgf that
+change, Xiegu's and ours (AES-ECB encrypts each block alone, so no key and nothing of Xiegu's readable), with the SHA-256
+and MD5 of Xiegu's file and of the result; gcfix4's blocks past the end of Xiegu's file (format 2) are appended.
+`x6x00-base-patch apply gcfix4` (rootfs/usr/sbin) makes the file on the radio from Xiegu's; base_flash knows both
+results by their SHA-256 (gcfix3 d34985d0..., gcfix4 fc6edfe5...). gcfix3 is three fixes, 15 bytes of Xiegu's image;
+gcfix4 adds the hold, a hook (x6100_hooks/alc_hold.s, assembled by x6100_hooks/build.sh, 4 bytes of Xiegu's changed
+and 224 appended):
 
 | Fix | Where | Bytes | Why |
 |---|---|---|---|
 | pll | 0x0802f3d8 | `movs r3,#8` -> `ldr r3,[r7,#0x40]` | the codec PLL's D low byte written as computed: 100 kHz, not 99,932 Hz |
 | 6m | 0x080246aa | `it hs; vmovhs s15,s13` -> 3 x `nop` | no +6 dB on the loop's gain from band index 20: it only raised 6 m's floor |
 | alc | 0x08027f90, 0x08027fb6 | `movt r3,#0xc220` -> `#0xc270` | the loop's floor -60 dB, not -40 |
+| hold (gcfix4) | 0x08027f82; code at 0x0807fb70 | `vldr s15,[sl,#0x220]` -> `b.w 0x0807fb70` | the loop's raise skipped while the block about to be sent is 30 dB under its recent peak: no climb through pauses |
 
 Measured on the owner's X6100 through 70 dB of pads (bench.py's gates; tools/bench/tones.py): 0.1 W on 6, 10, 20 and 40
-m (Xiegu's: 0.8 W on 6 m, 0.2-0.3 W on HF); SSB tones 300-2900 Hz within 4 dB at 0.1 W on 20 and 6 m, the other
-sideband 101-110 dB down; the receiver identical to Xiegu's V1.1.9 in the same sweep (passband, image). Withdrawn on
-the way: gcfix1 (floor only) and gcfix2 (no floor change), after a lost-tone run first blamed on the floor turned out
-to be the X6200's receiver (below).
+m (Xiegu's: 0.8 W on 6 m, 0.2-0.3 W on HF), 0.3, 0.5 and 1.1 W on 6 m as asked, the same to the dB with gcfix4; SSB
+tones 300-2900 Hz within 3.5 dB at 0.1 W; the other sideband about 42 dB down (the X6100's TX I/Q never calibrated:
+its calibration block is empty); the receiver identical to Xiegu's V1.1.9 in the same sweep (passband, image).
+Withdrawn on the way: gcfix1 (floor only) and gcfix2 (no floor change), after a lost-tone run first blamed on the floor.
 
-Found by the sweeps, not fixed (Xiegu's): the power loop climbs while the transmitter is silent (0.01 x 50 dB a block)
-and overshoots at the next sound: 1.0 W at 0.1 W asked on Xiegu's own base; and the X6200's receiver with its AGC off
-drops tones that keep changing after about 2.5 s (its spectrum shows them all along; a steady tone, or gaps, keep).
+The hold (gcfix4), measured with `tones.py --bursts` (1 kHz bursts with 2 ms starts after pauses of 50 ms to 3.2 s,
+0.1 W, three runs): every burst starts within +1.1 dB of its level, dips 2.6 dB at most, and the transmitter sends
+nothing over the receiver's floor in the pauses. gcfix3 (Xiegu's loop): +5 dB after 50 ms, +10 after 100 ms, +18
+after the key-down's lead or 0.8 s, each then 6-14 dB under for a fifth of a second, its own noise sent at full drive
+10 dB under the tone in long pauses, and 0.7-1.0 W on its meter (the bench's watch ends such an over). Xiegu's loop
+runs 781 times a second (128 samples at 100 kHz) and raises its gain by 0.01 x the error (about 50 dB in silence):
+half a dB a block. The hook's own state is in CCM RAM (Xiegu's base does not use it; the hook switches its clock on
+through the bit-band alias, as RF.Guru's patch_init does): a peak of the block energy, trusted only beside a magic
+word, that does not learn in the 100 blocks after a key-down (Xiegu's SWR hold-off count), and no hold lasts over 5 s.
+The first transmission after the radio is switched on behaves as Xiegu's until the peak has heard audio.
+
+Two misreadings on the way, both the listening X6200's squelch (at 4: with its AGC off and attenuator in, it shut and
+muted its audio whole, a flat -48 dBFS): runs that looked like the hook holding the transmitter quiet, and the other
+sideband "101-110 dB down" (it was the muted audio). tones.py opens the listener's squelch now. The X6200 "dropping
+changing tones after 2.5 s with its AGC off" was most likely the same.
 
 ### Every base compared, 2026-11-20
 
@@ -500,6 +516,7 @@ that names itself as a patched one (bbfw says `,r8`) would get capabilities from
 | [fetch.sh](fetch.sh) | releases from xiegu.eu into build/base_update, by x6x00-base-fetch |
 | [flash.sh](flash.sh) | from a computer: `--check`, `--flash`, `--recover`, `--dry-run` (X6100), `--to VERSION`, `--file FILE`, `--test-ok` |
 | [run_on_radio.sh](run_on_radio.sh) | on the radio, apart from the SSH session: GUI off, lock, write, GUI on |
-| [x6100_patch.py](x6100_patch.py) | the X6100 V1.1.9 patch (gcfix3) made from Xiegu's file and key: `--patch-out` writes the block patch the radios apply with `x6x00-base-patch` |
+| [x6100_patch.py](x6100_patch.py) | the X6100 V1.1.9 patches (gcfix4; gcfix3 with `--only pll,6m,alc`) made from Xiegu's file and key: `--patch-out` writes the block patch the radios apply with `x6x00-base-patch` |
+| [x6100_hooks/](x6100_hooks) | gcfix4's hook (alc_hold.s) and build.sh, which assembles it (arm-none-eabi binutils) and prints the bytes x6100_patch.py holds |
 | [install.sh](install.sh) | the 1.0.8 file to `/usr/firmware` on the internal memory, for Xiegu's own UPGRADE screen |
 | [test/](test) | run.sh, the unit tests (units.c), the simulated bases (sim.py, sim6100.py), the synthetic update zips (synth.py) |
