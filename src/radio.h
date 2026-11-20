@@ -183,6 +183,12 @@ void radio_pa_bias_info(char *buf, size_t size);
 #endif
 /* HW_CAP_* bits (radio_types.h): what the base does itself */
 uint32_t radio_caps(void);
+
+/* This radio's fingerprint, "x6100-" or "x6200-" and 16 hex digits: SHA-256 of the processor's chip ID (the R16's SID,
+ * /sys/bus/nvmem/devices/nvmem0) with a salt, as /usr/sbin/x6x00-fingerprint makes it; no raw ID leaves the radio.
+ * "" when the ID cannot be read. radio_fingerprint_id: its first 7 hex digits as a number, 0 for none */
+const char *radio_fingerprint(void);
+int32_t radio_fingerprint_id(void);
 /* The base's whole spectrum (384 kHz on the X6200, dsp_psd_raw()) while one or more users want it: each on is
  * matched by an off. Any thread; false (nothing done) on a base without its own spectrum (HW_CAP_PSD) */
 bool radio_psd_wide(bool on);

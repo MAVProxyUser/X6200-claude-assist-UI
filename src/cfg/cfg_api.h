@@ -283,6 +283,10 @@ extern ParamInt   *cfg_band_tx_i_offset;  // p_band_tx_i_offset
 extern ParamInt   *cfg_band_tx_q_offset;  // p_band_tx_q_offset
 extern ParamInt   *cfg_band_tx_iq_gain;   // p_band_tx_iq_gain
 extern ParamInt   *cfg_band_tx_iq_phase;  // p_band_tx_iq_phase
+extern ParamInt   *cfg_tx_cal_radio;      // p_tx_cal_radio
+/* The TX calibration gone from every band (its four settings' rows deleted), the band shown at 0: they were another
+ * radio's (radio.c tx_cal_check). On the GUI thread */
+void cfg_tx_cal_forget(void);
 extern ParamInt   *cfg_band_vfoa_mode;    // p_band_vfoa_mode
 extern ParamInt   *cfg_band_vfob_mode;    // p_band_vfob_mode
 extern ParamInt   *cfg_band_vfoa_att;     // p_band_vfoa_att

@@ -15,7 +15,8 @@ of each and measures both. Each pair's residual power is a bowl, P = k ((a - a0)
 residual phasor's two parts): five points (the centre and +-D on each axis) give its bottom by a parabola on each
 axis, a second pass at D/3 refines it, and the last point measures it: 11 overs a band. The session's first over is a short one at 0.1 W (bench rule 4),
 then everything at --w (5 W). What is found stays in TX's band settings (the GUI saves them) when it is better than
-what was there; --dry measures and puts the old values back. The bench rules throughout (bench.py); RX's squelch open,
+what was there; --dry measures and puts the old values back. Afterwards every band's values are saved to
+calibrations/<the radio's fingerprint>.json (txcal_store.py: tied to that radio's processor, put back on it alone). The bench rules throughout (bench.py); RX's squelch open,
 AGC 3, attenuator on, everything put back after. A report in ~/.config/x6x00-bench/runs/<time>-txcal/.
 
     txcal.py TX RX [--bands 160,80,...] [--w 5] [--fa 1000] [--off 1500] [--dry] [--d-image N] [--d-carrier N]
@@ -320,6 +321,11 @@ def main():
         with open(os.path.join(run_dir, "report.json"), "w") as f:
             json.dump(results, f, indent=1)
         say("report", os.path.join(run_dir, "report.json"))
+    if not a.dry and results["bands"]:
+        # the radio's calibration as it now is, every band's, into calibrations/<its fingerprint>.json
+        # (txcal_store.py: tied to the radio, never put on another)
+        subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "txcal_store.py"),
+                        "save", a.tx])
 
 
 if __name__ == "__main__":

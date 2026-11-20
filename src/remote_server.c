@@ -283,6 +283,7 @@ typedef struct {
     char    app[16];        /* the digital app open (main_screen_digital_app), "" for none */
     char    win[24];        /* the app whose window is open (main_screen_window_name), "" for none */
     char    pg[2];          /* the Sentry's page, "A"-"G" or "S" (app_sentry_page), "" when it is not open */
+    char    fp[24];         /* this radio's fingerprint (radio_fingerprint), for the bench's calibration files */
 } pstate_t;
 
 /* A change asked by a panel client, for the LVGL thread */
@@ -1133,6 +1134,8 @@ static void pstate_read(pstate_t *s) {
     snprintf(s->win, sizeof(s->win), "%s", main_screen_window_name());
     memset(s->pg, 0, sizeof(s->pg));
     s->pg[0] = app_sentry_page();
+    memset(s->fp, 0, sizeof(s->fp));
+    snprintf(s->fp, sizeof(s->fp), "%s", radio_fingerprint());
 }
 
 static void pstate_line(char *buf, size_t n, const pstate_t *s) {
@@ -1141,10 +1144,10 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "\"nb\":%d,\"nr\":%d,\"sql\":%d,\"rfg\":%d,\"vol\":%d,\"pwr\":%d.%d,\"step\":%d,\"zoom\":%d,"
              "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d,"
              "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"txio\":%d,\"txqo\":%d,\"txig\":%d,\"txip\":%d,"
-             "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\"}",
+             "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
-             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->txio, s->txqo, s->txig, s->txip, s->app, s->win, s->pg);
+             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->txio, s->txqo, s->txig, s->txip, s->app, s->win, s->pg, s->fp);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */

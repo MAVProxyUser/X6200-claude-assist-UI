@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""This radio's fingerprint: what a per-radio setting (the transmitter's calibration, tools/bench/txcal.py) is tied to,
+so that it is never used on another radio (the owner, 2026-11-20: "store the config tied to something like unique
+processor ID or serial number"). Made from the processor's chip ID (the Allwinner R16's SID, nvmem0), hashed with a
+salt: the raw ID never leaves the radio, and the fingerprint can go in a public repository. The GUI makes the same one
+(radio.c radio_fingerprint) and clears a TX calibration it finds made on another radio.
+
+    x6x00-fingerprint            {"fingerprint": "x6100-0123456789abcdef", "model": "x6100", "storage": "...", ...}
+    x6x00-fingerprint --short    x6100-0123456789abcdef
+
+"storage": the internal eMMC's CID, hashed the same way: a second witness (a processor board moved to another radio
+keeps its fingerprint; the eMMC is on that board too). Neither changes with the SD card.
+SPDX-License-Identifier: LGPL-2.1-or-later
+"""
+import hashlib, json, os, sys
+
+SALT = "GoldCorpHF radio fingerprint 1"     # the same in src/radio.c
+
+
+def read(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def model():
+    compat = read("/proc/device-tree/compatible") or b""
+    return "x6200" if b"xiegu,x6200" in compat else "x6100"
+
+
+def digest(kind, m, raw):
+    return hashlib.sha256(f"{SALT}|{m}|{raw.hex()}".encode()).hexdigest() if kind == "soc" else \
+        hashlib.sha256(f"{SALT}|{kind}|{m}|{raw.hex()}".encode()).hexdigest()
+
+
+def main():
+    m = model()
+    sid = read("/sys/bus/nvmem/devices/nvmem0/nvmem")
+    if not sid:
+        sys.exit("x6x00-fingerprint: the processor's chip ID (nvmem0) cannot be read")
+    fp = f"{m}-{digest('soc', m, sid)[:16]}"
+    if "--short" in sys.argv[1:]:
+        print(fp)
+        return
+    cid = None
+    for b in sorted(os.listdir("/sys/block")):
+        if b.startswith("mmcblk") and (read(f"/sys/block/{b}/device/type") or b"").strip() == b"MMC":
+            cid = (read(f"/sys/block/{b}/device/cid") or b"").strip()
+            break
+    print(json.dumps({"fingerprint": fp, "model": m,
+                      "storage": digest("emmc", m, cid)[:16] if cid else None,
+                      "made_from": "the processor's chip ID (SID) and the eMMC's CID, each SHA-256 with a salt"}))
+
+
+if __name__ == "__main__":
+    main()

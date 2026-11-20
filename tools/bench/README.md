@@ -110,7 +110,18 @@ between transmissions, so each point is an over of its own (a 1.6 s tone), each 
 and measuring both. Each pair's residual is a bowl: five points, a parabola on each axis to its bottom, a second pass
 at a third of the step, the last point measured; 11 overs a band. What it finds stays in the band's settings (the GUI
 saves them) when it is better than before; `--dry` measures only. An over whose tone did not come through to RX is
-done again. The session's first over is a short one at 0.1 W.
+done again. The session's first over is a short one at 0.1 W. After a run it saves the radio's calibration.
+
+`txcal_store.py save RADIO [FILE]` / `apply RADIO FILE` / `show FILE` (2026-11-20, the owner: "store the config tied to
+something like unique processor ID or serial number"): a radio's TX calibration (every band's txio, txqo, txig, txip)
+as calibrations/<fingerprint>.json. The fingerprint is `x6x00-fingerprint`'s (rootfs/usr/sbin): the processor's chip
+ID (the R16's SID) with a salt through SHA-256, "x6100-" or "x6200-" and 16 hex digits, with the eMMC's CID hashed the
+same way beside it; no raw ID is written anywhere. `apply` refuses a file made on another radio (`--force` for a radio
+whose processor board was changed). The GUI keeps the fingerprint the calibration was made on (tx_cal_radio) and clears
+the four settings on every band when it starts on another radio. Tested on the X6100 2026-11-20: saved, the record
+pointed at another radio, the GUI restarted and cleared every band ("the TX calibration was radio 0003039's, this is
+x6100-7e18f3a4ddc28bbd: cleared on every band"), applied back, read back equal; the X6200 refused the X6100's file.
+calibrations/x6100-7e18f3a4ddc28bbd.json is the owner's X6100's (the example).
 
 `radios-ft8` first ran 2026-11-18 (the X6100 and the X6200 through 40 + 30 dB, 0.1 W, 20 m), both ways: PASS. The
 X6200 decoded the X6100 at +11 to +15 dB, the X6100 the X6200 at -2 to -3 dB (the X6200's preamp on, the X6100's

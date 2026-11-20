@@ -114,6 +114,11 @@ class SettingsManager {
             return clip(align(v, BOARD_PWR_STEP), BOARD_PWR_MIN, pwr_top());
         },
         StorageType::GLOBAL, pending_writes_, {}, &global_params_};
+    // The radio the TX calibration (the bands' tx_i_offset, tx_q_offset, tx_iq_gain, tx_iq_phase) was made on: its
+    // fingerprint's number (radio_fingerprint_id: the processor's chip ID, hashed). Another radio's, at a start (the
+    // card moved), and those settings are cleared on every band (radio.c tx_cal_check). 0: none yet
+    Parameter<int32_t> p_tx_cal_radio{"tx_cal_radio", 0, {},
+        StorageType::GLOBAL, pending_writes_, {}, &global_params_};
     // The PWR a transverter's limit took down (pwr_xvtr_set), W, 0 none: it comes back off the transverter, after a
     // restart on it too
     Parameter<float, int32_t, 10> p_pwr_xvtr_held{"pwr_xvtr_held", 0.0f, 0.0f, BOARD_PWR_MAX,

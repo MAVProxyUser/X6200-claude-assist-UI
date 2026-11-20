@@ -329,6 +329,9 @@ class BandParamsTable {
     // The band's row of this param gone: the next load of the band takes its default again
     static bool Remove(int32_t band_id, const char *name);
 
+    // Every band's row of this param gone (cfg_tx_cal_forget: another radio's TX calibration)
+    static bool RemoveAll(const char *name);
+
   private:
     // Database handle shared by all statements of this table.
     inline static sqlite3 *db_ = nullptr;

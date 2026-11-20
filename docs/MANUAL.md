@@ -261,6 +261,15 @@ The rest, left as it is unless you have a reason:
   calibration against a second receiver (`tools/bench/txcal.py`, see
   [gcfix5](#goldcorphfs-fixes-to-xiegus-v119-gcfix5)); the sliders show it in
   steps of 0.0001.
+- **The calibration belongs to its radio.** The IQ offsets and IQ balance
+  are that radio's own errors, so the radio keeps the fingerprint of the
+  processor they were made on (`x6x00-fingerprint`: the processor's chip ID,
+  hashed, never the ID itself). Started on another radio (a card moved), the
+  radio clears them on every band and says so in its log. A calibration is
+  saved to a file named by that fingerprint and put back on the same radio
+  only (`tools/bench/txcal_store.py save` / `apply`; `txcal.py` saves one
+  after each run). One radio's file, the owner's X6100's, is in the
+  repository as an example: `tools/bench/calibrations/`.
 - **TX filter** (patched base r9 and later): the transmitted audio's
   passband, low edge 50-400 Hz (160 by default), high edge 2000-4000 Hz
   (3000).

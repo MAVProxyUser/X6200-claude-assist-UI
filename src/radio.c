@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <string.h>
@@ -43,6 +44,7 @@
 #include "pubsub_ids.h"
 #include "scheduler.h"
 #include "front_keys.h"
+#include "tci_ws.h"
 #include "backlight.h"
 #include "swr_guard.h"
 #include "tune_tx.h"
@@ -130,6 +132,7 @@ static void on_fw_zoom_change(Subject *subj, void *user_data);
 
 static void on_change_i(Subject *subj, void *user_data);
 static void on_tx_iq_bal_change(Subject *subj, void *user_data);
+static void tx_cal_check(void);
 static void on_rfg_change(Subject *subj, void *user_data);
 static void on_change_f(Subject *subj, void *user_data);
 static void on_rit_change(Subject *subj, void *user_data);
@@ -408,6 +411,7 @@ void radio_start() {
     }
 #endif
     cfg_hw_caps_set(hw_caps());     /* the LO offset from them, before the first frame */
+    tx_cal_check();                 /* another radio's TX calibration gone before anything is sent to the base */
     start_trace("base: version %s", hw_base_ver_str());
 #ifdef BOARD_X6200
     /* The WR12 on the HOST port (wr12.c, #134): its thread, and WR12 on HOST, before the VFOs go to the base. While
@@ -1470,6 +1474,63 @@ radio_base_ver_t radio_base_ver(void) {
 
 uint32_t radio_caps(void) {
     return hw_caps();
+}
+
+#define FINGERPRINT_SALT "GoldCorpHF radio fingerprint 1"     /* the same in rootfs/usr/sbin/x6x00-fingerprint */
+
+const char *radio_fingerprint(void) {
+    static char fp[32];
+    static bool done;
+
+    if (done) return fp;
+    done = true;
+    uint8_t sid[64];
+    FILE   *f = fopen("/sys/bus/nvmem/devices/nvmem0/nvmem", "rb");
+    size_t  n = f ? fread(sid, 1, sizeof(sid), f) : 0;
+
+    if (f) fclose(f);
+    if (!n) return fp;
+#ifdef BOARD_X6200
+    const char *model = "x6200";
+#else
+    const char *model = "x6100";
+#endif
+    char   msg[256];
+    size_t len = (size_t)snprintf(msg, sizeof(msg), FINGERPRINT_SALT "|%s|", model);
+
+    for (size_t i = 0; i < n && len + 2 < sizeof(msg); i++) len += (size_t)snprintf(msg + len, sizeof(msg) - len, "%02x", sid[i]);
+    uint8_t d[32];
+    ws_sha256((const uint8_t *)msg, len, d);
+    snprintf(fp, sizeof(fp), "%s-%02x%02x%02x%02x%02x%02x%02x%02x", model, d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]);
+    return fp;
+}
+
+int32_t radio_fingerprint_id(void) {
+    const char *fp   = radio_fingerprint();
+    const char *dash = strchr(fp, '-');
+    char        h[8];
+
+    if (!dash || strlen(dash + 1) < 7) return 0;
+    memcpy(h, dash + 1, 7);
+    h[7] = 0;
+    return (int32_t)strtol(h, NULL, 16);
+}
+
+/* The TX calibration belongs to the radio it was made on (its I/Q and DC errors are that radio's own): a card moved
+ * to another radio must not send the first one's values on the air (the owner, 2026-11-20: "store the config tied to
+ * something like unique processor ID"). At the start: none recorded, this radio's from now on (its values as they
+ * are); another radio's, its four settings cleared on every band (cfg_tx_cal_forget) and this radio's recorded */
+static void tx_cal_check(void) {
+    int32_t own = radio_fingerprint_id();
+    int32_t was = param_i_get(cfg_tx_cal_radio);
+
+    if (!own || was == own) return;
+    if (was) {
+        cfg_tx_cal_forget();
+        fprintf(stderr, "radio: the TX calibration was radio %07x's, this is %s: cleared on every band\n", (unsigned)was,
+                radio_fingerprint());
+    }
+    param_i_set(cfg_tx_cal_radio, own);
 }
 
 int radio_cw_tone_dir(radio_mode_t mode) {
