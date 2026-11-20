@@ -31,17 +31,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 /* Whether a restart brings this radio back by itself (x6x00-reboot): the X6200's base stays on; the X6100's switches
- * the radio off when the processor resets, so it comes back only where the running kernel can jump to the card's
- * (kexec: /sys/kernel/kexec_loaded, and the tool). An X6100 still on a kernel from before switches off: the box says so
- * (2026-11-19, the X6100's first restart into the kexec kernel) */
+ * the radio off when the processor resets, and its kexec restart, which leaves the processor running, is a test only
+ * (x6x00-reboot --kexec; 2026-11-19 the card's kernel started that way with no screen and no WiFi), so the box says
+ * it switches off there */
 static bool back_by_itself(void) {
 #ifdef BOARD_X6200
     return true;
 #else
-    return access("/sys/kernel/kexec_loaded", F_OK) == 0 && access("/usr/sbin/kexec", X_OK) == 0;
+    return false;
 #endif
 }
 

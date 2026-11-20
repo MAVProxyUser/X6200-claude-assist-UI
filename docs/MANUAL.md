@@ -2098,10 +2098,13 @@ installs the newest release even when it is the one running.
   <bundle> --kernel --reboot`): the whole radio restarts at the end of the
   install and comes back by itself in about a minute, the X6200's base kept on.
   The X6100's base switches the radio off whenever the processor resets, so
-  the X6100 comes back by itself only once it runs a kernel that can start
-  the card's new one without a reset (kexec, from v0.3.12.36): the first
-  restart from an older kernel switches it off, and the box says so ("it
-  switches off: switch it on again").
+  a restart there switches it off, and the box says so ("it switches off:
+  switch it on again"). Starting the card's new kernel without a reset
+  (kexec, `x6x00-reboot --kexec` over SSH) is a test only: tried 2026-11-19,
+  the new kernel started, but with a dark screen and no WiFi, the radio on
+  till POWER was held. That start keeps its kernel log on DATA
+  (`app_logs/dmesg_kexec.txt`, the old kernel's in
+  `app_logs/dmesg_before_kexec.txt`).
   Without it, at each start of the radio's software in the same power-on a box
   asks for a restart: the MFK's press restarts the radio now, any other key
   leaves it for later (asked again at the next start); the same after

@@ -88,11 +88,12 @@ if $x6200; then
     fi
 fi
 
-# The X6100's restart (x6x00-reboot): its base switches the radio off when the processor resets, so the kernel on the
-# SD card, loaded with kexec there, is jumped to with the processor not reset. DATA unmounted and the system read-only
+# The X6100's restart test (x6x00-reboot --kexec, not its default): its base switches the radio off when the processor
+# resets, so the kernel on the SD card, loaded with kexec there, is jumped to with the processor not reset. DATA unmounted and the system read-only
 # first, as a power-off leaves them. kexec -e returns only when it failed: then the plain reboot (the radio off)
 if ! $x6200 && $reboot && [ -e /run/x6x00-kexec ] && [ "$(cat /sys/kernel/kexec_loaded 2>/dev/null)" = 1 ]; then
     "$trace" "restart (x6x00-reboot): kexec into the SD card's kernel, the processor not reset"
+    dmesg > /mnt/app_logs/dmesg_before_kexec.txt 2>/dev/null     # this kernel's last words (x6x00-reboot --kexec)
     sync
     if ! umount /mnt 2>/dev/null; then
         sync

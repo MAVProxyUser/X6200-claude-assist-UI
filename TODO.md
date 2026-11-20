@@ -41,6 +41,15 @@ approved that day.
   control lines the GUI holds (bb_reset among them) let go while the processor resets, the base restarting off;
   to find out with the owner at the radio (each try switches it off). Meanwhile the update question's restart on an
   X6100 means switching it on again.
+  - kexec (the processor not reset), 2026-11-19 on the 977abb1c kernel (CONFIG_KEXEC in, kexec -l / -u fine): the
+    card's kernel started (start trace: rcS at "up 67 s", 64 s later than a power-on's 3.4 s; the GUI at 117 s,
+    "base answered", the relays clicked), but the GUI had no screen ("drm: no usable device, fbdev is used"; a
+    power-on finds the JLT4013A panel on SPI, sun4i-drm) and the WiFi never answered; the owner held POWER. Its
+    kernel log went with the power. Now a test only, `x6x00-reboot --kexec`: the start marked x6x00.kexec=1, both
+    kernels' logs kept on DATA (app_logs/dmesg_before_kexec.txt, dmesg_kexec.txt at 0, 60 and 180 s). Suspects to
+    read them for: the AXP223 on the RSB bus (its init sequence at a PMIC already in RSB mode: every regulator
+    behind it missing, the panel's and the WiFi's among them, the probes deferred), the SD card and the WiFi chip
+    not power-cycled. Not U-Boot's simplefb node: it is in /chosen, but "disabled".
 - Host checks on the Mac (item 6, "wrap 6 up"): liquid-dsp 1.4.0 built here; align and tx_meters run here now;
   cw_trainer (one case: a character decoded in silence, Mac arithmetic) and settings_keep (its copy under macOS's own
   SQLite) fail on a Mac only; cw_kbd, direct_hole, screen_saver, tci_ask and wf_image want the GUI's PC build (libnm);

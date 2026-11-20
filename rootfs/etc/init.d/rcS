@@ -41,3 +41,17 @@ for i in /etc/init.d/S??* ;do
     fi
 done
 "$trace" "init scripts done"
+
+# A start by kexec (x6x00-reboot --kexec, the X6100's restart test, x6x00.kexec=1 on the command line): the kernel's
+# log kept on DATA now, a minute on and three minutes on, its screen and WiFi perhaps missing (2026-11-19: dark, no
+# WiFi), so it is read at the next start
+if grep -q "x6x00\.kexec=1" /proc/cmdline 2>/dev/null; then
+    (
+        for wait in 0 60 120; do
+            sleep $wait
+            dmesg > /mnt/app_logs/dmesg_kexec.txt 2>/dev/null
+            sync
+        done
+        "$trace" "kexec start: the kernel's log in app_logs/dmesg_kexec.txt"
+    ) </dev/null >/dev/null 2>&1 &
+fi
