@@ -1660,12 +1660,13 @@ static void on_change_i(Subject *subj, void *user_data) {
 }
 
 /* The band's TX I/Q balance, its two halves in one register (HW_TX_IQ_BAL): only to a base that reads it */
-/* The radio's heat, estimated from how long it has transmitted: on the owner's X6100 15 m's transmit image stood at
- * -46 dBc for the first ~40 s of transmitting from cold, moved over the next ~25 s and stood at -29 dBc from there on
- * (at the band's calibration; 0.1 W tones, 2026-11-20, tools/bench/image.py), and was back after minutes of receiving.
- * The heat of another band's transmitting counted the same (20 m's overs made 15 m's move). Transmitting adds its
- * seconds; receiving cools it exponentially. 0 % before TX_HEAT_ON_S, 100 % from TX_HEAT_ON_S + TX_HEAT_SPAN_S: the
- * blend from a band's own I/Q balance to its warm one (tx_iq_hot_gain/phase, where it has one) */
+/* The radio's heat, estimated from how long it has transmitted (experimental): on the owner's X6100 15 m's transmit
+ * image stood at -46 dBc for the first ~40 s of 0.1 W tones from cold, moved over the next ~25 s and stood at -29 dBc
+ * (at the band's calibration, 2026-11-20, tools/bench/image.py), back after minutes of receiving; but a run of 1 W
+ * overs never moved it, so this estimate does not predict it in general (the trigger is open) and no band of that
+ * radio has a warm balance. Transmitting adds its seconds; receiving cools it exponentially. 0 % before
+ * TX_HEAT_ON_S, 100 % from TX_HEAT_ON_S + TX_HEAT_SPAN_S: the blend from a band's own I/Q balance to its warm one
+ * (tx_iq_hot_gain/phase, where it has one) */
 #define TX_HEAT_ON_S    40.0f
 #define TX_HEAT_SPAN_S  25.0f
 #define TX_HEAT_MAX_S   (TX_HEAT_ON_S + TX_HEAT_SPAN_S + 60.0f)    /* hot: more transmitting adds nothing */

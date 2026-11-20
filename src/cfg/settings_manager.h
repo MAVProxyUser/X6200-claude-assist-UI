@@ -816,10 +816,11 @@ class SettingsManager {
         StorageType::BAND, pending_writes_, [this] { p_band_tx_iq_gain.set_quiet(0); }, &band_params_};
     Parameter<int32_t> p_band_tx_iq_phase{"tx_iq_phase", 0, [](int32_t v) { return clip(v, -32767, 32767); },
         StorageType::BAND, pending_writes_, [this] { p_band_tx_iq_phase.set_quiet(0); }, &band_params_};
-    // The same once the radio is warm: on the owner's X6100 15 m's image moved from -46 to -29 dBc after about 45 s
-    // of transmitting (a step, the radio's heat: 20 m's on the air made 15 m's move too) and back after minutes of
-    // receiving, its best balance 9000 gain units away (2026-11-20). radio.c blends from these to the band's own as
-    // its estimate of the heat says (tx_heat). 0, 0: none, the band's own values whatever the heat (20 m kept still)
+    // The same once the radio is "warm" (experimental): on the owner's X6100 15 m's image moved from -46 to -29 dBc
+    // after a minute or two at 0.1 W and back after minutes of receiving, its best balance 9000 gain units away; but a
+    // run of 1 W overs never moved it, so transmitting time does not predict it (2026-11-20; the trigger is open).
+    // radio.c blends from these to the band's own as its estimate of the heat says (tx_heat). 0, 0: none (every band
+    // on the owner's X6100), the band's own whatever the estimate
     Parameter<int32_t> p_band_tx_iq_hot_gain{"tx_iq_hot_gain", 0, [](int32_t v) { return clip(v, -32767, 32767); },
         StorageType::BAND, pending_writes_, [this] { p_band_tx_iq_hot_gain.set_quiet(0); }, &band_params_};
     Parameter<int32_t> p_band_tx_iq_hot_phase{"tx_iq_hot_phase", 0, [](int32_t v) { return clip(v, -32767, 32767); },
