@@ -200,7 +200,7 @@ uint32_t hw_caps(void) {
 
 static bool has_register(hw_param_t p) {
     switch (p) {
-        case HW_RIT: case HW_XIT: case HW_AGC_TIME: case HW_TX_I_OFFSET: case HW_TX_Q_OFFSET:
+        case HW_RIT: case HW_XIT: case HW_AGC_TIME: case HW_TX_I_OFFSET: case HW_TX_Q_OFFSET: case HW_TX_IQ_BAL:
         case HW_FILTER1_LOW: case HW_FILTER1_HIGH: case HW_FILTER2_LOW: case HW_FILTER2_HIGH:
         case HW_ATU_NETWORK:
             return true;

@@ -181,6 +181,11 @@ static const struct {
      * code appended): "V1.1.9 Nov 27 2025,gcfix4" */
     {"X6100_BBFW_V1.1.9_251127001_gcfix4.xgf (base V1.1.9 with GoldCorpHF's fixes gcfix4)",
      "fc6edfe529f9f92842dc96a30f4803119a3781a6e98dfed75f73cf79e1eb5f46", 392272, "V1.1.9-gcfix4", MODEL_X6100, false},
+    /* gcfix4, the transmitter's I/Q balance from register 52 (80 bytes more) and the TX DC offsets kept through band
+     * changes (x6100_V1.1.9_gcfix5.json): the image and the carrier cancelled per band by the GUI's TX calibration.
+     * "V1.1.9 Nov 27 2025,gcfix5" */
+    {"X6100_BBFW_V1.1.9_251127001_gcfix5.xgf (base V1.1.9 with GoldCorpHF's fixes gcfix5)",
+     "f7d264fffaf47183b96b761f82a86a0ae3f44e3fc34b1deca47db2a49481d097", 392352, "V1.1.9-gcfix5", MODEL_X6100, false},
     /* RF.Guru's X6100-Baseband v0.1.0-alpha.2: Xiegu's V1.1.9 with CESSB, a compressor and a TX filter, its build
      * text "Nov 27 2025,tx1a2-test". TEST ONLY: not validated on a radio */
     {"X6100_BBFW_V1.1.9_251127001_tx1_alpha2_TEST.xgf (RF.Guru X6100-Baseband v0.1.0-alpha.2, a TEST build)",

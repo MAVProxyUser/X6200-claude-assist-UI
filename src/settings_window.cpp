@@ -1174,6 +1174,40 @@ static uint8_t make_iq_offsets(uint8_t row) {
     return row + 1;
 }
 
+/* The band's I/Q balance (the X6100's base from gcfix5 on): gain and phase in steps of 1e-4 (the setting's unit is
+ * 1e-5, which the bench's calibration sets exactly; a slider moved by hand rounds to its step) */
+#define TX_IQ_BAL_SCALE 10
+
+static void iq_bal_cb(lv_event_t *e) {
+    lv_obj_t *s = lv_event_get_target(e);
+    int32_t   v = lv_slider_get_value(s);
+
+    slider_text(s, "%d", v);
+    ParamInt *p = (ParamInt *)lv_event_get_user_data(e);
+    if (p->get() / TX_IQ_BAL_SCALE != v) {          /* the slider following the setting leaves it exact */
+        p->set(v * TX_IQ_BAL_SCALE);
+    }
+}
+
+static void iq_bal_follow(Subject *subj, void *slider) {
+    lv_slider_set_value((lv_obj_t *)slider, static_cast<SubjectInt *>(subj)->get() / TX_IQ_BAL_SCALE, LV_ANIM_OFF);
+    lv_event_send((lv_obj_t *)slider, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+static uint8_t make_iq_balance(uint8_t row) {
+    ParamInt *p[2] = {&cfg_sm.p_band_tx_iq_gain, &cfg_sm.p_band_tx_iq_phase};
+
+    wl_row_label(row, "IQ balance");
+    for (int i = 0; i < 2; i++) {
+        int32_t   v = p[i]->get() / TX_IQ_BAL_SCALE;
+        lv_obj_t *s = row_slider(row_cell(row, 1 + 3 * i, 3, SMALL_3), v, -32767 / TX_IQ_BAL_SCALE,
+                                 32767 / TX_IQ_BAL_SCALE, SMALL_3 - 110, iq_bal_cb, p[i], "%d", v);
+
+        observers.emplace_back(p[i]->subscribe(iq_bal_follow, s));
+    }
+    return row + 1;
+}
+
 static uint8_t make_band_gain(uint8_t row) {
     lv_obj_t *s;
 
@@ -4436,6 +4470,9 @@ static void make_txcal_page() {
         row = card_begin("TX CALIBRATION");
         if (caps & HW_CAP_TX_IQ_OFFSET) {
             row = make_iq_offsets(row);
+        }
+        if (caps & HW_CAP_TX_IQ_BAL) {
+            row = make_iq_balance(row);
         }
         if (caps & HW_CAP_BAND_GAIN) {
             row = make_band_gain(row);

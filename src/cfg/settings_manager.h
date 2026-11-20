@@ -801,6 +801,13 @@ class SettingsManager {
         StorageType::BAND, pending_writes_, {}, &band_params_};
     Parameter<int32_t> p_band_tx_q_offset{"tx_q_offset", 0, {},
         StorageType::BAND, pending_writes_, {}, &band_params_};
+    // The transmitter's I/Q balance of this band, 1e-5 each (+-0.33): Q' = Q + (gain Q + phase I) x 1e-5 in the
+    // X6100's base from gcfix5 on (register 52). 0, 0: as Xiegu's. Set by the TX calibration (Settings > TX CAL,
+    // tools/bench/txcal.py), which nulls the image on the other side of the dial
+    Parameter<int32_t> p_band_tx_iq_gain{"tx_iq_gain", 0, [](int32_t v) { return clip(v, -32767, 32767); },
+        StorageType::BAND, pending_writes_, {}, &band_params_};
+    Parameter<int32_t> p_band_tx_iq_phase{"tx_iq_phase", 0, [](int32_t v) { return clip(v, -32767, 32767); },
+        StorageType::BAND, pending_writes_, {}, &band_params_};
     // dB offset of the front panel audio chain (float, scaled x10 to an int
     // in the DB: 0.2 dB <-> 2).
     Parameter<float, int32_t, 10> p_band_dac_offset{"dac_offset", 0.0f, {},

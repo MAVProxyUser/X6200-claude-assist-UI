@@ -144,8 +144,9 @@ def main():
     results = {"tx": a.tx, "rx": a.rx, "w": a.w, "tones": tones, "pads_db": total, "overs": []}
     plan = [[0, LEAD_S]] + [[t, TONE_S] for t in tones] + [[0, TAIL_S]]
     key_s = sum(s for _, s in plan) + 1.0
-    if key_s > c["limits"]["max_key_s"] - 1:
-        raise Refused(f"{key_s:.1f} s on the air is over the limit")
+    lim_s = bench.FULL_RATING_KEY_S if a.w > bench.HARD_MAX_W else c["limits"]["max_key_s"]
+    if key_s > lim_s - 1:
+        raise Refused(f"{key_s:.1f} s on the air is over the limit ({lim_s:.0f} s at {a.w} W)")
     subprocess.run(["scp", "-q", "-o", "BatchMode=yes", SENDER, f"root@{txr.host}:/tmp/tci_tone_tx.py"], check=True)
     rx_audio = [None]
 

@@ -102,6 +102,16 @@ The X6100 into the X6200 at 5 W, all bands 160-6 m: the image at the dial minus 
 carrier: -30 to -48 dBc at 5 W, about -12 dBc at 0.1 W on HF (it does not scale with power). Details:
 tools/base_update/README.md.
 
+`txcal.py TX RX [--bands ...] [--w 5]` (2026-11-20, the owner: "please make it so"): the transmitter's calibration
+band by band, against the other radio, in image.py's geometry (a 1000 Hz tone, RX 1500 Hz below). It sets TX's band
+values through its remote (`set txig/txip`: the I/Q balance, register 52, the X6100's base gcfix5; `set txio/txqo`:
+the DC offsets, registers 50/51) and measures the image and the carrier for each. The X6100's base takes them only
+between transmissions, so each point is an over of its own (a 1.6 s tone), each over moving one value of each pair
+and measuring both. Each pair's residual is a bowl: five points, a parabola on each axis to its bottom, a second pass
+at a third of the step, the last point measured; 11 overs a band. What it finds stays in the band's settings (the GUI
+saves them) when it is better than before; `--dry` measures only. An over whose tone did not come through to RX is
+done again. The session's first over is a short one at 0.1 W.
+
 `radios-ft8` first ran 2026-11-18 (the X6100 and the X6200 through 40 + 30 dB, 0.1 W, 20 m), both ways: PASS. The
 X6200 decoded the X6100 at +11 to +15 dB, the X6100 the X6200 at -2 to -3 dB (the X6200's preamp on, the X6100's
 off: a parity run sets them alike). Found by it: the FT8 app opens on its last band and holds the dial (the band keys

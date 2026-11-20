@@ -8,6 +8,7 @@ own; SSH (root) only for provisioning, the test callsigns and cleaning the logs.
   bench.py provision NAME rx|tx        a remote session for the harness on radio NAME (the GUI restarts once)
   bench.py status [NAME...]            frequency, mode, power, TX, app and S-meter of each radio
   bench.py chain-ok PROFILE "WORDS"    the owner's word that the cable of PROFILE is in place (12 hours)
+  bench.py power-ok radios W "WORDS"   the owner's word for W over 5 W, up to each pad's own rating (12 hours)
   bench.py preflight PROFILE           every check before a transmission; nothing sent
   bench.py stop                        the emergency stop: the HackRF ended, every radio unkeyed, apps' TX stopped
   bench.py hackrf-ft8 [--band 20m] [--x 30] [--text "CQ Q9TST FN00"] [--audio 1500]
@@ -57,6 +58,11 @@ MAX_KEY_S = 16              # longer than an FT8 transmission: a radio still on 
 MAX_SWR = 2.0               # higher on a radio's TX meter: the chain is not the load it should be
 TOO_STRONG_DB = 20          # a receiver hearing this much more than the chain lets through: pads missing
 SOFT_POWER_MAX_W = 2.0      # more than asked up to this ends only that over (radios-walkie); over it stops all
+# Over HARD_MAX_W only with the owner's recorded word (power-ok; the owner, 2026-11-20: "Yes, run 10 W"): up to the
+# pads' own rating (not twice it), never over FULL_RATING_MAX_W, each over at most FULL_RATING_KEY_S on the air and
+# the radio then off at least as long as it was on before its next (the pad cools)
+FULL_RATING_MAX_W = 10.0
+FULL_RATING_KEY_S = 10
 TEST_CALL = re.compile(r"^Q[0-9]TST$")
 
 FT8_DIAL = {"40m": 7074000, "30m": 10136000, "20m": 14074000, "17m": 18100000, "15m": 21074000,
@@ -97,6 +103,9 @@ def conf():
         raise Refused(f"no configuration: copy tools/bench/bench.example.json to {CONF} and fill it in")
     lim = c.setdefault("limits", {})
     lim["radio_w"] = min(float(lim.get("radio_w", 1.0)), HARD_MAX_W)
+    full = power_ok()
+    if full:
+        lim["radio_w"] = full
     lim["max_key_s"] = min(float(lim.get("max_key_s", MAX_KEY_S)), MAX_KEY_S)
     lim["hackrf_x"] = min(int(lim.get("hackrf_x", 30)), HACKRF_MAX_X)
     return c
@@ -130,6 +139,7 @@ class Radio:
         self.state, self.meter, self.txm, self.ft8, self.apps = {}, None, None, {}, None
         self.rows, self.errs, self.lock = [], [], threading.Lock()
         self.tx, self.tx_since, self.ctl_mine, self.role = False, None, False, None
+        self.tx_last = None         # (on, off) of the last over: the pad's rest above HARD_MAX_W
         self.tx_off_at = 0.0       # when it last left TX (the radios' gate: one on the air at a time)
         self.last_msg = time.time()
         self.r.send(f"auth {tok}")
@@ -183,6 +193,8 @@ class Radio:
         if not on:
             if self.tx:
                 self.tx_off_at = time.time()
+                if self.tx_since:
+                    self.tx_last = (self.tx_since, self.tx_off_at)
             self.tx_since = None
         self.tx = on
 
@@ -224,6 +236,14 @@ class Radio:
 
 # ---- The gates ----
 
+def power_ok():
+    """The power the owner allowed over HARD_MAX_W in the last 12 hours (power-ok), else None"""
+    ok = load_json(os.path.join(STATE, "power.json"), {}).get("radios")
+    if not ok or time.time() - ok["at"] > CHAIN_VALID_S:
+        return None
+    return min(float(ok["w"]), FULL_RATING_MAX_W)
+
+
 def chain_gate(c, profile):
     ok = load_json(os.path.join(STATE, "chain.json"), {}).get(profile)
     if not ok or time.time() - ok["at"] > CHAIN_VALID_S:
@@ -242,8 +262,11 @@ def chain_gate(c, profile):
             raise Refused(f"the radios profile's pads add up to {total} dB, under {RADIOS_MIN_DB}")
         for name in p.get("between", []):
             at = [x for x in pads if x.get("at") == name]
-            if not at or at[0].get("watts", 0) < c["limits"]["radio_w"] * 2:
-                raise Refused(f"no pad rated for twice the test power on {name}'s antenna jack")
+            w = c["limits"]["radio_w"]
+            need = w if w > HARD_MAX_W else w * 2       # over 5 W: the owner's word for the pads' own rating
+            if not at or at[0].get("watts", 0) < need:
+                raise Refused(f"no pad rated for {'the' if w > HARD_MAX_W else 'twice the'} test power on "
+                              f"{name}'s antenna jack")
     return p, total
 
 
@@ -277,8 +300,15 @@ def rx_only_gate(radio):
 def radio_tx_gate(radio, c, w):
     if not radio.may_tx:
         raise Refused(f"{radio.name}: the harness's session there may not transmit")
-    if w > c["limits"]["radio_w"] or w > HARD_MAX_W:
+    if w > c["limits"]["radio_w"] or (w > HARD_MAX_W and (power_ok() or 0) < w):
         raise Refused(f"{w} W is over the limit ({c['limits']['radio_w']} W)")
+    if w > HARD_MAX_W and radio.tx_last:
+        # the pad at its rating: off at least as long as the last over was on
+        on_s = radio.tx_last[1] - radio.tx_last[0]
+        rest = on_s - (time.time() - radio.tx_last[1])
+        if rest > 0:
+            say(f"{radio.name}: the pad rests {rest:.1f} s before {w} W again")
+            time.sleep(rest)
     if radio.state.get("atu"):
         raise Refused(f"{radio.name}: the ATU is on (it tunes by transmitting): off first")
     freq = int(radio.state.get("freq", 0))
@@ -316,8 +346,10 @@ class Watch:
                 elif self.hackrf is not None and (not r.ctl_mine or r.state.get("rxo") != 1):
                     self.trip(f"{r.name}: control taken from the harness or the receive-only hold gone while the "
                               f"HackRF fed it")
-                elif since and time.time() - since > self.c["limits"]["max_key_s"]:
-                    self.trip(f"{r.name} on the air for over {self.c['limits']['max_key_s']:.0f} s")
+                elif since and time.time() - since > (FULL_RATING_KEY_S if (self.w or 0) > HARD_MAX_W else
+                                                      self.c["limits"]["max_key_s"]):
+                    self.trip(f"{r.name} on the air for over "
+                              f"{FULL_RATING_KEY_S if (self.w or 0) > HARD_MAX_W else self.c['limits']['max_key_s']:.0f} s")
                 elif since and txm and time.time() - since > 1.0:
                     w, swr = txm[0], txm[1]
                     if swr > MAX_SWR:
@@ -1014,6 +1046,23 @@ def cmd_chain_ok(c, a):
     say(f"{a.profile}: the owner's word recorded ({sum(x['db'] for x in p.get('pads', []))} dB), good for 12 hours")
 
 
+def cmd_power_ok(c, a):
+    p = c.get("profiles", {}).get("radios")
+    if not p:
+        raise Refused("no profile radios")
+    if not HARD_MAX_W < a.w <= FULL_RATING_MAX_W:
+        raise Refused(f"power-ok is for {HARD_MAX_W} to {FULL_RATING_MAX_W} W")
+    for name in p.get("between", []):
+        at = [x for x in p.get("pads", []) if x.get("at") == name]
+        if not at or at[0].get("watts", 0) < a.w:
+            raise Refused(f"the pad on {name}'s jack is not rated for {a.w} W")
+    doc = load_json(os.path.join(STATE, "power.json"), {})
+    doc["radios"] = {"at": time.time(), "w": a.w, "words": a.words}
+    save_json(os.path.join(STATE, "power.json"), doc)
+    say(f"radios: the owner's word for {a.w} W recorded (each over at most {FULL_RATING_KEY_S} s, the pad resting as "
+        f"long after), good for 12 hours")
+
+
 def cmd_preflight(c, a):
     p, total = chain_gate(c, a.profile)
     say(f"{a.profile}: cable confirmed, {total} dB of pads")
@@ -1062,6 +1111,8 @@ def main():
     s = sub.add_parser("provision"); s.add_argument("name"); s.add_argument("kind", choices=["rx", "tx"])
     s = sub.add_parser("status"); s.add_argument("names", nargs="*")
     s = sub.add_parser("chain-ok"); s.add_argument("profile", choices=["hackrf", "radios"]); s.add_argument("words")
+    s = sub.add_parser("power-ok"); s.add_argument("profile", choices=["radios"]); s.add_argument("w", type=float)
+    s.add_argument("words")
     s = sub.add_parser("preflight"); s.add_argument("profile", choices=["hackrf", "radios"])
     sub.add_parser("stop")
     s = sub.add_parser("hackrf-ft8")
@@ -1096,7 +1147,8 @@ def main():
         c = conf()
         if a.cmd in ("hackrf-ft8", "hackrf-iq") and a.x is None:
             a.x = c["limits"]["hackrf_x"]
-        {"provision": cmd_provision, "status": cmd_status, "chain-ok": cmd_chain_ok, "preflight": cmd_preflight,
+        {"provision": cmd_provision, "status": cmd_status, "chain-ok": cmd_chain_ok, "power-ok": cmd_power_ok,
+         "preflight": cmd_preflight,
          "stop": lambda c, a: emergency_stop(c), "hackrf-ft8": run_hackrf_ft8, "hackrf-iq": run_hackrf_iq, "radios-ft8": run_radios_ft8,
          "radios-walkie": run_radios_walkie,
          "testcall": cmd_testcall, "cleanlog": lambda c, a: clean_log(c["radios"][a.name]["host"])}[a.cmd](c, a)

@@ -129,6 +129,7 @@ static void on_change_comp_ratio(Subject *subj, void *user_data);
 static void on_fw_zoom_change(Subject *subj, void *user_data);
 
 static void on_change_i(Subject *subj, void *user_data);
+static void on_tx_iq_bal_change(Subject *subj, void *user_data);
 static void on_rfg_change(Subject *subj, void *user_data);
 static void on_change_f(Subject *subj, void *user_data);
 static void on_rit_change(Subject *subj, void *user_data);
@@ -487,6 +488,8 @@ void radio_start() {
 
     subject_subscribe_and_notify((Subject*)cfg_band_tx_i_offset, on_change_i, (void*)HW_TX_I_OFFSET);
     subject_subscribe_and_notify((Subject*)cfg_band_tx_q_offset, on_change_i, (void*)HW_TX_Q_OFFSET);
+    subject_subscribe((Subject*)cfg_band_tx_iq_gain, on_tx_iq_bal_change, NULL);
+    subject_subscribe_and_notify((Subject*)cfg_band_tx_iq_phase, on_tx_iq_bal_change, NULL);
 
     subject_subscribe((Subject*)cfg_band_id, on_band_change, NULL);
 
@@ -1593,6 +1596,17 @@ static void on_change_i(Subject *subj, void *user_data) {
     WITH_RADIO_LOCK(hw_set_i((hw_param_t)(intptr_t)user_data, v));
 }
 
+/* The band's TX I/Q balance, its two halves in one register (HW_TX_IQ_BAL): only to a base that reads it */
+static void on_tx_iq_bal_change(Subject *subj, void *user_data) {
+    (void)subj, (void)user_data;
+    if (!(radio_caps() & HW_CAP_TX_IQ_BAL)) {
+        return;
+    }
+    uint32_t g = (uint16_t)(int16_t)param_i_get(cfg_band_tx_iq_gain);
+    uint32_t p = (uint16_t)(int16_t)param_i_get(cfg_band_tx_iq_phase);
+    WITH_RADIO_LOCK(hw_set_i(HW_TX_IQ_BAL, (int32_t)((p << 16) | g)));
+}
+
 /* RIT to the base. On the X6200's WR12's IF the base takes I and Q the other way round (wr12_follow), and that mirrors
  * its offset: at 2 m RIT +500 Hz took a carrier's tone 500 Hz up where on HF it goes 500 Hz down (#134, ea4iln's
  * measurement). So the other way round there. Under the lock */
@@ -2527,8 +2541,9 @@ static void on_if_shift_change(Subject *subj, void *user_data) {
     on_vfo_freq_change(NULL, (void*)vfo);
 }
 
-static void on_band_change(Subject *subj, void *user_data) {
-    // Workaround for bug with ignored IQ offset on band change from BASE
+/* The band's TX DC offsets to the base, each a value it has not seen last (its register handler acts on a change
+ * only): the band's own, or one more when that is what it was sent last. On the GUI thread */
+static void offsets_send(void) {
     int32_t i_val = param_i_get(cfg_band_tx_i_offset);
     int32_t q_val = param_i_get(cfg_band_tx_q_offset);
     if (i_val == hw_get_i(HW_TX_I_OFFSET)) {
@@ -2539,6 +2554,27 @@ static void on_band_change(Subject *subj, void *user_data) {
         q_val++;
     }
     WITH_RADIO_LOCK(hw_set_i(HW_TX_Q_OFFSET, q_val));
+}
+
+/* When the X6100's base takes a band change it loads that band's DC offsets from its own calibration table (zeros on
+ * a radio Xiegu never calibrated) over the ones the GUI sent. Sent at once, the GUI's can reach it before it takes
+ * the band, and the table's win: calibrated offsets were lost on every band change, the carrier back from -61..-77
+ * to -30 dBc (2026-11-20, tools/bench/image.py after txcal.py). So once more half a second later (radio_loop) */
+static atomic_uint_fast64_t offsets_again_at;
+
+static void offsets_again_cb(void *arg) {
+    (void)arg;
+    offsets_send();
+    on_tx_iq_bal_change(NULL, NULL);
+}
+
+static void on_band_change(Subject *subj, void *user_data) {
+    // Workaround for bug with ignored IQ offset on band change from BASE
+    offsets_send();
+    /* The band's I/Q balance too: its settings did not always tell their observers on a band change, and 15 m went
+     * out with 17 m's balance (its image 20 dB worse, 2026-11-20, image.py after a band change) */
+    on_tx_iq_bal_change(NULL, NULL);
+    atomic_store(&offsets_again_at, get_time() + 500);
 }
 
 #ifndef BOARD_X6200
@@ -3426,6 +3462,10 @@ static void * radio_thread(void *arg) {
 
         if (radio_tick()) {
             usleep(2000);
+        }
+        uint64_t again = atomic_load(&offsets_again_at);   /* the band's DC offsets again (on_band_change) */
+        if (again && now_time >= again && atomic_compare_exchange_strong(&offsets_again_at, &again, 0)) {
+            scheduler_put(offsets_again_cb, NULL, 0);
         }
         /* The X6100's test base: settings changed during a TX, now that it receives */
         if (hw_settings_held()) {

@@ -79,6 +79,7 @@ typedef enum {
     HW_DAC_GAIN_F,      /* dB */
     HW_TX_I_OFFSET,
     HW_TX_Q_OFFSET,
+    HW_TX_IQ_BAL,       /* (phase << 16) | (gain & 0xffff), each 1e-5 signed: Q' = Q + (gain Q + phase I) x 1e-5 */
     HW_ATU_ENABLED,
     HW_ATU_NETWORK,
     HW_ATU_TUNE,

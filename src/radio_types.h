@@ -53,6 +53,9 @@ typedef enum {
     HW_CAP_TX_SPECTRUM_ON_DIAL = 1 << 18,
     /* A TEST ONLY base, not validated on a radio: the X6100's "tx1a2-test" (hw/x6100/test_base.h), labelled so */
     HW_CAP_TEST_BASE           = 1 << 19,
+    /* The transmitter's I/Q balance per band (HW_TX_IQ_BAL): GoldCorpHF's X6100 base from gcfix5 on (x6100_patch.py,
+     * fix "txiq"), the image on the other side of the dial cancelled by the TX calibration */
+    HW_CAP_TX_IQ_BAL           = 1 << 20,
 } hw_cap_t;
 
 /* The hand mic's keys as the base reports them (mic_keys.c): the X6100 mic's codes. The X6200's library has the

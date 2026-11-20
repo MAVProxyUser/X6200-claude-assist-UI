@@ -218,6 +218,8 @@ ParamInt         *cfg_band_split          = nullptr;
 ParamInt         *cfg_band_tx_shift       = nullptr;
 ParamInt         *cfg_band_tx_i_offset    = nullptr;
 ParamInt         *cfg_band_tx_q_offset    = nullptr;
+ParamInt         *cfg_band_tx_iq_gain     = nullptr;
+ParamInt         *cfg_band_tx_iq_phase    = nullptr;
 ParamInt         *cfg_band_vfoa_mode      = nullptr;
 ParamInt         *cfg_band_vfob_mode      = nullptr;
 ParamInt         *cfg_band_vfoa_att       = nullptr;
@@ -483,6 +485,8 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_band_tx_shift    = &cfg_sm.p_band_tx_shift;
     cfg_band_tx_i_offset = &cfg_sm.p_band_tx_i_offset;
     cfg_band_tx_q_offset = &cfg_sm.p_band_tx_q_offset;
+    cfg_band_tx_iq_gain  = &cfg_sm.p_band_tx_iq_gain;
+    cfg_band_tx_iq_phase = &cfg_sm.p_band_tx_iq_phase;
     cfg_band_vfoa_mode   = &cfg_sm.p_band_vfoa_mode;
     cfg_band_vfob_mode   = &cfg_sm.p_band_vfob_mode;
     cfg_band_vfoa_att    = &cfg_sm.p_band_vfoa_att;

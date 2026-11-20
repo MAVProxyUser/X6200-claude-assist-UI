@@ -706,6 +706,7 @@ bool hw_set_i(hw_param_t p, int32_t v) {
         /* The X6100 patched firmware's extras: this base has no register for them */
         case HW_TX_I_OFFSET:
         case HW_TX_Q_OFFSET:
+        case HW_TX_IQ_BAL:
         case HW_FILTER2_LOW:
         case HW_FILTER2_HIGH:
         case HW_IF_SHIFT_ON:

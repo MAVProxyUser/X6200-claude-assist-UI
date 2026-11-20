@@ -285,8 +285,9 @@ def main():
         plan.append([0, 0.6])                       # the radio's audio buffer played out before the unkey (the X6100
                                                     # cut the last burst short without it)
     key_s = sum(s for _, s in plan) + 1.0
-    if key_s > c["limits"]["max_key_s"] - 1:
-        raise Refused(f"{key_s:.1f} s on the air is over the limit")
+    lim_s = bench.FULL_RATING_KEY_S if a.w > bench.HARD_MAX_W else c["limits"]["max_key_s"]
+    if key_s > lim_s - 1:
+        raise Refused(f"{key_s:.1f} s on the air is over the limit ({lim_s:.0f} s at {a.w} W)")
     subprocess.run(["scp", "-q", "-o", "BatchMode=yes", SENDER, f"root@{txr.host}:/tmp/tci_tone_tx.py"], check=True)
 
     def tap(r):

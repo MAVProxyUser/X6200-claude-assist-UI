@@ -151,6 +151,7 @@ Baseband shows which base the radio runs.
 | Codec gain | Settings > TX Cal > TX CALIBRATION | - | r3 and later | - | - |
 | Band output gain | Settings > TX Cal > TX CALIBRATION | - | r8 and later | - | - |
 | IQ offsets | Settings > TX Cal > TX CALIBRATION | yes | yes | yes | - |
+| IQ balance | Settings > TX Cal > TX CALIBRATION | - | gcfix5 | - | - |
 | Mic gain | Settings > Audio > MICROPHONE | yes | yes | yes | yes |
 | Comp (the ratio) | the MFK 2:4 page | the button (see 4) | yes | yes | three levels |
 | Compressor, makeup | Settings > Audio > TX AUDIO | - | r3 and later | yes | - |
@@ -251,7 +252,15 @@ The rest, left as it is unless you have a reason:
 - **IQ offsets** (X6100, per band, 0 by default) shift the I and Q signals
   of the transmitter, which sets how well the carrier is suppressed. Change
   them only while you watch the carrier on a spectrum analyser or a second
-  receiver.
+  receiver. The X6100's base takes a new value at the next transmission,
+  not during one.
+- **IQ balance** (X6100 with GoldCorpHF's base gcfix5, per band, 0 by
+  default) corrects the transmitter's I and Q against each other (gain,
+  phase), which sets how well the mirror image of your signal on the other
+  side of the dial is suppressed. Like the offsets, it is set by a
+  calibration against a second receiver (`tools/bench/txcal.py`, see
+  [gcfix5](#goldcorphfs-fixes-to-xiegus-v119-gcfix5)); the sliders show it in
+  steps of 0.0001.
 - **TX filter** (patched base r9 and later): the transmitted audio's
   passband, low edge 50-400 Hz (160 by default), high edge 2000-4000 Hz
   (3000).
@@ -805,6 +814,9 @@ One screen, set up for its own radio: A for the X6200 (its base's 384 kHz around
 shown), B for an SDR on the HOST port, an RTL-SDR stick, a HackRF or a bladeRF (the middle 1.8 MHz of its
 2.1 MHz; "the stick" below, whichever it is). Each draws a trace over a 3D picture of the
 last seconds, the strongest signals named over it and the screen's channel bracketed (A's dial, B's channel).
+While the radio transmits (the PTT, an app, TCI) it cannot receive, so no spectrum comes in: A's picture and F's
+spectrogram go on at their pace with rows of one dim shade, a band across the picture as long as the transmission, so
+the time they show stays true (up to v0.3.12.39 they stopped while it sent).
 
 - **The S-meter, on each half of the picture** (top left of its trace): the X6200's half (A, and B's SPLIT) carries
   the radio's own [S-meter](#s-meter), every figure of it: its 25 bars on its scale (3 dB each up to S9, then 5 dB
@@ -1335,6 +1347,9 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
   each second.
 - At the bottom, beside F5's box, what is on the dial, and a word for what was refused and what to press instead. A build without portrait (on a PC) shows G in
   landscape, in four boxes.
+- The VOL knob's pop-up shows on G held up too, upright across its middle: the volume (or squelch, RF gain) with its
+  bar, for 2.5 s after a turn or push, as on the other screens (up to v0.3.12.39 it was drawn on the landscape
+  screen, out of sight behind G).
 
 **G follows the X6200**: its frequency and mode are the dial's, read live, and G never tunes by itself. A's scan
 moving the dial moves G, so TX armed here is on the band A was scanning. Choosing on G (a channel, a group, a mode,
@@ -2271,7 +2286,7 @@ low while the base is reset, as Xiegu's own X6100 updater does. More in
   writes (about 15 seconds), starts the GUI again. The base starts its new
   firmware by itself; the radio does not switch itself off.
 - Files known by their SHA-256: Xiegu's V1.1.8 and V1.1.9, GoldCorpHF's
-  gcfix3 and gcfix4 (below), and RF.Guru's [test base](#the-x6100-test-base) with
+  gcfix3, gcfix4 and gcfix5 (below), and RF.Guru's [test base](#the-x6100-test-base) with
   `--test-ok` (TEST to be typed).
   An X6200 file is refused.
 - As Xiegu asks: a 13.8 V supply of 3 A or more, the battery out, and the
@@ -2279,7 +2294,7 @@ low while the base is reset, as Xiegu's own X6100 updater does. More in
 - Checked on one X6100 on 15 November 2026: the test base written and
   Xiegu's V1.1.8 back, the base's calibration the same after each.
 
-#### GoldCorpHF's fixes to Xiegu's V1.1.9 (gcfix4)
+#### GoldCorpHF's fixes to Xiegu's V1.1.9 (gcfix5)
 
 GoldCorpHF ships no base firmware. It ships a patch: the few encrypted blocks
 of Xiegu's own V1.1.9 file that change, with the SHA-256 and MD5 of Xiegu's
@@ -2288,7 +2303,7 @@ from Xiegu's, and writes nothing unless Xiegu's file and the result are exactly
 the ones the patch names. Xiegu's V1.1.9 file is on the X6100's internal
 memory (`/usr/firmware` of Xiegu's own system) and in Xiegu's V1.2.0 update.
 
-What gcfix4 changes (`V1.1.9 Nov 27 2025,gcfix4` in Settings > Info):
+What gcfix5 changes (`V1.1.9 Nov 27 2025,gcfix5` in Settings > Info):
 
 - **Low power is right on every band.** Xiegu's power control only sets a
   target and lets its loop pull the drive down by 40 dB at most, plus a 6 dB
@@ -2301,7 +2316,7 @@ What gcfix4 changes (`V1.1.9 Nov 27 2025,gcfix4` in Settings > Info):
   while you are silent, so the first sound after a pause went out hot: 5 dB
   after 50 ms, 10 dB after a tenth of a second, 18 dB after most of a second
   (1 W on the meter at a 0.1 W setting), then 6-14 dB too low for a fifth of
-  a second while the loop pulled back. gcfix4 holds the drive through
+  a second while the loop pulled back. gcfix4 and 5 hold the drive through
   pauses: after pauses of 50 ms to 3 s each sound starts within 1 dB of its
   level. A hold never lasts over 5 seconds. The first transmission after the
   radio is switched on still behaves as Xiegu's until the base has heard
@@ -2317,25 +2332,36 @@ What gcfix4 changes (`V1.1.9 Nov 27 2025,gcfix4` in Settings > Info):
   at 0.1 W and at 5 W: 300 to 2900 Hz within 3.5 dB, the power as set
   (4.7-4.8 W on every band at 5 W, 5.2 W on 6 m), at 5 W each sound after a
   pause within 0.6 dB, the receiver the same as Xiegu's.
-- **What gcfix does not change: the other sideband and the carrier.** Every
-  X6100 also sends a weak mirror image of its signal on the other side of
-  the dial (a 600 Hz tone in USB also appears at 600 Hz below the dial), and
-  a carrier on the dial itself. Measured on this X6100 at 5 W on every band
+- **The other sideband and the carrier, calibrated away.** Every X6100
+  also sends a weak mirror image of its signal on the other side of the dial
+  (a 600 Hz tone in USB also appears at 600 Hz below the dial), and a
+  carrier on the dial itself. Measured on this X6100 at 5 W on every band
   from 160 to 6 m (`tools/bench/image.py`): the image 42 to 54 dB under the
   signal (15 and 12 m the worst), the carrier 30 to 48 dB under. Xiegu's own
   base measured the same. The carrier stays at the same few milliwatts
   whatever the power, so at a 0.1 W setting it is only about 12 dB under the
-  signal on HF. Neither base has a correction for them, and the X6100's
-  calibration memory is empty. Both stay within about 3 kHz of the dial;
-  they leave a band only if you work right at its edge.
+  signal on HF. Both stay within about 3 kHz of the dial; they leave a band
+  only if you work right at its edge. Xiegu's base has no correction for the
+  image (and the X6100's calibration memory is empty): gcfix5 adds one, the
+  band's IQ balance in Settings > TX Cal, and the band's IQ offsets null the
+  carrier. Both are found by a calibration against a second receiver
+  (`tools/bench/txcal.py`, the other radio through attenuators). On this
+  X6100 at 5 W (2026-11-20) it took the image from 46-55 dB under the
+  signal to 55-69 dB under on 160 to 17 m and 10 m, and the carrier from
+  30-35 to 44-59 dB under on 160 to 15 m; 15 and 12 m improved less (and
+  vary from one run to the next), 6 m not at all yet (its offsets left at
+  0). Uncalibrated (0, 0) it is Xiegu's as before. A new value takes effect
+  at the next transmission. gcfix5 also keeps the offsets through band
+  changes: Xiegu's base loaded its own table's (zeros) over them at each.
 
-gcfix3 is the same without the hold (the power and clock fixes only).
+gcfix4 is the same without the IQ balance, gcfix3 also without the hold (the
+power and clock fixes only).
 
 To put it on, from a computer:
 
-    ssh root@x6100.local x6x00-base-patch apply gcfix4
-    scp root@x6100.local:/mnt/base_update/X6100_BBFW_V1.1.9_251127001_gcfix4.xgf .
-    tools/base_update/flash.sh root@x6100.local --flash --file X6100_BBFW_V1.1.9_251127001_gcfix4.xgf
+    ssh root@x6100.local x6x00-base-patch apply gcfix5
+    scp root@x6100.local:/mnt/base_update/X6100_BBFW_V1.1.9_251127001_gcfix5.xgf .
+    tools/base_update/flash.sh root@x6100.local --flash --file X6100_BBFW_V1.1.9_251127001_gcfix5.xgf
 
 `x6x00-base-patch list` says whether Xiegu's file is on the card
 (`/mnt/base_update`); copy it there first if not. Xiegu's V1.1.9 back the same
@@ -3743,7 +3769,7 @@ What they do: see [DX Cluster](#dx-cluster).
 
 | Card | Options |
 |---|---|
-| TX CALIBRATION | IQ offsets, band output gain, codec gain |
+| TX CALIBRATION | IQ offsets, IQ balance (X6100 base gcfix5), band output gain, codec gain |
 | CESSB | on, level |
 | TX PROTECTION | SWR protection, TX ranges (Ham bands, South Korea, Own list), Own list file (Read again), TX outside ham bands (see [Amateur bands only](#amateur-bands-only)) |
 | EXTERNAL TUNER | TUNE power, W; TUNE time limit, s (see [TUNE for an external tuner](#tune-for-an-external-tuner)) |

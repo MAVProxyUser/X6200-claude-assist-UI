@@ -40,7 +40,19 @@ The fixes (tools/base_update/README.md "Every base compared", 2026-11-20):
            code goes at the end of the image (it grows by 224 bytes, still in its last flash sector). Measured
            (tools/bench/tones.py --bursts, 0.1 W): after pauses of 50 ms to 1.6 s each burst starts within 1 dB of
            its level; gcfix3 started them 5 to 18 dB hot, then 6 to 14 dB under for a fifth of a second.
-gcfix3 is pll,6m,alc; gcfix4 is gcfix3 and hold. The version text becomes "V1.1.9 Nov 27 2025,gcfixN": no ",rN",
+  txiq     The transmitter's I/Q balance (x6100_hooks/tx_iq.s): every X6100 sends a mirror image of its signal on the
+           other side of the dial (-42.5 to -54.5 dBc on 160-6 m at 5 W, 2026-11-20, Xiegu's own base the same) and
+           no X6100 base corrects transmit I/Q. Each sample's Q, in the base's DAC loop, becomes
+           Q + (G Q + P I) x 1e-5 with G and P from register 52 (unused by Xiegu, r13 and RF.Guru's port; the base
+           keeps it at 0x2000c598), which the GUI writes for each band (its TX calibration). Zero leaves the
+           samples exactly as Xiegu's. The code goes after alc_hold (0x0807fc50, 80 bytes).
+  dcband   The TX DC offsets kept through band changes: on a band change Xiegu's register handler loads the band's
+           TX DC offsets from its own calibration table (zeros on a radio Xiegu never calibrated) straight into the
+           DAC loop (bl 0x080242c0 / 0x080242d4 at 0x0802b32a / 0x0802b34e), over the GUI's registers 50/51, which it
+           applies only when they change. The GUI's calibrated offsets were lost after each band change (the carrier
+           back to -30 dBc, 2026-11-20); a resend half a second later lost the race too. The two calls become NOPs:
+           registers 50/51 alone set the offsets (the GUI sends each band's on every band change).
+gcfix3 is pll,6m,alc; gcfix4 is gcfix3 and hold; gcfix5 is gcfix4, txiq and dcband. The version text becomes "V1.1.9 Nov 27 2025,gcfixN": no ",rN",
 so OpenX6X00 and the X6100 library read it as Xiegu's 1.1.9 with all of its features, and the GUI's Base line says
 which build it is.
 SPDX-License-Identifier: LGPL-2.1-or-later
@@ -51,7 +63,7 @@ BASE = 0x08020000
 XGF_SHA256 = "87a3e96ea21abf16a14b0fb771aad19a9e0bf8c267f93ec71a09d38e59c25737"     # Xiegu's V1.1.9 .xgf
 PLAIN_SHA256 = "3fa11293e06951c21c9cfda04ea08adad85eaadda26b77a8e8bbcca8820c53c4"   # the same, decrypted
 IMAGE_END = 0x0807fb70                                                              # Xiegu's image ends here
-NAMES = {"pll,6m,alc": "gcfix3", "pll,6m,alc,hold": "gcfix4"}
+NAMES = {"pll,6m,alc": "gcfix3", "pll,6m,alc,hold": "gcfix4", "pll,6m,alc,hold,txiq,dcband": "gcfix5"}
 
 # (address, original bytes, new bytes, what): each applied only where the original is exactly there; an original of
 # None appends at the image's end (the address must be where it ends then)
@@ -74,12 +86,26 @@ PATCHES = {
                  "60ee810a8168b4eee00af1ee10fa05d50131b1f5746f02d980ed000a002181600029bdec030a0fbc03d1daed887ae6ee276a"
                  "a8f7a7b9098a7f3f6f12833affffffffffffffffffffffff"),
               "alc_hold (224 bytes with the 0xFF padding): the raise skipped while the block is 30 dB under its recent peak")],
+    "txiq": [(0x08026560, bytes.fromhex("d5ed017a"), bytes.fromhex("59f076bb"),
+              "vldr s15,[r5,#4] -> b.w 0x0807fc50: each sample's Q goes through tx_iq before the DAC"),
+             (0x0807fc50, None, bytes.fromhex(
+                 "d5ed017a03b44cf29850c2f200000068a8b12ded020a01b200ee101ab8eec00a011400ee901af8eee00a20ee270aa0ee870a"
+                 "dfed040ae0ee207abdec020a03bca6f768bcacc52737ffffffffffffffff"),
+              "tx_iq (80 bytes with the 0xFF padding): Q' = Q + (G Q + P I) x 1e-5, G and P from register 52")],
+    "dcband": [(0x0802b32a, bytes.fromhex("f8f7c9ff"), bytes.fromhex("00bf00bf"),
+                "bl 0x080242c0 -> nop x2: a band change no longer loads the TX I DC offset from the base's table"),
+               (0x0802b34e, bytes.fromhex("f8f7c1ff"), bytes.fromhex("00bf00bf"),
+                "bl 0x080242d4 -> nop x2: nor the TX Q DC offset (registers 50/51, the GUI's, keep them)")],
 }
 ABOUT = {"pll": "the codec's PLL fraction written as Xiegu meant it (the I/Q rate 100 kHz, not 99,932 Hz)",
          "6m": "no +6 dB on the TX power loop from 29.7 MHz up",
          "alc": "the TX power loop's floor -60 dB, not -40 (0.1 W reached on every band; 6 m gave 0.8 W, HF 0.2-0.3)",
          "hold": "the TX power loop held while the transmitter is silent (no burst of drive on the first sound after "
-                 "a pause; Xiegu's gave 1.0 W at a 0.1 W setting)"}
+                 "a pause; Xiegu's gave 1.0 W at a 0.1 W setting)",
+         "txiq": "the transmitter's I/Q balance set per band by the GUI through register 52 (the other sideband's "
+                 "image, -42 to -54 dBc on every X6100 base, cancelled by a calibration)",
+         "dcband": "the TX DC offsets the GUI sends kept through band changes (Xiegu's base loaded its own table's, "
+                   "zeros, over them: the carrier back after each band change)"}
 TIME_FIELD = (0x0803d3b0, b"10:31:57\x00\x00\x00\x00")       # 12 bytes: up to 11 characters and the NUL
 
 
@@ -97,7 +123,7 @@ def main():
     ap.add_argument("--xgf", required=True, help="Xiegu's X6100_BBFW_V1.1.9_251127001.xgf")
     ap.add_argument("--key-file", required=True, help="Xiegu's AES-256 key, 64 hex digits")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--only", default="pll,6m,alc,hold", help="the fixes to apply (default: all, gcfix4)")
+    ap.add_argument("--only", default="pll,6m,alc,hold,txiq,dcband", help="the fixes to apply (default: all, gcfix5)")
     ap.add_argument("--name", help="the build's name (default: gcfix3 or gcfix4 by the fixes)")
     ap.add_argument("--patch-out", help="also write the block patch the radios apply (x6x00-base-patch)")
     a = ap.parse_args()

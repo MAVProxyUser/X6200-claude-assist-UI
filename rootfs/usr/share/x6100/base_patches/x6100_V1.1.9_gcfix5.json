@@ -1,0 +1,156 @@
+{
+ "format": "x6x00-base-patch 2",
+ "name": "gcfix5",
+ "model": "x6100",
+ "about": "Xiegu's X6100 base V1.1.9 (251127001) with GoldCorpHF's fixes: the codec's PLL fraction written as Xiegu meant it (the I/Q rate 100 kHz, not 99,932 Hz), no +6 dB on the TX power loop from 29.7 MHz up, the TX power loop's floor -60 dB, not -40 (0.1 W reached on every band; 6 m gave 0.8 W, HF 0.2-0.3), the TX power loop held while the transmitter is silent (no burst of drive on the first sound after a pause; Xiegu's gave 1.0 W at a 0.1 W setting), the transmitter's I/Q balance set per band by the GUI through register 52 (the other sideband's image, -42 to -54 dBc on every X6100 base, cancelled by a calibration), the TX DC offsets the GUI sends kept through band changes (Xiegu's base loaded its own table's, zeros, over them: the carrier back after each band change)",
+ "fixes": [
+  "pll",
+  "6m",
+  "alc",
+  "hold",
+  "txiq",
+  "dcband"
+ ],
+ "source": {
+  "file": "X6100_BBFW_V1.1.9_251127001.xgf",
+  "size": 392048,
+  "sha256": "87a3e96ea21abf16a14b0fb771aad19a9e0bf8c267f93ec71a09d38e59c25737",
+  "md5": "e23107cd7d4522d6a42d07b196953c9f",
+  "version": "V1.1.9 Nov 27 2025,10:31:57"
+ },
+ "result": {
+  "file": "X6100_BBFW_V1.1.9_251127001_gcfix5.xgf",
+  "size": 392352,
+  "sha256": "f7d264fffaf47183b96b761f82a86a0ae3f44e3fc34b1deca47db2a49481d097",
+  "md5": "a29c0f132702c0752dc186af1396696a",
+  "version": "V1.1.9 Nov 27 2025,gcfix5"
+ },
+ "blocks": [
+  {
+   "offset": 18080,
+   "from": "2c4004c4a3cadc389322084ed0a10149",
+   "to": "6f81225928c91a544fe8725766579a9a"
+  },
+  {
+   "offset": 25952,
+   "from": "10003e9b641f0bd56066a6a8a8da993c",
+   "to": "28fe1e9afc55cde41977bda152366c31"
+  },
+  {
+   "offset": 32640,
+   "from": "a91678577f2598221548a462a69524ea",
+   "to": "ce8c168eecef4086978e83b8d0f40719"
+  },
+  {
+   "offset": 32656,
+   "from": "0a7f743367b44b9eb663ce68d7d22280",
+   "to": "3fbb8c5c4c6c0424156f6ebd8cf3438c"
+  },
+  {
+   "offset": 32688,
+   "from": "bf6edd739de9dc9f224cc61e69c3a36e",
+   "to": "e026308102934be714bf0b3392d5c854"
+  },
+  {
+   "offset": 45856,
+   "from": "4cbfc55a4c5e4e26e452d14c31e8245a",
+   "to": "a885eec2d3940baa7d7c64aad1f23b98"
+  },
+  {
+   "offset": 45888,
+   "from": "aefb5b4664570dcc3b49ed1975d0af78",
+   "to": "fd51d93c391657da389ea126039cf47a"
+  },
+  {
+   "offset": 45904,
+   "from": "813b832042eff2bc610849f2a943d3a4",
+   "to": "fa5c10cfb4284535b136c091c8597550"
+  },
+  {
+   "offset": 62416,
+   "from": "fe23028a68f3e9bfc3777fced0985006",
+   "to": "11ada6e263481f4d3abd592ede1afbb6"
+  },
+  {
+   "offset": 119728,
+   "from": "7f1d6f7cdd230e83e8846ca075c0deac",
+   "to": "09a3a493d8eea3892c3d35fe3c876ca7"
+  },
+  {
+   "offset": 392048,
+   "to": "ffbb9f045d108abd490e290e23df90b6"
+  },
+  {
+   "offset": 392064,
+   "to": "b70871528a6a3684853f65621d8f91a5"
+  },
+  {
+   "offset": 392080,
+   "to": "e104c367e96e53bf5748ec75a7daab56"
+  },
+  {
+   "offset": 392096,
+   "to": "fb451ccb7ea900f83d955ea078ac6848"
+  },
+  {
+   "offset": 392112,
+   "to": "b6b2d9d892f05341f151b3a505608f4d"
+  },
+  {
+   "offset": 392128,
+   "to": "35ca83e284ca661007af28db694645cd"
+  },
+  {
+   "offset": 392144,
+   "to": "5c32bd99dc49f82985ead22cbd984136"
+  },
+  {
+   "offset": 392160,
+   "to": "e337bbdf0de88cc757f4c1d56f8fa054"
+  },
+  {
+   "offset": 392176,
+   "to": "052abd8450bcb72ca44328c39eaec2e4"
+  },
+  {
+   "offset": 392192,
+   "to": "1e8a0fa7a7385659c0b059ebc9577f74"
+  },
+  {
+   "offset": 392208,
+   "to": "5537e02ab141b4b0e4d64daa06bcb04e"
+  },
+  {
+   "offset": 392224,
+   "to": "923ae6a335bb80d35bf2255504f91c7a"
+  },
+  {
+   "offset": 392240,
+   "to": "8645b6e9156252ad297e356c31d9ad5b"
+  },
+  {
+   "offset": 392256,
+   "to": "81b1e841192e53872cbe4e8e4ca27fad"
+  },
+  {
+   "offset": 392272,
+   "to": "55643043385a4c262af66dccb9e78490"
+  },
+  {
+   "offset": 392288,
+   "to": "1aa509575ab1a6aebea030c888a09a96"
+  },
+  {
+   "offset": 392304,
+   "to": "d736fa9cda931a21425f2a34bec2f872"
+  },
+  {
+   "offset": 392320,
+   "to": "29e96deb0d652c64a9eb583bec3057ce"
+  },
+  {
+   "offset": 392336,
+   "to": "3b624495d722fdf2f98523a745ca4fe9"
+  }
+ ]
+}

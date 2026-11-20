@@ -1156,6 +1156,9 @@ static volfn_t     vol_fn;
 #define VOL_BACK_MS 5000
 static uint32_t    vol_used_ms;
 static lv_obj_t   *legend_l, *osd_frame, *osd_title_l, *osd_text_l, *osd_bar_frame, *osd_bar, *help_frame, *help_l;
+/* The same on G held up, on its own portrait screen (build_walkie_portrait): the one above is on the Sentry's, out of
+ * sight while G shows (the owner, 2026-11-20: "there is no indication that the volume knob works on the G screen") */
+static lv_obj_t   *osdp_frame, *osdp_title_l, *osdp_text_l, *osdp_bar_frame, *osdp_bar;
 static lv_timer_t *osd_timer;
 static bool        help_on;
 
@@ -1741,17 +1744,41 @@ static void wf_shift(int dx) {
     render_3d();
 }
 
+/* The rows' pace while receiving (ms a row, a running mean) and when the last went in: on the air the spectrograms
+ * go on at that pace with rows of their own (wf_tx_row), so a picture keeps time through a transmission */
+static uint32_t row_ms, row_last;
+
+static void row_in(uint8_t *row) {
+    d3_head = (d3_head + 1) % D3_ROWS;
+    if (d3_count < D3_ROWS) d3_count++;
+    sys_spec_row(row);
+    if (scr == SCR_SCAN) render_3d();
+    row_last = lv_tick_get();
+}
+
 static void wf_row(void) {
     uint8_t *row = d3_lv[d3_head];
+    uint32_t dt  = lv_tick_elaps(row_last);
 
     for (int x = 0; x < IMG_W; x++) {
         int b = bin_of(hz_of_px(x + 0.5));
         row[x] = b >= 0 && b < nbins ? level_of(10 * log10f(row_lin[b] / row_frames + 1e-20f)) : 0;
     }
-    d3_head = (d3_head + 1) % D3_ROWS;
-    if (d3_count < D3_ROWS) d3_count++;
-    sys_spec_row(row);
-    if (scr == SCR_SCAN) render_3d();
+    if (row_last && dt < 2000) row_ms = row_ms ? (row_ms * 7 + dt) / 8 : dt;
+    row_in(row);
+}
+
+/* On the air nothing of the band comes in (the radio cannot receive while it sends: the X6100's base sends no spectrum,
+ * the X6200's is the transmitter's), so the spectrograms stopped and a transmission took no room in them (the owner,
+ * 2026-11-20: "it should keep moving to accurately represent time"). Rows of one dim level go in at the receive pace
+ * instead: a band across the picture as long as the transmission */
+#define TX_ROW_LEVEL 56
+
+static void wf_tx_row(void) {
+    uint8_t *row = d3_lv[d3_head];
+
+    memset(row, TX_ROW_LEVEL, IMG_W);
+    row_in(row);
 }
 
 /* ---- Widgets ---- */
@@ -5494,24 +5521,36 @@ static void osd_hide_cb(lv_timer_t *t) {
     lv_obj_add_flag(osd_text_l, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(osd_bar_frame, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(osd_bar, LV_OBJ_FLAG_HIDDEN);
+    if (osdp_frame) {
+        lv_obj_add_flag(osdp_frame, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(osdp_title_l, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(osdp_text_l, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(osdp_bar_frame, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(osdp_bar, LV_OBJ_FLAG_HIDDEN);
+    }
     if (ab_arrow) lv_obj_add_flag(ab_arrow, LV_OBJ_FLAG_HIDDEN);
     if (ab_tag) lv_obj_add_flag(ab_tag, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* A word over the screen for 2.5 s: what a knob or key just did; bar 0-100, or -1 none */
 static void osd(const char *title, const char *text, int bar) {
-    lv_label_set_text(osd_title_l, title);
-    lv_label_set_text(osd_text_l, text);
-    lv_obj_clear_flag(osd_frame, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(osd_title_l, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(osd_text_l, LV_OBJ_FLAG_HIDDEN);
+    bool      p       = g_portrait && osdp_frame;      /* G held up: on its screen, upright as everything on it */
+    lv_obj_t *frame   = p ? osdp_frame : osd_frame, *title_l = p ? osdp_title_l : osd_title_l;
+    lv_obj_t *text_l  = p ? osdp_text_l : osd_text_l, *bar_frame = p ? osdp_bar_frame : osd_bar_frame;
+    lv_obj_t *bar_obj = p ? osdp_bar : osd_bar;
+
+    lv_label_set_text(title_l, title);
+    lv_label_set_text(text_l, text);
+    lv_obj_clear_flag(frame, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(title_l, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(text_l, LV_OBJ_FLAG_HIDDEN);
     if (bar >= 0) {
-        lv_obj_clear_flag(osd_bar_frame, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(osd_bar, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_width(osd_bar, (bar > 100 ? 100 : bar) * (lv_obj_get_width(osd_bar_frame) - 12) / 100 + 1);
+        lv_obj_clear_flag(bar_frame, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(bar_obj, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_width(bar_obj, (bar > 100 ? 100 : bar) * (lv_obj_get_width(bar_frame) - 12) / 100 + 1);
     } else {
-        lv_obj_add_flag(osd_bar_frame, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(osd_bar, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(bar_frame, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(bar_obj, LV_OBJ_FLAG_HIDDEN);
     }
     if (osd_timer)
         lv_timer_reset(osd_timer);
@@ -6805,6 +6844,10 @@ static void timer_cb(lv_timer_t *t) {
     int64_t  c  = 0;
 
     (void)t;
+    if ((radio_get_state() != RADIO_RX || radio_get_modem()) && nbins && row_ms) {     /* on the air, TCI and apps too */
+        if (lv_tick_elaps(row_last) >= row_ms) wf_tx_row();
+        return;
+    }
     if (wide_ok) {
         if (!dsp_psd_raw(raw, MAX_BINS, &n, &span, &tx, &seq) || seq == last_seq) return;
     } else if (!own_psd_get(&n, &span, &c, &seq) || seq == last_seq) {
@@ -10516,6 +10559,22 @@ static void build_walkie_portrait(void) {
         u->ab_arrow = arrow_make(g_scr, pts, PW - 140, PH - 32, PW - 46, PH - 32);
         u->ab_tag   = tag_make(g_scr, amb, "A/B", PW - 146, PH - 41, false);
         lv_obj_add_flag(u->ab_tag, LV_OBJ_FLAG_HIDDEN);
+    }
+    /* The OSD held up (osd): what a knob or key just did, the VOL knob's volume, squelch or RF gain with its bar, over
+     * the middle of G's screen and upright as its words are; hidden with the landscape one (osd_hide_cb) */
+    {
+        int y = (PH - 230) / 2;
+
+        osdp_frame     = rect(g_scr, 24, y, PW - 48, 230, 3, false);
+        osdp_title_l   = label(g_scr, &pixel_28, amb, 32, y + 14, PW - 64, LV_TEXT_ALIGN_CENTER, "");
+        osdp_text_l    = label(g_scr, &pixel_20, amb, 40, y + 56, PW - 80, LV_TEXT_ALIGN_CENTER, "");
+        osdp_bar_frame = rect(g_scr, 48, y + 182, PW - 96, 28, 2, false);
+        osdp_bar       = rect(g_scr, 54, y + 188, 1, 16, 0, true);
+        lv_obj_add_flag(osdp_frame, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(osdp_title_l, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(osdp_text_l, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(osdp_bar_frame, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(osdp_bar, LV_OBJ_FLAG_HIDDEN);
     }
 }
 

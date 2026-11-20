@@ -282,6 +282,12 @@ uint32_t hw_caps(void) {
     if (v.rev >= 12) {
         caps |= HW_CAP_CESSB;
     }
+    /* GoldCorpHF's base gcfix5 and later ("V1.1.9 Nov 27 2025,gcfix5"): the transmitter's I/Q balance */
+    const char *fw  = x6100_control_get_fw_version_str();
+    const char *gcf = fw ? strstr(fw, ",gcfix") : NULL;
+    if (gcf && atoi(gcf + 6) >= 5) {
+        caps |= HW_CAP_TX_IQ_BAL;
+    }
     /* The test base: Xiegu's 1.1.9 above, and its added settings only (no calibration, FM emphasis or auto notch) */
     if (test_base) {
         caps |= HW_CAP_COMP | HW_CAP_COMP_SHAPE | HW_CAP_TX_FILTER | HW_CAP_CESSB | HW_CAP_TEST_BASE;
@@ -347,11 +353,16 @@ void hw_send_held(void) {
 
 /* ---- Settings ------------------------------------------------------------------------- */
 
+/* Register 52, unused by Xiegu's base (its library names none there): GoldCorpHF's base from gcfix5 on reads it in its
+ * DAC loop (tools/base_update/x6100_hooks/tx_iq.s) as the transmitter's I/Q balance. Xiegu's own base ignores it */
+#define X6100_REG_TX_IQ_BAL 52
+
 /* The settings with a register of their own: compared before the write, read back by hw_get_i() */
 static int reg_of(hw_param_t p) {
     switch (p) {
         case HW_TX_I_OFFSET:    return x6100_txiofs;
         case HW_TX_Q_OFFSET:    return x6100_txqofs;
+        case HW_TX_IQ_BAL:      return X6100_REG_TX_IQ_BAL;
         case HW_RIT:            return x6100_rit;
         case HW_XIT:            return x6100_xit;
         case HW_AGC_TIME:       return x6100_agctime;

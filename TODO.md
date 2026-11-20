@@ -56,6 +56,14 @@ approved that day.
     side on the X6200's panadapter on 80, 10 and 6 m. 10 W not run (the bench's twice-the-power pad rule: the owner's
     word needed). A draft PR to RF.Guru's X6100-Baseband (the errata as an opt-in patcher, these findings) is in
     drafts/x6100-baseband-errata/, NOT submitted (the owner: "do NOT submit it").
+    DONE 2026-11-20 evening (the owner: "please make it so"): gcfix5 (x6100_hooks/tx_iq.s, register 52), the GUI's
+    IQ balance (Settings > TX Cal, remote `set txig/txip/txio/txqo`), tools/bench/txcal.py (one over a point: the
+    base takes registers 50-52 between transmissions only), the X6100 calibrated on every band (tools/base_update/
+    README.md has the results). 10 W run too (power-ok; the 11.9 V supply sets the top, gcfix and Xiegu's alike).
+    Left: screen F's TX CAL (the owner's idea; needs a second receiver on the radio: an RTL stick only covers HF if
+    it is a V4 or in direct sampling); a combined build with RF.Guru's payload keeps their build name, so the GUI
+    would not know gcfix5 is in it (a marker of its own needed); the image's change across the audio band (one G, P
+    per band).
   - the X6200's WiFi, 2026-11-20 morning (v0.3.12.39): pinged at 10 Hz, 4-19% of replies over 100 ms, spikes of
     0.5-1.5 s, 0-7% lost (the X6100 beside it, same router: max 18-48 ms); its TCI audio reaches a client at 10-76%
     of real time (parec on the radio itself: full rate; the TCI queue holds 0.6 s and drops the rest). Not the GPS

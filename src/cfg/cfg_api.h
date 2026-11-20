@@ -281,6 +281,8 @@ extern ParamInt   *cfg_band_lock_modes;   // p_band_lock_modes
 extern ParamInt   *cfg_band_tx_shift;     // p_band_tx_shift (Hz, 0 off)
 extern ParamInt   *cfg_band_tx_i_offset;  // p_band_tx_i_offset
 extern ParamInt   *cfg_band_tx_q_offset;  // p_band_tx_q_offset
+extern ParamInt   *cfg_band_tx_iq_gain;   // p_band_tx_iq_gain
+extern ParamInt   *cfg_band_tx_iq_phase;  // p_band_tx_iq_phase
 extern ParamInt   *cfg_band_vfoa_mode;    // p_band_vfoa_mode
 extern ParamInt   *cfg_band_vfob_mode;    // p_band_vfob_mode
 extern ParamInt   *cfg_band_vfoa_att;     // p_band_vfoa_att

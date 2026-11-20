@@ -427,16 +427,18 @@ not the firmware.
   compressor and the TX band-pass, Xiegu's power scaling, ALC, calibration and telemetry kept. Known to `base_flash`
   (`--test-ok`). It does not bring true power control.
 
-### GoldCorpHF's patches to Xiegu's X6100 V1.1.9 (gcfix3, gcfix4), 2026-11-20
+### GoldCorpHF's patches to Xiegu's X6100 V1.1.9 (gcfix3, gcfix4, gcfix5), 2026-11-20
 
 `x6100_patch.py` (here, with Xiegu's key, never in the repository) makes them; `rootfs/usr/share/x6100/base_patches/
 x6100_V1.1.9_gcfix3.json` and `x6100_V1.1.9_gcfix4.json` are what ships: the 16-byte blocks of the encrypted .xgf that
 change, Xiegu's and ours (AES-ECB encrypts each block alone, so no key and nothing of Xiegu's readable), with the SHA-256
 and MD5 of Xiegu's file and of the result; gcfix4's blocks past the end of Xiegu's file (format 2) are appended.
-`x6x00-base-patch apply gcfix4` (rootfs/usr/sbin) makes the file on the radio from Xiegu's; base_flash knows both
-results by their SHA-256 (gcfix3 d34985d0..., gcfix4 fc6edfe5...). gcfix3 is three fixes, 15 bytes of Xiegu's image;
-gcfix4 adds the hold, a hook (x6100_hooks/alc_hold.s, assembled by x6100_hooks/build.sh, 4 bytes of Xiegu's changed
-and 224 appended):
+`x6x00-base-patch apply gcfix5` (rootfs/usr/sbin) makes the file on the radio from Xiegu's; base_flash knows the
+results by their SHA-256 (gcfix3 d34985d0..., gcfix4 fc6edfe5..., gcfix5 f7d264ff...). gcfix3 is three fixes, 15 bytes
+of Xiegu's image; gcfix4 adds the hold, a hook (x6100_hooks/alc_hold.s, assembled by x6100_hooks/build.sh, 4 bytes of
+Xiegu's changed and 224 appended); gcfix5 adds the transmitter's I/Q balance (x6100_hooks/tx_iq.s, 4 bytes changed
+and 80 more appended) and dcband (8 bytes), 392,352 bytes in all; the radio's own x6x00-base-patch made it byte for
+byte (29 blocks, 2026-11-20):
 
 | Fix | Where | Bytes | Why |
 |---|---|---|---|
@@ -444,6 +446,8 @@ and 224 appended):
 | 6m | 0x080246aa | `it hs; vmovhs s15,s13` -> 3 x `nop` | no +6 dB on the loop's gain from band index 20: it only raised 6 m's floor |
 | alc | 0x08027f90, 0x08027fb6 | `movt r3,#0xc220` -> `#0xc270` | the loop's floor -60 dB, not -40 |
 | hold (gcfix4) | 0x08027f82; code at 0x0807fb70 | `vldr s15,[sl,#0x220]` -> `b.w 0x0807fb70` | the loop's raise skipped while the block about to be sent is 30 dB under its recent peak: no climb through pauses |
+| dcband (gcfix5) | 0x0802b32a, 0x0802b34e | `bl 0x080242c0`, `bl 0x080242d4` -> 2 x `nop` each | a band change no longer loads the TX DC offsets from the base's table over the GUI's registers 50/51 (below) |
+| txiq (gcfix5) | 0x08026560; code at 0x0807fc50 | `vldr s15,[r5,#4]` -> `b.w 0x0807fc50` | each sample's Q + (G Q + P I) x 1e-5 before the DAC, G and P from register 52 (the GUI's band setting): the transmitter's image cancelled by a calibration (below) |
 
 Measured on the owner's X6100 through 70 dB of pads (bench.py's gates; tools/bench/tones.py): 0.1 W on 6, 10, 20 and 40
 m (Xiegu's: 0.8 W on 6 m, 0.2-0.3 W on HF), 0.3, 0.5 and 1.1 W on 6 m as asked, the same to the dB with gcfix4; SSB
@@ -512,6 +516,73 @@ Seen, not explained: the tone's second harmonic at the dial + 2 fa, -34 to -38 d
 38-41 kHz either side on the X6200's panadapter on 80, 10 and 6 m, about -42 dB per 100 Hz bin, the same with the
 X6200's attenuator out, no tone when the X6200 is tuned onto them.
 
+At a 10 W setting (2026-11-20 afternoon, the owner: "Yes, run 10 W"; bench.py power-ok, the pads at their rating,
+overs of 10 s at most, rests as long): the X6100 on its 11.9 V supply gave 8.6 W on 160 m, 8.0-8.4 W on 80, 40, 30 and
+15 m, 6.1-6.5 W on 20, 17 and 12 m, 3.5 W on 10 m and 5.3 W on 6 m, gcfix4 and Xiegu's V1.1.9 alike (20 m 6.4/6.3,
+10 m 3.5/3.5, 6 m 5.3/5.3; one 6 m over of Xiegu's gave 3.2 W, not seen again): the supply, not gcfix, sets the top.
+Bursts at it: within +0.2 dB (20 m) and +0.5 dB (6 m). The image at 10 W: -43 to -53 dBc, as at 5 W.
+
+### gcfix5: the transmitter's I/Q balance (txiq), 2026-11-20
+
+The owner, on the image: "that feels like something we'd want to fix ... please make it so". What it took, from
+Xiegu's V1.1.9 (static, objdump of the decrypted image):
+
+- **The register handler** (FUN_0802af0c, called from the main loop with its state at 0x20000024) compares each of the
+  56 registers the GUI writes (the block at 0x2000c4c8, pointer at 0x20000138; its last copy at 0x2000c5a8) with what
+  it took last and acts on the changes: 50 and 51 (TX I and Q DC offsets) go x 5000 into the DAC loop's offsets
+  ([sl,#0x1f4], [sl,#0x1f8]) at once. On the bench it does not run while the base transmits: offsets and the balance
+  set during an over came out at the next (2026-11-20), so the GUI's values take effect between transmissions.
+- **The calibration table** (0x2000c190, 204 words from flash 0x08004000, the 816 bytes the GUI reads at I2C 0x100):
+  0xaa5555aa, two power words (300 and 650 by default, 605 and 720 on the owner's X6100), per band (b) the receiver's
+  magnitude and phase at words 2b+3 and 2b+4 (x 1e-4 and x 1e-3 into 49 and 48's setters on a band change) and the TX
+  DC offsets at 2b+103 and 2b+104 (x 5000), and a checksum. No transmit gain or phase anywhere: Xiegu's base has no
+  way to correct the transmitter's I/Q. On a band change the base loads that band's offsets from it, over the GUI's
+  (the GUI sends its own again after: radio.c on_band_change).
+- **The DAC loop** (0x080264d0..0x080265bc, every block in receive and transmit, CW aside) takes each sample's I at
+  0x08026552 and Q at 0x08026560 (vldr s15,[r5,#4]) from the block at 0x20004190, converts them to Q31, adds the DC
+  offsets and stores them for the converter. tx_iq.s replaces that Q load with a branch: Q' = Q + (G Q + P I) x 1e-5,
+  G and P read from register 52 in the base's block (0x2000c598: gain in its low half, phase in its high half, signed
+  16-bit). Register 52 is used by nothing (Xiegu's library names none there; gdyuldin's r13 hijacks 12, 15, 18, 19,
+  22-25, 35, 36, 38 and 44-47; RF.Guru's port 36). Zero leaves the samples as Xiegu's. 72 bytes at 0x0807fc50, after
+  alc_hold; about 1.5 % of the processor at 100 kHz. The flags its asrs changes are set again (cmp r4, r3) before the
+  loop reads them.
+- **The GUI** (HW_CAP_TX_IQ_BAL on a base whose version says gcfix5 or later): two band settings, tx_iq_gain and
+  tx_iq_phase (Settings > TX Cal > IQ BALANCE), written to register 52 on a change and on a band change; the browser
+  remote's `set txig`/`set txip` (and `txio`/`txqo` for the offsets) for the calibration, their values in its state.
+
+Tried first (2026-11-20, 20 m, 5 W, gcfix5): G = +1500 took the image from -45.7/-46.6 to -51.8/-58.8 dBc (600/900 Hz
+tones), P = +1500 hardly moved it: the hook reaches the samples. The calibration (tools/bench/txcal.py) moves G, P and
+the offsets one transmission at a time and measures each with the X6200.
+
+- **dcband** (gcfix5 too): on a band change the handler loads the band's TX DC offsets from the table (zeros here) into
+  the DAC loop (bl 0x080242c0 / 0x080242d4 at 0x0802b32a / 0x0802b34e) over the GUI's registers 50/51, which it
+  applies only on a change: calibrated offsets were lost after every band change (image.py: the carrier back to -30
+  dBc). A resend from the GUI half a second later did not win every time; the two calls are NOPs now, the GUI's
+  registers alone set the offsets. The GUI also sends the band's I/Q balance (register 52) on every band change: its
+  settings did not always tell their observers, and 15 m went out with 17 m's balance once (-33 dBc).
+
+The calibration (txcal.py, 5 W, a 1000 Hz tone; each point an over: the base takes registers 50-52 between
+transmissions only): at its own tone it reached image -63 to -82 dBc and carrier -61 to -77 dBc on most bands. Checked
+apart with image.py (600 and 900 Hz tones, band changes between, gcfix5 with dcband, 2026-11-20 15:24), dBc:
+
+| Band | Image before | Image after | Carrier before | Carrier after |
+|---|---|---|---|---|
+| 160 m | -52 to -54 | -58 to -66 | -31 to -32 | -45 to -53 |
+| 80 m | -52 to -55 | -62 to -69 | -30 | -53 to -59 |
+| 40 m | -49 to -51 | -61 to -63 | -30 | -49 to -55 |
+| 30 m | -49 | -59 to -63 | -31 | -50 to -55 |
+| 20 m | -46 to -49 | -56 to -64 | -34 to -35 | -44 to -53 |
+| 17 m | -48 to -49 | -57 to -64 | -33 | -46 to -58 |
+| 15 m | -43 | -44 to -47 (-52 to -58 in two other runs) | -33 | -46 to -52 |
+| 12 m | -43 | -40 to -51 | -34 to -35 | -39 to -49 |
+| 10 m | -44 | -54 to -65 | -37 to -38 | -42 to -44 |
+| 6 m | -46 to -51 | -46 to -50 | -39 to -48 | -28 to -34 with its offsets: set back to 0 |
+
+What is left: the residual differs between 600 and 900 Hz (the imbalance changes across the audio band; one G, P a
+band is a compromise), 15 and 12 m vary from run to run by more than the search's steps, and 6 m's carrier search
+found offsets that measure worse apart. The dBc figures are against the wanted tone in the X6200's audio, whose level
+at 2.1 and 2.4 kHz differs (a 10 dB step at the tone change in one over, carrier and image together).
+
 ### Every base compared, 2026-11-20
 
 Decrypted with the public key (nothing of Xiegu's kept in the repository): Xiegu's X6100 V1.1.6 (230307001, from its
@@ -562,6 +633,6 @@ that names itself as a patched one (bbfw says `,r8`) would get capabilities from
 | [flash.sh](flash.sh) | from a computer: `--check`, `--flash`, `--recover`, `--dry-run` (X6100), `--to VERSION`, `--file FILE`, `--test-ok` |
 | [run_on_radio.sh](run_on_radio.sh) | on the radio, apart from the SSH session: GUI off, lock, write, GUI on |
 | [x6100_patch.py](x6100_patch.py) | the X6100 V1.1.9 patches (gcfix4; gcfix3 with `--only pll,6m,alc`) made from Xiegu's file and key: `--patch-out` writes the block patch the radios apply with `x6x00-base-patch` |
-| [x6100_hooks/](x6100_hooks) | gcfix4's hook (alc_hold.s) and build.sh, which assembles it (arm-none-eabi binutils) and prints the bytes x6100_patch.py holds |
+| [x6100_hooks/](x6100_hooks) | the hooks, gcfix4's (alc_hold.s) and gcfix5's (tx_iq.s), and build.sh, which assembles them (arm-none-eabi binutils) and prints the bytes x6100_patch.py holds |
 | [install.sh](install.sh) | the 1.0.8 file to `/usr/firmware` on the internal memory, for Xiegu's own UPGRADE screen |
 | [test/](test) | run.sh, the unit tests (units.c), the simulated bases (sim.py, sim6100.py), the synthetic update zips (synth.py) |
