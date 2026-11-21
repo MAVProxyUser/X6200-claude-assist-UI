@@ -102,8 +102,16 @@ Open:
     DC per band and 6 m fixes are off the radio with it, its patches and write-up still in the repo.
 - 12 m and 6 m calibration (6 m offsets left 0); 0.1 W carrier is about -25 dBc (the offsets were found at 5 W).
   On the factory base now: moot until a patched base goes back on.
-- Not seen on screen by me: the Sentry spectrograms keeping time while transmitting, G's VOL pop-up in portrait
-  (e9e3d890, installed on both).
+- On-screen checks DONE 2026-11-21 (screenshots over SSH, tools/screenshots/drive.py, 0.1 W into the 80 dB chain):
+  G's VOL pop-up shows upright on G held up ("X6200 VOLUME 1", its bar). On the air the Sentry jumps to G (the bench
+  arms there), and G's SPECTRUM stood still through a transmission (0 pixels changed between shots 1.5 s apart, both
+  radios; the owner had seen it: "on TX the voicegram still pauses"): e9e3d890 kept A's and F's going, not G's. FIXED:
+  G's rows of the same dim shade at its pace (ws_feed); its voiceprint's floor held on the air (it had followed the
+  over's near-silence down and drew the hiss white ~2 s after each over) and dim columns when no audio comes, counted
+  from the key so bursty audio is not doubled. Checked on both radios, PTT 5 s at 0.1 W: spectrum 5700-9400 pixels
+  changed between shots on the air, the hiss after the over as before it. Still not done of the 2026-11-14 ask: the
+  voiceprint OF THE MICROPHONE while keyed (it shows the capture, which on the air is not the mic unless the base is
+  in record mode, as the SDR walkie sets it); to try with a voice at the mic.
 - The X6100's processor temperature sensor: dead on that board (below); the cause (its analog supply or reference)
   only by schematic or a meter, if wanted.
   The heater cross-check ran 21:22-21:32 (build/temps_heater_2026-11-20.png): the three sensors agree, the X6200's
@@ -146,8 +154,9 @@ Changed state today:
   a DISC from anyone keyed the idle radio; a 16QAM frame wrote one int past the RS decoder's elp; an ARQCALL from Pat
   with spaces before its count overflowed the host reply). Proven with the audit's harnesses on ardopcf's own objects
   (before: keyed, ASan overflows; after: none) and on the X6200 (host commands to a no-sound ardopcf). Not reported
-  upstream (the owner's OK needed). axspawn (linuxax25) is not in the image: its findings (the "sys" answer falls back
-  to a cleartext login, root writes ~/.bcpasswd through a symlink, a clock-seeded challenge, ...) are upstream's only.
+  upstream: DROPPED at the owner's word (2026-11-21, "ignore the ardocpcf and axspawn reports"). axspawn (linuxax25)
+  is not in the image: its findings (the "sys" answer falls back to a cleartext login, root writes ~/.bcpasswd through
+  a symlink, a clock-seeded challenge, ...) are upstream's only.
 - Power: the X6100 on its stock adapter (a charger): its battery emptied 52 % -> 0 % and it switched off in a 10 W
   over at 19:31; at 8 % and charging at 01:00 UTC. bench.py's supply gate now refuses an over on a radio its supply
   is not holding (af73b3b0). MANUAL "Power supply" (fd0145dc): a regulated 13.8 V supply of 5 A or more.

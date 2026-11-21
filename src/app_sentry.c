@@ -8987,6 +8987,8 @@ static uint32_t   vp_pal[256];
 static int16_t    vp_in[VP_FFT];
 static int        vp_have;
 static float      vp_floor = 20, vp_rms;
+static bool       vp_air;               /* on the air: the floor held (vp_column), the time filled (walkie_step) */
+static void       vp_put(const uint8_t *lv);
 static int        vp_lo_hz = 100, vp_hi_hz = 3000;    /* the audio's band, where the hiss is measured (walkie_step) */
 static uint32_t   ptt_ms;
 
@@ -9107,8 +9109,7 @@ static void vp_fft(float *re, float *im, int n) {
 static void vp_column(void) {
     static float re[VP_FFT], im[VP_FFT], win[VP_FFT];
     float        col[VP_MAXH], sorted[VP_MAXH], bin_hz = 44100.0f / VP_FFT;
-    int          w = wui->vp_w, h = wui->vp_h;
-    uint32_t    *px = (uint32_t *)wui->vp_frame->data;
+    int          h = wui->vp_h;
 
     if (win[VP_FFT / 2] == 0)           /* the Hann window once, not a cosf a sample 86 times a second */
         for (int i = 0; i < VP_FFT; i++) win[i] = 0.5f - 0.5f * cosf(2 * (float)M_PI * i / (VP_FFT - 1));
@@ -9135,20 +9136,32 @@ static void vp_column(void) {
 
         if (f >= vp_lo_hz && f <= vp_hi_hz) sorted[n++] = col[r];
     }
-    if (n >= 4) {
+    /* Not on the air: what comes in then is no hiss (the transmitter's audio, or next to nothing), and a floor that
+     * followed it down drew the receiver's hiss white for seconds after each over (seen 2026-11-21) */
+    if (vp_air) {
+        /* held */
+    } else if (n >= 4) {
         vp_floor = 0.98f * vp_floor + 0.02f * float_kth(sorted, n, n / 2);
     } else {
         memcpy(sorted, col, (size_t)h * sizeof(float));
         vp_floor = 0.98f * vp_floor + 0.02f * float_kth(sorted, h, h / 3);
     }
+    uint8_t lv[VP_MAXH];
+
+    for (int y = 0; y < h; y++) {
+        float v = (col[h - 1 - y] - vp_floor - 2) / 30;
+        lv[y]   = v <= 0 ? 0 : v >= 1 ? 255 : (uint8_t)(v * 255);
+    }
+    vp_put(lv);
+}
+
+/* One column of the voiceprint's levels (0-255, top row first) shifted in at the right */
+static void vp_put(const uint8_t *lv) {
+    int       w = wui->vp_w, h = wui->vp_h;
+    uint32_t *px = (uint32_t *)wui->vp_frame->data;
+
     if (g_gpu && wui == &w_port) {      /* one column into the GPU's ring: the picture is not moved a column (that
                                          * moved all of it, 86 times a second) */
-        uint8_t lv[VP_MAXH];
-
-        for (int y = 0; y < h; y++) {
-            float v = (col[h - 1 - y] - vp_floor - 2) / 30;
-            lv[y]   = v <= 0 ? 0 : v >= 1 ? 255 : (uint8_t)(v * 255);
-        }
         gpu_levels_col(3, vp_head, lv);
         vp_head = (vp_head + 1) % w;
         g_dirty = true;
@@ -9156,11 +9169,9 @@ static void vp_column(void) {
     }
     for (int y = 0; y < h; y++) {
         uint32_t *row = px + y * w;
-        float     v   = (col[h - 1 - y] - vp_floor - 2) / 30;
-        int       i   = v <= 0 ? 0 : v >= 1 ? 255 : (int)(v * 255);
 
         memmove(row, row + 1, (size_t)(w - 1) * sizeof(uint32_t));
-        row[w - 1] = vp_pal[i];
+        row[w - 1] = vp_pal[lv[y]];
     }
 }
 
@@ -9174,6 +9185,10 @@ static void walkie_step(void) {
     w_sdr_step();
     if (!wui->vp_frame) return;
     bool from_rtl = w_sdr_hz != 0;      /* G on the SDR's channel: its audio, its level */
+    /* on the air: the X6200 (not on the SDR's channels, where it is held at 0 W whatever keys it), or the SDR */
+    bool air = w_sdr_hz ? w_sdr_ptt && rtl_spectrum_tx_state() == RTL_TX_ON : radio_get_state() == RADIO_TX;
+
+    vp_air = air;
 
     /* The band the voiceprint measures the hiss in: the receiver's filter (its audio edges for the mode), the stick's
      * FM audio 100-3000 Hz */
@@ -9199,6 +9214,32 @@ static void walkie_step(void) {
             }
         }
         got += n;
+    }
+    /* On the air the capture may bring nothing (it is the receiver's audio, and the radio is not receiving), and the
+     * voiceprint stood still through the transmission: columns of one dim level at the audio's pace instead (VP_HOP
+     * samples at 44.1 kHz, 86 a second), as A's and G's spectrum rows on the air (wf_tx_row), so it keeps time */
+    /* Counted from the key: the columns the time since is worth (ms x 44.1 samples a ms / VP_HOP), those the audio
+     * made counting toward them; the dim ones only make up a shortfall of over 0.3 s, so audio that comes in bursts
+     * on the air (it does on the X6200) is not doubled by them */
+    static uint32_t air_t0;
+    static int      air_cols;
+
+    if (!air) {
+        air_t0 = 0;
+    } else if (!air_t0) {
+        air_t0 = lv_tick_get(), air_cols = 0;
+    } else {
+        int due = (int)(lv_tick_elaps(air_t0) * 44.1f / VP_HOP), k = due - (air_cols += cols);
+
+        if (k > 26) {
+            uint8_t tx_lv[VP_MAXH];
+
+            if (k > 16) k = 16;                     /* made up over the next steps, 16 a step */
+            memset(tx_lv, TX_ROW_LEVEL, sizeof(tx_lv));
+            for (int i = 0; i < k; i++) vp_put(tx_lv);
+            air_cols += k;
+            cols += k;
+        }
     }
     if (cols && !(g_gpu && wui == &w_port)) lv_obj_invalidate(wui->vp_img);
     if (got) vp_rms = 0.7f * vp_rms + 0.3f * (float)sqrt(e / got);
@@ -9256,8 +9297,6 @@ static void walkie_step(void) {
 
     if (dsd) snprintf(dlamp, sizeof(dlamp), g_portrait ? "RX  %s" : "RX\n%s", rtl_dsd_name(ddv.proto));
     bool ptt = ptt_ms && lv_tick_get() - ptt_ms < 1500;
-    /* on the air: the X6200 (not on the SDR's channels, where it is held at 0 W whatever keys it), or the SDR */
-    bool air   = w_sdr_hz ? w_sdr_ptt && rtl_spectrum_tx_state() == RTL_TX_ON : radio_get_state() == RADIO_TX;
     bool armed = w_sdr_hz ? g_sdr_armed : g_armed;
 
     on = on || dmr || dsd;
@@ -10075,6 +10114,21 @@ static void ws_feed(void) {
 
         if (!rtl_spectrum_frame(sdb, N_OF(sdb), &sn, &srate, &sc, &sseq, &sfresh) || !sn || !srate) return;
         to_cols_n(sdb, sn, sc - srate / 2.0, (double)srate / sn, hz - ws_span / 2, px_hz, ws_cols, w);
+    } else if ((radio_get_state() != RADIO_RX || radio_get_modem()) && nbins && row_ms) {
+        /* On the air no spectrum comes in (timer_cb puts A's dim rows in instead, wf_tx_row), and G's picture stood
+         * still through the transmission (the owner, 2026-11-21: "on TX the voicegram still pauses, instead of
+         * moving"; e9e3d890 had done A's and F's only): the same dim rows here at G's pace, one each two of A's */
+        static uint32_t ws_tx_last;
+
+        if (ws_tx_last && lv_tick_elaps(ws_tx_last) < 2 * row_ms) return;
+        ws_tx_last = lv_tick_get();
+        memset(ws_rows[ws_head], TX_ROW_LEVEL, (size_t)w);
+        if (g_gpu) gpu_levels_row(2, ws_head, ws_rows[ws_head]);
+        ws_head = (ws_head + 1) % WS_ROWS;
+        if (ws_count < WS_ROWS) ws_count++;
+        npend = 0;
+        ws_draw();
+        return;
     } else {
         if (!centre || !nbins || last_seq == ws_seen) return;
         ws_seen = last_seq;

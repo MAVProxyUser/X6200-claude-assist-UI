@@ -1358,7 +1358,9 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
   `S1 3 5 7 9 +20 +40` under them, its smoothed level, the bars under the noise floor dim, its peak bar bright, and
   its value `S4  -103.4 DBM` (`TX` while transmitting); on an SDR channel B's `SNR` meter. AF: -60 to 0 dBFS.
 - **The spectrum**, edge to edge: the X6200's, 100 kHz around the dial (bracketed in the middle): its trace over the
-  last rows, in 3D as A's picture or 2D, a flat waterfall with the newest on top (**F4**).
+  last rows, in 3D as A's picture or 2D, a flat waterfall with the newest on top (**F4**). On the air it goes on at
+  its pace with rows of one dim shade, as A's picture does, a band as long as the transmission (up to v0.3.12.43 it
+  stood still while the radio sent).
 - **The voiceprint**: the receiver's audio as a sonogram, 0 to 4 kHz up and the last seconds across, in amber:
   voices show as their harmonics stacked, a tone as a line, the hiss as speckle. Its captions and kHz marks, as the
   spectrum's, are framed, so they read over the picture. Its dark is the hiss inside the receiver's filter (the
@@ -1366,7 +1368,11 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
   kHz, which the filter's empty part pulled down: the receiver's own noise drew bright and textured with nothing
   on the air (a CW filter of 300-1100 Hz lit 99 % of itself; now 37 %, faint). A line that stays is real: the
   X6100's audio carries one of about 781 Hz with its harmonics (1562, 2344, 3125, 3906 Hz), the same whatever
-  the dial, so from its own audio path, not the air (2026-11-21; the X6200's has none).
+  the dial, so from its own audio path, not the air (2026-11-21; the X6200's has none). On the air (TX in its
+  caption) it shows what the capture brings then, which is not the receiver: with a PTT and nothing said into the
+  microphone, a dark band. Its dark is held from before the transmission, and columns of one dim shade keep its time
+  when nothing comes in at all. Up to v0.3.12.43 the dark followed the transmission's near-silence down, and the
+  receiver's hiss drew white for a second or two after each over.
 - **The lamp**, under the voiceprint: RX SIGNAL when the audio stands 6 dB over its own noise, RX DMR while a DMR call
   is on the SDR's channel (lit even when its voice is silent, with no vocoder), RX QUIET, TX ARMED, ON AIR, TX LOCKED
   for a moment after PTT.
