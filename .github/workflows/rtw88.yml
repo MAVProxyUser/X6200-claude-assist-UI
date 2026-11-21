@@ -115,7 +115,7 @@ jobs:
         EXTRA: ${{ inputs.extra_patch }}
       run: |
         L=$(ls -d $BR/build/linux-[0-9]*/ | head -1)
-        PIN=$(sed -n 's/^RTW88_VERSION = //p' $GITHUB_WORKSPACE/AetherX6200Buildroot/br2_external/package/rtw88/rtl8723du.mk 2>/dev/null)
+        PIN=$(sed -n 's/^RTW88_VERSION = //p' $GITHUB_WORKSPACE/AetherX6200Buildroot/br2_external/package/rtw88/rtl8723du.mk 2>/dev/null || true)
         PIN=${PIN:-461b696b51317ba4ca585a4ddb32f2e72cd4efc9}
         git clone -q https://github.com/lwfinger/rtw88.git $RUNNER_TEMP/rtw88
         cd $RUNNER_TEMP/rtw88 && git -c advice.detachedHead=false checkout -q $PIN
