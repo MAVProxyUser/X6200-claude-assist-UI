@@ -920,10 +920,13 @@ def wsjtx_open():
         want = tx["frames"] * 44100 / 48000
         print(f"wsjtx TX played: {len(out)} samples at 44.1 kHz for {tx['frames']} pairs at 48 kHz ({want:.0f})")
         assert abs(len(out) - want) < 3, (len(out), want)
-        # the level: 0.5 of full scale, as int16 through x 32767, the linear interpolation's
-        # sinc^2 at 1.5 kHz of 48 kHz (-0.03 dB); beside it, that interpolation's own products
+        # the level: WSJT-X's 0.5 of full scale brought to the X6100's TCI TX peak (tci_server.c tx_level_norm:
+        # 3277, -20 dBFS: the processor-to-base hop's 2nd harmonic 44 dB under there, 33 at 0.3, 2026-11-20). The
+        # peak is the interpolated frame's highest sample, the tone's own peak sample, while the tone comes out
+        # under the linear interpolation's sinc^2 at 1.5 kHz (-0.03 dB): 0.9974 of it (simulated); beside it, that
+        # interpolation's own products
         rest = tone_check("wsjtx TX, the left channel played", [v / 32768 for v in out[2000:2000 + 29400]], 1500,
-                          44100, 0.5 * 32767 / 32768 * 0.9968)
+                          44100, 3277 / 32768 * 0.9974)
         assert rest < 10 ** (-50 / 20)
     ws.text("audio_stop:0;")
     st["power"] = None

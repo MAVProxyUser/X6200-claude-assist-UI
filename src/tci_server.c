@@ -280,6 +280,15 @@ static uint64_t        ptt_unkey_ms;
 static uint64_t        ptt_ms;
 
 /* The TX audio session: one client at a time */
+/* A TCI client's TX audio levelled on the X6100 (tx_level_norm, below): its peak, the most it is raised */
+#if !defined(BOARD_X6200) && !(defined(BOARD_GSOC) && BOARD_GSOC)
+#define TCI_TX_NORM     1
+#else
+#define TCI_TX_NORM     0
+#endif
+#define TCI_TX_PEAK     3277.0f
+#define TCI_TX_GAIN_MAX 4.0f
+
 static struct {
     atomic_bool keyed;      /* the base keyed by us through the modem bit */
     int         owner;      /* client index */
@@ -290,6 +299,7 @@ static struct {
     uint32_t    rate;       /* of the client's last TX frame */
     double      pos;
     int16_t     prev;
+    float       lvl_gain;   /* tx_level_norm's, this transmission's */
 } txs;
 
 /* A client's CW (cw_macros): its text keyed by the radio's own keyer (cw_encoder.c), the CW keyboard's and the stored
@@ -886,6 +896,7 @@ static void apply_cmd(void *arg) {
                  * does not transmit for (No TX there, no data from the base: tx_refused) sets no bit: refused */
                 txs.pos  = 0;
                 txs.prev = 0;
+                txs.lvl_gain = TCI_TX_GAIN_MAX;
                 radio_set_modem(true);
                 if (!radio_get_modem()) {
                     audio_play_lowlat_end();
@@ -1862,6 +1873,39 @@ static void handle_text(int ci, char *text) {
 
 /* ---- TX audio from the client ------------------------------------------------------- */
 
+/* The X6100's TX audio leaves the processor's own codec (its headphone output, at 0 dB) for the base's line-in, and
+ * that hop makes a 2nd harmonic of what it carries the louder it is: a 400 Hz tone at 0.3 of full scale went out with
+ * its 2nd harmonic 33 dB under it, at 0.5 28 dB, at 0.1 44 dB, 1 dB for 1 dB, the power the same (the base's loop
+ * makes it from far less; 2026-11-20, tools/bench/image.py on 20 m, 1 W). The headphone output 12 dB down did the
+ * same (-47 dBc); the base's line-in gain did nothing to it, so it is made before the base's PGA. The GUI's own
+ * digital modes play at -28.6 dB; a TCI client (WSJT-X at the top of its slider) sends at full scale, so its audio
+ * is brought to TCI_TX_PEAK (-20 dBFS: 0.1, the harmonic 44 dB under) here: the gain set by the loudest frame of the
+ * transmission so far (it only falls, so no pumping), from TCI_TX_GAIN_MAX (+12 dB, a quiet client still drives the
+ * base). The X6200 is left as it is: its base wants the codec's top for full power (tx_level.c) */
+static void tx_level_norm(int16_t *s, size_t n) {
+#if TCI_TX_NORM
+    int pk = 0;
+
+    for (size_t i = 0; i < n; i++) {
+        int a = s[i] < 0 ? -s[i] : s[i];
+
+        if (a > pk) {
+            pk = a;
+        }
+    }
+    /* 1 % over before it falls: a frame's samples catch a tone's peak only to within 0.6 % (1.5 kHz at 44.1 kHz),
+     * and the gain is not to creep down frame by frame */
+    if (pk && pk * txs.lvl_gain > TCI_TX_PEAK * 1.01f) {
+        txs.lvl_gain = TCI_TX_PEAK / pk;
+    }
+    for (size_t i = 0; i < n; i++) {
+        s[i] = (int16_t)lrintf(s[i] * txs.lvl_gain);
+    }
+#else
+    (void)s, (void)n;
+#endif
+}
+
 /* Linear interpolation from in_rate to AUDIO_PLAY_RATE, carried over between frames. 48 kHz
  * (WSJT-X, a browser's microphone) goes in as it is: simulated, a halfband down to 24 kHz first
  * changed nothing in the passband, where the worst product is this interpolation's own (-48 dBc
@@ -1930,6 +1974,7 @@ static void handle_tx_audio(int ci, const uint8_t *frame, size_t len) {
         txs.rate = h.sample_rate;
     txs.last_audio_ms = now_ms();
     size_t k = resample(pcm, frames, txs.rate, out, sizeof(out) / sizeof(out[0]));
+    tx_level_norm(out, k);
     if (k)
         audio_play_if_room(out, k);    /* full: dropped, the delay stays short */
 }

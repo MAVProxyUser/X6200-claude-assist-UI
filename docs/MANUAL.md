@@ -273,6 +273,15 @@ The rest, left as it is unless you have a reason:
   transmitting. `tools/bench/txcal.py --state hot` finds one.
 - A band never calibrated has none of these (0): before v0.3.12.41 it took
   the values of the band you came from.
+- **TCI transmit level** (X6100): what a TCI client (WSJT-X, JTDX, a
+  browser) sends is brought to 20 dB under full scale before it goes to the
+  base (raised up to 12 dB for a quiet client, lowered for a loud one, the
+  gain set once per transmission so FT8 and voice do not pump). The audio's
+  hop from the processor to the base adds a 2nd harmonic that grows with the
+  level: a client at full scale went out with a copy at twice the audio
+  frequency only 25-28 dB under the signal; levelled, 43-46 dB under. The
+  base's power control makes the set power from that level (at the very top
+  of a weak supply it can cost a few tenths of a dB).
 - **The calibration belongs to its radio.** The IQ offsets and IQ balance
   are that radio's own errors, so the radio keeps the fingerprint of the
   processor they were made on (`x6x00-fingerprint`: the processor's chip ID,

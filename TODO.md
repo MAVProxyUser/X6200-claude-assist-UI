@@ -70,11 +70,12 @@ approved that day.
     not move. First read as heat, but a run of 1 W overs never shifted (and 1 W after a shift did not undo it): the
     trigger is OPEN. A warm balance per band (tx_iq_hot_gain/phase) and a heat estimate (radio.c tx_heat) are in the
     GUI, off (0, 0) everywhere; txcal.py --state hot|cold. tools/base_update/README.md, "Why 15 m varied".
-    Also seen (both bases, before the Hilbert, so the audio's way in): the tone's 2nd harmonic at -32..-35 dBc and 3rd
-    at -42 (0.1 and 5 W alike). FT8 at 700 Hz would carry a -35 dBc copy at 1400 Hz. The GUI's TCI path is linear
-    (linear interpolation to 48 kHz, no processing); the X6100's TX audio leaves the processor's own codec (Headphone
-    63/63) for the base's ADC: the analog hop is the suspect, not yet tested (a tone level sweep: a square law falls
-    10 dB for 10 dB).
+    The tone's 2nd harmonic (both bases): TESTED 2026-11-20 evening. It follows the audio level 1 dB for 1 dB at a
+    held power (0.05 of full scale -53 dBc, 0.1 -44, 0.3 -33, 0.5 -28; 20 m, 1 W) and the processor's Headphone output
+    (-6 dB: -42, -12 dB: -47); the base's line-in gain (its codec PGA, page 1 reg 0x3B) changes nothing: made in the
+    hop from the processor's headphone amp to the base, before the PGA. FIXED for TCI clients (the GUI's own modes play
+    at -28.6 dB): tci_server.c brings a transmission's peak to -20 dBFS (X6100 only): full scale -45.5 dBc, 0.3 -43.5,
+    0.03 -44.4, 0.9 W each. At the 10 W setting (5 W on this 11.9 V supply) it costs ~0.4 dB of the top.
   - the X6200's WiFi, 2026-11-20 morning (v0.3.12.39): pinged at 10 Hz, 4-19% of replies over 100 ms, spikes of
     0.5-1.5 s, 0-7% lost (the X6100 beside it, same router: max 18-48 ms); its TCI audio reaches a client at 10-76%
     of real time (parec on the radio itself: full rate; the TCI queue holds 0.6 s and drops the rest). Not the GPS
