@@ -614,6 +614,13 @@ sending 900 Hz tones (0.1 W unless said), the X6200 listening through the pads (
   base's power and ALC readings are the same shifted or not, and the shifted image is the X6100's (it stays at the
   same RF frequency and level when the X6200's offset moves 300 Hz). The cause is open; what starts the shift is not
   transmitting time alone.
+- **Which bands** (80 dB, 0.1 W overs cycling 17, 15, 12, 10 m, six runs, 2026-11-20 19:11-19:22): 15 m -50 to
+  -29.5 dBc again; 12 m -43..-47 then -38, -35.5 (later, smaller); 10 m -48..-51 throughout; 17 m under the X6200's
+  floor throughout; 20 m earlier did not move either. 15 and 12 m: the bands whose calibration "varied from run to
+  run".
+- **Not intermodulation with the carrier** (2 x carrier - tone lands on the image's frequency): in the shifted state
+  the carrier moved from -25 to -9 dBc by the DC offsets and the image stayed at -29.5 +-0.5 dBc. It is a change of
+  the I/Q gain balance itself.
 
 So the GUI keeps a second, warm balance per band, experimental and off (0, 0) on every band (tx_iq_hot_gain/phase, Settings > TX Cal "IQ balance warm", remote
 txhg/txhp; 0, 0 = none) and estimates the radio's heat from its transmitting (radio.c tx_heat: TX seconds added,

@@ -68,7 +68,8 @@ approved that day.
     a shift after time on the air, not the audio band, the base's Hilbert filter (equiripple, 84.5 dB) or an I/Q skew:
     -46..-53 dBc, then -29 (a 9 % gain shift) after a minute or two at 0.1 W, back after ~5 min of receiving; 20 m does
     not move. First read as heat, but a run of 1 W overs never shifted (and 1 W after a shift did not undo it): the
-    trigger is OPEN. A warm balance per band (tx_iq_hot_gain/phase) and a heat estimate (radio.c tx_heat) are in the
+    trigger is OPEN. 12 m shifts too (later, smaller); 10, 17, 20 m do not. Not intermod with the carrier (the
+    carrier 16 dB up, the image unmoved): the I/Q gain balance itself. A warm balance per band (tx_iq_hot_gain/phase) and a heat estimate (radio.c tx_heat) are in the
     GUI, off (0, 0) everywhere; txcal.py --state hot|cold. tools/base_update/README.md, "Why 15 m varied".
     The tone's 2nd harmonic (both bases): TESTED 2026-11-20 evening. It follows the audio level 1 dB for 1 dB at a
     held power (0.05 of full scale -53 dBc, 0.1 -44, 0.3 -33, 0.5 -28; 20 m, 1 W) and the processor's Headphone output
