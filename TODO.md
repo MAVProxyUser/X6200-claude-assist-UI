@@ -112,11 +112,21 @@ Open:
   the X6200's audio has none. Where they enter (the same day, AGC off, RF gain 63 then 0, CW 300-1100 Hz): the hiss
   is shaped by the CW filter and did not move with the RF gain (the receiver's own floor behind the 80 dB chain), the
   lines did not move either and are NOT filtered (1562-3906 Hz above the filter's 1100 Hz edge, 97/147 Hz below its 300
-  Hz edge at +25 dB): added after the base's DSP, between its audio out and the SoC's codec. 97/147/290 Hz are
-  harmonics of ~48.5 Hz (x2, x3, x6). To do: the base's audio out against the codec's input (a scope on the line, or
-  the codec's input with the base's audio muted), the charger/battery as a suspect for 48.5 Hz. Ruled out: the
-  display (60.19 Hz: 27.5 MHz / 542 x 843), the backlight PWM (100 Hz), the base's flow packets (4136 bytes at
-  114688 bytes/s, 27.7 a second: ttyS1 streams at its line rate, no 48.5 Hz bursts).
+  Hz edge at +25 dB): added after the base's DSP, between its audio out and the SoC's codec. To do: a scope on the
+  base's audio line, if wanted. Ruled out: the display (60.19 Hz: 27.5 MHz / 542 x 843), the backlight PWM (100 Hz),
+  the base's flow packets (4136 bytes at 114688 bytes/s, 27.7 a second: ttyS1 streams at its line rate, no 48.5 Hz
+  bursts).
+  NARROWED the same evening (scratchpad vp_mic1/vp_mic2/vp_param/vp_fine.py, receive only, the mixer and params put
+  back): the receiver audio reaches the codec on MIC1 (24 dB boost; Line In is off). MIC1's boost at 0 dB took the
+  hiss and every line down the same 24-25 dB, so they are on the wire at MIC1's input. MIC2 at the same 24 dB boost
+  (nothing on it) has none of them, its floor 45 dB under them: not the processor board, the codec, its supply or mic
+  bias. Not the base's line-out gain either (params line_out 2, 10, 20: nothing moved, not even the hiss; that gain is
+  not on this path) and not the charger (off, the battery log's charging 0: the same lines). 40 s at 0.18 Hz bins: the
+  series is 780.69 Hz exactly and its x2-x5 (50 kHz / 64 = 781.25 is 0.07 % away); the low lines are two families,
+  ~97.9 Hz (x1, x2, x4: their level varies run to run) and 145.35 Hz (x1, x2), not one 48.5 Hz. So they come out of
+  the base board on its audio line, or in on the ground between the boards. +8..+15 dB over the receiver's own floor
+  behind the 80 dB chain: an antenna's band noise mostly covers them; a comb notch in the GUI's receive audio at
+  780.69 Hz x k would take the series out if ever wanted.
 
 Changed state today:
 - RTL sticks: back on both radios (the owner, 2026-11-21, after taking them off the same day): LISTEN RTL/BOTH and
