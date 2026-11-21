@@ -32,8 +32,13 @@ Open:
   (e9e3d890, installed on both).
 - The X6100's processor temperature sensor: dead on that board (below); the cause (its analog supply or reference)
   only by schematic or a meter, if wanted.
-- The heater run for the temperature sanity check did not happen (the 10 minutes ran flat): the three sensors' log
-  and plot are in build/temps_2026-11-20.png.
+  The heater cross-check ran 21:22-21:32 (build/temps_heater_2026-11-20.png): the three sensors agree, the X6200's
+  processor a steady 22 C over its power chip; the owner called it enough at 10 minutes.
+- The X6100's G WALKIE voiceprint looks rich even while the radio is not transmitting: structured patterns leaking
+  into it, where the X6200's is random noise (the owner, 2026-11-21: "figure out why"). To do: capture the X6100's
+  receiver audio with the antenna side quiet (the 80 dB chain, the X6200 not keying), find the lines' frequencies
+  and how they move (fixed tones: the board's own clocks, the charger, the display or WiFi; moving with the dial:
+  the receiver), against the X6200 the same way; then the source and whether it can be filtered or fixed.
 
 Changed state today:
 - RTL sticks: taken off both radios by the owner (2026-11-21): RTL items (LISTEN RTL/BOTH, Meteor, Kraken DF, an RTL
