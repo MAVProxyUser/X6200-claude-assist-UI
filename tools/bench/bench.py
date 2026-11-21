@@ -1209,6 +1209,7 @@ def run_radios_modem(c, args):
         t0, keyed_at, overs = time.time(), {}, {}
         seen_tune = {r.name: None for r in radios}
         probed, raised, changing = set(), args.power <= FIRST_PROBE_W, False
+        holder, wants_since, by_name = None, {}, {r.name: r for r in radios}
         while True:
             now = time.time()
             # each radio's first over at FIRST_PROBE_W; then, both off the air and held, the run's power, through the
@@ -1233,13 +1234,34 @@ def run_radios_modem(c, args):
                         say(f"  {r.name} now at {tune[0]} Hz mode {tune[1]} (split {tune[2]}, TX freq {tune[3]}, "
                             f"VFO {tune[4]}){' while on the air' if r.tx else ''}")
                     seen_tune[r.name] = tune
+            # The right to transmit, to one end at a time (the owner, 2026-11-21: never both keyed). An end holds it
+            # while it asks for it ("wants"), is keyed, or its radio is on the air or was in the last MODEM_GAP_S; only
+            # then is it free, and only to an end whose peer radio is off the air by its own GUI's word. Both asking
+            # at once: the one that asked first. Without this, both could be told "may 1" in the same 50 ms before
+            # either radio's state showed it on the air.
+            if holder is not None:
+                h, hl = by_name[holder], lines[holder]
+                with h.lock:
+                    h_busy = h.tx or now - h.tx_off_at <= MODEM_GAP_S
+                if not (h_busy or hl.get("wants") or hl.get("keyed") or hl.get("radio_tx") or
+                        hl.get("stats", {}).get("txq")):
+                    holder = None
             for r in radios:
-                o = peer[r.name]
-                with o.lock:
-                    other_off = not o.tx and now - o.tx_off_at > MODEM_GAP_S
-                end_o = lines[o.name]
-                may = other_off and not end_o.get("radio_tx") and not end_o.get("keyed") and not watch.why and \
-                    not changing
+                if lines[r.name].get("wants"):
+                    wants_since.setdefault(r.name, now)
+                else:
+                    wants_since.pop(r.name, None)
+            if holder is None and wants_since and not watch.why and not changing:
+                for name in sorted(wants_since, key=wants_since.get):
+                    o = peer[name]
+                    with o.lock:
+                        other_off = not o.tx and now - o.tx_off_at > MODEM_GAP_S
+                    eo = lines[o.name]
+                    if other_off and not eo.get("radio_tx") and not eo.get("keyed"):
+                        holder = name
+                        break
+            for r in radios:
+                may = r.name == holder and not watch.why and not changing
                 try:
                     ends[r.name].sendall(b"may 1\n" if may else b"may 0\n")
                 except OSError as e:

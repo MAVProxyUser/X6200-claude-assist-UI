@@ -35,9 +35,14 @@ Open:
   bench's Watch stopped it). Its base's ALC does not hold the setting, and TCI audio skips the GUI's drive loop
   (tx_level.c), which the apps use. WSJT-X over TCI is affected too. To do: TCI audio through a power-hold loop on
   the X6200 (as tx_level's, from the power readback), then measured on the bench.
-- X6100 at 1 W setting read 3.5 W on its own meter in a TCI training check (V.29, -32 dBFS after its levelling),
-  and the bench's Watch stopped the run (2026-11-21 01:03, through 80 dB, no harm): find why before any modem run
-  over 0.1 W. Also its receive audio clips (-2 dBFS RMS, 3rd harmonic -11 dBc) on a 0.1 W signal through 80 dB.
+- (Resolved 2026-11-21 01:17) the X6100's 3.5 W at a 1 W setting was the gcfix5 base patch (its ALC changes, the
+  hold the likeliest): back on Xiegu's factory V1.1.9 base, the same test read 1.0-1.4 W (ALC 8-8.6). The owner:
+  "revert back to factory base, and ignore the nuances for now". gcfix5's other fixes (TX I/Q, DC per band, 6 m)
+  are off the radio with it; the patches and their write-up stay in the repo.
+- x6x00-modem's own turn-taking still lets the two simulated ends key together in some runs (22 of 96 random lines,
+  most in the both-ways role swap, some one-way with the radios' long tails). On the radios the Mac's grant is
+  exclusive (one end at a time, on request) and the Watch stops two on the air: never seen there. To do: the link's
+  turns made safe by themselves (overlap.sh must pass a random sweep, not only its fixed cases).
 - (Resolved) the X6100 "losing steady tones from 1.5 kHz up" was its squelch at 4: at 0 it passes them all.
 - 12 m and 6 m calibration (6 m offsets left 0); 0.1 W carrier is about -25 dBc (the offsets were found at 5 W).
 - The draft PR to RF.Guru (drafts/x6100-baseband-errata/PR.md, NOT submitted: the owner's word needed) predates the

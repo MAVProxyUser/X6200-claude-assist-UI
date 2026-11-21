@@ -9,6 +9,9 @@ BUILD   ?= build
 CORE    = dsp.c v21.c v27ter.c v29.c qamrx.c pump.c hdlc.c link.c
 BINMODEM ?= ../../build/binmodem
 
+# make with no target runs the tests (tools/host_checks.sh runs each tool's make: CI)
+.DEFAULT_GOAL := test
+
 all: $(BUILD)/test_pump $(BUILD)/test_link $(BUILD)/interop $(BUILD)/x6x00-modem $(BUILD)/rxfile $(BUILD)/rxfast
 
 $(BUILD):
@@ -37,8 +40,10 @@ $(BUILD)/interop: interop.c $(CORE) $(wildcard *.h) | $(BUILD)
 # Each rate through: a clean line; the radios' audio filters with their carriers 37 Hz apart; their clocks
 # 120 ppm apart and 60 Hz; and 12 Hz, 50 ppm and noise. Every bit must come back.
 # Then the link, both ends a sample at a time through two such paths: both ways on a clean line at 9600; at 14 dB,
-# stepping down to 2400. It must finish, and the two must never be keyed at once.
-test: $(BUILD)/test_pump $(BUILD)/test_link
+# stepping down to 2400. It must finish, and the two must never be keyed at once. Then overlap.sh: never both keyed,
+# over a sweep of lines from clean to failing (the owner: "don't do that").
+test: $(BUILD)/test_pump $(BUILD)/test_link $(BUILD)/x6x00-modem
+	./overlap.sh $(BUILD)
 	$(BUILD)/test_pump 0 0 300 0
 	$(BUILD)/test_pump -37 0 300 1
 	$(BUILD)/test_pump -60 -120 300 1

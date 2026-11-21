@@ -86,6 +86,7 @@ typedef struct link {
     int       nplan, at;
     bool      planned, keyed, seg_started, plan_reply;
     bool      hold;                     /* not to key now (the radio end's right to transmit, from the Mac) */
+    bool      sent_data;                /* the plan in hand carries a block (the sender's wait after it is longer) */
     uint64_t  plan_made;
     double    tone_phase;
     uint64_t  keyed_at;
@@ -111,6 +112,10 @@ typedef struct link {
     double      busy_floor;
     uint64_t    quiet_for;
     uint64_t    v21_heard_at;           /* when V.21 flags were last on the line */
+    double      far_tail;               /* s the far end stays keyed after its signal (its CAP), 0 not yet said */
+    uint64_t    busy_until;             /* the far end cannot be done before this (sample): its check's or block's length,
+                                         * known from the procedure, and its tail. No answer keys before it, whatever the
+                                         * line sounds like (a noisy line's burst does not stand over its noise) */
 
     /* the procedure */
     rate_t   rate, far_max;

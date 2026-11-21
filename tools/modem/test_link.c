@@ -56,10 +56,21 @@ int main(int argc, char **argv) {
     cb.name = "X6200";
     ca.data_bytes = cb.data_bytes = bytes;
     ca.both_ways = cb.both_ways = both;
+    /* the radios' own lead and tails (bench.py MODEM_TAIL) when asked: LEAD, TAIL_A, TAIL_B */
+    if (getenv("LEAD"))
+        ca.lead_s = cb.lead_s = atof(getenv("LEAD"));
+    if (getenv("TAIL_A"))
+        ca.tail_s = atof(getenv("TAIL_A"));
+    if (getenv("TAIL_B"))
+        cb.tail_s = atof(getenv("TAIL_B"));
     link_init(&a, &ca);
     link_init(&b, &cb);
     channel_init(&ab, FS, true, off, ppm, snr);
     channel_init(&ba, FS, true, -off, -ppm, snr);
+    if (getenv("SEED")) {       /* each case its own noise */
+        ab.rng = 1000 + strtoull(getenv("SEED"), NULL, 10);
+        ba.rng = 2000 + strtoull(getenv("SEED"), NULL, 10);
+    }
     for (int i = 0; i < Q / 2; i++) {
         fifo_put(&fab, 0.0);
         fifo_put(&fba, 0.0);
@@ -103,5 +114,8 @@ int main(int argc, char **argv) {
                i ? "X6200" : "X6100", l->air_s[0], l->air_s[1], l->air_s[2], l->air_s[3],
                (unsigned long long)l->ftt_count, (unsigned long long)l->ppr_count, (unsigned long long)l->frames_resent);
     }
+    /* OVERLAP_ONLY: the sweep's question is only whether the two were ever keyed together */
+    if (getenv("OVERLAP_ONLY"))
+        return overlap ? 1 : 0;
     return overlap || a.state == L_FAILED || b.state == L_FAILED;
 }

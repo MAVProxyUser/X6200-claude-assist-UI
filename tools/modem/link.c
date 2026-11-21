@@ -12,8 +12,15 @@
 #include <string.h>
 
 #define LEVEL        0.35       /* of full scale: V.21 and V.29's outer points with room over them */
-#define VERSION      1
-#define SENDER_WAIT  6.0        /* s after the sender's transmission for the answer */
+#define VERSION      2        /* 2: the CAP says its sender's tail */
+#define SENDER_WAIT  10.0       /* s after the sender's control frame before it tries again: past the latest the far end
+                                 * keys its answer (FAR_TAIL + TAIL_MARGIN + REPLY_MAX) and the longest answer (~4 s) */
+#define DATA_WAIT    12.0       /* and after a block, on top of the block's longest (burst_s): the receiver waits out a
+                                 * whole block when it decodes none of its frames */
+#define SWAP_WAIT    14.0       /* s the new sender waits before its first CAP: past the old sender's next try */
+#define FAR_TAIL     2.0        /* s: the far end's keyed silence after its signal, until its CAP has said (the X6200's
+                                 * is 1.8) */
+#define TAIL_MARGIN  0.3
 #define RX_WAIT      20.0       /* s the receiver waits for a burst it was told of */
 #define TRIES        4
 #define PPR_ROUNDS   3
@@ -74,6 +81,8 @@ static uint8_t data_byte(uint32_t i) {
 }
 
 static void on_fast_bit(void *ctx, int bit);
+static bool line_quiet(link_t *l);
+static uint8_t cap_tail(const link_t *l);
 
 void link_init(link_t *l, const link_cfg_t *cfg) {
     memset(l, 0, sizeof(*l));
@@ -120,6 +129,9 @@ static void plan_v21(link_t *l, const uint8_t *f, int n) {
 
 /* the plan goes once the line has been quiet for reply_s: never over the far end */
 static void plan_go(link_t *l) {
+    l->sent_data = false;
+    for (int i = 0; i < l->nplan; i++)
+        l->sent_data |= l->plan[i].kind == SEG_FAST_DATA;
     l->at          = 0;
     l->seg_started = false;
     l->planned     = true;
@@ -145,12 +157,12 @@ static int rate_frames(const link_t *l, rate_t r) {
 /* ---- the sender ---- */
 
 static void send_cap(link_t *l) {
-    uint8_t f[16] = {'C', VERSION, (uint8_t)l->cfg.max_rate};
+    uint8_t f[17] = {'C', VERSION, (uint8_t)l->cfg.max_rate, cap_tail(l)};
     int     n     = (int)strlen(l->cfg.name);
     n             = n > 12 ? 12 : n;
-    memcpy(f + 3, l->cfg.name, (size_t)n);
+    memcpy(f + 4, l->cfg.name, (size_t)n);
     say(l, "TX CAP: up to %s", rate_name(l->cfg.max_rate));
-    send_frame(l, f, 3 + n);
+    send_frame(l, f, 4 + n);
 }
 
 static void send_train(link_t *l) {
@@ -199,13 +211,39 @@ static void send_eop(link_t *l) {
 
 static void become(link_t *l, link_role_t role);
 
+static double far_tail(const link_t *l) {
+    return l->far_tail > 0 ? l->far_tail : FAR_TAIL;
+}
+
+/* the far end busy at least until now + s, its tail after that */
+static void far_busy_for(link_t *l, double s) {
+    uint64_t until = l->now + (uint64_t)((s + far_tail(l) + TAIL_MARGIN) * l->cfg.fs);
+    if (until > l->busy_until)
+        l->busy_until = until;
+}
+
+/* this end's tail, tenths of a second, for its CAP */
+static uint8_t cap_tail(const link_t *l) {
+    double t = l->cfg.tail_s * 10.0 + 0.999;
+    return (uint8_t)(t > 255 ? 255 : t);
+}
+
+/* a CAP: the far end's fastest rate, its name, and (version 2) its tail: how long it stays keyed and silent after its
+ * signal, which this end waits out before it answers (it hears the signal end, not the far end's unkey) */
+static void cap_read(link_t *l, const uint8_t *f, int n) {
+    int name_at = f[1] >= 2 && n >= 4 ? 4 : 3;
+    l->far_max  = f[2] < RATE_COUNT ? (rate_t)f[2] : RATE_2400;
+    if (name_at == 4)
+        l->far_tail = f[3] / 10.0;
+    snprintf(l->far_name, sizeof(l->far_name), "%.*s", n - name_at > 12 ? 12 : n - name_at, (const char *)f + name_at);
+}
+
 static void sender_frame(link_t *l, const uint8_t *f, int n) {
     switch (f[0]) {
     case 'C':
         if (n < 3)
             return;
-        l->far_max = f[2] < RATE_COUNT ? (rate_t)f[2] : RATE_2400;
-        snprintf(l->far_name, sizeof(l->far_name), "%.*s", n - 3 > 12 ? 12 : n - 3, (const char *)f + 3);
+        cap_read(l, f, n);
         if (l->state != L_CAP)
             return;
         l->rate         = l->cfg.max_rate < l->far_max ? l->cfg.max_rate : l->far_max;
@@ -329,15 +367,14 @@ static void receiver_frame(link_t *l, const uint8_t *f, int n) {
     case 'C': {
         if (n < 3)
             return;
-        l->far_max = f[2] < RATE_COUNT ? (rate_t)f[2] : RATE_2400;
-        snprintf(l->far_name, sizeof(l->far_name), "%.*s", n - 3 > 12 ? 12 : n - 3, (const char *)f + 3);
+        cap_read(l, f, n);
         say(l, "RX CAP from %s: up to %s", l->far_name, rate_name(l->far_max));
-        uint8_t me[14] = {VERSION, (uint8_t)l->cfg.max_rate};
+        uint8_t me[16] = {VERSION, (uint8_t)l->cfg.max_rate, cap_tail(l)};
         int     k      = (int)strlen(l->cfg.name);
         k              = k > 12 ? 12 : k;
-        memcpy(me + 2, l->cfg.name, (size_t)k);
+        memcpy(me + 3, l->cfg.name, (size_t)k);
         say(l, "TX CAP: up to %s", rate_name(l->cfg.max_rate));
-        reply(l, 'C', me, 2 + k);
+        reply(l, 'C', me, 3 + k);
         l->state = L_LISTEN;
         break;
     }
@@ -352,6 +389,8 @@ static void receiver_frame(link_t *l, const uint8_t *f, int n) {
         /* the check follows in the same transmission: its closing flags (two, 53 ms), 75 ms, then the turn-on.
          * Looked for there, from 0.1 s before to 0.35 s after, rather than by its level rising */
         qamrx_expect(&l->rx.rx, l->rx.rx.n + (uint64_t)((2 * 8 / V21_BAUD + 0.075) * l->cfg.fs), 0.1, 0.35);
+        /* and the sender is on the air till the check is over, whatever is made of it here */
+        far_busy_for(l, 2 * 8 / V21_BAUD + 0.075 + pump_train_seconds(l->rate) + l->cfg.tcf_s + 0.1);
         l->state = L_TCF;
         /* the check's end, and 1.5 s more: then FTT whatever came. Its answer keys by REPLY_MAX after that, which is
          * 2 s before the sender's own next try (its SENDER_WAIT, from its end of the check) */
@@ -429,23 +468,28 @@ static void block_verdict(link_t *l) {
 }
 
 static void on_fast_frame(link_t *l, const uint8_t *f, int n) {
-    if (n < 7 || f[0] != 'B')
+    if (n < 8 || f[0] != 'B')
         return;
-    int      block = f[1], idx = f[2], nf = f[3];
+    int      block = f[1], idx = f[2], nf = f[3], after = f[7];
     uint32_t g     = (uint32_t)(f[4] | f[5] << 8 | f[6] << 16);
+    /* the sender's transmission ends after `after` more frames, the closing flags and its turn-off: exactly when, now,
+     * instead of a whole block's worth from the burst's start */
+    double frame_s = (l->cfg.frame_bytes + 10) * 8.0 * 1.03 / rate_bps(l->rate);
+    l->busy_until  = l->now + (uint64_t)((after * frame_s + 64.0 / rate_bps(l->rate) + 0.1 + far_tail(l) + TAIL_MARGIN) *
+                                        l->cfg.fs);
     if (block != l->rx_block) {
         l->rx_block = block;
         memset(l->got, 0, sizeof(l->got));
     }
     l->rx_block_frames = nf;
-    for (int i = 7; i < n; i++)
-        if (f[i] != data_byte(g * (uint32_t)l->cfg.frame_bytes + (uint32_t)(i - 7))) {
+    for (int i = 8; i < n; i++)
+        if (f[i] != data_byte(g * (uint32_t)l->cfg.frame_bytes + (uint32_t)(i - 8))) {
             l->frames_bad++;
             return;
         }
     if (!((l->got[idx / 8] >> (idx % 8)) & 1)) {
         l->got[idx / 8] |= (uint8_t)(1 << (idx % 8));
-        l->bytes_delivered += (uint64_t)(n - 7);
+        l->bytes_delivered += (uint64_t)(n - 8);
     }
 }
 
@@ -543,13 +587,17 @@ static void tx_done(link_t *l) {
     if (getenv("LINK_DEBUG"))
         fprintf(stderr, "%.2f %s tx done, state %s\n", link_seconds(l), l->cfg.name, link_state_name(l->state));
     if (l->role == LINK_SENDER && l->state != L_DONE && l->state != L_FAILED)
-        l->deadline = l->now + (uint64_t)(SENDER_WAIT * l->cfg.fs);
+        l->deadline = l->now + (uint64_t)((l->sent_data ? l->cfg.burst_s + DATA_WAIT : SENDER_WAIT) * l->cfg.fs);
     if (l->role == LINK_RECEIVER && l->state == L_RXDATA) {
         arm_fast(l, false);
         l->deadline = l->now + (uint64_t)(RX_WAIT * l->cfg.fs);
     }
     if (l->swap_after_tx) {
         l->swap_after_tx = false;
+        /* the old sender may have missed this MCF and try its EOP again: the first CAP waits past that */
+        uint64_t until = l->now + (uint64_t)(SWAP_WAIT * l->cfg.fs);
+        if (until > l->busy_until)
+            l->busy_until = until;
         become(l, LINK_SENDER);
     }
 }
@@ -581,9 +629,13 @@ static void top_up_data(link_t *l) {
         f[4]          = (uint8_t)g;
         f[5]          = (uint8_t)(g >> 8);
         f[6]          = (uint8_t)(g >> 16);
+        int after     = 0;          /* frames still to come in this transmission: the receiver knows when it ends */
+        for (int j = i + 1; j < block_size(l); j++)
+            after += (l->need[j / 8] >> (j % 8)) & 1;
+        f[7] = (uint8_t)after;
         for (int k = 0; k < len; k++)
-            f[7 + k] = data_byte(g * (uint32_t)l->cfg.frame_bytes + (uint32_t)k);
-        hdlc_frame(put_fast, l, f, 7 + len);
+            f[8 + k] = data_byte(g * (uint32_t)l->cfg.frame_bytes + (uint32_t)k);
+        hdlc_frame(put_fast, l, f, 8 + len);
     }
     if (l->fast_next >= block_size(l) && !l->fast_flags_done) {
         hdlc_flags(put_fast, l, 4);
@@ -592,8 +644,12 @@ static void top_up_data(link_t *l) {
     }
 }
 
+/* quiet long enough to key: the far end's signal over, and its keyed silence after it waited out (a radio keyed with
+ * nothing on it sounds quiet: 2026-11-21 the simulated ends, with the radios' tails, keyed together in every case) */
 static bool line_quiet(link_t *l) {
-    return l->quiet_for >= (uint64_t)(l->cfg.reply_s * l->cfg.fs);
+    double tail = far_tail(l);
+    double need = tail + TAIL_MARGIN > l->cfg.reply_s ? tail + TAIL_MARGIN : l->cfg.reply_s;
+    return l->quiet_for >= (uint64_t)(need * l->cfg.fs);
 }
 
 double link_tx_sample(link_t *l) {
@@ -602,7 +658,7 @@ double link_tx_sample(link_t *l) {
     l->now++;
     /* the sender tries again only on a line quiet for a while: an answer on its way restarts the wait */
     if (l->deadline && l->now >= l->deadline && !l->keyed && !l->planned) {
-        if (l->role == LINK_RECEIVER || l->quiet_for >= (uint64_t)(RETRY_QUIET * l->cfg.fs))
+        if (l->role == LINK_RECEIVER || (line_quiet(l) && l->quiet_for >= (uint64_t)(RETRY_QUIET * l->cfg.fs)))
             timeout(l);
     }
     if (!l->planned)
@@ -612,14 +668,14 @@ double link_tx_sample(link_t *l) {
          * later than that, so the two never start together */
         /* counted from the line's last sound: an answer decided while the far end is still sending (a check that did
          * not train, its 1.5 s still to come) waits for it, then has REPLY_MAX */
-        if (!line_quiet(l) && l->plan_reply)
+        if ((!line_quiet(l) || l->now < l->busy_until) && l->plan_reply)
             l->plan_made = l->now;
         if (l->plan_reply && l->now - l->plan_made > (uint64_t)(REPLY_MAX * l->cfg.fs)) {
             l->planned = false;
             say(l, "answer not sent: the line was not quiet in time");
             return 0.0;
         }
-        if (!line_quiet(l) || l->hold)
+        if (!line_quiet(l) || l->hold || l->now < l->busy_until)
             return 0.0;
         l->keyed    = true;
         l->keyed_at = l->now;
@@ -764,6 +820,12 @@ void link_rx_sample(link_t *l, double x) {
         qam_state_t st = l->rx.rx.state;
         if (st == QAM_TRACK && l->rx.rx.k != k)
             l->points[l->npoints++ % LINK_POINTS] = l->rx.rx.last;
+        if (l->state == L_RXDATA && l->fast_was == QAM_IDLE && st == QAM_COLLECT) {
+            /* a block begins (or something like one): the sender is on the air for up to a whole block from here */
+            int    nf   = l->block_frames > 0 ? l->block_frames : 255;
+            double bits = nf * (l->cfg.frame_bytes + 9) * 8.0 * 1.03 + 12 * 8;
+            far_busy_for(l, pump_train_seconds(l->rate) + bits / rate_bps(l->rate) + 0.3);
+        }
         if (l->rx.rx.fails != l->fast_fails) {
             /* a burst that did not train; V.21 on the line is not one (its tones are in every fast modem's band) */
             l->fast_fails = l->rx.rx.fails;

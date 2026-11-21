@@ -459,11 +459,13 @@ static void telemetry(void) {
     char       *o = out;
     qamrx_t    *q = &L.rx.rx;
 
+    /* "wants": a transmission planned and waiting to key (the Mac grants one end at a time, on this) */
     o += sprintf(o, "{\"name\":\"%s\",\"t\":%.2f,\"running\":%d,\"role\":\"%s\",\"state\":\"%s\",\"keyed\":%d,"
-                    "\"radio_tx\":%d,\"may\":%d,\"rate\":%d,\"rate_name\":\"%s\",\"seg\":%d,\"far\":",
+                    "\"wants\":%d,\"radio_tx\":%d,\"may\":%d,\"rate\":%d,\"rate_name\":\"%s\",\"seg\":%d,\"far\":",
                  name, running ? link_seconds(&L) : 0.0, running, L.role == LINK_SENDER ? "sender" : "receiver",
-                 running ? link_state_name(L.state) : "stopped", link_keyed(&L), radio_tx, may_key(), (int)L.rate,
-                 rate_name(L.rate), link_keyed(&L) && L.at < L.nplan ? (int)L.plan[L.at].kind : -1);
+                 running ? link_state_name(L.state) : "stopped", link_keyed(&L), running && L.planned && !L.keyed,
+                 radio_tx, may_key(), (int)L.rate, rate_name(L.rate),
+                 link_keyed(&L) && L.at < L.nplan ? (int)L.plan[L.at].kind : -1);
     json_str(&o, L.far_name);
     o += sprintf(o, ",\"rx\":{\"armed\":%d,\"state\":%d,\"snr\":%.1f,\"trained\":%.1f,\"offset\":%.2f,\"ppm\":%.1f,"
                     "\"timing\":%.2f,\"shifts\":%d,\"level_db\":%.1f}",
