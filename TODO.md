@@ -51,8 +51,14 @@ Open:
   the receiver), against the X6200 the same way; then the source and whether it can be filtered or fixed.
 
 Changed state today:
-- RTL sticks: taken off both radios by the owner (2026-11-21): RTL items (LISTEN RTL/BOTH, Meteor, Kraken DF, an RTL
-  as the second receiver for a TX CAL on F SYSTEM) wait for them.
+- RTL sticks: back on both radios (the owner, 2026-11-21, after taking them off the same day): LISTEN RTL/BOTH and
+  Kraken DF can be tried again. TX CAL on F SYSTEM: CLOSED by the owner 2026-11-21 ("we close out that research").
+- ardopcf security review (2026-11-21): fixed in the vendored source (third-party/ardopcf/UPSTREAM.md lists the three:
+  a DISC from anyone keyed the idle radio; a 16QAM frame wrote one int past the RS decoder's elp; an ARQCALL from Pat
+  with spaces before its count overflowed the host reply). Proven with the audit's harnesses on ardopcf's own objects
+  (before: keyed, ASan overflows; after: none) and on the X6200 (host commands to a no-sound ardopcf). Not reported
+  upstream (the owner's OK needed). axspawn (linuxax25) is not in the image: its findings (the "sys" answer falls back
+  to a cleartext login, root writes ~/.bcpasswd through a symlink, a clock-seeded challenge, ...) are upstream's only.
 - Power: the X6100 on its stock adapter (a charger): its battery emptied 52 % -> 0 % and it switched off in a 10 W
   over at 19:31; at 8 % and charging at 01:00 UTC. bench.py's supply gate now refuses an over on a radio its supply
   is not holding (af73b3b0). MANUAL "Power supply" (fd0145dc): a regulated 13.8 V supply of 5 A or more.
@@ -113,7 +119,8 @@ gets 0, not the last band's (2772e164); the X6200 never calibrated or keyed for 
     160-6 m; tools/base_update/README.md has the table): the image is the signal mirrored around the dial (to 0.09 Hz),
     -42.5 to -54.5 dBc (15 and 12 m worst), Xiegu's own V1.1.9 the same; the carrier -30 to -48 dBc at 5 W but about
     -12 dBc at 0.1 W on HF (constant milliwatts). The owner (2026-11-20): "that feels like something we'd want to
-    fix ... a calibration tool for screen F seems relevant"; the X6200 not wanted. To do: TX CAL on F SYSTEM (a
+    fix ... a calibration tool for screen F seems relevant"; the X6200 not wanted. CLOSED 2026-11-21 (the owner: "close
+    the tx cal on system since we close out that research"); the plan was: TX CAL on F SYSTEM (a
     dummy load, the lowest power, a second receiver: the other radio or an SDR on the X6100's USB) nulling the carrier
     with registers 50/51 (exist, zero, not yet tried) and the image with a second base hook (Q' = g Q + p I on the
     block before the DAC, per band, values from the GUI through a register). The X6100's calibration block is empty
@@ -127,8 +134,7 @@ gets 0, not the last band's (2772e164); the X6200 never calibrated or keyed for 
     IQ balance (Settings > TX Cal, remote `set txig/txip/txio/txqo`), tools/bench/txcal.py (one over a point: the
     base takes registers 50-52 between transmissions only), the X6100 calibrated on every band (tools/base_update/
     README.md has the results). 10 W run too (power-ok; the stock adapter, a charger, sets the top, gcfix and Xiegu's alike).
-    Left: screen F's TX CAL (the owner's idea; needs a second receiver on the radio: an RTL stick only covers HF if
-    it is a V4 or in direct sampling); a combined build with RF.Guru's payload keeps their build name, so the GUI
+    Left: (screen F's TX CAL closed 2026-11-21); a combined build with RF.Guru's payload keeps their build name, so the GUI
     would not know gcfix5 is in it (a marker of its own needed); the image's change across the audio band (one G, P
     per band).
     Later the same evening (the owner: "dive deeper ... find a novel solution that *works*"): 15 m's (and 12 m's)

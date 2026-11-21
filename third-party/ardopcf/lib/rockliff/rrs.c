@@ -290,7 +290,7 @@ int decode_rs(int *rcvd, int rslen, bool quiet, bool test_only)
 {
 	int retval = 0;
 	int i, j, u, q;
-	int elp[MAXRSLEN + 2][MAXRSLEN];
+	int elp[MAXRSLEN + 2][MAXRSLEN + 1];  // local patch: + 1, as elp[u + 1][i + u - q] reaches [MAXRSLEN] at rslen 64 (a 16QAM frame's syndromes S1-S63 0, S64 not)
 	int d[MAXRSLEN + 2];
 	int l[MAXRSLEN + 2];
 	int u_lu[MAXRSLEN + 2];

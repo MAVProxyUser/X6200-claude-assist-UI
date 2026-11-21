@@ -8888,6 +8888,11 @@ Good to know:
   network, and your tailnet with Tailscale on, can read and send your mail and
   make the radio transmit under your callsign. Turn Winlink off on a network
   you do not trust (a campsite's WiFi, a shared hotspot).
+- An ARDOP call tries 1 to 15 times (ARDOP's own range): a connection asking
+  for more (Pat's `connect_requests`) is refused rather than left calling.
+- With nothing connected, ARDOP answers another station's DISC frame only
+  when it ends our own last session, within a minute of it: a DISC from
+  anyone else no longer keys the radio.
 - The mailbox answers only to the radio's address and its
   [own names](#the-radios-own-names) (`x6100.local`, its name in your network's
   domain, the names added on the Network page, the Tailscale name, the short

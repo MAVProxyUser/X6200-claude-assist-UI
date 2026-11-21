@@ -181,6 +181,8 @@ bool DoTrueFalseCmd(char * strCMD, char * ptrParams, BOOL * Value)
  * and `fault` is populated instead. If this method returns false,
  * the value of `target` and `nattempts` are undefined.
  */
+#define ARDOP_MAX_ATTEMPTS 15	// the ARDOP spec's ARQCALL repeats, 2 to 15 (Pat's default is 10)
+
 ARDOP_MUSTUSE
 bool parse_station_and_nattempts(
 	const char* cmd,
@@ -215,7 +217,11 @@ bool parse_station_and_nattempts(
 		return false;
 	}
 
-	if (! try_parse_long(nattempts_str, nattempts)) {
+	// Local patch: digits only, and at most ARDOP_MAX_ATTEMPTS. strtol skipped leading spaces, so "ARQCALL W1AW"
+	// with a thousand spaces before its 1 passed, and its echo overflowed TCPSendCommandToHost's buffer; and any count
+	// kept the radio calling (Pat passes its connect_requests through from a URL anyone on the network can give it).
+	if (! (*nattempts_str >= '0' && *nattempts_str <= '9') || strlen(nattempts_str) > 2
+		|| ! try_parse_long(nattempts_str, nattempts)) {
 		snprintf(
 			fault,
 			fault_size,
@@ -224,12 +230,12 @@ bool parse_station_and_nattempts(
 		return false;
 	}
 
-	if (! (*nattempts >= 1)) {
+	if (! (*nattempts >= 1 && *nattempts <= ARDOP_MAX_ATTEMPTS)) {
 		snprintf(
 			fault,
 			fault_size,
-			"Syntax Err: %s %s %s: NATTEMPTS must be positive",
-			cmd, target_str, nattempts_str);
+			"Syntax Err: %s %s %s: NATTEMPTS must be 1 to %d",
+			cmd, target_str, nattempts_str, ARDOP_MAX_ATTEMPTS);
 		return false;
 	}
 
@@ -328,7 +334,8 @@ void ProcessCommandFromHost(char * strCMD)
 			case ARQ:
 				ARQConReqRepeats = (int)nattempts;
 				NeedConReq = TRUE;
-				SendReplyToHost(cmdCopy);
+				snprintf(cmdReply, sizeof(cmdReply), "ARQCALL %s %ld", ConnectToCall.str, nattempts);
+				SendReplyToHost(cmdReply);  // local patch: what was parsed, not the host's own text echoed
 				break;
 			case FEC:
 				snprintf(strFault, sizeof(strFault), "Not from mode FEC");
@@ -1023,7 +1030,8 @@ void ProcessCommandFromHost(char * strCMD)
 
 		PingCount = (int)nattempts;
 		NeedPing = TRUE;  // request ping from background
-		SendReplyToHost(cmdCopy);
+		snprintf(cmdReply, sizeof(cmdReply), "PING %s %ld", ConnectToCall.str, nattempts);
+		SendReplyToHost(cmdReply);  // local patch: what was parsed, not the host's own text echoed
 		goto cmddone;
 	}
 

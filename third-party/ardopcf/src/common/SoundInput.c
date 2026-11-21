@@ -222,6 +222,8 @@ BOOL PSKInitDone = FALSE;
 BOOL blnSymbolSyncFound, blnFrameSyncFound;
 
 extern UCHAR bytLastARQSessionID;
+extern BOOL blnDISCLastSession;  // ARQ.c: the DISC just decoded carried bytLastARQSessionID
+BOOL DISCIsOurs(void);
 extern UCHAR bytCurrentFrameType;
 extern int intShiftUpDn;
 extern const char ARQSubStates[10][11];
@@ -1332,7 +1334,7 @@ ProcessFrame:
 					ProcessUnconnectedConReqFrame(intFrameType, bytData);
 				else if (intFrameType == PING)
 					ProcessPingFrame(bytData);
-				else if (intFrameType == DISCFRAME)
+				else if (intFrameType == DISCFRAME && DISCIsOurs())
 				{
 					// Special case to process DISC from previous connection (Ending station must have missed END reply to DISC) Handles protocol rule 1.5
 
@@ -2145,6 +2147,7 @@ int MinimalDistanceFrameType(int * intToneMags, UCHAR bytSessionID)
 	float dblDistance1, dblDistance2, dblDistance3;
 	int i;
 
+	blnDISCLastSession = FALSE;
 	if (ProtocolState == ISS)
 	{
 		bytValidFrameTypes = bytValidFrameTypesISS;
@@ -2203,6 +2206,7 @@ int MinimalDistanceFrameType(int * intToneMags, UCHAR bytSessionID)
 
 			ZF_LOGD("[Frame Type Decode OK  ] %s", strDecodeCapture);
 
+			blnDISCLastSession = TRUE;  // its second byte carried bytLastARQSessionID (dblDistance3)
 			return intIatMinDistance1;
 		}
 

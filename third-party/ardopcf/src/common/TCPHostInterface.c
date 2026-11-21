@@ -124,7 +124,13 @@ void TCPSendCommandToHost(char * strText)
 	int len;
 	int ret;
 
-	len = sprintf(bytToSend,"%s\r", strText);
+	// local patch: bounded, the CR kept (sprintf wrote a host command's echo of up to 3000 bytes past the end)
+	len = snprintf((char *) bytToSend, sizeof(bytToSend) - 1, "%s", strText);
+	if (len < 0)
+		len = 0;
+	if (len > (int) sizeof(bytToSend) - 2)
+		len = sizeof(bytToSend) - 2;
+	bytToSend[len++] = '\r';
 
 	if (CONNECTED)
 	{
@@ -150,7 +156,13 @@ void TCPSendCommandToHostQuiet(char * strText)
 	int len;
 	int ret;
 
-	len = sprintf(bytToSend,"%s\r", strText);
+	// local patch: bounded, the CR kept (sprintf wrote a host command's echo of up to 3000 bytes past the end)
+	len = snprintf((char *) bytToSend, sizeof(bytToSend) - 1, "%s", strText);
+	if (len < 0)
+		len = 0;
+	if (len > (int) sizeof(bytToSend) - 2)
+		len = sizeof(bytToSend) - 2;
+	bytToSend[len++] = '\r';
 
 	if (CONNECTED)
 	{

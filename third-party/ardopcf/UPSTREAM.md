@@ -75,3 +75,21 @@ Each one is its own commit on top of the pristine import.
   feature): a ConReq or Ping frame (and its repeats) counts as an ID, as it
   carries our call, so no 10 minute ID frame follows a call nobody answered
   (it keyed by itself about 9 minutes after the call).
+- Security review of 2026-11-21 (reachable from the air or through Pat):
+  - `src/common/ARQ.c`, `src/common/SoundInput.c`: a DISC heard with nothing
+    connected (DISC state, or FEC mode) is answered with END, and then our ID
+    frame, only when it carried the ID of our own session that ended within
+    60 s (protocol rule 1.5, the case it is for). Before, a DISC from anyone,
+    at session ID 0xFF or before any session, keyed the idle radio, once for
+    each DISC sent, LISTEN FALSE or not.
+  - `lib/rockliff/rrs.c`: `elp` one column wider. With rslen 64 (every 16QAM
+    frame type, decoded while idle) and syndromes S1-S63 zero, S64 not,
+    `elp[u + 1][i + u - q]` wrote one int, of the sender's choosing, past
+    the array's end (`elp[65][64]`, the only write that can leave it).
+  - `src/common/TCPHostInterface.c`, `src/common/HostInterface.c`: the
+    replies to the host are bounded (`snprintf`, the CR kept); ARQCALL and
+    PING echo what was parsed, not the host's own text; their attempt count
+    is digits only, 1 to 15 (strtol skipped leading spaces, so a call with a
+    thousand spaces before its count passed, and its echo overflowed the
+    1024-byte reply buffer; Pat passes a connect URL's target and
+    `connect_requests` through from its web page).

@@ -92,6 +92,28 @@ StationId ARQStationLocal;   // current connection local callsign
 StationId ARQStationFinalId; // post-session local IDF to send
 
 UCHAR bytLastARQSessionID;
+// A DISC heard in DISC state is answered (an END, then our ID frame: protocol rule 1.5, the other station missed our
+// END) only when it carried the ID of our own session that just ended. Local patch: before it, a DISC from anyone,
+// with session ID 0xFF or before we ever had a session, keyed the idle radio, once for each DISC sent.
+// SoundInput.c sets blnDISCLastSession when the DISC it decoded carried bytLastARQSessionID.
+BOOL blnDISCLastSession = FALSE;
+static BOOL blnHadARQSession = FALSE;	// bytLastARQSessionID is a session's, ended at LastARQSessionEnd
+static unsigned int LastARQSessionEnd;
+#define DISC_ANSWER_MS 60000
+
+static void LastARQSessionEnded(void)
+{
+	blnHadARQSession = TRUE;
+	LastARQSessionEnd = Now;
+}
+
+BOOL DISCIsOurs(void)
+{
+	if (blnDISCLastSession && blnHadARQSession && Now - LastARQSessionEnd <= DISC_ANSWER_MS)
+		return TRUE;
+	ZF_LOGI("DISC frame received, not for our session that just ended: not answered");
+	return FALSE;
+}
 BOOL blnEnbARQRpt;
 BOOL blnListen = TRUE;
 BOOL Monitor = TRUE;
@@ -1138,6 +1160,8 @@ void ProcessRcvdARQFrame(UCHAR intFrameType, UCHAR * bytData, int DataLen, BOOL 
 		if (blnFrameDecodedOK && intFrameType == DISCFRAME)
 		{
 			// Special case to process DISC from previous connection (Ending station must have missed END reply to DISC) Handles protocol rule 1.5
+			if (!DISCIsOurs())
+				return;
 
 			ZF_LOGI("[ARDOPprotocol.ProcessRcvdARQFrame]  DISC frame received in ProtocolState DISC, Send END with SessionID= %XX Stay in DISC state", bytLastARQSessionID);
 
@@ -1499,6 +1523,7 @@ void ProcessRcvdARQFrame(UCHAR intFrameType, UCHAR * bytData, int DataLen, BOOL 
 				QueueCommandToHost(HostCmd);
 
 				bytLastARQSessionID = bytSessionID;  // capture this session ID to allow answering DISC from DISC state if ISS missed Sent END
+				LastARQSessionEnded();
 
 				ClearDataToSend();
 				// Send END.  The other station should respond by immediately
@@ -1868,6 +1893,7 @@ void ProcessRcvdARQFrame(UCHAR intFrameType, UCHAR * bytData, int DataLen, BOOL 
 			}
 			Mod4FSKDataAndPlay(END, &bytEncodedBytes[0], EncLen, LeaderLength);
 			bytLastARQSessionID = bytSessionID;  // capture this session ID to allow answering DISC from DISC state
+			LastARQSessionEnded();
 			ClearDataToSend();
 			SetARDOPProtocolState(DISC);
 			blnEnbARQRpt = FALSE;
@@ -2239,6 +2265,7 @@ void ProcessRcvdARQFrame(UCHAR intFrameType, UCHAR * bytData, int DataLen, BOOL 
 				QueueCommandToHost(HostCmd);
 
 				bytLastARQSessionID = bytSessionID;  // capture this session ID to allow answering DISC from DISC state
+				LastARQSessionEnded();
 				blnDISCRepeating = FALSE;
 
 				// Send END.  The other station should respond by immediately
