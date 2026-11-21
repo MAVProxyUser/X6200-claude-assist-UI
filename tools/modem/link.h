@@ -47,6 +47,8 @@ typedef struct {
     bool        both_ways;              /* after the sender's EOP, the roles swap and it runs again */
     int         rounds;                 /* transfers, the roles swapping after each (0: two if both_ways, else one) */
     const char *name;                   /* this radio, for the CAP */
+    int         v21_channel;            /* 2, T.30's (1650/1850 Hz); 1 (980/1180 Hz): the X6100's receiver takes steady
+                                         * tones from 1.5 kHz up out of its audio within a second (2026-11-21) */
 } link_cfg_t;
 
 void link_defaults(link_cfg_t *c, double fs, link_role_t role);
@@ -56,7 +58,7 @@ typedef enum {
     L_LISTEN, L_TCF, L_RXDATA                                                 /* receiver */
 } link_state_t;
 
-typedef enum { SEG_SILENCE, SEG_V21, SEG_FAST_TCF, SEG_FAST_DATA } seg_kind_t;
+typedef enum { SEG_SILENCE, SEG_V21, SEG_FAST_TCF, SEG_FAST_DATA, SEG_TONE } seg_kind_t;
 
 typedef struct {
     seg_kind_t kind;
@@ -64,6 +66,7 @@ typedef struct {
     int        nframe;                  /* SEG_V21: one frame */
     uint8_t    frame[64];
     rate_t     rate;                    /* the fast ones */
+    double     hz;                      /* SEG_TONE: a steady tone, samples long (a probe of the radios' audio path) */
 } seg_t;
 
 typedef struct {
@@ -82,7 +85,9 @@ typedef struct link {
     seg_t     plan[8];
     int       nplan, at;
     bool      planned, keyed, seg_started, plan_reply;
+    bool      hold;                     /* not to key now (the radio end's right to transmit, from the Mac) */
     uint64_t  plan_made;
+    double    tone_phase;
     uint64_t  keyed_at;
     int       seg_left;
     v21_tx_t  v21tx;
@@ -135,6 +140,8 @@ typedef struct link {
 void   link_init(link_t *l, const link_cfg_t *cfg);
 void   link_free(link_t *l);
 void   link_start(link_t *l);
+/* not the procedure: one transmission of a steady tone (lead, the tone, tail), for measuring the audio path */
+void   link_tone(link_t *l, double hz, double seconds);
 /* each sample: the transmitter's (0 while not keyed), then the receiver's line */
 double link_tx_sample(link_t *l);
 void   link_rx_sample(link_t *l, double x);

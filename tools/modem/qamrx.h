@@ -72,6 +72,7 @@ struct qamrx {
 
     qam_state_t state;
     uint64_t    trig;
+    double      find_before, find_after;    /* s around trig the first symbol is looked for (FIND_BEFORE, FIND_AFTER) */
     int         fails;
 
     /* followed */
@@ -93,6 +94,7 @@ struct qamrx {
     double   offset_hz, trained_snr_db, snr_db, level;
     double   timing_halves;             /* where the taps' centre of energy is, relative to theirs */
     int      shifts;                    /* half-symbol moves of the clock */
+    double   acquire_ms;                /* what the last burst's finding and training took, on this processor */
     cplx     last;
 };
 
@@ -100,5 +102,9 @@ int  qamrx_init(qamrx_t *q, const qamrx_cfg_t *cfg, qam_symbol_fn fn, void *ctx)
 void qamrx_free(qamrx_t *q);
 void qamrx_reset(qamrx_t *q);           /* wait for the next burst */
 void qamrx_feed(qamrx_t *q, double x);
+/* a burst due to begin about at line sample at (qamrx_t.n's count), without waiting for its level to rise: looked
+ * for from before_s ahead of it to after_s after (a training check behind the DCS that named it, in the same
+ * transmission: the receiving radio's AGC keeps its noise within some dB of a burst, which a rise may not show) */
+void qamrx_expect(qamrx_t *q, uint64_t at, double before_s, double after_s);
 
 #endif

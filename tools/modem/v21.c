@@ -25,6 +25,11 @@ void v21_tx_init(v21_tx_t *t, double fs) {
     t->current   = true;
 }
 
+void v21_tx_channel(v21_tx_t *t, int channel) {
+    t->space = channel == 1 ? V21_CH1_SPACE : V21_SPACE;
+    t->mark  = channel == 1 ? V21_CH1_MARK : V21_MARK;
+}
+
 void v21_tx_set(v21_tx_t *t, bool on) {
     t->transmitting = on;
 }
@@ -81,10 +86,14 @@ double fsk_feed(fsk_t *f, double x) {
     return cascade_run(&f->post, hz) / f->deviation;
 }
 
-void v21_rx_init(v21_rx_t *r, double fs) {
+void v21_rx_init_channel(v21_rx_t *r, double fs, int channel) {
     memset(r, 0, sizeof(*r));
-    fsk_init(&r->det, V21_SPACE, V21_MARK, V21_BAUD, fs);
+    fsk_init(&r->det, channel == 1 ? V21_CH1_SPACE : V21_SPACE, channel == 1 ? V21_CH1_MARK : V21_MARK, V21_BAUD, fs);
     r->sps = fs / V21_BAUD;
+}
+
+void v21_rx_init(v21_rx_t *r, double fs) {
+    v21_rx_init_channel(r, fs, 2);
 }
 
 /* Receiver::feed: the clock starts half a bit after the first crossing and is nudged by every

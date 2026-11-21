@@ -95,3 +95,72 @@ sits at that edge. V.27 ter 4800 (1000 to 2600 Hz) fits inside it comfortably.
 
 Offsets of up to ±60 Hz and clock drift of ±120 ppm decode with no errors. The receiver reports both. With the
 simulated link set to -60 Hz and -120 ppm, it read -60.2 Hz and -121 ppm.
+
+## On the radios
+
+Each radio runs one end, `x6x00-modem`. It works through the GUI's own TCI server on that radio:
+
+- 24 kHz int16 mono audio;
+- keying with `trx:0,true,tci`;
+- an audio frame sent for every TX_CHRONO.
+
+The Mac drives both ends with `tools/bench/bench.py radios-modem A B`, which:
+
+- puts both radios on the band's frequency in USB-D at 0.1 W, through every bench gate;
+- arms TX with the Sentry's A/B on its page A;
+- starts both ends and holds the interlock, sending each end "may 1" only while the other radio's own GUI state
+  says it is off the air (and the bench's Watch stops everything on two radios on the air, an over too long, a
+  bad SWR or more power than set);
+- serves the live view at http://127.0.0.1:8765/ (`tools/bench/modem_view.html`);
+- puts both radios back afterwards (`~/.config/x6x00-bench/modem_was.json` survives an interrupt).
+
+An end with no Mac connected, or a "may" more than 1.5 s old, does not transmit, and a "may 0" mid-transmission
+unkeys it and stops it. A second controller connecting is turned away.
+
+`tools/modem/build.sh install` puts a test build in `/tmp` on both radios. The image's own comes from buildroot's
+`x6x00-modem` package, and the update bundle carries it.
+
+### What the radios taught it (2026-11-21, X6100 and X6200 through 80 dB)
+
+- **TCI latency.** TCI audio reaches the air about 0.5 s after the key. At the unkey, the last 0.3-0.5 s of audio
+  is still in the X6100's transmitter path, and 1.2-1.4 s in the X6200's. Each end therefore keys 0.8 s of
+  silence before its audio and holds its own tail after it: 0.6 s on the X6100, 1.8 s on the X6200.
+- **V.21 channel.** The X6100's receiver takes steady tones from about 1.5 kHz up out of its audio within 0.3-0.9
+  s, while its S-meter holds. Measured with 3 s tones from the X6200:
+
+  | Tone | Heard at the X6100 |
+  |---|---|
+  | 1000 Hz | 3 s |
+  | 1250 Hz | 3 s |
+  | 1500 Hz | 0.56 s |
+  | 1650 Hz | 0.37-0.51 s |
+  | 1850 Hz | 0.93 s |
+  | 2200 Hz | none |
+
+  The X6200 hears all of them for the whole 3 s from the X6100, so the cause is on the X6100's side. It does this
+  in USB as in USB-D, with the GUI's DNF, auto-notch, NR and NB all off and no PulseAudio processing, so it is in
+  its base or codec. T.30's V.21 channel 2 (1650/1850 Hz) lost its preamble to it, so the radio link runs its
+  frames on V.21 channel 1 (980/1180 Hz): `--v21 1`, the default.
+- **X6200 TCI power.** The base's ALC does not hold the power setting, and TCI audio skips the GUI's drive loop
+  (`tx_level.c`). -20 dBFS gave 1.1 W at a 0.1 W setting, and the Watch stopped it. The X6200 end sends at
+  -32 dBFS.
+- **X6100 TCI level.** The GUI levels TCI audio to -20 dBFS, where the ALC reads 10 at 0.1 W, compressed. The
+  X6100 end sends at -44 dBFS, which the levelling takes to -32.
+- **AGC.** The receiving radio's AGC holds its noise within about 8 dB of a burst. A burst can't be found by its
+  level rising, so a training check is looked for where the DCS before it says it will be, and the line counts
+  as busy from 6 dB over its noise.
+- **Processor time.** On the R16 a 0.45 s search for a training check takes about 0.3 s, and an ordinary burst's
+  find and train about 90 ms.
+
+### Where it stands (2026-11-21 00:50 local)
+
+Over the air, the procedure runs from end to end:
+
+- CAP both ways on V.21 channel 1;
+- DCS and the training check;
+- FTT and the step-down 9600, 7200, 4800, 2400;
+- at 2400, CFR: the check came through with 0 errors in 2880 bits.
+
+The equaliser trains to 4-8 dB at 4800 and above, where the simulation gets 30 dB through filters like the
+radios'. The transmitters' compression is the suspect. The first data block at 2400 was not caught by the
+receiver. No data has gone across yet.

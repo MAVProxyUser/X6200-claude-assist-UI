@@ -9994,6 +9994,26 @@ the radio, hears it, keys it and sends CW with it.
     each restart of the program, or a change in its Radio settings, which
     connects again, asks again.
 
+### A modem link between two radios (x6x00-modem)
+
+The image carries `x6x00-modem`, one end of a modem link between two radios:
+
+- BinModem's fax modems ported to C: V.21, V.27 ter (2400, 4800) and V.29 (7200, 9600);
+- T.30's procedure: the radios say what they can do, try the fastest rate with a training check, step down
+  until a rate passes, then send numbered blocks, with lost frames sent again.
+
+It is a TCI client of its own radio. It keys and hears through the TCI server above, from the radio itself,
+so it is never asked about. It does nothing by itself: a computer drives both ends, and an end transmits only
+while that computer says the other radio is off the air.
+
+The bench harness (`tools/bench/bench.py radios-modem`) does this between two radios on a cable through
+attenuators. It runs at 0.1 W, with the Sentry's TX armed on page A, and serves a live view of both ends on the
+computer. `tools/modem/README.md` has the details, and what was learnt of each radio's audio path:
+
+- the latencies at key and unkey;
+- the X6100 losing steady tones above about 1.5 kHz, so the link's V.21 runs on channel 1;
+- the X6200's power following TCI audio rather than its power setting.
+
 ## Hamlib (NET rigctl)
 
 Programs that do their rig control through Hamlib (WSJT-X, fldigi, JS8Call,

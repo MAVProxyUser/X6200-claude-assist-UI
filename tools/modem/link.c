@@ -20,7 +20,8 @@
 #define TCF_SKIP     0.10       /* of the check's bits, not counted: the receiver settling */
 #define TCF_OK       1e-3
 #define MUTE_AFTER   0.05       /* s after unkeying the receiver is not fed (our own radio coming back) */
-#define QUIET_LEVEL  4.0        /* the line busy above this much of its quiet level ... */
+#define QUIET_LEVEL  2.0        /* the line busy above this much of its quiet level (6 dB: a radio's AGC holds its
+                                 * noise within 8 dB of a burst, and 12 dB took a far end's data for a quiet line) ... */
 #define QUIET_ABS    3e-4       /* ... and above this (-70 dBFS) */
 #define FLOOR_MIN    1e-5
 #define REPLY_MAX    2.5        /* s: an answer not keyed by then is dropped (the sender may be about to try again) */
@@ -40,6 +41,7 @@ void link_defaults(link_cfg_t *c, double fs, link_role_t role) {
     c->preamble_s  = 0.4;
     c->tcf_s       = 1.5;
     c->name        = "radio";
+    c->v21_channel = 2;
 }
 
 const char *link_state_name(link_state_t s) {
@@ -78,7 +80,8 @@ void link_init(link_t *l, const link_cfg_t *cfg) {
     l->cfg  = *cfg;
     l->role = cfg->role;
     v21_tx_init(&l->v21tx, cfg->fs);
-    v21_rx_init(&l->v21rx, cfg->fs);
+    v21_tx_channel(&l->v21tx, cfg->v21_channel);
+    v21_rx_init_channel(&l->v21rx, cfg->fs, cfg->v21_channel);
     pump_init(&l->tx, cfg->fs, NULL, NULL);
     pump_init(&l->rx, cfg->fs, on_fast_bit, l);
     hdlc_rx_reset(&l->h21);
@@ -346,6 +349,9 @@ static void receiver_frame(link_t *l, const uint8_t *f, int n) {
         l->cfg.frame_bytes  = f[3] | f[4] << 8;
         say(l, "RX DCS: %s, blocks of %d frames", rate_name(l->rate), l->block_frames);
         arm_fast(l, true);
+        /* the check follows in the same transmission: its closing flags (two, 53 ms), 75 ms, then the turn-on.
+         * Looked for there, from 0.1 s before to 0.35 s after, rather than by its level rising */
+        qamrx_expect(&l->rx.rx, l->rx.rx.n + (uint64_t)((2 * 8 / V21_BAUD + 0.075) * l->cfg.fs), 0.1, 0.35);
         l->state = L_TCF;
         /* the check's end, and 1.5 s more: then FTT whatever came. Its answer keys by REPLY_MAX after that, which is
          * 2 s before the sender's own next try (its SENDER_WAIT, from its end of the check) */
@@ -489,6 +495,18 @@ static void become(link_t *l, link_role_t role) {
     }
 }
 
+void link_tone(link_t *l, double hz, double seconds) {
+    l->role  = LINK_RECEIVER;
+    l->state = L_DONE;
+    say(l, "TX a tone: %.0f Hz for %.1f s", hz, seconds);
+    plan_begin(l);
+    plan_silence(l, l->cfg.lead_s);
+    plan_add(l, (seg_t){.kind = SEG_TONE, .samples = (int)(seconds * l->cfg.fs), .hz = hz});
+    plan_silence(l, l->cfg.tail_s);
+    plan_go(l);
+    l->plan_reply = false;
+}
+
 void link_start(link_t *l) {
     l->rounds = l->cfg.rounds > 0 ? l->cfg.rounds : l->cfg.both_ways ? 2 : 1;
     l->round  = -1;
@@ -592,12 +610,16 @@ double link_tx_sample(link_t *l) {
     if (!l->keyed) {
         /* the receiver answers within REPLY_MAX of deciding to, or not at all: the sender's next try comes
          * later than that, so the two never start together */
+        /* counted from the line's last sound: an answer decided while the far end is still sending (a check that did
+         * not train, its 1.5 s still to come) waits for it, then has REPLY_MAX */
+        if (!line_quiet(l) && l->plan_reply)
+            l->plan_made = l->now;
         if (l->plan_reply && l->now - l->plan_made > (uint64_t)(REPLY_MAX * l->cfg.fs)) {
             l->planned = false;
             say(l, "answer not sent: the line was not quiet in time");
             return 0.0;
         }
-        if (!line_quiet(l))
+        if (!line_quiet(l) || l->hold)
             return 0.0;
         l->keyed    = true;
         l->keyed_at = l->now;
@@ -614,7 +636,9 @@ double link_tx_sample(link_t *l) {
         l->seg_started = true;
         switch (s->kind) {
         case SEG_SILENCE:
-            l->seg_left = s->samples;
+        case SEG_TONE:
+            l->seg_left   = s->samples;
+            l->tone_phase = 0.0;
             break;
         case SEG_V21:
             bitq_clear(&l->v21tx.pending);
@@ -643,6 +667,12 @@ double link_tx_sample(link_t *l) {
     switch (s->kind) {
     case SEG_SILENCE:
         l->air_s[3] += 1.0 / l->cfg.fs;
+        done = --l->seg_left <= 0;
+        break;
+    case SEG_TONE:
+        x = cos(TAU * l->tone_phase);
+        l->tone_phase += s->hz / l->cfg.fs;
+        l->tone_phase -= floor(l->tone_phase);
         done = --l->seg_left <= 0;
         break;
     case SEG_V21:
@@ -676,7 +706,7 @@ double link_tx_sample(link_t *l) {
         done = !pump_tx_busy(&l->tx);
         break;
     }
-    if (s->kind != SEG_SILENCE && s->kind != SEG_V21) {
+    if (s->kind == SEG_FAST_TCF || s->kind == SEG_FAST_DATA) {
         cplx p = l->tx.rate >= RATE_7200 ? l->tx.v29.sent / v29_rms(l->tx.rate == RATE_9600 ? V29_9600 : V29_7200)
                                          : l->tx.v27.sent;
         if (p != l->tx_last_point) {

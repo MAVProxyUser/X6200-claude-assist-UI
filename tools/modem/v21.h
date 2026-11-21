@@ -10,8 +10,10 @@
 
 #include "dsp.h"
 
-#define V21_SPACE 1850.0
+#define V21_SPACE 1850.0                /* channel 2, which T.30 uses */
 #define V21_MARK  1650.0
+#define V21_CH1_SPACE 1180.0            /* channel 1 (V.21 clause 3, note 2: F_A 1180 Hz a ZERO, F_Z 980 Hz) */
+#define V21_CH1_MARK  980.0
 #define V21_BAUD  300.0
 
 /* bits queued for the transmitter: a ring, a bit a byte */
@@ -48,6 +50,7 @@ typedef struct {
 } v21_tx_t;
 
 void   v21_tx_init(v21_tx_t *t, double fs);
+void   v21_tx_channel(v21_tx_t *t, int channel);   /* 1 or 2 (the default) */
 void   v21_tx_set(v21_tx_t *t, bool on);
 double v21_tx_sample(v21_tx_t *t);
 
@@ -69,6 +72,7 @@ typedef struct {
 } v21_rx_t;
 
 void v21_rx_init(v21_rx_t *r, double fs);
+void v21_rx_init_channel(v21_rx_t *r, double fs, int channel);
 /* one sample in; 0 or 1 when a bit is due, -1 otherwise */
 int  v21_rx_feed(v21_rx_t *r, double x);
 static inline bool v21_rx_carrier(const v21_rx_t *r) {

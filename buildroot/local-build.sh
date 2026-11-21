@@ -281,12 +281,14 @@ rm -f $BOARD/rootfs-overlay/etc/init.d/S02update $BR/build/target/etc/init.d/S02
 # The Sentry's VHF/UHF screens read an SDR through x6x00-rtlspec (tools/rtlspec, built from this repository): an
 # RTL-SDR, a HackRF (libhackrf) or a bladeRF (libbladerf, opened at run time; no FPGA image in the image)
 # and dsd-fme for it (P25, D-STAR, YSF on B's narrow FM; its voice through a USB-3000 only), with our patch
-for p in rtlsdr-blog dump1090-fa libhackrf libbladerf x6x00-rtlspec x6x00-dsd-fme; do
+# x6x00-modem (tools/modem): one end of a modem link between the two radios, over their TCI (bench.py radios-modem)
+for p in rtlsdr-blog dump1090-fa libhackrf libbladerf x6x00-rtlspec x6x00-dsd-fme x6x00-modem; do
     grep -q "package/$p/Config.in" $EXT/Config.in || echo "source \"\$BR2_EXTERNAL_${M}_PATH/package/$p/Config.in\"" >> $EXT/Config.in
 done
-sed -i "s|@OPENX6X00@|$GUI|" $EXT/package/x6x00-rtlspec/x6x00-rtlspec.mk $EXT/package/x6x00-dsd-fme/x6x00-dsd-fme.mk
+sed -i "s|@OPENX6X00@|$GUI|" $EXT/package/x6x00-rtlspec/x6x00-rtlspec.mk $EXT/package/x6x00-dsd-fme/x6x00-dsd-fme.mk \
+    $EXT/package/x6x00-modem/x6x00-modem.mk
 cp $GUI/tools/dsdfme/patches/goldcorp.patch $EXT/package/x6x00-dsd-fme/0001-goldcorp.patch
-for o in BR2_PACKAGE_DUMP1090_FA=y BR2_PACKAGE_X6X00_RTLSPEC=y BR2_PACKAGE_X6X00_DSD_FME=y; do
+for o in BR2_PACKAGE_DUMP1090_FA=y BR2_PACKAGE_X6X00_RTLSPEC=y BR2_PACKAGE_X6X00_DSD_FME=y BR2_PACKAGE_X6X00_MODEM=y; do
     grep -q "^$o" $DEFCONFIG || echo "$o" >> $DEFCONFIG
 done
 # The GPU (the R16's Mali-400 MP2; the kernel's lima driver is in already: /dev/dri/renderD128): Mesa's lima with EGL

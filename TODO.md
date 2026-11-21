@@ -25,6 +25,19 @@ Open:
   neither kernel has TUN or PPP, so userspace, as BinModem's own TCP+proxy). Plan: channel sounding, one-way
   V.27ter/V.29/V.17 per band, a burst+ACK link with live stats; full duplex only with a second receiver per radio
   (the RTLs) and both transmitters keyed at once, which needs the owner's word. Not started.
+- BinModem on the radios (tools/modem, 2026-11-21): ported to C, checked against BinModem (every rate both ways,
+  samples to 2e-6), the link simulated, x6x00-modem on both radios with bench.py radios-modem and the live view.
+  Over the cable: the procedure works end to end (CAP, DCS, TCF, FTT, the step-down, CFR at 2400); no data across
+  yet: the equaliser trains to only 4-8 dB at 4800 and up (transmitter compression suspected, ALC 10 on the X6100),
+  and the first block at 2400 was missed. Then: data both ways, the per-band runs, max baud; the IP backlink later.
+- X6200: TCI transmit audio sets the power, not the power setting: -20 dBFS gave 1.1 W at a 0.1 W setting (the
+  bench's Watch stopped it). Its base's ALC does not hold the setting, and TCI audio skips the GUI's drive loop
+  (tx_level.c), which the apps use. WSJT-X over TCI is affected too. To do: TCI audio through a power-hold loop on
+  the X6200 (as tx_level's, from the power readback), then measured on the bench.
+- X6100: its receiver takes steady tones from about 1.5 kHz up out of its audio within 0.3-0.9 s while the
+  S-meter holds (1000/1250 Hz pass; 1500 0.56 s, 1650 0.4-0.5 s, 1850 0.9 s, 2200 none; the X6200 passes all of
+  them). DNF, auto-notch, NR and NB off, no PulseAudio processing, USB as USB-D: so its base or codec. Perhaps
+  the same cause as the voiceprint item above. tools/modem/README.md "What the radios taught it".
 - 12 m and 6 m calibration (6 m offsets left 0); 0.1 W carrier is about -25 dBc (the offsets were found at 5 W).
 - The draft PR to RF.Guru (drafts/x6100-baseband-errata/PR.md, NOT submitted: the owner's word needed) predates the
   2nd-harmonic finding, the 15/12 m shift and the adapter caveat: refresh before any submit.

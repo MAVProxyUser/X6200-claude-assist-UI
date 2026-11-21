@@ -62,7 +62,8 @@ LIB_FILES = ["/usr/lib/libft8.so"]
 # and dsd-fme, which the daemon runs on B's narrow FM (buildroot's x6x00-dsd-fme; libsndfile, PulseAudio and ncurses,
 # which every image has): without it the daemon decodes DMR alone
 SDR_FILES = ["/usr/bin/x6x00-rtlspec", "/usr/lib/libbladeRF.so.2", "/usr/bin/dsd-fme",
-             "/usr/bin/x6x00-df"]      # the KrakenSDR's direction finder (page I), from the same package
+             "/usr/bin/x6x00-df",       # the KrakenSDR's direction finder (page I), from the same package
+             "/usr/bin/x6x00-modem"]    # one end of the modem link between two radios (tools/modem; libc and libm)
 SKIP_PREFIXES = ("/usr/include/",)       # the GUI package installs headers too
 # kexec-tools' program (the X6100's image): its restart without the processor's reset (x6x00-reboot); carried when the
 # target has it, so a radio gets it with the kernel that can use it

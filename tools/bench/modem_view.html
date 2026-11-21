@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modem link</title>
+<style>
+:root {
+  --bg: #f7f6f3; --surface: #ffffff; --ink: #18181b; --ink2: #55524d; --muted: #8a867f; --rule: #e4e2dd;
+  --v21: #d08a00; --train: #6a4fd1; --data: #1f6fd1; --quiet: #b9b5ad; --rx: #1b9e6e; --air: #d23a2c;
+  --pt: 31, 111, 209;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141416; --surface: #1d1d20; --ink: #ececea; --ink2: #b4b1aa; --muted: #827e77; --rule: #2e2e33;
+    --v21: #e8a72a; --train: #9580ee; --data: #5b9cf0; --quiet: #55534f; --rx: #3cc493; --air: #ef5a4c;
+    --pt: 91, 156, 240;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; }
+header { padding: 16px 20px 8px; }
+h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+#note { color: var(--ink2); min-height: 1.4em; }
+.cards { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 20px; }
+.card { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 12px; min-width: 150px; }
+.card .k { color: var(--muted); font-size: 12px; }
+.card .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.card .s { color: var(--ink2); font-size: 12px; }
+section { padding: 4px 20px; }
+.box { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.box h2 { font-size: 13px; font-weight: 600; margin: 0 0 6px; color: var(--ink2); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--ink2); font-size: 12px; margin-top: 4px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 20px 20px; }
+@media (max-width: 900px) { .cols { grid-template-columns: 1fr; padding: 0 16px 16px; } section, .cards { padding-left: 16px; padding-right: 16px; } }
+.radio .top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.radio .top b { font-size: 16px; }
+.pill { font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--rule); color: var(--ink2); }
+.pill.air { background: var(--air); color: #fff; border-color: var(--air); }
+.pill.rxon { border-color: var(--rx); color: var(--rx); }
+.state { color: var(--ink2); }
+.plots { display: grid; grid-template-columns: 240px 1fr; gap: 10px; margin-top: 8px; }
+@media (max-width: 520px) { .plots { grid-template-columns: 1fr; } }
+canvas { width: 100%; display: block; }
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 10px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { .metrics { grid-template-columns: repeat(2, 1fr); } }
+.metrics div span { display: block; color: var(--muted); font-size: 11px; }
+.log { font: 12px/1.45 ui-monospace, Menlo, monospace; color: var(--ink2); height: 190px; overflow-y: auto; margin-top: 8px;
+       border-top: 1px solid var(--rule); padding-top: 6px; white-space: pre-wrap; }
+.log .t { color: var(--muted); }
+.air-bar { display: flex; height: 16px; border-radius: 3px; overflow: hidden; margin: 4px 0 2px; background: var(--rule); }
+.air-bar div { height: 100%; }
+.sub { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>@TITLE@</h1>
+  <div id="note">waiting for the radios&hellip;</div>
+</header>
+<div class="cards" id="cards"></div>
+<section>
+  <div class="box">
+    <h2>Who is on the air, last 2 minutes</h2>
+    <canvas id="timeline" height="92"></canvas>
+    <div class="legend">
+      <span><i style="background:var(--v21)"></i>V.21 control (300 bit/s)</span>
+      <span><i style="background:var(--train)"></i>training and training check</span>
+      <span><i style="background:var(--data)"></i>data</span>
+      <span><i style="background:var(--quiet)"></i>keyed, silent (turnaround lead and tail)</span>
+      <span><i style="background:var(--rx)"></i>receiver locked on a burst</span>
+    </div>
+  </div>
+  <div class="box" id="simplex"></div>
+</section>
+<div class="cols" id="cols"></div>
+<script>
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const R = {};               // each radio's state
+const order = [];
+const SEGC = ["--quiet", "--v21", "--train", "--data"];
+const WINDOW = 120;
+
+function ideal(rate) {
+  if (rate === 0) return [[1,0],[0,1],[-1,0],[0,-1]];
+  if (rate === 1) return Array.from({length: 8}, (_, i) => [Math.cos(i * Math.PI / 4), Math.sin(i * Math.PI / 4)]);
+  if (rate === 2 || rate === 3) {
+    const pts = [], rms = rate === 3 ? Math.sqrt(13.5) : Math.sqrt(5.5);
+    for (const outer of rate === 3 ? [false, true] : [false])
+      for (let e = 0; e < 8; e++) {
+        let x, y;
+        if (e % 2 === 0) { const r = outer ? 5 : 3; [x, y] = [[r,0],[0,r],[-r,0],[0,-r]][e / 2]; }
+        else { const k = outer ? 3 : 1; [x, y] = [[k,k],[-k,k],[-k,-k],[k,-k]][(e - 1) / 2]; }
+        pts.push([x / rms, y / rms]);
+      }
+    return pts;
+  }
+  return [];
+}
+
+function panel(name) {
+  const d = document.createElement("div");
+  d.className = "box radio";
+  d.innerHTML = `<div class="top"><b>${name}</b><span class="pill" data-k="role"></span>
+    <span class="pill" data-k="air">off the air</span><span class="state" data-k="state"></span></div>
+    <div class="plots"><div><canvas data-k="con" width="480" height="480"></canvas>
+      <div class="sub" data-k="conlbl">constellation</div></div>
+      <div><canvas data-k="spec" width="600" height="150"></canvas><div class="sub">audio spectrum, 0 to 3.9 kHz</div>
+      <canvas data-k="taps" width="600" height="90" style="margin-top:8px"></canvas>
+      <div class="sub">equaliser taps (31, half a symbol apart)</div></div></div>
+    <div class="metrics" data-k="m"></div><div class="log" data-k="log"></div>`;
+  document.getElementById("cols").appendChild(d);
+  const q = k => d.querySelector(`[data-k="${k}"]`);
+  return {el: d, q, pts: [], log: [], lane: [], last: null};
+}
+
+function sizeCanvas(c) {
+  const w = c.clientWidth, ratio = c.height / c.width;
+  if (w && Math.abs(c.width - w * devicePixelRatio) > 2) { c.width = w * devicePixelRatio; c.height = w * ratio * devicePixelRatio; }
+  return c.getContext("2d");
+}
+
+function drawCon(r) {
+  const c = r.q("con"), g = sizeCanvas(c), W = c.width, H = c.height, s = W / 3.2;
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = css("--rule"); g.lineWidth = 1;
+  g.beginPath(); g.moveTo(W / 2, 0); g.lineTo(W / 2, H); g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
+  const rate = r.last ? r.last.pts_rate : -1;
+  const n = r.pts.length, rgb = css("--pt");
+  for (let i = 0; i < n; i++) {
+    const [x, y] = r.pts[i], a = 0.15 + 0.85 * (i / n);
+    g.fillStyle = `rgba(${rgb},${a.toFixed(2)})`;
+    g.fillRect(W / 2 + x * s - 1.5 * devicePixelRatio, H / 2 - y * s - 1.5 * devicePixelRatio, 3 * devicePixelRatio, 3 * devicePixelRatio);
+  }
+  g.strokeStyle = css("--ink2"); g.lineWidth = 1.2 * devicePixelRatio;
+  for (const [x, y] of ideal(rate)) { g.beginPath(); g.arc(W / 2 + x * s, H / 2 - y * s, 5 * devicePixelRatio, 0, 7); g.stroke(); }
+}
+
+function drawSpec(r, spec) {
+  const c = r.q("spec"), g = sizeCanvas(c), W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  if (!spec || !spec.length) return;
+  const top = Math.max(...spec), lo = top - 60;
+  g.strokeStyle = css("--rule"); g.lineWidth = 1;
+  for (let k = 1000; k < 4000; k += 1000) { const x = W * k / 3937.5; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+  g.fillStyle = css("--muted"); g.font = `${10 * devicePixelRatio}px system-ui`;
+  for (let k = 1; k < 4; k++) g.fillText(`${k} kHz`, W * k * 1000 / 3937.5 + 3, H - 4);
+  g.strokeStyle = css("--data"); g.lineWidth = 2 * devicePixelRatio; g.beginPath();
+  spec.forEach((v, i) => { const x = W * (i + 1) / 63, y = H - H * Math.max(0, v - lo) / 60; i ? g.lineTo(x, y) : g.moveTo(x, y); });
+  g.stroke();
+}
+
+function drawTaps(r, taps) {
+  const c = r.q("taps"), g = sizeCanvas(c), W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  if (!taps) return;
+  const top = Math.max(1e-6, ...taps), bw = W / taps.length;
+  taps.forEach((v, i) => {
+    g.fillStyle = i === 15 ? css("--ink2") : css("--data");
+    const h = (H - 4) * v / top;
+    g.fillRect(i * bw + 1, H - h, bw - 2, h);
+  });
+}
+
+function fmt(v, d = 1) { return v === undefined || v === null || !isFinite(v) ? "&ndash;" : Number(v).toFixed(d); }
+
+function update(doc) {
+  if (doc.note) { document.getElementById("note").textContent = doc.note; return; }
+  const name = doc.name;
+  if (!R[name]) { R[name] = panel(name); order.push(name); }
+  const r = R[name];
+  if (doc.replay) { for (const e of doc.replay) r.log.push(e); renderLog(r); return; }
+  r.last = doc;
+  for (const p of doc.pts || []) r.pts.push(p);
+  if (r.pts.length > 700) r.pts.splice(0, r.pts.length - 700);
+  const now = Date.now() / 1000;
+  r.lane.push({t: now, keyed: doc.radio_tx || doc.keyed, seg: doc.seg, rx: doc.rx && doc.rx.armed && doc.rx.state === 2});
+  while (r.lane.length && r.lane[0].t < now - WINDOW - 2) r.lane.shift();
+  for (const e of doc.log || []) r.log.push(e);
+  if ((doc.log || []).length) renderLog(r);
+  r.q("role").textContent = doc.running ? doc.role : "stopped";
+  const air = r.q("air");
+  air.textContent = doc.radio_tx ? "ON THE AIR" : doc.rx && doc.rx.armed && doc.rx.state === 2 ? "receiving" : "off the air";
+  air.className = "pill" + (doc.radio_tx ? " air" : doc.rx && doc.rx.state === 2 ? " rxon" : "");
+  r.q("state").textContent = `${doc.state}${doc.rate_name && doc.state !== "capabilities" ? " · " + doc.rate_name : ""}${doc.far ? " · far end " + doc.far : ""}`;
+  r.q("conlbl").textContent = doc.pts_rate < 0 ? "constellation (none: V.21 is FSK)" :
+    `constellation, ${["V.27ter 2400", "V.27ter 4800", "V.29 7200", "V.29 9600"][doc.pts_rate]}` + (doc.keyed ? ", as sent" : ", as received");
+  const x = doc.rx || {}, s = doc.stats || {};
+  r.q("m").innerHTML = [
+    ["receiver SNR", fmt(x.snr) + " dB"], ["trained to", fmt(x.trained) + " dB"], ["far carrier", fmt(x.offset, 2) + " Hz"],
+    ["far clock", fmt(x.ppm, 0) + " ppm"], ["timing", fmt(x.timing, 2) + " half"], ["audio level", fmt(x.level_db, 0) + " dBFS"],
+    ["V.21 frames", `${s.v21_good ?? 0} good`], ["data frames", `${s.fast_good ?? 0} good`]
+  ].map(([k, v]) => `<div><span>${k}</span>${v}</div>`).join("");
+  drawCon(r); drawSpec(r, doc.spec); drawTaps(r, doc.taps);
+}
+
+function renderLog(r) {
+  const el = r.q("log");
+  if (r.log.length > 300) r.log.splice(0, r.log.length - 300);
+  el.innerHTML = r.log.map(e => `<span class="t">${e.t.toFixed(1).padStart(6)}</span> ${e.text.replace(/</g, "&lt;")}`).join("\n");
+  el.scrollTop = el.scrollHeight;
+}
+
+function drawTimeline() {
+  const c = document.getElementById("timeline"), g = sizeCanvas(c), W = c.width, H = c.height, now = Date.now() / 1000;
+  g.clearRect(0, 0, W, H);
+  const lane = H / Math.max(2, order.length), lab = 70 * devicePixelRatio;
+  g.font = `${12 * devicePixelRatio}px system-ui`;
+  order.forEach((name, i) => {
+    const r = R[name], y0 = i * lane + 4 * devicePixelRatio, h = lane - 10 * devicePixelRatio;
+    g.fillStyle = css("--ink2"); g.fillText(name, 4, y0 + h / 2 + 4 * devicePixelRatio);
+    g.fillStyle = css("--rule"); g.fillRect(lab, y0 + h / 2, W - lab, 1);
+    for (let k = 1; k < r.lane.length; k++) {
+      const a = r.lane[k - 1], b = r.lane[k];
+      const x0 = lab + (W - lab) * (1 - (now - a.t) / WINDOW), x1 = lab + (W - lab) * (1 - (now - b.t) / WINDOW);
+      if (x1 < lab) continue;
+      if (a.keyed) { g.fillStyle = css(SEGC[a.seg >= 0 ? a.seg : 0]); g.fillRect(Math.max(lab, x0), y0, x1 - Math.max(lab, x0) + 0.5, h); }
+      else if (a.rx) { g.fillStyle = css("--rx"); g.fillRect(Math.max(lab, x0), y0 + h - 4 * devicePixelRatio, x1 - Math.max(lab, x0) + 0.5, 4 * devicePixelRatio); }
+    }
+  });
+}
+
+function cards() {
+  const out = [];
+  for (const name of order) {
+    const d = R[name].last; if (!d || !d.running || d.role !== "sender") continue;
+    const s = d.stats, el = (s.t1 > 0 ? s.t1 : d.t) - s.t0;
+    out.push({k: `${name} → ${d.far || "?"}`, v: `${s.bytes} / ${s.total} B`, s: `${el.toFixed(0)} s, round ${s.round + 1}`});
+    out.push({k: "throughput", v: el > 0 ? `${(8 * s.bytes / el).toFixed(0)} bit/s` : "–", s: `at ${d.rate_name}`});
+    out.push({k: "retrains · PPRs · frames sent again", v: `${s.ftt} · ${s.ppr} · ${s.resent}`, s: "FTT steps down a rate"});
+    const a = s.air, tot = Math.max(el, 0.01);
+    document.getElementById("simplex").innerHTML = `<h2>What half duplex costs (${name}'s transfer so far)</h2>
+      <div class="air-bar">${[[a[2], "--data"], [a[1], "--train"], [a[0], "--v21"], [a[3], "--quiet"],
+        [Math.max(0, tot - a[0] - a[1] - a[2] - a[3]), "--rule"]].map(([v, c]) =>
+        `<div style="width:${(100 * v / tot).toFixed(1)}%;background:var(${c})"></div>`).join("")}</div>
+      <div class="sub">${(100 * a[2] / tot).toFixed(0)}% of the time carries data at ${d.rate_name}; training ${(100 * a[1] / tot).toFixed(0)}%,
+      V.21 control ${(100 * a[0] / tot).toFixed(0)}%, keyed silence ${(100 * a[3] / tot).toFixed(0)}%, and the rest (grey) is the far end answering
+      and the turnarounds. One radio talks at a time, so every block waits for its answer before the next.</div>`;
+  }
+  document.getElementById("cards").innerHTML = out.map(c => `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div><div class="s">${c.s}</div></div>`).join("");
+}
+
+const es = new EventSource("/events");
+es.onmessage = e => { try { update(JSON.parse(e.data)); } catch (err) { console.error(err); } };
+setInterval(() => { drawTimeline(); cards(); }, 200);
+</script>
+</body>
+</html>

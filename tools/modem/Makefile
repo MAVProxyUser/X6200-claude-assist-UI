@@ -9,7 +9,7 @@ BUILD   ?= build
 CORE    = dsp.c v21.c v27ter.c v29.c qamrx.c pump.c hdlc.c link.c
 BINMODEM ?= ../../build/binmodem
 
-all: $(BUILD)/test_pump $(BUILD)/test_link $(BUILD)/interop
+all: $(BUILD)/test_pump $(BUILD)/test_link $(BUILD)/interop $(BUILD)/x6x00-modem $(BUILD)/rxfile
 
 $(BUILD):
 	mkdir -p $@
@@ -19,6 +19,13 @@ $(BUILD)/test_pump: test_pump.c channel.c $(CORE) $(wildcard *.h) | $(BUILD)
 
 $(BUILD)/test_link: test_link.c channel.c $(CORE) $(wildcard *.h) | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ test_link.c channel.c $(CORE) -lm
+
+$(BUILD)/x6x00-modem: x6x00-modem.c $(CORE) $(wildcard *.h) | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ x6x00-modem.c $(CORE) -lm
+
+# what V.21 makes of a radio end's recording (x6x00-modem --record)
+$(BUILD)/rxfile: rxfile.c v21.c dsp.c hdlc.c $(wildcard *.h) | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ rxfile.c v21.c dsp.c hdlc.c -lm
 
 $(BUILD)/interop: interop.c $(CORE) $(wildcard *.h) | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ interop.c $(CORE) -lm

@@ -7,13 +7,16 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define ABS_ON        3e-4      /* the least level a burst is looked for at (-70 dBFS) */
-#define RISE          2.5       /* over the quiet line's level: 8 dB (a 10 ms mean of noise varies a few dB) */
+#define RISE          2.0       /* over the quiet line's level: 6 dB (a 10 ms mean of noise varies a dB or two; a
+                                 * radio's AGC holds its noise within 8 dB of a burst) */
 #define FIND_BEFORE   0.030     /* s before the rise the first symbol may be centred */
 #define FIND_AFTER    0.012     /* and after */
+#define COARSE        8         /* samples between the first look's tries */
 #define PIECE         0.005     /* s, the pieces the turn-on is matched in */
 #define FOUND         0.45      /* the match, against a perfect one, a burst is taken at */
 #define QUIET_BELOW   0.25      /* of the burst's loudest: its carrier gone (v29.rs QUIET_BELOW) */
@@ -73,7 +76,17 @@ void qamrx_free(qamrx_t *q) {
     q->ring = NULL;
 }
 
+void qamrx_expect(qamrx_t *q, uint64_t at, double before_s, double after_s) {
+    q->trig        = at;
+    q->find_before = before_s;
+    q->find_after  = after_s;
+    q->loudest     = q->lev.y;
+    q->state       = QAM_COLLECT;
+}
+
 void qamrx_reset(qamrx_t *q) {
+    q->find_before = FIND_BEFORE;
+    q->find_after  = FIND_AFTER;
     /* the line's level as it last was is the quiet line's: the tail of a burst heard before is no new one */
     q->floor_    = q->lev.y;
     q->state     = QAM_IDLE;
@@ -146,29 +159,49 @@ static double match_at(const qamrx_t *q, const cplx *e, int m, int64_t tau, int 
     return sum;
 }
 
+static double mono_s(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+
+static bool acquire_inner(qamrx_t *q);
+
 static bool acquire(qamrx_t *q) {
+    double t0 = mono_s();
+    bool   ok = acquire_inner(q);
+    q->acquire_ms = (mono_s() - t0) * 1000.0;
+    if (getenv("QAM_DEBUG"))
+        fprintf(stderr, "acquire: %s in %.0f ms\n", ok ? "trained" : "refused", q->acquire_ms);
+    return ok;
+}
+
+static bool acquire_inner(qamrx_t *q) {
     int    m, piece = (int)lround(PIECE * q->cfg.fs);
     cplx  *e = make_template(q, &m);
     if (!e)
         return false;
     int     npieces = m / piece;
     cplx   *pieces  = calloc((size_t)npieces + 1, sizeof(cplx));
-    int64_t lo      = (int64_t)q->trig - (int64_t)(FIND_BEFORE * q->cfg.fs) - (int64_t)(2 * q->sps);
-    int64_t hi      = (int64_t)q->trig + (int64_t)(FIND_AFTER * q->cfg.fs) - (int64_t)(2 * q->sps);
+    int64_t lo      = (int64_t)q->trig - (int64_t)(q->find_before * q->cfg.fs) - (int64_t)(2 * q->sps);
+    int64_t hi      = (int64_t)q->trig + (int64_t)(q->find_after * q->cfg.fs) - (int64_t)(2 * q->sps);
     int64_t oldest  = (int64_t)q->n - QAM_RING + 4;
     double  best = -1.0, norm, bn = 1.0, cm1 = 0, cp1 = 0;
     int64_t bt   = lo;
 
     if (lo < oldest)
         lo = oldest;
-    for (int64_t t = lo; t <= hi; t += 2) {
+    /* coarse every COARSE samples (a third of a millisecond at 24 kHz, finer than the match's peak is wide: a burst
+     * of 1.5 kHz bandwidth), then to the sample around the best. The radio's processor takes the whole of a 0.7 s
+     * window this way in a fifth of a second; every second sample took it seconds, and the end's loop with it */
+    for (int64_t t = lo; t <= hi; t += COARSE) {
         double c = match_at(q, e, m, t, piece, NULL, &norm);
         if (c > best) {
             best = c;
             bt   = t;
         }
     }
-    for (int64_t t = bt - 2; t <= bt + 2; t++) {
+    for (int64_t t = bt - COARSE; t <= bt + COARSE; t++) {
         double c = match_at(q, e, m, t, piece, NULL, &norm);
         if (c >= best) {
             best = c;
@@ -431,6 +464,8 @@ void qamrx_feed(qamrx_t *q, double x) {
             break;
         }
         if (lev > RISE * q->floor_ && lev > ABS_ON) {
+            q->find_before = FIND_BEFORE;
+            q->find_after  = FIND_AFTER;
             q->trig    = q->n;
             q->loudest = lev;
             q->state   = QAM_COLLECT;
@@ -441,11 +476,11 @@ void qamrx_feed(qamrx_t *q, double x) {
     case QAM_COLLECT: {
         if (lev > q->loudest)
             q->loudest = lev;
-        double need = (FIND_AFTER + 0.002) * q->cfg.fs + (2 * q->cfg.solve_to + QAM_REACH + 8) * q->hsp + 8;
-        double tmpl = (FIND_AFTER + 0.002) * q->cfg.fs + (q->cfg.find_syms + 4) * q->sps;
+        double need = (q->find_after + 0.002) * q->cfg.fs + (2 * q->cfg.solve_to + QAM_REACH + 8) * q->hsp + 8;
+        double tmpl = (q->find_after + 0.002) * q->cfg.fs + (q->cfg.find_syms + 4) * q->sps;
         if (tmpl > need)
             need = tmpl;
-        if ((double)(q->n - q->trig) >= need) {
+        if ((int64_t)q->n - (int64_t)q->trig >= (int64_t)need) {
             if (acquire(q)) {
                 q->state     = QAM_TRACK;
                 q->quiet_for = 0;
