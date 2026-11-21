@@ -69,9 +69,12 @@ Open:
   PROVEN 2026-11-21 (HackRF beside the X6200 on a 2.4 GHz antenna, receive only, 30 s medians, lna 24 vga 24): with the
   X6200 on, steady lines at 2457.60 MHz (+7.3 dB over the band at 50 kHz bins, +11.9 at 10 kHz) and 2470.61 MHz
   (+10.6), both inside channel 11, smaller ones near 2444.6 and 2453; switched off, none of them, the rest of the band
-  the same to 0.2 dB. 2457.6 MHz = 10 x 245.76 = 40 x 61.44 = 200 x 12.288 MHz, the X6200's own clocks. Next: a notch
-  for it in the WiFi chip's baseband (Realtek's NBI / CSI mask, which rtw88 does not do for the 8723D), tried in
-  debugfs first; shielding or a USB WiFi adapter on a lead away from the radio. Open: why the stand-in
+  the same to 0.2 dB. 2457.6 MHz = 10 x 245.76 = 40 x 61.44 = 200 x 12.288 MHz, the X6200's own clocks.
+  FIXED the same day: the 8723D's notch (NBI index 6, CSI mask bit 114 for 2457.6 and 27-28 for 2470.6, the register
+  mapping worked back from the driver's own channel-13/14 cases), set by hand in debugfs then by rtw88 0004's
+  host_spur_khz (rootfs/etc/modprobe.d/x6200-wifi-spur.conf). WSJT-X's TCI stream on channel 11, 3 min each: by
+  hand off 33 % / on 99.9 % / off dropped at 74 s / on 100 %; the built option on 99.4 % / off dropped at 74 s / on
+  99.7 %. Still: its join scan sometimes takes the -71 dBm channel-6 AP over the -50 channel-11 one. Open: why the stand-in
   server on the Mac did not decode either. The run (wsjtx_tx.py, enabletx.dylib, shmshim.dylib, the 127.0.0.1 relay,
   macOS's 4 MB kern.sysv.shmmax worked round) is in the scratchpad, not in the repo.
 - The X6100's TCI receive audio (or tones.py's recorder) repeated 1.8 s of it exactly, 2.000 s later (correlation
