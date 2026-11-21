@@ -35,6 +35,7 @@
 #include "msg.h"
 #include "params/params.h"
 #include "radio.h"
+#include "tx_hold.h"
 #include "tx_level.h"
 #include "tx_meters.h"
 #include "tx_player.h"
@@ -108,6 +109,9 @@ typedef struct {
     float       quiet_s;    /* each key this long in silence, then 2.6 s of audio (XARA after the other's QRT), 0 FT8 */
     float       alc_db;     /* an X6100: its ALC follows the drive, this much a dB over the knee; 0 the X6200's */
     float       lag_s;      /* the readings show the base this long before (the audio queued, the base's own lag) */
+    float       free_w;     /* TCI audio: the base ignores its setting, the drive alone makes the power, this much at
+                             * the default's drive, as the square of the audio (-20 dBFS gave 1.1 W at a 0.1 W setting),
+                             * reach_w the most; 0 the knee and the setting above */
 } scenario_t;
 
 static const scenario_t *sc;
@@ -129,6 +133,7 @@ static struct {
     int   n_last;
     bool  clipped;
     float top_drive;        /* the most the base was driven with, dB from the default's */
+    float top_w;            /* the most it put out, before the reading's noise and its cut to tenths */
 } tx;
 
 static uint8_t  reading_id;
@@ -238,8 +243,10 @@ static void base_reading(void) {
     float drive = drive_hist[(drive_ticks - 1 - (unsigned)lrintf(sc->lag_s / 0.05f)) % DRIVE_HIST];
     float p     = drive >= sc->knee_db ? set : set * powf(10.0f, (drive - sc->knee_db) / 10.0f);
 
+    if (sc->free_w > 0.0f) p = sc->free_w * powf(10.0f, drive / 10.0f);
     if (sc->reach_w > 0.0f && p > sc->reach_w) p = sc->reach_w;
     if (sc->ramp_w_s > 0.0f) p = fminf(p, floorf(s * sc->ramp_w_s * 10.0f) / 10.0f);
+    tx.top_w = fmaxf(tx.top_w, p);
     p *= sc->over > 0.0f ? sc->over : 1.0f;
     p += sc->noise_w * (2.0f * rnd01() - 1.0f);
     reading_pwr = p > 0.0f ? floorf(p * 10.0f + 1e-4f) / 10.0f : 0.0f;
@@ -420,6 +427,74 @@ static int level_lines(const char *log, int silent_want, int *bad) {
              || to - from > windows * TX_LEVEL_UP_FAST_DB + 0.01f;
     }
     return n;
+}
+
+/* ---- TCI audio on the X6200 (tx_hold.c): a client's FT8 played as it comes ---------------------------------- */
+
+static float tci_level;     /* params.tci_tx_level: the peak for 1 W, dBFS */
+
+/* One FT8 transmission from a TCI client whose audio peaks at client_dbfs, in frames of `frame` samples at the play
+ * rate, as tci_server.c plays them after its resampling: through tx_hold, the base keyed by the modem bit */
+static void send_tci(float client_dbfs, size_t frame) {
+    static int16_t buf[4096];
+    float          k = powf(10.0f, client_dbfs / 20.0f) / 0.8f;     /* ft8[] peaks at 0.8 of full scale */
+    tx_hold_t      h;
+
+    tx = (typeof(tx)){.at2 = -1.0f, .min = 99.0f, .top_drive = -99.0f};
+    base.drive_db = -99.0f;
+    for (int i = 0; i < DRIVE_HIST; i++) drive_hist[i] = -99.0f;
+    tx_hold_begin(&h, setting, tci_level);
+    radio_set_modem(true);
+    for (uint32_t off = 0; off < FT8_SAMPLES; off += frame) {
+        size_t n = FT8_SAMPLES - off < frame ? FT8_SAMPLES - off : frame;
+
+        for (size_t i = 0; i < n; i++) buf[i] = (int16_t)lrintf(fmaxf(-32767.0f, fminf(32767.0f, ft8[off + i] * k)));
+        tx_hold_audio(&h, buf, n);
+        audio_play(buf, n);
+    }
+    radio_set_modem(false);
+    tci_level = tx_hold_end(&h, tci_level);
+    atomic_fetch_add(&virt_ns, 2360000000ULL);      /* the rest of the slot */
+}
+
+typedef struct {
+    float top_w;            /* the most put out, all transmissions */
+    float top_w_after1;     /* the same from the second on */
+    int   over_txs;         /* transmissions that went over the setting by more than tx_level lets by (1.25 + 0.1 W) */
+    int   short_txs;        /* transmissions whose last 3 s read under 90 % of the setting */
+    float last_end;         /* the last transmission's last 3 s, read */
+    float level_end;        /* the level for 1 W after the last */
+    float drive_top;        /* the most the base was driven with, dB from the default's */
+} tci_result_t;
+
+static tci_result_t run_tci(const scenario_t *s, float client_dbfs, size_t frame, bool verbose) {
+    tci_result_t r = {.drive_top = -99.0f};
+
+    sc        = s;
+    setting   = s->pwr;
+    base      = (typeof(base)){0};
+    rnd       = 1;
+    tci_level = s->start_db;
+    if (verbose) printf("  %s, the client at %.0f dBFS in frames of %zu\n", s->name, client_dbfs, frame);
+    for (int i = 0; i < s->txs; i++) {
+        float before = tci_level;
+
+        send_tci(client_dbfs, frame);
+
+        float last = tx.n_last ? tx.sum_last / tx.n_last : 0.0f;
+
+        r.top_w = fmaxf(r.top_w, tx.top_w);
+        if (i > 0) r.top_w_after1 = fmaxf(r.top_w_after1, tx.top_w);
+        r.over_txs  += tx.top_w > s->pwr * 1.25f + TX_LEVEL_PWR_STEP_W;
+        r.short_txs += last < 0.9f * s->pwr;
+        r.last_end   = last;
+        r.drive_top  = fmaxf(r.drive_top, tx.top_drive);
+        if (verbose && (i < 4 || i == s->txs - 1))
+            printf("      tx %2d: level %6.1f -> %6.1f dBFS for 1 W, at most %.2f W, power 2 s in %.1f W, last 3 s "
+                   "%.2f W\n", i + 1, before, tci_level, tx.top_w, tx.at2, last);
+    }
+    r.level_end = tci_level;
+    return r;
 }
 
 int main(int argc, char **argv) {
@@ -605,6 +680,83 @@ int main(int argc, char **argv) {
     }
     mode_in_use = radio_mode_usb_dig;
     tx_mode_set = -1;
+
+    /* TCI audio on the X6200 (tx_hold.c): the base ignores its setting, -20 dBFS gave 1.1 W at 0.1 W (2026-11-21).
+     * From the first level ever, a client at -20 dBFS (WSJT-X's slider half way) or at full scale; the power never
+     * over the setting by more than tx_level lets it (1.25 times and a 0.1 W step) */
+    printf("TCI audio on the X6200, through the drive loop (tx_hold.c)\n");
+#define TCI_BASE .free_w = 8.07f, .reach_w = 8.0f, .ramp_w_s = 7.0f, .lag_s = 0.5f, .knee_db = -6.0f
+#define CLIENT_DRIVE(dbfs) ((dbfs) + 20.0f * log10f(1.0f / 0.8f) + 9.4f)    /* its drive, dB from the default's */
+    static const scenario_t tci01 = {.name = "TCI at 0.1 W, the first transmission ever", .pwr = 0.1f,
+                                     .start_db = TX_HOLD_FIRST, .txs = 10, TCI_BASE};
+    tci_result_t t1 = run_tci(&tci01, -20.0f, 1882, verbose);
+    check(t1.over_txs == 0, "%s, the client at -20 dBFS: at most %.2f W, %d transmissions over", tci01.name, t1.top_w,
+          t1.over_txs);
+    tci_result_t t2 = run_tci(&tci01, 0.0f, 1882, verbose);
+    check(t2.over_txs == 0 && fabsf(t2.level_end - t1.level_end) < 0.25f, "%s, the client at full scale: at most %.2f W "
+          "(%d over), the level %.1f dBFS for 1 W as from -20 dBFS (%.1f)", tci01.name, t2.top_w, t2.over_txs,
+          t2.level_end, t1.level_end);
+
+    static const scenario_t tci1 = {.name = "TCI at 1 W, the first transmission ever", .pwr = 1.0f,
+                                    .start_db = TX_HOLD_FIRST, .txs = 10, TCI_BASE};
+    tci_result_t t3 = run_tci(&tci1, -20.0f, 1882, verbose);
+    check(t3.over_txs == 0 && t3.short_txs <= 1 && t3.last_end >= 0.9f, "%s: at most %.2f W (%d over), %d short, the "
+          "last at %.2f W", tci1.name, t3.top_w, t3.over_txs, t3.short_txs, t3.last_end);
+    /* 1 W in the model at -20.4 dBFS (8.07 W at the default's drive, the square of the audio) */
+    check(t3.level_end >= -21.5f && t3.level_end <= -19.9f, "%s: the level %.1f dBFS for 1 W (-20.4 gives 1 W)",
+          tci1.name, t3.level_end);
+    tci_result_t t4 = run_tci(&tci1, -6.0f, 480, verbose);
+    check(t4.over_txs == 0 && fabsf(t4.level_end - t3.level_end) < 0.5f, "%s, the client at -6 dBFS in frames of 480: "
+          "at most %.2f W (%d over), the level %.1f dBFS as in frames of 1882 (%.1f)", tci1.name, t4.top_w, t4.over_txs,
+          t4.level_end, t3.level_end);
+
+    /* The setting turned down from 5 W to 1 W: the level is kept for 1 W, so the first at 1 W starts there */
+    static const scenario_t tci5 = {.name = "TCI at 5 W", .pwr = 5.0f, .start_db = TX_HOLD_FIRST, .txs = 8, TCI_BASE};
+    tci_result_t t5 = run_tci(&tci5, 0.0f, 1882, verbose);
+    scenario_t   down = tci1;
+    down.name     = "then at 1 W";
+    down.start_db = t5.level_end;
+    down.txs      = 3;
+    tci_result_t t6 = run_tci(&down, -20.0f, 1882, verbose);
+    check(t5.over_txs == 0 && t5.short_txs <= 1 && t6.over_txs == 0 && t6.short_txs == 0, "%s, the client at full "
+          "scale (at most %.2f W, %d over, %d short), %s: at most %.2f W from the first (%d over, %d short)", tci5.name,
+          t5.top_w, t5.over_txs, t5.short_txs, down.name, t6.top_w, t6.over_txs, t6.short_txs);
+
+    /* A client too quiet for the setting: its audio never raised, and what is learned does not wait for its slider to
+     * go up and then let it out that much hotter */
+    scenario_t quiet = tci5;
+    quiet.name     = "TCI at 5 W, the client at -30 dBFS (0.11 W the most from it)";
+    quiet.txs      = 6;
+    tci_result_t t7 = run_tci(&quiet, -30.0f, 1882, verbose);
+    check(t7.drive_top <= CLIENT_DRIVE(-30.0f) + 0.05f, "%s: driven at most %.2f dB, the client's own %.2f",
+          quiet.name, t7.drive_top, CLIENT_DRIVE(-30.0f));
+    scenario_t loud = tci5;
+    loud.name     = "then its slider to full scale";
+    loud.start_db = t7.level_end;
+    loud.txs      = 6;
+    tci_result_t t8 = run_tci(&loud, 0.0f, 1882, verbose);
+    check(t8.over_txs == 0 && t8.last_end >= 4.5f, "%s: at most %.2f W (%d over), the last at %.2f W", loud.name,
+          t8.top_w, t8.over_txs, t8.last_end);
+
+    /* The readings 2.5 a second with their noise, as the bench X6200 sends them */
+    scenario_t noisy = tci1;
+    noisy.name       = "TCI at 1 W, readings +-0.1 W 2.5 a second";
+    noisy.read_every = 8;
+    noisy.noise_w    = 0.1f;
+    noisy.txs        = 30;
+    tci_result_t t9 = run_tci(&noisy, -20.0f, 1882, verbose);
+    check(t9.over_txs == 0 && t9.short_txs <= 2, "%s: at most %.2f W (%d over), %d short", noisy.name, t9.top_w,
+          t9.over_txs, t9.short_txs);
+
+    /* An X6100 (its ALC follows the drive, the base holds the setting): TCI audio as the client sent it */
+    scenario_t x61 = x6100;
+    x61.name = "TCI on an X6100";
+    x61.start_db = TX_HOLD_FIRST;
+    x61.txs = 2;
+    tci_result_t t10 = run_tci(&x61, -20.0f, 1882, verbose);
+    check(fabsf(t10.drive_top - CLIENT_DRIVE(-20.0f)) < 0.05f && t10.level_end == TX_HOLD_FIRST, "%s: driven at "
+          "%.2f dB, the client's own %.2f, nothing learned (%.1f)", x61.name, t10.drive_top, CLIENT_DRIVE(-20.0f),
+          t10.level_end);
 
     printf("TXLEVEL %s: %d of %d cases\n", good == cases ? "OK" : "FAILED", good, cases);
     return good == cases ? 0 : 1;

@@ -19,7 +19,7 @@ ANSWER  ?= $(CONF).answer
 ALLOWED ?= $(CONF).allowed
 CFLAGS := -std=gnu11 -Wall -Wextra -O1 -g -pthread -I stub_include -DTCI_CONF='"$(CONF)"' -DTCI_ALLOWED='"$(ALLOWED)"'
 COPIED := tci_server.c tci_server.h tci_audio.c tci_audio.h tci_ws.c tci_ws.h board.h radio_types.h control_owner.c control_owner.h \
-          remote_sessions.h tci_ask.h cw_encoder.h cw_beacon.h
+          remote_sessions.h tci_ask.h cw_encoder.h cw_beacon.h tx_level.c tx_level.h tx_hold.c tx_hold.h
 MORSE  := cw_decoder/morse_code.c cw_decoder/morse_code.h
 # KEYED: what the stub's keyer was given, each text on a line, for the client test to read
 KEYED   ?= $(CONF).keyed
@@ -45,7 +45,7 @@ audio_test: tci_audio_test
 tci_own_test: tci_own_test.c stubs.c build/.copied
 	python3 ../host_link/autolink.py --src $(SRC) --stubs build/auto_stubs_own.c -- \
 	    $(CC) $(CFLAGS) -I build -DTCI_STUBS_NO_MAIN -o $@ tci_own_test.c stubs.c build/tci_audio.c build/tci_ws.c \
-	    build/control_owner.c build/cw_decoder/morse_code.c build/auto_stubs_own.c -lm
+	    build/control_owner.c build/cw_decoder/morse_code.c build/tx_level.c build/tx_hold.c build/auto_stubs_own.c -lm
 
 own_test: tci_own_test
 	./tci_own_test; r=$$?; rm -f $(ALLOWED) $(ALLOWED).tmp; exit $$r
@@ -53,11 +53,11 @@ own_test: tci_own_test
 tci_host: stubs.c build/.copied
 	python3 ../host_link/autolink.py --src $(SRC) --stubs build/auto_stubs_host.c -- \
 	    $(CC) $(CFLAGS) -I build -o $@ stubs.c build/tci_server.c build/tci_audio.c build/tci_ws.c build/control_owner.c \
-	    build/cw_decoder/morse_code.c build/auto_stubs_host.c -lm
+	    build/cw_decoder/morse_code.c build/tx_level.c build/tx_hold.c build/auto_stubs_host.c -lm
 
 syntax: build/.copied
 	$(CC) $(CFLAGS) -I build -fsyntax-only build/tci_server.c build/tci_audio.c build/tci_ws.c build/control_owner.c \
-	    build/cw_decoder/morse_code.c
+	    build/cw_decoder/morse_code.c build/tx_level.c build/tx_hold.c
 
 test: audio_test own_test tci_host
 	rm -f $(REVOKED) $(ASK) $(ANSWER) $(KEYED); $(ENV) ./tci_host & echo $$! > .pid; sleep 0.5; $(ENV) python3 -I tci_client_test.py; r=$$?; kill `cat .pid`; rm -f .pid $(REVOKED) $(ASK) $(ANSWER) $(ALLOWED) $(KEYED); exit $$r

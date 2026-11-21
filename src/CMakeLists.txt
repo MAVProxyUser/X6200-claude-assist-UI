@@ -35,7 +35,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     dialog_jtty.c jtty.c jtty_rx.c jtty_tx.c
     digi_freqs.c
     digi_textlog.c
-    tx_player.c tx_level.c
+    tx_player.c tx_level.c tx_hold.c
     swr_guard.c tune_tx.c ext_tune.c
     base_guard.c cpu_power.c
     app_sstv.c

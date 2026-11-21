@@ -361,3 +361,8 @@ int main(int argc, char **argv) {
     }
 }
 #endif
+
+/* ---- the settings: TCI audio's learned peak on a base without ALC (tx_hold.h); this radio has an ALC ---- */
+#include "params/params.h"
+params_t params = {.tci_tx_level = {.x = -23.0f}};
+void params_float_set(params_float_t *p, float x) { p->x = x; }

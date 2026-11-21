@@ -9984,7 +9984,19 @@ the radio, hears it, keys it and sends CW with it.
     sends TCI audio (`trx:0,true,tci;`), so with it off the radio is keyed
     with silence.
   - The transmit level is their Pwr slider; set it so the radio's ALC shows
-    little or none, as with a sound card.
+    little or none, as with a sound card. On the X6200 the radio sets the
+    level itself, from its power setting (PWR): its base has no ALC that
+    holds the setting, so the audio as sent would make the power, and a
+    client at half its slider went out at 1.1 W with PWR at 0.1 W. The
+    radio brings the client's audio down to the level that gives PWR, as
+    for its own digital modes: the first transmission ever starts low and
+    climbs to PWR in a transmission or two, holds there, and comes down
+    when the power reads over it; the level found is kept, and a change of
+    PWR scales it. It never raises the client's audio: a client too quiet
+    for PWR goes out under it, and its slider then needs to come up. Within
+    that the slider makes no difference. At PWR 0.1 W the power reads only
+    in 0.1 W steps, so the level stays where it starts (the bench read
+    0.1 W there, 0.2 W at most).
   - On the radio, Clients on Operate (Settings > General > TCI SERVER, or
     the TCI page's "Clients may"). With Listen only, their band and mode
     changes are answered with the radio's state, unchanged, and they stop

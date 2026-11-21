@@ -80,6 +80,8 @@
 #include "screen_main.h"
 #include "smeter.h"
 #include "tx_meters.h"
+#include "tx_hold.h"
+#include "params/params.h"
 
 #include "lvgl/lvgl.h"
 
@@ -300,6 +302,9 @@ static struct {
     double      pos;
     int16_t     prev;
     float       lvl_gain;   /* tx_level_norm's, this transmission's */
+    /* A base whose ALC does not hold the power setting (the X6200): its audio through the drive loop (tx_hold.h), at
+     * its own learned peak (params.tci_tx_level) */
+    tx_hold_t   hold;
 } txs;
 
 /* A client's CW (cw_macros): its text keyed by the radio's own keyer (cw_encoder.c), the CW keyboard's and the stored
@@ -800,6 +805,19 @@ static void cw_stop_apply(void *arg) {
         cw_encoder_stop();
 }
 
+/* A TCI transmission over: the level its audio was held at kept for the next (tx_hold.h) */
+static void tx_hold_learn(void) {
+    float was = params.tci_tx_level.x;
+    float pwr = txs.hold.pwr, set = txs.hold.level.target_w;
+    float now = tx_hold_end(&txs.hold, was);
+
+    if (fabsf(now - was) >= 0.05f) {
+        params_float_set(&params.tci_tx_level, now);
+        LV_LOG_USER("tci: TX level %.1f dBFS for 1 W (was %.1f), the power %.1f W at a %.1f W setting", now, was, pwr,
+                    set);
+    }
+}
+
 /* tci: the TCI audio session (if there is one); else the radio's own PTT */
 static void tx_unkey(bool tci, bool drain) {
     if (tci) {
@@ -817,6 +835,7 @@ static void tx_unkey(bool tci, bool drain) {
         radio_set_modem(false);
         audio_play_lowlat_end();
         atomic_store(&txs.keyed, false);
+        tx_hold_learn();
     } else {
         radio_set_ptt(false);
     }
@@ -897,6 +916,7 @@ static void apply_cmd(void *arg) {
                 txs.pos  = 0;
                 txs.prev = 0;
                 txs.lvl_gain = TCI_TX_GAIN_MAX;
+                tx_hold_begin(&txs.hold, param_f_get(cfg_pwr), params.tci_tx_level.x);
                 radio_set_modem(true);
                 if (!radio_get_modem()) {
                     audio_play_lowlat_end();
@@ -1975,6 +1995,7 @@ static void handle_tx_audio(int ci, const uint8_t *frame, size_t len) {
     txs.last_audio_ms = now_ms();
     size_t k = resample(pcm, frames, txs.rate, out, sizeof(out) / sizeof(out[0]));
     tx_level_norm(out, k);
+    tx_hold_audio(&txs.hold, out, k);
     if (k)
         audio_play_if_room(out, k);    /* full: dropped, the delay stays short */
 }

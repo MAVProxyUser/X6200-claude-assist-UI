@@ -120,6 +120,8 @@ params_t params = {
 #else
     .ft8_output_gain_offset = { .x = 0.0f,      .name = "ft8_output_gain_offset" },
 #endif
+    /* TCI audio's peak for 1 W, dBFS, on a base whose ALC does not hold the power (tx_hold.h TX_HOLD_FIRST) */
+    .tci_tx_level           = { .x = -23.0f,    .name = "tci_tx_level" },
     .ft8_cq_modifier        = { .x = "",        .name = "ft8_cq_modifier"},
     .sstv_denoise           = { .x = true,      .name = "sstv_denoise" },
     .sstv_reply_rx          = { .x = true,      .name = "sstv_reply_rx" },
@@ -379,6 +381,7 @@ static bool params_load() {
         if (params_load_bool(&params.waterfall_zoom, name, i)) continue;
         if (params_load_bool(&params.spmode, name, i)) continue;
         if (params_load_float(&params.ft8_output_gain_offset, name, f)) continue;
+        if (params_load_float(&params.tci_tx_level, name, f)) continue;
         if (params_load_str(&params.ft8_cq_modifier, name, t)) continue;
 
         if (params_load_uint8(&params.freq_accel, name, i)) continue;
@@ -544,6 +547,7 @@ static bool params_save() {
     params_save_bool(&params.waterfall_zoom);
     params_save_bool(&params.spmode);
     params_save_float(&params.ft8_output_gain_offset);
+    params_save_float(&params.tci_tx_level);
     params_save_str(&params.ft8_cq_modifier);
 
     params_save_str(&params.qth);

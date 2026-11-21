@@ -18,10 +18,14 @@ Open:
   the same 0.1 W recipe on the battery alone and on a 13.8 V supply. tools/base_update/README.md "Why 15 m varied".
 - The 10 W table and the 5-10 W results were made with the X6100 partly on its own battery (the stock adapter is a
   charger): run again on a supply that holds before taking its power figures as the radio's.
-- X6200: TCI transmit audio sets the power, not the power setting: -20 dBFS gave 1.1 W at a 0.1 W setting (the
-  bench's Watch stopped it). Its base's ALC does not hold the setting, and TCI audio skips the GUI's drive loop
-  (tx_level.c), which the apps use. WSJT-X over TCI is affected too. To do: TCI audio through a power-hold loop on
-  the X6200 (as tx_level's, from the power readback), then measured on the bench.
+- X6200 TCI transmit power: DONE 2026-11-21 (src/tx_hold.c). TCI audio set the power, not the setting (-20 dBFS gave
+  1.1 W at 0.1 W); now it goes through the apps' drive loop (tx_level.c, power_hold), the learned level kept as the
+  peak for 1 W (params tci_tx_level) and scaled by PWR. Bench (tones.py x6200 x6100 --w 1, the tones at -10.5 dBFS,
+  9.5 dB over the -20 that gave 1.1 W): at 0.1 W median 0.1 W, peak 0.2 W; at 1 W median 0.9 W, peak 1.0 W; the
+  level -22.75 dBFS for 1 W after. tools/txlevel models it (10 TCI cases). Not yet run: WSJT-X itself over TCI.
+- The X6100's TCI receive audio (or tones.py's recorder) repeated 1.8 s of it exactly, 2.000 s later (correlation
+  1.0000, so not RF) in the 1 W pass of that run, the X6100's receiver near full scale (AGC off, -3 dBFS):
+  ~/.config/x6x00-bench/runs/20261121-020143-tones-tcihold/usb-1.0W.wav. Its tone fits from 2000 Hz on missed.
 - BinModem: ported to C and run between the radios (2026-11-21), then REMOVED from the port at the owner's word
   ("that was all fun, but we don't need it in this port"). Besides the X6200's TCI power above, what it found that
   stays true of the radios:
@@ -33,16 +37,15 @@ Open:
     DC per band and 6 m fixes are off the radio with it, its patches and write-up still in the repo.
 - 12 m and 6 m calibration (6 m offsets left 0); 0.1 W carrier is about -25 dBc (the offsets were found at 5 W).
   On the factory base now: moot until a patched base goes back on.
-- The draft PR to RF.Guru (drafts/x6100-baseband-errata/PR.md, NOT submitted: the owner's word needed) predates the
-  2nd-harmonic finding, the 15/12 m shift and the adapter caveat: refresh before any submit.
 - Not seen on screen by me: the Sentry spectrograms keeping time while transmitting, G's VOL pop-up in portrait
   (e9e3d890, installed on both).
 - The X6100's processor temperature sensor: dead on that board (below); the cause (its analog supply or reference)
   only by schematic or a meter, if wanted.
   The heater cross-check ran 21:22-21:32 (build/temps_heater_2026-11-20.png): the three sensors agree, the X6200's
   processor a steady 22 C over its power chip; the owner called it enough at 10 minutes.
-- The X6100's G WALKIE voiceprint looks rich even while the radio is not transmitting: structured patterns leaking
-  into it, where the X6200's is random noise (the owner, 2026-11-21: "figure out why"). To do: capture the X6100's
+- The G WALKIE voiceprint looks rich even while the radio is not transmitting: structured patterns leaking into it,
+  first seen on the X6100 (the owner, 2026-11-21: "figure out why"), and on the X6200 too ("2 happens on both
+  radios I'm pretty sure"). To do: capture the X6100's
   receiver audio with the antenna side quiet (the 80 dB chain, the X6200 not keying), find the lines' frequencies
   and how they move (fixed tones: the board's own clocks, the charger, the display or WiFi; moving with the dial:
   the receiver), against the X6200 the same way; then the source and whether it can be filtered or fixed.
@@ -65,7 +68,7 @@ Changed state today:
 
 Done: the X6200 kept off WiFi channels 9-11 (98a8bd8d; its firmware is the newest Realtek's); 5 and 10 W runs and the
 image proved on the mirror (505af2c1); gcfix5 image and carrier calibration end to end, carrier kept through band
-changes (e9e3d890), v0.3.12.40 released; one-file draft PR (unsubmitted); Sentry spectrogram time on air and G's
+changes (e9e3d890), v0.3.12.40 released; one-file draft PR (never submitted; deleted 2026-11-21 at the owner's word); Sentry spectrogram time on air and G's
 VOL pop-up (e9e3d890); the radio's fingerprint and calibration file (842d7a1f); a band without a saved calibration
 gets 0, not the last band's (2772e164); the X6200 never calibrated or keyed for it (its last TX 06:01, FT8 tests);
 10 W image/carrier on every band (cc607867); never wait on CI (practice); stale background waits closed.
@@ -118,7 +121,8 @@ gets 0, not the last band's (2772e164); the X6200 never calibrated or keyed for 
     Seen, not explained: the tone's 2nd harmonic at dial + 2 fa (-34 to -38 dBc, both bases); humps 38-41 kHz either
     side on the X6200's panadapter on 80, 10 and 6 m. 10 W not run (the bench's twice-the-power pad rule: the owner's
     word needed). A draft PR to RF.Guru's X6100-Baseband (the errata as an opt-in patcher, these findings) is in
-    drafts/x6100-baseband-errata/, NOT submitted (the owner: "do NOT submit it").
+    drafts/x6100-baseband-errata/, NOT submitted (the owner: "do NOT submit it"); deleted 2026-11-21 at the
+    owner's word ("delete the draft PR"; to the macOS Trash), never sent.
     DONE 2026-11-20 evening (the owner: "please make it so"): gcfix5 (x6100_hooks/tx_iq.s, register 52), the GUI's
     IQ balance (Settings > TX Cal, remote `set txig/txip/txio/txqo`), tools/bench/txcal.py (one over a point: the
     base takes registers 50-52 between transmissions only), the X6100 calibrated on every band (tools/base_update/
