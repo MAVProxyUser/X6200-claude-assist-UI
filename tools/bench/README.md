@@ -152,6 +152,13 @@ when a call is decoded and its voice heard (receive only, nothing on the air).
 sideband I/Q at 2.004 MS/s (100 kHz above the HackRF's centre, clear of its DC spike), starts on the next FT8 slot
 and passes when the radio's FT8 app shows the text.
 
+`tci_rate.py HOST [--format wsjtx|bench] [--seconds 120]` checks a radio's TCI receive audio over the real network,
+as a TCI program gets it (the tests under tools/tci run on the radio over 127.0.0.1 and never see its WiFi): it asks
+for a format, answers the server's PINGs (a client that does not is dropped at 60 s), and passes when every 5 s
+window after the first holds 95 % of real time. `wsjtx` is TCI's default (48 kHz float32 stereo, 3 Mbit/s), what
+WSJT-X takes; `bench` is the recorder's (24 kHz int16 mono). Receive only. 2026-11-21: the X6100 PASS with wsjtx
+(100 %), the X6200 FAIL (mean 31 %: its WiFi sends about 1 Mbit/s, TODO.md).
+
 ## The two-radio suite (suite.py)
 
 `suite.py` runs batches against both radios at once and writes a report with every screen photographed side by

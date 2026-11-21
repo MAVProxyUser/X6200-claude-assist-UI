@@ -41,7 +41,14 @@ Open:
   counter in the shared memory reached 21 of 50). A plain reader on the Mac sees the same, so not WSJT-X: WSJT-X sets
   no format and takes TCI's default, 48 kHz float32 stereo = 3 Mbit/s, and the X6200's WiFi does not carry it (raw
   TCP from the radio 2.5 Mbit/s, then 0.8-1 Mbit/s after 15 s; its RTL8723DU at -68 dBm on another access point than
-  the X6100, which gets 17-34 Mbit/s at -47 dBm). 24 kHz int16 mono (0.4 Mbit/s) holds 100 %. Open: why the stand-in
+  the X6100, which gets 17-34 Mbit/s at -47 dBm). 24 kHz int16 mono (0.4 Mbit/s) holds 100 %. tools/bench/tci_rate.py
+  now checks this over the network (X6100 wsjtx PASS 100 %, X6200 FAIL mean 31 %).
+- The X6200's WiFi SENDS about 1 Mbit/s (2026-11-21): raw TCP from it 0.5-2.5 Mbit/s, to it 9-13 Mbit/s; on 11-17 the
+  same driver sent 8 Mbit/s to the same channel-6 access point at -57 dBm, now -66..-69 dBm (10 dB weaker: moved?).
+  Not the CPU (90 % idle), not power saving (off, disable_lps_deep=Y), no "failed to get tx report", Bluetooth quiet
+  1.3 against 1.0 Mbit/s; its rate falls to MCS 0 (6.5) or 5.5 Mbit/s while sending, retransmits near none. It stays
+  on channel 6 by design (98a8bd8d keeps it off 9-11, where it stalled). To try: the radio nearer the access point (a
+  driver fault would not care), then rtw88 brought up from its 461b696 pin (May 2025, 134 commits behind). Open: why the stand-in
   server on the Mac did not decode either. The run (wsjtx_tx.py, enabletx.dylib, shmshim.dylib, the 127.0.0.1 relay,
   macOS's 4 MB kern.sysv.shmmax worked round) is in the scratchpad, not in the repo.
 - The X6100's TCI receive audio (or tones.py's recorder) repeated 1.8 s of it exactly, 2.000 s later (correlation
