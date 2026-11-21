@@ -152,15 +152,23 @@ unkeys it and stops it. A second controller connecting is turned away.
 - **Processor time.** On the R16 a 0.45 s search for a training check takes about 0.3 s, and an ordinary burst's
   find and train about 90 ms.
 
-### Where it stands (2026-11-21 00:50 local)
+### Where it stands (2026-11-21 00:55 local)
 
-Over the air, the procedure runs from end to end:
+**The first transfer over the radios.** 2048 bytes went from the X6100 to the X6200 at 0.1 W through 80 dB.
+Every byte was checked against the sender's pattern at the far end. The run:
 
-- CAP both ways on V.21 channel 1;
-- DCS and the training check;
-- FTT and the step-down 9600, 7200, 4800, 2400;
-- at 2400, CFR: the check came through with 0 errors in 2880 bits.
+- CAP both ways on V.21 channel 1, then DCS and the training check;
+- FTT at 9600, 7200 and 4800, then CFR at 2400, the check clean (0 of 2880 bits wrong);
+- the block of 8 frames: frame 0 was lost (the equaliser just out of training) and sent again after a PPR;
+- a lost MCF covered by the sender's retry, then EOP and MCF.
 
-The equaliser trains to 4-8 dB at 4800 and above, where the simulation gets 30 dB through filters like the
-radios'. The transmitters' compression is the suspect. The first data block at 2400 was not caught by the
-receiver. No data has gone across yet.
+It took 91.3 s, 179 bit/s overall. The data itself was on the air for 10.1 s, at 2400 bit/s; the rest was the
+step-down from 9600, V.21 control (4.2 s) and the turnarounds.
+
+At 2400 the equaliser trains to 10-12 dB and the received symbols run at 11-13 dB SNR. The carriers are 7.5 Hz
+apart and the clocks 11-20 ppm. 4800 comes through at about 9 % bit errors, and 7200 and 9600 do not train (4 dB).
+Through filters like the radios' the simulation gets 30 dB, so something on the radio path costs about 20 dB. The
+suspects are the X6100's ALC and the receiving radio's AGC and noise.
+
+`rxfast FILE RATE` runs the fast receiver over an end's recording and prints the HDLC frames it decodes.
+`rxfile FILE` does the same for V.21.

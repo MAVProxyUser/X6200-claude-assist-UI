@@ -27,9 +27,10 @@ Open:
   (the RTLs) and both transmitters keyed at once, which needs the owner's word. Not started.
 - BinModem on the radios (tools/modem, 2026-11-21): ported to C, checked against BinModem (every rate both ways,
   samples to 2e-6), the link simulated, x6x00-modem on both radios with bench.py radios-modem and the live view.
-  Over the cable: the procedure works end to end (CAP, DCS, TCF, FTT, the step-down, CFR at 2400); no data across
-  yet: the equaliser trains to only 4-8 dB at 4800 and up (transmitter compression suspected, ALC 10 on the X6100),
-  and the first block at 2400 was missed. Then: data both ways, the per-band runs, max baud; the IP backlink later.
+  Over the cable (2026-11-21 00:54): the first transfer, 2048 bytes X6100 to X6200 at V.27ter 2400, every byte
+  checked, PPR resend and all; 91 s, 179 bit/s overall, 10 s of it data. 4800 ~9 % bit errors, 7200/9600 do not
+  train: the radio path costs ~20 dB against the simulation (the X6100's ALC, the AGC and noise suspected). Then:
+  higher rates, both ways, the per-band runs, max baud; the IP backlink later.
 - X6200: TCI transmit audio sets the power, not the power setting: -20 dBFS gave 1.1 W at a 0.1 W setting (the
   bench's Watch stopped it). Its base's ALC does not hold the setting, and TCI audio skips the GUI's drive loop
   (tx_level.c), which the apps use. WSJT-X over TCI is affected too. To do: TCI audio through a power-hold loop on

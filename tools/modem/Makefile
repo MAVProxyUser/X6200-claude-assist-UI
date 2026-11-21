@@ -9,7 +9,7 @@ BUILD   ?= build
 CORE    = dsp.c v21.c v27ter.c v29.c qamrx.c pump.c hdlc.c link.c
 BINMODEM ?= ../../build/binmodem
 
-all: $(BUILD)/test_pump $(BUILD)/test_link $(BUILD)/interop $(BUILD)/x6x00-modem $(BUILD)/rxfile
+all: $(BUILD)/test_pump $(BUILD)/test_link $(BUILD)/interop $(BUILD)/x6x00-modem $(BUILD)/rxfile $(BUILD)/rxfast
 
 $(BUILD):
 	mkdir -p $@
@@ -26,6 +26,10 @@ $(BUILD)/x6x00-modem: x6x00-modem.c $(CORE) $(wildcard *.h) | $(BUILD)
 # what V.21 makes of a radio end's recording (x6x00-modem --record)
 $(BUILD)/rxfile: rxfile.c v21.c dsp.c hdlc.c $(wildcard *.h) | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ rxfile.c v21.c dsp.c hdlc.c -lm
+
+# and what the fast receiver makes of one, its HDLC frames
+$(BUILD)/rxfast: rxfast.c $(CORE) $(wildcard *.h) | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ rxfast.c $(CORE) -lm
 
 $(BUILD)/interop: interop.c $(CORE) $(wildcard *.h) | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ interop.c $(CORE) -lm

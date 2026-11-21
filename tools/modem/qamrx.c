@@ -14,7 +14,8 @@
 #define ABS_ON        3e-4      /* the least level a burst is looked for at (-70 dBFS) */
 #define RISE          2.0       /* over the quiet line's level: 6 dB (a 10 ms mean of noise varies a dB or two; a
                                  * radio's AGC holds its noise within 8 dB of a burst) */
-#define FIND_BEFORE   0.030     /* s before the rise the first symbol may be centred */
+#define FIND_BEFORE   0.150     /* s before the rise the first symbol may be centred: the receiving radio's AGC makes a
+                                 * burst's level rise slowly (30 ms missed the X6100's data at the X6200, 2026-11-21) */
 #define FIND_AFTER    0.012     /* and after */
 #define COARSE        8         /* samples between the first look's tries */
 #define PIECE         0.005     /* s, the pieces the turn-on is matched in */
