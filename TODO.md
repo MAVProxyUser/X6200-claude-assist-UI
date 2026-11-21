@@ -69,7 +69,12 @@ approved that day.
     -46..-53 dBc, then -29 (a 9 % gain shift) after a minute or two at 0.1 W, back after ~5 min of receiving; 20 m does
     not move. First read as heat, but a run of 1 W overs never shifted (and 1 W after a shift did not undo it): the
     trigger is OPEN. 12 m shifts too (later, smaller); 10, 17, 20 m do not. Not intermod with the carrier (the
-    carrier 16 dB up, the image unmoved): the I/Q gain balance itself. A warm balance per band (tx_iq_hot_gain/phase) and a heat estimate (radio.c tx_heat) are in the
+    carrier 16 dB up, the image unmoved): the I/Q gain balance itself.
+    2026-11-20 19:31 (80 dB, the owner away with 10 W allowed): the X6100 went silent in the first 10 W over of a
+    txcal run on 15 m (keyed 19:31:24; the bench's watch stopped everything at 19:31:35, "on the air for over 10 s":
+    its state no longer came). Not transmitting after (the X6200 on 15 m: -88 dBm), no ping or SSH for 5+ min.
+    Ten 10 W overs on every band 19:06-19:10 had gone fine (3.8-7.3 W out on the 11.9 V supply). To find out: off
+    (a supply dip at 10 W, or a plain reboot, which switches it off) or hung; its /tmp log is gone if it restarted. A warm balance per band (tx_iq_hot_gain/phase) and a heat estimate (radio.c tx_heat) are in the
     GUI, off (0, 0) everywhere; txcal.py --state hot|cold. tools/base_update/README.md, "Why 15 m varied".
     The tone's 2nd harmonic (both bases): TESTED 2026-11-20 evening. It follows the audio level 1 dB for 1 dB at a
     held power (0.05 of full scale -53 dBc, 0.1 -44, 0.3 -33, 0.5 -28; 20 m, 1 W) and the processor's Headphone output
