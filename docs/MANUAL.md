@@ -152,7 +152,6 @@ Baseband shows which base the radio runs.
 | Band output gain | Settings > TX Cal > TX CALIBRATION | - | r8 and later | - | - |
 | IQ offsets | Settings > TX Cal > TX CALIBRATION | yes | yes | yes | - |
 | IQ balance | Settings > TX Cal > TX CALIBRATION | - | gcfix5 | - | - |
-| IQ balance warm | Settings > TX Cal > TX CALIBRATION | - | gcfix5 | - | - |
 | Mic gain | Settings > Audio > MICROPHONE | yes | yes | yes | yes |
 | Comp (the ratio) | the MFK 2:4 page | the button (see 4) | yes | yes | three levels |
 | Compressor, makeup | Settings > Audio > TX AUDIO | - | r3 and later | yes | - |
@@ -262,17 +261,8 @@ The rest, left as it is unless you have a reason:
   calibration against a second receiver (`tools/bench/txcal.py`, see
   [gcfix5](#goldcorphfs-fixes-to-xiegus-v119-gcfix5)); the sliders show it in
   steps of 0.0001.
-- **IQ balance warm** (the same radios; experimental, 0, 0 = off on every
-  band) is a second IQ balance the radio moves to as its estimate of its own
-  heat (from how long it has transmitted) rises. On the owner's X6100, 15 m's
-  image moved from 46-53 to 29 dB under after a minute or two of transmitting
-  at 0.1 W and came back after minutes of receiving, and a balance found in
-  that state put it back. But it did not happen in a run of 1 W overs, so
-  transmitting time alone does not predict it, and a warm balance set from
-  it made 1 W worse: leave it at 0, 0 unless your radio's shift follows its
-  transmitting. `tools/bench/txcal.py --state hot` finds one.
-- A band never calibrated has none of these (0): before v0.3.12.41 it took
-  the values of the band you came from.
+- A band never calibrated has no IQ offsets or IQ balance (0): before
+  v0.3.12.41 it took the values of the band you came from.
 - **TCI transmit level** (X6100): what a TCI client (WSJT-X, JTDX, a
   browser) sends is brought to 20 dB under full scale before it goes to the
   base (raised up to 12 dB for a quiet client, lowered for a loud one, the
@@ -2381,10 +2371,11 @@ What gcfix5 changes (`V1.1.9 Nov 27 2025,gcfix5` in Settings > Info):
   signal to 55-69 dB under on 160 to 17 m and 10 m, and the carrier from
   30-35 to 44-59 dB under on 160 to 15 m; 15 and 12 m improved less (and
   vary from one run to the next), 6 m not at all yet (its offsets left at
-  0). Why 15 m varied: after a minute or two of transmitting at 0.1 W its
-  image moves from 46-53 to 29 dB under at the same balance and comes back
-  after minutes of receiving (not in a run of 1 W overs; the cause is not
-  known yet), so a calibration depends on when it is made.
+  0). Why 15 m varied: during a long session its image (and 12 m's) moved
+  from 46-53 to 29 dB under at the same balance and came back later. That
+  evening the radio was on its stock adapter, a 12 V charger, which did not
+  hold it up while it transmitted (it ran on its internal battery, down to
+  empty): the suspect, to be measured again on a supply that holds.
   Uncalibrated (0, 0) it is Xiegu's as before. A new value takes effect
   at the next transmission. gcfix5 also keeps the offsets through band
   changes: Xiegu's base loaded its own table's (zeros) over them at each.

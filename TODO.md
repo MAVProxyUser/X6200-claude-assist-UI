@@ -59,29 +59,30 @@ approved that day.
     DONE 2026-11-20 evening (the owner: "please make it so"): gcfix5 (x6100_hooks/tx_iq.s, register 52), the GUI's
     IQ balance (Settings > TX Cal, remote `set txig/txip/txio/txqo`), tools/bench/txcal.py (one over a point: the
     base takes registers 50-52 between transmissions only), the X6100 calibrated on every band (tools/base_update/
-    README.md has the results). 10 W run too (power-ok; the 11.9 V supply sets the top, gcfix and Xiegu's alike).
+    README.md has the results). 10 W run too (power-ok; the stock adapter, a charger, sets the top, gcfix and Xiegu's alike).
     Left: screen F's TX CAL (the owner's idea; needs a second receiver on the radio: an RTL stick only covers HF if
     it is a V4 or in direct sampling); a combined build with RF.Guru's payload keeps their build name, so the GUI
     would not know gcfix5 is in it (a marker of its own needed); the image's change across the audio band (one G, P
     per band).
-    Later the same evening (the owner: "dive deeper ... find a novel solution that *works*"): 15 m's varying image is
-    a shift after time on the air, not the audio band, the base's Hilbert filter (equiripple, 84.5 dB) or an I/Q skew:
-    -46..-53 dBc, then -29 (a 9 % gain shift) after a minute or two at 0.1 W, back after ~5 min of receiving; 20 m does
-    not move. First read as heat, but a run of 1 W overs never shifted (and 1 W after a shift did not undo it): the
-    trigger is OPEN. 12 m shifts too (later, smaller); 10, 17, 20 m do not. Not intermod with the carrier (the
-    carrier 16 dB up, the image unmoved): the I/Q gain balance itself.
-    2026-11-20 19:31 (80 dB, the owner away with 10 W allowed): the X6100 went silent in the first 10 W over of a
-    txcal run on 15 m (keyed 19:31:24; the bench's watch stopped everything at 19:31:35, "on the air for over 10 s":
-    its state no longer came). Not transmitting after (the X6200 on 15 m: -88 dBm), no ping or SSH for 5+ min.
-    Ten 10 W overs on every band 19:06-19:10 had gone fine (3.8-7.3 W out on the 11.9 V supply). To find out: off
-    (a supply dip at 10 W, or a plain reboot, which switches it off) or hung; its /tmp log is gone if it restarted. A warm balance per band (tx_iq_hot_gain/phase) and a heat estimate (radio.c tx_heat) are in the
-    GUI, off (0, 0) everywhere; txcal.py --state hot|cold. tools/base_update/README.md, "Why 15 m varied".
+    Later the same evening (the owner: "dive deeper ... find a novel solution that *works*"): 15 m's (and 12 m's)
+    image moves during a session, -46..-53 dBc to -29 (a 9 % I/Q gain change) and back; not the audio band, the
+    base's Hilbert filter (equiripple, 84.5 dB), an I/Q skew, the base's power loop, the X6200, or intermod with the
+    carrier; 10, 17, 20 m do not move. A "warm balance" switched by a heat estimate was built and REMOVED the same
+    evening (the owner: "your warm balance theory was simply garbage ... revoke it"): the shift did not follow
+    transmitting time. The X6100's own battery log found the likelier suspect: the stock adapter (a charger) was not
+    holding the radio (0.2-3.9 V at its input in most TX minutes, ~8 V idle charging), so it ran on its 6.6-7.2 V
+    battery, 52 % at 18:12 down to empty. To do: the shift (and the 10 W table) again on a supply that holds the
+    radio. tools/base_update/README.md, "Why 15 m varied".
+    2026-11-20 19:31 (80 dB, the owner away with 10 W allowed): the X6100 switched off in the first 10 W over of a
+    txcal run on 15 m. Its battery log: the internal battery empty (1 % from 19:26), the adapter not holding it up all
+    evening; no hang (the GUI watch never acted, no kexec). The owner found it off and switched it on (20:07, 0 %).
+    Before more TX tests: a supply for transmitting (the stock adapter is a charger), the battery charged.
     The tone's 2nd harmonic (both bases): TESTED 2026-11-20 evening. It follows the audio level 1 dB for 1 dB at a
     held power (0.05 of full scale -53 dBc, 0.1 -44, 0.3 -33, 0.5 -28; 20 m, 1 W) and the processor's Headphone output
     (-6 dB: -42, -12 dB: -47); the base's line-in gain (its codec PGA, page 1 reg 0x3B) changes nothing: made in the
     hop from the processor's headphone amp to the base, before the PGA. FIXED for TCI clients (the GUI's own modes play
     at -28.6 dB): tci_server.c brings a transmission's peak to -20 dBFS (X6100 only): full scale -45.5 dBc, 0.3 -43.5,
-    0.03 -44.4, 0.9 W each. At the 10 W setting (5 W on this 11.9 V supply) it costs ~0.4 dB of the top.
+    0.03 -44.4, 0.9 W each. At the 10 W setting (on the battery, the adapter not holding) it cost ~0.4 dB of the top.
   - the X6200's WiFi, 2026-11-20 morning (v0.3.12.39): pinged at 10 Hz, 4-19% of replies over 100 ms, spikes of
     0.5-1.5 s, 0-7% lost (the X6100 beside it, same router: max 18-48 ms); its TCI audio reaches a client at 10-76%
     of real time (parec on the radio itself: full rate; the TCI queue holds 0.6 s and drops the rest). Not the GPS

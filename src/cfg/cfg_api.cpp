@@ -220,8 +220,6 @@ ParamInt         *cfg_band_tx_i_offset    = nullptr;
 ParamInt         *cfg_band_tx_q_offset    = nullptr;
 ParamInt         *cfg_band_tx_iq_gain     = nullptr;
 ParamInt         *cfg_band_tx_iq_phase    = nullptr;
-ParamInt         *cfg_band_tx_iq_hot_gain  = nullptr;
-ParamInt         *cfg_band_tx_iq_hot_phase = nullptr;
 ParamInt         *cfg_tx_cal_radio        = nullptr;
 ParamInt         *cfg_band_vfoa_mode      = nullptr;
 ParamInt         *cfg_band_vfob_mode      = nullptr;
@@ -490,8 +488,6 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
     cfg_band_tx_q_offset = &cfg_sm.p_band_tx_q_offset;
     cfg_band_tx_iq_gain  = &cfg_sm.p_band_tx_iq_gain;
     cfg_band_tx_iq_phase = &cfg_sm.p_band_tx_iq_phase;
-    cfg_band_tx_iq_hot_gain  = &cfg_sm.p_band_tx_iq_hot_gain;
-    cfg_band_tx_iq_hot_phase = &cfg_sm.p_band_tx_iq_hot_phase;
     cfg_tx_cal_radio     = &cfg_sm.p_tx_cal_radio;
     cfg_band_vfoa_mode   = &cfg_sm.p_band_vfoa_mode;
     cfg_band_vfob_mode   = &cfg_sm.p_band_vfob_mode;
@@ -539,16 +535,13 @@ void cfg_api_init(void (*on_db_error)(const char *)) {
 }
 
 void cfg_tx_cal_forget(void) {
-    for (const char *name : {"tx_i_offset", "tx_q_offset", "tx_iq_gain", "tx_iq_phase", "tx_iq_hot_gain",
-                              "tx_iq_hot_phase"}) {
+    for (const char *name : {"tx_i_offset", "tx_q_offset", "tx_iq_gain", "tx_iq_phase"}) {
         BandParamsTable::RemoveAll(name);
     }
     cfg_sm.p_band_tx_i_offset.set(0);
     cfg_sm.p_band_tx_q_offset.set(0);
     cfg_sm.p_band_tx_iq_gain.set(0);
     cfg_sm.p_band_tx_iq_phase.set(0);
-    cfg_sm.p_band_tx_iq_hot_gain.set(0);
-    cfg_sm.p_band_tx_iq_hot_phase.set(0);
 }
 
 int cfg_smeter_cal_bands(int *start, char (*names)[16], int *vals, int max) {

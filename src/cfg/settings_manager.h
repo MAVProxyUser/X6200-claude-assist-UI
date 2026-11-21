@@ -802,9 +802,9 @@ class SettingsManager {
     // A band that never saved one has none, not the last band's
     Parameter<int32_t> p_band_tx_shift{"tx_shift", 0, [](int32_t v) { return clip(v, -TX_SHIFT_MAX, TX_SHIFT_MAX); },
         StorageType::BAND, pending_writes_, [this] { p_band_tx_shift.set_quiet(0); }, &band_params_};
-    // The band's TX calibration (these two, the I/Q balance and its warm one below): a band that never saved one has
-    // none (0), not the last band's. With {} here a band without a value kept the one before it: 15 m's warm balance
-    // went out on 17, 12 and 10 m after 15 m (2026-11-20), and an uncalibrated band took its neighbour's offsets
+    // The band's TX calibration (these two and the I/Q balance below): a band that never saved one has none (0), not
+    // the last band's. With {} here a band without a value kept the one before it (2026-11-20: a value set on 15 m
+    // went out on 17, 12 and 10 m after it), and an uncalibrated band took its neighbour's offsets
     Parameter<int32_t> p_band_tx_i_offset{"tx_i_offset", 0, {},
         StorageType::BAND, pending_writes_, [this] { p_band_tx_i_offset.set_quiet(0); }, &band_params_};
     Parameter<int32_t> p_band_tx_q_offset{"tx_q_offset", 0, {},
@@ -816,15 +816,6 @@ class SettingsManager {
         StorageType::BAND, pending_writes_, [this] { p_band_tx_iq_gain.set_quiet(0); }, &band_params_};
     Parameter<int32_t> p_band_tx_iq_phase{"tx_iq_phase", 0, [](int32_t v) { return clip(v, -32767, 32767); },
         StorageType::BAND, pending_writes_, [this] { p_band_tx_iq_phase.set_quiet(0); }, &band_params_};
-    // The same once the radio is "warm" (experimental): on the owner's X6100 15 m's image moved from -46 to -29 dBc
-    // after a minute or two at 0.1 W and back after minutes of receiving, its best balance 9000 gain units away; but a
-    // run of 1 W overs never moved it, so transmitting time does not predict it (2026-11-20; the trigger is open).
-    // radio.c blends from these to the band's own as its estimate of the heat says (tx_heat). 0, 0: none (every band
-    // on the owner's X6100), the band's own whatever the estimate
-    Parameter<int32_t> p_band_tx_iq_hot_gain{"tx_iq_hot_gain", 0, [](int32_t v) { return clip(v, -32767, 32767); },
-        StorageType::BAND, pending_writes_, [this] { p_band_tx_iq_hot_gain.set_quiet(0); }, &band_params_};
-    Parameter<int32_t> p_band_tx_iq_hot_phase{"tx_iq_hot_phase", 0, [](int32_t v) { return clip(v, -32767, 32767); },
-        StorageType::BAND, pending_writes_, [this] { p_band_tx_iq_hot_phase.set_quiet(0); }, &band_params_};
     // dB offset of the front panel audio chain (float, scaled x10 to an int
     // in the DB: 0.2 dB <-> 2).
     Parameter<float, int32_t, 10> p_band_dac_offset{"dac_offset", 0.0f, {},

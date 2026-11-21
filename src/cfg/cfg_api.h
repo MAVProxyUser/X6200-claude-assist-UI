@@ -283,8 +283,6 @@ extern ParamInt   *cfg_band_tx_i_offset;  // p_band_tx_i_offset
 extern ParamInt   *cfg_band_tx_q_offset;  // p_band_tx_q_offset
 extern ParamInt   *cfg_band_tx_iq_gain;   // p_band_tx_iq_gain
 extern ParamInt   *cfg_band_tx_iq_phase;  // p_band_tx_iq_phase
-extern ParamInt   *cfg_band_tx_iq_hot_gain;  // p_band_tx_iq_hot_gain (the radio warm)
-extern ParamInt   *cfg_band_tx_iq_hot_phase; // p_band_tx_iq_hot_phase
 extern ParamInt   *cfg_tx_cal_radio;      // p_tx_cal_radio
 /* The TX calibration gone from every band (its four settings' rows deleted), the band shown at 0: they were another
  * radio's (radio.c tx_cal_check). On the GUI thread */

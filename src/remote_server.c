@@ -274,7 +274,6 @@ static atomic_bool     forget_all_due;       /* Settings: every session revoked 
 typedef struct {
     int32_t freq, mode, flo, fhi, kt, agc, pre, att, nb, nr, sql, rfg, vol, pwr10, step, zoom, vfo, atu, bat;
     int32_t txio, txqo, txig, txip;     /* the band's TX calibration: DC offsets, I/Q balance (Settings > TX CAL) */
-    int32_t txhg, txhp, hot;            /* its I/Q balance once the radio is warm; how warm it is, % (radio.c) */
     int32_t linein;                     /* the base's line-in gain (Settings > Audio, 0-36: its codec's PGA, 0.5 dB) */
     int32_t tune, tune_s;   /* TUNE for an external tuner on, its time limit */
     int32_t rxo;            /* the radio holds itself receive only (radio_rx_only_held: the Sentry, or a session
@@ -293,7 +292,7 @@ typedef enum { P_FREQ, P_MODE, P_AGC, P_PRE, P_ATT, P_NB, P_NR, P_SQL, P_RFG, P_
                P_VFO, P_FILTER, P_ATU, P_LOCK,
                /* the band's TX calibration (Settings > TX CAL): its DC offsets and I/Q balance, for the bench's
                 * calibration (tools/bench/txcal.py) */
-               P_TXIO, P_TXQO, P_TXIG, P_TXIP, P_TXHG, P_TXHP,
+               P_TXIO, P_TXQO, P_TXIG, P_TXIP,
                /* the base's line-in gain, for the bench's audio-level tests (tools/bench: the 2nd harmonic) */
                P_LINEIN } pcmd_id_t;
 
@@ -1044,8 +1043,6 @@ static void panel_apply(void *arg) {
         case P_TXQO:   param_i_set(cfg_band_tx_q_offset, LV_CLAMP(-10000, p->a, 10000)); break;
         case P_TXIG:   param_i_set(cfg_band_tx_iq_gain, LV_CLAMP(-32767, p->a, 32767)); break;
         case P_TXIP:   param_i_set(cfg_band_tx_iq_phase, LV_CLAMP(-32767, p->a, 32767)); break;
-        case P_TXHG:   param_i_set(cfg_band_tx_iq_hot_gain, LV_CLAMP(-32767, p->a, 32767)); break;
-        case P_TXHP:   param_i_set(cfg_band_tx_iq_hot_phase, LV_CLAMP(-32767, p->a, 32767)); break;
         case P_LINEIN: radio_set_line_in((uint8_t)LV_CLAMP(0, p->a, 36)); break;
     }
 }
@@ -1074,7 +1071,7 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
         {"nb", P_NB},     {"nr", P_NR},     {"sql", P_SQL},   {"rfg", P_RFG},   {"vol", P_VOL},
         {"pwr", P_PWR},   {"step", P_STEP}, {"zoom", P_ZOOM}, {"band", P_BAND}, {"vfo", P_VFO},
         {"filter", P_FILTER}, {"atu", P_ATU}, {"lock", P_LOCK},
-        {"txio", P_TXIO}, {"txqo", P_TXQO}, {"txig", P_TXIG}, {"txip", P_TXIP}, {"txhg", P_TXHG}, {"txhp", P_TXHP},
+        {"txio", P_TXIO}, {"txqo", P_TXQO}, {"txig", P_TXIG}, {"txip", P_TXIP},
         {"linein", P_LINEIN},
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
@@ -1122,9 +1119,6 @@ static void pstate_read(pstate_t *s) {
     s->txqo  = param_i_get(cfg_band_tx_q_offset);
     s->txig  = param_i_get(cfg_band_tx_iq_gain);
     s->txip  = param_i_get(cfg_band_tx_iq_phase);
-    s->txhg  = param_i_get(cfg_band_tx_iq_hot_gain);
-    s->txhp  = param_i_get(cfg_band_tx_iq_hot_phase);
-    s->hot   = radio_tx_heat_pct();
     s->linein = params.line_in;
     s->vol   = param_i_get(cfg_volume);
     s->pwr10 = (int32_t)lroundf(param_f_get(cfg_pwr) * 10.0f);
@@ -1156,12 +1150,11 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "\"nb\":%d,\"nr\":%d,\"sql\":%d,\"rfg\":%d,\"vol\":%d,\"pwr\":%d.%d,\"step\":%d,\"zoom\":%d,"
              "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d,"
              "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"txio\":%d,\"txqo\":%d,\"txig\":%d,\"txip\":%d,"
-             "\"txhg\":%d,\"txhp\":%d,\"hot\":%d,\"linein\":%d,"
+             "\"linein\":%d,"
              "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
-             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->txio, s->txqo, s->txig, s->txip, s->txhg, s->txhp, s->hot,
-             s->linein, s->app, s->win, s->pg, s->fp);
+             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->txio, s->txqo, s->txig, s->txip, s->linein, s->app, s->win, s->pg, s->fp);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */

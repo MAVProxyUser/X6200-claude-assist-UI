@@ -517,9 +517,10 @@ Seen, not explained: the tone's second harmonic at the dial + 2 fa, -34 to -38 d
 X6200's attenuator out, no tone when the X6200 is tuned onto them.
 
 At a 10 W setting (2026-11-20 afternoon, the owner: "Yes, run 10 W"; bench.py power-ok, the pads at their rating,
-overs of 10 s at most, rests as long): the X6100 on its 11.9 V supply gave 8.6 W on 160 m, 8.0-8.4 W on 80, 40, 30 and
+overs of 10 s at most, rests as long): the X6100 on its stock adapter (a 12 V charger, not a supply for transmitting:
+it ran partly on its own battery, see "Why 15 m varied") gave 8.6 W on 160 m, 8.0-8.4 W on 80, 40, 30 and
 15 m, 6.1-6.5 W on 20, 17 and 12 m, 3.5 W on 10 m and 5.3 W on 6 m, gcfix4 and Xiegu's V1.1.9 alike (20 m 6.4/6.3,
-10 m 3.5/3.5, 6 m 5.3/5.3; one 6 m over of Xiegu's gave 3.2 W, not seen again): the supply, not gcfix, sets the top.
+10 m 3.5/3.5, 6 m 5.3/5.3; one 6 m over of Xiegu's gave 3.2 W, not seen again): the power source, not gcfix, sets the top.
 Bursts at it: within +0.2 dB (20 m) and +0.5 dB (6 m). The image at 10 W: -43 to -53 dBc, as at 5 W.
 
 ### gcfix5: the transmitter's I/Q balance (txiq), 2026-11-20
@@ -598,19 +599,18 @@ sending 900 Hz tones (0.1 W unless said), the X6200 listening through the pads (
   eighth of the codec's rate, then each interpolated x8 by the same coefficients (0x0803e3e4). Its coefficients are an
   equiripple Hilbert transformer: computed from them, the opposite sideband is 84.5 dB or more under from 150 to
   2850 Hz (at 6 kHz). Nor a sample of skew between I and Q: in the bad state 300 Hz's image was the worse, not 1200's.
-- **A shift with time on the air** (first read as the radio's heat; see the last point). At fixed settings the image is steady within an over (+-0.2 dB at 5 W) but not from one to
+- **A shift during a session.** At fixed settings the image is steady within an over (+-0.2 dB at 5 W) but not from one to
   the next: from cold (6.5 min receiving) 15 m stood at -44 to -48 dBc for the first ~40 s of transmitting, moved
   within the next ~25 s and stood at -29 from there on (twice, the same); after receiving it came back (-31 at 2 min,
-  -36 to -38 at 3.5 min, -45 at 5 min). 20 m's overs made 15 m warm too, but 20 m's own image did not move
+  -36 to -38 at 3.5 min, -45 at 5 min). 20 m's overs moved 15 m's too, but 20 m's own image did not move
   (-47 to -50 dBc through 78 s of tones, its best balance where it was). Nothing in the base reports a temperature.
-- **Two balances.** Cold, 15 m's best is G 1464, P 750 (its saved one, 1081, 683, is beside it); warm, G -7600,
-  P 1570 (twice: -7696/1574 and -7494/1567, -45.7 and -43.1 dBc there): the warm shift is mostly gain, 9 %. With the
-  radio warm, alternating them: cold's -29 to -32 dBc, warm's -39 to -48, cold's -29, warm's -41 to -48.
-
-- **Not heat, or not only** (later, the pads 80 dB, the X6200's attenuator off at 0.1-1 W for the margin): from
-  an unshifted radio, 0.1 W overs alone shifted it again over ~100 s (-53 to -29.5 dBc at the cold balance) and two
+- **A second balance.** Before the shift, 15 m's best is G 1464, P 750 (its saved one, 1081, 683, is beside it); after it, G -7600,
+  P 1570 (twice: -7696/1574 and -7494/1567, -45.7 and -43.1 dBc there): the shift is mostly gain, 9 %. Shifted,
+  alternating them: the first -29 to -32 dBc, the second -39 to -48, then -29, -41 to -48.
+- **Not transmitting time** (later, the pads 80 dB, the X6200's attenuator off at 0.1-1 W for the margin): from
+  an unshifted radio, 0.1 W overs alone shifted it again over ~100 s (-53 to -29.5 dBc at the first balance) and two
   runs of 1 W overs after did not bring it back; but a run of 1 W overs (with 0.1 W probes) from cold never shifted
-  (its best balance stayed by the cold one, -56.8 dBc at G 235, P 435), so there the warm balance made it -27. The
+  (its best balance stayed by the first one, -56.8 dBc at G 235, P 435), so there the second made it -27. The
   base's power and ALC readings are the same shifted or not, and the shifted image is the X6100's (it stays at the
   same RF frequency and level when the X6200's offset moves 300 Hz). The cause is open; what starts the shift is not
   transmitting time alone.
@@ -622,19 +622,23 @@ sending 900 Hz tones (0.1 W unless said), the X6200 listening through the pads (
   the carrier moved from -25 to -9 dBc by the DC offsets and the image stayed at -29.5 +-0.5 dBc. It is a change of
   the I/Q gain balance itself.
 
-So the GUI keeps a second, warm balance per band, experimental and off (0, 0) on every band (tx_iq_hot_gain/phase, Settings > TX Cal "IQ balance warm", remote
-txhg/txhp; 0, 0 = none) and estimates the radio's heat from its transmitting (radio.c tx_heat: TX seconds added,
-receiving cooling them exponentially, 240 s; 0 % under 40 s, 100 % from 65 s), blending from the band's balance to its warm
-one and sending register 52 again while it receives (the base takes it between transmissions). tools/bench/txcal.py
---state hot|cold calibrates either (waiting for the GUI's estimate to be wholly warm or cold); txcal_store.py saves
-both. With the trigger not known, the X6100's file has no warm balance; the heat estimate is a tool for a radio
-whose shift does follow its transmitting.
+A warm balance per band switched by an estimate of the radio's heat was built on the first reading and taken out
+again the same evening: the shift did not follow transmitting time (above), and the radio's own log found a better
+suspect:
+
+- **The supply.** /mnt/battery_log.csv (a row a minute: the internal battery, its %, the external supply's volts)
+  shows the stock adapter (a 12 V charger) not holding the X6100 up all evening: at 11.9 V only part of the time, 0.2-3.9 V in most
+  minutes it transmitted and ~8 V idle while charging, so the radio ran on its 2-cell battery (6.6-7.2 V), from 52 %
+  at 18:12 to 1 % at 19:26-19:29; at the first 10 W over of 19:31 it switched off (battery empty; no hang: the GUI
+  watch never acted). The transmitter fed 7 V or 12 V from minute to minute may well be what moved 15 and 12 m's
+  balance (and the 10 W table below was made on that flagging battery). To measure again on a supply that holds.
 
 #### At the 10 W setting, through 80 dB (2026-11-20 evening)
 
 The owner's word for 10 W (`bench.py power-ok radios 10`, overs at most 10 s, the pad resting as long after), the
-pads 40 + 40 dB, the X6200's attenuator on; gcfix5 with the calibration as saved (cold balances), tones 600 and 900 Hz.
-The 11.9 V supply sets the top: 3.8 to 7.3 W came out. "<=" where the reading was within ~12 dB of the X6200's floor
+pads 40 + 40 dB, the X6200's attenuator on; gcfix5 with the calibration as saved, tones 600 and 900 Hz. 3.8 to
+7.3 W came out: the radio was running on its own battery by then (the supply not holding it up, 8-12 % charge; above),
+so this is no measure of its top. "<=" where the reading was within ~12 dB of the X6200's floor
 and off the mirror by more than a hertz (the image under it):
 
 | Band | Out (W) | Image 600 / 900 Hz (dBc) | Carrier (dBc) |

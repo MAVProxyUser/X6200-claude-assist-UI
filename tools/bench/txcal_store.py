@@ -22,8 +22,7 @@ from bench import Radio, Refused, say  # noqa: E402
 from image import BANDS  # noqa: E402
 
 FORMAT = "goldcorphf-txcal 1"
-KEYS = {"txio": "tx_i_offset", "txqo": "tx_q_offset", "txig": "tx_iq_gain", "txip": "tx_iq_phase",
-        "txhg": "tx_iq_hot_gain", "txhp": "tx_iq_hot_phase"}       # the last two: once the radio is warm (radio.c)
+KEYS = {"txio": "tx_i_offset", "txqo": "tx_q_offset", "txig": "tx_iq_gain", "txip": "tx_iq_phase"}
 DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibrations")
 
 
@@ -60,8 +59,7 @@ def save(a, c):
         doc = {"format": FORMAT, "fingerprint": fp, "model": fp.split("-")[0], "storage": storage,
                "saved": time.strftime("%Y-%m-%d %H:%M %Z"),
                "units": {"tx_i_offset": "register 50 (x 5000 in the base)", "tx_q_offset": "register 51",
-                         "tx_iq_gain": "1e-5 (register 52, low half)", "tx_iq_phase": "1e-5 (register 52, high half)",
-                         "tx_iq_hot_gain": "the same, once the radio is warm (0, 0: none)", "tx_iq_hot_phase": "the same"},
+                         "tx_iq_gain": "1e-5 (register 52, low half)", "tx_iq_phase": "1e-5 (register 52, high half)"},
                "bands": {}}
         if a.note:
             doc["note"] = a.note
