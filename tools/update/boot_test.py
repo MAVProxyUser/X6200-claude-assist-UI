@@ -18,7 +18,7 @@ from 8 KiB to 1 MiB, something else before and after), a folder for its FAT boot
 7. bundle-info: what differs from the card (both before, neither after); nothing offered off the SD card; what the
    bundle's version needs of them (its card image level), or that a card image is needed all the same.
 8. A part the bundle does not carry, or that the card has already, is left and said: a second install of the same
-   bundle keeps the .prev files of the kernel before.
+   bundle keeps the .prev files of the kernel before. A changed module alone is a kernel set the card lacks.
 9. The card image level: a "<model>-boot" line's parts on the card reach it (boot-level), boot-rollback takes it back;
    without them it is still wanted, with the parts that would reach it.
 10. The modules of kernels nothing can start go: kept are the running one's, the card's and the one it replaced.
@@ -148,7 +148,7 @@ class Card:
         return {n: read(os.path.join(self.boot, n)) for n in sorted(os.listdir(self.boot))}
 
     def bundle(self, version="0.3.13", kernel=b"new kernel", uboot=b"NEW-UBOOT" * 50000, release="6.1.90",
-               boot=None, image=None):
+               boot=None, image=None, module=b"new wifi module"):
         """A bundle with no files of the software (they would land on this Mac's own /usr) and the card's parts, its
         "boot" part made by mkbundle.py's own boot_part from an images folder and a target's modules"""
         images, target = os.path.join(self.root, "images"), os.path.join(self.root, "target")
@@ -162,7 +162,7 @@ class Card:
         mod = os.path.join(target, "lib", "modules", release, "kernel", "wifi.ko")
         os.makedirs(os.path.dirname(mod))
         with open(mod, "wb") as f:
-            f.write(b"new wifi module")
+            f.write(module)
         with open(os.path.join(target, "lib", "modules", release, "modules.dep"), "wb") as f:
             f.write(b"kernel/wifi.ko:\n")
         part, members = runpy.run_path(MKBUNDLE)["boot_part"](images, target, "x6200")
@@ -404,6 +404,18 @@ class BootInstall(unittest.TestCase):
             self.assertEqual(f.read(), self.c.old_uboot)
         self.c.run("boot-rollback")
         self.assertCardAsBefore()
+
+    def test_a_changed_module_alone_is_a_kernel_set_the_card_lacks(self):
+        """The X6200's WiFi driver fixed with the kernel itself unchanged (2026-11-21): offered and installed, then the
+        card's own"""
+        self.c.run("install", self.c.bundle(), "--kernel")
+        b = self.c.bundle(module=b"fixed wifi module")
+        self.assertTrue(self.c.run("bundle-info", b)["kernel"])
+        out = self.c.run("install", b, "--kernel")
+        self.assertNotIn("already", out)
+        with open(os.path.join(self.c.rootfs, "lib", "modules", "6.1.90", "kernel", "wifi.ko"), "rb") as f:
+            self.assertEqual(f.read(), b"fixed wifi module")
+        self.assertFalse(self.c.run("bundle-info", b)["kernel"])
 
     # 8b. --force (the owner, 2026-11-19: "a method to force an install without user interaction")
 

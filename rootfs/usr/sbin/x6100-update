@@ -1037,6 +1037,12 @@ def boot_same(b):
             out["kernel"] = all(_sha_file(os.path.join(d, e["name"])) == e["sha256"] for e in b["kernel"]["files"])
         finally:
             boot_umount()
+        # Its modules too: a build that changed only a module (the X6200's WiFi driver, rtw88, 2026-11-21) is a kernel
+        # set the radio has not got, offered and installed as one. Up to v0.3.12.41 only the boot partition's files
+        # counted, so such a change was "on the card already": never offered, and left by install --kernel
+        if out["kernel"]:
+            out["kernel"] = all(_sha_file(os.path.join(MODULES_ROOT, e["path"].lstrip("/"))) == e["sha256"]
+                                for e in b["kernel"].get("modules", []))
     if b.get("uboot"):
         u = b["uboot"]
         out["uboot"] = hashlib.sha256(uboot_read(int(u["size"]))).hexdigest() == u["sha256"]

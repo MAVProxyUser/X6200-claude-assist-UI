@@ -1954,7 +1954,10 @@ web configurator (System > Update).
   the root filesystem for the update", nothing changed).
 - **The SD card's kernel and bootloader, when ticked.** A bundle can also carry
   the kernel (with its modules) and U-Boot: when they differ from what the SD
-  card has, the box shows a tick box for each, unticked: "Also update the
+  card has (a changed module alone counts, from v0.3.12.42's updater on: the
+  X6200's WiFi driver fix of that version is offered so; up to v0.3.12.41's
+  only the kernel itself counted, and a module change was never offered),
+  the box shows a tick box for each, unticked: "Also update the
   kernel on the SD card (6.1.x)", "Also update the bootloader (U-Boot) on the
   SD card". The MFK goes through them before Yes and No; a press (or a touch)
   ticks or unticks. Unticked, nothing of them is written. One the new version
