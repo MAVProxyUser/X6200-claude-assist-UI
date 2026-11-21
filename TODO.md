@@ -80,6 +80,14 @@ Open:
 - The X6100's TCI receive audio (or tones.py's recorder) repeated 1.8 s of it exactly, 2.000 s later (correlation
   1.0000, so not RF) in the 1 W pass of that run, the X6100's receiver near full scale (AGC off, -3 dBFS):
   ~/.config/x6x00-bench/runs/20261121-020143-tones-tcihold/usb-1.0W.wav. Its tone fits from 2000 Hz on missed.
+  FOUND AND FIXED the same evening (tools/audio_dma/README.md): the kernel's DMA position read (sun6i-dma on 6.1.82),
+  now and then a period too far back when the engine changed descriptors between its two register reads; ALSA took
+  it as its 2.000 s capture ring wrapping and PulseAudio gave every client the last 2 s again, 2 s late from then
+  on (the GUI's decoders too: FT8 DT +2). Reproduced on both radios (pointer reads hammered: X6100 one jump in
+  4.7 M reads, its TCI audio 2.00000 s repeated at that moment; X6200 5 in 19 M). Mainline's c90b6973daa3 tried on
+  the running X6200 by a test module (x6x00_dmafix) in place of the built-in read: 0 jumps in 19 M reads against 5
+  with the old read. In the kernel as patches 9105/9106 (both radios); to do: hammer.py on the new kernel once a
+  radio has it.
 - BinModem: ported to C and run between the radios (2026-11-21), then REMOVED from the port at the owner's word
   ("that was all fun, but we don't need it in this port"). Besides the X6200's TCI power above, what it found that
   stays true of the radios:

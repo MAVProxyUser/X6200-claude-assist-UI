@@ -10828,6 +10828,18 @@ second. WiFi (NTP) or GPS sets it, and in the field the phone's clock (the
 for a clock that neither keeps), and FT8 Auto Sync, which keeps the clock
 right from the decodes once Time Sync has it within about 2 s.
 
+#### The receiver's audio played the last 2 seconds again, and decodes came 2 s late after it
+
+Fixed in the SD card's kernel of the bundles built after v0.3.12.42 (both radios). The processor's audio input
+is read through its DMA engine, and its position could now and then be read one period too far back (the
+engine moving to its next block between two register reads), which the kernel took as its 2-second capture
+buffer wrapping round. The audio server then gave every listener the last 2 seconds again: the GUI's
+decoders and recorders and a TCI client all ran 2 s behind from that moment (FT8's DT about +2), until the
+audio was started again (another 2 s with each further time). It came seldom: about once in 4 million reads of
+that position, which the radio makes on the order of a hundred a second, so once in many hours. The
+fix reaches a radio only with the update box's **Also update the kernel on the SD card** ticked (see
+[The SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot)) or with a new card image.
+
 #### The clock is back at the same time after every power-off
 
 The radio keeps the time in a clock chip while it is off. Some of these chips

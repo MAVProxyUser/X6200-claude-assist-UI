@@ -239,7 +239,10 @@ cp -a $GUI/buildroot/br2_external/board/X6100/linux/. $BOARD/
 # an X6200 hung for good as a hub of two streaming SDRs on that port browned out (November 2026). 9102: the race that
 # left it so (is_ready saved and restored around each giveback on two CPUs; also stalls and a double free) is closed
 # by settling the qh before the lock is dropped for a giveback. 9104: a KrakenSDR's hub asked about its ports over
-# ep0 once a second instead of keeping one of the R16's five receive endpoints for its status, so its fifth RTL streams
+# ep0 once a second instead of keeping one of the R16's five receive endpoints for its status, so its fifth RTL streams.
+# 9105, 9106: mainline's sun6i-dma fixes (c90b6973daa3, 9096bdc8d930): its position read could take the next
+# descriptor's count with the current one's address, a period too far back, which ALSA counts as a wrap of its 2 s
+# capture ring: PulseAudio then gave every client the last 2 s of receive audio again, 2 s late from then on (2026-11-21)
 mkdir -p $EXT/board/$M/patches/linux
 cp $GUI/buildroot/br2_external/board/X6100/patches/linux/*.patch $EXT/board/$M/patches/linux/
 if [ $MODEL = x6200 ]; then
