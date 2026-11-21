@@ -15,6 +15,13 @@
 # there. With none, it stays where it is. NetworkManager hands the supplicant the network again, unlimited, at each
 # join, and this runs again then: if that access point goes away, the next join may take channel 11 again.
 
+# From 2026-11-21 the WiFi driver can notch those lines (rtw88 host_spur_khz, rootfs/etc/modprobe.d/x6200-wifi-spur.conf:
+# channel 11 went from 33 % of a 3 Mbit/s TCI stream to 99-100 %). With it, no channel is avoided, and the join is
+# looked at the other way round: its scan sometimes saw only a -71 dBm channel-6 access point, not the -47 dBm
+# channel-11 one, and with background scans off (20-wifi-steady) it stayed there. So a link weaker than GOOD is moved
+# to another access point of the network MARGIN dB stronger or more (one more scan when the join's has none),
+# by the supplicant's roam. Without the notch (a driver of before), only the channel rule above.
+
 IF=$1
 [ "$2" = up ] || exit 0
 [ -e "${X6X00_NET:-/sys/class/net}/$IF/phy80211" ] || exit 0         # WiFi only
@@ -26,7 +33,11 @@ AVOID="2452 2457 2462"      # channels 9, 10, 11: within 9 MHz of 2457.6 (a 20 M
 # audio (3 Mbit/s) at 30 % of real time, where channel 11 gave 17-35 Mbit/s and 79-98 % even with its stalls. The
 # same channel-6 one at -57 dBm (2026-11-17) sent 8 Mbit/s
 FLOOR=-65
+GOOD=-60                    # dBm: a link this strong is kept as it is
+MARGIN=8                    # dB: an access point this much stronger is worth a roam from a weaker link
 SUP=fi.w1.wpa_supplicant1
+# The driver notching the X6200's own 2457.6 MHz: channels 9-11 as good as any, none avoided
+grep -q 2457600 "${X6X00_SPUR:-/sys/module/rtw_8723d/parameters/host_spur_khz}" 2> /dev/null && AVOID=""
 
 say() {
     logger -t wifi "$IF: $*"
@@ -37,12 +48,12 @@ call() {
 object() {
     sed -n "s/.*objectpath '\([^']*\)'.*/\1/p"
 }
-# The strongest access point of network $1 off the avoided channels, at FLOOR or better: "bssid freq signal"
+# The strongest access point of network $1 off the avoided channels, at $2 dBm or better, not $3: "bssid freq signal"
 best() {
     # The name through the environment: awk -v would turn iw's \xNN escapes into bytes, the dump's stay text
-    iw dev "$IF" scan dump 2> /dev/null | SSID=$1 awk -v avoid=" $AVOID " -v floor=$FLOOR '
+    iw dev "$IF" scan dump 2> /dev/null | SSID=$1 awk -v avoid=" $AVOID " -v floor="$2" -v skip="$3" '
         function done() {
-            if (b != "" && s == ENVIRON["SSID"] && f != "" && index(avoid, " " f " ") == 0 && g >= floor &&
+            if (b != "" && b != skip && s == ENVIRON["SSID"] && f != "" && index(avoid, " " f " ") == 0 && g >= floor &&
                     (best == "" || g > bg)) {
                 best = b; bf = f; bg = g
             }
@@ -58,26 +69,59 @@ link=$(iw dev "$IF" link 2> /dev/null)
 freq=$(printf '%s\n' "$link" | sed -n 's/^[[:space:]]*freq: \([0-9]*\).*/\1/p')
 ssid=$(printf '%s\n' "$link" | sed -n 's/^[[:space:]]*SSID: //p')      # printf: an echo may read iw's \x escapes
 [ -n "$freq" ] && [ -n "$ssid" ] || exit 0
-case " $AVOID " in
-    *" $freq "*) ;;
-    *) exit 0 ;;
-esac
+now_b=$(printf '%s\n' "$link" | sed -n 's/^Connected to \([0-9a-fA-F:]*\).*/\1/p')
+now_s=$(printf '%s\n' "$link" | sed -n 's/^[[:space:]]*signal: \(-*[0-9]*\).*/\1/p')
 ch=$(( (freq - 2407) / 5 ))
+case " $AVOID " in
+    *" $freq "*) avoided=1 ;;
+    *) avoided=
+        # Not an avoided channel: only a weak link is looked at
+        [ -n "$now_s" ] && [ "$now_s" -lt $GOOD ] || exit 0 ;;
+esac
 
 iface=$(call --object-path /fi/w1/wpa_supplicant1 --method $SUP.GetInterface "$IF" | object)
-[ -n "$iface" ] || { say "on channel $ch, the X6200's own: the supplicant does not have it, staying"; exit 0; }
+if [ -z "$iface" ]; then
+    [ -n "$avoided" ] && say "on channel $ch, the X6200's own: the supplicant does not have it, staying"
+    exit 0
+fi
 
-pick=$(best "$ssid")
-if [ -z "$pick" ]; then
-    # The join's scan may have gone stale in the kernel's list (30 s) by now: one more, read as it comes in
+# The strongest wanted ($1: floor, $2: one left out), one more scan if the join's list has none: the join's scan may
+# have gone stale in the kernel's list (30 s) by now, or missed it; read as it comes in
+seek() {
+    pick=$(best "$ssid" "$1" "$2")
+    [ -n "$pick" ] && return
     call --object-path "$iface" --method $SUP.Interface.Scan "{'Type': <'active'>}" > /dev/null
     i=0
     while [ $i -lt 12 ] && [ -z "$pick" ]; do
         sleep 0.5
-        pick=$(best "$ssid")
+        pick=$(best "$ssid" "$1" "$2")
         i=$((i + 1))
     done
+}
+
+if [ -z "$avoided" ]; then
+    seek $((now_s + MARGIN)) "$now_b"
+    if [ -z "$pick" ]; then
+        say "on channel $ch at $now_s dBm: no access point of this network $MARGIN dB stronger, staying"
+        exit 0
+    fi
+    set -- $pick
+    call --object-path "$iface" --method $SUP.Interface.Roam "$1" > /dev/null
+    i=0
+    while [ $i -lt 12 ]; do
+        sleep 0.5
+        printf '%s\n' "$(iw dev "$IF" link 2> /dev/null)" | grep -q "^Connected to $1" && break
+        i=$((i + 1))
+    done
+    if [ $i -lt 12 ]; then
+        say "on channel $ch at $now_s dBm: on channel $(( ($2 - 2407) / 5 )) now ($1, $3 dBm), the strongest of this network"
+    else
+        say "on channel $ch at $now_s dBm: not moved to $1 on channel $(( ($2 - 2407) / 5 )) ($3 dBm), the supplicant did not"
+    fi
+    exit 0
 fi
+
+seek $FLOOR ""
 if [ -z "$pick" ]; then
     say "on channel $ch, the X6200's own: no other access point of this network at $FLOOR dBm or better, staying"
     exit 0

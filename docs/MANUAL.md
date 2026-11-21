@@ -3724,7 +3724,11 @@ Once joined:
   began at a third of its speed). Both are in the WiFi driver, a kernel
   module: an update brings them with "Also update the kernel on the SD card"
   ticked (or a card image); without, the X6200 keeps the stalls on channel
-  11 and the rule above keeps it off there when it can.
+  11 and the rule above keeps it off there when it can. With the notch no
+  channel is avoided, and a link weaker than -60 dBm is moved to another
+  access point of your network 8 dB stronger or more, after one more scan if
+  the join's saw none (its join sometimes took a -71 dBm access point with a
+  -47 dBm one in reach, and stayed there).
 - The clock is set from the internet (NTP), with three tries 10 s apart, and
   written into the clock chip. ntpd, which keeps the clock from then on, is
   started again if it has found no time server yet: it starts with the

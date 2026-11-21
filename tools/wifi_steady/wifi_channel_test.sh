@@ -12,6 +12,8 @@
 # 10. Channel 10 is left too.                        11. A name with iw's \x escapes matches.
 # 12. The supplicant without the link: says so, stays.
 # 13. Another below the floor (-76 dBm, the X6200's case on 2026-11-21): one scan, stays.
+# 14-17. The driver notching the X6200's own 2457.6 MHz: nothing avoided; a good link kept; a weak one roamed to one
+#     8 dB stronger (one more scan when the join's saw none); none: stays. 18. Without the notch: not onto 9-11.
 HOOK=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 W=$(mktemp -d "${TMPDIR:-/tmp}/wifi-channel.XXXXXX")
 trap 'rm -rf "$W"' EXIT
@@ -80,7 +82,7 @@ check() {   # what, wanted, got
 run() {     # model, interface, action: what the hook asked, in order
     echo "$1" > "$W/compat"
     rm -f "$W/asked"
-    PATH="$W/bin:$PATH" X6X00_DT="$W/compat" X6X00_NET="$W/net" sh "$HOOK" "$2" "$3"
+    PATH="$W/bin:$PATH" X6X00_DT="$W/compat" X6X00_NET="$W/net" X6X00_SPUR="$W/spur" sh "$HOOK" "$2" "$3"
     echo "exit $?" >> "$W/asked"
     tr '\n' '|' < "$W/asked"
 }
@@ -99,8 +101,8 @@ fresh
 check "1. an X6100 on channel 11" "exit 0|" "$(run "$X6100" wlan0 up)"
 check "2. an X6200's link going down" "exit 0|" "$(run "$X6200" wlan0 down)"
 check "2. a link that is not WiFi" "exit 0|" "$(run "$X6200" eth0 up)"
-link $C6 2437 -62 HomeNet > "$W/link"
-check "3. an X6200 on channel 6" "exit 0|" "$(run "$X6200" wlan0 up)"
+link $C6 2437 -55 HomeNet > "$W/link"
+check "3. an X6200 on channel 6, a good link" "exit 0|" "$(run "$X6200" wlan0 up)"
 link $C11 2462 -58 HomeNet > "$W/link"
 check "4. an X6200 on channel 11, the network on channel 6 too" "$SET|$ON6" "$(run "$X6200" wlan0 up)"
 
@@ -145,6 +147,34 @@ check "12. the supplicant without the link" \
 fresh; link $C11 2462 -50 HomeNet > "$W/link"; { ap $C11 2462 -50 HomeNet; ap $C6 2437 -76 HomeNet; } > "$W/dump"
 check "13. another below the floor (the X6200's case, 2026-11-21): one scan, stays" \
     "Scan|log wlan0: on channel 11, the X6200's own: no other access point of this network at -65 dBm or better, staying|exit 0|" \
+    "$(run "$X6200" wlan0 up)"
+
+# The driver notching the X6200's own 2457.6 MHz (rtw88 host_spur_khz): no channel avoided, a weak link roamed
+echo "2457600,2470614" > "$W/spur"
+fresh; link $C11 2462 -50 HomeNet > "$W/link"; { ap $C11 2462 -50 HomeNet; ap $C6 2437 -62 HomeNet; } > "$W/dump"
+check "14. notched: on channel 11, a good link, kept" "exit 0|" "$(run "$X6200" wlan0 up)"
+
+fresh; link $C6 2437 -71 HomeNet > "$W/link"; { ap $C6 2437 -71 HomeNet; ap $C11 2462 -47 HomeNet; } > "$W/dump"
+link $C11 2462 -47 HomeNet > "$W/after_roam"
+check "15. notched: joined a -71 dBm one, a -47 there: roamed to it" \
+    "Roam $C11|log wlan0: on channel 6 at -71 dBm: on channel 11 now ($C11, -47 dBm), the strongest of this network|exit 0|" \
+    "$(run "$X6200" wlan0 up)"
+
+fresh; link $C6 2437 -71 HomeNet > "$W/link"; ap $C6 2437 -71 HomeNet > "$W/dump"
+{ ap $C6 2437 -71 HomeNet; ap $C11 2462 -47 HomeNet; } > "$W/after_scan"; link $C11 2462 -47 HomeNet > "$W/after_roam"
+check "16. notched: the join's scan saw only its own: one scan, roamed" \
+    "Scan|Roam $C11|log wlan0: on channel 6 at -71 dBm: on channel 11 now ($C11, -47 dBm), the strongest of this network|exit 0|" \
+    "$(run "$X6200" wlan0 up)"
+
+fresh; link $C6 2437 -71 HomeNet > "$W/link"; { ap $C6 2437 -71 HomeNet; ap $C1 2412 -66 HomeNet; } > "$W/dump"
+check "17. notched: none 8 dB stronger: one scan, stays" \
+    "Scan|log wlan0: on channel 6 at -71 dBm: no access point of this network 8 dB stronger, staying|exit 0|" \
+    "$(run "$X6200" wlan0 up)"
+
+rm -f "$W/spur"
+fresh; link $C6 2437 -71 HomeNet > "$W/link"; { ap $C6 2437 -71 HomeNet; ap $C11 2462 -47 HomeNet; } > "$W/dump"
+check "18. a driver without the notch: never onto channel 11, stays" \
+    "Scan|log wlan0: on channel 6 at -71 dBm: no access point of this network 8 dB stronger, staying|exit 0|" \
     "$(run "$X6200" wlan0 up)"
 
 [ $fails = 0 ] && echo "all passed" || echo "$fails failed"
