@@ -131,6 +131,7 @@ def ssh(host, cmd, timeout=60):
 class Radio:
     def __init__(self, name, rc, want_tx):
         self.name, self.host = name, rc["host"]
+        self.simulated = "port" in rc       # sim_test.py's radios: another port, no SSH, no battery log
         tok = load_json(os.path.join(STATE, "tokens.json"), {}).get(name, {}).get("tx" if want_tx else "rx")
         if not tok:
             raise Refused(f"{name}: no {'tx' if want_tx else 'rx'} session: bench.py provision {name} "
@@ -297,9 +298,41 @@ def rx_only_gate(radio):
                       f"radio")
 
 
+SUPPLY_HOLDS_V = 11.0       # the radio's DC in at or over this: its supply holds it (the stock 12 V chargers read 11.7-11.9)
+
+
+def supply_gate(radio, w):
+    """The radio's own battery log (/mnt/battery_log.csv, a row a minute: its battery's %, its DC in): no over on a
+    radio running on a low battery because its supply does not hold it up. 2026-11-20 the X6100's stock adapter (a
+    12 V charger) sagged to 0.2-3.9 V in most minutes it transmitted, the radio ran on its battery all evening
+    (52 % -> 1 %) and switched off in the first 10 W over, with the owner away. Unreadable: said, not a stop"""
+    if radio.simulated:
+        return
+    try:
+        rows = [r.split(",") for r in ssh(radio.host, "tail -3 /mnt/battery_log.csv", timeout=20).split()]
+        rows = [(int(r[0]), int(float(r[2])), float(r[3])) for r in rows if len(r) > 3 and r[0].isdigit()]
+    except (Refused, subprocess.SubprocessError, ValueError) as e:
+        say(f"{radio.name}: its battery log not read ({e}): its supply not checked")
+        return
+    if not rows or time.time() - rows[-1][0] > 300:
+        say(f"{radio.name}: no battery log row in the last 5 minutes: its supply not checked")
+        return
+    _, bat, dc = rows[-1]
+    low = min(r[2] for r in rows)
+    if bat <= 10 and dc < SUPPLY_HOLDS_V:
+        raise Refused(f"{radio.name}: on its battery at {bat} % (DC in {dc} V): charge it, or a supply that holds it")
+    if low < SUPPLY_HOLDS_V and bat < 30:
+        raise Refused(f"{radio.name}: its supply is not holding it up (DC in down to {low} V in the last minutes) and "
+                      f"its battery is at {bat} %: a supply for transmitting, or charge it first")
+    if w > HARD_MAX_W and low < SUPPLY_HOLDS_V:
+        raise Refused(f"{radio.name}: over {HARD_MAX_W} W only on a supply that holds it up (DC in down to {low} V in "
+                      f"the last minutes)")
+
+
 def radio_tx_gate(radio, c, w):
     if not radio.may_tx:
         raise Refused(f"{radio.name}: the harness's session there may not transmit")
+    supply_gate(radio, w)
     if w > c["limits"]["radio_w"] or (w > HARD_MAX_W and (power_ok() or 0) < w):
         raise Refused(f"{w} W is over the limit ({c['limits']['radio_w']} W)")
     if w > HARD_MAX_W and radio.tx_last:

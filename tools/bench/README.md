@@ -29,7 +29,12 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
 4. **The radios profile: low power, power-rated pads.** At most `limits.radio_w` (the configuration; 5 W
    whatever it says), and the first transmission of a session at 0.1 W whatever is asked. Each radio's own jack
    carries a pad rated for at least twice the test power. The power is set and read back before keying; the ATU
-   off (it tunes by transmitting); the frequency inside the amateur bands.
+   off (it tunes by transmitting); the frequency inside the amateur bands. And a supply that holds the radio:
+   before each over the radio's own battery log (`/mnt/battery_log.csv`, a row a minute) is read, and no over goes
+   on a radio on its battery at 10 % or less, nor with its DC in sagging under 11.0 V in the last minutes and its
+   battery under 30 %, nor over 5 W with any sag (2026-11-20: the X6100's stock adapter, a 12 V charger, sagged to
+   0.2-3.9 V while it transmitted, the radio drained its battery all evening and switched off in a 10 W over). An
+   unreadable log is said, not a stop.
 5. **Every transmission watched.** A radio on the air longer than `limits.max_key_s` (16 s at most: one FT8
    transmission), its SWR over 2.0, more power than asked, or a receiver hearing 20 dB more than the chain lets
    through (pads missing) stops everything at once: the HackRF killed, every radio unkeyed, the apps' TX stopped.
