@@ -1097,7 +1097,7 @@ def run_radios_modem(c, args):
                 w = was.get(r.name, {})
                 if w.get("pwr", 99) < 99:
                     r.send(f"set pwr {round(w['pwr'] * 10)}")
-                for k in ("freq", "mode", "agc"):
+                for k in ("freq", "mode", "agc", "pre", "att", "rfg", "sql"):
                     if w.get(k) is not None:
                         r.send(f"set {k} {w[k]}")
                 if w.get("flo") is not None and w.get("fhi") is not None:
@@ -1115,7 +1115,7 @@ def run_radios_modem(c, args):
         for r in radios:
             r.take_control()
             if r.name not in was:
-                was[r.name] = {k: r.state.get(k) for k in ("freq", "mode", "flo", "fhi", "agc")}
+                was[r.name] = {k: r.state.get(k) for k in ("freq", "mode", "flo", "fhi", "agc", "pre", "att", "rfg", "sql")}
                 was[r.name]["pwr"] = r.pwr()
                 save_json(was_file, was)
             if r.state.get("pg") != "A":
@@ -1125,6 +1125,9 @@ def run_radios_modem(c, args):
             r.send(f"set mode {args.mode}")         # 3 USB-D: the radio's digital SSB, as WSJT-X keys it
             r.send(f"set filter {args.filter[0]} {args.filter[1]}")
             r.send(f"set agc {args.agc}")           # fast by default: slow had the X6100 deaf for its first answers
+            for k in ("pre", "att", "rfg", "sql"):  # the receivers as asked, put back after
+                if getattr(args, k) is not None:
+                    r.send(f"set {k} {getattr(args, k)}")
             r.send(f"set pwr {round(FIRST_PROBE_W * 10)}")
             r.wait("the frequency, mode and power", lambda r=r: int(r.state.get("freq", 0)) == freq and
                    int(r.state.get("mode", -1)) == args.mode and abs(r.pwr() - FIRST_PROBE_W) < 0.05, 8)
@@ -1205,8 +1208,22 @@ def run_radios_modem(c, args):
                                                f"{' and back' if args.both else ''}; up to {args.max_rate} bit/s"})
         t0, keyed_at, overs = time.time(), {}, {}
         seen_tune = {r.name: None for r in radios}
+        probed, raised, changing = set(), args.power <= FIRST_PROBE_W, False
         while True:
             now = time.time()
+            # each radio's first over at FIRST_PROBE_W; then, both off the air and held, the run's power, through the
+            # gates again (the bench's rule: a session's first transmission at 0.1 W)
+            if not raised and probed >= {a.name, b.name} and not any(r.tx or lines[r.name].get("keyed") for r in radios):
+                changing = True
+                for s_ in ends.values():
+                    s_.sendall(b"may 0\n")
+                for r in radios:
+                    r.send(f"set pwr {round(args.power * 10)}")
+                    r.wait(f"{args.power} W", lambda r=r: abs(r.pwr() - args.power) < 0.05, 5)
+                    radio_tx_gate(r, c, args.power)
+                watch.w = args.power
+                raised, changing = True, False
+                say(f"both radios at {args.power} W from here")
             for r in radios:
                 # where each radio is, as it says: any move during the run is said (a Sentry routine, a split)
                 st = r.state
@@ -1221,7 +1238,8 @@ def run_radios_modem(c, args):
                 with o.lock:
                     other_off = not o.tx and now - o.tx_off_at > MODEM_GAP_S
                 end_o = lines[o.name]
-                may = other_off and not end_o.get("radio_tx") and not end_o.get("keyed") and not watch.why
+                may = other_off and not end_o.get("radio_tx") and not end_o.get("keyed") and not watch.why and \
+                    not changing
                 try:
                     ends[r.name].sendall(b"may 1\n" if may else b"may 0\n")
                 except OSError as e:
@@ -1249,6 +1267,7 @@ def run_radios_modem(c, args):
                     if m is not None:
                         ov.setdefault("smeter", []).append((round(now - keyed_at[r.name], 2), m))
                 elif r.name in keyed_at:
+                    probed.add(r.name)
                     ov = overs.pop(r.name, {})
                     say(f"  {r.name} over {now - keyed_at.pop(r.name):.1f} s: {ov.get('fwd', 0):.2f} W at most, ALC "
                         f"{ov.get('alc', 0):.1f}; {o.name} heard it at {ov.get('heard')} dBm")
@@ -1484,6 +1503,11 @@ def main():
     # V.21 channel 1 (980/1180 Hz) by default: the X6100's receiver takes steady tones from 1.5 kHz up out of its audio
     # within a second, its S-meter unmoved (2026-11-21, tones from the X6200), and T.30's channel 2 (1650/1850) with it
     s.add_argument("--v21", type=int, default=1, choices=[1, 2])
+    # the receivers: the X6100 with its preamp on clipped the X6200 at 0.1 W through 80 dB (3rd harmonic -10 dBc)
+    s.add_argument("--pre", type=int, default=0, choices=[0, 1]); s.add_argument("--att", type=int, default=None)
+    s.add_argument("--rfg", type=int, default=None); s.add_argument("--sql", type=int, default=0)
+    s.add_argument("--power", type=float, default=FIRST_PROBE_W, help="W after each radio's first over at 0.1 W "
+                   "(up to the limits' radio_w)")
     s.add_argument("--filter", type=int, nargs=2, default=[100, 3000], metavar=("LO", "HI"))
     s.add_argument("--view-port", type=int, default=8765); s.add_argument("--timeout", type=float, default=600)
     s.add_argument("--linger", type=float, default=0, help="seconds the view stays up after")

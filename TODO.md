@@ -35,10 +35,10 @@ Open:
   bench's Watch stopped it). Its base's ALC does not hold the setting, and TCI audio skips the GUI's drive loop
   (tx_level.c), which the apps use. WSJT-X over TCI is affected too. To do: TCI audio through a power-hold loop on
   the X6200 (as tx_level's, from the power readback), then measured on the bench.
-- X6100: its receiver takes steady tones from about 1.5 kHz up out of its audio within 0.3-0.9 s while the
-  S-meter holds (1000/1250 Hz pass; 1500 0.56 s, 1650 0.4-0.5 s, 1850 0.9 s, 2200 none; the X6200 passes all of
-  them). DNF, auto-notch, NR and NB off, no PulseAudio processing, USB as USB-D: so its base or codec. Perhaps
-  the same cause as the voiceprint item above. tools/modem/README.md "What the radios taught it".
+- X6100 at 1 W setting read 3.5 W on its own meter in a TCI training check (V.29, -32 dBFS after its levelling),
+  and the bench's Watch stopped the run (2026-11-21 01:03, through 80 dB, no harm): find why before any modem run
+  over 0.1 W. Also its receive audio clips (-2 dBFS RMS, 3rd harmonic -11 dBc) on a 0.1 W signal through 80 dB.
+- (Resolved) the X6100 "losing steady tones from 1.5 kHz up" was its squelch at 4: at 0 it passes them all.
 - 12 m and 6 m calibration (6 m offsets left 0); 0.1 W carrier is about -25 dBc (the offsets were found at 5 W).
 - The draft PR to RF.Guru (drafts/x6100-baseband-errata/PR.md, NOT submitted: the owner's word needed) predates the
   2nd-harmonic finding, the 15/12 m shift and the adapter caveat: refresh before any submit.

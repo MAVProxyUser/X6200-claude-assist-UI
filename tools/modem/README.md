@@ -125,22 +125,19 @@ unkeys it and stops it. A second controller connecting is turned away.
 - **TCI latency.** TCI audio reaches the air about 0.5 s after the key. At the unkey, the last 0.3-0.5 s of audio
   is still in the X6100's transmitter path, and 1.2-1.4 s in the X6200's. Each end therefore keys 0.8 s of
   silence before its audio and holds its own tail after it: 0.6 s on the X6100, 1.8 s on the X6200.
-- **V.21 channel.** The X6100's receiver takes steady tones from about 1.5 kHz up out of its audio within 0.3-0.9
-  s, while its S-meter holds. Measured with 3 s tones from the X6200:
-
-  | Tone | Heard at the X6100 |
-  |---|---|
-  | 1000 Hz | 3 s |
-  | 1250 Hz | 3 s |
-  | 1500 Hz | 0.56 s |
-  | 1650 Hz | 0.37-0.51 s |
-  | 1850 Hz | 0.93 s |
-  | 2200 Hz | none |
-
-  The X6200 hears all of them for the whole 3 s from the X6100, so the cause is on the X6100's side. It does this
-  in USB as in USB-D, with the GUI's DNF, auto-notch, NR and NB all off and no PulseAudio processing, so it is in
-  its base or codec. T.30's V.21 channel 2 (1650/1850 Hz) lost its preamble to it, so the radio link runs its
-  frames on V.21 channel 1 (980/1180 Hz): `--v21 1`, the default.
+- **The X6100's squelch.** With its squelch at 4, the X6100 took steady tones from about 1.5 kHz up out of its
+  audio within 0.3-0.9 s while its S-meter held (1000 and 1250 Hz passed, 1500-2200 Hz did not), and V.21 channel
+  2's preamble (1650/1850 Hz) with them. Its squelch at 0 (and preamp off) passes them all: a 1650 Hz tone was
+  heard for the whole 3 s, and with squelch 4 not at all. The harness sets squelch 0 and preamp off on both
+  receivers (`--sql`, `--pre`) and puts them back after. The link's V.21 stays on channel 1 (980/1180 Hz,
+  `--v21 1`), which works either way.
+- **The X6100's receive audio is hot.** A 0.1 W tone from the X6200 arrives at -2 dBFS RMS with its 3rd harmonic
+  at -11 dBc: clipped, ahead of the modem. Still to be fixed (its AGC level or capture gain).
+- **Transmit SNR at 0.1 W.** The X6100's tone reached the X6200 only 13.5 dB over the noise in 2.7 kHz, noise
+  that rides on its signal (the X6200's own noise does not rise when the X6100 keys with no audio). The X6100 makes
+  its power with a digital gain, so at 0.1 W its signal is close to the transmitter's own floor. The X6200's at
+  its real 0.3 W arrived at 41 dB. At 1 W setting the X6100 read 3.5 W on its meter in its first training check
+  and the Watch stopped the run (2026-11-21 01:03): not to be raised again until that is understood.
 - **X6200 TCI power.** The base's ALC does not hold the power setting, and TCI audio skips the GUI's drive loop
   (`tx_level.c`). -20 dBFS gave 1.1 W at a 0.1 W setting, and the Watch stopped it. The X6200 end sends at
   -32 dBFS.
