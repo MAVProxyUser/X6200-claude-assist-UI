@@ -522,6 +522,33 @@ static void late_key(void) {
     check(!on_air(), "A's unkey ends it");
 }
 
+/* A TCI audio start whose key takes the GUI thread 0.8 s (the network voice stream opened, the modem bit set): its
+ * client is told trx:0,true then, and its audio is waited for from there, not from the start. Ended at once before,
+ * as more than TX_SILENCE_MS had gone by: WSJT-X on the X6200 (2026-11-21). Silence after the key still ends it */
+static void slow_tci_key(void) {
+    client_open(A);
+    say(A, "trx:0,true,tci;");
+    txs.start_ms -= 800;                /* the start 0.8 s ago: the GUI thread busy that long */
+    txs.last_audio_ms = txs.start_ms;
+    gui(-1);                            /* the key runs, the socket thread has its round */
+    check(radio_get_modem() && atomic_load(&txs.keyed) && txs.owner == A && strstr(heard(A), "trx:0,true;"),
+          "the key taken 0.8 s after the start: A told trx:0,true, on the air");
+    tx_session_tick(now_ms() + TX_SILENCE_MS + 100);
+    check(radio_get_modem() && txs.owner == A, "not ended: A's first audio waited for from the key, TX_FIRST_AUDIO_MS");
+    say(A, "trx:0,false,tci;");
+    check(strstr(heard(A), "trx:0,false;") && radio_get_modem(),
+          "A's unkey answered at once, before the radio has played its last audio and unkeyed");
+    gui(-1);
+    check(!radio_get_modem() && txs.owner < 0, "then unkeyed");
+    say(A, "trx:0,true,tci;");
+    gui(-1);
+    check(radio_get_modem() && txs.owner == A, "A keys again");
+    tx_session_tick(now_ms() + TX_FIRST_AUDIO_MS + 100);
+    gui(-1);                            /* the unkey it queued runs */
+    check(!radio_get_modem() && txs.owner < 0 && strstr(heard(A), "trx:0,false;"),
+          "no audio for TX_FIRST_AUDIO_MS after the key: ended, A told so");
+}
+
 /* A start that ended before its key ran (its client's unkey, its client leaving, a TCI audio
  * start's second without its key) keys nothing: no one would hold that transmission */
 static void cancelled_keys_nothing(void) {
@@ -1082,6 +1109,90 @@ static void ask_no(void) {
 
 /* No answer within TCI_ASK_S is a No, with a note on the screen; an answer that comes after does nothing. The client
  * leaving takes its question off the screen, and the next client's start asks */
+/* A program that hangs up when its start is not confirmed at once (WSJT-X, JTDX: about a second after trx:0,true)
+ * and connects again: the question stays its time and is the client's, by its address, taken over by its
+ * new connection; an answer given after it left is kept for its next connection within GRANT_MS: Allow once for that
+ * one connection, No (or no answer) refusing it without a question; Always kept as ever */
+static void ask_client_reconnects(void) {
+    client_from(A, LAN_A, "WSJT-X");
+    say(A, "trx:0,true,tci;");
+    gui(-1);
+    check(stub_ask_id && stub_ask_shown == 1 && ask.ci == A, "A asks");
+    client_gone(A);
+    gui(-1);
+    check(stub_ask_id && ask.id && ask.ci == -1, "A hangs up: its question stays on the screen");
+    client_from(A, LAN_A, "WSJT-X");
+    say(A, "trx:0,true,tci;");
+    gui(-1);
+    check(strstr(heard(A), "trx:0,false;") && stub_ask_shown == 1 && ask.ci == A && !on_air(),
+          "A back and keying while it is open: refused, the question its own, not asked again");
+    client_gone(A);
+    gui(-1);
+    answer(TCI_ASK_ONCE);
+    check(!stub_ask_id && ask.id == 0 && grant.said == SAID_ONCE, "Allow once after it left: kept for its next connection");
+    client_from(B, LAN_B, "WSJT-X");
+    say(B, "trx:0,true;");
+    gui(-1);
+    check(strstr(heard(B), "trx:0,false;") && stub_ask_shown == 2 && !on_air(),
+          "another address, even with the same name: asked, not allowed by it");
+    answer(TCI_ASK_NO);
+    client_from(A, LAN_A, "WSJT-X");
+    say(A, "trx:0,true,tci;");
+    gui(-1);
+    check(radio_get_modem() && txs.owner == A && stub_ask_shown == 2, "A's next connection keys with its audio, no question");
+    unkey(A);
+    say(A, "trx:0,true;");
+    gui(-1);
+    check(on_air() && ptt_owner == A && stub_ask_shown == 2, "and again on that connection");
+    unkey(A);
+    client_gone(A);
+    client_from(A, LAN_A, "WSJT-X");
+    say(A, "trx:0,true;");
+    gui(-1);
+    check(strstr(heard(A), "trx:0,false;") && stub_ask_shown == 3 && !on_air(), "once: the connection after it is asked again");
+    client_gone(A);
+    gui(-1);
+    answer(TCI_ASK_NO);
+    check(grant.said == SAID_NO, "No after it left: kept");
+    client_from(A, LAN_A, "WSJT-X");
+    say(A, "trx:0,true;");
+    gui(-1);
+    check(strstr(heard(A), "trx:0,false;") && stub_ask_shown == 3 && !on_air(), "its next connection refused, no question");
+    client_gone(A);
+    client_from(A, LAN_A, "WSJT-X");
+    say(A, "trx:0,true;");
+    gui(-1);
+    check(strstr(heard(A), "trx:0,false;") && stub_ask_shown == 3, "and the one after it, while the No lasts");
+    grant.until_ms = now_ms() - 1;          /* its minute over */
+    client_gone(A);
+    client_from(A, LAN_A, "WSJT-X");
+    say(A, "trx:0,true;");
+    gui(-1);
+    check(stub_ask_id && stub_ask_shown == 4, "after it: asked again");
+    client_gone(A);
+    gui(-1);
+    ask_tick(now_ms() + ASK_MS + 1);
+    gui(-1);
+    check(!stub_ask_id && stub_ask_why == TCI_ASK_TIMEOUT && grant.said == SAID_NO,
+          "no answer after it left: its next connection refused a while");
+    grant.until_ms = now_ms() - 1;
+    client_from(A, LAN_A, "WSJT-X");
+    say(A, "trx:0,true;");
+    gui(-1);
+    check(stub_ask_id && stub_ask_shown == 5, "asked");
+    client_gone(A);
+    gui(-1);
+    answer(TCI_ASK_ALWAYS);
+    check(stub_ask_why == TCI_ASK_ALWAYS && tci_server_allowed(NULL, 0) == 1, "Always after it left: its address kept");
+    client_from(A, LAN_A, "WSJT-X");
+    say(A, "trx:0,true;");
+    gui(-1);
+    check(on_air() && ptt_owner == A && stub_ask_shown == 5, "its next connection keys, no question");
+    unkey(A);
+    check(tci_server_forget(LAN_A) && tci_server_allowed(NULL, 0) == 0, "forgotten");
+    memset(&grant, 0, sizeof(grant));
+}
+
 static void ask_timeout_and_gone(void) {
     uint32_t id;
 
@@ -1106,11 +1217,12 @@ static void ask_timeout_and_gone(void) {
     check(stub_ask_id && ask.ci == B && stub_ask_shown == 2, "B asks");
     client_gone(B);
     gui(-1);
-    check(!stub_ask_id && stub_ask_why == TCI_ASK_GONE && ask.id == 0, "B leaves: its question goes with it");
+    check(stub_ask_id && ask.id && ask.ci == -1 && stub_ask_shown == 2, "B leaves: its question stays (B may be back)");
     client_from(B, LAN_B, "");
     say(B, "trx:0,true;");
     gui(-1);
-    check(stub_ask_id && ask.ci == B && stub_ask_shown == 3, "B back: asked again");
+    check(stub_ask_id && ask.ci == B && stub_ask_shown == 2 && strstr(heard(B), "trx:0,false;"),
+          "B back and keying: refused, the open question its own, not asked again");
     answer(TCI_ASK_ONCE);
     say(B, "trx:0,true;");
     gui(-1);
@@ -1699,6 +1811,7 @@ int main(void) {
         {"The radio back on receive by itself during A's transmission", back_on_receive},
         {"A's key never takes (no TX on this frequency)", never_takes},
         {"A's key reaches the LVGL thread more than a second late", late_key},
+        {"A TCI audio start whose key takes 0.8 s: its audio waited for from the key", slow_tci_key},
         {"Starts ended before their key ran key nothing", cancelled_keys_nothing},
         {"Two TCI audio starts", two_tci_starts},
         {"TCI audio in DIGU and DIGL", tci_audio_in_dig},
@@ -1714,6 +1827,8 @@ int main(void) {
         {"A client on the network asks: Always, kept across a reconnect and a restart, then forgotten", ask_always},
         {"A client on the network asks: No", ask_no},
         {"A client on the network asks: no answer in time, the client leaving", ask_timeout_and_gone},
+        {"A client that hangs up and connects again (WSJT-X, JTDX): the question stays, its answer kept",
+         ask_client_reconnects},
         {"Not asked: a program on the radio, a paired browser, the radio on the air, Listen only", ask_not_for},
         {"Asking turned off", ask_off},
         {"CW: a client's text on the radio's keyer, in CW and CW-R", cw_keyed},

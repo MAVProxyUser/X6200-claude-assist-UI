@@ -9819,7 +9819,12 @@ the radio, hears it, keys it and sends CW with it.
   a keyboard's arrows and Enter do the same, Esc is No. No answer in 20 s is
   No, with a note on the screen.
   - Allow once: the client may transmit while that connection stays open; it
-    is asked again when it connects again. Always: kept in
+    is asked again when it connects again. A client that hangs up while it
+    is asked (WSJT-X and JTDX do, a second after a key the radio does not
+    confirm) leaves its question on the screen for its 20 s; back meanwhile,
+    it is the same question. Answered after it left, Allow once lets its
+    next connection within a minute transmit, and No (or no answer) refuses
+    that connection's starts without a question for that minute. Always: kept in
     `/mnt/tci_allowed.conf` (address, name, when allowed, when last seen),
     through restarts too, up to sixteen clients; with sixteen kept, Always
     is Allow once and a note says so. No, or no answer: its starts are
@@ -10007,9 +10012,19 @@ the radio, hears it, keys it and sends CW with it.
     changes are answered with the radio's state, unchanged, and they stop
     with a Rig Failure.
   - Their first over asks on the radio (Ask before TX, above) and does not
-    go out. Choose Always for a PC that keeps its address: with Allow once,
+    go out, and WSJT-X turns its Enable Tx off. Answer the question on the
+    radio, press Enable Tx again, and the next over goes out. (Should the
+    program hang up meanwhile, its Rig Control Error, the question stays on
+    the radio and the answer still counts when it connects again.) Choose
+    Always for a PC that keeps its address: with Allow once,
     each restart of the program, or a change in its Radio settings, which
     connects again, asks again.
+  - While one of them transmits, the radio sends it no receive audio (it has
+    no use for it then): over the X6200's WiFi its 6 Mbit/s of transmit
+    audio and the 3 Mbit/s of receive audio together were more than the
+    link carries, and its overs were cut short. Its first audio may come up
+    to 2 s after the key, and its unkey is answered at once while the radio
+    plays out its last half second or so.
 
 ## Hamlib (NET rigctl)
 

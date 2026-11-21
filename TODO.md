@@ -23,6 +23,17 @@ Open:
   peak for 1 W (params tci_tx_level) and scaled by PWR. Bench (tones.py x6200 x6100 --w 1, the tones at -10.5 dBFS,
   9.5 dB over the -20 that gave 1.1 W): at 0.1 W median 0.1 W, peak 0.2 W; at 1 W median 0.9 W, peak 1.0 W; the
   level -22.75 dBFS for 1 W after. tools/txlevel models it (10 TCI cases).
+- WSJT-X over TCI TRANSMITS (2026-11-21 05:11-05:22, the X6200 into the X6100 through 80 dB): ten full overs in a row,
+  0.1 W setting medians 0.1 W, 1 W setting medians 0.9-1.0 W, no Rig Control Error; the X6100's own FT8 app decoded
+  "CQ N0CALL" at 0.1 W once, then nothing in the next run, attenuator on or off: the CQ reaches the air 1.5-2 s late
+  (WSJT-X's audio over WiFi plus the X6200's 0.5 s), at the edge of FT8's DT. To do: measure its DT; consider asking
+  WSJT-X for 24 kHz or int16 (JTDX's client reads float32 48 kHz only) or a smaller pre-roll. Fixed on the way
+  (tci_server.c): the TX question kept when the client hangs up (its answer for its next connection); text ahead of
+  the RX audio and the TCP send buffer capped (answers 0.1-2.3 s late, now 7-99 ms with audio streaming, and the
+  stream at its full rate); silence counted from the key, the first audio given 2 s; no RX audio to the client
+  while it transmits; its unkey answered at once; the remote state's "ask". The bench run is in the scratchpad
+  (wsjtx_tx.py, enabletx.dylib presses Enable Tx, shmshim.dylib, the 127.0.0.1 relay), not in the repo.
+- The X6100's TCI RX audio to a recorder on the Mac stops after about a minute (tones.py's TciRx, 2026-11-20 and -21).
 - WSJT-X itself over TCI (2026-11-21, WSJT-X Improved 3.2.0 for Apple Silicon on the owner's Mac, N0CALL, the X6200):
   connects ("TCI Client RX1"), follows and sets the dial, streams the receive audio (its waterfall right), but never
   decodes: its decoder (jt9) is never asked, even with a stand-in TCI server on the Mac sending a clean ft8sim CQ in

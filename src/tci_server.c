@@ -111,8 +111,13 @@
 #define MAX_CLIENTS   4
 #define IN_SIZE       32768         /* a client's frame: commands, or TX audio (WSJT-X's: 64 + 2048 * 8 bytes) */
 #define OUT_SIZE      262144        /* queued output; RX audio takes up to audio_budget() of it */
-#define URG_SIZE      2048          /* queued TX_CHRONO frames: 0.6 s of them, longer than TX_SILENCE_MS */
+#define URG_SIZE      32768         /* queued TX_CHRONO frames and text, ahead of the RX audio (client_flush) */
 #define NOTSENT_LOWAT 16384         /* what the kernel holds unsent for a client: the rest waits in out */
+/* A TCP client's send buffer (Linux doubles it: 96 kB), what may be in flight to it. Left to grow (tcp_wmem: up to
+ * 4 MB), on a link slower than the RX audio (the X6200's WiFi at WSJT-X's 385 kB/s) it held a second and more of the
+ * audio ahead of every answer, urg or not, and WSJT-X and JTDX hung up waiting for their trx (2026-11-21). 96 kB is
+ * a quarter second there, and over Tailscale at 150 ms still 640 kB/s */
+#define SNDBUF_TCP    49152
 #define TEXT_MAX      2048          /* a text message, fragments joined */
 #define IDLE_MS       60000         /* a client silent this long is gone (the knob pings every 2 s) */
 #define PING_MS       20000         /* a client silent this long is pinged: a browser page (the remote's audio) in a
@@ -130,6 +135,9 @@
 #define FUNNEL_STALE_MS 6000        /* over Funnel: silent this long, its page may be gone without a word */
 #define ASK_MS        (TCI_ASK_S * 1000)   /* a start asked on the screen: no answer this long is a No */
 #define TX_SILENCE_MS 500           /* keyed with TCI audio: unkeyed without frames this long */
+/* ... and before its first frame, from the key: over the X6200's WiFi WSJT-X's first frames came 0.5 s and more
+ * after it, behind its 6 Mbit/s of TX audio (each frame twice its size) and our 3 Mbit/s of RX audio (2026-11-21) */
+#define TX_FIRST_AUDIO_MS 2000
 #define TX_LIMIT_MS   (180 * 1000)
 #define BT_PING_MS    2000          /* over Bluetooth: silent this long, it is pinged (its answer shows the link is up) */
 #define BT_TX_SILENT_MS 5000        /* over Bluetooth: silent this long while it transmits, its transmission ends. The
@@ -305,6 +313,10 @@ static struct {
     /* A base whose ALC does not hold the power setting (the X6200): its audio through the drive loop (tx_hold.h), at
      * its own learned peak (params.tci_tx_level) */
     tx_hold_t   hold;
+    /* What the over had, for the log when it ends for silence or the limit: audio frames taken, frames dropped (the
+     * key not yet taken, another client's), TX_CHRONO frames sent */
+    uint32_t    n_taken, n_early, n_chrono;
+    bool        took;       /* the socket thread has seen this start's key take (tx_session_tick) */
 } txs;
 
 /* A client's CW (cw_macros): its text keyed by the radio's own keyer (cw_encoder.c), the CW keyboard's and the stored
@@ -332,12 +344,26 @@ static atomic_uint          cw_refused;         /* the last text it refused */
 static atomic_uint          cw_send;            /* the keyer's number for the last one it put there (cw_encoder.h) */
 static atomic_uint_fast64_t cw_said_ms;         /* the last note on the screen about a client's CW */
 
-/* The question on the radio's screen (tx_permit): one at a time, for one client's start. Socket thread */
+/* The question on the radio's screen (tx_permit): one at a time, for one client's start. It is the client's, known
+ * by its address as Always keeps it (the name a program gives protects nothing), not its connection's: WSJT-X and JTDX hang up about a second after a trx:0,true that
+ * is not confirmed and connect again, so the question used to go with that connection before anyone could answer it,
+ * and came back at their next over, every 30 s, never answerable (2026-11-21). It stays open for its TCI_ASK_S; the
+ * same client back meanwhile takes it over, and an answer given after it left is kept for its next connection
+ * (grant). Socket thread */
 static struct {
     uint32_t id;            /* 0: none open */
-    int      ci;
+    int      ci;            /* the connection asking now, -1 when it has gone (the question stays) */
+    char     ip[48];        /* the client asked about */
+    char     app[32];
     uint64_t until_ms;
 } ask;
+/* An answer that came after its client had gone: for its next connection from the same address within GRANT_MS. Allow once for that one connection, No (or no answer) refusing without a question until it expires */
+#define GRANT_MS 60000
+static struct {
+    char     ip[48];
+    uint8_t  said;          /* SAID_ONCE, SAID_NO; SAID_NOTHING none */
+    uint64_t until_ms;
+} grant;
 static uint32_t             ask_gen;
 static atomic_uint_fast64_t ask_answer;    /* the operator's answer from the LVGL thread: id << 8 | tci_ask_t */
 
@@ -657,27 +683,42 @@ static void client_frame_within(client_t *c, size_t limit, uint8_t opcode, const
     pthread_mutex_unlock(&c->lock);
 }
 
-/* A TX_CHRONO: through urg, ahead of what waits in out (client_flush) */
-static void client_chrono(client_t *c, const audio_hdr_t *h) {
+/* A frame through urg, ahead of what waits in out (client_flush); false when urg has no room for it */
+static bool client_urgent(client_t *c, uint8_t opcode, const void *p, size_t l) {
     uint8_t head[WS_HEAD_MAX];
-    size_t  hl = ws_frame_head(head, WS_OP_BINARY, sizeof(*h));
+    size_t  hl = ws_frame_head(head, opcode, l);
+    bool    put = false;
 
     pthread_mutex_lock(&c->lock);
-    if (c->fd >= 0 && c->up && c->urg_len + hl + sizeof(*h) <= URG_SIZE) {
+    if (c->fd >= 0 && c->up && c->urg_len + hl + l <= URG_SIZE) {
         memcpy(c->urg + c->urg_len, head, hl);
-        memcpy(c->urg + c->urg_len + hl, h, sizeof(*h));
-        c->urg_len += hl + sizeof(*h);
+        memcpy(c->urg + c->urg_len + hl, p, l);
+        c->urg_len += hl + l;
         client_flush(c);
+        put = true;
     }
     pthread_mutex_unlock(&c->lock);
+    return put;
+}
+
+/* A TX_CHRONO: through urg */
+static void client_chrono(client_t *c, const audio_hdr_t *h) {
+    client_urgent(c, WS_OP_BINARY, h, sizeof(*h));
 }
 
 static void client_frame(client_t *c, uint8_t opcode, const void *p1, size_t l1, const void *p2, size_t l2) {
     client_frame_within(c, OUT_SIZE, opcode, p1, l1, p2, l2);
 }
 
+/* Text through urg too, in its order, ahead of the RX audio: behind up to audio_budget() of it (0.65 s of WSJT-X's
+ * 385 kB/s stream, more when the WiFi falls behind) a trx answer came after the second WSJT-X and JTDX wait for one,
+ * and they hung up (their Rig Control Error), keyed or not (2026-11-21: answered 0.1-2.3 s late). Out only when urg
+ * is full, for a client that reads nothing */
 static void client_text(client_t *c, const char *s) {
-    client_frame(c, WS_OP_TEXT, s, strlen(s), NULL, 0);
+    size_t n = strlen(s);
+
+    if (!client_urgent(c, WS_OP_TEXT, s, n))
+        client_frame(c, WS_OP_TEXT, s, n, NULL, 0);
 }
 
 static void client_textf(client_t *c, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
@@ -723,8 +764,10 @@ static void cap_update(void) {
 static void ask_end(int a);
 
 static void client_close(client_t *c) {
-    if (ask.id && ask.ci == (int)(c - clients))
-        ask_end(TCI_ASK_GONE);      /* its question goes from the screen with it */
+    if (ask.id && ask.ci == (int)(c - clients)) {
+        ask.ci = -1;                /* its question stays: the answer is kept for its next connection (grant) */
+        LV_LOG_USER("tci: %s left, its question stays on the screen", ask.ip);
+    }
     ctl_release(CTL_TCI, (int)(c - clients));
     pthread_mutex_lock(&c->lock);
     if (c->fd >= 0) {
@@ -1524,19 +1567,24 @@ static void client_who(const client_t *c, char *buf, size_t n) {
 /* What became of the question, answered or not: kept for its client's connection, or for its address with Always;
  * the box on the screen is told, which closes it and puts a note up for no answer and for Always. Socket thread */
 static void ask_end(int a) {
-    client_t   *c = &clients[ask.ci];
-    ask_close_t m = {.id = ask.id, .why = a};
+    client_t    gone = {0};     /* the client that left: what is said goes to its next connection (grant) */
+    client_t   *c    = ask.ci >= 0 ? &clients[ask.ci] : &gone;
+    ask_close_t m    = {.id = ask.id, .why = a};
     char        who[96];
     const char *what;
 
     if (!ask.id)
         return;
     ask.id = 0;
+    if (c == &gone) {
+        snprintf(gone.ip, sizeof(gone.ip), "%s", ask.ip);
+        snprintf(gone.app, sizeof(gone.app), "%s", ask.app);
+    }
     client_who(c, who, sizeof(who));
     switch (a) {
         case TCI_ASK_ONCE:
             c->said = SAID_ONCE;
-            what    = "allowed while it stays connected";
+            what    = c == &gone ? "allowed for its next connection" : "allowed while it stays connected";
             break;
         case TCI_ASK_ALWAYS:
             if (allowed_add(c->ip, c->app)) {
@@ -1545,23 +1593,35 @@ static void ask_end(int a) {
             } else {        /* no room: the operator said yes, so this connection may */
                 c->said = SAID_ONCE;
                 m.why   = TCI_ASK_FULL;
-                what    = "allowed while it stays connected, no room to keep it";
+                what    = c == &gone ? "allowed for its next connection, no room to keep it"
+                                     : "allowed while it stays connected, no room to keep it";
             }
             break;
         case TCI_ASK_GONE:
-            what = "no answer, it left (or asking was turned off) first";
+            what = "asking was turned off, its next start keys";
             break;
         case TCI_ASK_TIMEOUT:
             c->said = SAID_NO;
-            what    = "no answer, refused while it stays connected";
+            what    = c == &gone ? "no answer, refused for its next connection a while"
+                                 : "no answer, refused while it stays connected";
             break;
         default:
             c->said = SAID_NO;
-            what    = "refused while it stays connected";
+            what    = c == &gone ? "refused for its next connection a while" : "refused while it stays connected";
             break;
+    }
+    if (c == &gone && gone.said != SAID_NOTHING) {
+        snprintf(grant.ip, sizeof(grant.ip), "%s", ask.ip);
+        grant.said     = gone.said;
+        grant.until_ms = now_ms() + GRANT_MS;
     }
     scheduler_put(ask_close_apply, &m, sizeof(m));
     LV_LOG_USER("tci: %s to transmit: %s", who, what);
+}
+
+/* The client asked about: the same address (the name it gives is shown, and protects nothing) */
+static bool ask_is(const client_t *c, const char *ip) {
+    return !strcmp(c->ip, ip);
 }
 
 /* The question for client ci's start, unless one is open: its own (a second start asks nothing more) or another
@@ -1571,8 +1631,11 @@ static void ask_open(int ci) {
     ask_show_t m = {.seconds = TCI_ASK_S};
 
     if (ask.id) {
-        if (ask.ci != ci)
-            LV_LOG_USER("tci: %s wants to transmit: refused, the radio asks about %s now", c->ip, clients[ask.ci].ip);
+        if (ask.ci != ci && ask_is(c, ask.ip)) {
+            ask.ci = ci;            /* the client asked about, back on a new connection: the question is its own */
+        } else if (ask.ci != ci) {
+            LV_LOG_USER("tci: %s wants to transmit: refused, the radio asks about %s now", c->ip, ask.ip);
+        }
         return;
     }
     if (!++ask_gen)
@@ -1584,6 +1647,8 @@ static void ask_open(int ci) {
     ask.id       = m.id;
     ask.ci       = ci;
     ask.until_ms = now_ms() + ASK_MS;
+    snprintf(ask.ip, sizeof(ask.ip), "%s", c->ip);
+    snprintf(ask.app, sizeof(ask.app), "%s", c->app);
     LV_LOG_USER("tci: %s wants to transmit: asked on the screen", m.who);
 }
 
@@ -1616,6 +1681,12 @@ static bool tx_permit(int ci) {
         if (remote_server_session_check(c->token, &role, &tx, NULL, 0))
             return role >= 1 && tx;
         c->token[0] = 0;
+    }
+    if (c->said == SAID_NOTHING && grant.said != SAID_NOTHING && now_ms() < grant.until_ms &&
+        ask_is(c, grant.ip)) {
+        c->said = grant.said;       /* the answer given after its last connection left */
+        if (grant.said == SAID_ONCE)
+            grant.said = SAID_NOTHING;      /* once: for this one connection */
     }
     if (c->said == SAID_ONCE)
         return true;
@@ -1781,6 +1852,8 @@ static void handle_cmd(int ci, char *line) {
                 if (tci) {
                     txs.owner         = ci;
                     txs.start_ms      = now_ms();
+                    txs.n_taken = txs.n_early = txs.n_chrono = 0;
+                    txs.took    = false;
                     txs.last_audio_ms = txs.start_ms;
                     txs.chrono_t0     = 0;
                     txs.chrono_n      = 0;
@@ -1795,10 +1868,15 @@ static void handle_cmd(int ci, char *line) {
                     atomic_store(&key_refused, key_gen);    /* lost: refused, as the LVGL thread would */
             }
         } else {
-            if (txs.owner == ci || ptt_owner == ci || cw_owner == ci)
+            if (txs.owner == ci || ptt_owner == ci || cw_owner == ci) {
+                /* Its unkey answered now: the X6200 has 1.2-1.4 s of the over still to play, and the radio's state
+                 * says receive only after it, later than the second WSJT-X and JTDX wait, which then hung up (their
+                 * Rig Control Error, 2026-11-21). The state's own trx:0,false follows */
+                client_text(c, "trx:0,false;");
                 tx_session_end(ci, true);
-            else
+            } else {
                 client_text(c, "trx:0,false;");     /* not this client's transmission */
+            }
         }
     } else if (cw) {
         if (more) {
@@ -1969,8 +2047,11 @@ static void handle_tx_audio(int ci, const uint8_t *frame, size_t len) {
     int16_t     pcm[2048];
     int16_t     out[2048 * 6 + 2];
 
-    if (len < sizeof(h) || txs.owner != ci || !atomic_load(&txs.keyed))
+    if (len < sizeof(h) || txs.owner != ci || !atomic_load(&txs.keyed)) {
+        if (len >= sizeof(h))
+            txs.n_early++;
         return;
+    }
     memcpy(&h, frame, sizeof(h));
     if (h.type != AT_TX)
         return;
@@ -1993,6 +2074,7 @@ static void handle_tx_audio(int ci, const uint8_t *frame, size_t len) {
     if (h.sample_rate >= 8000 && h.sample_rate <= 48000)
         txs.rate = h.sample_rate;
     txs.last_audio_ms = now_ms();
+    txs.n_taken++;
     size_t k = resample(pcm, frames, txs.rate, out, sizeof(out) / sizeof(out[0]));
     tx_level_norm(out, k);
     tx_hold_audio(&txs.hold, out, k);
@@ -2039,13 +2121,24 @@ static void tx_session_tick(uint64_t now) {
         }
         return;
     }
+    if (!txs.took) {
+        /* The key just took, and its client is told trx:0,true now: its audio is waited for from here. Counted from
+         * its start, a key the GUI thread took more than TX_SILENCE_MS for (0.5-0.8 s: the network voice stream
+         * opened, the modem bit set) was ended at the first round after it, before the client could send a frame:
+         * WSJT-X on the X6200 lost two overs in three, then every one (2026-11-21, "0 audio frames taken") */
+        txs.took          = true;
+        txs.last_audio_ms = now;
+    }
     if (!radio_get_modem()) {               /* the SWR guard or an app took the modem bit */
         LV_LOG_USER("tci: start %u of %s ended: the modem bit went off after %llu ms", key_gen, c->ip,
                     (unsigned long long)(now - txs.start_ms));
         tx_session_end(txs.owner, false);
         return;
     }
-    if (now - txs.last_audio_ms > TX_SILENCE_MS || now - txs.start_ms > TX_LIMIT_MS) {
+    if (now - txs.last_audio_ms > (txs.n_taken ? TX_SILENCE_MS : TX_FIRST_AUDIO_MS) || now - txs.start_ms > TX_LIMIT_MS) {
+        LV_LOG_USER("tci: start %u of %s ended: %s after %llu ms (%u audio frames taken, %u dropped, %u TX_CHRONO)",
+                    key_gen, c->ip, now - txs.start_ms > TX_LIMIT_MS ? "the time limit" : "no audio",
+                    (unsigned long long)(now - txs.start_ms), txs.n_taken, txs.n_early, txs.n_chrono);
         tx_session_end(txs.owner, false);
         return;
     }
@@ -2073,6 +2166,7 @@ static void tx_session_tick(uint64_t now) {
                          .type = AT_CHRONO, .channels = f.ch};
         client_chrono(c, &h);
         txs.chrono_n++;
+        txs.n_chrono++;
     }
 }
 
@@ -2190,13 +2284,18 @@ static void *capture_thread(void *arg) {
 
             if (!on[i])
                 continue;
+            /* The client transmitting with its TCI audio gets no RX audio meanwhile: it has no use for it, and on the
+             * X6200's WiFi its 3 Mbit/s held back the client's own TX audio (6 Mbit/s from WSJT-X) until the over
+             * starved. Its place in the stream is kept, the frames not sent */
+            bool sending = txs.owner == i && atomic_load(&txs.keyed);
             memcpy(c->acc + c->acc_n, hi ? x48 : x24, n * sizeof(float));
             c->acc_n += n;
             while (c->acc_n >= f->samples) {
                 audio_hdr_t h = {.receiver = 0, .sample_rate = f->rate, .format = f->type,
                                  .length = f->samples * f->ch, .type = AT_RX, .channels = f->ch};
                 size_t bytes = tci_encode(c->acc, f->samples, f->ch, f->type, pkt);
-                client_frame_within(c, audio_budget(f), WS_OP_BINARY, &h, sizeof(h), pkt, bytes);
+                if (!sending)
+                    client_frame_within(c, audio_budget(f), WS_OP_BINARY, &h, sizeof(h), pkt, bytes);
                 c->acc_n -= f->samples;
                 memmove(c->acc, c->acc + f->samples, c->acc_n * sizeof(float));
             }
@@ -2468,6 +2567,7 @@ static void accept_client(int listen_fd) {
     if (fd < 0)
         return;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &(int){SNDBUF_TCP}, sizeof(int));
 #ifdef TCP_NOTSENT_LOWAT
     setsockopt(fd, IPPROTO_TCP, TCP_NOTSENT_LOWAT, &(int){NOTSENT_LOWAT}, sizeof(int));
 #endif

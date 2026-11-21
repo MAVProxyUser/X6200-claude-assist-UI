@@ -121,6 +121,7 @@
 #include "app_sentry.h"      /* "open sentry L" */
 #include "bench_banner.h"    /* "banner TEXT" */
 #include "smeter.h"
+#include "tci_ask.h"
 #include "tci_server.h"
 #include "tci_ws.h"
 #include "tx_meters.h"
@@ -279,6 +280,8 @@ typedef struct {
     int32_t tune, tune_s;   /* TUNE for an external tuner on, its time limit */
     int32_t rxo;            /* the radio holds itself receive only (radio_rx_only_held: the Sentry, or a session
                              * without TX in control); an int, not a bool: no padding for memcmp to see */
+    int32_t ask;            /* a TCI client's question to transmit is on the screen (tci_ask_open): the bench answers
+                             * it with the knob only while it is */
     bool    tx, lock;
     bool    ulock;          /* the user's lock alone (LOCK), not an app's hold: the page's LOCK button */
     bool    cwrise;         /* CW's tone rises with the dial, as CW-R's (the X6200): its CW passband the other side */
@@ -1205,6 +1208,7 @@ static void pstate_read(pstate_t *s) {
     s->tune  = ext_tune_on();
     s->tune_s = ext_tune_limit_s();
     s->rxo   = radio_rx_only_held();
+    s->ask   = tci_ask_open();
     const char *app = main_screen_digital_app();
     memset(s->app, 0, sizeof(s->app));      /* compared whole with memcmp */
     snprintf(s->app, sizeof(s->app), "%s", app ? app : "");
@@ -1221,12 +1225,12 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "state {\"freq\":%d,\"mode\":%d,\"flo\":%d,\"fhi\":%d,\"kt\":%d,\"agc\":%d,\"pre\":%d,\"att\":%d,"
              "\"nb\":%d,\"nr\":%d,\"sql\":%d,\"rfg\":%d,\"vol\":%d,\"pwr\":%d.%d,\"step\":%d,\"zoom\":%d,"
              "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d,"
-             "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"txio\":%d,\"txqo\":%d,\"txig\":%d,\"txip\":%d,"
+             "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"ask\":%d,\"txio\":%d,\"txqo\":%d,\"txig\":%d,\"txip\":%d,"
              "\"linein\":%d,"
              "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
-             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->txio, s->txqo, s->txig, s->txip, s->linein, s->app, s->win, s->pg, s->fp);
+             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->app, s->win, s->pg, s->fp);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */
