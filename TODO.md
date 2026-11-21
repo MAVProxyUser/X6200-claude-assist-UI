@@ -65,7 +65,13 @@ Open:
   H2C 0x69 buffer over-read (mainline's para[6]), buildroot/x6200/rtw88 0002/0003. Still open: on channel 11 the X6200
   stalls 1-1.7 s now and then (two 5-min runs: 88 % and 79 % mean; the X6100 on that AP 100 %), not coex, not the
   GPS's paging: its 2457.6 MHz harmonic is the suspect (the HackRF sweep); its join scans see one access point of
-  three (once missing a -47 dBm one) and with background scans off it stays on whatever the join took. Open: why the stand-in
+  three (once missing a -47 dBm one) and with background scans off it stays on whatever the join took.
+  PROVEN 2026-11-21 (HackRF beside the X6200 on a 2.4 GHz antenna, receive only, 30 s medians, lna 24 vga 24): with the
+  X6200 on, steady lines at 2457.60 MHz (+7.3 dB over the band at 50 kHz bins, +11.9 at 10 kHz) and 2470.61 MHz
+  (+10.6), both inside channel 11, smaller ones near 2444.6 and 2453; switched off, none of them, the rest of the band
+  the same to 0.2 dB. 2457.6 MHz = 10 x 245.76 = 40 x 61.44 = 200 x 12.288 MHz, the X6200's own clocks. Next: a notch
+  for it in the WiFi chip's baseband (Realtek's NBI / CSI mask, which rtw88 does not do for the 8723D), tried in
+  debugfs first; shielding or a USB WiFi adapter on a lead away from the radio. Open: why the stand-in
   server on the Mac did not decode either. The run (wsjtx_tx.py, enabletx.dylib, shmshim.dylib, the 127.0.0.1 relay,
   macOS's 4 MB kern.sysv.shmmax worked round) is in the scratchpad, not in the repo.
 - The X6100's TCI receive audio (or tones.py's recorder) repeated 1.8 s of it exactly, 2.000 s later (correlation
