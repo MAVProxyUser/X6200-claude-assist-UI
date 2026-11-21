@@ -11160,12 +11160,15 @@ for i in $(seq 600); do cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_
 The X6100 shows its power chip's temperature instead (from v0.3.12.41): the
 AXP223's own sensor, read through its ADC driver, steady to 0.2 °C on the
 owner's X6100. The title bars and clocks show it as the X6200's processor
-temperature is shown; the Walkie's info panel labels it `PMU` (the X6200's
-`CPU`). It sits on the same board as the processor and follows its
-heat, but reads cooler than the processor's own die would (about 40 °C idle
-where an X6200's processor reads about 53 °C). Its kernel leaves the
-processor sensor's driver out, because that sensor does not work on an X6100.
-On the owner's X6100 (2026-11-19, the first kernel with the driver, from
+temperature is shown; the Walkie's info panel labels it `PMU`. The X6200 has
+the same power chip besides its processor sensor, so its Walkie panel shows
+both in the one place by turns, 4 seconds each: `CPU 53C`, then `PMU 30C`
+(its title bars and clocks keep the processor's). The power chip sits on
+the same board as the processor and follows its heat, but reads cooler than
+the processor's own die (about 40 °C idle on the X6100; on the X6200 the
+power chip about 30 °C where its processor reads 53 °C). The X6100's kernel
+leaves the processor sensor's driver out, because that sensor does not work
+on an X6100. On the owner's X6100 (2026-11-19, the first kernel with the driver, from
 v0.3.12.32's update) its raw value jumped by up to 57 °C from one fifth of a
 second to the next (42 to 99 °C, where the X6200's moves by 1 °C), so the
 thermal zone below slowed its processor at random and a spike past 110 °C

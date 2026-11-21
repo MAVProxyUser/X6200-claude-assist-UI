@@ -150,6 +150,19 @@ bool clock_temp_is_pmic(void) {
     return temp_pmic;
 }
 
+/* The power chip's temperature on any radio (the X6200 shows it beside its processor's), read again every 5 s */
+int clock_pmu_temp(void) {
+    static time_t last;
+    static int    c = CLOCK_NO_TEMP;
+    time_t        now = time(NULL);
+
+    if (now - last >= 5) {
+        last = now;
+        c    = pmic_temp();
+    }
+    return c;
+}
+
 /* After the power, none there, nothing shown */
 static void temp_show(void) {
     int c = clock_cpu_temp();

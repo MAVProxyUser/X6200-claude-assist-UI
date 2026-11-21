@@ -10221,7 +10221,16 @@ static void show_walkie(void) {
             if (fscanf(fl, "%lf", &ld) != 1) ld = 0;
             fclose(fl);
         }
-        if (c != CLOCK_NO_TEMP)         /* the X6100's is its power chip's: PMU, not CPU */
+        int    pmu = clock_pmu_temp();
+
+        /* the X6200: its processor's and its power chip's (AXP223) by turns in the one place, 4 s each (the owner:
+         * "use the same space and just alternate them"; both beside the load wrapped the line, "TX 4 W" onto a
+         * fourth); the two the same width, so nothing moves. The X6100: the power chip's only (its processor
+         * sensor does not convert on that board), PMU, not CPU */
+        if (c != CLOCK_NO_TEMP && !clock_temp_is_pmic() && pmu != CLOCK_NO_TEMP)
+            snprintf(sy1, sizeof(sy1), "%s %dC  LD %.1f", (time(NULL) / 4) % 2 ? "PMU" : "CPU",
+                     (time(NULL) / 4) % 2 ? pmu : c, ld);
+        else if (c != CLOCK_NO_TEMP)
             snprintf(sy1, sizeof(sy1), "%s %dC  LD %.1f", clock_temp_is_pmic() ? "PMU" : "CPU", c, ld);
         else snprintf(sy1, sizeof(sy1), "LOAD %.1f", ld);
     }

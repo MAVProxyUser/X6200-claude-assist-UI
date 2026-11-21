@@ -43,6 +43,8 @@ const char *clock_hm(const struct tm *tm, char *buf, size_t size);
 int clock_cpu_temp(void);
 /* clock_cpu_temp's last reading is the power chip's (the X6100), not the processor's: label it so ("PMU") */
 bool clock_temp_is_pmic(void);
+/* The power chip's (AXP223's) temperature on either radio, CLOCK_NO_TEMP when it cannot be read; every 5 s */
+int clock_pmu_temp(void);
 
 void clock_tz_init();
 void clock_tz_set(const char *posix);
