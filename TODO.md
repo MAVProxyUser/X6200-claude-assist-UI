@@ -22,7 +22,17 @@ Open:
   1.1 W at 0.1 W); now it goes through the apps' drive loop (tx_level.c, power_hold), the learned level kept as the
   peak for 1 W (params tci_tx_level) and scaled by PWR. Bench (tones.py x6200 x6100 --w 1, the tones at -10.5 dBFS,
   9.5 dB over the -20 that gave 1.1 W): at 0.1 W median 0.1 W, peak 0.2 W; at 1 W median 0.9 W, peak 1.0 W; the
-  level -22.75 dBFS for 1 W after. tools/txlevel models it (10 TCI cases). Not yet run: WSJT-X itself over TCI.
+  level -22.75 dBFS for 1 W after. tools/txlevel models it (10 TCI cases).
+- WSJT-X itself over TCI (2026-11-21, WSJT-X Improved 3.2.0 for Apple Silicon on the owner's Mac, N0CALL, the X6200):
+  connects ("TCI Client RX1"), follows and sets the dial, streams the receive audio (its waterfall right), but never
+  decodes: its decoder (jt9) is never asked, even with a stand-in TCI server on the Mac sending a clean ft8sim CQ in
+  our framing (jt9 decodes the same file), so the fault is WSJT-X's on that Mac, not the radio's stream. Not the
+  usual install: macOS sets kern.sysv.shmmax only at boot (4 MB; WSJT-X wants 50 MB, its fix a LaunchDaemon and a
+  reboot), so it ran with a file-backed shared-memory shim (DYLD_INSERT_LIBRARIES, the app re-signed ad hoc), and
+  through a 127.0.0.1 relay (the re-signed app got no Local Network access to the radio). TX from WSJT-X not yet
+  tried: its UDP control cannot press Enable Tx, and a Reply needs a decode. With the radio's stream its waterfall
+  also drew period lines far more often than every 15 s (not with the stand-in's steady frames): the stream's bursts?
+  A run with the Mac's shared memory raised at boot would tell the shim from WSJT-X.
 - The X6100's TCI receive audio (or tones.py's recorder) repeated 1.8 s of it exactly, 2.000 s later (correlation
   1.0000, so not RF) in the 1 W pass of that run, the X6100's receiver near full scale (AGC off, -3 dBFS):
   ~/.config/x6x00-bench/runs/20261121-020143-tones-tcihold/usb-1.0W.wav. Its tone fits from 2000 Hz on missed.
