@@ -278,8 +278,9 @@ The rest, left as it is unless you have a reason:
   base (raised up to 12 dB for a quiet client, lowered for a loud one, the
   gain set once per transmission so FT8 and voice do not pump). The audio's
   hop from the processor to the base adds a 2nd harmonic that grows with the
-  level: a client at full scale went out with a copy at twice the audio
-  frequency only 25-28 dB under the signal; levelled, 43-46 dB under. The
+  level: a client at half scale went out with a copy at twice the audio
+  frequency only 28 dB under the signal (at 0.3 of full scale 33 dB, more
+  at full scale); levelled, 43-46 dB under whatever the client sends. The
   base's power control makes the set power from that level (at the very top
   of a weak supply it can cost a few tenths of a dB).
 - **The calibration belongs to its radio.** The IQ offsets and IQ balance

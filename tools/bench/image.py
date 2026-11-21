@@ -193,8 +193,16 @@ def main():
         raise Refused(f"{r.name}: {k} {v} not taken")
 
     def setw(w):
-        txr.send(f"set pwr {round(w * 10)}")
-        txr.wait(f"{w} W", lambda: abs(txr.pwr() - w) < 0.05, 5)
+        # set again until it shows: right after a band change the GUI holds TX at 0 W for a moment and a power set
+        # then can be lost (12 m and 10 m at 10 W, 2026-11-20: "did not come within 5 s" twice)
+        for tries in (1, 2, 3):
+            txr.send(f"set pwr {round(w * 10)}")
+            try:
+                txr.wait(f"{w} W", lambda: abs(txr.pwr() - w) < 0.05, 5)
+                return
+            except Refused:
+                if tries == 3:
+                    raise
 
     def over(band, f, off, w):
         setv(txr, "freq", f)

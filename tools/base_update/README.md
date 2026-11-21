@@ -623,6 +623,26 @@ one and sending register 52 again while it receives (the base takes it between t
 both. With the trigger not known, the X6100's file has no warm balance; the heat estimate is a tool for a radio
 whose shift does follow its transmitting.
 
+#### At the 10 W setting, through 80 dB (2026-11-20 evening)
+
+The owner's word for 10 W (`bench.py power-ok radios 10`, overs at most 10 s, the pad resting as long after), the
+pads 40 + 40 dB, the X6200's attenuator on; gcfix5 with the calibration as saved (cold balances), tones 600 and 900 Hz.
+The 11.9 V supply sets the top: 3.8 to 7.3 W came out. "<=" where the reading was within ~12 dB of the X6200's floor
+and off the mirror by more than a hertz (the image under it):
+
+| Band | Out (W) | Image 600 / 900 Hz (dBc) | Carrier (dBc) |
+|---|---|---|---|
+| 160 m | 7.05 | -52.9 / -57.7 | -49 to -55 |
+| 80 m | 5.85 | -52.0 / -57.9 | -50 to -53 |
+| 40 m | 6.75 | <= -51.6 / <= -56.5 | -53 |
+| 30 m | 6.7 | <= -52.3 / <= -54.5 | -50 to -55 |
+| 20 m | 5.05 | -54.0 / <= -56.2 | -49 to -56 |
+| 17 m | 5.65 | -50.4 / -51.0 | -53 to -55 |
+| 15 m | 7.3 | -46.5 / <= -57.0 | -49 to -53 |
+| 12 m | 5.2 | -47.6 / -50.7 | -45 to -56 |
+| 10 m | 3.8 | -59.5 / -63.4 | -56 to -60 |
+| 6 m | 4.25 | -44.9 / -46.0 | -43 to -47 |
+
 ### Every base compared, 2026-11-20
 
 Decrypted with the public key (nothing of Xiegu's kept in the repository): Xiegu's X6100 V1.1.6 (230307001, from its
