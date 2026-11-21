@@ -11,12 +11,13 @@
 #include <string.h>
 
 #define ABS_ON        3e-4      /* the least level a burst is looked for at (-70 dBFS) */
-#define RISE          4.0       /* over the quiet line's level: 12 dB */
+#define RISE          2.5       /* over the quiet line's level: 8 dB (a 10 ms mean of noise varies a few dB) */
 #define FIND_BEFORE   0.030     /* s before the rise the first symbol may be centred */
 #define FIND_AFTER    0.012     /* and after */
 #define PIECE         0.005     /* s, the pieces the turn-on is matched in */
 #define FOUND         0.45      /* the match, against a perfect one, a burst is taken at */
 #define QUIET_BELOW   0.25      /* of the burst's loudest: its carrier gone (v29.rs QUIET_BELOW) */
+#define QUIET_NEAR    1.6       /* of the quiet line's level before the burst */
 #define QUIET_OFF     0.020     /* s gone for, and the burst is over */
 #define LOST_MSE      0.35      /* symbols this far off their points ... */
 #define LOST_FOR      400       /* ... for this many: lost */
@@ -73,6 +74,8 @@ void qamrx_free(qamrx_t *q) {
 }
 
 void qamrx_reset(qamrx_t *q) {
+    /* the line's level as it last was is the quiet line's: the tail of a burst heard before is no new one */
+    q->floor_    = q->lev.y;
     q->state     = QAM_IDLE;
     q->quiet_for = 0;
     q->loudest   = 0.0;
@@ -433,7 +436,7 @@ void qamrx_feed(qamrx_t *q, double x) {
             q->state   = QAM_COLLECT;
             break;
         }
-        q->floor_ += (lev - q->floor_) / ((lev < q->floor_ ? 0.1 : 0.5) * q->cfg.fs);
+        q->floor_ += (lev - q->floor_) / ((lev < q->floor_ ? 0.02 : 0.5) * q->cfg.fs);
         break;
     case QAM_COLLECT: {
         if (lev > q->loudest)
@@ -456,7 +459,9 @@ void qamrx_feed(qamrx_t *q, double x) {
     }
     case QAM_TRACK:
         q->loudest = fmax(q->loudest, lev) * (1.0 - 1.0 / (2.0 * q->cfg.fs));
-        q->quiet_for = lev < QUIET_BELOW * q->loudest ? q->quiet_for + 1 : 0;
+        /* gone: well under the burst's loudest, or back near the quiet line's level from before it (on a noisy
+         * line the noise alone is more than a quarter of the burst) */
+        q->quiet_for = lev < QUIET_BELOW * q->loudest || lev < QUIET_NEAR * q->floor_ ? q->quiet_for + 1 : 0;
         if (q->quiet_for > QUIET_OFF * q->cfg.fs || q->lost > LOST_FOR) {
             q->state = QAM_ENDED;
             break;
