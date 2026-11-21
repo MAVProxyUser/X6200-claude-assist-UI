@@ -11,6 +11,7 @@
 #  8. Not moved by the limit: asked to roam.          9. Not moved at all: said so.
 # 10. Channel 10 is left too.                        11. A name with iw's \x escapes matches.
 # 12. The supplicant without the link: says so, stays.
+# 13. Another below the floor (-76 dBm, the X6200's case on 2026-11-21): one scan, stays.
 HOOK=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 W=$(mktemp -d "${TMPDIR:-/tmp}/wifi-channel.XXXXXX")
 trap 'rm -rf "$W"' EXIT
@@ -86,59 +87,64 @@ run() {     # model, interface, action: what the hook asked, in order
 fresh() {   # a new case on channel 11: the limit moves it to channel 6 unless the case says otherwise
     rm -f "$W/refuse" "$W/after_scan" "$W/after_roam" "$W/no_iface" "$W/dump"
     link $C11 2462 -58 HomeNet > "$W/link"
-    link $C6 2437 -71 HomeNet > "$W/after_set"
+    link $C6 2437 -62 HomeNet > "$W/after_set"
 }
 X6200="xiegu,x6200 allwinner,sun8i-r16"
 X6100="xiegu,x6100 allwinner,sun8i-r16"
-ON6="log wlan0: off channel 11, the X6200's own: on channel 6 now ($C6, -71 dBm)|exit 0|"
+ON6="log wlan0: off channel 11, the X6200's own: on channel 6 now ($C6, -62 dBm)|exit 0|"
 
 fresh
-{ ap $C11 2462 -58 HomeNet; ap $C6 2437 -71 HomeNet; ap $C1 2412 -83 HomeNet; ap 02:00:5e:00:00:99 2437 -40 Other; } \
+{ ap $C11 2462 -58 HomeNet; ap $C6 2437 -62 HomeNet; ap $C1 2412 -83 HomeNet; ap 02:00:5e:00:00:99 2437 -40 Other; } \
     > "$W/dump"
 check "1. an X6100 on channel 11" "exit 0|" "$(run "$X6100" wlan0 up)"
 check "2. an X6200's link going down" "exit 0|" "$(run "$X6200" wlan0 down)"
 check "2. a link that is not WiFi" "exit 0|" "$(run "$X6200" eth0 up)"
-link $C6 2437 -71 HomeNet > "$W/link"
+link $C6 2437 -62 HomeNet > "$W/link"
 check "3. an X6200 on channel 6" "exit 0|" "$(run "$X6200" wlan0 up)"
 link $C11 2462 -58 HomeNet > "$W/link"
 check "4. an X6200 on channel 11, the network on channel 6 too" "$SET|$ON6" "$(run "$X6200" wlan0 up)"
 
-fresh; { ap $C11 2462 -58 HomeNet; ap $C6 2437 -71 HomeNet; ap $C1 2412 -65 HomeNet; } > "$W/dump"
-rm "$W/after_set"; link $C1 2412 -65 HomeNet > "$W/after_roam"
+fresh; { ap $C11 2462 -58 HomeNet; ap $C6 2437 -62 HomeNet; ap $C1 2412 -55 HomeNet; } > "$W/dump"
+rm "$W/after_set"; link $C1 2412 -55 HomeNet > "$W/after_roam"
 check "5. the stronger of two others (roamed to)" \
-    "$SET|Roam $C1|log wlan0: off channel 11, the X6200's own: on channel 1 now ($C1, -65 dBm)|exit 0|" \
+    "$SET|Roam $C1|log wlan0: off channel 11, the X6200's own: on channel 1 now ($C1, -55 dBm)|exit 0|" \
     "$(run "$X6200" wlan0 up)"
 
 fresh; { ap $C11 2462 -58 HomeNet; ap $C6 2437 -85 HomeNet; } > "$W/dump"
 check "6. only a weak other: one scan, stays" \
-    "Scan|log wlan0: on channel 11, the X6200's own: no other access point of this network at -80 dBm or better, staying|exit 0|" \
+    "Scan|log wlan0: on channel 11, the X6200's own: no other access point of this network at -65 dBm or better, staying|exit 0|" \
     "$(run "$X6200" wlan0 up)"
 
 fresh; ap $C11 2462 -58 HomeNet > "$W/dump"
-{ ap $C11 2462 -58 HomeNet; ap $C6 2437 -71 HomeNet; } > "$W/after_scan"
+{ ap $C11 2462 -58 HomeNet; ap $C6 2437 -62 HomeNet; } > "$W/after_scan"
 check "7. the join's scan gone stale: one scan, then moved" "Scan|$SET|$ON6" "$(run "$X6200" wlan0 up)"
 
-fresh; { ap $C11 2462 -58 HomeNet; ap $C6 2437 -71 HomeNet; } > "$W/dump"
-rm "$W/after_set"; link $C6 2437 -71 HomeNet > "$W/after_roam"
+fresh; { ap $C11 2462 -58 HomeNet; ap $C6 2437 -62 HomeNet; } > "$W/dump"
+rm "$W/after_set"; link $C6 2437 -62 HomeNet > "$W/after_roam"
 check "8. not moved by the limit: asked to roam" "$SET|Roam $C6|$ON6" "$(run "$X6200" wlan0 up)"
 
-fresh; { ap $C11 2462 -58 HomeNet; ap $C6 2437 -71 HomeNet; } > "$W/dump"
+fresh; { ap $C11 2462 -58 HomeNet; ap $C6 2437 -62 HomeNet; } > "$W/dump"
 rm "$W/after_set"; touch "$W/refuse"
 check "9. not moved at all" \
-    "$SET|Roam $C6|log wlan0: off channel 11, the X6200's own: not moved to $C6 on channel 6 (-71 dBm), the supplicant did not|exit 0|" \
+    "$SET|Roam $C6|log wlan0: off channel 11, the X6200's own: not moved to $C6 on channel 6 (-62 dBm), the supplicant did not|exit 0|" \
     "$(run "$X6200" wlan0 up)"
 
-fresh; link $C11 2457 -58 HomeNet > "$W/link"; { ap $C11 2457 -58 HomeNet; ap $C6 2437 -71 HomeNet; } > "$W/dump"
+fresh; link $C11 2457 -58 HomeNet > "$W/link"; { ap $C11 2457 -58 HomeNet; ap $C6 2437 -62 HomeNet; } > "$W/dump"
 check "10. channel 10 left too" \
-    "$SET|log wlan0: off channel 10, the X6200's own: on channel 6 now ($C6, -71 dBm)|exit 0|" "$(run "$X6200" wlan0 up)"
+    "$SET|log wlan0: off channel 10, the X6200's own: on channel 6 now ($C6, -62 dBm)|exit 0|" "$(run "$X6200" wlan0 up)"
 
 fresh; link $C11 2462 -58 'Home\x41Net' > "$W/link"
-{ ap $C11 2462 -58 'Home\x41Net'; ap $C6 2437 -71 'Home\x41Net'; ap $C1 2412 -50 HomeANet; } > "$W/dump"
+{ ap $C11 2462 -58 'Home\x41Net'; ap $C6 2437 -62 'Home\x41Net'; ap $C1 2412 -50 HomeANet; } > "$W/dump"
 check "11. a name with iw's escapes" "$SET|$ON6" "$(run "$X6200" wlan0 up)"
 
-fresh; { ap $C11 2462 -58 HomeNet; ap $C6 2437 -71 HomeNet; } > "$W/dump"; touch "$W/no_iface"
+fresh; { ap $C11 2462 -58 HomeNet; ap $C6 2437 -62 HomeNet; } > "$W/dump"; touch "$W/no_iface"
 check "12. the supplicant without the link" \
     "log wlan0: on channel 11, the X6200's own: the supplicant does not have it, staying|exit 0|" \
+    "$(run "$X6200" wlan0 up)"
+
+fresh; link $C11 2462 -50 HomeNet > "$W/link"; { ap $C11 2462 -50 HomeNet; ap $C6 2437 -76 HomeNet; } > "$W/dump"
+check "13. another below the floor (the X6200's case, 2026-11-21): one scan, stays" \
+    "Scan|log wlan0: on channel 11, the X6200's own: no other access point of this network at -65 dBm or better, staying|exit 0|" \
     "$(run "$X6200" wlan0 up)"
 
 [ $fails = 0 ] && echo "all passed" || echo "$fails failed"

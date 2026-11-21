@@ -8,7 +8,7 @@
 # 2457.6 MHz, inside channels 9, 10 and 11. Its WiFi firmware is Realtek's newest.
 #
 # So, on an X6200 joined on one of those channels: the strongest access point of the same network on another
-# channel at -80 dBm or better (from the join's scan; one more scan if that has gone stale) becomes the one it uses.
+# channel at -65 dBm or better (from the join's scan; one more scan if that has gone stale) becomes the one it uses.
 # The supplicant's network is limited to the other channels (freq_list), so a later scan (the WiFi window's) does
 # not take it back. That change makes the supplicant leave the access point and join the strongest one left
 # (2 s without a link, the same address after, tried on the X6200 2026-11-20); should it not, it is asked to roam
@@ -21,7 +21,11 @@ IF=$1
 grep -q "xiegu,x6200" "${X6X00_DT:-/proc/device-tree/compatible}" 2> /dev/null || exit 0     # the X6200 only
 
 AVOID="2452 2457 2462"      # channels 9, 10, 11: within 9 MHz of 2457.6 (a 20 MHz channel's OFDM spans +-8.3)
-FLOOR=-80                   # dBm: an access point weaker than this is no better a link
+# dBm: an access point weaker than this is no better a link. -80 until 2026-11-21, when it took the X6200 from a
+# -47 dBm channel-11 one to a channel-6 one at -76..-81 dBm: there it sent 0.5-2.5 Mbit/s at MCS 0, WSJT-X's TCI
+# audio (3 Mbit/s) at 30 % of real time, where channel 11 gave 17-35 Mbit/s and 79-98 % even with its stalls. The
+# same channel-6 one at -57 dBm (2026-11-17) sent 8 Mbit/s
+FLOOR=-65
 SUP=fi.w1.wpa_supplicant1
 
 say() {

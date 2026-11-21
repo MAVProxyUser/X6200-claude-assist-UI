@@ -56,7 +56,16 @@ Open:
   diffed): leak fixes, broadcast queue routing, logging; nothing for 8723DU transmit. What is wrong is the link: the
   X6200 hears its access point at -64..-82 dBm with an SNR of 8-15 dB (its noise floor ~-84, 10 dB high; 366 OFDM
   false alarms in 2 s), the channel-11 AP 5-7 dB weaker than the X6100 beside it. Next: a 2.4 GHz sweep beside the
-  X6200 (HackRF, receive only) with the radio on and off, and a USB WiFi adapter on a short lead away from it. Open: why the stand-in
+  X6200 (HackRF, receive only) with the radio on and off, and a USB WiFi adapter on a short lead away from it.
+  LATER THE SAME DAY: mostly our own 98a8bd8d. A fresh driver joined the channel-11 AP at -47..-52 dBm: 17-35 Mbit/s up,
+  WSJT-X's TCI stream 98 %; the rule then moved it within 4 s to the channel-6 AP at -76..-81 ("-80 or better"):
+  back to 1 Mbit/s and 30 %. Its floor is -65 dBm now (test case 13). The driver (built as the image does by
+  .github/workflows/rtw88.yml, byte-identical to the image's, swapped in over SSH with a fallback): no Bluetooth TDMA
+  slot without a Bluetooth link (every uplink burst began at a third of its rate: mean 25.6 -> 31.8 Mbit/s) and the
+  H2C 0x69 buffer over-read (mainline's para[6]), buildroot/x6200/rtw88 0002/0003. Still open: on channel 11 the X6200
+  stalls 1-1.7 s now and then (two 5-min runs: 88 % and 79 % mean; the X6100 on that AP 100 %), not coex, not the
+  GPS's paging: its 2457.6 MHz harmonic is the suspect (the HackRF sweep); its join scans see one access point of
+  three (once missing a -47 dBm one) and with background scans off it stays on whatever the join took. Open: why the stand-in
   server on the Mac did not decode either. The run (wsjtx_tx.py, enabletx.dylib, shmshim.dylib, the 127.0.0.1 relay,
   macOS's 4 MB kern.sysv.shmmax worked round) is in the scratchpad, not in the repo.
 - The X6100's TCI receive audio (or tones.py's recorder) repeated 1.8 s of it exactly, 2.000 s later (correlation

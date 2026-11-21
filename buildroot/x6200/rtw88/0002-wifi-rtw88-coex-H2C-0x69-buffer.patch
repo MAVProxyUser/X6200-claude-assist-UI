@@ -1,0 +1,20 @@
+From: OpenX6X00 <noreply@rf.guru>
+Subject: [PATCH] wifi: rtw88: coex: H2C 0x69's buffer as long as what is sent of it
+
+rtw_coex_tdma_timer_base() fills u8 para[2] and hands it to
+rtw_fw_bt_wifi_control(), which reads five bytes from it: three bytes of
+the stack went to the firmware with every TDMA slot command. Mainline
+gives it six (para[6]); the same here, on the 461b696 pin of the X6200
+buildroot tree.
+---
+--- a/coex.c
++++ b/coex.c
+@@ -309,7 +309,7 @@ static void rtw_coex_tdma_timer_base(struct rtw_dev *rtwdev, u8 type)
+ {
+ 	struct rtw_coex *coex = &rtwdev->coex;
+ 	struct rtw_coex_stat *coex_stat = &coex->stat;
+-	u8 para[2] = {0};
++	u8 para[6] = {0};	/* rtw_fw_bt_wifi_control() reads five bytes from it */
+ 	u8 times;
+ 	u16 tbtt_interval = coex_stat->wl_beacon_interval;
+ 

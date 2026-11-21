@@ -3703,7 +3703,9 @@ Once joined:
   and on Scan. When the access point is lost the radio still looks for it,
   and joins it again.
 - The X6200 keeps off WiFi channels 9, 10 and 11 when your network has an
-  access point on another channel at -80 dBm or better: on channel 11 its
+  access point on another channel at -65 dBm or better (-80 up to v0.3.12.41,
+  which took it to a far one at -76..-81 dBm where it sent about 1 Mbit/s: a
+  weaker one is a worse link than channel 11's stalls): on channel 11 its
   WiFi stalled for seconds (668 ms on average, against 30 ms on channel 6 with
   a weaker signal), most likely its own clocks, whose harmonic at 2457.6 MHz
   falls there. Joined on one of those channels, it moves to the strongest
