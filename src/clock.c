@@ -100,11 +100,16 @@ static int pmic_temp(void) {
     if (!looked) {
         looked = true;
         for (int i = 0; i < 8 && !dir[0]; i++) {
-            char link[128], real[256];
+            char  link[128];
+            char *real;
             snprintf(link, sizeof(link), "/sys/bus/iio/devices/iio:device%d", i);
             snprintf(path, sizeof(path), "%s/in_temp_raw", link);
-            if (access(path, R_OK) == 0 && realpath(link, real) && strstr(real, "axp")) {
-                snprintf(dir, sizeof(dir), "%s", link);
+            /* realpath() allocating: a buffer of ours must be PATH_MAX, or glibc's _FORTIFY_SOURCE check (the image
+             * builds with it) ends the GUI with "buffer overflow detected" whatever the path's length. v0.3.12.41 did
+             * that to the X6100 at every start (its temperature comes from here), and was rolled back to v0.3.12.40 */
+            if (access(path, R_OK) == 0 && (real = realpath(link, NULL))) {
+                if (strstr(real, "axp")) snprintf(dir, sizeof(dir), "%s", link);
+                free(real);
             }
         }
     }

@@ -40,6 +40,8 @@ if [ ! -e "$MA/libaether_x6100_control.so" ]; then
 fi
 
 GEN=(); command -v ninja > /dev/null && GEN=(-G Ninja)
+# A build folder configured before the toolchain had the image's hardening flags is configured again
+[ -f "$B/CMakeCache.txt" ] && ! grep -q "_FORTIFY_SOURCE" "$B/CMakeCache.txt" && rm -f "$B/CMakeCache.txt"
 if [ ! -f "$B/CMakeCache.txt" ]; then
     # build.sh's settings, the X6100's driver; RADE as the X6200's build has it (build.sh builds it)
     RADE=$(grep -o 'RADE_PREFIX:PATH=.*' "$TOP/build/x6200/gui/CMakeCache.txt" 2>/dev/null | cut -d= -f2 || true)

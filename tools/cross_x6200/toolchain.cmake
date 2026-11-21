@@ -16,9 +16,14 @@ set(CMAKE_LIBRARY_ARCHITECTURE arm-linux-gnueabihf)
 set(ENV{PKG_CONFIG_SYSROOT_DIR} "${CMAKE_SYSROOT}")
 set(ENV{PKG_CONFIG_LIBDIR} "${_ma}/pkgconfig:${CMAKE_SYSROOT}/usr/share/pkgconfig")
 set(ENV{PKG_CONFIG_PATH} "")
-# Ubuntu's multiarch headers (jconfig.h, ...) are not on this GCC's own search path
-set(CMAKE_C_FLAGS_INIT "-isystem ${CMAKE_SYSROOT}/usr/include/arm-linux-gnueabihf")
-set(CMAKE_CXX_FLAGS_INIT "-isystem ${CMAKE_SYSROOT}/usr/include/arm-linux-gnueabihf")
+# Ubuntu's multiarch headers (jconfig.h, ...) are not on this GCC's own search path. And glibc's _FORTIFY_SOURCE=1, as
+# buildroot builds the image (its default): a build here trips the same checks as the release. Without it a realpath()
+# into 256 bytes ran fine here and ended v0.3.12.41's GUI on the X6100 at every start ("buffer overflow detected"),
+# rolled back by its updater. Not -fstack-protector (the image's BR2_SSP_REGULAR): this toolchain takes it from GCC's
+# libssp.so.0, which the radios do not have (the GUI did not start, 2026-11-21); buildroot's uses glibc's own
+set(_x6_hardening "-D_FORTIFY_SOURCE=1")
+set(CMAKE_C_FLAGS_INIT "-isystem ${CMAKE_SYSROOT}/usr/include/arm-linux-gnueabihf ${_x6_hardening}")
+set(CMAKE_CXX_FLAGS_INIT "-isystem ${CMAKE_SYSROOT}/usr/include/arm-linux-gnueabihf ${_x6_hardening}")
 # The radio's libraries are newer than this glibc 2.28 (they want GLIBC_2.3x): their own undefined symbols are the
 # radio's glibc's business. libstdc++ and libgcc go in static: GCC 15's runtime is newer than the radio's GCC 12
 set(CMAKE_EXE_LINKER_FLAGS_INIT

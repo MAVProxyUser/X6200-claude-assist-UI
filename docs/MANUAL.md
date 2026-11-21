@@ -2129,7 +2129,10 @@ installs the newest release even when it is the one running.
   was.
 - **When the radio restarts.** The new kernel and U-Boot start when the
   radio restarts or is next switched on. The update box has **Restart the
-  radio when done**, ticked by itself with the kernel or U-Boot (the web
+  radio when done**, ticked when the box opens on every radio that comes back
+  by itself (the X6200; an X6100 with kexec: from v0.3.12.42, so an update is
+  not left with only the radio software restarted; a press unticks it), and
+  ticked by itself with the kernel or U-Boot (the web
   Update page: Restart the radio after; over SSH `x6100-update install
   <bundle> --kernel --reboot`): the whole radio restarts at the end of the
   install and comes back by itself: the X6200 in about a minute, its base

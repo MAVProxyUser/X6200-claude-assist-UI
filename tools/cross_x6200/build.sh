@@ -23,6 +23,8 @@ fi
 if [ -f "$B/CMakeCache.txt" ] && ! grep -qx "RADE_PREFIX:PATH=$RADE" "$B/CMakeCache.txt"; then
     cmake -S "$TOP" -B "$B" -DRADE_PREFIX="$RADE"
 fi
+# A build folder configured before the toolchain had the image's hardening flags is configured again
+[ -f "$B/CMakeCache.txt" ] && ! grep -q "_FORTIFY_SOURCE" "$B/CMakeCache.txt" && rm -f "$B/CMakeCache.txt"
 if [ ! -f "$B/CMakeCache.txt" ]; then
     # buildroot/build.sh's settings, for the X6200
     OPTS=(-DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$TOP/tools/cross_x6200/toolchain.cmake"

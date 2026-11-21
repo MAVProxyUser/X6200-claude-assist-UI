@@ -521,6 +521,10 @@ static void ask(void) {
     sel    = n_opts() + PICK_NO;     /* a press meant for something else applies nothing */
     picked = false;
     for (int k = 0; k < OPTS; k++) opt_on[k] = false;       /* the SD card's parts: only when ticked */
+    /* The restart ticked from the start where the radio comes back by itself (the X6200; an X6100 with kexec), so an
+     * update is not left on the GUI's restart alone (the owner, 2026-11-21: "make reboot the default option on the
+     * update"). An X6100 a restart would switch off is left to tick it */
+    opt_on[OPT_REBOOT] = opt_offer[OPT_REBOOT] && back_by_itself();
 
     box = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(box);
