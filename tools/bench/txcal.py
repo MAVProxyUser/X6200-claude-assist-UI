@@ -56,9 +56,10 @@ def main():
     ap.add_argument("--d-carrier", type=int, default=None, help="the carrier search's first step (1500)")
     ap.add_argument("--d-image", type=int, default=None, help="the image search's first step (800)")
     ap.add_argument("--passes", type=int, default=2, help="passes of five points before the last (2)")
-    ap.add_argument("--state", choices=("cold", "hot"), default="cold",
-                    help="the radio's state the image is calibrated for: cold (txig/txip, the band's own) or hot "
-                         "(txhg/txhp, once the radio is warm: the GUI's heat estimate at 100 %%, warmed up first)")
+    ap.add_argument("--state", choices=("any", "cold", "hot"), default="any",
+                    help="any (the band's own txig/txip, no waiting: the default while no band has a warm balance), "
+                         "cold (the same, the GUI's heat estimate at 0 %% first) or hot (txhg/txhp, the estimate at "
+                         "100 %%, warmed up first)")
     ap.add_argument("--from-zero", action="store_true",
                     help="start each band at 0, 0 (uncalibrated) instead of its present values")
     ap.add_argument("--rx-att", type=int, default=1, help="RX's attenuator for the run (1; 0 when the pads leave "
@@ -212,6 +213,8 @@ def main():
     def heat_ready(f):
         """The radio as warm or as cold as --state asks, by the GUI's estimate ("hot", %): warmed with tones, or
         waited for (receiving) to cool. The image of 15 m on the owner's X6100 moves between the two (radio.c)"""
+        if a.state == "any":
+            return
         if "hot" not in txr.state:
             raise Refused(f"{txr.name}: its GUI has no heat estimate (hot): too old for --state")
         want = 100 if a.state == "hot" else 0
