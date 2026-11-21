@@ -196,7 +196,9 @@ computer, OpenX6X00's writer does both (see
 
 1. **Codec gain** (-25 to +25 dB, 0 by default) is the patched base's
    overall TX level. You set it once, not while you operate. The base's notes
-   say to set it so the radio gives 10 W at a 10 W setting. On our X6100,
+   say to set it so the radio gives 10 W at a 10 W setting: measure that on a
+   supply that holds, not the stock adapter, on which the radio transmits from
+   its battery and gives less (see [Power supply](#power-supply)). On our X6100,
    which shipped with Xiegu's V1.1.8, r13 gave about 10 % too much at 5 W and
    20 % at 10 W before this. Measure on the second transmission after a band
    change: on ours the first one sometimes had next to no power.
@@ -2628,6 +2630,18 @@ battery went from 52 % to empty in about 75 minutes and the radio switched
 itself off in a 10 W over; switched on again at 0 %, it went off again within
 minutes on the same adapter. It also capped the power: 3.5 to 8.6 W came out
 at a 10 W setting, depending on the band.
+
+**Power figures taken on a stock adapter are not the radio's.** Both radios'
+adapters are chargers (the X6200's reads 11.7 to 11.9 V on the radio even
+receiving). On one, the radio transmits from its own battery, so its power
+comes out low and drifts down as the battery empties. This manual's power
+readings and calibrations made in November 2026 (the bench's 5-10 W runs, the
+gcfix5 calibration, the codec and band gains on our X6100) were made that way;
+take them as low. Measure the power, set the gains (see
+[Setting up the transmitter](#setting-up-the-transmitter)) and calibrate on a
+regulated supply that holds: 13.8 V, 5 A or more (the X6100 takes up to 15 V).
+On such a supply External in Info > POWER stays put while you transmit; on the
+adapter it falls to a few volts.
 
 For transmitting, use a regulated 13.8 V supply rated 5 A or more (the extra
 over 3.5 A lets it charge the battery while you transmit). Check the polarity
