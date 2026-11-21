@@ -18,33 +18,21 @@ Open:
   the same 0.1 W recipe on the battery alone and on a 13.8 V supply. tools/base_update/README.md "Why 15 m varied".
 - The 10 W table and the 5-10 W results were made with the X6100 partly on its own battery (the stock adapter is a
   charger): run again on a supply that holds before taking its power figures as the radio's.
-- BinModem (CasualArclamp/BinModem, Rust, GPL-3): built and running on the Mac (build/binmodem, window + headless
-  modems). Asked: its ends on the radios ("port it so we aren't moving rust here": C for the radio ends), the window
-  on the Mac live, "what is maximum baud under those conditions, and what does simplex mean for data transfer", and a
-  slow IP backlink between the radios (a USB Ethernet dongle each: the X6200's kernel has asix/ax88179/r8152/cdc;
-  neither kernel has TUN or PPP, so userspace, as BinModem's own TCP+proxy). Plan: channel sounding, one-way
-  V.27ter/V.29/V.17 per band, a burst+ACK link with live stats; full duplex only with a second receiver per radio
-  (the RTLs) and both transmitters keyed at once, which needs the owner's word. Not started.
-- BinModem on the radios (tools/modem, 2026-11-21): ported to C, checked against BinModem (every rate both ways,
-  samples to 2e-6), the link simulated, x6x00-modem on both radios with bench.py radios-modem and the live view.
-  Over the cable (2026-11-21 00:54): the first transfer, 2048 bytes X6100 to X6200 at V.27ter 2400, every byte
-  checked, PPR resend and all; 91 s, 179 bit/s overall, 10 s of it data. 4800 ~9 % bit errors, 7200/9600 do not
-  train: the radio path costs ~20 dB against the simulation (the X6100's ALC, the AGC and noise suspected). Then:
-  higher rates, both ways, the per-band runs, max baud; the IP backlink later.
 - X6200: TCI transmit audio sets the power, not the power setting: -20 dBFS gave 1.1 W at a 0.1 W setting (the
   bench's Watch stopped it). Its base's ALC does not hold the setting, and TCI audio skips the GUI's drive loop
   (tx_level.c), which the apps use. WSJT-X over TCI is affected too. To do: TCI audio through a power-hold loop on
   the X6200 (as tx_level's, from the power readback), then measured on the bench.
-- (Resolved 2026-11-21 01:17) the X6100's 3.5 W at a 1 W setting was the gcfix5 base patch (its ALC changes, the
-  hold the likeliest): back on Xiegu's factory V1.1.9 base, the same test read 1.0-1.4 W (ALC 8-8.6). The owner:
-  "revert back to factory base, and ignore the nuances for now". gcfix5's other fixes (TX I/Q, DC per band, 6 m)
-  are off the radio with it; the patches and their write-up stay in the repo.
-- x6x00-modem's own turn-taking still lets the two simulated ends key together in some runs (22 of 96 random lines,
-  most in the both-ways role swap, some one-way with the radios' long tails). On the radios the Mac's grant is
-  exclusive (one end at a time, on request) and the Watch stops two on the air: never seen there. To do: the link's
-  turns made safe by themselves (overlap.sh must pass a random sweep, not only its fixed cases).
-- (Resolved) the X6100 "losing steady tones from 1.5 kHz up" was its squelch at 4: at 0 it passes them all.
+- BinModem: ported to C and run between the radios (2026-11-21), then REMOVED from the port at the owner's word
+  ("that was all fun, but we don't need it in this port"). Besides the X6200's TCI power above, what it found that
+  stays true of the radios:
+  - TCI audio reaches the air ~0.5 s after the key; at the unkey 0.3-0.5 s of it is still in the X6100's transmit
+    path and 1.2-1.4 s in the X6200's (a TCI program that unkeys at its last sample loses that much).
+  - A receiver's squelch (the X6100 at 4) takes steady tones from ~1.5 kHz up out of TCI audio: the squelch trap.
+  - The X6100's 3.5 W at a 1 W setting was the gcfix5 base patch: the X6100 is back on Xiegu's factory V1.1.9
+    (2026-11-21 01:12, the owner: "revert back to factory base, and ignore the nuances for now"); gcfix5's TX I/Q,
+    DC per band and 6 m fixes are off the radio with it, its patches and write-up still in the repo.
 - 12 m and 6 m calibration (6 m offsets left 0); 0.1 W carrier is about -25 dBc (the offsets were found at 5 W).
+  On the factory base now: moot until a patched base goes back on.
 - The draft PR to RF.Guru (drafts/x6100-baseband-errata/PR.md, NOT submitted: the owner's word needed) predates the
   2nd-harmonic finding, the 15/12 m shift and the adapter caveat: refresh before any submit.
 - Not seen on screen by me: the Sentry spectrograms keeping time while transmitting, G's VOL pop-up in portrait
@@ -61,7 +49,7 @@ Open:
 
 Changed state today:
 - RTL sticks: taken off both radios by the owner (2026-11-21): RTL items (LISTEN RTL/BOTH, Meteor, Kraken DF, an RTL
-  as the second receiver for a TX CAL on F SYSTEM, RTL full duplex for BinModem) wait for them.
+  as the second receiver for a TX CAL on F SYSTEM) wait for them.
 - Power: the X6100 on its stock adapter (a charger): its battery emptied 52 % -> 0 % and it switched off in a 10 W
   over at 19:31; at 8 % and charging at 01:00 UTC. bench.py's supply gate now refuses an over on a radio its supply
   is not holding (af73b3b0). MANUAL "Power supply" (fd0145dc): a regulated 13.8 V supply of 5 A or more.

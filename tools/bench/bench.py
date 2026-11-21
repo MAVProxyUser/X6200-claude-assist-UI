@@ -18,9 +18,6 @@ own; SSH (root) only for provisioning, the test callsigns and cleaning the logs.
   bench.py radios-walkie A B [--bands 20m,40m] [--modes am,fm]
                                        G (Walkie) on both: each band's channel, each mode, A sends and B hears,
                                        then B sends and A hears (0.1 W)
-  bench.py radios-modem A B [--band 20m] [--bytes 16384] [--max-rate 9600] [--both]
-                                       A sends to B over x6x00-modem (T.30 on V.21, V.27 ter, V.29) at 0.1 W, and back
-                                       with --both; the live view on this Mac (http://127.0.0.1:8765/)
   bench.py testcall NAME CALL|restore     the radio's callsign for the tests (Q<digit>TST), or back
   bench.py cleanlog NAME               the test callsigns' QSOs out of the radio's logs
 
@@ -67,7 +64,6 @@ SOFT_POWER_MAX_W = 2.0      # more than asked up to this ends only that over (ra
 FULL_RATING_MAX_W = 10.0
 FULL_RATING_KEY_S = 10
 TEST_CALL = re.compile(r"^Q[0-9]TST$")
-CLEANUP = []                # run by the interrupt handler before it exits: a test's putting back
 
 FT8_DIAL = {"40m": 7074000, "30m": 10136000, "20m": 14074000, "17m": 18100000, "15m": 21074000,
             "12m": 24915000, "10m": 28074000, "6m": 50313000}
@@ -1017,346 +1013,6 @@ def run_radios_walkie(c, args):
         raise Refused(f"{len(bad)} overs not heard")
 
 
-# ---- A modem link between the radios (tools/modem: BinModem's fax modems in C, an end on each radio) ----
-
-MODEM_FREQ = {"80m": 3590000, "40m": 7105000, "30m": 10140000, "20m": 14105000, "17m": 18105000,
-              "15m": 21105000, "12m": 24925000, "10m": 28105000, "6m": 50300000}
-MODEM_PORT = 7362
-MODEM_RATES = {"2400": 0, "4800": 1, "7200": 2, "9600": 3}
-MODEM_GAP_S = 0.15          # a radio off the air at least this long before the other may key (its own state says)
-# The int16 peak each radio's TCI audio goes out at, under where its transmitter compresses: a phase and amplitude
-# modem wants it linear (V.21's FSK does not mind). The X6100 levels TCI audio itself (tci_server.c TCI_TX_NORM: to
-# -20 dBFS, gain up to +12 dB), where its ALC reads 10 at 0.1 W: sent at -44 dBFS, its levelling takes it to -32. The
-# X6200 does not level it, and its base's ALC does not hold the power setting, so there the audio level is the power:
-# -20 dBFS gave 1.1 W at 0.1 W (the Watch stopped it), -26 dBFS 0.1-0.7 W (2026-11-21)
-MODEM_TX_PEAK = {"x6100": 205, "x6200": 820}
-# Keyed silence after the last of a transmission's audio, each radio its own: TCI audio reaches the air about 0.3-0.5 s
-# after it is sent on the X6100 and 1.2-1.4 s on the X6200 (2026-11-21, its frames cut 0.2 s short with a 1.0 s tail)
-MODEM_TAIL = {"x6100": 0.6, "x6200": 1.8}
-
-
-def modem_bin(r):
-    """The radio end: the image's, else a hot install's (tools/modem/build.sh install)"""
-    out = ssh(r.host, "for b in /usr/bin/x6x00-modem /tmp/x6x00-modem; do [ -x $b ] && echo $b && break; done").strip()
-    if not out:
-        raise Refused(f"{r.name}: no x6x00-modem on the radio (tools/modem/build.sh install, or an image with it)")
-    return out
-
-
-def run_radios_modem(c, args):
-    """A sends BYTES to B over the link (T.30's procedure on V.21, V.27 ter and V.29), at 0.1 W through the radios
-    cable, both radios in USB-D on the band's frequency. The live view on this Mac. Each end keys only while this
-    harness says it may: while the other radio's own state says it is off the air (MODEM_GAP_S), the Watch's every
-    stop meanwhile (two on the air, over max_key_s, SWR, power), and never with the harness gone"""
-    import socket
-    import modem_view
-    p, total = chain_gate(c, "radios")
-    for n in (args.a, args.b):
-        if n not in p.get("between", []):
-            raise Refused(f"{n} is not on the radios profile's cable")
-    a, b = Radio(args.a, c["radios"][args.a], True), Radio(args.b, c["radios"][args.b], True)
-    radios, peer = [a, b], {a.name: b, b.name: a}
-    freq = MODEM_FREQ[args.band]
-    was, ends, lines, done = {}, {}, {a.name: {}, b.name: {}}, threading.Event()
-    watch = view = None
-    run_dir = os.path.join(STATE, "runs", time.strftime("%Y%m%d-%H%M%S-modem"))
-    os.makedirs(run_dir, exist_ok=True)
-    history = {a.name: [], b.name: []}
-    # The radios as they were, on disk before anything changes: an interrupted run's own settings are not taken for the
-    # owner's the next time (2026-11-21: one was, and where the radios had been tuned was lost)
-    was_file = os.path.join(STATE, "modem_was.json")
-    was = load_json(was_file, {})
-    if was:
-        say(f"the radios' settings from before an interrupted run ({', '.join(was)}): those are put back after")
-
-    def tap(r, key):
-        r.send(f"key {key} 1")
-        time.sleep(0.15)
-        r.send(f"key {key} 0")
-
-    def arm(r, on):
-        """The Sentry's A/B on its page A: its receive-only hold let go (the radio's own TX rules again), or back"""
-        for _ in range(3):
-            if (r.state.get("rxo") == 0) == on:
-                return
-            tap(r, "AB")
-            try:
-                r.wait("TX " + ("armed" if on else "locked again"), lambda r=r: (r.state.get("rxo") == 0) == on, 5)
-                return
-            except Refused:
-                pass
-        raise Refused(f"{r.name}: the Sentry's TX {'arming' if on else 'lock'} did not take")
-
-    def put_back():
-        for r in radios:
-            try:
-                r.take_control()
-                if r.state.get("rxo") == 0:
-                    arm(r, False)
-                r.send("banner")
-                w = was.get(r.name, {})
-                if w.get("pwr", 99) < 99:
-                    r.send(f"set pwr {round(w['pwr'] * 10)}")
-                for k in ("freq", "mode", "agc", "pre", "att", "rfg", "sql"):
-                    if w.get(k) is not None:
-                        r.send(f"set {k} {w[k]}")
-                if w.get("flo") is not None and w.get("fhi") is not None:
-                    r.send(f"set filter {w['flo']} {w['fhi']}")
-                time.sleep(0.5)
-                say(f"{r.name}: put back ({w.get('freq')} Hz, mode {w.get('mode')}, {w.get('pwr')} W, TX locked: "
-                    f"{r.state.get('rxo') == 1})")
-                r.close()
-            except (Refused, OSError) as e:
-                say(f"{r.name}: not put back: {e}")
-        if all(r.name in was for r in radios):
-            os.remove(was_file) if os.path.exists(was_file) else None
-    CLEANUP.append(put_back)
-    try:
-        for r in radios:
-            r.take_control()
-            if r.name not in was:
-                was[r.name] = {k: r.state.get(k) for k in ("freq", "mode", "flo", "fhi", "agc", "pre", "att", "rfg", "sql")}
-                was[r.name]["pwr"] = r.pwr()
-                save_json(was_file, was)
-            if r.state.get("pg") != "A":
-                r.send("open sentry A")         # its page A: where A/B arms TX (and G, the walkie)
-                r.wait("the Sentry's page A", lambda r=r: r.state.get("pg") == "A", 8)
-            r.send(f"set freq {freq}")
-            r.send(f"set mode {args.mode}")         # 3 USB-D: the radio's digital SSB, as WSJT-X keys it
-            r.send(f"set filter {args.filter[0]} {args.filter[1]}")
-            r.send(f"set agc {args.agc}")           # fast by default: slow had the X6100 deaf for its first answers
-            for k in ("pre", "att", "rfg", "sql"):  # the receivers as asked, put back after
-                if getattr(args, k) is not None:
-                    r.send(f"set {k} {getattr(args, k)}")
-            r.send(f"set pwr {round(FIRST_PROBE_W * 10)}")
-            r.wait("the frequency, mode and power", lambda r=r: int(r.state.get("freq", 0)) == freq and
-                   int(r.state.get("mode", -1)) == args.mode and abs(r.pwr() - FIRST_PROBE_W) < 0.05, 8)
-            radio_tx_gate(r, c, FIRST_PROBE_W)
-        for r in radios:
-            arm(r, True)
-            # armed, the radio is where it was set: checked again
-            if int(r.state.get("freq", 0)) != freq or int(r.state.get("mode", -1)) != args.mode or \
-                    abs(r.pwr() - FIRST_PROBE_W) > 0.05:
-                raise Refused(f"{r.name}: armed, it reads {r.state.get('freq')} Hz mode {r.state.get('mode')} "
-                              f"{r.pwr()} W")
-        for r in radios:
-            binpath = modem_bin(r)
-            rec = f" --record /tmp/x6x00-modem-rx.raw" if args.record else ""
-            rec += f" --tx-peak {MODEM_TX_PEAK.get(r.name, 820)}"
-            ssh(r.host, f"killall x6x00-modem 2>/dev/null; sleep 0.3; (nohup {binpath} --name {r.name}{rec} > "
-                        f"/tmp/x6x00-modem.log 2>&1 &) ; sleep 0.8; pidof x6x00-modem >/dev/null")
-        for r in radios:
-            for _ in range(20):
-                try:
-                    ends[r.name] = socket.create_connection((r.host, MODEM_PORT), timeout=3)
-                    # the "may" lines are small and go every 50 ms: not held back for the ones before (Nagle)
-                    ends[r.name].setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    break
-                except OSError:
-                    time.sleep(0.25)
-            else:
-                raise Refused(f"{r.name}: its x6x00-modem did not answer on port {MODEM_PORT} (/tmp/x6x00-modem.log)")
-        view = modem_view.View(args.view_port, f"Modem link: {a.name} to {b.name}, {freq / 1e6:.3f} MHz, "
-                                               f"{FIRST_PROBE_W} W through {total} dB")
-        say(f"the live view: {view.url}")
-        watch = Watch(radios, c, w=FIRST_PROBE_W)
-
-        def reader(name, sock):
-            buf = b""
-            sock.settimeout(1.0)
-            while not done.is_set():
-                try:
-                    k = sock.recv(65536)
-                except socket.timeout:
-                    continue
-                except OSError:
-                    break
-                if not k:
-                    break
-                buf += k
-                while b"\n" in buf:
-                    ln, buf = buf.split(b"\n", 1)
-                    try:
-                        doc = json.loads(ln)
-                    except ValueError:
-                        continue
-                    lines[name] = doc
-                    for e in doc.get("log", []):
-                        history[name].append(e)
-                        say(f"  {name} {e['t']:7.2f} {e['text']}")
-                    view.publish(doc)
-            say(f"{name}: its end closed the link")
-
-        for r in radios:
-            threading.Thread(target=reader, args=(r.name, ends[r.name]), daemon=True).start()
-        for r in radios:
-            r.send(f"banner MODEM TEST {a.name} > {b.name} {FIRST_PROBE_W} W")
-        mx = MODEM_RATES[args.max_rate]
-        common = (f"bytes={args.bytes} max={mx} both={1 if args.both else 0} burst={args.burst} lead={args.lead} "
-                  f"preamble={args.preamble} v21={args.v21}")
-
-        def tail(r):
-            return args.tail if args.tail is not None else MODEM_TAIL.get(r.name, 1.8)
-        tones = [float(v) for v in str(args.tone).split(",") if float(v) > 0] if args.tone else []
-        if tones:
-            # the audio path's measure: A steady tones one after the other, B (recording) only listens
-            ends[a.name].sendall(f"tone hz={tones.pop(0)} secs={args.tone_s} lead={args.lead} tail={tail(a)}\n".encode())
-        else:
-            ends[b.name].sendall(f"start role=receiver {common} tail={tail(b)}\n".encode())
-            ends[a.name].sendall(f"start role=sender {common} tail={tail(a)}\n".encode())
-        view.publish({"name": "bench", "note": f"{a.name} sends {args.bytes} bytes to {b.name}"
-                                               f"{' and back' if args.both else ''}; up to {args.max_rate} bit/s"})
-        t0, keyed_at, overs = time.time(), {}, {}
-        seen_tune = {r.name: None for r in radios}
-        probed, raised, changing = set(), args.power <= FIRST_PROBE_W, False
-        holder, wants_since, by_name = None, {}, {r.name: r for r in radios}
-        while True:
-            now = time.time()
-            # each radio's first over at FIRST_PROBE_W; then, both off the air and held, the run's power, through the
-            # gates again (the bench's rule: a session's first transmission at 0.1 W)
-            if not raised and probed >= {a.name, b.name} and not any(r.tx or lines[r.name].get("keyed") for r in radios):
-                changing = True
-                for s_ in ends.values():
-                    s_.sendall(b"may 0\n")
-                for r in radios:
-                    r.send(f"set pwr {round(args.power * 10)}")
-                    r.wait(f"{args.power} W", lambda r=r: abs(r.pwr() - args.power) < 0.05, 5)
-                    radio_tx_gate(r, c, args.power)
-                watch.w = args.power
-                raised, changing = True, False
-                say(f"both radios at {args.power} W from here")
-            for r in radios:
-                # where each radio is, as it says: any move during the run is said (a Sentry routine, a split)
-                st = r.state
-                tune = (st.get("freq"), st.get("mode"), st.get("split"), st.get("txf"), st.get("vfo"))
-                if tune != seen_tune[r.name]:
-                    if seen_tune[r.name] is not None:
-                        say(f"  {r.name} now at {tune[0]} Hz mode {tune[1]} (split {tune[2]}, TX freq {tune[3]}, "
-                            f"VFO {tune[4]}){' while on the air' if r.tx else ''}")
-                    seen_tune[r.name] = tune
-            # The right to transmit, to one end at a time (the owner, 2026-11-21: never both keyed). An end holds it
-            # while it asks for it ("wants"), is keyed, or its radio is on the air or was in the last MODEM_GAP_S; only
-            # then is it free, and only to an end whose peer radio is off the air by its own GUI's word. Both asking
-            # at once: the one that asked first. Without this, both could be told "may 1" in the same 50 ms before
-            # either radio's state showed it on the air.
-            if holder is not None:
-                h, hl = by_name[holder], lines[holder]
-                with h.lock:
-                    h_busy = h.tx or now - h.tx_off_at <= MODEM_GAP_S
-                if not (h_busy or hl.get("wants") or hl.get("keyed") or hl.get("radio_tx") or
-                        hl.get("stats", {}).get("txq")):
-                    holder = None
-            for r in radios:
-                if lines[r.name].get("wants"):
-                    wants_since.setdefault(r.name, now)
-                else:
-                    wants_since.pop(r.name, None)
-            if holder is None and wants_since and not watch.why and not changing:
-                for name in sorted(wants_since, key=wants_since.get):
-                    o = peer[name]
-                    with o.lock:
-                        other_off = not o.tx and now - o.tx_off_at > MODEM_GAP_S
-                    eo = lines[o.name]
-                    if other_off and not eo.get("radio_tx") and not eo.get("keyed"):
-                        holder = name
-                        break
-            for r in radios:
-                may = r.name == holder and not watch.why and not changing
-                try:
-                    ends[r.name].sendall(b"may 1\n" if may else b"may 0\n")
-                except OSError as e:
-                    for s in ends.values():
-                        try:
-                            s.sendall(b"may 0\nstop\n")
-                        except OSError:
-                            pass
-                    raise Refused(f"{r.name}: its end's link to this Mac failed ({e}): both stopped")
-                if r.tx and r.name not in keyed_at:
-                    keyed_at[r.name] = now
-                    overs[r.name] = {"fwd": 0.0, "alc": 0.0, "heard": None}
-                    tx_log({"who": r.name, "f": freq, "w": r.pwr(), "what": "modem " + lines[r.name].get("state", "")})
-                elif r.tx:
-                    # each over: the sender's own meters, and how strong the other radio hears it (its S-meter)
-                    ov = overs[r.name]
-                    with r.lock:
-                        txm = r.txm
-                    with o.lock:
-                        m = o.meter
-                    if txm and now - keyed_at[r.name] > 0.6:
-                        ov["fwd"], ov["alc"] = max(ov["fwd"], txm[0]), max(ov["alc"], txm[2] if len(txm) > 2 else 0)
-                    if m is not None and now - keyed_at[r.name] > 0.6:
-                        ov["heard"] = m if ov["heard"] is None else max(ov["heard"], m)
-                    if m is not None:
-                        ov.setdefault("smeter", []).append((round(now - keyed_at[r.name], 2), m))
-                elif r.name in keyed_at:
-                    probed.add(r.name)
-                    ov = overs.pop(r.name, {})
-                    say(f"  {r.name} over {now - keyed_at.pop(r.name):.1f} s: {ov.get('fwd', 0):.2f} W at most, ALC "
-                        f"{ov.get('alc', 0):.1f}; {o.name} heard it at {ov.get('heard')} dBm")
-                    if args.tone and ov.get("smeter"):
-                        # its S-meter through the over, a reading each 0.25 s
-                        sm, row, nxt = ov["smeter"], [], 0.0
-                        for t_, v in sm:
-                            if t_ >= nxt:
-                                row.append(f"{v:.0f}")
-                                nxt += 0.25
-                        say(f"    {o.name}'s S-meter every 0.25 s from the key: {' '.join(row)}")
-            if watch.why:
-                for s in ends.values():
-                    s.sendall(b"stop\n")
-                raise Refused(f"stopped: {watch.why}")
-            if args.tone and not any(r.tx for r in radios) and not lines[a.name].get("keyed") and \
-                    lines[a.name].get("stats", {}).get("air", [0, 0, 0, 0])[3] > 0 and now - t0 > args.tone_s + 6:
-                if not tones:
-                    break
-                time.sleep(2.0)
-                t0 = time.time()
-                ends[a.name].sendall(f"tone hz={tones.pop(0)} secs={args.tone_s} lead={args.lead} tail={tail(a)}\n"
-                                     .encode())
-            st = [lines[r.name].get("state") for r in radios]
-            if not args.tone and all(s in ("done", "failed", "stopped") for s in st) and not any(
-                    lines[r.name].get("keyed") or r.tx for r in radios) and now - t0 > 3:
-                break
-            if not args.tone and "failed" in st and now - t0 > 3 and not any(r.tx for r in radios):
-                break
-            if now - t0 > args.timeout:
-                say(f"the link did not finish in {args.timeout} s" if not args.tone else "the tones did not finish in time")
-                break
-            time.sleep(0.05)
-        for r in radios:
-            d = lines[r.name]
-            s = d.get("stats", {})
-            if d.get("role") == "sender" or args.both:
-                el = (s.get("t1") or d.get("t", 0)) - s.get("t0", 0)
-                say(f"{r.name}: {d.get('state')} at {d.get('rate_name')}: {s.get('bytes')} of {s.get('total')} bytes in "
-                    f"{el:.1f} s ({8 * s.get('bytes', 0) / max(el, 0.01):.0f} bit/s), FTT {s.get('ftt')}, PPR {s.get('ppr')}, "
-                    f"air V.21 {s['air'][0]:.1f} s, training {s['air'][1]:.1f} s, data {s['air'][2]:.1f} s")
-    finally:
-        done.set()
-        if watch:
-            watch.close()
-        for s in ends.values():
-            try:
-                s.sendall(b"may 0\nquit\n")
-                s.close()
-            except OSError:
-                pass
-        for r in radios:
-            try:
-                ssh(r.host, "killall x6x00-modem 2>/dev/null; true", timeout=15)
-            except (Refused, subprocess.SubprocessError):
-                pass
-        put_back()
-        CLEANUP.remove(put_back)
-        with open(os.path.join(run_dir, "report.json"), "w") as f:
-            json.dump({"args": vars(args), "freq": freq, "was": was, "last": lines, "log": history,
-                       "stop": watch.why if watch else None}, f, indent=1)
-        say(f"the run: {run_dir}")
-        if view and args.linger > 0:
-            say(f"the view stays up {args.linger} s: {view.url}")
-            time.sleep(args.linger)
-
-
 def clean_log(host):
     py = ("import re,sqlite3\nn=0\ntry:\n d=sqlite3.connect('/mnt/qso_log.db')\n"
           " n=d.execute(\"delete from qso_log where remote_callsign glob 'Q[0-9]TST*' or local_callsign glob "
@@ -1508,33 +1164,6 @@ def main():
     s = sub.add_parser("radios-ft8"); s.add_argument("tx"); s.add_argument("rx")
     s.add_argument("--rx-alike", action="store_true", help="both receivers' preamp and attenuator off, put back after")
     s.add_argument("--band", default="20m", choices=FT8_DIAL)
-    s = sub.add_parser("radios-modem"); s.add_argument("a"); s.add_argument("b")
-    s.add_argument("--band", default="20m", choices=MODEM_FREQ); s.add_argument("--bytes", type=int, default=16384)
-    s.add_argument("--max-rate", default="9600", choices=MODEM_RATES); s.add_argument("--both", action="store_true")
-    # The radios' own latencies (2026-11-21, by TCI): RF about 0.5 s after the key; at the unkey the last 0.25 s of
-    # audio still in the X6100's transmitter path, more than 0.5 s in the X6200's; a lead and a tail longer than both
-    s.add_argument("--burst", type=float, default=8.0); s.add_argument("--lead", type=float, default=0.8)
-    s.add_argument("--tail", type=float, default=None, help="keyed silence after the audio, s (default: each radio's "
-                   "own, MODEM_TAIL)")
-    s.add_argument("--agc", type=int, default=2, choices=[0, 1, 2, 3], help="0 off, 1 slow, 2 fast, 3 auto")
-    s.add_argument("--preamble", type=float, default=0.4, help="V.21 flags before each frame, s")
-    s.add_argument("--tone", default="", help="instead of the link: A sends steady tones of these Hz, one after the "
-                   "other (1000,1750)")
-    s.add_argument("--tone-s", type=float, default=3.0)
-    s.add_argument("--mode", type=int, default=3, choices=[2, 3], help="2 USB, 3 USB-D (default)")
-    # V.21 channel 1 (980/1180 Hz) by default: the X6100's receiver takes steady tones from 1.5 kHz up out of its audio
-    # within a second, its S-meter unmoved (2026-11-21, tones from the X6200), and T.30's channel 2 (1650/1850) with it
-    s.add_argument("--v21", type=int, default=1, choices=[1, 2])
-    # the receivers: the X6100 with its preamp on clipped the X6200 at 0.1 W through 80 dB (3rd harmonic -10 dBc)
-    s.add_argument("--pre", type=int, default=0, choices=[0, 1]); s.add_argument("--att", type=int, default=None)
-    s.add_argument("--rfg", type=int, default=None); s.add_argument("--sql", type=int, default=0)
-    s.add_argument("--power", type=float, default=FIRST_PROBE_W, help="W after each radio's first over at 0.1 W "
-                   "(up to the limits' radio_w)")
-    s.add_argument("--filter", type=int, nargs=2, default=[100, 3000], metavar=("LO", "HI"))
-    s.add_argument("--view-port", type=int, default=8765); s.add_argument("--timeout", type=float, default=600)
-    s.add_argument("--linger", type=float, default=0, help="seconds the view stays up after")
-    s.add_argument("--record", action="store_true", help="each end records what its radio hears "
-                   "(/tmp/x6x00-modem-rx.raw on the radio: int16, 24 kHz)")
     s = sub.add_parser("testcall"); s.add_argument("name")
     s.add_argument("call", help="Q<digit>TST, or restore (argparse took --restore for an option: 2026-11-18)")
     s = sub.add_parser("cleanlog"); s.add_argument("name")
@@ -1544,11 +1173,6 @@ def main():
     def on_signal(*_):
         say("interrupted: the emergency stop")
         emergency_stop(c or {})
-        for fn in CLEANUP:          # a test's own putting back (radios-modem: the radios as they were)
-            try:
-                fn()
-            except Exception as e:      # noqa: BLE001 (on the way out: said, the rest still run)
-                say(f"cleanup: {e}")
         os._exit(130)
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
@@ -1559,7 +1183,7 @@ def main():
         {"provision": cmd_provision, "status": cmd_status, "chain-ok": cmd_chain_ok, "power-ok": cmd_power_ok,
          "preflight": cmd_preflight,
          "stop": lambda c, a: emergency_stop(c), "hackrf-ft8": run_hackrf_ft8, "hackrf-iq": run_hackrf_iq, "radios-ft8": run_radios_ft8,
-         "radios-walkie": run_radios_walkie, "radios-modem": run_radios_modem,
+         "radios-walkie": run_radios_walkie,
          "testcall": cmd_testcall, "cleanlog": lambda c, a: clean_log(c["radios"][a.name]["host"])}[a.cmd](c, a)
     except Refused as e:
         say(f"REFUSED: {e}")
