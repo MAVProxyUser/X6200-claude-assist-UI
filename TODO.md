@@ -7,6 +7,57 @@ here transmits until the owner says so (transmit work is not wanted for now). On
 Meteor/SCAN CFG one, the Kraken DF one and its kernel one) were folded into one backlog, in the order the owner
 approved that day.
 
+**2026-11-20: the owner's asks, audited 2026-11-21 02:10 UTC** (82 messages of 2026-11-20/21, direct and queued, checked
+against git: 32 commits that day, v0.3.12.37-.40 released). Open first; then what changed state; the done ones last.
+
+Open:
+- 15 m and 12 m transmit image shifts during a session (-46..-53 dBc to -29 at the same balance, a 9 % I/Q gain
+  change; 10, 17, 20 m steady). The owner: "dive deeper ... find a novel solution that *works*". The heat theory and
+  its warm balance were wrong and REMOVED (eab501f7); the battery-vs-adapter theory is not supported by the minute
+  log (shifted 49/77 in collapsed minutes, unshifted 20/32). To do, needing a supply that holds or a charged battery:
+  the same 0.1 W recipe on the battery alone and on a 13.8 V supply. tools/base_update/README.md "Why 15 m varied".
+- The 10 W table and the 5-10 W results were made with the X6100 partly on its own battery (the stock adapter is a
+  charger): run again on a supply that holds before taking its power figures as the radio's.
+- BinModem (CasualArclamp/BinModem, Rust, GPL-3): built and running on the Mac (build/binmodem, window + headless
+  modems). Asked: its ends on the radios ("port it so we aren't moving rust here": C for the radio ends), the window
+  on the Mac live, "what is maximum baud under those conditions, and what does simplex mean for data transfer", and a
+  slow IP backlink between the radios (a USB Ethernet dongle each: the X6200's kernel has asix/ax88179/r8152/cdc;
+  neither kernel has TUN or PPP, so userspace, as BinModem's own TCP+proxy). Plan: channel sounding, one-way
+  V.27ter/V.29/V.17 per band, a burst+ACK link with live stats; full duplex only with a second receiver per radio
+  (the RTLs) and both transmitters keyed at once, which needs the owner's word. Not started.
+- 12 m and 6 m calibration (6 m offsets left 0); 0.1 W carrier is about -25 dBc (the offsets were found at 5 W).
+- The draft PR to RF.Guru (drafts/x6100-baseband-errata/PR.md, NOT submitted: the owner's word needed) predates the
+  2nd-harmonic finding, the 15/12 m shift and the adapter caveat: refresh before any submit.
+- Not seen on screen by me: the Sentry spectrograms keeping time while transmitting, G's VOL pop-up in portrait
+  (e9e3d890, installed on both).
+- The X6100's processor temperature sensor: dead on that board (below); the cause (its analog supply or reference)
+  only by schematic or a meter, if wanted.
+- The heater run for the temperature sanity check did not happen (the 10 minutes ran flat): the three sensors' log
+  and plot are in build/temps_2026-11-20.png.
+
+Changed state today:
+- RTL sticks: taken off both radios by the owner (2026-11-21): RTL items (LISTEN RTL/BOTH, Meteor, Kraken DF, an RTL
+  as the second receiver for a TX CAL on F SYSTEM, RTL full duplex for BinModem) wait for them.
+- Power: the X6100 on its stock adapter (a charger): its battery emptied 52 % -> 0 % and it switched off in a 10 W
+  over at 19:31; at 8 % and charging at 01:00 UTC. bench.py's supply gate now refuses an over on a radio its supply
+  is not holding (af73b3b0). MANUAL "Power supply" (fd0145dc): a regulated 13.8 V supply of 5 A or more.
+- Pads: 40 + 40 dB (the X6100's 30 dB swapped, chain-ok 80 dB); at 1 W and under, --rx-att 0 for the margin.
+- Host checks: fixed for good (autolink, ce660ea3/9f117153): a new call in the GUI's sources gets a stand-in made;
+  green on every push since.
+- X6100 temperature: was none (driver removed 11-19); now its power chip's (AXP223, "PMU", af8f5fae); the X6200's
+  Walkie panel shows CPU and PMU by turns (50905e06). The processor sensor tested by hand (no driver): no clock,
+  sample rate, acquisition, chopper, filter or quiet audio makes it convert; Xiegu's 5.8.9 kernel and gdyuldin's
+  never had its driver.
+- TX audio's 2nd harmonic (-32..-35 dBc): made in the processor-to-base hop; TCI levelled to -20 dBFS on the X6100
+  (35f55221): -44..-46 dBc whatever the client sends.
+
+Done: the X6200 kept off WiFi channels 9-11 (98a8bd8d; its firmware is the newest Realtek's); 5 and 10 W runs and the
+image proved on the mirror (505af2c1); gcfix5 image and carrier calibration end to end, carrier kept through band
+changes (e9e3d890), v0.3.12.40 released; one-file draft PR (unsubmitted); Sentry spectrogram time on air and G's
+VOL pop-up (e9e3d890); the radio's fingerprint and calibration file (842d7a1f); a band without a saved calibration
+gets 0, not the last band's (2772e164); the X6200 never calibrated or keyed for it (its last TX 06:01, FT8 tests);
+10 W image/carrier on every band (cc607867); never wait on CI (practice); stale background waits closed.
+
 **2026-11-19 afternoon: the owner's new list** (asked while v0.3.12.32 was pushed to the radios)
 
 - Done (hot build on both radios, in the next release): F SYSTEM's spectrogram under WHAT IT DOES, A's rows drawn by
