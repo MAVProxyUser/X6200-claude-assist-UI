@@ -1,0 +1,137 @@
+# The X6200's WiFi driver (rtw88, the RTL8723DU) built as its image builds it, for a module to try on the radio
+# without a new image (rmmod/insmod over SSH; a restart brings the image's own back).
+#
+# By hand only (Actions > rtw88 module (X6200) > Run workflow, or gh workflow run rtw88.yml):
+#   - no kit_run: buildroot (local-build.sh, X6CI_ONLY) makes the toolchain, the kernel and rtw88 with this
+#     repository's patches (buildroot/x6200/rtw88), as the image does (about 30 minutes with the image builds'
+#     ccache); the toolchain and the prepared kernel tree are kept as the artifact x6200-kbuild (14 days)
+#   - kit_run=RUN_ID: that run's kit, and rtw88 built against it in a few minutes
+# Either way rtw88 (the pin, the repository's patches, then extra_patch if given) is built against the kit and its
+# modules are the artifact rtw88-x6200-modules. extra_patch: a patch to try that is not in the repository, as
+# base64 of its gzip (gzip -c x.patch | base64), applied with -p1 after the repository's.
+name: rtw88 module (X6200)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kit_run:
+        description: 'A run of this workflow whose kernel kit to build against (empty: build the kit)'
+        required: false
+        default: ''
+      extra_patch:
+        description: 'A patch to try, base64 of its gzip (optional)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    env:
+      BR: ${{ github.workspace }}/AetherX6200Buildroot/build
+    steps:
+    - name: Free Disk Space (Ubuntu)
+      if: inputs.kit_run == ''
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: false
+        docker-images: true
+        swap-storage: true
+
+    - name: Checkout GUI
+      uses: actions/checkout@v4
+      with:
+        path: x6100_gui
+
+    - name: Checkout buildroot
+      if: inputs.kit_run == ''
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+        repository: Guru-RF/AetherX6200Buildroot
+        path: AetherX6200Buildroot
+
+    # The image builds' ccache, read only (this workflow saves none: it would push theirs out)
+    - name: Restore ccache
+      if: inputs.kit_run == ''
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.buildroot-ccache
+        key: ${{ runner.os }}-x6200-ccache-none
+        restore-keys: |
+          ${{ runner.os }}-x6200-ccache-
+
+    - name: Build the toolchain, the kernel and rtw88 (buildroot)
+      if: inputs.kit_run == ''
+      run: |
+        X6CI_ONLY="linux rtw88" MODEL=x6200 GUI_DIR=$GITHUB_WORKSPACE/x6100_gui \
+          BR_DIR=$GITHUB_WORKSPACE/AetherX6200Buildroot bash x6100_gui/buildroot/local-build.sh
+
+    # The kit: buildroot's host tree (the cross toolchain) and the kernel tree prepared for modules, its objects
+    # left out. Unpacked at the same path by a later run, so the paths inside it hold
+    - name: Pack the kit
+      if: inputs.kit_run == ''
+      run: |
+        L=$(ls -d $BR/build/linux-[0-9]*/ | head -1)
+        mkdir -p $RUNNER_TEMP/bro && cp $BR/build/rtw88-*/*.ko $RUNNER_TEMP/bro/
+        find $L \( -path "$L/scripts" -o -path "$L/tools" \) -prune -o \( -name '*.o' -o -name '*.o.cmd' -o -name '*.ko' \) -print0 \
+          | xargs -0 rm -f
+        cd $GITHUB_WORKSPACE
+        tar -I 'zstd -T0 -10' -cf $RUNNER_TEMP/x6200-kbuild.tar.zst AetherX6200Buildroot/build/host \
+          "AetherX6200Buildroot/build/build/$(basename $L)"
+        ls -la $RUNNER_TEMP/x6200-kbuild.tar.zst
+
+    - name: Upload the kit
+      if: inputs.kit_run == ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: x6200-kbuild
+        path: ${{ runner.temp }}/x6200-kbuild.tar.zst
+        retention-days: 14
+
+    - name: Download the kit
+      if: inputs.kit_run != ''
+      uses: actions/download-artifact@v4
+      with:
+        name: x6200-kbuild
+        run-id: ${{ inputs.kit_run }}
+        github-token: ${{ github.token }}
+        path: ${{ runner.temp }}
+
+    - name: Unpack the kit
+      if: inputs.kit_run != ''
+      run: cd $GITHUB_WORKSPACE && tar -I zstd -xf $RUNNER_TEMP/x6200-kbuild.tar.zst
+
+    # The pin (the buildroot package's RTW88_VERSION), the repository's patches, then the one to try
+    - name: Build rtw88 against the kit
+      env:
+        EXTRA: ${{ inputs.extra_patch }}
+      run: |
+        L=$(ls -d $BR/build/linux-[0-9]*/ | head -1)
+        PIN=$(sed -n 's/^RTW88_VERSION = //p' $GITHUB_WORKSPACE/AetherX6200Buildroot/br2_external/package/rtw88/rtl8723du.mk 2>/dev/null)
+        PIN=${PIN:-461b696b51317ba4ca585a4ddb32f2e72cd4efc9}
+        git clone -q https://github.com/lwfinger/rtw88.git $RUNNER_TEMP/rtw88
+        cd $RUNNER_TEMP/rtw88 && git -c advice.detachedHead=false checkout -q $PIN
+        for p in $GITHUB_WORKSPACE/x6100_gui/buildroot/x6200/rtw88/*.patch; do echo "patch: $(basename $p)"; patch -p1 < $p; done
+        if [ -n "$EXTRA" ]; then echo "$EXTRA" | base64 -d | gunzip > $RUNNER_TEMP/extra.patch; echo "patch: extra_patch"; patch -p1 < $RUNNER_TEMP/extra.patch; fi
+        make -C $L ARCH=arm CROSS_COMPILE=$BR/host/bin/arm-buildroot-linux-gnueabihf- M=$RUNNER_TEMP/rtw88 -j$(nproc) modules
+        mkdir -p $RUNNER_TEMP/mods/kit && cp $RUNNER_TEMP/rtw88/*.ko $RUNNER_TEMP/mods/kit/
+        [ -d $RUNNER_TEMP/bro ] && cp -r $RUNNER_TEMP/bro $RUNNER_TEMP/mods/buildroot
+        for k in $RUNNER_TEMP/mods/kit/rtw_core.ko $RUNNER_TEMP/mods/kit/rtw_usb.ko; do
+          $BR/host/bin/arm-buildroot-linux-gnueabihf-strings $k | grep -m1 '^vermagic='
+        done
+        (cd $RUNNER_TEMP/mods && sha256sum */rtw_core.ko */rtw_usb.ko */rtw_8723d*.ko */rtw_8723x.ko 2>/dev/null)
+
+    - name: Upload the modules
+      uses: actions/upload-artifact@v4
+      with:
+        name: rtw88-x6200-modules
+        path: ${{ runner.temp }}/mods
+        retention-days: 7

@@ -482,6 +482,13 @@ echo "== XARA, the VARA-compatible Winlink modem (tools/xara/build.sh): one ARMv
 # toolchain (glibc 2.36, the GUI's), which a tree built for the first time makes here, the first step of its build
 XARA_CC=$BR/build/host/bin/arm-buildroot-linux-gnueabihf-gcc
 (cd $BR/build && make toolchain)
+# X6CI_ONLY="linux rtw88": only these buildroot targets, then stop (.github/workflows/rtw88.yml: the kernel and the
+# WiFi driver as the image builds them, for a module to try on the radio; nothing else of the image is made)
+if [ -n "$X6CI_ONLY" ]; then
+    (cd $BR/build && make $X6CI_ONLY)
+    echo "== done (X6CI_ONLY: $X6CI_ONLY)"
+    exit 0
+fi
 # XARA's author withdrew its releases (2026-11-08): with them gone and not in the cache, tools/xara/build.sh says so
 # with exit status 3 and the image is built without /usr/bin/xara (Winlink keeps ARDOP and Mercury, and says XARA is
 # not on the radio when it is chosen). Any other failure of it stops the build, as before.
