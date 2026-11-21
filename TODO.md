@@ -109,7 +109,14 @@ Open:
   inside the filter (37 % lit, faint), app_sentry.c vp_column, both radios run it. Left: the X6100's audio carries a
   series of ~781 Hz (781/1562/2344/3125/3906 Hz, +9..15 dB over its noise) and lines at 97, 147, 290 Hz, fixed with
   the dial, so its own audio path (the backlight PWM is 100 Hz: not it; 781.25 Hz = 50 kHz / 64 fits a base DSP frame);
-  the X6200's audio has none. To do: find where it enters (the base's line out vs the SoC codec's input).
+  the X6200's audio has none. Where they enter (the same day, AGC off, RF gain 63 then 0, CW 300-1100 Hz): the hiss
+  is shaped by the CW filter and did not move with the RF gain (the receiver's own floor behind the 80 dB chain), the
+  lines did not move either and are NOT filtered (1562-3906 Hz above the filter's 1100 Hz edge, 97/147 Hz below its 300
+  Hz edge at +25 dB): added after the base's DSP, between its audio out and the SoC's codec. 97/147/290 Hz are
+  harmonics of ~48.5 Hz (x2, x3, x6). To do: the base's audio out against the codec's input (a scope on the line, or
+  the codec's input with the base's audio muted), the charger/battery as a suspect for 48.5 Hz. Ruled out: the
+  display (60.19 Hz: 27.5 MHz / 542 x 843), the backlight PWM (100 Hz), the base's flow packets (4136 bytes at
+  114688 bytes/s, 27.7 a second: ttyS1 streams at its line rate, no 48.5 Hz bursts).
 
 Changed state today:
 - RTL sticks: back on both radios (the owner, 2026-11-21, after taking them off the same day): LISTEN RTL/BOTH and
