@@ -47,8 +47,16 @@ Open:
   same driver sent 8 Mbit/s to the same channel-6 access point at -57 dBm, now -66..-69 dBm (10 dB weaker: moved?).
   Not the CPU (90 % idle), not power saving (off, disable_lps_deep=Y), no "failed to get tx report", Bluetooth quiet
   1.3 against 1.0 Mbit/s; its rate falls to MCS 0 (6.5) or 5.5 Mbit/s while sending, retransmits near none. It stays
-  on channel 6 by design (98a8bd8d keeps it off 9-11, where it stalled). To try: the radio nearer the access point (a
-  driver fault would not care), then rtw88 brought up from its 461b696 pin (May 2025, 134 commits behind). Open: why the stand-in
+  on channel 6 by design (98a8bd8d keeps it off 9-11, where it stalled). Not moved (the owner: the radios sit side by
+  side). Ruled out the same day: rate control (fixed MCS 4: nothing through; MCS 2 1.4, MCS 0 0.9 Mbit/s, where a
+  sound MCS 0 link gives ~4), the A-MPDU cap our pin writes on the 8723D (0x458 = 0x7fff; 0xffff no better; mainline
+  writes it for the 8814A only, 0d2a88690e58), mainline's TX-report erratum (5f936768300f: the MAC table overwrote
+  0x421; ours reads 0x1f, intact), the antenna port (the efuse says AUX, 0x948 = 0x80; MAIN 4 dB worse), the
+  transmit power (indexes 42-49, nothing clamped). Mainline rtw88 since the pin (111 commits, usb.c/tx.c/8723x
+  diffed): leak fixes, broadcast queue routing, logging; nothing for 8723DU transmit. What is wrong is the link: the
+  X6200 hears its access point at -64..-82 dBm with an SNR of 8-15 dB (its noise floor ~-84, 10 dB high; 366 OFDM
+  false alarms in 2 s), the channel-11 AP 5-7 dB weaker than the X6100 beside it. Next: a 2.4 GHz sweep beside the
+  X6200 (HackRF, receive only) with the radio on and off, and a USB WiFi adapter on a short lead away from it. Open: why the stand-in
   server on the Mac did not decode either. The run (wsjtx_tx.py, enabletx.dylib, shmshim.dylib, the 127.0.0.1 relay,
   macOS's 4 MB kern.sysv.shmmax worked round) is in the scratchpad, not in the repo.
 - The X6100's TCI receive audio (or tones.py's recorder) repeated 1.8 s of it exactly, 2.000 s later (correlation
