@@ -84,8 +84,50 @@ static void pass_clicks(lv_obj_t *o) {
  * between the two halves last: 4 px between the labels and 4 more before the supply's sign when there is room,
  * else 2 or 1 between the labels and what is left (up to 4 more) before the supply's sign. The usual gaps in
  * the other choices */
-/* The processor's temperature (the kernel's first thermal zone; the X6200's from the v0.3.10 image on), read again
- * every 5 s. From the GUI's thread only: the main screen's clock, the Ops Room clock, Walkie, the LCD panel */
+/* The power chip's temperature where the processor's cannot be had: the X6100. Its processor sensor (the R16's, in the
+ * touch-panel ADC block) does not convert on that board: tried by hand with no driver (2026-11-20), at the X6200
+ * driver's settings and with every clock divider, sample rate, acquisition time, the chopper off and the median
+ * filter on, its raw value jumped by hundreds of counts each conversion (1580-2336) where the X6200's held to +-1;
+ * Xiegu's own kernel has no driver for it either. The AXP223's ADC (axp22x-adc, IIO) gives its die's temperature,
+ * steady to +-0.2 C, on the same board: (raw + offset) x scale m°C. Its folder found once */
+static int pmic_temp(void) {
+    static char dir[96];
+    static bool looked;
+    char        path[128];
+    int         raw, off = 0, scale = 0;
+    FILE       *f;
+
+    if (!looked) {
+        looked = true;
+        for (int i = 0; i < 8 && !dir[0]; i++) {
+            char link[128], real[256];
+            snprintf(link, sizeof(link), "/sys/bus/iio/devices/iio:device%d", i);
+            snprintf(path, sizeof(path), "%s/in_temp_raw", link);
+            if (access(path, R_OK) == 0 && realpath(link, real) && strstr(real, "axp")) {
+                snprintf(dir, sizeof(dir), "%s", link);
+            }
+        }
+    }
+    if (!dir[0]) return CLOCK_NO_TEMP;
+    snprintf(path, sizeof(path), "%s/in_temp_raw", dir);
+    if (!(f = fopen(path, "r"))) return CLOCK_NO_TEMP;
+    int n = fscanf(f, "%d", &raw);
+    fclose(f);
+    if (n != 1) return CLOCK_NO_TEMP;
+    snprintf(path, sizeof(path), "%s/in_temp_offset", dir);
+    if ((f = fopen(path, "r"))) { if (fscanf(f, "%d", &off) != 1) off = 0; fclose(f); }
+    snprintf(path, sizeof(path), "%s/in_temp_scale", dir);
+    if ((f = fopen(path, "r"))) { if (fscanf(f, "%d", &scale) != 1) scale = 0; fclose(f); }
+    if (scale <= 0) return CLOCK_NO_TEMP;
+    long m = (long)(raw + off) * scale;
+    return m > -100000 && m < 200000 ? (int)((m + 500) / 1000) : CLOCK_NO_TEMP;
+}
+
+static bool temp_pmic;      /* clock_cpu_temp's last reading was the power chip's */
+
+/* The radio's temperature, read again every 5 s: the processor's (the kernel's first thermal zone; the X6200's from
+ * the v0.3.10 image on), else the power chip's (pmic_temp: the X6100). From the GUI's thread only: the main screen's
+ * clock, the Ops Room clock, Walkie, the LCD panel */
 int clock_cpu_temp(void) {
     static time_t last;
     static int    c = CLOCK_NO_TEMP;
@@ -98,8 +140,14 @@ int clock_cpu_temp(void) {
         last = now;
         c    = f && fscanf(f, "%d", &m) == 1 && m > -100000 ? (m + 500) / 1000 : CLOCK_NO_TEMP;
         if (f) fclose(f);
+        temp_pmic = c == CLOCK_NO_TEMP;
+        if (temp_pmic) c = pmic_temp();
     }
     return c;
+}
+
+bool clock_temp_is_pmic(void) {
+    return temp_pmic;
 }
 
 /* After the power, none there, nothing shown */

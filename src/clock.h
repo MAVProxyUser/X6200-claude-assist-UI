@@ -36,10 +36,13 @@ int clock_hour(int h, const char **ampm);
 /* A local time's hours and minutes so: "15:07", or "3:07 PM" (#54); into buf */
 const char *clock_hm(const struct tm *tm, char *buf, size_t size);
 
-/* The processor's temperature in whole degrees C, CLOCK_NO_TEMP when the kernel has none; read again every 5 s.
- * Shown wherever the battery and the time are: the main screen's clock (every theme), Walkie, the LCD panel */
+/* The radio's temperature in whole degrees C: the processor's (the X6200), else the power chip's (the X6100, whose
+ * processor sensor does not work), CLOCK_NO_TEMP when there is neither; read again every 5 s. Shown wherever the
+ * battery and the time are: the main screen's clock (every theme), Walkie, the LCD panel */
 #define CLOCK_NO_TEMP   (-1000)
 int clock_cpu_temp(void);
+/* clock_cpu_temp's last reading is the power chip's (the X6100), not the processor's: label it so ("PMU") */
+bool clock_temp_is_pmic(void);
 
 void clock_tz_init();
 void clock_tz_set(const char *posix);

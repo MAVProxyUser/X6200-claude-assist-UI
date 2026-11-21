@@ -45,7 +45,7 @@ Settings. Button and option names are written as the radio shows them.
 - [Tailscale](#tailscale): [Tailscale Funnel](#tailscale-funnel)
 - [Ethernet](#ethernet): [USB tethering](#usb-tethering)
 - [Troubleshooting and FAQ](#troubleshooting-and-faq)
-- [Reference](#reference): [Bluetooth CAT connection](#bluetooth-cat-connection), [CI-V commands](#supported-ci-v-commands), [btcat-ctl](#btcat-ctl), [btaudio-ctl](#btaudio-ctl), [files on /mnt](#files-on-mnt), [processor speed](#processor-speed), [processor temperature](#processor-temperature-x6200)
+- [Reference](#reference): [Bluetooth CAT connection](#bluetooth-cat-connection), [CI-V commands](#supported-ci-v-commands), [btcat-ctl](#btcat-ctl), [btaudio-ctl](#btaudio-ctl), [files on /mnt](#files-on-mnt), [processor speed](#processor-speed), [processor temperature](#processor-temperature)
 - [Build](#build)
 
 ## Getting started
@@ -11126,7 +11126,7 @@ runtime state in `/mnt/btcat.conf` overrides them.
 
 The processor runs at 1008 MHz all the time, as the radios' kernels start it.
 On an X6200 it slows down only when it gets too hot (see
-[Processor temperature](#processor-temperature-x6200)).
+[Processor temperature](#processor-temperature)).
 
 v0.3.11 had a Processor setting (Settings > General > CONTROLS, and the web
 configurator's Display page) with Full speed and Saves power. v0.3.12 took it
@@ -11155,15 +11155,34 @@ minute's readings, ten a second, stands in for it:
 for i in $(seq 600); do cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq; sleep 0.1; done | sort -n | uniq -c
 ```
 
-### Processor temperature (X6200)
+### Processor temperature
 
-The X6100 has no temperature reading: its kernel leaves the sensor's driver
-out. The sensor is the same as the X6200's, but on an X6100 (2026-11-19, the
-first kernel with the driver there, from v0.3.12.32's update) its raw value
-jumped by up to 57 °C from one fifth of a second to the next (42 to 99 °C,
-where the X6200's moves by 1 °C), so the thermal zone below slowed its
-processor at random and a spike past 110 °C would have powered it off. The
-title bars and clocks show no temperature on it, as before.
+The X6100 shows its power chip's temperature instead (from v0.3.12.41): the
+AXP223's own sensor, read through its ADC driver, steady to 0.2 °C on the
+owner's X6100. The title bars and clocks show it as the X6200's processor
+temperature is shown; the Walkie's info panel labels it `PMU` (the X6200's
+`CPU`). It sits on the same board as the processor and follows its
+heat, but reads cooler than the processor's own die would (about 40 °C idle
+where an X6200's processor reads about 53 °C). Its kernel leaves the
+processor sensor's driver out, because that sensor does not work on an X6100.
+On the owner's X6100 (2026-11-19, the first kernel with the driver, from
+v0.3.12.32's update) its raw value jumped by up to 57 °C from one fifth of a
+second to the next (42 to 99 °C, where the X6200's moves by 1 °C), so the
+thermal zone below slowed its processor at random and a spike past 110 °C
+would have powered it off. Set up by hand with no driver at all (2026-11-20),
+at the X6200 driver's settings and at every clock divider, sample rate and
+acquisition time, with its chopper off and its median filter on, and with
+the audio stopped, it still jumped by hundreds of counts each conversion: no
+setting makes it work, so it is the board, not the driver. Xiegu's own kernel
+for the X6100 (5.8.9) has no driver for it either, so no firmware for the
+X6100 has ever read it.
+
+Reading the X6100's over [SSH](#ssh): `(in_temp_raw + in_temp_offset) x
+in_temp_scale` in thousandths of a degree, from the power chip's ADC:
+
+```
+cd /sys/bus/iio/devices/iio:device0; echo $(( ($(cat in_temp_raw) + $(cat in_temp_offset)) * $(cat in_temp_scale) ))
+```
 
 The X6200's kernel reads its processor's temperature sensor (with the
 `sun4i-gpadc-iio` driver) on a card written from the v0.3.10 card image or

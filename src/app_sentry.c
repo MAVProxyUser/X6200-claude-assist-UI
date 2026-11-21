@@ -10221,7 +10221,8 @@ static void show_walkie(void) {
             if (fscanf(fl, "%lf", &ld) != 1) ld = 0;
             fclose(fl);
         }
-        if (c != CLOCK_NO_TEMP) snprintf(sy1, sizeof(sy1), "CPU %dC  LD %.1f", c, ld);
+        if (c != CLOCK_NO_TEMP)         /* the X6100's is its power chip's: PMU, not CPU */
+            snprintf(sy1, sizeof(sy1), "%s %dC  LD %.1f", clock_temp_is_pmic() ? "PMU" : "CPU", c, ld);
         else snprintf(sy1, sizeof(sy1), "LOAD %.1f", ld);
     }
     const char *ver = base_ver_short();
