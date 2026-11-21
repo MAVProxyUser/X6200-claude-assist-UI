@@ -103,6 +103,13 @@ Open:
   receiver audio with the antenna side quiet (the 80 dB chain, the X6200 not keying), find the lines' frequencies
   and how they move (fixed tones: the board's own clocks, the charger, the display or WiFi; moving with the dial:
   the receiver), against the X6200 the same way; then the source and whether it can be filtered or fixed.
+  FOUND 2026-11-21 (TCI audio with the 80 dB chain quiet, the dial moved 1 kHz between two 20 s recordings): mostly the
+  voiceprint's own scaling: its dark was the 33rd percentile of 0-4 kHz, which the receiver filter's empty part pulled
+  below the hiss (X6200: 3 dB, 79 % of a quiet passband lit; X6100 in CW 300-1100 Hz: 16 dB, 99 % lit). Now the median
+  inside the filter (37 % lit, faint), app_sentry.c vp_column, both radios run it. Left: the X6100's audio carries a
+  series of ~781 Hz (781/1562/2344/3125/3906 Hz, +9..15 dB over its noise) and lines at 97, 147, 290 Hz, fixed with
+  the dial, so its own audio path (the backlight PWM is 100 Hz: not it; 781.25 Hz = 50 kHz / 64 fits a base DSP frame);
+  the X6200's audio has none. To do: find where it enters (the base's line out vs the SoC codec's input).
 
 Changed state today:
 - RTL sticks: back on both radios (the owner, 2026-11-21, after taking them off the same day): LISTEN RTL/BOTH and

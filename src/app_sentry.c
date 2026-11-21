@@ -8987,6 +8987,7 @@ static uint32_t   vp_pal[256];
 static int16_t    vp_in[VP_FFT];
 static int        vp_have;
 static float      vp_floor = 20, vp_rms;
+static int        vp_lo_hz = 100, vp_hi_hz = 3000;    /* the audio's band, where the hiss is measured (walkie_step) */
 static uint32_t   ptt_ms;
 
 /* A caption over a picture in a frame of its own (ink under it, an amber edge), so it reads over what is drawn: its
@@ -9123,8 +9124,23 @@ static void vp_column(void) {
 
         col[r] = 10 * log10f(m0 * (1 - t) + m1 * t + 1);
     }
-    memcpy(sorted, col, (size_t)h * sizeof(float));
-    vp_floor = 0.98f * vp_floor + 0.02f * float_kth(sorted, h, h / 3);     /* the hiss, followed slowly */
+    /* The hiss, followed slowly: the median of the rows inside the audio's band (the receiver's filter, or the
+     * stick's). Up to v0.3.12.41 the 33rd percentile of all of 0-4 kHz: the filter's empty top took that below the
+     * hiss (3 dB on the X6200, 6 on the X6100, measured 2026-11-21), so the receiver's own noise drew lit and textured,
+     * "rich" with nothing on the air */
+    int n = 0;
+
+    for (int r = 0; r < h; r++) {
+        float f = (r + 0.5f) * VP_HZ / h;
+
+        if (f >= vp_lo_hz && f <= vp_hi_hz) sorted[n++] = col[r];
+    }
+    if (n >= 4) {
+        vp_floor = 0.98f * vp_floor + 0.02f * float_kth(sorted, n, n / 2);
+    } else {
+        memcpy(sorted, col, (size_t)h * sizeof(float));
+        vp_floor = 0.98f * vp_floor + 0.02f * float_kth(sorted, h, h / 3);
+    }
     if (g_gpu && wui == &w_port) {      /* one column into the GPU's ring: the picture is not moved a column (that
                                          * moved all of it, 86 times a second) */
         uint8_t lv[VP_MAXH];
@@ -9158,6 +9174,18 @@ static void walkie_step(void) {
     w_sdr_step();
     if (!wui->vp_frame) return;
     bool from_rtl = w_sdr_hz != 0;      /* G on the SDR's channel: its audio, its level */
+
+    /* The band the voiceprint measures the hiss in: the receiver's filter (its audio edges for the mode), the stick's
+     * FM audio 100-3000 Hz */
+    if (from_rtl) {
+        vp_lo_hz = 100, vp_hi_hz = 3000;
+    } else {
+        int lo = cparam_i_get(cfg_cur_filter_low), hi = cparam_i_get(cfg_cur_filter_high);
+
+        vp_lo_hz = lo < 100 ? 100 : lo;
+        vp_hi_hz = hi > VP_HZ ? VP_HZ : hi;
+        if (vp_hi_hz - vp_lo_hz < 100) vp_lo_hz = 100, vp_hi_hz = 3000;
+    }
 
     while ((n = from_rtl ? rtl_spectrum_scope_read(buf, N_OF(buf)) : audio_scope_read(buf, N_OF(buf))) > 0) {
         for (size_t i = 0; i < n; i++) {

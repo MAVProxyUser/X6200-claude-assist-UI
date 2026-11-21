@@ -1359,7 +1359,12 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
   last rows, in 3D as A's picture or 2D, a flat waterfall with the newest on top (**F4**).
 - **The voiceprint**: the receiver's audio as a sonogram, 0 to 4 kHz up and the last seconds across, in amber:
   voices show as their harmonics stacked, a tone as a line, the hiss as speckle. Its captions and kHz marks, as the
-  spectrum's, are framed, so they read over the picture.
+  spectrum's, are framed, so they read over the picture. Its dark is the hiss inside the receiver's filter (the
+  stick's audio: 100-3000 Hz), so a quiet channel draws nearly dark. Up to v0.3.12.41 it was the hiss of all 0-4
+  kHz, which the filter's empty part pulled down: the receiver's own noise drew bright and textured with nothing
+  on the air (a CW filter of 300-1100 Hz lit 99 % of itself; now 37 %, faint). A line that stays is real: the
+  X6100's audio carries one of about 781 Hz with its harmonics (1562, 2344, 3125, 3906 Hz), the same whatever
+  the dial, so from its own audio path, not the air (2026-11-21; the X6200's has none).
 - **The lamp**, under the voiceprint: RX SIGNAL when the audio stands 6 dB over its own noise, RX DMR while a DMR call
   is on the SDR's channel (lit even when its voice is silent, with no vocoder), RX QUIET, TX ARMED, ON AIR, TX LOCKED
   for a moment after PTT.
