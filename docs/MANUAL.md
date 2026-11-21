@@ -9446,7 +9446,15 @@ is paired once, with a code the radio shows:
    paired browsers in `/mnt/remote_sessions.conf`, each as a hash (SHA-256)
    of its token: the Files page hands out what is in `/mnt`, and a hash is no
    use to whoever reads it. A file from before the hashes is converted at the
-   first start; the browsers paired before stay paired.
+   first start; the browsers paired before stay paired. A power cut does not
+   unpair them: the file is written whole beside the old one before it takes
+   its place, then written to the card again under its own name, and a copy
+   (`remote_sessions.conf.bak`) is kept beside it, which the radio falls back
+   on when the file comes back empty or unreadable. (2026-11-21 the X6100's
+   battery ran out just after the file had been written, and every browser
+   paired with it had to pair again.) The last-seen time goes to the card
+   once an hour, or when the browser's address changes, not at every
+   connection. Forget all, or revoking the last browser, deletes the copy too.
 
 The first browser ever paired is the admin: it operates the radio and manages
 the others (Sessions in the bar lists them, with their name, their address,

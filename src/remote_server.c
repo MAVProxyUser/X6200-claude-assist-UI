@@ -256,6 +256,7 @@ typedef struct {
 
 static session_t       sessions[SESS_MAX];
 static int             nsessions;
+static bool            sess_unread;     /* REMOTE_SESSIONS there but not read (sess_load): never written over */
 static pthread_mutex_t sess_mux = PTHREAD_MUTEX_INITIALIZER;
 static char            pair_code[8];
 static uint64_t        pair_until_ms;
@@ -432,18 +433,37 @@ static bool from_hex(const char *s, uint8_t *out, size_t n) {
     return true;
 }
 
-/* sess_mux held. The hash, never the token (session_t); an away session's last column its browser's session at home
- * (the hash of its token), "-" for the others */
-static void sess_save_locked(void) {
-    char  tmp[sizeof(REMOTE_SESSIONS) + 8];
+/* A file written whole as tmp, put in path's place so that a power cut leaves one or the other on the card. /mnt is
+ * VFAT, where rename() over a file puts the new one in the old one's directory entry and writes its size and first
+ * cluster there only when its inode is next written back (up to 30 s later): 2026-11-21 00:27 the X6100's battery
+ * gave out with that write still to come and remote_sessions.conf came back empty, every paired browser gone. So the
+ * file is synced again under its new name (its directory entry, as fsync writes the inode), then the directory */
+static bool file_commit(const char *tmp, const char *path) {
+    if (rename(tmp, path) != 0)
+        return false;
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        fsync(fd);
+        close(fd);
+    }
+    fd = open(BOARD_DATA, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd >= 0) {
+        fsync(fd);
+        close(fd);
+    }
+    return true;
+}
+
+static bool sess_write(const char *path) {
+    char  tmp[sizeof(REMOTE_SESSIONS) + 16];
     FILE *f;
 
-    snprintf(tmp, sizeof(tmp), "%s.tmp", REMOTE_SESSIONS);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
     int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
     if (fd < 0 || !(f = fdopen(fd, "w"))) {
         if (fd >= 0)
             close(fd);
-        return;
+        return false;
     }
     for (int i = 0; i < nsessions; i++) {
         char hex[65], home[65] = "-";
@@ -456,25 +476,36 @@ static void sess_save_locked(void) {
                 sessions[i].tx ? 1 : 0, (unsigned long long)sessions[i].created, (unsigned long long)sessions[i].last,
                 sessions[i].ip[0] ? sessions[i].ip : "-", sessions[i].funnel ? 1 : 0, home);
     }
-    /* whole on the card before it takes the old file's place: a power cut leaves one or the other */
-    if (fflush(f) == 0)
-        fsync(fileno(f));
-    fclose(f);
-    rename(tmp, REMOTE_SESSIONS);
+    /* whole on the card before it takes the old file's place */
+    bool ok = fflush(f) == 0 && fsync(fileno(f)) == 0;
+    ok      = fclose(f) == 0 && ok;
+    return ok && file_commit(tmp, path);
 }
 
-/* The sessions, as sess_save_locked keeps them (a 64-hex hash first). A file from before keeps the token itself
- * (32 hex): it is hashed here and the file written anew, so the browsers paired before stay paired and the tokens
- * are off the card. The old file stays until the new one has taken its place (sess_save_locked). A file without
- * the last columns (funnel, home) is from before them: none, as then */
-static void sess_load(void) {
-    FILE *f = fopen(REMOTE_SESSIONS, "r");
-    char  line[256];
-    int   plain = 0;
-
-    if (!f)
+/* sess_mux held. The hash, never the token (session_t); an away session's last column its browser's session at home
+ * (the hash of its token), "-" for the others. A copy beside it (.bak), written after, which sess_load falls back on
+ * when the file itself comes back empty or unreadable: a power cut during one of the two leaves the other. Not while
+ * the sessions could not be read (sess_unread): writing then would put an empty list over the paired browsers */
+static void sess_save_locked(void) {
+    if (sess_unread)
         return;
-    pthread_mutex_lock(&sess_mux);
+    if (!sess_write(REMOTE_SESSIONS))
+        return;
+    if (nsessions > 0)
+        sess_write(REMOTE_SESSIONS ".bak");
+    else
+        unlink(REMOTE_SESSIONS ".bak");     /* every browser revoked: none to come back from the copy */
+}
+
+/* One sessions file read into the table: the count of its sessions, -1 when it cannot be opened (errno), and in plain
+ * the count of tokens from before (kept in the clear) */
+static int sess_read(const char *path, int *plain) {
+    FILE *f = fopen(path, "r");
+    char  line[256];
+
+    *plain = 0;
+    if (!f)
+        return -1;
     nsessions = 0;
     while (nsessions < SESS_MAX && fgets(line, sizeof(line), f)) {
         session_t *x = &sessions[nsessions];
@@ -490,7 +521,7 @@ static void sess_load(void) {
                     } else if (strlen(tok) == TOKEN_LEN) {   /* a token from before: hashed */
                         ok = true;
                         token_hash(tok, x->hash);
-                        plain++;
+                        (*plain)++;
                     }
                     break;
                 case 1: snprintf(x->name, sizeof(x->name), "%s", tok); break;
@@ -506,11 +537,46 @@ static void sess_load(void) {
         if (ok && x->name[0])
             nsessions++;
     }
+    bool bad = ferror(f);
     fclose(f);
+    return bad ? -1 : nsessions;
+}
+
+/* The sessions, as sess_save_locked keeps them (a 64-hex hash first). A file from before keeps the token itself
+ * (32 hex): it is hashed here and the file written anew, so the browsers paired before stay paired and the tokens
+ * are off the card. The old file stays until the new one has taken its place (sess_save_locked). A file without
+ * the last columns (funnel, home) is from before them: none, as then */
+static void sess_load(void) {
+    int plain = 0;
+
+    pthread_mutex_lock(&sess_mux);
+    errno  = 0;
+    int n  = sess_read(REMOTE_SESSIONS, &plain);
+    int er = errno;
+    if (n <= 0) {
+        /* empty, or not to be read: the copy, if it has any (the file emptied by a power cut, 2026-11-21) */
+        int plain_b = 0, nb = sess_read(REMOTE_SESSIONS ".bak", &plain_b);
+        if (nb > 0) {
+            LV_LOG_USER("remote: %s %s: its copy's %d paired browser(s) taken", REMOTE_SESSIONS,
+                        n == 0 ? "empty" : "unreadable", nb);
+            plain = plain_b;
+            n     = nb;
+            sess_write(REMOTE_SESSIONS);
+        } else {
+            nsessions = 0;
+            /* unreadable for another reason than not being there: nothing written over it until a restart */
+            sess_unread = n < 0 && er != ENOENT;
+            if (sess_unread)
+                LV_LOG_USER("remote: %s unreadable (%s): the paired browsers not written until a restart",
+                            REMOTE_SESSIONS, strerror(er));
+            n = 0;
+        }
+    }
     if (plain) {
         sess_save_locked();
         LV_LOG_USER("remote: %d paired browser(s) kept as a hash of the token from now on", plain);
-    }
+    } else if (n > 0 && access(REMOTE_SESSIONS ".bak", F_OK) != 0)
+        sess_write(REMOTE_SESSIONS ".bak");     /* a GUI from before the copy: made now, not at the next change */
     pthread_mutex_unlock(&sess_mux);
 }
 
@@ -579,10 +645,16 @@ static int sess_find(const char *token) {
 static void sess_touch(int i, const char *ip, bool funnel) {
     pthread_mutex_lock(&sess_mux);
     if (i >= 0 && i < nsessions) {
-        sessions[i].last = wall_s();
+        /* on the card only when it says something new: another address, or an hour on (every connection wrote it,
+         * and every write to /mnt is one a power cut can catch) */
+        uint64_t now  = wall_s();
+        bool     news = strcmp(sessions[i].ip, ip) != 0 || sessions[i].funnel != funnel ||
+                    now > sessions[i].last + 3600 || now < sessions[i].last;
+        sessions[i].last = now;
         snprintf(sessions[i].ip, sizeof(sessions[i].ip), "%s", ip);
         sessions[i].funnel = funnel;
-        sess_save_locked();
+        if (news)
+            sess_save_locked();
     }
     pthread_mutex_unlock(&sess_mux);
 }
