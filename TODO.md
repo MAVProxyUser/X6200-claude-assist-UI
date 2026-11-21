@@ -76,7 +76,8 @@ approved that day.
     2026-11-20 19:31 (80 dB, the owner away with 10 W allowed): the X6100 switched off in the first 10 W over of a
     txcal run on 15 m. Its battery log: the internal battery empty (1 % from 19:26), the adapter not holding it up all
     evening; no hang (the GUI watch never acted, no kexec). The owner found it off and switched it on (20:07, 0 %).
-    Before more TX tests: a supply for transmitting (the stock adapter is a charger), the battery charged.
+    Before more TX tests: a supply for transmitting (the stock adapter is a charger), the battery charged. MANUAL
+    "Power supply": Xiegu's 9-15 V, 13.8 V and 3.5 A; ours, a regulated 13.8 V supply of 5 A or more.
     The tone's 2nd harmonic (both bases): TESTED 2026-11-20 evening. It follows the audio level 1 dB for 1 dB at a
     held power (0.05 of full scale -53 dBc, 0.1 -44, 0.3 -33, 0.5 -28; 20 m, 1 W) and the processor's Headphone output
     (-6 dB: -42, -12 dB: -47); the base's line-in gain (its codec PGA, page 1 reg 0x3B) changes nothing: made in the

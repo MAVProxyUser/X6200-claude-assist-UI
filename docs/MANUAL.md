@@ -26,7 +26,7 @@ Settings. Button and option names are written as the radio shows them.
 - [The Sentry](#the-sentry) (this fork, X6200 and X6100): [A and B](#a-and-b-the-spectrum-screens), [SCAN CFG](#scan-cfg), [C LOG](#c-log), [D, E, F](#d-bands-e-decode-f-system), [G WALKIE](#g-walkie), [USB receivers](#the-rtl-sdr-the-gns-5890-and-the-microadsb-on-usb), [the GPS panel](#the-gps-panel), [AIRSPACE](#airspace), [I DIRECTION FINDER](#i-direction-finder)
 - [The GSOC head with a G90](#the-gsoc-head-with-a-g90-from-source) (from source, untried here)
 - [Updating the firmware](#updating-the-firmware): [the SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot), [the X6200's base firmware](#the-x6200s-base-firmware), [the X6100's base firmware](#the-x6100s-base-firmware)
-- [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
+- [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [power supply](#power-supply), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
 - [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab)
 - [Transmitting](#transmitting): [amateur bands only](#amateur-bands-only), [no TX without data from the base](#no-tx-without-data-from-the-base), [TX shift](#tx-shift), [transverter TX power limit](#transverter-tx-power-limit), [SWR scan and the tuner](#swr-scan-and-the-tuner), [TUNE for an external tuner](#tune-for-an-external-tuner), [digital-mode TX level](#digital-mode-tx-level), [recording voice messages](#recording-voice-messages), [ALC in CW](#alc-in-cw), [PA bias](#pa-bias-x6200), [register 32](#register-32-x6200)
 - [Digital modes](#digital-modes): [opening a mode](#opening-a-mode), [FT8 and FT4](#ft8-and-ft4), [JS8](#js8) ([GhostNet](#ghostnet)), [WSPR](#wspr) ([band hopping](#band-hopping)), [SSTV, WeFax and NavTex](#sstv-wefax-and-navtex), [RADE (FreeDV)](#rade-freedv), [PSK31, PSK63 and Olivia](#psk31-psk63-and-olivia), [JTTY](#jtty), [frequencies of PSK, Olivia and JTTY](#frequencies-of-psk-olivia-and-jtty), [text log of the keyboard modes](#text-log-of-the-keyboard-modes), [RTTY and WeFax TX](#rtty-and-wefax-tx)
@@ -2599,6 +2599,32 @@ says, in plain words.
   28 MHz IF) are not taken for yours when they are exactly its values and
   nothing else is set: they are removed, and the transverters are off. To
   use one, set its shift in Settings > General > TRANSVERTERS (0 is off).
+
+### Power supply
+
+The X6100 takes 9 to 15 V DC, negative ground, and Xiegu recommends a 13.8 V
+supply good for at least 3.5 A: it draws up to 3 A transmitting, and makes
+10 W only on external power (5 W on its own battery). The adapter in the box
+is a charger, not a supply for transmitting (Xiegu's X6200 one is 12 V 1 A,
+see [low battery](#low-battery)): it charges the battery and runs the radio
+receiving, but when the radio transmits it cannot keep up and the radio runs
+on its battery instead.
+
+Measured on the owner's X6100 on its stock adapter (2026-11-20, an evening of
+bench transmitting at 0.1 to 10 W): the supply read 11.9 V idle, about 8 V
+while charging, and 0.2 to 3.9 V in most minutes the radio transmitted. The
+battery went from 52 % to empty in about 75 minutes and the radio switched
+itself off in a 10 W over; switched on again at 0 %, it went off again within
+minutes on the same adapter. It also capped the power: 3.5 to 8.6 W came out
+at a 10 W setting, depending on the band.
+
+For transmitting, use a regulated 13.8 V supply rated 5 A or more (the extra
+over 3.5 A lets it charge the battery while you transmit). Check the polarity
+and the plug before connecting it: Xiegu warns that a reversed connection can
+damage the radio badly. The supply's voltage is in Info > POWER (External),
+and the radio writes it every minute to `battery_log.csv` on its card (the
+`vext` column) beside the battery's % and how long it transmitted: a supply
+that drops while you transmit shows there.
 
 ### Low battery
 
