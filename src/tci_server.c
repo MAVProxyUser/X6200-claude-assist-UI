@@ -138,6 +138,9 @@
 /* ... and before its first frame, from the key: over the X6200's WiFi WSJT-X's first frames came 0.5 s and more
  * after it, behind its 6 Mbit/s of TX audio (each frame twice its size) and our 3 Mbit/s of RX audio (2026-11-21) */
 #define TX_FIRST_AUDIO_MS 2000
+/* A client's start after its own unkey, while the radio still plays that over out (its unkey is answered at once: the
+ * X6200 has 1.2-1.4 s to go): kept until the radio is free, this long at most, then keyed, instead of refused */
+#define KEY_WAIT_MS   3000
 #define TX_LIMIT_MS   (180 * 1000)
 #define BT_PING_MS    2000          /* over Bluetooth: silent this long, it is pinged (its answer shows the link is up) */
 #define BT_TX_SILENT_MS 5000        /* over Bluetooth: silent this long while it transmits, its transmission ends. The
@@ -173,6 +176,9 @@ typedef struct {
                                        proxy on the radio, the one it names; the client's own otherwise */
     bool            local;          /* a program on the radio itself: from 127.x, neither a browser nor a proxy's */
     char            app[32];        /* the name it gives itself (its User-Agent), "" none */
+    bool            key_wait;       /* a start waiting for its own last over to play out (key_wait_tick) */
+    bool            key_wait_tci;   /* ... with its TCI audio */
+    uint64_t        key_wait_ms;
     uint8_t         said;           /* what the operator said to its asking to transmit, on this connection (SAID_*) */
     bool            seen;           /* its address in the allowed list was marked as seen on this connection */
     uint8_t         in[IN_SIZE];
@@ -279,6 +285,7 @@ static int drive_of(float pwr) {
  * The LVGL thread says what became of a start by its number, so a refusal ends that start alone */
 static uint32_t        key_gen;          /* the last start queued (socket thread) */
 static atomic_uint     key_keyed;        /* the last start the LVGL thread keyed */
+static uint32_t        told_key;         /* the last start whose client was told trx:0,true (state_follow) */
 static atomic_uint     key_refused;      /* the last start the LVGL thread refused */
 static atomic_uint     key_cancelled;    /* the last start ended before its key ran: that key keys nothing */
 static int             ptt_owner = -1;   /* the client the radio's own PTT is keyed for (or about to be), -1 none */
@@ -316,6 +323,8 @@ static struct {
     /* What the over had, for the log when it ends for silence or the limit: audio frames taken, frames dropped (the
      * key not yet taken, another client's), TX_CHRONO frames sent */
     uint32_t    n_taken, n_early, n_chrono;
+    int         unkeyed_ci;     /* the client whose own unkey ended the last over, and when: its next start while that */
+    uint64_t    unkeyed_ms;     /* over plays out waits for the radio (KEY_WAIT_MS) instead of being refused */
     bool        took;       /* the socket thread has seen this start's key take (tx_session_tick) */
 } txs;
 
@@ -786,6 +795,9 @@ static void client_close(client_t *c) {
     c->local = c->seen = false;
     c->said   = SAID_NOTHING;
     c->app[0] = 0;
+    c->key_wait = false;
+    if (txs.unkeyed_ci == (int)(c - clients))
+        txs.unkeyed_ci = -1;
     pthread_mutex_unlock(&c->lock);
     cap_update();
 }
@@ -1114,6 +1126,14 @@ static void state_follow(rstate_t *last, bool first) {
     }
     if (s.tx != last->tx)
         broadcastf("trx:0,%s;", s.tx ? "true" : "false");
+    /* The owner of a start that keyed is told so also when the radio was back on the air before this look saw it on
+     * receive (a start right after its own unkey, KEY_WAIT_MS): there was no change to broadcast, and the client
+     * waited for its trx:0,true to send its audio */
+    if (keyed == key_gen && told_key != key_gen && s.tx && (txs.owner >= 0 || ptt_owner >= 0)) {
+        if (s.tx == last->tx)
+            client_text(&clients[txs.owner >= 0 ? txs.owner : ptt_owner], "trx:0,true;");
+        told_key = key_gen;
+    }
     /* The last start refused: its client holds nothing and hears so (audit A01). The refusal of
      * a start cancelled since is no one's: it neither ends nor tells the start after it (C01) */
     if (refused == key_gen && (txs.owner >= 0 || ptt_owner >= 0)) {
@@ -1763,6 +1783,14 @@ static void handle_cmd(int ci, char *line) {
     bool key     = (!strcmp(name, "trx") && n >= 2 && parse_bool(a[1])) || (cw && !more);
     bool not_cw  = cw && !more && !cw_mode(s.mode);
     bool refused = key && (!tx_free(&s) || not_cw || (atomic_load(&trust_operate) && !tx_permit(ci)));
+    if (refused && key && !cw && txs.unkeyed_ci == ci && now_ms() - txs.unkeyed_ms < KEY_WAIT_MS && txs.owner < 0 &&
+        ptt_owner < 0 && cw_owner < 0 && (s.tx || atomic_load(&txs.keyed))) {
+        /* its own last over still playing out: this start waits for the radio (key_wait_tick), answered then */
+        c->key_wait     = true;
+        c->key_wait_tci = n >= 3 && strcasecmp(a[2], "tci") == 0;
+        c->key_wait_ms  = now_ms();
+        return;
+    }
     /* A question takes no control: a vfo without its frequency (vfo:0,0;), a trx without true or false, the filter
      * without its two edges, the others without their value. It is answered with the state below, so a program that
      * polls (Hamlib's TCI backend asks VFO:0,0; and TRX:0; at every poll) leaves control with a browser that has it.
@@ -1868,11 +1896,17 @@ static void handle_cmd(int ci, char *line) {
                     atomic_store(&key_refused, key_gen);    /* lost: refused, as the LVGL thread would */
             }
         } else {
+            c->key_wait = false;                    /* a start of its waiting: given up */
             if (txs.owner == ci || ptt_owner == ci || cw_owner == ci) {
                 /* Its unkey answered now: the X6200 has 1.2-1.4 s of the over still to play, and the radio's state
                  * says receive only after it, later than the second WSJT-X and JTDX wait, which then hung up (their
-                 * Rig Control Error, 2026-11-21). The state's own trx:0,false follows */
+                 * Rig Control Error, 2026-11-21). The state's own trx:0,false follows. Its next start meanwhile
+                 * waits for the radio (KEY_WAIT_MS) */
                 client_text(c, "trx:0,false;");
+                if (txs.owner == ci || ptt_owner == ci) {
+                    txs.unkeyed_ci = ci;
+                    txs.unkeyed_ms = now_ms();
+                }
                 tx_session_end(ci, true);
             } else {
                 client_text(c, "trx:0,false;");     /* not this client's transmission */
@@ -2084,7 +2118,32 @@ static void handle_tx_audio(int ci, const uint8_t *frame, size_t len) {
 
 /* Keyed with TCI audio: the pacing frames, and the watchdog. The radio's own PTT keyed from
  * here has the time limit too. */
+/* A start waiting for its own last over to play out: keyed as the client sent it once the radio is free (the
+ * question, control and the radio's rules decided then as for any start), refused after KEY_WAIT_MS. Socket thread */
+static void key_wait_tick(uint64_t now) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        client_t *c = &clients[i];
+        rstate_t  s;
+
+        if (c->fd < 0 || !c->key_wait)
+            continue;
+        state_read(&s);
+        if (tx_free(&s)) {
+            char cmd[24];
+
+            c->key_wait = false;
+            snprintf(cmd, sizeof(cmd), "%s", c->key_wait_tci ? "trx:0,true,tci;" : "trx:0,true;");
+            txs.unkeyed_ci = -1;            /* no second wait: refused as ever if the radio is busy again */
+            handle_text(i, cmd);
+        } else if (now - c->key_wait_ms > KEY_WAIT_MS) {
+            c->key_wait = false;
+            client_text(c, "trx:0,false;");
+        }
+    }
+}
+
 static void tx_session_tick(uint64_t now) {
+    key_wait_tick(now);
     cw_tick(now);
     if (ptt_owner >= 0 && (clients[ptt_owner].fd < 0 || now - ptt_ms > TX_LIMIT_MS))
         tx_session_end(ptt_owner, false);
@@ -2793,6 +2852,7 @@ void tci_server_init(void) {
         pthread_mutex_init(&clients[i].lock, NULL);
     }
     txs.owner = -1;
+    txs.unkeyed_ci = -1;
     conf_read();
     allowed_load();
     if (pipe2(wake_fd, O_NONBLOCK | O_CLOEXEC) < 0) {

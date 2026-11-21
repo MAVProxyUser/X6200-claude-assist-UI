@@ -525,6 +525,10 @@ static void late_key(void) {
 /* A TCI audio start whose key takes the GUI thread 0.8 s (the network voice stream opened, the modem bit set): its
  * client is told trx:0,true then, and its audio is waited for from there, not from the start. Ended at once before,
  * as more than TX_SILENCE_MS had gone by: WSJT-X on the X6200 (2026-11-21). Silence after the key still ends it */
+static bool A_waits(void) {
+    return clients[A].key_wait;
+}
+
 static void slow_tci_key(void) {
     client_open(A);
     say(A, "trx:0,true,tci;");
@@ -538,11 +542,23 @@ static void slow_tci_key(void) {
     say(A, "trx:0,false,tci;");
     check(strstr(heard(A), "trx:0,false;") && radio_get_modem(),
           "A's unkey answered at once, before the radio has played its last audio and unkeyed");
+    say(A, "trx:0,true,tci;");          /* again at once, its last over still playing out */
+    check(!strstr(heard(A), "trx:0,") && A_waits(), "its start meanwhile waits for the radio, not refused");
+    gui(-1);                            /* the unkey runs, the radio is free; the round after keys the start */
     gui(-1);
-    check(!radio_get_modem() && txs.owner < 0, "then unkeyed");
+    check(radio_get_modem() && txs.owner == A && strstr(heard(A), "trx:0,true;") && !A_waits(),
+          "then keyed, A told trx:0,true");
+    say(A, "trx:0,false,tci;");
+    gui(-1);
+    check(!radio_get_modem() && txs.owner < 0, "unkeyed");
     say(A, "trx:0,true,tci;");
     gui(-1);
-    check(radio_get_modem() && txs.owner == A, "A keys again");
+    check(radio_get_modem() && txs.owner == A, "A keys again, the radio free");
+    say(A, "trx:0,false,tci;");
+    say(A, "trx:0,true,tci;");          /* waiting again... */
+    tx_session_tick(now_ms() + KEY_WAIT_MS + 100);      /* ...and the radio busy longer than KEY_WAIT_MS */
+    check(strstr(heard(A), "trx:0,false;") && !A_waits(), "a start that waited KEY_WAIT_MS in vain: refused");
+    gui(-1);
     tx_session_tick(now_ms() + TX_FIRST_AUDIO_MS + 100);
     gui(-1);                            /* the unkey it queued runs */
     check(!radio_get_modem() && txs.owner < 0 && strstr(heard(A), "trx:0,false;"),
