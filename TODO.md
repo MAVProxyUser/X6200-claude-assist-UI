@@ -33,17 +33,17 @@ Open:
   stream at its full rate); silence counted from the key, the first audio given 2 s; no RX audio to the client
   while it transmits; its unkey answered at once; the remote state's "ask". The bench run is in the scratchpad
   (wsjtx_tx.py, enabletx.dylib presses Enable Tx, shmshim.dylib, the 127.0.0.1 relay), not in the repo.
-- The X6100's TCI RX audio to a recorder on the Mac stops after about a minute (tones.py's TciRx, 2026-11-20 and -21).
-- WSJT-X itself over TCI (2026-11-21, WSJT-X Improved 3.2.0 for Apple Silicon on the owner's Mac, N0CALL, the X6200):
-  connects ("TCI Client RX1"), follows and sets the dial, streams the receive audio (its waterfall right), but never
-  decodes: its decoder (jt9) is never asked, even with a stand-in TCI server on the Mac sending a clean ft8sim CQ in
-  our framing (jt9 decodes the same file), so the fault is WSJT-X's on that Mac, not the radio's stream. Not the
-  usual install: macOS sets kern.sysv.shmmax only at boot (4 MB; WSJT-X wants 50 MB, its fix a LaunchDaemon and a
-  reboot), so it ran with a file-backed shared-memory shim (DYLD_INSERT_LIBRARIES, the app re-signed ad hoc), and
-  through a 127.0.0.1 relay (the re-signed app got no Local Network access to the radio). TX from WSJT-X not yet
-  tried: its UDP control cannot press Enable Tx, and a Reply needs a decode. With the radio's stream its waterfall
-  also drew period lines far more often than every 15 s (not with the stand-in's steady frames): the stream's bursts?
-  A run with the Mac's shared memory raised at boot would tell the shim from WSJT-X.
+- The X6100's TCI RX audio to a recorder on the Mac stopping after about a minute: DONE 2026-11-21. The server
+  PINGs a client silent 20 s and drops one silent 60 s (tci_server.c IDLE_MS); tones.py's TciRx (and tci_tone_tx.py)
+  never answered the PING. Both answer it now: 100 s from the X6100 at 99.8-100.1 % of real time.
+- WSJT-X over TCI: PARKED 2026-11-21 (its transmit side works, above). Why it never decoded from the X6200: it gets
+  the X6200's audio at 31-40 % of real time after the first 15-20 s, so it never fills a 15 s period (its period
+  counter in the shared memory reached 21 of 50). A plain reader on the Mac sees the same, so not WSJT-X: WSJT-X sets
+  no format and takes TCI's default, 48 kHz float32 stereo = 3 Mbit/s, and the X6200's WiFi does not carry it (raw
+  TCP from the radio 2.5 Mbit/s, then 0.8-1 Mbit/s after 15 s; its RTL8723DU at -68 dBm on another access point than
+  the X6100, which gets 17-34 Mbit/s at -47 dBm). 24 kHz int16 mono (0.4 Mbit/s) holds 100 %. Open: why the stand-in
+  server on the Mac did not decode either. The run (wsjtx_tx.py, enabletx.dylib, shmshim.dylib, the 127.0.0.1 relay,
+  macOS's 4 MB kern.sysv.shmmax worked round) is in the scratchpad, not in the repo.
 - The X6100's TCI receive audio (or tones.py's recorder) repeated 1.8 s of it exactly, 2.000 s later (correlation
   1.0000, so not RF) in the 1 W pass of that run, the X6100's receiver near full scale (AGC off, -3 dBFS):
   ~/.config/x6x00-bench/runs/20261121-020143-tones-tcihold/usb-1.0W.wav. Its tone fits from 2000 Hz on missed.

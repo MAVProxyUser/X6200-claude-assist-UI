@@ -63,10 +63,12 @@ class TciRx:
                   "audio_stream_samples:512;audio_start:0;")
 
     def text(self, t):
-        p = t.encode()
+        self._send(0x1, t.encode())
+
+    def _send(self, op, p):
         mask = os.urandom(4)
         n = len(p)
-        head = bytes([0x81]) + (bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + struct.pack(">H", n))
+        head = bytes([0x80 | op]) + (bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + struct.pack(">H", n))
         self.s.sendall(head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(p)))
 
     def _take(self, n):
@@ -88,7 +90,9 @@ class TciRx:
                 elif n == 127:
                     n = struct.unpack(">Q", self._take(8))[0]
                 p = self._take(n)
-                if b0 & 0x0F == 2 and len(p) > 64:
+                if b0 & 0x0F == 9:      # the server's PING to a client silent 20 s: unanswered, it is gone at 60 s
+                    self._send(0xA, p)
+                elif b0 & 0x0F == 2 and len(p) > 64:
                     h = struct.unpack("<8I", p[:32])
                     if h[6] == 1 and h[2] == 0:          # RX audio, int16
                         with self.lock:

@@ -127,7 +127,9 @@ def main():
     try:
         while sent < total and time.time() - t0 < max_s:
             op, p = ws.frame()
-            if op == 1:
+            if op == 9:                 # the server's PING: answered, or it drops a client silent 60 s
+                ws.send(10, p)
+            elif op == 1:
                 txt = p.decode(errors="replace")
                 if "trx:0,true" in txt:
                     keyed = True
