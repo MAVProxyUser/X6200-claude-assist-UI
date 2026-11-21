@@ -37,4 +37,5 @@ Measured 2026-11-21 (receive only):
   artifact's `kit/x6x00_dmafix.ko`.
 - `ab.sh HOST SECONDS KO`: the A/B above.
 
-On a kernel with 9105, `hammer.py 600` (two at once) should show no jump.
+On a kernel with 9105, `hammer.py 600` (two at once) shows no jump: the X6200 on d545dd48's kernel, 0 in 19.67 M
+reads (2026-11-21).

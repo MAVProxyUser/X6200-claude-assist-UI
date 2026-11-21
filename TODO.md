@@ -86,8 +86,11 @@ Open:
   on (the GUI's decoders too: FT8 DT +2). Reproduced on both radios (pointer reads hammered: X6100 one jump in
   4.7 M reads, its TCI audio 2.00000 s repeated at that moment; X6200 5 in 19 M). Mainline's c90b6973daa3 tried on
   the running X6200 by a test module (x6x00_dmafix) in place of the built-in read: 0 jumps in 19 M reads against 5
-  with the old read. In the kernel as patches 9105/9106 (both radios); to do: hammer.py on the new kernel once a
-  radio has it.
+  with the old read. In the kernel as patches 9105/9106 (both radios). PROVEN on the built kernel the same evening: the
+  X6200 given d545dd48's bundle with --kernel --reboot (it came back by itself, the owner confirmed), two hammers 600 s:
+  0 jumps in 19.67 M reads; after that boot the image's rtw88 had host_spur_khz set, the channel rule moved it from
+  channel 6 (-77 dBm) to channel 11 (-51) in 2 s, and WSJT-X's TCI stream held 100.0 % mean (lowest 99.4 %). The
+  X6100 gets it with the next release, the kernel box ticked.
 - BinModem: ported to C and run between the radios (2026-11-21), then REMOVED from the port at the owner's word
   ("that was all fun, but we don't need it in this port"). Besides the X6200's TCI power above, what it found that
   stays true of the radios:
