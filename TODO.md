@@ -11,6 +11,31 @@ approved that day.
 against git: 32 commits that day, v0.3.12.37-.40 released). Open first; then what changed state; the done ones last.
 
 Open:
+- 1:1 AUDIT of the two radios (the owner, 2026-11-22 ~03:00: "do a 1:1 audit of both radio features ... clean up the
+  backlog"). A feature inventory from the manual and the code (the caps each base gives: the X6100 on Xiegu's factory
+  V1.1.9 rev 0 has TX_IQ_OFFSET, ZOOM, IF_SHIFT, TX_SPECTRUM_ON_DIAL only; the X6200 ZOOM, DNF_AUTO, PSD, COMP,
+  TX_LEVEL, SAM_WFM, KEEPALIVE, TX_NO_ALC, CW_SPECTRUM_ON_DIAL, CW_TONE_RISES), then suite.py core on both radios
+  (every screen side by side). Gaps and their state:
+  - FIXED b010fc02: page I / the web DF page said X6200 on the X6100; the LCD theme's RF bars 0-10 W on the X6200
+    (8 W top); the Bluetooth CAT name X6100 on the X6200 (now the model, live on the X6200); manual: Mesa, the boot
+    video's engine and the clock chip's drift on the X6100 too (checked on it), the TX AUDIO / TX CALIBRATION cards'
+    models, CW peak on the X6200 acts on the decoder only.
+  - FIXED (this night, after b010fc02): G's spectrum on the X6100 50 kHz wide (its IQ climbs from ~27 kHz out; A
+    shows the middle 50 kHz; G's 100 kHz drew the humps as edge signals); its caption says so (50 KHZ on the X6100,
+    100 KHZ on the X6200, shot on both).
+  - suite.py core on both radios (2026-11-22 03:35, then the screens again): 55 pass + 37 screens pass; every Sentry
+    page and app screen alike on both, no old-theme colour; RADE shut on both (needs headphones or a TCI client, as
+    it should); SSTV on the X6100 opened after the 15 s wait (its picture showed it open): the wait is 25 s now.
+    Settings that differ and are each radio's own: adsb_range 3/8, line_in 10/default, sql 4/0. Identity: the X6100
+    bundle .43 (image .28), the X6200 bundle .42 (image 0.3.8), both GUIs the hot build.
+  - CHECKED, nothing to change: the CW key's release when the GUI stops (gpiochip1 line 203 is the key on both:
+    X6100_morse_key / X6200_morse_key); the X6100's base version reads V1.1.9 (G's panel); the settings the GUI sends
+    whatever the base (codec/band gain, CESSB, TX filter, FM emphasis, CW peak, DNF auto) are all at their defaults
+    on the X6100 (none saved), as upstream sends them to factory bases.
+  - LEFT (need the radio in a way not tried tonight): Comp on the factory X6100 (the button shown and sent, the cap
+    says no compressor: what it does on the air); IF shift on the factory X6100 (from the version alone); the
+    untested-on-one-model list in the manual (keyboard/mouse and the sideswiper on the X6100, KEY Train with a paddle,
+    the X6200's TUNE for an external tuner, KrakenSDR on the X6100, Time Signal's AM filter on the X6100).
 - G (the owner, 2026-11-22 ~03:00: "YOU should be setting the radio into the mode im only seeing spikes on it form the
   key up and key down"): DONE that night. (1) A/B arming on A and G puts CW/CW-R and LSB-D/USB-D into the band's voice
   mode (USB from 10 MHz and on 60 m, LSB below) and locking puts it back: scratchpad arm_mode_test.py 7 of 7 on both
@@ -45,8 +70,10 @@ Open:
   -48.3 once set again; the old daemon's rows -43.4 dB at 0 dB asked, fixed -74.1 from the start. FIXED in
   tools/rtlspec/sdr_rtl.c (the last gain set again when a tune brings the tuner out of direct sampling); hot-installed
   on both radios (b725436b). rtl_power and any program that sets its gain before its first tune have the same trap;
-  x6x00-df tunes first (right). Not done: a librtlsdr patch (the same re-apply inside _rtlsdr_set_direct_sampling)
-  would fix every program on the radio.
+  x6x00-df tunes first (right). DONE too 2026-11-22 ~04:00: buildroot rtlsdr-blog 0004 sets a manual gain again
+  after the tuner's init in _rtlsdr_set_direct_sampling (rtlsdr_set_tuner_gain_mode keeps the mode): every program on
+  the radio (rtl_power, rtl_fm, dump1090) keeps its gain; scratchpad rtl_gain/first.c against it on the X6200's stick:
+  rate-gain-tune now -48.5 dBFS at 0 dB (before -9.4), 3 of 3 runs; the daemon built on it on both radios (94c761fe).
 - 15 m and 12 m transmit image shifts during a session (-46..-53 dBc to -29 at the same balance, a 9 % I/Q gain
   change; 10, 17, 20 m steady). The owner: "dive deeper ... find a novel solution that *works*". The heat theory and
   its warm balance were wrong and REMOVED (eab501f7); the battery-vs-adapter theory is not supported by the minute

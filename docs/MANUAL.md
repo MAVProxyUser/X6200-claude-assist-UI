@@ -1392,7 +1392,9 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
   value. The S-meter is A's and B's own, the same in every figure: the radio's own box's 25 bars on its scale with
   `S1 3 5 7 9 +20 +40` under them, its smoothed level, the bars under the noise floor dim, its peak bar bright, and
   its value `S4  -103.4 DBM` (`TX` while transmitting); on an SDR channel B's `SNR` meter. AF: -60 to 0 dBFS.
-- **The spectrum**, edge to edge: the X6200's, 100 kHz around the dial (bracketed in the middle): its trace over the
+- **The spectrum**, edge to edge: the radio's, 100 kHz around the dial on the X6200, 50 kHz on the X6100 (its own
+  spectrum climbs from about 27 kHz either side of the dial, so A shows the same middle 50 kHz; up to v0.3.12.45 G drew
+  100 kHz there and those humps looked like signals at its edges) (bracketed in the middle): its trace over the
   last rows, in 3D as A's picture or 2D, a flat waterfall with the newest on top (**F4**). On the air it goes on at
   its pace with rows of one dim shade, as A's picture does, a band as long as the transmission (up to v0.3.12.43 it
   stood still while the radio sent).

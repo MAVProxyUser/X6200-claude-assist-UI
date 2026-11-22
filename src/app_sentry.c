@@ -9202,7 +9202,15 @@ static uint8_t  ws_rows[WS_ROWS][PW];
 static float    ws_cols[PW];
 static int      ws_head, ws_count;
 static float    ws_floor = -300, ws_top = -60, ws_bot = -130;
-static int64_t  ws_at, ws_span = 100000;    /* the frequency at the picture's middle, its width */
+/* G's width on the radio's own spectrum: the X6100's IQ climbs from about 27 kHz either side of the dial (A shows the
+ * middle 50 kHz for it), and G's 100 kHz drew those humps as signals at its edges (the 1:1 audit, 2026-11-22); the
+ * X6200's base spectrum and the SDR's are flat across 100 kHz */
+#ifdef BOARD_X6200
+#define WS_SPAN_OWN 100000
+#else
+#define WS_SPAN_OWN 50000
+#endif
+static int64_t  ws_at, ws_span = WS_SPAN_OWN;   /* the frequency at the picture's middle, its width */
 static uint32_t ws_seen;            /* the X6200's last frame drawn */
 static bool     ws_3d = true;
 static lv_obj_t  *g_scr, *g_prev_scr;           /* the portrait screen, and the one it took the place of */
@@ -10358,7 +10366,7 @@ static void ws_draw(void) {
     lv_obj_invalidate(u->ws_img);
 }
 
-/* A frame of the X6200's spectrum (the Sentry's own average) around the dial, 100 kHz: the trace each frame, a row
+/* A frame of the radio's spectrum (the Sentry's own average) around the dial, 100 kHz (the X6100's: 50): the trace each frame, a row
  * every second one (the stronger of the two), the rows moved aside when the dial moves */
 static void ws_feed(void) {
     static float pend[PW], tmp[PW];
@@ -10369,8 +10377,20 @@ static void ws_feed(void) {
     double       px_hz;
 
     if (!u->ws_frame) return;
-    w     = u->ws_w;
-    px_hz = (double)ws_span / w;
+    w       = u->ws_w;
+    ws_span = w_sdr_hz ? 100000 : WS_SPAN_OWN;
+    px_hz   = (double)ws_span / w;
+    {   /* the caption with it, when G goes from the radio to an SDR's channel or back */
+        static int64_t cap_span;
+
+        if (ws_span != cap_span && u->ws_cap_l) {
+            char wc[24];
+
+            snprintf(wc, sizeof(wc), "%d KHZ  %s", (int)(ws_span / 1000), ws_3d ? "3D" : "2D");
+            tag_text(u->ws_cap_l, wc, u->ws_cap_x, u->ws_cap_y, false);
+            cap_span = ws_span;
+        }
+    }
     if (w_sdr_hz) {                     /* on the SDR's channel: its rows */
         static float    sdb[8192];
         static uint32_t sseq;
@@ -10476,7 +10496,12 @@ static void g_gpu_draw(void) {
 static void ws_view_next(void) {
     ws_3d   = !ws_3d;
     g_dirty = true;
-    if (wui->ws_cap_l) tag_text(wui->ws_cap_l, ws_3d ? "100 KHZ  3D" : "100 KHZ  2D", wui->ws_cap_x, wui->ws_cap_y, false);
+    if (wui->ws_cap_l) {
+        char wc[24];
+
+        snprintf(wc, sizeof(wc), "%d KHZ  %s", (int)(ws_span / 1000), ws_3d ? "3D" : "2D");
+        tag_text(wui->ws_cap_l, wc, wui->ws_cap_x, wui->ws_cap_y, false);
+    }
     ws_draw();
     buttons_refresh(&btn[3]);
 }
@@ -10885,7 +10910,10 @@ static void build_walkie_portrait(void) {
         tag_make(g_scr, amb, "SPECTRUM", P_FX + 6, y + 6, true);
         u->ws_cap_x = P_FX + P_FW - 6;
         u->ws_cap_y = y + 6;
-        u->ws_cap_l = tag_make(g_scr, amb, ws_3d ? "100 KHZ  3D" : "100 KHZ  2D", u->ws_cap_x, u->ws_cap_y, false);
+        char wc[24];
+
+        snprintf(wc, sizeof(wc), "%d KHZ  %s", (int)((w_sdr_hz ? 100000 : WS_SPAN_OWN) / 1000), ws_3d ? "3D" : "2D");
+        u->ws_cap_l = tag_make(g_scr, amb, wc, u->ws_cap_x, u->ws_cap_y, false);
         ws_draw();
     }
     /* the voiceprint, edge to edge, as tall as the spectrum, down to the lamp's row */

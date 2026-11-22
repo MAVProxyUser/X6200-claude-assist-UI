@@ -297,8 +297,9 @@ def gate_rx(r):
 
 
 def screens_pair(run, label, setup, check):
-    """setup(r) on each radio; check(r) true on each within 15 s (the X6100's SSTV took 9-17 s to open, 2026-11-18);
-    both photographed, side by side, colours counted"""
+    """setup(r) on each radio; check(r) true on each within 25 s (the X6100's SSTV took 9-17 s to open, 2026-11-18,
+    and over 15 s on 2026-11-22, when the 15 s wait called it shut although its picture showed it open); both
+    photographed, side by side, colours counted"""
     paths, shut = {}, []
     run.banner(f"SUITE core: screen {label} on both, photographed side by side (receive only, nothing sent)")
     for n in run.names:
@@ -307,7 +308,7 @@ def screens_pair(run, label, setup, check):
     for n in run.names:
         r = run.radio(n)
         try:
-            r.wait(label, lambda r=r: check(r), 15)
+            r.wait(label, lambda r=r: check(r), 25)
         except bench.Refused:
             shut.append(n)
         gate_rx(r)

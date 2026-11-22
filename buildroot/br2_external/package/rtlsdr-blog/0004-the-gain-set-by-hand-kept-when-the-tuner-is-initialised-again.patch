@@ -1,0 +1,49 @@
+From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
+Subject: [PATCH] the gain set by hand kept when the tuner is initialised again
+
+Turning direct sampling off initialises the tuner again (_rtlsdr_set_direct_sampling:
+tuner->init), and an R820T comes back with its LNA and mixer on its own AGC while
+dev->gain still reports the gain set by hand. With an R820T that happens on the first
+tune after rtlsdr_open: rtlsdr_set_sample_rate's bandwidth step (r820t_set_bw) tunes to
+the frequency the stick has, 0 Hz, which turns direct sampling on, and the first real
+tune turns it off again. So every program that sets the rate, the gain, then the
+frequency (rtl_power, x6x00-rtlspec) ran at the tuner's own gain whatever it asked: on
+the bench X6200 (2026-11-22, an R820T at 145 MHz) 0 dB asked read -9.4 dBFS, the level
+of 49.6 dB, and -48.3 dBFS once set again after the tune. Now the manual gain is set
+again after the tuner's init; rtlsdr_set_tuner_gain_mode keeps the mode for that. The AGC
+case is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+--- a/src/librtlsdr.c
++++ b/src/librtlsdr.c
+@@ -113,6 +113,7 @@
+ 	uint32_t offs_freq; /* Hz */
+ 	int corr; /* ppm */
+ 	int gain; /* tenth dB */
++	int manual_gain; /* rtlsdr_set_tuner_gain_mode's last: the tuner's gain set by hand, not its AGC */
+ 	struct e4k_state e4k_s;
+ 	struct r82xx_config r82xx_c;
+ 	struct r82xx_priv r82xx_p;
+@@ -1108,6 +1109,8 @@
+ 		r = dev->tuner->set_gain_mode((void *)dev, mode);
+ 		/*rtlsdr_set_i2c_repeater(dev, 0);*/
+ 	}
++	if (!r)
++		dev->manual_gain = mode;
+ 
+ 	return r;
+ }
+@@ -1238,6 +1241,12 @@
+ 		if (dev->tuner && dev->tuner->init) {
+ 			rtlsdr_set_i2c_repeater(dev, 1);
+ 			r |= dev->tuner->init(dev);
++			/* The tuner initialised again has its gain on its own AGC: a gain set by hand before (the first tune
++			 * after rtlsdr_open comes here, the sample rate's bandwidth step having tuned to 0 Hz) is set again */
++			if (dev->manual_gain && dev->tuner->set_gain_mode && dev->tuner->set_gain) {
++				dev->tuner->set_gain_mode((void *)dev, 1);
++				dev->tuner->set_gain((void *)dev, dev->gain);
++			}
+ 			rtlsdr_set_i2c_repeater(dev, 0);
+ 		}
+ 
