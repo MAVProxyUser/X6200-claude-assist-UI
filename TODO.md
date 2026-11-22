@@ -37,10 +37,21 @@ Open:
 - 15 m and 12 m transmit image shifts during a session (-46..-53 dBc to -29 at the same balance, a 9 % I/Q gain
   change; 10, 17, 20 m steady). The owner: "dive deeper ... find a novel solution that *works*". The heat theory and
   its warm balance were wrong and REMOVED (eab501f7); the battery-vs-adapter theory is not supported by the minute
-  log (shifted 49/77 in collapsed minutes, unshifted 20/32). To do, needing a supply that holds or a charged battery:
-  the same 0.1 W recipe on the battery alone and on a 13.8 V supply. tools/base_update/README.md "Why 15 m varied".
+  log (shifted 49/77 in collapsed minutes, unshifted 20/32). NOT THE SUPPLY (2026-11-22 02:14-02:27, the owner's 14 V
+  bench supply, its input 13.3-13.7 V and charging every minute, Xiegu's factory V1.1.9, no correction): the same
+  recipe (image.py 17-15-12-10 m, 0.1 W, 900 Hz x3, six runs) shifted 15 m again, -43.4, -43.4, -30.4, -31.3, -33.3,
+  -41.8 dBc (12 m -42.7..-40.4..-47.5; 17 m -46..-48, 10 m -42..-45 steady). So not the supply and not gcfix5: the
+  X6100's transmitter on 15 m, coming and going within minutes. Left to try: the battery alone; the band order (15 m
+  alone, no cycling); the radio's case temperature beside it. tools/base_update/README.md "Why 15 m varied".
 - The 10 W table and the 5-10 W results were made with the X6100 partly on its own battery (the stock adapter is a
-  charger): run again on a supply that holds before taking its power figures as the radio's.
+  charger): run again on a supply that holds before taking its power figures as the radio's. 2026-11-22 on the
+  owner's 3 A bench supply (Velleman LABPS3003SMU at 14 V): 2.8 A drawn at 0.1 W while the battery charged; a 10 W
+  over on 20 m put it in current limiting (its CC light, the owner), 5.55 and 6.7 W out, the X6200 hearing lines
+  ~26 dB under the tone and its floor 17 dB higher than the 11-20 10 W run. Needs a 5 A supply (or the battery full,
+  its charge current off the supply). Also seen there: the TCI drive (tx_hold, the level for 1 W scaled by
+  10 log10 P) starts under Xiegu's knee at 10 W, ALC 0 (it climbed 3.6 dB in those two short overs, learned): the
+  base's power is not the square of the drive up there. To do: a level kept per power (or a fitted slope) instead
+  of one scaled by the power.
 - X6200 TCI transmit power: DONE 2026-11-21 (src/tx_hold.c). TCI audio set the power, not the setting (-20 dBFS gave
   1.1 W at 0.1 W); now it goes through the apps' drive loop (tx_level.c, power_hold), the learned level kept as the
   peak for 1 W (params tci_tx_level) and scaled by PWR. Bench (tones.py x6200 x6100 --w 1, the tones at -10.5 dBFS,

@@ -632,6 +632,12 @@ suspect:
   at 18:12 to 1 % at 19:26-19:29; at the first 10 W over of 19:31 it switched off (battery empty; no hang: the GUI
   watch never acted). The transmitter fed 7 V or 12 V from minute to minute may well be what moved 15 and 12 m's
   balance (and the 10 W table below was made on that flagging battery). To measure again on a supply that holds.
+- **Not the supply after all** (2026-11-22, the same recipe on the owner's 14 V bench supply, the radio's input
+  13.3-13.7 V and the battery charging in every minute of it; Xiegu's factory V1.1.9 on the radio, so no transmit
+  I/Q correction at all): 15 m -43.4, -43.4, -30.4, -31.3, -33.3, -41.8 dBc over the six runs, 12 m -42.7 to -40.4
+  and back to -47.5, 17 m -46 to -48 and 10 m -42 to -45 steady. The shift comes and goes within minutes on clean
+  power and without gcfix5: it is the X6100's transmitter on 15 m. The 10 W table was not taken again: a 3 A supply
+  goes into current limiting at a 10 W setting (2026-11-22, its CC light; 5.5-6.7 W out).
 
 #### At the 10 W setting, through 80 dB (2026-11-20 evening)
 

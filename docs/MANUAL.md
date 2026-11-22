@@ -2685,7 +2685,12 @@ On such a supply External in Info > POWER stays put while you transmit; on the
 adapter it falls to a few volts.
 
 For transmitting, use a regulated 13.8 V supply rated 5 A or more (the extra
-over 3.5 A lets it charge the battery while you transmit). Check the polarity
+over 3.5 A lets it charge the battery while you transmit). A 3 A bench supply
+is not enough at 10 W: on one set to 14 V (2026-11-22) the X6100 drew 2.8 A
+transmitting at 0.1 W while it charged its battery, and at a 10 W setting the
+supply went into current limiting (its CC light on). The voltage held at
+0.1 W, but at 10 W the power stopped at 5.5 to 6.7 W and the signal carried
+extra lines about 26 dB under it. Check the polarity
 and the plug before connecting it: Xiegu warns that a reversed connection can
 damage the radio badly. The supply's voltage is in Info > POWER (External),
 and the radio writes it every minute to `battery_log.csv` on its card (the
