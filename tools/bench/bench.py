@@ -57,7 +57,6 @@ CHAIN_VALID_S = 12 * 3600   # the owner's word on the cable holds this long
 MAX_KEY_S = 16              # longer than an FT8 transmission: a radio still on the air after it is stopped
 MAX_SWR = 2.0               # higher on a radio's TX meter: the chain is not the load it should be
 TOO_STRONG_DB = 20          # a receiver hearing this much more than the chain lets through: pads missing
-SOFT_POWER_MAX_W = 2.0      # more than asked up to this ends only that over (radios-walkie); over it stops all
 # Over HARD_MAX_W only with the owner's recorded word (power-ok; the owner, 2026-11-20: "Yes, run 10 W"): up to the
 # pads' own rating (not twice it), never over FULL_RATING_MAX_W, each over at most FULL_RATING_KEY_S on the air and
 # the radio then off at least as long as it was on before its next (the pad cools)
@@ -352,15 +351,18 @@ def radio_tx_gate(radio, c, w):
 
 
 class Watch:
-    """While a test runs: a radio on the air past max_key_s, on a bad SWR, or above the power asked, or a receiver
-    hearing far more than the chain lets through, stops everything at once"""
+    """While a test runs: a radio on the air past max_key_s, on a bad SWR, or over the rating of the pad on its jack,
+    or a receiver hearing far more than the chain lets through, stops everything at once. More power than asked, under
+    the pad's rating, is logged (said, tx_log, over_power) and the over goes on"""
 
     def __init__(self, radios, c, hackrf=None, expect_dbm=None, listener=None, w=None):
         self.radios, self.c, self.hackrf, self.why = radios, c, hackrf, None
         self.expect_dbm, self.listener, self.w = expect_dbm, listener, w
         self.tx_peak = {}       # each radio's own forward-power meter, its highest while on the air (W)
-        self.soft_power = False   # more power than asked (under SOFT_POWER_MAX_W) ends that radio's over, no stop
-        self.over_power = {}      # the radios that did so, and how much
+        self.over_power = {}      # the radios that went over the power asked, and their highest reading (W)
+        # the rating of the pad on each radio's jack (the radios profile), the most a reading may be: the watch's stop
+        pads = c.get("profiles", {}).get("radios", {}).get("pads", [])
+        self.pad_w = {x["at"]: float(x.get("watts", HARD_MAX_W)) for x in pads if x.get("at")}
         self.rx_peak = None     # the listener's S-meter, its highest while another radio is on the air (dBm)
         self.on = True
         threading.Thread(target=self._run, daemon=True).start()
@@ -387,16 +389,19 @@ class Watch:
                     w, swr = txm[0], txm[1]
                     if swr > MAX_SWR:
                         self.trip(f"{r.name}: SWR {swr:.2f} on the air: the chain is not a load")
+                    elif w > self.pad_w.get(r.name, HARD_MAX_W):
+                        self.trip(f"{r.name}: {w:.1f} W on the air, over the {self.pad_w.get(r.name, HARD_MAX_W):g} W "
+                                  f"its pad takes")
                     elif self.w is not None and w > max(self.w * 2, self.w + 0.5):
-                        if self.soft_power and w <= SOFT_POWER_MAX_W:
-                            # the owner, 2026-11-19: "we want end-to-end tests, not stoppages". More than asked but
-                            # far under what the pads take: that radio's over ends, said and kept, the test goes on
-                            if r.name not in self.over_power:
-                                self.over_power[r.name] = w
-                                say(f"{r.name}: {w:.1f} W on the air, {self.w} W asked: its over ended, the test goes on")
-                                r.stop()
-                        else:
-                            self.trip(f"{r.name}: {w:.1f} W on the air, {self.w} W asked")
+                        # the owner, 2026-11-21: "don't kill just log. we have attenuators" (the X6100's factory base
+                        # starts a TCI over at 0.9-1.0 W for a 0.1 W setting, and the stop hid what came after it).
+                        # Under the pad's rating: said once an over, its highest kept and logged, the over goes on
+                        if r.name not in self.over_power:
+                            say(f"{r.name}: {w:.1f} W on the air, {self.w} W asked: logged, the over goes on "
+                                f"(its pad takes {self.pad_w.get(r.name, HARD_MAX_W):g} W)")
+                        if w > self.over_power.get(r.name, 0.0):
+                            self.over_power[r.name] = w
+                            tx_log({"who": r.name, "over_power_w": w, "asked_w": self.w})
                 if since and txm and time.time() - since > 1.0:
                     self.tx_peak[r.name] = max(self.tx_peak.get(r.name, 0.0), txm[0])
                 if since and meter is not None and r is not self.listener and time.time() - since > 1.0:
@@ -829,7 +834,6 @@ def run_radios_walkie(c, args):
         r.wait("the power", lambda r=r: abs(r.pwr() - FIRST_PROBE_W) < 0.05, 5)
     expect = 10 * math.log10(FIRST_PROBE_W * 1000) - total
     watch = Watch(radios, c, expect_dbm=expect, listener=b, w=FIRST_PROBE_W)
-    watch.soft_power = True
     results, hold = [], [int(time.time()) % 100000]
 
     def tap(r, key):
@@ -899,8 +903,8 @@ def run_radios_walkie(c, args):
         # after 4 s on 17 m once, 2026-11-19), WALKIE_KEY_WAIT_S at most for it to come
         while not watch.why and (on_at is None and time.time() - t0 < WALKIE_KEY_WAIT_S or
                                  on_at is not None and time.time() - on_at < WALKIE_KEY_S):
-            if listener.tx or sender.name in watch.over_power:     # the other on the air: never key over it;
-                break                                               # more power than asked: the over ends
+            if listener.tx:                                         # the other on the air: never key over it
+                break
             sender.send(f"key PTT 1 {n}")
             if on_at is None and sender.tx:
                 on_at = time.time()

@@ -230,7 +230,7 @@ def main():
             with txr.lock:
                 if txr.tx and txr.txm:
                     txlog.append((round(time.time() - t_begin, 2),) + tuple(txr.txm))
-            if watch.why or rxr.tx or txr.name in watch.over_power:
+            if watch.why or rxr.tx:
                 r_ = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", f"root@{txr.host}", STOP_SENDER],
                                     capture_output=True, text=True)
                 say(f"{txr.name}: the sender stopped ({(r_.stdout + r_.stderr).strip() or 'killed'})")

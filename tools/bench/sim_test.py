@@ -2,9 +2,10 @@
 """bench.py's radios-ft8 against two simulated radios: each a WebSocket server on this computer speaking the radio
 remote's protocol as far as the harness uses it (auth, panel, control, set, ft8 open/cq/reply/stop/close, the PTT and
 TUNE stops; the state, the meters, tx, ft8 and ft8r back), the pair passing each transmission to the other as a
-decoded row and an S-meter. Five cases: a CQ and its reply pass; a radio that stays keyed, a bad SWR, too much power
-and a receiver hearing far more than the pads let through each end in the emergency stop and a refusal, with the
-stopped radio off the air. Nothing on the radio, nothing on the air.
+decoded row and an S-meter. Six cases: a CQ and its reply pass; a radio at 0.9 W for 0.1 W asked passes too, the
+over logged and not stopped (the owner, 2026-11-21: "don't kill just log. we have attenuators"); a radio that stays
+keyed, a bad SWR, more power than its pad takes and a receiver hearing far more than the pads let through each end in
+the emergency stop and a refusal, with the stopped radio off the air. Nothing on the radio, nothing on the air.
 
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
@@ -34,6 +35,7 @@ class SimRadio:
         self.state = {"freq": 14074000, "mode": 3, "pwr": 4.4, "atu": 0, "tx": 0, "app": ""}
         self.ft8 = {"open": 0, "auto": 1, "cq": 0, "tx": 1, "sending": 0, "nocall": 0}
         self.tx_until, self.heard_dbm, self.ids, self.got = 0.0, None, 0, []
+        self.what = None    # what its FT8 app sends ("cq", "reply"); none for a radio keyed by its PTT alone
         self.srv = socket.socket()
         self.srv.bind(("127.0.0.1", 0))
         self.srv.listen(2)
@@ -174,7 +176,7 @@ class SimRadio:
                 if time.time() > self.tx_until:
                     self._end()
                     continue
-                w = 5.0 if self.fault == "power" else self.state["pwr"]
+                w = 12.0 if self.fault == "power" else 0.9 if self.fault == "hot" else self.state["pwr"]
                 swr = 3.0 if self.fault == "swr" else 1.1
                 self.send(f"t {w:.1f} {swr:.2f} 0.0")
                 if self.peer:   # what the other one hears through the pads (70 dB), or with none (loud)
@@ -220,7 +222,7 @@ def run_case(fault, sender_fault=True):
         why = None
     except bench.Refused as e:
         why = str(e)
-    return why, a, b
+    return why, a, b, state
 
 
 def main():
@@ -230,7 +232,7 @@ def main():
         results.append(ok)
         print(("ok    " if ok else "WRONG ") + what, flush=True)
 
-    why, a, b = run_case(None)
+    why, a, b, _ = run_case(None)
     check(why is None, f"a CQ and its reply between two radios pass ({why or 'passed'})")
     check(any(g.startswith("set pwr 1") for g in a.got) and any(g.startswith("set pwr 1") for g in b.got),
           "both radios set to 0.1 W (the first probe's power) before keying")
@@ -239,15 +241,24 @@ def main():
     # busy CI runner (2026-11-18: checked before it, on a run of 26 minutes against the usual 17)
     check(settled(lambda: not a.state["tx"] and not b.state["tx"] and a.ft8["open"] == 0 and b.ft8["open"] == 0),
           "both off the air and their FT8 apps closed after")
-    for fault, word in (("stuck", "on the air for over"), ("swr", "SWR"), ("power", "W on the air"),
+    # more than asked, under the pad's 10 W: logged in tx_log, the over and the test go on
+    why, a, b, state = run_case("hot")
+    check(why is None, f"hot: 0.9 W for 0.1 W asked passes ({why or 'passed'})")
+    try:
+        logged = [json.loads(l) for l in open(os.path.join(state, "tx_log.jsonl"))]
+    except OSError:
+        logged = []
+    check(any(x.get("who") == "simA" and (x.get("over_power_w") or 0) >= 0.85 for x in logged),
+          "hot: the over-power logged in tx_log.jsonl")
+    for fault, word in (("stuck", "on the air for over"), ("swr", "SWR"), ("power", "its pad takes"),
                         ("loud", "pads missing")):
-        why, a, b = run_case(fault)
+        why, a, b, _ = run_case(fault)
         check(why is not None and word in why, f"{fault}: refused ({why})")
         check(settled(lambda: not a.state["tx"] and any(g == "ft8 stop" for g in a.got)),
               f"{fault}: the sender stopped, off the air")
     # the owner, 2026-11-19 ("won't that damage the radios? don't do that again"): a listener that keys while the
     # sender is on the air stops everything, both off the air
-    why, a, b = run_case("both", sender_fault=False)
+    why, a, b, _ = run_case("both", sender_fault=False)
     check(why is not None and "two radios on the air at once" in why, f"both: refused ({why})")
     check(settled(lambda: not a.state["tx"] and not b.state["tx"]), "both: both off the air")
     for d in DIRS:

@@ -335,7 +335,6 @@ def main():
             r.send(f"banner {line}")
         time.sleep(1.0)
         watch = Watch(radios, c, expect_dbm=10 * math.log10(w * 1000) - total, listener=rxr, w=w)
-        watch.soft_power = True
         arm(txr, True)
         tx_log({"who": txr.name, "f": a.freq, "w": txr.pwr(), "what": f"tones {label}"})
         t_begin = time.time()
@@ -347,9 +346,9 @@ def main():
             with txr.lock:
                 if txr.tx and txr.txm:
                     txlog.append((round(time.time() - t_begin, 2),) + tuple(txr.txm))
-            # a stop, the other on the air, or more power than asked (the watch's soft stop releases only the remote's
-            # PTT, not a TCI transmission): the sender killed, the server unkeys within 0.5 s
-            if watch.why or rxr.tx or txr.name in watch.over_power:
+            # a stop or the other on the air (the watch's stop releases only the remote's PTT, not a TCI transmission):
+            # the sender killed, the server unkeys within 0.5 s. More power than asked is logged, not stopped
+            if watch.why or rxr.tx:
                 r = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", f"root@{txr.host}", STOP_SENDER],
                                    capture_output=True, text=True)
                 say(f"{txr.name}: the sender stopped ({(r.stdout + r.stderr).strip() or 'killed'})")
@@ -392,7 +391,7 @@ def main():
                                                             None if start is None else start - t_begin, a.burst_hz)}
             results["passes"][label] = res
             say(f"{label}: TX peak {res['tx_peak_w']} W by its own meter"
-                f"{', OVER POWER ' + str(res['over_power_w']) + ' W: ended' if res['over_power_w'] else ''}")
+                f"{', OVER POWER ' + str(res['over_power_w']) + ' W (logged)' if res['over_power_w'] else ''}")
             for b in res["bursts"]:
                 if not b["found"]:
                     say(f"   after {b['pause_s']:5.2f} s: burst not found")
@@ -418,7 +417,7 @@ def main():
         pw = [t[1] for t in txlog]
         say(f"{label}: onset {on:.2f} s, peak {res['peak_dbfs']} dBFS, TX peak {res['tx_peak_w']} W, median "
             f"{float(np.median(pw)) if pw else None} W, ALC median {float(np.median([t[3] for t in txlog])) if txlog else None}"
-            f"{', OVER POWER ' + str(res['over_power_w']) + ' W: ended' if res['over_power_w'] else ''}")
+            f"{', OVER POWER ' + str(res['over_power_w']) + ' W (logged)' if res['over_power_w'] else ''}")
         for t in res["tones"]:
             say(f"   {t['tone']:5d} Hz -> {t['f']} Hz ({t['err_hz']:+} Hz)  {t['dbfs']} dBFS  "
                 f"H2 {t['h2_db']} H3 {t['h3_db']}  spectrum {t.get('spec_quiet_db')} -> {t.get('spec_db')} dB")

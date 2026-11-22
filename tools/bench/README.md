@@ -36,9 +36,12 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
    0.2-3.9 V while it transmitted, the radio drained its battery all evening and switched off in a 10 W over). An
    unreadable log is said, not a stop.
 5. **Every transmission watched.** A radio on the air longer than `limits.max_key_s` (16 s at most: one FT8
-   transmission), its SWR over 2.0, more power than asked, or a receiver hearing 20 dB more than the chain lets
-   through (pads missing) stops everything at once: the HackRF killed, every radio unkeyed, the apps' TX stopped.
-   The browser remote's PTT is a lease besides: without its renewal the radio unkeys within 3 s.
+   transmission), its SWR over 2.0, its power over the rating of the pad on its jack (the radios profile's `watts`,
+   10 W here), or a receiver hearing 20 dB more than the chain lets through (pads missing) stops everything at once:
+   the HackRF killed, every radio unkeyed, the apps' TX stopped. More power than asked but under the pad's rating is
+   logged, not stopped (the owner, 2026-11-21: "don't kill just log. we have attenuators"): said once an over, its
+   highest reading in `tx_log.jsonl` and the run's result (`over_power_w`), and the over goes on. The browser
+   remote's PTT is a lease besides: without its renewal the radio unkeys within 3 s.
 6. **Test callsigns only.** `Q<digit>TST` (`bench.py testcall NAME Q1TST`, `restore` after), never a real
    call; FT8 grids FN00. The test QSOs are taken out of the radio's logs after each run (`cleanlog`). No real call
    starts with Q, which is why: and WSJT-X takes none for a standard call (chkcall.f90), so a Q call goes as a
@@ -79,8 +82,8 @@ side the same way"): tones from 200 to 3100 Hz in USB into one radio's transmitt
 (tci_tone_tx.py, run on that radio: a client from the radio itself is not asked about on its screen), the other radio's
 TCI audio recorded here with its AGC off, then the same with it on LSB: each tone's frequency (offset and slope fitted;
 a few hundredths of a hertz), level, harmonics, the other sideband, and the listener's own spectrum at each tone's RF.
-At 0.1 W, the first transmission of the session; the watch as radios-walkie's (more power than asked ends the over:
-the sender killed, since the remote's PTT release does not end a TCI transmission). Faded tones with short gaps
+At 0.1 W, the first transmission of the session; the watch as radios-walkie's (more power than asked is logged, the
+over goes on; a stop kills the sender, since the remote's PTT release does not end a TCI transmission). Faded tones with short gaps
 measure the passband. The listener's AGC is off and its squelch open for the run (a shut squelch mutes the audio
 whole: the X6200's, at 4, faked a silent transmitter and an image 101-110 dB down on 2026-11-20). The X6100 (gcfix4)
 into the X6200, 20 m: 300-2900 Hz within 3.5 dB, the other sideband about 42 dB down (the two radios' images
@@ -90,8 +93,9 @@ together), the two radios' oscillators 7.2 Hz apart, the slope 8 ppm.
 pause. 1 kHz bursts of 0.5 s with 2 ms starts, each after the pause given; in the tone's band of the listener's audio
 each burst's first 80 ms against its steady end (the overshoot), its lowest after that (the dip), how long it takes
 to settle within 1 dB, and what came in the pause. Xiegu's X6100 loop: +5 to +18 dB, then 6-14 dB under; with gcfix4
-within +1.1 dB (tools/base_update/README.md). A burst too hot for the watch (0.6 W at 0.1 W) ends the over, so
-Xiegu's loop is seen on its first bursts only. The sender on the radio is stopped by its pid file (the X6100's
+within +1.1 dB (tools/base_update/README.md). Up to 2026-11-21 a burst too hot for the watch (0.6 W at
+0.1 W) ended the over, so Xiegu's loop was seen on its first bursts only; it is now logged and every burst is
+measured. The sender on the radio is stopped by its pid file (the X6100's
 BusyBox has no pkill).
 
 `--w 5` (2026-11-20, the owner: gcfix "needs a run at 5-10 W into a dummy load"): every pass at 0.1 W first (rule 4),
