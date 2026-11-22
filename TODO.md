@@ -116,14 +116,18 @@ Open:
 - The X6100's TCI RX audio to a recorder on the Mac stopping after about a minute: DONE 2026-11-21. The server
   PINGs a client silent 20 s and drops one silent 60 s (tci_server.c IDLE_MS); tones.py's TciRx (and tci_tone_tx.py)
   never answered the PING. Both answer it now: 100 s from the X6100 at 99.8-100.1 % of real time.
-- WSJT-X over TCI: PARKED 2026-11-21 (its transmit side works, above). Why it never decoded from the X6200: it gets
+- WSJT-X over TCI: RESOLVED 2026-11-21 evening (the X6200's WiFi notch, bcbf1dcd: TCI 100 %, 24eaeb61; WSJT-X then
+  decoded live from the X6200's TCI once ft8lib 0002 sent WSJT-X's own call format, 413debdf). Was: PARKED 2026-11-21
+  (its transmit side works, above). Why it never decoded from the X6200: it gets
   the X6200's audio at 31-40 % of real time after the first 15-20 s, so it never fills a 15 s period (its period
   counter in the shared memory reached 21 of 50). A plain reader on the Mac sees the same, so not WSJT-X: WSJT-X sets
   no format and takes TCI's default, 48 kHz float32 stereo = 3 Mbit/s, and the X6200's WiFi does not carry it (raw
   TCP from the radio 2.5 Mbit/s, then 0.8-1 Mbit/s after 15 s; its RTL8723DU at -68 dBm on another access point than
   the X6100, which gets 17-34 Mbit/s at -47 dBm). 24 kHz int16 mono (0.4 Mbit/s) holds 100 %. tools/bench/tci_rate.py
   now checks this over the network (X6100 wsjtx PASS 100 %, X6200 FAIL mean 31 %).
-- The X6200's WiFi SENDS about 1 Mbit/s (2026-11-21): raw TCP from it 0.5-2.5 Mbit/s, to it 9-13 Mbit/s; on 11-17 the
+- RESOLVED the same day by the driver's notch for the X6200's own 2457.6/2470.6 MHz lines (bcbf1dcd, upstream
+  Guru-RF/OpenX6X00#327): channel 11 from 33 % to 99-100 %, TCI at full rate. Was: the X6200's WiFi SENDS about
+  1 Mbit/s (2026-11-21): raw TCP from it 0.5-2.5 Mbit/s, to it 9-13 Mbit/s; on 11-17 the
   same driver sent 8 Mbit/s to the same channel-6 access point at -57 dBm, now -66..-69 dBm (10 dB weaker: moved?).
   Not the CPU (90 % idle), not power saving (off, disable_lps_deep=Y), no "failed to get tx report", Bluetooth quiet
   1.3 against 1.0 Mbit/s; its rate falls to MCS 0 (6.5) or 5.5 Mbit/s while sending, retransmits near none. It stays
@@ -238,7 +242,12 @@ Open:
   moved to nonstandard checks); end to end on the radios (the library hot-installed on both): the X6100's FT8 app
   CQ Q1TST, the X6200 decoded it (SNR 3), WSJT-X live on the X6200's TCI decoded it (-1 dB, DT 0.0), the X6100
   decoded the reply "<Q1TST> Q2TST" (SNR 7), PASS. bench.py takes a test call bare or hashed.
-- The X6100's "rake" (the owner, 2026-11-21): steady carriers every ~6 kHz on 20 m (14.052, .058, .064, .070, .076,
+- 2026-11-22 (the owner: "that rake is only around 14.69", i.e. 14.069): on the owner's 14 V bench supply (the stock
+  charger off the radio, no RTL on its USB) no ~6 kHz comb at 14.05-14.09 MHz; the lines left near 14.07 move with the
+  X6100's own dial (scratchpad rake_dial.py: at 14.074 MHz +-17.5 and +-35.2 kHz pairs and -5.5 kHz, at 14.100 only
+  -47.6 kHz, at 14.060 +-44 kHz): its receiver's own spurs, none inside the 0-3 kHz it listens to. So the comb was
+  most likely the stock charger; to confirm, the charger back for a minute (the owner's step). Was: the X6100's
+  "rake" (the owner, 2026-11-21): steady carriers every ~6 kHz on 20 m (14.052, .058, .064, .070, .076,
   .082, .088, .094 MHz, 10-15 dB over its floor) on A and G. Not the X6200 (its dial to 40 m: the comb unchanged);
   the hump at 14.075 is real FT8 traffic leaking past the pads. The HackRF beside both radios (ANT500) saw no comb
   (too deaf at HF to rule out a weak radiator). Suspects: the RTL stick in the X6100's USB (RTL0) and its charger;
