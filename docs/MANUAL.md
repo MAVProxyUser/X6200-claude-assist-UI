@@ -1297,13 +1297,25 @@ written through to the card before it replaces the last copy, so a power cut kee
 - **F SYSTEM**: Settings, the apps (APPS: the APP grid; its WHAT IT DOES names them, Weather, Flights, HF Air Band,
   CB, Web radio, Zello and SVXConnect among them), the digital modes, AIRSPACE, VHF/UHF, the SDR pool, the
   [GPS](#the-gps-panel),
-  the classic radio screen, a shell, the [base firmware](#the-x6200s-base-firmware) and where the radio starts. F2 opens the item chosen
+  the classic radio screen, a shell, the [base firmware](#the-x6200s-base-firmware), TRIBAL KNOWLEDGE and where the radio starts. F2 opens the item chosen
   (CLASSIC RADIO is on the list); the other F keys do nothing here. Every Sentry title says the release, the GUI's
   commit and the base's firmware, written the same on both radios: `... DECODER SENTRY: v0.3.12.32 62273334 - base
   v1.1.9` (G held up says BASE V1.0.8 under its clock). Under the chosen item's text (in the small font), WHAT IT
   DOES shows a spectrogram of A's: the X6200's spectrum around the dial as A takes it, flat, the newest row on top,
   following the dial as A's rows do; the GPU draws it where the image has Mesa, the processor elsewhere. A's title names
   what its scope takes in: `MF/HF/VHF SPECTRUM` (the X6200 from 100 kHz to 55 MHz, and 87.5 to 137 MHz).
+- **TRIBAL KNOWLEDGE** on F: what hams pass on by word of mouth, read a page at a time in WHAT IT DOES, which grows
+  down over the processor's box while it is open (its title `TRIBAL KNOWLEDGE 3/10`); the MFK turns the pages, a push
+  or F2 closes it, and so does leaving F. The radio's own text (`/usr/share/x6100/tribal.txt`): the digital nets
+  that practise sending messages and files for when a disaster takes the phones and the internet (NBEMS with fldigi,
+  flmsg and flamp; Winlink; JS8Call and VARAC), how to find yours, a few open to anyone (Winlink Wednesday, the
+  Maryland-DC section's monthly Winlink check-in, the Pennsylvania and Eastern Massachusetts NBEMS nets, as found in
+  November 2026: check them before relying on them), and the tropospheric ducting map: how a temperature inversion
+  carries 2 m and 70 cm far, and how to read William Hepburn's forecasts (dxinfocentre.com/tropo.html; his licence
+  does not allow the maps into other programs, so the radio says where to look and how to hear a duct on B instead).
+  Your own notes come first: `/mnt/tribal.txt` on the card's DATA partition (the web page's Files, or the card in a
+  PC), plain text, a blank line between paragraphs; the nets near you belong there, not in the image. Upper case on
+  screen, as the Sentry draws everything.
 - **PROCESSOR, GRAPHICS, MEMORY** under WHAT IT DOES on F, each second with a bar: CPU, the four cores' load in all
   and each (and the clock); GPU, the share of the last second the Mali-400 spent drawing (the Sentry's pictures, F's
   spectrogram among them, and the GUI turned onto the display), its clock beside it (144 to 384 MHz as its governor

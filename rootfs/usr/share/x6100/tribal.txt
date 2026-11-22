@@ -1,0 +1,25 @@
+Tribal knowledge: what hams pass on by word of mouth, written down. Your own notes come first: put them in /mnt/tribal.txt on the card's DATA partition (the web page's Files, or the card in a PC): the nets near you, their days, times and frequencies, the repeaters, who to call. A blank line starts a new paragraph. The MFK turns the pages; a push or F2 closes.
+
+DIGITAL NETS: PRACTISING FOR THE DAY THE PHONES ARE DOWN
+
+When a storm, a flood or a long outage takes the phones and the internet, hams carry the messages: a shelter's needs, a hospital's forms, lists, small files. That works only if it has been practised. So ARES (the Amateur Radio Emergency Service) groups, county emergency communications teams and traffic nets hold regular digital nets: a net control station calls, stations check in, and messages and small files are sent and confirmed, every week or month, so the gear and the operators are ready.
+
+What they use. NBEMS (free): fldigi is the modem; flmsg fills in a form (the ICS-213 general message, the ARRL radiogram) and sends it with a checksum, so the far end knows it arrived whole; flamp sends a file to many stations at once and lets each ask again for the parts it missed. Usual modes: MT63-2KL on 2 m FM, simplex or through a repeater; Olivia 8-500 or THOR on 80 and 40 m. Winlink: e-mail by radio, with its forms, over VARA, ARDOP or packet, to a gateway or straight to another station, so it works without the internet at your end. This radio does Winlink over ARDOP and Mercury (the Winlink app). JS8Call and VARAC: keyboard chat and relaying on HF.
+
+Finding your nets: your county's ARES Emergency Coordinator; your ARRL section's ARES or traffic manager and its net list (arrl.org lists the sections); the ARRL NTS Letter; a club meeting. The nets that pass files usually have NBEMS, digital or Winlink in their name.
+
+Examples, as found in November 2026: days and frequencies change, so check before relying on them.
+Winlink Wednesday: weekly Winlink check-ins, open to any licensed amateur wherever you are; send the check-in message on a Wednesday as the net's page says (winlinkwednesday.net; North Texas and other regions run their own).
+Maryland-DC Section (ARRL): a section-wide Winlink check-in once a month, on the second Tuesday, to the tactical address MDCASEC (qsl.net/mdcasec), and a monthly digital EmComm challenge with Winlink, VARAC and fldigi.
+Pennsylvania NBEMS Net: Sundays 8:00 AM local, 3.584 MHz, THOR22.
+Eastern Massachusetts ARES: NBEMS on 3584.5 kHz, 1500 Hz on the waterfall, THOR22: check-ins, then an ICS-213 sent with flmsg.
+
+Practise before you need it: with a friend, a 2 m simplex test in MT63-2KL with an flmsg form, or a Winlink message sent peer to peer, with no internet on either end.
+
+THE TROPOSPHERIC DUCTING MAP (THE ATMOSPHERE'S TUNNELS)
+
+Above 30 MHz signals normally reach a little past the horizon. When a layer of warm, dry air lies over cooler, moist air (a temperature inversion), radio waves bend back down along it and travel inside it as in a pipe: a duct. Then 2 m, 70 cm, FM broadcast and TV signals go hundreds of km, sometimes well over a thousand. It comes most with calm high pressure, on clear nights and early mornings, in late summer and autumn, along coasts and over the Great Lakes and the Gulf of Mexico; rarely west of the Rockies but along the Pacific coast.
+
+William Hepburn's DX Info Centre forecasts it six days ahead: dxinfocentre.com/tropo.html, then your region. The maps come out once a day, around 1800 UTC: every 3 hours for the first 36 hours, then every 6. Their colours are the Hepburn Tropo Index, 0 to 10: how strongly the air bends signals over each place, from nothing special at the bottom of the scale to the strong ducts at the top. Look at the colour over you and over the far end of the path you want: a band of high index joining the two is where a duct may open.
+
+His licence does not allow his maps to be copied into other programs, so this radio does not show them: open the page on a phone. To hear a duct here: B (VHF/UHF, an SDR on USB) on the FM broadcast band (F2: FM BC) brings in distant stations while one is up; on 2 m, FT8 on 144.174 MHz, SSB calling on 144.200 MHz, and in North America APRS on 144.390 MHz.

@@ -1077,7 +1077,7 @@ static lv_obj_t *badge_l[2], *title_l, *status_l, *batt_l;
 static lv_obj_t *ab_arrow, *ab_tag;     /* PTT refused: where the A/B key is (landscape) */
 extern const lv_font_t power_sym_14;    /* the clock's: Montserrat's battery and bolt, and a plug (clock.c) */
 #define SYMBOL_PLUG "\xEF\x87\xA6"     /* U+F1E6 */
-typedef struct { lv_obj_t *frame, *cap, *line, *opt[12]; int n; } box_t;     /* opt: E SYSTEM's 9 rows the most */
+typedef struct { lv_obj_t *frame, *cap, *line, *opt[12]; int n; } box_t;     /* opt: F SYSTEM's 12 rows the most */
 static lv_obj_t *tick_l[TICKS], *tgt_l[LABELS];
 /* SCAN CFG: its rows (the MFK goes through them, its push or a tap changes the one chosen), what the chosen one does,
  * and what each radio's scan does now */
@@ -1100,7 +1100,7 @@ static list_sbar_t *sb_bd, *sb_lg, *sb_dsel, *sb_drow;     /* D's bands, C's log
 /* F SYSTEM: the rest of the radio, from here */
 typedef enum {
     SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_POOL, SYS_GPS, SYS_CLASSIC, SYS_SHELL, SYS_BASEFW,
-    SYS_HOME,
+    SYS_TRIBAL, SYS_HOME,
     SYS_N
 } sysitem_t;
 static const struct {
@@ -1140,11 +1140,17 @@ static const struct {
     {"BASE FIRMWARE", "NOT SUPPORTED ON THE X6100: THE BASE FIRMWARE UPDATER IS THE X6200'S ONLY, AND NOTHING OF IT IS IN "
                       "THIS RADIO'S SOFTWARE. THE X6100'S BASE IS WRITTEN ANOTHER WAY, WITH XIEGU'S OWN SYSTEM."},
 #endif
+    {"TRIBAL KNOWLEDGE", "WHAT HAMS PASS ON BY WORD OF MOUTH: THE DIGITAL NETS THAT PRACTISE SENDING MESSAGES AND "
+                         "FILES FOR WHEN A DISASTER TAKES THE PHONES AND THE INTERNET, HOW TO FIND YOURS, AND HOW TO "
+                         "READ THE TROPOSPHERIC DUCTING MAP. PUSH TO READ, THE MFK TURNS THE PAGES. YOUR OWN NOTES "
+                         "(/MNT/TRIBAL.TXT ON THE CARD'S DATA PARTITION) COME FIRST."},
     {"START IN", "WHERE THE RADIO STARTS AND COMES BACK TO WHEN AN APP CLOSES: THE SENTRY, OR THE CLASSIC RADIO "
                  "SCREEN. PUSH TO SWITCH."},
 };
 static int       sys_sel;
 static box_t     s_list, s_what, s_look, s_home, s_keys, s_load;
+static bool      trib_on;               /* TRIBAL KNOWLEDGE open: WHAT IT DOES reads it (trib_open) */
+static void      trib_show(void);
 static lv_obj_t *key_l[5];
 
 /* The knobs and keys, said: the legend, a word on screen for a moment (OSD), the list of them all (help) */
@@ -1822,9 +1828,11 @@ static void box_make(box_t *b, lv_obj_t *parent, int x, int y, int w, int h, con
     b->line  = rect(parent, x, y + 25, w, 3, 0, true);
     if (n > (int)(sizeof(b->opt) / sizeof(b->opt[0]))) n = (int)(sizeof(b->opt) / sizeof(b->opt[0]));
     b->n     = n;
+    int step = n > 0 && 30 + n * 20 > h ? (h - 32) / n : 20;   /* closer rows where 20 px would not fit (F's 12) */
+
     for (int i = 0; i < n; i++) {
-        b->opt[i] = label(parent, &pixel_20, amb, x + 3, y + 30 + i * 20, w - 6, LV_TEXT_ALIGN_CENTER, "");
-        lv_obj_set_height(b->opt[i], 20);
+        b->opt[i] = label(parent, &pixel_20, amb, x + 3, y + 30 + i * step, w - 6, LV_TEXT_ALIGN_CENTER, "");
+        lv_obj_set_height(b->opt[i], step);
         lv_label_set_long_mode(b->opt[i], LV_LABEL_LONG_CLIP);
         lv_obj_set_style_bg_color(b->opt[i], amb, 0);
         if (tag >= 0) {
@@ -2764,15 +2772,16 @@ static void show_system(void) {
             snprintf(s, sizeof(s), "%s", sys_items[i].name);
         opt_set(&s_list, i, s, i == sys_sel);
     }
-    opt_set(&s_what, 0, sys_items[sys_sel].about, 0);
+    if (trib_on) trib_show();
+    else opt_set(&s_what, 0, sys_items[sys_sel].about, 0);
     snprintf(s, sizeof(s), "%s THEME", params.theme_name.x);
     for (char *c = s; *c; c++) *c = (char)toupper((unsigned char)*c);
     opt_set(&s_look, 0, s, 0);
     opt_set(&s_look, 1, "SETTINGS > DISPLAY", 2);
     opt_set(&s_home, 0, home ? "THE SENTRY" : "CLASSIC RADIO", 0);
     opt_set(&s_home, 1, home ? "APPS COME BACK HERE" : "APPS GO TO CLASSIC", 2);
-    opt_set(&s_keys, 0, "APP: THIS SCREEN", 0);
-    opt_set(&s_keys, 1, "F2 OR PRESS: OPEN", 2);
+    opt_set(&s_keys, 0, trib_on ? "MFK: TURN THE PAGE" : "APP: THIS SCREEN", 0);
+    opt_set(&s_keys, 1, trib_on ? "F2 OR PRESS: CLOSE" : "F2 OR PRESS: OPEN", 2);
     sys_spec_layout();                  /* the spectrogram under the text, as much as it leaves */
     sys_load_show();
     sys_spec_draw();
@@ -3338,6 +3347,193 @@ static void build_sys_spec(lv_obj_t *p) {
     }
     lv_obj_add_flag(f_obj, LV_OBJ_FLAG_HIDDEN);
     sys_spec_layout();
+}
+
+/* ---- F's TRIBAL KNOWLEDGE ---- */
+
+/* What hams pass on by word of mouth (the owner, 2026-11-21: "add a tribal knowledge page to screen F ... local
+ * digital modes nets ... the atmospheric tunneling map"): the owner's own notes first (/mnt/tribal.txt on the card's
+ * DATA partition: the local nets, kept off the image), then the radio's (rootfs/usr/share/x6100/tribal.txt), read in
+ * WHAT IT DOES grown down over the processor's box, a page at a time: the MFK turns them, a push or F2 closes, and so
+ * does leaving F. Upper case, as the Sentry's fonts are drawn; a blank line ends a paragraph, and a page breaks
+ * between paragraphs where it can */
+static void show_screen(void);
+#define TRIB_LOCAL "/mnt/tribal.txt"
+#define TRIB_IMAGE "/usr/share/x6100/tribal.txt"
+#define TRIB_PAGES 80
+#define TRIB_MAX   65536
+static char *trib_buf;                  /* the pages, each NUL-ended */
+static char *trib_pg[TRIB_PAGES];
+static int   trib_n, trib_i;
+static int   sys_y, sys_h, sys_lh;      /* build_system's: the column's top and height, the processor's box's */
+
+static char *trib_read(void) {
+    static const char *const files[] = {TRIB_LOCAL, TRIB_IMAGE};
+    char  *all = calloc(1, TRIB_MAX + 1);
+    size_t len = 0;
+
+    if (!all) return NULL;
+    for (size_t k = 0; k < N_OF(files); k++) {
+        FILE *fp = fopen(files[k], "r");
+
+        if (!fp) continue;
+        if (len && len + 2 < TRIB_MAX) all[len++] = '\n', all[len++] = '\n';
+        len += fread(all + len, 1, TRIB_MAX - len, fp);
+        fclose(fp);
+    }
+    all[len] = 0;
+    char *o = all;                      /* no \r, tabs as spaces, upper case */
+    for (char *c = all; *c; c++) {
+        if (*c == '\r') continue;
+        *o++ = *c == '\t' ? ' ' : (char)toupper((unsigned char)*c);
+    }
+    *o = 0;
+    return all;
+}
+
+/* The page with add appended (after sep) if it still fits the room: true and the page grown, else as it was */
+static bool trib_try(char *page, size_t cap, const char *sep, const char *add, size_t addn, int room) {
+    char       cand[2048];
+    size_t     pl = strlen(page), sl = strlen(sep);
+    lv_point_t sz;
+
+    if (pl + sl + addn + 1 > sizeof(cand) || pl + sl + addn + 1 > cap) return false;
+    memcpy(cand, page, pl);
+    memcpy(cand + pl, sep, sl);
+    memcpy(cand + pl + sl, add, addn);
+    cand[pl + sl + addn] = 0;
+    lv_txt_get_size(&sz, cand, &pixel_16, 0, 0, f_tw, LV_TEXT_FLAG_NONE);
+    if (sz.y > room) return false;
+    memcpy(page, cand, pl + sl + addn + 1);
+    return true;
+}
+
+static void trib_flush(char *page, char **out) {
+    size_t n = strlen(page) + 1;
+
+    if (n > 1 && trib_n < TRIB_PAGES) {
+        memcpy(*out, page, n);
+        trib_pg[trib_n++] = *out;
+        *out += n;
+    }
+    page[0] = 0;
+}
+
+static void trib_paginate(const char *p) {
+    char  page[2048] = "";
+    char *out  = trib_buf;
+    int   room = sys_y + sys_h - 6 - f_ty - 4;
+
+    while (*p && trib_n < TRIB_PAGES) {
+        while (*p == '\n' || *p == ' ') p++;
+        if (!*p) break;
+        const char *e    = strstr(p, "\n\n");
+        size_t      plen = e ? (size_t)(e - p) : strlen(p);
+
+        /* A heading (a short line with no full stop) goes on this page only with the paragraph after it (or as much
+         * of it as a page holds): else it starts the next page */
+        if (page[0] && e && plen < 80 && p[plen - 1] != '.' && !memchr(p, '\n', plen)) {
+            char        probe[2048];
+            const char *e2 = strstr(e + 2, "\n\n");
+            size_t      nx = e2 ? (size_t)(e2 - (e + 2)) : strlen(e + 2);
+
+            if (nx > 900) nx = 900;
+
+            if (plen + 2 + nx < sizeof(probe)) {
+                memcpy(probe, p, plen);
+                memcpy(probe + plen, "\n\n", 2);
+                memcpy(probe + plen + 2, e + 2, nx);
+                probe[plen + 2 + nx] = 0;
+                char keep[2048];
+
+                memcpy(keep, page, strlen(page) + 1);
+                if (!trib_try(keep, sizeof(keep), "\n\n", probe, strlen(probe), room)) {
+                    trib_flush(page, &out);
+                    continue;
+                }
+            }
+        }
+        if (trib_try(page, sizeof(page), page[0] ? "\n\n" : "", p, plen, room)) {
+            p += plen;
+            continue;
+        }
+        if (page[0]) {                  /* the paragraph on a page of its own */
+            trib_flush(page, &out);
+            continue;
+        }
+        size_t used = 0;                /* longer than a page: as many words as fit, the rest on the next */
+
+        while (used < plen) {
+            size_t w = used;
+
+            while (w < plen && p[w] != ' ' && p[w] != '\n') w++;
+            if (w < plen) w++;          /* the word with what follows it */
+            if (!trib_try(page, sizeof(page), "", p + used, w - used, room)) break;
+            used = w;
+        }
+        if (!used) {                    /* not even a word: cut */
+            used = plen < 120 ? plen : 120;
+            memcpy(page, p, used);
+            page[used] = 0;
+        }
+        trib_flush(page, &out);
+        p += used;
+    }
+    trib_flush(page, &out);
+}
+
+/* WHAT IT DOES over the whole column (on) or over the processor's box again */
+static void trib_layout(bool on) {
+    int h = on ? sys_h : sys_h - sys_lh - 6;
+
+    lv_obj_set_height(s_what.frame, h);
+    f_bot = sys_y + h - 6;
+    lv_obj_t *load[3 + 9] = {s_load.frame, s_load.cap, s_load.line};
+
+    for (int i = 0; i < 3; i++) load[3 + i * 3] = ld_val[i], load[4 + i * 3] = ld_img[i], load[5 + i * 3] = ld_more[i];
+    for (size_t i = 0; i < N_OF(load); i++) {
+        if (!load[i]) continue;
+        if (on) lv_obj_add_flag(load[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_clear_flag(load[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void trib_show(void) {
+    char cap[40];
+
+    snprintf(cap, sizeof(cap), "TRIBAL KNOWLEDGE  %d/%d", trib_n ? trib_i + 1 : 0, trib_n);
+    lv_label_set_text(s_what.cap, cap);
+    opt_set(&s_what, 0, trib_n ? trib_pg[trib_i] : "NOTHING TO READ: NEITHER /MNT/TRIBAL.TXT NOR THE RADIO'S OWN "
+                                                    "/USR/SHARE/X6100/TRIBAL.TXT IS THERE.", 0);
+}
+
+static void trib_open(void) {
+    char *all = trib_read();
+
+    free(trib_buf);
+    trib_buf = NULL;
+    trib_n = trib_i = 0;
+    trib_on = true;
+    trib_layout(true);
+    if (all && (trib_buf = malloc(strlen(all) + 16)) != NULL) trib_paginate(all);
+    free(all);
+    show_screen();
+}
+
+static void trib_close(void) {
+    if (!trib_on) return;
+    trib_on = false;
+    trib_layout(false);
+    lv_label_set_text(s_what.cap, "WHAT IT DOES");
+    free(trib_buf);
+    trib_buf = NULL;
+    trib_n = 0;
+}
+
+static void trib_turn(int dir) {
+    if (!trib_n) return;
+    trib_i = LV_CLAMP(0, trib_i + dir, trib_n - 1);
+    show_screen();
 }
 
 /* MHz without the zeros at the end: 118, 162.55, 467.725 */
@@ -6445,6 +6641,7 @@ static void show_glog(void) {
 }
 
 static void go(scr_t s) {
+    if (s != SCR_SYSTEM) trib_close();     /* leaving F closes TRIBAL KNOWLEDGE */
     if (scr == SCR_LOG && s != SCR_LOG) g_leave(s == SCR_RTL);
     scr_t was = scr;
 
@@ -7373,6 +7570,11 @@ static void pp_open(void);
 static void gp_open(void);
 
 static void sys_open(int i) {
+    if (i == SYS_TRIBAL) {
+        trib_open();
+        return;
+    }
+    trib_close();
     if (i == SYS_VHF) {
         go(SCR_RTL);
         return;
@@ -7581,8 +7783,9 @@ static void fkey(int k) {
                 show_screen();
             }
             break;
-        case SCR_SYSTEM:                /* F2 opens the item; the others nothing (CLASSIC RADIO is on the list) */
-            if (k == 1) sys_open(sys_sel);
+        case SCR_SYSTEM:                /* F2 opens the item (or closes TRIBAL KNOWLEDGE); the others nothing */
+            if (k == 1 && trib_on) trib_close(), show_screen();
+            else if (k == 1) sys_open(sys_sel);
             break;
         case SCR_RTL:
             if (k == 0 && !rtl_scan && scan_chans && !chan_count(true)) {   /* SCAN CFG's F1 SCANS: none for B */
@@ -7759,6 +7962,10 @@ static void step(int dir) {
             break;
         }
         case SCR_SYSTEM:
+            if (trib_on) {              /* reading: its pages */
+                trib_turn(dir);
+                break;
+            }
             sys_sel = (sys_sel + dir + SYS_N) % SYS_N;
             show_screen();
             break;
@@ -7807,7 +8014,10 @@ static void press(void) {
             break;
         case SCR_BANDS: listen_band(); break;
         case SCR_DECODE: open_decoder(); break;
-        case SCR_SYSTEM: sys_open(sys_sel); break;
+        case SCR_SYSTEM:
+            if (trib_on) trib_close(), show_screen();
+            else sys_open(sys_sel);
+            break;
         case SCR_RTL:                   /* the strongest signal in view: C's channel to it */
             if (rtl_best) {
                 rtl_scan_set(false);
@@ -8871,6 +9081,7 @@ static void build_system(lv_obj_t *p) {
 
     int lh = 102, rx = lw + 12, rw = SW - lw - 18;     /* the load under what it does */
 
+    sys_y = y, sys_h = h, sys_lh = lh;
     box_make(&s_list, p, 6, y, lw, h, "SYSTEM", SYS_N, 5);
     box_make(&s_what, p, rx, y, rw, h - lh - 6, "WHAT IT DOES", 1, -1);
     lv_obj_set_height(s_what.opt[0], h - lh - 6 - 34);
