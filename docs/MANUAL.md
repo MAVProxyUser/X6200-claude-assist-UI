@@ -3744,7 +3744,11 @@ Once joined:
   (2457.6 and 2470.6 MHz, found with a receiver beside the radio, on against
   off) on the channels they fall in: on channel 11 a 3 Mbit/s TCI audio
   stream (what WSJT-X takes) held 99-100 % of real time, where without the
-  notch it got 33 % or the connection dropped. And it no longer holds back
+  notch it got 33 % or the connection dropped. On channel 13 (Europe) the
+  2470.6 MHz line is notched on top of the chip's own notch there, from the
+  bundles built after v0.3.12.43: not tested on the air (no channel-13
+  access point here), its register values checked off the radio. And it no
+  longer holds back
   its sending for a Bluetooth link it does not have (every burst of upload
   began at a third of its speed). Both are in the WiFi driver, a kernel
   module: an update brings them with "Also update the kernel on the SD card"
