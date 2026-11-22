@@ -114,9 +114,20 @@ Open:
   without ALC (the X6200). Fix: the X6100's TCI audio through the drive loop too. TRIED the same evening (tx_hold on
   every base, power_hold only without ALC, as tx_player runs the apps' loop): the ALC fell from 9.9 to a median of
   8.4, the power stayed 0.0 W (0.3 at most) and the X6200 still heard no tone, while the X6100's own FT8 app gave
-  0.10 W on the same factory base the same day. Not committed. To find: what differs between its TCI path and the
-  apps' (play mode, the mode's audio path, the level the loop starts from), and whether the factory base's ALC
-  fold-back latches (gcfix5's "hold" fixed that kind of thing).
+  0.10 W on the same factory base the same day. Not committed.
+  TAKEN APART step by step the same evening (tones.py --tx-mode; a debug build logging the TCI frames and the
+  receive-only hold's callers; the codec's playback monitor; PulseAudio's streams polled): NOT 0 W. The TCI path is
+  sound: every frame taken and played at -20 dBFS (the client's -10.5 levelled), the modem bit on, the radio on the
+  air, the playback stream steady (350-375 ms queued). Eliminated: the mode (USB and USB-D the same), the drive
+  level (the codec 18 dB down: the same), the sender, the key. What it is: (1) at a 0.1 W setting the X6100's
+  meter reads 0.0-0.1 W, which is what was asked; the tones were in the X6200's audio (793-2893 Hz, 16-21 dB over
+  the noise with its AGC off); tones.py missed its faint 1000 Hz mark and said "no tone found". (2) The factory
+  V1.1.9 base starts a TCI over HOT: 0.4 W, then 0.9-1.0 W in the first second at a 0.1 W setting (Xiegu's ALC loop
+  raises its gain through the pause; gcfix5's hold fixed it), and the bench's watch kills the over at ~2.6 s ("1.0 W
+  on the air, 0.1 W asked"): that was the "audio stops after 2.5 s" and the re-hold (the bench's own disarm). The
+  apps' player does not overshoot: its drive starts from the learned level and climbs. To do: the X6100's TCI audio
+  started low and brought up as the player's (tx_hold on an ALC base, from the apps' learned level), then 0.1 W and
+  1 W passes through the watch.
   (1) FOUND the same evening: not the audio. ft8_lib decodes that recording ("CQ Q1TST EN80", SNR 8, DT +0.1, 1319
   Hz); jt9 decodes nothing from it, nor from ft8_lib's own perfect synthesis of "CQ Q1TST EN80" (it does decode
   "CQ N0CALL"). WSJT-X's chkcall: "Real calls don't start with Q, but we'll allow the placeholder callsign QU1RK":

@@ -253,6 +253,7 @@ def main():
     ap.add_argument("--burst-hz", type=int, default=1000)
     ap.add_argument("--burst-s", type=float, default=0.5)
     ap.add_argument("--fade", type=float, default=None, help="each stretch of tone faded in and out (s): 0.3, bursts 0.002")
+    ap.add_argument("--tx-mode", type=int, default=2, help="the transmitter's mode for the run (2 USB, 3 USB-D)")
     a = ap.parse_args()
     tones = [int(t) for t in a.tones.split(",")]
     gaps = [float(g) for g in a.bursts.split(",")] if a.bursts else None
@@ -324,7 +325,7 @@ def main():
 
     def one_over(sideband, label):
         rx_mode = {"usb": 2, "lsb": 0}[sideband]
-        setv(txr, "mode", 2)
+        setv(txr, "mode", a.tx_mode)
         setv(rxr, "mode", rx_mode)
         w = cur_w[0]
         radio_tx_gate(txr, c, w)
