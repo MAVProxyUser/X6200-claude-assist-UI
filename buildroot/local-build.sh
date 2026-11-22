@@ -616,6 +616,11 @@ if ls -d $BR/build/build/ft8lib-*/ > /dev/null 2>&1 \
         && ! grep -qs "0002-message-standard-calls-as-WSJT-X-takes-them" $BR/build/build/ft8lib-*/.applied_patches_list; then
     make ft8lib-dirclean
 fi
+# librtlsdr built before its 0004 (a gain set by hand kept when the tuner is initialised again), and what links it in
+if ls -d $BR/build/build/rtlsdr-blog-*/ > /dev/null 2>&1 \
+        && ! grep -qs "0004-the-gain-set-by-hand-kept" $BR/build/build/rtlsdr-blog-*/.applied_patches_list; then
+    make rtlsdr-blog-dirclean x6x00-rtlspec-dirclean dump1090-fa-dirclean
+fi
 # and U-Boot built before its logo was turned off (above) is built again with its new config
 if ls -d $BR/build/build/uboot-*/ > /dev/null 2>&1 \
         && ! grep -qs "^# CONFIG_VIDEO_LOGO is not set" $BR/build/build/uboot-*/.config; then
