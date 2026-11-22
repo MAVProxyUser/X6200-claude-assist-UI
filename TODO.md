@@ -102,6 +102,29 @@ Open:
     DC per band and 6 m fixes are off the radio with it, its patches and write-up still in the repo.
 - 12 m and 6 m calibration (6 m offsets left 0); 0.1 W carrier is about -25 dBc (the offsets were found at 5 W).
   On the factory base now: moot until a patched base goes back on.
+- WSJT-X over TCI, transmit timing (2026-11-21 evening, the X6200 into the X6100 through 80 dB, 0.1 W, four overs):
+  WSJT-X's own jt9 decoded all four CQs from the X6100's recording at DT +0.5 s (SNR +31..+36); the X6100's FT8 app
+  decoded them too. +0.5 s is the X6200's TCI-to-air delay; the WiFi fix took away the rest (1.5-2 s this morning).
+  scratchpad wsjtx_bench/dt_decode.py cuts a recording into UTC periods for jt9. Still open: (1) WSJT-X on the Mac
+  logged no decodes from the X6200's TCI audio, at full rate, with the X6100's CQ in it (+22 dB in its band) and the
+  X6200's own FT8 app decoding it (SNR 7); jt9 on the recording of that audio decodes nothing either, as recorded,
+  mirrored or shifted: why is open (the X6100's FT8 signal or the X6200's audio). (2) The X6100 transmitting from
+  TCI audio at -10.5 dBFS (tones.py) gives 0.4 W for a moment, then 0.0 W with the ALC at 9.9 for the rest of the
+  over: the factory V1.1.9 base folds back when overdriven, and the GUI's drive loop (tx_hold.c) runs only on a base
+  without ALC (the X6200). Fix: the X6100's TCI audio through the drive loop too.
+  (1) FOUND the same evening: not the audio. ft8_lib decodes that recording ("CQ Q1TST EN80", SNR 8, DT +0.1, 1319
+  Hz); jt9 decodes nothing from it, nor from ft8_lib's own perfect synthesis of "CQ Q1TST EN80" (it does decode
+  "CQ N0CALL"). WSJT-X's chkcall: "Real calls don't start with Q, but we'll allow the placeholder callsign QU1RK":
+  any Q-prefixed call but QU1RK is nonstandard there (its ft8code sends "CQ Q1TST EN80" as type 4, "CQ Q1TST"),
+  while ft8_lib's pack_basecall packs Q1TST as a standard call (type 1, with the grid), which WSJT-X then throws
+  away. So the bench's test calls (Q1TST, Q2TST) are invisible to WSJT-X, and the radios' FT8 apps (ft8_lib)
+  disagree with WSJT-X on them. No real callsign starts with Q. Fix: ft8lib 0002, a callsign starting with Q (but
+  QU1RK) is not standard, as WSJT-X has it; then retry radios-ft8 with WSJT-X listening.
+- The X6100's "rake" (the owner, 2026-11-21): steady carriers every ~6 kHz on 20 m (14.052, .058, .064, .070, .076,
+  .082, .088, .094 MHz, 10-15 dB over its floor) on A and G. Not the X6200 (its dial to 40 m: the comb unchanged);
+  the hump at 14.075 is real FT8 traffic leaking past the pads. The HackRF beside both radios (ANT500) saw no comb
+  (too deaf at HF to rule out a weak radiator). Suspects: the RTL stick in the X6100's USB (RTL0) and its charger;
+  next: unplug each for a minute while the spectrum is watched.
 - On-screen checks DONE 2026-11-21 (screenshots over SSH, tools/screenshots/drive.py, 0.1 W into the 80 dB chain):
   G's VOL pop-up shows upright on G held up ("X6200 VOLUME 1", its bar). On the air the Sentry jumps to G (the bench
   arms there), and G's SPECTRUM stood still through a transmission (0 pixels changed between shots 1.5 s apart, both
