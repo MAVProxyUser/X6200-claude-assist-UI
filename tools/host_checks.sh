@@ -239,6 +239,14 @@ fi
 if wanted bench; then
     TIME_LIMIT=$((TIME_LIMIT > 420 ? TIME_LIMIT : 420)) check_twice bench python3 tools/bench/sim_test.py
 fi
+# acoustic.py's judgement of a mic over on made-up data (numpy)
+if wanted acoustic; then
+    if python3 -c "import numpy" 2>/dev/null; then
+        check_twice acoustic python3 tools/bench/acoustic_test.py
+    else
+        record acoustic SKIP "needs Python's numpy"
+    fi
+fi
 # The audits' reproduction harnesses, now the regression suite of their fixes (docs/audit/repro-2026-10-24/README.md):
 # Python, Node.js, SQLite, libpng and ALSA's headers, LVGL; Linux
 if [[ "$ONLY" == *" audit "* ]]; then     # named only (the header says why)

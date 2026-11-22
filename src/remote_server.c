@@ -120,6 +120,7 @@
 #include "screen_main.h"
 #include "app_sentry.h"      /* "open sentry L" */
 #include "bench_banner.h"    /* "banner TEXT" */
+#include "bench_player.h"    /* "play PATH", "play stop" */
 #include "smeter.h"
 #include "tci_ask.h"
 #include "tci_server.h"
@@ -292,6 +293,7 @@ typedef struct {
     int32_t spk, moni;      /* the speaker's level and the TX monitor's as last sent the base (-1 none yet) */
     int32_t muted, tcim;    /* the speaker muted (any reason); a TCI client's over muting it */
     int32_t mic;            /* the mic in use (radio_mic_sel_t: 0 built-in, 1 hand, 2 auto) */
+    int32_t plays;          /* the bench's file on the speaker (bench_player_busy) */
     bool    tx, lock;
     bool    ulock;          /* the user's lock alone (LOCK), not an app's hold: the page's LOCK button */
     bool    cwrise;         /* CW's tone rises with the dial, as CW-R's (the X6200): its CW passband the other side */
@@ -1238,6 +1240,7 @@ static void pstate_read(pstate_t *s) {
     s->muted = radio_speaker_muted();
     s->tcim  = radio_tci_muted();
     s->mic   = radio_get_mic();
+    s->plays = bench_player_busy();
     const char *app = main_screen_digital_app();
     memset(s->app, 0, sizeof(s->app));      /* compared whole with memcmp */
     snprintf(s->app, sizeof(s->app), "%s", app ? app : "");
@@ -1256,12 +1259,13 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d,"
              "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"ask\":%d,\"txio\":%d,\"txqo\":%d,\"txig\":%d,\"txip\":%d,"
              "\"linein\":%d,\"txf\":%d,\"split\":%d,\"rit\":%d,\"xit\":%d,\"play\":%d,\"heard\":%d,\"spk\":%d,"
-             "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,"
+             "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,\"plays\":%d,"
              "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
              s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->txf, s->split,
-             s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->app, s->win, s->pg, s->fp);
+             s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->plays, s->app, s->win, s->pg,
+             s->fp);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */
@@ -2551,6 +2555,15 @@ static void handle_text(client_t *c, char *text) {
             q.arg = (int32_t)v;
         }
         scheduler_put(app_apply, &q, sizeof(q));
+    } else if (!strcmp(a[0], "play") && n >= 2) {
+        /* "play /tmp/bench_NAME.wav": the bench's file on this radio's own speaker (bench_player.c, the acoustic test
+         * of a mic on G, tools/bench/acoustic.py); "play stop" ends it. The state's "plays" says it is playing */
+        if (!allowed(c, ROLE_OPERATE, true))
+            return;
+        if (!strcmp(a[1], "stop"))
+            bench_player_stop();
+        else if (!bench_player_start(a[1]))
+            client_textf(c, "err play %s: a /tmp/bench_*.wav, one at a time, not while the radio transmits", a[1]);
     } else if (!strcmp(a[0], "close")) {
         /* "close": the app open closed (the X6200's and X6100's Sentry, their home screen, comes back) */
         if (!allowed(c, ROLE_OPERATE, true))

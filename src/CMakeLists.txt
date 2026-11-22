@@ -98,7 +98,7 @@ target_sources(${PROJECT_NAME} PUBLIC
     dialog_snake.c
     dialog_iradio.c iradio_list.c
     remote_server.c
-    bench_banner.c
+    bench_banner.c bench_player.c
     control_owner.c
     winlink.c
     rigctld.c

@@ -253,12 +253,16 @@ class Radio:
 
 # The keys "set" takes (src/remote_server.c panel_set), in the order they go: split and the VFO, then the dial and the
 # mode (a band change loads the band's ATT, PRE and AGC, so those after it), the receiver's, the rest; LISTEN last
-SET_ORDER = ("split", "vfo", "freq", "mode", "filter", "att", "pre", "agc", "rfg", "sql", "nb", "nr", "rit", "xit",
-             "atu", "pwr", "txio", "txqo", "txig", "txip", "heard")
+SET_ORDER = ("split", "vfo", "freq", "mode", "filter", "zoom", "att", "pre", "agc", "rfg", "sql", "nb", "nr", "rit",
+             "xit",
+             "atu", "pwr", "vol", "txio", "txqo", "txig", "txip", "heard")
+# Kept by the band (or the band's mode): put back only once the dial is on that band again
+BAND_KEYS = {"mode", "filter", "zoom", "att", "pre", "agc", "txio", "txqo", "txig", "txip"}
 # What a test may change and finish() puts back ("heard" is not: the Sentry's page A puts its own LISTEN back)
 RESTORED = SET_ORDER[:-1]
 # The state the checks read (pstate_read): a GUI without these is older than them, and the harness will not guess
-STATE_NEEDS = ("txf", "split", "rit", "xit", "play", "heard", "spk", "moni", "muted", "tcim", "mic", "flo", "fhi")
+STATE_NEEDS = ("txf", "split", "rit", "xit", "play", "heard", "spk", "moni", "muted", "tcim", "mic", "flo", "fhi",
+               "vol")
 SET_WAIT_S = 6.0            # a "set" read back within this (sim_test.py's radios answer at once: less there)
 PLAY_MODES = {0: "off", 1: "on (the speaker plays the processor's audio)", 2: "voice record", 3: "the hand mic"}
 
@@ -442,16 +446,19 @@ def restore(r, snap, quiet=False):
     """r as snap found it, in SET_ORDER (the dial first: the band's own ATT, PRE and AGC come with it and are then set
     as they were), each read back. What did not come back is said and returned, never raised: the end of a test puts
     back all it can"""
-    bad = {}
+    bad, off_band = {}, False
     for k in SET_ORDER:
         v = snap.get(k)
         if v is None or k == "heard" or _same(k, _value(r, k), v):
             continue
+        if off_band and k in BAND_KEYS:
+            continue                    # never onto another band's memory (2026-11-22: an app held the dial)
         _put(r, k, v)
         try:
             r.wait(f"{k} back", lambda k=k, v=v: _same(k, _value(r, k), v), SET_WAIT_S)
         except Refused:
-            pass
+            if k == "freq":
+                off_band = True
     time.sleep(0.4)
     for k, v in snap.items():
         if v is not None and not k.startswith("_") and k != "heard" and not _same(k, _value(r, k), v):
@@ -489,9 +496,33 @@ def arm(r, on, mode=None):
 
 
 def open_page(r, letter):
-    if r.state.get("pg") != letter:
+    """The Sentry on its page letter, asked twice (an app still closing can take the first ask)"""
+    for wait in (5, 8):
+        if r.state.get("pg") == letter:
+            return
         r.send(f"open sentry {letter}")
-        r.wait(f"the Sentry's page {letter}", lambda: r.state.get("pg") == letter, 10)
+        try:
+            r.wait(f"the Sentry's page {letter}", lambda: r.state.get("pg") == letter, wait)
+            return
+        except Refused:
+            if wait == 8:
+                raise
+
+
+def close_apps(r):
+    """An app open closed (it holds the dial: a band's memories cannot be put back under it, 2026-11-22); the Sentry
+    itself is no app. Said if it stays"""
+    for _ in range(3):
+        if not (r.state.get("app") or (r.state.get("win") or "Sentry") != "Sentry"):
+            return True
+        r.send("close")
+        try:
+            r.wait("the app closed", lambda: not r.state.get("app") and (r.state.get("win") or "Sentry") == "Sentry", 4)
+            return True
+        except Refused:
+            pass
+    say(f"{r.name}: its app {r.state.get('app') or r.state.get('win')} did not close")
+    return False
 
 
 def finish(radios, snaps, keep=(), report=None, before=None):
@@ -506,6 +537,8 @@ def finish(radios, snaps, keep=(), report=None, before=None):
             if not r.ctl_mine:
                 r.take_control()            # an emergency stop's session released it
             r.send("banner")
+            if not close_apps(r):
+                bad["app"] = r.state.get("app") or r.state.get("win")
             if r.state.get("rxo") == 0 and r.may_tx:
                 try:
                     arm(r, False)

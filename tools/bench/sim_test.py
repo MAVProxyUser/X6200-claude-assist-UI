@@ -42,7 +42,7 @@ class SimRadio:
                       "flo": 100, "fhi": 3000, "att": 1, "pre": 1, "agc": 3, "rfg": 39, "sql": 4, "nb": 0, "nr": 0,
                       "rit": 0, "xit": 0, "txf": 14074000, "play": 1, "heard": 1,
                       "spk": 30, "moni": 0, "muted": 0, "tcim": 0, "mic": 2, "rxo": 1, "tune": 0, "pg": "B",
-                      "vol": 30}
+                      "vol": 30, "zoom": 1}
         if fault == "oldgui":
             for k in ("txf", "play", "heard", "tcim"):
                 del self.state[k]
