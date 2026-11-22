@@ -111,7 +111,12 @@ Open:
   mirrored or shifted: why is open (the X6100's FT8 signal or the X6200's audio). (2) The X6100 transmitting from
   TCI audio at -10.5 dBFS (tones.py) gives 0.4 W for a moment, then 0.0 W with the ALC at 9.9 for the rest of the
   over: the factory V1.1.9 base folds back when overdriven, and the GUI's drive loop (tx_hold.c) runs only on a base
-  without ALC (the X6200). Fix: the X6100's TCI audio through the drive loop too.
+  without ALC (the X6200). Fix: the X6100's TCI audio through the drive loop too. TRIED the same evening (tx_hold on
+  every base, power_hold only without ALC, as tx_player runs the apps' loop): the ALC fell from 9.9 to a median of
+  8.4, the power stayed 0.0 W (0.3 at most) and the X6200 still heard no tone, while the X6100's own FT8 app gave
+  0.10 W on the same factory base the same day. Not committed. To find: what differs between its TCI path and the
+  apps' (play mode, the mode's audio path, the level the loop starts from), and whether the factory base's ALC
+  fold-back latches (gcfix5's "hold" fixed that kind of thing).
   (1) FOUND the same evening: not the audio. ft8_lib decodes that recording ("CQ Q1TST EN80", SNR 8, DT +0.1, 1319
   Hz); jt9 decodes nothing from it, nor from ft8_lib's own perfect synthesis of "CQ Q1TST EN80" (it does decode
   "CQ N0CALL"). WSJT-X's chkcall: "Real calls don't start with Q, but we'll allow the placeholder callsign QU1RK":
