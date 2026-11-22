@@ -5,7 +5,11 @@ TUNE stops; the state, the meters, tx, ft8 and ft8r back), the pair passing each
 decoded row and an S-meter. Six cases: a CQ and its reply pass; a radio at 0.9 W for 0.1 W asked passes too, the
 over logged and not stopped (the owner, 2026-11-21: "don't kill just log. we have attenuators"); a radio that stays
 keyed, a bad SWR, more power than its pad takes and a receiver hearing far more than the pads let through each end in
-the emergency stop and a refusal, with the stopped radio off the air. Nothing on the radio, nothing on the air.
+the emergency stop and a refusal, with the stopped radio off the air. And the state layer (2026-11-22): a listener
+said whole and read back, put back as found and left on the Sentry's page A; refused for an attenuator that will not
+go off, a base held in play mode, a sender that would transmit off its dial, a GUI older than the checks; a dial that
+will not go back said; a path proof each way before the overs; a deaf listener refused by it, one deaf after it
+refused by the watch; a radio whose link stalls stopped. Nothing on the radio, nothing on the air.
 
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
@@ -22,6 +26,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bench  # noqa: E402
+bench.SET_WAIT_S = 1.0      # the simulated radios answer a "set" at once: a refusal's two tries need not take 12 s
 
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 TX_S = 2.5          # a simulated FT8 transmission: long enough for the watchdog's 1 s settling
@@ -32,10 +37,22 @@ class SimRadio:
     def __init__(self, name, call, fault=None):
         self.name, self.call, self.fault = name, call, fault
         self.peer, self.conn, self.lock = None, None, threading.Lock()
-        self.state = {"freq": 14074000, "mode": 3, "pwr": 4.4, "atu": 0, "tx": 0, "app": ""}
+        # the remote's state as the GUI sends it (src/remote_server.c pstate_read), the bench's checks' keys included
+        self.state = {"freq": 14074000, "mode": 3, "pwr": 4.4, "atu": 0, "tx": 0, "app": "", "split": 0, "vfo": 0,
+                      "flo": 100, "fhi": 3000, "att": 1, "pre": 1, "agc": 3, "rfg": 39, "sql": 4, "nb": 0, "nr": 0,
+                      "rit": 0, "xit": 0, "txf": 14074000, "play": 1, "heard": 1,
+                      "spk": 30, "moni": 0, "muted": 0, "tcim": 0, "mic": 2, "rxo": 1, "tune": 0, "pg": "B",
+                      "vol": 30}
+        if fault == "oldgui":
+            for k in ("txf", "play", "heard", "tcim"):
+                del self.state[k]
+        self.tone = None    # (hz above the dial, until): a "sim tone" plan on the air
+        self.silent = False  # "silentlink": from the test's first FT8 over its link sends nothing more
+        # "deaf": it never hears its peer; "deafafter": it hears the path proof's tone, not the test's overs after it
         self.ft8 = {"open": 0, "auto": 1, "cq": 0, "tx": 1, "sending": 0, "nocall": 0}
         self.tx_until, self.heard_dbm, self.ids, self.got = 0.0, None, 0, []
         self.what = None    # what its FT8 app sends ("cq", "reply"); none for a radio keyed by its PTT alone
+        self.first_freq = 14074000
         self.srv = socket.socket()
         self.srv.bind(("127.0.0.1", 0))
         self.srv.listen(2)
@@ -93,7 +110,7 @@ class SimRadio:
 
     def send(self, text):
         c = self.conn
-        if not c:
+        if not c or self.silent:            # "silentlink": its link dropped, nothing reaches the harness
             return
         d = text.encode()
         head = bytes([0x81, len(d)]) if len(d) < 126 else bytes([0x81, 126]) + struct.pack(">H", len(d))
@@ -118,8 +135,38 @@ class SimRadio:
         elif a[:2] == ["control", "take"]:
             self.send("ctl browser bench-tx 1")
         elif a[0] == "set" and len(a) >= 3:
-            v = float(a[2])
-            self.state[a[1]] = v / 10 if a[1] == "pwr" else int(v)
+            k, v = a[1], float(a[2])
+            if k == "vfo":
+                self.state["vfo"] ^= 1                  # a toggle, as the GUI's P_VFO
+            elif k == "filter":
+                self.state["flo"], self.state["fhi"] = int(v), int(float(a[3]))
+            elif k == "pwr":
+                self.state["pwr"] = v / 10
+            elif k == "att" and self.fault == "stuckatt":
+                self.send("err att: the radio is busy, try again")
+            elif k == "freq" and self.fault == "norestore" and int(v) == self.first_freq and self.state["freq"] != v:
+                self.send("err freq: locked (LOCK, or an app holds the frequency)")
+            else:
+                self.state[k] = int(v)
+            if k == "heard" and self.fault != "play":     # "play": a base held in play mode by something else
+                self.state["play"] = 1 if self.state["heard"] in (1, 2) else 0
+            self.state["txf"] = self.state["freq"] + (5000 if self.fault == "split" else 0)
+            self._state()
+        elif a[:2] == ["open", "sentry"] and len(a) >= 3:
+            self.state["pg"] = a[2]
+            self._state()
+        elif a[:2] == ["key", "AB"] and a[2:3] == ["1"]:
+            if self.state["pg"] in ("A", "G"):
+                self.state["rxo"] ^= 1
+                self._state()
+        elif a[:2] == ["sim", "tone"]:
+            plan = json.loads(t.split(" ", 2)[2])
+            secs = sum(x[1] for x in plan)
+            self.tone = (max(x[0] for x in plan), time.time() + secs)
+            self.what = None
+            self.tx_until = time.time() + secs
+            self.state["tx"] = 1
+            self.send("tx 1")
             self._state()
         elif a[0] == "ft8" and len(a) >= 2:
             w = a[1]
@@ -130,6 +177,7 @@ class SimRadio:
             elif w == "auto":
                 self.ft8["auto"] ^= 1
             elif w in ("cq", "reply"):
+                self.silent = self.fault == "silentlink"      # its link stalls as the test asks for the over
                 self.reply_to = a[2] if len(a) > 2 else None
                 self.what = w
                 threading.Timer(0.5, self._key).start()
@@ -153,6 +201,7 @@ class SimRadio:
             self._end()
 
     def _end(self):
+        self.tone = None
         self.state["tx"] = 0
         self.send("tx 0")
         self._state()
@@ -169,9 +218,31 @@ class SimRadio:
         self.send("ft8r " + json.dumps({"id": self.ids, "t": 0, "x": time.strftime("%H:%M:%S ") + text, "c": call,
                                         "snr": -5, "f": 1500}))
 
+    def _frame(self):
+        """A spectrum frame as the GUI sends one (remote_ws: 0xFFFF, bins, centre, width, then int8 dB): noise at
+        -120, and the peer's transmission where it is, through the pads, unless this radio is deaf to it"""
+        nb, wid, cen = 256, 100000, self.state["freq"]
+        v = [-120 + (i * 7) % 3 for i in range(nb)]
+        p = self.peer
+        deaf = self.fault == "deaf" or (self.fault == "deafafter" and p is not None and p.what is not None)
+        if p and p.state["tx"] and not deaf:
+            at = p.state["txf"] + (p.tone[0] if p.tone and time.time() < p.tone[1] else 1500)
+            i = int((at - (cen - wid / 2)) / (wid / nb))
+            if 0 <= i < nb:
+                v[i] = -60
+        body = b"\xff\xff" + struct.pack("<HIII", nb, cen, wid, 0) + struct.pack(f"<{nb}b", *v)
+        c = self.conn
+        if c and not self.silent:
+            try:
+                with self.lock:
+                    c.sendall(bytes([0x82, 126]) + struct.pack(">H", len(body)) + body)
+            except OSError:
+                pass
+
     def _tick(self):
         while True:
             time.sleep(0.1)
+            self._frame()
             if self.state["tx"]:
                 if time.time() > self.tx_until:
                     self._end()
@@ -225,12 +296,67 @@ def run_case(fault, sender_fault=True):
     return why, a, b, state
 
 
+def one_radio(fault):
+    """A single simulated radio and the harness's session to it, for the state layer's own cases"""
+    r = SimRadio("simC", "Q3TST", fault)
+    state = tempfile.mkdtemp(prefix="bench-sim-")
+    DIRS.append(state)
+    bench.STATE = state
+    bench.CONF = os.path.join(state, "bench.json")
+    bench.save_json(bench.CONF, {"radios": {"simC": {"host": "127.0.0.1", "port": r.port}},
+                                 "limits": {"radio_w": 1.0, "max_key_s": 4}})
+    bench.save_json(os.path.join(state, "tokens.json"), {"simC": {"tx": "c" * 32}})
+    h = bench.Radio("simC", {"host": "127.0.0.1", "port": r.port}, True)
+    h.take_control()
+    return r, h
+
+
+def refused(fn):
+    try:
+        fn()
+        return None
+    except bench.Refused as e:
+        return str(e)
+
+
 def main():
     results = []
 
     def check(ok, what):
         results.append(ok)
         print(("ok    " if ok else "WRONG ") + what, flush=True)
+
+    # ---- the state layer (bench.ensure, snapshot, restore, finish), 2026-11-22 ----
+    sim, h = one_radio(None)
+    snap = bench.snapshot(h)
+    got = bench.ensure(h, *bench.rx_profile(14200000, 2, pre=0, att=0, rfg=100, agc=0))
+    check(got["att"] == 0 and got["pre"] == 0 and got["rfg"] == 100 and got["agc"] == 0 and got["sql"] == 0 and
+          got["heard"] == 0 and sim.state["play"] == 0, f"a listener said whole and read back: {got}")
+    check(sim.state["pg"] == "B" and any(g == "set heard 0" for g in sim.got),
+          "its speaker taken off the SDR (LISTEN 0), the base out of play mode")
+    bad = bench.restore(h, snap)
+    check(not bad and sim.state["att"] == 1 and sim.state["pre"] == 1 and sim.state["rfg"] == 39 and
+          sim.state["sql"] == 4 and sim.state["freq"] == 14074000, f"put back as found ({bad or 'all of it'})")
+    bench.finish([h], {"simC": snap})
+    check(settled(lambda: sim.state["pg"] == "A"), "finish leaves it on the Sentry's page A")
+    for fault, do, word, what in (
+            ("stuckatt", lambda h: bench.ensure(h, *bench.rx_profile(14200000, 2, pre=0, att=0)), "att 0 not taken",
+             "an attenuator that will not go off"),
+            ("play", lambda h: bench.ensure(h, *bench.rx_profile(14200000, 2, pre=0, att=0)), "play mode",
+             "a listener whose base stays in play mode"),
+            ("split", lambda h: bench.ensure(h, *bench.tx_profile(14200000, 2, 0.1)), "off its dial",
+             "a sender that would transmit off its dial"),
+            ("oldgui", lambda h: bench.snapshot(h), "does not report", "a GUI older than the checks")):
+        sim, h = one_radio(fault)
+        why = refused(lambda: do(h))
+        check(why is not None and word in why, f"{what}: refused ({why})")
+        h.close()
+    sim, h = one_radio("norestore")
+    snap = bench.snapshot(h)
+    bench.ensure(h, {"freq": 14200000})
+    bad = bench.restore(h, snap)
+    check("freq" in bad, f"a dial that will not go back is said, not passed over ({bad})")
+    h.close()
 
     why, a, b, _ = run_case(None)
     check(why is None, f"a CQ and its reply between two radios pass ({why or 'passed'})")
@@ -261,6 +387,24 @@ def main():
     why, a, b, _ = run_case("both", sender_fault=False)
     check(why is not None and "two radios on the air at once" in why, f"both: refused ({why})")
     check(settled(lambda: not a.state["tx"] and not b.state["tx"]), "both: both off the air")
+    # ---- what the listener hears, 2026-11-22: hours of tests on a listener that heard nothing, nothing said ----
+    why, a, b, _ = run_case(None)
+    check(why is None and a.state["pg"] == "A" and b.state["pg"] == "A", "after a pass both radios on page A")
+    check(a.state["att"] == 1 and a.state["rfg"] == 39 and b.state["sql"] == 4,
+          "their receivers put back as found (ATT, RF gain, squelch)")
+    check(any(g.startswith("sim tone") for g in a.got) and any(g.startswith("sim tone") for g in b.got),
+          "a path proof each way before the FT8 overs")
+    why, a, b, _ = run_case("deaf", sender_fault=False)
+    check(why is not None and "path proof" in why and "does not hear" in why, f"a deaf listener: refused by the "
+          f"path proof ({why})")
+    check(not any(g.startswith("ft8 cq") for g in a.got), "deaf: nothing of the test sent after the proof failed")
+    check(settled(lambda: a.state["pg"] == "A" and b.state["pg"] == "A"), "deaf: both put back on page A all the same")
+    why, a, b, _ = run_case("deafafter", sender_fault=False)
+    check(why is not None and "did not hear" in why, f"a listener deaf after the proof: the over unheard, refused "
+          f"({why})")
+    why, a, b, _ = run_case("silentlink")
+    check(why is not None and "no word from" in why, f"a radio whose link stalls on the air: stopped ({why})")
+    check(settled(lambda: not a.state["tx"]), "silentlink: off the air")
     for d in DIRS:
         __import__("shutil").rmtree(d, ignore_errors=True)
     bad = results.count(False)

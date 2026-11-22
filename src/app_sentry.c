@@ -11580,6 +11580,21 @@ void app_sentry_open_pool(void) {
     main_screen_start_app(ACTION_APP_SENTRY);
 }
 
+/* What the speaker plays (the browser remote's state "heard"): 0 the radio's own receiver, 1 the SDR at B's channel,
+ * 2 both, 3 nothing. RTL or BOTH with no SDR is the receiver (hear_apply) */
+int app_sentry_heard(void) {
+    return heard;
+}
+
+/* The speaker set to h for now (the remote's "set heard", the bench: a test listens to the radio's own receiver, never
+ * to a stick that puts the base in play mode, where the receiver's audio never reaches the processor). Each page's
+ * saved LISTEN is left alone: A and B put theirs back when opened. LVGL thread */
+void app_sentry_set_heard(int h) {
+    if (!root || !dialog_type_is_run(dialog_sentry)) return;      /* its head is drawn: the Sentry open only */
+    if (h < 0 || h >= HEAR_N || h == heard) return;
+    hear_apply(h);
+}
+
 /* The page the Sentry shows, "A" to "G" (SCAN CFG: "S"), 0 when it is not open: the browser remote's state "pg" */
 char app_sentry_page(void) {
     if (!root || !dialog_type_is_run(dialog_sentry)) return 0;

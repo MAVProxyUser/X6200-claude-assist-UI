@@ -27,7 +27,8 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
    app sends nothing); a radio that goes on the air while the HackRF feeds it stops the HackRF at once. HackRF: `-a 0` (the amp never), `-p 0`, `-x` 40 at most (the owner's approved
    maximum).
 4. **The radios profile: low power, power-rated pads.** At most `limits.radio_w` (the configuration; 5 W
-   whatever it says), and the first transmission of a session at 0.1 W whatever is asked. Each radio's own jack
+   whatever it says; image.py and txcal.py ask 0.1 and 1 W by default: no test stresses a pad, the owner,
+   2026-11-22, after a night with 10 W overs into the 10 W pads), and the first transmission of a session at 0.1 W whatever is asked. Each radio's own jack
    carries a pad rated for at least twice the test power. The power is set and read back before keying; the ATU
    off (it tunes by transmitting); the frequency inside the amateur bands. And a supply that holds the radio:
    before each over the radio's own battery log (`/mnt/battery_log.csv`, a row a minute) is read, and no over goes
@@ -40,7 +41,8 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
    10 W here), or a receiver hearing 20 dB more than the chain lets through (pads missing) stops everything at once:
    the HackRF killed, every radio unkeyed, the apps' TX stopped. More power than asked but under the pad's rating is
    logged, not stopped (the owner, 2026-11-21: "don't kill just log. we have attenuators"): said once an over, its
-   highest reading in `tx_log.jsonl` and the run's result (`over_power_w`), and the over goes on. The browser
+   highest reading in `tx_log.jsonl` and the run's result (`over_power_w`), and the over goes on. A radio the harness
+   hears nothing from for 6 s (its meters come every 100 ms) stops everything too: it cannot be watched. The browser
    remote's PTT is a lease besides: without its renewal the radio unkeys within 3 s.
 6. **Test callsigns only.** `Q<digit>TST` (`bench.py testcall NAME Q1TST`, `restore` after), never a real
    call; FT8 grids FN00. The test QSOs are taken out of the radio's logs after each run (`cleanlog`). No real call
@@ -50,9 +52,38 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
    discarded every such message (2026-11-21: never `CQ Q1TST EN80` from a radio, while the other radio decoded
    it): a test call WSJT-X is to hear needs ft8lib patch 0002 on the sending radio.
 7. **Everything logged.** Each HackRF and radio transmission and each stop goes to `tx_log.jsonl`.
-8. **Stop on demand.** Ctrl-C or `bench.py stop` is the emergency stop (rule 5's actions).
-9. **The radios as found.** A test closes the apps it opened (the X6200 goes back to the Sentry) and releases
-   control; a callsign set for the tests is put back with `testcall NAME restore`.
+8. **Stop on demand.** Ctrl-C or `bench.py stop` is the emergency stop (rule 5's actions); then the test's own end
+   still puts the radios back (rule 12). A second Ctrl-C leaves at once.
+9. **The radios put back, on page A.** A test closes the apps it opened and releases control; a callsign set for
+   the tests is put back with `testcall NAME restore`. Everything it changed is put back and read back
+   (`bench.finish`): the settings, each band it tuned through, a mode's own filter; what did not come back is said
+   and in the report (`not_restored`). Both radios end on the Sentry's page A, whatever page they were on (the
+   owner, 2026-11-22: "when tests finish they should always leave on screen A").
+10. **Every radio said whole, never taken as found.** (The owner, 2026-11-22: "very often during testing you do
+   things like forget the preamp, forget to sync channels, forget you muted an audio source, or had attenuation on
+   ... ensure this stops happening".) A test names the whole state each radio needs (`bench.rx_profile`,
+   `bench.tx_profile`) and `bench.ensure` sets it in order, the dial and mode first (a band change loads that band's
+   own ATT, PRE and AGC, so they are set after it), and reads every key back: one not taken is a refusal naming it.
+   A listener: its dial, mode, PRE, ATT, RF gain, AGC and squelch as the test says (PRE and ATT have no default),
+   no split, RIT, NB or NR, its own receiver on the speaker (LISTEN 0: an SDR heard there puts the base in play mode,
+   where the processor gets no receiver audio at all, and tones.py, the decoders and TCI get nothing), no TCI over
+   muting it. A sender: on its dial in its mode at its power, the frequency it says it transmits on (`txf`: split, XIT,
+   a TX shift) the dial, ATU and TUNE off; for a mic over, out of play mode (both mics at 0 there). Arming on A or G
+   puts the data modes into the voice mode: `bench.arm(r, True, mode=...)` sets the test's again. The radios' GUI
+   reports all of it (the remote's state: txf, split, rit, xit, play, heard, spk, moni, muted, tcim, mic); a GUI
+   older than that is refused. `bench.py status` shows it all, and what in it would spoil a test.
+11. **The path proved before anything is measured.** `bench.path_proof`: the sender sends 1000 Hz over its TCI at
+   0.1 W for 2 s, and the listener's spectrum at the tone must rise 20 dB over its quiet (0.1 W through 70-80 dB:
+   40-59 dB). Under it the test is refused, with the listener's state; 15 dB under the last proof of the same pair
+   is said. Then each over is watched for it (rule 5's watch): an over whose listener's spectrum around the sender's
+   TX frequency never rose 15 dB while the sender's meter showed power is unheard, and the test fails (radios-ft8,
+   tones, image, txcal) or stops after 3 in a row (radios-walkie). 2026-11-22: tests ran for hours on a listener
+   that heard nothing (its battery nearly flat), each result taken for the receiver's.
+12. **A listener's supply.** `bench.listener_gate`: a listener at under 25 % on a supply under 12 V is refused (its
+   receiver went deaf like that, 2026-11-22, and it switches itself off at 7.0 V).
+13. **No test by hand.** An ad-hoc script uses the same pieces (`snapshot`, `ensure`, `path_proof`, `Watch`,
+   `finish`), never `set` and `key` on their own: the audit of 2026-11-22 found every hand-made one forgetting
+   something (a knob turned whose job it could not see, a mode never set, a PTT not released on a failure).
 
 ## Use
 

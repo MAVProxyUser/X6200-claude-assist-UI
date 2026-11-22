@@ -266,6 +266,10 @@ static int              rfg_override = -1;  /* the base's RF gain in place of cf
 static int              vol_override = -1;  /* the speaker's level in place of cfg_volume (the Sentry's RTL-SDR heard), -1 none */
 static bool             rec_moni = false;   /* a screen recording takes the TX audio: the monitor at 30 at least (X6100) */
 static bool             tx_moni  = false;   /* G's voiceprint takes the radio's own over: the same (radio_set_tx_moni) */
+/* What radio_vol_refresh last sent the base, for the browser remote's state (the bench checks the speaker and the
+ * monitor are what a test needs, not guessed): the speaker's level, the monitor's, and whether it was muted */
+static atomic_int       rxvol_sent = -1, moni_sent = -1;
+static atomic_bool      muted_now;
 static bool             digi_cap;       /* a digital app is open: never above its cap */
 static float            tune_cap;       /* a TUNE for an external tuner: never above its power (under the lock) */
 static atomic_int       tx_mode = -1;   /* radio_set_tx_mode's for the transmission under way, -1 none */
@@ -866,10 +870,14 @@ void radio_vol_refresh() {
     if (rec_raise) moni = LV_MAX(moni, 30);
     else if (muted || vol == 0) moni = 0;
     if (moni_test >= 0) moni = moni_test;
+    int32_t rxvol = muted ? 0 : vol_override >= 0 ? vol_override : vol;
     radio_lock();
-    hw_set_i(HW_RXVOL, muted ? 0 : vol_override >= 0 ? vol_override : vol);
+    hw_set_i(HW_RXVOL, rxvol);
     hw_set_i(HW_MONI, moni);
     radio_unlock();
+    atomic_store(&rxvol_sent, rxvol);
+    atomic_store(&moni_sent, moni);
+    atomic_store(&muted_now, muted);
 }
 
 void radio_moni_test_poll(void) {
@@ -1431,6 +1439,22 @@ bool radio_get_modem(void) {
 /* Under the lock: the record, PTT, modem, tune and split bits share one register, and the
  * library's read-modify-write of it from two threads lost a PTT or modem change */
 static _Atomic audio_play_mode_t play_mode_now = AUDIO_PLAY_OFF;
+
+int radio_rxvol_sent(void) {
+    return atomic_load(&rxvol_sent);
+}
+
+int radio_moni_sent(void) {
+    return atomic_load(&moni_sent);
+}
+
+bool radio_speaker_muted(void) {
+    return atomic_load(&muted_now);
+}
+
+bool radio_tci_muted(void) {
+    return tci_mute;
+}
 
 /* The base's play mode as last set (any of its users: the SDR player, the recorder, voice messages, FreeDV) */
 audio_play_mode_t radio_play_mode(void) {

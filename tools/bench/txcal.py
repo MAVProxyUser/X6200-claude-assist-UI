@@ -17,11 +17,16 @@ axis, a second pass refines it (the carrier's at D/3, the image's at D/2 but nev
 well above an over's wander), and the last point measures it: 11 overs a band. The session's first over is a short one at 0.1 W (bench rule 4),
 then everything at --w (5 W). What is found stays in TX's band settings (the GUI saves them) when it is better than
 what was there; --dry measures and puts the old values back. Afterwards every band's values are saved to
-calibrations/<the radio's fingerprint>.json (txcal_store.py: tied to that radio's processor, put back on it alone). The bench rules throughout (bench.py); RX's squelch open,
-AGC 3, attenuator on, everything put back after. A report in ~/.config/x6x00-bench/runs/<time>-txcal/.
+calibrations/<the radio's fingerprint>.json (txcal_store.py: tied to that radio's processor, put back on it alone). The bench rules throughout (bench.py); both radios said
+whole for each over after its band change (bench.ensure: RX's squelch open, AGC 3, its PRE and ATT as given), the
+path proved before the first over, an over RX did not hear ending the run, everything put back after with every band
+visited (bench.finish, the Sentry's page A). Each band's search starts from its saved values (the radio's own
+band_params, read before the run: the state a moment after a band change could still be the last band's), and a band
+whose search fails gets them back (a trial point was left on it before, 2026-11-22 audit); --dry always keeps them.
+A report in ~/.config/x6x00-bench/runs/<time>-txcal/.
 
-    txcal.py TX RX [--bands 160,80,...] [--w 5] [--fa 1000] [--off 1500] [--dry] [--d-image N] [--d-carrier N]
-                   [--passes 2] [--from-zero] [--rx-att 1]
+    txcal.py TX RX [--bands 160,80,...] [--w 1] [--fa 1000] [--off 1500] [--dry] [--d-image N] [--d-carrier N]
+                   [--passes 2] [--from-zero] [--rx-att 0] [--rx-pre 0]
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
 import argparse, json, math, os, subprocess, sys, threading, time
@@ -42,7 +47,7 @@ def main():
     ap.add_argument("tx")
     ap.add_argument("rx")
     ap.add_argument("--bands", default=",".join(BANDS))
-    ap.add_argument("--w", type=float, default=5.0)
+    ap.add_argument("--w", type=float, default=1.0)    # the pads are never stressed (the owner, 2026-11-22)
     ap.add_argument("--fa", type=int, default=1000)
     ap.add_argument("--off", type=int, default=1500)
     ap.add_argument("--amp", type=float, default=0.3)
@@ -52,8 +57,9 @@ def main():
     ap.add_argument("--passes", type=int, default=2, help="passes of five points before the last (2)")
     ap.add_argument("--from-zero", action="store_true",
                     help="start each band at 0, 0 (uncalibrated) instead of its present values")
-    ap.add_argument("--rx-att", type=int, default=1, help="RX's attenuator for the run (1; 0 when the pads leave "
-                                                           "the image near RX's floor: 80 dB at 1 W)")
+    ap.add_argument("--rx-att", type=int, default=0, help="RX's attenuator for the run (0: at 80 dB and 1 W the image "
+                                                           "is near RX's floor with it on)")
+    ap.add_argument("--rx-pre", type=int, default=0, help="RX's preamp for the run")
     ap.add_argument("--tag", default="")
     a = ap.parse_args()
     c = bench.conf()
@@ -62,8 +68,7 @@ def main():
     radios = [txr, rxr]
     run_dir = os.path.join(bench.STATE, "runs", time.strftime("%Y%m%d-%H%M%S-txcal") + (f"-{a.tag}" if a.tag else ""))
     os.makedirs(run_dir, exist_ok=True)
-    keys = ("freq", "mode", "pg", "atu", "agc", "att", "pre", "rfg", "sql")
-    was, results = {}, {"tx": a.tx, "rx": a.rx, "w": a.w, "fa": a.fa, "off": a.off, "bands": {}}
+    snaps, results = {}, {"tx": a.tx, "rx": a.rx, "w": a.w, "fa": a.fa, "off": a.off, "bands": {}}
     lim_s = bench.FULL_RATING_KEY_S if a.w > bench.HARD_MAX_W else c["limits"]["max_key_s"]
     subprocess.run(["scp", "-q", "-o", "BatchMode=yes", SENDER, f"root@{txr.host}:/tmp/tci_tone_tx.py"], check=True)
     rx_audio = [None]
@@ -84,18 +89,6 @@ def main():
                     break
         return rx_audio[0]
 
-    def arm(r, on):
-        for _ in range(3):
-            if (r.state.get("rxo") == 0) == on:
-                return
-            r.send("key AB 1"); time.sleep(0.15); r.send("key AB 0")
-            try:
-                r.wait("TX " + ("armed" if on else "locked"), lambda: (r.state.get("rxo") == 0) == on, 5)
-                return
-            except Refused:
-                pass
-        raise Refused(f"{r.name}: TX not {'armed' if on else 'locked'}")
-
     def setv(r, k, v):
         for _ in range(2):
             if int(r.state.get(k, -99999)) == v:
@@ -108,26 +101,13 @@ def main():
                 pass
         raise Refused(f"{r.name}: {k} {v} not taken")
 
-    def setw(w):
-        # set again until it shows: right after a band change the GUI holds TX at 0 W for a moment and a power set
-        # then can be lost (12 m and 10 m at 10 W, 2026-11-20: "did not come within 5 s" twice)
-        for tries in (1, 2, 3):
-            txr.send(f"set pwr {round(w * 10)}")
-            try:
-                txr.wait(f"{w} W", lambda: abs(txr.pwr() - w) < 0.05, 5)
-                return
-            except Refused:
-                if tries == 3:
-                    raise
-
     def over(f, w, tone_s, label, during=None):
         """One transmission of the tone (tone_s seconds after a lead) with every gate and the watch; during(ctx) runs
         while it is on air. Returns (the audio, its start on this clock, ctx: the lag and the tone's start)"""
-        setv(txr, "freq", f)
-        setv(rxr, "freq", f - a.off)
-        setv(txr, "mode", 2)
-        setv(rxr, "mode", 2)
-        setw(w)
+        # both said whole on this band after its change (RX's ATT and AGC had been set on the start band only and
+        # fell away at the first band change, 2026-11-22 audit), each read back
+        bench.ensure(rxr, *bench.rx_profile(f - a.off, 2, pre=a.rx_pre, att=a.rx_att, rfg=100, agc=3, sql=0))
+        bench.ensure(txr, *bench.tx_profile(f, 2, w))
         plan = [[0, LEAD_S], [a.fa, tone_s], [0, TAIL_S]]
         key_s = sum(s for _, s in plan) + 1.0
         if key_s > lim_s - 1:
@@ -138,7 +118,7 @@ def main():
             r.send(f"banner BENCH TX CAL: {a.tx.upper()} SENDS A TONE {w} W, {a.rx.upper()} LISTENS, "
                    f"{f / 1e6:.3f} MHZ THROUGH {total} DB")
         watch = Watch(radios, c, expect_dbm=10 * math.log10(w * 1000) - total, listener=rxr, w=w)
-        arm(txr, True)
+        bench.arm(txr, True, mode=2)
         tx_log({"who": txr.name, "f": f, "w": txr.pwr(), "what": f"txcal {label}"})
         t_begin = time.time()
         proc = subprocess.Popen(["ssh", "-n", "-o", "BatchMode=yes", f"root@{txr.host}",
@@ -176,14 +156,17 @@ def main():
                 subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", f"root@{txr.host}", STOP_SENDER],
                                capture_output=True, text=True)
                 proc.wait(timeout=30)
-            watch.close()
             try:
                 txr.wait("off the air", lambda: not txr.tx, 5)
             except Refused:
                 pass
-            arm(txr, False)
+            watch.close()
+            bench.arm(txr, False)
         if watch.why:
             raise Refused(f"stopped: {watch.why}")
+        if watch.deaf:      # a point RX did not hear is noise: the run ends, nothing chosen from it
+            raise Refused(f"stopped: {a.rx} did not hear the over (its spectrum rose "
+                          f"{watch.deaf[-1]['best_rise_db']} dB at most)")
         x, x_t0 = tci.audio(t_begin - 1.0, None)
         time.sleep(0.8)
         return x, x_t0, ctx
@@ -205,13 +188,19 @@ def main():
         frequencies and do not touch each other, so each over moves one of each and measures both. One over a point:
         the base takes registers 50-52 between transmissions only"""
         ki, kc = KEYS["image"], KEYS["carrier"]
-        setv(txr, "freq", f)                         # the band first: its own values are the ones read and set
-        time.sleep(1.5)                              # (the state a panel tick behind the band change)
-        si = (int(txr.state.get(ki[0], 0)), int(txr.state.get(ki[1], 0)))
-        sc = (int(txr.state.get(kc[0], 0)), int(txr.state.get(kc[1], 0)))
+        bench.ensure(txr, {"freq": f})               # the band first: its own values are the ones set
+        # its saved values, from the radio's own band_params read before the run (the state a moment after the band
+        # change could still show the last band's: a search from there began far off on 15 and 12 m, 2026-11-20)
+        saved = bench.band_values(snaps[txr.name].get("_bands"), f)
+        if saved:
+            orig = {ki[0]: saved.get("tx_iq_gain", 0), ki[1]: saved.get("tx_iq_phase", 0),
+                    kc[0]: saved.get("tx_i_offset", 0), kc[1]: saved.get("tx_q_offset", 0)}
+        else:
+            time.sleep(1.5)                          # not read: the state a panel tick behind, as before
+            orig = {k: int(txr.state.get(k, 0)) for k in (ki[0], ki[1], kc[0], kc[1])}
+        in_band[0] = (band, f, orig)
+        si, sc = (orig[ki[0]], orig[ki[1]]), (orig[kc[0]], orig[kc[1]])
         if a.from_zero:
-            # (the state may still show the last band's values a moment after the band changed: a search from
-            # there began far off on 15 and 12 m, 2026-11-20)
             si, sc = (0, 0), (0, 0)
         di, dc = a.d_image or ki[2], a.d_carrier or kc[2]
         rec = {"band": band, "w": a.w, "start": {"image": si, "carrier": sc}, "points": []}
@@ -265,7 +254,7 @@ def main():
             first, last = pts[0][what], pts[-1][what]
             best = min((p[what] for p in pts), key=lambda v: v[2])
             if a.dry:
-                kept = list(st)
+                kept = [orig[kk[0]], orig[kk[1]]]      # the band's own (not --from-zero's 0, 0: the audit)
             elif last[2] <= first[2]:
                 kept = last[:2]
             else:
@@ -276,25 +265,22 @@ def main():
             say(f"{band} m {what}: {list(st)} {first[2]} dBc -> {last[:2]} {last[2]} dBc (best seen {best[:2]} "
                 f"{best[2]} dBc), kept {kept}")
         rec.update(out)
+        in_band[0] = None                           # its values are the ones kept: nothing to put back
         return rec
 
+    in_band = [None]            # (band, f, its own values) while a band's search runs: put back if it fails
+    for r in radios:
+        r.take_control()
+        snaps[r.name] = bench.snapshot(r)
     try:
+        results["supply"] = bench.listener_gate(rxr)
         for r in radios:
-            r.take_control()
-            was[r.name] = {k: r.state.get(k) for k in keys}
-            was[r.name]["pwr"] = r.pwr()
-            if r.state.get("atu"):
-                r.send("set atu 0")
-                r.wait("the tuner out", lambda r=r: not r.state.get("atu"), 10)
-            if r.state.get("pg") != "G":
-                r.send("open sentry G")
-                r.wait("G, the Walkie", lambda r=r: r.state.get("pg") == "G", 10)
-        setv(rxr, "sql", 0)
-        setv(rxr, "agc", 3)
-        setv(rxr, "att", a.rx_att)
-        audio_live()
+            bench.open_page(r, "G")
         bands = a.bands.split(",")
-        over(BANDS[bands[0]], bench.FIRST_PROBE_W, 1.0, "probe")     # the session's first over: 0.1 W
+        # the session's first over at 0.1 W: the path proof (RX on TX's dial for it)
+        bench.ensure(rxr, *bench.rx_profile(BANDS[bands[0]], 2, pre=a.rx_pre, att=a.rx_att, rfg=100, agc=3, sql=0))
+        bench.path_proof(c, total, txr, rxr, BANDS[bands[0]], results)
+        audio_live()
         for band in bands:
             for tries in (1, 2):
                 try:
@@ -312,25 +298,14 @@ def main():
     finally:
         if rx_audio[0]:
             rx_audio[0].close()
-        for r in radios:
-            try:
-                r.stop()
-                r.send("banner")
-                v = was.get(r.name, {})
-                if v.get("pwr") is not None and v["pwr"] < 99:
-                    r.send(f"set pwr {round(v['pwr'] * 10)}")
-                for k in ("freq", "mode", "agc", "att", "pre", "rfg", "sql"):
-                    if v.get(k) is not None:
-                        r.send(f"set {k} {int(v[k])}")
-                        time.sleep(0.3)
-                if v.get("atu"):
-                    r.send("set atu 1")
-                if v.get("pg") and v["pg"] != "G":
-                    r.send(f"open sentry {v['pg']}")
-                time.sleep(0.5)
-                r.close()
-            except Exception as e:  # noqa: BLE001
-                say(f"{r.name}: putting it back: {e}")
+        before = {}
+        if in_band[0]:      # a search that did not finish: the band's own values back, not a trial point
+            band, f, orig = in_band[0]
+            say(f"{band} m: its search did not finish: its own TX calibration back {orig}")
+            before[txr.name] = [dict({"freq": f}, **orig)]
+            results.setdefault("put_back", {})[band] = orig
+        # the calibration it keeps stays (the home band's too); a band it did not finish gets its own back (before)
+        bench.finish(radios, snaps, report=results, before=before, keep=("txio", "txqo", "txig", "txip"))
         with open(os.path.join(run_dir, "report.json"), "w") as f:
             json.dump(results, f, indent=1)
         say("report", os.path.join(run_dir, "report.json"))
@@ -342,4 +317,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    bench.install_stop_signals(lambda: bench.conf())
+    try:
+        main()
+    except Refused as e:
+        say(f"REFUSED: {e}")
+        sys.exit(2)
+    except KeyboardInterrupt:
+        sys.exit(130)

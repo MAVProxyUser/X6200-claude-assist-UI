@@ -31,6 +31,10 @@ extern dialog_t *dialog_sentry;
 void app_sentry_open_at(char letter);
 /* The page shown, "A" to "G" (SCAN CFG "S"), 0 when the Sentry is not open */
 char app_sentry_page(void);
+/* What the speaker plays: 0 the radio's own receiver, 1 the SDR at B's channel, 2 both, 3 nothing (the remote's
+ * "heard"); and set for now, each page's saved LISTEN left alone (LVGL thread) */
+int app_sentry_heard(void);
+void app_sentry_set_heard(int h);
 /* The SDR pool's panel (sdr_pool.h), the Sentry opened on F for it when it is not open (APP held on H) */
 void app_sentry_open_pool(void);
 

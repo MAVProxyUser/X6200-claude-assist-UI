@@ -247,8 +247,11 @@ def main():
     ap.add_argument("--tones", default=",".join(map(str, TONES)))
     ap.add_argument("--amp", type=float, default=0.3)
     ap.add_argument("--tag", default="")
-    ap.add_argument("--rx-rfg", type=int, default=None, help="the receiver's RF gain for the run")
-    ap.add_argument("--rx-att", type=int, default=None, help="the receiver's attenuator for the run (0/1)")
+    # the receiver said whole for the run, never taken as found (2026-11-22): PRE and ATT off and RF gain at its top
+    # unless asked, AGC off (the chain's levels, not the AGC's), the squelch open
+    ap.add_argument("--rx-rfg", type=int, default=100, help="the receiver's RF gain for the run")
+    ap.add_argument("--rx-att", type=int, default=0, help="the receiver's attenuator for the run (0/1)")
+    ap.add_argument("--rx-pre", type=int, default=0, help="the receiver's preamp for the run (0/1)")
     ap.add_argument("--bursts", default=None, help="the pauses (s) before each burst after the first: the loop's overshoot")
     ap.add_argument("--burst-hz", type=int, default=1000)
     ap.add_argument("--burst-s", type=float, default=0.5)
@@ -272,8 +275,7 @@ def main():
     radios = [txr, rxr]
     run_dir = os.path.join(bench.STATE, "runs", time.strftime("%Y%m%d-%H%M%S-tones") + (f"-{a.tag}" if a.tag else ""))
     os.makedirs(run_dir, exist_ok=True)
-    keys = ("freq", "mode", "pg", "atu", "agc", "att", "pre", "rfg", "sql")
-    was, results = {}, {"tx": a.tx, "rx": a.rx, "f": a.freq, "w": a.w, "tones": tones, "passes": {}}
+    snaps, results = {}, {"tx": a.tx, "rx": a.rx, "f": a.freq, "w": a.w, "tones": tones, "passes": {}}
     tci = None
     delay = [None]
     plan = [[0, LEAD_S], [MARK_HZ, MARK_S], [0, MARK_GAP_S]] + [x for t in tones for x in ([t, TONE_S], [0, GAP_S])]
@@ -295,39 +297,13 @@ def main():
         raise Refused(f"{key_s:.1f} s on the air is over the limit ({lim_s:.0f} s at {a.w} W)")
     subprocess.run(["scp", "-q", "-o", "BatchMode=yes", SENDER, f"root@{txr.host}:/tmp/tci_tone_tx.py"], check=True)
 
-    def tap(r):
-        r.send("key AB 1"); time.sleep(0.15); r.send("key AB 0")
-
-    def arm(r, on):
-        for _ in range(3):
-            if (r.state.get("rxo") == 0) == on:
-                return
-            tap(r)
-            try:
-                r.wait("TX " + ("armed" if on else "locked"), lambda: (r.state.get("rxo") == 0) == on, 5)
-                return
-            except Refused:
-                pass
-        raise Refused(f"{r.name}: TX not {'armed' if on else 'locked'}")
-
-    def setv(r, k, v):
-        get = (lambda: int(r.state.get(k, -1))) if k in ("freq", "mode", "agc", "att", "pre", "rfg", "sql") else None
-        for _ in range(2):
-            if get and get() == v:
-                return
-            r.send(f"set {k} {v}")
-            try:
-                r.wait(f"{k} {v}", lambda: get() == v, 6)
-                return
-            except Refused:
-                pass
-        raise Refused(f"{r.name}: {k} {v} not taken")
-
     def one_over(sideband, label):
         rx_mode = {"usb": 2, "lsb": 0}[sideband]
-        setv(txr, "mode", a.tx_mode)
-        setv(rxr, "mode", rx_mode)
         w = cur_w[0]
+        # each radio said whole for the over, read back (the mode with its band's own settings after it)
+        results.setdefault("rx_state", {})[label] = bench.ensure(
+            rxr, *bench.rx_profile(a.freq, rx_mode, pre=a.rx_pre, att=a.rx_att, rfg=a.rx_rfg, agc=0, sql=0))
+        bench.ensure(txr, *bench.tx_profile(a.freq, a.tx_mode, w))
         radio_tx_gate(txr, c, w)
         line = (f"BENCH TONES: {a.tx.upper()} SENDS {len(tones)} TONES USB {w} W, {a.rx.upper()} LISTENS "
                 f"{sideband.upper()}, {a.freq / 1e6:.3f} MHZ THROUGH {total} DB")
@@ -335,7 +311,7 @@ def main():
             r.send(f"banner {line}")
         time.sleep(1.0)
         watch = Watch(radios, c, expect_dbm=10 * math.log10(w * 1000) - total, listener=rxr, w=w)
-        arm(txr, True)
+        bench.arm(txr, True, mode=a.tx_mode)      # arming puts USB-D into USB: the test's mode again
         tx_log({"who": txr.name, "f": a.freq, "w": txr.pwr(), "what": f"tones {label}"})
         t_begin = time.time()
         proc = subprocess.Popen(["ssh", "-n", "-o", "BatchMode=yes", f"root@{txr.host}",
@@ -356,12 +332,16 @@ def main():
             time.sleep(0.05)
         out = proc.communicate(timeout=30)[0]
         t_end = time.time()
-        watch.close()
         try:
             txr.wait("off the air", lambda: not txr.tx, 5)
         except Refused:
             pass
-        arm(txr, False)
+        watch.close()
+        bench.arm(txr, False)
+        if watch.deaf:
+            results["passes"][label] = {"error": "the listener did not hear the over", "deaf": watch.deaf}
+            raise Refused(f"{label}: {a.rx} did not hear {a.tx}'s over (its spectrum rose "
+                          f"{watch.deaf[-1]['best_rise_db']} dB at most): nothing measured counts")
         start = next((float(l.split()[1]) for l in out.splitlines() if l.startswith("start ")), None)
         time.sleep(1.0)
         x, x_t0 = tci.audio(t_begin - 0.5, t_end + 1.0)
@@ -425,25 +405,17 @@ def main():
         time.sleep(1.5)
         return res
 
+    for r in radios:
+        r.take_control()
+        snaps[r.name] = bench.snapshot(r)
     try:
+        results["supply"] = bench.listener_gate(rxr)
         for r in radios:
-            r.take_control()
-            was[r.name] = {k: r.state.get(k) for k in keys}
-            was[r.name]["pwr"] = r.pwr()
-            if r.state.get("atu"):
-                r.send("set atu 0")
-                r.wait("the tuner out", lambda r=r: not r.state.get("atu"), 10)
-            if r.state.get("pg") != "G":
-                r.send("open sentry G")
-                r.wait("G, the Walkie", lambda r=r: r.state.get("pg") == "G", 10)
-            setv(r, "freq", a.freq)
-        setv(rxr, "agc", 0)                        # off: the chain's levels, not the AGC's
-        setv(rxr, "sql", 0)                        # open: a squelch shut on the receiver mutes its audio whole (the
-                                                   # X6200's at 4, 2026-11-20: "no tone found" runs)
-        if a.rx_rfg is not None:
-            setv(rxr, "rfg", a.rx_rfg)
-        if a.rx_att is not None:
-            setv(rxr, "att", a.rx_att)
+            bench.open_page(r, "G")
+        # the listener's receiver said (AGC off: the chain's levels; the squelch open: a shut one mutes its audio whole,
+        # the X6200's at 4, 2026-11-20: "no tone found" runs), then the path proved before anything is measured
+        bench.ensure(rxr, *bench.rx_profile(a.freq, 2, pre=a.rx_pre, att=a.rx_att, rfg=a.rx_rfg, agc=0, sql=0))
+        bench.path_proof(c, total, txr, rxr, a.freq, results)
         tci = TciRx(rxr.host)
         time.sleep(1.0)
         for w in powers:
@@ -483,29 +455,18 @@ def main():
     finally:
         if tci:
             tci.close()
-        for r in radios:
-            try:
-                r.stop()
-                r.send("banner")
-                v = was.get(r.name, {})
-                if v.get("pwr") is not None and v["pwr"] < 99:
-                    r.send(f"set pwr {round(v['pwr'] * 10)}")
-                for k in ("freq", "mode", "agc", "att", "pre", "rfg", "sql"):
-                    if v.get(k) is not None:
-                        r.send(f"set {k} {int(v[k])}")
-                        time.sleep(0.3)
-                if v.get("atu"):
-                    r.send("set atu 1")
-                if v.get("pg") and v["pg"] != "G":
-                    r.send(f"open sentry {v['pg']}")
-                time.sleep(0.5)
-                r.close()
-            except Exception as e:  # noqa: BLE001
-                say(f"{r.name}: putting it back: {e}")
+        bench.finish(radios, snaps, report=results)     # put back, checked, both on the Sentry's page A
         with open(os.path.join(run_dir, "report.json"), "w") as f:
             json.dump(results, f, indent=1)
         say("report", os.path.join(run_dir, "report.json"))
 
 
 if __name__ == "__main__":
-    main()
+    bench.install_stop_signals(lambda: bench.conf())
+    try:
+        main()
+    except Refused as e:
+        say(f"REFUSED: {e}")
+        sys.exit(2)
+    except KeyboardInterrupt:
+        sys.exit(130)

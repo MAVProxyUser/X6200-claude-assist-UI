@@ -234,6 +234,11 @@ fi
 if wanted p25; then
     check_twice p25 sh -c "$CC -O2 -Wall -Wextra -o '$OUT/p25_test' tools/dsdfme/mbe_dvsi/p25_test.c tools/dsdfme/mbe_dvsi/mbe_dvsi.c && '$OUT/p25_test' tools/dsdfme/mbe_dvsi/p25_chip_frames.bin"
 fi
+# The bench harness against two simulated radios (tools/bench/sim_test.py: its gates, its watch, the state layer that
+# says each radio whole, proves the path and puts it back, 2026-11-22): Python's standard library, local sockets only
+if wanted bench; then
+    TIME_LIMIT=$((TIME_LIMIT > 420 ? TIME_LIMIT : 420)) check_twice bench python3 tools/bench/sim_test.py
+fi
 # The audits' reproduction harnesses, now the regression suite of their fixes (docs/audit/repro-2026-10-24/README.md):
 # Python, Node.js, SQLite, libpng and ALSA's headers, LVGL; Linux
 if [[ "$ONLY" == *" audit "* ]]; then     # named only (the header says why)

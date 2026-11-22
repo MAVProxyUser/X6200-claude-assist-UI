@@ -14,11 +14,13 @@ Batches, by the hardware they need (the hardware ones in a batch of their own, r
     core     both radios on the network, any antenna or none; receive-only sessions, nothing keyed
     rtl      an RTL-SDR on each radio's HOST port, their antennas side by side
     cable    the two radios' antenna jacks joined through >= 60 dB of pads (bench.py chain-ok radios first)
-    hackrf   the HackRF into one radio through >= 70 dB (bench.py chain-ok hackrf first)
-    gps      a Bluetooth GPS paired (btgps-ctl), under the sky
     update   a release published: the updater's check and its bundle's parts, nothing installed
+    (the HackRF's tests run from bench.py: hackrf-ft8, hackrf-iq; there is no gps batch)
 
-Every test leaves the radios as it found them (the app open, the Sentry's page, the settings it changed). Screens are
+Every test puts back the settings it changed (the app open, the receiver's settings, the bands it tuned through) and
+the suite leaves both radios on the Sentry's page A at its end, whatever page it found them on (the owner, 2026-11-22:
+"when tests finish they should always leave on screen A"); the cable batch's transmissions run in bench.py, which
+says each radio whole, proves the path first and checks what it puts back. Screens are
 compared as pictures: each pair side by side in the report, and each picture's colours counted against the Sentry
 theme's gold on black: cyan, blue or purple (the old themes' accents) is what an old look leaves behind; the warm
 gradient (the waterfall's dark orange to gold) and green status words are the Sentry's own.
@@ -32,6 +34,7 @@ import gzip
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -357,6 +360,23 @@ def t_pages(run):
         run.radio(n).send("open sentry A")
 
 
+def run_child(cmd, timeout):
+    """A bench test as a child: past timeout it gets SIGINT first, so its emergency stop and its finish() still put the
+    radios back (a plain timeout killed it outright: nothing back, the 2026-11-22 audit); 60 s later, killed"""
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.send_signal(signal.SIGINT)
+        try:
+            out, err = p.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            out, err = p.communicate()
+        err = (err or "") + f"\n(stopped after {timeout} s)"
+    return subprocess.CompletedProcess(cmd, p.returncode, out or "", err or "")
+
+
 def t_gesture(run):
     """The X6100's stand-in for the X6200's MFK inner ring: the MFK held, the main dial turned one click, let go: the
     next page, the dial not tuned, no push. Through the remote's keys and knobs, which reach the GUI as the radio's"""
@@ -377,6 +397,9 @@ def t_gesture(run):
         run.result("core", "mfk-held-dial", pg == "B" and f1 == f0,
                    f"{n}: page A -> {pg} (B wanted), the dial {f0} -> {f1} (unchanged wanted)", radio=n)
         r.send("open sentry A")
+        if f1 != f0:            # the test failed by tuning: the dial back (the 2026-11-22 audit)
+            r.send(f"set freq {f0}")
+            r.wait("the dial back", lambda: int(r.state.get("freq", 0)) == f0, 6)
 
 
 def t_web(run):
@@ -494,7 +517,7 @@ def cable(run, only):
         for tx, rx in ((run.names[0], run.names[1]), (run.names[1], run.names[0])):
             cmd = [sys.executable, "-B", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench.py"),
                    "radios-ft8", tx, rx, "--band", "20m", "--rx-alike"]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            r = run_child(cmd, 600)
             out = (r.stdout + r.stderr).strip().splitlines()
             with open(os.path.join(run.dir, f"ft8_{tx}_{rx}.txt"), "w") as f:      # the whole run, kept
                 f.write("\n".join(out) + "\n")

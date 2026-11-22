@@ -282,6 +282,16 @@ typedef struct {
                              * without TX in control); an int, not a bool: no padding for memcmp to see */
     int32_t ask;            /* a TCI client's question to transmit is on the screen (tci_ask_open): the bench answers
                              * it with the knob only while it is */
+    /* Where the radio sends and listens, and what reaches its speaker and processor: the bench checks each before a
+     * test instead of trusting it (tools/bench, 2026-11-22: a listener's base in play mode, its receiver's audio gone,
+     * went unnoticed) */
+    int32_t txf;            /* the frequency it transmits on (radio_tx_freq: split, XIT, a TX shift) */
+    int32_t split, rit, xit;
+    int32_t play;           /* the base's play mode (audio_play_mode_t): 0 the receiver to the processor */
+    int32_t heard;          /* the Sentry's LISTEN: 0 the receiver, 1 the SDR, 2 both, 3 nothing; -1 no Sentry */
+    int32_t spk, moni;      /* the speaker's level and the TX monitor's as last sent the base (-1 none yet) */
+    int32_t muted, tcim;    /* the speaker muted (any reason); a TCI client's over muting it */
+    int32_t mic;            /* the mic in use (radio_mic_sel_t: 0 built-in, 1 hand, 2 auto) */
     bool    tx, lock;
     bool    ulock;          /* the user's lock alone (LOCK), not an app's hold: the page's LOCK button */
     bool    cwrise;         /* CW's tone rises with the dial, as CW-R's (the X6200): its CW passband the other side */
@@ -298,7 +308,10 @@ typedef enum { P_FREQ, P_MODE, P_AGC, P_PRE, P_ATT, P_NB, P_NR, P_SQL, P_RFG, P_
                 * calibration (tools/bench/txcal.py) */
                P_TXIO, P_TXQO, P_TXIG, P_TXIP,
                /* the base's line-in gain, for the bench's audio-level tests (tools/bench: the 2nd harmonic) */
-               P_LINEIN } pcmd_id_t;
+               P_LINEIN,
+               /* for the bench's tests, which must know where each radio listens and sends (tools/bench, its state
+                * check): split, RIT and XIT, and what the speaker plays (the Sentry's LISTEN, for now) */
+               P_SPLIT, P_RIT, P_XIT, P_HEARD } pcmd_id_t;
 
 typedef struct {
     pcmd_id_t id;
@@ -1119,6 +1132,10 @@ static void panel_apply(void *arg) {
         case P_TXIG:   param_i_set(cfg_band_tx_iq_gain, LV_CLAMP(-32767, p->a, 32767)); break;
         case P_TXIP:   param_i_set(cfg_band_tx_iq_phase, LV_CLAMP(-32767, p->a, 32767)); break;
         case P_LINEIN: radio_set_line_in((uint8_t)LV_CLAMP(0, p->a, 36)); break;
+        case P_SPLIT:  param_i_set(cfg_band_split, p->a != 0); break;
+        case P_RIT:    param_i_set(cfg_rit, LV_CLAMP(-BOARD_RIT_MAX, p->a, BOARD_RIT_MAX)); break;
+        case P_XIT:    param_i_set(cfg_xit, LV_CLAMP(-BOARD_XIT_MAX, p->a, BOARD_XIT_MAX)); break;
+        case P_HEARD:  app_sentry_set_heard(p->a); break;
     }
 }
 
@@ -1148,6 +1165,7 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
         {"filter", P_FILTER}, {"atu", P_ATU}, {"lock", P_LOCK},
         {"txio", P_TXIO}, {"txqo", P_TXQO}, {"txig", P_TXIG}, {"txip", P_TXIP},
         {"linein", P_LINEIN},
+        {"split", P_SPLIT}, {"rit", P_RIT}, {"xit", P_XIT}, {"heard", P_HEARD},
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strcasecmp(names[i].name, name))
@@ -1209,6 +1227,17 @@ static void pstate_read(pstate_t *s) {
     s->tune_s = ext_tune_limit_s();
     s->rxo   = radio_rx_only_held();
     s->ask   = tci_ask_open();
+    s->txf   = radio_tx_freq();
+    s->split = param_i_get(cfg_band_split);
+    s->rit   = param_i_get(cfg_rit);
+    s->xit   = param_i_get(cfg_xit);
+    s->play  = (int32_t)radio_play_mode();
+    s->heard = app_sentry_page() ? app_sentry_heard() : -1;
+    s->spk   = radio_rxvol_sent();
+    s->moni  = radio_moni_sent();
+    s->muted = radio_speaker_muted();
+    s->tcim  = radio_tci_muted();
+    s->mic   = radio_get_mic();
     const char *app = main_screen_digital_app();
     memset(s->app, 0, sizeof(s->app));      /* compared whole with memcmp */
     snprintf(s->app, sizeof(s->app), "%s", app ? app : "");
@@ -1226,11 +1255,13 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "\"nb\":%d,\"nr\":%d,\"sql\":%d,\"rfg\":%d,\"vol\":%d,\"pwr\":%d.%d,\"step\":%d,\"zoom\":%d,"
              "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d,"
              "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"ask\":%d,\"txio\":%d,\"txqo\":%d,\"txig\":%d,\"txip\":%d,"
-             "\"linein\":%d,"
+             "\"linein\":%d,\"txf\":%d,\"split\":%d,\"rit\":%d,\"xit\":%d,\"play\":%d,\"heard\":%d,\"spk\":%d,"
+             "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,"
              "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
-             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->app, s->win, s->pg, s->fp);
+             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->txf, s->split,
+             s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->app, s->win, s->pg, s->fp);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */
@@ -1814,7 +1845,7 @@ static void *panel_thread(void *arg) {
     bool           have_last = false;
     uint32_t       sp_seq = 0, spots_gen = 0, plan_gen = band_plan_gen();
     uint64_t       state_ms = 0, meter_ms = 0, spots_ms = 0, ft8_ms = 0, ft8_sent_ms = 0;
-    char           line[640];      /* the state line: about 450 at most (TX calibration in it, 2026-11-20) */
+    char           line[768];      /* the state line: about 570 at most (the bench's checks in it, 2026-11-22) */
     (void)arg;
 
     while (true) {

@@ -167,6 +167,13 @@ void radio_speaker_play(bool speaker);
 /* What the base streams: the receiver, our audio to the speaker, or the hand mic and our audio */
 void radio_set_play_mode(audio_play_mode_t mode);
 audio_play_mode_t radio_play_mode(void);
+/* What radio_vol_refresh last sent the base (-1 before the first): the speaker's level (0 while muted) and the TX
+ * monitor's; whether the speaker is muted (mute, a TCI client's over, the scanner, Bluetooth, Speaker off); whether a
+ * TCI client's over mutes it. For the browser remote's state, which the bench checks. Any thread */
+int radio_rxvol_sent(void);
+int radio_moni_sent(void);
+bool radio_speaker_muted(void);
+bool radio_tci_muted(void);
 /* The base's monitor at the level in /tmp/moni_test while it is there (a test); called each half second */
 void radio_moni_test_poll(void);
 
