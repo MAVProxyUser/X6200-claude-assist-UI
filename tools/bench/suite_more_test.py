@@ -62,6 +62,22 @@ try:
 finally:
     suite_more.HERE = real
     shutil.rmtree(d, ignore_errors=True)
+# suite_proto.py's parsers: the system read, the TCI greeting
+import suite_proto  # noqa: E402
+
+kv = suite_proto.sys_parse("now=1795382681\nbat=1795382640,8.6,99\ntrace_has=settings read\ntrace_has=first frame\n"
+                           "proc=gpsd\nproc=x6100_gui\nupd={\"pending\": null}\nts=funnel=off x=1\n")
+check(kv["now"] == "1795382681" and kv["trace_has"] == ["settings read", "first frame"] and
+      kv["proc"] == ["gpsd", "x6100_gui"], "the system read: single keys as values, repeated ones as lists")
+check(kv["upd"] == '{"pending": null}' and kv["ts"] == "funnel=off x=1", "a value keeps its own = signs")
+g = ["protocol:ExpertSDR3,1.9;", "audio_samplerate:48000;", "drive:0,10;", "ready;"]
+check(suite_proto.greeted(g, "audio_samplerate") == "48000" and suite_proto.greeted(g, "drive") == "0,10" and
+      suite_proto.greeted(g, "dds") is None, "a TCI greeting's values")
+import struct  # noqa: E402
+jp = (b"\xff\xd8\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00" + bytes(9) + b"\xff\xc0" +
+      struct.pack(">HBHH", 17, 8, 400, 240) + bytes(12))
+check(suite_proto.jpeg_size(jp) == (240, 400) and suite_proto.jpeg_size(b"\xff\xd8\x00") is None,
+      "a JPEG's own size from its SOF, past its APP0")
 bad = results.count(False)
 print(f"suite_more: {len(results) - bad} of {len(results)} as they should be")
 sys.exit(1 if bad else 0)

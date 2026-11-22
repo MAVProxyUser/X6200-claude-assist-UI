@@ -17,8 +17,15 @@ stops happening"; "a comprehensive set of unit tests to cover EVERYTHING 1:1 on 
 - FOUND, to look at: the X6200's remote spectrum cannot resolve a tone inside the passband: one clean 1000 Hz TCI
   tone fills 0-2500 Hz alike, at zoom 1 or 8, at any gain (2026-11-22, scratchpad tone_shape2.py); the X6100's peaks
   (-9 dB at +-200 Hz). Its source (the base's PSD?) or its smoothing: check the X6200's own screen too.
-- FOUND, the owner's call: on the X6100 an RF gain under 100 is the base's stepped attenuator; it sits at 63 (Xiegu's
-  default) and D/E's rule ("ATT off") does not touch RF gain. Whether D and E should set RF gain 100 too.
+- DONE 2fc81863 (the owner: "they should handle uniformly in the same fashion the 6200 does"): on the X6100 a D/E choice
+  with ATT off takes RF gain to 100 (its attenuator); proven from RF gain 80 on 24 D bands and 15 E types.
+- DONE 2fc81863: x6100_daemon kept 50 run logs only at boot; a crash loop on 11-21 left 54 on each radio. Pruned after
+  every run now (the radios' copies take it at their next boot).
+- suite_proto.py (control: TCI protocol, the remote's protocol, control, screen, web guards, Funnel; system: SSH reads):
+  found the bench player taking a missing file in silence (fixed), the manual blurring rx_smeter (always) with
+  rx_channel_sensors (after rx_sensors_enable).
+- OPEN, the owner's word first: the logging tests (log, logq) would write test QSOs (Q9TST) into the radios' own day
+  log and QSO database; not run.
 - CHECKED (the owner: "selecting things in D or E should automatically properly set the permutation for ATT, PRE and
   AGC"): D's LISTEN on 15 bands and E's OPEN on all 17 types set ATT, PRE and AGC as rx_setup says, on both radios,
   read back 0.3-4 s after (they stay). The ATT seen on was left by the bench's 10 W probe (image.py --rx-att 1), not

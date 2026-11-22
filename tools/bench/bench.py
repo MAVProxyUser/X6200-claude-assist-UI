@@ -28,6 +28,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
 """
 import argparse
 import base64
+import collections
 import json
 import math
 import os
@@ -150,6 +151,7 @@ class Radio:
         self.last_msg = time.time()
         self.freqs = set()          # every dial it reported since snapshot(): the bands a test tuned it into
         self.cw = ""                # the CW decoder's text since the session began (the remote's "cw" lines)
+        self.lines = collections.deque(maxlen=600)     # every text the radio sent, with when: the suite's protocol tests
         self.r.send(f"auth {tok}")
         self.r.send("panel 1")
         self.r.send("screen 0")
@@ -195,6 +197,7 @@ class Radio:
                 return                          # a connection replaced by reconnect(): its reader stops
             k, _, rest = t.partition(" ")
             self.last_msg = time.time()        # anything at all from it: a stall is measured, not guessed
+            self.lines.append((self.last_msg, t))
             with self.lock:
                 if k == "state":
                     self.state = json.loads(rest)

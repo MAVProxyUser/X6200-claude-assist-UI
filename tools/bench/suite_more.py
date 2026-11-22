@@ -55,6 +55,8 @@ def per_radio(run, batch, test, fn, covers, want_tx=False):
                 ok, says = False, f"refused: {e}" + (f" (the radio said: {r.errs[-3:]})" if r.errs else "")
             finally:
                 bench.finish([r], {n: snap}, report=rep)
+            if ok is not None and not isinstance(ok, bool):
+                ok = bool(ok)                       # a test's "a and b and text": its truth, never the text itself
             if rep.get("not_restored"):
                 says += f" (NOT put back: {rep['not_restored'][n]})"
                 ok = False if ok else ok
@@ -66,8 +68,9 @@ def per_radio(run, batch, test, fn, covers, want_tx=False):
         run.result(batch, f"{test} {n}", ok, says, radio=n, covers=covers)
     if len(out) == 2:
         (a, (oa, sa)), (b, (ob, sb)) = out.items()
-        run.result(batch, f"{test} 1:1", oa is True and ob is True, f"{a} {'pass' if oa else 'FAIL'}, "
-                   f"{b} {'pass' if ob else 'FAIL'}", covers=covers)
+        pair = False if False in (oa, ob) else None if None in (oa, ob) else True     # a look on one: a look
+        run.result(batch, f"{test} 1:1", pair, f"{a} {'pass' if oa else 'look' if oa is None else 'FAIL'}, "
+                   f"{b} {'pass' if ob else 'look' if ob is None else 'FAIL'}", covers=covers)
     return out
 
 
@@ -149,6 +152,8 @@ def t_d_rule(run):
             if i:
                 r.send("knob mfk 1")
                 time.sleep(1.0)
+            if r.name == "x6100":
+                bench.ensure(r, {"rfg": 80})    # the rule must take it to 100, not find it there
             bench.tap(r, "F2")
             time.sleep(2.5)
             f = int(r.state.get("freq", 0))
@@ -158,6 +163,8 @@ def t_d_rule(run):
                 continue
             seen.append(f)
             want = rule_of(f, listening=True)
+            if r.name == "x6100":
+                want["rfg"] = 100           # its attenuator is its RF gain: ATT off takes it to 100 (2026-11-22)
             have = {k: int(r.state.get(k, -1)) for k in want}
             n += 1
             if have != want:
@@ -175,6 +182,8 @@ def t_e_rule(run):
             bench.tap(r, "F4")
             time.sleep(1.2)
             f0 = int(r.state.get("freq", 0))
+            if r.name == "x6100":
+                bench.ensure(r, {"rfg": 80})
             bench.tap(r, "F2")
             time.sleep(3.0)
             f, mode = int(r.state.get("freq", 0)), int(r.state.get("mode", -1))
@@ -184,6 +193,8 @@ def t_e_rule(run):
                 bench.close_apps(r)
                 continue
             want = rule_of(f, cw_or_prop=mode in (4, 5) or "Propag" in what)
+            if r.name == "x6100":
+                want["rfg"] = 100
             have = {k: int(r.state.get(k, -1)) for k in want}
             n += 1
             if have != want:
@@ -608,6 +619,81 @@ def t_safety(run, only=()):
                                              f"{'off the air' if not went else 'WENT ON THE AIR'}; unanswered, the "
                                              f"question gone {gone_s} s after the client left (its 20 s): {gone}")
     per_radio_(run, "safety", "tci-ask", tci_ask, ["tci-ask-prompt", "tci-ask-timeout"], want_tx=True)
+
+    def tci_cw_usb(r):
+        """CW text through TCI (a program on the radio: never asked) with the radio in USB, armed: refused at once"""
+        import subprocess
+        bench.ensure(r, *bench.tx_profile(F_CW, 2, bench.FIRST_PROBE_W))
+        bench.radio_tx_gate(r, run.c, bench.FIRST_PROBE_W)
+        bench.arm(r, True, mode=2)
+        subprocess.run(["scp", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_cw_tx.py"),
+                        f"root@{r.host}:/tmp/tci_cw_tx.py"], check=True)
+        out = {}
+
+        def press():
+            out["p"] = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", f"root@{r.host}",
+                                       "python3 /tmp/tci_cw_tx.py 'Q9TST' 3"], capture_output=True, text=True,
+                                      timeout=20)
+        went, w = watched(run, r, 4.0, press)
+        bench.stop_bench_programs(r)
+        time.sleep(0.5)
+        if not r.ctl_mine:
+            r.take_control()
+        bench.arm(r, False)
+        said = (out.get("p").stdout if out.get("p") else "").strip().replace("\n", " ")[-80:]
+        return not went and r.state.get("ask") == 0, f"TCI CW text in USB, armed: " + \
+            ("refused, off the air" if not went else "WENT ON THE AIR") + f", nobody asked; the sender: {said!r}"
+    per_radio_(run, "safety", "tci-cw-usb", tci_cw_usb, ["tci-cw-refused-not-cw"], want_tx=True)
+
+    def tci_key_cw(r):
+        """A TCI audio key (a program on the radio) with the radio in CW, armed: refused"""
+        import subprocess
+        bench.ensure(r, *bench.tx_profile(F_CW, 4, bench.FIRST_PROBE_W))
+        bench.radio_tx_gate(r, run.c, bench.FIRST_PROBE_W)
+        bench.arm(r, True, mode=4)
+        subprocess.run(["scp", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_tone_tx.py"),
+                        f"root@{r.host}:/tmp/tci_tone_tx.py"], check=True)
+
+        def press():
+            subprocess.Popen(["ssh", "-n", "-o", "BatchMode=yes", f"root@{r.host}",
+                              "python3 /tmp/tci_tone_tx.py '[[700, 2.0]]' 0.3 3.0 50001 0.05"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        went, w = watched(run, r, 4.0, press)
+        bench.stop_bench_programs(r)
+        time.sleep(1.0)
+        if not r.ctl_mine:
+            r.take_control()
+        bench.arm(r, False)
+        return not went, "a TCI audio key in CW, armed: " + ("refused, off the air" if not went else
+                                                              "WENT ON THE AIR")
+    per_radio_(run, "safety", "tci-key-cw", tci_key_cw, ["tci-key-refused-cw"], want_tx=True)
+
+    def ft8_no_tx(r):
+        """FT8's sending commands from a receive-only session, FT8 open: each refused, nothing keyed"""
+        bench.ensure(r, {"freq": F_TEST, "mode": 2})
+        r.send("ft8 open")
+        said = []
+        try:
+            r.wait("FT8 open", lambda: r.state.get("app") in ("FT8", "FT4", "FT2"), 10)
+
+            def press():
+                for c in ("ft8 cq", "ft8 auto", "ft8 txcall", "ft8 reply 1"):
+                    t0 = time.time()
+                    r.send(c)
+                    e = None
+                    while time.time() - t0 < 2 and not e:
+                        with r.lock:
+                            e = next((x for at, x in list(r.lines) if at >= t0 and x.startswith("err ")), None)
+                        time.sleep(0.05)
+                    said.append(f"{c}: {e!r}")
+            went, w = watched(run, r, 3.0, press)
+        finally:
+            r.send("ft8 stop")
+            r.send("ft8 close")
+        refused = all("may not transmit" in x for x in said)
+        return refused and not went and not r.ft8.get("cq") and not r.ft8.get("auto"), \
+            "; ".join(said) + ("; off the air" if not went else "; WENT ON THE AIR")
+    per_radio_(run, "safety", "ft8-no-tx-session", ft8_no_tx, ["panel-ft8-tx-refused-no-tx"])
 
     def rx_session(r):
         went, w = watched(run, r, 2.5, lambda: r.send("key PTT 1 11"))

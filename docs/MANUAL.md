@@ -9987,8 +9987,9 @@ the radio, hears it, keys it and sends CW with it.
   battery 5 W, from 50 % up on the X6100 and 62 % up on the X6200),
   `trx` (PTT; `trx:0,true,tci;` keys with the client's
   audio as the microphone), `cw_macros`, `cw_macros_stop`,
-  `cw_macros_speed` and `cw_keyer_speed` (CW, below), `rx_smeter` and `rx_channel_sensors` (the
-  S-meter in dBm, after `rx_sensors_enable:true;`), `tx_sensors` (mic level,
+  `cw_macros_speed` and `cw_keyer_speed` (CW, below), `rx_smeter` (the S-meter in dBm, ten a
+  second to every client) and `rx_channel_sensors` (the same, only after `rx_sensors_enable:true;`,
+  till `rx_sensors_enable:false;`), `tx_sensors` (mic level,
   forward power, SWR, ALC, after `tx_sensors_enable:true;`; 0 from the key
   until the radio's first reading, the SWR 1.0, never less), the RX audio
   stream (`audio_start`, in the client's format, below) and the TX audio

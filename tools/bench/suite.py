@@ -44,6 +44,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bench  # noqa: E402
 import suite_more  # noqa: E402
+import suite_proto  # noqa: E402
 
 try:
     from PIL import Image, ImageDraw
@@ -740,7 +741,10 @@ BATCHES = {
     "update": ("a release published (the updater's check on each radio; nothing installed)", update),
     # one test per feature, each radio and 1:1 (suite_more.py; the owner, 2026-11-22: "EVERYTHING needs validation")
     "rx": ("both radios on the network (receive only: every receiver setting, D's and E's rule)", suite_more.rx),
-    "control": ("both radios on the network (TCI, rigctl, every web page)", suite_more.control),
+    "control": ("both radios on the network (TCI, rigctl, every web page, the remote's protocol and guards)",
+                lambda run, only: (suite_more.control(run, only), suite_proto.control(run, only))),
+    "system": ("both radios over SSH (read only: logs, settings copy, services, sessions, update state)",
+               suite_proto.system),
     "safety": ("the cable (bench.py chain-ok radios): the transmitter's locks, 0.1 W at most", suite_more.safety),
     "paths": ("the cable: tones, the mic on G, CW, AM and FM, both ways at 0.1 W", suite_more.paths),
     "look": ("both radios on the network: every Settings tab photographed side by side, compared", suite_more.look),

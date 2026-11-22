@@ -211,7 +211,10 @@ side (`~/.config/x6x00-bench/runs/<time>-<batches>/report.md`), for a release to
     suite.py list                 # the batches and what each needs plugged in
     suite.py run core             # both radios on the network: versions, services, settings, apps, every screen
     suite.py run rtl,cable        # the hardware batches, when that hardware is on the bench
-    suite.py run rx,control       # no RF: every receiver setting, D's and E's rule, TCI, rigctl, every web page
+    suite.py run rx,control       # no RF: every receiver setting, D's and E's rule, TCI, rigctl, every web page,
+                                  # the remote's protocol, control and guards (suite_proto.py)
+    suite.py run system           # over SSH, read only: logs, DATA's fsck, the settings copy, SSH keys only,
+                                  # services, the GPU, the sessions file, the update state, the clock
     suite.py run safety,paths     # the cable at 0.1 W: the transmitter's locks; every band, tones, the mic on G,
                                   # RTTY, PSK31, CW, AM/FM, each both ways and confirmed by the other radio
     suite.py run look             # every Settings tab on both, side by side, compared pixel by pixel
@@ -223,6 +226,7 @@ EVERYTHING 1:1 on both radios"). `features.json` lists every feature the manual 
 area, radios, what it needs plugged in, how a test confirms it, the manual's heading). Each result names the features
 it covers, and each run writes `coverage.md` beside its report: by area, the features that passed, failed, or are not
 covered yet, every uncovered one listed. The batches of `suite_more.py` (`rx`, `control`, `look`, `safety`, `paths`)
+and `suite_proto.py` (`control`'s TCI protocol, the remote's own protocol, control and the screen; `system`)
 run each test on each radio through the harness's state layer (rules 9-13) and add a 1:1 result for the pair.
 Reception is confirmed by the other radio every time: its spectrum (the path proof on each band), its audio (tones),
 its decoders (CW through the remote's `cw` lines; RTTY and PSK31 made by `digimodes.py` from the radios' own encoders'

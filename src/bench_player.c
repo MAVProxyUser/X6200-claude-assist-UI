@@ -16,6 +16,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "audio.h"
 #include "radio.h"
@@ -60,6 +61,8 @@ bool bench_player_start(const char *p) {
     if (n < 16 || n >= sizeof(path) || strncmp(p, "/tmp/bench_", 11) || strcmp(p + n - 4, ".wav") || strstr(p, "..") ||
         strchr(p + 5, '/'))
         return false;                       /* /tmp/bench_NAME.wav, nothing else (no folder under /tmp) */
+    if (access(p, R_OK) != 0)
+        return false;                       /* not there: refused now, not found later by the worker in silence */
     if (radio_get_state() != RADIO_RX || atomic_exchange(&busy, true))
         return false;
     snprintf(path, sizeof(path), "%s", p);

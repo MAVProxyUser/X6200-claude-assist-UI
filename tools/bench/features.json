@@ -17905,7 +17905,7 @@
  {
   "id": "remote-play-file",
   "area": "remote",
-  "feature": "'play /tmp/bench_NAME.wav' plays a bench file on the radio's own speaker (bench_player.c, uncommitted; the acoustic mic test); 'play stop'; refused while transmitting",
+  "feature": "'play /tmp/bench_NAME.wav' plays a bench file on the radio's own speaker (bench_player.c; the acoustic mic test); 'play stop'; refused while transmitting",
   "radios": [
    "x6100",
    "x6200"

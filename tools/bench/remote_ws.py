@@ -15,12 +15,15 @@ import time
 
 
 class Remote:
-    def __init__(self, host, port=50002, timeout=10):
+    def __init__(self, host, port=50002, timeout=10, headers=None):
+        """headers: more request lines ({name: value}: an Origin, the Funnel's, a Host), for the suite's guard tests"""
         self.host = host
         self.s = socket.create_connection((host, port), timeout)
         key = base64.b64encode(os.urandom(16)).decode()
-        self.s.sendall((f"GET / HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                        f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n").encode())
+        extra = "".join(f"{k}: {v}\r\n" for k, v in (headers or {}).items())
+        hostline = "" if any(k.lower() == "host" for k in (headers or {})) else f"Host: {host}:{port}\r\n"
+        self.s.sendall((f"GET / HTTP/1.1\r\n{hostline}Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                        f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n{extra}\r\n").encode())
         got = b""
         while b"\r\n\r\n" not in got:
             d = self.s.recv(4096)
@@ -28,6 +31,7 @@ class Remote:
                 raise ConnectionError(f"{host}: the remote closed during the handshake")
             got += d
         head, self.buf = got.split(b"\r\n\r\n", 1)
+        self.status = head.split(b"\r\n", 1)[0].decode(errors="replace")
         if b" 101 " not in head.split(b"\r\n", 1)[0]:
             raise ConnectionError(f"{host}: no WebSocket: {head[:120]!r}")
         self.s.settimeout(None)
@@ -36,6 +40,11 @@ class Remote:
         # dB a bin), the last 300 with when they came: (time, centre, width, dBs). What the receiver itself takes in
         # (the radios' walkie test: the X6200's S-meter did not follow an AM signal its spectrum showed 41 dB up)
         self.spectra = collections.deque(maxlen=300)
+        self.binary = 0             # every binary frame (TCI's audio and sensor frames too), and the last one
+        self.binary_last = b""
+        # the last 64 binary frames' heads, for the suite's checks of the screen (a JPEG's own size is in its SOF,
+        # past its tables), the wide spectrum and TCI's audio: (time, length, its first 640 bytes)
+        self.frames = collections.deque(maxlen=64)
         self.alive = True
         self.wlock = threading.Lock()
         threading.Thread(target=self._reader, daemon=True).start()
@@ -71,6 +80,10 @@ class Remote:
                 data = self._exact(n)
                 if mask:
                     data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+                if op == 2:
+                    self.binary += 1
+                    self.binary_last = data
+                    self.frames.append((time.time(), len(data), data[:640]))
                 if op == 1:
                     self.texts.put(data.decode(errors="replace"))
                 elif op == 2 and len(data) > 16 and data[:2] == b"\xff\xff":
