@@ -18,6 +18,22 @@ Open:
   the second stick never enumerated. Nothing transmitted, nothing changed. To do once they are on a powered hub or
   the HOST port one at a time: ppm against the HackRF, the same weak carrier's SNR and the noise floor at the same
   gain, spurs (2 m or 70 cm, or 433 ISM, -a 0, from -x 0).
+  DONE the same night, one at a time on the HOST port (the fork's rtl_compare in the scratchpad): all three R820T,
+  serial 00000001, no TCXO. Stick 1: -88 ppm, the best on 2 m (36 dB tone over floor) and NOAA (+25 dB), image
+  rejection 35 dB, floor steady under a strong tone, 15 overload lines. Stick 2: -52 ppm, the best at 70 cm (34.5 dB
+  SNR), 48 overload lines. Stick 3: -2 ppm (as good as a TCXO), the cleanest (5 overload lines, floor steady, no
+  145.600 spur), 10 dB under stick 1 on 2 m and 20 on NOAA (antennas? over the air: swap them to tell). rtl_power's
+  gain never took: FOUND the cause in librtlsdr (below) and FIXED it in our daemon the same night.
+- RTL gain (2026-11-22, the owner: "Do this task here"): x6x00-rtlspec never took the gain a stick was opened with
+  (B's -g at every start, replug or stick switch) until it was changed. rtl-sdr-blog's sample-rate step tunes to the
+  stick's frequency, 0 after the open, so the R820T goes to direct sampling; the first real tune brings it back and
+  initialises the tuner again, its gain to its own AGC, while librtlsdr still reports the gain set. Bench X6200
+  (scratchpad rtl_gain/gaincheck.c, first.c, dgain.py): 0 dB asked before the first tune read -9.4 dBFS against
+  -48.3 once set again; the old daemon's rows -43.4 dB at 0 dB asked, fixed -74.1 from the start. FIXED in
+  tools/rtlspec/sdr_rtl.c (the last gain set again when a tune brings the tuner out of direct sampling); hot-installed
+  on both radios (b725436b). rtl_power and any program that sets its gain before its first tune have the same trap;
+  x6x00-df tunes first (right). Not done: a librtlsdr patch (the same re-apply inside _rtlsdr_set_direct_sampling)
+  would fix every program on the radio.
 - 15 m and 12 m transmit image shifts during a session (-46..-53 dBc to -29 at the same balance, a 9 % I/Q gain
   change; 10, 17, 20 m steady). The owner: "dive deeper ... find a novel solution that *works*". The heat theory and
   its warm balance were wrong and REMOVED (eab501f7); the battery-vs-adapter theory is not supported by the minute

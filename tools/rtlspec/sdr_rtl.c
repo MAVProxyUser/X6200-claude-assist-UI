@@ -33,6 +33,8 @@ static char            want_sn[64], want_loc[32], open_sn[64];     /* sdr_rtl_wa
 static pthread_mutex_t want_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static rtlsdr_dev_t *volatile dev;
+/* rtl_gain's last, INT_MIN none since the open: set again where librtlsdr set the tuner up anew (rtl_freq) */
+static int gain_tenths = INT_MIN;
 static sdr_rx_cb              rx_cb;
 static volatile int          *rx_halt;
 
@@ -237,6 +239,7 @@ static int rtl_open(char *tuner, size_t n, uint64_t *lo, uint64_t *hi) {
     fprintf(stderr, "rtlspec: RTL%d of %d (serial %s, USB %s)%s\n", at, cnt, sn, loc[0] ? loc : "?",
             wsn[0] ? ", asked for by its serial" : at != sdr_rtl_index ? ": the one asked for is not on USB" : "");
     rtlsdr_set_bias_tee(d, 0);
+    gain_tenths = INT_MIN;
     snprintf(tuner, n, "%s", tuner_name(rtlsdr_get_tuner_type(d)));
     *lo = 24000000;
     *hi = 1766000000;
@@ -250,12 +253,30 @@ static int rtl_rate(uint32_t want, uint32_t *got) {
     return 0;
 }
 
+static void rtl_gain(int tenths);
+
+/* rtl-sdr-blog tunes an R820T below 24 MHz by direct sampling, by itself, its tuner off; tuned back above, the tuner
+ * is initialised again (_rtlsdr_set_direct_sampling: tuner->init), its LNA and mixer back on their AGC, and the gain
+ * set before is gone while librtlsdr still reports it. The daemon tunes an RTL from 24 MHz up (rtl_open), but the
+ * first tune after the open is such a return: the sample rate's bandwidth step (r820t_set_bw) tunes to the frequency
+ * the stick has, 0, so direct sampling is on when the first real tune comes. The daemon sets the rate, the gain, then
+ * the frequency, and the gain again only when it changes: the gain a stick was opened with never took until it was
+ * changed (B's from the GUI's -g, at every start, replug and stick switch; AIRSPACE's top gain when it had the stick
+ * then). The bench X6200, 2026-11-22, an R820T at 145 MHz: the old daemon's rows at -43.4 dB with 0 dB asked (the
+ * tuner's own level, 49.6 dB read -43.3), -74.1 once 0 dB was asked again; fixed, -74.1 from the start. So the last
+ * gain is set again whenever a tune brings the tuner back */
 static int rtl_freq(uint64_t hz) {
-    return hz > UINT32_MAX ? -1 : rtlsdr_set_center_freq(dev, (uint32_t)hz);
+    if (hz > UINT32_MAX) return -1;
+    int ds = rtlsdr_get_direct_sampling(dev);
+    int r  = rtlsdr_set_center_freq(dev, (uint32_t)hz);
+
+    if (ds > 0 && rtlsdr_get_direct_sampling(dev) == 0 && gain_tenths != INT_MIN) rtl_gain(gain_tenths);
+    return r;
 }
 
 /* The nearest the tuner has; -1 its AGC, 999 its top */
 static void rtl_gain(int tenths) {
+    gain_tenths = tenths;
     if (tenths < 0) {
         rtlsdr_set_tuner_gain_mode(dev, 0);
         return;

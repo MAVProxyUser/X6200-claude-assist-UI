@@ -988,7 +988,11 @@ the time they show stays true (up to v0.3.12.39 they stopped while it sent).
   the stick's picture (OFF, 1 to 40): open at the level, shut half a second after falling 3 dB under it, eased in
   and out without a click; the stick's half reads SQUELCHED meanwhile. RF GAIN walks the R820T's gains one a detent;
   on a HackRF the same scale is spread over its LNA and VGA (B's 28 dB is LNA 32, VGA 24 dB; AUTO, which it lacks,
-  the same), on a bladeRF over its own gain range (AUTO its AGC).
+  the same), on a bladeRF over its own gain range (AUTO its AGC). Up to v0.3.12.44 an RTL stick did not take the
+  gain it was opened with (at every start of the radio, a replug or a switch of stick) until you changed it: it ran
+  at its tuner's own level, about as loud as its top gain (49.6 dB) and some 20 dB over B's 19.7 dB on FM, so B's
+  picture sat higher and strong stations overloaded it more. Now the gain holds from the start; the picture is that
+  much lower, as set.
 - The stick gone for a moment (the first second of a start, a replug) changes nothing: its audio is silent meanwhile,
   RECEIVER says why, and it is heard again as soon as it is back.
 - B stays as it was left when another screen is shown: band, tuning, channel and scan. Its tuning, gain, squelch
