@@ -140,6 +140,7 @@ class Radio:
         if not tok:
             raise Refused(f"{name}: no {'tx' if want_tx else 'rx'} session: bench.py provision {name} "
                           f"{'tx' if want_tx else 'rx'}")
+        self._rc, self._tok, self._want_tx = rc, tok, want_tx     # for reconnect()
         self.r = Remote(self.host, int(rc.get("port", 50002)))     # another port: the simulated radios' (sim_test.py)
         self.state, self.meter, self.txm, self.ft8, self.apps = {}, None, None, {}, None
         self.rows, self.errs, self.lock = [], [], threading.Lock()
@@ -152,7 +153,7 @@ class Radio:
         self.r.send(f"auth {tok}")
         self.r.send("panel 1")
         self.r.send("screen 0")
-        threading.Thread(target=self._read, daemon=True).start()
+        threading.Thread(target=self._read, args=(self.r,), daemon=True).start()
         t = time.time()
         while time.time() - t < 8 and (self.role is None or not self.state):
             time.sleep(0.05)
@@ -164,11 +165,34 @@ class Radio:
             raise Refused(f"{name}: the harness's session is not paired any more (role view): provision it again")
         self.may_tx = self.role[1] == "1"
 
-    def _read(self):
+    def reconnect(self):
+        """A new connection with the same session (a stalled or dropped link: the X6200's WiFi held its messages back
+        6 s and more, 2026-11-22), its state read afresh and control taken again. Refused when it does not come"""
+        try:
+            self.r.close()
+        except OSError:
+            pass
+        self.state, self.role, self.ctl_mine = {}, None, False
+        self.r = Remote(self.host, int(self._rc.get("port", 50002)))
+        self.last_msg = time.time()
+        self.r.send(f"auth {self._tok}")
+        self.r.send("panel 1")
+        self.r.send("screen 0")
+        threading.Thread(target=self._read, args=(self.r,), daemon=True).start()
+        self.wait("its state again", lambda: self.role is not None and self.state and self.role[0] != "view", 10)
+        self.take_control()
+
+    def stale(self, secs=3.0):
+        """No word from the radio for secs, or its connection gone"""
+        return not self.r.alive or time.time() - self.last_msg > secs
+
+    def _read(self, rem):
         while True:
-            t = self.r.recv()
+            t = rem.recv()
             if t is None:
                 return
+            if rem is not self.r:
+                return                          # a connection replaced by reconnect(): its reader stops
             k, _, rest = t.partition(" ")
             self.last_msg = time.time()        # anything at all from it: a stall is measured, not guessed
             with self.lock:
@@ -414,7 +438,8 @@ def band_memories(r):
 
 def snapshot(r):
     """What finish() puts back: every key a test may change, as the radio reads it now, and each band's own memories
-    ("_bands"); from here the radio's dials are noted (Radio.freqs)"""
+    ("_bands"); from here the radio's dials are noted (Radio.freqs). Refused for a radio a test left not as found"""
+    left_wrong_gate(r)
     state_ready(r)
     snap = {k: _value(r, k) for k in RESTORED}
     snap["_bands"] = band_memories(r)
@@ -531,38 +556,117 @@ def close_apps(r):
     return False
 
 
-def finish(radios, snaps, keep=(), report=None, before=None):
-    """The end of every test, passed or not: each radio stopped, its banner off, its transmitter locked, put back as
-    snaps found it (all but keep), on the Sentry's page A last, and the harness's control released. before ({name:
-    [want, ...]}): put back first, what snaps cannot hold (a mode's own filter: the edges are kept per mode, and the
-    home mode's are all a snapshot sees). What did not come back is said and kept in report["not_restored"]"""
-    for r in radios:
-        bad = {}
+FINISH_TRIES = 3                # finish()'s attempts at a radio before it is recorded as left wrong
+LEFT_WRONG = "left_wrong.json"  # the radios a test could not put back: no test touches them till bench.py restore
+
+
+def stop_bench_programs(r):
+    """The harness's own programs on the radio ended: a TCI sender holds control while it is connected (the X6200's
+    dial stayed on 15 MHz under one, 2026-11-22), a recording runs on. BusyBox has no pkill"""
+    if r.simulated:
+        return
+    try:
+        ssh(r.host, "kill $(cat /tmp/tci_tone_tx.pid 2>/dev/null) 2>/dev/null; for p in $(ps | grep -E "
+                    "'tci_(tone|cw)_tx|parecord' | grep -v grep | awk '{print $1}'); do kill $p; done; true", timeout=20)
+    except (Refused, subprocess.SubprocessError) as e:
+        say(f"{r.name}: its bench programs not stopped ({e})")
+
+
+def put_back(r, snap, keep=(), before=None):
+    """One attempt at r: its link renewed if it stalled, the bench's programs stopped, control, apps closed, the
+    transmitter locked, then everything put back and read back, the Sentry's page A. What is not back, returned"""
+    bad = {}
+    if r.stale():
+        r.reconnect()
+    r.stop()
+    stop_bench_programs(r)
+    if not r.ctl_mine:
+        r.take_control()                # an emergency stop's session, a TCI client, the radio's operator had it
+    r.send("banner")
+    if not close_apps(r):
+        bad["app"] = r.state.get("app") or r.state.get("win")
+    if r.state.get("rxo") == 0 and r.may_tx:
         try:
-            r.stop()
-            if not r.ctl_mine:
-                r.take_control()            # an emergency stop's session released it
-            r.send("banner")
-            if not close_apps(r):
-                bad["app"] = r.state.get("app") or r.state.get("win")
-            if r.state.get("rxo") == 0 and r.may_tx:
-                try:
-                    arm(r, False)
-                except Refused as e:
-                    bad["armed"] = str(e)
-            for want in (before or {}).get(r.name, []):
-                bad.update(restore(r, want))
-            snap = {k: v for k, v in snaps.get(r.name, {}).items() if k not in keep}
-            if "freq" not in keep:
-                bad.update(restore_bands(r, snap.get("_bands"), snap.get("freq") or int(r.state.get("freq", 0))))
-            bad.update(restore(r, snap))       # its home band last: the dial, then that band's own settings
-            open_page(r, "A")
-        except (Refused, OSError) as e:
-            bad["error"] = str(e)
-            say(f"{r.name}: putting it back: {e}")
+            arm(r, False)
+        except Refused as e:
+            bad["armed"] = str(e)
+    for want in before or []:
+        bad.update(restore(r, want))
+    snap = {k: v for k, v in snap.items() if k not in keep}
+    if "freq" not in keep:
+        bad.update(restore_bands(r, snap.get("_bands"), snap.get("freq") or int(r.state.get("freq", 0))))
+    bad.update(restore(r, snap))           # its home band last: the dial, then that band's own settings
+    open_page(r, "A")
+    return bad
+
+
+def finish(radios, snaps, keep=(), report=None, before=None):
+    """The end of every test, passed or not: each radio stopped, its transmitter locked, put back as snaps found it
+    (all but keep), read back, on the Sentry's page A, the harness's control released. before ({name: [want, ...]}):
+    put back first what snaps cannot hold (a mode's own filter). A radio NEVER stays not as found (the owner,
+    2026-11-22: "The X6200 was left on the wrong frequency ... fix the harness. this should NEVER happen"): up to
+    FINISH_TRIES attempts, each renewing a stalled link, stopping the bench's own programs, taking control again; what
+    is still not back then is recorded (LEFT_WRONG) and every test refuses that radio till bench.py restore puts it
+    back. What did not come back is said and kept in report["not_restored"]"""
+    for r in radios:
+        snap, bad = snaps.get(r.name, {}), {}
+        for attempt in range(FINISH_TRIES):
+            try:
+                if attempt:
+                    r.reconnect()
+                bad = put_back(r, snap, keep, (before or {}).get(r.name, []))
+            except (Refused, OSError) as e:
+                bad = {"error": str(e)}
+            if not bad:
+                break
+            say(f"{r.name}: not all put back (try {attempt + 1} of {FINISH_TRIES}): {bad}")
+            time.sleep(2.0)
+        if bad:
+            say(f"{r.name}: LEFT NOT AS FOUND after {FINISH_TRIES} tries: {bad}. No test touches it till "
+                f"bench.py restore puts it back")
+            doc = load_json(os.path.join(STATE, LEFT_WRONG), {})
+            doc[r.name] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "bad": bad,
+                           "snap": {k: v for k, v in snap.items() if k not in keep}}
+            save_json(os.path.join(STATE, LEFT_WRONG), doc)
         if report is not None and bad:
             report.setdefault("not_restored", {})[r.name] = bad
         r.close()
+
+
+def left_wrong_gate(r):
+    """No test on a radio a test could not put back (finish() recorded it): bench.py restore first"""
+    doc = load_json(os.path.join(STATE, LEFT_WRONG), {})
+    if r.name in doc:
+        raise Refused(f"{r.name} was left not as found ({doc[r.name]['at']}: {doc[r.name]['bad']}): "
+                      f"bench.py restore puts it back first")
+
+
+def cmd_restore(c, a):
+    """The radios a test left not as found, put back from the snapshot taken before that test, read back"""
+    doc = load_json(os.path.join(STATE, LEFT_WRONG), {})
+    if not doc:
+        say("no radio was left not as found")
+        return
+    for name, ent in list(doc.items()):
+        toks = load_json(os.path.join(STATE, "tokens.json"), {}).get(name, {})
+        r = Radio(name, c["radios"][name], "tx" in toks)
+        r.take_control()
+        bad = {}
+        for _ in range(FINISH_TRIES):
+            try:
+                bad = put_back(r, ent["snap"])
+            except (Refused, OSError) as e:
+                bad = {"error": str(e)}
+            if not bad:
+                break
+            time.sleep(2.0)
+            r.reconnect()
+        r.close()
+        if bad:
+            raise Refused(f"{name}: still not as found: {bad}")
+        doc.pop(name)
+        save_json(os.path.join(STATE, LEFT_WRONG), doc)
+        say(f"{name}: put back as it was before the test of {ent['at']}")
 
 
 def spectrum_level(r, hz, t0, t1, half=3000):
@@ -1153,6 +1257,8 @@ def run_hackrf_ft8(c, args):
         radio.send("ft8 close")             # the app opened for the test closed, refused or not (the X6200: the Sentry)
         time.sleep(0.5)
         finish([radio], snaps, report=report)       # its dial (never put back before) and bands back, on page A
+    if report.get("not_restored"):
+        raise Refused(f"NOT put back: {report['not_restored']}")
     if watch and watch.why:
         raise Refused(watch.why)
     if not found:
@@ -1213,6 +1319,8 @@ def run_hackrf_iq(c, args):
         if hk and hk.poll() is None:
             hk.kill()
         finish([radio], snaps, report=report, before=before)
+    if report.get("not_restored"):
+        raise Refused(f"NOT put back: {report['not_restored']}")
     if during:
         out, _ = during.communicate(timeout=120)
         say("beside it:\n" + out.rstrip())
@@ -1349,6 +1457,8 @@ def run_radios_ft8(c, args):
         finish(radios, snaps, report=report)        # put back, checked, both on the Sentry's page A
         for r in radios:
             clean_log(r.host)
+    if report.get("not_restored"):
+        raise Refused(f"NOT put back: {report['not_restored']}")
     if watch.why:
         raise Refused(watch.why)
     say(f"PASS: {a.name} -> {b.name} -> {a.name} at {FIRST_PROBE_W} W through {total} dB")
@@ -1558,6 +1668,8 @@ def run_radios_walkie(c, args):
         with open(out, "w") as f:
             json.dump({"overs": results, "report": report}, f, indent=1)
         say(f"the overs: {out}")
+    if report.get("not_restored"):
+        raise Refused(f"NOT put back: {report['not_restored']}")
     bad = [x for x in results if not x["heard"]]
     still = [x for x in results if x["heard"] and not x["meter_rose"]]
     if still:
@@ -1739,6 +1851,7 @@ def main():
     s.add_argument("words")
     s = sub.add_parser("preflight"); s.add_argument("profile", choices=["hackrf", "radios"])
     sub.add_parser("stop")
+    sub.add_parser("restore", help="the radios a test left not as found, put back from its snapshot")
     s = sub.add_parser("hackrf-ft8")
     s.add_argument("--band", default="20m", choices=FT8_DIAL); s.add_argument("--x", type=int, default=None)
     s.add_argument("--text", default="CQ Q9TST FN00"); s.add_argument("--audio", type=int, default=1500)
@@ -1770,7 +1883,7 @@ def main():
         if a.cmd in ("hackrf-ft8", "hackrf-iq") and a.x is None:
             a.x = c["limits"]["hackrf_x"]
         {"provision": cmd_provision, "status": cmd_status, "chain-ok": cmd_chain_ok, "power-ok": cmd_power_ok,
-         "preflight": cmd_preflight,
+         "preflight": cmd_preflight, "restore": cmd_restore,
          "stop": lambda c, a: emergency_stop(c), "hackrf-ft8": run_hackrf_ft8, "hackrf-iq": run_hackrf_iq, "radios-ft8": run_radios_ft8,
          "radios-walkie": run_radios_walkie,
          "testcall": cmd_testcall, "cleanlog": lambda c, a: clean_log(c["radios"][a.name]["host"])}[a.cmd](c, a)

@@ -54,11 +54,15 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
 7. **Everything logged.** Each HackRF and radio transmission and each stop goes to `tx_log.jsonl`.
 8. **Stop on demand.** Ctrl-C or `bench.py stop` is the emergency stop (rule 5's actions); then the test's own end
    still puts the radios back (rule 12). A second Ctrl-C leaves at once.
-9. **The radios put back, on page A.** A test closes the apps it opened and releases control; a callsign set for
-   the tests is put back with `testcall NAME restore`. Everything it changed is put back and read back
-   (`bench.finish`): the settings, each band it tuned through, a mode's own filter; what did not come back is said
-   and in the report (`not_restored`). Both radios end on the Sentry's page A, whatever page they were on (the
-   owner, 2026-11-22: "when tests finish they should always leave on screen A").
+9. **The radios put back, on page A: NEVER left otherwise.** A test closes the apps it opened and releases
+   control; a callsign set for the tests is put back with `testcall NAME restore`. Everything it changed is put back
+   and read back (`bench.finish`): the settings, each band it tuned through, a mode's own filter. Both radios end on
+   the Sentry's page A, whatever page they were on (the owner, 2026-11-22: "when tests finish they should always leave
+   on screen A"). Up to three attempts, each renewing a stalled or dropped link, stopping the bench's own programs on
+   the radio (a TCI client holds control while connected), taking control again and closing apps; a radio still not
+   as found is recorded (`left_wrong.json`), its test fails, and every later test refuses it until `bench.py restore`
+   puts it back from the snapshot (the owner, 2026-11-22: "The X6200 was left on the wrong frequency ... fix the
+   harness. this should NEVER happen").
 10. **Every radio said whole, never taken as found.** (The owner, 2026-11-22: "very often during testing you do
    things like forget the preamp, forget to sync channels, forget you muted an audio source, or had attenuation on
    ... ensure this stops happening".) A test names the whole state each radio needs (`bench.rx_profile`,

@@ -53,6 +53,7 @@ class SimRadio:
         self.tx_until, self.heard_dbm, self.ids, self.got = 0.0, None, 0, []
         self.what = None    # what its FT8 app sends ("cq", "reply"); none for a radio keyed by its PTT alone
         self.first_freq = 14074000
+        self.refused_once = False
         self.srv = socket.socket()
         self.srv.bind(("127.0.0.1", 0))
         self.srv.listen(2)
@@ -78,6 +79,7 @@ class SimRadio:
         c.sendall(f"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                   f"Sec-WebSocket-Accept: {acc}\r\n\r\n".encode())
         self.conn = c
+        self.silent = False                 # a new connection: a stalled link ("stall") comes back with it
         buf = req.split(b"\r\n\r\n", 1)[1]
         try:
             while True:
@@ -146,6 +148,9 @@ class SimRadio:
                 self.send("err att: the radio is busy, try again")
             elif k == "freq" and self.fault == "norestore" and int(v) == self.first_freq and self.state["freq"] != v:
                 self.send("err freq: locked (LOCK, or an app holds the frequency)")
+            elif k == "freq" and self.fault == "flakyrestore" and int(v) == self.first_freq and not self.refused_once:
+                self.refused_once = True        # the first time only: a busy radio, then it takes it
+                self.send("err freq: the radio is busy, try again")
             else:
                 self.state[k] = int(v)
             if k == "heard" and self.fault != "play":     # "play": a base held in play mode by something else
@@ -361,6 +366,41 @@ def main():
     bad = bench.restore(h, snap)
     check("freq" in bad, f"a dial that will not go back is said, not passed over ({bad})")
     h.close()
+    # ---- a radio NEVER left not as found (the owner, 2026-11-22: "this should NEVER happen") ----
+    sim, h = one_radio("flakyrestore")
+    snap = bench.snapshot(h)
+    bench.ensure(h, {"freq": 14200000})
+    rep = {}
+    bench.finish([h], {"simC": snap}, report=rep)
+    left = bench.load_json(os.path.join(bench.STATE, bench.LEFT_WRONG), {})
+    check(sim.state["freq"] == 14074000 and not rep.get("not_restored") and not left,
+          f"a radio busy at the first try: finish tries again, put back, nothing recorded ({rep or 'clean'})")
+    sim, h = one_radio("stall")
+    snap = bench.snapshot(h)
+    bench.ensure(h, {"freq": 14200000, "att": 0})
+    sim.silent = True                       # its link stalls as the test ends
+    rep = {}
+    bench.finish([h], {"simC": snap}, report=rep)
+    check(sim.state["freq"] == 14074000 and sim.state["att"] == 1 and not rep.get("not_restored"),
+          f"its link stalled at the end: finish connects again and puts it back ({rep or 'clean'})")
+    sim, h = one_radio("norestore")
+    snap = bench.snapshot(h)
+    bench.ensure(h, {"freq": 14200000})
+    rep = {}
+    bench.finish([h], {"simC": snap}, report=rep)
+    left = bench.load_json(os.path.join(bench.STATE, bench.LEFT_WRONG), {})
+    check("simC" in left and rep.get("not_restored"), f"a radio that will not go back after {bench.FINISH_TRIES} "
+          f"tries: recorded as left not as found ({list(left)})")
+    h2 = bench.Radio("simC", {"host": "127.0.0.1", "port": sim.port}, True)
+    h2.take_control()
+    why = refused(lambda: bench.snapshot(h2))
+    check(why is not None and "left not as found" in why, f"and the next test refuses it ({why})")
+    h2.close()
+    sim.fault = None                        # its trouble gone: bench.py restore puts it back from the snapshot
+    bench.cmd_restore(bench.conf(), None)
+    left = bench.load_json(os.path.join(bench.STATE, bench.LEFT_WRONG), {})
+    check(not left and sim.state["freq"] == 14074000 and sim.state["pg"] == "A",
+          f"bench.py restore: put back as the test found it, on page A, the record gone ({left or 'clean'})")
 
     why, a, b, _ = run_case(None)
     check(why is None, f"a CQ and its reply between two radios pass ({why or 'passed'})")

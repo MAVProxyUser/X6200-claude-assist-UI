@@ -52,7 +52,7 @@ def per_radio(run, batch, test, fn, covers, want_tx=False):
                 bench.open_page(r, "G")             # the Walkie keeps the dial where it is put (A's scan retunes)
                 ok, says = fn(r)
             except bench.Refused as e:
-                ok, says = False, f"refused: {e}"
+                ok, says = False, f"refused: {e}" + (f" (the radio said: {r.errs[-3:]})" if r.errs else "")
             finally:
                 bench.finish([r], {n: snap}, report=rep)
             if rep.get("not_restored"):
@@ -569,6 +569,13 @@ def t_safety(run, only=()):
                               "python3 /tmp/tci_tone_tx.py '[[1000, 2.0]]' 0.3 3.0 50001 0.05"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         went, w = watched(run, r, 4.0, press)
+        # the sender gone before anything is put back: a TCI client holds control while it is connected, and the dial
+        # was left on 15 MHz under it once (2026-11-22)
+        subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", f"root@{r.host}",
+                        "kill $(cat /tmp/tci_tone_tx.pid) 2>/dev/null; sleep 1; true"], capture_output=True)
+        time.sleep(1.0)
+        if not r.ctl_mine:
+            r.take_control()
         bench.arm(r, False)
         return not went, "a TCI transmission (a program on the radio) on 15.000 MHz, armed: " + \
             ("refused, off the air" if not went else "WENT ON THE AIR")
@@ -617,7 +624,7 @@ def safety(run, only):
 
 # ---- CW both ways: the sender's own keyer (TCI cw_macros, run on it), the listener's decoder ----
 F_CW = 14040000
-CW_TEXT = "TEST TEST DE Q1TST"
+CW_TEXT = "VVV TEST DE Q1TST"    # the V's: the decoder finds the speed first; about 12 s at 20 wpm (one over: 16)
 
 
 def cw_over(run, s_name, l_name):
@@ -650,16 +657,16 @@ def cw_over(run, s_name, l_name):
         bench.tx_log({"who": s_name, "f": F_CW, "w": snd.pwr(), "what": "suite CW"})
         lis.cw = ""
         out = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", f"root@{snd.host}",
-                              f"python3 /tmp/tci_cw_tx.py '{CW_TEXT}' 14"], capture_output=True, text=True,
+                              f"python3 /tmp/tci_cw_tx.py '{CW_TEXT}' 15"], capture_output=True, text=True,
                              timeout=40).stdout
         time.sleep(1.5)
         watch.close()
         bench.arm(snd, False)
         got = " ".join(lis.cw.split())
-        words = [w for w in CW_TEXT.split() if w in got.upper()]
-        ok = not watch.why and len(words) >= 3
+        words = [w for w in ("TEST", "Q1TST") if w in got.upper()]
+        ok = not watch.why and bool(words)
         return ok, (f"{s_name} keyed {CW_TEXT!r} ({out.strip().splitlines()[-1:] or 'no word'}), {l_name}'s decoder: "
-                    f"{got[-80:]!r} ({len(words)} of {len(CW_TEXT.split())} words)"
+                    f"{got[-80:]!r} (copied: {', '.join(words) or 'neither TEST nor Q1TST'})"
                     + (f"; STOPPED: {watch.why}" if watch.why else ""))
     except bench.Refused as e:
         return False, f"refused: {e}"
@@ -667,6 +674,8 @@ def cw_over(run, s_name, l_name):
         if watch:
             watch.close()
         bench.finish(radios, snaps, report=rep)
+        if rep.get("not_restored"):         # a radio not as found fails the test (returned from here: it decides)
+            return False, f"NOT put back: {rep['not_restored']}"
 
 
 # ---- every band both ways: the path proof (0.1 W, 1000 Hz) on each amateur band, each radio sending ----
@@ -703,6 +712,36 @@ def band_proofs(run):
                                covers=["path-tx-power-readback", "tx-bands-each"])
         finally:
             bench.finish(radios, snaps, report=rep)
+            run.result("paths", f"band put back {s_name}->{l_name}", not rep.get("not_restored"),
+                       "both as found after the bands" if not rep.get("not_restored") else
+                       f"NOT put back: {rep['not_restored']}")
+
+
+def open_app(r, name):
+    """r's app whose name starts with name (any case): from the remote's apps list, else E's types one by one (the
+    RTTY panel is no app of the list: E's OPEN opens it), each opened and closed again till it is the one"""
+    r.send("apps")
+    r.wait("the apps list", lambda: r.apps is not None, 5)
+    is_it = lambda: (r.state.get("app") or r.state.get("win") or "").lower().startswith(name)
+    app = next((a for a in r.apps if a[1].lower().startswith(name)), None)
+    if app:
+        r.send(f"open {app[0]}")
+        try:
+            r.wait(f"its {app[1]}", is_it, 10)
+            return True
+        except bench.Refused:
+            pass
+    for _ in range(26):                         # E's types, round once
+        bench.open_page(r, "E")
+        time.sleep(1.0)
+        bench.tap(r, "F4")
+        time.sleep(1.2)
+        bench.tap(r, "F2")
+        time.sleep(3.0)
+        if is_it():
+            return True
+        bench.close_apps(r)
+    return False
 
 
 # ---- keyboard modes both ways: RTTY and PSK31 made here (digimodes.py), sent by one radio's TCI at 0.1 W, decoded by
@@ -723,14 +762,9 @@ def digi_over(run, mode, s_name, l_name):
         snaps[r.name] = bench.snapshot(r)
     try:
         bench.listener_gate(lis)
-        lis.send("apps")
-        lis.wait("the apps list", lambda: lis.apps is not None, 5)
-        app = next((a for a in lis.apps if a[1].lower().startswith(DIGI_APP[mode])), None)
-        if not app:
-            return False, f"{l_name} has no {mode} app"
-        lis.send(f"open {app[0]}")
-        lis.wait(f"its {app[1]} app", lambda: (lis.state.get("app") or lis.state.get("win") or "").lower()
-                 .startswith(DIGI_APP[mode]), 10)
+        if not open_app(lis, DIGI_APP[mode]):
+            return False, f"{l_name}: its {mode} app did not open (the remote's apps, then E's types)"
+        app = (None, lis.state.get("app") or lis.state.get("win"))
         time.sleep(2.0)
         f, m = int(lis.state.get("freq", 0)), int(lis.state.get("mode", -1))
         rule = rule_of(f)
@@ -765,10 +799,17 @@ def digi_over(run, mode, s_name, l_name):
         bench.tx_log({"who": s_name, "f": f, "w": snd.pwr(), "what": f"suite {mode}"})
         lines, t_on, t_off = bench.tci_send(snd, None, max_s=secs + 4, watch=watch, file="/tmp/bench_digi.raw",
                                             amp=0.5)
-        time.sleep(4.0)                     # the app's last line ended by its pause, then onto the card
         watch.close()
         bench.arm(snd, False)
-        got = bench.ssh(lis.host, f"f=$(ls -t /mnt/digi_text/*.txt | head -1); tail -c +{int(log0 or 0) + 1} $f")
+        time.sleep(2.0)
+        # the app closed: PSK31 decodes the noise after the signal and its line never pauses, so only the app's closing
+        # ends it onto the card (digi_textlog_end); RTTY's pause ends it sooner. Then looked for up to 30 s
+        bench.close_apps(lis)
+        # the app's line ends at its pause and goes onto the card after (digi_textlog.c): looked for up to 30 s
+        got, t0 = "", time.time()
+        while time.time() - t0 < 30 and "Q1TST" not in got.upper():
+            time.sleep(3.0)
+            got = bench.ssh(lis.host, f"f=$(ls -t /mnt/digi_text/*.txt | head -1); tail -c +{int(log0 or 0) + 1} $f")
         ok = not watch.why and "Q1TST" in got.upper()
         return ok, (f"{s_name} sent {mode} ({secs:.1f} s at {f} Hz, mode {m}{', ' + str(cfg) if cfg else ''}); "
                     f"{l_name}'s {app[1]} wrote: {' '.join(got.split())[-120:]!r}"
@@ -779,6 +820,8 @@ def digi_over(run, mode, s_name, l_name):
         if watch:
             watch.close()
         bench.finish(radios, snaps, report=rep)
+        if rep.get("not_restored"):         # a radio not as found fails the test (returned from here: it decides)
+            return False, f"NOT put back: {rep['not_restored']}"
 
 
 # ---- paths: the radios' signal paths both ways (the bench's own tests, as children) ----

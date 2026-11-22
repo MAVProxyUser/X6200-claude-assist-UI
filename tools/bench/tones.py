@@ -456,6 +456,8 @@ def main():
         if tci:
             tci.close()
         bench.finish(radios, snaps, report=results)     # put back, checked, both on the Sentry's page A
+        if results.get("not_restored"):        # a radio not as found: the run fails, whatever it measured
+            say(f"NOT put back: {results['not_restored']}")
         with open(os.path.join(run_dir, "report.json"), "w") as f:
             json.dump(results, f, indent=1)
         say("report", os.path.join(run_dir, "report.json"))
@@ -465,6 +467,9 @@ if __name__ == "__main__":
     bench.install_stop_signals(lambda: bench.conf())
     try:
         main()
+        if bench.load_json(os.path.join(bench.STATE, bench.LEFT_WRONG), {}):
+            say("a radio is recorded as left not as found: bench.py restore")
+            sys.exit(3)
     except Refused as e:
         say(f"REFUSED: {e}")
         sys.exit(2)
