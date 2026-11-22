@@ -11,6 +11,13 @@ approved that day.
 against git: 32 commits that day, v0.3.12.37-.40 released). Open first; then what changed state; the done ones last.
 
 Open:
+- 2026-11-22 00:00 the owner: "on the X6200 I just connected 2 RTLSDR dongles, can you tell me which performs better?
+  you can use the hackrf to test". BLOCKED on the hub: the X6200 sees only the Genesys 4-port hub (05e3:0610, the bad
+  one); the first stick (RTL0, serial 00000001, R820T) came up twice on its port 2 and each time it streamed the
+  controller logged "ep3 RX three-strikes error" and the whole hub dropped, then the kernel gave up on all four ports;
+  the second stick never enumerated. Nothing transmitted, nothing changed. To do once they are on a powered hub or
+  the HOST port one at a time: ppm against the HackRF, the same weak carrier's SNR and the noise floor at the same
+  gain, spurs (2 m or 70 cm, or 433 ISM, -a 0, from -x 0).
 - 15 m and 12 m transmit image shifts during a session (-46..-53 dBc to -29 at the same balance, a 9 % I/Q gain
   change; 10, 17, 20 m steady). The owner: "dive deeper ... find a novel solution that *works*". The heat theory and
   its warm balance were wrong and REMOVED (eab501f7); the battery-vs-adapter theory is not supported by the minute
@@ -125,9 +132,25 @@ Open:
   V1.1.9 base starts a TCI over HOT: 0.4 W, then 0.9-1.0 W in the first second at a 0.1 W setting (Xiegu's ALC loop
   raises its gain through the pause; gcfix5's hold fixed it), and the bench's watch kills the over at ~2.6 s ("1.0 W
   on the air, 0.1 W asked"): that was the "audio stops after 2.5 s" and the re-hold (the bench's own disarm). The
-  apps' player does not overshoot: its drive starts from the learned level and climbs. To do: the X6100's TCI audio
-  started low and brought up as the player's (tx_hold on an ALC base, from the apps' learned level), then 0.1 W and
-  1 W passes through the watch.
+  apps' player does not overshoot: its drive starts from the learned level and climbs.
+  FIXED 2026-11-22 (the owner: "Yes, ramp it"; src/tx_hold.c on a base with ALC): a TCI over on the X6100 starts at
+  TCI's own learned level (params tci_tx_level_alc; the apps' level, tx_player_level_1w, until it has one), the codec
+  taking it (AIF1 DA0, back to the playback volume after) and the samples at -20 dBFS, the first 1.5 s faded in from
+  6 dB under, then the apps' ALC rule. Why it works: Xiegu's loop is an AGC on the audio (tools/base_update/README.md),
+  so the start of an over goes out over the setting by as far as the loop had come down; at -20 dBFS with the codec
+  at 0 dB that was 36 dB (its ALC 9.9), at the apps' level a few. Bench, tones.py x6100 x6200 through 80 dB, USB-D:
+  0.1 W: before, 0.6-1.0 W spikes at every tone start, then 0.0 W at ALC 9.9, the X6200's audio no higher than its
+  -45 dBFS floor, the watch stopping the over; now the meter at the setting, ALC median 1.3-1.6, every tone
+  300-2900 Hz found at -18..-20 dBFS (25 dB over the floor), offset -7.53 Hz, 2nd harmonic -46..-80 dBc. 1 W (never
+  reached before: the 0.1 W probe was stopped at 0.9 W): at most 1.0 W, 0.9-1.0 W held, all tones at -14..-15 dBFS.
+  FT8 over the X6100's TCI (scratchpad ft8_tci.py: "CQ Q1TST" by tci_tone_tx.py at the slot), the X6200's FT8 app
+  decoding: 4 of 4 (0.1 W twice, 1 W twice, meter median 0.9 W and max 1.0 at 1 W). The learned level settled at
+  -44.4 dBFS for 1 W; the apps' -37.48 dB untouched. tools/txlevel models Xiegu's loop (its gain's climb in a pause
+  and its 0.13 s fall): the old level 36 dB over gives the hot start, the new one none (52 of 52); tools/tci checks
+  the codec, the level and the fade. Left: every over on the factory base reads 0.3-0.4 W and ALC 9.5 for about
+  half a second at the key, whatever the audio (at 1 W too, under the steady 0.9 W, while the TCI audio is still
+  faded 6 dB under); the X6200's audio shows a 100 ms blip 15 dB under the signal there: Xiegu's loop sending its
+  own noise at the key (the README), not the audio. Not worked on.
   (1) FOUND the same evening: not the audio. ft8_lib decodes that recording ("CQ Q1TST EN80", SNR 8, DT +0.1, 1319
   Hz); jt9 decodes nothing from it, nor from ft8_lib's own perfect synthesis of "CQ Q1TST EN80" (it does decode
   "CQ N0CALL"). WSJT-X's chkcall: "Real calls don't start with Q, but we'll allow the placeholder callsign QU1RK":

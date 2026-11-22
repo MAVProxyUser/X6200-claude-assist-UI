@@ -419,7 +419,8 @@ def main():
             f"{float(np.median(pw)) if pw else None} W, ALC median {float(np.median([t[3] for t in txlog])) if txlog else None}"
             f"{', OVER POWER ' + str(res['over_power_w']) + ' W (logged)' if res['over_power_w'] else ''}")
         for t in res["tones"]:
-            say(f"   {t['tone']:5d} Hz -> {t['f']} Hz ({t['err_hz']:+} Hz)  {t['dbfs']} dBFS  "
+            say(f"   {t['tone']:5d} Hz -> {t['f']} Hz ({'none' if t['err_hz'] is None else format(t['err_hz'], '+')} Hz)  "
+                f"{t['dbfs']} dBFS  "
                 f"H2 {t['h2_db']} H3 {t['h3_db']}  spectrum {t.get('spec_quiet_db')} -> {t.get('spec_db')} dB")
         time.sleep(1.5)
         return res

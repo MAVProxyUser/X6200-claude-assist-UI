@@ -903,7 +903,7 @@ def wsjtx_open():
     # Keyed as WSJT-X keys, in the digu its Mode Data/Pkt set (#17), every TX_CHRONO answered
     assert st["mode"] == "digu", st["mode"]
     ws.text("trx:0,true,tci;")
-    collect(1.2)
+    collect(2.6)                                    # past the X6100's 1.5 s fade in (tx_hold.h), a second of it after
     assert st["trx"] is True, "WSJT-X: TCI failed to set ptt"
     tx["keyed"] = False
     ws.text("trx:0,false;")
@@ -920,14 +920,35 @@ def wsjtx_open():
         want = tx["frames"] * 44100 / 48000
         print(f"wsjtx TX played: {len(out)} samples at 44.1 kHz for {tx['frames']} pairs at 48 kHz ({want:.0f})")
         assert abs(len(out) - want) < 3, (len(out), want)
-        # the level: WSJT-X's 0.5 of full scale brought to the X6100's TCI TX peak (tci_server.c tx_level_norm:
-        # 3277, -20 dBFS: the processor-to-base hop's 2nd harmonic 44 dB under there, 33 at 0.3, 2026-11-20). The
-        # peak is the interpolated frame's highest sample, the tone's own peak sample, while the tone comes out
-        # under the linear interpolation's sinc^2 at 1.5 kHz (-0.03 dB): 0.9974 of it (simulated); beside it, that
-        # interpolation's own products
-        rest = tone_check("wsjtx TX, the left channel played", [v / 32768 for v in out[2000:2000 + 29400]], 1500,
-                          44100, 3277 / 32768 * 0.9974)
+        # the level (tx_hold.h): an X6100 with no TCI level of its own yet starts at the apps' level for the
+        # setting (the stub's tx_player_level_1w, -55.82 dBFS for 1 W, the factory base's: plus 10 log10 of the
+        # power), the codec set to it plus TX_HOLD_HEAD_DB (20 dB, in its 0.75 dB steps) and the samples carrying
+        # the rest, about 20 dB under full scale, WSJT-X's 0.5 brought there after the first 1.5 s's fade in (from
+        # 6 dB under). Before 2026-11-21 it was brought to -20 dBFS with the codec at 0 dB, 36 dB over the apps: the
+        # factory base started each over hot (0.9-1.0 W at 0.1 W). The codec back to the playback volume (0 dB here)
+        # after the over. The peak is the interpolated frame's highest sample, the tone's own peak sample, while the
+        # tone comes out under the linear interpolation's sinc^2 at 1.5 kHz (-0.03 dB): 0.9974 of it (simulated);
+        # beside it, that interpolation's own products
+        with open(PLAYED + ".codec") as f:
+            codec = [tuple(float(v) for v in l.split()) for l in f if l.strip()]
+        assert len(codec) == 2 and codec[1][0] == 0.0, f"the codec set at the key and back after it: {codec}"
+        (codec_db, w) = codec[0]
+        total = -55.82 + 10 * math.log10(max(w, 0.1))
+        assert abs(codec_db - (total + 20)) <= 0.375 + 1e-6, (codec_db, total)
+        print(f"wsjtx TX: codec {codec_db:.2f} dB at {w:.1f} W, the samples' peak {total - codec_db:.2f} dBFS, "
+              f"{total:.2f} dBFS in all")
+        level = 10 ** ((total - codec_db) / 20)
+        assert len(out) >= 72000 + 29400, f"{len(out)} samples: the over too short for the fade in and a tone after"
+        rest = tone_check("wsjtx TX after the fade in, the left channel played",
+                          [v / 32768 for v in out[72000:72000 + 29400]], 1500, 44100, level * 0.9974)
         assert rest < 10 ** (-50 / 20)
+
+        # the fade in: its first 50 ms about 6 dB under (5.9 at their end), 0.75 s in 3 dB, rising all the way
+        def peak(a, b):
+            return max(abs(v) for v in out[a:b]) / 32768 / (level * 0.9974)
+        first, mid = 20 * math.log10(peak(0, 2205)), 20 * math.log10(peak(32000, 34205))
+        print(f"wsjtx TX fade in: the first 50 ms {first:+.2f} dB, 0.75 s in {mid:+.2f} dB")
+        assert -6.2 < first < -5.5 and -3.3 < mid < -2.7, (first, mid)
     ws.text("audio_stop:0;")
     st["power"] = None
     ws.text("stop;")                                # rig power off: the radio stays on

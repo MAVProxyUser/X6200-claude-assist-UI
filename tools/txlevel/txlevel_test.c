@@ -2,7 +2,8 @@
  *  SPDX-License-Identifier: LGPL-2.1-or-later
  *
  *  OpenX6X00 - host test of the digital apps' TX level on the X6200 (src/tx_player.c, src/tx_level.c, #126 #123 #16),
- *  and an X6100's with XARA's keys (#120); see the Makefile.
+ *  and an X6100's with XARA's keys (#120); TCI audio through the same loop (src/tx_hold.c) on the X6200 and on the
+ *  X6100, Xiegu's own base modelled with its ALC loop (scenario_t.factory); see the Makefile.
  *
  *  The base: a model X6200 behind the real tx_player.c and tx_level.c. What it is driven with is the audio played, the
  *  samples' gain and the codec's (the X6200's AIF1 DA0: -120 to +24 dB in 0.75 dB steps, its output cut at full
@@ -112,6 +113,13 @@ typedef struct {
     float       free_w;     /* TCI audio: the base ignores its setting, the drive alone makes the power, this much at
                              * the default's drive, as the square of the audio (-20 dBFS gave 1.1 W at a 0.1 W setting),
                              * reach_w the most; 0 the knee and the setting above */
+    bool        factory;    /* Xiegu's own X6100 base (V1.1.9, its loop: tools/base_update/README.md): no HW_CAP_TX_LEVEL,
+                             * its knee knee_db at 1 W and 10 log10 of the setting from there (the apps' base gain), and
+                             * over the knee its ALC loop on the audio, as fact_loop below: in a pause its gain climbs
+                             * to the top (half a dB a 1.28 ms block), with sound it comes down to hold the setting,
+                             * 0.01 of the error a block (0.128 s): the first sound after a pause goes out over the
+                             * setting by what the drive is over the knee, for a fifth of a second. The ALC reads how
+                             * far the gain is down, alc_db a dB */
 } scenario_t;
 
 static const scenario_t *sc;
@@ -123,6 +131,9 @@ static struct {
     float    codec_db;      /* the codec's playback level */
     float    drive_db;      /* the last audio's level, dB from the default's */
     bool     clipped;       /* the codec's output went over full scale */
+    float    loop_db;       /* Xiegu's loop (factory): its gain, dB from its top (0, where it starts: after a pause) */
+    float    out_w;         /* its power now, and the most since the last 50 ms tick */
+    float    tick_top_w;
 } base;
 
 /* One transmission as the meters saw it */
@@ -197,7 +208,7 @@ void radio_set_pwr(float w) {
 }
 
 uint32_t radio_caps(void) {
-    return sc->alc_db > 0.0f ? HW_CAP_TX_LEVEL : HW_CAP_TX_LEVEL | HW_CAP_TX_NO_ALC;
+    return sc->factory ? 0 : sc->alc_db > 0.0f ? HW_CAP_TX_LEVEL : HW_CAP_TX_LEVEL | HW_CAP_TX_NO_ALC;
 }
 
 unsigned radio_band_stops(void) {
@@ -230,19 +241,45 @@ void audio_gain_db_transition(int16_t *buf, size_t n, float g1, float g2, int16_
 #define TONE_AMP    (32767.0f * 0.8f)
 #define DEFAULT_RMS (TONE_AMP / sqrtf(2.0f) * powf(10.0f, -9.4f / 20.0f))
 
-/* The drive of the last 3.2 s, a 50 ms tick each, for readings that come late */
+/* The drive of the last 3.2 s, a 50 ms tick each, for readings that come late; Xiegu's loop's power and gain too */
 #define DRIVE_HIST 64
 
-static float    drive_hist[DRIVE_HIST];
+static float    drive_hist[DRIVE_HIST], loop_w_hist[DRIVE_HIST], loop_db_hist[DRIVE_HIST];
 static unsigned drive_ticks;
+
+/* Xiegu's loop (factory) on n samples of audio at the codec's output, sum their energy: its gain moved as a base block
+ * of 1.28 ms moves it, scaled to the time they take; the power after it, set times 10^(over the knee / 10), the
+ * setting's top no more than the drive gives */
+#define FACT_BLOCK_S  (128.0f / 100000.0f)
+static void fact_loop(double sum, size_t n) {
+    float set   = base.pwr > 0.0f ? base.pwr : setting;
+    float knee  = sc->knee_db + 10.0f * log10f(set);
+    float drive = 10.0f * log10f((float)(sum / n) / (DEFAULT_RMS * DEFAULT_RMS) + 1e-12f);
+    float over  = drive - knee;                     /* where it would go out, the gain at its top */
+    float k     = (n / (float)AUDIO_PLAY_RATE) / FACT_BLOCK_S;  /* base blocks in these samples */
+    float err   = -(over + base.loop_db);           /* the setting less where it goes out: + while short */
+
+    if (err > 0.0f)
+        base.loop_db += fminf(0.5f * k, 0.01f * k * err);   /* up, half a dB a block at most */
+    else
+        base.loop_db += fmaxf(err, 0.01f * k * err);        /* down, 0.01 of the error a block */
+    base.loop_db = fminf(0.0f, fmaxf(-60.0f, base.loop_db));
+    float out = over + base.loop_db;
+    base.out_w = set * powf(10.0f, out / 10.0f);
+    if (sc->reach_w > 0.0f && base.out_w > sc->reach_w) base.out_w = sc->reach_w;
+    base.tick_top_w = fmaxf(base.tick_top_w, base.out_w);
+}
 
 /* One reading of the base: what it puts out for the drive, after the key, at the band's top */
 static void base_reading(void) {
     float s     = (atomic_load(&virt_ns) - base.key_ns) / 1e9f;
     float set   = base.pwr > 0.0f ? base.pwr : setting;
-    float drive = drive_hist[(drive_ticks - 1 - (unsigned)lrintf(sc->lag_s / 0.05f)) % DRIVE_HIST];
-    float p     = drive >= sc->knee_db ? set : set * powf(10.0f, (drive - sc->knee_db) / 10.0f);
+    unsigned at    = (drive_ticks - 1 - (unsigned)lrintf(sc->lag_s / 0.05f)) % DRIVE_HIST;
+    float    drive = drive_hist[at];
+    float    knee  = sc->knee_db;
+    float    p     = drive >= knee ? set : set * powf(10.0f, (drive - knee) / 10.0f);
 
+    if (sc->factory) p = loop_w_hist[at];           /* Xiegu's loop's, the top of that tick (the meter's peak) */
     if (sc->free_w > 0.0f) p = sc->free_w * powf(10.0f, drive / 10.0f);
     if (sc->reach_w > 0.0f && p > sc->reach_w) p = sc->reach_w;
     if (sc->ramp_w_s > 0.0f) p = fminf(p, floorf(s * sc->ramp_w_s * 10.0f) / 10.0f);
@@ -251,7 +288,8 @@ static void base_reading(void) {
     p += sc->noise_w * (2.0f * rnd01() - 1.0f);
     reading_pwr = p > 0.0f ? floorf(p * 10.0f + 1e-4f) / 10.0f : 0.0f;
     reading_alc = sc->alc_share > 0.0f && rnd01() < sc->alc_share ? sc->alc : 0.0f;
-    if (sc->alc_db > 0.0f) reading_alc = fminf(10.0f, fmaxf(reading_alc, (drive - sc->knee_db) * sc->alc_db));
+    if (sc->alc_db > 0.0f)
+        reading_alc = fminf(10.0f, fmaxf(reading_alc, (sc->factory ? -loop_db_hist[at] : drive - knee) * sc->alc_db));
     reading_id++;
 
     if (s >= 2.0f && tx.at2 < 0.0f) tx.at2 = reading_pwr;
@@ -282,7 +320,7 @@ void tx_info_set_length(float s) {
 int audio_play(int16_t *buf, size_t n) {
     static uint64_t carry_ns;
     float           k = powf(10.0f, base.codec_db / 20.0f);
-    double          sum = 0.0;
+    double          sum = 0.0, part = 0.0;
 
     for (size_t i = 0; i < n; i++) {
         float v = buf[i] * k;
@@ -292,6 +330,13 @@ int audio_play(int16_t *buf, size_t n) {
             base.clipped = tx.clipped = true;
         }
         sum += (double)v * v;
+        part += (double)v * v;
+        /* Xiegu's loop a block of 128 samples at a time (2.9 ms at 44.1 kHz: two of its own) */
+        if (sc->factory && base.modem && ((i + 1) % 128 == 0 || i + 1 == n)) {
+            fact_loop(part, (i % 128) + 1);
+            tx.top_w = fmaxf(tx.top_w, base.out_w);
+            part = 0.0;
+        }
     }
     base.drive_db = 10.0f * log10f((float)(sum / n) / (DEFAULT_RMS * DEFAULT_RMS) + 1e-12f);
     tx.top_drive  = fmaxf(tx.top_drive, base.drive_db);
@@ -302,6 +347,9 @@ int audio_play(int16_t *buf, size_t n) {
     while (carry_ns >= 50000000ULL) {
         carry_ns -= 50000000ULL;
         atomic_fetch_add(&virt_ns, 50000000ULL);
+        loop_w_hist[drive_ticks % DRIVE_HIST]  = base.tick_top_w;
+        loop_db_hist[drive_ticks % DRIVE_HIST] = base.loop_db;
+        base.tick_top_w = base.out_w;
         drive_hist[drive_ticks++ % DRIVE_HIST] = base.drive_db;
         if (base.modem && ++ticks % (unsigned)(sc->read_every > 0 ? sc->read_every : 1) == 0) base_reading();
         if (base.modem && stop_at_s > 0.0f && (atomic_load(&virt_ns) - base.key_ns) / 1e9f >= stop_at_s) {
@@ -331,6 +379,7 @@ static int16_t idkey[AUDIO_PLAY_RATE * 4 + ID_SAMPLES];
 static void send(void) {
     tx = (typeof(tx)){.at2 = -1.0f, .min = 99.0f, .top_drive = -99.0f};
     base.drive_db = -99.0f;
+    base.loop_db  = 0.0f;       /* Xiegu's loop at its top after the pause (factory) */
     for (int i = 0; i < DRIVE_HIST; i++) drive_hist[i] = -99.0f;
     if (sc->quiet_s > 0.0f) {
         uint32_t quiet = (uint32_t)(sc->quiet_s * AUDIO_PLAY_RATE);
@@ -442,6 +491,7 @@ static void send_tci(float client_dbfs, size_t frame) {
 
     tx = (typeof(tx)){.at2 = -1.0f, .min = 99.0f, .top_drive = -99.0f};
     base.drive_db = -99.0f;
+    base.loop_db  = 0.0f;       /* Xiegu's loop at its top after the pause (factory) */
     for (int i = 0; i < DRIVE_HIST; i++) drive_hist[i] = -99.0f;
     tx_hold_begin(&h, setting, tci_level);
     radio_set_modem(true);
@@ -460,6 +510,8 @@ static void send_tci(float client_dbfs, size_t frame) {
 typedef struct {
     float top_w;            /* the most put out, all transmissions */
     float top_w_after1;     /* the same from the second on */
+    int   codec_left;       /* transmissions after which the codec was not back at the playback volume */
+    int   clipped;          /* transmissions whose audio went over the codec's full scale */
     int   over_txs;         /* transmissions that went over the setting by more than tx_level lets by (1.25 + 0.1 W) */
     int   short_txs;        /* transmissions whose last 3 s read under 90 % of the setting */
     float last_end;         /* the last transmission's last 3 s, read */
@@ -489,6 +541,8 @@ static tci_result_t run_tci(const scenario_t *s, float client_dbfs, size_t frame
         r.short_txs += last < 0.9f * s->pwr;
         r.last_end   = last;
         r.drive_top  = fmaxf(r.drive_top, tx.top_drive);
+        r.codec_left += base.codec_db != params.play_gain_db_f.x;
+        r.clipped    += tx.clipped;
         if (verbose && (i < 4 || i == s->txs - 1))
             printf("      tx %2d: level %6.1f -> %6.1f dBFS for 1 W, at most %.2f W, power 2 s in %.1f W, last 3 s "
                    "%.2f W\n", i + 1, before, tci_level, tx.top_w, tx.at2, last);
@@ -748,15 +802,70 @@ int main(int argc, char **argv) {
     check(t9.over_txs == 0 && t9.short_txs <= 2, "%s: at most %.2f W (%d over), %d short", noisy.name, t9.top_w,
           t9.over_txs, t9.short_txs);
 
-    /* An X6100 (its ALC follows the drive, the base holds the setting): TCI audio as the client sent it */
+    /* TCI audio on an X6100 (tx_hold.c, a base with ALC): from the apps' level, the codec taking it, the ALC rule.
+     * Up to 2026-11-21 it went out at -20 dBFS with the codec at 0 dB, 36 dB over the apps on the bench X6100's
+     * factory base, which started each over at 0.9-1.0 W for a 0.1 W setting */
+    printf("TCI audio on an X6100, through the drive loop from the apps' level (tx_hold.c)\n");
+    /* Xiegu's base: its knee where the apps learn about -37.5 dB (the bench X6100's -37.48: its ALC 1 at 1.7 dB over
+     * the knee), from 5 dB under */
+    static const scenario_t fx_apps = {.name = "Xiegu's X6100 base (V1.1.9), FT8 from the apps at 1 W", .pwr = 1.0f,
+                                       .knee_db = -46.0f, .start_db = -42.0f, .txs = 20, .alc_db = 0.6f,
+                                       .factory = true, .lag_s = 0.5f};
+    r = run(&fx_apps, verbose);
+    float apps = r.level_end;
+    check(apps >= -38.5f && apps <= -36.0f && r.short_txs <= 2, "%s: from -42 dB the level %.1f dB, where its ALC "
+          "reads 1 (-37.3), %d short", fx_apps.name, apps, r.short_txs);
+
+    /* The model against the bench: a TCI level 36 dB over the apps' (as -20 dBFS at 0 dB was) at 0.1 W */
+    scenario_t fx_hot = fx_apps;
+    fx_hot.name     = "TCI at 0.1 W, its level 36 dB over the apps' (as before 2026-11-21)";
+    fx_hot.pwr      = 0.1f;
+    fx_hot.start_db = tx_player_level_1w() + 36.0f;
+    fx_hot.txs      = 1;
+    tci_result_t t10 = run_tci(&fx_hot, -6.0f, 1882, verbose);
+    check(t10.top_w >= 0.9f, "%s: %.2f W at the start, as the bench's 0.9-1.0 W", fx_hot.name, t10.top_w);
+
+    /* From the apps' level (no TCI level yet): no hot start, at the setting, a level of its own, the apps' kept */
+    scenario_t fx01 = fx_apps;
+    fx01.name     = "TCI at 0.1 W, no level of its own yet";
+    fx01.pwr      = 0.1f;
+    fx01.start_db = TX_HOLD_UNSET;
+    fx01.txs      = 6;
+    tci_result_t t11 = run_tci(&fx01, -6.0f, 1882, verbose);
+    check(t11.over_txs == 0 && t11.top_w <= 0.2f && t11.short_txs <= 1, "%s, WSJT-X at -6 dBFS: at most %.2f W (%d "
+          "over), %d short", fx01.name, t11.top_w, t11.over_txs, t11.short_txs);
+    check(t11.level_end < 0.0f && fabsf(t11.level_end - tx_player_level_1w()) <= 3.0f
+          && params.ft8_output_gain_offset.x == apps, "%s: a level of its own, %.1f dBFS for 1 W (the apps' %.1f), "
+          "the apps' left at %.1f dB", fx01.name, t11.level_end, tx_player_level_1w(), params.ft8_output_gain_offset.x);
+    check(t11.codec_left == 0 && t11.clipped == 0, "%s: the codec back at the playback volume after each (%d not), "
+          "nothing clipped (%d)", fx01.name, t11.codec_left, t11.clipped);
+    tci_result_t t12 = run_tci(&fx01, 0.0f, 480, verbose);
+    check(t12.over_txs == 0 && fabsf(t12.level_end - t11.level_end) < 0.5f, "%s, the client at full scale in frames "
+          "of 480: at most %.2f W (%d over), the level %.1f as from -6 dBFS (%.1f)", fx01.name, t12.top_w,
+          t12.over_txs, t12.level_end, t11.level_end);
+
+    scenario_t fx1 = fx01;
+    fx1.name = "TCI at 1 W, no level of its own yet";
+    fx1.pwr  = 1.0f;
+    tci_result_t t13 = run_tci(&fx1, -6.0f, 1882, verbose);
+    check(t13.over_txs == 0 && t13.short_txs <= 1 && t13.last_end >= 0.9f, "%s: at most %.2f W (%d over), %d short, "
+          "the last at %.2f W", fx1.name, t13.top_w, t13.over_txs, t13.short_txs, t13.last_end);
+
+    /* A quiet client (WSJT-X's slider low): raised up to 12 dB, never over where it would be from a loud one */
+    tci_result_t t14 = run_tci(&fx1, -26.0f, 1882, verbose);
+    check(t14.over_txs == 0 && t14.drive_top <= t13.drive_top + 0.1f && t14.last_end >= 0.9f, "%s, the client at "
+          "-26 dBFS: at most %.2f W (%d over), driven at most %.1f dB (%.1f from -6 dBFS), the last at %.2f W",
+          fx1.name, t14.top_w, t14.over_txs, t14.drive_top, t13.drive_top, t14.last_end);
+
+    /* An X6100 from rev 3 (the base sets the power: one level at any power), its ALC 0.6 a dB over the knee */
     scenario_t x61 = x6100;
-    x61.name = "TCI on an X6100";
-    x61.start_db = TX_HOLD_FIRST;
-    x61.txs = 2;
-    tci_result_t t10 = run_tci(&x61, -20.0f, 1882, verbose);
-    check(fabsf(t10.drive_top - CLIENT_DRIVE(-20.0f)) < 0.05f && t10.level_end == TX_HOLD_FIRST, "%s: driven at "
-          "%.2f dB, the client's own %.2f, nothing learned (%.1f)", x61.name, t10.drive_top, CLIENT_DRIVE(-20.0f),
-          t10.level_end);
+    x61.name     = "TCI on an X6100 whose base sets the power, 5 W, no level of its own yet";
+    x61.start_db = TX_HOLD_UNSET;
+    x61.txs      = 6;
+    params.ft8_output_gain_offset.x = -4.0f;    /* where the apps' ALC reads about 1 there */
+    tci_result_t t15 = run_tci(&x61, -6.0f, 1882, verbose);
+    check(t15.over_txs == 0 && t15.short_txs <= 1 && t15.codec_left == 0, "%s: at most %.2f W (%d over), %d short, "
+          "the codec back after each (%d not)", x61.name, t15.top_w, t15.over_txs, t15.short_txs, t15.codec_left);
 
     printf("TXLEVEL %s: %d of %d cases\n", good == cases ? "OK" : "FAILED", good, cases);
     return good == cases ? 0 : 1;

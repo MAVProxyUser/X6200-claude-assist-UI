@@ -272,6 +272,11 @@ bool audio_play_lowlat_begin(void) {
     const char *path = getenv("TCI_TEST_PLAYED");
     played   = 0;
     played_f = path ? fopen(path, "wb") : NULL;
+    if (path) {
+        char name[512];
+        snprintf(name, sizeof(name), "%s.codec", path);
+        remove(name);   /* this transmission's codec levels from here (tx_hold_begin sets it after this) */
+    }
     return true;
 }
 void audio_play_lowlat_end(void) {
@@ -362,7 +367,44 @@ int main(int argc, char **argv) {
 }
 #endif
 
-/* ---- the settings: TCI audio's learned peak on a base without ALC (tx_hold.h); this radio has an ALC ---- */
+/* ---- the settings: TCI audio's learned level (tx_hold.h); this radio, an X6100, has an ALC: none yet, its over
+ * starts at the apps' level (tx_player_level_1w, below) ---- */
 #include "params/params.h"
-params_t params = {.tci_tx_level = {.x = -23.0f}};
+params_t params = {.tci_tx_level = {.x = 1.0f}, .play_gain_db_f = {.x = 0.0f}};
 void params_float_set(params_float_t *p, float x) { p->x = x; }
+
+/* ---- the drive: the apps' level for 1 W as the bench X6100's (factory V1.1.9, its learned -37.48 dB:
+ * -1.94 - 16.4 - 37.48), the gain the GUI's audio.c applies, no readings from the base ---- */
+float tx_player_level_1w(void) { return -55.82f; }
+void audio_gain_db(int16_t *buf, size_t n, float g, int16_t *out) {
+    float k = powf(10.0f, g / 20.0f);
+    for (size_t i = 0; i < n; i++) out[i] = (int16_t)lrintf(fmaxf(-32767.0f, fminf(32767.0f, buf[i] * k)));
+}
+void audio_gain_db_transition(int16_t *buf, size_t n, float g1, float g2, int16_t *out) {
+    for (size_t i = 0; i < n; i++) {
+        float k = powf(10.0f, (g1 + (g2 - g1) * i / n) / 20.0f);
+        out[i] = (int16_t)lrintf(fmaxf(-32767.0f, fminf(32767.0f, buf[i] * k)));
+    }
+}
+bool tx_info_refresh(uint8_t *seen, float *alc, float *pwr, float *swr) {
+    (void)seen, (void)alc, (void)pwr, (void)swr;
+    return false;
+}
+/* The X6100's AIF1 DA0 (-120 to +24 dB in 0.75 dB steps): each level set, with the power setting then, a line of
+ * TCI_TEST_PLAYED.codec for the client test (the file new at each transmission's audio_play_lowlat_begin) */
+float audio_set_play_vol(float db) {
+    float       d    = roundf((db > 24.0f ? 24.0f : db < -120.0f ? -120.0f : db) / 0.75f) * 0.75f;
+    const char *path = getenv("TCI_TEST_PLAYED");
+    char        name[512];
+
+    if (path) {
+        snprintf(name, sizeof(name), "%s.codec", path);
+        FILE *f = fopen(name, "a");
+        if (f) {
+            fprintf(f, "%.2f %.2f\n", d, pwr.v);
+            fclose(f);
+        }
+    }
+    fprintf(stderr, "[stub] codec %.2f dB\n", d);
+    return d;
+}

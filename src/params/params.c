@@ -120,8 +120,15 @@ params_t params = {
 #else
     .ft8_output_gain_offset = { .x = 0.0f,      .name = "ft8_output_gain_offset" },
 #endif
+#ifdef BOARD_X6200
     /* TCI audio's peak for 1 W, dBFS, on a base whose ALC does not hold the power (tx_hold.h TX_HOLD_FIRST) */
     .tci_tx_level           = { .x = -23.0f,    .name = "tci_tx_level" },
+#else
+    /* TCI audio's level for 1 W, dBFS at the codec's output, on the X6100's base with ALC (tx_hold.h); 1.0 is
+     * TX_HOLD_UNSET: none yet, a TCI over starts at the apps' level. Its own name: "tci_tx_level" on an X6100 was
+     * learned by a trial build that started 20 dB hot (2026-11-21), and no release used it there */
+    .tci_tx_level           = { .x = 1.0f,      .name = "tci_tx_level_alc" },
+#endif
     .ft8_cq_modifier        = { .x = "",        .name = "ft8_cq_modifier"},
     .sstv_denoise           = { .x = true,      .name = "sstv_denoise" },
     .sstv_reply_rx          = { .x = true,      .name = "sstv_reply_rx" },

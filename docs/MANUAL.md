@@ -266,15 +266,34 @@ The rest, left as it is unless you have a reason:
 - A band never calibrated has no IQ offsets or IQ balance (0): before
   v0.3.12.41 it took the values of the band you came from.
 - **TCI transmit level** (X6100): what a TCI client (WSJT-X, JTDX, a
-  browser) sends is brought to 20 dB under full scale before it goes to the
-  base (raised up to 12 dB for a quiet client, lowered for a loud one, the
-  gain set once per transmission so FT8 and voice do not pump). The audio's
-  hop from the processor to the base adds a 2nd harmonic that grows with the
-  level: a client at half scale went out with a copy at twice the audio
-  frequency only 28 dB under the signal (at 0.3 of full scale 33 dB, more
-  at full scale); levelled, 43-46 dB under whatever the client sends. The
-  base's power control makes the set power from that level (at the very top
-  of a weak supply it can cost a few tenths of a dB).
+  browser) sends goes to the base at the level the radio's own digital apps
+  use, not as the client sent it, and the radio finds the right level
+  itself as it does for its apps. A TCI transmission starts where the last
+  one ended (the first one ever starts at the apps' level), fades in over
+  its first 1.5 s from 6 dB under, then climbs while the ALC reads under 1,
+  holds once it shows, and comes down a little when it reads over 3. The
+  level found is TCI's own, so a voice through the browser's microphone
+  does not move the level FT8 starts at. The client's audio is raised up to
+  12 dB if it is quiet and lowered if it is loud, its gain set once per
+  transmission so FT8 and voice do not pump. Within that the client's Pwr
+  slider makes no difference.
+  Why: up to v0.3.12.43 the client's audio went to the base at 20 dB under
+  full scale, 36 dB louder than the apps send. Xiegu's base holds the power
+  with a loop on the audio. In a pause the loop turns its gain up, and with
+  sound it turns it down within about a fifth of a second, so the start of
+  every over went out hot: 0.9-1.0 W in the first second with PWR at
+  0.1 W, before the loop brought it down. At the apps' level the loop has
+  only a few dB to come down, and the fade in lets it follow. On our bench
+  X6100 (factory V1.1.9, into a second radio through 80 dB): before, the
+  meter jumped to 0.6-1.0 W at the start of each tone and the other radio
+  heard almost nothing; now it reads the setting at 0.1 W and at 1 W, and FT8
+  sent over TCI was decoded 4 times out of 4. A reading of 0.3-0.4 W for
+  half a second at each key-down remains: it comes from the base itself,
+  whatever the audio, and is short and weak on the air.
+  The audio's hop from the processor to the base also adds a 2nd harmonic
+  that grows with the level: a client at half scale went out with a copy at
+  twice the audio frequency only 28 dB under the signal. At 20 dB under full
+  scale it was 43-46 dB under; at the apps' level it is well under that.
 - **The calibration belongs to its radio.** The IQ offsets and IQ balance
   are that radio's own errors, so the radio keeps the fingerprint of the
   processor they were made on (`x6x00-fingerprint`: the processor's chip ID,
@@ -10068,7 +10087,11 @@ the radio, hears it, keys it and sends CW with it.
     sends TCI audio (`trx:0,true,tci;`), so with it off the radio is keyed
     with silence.
   - The transmit level is their Pwr slider; set it so the radio's ALC shows
-    little or none, as with a sound card. On the X6200 the radio sets the
+    little or none, as with a sound card. On the X6100 the radio sets the
+    level itself: it starts at its own apps' level and follows the ALC, as
+    described under **TCI transmit level** in
+    [Setting up the transmitter](#setting-up-the-transmitter), and the slider only needs to
+    be above 32 dB under full scale. On the X6200 the radio sets the
     level itself, from its power setting (PWR): its base has no ALC that
     holds the setting, so the audio as sent would make the power, and a
     client at half its slider went out at 1.1 W with PWR at 0.1 W. The

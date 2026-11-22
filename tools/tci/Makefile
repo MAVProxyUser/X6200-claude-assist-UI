@@ -19,7 +19,7 @@ ANSWER  ?= $(CONF).answer
 ALLOWED ?= $(CONF).allowed
 CFLAGS := -std=gnu11 -Wall -Wextra -O1 -g -pthread -I stub_include -DTCI_CONF='"$(CONF)"' -DTCI_ALLOWED='"$(ALLOWED)"'
 COPIED := tci_server.c tci_server.h tci_audio.c tci_audio.h tci_ws.c tci_ws.h board.h radio_types.h control_owner.c control_owner.h \
-          remote_sessions.h tci_ask.h cw_encoder.h cw_beacon.h tx_level.c tx_level.h tx_hold.c tx_hold.h
+          remote_sessions.h tci_ask.h cw_encoder.h cw_beacon.h tx_level.c tx_level.h tx_hold.c tx_hold.h tx_player.h
 MORSE  := cw_decoder/morse_code.c cw_decoder/morse_code.h
 # KEYED: what the stub's keyer was given, each text on a line, for the client test to read
 KEYED   ?= $(CONF).keyed
@@ -60,9 +60,9 @@ syntax: build/.copied
 	    build/cw_decoder/morse_code.c build/tx_level.c build/tx_hold.c
 
 test: audio_test own_test tci_host
-	rm -f $(REVOKED) $(ASK) $(ANSWER) $(KEYED); $(ENV) ./tci_host & echo $$! > .pid; sleep 0.5; $(ENV) python3 -I tci_client_test.py; r=$$?; kill `cat .pid`; rm -f .pid $(REVOKED) $(ASK) $(ANSWER) $(ALLOWED) $(KEYED); exit $$r
+	rm -f $(REVOKED) $(ASK) $(ANSWER) $(KEYED); $(ENV) ./tci_host & echo $$! > .pid; sleep 0.5; $(ENV) python3 -I tci_client_test.py; r=$$?; kill `cat .pid`; rm -f .pid $(REVOKED) $(ASK) $(ANSWER) $(ALLOWED) $(KEYED) $(PLAYED).codec; exit $$r
 
 clean:
-	rm -rf tci_host tci_audio_test tci_own_test .pid build played.raw
+	rm -rf tci_host tci_audio_test tci_own_test .pid build played.raw played.raw.codec
 
 .PHONY: all syntax audio_test own_test test clean

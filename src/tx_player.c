@@ -314,11 +314,25 @@ bool tx_player_stream(tx_fill_fn_t fill, void *fill_ctx, int32_t offset_hz, floa
     return !stopped;
 }
 
+/* The apps' base gain: on a base that sets the power itself, at any power; on the OEM X6100 base, for 1 W */
+#define BASE_GAIN_LEVEL_DB  (-9.4f)
+#define BASE_GAIN_1W_DB     (-16.4f)
+/* The apps' waveforms' peak, 0.8 of full scale (gfsk.c, tune_tx.c, rtty.c), dBFS */
+#define APPS_PEAK_DBFS      (-1.938f)
+
 float tx_player_base_gain_offset(void) {
     /* A base that sets the power itself (the X6100 from rev 3 on, the X6200, whose stock GUI
      * plays at one level too) takes the audio at one level; the OEM X6100 base scales it, to the
      * power this transmission goes out at */
-    if (radio_caps() & HW_CAP_TX_LEVEL) return -9.4f;
+    if (radio_caps() & HW_CAP_TX_LEVEL) return BASE_GAIN_LEVEL_DB;
 
-    return -16.4f + 10.0f * log10f(tx_pwr());
+    return BASE_GAIN_1W_DB + 10.0f * log10f(tx_pwr());
+}
+
+float tx_player_level_1w(void) {
+    float base = radio_caps() & HW_CAP_TX_LEVEL ? BASE_GAIN_LEVEL_DB : BASE_GAIN_1W_DB;
+    float kept = LV_MAX(params.ft8_output_gain_offset.x, LEARNED_MIN_DB);
+
+    /* as tx_player_stream makes its whole gain: the base's and the learned, the whole at most TOTAL_TOP_DB */
+    return APPS_PEAK_DBFS + base + LV_MIN(kept, TOTAL_TOP_DB - base);
 }

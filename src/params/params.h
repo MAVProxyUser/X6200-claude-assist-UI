@@ -218,7 +218,7 @@ typedef struct {
 
     // FT8 gain offset for different radios/bands/modes
     params_float_t      ft8_output_gain_offset;
-    params_float_t      tci_tx_level;       /* tx_hold.h: TCI audio's peak for 1 W, dBFS, on a base without ALC (X6200) */
+    params_float_t      tci_tx_level;       /* tx_hold.h: TCI audio's level for 1 W, dBFS (X6200, X6100) */
 
     /* Long press actions */
 

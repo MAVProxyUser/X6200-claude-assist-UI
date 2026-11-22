@@ -33,6 +33,11 @@ typedef size_t (*tx_fill_fn_t)(int16_t *buf, size_t n, void *ctx);
 
 float tx_player_base_gain_offset(void);   /* dB to start with: base firmware and power set */
 
+/* The level the apps' audio goes out at for 1 W (on a base that sets the power itself, at any power): their
+ * waveforms' peak through the whole gain they would play with now, the learned level's too, in dBFS at the codec's
+ * output. A TCI client's audio on a base with ALC starts there until it has a level of its own (tx_hold.h) */
+float tx_player_level_1w(void);
+
 /* An app's own TX power for what it sends next (WSPR's, a TUNE's), in W; 0: the radio's setting, as for the other
  * apps. The calling thread's: set it on the thread that transmits, before tx_player_base_gain_offset and the
  * transmission, and 0 after. The radio's power setting is not changed and is put back after the transmission; the
