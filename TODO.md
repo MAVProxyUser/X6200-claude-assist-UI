@@ -32,6 +32,12 @@ Open:
     X6100_morse_key / X6200_morse_key); the X6100's base version reads V1.1.9 (G's panel); the settings the GUI sends
     whatever the base (codec/band gain, CESSB, TX filter, FM emphasis, CW peak, DNF auto) are all at their defaults
     on the X6100 (none saved), as upstream sends them to factory bases.
+  - 6 m at 0.1 W (the 11-19 walkie finding), again 2026-11-22 04:00 on the 14 V supply (radios-walkie 6m,6m-fm, the
+    X6100 sending): 1.0-1.2 W in AM and FM at a 0.1 W setting, logged, not stopped. Xiegu's factory base's floor on
+    6 m (tools/base_update/README.md: "Xiegu's: 0.8 W on 6 m"; gcfix4/5 gave 0.1 W): not the GUI. The X6200 heard
+    those overs only 7 dB over its spectrum's quiet (its own front end: ATT on, RF gain 39, both saved settings of
+    its, from before tonight). The walkie leaves both radios on the first one's channel (the owner's 11-19 wish): the
+    X6200 is on 21.300 MHz USB since, not its 14.204 USB-D.
   - LEFT (need the radio in a way not tried tonight): Comp on the factory X6100 (the button shown and sent, the cap
     says no compressor: what it does on the air); IF shift on the factory X6100 (from the version alone); the
     untested-on-one-model list in the manual (keyboard/mouse and the sideswiper on the X6100, KEY Train with a paddle,
