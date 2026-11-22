@@ -7351,6 +7351,13 @@ static void rx_set(rxset_t st) {
     cparam_i_set(cfg_cur_pre, st.pre);
     cparam_i_set(cfg_cur_att, st.att);
     if (st.agc >= 0) cparam_i_set(cfg_cur_agc, st.agc);
+#ifndef BOARD_X6200
+    /* The X6100's attenuator is its RF gain as well: under 100 its base switches in a step for each point (strijar's
+     * x6100-base protocol notes), where the X6200 has its ATT alone. ATT off on D and E takes it off on the X6100 too,
+     * so a choice there leaves both radios with nothing in front of the receiver (the owner, 2026-11-22: "they should
+     * handle uniformly in the same fashion the 6200 does") */
+    if (st.att == radio_att_off) param_i_set(cfg_rfgain, 100);
+#endif
 }
 
 static void rx_setup_apply(int64_t hz, int agc) {

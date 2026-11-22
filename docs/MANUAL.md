@@ -1249,6 +1249,9 @@ written through to the card before it replaces the last copy, so a power cut kee
     only adds overload from the big signals) **and on AM and FM broadcast** (strong local stations), **on from 8 MHz
     up** and on the airband; the **attenuator off**; **AGC** FAST for CW and the beacons, SLOW for a decoder app,
     AUTO (the mode's own) for listening;
+  - on the X6100 the same, and its **RF gain to 100**: under 100 its base switches in an attenuator step for each
+    point (Xiegu's 63 is 37 of them), where the X6200 has its ATT alone, so ATT off leaves nothing in front of either
+    radio's receiver (the X6200's RF gain stays as you set it);
   - on the SDR, its **gain**: 19.7 dB on FM broadcast, 49.6 dB on the weather satellites, the sondes and from 960 MHz up (weak
     signals), 37.2 dB on the airband, marine and NOAA weather (far transmitters), 28.0 dB elsewhere (local repeaters
     and handhelds).
@@ -10710,7 +10713,8 @@ The GUI restarts when its audio server (PulseAudio) goes away: `x6100_daemon`
 starts the audio server again and then the GUI, within a few seconds. The log of
 the run that ended is in `/mnt/app_logs/`; the last lines say why. A power-off
 with the POWER key saves the run's log there too (`..._off.txt`); the newest 50
-logs are kept.
+logs are kept, counted after every run (a GUI that keeps restarting cannot fill
+the card with them).
 
 #### The radio stops at the boot logo, or the screen stays dark after it
 
