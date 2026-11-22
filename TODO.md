@@ -11,6 +11,19 @@ approved that day.
 against git: 32 commits that day, v0.3.12.37-.40 released). Open first; then what changed state; the done ones last.
 
 Open:
+- G (the owner, 2026-11-22 ~03:00: "YOU should be setting the radio into the mode im only seeing spikes on it form the
+  key up and key down"): DONE that night. (1) A/B arming on A and G puts CW/CW-R and LSB-D/USB-D into the band's voice
+  mode (USB from 10 MHz and on 60 m, LSB below) and locking puts it back: scratchpad arm_mode_test.py 7 of 7 on both
+  radios. The owner had keyed at 14.0694 MHz in CW (a carrier, 6 s and 3 s at 1.0 W) and at 14.204 MHz in USB-D (12 s
+  at 0.0 W: the data mode takes the processor's audio). (2) The radio's own PTT over while B plays the stick on the
+  speaker: the base out of play mode for the over (play mode has both mics at 0: silent). (3) G's voiceprint on the
+  air: the X6100's base monitor raised to 30 for a PTT over on G (radio_set_tx_moni, as a screen recording's): the
+  base puts the monitor on the processor's capture line (a 1000 Hz tone over TCI 21 dB over the line's floor at 30,
+  none at 0; scratchpad moni_route.py), so the voiceprint draws what goes out. Not the X6200 (issue #15, its speaker
+  rings into its built-in mic). Record mode (HW_RECORD) while keyed was tried first and DROPPED THE OVER within 1 s on
+  the X6100's factory base (1 s at 0.6 W in the minute log instead of 6 s): not used. LEFT: the owner's voice on G to
+  see it draw (the acoustic try failed: the X6200 played its RTL's FM station, the X6100's hand mic did not pick it
+  up where it lies); whether the X6100's speaker playing the monitor at 30 bothers anyone.
 - 2026-11-22 00:00 the owner: "on the X6200 I just connected 2 RTLSDR dongles, can you tell me which performs better?
   you can use the hackrf to test". BLOCKED on the hub: the X6200 sees only the Genesys 4-port hub (05e3:0610, the bad
   one); the first stick (RTL0, serial 00000001, R820T) came up twice on its port 2 and each time it streamed the

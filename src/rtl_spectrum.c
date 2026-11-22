@@ -128,6 +128,10 @@ static atomic_bool     dev_tx;
 /* Transmitting (rtl_spectrum_tx): what was asked, the daemon's word on it, the hand mic's level */
 static atomic_int      tx_state = RTL_TX_OFF;
 static atomic_bool     tx_mic;          /* the mic thread sends the voice: the base in record mode */
+/* The radio's own transmitter keyed by its PTT on the Sentry (rtl_spectrum_own_tx): the base out of play mode for the
+ * over (its mics live), the player leaving its mode alone meanwhile, as for tx_mic; the mode before, to put back */
+static atomic_bool     own_mic;
+static audio_play_mode_t own_was;
 static atomic_int      tx_mic_cdb = -9900;     /* hundredths of dBFS */
 static char            tx_said[48];
 static uint32_t        tx_said_n;
@@ -1134,6 +1138,11 @@ static int stick_take(int16_t *out, int n) {
     return m;
 }
 
+/* The base's mode is a transmitter's while one sends from the mic: the SDR's (tx_mic) or the radio's own (own_mic) */
+static bool mic_held(void) {
+    return atomic_load(&tx_mic) || atomic_load(&own_mic);
+}
+
 /* The audio to the speaker while listening: one thread for good, that never has to be waited for. It takes the
  * speaker when listening starts (the base in play mode, as the recorder plays; or the Bluetooth headphones when they
  * stand in for it) and gives it back when it ends. audio_play() waits for room in CHUNK at most, so the codec paces
@@ -1162,13 +1171,13 @@ static void *player_thread(void *arg) {
         if (want_play && !atomic_load(&playing)) {
             bt   = audio_play_bt_begin();
             moni = false;
-            if (!bt && !atomic_load(&tx_mic)) radio_set_play_mode(AUDIO_PLAY_ON);   /* transmitting: the mic's mode
+            if (!bt && !mic_held()) radio_set_play_mode(AUDIO_PLAY_ON);   /* transmitting: the mic's mode
                                                                                      * stays, put back after it */
             atomic_store(&playing, true);
         } else if (!want_play && atomic_load(&playing)) {
             audio_play_flush();
             if (bt) audio_play_bt_end();
-            else if (!moni && !atomic_load(&tx_mic)) radio_set_play_mode(AUDIO_PLAY_OFF);
+            else if (!moni && !mic_held()) radio_set_play_mode(AUDIO_PLAY_OFF);
             bt = moni = false;
             atomic_store(&playing, false);
         }
@@ -1184,7 +1193,7 @@ static void *player_thread(void *arg) {
             }
             bool want_moni = moni_file && atomic_load(&mux) && atomic_load(&listen_mode);
 
-            if (want_moni != moni && !atomic_load(&tx_mic)) {
+            if (want_moni != moni && !mic_held()) {
                 moni = want_moni;
                 radio_set_play_mode(moni ? AUDIO_PLAY_OFF : AUDIO_PLAY_ON);
                 fprintf(stderr, "rtl BOTH monitor test: %s\n", moni ? "on, the base in normal mode, the stick to its "
@@ -1193,7 +1202,7 @@ static void *player_thread(void *arg) {
         }
         /* the speaker taken back for us: another of the base's play mode's users (the recorder, a voice message,
          * FreeDV) set it OFF as it ended while we still play (only from OFF: a recording's mode is left alone) */
-        if (atomic_load(&playing) && !bt && !moni && !atomic_load(&tx_mic) && radio_play_mode() == AUDIO_PLAY_OFF) {
+        if (atomic_load(&playing) && !bt && !moni && !mic_held() && radio_play_mode() == AUDIO_PLAY_OFF) {
             static uint32_t again;
 
             if (lv_tick_or_ms() - again >= 500) {
@@ -1654,6 +1663,26 @@ uint32_t rtl_spectrum_tx_said(char *s, size_t n) {
     uint32_t k = tx_said_n;
     pthread_mutex_unlock(&lock);
     return k;
+}
+
+void rtl_spectrum_own_tx(bool on) {
+    if (on == atomic_load(&own_mic)) return;
+    if (on) {
+        own_was = radio_play_mode();
+        atomic_store(&own_mic, true);
+        if (own_was == AUDIO_PLAY_ON) radio_set_play_mode(AUDIO_PLAY_OFF);
+        return;
+    }
+    atomic_store(&own_mic, false);
+    if (own_was != AUDIO_PLAY_ON) return;          /* nothing was changed */
+    /* the base's audio as the player has it now (the stick on the speaker or not), else as it was before the over */
+    radio_set_play_mode(atomic_load(&playing) ? (!atomic_load(&on_bt) && !atomic_load(&player_moni) ? AUDIO_PLAY_ON
+                                                                                                    : AUDIO_PLAY_OFF)
+                                              : own_was);
+}
+
+bool rtl_spectrum_own_mic(void) {
+    return atomic_load(&own_mic);
 }
 
 float rtl_spectrum_tx_mic_db(void) {

@@ -95,6 +95,9 @@ bool radio_change_spmode(int16_t df);
 void radio_change_mute();
 /* A TCI client transmits: the speaker and the monitor quiet until it unkeys */
 void radio_set_tci_mute(bool on);
+/* The radio's own PTT over on G: the base's monitor at 30 at least, so the capture (G's voiceprint) has what goes out;
+ * the X6100 only, as a screen recording's (radio_set_rec_moni) */
+void radio_set_tx_moni(bool on);
 /* The scanner looking from one frequency to the next: the speaker quiet until it stops */
 void radio_set_scan_mute(bool on);
 /* The speaker's level in place of the volume setting while another receiver is heard through the GUI (the Sentry's

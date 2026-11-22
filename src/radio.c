@@ -265,6 +265,7 @@ static bool             scan_mute = false;  /* the scanner between stops: no noi
 static int              rfg_override = -1;  /* the base's RF gain in place of cfg_rfgain (the CW Trainer, #110), -1 none */
 static int              vol_override = -1;  /* the speaker's level in place of cfg_volume (the Sentry's RTL-SDR heard), -1 none */
 static bool             rec_moni = false;   /* a screen recording takes the TX audio: the monitor at 30 at least (X6100) */
+static bool             tx_moni  = false;   /* G's voiceprint takes the radio's own over: the same (radio_set_tx_moni) */
 static bool             digi_cap;       /* a digital app is open: never above its cap */
 static float            tune_cap;       /* a TUNE for an external tuner: never above its power (under the lock) */
 static atomic_int       tx_mode = -1;   /* radio_set_tx_mode's for the transmission under way, -1 none */
@@ -859,7 +860,7 @@ void radio_vol_refresh() {
      * built-in microphone, and a monitor at 30 rang back into the transmission (issue #15) */
     bool    rec_raise = false;
 #else
-    bool    rec_raise = rec_moni && !tci_mute;
+    bool    rec_raise = (rec_moni || tx_moni) && !tci_mute;
 #endif
 
     if (rec_raise) moni = LV_MAX(moni, 30);
@@ -1593,6 +1594,16 @@ void radio_set_line_out(uint8_t d) {
 
 void radio_set_qsk_time(uint16_t ms) {
     WITH_RADIO_LOCK(hw_set_i(HW_QSK_TIME, ms));
+}
+
+/* G's voiceprint while the radio's own PTT over goes out: the base's monitor puts what is transmitted on its audio line
+ * to the processor (the capture: a 1000 Hz tone sent over TCI came through 21 dB over its line's floor at monitor 30,
+ * not at all at 0; the X6100 on factory V1.1.9, 2026-11-22), and with it 0 the capture on the air has only the key's
+ * clicks. So the monitor at 30 at least for the over, as for a screen recording; the X6100 only (radio_vol_refresh) */
+void radio_set_tx_moni(bool on) {
+    if (tx_moni == on) return;
+    tx_moni = on;
+    radio_vol_refresh();
 }
 
 void radio_set_rec_moni(bool on) {

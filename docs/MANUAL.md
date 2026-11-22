@@ -844,7 +844,7 @@ Its controls (GEN shows them, as does a tap on the title):
 | MFK inner ring | The screens, A to H and round again (H is AIRSPACE; its ring comes back to A or G). On an X6100: hold the MFK and turn the main dial |
 | VOL/SQL/RFG knob | Volume; push: squelch, push: RF gain, push: volume again. Left on squelch or RF gain, it is the volume again 5 s after its last turn or push, so a reach for it finds the volume. On B the squelch and RF gain are the SDR's |
 | F1-F5 | The keys along the bottom: on A and B, F1 SCAN, F2 BAND (B: PRESET), F3 VIEW, F4 LISTEN, F5 SCAN CFG |
-| A/B | On A and G: arms the X6200's transmitter for PTT (`X6200 TX ARMED` blinks in A's RECEIVER box, G's lamp says TX ARMED, ON AIR while it transmits), at the power set; the Sentry's scans and AUTO wait meanwhile, so the dial stays put. A/B again, F5 on G, or any screen but A and G locks it again. KEY and MSG stay refused. The radio's own TX rules still apply (its bands and power). On G's SDR channels A/B arms the HackRF's or bladeRF's transmitter instead, the X6200 staying at 0 W ([G on a HackRF or bladeRF](#g-on-a-hackrf-or-bladerf)) |
+| A/B | On A and G: arms the X6200's transmitter for PTT (`X6200 TX ARMED` blinks in A's RECEIVER box, G's lamp says TX ARMED, ON AIR while it transmits), at the power set; the Sentry's scans and AUTO wait meanwhile, so the dial stays put. A/B again, F5 on G, or any screen but A and G locks it again. KEY and MSG stay refused. PTT is voice here, so arming in CW or a data mode puts the radio in the band's voice mode first (CW and CW-R: USB from 10 MHz up and on 60 m, LSB below; LSB-D and USB-D: LSB and USB; the screen says which), and locking puts the mode back. Up to v0.3.12.45 it stayed as it was: in CW PTT sent the key's carrier (a steady tone), in a data mode the processor's audio instead of the microphone (nothing), while G's corner called both SSB. While B plays the SDR on the speaker, the base is taken out of its play mode for your over (play mode has the microphones at 0: the over went out silent). The radio's own TX rules still apply (its bands and power). On G's SDR channels A/B arms the HackRF's or bladeRF's transmitter instead, the X6200 staying at 0 W ([G on a HackRF or bladeRF](#g-on-a-hackrf-or-bladerf)) |
 | APP | F SYSTEM |
 | BAND up/down | The next band, as F2 on A (on B, the next preset) |
 | AM, CW, SSB, DFN, DFL, FST | The mode, the noise reduction and blanker, the filter, the tuning step, as on the main screen |
@@ -1405,7 +1405,13 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
   X6100's audio carries one of about 781 Hz with its harmonics (1562, 2344, 3125, 3906 Hz), the same whatever
   the dial, so from its own audio path, not the air (2026-11-21; the X6200's has none). On the air (TX in its
   caption) it shows what the capture brings then, which is not the receiver: with a PTT and nothing said into the
-  microphone, a dark band. Its dark is held from before the transmission, and columns of one dim shade keep its time
+  microphone, a dark band. On the X6100 it shows what you transmit: for a PTT over on G the base's TX monitor goes to
+  30 at least (as for a screen recording), and the base puts the monitor on its audio line to the processor too (a
+  tone sent over TCI came through 21 dB over that line's floor at 30, not at all at 0), so your voice draws as it
+  goes out; the speaker plays it at that level meanwhile. Not on the X6200: its speaker shares the case with its
+  built-in microphone, and a monitor at 30 rang back into the transmission (issue #15). Up to v0.3.12.45 only the
+  key's clicks showed on the air. The base's record mode, which would hand the processor the microphone itself,
+  is not used: set while keyed, the X6100's base dropped the over within a second. Its dark is held from before the transmission, and columns of one dim shade keep its time
   when nothing comes in at all. Up to v0.3.12.43 the dark followed the transmission's near-silence down, and the
   receiver's hiss drew white for a second or two after each over.
 - **The lamp**, under the voiceprint: RX SIGNAL when the audio stands 6 dB over its own noise, RX DMR while a DMR call

@@ -272,6 +272,13 @@ uint32_t rtl_spectrum_tx_said(char *s, size_t n);
 /* The hand mic's level going out, dBFS (its loudest of the last 0.1 s), -99 none */
 float rtl_spectrum_tx_mic_db(void);
 
+/* The radio's own transmitter keyed by its PTT on the Sentry (on), or no more: a base in play mode (the stick on the
+ * speaker) out of it for the over, so its mics are live (play mode has them at 0: the over went out silent); the
+ * player leaves the mode alone meanwhile, and after it the base's audio is the player's again. Not record mode: the
+ * X6100's factory base dropped the over 1 s after it was set while keyed (2026-11-22). LVGL thread */
+void rtl_spectrum_own_tx(bool on);
+bool rtl_spectrum_own_mic(void);
+
 /* The newest row: up to cap dB values from the lowest frequency, its sample rate (the span) and centre. False when
  * there is none, or none newer than *seq (which it updates). fresh: the first since a retune */
 bool rtl_spectrum_frame(float *db, uint16_t cap, uint16_t *n, uint32_t *rate, int64_t *centre, uint32_t *seq,

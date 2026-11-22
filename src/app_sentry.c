@@ -5011,6 +5011,18 @@ static void rtl_timer_cb(lv_timer_t *t) {
 
     (void)t;
     rtl_scan_step();
+    {   /* The radio's own transmitter keyed by its PTT while armed (A or G): out of play mode for the over
+         * (rtl_spectrum_own_tx). With B's stick on the speaker the base is in play mode, its mics at 0, and the over
+         * went out silent. Let go 0.3 s after the over, so a PTT's bounce does not flip it */
+        static uint32_t own_tx_ms;
+        bool            own = g_armed && radio_get_state() == RADIO_TX && !radio_get_modem();
+
+        if (own) own_tx_ms = lv_tick_get() | 1;
+        rtl_spectrum_own_tx(own || (own_tx_ms && lv_tick_elaps(own_tx_ms) < 300));
+        /* and on G its voiceprint draws the over: the base's monitor puts what goes out on the capture (radio.c) */
+        radio_set_tx_moni(scr == SCR_WALKIE && (own || (own_tx_ms && lv_tick_elaps(own_tx_ms) < 300)));
+        if (!own && own_tx_ms && lv_tick_elaps(own_tx_ms) >= 300) own_tx_ms = 0;
+    }
     if (scr == SCR_WALKIE) walkie_step();
     {   /* a weather alert, whatever the screen */
         char   h[300];
@@ -9532,25 +9544,69 @@ static void walkie_step(void) {
     }
 }
 
+/* PTT is voice in the Sentry (KEY and MSG are locked out): the voice mode for a mode that is not one, -1 for a voice
+ * mode (LSB, USB, AM, FM) as it is. CW and CW-R by the dial: LSB under 10 MHz but 60 m, USB from there; LSB-D and USB-D
+ * their sideband */
+static int arm_voice_mode(int m, int32_t hz) {
+    switch (m) {
+        case radio_mode_lsb_dig: return radio_mode_lsb;
+        case radio_mode_usb_dig: return radio_mode_usb;
+        case radio_mode_cw:
+        case radio_mode_cwr:     return hz < 10000000 && !(hz >= 5250000 && hz <= 5450000) ? radio_mode_lsb
+                                                                                           : radio_mode_usb;
+        default:                 return -1;
+    }
+}
+
+/* What arming changed, for locking to put back: the mode before, the voice mode set and where (-1 nothing) */
+static int     arm_was_mode = -1, arm_set_mode = -1;
+static int32_t arm_hz;
+
 /* The A/B (VFO) key on A and G: the transmitter armed for PTT (the Sentry's receive-only hold let go: the radio's own
- * TX rules again, its power and band limits), or locked again. A/B again or leaving A and G locks it */
+ * TX rules again, its power and band limits), or locked again. A/B again or leaving A and G locks it.
+ * Armed in CW or a data mode, PTT sent no voice: CW keyed its carrier (a steady tone) and LSB-D/USB-D took the
+ * processor's audio, not the hand mic (the owner on G, 2026-11-22: 14.0694 MHz CW, then 14.204 MHz USB-D, 12 s on the
+ * air at 0.0 W; "YOU should be setting the radio into the mode"), while G called both SSB. So arming puts the radio in
+ * the voice mode, and locking puts the mode back when it is still the one set, near where it was armed */
 static void walkie_arm(bool on) {
     char t[64];
 
     if (on == g_armed) return;
     if (on) {
+        int m = cparam_i_get(cfg_cur_mode), v = arm_voice_mode(m, cparam_i_get(cfg_fg_freq));
+
+        arm_was_mode = arm_set_mode = -1;
+        if (v >= 0 && !main_screen_mode_locked()) {
+            arm_was_mode = m;
+            arm_set_mode = v;
+            arm_hz       = cparam_i_get(cfg_fg_freq);
+            cparam_i_set(cfg_cur_mode, v);
+        }
         if (rx_held) radio_rx_only(false);
         rx_held = false;
         g_armed = true;
         if (routine == ROUT_SCAN || routine == ROUT_SWEEP) set_routine(ROUT_BAND);     /* the dial stays put */
-        snprintf(t, sizeof(t), "TX ARMED: PTT TRANSMITS (%.0f W)", param_f_get(cfg_pwr));
+        snprintf(t, sizeof(t), "TX ARMED: PTT TRANSMITS %s (%.0f W)", mode_name(cparam_i_get(cfg_cur_mode)),
+                 param_f_get(cfg_pwr));
     } else {
         rx_held = radio_rx_only(true);
         g_armed = false;
+        if (arm_set_mode >= 0 && cparam_i_get(cfg_cur_mode) == arm_set_mode && !main_screen_mode_locked()
+            && abs(cparam_i_get(cfg_fg_freq) - arm_hz) <= 100000)
+            cparam_i_set(cfg_cur_mode, arm_was_mode);
+        arm_was_mode = arm_set_mode = -1;
         snprintf(t, sizeof(t), "TX LOCKED AGAIN");
     }
     if (g_portrait) lv_label_set_text(wui->msg_l, t);
-    else osd(on ? "TX ARMED" : "TX LOCKED",
+    else if (on && arm_set_mode >= 0) {
+        char d[160];
+
+        snprintf(d, sizeof(d), "PTT TRANSMITS VOICE IN %s ON THE " BOARD_NAME "'S DIAL (%s TAKES NO VOICE); THE "
+                 "SENTRY'S SCANS AND AUTO WAIT. A/B AGAIN, OR A SCREEN BUT A AND G, LOCKS IT AND PUTS %s BACK.",
+                 mode_name(arm_set_mode), mode_name(arm_was_mode), mode_name(arm_was_mode));
+        osd("TX ARMED", d, -1);
+    } else
+        osd(on ? "TX ARMED" : "TX LOCKED",
              on ? "PTT TRANSMITS ON THE " BOARD_NAME "'S DIAL; THE SENTRY'S SCANS AND AUTO WAIT. A/B AGAIN, OR A SCREEN BUT A AND "
                   "G, LOCKS IT."
                 : "THE SENTRY IS RECEIVE ONLY AGAIN.", -1);
