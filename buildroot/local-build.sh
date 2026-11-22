@@ -225,7 +225,8 @@ grep -q '^BR2_PACKAGE_FFMPEG_DECODERS="aac ' $DEFCONFIG
 find $GUI/rootfs -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
 
 echo "== OpenX6X00 additions to the buildroot tree (buildroot/br2_external in this repository)"
-# ft8_lib's patch (br2_external/package/ft8lib: its callsign table zeroed whole, from the security review) goes
+# ft8_lib's patches (br2_external/package/ft8lib: 0001 its callsign table zeroed whole, from the security review;
+# 0002 a standard callsign is what WSJT-X takes for one, so WSJT-X decodes the Q, 3X and 3DA0 calls it sends) go
 # next to the tree's own ft8lib.mk, both radios.
 # The rtl8723bu WiFi driver package (the X6100's USB WiFi; the X6200's is on the board), the DATA
 # partition repair at boot, the USB tethering profile, the Bluetooth, NTP and PulseAudio settings:
@@ -612,7 +613,7 @@ if [ $MODEL = x6100 ] && ls -d $BR/build/build/rtl8723bu-wifi-*/ > /dev/null 2>&
     make rtl8723bu-wifi-dirclean
 fi
 if ls -d $BR/build/build/ft8lib-*/ > /dev/null 2>&1 \
-        && ! grep -qs "0001-hashtable-zero-the-whole-table" $BR/build/build/ft8lib-*/.applied_patches_list; then
+        && ! grep -qs "0002-message-standard-calls-as-WSJT-X-takes-them" $BR/build/build/ft8lib-*/.applied_patches_list; then
     make ft8lib-dirclean
 fi
 # and U-Boot built before its logo was turned off (above) is built again with its new config

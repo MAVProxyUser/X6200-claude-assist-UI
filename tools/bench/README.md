@@ -40,7 +40,12 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
    through (pads missing) stops everything at once: the HackRF killed, every radio unkeyed, the apps' TX stopped.
    The browser remote's PTT is a lease besides: without its renewal the radio unkeys within 3 s.
 6. **Test callsigns only.** `Q<digit>TST` (`bench.py testcall NAME Q1TST`, `restore` after), never a real
-   call; FT8 grids FN00. The test QSOs are taken out of the radio's logs after each run (`cleanlog`).
+   call; FT8 grids FN00. The test QSOs are taken out of the radio's logs after each run (`cleanlog`). No real call
+   starts with Q, which is why: and WSJT-X takes none for a standard call (chkcall.f90), so a Q call goes as a
+   nonstandard one, `CQ Q1TST` with no grid and the reply `<Q1TST> Q2TST`, a hash where the call has been heard;
+   radios-ft8 takes either form. Up to v0.3.12.43 the radios' FT8 library sent Q calls as standard and WSJT-X
+   discarded every such message (2026-11-21: never `CQ Q1TST EN80` from a radio, while the other radio decoded
+   it): a test call WSJT-X is to hear needs ft8lib patch 0002 on the sending radio.
 7. **Everything logged.** Each HackRF and radio transmission and each stop goes to `tx_log.jsonl`.
 8. **Stop on demand.** Ctrl-C or `bench.py stop` is the emergency stop (rule 5's actions).
 9. **The radios as found.** A test closes the apps it opened (the X6200 goes back to the Sentry) and releases

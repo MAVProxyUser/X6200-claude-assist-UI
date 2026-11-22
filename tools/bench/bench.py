@@ -721,17 +721,27 @@ def run_radios_ft8(c, args):
             say(f"{sender.name} sent {watch.tx_peak.get(sender.name, 0):.2f} W by its own meter; {listener.name}'s "
                 f"S-meter {quiet} dBm before, {watch.rx_peak} dBm at most while it sent (the chain: about "
                 f"{expect:.0f})")
-            listener.wait(f"{what} decoded", lambda: watch.why or any(want(r) for r in listener.rows[n0:]), 8)
+            try:
+                listener.wait(f"{what} decoded", lambda: watch.why or any(want(r) for r in listener.rows[n0:]), 8)
+            except Refused:
+                say(f"{listener.name} decoded meanwhile: " + ("; ".join(repr(msg(r)) for r in listener.rows[n0:])
+                                                             or "nothing"))
+                raise
             if watch.why:
                 raise Refused(watch.why)
             return next(r for r in listener.rows[n0:] if want(r))
 
         ca, cb = calls[a.name], calls[b.name]
-        row = one_tx(a, b, "ft8 cq", lambda r: msg(r).startswith(f"CQ {ca}"), "CQ")
+        # A test call (Q<digit>TST) is a nonstandard call, as WSJT-X has it (ft8lib 0002): a call in a message is
+        # then sent whole or as its hash, which reads "<Q1TST>" where the call has been heard
+        def calls_are(r, first, second):
+            w = msg(r).split()
+            return len(w) >= 2 and w[0].strip("<>") == first and w[1].strip("<>") == second
+        row = one_tx(a, b, "ft8 cq", lambda r: calls_are(r, "CQ", ca), "CQ")
         result["cq"] = row
         say(f"{b.name} decoded {row['x']!r}, SNR {row['snr']} dB")
         watch.listener, watch.expect_dbm = a, expect
-        row = one_tx(b, a, f"ft8 reply {row['id']}", lambda r: msg(r).startswith(f"{ca} {cb}"), "reply")
+        row = one_tx(b, a, f"ft8 reply {row['id']}", lambda r: calls_are(r, ca, cb), "reply")
         result["reply"] = row
         say(f"{a.name} decoded {row['x']!r}, SNR {row['snr']} dB")
     finally:

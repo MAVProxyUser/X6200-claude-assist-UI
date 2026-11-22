@@ -1,0 +1,130 @@
+From: OpenX6X00 <noreply@rf.guru>
+Subject: [PATCH] message: a standard callsign is what WSJT-X takes for one (chkcall.f90)
+
+WSJT-X takes a callsign for a standard one (28 bits in a type 1 message,
+with a grid) only when one of its first two characters is a letter, a
+digit comes second or third, one to three letters follow, it has at most
+six characters, and it does not start with Q (chkcall.f90: "Real calls
+don't start with Q"). Others it sends as nonstandard calls (type 4), and
+a type 1 message with one of them in it is thrown away by its decoder.
+
+ft8_lib packed more as standard: Q calls (the bench's Q1TST, Q2TST), and
+through the old 3X -> Q and 3DA0 -> 3D0 shortcuts Guinea's 3XA1AB and
+Eswatini's 3DA0XY. WSJT-X's jt9 decoded none of them, from ft8_lib's own
+clean signal or off the air, while ft8_lib decoded them (2026-11-21: a
+radio's FT8 app sending CQ Q1TST, heard at -21 dBFS in the other radio's
+TCI audio, decoded by its FT8 app, never by WSJT-X). Even WSJT-X's own
+exception, QU1RK, comes back as 3XU1RK (its ft8code: "bad message"), so
+no Q call is standard here.
+
+Now they go as nonstandard calls, as WSJT-X sends them, and jt9 and
+ft8_lib read the same text from 15 test messages (standard, Q, 3X, 3DA0,
+3D2, A61, 4U1, E51, 2E0, N0CALL, /P, reports, RR73). The decode side's
+3X and 3DA0 mappings stay, for senders that still use them. The tests'
+standard-message list drops the 3DA0 and 3X calls and checks them, with
+Q1TST and QU1RK, as nonstandard messages: 2617 OK, 0 failed.
+---
+--- a/ft8/message.c
++++ b/ft8/message.c
+@@ -670,39 +670,50 @@
+     return found;
+ }
+ 
++/// Whether WSJT-X takes the callsign for a standard one (its chkcall.f90): one of the first two characters a letter,
++/// a digit second or third, then one to three letters, six characters at most, and not starting with Q ("Real calls
++/// don't start with Q"). A call ft8_lib packed as standard but WSJT-X does not (Q1TST; Guinea's 3XA1AB and
++/// Eswatini's 3DA0XY, which the old 3X -> Q and 3DA0 -> 3D0 shortcuts packed) was thrown away by WSJT-X's decoder;
++/// WSJT-X sends them as nonstandard calls, and so does this now, so both read each other's. Even WSJT-X's own
++/// exception, QU1RK, came back as 3XU1RK (its ft8code: "bad message"), so no Q call is standard here
++static bool wsjtx_standard_call(const char* c, int n)
++{
++    if (n < 3 || n > 6)
++        return false;
++    if (!is_letter(c[0]) && !is_letter(c[1]))
++        return false;
++    if (c[0] == 'Q')
++        return false;
++    int i1 = -1;
++    if (is_digit(c[1]))
++        i1 = 1;
++    if (is_digit(c[2]))
++        i1 = 2;
++    if (i1 < 0 || n - i1 - 1 < 1 || n - i1 - 1 > 3)
++        return false;
++    for (int i = i1 + 1; i < n; ++i)
++        if (!is_letter(c[i]))
++            return false;
++    return true;
++}
++
+ static int32_t pack_basecall(const char* callsign, int length)
+ {
+-    if (length > 2)
++    if (wsjtx_standard_call(callsign, length))
+     {
+         // Attempt to pack a standard callsign, if fail, revert to hashed callsign
+         char c6[6] = { ' ', ' ', ' ', ' ', ' ', ' ' };
+ 
+-        // Copy callsign to 6 character buffer
+-        if (starts_with(callsign, "3DA0") && (length > 4) && (length <= 7))
++        // Check the position of callsign digit and make a right-aligned copy into c6
++        if (is_digit(callsign[2]) && length <= 6)
+         {
+-            // Work-around for Swaziland prefix: 3DA0XYZ -> 3D0XYZ
+-            memcpy(c6, "3D0", 3);
+-            memcpy(c6 + 3, callsign + 4, length - 4);
++            // AB0XYZ
++            memcpy(c6, callsign, length);
+         }
+-        else if (starts_with(callsign, "3X") && is_letter(callsign[2]) && length <= 7)
++        else if (is_digit(callsign[1]) && length <= 5)
+         {
+-            // Work-around for Guinea prefixes: 3XA0XYZ -> QA0XYZ
+-            memcpy(c6, "Q", 1);
+-            memcpy(c6 + 1, callsign + 2, length - 2);
+-        }
+-        else
+-        {
+-            // Check the position of callsign digit and make a right-aligned copy into c6
+-            if (is_digit(callsign[2]) && length <= 6)
+-            {
+-                // AB0XYZ
+-                memcpy(c6, callsign, length);
+-            }
+-            else if (is_digit(callsign[1]) && length <= 5)
+-            {
+-                // A0XYZ -> " A0XYZ"
+-                memcpy(c6 + 1, callsign, length);
+-            }
++            // A0XYZ -> " A0XYZ"
++            memcpy(c6 + 1, callsign, length);
+         }
+ 
+         // Check for standard callsign
+--- a/test/test.c
++++ b/test/test.c
+@@ -238,7 +238,10 @@
+     hashtable_init(256);
+     // test1();
+     // test4();
+-    const char* callsigns[] = { "YL3JG", "W1A", "W1A/R", "W5AB", "W8ABC", "DE6ABC", "DE6ABC/R", "DE7AB", "DE9A", "3DA0X", "3DA0XYZ", "3DA0XYZ/R", "3XZ0AB", "3XZ0A"};
++    // Standard calls only: 3DA0X, 3DA0XYZ, 3XZ0AB and 3XZ0A went as standard calls through the 3DA0 -> 3D0 and
++    // 3X -> Q shortcuts, which WSJT-X does not take for standard (its chkcall.f90) and throws away; they go as
++    // nonstandard calls now, as WSJT-X sends them (test_msg below)
++    const char* callsigns[] = { "YL3JG", "W1A", "W1A/R", "W5AB", "W8ABC", "DE6ABC", "DE6ABC/R", "DE7AB", "DE9A"};
+     const char* tokens[] = { "CQ", "QRZ", "CQ_123", "CQ_000", "CQ_POTA", "CQ_SA", "CQ_O", "CQ_ASD" };
+     const char* grids[] = { "KO26", "RR99", "AA00", "RR09", "AA01", "RRR", "RR73", "73", "R+10", "R+05", "R-12", "R-02", "+10", "+05", "-02", "-02", "" };
+ 
+@@ -259,6 +262,12 @@
+             }
+         }
+     }
++    // Nonstandard for WSJT-X, so nonstandard here: a Q call (no real call starts with Q; WSJT-X's own QU1RK
++    // exception came back as 3XU1RK), Guinea's 3X and Eswatini's 3DA0 calls
++    test_msg("CQ Q1TST", "CQ Q1TST", &hash_if);
++    test_msg("CQ QU1RK", "CQ QU1RK", &hash_if);
++    test_msg("CQ 3XA1AB", "CQ 3XA1AB", &hash_if);
++    test_msg("CQ 3DA0XY", "CQ 3DA0XY", &hash_if);
+     test_msg("CQ EA8/G5LSI", "CQ EA8/G5LSI", NULL);
+     test_msg("EA8/G5LSI R2RFE RR73", "<EA8/G5LSI> R2RFE RR73", &hash_if);
+     test_msg("R2RFE/P EA8/G5LSI R+12", "R2RFE/P <EA8/G5LSI> R+12", &hash_if);

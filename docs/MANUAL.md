@@ -5238,6 +5238,17 @@ activation's fields besides: its reference (MY_SOTA_REF, MY_POTA_REF or
 MY_SIG and MY_SIG_INFO) and, in Tiles, the tile as MY_GRIDSQUARE. For LoTW,
 upload one of the two (see [Where are my logs?](#where-are-my-logs)).
 
+Which calls count as standard is WSJT-X's rule (its chkcall): one of the
+first two characters a letter, a digit second or third, then one to three
+letters, six characters at most, and not starting with Q. So a call that
+starts with Q (the bench's test calls, Q1TST), and Guinea's 3X and
+Eswatini's 3DA0 calls (3XA1AB, 3DA0XY), go as nonstandard calls, below, as
+WSJT-X sends them. Up to v0.3.12.43 the FT8 library sent those as standard
+calls (the Q, and 3X and 3DA0 through old shortcuts), and WSJT-X threw every
+such message away: WSJT-X never decoded `CQ Q1TST EN80` from this radio,
+while another of these radios did (2026-11-21, checked with WSJT-X's own
+decoder; the fix is ft8lib patch 0002). Since, both read each other's.
+
 A compound or long callsign. FT8 packs a base call, with /P or /R at most
 (ON6URE, ON6URE/P), together with a grid or a report. Any other call of
 yours (PA/ON6URE, ON6URE/MM, KF0QGT/6Y, OT4ABCD, up to 11 characters; the

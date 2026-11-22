@@ -118,8 +118,14 @@ Open:
   any Q-prefixed call but QU1RK is nonstandard there (its ft8code sends "CQ Q1TST EN80" as type 4, "CQ Q1TST"),
   while ft8_lib's pack_basecall packs Q1TST as a standard call (type 1, with the grid), which WSJT-X then throws
   away. So the bench's test calls (Q1TST, Q2TST) are invisible to WSJT-X, and the radios' FT8 apps (ft8_lib)
-  disagree with WSJT-X on them. No real callsign starts with Q. Fix: ft8lib 0002, a callsign starting with Q (but
-  QU1RK) is not standard, as WSJT-X has it; then retry radios-ft8 with WSJT-X listening.
+  disagree with WSJT-X on them. No real callsign starts with Q. FIXED: ft8lib 0002 takes WSJT-X's whole rule (a
+  letter in the first two, a digit second or third, one to three letters after, six at most, no Q; QU1RK, WSJT-X's
+  own exception, comes back as 3XU1RK even in WSJT-X), which also catches real calls: Guinea's 3X and Eswatini's
+  3DA0 calls went as standard through old shortcuts and WSJT-X dropped them too. Proven: 15 messages read the same
+  by jt9 and ft8_lib (0 before for the Q, 3X, 3DA0 ones); ft8_lib's tests 2617 OK, 0 failed (the 3X/3DA0 calls
+  moved to nonstandard checks); end to end on the radios (the library hot-installed on both): the X6100's FT8 app
+  CQ Q1TST, the X6200 decoded it (SNR 3), WSJT-X live on the X6200's TCI decoded it (-1 dB, DT 0.0), the X6100
+  decoded the reply "<Q1TST> Q2TST" (SNR 7), PASS. bench.py takes a test call bare or hashed.
 - The X6100's "rake" (the owner, 2026-11-21): steady carriers every ~6 kHz on 20 m (14.052, .058, .064, .070, .076,
   .082, .088, .094 MHz, 10-15 dB over its floor) on A and G. Not the X6200 (its dial to 40 m: the comb unchanged);
   the hump at 14.075 is real FT8 traffic leaking past the pads. The HackRF beside both radios (ANT500) saw no comb
