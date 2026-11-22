@@ -207,7 +207,24 @@ side (`~/.config/x6x00-bench/runs/<time>-<batches>/report.md`), for a release to
     suite.py list                 # the batches and what each needs plugged in
     suite.py run core             # both radios on the network: versions, services, settings, apps, every screen
     suite.py run rtl,cable        # the hardware batches, when that hardware is on the bench
+    suite.py run rx,control       # no RF: every receiver setting, D's and E's rule, TCI, rigctl, every web page
+    suite.py run safety,paths     # the cable at 0.1 W: the transmitter's locks; every band, tones, the mic on G,
+                                  # RTTY, PSK31, CW, AM/FM, each both ways and confirmed by the other radio
+    suite.py run look             # every Settings tab on both, side by side, compared pixel by pixel
+    suite.py coverage             # every feature against the latest result of each test of every run so far
     suite.py release              # core and the batches bench.json's "attached" names
+
+**One test per feature, both radios, 1:1** (the owner, 2026-11-22: "a comprehensive set of unit tests to cover
+EVERYTHING 1:1 on both radios"). `features.json` lists every feature the manual and the code have (1386: the id,
+area, radios, what it needs plugged in, how a test confirms it, the manual's heading). Each result names the features
+it covers, and each run writes `coverage.md` beside its report: by area, the features that passed, failed, or are not
+covered yet, every uncovered one listed. The batches of `suite_more.py` (`rx`, `control`, `look`, `safety`, `paths`)
+run each test on each radio through the harness's state layer (rules 9-13) and add a 1:1 result for the pair.
+Reception is confirmed by the other radio every time: its spectrum (the path proof on each band), its audio (tones),
+its decoders (CW through the remote's `cw` lines; RTTY and PSK31 made by `digimodes.py` from the radios' own encoders'
+rules, sent by the sender's TCI, written by the listener's app into its text log), or, for the X6200's mic, the
+X6100's spectrum. The X6200's remote spectrum does not resolve tones inside its passband (a single tone fills
+0-2500 Hz), so where it listens the steps are read from the sender's own capture.
 
 `core` keys nothing: receive-only sessions, each radio held receive only while the suite has control. It checks
 both run the same version, the same services and apps, lists the look-and-behaviour settings that differ, opens

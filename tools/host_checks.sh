@@ -183,6 +183,7 @@ for d in tools/*/; do
     name=$(basename "$d")
     wanted "$name" || continue
     [ -f "$d/Makefile" ] || continue
+    [ "$name" = bench ] && continue         # run below with a longer limit (its simulated radios take 3-4 minutes)
     why=$(skip_why "$name")
     if [ -n "$why" ]; then
         record "$name" SKIP "$why"
@@ -238,6 +239,10 @@ fi
 # says each radio whole, proves the path and puts it back, 2026-11-22): Python's standard library, local sockets only
 if wanted bench; then
     TIME_LIMIT=$((TIME_LIMIT > 420 ? TIME_LIMIT : 420)) check_twice bench python3 tools/bench/sim_test.py
+fi
+# suite_more.py's own logic: D's and E's rule, the pages' features, the coverage report's counting
+if wanted suite; then
+    check_twice suite python3 tools/bench/suite_more_test.py
 fi
 # acoustic.py's judgement of a mic over on made-up data (numpy)
 if wanted acoustic; then

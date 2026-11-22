@@ -148,6 +148,7 @@ class Radio:
         self.tx_off_at = 0.0       # when it last left TX (the radios' gate: one on the air at a time)
         self.last_msg = time.time()
         self.freqs = set()          # every dial it reported since snapshot(): the bands a test tuned it into
+        self.cw = ""                # the CW decoder's text since the session began (the remote's "cw" lines)
         self.r.send(f"auth {tok}")
         self.r.send("panel 1")
         self.r.send("screen 0")
@@ -193,6 +194,11 @@ class Radio:
                     self.role = rest.split(" ", 2)
                 elif k == "err":
                     self.errs.append(rest)
+                elif k == "cw":
+                    try:
+                        self.cw += json.loads(rest)
+                    except ValueError:
+                        pass
 
     def _tx(self, on):
         if on and not self.tx:
@@ -582,7 +588,7 @@ PROOF_MIN_DB = 20           # the listener's spectrum at the tone over its quiet
 PROOF_DROP_DB = 15          # weaker than the last proof of the same pair by this much: said
 
 
-def tci_send(sender, plan, amp=0.3, max_s=10.0, fade=0.05, watch=None):
+def tci_send(sender, plan, amp=0.3, max_s=10.0, fade=0.05, watch=None, file=None):
     """plan ([[hz, s], ...]) into the sender's transmitter through its own TCI server (tci_tone_tx.py run on it): the
     sender's own stop if the watch stops. Returns (its output lines, epoch it began, epoch it ended)"""
     sender_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tci_tone_tx.py")
@@ -591,11 +597,13 @@ def tci_send(sender, plan, amp=0.3, max_s=10.0, fade=0.05, watch=None):
                        check=True)
     t0 = time.time()
     if sender.simulated:
+        plan = plan or [[1500, max_s - 4]]
         sender.send(f"sim tone {json.dumps(plan)}")           # sim_test.py's radio keys itself for the plan
         time.sleep(sum(s for _, s in plan) + 0.3)
         return [], t0, time.time()
     proc = subprocess.Popen(["ssh", "-n", "-o", "BatchMode=yes", f"root@{sender.host}",
-                             f"python3 /tmp/tci_tone_tx.py '{json.dumps(plan)}' {amp} {max_s:.1f} 50001 {fade}"],
+                             f"python3 /tmp/tci_tone_tx.py '{'@' + file if file else json.dumps(plan)}' {amp} "
+                             f"{max_s:.1f} 50001 {fade}"],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     while proc.poll() is None:
         if watch is not None and watch.why:
@@ -766,6 +774,20 @@ def supply_gate(radio, w):
 
 LISTENER_MIN_PCT = 25       # a listener's battery at least this, unless its DC in holds it (12 V and over)
 LISTENER_DC_HOLDS_V = 12.0
+
+
+def listener_gate_read(radio):
+    """The radio's last battery log row: {battery_pct, vbat, dc_in}, or None unread (simulated, no row in 5 min)"""
+    if radio.simulated:
+        return None
+    try:
+        rows = [r.split(",") for r in ssh(radio.host, "tail -2 /mnt/battery_log.csv", timeout=20).split()]
+        rows = [(int(r[0]), float(r[1]), int(float(r[2])), float(r[3])) for r in rows if len(r) > 3 and r[0].isdigit()]
+    except (Refused, subprocess.SubprocessError, ValueError):
+        return None
+    if not rows or time.time() - rows[-1][0] > 300:
+        return None
+    return {"battery_pct": rows[-1][2], "vbat": rows[-1][1], "dc_in": rows[-1][3]}
 
 
 def listener_gate(radio):

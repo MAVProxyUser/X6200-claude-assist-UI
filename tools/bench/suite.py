@@ -43,6 +43,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bench  # noqa: E402
+import suite_more  # noqa: E402
 
 try:
     from PIL import Image, ImageDraw
@@ -299,6 +300,22 @@ def gate_rx(r):
         raise bench.Refused(f"{r.name}: not held receive only (rxo {r.state.get('rxo')}, tx {r.state.get('tx')})")
 
 
+DIFF_LEVEL = 48                 # a pixel's brightness apart (0-255) for it to count as different
+DIFF_SHARE = 0.15               # more of the screen than this different: shown to look at
+
+
+def picture_diff(paths):
+    """The share of two pictures' pixels whose brightness differs by more than DIFF_LEVEL (None without two)"""
+    if Image is None or len(paths) != 2:
+        return None
+    a, b = (Image.open(p).convert("L") for p in paths)
+    if a.size != b.size:
+        b = b.resize(a.size)
+    pa, pb = a.getdata(), b.getdata()
+    n = sum(1 for x, y in zip(pa, pb) if abs(x - y) > DIFF_LEVEL)
+    return n / max(len(pa), 1)
+
+
 def screens_pair(run, label, setup, check):
     """setup(r) on each radio; check(r) true on each within 25 s (the X6100's SSTV took 9-17 s to open, 2026-11-18,
     and over 15 s on 2026-11-22, when the 15 s wait called it shut although its picture showed it open); both
@@ -333,6 +350,14 @@ def screens_pair(run, label, setup, check):
     run.result("core", f"screen {label}", None if flag else True,
                f"cool colour (old look) {off}" + (f": {flag} not all gold on black" if flag else ""),
                shot=os.path.relpath(pair, run.dir) if pair else None, palette=pal)
+    # 1:1 as pictures, not only as colours (the owner, 2026-11-22: "EVERYTHING 1:1 ... from GUI look and feel"): the
+    # share of the screen whose brightness differs by more than DIFF_LEVEL between the radios' pictures; the model's
+    # name, the clock, live spectra and S-meters differ always, so over DIFF_SHARE is shown to look at, not failed
+    d = picture_diff([p for p in paths.values() if p])
+    if d is not None:
+        run.result("core", f"alike {label}", True if d <= DIFF_SHARE else None,
+                   f"{d:.1%} of the screen differs between the radios' pictures (look at it over {DIFF_SHARE:.0%})",
+                   shot=os.path.relpath(pair, run.dir) if pair else None, covers=["lookfeel-pair-pixel-diff"])
 
 
 def t_screens(run, apps):
@@ -713,6 +738,12 @@ BATCHES = {
     "rtl": ("an RTL-SDR on each HOST port, antennas side by side", rtl),
     "cable": ("the radios joined through >= 60 dB (bench.py chain-ok radios), test callsigns", cable),
     "update": ("a release published (the updater's check on each radio; nothing installed)", update),
+    # one test per feature, each radio and 1:1 (suite_more.py; the owner, 2026-11-22: "EVERYTHING needs validation")
+    "rx": ("both radios on the network (receive only: every receiver setting, D's and E's rule)", suite_more.rx),
+    "control": ("both radios on the network (TCI, rigctl, every web page)", suite_more.control),
+    "safety": ("the cable (bench.py chain-ok radios): the transmitter's locks, 0.1 W at most", suite_more.safety),
+    "paths": ("the cable: tones, the mic on G, CW, AM and FM, both ways at 0.1 W", suite_more.paths),
+    "look": ("both radios on the network: every Settings tab photographed side by side, compared", suite_more.look),
 }
 
 
@@ -731,6 +762,7 @@ def report(run):
             lines.append(f"  ![{x['test']}]({x['shot']})")
     with open(os.path.join(run.dir, "report.md"), "w") as f:
         f.write("\n".join(lines) + "\n")
+    suite_more.coverage(run)            # every feature of features.json: covered and passed, failed, or not yet
     say(f"{ok} pass, {warn} to look at, {bad} fail: {os.path.join(run.dir, 'report.md')}")
     return bad
 
@@ -744,6 +776,7 @@ def main():
     s.add_argument("--only", default="", help="core's tests by name, comma-separated")
     s.add_argument("--radios", default="x6100,x6200")
     sub.add_parser("release")
+    sub.add_parser("coverage", help="every feature against the latest result of each test of every run so far")
     s = sub.add_parser("align")
     s.add_argument("src")
     s.add_argument("dst")
@@ -751,6 +784,9 @@ def main():
     a = ap.parse_args()
     if a.cmd == "align":
         return align([a.src, a.dst], a.src, a.dst, a.undo)
+    if a.cmd == "coverage":
+        suite_more.coverage_all()
+        return 0
     if a.cmd == "list":
         for k, (needs, fn) in BATCHES.items():
             print(f"{k:8s} needs {needs}")

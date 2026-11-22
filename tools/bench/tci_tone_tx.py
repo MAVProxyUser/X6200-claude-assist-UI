@@ -5,7 +5,7 @@ from 127.0.0.1 is not asked about on the screen (src/tci_server.c), one from the
 plan's tone (made whole before keying), then "trx:0,false;". Its own deadline besides: past MAX_S it unkeys and leaves, and the
 server itself unkeys 500 ms after the audio stops. Standard library only (the radios have no WebSocket package).
 
-    tci_tone_tx.py PLAN_JSON AMPLITUDE MAX_S [PORT [FADE_S]]   PLAN: [[hz, seconds], ...]; 0 Hz is silence; FADE_S the
+    tci_tone_tx.py PLAN_JSON|@FILE AMPLITUDE MAX_S [PORT [FADE_S]]   (@FILE: 16-bit 24 kHz mono audio, sent as it is)   PLAN: [[hz, seconds], ...]; 0 Hz is silence; FADE_S the
                                                                fade in and out of each stretch of tone (0.3 s; tones.py
                                                                --bursts: a hard start, 2 ms)
 Prints "start EPOCH" at the first frame sent and "end EPOCH SAMPLES" at the unkey.
@@ -72,7 +72,9 @@ class WS:
 
 
 def main():
-    plan = json.loads(sys.argv[1])
+    # "@FILE": the audio of a file instead (mono 16-bit little-endian at 24 kHz, made on the computer: a PSK31 or RTTY
+    # signal for the suite's decoder tests), sent as it is
+    plan = [] if sys.argv[1].startswith("@") else json.loads(sys.argv[1])
     amp, max_s = float(sys.argv[2]), float(sys.argv[3])
     port = int(sys.argv[4]) if len(sys.argv) > 4 else 50001
     fade_s = float(sys.argv[5]) if len(sys.argv) > 5 else 0.3
@@ -112,6 +114,12 @@ def main():
             g = i / nf
             out[r0 + i] = int(out[r0 + i] * g)
             out[r1 - 1 - i] = int(out[r1 - 1 - i] * g)
+    if sys.argv[1].startswith("@"):
+        out = array("h")
+        with open(sys.argv[1][1:], "rb") as f:
+            out.frombytes(f.read())
+        if sys.byteorder != "little":
+            out.byteswap()
     if sys.byteorder != "little":
         out.byteswap()
     pcm = out.tobytes()

@@ -7,6 +7,25 @@ here transmits until the owner says so (transmit work is not wanted for now). On
 Meteor/SCAN CFG one, the Kraken DF one and its kernel one) were folded into one backlog, in the order the owner
 approved that day.
 
+**2026-11-22 afternoon: the test harness and the 1:1 suite** (the owner: "audit deeply the test harness and ensure this
+stops happening"; "a comprehensive set of unit tests to cover EVERYTHING 1:1 on both radios"):
+- DONE cad0140f, d5803f2e: bench.py's state layer (each radio said whole and read back, the path proved, unheard overs
+  failed, finish to page A), the remote's new state, sim_test 34 cases in CI; acoustic.py (the mic on G both ways,
+  PASS); the bench player ("play").
+- UNDER WAY: features.json (1386 features from the manual and the code) and suite_more.py's batches rx, control,
+  safety, paths: one test per feature on each radio and 1:1, coverage.md with each run (what is not covered yet).
+- FOUND, to look at: the X6200's remote spectrum cannot resolve a tone inside the passband: one clean 1000 Hz TCI
+  tone fills 0-2500 Hz alike, at zoom 1 or 8, at any gain (2026-11-22, scratchpad tone_shape2.py); the X6100's peaks
+  (-9 dB at +-200 Hz). Its source (the base's PSD?) or its smoothing: check the X6200's own screen too.
+- FOUND, the owner's call: on the X6100 an RF gain under 100 is the base's stepped attenuator; it sits at 63 (Xiegu's
+  default) and D/E's rule ("ATT off") does not touch RF gain. Whether D and E should set RF gain 100 too.
+- CHECKED (the owner: "selecting things in D or E should automatically properly set the permutation for ATT, PRE and
+  AGC"): D's LISTEN on 15 bands and E's OPEN on all 17 types set ATT, PRE and AGC as rx_setup says, on both radios,
+  read back 0.3-4 s after (they stay). The ATT seen on was left by the bench's 10 W probe (image.py --rx-att 1), not
+  D or E.
+- The X6200 heard nothing of the X6100 with its battery at 7.0-7.6 V and everything on a full one (both pads fine):
+  to prove at its next low battery (bench.listener_gate refuses a listener under 25 % meanwhile).
+
 **2026-11-20: the owner's asks, audited 2026-11-21 02:10 UTC** (82 messages of 2026-11-20/21, direct and queued, checked
 against git: 32 commits that day, v0.3.12.37-.40 released). Open first; then what changed state; the done ones last.
 

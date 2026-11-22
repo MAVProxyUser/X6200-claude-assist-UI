@@ -152,6 +152,10 @@ class SimRadio:
                 self.state["play"] = 1 if self.state["heard"] in (1, 2) else 0
             self.state["txf"] = self.state["freq"] + (5000 if self.fault == "split" else 0)
             self._state()
+        elif a[0] == "close":                           # the app open closed (the harness's finish closes it)
+            self.ft8["open"], self.state["app"] = 0, ""
+            self.send("ft8 " + json.dumps(self.ft8))
+            self._state()
         elif a[:2] == ["open", "sentry"] and len(a) >= 3:
             self.state["pg"] = a[2]
             self._state()

@@ -51,7 +51,7 @@ jobs:
           for i in 1 2 3; do sudo apt-get install -y -q -o Acquire::Retries=3 -o Dir::Cache::Archives="$A" \
             -o APT::Keep-Downloaded-Packages=true \
             build-essential autoconf automake libtool cmake ninja-build pkg-config \
-            libsqlite3-dev sqlite3 libxkbcommon-dev libnm-dev libpng-dev libasound2-dev python3-bottle \
+            libsqlite3-dev sqlite3 libxkbcommon-dev libnm-dev libpng-dev libasound2-dev python3-bottle python3-numpy \
             fdisk util-linux parted dosfstools exfatprogs bsdextrautils network-manager dbus iproute2 \
             libsdl2-dev libdrm-dev libdbus-glib-1-dev libsndfile1-dev libudev-dev libpulse-dev libjpeg-dev \
             libglib2.0-dev libboost-dev && break; sleep 20; [ $i = 3 ] && exit 1; done
