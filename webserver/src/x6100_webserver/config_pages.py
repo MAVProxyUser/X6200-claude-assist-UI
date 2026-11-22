@@ -143,13 +143,16 @@ def plain_page(view='index'):
 def secret_places():
     """The files and folders of the DATA partition that hold secrets (apps.py, SECRET_HIDDEN): the keys of the
     Wavelog and Field pages, the Zello account and developer key, SVXConnect's key and certificate (all of its pki/
-    folder), the copy of the WiFi passwords, the SSH host keys
+    folder), the HTTPS server's private key, the copy of the WiFi passwords, the SSH host keys
     and root's SSH files made at each power-off and the Bluetooth link keys (backups/: backup.tgz, bluetooth.tgz), an
     uploaded backup while it waits for Restore (its WiFi passwords) and the WiFi networks a restore replaced"""
     files = [os.path.join(settings.FIELD_DIR, n + tmp) for n in ("wavelog.conf", "qrz.conf", "hota.conf", "wwff.conf")
              for tmp in ("", ".tmp")]
     files += [os.path.join(settings.ZELLO_DIR, n + tmp) for n in ("account.conf", "private_key.pem")
               for tmp in ("", ".tmp")]
+    # the HTTPS server's private key: whoever has it can pass for the radio's https pages and read a paired
+    # browser's traffic (it was served here up to v0.3.12.46, 2026-11-22); its certificate stays downloadable
+    files += [os.path.join(settings.CERT_DIR, "key.pem" + tmp) for tmp in ("", ".tmp")]
     folders = [os.path.join(settings.FILEBROWSER_PATH, "backups"), settings.BACKUP_WORK,
                os.path.join(settings.BACKUP_SAFETY, "wifi"), os.path.join(settings.SVX_DIR, "pki")]
     return files, folders

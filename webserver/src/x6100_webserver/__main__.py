@@ -447,6 +447,7 @@ def serve():
     # params.db for the routes that take a "dbcon" argument: a connection per request, committed after it
     apps.app.install(bottle.ext.sqlite.Plugin(dbfile=opts.db, keyword="dbcon"))
     settings.FILEBROWSER_PATH, settings.DB_PATH = opts.filebrowser_path, opts.db
+    settings.CERT_DIR = opts.cert_dir
     settings.CLUSTER_CONF = opts.cluster_conf
     settings.TCI_CONF = opts.tci_conf
     settings.CHANNELS_FILE = opts.channels_file

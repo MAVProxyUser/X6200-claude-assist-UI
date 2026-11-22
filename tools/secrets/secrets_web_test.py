@@ -210,6 +210,10 @@ class Secrets(unittest.TestCase):
         con.commit()
         con.close()
 
+        if hasattr(settings, "CERT_DIR"):       # the HTTPS pages' key (served by the Files page up to v0.3.12.46)
+            write(settings.CERT_DIR + "/key.pem", "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIBENCH\n"
+                                                  "-----END PRIVATE KEY-----\n", 0o600)
+            write(settings.CERT_DIR + "/cert.pem", "-----BEGIN CERTIFICATE-----\nBENCH\n-----END CERTIFICATE-----\n")
         f = settings.FIELD_DIR
         write(f + "/wavelog.conf", f"enabled=0\nurl=https://log.example.org\nkey={WAVELOG_KEY}\nstation_id=1\n"
                                    f"cat=1\ncat_token={CAT_TOKEN}\n", 0o600)
@@ -364,7 +368,7 @@ class Secrets(unittest.TestCase):
                 files.add(path)
         for path in ("/files/ft_log.adi", "/files/shot.png", "/files/backup_before_restore/channels.json",
                      "/files/field/logs/2026-11-13-ONFF-0001.adi", "/files/zello/channels.txt",
-                     "/files/svxconnect/svxconnect.conf"):
+                     "/files/svxconnect/svxconnect.conf", "/files/https/cert.pem"):
             self.assertIn(path, files)       # the others are still downloaded
         for path in ("/files/field/wavelog.conf", "/files/field/qrz.conf", "/files/field/hota.conf",
                      "/files/field/wwff.conf", "/files/field/copy-of-wavelog.conf", "/files/backups/backup.tgz",
@@ -372,7 +376,7 @@ class Secrets(unittest.TestCase):
                      "/files/backup_before_restore/wifi/Club.nmconnection", "/files/zello/account.conf",
                      "/files/zello/private_key.pem", "/files/svxconnect/pki/ON6URE.key",
                      "/files/svxconnect/pki/ON6URE.csr", "/files/svxconnect/pki/ON6URE.crt",
-                     "/files/svxconnect/pki/ca-bundle.crt"):
+                     "/files/svxconnect/pki/ca-bundle.crt", "/files/https/key.pem"):
             self.assertNotIn(path, files)
             self.get(path, 403)              # asked for by name
         st, data = self.get("/files/field/", 200)

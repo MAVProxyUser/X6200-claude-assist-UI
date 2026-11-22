@@ -34,6 +34,7 @@ SVX_DIR = "/mnt/svxconnect"         # the SVXConnect app's settings (svxconnect.
 SVX_CMD = "/usr/bin/svxconnect"     # SVXConnect-CLI (tools/svxconnect): the app's helper, the enrolment here
 SVX_ENROLL_LOG = "/mnt/app_logs/svxconnect-enroll.txt"   # what the last enrolment said
 HTTPS_PORT = 0                      # set when the HTTPS server runs (the Gallery's in-browser conversion needs it)
+CERT_DIR = "/mnt/https"             # its self-signed cert.pem and key.pem (--cert-dir): the key is a secret
 HTTP_PORT = 80                      # the plain server: every other page
 SMARTCW_PORT = 0                    # set when SmartCW's page runs on its own port (smartcw.py)
 REMOTE_CONF = "/mnt/remote.conf"   # the browser remote (src/remote_server.c): enabled=, port=
