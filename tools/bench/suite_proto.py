@@ -791,10 +791,111 @@ def t_web_guards(run):
     by_radio(run, "control", "funnel-sim", ["tci-funnel-refused", "funnel-ws-key-first"], funnel_ws)
 
 
+# ---- control: the Panel's Log tab (the owner, 2026-11-22: "Yes, log Q9TST") ----
+# The phone's log writes the day's log on DATA (/mnt/field/logs/YYYYMMDD.adi, the QSO's UTC date), kicks Wavelog
+# (off without /mnt/field/wavelog.conf) and sends the QSO as WSJT-X UDP "QSO Logged" when ft8_udp.conf says
+# enabled=1, read again for each QSO while the FT8 window is closed. So the test switches the UDP off for its QSOs
+# (none of Q9TST reaches a PC logger, GridTracker or LoTW) and puts the file back byte for byte; it takes its QSOs
+# out of the day's log after (the file and its folder gone when they were not there before).
+LOG_CALL = "Q9TST"
+LOG_PREP = r"""
+d=/mnt/field/logs; f=$d/$(date -u +%Y%m%d).adi
+echo "dir=$([ -d $d ] && echo yes || echo no) file=$([ -f $f ] && echo yes || echo no) path=$f"
+echo "wavelog=$([ -f /mnt/field/wavelog.conf ] && grep -c '^enabled=1' /mnt/field/wavelog.conf || echo 0)"
+if [ -f /mnt/ft8_udp.conf ]; then
+    cp -p /mnt/ft8_udp.conf /tmp/bench_ft8_udp.conf && sed -i 's/^enabled=1/enabled=0/' /mnt/ft8_udp.conf && echo udp=off
+else
+    echo udp=none
+fi
+"""
+
+
+def adif_records(text):
+    """The records of an ADIF file after its header: [{FIELD: value}]"""
+    import re
+    body = re.split(r"<eoh>", text, flags=re.I)[-1]
+    out = []
+    for rec in re.split(r"<eor>", body, flags=re.I):
+        fields = {}
+        for m in re.finditer(r"<([A-Za-z_]+):(\d+)(?::[A-Za-z])?>", rec):
+            fields[m.group(1).upper()] = rec[m.end():m.end() + int(m.group(2))]
+        if fields:
+            out.append(fields)
+    return out
+
+
+def t_log(run):
+    def fn(r):
+        import random
+        prep = dict(x.split("=", 1) for x in bench.ssh(r.host, LOG_PREP, 30).split() if "=" in x)
+        said, ok = [], True
+        try:
+            if prep.get("wavelog") not in ("0", ""):
+                return False, "Wavelog is on: the test QSOs would go to the online log; not run"
+            if prep.get("udp") not in ("off", "none"):
+                return False, f"the WSJT-X UDP not switched off ({prep.get('udp')}); not run"
+            bench.close_apps(r)                 # the FT8 window owns the UDP socket while open
+            bench.ensure(r, {"freq": F_TEST, "mode": 2})
+            t0 = time.time()
+            r.send(f"log {LOG_CALL}|57|58|BENCH|TEST QTH|FN00|")
+            a = line_after(r, t0, "logged ", 5)
+            ok &= a == "logged ok"
+            said.append(f"log in USB: {a!r}")
+            bench.ensure(r, {"mode": 4})
+            qid = random.randrange(10 ** 9, 10 ** 12)
+            q = f"{LOG_CALL}|599|579"
+            answers = []
+            for cmd in (f"logq {qid} {q}", f"logq {qid} {q}", f"logq? {qid} {q}", f"logq {qid} {LOG_CALL}|599|599",
+                        f"logq? {qid + 1} {q}"):
+                t1 = time.time()
+                r.send(cmd)
+                answers.append(line_after(r, t1, "logged ", 5))
+            want = [f"logged {qid} ok", f"logged {qid} ok", f"logged {qid} ok", f"logged {qid} conflict",
+                    f"logged {qid + 1} unknown"]
+            ok &= answers == want
+            said.append("logq: " + ", ".join(repr(x) for x in answers) + " (sent, the same again, asked, another QSO "
+                        "under its number, a number never sent)")
+            time.sleep(1.0)
+            text = bench.ssh(r.host, f"cat {prep['path']} 2>/dev/null", 20)
+            mine = [x for x in adif_records(text) if x.get("CALL") == LOG_CALL]
+            modes = [(x.get("MODE"), x.get("RST_SENT"), x.get("RST_RCVD")) for x in mine]
+            first = mine[0] if mine else {}
+            ok &= len(mine) == 2 and modes == [("SSB", "57", "58"), ("CW", "599", "579")] and \
+                first.get("NAME") == "BENCH" and first.get("GRIDSQUARE") == "FN00" and \
+                abs(float(first.get("FREQ", 0)) - F_TEST / 1e6) < 0.001
+            head = text[:200]
+            hdr = "<ADIF_VER:5>3.1.8" in head and "GoldCorpHF" in head
+            if prep.get("file") == "no":
+                ok &= hdr
+            said.append(f"the day's log: {len(mine)} {LOG_CALL} records {modes} (written once each), name "
+                        f"{first.get('NAME')!r}, grid {first.get('GRIDSQUARE')!r}, {first.get('FREQ')} MHz; its "
+                        f"header ADIF 3.1.8 by GoldCorpHF {hdr}")
+            return ok, "; ".join(said)
+        finally:
+            # the test's QSOs out of the day's log, the UDP setting back as it was
+            if prep.get("file") == "no":
+                clean = f"rm -f {prep['path']}" + ("; rmdir /mnt/field/logs 2>/dev/null" if prep.get("dir") == "no"
+                                                   else "")
+            else:
+                clean = (f"python3 - {prep['path']} <<'PY'\nimport re, sys\np = sys.argv[1]\ns = open(p).read()\n"
+                         f"parts = re.split(r'(<eor>)', s, flags=re.I)\nkeep = ''.join(a + b for a, b in "
+                         f"zip(parts[0::2], parts[1::2] + ['']) if '<CALL:{len(LOG_CALL)}>{LOG_CALL}' not in a.upper())"
+                         f"\nopen(p + '.tmp', 'w').write(keep)\nPY\nmv {prep['path']}.tmp {prep['path']}")
+            if prep.get("udp") == "off":
+                clean += ("; cp -p /tmp/bench_ft8_udp.conf /mnt/ft8_udp.conf && cmp /tmp/bench_ft8_udp.conf "
+                          "/mnt/ft8_udp.conf && rm /tmp/bench_ft8_udp.conf && echo udp_back")
+            out = bench.ssh(r.host, clean + f"; grep -c '{LOG_CALL}' {prep['path']} 2>/dev/null || true", 30)
+            say(f"{r.name}: the test QSOs taken out, the UDP setting back: {out.strip()!r}")
+            if prep.get("udp") == "off" and "udp_back" not in out:
+                raise bench.Refused(f"{r.name}: /mnt/ft8_udp.conf NOT put back (/tmp/bench_ft8_udp.conf has it)")
+    per_radio(run, "control", "panel-log", fn, ["panel-log-qso", "panel-logq-idempotent", "panel-logq-query",
+                                                 "panel-log-mode", "log-quick-qso-fields"])
+
+
 def control(run, only):
     for name, fn in (("tci-proto", t_tci_proto), ("tci-drive", t_tci_drive), ("tci-guards", t_tci_guards),
                      ("panel", t_panel), ("control-owner", t_control_owner), ("panel-apps", t_panel_apps),
-                     ("screen", t_screen), ("web-guards", t_web_guards)):
+                     ("screen", t_screen), ("web-guards", t_web_guards), ("log", t_log)):
         if not only or name in only:
             run.banner(f"SUITE control: {name} (nothing sent)")
             fn(run)

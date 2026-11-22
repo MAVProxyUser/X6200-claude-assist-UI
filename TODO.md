@@ -24,8 +24,10 @@ stops happening"; "a comprehensive set of unit tests to cover EVERYTHING 1:1 on 
 - suite_proto.py (control: TCI protocol, the remote's protocol, control, screen, web guards, Funnel; system: SSH reads):
   found the bench player taking a missing file in silence (fixed), the manual blurring rx_smeter (always) with
   rx_channel_sensors (after rx_sensors_enable).
-- OPEN, the owner's word first: the logging tests (log, logq) would write test QSOs (Q9TST) into the radios' own day
-  log and QSO database; not run.
+- DONE (the owner: "Yes, log Q9TST"): the Log tab's tests on both radios 1:1: log in USB (SSB 57/58, name and grid),
+  logq sent, repeated (written once), asked, a conflict, an unknown number. WSJT-X UDP (enabled=1 on both, multicast
+  and the gateway) switched off for the test and put back byte for byte, so no Q9TST reached a PC logger; the day's
+  log removed after (it was not there before).
 - CHECKED (the owner: "selecting things in D or E should automatically properly set the permutation for ATT, PRE and
   AGC"): D's LISTEN on 15 bands and E's OPEN on all 17 types set ATT, PRE and AGC as rx_setup says, on both radios,
   read back 0.3-4 s after (they stay). The ATT seen on was left by the bench's 10 W probe (image.py --rx-att 1), not
