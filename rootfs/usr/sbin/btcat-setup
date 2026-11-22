@@ -2,7 +2,10 @@
 # Configure adapter for SPP CAT: power, name, SDP record. No pairing agent and
 # not pairable: new devices pair in the pairing window (btcat-ctl discoverable on).
 BTCAT_BT=yes
+# The name a PC sees: the radio's model (the X6200 called itself X6100 here up to v0.3.12.45); /mnt/btcat.conf may set
+# another with BTCAT_ALIAS=
 BTCAT_ALIAS="X6100"
+grep -q "xiegu,x6200" /proc/device-tree/compatible 2>/dev/null && BTCAT_ALIAS="X6200"
 [ -r /etc/default/btcat ] && . /etc/default/btcat
 [ -r /mnt/btcat.conf ] && . /mnt/btcat.conf
 

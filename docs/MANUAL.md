@@ -3642,7 +3642,7 @@ at 4, as it would have.
 | Card | Options |
 |---|---|
 | RX AUDIO | Speaker mode, Line-in / Line-out, Play / Rec gain, Boot sound (CQ CQ in CW with the boot logo, quiet; at volume 28 when your VOL is lower; off by default), Speaker always off |
-| TX AUDIO | compressor (threshold, makeup), TX filter, FM pre/de-emphasis |
+| TX AUDIO | compressor (threshold, makeup), TX filter, FM pre/de-emphasis: an X6100 with a patched base only (r3, r8, r9 and later, see [the table at the top](#setting-up-the-transmitter)); hidden on Xiegu's own base and on the X6200 |
 | MICROPHONE | Input (Built-in, Hand, Auto), Hand mic gain, Built-in gain, Moni level (0-100, 0 by default) |
 | VOX | On, Gain, Anti-VOX, Delay |
 | AGC | Hang, Knee, Slope |
@@ -3918,7 +3918,7 @@ What they do: see [DX Cluster](#dx-cluster).
 
 | Card | Options |
 |---|---|
-| TX CALIBRATION | IQ offsets, IQ balance (X6100 base gcfix5), band output gain, codec gain |
+| TX CALIBRATION | the X6100 only: IQ offsets (every base), IQ balance (base gcfix5), band output gain (r8 and later), codec gain (r3 and later); on Xiegu's own V1.1.9 only the IQ offsets show. Not on the X6200 |
 | CESSB | on, level |
 | TX PROTECTION | SWR protection, TX ranges (Ham bands, South Korea, Own list), Own list file (Read again), TX outside ham bands (see [Amateur bands only](#amateur-bands-only)) |
 | EXTERNAL TUNER | TUNE power, W; TUNE time limit, s (see [TUNE for an external tuner](#tune-for-an-external-tuner)) |
@@ -5171,7 +5171,7 @@ Buttons:
   FT8, 7.5 s FT4, 3.75 s FT2) and is kept in the clock chip. A clock that
   NTP (WiFi) or the GPS keeps is left alone ("Clock in sync", "The GPS keeps
   the clock"): moved to a press it could only get worse.
-- Days away from a network (the X6200): its two clocks are kept together.
+- Days away from a network (the X6200, and the X6100 with its clock chip): its two clocks are kept together.
   The processor's clock runs while the radio is on, its rate learnt by ntpd
   whenever WiFi was there (kept on the card). The clock chip, on its own
   battery, counts while it is off; it counts whole seconds, so it is now
@@ -6183,7 +6183,9 @@ Train is for practice: the key, the paddle, the CW messages and the
 
 In CW mode the decoder buttons are on the CW pages: CW 1:2 has ZAP, CW
 peak, CW peak Q and Log QSO (the [quick QSO log](#quick-qso-log)), CW 2:2 Decoder on/off, Tuner (tuning
-indicator), Dec SNR and Parse. Text and speed (WPM) appear in the panel
+indicator), Dec SNR and Parse. CW peak and its Q shape what you hear on the X6100 (the base's peaking filter at the
+key tone) and the decoder's input on both radios; the X6200's base has no such filter, so there they act on the
+decoder only. Text and speed (WPM) appear in the panel
 over the waterfall. The panel is see-through in every theme (up to v0.3.12.30 the
 flat themes, the Sentry's gold on black among them, filled it solid, so with the
 decoder on the classic screen showed no waterfall in CW); High contrast keeps it
@@ -8651,8 +8653,10 @@ plays (`/usr/share/x6100/bootvideo.mp4`, this fork's GoldCorp start-up,
   makes one that plays smoothly: 800x480 at 30 frames a second, H.264, no
   sound. The optional crop (ffmpeg's `crop=W:H:X:Y`) keeps the part of a tall
   or wide video that matters, so it fills more of the screen.
-- On the X6200 the processor's video engine (Cedrus) decodes it and the
-  display shows each picture as it comes, so the whole 15 s video costs the
+- The processor's video engine (Cedrus) decodes it and the
+  display shows each picture as it comes (the X6200; the X6100 too from
+  v0.3.12.29's card image: `the video engine decoded it` on the owner's,
+  2026-11-22), so the whole 15 s video costs the
   processor under a second (ffmpeg decoding it takes about half the
   processor). That needs the image's GStreamer (v0.3.12.21 on, with a kernel
   from v0.3.12.19's bundles or later on the card) and a portrait twin beside
@@ -11149,7 +11153,7 @@ begun before keeps the header it had (PROGRAMVERSION 1.0.0, ADIF_VER 3.14);
 |---|---|
 | Transport | Bluetooth SPP, RFCOMM channel 1 (or USB CAT) |
 | SPP UUID | `00001101-0000-1000-8000-00805F9B34FB` |
-| Pairing | required once, in the 3-minute pairing window; Just Works, no PIN; device name `X6100` (`BTCAT_ALIAS` in `/etc/default/btcat`) |
+| Pairing | required once, in the 3-minute pairing window; Just Works, no PIN; device name the radio's model, `X6100` or `X6200` (up to v0.3.12.45 the X6200 called itself `X6100` too; another with `BTCAT_ALIAS="..."` in `/mnt/btcat.conf`) |
 | Protocol | CI-V, radio address `0xA4` |
 | Frame | `FE FE A4 <ctrl> <cmd> [sub] [data] FD`; reply `FB` = OK, `FA` = NG |
 | Baud (USB) | 19200 8N1 (ignored over BT) |
@@ -11417,9 +11421,12 @@ A radio whose kernel has no thermal zone shows none of them.
 ### Graphics processor (X6200)
 
 The X6200's processor has a graphics processor of its own, a Mali-400 with two
-cores. The X6200's image carries Mesa with its `lima` driver (from v0.3.12.19),
-and the GUI has the GPU draw the pictures that change all the time, which the
-processor drew alone before:
+cores, and so has the X6100's. The X6200's image carries Mesa with its `lima`
+driver from v0.3.12.19, the X6100's from v0.3.12.29 (Mesa comes with a card
+image, not an update bundle; checked on the owner's X6100, 2026-11-22: `gpu:
+Mali400 draws the Sentry's pictures into the display's plane`, and the GUI's
+layer on the GPU too), and the GUI has the GPU draw the pictures that change all
+the time, which the processor drew alone before:
 
 - the [Sentry](#the-sentry)'s A and B: the spectrum, the waterfall in 3D or
   flat, the dial's brackets and SPLIT's divider (v0.3.12.20);
@@ -11484,11 +11491,13 @@ display's lower plane, under holes in that layer.
   the processor's cache over the whole layer for each frame the GPU reads. An
   empty `/mnt/gpu_gui.off` leaves the layer to the processor, the rest on the
   GPU.
-- **The X6100** has the same processor and graphics processor, but its image
-  carries no Mesa: the processor draws everything there, as before (the GUI's
-  log: `no Mesa on this image`).
-- **The boot video**: on the X6200 the processor's video engine decodes it
-  (see [Boot video](#boot-video)).
+- **The X6100** has the same processor and graphics processor. Its card
+  images up to v0.3.12.28 carried no Mesa, and a card written with one of them
+  (updated by bundles since) still has none: the processor draws everything
+  there, as before (the GUI's log: `no Mesa on this image`). A card image from
+  v0.3.12.29 on has it.
+- **The boot video**: the processor's video engine decodes it, on the X6100
+  too from v0.3.12.29's card image (see [Boot video](#boot-video)).
 
 ## Build
 

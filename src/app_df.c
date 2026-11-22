@@ -1440,7 +1440,7 @@ static void pan_fill(void) {
 
         lv_label_set_text(panel_head_l, "TUNE: WHERE TO TAKE A BEARING");
         snprintf(t[T_FOLLOW], sizeof(t[0]), "FOLLOW    < %s >  %s", follow_names[cfg.follow],
-                 cfg.follow == 1 ? "THE X6200'S DIAL, AS IT CHANGES" : cfg.follow == 2 ? "B'S FREQUENCY, AS IT CHANGES"
+                 cfg.follow == 1 ? "THE " BOARD_NAME "'S DIAL, AS IT CHANGES" : cfg.follow == 2 ? "B'S FREQUENCY, AS IT CHANGES"
                                                                        : "TUNED HERE");
         fmt_mhz(f, sizeof(f), b >= 0 ? bands[b].hz : target_hz());
         snprintf(t[T_BAND], sizeof(t[0]), "BAND      < %s %s MHZ >", b >= 0 ? bands[b].name : "-", b >= 0 ? f : "");
@@ -2165,7 +2165,7 @@ static void build(void) {
                    "GREEN IN, AMBER QUIET, RED LOW OR SLIPPED, MAGENTA CLIPPING, DIM NOT CALIBRATED, OFF OR GONE. ITS BAR: "
                    "THE TARGET OVER ITS FLOOR. THE DASHED CIRCLE IS HALF A WAVELENGTH ACROSS. ROUND IT THE METHOD'S "
                    "SPECTRUM, THE NEEDLE (GREEN FIT 80% UP, AMBER 50-80, RED UNDER) AND ITS +- WEDGE; DOTS: LAST BEARINGS.\n\n"
-                   "F1 TUNE: FOLLOW A OR B (THE X6200'S DIAL OR B'S FREQUENCY, AS THEY CHANGE), BAND, FREQUENCY, WIDTH, AUTO "
+                   "F1 TUNE: FOLLOW A OR B (THE " BOARD_NAME "'S DIAL OR B'S FREQUENCY, AS THEY CHANGE), BAND, FREQUENCY, WIDTH, AUTO "
                    "(HELD: AUTO).  F2 ARRAY: BAND, KIND, SIZE, SIZE FOR THE BAND, HEADING.  F3 METHOD.  F4 CAL NOW (HELD: "
                    "HOW OFTEN).  F5 SET: RATE, GAIN, SQUELCH, ANTENNAS LEFT OUT, TEST SOURCE.  VFO: TARGET 1 KHZ (THE KRAKEN "
                    "FOLLOWS PAST THE EDGE).  MFK: A CHANNEL.  BAND KEYS: THE BAND PRESETS.  " SENTRY_RING_SHORT ": H BEFORE, A "

@@ -587,7 +587,8 @@ static void read_state(lcd_state_t *st) {
     if (tx) {
         tx_info_get(&pwr, &swr);
         st->swr_bars = LV_CLAMP(0, (int)((swr - 1.0f) * 3 + 0.5f), 7);   /* 1.0 to 3.0 on 7 bars */
-        st->rf_bars  = LV_CLAMP(0, (int)(pwr * 11 / 10 + 0.5f), 11);     /* 0 to 10 W on 11 bars */
+        /* 0 to the radio's top (10 W, the X6200's 8 W) on 11 bars: the X6200 at its top showed 9 of them */
+        st->rf_bars  = LV_CLAMP(0, (int)(pwr * 11 / BOARD_PWR_MAX + 0.5f), 11);
     }
     clock_power_get(&ext, &bat, &cap, &charge);
     gmtime_r(&now, &t);

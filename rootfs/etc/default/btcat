@@ -3,4 +3,4 @@
 BTCAT_ENABLE=yes
 # Bluetooth adapter power
 BTCAT_BT=yes
-BTCAT_ALIAS="X6100"
+# The name a PC sees (BTCAT_ALIAS): the radio's model by default (btcat-setup); set one in /mnt/btcat.conf to change it
