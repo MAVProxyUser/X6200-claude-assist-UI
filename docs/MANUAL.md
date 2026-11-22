@@ -10875,6 +10875,22 @@ second. WiFi (NTP) or GPS sets it, and in the field the phone's clock (the
 for a clock that neither keeps), and FT8 Auto Sync, which keeps the clock
 right from the decodes once Time Sync has it within about 2 s.
 
+#### Steady tones in the X6100's receive audio: about 781 Hz and its harmonics
+
+With nothing on the air the X6100's receive audio carries steady tones that stay at the same audio pitch wherever
+the dial is: 780.69 Hz exactly and its harmonics (1561.4, 2342.1, 3122.8, 3903.5 Hz), and lower ones around
+97.9 Hz (with 195.7 and 391.2) and 145.35 Hz (with 290.7). Measured on our X6100 on 2026-11-21, 8 to 15 dB over
+the receiver's own noise with the antenna side quiet (behind 80 dB of pads); the X6200 has none. On a voiceprint
+or an audio spectrum they are thin steady lines; through a real antenna the band's noise mostly covers them. They
+are not RF birdies (an X6100's are many, at fixed radio frequencies, and move in the audio as you tune): these
+pass through the CW filter, do not change with the RF gain, the base's line-out level or the charger, and are not
+the display, the backlight or the base's data. They come in on the wire that carries the base's receive audio to
+the processor's codec (its MIC1 input): with that input's boost at 0 dB they fall with the hiss, 24 dB, while the
+codec's other input at the same gain has none, 45 dB below them. So they come out of the base board, or in on the
+ground between the two boards. We have found no public report of them; 780.69 Hz is 0.07 % off 50 kHz / 64, close
+to but not exactly a base DSP rate. Nothing filters them yet: a notch in the radio's receive audio at 780.69 Hz and
+its harmonics would take the main series out.
+
 #### The receiver's audio played the last 2 seconds again, and decodes came 2 s late after it
 
 Fixed in the SD card's kernel of the bundles built after v0.3.12.42 (both radios). The processor's audio input
