@@ -722,7 +722,22 @@ def http(ip, path, host=None, method="GET", body=None, headers=None):
 
 
 def by_radio(run, batch, test, covers, fn):
-    """fn(name, host, ip) on each radio without a remote session (the web, SSH): (ok, says) each, then 1:1"""
+    """fn(name, host, ip) on each radio without a remote session (the web, SSH): (ok, says) each, then 1:1. Both
+    radios are put in sync first (suite_more.sync_both: the owner, 2026-11-23) and back as found after"""
+    from suite_more import sync_both, unsync_both
+    snaps, seen, why = sync_both(run)
+    try:
+        if why:
+            for n in run.names:
+                run.result(batch, f"{test} {n}", False, f"refused: the radios are not in sync before the test ({why})",
+                           radio=n, covers=covers)
+            return
+        _by_radio(run, batch, test, covers, fn)
+    finally:
+        unsync_both(run, snaps)
+
+
+def _by_radio(run, batch, test, covers, fn):
     res = {}
     for n in run.names:
         h = run.host(n)

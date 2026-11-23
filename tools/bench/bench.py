@@ -689,15 +689,151 @@ def spectrum_level(r, hz, t0, t1, half=3000):
 
 # ---- The path proof: the listener hears the sender before a test measures anything ----
 PROOF_HZ = 1000             # the tone above the dial (USB-D)
-PROOF_S = 2.0
+PROOF_S = 5.0             # long enough for both screens to be photographed in the middle of it (the owner, 2026-11-23)
 PROOF_MIN_DB = 20           # the listener's spectrum at the tone over its quiet, at the least (0.1 W through 70-80 dB:
                             # 50-59 dB on the X6200, 2026-11-22)
 PROOF_DROP_DB = 15          # weaker than the last proof of the same pair by this much: said
 
 
-def tci_send(sender, plan, amp=0.3, max_s=10.0, fade=0.05, watch=None, file=None):
+# ---- Both radios alike, and both pictured while one sends ----
+# The owner, 2026-11-23: "when you TX on one radio screenshot them BOTH, you should see the RX happening! and they
+# should have the same settings. IF they don't something is wrong". So before any over the listener is set first and
+# read back, the sender is given exactly the listener's set-up, the two are compared (a difference refuses the test),
+# and during the over both screens are photographed (SHOTS_DIR, named for the test, the over and the radio).
+PAIR_KEYS = ("freq", "mode", "flo", "fhi", "pre", "att", "agc", "rfg", "sql", "nb", "nr", "rit", "split", "vfo", "ifs",
+             "zoom")
+PAIR_SET = ("freq", "mode", "filter", "pre", "att", "agc", "rfg", "sql", "nb", "nr", "rit", "split", "vfo", "zoom")
+SHOTS_DIR = os.path.join(STATE, "shots")
+PANEL_WH = (800, 480)                   # the screen's raw buffer: 480x800 portrait, saved landscape
+
+
+def pair_diff(a, b):
+    """The receiver settings a and b do not share: {key: (a's, b's)}"""
+    return {k: (a.state.get(k), b.state.get(k)) for k in PAIR_KEYS if a.state.get(k) != b.state.get(k)}
+
+
+def pair_align(sender, listener, f=None, mode=None):
+    """The listener first (f and mode when given), read back; then the sender set exactly as the listener, read back;
+    then the two compared. Refused, naming the keys, when they differ. Returns the set-up both have"""
+    first = {k: v for k, v in (("freq", f), ("mode", mode)) if v is not None}
+    if first:
+        ensure(listener, first)
+    want = {k: _value(listener, k) for k in PAIR_SET if _value(listener, k) is not None}
+    ensure(sender, want)
+    time.sleep(0.5)
+    diff = pair_diff(sender, listener)
+    if diff:
+        raise Refused(f"{sender.name} and {listener.name} are not set alike before the over: " +
+                      ", ".join(f"{k} {x}/{y}" for k, (x, y) in diff.items()))
+    return {k: listener.state.get(k) for k in PAIR_KEYS}
+
+
+# ssh -4: from Python each connection waited ~5 s on the name's IPv6 lookup (2026-11-23: 5.3 s against 0.33 s)
+def screen_capture(radio, tag):
+    """radio's screen kept on the radio now (/tmp/bench_shot_<tag>.raw): fast, so it can be taken during an over;
+    screen_fetch brings it here later. True when it was kept"""
+    if radio.simulated:
+        return False
+    cmd = (f"rm -f /tmp/screen.raw /tmp/bench_shot_{tag}.raw; kill -USR1 $(pidof x6100_gui); "
+           "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do [ -f /tmp/screen.raw ] && break; sleep 0.1; done; "
+           f"sleep 0.2; mv /tmp/screen.raw /tmp/bench_shot_{tag}.raw && echo kept")
+    try:
+        r = subprocess.run(["ssh", "-4", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", f"root@{radio.host}", cmd],
+                           capture_output=True, text=True, timeout=30)
+        return "kept" in r.stdout
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def screen_fetch(radio, tag, label):
+    """A screen screen_capture kept, here as SHOTS_DIR/<time>_<label>_<name>.png (landscape): its path, or None"""
+    try:
+        import gzip
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        r = subprocess.run(["ssh", "-4", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", f"root@{radio.host}",
+                            f"gzip -1 -c /tmp/bench_shot_{tag}.raw && rm -f /tmp/bench_shot_{tag}.raw"],
+                           capture_output=True, timeout=90)
+        data = gzip.decompress(r.stdout)
+    except (subprocess.TimeoutExpired, OSError, EOFError):
+        return None
+    if len(data) != PANEL_WH[0] * PANEL_WH[1] * 4:
+        return None
+    os.makedirs(SHOTS_DIR, exist_ok=True)
+    im = Image.frombuffer("RGBA", (PANEL_WH[1], PANEL_WH[0]), data, "raw", "BGRA", 0, 1).convert("RGB")
+    path = os.path.join(SHOTS_DIR, f"{time.strftime('%Y%m%d-%H%M%S')}_{re.sub(r'[^A-Za-z0-9]+', '_', label)}_"
+                                   f"{radio.name}.png")
+    im.rotate(-90, expand=True).save(path)
+    return path
+
+
+def screenshot(radio, label):
+    """radio's screen now, landscape, into SHOTS_DIR: its path, or None"""
+    tag = f"{os.getpid()}_{radio.name}"
+    return screen_fetch(radio, tag, label) if screen_capture(radio, tag) else None
+
+
+def _both(fn, radios):
+    out = {}
+    ths = [threading.Thread(target=lambda r=r: out.__setitem__(r.name, fn(r))) for r in radios]
+    for t in ths:
+        t.start()
+    for t in ths:
+        t.join(90)
+    return out
+
+
+def screenshots_both(radios, label):
+    """Every radio's screen at the same moment (captured together, fetched after): {name: path}"""
+    tag = f"{os.getpid()}_{int(time.time() * 1000)}"
+    kept = _both(lambda r: screen_capture(r, f"{tag}_{r.name}"), radios)
+    return _both(lambda r: screen_fetch(r, f"{tag}_{r.name}", label) if kept.get(r.name) else None, radios)
+
+
+def shots_during(radios, label, sender, settle_s=0.5, wait_s=15.0, tries=4):
+    """Both screens captured while the sender is on the air (its remote state "tx"; a fixed delay missed the over,
+    2026-11-23): once it goes on the air and settle_s more, both captured together on the radios (fast), kept when
+    the sender was on the air from before the capture to after it, else captured again (tries) until the over ends;
+    fetched afterwards. A started thread; once joined .paths ({name: path}), .on_air, .tries"""
+    def run():
+        t0 = time.time()
+        while time.time() - t0 < wait_s and not sender.tx:
+            time.sleep(0.05)
+        if not sender.tx:
+            return
+        time.sleep(settle_s)
+        tag = f"{os.getpid()}_{int(time.time() * 1000)}"
+        for k in range(tries):
+            if not sender.tx:
+                break
+            since = sender.tx_since
+            kept = _both(lambda r: screen_capture(r, f"{tag}_{k}_{r.name}"), radios)
+            th.tries = k + 1
+            good = bool(sender.tx) and sender.tx_since == since and all(kept.values())
+            if good or k == tries - 1 or not sender.tx:
+                th.on_air = good
+                th.paths = _both(lambda r: screen_fetch(r, f"{tag}_{k}_{r.name}", f"{label} {k + 1}")
+                                 if kept.get(r.name) else None, radios)
+                break
+            _both(lambda r: subprocess.run(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{r.host}",
+                                            f"rm -f /tmp/bench_shot_{tag}_{k}_{r.name}.raw"], capture_output=True,
+                                           timeout=20), radios)
+    th = threading.Thread(target=run)
+    th.paths, th.on_air, th.tries = {}, False, 0
+    th.start()
+    return th
+
+
+def tci_send(sender, plan, amp=0.3, max_s=10.0, fade=0.05, watch=None, file=None, listener=None, label="over"):
     """plan ([[hz, s], ...]) into the sender's transmitter through its own TCI server (tci_tone_tx.py run on it): the
-    sender's own stop if the watch stops. Returns (its output lines, epoch it began, epoch it ended)"""
+    sender's own stop if the watch stops. Returns (its output lines, epoch it began, epoch it ended). With listener:
+    both screens photographed halfway through the plan (screenshots_both; their paths in tci_send.last_shots)"""
+    shots = None
+    if listener is not None and plan and not sender.simulated:
+        shots = shots_during([sender, listener], label, sender,
+                             settle_s=min(1.0, max(0.3, sum(sec for _, sec in plan) / 3)))
     sender_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tci_tone_tx.py")
     if not sender.simulated:
         subprocess.run(["scp", "-q", "-o", "BatchMode=yes", sender_py, f"root@{sender.host}:/tmp/tci_tone_tx.py"],
@@ -719,7 +855,12 @@ def tci_send(sender, plan, amp=0.3, max_s=10.0, fade=0.05, watch=None, file=None
             break
         time.sleep(0.05)
     out = proc.communicate(timeout=30)[0]
-    return out.splitlines(), t0, time.time()
+    t1 = time.time()
+    tci_send.last_shots, tci_send.last_on_air = {}, False
+    if shots is not None:
+        shots.join(80)
+        tci_send.last_shots, tci_send.last_on_air = shots.paths, shots.on_air
+    return out.splitlines(), t0, t1
 
 
 def path_proof(c, total, sender, listener, f, report=None):
@@ -728,10 +869,14 @@ def path_proof(c, total, sender, listener, f, report=None):
     with what was seen; said when it is PROOF_DROP_DB under the last proof of the same pair. The listener must be set
     (ensure) before; the sender is left on f in USB-D at 0.1 W"""
     open_page(sender, "G")
+    open_page(listener, "G")
+    # both alike, the listener first: the same frequency and mode (USB-D, the sender's), filter, PRE, ATT, AGC... read
+    # back on both and compared (the owner, 2026-11-23: "they should have the same settings")
+    pair_align(sender, listener, f, 3)
     ensure(sender, *tx_profile(f, 3, FIRST_PROBE_W))
+    if pair_diff(sender, listener):
+        raise Refused(f"path proof: not alike after the sender's TX set-up: {pair_diff(sender, listener)}")
     radio_tx_gate(sender, c, FIRST_PROBE_W)
-    if abs(int(listener.state.get("freq", 0)) - f) > 20000:
-        raise Refused(f"path proof: {listener.name} is tuned to {listener.state.get('freq')} Hz, not near {f}")
     hz = f + PROOF_HZ
     for r in (sender, listener):
         r.send(f"banner BENCH PATH PROOF: {sender.name.upper()} SENDS {PROOF_HZ} HZ {FIRST_PROBE_W} W, "
@@ -739,11 +884,12 @@ def path_proof(c, total, sender, listener, f, report=None):
     time.sleep(1.2)
     quiet, nq = spectrum_level(listener, hz, time.time() - 1.0, time.time(), half=150)
     watch = Watch([sender, listener], c, expect_dbm=10 * math.log10(FIRST_PROBE_W * 1000) - total, listener=listener,
-                  w=FIRST_PROBE_W)
+                  w=FIRST_PROBE_W, label=f"path proof {sender.name} to {listener.name}")
     try:
         arm(sender, True, mode=3)
         tx_log({"who": sender.name, "f": f, "w": sender.pwr(), "what": "path proof"})
-        _, t_on, t_off = tci_send(sender, [[0, 0.3], [PROOF_HZ, PROOF_S]], watch=watch)
+        tone_s = min(PROOF_S, c["limits"]["max_key_s"] - 1.5)     # always under the over's own limit
+        _, t_on, t_off = tci_send(sender, [[0, 0.3], [PROOF_HZ, tone_s]], watch=watch)
     finally:
         watch.close()
         try:
@@ -758,6 +904,8 @@ def path_proof(c, total, sender, listener, f, report=None):
     loud, nl = spectrum_level(listener, hz, t_on + 0.8, t_off - 0.2, half=150)
     peak = watch.tx_peak.get(sender.name)
     res = {"sender": sender.name, "listener": listener.name, "f": f, "pads_db": total, "quiet_db": quiet, "tone_db": loud,
+           "shots": (watch.shots[-1]["paths"] if watch.shots else {}),
+           "shots_on_air": bool(watch.shots and watch.shots[-1]["on_air"]),
            "rise_db": None if quiet is None or loud is None else round(loud - quiet, 1), "frames": [nq, nl],
            "sender_peak_w": peak, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     if report is not None:
@@ -947,8 +1095,15 @@ class Watch:
     or a receiver hearing far more than the chain lets through, stops everything at once. More power than asked, under
     the pad's rating, is logged (said, tx_log, over_power) and the over goes on"""
 
-    def __init__(self, radios, c, hackrf=None, expect_dbm=None, listener=None, w=None):
+    def __init__(self, radios, c, hackrf=None, expect_dbm=None, listener=None, w=None, label="over", pair_ignore=()):
         self.radios, self.c, self.hackrf, self.why = radios, c, hackrf, None
+        # Every over of one radio to another (the owner, 2026-11-23: "when you TX on one radio screenshot them BOTH,
+        # you should see the RX happening! and they should have the same settings. IF they don't something is
+        # wrong"): as a radio goes on the air the others' receiver settings are compared with its own (PAIR_KEYS
+        # less pair_ignore, what a test changes on purpose) and a difference stops everything; both screens are
+        # photographed while it is on the air (shots_during), their paths in self.shots after close()
+        self.label, self.pair_ignore = label, set(pair_ignore)
+        self._shot_threads, self._shot_seen, self.shots = [], {}, []
         self.expect_dbm, self.listener, self.w = expect_dbm, listener, w
         self.tx_peak = {}       # each radio's own forward-power meter, its highest while on the air (W)
         self.over_power = {}      # the radios that went over the power asked, and their highest reading (W)
@@ -1035,6 +1190,16 @@ class Watch:
             for r in self.radios:
                 with r.lock:
                     since, txm, meter = r.tx_since, r.txm, (self.listener.meter if self.listener else None)
+                if since and self.hackrf is None and len(self.radios) > 1 and self._shot_seen.get(r.name) != since:
+                    self._shot_seen[r.name] = since
+                    for o in self.radios:
+                        diff = {k: v for k, v in pair_diff(r, o).items() if k not in self.pair_ignore} if o is not r \
+                            else {}
+                        if diff:
+                            self.trip(f"{r.name} went on the air not set as {o.name}: " +
+                                      ", ".join(f"{k} {x}/{y}" for k, (x, y) in diff.items()))
+                    self._shot_threads.append((r.name, since, shots_during(self.radios, f"{self.label} {r.name} TX",
+                                                                           r)))
                 if self.hackrf is not None and r.tx:
                     self.trip(f"{r.name} went on the air while the HackRF fed it")
                 elif self.hackrf is not None and (not r.ctl_mine or r.state.get("rxo") != 1):
@@ -1093,6 +1258,13 @@ class Watch:
                 st = self._ov.get(r.name)
                 if st is not None and not st.get("done"):
                     self._judge(r.name, st, int(r.state.get("txf") or r.state.get("freq") or 0))
+        for name, since, th in self._shot_threads:
+            th.join(90)
+            self.shots.append({"sender": name, "since": since, "paths": th.paths, "on_air": th.on_air})
+            if th.paths:
+                say(f"over of {name}: both screens {'on the air' if th.on_air else 'NOT caught on the air'}: "
+                    + ", ".join(os.path.basename(p) for p in th.paths.values() if p))
+        self._shot_threads = []
 
 
 def install_stop_signals(get_conf):

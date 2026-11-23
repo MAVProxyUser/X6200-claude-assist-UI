@@ -37,9 +37,83 @@ def say(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
 
+# ---- Both radios in sync before every test ----
+# The owner, 2026-11-23: "ensure before EVERY test runs that both radios are in sync on frequency, mode, preamp, etc".
+# Before each test both radios are put on one receiver set-up and read back, and the two compared; a test whose
+# radios do not match is not run (refused, naming what differs). After it each radio is put back as found. A test
+# sets what it tests on top of this (its own frequency, mode, PRE...), on both alike.
+SYNC_PROFILE = bench.rx_profile(F_TEST, 2, pre=0, att=0, rfg=100, agc=0, sql=0, filt=(300, 2700))
+SYNC_EXTRA = {"xit": 0, "zoom": 1}
+SYNC_KEYS = ("freq", "mode", "flo", "fhi", "pre", "att", "agc", "rfg", "sql", "nb", "nr", "rit", "xit", "split", "vfo",
+             "zoom", "ifs", "play", "tcim")
+
+
+def sync_set(r):
+    """One radio on the set-up (on whatever page it is), read back: {key: value}"""
+    want, checks = SYNC_PROFILE
+    bench.ensure(r, dict(want, **SYNC_EXTRA), checks)
+    return {k: r.state.get(k) for k in SYNC_KEYS}
+
+
+def sync_both(run):
+    """Both radios on the set-up, on the Sentry's page A, each read back: (their snapshots as found, what each reads,
+    why they are not in sync or None)"""
+    snaps, seen, why = {}, {}, []
+    for n in run.names:
+        r = None
+        try:
+            r = bench.Radio(n, run.c["radios"][n], False)
+            r.take_control()
+            snaps[n] = bench.snapshot(r)
+            bench.open_page(r, "A")
+            seen[n] = sync_set(r)
+        except (bench.Refused, OSError) as e:
+            why.append(f"{n} not set up: {e}")
+        finally:
+            if r:
+                r.close()
+    if len(seen) == 2 and not why:
+        a, b = seen.values()
+        diff = [k for k in SYNC_KEYS if a.get(k) != b.get(k)]
+        if diff:
+            why.append("not in sync: " + ", ".join(f"{k} {a.get(k)}/{b.get(k)}" for k in diff))
+    return snaps, seen, ("; ".join(why) or None)
+
+
+def unsync_both(run, snaps):
+    """Each radio back as it was found before the sync (finish: put back, read back, page A)"""
+    for n, snap in snaps.items():
+        r = None
+        try:
+            r = bench.Radio(n, run.c["radios"][n], False)
+            r.take_control()
+            rep = {}
+            bench.finish([r], {n: snap}, report=rep)
+            if rep.get("not_restored"):
+                say(f"{n}: NOT put back after the sync: {rep['not_restored'][n]}")
+        except (bench.Refused, OSError) as e:
+            say(f"{n}: not put back after the sync: {e}")
+            if r:
+                r.close()
+
+
 def per_radio(run, batch, test, fn, covers, want_tx=False):
     """fn(r) on each radio (its own session, snapshot before, finish after: put back, page A): (ok, says) each, a
-    result per radio and one for the pair (1:1: both pass, or both the same refusal)"""
+    result per radio and one for the pair (1:1: both pass, or both the same refusal). Both radios are put in sync
+    first (sync_both) and back as found after"""
+    snaps, seen, why = sync_both(run)
+    try:
+        if why:
+            out = {n: (False, f"refused: the radios are not in sync before the test ({why})") for n in run.names}
+            for n, (ok, says) in out.items():
+                run.result(batch, f"{test} {n}", ok, says, radio=n, covers=covers)
+            return out
+        return _per_radio(run, batch, test, fn, covers, want_tx)
+    finally:
+        unsync_both(run, snaps)
+
+
+def _per_radio(run, batch, test, fn, covers, want_tx=False):
     out = {}
     for n in run.names:
         r = None
@@ -50,6 +124,7 @@ def per_radio(run, batch, test, fn, covers, want_tx=False):
             rep = {}
             try:
                 bench.open_page(r, "G")             # the Walkie keeps the dial where it is put (A's scan retunes)
+                sync_set(r)                         # in sync again on G (G may tune its own channel as it opens)
                 ok, says = fn(r)
             except bench.Refused as e:
                 ok, says = False, f"refused: {e}" + (f" (the radio said: {r.errs[-3:]})" if r.errs else "")

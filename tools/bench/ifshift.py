@@ -63,7 +63,7 @@ def main():
                 marks.append((time.time(), s))
                 time.sleep(STEP_S)
         watch = bench.Watch([tx, rx], c, expect_dbm=10 * math.log10(bench.FIRST_PROBE_W * 1000) - total, listener=rx,
-                            w=bench.FIRST_PROBE_W)
+                            w=bench.FIRST_PROBE_W, label="IF shift", pair_ignore=("ifs",))   # its IF shift on purpose
         try:
             bench.arm(tx, True, mode=3)
             bench.tx_log({"who": tx.name, "f": F, "w": tx.pwr(), "what": "IF shift test"})
