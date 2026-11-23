@@ -461,6 +461,15 @@ def band_memories(r):
 
 
 DB_LEARNED = re.compile(r"P\|tci_tx_level")   # rows the radio moves by itself (TCI's learned TX level): left
+# The owner, 2026-11-23: "any time you are *done* simply leave the radio on the last frequency it was on. stop
+# trying to reset it to some state it was previously on short of simply being on the same screen". finish() leaves
+# the dial and the receiver where the test left them (TUNING), the bands' memories and the per-mode rows with them
+# (DB_TUNING); it still stops, locks the transmitter, closes the apps, puts back the power, TUNE's power, the volume,
+# the ATU and the compressor, and opens the Sentry's page A. False: the whole snapshot put back, as before (sim_test)
+LEAVE_TUNING = True
+TUNING = ("split", "vfo", "freq", "mode", "filter", "zoom", "att", "pre", "agc", "rfg", "sql", "nb", "nr", "rit", "xit",
+          "ifs", "wch", "txio", "txqo", "txig", "txip", "_bands")
+DB_TUNING = re.compile(r"[BM]\||P\|(band_id|vfo[ab]_\w+|rfgain|sql)$")
 DB_SETTLE_S = 4.0       # the GUI writes what changed every 3 s (settings_manager.cpp start_flush_thread)
 DB_QUERY = ('.separator "\\037" "\\036"\n'
             "select 'P|'||name, quote(val) from params;"
@@ -499,7 +508,7 @@ def _db_where(k):
     return None
 
 
-def db_put_back(r, before):
+def db_put_back(r, before, skip=None):
     """r's settings database as before (db_rows) found it: a row new since deleted (a setting set and set back leaves
     one: the split tests left VFO B's 14.230 USB in 20 m's memories on both radios, where VFO B had followed VFO A,
     2026-11-23, and finish put back VFO A's alone), a changed one's value written again, one gone inserted again; the
@@ -511,7 +520,8 @@ def db_put_back(r, before):
     now = db_rows(r)
     if now is None:
         return {"db": "not read"}
-    diff = sorted(k for k in set(before) | set(now) if before.get(k) != now.get(k) and not DB_LEARNED.match(k))
+    diff = sorted(k for k in set(before) | set(now)
+                  if before.get(k) != now.get(k) and not DB_LEARNED.match(k) and not (skip and skip.match(k)))
     if not diff:
         return {}
     sql = ["begin;"]
@@ -729,6 +739,8 @@ def finish(radios, snaps, keep=(), report=None, before=None):
     FINISH_TRIES attempts, each renewing a stalled link, stopping the bench's own programs, taking control again; what
     is still not back then is recorded (LEFT_WRONG) and every test refuses that radio till bench.py restore puts it
     back. What did not come back is said and kept in report["not_restored"]"""
+    if LEAVE_TUNING:                        # the dial and the receiver left where the test left them
+        keep, before = tuple(keep) + TUNING, None
     bads = {}
     for r in radios:
         snap, bad = snaps.get(r.name, {}), {}
@@ -751,7 +763,7 @@ def finish(radios, snaps, keep=(), report=None, before=None):
     for r in radios:
         snap, bad = snaps.get(r.name, {}), bads[r.name]
         if not bad and "_db" not in keep:
-            bad = db_put_back(r, snap.get("_db"))
+            bad = db_put_back(r, snap.get("_db"), DB_TUNING if LEAVE_TUNING else None)
         if bad:
             say(f"{r.name}: LEFT NOT AS FOUND after {FINISH_TRIES} tries: {bad}. No test touches it till "
                 f"bench.py restore puts it back")

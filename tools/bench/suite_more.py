@@ -22,6 +22,7 @@ import json
 import os
 import socket
 import sys
+import threading
 import time
 import urllib.request
 
@@ -113,6 +114,51 @@ def per_radio(run, batch, test, fn, covers, want_tx=False):
         unsync_both(run, snaps)
 
 
+class Follow:
+    """The other radio kept on the frequency and mode of the one a test runs on, while it runs (the owner,
+    2026-11-23: the X6100 on a CB channel in cover_c's test, "6200 is NOT in sync with proper CB channel to
+    receive"): its own session, every FOLLOW_S, only what differs sent; nothing it cannot take (another band
+    plan's channel) stops the test. Control only when free (bench.Radio.take_control)"""
+    FOLLOW_S = 0.5
+
+    def __init__(self, run, lead, names):
+        self.lead, self.stop, self.rs, self.th = lead, threading.Event(), [], None
+        for n in names:
+            try:
+                f = bench.Radio(n, run.c["radios"][n], False)
+                f.take_control()
+                self.rs.append(f)
+            except (bench.Refused, OSError) as e:
+                say(f"{n}: not kept in step with {lead.name} ({e})")
+        if self.rs:
+            self.th = threading.Thread(target=self._loop, daemon=True)
+            self.th.start()
+
+    def _loop(self):
+        sent = {}
+        while not self.stop.wait(self.FOLLOW_S):
+            want = {k: self.lead.state.get(k) for k in ("freq", "mode")}
+            if None in want.values():
+                continue
+            for f in self.rs:
+                for k in ("freq", "mode"):      # the dial first: a band's own mode comes with it, then the lead's
+                    if f.state.get(k) != want[k] and sent.get((f.name, k)) != want[k]:
+                        try:
+                            f.send(f"set {k} {int(want[k])}")
+                        except OSError:
+                            pass
+                        sent[(f.name, k)] = want[k]
+                    elif f.state.get(k) == want[k]:
+                        sent.pop((f.name, k), None)
+
+    def close(self):
+        self.stop.set()
+        if self.th:
+            self.th.join(2)
+        for f in self.rs:
+            f.close()
+
+
 def _per_radio(run, batch, test, fn, covers, want_tx=False):
     out = {}
     for n in run.names:
@@ -122,13 +168,17 @@ def _per_radio(run, batch, test, fn, covers, want_tx=False):
             r.take_control()
             snap = bench.snapshot(r)
             rep = {}
+            follow = None
             try:
                 bench.open_page(r, "G")             # the Walkie keeps the dial where it is put (A's scan retunes)
                 sync_set(r)                         # in sync again on G (G may tune its own channel as it opens)
+                follow = Follow(run, r, [x for x in run.names if x != n])
                 ok, says = fn(r)
             except bench.Refused as e:
                 ok, says = False, f"refused: {e}" + (f" (the radio said: {r.errs[-3:]})" if r.errs else "")
             finally:
+                if follow:
+                    follow.close()
                 bench.finish([r], {n: snap}, report=rep)
             if ok is not None and not isinstance(ok, bool):
                 ok = bool(ok)                       # a test's "a and b and text": its truth, never the text itself

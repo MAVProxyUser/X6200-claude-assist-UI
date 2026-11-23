@@ -338,7 +338,9 @@ def main():
         results.append(ok)
         print(("ok    " if ok else "WRONG ") + what, flush=True)
 
-    # ---- the state layer (bench.ensure, snapshot, restore, finish), 2026-11-22 ----
+    # ---- the state layer (bench.ensure, snapshot, restore, finish), 2026-11-22: the whole put back (bench.py
+    # restore's and LEAVE_TUNING False's); finish's own since 2026-11-23 last ----
+    bench.LEAVE_TUNING = False
     sim, h = one_radio(None)
     snap = bench.snapshot(h)
     got = bench.ensure(h, *bench.rx_profile(14200000, 2, pre=0, att=0, rfg=100, agc=0))
@@ -478,6 +480,22 @@ def main():
     why, a, b, _ = run_case("silentlink")
     check(why is not None and "no word from" in why, f"a radio whose link stalls on the air: stopped ({why})")
     check(settled(lambda: not a.state["tx"]), "silentlink: off the air")
+    # ---- finish leaves the dial where the test left it (the owner, 2026-11-23: "simply leave the radio on the last
+    # frequency it was on ... short of simply being on the same screen") ----
+    bench.LEAVE_TUNING = True
+    sim, h = one_radio(None)
+    snap = bench.snapshot(h)
+    bench.ensure(h, {"freq": 14200000, "mode": 2, "att": 0, "rfg": 100})
+    h.send("set pwr 1")                     # the power still put back (0.1 W left on both radios, 2026-11-18)
+    settled(lambda: abs(sim.state["pwr"] - 0.1) < 0.01)
+    rep = {}
+    bench.finish([h], {"simC": snap}, report=rep)
+    left = bench.load_json(os.path.join(bench.STATE, bench.LEFT_WRONG), {})
+    check(sim.state["freq"] == 14200000 and sim.state["mode"] == 2 and sim.state["att"] == 0 and
+          sim.state["rfg"] == 100 and not rep.get("not_restored") and not left,
+          f"finish leaves the dial and the receiver as the test left them, nothing recorded ({rep or 'clean'})")
+    check(settled(lambda: sim.state["pg"] == "A") and abs(sim.state["pwr"] - 4.4) < 0.01,
+          f"and still opens the Sentry's page A and puts the power back ({sim.state['pg']}, {sim.state['pwr']} W)")
     for d in DIRS:
         __import__("shutil").rmtree(d, ignore_errors=True)
     bad = results.count(False)
