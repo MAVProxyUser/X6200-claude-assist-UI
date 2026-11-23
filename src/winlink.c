@@ -97,8 +97,10 @@
 #define RIG_CLIENTS     4
 #define RIG_LINE        256
 #define TUNE_WAIT_MS    700             /* \set_freq waits this long for the LVGL thread (Pat reads for 1 s) */
+#define MODE_WAIT_MS    500             /* a key waits this long for the LVGL thread's USB-D (key_mode) */
 #define PENDING_MS      (30 * 1000)     /* a QSY asked on the air is done at the end of it, if within this */
 #define REF_MS          (60 * 1000)     /* Pat's tune or the modem's key this recent: a connection under way */
+#define PRESET_QSY_MS   4000            /* no first press of APP > Mail's Connect this soon after a tune of Pat's */
 
 typedef struct {
     uint8_t  type;
@@ -173,6 +175,7 @@ static atomic_int    missed_hz;     /* a QSY Pat was told was done and that coul
  * from then on is kept for later (keying), so never both at once */
 static atomic_int    ref_hz;
 static atomic_ullong ref_ms;
+static atomic_ullong pat_tune_ms;   /* Pat's last \set_freq, made or kept for later; 0 none (winlink_preset) */
 
 static uint64_t now_ms(void) {
     struct timespec ts;
@@ -568,6 +571,46 @@ bool winlink_busy(void) {
     return atomic_load(&keying) || (atomic_load(&ref_hz) && at && now_ms() - at < REF_MS);
 }
 
+static atomic_uint mode_done;   /* the last key_mode() request mode_cb went through */
+
+/* LVGL thread: USB-D for the modem's key, as Pat's QSY sets it (tune_cb), unless an app has the mode locked */
+static void mode_cb(void *arg) {
+    unsigned id   = *(unsigned *)arg;
+    int32_t  mode = cparam_i_get(cfg_cur_mode);
+
+    if (mode != radio_mode_usb && mode != radio_mode_usb_dig && !main_screen_mode_locked()) {
+        cparam_i_set(cfg_cur_mode, radio_mode_usb_dig);
+        LV_LOG_USER("winlink: %s to USB-D for the modem's key", channels_mode_name(mode));
+    }
+    atomic_store(&mode_done, id);
+}
+
+/* Why the key would not go out in a mode the modem's audio goes out in; NULL: USB or USB-D, as it was or as set now.
+ * Only Pat's QSY set USB-D: a connection with no frequency in it (a call typed in, a gateway without one) keyed in
+ * the dial's mode, in CW 0.0 to 0.4 W at full ALC on the bench X6100, in AM or FM not what the gateway listens for.
+ * The worker, keying set */
+static const char *key_mode(void) {
+    static char     why[64];
+    static unsigned last;
+    int32_t         mode = cparam_i_get(cfg_cur_mode);
+
+    if (mode == radio_mode_usb || mode == radio_mode_usb_dig)
+        return NULL;
+    if (!++last)
+        last = 1;
+    unsigned id = last;
+
+    if (scheduler_put(mode_cb, &id, sizeof(id)))
+        for (int ms = 0; atomic_load(&mode_done) != id && ms < MODE_WAIT_MS; ms += 5)
+            usleep(5000);
+    mode = cparam_i_get(cfg_cur_mode);
+    if (mode == radio_mode_usb || mode == radio_mode_usb_dig)
+        return NULL;
+    snprintf(why, sizeof(why), "the radio is in %s, not USB-D%s", channels_mode_name(mode),
+             main_screen_mode_locked() ? " (an app holds the mode)" : "");
+    return why;
+}
+
 /* Why the modem's key would not go out where the radio listens, on the connection's frequency; NULL: it would, on
  * ses.key_hz. Winlink is simplex, the gateway answers on the frequency it is called on. The key goes out on
  * radio_tx_freq() (tx_player), in split the other VFO or the shifted one, and the X6100's base adds the XIT
@@ -628,6 +671,8 @@ static const char *tx_off_freq(void) {
     }
     if (radio_no_data())
         return "no data from the base";
+    if ((no = key_mode()))
+        return no;
     ses.key_hz = rx;
     return NULL;
 }
@@ -1038,6 +1083,7 @@ static int rig_tune(double hz) {
     }
     pthread_mutex_lock(&tune_lock);     /* kept or made with no tune of the worker's in between */
     atomic_store(&missed_hz, 0);    /* Pat's QSY before this one is not where Pat waits any more */
+    atomic_store(&pat_tune_ms, now_ms());
     if (on_air() || atomic_load(&keying)) {
         atomic_store(&pending_ms, now_ms());
         atomic_store(&pending_hz, f);
@@ -1053,6 +1099,114 @@ static int rig_tune(double hz) {
     }
     pthread_mutex_unlock(&tune_lock);
     return ret;
+}
+
+/* ---- APP > Mail's Connect: on the gateway's frequency before the call (#322) -------- */
+
+/* The first press of Connect puts the radio on the gateway's dial frequency and transmits nothing, so the antenna
+ * tuner can be run there; the second one calls. Pat then finds the radio there already, and its tune back after the
+ * session leaves it there: winlink_preset_back() brings it to where it was before the first press, as Pat's tune back
+ * does for a connection from the web mailbox. Neither is a tune of Pat's: no connection is under way for it
+ * (winlink_busy), so TUNE goes. All on the LVGL thread */
+static int32_t     preset_hz;       /* where winlink_preset() put the radio; 0 none */
+static int32_t     preset_from_hz;  /* where the radio was before */
+static uint64_t    preset_ms;       /* when it was put there */
+static atomic_bool preset_waits;    /* a way back asked on the air: made once it is over (preset_back_thread) */
+
+bool winlink_preset(int32_t hz, char *why, size_t n) {
+    int32_t now = cparam_i_get(cfg_fg_freq), mode;
+    uint64_t pat = atomic_load(&pat_tune_ms);
+
+    if (tune_refused(hz, why, n))
+        return false;
+    /* Never under a connection, also one from the web mailbox. The app asks Pat first (x6100-winlink-mail busy), but
+     * Pat says "dialing" only once its QSY and the 3 s it waits after it are over (app/connect.go, v1.0.1): a tune
+     * of Pat's this recent is a connection that begins, or one that just ended. And a key of the modem's is one */
+    if (atomic_load(&keying) || (pat && now_ms() - pat < PRESET_QSY_MS)) {
+        snprintf(why, n, "Pat just tuned the radio for a connection, try again in a moment");
+        return false;
+    }
+    /* A second gateway tried from the first one's frequency: the way back is still to where the radio was. The dial
+     * turned since: from there */
+    if (!preset_hz || now != preset_hz)
+        preset_from_hz = now;
+    backlight_tick();
+    if (hz != now)
+        main_screen_set_freq((uint64_t)hz);
+    if (cparam_i_get(cfg_fg_freq) != hz) {
+        snprintf(why, n, "the radio did not tune there");
+        return false;
+    }
+    mode = cparam_i_get(cfg_cur_mode);      /* as Pat's QSY (tune_cb): what the tuner is run in is what is sent in */
+    if (mode != radio_mode_usb && mode != radio_mode_usb_dig && !main_screen_mode_locked())
+        cparam_i_set(cfg_cur_mode, radio_mode_usb_dig);
+    preset_hz = hz;
+    preset_ms = now_ms();
+    LV_LOG_USER("winlink: on %d Hz for a gateway, from %d Hz, nothing sent", (int)hz, (int)preset_from_hz);
+    return true;
+}
+
+bool winlink_preset_at(int32_t hz) {
+    return hz && preset_hz == hz && cparam_i_get(cfg_fg_freq) == hz;
+}
+
+/* The way back, now that the radio is off the air (or was not heard of for PENDING_MS: then it stays) */
+static void preset_back_cb(void *arg) {
+    int32_t hz = *(int32_t *)arg, back = preset_from_hz;
+    char    why[64];
+
+    atomic_store(&preset_waits, false);
+    /* the dial turned meanwhile, or a new first press: the radio is where the operator wants it */
+    if (preset_hz != hz || cparam_i_get(cfg_fg_freq) != hz)
+        return;
+    preset_hz = 0;
+    if (tune_refused(back, why, sizeof(why))) {
+        LV_LOG_WARN("winlink: not back to %d Hz after the gateway's %d Hz, %s", (int)back, (int)hz, why);
+        return;
+    }
+    main_screen_set_freq((uint64_t)back);
+}
+
+static void *preset_back_thread(void *arg) {
+    int32_t hz = (int32_t)(intptr_t)arg;
+
+    for (int ms = 0; (on_air() || atomic_load(&keying)) && ms < PENDING_MS; ms += 100)
+        usleep(100000);
+    if (on_air() || atomic_load(&keying) || !scheduler_put(preset_back_cb, &hz, sizeof(hz)))
+        atomic_store(&preset_waits, false);
+    return NULL;
+}
+
+void winlink_preset_back(bool after_call) {
+    int32_t hz = preset_hz;
+
+    if (!hz || atomic_load(&preset_waits))
+        return;
+    if (cparam_i_get(cfg_fg_freq) != hz || preset_from_hz == hz) {
+        preset_hz = 0;      /* the dial was turned since, or the radio was there from the start: it stays */
+        return;
+    }
+    /* No call from the app, but Pat tuned there after the first press: a connection from the web mailbox, on the
+     * frequency the radio was put on for it. The radio is that connection's, and Pat's tune back leaves it there */
+    if (!after_call && atomic_load(&ref_hz) == hz && atomic_load(&ref_ms) >= preset_ms &&
+        now_ms() - atomic_load(&ref_ms) < REF_MS) {
+        preset_hz = 0;
+        return;
+    }
+    if (on_air() || atomic_load(&keying)) {
+        /* the modem's last frame after the session (ardopcf's ID): once it is out, as Pat's own tune back waits */
+        pthread_t      th;
+        pthread_attr_t attr;
+
+        atomic_store(&preset_waits, true);
+        pthread_attr_init(&attr);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        if (pthread_create(&th, &attr, preset_back_thread, (void *)(intptr_t)hz) != 0)
+            atomic_store(&preset_waits, false);
+        pthread_attr_destroy(&attr);
+        return;
+    }
+    preset_back_cb(&hz);
 }
 
 /* The answer to one line into reply, "" for none. False: the client says goodbye */

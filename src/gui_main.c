@@ -61,6 +61,7 @@
 #include "btaudio.h"
 #include "rtty.h"
 #include "screen_light.h"
+#include "panel_stripes.h"
 #include "gui_events.h"
 #include "gps.h"
 #include "mfk_control.h"
@@ -83,6 +84,7 @@
 #include "app_sstv.h"
 #include "walkie.h"
 #include "winlink.h"
+#include "voice.h"
 #include "first_start.h"
 #include "perf_hud.h"
 #include "gui_state.h"
@@ -360,6 +362,7 @@ static void services_start(void) {
     bt_dev_init();
     start_trace("services: Bluetooth set up");
     backlight_init();
+    panel_stripes_init();   /* Settings > Display: the gamma table for panels that stripe in dark shades */
     cat_init();
     cfg_socket_init();
     ctl_init();
@@ -557,6 +560,10 @@ int main(void) {
     lv_timer_create(ui_alive_cb, 1000, NULL);       /* the screen loop's heartbeat (x6x00-gui-watch) */
     dialog_field_wavelog_start();
     first_start_init();     /* a new card or a settings reset: the guide, once the screen is up */
+    /* Spoken feedback (voice.cpp): no window of this GUI announces itself, so the helper that reads focus
+     * changes, messages and F-key presses is on everywhere (it says nothing with speech Off, and nothing on the air) */
+    voice_auto_set(true);
+    voice_say_text_fmt("Open X 6 X hundred, ready");    /* with speech on: the radio is up */
     gui_loop();
     return 0;
 }

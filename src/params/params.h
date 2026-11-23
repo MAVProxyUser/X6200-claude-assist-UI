@@ -35,7 +35,7 @@ typedef enum {
     ACTION_MUTE,
     ACTION_STEP_UP,
     ACTION_STEP_DOWN,
-    ACTION_VOICE_MODE,  /* unused (voice guidance removed), kept: values are stored in settings */
+    ACTION_VOICE_MODE,  /* speech mode: screen off only, always, off (voice_change_mode) */
     ACTION_BAT_INFO,    /* unused (spoken battery info removed) */
     ACTION_NR_TOGGLE,
     ACTION_NB_TOGGLE,
@@ -62,6 +62,8 @@ typedef enum {
     ACTION_SPLIT,       /* 29: split on or off, as the X6100's AGC key held */
     ACTION_USER_PAGE,   /* 30: the USER page of F1-F5 actions of the user's own (button_bar.cpp) */
     ACTION_CHARGER,     /* 31: Settings > General > Charger On, or Off when it is On (#276) */
+    ACTION_WF_FULL,     /* 32 here (upstream's 23): the waterfall over the whole main screen, or back (#302). Keys
+                         * hold these numbers, so this fork's 23-31 stay and upstream's comes after them */
 
     ACTION_APP_RTTY = 100,
     ACTION_APP_FT8,
@@ -97,6 +99,7 @@ typedef enum {
     ACTION_APP_TIMESIG,  /* 132: Time Signal, the clock from WWV and WWVH (dialog_timesig.c) */
     ACTION_APP_SWL,      /* 133: On the Air, the broadcast list's stations on the air now (dialog_swl.c) */
     ACTION_APP_DF,       /* 134: page I, the Sentry's direction finder with a KrakenSDR (app_df.c) */
+    ACTION_APP_MAIL,     /* 135 here (upstream's 130): Winlink mail on the radio (#294) */
 
     /* The CX8ANM edition's numbers (condoruy's fork), so a key given one of its apps there opens it here as well */
     ACTION_APP_METEO = 200,   /* Weather (dialog_meteo.c) */
@@ -106,6 +109,7 @@ typedef enum {
     ACTION_APP_AERO = 204,  /* HF Air Band */
     ACTION_APP_CB = 205,    /* CB */
     ACTION_APP_SVX = 206,   /* SVXConnect (dialog_svx.c) */
+    ACTION_APP_DMR = 207,   /* DMR (dialog_dmr.c); the CX8ANM edition's is 206, SVXConnect's here */
 } press_action_t;
 
 typedef enum {

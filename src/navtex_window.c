@@ -25,6 +25,8 @@
 #include "dsp.h"
 #include "gui_events.h"
 #include "msg_box.h"
+#include "voice.h"
+#include "voice_text.h"
 
 #include <math.h>
 #include <pthread.h>        /* rx_lock */
@@ -109,12 +111,13 @@ static const char *page2_label(void);
 static const char *view_label(void);
 static void view_cb(button_data_t *data);
 
-static button_data_t btn_page   = {.type = BTN_TEXT_FN, .label_fn = page1_label, .press = page_cb};
+/* Two pages: held, the page before is the other one too (#317) */
+static button_data_t btn_page   = {.type = BTN_TEXT_FN, .label_fn = page1_label, .press = page_cb, .hold = page_cb};
 static button_data_t btn_freq   = {.type = BTN_TEXT, .label = "Freq.", .press = freq_cb};
 static button_data_t btn_mode   = {.type = BTN_TEXT_FN, .label_fn = mode_label, .press = mode_cb};
 static button_data_t btn_clear  = {.type = BTN_TEXT, .label = "Clear", .press = clear_btn_cb};
 static button_data_t btn_close  = {.type = BTN_TEXT, .label = "Close", .press = close_btn_cb};
-static button_data_t btn_page_2 = {.type = BTN_TEXT_FN, .label_fn = page2_label, .press = page_cb};
+static button_data_t btn_page_2 = {.type = BTN_TEXT_FN, .label_fn = page2_label, .press = page_cb, .hold = page_cb};
 static button_data_t btn_save   = {.type = BTN_TEXT, .label = "Save", .press = save_cb};
 static button_data_t btn_view   = {.type = BTN_TEXT_FN, .label_fn = view_label, .press = view_cb};
 
@@ -533,8 +536,14 @@ static void ui_timer_cb(lv_timer_t *t)
         time_t now = time(NULL);
         char   hms[16];
         strftime(hms, sizeof(hms), "%H:%M:%S", gmtime(&now));
-        for (int i = 0; i < ncalls; i++)
+        for (int i = 0; i < ncalls; i++) {
+            char detail[160], said[180];
+
             dsc_add_row(&calls[i], hms, cparam_i_get(cfg_fg_freq) + 1000);
+            dsc_detail(&calls[i], "", detail, sizeof(detail));
+            snprintf(said, sizeof(said), "D S C call, %s", detail);
+            if (voice_auto_active()) voice_say_clean(said, false);
+        }
     }
     for (int v = 0; v < NV; v++)
         if (nchars[v]) text_add(v, chars[v], nchars[v]);
@@ -543,6 +552,13 @@ static void ui_timer_cb(lv_timer_t *t)
 
         best  = best_of();
         shown = view < 0 ? best : view;
+        if (nchars[shown]) {
+            char said[RX_CHARS + 1];
+
+            memcpy(said, chars[shown], nchars[shown]);
+            said[nchars[shown]] = '\0';
+            voice_text_add(said);   /* the text shown read aloud as it comes (Settings > Voice > Read decoded text) */
+        }
         if (shown != was || nchars[shown]) {
             lv_label_set_text(label, screen_text);
             if (follow)

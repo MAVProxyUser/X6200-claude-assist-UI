@@ -29,8 +29,9 @@ are ours.
 - `GOTOOLCHAIN=local GOFLAGS=-mod=readonly`, the public module proxy and checksum database,
   `go mod download` and `go mod verify`: a module that does not match `go.sum` stops the build.
 - `CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w -buildid="`:
-  one static binary for both radios, about 14.1 MB (v1.0.1 with our patches: 14090364
-  bytes, SHA-256 `380f76c8ee36e0dfa0b9071b0298a7fbfc15dd128de4b19e8ed1c895c5734509`). With
+  one static binary for both radios, about 14.1 MB (v1.0.1 with our patches 0001 to 0010:
+  14090364 bytes, SHA-256 `0a13e38e2191d19bdacbbcd0c55bb7554dbd5b34dcaf32b6b548801525bbb992`,
+  the same from a full clone and from a fresh shallow one as `build.sh` makes it, 19 Nov). With
   v1.0.0, two builds with Go's build cache wiped in between gave the same SHA-256; with v1.0.1,
   `build.sh` and a build with nothing cached did: a fresh clone in another directory, the Go
   toolchain downloaded again (its SHA-256 checked) and empty module and build caches.
@@ -55,10 +56,11 @@ reports itself as Pat 1.0.1 with the upstream revision `2ad31e8` (`pat version`:
 
 ## Local patches (`patches/`)
 
-Each one made with `git format-patch` against `v1.0.1`; `git apply` takes them in order. On
-the way from `v1.0.0`: 0001 to 0004 rebased as they were (line offsets only); 0005 and 0006
-rebased onto v1.0.1's own changes to the same files (below); 0007 is new, for a v1.0.1
-regression.
+Each one made with `git format-patch` against `v1.0.1` (0008 against a stand-in, below); `git
+apply` takes them in order. On the way from `v1.0.0`: 0001 to 0004 rebased as they were (line
+offsets only); 0005 and 0006 rebased onto v1.0.1's own changes to the same files (below); 0007 is
+new, for a v1.0.1 regression; 0008 is new, for #296; 0009 and 0010 are new, for an Abort that did
+not end a connection (the bench X6100, 19 Nov).
 
 - `0001-http-guard.patch`: a guard around Pat's HTTP handler (`api/guard.go`, wrapped in
   `api.ListenAndServe`). Pat has no login, and a plain GET of `/api/connect` keys the
@@ -203,6 +205,65 @@ regression.
   takes the mailbox's root, as `PostFormDataHandler` does; `in-reply-to` stays inside it
   (`IsInPath`). With a test (`internal/forms/template_reply_test.go`). Should go upstream (not
   reported).
+
+- `0008-modem-switch.patch`: a connection through ARDOP or VARA HF switches the radio's modem
+  first (#296). The radio runs one modem at a time, ARDOP, or Mercury or XARA (Pat's VARA HF), the
+  one chosen on the radio's Winlink page; a connection through the other transport (Pat's Connect
+  dialog, its API, APP > Mail, a schedule) went nowhere. `Connect()` now runs the command named in
+  `OPENX6X00_MODEM_SWITCH` (the supervisor sets it to `x6100-winlink`) as `<command> switch
+  ardop|varahf` before it sets up the TNC: that switches the modem when the other one runs, waits
+  until it is ready and exits 0, with `bw=<Hz>` for VARA HF (the radio's bandwidth for the modem
+  that runs, which the config Pat read at its start may not have; a connection's own `bw=` stays);
+  exit status 1, nothing dialed, the reason in Pat's log. One switch at a time, and none while a
+  connection through the other transport is under way. Without the variable, and for every other
+  transport, as upstream. Not Pat's prehook: that runs once the link is up, on it (for a node's
+  commands), and only for a URL that names it: too late to choose the modem. With a test
+  (`app/radio_modem_test.go`, with a stand-in switch). The radio's own: not for upstream.
+
+  Written on a PC without Pat's source at hand (no network but loopback in that round): the
+  `connect.go` hunk goes by the lines 0003 leaves there, so it has no `index` line, which
+  `git apply` does without. `radio_modem.go` and its test were built and run against wl2k-go
+  v1.0.1 from the module cache (`go vet`, `go test -race`, an ARMv7 build), with a stand-in for
+  `Connect()` around the hunk. Not built into Pat yet: `build.sh` builds it the first time and runs
+  no tests, so `go test ./app/` in the patched tree is the check to make then. Done on 19 Nov
+  with 0009 and 0010 on top: `go vet ./...`, `go test -race ./app/`, the ARMv7 build.
+
+- `0009-busy-channel-abort.patch`: an abort while Pat waits for a clear channel ends the dial at
+  once. ARDOP's and VARA's dialers (wl2k-go's `ardop`, Pat-Vara) wait through the busy function
+  with a context made from `context.Background()`, which ends when the channel clears and never
+  with the dial's. An abort (`/api/disconnect`: the mailbox's status line, APP > Mail's Abort)
+  while the busy-channel prompt was open went on until the prompt's 5 minutes were up. With VARA
+  HF, Connect returned only then: on the bench X6100 "Got abort signal while dialing varahf,
+  cancelling...", and "aborted while waiting for clear channel" three and a half minutes later,
+  an ARDOP connection refused meanwhile. With ARDOP, Connect returned at once, but its dial went
+  on in the background with the prompt open, which holds back the next prompt (the password's),
+  and called the gateway once the channel cleared. Connect now keeps its dial's context for the
+  busy function (`app/busy_abort.go`), and `onBusyChannel` ends with it too: the prompt goes away
+  (the mailbox and APP > Mail get `PromptAbort`) and the dial ends, as the prompt's own Abort ends
+  it; a wait that only begins after its Connect returned (ARDOP's background dial) ends at once.
+  Connect logs "Connect cancelled" for it, where VARA HF's dialer gave "aborted while waiting for
+  clear channel". The prompt's Abort and Continue answers, the channel clearing and the 5 minute
+  timeout are as upstream. With tests (`app/busy_abort_test.go`): the wait and its prompt, and
+  Connect through a stand-in VARA HF modem and a stand-in ARDOP TNC on loopback; its `TestMain`
+  gives the package's tests a state directory of their own, where Connect's account check finds a
+  recent mark and asks nothing of the internet. The stand-ins say the channel is busy once, before
+  their version: the dialers read that flag from a goroutine of their own without a lock, and a
+  change of it while they look is a race of theirs. Should go upstream, better as the dial's
+  context given to the busy function in wl2k-go and Pat-Vara (not reported).
+- `0010-modem-switch-abort.patch`: Pat's Abort while the radio's modem switches (0008) ends the
+  connection there. The switch takes up to 45 s, and Pat is not dialing yet: `/api/disconnect`
+  found nothing to end (400), and Pat dialed once the switch was over.
+  `AbortActiveConnection` now ends a switch that runs first (`radioModemAbort`): the switch command
+  gets SIGTERM, on which it stops waiting and exits (`x6100-winlink`), and it is killed if it is
+  still there 2 s later; nothing is dialed, and Pat's log says "OpenX6X00: no connection through
+  VARA HF: Abort was chosen while the modem switched; Pat did not call". The modem goes on to the
+  one the switch wrote into the settings, which the supervisor finishes as a choice made on the
+  Winlink page; going back would stop the new modem and start the old one again, for a connection
+  nobody waits for. A switch that does not end within 90 s gets SIGTERM too, where it was killed.
+  Pat's mailbox shows Ready during a switch, as before, so its status line offers Abort only once
+  Pat dials; APP > Mail's Abort and the API reach the switch. With tests
+  (`app/radio_modem_test.go`: a stand-in switch that waits, one that ignores SIGTERM, and Connect).
+  The radio's own: not for upstream.
 
 `pat_ui_test.js` (ours, not in a patch) runs Pat's mailbox and configuration pages and their
 scripts from a patched source in jsdom, against a stand-in for Pat's server that answers with such

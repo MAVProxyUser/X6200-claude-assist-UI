@@ -11,6 +11,8 @@
 #include "update_watch.h"
 #include "settings_window.h"
 #include "board.h"
+#include "voice.h"
+#include "voice_focus.h"
 
 #include "dsp.h"
 #include "wifi.h"
@@ -47,6 +49,7 @@ extern "C" {
     #include "gui_events.h"
     #include "key_input.h"
     #include "paddle_keyer.h"
+    #include "cfg/kbd_devices.h"
     #include "clock.h"
     #include "bat_est.h"
     #include "audio.h"
@@ -57,11 +60,13 @@ extern "C" {
     #include "station.h"
     #include "band_plan.h"
     #include "countries.h"
+    #include "meteo.h"
     #include "tci_server.h"
     #include "remote_server.h"
     #include "cluster/client.h"
     #include "cluster/spots.h"
     #include "broadcast_db.h"
+    #include "boot_cw.h"
 
     #include "lvgl/lvgl.h"
     #include <sys/time.h>
@@ -109,6 +114,7 @@ static uint8_t info_row(uint8_t row, const char *label, const char *val);
 #define TEST_BASE_NOTE "TEST ONLY, not validated on a radio"
 
 static void make_walkie_page();
+static void make_voice_page();
 static void wl_row_label(uint8_t row, const char *text);
 static void nn_load(char *out, size_t size);     /* the network name (Wireless) */
 static void ts_update();                         /* Tailscale (Wireless) */
@@ -136,14 +142,49 @@ static void key_cb(lv_event_t *e);
 
 /* The page button, and the APP key pressed again: the next page of buttons, and its first tab opens
  * (buttons_load_page_group presses the page button for the key) */
-static void page_press(button_data_t *btn) {
-    button_next_page_cb(btn);
-    if (btn->next && btn->next->items[1]) tab_press(btn->next->items[1]);
+static bool tabs_said;      /* a hint naming the tabs is on its way: tab_press() leaves it */
+
+/* "Settings tabs, page 2: F2 Bluetooth, F3 Keys, F4 Cluster, F5 TX Cal. F1 more tabs" */
+static void tabs_hint(const char *head, buttons_page_t *pg, int num) {
+    char   s[300];
+    size_t n = (size_t)snprintf(s, sizeof(s), "%s, page %d of 3:", head, num);
+
+    for (int i = 1; i < 5 && n + 8 < sizeof(s); i++) {
+        if (pg->items[i] && pg->items[i]->label) {
+            n += snprintf(s + n, sizeof(s) - n, "%s F%d %s", i == 1 ? "" : ",", i + 1, pg->items[i]->label);
+        }
+    }
+    /* the page's first tab opens with it: named, then its first row ("... F1 more tabs. Info tab. Version, ...") */
+    if (pg->items[1] && pg->items[1]->label)
+        snprintf(s + n, sizeof(s) - n, ". F1 more tabs. %s tab", pg->items[1]->label);
+    else
+        snprintf(s + n, sizeof(s) - n, ". F1 more tabs");
+    voice_focus_hint(s);
+    tabs_said = true;
 }
 
-static button_data_t btn_p1        = { .type = BTN_TEXT, .label = "(SETTINGS\n1:3)", .press = page_press };
-static button_data_t btn_p2        = { .type = BTN_TEXT, .label = "(SETTINGS\n2:3)", .press = page_press };
-static button_data_t btn_p3        = { .type = BTN_TEXT, .label = "(SETTINGS\n3:3)", .press = page_press };
+static void page_press(button_data_t *btn) {
+    button_next_page_cb(btn);
+    if (btn->next && btn->next->items[1]) {
+        int num = btn->next->items[0] && btn->next->items[0]->label ? btn->next->items[0]->label[10] - '0' : 0;
+
+        tabs_hint("Settings tabs", btn->next, num);
+        tab_press(btn->next->items[1]);
+    }
+}
+
+/* Held: the page before, and its first tab (#317) */
+static void page_hold(button_data_t *btn) {
+    buttons_page_t *prev = buttons_page_before(btn);
+
+    if (!prev) return;
+    buttons_load_page(prev);
+    if (prev->items[1]) tab_press(prev->items[1]);
+}
+
+static button_data_t btn_p1        = { .type = BTN_TEXT, .label = "(SETTINGS\n1:3)", .press = page_press, .hold = page_hold };
+static button_data_t btn_p2        = { .type = BTN_TEXT, .label = "(SETTINGS\n2:3)", .press = page_press, .hold = page_hold };
+static button_data_t btn_p3        = { .type = BTN_TEXT, .label = "(SETTINGS\n3:3)", .press = page_press, .hold = page_hold };
 static button_data_t btn_general   = { .type = BTN_TEXT, .label = "General", .press = tab_press };
 static button_data_t btn_display   = { .type = BTN_TEXT, .label = "Display", .press = tab_press };
 static button_data_t btn_audio     = { .type = BTN_TEXT, .label = "Audio", .press = tab_press };
@@ -154,10 +195,11 @@ static button_data_t btn_cluster   = { .type = BTN_TEXT, .label = "Cluster", .pr
 static button_data_t btn_txcal     = { .type = BTN_TEXT, .label = "TX Cal", .press = tab_press };
 static button_data_t btn_info      = { .type = BTN_TEXT, .label = "Info", .press = tab_press };
 static button_data_t btn_walkie    = { .type = BTN_TEXT, .label = "Walkie", .press = tab_press };
+static button_data_t btn_voice     = { .type = BTN_TEXT, .label = "Voice", .press = tab_press };
 
 static buttons_page_t btn_page   = {{&btn_p1, &btn_general, &btn_display, &btn_audio, &btn_wireless}};
 static buttons_page_t btn_page_2 = {{&btn_p2, &btn_bluetooth, &btn_keys, &btn_cluster, &btn_txcal}};
-static buttons_page_t btn_page_3 = {{&btn_p3, &btn_info, &btn_walkie}};
+static buttons_page_t btn_page_3 = {{&btn_p3, &btn_info, &btn_walkie, &btn_voice}};
 static buttons_page_t *btn_pages[] = {&btn_page, &btn_page_2, &btn_page_3};
 
 static dialog_t dialog = {
@@ -189,6 +231,7 @@ static const struct {
     {&btn_bluetooth, make_bluetooth_page, "bluetooth"}, {&btn_keys, make_keys_page, "keys"},
     {&btn_cluster, make_cluster_page, "cluster"},   {&btn_txcal, make_txcal_page, "txcal"},
     {&btn_info, make_info_page, "info"},            {&btn_walkie, make_walkie_page, "walkie"},
+    {&btn_voice, make_voice_page, "audio"},
 };
 
 /* Left rail: the tabs of all button pages, numbered, the current one marked */
@@ -290,6 +333,10 @@ static void mark_tab(button_data_t *btn_data) {
 }
 
 static void tab_press(button_data_t *btn) {
+    if (!tabs_said && btn->label) {
+        voice_focus_hint(btn->label);   /* "Wireless", then its first row */
+    }
+    tabs_said = false;
     for (auto &t : tabs) {
         if (t.btn == btn) t.make();
     }
@@ -512,6 +559,18 @@ static uint8_t make_param_choice(uint8_t row, const char *label, const char *opt
     return row + 1;
 }
 
+/* Tuning steps from, to: the first and the last of the steps FST goes through (freq_steps.h). The label names both,
+ * as the other rows of two controls do (Manual min, max): "Tuning steps" over two steps did not say which is which */
+static uint8_t make_freq_steps(uint8_t row) {
+    static const char *steps = " 10 Hz \n 100 Hz \n 500 Hz \n 1 kHz \n 5 kHz \n 10 kHz \n 25 kHz \n 100 kHz ";
+    static_assert(FREQ_STEPS_N == 8, "the dropdowns name the steps of freq_steps[] one by one");
+
+    wl_row_label(row, "Tuning steps from, to");
+    row_choice(row, 1, 3, SMALL_3, steps, cfg_sm.p_freq_step_lo.get(), int_choice_cb, &cfg_sm.p_freq_step_lo);
+    row_choice(row, 4, 3, SMALL_3, steps, cfg_sm.p_freq_step_hi.get(), int_choice_cb, &cfg_sm.p_freq_step_hi);
+    return row + 1;
+}
+
 /* Spectrum and waterfall looks: while one of them is changed the window fades to 60% and the
  * main screen shows through. Not with a folder theme's window image: faded, it turns see-through. */
 static void fade_exec(void *obj, int32_t opa) {
@@ -595,7 +654,10 @@ static uint8_t make_dt_row(uint8_t row, const char *label, int first) {
     for (int i = first; i < first + 3; i++) {
         const clock_field_t *f = &clock_fields[i];
 
+        static const char *const spoken[6] = {"Day", "Month", "Year", "Hour", "Minute", "Second"};
+
         dt_spin[i] = row_spin(row, 1 + i - first, 1, dt_w[i], *dt_field(i) + f->base, f->lo, f->hi, f->digits);
+        voice_focus_set_name(dt_spin[i], spoken[i]);    /* "Day, 18", not "Date, 18" three times */
         lv_obj_add_event_cb(dt_spin[i], dt_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
         lv_obj_add_event_cb(dt_spin[i], dt_rtc_cb, LV_EVENT_FOCUSED, NULL);
     }
@@ -694,6 +756,7 @@ static uint8_t make_backlight(uint8_t row) {
     wl_row_label(row, "Timeout (0 off), Brightness");
     obj = row_spin(row, 1, 2, SMALL_2, params.brightness_timeout, SCREEN_DIM_OFF, SCREEN_DIM_MAX_S, 3);
     lv_obj_add_event_cb(obj, bl_timeout_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    voice_focus_set_name(obj, "Screen dims after, seconds, 0 never");
 
     bl_slider = obj = lv_slider_create(row_cell(row, 3, 4, SMALL_4));
     dialog_item(&dialog, obj);
@@ -705,6 +768,7 @@ static uint8_t make_backlight(uint8_t row) {
     lv_obj_set_width(obj, SMALL_4 - 30);
     lv_obj_center(obj);
     lv_obj_add_event_cb(obj, bl_level_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    voice_focus_set_name(obj, "Brightness, dimmed and normal");
     row++;
 
     wl_row_label(row, "Buttons brightness");
@@ -1792,13 +1856,28 @@ static lv_obj_t * wl_button(uint8_t row, const char *text, lv_event_cb_t cb) {
     return obj;
 }
 
+/* The notes' font: two lines of it fill a row */
+static const lv_font_t * wl_note_font() {
+    return theme_shape.vision ? &sony_18 : &sony_20;   /* one size up: two would overflow */
+}
+
 /* Note to the right of a 3-column control: two lines in its own columns, a longer one ran off the card */
 static lv_obj_t * wl_note(uint8_t row) {
-    lv_obj_t *obj = wl_label(grid, theme_shape.vision ? &sony_18 : &sony_20, theme_hex(TC_text_dim), 0);   /* one size up: two would overflow */
+    lv_obj_t *obj = wl_label(grid, wl_note_font(), theme_hex(TC_text_dim), 0);
 
     lv_obj_set_width(obj, SMALL_3);
     lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
     lv_obj_set_grid_cell(obj, LV_GRID_ALIGN_START, 4, 3, LV_GRID_ALIGN_CENTER, row, 1);
+    return obj;
+}
+
+/* A note of a list that may run long (the clients allowed, the paired browsers): its two lines, dots at the end of
+ * the second. It was made 330 px wide in its 181 px cell, and ran off the screen instead (#311) */
+static lv_obj_t * wl_note_list(uint8_t row) {
+    lv_obj_t *obj = wl_note(row);
+
+    lv_obj_set_height(obj, 2 * lv_font_get_line_height(wl_note_font()));
+    lv_label_set_long_mode(obj, LV_LABEL_LONG_DOT);
     return obj;
 }
 
@@ -1852,6 +1931,23 @@ static void wl_row_show(wl_row_t *r, bool show, lv_obj_t *fallback) {
 
 /* Action menu */
 
+/* Spoken: the action chosen, its note and place; first: the menu's title before it */
+static void wl_menu_say(const char *first) {
+    if (wl_sel < 0 || wl_sel >= (int)wl_items.size()) {
+        return;
+    }
+    const wl_item_t &it = wl_items[wl_sel];
+    char             text[200];
+
+    snprintf(text, sizeof(text), "%s%s%s%s%s, %i of %i", first ? first : "", first ? ", menu, " : "",
+             it.label.c_str(), it.note.empty() ? "" : ", ", it.note.c_str(), wl_sel + 1, (int)wl_items.size());
+    if (first) {
+        voice_say_clean(text, false);
+    } else {
+        voice_say_clean(text, true);
+    }
+}
+
 static void wl_menu_show_sel() {
     for (size_t i = 0; i < wl_item_rows.size(); i++) {
         bool on = (int)i == wl_sel;
@@ -1895,12 +1991,14 @@ static void wl_menu_key_cb(lv_event_t *e) {
         case LV_KEY_UP:
             if (wl_sel > 0) wl_sel--;
             wl_menu_show_sel();
+            wl_menu_say(NULL);
             break;
 
         case LV_KEY_RIGHT:
         case LV_KEY_DOWN:
             if (wl_sel < (int)wl_items.size() - 1) wl_sel++;
             wl_menu_show_sel();
+            wl_menu_say(NULL);
             break;
 
         case LV_KEY_ENTER:
@@ -1992,8 +2090,10 @@ static void wl_menu_open(const std::string &title, std::vector<wl_item_t> items)
     lv_group_add_obj(keyboard_group, wl_menu);
     lv_obj_add_event_cb(wl_menu, wl_menu_key_cb, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(wl_menu, wl_menu_click_cb, LV_EVENT_CLICKED, NULL);
+    voice_focus_quiet(wl_menu);     /* wl_menu_say() speaks the choice */
     lv_group_focus_obj(wl_menu);
     lv_group_set_editing(keyboard_group, true);
+    wl_menu_say(title.c_str());
 }
 
 /* WiFi */
@@ -2061,6 +2161,22 @@ static void wifi_update() {
             wl_pill(r->pill_1, NULL, 0, 0);
         }
         lv_label_set_text(r->note, ap->known ? "saved" : "");
+
+        char said[240];
+
+        char addr[96] = "";
+
+        if (ap->is_connected) {
+            char ipt[80];
+
+            voice_ip_text(ipt, sizeof(ipt));
+            if (ipt[0]) snprintf(addr, sizeof(addr), ", address %s", ipt);
+        }
+        snprintf(said, sizeof(said), "%s%s%s%s, %s, signal %u percent, %i of %i", ap->ssid,
+                 ap->is_connected ? ", connected" : "", addr, ap->known ? ", saved" : "",
+                 ap->unsupported ? ap->unsupported : ap->password_validator ? "secured" : "open",
+                 (unsigned)ap->strength, i + 1, n);
+        voice_focus_set_text(r->obj, said);
     }
     lv_label_set_text(wf.status_ssid, wifi_eth_active() ? "Ethernet in use" : ssid);
 
@@ -2138,6 +2254,11 @@ static void wl_kbd_open(const wifi_ap_info_t &ap) {
     wl_kbd_ap = ap;
     wl_kbd = true;
     lv_group_remove_all_objs(keyboard_group);
+
+    char hint[160];
+
+    snprintf(hint, sizeof(hint), "Password for %s. Small knob: the keys, press: type, done: finish", ap.ssid);
+    voice_focus_hint(hint);
     textarea_window_open(wl_kbd_ok, wl_kbd_close);
     lv_textarea_set_placeholder_text(textarea_window_text(), " Password");
 }
@@ -2436,6 +2557,15 @@ static void bt_update_view() {
             lv_label_set_text(r->note, "");
         }
         lv_obj_align(r->note, LV_ALIGN_LEFT_MID, d->connected ? 580 : 430, 0);
+
+        /* Spoken: the pills are pictures to the reader. "My headphones, headphones, connected, 1 of 3" */
+        char said[200];
+
+        snprintf(said, sizeof(said), "%s, %s%s, %i of %i", d->name,
+                 !d->paired ? "new, press to pair" : d->audio ? "headphones" : d->input ? "keyboard"
+                 : d->phone ? "phone" : "CAT",
+                 d->paired ? (d->connected ? ", connected" : ", not connected") : "", (int)i + 1, (int)n);
+        voice_focus_set_text(r->obj, said);
     }
 }
 
@@ -2682,13 +2812,13 @@ static uint8_t make_headphones(uint8_t row) {
     return row;
 }
 
-/* TCI server (tci_server.c): on/off, the port and the connected client */
+/* TCI server (tci_server.c): on/off, the port, the clients connected */
 
 static struct {
     lv_obj_t *sw;
     lv_obj_t *port;
     lv_obj_t *pill;
-    lv_obj_t *client;
+    lv_obj_t *client;    /* the row under the pill: every client's address */
     lv_obj_t *trust;     /* Operate / Listen only (R3) */
     lv_obj_t *ask;       /* a client on the network asks before it transmits */
     lv_obj_t *allowed;   /* the note beside Forget: the clients allowed always */
@@ -2716,8 +2846,10 @@ static void rs_update() {
     }
     wl_pill(rs.pill, n ? (n == 1 ? "1 viewer" : "viewers") : NULL, theme_hex(TC_ok_bg), theme_hex(TC_ok));
     nn_load(name, sizeof(name));
+    /* a viewer's address alone: the port is the radio's, as without one, and beside the pill there is no room for
+     * both (#311) */
     if (ip)
-        snprintf(text, sizeof(text), "%s, port %d", ip, remote_server_port());
+        snprintf(text, sizeof(text), "%s", ip);
     else
         snprintf(text, sizeof(text), "%s.local/remote, port %d", name, remote_server_port());
     lv_label_set_text(rs.info, text);
@@ -2727,7 +2859,7 @@ static void rs_update() {
         char names[160];
         int  k = remote_server_sessions(names, sizeof(names));
         if (k)
-            snprintf(text, sizeof(text), "%d paired: %s", k, names);
+            snprintf(text, sizeof(text), "%d paired:\n%s", k, names);
         else
             snprintf(text, sizeof(text), "no browser paired yet");
         lv_label_set_text(rs.sess, text);
@@ -2772,9 +2904,11 @@ static uint8_t make_remote(uint8_t row) {
     lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(obj, 12, 0);
     lv_obj_set_grid_cell(obj, LV_GRID_ALIGN_START, 1, 6, LV_GRID_ALIGN_CENTER, row, 1);
+    lv_obj_set_width(obj, SMALL_6);    /* the text takes what the pill leaves of the cell, dots at its end */
     rs.pill = wl_pill_create(obj, 0);
     rs.info = wl_label(obj, SF(22), theme_hex(TC_text), 0);
-    lv_obj_set_size(rs.info, 400, lv_font_get_line_height(SF(22)));
+    lv_obj_set_height(rs.info, lv_font_get_line_height(SF(22)));
+    lv_obj_set_flex_grow(rs.info, 1);
     lv_label_set_long_mode(rs.info, LV_LABEL_LONG_DOT);
     row++;
 
@@ -2787,15 +2921,14 @@ static uint8_t make_remote(uint8_t row) {
 
     wl_row_label(row, "Sessions");
     wl_button(row, "Forget all", rs_forget_cb);
-    rs.sess = wl_note(row);
-    lv_label_set_long_mode(rs.sess, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(rs.sess, 330);
+    rs.sess = wl_note_list(row);
     return row + 1;
 }
 
 static void wv_update() {
-    const char *name = tci_server_client();
-    char        port[24];
+    const char      *name = tci_server_client();
+    char             port[24], addrs[320];
+    const lv_font_t *font = SF(22);
 
     rs_update();
 
@@ -2807,7 +2940,23 @@ static void wv_update() {
     snprintf(port, sizeof(port), "TCP %d", tci_server_port());
     lv_label_set_text(wv.port, port);
     wl_pill(wv.pill, name ? "connected" : NULL, theme_hex(TC_ok_bg), theme_hex(TC_ok));
-    lv_label_set_text(wv.client, name ? name : "no client");
+    /* The addresses in the row's size when they fit on one line, else on two in the notes', the first line ending
+     * after the last address that fits: LVGL would break one at a dot */
+    snprintf(addrs, sizeof(addrs), "%s", name ? name : _("no client"));
+    if (name && lv_txt_get_width(addrs, strlen(addrs), font, 0, LV_TEXT_FLAG_NONE) > SMALL_6) {
+        char *cut = NULL;
+
+        font = wl_note_font();
+        for (char *p = strstr(addrs, ", "); p; p = strstr(p + 2, ", ")) {
+            if (lv_txt_get_width(addrs, p + 1 - addrs, font, 0, LV_TEXT_FLAG_NONE) > SMALL_6) break;
+            cut = p;
+        }
+        if (cut) cut[1] = '\n';
+    }
+    if (strcmp(lv_label_get_text(wv.client), addrs)) {
+        lv_obj_set_style_text_font(wv.client, font, 0);
+        lv_label_set_text(wv.client, addrs);
+    }
     lv_obj_set_style_text_color(wv.client, name ? TC(text) : TC(text_faint), 0);
     /* Not while the list is open: the knob moves the dropdown's selection before the press
      * confirms it, and putting it back to the setting every second turned a Listen only
@@ -2825,7 +2974,7 @@ static void wv_update() {
         char list[160], text[176];
         int  k = tci_server_allowed(list, sizeof(list));
         if (k)
-            snprintf(text, sizeof(text), "%d allowed: %s", k, list);
+            snprintf(text, sizeof(text), "%d allowed:\n%s", k, list);
         else
             snprintf(text, sizeof(text), "none allowed always");
         if (strcmp(lv_label_get_text(wv.allowed), text))
@@ -2869,9 +3018,16 @@ static uint8_t make_tci(uint8_t row) {
     lv_obj_set_grid_cell(obj, LV_GRID_ALIGN_START, 1, 6, LV_GRID_ALIGN_CENTER, row, 1);
     wv.port = wl_label(obj, SF(22), theme_hex(TC_text_dim), 0);
     wv.pill = wl_pill_create(obj, 0);
-    wv.client = wl_label(obj, SF(22), theme_hex(TC_text), 0);
-    lv_obj_set_size(wv.client, 170, lv_font_get_line_height(SF(22)));   /* one line, then dots */
-    lv_label_set_long_mode(wv.client, LV_LABEL_LONG_DOT);
+    row++;
+
+    /* The clients' addresses under it, all of them: beside the port and the pill there was room for 9 characters
+     * of one, and 192.168.8.123 ran off the screen (#311). On one line when they fit, else on two in the notes' size
+     * (wv_update): four addresses, or one over Funnel with its IPv6 address */
+    wl_row_label(row, "Connected from");
+    wv.client = wl_label(grid, SF(22), theme_hex(TC_text), 0);
+    lv_obj_set_width(wv.client, SMALL_6);
+    lv_label_set_long_mode(wv.client, LV_LABEL_LONG_WRAP);
+    lv_obj_set_grid_cell(wv.client, LV_GRID_ALIGN_START, 1, 6, LV_GRID_ALIGN_CENTER, row, 1);
     row++;
 
     /* What a client may do: tune and key as always, or only hear and follow */
@@ -2891,9 +3047,7 @@ static uint8_t make_tci(uint8_t row) {
     /* Those it was answered Always for: by their address */
     wl_row_label(row, "Allowed");
     wl_button(row, "Forget all", wv_forget_cb);
-    wv.allowed = wl_note(row);
-    lv_label_set_long_mode(wv.allowed, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(wv.allowed, 330);
+    wv.allowed = wl_note_list(row);
     lv_label_set_text(wv.allowed, "");
     return row + 1;
 }
@@ -3177,6 +3331,7 @@ static lv_coord_t notes_bottom(lv_obj_t *obj) {
 static void focus_cb(lv_group_t *g) {
     lv_obj_t *obj = lv_group_get_focused(g);
 
+    voice_focus_cb(g);      /* spoken feedback: the row's name and value */
     focus_row_label(obj);
     if (!page || !obj || !lv_obj_has_flag(page, LV_OBJ_FLAG_SCROLLABLE)) {
         return;
@@ -3254,12 +3409,45 @@ static void grid_create() {
     lv_obj_align(page, LV_ALIGN_RIGHT_MID, -4, 0);   /* right of the rail */
 }
 
-/* Station: callsign and QTH locator, edited with the on-screen keyboard */
+/* Station: callsign, QTH locator and the weather's place, edited with the on-screen keyboard */
 
 #define ST_CALLSIGN 1
 #define ST_QTH      2
+#define ST_PLACE    3
 
-static int st_kbd;  /* keyboard open for ST_CALLSIGN / ST_QTH */
+static int st_kbd;  /* keyboard open for ST_CALLSIGN / ST_QTH / ST_PLACE */
+
+/* The place typed for the weather: degrees or a locator (meteo_place_parse()), or nothing. A place typed is the one
+ * the weather is for (Weather from: Typed); none typed, where the radio is again */
+static void weather_place_edit(lv_obj_t *text) {
+    char place[METEO_PLACE_MAX];
+
+    /* the digits and signs of degrees, N S E W, the letters of a locator (A to X) */
+    lv_textarea_set_accepted_chars(text, "0123456789.,;+- ABCDEFGHIJKLMNOPQRSTUVWXabcdefghijklmnopqrstuvwx");
+    lv_textarea_set_max_length(text, METEO_PLACE_MAX - 1);
+    lv_textarea_set_placeholder_text(text, "50.85, 4.35 or JO20ft");
+    param_t_get(cfg_meteo_place, place, sizeof(place));
+    textarea_window_set(place);
+}
+
+static bool weather_place_save(const char *val) {
+    char   v[METEO_PLACE_MAX];
+    double lat, lon;
+    size_t n;
+
+    snprintf(v, sizeof(v), "%s", val + strspn(val, " "));
+    for (n = strlen(v); n && v[n - 1] == ' '; n--) v[n - 1] = 0;
+    if (v[0] && !meteo_place_parse(v, &lat, &lon)) {
+        msg_update_text_fmt("Not a place: degrees (50.85, 4.35) or a locator (JO20ft)");
+        return false;
+    }
+    cfg_sm.p_meteo_place.set(v);
+    if (v[0])
+        cfg_sm.p_meteo_from.set(METEO_FROM_TYPED);
+    else if (cfg_sm.p_meteo_from.get() == METEO_FROM_TYPED)
+        cfg_sm.p_meteo_from.set(METEO_FROM_RADIO);
+    return true;
+}
 
 /* The keyboard gets all the keys: the page is built again when it closes */
 static bool st_kbd_close() {
@@ -3271,7 +3459,9 @@ static bool st_kbd_close() {
 
 static bool st_kbd_ok() {
     const char *val = textarea_window_get();
-    bool        ok  = st_kbd == ST_CALLSIGN ? station_callsign_save(val) : station_qth_save(val);
+    bool        ok  = st_kbd == ST_CALLSIGN ? station_callsign_save(val)
+                    : st_kbd == ST_PLACE    ? weather_place_save(val)
+                                            : station_qth_save(val);
 
     return ok && st_kbd_close();
 }
@@ -3282,6 +3472,8 @@ static void st_kbd_open_cb(lv_event_t *e) {
     textarea_window_open(st_kbd_ok, st_kbd_close);
     if (st_kbd == ST_CALLSIGN) {
         station_callsign_edit(textarea_window_text());
+    } else if (st_kbd == ST_PLACE) {
+        weather_place_edit(textarea_window_text());
     } else {
         station_qth_edit(textarea_window_text());
     }
@@ -3367,6 +3559,31 @@ static uint8_t make_country(uint8_t row) {
     return row + 1;
 }
 
+/* Where APP > Weather, its notices and the web Weather page ask the weather for (meteo.h): where the radio is (its GPS,
+ * the phone's, the QTH locator), the QTH locator whatever the GPS says, or the place typed on the row below. Four cells
+ * wide, out to the left as the band plan's. Then the units the three show it in: metric, or the US ones (#315) */
+static uint8_t make_weather(uint8_t row) {
+    char place[METEO_PLACE_MAX];
+
+    wl_row_label(row, "Weather from");
+    row_choice(row++, 1, 1, SMALL_4, " Auto \n Locator \n Typed ", cfg_sm.p_meteo_from.get(), int_choice_cb,
+               &cfg_sm.p_meteo_from);
+    param_t_get(cfg_meteo_place, place, sizeof(place));
+    wl_row_label(row, "Weather place");
+
+    /* degrees take the band plan's width, out to the left of the column */
+    lv_obj_t *obj = wl_button(row, place[0] ? place : "-", st_kbd_open_cb);
+    lv_obj_set_size(obj, SMALL_4, ROW_H - 4);
+    lv_obj_set_grid_cell(obj, LV_GRID_ALIGN_END, 1, 1, LV_GRID_ALIGN_CENTER, row, 1);
+    lv_obj_set_user_data(obj, (void *)(intptr_t)ST_PLACE);
+    row++;
+
+    wl_row_label(row, "Weather units");
+    row_choice(row++, 1, 1, SMALL_4, " Metric \n US ", cfg_sm.p_meteo_units.get(), int_choice_cb,
+               &cfg_sm.p_meteo_units);
+    return row;
+}
+
 /* The first-start guide again (first_start.c): Settings gives way to it once this press is over, its window going with
  * the press's own object */
 static void guide_open(void *arg) {
@@ -3388,6 +3605,7 @@ static uint8_t make_station(uint8_t row) {
     row = make_station_row(row, "QTH locator", params.qth.x, ST_QTH);
     row = make_country(row);
     row = make_band_region(row);
+    row = make_weather(row);
     /* The switches in the card's own second column: make_param_switch places them in the
      * seven-column template, past the end of this two-column one */
     /* A and B each on their own band: the VFO key brings the other one's band back */
@@ -3646,7 +3864,7 @@ static void make_general_page() {
     card_end(row);
 }
 
-/* The Walkie Talkie screen: on (Settings closes, the portrait screen comes up), its knob, its mic */
+/* The Walkie Talkie screen: on (Settings closes, the portrait screen comes up), its knob, its mic, its scope */
 static void make_walkie_page() {
     grid_create();
 
@@ -3654,6 +3872,76 @@ static void make_walkie_page() {
     row = make_param_switch(row, "Walkie Talkie", cfg_sm.p_walkie);
     row = make_param_switch(row, "Main knob steps channels", cfg_sm.p_walkie_mem);
     row = make_mic(row, "Microphone", cfg_sm.p_walkie_mic);
+    /* A small waterfall where the bandscope is (#302): walkie.c looks at it ten times a second */
+    row = make_param_switch(row, "Mini waterfall", cfg_sm.p_walkie_wf);
+    card_end(row);
+}
+
+/* Spoken feedback (voice.cpp). A change here is spoken whatever the voice mode (voice_sure()): turning
+ * the mode to Off says so, the voice chosen says hello */
+static void voice_mode_cb(lv_event_t *e) {
+    int_choice_cb(e);
+    voice_sure();
+}
+
+static void voice_choice_cb(lv_event_t *e) {
+    int_choice_cb(e);
+    voice_sure();
+    voice_say_lang();
+}
+
+static void voice_slider_cb(lv_event_t *e) {
+    voice_sure();
+}
+
+static param_slider_t voice_rate_slider   = {&cfg_sm.p_voice_rate, 50, 150, 5, "%i%%"};
+static param_slider_t voice_pitch_slider  = {&cfg_sm.p_voice_pitch, 50, 150, 5, "%i%%"};
+static param_slider_t voice_volume_slider = {&cfg_sm.p_voice_volume, 50, 150, 5, "%i%%"};
+static param_slider_t voice_repeat_slider = {&cfg_sm.p_voice_repeat_count, 0, 20, 1, "%i"};
+static param_slider_t voice_delay_slider  = {&cfg_sm.p_voice_interrupt_delay_ms, 0, 1000, 50, "%i ms"};
+static param_slider_t voice_fdelay_slider = {&cfg_sm.p_voice_freq_interrupt_delay_ms, 0, 1000, 50, "%i ms"};
+
+static void make_voice_page() {
+    static char voices[VOICES_NUM * 24];
+
+    voices[0] = '\0';
+    for (int i = 0; i < VOICES_NUM; i++) {
+        if (i) strcat(voices, "\n");
+        strcat(voices, voice_item[i].label);
+    }
+
+    grid_create();
+
+    uint8_t row = card_begin("VOICE");
+
+    /* A card image from before speech (a radio updated in place): the settings are there and kept, nothing speaks */
+    if (!voice_available()) {
+        row = info_row(row, "Speech", "Needs a newer card image");
+    }
+    wl_row_label(row, "Voice mode");
+    row_choice(row, 1, 3, SMALL_3, "Off\nScreen off only\nAlways", cfg_sm.p_voice_mode.get(), voice_mode_cb,
+               &cfg_sm.p_voice_mode);
+    row++;
+    wl_row_label(row, "Voice");
+    row_choice(row, 1, 3, SMALL_3, voices, cfg_sm.p_voice_lang.get(), voice_choice_cb, &cfg_sm.p_voice_lang);
+    row++;
+    for (param_slider_t *p : {&voice_rate_slider, &voice_pitch_slider, &voice_volume_slider}) {
+        const char *name = p == &voice_rate_slider ? "Rate" : p == &voice_pitch_slider ? "Pitch" : "Volume";
+        lv_obj_t   *s;
+
+        wl_row_label(row, name);
+        s = param_slider(row_cell(row, 4, 3, SMALL_3), SMALL_3 - 134, p);
+        lv_obj_add_event_cb(s, voice_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        row++;
+    }
+    card_end(row);
+
+    row = card_begin("VOICE BEHAVIOUR");
+    row = make_param_switch(row, "New speech interrupts", cfg_sm.p_voice_interrupt);
+    row = make_param_switch(row, "Read decoded text", cfg_sm.p_voice_read_text);
+    row = make_param_slider(row, "Interrupt delay", &voice_delay_slider);
+    row = make_param_slider(row, "Tuning delay", &voice_fdelay_slider);
+    row = make_param_slider(row, "Name repeats", &voice_repeat_slider);
     card_end(row);
 }
 
@@ -3841,6 +4129,41 @@ static uint8_t make_paddle(uint8_t row) {
     return row;
 }
 
+/* Settings > Keys > KEYBOARD, a row for each USB or Bluetooth device with a keyboard's keys connected as the page
+ * opens: what its [ ] are (kbd_devices.h, #306), the paddle in CW as on every keyboard, or the RX volume in every
+ * window and mode (a volume knob, a macro pad), never keying */
+#define KD_ROWS 6
+
+static keyboard_dev_t kd_dev[KD_ROWS];
+
+static void kd_choice_cb(lv_event_t *e) {
+    keyboard_dev_t *d = (keyboard_dev_t *)lv_event_get_user_data(e);
+    std::string     list = cfg_sm.p_kbd_dev_volume.get();
+    char            out[KBD_DEV_LIST_LEN];
+
+    kbd_dev_list_set(list.c_str(), d->id, lv_dropdown_get_selected(lv_event_get_target(e)) == 1, out, sizeof(out));
+    cfg_sm.p_kbd_dev_volume.set(out);
+}
+
+static uint8_t make_kbd_devices(uint8_t row) {
+    size_t      n    = keyboard_devices(kd_dev, KD_ROWS);
+    std::string list = cfg_sm.p_kbd_dev_volume.get();
+
+    for (size_t i = 0; i < n; i++) {
+        char label[48];
+
+        snprintf(label, sizeof(label), "%.16s%s", kd_dev[i].name, strlen(kd_dev[i].name) > 16 ? "..." : "");
+        wl_row_label(row, label);
+        row_choice(row, 1, 3, SMALL_3, " Paddle in CW \n Volume ", kbd_dev_listed(list.c_str(), kd_dev[i].id),
+                   kd_choice_cb, &kd_dev[i]);
+        lv_label_set_text(wl_note(row++), _("its [ ] keys"));
+    }
+    if (!n) {
+        lv_label_set_text(pd_value(row++, _("[ ] keys by device")), _("none connected"));
+    }
+    return row;
+}
+
 /* What the front keys (long press) and the hand mic keys do, the USB paddle */
 static void make_keys_page() {
     uint8_t row;
@@ -3862,7 +4185,10 @@ static void make_keys_page() {
     row = make_param_switch(row, "Per band and mode", cfg_sm.p_lock_per_band);
     card_end(row);
 
+    /* UP/DOWN: the channels, or the VFO a step as the main knob (#300, mic_updown.h); screen_main.c reads it at each
+     * press */
     row = card_begin("HAND MIC KEYS");
+    row = make_param_choice(row, "Hand mic UP/DOWN", " Channels \n Tune ", cfg_sm.p_mic_updown);
     row = make_key_rows(row, KEY_ROWS_FRONT, key_rows_n);
     card_end(row);
 
@@ -3877,6 +4203,7 @@ static void make_keys_page() {
     row = make_param_choice(row, "Layout", kbd_layout_options(), cfg_sm.p_kbd_layout);
     row = make_param_switch(row, "Shortcuts", cfg_sm.p_kbd_shortcuts);
     row = make_param_switch(row, "Mouse", cfg_sm.p_mouse);
+    row = make_kbd_devices(row);
     card_end(row);
 }
 
@@ -4123,6 +4450,7 @@ static void sm_rfg_cb(lv_event_t *e) {
 
 static void smc_note_set(const char *text) {
     if (smc_note) lv_label_set_text(smc_note, text);
+    voice_say_text_fmt("%s", text);
 }
 
 static void smc_btn_label(const char *text) {
@@ -4512,6 +4840,8 @@ static void make_display_page() {
     grid_create();
     row = card_begin("BACKLIGHT");
     row = make_backlight(row);
+    /* For panels with stripes in the darkest shades: the display engine's gamma table sends 8..31 out as 32 (#239) */
+    row = make_param_switch(row, "Panel stripes fix", cfg_sm.p_panel_stripes);
     card_end(row);
 
     row = card_begin("SPECTRUM");
@@ -4560,9 +4890,18 @@ static void make_display_page() {
     row = make_param_switch(row, "Zoom and step per mode", cfg_sm.p_zoom_step_per_mode);
     /* On: each zoom keeps the last step chosen at it, and a zoom change brings it back (#132) */
     row = make_param_switch(row, "Step per zoom", cfg_sm.p_step_per_zoom);
+    /* The steps FST, a keyboard's + and _ and a knob's Step go through: from, to (freq_steps.h) */
+    row = make_freq_steps(row);
     /* The box at the top right: the charge and the time left or to full, the voltages, the two in turn, or
      * the charge and the supply's voltage */
     row = make_param_choice(row, "Power display", " % + time \n Volts \n Alternate \n % + V ", cfg_sm.p_power_display);
+    /* The callsign of General > STATION small on the main screen (main_call.h) and on the boot logo (#292) */
+    row = make_param_switch(row, "Callsign", cfg_sm.p_callsign_show);
+    /* In CW the CW Tuner's bars and the decoder's WPM over the spectrum, or in the frequency strip between the band
+     * and the frequency (freq_strip.c, #308). Four columns: "Frequency strip" ran over the arrow at three */
+    wl_row_label(row, "CW tune and WPM");
+    row_choice(row++, 1, 4, SMALL_4, " Spectrum \n Frequency strip ", cfg_sm.p_cw_tune_place.get(), int_choice_cb,
+               &cfg_sm.p_cw_tune_place);
     card_end(row);
 
     row = card_begin("INTERFACE");
@@ -4574,6 +4913,8 @@ static void make_display_page() {
     row = make_param_choice(row, "Hide buttons", " Off \n After 3 s \n After 5 s \n After 10 s ",
                             cfg_sm.p_buttons_hide);
     row = make_param_switch(row, "Keep knob lines", cfg_sm.p_knob_lines_stay);   /* not hidden with the buttons */
+    /* A short press of VOL or the MFK: the next control on its list, as the stock firmware does (#282) */
+    row = make_param_switch(row, "Knob press: next control", cfg_sm.p_knob_press_next);
     row = make_theme(row);
     row = make_font(row);
     row = make_language(row);
@@ -4587,6 +4928,110 @@ static void make_display_page() {
     card_end(row);
 }
 
+/* Boot sound (#289): Off, CQ CQ (the switch's on up to v0.3.12), the callsign or an own text, in CW with the boot
+ * logo (bootanim/bootanim.c, boot_cw.h). The own text's row only with Own text: the page again after the event, as
+ * for the spectrum. The note says what it plays and how fast */
+static lv_obj_t *boot_sound_dd;
+static bool      boot_kbd;      /* the own text's keyboard open */
+
+static void boot_note(lv_obj_t *note) {
+    int         choice = cfg_sm.p_boot_sound.get();
+    std::string own    = cfg_sm.p_boot_text.get();
+    const char *text   = boot_cw_text(choice, params.callsign.x, own.c_str());
+    boot_cw_t   cw;
+
+    if (!text || !boot_cw_plan(text, &cw)) {
+        lv_label_set_text(note, "");
+    } else if (choice == BOOT_SOUND_CALL && !strcmp(text, BOOT_CW_CQ)) {
+        lv_label_set_text(note, "No callsign set: CQ CQ");
+    } else if (choice == BOOT_SOUND_TEXT && !strcmp(text, BOOT_CW_CQ)) {
+        lv_label_set_text(note, "No text yet: CQ CQ");
+    } else if (cw.used < strlen(text) && choice == BOOT_SOUND_CALL) {
+        lv_label_set_text_fmt(note, "Only %.*s, %d WPM", (int)cw.used, text, 1200 / cw.dit_ms);
+    } else if (cw.used < strlen(text)) {     /* the text is on the row under it: its part as a number, on two lines */
+        lv_label_set_text_fmt(note, "First %d characters, %d WPM", (int)cw.used, 1200 / cw.dit_ms);
+    } else if (choice == BOOT_SOUND_CALL) {
+        lv_label_set_text_fmt(note, "%s, %d WPM", text, 1200 / cw.dit_ms);
+    } else {
+        lv_label_set_text_fmt(note, "%d WPM", 1200 / cw.dit_ms);
+    }
+}
+
+static void boot_sound_page(void *arg) {
+    if (!page) {
+        return;
+    }
+    make_audio_page();
+    lv_group_focus_obj(boot_sound_dd);
+}
+
+static void boot_sound_cb(lv_event_t *e) {
+    lv_async_call(boot_sound_page, NULL);
+}
+
+static bool boot_kbd_close() {
+    boot_kbd = false;
+    textarea_window_close();
+    make_audio_page();
+    return true;
+}
+
+static bool boot_kbd_ok() {
+    char      text[BOOT_CW_TEXT_MAX + 1];
+    boot_cw_t cw;
+
+    boot_cw_clean(textarea_window_get(), text);
+    cfg_sm.p_boot_text.set(text);
+    if (boot_cw_plan(text, &cw) && cw.used < strlen(text)) {
+        msg_update_text_fmt("Boot sound: only \"%.*s\" fits", (int)cw.used, text);
+    }
+    return boot_kbd_close();
+}
+
+static void boot_text_cb(lv_event_t *e) {
+    boot_kbd = true;
+    lv_group_remove_all_objs(keyboard_group);
+    textarea_window_open(boot_kbd_ok, boot_kbd_close);
+    lv_textarea_set_max_length(textarea_window_text(), BOOT_CW_TEXT_MAX);
+    lv_textarea_set_accepted_chars(textarea_window_text(), BOOT_CW_TEXT_CHARS "abcdefghijklmnopqrstuvwxyz");
+    lv_textarea_set_placeholder_text(textarea_window_text(), "Boot text");
+    textarea_window_set(cfg_sm.p_boot_text.get().c_str());
+}
+
+/* Settings closed with the keyboard open */
+static void boot_delete_cb(lv_event_t *e) {
+    if (boot_kbd) {
+        boot_kbd = false;
+        textarea_window_close();
+    }
+}
+
+static uint8_t make_boot_sound(uint8_t row) {
+    wl_row_label(row, "Boot sound");
+    boot_sound_dd = row_choice(row, 1, 3, SMALL_3, " Off \n CQ CQ \n Callsign \n Own text ", cfg_sm.p_boot_sound.get(),
+                               int_choice_cb, &cfg_sm.p_boot_sound);
+    lv_obj_add_event_cb(boot_sound_dd, boot_sound_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    boot_note(wl_note(row++));
+    if (cfg_sm.p_boot_sound.get() == BOOT_SOUND_TEXT) {
+        std::string own = cfg_sm.p_boot_text.get();
+        lv_obj_t   *btn;
+        lv_obj_t   *label;
+
+        wl_row_label(row, "Boot text");
+        /* Four cells: 16 characters were cut at both ends in three */
+        btn   = wl_button(row, "", boot_text_cb);
+        label = lv_obj_get_child(btn, 0);
+        lv_obj_set_size(btn, SMALL_4, ROW_H - 4);
+        lv_obj_set_grid_cell(btn, LV_GRID_ALIGN_END, 3, 4, LV_GRID_ALIGN_CENTER, row++, 1);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+        lv_obj_set_size(label, SMALL_4 - 16, lv_font_get_line_height(lv_obj_get_style_text_font(label, 0)));
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        (lv_label_set_text)(label, own.empty() ? "-" : own.c_str());   /* the user's, not translated */
+    }
+    lv_obj_add_event_cb(grid, boot_delete_cb, LV_EVENT_DELETE, NULL);
+    return row;
+}
+
 static void make_audio_page() {
     uint32_t caps = radio_caps();
     uint8_t  row;
@@ -4596,7 +5041,7 @@ static void make_audio_page() {
     row = make_sp_mode(row);
     row = make_line_gain(row);
     row = make_audio_gain(row);
-    row = make_param_switch(row, "Boot sound", cfg_sm.p_boot_sound);   /* CQ CQ in CW with the boot logo */
+    row = make_boot_sound(row);
     row = make_param_switch(row, "Speaker always off", cfg_sm.p_speaker_off);   /* a remote station */
     card_end(row);
 
@@ -4857,6 +5302,9 @@ static const char *ts_funnel_update(const ts_status_t *st, bool running) {
     return enable ? st->funnel_url : NULL;
 }
 
+static uint32_t ts_tell_until;   /* lv_tick: new statuses spoken until then (a command was given) */
+static char     ts_told[64];
+
 static void ts_update() {
     ts_status_t st;
 
@@ -4875,6 +5323,10 @@ static void ts_update() {
         else lv_obj_clear_state(ts.sw, LV_STATE_CHECKED);
     }
     lv_label_set_text(ts.text, st.text);
+    if (ts_tell_until && (int32_t)(ts_tell_until - lv_tick_get()) > 0 && strcmp(ts_told, st.text)) {
+        snprintf(ts_told, sizeof(ts_told), "%s", st.text);
+        voice_say_text_fmt("Tailscale: %s", st.text);
+    }
     if (running) {
         lv_label_set_text_fmt(ts.addr, "%s  %s", st.name, st.ip);
     } else {
@@ -4915,6 +5367,8 @@ static void ts_update() {
 }
 
 static void ts_done_cb(const char *out, int status, void *user) {
+    ts_tell_until = lv_tick_get() + 60000;
+    ts_told[0] = 0;
     if ((intptr_t)user == wl_gen) {
         ts_busy(false);
     }
@@ -4959,6 +5413,7 @@ static void ts_logout_cb(lv_event_t *e) {
     if (!ts.armed || lv_tick_elaps(ts.armed) > TS_ARM_MS) {
         ts.armed = lv_tick_get() | 1;
         lv_label_set_text(ts.logout_note, "press again to log out");
+        voice_say_text_fmt("Press again to log out");
         return;
     }
     ts.armed = 0;
@@ -5203,6 +5658,11 @@ static uint8_t info_row(uint8_t row, const char *label, const char *val) {
     lv_obj_set_style_text_color(obj, TC(text), 0);
     lv_obj_set_grid_cell(obj, LV_GRID_ALIGN_END, 1, 6, LV_GRID_ALIGN_CENTER, row, 1);
     row_dsc[row] = INFO_ROW_H;
+    /* With speech on, a stop of the knob: the row read as the knob passes ("Version, v0.3.12"); it has nothing
+     * to change, the knob goes on to the next */
+    if (voice_is_on()) {
+        dialog_item(&dialog, obj);
+    }
     return row + 1;
 }
 
@@ -5234,8 +5694,15 @@ static lv_obj_t   *bc_note;
 static lv_timer_t *bc_timer;
 static bool        bc_busy;
 
-static void bc_say(const char *s) {
+/* on the screen only: the row's standing note and the download's progress */
+static void bc_show(const char *s) {
     if (bc_note) lv_label_set_text(bc_note, s);
+}
+
+/* on the screen and spoken: what a press of Update brought */
+static void bc_say(const char *s) {
+    bc_show(s);
+    voice_say_text_fmt("%s", s);
 }
 
 /* 9593 as "9,593" */
@@ -5253,7 +5720,7 @@ static void bc_timer_cb(lv_timer_t *t) {
     if (fscanf(f, "%ld %ld", &got, &total) == 2) {
         if (total > 0) snprintf(s, sizeof(s), "Downloading %.1f of %.1f MB", got / 1e6, total / 1e6);
         else snprintf(s, sizeof(s), "Downloading %.1f MB", got / 1e6);
-        bc_say(s);
+        bc_show(s);
     }
     fclose(f);
 }
@@ -5310,8 +5777,15 @@ static lv_timer_t *upd_timer;
 static bool        upd_busy;
 static char        upd_latest[24];     /* a newer version found by Check, "" none */
 
-static void upd_say(const char *t) {
+/* on the screen only: the row's standing note, read with the row */
+static void upd_show(const char *t) {
     if (upd_note) lv_label_set_text(upd_note, t);
+}
+
+/* on the screen and spoken: what a press of Check or Install brought */
+static void upd_say(const char *t) {
+    upd_show(t);
+    voice_say_text_fmt("%s", t);
 }
 
 static void upd_btn_label(const char *t) {
@@ -5322,6 +5796,8 @@ static void upd_timer_cb(lv_timer_t *t) {
     FILE *f = fopen(UPD_PROGRESS, "r");
     char  step[16], s[64];
     long  got = 0, total = 0;
+    static char last_step[16];   /* spoken: each new step, and the download every quarter */
+    static int  last_quarter;
 
     if (!f) return;
     if (fscanf(f, "%15s %ld %ld", step, &got, &total) >= 1) {
@@ -5340,7 +5816,16 @@ static void upd_timer_cb(lv_timer_t *t) {
         } else {
             snprintf(s, sizeof(s), "Finishing...");
         }
-        upd_say(s);
+        upd_show(s);
+        int quarter = (!strcmp(step, "download") && total > 0) ? (int)(got * 4 / total) : 0;
+        if (strcmp(step, last_step)) {
+            snprintf(last_step, sizeof(last_step), "%s", step);
+            last_quarter = 0;
+            if (strcmp(step, "download")) voice_say_text_fmt("%s", s);
+        } else if (quarter > last_quarter && quarter < 4) {
+            last_quarter = quarter;
+            voice_say_text_fmt("Downloaded %d percent", quarter * 25);
+        }
     }
     fclose(f);
 }
@@ -5373,7 +5858,7 @@ static bool upd_json_str(const char *json, const char *key, char *out, size_t n)
 }
 
 static void upd_check_done(const char *out, int status, void *user) {
-    char latest[24] = "", s[200];
+    char latest[24] = "", s[280];
 
     upd_busy = false;
     upd_latest[0] = 0;
@@ -5427,7 +5912,7 @@ static void upd_btn_cb(lv_event_t *e) {
 
 static uint8_t make_update(uint8_t row) {
     FILE *f = fopen("/var/lib/x6100-update/pending.json", "r");
-    char  s[96], note[160], t[240];
+    char  s[96], note[160], t[320];
 
     char        st[48];
     std::string name = "Update";
@@ -5443,17 +5928,21 @@ static uint8_t make_update(uint8_t row) {
     lv_obj_add_event_cb(upd_note, upd_del_cb, LV_EVENT_DELETE, NULL);
     if (f) {   /* installed, not yet confirmed by a minute of running */
         fclose(f);
-        upd_say("A new version was just installed: it is confirmed once the radio has run a minute.");
+        upd_show("A new version was just installed: it is confirmed once the radio has run a minute.");
     } else if (upd_busy) {
-        upd_say("Updating...");
+        upd_show("Updating...");
         if (!upd_timer) upd_timer = lv_timer_create(upd_timer_cb, 500, NULL);
     } else if (image_newer_wanted(note, sizeof(note))) {
-        /* the running version wants a newer card image than the one on the card */
-        snprintf(t, sizeof(t), "New card image for this version: %s", note);
+        /* the running version wants a newer card image than the one on the card; on a multiboot card through Xiegu
+           Multi-Boot, which keeps the menu and the other systems (S01multiboot) */
+        if (card_is_multiboot())
+            snprintf(t, sizeof(t), _("New card image for this version, rebuild the card with Multi-Boot: %s"), note);
+        else
+            snprintf(t, sizeof(t), _("New card image for this version: %s"), note);
         upd_say(t);
     } else {
         snprintf(s, sizeof(s), "Check looks for a newer release on GitHub; installing takes a minute.");
-        upd_say(s);
+        upd_show(s);
     }
     return row + 1;
 }
@@ -5472,7 +5961,7 @@ static uint8_t make_broadcast_list(uint8_t row) {
     lv_obj_add_event_cb(bc_note, bc_note_del_cb, LV_EVENT_DELETE, NULL);
 
     if (bc_busy) {
-        bc_say("Downloading...");
+        bc_show("Downloading...");
         bc_timer = lv_timer_create(bc_timer_cb, 500, NULL);
         return row + 1;
     }
@@ -5487,7 +5976,7 @@ static uint8_t make_broadcast_list(uint8_t row) {
         strcpy(s, "In use: the list that came with the firmware.");
     }
     if (f) fclose(f);
-    bc_say(s);
+    bc_show(s);
     return row + 1;
 }
 
@@ -5732,6 +6221,7 @@ static void construct_cb(lv_obj_t *parent) {
         btn_pages[i]->items[0]->next = btn_pages[(i + 1) % 3];
     }
     rail_create();
+    tabs_hint("Settings. Tabs on the F-keys", &btn_page, 1);
     tab_press(&btn_general);
     lv_group_set_focus_cb(keyboard_group, focus_cb);
 }
@@ -5739,6 +6229,7 @@ static void construct_cb(lv_obj_t *parent) {
 static void destruct_cb() {
     lv_group_set_focus_cb(keyboard_group, NULL);
     grid_delete();
+    lv_group_set_focus_cb(keyboard_group, voice_focus_cb);     /* the group's own again (key_input.c) */
 }
 
 /* FINP on the hand mic: in and out of editing, as a long MFK press. ESC closes. */

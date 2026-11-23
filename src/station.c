@@ -9,6 +9,7 @@
 #include "station.h"
 
 #include "band_plan.h"
+#include "cb.h"
 #include "textarea_window.h"
 #include "params/params.h"
 #include "qth/qth.h"
@@ -87,6 +88,9 @@ bool station_callsign_save(const char *callsign) {
         if (!check_ftx_msg_encoding(buf)) {
             msg_schedule_text_fmt("Unsupported callsign (too long)");
             return false;
+        } else if (cb_callsign(callsign)) {
+            /* 26AT101: FT8 and FT4 work CB stations with it (as WSJT-CB does); the amateur services do not get it */
+            msg_schedule_long_text_fmt("CB callsign: FT8 sends no QTH with it; no DX cluster, RBN or Wavelog");
         } else {
             msg_schedule_text_fmt("Callsign is long, QTH will be omitted");
         }
@@ -138,6 +142,12 @@ const char *station_qth(void) {
 #define POS_MAX_AGE_S   600     /* the phone sends its position every two minutes standing still */
 #define PHONE_MAX_ACC_M 1000    /* coarser than that (a phone placed by its cell), the locator does as well */
 
+bool station_locator_position(double *lat, double *lon) {
+    if (strlen(params.qth.x) < 4 || !qth_grid_check(params.qth.x)) return false;
+    qth_str_to_pos(params.qth.x, lat, lon);
+    return true;
+}
+
 bool station_position(double *lat, double *lon, const char **src) {
     int age, acc;
 
@@ -149,11 +159,11 @@ bool station_position(double *lat, double *lon, const char **src) {
         *src = "Phone";
         return true;
     }
-    if (strlen(params.qth.x) >= 4 && qth_grid_check(params.qth.x)) {
-        qth_str_to_pos(params.qth.x, lat, lon);
+    if (station_locator_position(lat, lon)) {
         *src = "Locator";
         return true;
     }
     *src = "";
     return false;
 }
+

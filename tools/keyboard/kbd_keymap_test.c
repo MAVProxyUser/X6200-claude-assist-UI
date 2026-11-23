@@ -4,10 +4,14 @@
  *  Host test of the keyboard's keys with no character (src/kbd_keymap.c; #175): Scroll Lock and Print Screen get
  *  the keys screen_main.c knows them by, by scancode, as xkb gives them none, and are the main screen's only. The F
  *  keys and PgUp and PgDn get nothing (mapped up to v0.3.8, they are CapsLock's chords now), the letters and the
- *  others are left to xkb.
+ *  others are left to xkb. Volume Up and Down are the volume keys (kbd_keymap_volume): +1 and -1, the only two, and
+ *  get no LVGL key.
  */
 
 #include "kbd_keymap.h"
+#include "cfg/kbd_devices.h"
+
+#include <string.h>
 
 #include <linux/input.h>
 #include <stdio.h>
@@ -60,6 +64,57 @@ int main(void) {
     check(mapped == 3, line);
     snprintf(line, sizeof(line), "%d keys for the main screen only, want 3", main_only);
     check(main_only == 3, line);
+
+    /* The volume keys: Up +1, Down -1, no other key; none of them an LVGL key */
+    check(kbd_keymap_volume(KEY_VOLUMEUP) == +1, "Volume Up: +1");
+    check(kbd_keymap_volume(KEY_VOLUMEDOWN) == -1, "Volume Down: -1");
+    check(kbd_keymap(KEY_VOLUMEUP) == 0 && kbd_keymap(KEY_VOLUMEDOWN) == 0, "the volume keys: no LVGL key");
+    check(kbd_keymap_volume(KEY_MUTE) == 0, "Mute: not a volume step");
+    check(kbd_keymap_volume(KEY_LEFTBRACE) == 0 && kbd_keymap_volume(KEY_RIGHTBRACE) == 0, "[ and ]: not volume keys");
+    int volume = 0;
+    for (uint16_t code = 0; code < KEY_CNT; code++) {
+        volume += kbd_keymap_volume(code) != 0;
+    }
+    snprintf(line, sizeof(line), "%d volume keys, want 2", volume);
+    check(volume == 2, line);
+
+    /* [ and ]: ] +1, [ -1, no other key (a device set to Volume, kbd_devices.h) */
+    check(kbd_keymap_brackets(KEY_RIGHTBRACE) == +1 && kbd_keymap_brackets(KEY_LEFTBRACE) == -1, "] +1, [ -1");
+    int brackets = 0;
+    for (uint16_t code = 0; code < KEY_CNT; code++) {
+        brackets += kbd_keymap_brackets(code) != 0;
+    }
+    snprintf(line, sizeof(line), "%d bracket keys, want 2", brackets);
+    check(brackets == 2, line);
+
+    /* The devices set to Volume (kbd_devices.c): ids, the list cleaned, set and unset */
+    char id[KBD_DEV_ID_LEN], out[KBD_DEV_LIST_LEN];
+    kbd_dev_id(id, BUS_BLUETOOTH, 0x514c, 0x8850);
+    check(strcmp(id, "0005:514c:8850") == 0, "a Bluetooth knob's id: 0005:514c:8850");
+    check(kbd_dev_listed("0003:046d:c52b 0005:514c:8850", id), "listed: found");
+    check(kbd_dev_listed("0005:514C:8850", id), "listed: in capitals too");
+    check(!kbd_dev_listed("0005:514c:88501", id) && !kbd_dev_listed("", id) && !kbd_dev_listed(NULL, id),
+          "listed: not a longer id, not in an empty list");
+    kbd_dev_list_clean("  0005:514C:8850 junk 0003:046d:c52b 0005:514c:8850 12:34:56 ", out, sizeof(out));
+    check(strcmp(out, "0003:046d:c52b 0005:514c:8850") == 0, "clean: well-formed, lower case, each once, last place");
+    kbd_dev_list_set("0003:046d:c52b", id, true, out, sizeof(out));
+    check(strcmp(out, "0003:046d:c52b 0005:514c:8850") == 0, "set: added at the end");
+    kbd_dev_list_set(out, id, true, out, sizeof(out));
+    check(strcmp(out, "0003:046d:c52b 0005:514c:8850") == 0, "set again: still once");
+    kbd_dev_list_set("0005:514c:8850 0003:046d:c52b", id, false, out, sizeof(out));
+    check(strcmp(out, "0003:046d:c52b") == 0, "unset: taken out");
+    kbd_dev_list_set("", id, false, out, sizeof(out));
+    check(strcmp(out, "") == 0, "unset from nothing: nothing");
+    char many[KBD_DEV_LIST_LEN * 2] = "";
+    for (int i = 0; i < KBD_DEV_MAX + 3; i++) {
+        kbd_dev_id(id, BUS_USB, 0x1000 + i, 0x0001);
+        kbd_dev_list_set(many, id, true, out, sizeof(out));
+        snprintf(many, sizeof(many), "%s", out);
+    }
+    kbd_dev_id(id, BUS_USB, 0x1000, 0x0001);
+    check(!kbd_dev_listed(many, id), "past KBD_DEV_MAX: the oldest dropped");
+    kbd_dev_id(id, BUS_USB, 0x1000 + KBD_DEV_MAX + 2, 0x0001);
+    check(kbd_dev_listed(many, id) && strlen(many) == KBD_DEV_MAX * KBD_DEV_ID_LEN - 1, "past KBD_DEV_MAX: the newest kept, 16 of them");
 
     printf("%d cases, %d wrong\n", cases, bad);
     return bad != 0;

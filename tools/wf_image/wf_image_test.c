@@ -31,22 +31,40 @@
  *    redraws a few columns, not the shade's whole width
  *  - in CW and CW-R, on an X6100 base that sends no frequency with its data (Xiegu's): a station on the dial in
  *    receive and the carrier in TX on the line, the rows placed by the LO offsets as the settings give them for each
- *    base. Xiegu's 1.1.9 centres its spectrum on the dial in TX, its 1.1.8 on the oscillator as in receive: with the
- *    receive offset in TX too, 1.1.9's carrier was a key tone below the line in CW (#191). At Speed 1 a line holds
- *    frames of TX or of receive, not of both, there a key tone apart. A patched base's rows as before. With an IF
- *    shift 1.1.9 is tuned that far from the dial, its receive spectrum centred there and its TX one on the dial: a
- *    station on the dial in receive and the carrier in TX on the line in USB, CW and CW-R, as the spectrum draws
- *    them; placed from where the base was tuned the TX rows were the IF shift off the line (#191). At Speed 1 a
- *    line holds frames of TX or of receive there too
+ *    base (cfg/lo_offset.c). Xiegu's 1.1.8 centres its frames on the oscillator in TX as in receive. Its 1.1.9 sends
+ *    its TX frames as if unzoomed, as the reporter's screens show them at zoom 8 (#191): centred on the oscillator,
+ *    the carrier a key tone from their middle, drawn over the zoom's span, so the key tone over the zoom from it;
+ *    with the receive offset in TX (up to v0.3.10) the carrier was 7/8 of a key tone below the line in CW, with the
+ *    frames on the dial (v0.3.11 to v0.3.13) an eighth of it above. At Speed 1 a line holds frames of TX or of
+ *    receive, not of both, there apart. A patched base's rows as before. With an IF shift 1.1.9 is tuned that far
+ *    from the dial, its receive frames centred there, its TX ones not: a station on the dial in receive and the
+ *    carrier in TX on the line in USB, CW and CW-R, with +1.5 kHz and with the reporter's -3 kHz; placed from where
+ *    the base was tuned the TX rows were the IF shift off the line (#191). At Speed 1 a line holds frames of TX or
+ *    of receive there too
+ *  - another height (waterfall_set_height(): the full-screen waterfall and back, the spectrum's height, #302) keeps
+ *    the rows that fit: taller, the rows it had are the top lines, newest first, and nothing is under them; lower,
+ *    its newest rows stay; a new row comes in at the top each time. It emptied the waterfall before
+ *  - the walkie screen's mini waterfall (waterfall_mini_draw(), #302), 360 x 100 pixels of the same rows: a station
+ *    on the dial is a line down its middle and nowhere else; a call with no new row draws nothing; a new row comes
+ *    in at the top and the rest moves down a line; another centre draws it all again, the station where it now is
+ *  - 3D: the picture is drawn on a thread of its own (d3_job) and shown by the GUI thread once drawn. The image is
+ *    then, pixel for pixel, the picture drawn in place in rows as before the thread; after rows and tunes that came
+ *    while a picture was being drawn (the thread held up here, 30 ms a picture), the picture of the last of them;
+ *    3D switched off while one is being drawn: the 2D waterfall the rows as they are, and the 3D picture that was on
+ *    its way is not shown over it later; the waterfall's height changed while one is being drawn (the image is freed
+ *    and made again there): the old height's picture dropped, the new one's shown. `make asan` and `make tsan` run
+ *    these under the address and the thread sanitizer
  *  See the Makefile.
  *
  *  Copyright (c) 2026 Joeri Van Dooren ON6URE / Guru-RF
  */
 
 #include "waterfall_view.c"
+#include "cfg/lo_offset.h"
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #define W       800
 #define H       480
@@ -84,6 +102,7 @@ ComputedParamInt *cfg_fg_freq = P(30), *cfg_cur_filter_low = P(31), *cfg_cur_fil
                  *cfg_cur_mode = P(33), *cfg_mode_lo_offset = P(34), *cfg_mode_tx_lo_offset = P(35);
 
 static int     speed = 3;           /* Settings > Waterfall > Speed */
+static int32_t want_3d;             /* Settings > Display > WATERFALL, 3D */
 static int32_t shade = 4;           /* Filter shade: Full, the default (#167) */
 static int32_t where = FILTER_SHADE_PASSBAND;  /* Shaded part (#250) */
 static int32_t filter_high = 2700, cur_mode = radio_mode_lsb, cur_zoom = 1;
@@ -97,6 +116,11 @@ int32_t param_i_get(const ParamInt *p) {
     if (p == cfg_filter_shade) return shade;
     if (p == cfg_filter_shade_where) return where;
     if (p == cfg_band_if_shift) return if_shift_hz;
+    if (p == cfg_wf_3d) return want_3d;
+    if (p == cfg_wf_3d_colors) return D3_WATERFALL;    /* the test's palette; no held peaks, no glide: a picture */
+    if (p == cfg_wf_3d_depth) return 40;                /* is of the rows and the view alone, whenever it is drawn */
+    if (p == cfg_wf_3d_range) return 40;
+    if (p == cfg_wf_3d_tilt) return 3;
     return 0;
 }
 
@@ -157,16 +181,36 @@ ObserverDelayed *subject_subscribe_delayed_and_notify(Subject *subj, observer_cb
     return NULL;
 }
 
-/* The jobs for the GUI thread, run by loop() as scheduler_work() runs them */
-static scheduler_fn_t jobs[8];
-static int            njobs;
+/* The jobs for the GUI thread, run by loop() as scheduler_work() runs them; the 3D thread puts one too */
+#define MAX_JOBS 16
+static scheduler_fn_t  jobs[MAX_JOBS];
+static int             njobs;
+static pthread_mutex_t jobs_mx = PTHREAD_MUTEX_INITIALIZER;
 
 bool scheduler_put_coalesced(scheduler_fn_t fn) {
+    bool ok = true;
+
+    pthread_mutex_lock(&jobs_mx);
     for (int i = 0; i < njobs; i++) {
-        if (jobs[i] == fn) return true;
+        if (jobs[i] == fn) {
+            pthread_mutex_unlock(&jobs_mx);
+            return true;
+        }
     }
-    jobs[njobs++] = fn;
-    return true;
+    if (njobs < MAX_JOBS) jobs[njobs++] = fn;
+    else ok = false;
+    pthread_mutex_unlock(&jobs_mx);
+    return ok;
+}
+
+bool scheduler_put_noargs(scheduler_fn_t fn) {
+    bool ok;
+
+    pthread_mutex_lock(&jobs_mx);
+    ok = njobs < MAX_JOBS;
+    if (ok) jobs[njobs++] = fn;
+    pthread_mutex_unlock(&jobs_mx);
+    return ok;
 }
 
 uint64_t get_time() {
@@ -222,7 +266,15 @@ int freq_scale_refs(int32_t *x, int32_t *hz, int max) {
     return 0;
 }
 
+/* Asked once for each 3D picture, by the thread that draws it: with slow_3d set the 3D thread is held up there, so
+ * a picture is still being drawn when the GUI thread goes on */
+static pthread_t gui_thread;
+static _Atomic bool slow_3d;
+
 bool buttons_hidden() {
+    if (slow_3d && !pthread_equal(pthread_self(), gui_thread)) {
+        usleep(30000);
+    }
     return false;
 }
 
@@ -273,11 +325,14 @@ static void flush(lv_disp_drv_t *drv, const lv_area_t *a, lv_color_t *px) {
 /* The GUI loop for ms, as gui_main.c's: the jobs, then LVGL's timers (the screen's refresh among them) */
 static void loop(uint32_t ms) {
     for (uint32_t t = 0; t < ms; t += STEP) {
-        scheduler_fn_t run[8];
-        int            n = njobs;
+        scheduler_fn_t run[MAX_JOBS];
+
+        pthread_mutex_lock(&jobs_mx);
+        int n = njobs;
 
         memcpy(run, jobs, sizeof(run));
         njobs = 0;
+        pthread_mutex_unlock(&jobs_mx);
         for (int i = 0; i < n; i++) {
             run[i](NULL);
         }
@@ -314,16 +369,36 @@ static void if_shift_to(int32_t hz) {
     retuned = false;
 }
 
-/* A frame of the X6100's base, its spectrum centred `centre` Hz from the dial as the base centres it, with a carrier
- * on the dial; at: the frequency the base sends with it, 0 none (Xiegu's own bases). In TX the levels of the TX scale */
-static void x6100_frame(bool tx, int32_t centre, uint32_t at) {
-    float db[WATERFALL_NFFT];
-    int   carrier = WATERFALL_NFFT / 2 - centre * WATERFALL_NFFT / SPAN_HZ;
+/* A frame of the X6100's base at the zoom z, its spectrum centred `centre` Hz from the dial as the base centres it,
+ * with a carrier on the dial; at: the frequency the base sends with it, 0 none (Xiegu's own bases). In TX the levels
+ * of the TX scale */
+static void x6100_frame_z(bool tx, int32_t centre, uint32_t at, int32_t z) {
+    float   db[WATERFALL_NFFT];
+    int32_t width   = SPAN_HZ / z;
+    int     carrier = WATERFALL_NFFT / 2 - lround((double)centre * WATERFALL_NFFT / width);   /* the nearest bin */
 
     for (int i = 0; i < WATERFALL_NFFT; i++) {
         db[i] = i != carrier ? (tx ? TX_MIN : 10) : tx ? TX_MAX : 200;
     }
-    waterfall_data(db, WATERFALL_NFFT, tx, at, SPAN_HZ);
+    waterfall_data(db, WATERFALL_NFFT, tx, at, width);
+}
+
+/* The same at zoom 1 */
+static void x6100_frame(bool tx, int32_t centre, uint32_t at) {
+    x6100_frame_z(tx, centre, at, 1);
+}
+
+/* A TX frame of Xiegu's 1.1.9 at the zoom z, as the reporter's screens show it (#191): as if unzoomed, the whole
+ * 100 kHz centred on the oscillator a key tone from the dial (lo, the receive LO offset), the carrier on the dial;
+ * the GUI takes it as the zoom's span, as it does every frame of that base. No frequency with it */
+static void x6100_119_tx_frame(int32_t lo, int32_t z) {
+    float db[WATERFALL_NFFT];
+    int   carrier = WATERFALL_NFFT / 2 - lround((double)lo * WATERFALL_NFFT / SPAN_HZ);
+
+    for (int i = 0; i < WATERFALL_NFFT; i++) {
+        db[i] = i != carrier ? TX_MIN : TX_MAX;
+    }
+    waterfall_data(db, WATERFALL_NFFT, true, 0, SPAN_HZ / z);
 }
 
 /* Where the newest row has its carrier, Hz from the dial: the frequency of its highest value */
@@ -340,6 +415,46 @@ static int32_t carrier_at(void) {
 /* The newest row's level away from its carrier, near the low edge: its noise */
 static uint8_t noise_level(void) {
     return rows[__atomic_load_n(&newest, __ATOMIC_ACQUIRE)].values[DATA_AT + 8];
+}
+
+/* The picture's first n lines each the colour of its level in had, the lines under them empty (level 0), at the left
+ * edge, the middle and the right edge */
+enum { TALL = 300, LOW = 120 };
+
+static uint32_t colour(uint8_t v);
+
+static bool history_is(const uint8_t *had, int n) {
+    static const int32_t xs[] = {3, WIDTH / 2 + 40, WIDTH - 4};
+
+    for (int32_t y = 0; y < height; y++) {
+        const lv_color_t *px = (const lv_color_t *)frame->data + (size_t)y * WIDTH;
+
+        for (int i = 0; i < 3; i++) {
+            if ((px[xs[i]].full | 0xff000000) != colour(y < n ? had[y] : 0)) {
+                printf("        line %d, x %d: 0x%06x, not level %d\n", y, xs[i], px[xs[i]].full & 0xffffff,
+                       y < n ? had[y] : 0);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/* The mini waterfall's line y (MW pixels): where its strongest pixel is and its level, and the level at the left
+ * edge. The test's palette has a level in its red */
+enum { MW = 360, MH = 100 };
+
+static lv_color_t mini_px[MW * MH];
+
+static int mini_peak(int y, int *peak, int *edge) {
+    int at = 0;
+
+    for (int x = 1; x < MW; x++) {
+        if (mini_px[y * MW + x].ch.red > mini_px[y * MW + at].ch.red) at = x;
+    }
+    *peak = mini_px[y * MW + at].ch.red;
+    *edge = mini_px[y * MW].ch.red;
+    return at;
 }
 
 /* The VFO moved by hz, as the parameters tell it */
@@ -435,11 +550,140 @@ static int32_t columns_waiting(void) {
     return n;
 }
 
+/* ---- 3D ---- */
+
+/* A row with carriers over a quiet band, the carriers' heights by the row: something for the traces to show */
+static uint32_t d3_rows_fed;
+
+static void d3_row(void) {
+    float db[WATERFALL_NFFT];
+
+    d3_rows_fed++;
+    for (int i = 0; i < WATERFALL_NFFT; i++) {
+        db[i] = 10 + (i * 7 + d3_rows_fed) % 5;
+        if (i % 97 < 3) db[i] = 120 + (i + d3_rows_fed * 11) % 120;
+    }
+    waterfall_data(db, WATERFALL_NFFT, false, radio_center_freq + mode_lo_offset, 100000);
+}
+
+/* The GUI loop until no 3D picture is being drawn or asked for and the scroll is at rest, the 3D thread given real
+ * time meanwhile; false: not within 5 s */
+static bool d3_settle(void) {
+    for (int i = 0; i < 5000; i++) {
+        loop(STEP);
+        pthread_mutex_lock(&jobs_mx);
+        int n = njobs;
+
+        pthread_mutex_unlock(&jobs_mx);
+        if (!d3_busy && !d3_again && !d3_later && !n && wf_center_freq == radio_center_freq - waterfall_view_shift()
+            && __atomic_load_n(&new_rows, __ATOMIC_ACQUIRE) == 0) {
+            return true;
+        }
+        usleep(1000);
+    }
+    return false;
+}
+
+/* The image is the 3D picture of the rows and the view now, as drawn in place in rows (d3_draw(), the renderer of
+ * before the thread and the turn); lit: some of it is not the background, the traces are there */
+static void d3_image_is(const char *what, bool lit) {
+    static uint32_t ref[W * H];
+    d3_pic_t        pic = {.center = wf_center_freq, .span = shown_span(), .cx = d3_vanish};
+    int32_t         ref_x[MAX_D3_REFS] = {0};
+    const uint32_t *shown_px = (const uint32_t *)frame->data;
+    int32_t         wrong = 0, first = -1, drawn = 0;
+
+    d3_draw(ref, false, &pic, ref_x, 0);
+    d3_drawn_buf = NULL;            /* the test drew a picture of its own: the next one whole */
+    for (int32_t i = 0; i < WIDTH * height; i++) {
+        if (shown_px[i] != ref[i] && wrong++ == 0) first = i;
+        drawn += ref[i] != ref[0];
+    }
+    check(wrong == 0 && (!lit || drawn > 2000), "%s: the image is the picture drawn in place (%d pixels of traces)", what,
+          drawn);
+    if (wrong) {
+        printf("        %d pixels differ, the first at x %d, line %d: 0x%08x, in place 0x%08x\n", wrong, first % WIDTH,
+               first / WIDTH, shown_px[first], ref[first]);
+    }
+}
+
+static void d3_cases(lv_obj_t *wf) {
+    printf("3D: the picture from a thread of its own\n");
+    want_3d = 1;
+    for (int i = 0; i < 60; i++) d3_row();
+    waterfall_redraw();
+    check(d3_settle(), "the pictures came");
+    check(d3_thread_on && !d3_thread_failed, "drawn by the 3D thread (%u pictures)", d3_job.seq);
+    d3_image_is("at rest", true);
+
+    printf("3D: rows and tunes while a picture is being drawn\n");
+    uint32_t before = d3_job.seq;
+    bool     was_busy = false;
+
+    slow_3d = true;
+    for (int i = 0; i < 6; i++) {
+        d3_row();
+        tune(i % 2 ? -700 : 1200);
+        loop(STEP);
+        was_busy |= d3_busy;
+    }
+    slow_3d = false;
+    check(was_busy, "a picture was being drawn while they came");
+    check(d3_settle(), "the pictures came");
+    check(d3_job.seq > before + 1, "more than one picture drawn (%u)", d3_job.seq - before);
+    d3_image_is("after them", true);
+
+    printf("3D switched off while a picture is being drawn\n");
+    for (int i = 0; i < height; i++) row();     /* rows of one level each: picture_is() tells a row by its line */
+    check(d3_settle(), "the pictures came");
+    slow_3d = true;
+    row();
+    loop(2 * STEP);
+    check(d3_busy, "a picture is being drawn");
+    want_3d = 0;
+    waterfall_redraw();
+    loop(STEP);
+    slow_3d = false;
+    check(!d3_busy, "the 2D waterfall waited for it");
+    picture_is_rows("the 2D waterfall then");
+    usleep(50000);                  /* the thread's word that the picture is drawn, if not here yet */
+    loop(4 * STEP);
+    picture_is_rows("after the 3D picture's hand-over came");
+
+    printf("3D: the waterfall's height changed while a picture is being drawn\n");
+    want_3d = 1;
+    for (int i = 0; i < 20; i++) d3_row();
+    waterfall_redraw();
+    check(d3_settle(), "the pictures came");
+    slow_3d = true;
+    d3_row();
+    loop(2 * STEP);
+    check(d3_busy, "a picture is being drawn");
+    lv_obj_set_size(wf, W, WF_H - 50);
+    lv_obj_set_pos(wf, 0, H - (WF_H - 50));
+    waterfall_set_height(WF_H - 50);
+    slow_3d = false;
+    check(!d3_busy && height == WF_H - 50 && frame->header.h == WF_H - 50, "waited for and dropped, the image %d lines",
+          frame->header.h);
+    for (int i = 0; i < 30; i++) d3_row();
+    check(d3_settle(), "the pictures came");
+    d3_image_is("at the new height", true);
+
+    want_3d = 0;                    /* as it was */
+    lv_obj_set_size(wf, W, WF_H);
+    lv_obj_set_pos(wf, 0, H - WF_H);
+    waterfall_set_height(WF_H);
+    waterfall_redraw();
+    loop(4 * STEP);
+}
+
 int main(void) {
     static lv_disp_draw_buf_t draw_buf;
     static lv_color_t         px[W * H];     /* as gui_main.c's, the whole screen: the image drawn in one piece */
     static lv_disp_drv_t      drv;
 
+    gui_thread = pthread_self();
+    sony_16 = *lv_font_default();   /* the 3D labels are set in it */
     for (int v = 0; v < 256; v++) pal[v] = 0xff000000 | (uint32_t)v << 16 | (uint32_t)(255 - v) << 8 | 0x40;
     params.waterfall_smooth_scroll.x = true;
     params.waterfall_center_line.x   = true;
@@ -582,90 +826,123 @@ int main(void) {
     retuned = false;
 
     const int32_t bin = SPAN_HZ / WATERFALL_NFFT;
+    const uint32_t v118 = HW_CAP_TX_IQ_OFFSET;
+    const uint32_t v119 = HW_CAP_TX_IQ_OFFSET | HW_CAP_ZOOM | HW_CAP_IF_SHIFT | HW_CAP_TX_SPECTRUM_ON_DIAL;
     const struct {
-        const char *base;
-        int32_t     rx, tx;     /* where the base centres its spectrum, Hz from the dial: the LO offsets */
-    } bases[] = {
-        /* Measured on the bench X6100, 1.1.8: the carrier on the line in CW and CW-R */
-        {"Xiegu's 1.1.8, CW", -700, -700},
-        {"Xiegu's 1.1.8, CW-R", 700, 700},
-        /* The reporter's 1.1.9: centred on the dial in TX, the carrier a key tone below the line in CW */
-        {"Xiegu's 1.1.9, CW", -700, 0},
-        {"Xiegu's 1.1.9, CW-R", 700, 0},
-    };
+        const char *mode;
+        int32_t     mode_id;
+    } cws[] = {{"CW", radio_mode_cw}, {"CW-R", radio_mode_cwr}};
 
-    for (size_t i = 0; i < sizeof(bases) / sizeof(bases[0]); i++) {
-        int32_t at;
+    /* Measured on the bench X6100, 1.1.8: the carrier on the line in CW and CW-R */
+    for (size_t i = 0; i < 2; i++) {
+        int32_t rx = lo_offset_rx(cws[i].mode_id, 700, v118), at;
 
-        lo_offsets(bases[i].rx, bases[i].tx);
-        x6100_frame(false, bases[i].rx, 0);
+        lo_offsets(rx, lo_offset_tx(cws[i].mode_id, 700, v118, 1));
+        x6100_frame(false, rx, 0);
         at = carrier_at();
-        check(LV_ABS(at) < bin, "%s, receive: a station on the dial on the line (%+d Hz)", bases[i].base, at);
-        x6100_frame(true, bases[i].tx, 0);
+        check(LV_ABS(at) < bin, "Xiegu's 1.1.8, %s, receive: a station on the dial on the line (%+d Hz)", cws[i].mode,
+              at);
+        x6100_frame(true, rx, 0);
         at = carrier_at();
-        check(LV_ABS(at) < bin, "%s, TX: the carrier on the line (%+d Hz)", bases[i].base, at);
+        check(LV_ABS(at) < bin, "Xiegu's 1.1.8, %s, TX: the carrier on the line (%+d Hz)", cws[i].mode, at);
+    }
+
+    printf("Xiegu's 1.1.9 at zoom 8, as the reporter's: its TX frames as if unzoomed\n");
+    const int32_t z = 8, zbin = SPAN_HZ / z / WATERFALL_NFFT;
+    const int32_t tones[] = {500, 700, 1200};
+
+    for (size_t i = 0; i < 2; i++) {
+        for (size_t t = 0; t < sizeof(tones) / sizeof(tones[0]); t++) {
+            int32_t rx = lo_offset_rx(cws[i].mode_id, tones[t], v119), at;
+
+            lo_offsets(rx, lo_offset_tx(cws[i].mode_id, tones[t], v119, z));
+            x6100_frame_z(false, rx, 0, z);
+            at = carrier_at();
+            check(LV_ABS(at) < zbin, "%s, %d Hz, receive: a station on the dial on the line (%+d Hz)", cws[i].mode,
+                  tones[t], at);
+            x6100_119_tx_frame(rx, z);
+            at = carrier_at();
+            check(LV_ABS(at) < zbin, "%s, %d Hz, TX: the carrier on the line (%+d Hz)", cws[i].mode, tones[t], at);
+            /* As v0.3.11 to v0.3.13 placed it: on the dial, the carrier the key tone over the zoom off the line */
+            lo_offsets(rx, 0);
+            x6100_119_tx_frame(rx, z);
+            at = carrier_at();
+            check(LV_ABS(at + rx / z) < zbin, "%s, %d Hz, TX placed on the dial: %+d Hz off the line (%+d Hz)",
+                  cws[i].mode, tones[t], -rx / z, at);
+        }
     }
 
     printf("The same base at Speed 1, three frames a line: a line of TX or of receive, not of both\n");
-    lo_offsets(-700, 0);
+    int32_t lo_rx_cw = lo_offset_rx(radio_mode_cw, 700, v119);
+
+    lo_offsets(lo_rx_cw, lo_offset_tx(radio_mode_cw, 700, v119, z));
     speed = 1;
-    x6100_frame(false, -700, 0);
-    x6100_frame(false, -700, 0);
+    x6100_frame_z(false, lo_rx_cw, 0, z);
+    x6100_frame_z(false, lo_rx_cw, 0, z);
     uint16_t was_newest = newest;
 
-    x6100_frame(true, 0, 0);
-    check(newest != was_newest && noise_level() == 0 && LV_ABS(carrier_at()) < bin,
+    x6100_119_tx_frame(lo_rx_cw, z);
+    check(newest != was_newest && noise_level() == 0 && LV_ABS(carrier_at()) < zbin,
           "the first TX frame: a line of it alone, the carrier on the line (%+d Hz, beside it %d)", carrier_at(),
           noise_level());
-    x6100_frame(true, 0, 0);
-    x6100_frame(true, 0, 0);
+    x6100_119_tx_frame(lo_rx_cw, z);
+    x6100_119_tx_frame(lo_rx_cw, z);
     was_newest = newest;
-    x6100_frame(false, -700, 0);
-    check(newest != was_newest && noise_level() == 10 && LV_ABS(carrier_at()) < bin,
+    x6100_frame_z(false, lo_rx_cw, 0, z);
+    check(newest != was_newest && noise_level() == 10 && LV_ABS(carrier_at()) < zbin,
           "the first receive frame after TX: a line of it alone, the station on the line (%+d Hz, beside it %d)",
           carrier_at(), noise_level());
     speed = 3;
 
-    printf("Xiegu's 1.1.9 with an IF shift of +1.5 kHz: tuned that far below the dial, its receive spectrum centred "
-           "there, its TX one on the dial\n");
-    const int32_t shift = 1500;
+    printf("Xiegu's 1.1.9 at zoom 8 with an IF shift: tuned that far from the dial, its receive frames centred there, "
+           "its TX ones not\n");
+    const int32_t shifts[] = {1500, -3000};     /* -3000: the reporter's, 21 Nov */
     const struct {
         const char *mode;
-        int32_t     rx, tx;     /* the LO offsets, as the settings give them for 1.1.9 */
+        int32_t     mode_id, tone;
     } shifted[] = {
-        {"USB", 0, 0},
-        {"CW", -700, 0},
-        {"CW-R", 700, 0},
+        {"USB", radio_mode_usb, 700},
+        {"CW", radio_mode_cw, 700},
+        {"CW-R", radio_mode_cwr, 700},
+        {"CW", radio_mode_cw, 1200},
+        {"CW-R", radio_mode_cwr, 1200},
     };
 
-    if_shift_to(shift);
-    for (size_t i = 0; i < sizeof(shifted) / sizeof(shifted[0]); i++) {
-        int32_t at;
+    for (size_t s = 0; s < sizeof(shifts) / sizeof(shifts[0]); s++) {
+        if_shift_to(shifts[s]);
+        for (size_t i = 0; i < sizeof(shifted) / sizeof(shifted[0]); i++) {
+            int32_t rx = lo_offset_rx(shifted[i].mode_id, shifted[i].tone, v119), at;
 
-        lo_offsets(shifted[i].rx, shifted[i].tx);
-        x6100_frame(false, shifted[i].rx - shift, 0);
-        at = carrier_at();
-        check(LV_ABS(at) < bin, "%s, receive: a station on the dial on the line (%+d Hz)", shifted[i].mode, at);
-        x6100_frame(true, shifted[i].tx, 0);
-        at = carrier_at();
-        check(LV_ABS(at) < bin, "%s, TX: the carrier on the line, as the spectrum has it (%+d Hz)", shifted[i].mode, at);
+            lo_offsets(rx, lo_offset_tx(shifted[i].mode_id, shifted[i].tone, v119, z));
+            x6100_frame_z(false, rx - shifts[s], 0, z);
+            at = carrier_at();
+            check(LV_ABS(at) < zbin, "%+d Hz, %s, %d Hz, receive: a station on the dial on the line (%+d Hz)",
+                  shifts[s], shifted[i].mode, shifted[i].tone, at);
+            x6100_119_tx_frame(rx, z);
+            at = carrier_at();
+            check(LV_ABS(at) < zbin, "%+d Hz, %s, %d Hz, TX: the carrier on the line, as the spectrum has it (%+d Hz)",
+                  shifts[s], shifted[i].mode, shifted[i].tone, at);
+        }
     }
 
     printf("The same at Speed 1 in USB: a line of TX or of receive, not of both, there the IF shift apart\n");
+    const int32_t shift = 1500;
+
+    if_shift_to(shift);
     lo_offsets(0, 0);
     speed = 1;
-    x6100_frame(false, -shift, 0);
-    x6100_frame(false, -shift, 0);
+    x6100_frame_z(false, -shift, 0, z);
+    x6100_frame_z(false, -shift, 0, z);
     was_newest = newest;
-    x6100_frame(true, 0, 0);
-    check(newest != was_newest && noise_level() == 0 && LV_ABS(carrier_at()) < bin,
+    x6100_119_tx_frame(0, z);
+    check(newest != was_newest && noise_level() == 0 && LV_ABS(carrier_at()) < zbin,
           "the first TX frame: a line of it alone, the carrier on the line (%+d Hz, beside it %d)", carrier_at(),
           noise_level());
-    x6100_frame(true, 0, 0);
-    x6100_frame(true, 0, 0);
+    x6100_119_tx_frame(0, z);
+    x6100_119_tx_frame(0, z);
     was_newest = newest;
-    x6100_frame(false, -shift, 0);
-    check(newest != was_newest && noise_level() == 10 && LV_ABS(carrier_at()) < bin,
+    x6100_frame_z(false, -shift, 0, z);
+    check(newest != was_newest && noise_level() == 10 && LV_ABS(carrier_at()) < zbin,
           "the first receive frame after TX: a line of it alone, the station on the line (%+d Hz, beside it %d)",
           carrier_at(), noise_level());
     speed = 3;
@@ -685,6 +962,69 @@ int main(void) {
     check(rows[newest].center_freq == (uint32_t)fg_freq - 700,
           "TX, the IF shift on: the row centred the key tone below the dial it sent");
     if_shift_to(0);
+
+    printf("Another height keeps the rows that fit (#302): %d lines to %d, a row more, then to %d\n", WF_H, TALL, LOW);
+    static uint8_t had[TALL];
+    int            off = 0;
+
+    theme_shape.mono = false;
+    lo_offsets(0, 0);
+    lv_obj_set_y(obj, 0);
+    for (int i = 0; i < WF_H; i++) row();
+    loop(300);
+    for (int y = 0; y < WF_H; y++) had[y] = row_at(y)->values[DATA_AT];
+    waterfall_set_height(TALL);
+    loop(300);
+    for (int y = 0; y < TALL; y++) {
+        off += y < WF_H ? row_at(y)->width == 0 || row_at(y)->values[DATA_AT] != had[y] : row_at(y)->width != 0;
+    }
+    check(height == TALL && !off, "taller: the %d rows it had, newest first, the rest empty", WF_H);
+    check(history_is(had, WF_H), "the picture: those lines at the top, nothing under them");
+    row();
+    loop(100);
+    memmove(had + 1, had, WF_H);
+    had[0] = level;
+    check(history_is(had, WF_H + 1), "a new row: at the top, the others a line down");
+    waterfall_set_height(LOW);
+    loop(300);
+    off = 0;
+    for (int y = 0; y < LOW; y++) off += row_at(y)->width == 0 || row_at(y)->values[DATA_AT] != had[y];
+    check(height == LOW && !off, "lower: its newest %d rows", LOW);
+    check(history_is(had, LOW), "the picture: those lines");
+    row();
+    loop(100);
+    memmove(had + 1, had, LOW - 1);
+    had[0] = level;
+    check(history_is(had, LOW), "a new row: at the top, the others a line down");
+
+    printf("The walkie screen's mini waterfall: %d x %d of the same rows, over the same 100 kHz\n", MW, MH);
+    int at, peak, edge, wrong = 0;
+
+    theme_shape.mono = false;
+    lo_offsets(0, 0);
+    for (int i = 0; i < MH + 5; i++) x6100_frame(false, 0, fg_freq);
+    check(waterfall_mini_draw(mini_px, MW, MH, fg_freq, SPAN_HZ), "the first call draws it");
+    for (int y = 0; y < MH; y++) {
+        at = mini_peak(y, &peak, &edge);
+        wrong += LV_ABS(at - MW / 2) > 1 || peak < 40 || edge != 10;
+    }
+    at = mini_peak(MH - 1, &peak, &edge);
+    check(!wrong, "a station on the dial: a line down the middle of every row (the last: x %d, level %d, %d beside)",
+          at, peak, edge);
+    check(!waterfall_mini_draw(mini_px, MW, MH, fg_freq, SPAN_HZ), "no new row: nothing drawn");
+    row();
+    check(waterfall_mini_draw(mini_px, MW, MH, fg_freq, SPAN_HZ), "a new row: drawn");
+    mini_peak(0, &peak, &edge);
+    at = mini_peak(1, &wrong, &n);
+    check(peak == level && edge == level && at == MW / 2 && n == 10,
+          "it is the top line (level %d, the row's %d), the one before under it (its station at x %d)", peak, level,
+          at);
+    check(waterfall_mini_draw(mini_px, MW, MH, fg_freq + 10000, SPAN_HZ), "a view 10 kHz up: drawn again");
+    at = mini_peak(MH - 1, &peak, &edge);
+    check(LV_ABS(at - (MW / 2 - MW / 10)) <= 1 && peak >= 40, "the station a tenth of the width to the left (x %d)",
+          at);
+    lo_offsets(0, 0);
+    d3_cases(wf);
 
     printf("%d of %d cases ok\n", good, cases);
     return good == cases ? 0 : 1;

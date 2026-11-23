@@ -5,11 +5,15 @@ CLUSTER_CONF = "/mnt/cluster.conf"
 TCI_CONF = "/mnt/tci.conf"
 CHANNELS_FILE = "/mnt/channels.json"
 QSO_LOG_DB = "/mnt/qso_log.db"
+FT_LOG = "/mnt/ft_log.adi"          # the FT8 app's own ADIF log (src/ft8_window.c)
+JS8_LOG = "/mnt/js8call_log.adi"    # the JS8 app's (src/js8_window.c JS8_LOG_PATH)
 CW_TRAINER_FILE = "/mnt/cw_trainer.json"
 VOICE_DIR = "/mnt/msg"
 MACRO_FILES = {"psk": "/mnt/psk_macros.txt", "olivia": "/mnt/olivia_macros.txt",
-               "jtty": "/mnt/jtty_macros.txt"}   # src/psk_macro.c, olivia_macro.c, jtty_macro.c
+               "jtty": "/mnt/jtty_macros.txt", "rtty": "/mnt/rtty_macros.txt"}
+# src/psk_macro.c, olivia_macro.c, jtty_macro.c, rtty_macro.c
 JS8_TEXTS_FILE = "/mnt/js8_texts.txt"   # INFO, STATUS and more, src/dialog_js8.c
+JS8_SAVED_FILE = "/mnt/js8_saved.txt"   # the JS8 app's ten saved messages, src/js8_window.c (JS8_SAVED_PATH)
 IRADIO_FAV_FILE = "/mnt/iradio/favorites.tsv"   # the Internet radio's favourites, src/dialog_iradio.c
 IRADIO_COUNTRY_FILE = "/mnt/iradio/country"     # the country its list of stations is of, src/dialog_iradio.c
 FFMPEG = "/usr/bin/ffmpeg"          # the Internet radio's decoder of every format but MP3, on an image that has it
@@ -33,6 +37,11 @@ ZELLO_CMD = "x6100-zello"
 SVX_DIR = "/mnt/svxconnect"         # the SVXConnect app's settings (svxconnect.conf), its key and certificate (pki/)
 SVX_CMD = "/usr/bin/svxconnect"     # SVXConnect-CLI (tools/svxconnect): the app's helper, the enrolment here
 SVX_ENROLL_LOG = "/mnt/app_logs/svxconnect-enroll.txt"   # what the last enrolment said
+DMR_DIR = "/mnt/dmr"                # the DMR app's settings (dmr.conf) and hotspot password (rootfs/usr/sbin/x6100-dmr)
+DMR_CMD = "x6100-dmr"
+DMR_STATUS = "/tmp/x6100-dmr.json"  # the helper's state while the app listens: the page's "On the air"
+DMR_MAP = "/tmp/x6100-dmr-map.json"     # the helper's map while it listens and a map is looked at: the page's Map
+DMR_MAP_WANT = "/tmp/x6100-dmr-map.want"    # touched while the page's map is open: the helper writes DMR_MAP
 HTTPS_PORT = 0                      # set when the HTTPS server runs (the Gallery's in-browser conversion needs it)
 CERT_DIR = "/mnt/https"             # its self-signed cert.pem and key.pem (--cert-dir): the key is a secret
 HTTP_PORT = 80                      # the plain server: every other page

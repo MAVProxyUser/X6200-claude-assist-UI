@@ -12,6 +12,10 @@
 #include "zoom_span.h"
 #include "screen_main.h"
 #include "board.h"
+#include "voice.h"
+#include "voice_focus.h"
+#include "ft8_udp.h"
+#include "channel_list.h"
 
 #include "ft8/ft2.h"
 #include "gui_styles.h"
@@ -37,10 +41,12 @@
 #include "main.h"
 #include "text_panel.h"
 #include "rtty.h"
+#include "rtty_send.h"
 #include "screen_shot.h"
 #include "screen_rec.h"
 #include "key_input.h"
 #include "mic_keys.h"
+#include "mic_updown.h"
 #include "app_window.h"
 #include "band_keep.h"
 #include "settings_window.h"
@@ -48,6 +54,7 @@
 #include "cw_messages.h"
 #include "cw_encoder.h"
 #include "dialog_cw_kbd.h"
+#include "winlink_mail.h"
 #include "voice_messages.h"
 #include "swrscan_window.h"
 #include "ft8_window.h"
@@ -81,6 +88,7 @@
 #include "wefax_window.h"
 #include "dialog_js8.h"
 #include "freq_strip.h"
+#include "main_call.h"
 #include "lcd_panel.h"
 #include "freq_scale.h"
 #include "spot_marks.h"
@@ -95,6 +103,8 @@
 #include "walkie.h"
 #include "cfg/memory.h"
 #include "knob_info.h"
+#include "knob_press.h"
+#include "front_keys.h"
 #include "radio_controls.h"
 #include "apps_menu.h"
 #include "dialog_birdie.h"
@@ -109,6 +119,7 @@
 #include "dialog_zello.h"
 #include "dialog_meteo.h"
 #include "dialog_svx.h"
+#include "dialog_dmr.h"
 #include "voice_net.h"
 #include "first_start.h"
 #include "control_owner.h"
@@ -120,6 +131,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 static lv_obj_t     *obj;                   /* the screen */
 static lv_obj_t     *spectrum;              /* also the target of the keys and the MFK press */
@@ -130,6 +142,25 @@ static lv_obj_t     *tx_info;
 static uint16_t     spectrum_height;        /* Settings > Display > Spectrum height, 76 by default */
 static uint16_t     freq_height = 36;       /* the frequency scale under the spectrum, 0 in deck themes */
 static lv_coord_t   wf_y;                   /* waterfall top */
+
+/* The waterfall over the whole screen (#302): a key given "WF full screen on/off" in Settings > Keys, or a touch held
+ * on the waterfall (a pointer: the PC build's mouse), and the same again goes back. The waterfall and what lies on it
+ * (the band plan, the scale's lines, the spots, the cluster column: wf_block_n children of the screen in a row, from
+ * build()) come in front of all the rest, from the top of the screen to the bottom; the rest stays as it is
+ * underneath and goes on unseen, so nothing of it has to be put back. Over it a tag with the frequency and the mode,
+ * red with TX before them and a red frame around the screen while the radio transmits (the TX panel comes over it by
+ * itself). The knob, PTT and the keys work as before, VOL and the MFK say their value on the message line; F1-F5 and
+ * a tap of a key of the buttons (GEN APP KEY MSG DFN DFL, VM) go back to the normal screen, as does any app, window
+ * or Settings opening. Not kept over a restart, never over an app or in walkie mode */
+static bool         wf_full;
+static uint32_t     wf_block_n;
+static lv_obj_t   **wf_block;               /* while full: those children, in their order */
+static uint32_t     wf_block_at;            /* and the place the first one had among the screen's children */
+static lv_obj_t    *wf_tag_box, *wf_tag;
+static bool         on_air;                 /* rx_tx_cb(): the radio transmits */
+
+static void wf_full_set(bool on);
+static void wf_tag_update(void);
 
 /* What an open app keeps the keys from changing. The frequency lock is a subject: the scale
  * greys out with it. It is on while either holds it: the user's lock (LOCK, SPCH, Scroll Lock, the Panel's LOCK,
@@ -459,19 +490,89 @@ void mem_save(uint16_t id) {
 /* AGC key and the MFK "AGC" button: Off, Slow, Fast, Auto and round, the order of radio_agc_t */
 void main_screen_agc_next() {
     cparam_i_set(cfg_cur_agc, (cparam_i_get(cfg_cur_agc) + 1) % 4);
+    voice_say_text_fmt("AGC %s", info_params_agc());
     if (params.mag_info.x) {
         msg_tiny_set_text_fmt("AGC: %s", info_params_agc());
     }
 }
 
-/* The small note in the middle of the screen, when Settings asks for it */
+/* The small note in the middle of the screen, when Settings asks for it; said in any case */
 static void tiny_on_off(const char *what, bool on) {
+    voice_say_text_fmt("%s %s", what, on ? "on" : "off");
     if (params.mag_info.x) {
         msg_tiny_set_text_fmt("%s: %s", what, on ? "On" : "Off");
     }
 }
 
+/* Spoken feedback: the mode as it is said ("U S B digital") */
+static void voice_mode_now(char *out, size_t size) {
+    voice_mode_text(channels_mode_name(cparam_i_get(cfg_cur_mode)), out, size);
+}
+
+static void say_band(void);
+
+/* The power key's tap with speech on: the open window's text, or on the main screen where the radio is ("14.074, U S B,
+ * VFO A, 20 meters, 10:42, battery 80 percent"). A blind operator has no use for the screen off/on it does otherwise */
+static void say_screen(void) {
+    lv_obj_t *win = dialog_obj();
+
+    char keys[300], tail[320] = "";
+
+    buttons_page_text(keys, sizeof(keys));
+    if (keys[0]) snprintf(tail, sizeof(tail), "F-keys: %s", keys);
+    if (win) {
+        voice_focus_read_full(NULL, win, tail);
+        return;
+    }
+
+    char        f[32], m[32], t[16], bat[48] = "", band[32] = "";
+    const char *l = info_params_vfo_label_get();
+    const char *bn = ft8_udp_band_name(cparam_i_get(cfg_fg_freq));
+    time_t      now = time(NULL);
+    struct tm   tm;
+    float       ext, volts;
+    uint8_t     cap;
+    bool        charge;
+
+    voice_freq_text(cparam_i_get(cfg_fg_freq), f, sizeof(f));
+    voice_mode_text(channels_mode_name(cparam_i_get(cfg_cur_mode)), m, sizeof(m));
+    localtime_r(&now, &tm);
+    clock_hm(&tm, t, sizeof(t));
+    clock_power_get(&ext, &volts, &cap, &charge);
+    if (volts > 0.0f) {
+        snprintf(bat, sizeof(bat), ", battery %u percent%s", (unsigned)cap, charge ? ", charging" : "");
+    }
+    if (bn && bn[0]) {
+        size_t n = strlen(bn);
+
+        if (bn[n - 1] == 'm') snprintf(band, sizeof(band), ", %.*s meters", (int)(n - 1), bn);
+    }
+    char ipt[80], addr[96] = "";
+
+    voice_ip_text(ipt, sizeof(ipt));
+    if (ipt[0]) snprintf(addr, sizeof(addr), ", WiFi address %s", ipt);
+    voice_say_text_fmt("%s, %s, %s%s%s, %s%s%s%s%s%s", f, m, strncmp(l, "SPL-", 4) == 0 ? "Split " : "VFO ", l + 4,
+                       band, t, bat, subject_i_get(freq_lock) ? ", dial locked" : "", addr, tail[0] ? ". " : "", tail);
+}
+
+/* "VFO-B" said "VFO B, 14.074", "SPL-A" "Split A, ..." */
+static void say_vfo(void) {
+    char        vfo[32], f[32];
+    const char *l = info_params_vfo_label_get();
+
+    if (strncmp(l, "SPL-", 4) == 0) {
+        snprintf(vfo, sizeof(vfo), "Split %s", l + 4);
+    } else if (strncmp(l, "VFO-", 4) == 0) {
+        snprintf(vfo, sizeof(vfo), "VFO %s", l + 4);
+    } else {
+        snprintf(vfo, sizeof(vfo), "%s", l);
+    }
+    voice_freq_text(cparam_i_get(cfg_fg_freq), f, sizeof(f));
+    voice_say_text_fmt("%s, %s", vfo, f);
+}
+
 static void tiny_vfo(void) {
+    say_vfo();
     if (params.mag_info.x) {
         msg_tiny_set_text_fmt("%s", info_params_vfo_label_get());
     }
@@ -510,9 +611,33 @@ static bool toggle_cparam(ComputedParamInt *p) {
 }
 
 /* Band up/down, unless an app holds the band; the app hears of it anyway */
+/* Spoken feedback: "20 meters, 14.074, U S B", the band the radio is on now */
+static void say_band(void) {
+        int32_t     freq = cparam_i_get(cfg_fg_freq);
+        const char *band = ft8_udp_band_name(freq);
+        char        f[32], m[32], b[32];
+
+        voice_freq_text(freq, f, sizeof(f));
+        voice_mode_now(m, sizeof(m));
+        b[0] = '\0';
+        if (band && band[0]) {
+            size_t n = strlen(band);
+
+            if (band[n - 1] == 'm' && n < sizeof(b)) {
+                snprintf(b, sizeof(b), "%.*s meters, ", (int)(n - 1), band);
+            } else {
+                snprintf(b, sizeof(b), "%s, ", band);
+            }
+        }
+        voice_say_text_fmt("%s%s, %s", b, f, m);
+}
+
 static void band_step(bool up) {
     if (!band_lock) {
         cfg_band_load_next(up);
+        say_band();
+    } else {
+        voice_say_text_fmt("Band locked by the app");
     }
     dialog_send(up ? EVENT_BAND_UP : EVENT_BAND_DOWN, NULL);
 }
@@ -559,10 +684,12 @@ static const char *app_name(press_action_t a) {
         case ACTION_APP_IRADIO:     return "Internet radio";
         case ACTION_APP_ZELLO:      return "Zello";
         case ACTION_APP_SVX:        return "SVXConnect";
+        case ACTION_APP_DMR:        return "DMR";
         case ACTION_APP_FLIGHTS:    return "Flights";
         case ACTION_APP_AERO:       return "HF Air Band";
         case ACTION_APP_CB:         return "CB";
         case ACTION_APP_METEO:      return "Weather";
+        case ACTION_APP_MAIL:       return "Mail";
         default:                   return NULL;    /* Modes menu: a menu, not an app */
     }
 }
@@ -601,6 +728,7 @@ static void sql_give_back(void) {
 
 static void close_apps(void) {
     sql_give_back();
+    wf_full_set(false);     /* an app coming, the buttons asked for, a new theme: the normal screen */
     dialog_destruct();
     freq_strip_set_app(NULL);
     if (rtty_get_state() != RTTY_OFF) {
@@ -662,6 +790,8 @@ static const struct {
     {ACTION_APP_AERO, &dialog_aero},
     {ACTION_APP_CB, &dialog_cb},
     {ACTION_APP_METEO, &dialog_meteo},
+    {ACTION_APP_DMR, &dialog_dmr},
+    {ACTION_APP_MAIL, &dialog_winlink_mail},
 };
 #define WINDOWS_N (sizeof(windows) / sizeof(windows[0]))
 
@@ -744,9 +874,16 @@ void main_screen_start_app(press_action_t app_action) {
             main_screen_set_freq(freq);
             cparam_i_set(cfg_cur_mode, mode);
         }
+        rtty_send_open();       /* its macros, as the web configurator left them */
         buttons_load_page(&buttons_page_rtty);
         rtty_set_state(RTTY_RX);
         panel_update_visibility(true);
+    }
+    /* Spoken feedback: the app's name, said with the first thing its window focuses (voice_focus.c) */
+    const char *name = app_name(app_action);
+
+    if (name && name[0]) {
+        voice_focus_hint(name);
     }
     for (size_t i = 0; i < WINDOWS_N; i++) {
         if (windows[i].app == app_action) {
@@ -842,6 +979,8 @@ void main_screen_open_dialog(dialog_t *d) {
     dialog_construct(d, obj);
 }
 
+static void wf_full_toggle(bool say);
+
 /* What a long press (or a hand mic F key) was given in Settings */
 static void ab_key(bool tap, bool hold);
 
@@ -868,6 +1007,9 @@ void main_screen_mode_step(int dir) {
 
 void main_screen_action(press_action_t action) {
     switch (action) {
+        case ACTION_NONE:
+            if (voice_auto_active()) voice_say_text_fmt("No long press action set");
+            break;
         case ACTION_SCREENSHOT:     screenshot_take(); break;
         case ACTION_RECORDER:       recorder_set_on(!recorder_is_on()); break;
         case ACTION_SCREEN_REC:     screen_rec_toggle(); break;
@@ -877,6 +1019,7 @@ void main_screen_action(press_action_t action) {
         case ACTION_ATU_TUNE:       radio_start_atu(); break;   /* as a long press of the ATU key */
         case ACTION_EXT_TUNE:       ext_tune_toggle(); break;   /* an external tuner's: started, or stopped */
         case ACTION_FREQ_LOCK:      say_lock(toggle_freq_lock()); break;
+        case ACTION_VOICE_MODE:     voice_change_mode(); break;
 
         case ACTION_NR_TOGGLE:      say_state("NR", toggle_param(cfg_nr) ? "On" : "Off"); break;
         case ACTION_NB_TOGGLE:      say_state("NB", toggle_param(cfg_nb) ? "On" : "Off"); break;
@@ -885,6 +1028,7 @@ void main_screen_action(press_action_t action) {
         case ACTION_ATU_TOGGLE:     say_state("ATU", toggle_atu() ? "On" : "Off"); break;
         case ACTION_WF_MODE:        say_state("Waterfall", toggle_param(cfg_wf_mode) ? "Fixed" : "Centered"); break;
         case ACTION_WF_3D:          say_state("Waterfall 3D", toggle_param(cfg_wf_3d) ? "On" : "Off"); break;
+        case ACTION_WF_FULL:        wf_full_toggle(true); break;
         case ACTION_CW_DECODER:     say_state("CW decoder", toggle_param(cfg_cw_decoder) ? "On" : "Off"); break;
         case ACTION_CW_ZAP:         controls_cw_zap(NULL); break;   /* in CW and CW-R, as the button */
         /* The X6100 mic's GENE and NW on any key: the X6200's mic has neither (#155) */
@@ -923,12 +1067,13 @@ void main_screen_action(press_action_t action) {
             break;
 
         default:
-            /* Voice mode and battery info were removed but may still be stored: nothing. Every app the lists offer
-             * (up to v0.3.12.23 RADE, Birdie Cal and the newer apps did nothing from a key) */
-            if (action >= ACTION_APP_RTTY && action <= ACTION_APP_SWL) {
+            /* Battery info was removed but may still be stored: nothing. Every app the lists offer (up to
+             * v0.3.12.23 RADE, Birdie Cal and the newer apps did nothing from a key); upstream's Mail (135 here) */
+            if ((action >= ACTION_APP_RTTY && action <= ACTION_APP_SWL) || action == ACTION_APP_MAIL) {
                 main_screen_start_app(action);
             } else if (action == ACTION_APP_IRADIO || action == ACTION_APP_ZELLO || action == ACTION_APP_FLIGHTS ||
-                       action == ACTION_APP_AERO || action == ACTION_APP_CB || action == ACTION_APP_METEO) {
+                       action == ACTION_APP_AERO || action == ACTION_APP_CB || action == ACTION_APP_METEO ||
+                       action == ACTION_APP_SVX || action == ACTION_APP_DMR) {
                 main_screen_start_app(action);      /* upstream's apps (the CX8ANM numbers, 200 on), as upstream */
             }
             break;
@@ -1008,6 +1153,11 @@ static void mode_key(keypad_key_t key, bool hold) {
         mode = ssb_key_mode(mode, hold);
     }
     cparam_i_set(cfg_cur_mode, mode);
+
+    char m[32];
+
+    voice_mode_now(m, sizeof(m));
+    voice_say_text_fmt("%s", m);
 }
 
 /* The keys over the buttons: their pages, or the action given to the long press. The hand
@@ -1108,6 +1258,7 @@ static bool ptt_key(keypad_state_t state) {
  * VFOs */
 static void ab_key(bool tap, bool hold) {
     if (ab_lock) {
+        if ((tap || hold) && voice_auto_active()) voice_say_text_fmt("VFO locked by the app");
         return;
     }
     if (tap) {
@@ -1118,7 +1269,10 @@ static void ab_key(bool tap, bool hold) {
         bool on_a = param_i_get(cfg_band_current_vfo) == RADIO_VFO_A;
 
         cfg_band_vfo_copy();
+        voice_msg_hold(true);
         msg_update_text_fmt("Clone VFO %s", on_a ? "A->B" : "B->A");
+        voice_msg_hold(false);
+        voice_say_text_fmt("VFO %s copied to %s", on_a ? "A" : "B", on_a ? "B" : "A");
     }
 }
 
@@ -1165,6 +1319,10 @@ static void hide_arm(void) {
 bool main_screen_buttons_wake(void) {
     bool was = buttons_hidden();
 
+    if (wf_full) {
+        return false;       /* under the full-screen waterfall: they come back when it goes (wf_full_set()) */
+    }
+
     buttons_hide(false);
     hide_arm();
     return was;
@@ -1182,7 +1340,7 @@ static void on_buttons_hide_change(Subject *subj, void *user_data) {
     main_screen_buttons_wake();
 }
 
-/* Front keys. Most act on the release (a press) or on the long press, not both */
+/* Front keys. Most act on the release (a press) or on the long press, not both; BAND UP and DOWN on the press */
 /* POWER held (on the radio, from the remote) or the battery spent: the same switch-off from any screen or app. What
  * plays through the base stops first (the Sentry's stick: LISTEN RTL, BOTH and OFF keep the base playing the GUI's
  * audio), then radio_poweroff() leaves the base with nothing set before Linux's shutdown and the "s" at its end */
@@ -1218,13 +1376,66 @@ static bool key_assigned(keypad_key_t key, bool tap, bool hold, bool long_releas
     return true;
 }
 
+/* BAND UP and DOWN with a press or a hold given an action of the user's (#111): front_keys.c repeats them in place of
+ * a long press (#233), so here the repeat past the long press time is their hold, the release after it a long press's,
+ * the other repeats nothing, and their own step comes on the release as before. Neither given one: the step on the
+ * press and on each repeat (front_key_cb). False: the state does nothing */
+#define BAND_KEY_HOLD_MS 1000   /* front_keys.c's HOLD_MS, the long press of the other keys */
+
+static bool band_key_assigned(keypad_key_t key) {
+    int k = key == KEYPAD_BAND_UP ? KA_BAND_UP : KA_BAND_DOWN;
+
+    return (cfg_key_press[k] && param_i_get(cfg_key_press[k]) != KEY_OWN) ||
+           (cfg_key_hold[k] && param_i_get(cfg_key_hold[k]) != KEY_OWN);
+}
+
+static bool band_key_states(keypad_state_t state, bool *tap, bool *hold, bool *long_release) {
+    static uint32_t since;
+    static bool     held;
+
+    switch (state) {
+        case KEYPAD_PRESS:
+            since = lv_tick_get();
+            held  = false;
+            return true;
+        case KEYPAD_REPEAT:
+            if (held || lv_tick_elaps(since) < BAND_KEY_HOLD_MS) return false;
+            held  = true;
+            *hold = true;
+            return true;
+        case KEYPAD_RELEASE:
+            if (held) {
+                held          = false;
+                *tap          = false;
+                *long_release = true;
+            }
+            return true;
+        default:
+            return true;
+    }
+}
+
 static void front_key_cb(lv_event_t *e) {
     event_keypad_t *ev   = lv_event_get_param(e);
     bool            tap  = ev->state == KEYPAD_RELEASE;
     bool            hold = ev->state == KEYPAD_LONG;
-    bool            woke = main_screen_buttons_wake();
+    bool            woke;
     bool            step;
 
+    /* The full-screen waterfall (#302): F1-F5 bring the normal screen back on the press, which does nothing more,
+     * as with the buttons hidden; a key of the buttons on its tap, as its long press may be the one that goes back
+     * (over a page of its own group that page stays, as with the buttons hidden). The other keys do their work
+     * under it */
+    if (wf_full && ev->state == KEYPAD_PRESS && ev->key >= KEYPAD_F1 && ev->key <= KEYPAD_F5) {
+        wf_full_set(false);
+        woke_key = ev->key;
+    } else if (wf_full && tap && (key_group(ev->key) || ev->key == KEYPAD_MSG)) {
+        if (key_group(ev->key) && buttons_group_shown(key_group(ev->key))) {
+            woke_group = ev->key;
+        }
+        wf_full_set(false);
+    }
+    woke = main_screen_buttons_wake();
     if (woke && ev->state == KEYPAD_PRESS && ev->key >= KEYPAD_F1 && ev->key <= KEYPAD_F5) {
         woke_key = ev->key;
     }
@@ -1248,7 +1459,16 @@ static void front_key_cb(lv_event_t *e) {
     if (page_key(ev->key, tap, hold, step)) {
         return;
     }
-    if (key_assigned(ev->key, tap, hold, ev->state == KEYPAD_LONG_RELEASE)) {
+    bool long_release = ev->state == KEYPAD_LONG_RELEASE;
+    bool band_own     = true;   /* BAND UP and DOWN with no action given: they step on the press */
+
+    if (ev->key == KEYPAD_BAND_UP || ev->key == KEYPAD_BAND_DOWN) {
+        band_own = !band_key_assigned(ev->key);
+        if (!band_own && !band_key_states(ev->state, &tap, &hold, &long_release)) {
+            return;
+        }
+    }
+    if (key_assigned(ev->key, tap, hold, long_release)) {
         return;
     }
     switch (ev->key) {
@@ -1269,11 +1489,17 @@ static void front_key_cb(lv_event_t *e) {
         case KEYPAD_MODE_AM: case KEYPAD_MODE_CW: case KEYPAD_MODE_SSB:
             if (!mode_lock && (tap || hold)) {
                 mode_key(ev->key, hold);
+            } else if (tap || hold) {
+                voice_say_text_fmt("Mode locked by the app");
             }
             break;
 
+        /* On the press, as the stock firmware does, and again and again while held (front_keys.c). On the release
+         * they came late, and a press held past the long press time did nothing (#233). An app that holds the
+         * band (band_lock) gets each step too. With a press or a hold given an action (#111): the step on the
+         * release, the hold the action's (band_key_states) */
         case KEYPAD_BAND_UP: case KEYPAD_BAND_DOWN:
-            if (tap) {
+            if (band_own ? (ev->state == KEYPAD_PRESS || ev->state == KEYPAD_REPEAT) : tap) {
                 band_step(ev->key == KEYPAD_BAND_UP);
             }
             break;
@@ -1316,9 +1542,15 @@ static void front_key_cb(lv_event_t *e) {
             ab_key(tap, hold);
             break;
 
-        case KEYPAD_POWER:  /* a press: the screen off/on */
+        case KEYPAD_POWER:  /* a press: the screen off/on; with speech always on, the screen read aloud instead */
             if (tap) {
-                backlight_switch();
+                /* Speech always: the screen read aloud, a blind operator has no use for the screen off/on. Off, and
+                 * speech only while the screen is dark: the screen off/on as ever */
+                if (voice_is_on() && param_i_get(cfg_voice_mode) == VOICE_ALWAYS) {
+                    say_screen();
+                } else {
+                    backlight_switch();
+                }
             } else if (hold) {
                 power_off_now();
             }
@@ -1346,29 +1578,41 @@ static void front_key_cb(lv_event_t *e) {
         case KEYPAD_VM:
             if (tap && step && !dialog_is_run()) {
                 buttons_load_page_group(buttons_group_vm);
+            } else if (tap && dialog_is_run()) {
+                voice_say_text_fmt("V M, not used here");
             }
             break;
 
         default:
             LV_LOG_WARN("Unsuported key: %u", ev->key);
+            if (tap && voice_auto_active()) voice_say_text_fmt("Not used");
             break;
     }
 }
 
 /* The H-22's VOL+ and VOL-: the RX volume a step a press, as in Xiegu's app, and on by itself while the key is held
- * (the X6200's goes to 100). Its message as the VOL knob's */
+ * (the X6200's goes to 100). Its message as the VOL knob's. A keyboard's volume keys step it the same way
+ * (main_screen_media_vol, key_input.c) */
 #define MIC_VOL_DELAY_MS    400     /* held this long, the steps repeat */
 #define MIC_VOL_REPEAT_MS   100
 
 static lv_timer_t *mic_vol_timer;
 static hkey_t      mic_vol_key;
 
-static void mic_vol_step(void) {
-    uint16_t vol = radio_change_vol(mic_vol_key == HKEY_VOL_UP ? +1 : -1);
+static void rx_vol_step(int16_t df) {
+    uint16_t vol = radio_change_vol(df);
 
     if (!knobs_visible() || vol_get_ctrl() != CTRL_VOL) {
         msg_update_text_fmt("Volume: %i", vol);
     }
+}
+
+static void mic_vol_step(void) {
+    rx_vol_step(mic_vol_key == HKEY_VOL_UP ? +1 : -1);
+}
+
+void main_screen_media_vol(int dir) {
+    rx_vol_step(dir > 0 ? +1 : -1);
 }
 
 static void mic_vol_stop(void) {
@@ -1389,13 +1633,21 @@ static void mic_vol_repeat_cb(lv_timer_t *t) {
     lv_timer_set_period(t, MIC_VOL_REPEAT_MS);
 }
 
+static void knob_turn(int16_t diff, uint16_t dt);     /* the main knob turned (below) */
+
 /* Hand mic keys */
 static void mic_key_cb(lv_event_t *e) {
     event_hkey_t   *ev   = lv_event_get_param(e);
     bool            tap  = ev->state == HKEY_RELEASE;
     bool            hold = ev->state == HKEY_LONG;
+    bool            updown = ev->key == HKEY_UP || ev->key == HKEY_DOWN;
+    bool            tune   = updown && param_i_get(cfg_mic_updown) == MIC_UPDOWN_TUNE;
 
-    main_screen_buttons_wake();     /* a key: the buttons back (Hide buttons) */
+    /* A key: the buttons back (Hide buttons). Not UP/DOWN on Tune, the main knob's detents, which leave them as the
+     * knob does; held, the band, they come back */
+    if (!tune || hold) {
+        main_screen_buttons_wake();
+    }
     switch (ev->key) {
         /* The band printed on the key; digits only in F-INP (dialog_freq.c). Long: memory 1-9 */
         case HKEY_0: case HKEY_1: case HKEY_2: case HKEY_3: case HKEY_4:
@@ -1415,6 +1667,9 @@ static void mic_key_cb(lv_event_t *e) {
             }
             if (tap && !band_lock) {
                 controls_set_band_m(ev->h22 ? h22_m[digit] : band_m[digit]);
+                say_band();
+            } else if (tap) {
+                voice_say_text_fmt("Band locked by the app");
             } else if (hold && digit > 0 && digit < 10) {
                 mem_load(digit);
             }
@@ -1429,7 +1684,7 @@ static void mic_key_cb(lv_event_t *e) {
 
         case HKEY_TUNER:    /* as the ATU key, without the note */
             if (tap) {
-                toggle_atu();
+                voice_say_text_fmt("ATU %s", toggle_atu() ? "on" : "off");
             } else if (hold) {
                 radio_start_atu();
             }
@@ -1439,19 +1694,29 @@ static void mic_key_cb(lv_event_t *e) {
             if (tap && !ab_lock) {
                 radio_toggle_vfo();
                 spectrum_clear();
+                say_vfo();
             }
             break;
 
-        /* Hand mic UP/DOWN: the channel before/after the last one tuned, its name shown;
-         * long press: band up/down */
+        /* Hand mic UP/DOWN (Settings > Keys > HAND MIC KEYS > Hand mic UP/DOWN, mic_updown.h): on Channels the channel
+         * before/after the last one tuned, its name shown; on Tune a detent of the main knob, up/down, by the knob's
+         * own path: its step, LOCK, an app's hold, an app's own use of the knob (#300). Long press: band up/down */
         case HKEY_UP:
         case HKEY_DOWN: {
-            bool up = ev->key == HKEY_UP;
+            mic_ud_t ud = mic_updown(param_i_get(cfg_mic_updown), ev->key == HKEY_UP, tap, hold);
 
-            if (hold) {
-                band_step(up);
-            } else if (tap && dialog_channels_recall_relative(up ? -1 : +1)) {
+            if (ud.what == MIC_UD_BAND) {
+                band_step(ud.dir > 0);
+            } else if (ud.what == MIC_UD_TUNE) {
+                knob_turn(ud.dir, 0);
+            } else if (ud.what == MIC_UD_CHANNEL && dialog_channels_recall_relative(ud.dir)) {
+                char f[32];
+
                 channel_overlay_show(dialog_channels_last_recalled_name());
+                voice_freq_text(cparam_i_get(cfg_fg_freq), f, sizeof(f));
+                voice_say_text_fmt("Channel %s, %s", dialog_channels_last_recalled_name(), f);
+            } else if (ud.what == MIC_UD_CHANNEL) {
+                voice_say_text_fmt("No channels");
             }
             break;
         }
@@ -1487,6 +1752,11 @@ static void mic_key_cb(lv_event_t *e) {
                     i++;
                 }
                 cparam_i_set(cfg_cur_mode, order[(i + 1) % n_order]);
+
+                char m[32];
+
+                voice_mode_now(m, sizeof(m));
+                voice_say_text_fmt("%s", m);
             } else if (!mode_lock && hold) {
                 mode_key(KEYPAD_MODE_SSB, true);
             }
@@ -1532,15 +1802,16 @@ static void mic_key_cb(lv_event_t *e) {
             ab_key(tap, hold);
             break;
 
-        case HKEY_BAND_UP:  /* as the BAND keys; Xiegu's app knows them, no base was seen sending them */
+        case HKEY_BAND_UP:  /* as the BAND keys, on the press; Xiegu's app knows them, no base was seen sending them */
         case HKEY_BAND_DOWN:
-            if (tap) {
+            if (ev->state == HKEY_PRESS) {
                 band_step(ev->key == HKEY_BAND_UP);
             }
             break;
 
         default:
             LV_LOG_WARN("Unsuported key: %u", ev->key);
+            if (tap && voice_auto_active()) voice_say_text_fmt("Not used");
             break;
     }
 }
@@ -1551,6 +1822,8 @@ static void rx_tx_cb(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
 
     backlight_tx(code == EVENT_RADIO_TX);
+    on_air = code == EVENT_RADIO_TX;
+    wf_tag_update();
     lv_event_send(meter, code, NULL);
     lv_event_send(tx_info, code, NULL);
     lv_event_send(spectrum, code, NULL);
@@ -1623,6 +1896,7 @@ static void freq_shift(int16_t diff, uint16_t dt) {
     }
     cparam_i_set(cfg_fg_freq, freq);
     plan_mode(old, freq);
+    voice_say_freq(cparam_i_get(cfg_fg_freq));     /* spoken once the knob rests (voice.cpp) */
 }
 
 /* Settings > General > Mode from band plan: the knob turned into another segment of the band plan
@@ -1668,6 +1942,13 @@ static bool mfk_page_turn(int32_t diff) {
 }
 #endif
 
+/* diff detents of the main knob, dt ms each (0: a key, one step a detent): the frequency, and the open app's own use
+ * of the knob (FT8's TX offset). The hand mic's UP/DOWN on Tune come here too */
+static void knob_turn(int16_t diff, uint16_t dt) {
+    if (!dialog_rotary_taken()) freq_shift(diff, dt);     /* the Sentry's RTL-SDR may have it */
+    dialog_rotary(diff);
+}
+
 static void main_knob_cb(lv_event_t *e) {
     rotary_data_t *turn = lv_event_get_param(e);
 
@@ -1677,20 +1958,108 @@ static void main_knob_cb(lv_event_t *e) {
         return;
     }
 #endif
-    if (!dialog_rotary_taken()) freq_shift(turn->diff, turn->dt);     /* the Sentry's RTL-SDR may have it */
-    dialog_rotary(turn->diff);
+    knob_turn(turn->diff, turn->dt);
     free(turn);     /* rotary.c allocates one per event */
 }
 
-/* VOL press: turning changes the value, or chooses what VOL controls */
-void main_screen_vol_press(void) {
-    if (walkie_on()) return;    /* the volume, always */
-
+/* VOL's press with Knob press: next control off, its long one with it on: turning changes the value, or chooses
+ * what VOL controls */
+static void vol_toggle(void) {
     bool edit = vol->state != VOL_STATE_EDIT;
 
     vol->state = edit ? VOL_STATE_EDIT : VOL_STATE_SELECT;
     knobs_set_vol_state(edit);
     vol_update(0);
+    vol_say_state();
+}
+
+/* The MFK's, as VOL's */
+static void mfk_toggle(void) {
+    bool edit = mfk_state != MFK_STATE_EDIT;
+
+    mfk_state = edit ? MFK_STATE_EDIT : MFK_STATE_SELECT;
+    knobs_set_mfk_state(edit);
+    mfk_update(0);
+    mfk_say_state();
+}
+
+/* Knob press: next control (#282), as the stock firmware does it: a short press takes the knob's next control
+ * (round the list) ready to change, the knob line and the button's mark on it at once; a long one does what a
+ * press does with it off. A press is told short or long by watching the knob until it is let go or held
+ * (knob_press.h): the encoder's own LONG_PRESSED is not sent for VOL, nor for a click (Field Ops) */
+static knob_press_watch_t vol_watch, mfk_watch;
+static lv_timer_t        *knob_press_timer;
+
+static void vol_next(void) {
+    if (vol->state != VOL_STATE_EDIT) {
+        vol->state = VOL_STATE_EDIT;
+        knobs_set_vol_state(true);
+    }
+    vol_change_ctrl(+1);
+}
+
+static void mfk_next(void) {
+    if (mfk_state != MFK_STATE_EDIT) {
+        mfk_state = MFK_STATE_EDIT;
+        knobs_set_mfk_state(true);
+    }
+    mfk_change_ctrl(+1);
+}
+
+/* Held on the cluster column: tune to the spot, the knob left as it was, as the long press does with it off (a
+ * press, then the long press tuned and pressed again) */
+static void mfk_held(void) {
+    if (mfk_ctrl == CTRL_CLUSTER) {
+        cluster_column_tune();
+    } else {
+        mfk_toggle();
+    }
+}
+
+static void knob_press_cb(lv_timer_t *t) {
+    uint32_t now = lv_tick_get();
+
+    switch (knob_press_look(&vol_watch, now, keypad_vol_down())) {
+        case KNOB_PRESS_SHORT:  vol_next(); break;
+        case KNOB_PRESS_HELD:   vol_toggle(); break;
+        default:                break;
+    }
+    switch (knob_press_look(&mfk_watch, now, mfk && mfk->pressed)) {
+        case KNOB_PRESS_SHORT:  mfk_next(); break;
+        case KNOB_PRESS_HELD:   mfk_held(); break;
+        default:                break;
+    }
+    if (!vol_watch.watching && !mfk_watch.watching) {
+        lv_timer_pause(t);
+    }
+}
+
+/* A press to watch, and the first look at once: one with no knob down behind it (a keyboard's key, a click that
+ * comes at the release) is short there and then */
+static void knob_press_watch(knob_press_watch_t *w) {
+    knob_press_begin(w, lv_tick_get());
+    if (knob_press_timer) {
+        lv_timer_resume(knob_press_timer);
+    } else {
+        knob_press_timer = lv_timer_create(knob_press_cb, 20, NULL);
+    }
+    knob_press_cb(knob_press_timer);
+}
+
+static bool knob_press_next(void) {
+    return param_i_get(cfg_knob_press_next);
+}
+
+/* VOL press: turning changes the value, or chooses what VOL controls; with Knob press: next control the next
+ * control, or that when held */
+void main_screen_vol_press(void) {
+    if (walkie_on()) return;    /* the volume, always */
+
+    if (knob_press_next()) {
+        knob_press_watch(&vol_watch);
+    } else {
+        vol_toggle();
+    }
 }
 
 /* MFK as on the main screen: dir -1 / +1 turns it, 0 is the press */
@@ -1703,12 +2072,11 @@ void main_screen_mfk(int dir) {
             mfk_change_ctrl(dir);
         return;
     }
-
-    bool edit = mfk_state != MFK_STATE_EDIT;
-
-    mfk_state = edit ? MFK_STATE_EDIT : MFK_STATE_SELECT;
-    knobs_set_mfk_state(edit);
-    mfk_update(0);
+    if (knob_press_next()) {
+        knob_press_watch(&mfk_watch);
+    } else {
+        mfk_toggle();
+    }
 }
 
 /* Keys sent to the spectrum (it has the keyboard when no app does): the VOL knob, and a USB
@@ -1716,6 +2084,7 @@ void main_screen_mfk(int dir) {
 static void spectrum_key_cb(lv_event_t *e) {
     uint32_t key = *(uint32_t *)lv_event_get_param(e);
 
+    voice_trace("spectrum key %u", key);
     if (key == KEY_VOL_PRESS) {
         key = LV_KEY_ESC;   /* on the main screen VOL press does what ESC does */
     }
@@ -1734,7 +2103,10 @@ static void spectrum_key_cb(lv_event_t *e) {
             main_screen_buttons_wake();
             break;
     }
-    if (cw_field_key(key)) {
+    if (cw_field_key(key) || rtty_send_key(key)) {
+        if (cw_field_visible()) {
+            wf_full_set(false);     /* the line being typed is under the full-screen waterfall */
+        }
         return;
     }
     switch (key) {
@@ -1789,8 +2161,10 @@ static void spectrum_pressed_cb(lv_event_t *e) {
 }
 
 /* Long MFK press: with the Cluster item active, tune to the highlighted spot.
- * The press already toggled the MFK state; toggle it back to keep browsing. */
+ * The press already toggled the MFK state; toggle it back to keep browsing.
+ * With Knob press: next control the press is watched instead (mfk_held()) */
 static void spectrum_long_pressed_cb(lv_event_t *e) {
+    if (knob_press_next()) return;
     if (mfk_ctrl == CTRL_CLUSTER && !main_walk_on()) {
         cluster_column_tune();
         spectrum_pressed_cb(e);
@@ -1922,7 +2296,7 @@ void main_screen_keyboard_gone(void) {
 /* CapsLock and a key (key_input.c, kbd_hyper.c's table): what each chord does, and where. The main screen's act only
  * while it has the keyboard, where they bring hidden buttons back as a key does; in an app, a dialog or a text box
  * they do nothing. The screenshot is taken everywhere, as a long press given it is; PTT goes off everywhere; 1-8 are
- * JTTY's macros while it has the keyboard */
+ * JTTY's macros while it has the keyboard, 1-6 RTTY's on the main screen in RTTY */
 void main_screen_chord(int action) {
     bool here = main_screen_has_keys();
 
@@ -1942,7 +2316,7 @@ void main_screen_chord(int action) {
     if (action >= HYPER_KEY_1 && action <= HYPER_KEY_8) {
         int n = action - HYPER_KEY_1 + 1;
 
-        if (!dialog_jtty_macro(n) && here && n <= 5) {
+        if (!dialog_jtty_macro(n) && here && !rtty_send_macro(n) && n <= 5) {
             cw_field_message(n);    /* in CW, where the CW line keys */
         }
         return;
@@ -2180,19 +2554,133 @@ static lv_coord_t spectrum_layout(void) {
     return y + spectrum_height;
 }
 
-/* Spectrum on/off or its height (Settings, the remote): what is under it moves, live */
+/* Spectrum on/off or its height (Settings, the remote), the full-screen waterfall on or off: what is under the
+ * spectrum moves, live. Full screen: the waterfall from the top of the screen, the spectrum as when it is off (no
+ * trace drawn, nor put on the primary plane, where the waterfall now is) */
 static void on_spectrum_layout_change(Subject *subj, void *user_data) {
-    lv_coord_t y = spectrum_layout();
+    lv_coord_t y = 0;
 
-    freq_scale_set_y(theme_shape.deck ? y - spectrum_height : y);   /* deck: the edges in the spectrum */
-    y += freq_height;
+    if (wf_full) {
+        lv_obj_set_style_opa(spectrum, LV_OPA_TRANSP, 0);
+    } else {
+        y = spectrum_layout();
+        freq_scale_set_y(theme_shape.deck ? y - spectrum_height : y);   /* deck: the edges in the spectrum */
+        y += freq_height;
+    }
     if (y == wf_y) {
         return;     /* the height of a spectrum that is off */
     }
     wf_y = y;
     waterfall_set_height(BOARD_DISP_H - y);
     on_cluster_spots_wf_change(NULL, NULL);     /* waterfall, its lines, band plan, spots, cluster column */
-    panel_keep_below(wf_y - 8);
+    if (!wf_full) {
+        panel_keep_below(wf_y - 8);
+    }
+}
+
+/* The tag over the full-screen waterfall: the frequency and the mode; on the air TX before them on the TX colours,
+ * and a frame of the TX colour around the screen, as the walkie screen's */
+static void wf_tag_update(void) {
+    uint16_t mhz, khz, hz;
+
+    if (!wf_full) {
+        return;
+    }
+    split_freq(shown_freq(), &mhz, &khz, &hz);
+    lv_label_set_text_fmt(wf_tag, "%s%i.%03i.%03i %s", on_air ? "TX " : "", mhz, khz, hz, info_params_mode_label_get());
+    lv_obj_set_style_bg_color(wf_tag, on_air ? TC(tx_bg) : TC(chip), 0);
+    lv_obj_set_style_border_color(wf_tag, on_air ? TC(tx) : TC(bar_border), 0);
+    lv_obj_set_style_border_width(wf_tag_box, on_air ? 4 : 0, 0);
+}
+
+static void on_wf_tag_change(Subject *subj, void *user_data) {
+    wf_tag_update();
+}
+
+/* Made hidden, over all the rest (build()) */
+static void wf_tag_init(void) {
+    wf_tag_box = lv_obj_create(obj);
+    lv_obj_remove_style_all(wf_tag_box);
+    lv_obj_set_size(wf_tag_box, BOARD_DISP_W, BOARD_DISP_H);
+    lv_obj_clear_flag(wf_tag_box, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);     /* a touch: the waterfall's */
+    lv_obj_add_flag(wf_tag_box, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_border_color(wf_tag_box, TC(tx), 0);
+
+    /* In the bottom left corner, on the oldest rows, over the 3D waterfall's labels */
+    wf_tag = lv_label_create(wf_tag_box);
+    lv_obj_set_style_text_font(wf_tag, &sony_26, 0);
+    lv_obj_set_style_text_color(wf_tag, TC(text), 0);
+    lv_obj_set_style_bg_opa(wf_tag, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(wf_tag, LV_MAX(theme_shape.border, 1), 0);
+    lv_obj_set_style_radius(wf_tag, LV_MIN(theme_shape.radius, 6), 0);
+    lv_obj_set_style_pad_hor(wf_tag, 10, 0);
+    lv_obj_set_style_pad_ver(wf_tag, 3, 0);
+    lv_label_set_text(wf_tag, "");
+    lv_obj_align(wf_tag, LV_ALIGN_BOTTOM_LEFT, 8, -28);
+}
+
+/* The full-screen waterfall on or off (see wf_full) */
+static void wf_full_set(bool on) {
+    if (on == wf_full || !waterfall) {
+        return;
+    }
+    if (on) {
+        wf_block = malloc(wf_block_n * sizeof(*wf_block));
+        if (!wf_block) {
+            return;
+        }
+        wf_block_at = lv_obj_get_index(waterfall);
+        for (uint32_t i = 0; i < wf_block_n; i++) {
+            wf_block[i] = lv_obj_get_child(obj, wf_block_at + i);
+        }
+        for (uint32_t i = 0; i < wf_block_n; i++) {
+            lv_obj_move_foreground(wf_block[i]);
+        }
+        lv_obj_move_foreground(wf_tag_box);
+        lv_obj_clear_flag(wf_tag_box, LV_OBJ_FLAG_HIDDEN);
+        buttons_hide(true);     /* as Hide buttons has them: the 3D waterfall to the bottom, the knobs' values said */
+        knobs_cover(true);
+        wf_full = true;
+    } else {
+        wf_full = false;
+        /* Back where they were, the first one first: nothing under them was made or deleted meanwhile (the widgets
+         * of build()), what came over them since (a note, the SWL panel) stays over them */
+        for (uint32_t i = 0; i < wf_block_n; i++) {
+            lv_obj_move_to_index(wf_block[i], wf_block_at + i);
+        }
+        free(wf_block);
+        wf_block = NULL;
+        lv_obj_add_flag(wf_tag_box, LV_OBJ_FLAG_HIDDEN);
+        knobs_cover(false);
+        main_screen_buttons_wake();     /* shown, and Hide buttons counted from now */
+    }
+    on_spectrum_layout_change(NULL, NULL);
+    wf_tag_update();
+}
+
+void main_screen_wf_full_end(void) {
+    wf_full_set(false);
+}
+
+/* The key given it (say: a word when it cannot), or a touch held on the waterfall. Going back is always allowed */
+static void wf_full_toggle(bool say) {
+    if (!wf_full && (dialog_is_run() || rtty_get_state() != RTTY_OFF || walkie_on())) {
+        if (say && !walkie_on()) {
+            msg_update_text_fmt("Full screen: not over an app");
+        }
+        return;
+    }
+    wf_full_set(!wf_full);
+}
+
+/* A touch (the PC build's mouse) held on the waterfall, where no other touch does anything. The knobs' long presses
+ * go to the spectrum (spectrum_long_pressed_cb()) */
+static void wf_long_pressed_cb(lv_event_t *e) {
+    lv_indev_t *indev = lv_indev_get_act();
+
+    if (indev && lv_indev_get_type(indev) == LV_INDEV_TYPE_POINTER) {
+        wf_full_toggle(false);
+    }
 }
 
 static void channels_poll_cb(lv_timer_t *t) {
@@ -2268,6 +2756,7 @@ lv_obj_t * main_screen() {
     msg_init(lv_layer_top());
     msg_tiny_init(lv_layer_top());
 
+    main_call_init();   /* the callsign the layouts show (#292) */
     build();
     buttons_load_page(&buttons_page_vol_1);
     lv_async_call(band_usable_check, NULL);     /* once the radio runs */
@@ -2298,7 +2787,9 @@ static void build(void) {
 
     y += freq_height;
     wf_y = y;
+    wf_block_n = lv_obj_get_child_cnt(obj);     /* the waterfall and what lies on it: the children from here on */
     waterfall = waterfall_init(obj);
+    lv_obj_add_event_cb(waterfall, wf_long_pressed_cb, LV_EVENT_LONG_PRESSED, NULL);
     waterfall_min_max_reset();
     lv_obj_set_y(waterfall, y);
     waterfall_set_height(BOARD_DISP_H - y);
@@ -2306,6 +2797,7 @@ static void build(void) {
     freq_scale_lines_init(obj, y, BOARD_DISP_H - y);
     spot_marks_init(obj, y, spot_tag_y);   /* laid out by on_cluster_spots_wf_change() */
     cluster_column_init(obj, wf_y);
+    wf_block_n = lv_obj_get_child_cnt(obj) - wf_block_n;
     subject_subscribe_delayed_and_notify((Subject*)cfg_cluster_spots_wf, on_cluster_spots_wf_change, NULL);
     subject_subscribe_delayed((Subject*)cfg_channel_marks, channel_marks_cb, NULL);
     subject_subscribe_delayed((Subject*)cfg_band_plan, on_band_plan_change, NULL);
@@ -2352,6 +2844,11 @@ static void build(void) {
     }
 
     cw_tune_init(obj);
+    wf_tag_init();
+    subject_subscribe_delayed((Subject*)cfg_fg_freq, on_wf_tag_change, NULL);
+    subject_subscribe_delayed((Subject*)cfg_bg_freq, on_wf_tag_change, NULL);
+    subject_subscribe_delayed((Subject*)cfg_band_split, on_wf_tag_change, NULL);
+    subject_subscribe_delayed((Subject*)cfg_cur_mode, on_wf_tag_change, NULL);
 
     /* The order counts: these run in it when several change at once */
     subject_subscribe_delayed((Subject*)freq_lock, on_freq_change, NULL);

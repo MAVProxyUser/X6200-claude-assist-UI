@@ -10,7 +10,11 @@
 2. Mercury through x6x00-mercury, protocol version 2, and Pat v1.0.1's varahf transport, as on the radio: two
    stations, each a winlink_host and a bridge, what one transmits the other hears (with a little noise). Pat B
    listens; Pat A sends B a message peer to peer. Pat starts the modem (Mercury answers VERSION), connects,
-   sends, disconnects, and the message is in B's inbox.
+   sends, disconnects, and the message is in B's inbox. The keys' level is Mercury 1.9.21's (x6100-winlink's
+   tx_gain_db = -4 under 1.9.25, which alone is 4 dB louder). Then the stop: with a session up, x6x00-mercury has
+   Mercury end it on the air first, so the other station's Mercury says DISCONNECTED at once, and it stops within
+   its bound and keys no more; with none it stops at once; a second SIGTERM during the goodbye stops it at once;
+   a goodbye nobody answers still ends.
 3. XARA (our patched build, its --audio x6x00 on the GUI's socket, protocol version 2 at 12000 Hz) and Pat's varahf,
    the same way, twice: with the settings x6100-winlink writes for the free speed (no `registered`), B's XARA says
    LINK UNREGISTERED and no level goes past VARA's free 4; with `registered` on A (the Winlink page's VARA licence
@@ -18,10 +22,10 @@
    the free speed and before any Pat: A's XARA calls B's, which neither answers nor keys (on the radio XARA starts
    with listening off; Pat B's listen turns it on). The free run has calls of a European kind (ON4AAA, ON4BBB), the
    registered one US calls. Both XARAs identify in CW as Pat's session closes, with either kind: Pat sends CWID ON,
-   which upstream's XARA 0.1.3 takes only for a US call and our patch 0002 for any. Before any Pat, with no CWID ON,
+   which upstream's XARA takes only for a US call and our patch 0004 for any. Before any Pat, with no CWID ON,
    A's call that B does not answer ends without one with the European call, as upstream's does. Then, with CWID ON,
    a call cancelled in its reply window (ABORT, as Pat's force disconnect) and a tune elsewhere half a second later,
-   as Pat's tune back: A's XARA keys its ID at once (patch 0003), on the call's frequency, and the radio tunes after
+   as Pat's tune back: A's XARA keys its ID at once (patch 0005), on the call's frequency, and the radio tunes after
    that key.
 
 Run it in a network namespace with loopback only (`make modems` does, with unshare -rn): Pat then reaches
@@ -33,6 +37,7 @@ Prints MODEMS OK at the end; exits 1 at the first failure. --keep DIR keeps the 
 import argparse
 import array
 import json
+import math
 import os
 import re
 import shutil
@@ -46,6 +51,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLAY_RATE = 44100
 CALL_A, CALL_B = "N0AAA", "N0BBB"
+GOODBYE_S = 42                         # x6x00-mercury's bound for a session ended on the air at its stop
 # Calls that are not of the US kind, for XARA's run at the free speed: without CWID ON from its host XARA identifies in
 # CW only with a US call
 CALL_EU_A, CALL_EU_B = "ON4AAA", "ON4BBB"
@@ -123,6 +129,14 @@ def host(procs, tmp, name, rig_port, air_in=None, air_out=None):
 def played(h):
     """The transmissions of a winlink_host so far: (samples, stopped) each."""
     return [(int(l.split()[1]), l.split()[3] == "1") for l in text(h["played"] + ".log").splitlines()]
+
+
+def peak_db(h):
+    """The peak of a winlink_host's last transmission as it was played, dBFS"""
+    a = array.array("h")
+    with open(h["played"], "rb") as f:
+        a.frombytes(f.read())
+    return 20 * math.log10(max(max(a), -min(a), 1) / 32768)
 
 
 def freqs(h):
@@ -252,7 +266,7 @@ broadcast_tcp_port = {port - 200}
 callsign = {call}
 
 [audio]
-tx_gain_db = 0.0
+tx_gain_db = -4.0
 tx_delay_ms = 10
 
 [channel]
@@ -266,8 +280,21 @@ enabled = false
 """)
     env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=os.path.join(home, ".config"))
     log = os.path.join(tmp, name + "-mercury.log")
-    m = procs.start([mercury, f"SOCK:{h['sock']}", "-C", ini], log, env)
+    h["bridge"] = ([mercury, f"SOCK:{h['sock']}", "-C", ini], env, log)
+    m = procs.start(h["bridge"][0], log, env)
     return h, m, log
+
+
+def mercury_again(procs, h, nth):
+    """The station's x6x00-mercury started again on the same winlink_host, a log of its own"""
+    argv, env, log = h["bridge"]
+    log = f"{log}.{nth}"
+    return procs.start(argv, log, env), log
+
+
+def _keyed_now(h):
+    """The winlink_host has a key on"""
+    return text(h["log"]).count("[stub] keyed") > text(h["log"]).count("[stub] unkeyed")
 
 
 def pat_env(tmp, name, call):
@@ -302,23 +329,20 @@ def pat_cmd(pat, d, port, call, *args, listen=False):
 
 
 def version_check(port):
-    """Pat's start of the modem, the order that hung it: the WRONG for CWID ON read before VERSION is asked.
-    Pat-Vara's Version() then waits, with no timeout, for a line that starts VERSION or WRONG"""
+    """Pat's start of the modem: its start-up commands, then VERSION. Pat-Vara's Version() waits, with no timeout,
+    for a line that starts VERSION or WRONG. Mercury 1.9.21 said WRONG to CWID ON, which ended that wait only when
+    it came after the question; 1.9.25 takes CWID ON (and sends no CW ID), so its VERSION line alone ends it"""
     c = socket.create_connection(("127.0.0.1", port), timeout=5)
-    got = b""
-    for cmd in ("PUBLIC ON", "CWID ON", "COMPRESSION TEXT", f"MYCALL {CALL_A}", "LISTEN OFF"):
+    cmds = ("PUBLIC ON", "CWID ON", "COMPRESSION TEXT", f"MYCALL {CALL_A}", "LISTEN OFF")
+    for cmd in cmds:
         c.sendall(cmd.encode() + b"\r")
-    end = time.time() + 5
-    while b"WRONG\r" not in got and time.time() < end:
-        got += c.recv(4096)
-    check(b"WRONG\r" in got, "Mercury answers Pat's CWID ON with WRONG")
-    got = b""
+    got = read_until(c, lambda g: g.split(b"\r").count(b"OK") >= len(cmds) or b"WRONG" in g, 5)
+    check(got.split(b"\r").count(b"OK") == len(cmds) and b"WRONG" not in got,
+          f"Mercury takes Pat's start-up commands, CWID ON too ({got!r})")
     c.sendall(b"VERSION\r")
-    end = time.time() + 3
-    while not any(l.startswith(b"VERSION") for l in got.split(b"\r")) and time.time() < end:
-        got += c.recv(4096)
+    got = read_until(c, lambda g: any(l.startswith(b"VERSION") for l in g.split(b"\r")[:-1]), 3)
     line = next((l for l in got.split(b"\r") if l.startswith(b"VERSION")), b"").decode()
-    check(line == "VERSION Mercury 1.9.21", f"and VERSION with a VERSION line, what Pat waits for ({line!r})")
+    check(line == "VERSION Mercury 1.9.25", f"and VERSION with a VERSION line, what Pat waits for ({line!r})")
     c.close()
 
 
@@ -371,12 +395,116 @@ def mercury_test(procs, tmp, mercury, pat):
     check(keys_a and keys_b, f"both radios keyed: A {len(keys_a)} times, B {len(keys_b)} times")
     longest = max(n for n, _ in keys_a + keys_b) / PLAY_RATE
     check(not any(s for _, s in keys_a + keys_b), f"no key stopped by the GUI (the longest {longest:.1f} s)")
+    # The level on the GUI's socket, as the radio's player gets it: each station's last key (A's a data mode, B's
+    # the MFSK of its last answer, or the other way round). Mercury 1.9.25 alone peaks at -2 dBFS (-2.5 MFSK), 4 dB
+    # over 1.9.21 to 1.9.24; with x6100-winlink's tx_gain_db = -4 it is their -6 dBFS (-6.5 MFSK) again
+    for h, n in ((ha, "A"), (hb, "B")):
+        db = peak_db(h)
+        check(-7.5 <= db <= -5.5, f"station {n}: its last key peaks at {db:.1f} dBFS, the level of Mercury 1.9.21")
     pb.stdin.close()
     procs.stop(pb)
-    for m, h, n in ((ma, ha, "A"), (mb, hb, "B")):
-        procs.stop(m)
-        check(m.returncode == 0 and wait_for(lambda: "the modem gone" in text(h["log"]), 5),
-              f"station {n}: x6x00-mercury stopped on SIGTERM, the GUI saw it go")
+
+    # The stop. With a session up, x6x00-mercury first has Mercury end it on the air (1.9.25's goodbye, one
+    # DISCONNECT) while its audio thread still carries the key: the other station is let go at once, not by its
+    # watchdog 240 s later. With none it stops at once, as before
+    def session():
+        cs = [socket.create_connection(("127.0.0.1", p), timeout=5) for p in (18300, 18310)]
+        for c, call in zip(cs, (CALL_A, CALL_B)):
+            c.sendall(f"MYCALL {call}\rLISTEN ON\r".encode())
+        cs[0].sendall(f"CONNECT {CALL_A} {CALL_B}\r".encode())
+        for c, n in zip(cs, "AB"):
+            got = read_until(c, lambda g: b"CONNECTED " in g, 60)
+            check(b"CONNECTED " in got, f"a session of the two Mercurys alone, for the stop: {n} says CONNECTED")
+        return cs
+
+    def keyed(h):
+        return text(h["log"]).count("[stub] keyed")
+
+    def quiet_after(h, n):
+        keys = keyed(h)
+        time.sleep(1.5)
+        check(keyed(h) == keys, f"station {n}: no key after the stop")
+
+    ca, cb = session()
+    keys, sent, gone = keyed(ha), len(played(ha)), text(ha["log"]).count("the modem gone")
+    t0 = time.time()
+    ma.send_signal(signal.SIGTERM)
+    got = read_until(cb, lambda g: b"DISCONNECTED" in g, GOODBYE_S)
+    heard = time.time() - t0
+    check(b"DISCONNECTED" in got, f"A stopped with the session up: B's Mercury says DISCONNECTED {heard:.1f} s later, "
+                                  "by A's goodbye on the air")
+    try:
+        ma.wait(GOODBYE_S + 13 - heard)
+    except subprocess.TimeoutExpired:
+        fail(f"station A: x6x00-mercury still runs {GOODBYE_S + 13} s after SIGTERM")
+    secs = time.time() - t0
+    check(ma.returncode == 0 and secs < GOODBYE_S + 13,
+          f"station A: x6x00-mercury stopped {secs:.1f} s after SIGTERM, within its {GOODBYE_S} s and the stop "
+          f"(code {ma.returncode})")
+    check("x6x00-mercury: a session is up, ending it on the air first" in text(la)
+          and "x6x00-mercury: the goodbye is over" in text(la), "station A: its log says the goodbye, and that it is over")
+    check(wait_for(lambda: text(ha["log"]).count("the modem gone") == gone + 1, 5), "station A: the GUI saw it go")
+    ends = played(ha)[sent:]
+    check(keyed(ha) > keys and ends and not ends[-1][1],
+          f"station A: the goodbye was keyed through the GUI and played to its end ({len(ends)} "
+          f"transmission{'s' if len(ends) != 1 else ''} after SIGTERM, the last {ends[-1][0] / PLAY_RATE:.1f} s)"
+          if ends else "station A: the goodbye was keyed through the GUI")
+    quiet_after(ha, "A")
+    # B has no session any more: its stop is at once
+    time.sleep(3)
+    check(wait_for(lambda: not _keyed_now(hb), 20), "station B: unkeyed after the session's end")
+    t0 = time.time()
+    procs.stop(mb, 20.0)
+    secs = time.time() - t0
+    check(mb.returncode == 0 and secs < 3 and "ending it on the air first" not in text(lb),
+          f"station B: with no session up x6x00-mercury stopped at once, in {secs:.1f} s (code {mb.returncode}), "
+          "no goodbye")
+    quiet_after(hb, "B")
+    ca.close()
+    cb.close()
+
+    # A second SIGTERM during the goodbye stops at once (x6100-winlink passes on one it gets meanwhile): the GUI
+    # cuts the key when the modem goes. B is left with a session whose other end is gone: its goodbye gets no
+    # answer, and its stop still ends in time
+    ma, la = mercury_again(procs, ha, 2)
+    mb, lb = mercury_again(procs, hb, 2)
+    for log, n, port in ((la, "A", 18300), (lb, "B", 18310)):
+        check(wait_for(lambda: f"Listening on 127.0.0.1 TCP port {port}" in text(log), 15),
+              f"station {n}: x6x00-mercury started again")
+    for h, n in ((ha, "A"), (hb, "B")):
+        check(wait_for(lambda: text(h["log"]).count("the modem connected, protocol 2") >= 2, 15),
+              f"station {n}: on the GUI's socket again")
+    ca, cb = session()
+    gone = text(ha["log"]).count("the modem gone")
+    t0 = time.time()
+    ma.send_signal(signal.SIGTERM)
+    check(wait_for(lambda: "ending it on the air first" in text(la), 3, 0.05), "station A: the goodbye began")
+    time.sleep(0.5)
+    ma.send_signal(signal.SIGTERM)
+    try:
+        ma.wait(5)
+    except subprocess.TimeoutExpired:
+        fail("station A: x6x00-mercury still runs 5 s after the second SIGTERM")
+    secs = time.time() - t0
+    check(ma.returncode == 0 and "the goodbye is cut short by a second stop" in text(la)
+          and wait_for(lambda: text(ha["log"]).count("the modem gone") == gone + 1, 5),
+          f"station A: a second SIGTERM during the goodbye stopped it at once, {secs:.1f} s after the first (code "
+          f"{ma.returncode}), the GUI saw it go")
+    quiet_after(ha, "A")
+    t0 = time.time()
+    mb.send_signal(signal.SIGTERM)
+    try:
+        mb.wait(GOODBYE_S + 13)
+    except subprocess.TimeoutExpired:
+        fail(f"station B: x6x00-mercury still runs {GOODBYE_S + 13} s after SIGTERM, its goodbye unanswered")
+    secs = time.time() - t0
+    said = [l for l in text(lb).splitlines() if "x6x00-mercury: the goodbye is" in l]
+    check(mb.returncode == 0 and said,
+          f"station B: its goodbye with nobody there to answer still ended, {secs:.1f} s after SIGTERM (code "
+          f"{mb.returncode}; {said[-1].split('x6x00-mercury: ')[-1] if said else '-'})")
+    quiet_after(hb, "B")
+    ca.close()
+    cb.close()
 
 
 def supervisor(root):
@@ -455,8 +583,8 @@ def unanswered_call(ha, hb, la, lb, port_a, call_a, call_b):
 def cancelled_call(ha, la, port_a, call_a, call_b):
     """A call cancelled in its reply window, then a tune elsewhere: Pat's force disconnect (ABORT, and DISCONNECTED
     faked at once), then a second later its tune back to where the radio was (here half a second, inside the 1.3 s
-    reply window that upstream's 0.1.3 waits out before its ID, which then went out there). With CWID ON, A's XARA
-    keys its CW ID at once (patch 0003), on the call's frequency, and the radio tunes once that key is over"""
+    reply window that upstream's XARA waits out before its ID, which then went out there). With CWID ON, A's XARA
+    keys its CW ID at once (patch 0005), on the call's frequency, and the radio tunes once that key is over"""
     c = xara_client(port_a)
     keys, call_hz, ids = len(played(ha)), int(rig(ha, "f")), text(la).count("  tx cw")
     c.sendall(f"CWID ON\rCONNECT {call_a} {call_b}\r".encode())
@@ -553,7 +681,7 @@ def xara_test(procs, tmp, xara, pat, registered):
               "B's XARA says LINK UNREGISTERED")
         check(max(lv) <= 4, f"no level past the free 4 (the highest {max(lv)})")
     # Pat sends CWID ON as it starts the modem, and each side identifies in CW as the session closes, whatever the
-    # kind of call (patch 0002; upstream's XARA 0.1.3 drops CWID ON and identifies only with a US call). The ID is the
+    # kind of call (patch 0004; upstream's XARA drops CWID ON and identifies only with a US call). The ID is the
     # end of a key like any other, through the GUI's socket and checks: played whole. B's waits out A's (blank words)
     kind = "US" if registered else "European"
     for log, h, n in ((la, ha, "A"), (lb, hb, "B")):

@@ -156,6 +156,15 @@ static bool wf_gpu_on(void) {
     return wf_gpu && !theme_shape.mono && !d3_on();
 }
 
+/* The walkie screen's mini waterfall (waterfall_mini_draw()): what its buffer holds, the view and the newest row it
+ * was drawn to. buf NULL: all of it again (new colours, the rows emptied by waterfall_set_height()) */
+static struct {
+    lv_color_t *buf;
+    lv_coord_t  w, h;
+    uint32_t    center, span;
+    uint32_t    num;
+} mini;
+
 static void refresh_waterfall(void *arg);
 static void d3_wait(void);
 static void do_scroll_timer(lv_timer_t *t);
@@ -167,6 +176,7 @@ static void on_palette_change(Subject *subj, void *user_data) {
     extern const uint32_t wf_palette_legacy[256], wf_palette_gauss[256];   /* styles.c */
 
     wfp_full = true;            /* colours change: the image / plane must be remade */
+    mini.buf = NULL;            /* and the walkie screen's mini waterfall */
     if (theme_shape.mono) {     /* 1bit: its ink density, not the presets */
         wf_palette = theme_waterfall();
     } else {
@@ -320,9 +330,10 @@ void waterfall_data(float *db, uint16_t size, bool tx, uint32_t base_freq, uint3
     static uint32_t acc_freq;
     int             frames = speed_frames[LV_CLAMP(1, param_i_get(cfg_waterfall_speed), 5) - 1];
     /* Where the frame was taken: with no frequency from the base (the OEM X6100 base) the GUI's,
-     * else a line averaged frames of several tuning steps. In TX where the base centres the frame
-     * then: on the dial with Xiegu's X6100 base from 1.1.9 on, a key tone from where it receives in
-     * CW, so a line holds frames of TX or of receive, not of both (#191). From the dial in TX, not
+     * else a line averaged frames of several tuning steps. In TX where the frame is drawn centred
+     * then: the key tone over the zoom from the dial with Xiegu's X6100 base from 1.1.9 on
+     * (cfg/lo_offset.h), not where it receives in CW, so a line holds frames of TX or of receive,
+     * not of both (#191). From the dial in TX, not
      * from where the base is tuned the IF shift away (radio_center_freq): the frames it receives are
      * centred there, its TX ones on the dial it transmits on, where the spectrum has its TX trace.
      * The TX rows were the IF shift off the line, the spectrum's carrier on it (#191) */
@@ -704,6 +715,8 @@ static void wf_gpu_hook(int back) {
 #define D3_WALL     0x222c3a
 #define D3_PEAK_DECAY 90.0f /* levels a second the held peaks come down */
 #define D3_MIN_MS   33      /* at most a picture so often (30 a second) while tuning; the last one later */
+#define D3_FAST_MS  100     /* rows at least this often (10 a second) are smooth as they are: no glide pictures between
+                             * them, a picture a row (about half the pictures at the default waterfall speed) */
 #define D3_PHASE_Q  16      /* a glide picture is drawn when the phase moved to another 1/16 of a row, or a row came */
 #define D3_CACHE    72      /* rows whose levels are kept (every D3_STEP-th: up to 64 traces and a few) */
 
@@ -756,6 +769,17 @@ static struct {
     uint32_t panel;
     bool     portrait, mono;
 } d3_bg_of;
+
+/* What a picture is of, taken on the GUI thread where the picture is asked for, and what it was drawn at, read there
+ * once it is drawn. The picture is drawn on a thread of its own (d3_job) while the tuning moves the waterfall's
+ * centre: read where it is used, a trace's levels of one centre were kept under the next one's name */
+typedef struct {
+    int32_t  center;        /* the frequency at the centre of the picture (wf_center_freq) */
+    uint32_t span;          /* the span it shows (shown_span()) */
+    int32_t  cx;            /* the vanishing point (d3_vanish) */
+    float    phase;         /* out: the phase it was drawn at (d3_phase()) */
+    uint32_t num;           /* out: the number of its newest row */
+} d3_pic_t;
 
 /* The front edge of the floor, with the labels under it: above the buttons, or down to the bottom while they are
  * hidden (Settings > Display > Hide buttons) */
@@ -1091,10 +1115,10 @@ static void d3_trace(const d3_target_t *o, const d3_scene_t *sc, const uint8_t *
 /* The view's pixels of a row, smoothed 1 4 6 4 1 but never below the pixel itself: the noise a surface, not
  * grains, and a signal of a pixel or two (CW and FT8 at 50 kHz and wider: 62 Hz and more a pixel) at its own
  * height; smoothed alone, a recording of real traffic showed them at four tenths of it */
-static void d3_levels(const wf_row_t *row, uint32_t span, uint8_t *lv) {
+static void d3_levels(const wf_row_t *row, int32_t center, uint32_t span, uint8_t *lv) {
     uint8_t raw[WIDTH];
 
-    row_pixels(row, wf_center_freq, span, 0, WIDTH, raw);
+    row_pixels(row, center, span, 0, WIDTH, raw);
     for (int32_t i = 0; i < WIDTH; i++) {
         int32_t a = raw[LV_MAX(i - 2, 0)], b = raw[LV_MAX(i - 1, 0)], c = raw[i];
         int32_t d = raw[LV_MIN(i + 1, WIDTH - 1)], e = raw[LV_MIN(i + 2, WIDTH - 1)];
@@ -1116,6 +1140,18 @@ static uint32_t d3_glide_ms(void) {
  * last 8): the traces are drawn that much of a row further back, so they move on at every picture, not at every
  * row. 1 when it is late: no further than where the next row puts them; also when the interval is not known, so
  * d3_frames_cb() pauses instead of drawing the same picture again */
+/* Rows coming at least every D3_FAST_MS (their interval known): no glide pictures between them */
+static bool d3_rows_fast(uint16_t top) {
+    const wf_row_t *a = row_from(top, 0), *b = row_from(top, 8);
+
+    if (!a->width || !b->width || height <= 9) {
+        return false;
+    }
+    uint32_t every = (a->ms - b->ms) / 8;
+
+    return every && every < D3_FAST_MS;
+}
+
 static float d3_phase(uint16_t top) {
     const wf_row_t *a = row_from(top, 0), *b = row_from(top, 8);
 
@@ -1130,6 +1166,9 @@ static float d3_phase(uint16_t top) {
 
     if (every == 0 || every > 1000) {
         return 1.0f;                        /* rows from before a pause: no next row is due, the glide has nothing to do */
+    }
+    if (every < D3_FAST_MS) {
+        return 0.0f;                        /* rows fast enough: the traces at their rows, as with the glide off */
     }
     return LV_MIN(1.0f, (float) since / every);
 }
@@ -1169,21 +1208,21 @@ static void d3_cut(uint8_t *lv, int32_t cut, int32_t scale, uint8_t *blk) {
 
 /* A trace's levels above the floor and its blocks: kept for the rows of the stack (every D3_STEP-th), worked
  * out for the newest */
-static const uint8_t *d3_levels_of(const wf_row_t *row, uint32_t span, int32_t cut, int32_t scale, uint8_t *scratch,
-                                   uint8_t *scratch_blk, const uint8_t **blk) {
+static const uint8_t *d3_levels_of(const wf_row_t *row, int32_t center, uint32_t span, int32_t cut, int32_t scale,
+                                   uint8_t *scratch, uint8_t *scratch_blk, const uint8_t **blk) {
     if (row->num % D3_STEP) {
-        d3_levels(row, span, scratch);
+        d3_levels(row, center, span, scratch);
         d3_cut(scratch, cut, scale, scratch_blk);
         *blk = scratch_blk;
         return scratch;
     }
     typeof(d3_cache[0]) *c = &d3_cache[row->num / D3_STEP % D3_CACHE];
 
-    if (c->num != row->num || c->center != wf_center_freq || c->span != span || c->cut != cut || c->scale != scale) {
-        d3_levels(row, span, c->lv);
+    if (c->num != row->num || c->center != center || c->span != span || c->cut != cut || c->scale != scale) {
+        d3_levels(row, center, span, c->lv);
         d3_cut(c->lv, cut, scale, c->blk);
         c->num = row->num;
-        c->center = wf_center_freq;
+        c->center = center;
         c->span = span;
         c->cut = cut;
         c->scale = scale;
@@ -1265,11 +1304,14 @@ static void d3_background(const d3_target_t *o, const d3_scene_t *sc, uint32_t b
 }
 
 
+/* One picture of pic's view into buf. The GUI thread's, or the 3D thread's while the GUI thread waits for nothing
+ * of it (d3_job): what it keeps from one picture to the next (the background, the levels, the peaks, what was
+ * drawn) is of the thread that draws */
 __attribute__((noinline))
-static void d3_draw(uint32_t *buf, bool portrait, const int32_t *ref_x, int n_refs) {
+static void d3_draw(uint32_t *buf, bool portrait, d3_pic_t *pic, const int32_t *ref_x, int n_refs) {
     d3_target_t     o = {buf, portrait, height, theme_shape.mono};
     int32_t         h = height;
-    uint32_t        span = shown_span();
+    uint32_t        span = pic->span;
     uint32_t        accent;
     const uint32_t *pal = d3_palette(&accent);
     uint32_t        bg = o.mono ? theme_shape.paper | 0xff000000u : TC(panel).full | 0xff000000u;
@@ -1285,7 +1327,7 @@ static void d3_draw(uint32_t *buf, bool portrait, const int32_t *ref_x, int n_re
     sc.amp = sc.hv * (0.75f - 0.04f * tilt);
     sc.rise = sc.hv - sc.amp - 4;
     sc.shrink = 0.9f - 0.05f * tilt;
-    sc.cx = d3_vanish;
+    sc.cx = pic->cx;
     sc.span = LV_MAX(1, LV_MIN(param_i_get(cfg_wf_3d_depth) * D3_STEP, h - 1));
 
     d3_background(&o, &sc, bg, tilt, ref_x, n_refs);
@@ -1308,12 +1350,13 @@ static void d3_draw(uint32_t *buf, bool portrait, const int32_t *ref_x, int n_re
             continue;
         }
         const uint8_t *blk;
-        const uint8_t *levels = d3_levels_of(row, span, LV_MIN(row->floor + cut_add, 254), scale, lv, lv_blk, &blk);
+        const uint8_t *levels = d3_levels_of(row, pic->center, span, LV_MIN(row->floor + cut_add, 254), scale, lv,
+                                             lv_blk, &blk);
 
         d3_trace(&o, &sc, levels, blk, t, pal, horizon, age == 0 ? front : NULL);
     }
-    d3_drawn_phase = phase;
-    d3_drawn_num = newest_row->num;
+    pic->phase = phase;
+    pic->num = newest_row->num;
     if (!newest_row->width) {
         return;
     }
@@ -1326,9 +1369,9 @@ static void d3_draw(uint32_t *buf, bool portrait, const int32_t *ref_x, int n_re
     float    fall = (now - d3_peak_tick) / 1000.0f * D3_PEAK_DECAY * sc.amp / 255.0f;   /* px */
     bool     peaks = param_i_get(cfg_wf_3d_peak);
 
-    if (d3_peak_center != wf_center_freq || d3_peak_span != span || fall > sc.amp) {
+    if (d3_peak_center != pic->center || d3_peak_span != span || fall > sc.amp) {
         for (int32_t x = 0; x < WIDTH; x++) d3_peak[x] = f0;
-        d3_peak_center = wf_center_freq;
+        d3_peak_center = pic->center;
         d3_peak_span = span;
         fall = 0;
     }
@@ -1412,19 +1455,27 @@ static void d3_transpose(uint32_t *dst, const uint32_t *src, int32_t h) {
 }
 
 /* One picture. A landscape one is drawn as the portrait one into columns of its own and turned over into buf: its
- * pixels in a column, 4 KB apart in rows, were most of the time */
-__attribute__((noinline))   /* measurable on its own */
-static void d3_render(uint32_t *buf, bool portrait, const int32_t *ref_x, int n_refs) {
-    static uint32_t *columns;
+ * pixels in a column, 4 KB apart in rows, were most of the time. The columns are d3_columns, which the wf_3d thread
+ * also draws into without planes and the GUI thread turns over (d3_job_show()). tools/d3_colmajor checks the turn
+ * against the rows */
+static uint32_t *d3_columns;
 
-    if (!portrait && !columns) {
-        columns = malloc(sizeof(uint32_t) * WIDTH * MAX_HEIGHT);
+static uint32_t *d3_columns_get(void) {
+    if (!d3_columns) {
+        d3_columns = malloc(sizeof(uint32_t) * WIDTH * MAX_HEIGHT);
     }
+    return d3_columns;
+}
+
+__attribute__((noinline))   /* measurable on its own */
+static void d3_render(uint32_t *buf, bool portrait, d3_pic_t *pic, const int32_t *ref_x, int n_refs) {
+    uint32_t *columns = portrait ? NULL : d3_columns_get();
+
     if (portrait || !columns) {             /* (no memory for them: drawn in rows) */
-        d3_draw(buf, portrait, ref_x, n_refs);
+        d3_draw(buf, portrait, pic, ref_x, n_refs);
         return;
     }
-    d3_draw(columns, true, ref_x, n_refs);
+    d3_draw(columns, true, pic, ref_x, n_refs);
     d3_transpose(buf, columns, height);
 }
 
@@ -1602,7 +1653,8 @@ static void d3_render_gpu(const int32_t *ref_x, int n_refs) {
             continue;
         }
         const uint8_t *blk;
-        const uint8_t *levels = d3_levels_of(row, span, LV_MIN(row->floor + cut_add, 254), scale, lv, lv_blk, &blk);
+        const uint8_t *levels = d3_levels_of(row, wf_center_freq, span, LV_MIN(row->floor + cut_add, 254), scale, lv,
+                                             lv_blk, &blk);
 
         d3_trace_cols(&sc, levels, blk, t, horizon, age == 0 ? front : NULL, d3_tr_n++);
     }
@@ -1715,12 +1767,16 @@ static void d3_redraw(void);
  * thread it was three quarters of that thread (the keys, the knob and the rest of the GUI waited for it), and its
  * copy from RAM to the plane went too. The GUI thread asks for one (d3_job_start), the thread draws it and hands it
  * back through the scheduler (d3_job_done), which shows it at the next commit; one at a time, one more asked for
- * meanwhile is drawn after it. Whatever else draws in the waterfall or presents it waits for it first (d3_wait) */
+ * meanwhile is drawn after it. Whatever else draws in the waterfall or presents it waits for it first (d3_wait).
+ * The view a picture is of (d3_pic_t) is taken where it is asked for, and the phase and the row it was drawn at come
+ * back with it: read on the thread while the tuning moved the centre, a trace's levels of one centre were kept under
+ * the next one's name, and the glide's timer read what the thread wrote */
 static pthread_mutex_t d3_mx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  d3_cv = PTHREAD_COND_INITIALIZER;
 static bool            d3_thread_on, d3_thread_failed;
 static struct {
     uint32_t *dst;
+    d3_pic_t  pic;
     int32_t   ref_x[MAX_D3_REFS], n, y, h;
     uint32_t  seq, drawn;           /* the newest job's number, and the newest drawn */
 } d3_job;
@@ -1739,12 +1795,14 @@ static void *d3_thread_fn(void *arg) {
         }
         seq = d3_job.seq;
         uint32_t *dst = d3_job.dst;
+        d3_pic_t  pic = d3_job.pic;
         int32_t   ref_x[MAX_D3_REFS], n = d3_job.n;
 
         memcpy(ref_x, d3_job.ref_x, sizeof(ref_x));
         pthread_mutex_unlock(&d3_mx);
-        d3_render(dst, false, ref_x, n);
+        d3_render(dst, false, &pic, ref_x, n);
         pthread_mutex_lock(&d3_mx);
+        d3_job.pic = pic;
         d3_job.drawn = seq;
         pthread_cond_broadcast(&d3_cv);
         scheduler_put_noargs(d3_job_done);
@@ -1755,6 +1813,10 @@ static void *d3_thread_fn(void *arg) {
 /* The job's picture to the screen at the next commit (GUI thread, the job drawn) */
 static void d3_job_show(void) {
     d3_busy = false;
+    pthread_mutex_lock(&d3_mx);
+    d3_drawn_phase = d3_job.pic.phase;
+    d3_drawn_num = d3_job.pic.num;
+    pthread_mutex_unlock(&d3_mx);
     drm_strip_back_done(d3_job.y, d3_job.h);
 }
 
@@ -1791,9 +1853,9 @@ static void d3_wait(void) {
     d3_again = false;
 }
 
-/* A picture of the waterfall at panel rows a->y1 .. + height - 1 asked of the thread; false: none (no strip plane,
- * no thread): drawn here then */
-static bool d3_job_start(const lv_area_t *a, const int32_t *ref_x, int n) {
+/* A picture of pic's view of the waterfall at panel rows a->y1 .. + height - 1 asked of the thread; false: none (no
+ * strip plane, no thread): drawn here then */
+static bool d3_job_start(const lv_area_t *a, const d3_pic_t *pic, const int32_t *ref_x, int n) {
     int32_t   pitch;
     uint32_t *dst;
 
@@ -1817,6 +1879,7 @@ static bool d3_job_start(const lv_area_t *a, const int32_t *ref_x, int n) {
     }
     pthread_mutex_lock(&d3_mx);
     d3_job.dst = dst;
+    d3_job.pic = *pic;
     d3_job.n = n;
     d3_job.y = a->y1;
     d3_job.h = height;
@@ -1828,7 +1891,150 @@ static bool d3_job_start(const lv_area_t *a, const int32_t *ref_x, int n) {
     return true;
 }
 #else
-static void d3_wait(void) {}
+/* ---- The 3D picture on a thread of its own ----
+ *
+ * Here: the X6100's and X6200's panel, a portrait one shown turned, with its planes or without them (fbdev, a single
+ * plane), and the PC build; a landscape panel's strip plane has the thread above. Drawn on the GUI thread, a picture
+ * held the keys, the knobs and the rest of the GUI for as long as it took, up to 30 times a second. The GUI thread
+ * now asks the "wf_3d" thread for it (d3_job_start()) and goes on; the thread draws it into columns the GUI thread
+ * leaves alone meanwhile (the waterfall plane's picture in RAM, wfp, or without planes d3_columns) and says so
+ * through the scheduler (d3_job_done()); the GUI thread then shows it (d3_job_show(): the columns to the plane, or
+ * turned over into the image). One picture at a time: one asked for meanwhile is drawn after it. Whatever else draws
+ * the waterfall, changes its height or empties its rows waits for the picture being drawn first and drops it
+ * (d3_wait()). The GPU's 3D (d3_render_gpu) is worked out on the GUI thread as before: only the CPU's pictures go to
+ * the thread.
+ *
+ * What the thread reads of the GUI thread's while it draws: the view from the job (d3_pic_t), the rows as the GUI
+ * thread reads them from the DSP thread (from the newest of one moment), and the settings, the theme's colours and
+ * the levels where it uses them, each a single word: one changed in the middle of a picture is in the next one
+ * whole, as a redraw is asked at each such change. Without the thread (it could not be started) a picture is drawn
+ * where it is asked for, as before */
+static pthread_mutex_t d3_mx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  d3_cv = PTHREAD_COND_INITIALIZER;
+static struct {
+    uint32_t *buf;                  /* portrait columns */
+    d3_pic_t  pic;
+    int32_t   ref_x[MAX_D3_REFS], n;
+    uint32_t  seq, drawn;           /* the newest job's number, and the newest drawn */
+} d3_job;                           /* under d3_mx */
+static bool            d3_thread_on, d3_thread_failed;
+static bool            d3_busy;     /* the GUI thread's: a job given and not shown or dropped yet */
+static bool            d3_again;    /* a picture asked for while busy */
+static int32_t         d3_job_y;    /* the planes: the waterfall's first panel column when the job was given */
+
+static void d3_job_done(void *arg);
+
+static void *d3_thread_fn(void *arg) {
+    uint32_t seq = 0;
+
+    pthread_mutex_lock(&d3_mx);
+    for (;;) {
+        while (d3_job.seq == seq) {
+            pthread_cond_wait(&d3_cv, &d3_mx);
+        }
+        seq = d3_job.seq;
+        uint32_t *buf = d3_job.buf;
+        d3_pic_t  pic = d3_job.pic;
+        int32_t   ref_x[MAX_D3_REFS], n = d3_job.n;
+
+        memcpy(ref_x, d3_job.ref_x, sizeof(ref_x));
+        pthread_mutex_unlock(&d3_mx);
+        d3_draw(buf, true, &pic, ref_x, n);
+        pthread_mutex_lock(&d3_mx);
+        d3_job.pic = pic;
+        d3_job.drawn = seq;
+        pthread_cond_broadcast(&d3_cv);
+        pthread_mutex_unlock(&d3_mx);
+        scheduler_put_noargs(d3_job_done);  /* (the queue full: the next picture asked for shows this one) */
+        pthread_mutex_lock(&d3_mx);
+    }
+    return NULL;
+}
+
+static bool d3_job_drawn(void) {
+    pthread_mutex_lock(&d3_mx);
+    bool drawn = d3_job.drawn == d3_job.seq;
+
+    pthread_mutex_unlock(&d3_mx);
+    return drawn;
+}
+
+/* The job's picture, drawn, to the screen (GUI thread): the plane's columns presented, or without planes the
+ * columns turned over into the image */
+static void d3_job_show(void) {
+    d3_busy = false;
+    pthread_mutex_lock(&d3_mx);
+    d3_drawn_phase = d3_job.pic.phase;
+    d3_drawn_num = d3_job.pic.num;
+    pthread_mutex_unlock(&d3_mx);
+    if (direct) {
+#if USE_DRM
+        drm_wf_gpu_area(false, -1, 0, 0, 0, 0);    /* a dump reads the CPU's strip */
+        drm_wf_present_ring(wfp, d3_job_y, height, wfp_head);
+#endif
+    } else {
+        d3_transpose((uint32_t *) frame->data, d3_columns, height);
+        lv_obj_invalidate(img);
+    }
+}
+
+static void d3_job_done(void *arg) {
+    if (!d3_busy || !d3_job_drawn()) {
+        return;                     /* shown or dropped already, or a newer job not drawn yet: its own call comes */
+    }
+    d3_job_show();
+    if (d3_again) {
+        d3_again = false;
+        if (d3_on()) {
+            d3_redraw();
+        }
+    }
+}
+
+/* Until the picture being drawn is drawn; it is dropped, not shown: what waits draws the waterfall itself, or
+ * the picture is of a height or of rows that are no more */
+static void d3_wait(void) {
+    if (!d3_busy) {
+        return;
+    }
+    pthread_mutex_lock(&d3_mx);
+    while (d3_job.drawn != d3_job.seq) {
+        pthread_cond_wait(&d3_cv, &d3_mx);
+    }
+    pthread_mutex_unlock(&d3_mx);
+    d3_busy = false;
+    d3_again = false;
+}
+
+/* A picture of pic's view asked of the thread, into the columns buf; false: none (no thread, no columns): drawn
+ * by the caller then */
+static bool d3_job_start(uint32_t *buf, const d3_pic_t *pic, const int32_t *ref_x, int n, int32_t y) {
+    if (d3_thread_failed || !buf) {
+        return false;
+    }
+    if (!d3_thread_on) {
+        pthread_t t;
+
+        if (pthread_create(&t, NULL, d3_thread_fn, NULL)) {
+            d3_thread_failed = true;
+            return false;
+        }
+        pthread_setname_np(t, "wf_3d");
+        pthread_detach(t);
+        d3_thread_on = true;
+    }
+    pthread_mutex_lock(&d3_mx);
+    d3_job.buf = buf;
+    d3_job.pic = *pic;
+    d3_job.n = n;
+    memcpy(d3_job.ref_x, ref_x, sizeof(d3_job.ref_x));
+    d3_job.seq++;
+    pthread_cond_signal(&d3_cv);
+    pthread_mutex_unlock(&d3_mx);
+    d3_job_y = y;
+    d3_busy = true;
+    return true;
+}
 #endif
 
 /* Whether a picture is seen: not under a window (the waterfall a refresh in refresh_period then, as 2D, without
@@ -1846,16 +2052,16 @@ static void d3_later_cb(lv_timer_t *t) {
 }
 
 /* Every d3_glide_ms() while the traces are on their way to the next row; paused once they are there (no rows: still),
- * with 3D off, glide off or nothing seen. A picture from a new row starts it again. With the glide every picture
+ * with 3D off, glide off, nothing seen or rows 10 a second or more (a picture a row then). A picture from a new row
+ * starts it again. With the glide every picture
  * keeps its period (d3_redraw()), a row's too, so 3D glide is the pictures a second in all. Nothing is drawn for a phase
  * in the same 1/D3_PHASE_Q of a row as the last picture's, with no new row: a picture of the same pixels (a new view
  * comes by refresh_waterfall(), not by this timer) */
 static void d3_frames_cb(lv_timer_t *t) {
     uint32_t glide = d3_glide_ms();
+    uint16_t top = __atomic_load_n(&newest, __ATOMIC_ACQUIRE);
 
-    if (d3_on() && glide && d3_drawn_phase < 1.0f && d3_seen()) {
-        uint16_t        top = __atomic_load_n(&newest, __ATOMIC_ACQUIRE);
-
+    if (d3_on() && glide && d3_drawn_phase < 1.0f && d3_seen() && !d3_rows_fast(top)) {
         if (lv_tick_elaps(d3_last_ms) + 5 < glide) {
             return;                 /* a picture came meanwhile (d3_later): not one more in this period */
         }
@@ -1908,6 +2114,14 @@ static void d3_redraw(void) {
             return;
         }
     }
+#else
+    if (d3_busy) {
+        if (!d3_job_drawn()) {
+            d3_again = true;        /* after the one being drawn */
+            return;
+        }
+        d3_job_show();              /* drawn, its d3_job_done() not here yet */
+    }
 #endif
     d3_last_ms = lv_tick_get();
     int n = freq_scale_refs(ref_x, ref_hz, MAX_D3_REFS);
@@ -1922,6 +2136,9 @@ static void d3_redraw(void) {
     }
     __atomic_store_n(&new_rows, 0, __ATOMIC_RELEASE);
     wfp_full = true;                /* the waterfall again whole when 3D is switched off: the plane, or the image */
+    /* The view the picture is of, taken here: the wf_3d thread draws it while the tuning moves the centre */
+    d3_pic_t pic = {.center = wf_center_freq, .span = shown_span(), .cx = d3_vanish};
+
     if (direct && d3_gpu_on()) {        /* worked out here, drawn by the GPU at the commit */
         lv_area_t a;
 
@@ -1939,18 +2156,30 @@ static void d3_redraw(void) {
         wfp_head = 0;
         lv_obj_get_coords(obj, &a);
 #if USE_DRM && !BOARD_FB_ROTATE_90
-        if (!d3_job_start(&a, ref_x, n))    /* a landscape panel's strip plane: drawn on the wf_3d thread */
+        if (!d3_job_start(&a, &pic, ref_x, n))    /* a landscape panel's strip plane: drawn on the wf_3d thread */
+#else
+        if (!d3_job_start(wfp, &pic, ref_x, n, a.y1))  /* the plane's columns (wfp): drawn on the wf_3d thread */
 #endif
         {
-            d3_render(wfp, WFP_PORTRAIT, ref_x, n);
+            d3_render(wfp, WFP_PORTRAIT, &pic, ref_x, n);
+            d3_drawn_phase = pic.phase;
+            d3_drawn_num = pic.num;
 #if USE_DRM
             drm_wf_gpu_area(false, -1, 0, 0, 0, 0);    /* a dump reads the CPU's strip */
             drm_wf_present_ring(wfp, a.y1, height, wfp_head);
 #endif
         }
     } else {
-        d3_render((uint32_t *) frame->data, false, ref_x, n);
-        lv_obj_invalidate(img);
+#if !USE_DRM || BOARD_FB_ROTATE_90
+        /* No planes: drawn on the wf_3d thread into the columns, turned over into the image when shown */
+        if (!d3_job_start(d3_columns_get(), &pic, ref_x, n, 0))
+#endif
+        {
+            d3_render((uint32_t *) frame->data, false, &pic, ref_x, n);
+            lv_obj_invalidate(img);
+            d3_drawn_phase = pic.phase;
+            d3_drawn_num = pic.num;
+        }
     }
     lv_coord_t hv = d3_front(height);
 
@@ -2062,6 +2291,57 @@ static void image_redraw(int new_row) {
     lv_obj_invalidate(img);
 }
 
+/* ---- The walkie screen's mini waterfall ---- */
+
+/* A row at w pixels: each the strongest of the screen pixels it stands for, so a narrow signal stays a line */
+static void mini_line(lv_color_t *out, lv_coord_t w, const wf_row_t *row, uint32_t center, uint32_t span) {
+    uint8_t px[WIDTH];
+
+    row_pixels(row, center, span, 0, WIDTH, px);
+    for (lv_coord_t x = 0; x < w; x++) {
+        size_t  a = (size_t) x * WIDTH / w, b = (size_t) (x + 1) * WIDTH / w;
+        uint8_t v = px[a];
+
+        for (a++; a < b; a++) {
+            if (px[a] > v) v = px[a];
+        }
+        out[x] = (lv_color_t) (wf_pixel(v, x, row) | 0xff000000);    /* opaque: the GUI over the planes */
+    }
+}
+
+bool waterfall_mini_draw(lv_color_t *buf, lv_coord_t w, lv_coord_t h, uint32_t center, uint32_t span) {
+    static const wf_row_t none;     /* older than the rows kept: empty */
+    uint16_t              top;
+    uint32_t              num;
+    int32_t               n;
+
+    if (!ready || !buf || w <= 0 || w > WIDTH || h <= 0 || !span) {
+        return false;
+    }
+    /* The rows of one moment, as image_redraw() takes them */
+    top = __atomic_load_n(&newest, __ATOMIC_ACQUIRE);
+    num = row_from(top, 0)->num;
+    n = h;
+    if (mini.buf == buf && mini.w == w && mini.h == h && mini.center == center && mini.span == span &&
+        num - mini.num < (uint32_t) h) {
+        n = num - mini.num;
+        if (n == 0) {
+            return false;
+        }
+        memmove(buf + (size_t) n * w, buf, (size_t) (h - n) * w * sizeof(lv_color_t));
+    }
+    for (int32_t y = 0; y < n; y++) {
+        mini_line(buf + (size_t) y * w, w, y < height ? row_from(top, y) : &none, center, span);
+    }
+    mini.buf = buf;
+    mini.w = w;
+    mini.h = h;
+    mini.center = center;
+    mini.span = span;
+    mini.num = num;
+    return true;
+}
+
 static void refresh_waterfall(void *arg) {
     if (!ready || ++refresh_count < refresh_period) {
         return;
@@ -2082,7 +2362,7 @@ static void refresh_waterfall(void *arg) {
         d3_labels_update(false, NULL, NULL, 0, 0);     /* out of 3D: its labels away */
         d3_label_y = -1;
     }
-    d3_wait();
+    d3_wait();                      /* a 3D picture still being drawn: dropped (shown, on a strip plane) */
     d3_drawn_buf = NULL;            /* 2D draws over it: 3D again from the whole background */
     {
         int n = __atomic_exchange_n(&new_rows, 0, __ATOMIC_ACQUIRE);
@@ -2542,22 +2822,52 @@ static void make_objs(void) {
     band_info_init(obj);
 }
 
+/* The ring from was + 1 rows to now + 1: the newest rows that fit kept, oldest first from rows[0], the newest the
+ * last of them, the slots after them empty. A taller waterfall has its history at the top and fills up below, a
+ * lower one loses its oldest lines (#302: the full-screen waterfall and back, the spectrum's height, a new theme).
+ * Without the memory for the copy: an empty waterfall, as before */
+static void rows_keep(lv_coord_t was, lv_coord_t now) {
+    int32_t   ring = was + 1;
+    int32_t   top = __atomic_load_n(&newest, __ATOMIC_ACQUIRE);
+    int32_t   n = LV_MIN(was, now);
+    wf_row_t *kept = n > 0 ? malloc((size_t) n * sizeof(*kept)) : NULL;
+
+    if (!kept) {
+        n = 0;
+    }
+    for (int32_t i = 0; i < n; i++) {
+        kept[i] = rows[(top - (n - 1 - i) + ring) % ring];
+    }
+    if (n) {
+        memcpy(rows, kept, (size_t) n * sizeof(*kept));
+        free(kept);
+    }
+    for (int32_t i = n; i <= MAX_HEIGHT; i++) {
+        rows[i].width = 0;
+    }
+    __atomic_store_n(&newest, n ? n - 1 : 0, __ATOMIC_RELEASE);
+}
+
 void waterfall_set_height(lv_coord_t h) {
+    lv_coord_t was = height;
+
     lv_obj_set_height(obj, h);
     lv_obj_update_layout(obj);
     d3_wait();                      /* the picture being drawn is of the old height */
     height = lv_obj_get_height(obj);
 
     if (ready) {
-        /* Again (main_screen.c): the same buffers, an empty waterfall of the new height. The
-         * DSP thread may write a row meanwhile: it stays within the MAX_HEIGHT + 1 rows */
-        __atomic_store_n(&newest, 0, __ATOMIC_RELEASE);
-        for (size_t i = 0; i <= MAX_HEIGHT; i++) {
-            rows[i].width = 0;
+        /* Again (main_screen.c): the same buffers, the waterfall at the new height with the rows it had that fit.
+         * The DSP thread may write a row meanwhile: it stays within the MAX_HEIGHT + 1 rows, and a row written
+         * while they move may be lost or stand a line off, once */
+        if (height != was) {
+            rows_keep(was, height);
         }
         wfp_head = 0;
         wfp_full = true;
+        mini.buf = NULL;
         d3_drawn_buf = NULL;
+        d3_peak_span = 0;       /* 3D: the held peaks from the new front edge, not a line where the old one was */
         if (!direct) {
             lv_img_buf_free(frame);
             frame = lv_img_buf_alloc(WIDTH, height, LV_IMG_CF_TRUE_COLOR);

@@ -23,6 +23,8 @@
 #include "screen_rec.h"
 #include "styles.h"
 #include "theme.h"
+#include "voice.h"
+#include "voice_focus.h"
 
 #include <stdint.h>
 
@@ -63,7 +65,8 @@ static const struct {
     {"Recorder", "RX audio", "recorder", OPEN_APP, ACTION_APP_RECORDER},
     {"CW Trainer", "Learn CW", "trainer", OPEN_APP, ACTION_APP_CWTRAINER},
     {"CW Keyboard", "CW as you type", "text", OPEN_APP, ACTION_APP_CW_KBD},   /* the keyboard of RTTY, PSK */
-    {"GPS", "Position, time", "gps", OPEN_APP, ACTION_APP_GPS},
+    {"Mail", "Winlink, no phone", "mail", OPEN_APP, ACTION_APP_MAIL},
+    {"GPS / Clock", "Position, clock", "gps", OPEN_APP, ACTION_APP_GPS},
     {"Screen Rec", "Screen and audio", "screenrec", OPEN_SCREEN_REC, 0},
     {"Walkie", "Portrait screen", "walkie", OPEN_WALKIE, 0},
     {"Birdie Cal", "Find birdies, antenna off", "birdie", OPEN_APP, ACTION_APP_BIRDIE},
@@ -72,6 +75,7 @@ static const struct {
     {"Web radio", "Internet stations", "iradio", OPEN_APP, ACTION_APP_IRADIO},     /* "Internet radio" is cut in 1bit */
     {"Zello", "Internet voice", "zello", OPEN_APP, ACTION_APP_ZELLO},
     {"SVXConnect", "Reflector talkgroups", "svx", OPEN_APP, ACTION_APP_SVX},
+    {"DMR", "Talkgroups, listen only", "dmr", OPEN_APP, ACTION_APP_DMR},
     {"Flights", "Aircraft around", "flights", OPEN_APP, ACTION_APP_FLIGHTS},
     {"HF Air Band", "Oceanic routes, VOLMET", "aero", OPEN_APP, ACTION_APP_AERO},
     {"CB", "27 MHz channels", "cb", OPEN_APP, ACTION_APP_CB},
@@ -117,6 +121,15 @@ static void show_sel(void) {
     lv_obj_scroll_to_view(tiles[sel], LV_ANIM_OFF);
 }
 
+/* Spoken: the app chosen, what it is, and where in the grid; first: the grid's name before it */
+static void say_sel(const char *first) {
+    if (first) {
+        voice_say_text_fmt("%s, %s, %s, %i of %i", first, apps[sel].name, apps[sel].sub, sel + 1, APPS_N);
+    } else {
+        voice_delay_say_text_fmt("%s, %s, %i of %i", apps[sel].name, apps[sel].sub, sel + 1, APPS_N);
+    }
+}
+
 static void open_async(void *arg) {
     int i = (int)(intptr_t)arg;
 
@@ -145,18 +158,22 @@ static void key_cb(lv_event_t *e) {
         case LV_KEY_LEFT:
             if (sel > 0) sel--;
             show_sel();
+            say_sel(NULL);
             break;
         case LV_KEY_RIGHT:
             if (sel < APPS_N - 1) sel++;
             show_sel();
+            say_sel(NULL);
             break;
         case LV_KEY_UP:
             if (sel >= COLS) sel -= COLS;
             show_sel();
+            say_sel(NULL);
             break;
         case LV_KEY_DOWN:
             if (sel + COLS < APPS_N) sel += COLS;
             show_sel();
+            say_sel(NULL);
             break;
         case LV_KEY_ENTER:
             open_sel();
@@ -269,8 +286,10 @@ static void construct_cb(lv_obj_t *parent) {
     lv_group_add_obj(keyboard_group, box);
     lv_obj_add_event_cb(box, key_cb, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(box, click_cb, LV_EVENT_CLICKED, NULL);
+    voice_focus_quiet(box);
     lv_group_focus_obj(box);
     lv_group_set_editing(keyboard_group, true);
+    say_sel("Apps");
 }
 
 static void destruct_cb(void) {

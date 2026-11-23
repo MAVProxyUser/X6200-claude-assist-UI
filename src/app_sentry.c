@@ -8271,6 +8271,16 @@ static bool front_key(int key, int state) {
     bool tap = state == KEYPAD_RELEASE, hold = state == KEYPAD_LONG;
     char t[48];
 
+    /* The band keys repeat instead of a long press since upstream's front_keys.c (merged 2026-11-23), and a held one
+     * ends in a plain release: a release after repeats is a hold here, as its long press was (no band step) */
+    if (key == KEYPAD_BAND_UP || key == KEYPAD_BAND_DOWN) {
+        static bool repeated;
+
+        if (state == KEYPAD_PRESS) repeated = false;
+        else if (state == KEYPAD_REPEAT) repeated = true;
+        else if (tap && repeated) tap = repeated = false;
+    }
+
     if (help_on) {
         if (tap || hold) help_show(false);
         return key != KEYPAD_POWER;     /* POWER held switches off from the help too, as from every screen */

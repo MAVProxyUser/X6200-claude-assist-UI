@@ -19,6 +19,8 @@ const key_action_t key_front_actions[] = {
     {" Step down ", ACTION_STEP_DOWN},     /* FST's long press until it is changed */
     {" WF mode ", ACTION_WF_MODE},
     {" WF 3D on/off ", ACTION_WF_3D},
+    {" WF full screen on/off ", ACTION_WF_FULL},    /* upstream's (#302), merged 2026-11-23 */
+    {" Speech mode ", ACTION_VOICE_MODE},           /* upstream's speech for blind and low-vision operators */
     {" CW decoder on/off ", ACTION_CW_DECODER},
     {" CW ZAP ", ACTION_CW_ZAP},
     {" SWL panel ", ACTION_SWL_PANEL},
@@ -67,6 +69,8 @@ const key_action_t key_front_actions[] = {
     {" APP HF Air Band ", ACTION_APP_AERO},
     {" APP CB ", ACTION_APP_CB},
     {" APP Weather ", ACTION_APP_METEO},
+    {" APP Mail ", ACTION_APP_MAIL},
+    {" APP DMR ", ACTION_APP_DMR},
     {" APP RX recorder ", ACTION_APP_RECORDER},
     {" APP SWR Scan ", ACTION_APP_SWRSCAN},
     {" APP GPS ", ACTION_APP_GPS},
@@ -94,6 +98,8 @@ const key_action_t key_mic_actions[] = {
     {" NB toggle ", ACTION_NB_TOGGLE},
     {" WF mode ", ACTION_WF_MODE},
     {" WF 3D on/off ", ACTION_WF_3D},
+    {" WF full screen on/off ", ACTION_WF_FULL},
+    {" Speech mode ", ACTION_VOICE_MODE},
     {" CW decoder on/off ", ACTION_CW_DECODER},
     {" CW ZAP ", ACTION_CW_ZAP},
     {" SWL panel ", ACTION_SWL_PANEL},

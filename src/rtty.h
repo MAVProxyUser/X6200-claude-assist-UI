@@ -36,6 +36,20 @@ void rtty_open_with(uint16_t rate, uint16_t shift, bool reverse);
 bool rtty_scope_get(float *x, float *y, float *offset);
 rtty_state_t rtty_get_state();
 
+/* TX (#312): text sent as a line of its own (a '\n' added), after what is being sent or queued already. False: not
+ * queued (RTTY not open, not in LSB or USB, the queue full), and the screen says why. LVGL thread */
+bool rtty_tx_send(const char *text);
+/* Stop TX: unkeyed at once (the next block of audio), the rest not sent. Any thread */
+void rtty_tx_stop(void);
+/* A transmission is on, or lines are waiting for one. Any thread */
+bool rtty_tx_on(void);
+
+/* The preset (rtty_tx.h) the rate, shift and reverse are now, -1 none. LVGL thread */
+int rtty_preset_now(void);
+/* A preset's rate, shift and reverse at once, kept as the knobs keep them: the decoder follows at once, the
+ * transmitter from its next transmission (as after a knob). LVGL thread */
+void rtty_preset_set(int preset);
+
 float rtty_change_rate(int16_t df);
 uint16_t rtty_change_shift(int16_t df);
 uint16_t rtty_change_center(int16_t df);

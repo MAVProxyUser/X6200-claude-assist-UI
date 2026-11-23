@@ -1885,6 +1885,16 @@ static bool front_key(int key, int state) {
         return true;
     }
     if (key == KEYPAD_BAND_UP || key == KEYPAD_BAND_DOWN) {
+        /* A release after repeats is a hold (upstream's band keys repeat instead of a long press since the
+         * 2026-11-23 merge): no step, as before */
+        static bool repeated;
+
+        if (state == KEYPAD_PRESS) repeated = false;
+        else if (state == KEYPAD_REPEAT) repeated = true;
+        else if (state == KEYPAD_RELEASE && repeated) {
+            repeated = false;
+            return true;
+        }
         if (state == KEYPAD_RELEASE && !help_on) band_step(key == KEYPAD_BAND_UP ? 1 : -1);
         return true;
     }

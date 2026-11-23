@@ -21,6 +21,7 @@
 #include "screen_light.h"
 #include "board.h"
 #include "cfg/cfg_api.h"
+#include "panel_stripes.h"
 #include "screen_idle.h"
 #include "screen_rec.h"
 #include "screen_saver.h"
@@ -30,6 +31,7 @@
 #include "util.h"
 
 #include "radio.h"
+#include "voice.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,7 +53,8 @@ static bool           knob_woke;
 static bool           at_level;             /* the light put at its level by light_again(), not dimmed since */
 
 /* X6100's backlight driver counts the other way, so a bright panel is a small sysfs value.
- * GSOC's kernel PWM is already inverted: 0 is off and 10 is full, and the GUI level is that scale. */
+ * GSOC's kernel PWM is already inverted: 0 is off and 10 is full, and the GUI level is that scale.
+ * Other boards: the driver's scale from board.h (BOARD_BACKLIGHT_INVERTED: 10 - level, as the X6100 and the X6200) */
 static void write_level(int16_t level) {
     char text[8];
 #if BOARD_GSOC
@@ -61,7 +64,7 @@ static void write_level(int16_t level) {
     if (sysfs > 10)
         sysfs = 10;
 #else
-    int  sysfs = 10 - level;
+    int  sysfs = BOARD_BACKLIGHT_INVERTED ? 10 - level : level;
 #endif
     int  n = snprintf(text, sizeof(text), "%i\n", sysfs);
 
@@ -128,6 +131,7 @@ static void panel_dark(void) {
 
 static void panel_lit(void) {
     write_power(true);
+    panel_stripes_again();      /* the display engine may have been reset meanwhile */
     write_level(params.brightness_normal);
     shown = params.brightness_normal;
     keys_light(params.brightness_buttons != BUTTONS_DARK);
@@ -262,6 +266,11 @@ bool backlight_saver_tick() {
 bool backlight_knob_tick() {
     uint64_t now = get_time();
 
+    if (voice_is_on()) {
+        backlight_saver_tick();     /* the screen wakes, and the turn acts as well */
+        knob_woke = false;
+        return false;
+    }
     if (backlight_saver_tick()) {
         knob_woke    = true;
         knob_woke_ms = now;

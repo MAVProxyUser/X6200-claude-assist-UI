@@ -4,9 +4,10 @@
  *
  *  Copyright (c) 2026 Giovanni Ricciardi IU1WXY
  *
- *  Waterfall with the TX frequency marker, the message list over it (ft8/table_view.c), four
- *  pages of buttons. Decoding runs in ft8/audio_worker.c; its callbacks below run on that
- *  thread and reach LVGL only through scheduler_put(). The QSO sequence is ft8/qso.cpp's,
+ *  Waterfall with the TX frequency marker and the calls heard over it (the lane), the message list over it
+ *  (ft8/decode_list.c) or the stations heard as tiles (ft8/heard.c), five pages of buttons; the lane, the tiles and
+ *  the pages' order are F4OLI's redesign (OlivLoze's fork). Decoding runs in ft8/audio_worker.c; its callbacks
+ *  below run on that thread and reach LVGL only through scheduler_put(). The QSO sequence is ft8/qso.cpp's,
  *  DXpedition Hound mode ft8/hound.c's, the transmission ft8/tx_worker.c's.
  */
 
@@ -49,14 +50,17 @@
 #include "qso_log.h"
 #include "qth/qth.h"
 #include "radio.h"
+#include "remote_server.h"
 #include "scheduler.h"
 #include "station.h"
+#include "voice.h"
 #include "gui_styles.h"
 #include "text_popup.h"
 #include "theme.h"
 #include "tx_player.h"
 #include "util.h"
 #include "btaudio.h"   /* sh_run */
+#include "clock_sync.h"
 #include "ft8/audio_worker.h"
 #include "ft8/cq_scheduler.h"
 #include "ft8/ft2.h"
@@ -64,6 +68,7 @@
 #include "ft8/msg_encode.h"
 #include "ft8/qso.h"
 #include "ft8/decode_list.h"
+#include "ft8/heard.h"
 #include "ft8/time_sync.h"
 #include "ft8/tx_worker.h"
 #include "ft8/utils.h"
@@ -76,6 +81,9 @@
 #define WIDTH           771
 #define WF_HEIGHT       (DIALOG_H - 26)   /* 13 px margins above and below */
 #define WF_VISIBLE      40     /* waterfall clear above the log: ~16 s, a slot, to find a clear spot */
+#define LANE_H          26     /* the calls over the waterfall, on two lines */
+#define LIST_Y          (13 + LANE_H + WF_VISIBLE)
+#define LIST_H          (WF_HEIGHT - LANE_H - WF_VISIBLE)
 
 #define CUSTOM_MIN_HZ   1800000  /* custom dial frequency: 160m ... */
 #define CUSTOM_MAX_HZ   54000000 /* ... to the top of 6m */
@@ -202,7 +210,7 @@ static double  my_lat, my_lon;
 static int32_t filter_low, filter_high;
 static float   base_gain_offset;
 
-static button_data_t button_freq, button_hound;
+static button_data_t button_freq, button_hound, button_foryou;
 
 static void add_info(const char *fmt, ...);
 static void list_pressed(const cell_data_t *cd);
@@ -216,10 +224,22 @@ typedef struct {
     uint32_t    win_gen;
 } row_job_t;
 
+static void lane_update(void);
+static void board_update(void);
+
+/* A decode with its sender: NEW when its country is not in the log, and its station on the tiles and the lane, which
+ * so take what the list shows (Show: CQ leaves the other QSOs out of all three) */
 static void row_apply(void *arg) {
     row_job_t *j = arg;
 
-    if (j->win_gen == win_gen) table_view_add_msg_cb(&j->cd);
+    if (j->win_gen != win_gen) return;
+    if (j->cd.cell_type == CELL_RX_CQ || j->cd.cell_type == CELL_RX_MSG || j->cd.cell_type == CELL_RX_TO_ME) {
+        j->cd.new_dxcc = j->cd.cty_prefix[0] && !ft8_worked_has(j->cd.cty_prefix);
+        ft8_heard_add(&j->cd, lv_tick_get());
+        lane_update();
+        board_update();
+    }
+    table_view_add_msg_cb(&j->cd);
 }
 
 static void row_post(const cell_data_t *cd) {
@@ -232,6 +252,369 @@ static void give_list_the_mfk(void) {
     lv_group_add_obj(keyboard_group, table_view_obj());
     lv_group_focus_obj(table_view_obj());
     lv_group_set_editing(keyboard_group, true);
+}
+
+/* ---- The countries of the log: a CQ or a call from another one is NEW (the list's tag, the tiles) ---- */
+
+static void worked_add_call(const char *call, void *ud) {
+    const char *name, *prefix;
+
+    (void)ud;
+    if (dxcc_lookup(call, &name, &prefix)) ft8_worked_add(prefix);
+}
+
+/* ---- The lane, over the waterfall (F4OLI's redesign): each call shown on the tiles over its offset, on two lines
+ * where they would meet; red the stations calling us, white the CQs, grey the others, yellow the tile selected and
+ * our TX. The MFK and the knob leave it alone ---- */
+
+static lv_obj_t *lane;
+static lv_obj_t *board;                 /* the tiles, over the hidden list */
+static bool      board_on;              /* View: the tiles show, else the traffic (the list); kept while the GUI runs */
+static char      board_sel_call[16];    /* the tile selected, "" none */
+static lv_timer_t *heard_timer;         /* each second: the red of 3 minutes, the stations of 2 */
+
+static lv_coord_t lane_x(float hz) {
+    if (filter_high <= filter_low) return 0;
+    return (lv_coord_t)((hz - filter_low) * WIDTH / (filter_high - filter_low));
+}
+
+static void lane_update(void) {
+    if (lane) lv_obj_invalidate(lane);
+}
+
+static int by_hz(const void *a, const void *b) {
+    float x = (*(const ft8_heard_t *const *)a)->cd.meta.freq_hz, y = (*(const ft8_heard_t *const *)b)->cd.meta.freq_hz;
+
+    return (x > y) - (x < y);
+}
+
+static void lane_draw_cb(lv_event_t *e) {
+    static const ft8_heard_t *st[FT8_HEARD_MAX];
+    lv_draw_ctx_t            *ctx  = lv_event_get_draw_ctx(e);
+    uint32_t                  now  = lv_tick_get();
+    int                       n    = ft8_heard_list(st, FT8_HEARD_MAX, param_i_get(cfg_ft8_show_all), now);
+    lv_coord_t                ends[2] = {-1000, -1000};
+    lv_draw_label_dsc_t       ld;
+    lv_area_t                 box;
+
+    lv_obj_get_coords(lane, &box);
+    lv_draw_label_dsc_init(&ld);
+    ld.font = &sony_16;
+    qsort(st, n, sizeof(st[0]), by_hz);
+
+    /* TX first: the calls give way to it on its line */
+    for (int k = -1; k < n; k++) {
+        const char *call = k < 0 ? "TX" : st[k]->cd.meta.call_de;
+        lv_coord_t  x    = box.x1 + lane_x(k < 0 ? params.ft8_tx_freq.x : st[k]->cd.meta.freq_hz);
+        lv_point_t  size;
+
+        lv_txt_get_size(&size, call, ld.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if (x + size.x > box.x2) x = box.x2 - size.x;
+
+        int line = x > ends[0] + 6 ? 0 : x > ends[1] + 6 ? 1 : -1;
+
+        if (line < 0) continue;     /* no room on either line: its tile has it */
+        ends[line] = x + size.x;
+        if (k < 0 || (board_on && !strcmp(call, board_sel_call))) ld.color = TC(warn);
+        else if (ft8_heard_calls_you(st[k], now)) ld.color = TC(err);
+        else if (st[k]->cd.cell_type == CELL_RX_CQ) ld.color = TC(text);
+        else ld.color = TC(text_mute);
+
+        lv_area_t a = {x, box.y1 + 1 + line * 12, x + size.x, box.y1 + 1 + line * 12 + 14};
+
+        lv_draw_label(ctx, &ld, &a, call, NULL);
+    }
+}
+
+static void build_lane(void) {
+    lv_obj_t *l = lane = lv_obj_create(dialog.obj);
+
+    lv_obj_remove_style_all(l);
+    lv_obj_set_style_bg_color(l, TC(panel), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(l, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_clear_flag(l, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(l, WIDTH, LANE_H);
+    lv_obj_set_pos(l, 13, 13);
+    lv_obj_add_event_cb(l, lane_draw_cb, LV_EVENT_DRAW_MAIN_END, NULL);
+}
+
+/* ---- The tiles (View: Tiles, F4OLI's redesign, as JS8's board): one a station heard in the last 2 minutes, in
+ * ft8_heard_list's order (those calling us first), nine a page. A tile: flag, call, signal, country and distance, a
+ * tag. The MFK goes from tile to tile, its press calls the station as a press on its last row does; a touch too.
+ * The list stays under them, hidden, with the keys: decode_list.c hands them over (on_key, on_press) ---- */
+
+#define BOARD_COLS  3
+#define BOARD_ROWS  3
+#define BOARD_N     (BOARD_COLS * BOARD_ROWS)
+#define BARS        5
+
+typedef struct {
+    lv_obj_t *box, *flag, *call, *info, *tag, *bar[BARS];
+} card_t;
+
+static card_t             cards[BOARD_N];
+static lv_obj_t          *board_note;       /* "Listening..." with no station, the page with more than nine */
+static const ft8_heard_t *board_st[FT8_HEARD_MAX];
+static int                board_n, board_sel, board_first;
+
+static void card_show(card_t *c, const ft8_heard_t *st, bool sel) {
+    const cell_data_t *cd    = &st->cd;
+    uint32_t           now   = lv_tick_get();
+    bool               fresh = ft8_heard_calls_you(st, now);
+
+    lv_obj_clear_flag(c->box, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_bg_color(c->box, fresh ? TC(row_to_me) : TC(row), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(c->box, sel ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+
+    const lv_img_dsc_t *f = table_view_flag(cd->flag);
+
+    if (f) {
+        lv_img_set_src(c->flag, f);
+        lv_obj_clear_flag(c->flag, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(c->flag, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_label_set_text(c->call, cd->meta.call_de);
+
+    char info[48] = "";
+
+    if (cd->country[0]) snprintf(info, sizeof(info), "%s", cd->country);
+    if (cd->dist > 0) {
+        bool miles = decode_list_miles();
+
+        snprintf(info + strlen(info), sizeof(info) - strlen(info), "%s%d %s", info[0] ? "  " : "",
+                 miles ? (int)(cd->dist * 0.621371f + 0.5f) : cd->dist, miles ? "mi" : "km");
+    }
+    lv_label_set_text(c->info, info);
+    lv_obj_set_style_text_color(c->info, fresh ? TC(text) : TC(text_mute), LV_PART_MAIN);  /* grey on red hardly reads */
+
+    /* their signal as we hear it, -24 dB one bar to -4 dB five */
+    int lit = (cd->meta.local_snr + 29) / 5;
+
+    for (int b = 0; b < BARS; b++) lv_obj_set_style_bg_color(c->bar[b], b < lit ? TC(ok) : TC(line), LV_PART_MAIN);
+
+    char       tag[32];
+    lv_color_t col = TC(text_mute);
+
+    switch (ft8_heard_tag(st, now)) {
+        case FT8_TAG_CALLS_YOU:     /* in the text's colour: the tile is red already */
+            if (st->has_report) snprintf(tag, sizeof(tag), _("calls you %+03d"), st->report);
+            else snprintf(tag, sizeof(tag), "%s", _("calls you"));
+            col = TC(text);
+            break;
+        case FT8_TAG_NEW:
+            snprintf(tag, sizeof(tag), "%s", _("NEW"));
+            col = TC(warn);
+            break;
+        case FT8_TAG_CQ:
+            snprintf(tag, sizeof(tag), "%s", cd->pota ? _("CQ POTA") : _("CQ"));
+            col = TC(ok);
+            break;
+        case FT8_TAG_WORKED:     snprintf(tag, sizeof(tag), "%s", _("worked")); break;
+        case FT8_TAG_CALLED_YOU: snprintf(tag, sizeof(tag), "%s", _("called you")); break;
+        default:                 snprintf(tag, sizeof(tag), "%s", _("QSO")); break;
+    }
+    lv_label_set_text(c->tag, tag);
+    lv_obj_set_style_text_color(c->tag, col, LV_PART_MAIN);
+}
+
+static void board_update(void) {
+    if (!board || !board_on) return;
+    board_n = ft8_heard_list(board_st, FT8_HEARD_MAX, param_i_get(cfg_ft8_show_all), lv_tick_get());
+
+    /* the tile selected follows its station when the order changes */
+    board_sel = -1;
+    for (int k = 0; k < board_n; k++)
+        if (board_sel_call[0] && !strcmp(board_st[k]->cd.meta.call_de, board_sel_call)) board_sel = k;
+    if (board_sel >= 0) board_first = board_sel / BOARD_N * BOARD_N;
+    if (board_first >= board_n) board_first = 0;
+
+    for (int i = 0; i < BOARD_N; i++) {
+        int k = board_first + i;
+
+        if (k < board_n) card_show(&cards[i], board_st[k], k == board_sel);
+        else lv_obj_add_flag(cards[i].box, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (!board_n) {
+        lv_label_set_text(board_note, "Listening... the stations heard come here");
+        lv_obj_align(board_note, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_clear_flag(board_note, LV_OBJ_FLAG_HIDDEN);
+    } else if (board_n > BOARD_N) {
+        lv_label_set_text_fmt(board_note, "%d/%d", board_first / BOARD_N + 1, (board_n + BOARD_N - 1) / BOARD_N);
+        lv_obj_align(board_note, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_clear_flag(board_note, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(board_note, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+/* Speech: a tile as said, "Calling you, K 1 A B C, CQ, minus 12 dB, United States, 1200 km, new country, 3 of 9" */
+static void tile_say(int k) {
+    const ft8_heard_t *st = board_st[k];
+    const cell_data_t *cd = &st->cd;
+    char               call[48], what[64] = "", where[80] = "";
+
+    if (!voice_auto_active()) return;
+    voice_spell_calls(cd->meta.call_de, call, sizeof(call));
+    if (ft8_heard_calls_you(st, lv_tick_get())) snprintf(what, sizeof(what), "Calling you, ");
+    if (cd->country[0] && cd->dist > 0) snprintf(where, sizeof(where), ", %s, %i km", cd->country, cd->dist);
+    else if (cd->country[0]) snprintf(where, sizeof(where), ", %s", cd->country);
+    voice_delay_say_text_fmt("%s%s%s, %i d B%s%s%s, %i of %i", what, call,
+                             cd->cell_type == CELL_RX_CQ ? ", C Q" : "", cd->meta.local_snr, where,
+                             cd->new_dxcc ? ", new country" : "",
+                             cd->cell_type == CELL_RX_CQ && cd->worked_type == SEARCH_WORKED_SAME_MODE ? ", worked" : "",
+                             k + 1, board_n);
+}
+
+/* The MFK on the tiles: the next one, the tiles' page following it; its station's offset marked on the waterfall */
+static void board_move(int step) {
+    if (!board_n) {
+        if (voice_auto_active()) voice_say_text_fmt("No stations yet");
+        return;
+    }
+
+    int k = board_sel >= 0 ? (board_sel + step + board_n) % board_n : 0;
+
+    snprintf(board_sel_call, sizeof(board_sel_call), "%s", board_st[k]->cd.meta.call_de);
+    lv_finder_set_cursor(finder, board_st[k]->cd.meta.freq_hz);
+    board_update();
+    lane_update();
+    tile_say(board_sel >= 0 ? board_sel : k);     /* board_update() sorted the tiles again: the one chosen by its call */
+}
+
+static void board_call(int k) {
+    if (k < 0 || k >= board_n) return;
+
+    cell_data_t cd = board_st[k]->cd;   /* a copy: the call brings new rows, and the tiles move */
+
+    list_pressed(&cd);
+}
+
+static bool board_key(uint32_t key) {
+    if (!board_on) return false;
+    if (key == LV_KEY_LEFT || key == LV_KEY_UP) board_move(-1);
+    else if (key == LV_KEY_RIGHT || key == LV_KEY_DOWN) board_move(1);
+    else return false;
+    return true;
+}
+
+/* The first press with no tile selected picks the first; the next calls it. While we send, a press stops TX as on
+ * the list (list_pressed) */
+static bool board_press(void) {
+    if (!board_on) return false;
+    if (board_sel < 0 && !sending) board_move(0);
+    else if (board_sel < 0) list_pressed(NULL);
+    else board_call(board_sel);
+    return true;
+}
+
+static void card_clicked_cb(lv_event_t *e) {
+    int k = board_first + (int)(intptr_t)lv_event_get_user_data(e);
+
+    if (k >= board_n) return;
+    snprintf(board_sel_call, sizeof(board_sel_call), "%s", board_st[k]->cd.meta.call_de);
+    board_update();
+    lane_update();
+    board_call(board_sel >= 0 ? board_sel : k);
+}
+
+static void fade_stop(void);
+
+static void board_show(bool on) {
+    board_on = on;
+    if (!board) return;
+    fade_stop();    /* the view that was fading out shows again in full when it comes back */
+    if (on) {
+        lv_obj_clear_flag(board, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(table_view_obj(), LV_OBJ_FLAG_HIDDEN);
+        board_update();
+    } else {
+        lv_obj_add_flag(board, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(table_view_obj(), LV_OBJ_FLAG_HIDDEN);
+    }
+    lane_update();
+}
+
+static void build_board(void) {
+    lv_obj_t *b = board = lv_obj_create(dialog.obj);
+
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, WIDTH, LIST_H);
+    lv_obj_set_pos(b, 13, LIST_Y);
+    lv_obj_set_style_bg_color(b, TC(panel), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_clear_flag(b, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_coord_t cw = (WIDTH - (BOARD_COLS - 1) * 6) / BOARD_COLS;
+    lv_coord_t ch = (LIST_H - 14 - (BOARD_ROWS - 1) * 4) / BOARD_ROWS;     /* the page's note under them */
+
+    for (int i = 0; i < BOARD_N; i++) {
+        card_t   *c   = &cards[i];
+        lv_obj_t *box = c->box = lv_obj_create(b);
+
+        lv_obj_remove_style_all(box);
+        lv_obj_set_size(box, cw, ch);
+        lv_obj_set_pos(box, (i % BOARD_COLS) * (cw + 6), 2 + (i / BOARD_COLS) * (ch + 4));
+        lv_obj_set_style_bg_opa(box, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_radius(box, 8, LV_PART_MAIN);
+        lv_obj_set_style_border_width(box, 3, LV_PART_MAIN);
+        lv_obj_set_style_border_color(box, TC(warn), LV_PART_MAIN);
+        lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(box, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(box, card_clicked_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+        c->flag = lv_img_create(box);
+        lv_img_set_zoom(c->flag, 384);  /* 24 x 18 */
+        lv_obj_set_pos(c->flag, 12, 8);
+
+        c->call = lv_label_create(box);
+        lv_obj_set_style_text_font(c->call, &sony_22, LV_PART_MAIN);
+        lv_obj_set_style_text_color(c->call, TC(text), LV_PART_MAIN);
+        lv_obj_set_pos(c->call, 40, 2);
+
+        for (int k = 0; k < BARS; k++) {
+            lv_obj_t *bar = c->bar[k] = lv_obj_create(box);
+
+            lv_obj_remove_style_all(bar);
+            lv_obj_set_size(bar, 4, 4 + k * 3);
+            lv_obj_set_pos(bar, cw - 44 + k * 6, 22 - k * 3);
+            lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
+        }
+
+        c->info = lv_label_create(box);
+        lv_label_set_long_mode(c->info, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(c->info, cw - 120);
+        lv_obj_set_style_text_font(c->info, &sony_16, LV_PART_MAIN);
+        lv_obj_set_pos(c->info, 8, ch - 24);
+
+        /* the tag on a box of the panel's colour: black ones hardly read in the light theme */
+        c->tag = lv_label_create(box);
+        lv_obj_set_style_text_font(c->tag, &sony_16, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(c->tag, TC(panel), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(c->tag, LV_OPA_60, LV_PART_MAIN);
+        lv_obj_set_style_radius(c->tag, 8, LV_PART_MAIN);
+        lv_obj_set_style_pad_hor(c->tag, 6, LV_PART_MAIN);
+        lv_obj_align(c->tag, LV_ALIGN_BOTTOM_RIGHT, -6, -3);
+        lv_obj_add_flag(box, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    board_note = lv_label_create(b);
+    lv_obj_set_style_text_font(board_note, &sony_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(board_note, TC(text_mute), LV_PART_MAIN);
+
+    board_n           = 0;
+    board_sel         = -1;
+    board_first       = 0;
+    board_sel_call[0] = '\0';
+    lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* Each second: a red tile goes plain 3 minutes after its call, a station 2 minutes after its last row, with no new
+ * decode to tell */
+static void heard_timer_cb(lv_timer_t *t) {
+    (void)t;
+    board_update();
+    lane_update();
 }
 
 /* ---- WSJT-X's UDP messages for loggers (GridTracker, JTAlert...): ft8_udp.c, after SP2KMO's
@@ -369,6 +752,10 @@ static void save_qso_apply(void *arg) {
     saved_job_t *j = arg;
 
     dialog_field_day_log(&j->rec);
+    worked_add_call(j->rec.remote_call, NULL);  /* its country is worked now: no NEW for it */
+    ft8_heard_logged(j->rec.remote_call);       /* its tile no longer red */
+    board_update();
+    lane_update();
     ui_apply(&j->ui);
 }
 
@@ -532,8 +919,14 @@ static void map_close(void) {
     give_list_the_mfk();
 }
 
+/* The map has the keys while open: VOL (the knob, and the browser's, which comes the same way) passed on as the
+ * list does, or it did nothing until the map closed (#305) */
 static void map_key_cb(lv_event_t *e) {
-    if (*(uint32_t *)lv_event_get_param(e) == LV_KEY_ESC) map_close();
+    uint32_t key = *(uint32_t *)lv_event_get_param(e);
+
+    if (key == LV_KEY_ESC) map_close();
+    else if (key == KEY_VOL_LEFT_EDIT || key == KEY_VOL_LEFT_SELECT) radio_change_vol(-1);
+    else if (key == KEY_VOL_RIGHT_EDIT || key == KEY_VOL_RIGHT_SELECT) radio_change_vol(1);
 }
 
 /* What the heard map keeps of a decode: enough to call it as a press on its row does */
@@ -616,11 +1009,15 @@ static void load_base(void) {
     msg_update_text_fmt("%s", where_label());
 }
 
-/* Empty list and waterfall, the MFK on the "Wait sync" row */
+/* Empty list, tiles and waterfall, the MFK on the "Wait sync" row */
 static void clear_view(void) {
     static uint32_t up = LV_KEY_UP;
 
     table_view_reset();
+    ft8_heard_clear();
+    board_sel_call[0] = '\0';
+    board_update();
+    lane_update();
     lv_waterfall_clear_data(waterfall);
     lv_event_send(table_view_obj(), LV_EVENT_KEY, &up);
 }
@@ -679,6 +1076,7 @@ static void set_tx_freq(int32_t hz) {
     lv_finder_set_value(finder, hz);
     lv_obj_invalidate(finder);
     freq_strip_set_offset(hz);
+    lane_update();      /* its TX */
 }
 
 /* The TX frequency as far as the signal stays inside the filter */
@@ -695,9 +1093,31 @@ static void fade_ready_cb(lv_anim_t *a) {
     fading = false;
 }
 
+/* The view in sight fades: the list or the tiles */
+static lv_obj_t *view_obj(void) {
+    return board_on && board ? board : table_view_obj();
+}
+
 static void fade_to(lv_opa_t opa) {
-    lv_anim_set_values(&fade, lv_obj_get_style_opa_layered(table_view_obj(), 0), opa);
+    lv_anim_set_var(&fade, view_obj());
+    lv_anim_set_values(&fade, lv_obj_get_style_opa_layered(view_obj(), 0), opa);
     lv_anim_start(&fade);
+}
+
+/* No fade: both views in full (View changes while the knob turns) */
+static void fade_stop(void) {
+    lv_obj_t *views[2] = {table_view_obj(), board};
+
+    for (int i = 0; i < 2; i++) {
+        if (!views[i]) continue;
+        lv_anim_del(views[i], fade_exec_cb);
+        lv_obj_set_style_opa_layered(views[i], LV_OPA_COVER, 0);
+    }
+    fading = false;
+    if (fade_back_timer) {
+        lv_timer_del(fade_back_timer);
+        fade_back_timer = NULL;
+    }
 }
 
 static void fade_back_cb(lv_timer_t *t) {
@@ -805,6 +1225,35 @@ static const char *retries_label(void) {
 static void show_cb(button_data_t *btn) {
     if (kb_open) return;
     param_i_set(cfg_ft8_show_all, !param_i_get(cfg_ft8_show_all));
+    board_update();     /* Show: CQ on the tiles and the lane at once: the stations seen in a QSO go */
+    lane_update();
+}
+
+static void foryou_cb(button_data_t *btn);
+
+/* Show held: the "For you" strip on or off, as For you (page 5) does (F4OLI's shortcut) */
+static void show_hold_cb(button_data_t *btn) {
+    foryou_cb(btn);
+    buttons_refresh(&button_foryou);
+    msg_schedule_text_fmt(param_i_get(cfg_ft8_foryou) ? "For you strip: on" : "For you strip: off");
+}
+
+/* View: the traffic (the list) or the tiles */
+static const char *view_label(void) {
+    return board_on ? "View:\nTiles" : "View:\nTraffic";
+}
+
+static void view_cb(button_data_t *btn) {
+    if (kb_open) return;
+    board_show(!board_on);
+    buttons_refresh(btn);
+    if (voice_auto_active()) {
+        if (board_on)
+            voice_say_text_fmt("Tiles, %i station%s. M F K: station by station, press: call it", board_n,
+                               board_n == 1 ? "" : "s");
+        else
+            voice_say_text_fmt("Traffic, the decode list");
+    }
 }
 
 /* FT8 -> FT4 -> FT2 -> FT8 */
@@ -948,44 +1397,24 @@ static void cq_modifier_cb(button_data_t *btn) {
 /* Time Sync, pressed as a slot starts: the system clock to the nearest slot start, for a clock
  * off by a few seconds with nothing to set it. A clock that ntpd keeps (WiFi, or the GPS through
  * it) is right already, and moved to where the press fell it would be off by up to half a slot:
- * it is left alone. The step is taken from the time to the nanosecond (FT4's and FT2's slots
- * start on fractions of a second, whole seconds missed them), and only a clock that moved goes
- * into the RTC */
-#define SYNC_GPS_AGE_S  10      /* a GPS fix this recent: gpsd feeds ntpd */
+ * it is left alone (clock_sync.h's rule). The step is taken from the time to the nanosecond
+ * (FT4's and FT2's slots start on fractions of a second, whole seconds missed them), and only a
+ * clock that moved goes into the RTC */
 #define SYNC_ON_SLOT_NS 50000000
-
-/* What keeps the clock: CLOCK_NTP, CLOCK_GPS, or nothing (CLOCK_FREE); any thread */
-typedef enum { CLOCK_FREE, CLOCK_NTP, CLOCK_GPS } clock_keeper_t;
-
-static clock_keeper_t clock_keeper(int *err_ms) {
-    double lat, lon;
-    int    age;
-
-    if (ftx_clock_synced(err_ms)) return CLOCK_NTP;
-    if (gps_last_fix(&lat, &lon, &age) && age <= SYNC_GPS_AGE_S) return CLOCK_GPS;
-    return CLOCK_FREE;
-}
-
-/* The clock moved: into the RTC too, in UTC as the kernel reads it at boot, kept across a power-off (x6100-rtc: its
- * second's phase noted for the next start; not a network's time, so its rate is not measured against it). sh_run
- * runs it on a thread of its own (it waits for the second to set it) */
-static void rtc_write(void) {
-    sh_run("/usr/sbin/x6100-rtc save >/dev/null 2>&1 || hwclock -w -u -f /dev/rtc1", NULL, NULL);
-}
 
 static void time_sync_cb(button_data_t *btn) {
     struct timespec now;
     int             err_ms;
-    int64_t         off, t;
+    int64_t         off;
 
-    switch (clock_keeper(&err_ms)) {
-        case CLOCK_NTP:
+    switch (clock_sync_keeper(&err_ms)) {
+        case CLOCK_BY_NTP:
             msg_update_text_fmt("Clock in sync (NTP, within %d ms): no Time Sync needed", err_ms);
             return;
-        case CLOCK_GPS:
+        case CLOCK_BY_GPS:
             msg_update_text_fmt("The GPS keeps the clock: no Time Sync needed");
             return;
-        case CLOCK_FREE:
+        default:
             break;
     }
     clock_gettime(CLOCK_REALTIME, &now);
@@ -994,72 +1423,28 @@ static void time_sync_cb(button_data_t *btn) {
         msg_update_text_fmt("Clock on the slot already (%+.2f s)", off / 1e9);
         return;
     }
-    clock_gettime(CLOCK_REALTIME, &now);    /* the step on the time as it is now: nothing lost */
-    t = (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec - off;
-
-    struct timespec ts = {.tv_sec = t / 1000000000LL, .tv_nsec = t % 1000000000LL};
-
-    if (clock_settime(CLOCK_REALTIME, &ts)) {
-        const char *why = strerror(errno);
-
-        LV_LOG_ERROR("Can't set system time: %s\n", why);
-        msg_update_text_fmt("Time Sync: the clock can't be set (%s)", why);
+    if (!clock_sync_step(-off / 1e9, CLOCK_BY_HAND, "Time Sync")) {
+        msg_update_text_fmt("Time Sync: the clock can't be set (%s)", strerror(errno));
         return;
     }
-    rtc_write();
     msg_update_text_fmt("Clock moved %+.2f s to the slot start", -off / 1e9);
 }
 
-/* ---- Auto Sync (FT8 5:5, ft8/time_sync.h): the clock from the decodes' DT, for a clock that neither NTP nor the
- * GPS keeps. The decodes of FT8 and FT4 are gathered as they come (on_message), and once a slot, just past its
- * middle (on_tick), what they say is looked at: with enough stations agreeing that the clock is 0.2 s off or more,
- * it moves then, unless something transmits. All on the decoder thread: a transmission of the app holds it, so
- * none is under way as the clock moves. With NTP or the GPS keeping the clock it only logs what it reads (the bench
- * measures FTX_SYNC_RX_DT_S so) */
+/* ---- Auto Sync (ft8/time_sync.h): the clock from the decodes' DT. The decodes of FT8 and FT4 are gathered as they
+ * come (on_message), and once a slot, just past its middle (on_tick), what they say is looked at and told to the
+ * GPS / Clock page (clock_sync.h), Auto Sync on or off. The clock moves only by clock_sync.h's rule: nothing keeps it
+ * (neither NTP nor the GPS), Auto Sync is on (its switch is on the GPS / Clock page) and no time station set it in
+ * the last hour; with enough stations agreeing that it is 0.2 s off or more, it moves then, unless something
+ * transmits. All on the decoder thread: a transmission of the app holds it, so none is under way as the clock moves.
+ * With NTP keeping the clock, the median DT a right clock shows here is learned (clock_sync_ft8_rx_dt) */
 
-#define SYNC_LOG_MS 60000       /* the log line at most once a minute, a move always */
+#define SYNC_LOG_MS 60000       /* the log line and the learning at most once a minute, a move always */
 
 static ftx_sync_t  sync_state;
 static int64_t     sync_slot_seen;      /* the slot last looked at (its number), decoder thread */
 static int64_t     sync_logged_ms;
-static bool        sync_said_far;       /* "too far" said: again only after a move or Auto Sync on again */
+static bool        sync_said_far;       /* "too far" said: again only after a move */
 static bool        sync_said_fail;
-/* Auto Sync switched on: the first verdict goes on the message line, "on time" too */
-static atomic_bool sync_report;
-
-static const char *auto_sync_label(void) {
-    static char buf[32];
-    return switch_label(buf, sizeof(buf), "Auto Sync", param_i_get(cfg_ft8_auto_sync));
-}
-
-static void auto_sync_cb(button_data_t *btn) {
-    if (kb_open) return;
-
-    bool on = !param_i_get(cfg_ft8_auto_sync);
-    int  err_ms;
-
-    param_i_set(cfg_ft8_auto_sync, on);
-    sync_report = on;
-    if (!on) {
-        msg_update_text_fmt("Auto Sync off: the clock moves only with Time Sync");
-        return;
-    }
-    if (!ftx_sync_proto(cur_proto())) {
-        msg_update_text_fmt("Auto Sync on: it works in FT8 and FT4, not in %s", mode_name());
-        return;
-    }
-    switch (clock_keeper(&err_ms)) {
-        case CLOCK_NTP:
-            msg_update_text_fmt("Auto Sync on: NTP keeps the clock, nothing to do while it does");
-            break;
-        case CLOCK_GPS:
-            msg_update_text_fmt("Auto Sync on: the GPS keeps the clock, nothing to do while it does");
-            break;
-        case CLOCK_FREE:
-            msg_update_text_fmt("Auto Sync on: the clock follows the decodes, after a minute or more");
-            break;
-    }
-}
 
 static int64_t clock_ns(clockid_t id) {
     struct timespec t;
@@ -1068,41 +1453,21 @@ static int64_t clock_ns(clockid_t id) {
     return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec;
 }
 
-/* A decode of a known sender (decoder thread) */
+/* A decode of a known sender (decoder thread): gathered always, the page shows what they say */
 static void auto_sync_heard(const slot_info_t *slot, const char *call, float time_sec) {
-    if (!param_i_get(cfg_ft8_auto_sync)) return;
-
     int64_t now = clock_ns(CLOCK_REALTIME), mono = clock_ns(CLOCK_MONOTONIC);
 
     ftx_sync_add(&sync_state, dec_proto, slot->rx_start_ns, slot->rx_start_mono_ns, time_sec, call, now, mono);
 }
 
-static void auto_sync_log(const ftx_sync_result_t *r, const char *what, bool always) {
+/* True once a minute (always: a move) */
+static bool auto_sync_log(const ftx_sync_result_t *r, const char *what, bool always) {
     uint64_t ms = get_time();
 
-    if (!always && sync_logged_ms && ms - sync_logged_ms < SYNC_LOG_MS) return;
+    if (!always && sync_logged_ms && ms - sync_logged_ms < SYNC_LOG_MS) return false;
     sync_logged_ms = ms;
     fprintf(stderr, "ft8: Auto Time Sync: median DT %+.3f s (%+.3f s on time) of %d stations, %d slots, %d decodes, "
-            "spread %.3f s: %s\n", r->median_dt, FTX_SYNC_RX_DT_S, r->stations, r->slots, r->decodes, r->spread, what);
-}
-
-/* The clock moved by step s, now */
-static bool auto_sync_step(float step) {
-    struct timespec ts;
-    int64_t         t;
-
-    clock_gettime(CLOCK_REALTIME, &ts);
-    t  = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec + llround(step * 1e9);
-    ts = (struct timespec){.tv_sec = t / 1000000000LL, .tv_nsec = t % 1000000000LL};
-    if (clock_settime(CLOCK_REALTIME, &ts)) {
-        const char *why = strerror(errno);
-
-        LV_LOG_ERROR("Auto Sync: can't set system time: %s", why);
-        if (!sync_said_fail) msg_schedule_text_fmt("Auto Sync: the clock can't be set (%s)", why);
-        sync_said_fail = true;
-        return false;
-    }
-    rtc_write();
+            "spread %.3f s: %s\n", r->median_dt, ftx_sync_rx_dt(), r->stations, r->slots, r->decodes, r->spread, what);
     return true;
 }
 
@@ -1110,7 +1475,7 @@ static bool auto_sync_step(float step) {
 static void auto_sync_tick(float sec) {
     int proto = dec_proto;
 
-    if (!param_i_get(cfg_ft8_auto_sync) || !ftx_sync_proto(proto)) {
+    if (!ftx_sync_proto(proto)) {
         if (sync_state.n) ftx_sync_reset(&sync_state);
         sync_said_far  = false;
         sync_said_fail = false;
@@ -1126,14 +1491,31 @@ static void auto_sync_tick(float sec) {
     sync_slot_seen = id;
 
     ftx_sync_result_t r;
-    ftx_sync_rc_t     rc = ftx_sync_check(&sync_state, proto, now, mono, &r);
-    int               err_ms;
+    clock_by_t        keeper;
 
+    clock_sync_ft8_rx_dt(NULL);     /* the learned DT into the checks (read from the card once) */
+
+    ftx_sync_rc_t rc      = ftx_sync_check(&sync_state, proto, now, mono, &r);
+    bool          allowed = clock_sync_allowed(CLOCK_BY_FT8, &keeper);
+
+    clock_sync_ft8_word(rc, r.step, r.median_dt, r.stations, r.slots);
     if (rc == FTX_SYNC_WAIT) return;
-    switch (clock_keeper(&err_ms)) {
-        case CLOCK_NTP: auto_sync_log(&r, "NTP keeps the clock", false); return;
-        case CLOCK_GPS: auto_sync_log(&r, "the GPS keeps the clock", false); return;
-        case CLOCK_FREE: break;
+    switch (keeper) {
+        case CLOCK_BY_NTP:
+            /* a right clock: what it reads by the decodes is learned, the stations agreeing */
+            if (auto_sync_log(&r, "NTP keeps the clock", false) && rc != FTX_SYNC_SPREAD)
+                clock_sync_ft8_rx_dt_learn(r.median_dt);
+            return;
+        case CLOCK_BY_GPS:
+            auto_sync_log(&r, "the GPS keeps the clock", false);
+            return;
+        default:
+            break;
+    }
+    if (!allowed) {
+        auto_sync_log(&r, param_i_get(cfg_ft8_auto_sync) ? "a time station set the clock, measured only"
+                                                         : "Auto Sync off, measured only", false);
+        return;
     }
     switch (rc) {
         case FTX_SYNC_SPREAD:
@@ -1141,12 +1523,9 @@ static void auto_sync_tick(float sec) {
             break;
         case FTX_SYNC_ON_TIME:
             auto_sync_log(&r, "on time", false);
-            if (atomic_exchange(&sync_report, false))
-                msg_schedule_text_fmt("Auto Sync: the clock is on time by the decodes of %d stations", r.stations);
             break;
         case FTX_SYNC_TOO_FAR:
             auto_sync_log(&r, "too far to move", false);
-            sync_report = false;
             if (!sync_said_far)
                 msg_schedule_text_fmt("Auto Sync: by the decodes the clock is %.1f s %s, too far: press Time Sync as "
                                       "a slot starts", fabsf(r.step), r.step < 0 ? _("ahead") : _("behind"));
@@ -1159,13 +1538,18 @@ static void auto_sync_tick(float sec) {
                 auto_sync_log(&r, "not now", false);
                 break;
             }
-            if (!auto_sync_step(r.step)) break;
-            ftx_sync_reset(&sync_state);    /* the DTs gathered were of the clock before */
-            sync_report   = false;
-            sync_said_far = false;
             {
                 char what[32];
 
+                snprintf(what, sizeof(what), _("%d stations"), r.stations);   /* shown on GPS / Clock */
+                if (!clock_sync_step(r.step, CLOCK_BY_FT8, what)) {
+                    if (!sync_said_fail)
+                        msg_schedule_text_fmt("Auto Sync: the clock can't be set (%s)", strerror(errno));
+                    sync_said_fail = true;
+                    break;
+                }
+                ftx_sync_reset(&sync_state);    /* the DTs gathered were of the clock before */
+                sync_said_far = false;
                 snprintf(what, sizeof(what), "moved %+.3f s", r.step);
                 auto_sync_log(&r, what, true);
             }
@@ -1353,39 +1737,40 @@ static void foryou_cb(button_data_t *btn) {
 
 static buttons_page_t page_1, page_2, page_3, page_4, page_5;
 
-/* The labels show the state now; a press changes it */
+/* The labels show the state now; a press changes it. F4OLI's pages: operate, the QSO, the band, the tools; then
+ * ours that their four left to a hold (Log Map, For you) as buttons of their own. Auto Sync: on the GPS / Clock page */
 static button_data_t button_page_1  = {.type = BTN_TEXT, .label = "(FT8 1:5)", .press = button_next_page_cb, .next = &page_2};
-static button_data_t button_show    = {.type = BTN_TEXT_FN, .label_fn = show_label, .press = show_cb};
-static button_data_t button_mode    = {.type = BTN_TEXT_FN, .label_fn = mode_label, .press = mode_cb};
 static button_data_t button_tx_cq   = {.type = BTN_TEXT_FN, .label_fn = tx_cq_label, .press = tx_cq_cb};
 static button_data_t button_tx_call = {.type = BTN_TEXT_FN, .label_fn = tx_call_label, .press = tx_call_cb};
+static button_data_t button_show    = {.type = BTN_TEXT_FN, .label_fn = show_label, .press = show_cb, .hold = show_hold_cb};
+static button_data_t button_view    = {.type = BTN_TEXT_FN, .label_fn = view_label, .press = view_cb};
 
 static button_data_t button_page_2  = {.type = BTN_TEXT, .label = "(FT8 2:5)", .press = button_next_page_cb, .next = &page_3};
-static button_data_t button_hold    = {.type = BTN_TEXT_FN, .label_fn = hold_label, .press = hold_cb};
 static button_data_t button_auto    = {.type = BTN_TEXT_FN, .label_fn = auto_label, .press = auto_cb};
+static button_data_t button_hold    = {.type = BTN_TEXT_FN, .label_fn = hold_label, .press = hold_cb};
+static button_data_t button_retries = {.type = BTN_TEXT_FN, .label_fn = retries_label, .press = retries_cb};
 static button_data_t button_force   = {.type = BTN_TEXT, .label = "Force QSO\nsave", .press = force_save_cb};
 
 static button_data_t button_page_3  = {.type = BTN_TEXT, .label = "(FT8 3:5)", .press = button_next_page_cb, .next = &page_4};
-static button_data_t button_cq_mod  = {.type = BTN_TEXT, .label = "CQ\nModifier", .press = cq_modifier_cb};
-static button_data_t button_sync    = {.type = BTN_TEXT, .label = "Time\nSync", .press = time_sync_cb};
-static button_data_t button_log_map = {.type = BTN_TEXT, .label = "Log\nMap", .press = map_cb};
-static button_data_t button_live_map = {.type = BTN_TEXT, .label = "Live\nMap", .press = heard_map_cb};
-
-static button_data_t button_page_4  = {.type = BTN_TEXT, .label = "(FT8 4:5)", .press = button_next_page_cb, .next = &page_5};
+static button_data_t button_mode    = {.type = BTN_TEXT_FN, .label_fn = mode_label, .press = mode_cb};
 static button_data_t button_freq    = {.type = BTN_TEXT_FN, .label_fn = freq_label, .press = freq_cb, .hold = freq_hold_cb};
 static button_data_t button_hound   = {.type = BTN_TEXT_FN, .label_fn = hound_label, .press = hound_cb};
-static button_data_t button_retries = {.type = BTN_TEXT_FN, .label_fn = retries_label, .press = retries_cb};
-static button_data_t button_foryou  = {.type = BTN_TEXT_FN, .label_fn = foryou_label, .press = foryou_cb};
 
 /* TUNE for an external tuner: a tone at the TX offset, where the app transmits (ext_tune.h) */
-static button_data_t button_page_5  = {.type = BTN_TEXT, .label = "(FT8 5:5)", .press = button_next_page_cb, .next = &page_1};
-static button_data_t button_auto_sync = {.type = BTN_TEXT_FN, .label_fn = auto_sync_label, .press = auto_sync_cb};
+static button_data_t button_page_4  = {.type = BTN_TEXT, .label = "(FT8 4:5)", .press = button_next_page_cb, .next = &page_5};
+static button_data_t button_cq_mod  = {.type = BTN_TEXT, .label = "CQ\nModifier", .press = cq_modifier_cb};
+static button_data_t button_sync    = {.type = BTN_TEXT, .label = "Time\nSync", .press = time_sync_cb};
+static button_data_t button_live_map = {.type = BTN_TEXT, .label = "Live\nMap", .press = heard_map_cb, .hold = map_cb};
 
-static buttons_page_t page_1 = {{&button_page_1, &button_show, &button_mode, &button_tx_cq, &button_tx_call}};
-static buttons_page_t page_2 = {{&button_page_2, &button_hold, &button_auto, &button_force, &btn_dig_pwr}};
-static buttons_page_t page_3 = {{&button_page_3, &button_cq_mod, &button_sync, &button_log_map, &button_live_map}};
-static buttons_page_t page_4 = {{&button_page_4, &button_freq, &button_hound, &button_retries, &button_foryou}};
-static buttons_page_t page_5 = {{&button_page_5, &btn_ext_tune, &button_auto_sync}};
+static button_data_t button_page_5  = {.type = BTN_TEXT, .label = "(FT8 5:5)", .press = button_next_page_cb, .next = &page_1};
+static button_data_t button_log_map = {.type = BTN_TEXT, .label = "Log\nMap", .press = map_cb};
+static button_data_t button_foryou  = {.type = BTN_TEXT_FN, .label_fn = foryou_label, .press = foryou_cb};
+
+static buttons_page_t page_1 = {{&button_page_1, &button_tx_cq, &button_tx_call, &button_show, &button_view}};
+static buttons_page_t page_2 = {{&button_page_2, &button_auto, &button_hold, &button_retries, &button_force}};
+static buttons_page_t page_3 = {{&button_page_3, &button_mode, &button_freq, &button_hound, &btn_dig_pwr}};
+static buttons_page_t page_4 = {{&button_page_4, &button_cq_mod, &button_sync, &button_live_map, &btn_ext_tune}};
+static buttons_page_t page_5 = {{&button_page_5, &button_log_map, &button_foryou}};
 
 /* ---- keyboard window ---- */
 
@@ -1447,7 +1832,8 @@ static void list_pressed(const cell_data_t *cd) {
         tx_call_off();
         return;
     }
-    if (!cd || cd->cell_type == CELL_TX_MSG || cd->cell_type == CELL_RX_INFO || cd->cell_type == CELL_START_QSO) {
+    if (!cd || cd->cell_type == CELL_TX_MSG || cd->cell_type == CELL_RX_INFO || cd->cell_type == CELL_START_QSO ||
+        cd->cell_type == CELL_SLOT_SEP) {   /* a slot's line: no station (in Hound it said "Select the Fox's CQ") */
         msg_schedule_text_fmt("What should I do about it?");
         return;
     }
@@ -1526,16 +1912,28 @@ static void add_info(const char *fmt, ...) {
     row_post(&row);
 }
 
-/* Our transmission as a row, "12:00:15 DL1ABC ON6URE JO21" */
-static void add_tx_row(const char *msg) {
-    cell_data_t     row = {.cell_type = CELL_TX_MSG};
-    char            text[sizeof(row.text)];
+/* The start of the slot we are in, UTC: the time of its rows and of our transmission in it. Read as the tick came,
+ * it was 1 to 3 s late on a busy band (07:42:18, 07:42:46 on 40 m with 20 to 26 decodes a slot): the slot's last
+ * decode runs before the tick (F4OLI) */
+static void slot_start_utc(struct tm *utc) {
     struct timespec now;
+    time_t          start;
+
+    clock_gettime(CLOCK_REALTIME, &now);
+    start = (time_t)ftx_slot_start(now.tv_sec, now.tv_nsec, ftx_slot_time(cur_proto()));
+    gmtime_r(&start, utc);
+}
+
+/* Our transmission as a row, "12:00:15 DL1ABC ON6URE JO21": its slot's start, as the decodes */
+static void add_tx_row(const char *msg) {
+    cell_data_t row = {.cell_type = CELL_TX_MSG};
+    char        text[sizeof(row.text)];
+    struct tm   utc;
 
     snprintf(text, sizeof(text), "%s", msg);
     if (!strncmp(text, "CQ_", 3)) text[2] = ' ';
-    clock_gettime(CLOCK_REALTIME, &now);
-    strftime(row.text, 10, "%H:%M:%S ", gmtime(&now.tv_sec));
+    slot_start_utc(&utc);
+    strftime(row.text, 10, "%H:%M:%S ", &utc);
     snprintf(row.text + 9, sizeof(row.text) - 9, "%s", text);
     row_post(&row);
 }
@@ -1630,12 +2028,13 @@ static void add_rx_text(int16_t snr, const char *text, const slot_info_t *slot, 
 
     bool parsed = meta.type != FXT_MSG_TYPE_OTHER && meta.call_de[0];
 
-    /* The heard map, PSK Reporter and Auto Sync: the sender of any message we can parse */
+    /* The heard map, PSK Reporter and Auto Sync: the sender of any message we can parse. A CB station's free text
+     * ("1AT106 -07") names no sender: the call is the QSO's it was taken for, no spot */
     if (parsed) {
         auto_sync_heard(slot, meta.call_de, time_sec);
         map_rx_t rx = {meta, odd};
-        js8_map_heard(meta.call_de, meta.grid, snr, meta.to_me, &rx, sizeof(rx));
-        if (param_i_get(cfg_pskreporter)) {
+        if (!meta.free_text) js8_map_heard(meta.call_de, meta.grid, snr, meta.to_me, &rx, sizeof(rx));
+        if (param_i_get(cfg_pskreporter) && !meta.free_text) {
             pskr_spot(params.callsign.x, station_qth(), VERSION, meta.call_de, meta.grid,
                       (uint32_t)cparam_i_get(cfg_fg_freq) + (uint32_t)(freq_hz + 0.5f), snr, mode_name());
         }
@@ -1686,7 +2085,10 @@ typedef struct {
 static void wf_row_add(void *data) {
     wf_row_t *row = data;
 
-    if (row->win_gen == win_gen) lv_waterfall_add_data(waterfall, row->db, row->n);
+    if (row->win_gen == win_gen) {
+        lv_waterfall_add_data(waterfall, row->db, row->n);
+        remote_server_app_wf(row->db, row->n, filter_low, filter_high);     /* the FT8 page's */
+    }
     free(row->db);
 }
 
@@ -1825,14 +2227,11 @@ static void on_tick(const slot_info_t *slot, bool new_slot, float sec, void *ctx
     }
 
     static unsigned ft2_slots;
-    struct timespec now;
+    struct tm       utc;
 
     sending = false;
-    clock_gettime(CLOCK_REALTIME, &now);
-
-    struct tm *utc = gmtime(&now.tv_sec);
-
-    snprintf(slot_time, sizeof(slot_time), "%02i:%02i:%02i", utc->tm_hour, utc->tm_min, utc->tm_sec);
+    slot_start_utc(&utc);
+    snprintf(slot_time, sizeof(slot_time), "%02i:%02i:%02i", utc.tm_hour, utc.tm_min, utc.tm_sec);
 
     /* FT2: an RX line every 3.75 s would fill the table; one every 4th slot (15 s), as FT8 */
     if (tx_pending && subject_i_get(tx_enabled)) return;
@@ -1878,7 +2277,6 @@ static void construct_cb(lv_obj_t *parent) {
     button_auto.subj    = (Subject *)cfg_ft8_auto;
     button_foryou.subj  = (Subject *)cfg_ft8_foryou;
     button_retries.subj = (Subject *)cfg_ft8_max_repeats;
-    button_auto_sync.subj = (Subject *)cfg_ft8_auto_sync;
 
     /* TX CQ starts off each time, TX Call as it was left */
     if (cq_enabled) {
@@ -1897,16 +2295,17 @@ static void construct_cb(lv_obj_t *parent) {
     lv_obj_add_style(waterfall, &waterfall_style, 0);
     lv_obj_clear_flag(waterfall, LV_OBJ_FLAG_SCROLLABLE);
     lv_waterfall_set_palette(waterfall, (lv_color_t *)wf_palette, 256);
-    lv_waterfall_set_size(waterfall, WIDTH, WF_HEIGHT);
+    lv_waterfall_set_size(waterfall, WIDTH, WF_HEIGHT - LANE_H);
     lv_waterfall_set_min(waterfall, 0);    /* above the noise floor (on_psd), as JS8 */
     lv_waterfall_set_max(waterfall, 30);
-    lv_obj_set_pos(waterfall, 13, 13);
+    lv_obj_set_pos(waterfall, 13, 13 + LANE_H);
+    build_lane();
 
     finder = lv_finder_create(waterfall);
     lv_finder_set_width(finder, protos[FTX_PROTOCOL_FT8].width_hz);
     lv_finder_set_value(finder, params.ft8_tx_freq.x);
     freq_strip_set_offset(params.ft8_tx_freq.x);
-    lv_obj_set_size(finder, WIDTH, WF_HEIGHT);
+    lv_obj_set_size(finder, WIDTH, WF_HEIGHT - LANE_H);
     lv_obj_set_pos(finder, 0, 0);
     lv_obj_set_style_radius(finder, 0, LV_PART_MAIN);
     lv_obj_set_style_border_width(finder, 0, LV_PART_MAIN);
@@ -1918,9 +2317,18 @@ static void construct_cb(lv_obj_t *parent) {
     lv_obj_set_style_border_opa(finder, LV_OPA_50, LV_PART_INDICATOR);
 
     /* See-through: the waterfall's top rows clear above it, the rest visible under it */
-    table_view_build(dialog.obj, 13, 13 + WF_VISIBLE, WIDTH, WF_HEIGHT - WF_VISIBLE);
+    table_view_build(dialog.obj, 13, LIST_Y, WIDTH, LIST_H);
     table_view_set_press_cb(list_pressed);
-    table_view_set_actions(&(table_view_actions_t){.on_close = list_close, .on_vol_change = list_vol});
+    table_view_set_actions(&(table_view_actions_t){.on_close = list_close, .on_vol_change = list_vol,
+                                                   .on_key = board_key, .on_press = board_press});
+
+    /* The tiles over the list (F4OLI's redesign), as View was left; the countries of the log for their NEW */
+    ft8_heard_clear();
+    ft8_worked_clear();
+    qso_log_each_call(worked_add_call, NULL);
+    build_board();
+    board_show(board_on);
+    heard_timer = lv_timer_create(heard_timer_cb, 1000, NULL);
 
     lv_anim_init(&fade);
     lv_anim_set_var(&fade, table_view_obj());
@@ -1968,7 +2376,18 @@ static void construct_cb(lv_obj_t *parent) {
 
 static void destruct_cb(void) {
     map_obj   = NULL;   /* deleted with the dialog */
+    lane      = NULL;
+    board     = NULL;
     freq_list = NULL;
+    if (heard_timer) {
+        lv_timer_del(heard_timer);
+        heard_timer = NULL;
+    }
+    if (fade_back_timer) {      /* its fade_to() would find the list gone */
+        lv_timer_del(fade_back_timer);
+        fade_back_timer = NULL;
+    }
+    fading = false;
     kb_close();
     decoder_stop();
     win_gen++;      /* the decoder is joined: what it queued for this window goes nowhere now */

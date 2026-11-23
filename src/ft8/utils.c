@@ -64,6 +64,14 @@ int64_t ftx_slot_offset_ns(int64_t sec, long nsec, float slot) {
     return (t + slot_ns / 2) % slot_ns - slot_ns / 2;
 }
 
+int64_t ftx_slot_start(int64_t sec, long nsec, float slot) {
+    int64_t slot_ns = llround(slot * 1e9);
+    int64_t t       = (sec % 60 + 60) % 60 * 1000000000LL + nsec;     /* into the minute, as the slots count */
+    int64_t start   = sec * 1000000000LL + nsec - t % slot_ns;
+
+    return start / 1000000000LL;
+}
+
 bool ftx_clock_synced(int *err_ms) {
     struct timex tx    = {0};   /* modes 0: only read */
     int          state = ntp_adjtime(&tx);
@@ -71,6 +79,9 @@ bool ftx_clock_synced(int *err_ms) {
     if (state < 0 || state == TIME_ERROR || (tx.status & STA_UNSYNC) || tx.maxerror > SYNC_MAX_ERR_US) {
         return false;
     }
-    if (err_ms) *err_ms = (int)(tx.maxerror / 1000);
+    /* The error said is ntpd's estimate, not its maximum: the maximum is the root distance and grows 0.5 ms a second
+     * between updates, 419 ms on the bench X6100 over Ethernet with the clock 0.3 ms off and the estimate 2.2 ms,
+     * and GPS / Clock read "kept by NTP (402 ms)" (19 Nov). At least 1 ms: 0 there means no number */
+    if (err_ms) *err_ms = tx.esterror > 0 ? (int)((tx.esterror + 999) / 1000) : 1;
     return true;
 }

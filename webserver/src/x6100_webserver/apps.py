@@ -1,8 +1,9 @@
 from datetime import datetime
 try:
+    import gzip
     import zlib
-except ImportError:   # images built before python3-zlib was selected
-    zlib = None
+except ImportError:   # images built before python3-zlib was selected (gzip needs it)
+    gzip = zlib = None
 import base64
 import binascii
 import csv
@@ -462,6 +463,134 @@ def remote():
 @app.route('/panel')
 def panel():
     return bottle.template('panel')
+
+
+# The apps' pages (the Apps menu, from OlivLoze's fork): the radio's WeFax, FT8 and JS8 apps from the browser, over
+# the Panel's socket (src/remote_server.c). The radio decodes, answers and saves on its own; a page shows and commands.
+#
+# The WeFax app's stations as src/wefax_window.c lists them (stations[]: tools/apps_web checks that these are the
+# same), by their published frequency: the app tunes WEFAX_CENTER_HZ under it, in USB
+WEFAX_CENTER_HZ = 1500
+WEFAX_SAME_HZ = 50       # SAME_STATION_HZ: a channel this close to a station is that station
+WEFAX_STATIONS = (
+    ("DWD (DE)", (("DDH3", 3855000, "night"), ("DDK3", 7880000, "day and night"), ("DDK6", 13882500, "day"))),
+    ("Northwood (UK)", (("GYA", 2618500, ""), ("GYA", 4610000, ""), ("GYA", 8040000, ""), ("GYA", 11086500, ""))),
+    ("Athens (GR)", (("SVJ4", 4481000, ""), ("SVJ4", 8105000, ""))),
+    ("Boston (US)", (("NMF", 4235000, "night"), ("NMF", 6340500, ""), ("NMF", 9110000, ""),
+                     ("NMF", 12750000, "day"))),
+    ("New Orleans (US)", (("NMG", 4317900, "night"), ("NMG", 8503900, ""), ("NMG", 12789900, ""),
+                          ("NMG", 17146400, "day"))),
+    ("Pt. Reyes (US)", (("NMC", 4346000, "night"), ("NMC", 8682000, ""), ("NMC", 12786000, ""),
+                        ("NMC", 17151200, "day"), ("NMC", 22527000, "day"))),
+    ("Kodiak (US)", (("NOJ", 2054000, "night"), ("NOJ", 4298000, ""), ("NOJ", 8459000, ""),
+                     ("NOJ", 12412500, "day"))),
+    ("Honolulu (US)", (("KVM70", 9982500, ""), ("KVM70", 11090000, ""), ("KVM70", 16135000, ""),
+                       ("KVM70", 23331500, "day"))),
+)
+
+
+def wefax_channel_name(name):
+    """A channel's name as the WeFax app lists it (channel_name in src/wefax_window.c): what follows WEFAX and its
+    separators, all of it when nothing does, without '#'"""
+    return (name[5:].lstrip(" -_:./#") or name).replace("#", "")
+
+
+def wefax_stations():
+    """What the app's Freq. list holds: its stations, then the channels whose name starts with WEFAX (APP >
+    Channels, the Memories page) that are not one of them, under Channels. [[group, [[name, Hz, note]]]]"""
+    groups = [[g, [list(s) for s in st]] for g, st in WEFAX_STATIONS]
+    known = [s[1] for _, st in WEFAX_STATIONS for s in st]
+    own = []
+    for c in channels_state()["channels"]:
+        f = c["frequency"] + WEFAX_CENTER_HZ
+        if c["name"][:5].upper() != "WEFAX" or f > 0x7FFFFFFF or any(abs(k - f) <= WEFAX_SAME_HZ for k in known):
+            continue
+        own.append([wefax_channel_name(c["name"]), f, ""])
+    if own:
+        groups.append(["Channels", own])
+    return groups
+
+
+def js_value(v):
+    """v as JavaScript in a page's script: JSON, "<" escaped, so a name with "</script>" in it stays text"""
+    return json.dumps(v).replace("<", "\\u003c")
+
+
+@app.route('/wefax')
+def wefax_page():
+    return bottle.template('wefax', stations=js_value(wefax_stations()))
+
+
+# The FT8 page: the callsign and the locator for its map and its QSO's messages (the radio sends the rest)
+@app.route('/ft8')
+def ft8_page():
+    return bottle.template('ft8', me=js_value(read_callsign() or ""), grid=js_value(read_param("qth") or ""))
+
+
+# The JS8 page: the callsign and the locator, as FT8's
+@app.route('/js8')
+def js8_page():
+    return bottle.template('js8', me=js_value(read_callsign() or ""), grid=js_value(read_param("qth") or ""))
+
+
+# The country of a call for the apps' pages (their flags and distances): AD1C's cty.dat as the radio reads it
+# (src/dxcc.c), /mnt/cty.dat first so a newer one put on the card counts here too, then the image's; the last is the
+# source tree's (a server on a PC). Sent whole, compact, and looked up in the page as dxcc_lookup does (app_wall.js):
+# {"e": [[name, primary prefix, lat, lon]], "p": {prefix: e}, "x": {whole call: e}}, lon east positive (cty.dat's is
+# west). From OlivLoze's fork
+CTY_PATHS = ("/mnt/cty.dat", "/usr/share/x6100/cty.dat",
+             os.path.join(PACKAGE_DIR, "..", "..", "..", "third-party", "cty", "cty.dat"))
+CTY_SHORT = {"Fed. Rep. of Germany": "Germany", "United States": "USA", "European Russia": "Russia",
+             "Republic of Korea": "South Korea", "DPR of Korea": "North Korea", "United Arab Emirates": "UAE",
+             "Slovak Republic": "Slovakia", "Czech Republic": "Czechia", "Bosnia-Herzegovina": "Bosnia",
+             "Dem. Rep. of the Congo": "DR Congo", "Republic of the Congo": "Congo",
+             "Republic of South Sudan": "South Sudan", "Antigua & Barbuda": "Antigua", "Trinidad & Tobago": "Trinidad",
+             "Turks & Caicos Islands": "Turks & Caicos", "St. Kitts & Nevis": "St. Kitts",
+             "Sov Mil Order of Malta": "SMOM", "UK Base Areas on Cyprus": "UK Cyprus"}   # short_name in src/dxcc.c
+_cty = {"key": None, "json": None, "gz": None}
+
+
+def cty_table(text):
+    """parse() in src/dxcc.c: eight ':'-ended fields, then the prefixes up to ';' (split at commas and spaces),
+    "=CALL" a whole call, what follows a ( [ < { ~ cut off. The primary prefix counts only where it is listed, as
+    there. A whole call listed under two entities (4U1A and a few more of the UN's): the first here, either one
+    there (its binary search)"""
+    ents, pfx, exact = [], {}, {}
+    for block in text.split(";"):
+        f = block.split(":", 8)
+        if len(f) < 9:
+            break                   # a truncated file: what came before it
+        try:
+            lat, lon = float(f[4]), -float(f[5])
+        except ValueError:
+            lat = lon = 0.0
+        e, name, prim = len(ents), f[0].strip(), f[7].strip()
+        ents.append([CTY_SHORT.get(name, name), prim[1:] if prim.startswith("*") else prim, lat, lon])
+        for a in re.split(r"[,\s]+", f[8]):
+            whole = a.startswith("=")
+            a = re.split(r"[(\[<{~]", a[whole:], maxsplit=1)[0]
+            if a:
+                (exact if whole else pfx).setdefault(a, e)
+    return {"e": ents, "p": pfx, "x": exact}
+
+
+@app.get('/api/dxcc')
+def dxcc_table():
+    path = next((p for p in CTY_PATHS if os.path.exists(p)), None)
+    if not path:
+        raise bottle.HTTPError(404, "No cty.dat on the radio")
+    key = (path, os.path.getmtime(path))
+    if _cty["key"] != key:
+        with open(path, encoding="latin-1") as f:
+            _cty["json"] = json.dumps(cty_table(f.read()), separators=(",", ":")).encode()
+        _cty["gz"] = gzip.compress(_cty["json"]) if gzip else None
+        _cty["key"] = key
+    bottle.response.content_type = "application/json"
+    bottle.response.set_header("Cache-Control", "max-age=3600")
+    if _cty["gz"] and "gzip" in bottle.request.headers.get("Accept-Encoding", ""):
+        bottle.response.set_header("Content-Encoding", "gzip")
+        return _cty["gz"]
+    return _cty["json"]
 
 
 # Tailscale Funnel (#58): the Panel and the Screen page for the internet, written at the start into a folder in RAM
@@ -934,6 +1063,7 @@ WINLINK_CALL_RE = re.compile(r"[A-Z0-9]{3,12}(-[0-9]{1,2})?")   # as x6100-winli
 WINLINK_LOCATOR_RE = re.compile(r"[A-R]{2}[0-9]{2}([A-X]{2})?", re.I)
 WINLINK_BANDWIDTHS = (200, 500, 1000, 2000)           # ARDOP's, the widest Pat may use (as x6100-winlink's)
 WINLINK_MODEMS = ("ardop", "mercury", "xara")         # the modem= choice (as x6100-winlink's), ardop the default
+WINLINK_VARA_MODEMS = ("mercury", "xara")             # the ones Pat reaches as VARA HF (varahf_modem=, the last)
 WINLINK_MERCURY_BANDWIDTHS = (500, 2300, 2750)        # Mercury's, VARA's three (as x6100-winlink's), 2300 the default
 WINLINK_XARA_BANDWIDTHS = (500, 2300, 2750)           # XARA's, VARA HF's own three, 2300 the default
 winlink_lock = threading.Lock()                       # one change at a time: Off may take 20 s
@@ -1092,6 +1222,11 @@ def set_winlink():
             if data["modem_choice"] not in WINLINK_MODEMS:
                 return api_error(400, "Modem: ARDOP, Mercury or XARA")
             new["modem"] = data["modem_choice"]
+            # The last of Mercury and XARA chosen: the one a VARA HF connection in Pat switches to from ARDOP (#296)
+            for m in (new["modem"], conf["modem"]):
+                if m in WINLINK_VARA_MODEMS:
+                    new["varahf_modem"] = m
+                    break
         if "mercury_bandwidth" in data:
             mbw = data["mercury_bandwidth"]
             if mbw not in WINLINK_MERCURY_BANDWIDTHS or isinstance(mbw, bool):
@@ -1578,7 +1713,8 @@ def winlink_secrets():
 
 def stored_secrets():
     """Every secret the radio keeps: the Wavelog key and its live link's secret path, the QRZ, HOTA and WWFF keys, the
-    Winlink passwords, the WiFi passwords, the Zello password and developer key, SVXConnect's private key"""
+    Winlink passwords, the WiFi passwords, the Zello password and developer key, SVXConnect's private key, the DMR
+    hotspot password"""
     wl = wavelog_read()
     found = {wl.get("key", ""), wl.get("cat_token", ""), field_key("hota.conf"), field_key("wwff.conf")}
     found.update(qrz_read()[2])
@@ -1586,6 +1722,7 @@ def stored_secrets():
     found.update(wifi_secrets())
     found.update(zello_secrets())
     found.update(svx_secrets())
+    found.update(dmr_secrets())
     return found
 
 
@@ -2083,15 +2220,13 @@ def rec_id(rec):
     return hashlib.sha1(rec.strip()).hexdigest()[:12]
 
 
-def edit_qso(name, n, fn, rid):
-    """Applies fn to the record with the identity rid (rec_id), of which n is the row number the
-    page knew (0 = the first QSO of the file; records without CALL do not count): fn returns the
-    new record, or None to delete it. A rid the file no longer holds is a 409: the page is stale.
-    Returns an error response or None."""
+def edit_records(name, edits):
+    """Applies each (n, rid, fn) of edits to the record with the identity rid (rec_id) in the log name, of which n is
+    the row number the page knew (0 = the first QSO of the file; records without CALL do not count): fn returns the
+    new record, or None to delete it. The file is written once. Returns (error response or None, the (old, new)
+    records changed, new None for one deleted, the edits whose QSO the file no longer holds: the page is stale)."""
     if not name.endswith(".adi") or os.path.basename(name) != name:
-        return api_error(400, "Not a log")
-    if not rid:
-        return api_error(400, "Which QSO: the id is missing (reload the page)")
+        return api_error(400, "Not a log"), [], []
     path = field_path("logs", name)
     # The radio appends QSOs to the same file and takes this lock on the folder while it does
     # (src/field/flog.c): a QSO logged while the file is rewritten here would otherwise be lost
@@ -2099,42 +2234,259 @@ def edit_qso(name, n, fn, rid):
     try:
         lock = os.open(os.path.dirname(path), os.O_RDONLY)
     except OSError:
-        return api_error(404, "Not found")
+        return api_error(404, "Not found"), [], []
+    changed, stale = [], []
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             with open(path, "rb") as f:
                 raw = f.read()
         except FileNotFoundError:
-            return api_error(404, "Not found")
+            return api_error(404, "Not found"), [], []
         head, parts = adif_split(raw)
         recs = [i for i, p in enumerate(parts[:-1]) if re.search(rb'<call:\d+', p, re.I)]
-        same = [i for i in recs if rec_id(parts[i]) == rid]
-        if len(same) == 1:
-            at = same[0]
-        elif same and 0 <= n < len(recs) and recs[n] in same:
-            at = recs[n]      # identical records: the row the page meant
-        else:
-            return api_error(409, "This QSO is not in the log as the page shows it: reload the page")
-        new = fn(parts[at])
-        if new is None:
-            del parts[at]
-        else:
-            parts[at] = new
-        tmp = path + ".tmp"
-        with open(tmp, "wb") as f:
-            f.write(head + b"<eor>".join(parts))
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
+        new, taken = list(parts), set()
+        for n, rid, fn in edits:
+            same = [i for i in recs if i not in taken and rec_id(parts[i]) == rid]
+            if len(same) == 1:
+                at = same[0]
+            elif same and 0 <= n < len(recs) and recs[n] in same:
+                at = recs[n]      # identical records: the row the page meant
+            else:
+                stale.append((n, rid, fn))
+                continue
+            taken.add(at)
+            new[at] = fn(parts[at])
+            changed.append((parts[at], new[at]))
+        if changed:
+            tmp = path + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(head + b"<eor>".join(p for p in new if p is not None))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
     finally:
         os.close(lock)   # releases the lock
-    return None
+    return None, changed, stale
+
+
+def edit_qso(name, n, fn, rid):
+    """Applies fn to the record with the identity rid (rec_id), as edit_records does, and the change to the radio's
+    other stores of the QSO (follow_qsos). A rid the file no longer holds is a 409: the page is stale. Returns an
+    error response, or {"status": "OK"} with a "note" when another store could not follow."""
+    if not rid:
+        return api_error(400, "Which QSO: the id is missing (reload the page)")
+    err, changed, stale = edit_records(name, [(n, rid, fn)])
+    if err:
+        return err
+    if stale:
+        return api_error(409, "This QSO is not in the log as the page shows it: reload the page")
+    return ok_noted(follow_qsos(changed))
+
+
+def ok_noted(notes, **more):
+    return dict({"status": "OK"}, **more, **({"note": "; ".join(notes)} if notes else {}))
+
+
+# An app's QSO in the radio's other stores (#284). The FT8, FT4, FT2 and JS8 apps log a QSO into the day's log or the
+# activation's, the logs the Logs page and the Field Ops page show, and besides into the radio's QSO list
+# qso_log.db, whose calls the FT8, FT4 and JS8 lists mark as worked, and into the app's own ADIF file, ft_log.adi or
+# js8call_log.adi, whose QSOs the apps' maps draw (src/ft8_window.c save_qso, src/js8_window.c p3_log_save). The
+# logs here are the operator's, the truth: a QSO deleted or changed here is deleted or changed in those too, found
+# by its call, date and time (to the second; to the minute for a time given as hhmm). Up to v0.3.12 they kept it,
+# and a call deleted here to start an activation from zero was still worked in FT8. The apps read qso_log.db at each
+# decode and the files at each map: nothing to restart. A QSO in qso_log.db alone (imported from incoming_log.adi,
+# or deleted here before) is in no log here: worked_extra() counts those, forget_worked() takes them out.
+
+QSO_DB_MODES = {"SSB": 1, "AM": 2, "FM": 3, "CW": 4, "FT8": 5, "FT4": 6, "RTTY": 7, "JS8": 8, "FT2": 9}  # qso_log.h
+# The bands as qso_log.db numbers them, edges in kHz (src/qso_log.c); 0 any other
+QSO_DB_BANDS = ((1800, 2000, 160), (3500, 4000, 80), (5351, 5367, 60), (7000, 7300, 40), (10100, 10150, 30),
+                (14000, 14350, 20), (18068, 18168, 17), (21000, 21450, 15), (24890, 24990, 12), (28000, 29700, 10),
+                (50000, 54000, 6))
+
+
+def qso_key(rec):
+    """(CALL, QSO_DATE, TIME_ON) of a record, the call in capitals and the time as hhmmss or hhmm; None for a record
+    without them"""
+    f = adif_fields(rec)
+    call, date, tm = f.get("call", "").strip().upper(), f.get("qso_date", "").strip(), f.get("time_on", "").strip()
+    if not call or not re.fullmatch(r'[0-9]{8}', date) or not re.fullmatch(r'[0-9]{4}([0-9]{2})?', tm):
+        return None
+    return call, date, tm
+
+
+def same_qso(a, b):
+    """Two qso_keys are one QSO: the call and the date, and the time to the second, or to the minute when one of
+    them has no seconds (a time set on the Logs page)"""
+    return a[:2] == b[:2] and (a[2] == b[2] or (min(len(a[2]), len(b[2])) == 4 and a[2][:4] == b[2][:4]))
+
+
+def db_span(key):
+    """The first and last ts in qso_log.db of a qso_key: the second, or the minute of an hhmm"""
+    d, t = f"{key[1][:4]}-{key[1][4:6]}-{key[1][6:]}", key[2]
+    if len(t) == 6:
+        return (f"{d} {t[:2]}:{t[2:4]}:{t[4:]}",) * 2
+    return f"{d} {t[:2]}:{t[2:4]}:00", f"{d} {t[:2]}:{t[2:4]}:59"
+
+
+def canon_call(call):
+    """The call qso_log.db looks the worked calls up by: the part with a digit in its first three characters and 4
+    long or more, ON6URE of PA/ON6URE/P (src/util.cpp util_canonize_callsign)"""
+    for part in call.split("/"):
+        if len(part) >= 4 and re.search(r'[0-9]', part[:3]):
+            return part
+    return call
+
+
+def db_values(rec):
+    """ts, call, canonized call, band, mode and frequency of a record as qso_log.db has them; None for a band, mode
+    or frequency the record does not give (the row keeps its own)"""
+    f, key = adif_fields(rec), qso_key(rec)
+    try:
+        mhz = float(f.get("freq", ""))
+    except ValueError:
+        mhz = None
+    mhz = mhz if mhz and mhz > 0 else None
+    band = f.get("band", "").strip().lower()
+    band = int(band[:-1]) if re.fullmatch(r'[0-9]{1,3}m', band) else None
+    if band not in [b[2] for b in QSO_DB_BANDS]:
+        khz = mhz * 1000 if mhz else -1
+        # a band the log does not number (2m) is 0, as the radio saves it; none at all leaves the row's
+        band = next((b[2] for b in QSO_DB_BANDS if b[0] <= khz <= b[1]), 0 if mhz or band is not None else None)
+    mode = (f.get("submode") or f.get("mode") or "").strip().upper()
+    return db_span(key)[0], key[0], canon_call(key[0]), band, QSO_DB_MODES.get(mode, 0) if mode else None, mhz
+
+
+def rec_changes(old, new):
+    """The fields that differ between two records: [(NAME, value, or None for a field gone)]"""
+    a, b = adif_fields(old), adif_fields(new)
+    return [(k.upper(), b.get(k)) for k in list(a) + [k for k in b if k not in a] if a.get(k) != b.get(k)]
+
+
+DB_FIELDS = ("CALL", "QSO_DATE", "TIME_ON", "BAND", "FREQ", "MODE", "SUBMODE")
+
+
+def follow_db(changes):
+    """The changes [(old, new)] into qso_log.db: a QSO deleted, or its call, date, time, band, mode or frequency
+    changed. The file is never made here: none on a PC. Returns the notes"""
+    if not os.path.isfile(settings.QSO_LOG_DB):
+        return []
+    where = "remote_callsign = ? COLLATE NOCASE AND ts BETWEEN ? AND ?"
+    try:
+        # timeout: the GUI writes a QSO in a few ms
+        con = sqlite3.connect(f"file:{settings.QSO_LOG_DB}?mode=rw", uri=True, timeout=10)
+        try:
+            with con:
+                for old, new in changes:
+                    key = qso_key(old)
+                    if not key:
+                        continue
+                    if new is None:
+                        con.execute(f"DELETE FROM qso_log WHERE {where}", (key[0], *db_span(key)))
+                    elif qso_key(new) and any(k in DB_FIELDS for k, _ in rec_changes(old, new)):
+                        # OR REPLACE: the same call at the same second is one QSO (its UNIQUE index)
+                        con.execute("UPDATE OR REPLACE qso_log SET ts = ?, remote_callsign = ?, "
+                                    "canonized_remote_callsign = ?, band = coalesce(?, band), "
+                                    f"mode = coalesce(?, mode), freq = coalesce(?, freq) WHERE {where}",
+                                    (*db_values(new), key[0], *db_span(key)))
+        finally:
+            con.close()
+    except sqlite3.Error as ex:
+        return [f"the worked-before list (qso_log.db) not changed: {ex}"]
+    return []
+
+
+def follow_app_log(path, changes):
+    """The changes [(old, new)] into an app's own ADIF file (ft_log.adi, js8call_log.adi): the record of the same QSO
+    deleted, or the fields that changed changed in it. The file is written once, under the lock on its folder the GUI
+    takes to append (src/field/flog.c field_log_append, src/js8/qso_book.cpp). Returns the notes"""
+    keyed = [(qso_key(old), old, new) for old, new in changes]
+    keyed = [c for c in keyed if c[0] and (c[2] is None or rec_changes(c[1], c[2]))]
+    if not keyed:
+        return []
+    try:
+        lock = os.open(os.path.dirname(path) or ".", os.O_RDONLY)
+    except OSError:
+        return []
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        except FileNotFoundError:
+            return []
+        head, parts = adif_split(raw)
+        out, hit = [], False
+        for p in parts[:-1]:
+            k = qso_key(p)
+            c = next((c for c in keyed if same_qso(k, c[0])), None) if k else None
+            if c:
+                hit = True
+                if c[2] is None:
+                    continue
+                for name, v in rec_changes(c[1], c[2]):
+                    p = adif_set(p, name, v) if v is not None else adif_del(p, name)
+            out.append(p)
+        if hit:
+            tmp = path + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(head + b"<eor>".join(out + parts[-1:]))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+    except OSError as ex:
+        return [f"{os.path.basename(path)} not changed: {ex.strerror}"]
+    finally:
+        os.close(lock)   # releases the lock
+    return []
+
+
+def follow_qsos(changes):
+    """The QSOs deleted or changed in a log here, [(old, new)], deleted or changed in qso_log.db, ft_log.adi and
+    js8call_log.adi too. Returns what could not be done, for the page"""
+    if not changes:
+        return []
+    notes = follow_db(changes)
+    for path in (settings.FT_LOG, settings.JS8_LOG):
+        notes += follow_app_log(path, changes)
+    return notes
+
+
+def worked_rows():
+    """The QSOs of qso_log.db, [(rowid, qso_key)], the key None for a ts that is no date and time; [] without it"""
+    if not os.path.isfile(settings.QSO_LOG_DB):
+        return []
+    try:
+        con = sqlite3.connect(f"file:{settings.QSO_LOG_DB}?mode=ro", uri=True, timeout=10)
+        try:
+            rows = con.execute("SELECT rowid, ts, remote_callsign FROM qso_log").fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return []
+    out = []
+    for rowid, ts, call in rows:
+        m = re.fullmatch(r'([0-9]{4})-([0-9]{2})-([0-9]{2}) ([0-9]{2}):([0-9]{2}):([0-9]{2})', str(ts or ""))
+        out.append((rowid, (str(call or "").upper(), "".join(m.groups()[:3]), "".join(m.groups()[3:])) if m else None))
+    return out
+
+
+def worked_extra(keys=None):
+    """The rowids of the QSOs in qso_log.db that are in none of the logs here (imported, or deleted here before),
+    and how many it holds. keys: the qso_keys of the logs' QSOs, when the caller has read them already"""
+    if keys is None:
+        keys = [qso_key(rec) for log in field_logs() for rec in log_records(log["name"])]
+    exact = {k for k in keys if k and len(k[2]) == 6}
+    minute = {k for k in keys if k and len(k[2]) == 4}
+    rows = worked_rows()
+    extra = [rowid for rowid, key in rows
+             if not key or (key not in exact and (key[0], key[1], key[2][:4]) not in minute)]
+    return extra, len(rows)
 
 
 @app.delete('/api/field/logs/<name>/<n:int>')
 def delete_qso(name, n):
-    return edit_qso(name, n, lambda rec: None, bottle.request.query.get("id", "")) or {"status": "OK"}
+    return edit_qso(name, n, lambda rec: None, bottle.request.query.get("id", ""))
 
 
 @app.put('/api/field/logs/<name>/<n:int>')
@@ -2161,7 +2513,7 @@ def put_qso(name, n):
     def change(rec):
         rec = adif_set(adif_set(adif_set(rec, "CALL", call), "RST_SENT", rs), "RST_RCVD", rr)
         return rec if ref is None else set_ref(rec, ref)
-    return edit_qso(name, n, change, bottle.request.query.get("id", "")) or {"status": "OK"}
+    return edit_qso(name, n, change, bottle.request.query.get("id", ""))
 
 
 @app.delete('/api/field/logs/<name>')
@@ -2170,11 +2522,13 @@ def delete_field_log(name):
         return api_error(400, "Not a log")
     if name == field_active_log():
         return api_error(409, "This activation is still running: end it on the radio first")
+    recs = log_records(name)
     try:
         os.remove(field_path("logs", name))
     except FileNotFoundError:
         return api_error(404, "Not found")
-    return get_field()
+    notes = follow_qsos([(rec, None) for rec in recs])   # its QSOs no longer worked (#284)
+    return dict(get_field(), **({"note": "; ".join(notes)} if notes else {}))
 
 
 # Logs page: every QSO of every log in <FIELD_DIR>/logs (the day's logs YYYYMMDD.adi and the activations),
@@ -2209,14 +2563,69 @@ def logs_page():
 
 @app.get('/api/logs')
 def get_logs():
-    qsos = []
+    """The QSOs; "worked": how many QSOs the FT8, FT4 and JS8 apps count as worked (qso_log.db), and how many of them
+    are in none of these logs (worked_extra)"""
+    qsos, keys = [], []
     for log in field_logs():
         for n, rec in enumerate(log_records(log["name"])):
             q = adif_fields(rec)
             if q.get("submode"):   # MFSK with SUBMODE FT4, JS8, FT2, JTTY, PSK with PSK31: the submode names it
                 q["mode"] = q["submode"]
             qsos.append(dict(q, file=log["name"], n=n, id=rec_id(rec)))
-    return {"qsos": qsos, "active": field_active_log()}
+            keys.append(qso_key(rec))
+    extra, total = worked_extra(keys)
+    return {"qsos": qsos, "active": field_active_log(), "worked": {"total": total, "extra": len(extra)}}
+
+
+@app.post('/api/logs/delete')
+def delete_log_qsos():
+    """JSON {"qsos": [{"file", "n", "id"}, ...]}: those QSOs deleted, each log written once, then from the radio's
+    other stores (follow_qsos). Delete shown went a request a QSO, each rewriting ft_log.adi too. Not while one of
+    them is in the activation running on the radio. A QSO the file no longer holds is counted as stale"""
+    try:
+        data = bottle.request.json
+    except ValueError:
+        data = None
+    items = data.get("qsos") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not all(isinstance(q, dict) for q in items):
+        return api_error(400, "Which QSOs")
+    by_file = {}
+    for q in items:
+        name, rid = str(q.get("file", "")), str(q.get("id", ""))
+        try:
+            n = int(q.get("n", -1))
+        except (TypeError, ValueError):
+            n = -1
+        if not name.endswith(".adi") or os.path.basename(name) != name or not re.fullmatch(r'[0-9a-f]{12}', rid):
+            return api_error(400, "Which QSOs")
+        by_file.setdefault(name, []).append((n, rid, lambda rec: None))
+    if field_active_log() in by_file:
+        return api_error(409, "The activation running on the radio is in the list: end it first")
+    changed, stale = [], 0
+    for name, edits in sorted(by_file.items()):
+        err, done, left = edit_records(name, edits)
+        changed += done
+        stale += len(edits) if err else len(left)
+    return ok_noted(follow_qsos(changed), deleted=len(changed), stale=stale)
+
+
+@app.post('/api/logs/worked/forget')
+def forget_worked():
+    """The QSOs the FT8, FT4 and JS8 apps count as worked that are in none of the logs here taken out of
+    qso_log.db (worked_extra): those deleted here by an older firmware, and the ones imported from
+    incoming_log.adi, which were never here"""
+    extra, _ = worked_extra()
+    if extra:
+        try:
+            con = sqlite3.connect(f"file:{settings.QSO_LOG_DB}?mode=rw", uri=True, timeout=10)
+            try:
+                with con:
+                    con.executemany("DELETE FROM qso_log WHERE rowid = ?", [(r,) for r in extra])
+            finally:
+                con.close()
+        except sqlite3.Error as ex:
+            return api_error(500, f"Not done: {ex}")
+    return {"status": "OK", "forgot": len(extra)}
 
 
 # Editable fields and what they may hold (no < or >: they would break the ADIF tags)
@@ -2294,7 +2703,7 @@ def put_log_qso(name, n):
                 v = v.lower() if k == "band" else v
                 rec = adif_set(rec, k.upper(), v) if v else adif_del(rec, k.upper())
         return rec
-    return edit_qso(name, n, change, bottle.request.query.get("id", "")) or {"status": "OK"}
+    return edit_qso(name, n, change, bottle.request.query.get("id", ""))
 
 
 def adif_header(title):
@@ -3181,10 +3590,10 @@ def delete_cw_message(dbcon, id):
     return read_cw_messages(dbcon)
 
 
-# Macros of the PSK31, Olivia and JTTY windows: one "name<TAB>text" line each, as src/psk_macro.c,
-# olivia_macro.c and jtty_macro.c read and write them. The GUI reads the file when the window opens.
-# (count, name, text): PSK_MACRO_MAX, _NAME_LEN - 1, _TEXT_LEN - 1 and the JTTY ones
-MACRO_LIMITS = {"psk": (12, 23, 199), "olivia": (12, 23, 199), "jtty": (8, 23, 80)}
+# Macros of the PSK31, Olivia, JTTY and RTTY apps: one "name<TAB>text" line each, as src/psk_macro.c,
+# olivia_macro.c, jtty_macro.c and rtty_macro.c read and write them. The GUI reads the file when the app opens.
+# (count, name, text): PSK_MACRO_MAX, _NAME_LEN - 1, _TEXT_LEN - 1, the JTTY ones and RTTY_MACRO_*
+MACRO_LIMITS = {"psk": (12, 23, 199), "olivia": (12, 23, 199), "jtty": (8, 23, 80), "rtty": (6, 23, 199)}
 
 
 @app.route('/macros')
@@ -3342,6 +3751,36 @@ def set_js8_texts():
     except OSError as ex:
         return api_error(500, f"Can't save: {ex}")
     return read_js8_texts()
+
+
+# The JS8 app's saved messages (Query > Saved on the radio, which edits them): a line each, an empty line for an
+# empty slot, read in capitals as the app reads them (load_saved in src/js8_window.c). The JS8 page offers them;
+# their macros (<CALL> and the others) are filled in by the radio as it sends
+JS8_SAVED_N = 10
+JS8_SAVED_MAX = 500             # TX_TEXT_MAX there
+JS8_SAVED_DEFAULT = "TNX 73 GL"  # the first slot's before anything was saved
+
+
+def read_js8_saved():
+    try:
+        with open(settings.JS8_SAVED_FILE, "rb") as f:     # bytes: a line ends at \n alone, as for its fgets
+            lines = [f.readline(JS8_SAVED_MAX + 7).decode("latin-1") for _ in range(JS8_SAVED_N)]
+    except FileNotFoundError:
+        lines = [JS8_SAVED_DEFAULT]
+    except OSError:
+        lines = []
+    saved = []
+    for slot, line in enumerate(lines):
+        line = line.split("\n", 1)[0].split("\r", 1)[0]
+        text = "".join(c.upper() if "a" <= c <= "z" else c for c in line)[:JS8_SAVED_MAX]
+        if text:
+            saved.append({"n": slot + 1, "text": text})
+    return {"saved": saved}
+
+
+@app.get('/api/js8_saved')
+def get_js8_saved():
+    return read_js8_saved()
 
 
 # Internet radio (APP > Internet radio, src/dialog_iradio.c): its favourites, one station a line of IRADIO_FAV_FILE,
@@ -4242,14 +4681,15 @@ def backup_files():
             "cw_trainer.json": ("cw", settings.CW_TRAINER_FILE),
             "bootlogo.png": ("bootpic", settings.BOOT_PICTURE),
             # The apps' own lists and settings, none of their accounts or keys (Zello's account.conf and
-            # private_key.pem, SVXConnect's pki/ stay out): the GUI reads each again when its app opens, GhostNet's
-            # when it changes
+            # private_key.pem, SVXConnect's pki/, the DMR hotspot password stay out): the GUI reads each again when
+            # its app opens, GhostNet's when it changes
             "ghostnet.conf": ("apps", settings.GHOSTNET_CONF),
             "ghostnet_nets.txt": ("apps", settings.GHOSTNET_NETS_USER),
             "iradio/favorites.tsv": ("apps", settings.IRADIO_FAV_FILE),
             "iradio/country": ("apps", settings.IRADIO_COUNTRY_FILE),
             "zello/channels.txt": ("apps", os.path.join(settings.ZELLO_DIR, "channels.txt")),
-            "svxconnect/svxconnect.conf": ("apps", os.path.join(settings.SVX_DIR, "svxconnect.conf"))}
+            "svxconnect/svxconnect.conf": ("apps", os.path.join(settings.SVX_DIR, "svxconnect.conf")),
+            "dmr/dmr.conf": ("apps", os.path.join(settings.DMR_DIR, "dmr.conf"))}
 
 
 def backup_member(name):
@@ -4933,27 +5373,31 @@ def flights_get():
 # Weather: as APP > Weather shows it (src/dialog_meteo.c), from the same helper (rootfs/usr/sbin/x6100-meteo: Open-Meteo,
 # OpenStreetMap's Nominatim for the place's name, the country's weather service for its warnings; the position sent
 # rounded to 0.1 degree). Asked only while the page is open and seen: its script asks again every 15 minutes, and
-# only the first ask and Update let the helper look up a place's name (Nominatim's policy). The country and the QTH
-# locator are set on the radio, Settings > General > STATION: this page only reads them.
+# only the first ask and Update let the helper look up a place's name (Nominatim's policy). The country, the QTH
+# locator and where the weather is for (Weather from, Weather place) are set on the radio, Settings > General >
+# STATION: this page only reads them. Weather units (#315) its Units choice sets too (/api/display, meteo_units): the
+# answer stays metric, the page's script shows it in the radio's units.
 
 
 def meteo_position(grid):
-    """{lat, lon, src, where, cc, lang, notices} for the page: the locator typed on it, else what the radio asks for
-    (its GPS, the phone's, the QTH locator, else the country's capital: pos_get on the GUI's socket, as the Flights
-    page asks), else the QTH locator of params.db while the GUI does not answer. None without any. notices: APP >
-    Weather > Notices is on"""
+    """{lat, lon, src, where, cc, lang, notices, us} for the page: the locator typed on it, else what the radio asks
+    for (its GPS, the phone's, the QTH locator, else the country's capital, or the locator alone or a place typed as
+    its Weather from says: pos_get on the GUI's socket, as the Flights page asks), else the QTH locator of params.db
+    while the GUI does not answer. None without any. notices: APP > Weather > Notices is on; us: Weather units is US"""
     reply = display_call({"cmd": "pos_get"}) or {}
     ok = reply.get("t") == "pos"
     cc = str(reply.get("cc") or "") if ok else read_param("country")
     lang = str(reply.get("lang") or "") if ok else read_param("language")
     pos = {"cc": cc if re.fullmatch(r"[A-Z]{2}", cc or "") else "-", "lang": lang or "en",
-           "notices": bool(reply.get("notices")) if ok else read_param("meteo_alerts") == "1"}
+           "notices": bool(reply.get("notices")) if ok else read_param("meteo_alerts") == "1",
+           "us": reply.get("units") == 1 if ok else read_param("meteo_units") == "1"}
     if grid:
         c = locator_center(grid)
         return dict(pos, lat=c[0], lon=c[1], src="Locator", where=grid.strip().upper()) if c else None
     if ok and isinstance(reply.get("lat"), (int, float)) and isinstance(reply.get("lon"), (int, float)):
         src = str(reply.get("src") or "")
         where = {"Locator": f"Locator {read_param('qth')}",
+                 "Typed": f"Place {reply.get('place') or ''}".strip(),
                  "Country": f"Country {reply.get('country') or cc}"}.get(src, src)
         return dict(pos, lat=reply["lat"], lon=reply["lon"], src=src, where=where)
     qth = read_param("qth")
@@ -4999,6 +5443,7 @@ def meteo_get():
         return api_error(502, f"Can't read the answer: {e}")
     doc["where"] = pos["where"]
     doc["notices"] = pos["notices"]
+    doc["us"] = pos["us"]
     return doc
 
 
@@ -5483,6 +5928,407 @@ def svx_enroll_cmd():
             shutil.rmtree(svx_path("pki"), ignore_errors=True)
             return svx_state("Key, request and certificate removed")
     return api_error(400, "action: start, stop or remove")
+
+
+# DMR routes: the DMR app (APP > DMR, src/dialog_dmr.c) and its helper x6100-dmr (rootfs/usr/sbin), which logs in to
+# the network's master set here as a hotspot that only listens, and only while the app listens to a talkgroup. In
+# DMR_DIR: dmr.conf, the settings this page writes (the network, the master, the DMR ID, the talkgroups), and password,
+# the hotspot password: given to the helper on its stdin (set-password), which writes it for root alone; never handed
+# back (the page says Set or Not set), not in a backup (backup_files) and not on the Files page
+# (config_pages.secret_places), hidden in whatever a helper says. The master gets SHA-256 of it with its salt, never
+# the password. BrandMeister's masters are refused here and in the helper: BrandMeister keeps its hotspot protocol for
+# hotspots with a radio module (the manual, DMR).
+
+DMR_NETWORKS = ("freedmr", "other")
+DMR_TGS_MAX = 32                # the app's table holds as many
+DMR_ID = re.compile(r"[1-9][0-9]{6}")
+DMR_SSID = re.compile(r"0[1-9]|[1-9][0-9]")
+DMR_REFUSED = ("brandmeister.network",)
+DMR_NAME_BAD = re.compile(r"[|\x00-\x1f\x7f]")
+dmr_lock = threading.Lock()
+
+
+def dmr_path(name):
+    return os.path.join(settings.DMR_DIR, name)
+
+
+def dmr_read():
+    """dmr.conf as the helper reads it: the defaults for what is missing"""
+    c = {"NETWORK": "freedmr", "HOST": "", "PORT": "62031", "DMR_ID": "", "SSID": "01", "OPTIONS": "",
+         "TALKGROUPS": ""}
+    try:
+        with open(dmr_path("dmr.conf"), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                k, sep, v = line.rstrip("\r\n").partition("=")
+                if sep and k.strip() in c:
+                    c[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return c
+
+
+def dmr_password():
+    try:
+        with open(dmr_path("password"), encoding="utf-8", errors="replace") as f:
+            return f.read().rstrip("\r\n")
+    except OSError:
+        return ""
+
+
+def dmr_secrets():
+    """The hotspot password"""
+    return {dmr_password()}
+
+
+def dmr_talkgroups(text):
+    """"91 World|2062 Belgium" as [{"tg": 91, "name": "World"}]"""
+    out = []
+    for item in text.split("|"):
+        m = re.match(r"\s*([0-9]{1,8})\s*(.*)$", item)
+        if m and 0 < int(m.group(1)) <= 16777215:
+            out.append({"tg": int(m.group(1)), "name": m.group(2).strip()})
+    return out
+
+
+def dmr_on_air():
+    """The helper's state while the app listens (its file is fresh: it writes it at least every 10 s), else None"""
+    try:
+        if time.time() - os.path.getmtime(settings.DMR_STATUS) > 60:
+            return None
+        with open(settings.DMR_STATUS, encoding="utf-8") as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return json.loads(hide_secrets(json.dumps(st))) if isinstance(st, dict) else None
+
+
+def dmr_state(result=None):
+    c = dmr_read()
+    call = max(read_callsign().upper().split("/"), key=len)     # ON6URE of ON6URE/P, as the helper sends it
+    return {"network": c["NETWORK"] if c["NETWORK"] in DMR_NETWORKS else "other", "host": c["HOST"],
+            "port": int(c["PORT"]) if c["PORT"].isdigit() else 62031, "dmr_id": c["DMR_ID"], "ssid": c["SSID"],
+            "options": c["OPTIONS"], "talkgroups": dmr_talkgroups(c["TALKGROUPS"]),
+            "password_set": bool(dmr_password()), "radio_callsign": call,
+            "hotspot": c["DMR_ID"] + c["SSID"] if c["DMR_ID"] else "", "on_air": dmr_on_air(), "result": result}
+
+
+def dmr_run(args, stdin=None, timeout=40):
+    """The helper with this page's folder; (exit code, its last line), the secrets hidden"""
+    env = dict(os.environ, X6100_DMR_DIR=settings.DMR_DIR)
+    try:
+        r = subprocess.run([settings.DMR_CMD, *args], input=stdin, capture_output=True, text=True, timeout=timeout,
+                           env=env)
+    except subprocess.TimeoutExpired:
+        return 1, f"error no answer in {timeout} s: check the radio's network"
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, f"error {e}"
+    lines = (r.stdout.strip() or r.stderr.strip()).splitlines()
+    return r.returncode, hide_secrets(lines[-1] if lines else f"error exit code {r.returncode}", stdin)
+
+
+@app.route('/dmr')
+def dmr_page():
+    return bottle.template('dmr')
+
+
+@app.get('/api/dmr')
+def get_dmr():
+    return dmr_state()
+
+
+@app.post('/api/dmr')
+def set_dmr():
+    """{"network", "host", "port", "dmr_id", "ssid", "options", "talkgroups": [{"tg", "name"}], "password"}: what is
+    not sent stays, an empty password keeps the one set. {"clear_password": true} takes the password away"""
+    try:
+        body = bottle.request.json
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return api_error(400, "Send the settings as JSON")
+    try:
+        with dmr_lock:
+            c = dmr_read()
+            new = dict(c)
+            if "network" in body:
+                if body["network"] not in DMR_NETWORKS:
+                    raise ValueError("Network: FreeDMR or Other")
+                new["NETWORK"] = body["network"]
+            if "host" in body:
+                host = svx_text(body["host"], 253, "Server").rstrip(".").lower()
+                if host and not SVX_HOST.fullmatch(host):
+                    raise ValueError("Server: a host name or address, as the network lists its servers")
+                if any(host == h or host.endswith("." + h) for h in DMR_REFUSED):
+                    raise ValueError("Server: BrandMeister keeps its hotspot protocol for hotspots with a radio "
+                                     "module, which this listener is not (see the manual, DMR)")
+                new["HOST"] = host
+            if "port" in body:
+                new["PORT"] = str(svx_int(body["port"], 1, 65535, "Port"))
+            if "dmr_id" in body:
+                dmr_id = body["dmr_id"].strip() if isinstance(body["dmr_id"], str) else None
+                if dmr_id is None or dmr_id and not DMR_ID.fullmatch(dmr_id):
+                    raise ValueError("DMR ID: your own, the 7 digits radioid.net gave your callsign")
+                new["DMR_ID"] = dmr_id
+            if "ssid" in body:
+                ssid = body["ssid"].strip() if isinstance(body["ssid"], str) else None
+                if ssid is None or not DMR_SSID.fullmatch(ssid):
+                    raise ValueError("Hotspot digits: two, 01 to 99")
+                new["SSID"] = ssid
+            if "options" in body:
+                opts = body["options"] if isinstance(body["options"], str) else None
+                if opts is None or len(opts) > 255 or not all(" " <= ch <= "~" for ch in opts):
+                    raise ValueError("Options: up to 255 plain characters (letters, digits, = ; and the like)")
+                new["OPTIONS"] = opts.strip()
+            if "talkgroups" in body:
+                tgs = body["talkgroups"]
+                if not isinstance(tgs, list) or len(tgs) > DMR_TGS_MAX:
+                    raise ValueError(f"Talkgroups: a list of {DMR_TGS_MAX} at most")
+                items, seen = [], set()
+                for t in tgs:
+                    tg = t.get("tg") if isinstance(t, dict) else None
+                    name = t.get("name", "") if isinstance(t, dict) else None
+                    if isinstance(tg, str) and tg.strip().isdigit():
+                        tg = int(tg)
+                    if not isinstance(tg, int) or isinstance(tg, bool) or not 0 < tg <= 16777215:
+                        raise ValueError("Talkgroups: a number from 1 to 16777215 on each line, then its name")
+                    if not isinstance(name, str) or len(name) > 30 or DMR_NAME_BAD.search(name):
+                        raise ValueError(f"TG {tg}: a name of at most 30 characters, without |")
+                    if tg not in seen:
+                        seen.add(tg)
+                        items.append(f"{tg} {' '.join(name.split())}".strip())
+                new["TALKGROUPS"] = "|".join(items)
+            password = body.get("password", "")
+            if not isinstance(password, str) or len(password) > 64 or \
+                    any(ord(ch) < 32 or ord(ch) == 127 for ch in password):
+                raise ValueError("Hotspot password: up to 64 characters, on one line")
+            clear = body.get("clear_password") is True
+            if password and clear:
+                raise ValueError("A new password or Clear, not both")
+            if new != c:
+                os.makedirs(settings.DMR_DIR, exist_ok=True)
+                replace_file(dmr_path("dmr.conf"), lambda f: f.write("".join(f"{k}={v}\n" for k, v in new.items())))
+            if password:
+                rc, line = dmr_run(["set-password"], password + "\n")
+                if rc:
+                    return api_error(500, "DMR: " + (line[6:] if line.startswith("error ") else line))
+            if clear:
+                rc, line = dmr_run(["clear-password"])
+                if rc:
+                    return api_error(500, "DMR: " + (line[6:] if line.startswith("error ") else line))
+    except ValueError as e:
+        return api_error(400, str(e))
+    except OSError as e:
+        return api_error(500, f"Can't save: {e}")
+    return dmr_state("Saved. On the radio: APP > DMR, choose a talkgroup")
+
+
+@app.post('/api/dmr/test')
+def test_dmr():
+    """x6100-dmr test with what is saved: it logs in to the master as the hotspot and out again. Its line"""
+    if not dmr_lock.acquire(blocking=False):
+        return api_error(409, "A test is running")
+    try:
+        rc, line = dmr_run(["test"], timeout=70)    # a master that answers slowly: four steps of up to 16 s
+    finally:
+        dmr_lock.release()
+    ok = rc == 0 and line.startswith("ok ")
+    return {"ok": ok, "msg": line[3:] if ok else line[6:] if line.startswith("error ") else line}
+
+
+# The DMR listening log: every call the app heard of half a second or more, which x6100-dmr adds to DMR_DIR/heard.tsv
+# (and heard.tsv.1, the file before it): the start, the DMR ID, the name radioid.net had, the talkgroup, the seconds,
+# the network, group|private. The page lists the newest, searched by callsign or name, talkgroup and day; the same
+# search downloads as ADIF and as CSV. The ADIF's records are listening reports, not QSOs: SWL Y, MODE DIGITALVOICE
+# with SUBMODE DMR, PROP_MODE INTERNET, no band and no frequency (nothing was on the air), in the form of the radio's
+# other logs (adif_header, lengths in bytes). After the CX8ANM edition's listening log (condoruy/OpenX6X00-CX8ANM
+# 7841ea61).
+
+DMR_LOG_SHOWN = 500             # rows the page shows; the downloads have them all
+DMR_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+DMR_CALL = re.compile(r"(?=[A-Z0-9/]*[A-Z])(?=[A-Z0-9/]*[0-9])[A-Z0-9/]{3,15}")
+
+
+def dmr_names():
+    """names.json's name for each DMR ID heard ({ID: [name, when asked]}, or the name alone from before)"""
+    try:
+        with open(dmr_path("names.json"), encoding="utf-8") as f:
+            db = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for k, v in db.items() if isinstance(db, dict) else ():
+        name = v[0] if isinstance(v, list) and v else v
+        if isinstance(name, str) and name:
+            out[k] = name
+    return out
+
+
+def dmr_log(q="", tg="", day_from="", day_to="", limit=None):
+    """The calls heard, the newest first. q: part of a callsign or a name, or a DMR ID; tg: a talkgroup's number;
+    day_from, day_to: YYYY-MM-DD, the radio's local days. A line that is not a call's is left out"""
+    lines = []
+    for name in ("heard.tsv.1", "heard.tsv"):
+        try:
+            with open(dmr_path(name), encoding="utf-8", errors="replace") as f:
+                lines += f.read().splitlines()
+        except OSError:
+            pass
+    names = None
+    q = q.strip().upper()
+    tg = tg.strip()
+    out = []
+    for line in reversed(lines):
+        p = line.split("\t")
+        if len(p) < 5 or not p[1].isdigit():
+            continue
+        try:
+            start, dst, secs = int(p[0]), int(p[3]), int(p[4])
+        except ValueError:
+            continue
+        who = p[2]
+        if not who:             # heard before radioid.net answered: the name it has by now
+            if names is None:
+                names = dmr_names()
+            who = names.get(p[1], "")
+        call, _, name = who.partition(" ")
+        if not DMR_CALL.fullmatch(call.upper()):    # radioid.net has no callsign for the ID: the name alone
+            call, name = "", who
+        local = time.localtime(start)
+        day = time.strftime("%Y-%m-%d", local)
+        if tg and str(dst) != tg:
+            continue
+        if (day_from and day < day_from) or (day_to and day > day_to):
+            continue
+        if q and q not in who.upper() and q != p[1]:
+            continue
+        out.append({"start": start, "local": time.strftime("%Y-%m-%d %H:%M:%S", local), "id": int(p[1]),
+                    "call": call.upper(), "name": name.strip(), "tg": dst, "secs": secs,
+                    "network": p[5] if len(p) > 5 else "", "private": len(p) > 6 and p[6] == "private"})
+        if limit and len(out) >= limit:
+            break
+    return out
+
+
+def dmr_log_search():
+    """The search of a request: q, tg, from, to. ValueError says which one is not what it should be"""
+    g = bottle.request.query
+    q, tg = g.getunicode("q", "") or "", g.getunicode("tg", "") or ""
+    days = [g.getunicode(k, "") or "" for k in ("from", "to")]
+    if len(q) > 40:
+        raise ValueError("Search: up to 40 characters")
+    if tg.strip() and not re.fullmatch(r"\d{1,8}", tg.strip()):
+        raise ValueError("TG: a talkgroup's number")
+    if any(d and not DMR_DAY.fullmatch(d) for d in days):
+        raise ValueError("From, To: a day as 2026-11-21")
+    return {"q": q, "tg": tg, "day_from": days[0], "day_to": days[1]}
+
+
+@app.get('/api/dmr/log')
+def get_dmr_log():
+    try:
+        rows = dmr_log(limit=DMR_LOG_SHOWN + 1, **dmr_log_search())
+    except ValueError as e:
+        return api_error(400, str(e))
+    return {"rows": rows[:DMR_LOG_SHOWN], "more": len(rows) > DMR_LOG_SHOWN}
+
+
+def dmr_adif_record(r, station):
+    """A call heard as an ADIF listening report"""
+    def field(name, value):
+        v = str(value).encode()
+        return b"<%s:%d>%s " % (name.encode(), len(v), v) if v else b""
+
+    on, off = time.gmtime(r["start"]), time.gmtime(r["start"] + r["secs"])
+    where = "private call" if r["private"] else "TG %d" % r["tg"]
+    comment = "Heard on DMR over the internet: %s%s, %d s, DMR ID %d" % (
+        where, ", " + r["network"] if r["network"] else "", r["secs"], r["id"])
+    return (field("CALL", r["call"]) + field("QSO_DATE", time.strftime("%Y%m%d", on))
+            + field("TIME_ON", time.strftime("%H%M%S", on)) + field("QSO_DATE_OFF", time.strftime("%Y%m%d", off))
+            + field("TIME_OFF", time.strftime("%H%M%S", off)) + field("MODE", "DIGITALVOICE")
+            + field("SUBMODE", "DMR") + field("SWL", "Y") + field("PROP_MODE", "INTERNET")
+            + field("NAME", r["name"]) + field("COMMENT", comment) + field("STATION_CALLSIGN", station)
+            + b"<eor>\n")
+
+
+def dmr_log_file(ext):
+    return f'attachment; filename="x6100-dmr-heard-{time.strftime("%Y%m%d-%H%M")}.{ext}"'
+
+
+@app.get('/api/dmr/log.adi')
+def get_dmr_log_adif():
+    """The search as ADIF, the oldest first. A call of an ID without a callsign is no report: left out"""
+    try:
+        rows = dmr_log(**dmr_log_search())
+    except ValueError as e:
+        return api_error(400, str(e))
+    station = read_callsign().strip().upper()
+    body = adif_header("OpenX6X00 DMR listening log: stations heard over the internet (SWL reports, not QSOs)")
+    body += b"".join(dmr_adif_record(r, station) for r in reversed(rows) if r["call"])
+    bottle.response.content_type = "text/plain; charset=utf-8"
+    bottle.response.set_header("Content-Disposition", dmr_log_file("adi"))
+    return body
+
+
+def dmr_csv_text(text):
+    """A name from elsewhere in a CSV cell: a spreadsheet takes a cell that starts with = + - or @ for a formula"""
+    return "'" + text if text[:1] in ("=", "+", "-", "@") else text
+
+
+@app.get('/api/dmr/log.csv')
+def get_dmr_log_csv():
+    """The search as CSV, the newest first, the calls without a callsign too. Times in UTC, as the ADIF's"""
+    try:
+        rows = dmr_log(**dmr_log_search())
+    except ValueError as e:
+        return api_error(400, str(e))
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["UTC", "CALL", "NAME", "DMR_ID", "TALKGROUP", "PRIVATE", "SECONDS", "NETWORK"])
+    for r in rows:
+        w.writerow([time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(r["start"])), r["call"],
+                    dmr_csv_text(r["name"]), r["id"], r["tg"], "Y" if r["private"] else "", r["secs"],
+                    dmr_csv_text(r["network"])])
+    bottle.response.content_type = "text/csv; charset=utf-8"
+    bottle.response.set_header("Content-Disposition", dmr_log_file("csv"))
+    return out.getvalue()
+
+
+# The DMR page's Map: the stations the radio heard in the last 24 hours, each in the country of its callsign, and the
+# one talking now in the city of its radioid.net record, as APP > DMR > Map shows them (the helper's header). While
+# the page's map is open it touches DMR_MAP_WANT, and a helper that listens writes DMR_MAP every 2 s (and looks up
+# the talker's city); with no helper listening, its "map" gives the stations kept, asked for at most every 20 s.
+
+DMR_MAP_FRESH = 10              # s: DMR_MAP older than this is not written now
+DMR_MAP_KEPT = 20               # s: the stations kept, asked of the helper again after this
+dmr_map_kept = {"at": 0.0, "map": None}
+dmr_map_lock = threading.Lock()
+DMR_MAP_EMPTY = {"t": 0, "hours": 24, "stations": [], "talker": None}
+
+
+@app.get('/api/dmr/map')
+def get_dmr_map():
+    try:
+        with open(settings.DMR_MAP_WANT, "a"):
+            os.utime(settings.DMR_MAP_WANT, None)
+    except OSError:
+        pass
+    try:
+        if time.time() - os.path.getmtime(settings.DMR_MAP) < DMR_MAP_FRESH:
+            with open(settings.DMR_MAP, encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                return dict(d, live=True)
+    except (OSError, ValueError):
+        pass
+    with dmr_map_lock:
+        if time.monotonic() - dmr_map_kept["at"] >= DMR_MAP_KEPT or dmr_map_kept["map"] is None:
+            rc, line = dmr_run(["map"], timeout=20)
+            try:
+                d = json.loads(line) if rc == 0 else None
+            except ValueError:
+                d = None
+            dmr_map_kept.update(at=time.monotonic(), map=d if isinstance(d, dict) else DMR_MAP_EMPTY)
+        return dict(dmr_map_kept["map"], talker=None, live=False)
 
 
 # The Bands, Digital modes, Time and Files pages, static files: config_pages.py adds their routes to app

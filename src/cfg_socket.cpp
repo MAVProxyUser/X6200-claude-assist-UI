@@ -31,12 +31,15 @@
  *    {"cmd":"df_run","on":0|1}                        -> {"t":"ok"}: the web page holds the Kraken (DF runs without page
  *                                                        I open) while its df_get keep coming, or lets it go
  *    {"cmd":"pos_get"}                                -> {"t":"pos","lat":..,"lon":..,"src":"GPS"|"Phone"|"Locator"|
- *                                                        "Country","cc":"BE","country":..,"lang":"nl","notices":0|1}:
- *                                                        where the radio is (station_position), else the place of its
- *                                                        country (meteo_position), "src":"" without either; the
- *                                                        country, the GUI's language and APP > Weather > Notices. For
- *                                                        the web Flights page (which leaves "Country" aside) and the
- *                                                        web Weather page
+ *                                                        "Typed"|"Country","place":..,"cc":"BE","country":..,
+ *                                                        "lang":"nl","notices":0|1,"units":0|1}: where the weather
+ *                                                        is asked for (meteo_position: where the radio is, or the
+ *                                                        locator or the place typed as Settings > General > STATION >
+ *                                                        Weather from says, else the place of its country), "src":""
+ *                                                        without any; "place" the one typed; the country, the GUI's
+ *                                                        language, APP > Weather > Notices and Weather units
+ *                                                        (METEO_UNITS_*). For the web Flights page (which leaves
+ *                                                        "Country" aside) and the web Weather page
  *  The values are checked here and applied on the LVGL thread through the scheduler, as the
  *  Settings pages apply them.
  *
@@ -133,15 +136,24 @@ static const struct {
     {"knob_info", &cfg_sm.p_knob_info, 0, 1},
     {"buttons_hide", &cfg_sm.p_buttons_hide, 0, 3},     /* live: screen_main.c follows it */
     {"knob_lines_stay", &cfg_sm.p_knob_lines_stay, 0, 1},   /* live: knob_info.cpp follows it */
+    {"knob_press_next", &cfg_sm.p_knob_press_next, 0, 1},   /* live: screen_main.c reads it at each press */
+    {"panel_stripes", &cfg_sm.p_panel_stripes, 0, 1},   /* live: panel_stripes.c follows it */
     {"walkie", &cfg_sm.p_walkie, 0, 1},                 /* live: walkie.c follows it */
+    {"walkie_wf", &cfg_sm.p_walkie_wf, 0, 1},           /* live: walkie.c looks at it ten times a second (#302) */
     {"speaker_off", &cfg_sm.p_speaker_off, 0, 1},       /* live: radio.c follows it */
     {"indep_vfo", &cfg_sm.p_indep_vfo, 0, 1},           /* Station: independent VFOs */
     {"mode_from_plan", &cfg_sm.p_mode_from_plan, 0, 1}, /* Station: the mode follows the band plan */
     {"band_region", &cfg_sm.p_band_region, 0, BP_PLAN_COUNT - 1},  /* Station: the band plan; live, screen_main.c */
+    {"meteo_units", &cfg_sm.p_meteo_units, 0, 1},       /* Station: Weather units, the web Weather page (#315); live,
+                                                         * dialog_meteo.c draws again */
     {"birdie_marks", &cfg_sm.p_birdie_marks, 0, 2},     /* Main screen: Birdie Cal's carriers */
     {"zoom_step_per_mode", &cfg_sm.p_zoom_step_per_mode, 0, 1},   /* Main screen: live, zoom_step_scope follows it */
     {"step_per_zoom", &cfg_sm.p_step_per_zoom, 0, 1},   /* Main screen (#132): live, step_zoom follows it */
+    {"freq_step_lo", &cfg_sm.p_freq_step_lo, 0, FREQ_STEPS_N - 1},  /* Main screen: Tuning steps, read at each FST */
+    {"freq_step_hi", &cfg_sm.p_freq_step_hi, 0, FREQ_STEPS_N - 1},
     {"power_display", &cfg_sm.p_power_display, 0, 3},  /* Main screen: live, clock.c reads it */
+    {"callsign_show", &cfg_sm.p_callsign_show, 0, 1},  /* Main screen (#292): live, main_call.c follows it */
+    {"cw_tune_place", &cfg_sm.p_cw_tune_place, 0, 1},  /* Main screen (#308): live, freq_strip.c follows it */
     {"tx_outside_bands", &cfg_sm.p_tx_outside_bands, 0, 1},   /* TX Cal (#121): live, radio.c, info_bar.c and
                                                                  * freq_strip.c follow it */
     {"tx_ranges", &cfg_sm.p_tx_ranges, TX_RANGES_BANDS, TX_RANGES_OWN},  /* TX Cal (#247): the same; Own list reads
@@ -658,16 +670,18 @@ typedef struct {
     double      lat, lon;
     const char *src;
     bool        ok;
+    char        place[METEO_PLACE_MAX];     /* the place typed for the weather, "" none */
 } pos_req_t;
 
 static void pos_cb(void *arg) {
     pos_req_t *p = (pos_req_t *)arg;
 
     p->ok = meteo_position(&p->lat, &p->lon, &p->src);
+    snprintf(p->place, sizeof(p->place), "%s", cfg_sm.p_meteo_place.get().c_str());
 }
 
 static const char *pos_get(char *out, size_t size, int *l) {
-    pos_req_t   p = {0, 0, "", false};
+    pos_req_t   p = {0, 0, "", false, ""};
     char        cc[3];
     cJSON      *o;
     char       *text;
@@ -681,10 +695,12 @@ static const char *pos_get(char *out, size_t size, int *l) {
         cJSON_AddNumberToObject(o, "lon", p.lon);
     }
     cJSON_AddStringToObject(o, "src", p.ok ? p.src : "");
+    cJSON_AddStringToObject(o, "place", p.place);
     cJSON_AddStringToObject(o, "cc", country_code(cc));
     cJSON_AddStringToObject(o, "country", country_name(country_now()));
     cJSON_AddStringToObject(o, "lang", i18n_code()[0] ? i18n_code() : "en");
     cJSON_AddNumberToObject(o, "notices", cfg_sm.p_meteo_alerts.get());
+    cJSON_AddNumberToObject(o, "units", cfg_sm.p_meteo_units.get());
     text = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     if (!text)

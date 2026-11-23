@@ -18,12 +18,13 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${GIT_COMMIT_DIR})
 target_sources(${PROJECT_NAME} PUBLIC
     gui_main.c gui_state.c gui_wake.c ops_room.c perf_hud.c screen_main.c walkie.c gui_styles.c mono.c wf_palettes.c
     spectrum_view.c radio.c dsp.cpp util.cpp list_sbar.c
+    dropdown_fit.c
     waterfall_view.c knob_device.c key_input.c mouse_input.c input_caps.c mfk_device.c
     gui_events.c msg_box.c msg_note.c front_keys.c kbd_rollover.c kbd_hyper.c kbd_keymap.c kbd_layout.c kbd_ptt.c
     mic_keys.c clock.c bat_est.c bat_watch.c info_bar.c smeter.c
     band_names.cpp tx_meters.c
     audio.c audio_owner.c mfk_control.cpp cw.cpp cw_decoder.c cw_parse.c text_panel.cpp
-    rtty.c screen_shot.c screen_rec.c avi_writer.c screen_light.c screen_idle.c screen_saver.c gps.c
+    rtty.c rtty_tx.c rtty_send.c rtty_macro.c screen_shot.c screen_rec.c avi_writer.c screen_light.c screen_idle.c screen_saver.c gps.c
     cat.cpp tci_ws.c tci_audio.c tci_server.c tci_ask.c cfg_socket.cpp wavelog_cat.c
     app_window.c settings_window.cpp swrscan_window.c ft8_window.c
     freq_entry.c gps_window.c cw_messages.c
@@ -54,16 +55,18 @@ target_sources(${PROJECT_NAME} PUBLIC
     adsb.c adsb_rx.c app_adsb.c rtl_spectrum.c rtl_watch.c sdr_pool.c
     df_rx.c app_df.c
     birdie.c dialog_birdie.c dialog_flights.c
-    dialog_zello.c zello.c voice_net.c voice_link.c voice_ptt.c dialog_svx.c svx.c svx_proto.c
+    dialog_zello.c zello.c voice_net.c voice_link.c voice_ptt.c ctcss.c dialog_svx.c svx.c svx_proto.c
+    dialog_dmr.c dmr_ambe.c dmr_proto.c live_map.c
     dialog_meteo.c meteo.c meteo_alerts.c
-    first_start.c first_start_rule.c
-    dialog_cw_trainer.c
+    first_start.c first_start_rule.c first_start_kbd.c
+    dialog_cw_trainer.c cw_trainer_score.c
     dialog_cw_kbd.c recolor_rows.c
     dialog_shell.c
     update_watch.c
     theme.c
-    freq_strip.c
+    freq_strip.c main_call.c boot_cw.c
     lcd_panel.c
+    panel_stripes.c
     freq_scale.c
     spot_marks.c
     band_plan.c
@@ -78,13 +81,14 @@ target_sources(${PROJECT_NAME} PUBLIC
     sstv/sstv_tx.c
     sstv/sstv_png.c
     sstv/denoise.c
-    wefax_window.c wefax/decoder.c wefax/encoder.c
+    wefax_window.c wefax_bulletin.c wefax_viewer.c wefax_night.c wefax/decoder.c wefax/encoder.c wefax/plan.c
+    wefax/quality.c wefax/thumb.c wefax/tilt.c wefax/night.c clock_sync.c clock_rule.c time_station.c
     navtex_window.c navtex/sitorb.c navtex/dsc.c
     dialog_freedv.c freedv_rx.c freedv_text.c freedv_tx.c
     channel_list.c broadcast_db.c cJSON.c
     text_popup.c cw_encoder.c image_level.c start_trace.c
     cw_beacon.c
-    button_bar.cpp vol_control.cpp recorder.c
+    button_bar.cpp button_page.c vol_control.cpp recorder.c
     cw_tune_view.c adif.c qso_log.c scheduler.cpp
     wifi_window.c wifi.cpp btaudio.cpp bt_dev.c radio_controls.cpp
     usb_devices.cpp knob_info.cpp main_walk.cpp key_settings.cpp
@@ -103,7 +107,14 @@ target_sources(${PROJECT_NAME} PUBLIC
     winlink.c
     rigctld.c
     i18n.cpp
+    voice.cpp voice_focus.c voice_text.c speech_engine.c
+    winlink_mail.c
 )
+
+# Spoken feedback (voice.cpp): RHVoice is not linked. speech_engine.c opens its library when speech is first asked for
+# (dlopen), with the C interface of third-party/rhvoice/RHVoice.h, so the same GUI runs on a card image without it
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/third-party/rhvoice)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${CMAKE_DL_LIBS})
 
 # The languages (i18n.h): every GUI source gets i18n_hook.h first, so the texts it hands to LVGL are translated.
 # Only this target's sources: LVGL's own and the libraries below do not
@@ -216,7 +227,7 @@ endif()
 # radio backend's library, liquid-dsp and ft8_lib
 target_link_libraries(${PROJECT_NAME} PRIVATE
     PkgConfig::deps ${GPS_LIBS}
-    FT8 QTH CLUSTER FIELD WSPR CW_DECODER JS8 cfg
+    FT8 QTH CLUSTER FIELD WSPR CW_DECODER JS8 cfg mbe
     Threads::Threads
     lvgl lvgl::drivers
     ${HW_LIBS} liquid ft8

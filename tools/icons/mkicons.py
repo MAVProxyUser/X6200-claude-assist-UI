@@ -220,6 +220,10 @@ def i_sentry(p):     # a wide trace with three signals, in a sight's corners: Se
         p.line([(x0 + 10 * d, 12), (x0, 12), (x0, 24)])
         p.line([(x0 + 10 * d, 88), (x0, 88), (x0, 76)])
 
+def i_mail(p):       # an envelope: Winlink mail
+    p.box(8, 22, 92, 78, r=6)
+    p.line([(12, 28), (50, 56), (88, 28)])
+
 def i_navtex(p):     # lines of text
     p.box(16, 10, 84, 90, r=6)
     for y in (32, 48, 64):
@@ -278,6 +282,13 @@ def i_svx(p):        # a reflector: stations around a hub, each linked to it (th
         k = 12 / math.hypot(dx, dy)
         p.line([(x + dx * 0.2, y + dy * 0.2), (50 - dx * k, 50 - dy * k)], w=p.w // 2 + 1)
         p.dot(x, y, 7)
+
+def i_dmr(p):        # digital voice heard: a pulse train with the arcs of sound over it (the DMR app, listen only)
+    p.line([(6, 84), (6, 68), (24, 68), (24, 84), (42, 84), (42, 68), (60, 68), (60, 84), (78, 84), (78, 68),
+            (94, 68)], w=p.w // 2 + 1)
+    p.dot(50, 46, 7)
+    for r in (17, 31):
+        p.ring(50, 46, r, w=p.w // 2 + 1, start=205, end=335)
 
 
 def i_meteo(p):      # a sun behind a cloud: the Weather app

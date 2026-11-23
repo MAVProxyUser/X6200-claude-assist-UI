@@ -81,7 +81,7 @@ static const struct {
 } filter_steps[] = {
     {CTRL_FILTER_LOW, &cfg_sm.cp_cur_filter_low, BOARD_FILTER_LOW_STEP, "Filter low: %i Hz"},
     {CTRL_FILTER_HIGH, &cfg_sm.cp_cur_filter_high, 0, "Filter high: %i Hz"},
-    {CTRL_FILTER_BW, &cfg_sm.cp_cur_filter_bw, BOARD_FILTER_BW_STEP, "Filter bw: %i Hz"},
+    {CTRL_FILTER_BW, &cfg_sm.cp_cur_filter_bw, 0, "Filter bw: %i Hz"},
 };
 
 /* On/off settings: any turn flips them */
@@ -119,6 +119,12 @@ static int32_t filter_high_step() {
     return mode == radio_mode_cw || mode == radio_mode_cwr ? 10 : 50;
 }
 
+/* A detent of the width: in WFM, both sides of the dial (#283), the edge's 50 Hz on each side, so 16 kHz down to
+ * 10 kHz is 60 detents and not 300 */
+static int32_t filter_bw_step() {
+    return cfg_sm.cp_cur_mode.get() == radio_mode_wfm ? 100 : BOARD_FILTER_BW_STEP;
+}
+
 /* One step round a setting of n values (0 .. n-1) */
 static int32_t cycle(Parameter<int32_t> &p, int32_t n, int32_t diff) {
     int32_t v = p.get();
@@ -148,7 +154,7 @@ static bool from_table(cfg_ctrl_t ctrl, int32_t diff, char *buf, size_t size) {
             int32_t v = s.p->get();
 
             if (diff) {
-                int32_t step = s.step ? s.step : filter_high_step();
+                int32_t step = s.step ? s.step : s.ctrl == CTRL_FILTER_BW ? filter_bw_step() : filter_high_step();
 
                 s.p->set(align(v + diff * step, step));
                 v = s.p->get();
@@ -279,12 +285,12 @@ void controls_encoder_update(cfg_ctrl_t ctrl, int32_t diff, std::string &msg) {
             break;
         }
 
-        case CTRL_STEP: {       /* 10 Hz to 100 kHz as FST, but stopping at either end: FST goes round, and a knob
-                                 * turned on past the top landed on 10 Hz */
+        case CTRL_STEP: {       /* the steps of Tuning steps as FST, but stopping at either end: FST goes round, and a
+                                 * knob turned on past the top landed on the bottom */
             char st[16];
 
             i = cfg_sm.p_mode_freq_step.get();
-            if ((diff > 0 && i < CFG_FREQ_STEP_MAX) || (diff < 0 && i > CFG_FREQ_STEP_MIN)) {
+            if (diff && !cfg_freq_step_at_end(diff > 0)) {
                 i = cfg_mode_change_freq_step(diff > 0);
             }
             snprintf(buf, size, "Freq step: %s", cfg_freq_step_text(i, st, sizeof(st)));

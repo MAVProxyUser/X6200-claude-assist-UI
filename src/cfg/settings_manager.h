@@ -36,6 +36,7 @@
 #include "smeter_att.h"
 #include "computed_parameter.h"
 #include "encoder_bind_types.h"
+#include "freq_steps.h"
 #include "parameter.h"
 #include "pending_writes.h"
 #include "settings_manager_api.h"
@@ -133,6 +134,9 @@ class SettingsManager {
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_wefax_align{"wefax_align", 0, -1300, 1300, StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_wefax_tilt{"wefax_tilt", 0, -400, 400, StorageType::GLOBAL, pending_writes_, &global_params_};
+    /* WeFax Auto Plan on when the app opens: turned on, it stays on until its button turns it off (F4OLI) */
+    Parameter<int32_t> p_wefax_plan{"wefax_plan", 0, 0, 1, StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_wefax_night{"wefax_night", 0, 0, 2, StorageType::GLOBAL, pending_writes_, &global_params_};
 
     Parameter<int32_t> p_rit{"rit", 0, -BOARD_RIT_MAX, BOARD_RIT_MAX,
         StorageType::GLOBAL, pending_writes_, &global_params_};
@@ -174,6 +178,16 @@ class SettingsManager {
     // on the screen, where they are, when the buttons hide (knob_info.cpp). Off (the default): they hide with them
     Parameter<int32_t> p_knob_lines_stay{"knob_lines_stay", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Knob press: next control (Settings > Display > INTERFACE, live, #282): a short press of VOL or the MFK takes
+    // the next control on its list, ready to change; a held one does what any press does with it off (screen_main.c,
+    // knob_press.h). Off (the default): a press switches between changing the value and choosing the control
+    Parameter<int32_t> p_knob_press_next{"knob_press_next", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Panel stripes fix (Settings > Display > BACKLIGHT, live, #239): the display engine's gamma table sends 8..31
+    // out as 32 in each colour, for panels that stripe in those dark values (panel_stripes.c, tcon_gamma.h). Off
+    // (the default): the table off, the colours as they are
+    Parameter<int32_t> p_panel_stripes{"panel_stripes", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     // Independent VFOs: A and B each keep their own band, a VFO switch brings its band back
     // (vfo_toggle). Off: both VFOs live in the current band, as the radio does it.
     // Turning the knob into another band plan segment sets its mode: CW in the CW segment, the
@@ -196,6 +210,12 @@ class SettingsManager {
     // Step per zoom (Settings > Display, #132): on, each zoom keeps the last tuning step chosen at it, and a zoom
     // change brings that step back (step_zoom). Per mode or for every mode, as p_zoom_step_per_mode has it
     Parameter<int32_t> p_step_per_zoom{"step_per_zoom", false, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Tuning steps (Settings > Display): FST, a keyboard's + and _ and a knob's Step go through the steps from
+    // freq_steps[lo] to freq_steps[hi] (freq_steps.h), 10 Hz to 100 kHz by default
+    Parameter<int32_t> p_freq_step_lo{"freq_step_lo", 0, 0, FREQ_STEPS_N - 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_freq_step_hi{"freq_step_hi", FREQ_STEPS_N - 1, 0, FREQ_STEPS_N - 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     // Birdies (birdie.c): 0 nothing, 1 marked on the waterfall, 2 marked and notched in the passband
     Parameter<int32_t> p_birdie_marks{"birdie_marks", 1, 0, 2,
@@ -257,6 +277,9 @@ class SettingsManager {
         StorageType::GLOBAL, pending_writes_, &global_params_};
     // Walkie Talkie: the microphone while its screen is up (radio_mic_sel_t); p_mic stays as saved
     Parameter<int32_t> p_walkie_mic{"walkie_mic", radio_mic_builtin, 0, 2,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Walkie Talkie: a small waterfall in place of its bandscope (walkie.c, #302)
+    Parameter<int32_t> p_walkie_wf{"walkie_wf", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     // S-meter drawn as a needle on a dial instead of the bars
     // Waterfall colours: 0 the theme's, then classic, gauss, grey, fire, ice, rainbow (theme.c)
@@ -393,9 +416,13 @@ class SettingsManager {
     // VOX
     Parameter<int32_t> p_vox_en{"vox_en", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
-    // Settings > Audio > Boot sound: "CQ CQ" in CW with the boot animation (bootanim/bootanim.c reads it from the DB)
-    Parameter<int32_t> p_boot_sound{"boot_sound", false, 0, 1,
+    // Settings > Audio > Boot sound: CW with the boot animation (bootanim/bootanim.c reads it from the DB), a
+    // boot_sound_t (boot_cw.h): 0 off, 1 "CQ CQ" (the switch's on up to v0.3.12), 2 the callsign, 3 boot_text (#289)
+    Parameter<int32_t> p_boot_sound{"boot_sound", false, 0, 3,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Its own text (Boot sound Own text): capitals, figures, the stops and spaces the keyer has codes for
+    Parameter<std::string> p_boot_text{"boot_text", "", boot_text_validate,
+        StorageType::GLOBAL, pending_writes_, {}, &global_params_};
     // Settings > Audio > Speaker always off: a remote station's speaker and TX monitor stay silent, whatever the
     // volume (radio.c radio_vol_refresh); the audio to a browser, TCI and headphones goes on
     Parameter<int32_t> p_speaker_off{"speaker_off", false, 0, 1,
@@ -492,6 +519,17 @@ class SettingsManager {
     // A's view, as F4 VIEW is C's (rtl_view): 0 the stick alone, 1 split, 2 the X6200 alone
     Parameter<int32_t> p_a_view{"sentry_a_view", 2, 0, 2,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Settings > Keys > KEYBOARD, a row a device (#306): the USB and Bluetooth devices whose [ ] step the RX volume, in
+    // every window and in CW, and that never key the radio (a volume knob), kbd_devices.h's ids ("0005:514c:8850") a
+    // space between them; the others' [ ] are the paddle in CW, as on every keyboard. key_input.c and paddle_keyer.c
+    // follow it at once
+    Parameter<std::string> p_kbd_dev_volume{"kbd_dev_volume", "", kbd_dev_volume_validate,
+        StorageType::GLOBAL, pending_writes_, {}, &global_params_};
+    // Settings > Keys > HAND MIC KEYS > Hand mic UP/DOWN (#300), mic_updown.h's values: 0 Channels (the default, as up
+    // to v0.3.12), a press recalls the channel before or after the last one tuned; 1 Tune, a press moves the VFO a
+    // step, as a detent of the main knob. Held, band up or down with both (screen_main.c, live)
+    Parameter<int32_t> p_mic_updown{"mic_updown", 0, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_vox_gain{"vox_gain", 0, 0, 100,
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_vox_ag{"vox_ag", 0, 0, 100,
@@ -511,7 +549,7 @@ class SettingsManager {
     /* "For you": the callers pinned under the list (off: the list only) */
     Parameter<int32_t> p_ft8_foryou{"ft8_foryou", true, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
-    /* Auto Sync (FT8 5:5): the clock set from the decodes' DT when neither NTP nor the GPS keeps it (ft8/time_sync.h);
+    /* Auto Sync (Settings > GPS / Clock): the clock set from the decodes' DT when neither NTP nor the GPS keeps it (ft8/time_sync.h);
      * off by default */
     Parameter<int32_t> p_ft8_auto_sync{"ft8_auto_sync", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
@@ -589,6 +627,13 @@ class SettingsManager {
         StorageType::GLOBAL, pending_writes_, &global_params_};
     Parameter<int32_t> p_svx_id_min{"svx_id_min", 60, 5, 120,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The CTCSS tone under what the Simplex repeaters (Zello, SVXConnect) transmit in FM, in tenths of a Hz (#141);
+    // 0 off. One for both: it belongs to the frequency, not to the network
+    Parameter<int32_t> p_link_ctcss{"link_ctcss", 0, 0, 2541,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // The DMR app (dialog_dmr.c): the talkgroup last listened to, which Connect asks for again; 0 none yet
+    Parameter<int32_t> p_dmr_tg{"dmr_tg", 0, 0, 16'777'215,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
 
     // Field Ops: start in Field Ops at power on
     Parameter<int32_t> p_field_boot{"field_boot", false, 0, 1,
@@ -598,6 +643,33 @@ class SettingsManager {
         StorageType::GLOBAL, pending_writes_, &global_params_};
     // Voice messages (the Field Ops voice CQ too): playback level, dB
     Parameter<int32_t> p_voice_msg_gain{"voice_msg_gain", 0, -20, 10,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+
+    // Spoken feedback (voice.cpp, Settings > Voice). The same names in the database as Jimr9's speech builds.
+    // Mode: 0 Off (the default: nothing is loaded, nothing runs), 1 only while the screen is dark, 2 Always.
+    // A blind operator turns it on with the DFN key held (params.long_dfn), twice for Always
+    Parameter<int32_t> p_voice_mode{"voice_mode", 0, 0, 2,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // voice_item[] (voice.cpp): the voices of the card image
+    Parameter<int32_t> p_voice_lang{"voice_lang", 0, 0, 3,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_voice_rate{"voice_rate", 100, 50, 150,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_voice_pitch{"voice_pitch", 100, 50, 150,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_voice_volume{"voice_volume", 100, 50, 150,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // A new announcement cuts off the one speaking (screen-reader style), after this delay
+    Parameter<int32_t> p_voice_interrupt{"voice_interrupt", true, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_voice_repeat_count{"voice_repeat_count", 5, 0, 20,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_voice_interrupt_delay_ms{"voice_interrupt_delay_ms", 100, 0, 1000,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_voice_freq_interrupt_delay_ms{"voice_freq_interrupt_delay_ms", 1000, 0, 1000,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // What the CW decoder, RTTY, PSK, Olivia and JTTY receive, read aloud (voice_text.c)
+    Parameter<int32_t> p_voice_read_text{"voice_read_text", true, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
 
     // SWR scan
@@ -678,6 +750,11 @@ class SettingsManager {
     // Calls: the KEY Speed stays the user's, the calls at their own speed (#270); off, it follows the calls
     Parameter<int32_t> p_cwt_tx_fixed{"cwt_tx_fixed", false, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Copy (#290): its own level and group length, copying is not keying back
+    Parameter<int32_t> p_cwt_copy_level{"cwt_copy_level", 2, 2, 40,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<int32_t> p_cwt_copy_group{"cwt_copy_group", 1, 1, 5,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
 
     // CW decoder
     Parameter<int32_t> p_cw_decoder{"cw_decoder", true, 0, 1,
@@ -750,6 +827,15 @@ class SettingsManager {
     // charge and, on a supply, the supply's voltage, on battery as 0 (#119) (clock.c)
     Parameter<int32_t> p_power_display{"power_display", 0, 0, 3,
         StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Callsign (Settings > Display > MAIN SCREEN, live, #292): the callsign of Settings > General > STATION small on
+    // the main screen (main_call.c), and on the boot logo from the next start (bootanim/bootanim.c reads it)
+    Parameter<int32_t> p_callsign_show{"callsign_show", 0, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // CW tune and WPM (Settings > Display > MAIN SCREEN, live, #308): in CW the CW Tuner's bars and the decoder's
+    // speed on the spectrum (0, as up to v0.3.13) or in the frequency strip, between the band and the frequency (1,
+    // freq_strip.c), back on the spectrum while the strip has no room for them
+    Parameter<int32_t> p_cw_tune_place{"cw_tune_place", 0, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
 
     // Text log of the keyboard modes (digi_textlog.c, #55): on by default, and the most the folder keeps, MB
     Parameter<int32_t> p_textlog{"textlog", true, 0, 1,
@@ -769,6 +855,18 @@ class SettingsManager {
     // APP > Weather > Notices (meteo_alerts.c): every 30 minutes the warnings where the radio is, a new one of its
     // own as a notice on any screen. Off by default: it asks the services in the background
     Parameter<int32_t> p_meteo_alerts{"meteo_alerts", 0, 0, 1,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    // Where the weather is asked for (Settings > General > STATION > Weather from, meteo.c): 0 where the radio is (its
+    // GPS, the phone's, the QTH locator, else the country), 1 the QTH locator whatever the GPS says, 2 the place typed
+    // in p_meteo_place (meteo_place_parse(): degrees or a locator, "" none; at most 40 characters)
+    Parameter<int32_t> p_meteo_from{"meteo_from", 0, 0, 2,
+        StorageType::GLOBAL, pending_writes_, &global_params_};
+    Parameter<std::string> p_meteo_place{"meteo_place", "", meteo_place_validate,
+        StorageType::GLOBAL, pending_writes_, {}, &global_params_};
+    // The units the weather is shown in (Settings > General > STATION > Weather units, #315): 0 metric, as the
+    // services give it, 1 US (°F, mph, inHg, inches, miles). Only what is shown: the data and the warnings'
+    // thresholds stay metric (meteo.h, meteo_format)
+    Parameter<int32_t> p_meteo_units{"meteo_units", 0, 0, 1,
         StorageType::GLOBAL, pending_writes_, &global_params_};
 
     // Waterfall Mode Fixed (Settings > Display > WATERFALL, live, #10): the view moves on when 0 the line (or what is
@@ -967,7 +1065,8 @@ class SettingsManager {
     // CWR → +key_tone, else 0; 0 in every mode with HW_CAP_CW_SPECTRUM_ON_DIAL.
     // Driven by cp_cur_mode, p_key_tone and hw_caps_.
     ComputedParameter<int32_t> cp_mode_lo_offset;
-    // The same while the base transmits: cp_mode_lo_offset's, 0 with HW_CAP_TX_SPECTRUM_ON_DIAL (#191).
+    // The same while the base transmits: cp_mode_lo_offset's, over the zoom (p_mode_zoom) with
+    // HW_CAP_TX_SPECTRUM_ON_DIAL, Xiegu's X6100 base from 1.1.9 on (lo_offset.h, #191).
     ComputedParameter<int32_t> cp_mode_tx_lo_offset;
 
     // Computed current filter params for the active MODE category. The compute
@@ -1283,6 +1382,11 @@ class SettingsManager {
 
     // A country code as p_country keeps it: two letters in capitals, anything else "" (none set). Pure function
     static std::string country_validate(const std::string &val);
+    static std::string meteo_place_validate(const std::string &val);
+
+    // The boot sound's own text as p_boot_text keeps it (boot_cw_clean). Pure function
+    static std::string boot_text_validate(const std::string &val);
+    static std::string kbd_dev_volume_validate(const std::string &val);
 
     // Filter category of a mode (SSB/AM/FM/CW; unknown/default -> SSB).
     enum class FilterMode {

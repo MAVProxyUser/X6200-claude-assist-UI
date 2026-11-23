@@ -10,6 +10,7 @@
  *      INCLUDES
  *********************/
 #include "radio.h"
+#include "voice.h"
 #include "board.h"
 
 #include "hw/hw.h"
@@ -176,9 +177,27 @@ static bool radio_tick();
 static void * radio_thread(void *arg);
 
 /* The tuner found its network, on the LVGL thread (see the flow handler) */
+/* The SWR the base last reported during a tune (radio thread writes, the GUI reads after it): said with the result */
+static volatile float atu_last_swr;
+
+/* Spoken once the carrier is off and the radio receives again ("Tuner done, S W R 1.2"): nothing is said on the air */
+static void atu_say_cb(lv_timer_t *t) {
+    float swr = atu_last_swr;
+
+    (void)t;
+    if (swr >= 1.0f) {
+        voice_say_text_fmt("Tuner done, S W R %.1f", swr);
+    } else {
+        voice_say_text_fmt("Tuner done");
+    }
+}
+
 static void atu_done_cb(void *arg) {
     cfg_atu_save_network(*(uint32_t *)arg);
     param_i_set(cfg_atu_enabled, true);
+    if (voice_is_on()) {
+        lv_timer_set_repeat_count(lv_timer_create(atu_say_cb, 500, NULL), 1);
+    }
 }
 
 /* The base's warnings, on the LVGL thread: bit 0 battery hot, 1 PA hot, 2 DC in too low,
@@ -255,6 +274,7 @@ static uint64_t         pack_time;      /* last packet from the base */
 static bool             base_seen;      /* a packet came in this run */
 static atomic_uint_fast64_t data_time;  /* pack_time for the other threads (radio_no_data), 0 before the first packet */
 static bool             gone_said;      /* "No data from the base" said, until a packet comes (base_gone) */
+static bool             gap_said;       /* a gap of NO_DATA_MS in the base log, until a packet comes */
 static bool             tx_by_gui;      /* the GUI keyed the TX under way (PTT, an app, the CW key): radio thread */
 static uint8_t          pack_vbat, pack_vext;   /* its voltages, 0.1 V */
 static volatile int8_t  bat_pct = -1;   /* the battery %, -1 on external power or not measured yet */
@@ -838,6 +858,9 @@ uint16_t radio_change_vol(int16_t df) {
     if (new_val != vol) {
         param_i_set(cfg_volume, new_val);
     };
+    /* Spoken here, so that the apps and the first-start guide, which turn the volume themselves, say it too
+     * (vol_update() and mfk_update() leave a turned volume to this) */
+    voice_say_prompted_fmt("Volume,", " %i", new_val);
 
     return new_val;
 }
@@ -967,6 +990,7 @@ void radio_start_atu() {
     }
     WITH_RADIO_LOCK(open_tx_key());     /* the X6200's open TX still due first: the tuner keys at the next packet */
     atomic_store(&atu_band_stop, false);    /* one asked of a tune over already */
+    atu_last_swr = 0.0f;
     state_move(RADIO_RX, RADIO_ATU_START);
 }
 
@@ -1332,12 +1356,14 @@ void radio_set_tx_prepare_fn(void (*fn)(void)) {
 }
 
 /* Before the GUI keys, on the thread that keys and with no lock held: the speaker's own audio stops, so none of it
- * goes out with the TX audio (the PTT, and the modem that sends the codec's audio): the Internet radio's station
- * (audio.h), then the voice link's network (voice_net.c: Zello's channel, SVXConnect's talkgroup) */
+ * goes out with the TX audio (the PTT, and the modem that sends the codec's audio): the listeners, the Internet
+ * radio's station and DMR's talkgroups (audio.h), then the voice link's network (voice_net.c: Zello's channel,
+ * SVXConnect's talkgroup) */
 static void tx_prepare(void) {
     void (*fn)(void) = atomic_load(&tx_prepare_fn);
 
     audio_listen_cut();
+    voice_stop();       /* spoken feedback: an announcement still playing is cut off, never sent */
     if (fn) {
         fn();
     }
@@ -2765,10 +2791,13 @@ static void battery_log(const hw_pack_t *p, bool volts_ext) {
         }
         fclose(f);
     }
+    /* the % shown on battery (bat_watch_cap: the base's can be far off, #49), else the base's: the time to full is
+     * learned in the base's % while charging (bat_est.c), as the log keeps it. One row gone wrong held (bat_row_cap) */
+    static bat_row_t row = {0, -1, false};
+    int              cap = bat_row_cap(&row, p->vbat, bat_pct >= 0 ? bat_pct : p->batcap,
+                                       p->vext * 0.1f >= 3.0f || p->charging || tx_s > 0);
     bat_sample_t s = {
-        /* the % shown on battery (bat_watch_cap: the base's can be far off, #49), else the base's: the time to
-         * full is learned in the base's % while charging (bat_est.c), as the log keeps it */
-        .t = t, .vbat = p->vbat * 0.1f, .cap = bat_pct >= 0 ? bat_pct : p->batcap, .vext = p->vext * 0.1f,
+        .t = t, .vbat = p->vbat * 0.1f, .cap = cap, .vext = p->vext * 0.1f,
         .charging = p->charging,
         .tx_s = tx_s, .tx_w = tx_s > 0 ? tx_ws / tx_s : 0, .bl = backlight_level(),
         .wifi = wifi_get_status() != WIFI_OFF,
@@ -3067,9 +3096,10 @@ static bool radio_tick() {
         /* Its gap kept until a line is free: right after a "base silent" line it was dropped (one a second) */
         static uint32_t again_ms;
 
-        if (gone_said) {
+        if (gone_said || gap_said) {
             again_ms = now_time - pack_time;
         }
+        gap_said = false;
         if (again_ms && base_guard_log_free()) {
             base_guard_log("data from the base again after %u ms", (unsigned)again_ms);
             again_ms = 0;
@@ -3298,6 +3328,7 @@ static bool radio_tick() {
                     state_move(RADIO_ATU_RUN, RADIO_RX);
                 } else if (pack->tx) {
                     tx_info_update(pack->tx_power * 0.1f, pack->vswr * 0.1f, pack->alc_level * 0.1f);
+                    atu_last_swr = pack->vswr * 0.1f;
                     atu_time = now_time;
                 } else if (now_time - atu_time > ATU_NO_MATCH_MS) {
                     /* out of TX without the done flag; the X6200 library's own example ends a tune there */
@@ -3454,6 +3485,13 @@ static bool radio_tick() {
             if (s == RADIO_POWEROFF) {
                 WITH_RADIO_LOCK(hw_poweroff());
                 state_move(RADIO_POWEROFF, RADIO_OFF);
+            }
+            /* A gap from NO_DATA_MS on, when TX is refused, not only from BASE_GONE_MS: a body on a cable (the G90's)
+             * out for a few seconds left no line. Its end is the "again" line. Not before the first packet: a start's
+             * first packet can take 16 s (#47), and base_gone says that one */
+            if (base_seen && !gap_said && now_time - pack_time > NO_DATA_MS && base_guard_log_free()) {
+                base_guard_log("no data from the base for %u ms", (unsigned)(now_time - pack_time));
+                gap_said = true;
             }
             if (base_gone()) {
                 silent_logged = now_time;   /* its line instead of a "base silent" one */

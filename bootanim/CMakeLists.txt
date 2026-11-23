@@ -1,6 +1,8 @@
-# x6100-bootanim: the boot logo composes itself while the radio boots (see bootanim.c)
+# x6100-bootanim: the boot logo composes itself while the radio boots (see bootanim.c). The boot sound's text and its
+# codes are the GUI's (src/boot_cw.c, src/cw_decoder/morse_code.c)
 find_package(PNG REQUIRED)
-add_executable(x6100-bootanim bootanim.c)
+add_executable(x6100-bootanim bootanim.c boot_call.c ${CMAKE_SOURCE_DIR}/src/boot_cw.c
+               ${CMAKE_SOURCE_DIR}/src/cw_decoder/morse_code.c)
 if(BOARD_GSOC)
     # GSOC: 1024×600 landscape fb, centred 800×480 logo; no X6100 CW/GPIO sound path
     # (HW_BACKEND=g90 has no aether_x6100_control target).

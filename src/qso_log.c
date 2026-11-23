@@ -67,6 +67,9 @@ bool qso_log_init() {
         LV_LOG_ERROR("Can't open " LOG_DB);
         return false;
     }
+    /* The web configurator's Logs page deletes and changes QSOs here too (#284): a QSO saved while it
+     * writes waits for it, a few ms, rather than being lost to "database is locked" */
+    sqlite3_busy_timeout(db, 2000);
     for (size_t i = 0; i < sizeof(schema) / sizeof(schema[0]); i++) {
         char *err = NULL;
 
@@ -186,7 +189,30 @@ qso_log_search_worked_t qso_log_search_worked(const char *callsign, qso_log_mode
             break;
         }
     }
+    /* Done with the rows: a query left at a row kept its read lock on the file until the next one, and
+     * with the app closed after a call worked on this band and mode, for good. The web configurator's
+     * delete then could not write (#284). Each search reads the file afresh: a QSO deleted there is no
+     * longer worked at the next decode */
+    sqlite3_reset(worked_stmt);
     return res;
+}
+
+int qso_log_each_call(void (*fn)(const char *call, void *ud), void *ud) {
+    sqlite3_stmt *st;
+    int           n = 0;
+
+    if (!db) return -1;
+    if (sqlite3_prepare_v2(db, "SELECT DISTINCT remote_callsign FROM qso_log", -1, &st, NULL) != SQLITE_OK) return -1;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *call = (const char *)sqlite3_column_text(st, 0);
+
+        if (call && call[0]) {
+            fn(call, ud);
+            n++;
+        }
+    }
+    sqlite3_finalize(st);   /* no read lock left on the file (#284) */
+    return n;
 }
 
 /* The radio's own callsign (Settings > STATION) as the import starts, taken on the GUI thread:

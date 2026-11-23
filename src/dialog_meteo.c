@@ -6,14 +6,16 @@
  *  name and the country's weather service for its warnings (the US NWS, MeteoAlarm, Argentina's SMN, Brazil's INMET),
  *  else works them out from the forecast; it sends the position rounded to 0.1 degree, each service as its terms ask.
  *  Asked when the app opens, with Update, and every 15 minutes while it is open and the screen lit. The position:
- *  meteo_position (the GPS, the phone's, the QTH locator, else the country set in Settings > General). Each source is
- *  named in the status line, as its terms ask.
+ *  meteo_position (the GPS, the phone's, the QTH locator, else the country set in Settings > General; or as Weather
+ *  from there says, the locator alone or a place typed). Each source is named in the status line, as its terms ask.
  *
  *  From condoruy's CX8ANM edition of OpenX6X00 (its Meteo app).
  *
  *  Copyright (c) 2026 Joeri Van Dooren ON6URE / Guru-RF
  */
 #include "dialog_meteo.h"
+#include "voice.h"
+#include "voice_focus.h"
 
 #include "app_frame.h"
 #include "buttons.h"
@@ -45,7 +47,6 @@
 #define RETRY_S     120         /* after an error */
 #define STRIP_H     30
 #define TILE_W      168
-#define DEG         "°"
 
 typedef enum { VIEW_NOW, VIEW_DAYS, VIEW_WARN, VIEW_N } view_t;
 
@@ -59,6 +60,7 @@ static cJSON      *data;
 static bool        updating;
 static int         gen;             /* an answer for an earlier opening is dropped */
 static time_t      next_at;
+static bool        shown_us;        /* the units drawn (Weather units): the web page may change them */
 static char        error[120];
 static const char *pos_src = "";
 
@@ -139,6 +141,16 @@ static const char *fmt_num(char *b, size_t n, cJSON *o, const char *k, int dec, 
     v = round(v * p) / p;
     if (v == 0) v = 0;
     snprintf(b, n, "%.*f%s", dec, v, unit);
+    return b;
+}
+
+/* A temperature, a speed, a pressure, rain or a distance of o's k in the units of Weather units (meteo_format: dec
+ * the metric decimals), "--" without one */
+static const char *fmt_wx(char *b, size_t n, cJSON *o, const char *k, meteo_qty_t q, int dec, meteo_show_t show) {
+    double v;
+
+    if (!num(o, k, &v)) return "--";
+    meteo_format(b, n, q, v, dec, show);
     return b;
 }
 
@@ -293,12 +305,13 @@ static void view_now(void) {
     lv_coord_t x0 = 250, x1 = x0 + TILE_W + 4, x2 = x1 + TILE_W + 4;
 
     /* Left: the temperature, the sky, how it feels, today's low and high, the sun */
-    lv_label_set_text(text(body, &sony_44, TC(text_value), 12, 0, 232), fmt_num(a, sizeof(a), c, "temp", 1, " " DEG "C"));
+    lv_label_set_text(text(body, &sony_44, TC(text_value), 12, 0, 232),
+                      fmt_wx(a, sizeof(a), c, "temp", METEO_TEMP, 1, METEO_UNIT));
     lv_label_set_text(text(body, &sony_22, TC(accent), 12, 54, 232), sky(c));
-    snprintf(s, sizeof(s), _("Feels like %s"), fmt_num(a, sizeof(a), c, "feels", 0, " " DEG "C"));
+    snprintf(s, sizeof(s), _("Feels like %s"), fmt_wx(a, sizeof(a), c, "feels", METEO_TEMP, 0, METEO_UNIT));
     lv_label_set_text(text(body, &sony_18, TC(text_soft), 12, 82, 232), s);
-    snprintf(s, sizeof(s), _("Low %s, high %s"), fmt_num(a, sizeof(a), d0, "tmin", 0, DEG),
-             fmt_num(b, sizeof(b), d0, "tmax", 0, " " DEG "C"));
+    snprintf(s, sizeof(s), _("Low %s, high %s"), fmt_wx(a, sizeof(a), d0, "tmin", METEO_TEMP, 0, METEO_DEG),
+             fmt_wx(b, sizeof(b), d0, "tmax", METEO_TEMP, 0, METEO_UNIT));
     lv_label_set_text(text(body, &sony_18, TC(text_soft), 12, 104, 232), s);
     if (str(sun, "rise")[0]) {
         snprintf(s, sizeof(s), _("Sun %s to %s"), str(sun, "rise"), str(sun, "set"));
@@ -307,18 +320,19 @@ static void view_now(void) {
 
     /* Right: three rows of three */
     if (num(c, "wind_kmh", &v) && num(c, "wind_dir", &dir))
-        snprintf(s, sizeof(s), "%s %.0f km/h", compass(dir), round(v));
+        snprintf(s, sizeof(s), "%s %s", compass(dir), fmt_wx(a, sizeof(a), c, "wind_kmh", METEO_SPEED, 0, METEO_UNIT));
     else
-        snprintf(s, sizeof(s), "%s", fmt_num(a, sizeof(a), c, "wind_kmh", 0, " km/h"));
+        snprintf(s, sizeof(s), "%s", fmt_wx(a, sizeof(a), c, "wind_kmh", METEO_SPEED, 0, METEO_UNIT));
     tile(x0, 0, _("Wind"), s);
-    tile(x1, 0, _("Gusts"), fmt_num(a, sizeof(a), c, "gust_kmh", 0, " km/h"));
+    tile(x1, 0, _("Gusts"), fmt_wx(a, sizeof(a), c, "gust_kmh", METEO_SPEED, 0, METEO_UNIT));
     tile(x2, 0, _("Humidity"), fmt_num(a, sizeof(a), c, "hum", 0, " %"));
-    tile(x0, 44, _("Pressure"), fmt_num(a, sizeof(a), c, "press", 0, " hPa"));
-    snprintf(s, sizeof(s), "%s, %s", fmt_num(a, sizeof(a), d0, "prob", 0, " %"), fmt_num(b, sizeof(b), d0, "rain_mm", 1, " mm"));
+    tile(x0, 44, _("Pressure"), fmt_wx(a, sizeof(a), c, "press", METEO_PRESS, 0, METEO_UNIT));
+    snprintf(s, sizeof(s), "%s, %s", fmt_num(a, sizeof(a), d0, "prob", 0, " %"),
+             fmt_wx(b, sizeof(b), d0, "rain_mm", METEO_RAIN, 1, METEO_UNIT));
     tile(x1, 44, _("Rain today"), s);
     tile(x2, 44, _("Clouds"), fmt_num(a, sizeof(a), c, "cloud", 0, " %"));
-    tile(x0, 88, _("Dew point"), fmt_num(a, sizeof(a), c, "dew", 1, " " DEG "C"));
-    tile(x1, 88, _("Visibility"), fmt_num(a, sizeof(a), c, "vis_km", 0, " km"));
+    tile(x0, 88, _("Dew point"), fmt_wx(a, sizeof(a), c, "dew", METEO_TEMP, 1, METEO_UNIT));
+    tile(x1, 88, _("Visibility"), fmt_wx(a, sizeof(a), c, "vis_km", METEO_DIST, 0, METEO_UNIT));
     if (num(c, "uv", &v))
         snprintf(s, sizeof(s), "%.0f, %s", round(v) == 0 ? 0.0 : round(v), uv_word(v));
     else
@@ -341,22 +355,25 @@ static void view_days(void) {
         /* The day, its high and low, the sky, the rain and the wind */
         snprintf(s, sizeof(s), "%s %s", i == 0 ? _("Today") : meteo_weekday(str(d, "date")), str(d, "date") + 8);
         lv_label_set_text(text(body, &sony_20, TC(text_head), x, 2, w - 6), s);
-        snprintf(s, sizeof(s), "%s #%06x %s#", fmt_num(a, sizeof(a), d, "tmax", 0, DEG), theme_hex(TC_text_dim),
-                 fmt_num(b, sizeof(b), d, "tmin", 0, DEG));
+        snprintf(s, sizeof(s), "%s #%06x %s#", fmt_wx(a, sizeof(a), d, "tmax", METEO_TEMP, 0, METEO_DEG),
+                 theme_hex(TC_text_dim), fmt_wx(b, sizeof(b), d, "tmin", METEO_TEMP, 0, METEO_DEG));
         lv_label_set_text(text(body, &sony_26, TC(text_value), x, 26, w - 6), s);
 
         lv_obj_t *l = text(body, &sony_16, TC(accent), x, 58, w - 6);
 
         lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
         lv_label_set_text(l, sky(d));
-        snprintf(s, sizeof(s), "%s  %s", fmt_num(a, sizeof(a), d, "prob", 0, " %"), fmt_num(b, sizeof(b), d, "rain_mm", 1, " mm"));
+        snprintf(s, sizeof(s), "%s  %s", fmt_num(a, sizeof(a), d, "prob", 0, " %"),
+                 fmt_wx(b, sizeof(b), d, "rain_mm", METEO_RAIN, 1, METEO_UNIT));
         lv_label_set_text(text(body, &sony_16, TC(info), x, 98, w - 6), s);
+        /* the speeds' unit once, after the gusts */
         if (num(d, "wind_max", &v) && num(d, "wind_dir", &dir))
-            snprintf(s, sizeof(s), "%s %s %.0f", _("Wind"), compass(dir), round(v));
+            snprintf(s, sizeof(s), "%s %s %s", _("Wind"), compass(dir),
+                     fmt_wx(a, sizeof(a), d, "wind_max", METEO_SPEED, 0, METEO_BARE));
         else
-            snprintf(s, sizeof(s), "%s %s", _("Wind"), fmt_num(a, sizeof(a), d, "wind_max", 0, ""));
+            snprintf(s, sizeof(s), "%s %s", _("Wind"), fmt_wx(a, sizeof(a), d, "wind_max", METEO_SPEED, 0, METEO_BARE));
         lv_label_set_text(text(body, &sony_16, TC(text_soft), x, 118, w - 6), s);
-        snprintf(s, sizeof(s), "%s %s", _("Gusts"), fmt_num(a, sizeof(a), d, "gust_max", 0, " km/h"));
+        snprintf(s, sizeof(s), "%s %s", _("Gusts"), fmt_wx(a, sizeof(a), d, "gust_max", METEO_SPEED, 0, METEO_UNIT));
         lv_label_set_text(text(body, &sony_16, TC(text_soft), x, 138, w - 6), s);
         if (num(d, "uv", &v) && v >= 3) {
             snprintf(s, sizeof(s), "UV %.0f", round(v));
@@ -462,6 +479,8 @@ static void show_status(void) {
     lv_label_set_text(frame.head_left, head);
     if (!strcmp(pos_src, "Locator"))
         snprintf(right, sizeof(right), "%s %s", _("Locator"), params.qth.x);
+    else if (!strcmp(pos_src, "Typed"))     /* Settings > General > STATION > Weather place: its name is at the left */
+        snprintf(right, sizeof(right), "%s", _("Place"));
     else if (!strcmp(pos_src, "Country"))
         snprintf(right, sizeof(right), "%s %s", _("Country"), country_name(country_now()));
     else
@@ -489,8 +508,29 @@ static void show_status(void) {
     lv_label_set_text(frame.status, st);
 }
 
-static void show(void) {
+static void show_body(void);
+
+/* Spoken: the view shown, all of it ("Weather, now. 12 C, Partly cloudy, ...") */
+static void say_view(void) {
+    static const char *names[] = {"now", "5 days", "warnings"};
+
     if (!body) return;
+    char head[48];
+
+    snprintf(head, sizeof(head), "Weather, %s", view < 3 ? names[view] : "");
+    voice_lines_set(body, head);
+}
+
+static bool quiet_update;   /* the background refresh: drawn, not read again */
+
+static void show(void) {
+    show_body();
+    say_view();
+}
+
+static void show_body(void) {
+    if (!body) return;
+    shown_us = meteo_us();
     lv_obj_clean(body);
     lv_obj_scroll_to_y(body, 0, LV_ANIM_OFF);
     if (view == VIEW_WARN)
@@ -562,7 +602,10 @@ static void update_done(void *arg) {
             meteo_alerts_seen(data);    /* shown here: no notice for them later */
         }
     }
-    show();
+    if (quiet_update)
+        show_body();
+    else
+        show();
 }
 
 static void *update_thread(void *arg) {
@@ -593,6 +636,7 @@ static void start_update(bool asked) {
     char       args[160];
 
     if (updating) return;
+    quiet_update = !asked;
     if (!meteo_position(&lat, &lon, &pos_src)) {
         next_at = time(NULL) + RETRY_S;
         show();
@@ -606,8 +650,10 @@ static void start_update(bool asked) {
     error[0] = 0;
     if (data)
         show_status();      /* the last answer stays while the new one comes */
-    else
+    else if (asked)
         show();
+    else
+        show_body();
     if (pthread_create(&t, NULL, update_thread, q) == 0) {
         pthread_detach(t);
     } else {
@@ -617,9 +663,11 @@ static void start_update(bool asked) {
     }
 }
 
-/* Each second: the next request when it is due, not while the screen is dark */
+/* Each second: the next request when it is due, not while the screen is dark; drawn again in the other units when
+ * Weather units changed (the web Weather page sets it too) */
 static void timer_cb(lv_timer_t *t) {
     (void)t;
+    if (meteo_us() != shown_us) show();
     if (!updating && time(NULL) >= next_at && backlight_seen()) start_update(false);
 }
 
@@ -682,13 +730,17 @@ static void key_cb(lv_event_t *e) {
         case LV_KEY_ESC:
             dialog_destruct();
             break;
+        /* With speech on the small knob reads line by line (voice_lines); F1 Now, F2 5 days, F3 Warnings change
+         * the view. Without it, as before: the warnings' text up and down, else the views */
         case LV_KEY_UP:
         case LV_KEY_LEFT:
-            step(-1);
+            if (voice_is_on()) voice_lines_step(-1);
+            else step(-1);
             break;
         case LV_KEY_DOWN:
         case LV_KEY_RIGHT:
-            step(1);
+            if (voice_is_on()) voice_lines_step(1);
+            else step(1);
             break;
         case LV_KEY_ENTER:
             start_update(true);
@@ -721,6 +773,7 @@ static void construct_cb(lv_obj_t *parent) {
 
     lv_group_add_obj(keyboard_group, dialog.obj);
     lv_obj_add_event_cb(dialog.obj, key_cb, LV_EVENT_KEY, NULL);
+    voice_focus_quiet(dialog.obj);      /* say_view() reads the views */
     lv_group_focus_obj(dialog.obj);
     lv_group_set_editing(keyboard_group, true);
 
@@ -737,11 +790,12 @@ static void construct_cb(lv_obj_t *parent) {
     }
     if (data) meteo_alerts_seen(data);  /* shown here: no notice for them later */
     start_update(true);
-    show();
+    show_body();        /* start_update() has read it already: the new forecast is read when it comes */
     timer = lv_timer_create(timer_cb, 1000, NULL);
 }
 
 static void destruct_cb(void) {
+    voice_lines_clear();
     gen++;                  /* an answer still on its way is dropped */
     updating = false;
     if (timer) lv_timer_del(timer);

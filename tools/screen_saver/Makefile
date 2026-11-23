@@ -30,7 +30,7 @@ build/%.o: $(SRC)/%.c $(wildcard $(SRC)/*.h)
 	mkdir -p $(dir $@) && $(CC) $(GUI) -c -o $@ $<
 
 screen_saver_test: screen_saver_test.c $(OBJS) $(LVGL_LIB)
-	$(CC) $(CFLAGS) -o $@ screen_saver_test.c $(OBJS) $(LVGL_LIB) $(GC_SECTIONS) -lm -pthread
+	$(CC) $(CFLAGS) -o $@ screen_saver_test.c ../speech/silent.c $(OBJS) $(LVGL_LIB) $(GC_SECTIONS) -lm -pthread
 
 test: screen_saver_test
 	./screen_saver_test

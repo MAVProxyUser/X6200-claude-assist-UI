@@ -3,21 +3,28 @@
 sandbox, driven by a script of x6drive.py's commands; every "shot NAME" lands as NAME.png.
 
   python3 tools/screenshots/host_shots.py <build dir> <script> <out dir> [--theme NAME]
-                                          [--set name=value ...] [--data DIR] [--first-start] [--keep]
+                                          [--set name=value ...] [--data DIR] [--tmp DIR] [--image-note]
+                                          [--first-start] [--serve CMD] [--rx-audio FILE] [--keep]
 
 <build dir> is a host build (host/build.sh, cmake -DHOST_BUILD=ON). <script> is a file, or the
 commands inline with ";" between them ("key APP; sleep 1; shot apps"). Each run starts from the
 default settings (the build's params.db, or sql/params.sql) with the theme and the --set values in
-params, and the files of --data DIR copied into the GUI's data folder (a ghostnet.conf, a
-cluster.conf); the GUI gets 10 s after its FIFOs appear before the script starts. The defaults have
+params, and the files and folders of --data DIR copied into the GUI's data folder (a ghostnet.conf,
+a cluster.conf, a wefax folder of charts); the GUI gets 10 s after its FIFOs appear before the script starts. The defaults have
 no callsign, so the first-start guide (src/first_start.c) would come up over every shot: it is
-marked done, unless --first-start leaves it to come up.
+marked done, unless --first-start leaves it to come up. The files of --tmp DIR go into the GUI's /tmp (S01multiboot's
+mark, x6100-multiboot). The build's image-required is hidden (no "new card image" note in the shots) unless
+--image-note keeps it. --serve CMD runs CMD (sh -c) in the sandbox before the GUI, in the background: a stand-in
+server on 127.0.0.1 for an app that needs one (the sandbox has no other network), as tools/dmr/fake_master.py --serve.
+--rx-audio FILE plays FILE (raw s16le, 44.1 kHz, mono) round and round as the radio's RX audio: the GUI records it as
+it records the codec on the radio, so the CW decoder, the CW Tuner's bars and RTTY get a signal (the stub radio's
+stream feeds the spectrum and the waterfall only). tools/screenshots/cw_audio.py makes keyed CW.
 
 The sandbox (bwrap): the whole system read-only, the GUI's data folder and /tmp private, no
 network (no cluster spots: the shots are the same each run), no D-Bus (NetworkManager and BlueZ on
 this PC are left alone), and a PipeWire of its own with a null sink (the GUI needs PulseAudio,
 and the stub radio's noise stays off this PC's speakers). Needs bwrap, pipewire, pipewire-pulse,
-pactl, sqlite3 and Pillow.
+pactl, sqlite3 and Pillow; --rx-audio wireplumber and pacat too.
 
 SPDX-License-Identifier: LGPL-2.1-or-later
 Copyright (c) 2026 Joeri Van Dooren ON6URE / Guru-RF
@@ -43,6 +50,16 @@ sleep 1
 pipewire-pulse > /tmp/pwp.log 2>&1 &
 sleep 1
 pactl load-module module-null-sink sink_name=shots > /tmp/pactl.log 2>&1
+if [ -n "$X6_SHOTS_RX" ]; then
+    # --rx-audio: played into the null sink, whose monitor is the source the GUI records (its own sounds are mixed
+    # in, none in RX). A session manager links the GUI's capture, which it connects once at its start
+    wireplumber > /tmp/wp.log 2>&1 &
+    sleep 1
+    pactl set-default-source shots.monitor >> /tmp/pactl.log 2>&1
+    { while pacat --playback --device=shots --format=s16le --rate=44100 --channels=1 "$X6_SHOTS_RX"; do :; done; } \
+        > /tmp/rx.log 2>&1 &
+fi
+[ -n "$X6_SHOTS_SERVE" ] && { sh -c "$X6_SHOTS_SERVE" > /tmp/serve.log 2>&1 & }
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy exec "$@" > /tmp/gui.log 2>&1
 """
 
@@ -63,7 +80,11 @@ def main():
     ap.add_argument("--theme")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE")
     ap.add_argument("--data", metavar="DIR", help="files copied into the GUI's data folder before it starts")
+    ap.add_argument("--tmp", metavar="DIR", help="files copied into the GUI's /tmp before it starts")
+    ap.add_argument("--image-note", action="store_true", help="keep the build's image-required: the card image notes")
     ap.add_argument("--first-start", action="store_true", help="the first-start guide comes up, as on a new card")
+    ap.add_argument("--serve", metavar="CMD", help="a stand-in server started in the sandbox before the GUI")
+    ap.add_argument("--rx-audio", metavar="FILE", help="raw s16le 44.1 kHz mono, played as the radio's RX audio")
     ap.add_argument("--keep", action="store_true", help="keep the run folder (its gui.log)")
     a = ap.parse_args()
 
@@ -85,6 +106,12 @@ def main():
         for n in os.listdir(a.data):
             if os.path.isfile(os.path.join(a.data, n)):
                 shutil.copy(os.path.join(a.data, n), os.path.join(data, n))
+            elif os.path.isdir(os.path.join(a.data, n)):     # a folder of the app's files: wefax/ with charts
+                shutil.copytree(os.path.join(a.data, n), os.path.join(data, n))
+    if a.tmp:
+        for n in os.listdir(a.tmp):
+            if os.path.isfile(os.path.join(a.tmp, n)):
+                shutil.copy(os.path.join(a.tmp, n), os.path.join(tmp, n))
     db = os.path.join(data, "params.db")
     if os.path.exists(os.path.join(build, "params.db")):
         shutil.copy(os.path.join(build, "params.db"), db)
@@ -96,6 +123,8 @@ def main():
         name, _, value = s.partition("=")
         v = value if value.lstrip("-").isdigit() else "'" + value.replace("'", "''") + "'"
         subprocess.run(["sqlite3", db, f"INSERT INTO params VALUES('{name}', {v})"], check=True)
+    if a.rx_audio:      # into the sandbox's /tmp: the scratch folders under the PC's /tmp are hidden there
+        shutil.copy(a.rx_audio, os.path.join(tmp, "rx_audio.raw"))
     with open(os.path.join(tmp, "inside.sh"), "w") as f:
         f.write(INSIDE)
     os.chmod(os.path.join(tmp, "inside.sh"), 0o755)
@@ -108,11 +137,12 @@ def main():
     cmd = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--bind", tmp, "/tmp",
            "--ro-bind", build, build, "--bind", data, data_dir, "--tmpfs", "/run/dbus"]
     notice = os.path.join(build, "share", "image-required")
-    if os.path.exists(notice):
+    if os.path.exists(notice) and not a.image_note:
         cmd += ["--ro-bind", empty, notice]   # no "new card image" note in the shots
     cmd += ["--unshare-net", "--unshare-ipc", "--die-with-parent",
             "--info-fd", str(info_w), "/tmp/inside.sh", gui]
-    proc = subprocess.Popen(cmd, pass_fds=(info_w,))
+    env = dict(os.environ, X6_SHOTS_SERVE=a.serve or "", X6_SHOTS_RX="/tmp/rx_audio.raw" if a.rx_audio else "")
+    proc = subprocess.Popen(cmd, pass_fds=(info_w,), env=env)
     os.close(info_w)
     info = b""
     while not info.rstrip().endswith(b"}"):

@@ -24,3 +24,19 @@ bool kbd_keymap_main_only(uint16_t code) {
 
     return key == KEYBOARD_SCRL_LOCK || key == KEYBOARD_PRINT;
 }
+
+int kbd_keymap_volume(uint16_t code) {
+    switch (code) {
+        case KEY_VOLUMEUP:      return +1;
+        case KEY_VOLUMEDOWN:    return -1;
+        default:                return 0;
+    }
+}
+
+int kbd_keymap_brackets(uint16_t code) {
+    switch (code) {
+        case KEY_RIGHTBRACE:    return +1;
+        case KEY_LEFTBRACE:     return -1;
+        default:                return 0;
+    }
+}

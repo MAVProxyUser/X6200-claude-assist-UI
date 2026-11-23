@@ -102,6 +102,8 @@ if(ENABLE_TESTING AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 else()
         add_subdirectory(third-party/js8core)     # JS8Call's modem, for src/js8
         add_subdirectory(third-party/wsprd)
+        # the DMR app's voice (src/dmr_ambe.c): through the DVSI USB-3000, never mbelib (the owner: "hard no on the mbelib, USB-3000 is hard requirement")
+        add_subdirectory(tools/dsdfme/mbe_dvsi)
         add_subdirectory(src)
         add_subdirectory(lv_drivers)
         add_subdirectory(sql)

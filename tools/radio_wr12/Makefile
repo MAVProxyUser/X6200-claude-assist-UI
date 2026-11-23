@@ -69,7 +69,7 @@ radio_wr12_test: radio_wr12_test.c fakes.c fakes.h build/radio.o $(WRAPPERS) \
                  $(SRC)/pa_bias.c $(SRC)/cfg/ham_bands.c $(SRC)/cfg/tx_ranges.c $(SRC)/bat_watch.c
 	python3 $(TOP)/tools/host_link/autolink.py --src $(SRC) --stubs build/auto_stubs.c \
 	    --settings build/auto_settings.h -- \
-	    $(CC) $(CFLAGS) -I build $(RENAME) -o $@ radio_wr12_test.c fakes.c build/radio.o $(WRAPPERS) \
+	    $(CC) $(CFLAGS) -I build $(RENAME) -o $@ radio_wr12_test.c fakes.c ../speech/silent.c build/radio.o $(WRAPPERS) \
 	    $(SRC)/pa_bias.c $(SRC)/cfg/ham_bands.c $(SRC)/cfg/tx_ranges.c $(SRC)/bat_watch.c build/auto_stubs.c \
 	    -lm $(WRAPS)
 

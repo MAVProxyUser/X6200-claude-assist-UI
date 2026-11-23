@@ -3,8 +3,9 @@
 # the PC build's LVGL (LVGL_LIB, as host/build.sh leaves it in build-host/lib), its rows through waterfall_data() as
 # the DSP thread gives them, with liquid-dsp's vector maths (DEPS, as host/build.sh puts it in build-host/deps). What
 # the waterfall reaches of the rest of the GUI (the parameters and their observers, the scheduler, the theme, the
-# frequency scale) the test stands in for; the rest of waterfall_view.c drops out of the link (--gc-sections). A link
-# error names what it now reaches: a stand-in for it goes in the test. See wf_image_test.c for the cases.
+# frequency scale) the test stands in for, but the LO offsets of src/cfg/lo_offset.c, which it takes as they are; the
+# rest of waterfall_view.c drops out of the link (--gc-sections). A link error names what it now reaches: a stand-in
+# for it goes in the test. See wf_image_test.c for the cases.
 TOP      := ../..
 SRC      := $(TOP)/src
 DEPS     ?= $(TOP)/build-host/deps
@@ -21,13 +22,26 @@ CFLAGS   := -std=gnu11 -O1 -g -pthread -Wall -Wextra -Wno-comment -Wno-unused-pa
 
 all: test
 
-wf_image_test: wf_image_test.c $(SRC)/waterfall_view.c $(wildcard $(SRC)/*.h) $(LVGL_LIB)
-	$(CC) $(CFLAGS) -o $@ wf_image_test.c $(LVGL_LIB) $(DEPS)/lib/libliquid.a -Wl,--gc-sections -lm -pthread
+wf_image_test: wf_image_test.c $(SRC)/waterfall_view.c $(SRC)/cfg/lo_offset.c $(wildcard $(SRC)/*.h) \
+               $(SRC)/cfg/lo_offset.h $(LVGL_LIB)
+	$(CC) $(CFLAGS) -o $@ wf_image_test.c $(SRC)/cfg/lo_offset.c $(LVGL_LIB) $(DEPS)/lib/libliquid.a \
+	    -Wl,--gc-sections -lm -pthread
 
 test: wf_image_test
 	./wf_image_test
 
-clean:
-	rm -f wf_image_test
+# The same cases under the address and undefined-behaviour sanitizers, and under the thread sanitizer: the 3D picture
+# is drawn on a thread of its own (the image freed while it draws, a word read by two threads). LVGL and liquid-dsp
+# are the PC build's, not instrumented
+asan tsan: SAN = $(if $(filter asan,$@),address$(comma)undefined,thread)
+asan tsan: wf_image_test.c $(SRC)/waterfall_view.c $(SRC)/cfg/lo_offset.c $(LVGL_LIB)
+	$(CC) $(CFLAGS) -fsanitize=$(SAN) -o wf_image_test.$@ wf_image_test.c $(SRC)/cfg/lo_offset.c $(LVGL_LIB) \
+	    $(DEPS)/lib/libliquid.a -lm -pthread
+	./wf_image_test.$@
 
-.PHONY: all test clean
+comma := ,
+
+clean:
+	rm -f wf_image_test wf_image_test.asan wf_image_test.tsan
+
+.PHONY: all test asan tsan clean

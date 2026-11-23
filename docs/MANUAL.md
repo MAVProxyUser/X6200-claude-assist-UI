@@ -14,7 +14,10 @@ changes: a radio takes the release after them as usual. Their SD card images are
 How to use every part of the firmware, and the reference tables. The short
 overview is the [README](../README.md). Each release on GitHub has this
 manual as a PDF too, `GoldCorpHF-manual-v<version>.pdf`, to read offline or
-print (A4); `tools/manual_pdf/build.sh` makes it.
+print (A4); `tools/manual_pdf/build.sh` makes it. The manual on GitHub
+follows the code being worked on, so it can describe apps and settings the
+latest release does not have yet; the PDF with a release is the manual for
+that version (#303).
 
 Each option has a "Where:" line with its place on the radio, for example
 "Where: Settings > Display > MAIN SCREEN". Settings opens from APP (page 2) >
@@ -27,18 +30,20 @@ Settings. Button and option names are written as the radio shows them.
 - [The GSOC head with a G90](#the-gsoc-head-with-a-g90-from-source) (from source, untried here)
 - [Updating the firmware](#updating-the-firmware): [the SD card's kernel and U-Boot](#the-sd-cards-kernel-and-u-boot), [the X6200's base firmware](#the-x6200s-base-firmware), [the X6100's base firmware](#the-x6100s-base-firmware)
 - [Main screen](#main-screen): [band keys](#band-keys), [receiving outside the ham bands](#receiving-outside-the-ham-bands), [WR12 receiver](#wr12-receiver-x6200), [power supply](#power-supply), [low battery](#low-battery), [battery time](#battery-time), [status bar](#status-bar), [S-meter](#s-meter), [waterfall](#waterfall), [band plan](#band-plan), [screen recording](#screen-recording), [Walkie Talkie](#walkie-talkie-mode)
-- [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab)
+- [Settings](#settings): [General](#general-tab), [Display](#display-tab) ([screensaver](#screensaver), [panel stripes fix](#panel-stripes-fix)), [Audio](#audio-tab), [Wireless](#wireless-tab), [Bluetooth](#bluetooth-tab), [Keys](#keys-tab), [Cluster](#cluster-tab), [TX Cal](#tx-cal-tab), [Info](#info-tab), [Walkie](#walkie-tab), [Voice](#voice-tab)
 - [Transmitting](#transmitting): [amateur bands only](#amateur-bands-only), [no TX without data from the base](#no-tx-without-data-from-the-base), [TX shift](#tx-shift), [transverter TX power limit](#transverter-tx-power-limit), [SWR scan and the tuner](#swr-scan-and-the-tuner), [TUNE for an external tuner](#tune-for-an-external-tuner), [digital-mode TX level](#digital-mode-tx-level), [recording voice messages](#recording-voice-messages), [ALC in CW](#alc-in-cw), [PA bias](#pa-bias-x6200), [register 32](#register-32-x6200)
-- [Digital modes](#digital-modes): [opening a mode](#opening-a-mode), [FT8 and FT4](#ft8-and-ft4), [JS8](#js8) ([GhostNet](#ghostnet)), [WSPR](#wspr) ([band hopping](#band-hopping)), [SSTV, WeFax and NavTex](#sstv-wefax-and-navtex), [RADE (FreeDV)](#rade-freedv), [PSK31, PSK63 and Olivia](#psk31-psk63-and-olivia), [JTTY](#jtty), [frequencies of PSK, Olivia and JTTY](#frequencies-of-psk-olivia-and-jtty), [text log of the keyboard modes](#text-log-of-the-keyboard-modes), [RTTY and WeFax TX](#rtty-and-wefax-tx)
+- [Digital modes](#digital-modes): [opening a mode](#opening-a-mode), [FT8 and FT4](#ft8-and-ft4), [JS8](#js8) ([GhostNet](#ghostnet)), [WSPR](#wspr) ([band hopping](#band-hopping)), [SSTV, WeFax and NavTex](#sstv-wefax-and-navtex), [RADE (FreeDV)](#rade-freedv), [PSK31, PSK63 and Olivia](#psk31-psk63-and-olivia), [JTTY](#jtty), [frequencies of PSK, Olivia and JTTY](#frequencies-of-psk-olivia-and-jtty), [text log of the keyboard modes](#text-log-of-the-keyboard-modes), [RTTY](#rtty), [WeFax TX](#wefax-tx)
 - [CW](#cw): [CW decoder](#cw-decoder), [CW from the keyboard](#cw-from-the-keyboard), [CW Keyboard](#cw-keyboard), [USB paddle](#usb-paddle), [SmartCW](#smartcw), [CW messages](#cw-messages) ([beacon](#cw-beacon), [QRSS3](#qrss3)), [CW Trainer](#cw-trainer)
-- [Apps](#apps): [DX Cluster](#dx-cluster), [Field Ops (SOTA / POTA)](#field-ops-sota--pota), [Bands](#bands), [Propagation](#propagation), [On the Air](#on-the-air), [Time Signal](#time-signal), [Channels](#channels), [Scanner](#scanner), [HF Air Band](#hf-air-band), [CB](#cb), [Flights](#flights), [Internet radio](#internet-radio), [Zello](#zello), [SVXConnect](#svxconnect), [Weather](#weather)
+- [Apps](#apps): [DX Cluster](#dx-cluster), [Field Ops (SOTA / POTA)](#field-ops-sota--pota), [Bands](#bands), [Propagation](#propagation), [On the Air](#on-the-air), [Time Signal](#time-signal), [GPS / Clock](#gps--clock), [Channels](#channels), [Scanner](#scanner), [HF Air Band](#hf-air-band), [CB](#cb), [Flights](#flights), [Internet radio](#internet-radio), [Zello](#zello), [SVXConnect](#svxconnect), [DMR](#dmr-over-the-internet), [Weather](#weather)
 - [Bluetooth](#bluetooth): [headphones](#bluetooth-headphones), [CAT](#bluetooth-cat), [TCI over Bluetooth](#tci-over-bluetooth), [a PC on Bluetooth](#a-pc-on-bluetooth)
+- [Speech](#speech)
 - [Themes](#themes)
 - [Web configurator](#web-configurator)
 - [Wavelog](#wavelog): [live link](#live-link)
-- [Winlink](#winlink): [Mercury](#mercury-experimental), [XARA](#xara-experimental)
+- [Winlink](#winlink): [Mail on the radio](#mail-on-the-radio), [Mercury](#mercury-experimental), [XARA](#xara-experimental)
 - [Browser panel](#browser-panel)
 - [Browser remote](#browser-remote)
+- [Browser apps](#browser-apps): [FT8](#ft8-in-the-browser), [JS8](#js8-in-the-browser), [WeFax](#wefax-in-the-browser)
 - [TCI server](#tci-server)
 - [Network name](#network-name): [the radio's own names](#the-radios-own-names)
 - [SSH](#ssh): [a key on Windows](#a-key-on-windows), [on a Mac or on Linux](#a-key-on-a-mac-or-on-linux), [in PuTTY](#a-key-in-putty), [on a security key](#a-key-on-a-security-key), [adding the key on the radio](#adding-the-key-on-the-radio), [the first login](#the-first-login), [after a new card image](#after-a-new-card-image), [when SSH does not let you in](#when-ssh-does-not-let-you-in)
@@ -54,7 +59,7 @@ Settings. Button and option names are written as the radio shows them.
 
 A radio with no callsign, at its first start on a new card or after a factory
 reset (Settings > Info), opens the first-start guide a few seconds after the
-start: five steps, then a summary. The radio receives underneath all the
+start: six steps, then a summary. The radio receives underneath all the
 while. A radio that has a callsign, for example one updated from an earlier
 version, never opens it by itself. The X6100 and the X6200 show the same guide
 (both screens are 800 by 480).
@@ -65,17 +70,34 @@ Where: Settings > General > STATION > First-start guide (Start runs it again).
    name our fonts cannot draw before it is chosen, such as 中文, has its code
    beside it: zh_CN). The choice is taken at once: the screen is built again
    in it, and the guide comes back on this step in that language.
-2. WiFi. Networks opens the WiFi window and turns WiFi on: choose a network
+2. Keyboard. Pairs a Bluetooth keyboard, so the WiFi password, the callsign
+   and the locator in the next steps can be typed on it; a USB keyboard
+   needs nothing here. Put the keyboard in pairing mode, then Scan (16 s):
+   the keyboards found are listed, *new* or *paired*. Press yours: the guide
+   pairs it, trusts it (it connects by itself at the next starts) and
+   connects it, as Settings > Bluetooth > DEVICES does. Many keyboards want
+   their pairing key pressed once more at that moment: the line says so.
+   One that asks for a code shows it in large digits: type them on the
+   keyboard, then its Enter key. Once its keys come, the line says "works:
+   type something to try it", and what you type shows under it. Not
+   found, or the pairing failed: the line says what to do, and Scan looks
+   again. With Bluetooth off, Turn on switches it on (with WiFi off, the
+   chip is off: Turn on switches WiFi and Bluetooth on, as the next step
+   would). With no Bluetooth on the radio the line says so; Skip goes on
+   without a keyboard. Settings > Bluetooth > DEVICES pairs one later.
+3. WiFi. Networks opens the WiFi window and turns WiFi on: choose a network
    there, then ESC or GEN brings you back to the guide. The line above
    Networks says whether the radio is connected, to which network and with
    which address. With Ethernet connected, WiFi is not needed.
-3. Callsign and locator. Callsign and Locator open the keyboard (on the
-   screen, or a USB keyboard when one is plugged in); Enter or the tick key
-   saves. With a GPS that has a fix, a GPS fix line offers its locator:
-   Use <locator> sets it.
-4. Country. The country you operate from, as Settings > General > STATION >
+4. Callsign and locator. Callsign and Locator open the keyboard (on the
+   screen, or a USB or Bluetooth keyboard when one is there); Enter or the
+   tick key saves. With a GPS that has a fix, a GPS fix line offers its
+   locator: Use <locator> sets it.
+5. Country. The country you operate from, as Settings > General > STATION >
    Country has it: Country opens the list (the names in the screen's
-   language, "-" for none). With a callsign, the line From the callsign
+   language, "-" for none; the MFK goes down it to the last one, Zimbabwe;
+   up to v0.3.13 the list stopped scrolling at Tuvalu, issue #310). With a
+   callsign, the line From the callsign
    offers its country (from cty.dat): Use <country> sets it. The line under
    it says what the band plan takes now: "Auto, Region 1 from the country",
    from the GPS, the locator or the callsign (see [Band plan](#band-plan)).
@@ -84,25 +106,25 @@ Where: Settings > General > STATION > First-start guide (Start runs it again).
    one of the same time when the list has not that one), but only while no
    time zone was ever chosen (a new card, a factory reset), or the guide set
    it from a country before.
-5. Clock and time zone. The clock with the date and UTC, and what set it:
+6. Clock and time zone. The clock with the date and UTC, and what set it:
    NTP (over WiFi) or the GPS. Set by either, there is nothing to do. If
    neither did, set the date and time in the fields under it, as in
    Settings > General > DATE / TIME. Time zone sets the zone the clock at the
-   top right shows ("From the country" under it when step 4 set it); the
+   top right shows ("From the country" under it when step 5 set it); the
    logs and the digital modes stay on UTC.
-6. Done. What is set and what is not, the web configurator's address
-   (`http://x6100.local` or `http://x6200.local`, or the
-   [network name](#network-name) you gave the radio, and its IP address), and
-   where this manual is.
+7. Done. What is set and what is not (the keyboard by its Bluetooth name),
+   the web configurator's address (`http://x6100.local` or
+   `http://x6200.local`, or the [network name](#network-name) you gave the
+   radio, and its IP address), and where this manual is.
 
 Moving through it:
 
-- The buttons at the bottom: Back, the step's own (Language, Networks,
-  Callsign, Locator, Country, Time zone), Skip and Next (Done on the last
-  screen). The MFK moves between the controls of a step and its press opens
-  one; touch works too.
-- Skip goes on without the step: the summary then says "Skipped" for WiFi,
-  the callsign or the country while they are not set. One set elsewhere
+- The buttons at the bottom: Back, the step's own (Language, Scan or Turn
+  on, Networks, Callsign, Locator, Country, Time zone), Skip and Next (Done
+  on the last screen). The MFK moves between the controls of a step and its
+  press opens one; touch works too.
+- Skip goes on without the step: the summary then says "Skipped" for the
+  keyboard, WiFi, the callsign or the country while they are not set. One set elsewhere
   (the callsign in Settings, WiFi in the WiFi window) shows as set.
 - ESC asks "Skip the guide?" first; a second ESC within 4 seconds skips the
   rest. GEN, or another app, leaves the guide as well.
@@ -116,8 +138,8 @@ Moving through it:
 ### First steps
 
 On a new card the [first-start guide](#first-start-guide) takes you through
-steps 1 to 3 (and the language and the country) and names the web
-configurator's address.
+steps 1 to 3 (and the language, a Bluetooth keyboard and the country) and
+names the web configurator's address.
 
 1. Set your callsign and QTH locator.
    Where: Settings > General > STATION.
@@ -326,10 +348,10 @@ The APP button opens six pages of apps and tools:
 |---|---|
 | APP 1:6 | Modes, Cluster, SWR Scan, RX Recorder |
 | APP 2:6 | Settings, CW Trainer, Field Ops, Channels |
-| APP 3:6 | Bands, GPS, Screen rec, CW Keyboard |
+| APP 3:6 | Bands, GPS / Clock, Screen rec, CW Keyboard |
 | APP 4:6 | Propagation, Scanner, User keys, Internet radio |
 | APP 5:6 | Zello, SVXConnect, Flights, HF Air Band |
-| APP 6:6 | CB, Weather |
+| APP 6:6 | CB, Weather, Mail, DMR |
 
 With Icon menus on (Settings > Display > INTERFACE, on by default) APP also
 opens the same apps as a grid of tiles over these pages, with Walkie and
@@ -338,13 +360,28 @@ closes the grid. Four rows are in sight; the grid scrolls to the rows below
 as the MFK goes there (or by a swipe on the touch screen). "APP > CW Keyboard" in this manual is the tile, or the
 button on APP 3:6.
 
-- Each app has its own button pages, named like `(JS8 1:7)`. The first
-  button goes to the next page.
+- Each app has its own button pages, named like `(JS8 1:4)`, as the main
+  screen's buttons have theirs (`APP 3:6`, `KEY 1:2`). The first button, the
+  page button, goes to the next page; held (1 s, half a second in JS8), it
+  goes one page back, from the first page round to the last. The same on
+  every bar of more than one page, in every app, and on the touch screen.
+  Up to v0.3.13 only the main screen and some apps (JS8, WSPR, PSK, Olivia,
+  RTTY, JTTY, RADE, the CW Trainer, Walkie and a few more) went back: held,
+  the page button did nothing in FT8, the cluster, SSTV, WeFax, Field Ops,
+  NAVTEX/DSC, Settings, the CW and voice messages and the CW Keyboard
+  (issue #317).
 - The MFK walks the items of an app or a list; a press chooses.
 - ESC closes popups and apps.
 - A press of VOL does not close menus or apps, and in a text field it types
   nothing; on the main screen it still works as ESC. Held, it is still one
   press.
+- A text box (a call, a message, a password) takes Enter as OK. Without a
+  keyboard the on-screen keyboard is under it: its tick is OK, its keyboard
+  key (bottom left) closes the box and nothing is taken or sent. With a
+  keyboard a line under the text says it: Enter OK, Esc or the MFK held
+  closes the box, nothing taken or sent. Up to v0.3.12 the MFK's hold did
+  nothing there, and a keyboard without an Esc key had no way out but OK
+  (issue #280).
 
 Knobs. On the main screen the main knob tunes, and VOL and the MFK each turn
 one control of their own list. The two lines over the buttons say which
@@ -357,6 +394,16 @@ brackets (#279).
 - A press of the knob switches it between changing the value and choosing
   the control: while it chooses, a turn goes to the next control on its list
   (the name lit), and the next press changes that one again.
+- Knob press: next control (Settings > Display > INTERFACE, off by default;
+  also on the web configurator's Display page): as on the stock firmware, a
+  short press of VOL or the MFK takes the next control on its list, round to
+  the first after the last, ready to turn: its value lit on the knob line
+  and the mark lit on its button. A long press (from 0.4 s) does what a
+  press does with it off: choose or change; on the cluster column it tunes to
+  the spot, as the long press always did. Volume keeps VOL in walkie mode. A
+  keyboard's Enter and ESC count as short presses, as does the MFK press in
+  Field Ops while it tunes (that one comes at the release). Up to v0.3.12 a
+  press only switched between choosing and changing (issue #282).
 - X6200: the MFK has an inner ring. The inner ring chooses the MFK's control,
   the next one or the one before on its list, and the outer ring changes its
   value, with no press. The X6100's MFK has no inner ring: it uses the press.
@@ -377,9 +424,10 @@ brackets (#279).
   switches it; a press of AGC takes it to the next of Off, Slow, Fast, Auto.
 - AGC is on the MFK 2:4 page, PRE, ATT and ATU on VOL 2:2, Step (the tuning
   step, as FST) on the DFL page. On a knob, a turn steps AGC and Step forward
-  or back, stopping at Off and Auto, 10 Hz and 100 kHz (the AGC and FST keys go
-  round), and switches PRE, ATT and ATU. Up to v0.3.7 AGC, PRE and ATT could not
-  go on a knob, and there was no ATU or Step button.
+  or back, stopping at Off and Auto, and at the ends of
+  [Tuning steps from, to](#waterfall), 10 Hz and 100 kHz by default (the AGC
+  and FST keys go round), and switches PRE, ATT and ATU. Up to v0.3.7 AGC,
+  PRE and ATT could not go on a knob, and there was no ATU or Step button.
 - At first VOL has Volume, RF gain, the filter edges and TX power, and the MFK
   Spectrum Zoom and DNF. Volume never leaves VOL.
 - GEN shows the VOL pages, then the MFK pages: VOL 1:2 (Volume, Squelch, RF
@@ -419,7 +467,8 @@ Hide buttons. With Settings > Display > INTERFACE > Hide buttons at After
 3 s, After 5 s or After 10 s (Off by default), the five buttons and the two
 knob lines over them hide on the main screen once that long has gone by
 without a key, and the waterfall shows down to the bottom of the screen.
-- Any key brings them back: a front key, a hand mic key, a keyboard key. It
+- Any key brings them back: a front key, a hand mic key, a keyboard key
+  (not the hand mic's UP and DOWN set to Tune: they are the main knob). It
   also does its usual job (ATU switches the tuner), except F1-F5: their
   press only brings the buttons back, so a button you can't see is never
   pressed. Press it again to use it. F1-F5 from a browser (the Panel's Keys
@@ -455,6 +504,8 @@ long-press action, and so has FST, the tuning step key: a press steps up,
 held it steps down until you give it another action (Frequency lock on/off,
 as on the stock firmware, say). The steps are 10 Hz, 100 Hz, 500 Hz, 1 kHz,
 5 kHz, 10 kHz, 25 kHz and 100 kHz; up to v0.3.9 they stopped at 5 kHz (#234).
+[Tuning steps from, to](#waterfall) (Settings > Display) narrows them to a
+range of them.
 To go further at once, type the frequency (F-INP, or `f` on a keyboard).
 Where: Settings > Keys > PAGE KEYS, LONG PRESS (FST: TOP AND SIDE KEYS).
 
@@ -482,12 +533,28 @@ The web configurator's Keys page (System > Keys) sets all of these too: the
 top and side keys, the page keys, the USER page, the hand mic keys and the
 lock per band and mode, from the radio's own lists.
 
+Out of the box:
+
+| Key | Long press |
+|---|---|
+| GEN | screenshot |
+| APP | the RX recorder (the app) |
+| KEY | none |
+| MSG | RX recorder on/off |
+| DFN | none |
+| DFL | WF full screen on/off: the waterfall over the whole screen, and back (see [Waterfall](#waterfall)). Up to v0.3.13 DFL had none; a radio whose DFL long press was set in Settings > Keys, to None too, keeps what it was set to. The X6100 hand mic's FIL held does DFL's long press |
+| FST | step down |
+
+A key let go while the radio is busy (a band change, an app closing) is a
+tap however late the radio reads it. Up to v0.3.12 one read after the long
+press time counted as held: a tap of F1 did its long action (#233).
+
 | Kind | Actions |
 |---|---|
 | Keys' jobs | mode: next, mode: back, VFO A/B, band up, band down, AGC (Off, Slow, Fast, Auto), split on/off, USER page (#111), charger on/off (Settings > General > Charger On, or Off when it is On; from Shadow On; #276) |
-| Quick | none, screenshot, RX recorder on/off, screen rec on/off, mute, frequency lock on/off, step up, step down, WF mode, WF 3D on/off, CW decoder on/off, CW ZAP (in CW and CW-R, the dial onto the signal the CW Tuner hears, as the CW 1:2 ZAP button; up to v0.3.9 neither was a key action, #196), SWL panel (as the X6100 hand mic's GENE: the broadcast stations on the air within 2 kHz, again the next one), SWL: save channel (as its NW: the station shown saved as a channel; up to v0.3.11 neither was a key action, so an X6200 could not open the panel, #155), ATT on/off, PRE on/off, tuner on/off, tuner tune (transmits a carrier), TUNE ext. tuner on/off (a carrier for a tuner at the antenna, see [TUNE for an external tuner](#tune-for-an-external-tuner)) |
+| Quick | none, screenshot, RX recorder on/off, screen rec on/off, mute, frequency lock on/off, step up, step down, WF mode, WF 3D on/off, WF full screen on/off (the waterfall over the whole screen, and back: see [Waterfall](#waterfall)), CW decoder on/off, CW ZAP (in CW and CW-R, the dial onto the signal the CW Tuner hears, as the CW 1:2 ZAP button; up to v0.3.9 neither was a key action, #196), SWL panel (as the X6100 hand mic's GENE: the broadcast stations on the air within 2 kHz, again the next one), SWL: save channel (as its NW: the station shown saved as a channel; up to v0.3.11 neither was a key action, so an X6200 could not open the panel, #155), ATT on/off, PRE on/off, tuner on/off, tuner tune (transmits a carrier), TUNE ext. tuner on/off (a carrier for a tuner at the antenna, see [TUNE for an external tuner](#tune-for-an-external-tuner)) |
 | Digital modes | RTTY, FT8, WSPR, JS8, SSTV, WeFax, NavTex, RADE, PSK, Olivia, JTTY, the Modes menu |
-| Tools | Cluster, CW Trainer, CW Keyboard, Field Ops, Bands, Propagation, Channels, Scanner, Internet radio, Zello, SVXConnect, Flights, HF Air Band, CB, Weather, RX recorder, SWR Scan, GPS, QTH grid, Settings, Sentry, Airspace, Birdie Cal, Time Signal, On the Air |
+| Tools | Cluster, CW Trainer, CW Keyboard, Mail, Field Ops, Bands, Propagation, Channels, Scanner, Internet radio, Zello, SVXConnect, DMR, Flights, HF Air Band, CB, Weather, RX recorder, SWR Scan, GPS / Clock, QTH grid, Settings, Sentry, Airspace, Birdie Cal, Time Signal, On the Air |
 
 Up to v0.3.12.23 RADE was on the list but did nothing from a key.
 
@@ -525,8 +592,9 @@ While it is on, LOCK shows in the frequency strip, the main knob and F-INP
 do not tune, the step mark under the frequency goes and the frequency scale
 greys out, and the browser panel, TCI programs, Pat's QSY (Winlink) and Field
 Ops' band tune are refused. The band keys, memories, channels (the
-CHANNELS window and the hand mic's UP/DOWN), cluster spots and CAT still
-tune: they are chosen, and LOCK is there against a knob turned by accident.
+CHANNELS window and the hand mic's UP/DOWN on Channels), cluster spots and CAT
+still tune: they are chosen, and LOCK is there against a knob turned by
+accident. The hand mic's UP/DOWN on Tune are the knob: LOCK stops them.
 LOCK stays on after them. Up to v0.3.11 LOCK refused channels too
 (issue #111).
 - LOCK is left of the frequency; in VISION in front of the locator; in Black
@@ -555,7 +623,7 @@ one second.
 | F-INP (H-22: the red F-INP/ENT) | both | the frequency box, see below | |
 | F1, F2 | both | the action set in Settings > Keys > HAND MIC KEYS: F1 steps up, F2 does nothing until it has one | F1 steps down, F2 as set |
 | F3 | H-22 | as F2, with its own action (X6200: Settings > Keys > HAND MIC KEYS) | as set |
-| UP, DOWN (H-22: the arrow keys) | both | the [channel](#channels) before or after the last one tuned, its name shown (not while an app holds the frequency or the mode; LOCK lets it through) | band up or down |
+| UP, DOWN (H-22: the arrow keys) | both | as Settings > Keys > HAND MIC KEYS > Hand mic UP/DOWN has it. Channels (the default): the [channel](#channels) before or after the last one tuned, its name shown (not while an app holds the frequency or the mode; LOCK lets it through). Tune: the frequency one step up or down, as one click of the main knob (see below) | band up or down, with either |
 | MODE | both | the next mode: LSB, USB, CW, CW-R, AM, NFM (and SAM, WFM on the X6200) | DIG on or off in SSB, like a long press of the front SSB key |
 | V/M | both | the [CHANNELS](#channels) window (not over an app that has the screen) | |
 | VOL+, VOL- | H-22 | the RX volume one step up or down, shown like the VOL knob's | held: on by itself from 0.4 s, before the long press, about ten steps a second until let go |
@@ -574,6 +642,18 @@ one second.
   it only closes it.
 - In a list or a text box (the WiFi password) the digits, the dot and CE type
   instead.
+- Hand mic UP/DOWN on Tune: each press of UP or DOWN moves the frequency one
+  tuning step, as one click of the main knob, as on the stock firmware. Tune
+  along a band without looking, counting the presses: with a 500 Hz step,
+  three presses of UP are 1.5 kHz up. The key goes the knob's way in all:
+  the step of the mode and zoom (FST changes it), no speed-up, the VFO you
+  are on, Mode from band plan, LOCK and an app holding the frequency stop
+  it, the cluster spot snap holds it on a spot as a slowly turned knob
+  (Spot snap hold), and in an app that uses the main knob for itself (FT8's
+  TX offset) a press moves that. A press acts as the key is let go; held a
+  second it is band up or down instead, and held longer it does not repeat.
+  Hidden buttons stay hidden, as with the knob. Up to v0.3.12 UP and DOWN
+  always recalled channels (issue #300).
 - The H-22's UP and DOWN keys on its side change band like the BAND keys.
 - The X6100's hand mic works on the X6200 too, its keys as in this table: the
   digits go to the bands printed on them (3 = 40 m) and its dot to none. The
@@ -585,8 +665,9 @@ one second.
 
 ### Keyboard
 
-A USB keyboard, or a Bluetooth one paired in Settings > Bluetooth > DEVICES,
-types in the text boxes and the apps.
+A USB keyboard, or a Bluetooth one paired in Settings > Bluetooth > DEVICES
+(or in the [first-start guide](#first-start-guide)'s Keyboard step), types
+in the text boxes and the apps.
 
 Settings > Keys > KEYBOARD AND MOUSE > Shortcuts, off by default, decides whether it
 does more than type:
@@ -596,7 +677,8 @@ does more than type:
   JTTY, the shell), with Enter, Backspace, the arrows and ESC in them;
   anywhere else a key does nothing (it still lights a dark screen).
   CapsLock is plain Caps Lock, with no chords, and `[` `]` are no CW
-  paddle. The knobs, the buttons and the touch screen work as always.
+  paddle. The knobs, the buttons and the touch screen work as always, and
+  so do the volume keys (below).
 - On: everything below as well. The keys stand in for the knobs on the main
   screen and in the apps, CapsLock's chords work (CapsLock+Space is PTT),
   and in CW `[` `]` are the paddle.
@@ -606,6 +688,26 @@ the knobs (see [Buttons and knobs](#buttons-and-knobs)), `f` for the
 frequency box and, in CW, the [CW line](#cw-from-the-keyboard). Scroll Lock
 turns the [frequency lock](#buttons-and-knobs) on and off and Print Screen
 takes a screenshot, both on the main screen only.
+
+The volume keys (Volume Up and Down: a keyboard's media keys, a Bluetooth
+volume knob) step the RX volume as the H-22's [VOL+ and VOL-](#hand-mic), in
+every window and in CW too, with Shortcuts on or off: they are not the VOL
+knob's `[` and `]`, which are the paddle in CW (with Shortcuts on). They
+never type. A keyboard whose media keys are an input device of their own
+(most of them) has them read beside its letters.
+
+What `[` and `]` are is set for each device in Settings > Keys > KEYBOARD AND
+MOUSE, which has a row for every USB or Bluetooth keyboard, knob or macro pad
+connected as the page opens (connect one, then open the page): **Paddle in
+CW** (the default, as on every keyboard: with Shortcuts on the VOL knob's
+keys, and in CW the paddle; with Shortcuts off they only type) or
+**Volume**. A device set to Volume never keys the radio: its `[`
+and `]` step the RX volume as its volume keys do, in every window and in CW
+too, and never type. That suits a Bluetooth volume knob or a macro pad set up
+to turn the volume with `[` and `]`. Beside a keyboard, a device set to Volume
+is read for the volume only and the keyboard types; alone, it is the keyboard
+for its other keys (a knob's `-` and `=` still tune, with Shortcuts on). The choice is kept for
+the device (its bus, vendor and product) when it comes back.
 
 The keyboard's layout is set in Settings > Keys > KEYBOARD AND MOUSE > Layout: US (the
 default, and the only one up to v0.3.9), UK, German (QWERTZ), Swiss German,
@@ -635,6 +737,7 @@ Bluetooth ones too, which often have no F keys, or only with Fn.
 | F | The frequency box, as `f`, also in CW, where `f` goes into the CW line | main screen |
 | 1 to 5 | In CW, the MSG > CW messages 1 to 5, keyed from the [CW line](#cw-from-the-keyboard) | main screen |
 | 1 to 8 | [JTTY](#jtty)'s macros F1 to F8, as their buttons | JTTY |
+| 1 to 6 | [RTTY](#rtty)'s macros, as their buttons | main screen in RTTY |
 | Up, Down | The next band up or down, as the [BAND keys](#band-keys) | main screen |
 | Space | PTT on, and at the next press off (below) | on: main screen; off: everywhere |
 
@@ -642,7 +745,8 @@ Bluetooth ones too, which often have no F keys, or only with Fn.
   Talkie mode](#walkie-talkie-mode). Elsewhere these chords do nothing, and
   type nothing: in walkie mode CapsLock+Space keys nothing (it still lets go).
   RTTY receives on the main screen, with no window of its own: there the
-  chords work, and CapsLock+L logs the QSO as RTTY.
+  chords work, and CapsLock+L logs the QSO as RTTY. There a letter or digit
+  typed opens RTTY's line to send, with it in (see [RTTY](#rtty)).
 - The keys count by their place on a US keyboard, whatever the Layout. The
   letters are in the same place on AZERTY and QWERTZ keyboards; on an AZERTY
   one CapsLock+1 is the key marked & and 1. The CW paddle keys (`[` and `]`
@@ -745,8 +849,8 @@ reads CW 1:2, then F5), opens a one-line box near the top,
   takes 64 characters. Field Ops' Log QSO takes them too, after the call,
   the reports and their reference (issue #195).
 - In CW with the decoder's text on the screen (and in RTTY) the call it
-  confirmed last is in the box already. Not in SSB after CW: the call heard
-  in CW stays out.
+  confirmed last is in the box already, never one from what RTTY sent. Not
+  in SSB after CW: the call heard in CW stays out.
 - With the dial on a [DX Cluster](#dx-cluster) spot, the box opens with the
   spot's call in it, however you tuned there, the main knob too: within
   1 kHz of a spot the waterfall marks in SSB, AM and FM, within 200 Hz in CW
@@ -2139,6 +2243,29 @@ web configurator (System > Update).
     `/etc/openx6x00-image`, which no update touches, and each version lists the
     level it wants in `/usr/share/x6100/image-required`. Images up to v0.3.3
     have no stamp and count as level 1.
+- On a multiboot card (several systems behind a boot menu, made with SQ6RT's
+  [Xiegu Multi-Boot](https://github.com/TomekR1/Xiegu6x00-Multi-Boot) app):
+  - The update above works as on a card of its own: it replaces files of
+    this system only, never a partition, the menu or the other systems.
+  - A new card image does not go onto the card: written there, it erases the
+    boot menu and the other systems. Rebuild the card in the app instead,
+    with the new version and "Carry the settings over from the old card"
+    ticked.
+  - The radio says so itself: the message at the start ("New card image: use
+    Multi-Boot") and the card-image line of Settings > Info > Update ("New
+    card image for this version, rebuild the card with Multi-Boot: ...").
+    This fork's updater (`x6100-update`) and the web Update page do not
+    look at it: on such a card take their "new card image" as the cue to
+    rebuild the card in the app.
+  - How it knows, at each start (`/etc/init.d/S01multiboot`, into
+    `/tmp/x6100-multiboot`): `x6100mb=` on the kernel's command line (the
+    menu of the CX8ANM edition's fork of the app), the system on another
+    partition of the card than its second, or `bootmenu.env` on the card's
+    first partition. Our own card has none of these. `cat
+    /tmp/x6100-multiboot` over SSH says how it was told (no file: a card of
+    its own).
+  - From the CX8ANM edition of OpenX6X00 (condoruy). Checked on a PC only
+    (`make -C tools/multiboot test`), not yet on a radio with such a card.
 
 ### The SD card's kernel and U-Boot
 
@@ -2466,6 +2593,15 @@ The BAND keys (and the hand mic's long UP/DOWN, a keyboard's CapsLock+Up and
 Down, the Walkie Talkie's Band buttons, the browser panel) step through the
 active bands of the band list, from the frequency up or down.
 
+- A BAND key steps on the press, as on the stock firmware, and held it goes
+  on: the next band half a second later, then one every 0.3 s, until it is
+  let go. Up to v0.3.12 the step came on the release, so it felt late, and a
+  press held past one second (the long press time) did nothing, nor did a
+  tap the radio read late while busy (just after a band change, a quick turn
+  of the knob, an app closing) (#233). An app with its own band list (FT8,
+  WSPR, PSK, Olivia, JTTY) steps through it the same way. The browser's
+  screen keys work like the radio's.
+
 - They skip a band the radio cannot tune: 4 m (70 MHz), 2 m and 70 cm,
   unless a transverter that is on (Settings > General > TRANSVERTERS) or, on
   the X6200, the WR12 covers it (see [WR12 receiver](#wr12-receiver-x6200)).
@@ -2532,6 +2668,15 @@ active bands of the band list, from the frequency up or down.
   Airband, after 6 m on the band keys. They are receive only: PTT, the digital
   apps, CW from the keyboard, the tuner and the SWR scan are refused there:
   "No TX on 100.000 MHz", then "Receive only there".
+- Wide FM's filter (X6200): 16 kHz by default, the widest the X6200's base
+  takes and the stock firmware's own WFM filter. Filter BW (the knob, the
+  button, the info bar) shows the whole width, both sides of the dial, as the
+  stock firmware does, from 16 kHz down in 100 Hz detents; Filter high is the
+  edge on one side, 8 kHz at the widest. Up to v0.3.12 Filter BW showed that
+  edge, 8000 Hz at the default and 10000 Hz at most: the base took 8 to 10 kHz
+  all as 16 kHz, so the sound was the same, only the number was half (issue
+  #283). A filter set to 10000 then is 16 kHz now. AM, NFM and SAM still show
+  the edge as Filter BW. CAT reports WFM's filter by its edge, as before.
 - The same refusal holds anywhere the radio does not transmit: above 55 MHz
   without a transverter, and what the WR12 receives unless a transverter with
   a shift covers it (the transverter wins, see
@@ -3038,7 +3183,7 @@ Where: Settings > Display > WATERFALL.
 | 3D depth, tilt, floor | shown with 3D: the traces (8-64, every third line), the view from the front (0) to from above (10), how much above the noise floor is cut away |
 | 3D range | shown with 3D: the dB above the noise floor at a trace's full height (20-60, 40 by default); less makes weak signals taller |
 | 3D peaks | shown with 3D: the newest trace's peaks held a moment |
-| 3D glide | shown with 3D: the traces move back smoothly, 30, 20 (default) or 15 pictures a second, fewer for less CPU; Off, a step at each new line: the least CPU |
+| 3D glide | shown with 3D: the traces move back smoothly, 30, 20 (default) or 15 pictures a second, fewer for less CPU; Off, a step at each new line: the least CPU. With 10 or more new lines a second (the default waterfall speed) the lines are smooth as they are and no pictures are drawn between them |
 
 With 3D on, the waterfall area shows the spectrum in perspective, as on
 some other makers' radios: the newest trace at the bottom, every third line
@@ -3151,6 +3296,24 @@ issue #132).
 - A zoom between those four, which CAT or the browser panel can set, keeps
   the step in use.
 
+Tuning steps from, to. Where: Settings > Display > MAIN SCREEN, under Step
+per zoom (also on the web configurator's Display page, as Tuning steps from
+and Tuning steps to; 10 Hz to 100 kHz by default).
+
+- The steps FST, a keyboard's `+` and `_`, the step up and step down key
+  actions and a knob's Step go through: from the first to the second, of
+  10 Hz, 100 Hz, 500 Hz, 1 kHz, 5 kHz, 10 kHz, 25 kHz and 100 kHz. 10 Hz to
+  500 Hz, for example, and FST goes 10 Hz, 100 Hz, 500 Hz and round to 10 Hz
+  again; held, it goes down and round from 10 Hz to 500 Hz. A knob stops at
+  the two ends.
+- A step outside the range (chosen before it was narrowed, a mode's own
+  with Zoom and step per mode on, set by CAT or the browser panel, or
+  brought back by Step per zoom) stays until FST is pressed: then it goes to
+  the step of the range above or below it, round past the end, as FST goes.
+  The main knob tunes with it meanwhile.
+- The two in either order: 500 Hz to 10 Hz is 10 Hz to 500 Hz. Both the
+  same: that one step only.
+
 Wider than 100 kHz (the X6200, #131). The X6200's base sends its spectrum up
 to 384 kHz wide, so the X6200 has two wider zooms beyond 100 kHz: 192 and
 384 kHz, reached as the others are (Span + past 100 kHz, the MFK's Zoom, the
@@ -3197,6 +3360,36 @@ Colours, on the web configurator's Display page:
 | Trace colour | Theme, or your own |
 | Fill colour | As trace, or your own (the trace is then drawn over it) |
 | Filter colour, Filter shade, Shaded part | as on the radio (above); up to v0.3.9 not on the web page, Shaded part from v0.3.12 |
+
+Full screen (#302). The waterfall over the whole screen, 2D or 3D, with its
+band plan strip, the scale's lines, the cluster spots and the cluster column;
+the top bars, the frequency strip, the S-meter, the spectrum and the buttons
+are out of sight. Off by default, and not kept over a restart.
+
+- On and off: give a key "WF full screen on/off" in Settings > Keys (the long
+  press of GEN, APP, KEY, MSG, DFN, DFL or FST, or a hand mic F key). The same
+  key goes back. Out of the box it is DFL's long press (and so the X6100
+  hand mic's FIL held), see [Buttons and knobs](#buttons-and-knobs).
+- A tag in the bottom left corner keeps the frequency and the mode in sight.
+- The main knob tunes, PTT keys the radio, and the band, mode, PRE, AGC, ATU,
+  A/B, FST and LOCK keys do what they always do; their notes show over the
+  waterfall. VOL and the MFK say their control and value on the message line,
+  as with the buttons hidden.
+- F1-F5 bring the normal screen back, and that press does nothing more: a
+  button not seen is never pressed. A tap of GEN, APP, KEY, MSG, DFN, DFL or
+  VM brings it back too, with the key's buttons.
+- An app, Settings, the frequency box or any other window opens on the
+  normal screen: full screen ends first. With an app or RTTY open the key
+  says "Full screen: not over an app". Not in walkie mode, which has its own
+  [mini waterfall](#walkie-talkie-mode).
+- On the air the tag turns red and reads TX before the frequency, a red frame
+  goes around the screen, and the TX panel (power, SWR, ALC) shows as on the
+  normal screen.
+- The waterfall keeps its lines both ways: going to full screen they are at
+  the top and it fills up below them, going back the newest that fit stay.
+  The same now when the spectrum's height changes or the spectrum is switched
+  on or off, and over a new theme; up to v0.3.13 those started an empty
+  waterfall.
 
 ### Band plan
 
@@ -3339,15 +3532,26 @@ bars. It follows the theme.
   spectrum (fill, peaks, colours, filter and VFO line), with the band edges
   in MHz and the span under it. The zoom is the main screen's. It runs also
   when the main spectrum is turned off.
+- Mini waterfall (Settings > Walkie > Mini waterfall, off by default, #302):
+  a small waterfall in the bandscope's frame in place of the trace, the
+  newest line at the top, in the waterfall's colours, with a line where the
+  VFO is. The band edges and the span under it stay, and the zoom is still
+  the main screen's. Switched live, the screen up or not, also on the web
+  configurator's Display page (Spectrum and waterfall > Walkie mini
+  waterfall).
 
 Where: Settings > Walkie > WALKIE TALKIE > Walkie Talkie (or Settings >
 General > CONTROLS > Walkie Talkie). The screen turns to portrait at once, no
 restart.
 
 > **How to leave Walkie Talkie mode**
-> 1. Press **APP**: the walkie buttons appear on the left edge, the first one reads "(WLK 1:4)".
-> 2. **Hold** that first button "(WLK 1:4)" (or press it three times): it goes to "(WLK 4:4)".
-> 3. **Hold** the button **"Exit hold"** for a second. The radio goes back to the normal landscape screen.
+> **Hold APP** for a second. The radio goes back to the normal landscape screen. The radio says so each time
+> it enters walkie mode ("Hold APP to leave walkie mode"), also when it starts in it: the mode is kept over a
+> restart. From v0.3.14; issue #334.
+>
+> Up to v0.3.13, and still there: press **APP** (the walkie buttons appear on the left edge, the first one
+> reads "(WLK 1:4)"), **hold** that first button (or press it three times) until it reads "(WLK 4:4)", then
+> **hold** the button **"Exit hold"** for a second.
 
 - PTT: the PTT key on the side of the radio. It transmits with the built-in
   microphone (Settings > Walkie > Microphone); the border turns red and the
@@ -3377,7 +3581,7 @@ restart.
   - They are kept in /mnt/walkie_channels.json, the same format as
     channels.json with the channel number in "ch". A name can be written
     there; the radio shows it.
-- Exit: APP, then WLK 4, hold "Exit hold" (steps in the box above). The screen
+- Exit: hold APP, or APP, then WLK 4, hold "Exit hold" (the box above). The screen
   goes back to landscape, no restart.
 - Not in walkie mode: the apps, Settings and the hand mic keys. Leave walkie
   mode to use them.
@@ -3386,8 +3590,9 @@ restart.
 
 APP (page 2) > Settings. The tabs are on three button pages: General, Display,
 Audio, Wireless (page 1); Bluetooth, Keys, Cluster, TX Cal (page 2); Info,
-Walkie (page 3). The page button, or the APP key pressed again, turns the
-page and opens its first tab.
+Walkie, Voice (page 3). The page button, or the APP key pressed again, turns the
+page and opens its first tab. The page button held goes one page back and
+opens that page's first tab.
 
 The MFK walks the controls and stops at the first and last one. There the
 page shows its top or its end, so status rows below the last control are
@@ -3399,13 +3604,13 @@ base is too old.
 
 | Card | Options |
 |---|---|
-| STATION | First-start guide (Start runs the [first-start guide](#first-start-guide) again), callsign (an empty field clears it), QTH locator, Country (the country you operate from, "-" for none, the default; the names in the screen's language, from the Unicode CLDR; the band plan's Auto takes its region when the GPS and the locator do not tell, see [Band plan](#band-plan); the [CB](#cb) app takes its plan until one is chosen there), Band plan (Auto, Region 1, 2 or 3, US Extra, Advanced, General or Technician: see [Band plan](#band-plan)), Mode from band plan (the knob turned into another band plan segment sets its mode: CW in a CW segment, the band's sideband in a phone segment; SSB and CW only), Independent VFOs (VFO A and VFO B each keep their own band, frequency and mode: a band key moves the VFO you are on only, the VFO key brings the other one's band back, A=B copies everything to the other VFO; off, a band key brings both VFOs of that band, and a VFO tuned into another band leaves the other as it was, see [Band keys](#band-keys)) |
+| STATION | First-start guide (Start runs the [first-start guide](#first-start-guide) again), callsign (an empty field clears it), QTH locator, Country (the country you operate from, "-" for none, the default; the names in the screen's language, from the Unicode CLDR; the MFK goes down the list to the last one, its lines a little closer together than in a short list, where up to v0.3.13 it stopped scrolling at Suriname, issue #310; the band plan's Auto takes its region when the GPS and the locator do not tell, see [Band plan](#band-plan); the [CB](#cb) app takes its plan until one is chosen there), Band plan (Auto, Region 1, 2 or 3, US Extra, Advanced, General or Technician: see [Band plan](#band-plan)), Weather from (where APP > Weather, its notices and the web Weather page ask the weather for: Auto, the default, where the radio is; Locator, the QTH locator whatever the GPS says; Typed, the Weather place below), Weather place (degrees, "50.85, 4.35" or "34.9S 56.16W", or a locator, typed with the keyboard; typing one sets Weather from to Typed, an empty field clears it and Weather from goes back to Auto; see [Weather](#weather)), Weather units (Metric, the default, or US: °F, mph, inHg, inches and miles in APP > Weather, its notices and the web Weather page, which sets it too; see [Weather](#weather)), Mode from band plan (the knob turned into another band plan segment sets its mode: CW in a CW segment, the band's sideband in a phone segment; SSB and CW only), Independent VFOs (VFO A and VFO B each keep their own band, frequency and mode: a band key moves the VFO you are on only, the VFO key brings the other one's band back, A=B copies everything to the other VFO; off, a band key brings both VFOs of that band, and a VFO tuned into another band leaves the other as it was, see [Band keys](#band-keys)) |
 | DATE / TIME | date, time, time zone, 12-hour clock (the clock at the top right as `1:05:30 PM`, off as `13:05:30`, the default; VISION shows `1:05 PM`, Ops Room's digits the hours 1 to 12 without AM or PM; Field Ops' clock and its QSO times and Walkie Talkie's clock follow it, `1:05 PM`; the logs, FT8 and the other digital modes stay on UTC; #54) |
 | CONTROLS | Freq acceleration, Accel. onset, Charger (Off, On, Shadow), Per band S-meter cal, TX shift of the band the radio is on (see [TX shift](#tx-shift)), Walkie Talkie (see [Walkie Talkie mode](#walkie-talkie-mode)) |
 | TRANSVERTERS | two transverters: from, to, shift in MHz; a shift of 0 is off, the default on both radios (see [Amateur bands only](#amateur-bands-only) and [WR12 receiver](#wr12-receiver-x6200)); TX power limit, W: Off, or 0.1 W up to the radio's top (see [Transverter TX power limit](#transverter-tx-power-limit)) |
 | WR12 RECEIVER | the X6200 only: WR12 on HOST (see [WR12 receiver](#wr12-receiver-x6200)) |
-| TCI SERVER | on/off, port and status, connected client, Clients (Operate or Listen only), Ask before TX (on by default) and Allowed with Forget all (see [TCI server](#tci-server)) |
-| TEXT LOG | Keyboard modes (on by default), Size limit (1-100 MB, 10 MB by default): what PSK, Olivia, Contestia and JTTY receive and send, and what RTTY receives, on the card (see [Text log of the keyboard modes](#text-log-of-the-keyboard-modes)) |
+| TCI SERVER | on/off, Port / Status (the port, "connected" while a client is), Connected from (the address of each client connected), Clients (Operate or Listen only), Ask before TX (on by default) and Allowed with Forget all (see [TCI server](#tci-server)) |
+| TEXT LOG | Keyboard modes (on by default), Size limit (1-100 MB, 10 MB by default): what PSK, Olivia, Contestia, JTTY and RTTY receive and send, on the card (see [Text log of the keyboard modes](#text-log-of-the-keyboard-modes)) |
 
 Main knob acceleration. Where: Settings > General > CONTROLS > Freq
 acceleration.
@@ -3468,11 +3673,11 @@ Per band S-meter cal: see [S-meter](#s-meter). TCI SERVER: see
 
 | Card | Options |
 |---|---|
-| BACKLIGHT | Timeout (0 off), Brightness (see below), buttons brightness (Always Off, Always On, Temporarily On), Screensaver (None, Matrix rain), Screensaver (min) (with a screensaver: 1-120 minutes without use), Rain speed (Normal, Slow, Very slow), Screen off (min) (minutes without use, 0 never; the key that wakes it does nothing else), Screen always off (the screen stays dark for a radio run from the VFO-Knob or a browser, no screensaver; POWER shows it for the blank time, a minute at least); see [Screensaver](#screensaver) |
+| BACKLIGHT | Timeout (0 off), Brightness (see below), buttons brightness (Always Off, Always On, Temporarily On), Screensaver (None, Matrix rain), Screensaver (min) (with a screensaver: 1-120 minutes without use), Rain speed (Normal, Slow, Very slow), Screen off (min) (minutes without use, 0 never; the key that wakes it does nothing else), Screen always off (the screen stays dark for a radio run from the VFO-Knob or a browser, no screensaver; POWER shows it for the blank time, a minute at least); see [Screensaver](#screensaver); Panel stripes fix (off by default; see [Panel stripes fix](#panel-stripes-fix)) |
 | SPECTRUM | Spectrum; with it on Fill, Peaks, Fill gradient, Fill by level, Filter colour, Filter shade, Shaded part, Height (see [Waterfall](#waterfall)) |
 | WATERFALL | see [Waterfall](#waterfall) |
-| MAIN SCREEN | Band plan, Cluster spots, Channels, Cluster column, Broadcast names, S-meter type, S-meter colours, Needle lamp, Birdies (see [Birdie Cal](#birdie-cal)), Zoom and step per mode, Step per zoom (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)) |
-| INTERFACE | Popups Freq/Info/TX, Icon menus, Knob info, Hide buttons (Off, After 3 s, After 5 s, After 10 s), Keep knob lines, Theme, Font, Language, Decoder text, FT8/FT4 info |
+| MAIN SCREEN | Band plan, Cluster spots, Channels, Cluster column, Broadcast names, S-meter type, S-meter colours, Needle lamp, Birdies (see [Birdie Cal](#birdie-cal)), Zoom and step per mode, Step per zoom, Tuning steps from, to (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)), Callsign (see below), CW tune and WPM (Spectrum, Frequency strip; see [CW decoder](#cw-decoder)) |
+| INTERFACE | Popups Freq/Info/TX, Icon menus, Knob info, Hide buttons (Off, After 3 s, After 5 s, After 10 s), Keep knob lines, Knob press: next control, Theme, Font, Language, Decoder text, FT8/FT4 info |
 
 - Timeout (0 off), Brightness: the seconds without a key or a knob before
   the screen dims, 5 to 120 (30 by default), and the slider of the
@@ -3510,6 +3715,9 @@ Per band S-meter cal: see [S-meter](#s-meter). TCI SERVER: see
   back (see [Buttons and knobs](#buttons-and-knobs)).
 - Keep knob lines (Off by default): with Hide buttons on, the knob lines
   stay on the screen when the buttons hide.
+- Knob press: next control (Off by default): a short press of VOL or the
+  MFK takes the next control on its list, a long one chooses or changes
+  (see [Buttons and knobs](#buttons-and-knobs)).
 - Theme: see [Themes](#themes). A new theme applies at once, without a restart.
 - Font: Sony Sketch, Roboto or DejaVu (default). A new font applies at once.
   Themes with their own font (Classic, Black Metal, Total Black, 1bit,
@@ -3531,6 +3739,31 @@ Per band S-meter cal: see [S-meter](#s-meter). TCI SERVER: see
   channels first, so they keep their places; the tuning snaps to them as to a
   spot). A channel added or renamed on the web Channels page shows within a
   second (#203).
+- Callsign (off by default, from v0.3.13; issue #292): your callsign
+  (Settings > General > STATION, a CB call too) small on the main screen,
+  in the theme's dim text colour: a reminder of the call you use, portable
+  or in a park, and for anyone looking at the radio or a photo of the
+  screen. It comes at once, and follows a new callsign within 2 seconds.
+  Where it sits:
+  - Most themes: in the frequency strip, on the right in front of the
+    locator. When the strip needs the room (a split, with its second
+    frequency) it hides until the room is back. VISION moves its big digits
+    a little left for it, as far as the band name keeps its room.
+  - Black Metal and Total Black: in the second row at the top, between
+    BW IF STEP and the battery; it hides while that row leaves it no room
+    (a wide filter, a big step, a long callsign).
+  - Amber Trey: under the display, in the middle of the bottom line.
+  - With it on, the built-in boot logo also shows the callsign over its
+    ring, the last thing to come in, from the next start (after the CX8ANM
+    edition, condoruy). A picture of your own (see
+    [Boot picture](#boot-picture)) is shown as it is.
+
+  No callsign set: nothing is shown.
+- CW tune and WPM (Spectrum by default, from v0.3.14; issue #308): where
+  the CW Tuner's bars and the decoder's speed are in CW and CW-R. Spectrum
+  keeps them over the spectrum or the waterfall, as before. Frequency strip
+  puts them in the strip between the band and the frequency; see
+  [CW decoder](#cw-decoder).
 
 All these options are also on the web configurator's Display page.
 
@@ -3651,11 +3884,34 @@ off 5: POWER shows the screen 5 minutes, as before (0 would be one), and
 with Screen always off cleared later it goes dark at 5 with the screensaver
 at 4, as it would have.
 
+#### Panel stripes fix
+
+Where: Settings > Display > BACKLIGHT (also on the web configurator's
+Display page). Off by default.
+
+For a screen that shows thin vertical coloured stripes in its darkest
+shades: in the dark bars and buttons, the frequency strip, the see-through
+panels over a dark waterfall. Some newer X6100s do this (issue #239). The
+picture the radio makes is clean; the stripes come where the panel is sent
+a colour of 8 to 31 out of 255. With the fix on, the radio's display engine
+sends each of those shades out as 32, in each of red, green and blue, on
+its way to the panel: the stripes go, and the darkest shades look a little
+lighter and greyer. Black (0 to 7) and everything from 32 up stay as they
+are. Leave it off on a screen without stripes.
+
+- It costs nothing: the panel controller in the processor does it for every
+  pixel, nothing is drawn differently.
+- It is set again when the screen comes back from dark and when the radio's
+  screen starts, and looked at every few seconds while on. Off takes it away
+  at once.
+- The X6200 has the same processor, so the setting is there too; no X6200
+  with stripes is known.
+
 ### Audio tab
 
 | Card | Options |
 |---|---|
-| RX AUDIO | Speaker mode, Line-in / Line-out, Play / Rec gain, Boot sound (CQ CQ in CW with the boot logo, quiet; at volume 28 when your VOL is lower; off by default), Speaker always off |
+| RX AUDIO | Speaker mode, Line-in / Line-out, Play / Rec gain, Boot sound (Off, CQ CQ, Callsign, Own text: CW with the boot logo; see below; off by default), Speaker always off |
 | TX AUDIO | compressor (threshold, makeup), TX filter, FM pre/de-emphasis: an X6100 with a patched base only (r3, r8, r9 and later, see [the table at the top](#setting-up-the-transmitter)); hidden on Xiegu's own base and on the X6200 |
 | MICROPHONE | Input (Built-in, Hand, Auto), Hand mic gain, Built-in gain, Moni level (0-100, 0 by default) |
 | VOX | On, Gain, Anti-VOX, Delay |
@@ -3666,6 +3922,25 @@ speaker and the TX monitor stay silent whatever the volume, and there is no
 boot sound. The sound to the browser, TCI and Bluetooth headphones goes on as
 before. Turning VOL says so on the screen. The CW sidetone keeps its own level
 (Key volume). Also on the web configurator's Display page, Remote station card.
+
+Boot sound: CW on the speaker while the boot logo comes in, its last
+character as the logo is whole; quiet, at volume 28 when your VOL is lower.
+Off by default. What it plays (issue #289, from v0.3.13; up to v0.3.12 it
+was a switch, and on it played CQ CQ, which it still does after the update):
+- CQ CQ, at 20 WPM.
+- Callsign: your callsign (Settings > General > STATION). With none set,
+  CQ CQ.
+- Own text: Boot text below it opens the keyboard: up to 16 letters,
+  figures, spaces and . , ? / = - and a prosign such as `<SK>`; small
+  letters become capitals, what CW has no code for is left out. With no
+  text, CQ CQ.
+
+The note beside the choice says what it plays and how fast. The CW lasts
+3.9 s at most, a little longer than CQ CQ: a longer text is sent faster to
+fit, up to 40 WPM; one still too long then is cut after the last character
+that fits (not on a stroke: EA8/ON6URE/P plays EA8/ON6URE), and Settings
+says so when you enter it. The boot is never longer for it. Not on the web
+configurator.
 
 Line-in and Play / Rec gain are separate settings:
 
@@ -3718,7 +3993,11 @@ the X6200 a screen recording does not raise it (see
 | ETHERNET | a USB Ethernet adapter: DHCP or a static address (see [Ethernet](#ethernet)) |
 
 WiFi/BT power switches the WiFi and Bluetooth chip (one chip for both): with
-it off, Bluetooth is off too. Bluetooth has its own tab.
+it off, Bluetooth is off too. Bluetooth has its own tab. The switch flipped
+twice in a moment ends as it stands: off stays Off, on comes back by itself.
+If the chip drops off under the radio (its USB link reset), the status says
+Starting until it is back, then the radio joins again; up to v0.3.13 it kept
+saying Connected.
 
 Joining a network:
 
@@ -3914,9 +4193,9 @@ by itself. The 20 MHz and channel 12 and 13 settings in `x6100-wifi.conf` are
 | TOP AND SIDE KEYS | a press and a hold of FST, ATU, A/B, the band keys and the mode keys (X6100: PRE and AGC too), each the key's own job or an action; Reset to own (#111) |
 | USER PAGE | the actions of the USER page's F1-F5 (#111) |
 | FREQUENCY LOCK | Per band and mode: each band and mode its own lock, off by default (#111) |
-| HAND MIC KEYS | F1, F2, F1 long, F2 long; on the X6200 F3 and F3 long too, for the H-22's F3 (see [Hand mic](#hand-mic)) |
+| HAND MIC KEYS | Hand mic UP/DOWN (Channels, the default: UP and DOWN recall the channels; Tune: they move the frequency a step, as the main knob), F1, F2, F1 long, F2 long; on the X6200 F3 and F3 long too, for the H-22's F3 (see [Hand mic](#hand-mic)) |
 | PADDLE | USB paddles: Connected, the dit/dah of each kind, Learn dit and dah, Swap dit and dah, Serial port (see [USB paddle](#usb-paddle)) |
-| KEYBOARD AND MOUSE | Layout of a USB or Bluetooth keyboard: US by default, UK, German, French and others; Shortcuts, off by default (the keyboard only types); Mouse, off by default (see [Keyboard](#keyboard) and [Mouse](#mouse)) |
+| KEYBOARD AND MOUSE | Layout of a USB or Bluetooth keyboard: US by default, UK, German, French and others; Shortcuts, off by default (the keyboard only types); Mouse, off by default; a row for each USB or Bluetooth keyboard, knob or macro pad connected: its `[` `]` keys, Paddle in CW (the default) or Volume (see [Keyboard](#keyboard) and [Mouse](#mouse)) |
 
 ### Cluster tab
 
@@ -4191,7 +4470,7 @@ POWER, below Factory reset, has three lines:
 
 | Card | Options |
 |---|---|
-| WALKIE TALKIE | Walkie Talkie, Main knob steps channels, Microphone |
+| WALKIE TALKIE | Walkie Talkie, Main knob steps channels, Microphone, Mini waterfall |
 
 - Walkie Talkie: turns the portrait screen on. Settings closes and the walkie
   screen comes up (see [Walkie Talkie mode](#walkie-talkie-mode)).
@@ -4199,6 +4478,19 @@ POWER, below Factory reset, has three lines:
   instead of tuning. The same as the MEM/VFO button on WLK 1.
 - Microphone: the input used while the walkie screen is up (Built-in, Hand,
   Auto; default Built-in). The Audio tab's input is not changed.
+- Mini waterfall: a small waterfall where the walkie screen has its
+  bandscope (off by default: the bandscope, as before).
+
+### Voice tab
+
+| Card | Options |
+|---|---|
+| VOICE | Voice mode, Voice, Rate, Pitch, Volume |
+| VOICE BEHAVIOUR | New speech interrupts, Read decoded text, Interrupt delay, Tuning delay, Name repeats |
+
+The settings of the spoken feedback: see [Speech](#speech). On a card image
+from before speech the first row reads "Speech: Needs a newer card image";
+the settings are kept, nothing is spoken.
 
 ## Transmitting
 
@@ -4862,7 +5154,7 @@ Starting and stopping it:
 
 - A key: give "TUNE ext. tuner on/off" to a front key's long press or to a
   hand mic F key (Settings > Keys). It works with an app open.
-- The Ext tune button of the digital apps: FT8/FT4/FT2 page 5, JS8 page 7,
+- The Ext tune button of the digital apps: FT8/FT4/FT2 page 4, JS8 page 3,
   WSPR page 2, SSTV page 3, PSK31/PSK63 and Olivia page 6, JTTY page 5. It
   shows the TUNE power, and Stop while it tunes.
 - The browser Panel's TUNE button (see
@@ -5134,20 +5426,28 @@ Pressing Modes again closes the menu.
 ### FT8 and FT4
 
 APP > Modes > FT8 (or FT4, FT2). The radio tunes an FT8/FT4/FT2 frequency; the band
-keys step through the others. 80 px of waterfall (about two slots) sit above
-the list. The main knob moves your TX audio offset.
+keys step through the others. On top the lane, the calls heard over their
+offset, then 40 px of waterfall (about a slot) above the traffic (the list)
+or the tiles. The main knob moves your TX audio offset; the list or the tiles
+fade out while it turns, to show the waterfall under them. The lane, the
+tiles, the slot lines and the CQs' look in the list are F4OLI's redesign
+(OlivLoze's fork).
 
 Buttons:
 
 | Page | Buttons |
 |---|---|
-| 1 | Show: All / CQ, Mode: FT8 / FT4 / FT2, TX CQ, TX Call |
-| 2 | Hold Freq, Auto, Force QSO save, Power |
-| 3 | CQ Modifier, Time Sync, Log Map, Live Map |
-| 4 | Freq: Preset / 14.091, Hound: Off / On, Retries, For you |
-| 5 | Ext tune (see [TUNE for an external tuner](#tune-for-an-external-tuner)), Auto Sync |
+| 1 operate | TX CQ, TX Call, Show: All / CQ (held: the For you strip on / off), View: Traffic / Tiles |
+| 2 the QSO | Auto, Hold Freq, Retries, Force QSO save |
+| 3 the band | Mode: FT8 / FT4 / FT2, Freq: Preset / 14.091, Hound: Off / On, Power |
+| 4 tools | CQ Modifier, Time Sync, Live Map (held: the Log Map), Ext tune (see [TUNE for an external tuner](#tune-for-an-external-tuner)) |
+| 5 | Log Map, For you |
 
-- Show: CQ shows the CQs and the messages to you; All shows all traffic.
+- Show: CQ shows the CQs and the messages to you; All shows all traffic. It
+  filters the tiles and the lane as it does the list: a station seen in
+  another QSO under All goes from them at once.
+- View: the traffic (the list) or the tiles, below. The radio keeps your
+  choice until it restarts; it starts on the traffic.
 - TX CQ calls CQ. A band key, Freq or Mode ends the CQ: TX CQ goes to
   Disabled (after a band key or Freq the radio also says "CQ off: press TX
   CQ to call on this frequency"), and one press calls again there. A reply,
@@ -5195,8 +5495,9 @@ Buttons:
   `/mnt/rtc-drift.json`, is taken out at every start (`x6100-rtc status` over
   SSH shows it). A typical chip runs 1 to 2 s a day off; corrected, a few
   tenths of a second in a week. Time Sync and Settings' date set it too.
-- Auto Sync (page 5): Time Sync by itself, from the decodes, for a radio
-  with no WiFi or GPS. Disabled by default; a press switches it. In FT8 and
+- Auto Sync, switched on the [GPS / Clock](#gps--clock) page: Time Sync by
+  itself, from the decodes, for a radio with no WiFi or GPS. Off by
+  default. In FT8 and
   FT4 (not FT2) it reads the time offset (DT) of each station it decodes,
   one vote a station however often it is heard (a Fox counts once). Once 5
   stations or more were heard in 3 slots or more within the last 4 minutes,
@@ -5206,34 +5507,82 @@ Buttons:
   Sync: clock moved -0.42 s by the decodes of 7 stations". Then it starts
   over with the decodes that follow. It aims at the DT a right clock shows
   on this radio, a little over 0 (the signals reach the decoder a moment
-  late), not at 0. The clock must be within about 2 s first: Time Sync, at
+  late), not at 0: 0.15 s until the radio has learned its own, which it does
+  by itself while NTP keeps the clock (at home, on WiFi). The clock must be
+  within about 2 s first: Time Sync, at
   a slot start, does that. Further off it moves nothing and says so once
   ("too far: press Time Sync as a slot starts"); stations that disagree
   (two groups of clocks) move nothing either. A clock that NTP or the GPS
-  keeps is left alone. Switched on, the first answer shows too ("the clock
-  is on time by the decodes of 6 stations"). The system log has a line a
-  minute with what it reads ("ft8: Auto Time Sync: median DT ...").
+  keeps is left alone, and so is one a time station set in the last hour.
+  Off, the decodes are still read: the GPS / Clock page's "FT8 says" row
+  shows what they say of the clock. The system log has a line a minute with
+  what it reads ("ft8: Auto Time Sync: median DT ...").
 - CQ Modifier: for example `CQ POTA` or `CQ DX`.
 
-The list. Each row has the slot time, the message, and on the right the
-country with its flag, the distance (when the sender sent a grid and your
-QTH is set) and the SNR. The country comes from AD1C's cty.dat (SP2KMO's
-upstream PR #282). Settings > Display > INTERFACE > FT8/FT4 info picks what
-goes next to the SNR: km, mi, Country, Country + km (the default) or
-Country + mi. The "Saved QSO" message and the web Panel's FT8 list give the
-distance in the same unit.
+The lane. Over the waterfall, each station on the tiles (heard in the last
+2 minutes, as Show lets it) has its call written over its offset, on two
+lines where calls would meet; a call with no room on either is left out
+(its tile has it). Red: a station that called you in the last 3 minutes.
+White: a CQ. Grey: the others. Yellow: your TX offset ("TX") and, in the
+tiles, the station selected.
 
-| Row | Colour |
+The list (View: Traffic). A line with the slot's time heads its rows, and
+the rows go without theirs; your transmissions are in it, in blue, in their
+slot. The time is the slot's start (12:00:15), for each row of the slot and
+for your TX: read as the slot's tick came, it was 1 to 3 s late on a busy
+band, the slot's last decodes running first. Each row has the message, and
+on the right the country with its flag, the distance (when the sender sent
+a grid and your QTH is set) and the SNR. The country comes from AD1C's
+cty.dat (SP2KMO's upstream PR #282). Settings > Display > INTERFACE >
+FT8/FT4 info picks what goes next to the SNR: km, mi, Country, Country + km
+(the default) or Country + mi. The "Saved QSO" message and the web Panel's
+FT8 list give the distance in the same unit. The CQs stand out of the
+traffic, to answer them fast:
+
+| Row | Looks |
 |---|---|
-| CQ, not worked | green |
-| CQ, worked on another band or mode | dark green |
-| CQ, worked on this band and mode | darker green, struck through |
+| CQ, not worked | bright, a green edge, a green CQ tag |
+| CQ, worked on another band or mode | a fainter edge, a "worked" tag |
+| CQ, worked on this band and mode | the same, struck through |
+| a CQ or a call to you from a country not in your log | a yellow NEW tag |
+| the other stations' QSOs (Show: All) | grey |
 | a message to you | red |
 | your TX | blue |
+
+The countries of your log are read from the radio's QSO list as the app
+opens, and a QSO logged since adds its own; one deleted or imported meanwhile
+counts from the next time the app opens. In the 1bit theme a CQ not worked
+has a heavy left border instead of the edge.
+
+The tiles (View: Tiles). One tile a station heard in the last 2 minutes:
+flag, call, signal (one to five bars, -24 to -4 dB), country and distance,
+and a tag: "calls you" with its report (the tile red for 3 minutes after its
+call, the text white on it), NEW (a CQ from a country not in your log), CQ
+(or CQ POTA), worked (a CQ of a station worked before), called you (once
+red, or logged since), QSO (in a QSO with someone else). The stations that
+call you come first, the newest call first, then the NEW CQs, the CQs, the
+CQs worked, the others; the strongest first in each. A QSO logged ends its
+station's red. Nine a page, the page under them (1/2) when there are more.
+The MFK goes from tile to tile, its station's offset marked on the
+waterfall; a press calls the selected station as a press on its last row
+would, and the first press with none selected picks the first tile. A touch
+on a tile calls it. A press while transmitting stops TX, as on the list.
+The list goes on under the tiles: back on the traffic it is where you left
+it, still following the new rows from its last one.
 
 A POTA tag after the message marks a station spotted on POTA right now, and
 any `CQ POTA`. The spots are the ones the cluster already fetches from
 pota.app; with no spots there is no tag.
+
+Worked comes from the radio's QSO list, `/mnt/qso_log.db`: every FT8, FT4,
+FT2 and JS8 QSO, and the QSOs imported from `incoming_log.adi`. A QSO
+deleted on the web Logs page, or with its whole log on the Field Ops page,
+goes from the list too, and from `ft_log.adi` or `js8call_log.adi`: from the
+next decode the call is no longer worked, no restart. A QSO whose call,
+time, band or mode is changed there is worked under the new ones. Up to
+v0.3.12 a deleted QSO stayed in the list (issue #284); those, and the
+imported ones, are in no log on the Logs page, which counts them under
+Worked before and forgets them on request.
 
 Replying. Turn the MFK onto a row and press it. The radio
 answers that station, moves your TX offset there (unless Hold Freq is on) and
@@ -5253,8 +5602,9 @@ list, so they do not scroll away.
 - An MFK press on a row replies, as in the list.
 - With the MFK: down past the last row of the list enters the strip; up from
   its first row goes back to the list.
-- For you (page 4) turns the strip off: no pinned rows, the calls to you stay
-  in the list only, in red as before. On by default.
+- For you (page 5), or Show held (page 1), turns the strip off: no pinned
+  rows, the calls to you stay in the list only, in red as before. On by
+  default. The tiles cover the strip: they have the calls to you in red.
 - The strip has no title: a line in the "to you" colour sits on top of it.
   It is hidden when empty.
 
@@ -5336,11 +5686,43 @@ but Auto does not answer it and a press does not either, as there is no call
 to send the answer to; nothing is logged with it. The call shows once a
 message of that station's with its full call has been decoded.
 
-Log Map. Page 3 > Log Map shows the logged stations on a world map centred on you:
+CB callsigns. The app works CB stations on 11 m with a CB call as WSJT-CB,
+the 27 MHz edition of the desktop program, does, and the two decode each
+other. A CB call (26AT101, 1AT106, 999ZZ999, 999ZZ/ZZ: 1 to 3 digits, 1 or 2
+letters, then 1 to 3 digits or a stroke and 2 letters) goes in Settings >
+General > STATION as any other callsign; the setting says "CB callsign: FT8 sends no
+QTH with it; no DX cluster, RBN or Wavelog". Your CQ is `CQ 1AT106`, with
+no QTH. With another CB call the QSO goes as WSJT-CB makes it: your call to
+its CQ `<26AT101> 1AT106`, then the reports, RR73 and 73 with the other
+station's call alone, as free text: it sends `1AT106 -07`, you `26AT101
+R-05`, it `1AT106 RR73`, you `26AT101 73` (FT8 has no message with two
+such calls and a report). The messages to you name no sender: the app takes
+each one for the QSO whose station it heard on that audio frequency (within
+25 Hz), else for the QSO going on; Auto answers them, a press does too, and
+the QSO is logged as any other, with no grid. One with no QSO it could be
+part of is a message to you (red) that nothing answers. WSJT-CB's call as
+free text, its call and then yours (`1AT107 1AT106`), is taken as a call to
+you too. With an amateur call on the other side, the QSO goes as with a
+long call (above). A CB call has no country: its row shows none and the
+maps no place. A call such as 1A1, which FT8 packs as a standard one, works
+as any standard call, as in WSJT-CB.
+
+Where a CB call goes: PSK Reporter takes CB calls (it shows the 11 m spots
+of WSJT-CB stations), so the app's spots go there as any other, except a
+free-text message to you, whose sender the app worked out itself. The DX
+cluster, the Reverse Beacon Network, the activation programmes and Wavelog
+are amateur ones: with a CB call the cluster does not log in (APP > Cluster
+says "CB call: no amateur cluster login"; a Login set on its web page is
+used as it stands), the RBN does not start, Field Ops posts no spot, and no
+QSO with a CB call on either side goes to Wavelog. Transmitting on 11 m goes
+by the radio's rule, as anywhere outside the amateur bands: refused unless
+TX outside ham bands is on (see [CB](#cb)).
+
+Log Map. Page 5 > Log Map, or Live Map held (page 4), shows the logged stations on a world map centred on you:
 great-circle paths, a dot and the callsign for each station. Calls and dots
 are larger since v0.119. ESC or Log Map closes it.
 
-Live Map. Page 3 > Live Map puts on the same map every station decoded in
+Live Map. Page 4 > Live Map puts on the same map every station decoded in
 the last 15 minutes that sent a grid (a CQ or a reply with its 4-character
 square). The dot's colour is the distance from your QTH square: green under
 1000 km, blue under 3000, orange under 8000, pink beyond. Stations heard in the
@@ -5434,11 +5816,13 @@ First steps:
    timing (a drift shown on the top line); hold the button to reset it.
 3. APP > Modes > JS8. The radio tunes the nearest JS8 frequency; the band
    keys step through JS8Call's (or GhostNet's) frequencies, or type your own
-   (Freq, page 6). While JS8 is open the RX filter is 200-3000 Hz, noise
+   (Settings..., Freq). While JS8 is open the RX filter is 200-3000 Hz, noise
    reduction, noise blanker and notch are off, and power is capped at 7 W;
    all go back when you leave.
-4. Turn the MFK onto a station's row, then HW CPY? (page 1), Reply (page 2)
-   or Query > (page 1).
+4. The board shows the stations of the band as cards. Heartbeat (page 1)
+   tells them you are here; those that hear you answer and come first, in
+   red for 3 minutes, "heard you" with their report. Turn the MFK onto a card and press:
+   the conversations open on that station.
 5. ESC or the top knob stops sending; the next ESC leaves the app.
 
 Nothing sends by itself: AUTO (automatic replies), HB (heartbeats) and HB ACK
@@ -5448,24 +5832,80 @@ Buttons (the first one of each row turns the page, hold to go back):
 
 | Page | Buttons |
 |---|---|
-| 1 | CQ (hold: auto CQ), Heartbeat, Query >, HW CPY? |
-| 2 | Show: No HB / Directed / All, Reply, Send..., Clear |
-| 3 | Time Sync, Hold: Off / On, Show Stations / Messages, Inbox |
-| 4 | AUTO, HB, HB ACK, Settings... (INFO, STATUS, Relay, Groups) |
-| 5 | APRS >, Log QSO, Activ.: Off / POTA / SOTA, Log prompt |
-| 6 | Alerts >, Speed, Decode: All speeds / My speed, Freq: JS8 / GhostNet / kHz |
-| 7 | Power, Map, Ext tune, Translate |
+| 1 | Heartbeat (hold: HB in Settings), CQ (hold: auto CQ), Chat (the station chosen), Inbox (n new) |
+| 2 | Query > (HW CPY? first), Reply, Send..., View: Board / Messages / Stations |
+| 3 | Time Sync (hold: reset), Power, Ext tune, Settings... |
+| 4 | Translate, Map |
+
+The board, the main view: a card for each station of the band, nine a page,
+those that heard you first (a heartbeat answered, a call), then the others,
+newest first. A card shows the flag, the call, the signal as you hear it,
+the country and distance (from their locator, else from their country's
+middle, "~"), and a tag: "2 new" (messages for you not read), "heard you
+-12" (their report; the card red for 3 minutes after their answer, then
+plain with the tag in grey), else what they sent last (CQ, HB, X6100). The selected
+card is framed; the MFK goes from card to card, its press opens the
+conversations. On the right of the TX line: the stations heard and "HB:
+say you're here", then after a heartbeat its time and how many heard it,
+and the board's page. View (page 2) goes to the list of messages, then the
+table of stations, then back to the board.
+
+The conversations: on the left every station you are talking with (a
+message for you, one of yours to them, a heartbeat of yours they heard),
+newest first, their flag, last words and unread count; on the right the one
+chosen, theirs on the left, yours on the right in blue, their country,
+locator, distance and the reports on top. The MFK goes from one station to
+the next, its press opens Query > for it. Buttons: < Board, Reply, Query >,
+Write... (words for them; MSG first puts them in their Inbox) and Close Chat;
+F1, F5 or ESC go back to the board (Heartbeat is on its page 1). The lane and
+the TX line stay above it.
+
+The message window (Reply, Send..., Write...): Enter sends. ESC, the MFK
+held (with a keyboard), the on-screen keyboard's keyboard key, or the same
+button again closes it without sending; what you typed is kept ("Not sent:
+kept for Send... or Reply") and comes back in the next window that starts
+the same way (Send..., or Reply and Write... to that station), also after
+the app was closed (not after a restart). A message sent is forgotten, and
+so is one whose text you empty before closing. Up to v0.3.12 the button
+again did nothing and the words were lost (issue #280).
+
+Heartbeat (page 1) sends one at once; it reads "Heartbeat auto 10 min"
+while the automatic ones go out. Held, it opens Settings on HB to turn them
+on or off.
+
+Settings... is one list of the switches set once, each row doing what its
+button did: AUTO, HB (on, off) and its interval (the knob), HB ACK, Hold,
+Show: No HB / Directed / All, Speed and the selected station's speed,
+Decode: All speeds / My speed, Freq: JS8 / GhostNet / kHz (and
+GhostNet's nets, reminder and RTTY),
+Activation: Off / POTA / SOTA and its reference, Log prompt, Log QSO, a
+heartbeat now, Alerts, APRS, Groups / INFO / STATUS / Relay, and Clear the
+list. A switch shows its new value on its row; ESC or Settings... closes it.
+
+The screen: over the waterfall a lane of the calls heard in the last 3
+minutes, each over its offset (the one selected in the warning colour,
+those that called you in red, TX where you send); the newest rows of the
+waterfall; the TX line; the list. Each message shows its sender's flag,
+country and distance on the right where it fits (the distance from the
+locator they sent, else from their country's middle, "~"); the Stations view
+has the flag before the call and a country column.
+
+A message for you or your group comes in: besides the line in the list and
+the beep, a box says "Message from ..." with its text, their country and
+distance. The MFK's press opens it in the Inbox (Reply there); ESC or any
+button leaves it in the Inbox for later. It does not open over the keyboard
+or a list.
 
 What it does:
 
 - One-press messages (SNR?, GRID?, INFO?, STATUS?, HEARING?, AGN?, RR, 73),
   an Inbox for `MSG` messages, relays and store-and-forward like desktop
   JS8Call.
-- Log: the Log popup (page 5, or when a QSO ends with 73/SK) saves to
+- Log: the Log popup (Settings..., Log QSO, or when a QSO ends with 73/SK) saves to
   `js8call_log.adi` in desktop JS8Call's ADIF format, with POTA/SOTA
   activation fields. FT8 keeps its own `ft_log.adi`.
-- Map (page 7): the stations of the JS8 log on the same map as FT8.
-- Translate (page 7): the message on the list's cursor, translated into the
+- Map (page 4): the stations of the JS8 log on the same map as FT8.
+- Translate (page 4): the message on the list's cursor, translated into the
   GUI's language; see [GhostNet](#ghostnet), Translation.
 - Alerts: beeps for messages, CQs and new stations, and purple alert words.
 - APRS through JS8 gateways: grid and GPS position beacons (optionally with a
@@ -5492,10 +5932,10 @@ default, and everyone is free to take it out:
 - The radio never transmits to the group by itself: no automatic answers,
   heartbeat acks, ACKs or relays for @X6100 traffic, with AUTO on or off,
   in the group or not. Only what you send yourself goes out.
-- To leave it: page 4, Settings..., Groups: @X6100. Delete @X6100 from the
-  text and confirm; the radio shows "No groups" (or your other groups). It
-  stays out after that, also after a restart or an update. To join again,
-  type @X6100 there.
+- To leave it: Settings... (page 3), Groups, INFO, STATUS, Relay...,
+  Groups: @X6100. Delete @X6100 from the text and confirm; the radio shows
+  "No groups" (or your other groups). It stays out after that, also after a
+  restart or an update. To join again, type @X6100 there.
 
 Known limits: relays, store and forward, and most APRS items are not yet
 proven on the air (only the grid spot and SMS are). The main screen's
@@ -5505,16 +5945,16 @@ waterfall stands still while JS8 is open.
 
 GhostNet is a weekly JS8 net for emergency communication, with a net in
 each region on Thursday evening and data bridges between the regions on
-Saturday. Freq (page 6) has two GhostNet items:
+Saturday. Freq (Settings..., page 3) has two GhostNet items:
 
 - **GhostNet mode: 7.107 + its groups** tunes 7.107 MHz, the GhostNet
   frequency of the weekly nets (the band keys step through GhostNet's list:
   3.575, 7.107 and 14.107), and puts @GHOSTNET, @GSTFLASH and your regional group
-  in Groups (page 4, Settings...). The groups go in once; take any of them
-  out in Groups as you would @X6100. The row "GhostNet groups: ..." in the
-  list says what you are in. With AUTO on, JS8 answers the queries sent to
-  your groups (SNR?, GRID? ...) as desktop JS8Call does; AUTO is off every
-  time the app opens.
+  in Groups (Settings..., page 3: Groups, INFO, STATUS, Relay...). The
+  groups go in once; take any of them out in Groups as you would @X6100.
+  The row "GhostNet groups: ..." in the list says what you are in. With
+  AUTO on, JS8 answers the queries sent to your groups (SNR?, GRID? ...) as
+  desktop JS8Call does; AUTO is off every time the app opens.
 - **GhostNet: nets, reminder, RTTY...** opens GhostNet's popup:
   - Reminder N min before: On / Off (Off by default). On, a message comes
     up N minutes (10 by default) before each net you chose, over whatever
@@ -5556,12 +5996,13 @@ Translation, through MyMemory (mymemory.translated.net, Translated's free
 translation memory, used without a key and without an account). GhostNet's
 nets are held in English, and some in Spanish:
 
-- **Translate** (page 7): turn the MFK onto a message, press Translate. The
-  translation into the GUI's language (Settings > Display > INTERFACE >
-  Language) comes on a line of its own under the message, with the language
-  in front ("NL: ..."), and stays while the radio is on. It translates from
-  English, or from Spanish when the message reads as Spanish; with the GUI
-  in English, from Spanish.
+- **Translate** (page 4): in View: Messages (page 2) turn the MFK onto a
+  message, press Translate. The translation into the GUI's language
+  (Settings > Display > INTERFACE > Language) comes on a line of its own
+  under the message, with the language in front ("NL: ..."), and in its
+  bubble in the conversations, and stays while the radio is on. It
+  translates from English, or from Spanish when the message reads as
+  Spanish; with the GUI in English, from Spanish.
 - **Translate arriving messages** (GhostNet's popup, Off by default): each
   message that arrives in English (or Spanish) is translated the same way,
   on any frequency. Messages already in your language, heartbeats and SNR
@@ -5774,14 +6215,128 @@ frequency and the receiver state. Leaving the app gives the VFO back.
   the decoding progress in the thin bar under the header. The decoder is
   TheMurusTeam's 1KO125 beta8 one, with a tolerant VIS detection.
 
-WeFax buttons. WeFax opens in RX Auto: it waits for the start tone of a fax.
+WeFax buttons. WeFax opens in RX Auto: it waits for the start tone of a fax,
+and saves the fax at its stop tone (or at the next start, or when Auto Plan
+moves on). A fax of under 200 rows is a false start, noise taken for a start
+tone, and is not saved (a chart is about 1300 rows); Save does save it.
 
 | Page | Buttons |
 |---|---|
-| 1 | Freq., RX Auto / Cont, Clear, Close |
-| 2 | Align, Tilt, View, Save |
-| 3 | Fax Browser, Fix Align, Fix Tilt, Done |
-| 4 | Power |
+| 1 | Auto Plan (Plan next HH:MM), Bulletin, All Charts, Close |
+| 2 | Freq., RX Auto / Cont, View, Clear |
+| 3 | Align, Tilt, Save, Power |
+| 4 | Night Auto / On / Off |
+
+Waiting for a fax in Auto, the picture is dark and says what comes next: the
+chart Auto Plan takes, its station and frequency, when ("21:36 UTC, in 19
+min") and the two after it; with Auto Plan off, that a fax starts by itself
+at its start tone. The chart shows as soon as its first rows come in.
+
+Night (page 4) dims the charts at night, white paper would dazzle: Auto dims
+them when the sun is down at the station's locator (6 degrees under the
+horizon, by the clock; never without a locator or a set clock), "Night Auto
+(on)" says it is; On and Off force it. The live picture, the tiles and the
+full screen are dimmed alike, a saved chart is not changed.
+
+The Bulletin, All Charts, a chart large, the full screen and Fix have their
+own buttons; wherever the app is, F5 goes one level up (ESC too), F1 back to
+page 1. The status line under the picture says what the MFK does there. Up
+to v0.3.12 the pages were Freq./RX/Clear/Close, Align/Tilt/View/Save, the
+browser and Power; the Fax Browser (a list of names, Fix Align and Fix Tilt
+on a fax open) became All Charts and Fix in v0.3.13.
+
+| Where | Buttons |
+|---|---|
+| Bulletin, the tiles | Auto Plan, Open, All Charts, < Fax |
+| All Charts, the tiles | Open, Newest, Delete, < Fax |
+| A chart large | Full Screen, Fix, Delete, < Tiles |
+| Full screen | Fix (F3), any other button back |
+| Fix | Auto Tilt, Undo, Cancel, Save & Back |
+
+Delete takes a second press within 3 s: the first one turns the button into
+"Delete? Press again" and asks "Delete this chart?"; the chart and its preview
+go at the second.
+
+Fix shows the whole chart over the screen, the buttons left visible, with
+upright lines to judge its frame by. It first finds the tilt that straightens
+the chart (a station's line rate and the radio's never quite agree, each row
+comes a little earlier or later and the chart leans): "Tilt -185 (auto)" a
+few seconds after; then the MFK touches the tilt up by one, VOL moves the
+chart 8 px a step (Align), a press of the MFK (or Auto Tilt) searches the
+tilt again. A chart with nothing upright to go by says "no clear tilt" and
+the MFK sets it from 0. Undo goes back to the chart as saved, Cancel leaves
+without writing (ESC too), Save & Back writes it over its file, with its
+preview, and goes back to the chart large.
+
+Auto Plan (page 1) leaves WeFax on its own for the day: the radio follows a
+plan of the DWD and Northwood charts (UTC), each on the frequency that comes
+in best at its hour (Northwood: 2618.5 kHz at night, 4610 from 06:00, 8040
+from 09:00, 4610 from 16:12; DWD: 7880 by day, 3855 at night), tuned in USB
+10 s before the chart starts. The button shows the next slot's time ("Plan
+next 13:56"), the header too. The plan and the way it keeps the best copy are
+F4OLI's (OlivLoze's fork), from his own receiving station.
+
+- A chart coming in is not cut by the next slot; a filler slot of a plan (one
+  of your own: the firmware's has none) gives way to a chart of the plan. A chart whose stop tone was missed gives
+  way 30 s before its end.
+- A clean chart (mark 60 or more) is saved straightened (Auto Tilt,
+  as Fix finds it), and its tilt is kept for its station
+  (`/mnt/wefax/tilt.conf`, the median of its last five): when the plan tunes
+  the station again, Tilt is set to it and its charts come in straight. On
+  F4OLI's radio DWD's is about -185, Northwood's about -10.
+- Each fax gets a quality mark (0-100: stripes, noise, lost sync, fading,
+  times 0.8 when its stop tone was not heard), in its name with the chart:
+  `wefax-20261116-062315-NW-surface-analysis-00Z-q91.png`. A fax saved by
+  hand or out of the plan has the mark only.
+- A chart is sent several times a day: of one chart (the same name within
+  16 h) only the best copy is kept; a worse one is not written ("Fax
+  dropped: quality 41, a copy has 77"). Charts whose name holds `unknown`
+  are all kept.
+- Auto Plan stays on: the app opens with it on until its button turns it off
+  (off-grid: put up an antenna, open WeFax, the charts come). Tuning by hand
+  (Freq., the knob, the web page) stops it until the app opens again.
+- Opened during a chart of the plan (with more than 2 minutes of it to come),
+  the app takes the chart from where it is: its first 30 rows tell a chart
+  from noise, on noise it waits for the next start. Its top is missing and,
+  its phasing missed, it can sit sideways (Align in Fix); a full copy of the
+  chart replaces it when one comes in.
+- The plan is in the firmware (tools/wefax_plan/plan.json, from a 48 h watch
+  in November 2026, made for western Europe, each chart named from its title
+  as received; DWD's 05:25 and 18:00 charts are the North Atlantic surface
+  analysis, in the Bulletin's Analysis; Northwood's 00Z analysis and 24 h
+  forecast come again at 04:00 and 05:12 on 2618.5 kHz, its 06Z analysis
+  at 09:00 and 10:00 on 8040, the best copy kept); a `/mnt/wefax/plan.json` of the
+  same form replaces it (`"slots"`: `t` the UTC start, `st` the station, `hz`
+  the frequency the fax is on, `prod` the chart's name, `dur` its length in s,
+  690 by default, `fill` true for a filler).
+- The browser remote has it too: `wefax plan` and `wefax unplan`.
+
+Bulletin (page 1) shows each kind of chart (analysis, forecasts at 24 h,
+36-48 h and 3-5 days, sea and swell, wind, significant weather, rain and
+visibility, ice) as a tile, eight a page: its newest copy of fair quality (a
+newer poor one, noise or a fade, does not push out a good one; a poor copy
+shows only when there is no other), how old it is (the dot green under 6 h,
+orange under 24 h, red older) and its quality in a word (good from mark 70,
+fair from 30, poor under); a kind with no copy yet says when the plan has the
+next one, and the chart coming in draws in its tile ("receiving 40 %"). The
+MFK picks a tile, its press (or Open) shows it large: the whole chart, its
+station and frequency, when it was received (UTC), its quality, the next
+copy, what the dots mean; for a kind with no copy yet, its next four
+broadcasts. The MFK goes through them there, < Tiles goes back. A press there
+(or Full Screen) shows the chart over the whole screen: the next press goes
+x2, then 1:1 (the pressure figures readable), then whole again; the MFK moves
+up and down, VOL left and right, a small map in the corner shows where.
+
+All Charts (page 1, or F4 of the Bulletin) has every chart saved as tiles
+too, the newest 128 first, named in words (Analysis, Forecast 48 h, Upper air
+36-48 h, Sea and swell 12 h, Unsorted for a fax not of the plan) with the
+time it was received (UTC), the station and the quality; Newest goes back to
+the first one. The tiles come from a small preview of each chart in
+`/mnt/wefax/thumbs`, made when it is saved; a chart saved before gets one the
+first time it is shown ("preparing" for a few seconds), and the preview of a
+chart deleted on the web Gallery goes when the tiles open. The kinds and the
+charts in each are the plan's `"bulletin"` (a `/mnt/wefax/plan.json` can have
+its own). Bulletin, All Charts, the viewer and Fix are F4OLI's too.
 
 The VOL knob works as on the main screen: turned it changes what it is on
 (volume, squelch, RF gain, the filter edges...), a press of VOL switches
@@ -6100,10 +6655,11 @@ with the other digital mode frequencies, so a backup of the settings has them.
 
 ### Text log of the keyboard modes
 
-What PSK31, PSK63, Olivia, Contestia and JTTY receive and send, and what RTTY
-receives, is kept on the card: a line for each line, in `/mnt/digi_text/`, one file a
-UTC day (`2026-10-31.txt`). Leave the radio listening and read later what
-came through; the reports you exchange are in the text.
+What PSK31, PSK63, Olivia, Contestia, JTTY and RTTY receive and send is kept
+on the card (up to v0.3.13 RTTY only received): a line for each line, in
+`/mnt/digi_text/`, one file a UTC day (`2026-10-31.txt`). Leave the radio
+listening and read later what came through; the reports you exchange are in
+the text.
 
 ```
 2026-10-31 14:05:12Z 14.071000 PSK31 RX Q87% CQ CQ DE PA3XYZ PA3XYZ K
@@ -6130,6 +6686,9 @@ came through; the reports you exchange are in the text.
   too, each at its own frequency.
 - PSK keeps what the panel shows: with the squelch on, what the decoder
   makes of noise is not kept either.
+- RTTY keeps what went out, as the other end prints it: in capitals,
+  without what RTTY has no character for, and a line stopped with Stop TX
+  up to where it stopped.
 - Settings > General > TEXT LOG: Keyboard modes (on by default) and Size
   limit (1-100 MB, 10 MB by default). Past the limit the oldest day's file
   goes. The newest day's file is never deleted: when it alone reaches the
@@ -6143,13 +6702,85 @@ came through; the reports you exchange are in the text.
 - These lines are not QSOs: to log a QSO in these modes, use the Log tab of
   the [browser panel](#browser-panel).
 
-### RTTY and WeFax TX
+### RTTY
 
-The RTTY and WeFax transmitters are in the firmware (the TX player), but no
-screen on the radio starts them yet: a control for them is still to come.
+APP > Modes > RTTY. RTTY has no window of its own: it decodes on the main
+screen, into the panel over the waterfall, with a tuning scope at the
+panel's right (mark across, space up: two thin ellipses at right angles
+when tuned, the tones' offset under them) and the mark and space as two
+lines on the spectrum. It opens on its last frequency and mode; the ones
+you were on come back when it closes (GEN).
 
-- RTTY TX: ITA2 AFSK with the RTTY app's rate, shift, centre and reverse,
-  through the same TX player.
+| Page | Buttons |
+|---|---|
+| 1 the decoder | Rate, Shift, Center, Reverse (a press puts it on the knob) |
+| 2 sending | Send..., Stop TX, DX call, RST snt |
+| 3 macros | CQ, Answer, Report, Stop TX |
+| 4 macros | TNX, 73, QRZ, Stop TX |
+| 5 | Power, Ext tune, Clear, Preset |
+
+Up to v0.3.13 RTTY had two pages: the decoder's and Power.
+
+- Amateur RTTY is Rate 45.45, Shift 170 and Reverse Off, in LSB (the usual)
+  or USB: press Preset (page 5) until it shows Ham. With Reverse off the
+  mark is the higher radio frequency in either. The transmitter takes mark
+  and space as the decoder does, Reverse too: what you copy right goes out
+  right.
+- Preset (page 5; held F1 on page 1 goes there): RTTY starts on 50 baud,
+  Shift 450 and Reverse On, for the weather stations, and the button shows
+  Weather. A press sets Rate, Shift and Reverse for ham RTTY at once (Ham,
+  "45.45 Bd, 170 Hz, Reverse Off" in the message); a press on Ham goes back
+  to Weather. It shows "--" when the three are neither, and a press then
+  gives Ham. Center stays where it is. The decoder follows at once, the
+  transmitter from the next transmission, and the three are kept as when
+  turned with the knob.
+- Send... (page 2) opens a line to type, up to 199 characters; Enter (or
+  the on-screen keyboard's tick) sends it, Esc closes it unsent (with a
+  keyboard the MFK held too). With a USB or Bluetooth keyboard, a letter or
+  digit typed on the main screen opens the line with it in.
+- A transmission starts with half a second of mark, three LTRS (the diddle
+  a receiver finds the characters on) and CR LF, so your text starts on a
+  line of its own at the other end, and each line ends with CR LF. A line
+  sent while one goes out follows it in the same transmission.
+- RTTY has capitals, figures and a few signs: lower case goes out in
+  capitals, and what it has no character for (`@ % * < > [ ]`, accents) is
+  left out. The radio puts in the LTRS and FIGS shifts. After a space in
+  figures the next figure gets FIGS again (`599 001`), so that a receiver
+  that goes back to letters at a space (unshift on space) prints it right,
+  and one that doesn't too.
+- What is sent shows in the panel in the TX colour as it goes out; sent and
+  received text never share a line.
+- Stop TX (on pages 2, 3 and 4) unkeys at once and drops the rest.
+- Macros (pages 3 and 4; CapsLock+1 to CapsLock+6 on a keyboard): press
+  sends, hold edits the name and then the text (an empty text deletes, the
+  ones after move up). `<MYCALL>` is your callsign (Settings > General >
+  STATION), `<CALL>` the DX call, `<RST>` the report you send (RST snt:
+  press steps the strength, hold goes back to 599), `<RSTR>` the one you
+  got. The DX call is taken from "DE <call>" in what RTTY decodes, or typed
+  in with DX call (hold clears it and the reports); a macro with `<CALL>`
+  and no DX call is not sent. PSK and Olivia have the same DX call and
+  reports. The macros are kept in `/mnt/rtty_macros.txt`, also on the web
+  configurator's Macros page, and read each time RTTY opens.
+- TX goes through the same path as FT8 and PSK: power capped at 7 W (Power,
+  page 5), the ALC levelling (see
+  [Digital-mode TX level](#digital-mode-tx-level)), the SWR protection,
+  in LSB-D or USB-D for the transmission and back to LSB or USB after. Outside the amateur bands it is refused as any TX (see
+  [amateur bands only](#amateur-bands-only)). In a mode other than LSB or
+  USB the radio says "RTTY TX: LSB or USB only".
+- The decoder rests while the radio sends, and starts afresh after it.
+- Ext tune (page 5): a carrier on the RTTY centre for an external tuner
+  (see [TUNE for an external tuner](#tune-for-an-external-tuner)). Clear:
+  the panel's text.
+- What RTTY receives and sends is kept on the card (see
+  [Text log of the keyboard modes](#text-log-of-the-keyboard-modes)).
+- CapsLock+L logs the QSO as RTTY, the last call decoded ready in the box
+  (see [quick QSO log](#quick-qso-log)).
+
+### WeFax TX
+
+The WeFax transmitter is in the firmware (the TX player), but no screen on
+the radio starts it yet: a control for it is still to come.
+
 - WeFax TX: a picture in grey, 1809 px wide (IOC 576), 120 LPM, with APT
   start and stop tones and phasing, at most 800 lines. Pictures go to
   `/mnt/wefax/tx_pics` (uploaded from the Gallery).
@@ -6265,20 +6896,51 @@ it in CW-R, and in CW its ZAP and Tuner went the wrong way (#115).
   the spectrum, at the left. Amber Trey shows them as CWT on its bar graph.
   Up to v0.3.9, with the spectrum off, they were drawn over the frequency
   scale and the band plan, where they hardly showed (#185, #217).
+- In the frequency strip. Where: Settings > Display > MAIN SCREEN > CW tune
+  and WPM > Frequency strip (Spectrum by default; also on the web
+  configurator's Display page; from v0.3.14, issue #308). In CW and CW-R
+  the bars and the speed move into the frequency strip, between the band
+  and the frequency, and the spectrum and the waterfall stay clear. The
+  speed is the number over "WPM", the bars at its right, at their size on
+  the spectrum where the strip has the room. With less room they get
+  narrower: LOCK in front of the frequency, a split's two frequencies,
+  where "22 WPM" goes on one line over the bars. The band's name stays
+  whole; a broadcast station's or a memory's name is cut shorter. The
+  frequency, the mode, the callsign and the locator do not move. The bars
+  work as on the spectrum: the lit bar solid, the others faint. With the
+  Tuner off only the speed is there, with the decoder off only the bars.
+  Where the strip has no room for them, they are back on the spectrum
+  until it has: a split with LOCK on, and VISION in a split. Under a
+  window (Settings, the CW messages, an app) they are back on the
+  spectrum too, which the window covers, as before. VISION, with its taller
+  strip, has the speed over the bars and its decoder panel no longer has a
+  top line for them; its callsign makes room for them as for the band.
+  Black Metal, Total Black and Amber Trey keep them where they are: their
+  strips hold the meter, the other VFO and the A/B badge, Amber Trey its
+  bar graph. Other modes do not change.
 
 While you send in CW or CW-R, the waterfall and the spectrum draw your
-carrier on the VFO line, as they draw a station on the dial. Up to v0.3.10
-an X6100 with Xiegu's base 1.1.9 drew it a key tone below the line in CW, and
-we'd expect above it in CW-R: that base centres the picture on the dial
-while it transmits, where 1.1.8 keeps it a key tone off, as in receive. Only
-the picture was off: the carrier went out on the dial (#191). We haven't run
-this on a 1.1.9 base ourselves.
+carrier on the VFO line, as they draw a station on the dial. On an X6100
+with Xiegu's base 1.1.9 that took three tries (#191). While it transmits,
+that base sends a picture with your carrier the key tone divided by the
+zoom from its middle: at zoom 8 an eighth of the key tone, 150 Hz at a
+1200 Hz key tone, above the middle in CW and below it in CW-R. It looks as
+if the base leaves that picture unzoomed, centred a key tone off the dial
+as 1.1.8 does, and the screen spreads it over the zoom's span. Up to
+v0.3.10 the carrier was drawn seven eighths of a key tone below the line in
+CW; from v0.3.11 to v0.3.13 an eighth of a key tone above it in CW and below
+it in CW-R, growing with the key tone. Now the picture is placed by the key
+tone over the zoom, and the carrier is on the line at any key tone. Only
+the picture was off: the carrier went out on the dial. Measured at zoom 8
+on the reporter's radio; we haven't run it on a 1.1.9 base ourselves, nor
+at the other zooms.
 
 With an IF shift (the MFK 2:4 page, an X6100 with base 1.1.9 or later) the
 base is tuned that far from the dial and the received picture is centred
-there; while it transmits, on the dial. Up to v0.3.12 the waterfall drew
-your carrier the IF shift off the line in every mode, while the spectrum
-had it on the line (#191; not run on a 1.1.9 base either). The faint
+there; while it transmits, around the dial, as without one. Up to v0.3.12
+the waterfall drew your carrier the IF shift off the line in every mode,
+while the spectrum had it on the line (#191; not run on a 1.1.9 base
+either). The faint
 stripe of the radio's own noise is where the base is tuned: on the line in
 USB and LSB, a key tone below it in CW and above it in CW-R; an IF shift
 moves it as far the other way (+1000 Hz: 1 kHz lower). Tried on Xiegu's own
@@ -6652,6 +7314,8 @@ too. Turning the RF gain while the trainer is open gives you what you set.
 - With a paddle, set Mode to Auto-L or Auto-R before opening the trainer, for
   the keyer's dits and dahs. On Manual the paddle is a straight key (on an
   X6200, from the KEY jack, a sideswiper).
+- Mode (page 1) goes Learn, Practice, Calls, [Copy](#copy-type-what-you-hear),
+  and back to Learn.
 - Learn (Koch) plays groups of the characters of your level. The level's
   newest character comes up in about one place of three while it is new,
   less and less over its first 20 tries; after that it comes up as often as
@@ -6730,6 +7394,51 @@ too. Turning the RF gain while the trainer is open gives you what you set.
   32): a garbled answer to a "?" counted right. A prosign took four places,
   and its letters counted for the group's in Stats.
 
+#### Copy: type what you hear
+
+Learn can be passed by keying back the dits and dahs you heard without ever
+knowing the character. Copy (Mode, after Calls; issue #290) trains copying:
+the radio keys a group, you type it on a USB or Bluetooth keyboard, and the
+group is not shown until your answer is in.
+
+- Copy has its own level, group length and Stats, apart from Learn's:
+  copying a character is not keying it back. Level +, Level - and Group
+  (page 2) and Stats and Reset stats (page 3) are Copy's while you are in
+  Copy. It starts at level 2 (K M) with groups of 1; Level + takes it up to
+  where you are. As in Learn, 9 of the last 10 groups right brings the next
+  character, the level's newest comes up more often while it is new, and
+  weak and little tried characters come up more often.
+- Start keys the first group a second after the press. Type as you hear it,
+  while it plays or after: a `_` stands for each place still to type, and
+  Backspace rubs out the last one. The answer is checked when it is as long
+  as the group, or at Enter: the places not typed then count as missed
+  (Enter with nothing typed gives the group up). No pause ends it: take
+  your time.
+- Lower case is the same as capitals. Keys that are no character of the
+  trainer's 40 (Space, =, a letter such as Å) type nothing.
+- The answer is checked place by place, but a character missed or typed
+  twice costs that one place, not the rest of the group: KMRSU typed KRSU
+  has only M wrong. Two characters swapped are both wrong.
+- The result shows the group (Sent) and your answer (Typed), each with its
+  dits and dahs. Red: a character of the group you missed or got wrong, and
+  a character you typed wrong. Each character of the group counts right or
+  wrong in Copy's Stats.
+- Right: the next group follows a second later (Pause: stop after this
+  one). Wrong: the trainer waits with the right group on screen. Replay
+  keys it again, as often as you like; Next, Enter or an MFK press brings
+  the next group.
+- Replay while your answer is due keys the group again, and your answer
+  starts again.
+- The groups are keyed at KEY Speed, as in Learn. The arrow keys of the
+  keyboard set it at any time, the MFK while no answer is due. There is no
+  separate character speed (Farnsworth spacing) yet.
+- Without a keyboard: under the lines are keys with the level's characters,
+  Del and OK. While an answer is due, turn the MFK to one (the one it is on
+  is lit) and press it. The hint line says when no keyboard is found, and
+  changes when one comes while the trainer is open.
+- The paddle does nothing in Copy: it sounds the sidetone, and nothing of it
+  is checked. Esc closes the trainer, as in the other modes.
+
 
 ## Apps
 
@@ -6748,6 +7457,10 @@ STATION), used to log in.
   it tries again. To run the radio and a logger at the same time, give the
   radio its own login, your call with `-2`, on the web configurator's Cluster
   page (Link card).
+- A CB callsign (26AT101, for FT8 on 11 m) is not sent to log in: the DX
+  clusters are amateur networks. The status line says "CB call: no amateur
+  cluster login", and the link stays off unless a Login is set on the web
+  page (for a cluster that takes CB calls).
 - Link Off (Cluster page 2, or the web page) ends the login and keeps it off,
   also after a restart. Powering off closes the link at once.
 - Spots older than 60 minutes are dropped. After login it asks for the latest
@@ -7059,7 +7772,8 @@ HIGH / GOOD / FAIR / POOR, the best band marked.
   other mode it is the band's phone frequency, in its sideband (LSB below
   10 MHz, USB above and on 60 m).
 - RBN is connected while the screen is open (the first minute fills the
-  counts); it needs WiFi and the callsign.
+  counts); it needs WiFi and the callsign. Not with a CB callsign: the RBN
+  is an amateur network, and its state says "not with a CB call".
 - The skimmer data comes from the Reverse Beacon Network
   (reversebeacon.net), thanks to its skimmer operators.
 
@@ -7089,7 +7803,9 @@ Upload QRZ, QRZ: <call>, Back.
 
 Spot also posts the spot on the DX cluster (`POTA IT-0123 SSB`, `SOTA
 I/LO-123 CW`), and so does Start in POTA, WWBOTA, HOTA and WWFF; the QSY
-spots don't.
+spots don't. With a CB callsign nothing is spotted, on the programmes'
+sites or on the DX cluster ("No spot with a CB callsign: amateur programmes
+only").
 
 WWBOTA (World Wide Bunkers On The Air) and HOTA (History On The Air) work
 like POTA, with their own tile.
@@ -7449,6 +8165,76 @@ frequency and mode come back when it closes.
   stations are not read: DCF77 (77.5 kHz) and MSF (60 kHz) lie below the
   radio's 100 kHz, and the others are rarely heard outside Europe.
 
+### GPS / Clock
+
+APP (page 3) > GPS / Clock: the GPS (satellites in view and in use, the fix,
+its date and time, the position, the grid and gpsd's state) and the clock:
+what keeps it, what the FT8 decodes say of it, and a time station's minute
+marker. The clock part is F4OLI's (OlivLoze's fork), merged with FT8's Auto
+Sync.
+
+- Satellites, fix: the satellites the GPS sees and uses, and the fix ("25/8,
+  3D", "25/0, no fix"). It keeps the last count gpsd gave, as not all of
+  gpsd's reports carry one once there is a fix.
+- Clock: the time in UTC and what keeps it ("kept by NTP (2 ms)": ntpd's
+  estimate of the clock's error; "kept by GPS"), else the last move here ("RWM 9996 +0.031 s 3 min ago", "8
+  stations -0.42 s 1 h ago"), else "clock chip".
+- FT8 says: what the FT8 and FT4 decodes say of the clock while that app is
+  open, Auto Sync on or off ("0.42 s ahead, 7 stations, 2 min ago", "on time",
+  "the stations disagree", "too far, Time Sync in FT8").
+- Time station: what the station listened to gives ("listening", "marker 20
+  s ago, 24 dB", "RWM 9996: behind 0.031 s, 24 dB", "no markers until :40").
+
+| Button | |
+|---|---|
+| Station | RWM 4996, 9996 (the first), 14996 kHz; WWV 2500, 5000, 10000, 15000, 20000 kHz; WWVH 5000, 10000, 15000 kHz; CHU 3330, 7850, 14670 kHz |
+| Listen | tunes the station in USB and listens to its minute marker; Stop listening. Closing the page gives the frequency and mode back |
+| Auto Sync | On: in FT8 and FT4 the clock follows the decodes (see [FT8 and FT4](#ft8-and-ft4)). Off by default |
+
+Which source moves the clock, one rule for all:
+
+1. The GPS (a fix in the last 10 s) and NTP (ntpd synchronised to a source,
+   asked directly: the kernel's own flag stays "unsynchronised" for up to 17
+   minutes after any step) keep the clock. Nothing on this page moves it
+   then; the others only measure, and learn what a right clock reads by them.
+2. A time station, while it is listened to: it moves the clock to the
+   millisecond and holds FT8 off for an hour after (the FT8 stations' own
+   clocks and the receive path move FT8's word by a tenth of a second).
+3. FT8 and FT4, with Auto Sync on.
+4. By hand: FT8's Time Sync, pressed as a slot starts, or the phone's clock
+   (the [Browser panel](#browser-panel)'s GPS button).
+
+Every move goes into the clock chip too. APP > [Time Signal](#time-signal)
+(this fork's, WWV's whole time code) sets the clock by its own rule, and it
+too leaves alone a clock NTP or the GPS keeps. The Sentry's F SYSTEM has a
+GPS panel of its own (see [the GPS panel](#the-gps-panel)).
+
+#### From a time station
+
+A time station sends a marker on each minute; heard, the radio knows when
+the minute starts to a few milliseconds. The clock must already be within 30
+s (the clock chip keeps it so): which minute it is, is the clock's own.
+
+- RWM (Moscow, 4996, 9996 and 14996 kHz): keys its carrier 500 ms on the
+  minute in the minutes :10 to :29 and :40 to :59; in the others there is
+  none, and the row says until when. Its 100 ms second pulses are told apart.
+  Heard across Europe.
+- WWV (Colorado, 2.5 to 20 MHz): a 1000 Hz tone 800 ms on each minute (1500
+  Hz at the hour, not taken). WWVH (Hawaii, on WWV's frequencies) sends 1200
+  Hz: each is listened to on its own tone, the other one not heard.
+- CHU (Ottawa, 3330, 7850 and 14670 kHz): a 1000 Hz tone 500 ms on the
+  minute, told apart from its 300 ms second pulses. Canada's NRC closed CHU
+  for good on 22 June 2026 (see [Time Signal](#time-signal)), so nothing is
+  heard there now.
+
+Two markers 1 to 5 minutes apart that agree within 30 ms move the clock
+("Clock moved +0.031 s by RWM 9996"); within 20 ms it is right and left
+alone. While NTP or the GPS keeps the clock, a station heard teaches the
+delay from the station to the measure instead (the receive path, the
+distance), kept in `/mnt/clock_sync.conf` with FT8's learned DT; listen to
+one once at home to calibrate. DCF77, MSF and TDF (#275) send below the
+radio's HF range; EBC and IAM are not done yet.
+
 ### Channels
 
 A list of named frequencies: APP (page 2) > Channels, the long-press action
@@ -7664,6 +8450,8 @@ its name with the rest.
   European decision and the FCC's rules, less in some countries) is not set
   by the app: PWR is yours to set. Transmitting there is your responsibility
   under your licence.
+- FT8 and FT4 with a CB callsign (26AT101), as WSJT-CB works them: see CB
+  callsigns under [FT8 and FT4](#ft8-and-ft4).
 
 ### Flights
 
@@ -7686,6 +8474,20 @@ nothing retunes it; ESC closes.
   *EMERGENCY* when it squawks one.
 - **Range**: 25, 50, 100 (the default), 200 or 400 km; kept until the radio
   is switched off. **Update** (or a press of the MFK): ask now.
+- **On the air band**: while the radio is tuned between 118 and 137 MHz (the
+  X6200's airband to receive, after 6 m on the band keys; the app stays open
+  while you tune), the header says *Air band: near and low ringed*. The
+  aircraft within 30 km of you and under 3000 m, or on the ground there, get
+  a ring on the plot and their registration as their name, and their rows
+  are in the highlight colour: near an airfield these are the ones most
+  likely to be on its tower's or approach's frequency, rather than on an
+  area control's far above. The chosen one's second line says which it is:
+  *near, on the ground*, *near and low, descending*, *near and low,
+  climbing* or *near and low*. It is a guess from the positions: the app
+  does not know which frequency an aircraft is on, and it tunes and listens
+  to nothing itself. Listening to air traffic is not allowed everywhere:
+  your country's rules apply. After the CX8ANM edition (condoruy), which
+  marks the aircraft near an airport while its tower is listened to.
 - The header says where the plot is centred: *GPS* (the radio's GPS), *Phone*
   (the position the Panel page's GPS button sends, when it is no coarser
   than 1 km), else *Locator* and your QTH locator (Settings > General). A
@@ -7728,9 +8530,16 @@ Internet radio stations, which anyone can add a station to.
 | Play / Stop | plays the station selected, or stops the one playing (the MFK press and a tap on a row do the same; pressed on the station playing, it stops) |
 | Favourite | the station selected into your favourites, or out of them |
 | List | Favourites, then the country's stations, the most listened in the world, the last search, and round again |
-| Country | the countries the directory has stations of, with how many; a press chooses one, ESC goes back. The radio keeps it |
+| Country | the countries the directory has stations of, with how many, opened at the one you chose; a press chooses one, ESC goes back. The radio keeps it for the next start |
 | Search | a station's name or a genre (jazz, news: the directory's tags, asked when the names give fewer than 15), or a stream address (`http://...`), which goes straight into the favourites |
 
+- **Search** opens a text box with the on-screen keyboard, or without it
+  when a keyboard is plugged in or connected. Enter, or the on-screen
+  keyboard's tick or return key, searches; the box opens again on the last
+  search. ESC, the on-screen keyboard's keyboard key, the MFK held (with a
+  keyboard) and any of the window's buttons (Search again too) close it,
+  nothing searched. Up to v0.3.13 the box showed nothing of what was typed
+  and the buttons did not close it (issue #316).
 - The window opens on your favourites, or the country's stations when there
   are none, or the countries when no country is chosen yet. The lists are
   ordered by how often the directory's listeners play them, 100 stations at
@@ -7767,7 +8576,9 @@ Internet radio stations, which anyone can add a station to.
 - The favourites are in `/mnt/iradio/favorites.tsv`, the chosen country in
   `/mnt/iradio/country`. The web configurator's Internet radio page edits
   the favourites: add any stream address there, rename, reorder, delete.
-  They are not in the Backup.
+  Both are in the Backup (its Apps' lists). Up to v0.3.13 the country was
+  written but not read back, and the radio forgot it at each start (issue
+  #316); the file that version wrote is read now.
 - The lists are what the directory has: a station may be off the air, or
   have moved. Error says why one did not play ("not a stream: a web page",
   "the station answered HTTP 404").
@@ -7894,6 +8705,25 @@ Its switches are on pages 2 and 3 of the app and are kept:
   to the same limit, and the next one waits until the squelch has closed.
 - **Pause** (page 3, 1 to 30 s, 3 s unless you change it): the time between
   the end of one transmission and the next relayed message.
+- **Tone** (page 3, Off unless you change it): a CTCSS tone under what the
+  link transmits in FM, for a repeater or a receiver whose squelch opens on
+  a tone only (#141). A press goes to the next tone up, a hold to the next
+  one down; Off sits between the highest and the lowest. The 50 usual tones
+  are there, 67.0 to 254.1 Hz. The tone is on from the moment the radio keys
+  to the moment it unkeys, under the gaps and the CW ID too. One setting for
+  both voice apps: SVXConnect's Tone button is the same one.
+  - **FM only**: in LSB, USB and AM no tone goes out.
+  - **Only what the link transmits**: your own voice from the hand mic
+    never carries the tone. Neither baseband has a tone of its own, and the
+    hand mic's voice goes straight into it, past the part that adds the
+    tone.
+  - **Level**: each tone has its own, aimed at 350 to 380 Hz of deviation.
+    That was measured on an X6200 for 91.5 and 123.0 Hz; the other tones
+    follow from those two, and nothing was measured on an X6100. The level
+    holds with Play gain and Line-in (Settings > Audio) at their defaults:
+    both move the tone as they move the voice. The voice messages' level
+    (the CQ level) does not move it. A test set, or a receiver with a tone
+    squelch, tells whether your radio's tone is right.
 
 It keeps every TX rule of the radio:
 
@@ -8056,9 +8886,9 @@ countries ask for a special permit or a club or repeater licence for this,
 allow it on some bands or frequencies only, or not at all. Check before you
 turn it on. Both directions are off until you turn them on.
 
-- **SVX>RF** and **RF>SVX** (page 2), **CW ID** (page 2), **TX limit** and
-  **Pause** (page 3) are Zello's, with the same rules and the same
-  defaults: see [Zello: Simplex repeater](#zello-simplex-repeater). That
+- **SVX>RF** and **RF>SVX** (page 2), **CW ID** (page 2), **TX limit**,
+  **Pause** and **Tone** (page 3) are Zello's, with the same rules and the
+  same defaults (Tone is one setting for both): see [Zello: Simplex repeater](#zello-simplex-repeater). That
   includes **amateur bands only**: the link keys only inside the
   [amateur bands](#amateur-bands-only) or a transverter's range, whatever TX
   outside ham bands and the TX ranges say ("Link: amateur bands only"; the
@@ -8081,6 +8911,178 @@ Connect with a direction on to start it. Closing the app then keeps the
 radio on the reflector ("SVXConnect link stays on"); open the app and press
 Disconnect to stop it. Nothing starts it at power on.
 
+### DMR over the internet
+
+APP > DMR (APP 6:6, the tile after SVXConnect in the APP grid, or a
+long-press action) listens to the talkgroups of a DMR network over the
+internet (the Sentry's own [DMR](#dmr) is DMR heard on the air by B's SDR).
+Its voice needs a DVSI USB-3000 on the radio's USB (see the end of this
+section): without one the app shows the calls but plays no voice. The
+radio logs in to one of the network's servers (its masters) as a hotspot
+does, with the MMDVM hotspot protocol, and plays what the
+talkgroup says. **It only listens**: it sends the network no voice and no
+data, only its login, its options, a keepalive every 10 seconds and its
+logout, and it never keys the transmitter. It needs the network (WiFi,
+Ethernet or USB), and it is logged in only while the app listens to a
+talkgroup: closing the app logs out, and nothing logs in at power on.
+
+**What the networks ask** (as they say in November 2026):
+
+- **Your own DMR ID and callsign.** radioid.net gives a DMR ID to a licensed
+  radio amateur, and the networks check the ID against the callsign. The
+  radio logs in with the ID and two digits (the hotspot ID, 01 to 99, another
+  pair for each hotspot of yours on the network) and with its own callsign
+  (Settings > General; ON6URE of ON6URE/P). Never use someone else's ID or
+  hotspot password.
+- **FreeDMR** is for licensed amateurs and takes hotspots of any kind; its
+  site (freedmr.uk) lists the servers for hotspots and the hotspot password.
+  The talkgroup is asked for in the hotspot's options: the radio sends
+  `TS2=<talkgroup>;DIAL=0;VOICE=0;` (the talkgroup on time slot 2, no
+  dial-a-talkgroup, no voice announcements).
+- **BrandMeister** keeps its hotspot protocol for repeaters and hotspots with
+  a radio of their own, and asks programs without one to use another
+  protocol (its wiki, "Homebrew repeater protocol"), whose own page still
+  calls itself a draft. The radio has no DMR radio, so it does not log in to
+  BrandMeister: the web page and the app refuse its servers.
+- **Other**: a network of the same protocol, with its own rules and options.
+
+What the radio tells the server about itself: the callsign, no frequency
+(it has no DMR radio), power 0, colour code 1, no position, "Listen only",
+and its software, "GoldCorpHF" and the version.
+
+**The settings**, on the web configurator's DMR page (Operating > DMR):
+
+- **Network**: FreeDMR or Other. **Server**: the master's host name, and its
+  port (62031 for most).
+- **DMR ID**: yours, 7 digits, and the hotspot's two digits after it (01 unless
+  you change it); the page shows the hotspot ID and the callsign sent with
+  it.
+- **Hotspot password**: the one the network gives for hotspots. Write only:
+  the page says Set or Not set, an empty field keeps it, Clear password
+  takes it away. It is kept on the radio's DATA partition
+  (`/mnt/dmr/password`), readable by root only, never shown, never in a log,
+  never on a command line, not in a Backup and not on the Files page; the
+  server gets only a proof of it (SHA-256 of it with a number the server
+  sends), never the password.
+- **Options**: sent at the login, `{tg}` the talkgroup chosen in the app.
+  Empty: the network's own (FreeDMR's above; Other: none).
+- **Talkgroups**: one a line, its number and a name (`91 Worldwide`), 32 at
+  most. None: the app has one row, the talkgroups the server has for the
+  hotspot (the login without options).
+- **Test** logs in to the server with what is saved, on the first
+  talkgroup, and out again. **On the air** shows, while the app listens, the
+  server, the talkgroup, who talks and the last heard.
+
+The settings are in `/mnt/dmr/dmr.conf`, in the Backup's Apps' lists.
+
+**The listening log**, on the same page: every call the app heard for half
+a second or more, the newest first, with its date and time (the radio's
+local time), the station's callsign and name as radioid.net had them, the
+talkgroup (*private* for a call to your own DMR ID), the seconds and the
+network. These are listening reports (SWL), not QSOs: nothing went on the
+air and nobody was worked.
+
+- **Search** narrows it: part of a callsign or a name (or a DMR ID), a
+  talkgroup's number, a first and a last day. The page shows the newest 500
+  of what the search finds.
+- A callsign, here and under On the air, is a link to its page on
+  [QRZ.com](https://www.qrz.com/), in a new tab. The link is made in your
+  browser: the radio itself asks QRZ.com nothing.
+- **Download ADIF (SWL)** and **Download CSV** give all the search finds, in
+  UTC. Each ADIF record is a listening report: `SWL` Y, `MODE` DIGITALVOICE
+  with `SUBMODE` DMR, `PROP_MODE` INTERNET, the station's callsign and name,
+  the times it started and ended, your own callsign as `STATION_CALLSIGN`,
+  and the talkgroup, the network, the seconds and the DMR ID in `COMMENT`;
+  no band, no frequency and no report, since nothing was on the air. A
+  logging program that knows `SWL` keeps them apart from your QSOs; check
+  what yours does before you import them, and do not send them to a QSL
+  service as contacts. A station whose DMR ID has no callsign at radioid.net
+  is in the CSV only.
+- The log is `/mnt/dmr/heard.tsv` on the DATA partition (Files page), a
+  line a call, tab-separated: the start (Unix time), the DMR ID, the name,
+  the talkgroup, the seconds, the network, `group` or `private`. It stays
+  over a restart and an update. Over 2 MB (some 40 000 calls) it becomes
+  `heard.tsv.1` and a new one starts; the page reads both. It is not in the
+  Backup; delete the two files on the Files page to start again.
+- After the CX8ANM edition of OpenX6X00 (condoruy), whose listening log this
+  is.
+
+**The map**: **Map** (the second button of the app; **List** goes back, and
+so does a press of the MFK) shows the world in place of the two lists, with
+a dot for each station the radio heard in the last 24 hours, brighter when
+that was within 5 minutes. The station talking now is a larger dot in two
+rings with its callsign, and a window has its callsign, name, city and
+country and the talkgroup. The MFK zooms (2, 4, 8, 16 times) around the
+station talking, or around where you are when nobody talks; the bottom line
+counts the stations. The web page's **Map** shows the same, and names a
+station when the pointer is on its dot.
+
+- The places are approximate: DMR sends no positions. A station is drawn in
+  the country of its callsign (cty.dat, the list the FT8 table's countries
+  come from), a little apart from the others of that country; a station
+  without a callsign at radioid.net is not on the map. The station talking
+  is drawn in the city of its radioid.net record when that city is found,
+  else in its country.
+- Finding the city asks two services, and only for a station the radio
+  hears while a map is open on the radio or on the web page, once for a
+  station: radioid.net for the record's city, state and country, and
+  [OpenStreetMap's place search](https://nominatim.openstreetmap.org/)
+  (Nominatim; its data are © OpenStreetMap contributors, under the Open
+  Database Licence) for where that city is, never more than one request a
+  second, as its usage policy asks. Both get the firmware's name and version
+  (`GoldCorpHF/<version>`) and nothing of yours: no callsign, no DMR ID, no
+  position. The answers are kept in `/mnt/dmr/places.json` (the last 2000
+  stations).
+- The map is of what your own radio heard, from the listening log, on the
+  network you chose. It is not the activity of a whole network: that would
+  take a network's feed made for it, and the radio uses none.
+- Without the app connected the map still shows the stations of the last 24
+  hours; nobody talks then, and nothing is looked up.
+- After the CX8ANM edition of OpenX6X00 (condoruy), whose DMR map of the
+  world this follows: the map on the radio, the country of the callsign and
+  the city of the station heard.
+
+**On the radio:**
+
+- Turn the MFK to a talkgroup and press it: the radio logs in and listens to
+  it (> marks it). Another talkgroup: press it, and the radio logs in again
+  with it. **Connect** (the button) logs in with the talkgroup last chosen;
+  **Disconnect** logs out.
+- The top line says what happens: "Logging in to the network", then the
+  server, the talkgroup and the hotspot ID; or why it is not connected
+  ("the master refused the hotspot password", "no DMR ID: set yours on the
+  radio's web page (DMR)"). A server that does not answer or stops answering
+  is tried again after 10 seconds, then 20, 40 and so on up to 5 minutes; a
+  refusal (the password, the ID, the callsign) is not tried again.
+- **Talking now**: the station's callsign and name as radioid.net has them
+  (its DMR ID until they are known), the talkgroup and for how long; a call
+  to your own DMR ID says "a private call to you". **Heard**, on the right:
+  the last calls, newest first, with how long ago and how long. The radio
+  asks radioid.net once for each station it hears and keeps the answer on
+  the DATA partition; it asks again when the station is heard after 30 days
+  (a new callsign or name), or after a day for an ID radioid.net did not
+  know yet.
+- With a USB-3000 (below), the calls play on the speaker at the radio's
+  volume (VOL), or on the Bluetooth headphones while they stand in for it,
+  one call at a time: a
+  second call while one is on is not heard. Between calls the speaker is the
+  receiver's. A Zello or SVXConnect message wins over a call.
+- When the radio transmits (the PTT, the hand mic, VOX, the KEY jack, a
+  digital mode), the call's audio stops at once; the next call plays once
+  the radio has received for a second.
+- A report for a problem: `/mnt/app_logs/dmr.txt` (Files page): the logins,
+  why they ended, the calls heard; never the password.
+
+**The voice** goes through a DVSI USB-3000 (an AMBE-3000R) only: DMR's
+AMBE+2 has no open decoder, and this firmware has no software vocoder (no
+mbelib). Plug the USB-3000 into the radio's USB (the HOST port, through a
+powered hub), as for the Sentry's [DMR](#dmr) and
+[dsd-fme](#p25-d-star-ysf-nxdn-and-the-other-digital-voice-dsd-fme): the SDR
+daemon finds it by itself and serves it on 127.0.0.1:2460, and the app hands
+its voice frames there (libmbe-dvsi, `tools/dsdfme/mbe_dvsi`), receive only.
+Without one the app still logs in and shows who talks, the talkgroup and the
+last heard, but plays no voice.
+
 ### Weather
 
 APP > Weather (APP 6:6, the tile before Settings in the APP grid, or a
@@ -8102,12 +9104,33 @@ nothing keys it; ESC closes.
   locator, else the capital (or largest city) of the country set in
   Settings > General > STATION > Country. A GPS or phone position older than
   10 minutes is not taken. The header says which: *GPS*, *Phone*, *Locator*
-  and the locator, *Country* and its name. The country's place is only where
-  the weather is asked for: the QTH locator is never set from it. With none
-  of these, the app says what to set and fetches nothing.
+  and the locator, *Country* and its name, *Place* for a place typed. The
+  country's place is only where the weather is asked for: the QTH locator is
+  never set from it. With none of these, the app says what to set and
+  fetches nothing.
+- Another place: Settings > General > STATION > Weather from. *Auto* (the
+  default) is the order above. *Locator* takes the QTH locator's centre
+  whatever the GPS says (a radio by the window with a fix that wanders, a
+  mast elsewhere), else the country. *Typed* takes the place in Weather
+  place: degrees, latitude first ("50.85, 4.35", "-34.9 -56.16",
+  "34.9S 56.16W"; a point for the decimals, a comma, a semicolon or spaces
+  between) or a locator of 4, 6 or 8 characters. Typing a place there sets
+  Weather from to *Typed*; one that is not a place is refused with a note;
+  an empty field clears it and goes back to *Auto*. While no place is typed,
+  *Typed* works as *Auto*. The place is kept as typed; what leaves the radio
+  is rounded as below. The choice came from the CX8ANM edition (condoruy).
 - Times are the place's own (its time zone as Open-Meteo gives it), with the
-  zone's abbreviation: "Mon 16 15:00 to Tue 17 09:00 CET". The units are
-  °C, km/h, hPa, mm and km.
+  zone's abbreviation: "Mon 16 15:00 to Tue 17 09:00 CET".
+- Units: Settings > General > STATION > Weather units. *Metric*, the
+  default: °C, km/h, hPa, mm and km. *US*: °F, mph, inHg, inches and miles,
+  rounded as a US forecast has them: whole degrees and mph, the pressure and
+  the rain to the hundredth (29.92 inHg, 0.25 in), the visibility to a tenth
+  of a mile under 10 miles. The app, its notices and the web page all
+  follow it; the app open on the screen changes at once when the web page
+  sets it. Only what is shown changes: the radio asks for and keeps the
+  weather in metric units, and the warnings worked out from the forecast
+  (below) keep their metric limits. A warning's own text stays as the
+  service wrote it (the NWS's in US units, MeteoAlarm's in metric).
 - The MFK: in Now and 5 days, on to the next view; in Warnings, up and down
   the text.
 - How often: when the app opens, with Update, then every 15 minutes while
@@ -8166,7 +9189,8 @@ each source of what they show, as their terms ask:
   and the warnings in the browser, with a **Place** box for a look somewhere
   else by its locator (empty: the radio's position, as above). It asks while
   the page is open and in view, every 15 minutes. The country and the QTH
-  locator are set on the radio only.
+  locator are set on the radio only. **Units** there is the radio's Weather
+  units: changed on the page, it changes on the radio too.
 - The answers are kept in `/tmp`: `x6100-meteo.json` (the app's and the
   page's), `x6100-meteo-web.json` (a locator typed on the page).
 - After the CX8ANM edition of OpenX6X00 (condoruy), whose Meteo app this is.
@@ -8373,6 +9397,78 @@ CAT; the CAT settings are in the [reference](#bluetooth-cat-connection)) or
 the [TCI server](#tci-server): CAT and audio both ways over the network, on
 WiFi or better on [Ethernet](#ethernet).
 
+## Speech
+
+The radio can say what it does, for blind and low-vision operators: every
+key, knob, F-key page, window, list, setting and message. It is off by
+default, and off it costs nothing: nothing is loaded and nothing runs. The
+work is Jimr9's (OpenX6X00 Speech Access).
+
+Turning it on without seeing the screen: hold the DFN key. Each hold goes one
+step, and says which: "Speech when the screen is off", "Speech always",
+"Speech off. Hold D F N for speech again". The same choice is Settings >
+Voice > Voice mode. (Holding DFN is the long-press action of that key on a
+radio that never set another one: Settings > Keys > PAGE KEYS, LONG PRESS,
+action Speech mode.)
+
+- Screen off only: silent while the screen is lit, spoken once it is dark,
+  for the operator who saves the battery with the screen off.
+- Always: spoken whatever the screen does. In this mode a short press of the
+  power key reads the screen aloud instead of switching it off and on: the
+  frequency, mode, VFO, band, time and battery on the main screen, the open
+  window and its F-keys elsewhere. A key or a knob that wakes a dark screen
+  then also does its work at once; without speech the first press only wakes
+  the screen.
+
+What is spoken:
+
+- The frequency after the main knob comes to rest, as megahertz and
+  kilohertz ("14.074"), and the band on a band key.
+- A key: what it switched and to what. An F-key page: its name and its
+  buttons. An F-key press: the button, and its new value.
+- VOL and the MFK: the control's name once, then its values alone while the
+  knob turns, the name again every few values (Name repeats).
+- A window: its title, then the control the knob lands on with its kind and
+  value, a list's row with its place ("3 of 12"), and what a control is for
+  where the name does not tell.
+- Messages on the screen. One that comes up during a transmission is said
+  once the radio is back on receive.
+- Decoded text (CW, RTTY, PSK, Olivia, NavTex), a few words at a time, with
+  Read decoded text on. Callsigns and locators in FT8 and JS8 rows are
+  spelled.
+
+Never on the air: nothing is said during a transmission, a tuning cycle or
+an SWR scan, and what is being said is cut off as the radio keys. Nothing is
+said while the recorder runs or a voice message is recorded.
+
+Where it is heard: the radio's speaker or wired headphones; with Bluetooth
+headphones connected, in those. While it speaks, the receiver's audio makes
+way for it and comes back after.
+
+Settings > Voice:
+
+- Voice mode: Off (default), Screen off only, Always.
+- Voice: SLT or CLB (female), Alan or BDL (male), all English. A change says
+  the voice's name in that voice.
+- Rate, Pitch, Volume: 50 to 150 % of the voice's own.
+- New speech interrupts (default on): a newer announcement cuts the one
+  being said. Off, a new one is dropped while one is said, and a knob's
+  value is said one second after it stops.
+- Read decoded text (default on).
+- Interrupt delay (default 100 ms): how long a knob must rest before its
+  value is said. Tuning delay (default 1000 ms): the same for the main knob.
+- Name repeats (default 5): after how many values a control's name is said
+  again; 0 says the name every time.
+
+The texts are spoken in English, whatever the GUI's language: the voices are
+English ones.
+
+Speech needs a card image that has the synthesizer (RHVoice, with the four
+voices: about 25 MB). An update from the radio's screen or over SSH brings
+the settings and the Voice tab but not the voices; with an older card image
+the tab says so and the DFN key held shows "Speech is not on this card
+image". Write the newer card image to hear it.
+
 ## Themes
 
 Every colour of the GUI comes from a role (background, button, selected row,
@@ -8453,7 +9549,7 @@ transmitter. Logs > Export and the
 Gallery's ZIP download hold no secret and work by any name; TCI programs, which
 are not browsers, connect by any name as before.
 
-The menu has General and five groups:
+The menu has General and six groups:
 
 | Group | Page | Does |
 |---|---|---|
@@ -8462,6 +9558,9 @@ The menu has General and five groups:
 | | Screen | the radio's screen live, its keys and knobs, the audio both ways (see [Browser remote](#browser-remote)) |
 | | Direction finder | page I with a KrakenSDR in the browser: the compass, the band, every channel, tuning and every setting (see [Direction finder in the browser](#direction-finder-in-the-browser)) |
 | | Tailscale | Enabled, status, Log in to Tailscale, the radio on your tailnet, Log out, and Funnel (see [Tailscale](#tailscale) and [Tailscale Funnel](#tailscale-funnel)) |
+| Apps | FT8 | the radio's FT8 app: its own waterfall with the calls of each slot, the stations on a map, the band's decodes, the QSO under way, the app's buttons and its next message (see [FT8 in the browser](#ft8-in-the-browser)); each Apps page opens its app on the radio by itself when no other digital app is open there and the browser may operate (see [Browser apps](#browser-apps)) |
+| | JS8 | the radio's JS8 app: its own waterfall with the calls heard, the stations on a map, the band's messages or the stations heard, the conversation with a box to write, the app's buttons (see [JS8 in the browser](#js8-in-the-browser)) |
+| | WeFax | the radio's WeFax app: the chart live as it comes in, open and close, RX Auto or Cont, Auto Plan, Save now, Clear, the stations, the last charts (see [WeFax in the browser](#wefax-in-the-browser)) |
 | Frequencies | Bands | band edges, default modes and TX shifts ([TX shift](#tx-shift)); the band plan the radio uses, whose region 160m, 80m, 40m SSB and 6m follow unless edited ([Band plan](#band-plan)). A band may overlap an inactive broadcast band (80m to 4 MHz over Broadcast 75m): the radio takes the band |
 | | Digital modes | add, edit and delete the FT8/FT4, JS8, WSPR and FT2 frequencies, and your own for PSK, Olivia and JTTY in the place of their built-in ones; a card shows what the band keys of those three step through, with the band plan ([Frequencies of PSK, Olivia and JTTY](#frequencies-of-psk-olivia-and-jtty)); WSPR band hopping: Hop and each band's Off, RX or RX+TX, set live (see [Band hopping](#band-hopping)) |
 | | Memories | MEM 1-9 slots and the named channel list ([Channels](#channels)), on the frequencies the radio tunes |
@@ -8472,15 +9571,16 @@ The menu has General and five groups:
 | | GhostNet | GhostNet's nets of the next 7 days in UTC and the radio's own time, the reminder and the nets it is for, the own net, the regional group, the two translation switches, the messages JS8 heard and sent there with their translations, the stations heard, a short guide (writes `/mnt/ghostnet.conf`, see [GhostNet](#ghostnet)) |
 | | CW messages | the MSG > CW messages: add, edit, delete (1-64 characters) |
 | | Macros | the PSK31, Olivia and JTTY macros (add, edit, move up, delete) and the JS8 INFO and STATUS answers (see below) |
-| | Logs | every QSO on the radio, day by day: edit, delete, export as ADIF or CSV; the text of the keyboard modes, a file a day: read, download, delete (see [Text log of the keyboard modes](#text-log-of-the-keyboard-modes)) |
+| | Logs | every QSO on the radio, day by day: edit, delete, export as ADIF or CSV (a QSO deleted or edited here is so in the worked-before list of FT8, FT4 and JS8 and in `ft_log.adi` or `js8call_log.adi` too); Worked before: the QSOs that list has besides (imported, or deleted by v0.3.12 or older), counted and forgotten on request; the text of the keyboard modes, a file a day: read, download, delete (see [Text log of the keyboard modes](#text-log-of-the-keyboard-modes)) |
 | | Internet radio | the [Internet radio](#internet-radio)'s favourites: add a station by its name and stream address, edit, move up, delete; whether this card image plays more than MP3 (writes `/mnt/iradio/favorites.tsv`) |
 | | Zello | the [Zello](#zello) app's account (user name, password, the developer key's Issuer and Private Key: only Set or Not set shown again, the user name as its first two characters), Clear account, Test (logs on to zello.io and off again), and the channels, one a line (writes `/mnt/zello`, for root alone; the account not in a Backup and not on the Files page, the channels in the Backup's Apps' lists) |
+| | DMR | the [DMR](#dmr-over-the-internet) app's network, server, DMR ID and hotspot digits, the hotspot password (only Set or Not set shown again), options and talkgroups, Test (logs in to the server and out again), and On the air (writes `/mnt/dmr`; the password for root alone, not in a Backup and not on the Files page, the settings in the Backup's Apps' lists) |
 | | Flights | the aircraft around the radio, as APP > Flights shows them: plot, list, range, a centre by locator (see [Flights](#flights)) |
 | | Weather | the weather where the radio is, as APP > Weather shows it: now, five days, the warnings, a place by its locator (see [Weather](#weather)) |
 | | SmartCW | SmartCW's own page through the radio, in a new tab on port 8073; in the menu while SmartCW is plugged in (see [SmartCW](#smartcw)) |
 | Files | Files | browse and download `/mnt` |
 | | Gallery | screen recordings, voice recordings, screenshots, SSTV and WeFax pictures (see below) |
-| | Backup | download settings, memories, cluster, TCI server, QSO log, voice messages, your own boot picture, the apps' lists (GhostNet's settings and nets file, the Internet radio's favourites and country, the Zello channels, the SVXConnect settings; Flights, HF Air Band and CB keep theirs in the settings) (optionally CW trainer and WiFi) as one file, and restore the parts you choose (restored WiFi networks are taken a few seconds after, no restart needed; see below) |
+| | Backup | download settings, memories, cluster, TCI server, QSO log, voice messages, your own boot picture, the apps' lists (GhostNet's settings and nets file, the Internet radio's favourites and country, the Zello channels, the SVXConnect settings, the DMR settings; Flights, HF Air Band and CB keep theirs in the settings) (optionally CW trainer and WiFi) as one file, and restore the parts you choose (restored WiFi networks are taken a few seconds after, no restart needed; see below) |
 | System | Keys | what the radio's keys do, as Settings > Keys: the top and side keys pressed and held, the page keys held, the USER page's F1-F5, the hand mic keys, the frequency lock per band and mode ([#111](#buttons-and-knobs)) |
 | | Display | every display option of the radio, a few station options of the other tabs (independent VFOs, the band plan, the WR12, [TX ranges, the own list and TX outside ham bands](#amateur-bands-only) in the Transmitter card), and the [boot picture](#boot-picture) (see below) |
 | | Time | local and server time; Sync sets the radio clock from the browser's, in the radio's timezone; NTP sync; timezone |
@@ -8593,10 +9693,10 @@ them.
 | S-meter | S-meter type (Bars, Needle), Colours (Theme, Scale, Level), Needle lamp; with a preview |
 | Waterfall | Mode (Centered, Fixed), Jump at (40%, Passband, Line) and Jump to (Center, Other edge, Scroll), greyed unless Mode is Fixed (see [Waterfall](#waterfall)), Speed (1-5), Auto level, Auto level offset (-15 to +15 dB), Center line, Zoom, Smooth scroll, 3D, 3D colours (Strength, Waterfall, Blue), 3D depth, tilt, floor, range, peaks, glide (greyed unless 3D is on; under Amber Trey 3D off and greyed with them) |
 | On the waterfall | Band plan, Plan (Auto or a plan, with what Auto takes and from what; see [Band plan](#band-plan)), Cluster spots, Cluster column |
-| Backlight | Brightness, Brightness when idle (greyed with Idle after Off), Idle after (Off, 5-120 s), Button lights (Always off, Always on, Temporarily on), Screensaver (None, Matrix rain), Screensaver after (1-120 min, greyed with None), Rain speed (Normal, Slow, Very slow; greyed with None), Screen off after (0-120 min), Screen always off (the screensaver's rows greyed while it is on); see [Screensaver](#screensaver) |
+| Backlight | Brightness, Brightness when idle (greyed with Idle after Off), Idle after (Off, 5-120 s), Button lights (Always off, Always on, Temporarily on), Screensaver (None, Matrix rain), Screensaver after (1-120 min, greyed with None), Rain speed (Normal, Slow, Very slow; greyed with None), Screen off after (0-120 min), Screen always off (the screensaver's rows greyed while it is on); see [Screensaver](#screensaver); Panel stripes fix (see [Panel stripes fix](#panel-stripes-fix)) |
 | Receiver | the X6200 only: WR12 on HOST (see [WR12 receiver](#wr12-receiver-x6200)) |
 | Transmitter | TX ranges (Ham bands, South Korea, Own list), TX outside ham bands (Settings > TX Cal), and the own list as a text field: Save writes `tx_ranges.conf` and the radio reads it at once, the ranges it took and a line it could not read said under it (see [Amateur bands only](#amateur-bands-only)) |
-| Text and info | Independent VFOs, Birdies (Off, Marks, Marks + notch), Mode from band plan, Zoom and step per mode, Step per zoom (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)), 12-hour clock, Icon menus, Knob info, Hide buttons (Off, 3 s, 5 s, 10 s; see [Buttons and knobs](#buttons-and-knobs)), Keep knob lines, Decoder text (Large, Compact), Magnify frequency, Magnify info, TX panel (the radio's Popups TX) |
+| Text and info | Independent VFOs, Birdies (Off, Marks, Marks + notch), Mode from band plan, Zoom and step per mode, Step per zoom, Tuning steps from, Tuning steps to (see [Waterfall](#waterfall)), Power display (% + time, Volts, Alternate, % + V; see [battery time](#battery-time)), Callsign (see [Display tab](#display-tab)), CW tune and WPM (Spectrum, Frequency strip; see [CW decoder](#cw-decoder)), 12-hour clock, Icon menus, Knob info, Hide buttons (Off, 3 s, 5 s, 10 s; see [Buttons and knobs](#buttons-and-knobs)), Keep knob lines, Decoder text (Large, Compact), Magnify frequency, Magnify info, TX panel (the radio's Popups TX) |
 | Boot picture | the picture the radio starts with, Upload, Default; kept by the web server, not a Settings option, so it works with the radio's screen down too (see [Boot picture](#boot-picture)) |
 
 HTTPS. The server also listens on port 443, with a self-signed certificate
@@ -8646,8 +9746,10 @@ card. No SSH needed.
   RGBA, not a palette) and it is taken.
 - It fades in as a whole over about 3 seconds, from the colour of its
   top-left pixel; the built-in logo's steps are made for that logo alone.
-  With the [boot sound](#audio-tab) on it ends with "CQ CQ", as the logo
-  does. What is transparent in it shows black.
+  With the [boot sound](#audio-tab) on it ends with the sound's last
+  character, as the logo does. What is transparent in it shows black. The
+  callsign of Settings > Display > MAIN SCREEN > Callsign goes on the
+  built-in logo only, not on yours.
 - It is kept on the card's DATA partition (`/mnt/bootlogo.png`), so updates,
   which put the built-in logo back with the rest of the system, leave it as
   it is, and so does a new card image that keeps the DATA partition. The
@@ -8719,6 +9821,7 @@ Every QSO the radio logs goes to your [Wavelog](https://github.com/wavelog/wavel
 - Set up: the Wavelog URL (the address you open Wavelog with), a read & write API key (Wavelog: your account menu, API Keys, Create a read & write key; in Wavelog 3.1 and later under Legacy API Keys (API v1)), then Load, choose the station profile and switch Upload to Wavelog on. Test connection asks Wavelog for its version and the key's rights, with what is typed, before Save: a read-only key, with which every QSO would be refused, fails the test. Test connection, Load and Send now wait for Wavelog one at a time, their buttons off meanwhile. A Wavelog that doesn't answer gives "no connection" after 20 s; a name lookup the radio's network never answers holds the radio's side longer, and Test connection or Load then says, at 40 s, "no answer in 40 s: check the URL, and that the radio can reach that address". The API tokens of Wavelog's API v2 (wl2_...) don't work yet: the page says so at Test connection, Load and Save. The saved key goes only to the server it was saved with: with the URL of another server (your Wavelog moved), type the key again for Test connection, Load and Save.
 - Station profile Automatic: each QSO goes to the Wavelog profile with the callsign the radio logged it with (Settings > General > STATION). With a profile DF8MH and one DF8MH/P in Wavelog, changing the callsign on the radio is all it takes; when several profiles have the callsign, the one Wavelog marks active. A QSO whose callsign has no profile waits, "Wavelog: no station profile for DF8MH/M, 1 QSO waiting", and the others still go; make the profile in Wavelog, then Send now.
 - From the moment it is switched on: the QSOs logged before are not sent. To send an older log, import its ADIF in Wavelog (Files, Logs page, Export).
+- A CB QSO (a CB callsign on either side, 26AT101: FT8 on 11 m) stays on the radio: Wavelog is an amateur log, with no 11 m band.
 - The display says what happened: "Wavelog: DL1ABC uploaded", "Wavelog: DL1ABC was already there" (Wavelog found it as a duplicate), "Wavelog: no connection, 2 QSOs waiting". A failure is shown once, on the QSO that met it.
 - Each QSO goes once. The radio tells QSOs apart by the other station, the date and time to the second, the band, the mode and your station callsign: two QSOs with DL1ABC in the same minute, or one as ON6URE and one as ON6URE/P, are two, and both go. Wavelog itself takes a second QSO with the same station, band and mode within 15 minutes, under the same callsign of yours, for a duplicate.
 - The mode goes as ADIF 3.1.8 has it: PSK31 and PSK63 as mode PSK with that submode, FT4, FT2, JS8 and JTTY as mode MFSK with theirs, FT8, OLIVIA, CONTESTI, RTTY, CW, SSB, AM and FM as they are. A QSO logged without a mode (by hand in USB-D or LSB-D with no app open, away from FT8 and FT4) waits on the radio: it goes once the Logs page gives it one, so Wavelog never gets it without a mode and then again with one.
@@ -8759,7 +9862,8 @@ speaks VARA HF (both experimental), in its place. Pat
 calls a Winlink RMS gateway, the radio tunes there and transmits, and your
 mail goes out while the new mail comes in. Where: web configurator,
 Operating > Winlink. Off by default; when it is off, Pat and the modem do not
-run.
+run. With no phone or laptop at hand, [APP > Mail](#mail-on-the-radio) reads,
+writes and sends the same mail on the radio itself.
 
 Setting it up:
 
@@ -8797,12 +9901,18 @@ Setting it up:
    - Frequency: where the radio listens, and whether it transmits there too
      ("No TX: split would send on 14.200.000, not 14.105.000", XIT, RIT, a
      TX shift, outside the amateur bands, "No TX: no data from the base").
-   - Mode: Pat's QSY to a gateway sets USB-D (USB is kept).
+   - Mode: Pat's QSY to a gateway sets USB-D (USB is kept), and so does the
+     modem's first key in any other mode, for a connection with no
+     frequency in it (a call typed in): up to v0.3.12 it keyed in the
+     dial's mode, in CW with almost no power. While an app holds the mode
+     (the CW Trainer, an SSTV transmission) it does not key: "Winlink: no
+     TX, the radio is in CW, not USB-D (an app holds the mode)".
    - Filter: whether the RX filter (and the TX filter, on a base that has
      one) covers ARDOP's passband at the page's bandwidth: 1250-1750 Hz at
-     500 Hz, 500-2500 Hz at 2000 Hz. Mercury's: 450-2550 Hz at 2300 and
-     2750 Hz, 1200-1800 Hz at 500 Hz. XARA's, VARA HF's carriers: 350-2650
-     Hz at 2300 Hz, 120-2880 Hz at 2750 Hz, 1240-1760 Hz at 500 Hz.
+     500 Hz, 500-2500 Hz at 2000 Hz. Mercury's: 375-2625 Hz at 2300 Hz,
+     125-2875 Hz at 2750 Hz, 1200-1800 Hz at 500 Hz. XARA's, VARA HF's
+     carriers: 350-2650 Hz at 2300 Hz, 120-2880 Hz at 2750 Hz, 1240-1760 Hz
+     at 500 Hz.
    - Power: the radio's PWR, at most 7 W for Winlink; 5 W with the X6200 on
      its battery, or a transverter's TX power limit, which the row says (see
      [Transmitting](#transmitting)).
@@ -8845,7 +9955,10 @@ Setting it up:
      | The link dropped during the exchange | What was delivered counts; connect again, narrower on a weak path |
      | Pat could not tune the radio (Unable to QSY) | The radio's screen says why |
 
-     The same line goes into Pat's log, so the mailbox shows it too.
+     The same line goes into Pat's log, so the mailbox shows it too. A
+     connection refused while another is under way ("no connection through
+     ARDOP: one through VARA HF is under way") shows until the one under
+     way comes to something, which then takes its place.
    - Logs, Download: Pat's log, its output, ARDOP's, Mercury's, XARA's (and
      its settings), Pat's event log, the radio's state and the status, as one
      text file to attach to a bug
@@ -8874,10 +9987,52 @@ Connecting to a gateway:
   RMS list): the gateways that run ARDOP, with their callsign, frequency and
   distance. Pick one on a band that suits the time of day and your antenna,
   and Connect.
+- Which gateways the list has (from v0.3.14; issue #324): Winlink keeps the
+  gateways under service codes, and Pat asks for the ones in its Service
+  codes (Action > Configure). Sysops register an ARDOP gateway under PUBLIC,
+  one that runs XARA under XARA and one that runs Mercury under MERCURY. The
+  radio sets all three, PUBLIC, XARA and MERCURY, each time it starts Pat,
+  whichever modem is chosen. Pat's list does not say which code a gateway
+  is under, and Mercury and XARA do not talk to each other: a gateway that
+  never answers one may be the other's, so try the other modem (APP > Mail,
+  Modem). Codes of your own typed there (EMCOMM and the like) stay, behind
+  the radio's. Up to v0.3.13 the list had the PUBLIC gateways only. Pat
+  keeps a list of its own for each set of codes: the first time after the
+  update it downloads the new one when the radio has internet, and shows
+  the list it comes with when it has none.
+- The transport you connect through chooses the modem (from v0.3.13; issue
+  #296): ARDOP while Mercury or XARA runs makes the modem ARDOP, VARA HF while
+  ARDOP runs makes it XARA, or Mercury when that was the last of the two you
+  chose on the Winlink page. The same from Pat's API and from
+  [APP > Mail](#mail-on-the-radio). Pat waits the few seconds until the new
+  modem is on the radio's audio, then calls; its log says so ("GoldCorpHF:
+  switching the modem from ARDOP to XARA for this connection through VARA
+  HF"). The Winlink page's Modem follows and stays there afterwards; the
+  bandwidths, the VARA HF licence tick and the rest stay as set. When the
+  modem does not come up, Pat does not call and its log says why ("GoldCorpHF:
+  no connection through VARA HF: XARA did not start ..."). APP > Mail's
+  Abort while Pat waits for the modem ends the connection there (the
+  mailbox's status line offers Abort only once Pat calls): Pat does not call
+  ("GoldCorpHF: no connection through VARA HF: Abort was chosen while the
+  modem switched"), and the modem goes on to the new one, which the Winlink
+  page shows. No switch while
+  a connection through the other transport is under way; telnet and the
+  other transports are not touched. Up to v0.3.12 such a connection went
+  nowhere until the modem was changed on the Winlink page.
+- When the modem hears the frequency in use, Pat waits for it to clear
+  before it calls ("Waiting for clear channel...") and asks in the mailbox
+  and on APP > Mail: Continue anyway, or Abort. After 5 minutes it gives up.
+  Abort on the mailbox's status line ("Dialing..."), or on APP > Mail's
+  Connection page, ends that wait at once too, with ARDOP and with VARA HF
+  (Mercury, XARA): no call goes out, and the next connection can go. Up to
+  v0.3.12 the call went on until the 5 minutes were up, and with ARDOP it
+  could still go out once the frequency cleared.
 - Pat gives the radio the gateway's dial frequency: the radio tunes there,
   switches to USB-D (unless it is in USB or USB-D already), and tunes back
   after the session. The power is the radio's setting, at most 7 W, as for
-  the radio's other digital modes.
+  the radio's other digital modes. To tune the antenna on the gateway's
+  frequency before the call, connect from [APP > Mail](#mail-on-the-radio):
+  its first press puts the radio there and transmits nothing.
 - ARDOP keys the radio the way the radio's own digital modes do, and
   identifies with your callsign in CW. Its call carries your callsign too
   and counts as an ID: no ID frame keys the radio by itself about 9 minutes
@@ -9107,14 +10262,124 @@ calls home, the Winlink page's ARDOP bandwidth as the widest, its log open to
 the radio's lines, a reply with a Winlink form or a text-only template that
 reaches the composer), ardopcf with its audio and PTT through the radio's GUI.
 
+### Mail on the radio
+
+Since v0.3.13 (#294). APP > Mail (the APP grid's Mail tile, APP 6:6, or a
+key's long press given APP Mail in Settings > Keys) reads, writes and sends
+Winlink mail on the radio, with the touch screen, the
+MFK or a USB or Bluetooth keyboard: no phone, no laptop and no WiFi. It is
+the same mailbox as Pat's web page: a message written on the radio shows in
+the web mailbox, and the other way round. Plain text only: a message's
+attachments are named with their size, and they and Winlink forms stay in the
+web mailbox.
+
+- The list: Box goes through the Inbox, the Outbox (what the next
+  connection sends) and Sent. Unread messages are marked with `*` and
+  counted at the top right, with the messages waiting to go. The MFK (or Up
+  and Down) chooses, a press (or Enter) reads; a message touched is read at
+  once. On a keyboard N writes a new message, C connects, B goes to the next
+  box.
+- Reading: Up and Down, the MFK, the space bar or a finger scroll. Reply fills in the
+  sender and "Re:" and quotes nothing: over HF every byte takes air time.
+  Delete, pressed twice, deletes the message; in the Outbox it is then not
+  sent.
+- New: To and Cc (callsigns or e-mail addresses, commas between them), the
+  subject (at most 128 characters) and the text. On a keyboard type into the
+  field; Enter or Down goes to the next field, and in the text Enter is a new
+  line. Without one, the MFK chooses the field and a press (or Edit) opens the
+  on-screen keys: a field takes the whole line typed, the text a line at a
+  time. Send puts the message in the Outbox; Cancel twice drops it. Pat
+  writes mail in Latin-1, as Winlink carries it: accents and umlauts go out
+  and show as they are, and what is beyond Latin-1 is written out (typographic
+  quotes and dashes as plain ones, the euro sign as EUR, Ł as L), where Pat
+  would put "?". If Pat asks something during a connection while you write,
+  its question comes first; the message comes back after the answer, or with
+  New.
+- Connect: Pat's gateway list for the modem chosen (Modem on page 2, or the
+  Winlink page: ARDOP, or the VARA HF gateways for Mercury and XARA), the
+  nearest first, the ones called from the radio lately on top (`+`, on the
+  band chosen). Band goes through the bands; the MFK, the arrows or a touch
+  choose a gateway. The list comes from the card: without internet Pat takes
+  the one it last downloaded, or the one it comes with.
+- Two presses call a gateway, and only the second transmits (from v0.3.14;
+  issue #322). The first, Set freq (or an MFK press, or Enter), puts the
+  radio on the gateway's dial frequency, in USB-D unless it is in USB or
+  USB-D already, and sends nothing: the status line says "On 7100.0 kHz for
+  DM6TS, nothing sent: tune the antenna now if needed", and there is no time
+  limit, so run the antenna tuner for that frequency if it needs one. The
+  button now reads Connect: the second press calls the gateway as Pat's
+  Connect does, with the same checks before each key (see above), and Pat
+  sends the Outbox and fetches the new mail. Another gateway chosen, or the
+  dial turned, and the next press is a first one again. When the radio
+  cannot go there the line says why ("Not on 7100.0 kHz: FT8 is open, close
+  it"; the radio on the air; LOCK). It never moves the radio under a
+  connection, also one begun from the web mailbox while the list is open:
+  the app asks Pat at the press ("Not on 7100.0 kHz: a connection is under
+  way", "Pat is calling a gateway", "the modem is being switched for a
+  connection", or "Pat just tuned the radio for a connection, try again in a
+  moment" in the 4 seconds after Pat tuned). Back, another band or closing the app
+  without calling takes the radio back to where it was before the first
+  press, and so does the end of the connection, as Pat's own tune back does
+  for a connection from the web mailbox; a dial you turned yourself in
+  between stays where you put it. After Set freq you can also connect from
+  the web mailbox: the radio is then left on the gateway's frequency, where
+  Pat found it. The mode stays USB-D, as after any
+  Winlink connection. A gateway with no frequency in Pat's list is called
+  where the radio is: Connect, twice within 5 seconds. Up to v0.3.13 the
+  radio changed frequency only as it began to transmit.
+- The Connection page shows Calling or Connected, the progress of each
+  message on the bar, Pat's last log lines, and at the end what happened,
+  with what to do next as the Winlink page says it, on as many lines as it
+  takes (up to v0.3.13 it was one line, cut at the right edge; issue #321).
+  Abort ends the connection; pressed again, at once.
+- Pat's questions during a connection come up on the buttons, as in the web
+  mailbox: a busy channel (Continue anyway or Abort; Pat waits for it to
+  clear meanwhile, and the Connection page's Abort ends that wait too), the
+  password when none is set (typed in a hidden field),
+  an account Pat cannot confirm (Continue anyway: the account is activated
+  over the air and a message brings its password, the only key to it, so
+  write it down), a new account's password message (Download now or Later)
+  and messages waiting at the gateway over Pat's size limit (Get all, Get
+  small or Later). A question answered in the web mailbox goes away on the
+  radio.
+- Page 2: Winlink On or Off (as the Winlink page's Enabled; Pat and the
+  modem start with the radio from then on), Modem, the Winlink password
+  (kept on the radio and never shown, as the Winlink page keeps it; Pat
+  starts again with it) and Refresh. Close is on page 1. The callsign is the
+  radio's (Settings > General) unless the Winlink page sets another; the
+  bandwidths and the VARA HF licence tick are set on the Winlink page.
+- Modem (from v0.3.14; issues #322, #323) goes through the modems on the
+  radio: ARDOP, Mercury, XARA. A press chooses the next one, as the Winlink
+  page's Modem and Save: Pat stops, the modem that runs stops, the new one
+  starts and Pat starts again, which takes a while. The status line
+  follows it ("Modem: switching to XARA... Restarting Pat with the new
+  settings...") and ends with "Modem: XARA is ready", or with why it is not
+  ("Modem: XARA did not start: ...", or "XARA needs your callsign: ..."
+  when XARA cannot take the one set). The gateway list is then that
+  modem's, and the Winlink page shows the same choice. With Winlink off the
+  choice is kept for when it is turned on. Not during a connection: Pat
+  restarts for it.
+- Closing the app leaves a connection running, as one from the web mailbox;
+  APP > Mail shows it again ("A connection is under way") and Abort ends it.
+  The radio still goes back to where it was when that connection ends.
+- The app holds neither the radio's audio nor its frequency, so it is not
+  one of the digital apps that keep Winlink from keying.
+
+Over SSH, `x6100-winlink-mail` is what the app runs: `status`, `list in`,
+`read in <ID>` and `gateways 40m` print what the app shows, as JSON.
+`x6100-winlink modem` says the modem chosen and the ones on the radio, and
+`x6100-winlink modem xara` (or `ardop`, `mercury`) chooses one as the app's
+Modem does.
+
 ### Mercury (experimental)
 
 [Mercury](https://github.com/Rhizomatica/mercury) is a second HF modem for
-Winlink, from Rhizomatica's HERMES project: OFDM modes up to 2.1 kHz wide,
-faster than ARDOP on a good path, down to an MFSK mode for the weakest
-signals, and a VARA-style connection that Pat drives as its VARA HF transport.
-It comes with the firmware, pinned at version 1.9.21: `x6x00-mercury` is
-Mercury with the radio's GUI as its sound card and PTT, as ardopcf has.
+Winlink, from Rhizomatica's HERMES project: OFDM modes up to 2.25 kHz wide
+(2.75 kHz at its widest bandwidth), faster than ARDOP on a good path, down to
+an MFSK mode for the weakest signals, and a VARA-style connection that Pat
+drives as its VARA HF transport. It comes with the firmware, pinned at version
+1.9.25: `x6x00-mercury` is Mercury with the radio's GUI as its sound card and
+PTT, as ardopcf has.
 
 It is experimental. Two stations connected and exchanged mail through it on a
 PC, each with the radio's own Winlink code and Pat, but it has not been on the
@@ -9122,7 +10387,9 @@ air from a radio yet. It needs far more of the radio's processor than ARDOP:
 on an X6100, into a dummy load, about one of its four cores, the radio at
 39 % of its processor with Mercury listening (18 % with ARDOP) and at most
 51 % during calls, its receiver never falling behind. The X6100 has no
-temperature sensor to read. Not measured on an X6200 yet.
+temperature sensor to read. Not measured on an X6200 yet. Those figures are
+Mercury 1.9.21's; 1.9.25, which has more modes and listens for calls on two
+MFSK widths, has run on a PC only, not on a radio yet.
 
 Choosing it: on Operating > Winlink, the Station card's Modem, Mercury
 (experimental), and its bandwidth, then Save. One modem runs at a time, since
@@ -9133,9 +10400,14 @@ as ON6URE" once Pat and Mercury run, and the Connections card's Modem row
 
 Who answers:
 
-- Only Mercury 1.9.20 or later: 1.9.20 and later do not connect to 1.9.19 or
-  older, and Mercury does not talk to VARA or ARDOP at all. Ask the other
-  station which version it runs.
+- Only Mercury 1.9.25, the radio's own version. Mercury's versions connect in
+  groups, as its release notes of 1.9.25 give them: 1.9.25 to 1.9.25 only;
+  1.9.20 to 1.9.24 to one another; 1.9.19 and 1.9.18 each to itself; 1.9.17
+  and older to one another. 1.9.25 does not connect to 1.9.24 or older in
+  either direction (the notes say nothing yet of versions after 1.9.25), and
+  Mercury does not talk to VARA or ARDOP at all. Ask the other station which
+  version it runs. A firmware up to v0.3.13 has Mercury 1.9.21, which
+  connects to 1.9.20-1.9.24 and not to 1.9.25.
 - Another Mercury station, station to station (P2P). The radio calls; it does
   not answer calls (P2P listening stays off, as with ARDOP), so the other
   station listens.
@@ -9150,26 +10422,50 @@ station's callsign as the target and its dial frequency in kHz by hand, and
 Connect. The radio tunes there in USB-D and back afterwards, as with ARDOP.
 The bandwidth field may stay empty: Mercury then takes the Winlink page's.
 
-- The bandwidth: 2300 Hz (the default) lets Mercury use all its modes; 500 Hz
-  keeps it narrow (DATAC3, 562 Hz, at the most), and its most robust mode, the
-  MFSK floor, is then a 500 Hz MFSK at half the speed (about 27 s a frame);
-  2750 Hz has 2300's modes for now. The narrower of the two stations' is used.
-  The RX filter has to cover Mercury's audio: 450-2550 Hz at 2300 and 2750 Hz,
-  1200-1800 Hz at 500 Hz. The Before you connect card checks it.
+- The bandwidth: each has its own set of modes in 1.9.25. 2300 Hz (the
+  default) goes up to modes 2250 Hz wide; 500 Hz keeps it narrow (562 Hz at
+  the most), and its most robust mode, the MFSK floor, is then a 500 Hz MFSK
+  at half the speed (about 27 s a frame); 2750 Hz has two modes 2750 Hz wide
+  at the top, for a good path. The narrower of the two stations' is used.
+  The RX filter has to cover Mercury's audio: 375-2625 Hz at 2300 Hz,
+  125-2875 Hz at 2750 Hz, 1200-1800 Hz at 500 Hz (1.9.21's widest modes were
+  2100 Hz, 450-2550 Hz). The Before you connect card checks it.
 - Mercury's keys are longer than ARDOP's: a call on its MFSK floor took 27 s
   on the PC, and a round in a session is up to 30 s on the air plus its head
   and tail. The radio stops a Mercury key after 40 s ("Winlink: TX stopped
   after 40 s"), an ARDOP one after 30 s. The power is the same, at most 7 W,
   and everything above holds for Mercury too: simplex, the apps, the SWR hold,
   a QSY asked during a key.
-- Mercury sends no CW ID (Pat's CWID ON is not one of its commands): the
+- Mercury sends no CW ID (it takes Pat's CWID ON and sends none): the
   callsigns go in its own call frames.
+- The transmit level is what it was: Mercury 1.9.25 by itself sends its audio
+  4 dB louder than 1.9.24 and before, and the radio turns that back (`tx_gain_db
+  = -4` in the settings it writes for Mercury), so the drive and the ALC are
+  as with the firmware before.
+- Stopping it with a session still up: Mercury first ends the session on the
+  air, so the other station is let go at once and does not wait for its own
+  timeout (4 minutes). That is one more transmission of about 4 s, which may
+  wait for the other station's turn: about 20 s on the PC, 42 s at the very
+  most, after which Mercury is stopped whatever happened, and the radio is
+  unkeyed when it goes. It happens when Winlink is turned off, another modem
+  is chosen or the radio shuts down while a session is up; normally Pat has
+  ended the session before (Abort, or the end of the mail exchange) and
+  Mercury stops at once. Meanwhile Status says "Mercury is ending its session
+  on the air before it stops (up to 42 s)...", on the Winlink page and in APP
+  > Mail, and a switch to another modem takes that much longer. To have the
+  transmitter quiet at once instead: anything that stops a Winlink key on the
+  radio still stops the one that is on (a digital app opened, the dial
+  turned, split or XIT changed), and over SSH `x6100-winlink stop`, or `x6100-winlink off`, given
+  a second time stops Mercury without the rest of its goodbye.
 
 When it does not work:
 
 - The Connections card's last connection says what happened, as with ARDOP:
-  no answer (the other station needs Mercury 1.9.20 or later, a VARA gateway
-  from Pat's list does not answer it), a dropped link (500 Hz on a weak
+  no answer (the other station needs Mercury 1.9.25, a VARA gateway
+  from Pat's list does not answer it), "answered with Mercury 1.9.24 or
+  older, which does not connect to this radio's" (such a station still
+  answers the call, and Mercury 1.9.25 ignores the answer: it has to update,
+  nothing on the radio helps), a dropped link (500 Hz on a weak
   path), "Pat called through ARDOP, but the radio runs Mercury" (VARA HF in
   Pat's Connect dialog, or ARDOP on the page), "Mercury was not ready", a
   bandwidth Mercury does not have (500, 2300 or 2750).
@@ -9195,23 +10491,32 @@ Pat's VERSION with a VERSION line, so Pat never hangs starting it
 
 ### XARA (experimental)
 
-[XARA](https://github.com/x0rro/xara) is a third HF modem for Winlink: an
-independent program by another author (x0rro) that speaks VARA HF on the air
-and VARA's interface to Pat. So the VARA HF gateways in Pat's list answer it,
-where they do not answer Mercury. It comes with the firmware, pinned at
-version 0.1.3 and built from its source with three changes of ours: the
-radio's GUI is its sound card and PTT, as for ardopcf and Mercury, it
-identifies in CW with any callsign, and a call you cancel ends at once
+[XARA](https://github.com/NR5P/xara) is a third HF modem for Winlink: an
+independent program by other authors that speaks VARA HF on the air and
+VARA's interface to Pat. So the VARA HF gateways in Pat's list answer it,
+where they do not answer Mercury. x0rro wrote it and stopped it on 8
+November 2026; NR5P (Nathan Rigg) carries it on, and the firmware follows
+his. It comes with the firmware, pinned at NR5P's version of 9 November 2026
+and built from its source with the modem of x0rro's last version (0.1.3, as
+up to v0.3.9, but for NR5P's detector of a busy channel) and four changes of
+ours: the radio's GUI is its sound card and PTT, as for ardopcf and Mercury,
+it identifies in CW with any callsign, a call you cancel ends at once, and
+its busy detector reads the noise of the radio's passband as a clear channel
 (below). Every transmission goes through the radio's own TX path, as for the
 other digital modes: the amateur bands only, simplex, at most 7 W, the SWR
 hold, no TX while a digital app is open.
 
-It is experimental. Two stations exchanged mail through it on a PC, each with
-the radio's own Winlink code and Pat, at the free speed and at full speed. It
-has not been on the air from a radio yet, nor against VARA itself or a VARA
-gateway. Listening on the bench X6200 it took 6-7 % in `top`; keyed, and
-its timing through the radio's audio, are not measured yet. XARA itself is young (its first release
-came out on 21 October 2026) and still changes fast.
+It is experimental. Up to v0.3.9 the firmware had x0rro's 0.1.3: two
+stations exchanged mail through it on a PC, each with the radio's own
+Winlink code and Pat, at the free speed and at full speed, and from an X6100
+on 80 m it delivered mail to and from VARA HF gateways at the free speed
+([#120](https://github.com/Guru-RF/OpenX6X00/issues/120)). Listening on the
+bench X6200 it took 6-7 % in `top`. NR5P's version has been tested on a PC
+only so far: two stations at the free speed and at full speed, driven as
+Pat drives XARA, not yet with Pat itself, nor on the radios or on the air.
+Keyed, XARA's processor load and its timing through the radio's audio are
+not measured yet. XARA itself is young (its first release came out on 21
+October 2026) and still changes fast.
 
 Choosing it: on Operating > Winlink, the Station card's Modem, XARA
 (experimental, VARA-compatible), its bandwidth and the VARA HF licence box
@@ -9235,9 +10540,10 @@ The speed:
   as a registered VARA station does, and the link may use every level ("full
   speed (VARA HF licence ticked)"). The radio always calls (it answers no
   call, below), so its own setting is the one that counts on its links.
-- XARA's author ships his own builds without the faster levels, so that
-  using them takes a build of one's own. This firmware has them built in, off,
-  behind the box: ticking it is your statement that you hold a licence.
+- XARA's first author shipped his builds without the faster levels, so that
+  using them took a build of one's own; NR5P's have them, off until asked
+  for. This firmware has them built in, off, behind the box: ticking it is
+  your statement that you hold a licence.
 
 Dialling: in the mailbox, Connect, VARA HF as the transport, then a gateway
 from the VARA HF gateway list, or another station's callsign and dial
@@ -9262,7 +10568,7 @@ gives.
   the radio first waits out its ID, keyed and silent (about 3 s), then sends
   its own. The ID is part of a key like the rest of XARA's audio: the radio's
   checks and power hold for it, and the silent wait leaves the TX level as it
-  was. XARA 0.1.3 itself sends one only with a US callsign (such as K1ABC or
+  was. XARA itself sends one only with a US callsign (such as K1ABC or
   N0AAA), and after a cancelled call only once the call's wait for an answer
   is over, when Pat may have tuned the radio back already; ours with any, a
   European one too, and at once.
@@ -9284,24 +10590,40 @@ When it does not work:
   at VARA's free speed: 1 sent, 0 received".
 - After a call that got no answer, or right after you cancel one, the radio
   keys once more for a few seconds: that is its CW ID, not another call.
+- Pat says the frequency is busy: XARA reads a channel busy for about 4 s
+  after it starts, while it learns the noise of the radio's passband, then
+  clear on a quiet band or a dummy load. Its log says what it heard each
+  time BUSY comes on: "busy: a tone at 1406 Hz" (a carrier there), "busy: a
+  VARA signal (level 5)" (another VARA station), "busy: a tone at ... Hz
+  (the noise shape not learned yet)" (its first seconds). Before, BUSY came
+  on at the start and could stay on for good behind the radio's filter, so
+  Pat never called, and plain noise read as "a VARA signal" every so often.
 - The Modem row says "Ready, but it fell behind the receiver lately" in red,
   and Pat's log "GoldCorpHF: XARA could not keep up with the receiver": XARA
-  fell behind the radio's audio ("xara is falling behind real time" in its
-  log), and its connections fail. The radio's processor is short for it: use
+  fell behind the radio's audio by 400 ms or more ("xara is falling behind
+  real time" in its log), and its connections fail. The radio's processor is
+  short for it: use
   ARDOP, and send the logs download on
   [#120](https://github.com/Guru-RF/OpenX6X00/issues/120), it helps the
-  measurement.
+  measurement. "audio: no receiver audio from the GUI for ... ms" in XARA's
+  log is something else: the radio's audio stopped for a moment and came
+  back all at once. XARA hears silence for that moment, drops the audio that
+  came late, so its timing stays the air's, and does not count it as falling
+  behind. Nor is one "falling behind" line of 100 to 300 ms: a block that took
+  long, as when XARA makes its own frame to send, and drained at once.
 - XARA's log is `/run/winlink/xara.log` (in the logs download too), its
   settings `/run/winlink/xara.conf`, written at each start: its commands on
   127.0.0.1:8300 and its data on 8301 (which Tailscale's userspace mode also
   opens to your tailnet, as ARDOP's), no KISS port, no web UI of its own.
 
-XARA (MIT, x0rro) comes with the firmware built from its v0.1.3 release with
-three changes of ours: its sound card and PTT through the radio's GUI, its CW
-ID with any callsign, and a cancelled call that ends at once
-(`tools/xara/UPSTREAM.md`). The Rust crates in it are MIT (some also
-Apache-2.0, Zlib or 0BSD) and the Rust standard library Apache-2.0 or MIT;
-their texts are on the radio in `/usr/share/x6100/licenses/xara`.
+XARA (MIT, by x0rro, carried on by NR5P) comes with the firmware built from
+NR5P's source at a pinned commit, with x0rro's 0.1.3 modem and resampler and
+four changes of ours: its sound card and PTT through the radio's GUI, its CW
+ID with any callsign, a cancelled call that ends at once, and a busy
+detector that learns the radio's passband (`tools/xara/UPSTREAM.md`). The
+Rust crates in it are MIT (some also Apache-2.0, Zlib or 0BSD) and the Rust
+standard library Apache-2.0 or MIT; their texts are on the radio in
+`/usr/share/x6100/licenses/xara`.
 
 ## Browser panel
 
@@ -9335,9 +10657,11 @@ browser paired at home on any device.
   typed alone takes the other one along, as the radio's own Filter low and
   Filter high do, and the two typed give their width; in AM, NFM and
   SAM the high edge alone, the low one is always 0 (2.5 to 6 kHz); in WFM
-  the same up to 10 kHz (4 to 10 kHz). No edge goes past 6 kHz, 10 kHz in
-  WFM. A field left empty, or holding no number, keeps its edge. The preset
-  lit is the one whose edges the radio has.
+  the same up to 8 kHz, the presets and the button showing the whole width,
+  twice the edge (10, 12, 14 and 16 kHz). No edge goes past 6 kHz, 8 kHz in
+  WFM (up to v0.3.12 10 kHz, which the base took as 16 kHz too). A field
+  left empty, or holding no number, keeps its edge. The preset lit is the
+  one whose edges the radio has.
 - The S-meter, the power and SWR while transmitting, the battery.
 - Spots: the DX cluster's spots as the radio filters them (see
   [DX Cluster](#dx-cluster)), newest first, tap one to tune to it; the calls
@@ -9443,8 +10767,8 @@ text, call, grid, audio Hz, SNR, to me, worked, distance, country), the app's
 state as `ft8 {...}` (open, proto, cq, tx, auto, hold, sending, txf, next),
 the CW decoder's text as `cw "..."`; `ft8 open|close|cq|stop|auto|hold|mode`,
 `ft8 txcall`, `ft8 txfreq HZ` and `ft8 reply ID` work the app; `wefax
-open|close|auto|cont|save|clear` works the WeFax app as its buttons do (RX
-Auto, RX Cont, Save, Clear; operate and control, `err wefax WHAT` for one it
+open|close|auto|cont|save|clear|plan|unplan` works the WeFax app as its buttons
+do (RX Auto, RX Cont, Save, Clear, Auto Plan on and off; operate and control, `err wefax WHAT` for one it
 does not know), and the panel state's `app` names the digital app open
 (`"FT8"`, `"WeFax"`, `""` for none), `win` the app whose window is open
 (any app: `"Cluster"`, `"Sentry"`, `""` for the main screen) and `pg` the
@@ -9454,8 +10778,28 @@ has; `open ACTION` opens one of them, `open sentry L` the Sentry on its page
 L (`H` AIRSPACE, `I` the direction finder) and `close` closes the app open
 (operate and control; never the SWR scan, WSPR or the first-start guide,
 `err open ACTION`): what the two-radio suite (tools/bench/suite.py)
-photographs every screen with; the FT8 state
-carries the timeline too (`in` ms to our next slot, `slot` its length, `rep`
+photographs every screen with. The WeFax app's state comes as `wefax {...}` (open,
+auto, fax: a chart coming in, tx and txp, gen: a new picture, rows kept,
+freq, station, saved: the last file written to `/mnt/wefax`, saves), and to
+a client that sent `wefax rows 1` (no role needed) the picture row by row as
+binary frames (8 bytes header `{u16 0xFFFE, u16 width, u32 the row's number
+in the picture, from 1}`, then a grey byte a pixel); to a client that sent
+`ft8 wf 1` (no role needed either) the FT8 app's own waterfall row by row,
+binary too (`{u16 0xFFFD, u16 bins, u16 low Hz, u16 high Hz}`, then a signed
+byte a bin, dB over the noise floor, the app's filter from its low edge to
+its high one); `js8 open|close|cq|autocq|hbnow|hb|auto|hold|speed|stop`,
+`js8 txfreq HZ`, `js8 select CALL` and `js8 send TEXT` (500 characters at
+most, macros filled as on the radio) work the JS8 app as its buttons do
+(operate and control); its messages come as `js8r {...}` (id, utc, snr,
+audio Hz, speed, tx: ours, me, cq, hb, grp, lc: low confidence, part: still
+coming in, chk, fr, to, g: the sender's locator, x: the text), the last 64
+again to a client that connects later, a message coming in keeping its id as
+it grows; its state as `js8 {...}` (open, busy, sending, acq, hb, auto, hold,
+speed, frame and frames, txf, selhz, hbmin, next in seconds, sel, where,
+text, and note, noteerr, notefor and notes: the answer to the last command,
+"Queued: 3 frames, 45 s" or why not, and that command's word); `js8 wf 1`
+brings its waterfall as FT8's. A text message longer than 1023 bytes is
+answered `err message too long for the radio`; the FT8 state carries the timeline too (`in` ms to our next slot, `slot` its length, `rep`
 the sends left, `qso`, `hound`, `nocall`, `logged` and `logged_s`), once a
 second while a countdown runs; `log CALL|RSTS|RSTR|NAME`
 writes the day's log and is answered with `logged ok|no`. `logq ID CALL|...`
@@ -9831,12 +11175,23 @@ here it is a web page, nothing to install.
   sends and which listens; the box is the radio's own word, TX on red while it
   is on the air. A session that may operate sets it with `banner TEXT` and
   clears it with `banner`; it goes by itself when that session disconnects.
-- F1-F5 under the screen, the key block to its right (GEN, KEY, DFN / APP,
-  MSG, DFL / AM, CW, SSB / A/B, PRE, ATU / V/M, AGC, FST), BAND up and down,
-  LOCK, POWER and PTT. A key is held as long as it is pressed, so long presses
-  work; the page releases every key it holds when it loses the connection.
+- The keys and knobs are where the radio has them. Over the screen, the
+  radio's top side: PTT on the left, BAND down and up over AM, CW and SSB,
+  and on the right A/B, PRE, ATU over V/M, AGC, FST. Left of the screen, top
+  to bottom: VOL, POWER, GEN to DFL and the MFK. F1-F5 under the screen. Right
+  of it LOCK and the MAIN knob. The page takes the layout of the radio it is
+  on: the X6100 has GEN, APP / KEY, MSG / DFN, DFL in two columns, the X6200
+  GEN, APP, KEY / MSG, DFN, DFL in two rows, and A/B, ATU, FST in one row
+  (it has no PRE, V/M, AGC or LOCK key, so the page shows none). On a phone
+  the screen takes the whole width, with the left column and the MAIN knob
+  under it, each on its own side. Up to v0.3.13 the knobs and all the keys
+  were in one block right of the screen, on both radios (issue #318).
+- A key is held as long as it is pressed, so long presses work; the page
+  releases every key it holds when it loses the connection.
 - VOL, MFK and the MAIN knob: drag around the ring, the mouse wheel over it,
-  or the - and + buttons; "push" presses the VOL or MFK knob.
+  or the - and + buttons. A click or a tap on the VOL or MFK knob is its push,
+  as on the radio; held, the knob stays pushed until you let go (a long
+  press). A drag is a turn, never a push.
 - Keyboard: F1-F5, left and right arrows turn the main knob (Shift: ten
   detents at a time), `[` and `]` the volume, PageUp and PageDown the MFK,
   Enter pushes the MFK, Space is PTT. As on the Panel, the keys are the
@@ -9881,6 +11236,160 @@ other sites cannot connect (the browser's Origin is checked), nor can Pat's
 Winlink mailbox (port 8080). So the Panel and the Screen page do not connect
 either when you open them at port 8080 of your own computer, through an SSH
 tunnel or a forwarded port: use another port for that, 8000 for instance.
+
+## Browser apps
+
+The web configurator's Apps menu works the radio's apps from a browser, over
+the Panel's link (the same port, pairing, control and health chips, see
+[Browser panel](#browser-panel)). The radio does the work on its own, with
+or without the page: it decodes, answers and saves as it does when no browser
+is open, and a page that closes or drops leaves it as it was. Anyone on the
+network sees the pages; a change needs a paired browser in control, as on
+the Panel. These pages came from OlivLoze's fork (f4oli-apps).
+
+A page opens its app on the radio by itself, once, when the radio has no
+digital app open and the browser may operate (paired, in control): "Opening
+FT8 on the radio...", then "FT8 is open on the radio". It waits a moment
+for the pairing to be known, and it never takes the radio from another app:
+with JS8 open there (an operator at the radio, say) the FT8 page says "JS8
+is open on the radio: Open switches it to FT8" and leaves it. What stops it
+otherwise (not paired, the radio operated at the radio) is said on the
+status line, without a dialog. Closed from the page (Close), the app stays
+closed until Open or the page is opened again.
+
+### FT8 in the browser
+
+Apps > FT8 (`http://x6100.local/ft8`) shows the radio's [FT8](#ft8-and-ft4)
+app (FT4 and FT2 too) as four screens over the app's buttons:
+
+- Waterfall: the app's own, the audio it decodes from its filter's low edge
+  to its high one, the newest row on top, each slot's start and time, the
+  calls decoded in it at their frequency, and our TX frequency in red. A
+  click moves our TX frequency there.
+- Map: the stations heard in the last half hour at their locator (CQ, POTA,
+  CQ DX, calling me, the others, each its colour, the older ones paler), us
+  at the radio's locator (Settings > General > STATION), and the path to the station
+  worked. Near shows our part of the world, World all of it. Sat puts NASA's
+  Blue Marble (public domain) under the stations: on by default on a computer,
+  off on a phone, where its 280 kB are the most of the page's weight; the
+  browser keeps the choice. Everything comes from the radio: the page needs no
+  internet.
+- Band activity: the decodes slot by slot with the dB, the audio Hz, the
+  sender's flag, its country and the distance; a tap on a CQ or a call answers it in our next
+  slot and arms TX, as a tap on the radio's list does. Clear empties the
+  page's list only.
+- QSO: our messages, the stations calling us and the station worked.
+- The buttons: Open or Close, Mode (FT8, FT4, FT2), TX Hz with - and + (10 Hz),
+  TX armed or off, CQ, Auto, Hold and Stop, as on the radio. Under them the
+  steps (listening, queued, next slot, sending, logged), the QSO's six
+  messages with the next one lit, what the app does next in words, and the
+  seconds to our next slot.
+
+The country of a call is the radio's own answer: the pages read the radio's
+cty.dat (a newer one put on the card as `/mnt/cty.dat` counts there too)
+and look a call up as the FT8 list does, and the flags are the radio's,
+drawn larger. Both load once an hour at most (about 100 kB).
+
+The radio's own list and its rules decide: CQ and Auto go on when the page
+closes or drops, a reply waits for its slot, and Stop ends the transmission,
+drops the queued message and turns CQ and TX off. TX off makes a dry run:
+the app listens, decodes and queues, and nothing keys the transmitter. A
+page that opens later gets the last 48 rows the radio kept.
+
+On a phone the page has two pairs of tabs, Waterfall or Map on top and Band
+activity or QSO under them (the browser keeps the choice), and a bar under
+the thumb with the next message, the seconds to our slot, Open, TX, CQ, Auto
+and Stop; Mode, TX Hz, Hold and the steps are under the lists.
+
+### JS8 in the browser
+
+Apps > JS8 (`http://x6100.local/js8`) shows the radio's [JS8](#js8) app as
+four screens over its buttons, as the FT8 page:
+
+- Waterfall: the app's own (five rows a second), the calls heard at their
+  offset on the row they came in, the station selected in green and our TX
+  offset in red. A click moves our TX offset there.
+- Map: the stations heard at the locator they sent (called me, CQ,
+  heartbeat, the others, each its colour), us at the radio's locator, and Sat
+  as on the FT8 page.
+- Band activity: the messages with the time, the dB, the audio Hz (F, T or S
+  after it for Fast, Turbo or Slow), the sender's flag, a message still
+  coming in in italics, growing as its frames arrive. HB hides the
+  heartbeats and their SNR answers; Stations lists the stations heard
+  instead (those that called us first) with their flag and how far they are:
+  from the locator they sent, or about (≈) from their country's centre. A tap on a message or a station selects it on the radio, as its map
+  does.
+- Conversation: our messages, those to us and those of the station
+  selected, and a box to write in (500 characters, Enter sends). With a
+  station selected, chips fill in the usual questions (SNR?, GRID?, INFO?,
+  STATUS?, HEARING?, AGN?), RR, 73 and our grid.
+- The buttons: Open or Close, Speed (Normal, Fast, Turbo, Slow), TX Hz with -
+  and + (10 Hz), CQ, Auto CQ, HB (on or off), HB now, Auto, Hold and Stop,
+  as on the radio. Under them what is on the air or queued, what goes out by
+  itself (auto CQ, HB, Auto) and the seconds to the next frame.
+
+Send queues the message as OK in the radio's keyboard does: its macros
+filled, an APRS message checked, and to the station selected on its offset
+when Hold is off, as Reply. The radio's answer shows on the page's status
+line ("Queued: 3 frames, 45 s", "Already sending: Stop first", or why it was
+not sent). The page sends what was typed: GhostNet's Mine into English first
+works in the radio's keyboard only. A page that opens later gets the last 64 messages the
+radio kept.
+
+Chat (the switch at the top, the browser keeps the choice) shows the same
+messages as conversations, for writing from a computer's or a phone's
+keyboard:
+
+- The chats: one per station (what it sends us and what we send it, its
+  flag, country and distance) and one per group (@NAME), the newest on top
+  with its last message and the messages not read yet; the stations heard in the last half hour under
+  them, a tap starts a chat. A call or a group typed in the box above starts
+  one with a station not heard yet (a sked) or with @ALLCALL. Heartbeats, CQs
+  and SNR answers stay out. Open and CQ are there too.
+- A chat: the messages as bubbles with the time and the dB, a message still
+  coming in growing with three dots, a message of the station to another one
+  paler, ours with a clock while the radio has it queued, two ticks once on
+  the air, ON AIR while it goes out, or the radio's reason when it was not
+  sent. Opening a chat selects the station on the radio (its offset); Send
+  writes its call first, as Reply on the radio. Chips fill in the usual
+  questions, our grid and the radio's saved messages (Query > Saved on the
+  radio, which edits them; a `<CALL>` in front is the chat's call).
+- The conversations are kept in this browser (the last 600 messages), not on
+  the radio: another browser has its own, and both get the radio's last 64
+  messages when they connect.
+
+On a phone the page has the FT8 page's tabs, and a bar under the thumb with
+what goes out next, the seconds to it, Open, CQ, HB, Auto and Stop; a chat
+opens over the whole screen, the arrow goes back to the list.
+
+### WeFax in the browser
+
+Apps > WeFax (`http://x6100.local/wefax`) shows the radio's
+[WeFax](#sstv-wefax-and-navtex) app:
+
+- Chart: the picture row by row as the radio decodes it, the station and its
+  frequency, receiving, waiting for a start tone or listening, the signal and
+  the rows kept. The radio keeps a chart's last 2400 rows, and so does the
+  page: past those the picture moves up as on the radio. With nothing coming
+  in, the chart shows the last one the radio saved.
+- Open the app or Close it, RX Auto (waits for a chart's start tone, saves at
+  its stop tone) or RX Cont (takes the rows at once), Save now (writes the
+  rows kept to `/mnt/wefax` and starts over), Clear (asks first: what was not
+  saved is lost).
+- Auto Plan: turns the app's Auto Plan on or off; while it runs, the button
+  shows the next chart's time, station and frequency. Tuning a station by hand
+  stops it until the app opens again, as on the radio.
+- Stations: the app's own list (DWD, Northwood, Athens and NOAA's five) and
+  your channels named WEFAX ([Channels](#channels), the Memories page), and a
+  box for any other station by its published frequency in kHz. A tap tunes
+  the radio 1.5 kHz under it in USB, as the app's Freq. list does; the station
+  the radio is on is marked.
+- Last charts: the newest eight on the card with their time, and for Auto
+  Plan's the chart and its quality; a tap opens one; all of them in the
+  Gallery.
+
+The page receives only: the WeFax transmitter ([WeFax TX](#wefax-tx))
+stays on the radio.
 
 ## TCI server
 
@@ -10003,8 +11512,12 @@ the radio, hears it, keys it and sends CW with it.
     keys at once, as before. A `/mnt/tci.conf` from before has no
     `tx_confirm` and asks. Turning it off while the radio asks closes the
     question; the client's next start keys.
-- The TCI SERVER card shows the connected client (address), "no client"
-  otherwise.
+- The TCI SERVER card shows "connected" beside the port while a client is,
+  and on the row under it, Connected from, the address of each client
+  connected ("via Funnel" or "via Bluetooth" after one that came so), "no
+  client" otherwise. Addresses that do not fit on one line go on two in a
+  smaller size: four addresses, or an IPv6 one over Funnel. Allowed shows how
+  many are kept and as many of them as fit on its two lines.
 - What it carries: `vfo`, `modulation` (lsb, usb, cw, cwr, am, nfm, digl,
   digu), `rx_filter_band`, `agc_mode`, `rit_enable` / `rit_offset`,
   `drive` (TX power, 0-100 %: 0.1 W up to 10 W, 8 W on the X6200; on
@@ -10945,8 +12458,10 @@ FAT32 on a PC settles it.
 Check the clock: FT8 and JS8 need it within about 2 s, WSPR within about a
 second. WiFi (NTP) or GPS sets it, and in the field the phone's clock (the
 [Browser panel](#browser-panel)'s GPS button). FT8 and JS8 also have Time Sync (FT8's
-for a clock that neither keeps), and FT8 Auto Sync, which keeps the clock
-right from the decodes once Time Sync has it within about 2 s.
+for a clock that neither keeps), and Auto Sync (on the
+[GPS / Clock](#gps--clock) page), which keeps the clock right from the FT8
+decodes once Time Sync has it within about 2 s. A time station (RWM, WWV,
+WWVH, CHU) on the same page sets it to the millisecond.
 
 #### Steady tones in the X6100's receive audio: about 781 Hz and its harmonics
 
@@ -10983,7 +12498,8 @@ come stopped (their STOP or TEST1 bit set) and never count. The radio starts
 such a chip at boot and says so in the system log ("Clock chip ... was
 stopped ... started"). The chip takes the right time at the next NTP sync
 (when WiFi or Ethernet comes up), from FT8's Time Sync, or from the date and
-time set in Settings > General > DATE / TIME, and keeps it from then on.
+time set in Settings > General > DATE / TIME, or a time station on the
+[GPS / Clock](#gps--clock) page, and keeps it from then on.
 
 #### The GPS icon turns grey after a while
 
@@ -10997,6 +12513,16 @@ it stays grey, unplug the GPS and plug it in again. The radio's log
 (`/mnt/app_logs/`, the newest `x6100_log_*.txt`) has a line starting with
 `gps:` for each of these steps. Up to v0.3.10 the radio could stop reading the
 GPS after a while until it was restarted (issue #237).
+
+#### A USB GPS mouse shows nothing
+
+The radio reads a GPS through gpsd. A mouse with a USB port of its own (a
+`ttyACM` port) is read as soon as it is plugged in. One behind a USB-serial
+bridge (a `ttyUSB` port) is read when its bridge is one gpsd takes for a GPS:
+the common ones, and the newer series of the most common bridge (USB IDs
+067b:23a3 to 23f3, issue #301). For another bridge, hand the port over by hand
+over SSH (`gpsdctl add /dev/ttyUSB0`) and open an issue with the mouse's USB
+ID, so it can be added.
 
 #### The ALC reads about 1 in FT8 or JS8. Is it too high?
 
@@ -11027,6 +12553,18 @@ changed it yourself (see [Audio tab](#audio-tab)). On the X6200 the next
 transmission starts again from the default level. If it happens again, send
 the newest log in `/mnt/app_logs/` (a power-off with the POWER key saves the
 run's log there) and the base log `/mnt/base_i2c.log` with your report.
+
+#### The X6200's WiFi stalls or drops on channel 11
+
+The X6200's own clocks put two steady lines into the 2.4 GHz band, at 2457.6 and 2470.6 MHz, inside WiFi channel
+11, where its WiFi chip hears them: on an access point on that channel its WiFi stalled for seconds and dropped
+under steady upload (a TCI client's audio, for one), while an X6100 beside it did not. The X6200's WiFi driver
+notches both lines on the channels they fall in (`options rtw_8723d host_spur_khz=2457600,2470614` in
+`/etc/modprobe.d/x6200-wifi-spur.conf`): channel 11 held a 3 Mbit/s upload at 99-100 % of real time instead of 33 %.
+The driver comes with a card image built after this change; `cat /sys/module/rtw_8723d/parameters/host_spur_khz`
+says `2457600,2470614` when the radio has it. Channel 13 (Europe) is covered too but not tested on the air.
+The why and the measurements:
+`buildroot/x6200/rtw88/README.md`.
 
 #### The DX Cluster shows no spots
 
@@ -11141,6 +12679,15 @@ the battery reading work, that is a fault of base 1.0.7 itself (issue #14):
 
 That is normal while JS8 is open.
 
+#### Thin coloured stripes in the dark parts of the screen
+
+Some newer X6100s show thin vertical coloured stripes in the darkest
+shades: the dark bars and buttons, the frequency strip. Turn on Settings >
+Display > BACKLIGHT > Panel stripes fix (see
+[Panel stripes fix](#panel-stripes-fix)): the darkest shades then look a
+little lighter, and the stripes go. The radio's log has a line starting
+with `panel:` when it is turned on or off.
+
 #### The screen feels slow: measuring it
 
 A performance overlay at the bottom right of the screen shows what the GUI does each second: the frames
@@ -11155,7 +12702,7 @@ measures.
 
 FT8/FT4 in `/mnt/ft_log.adi`, JS8 in `/mnt/js8call_log.adi`, Field Ops in
 `/mnt/field/logs/`, the QSOs logged outside an activation in the day's log. The web configurator's
-Logs page shows them all. What PSK, Olivia, Contestia and JTTY received and sent, and what RTTY received, is in
+Logs page shows them all. What PSK, Olivia, Contestia, JTTY and RTTY received and sent is in
 `/mnt/digi_text/`, a file a UTC day, on the Logs page too ([Text log of the keyboard modes](#text-log-of-the-keyboard-modes)).
 
 An FT8, FT4 or FT2 QSO is in two of them, `ft_log.adi` and the day's log
@@ -11175,6 +12722,12 @@ header: a line naming the file, ADIF_VER 3.1.8, PROGRAMID GoldCorpHF and
 PROGRAMVERSION, the firmware's version (Settings > Info). An `ft_log.adi`
 begun before keeps the header it had (PROGRAMVERSION 1.0.0, ADIF_VER 3.14);
 `js8call_log.adi` keeps desktop JS8Call's.
+
+The logs on the Logs page are the ones that count. A QSO deleted there (or
+with its log on the Field Ops page) is deleted from `ft_log.adi`,
+`js8call_log.adi` and the worked-before list (`qso_log.db`) too; a QSO
+edited there is edited in them, field for field. The other files' records
+of QSOs not on the page stay as they are.
 
 ## Reference
 
@@ -11559,7 +13112,7 @@ never the copy in the build tree.
 The Winlink modems are built by the GUI's CMake and installed with it, so
 the image and the update bundle carry them: ardopcf (`third-party/ardopcf`)
 and, experimental and chosen on the Winlink page,
-`x6x00-mercury` (`third-party/mercury`: Mercury v1.9.21's daemon build and
+`x6x00-mercury` (`third-party/mercury`: Mercury v1.9.25's daemon build and
 our program around it, which takes its audio and PTT through the GUI's
 modem socket). Pat is built outside, by `tools/pat/build.sh`. In the PC
 build both modems are built only when named (`cmake --build build-host
@@ -11568,14 +13121,16 @@ modem socket with them, Pat to Pat over Mercury and over XARA included
 (see its README).
 
 XARA, the third Winlink modem (experimental), is built outside too, by
-`tools/xara/build.sh`: the pinned v0.1.3 release's source and vendored
-crates, the official Rust 1.99.1 (buildroot's Rust is too old), each
-download's SHA-256 checked and kept in `$HOME/.cache/openx6x00`, with our
-patches: the GUI's modem socket as its sound card and PTT, its CW ID with any
-callsign, a cancelled call that ends at once. Linked with the buildroot
-tree's own gcc, which `local-build.sh` makes first (`make toolchain`), it is
-installed as `/usr/bin/xara`, its licence and the notices of the Rust crates
-in it in `/usr/share/x6100/licenses/xara` (`tools/xara/UPSTREAM.md`).
+`tools/xara/build.sh`: NR5P's source at the pinned commit (GitHub's tarball
+of it) and the crates its `Cargo.lock` names (from crates.io), the official
+Rust 1.99.1 (buildroot's Rust is too old), each download's SHA-256 checked
+and kept in `$HOME/.cache/openx6x00`, with our patches: x0rro's 0.1.3 modem
+and resampler, the GUI's modem socket as its sound card and PTT, its CW ID
+with any callsign, a cancelled call that ends at once. Linked with the
+buildroot tree's own gcc, which `local-build.sh` makes first (`make
+toolchain`), it is installed as `/usr/bin/xara`, its licence and the notices
+of the Rust crates in it in `/usr/share/x6100/licenses/xara`
+(`tools/xara/UPSTREAM.md`).
 `tools/xara/build.sh --host` builds it for the PC, for `tools/winlink`'s
 `make modems`.
 

@@ -23,6 +23,7 @@ extern "C" {
     #include "params/params.h"
     #include "cw_parse.h"
     #include "cw_tune_view.h"
+    #include "freq_strip.h"
 }
 
 /* The decoder text over the waterfall (CW decoder, RTTY, NavTex): a label of the last lines,
@@ -33,6 +34,7 @@ static lv_obj_t    *info_line;
 static lv_anim_t    dim_anim;       /* tuning dims the text */
 static char         buf[1024];      /* the text as decoded, '\n' between the lines */
 static char        *buf_write = buf;   /* its end, where the next text goes */
+static bool         own[sizeof(buf)];   /* buf's characters that were sent (RTTY's TX, #312), not received */
 static char         shown[6144];    /* buf with the words coloured (label recolour), up to 9 more chars a word */
 static uint8_t      max_line_count;
 static radio_mode_t prev_mode;      /* CW-R kept as CW: switching between them keeps the text */
@@ -156,6 +158,7 @@ static void drop_first_line() {
     for (const char *p = second; p; p = strchr(p + 1, '\n')) lines++;
     if (buf[len - 1] == '\n') lines--;
     if (lines > max_line_count) {
+        memmove(own, own + (second + 1 - buf), buf + len - second);
         memmove(buf, second + 1, buf + len - second);
         buf_write = buf + strlen(buf);
     }
@@ -185,7 +188,7 @@ static bool sent_call(const char *w, size_t len) {
 /* buf into the label, the calls coloured; with Parse also abbreviations (dim) and RST. A word still
  * being decoded stays plain */
 static void show() {
-    char   call[8], abbr[8], rst[8];
+    char   call[8], abbr[8], rst[8], tx[8];
     char  *o = shown, *end = shown + sizeof(shown) - 16;
     size_t n;
     bool   parse = parse_on();
@@ -193,6 +196,7 @@ static void show() {
     snprintf(call, sizeof(call), "%06X", (unsigned)(theme_hex(parse ? TC_accent : TC_text_head) & 0xFFFFFF));
     snprintf(abbr, sizeof(abbr), "%06X", (unsigned)(theme_hex(TC_text_dim) & 0xFFFFFF));
     snprintf(rst, sizeof(rst), "%06X", (unsigned)(theme_hex(TC_text_head) & 0xFFFFFF));
+    snprintf(tx, sizeof(tx), "%06X", (unsigned)(theme_hex(TC_tx) & 0xFFFFFF));
     for (const char *p = buf; *p && o < end; p += n) {
         n = strcspn(p, " \n");
         if (n == 0) {           /* a separator */
@@ -201,7 +205,9 @@ static void show() {
             continue;
         }
         const char *color = NULL;
-        if (p[n] && sent_call(p, n)) {
+        if (own[p - buf]) {
+            color = tx;         /* ours, the word being sent too */
+        } else if (p[n] && sent_call(p, n)) {
             color = call;
         } else if (p[n] && parse) {
             cwp_class_t c = cw_parse_class(p, n);
@@ -238,6 +244,7 @@ static void split_words(char *from) {
             memcpy(raw, p, n);
             m = cw_parse_split(raw, n, buf, out, sizeof(out));
             if (m > n && (size_t)(buf_write - buf) + m - n < sizeof(buf) - 1) {
+                memmove(own + (p + m - buf), own + (p + n - buf), buf_write - (p + n) + 1);
                 memmove(p + m, p + n, buf_write - (p + n) + 1);
                 memcpy(p, out, m);
                 buf_write += m - n;
@@ -256,7 +263,8 @@ const char *panel_last_call(void) {
     call[0] = '\0';
     for (; *p; p += n ? n : 1) {
         n = strcspn(p, " \n");
-        if (n && p[n] && sent_call(p, n)) snprintf(call, sizeof(call), "%.*s", (int)n, p);
+        /* the calls received: in RTTY's own text are the station's and the one it calls (#312) */
+        if (n && p[n] && !own[p - buf] && sent_call(p, n)) snprintf(call, sizeof(call), "%.*s", (int)n, p);
     }
     return call;
 }
@@ -297,24 +305,31 @@ static bool too_wide() {
     return size.x > w;
 }
 
-/* New decoded text at the end of buf. The lines are kept to the panel's width and count, but
- * that does not bound the bytes: a line of narrow characters (',' 'I') is ~250 of them, so room
- * is made first, the oldest lines going, for the text, a '\n' and the NUL */
-static void add_text(void *arg) {
-    const char *text = (const char *)arg;
-    size_t      tl = strlen(text);
-    char       *at;
+/* New text at the end of buf, decoded or (mine) sent. The lines are kept to the panel's width and count, but
+ * that does not bound the bytes: a line of narrow characters (',' 'I') is ~250 of them, so room is made first, the
+ * oldest lines going, for the text, a '\n' before it (sent after received or the other way), a '\n' and the NUL */
+static void add(const char *text, bool mine) {
+    size_t tl = strlen(text);
+    char  *at;
 
     if (tl + 2 > sizeof(buf) / 2)
         return;
-    while ((size_t)(buf_write - buf) + tl + 2 > sizeof(buf)) {
+    while ((size_t)(buf_write - buf) + tl + 3 > sizeof(buf)) {
         char  *nl  = strchr(buf, '\n');
         size_t cut = nl ? (size_t)(nl - buf) + 1 : (size_t)(buf_write - buf);
 
+        memmove(own, own + cut, (size_t)(buf_write - buf) - cut + 1);
         memmove(buf, buf + cut, (size_t)(buf_write - buf) - cut + 1);
         buf_write -= cut;
     }
     at = buf_write;
+
+    /* Sent and received text never share a line, as in the keyboard modes' windows: a line breaks where one
+     * follows the other (RTTY's TX after what it decoded, the decoder after a TX stopped in a line) */
+    if (at > buf && at[-1] != '\n' && own[at - 1 - buf] != mine && *text != '\n') {
+        *at++ = '\n';
+        *at = '\0';
+    }
     buf_write = stpcpy(at, text);
     if (buf_write - buf >= 2 && !strcmp(buf_write - 2, "\n\n")) {
         buf_write--;            /* one empty line at most: the next text goes over the second '\n' */
@@ -339,8 +354,17 @@ static void add_text(void *arg) {
             if (sp > buf && sp[-1] == ' ') sp[-1] = '\n';
         }
     }
+    memset(own + (at - buf), mine, buf_write - at);
     drop_first_line();
     show();
+}
+
+static void add_text(void *arg) {
+    add((const char *)arg, false);
+}
+
+static void add_tx_text(void *arg) {
+    add((const char *)arg, true);
 }
 
 static void set_info(void *arg) {
@@ -412,6 +436,10 @@ void panel_add_text(const char *text) {
     scheduler_put(add_text, (void *)text, strlen(text) + 1);
 }
 
+void panel_add_tx_text(const char *text) {
+    scheduler_put(add_tx_text, (void *)text, strlen(text) + 1);
+}
+
 void panel_set_info(const char *text) {
     scheduler_put(set_info, (void *)text, strlen(text) + 1);
 }
@@ -434,21 +462,52 @@ void panel_clear(void) {
     lv_label_set_text_static(obj, buf);
 }
 
-/* CW with the decoder on, or SSB with RTTY (and NavTex) running */
-void panel_update_visibility(bool clear) {
+/* CW with the decoder on, or SSB with RTTY (and NavTex) running; *rtty for the second */
+static bool decoder_on(bool *rtty) {
     radio_mode_t mode = (radio_mode_t)cfg_sm.cp_cur_mode.get();
     bool         cw = mode == radio_mode_cw || mode == radio_mode_cwr;
     bool         ssb = (unsigned)mode <= (unsigned)radio_mode_usb_dig;   /* LSB, LSB-D, USB, USB-D */
     bool         on = cw ? cfg_sm.p_cw_decoder.get() : ssb && rtty_get_state() != RTTY_OFF;
 
-    /* RTTY: the scope, and the text keeps clear of it */
-    bool rtty = on && !cw;
-    /* The CW speed above the panel is CW's: RTTY (NavTex) showed the last "WPM: 22" over the frequency scale */
-    if (rtty) {
+    *rtty = on && !cw;
+    return on;
+}
+
+/* The CW speed above the panel, and VISION's top line of the panel for it with the CW tuning bars at its left
+ * (styles.c). The speed is CW's: RTTY (NavTex) showed the last "WPM: 22" over the frequency scale. In the frequency
+ * strip (Settings > Display > MAIN SCREEN > CW tune and WPM, #308) both are there, and VISION's text starts at the
+ * panel's top */
+static void info_place(bool on, bool rtty) {
+    bool strip = freq_strip_holds_cw();
+
+    if (rtty || strip) {
         lv_obj_add_flag(info_line, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_clear_flag(info_line, LV_OBJ_FLAG_HIDDEN);
     }
+
+    bool was_cw = vision_cw;
+
+    vision_cw = theme_shape.vision && on && !rtty && !strip;
+    if (theme_shape.vision) {
+        lv_obj_set_style_pad_top(obj, rtty || strip ? 10 : 10 + lv_font_get_line_height(&sony_24), 0);   /* styles.c */
+        text_size_cb(NULL, NULL);
+        cw_tune_set_y(vision_cw ? lv_obj_get_style_y(obj, 0) + 2 : -1);
+    } else if (was_cw) {
+        cw_tune_set_y(-1);      /* VISION left for another theme */
+    }
+}
+
+void panel_info_place(void) {
+    bool rtty, on = decoder_on(&rtty);
+
+    if (obj) info_place(on, rtty);
+}
+
+void panel_update_visibility(bool clear) {
+    bool rtty, on = decoder_on(&rtty);
+
+    /* RTTY: the scope, and the text keeps clear of it */
     if (rtty) {
         lv_obj_clear_flag(scope_box, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_pad_right(obj, SCOPE_SZ + 12, 0);
@@ -458,18 +517,7 @@ void panel_update_visibility(bool clear) {
         lv_obj_remove_local_style_prop(obj, LV_STYLE_PAD_RIGHT, 0);
     }
 
-    /* VISION: the CW speed on a line of its own at the top (styles.c), the text and the CW
-     * tuning bars (at its left) under it */
-    bool was_cw = vision_cw;
-
-    vision_cw = theme_shape.vision && on && !rtty;
-    if (theme_shape.vision) {
-        lv_obj_set_style_pad_top(obj, rtty ? 10 : 10 + lv_font_get_line_height(&sony_24), 0);   /* its font in styles.c */
-        text_size_cb(NULL, NULL);
-        cw_tune_set_y(vision_cw ? lv_obj_get_style_y(obj, 0) + 2 : -1);
-    } else if (was_cw) {
-        cw_tune_set_y(-1);      /* VISION left for another theme */
-    }
+    info_place(on, rtty);
 
     if (on && lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);

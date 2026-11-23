@@ -7,6 +7,28 @@ here transmits until the owner says so (transmit work is not wanted for now). On
 Meteor/SCAN CFG one, the Kraken DF one and its kernel one) were folded into one backlog, in the order the owner
 approved that day.
 
+**2026-11-23: upstream merged (Guru-RF 51bf5bf3..6a5d262e, 229 commits: v0.3.13, Speech, APP > DMR over the internet,
+RTTY sending, APP > Mail, Mercury 1.9.25, XARA from NR5P, FT8 Traffic/Tiles, JS8 board, WeFax tiles/Auto Plan/Night,
+GPS / Clock, the 3D waterfall's thread, WF full screen, weather units, tuning steps, knob press, hand mic UP/DOWN)**.
+The owner: "just NEVER EVER EVER stomp on something we are doing. you can add funcitonality and fix bugs. That's it".
+- Kept ours: README (upstream's in README_original.md), the updater and its tests and web page (upstream's multiboot
+  report in them left out; S01multiboot and the GUI's card warning taken), the key action numbers (WF_FULL 32, MAIL 135;
+  VOICE_MODE reuses slot 6), FT8's clock chip write through x6100-rtc (upstream moved Time Sync to clock_sync.c), the
+  band keys in the Sentry and on page I (upstream's front_keys.c repeats BAND instead of a long press: a held key now
+  does nothing there, as before), our rtw88 0004 notch and ft8lib 0001 (upstream's copies of the same dropped).
+- No mbelib (the owner: "hard no on the mbelib, USB-3000 is hard requirement"): upstream's DMR app gets its "mbe" from
+  tools/dsdfme/mbe_dvsi, voice through the USB-3000 only; third-party/mbelib and its test removed.
+- Added to upstream's work: its WeFax tiles, Fix view and map drawn in the theme's colours (wefax_screen_grey, as our
+  live view); its new key actions in our key lists; its DMR helper named GoldCorpHF outside; ours "wide 1" frames moved
+  to 0xFFFC (upstream's WeFax rows took 0xFFFE); d3_colmajor's extract stops before our GPU 3D code.
+- Checked: every line ours added since the base is there or deliberately combined (merge_check.py), both GUIs build
+  (no libssp, no mbelib symbols), hot-installed on both radios; Mac tests pass but tools/ft8_qso (it now links libft8
+  from build-host/deps, CI only).
+- To look at on the radios: the classic screen's 3D waterfall (upstream's drawing thread now runs on the X6100/X6200),
+  WeFax's tiles and Night in amber, the WiFi device held over GUI restarts (upstream's device_take), Speech off by
+  default. Pre-existing, not from the merge: Pat's log lines say "OpenX6X00:" while the manual says "GoldCorpHF:"; the
+  USER page has no labels for upstream's 200+ apps.
+
 **2026-11-22 afternoon: the test harness and the 1:1 suite** (the owner: "audit deeply the test harness and ensure this
 stops happening"; "a comprehensive set of unit tests to cover EVERYTHING 1:1 on both radios"):
 - DONE cad0140f, d5803f2e: bench.py's state layer (each radio said whole and read back, the path proved, unheard overs
@@ -1031,11 +1053,21 @@ write it: Pat (getpat.io, Go, MIT) as the client, ARDOP as the HF modem.
   ardopcf's maintainer has stepped back (its README asks for forks), so fixes may have to be ours.
 - **Mercury** (github.com/Rhizomatica/mercury, GPL-3.0-or-later): faster OFDM with a VARA-style TCP interface,
   which Pat's varahf transport talks to. Some Winlink RMS gateways do run it, behind RMS Trimode's or BPQ32's
-  VARA driver: KO0OOO (its banner gives 7.101.5) and K7EK-10, seen in Mercury's issues (#162, #384, #442); only
-  Mercury 1.9.20 and later talk to each other. VARA itself is closed and Windows-only: out.
-  - **Built, experimental, chosen on the Winlink page** (v0.3.7): v1.9.21 vendored as its daemon build
+  VARA driver: KO0OOO (its banner gives 7.101.5) and K7EK-10, seen in Mercury's issues (#162, #384, #442).
+  Mercury's versions connect in groups (its docs/RELEASE-1.9.25.md and discussion #637): 1.9.25 to 1.9.25 only,
+  1.9.20-1.9.24 to one another, 1.9.19 and 1.9.18 each to itself, 1.9.17 and older to one another. VARA itself is
+  closed and Windows-only: out.
+  - **v1.9.25 vendored** (#328, 2026-11-22; v1.9.21 from v0.3.7 to v0.3.13): it does not connect to 1.9.24 or
+    older in either direction, so the radio follows the gateways. Mercury's own level kept as before
+    (tx_gain_db = -4: 1.9.25 alone is 4 dB louder), a stop with a session up ends it on the air first (Mercury's
+    DISCONNECT through the bridge, 42 s at most, the status saying so; at once with none), an answer from
+    1.9.24 or older told as that, the Filter row's spans (375-2625 Hz at 2300, 125-2875 Hz at 2750). Tested on
+    the PC only (make modems, two 1.9.25 stations): **not on a radio and not on the air yet**; open there: the
+    processor load (more modes, two MFSK call listeners), the drive and ALC at the kept level, a session with a
+    gateway on 1.9.25, and the goodbye at a stop as the radio keys it.
+  - **Built, experimental, chosen on the Winlink page** (v0.3.7): Mercury vendored as its daemon build
     (third-party/mercury, two local patches: the TNC and broadcast ports on 127.0.0.1, VERSION answered with a
-    VERSION line so Pat cannot hang), linked into x6x00-mercury, which takes the audio and the PTT through the
+    VERSION line that names Mercury and its version), linked into x6x00-mercury, which takes the audio and the PTT through the
     GUI's modem socket in its protocol 2 (8000 Hz, keys of up to 40 s; ardopcf stays on protocol 1). In the image
     and the bundle. Operating > Winlink's Modem (ARDOP or Mercury, one at a time) and Mercury's bandwidth (500,
     2300, 2750); x6100-winlink runs x6x00-mercury in place of ardopcf with /run/winlink/mercury.ini, Pat's varahf
@@ -1052,15 +1084,19 @@ write it: Pat (getpat.io, Go, MIT) as the client, ARDOP as the HF modem.
     gateway (KO0OOO, K7EK-10) once the Winlink account works. Upstream reports to post: the VERSION reply (Pat's
     start race), the daemon build's two missing Android hooks, an option for the TNC ports' address, nanorq's and
     oblas's licence files, PUBLIC in TNC.md.
-- **XARA** (github.com/x0rro/xara, MIT, a VARA-compatible modem in Rust; #120): built, experimental, the third
-  Winlink modem (branch gh44-xara, 2026-11-04; the owner's decision of 4 November). v0.1.3 from its release
-  tarballs with a pinned Rust 1.99.1 (tools/xara, its UPSTREAM.md), our patch 0001 for the GUI's modem socket
-  (--audio x6x00, --ptt x6x00), 0002 for the CW ID with any callsign when Pat asks (CWID ON; the owner's decision
-  of 4 November: 0.1.3 identifies only with a US call) and 0003, a call Pat cancels given up at once, its ID on the
+- **XARA** (x0rro's, MIT, a VARA-compatible modem in Rust, discontinued by him on 8 November; NR5P's fork
+  github.com/NR5P/xara since, the owner's decision of 9 November; #120): built, experimental, the third Winlink
+  modem (branch gh44-xara, 2026-11-04; the owner's decision of 4 November), in v0.3.9 as x0rro's v0.1.3 from its
+  release tarballs. Since branch gh54-xara (2026-11-09) NR5P's main bd8300a, from GitHub's tarball of the commit and
+  crates.io, with a pinned Rust 1.99.1 (tools/xara, its UPSTREAM.md): 0001 NR5P's port of x0rro's 0.1.3 modem core
+  (its branch upstream-0.1.3-fixes, not merged), 0002 0.1.3's resampler, our 0003 for the GUI's modem socket
+  (--audio x6x00, --ptt x6x00), 0004 for the CW ID with any callsign when Pat asks (CWID ON; the owner's decision
+  of 4 November: XARA identifies only with a US call) and 0005, a call Pat cancels given up at once, its ID on the
   call's frequency before Pat tunes back. VARA's free speed by default; its `registered` feature is
   compiled in and used only with the Winlink page's VARA HF licence tick box, the user's own statement, which nothing
-  checks. Tested between two stations on a PC only (make modems, eight runs: free, levels 2 to 4; ticked, the
-  highest level 9 to 14).
+  checks. Tested between two stations on a PC (0.1.3: make modems, eight runs: free, levels 2 to 4; ticked, the
+  highest level 9 to 14; NR5P's: without Pat only, free level 4, ticked up to 11; make modems owed, it needs a Pat
+  for the PC); on the air with 0.1.3 (km4gkd, #120).
   - **Bench** (the owner; no air yet): `top -H` on the X6100 and the X6200 with XARA listening and in calls (48 kHz
     f64 DSP next to the GUI; "xara is falling behind real time" in xara.log). The audio path XARA times its
     replies by: path()'s 25/50/80 ms (capture, keying, out) are guesses; measure with XARA's `--record` (a FLAC
@@ -1079,15 +1115,23 @@ write it: Pat (getpat.io, Go, MIT) as the client, ARDOP as the HF modem.
     windows, 3 or 4 of them stepping up on the silence. The level before and after a whole session says nothing: on
     the X6100 every key's level is kept, and the session's data keys and the ID's audio move it too. A call
     cancelled in Pat (Dialing..., then the second click that forces it): the ID at once on the call's frequency,
-    Pat's tune back after it (0003; make modems tunes half a second after ABORT).
+    Pat's tune back after it (0005; make modems tunes half a second after ABORT). At many a key's start the first
+    read waits up to 70 ms for an R the GUI no longer sends (as in 0.1.3; NR5P's pump says "audio loop slow while
+    keyed"): listen for a gap at the start of a key in the dummy load's audio; Audio::keyed() could end that wait.
   - **Then on the air**: yo4cil against his own gateway (YO4CIL, VARA and ARDOP on 4 bands), free speed first; a
     test build announced on #120 first.
-  - **Upstream**: 0002 is prepared as a patch for x0rro/xara's main with a PR text (not sent yet); drop 0002 once
-    upstream acts on CWID ON. 0003 is not offered yet (0.1.3 waits the same way with a US call).
-  - **Watch**: 0.1.4, "a significant departure from 0.1.3 (libxara is coming)": 0001 then needs a rebase, or a
-    program of ours that links libxara as x6x00-mercury links Mercury. Its open PRs for slow audio paths (#39 the
-    extra answer lead, #40 the detector before a reply deadline, #38 the ACK margin), #37; any statement by EA5HVK
-    (VARA's author).
+  - **Upstream**: 0004 and 0005 apply to NR5P's main as they are (not offered yet; 0004 was prepared for x0rro
+    with a PR text); drop 0004 once NR5P acts on CWID ON, 0005 once a cancelled call gives up at once there, 0001
+    once NR5P merges upstream-0.1.3-fixes, 0002 once its resampler is 0.1.2's.
+  - **Watch**: NR5P's main (OpenSlot builds its modem from it too). x0rro's 0.1.4 ("libxara") will not come, and
+    his open PRs for slow audio paths (#39 the extra answer lead, #40 the detector before a reply deadline, #38 the
+    ACK margin, #37) went with his repository; any statement by EA5HVK (VARA's author).
+- **Mail on the radio** (#294): APP > Mail reads, writes and sends Winlink mail with no phone or WiFi, through
+  Pat's own API (rootfs/usr/sbin/x6100-winlink-mail; src/winlink_mail.c). Tested on the PC build against Pat 1.0.1
+  (tools/winlink, make mail; the GUI driven headless): lists, reading, a message typed and sent into the outbox,
+  the gateways, Pat's questions answered on the buttons, a connection that fails without a modem. Still to do: a
+  session with a gateway on the air from the app, on the X6200 (the issue's reporter offers it) and the X6100;
+  attachments and forms stay in the web mailbox, P2P is not offered (Pat listens for no P2P call on the radio).
 
 ## X6200: the H-22 hand mic's keys (#56)
 

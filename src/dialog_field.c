@@ -13,11 +13,13 @@
  */
 
 #include "dialog_field.h"
+#include "voice.h"
 #include "adif.h"
 #include "band_plan.h"
 #include "board.h"
 
 #include "buttons.h"
+#include "cb.h"
 #include "cfg/cfg_api.h"
 #include "cluster/client.h"
 #include "cluster/spots.h"
@@ -972,11 +974,30 @@ static void list_select(int k) {
         map_fill();
         prog_info_update();
     }
+    {
+        static char said[300];
+        char        text[300];
+        size_t      n   = 0;
+        lv_obj_t   *row = lv_obj_get_child(list, sel);
+
+        text[0] = 0;
+        for (uint32_t c = 0; row && c < lv_obj_get_child_cnt(row) && n + 4 < sizeof(text); c++) {
+            const char *t = lv_label_get_text(lv_obj_get_child(row, c));
+
+            if (t && t[0]) n += snprintf(text + n, sizeof(text) - n, "%s%s", n ? ", " : "", t);
+        }
+        if (n + 20 < sizeof(text)) snprintf(text + n, sizeof(text) - n, ", %i of %i", sel + 1, rows_n);
+        if (strcmp(text, said) && voice_auto_active()) {
+            snprintf(said, sizeof(said), "%s", text);
+            voice_say_clean(text, true);
+        }
+    }
 }
 
 /* Buttons */
 
 static void page_cb(button_data_t *b);
+static void page_back_cb(button_data_t *b);
 static void open_cb(button_data_t *b);
 static void boot_cb(button_data_t *b);
 static void respot_cb(button_data_t *b);
@@ -1012,11 +1033,11 @@ static button_data_t b_exit   = {.type = BTN_TEXT, .label = "Radio", .press = ex
 static button_data_t b_back   = {.type = BTN_TEXT, .label = "Back", .press = back_cb};
 static const char   *ref1_label(void);
 static const char   *ref2_label(void);
-static button_data_t b_ref1   = {.type = BTN_TEXT_FN, .label_fn = ref1_label, .press = page_cb};
-static button_data_t b_ref2   = {.type = BTN_TEXT_FN, .label_fn = ref2_label, .press = page_cb};
-static button_data_t b_ref3   = {.type = BTN_TEXT, .label = "(3:3)", .press = page_cb};
-static button_data_t b_act1   = {.type = BTN_TEXT, .label = "(1:2)", .press = page_cb};
-static button_data_t b_act2   = {.type = BTN_TEXT, .label = "(2:2)", .press = page_cb};
+static button_data_t b_ref1   = {.type = BTN_TEXT_FN, .label_fn = ref1_label, .press = page_cb, .hold = page_back_cb};
+static button_data_t b_ref2   = {.type = BTN_TEXT_FN, .label_fn = ref2_label, .press = page_cb, .hold = page_back_cb};
+static button_data_t b_ref3   = {.type = BTN_TEXT, .label = "(3:3)", .press = page_cb, .hold = page_back_cb};
+static button_data_t b_act1   = {.type = BTN_TEXT, .label = "(1:2)", .press = page_cb, .hold = page_back_cb};
+static button_data_t b_act2   = {.type = BTN_TEXT, .label = "(2:2)", .press = page_cb, .hold = page_back_cb};
 static button_data_t b_act    = {.type = BTN_TEXT_FN, .label_fn = activate_label, .press = activate_cb};
 static const char *spot_label(void);
 static button_data_t b_spot   = {.type = BTN_TEXT_FN, .label_fn = spot_label, .press = spot_cb};
@@ -1111,6 +1132,18 @@ static void page_cb(button_data_t *b) {
 
     buttons_unload_page();
     buttons_load_page(next);
+}
+
+/* Held: the page before (#317) */
+static void page_back_cb(button_data_t *b) {
+    buttons_page_t *prev = b == &b_ref1   ? (map_here() ? &page_ref3 : &page_ref2)
+                           : b == &b_ref2 ? &page_ref1
+                           : b == &b_ref3 ? &page_ref2
+                           : b == &b_act1 ? &page_act2
+                                          : &page_act1;
+
+    buttons_unload_page();
+    buttons_load_page(prev);
 }
 
 static void view_cb(button_data_t *b) {
@@ -1225,6 +1258,17 @@ static void home_select(int k) {
         lv_obj_set_style_bg_grad_color(t, TC(panel), 0);
     }
     home_reveal(sel);
+    {
+        static int said = -1;
+
+        if (sel != said && voice_auto_active()) {
+            char text[160];
+
+            snprintf(text, sizeof(text), "%s, %s, %i of %i", tile_name(sel), tile_sub(sel), sel + 1, HOME_TILES);
+            voice_say_clean(text, said >= 0);   /* the first one at once (the screen opening) */
+        }
+        said = sel;
+    }
 }
 
 static void tile_click_cb(lv_event_t *e) {
@@ -1616,6 +1660,19 @@ static void act_update(void) {
     lv_label_set_text_fmt(act_qsos, "%d", act_count());
     lv_label_set_text_fmt(act_time, "%d:%02d", s / 3600, s / 60 % 60);
     lv_label_set_text(act_last, qsos_n ? qsos[qsos_n - 1].call : "-");
+    {
+        /* Spoken: each QSO logged, its count and call ("QSO 5, K 1 A B C"); the rest of the screen by the power key */
+        static int said_count = -1;
+        int        count      = act_count();
+
+        if (said_count >= 0 && count > said_count && qsos_n && voice_auto_active()) {
+            char call[48];
+
+            voice_spell_calls(qsos[qsos_n - 1].call, call, sizeof(call));
+            voice_say_text_fmt("Q S O %d, %s", count, call);
+        }
+        said_count = count;
+    }
 
     /* The last three QSOs, the newest at the bottom */
     char      recent[200] = "", line[64];
@@ -1948,6 +2005,8 @@ static bool spot_job(bool qrt) {
 
     if (!ref_ok(st.ref.ref) || !prog_of(st.ref.type)->site)   /* it goes on a command line */
         return false;
+    if (cb_callsign(my_call()))     /* the programmes are amateur ones (spot_to says so) */
+        return false;
     if (st.ref.type == 'B')
         return job_start(spot_done, HELPER " wwbota-spot --call %s --freq-khz %.1f --ref %s --mode %s --id '%s'%s",
                          my_call(), khz, st.ref.ref, m, wwbota_id, qrt ? " --qrt" : "");
@@ -2072,6 +2131,11 @@ static void spot_to(bool cluster) {
     }
     if (!my_call()[0]) {
         msg_update_text_fmt("Set your callsign in Settings");
+        return;
+    }
+    if (cb_callsign(my_call())) {
+        /* 26AT101 (cb.h): the programmes' sites and the DX clusters are for amateur calls */
+        msg_update_text_fmt("No spot with a CB callsign: amateur programmes only");
         return;
     }
     if (st.ref.type == 'X') {

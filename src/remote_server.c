@@ -59,7 +59,15 @@
  *  list's rows go out as they come ("ft8r {...}", the last 48 to a page that opens later), the
  *  app's state when it changes ("ft8 {...}"), the CW decoder's text ("cw \"...\""); "ft8
  *  open|close|cq|stop|auto|hold|mode", "ft8 txfreq HZ", "ft8 reply ID" work the app, "wefax
- *  open|close|auto|cont|save|clear" the WeFax app (the state's "app" names the one open), "pos LAT
+ *  open|close|auto|cont|save|clear|plan|unplan" the WeFax app (the state's "app" names the one open), whose state goes
+ *  out as "wefax {...}" and, to a page that sent "wefax rows 1", its picture row by row (binary 0xFFFE,
+ *  remote_server_wefax_row); "ft8 wf 1" asks for the FT8 app's waterfall row by row (binary 0xFFFD,
+ *  remote_server_app_wf); "wide 1" asks for the X6200 base's whole spectrum, its raw packets as binary 0xFFFC
+ *  (the bench's; 0xFFFE was ours till upstream's WeFax rows took it). "js8 open|close|cq|autocq|hbnow|hb|auto|hold|speed|stop", "js8 txfreq HZ", "js8 select
+ *  CALL" and "js8 send TEXT" work the JS8 app (js8_window.c, through the types of remote_server.h), whose messages
+ *  go out as "js8r {...}" (the last 64 to a page that opens later; one still coming in keeps its id as it grows),
+ *  its state as "js8 {...}" (with "note": the answer to the last command) and, after "js8 wf 1", its waterfall as
+ *  FT8's. "pos LAT
  *  LON [ACC]" gives the radio the phone's position (degrees, the accuracy in metres; Field Ops uses
  *  it when no GPS is plugged in, operate without control: it touches nothing of the RF side), "clk?
  *  MS" and "clk MS RTT" the phone's clock (clock_from_phone: the radio's set from it in the field,
@@ -97,6 +105,7 @@
 #include "remote_sessions.h"
 #include "control_owner.h"
 #include "clock.h"
+#include "clock_sync.h"
 #include "front_keys.h"
 #include "ft8/utils.h"
 #include "gps.h"
@@ -127,6 +136,7 @@
 #include "tci_ws.h"
 #include "tx_meters.h"
 #include "wefax_window.h"
+#include "voice.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -159,7 +169,7 @@
 #define FUNNEL_PAUSE_MS (600 * 1000)  /* ... and Funnel's connections are refused this long */
 #define IN_SIZE     4096
 #define OUT_SIZE    (384 * 1024)    /* two frames at the most */
-#define TEXT_MAX    256
+#define TEXT_MAX    1024            /* a text message, its NUL too: "js8 send" and 500 characters fit */
 #define FRAME_MS    100             /* ten frames a second at the most */
 #define STILL_MS    1000            /* an unchanged screen: a frame this often */
 #define IDLE_MS     30000           /* a silent client is gone (the page pings every 5 s) */
@@ -204,6 +214,7 @@ typedef struct {
     pthread_mutex_t lock;
     char            text[TEXT_MAX];
     size_t          text_len;
+    bool            text_over;      /* the message coming in is longer than TEXT_MAX: its other frames go too */
     uint64_t        last_ms;
     uint64_t        ping_ms;        /* the last PING we sent */
     uint16_t        held[MAX_HELD]; /* keys this client holds down: released when it goes */
@@ -215,6 +226,8 @@ typedef struct {
     bool            panel;          /* wants the state, the spectrum and the spots (the Panel page) */
     bool            panel_fresh;    /* just subscribed: the whole state goes out next */
     bool            wide;           /* "wide 1": the base's whole spectrum (radio_psd_wide) and its raw frames */
+    bool            fax;            /* wants the WeFax picture's rows (the WeFax page: "wefax rows 1") */
+    bool            appwf;          /* wants the FT8 or JS8 app's waterfall rows ("ft8 wf 1", "js8 wf 1") */
     atomic_bool     state_due;      /* a "set" refused: the state goes out to it next, changed or not */
     int             sess;           /* the session it authenticated as, -1 none (a viewer) */
     uint8_t         role;           /* ROLE_VIEW, ROLE_OPERATE, ROLE_ADMIN */
@@ -336,10 +349,14 @@ static atomic_bool state_resend;    /* a "set" dropped on the LVGL thread: the s
 static int         wake_fd[2] = {-1, -1};
 static int         dev_keypad = -1, dev_power = -1, dev_main = -1, dev_vol = -1, dev_mfk = -1;
 
-/* The screen: shadow (LVGL thread), frame (handed over), enc and prev (encoder thread) */
+/* The screen: shadow (LVGL thread), frame (handed over), enc and prev (encoder thread). With the DRM planes the
+ * waterfall plane's picture goes with frame and enc (frame_under, enc_under, has_under: this frame has one): the
+ * encoder thread puts it under the GUI's see-through parts. The LVGL thread did that at every frame */
 static pthread_mutex_t fmut = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  fcond = PTHREAD_COND_INITIALIZER;
 static uint8_t        *shadow, *frame, *enc, *prev;
+static uint32_t       *frame_under, *enc_under;
+static bool            frame_has_under, enc_has_under;
 static int32_t         sw, sh;          /* the shadow's size: the display's */
 static int32_t         fw, fh, ew, eh, pw, ph;
 static bool            frame_ready, dirty;
@@ -375,6 +392,9 @@ static const struct {
     {"LOCK", BTN_TRIGGER_HAPPY25},   {"MFK", BTN_TRIGGER_HAPPY27},
 #endif
 };
+
+/* The keys[] table's "PTT": the radio's own microphone, which the "key" command leases (ptt_down) */
+#define PTT_CODE    BTN_TRIGGER_HAPPY4
 
 static uint64_t now_ms(void) {
     struct timespec ts;
@@ -819,7 +839,16 @@ static void pair_msg_apply(void *arg) {
     char code[8];
     snprintf(code, sizeof(code), "%s", pair_code);
     pthread_mutex_unlock(&sess_mux);
+    /* spoken digit by digit, twice: read as it is shown, six digits are one big number */
+    char spoken[24] = "";
+    for (const char *d = code; *d; d++) {
+        size_t n = strlen(spoken);
+        snprintf(spoken + n, sizeof(spoken) - n, "%s%c", n ? " " : "", *d);
+    }
+    voice_msg_hold(true);
     msg_schedule_text_ms(PAIR_SHOW_MS, "Pair code: #ffb020 %s#  (2 min)", code);
+    voice_msg_hold(false);
+    voice_say_text_fmt("Pair code: %s. Again: %s. Good for 2 minutes.", spoken, spoken);
 }
 
 /* LVGL thread: pairing paused, for how many minutes */
@@ -1071,6 +1100,8 @@ static void client_close(client_t *c) {
     c->up      = false;
     c->funnel  = false;
     c->panel   = false;
+    c->fax     = false;
+    c->appwf   = false;
     c->out_len = c->in_len = c->text_len = 0;
     pthread_mutex_unlock(&c->lock);
     rx_hold_sync();                 /* a session without TX gone from control: its hold with it */
@@ -1106,10 +1137,10 @@ static void panel_apply(void *arg) {
         case P_ATT:    cparam_i_set(cfg_cur_att, p->a != 0); break;
         case P_NB:     param_i_set(cfg_nb, p->a != 0); break;
         case P_NR:     param_i_set(cfg_nr, p->a != 0); break;
-        case P_SQL:    param_i_set(cfg_squelch, LV_CLAMP(0, p->a, 100)); break;
-        case P_RFG:    param_i_set(cfg_rfgain, LV_CLAMP(0, p->a, 100)); break;
+        case P_SQL:    param_i_set(cfg_squelch, LV_CLAMP(0, p->a, BOARD_SQL_MAX)); break;
+        case P_RFG:    param_i_set(cfg_rfgain, LV_CLAMP(0, p->a, BOARD_RFG_MAX)); break;
         case P_VOL:    param_i_set(cfg_volume, LV_CLAMP(0, p->a, BOARD_VOL_MAX)); break;
-        case P_PWR:    cfg_pwr_set(LV_CLAMP(1, p->a, (int)(BOARD_PWR_MAX * 10)) / 10.0f); break;
+        case P_PWR:    cfg_pwr_set(LV_CLAMP((int)(BOARD_PWR_MIN * 10), p->a, (int)(BOARD_PWR_MAX * 10)) / 10.0f); break;
         case P_STEP:   param_i_set(cfg_mode_freq_step, LV_CLAMP(1, p->a, CFG_FREQ_STEP_MAX)); break;
         case P_ZOOM:   param_i_set(cfg_mode_zoom, LV_CLAMP(ZOOM_MIN, p->a, ZOOM_MAX)); break;   /* zoom_span.h */
         case P_BAND:
@@ -1499,6 +1530,69 @@ void remote_server_ft8_row(const void *cell) {
     panel_broadcast(line);
 }
 
+/* LVGL thread (wefax_window.c): a row of the WeFax picture coming in, to the pages that asked for them ("wefax rows
+ * 1"), binary: {u16 0xFFFE, u16 width, u32 its number in the picture, from 1; 1 again is a new picture}, then a grey
+ * byte a pixel. The Panel takes binary frames for the spectrum: only the pages that asked get these. A client with
+ * no room loses the row, and the page draws the one before in its place (the number says one is missing) */
+void remote_server_wefax_row(const uint8_t *row, unsigned width, uint32_t number) {
+    struct {
+        uint16_t mark, w;
+        uint32_t n;
+    } hdr = {0xFFFE, (uint16_t)width, number};
+
+    if (!atomic_load(&npanel))
+        return;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        client_t *c = &clients[i];
+        if (c->fd < 0 || !c->up || !c->panel || !c->fax)
+            continue;
+        pthread_mutex_lock(&c->lock);
+        bool room = c->out_len < PANEL_ROOM;
+        pthread_mutex_unlock(&c->lock);
+        if (room)
+            client_frame(c, WS_OP_BINARY, &hdr, sizeof(hdr), row, width);
+    }
+}
+
+/* LVGL thread (ft8_window.c): a row of the FT8 app's own waterfall, to the pages that asked for them ("ft8 wf 1"),
+ * binary: {u16 0xFFFD, u16 bins, u16 low Hz, u16 high Hz}, then an int8 a bin, dB over the noise floor: the audio
+ * the app decodes, from its filter's low edge to its high one (the Panel's spectrum is the receiver's, wider and
+ * coarser). As the WeFax rows: only to the pages that asked, and a client with no room loses the row */
+void remote_server_app_wf(const float *db, unsigned n, int lo_hz, int hi_hz) {
+    struct {
+        uint16_t mark, n, lo, hi;
+    } hdr = {0xFFFD, (uint16_t)n, (uint16_t)LV_CLAMP(0, lo_hz, 65535), (uint16_t)LV_CLAMP(0, hi_hz, 65535)};
+    int8_t row[2048];
+
+    if (!atomic_load(&npanel) || !n || n > sizeof(row))
+        return;
+    for (unsigned i = 0; i < n; i++)
+        row[i] = (int8_t)(db[i] < -128.0f ? -128 : db[i] > 127.0f ? 127 : lroundf(db[i]));
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        client_t *c = &clients[i];
+        if (c->fd < 0 || !c->up || !c->panel || !c->appwf)
+            continue;
+        pthread_mutex_lock(&c->lock);
+        bool room = c->out_len < PANEL_ROOM;
+        pthread_mutex_unlock(&c->lock);
+        if (room)
+            client_frame(c, WS_OP_BINARY, &hdr, sizeof(hdr), row, n);
+    }
+}
+
+/* The WeFax app as JSON: "wefax {...}" */
+static void wefax_status_line(char *buf, size_t n, const wefax_status_t *s) {
+    size_t k = snprintf(buf, n, "wefax {\"open\":%d,\"auto\":%d,\"fax\":%d,\"tx\":%d,\"txp\":%d,\"gen\":%u,"
+                        "\"rows\":%u,\"freq\":%d,\"saves\":%u,\"station\":", s->open, s->auto_mode, s->fax_on, s->tx,
+                        s->tx_pct, s->gen, s->rows, s->freq, s->saves);
+    k += json_str(buf + k, n - k, s->station);
+    k += snprintf(buf + k, n - k, ",\"saved\":");
+    k += json_str(buf + k, n - k, s->saved);
+    k += snprintf(buf + k, n - k, ",\"plan\":%d,\"next\":", s->plan);
+    k += json_str(buf + k, n - k, s->plan_next);
+    snprintf(buf + k, n - k, "}");
+}
+
 /* Any thread (the CW decoder's) */
 void remote_server_cw_text(const char *text) {
     size_t n = strlen(text);
@@ -1522,6 +1616,94 @@ void remote_server_cw_text(const char *text) {
     pthread_mutex_unlock(&app_mux);
 }
 
+/* The JS8 messages kept for a page that opens later, ours too. A message still coming in has one place, written
+ * again as its frames arrive (the same msg_id), so the page grows its row */
+#define JS8_RING 64
+static struct {
+    uint32_t         id;            /* ours, from 1; 0 unused */
+    remote_js8_msg_t m;
+} js8_ring[JS8_RING];
+static uint32_t js8_ids;
+
+/* A message as JSON: "js8r {...}" */
+static void js8_msg_line(char *buf, size_t n, uint32_t id, const remote_js8_msg_t *m) {
+    size_t k = snprintf(buf, n, "js8r {\"id\":%u,\"utc\":%d,\"snr\":%d,\"f\":%d,\"sp\":%d,\"tx\":%d,\"me\":%d,"
+                        "\"cq\":%d,\"hb\":%d,\"grp\":%d,\"lc\":%d,\"part\":%d,\"chk\":%d,\"fr\":",
+                        id, (int)m->utc, m->snr, m->freq_hz, m->submode, m->tx, m->to_me, m->cq, m->heartbeat,
+                        m->to_group, m->low_confidence, m->partial, m->checksum);
+    k += json_str(buf + k, n - k, m->from);
+    k += snprintf(buf + k, n - k, ",\"to\":");
+    k += json_str(buf + k, n - k, m->to);
+    k += snprintf(buf + k, n - k, ",\"g\":");
+    k += json_str(buf + k, n - k, m->grid);
+    k += snprintf(buf + k, n - k, ",\"x\":");
+    k += json_str(buf + k, n - k - 1, m->text);     /* room for the closing brace, whatever the text */
+    snprintf(buf + k, n - k, "}");
+}
+
+#define JS8_LINE (REMOTE_JS8_TEXT * 2 + 512)       /* a js8r line: the text with every character escaped fits */
+
+/* LVGL thread (js8_window.c): kept, and to the panel clients at once */
+void remote_server_js8_msg(const remote_js8_msg_t *m) {
+    static char line[JS8_LINE];     /* this thread's alone */
+    uint32_t    id;
+    int         at = -1;
+
+    pthread_mutex_lock(&app_mux);
+    if (!m->tx && m->msg_id)        /* more of a message already kept */
+        for (int i = 0; i < JS8_RING && at < 0; i++)
+            if (js8_ring[i].id && !js8_ring[i].m.tx && js8_ring[i].m.msg_id == m->msg_id && js8_ring[i].m.partial)
+                at = i;
+    if (at < 0) {
+        id = ++js8_ids;
+        at = id % JS8_RING;
+    } else {
+        id = js8_ring[at].id;
+    }
+    js8_ring[at].id = id;
+    js8_ring[at].m  = *m;
+    pthread_mutex_unlock(&app_mux);
+    if (!atomic_load(&npanel))
+        return;
+    js8_msg_line(line, sizeof(line), id, m);
+    panel_broadcast(line);
+}
+
+/* The JS8 app's commands by their word: "js8 WORD" */
+static const struct {
+    const char     *name;
+    remote_js8_rc_t rc;
+} js8_words[] = {{"cq", REMOTE_JS8_CQ},         {"autocq", REMOTE_JS8_AUTOCQ}, {"hbnow", REMOTE_JS8_HBNOW},
+                 {"hb", REMOTE_JS8_HB},         {"auto", REMOTE_JS8_AUTO},     {"hold", REMOTE_JS8_HOLD},
+                 {"speed", REMOTE_JS8_SPEED},   {"stop", REMOTE_JS8_STOP},     {"txfreq", REMOTE_JS8_TXFREQ},
+                 {"select", REMOTE_JS8_SELECT}, {"send", REMOTE_JS8_SEND}};
+#define JS8_WORDS (sizeof(js8_words) / sizeof(js8_words[0]))
+
+static const char *js8_word(int rc) {
+    for (size_t i = 0; i < JS8_WORDS; i++)
+        if ((int)js8_words[i].rc == rc)
+            return js8_words[i].name;
+    return "";
+}
+
+/* The JS8 app as JSON: "js8 {...}"; "notefor" is the word of the command the note answers (a page that sent a
+ * message waits for "send"'s) */
+static void js8_status_line(char *buf, size_t n, const remote_js8_status_t *s) {
+    size_t k = snprintf(buf, n, "js8 {\"open\":%d,\"busy\":%d,\"sending\":%d,\"acq\":%d,\"hb\":%d,\"auto\":%d,"
+                        "\"hold\":%d,\"speed\":%d,\"frame\":%d,\"frames\":%d,\"txf\":%d,\"selhz\":%d,\"hbmin\":%d,"
+                        "\"next\":%d,\"notes\":%u,\"noteerr\":%d,\"notefor\":\"%s\",\"note\":", s->open, s->busy,
+                        s->sending, s->auto_cq, s->hb, s->auto_on, s->hold, s->speed, s->frame, s->frames, s->txf,
+                        s->sel_hz, s->hb_min, s->next_s, s->notes, s->note_err, js8_word(s->note_cmd));
+    k += json_str(buf + k, n - k, s->note);
+    k += snprintf(buf + k, n - k, ",\"sel\":");
+    k += json_str(buf + k, n - k, s->sel);
+    k += snprintf(buf + k, n - k, ",\"where\":");
+    k += json_str(buf + k, n - k, s->where);
+    k += snprintf(buf + k, n - k, ",\"text\":");
+    k += json_str(buf + k, n - k - 1, s->text);
+    snprintf(buf + k, n - k, "}");
+}
+
 /* The rows kept and the CW text so far: to a client that just subscribed */
 static void panel_app_history(client_t *c) {
     char line[CW_HIST * 2 + 16];
@@ -1532,6 +1714,13 @@ static void panel_app_history(client_t *c) {
         if (ft8_ring[id % FT8_RING].id != id)
             continue;
         ft8_row_line(line, 512, id, &ft8_ring[id % FT8_RING].cell);
+        client_text(c, line);
+    }
+    uint32_t jfirst = js8_ids > JS8_RING ? js8_ids - JS8_RING + 1 : 1;
+    for (uint32_t id = jfirst; id <= js8_ids; id++) {
+        if (js8_ring[id % JS8_RING].id != id)
+            continue;
+        js8_msg_line(line, sizeof(line), id, &js8_ring[id % JS8_RING].m);
         client_text(c, line);
     }
     if (cw_hist_len) {
@@ -1573,16 +1762,16 @@ static void ft8_status_line(char *buf, size_t n, const ft8_status_t *s) {
 }
 
 /* What the panel asks of the apps, on the LVGL thread */
-typedef enum { A_FT8_OPEN, A_FT8_CLOSE, A_FT8, A_WEFAX_OPEN, A_WEFAX_CLOSE, A_WEFAX, A_LOG, A_APP_OPEN, A_APP_CLOSE,
-               A_SENTRY, A_BANNER } acmd_id_t;
+typedef enum { A_FT8_OPEN, A_FT8_CLOSE, A_FT8, A_WEFAX_OPEN, A_WEFAX_CLOSE, A_WEFAX, A_JS8_OPEN, A_JS8_CLOSE, A_JS8,
+               A_LOG, A_APP_OPEN, A_APP_CLOSE, A_SENTRY, A_BANNER } acmd_id_t;
 
 typedef struct {
     acmd_id_t   id;
-    int         what;       /* ft8_rc_t, wefax_rc_t */
+    int         what;       /* ft8_rc_t, wefax_rc_t, remote_js8_rc_t */
     int32_t     arg;
     bool        has_cell;
     cell_data_t cell;
-    char        text[200];
+    char        text[512];  /* A_LOG's QSO; A_JS8's message (500 characters at most) or call */
     uint64_t    log_id;     /* A_LOG: the page's number for its answer, 0 for none */
     uint64_t    who;        /* A_LOG: the session it came from */
     uint64_t    sum;        /* A_LOG: its text as sent, hashed (log_sum) */
@@ -1720,6 +1909,19 @@ static void app_apply(void *arg) {
         case A_WEFAX:
             wefax_window_remote((wefax_rc_t)a->what);
             break;
+        case A_JS8_OPEN:
+            if (!js8_window_running()) {
+                backlight_tick();
+                main_screen_start_app(ACTION_APP_JS8);
+            }
+            break;
+        case A_JS8_CLOSE:
+            if (js8_window_running())
+                main_screen_close_app();
+            break;
+        case A_JS8:
+            js8_window_remote((remote_js8_rc_t)a->what, a->arg, a->text);
+            break;
         case A_LOG:
             log_answer(a->who, a->log_id, a->sum, dialog_field_qso_log(a->text));
             break;
@@ -1785,13 +1987,15 @@ static bool app_ft8_cmd(const char *what, const char *arg) {
     return true;
 }
 
-/* "wefax open|close|auto|cont|save|clear": Auto waits for the start tone and saves at the stop tone, Cont takes rows
- * at once, Save writes the rows kept to /mnt/wefax and starts over, Clear drops them */
+/* "wefax open|close|auto|cont|save|clear|plan|unplan": Auto waits for the start tone and saves at the stop tone, Cont
+ * takes rows at once, Save writes the rows kept to /mnt/wefax and starts over, Clear drops them, Plan and Unplan turn
+ * Auto Plan on and off (the day's charts, wefax/plan.h) */
 static bool app_wefax_cmd(const char *what) {
     static const struct {
         const char *name;
         wefax_rc_t  rc;
-    } rcs[] = {{"auto", WEFAX_RC_AUTO}, {"cont", WEFAX_RC_CONT}, {"save", WEFAX_RC_SAVE}, {"clear", WEFAX_RC_CLEAR}};
+    } rcs[] = {{"auto", WEFAX_RC_AUTO},   {"cont", WEFAX_RC_CONT}, {"save", WEFAX_RC_SAVE},
+               {"clear", WEFAX_RC_CLEAR}, {"plan", WEFAX_RC_PLAN}, {"unplan", WEFAX_RC_UNPLAN}};
     acmd_t a = {.id = A_WEFAX};
 
     if (!strcasecmp(what, "open")) {
@@ -1807,6 +2011,30 @@ static bool app_wefax_cmd(const char *what) {
     }
     scheduler_put(app_apply, &a, sizeof(a));
     return true;
+}
+
+/* "js8 open|close|cq|autocq|hbnow|hb|auto|hold|speed|stop", "js8 txfreq HZ", "js8 select CALL", "js8 send TEXT":
+ * the JS8 app's buttons. False for a word it does not know or an argument missing */
+static bool app_js8_cmd(const char *what, const char *arg) {
+    acmd_t a = {.id = A_JS8};
+
+    if (!strcasecmp(what, "open")) {
+        a.id = A_JS8_OPEN;
+    } else if (!strcasecmp(what, "close")) {
+        a.id = A_JS8_CLOSE;
+    } else {
+        size_t i = 0;
+        while (i < JS8_WORDS && strcasecmp(js8_words[i].name, what)) i++;
+        if (i == JS8_WORDS)
+            return false;
+        a.what = js8_words[i].rc;
+        bool needs = a.what == REMOTE_JS8_SELECT || a.what == REMOTE_JS8_SEND || a.what == REMOTE_JS8_TXFREQ;
+        if (needs && (!arg || !*arg || strlen(arg) >= sizeof(a.text)))
+            return false;
+        a.arg = a.what == REMOTE_JS8_TXFREQ ? (int32_t)strtol(arg, NULL, 10) : 0;
+        snprintf(a.text, sizeof(a.text), "%s", needs ? arg : "");
+    }
+    return scheduler_put(app_apply, &a, sizeof(a));
 }
 
 /* "log CALL|RSTS|RSTR|NAME|QTH|GRID|COUNTRY" (dialog_field_qso_log's text), the day's log;
@@ -1855,6 +2083,10 @@ static void *panel_thread(void *arg) {
     uint32_t       raw_seq = 0;
     pstate_t       last = {0};
     ft8_status_t   ft8_last = {0};
+    wefax_status_t fax_last = {0};
+    uint64_t       fax_ms = 0, js8_ms = 0;
+    static remote_js8_status_t js8_last;
+    static char    jline[1024];     /* the JS8 state's line: its texts may be escaped whole */
     bool           have_last = false;
     uint32_t       sp_seq = 0, spots_gen = 0, plan_gen = band_plan_gen();
     uint64_t       state_ms = 0, meter_ms = 0, spots_ms = 0, ft8_ms = 0, ft8_sent_ms = 0;
@@ -1895,7 +2127,7 @@ static void *panel_thread(void *arg) {
             }
         }
 
-        /* The base's raw spectrum to the clients that asked for it ("wide 1"): {u16 0xFFFE, u16 bins, u32 centre Hz,
+        /* The base's raw spectrum to the clients that asked for it ("wide 1"): {u16 0xFFFC, u16 bins, u32 centre Hz,
          * u32 width Hz, u32 sequence}, then one int8 dBm per bin, the lowest first */
         uint16_t rn;
         uint32_t rspan, rseq;
@@ -1910,7 +2142,7 @@ static void *panel_thread(void *arg) {
             struct {
                 uint16_t mark, n;
                 uint32_t center, width, seq;
-            } rh = {0xFFFE, rn, rc, rspan, rseq};
+            } rh = {0xFFFC, rn, rc, rspan, rseq};   /* 0xFFFC: upstream's WeFax rows took 0xFFFE */
             for (int i = 0; i < MAX_CLIENTS; i++) {
                 client_t *c = &clients[i];
                 if (c->fd < 0 || !c->up || !c->panel || !c->wide)
@@ -1949,6 +2181,12 @@ static void *panel_thread(void *arg) {
                     ft8_window_status(&ft8_last);
                     ft8_status_line(line, sizeof(line), &ft8_last);
                     client_text(c, line);
+                    wefax_window_status(&fax_last);
+                    wefax_status_line(line, sizeof(line), &fax_last);
+                    client_text(c, line);
+                    js8_window_status(&js8_last);
+                    js8_status_line(jline, sizeof(jline), &js8_last);
+                    client_text(c, jline);
                     panel_app_history(c);
                     if (changed)
                         pstate_line(line, sizeof(line), &s);     /* the line the others get */
@@ -2004,6 +2242,28 @@ static void *panel_thread(void *arg) {
                 ft8_sent_ms = now;
                 ft8_status_line(line, sizeof(line), &fs);
                 panel_broadcast(line);
+            }
+            /* WeFax: on a change, the rows kept (two a second while a chart comes in) once a second at most */
+            wefax_status_t ws, wa, wb;
+            wefax_window_status(&ws);
+            wa = ws; wb = fax_last;
+            wa.rows = wb.rows = 0;
+            if (memcmp(&wa, &wb, sizeof(wa)) != 0 || (ws.rows != fax_last.rows && now - fax_ms >= 1000)) {
+                fax_last = ws;
+                fax_ms   = now;
+                wefax_status_line(line, sizeof(line), &ws);
+                panel_broadcast(line);
+            }
+            /* JS8: on a change, the countdown once a second at most */
+            remote_js8_status_t js, ja, jb;
+            js8_window_status(&js);
+            ja = js; jb = js8_last;
+            ja.next_s = jb.next_s = 0;
+            if (memcmp(&ja, &jb, sizeof(ja)) != 0 || (js.next_s != js8_last.next_s && now - js8_ms >= 1000)) {
+                js8_last = js;
+                js8_ms   = now;
+                js8_status_line(jline, sizeof(jline), &js);
+                panel_broadcast(jline);
             }
             panel_cw_flush();
             log_flush();
@@ -2081,19 +2341,17 @@ static bool allowed(client_t *c, uint8_t role, bool control) {
 /* "clk MS RTT": the phone's clock, step 2 (operate, no control: it touches nothing of the RF side). MS the phone's
  * time as it sent this, RTT the round trip it measured with "clk?": the radio's clock is set to MS + RTT / 2 when it
  * is more than CLK_STEP_MS off, and only while nothing else keeps it, neither ntpd (the network, or the GPS through
- * it) nor a GPS fix of the last seconds, the FT8 app's Time Sync rule: in the field, with no internet. A round trip
- * over CLK_RTT_MAX_MS is no measure. A clock set goes into the RTC too and the radio says so. Answered "clk
+ * it) nor a GPS fix of the last seconds, clock_sync.h's rule for a move by hand: in the field, with no internet. A
+ * round trip over CLK_RTT_MAX_MS is no measure. A clock set goes into the RTC too, the GPS / Clock page names it
+ * ("phone") and the radio says so. Answered "clk
  * set|ok|ntp|gps|slow DIFF" (the difference found, in ms) or "err clk ...". Socket thread */
 #define CLK_STEP_MS    300
 #define CLK_RTT_MAX_MS 1000
-#define CLK_GPS_AGE_S  10      /* a GPS fix this recent: gpsd feeds ntpd */
 
 static void clock_from_phone(client_t *c, const char *ms_s, const char *rtt_s) {
     char           *e1, *e2;
     long long       ms = strtoll(ms_s, &e1, 10), rtt = strtoll(rtt_s, &e2, 10);
     struct timespec now;
-    double          lat, lon;
-    int             age;
 
     if (!allowed(c, ROLE_OPERATE, false))
         return;
@@ -2107,24 +2365,24 @@ static void clock_from_phone(client_t *c, const char *ms_s, const char *rtt_s) {
         client_textf(c, "clk slow %lld", diff);
         return;
     }
-    if (ftx_clock_synced(NULL)) {
-        client_textf(c, "clk ntp %lld", diff);
-        return;
-    }
-    if (gps_last_fix(&lat, &lon, &age) && age <= CLK_GPS_AGE_S) {
-        client_textf(c, "clk gps %lld", diff);
-        return;
+    switch (clock_sync_keeper(NULL)) {
+        case CLOCK_BY_NTP:
+            client_textf(c, "clk ntp %lld", diff);
+            return;
+        case CLOCK_BY_GPS:
+            client_textf(c, "clk gps %lld", diff);
+            return;
+        default:
+            break;
     }
     if (llabs(diff) <= CLK_STEP_MS) {
         client_textf(c, "clk ok %lld", diff);
         return;
     }
-    struct timespec set = {.tv_sec = theirs / 1000, .tv_nsec = (theirs % 1000) * 1000000};
-    if (clock_settime(CLOCK_REALTIME, &set) != 0) {
+    if (!clock_sync_step(diff / 1000.0, CLOCK_BY_HAND, N_("phone"))) {
         client_textf(c, "err clk: %s", strerror(errno));
         return;
     }
-    clock_rtc_save();
     LV_LOG_USER("Clock set from the phone: %+lld ms (round trip %lld ms)", diff, rtt);
     msg_schedule_text_fmt("Clock set from the phone: %+.1f s", diff / 1000.0);
     client_textf(c, "clk set %lld", diff);
@@ -2143,7 +2401,7 @@ static void ptt_down(client_t *c, const char *hold_text) {
     char     no[96];
     int32_t  f;
 
-    while (k < c->nheld && c->held[k] != BTN_TRIGGER_HAPPY4) k++;
+    while (k < c->nheld && c->held[k] != PTT_CODE) k++;
     if (!hold) {
         client_text(c, "err this session may not transmit from a page older than the radio: reload the page");
         return;
@@ -2173,8 +2431,8 @@ static void ptt_down(client_t *c, const char *hold_text) {
         return;
     }
     c->ptt_start_ms = c->ptt_ms;
-    c->held[c->nheld++] = BTN_TRIGGER_HAPPY4;
-    key_emit(BTN_TRIGGER_HAPPY4, true);
+    c->held[c->nheld++] = PTT_CODE;
+    key_emit(PTT_CODE, true);
 }
 
 /* A held PTT is a lease (R4): renewed every second by the page, or let go here; three minutes at most. Its hold
@@ -2182,10 +2440,10 @@ static void ptt_down(client_t *c, const char *hold_text) {
 static void ptt_lease(client_t *c, uint64_t now) {
     int k = 0;
 
-    while (k < c->nheld && c->held[k] != BTN_TRIGGER_HAPPY4) k++;
+    while (k < c->nheld && c->held[k] != PTT_CODE) k++;
     if (k < c->nheld && (now - c->ptt_ms > PTT_LEASE_MS || now - c->ptt_start_ms > PTT_LIMIT_MS)) {
         c->held[k] = c->held[--c->nheld];
-        key_emit(BTN_TRIGGER_HAPPY4, false);
+        key_emit(PTT_CODE, false);
         client_text(c, now - c->ptt_start_ms > PTT_LIMIT_MS ? "err ptt released: three minutes on the air"
                                                             : "err ptt released: no renewal from the page");
     }
@@ -2333,6 +2591,11 @@ static void handle_text(client_t *c, char *text) {
         snprintf(q.text, sizeof(q.text), "%s", text[6] ? text + 7 : "");
         atomic_store(&banner_by, q.text[0] ? (int)(c - clients) : -1);
         scheduler_put(app_apply, &q, sizeof(q));
+        return;
+    }
+    if (!strncmp(text, "js8 send ", 9)) {   /* the message as it is: it has spaces */
+        if (allowed(c, ROLE_OPERATE, true) && !app_js8_cmd("send", text + 9))
+            client_text(c, "err js8 send: an empty message, one too long, or the radio is busy");
         return;
     }
     if (!strncmp(text, "log ", 4)) {        /* the text as it is: names have spaces */
@@ -2509,6 +2772,8 @@ static void handle_text(client_t *c, char *text) {
         panel_set(c, a[1], n >= 3 ? a[2] : NULL, n >= 4 ? a[3] : NULL);
     } else if (!strcmp(a[0], "tune") && n >= 2) {
         tune_cmd(c, atoi(a[1]) != 0, n >= 3 ? a[2] : NULL);
+    } else if ((!strcmp(a[0], "ft8") || !strcmp(a[0], "js8")) && n >= 3 && !strcmp(a[1], "wf")) {
+        c->appwf = atoi(a[2]) != 0;         /* only watching: no role needed */
     } else if (!strcmp(a[0], "ft8") && n >= 2) {
         if (!allowed(c, ROLE_OPERATE, true))
             return;
@@ -2521,6 +2786,8 @@ static void handle_text(client_t *c, char *text) {
         }
         if (!app_ft8_cmd(a[1], n >= 3 ? a[2] : NULL))
             client_textf(c, "err ft8 %s", a[1]);
+    } else if (!strcmp(a[0], "wefax") && n >= 3 && !strcmp(a[1], "rows")) {
+        c->fax = atoi(a[2]) != 0;           /* only watching: no role needed */
     } else if (!strcmp(a[0], "wefax") && n >= 2) {
         if (!allowed(c, ROLE_OPERATE, true))
             return;
@@ -2580,6 +2847,11 @@ static void handle_text(client_t *c, char *text) {
         acmd_t q = {.id = A_APP_CLOSE};
 
         scheduler_put(app_apply, &q, sizeof(q));
+    } else if (!strcmp(a[0], "js8") && n >= 2) {
+        if (!allowed(c, ROLE_OPERATE, true))
+            return;
+        if (!app_js8_cmd(a[1], n >= 3 ? a[2] : NULL))
+            client_textf(c, "err js8 %s", a[1]);
     } else if (!strcmp(a[0], "clk?") && n >= 2) {
         /* the phone's clock, step 1: its time sent back with ours, so the page knows the round trip */
         struct timespec ts;
@@ -2607,7 +2879,7 @@ static void handle_text(client_t *c, char *text) {
             client_textf(c, "err unknown key %s", a[1]);
             return;
         }
-        if (code == BTN_TRIGGER_HAPPY4 && down) {  /* PTT: the radio's own microphone, a lease */
+        if (code == PTT_CODE && down) {  /* PTT: the radio's own microphone, a lease */
             ptt_down(c, n >= 4 ? a[3] : NULL);
             return;
         }
@@ -2776,13 +3048,20 @@ static void client_read(client_t *c) {
         switch (f.opcode) {
             case WS_OP_TEXT:
             case WS_OP_CONT:
-                if (f.opcode == WS_OP_TEXT)
-                    c->text_len = 0;
-                if (c->text_len + f.len < TEXT_MAX) {
+                if (f.opcode == WS_OP_TEXT) {
+                    c->text_len  = 0;
+                    c->text_over = false;
+                }
+                if (!c->text_over && c->text_len + f.len < TEXT_MAX) {
                     memcpy(c->text + c->text_len, f.payload, f.len);
                     c->text_len += f.len;
                 } else {
-                    c->text_len = 0;
+                    /* Said, not dropped without a word: a page's long JS8 message was lost so. The rest of the
+                     * message is not taken for one of its own */
+                    if (!c->text_over && c->up)
+                        client_text(c, "err message too long for the radio");
+                    c->text_over = !f.fin;
+                    c->text_len  = 0;
                     break;
                 }
                 if (f.fin) {
@@ -2862,7 +3141,7 @@ static void accept_client(int listen_fd) {
         c->pic     = PIC_SHARP;
         c->screen_stale = true;
         c->screen_ms    = 0;
-        c->panel   = c->panel_fresh = false;
+        c->panel   = c->panel_fresh = c->fax = c->appwf = false;
         atomic_store(&c->state_due, false);
         c->sess    = -1;
         c->role    = ROLE_VIEW;
@@ -3103,9 +3382,18 @@ static void tick_cb(lv_timer_t *t) {
         }
         if (frame) {
             memcpy(frame, shadow, bytes);
+            frame_has_under = false;
 #if USE_DRM
-            if (sw == BOARD_DISP_W && sh == BOARD_DISP_H)
-                drm_compose_landscape((uint32_t *)frame);   /* + the waterfall plane */
+            if (sw == BOARD_DISP_W && sh == BOARD_DISP_H) {
+                /* + the waterfall plane: its picture copied here, put under the GUI by the encoder thread. Without
+                 * memory for the copy, here as before */
+                if (!frame_under)
+                    frame_under = malloc(bytes);
+                if (frame_under)
+                    frame_has_under = drm_under_copy(frame_under);
+                else
+                    drm_compose_landscape((uint32_t *)frame);
+            }
 #endif
             frame_ready = true;
             dirty       = false;
@@ -3153,16 +3441,21 @@ static void *encoder_thread(void *arg) {
         while (!frame_ready)
             pthread_cond_wait(&fcond, &fmut);
         /* the buffers change places, each with its size: LVGL fills the old enc next */
-        uint8_t *tmp = enc;
-        int32_t  tw = ew, th = eh;
-        enc = frame, ew = fw, eh = fh;
-        frame = tmp, fw = tw, fh = th;
+        uint8_t  *tmp = enc;
+        uint32_t *tmp_under = enc_under;
+        int32_t   tw = ew, th = eh;
+        enc = frame, ew = fw, eh = fh, enc_under = frame_under, enc_has_under = frame_has_under;
+        frame = tmp, fw = tw, fh = th, frame_under = tmp_under;
         int32_t w = ew, h = eh;
         frame_ready = false;
         pthread_mutex_unlock(&fmut);
 
         if (!atomic_load(&nclients))
             continue;
+#if USE_DRM
+        if (enc_has_under)          /* (only a frame of the display's landscape size has one) */
+            drm_compose_landscape_from((uint32_t *)enc, enc_under);
+#endif
         uint64_t now   = now_ms();
         size_t   bytes = (size_t)w * h * 4;
         bool     same  = prev && pw == w && ph == h && memcmp(prev, enc, bytes) == 0;

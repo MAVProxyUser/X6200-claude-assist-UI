@@ -16,6 +16,7 @@
  * the button callbacks.
  */
 #include "app_sstv.h"
+#include "voice.h"
 #include "board.h"
 #include "app_sstv_int.h"
 
@@ -73,12 +74,13 @@ static void restart_cb(button_data_t *b);
 static void denoise_cb(button_data_t *b);
 static void close_cb(button_data_t *b);
 static void page_cb(button_data_t *b);
+static void page_back_cb(button_data_t *b);
 
 /* ---- Window and buttons ---- */
 
-static button_data_t btn_p1 = { .type = BTN_TEXT, .label = "(SSTV 1:3)", .press = page_cb };
-static button_data_t btn_p2 = { .type = BTN_TEXT, .label = "(SSTV 2:3)", .press = page_cb };
-static button_data_t btn_p3 = { .type = BTN_TEXT, .label = "(SSTV 3:3)", .press = page_cb };
+static button_data_t btn_p1 = { .type = BTN_TEXT, .label = "(SSTV 1:3)", .press = page_cb, .hold = page_back_cb };
+static button_data_t btn_p2 = { .type = BTN_TEXT, .label = "(SSTV 2:3)", .press = page_cb, .hold = page_back_cb };
+static button_data_t btn_p3 = { .type = BTN_TEXT, .label = "(SSTV 3:3)", .press = page_cb, .hold = page_back_cb };
 static button_data_t btn_auto = { .type = BTN_TEXT, .label = "Start\nAuto RX", .press = auto_cb };
 static button_data_t btn_manual = { .type = BTN_TEXT, .label = "Start\nManual RX", .press = manual_cb };
 button_data_t sstv_btn_mode = { .type = BTN_TEXT, .label = "RX Mode\nAuto", .press = mode_cb };
@@ -789,6 +791,16 @@ static void timer_cb(lv_timer_t *t)
         if (sstv_bar) lv_bar_set_value(sstv_bar, 1000, LV_ANIM_OFF);
         if (!start_worker(auto_thread)) auto_dec = false;
     }
+    {
+        static bool said_rec;   /* a picture starting: said once ("Receiving picture, Martin 1") */
+
+        if (auto_rec && rec_want > 0 && !said_rec) {
+            said_rec = true;
+            if (voice_auto_active()) voice_say_text_fmt("Receiving picture, %s", sstv_mode_info(rec_mode)->name);
+        } else if (!auto_rec) {
+            said_rec = false;
+        }
+    }
     if (auto_rec && rec_want > 0) {       /* the bar follows the recording */
         show_decoding(sstv_mode_info(rec_mode)->name);
         if (sstv_bar) {
@@ -822,6 +834,13 @@ static void page_cb(button_data_t *b)
 {
     buttons_load_page(b == &btn_p1 ? &page2 : b == &btn_p2 ? &page3 : &page1);
     if (b == &btn_p1) sstv_gallery_labels();
+}
+
+/* Held: the page before, as everywhere (#317); page 2's gallery labels as a press puts them */
+static void page_back_cb(button_data_t *b)
+{
+    buttons_load_page(b == &btn_p1 ? &page3 : b == &btn_p2 ? &page1 : &page2);
+    if (b == &btn_p3) sstv_gallery_labels();
 }
 
 static void freq_cb(button_data_t *b)

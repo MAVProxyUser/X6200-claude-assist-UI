@@ -483,9 +483,9 @@ def t_panel(run):
                 e = line_after(r, t0, "err wide")
                 return e is not None, f"wide 1: {e!r} (its base has no spectrum of its own)"
             time.sleep(2.0)
-            fr = [f for f in list(r.r.frames) if f[0] >= t0 and f[2][:2] == b"\xfe\xff"]
+            fr = [f for f in list(r.r.frames) if f[0] >= t0 and f[2][:2] == b"\xfc\xff"]
             if not fr:
-                return False, f"wide 1: no 0xFFFE frames in 2 s ({len(r.r.frames) - n0} frames of any kind)"
+                return False, f"wide 1: no 0xFFFC frames in 2 s ({len(r.r.frames) - n0} frames of any kind)"
             nb, cen, wid = struct.unpack_from("<HII", fr[-1][2], 2)
             return 300000 <= wid <= 400000, f"wide 1: {len(fr)} frames in 2 s, {nb} bins, {wid / 1000:.0f} kHz wide " \
                 f"around {cen / 1e6:.3f} MHz"

@@ -1,6 +1,10 @@
 #include "settings_manager.h"
 
 #include "smeter_att.h"
+#include "lo_offset.h"
+#include "../wfm_filter.h"
+#include "../boot_cw.h"
+#include "kbd_devices.h"
 
 #include <algorithm>
 #include <chrono>
@@ -193,6 +197,7 @@ void SettingsManager::init_load(void (*on_db_error)(const char *msg)) {
     cp_mode_lo_offset.recompute();
     cp_mode_tx_lo_offset.bind(cp_cur_mode);
     cp_mode_tx_lo_offset.bind(p_key_tone);
+    cp_mode_tx_lo_offset.bind(p_mode_zoom);
     cp_mode_tx_lo_offset.recompute();
 
     // Bind the computed filter params to their sources (filter_low/high +
@@ -730,10 +735,11 @@ int32_t SettingsManager::filter_low_validate(int32_t v) {
     return clip(v, 0, hi);
 }
 
-/* The widest filter the mode takes: the X6200's WFM goes to 10 kHz (its stock GUI's limit, the
- * default 8 kHz), every other mode to 6 kHz */
+/* The highest edge the mode takes: 6 kHz, in the X6200's WFM 8 kHz. WFM goes to the base from -edge to +edge, which
+ * its base (1.0.8) takes as one width and cuts at 16 kHz, the stock firmware's fixed WFM filter (#283, wfm_filter.h);
+ * up to v0.3.12 the edge went to 10 kHz, all of 8 to 10 kHz the same 16 kHz at the base */
 int32_t SettingsManager::filter_high_max() {
-    return cp_cur_mode.get() == radio_mode_wfm ? 10000 : 6000;
+    return cp_cur_mode.get() == radio_mode_wfm ? WFM_BW_MAX / 2 : 6000;
 }
 
 int32_t SettingsManager::filter_high_validate(int32_t v) {
@@ -775,7 +781,12 @@ int32_t SettingsManager::cur_filter_high_compute() {
     }
 }
 
+/* WFM's width is both sides of the dial, as the base takes it and the stock firmware shows it (16 kHz at the edge
+ * 8000, #283). AM, NFM and SAM keep the edge as their width, as up to v0.3.12 */
 int32_t SettingsManager::cur_filter_bw_compute() {
+    if (cp_cur_mode.get() == radio_mode_wfm) {
+        return wfm_bw_of_edge(p_mode_filter_high.get());
+    }
     return cp_cur_filter_high.get() - cp_cur_filter_low.get();
 }
 
@@ -819,6 +830,10 @@ void SettingsManager::cur_filter_high_reverse(int32_t v) {
 }
 
 void SettingsManager::cur_filter_bw_reverse(int32_t v) {
+    if (cp_cur_mode.get() == radio_mode_wfm) {
+        p_mode_filter_high.set(wfm_edge_of_bw(v));
+        return;
+    }
     v = clip(v, 10, filter_high_max());
     switch (filter_mode(cp_cur_mode.get())) {
         case FilterMode::AM:
@@ -1217,30 +1232,39 @@ std::string SettingsManager::country_validate(const std::string &val) {
             static_cast<char>(toupper(static_cast<unsigned char>(val[1])))};
 }
 
-/* Where the base's spectrum is centred, Hz from the dial: the X6100's in CW and CW-R on the oscillator the tone is
- * heard from, the key tone below the dial in CW and above it in CW-R (its lo_freq); the X6200's on the dial in every
- * mode (HW_CAP_CW_SPECTRUM_ON_DIAL), where this offset drew a station on the dial a pitch off it (#115) */
-int32_t SettingsManager::lo_offset_compute() {
-    int32_t mode = cp_cur_mode.get();
-    int32_t key_tone = p_key_tone.get();
-    if (hw_caps_ & HW_CAP_CW_SPECTRUM_ON_DIAL) {
-        return 0;
-    }
-    if (mode == radio_mode_cw) {
-        return -key_tone;
-    }
-    if (mode == radio_mode_cwr) {
-        return key_tone;
-    }
-    return 0;
+/* The place typed for the weather as it is kept: printable ASCII (degrees and a locator need no more), the spaces at its
+ * ends gone, 40 characters at most; whether it is a place meteo_place_parse() tells where it is typed */
+std::string SettingsManager::meteo_place_validate(const std::string &val) {
+    std::string out;
+
+    for (char c : val)
+        if (c >= ' ' && c <= '~' && out.size() < 40) out += c;
+    size_t a = out.find_first_not_of(' '), b = out.find_last_not_of(' ');
+    return a == std::string::npos ? "" : out.substr(a, b - a + 1);
 }
 
-/* The same while the base transmits. Xiegu's X6100 base from 1.1.9 on centres it on the dial then, where the carrier
- * is (HW_CAP_TX_SPECTRUM_ON_DIAL): moved by the key tone as in receive, the carrier was drawn a key tone off the line,
- * below it in CW. Its 1.1.8 keeps it on the oscillator in TX too, and there the carrier is on the line (#191) */
+std::string SettingsManager::kbd_dev_volume_validate(const std::string &val) {
+    char out[KBD_DEV_LIST_LEN];
+
+    kbd_dev_list_clean(val.c_str(), out, sizeof(out));
+    return out;
+}
+
+std::string SettingsManager::boot_text_validate(const std::string &val) {
+    char out[BOOT_CW_TEXT_MAX + 1];
+
+    boot_cw_clean(val.c_str(), out);
+    return out;
+}
+
+/* Where the base's frames are centred, Hz from the dial (lo_offset.h): the X6100's in CW and CW-R on the oscillator
+ * the tone is heard from, the X6200's on the dial in every mode (#115) */
+int32_t SettingsManager::lo_offset_compute() {
+    return lo_offset_rx(cp_cur_mode.get(), p_key_tone.get(), hw_caps_);
+}
+
+/* The same while the base transmits, at the zoom the picture is drawn at: on Xiegu's X6100 base from 1.1.9 on the
+ * receive offset over the zoom, where the carrier is drawn on the line (lo_offset.h, #191) */
 int32_t SettingsManager::tx_lo_offset_compute() {
-    if (hw_caps_ & HW_CAP_TX_SPECTRUM_ON_DIAL) {
-        return 0;
-    }
-    return lo_offset_compute();
+    return lo_offset_tx(cp_cur_mode.get(), p_key_tone.get(), hw_caps_, p_mode_zoom.get());
 }
