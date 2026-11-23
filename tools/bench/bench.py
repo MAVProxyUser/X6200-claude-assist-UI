@@ -2112,25 +2112,38 @@ def cmd_preflight(c, a):
 
 
 def cmd_testcall(c, a):
+    """A test call set (its GUI restarted to read it), the radio's own kept in calls.json; restore puts it back. With
+    a test call PSK Reporter is off (its default is on: every FT8/JS8 decode would be spotted on the internet with
+    the radio's locator): its row as found is kept beside the call and put back with it"""
     rc = c["radios"][a.name]
     saved = load_json(os.path.join(STATE, "calls.json"), {})
     cur = ssh(rc["host"], "sqlite3 /mnt/params.db \"select val from params where name='callsign'\"").strip()
+    pskr = ssh(rc["host"], "sqlite3 /mnt/params.db \"select val from params where name='pskreporter'\"").strip()
     if a.call in ("restore", "--restore"):
         old = saved.pop(a.name, None)
         if old is None:
             raise Refused(f"{a.name}: no callsign kept to go back to")
         q = (f"insert or replace into params(name,val) values('callsign','{old}')" if old else
              "delete from params where name='callsign'")
+        old_pskr = saved.pop(a.name + ".pskreporter", "")
+        if re.fullmatch(r"-?\d+", old_pskr):
+            q += f"; insert or replace into params(name,val) values('pskreporter',{int(old_pskr)})"
+        else:
+            q += "; delete from params where name='pskreporter'"      # none: the default (on)
     else:
         if not TEST_CALL.match(a.call):
             raise Refused("a test callsign is Q<digit>TST")
         if not TEST_CALL.match(cur):
             saved[a.name] = cur
-        q = f"insert or replace into params(name,val) values('callsign','{a.call}')"
+            saved[a.name + ".pskreporter"] = pskr
+        q = (f"insert or replace into params(name,val) values('callsign','{a.call}'); "
+             f"insert or replace into params(name,val) values('pskreporter',0)")
     save_json(os.path.join(STATE, "calls.json"), saved)
     ssh(rc["host"], f"/etc/init.d/S95gui stop >/dev/null 2>&1; sqlite3 /mnt/params.db \"{q}\"; "
                     f"/etc/init.d/S95gui start >/dev/null 2>&1")
-    say(f"{a.name}: callsign {cur or 'none'} -> {a.call if a.call not in ('restore', '--restore') else (old or 'none')}")
+    back = a.call in ("restore", "--restore")
+    say(f"{a.name}: callsign {'(its own)' if not TEST_CALL.match(cur) else cur} -> "
+        f"{'its own' if back else a.call}; PSK Reporter {'as found' if back else 'off'}; the GUI restarted")
 
 
 def main():
