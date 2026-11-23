@@ -568,7 +568,7 @@ class Notes(Root):
         os.close(pat)
         lines = read(self.wl.PAT_OWN_LOG).splitlines()
         self.assertEqual(len(lines), 3)
-        self.assertRegex(lines[1], r"^\d{4}/\d\d/\d\d \d\d:\d\d:\d\d OpenX6X00: a line of ours$")
+        self.assertRegex(lines[1], r"^\d{4}/\d\d/\d\d \d\d:\d\d:\d\d GoldCorpHF: a line of ours$")
         self.assertTrue(lines[2].endswith("Connecting to DM6TS (ardop)..."))
 
     def test_never_the_password(self):
@@ -582,7 +582,7 @@ class Notes(Root):
     def test_no_password_said_when_pat_answers(self):
         open(self.wl.PAT_OWN_LOG, "w").close()
         self.wl.pat_up({"mycall": "M7SVA"})
-        self.assertIn("OpenX6X00: no Winlink password for M7SVA", read(self.wl.PAT_OWN_LOG))
+        self.assertIn("GoldCorpHF: no Winlink password for M7SVA", read(self.wl.PAT_OWN_LOG))
         os.makedirs(self.wl.LIB)
         with open(self.wl.PASSWORD, "w") as f:
             f.write("pw\n")
@@ -641,7 +641,7 @@ class Logs(Root):
         return self.watch.poll(Running(), Running(), kind)
 
     def notes(self):
-        return [ln for ln in read(self.wl.PAT_OWN_LOG).splitlines() if " OpenX6X00: " in ln]
+        return [ln for ln in read(self.wl.PAT_OWN_LOG).splitlines() if " GoldCorpHF: " in ln]
 
 
 class Outcomes(Logs):
@@ -654,7 +654,7 @@ class Outcomes(Logs):
         self.assertEqual(k["last_text"], "Done with W4NWG: 1 sent, 0 received")
         self.assertEqual(k["last_next"], "")
         self.assertEqual(len(self.notes()), 1)
-        self.assertTrue(self.notes()[0].endswith("OpenX6X00: Done with W4NWG: 1 sent, 0 received"))
+        self.assertTrue(self.notes()[0].endswith("GoldCorpHF: Done with W4NWG: 1 sent, 0 received"))
         self.poll()
         self.assertEqual(len(self.notes()), 1)          # said once
 
@@ -853,7 +853,7 @@ class MercuryOutcomes(Logs):
                 "so far")
         self.assertEqual(self.poll(mercury=ring, kind="mercury")["modem"], "behind")
         self.assertEqual(len(self.notes()), 1)
-        self.assertIn("OpenX6X00: Mercury could not keep up with the receiver", self.notes()[0])
+        self.assertIn("GoldCorpHF: Mercury could not keep up with the receiver", self.notes()[0])
         self.poll(mercury=ring.replace("160", "10400"), kind="mercury")
         self.assertEqual(len(self.notes()), 1)                         # once in MERCURY_BEHIND
         self.watch.behind -= self.wl.MERCURY_BEHIND
@@ -975,7 +975,7 @@ class XaraOutcomes(Logs):
                       events=fixture("pc-n0aaa-n0bbb-xara.events.log").splitlines(), kind="xara")
         self.assertEqual(k["last_result"], "delivered")
         self.assertEqual(k["last_text"], "Done with N0BBB at 2300 Hz at VARA's free speed: 1 sent, 0 received")
-        self.assertEqual([n.split(" ", 2)[2] for n in self.notes()], ["OpenX6X00: " + k["last_text"]])
+        self.assertEqual([n.split(" ", 2)[2] for n in self.notes()], ["GoldCorpHF: " + k["last_text"]])
 
     def test_full_speed_from_xaras_own_line(self):
         """The licence ticked: XARA says REGISTERED with our call after Pat's MYCALL, and the radio, the caller,
@@ -1056,7 +1056,7 @@ class XaraOutcomes(Logs):
         behind = behind.replace("120", "480")
         self.assertEqual(self.poll(xara=behind, kind="xara")["modem"], "behind")
         self.assertEqual(len(self.notes()), 1)
-        self.assertIn("OpenX6X00: XARA could not keep up with the receiver", self.notes()[0])
+        self.assertIn("GoldCorpHF: XARA could not keep up with the receiver", self.notes()[0])
         self.poll(xara=behind.replace("480", "960"), kind="xara")
         self.assertEqual(len(self.notes()), 1, "once in ten minutes")
         self.watch.behind -= self.wl.MERCURY_BEHIND
@@ -1111,7 +1111,7 @@ class RadioFile(Logs):
         self.assertEqual(self.notes(), [])
         self.radio(swr=299, where="on 20m", here=1, refused="high SWR on 20m, the hold ends in 5 min", seq=1)
         self.poll()
-        self.assertRegex(self.notes()[0], r"OpenX6X00: high SWR stopped a Winlink transmission on 20m: no TX there "
+        self.assertRegex(self.notes()[0], r"GoldCorpHF: high SWR stopped a Winlink transmission on 20m: no TX there "
                                           r"for 5 minutes, until \d\d:\d\d; another band transmits. Check the "
                                           r"antenna and the tuner$")
         self.assertTrue(self.notes()[1].endswith("no TX, high SWR on 20m, the hold ends in 5 min. Check the "
@@ -1124,7 +1124,7 @@ class RadioFile(Logs):
         self.radio(swr=300, where="on 40m", here=1, refused="high SWR on 20m, the hold ends in 5 min", seq=1)
         self.poll()
         self.assertEqual(len(self.notes()), 3)                              # a trip on 40m: the hold moved there
-        self.assertRegex(self.notes()[2], r"OpenX6X00: high SWR stopped a Winlink transmission on 40m: no TX there "
+        self.assertRegex(self.notes()[2], r"GoldCorpHF: high SWR stopped a Winlink transmission on 40m: no TX there "
                                           r"for 5 minutes, until \d\d:\d\d; another band transmits")
         self.radio(swr=290, where="on 40m", here=1, refused="high SWR on 20m, the hold ends in 5 min", seq=1)
         self.poll()
@@ -1135,7 +1135,7 @@ class RadioFile(Logs):
         self.poll()
         self.radio(swr=299, refused="high SWR, the hold ends in 5 min", seq=1)
         self.poll()
-        self.assertRegex(self.notes()[0], r"OpenX6X00: high SWR stopped a Winlink transmission: no TX for 5 "
+        self.assertRegex(self.notes()[0], r"GoldCorpHF: high SWR stopped a Winlink transmission: no TX for 5 "
                                           r"minutes, until \d\d:\d\d. Check the antenna and the tuner$")
 
     def test_refusals_into_pats_log_once(self):
@@ -1149,7 +1149,7 @@ class RadioFile(Logs):
         self.assertIn("the radio does not transmit: FT8 is open, close it", k["last_text"])
         self.assertEqual(len(self.notes()), 1)
         self.assertTrue(self.notes()[0].endswith(
-            "OpenX6X00: no TX, FT8 is open, close it. Close the app on the radio, then connect again"))
+            "GoldCorpHF: no TX, FT8 is open, close it. Close the app on the radio, then connect again"))
         self.radio(app="FT8", refused="FT8 is open, close it", seq=5)     # ardopcf's next connect request
         self.poll()
         self.assertEqual(len(self.notes()), 1)
@@ -1162,7 +1162,7 @@ class RadioFile(Logs):
         self.poll()
         self.radio(qsy=7061500, qsy_why="FT8 is open, close it", qsy_seq=1)
         self.poll()
-        self.assertTrue(self.notes()[-1].endswith("OpenX6X00: no QSY to 7.061.500 MHz, FT8 is open, close it"))
+        self.assertTrue(self.notes()[-1].endswith("GoldCorpHF: no QSY to 7.061.500 MHz, FT8 is open, close it"))
         self.radio(qsy=7061500, qsy_why="", qsy_seq=2)                      # made
         self.poll()
         self.assertEqual(len(self.notes()), 1)
@@ -1341,8 +1341,8 @@ class Switch(Root):
             f.write(status_of(kind, **kw))
 
     def notes(self):
-        return [ln.split(" OpenX6X00: ", 1)[1] for ln in read(self.wl.PAT_OWN_LOG).splitlines()
-                if " OpenX6X00: " in ln]
+        return [ln.split(" GoldCorpHF: ", 1)[1] for ln in read(self.wl.PAT_OWN_LOG).splitlines()
+                if " GoldCorpHF: " in ln]
 
     def test_varahf_while_ardop_runs_switches_to_xara(self):
         """None of Mercury and XARA chosen before: XARA, at its own bandwidth"""
@@ -1784,7 +1784,7 @@ class SwitchSupervisor(Root):
 class SwitchOutcome(Logs):
     def test_the_switch_failed(self):
         """Our line when the switch did not come about is the last connection, as it says, not said again"""
-        line = ("2026/11/18 10:00:00 OpenX6X00: no connection through VARA HF: XARA did not start (XARA (xara) "
+        line = ("2026/11/18 10:00:00 GoldCorpHF: no connection through VARA HF: XARA did not start (XARA (xara) "
                 "stopped (code 1)); Pat did not call. The Winlink page (Operating > Winlink) says how XARA is doing")
         k = self.poll(pat=line)
         self.assertEqual(k["last_result"], "failed")
@@ -1792,12 +1792,12 @@ class SwitchOutcome(Logs):
                                          "Winlink page (Operating > Winlink) says how XARA is doing")
         self.assertEqual(k["last_next"], "")
         self.assertEqual(len(self.notes()), 1)              # its own line only
-        k = self.poll(pat="2026/11/18 10:00:00 OpenX6X00: switching the modem from ARDOP to XARA for this "
-                          "connection through VARA HF\n2026/11/18 10:00:04 OpenX6X00: XARA is ready and the "
+        k = self.poll(pat="2026/11/18 10:00:00 GoldCorpHF: switching the modem from ARDOP to XARA for this "
+                          "connection through VARA HF\n2026/11/18 10:00:04 GoldCorpHF: XARA is ready and the "
                           "connection goes ahead\n2026/11/18 10:00:05 Connecting to N0BBB (varahf)...")
         self.assertEqual((k["last_result"], k["last_gateway"]), ("dialing", "N0BBB"))
 
-    REFUSED = ("2026/11/19 11:41:53 OpenX6X00: no connection through ARDOP: one through VARA HF is under way, and the "
+    REFUSED = ("2026/11/19 11:41:53 GoldCorpHF: no connection through ARDOP: one through VARA HF is under way, and the "
                "radio runs one modem at a time")
 
     def test_a_refusal_during_a_dial_then_its_outcome(self):
@@ -1819,7 +1819,7 @@ class SwitchOutcome(Logs):
                                          "clear")
         self.assertEqual(k["last_next"], "Try again later, another gateway or another band")
         self.assertEqual(len(self.notes()), 2)               # its outcome said once
-        self.assertTrue(self.notes()[-1].endswith(" OpenX6X00: " + k["last_text"] + ". " + k["last_next"]))
+        self.assertTrue(self.notes()[-1].endswith(" GoldCorpHF: " + k["last_text"] + ". " + k["last_next"]))
         # The next connection, as before
         k = self.poll(pat="2026/11/19 11:45:26 Connecting to N0CALL (ardop)...")
         self.assertEqual((k["last_result"], k["last_text"]), ("dialing", "Calling N0CALL"))
@@ -1830,7 +1830,7 @@ class SwitchOutcome(Logs):
         """The ARDOP connection under way connects after the refusal, and goes on to the end: its lines and
         ardopcf's are its own"""
         self.poll(pat="2026/11/19 11:40:13 Connecting to N0BBB (ardop)...")
-        k = self.poll(pat="2026/11/19 11:40:20 OpenX6X00: no connection through VARA HF: one through ARDOP is under "
+        k = self.poll(pat="2026/11/19 11:40:20 GoldCorpHF: no connection through VARA HF: one through ARDOP is under "
                           "way, and the radio runs one modem at a time", ardop=ESTABLISHED.format("N0BBB", 500))
         self.assertEqual((k["last_result"], k["last_bw"]), ("failed", ""))
         k = self.poll(pat="2026/11/19 11:40:21 Connected to N0BBB (ardop)\nRemote accepted ABC123")
@@ -1841,7 +1841,7 @@ class SwitchOutcome(Logs):
     def test_a_refusal_during_a_dial_with_no_answer(self):
         """ardopcf's word for the call under way counts for it, not for the refusal shown meanwhile"""
         self.poll(pat="2026/11/19 11:40:10 QSY ardop: 7101.5\n2026/11/19 11:40:13 Connecting to N0BBB (ardop)...")
-        self.poll(pat="2026/11/19 11:40:20 OpenX6X00: no connection through VARA HF: one through ARDOP is under way, "
+        self.poll(pat="2026/11/19 11:40:20 GoldCorpHF: no connection through VARA HF: one through ARDOP is under way, "
                       "and the radio runs one modem at a time")
         k = self.poll(pat="2026/11/19 11:41:00 Unable to establish connection to remote: Connect timeout",
                       ardop="[STATUS: ARQ CONNECTION REJECTED BY N0BBB, REMOTE STATION BUSY.]")
@@ -1964,8 +1964,8 @@ class SwitchWithTheSupervisor(Root):
         self.assertEqual(self.wl.read_kv(self.wl.STATUS)["ardop"], "running")
         self.assertEqual(len(self.starts()), 1)              # Pat went on through both
         log = read(self.wl.PAT_OWN_LOG)
-        self.assertIn("OpenX6X00: XARA is ready and the connection goes ahead", log)
-        self.assertIn("OpenX6X00: ARDOP is ready and the connection goes ahead", log)
+        self.assertIn("GoldCorpHF: XARA is ready and the connection goes ahead", log)
+        self.assertIn("GoldCorpHF: ARDOP is ready and the connection goes ahead", log)
         # The page's own choice, as before: Pat restarts with it
         self.conf(enabled=1, mycall="N0AAA", modem="mercury", mercury_bandwidth=500, xara_bandwidth=2300)
         self.wl.poke()

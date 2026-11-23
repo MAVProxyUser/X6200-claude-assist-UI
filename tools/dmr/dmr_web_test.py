@@ -168,8 +168,8 @@ class DmrLog(unittest.TestCase):
         self.assertRegex(headers["Content-Disposition"], r'^attachment; filename="x6100-dmr-heard-\d{8}-\d{4}\.adi"$')
         self.assertTrue(headers["Content-Type"].startswith("text/plain"))
         head, parts = apps.adif_split(body)
-        self.assertTrue(head.startswith(b"OpenX6X00 DMR listening log"))
-        self.assertIn(b"<ADIF_VER:5>3.1.8 <PROGRAMID:9>OpenX6X00 <PROGRAMVERSION:5>9.9.9 <eoh>", head)
+        self.assertTrue(head.startswith(b"GoldCorpHF DMR listening log"))
+        self.assertIn(b"<ADIF_VER:5>3.1.8 <PROGRAMID:10>GoldCorpHF <PROGRAMVERSION:5>9.9.9 <eoh>", head)
         recs = [p for p in parts if p.strip()]
         f = [apps.adif_fields(r) for r in recs]
         # the oldest first; the ID nobody knows, the name without a callsign and the formula's "callsign" are no report

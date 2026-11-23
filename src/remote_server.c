@@ -1151,6 +1151,13 @@ static void panel_apply(void *arg) {
             break;
         case P_VFO:    cfg_vfo_toggle(); break;
         case P_FILTER:
+            /* CW and CW-R keep a width centred on the key tone: set it whole. Edge by edge, each edge's setter took it
+             * for the width about the key tone, so 0-500 at a 700 Hz tone went 0-1400 and then to 1 Hz (the 1:1
+             * suite, 2026-11-23) */
+            if (cparam_i_get(cfg_cur_mode) == radio_mode_cw || cparam_i_get(cfg_cur_mode) == radio_mode_cwr) {
+                cparam_i_set(cfg_cur_filter_bw, p->b - p->a);
+                break;
+            }
             if (p->b > cparam_i_get(cfg_cur_filter_high)) {
                 cparam_i_set(cfg_cur_filter_high, p->b);
                 cparam_i_set(cfg_cur_filter_low, p->a);
@@ -3328,9 +3335,22 @@ static bool encode(const uint8_t *px, int32_t w, int32_t h, int quality, uint8_t
     return true;
 }
 
-/* LVGL thread, from screen_rec_flush(): the area into the shadow while someone watches */
+/* Whether a client wants the screen's pictures ("screen 1", the Screen page's default). A connection that does not
+ * (the Panel, the bench's sessions: "screen 0") cost the GUI thread a quarter of a core all the same: the shadow and
+ * a whole frame and the waterfall plane copied every FRAME_MS for an encoder with no one to send to (the X6200 on the
+ * Sentry's A, 2026-11-23: 9 % of a core with no client, 33 % with one Panel or one bare connection). Any thread */
+static atomic_bool screen_want;
+
+static bool screen_wanted(void) {
+    for (int i = 0; i < MAX_CLIENTS; i++)
+        if (clients[i].fd >= 0 && clients[i].up && clients[i].screen)
+            return true;
+    return false;
+}
+
+/* LVGL thread, from screen_rec_flush(): the area into the shadow while someone watches the screen */
 void remote_flush(const lv_area_t *area, const lv_color_t *color_p) {
-    if (!atomic_load(&nclients))
+    if (!atomic_load(&screen_want))
         return;
     int32_t w = lv_disp_get_hor_res(NULL), h = lv_disp_get_ver_res(NULL);
 
@@ -3356,21 +3376,26 @@ void remote_flush(const lv_area_t *area, const lv_color_t *color_p) {
 
 /* LVGL thread, every FRAME_MS: the viewers' coming and going, the shadow into a frame */
 static void tick_cb(lv_timer_t *t) {
-    static bool had_viewers;
+    static bool had_viewers, had_screen;
     bool        any = atomic_load(&nclients) > 0;
+    bool        pics = any && screen_wanted();
     (void)t;
 
     if (any != had_viewers) {
         had_viewers = any;
         backlight_viewers(any);     /* drawn while dark for them */
-        if (any) {
-            /* the shadow starts empty: everything drawn once */
+    }
+    if (pics != had_screen) {
+        had_screen = pics;
+        atomic_store(&screen_want, pics);
+        if (pics) {
+            /* the shadow was not kept meanwhile: everything drawn once */
             lv_obj_invalidate(lv_scr_act());
             lv_obj_invalidate(lv_layer_top());
             lv_obj_invalidate(lv_layer_sys());
         }
     }
-    if (!any)
+    if (!pics)
         return;
     pthread_mutex_lock(&fmut);
     if (shadow && !frame_ready) {

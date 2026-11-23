@@ -17084,6 +17084,19 @@
   "manual_ref": "### Graphics processor (X6200)"
  },
  {
+  "id": "remote-panel-no-screen-cost",
+  "area": "system",
+  "feature": "A remote connection that wants no screen pictures (the Panel, TCI-like programs on 50002, 'screen 0') costs the GUI's main thread nothing: the screen is copied for the picture encoder only while a client wants pictures",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "SSH: the main thread's utime+stime over 10 s with no client, then with a WS 50002 'panel 1' + 'screen 0' connection: within a few % (up to v0.3.12.47: 9 -> 33 % on the X6200)",
+  "suite_has": "cover gui-cpu",
+  "manual_ref": "## Web configurator"
+ },
+ {
   "id": "lookfeel-screen-ft8",
   "area": "lookfeel",
   "feature": "FT8 window opens and looks alike on both radios (gold on black)",

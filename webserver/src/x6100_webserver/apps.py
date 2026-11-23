@@ -6262,7 +6262,7 @@ def get_dmr_log_adif():
     except ValueError as e:
         return api_error(400, str(e))
     station = read_callsign().strip().upper()
-    body = adif_header("OpenX6X00 DMR listening log: stations heard over the internet (SWL reports, not QSOs)")
+    body = adif_header("GoldCorpHF DMR listening log: stations heard over the internet (SWL reports, not QSOs)")
     body += b"".join(dmr_adif_record(r, station) for r in reversed(rows) if r["call"])
     bottle.response.content_type = "text/plain; charset=utf-8"
     bottle.response.set_header("Content-Disposition", dmr_log_file("adi"))

@@ -219,6 +219,7 @@ side (`~/.config/x6x00-bench/runs/<time>-<batches>/report.md`), for a release to
     suite.py run safety,paths     # the cable at 0.1 W: the transmitter's locks; every band, tones, the mic on G,
                                   # RTTY, PSK31, CW, AM/FM, each both ways and confirmed by the other radio
     suite.py run look             # every Settings tab on both, side by side, compared pixel by pixel
+    suite.py run cover            # features the others had not reached (suite_cover.py), receive only
     suite.py coverage             # every feature against the latest result of each test of every run so far
     suite.py release              # core and the batches bench.json's "attached" names
 

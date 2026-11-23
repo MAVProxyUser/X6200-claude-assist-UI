@@ -10641,7 +10641,11 @@ browser paired at home on any device.
   frame, fifteen a second: a tenth of the Screen page's bandwidth), with the
   frequency scale, the band plan strip, the VFO line and the passband.
   Tap or drag to tune, pinch (or Ctrl + the mouse wheel) to zoom, the wheel
-  to tune by the step. Colours: Blue, Fire, Ice, Grey.
+  to tune by the step. Colours: Blue, Fire, Ice, Grey. The Panel costs the
+  radio's screen nothing: only pictures of the screen (the Screen page) take
+  the GUI's time, about a quarter of a core while they stream. Up to
+  v0.3.12.47 any page or program connected took that, pictures or not (the
+  X6200 on the Sentry's A: 9 % of a core with none, 33 % with one Panel).
 - The frequency: tap it for a keypad (kHz). BAND up and down, MODE, STEP,
   ZOOM, VFO A/B, LOCK; the knob buttons tune by the step. LOCK shows and sets
   the radio's [frequency lock](#buttons-and-knobs). While an app holds the
@@ -10655,7 +10659,9 @@ browser paired at home on any device.
   filter rules: in SSB and DIG both edges (presets 1.8 to 3.6 kHz); in CW
   and CW-R the width, around the key tone (100 Hz to 1 kHz), so an edge
   typed alone takes the other one along, as the radio's own Filter low and
-  Filter high do, and the two typed give their width; in AM, NFM and
+  Filter high do, and the two typed give their width (up to v0.3.12.47 two
+  edges sent together under the key tone, such as 0 and 500 at 700 Hz, gave
+  a 1 Hz filter); in AM, NFM and
   SAM the high edge alone, the low one is always 0 (2.5 to 6 kHz); in WFM
   the same up to 8 kHz, the presets and the button showing the whole width,
   twice the edge (10, 12, 14 and 16 kHz). No edge goes past 6 kHz, 8 kHz in

@@ -40,11 +40,19 @@ contest_test: contest_test.c $(UNPACK) $(LIB_MSG) | build/inc/ft8lib
 	$(CC) $(LIBFLAGS) -c -o build/msg/text.o $(FT8LIB)/ft8/text.c
 	$(CC) $(CFLAGS) -o $@ contest_test.c $(SRC)/ft8/contest_unpack.c build/msg/message.o build/msg/text.o
 
-qso_texts: qso_texts_test.cpp $(SRC)/ft8/qso.cpp $(SRC)/ft8/qso.h $(SRC)/ft8/utils.c $(SRC)/qth/qth.c
-	mkdir -p build
+# qso.cpp asks cb_callsign (src/cb.c, upstream's CB calls, merged 2026-11-23) and ftx_call_is_standard
+# (src/ft8/msg_encode.c, over ft8_lib's message.c and text.c)
+qso_texts: qso_texts_test.cpp $(SRC)/ft8/qso.cpp $(SRC)/ft8/qso.h $(SRC)/ft8/utils.c $(SRC)/qth/qth.c $(SRC)/cb.c \
+           $(SRC)/ft8/msg_encode.c $(LIB_MSG) | build/inc/ft8lib
+	mkdir -p build/msg
 	$(CC) -std=gnu11 -O1 -g $(SAN) -c -o build/utils.o $(SRC)/ft8/utils.c
 	$(CC) -std=gnu11 -O1 -g $(SAN) -c -o build/qth.o $(SRC)/qth/qth.c
-	$(CXX) $(CXXFLAGS) -o $@ qso_texts_test.cpp $(SRC)/ft8/qso.cpp build/utils.o build/qth.o -lm
+	$(CC) -std=gnu11 -O1 -g $(SAN) -I $(SRC) -c -o build/cb.o $(SRC)/cb.c
+	$(CC) -std=gnu11 -O1 -g $(SAN) -I build/inc -I $(SRC)/ft8 -c -o build/msg_encode.o $(SRC)/ft8/msg_encode.c
+	$(CC) $(LIBFLAGS) -c -o build/msg/message.o $(FT8LIB)/ft8/message.c
+	$(CC) $(LIBFLAGS) -c -o build/msg/text.o $(FT8LIB)/ft8/text.c
+	$(CXX) $(CXXFLAGS) -I build/inc -o $@ qso_texts_test.cpp $(SRC)/ft8/qso.cpp build/utils.o build/qth.o build/cb.o \
+	    build/msg_encode.o build/msg/message.o build/msg/text.o -lm
 
 # ft8_lib's demo decoder, its ftx_message_decode() the worker's (worker_unpack.h); Hound's 0.1 with it, as worker.c
 decode_contest: worker_unpack.c worker_unpack.h $(UNPACK) $(SRC)/ft8/hound.c $(LIB_ALL) | build/inc/ft8lib

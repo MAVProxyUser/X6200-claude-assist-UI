@@ -7,6 +7,18 @@ here transmits until the owner says so (transmit work is not wanted for now). On
 Meteor/SCAN CFG one, the Kraken DF one and its kernel one) were folded into one backlog, in the order the owner
 approved that day.
 
+**2026-11-23 night: the 1:1 suite's "cover" batch (tools/bench/suite_cover.py)**, 30 pass 0 fail on both radios.
+Found and FIXED with it: a remote connection that wanted no screen pictures (the Panel, the bench) had the GUI thread
+copy the screen and the waterfall plane for the picture encoder all the same: the X6200 on A 9 % of a core alone,
+33 % with one Panel (the X6100 13 -> 35 %); now only while a client wants pictures (remote_server.c screen_want),
+9.9 and 13.7 % with a Panel; the Screen page's pictures still cost ~34 %. The Panel's CW filter: two edges below
+the key tone (0-500 at 700 Hz) gave a 1 Hz filter (each edge's setter took it as the width about the tone): now the
+width whole (450-950), as the manual said. Not the merge: the pre-merge build measured the same 9 % alone.
+Also from the merge's CI: upstream's matcher of a failed modem switch looked for "OpenX6X00:" in Pat's log while
+ours writes "GoldCorpHF:" (switch failures went unseen): matched to ours, with upstream's tests; the DMR listening
+log's heading GoldCorpHF; the FT8 CB and contest tests given each other's new sources; front_keys' stand-in our
+"paged".
+
 **2026-11-23: upstream merged (Guru-RF 51bf5bf3..6a5d262e, 229 commits: v0.3.13, Speech, APP > DMR over the internet,
 RTTY sending, APP > Mail, Mercury 1.9.25, XARA from NR5P, FT8 Traffic/Tiles, JS8 board, WeFax tiles/Auto Plan/Night,
 GPS / Clock, the 3D waterfall's thread, WF full screen, weather units, tuning steps, knob press, hand mic UP/DOWN)**.

@@ -17,7 +17,7 @@ CFLAGS := -std=gnu11 -O1 -g -pthread -DHOST_BUILD=1 -DBOARD_DATA='"$(DATA)"' -DC
 WARN   := -Wall -Wextra
 LIBS   := -L $(DEPS)/lib -lft8 -lliquid -lm -lstdc++ -Wl,-rpath,$(abspath $(DEPS)/lib)
 OURS   := cb.c dxcc.c ft8/msg_encode.c ft8/utils.c qth/qth.c
-GUI    := ft8/worker.c ft8/gfsk.c ft8/hound.c
+GUI    := ft8/worker.c ft8/gfsk.c ft8/hound.c ft8/contest_unpack.c     # worker.c reads contest messages through it
 HDRS   := $(wildcard $(SRC)/ft8/*.h) $(SRC)/qth/qth.h $(SRC)/cb.h $(SRC)/dxcc.h
 
 all: test

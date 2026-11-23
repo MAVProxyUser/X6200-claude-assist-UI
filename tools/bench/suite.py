@@ -45,6 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bench  # noqa: E402
 import suite_more  # noqa: E402
 import suite_proto  # noqa: E402
+import suite_cover  # noqa: E402
 
 try:
     from PIL import Image, ImageDraw
@@ -748,6 +749,8 @@ BATCHES = {
     "safety": ("the cable (bench.py chain-ok radios): the transmitter's locks, 0.1 W at most", suite_more.safety),
     "paths": ("the cable: tones, the mic on G, CW, AM and FM, both ways at 0.1 W", suite_more.paths),
     "look": ("both radios on the network: every Settings tab photographed side by side, compared", suite_more.look),
+    "cover": ("both radios on the network and SSH (receive only: features the other batches had not reached)",
+              suite_cover.cover),
 }
 
 
