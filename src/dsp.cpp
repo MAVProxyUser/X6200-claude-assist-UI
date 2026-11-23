@@ -406,7 +406,13 @@ static void frame_out(uint64_t now, bool tx, uint32_t base_freq, uint32_t covers
     if (!tx) {
         pthread_mutex_lock(&snap_mux);
         memcpy(snap_db, wf_db, sizeof(snap_db));
-        snap_center = base_freq ? base_freq : cur_freq;
+        /* A base that sends no frequency (Xiegu's X6100 base, the X6200's spectrum): where it is tuned, as the
+         * waterfall and the Sentry place it: the dial less the IF shift, plus the mode's offset (a key tone in CW).
+         * The dial alone drew the browser's picture the IF shift off on the X6100 (the 1:1 suite, 2026-11-23: a tone
+         * 2.1 kHz off at an IF shift of 2000, its audio unchanged) and the key tone off in CW */
+        snap_center = base_freq ? base_freq
+                                : (uint32_t)(cfg_sm.cp_fg_freq.get() - cfg_sm.p_band_if_shift.get() +
+                                             cfg_sm.cp_mode_lo_offset.get());
         snap_width  = covers;
         snap_seq++;
         pthread_mutex_unlock(&snap_mux);

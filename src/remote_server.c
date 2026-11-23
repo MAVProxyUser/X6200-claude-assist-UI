@@ -288,6 +288,7 @@ typedef struct {
      * went unnoticed) */
     int32_t txf;            /* the frequency it transmits on (radio_tx_freq: split, XIT, a TX shift) */
     int32_t split, rit, xit;
+    int32_t ifs, comp;          /* the band's IF shift (Hz), the compressor's ratio (1 = off, 2-8 = N:1) */
     int32_t play;           /* the base's play mode (audio_play_mode_t): 0 the receiver to the processor */
     int32_t heard;          /* the Sentry's LISTEN: 0 the receiver, 1 the SDR, 2 both, 3 nothing; -1 no Sentry */
     int32_t spk, moni;      /* the speaker's level and the TX monitor's as last sent the base (-1 none yet) */
@@ -313,7 +314,7 @@ typedef enum { P_FREQ, P_MODE, P_AGC, P_PRE, P_ATT, P_NB, P_NR, P_SQL, P_RFG, P_
                P_LINEIN,
                /* for the bench's tests, which must know where each radio listens and sends (tools/bench, its state
                 * check): split, RIT and XIT, and what the speaker plays (the Sentry's LISTEN, for now) */
-               P_SPLIT, P_RIT, P_XIT, P_HEARD } pcmd_id_t;
+               P_SPLIT, P_RIT, P_XIT, P_HEARD, P_IFS, P_COMP } pcmd_id_t;
 
 typedef struct {
     pcmd_id_t id;
@@ -1138,6 +1139,9 @@ static void panel_apply(void *arg) {
         case P_RIT:    param_i_set(cfg_rit, LV_CLAMP(-BOARD_RIT_MAX, p->a, BOARD_RIT_MAX)); break;
         case P_XIT:    param_i_set(cfg_xit, LV_CLAMP(-BOARD_XIT_MAX, p->a, BOARD_XIT_MAX)); break;
         case P_HEARD:  app_sentry_set_heard(p->a); break;
+        /* The 1:1 suite's: the band's IF shift (the X6100's base; the GUI's own range) and the compressor's ratio */
+        case P_IFS:    param_i_set(cfg_band_if_shift, LV_CLAMP(-40000, p->a, 40000)); break;
+        case P_COMP:   param_i_set(cfg_comp, LV_CLAMP(1, p->a, 8)); break;
     }
 }
 
@@ -1168,6 +1172,7 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
         {"txio", P_TXIO}, {"txqo", P_TXQO}, {"txig", P_TXIG}, {"txip", P_TXIP},
         {"linein", P_LINEIN},
         {"split", P_SPLIT}, {"rit", P_RIT}, {"xit", P_XIT}, {"heard", P_HEARD},
+        {"ifs", P_IFS},   {"comp", P_COMP},
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strcasecmp(names[i].name, name))
@@ -1184,6 +1189,8 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
             set_refused(c, "freq: locked (LOCK, or an app holds the frequency)");
         else if (names[i].id == P_FREQ && !cfg_is_valid_hw_freq(a))
             set_refused(c, "freq: not a frequency this radio tunes");
+        else if (names[i].id == P_IFS && !(radio_caps() & HW_CAP_IF_SHIFT))
+            set_refused(c, "ifs: this radio's base has no IF shift");   /* the X6200's: only the dial would move */
         else if (!panel_put(names[i].id, a, b)) {
             char why[48];                       /* named as the others: a page takes "busy..." for its PTT's refusal */
             snprintf(why, sizeof(why), "%s: the radio is busy, try again", names[i].name);
@@ -1233,6 +1240,8 @@ static void pstate_read(pstate_t *s) {
     s->split = param_i_get(cfg_band_split);
     s->rit   = param_i_get(cfg_rit);
     s->xit   = param_i_get(cfg_xit);
+    s->ifs   = param_i_get(cfg_band_if_shift);
+    s->comp  = param_i_get(cfg_comp);
     s->play  = (int32_t)radio_play_mode();
     s->heard = app_sentry_page() ? app_sentry_heard() : -1;
     s->spk   = radio_rxvol_sent();
@@ -1259,12 +1268,12 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d,"
              "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"ask\":%d,\"txio\":%d,\"txqo\":%d,\"txig\":%d,\"txip\":%d,"
              "\"linein\":%d,\"txf\":%d,\"split\":%d,\"rit\":%d,\"xit\":%d,\"play\":%d,\"heard\":%d,\"spk\":%d,"
-             "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,\"plays\":%d,"
+             "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,\"plays\":%d,\"ifs\":%d,\"comp\":%d,"
              "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
              s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->txf, s->split,
-             s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->plays, s->app, s->win, s->pg,
+             s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->plays, s->ifs, s->comp, s->app, s->win, s->pg,
              s->fp);
 }
 

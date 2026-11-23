@@ -77,8 +77,16 @@ Open:
     those overs only 7 dB over its spectrum's quiet (its own front end: ATT on, RF gain 39, both saved settings of
     its, from before tonight). The walkie leaves both radios on the first one's channel (the owner's 11-19 wish): the
     X6200 is on 21.300 MHz USB since, not its 14.204 USB-D.
+  - DONE 2026-11-23: IF shift on the factory X6100 (it was claimed from the version alone). ifshift.py (the paths
+    batch): a 0.1 W tone from the X6200, the X6100 at +2000/-2000: its pitch kept within 2 Hz, the base 2.1 kHz the
+    other way, as the manual says. Found with it and FIXED (dsp.cpp frame_out): the browser Panel placed a base
+    without a frequency (Xiegu's X6100 base, the X6200's spectrum) on the bare dial, not where the base is tuned as
+    the waterfall and the Sentry do (the IF shift, CW's key tone): the tone drawn 2.1 kHz off at a 2000 Hz shift, now
+    within a bin. The remote takes `set ifs` (refused on the X6200: no IF shift there, the dial alone would move) and
+    `set comp`; the state says both, the bench puts both back.
   - LEFT (need the radio in a way not tried tonight): Comp on the factory X6100 (the button shown and sent, the cap
-    says no compressor: what it does on the air); IF shift on the factory X6100 (from the version alone); the
+    says no compressor: what it does on the air; needs the mic path, acoustic.py's, as TCI audio has its own
+    levelling on the X6100's base); the
     untested-on-one-model list in the manual (keyboard/mouse and the sideswiper on the X6100, KEY Train with a paddle,
     the X6200's TUNE for an external tuner, KrakenSDR on the X6100, Time Signal's AM filter on the X6100).
 - G (the owner, 2026-11-22 ~03:00: "YOU should be setting the radio into the mode im only seeing spikes on it form the
@@ -380,7 +388,8 @@ gets 0, not the last band's (2772e164); the X6200 never calibrated or keyed for 
   slower than the suite's 15 s (pictured before it tuned to 14.230).
 - DONE 2026-11-19 23:28: both radios on v0.3.12.36 through their own updaters (`x6100-update upgrade --kernel --uboot
   --reboot`, "confirmed"), each back by itself in under 2 minutes, the X6100 by kexec; the cards had the bundle's
-  kernel and U-Boot already. The X6100's SSTV opening in 9-17 s is still to look at.
+  kernel and U-Boot already. The X6100's SSTV opening in 9-17 s: GONE (2026-11-23, timed from the Sentry's A on
+  v0.3.12.46's GUI, receive only: SSTV 0.1-0.2 s on the X6100 3 of 3, 0.2-2.4 s on the X6200; WeFax 0.1-0.2 s on both).
 - Done in the bundle (the owner: "I should not have to write it, the updater should"): the image's Mesa, GStreamer
   and ffmpeg with the libraries they load (mkbundle.py CARRY_PKGS), and level 3 reached by the bundle's kernel and
   U-Boot (image-required's x6100-boot and x6200-boot lines): the X6100's card v0.3.12.28 gets the GPU through its

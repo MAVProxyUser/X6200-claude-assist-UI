@@ -921,16 +921,20 @@ def paths(run, only):
                                      "2000,1700,1400,1100,800,500", "--tx-mode", "3", "--tag", "suite"],
               ["path-usb-tones", "path-lsb-tones", "path-rx-level-parity"]),
              ("mic-on-g", lambda s, l: [os.path.join(HERE, "acoustic.py"), l, s, "--tag", "suite"],
-              ["path-mic-voice", "sentry-g-ptt", "panel-mic-ptt"])]
+              ["path-mic-voice", "sentry-g-ptt", "panel-mic-ptt"]),
+             ("if-shift", lambda s, l: [os.path.join(HERE, "ifshift.py"), s, l], ["cw-if-shift-x6100"])]
     for name, cmd, covers in tests:
         if only and name not in only:
             continue
-        for s, l in ((a, b), (b, a)):
+        # IF shift is the X6100's base's alone: it listens, the other sends
+        pairs = [(s, l) for s, l in ((a, b), (b, a)) if name != "if-shift" or l == "x6100"]
+        for s, l in pairs:
             r = run_child([sys.executable, "-B"] + cmd(s, l), 400)
             out = (r.stdout + r.stderr).strip().splitlines()
             with open(os.path.join(run.dir, f"{name}_{s}_{l}.txt"), "w") as f:
                 f.write("\n".join(out) + "\n")
-            keep = [x for x in out if any(w in x for w in ("path proof", "PASS", "REFUSED", "STOP", "summary", " Hz ->",
+            keep = [x for x in out if any(w in x for w in ("path proof", "PASS", "FAIL", "REFUSED", "STOP", "summary", " Hz ->",
+                                                           "ifs ",
                                                            "steps on its", "own capture", "NOT put back"))]
             run.result("paths", f"{name} {s}->{l}", r.returncode == 0,
                        " | ".join(x.split(" ", 1)[-1] for x in (keep or out[-3:]))[:900], covers=covers)

@@ -74,7 +74,8 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
    muting it. A sender: on its dial in its mode at its power, the frequency it says it transmits on (`txf`: split, XIT,
    a TX shift) the dial, ATU and TUNE off; for a mic over, out of play mode (both mics at 0 there). Arming on A or G
    puts the data modes into the voice mode: `bench.arm(r, True, mode=...)` sets the test's again. The radios' GUI
-   reports all of it (the remote's state: txf, split, rit, xit, play, heard, spk, moni, muted, tcim, mic); a GUI
+   reports all of it (the remote's state: txf, split, rit, xit, play, heard, spk, moni, muted, tcim, mic; ifs and comp,
+   set and put back too, from 2026-11-23); a GUI
    older than that is refused. `bench.py status` shows it all, and what in it would spoil a test.
 11. **The path proved before anything is measured.** `bench.path_proof`: the sender sends 1000 Hz over its TCI at
    0.1 W for 2 s, and the listener's spectrum at the tone must rise 20 dB over its quiet (0.1 W through 70-80 dB:

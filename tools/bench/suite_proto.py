@@ -1150,11 +1150,37 @@ def t_web_more(run):
     by_radio(run, "control", "textlog-page", ["text-log-web-logs"], textlog)
 
 
+def t_ifs(run):
+    """IF shift by the remote ("set ifs", the X6100's base): taken and read back, the dial kept, put back; the X6200's
+    base has none, so its remote refuses it. Receive only; what it does to the audio and the picture is the paths
+    batch's if-shift (ifshift.py, a tone through the cable)"""
+    def fn(r):
+        r.errs.clear()
+        r.send("set ifs 500")
+        t0 = time.time()
+        while time.time() - t0 < 3 and int(r.state.get("ifs", 0)) != 500 and not r.errs:
+            time.sleep(0.05)
+        time.sleep(0.5)
+        if r.name != "x6100":
+            refused = any("ifs" in e for e in r.errs)
+            return refused and int(r.state.get("ifs", 0)) == 0, \
+                f"set ifs 500 refused ({r.errs[-1:] or 'no answer'}), the IF shift {r.state.get('ifs')}"
+        took, dial = int(r.state.get("ifs", 0)) == 500, int(r.state.get("freq", 0))
+        r.send("set ifs 0")
+        t0 = time.time()
+        while time.time() - t0 < 3 and int(r.state.get("ifs", 1)) != 0:
+            time.sleep(0.05)
+        back = int(r.state.get("ifs", 1)) == 0
+        return took and back and dial == int(r.state.get("freq", -1)), \
+            f"set ifs 500 read back {took}, the dial kept {dial}, back to 0 {back}"
+    per_radio(run, "control", "if-shift", fn, ["cw-if-shift-x6100"])
+
+
 def control(run, only):
     for name, fn in (("tci-proto", t_tci_proto), ("tci-drive", t_tci_drive), ("tci-guards", t_tci_guards),
                      ("panel", t_panel), ("control-owner", t_control_owner), ("panel-apps", t_panel_apps),
                      ("screen", t_screen), ("web-guards", t_web_guards), ("log", t_log), ("core", t_core),
-                     ("web-more", t_web_more)):
+                     ("web-more", t_web_more), ("if-shift", t_ifs)):
         if not only or name in only:
             run.banner(f"SUITE control: {name} (nothing sent)")
             fn(run)

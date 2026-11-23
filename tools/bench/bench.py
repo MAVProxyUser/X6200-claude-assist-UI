@@ -287,10 +287,10 @@ class Radio:
 # The keys "set" takes (src/remote_server.c panel_set), in the order they go: split and the VFO, then the dial and the
 # mode (a band change loads the band's ATT, PRE and AGC, so those after it), the receiver's, the rest; LISTEN last
 SET_ORDER = ("split", "vfo", "freq", "mode", "filter", "zoom", "att", "pre", "agc", "rfg", "sql", "nb", "nr", "rit",
-             "xit",
+             "xit", "ifs", "comp",
              "atu", "pwr", "vol", "txio", "txqo", "txig", "txip", "heard")
 # Kept by the band (or the band's mode): put back only once the dial is on that band again
-BAND_KEYS = {"mode", "filter", "zoom", "att", "pre", "agc", "txio", "txqo", "txig", "txip"}
+BAND_KEYS = {"mode", "filter", "zoom", "att", "pre", "agc", "txio", "txqo", "txig", "txip", "ifs"}
 # What a test may change and finish() puts back ("heard" is not: the Sentry's page A puts its own LISTEN back)
 RESTORED = SET_ORDER[:-1]
 # The state the checks read (pstate_read): a GUI without these is older than them, and the harness will not guess

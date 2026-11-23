@@ -8879,9 +8879,9 @@
   "radios": [
    "x6100"
   ],
-  "needs": "none",
+  "needs": "cable",
   "how_to_confirm": "Screenshot only: IF shift +1000 on the MFK 2:4 page, the faint noise stripe 1 kHz lower in the waterfall.",
-  "suite_has": null,
+  "suite_has": "control if-shift (set ifs, read back, the X6200 refuses); paths if-shift (ifshift.py: a 0.1 W tone from the X6200, its pitch kept, the Panel placing it, the base retuned)",
   "manual_ref": "### CW decoder"
  },
  {

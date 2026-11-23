@@ -6281,7 +6281,16 @@ your carrier the IF shift off the line in every mode, while the spectrum
 had it on the line (#191; not run on a 1.1.9 base either). The faint
 stripe of the radio's own noise is where the base is tuned: on the line in
 USB and LSB, a key tone below it in CW and above it in CW-R; an IF shift
-moves it as far the other way (+1000 Hz: 1 kHz lower).
+moves it as far the other way (+1000 Hz: 1 kHz lower). Tried on Xiegu's own
+base 1.1.9 (2026-11-23, a 1000 Hz tone from the X6200 through the cable): at
++2000 and -2000 Hz the tone's pitch stayed within 2 Hz and the base moved
+2 kHz the other way, as above. What you hear does not change; the shift moves
+the base's own noise and its centre away from a signal. The browser Panel
+places the picture where the base is tuned too, as the radio's own
+waterfall does: the IF shift and, in CW, the key tone allowed for (up to
+v0.3.12.47 it placed it on the dial, so with a shift every signal was drawn
+that far off). The X6200's base has no IF shift; its remote refuses one
+(`set ifs`).
 
 Parse. Where: CW 2:2 > Parse (on by default). The decoder often runs words
 together when the spacing is tight: "CQCQDEON6UREK". With Parse on, each
