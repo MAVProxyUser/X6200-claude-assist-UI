@@ -49,6 +49,7 @@ import suite_cover  # noqa: E402
 import suite_cover_b  # noqa: E402
 import suite_air_a  # noqa: E402
 import suite_air_b  # noqa: E402
+import suite_air_c  # noqa: E402
 
 try:
     from PIL import Image, ImageDraw
@@ -757,6 +758,7 @@ BATCHES = {
     "cover_b": ("both radios: the Sentry pages and the receiver core (receive only)", suite_cover_b.batch),
     "air_a": ("the cable (chain-ok radios): the transmitter, one sends 0.1 W, one listens", suite_air_a.batch),
     "air_b": ("the cable (chain-ok radios): CW and the digital modes over the air", suite_air_b.batch),
+    "air_c": ("the cable (chain-ok radios): TCI, the remote, the Sentry, the apps over the air", suite_air_c.batch),
 }
 
 
