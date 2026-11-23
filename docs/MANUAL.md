@@ -3161,7 +3161,13 @@ browser Panel (up to v0.3.12.46 it drew the wide zooms' spectrum over a
 100 kHz scale, its signals 2-4x too near the dial and a tap tuning beside
 them). At 384 kHz the base's
 512 points are 750 Hz apart: a busy segment or a pileup shows, single FT8 or
-CW signals do not, so zoom back in for those. The 3D waterfall draws the
+CW signals do not, so zoom back in for those. While the Sentry is open the
+X6200's base stays at 384 kHz whatever the zoom (A's trace and scans, D's
+counts and G's picture all read it), so the browser Panel's spectrum and G's
+have those 750 Hz points at every zoom: one CW or FT8 signal is a hump about
+2 kHz wide there, and two signals closer than about 1.5 kHz look like one. For
+the zoom's own detail (about 47 Hz at x8) use the classic screen (F SYSTEM)
+and the Panel with it; the X6100's Panel always has its zoom's own. The 3D waterfall draws the
 noise under its floor, so a quiet part of a wide span can look empty there; the
 2D waterfall shows it. The two wide zooms keep the step in use (Step per zoom
 has no step of their own). The X6100's base gives 100 kHz only: x1 stays its

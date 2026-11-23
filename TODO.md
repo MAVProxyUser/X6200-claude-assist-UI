@@ -14,9 +14,14 @@ stops happening"; "a comprehensive set of unit tests to cover EVERYTHING 1:1 on 
   PASS); the bench player ("play").
 - UNDER WAY: features.json (1386 features from the manual and the code) and suite_more.py's batches rx, control,
   safety, paths: one test per feature on each radio and 1:1, coverage.md with each run (what is not covered yet).
-- FOUND, to look at: the X6200's remote spectrum cannot resolve a tone inside the passband: one clean 1000 Hz TCI
-  tone fills 0-2500 Hz alike, at zoom 1 or 8, at any gain (2026-11-22, scratchpad tone_shape2.py); the X6100's peaks
-  (-9 dB at +-200 Hz). Its source (the base's PSD?) or its smoothing: check the X6200's own screen too.
+- SETTLED 2026-11-23 (a limit, documented in the manual's wide zooms): the X6200's remote spectrum cannot resolve a
+  tone inside the passband (one clean 1000 Hz TCI tone filled 0-2500 Hz alike at zoom 1 or 8; the X6100's peaks).
+  The Sentry holds the X6200's base at 384 kHz while it is open (radio_psd_wide: A's trace and scans, D's counts, G's
+  own picture all read it), 512 points 750 Hz apart, and every narrower view stretches the middle of those. Measured
+  receive only (scratchpad panel_res): the Panel's frames at zoom 1 and 8 are straight lines between points 750 Hz
+  apart (fit error 0.29-0.32 dB, the 1 dB rounding; 0.66 at 1500 Hz). The base sends one stream at one span, so a
+  finer Panel would cost A and G theirs; alternating the base's span per packet was not tried (its settling after
+  a change is unknown, a misfiled packet would give A false targets). The bench reads tones from TCI audio there.
 - DONE 2fc81863 (the owner: "they should handle uniformly in the same fashion the 6200 does"): on the X6100 a D/E choice
   with ATT off takes RF gain to 100 (its attenuator); proven from RF gain 80 on 24 D bands and 15 E types.
 - DONE 2fc81863: x6100_daemon kept 50 run logs only at boot; a crash loop on 11-21 left 54 on each radio. Pruned after
