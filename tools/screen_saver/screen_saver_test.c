@@ -28,6 +28,7 @@
 
 #include "cfg/subject_api.h"
 #include "lvgl/lvgl.h"
+#include "gpu.h"
 #include "mono.h"
 #include "params/params.h"
 #include "radio.h"
@@ -100,6 +101,11 @@ void radio_backlight_power(bool on) {
 }
 
 void params_lock() {}
+
+/* mono_set tells the GPU (gpu.c, not built here): nothing draws on a plane in this test */
+void gpu_mono(bool on, uint32_t ink, uint32_t paper) {
+    (void)on, (void)ink, (void)paper;
+}
 
 void params_unlock(bool *dirty) {
     (void)dirty;

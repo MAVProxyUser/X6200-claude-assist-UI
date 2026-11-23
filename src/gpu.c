@@ -195,6 +195,9 @@ static GLuint tex_d3col, tex_img;   /* the 3D picture's column records, its back
 static GLuint tex_pic;              /* B's Meteor picture (gpu_pic) */
 static int    pic_w, pic_h;
 static GLint  u_gui_img;
+static GLint  u_mono[P_N], u_mono_ink[P_N], u_mono_paper[P_N];
+static bool   mono_on, mono_dirty;  /* the 1bit theme (gpu_mono); set into the programs at the next frame's start */
+static uint32_t mono_ink, mono_paper;
 static GLuint ov_fbo[2];            /* the overlay plane's buffers: the GUI's layer (drm_gui_export) */
 static GLuint tex_gui[2];           /* LVGL's frame as the GPU reads it: landscape, portrait */
 static int    d3col_w, d3col_h, img_w, img_h;
@@ -312,7 +315,7 @@ static const char *fs_rows_src =
     "    if (d < 0.0) discard;\n"
     "    float fade = v_row.y;\n"
     "    vec3 c = d < 1.0 ? pal(v) * fade : d < 2.0 ? pal(v) * (fade * 0.8) : pal(v * 0.5) * (fade * 0.45);\n"
-    "    gl_FragColor = vec4(c, 1.0);\n"
+    "    gl_FragColor = px(vec4(c, 1.0));\n"
     "}\n";
 
 /* The trace (panel_trace): per column its line's row and its span to the column before (the line drawn there),
@@ -344,13 +347,13 @@ static const char *fs_trace_src =
     "        c = (near < st * 0.5 && mod(col, 3.0) < 0.5) ? u_grid.rgb : u_bg.rgb;\n"
     "    }\n"
     "    if (row >= 2.0 && mod(row, 3.0) > 1.5) c = c * 0.75;\n"
-    "    gl_FragColor = vec4(c, 1.0);\n"
+    "    gl_FragColor = px(vec4(c, 1.0));\n"
     "}\n";
 
 static const char *fs_rect_src =
     "precision mediump float;\n"
     "uniform vec4 u_color;\n"
-    "void main() { gl_FragColor = u_color; }\n";
+    "void main() { gl_FragColor = px(u_color); }\n";
 
 /* The rows flat, a waterfall (G's 2D, ws_draw): u_band pixels a row, the newest on top, each its level's colour
  * dimmed by how weak it is; below the rows there are, the background */
@@ -366,11 +369,11 @@ static const char *fs_flat_src =
     "varying vec2 v_uv;\n"
     "void main() {\n"
     "    float r = floor(v_uv.y / u_band);\n"
-    "    if (r >= u_count) { gl_FragColor = u_bg; return; }\n"
+    "    if (r >= u_count) { gl_FragColor = px(u_bg); return; }\n"
     "    float ring = mod(u_head - 1.0 - r + u_ring, u_ring);\n"
     "    float v = texture2D(u_lv, vec2(v_uv.x, (ring + 0.5) / u_ring)).r;\n"
     "    vec3 c = texture2D(u_pal, vec2(v * 0.99609375 + 0.001953125, 0.5)).rgb;\n"
-    "    gl_FragColor = vec4(c * (0.12 + 0.88 * v), 1.0);\n"
+    "    gl_FragColor = px(vec4(c * (0.12 + 0.88 * v), 1.0));\n"
     "}\n";
 
 /* The voiceprint (vp_column): a ring of columns, the oldest at the left from u_head on, each column's rows the
@@ -385,7 +388,7 @@ static const char *fs_vp_src =
     "void main() {\n"
     "    float c = mod(u_head + floor(v_uv.x), u_cols);\n"
     "    float v = texture2D(u_lv, vec2((c + 0.5) / u_cols, v_uv.y)).r;\n"
-    "    gl_FragColor = vec4(texture2D(u_pal, vec2(v * 0.99609375 + 0.001953125, 0.5)).rgb, 1.0);\n"
+    "    gl_FragColor = px(vec4(texture2D(u_pal, vec2(v * 0.99609375 + 0.001953125, 0.5)).rgb, 1.0));\n"
     "}\n";
 
 /* The main screen's waterfall (waterfall_view.c, direct mode): a ring of rows, row age (0 the newest, at the top)
@@ -400,7 +403,7 @@ static const char *fs_wf_src =
     "void main() {\n"
     "    float ring = mod(u_head + floor(v_uv.y), u_ring);\n"
     "    float v = texture2D(u_lv, vec2(v_uv.x, (ring + 0.5) / u_ring)).r;\n"
-    "    gl_FragColor = vec4(texture2D(u_pal, vec2(v * 0.99609375 + 0.001953125, 0.5)).rgb, 1.0);\n"
+    "    gl_FragColor = px(vec4(texture2D(u_pal, vec2(v * 0.99609375 + 0.001953125, 0.5)).rgb, 1.0));\n"
     "}\n";
 
 /* AIRSPACE's scope (app_adsb.c draw_scope): outside the outer ring the ink; inside, the afterglow a quarter turn behind
@@ -415,12 +418,12 @@ static const char *fs_radar_src =
     "varying vec2 v_uv;\n"
     "void main() {\n"
     "    vec2 p = vec2(v_uv.x - u_c.x, u_c.y - v_uv.y);\n"
-    "    if (dot(p, p) > u_r * u_r) { gl_FragColor = u_ink; return; }\n"
+    "    if (dot(p, p) > u_r * u_r) { gl_FragColor = px(u_ink); return; }\n"
     "    float a = mod(floor(degrees(atan(p.x, p.y)) * 10.0 + 3600.5), 3600.0);\n"
     "    float d = mod(u_sweep - a + 3600.0, 3600.0);\n"
-    "    if (d >= 900.0) { gl_FragColor = u_ink; return; }\n"
+    "    if (d >= 900.0) { gl_FragColor = px(u_ink); return; }\n"
     "    float i = floor((900.0 - d) * 63.0 / 900.0);\n"
-    "    gl_FragColor = vec4(texture2D(u_pal, vec2((i + 0.5) / 256.0, 0.5)).rgb, 1.0);\n"
+    "    gl_FragColor = px(vec4(texture2D(u_pal, vec2((i + 0.5) / 256.0, 0.5)).rgb, 1.0));\n"
     "}\n";
 
 /* Coloured points, lines and triangles, each corner its colour; points a pixel */
@@ -440,7 +443,7 @@ static const char *vs_prim_src =
 static const char *fs_prim_src =
     "precision mediump float;\n"
     "varying vec4 v_col;\n"
-    "void main() { gl_FragColor = v_col; }\n";
+    "void main() { gl_FragColor = px(v_col); }\n";
 
 /* The GUI's layer: LVGL's ARGB frame as it is, alpha too (what the GUI leaves see-through) */
 static const char *fs_gui_src =
@@ -454,7 +457,7 @@ static const char *fs_img_src =
     "precision mediump float;\n"
     "uniform sampler2D u_img;\n"
     "varying vec2 v_uv;\n"
-    "void main() { gl_FragColor = vec4(texture2D(u_img, v_uv).bgr, 1.0); }\n";
+    "void main() { gl_FragColor = px(vec4(texture2D(u_img, v_uv).bgr, 1.0)); }\n";
 
 /* The classic screen's 3D traces (waterfall_view.c d3_trace): what each column of a trace shows was worked out by the
  * CPU (its floating horizon), two texels a column: start, top, bottom (9 bits each: their low bytes, the high bits in
@@ -500,12 +503,12 @@ static const char *fs_d3_src =
     "    if (y < start || y >= bottom) discard;\n"
     "    if (y > top + b.r) {\n"
     "        float l = clamp(floor((max(0.0, v_t1.y - y) + v_t1.z) * v_t1.w), 0.0, 255.0);\n"
-    "        gl_FragColor = vec4(floor(pal(l) * v_t2.y) / 255.0, 1.0);\n"
+    "        gl_FragColor = px(vec4(floor(pal(l) * v_t2.y) / 255.0, 1.0));\n"
     "        return;\n"
     "    }\n"
     "    vec3 p = pal(b.g);\n"
     "    vec3 r = floor((p + floor((255.0 - p) / 3.0)) * v_t2.x);\n"
-    "    gl_FragColor = vec4(r / 255.0, y == top ? b.b / 255.0 : 1.0);\n"
+    "    gl_FragColor = px(vec4(r / 255.0, y == top ? b.b / 255.0 : 1.0));\n"
     "}\n";
 
 /* A line of one segment a column (d3_join): each column's ends in quarter pixels (two bytes each), the pixels it
@@ -522,14 +525,37 @@ static const char *fs_join_src =
     "    float y = floor(v_uv.y);\n"
     "    float cov = min(y + 1.0, hi) - max(y, lo);\n"
     "    if (cov <= 0.0) discard;\n"
-    "    gl_FragColor = vec4(u_c.rgb, min(cov, 1.0) * u_c.a);\n"
+    "    gl_FragColor = px(vec4(u_c.rgb, min(cov, 1.0) * u_c.a));\n"
+    "}\n";
+
+/* Put before every fragment shader: px(), each pixel's colour as it goes out. Other themes: as it is. The 1bit theme
+ * (gpu_mono): ink or paper by its lightness against the paper, an ordered 4x4 dither in the panel's pixels, and no
+ * part coverage (under half not drawn, else solid), as mono.c's layer makes LVGL's (the pictures on the plane never
+ * go through it: they kept their greys, cover_a 2026-11-23). GLSL ES 1.0 has no integers to spare: the 4x4 Bayer
+ * matrix from its 2x2 one, mod(2x + 3y, 4) */
+static const char *fs_mono_pre =
+    "precision mediump float;\n"
+    "uniform float u_mono;\n"
+    "uniform vec4 u_mono_ink;\n"
+    "uniform vec4 u_mono_paper;\n"
+    "float mono_b2(vec2 q) { return mod(2.0 * q.x + 3.0 * q.y, 4.0); }\n"
+    "vec4 px(vec4 c) {\n"
+    "    if (u_mono < 0.5) return c;\n"
+    "    if (c.a < 0.5) discard;\n"
+    "    vec3 w = vec3(0.30, 0.59, 0.11);\n"
+    "    float l = clamp(dot(c.rgb, w) / max(dot(u_mono_paper.rgb, w), 0.004), 0.0, 1.0);\n"
+    "    vec2 a = mod(floor(gl_FragCoord.xy), 4.0);\n"
+    "    float t = (4.0 * mono_b2(mod(a, 2.0)) + mono_b2(floor(a * 0.5)) + 0.5) / 16.0;\n"
+    "    return 1.0 - l > t ? u_mono_ink : u_mono_paper;\n"
     "}\n";
 
 static GLuint shader(GLenum type, const char *src) {
-    GLuint s = p_glCreateShader(type);
-    GLint  ok = 0;
+    GLuint      s = p_glCreateShader(type);
+    GLint       ok = 0;
+    const char *srcs[2] = {fs_mono_pre, src};
 
-    p_glShaderSource(s, 1, &src, NULL);
+    if (type == GL_FRAGMENT_SHADER) p_glShaderSource(s, 2, srcs, NULL);
+    else p_glShaderSource(s, 1, &src, NULL);
     p_glCompileShader(s);
     p_glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
     if (!ok) {
@@ -787,6 +813,12 @@ static bool setup(void) {
     u_jn_row     = p_glGetUniformLocation(prog[P_JOIN], "u_row");
     u_jn_c       = p_glGetUniformLocation(prog[P_JOIN], "u_c");
     u_gui_img    = p_glGetUniformLocation(prog[P_GUI], "u_img");
+    for (int i = 0; i < P_N; i++) {
+        u_mono[i]       = p_glGetUniformLocation(prog[i], "u_mono");
+        u_mono_ink[i]   = p_glGetUniformLocation(prog[i], "u_mono_ink");
+        u_mono_paper[i] = p_glGetUniformLocation(prog[i], "u_mono_paper");
+    }
+    mono_dirty = true;
     for (int i = 0; i < PALS; i++) tex_pal[i] = texture(256, 1, GL_RGBA);
     p_glDisable(GL_DITHER);
     p_glDisable(GL_BLEND);
@@ -941,7 +973,31 @@ static void rect_flush(void) {
     rect_n = 0;
 }
 
+/* gpu_mono's theme into every program (each draw binds its own after: use()) */
+static void mono_apply(void) {
+    float ink[3], paper[3];
+
+    rgb4(mono_ink, ink);
+    rgb4(mono_paper, paper);
+    for (int i = 0; i < P_N; i++) {
+        p_glUseProgram(prog[i]);
+        p_glUniform1f(u_mono[i], mono_on && i != P_GUI ? 1.0f : 0.0f);
+        p_glUniform4f(u_mono_ink[i], ink[0], ink[1], ink[2], 1);
+        p_glUniform4f(u_mono_paper[i], paper[0], paper[1], paper[2], 1);
+    }
+    mono_dirty = false;
+}
+
+void gpu_mono(bool on, uint32_t ink, uint32_t paper) {
+    if (on == mono_on && ink == mono_ink && paper == mono_paper) return;
+    mono_on    = on;
+    mono_ink   = ink;
+    mono_paper = paper;
+    mono_dirty = true;
+}
+
 static bool begin_on(int b, bool port) {
+    if (mono_dirty) mono_apply();
     portrait = port;
     p_glBindFramebuffer(GL_FRAMEBUFFER, fbo[b]);
     p_glViewport(0, 0, pw, ph);
@@ -1397,6 +1453,9 @@ void gpu_d3_join(int x, int y, int w, int row, int y0, int y1, uint32_t rgb, flo
 bool gpu_init(int cols, int rows) {
     (void)cols, (void)rows;
     return false;
+}
+void gpu_mono(bool on, uint32_t ink, uint32_t paper) {
+    (void)on, (void)ink, (void)paper;
 }
 bool gpu_frame_begin_buf(int buf, bool port) {
     (void)buf, (void)port;

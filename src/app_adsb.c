@@ -1402,7 +1402,7 @@ static void build(void) {
     rect(root, SC_X - 3, BODY_Y, SC + 6, SC + 6, 3, false);
     scope = lv_img_buf_alloc(SC, SC, LV_IMG_CF_TRUE_COLOR);
 #if USE_DRM
-    sc_gpu = drm_planes() && gpu_start();
+    sc_gpu = drm_planes() && gpu_start();     /* 1bit: the GPU dithers it to ink and paper (gpu_mono) */
 #endif
     if (sc_gpu) {   /* the GPU draws it on the display's plane, the GUI a hole over it (the labels drawn over the hole):
                      * LVGL drew the image (a copy), turned it onto the panel (a second) and copied that (a third)
@@ -1538,7 +1538,7 @@ void app_adsb_open_view(bool acars) {
 static void construct_cb(lv_obj_t *parent) {
     amb     = TC(accent);
     ink     = TC(bg);
-    dim     = lv_color_mix(amb, ink, 110);
+    dim     = theme_shape.mono ? amb : lv_color_mix(amb, ink, 110);    /* 1bit: the mix snaps to paper (app_sentry.c) */
     faint   = lv_color_mix(amb, ink, 50);
     c_amb   = argb(amb);
     c_ink   = argb(ink);

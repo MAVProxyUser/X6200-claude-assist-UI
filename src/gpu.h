@@ -32,6 +32,10 @@ bool gpu_slot(int s, int cols, int rows);
  * classic 3D picture's): 256 colours, 0x00RRGGBB */
 void gpu_palette(int which, const uint32_t *pal);
 
+/* The 1bit theme (mono.c's mono_set, at every theme): on, every picture the GPU draws comes out in ink or paper (0xRRGGBB),
+ * dithered by its lightness, as the mono layer makes LVGL's; off, the colours as drawn. From the next frame */
+void gpu_mono(bool on, uint32_t ink, uint32_t paper);
+
 /* Slot s's levels: one row of its ring, one column (a voiceprint's), or all of them */
 void gpu_levels_row(int s, int ring_row, const uint8_t *levels);
 void gpu_levels_col(int s, int col, const uint8_t *levels);

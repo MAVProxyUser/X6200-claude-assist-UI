@@ -2194,7 +2194,7 @@ static void build(void) {
 static void construct_cb(lv_obj_t *parent) {
     amb     = TC(accent);
     ink     = TC(bg);
-    dim     = lv_color_mix(amb, ink, 110);
+    dim     = theme_shape.mono ? amb : lv_color_mix(amb, ink, 110);    /* 1bit: the mix snaps to paper (app_sentry.c) */
     faint   = lv_color_mix(amb, ink, 50);
     green   = lv_color_hex(0x7cd65a);
     red     = TC(err);

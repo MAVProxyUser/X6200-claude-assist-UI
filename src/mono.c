@@ -26,6 +26,7 @@
  */
 
 #include "mono.h"
+#include "gpu.h"
 #include "theme.h"
 
 #include "lvgl/src/core/lv_refr.h"
@@ -266,6 +267,7 @@ void mono_set(bool mono) {
     ink24   = theme_shape.ink & 0xffffff;
     paper24 = theme_shape.paper & 0xffffff;
     paper_luma = LV_MAX(1, luma(paper));
+    gpu_mono(mono, ink24, paper24);         /* the pictures the GPU draws on the plane, never through this layer */
     if (!disp) return;
     hooks(disp->driver->draw_ctx, mono);
     disp->driver->antialiasing = !mono;     /* nearest pixel in transformed pictures */

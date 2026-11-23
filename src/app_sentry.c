@@ -5237,6 +5237,9 @@ static void build_rtl(lv_obj_t *p) {
     rtl_direct = drm_planes();
 #endif
     rtl_gpu = rtl_direct && gpu_init(RTL_COLS, D3_ROWS);   /* the GPU there (Mesa on the image): it draws it */
+    /* 1bit: the GPU dithers to ink and paper itself (gpu_mono, from mono_set); the CPU's picture on the plane would
+     * keep its greys (cover_a 2026-11-23), so without the GPU it goes through LVGL, whose mono layer does it */
+    if (theme_shape.mono && !rtl_gpu) rtl_direct = false;
     if (rtl_gpu) gpu_palette(0, d3_pal);
     if (rtl_direct) {   /* the picture on the primary plane (rtl_present), the GUI a hole over it: the ticks, peaks
                          * and the bracket's labels drawn over the hole. LVGL drew it (a copy into its buffer), turned
@@ -11627,7 +11630,9 @@ static void construct_cb(lv_obj_t *parent) {
     main_screen_home_pause(false);      /* the home screen again: apps come back here */
     amb   = TC(accent);
     ink   = TC(bg);
-    dim   = lv_color_mix(amb, ink, 110);
+    /* 1bit: the mix is lighter than half, which the mono layer snaps to the paper (mono.c): the dim text was paper on
+     * paper (cover_a, 2026-11-23). Ink there; faint stays, the pictures' grids dithered to dots */
+    dim   = theme_shape.mono ? amb : lv_color_mix(amb, ink, 110);
     faint = lv_color_mix(amb, ink, 50);
     {
         lv_color_t red = TC(err), deep = lv_color_mix(amb, red, 110), orange = lv_color_mix(amb, red, 190);
