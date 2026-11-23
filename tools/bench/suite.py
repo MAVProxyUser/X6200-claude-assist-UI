@@ -46,6 +46,7 @@ import bench  # noqa: E402
 import suite_more  # noqa: E402
 import suite_proto  # noqa: E402
 import suite_cover  # noqa: E402
+import suite_cover_a  # noqa: E402
 import suite_cover_b  # noqa: E402
 import suite_air_a  # noqa: E402
 import suite_air_b  # noqa: E402
@@ -755,6 +756,7 @@ BATCHES = {
     "look": ("both radios on the network: every Settings tab photographed side by side, compared", suite_more.look),
     "cover": ("both radios on the network and SSH (receive only: features the other batches had not reached)",
               suite_cover.cover),
+    "cover_a": ("both radios: settings and the display (receive only)", suite_cover_a.batch),
     "cover_b": ("both radios: the Sentry pages and the receiver core (receive only)", suite_cover_b.batch),
     "air_a": ("the cable (chain-ok radios): the transmitter, one sends 0.1 W, one listens", suite_air_a.batch),
     "air_b": ("the cable (chain-ok radios): CW and the digital modes over the air", suite_air_b.batch),
