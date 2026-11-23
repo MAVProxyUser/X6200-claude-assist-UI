@@ -149,8 +149,16 @@ def main():
         results["speaker_rx"] = bench.ensure(spk, *bench.rx_profile(a.freq, 2, pre=a.rx_pre, att=a.rx_att,
                                                                     rfg=a.rx_rfg, agc=3))
         bench.path_proof(c, total, mic, spk, a.freq, results)
+        # Both alike for the over (the owner, 2026-11-23: "they should have the same settings"): the proof left both
+        # in USB-D; the speaker radio first, back on USB and read back, then the mic radio given exactly its set-up
+        # (pair_align), then its TX set-up, the two compared
+        results["speaker_rx"] = bench.ensure(spk, *bench.rx_profile(a.freq, 2, pre=a.rx_pre, att=a.rx_att,
+                                                                    rfg=a.rx_rfg, agc=3))
+        bench.pair_align(mic, spk, a.freq, 2)
         results["speaker_rx"].update(bench.ensure(spk, {"vol": a.vol}))
         results["mic_tx"] = bench.ensure(mic, *bench.tx_profile(a.freq, 2, bench.FIRST_PROBE_W, mic=True))
+        if bench.pair_diff(mic, spk):
+            raise Refused(f"not alike after {mic.name}'s TX set-up: {bench.pair_diff(mic, spk)}")
         results["mic_input"] = {0: "built-in", 1: "hand", 2: "auto"}.get(mic.state.get("mic"), mic.state.get("mic"))
         if spk.simulated:
             spk.send(f"sim plan {json.dumps([[0, LEAD_S]] + [[t, a.step_s] for t in tones] + [[0, TAIL_S]])}")
@@ -171,7 +179,7 @@ def main():
                                 "--rate=44100 /tmp/bench_mic.raw >/dev/null 2>&1 &)")
             recording, rec0 = True, time.time()
         watch = Watch(radios, c, expect_dbm=10 * math.log10(bench.FIRST_PROBE_W * 1000) - total, listener=spk,
-                      w=bench.FIRST_PROBE_W)
+                      w=bench.FIRST_PROBE_W, label=f"mic on G {mic.name} to {spk.name}")
         bench.arm(mic, True, mode=2)
         tx_log({"who": mic.name, "f": a.freq, "w": mic.pwr(), "what": f"acoustic {a.tag}"})
         n, on_at, t_play, t_end, t0 = 0, None, None, None, time.time()

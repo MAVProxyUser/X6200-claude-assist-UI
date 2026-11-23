@@ -863,11 +863,11 @@ def tci_send(sender, plan, amp=0.3, max_s=10.0, fade=0.05, watch=None, file=None
     return out.splitlines(), t0, t1
 
 
-def path_proof(c, total, sender, listener, f, report=None):
+def path_proof(c, total, sender, listener, f, report=None, label=None):
     """1000 Hz over the sender's TCI at 0.1 W for 2 s (USB-D on f, its transmitter armed on G for it and locked
     after), and the listener's spectrum at f + 1000 Hz must rise PROOF_MIN_DB over its quiet. Refused when it does not,
     with what was seen; said when it is PROOF_DROP_DB under the last proof of the same pair. The listener must be set
-    (ensure) before; the sender is left on f in USB-D at 0.1 W"""
+    (ensure) before; the sender is left on f in USB-D at 0.1 W. label: its screenshots' name (the test's own)"""
     open_page(sender, "G")
     open_page(listener, "G")
     # both alike, the listener first: the same frequency and mode (USB-D, the sender's), filter, PRE, ATT, AGC... read
@@ -884,7 +884,7 @@ def path_proof(c, total, sender, listener, f, report=None):
     time.sleep(1.2)
     quiet, nq = spectrum_level(listener, hz, time.time() - 1.0, time.time(), half=150)
     watch = Watch([sender, listener], c, expect_dbm=10 * math.log10(FIRST_PROBE_W * 1000) - total, listener=listener,
-                  w=FIRST_PROBE_W, label=f"path proof {sender.name} to {listener.name}")
+                  w=FIRST_PROBE_W, label=label or f"path proof {sender.name} to {listener.name}")
     try:
         arm(sender, True, mode=3)
         tx_log({"who": sender.name, "f": f, "w": sender.pwr(), "what": "path proof"})
@@ -1549,9 +1549,9 @@ def run_radios_ft8(c, args):
             # X6100's base switches in its stepped attenuator, 100 - rfg steps, strijar/x6100-base docs/protocol.md;
             # it had run at 63, its default), AGC auto as the FT8 app runs. The dial first: the app holds it once open
             report.setdefault("rx", {})[r.name] = ensure(r, *rx_profile(dial, 3, pre=0, att=0, rfg=100, agc=3))
-        path_proof(c, total, a, b, dial, report)
+        path_proof(c, total, a, b, dial, report, label=f"ft8 path proof {a.name} to {b.name}")
         report["path_proof_" + a.name] = report["path_proof"]
-        path_proof(c, total, b, a, dial, report)
+        path_proof(c, total, b, a, dial, report, label=f"ft8 path proof {b.name} to {a.name}")
         ensure(a, *rx_profile(dial, 3, pre=0, att=0, rfg=100, agc=3))      # the proof left it in its sender's state
     except Refused:
         finish(radios, snaps, report=report)
@@ -1568,7 +1568,7 @@ def run_radios_ft8(c, args):
                abs(r.pwr() - FIRST_PROBE_W) < 0.05, 5)
         radio_tx_gate(r, c, FIRST_PROBE_W)
     expect = 10 * math.log10(FIRST_PROBE_W * 1000) - total
-    watch = Watch(radios, c, expect_dbm=expect, listener=b, w=FIRST_PROBE_W)
+    watch = Watch(radios, c, expect_dbm=expect, listener=b, w=FIRST_PROBE_W, label=f"ft8 cq {a.name} to {b.name}")
     try:
         def one_tx(sender, listener, start_cmd, want, what):
             n0 = len(listener.rows)
@@ -1612,7 +1612,8 @@ def run_radios_ft8(c, args):
         result["cq"] = row
         say(f"{b.name} decoded {row['x']!r}, SNR {row['snr']} dB")
         watch.close()                   # the CQ's over judged; a new watch with A listening
-        watch = Watch(radios, c, expect_dbm=expect, listener=a, w=FIRST_PROBE_W)
+        watch = Watch(radios, c, expect_dbm=expect, listener=a, w=FIRST_PROBE_W,
+                      label=f"ft8 reply {b.name} to {a.name}")
         row = one_tx(b, a, f"ft8 reply {row['id']}", lambda r: calls_are(r, ca, cb), "reply")
         result["reply"] = row
         say(f"{a.name} decoded {row['x']!r}, SNR {row['snr']} dB")
@@ -1690,6 +1691,7 @@ def run_radios_walkie(c, args):
     snaps[b.name] = dict(snaps[b.name], freq=snaps[a.name]["freq"], mode=snaps[a.name]["mode"])
     expect = 10 * math.log10(FIRST_PROBE_W * 1000) - total
     results, hold = [], [int(time.time()) % 100000]
+    before = {}             # each radio's own memory of a mode (filter, zoom) before the other's was copied over it
     try:
         for r in radios:
             report.setdefault("supply", {})[r.name] = listener_gate(r)
@@ -1698,12 +1700,12 @@ def run_radios_walkie(c, args):
         hz0 = bands[0][1]
         for s_, l_ in ((a, b), (b, a)):
             ensure(l_, *rx_profile(hz0, 2, pre=0, att=0, rfg=100, agc=3))
-            path_proof(c, total, s_, l_, hz0, report)
+            path_proof(c, total, s_, l_, hz0, report, label=f"walkie path proof {s_.name} to {l_.name}")
             report[f"path_proof_{s_.name}"] = report.pop("path_proof")
     except Refused:
         finish(radios, snaps, report=report)
         raise
-    watch = Watch(radios, c, expect_dbm=expect, listener=b, w=FIRST_PROBE_W)
+    watch = Watch(radios, c, expect_dbm=expect, listener=b, w=FIRST_PROBE_W, label="walkie")
 
     def caught_up(r, wait=10):
         """r's link to this computer current again: a message within the last half second, for a second"""
@@ -1730,7 +1732,21 @@ def run_radios_walkie(c, args):
         # the listener's receiver the same on every band (it had kept each band's own PRE, ATT and AGC, unrecorded),
         # the sender sending where it is tuned; each band's own memories put back by finish()
         ensure(listener, *rx_profile(hz, WALKIE_MODES[mode], pre=0, att=0, rfg=100, agc=3))
-        ensure(sender, *tx_profile(hz, WALKIE_MODES[mode], FIRST_PROBE_W))
+        # both alike for the over (the owner, 2026-11-23: "they should have the same settings. IF they don't something
+        # is wrong"): the listener set first (above), then the sender given exactly its set-up (pair_align: its filter,
+        # zoom, PRE, ATT, AGC, RF gain...), then its TX set-up, the two compared. The sender's own memory of the mode
+        # (filter and zoom: each mode's, which the snapshot does not hold) kept first for finish's before
+        m = WALKIE_MODES[mode]
+        ensure(sender, {"freq": hz, "mode": m})
+        mem = before.setdefault(sender.name, [])
+        if not any(x.get("mode") == m for x in mem):
+            mem.append({"freq": hz, "mode": m, "filter": _value(sender, "filter"), "zoom": _value(sender, "zoom")})
+        pair_align(sender, listener, hz, m)
+        ensure(sender, *tx_profile(hz, m, FIRST_PROBE_W))
+        if pair_diff(sender, listener):
+            raise Refused(f"walkie {band} {mode}: {sender.name} and {listener.name} not alike after the sender's TX "
+                          f"set-up: {pair_diff(sender, listener)}")
+        watch.label = f"walkie {band} {mode} {sender.name} to {listener.name}"     # its screenshots' name
         line = (f"BENCH WALKIE (G) radio to radio, {band} {mode.upper()} {hz / 1e6:.3f} MHZ, {FIRST_PROBE_W} W through "
                 f"{total} DB: {sender.name.upper()} SENDS, {listener.name.upper()} LISTENS")
         for r in radios:
@@ -1746,6 +1762,7 @@ def run_radios_walkie(c, args):
         watch.over_power.pop(sender.name, None)
         listener.wait("the other radio out of TX for a second",
                       lambda: not listener.tx and time.time() - listener.tx_off_at >= 1.0, 10)
+        n_shots = len(watch._shot_threads)          # this over's pictures: the Watch's threads from here
         arm(sender, True, mode=WALKIE_MODES[mode])
         hold[0] += 1
         n = hold[0]
@@ -1780,6 +1797,10 @@ def run_radios_walkie(c, args):
                 arm(sender, False)
         if watch.why:
             raise Refused(watch.why)
+        # both screens while it was on the air (the Watch's own pictures of this over, fetched now)
+        pic = next((th for name, _, th in watch._shot_threads[n_shots:] if name == sender.name), None)
+        if pic is not None:
+            pic.join(90)
         peak, w = watch.rx_peak, watch.tx_peak.get(sender.name, 0.0)
         # heard: the listener's own spectrum at the dial up WALKIE_RISE_DB (its S-meter beside it: the X6200's did not
         # follow an AM signal, 2026-11-19)
@@ -1802,7 +1823,8 @@ def run_radios_walkie(c, args):
                "meter_rose": meter_rise, "spec_rose": spec_rise,
                "key_s": round(on_at - t0, 1) if on_at else None, "listener_stayed": stayed,
                "listener_tx": sorted(set(ltx)), "listener_silent": mute,
-               "over_power_w": watch.over_power.get(sender.name), "listener_silent_s": round(gap, 1)}
+               "over_power_w": watch.over_power.get(sender.name), "listener_silent_s": round(gap, 1),
+               "pictured_on_air": bool(pic and pic.on_air), "shots": dict(pic.paths) if pic else {}}
         results.append(res)
         where = f"page {listener.state.get('pg')}, {listener.state.get('freq')} Hz"
         say(f"{'PASS' if heard else 'FAIL'} {band} {mode} {sender.name} -> {listener.name}: keyed {keyed}"
@@ -1810,7 +1832,9 @@ def run_radios_walkie(c, args):
             f"{w:.2f} W by its meter; {listener.name}'s spectrum at the dial {sq} -> {sp} dB, its S-meter {quiet} -> "
             f"{peak} dBm{'' if meter_rise else ' (the S-meter did not follow)'}"
             f"{'' if stayed else ' (the listener left G or the channel: ' + where + ')'}"
-            f" (the chain: about {expect:.0f}); the listener's tx/hold {sorted(set(ltx))}")
+            f" (the chain: about {expect:.0f}); the listener's tx/hold {sorted(set(ltx))}; both screens "
+            f"{'on the air' if res['pictured_on_air'] else 'NOT caught on the air'}: "
+            + ", ".join(os.path.basename(x) for x in res["shots"].values() if x))
 
     try:
         unheard = 0
@@ -1837,7 +1861,9 @@ def run_radios_walkie(c, args):
     finally:
         watch.close()
         report["deaf"] = watch.deaf
-        finish(radios, snaps, report=report)        # each band's memories, power, ATU back; both on page A
+        report["shots"] = watch.shots
+        # each band's memories, power, ATU back; each mode's memory the other's was copied over first; both on page A
+        finish(radios, snaps, report=report, before=before)
         out = os.path.join(STATE, "runs", time.strftime("%Y%m%d-%H%M%S-walkie.json"))
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, "w") as f:

@@ -783,6 +783,38 @@ def safety(run, only):
     t_safety(run, only)
 
 
+# ---- Both radios alike before an over (the owner, 2026-11-23: "when you TX on one radio screenshot them BOTH, you
+# should see the RX happening! and they should have the same settings. IF they don't something is wrong") ----
+
+def align_over(snd, lis, f, mode, before):
+    """bench.pair_align for an over: the listener first (f and mode, read back), the sender given exactly its set-up,
+    compared. The sender's own memory of that mode (its filter and zoom are each mode's, which finish's snapshot does
+    not hold: the listener's copied over them) kept first in before[snd.name], so finish(before=) puts it back"""
+    bench.ensure(snd, {"freq": f, "mode": mode})
+    mem = before.setdefault(snd.name, [])
+    if not any(x.get("mode") == mode for x in mem):
+        mem.append({"freq": f, "mode": mode, "filter": bench._value(snd, "filter"), "zoom": bench._value(snd, "zoom")})
+    return bench.pair_align(snd, lis, f, mode)
+
+
+def shots_words(watch):
+    """What the Watch pictured (both screens during each over of the sender): how many on the air, one pair's files"""
+    if not watch or not watch.shots:
+        return "no over pictured"
+    on = [x for x in watch.shots if x["on_air"]]
+    pair = (on or watch.shots)[0]["paths"]
+    return (f"{len(on)} of {len(watch.shots)} overs pictured on the air ("
+            + ", ".join(os.path.basename(p) for p in pair.values() if p) + ")")
+
+
+def alike_or_refuse(snd, lis, what):
+    """The two compared once the sender has its TX set-up: Refused, naming what differs"""
+    d = bench.pair_diff(snd, lis)
+    if d:
+        raise bench.Refused(f"{what}: {snd.name} and {lis.name} not alike after the sender's TX set-up: " +
+                            ", ".join(f"{k} {x}/{y}" for k, (x, y) in d.items()))
+
+
 # ---- CW both ways: the sender's own keyer (TCI cw_macros, run on it), the listener's decoder ----
 F_CW = 14040000
 CW_TEXT = "VVV TEST DE Q1TST"    # the V's: the decoder finds the speed first; about 12 s at 20 wpm (one over: 16)
@@ -794,7 +826,7 @@ def cw_over(run, s_name, l_name):
     c = run.c
     p, total = bench.chain_gate(c, "radios")
     snd, lis = bench.Radio(s_name, c["radios"][s_name], True), bench.Radio(l_name, c["radios"][l_name], False)
-    radios, snaps, rep, watch = [snd, lis], {}, {}, None
+    radios, snaps, rep, watch, before = [snd, lis], {}, {}, None, {}
     for r in radios:
         r.take_control()
         snaps[r.name] = bench.snapshot(r)
@@ -803,9 +835,13 @@ def cw_over(run, s_name, l_name):
         for r in radios:
             bench.open_page(r, "G")
         bench.ensure(lis, *bench.rx_profile(F_CW, 4, pre=0, att=0, rfg=100, agc=2))
-        bench.path_proof(c, total, snd, lis, F_CW, rep)
+        bench.path_proof(c, total, snd, lis, F_CW, rep, label=f"cw path proof {s_name} to {l_name}")
+        # both alike for the over: the listener first, back on CW and read back, then the sender exactly as it (its
+        # filter, zoom, PRE, ATT, AGC, RF gain...), then its TX set-up, the two compared
         bench.ensure(lis, *bench.rx_profile(F_CW, 4, pre=0, att=0, rfg=100, agc=2))
+        align_over(snd, lis, F_CW, 4, before)
         bench.ensure(snd, *bench.tx_profile(F_CW, 4, bench.FIRST_PROBE_W))
+        alike_or_refuse(snd, lis, "cw")
         bench.radio_tx_gate(snd, c, bench.FIRST_PROBE_W)
         import subprocess
         subprocess.run(["scp", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_cw_tx.py"),
@@ -813,7 +849,7 @@ def cw_over(run, s_name, l_name):
         for r in radios:
             r.send(f"banner BENCH CW: {s_name.upper()} KEYS '{CW_TEXT}' {bench.FIRST_PROBE_W} W {F_CW / 1e6:.3f} MHZ, "
                    f"{l_name.upper()} DECODES (RX ONLY) THROUGH {total} DB")
-        watch = bench.Watch(radios, c, w=bench.FIRST_PROBE_W, listener=lis)
+        watch = bench.Watch(radios, c, w=bench.FIRST_PROBE_W, listener=lis, label=f"cw {s_name} to {l_name}")
         bench.arm(snd, True, mode=4)            # arming puts CW into the voice mode: CW again
         bench.tx_log({"who": s_name, "f": F_CW, "w": snd.pwr(), "what": "suite CW"})
         lis.cw = ""
@@ -827,14 +863,14 @@ def cw_over(run, s_name, l_name):
         words = [w for w in ("TEST", "Q1TST") if w in got.upper()]
         ok = not watch.why and bool(words)
         return ok, (f"{s_name} keyed {CW_TEXT!r} ({out.strip().splitlines()[-1:] or 'no word'}), {l_name}'s decoder: "
-                    f"{got[-80:]!r} (copied: {', '.join(words) or 'neither TEST nor Q1TST'})"
+                    f"{got[-80:]!r} (copied: {', '.join(words) or 'neither TEST nor Q1TST'}); {shots_words(watch)}"
                     + (f"; STOPPED: {watch.why}" if watch.why else ""))
     except bench.Refused as e:
         return False, f"refused: {e}"
     finally:
         if watch:
             watch.close()
-        bench.finish(radios, snaps, report=rep)
+        bench.finish(radios, snaps, report=rep, before=before)      # the sender's CW memory first (align_over)
         if rep.get("not_restored"):         # a radio not as found fails the test (returned from here: it decides)
             return False, f"NOT put back: {rep['not_restored']}"
 
@@ -863,10 +899,12 @@ def band_proofs(run):
             for band, f in PROOF_BANDS:
                 try:
                     bench.ensure(lis, *bench.rx_profile(f, 2, pre=0, att=0, rfg=100, agc=3))
-                    res = bench.path_proof(c, total, snd, lis, f, rep)
+                    res = bench.path_proof(c, total, snd, lis, f, rep, label=f"band {band} {s_name} to {l_name}")
                     run.result("paths", f"band {band} {s_name}->{l_name}", True,
                                f"{l_name} sees {s_name}'s 0.1 W tone {res['rise_db']} dB over its quiet "
-                               f"({s_name}'s meter {res['sender_peak_w']} W)",
+                               f"({s_name}'s meter {res['sender_peak_w']} W); both screens "
+                               f"{'on the air' if res.get('shots_on_air') else 'NOT caught on the air'}: "
+                               + ", ".join(os.path.basename(x) for x in (res.get("shots") or {}).values() if x),
                                covers=["path-tx-power-readback", "path-rx-level-parity", "tx-bands-each"])
                 except bench.Refused as e:
                     run.result("paths", f"band {band} {s_name}->{l_name}", False, str(e)[:300],
@@ -905,6 +943,43 @@ def open_app(r, name):
     return False
 
 
+def ft8_proto_of(r):
+    """r's FT8 app protocol as kept (params ft8_protocol, read only over SSH): 0 FT4, 1 FT8, 2 FT2; None unread"""
+    try:
+        v = bench.ssh(r.host, "sqlite3 -readonly /mnt/params.db \"select val from params where name='ft8_protocol'\"",
+                      timeout=20).strip()
+    except bench.Refused:
+        return None
+    return int(v) if v.isdigit() else None
+
+
+def ft8_proto_back(r, want):
+    """open_app's round of E's types opens FT8 and FT4 on the way, and each sets the FT8 app's protocol (app_sentry.c
+    open_async): 2026-11-23 the X6200's was left FT4 (1 -> 0). Put back as found through the remote: the FT8 app
+    opened, its Mode pressed till it reads want (FT8 -> FT4 -> FT2 -> FT8), closed. r's session receive only: the
+    radio holds itself so, nothing it does sends. True when it reads want after"""
+    if want is None or ft8_proto_of(r) == want:
+        return True
+    bench.close_apps(r)
+    r.send("ft8 open")
+    r.wait("the FT8 app", lambda: r.ft8.get("open") == 1, 10)
+    for _ in range(3):
+        if r.ft8.get("proto") == want:
+            break
+        was = r.ft8.get("proto")
+        r.send("ft8 mode")
+        r.wait("the FT8 app's next protocol", lambda: r.ft8.get("proto") != was, 5)
+    r.send("ft8 close")
+    try:
+        r.wait("the FT8 app closed", lambda: r.ft8.get("open") != 1, 8)
+    except bench.Refused:
+        pass
+    time.sleep(1.5)
+    back = ft8_proto_of(r) == want
+    say(f"{r.name}: the FT8 app's protocol {'put back' if back else 'NOT put back'} to {want}")
+    return back
+
+
 # ---- keyboard modes both ways: RTTY and PSK31 made here (digimodes.py), sent by one radio's TCI at 0.1 W, decoded by
 # the other's own app into its text log ----
 DIGI_TEXT = {"rtty": "RYRY CQ DE Q1TST Q1TST K", "psk31": "CQ CQ DE Q1TST Q1TST K"}
@@ -917,10 +992,11 @@ def digi_over(run, mode, s_name, l_name):
     c = run.c
     p, total = bench.chain_gate(c, "radios")
     snd, lis = bench.Radio(s_name, c["radios"][s_name], True), bench.Radio(l_name, c["radios"][l_name], False)
-    radios, snaps, rep, watch = [snd, lis], {}, {}, None
+    radios, snaps, rep, watch, before = [snd, lis], {}, {}, None, {}
     for r in radios:
         r.take_control()
         snaps[r.name] = bench.snapshot(r)
+    proto0 = ft8_proto_of(lis)         # open_app's round of E's types may change it: put back after
     try:
         bench.listener_gate(lis)
         if not open_app(lis, DIGI_APP[mode]):
@@ -950,12 +1026,16 @@ def digi_over(run, mode, s_name, l_name):
         log0 = bench.ssh(lis.host, "f=$(ls -t /mnt/digi_text/*.txt 2>/dev/null | head -1); [ -n \"$f\" ] && wc -c < $f "
                                    "|| echo 0").strip()
         bench.open_page(snd, "G")
+        # both alike for the over: the listener set first (its app holds the dial and the mode; its ATT, PRE, AGC as
+        # the rule says, read back above), the sender given exactly its set-up, then its TX set-up, the two compared
+        align_over(snd, lis, f, m, before)
         bench.ensure(snd, *bench.tx_profile(f, m, bench.FIRST_PROBE_W))
+        alike_or_refuse(snd, lis, mode)
         bench.radio_tx_gate(snd, c, bench.FIRST_PROBE_W)
         for r in radios:
             r.send(f"banner BENCH {mode.upper()}: {s_name.upper()} SENDS '{DIGI_TEXT[mode]}' {bench.FIRST_PROBE_W} W "
                    f"{f / 1e6:.4f} MHZ, {l_name.upper()}'S APP DECODES (RX ONLY) THROUGH {total} DB")
-        watch = bench.Watch(radios, c, w=bench.FIRST_PROBE_W, listener=lis)
+        watch = bench.Watch(radios, c, w=bench.FIRST_PROBE_W, listener=lis, label=f"{mode} {s_name} to {l_name}")
         bench.arm(snd, True, mode=m)
         bench.tx_log({"who": s_name, "f": f, "w": snd.pwr(), "what": f"suite {mode}"})
         lines, t_on, t_off = bench.tci_send(snd, None, max_s=secs + 4, watch=watch, file="/tmp/bench_digi.raw",
@@ -965,7 +1045,12 @@ def digi_over(run, mode, s_name, l_name):
         time.sleep(2.0)
         # the app closed: PSK31 decodes the noise after the signal and its line never pauses, so only the app's closing
         # ends it onto the card (digi_textlog_end); RTTY's pause ends it sooner. Then looked for up to 30 s
-        bench.close_apps(lis)
+        if not bench.close_apps(lis):
+            # the RTTY panel is no dialog: the remote's "close" leaves it (A_APP_CLOSE closes a dialog only), and the
+            # X6100's decoder prints the noise after the over without a pause, so its line (the over's text in it) went
+            # onto the card only when finish() retuned it, after the 30 s below (2026-11-23). The Sentry's page opened
+            # closes the panel and ends the line
+            bench.open_page(lis, "A")
         # the app's line ends at its pause and goes onto the card after (digi_textlog.c): looked for up to 30 s
         got, t0 = "", time.time()
         while time.time() - t0 < 30 and "Q1TST" not in got.upper():
@@ -973,14 +1058,29 @@ def digi_over(run, mode, s_name, l_name):
             got = bench.ssh(lis.host, f"f=$(ls -t /mnt/digi_text/*.txt | head -1); tail -c +{int(log0 or 0) + 1} $f")
         ok = not watch.why and "Q1TST" in got.upper()
         return ok, (f"{s_name} sent {mode} ({secs:.1f} s at {f} Hz, mode {m}{', ' + str(cfg) if cfg else ''}); "
-                    f"{l_name}'s {app[1]} wrote: {' '.join(got.split())[-120:]!r}"
+                    f"{l_name}'s {app[1]} wrote: {' '.join(got.split())[-120:]!r}; {shots_words(watch)}"
                     + (f"; STOPPED: {watch.why}" if watch.why else ""))
     except bench.Refused as e:
         return False, f"refused: {e}"
     finally:
         if watch:
             watch.close()
-        bench.finish(radios, snaps, report=rep)
+        # open_app's round of E's types tunes the types outside the bands too (Time Signal's 2.5 MHz: 2026-11-23 the
+        # X6200's out-of-band memory went 10 MHz -> 2.5 MHz), which restore_bands does not cover (no row of the band
+        # table): the dial put there first as found, so it is kept there again as finish tunes away
+        try:
+            out0 = ((snaps.get(l_name) or {}).get("_bands") or {}).get("mem", {}).get(-1, {})
+            out1 = ((bench.band_memories(lis) or {}).get("mem") or {}).get(-1, {})
+            if out0.get("vfoa_freq") and out1.get("vfoa_freq") != out0["vfoa_freq"]:
+                before.setdefault(l_name, []).insert(0, {"freq": out0["vfoa_freq"], "mode": out0.get("vfoa_mode")})
+        except (bench.Refused, OSError) as e:
+            say(f"{l_name}: its out-of-band memory not checked ({e})")
+        try:
+            if not ft8_proto_back(lis, proto0):
+                rep.setdefault("not_restored", {})[f"{l_name} ft8_protocol"] = {"was": proto0, "reads": ft8_proto_of(lis)}
+        except (bench.Refused, OSError) as e:
+            rep.setdefault("not_restored", {})[f"{l_name} ft8_protocol"] = {"was": proto0, "error": str(e)}
+        bench.finish(radios, snaps, report=rep, before=before)      # the sender's memory of the mode first
         if rep.get("not_restored"):         # a radio not as found fails the test (returned from here: it decides)
             return False, f"NOT put back: {rep['not_restored']}"
 

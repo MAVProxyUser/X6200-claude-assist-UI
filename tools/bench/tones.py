@@ -278,6 +278,7 @@ def main():
     snaps, results = {}, {"tx": a.tx, "rx": a.rx, "f": a.freq, "w": a.w, "tones": tones, "passes": {}}
     tci = None
     delay = [None]
+    lsb_mem = []            # the listener's LSB filter and zoom as found, when the image pass set them as the sender's
     plan = [[0, LEAD_S], [MARK_HZ, MARK_S], [0, MARK_GAP_S]] + [x for t in tones for x in ([t, TONE_S], [0, GAP_S])]
     bursts = None
     if gaps:
@@ -298,19 +299,38 @@ def main():
     subprocess.run(["scp", "-q", "-o", "BatchMode=yes", SENDER, f"root@{txr.host}:/tmp/tci_tone_tx.py"], check=True)
 
     def one_over(sideband, label):
-        rx_mode = {"usb": 2, "lsb": 0}[sideband]
         w = cur_w[0]
-        # each radio said whole for the over, read back (the mode with its band's own settings after it)
+        # Both radios alike before the over (the owner, 2026-11-23: "they should have the same settings. IF they
+        # don't something is wrong"): the listener first, on the sender's own mode (USB-D for TCI's audio), said whole
+        # and read back; the sender given exactly its set-up (pair_align), then its TX set-up, the two compared again
         results.setdefault("rx_state", {})[label] = bench.ensure(
-            rxr, *bench.rx_profile(a.freq, rx_mode, pre=a.rx_pre, att=a.rx_att, rfg=a.rx_rfg, agc=0, sql=0))
+            rxr, *bench.rx_profile(a.freq, a.tx_mode, pre=a.rx_pre, att=a.rx_att, rfg=a.rx_rfg, agc=0, sql=0))
+        bench.pair_align(txr, rxr, a.freq, a.tx_mode)
         bench.ensure(txr, *bench.tx_profile(a.freq, a.tx_mode, w))
+        if bench.pair_diff(txr, rxr):
+            raise Refused(f"{label}: not alike after {txr.name}'s TX set-up: {bench.pair_diff(txr, rxr)}")
+        ignore = ()
+        if sideband == "lsb":
+            # The image pass: the listener on the other sideband ON PURPOSE (what the receiver makes of the sender's
+            # USB tones there is the measurement), all else as the sender's. The mode brings its own filter and zoom
+            # (each mode's memory): set as the sender's, the listener's own put back after (finish's before)
+            bench.ensure(rxr, {"mode": 0})
+            fix = {k: bench._value(txr, k) for k in ("filter", "zoom") if bench._value(rxr, k) != bench._value(txr, k)}
+            if fix:
+                lsb_mem.append(dict({"freq": a.freq, "mode": 0}, **{k: bench._value(rxr, k) for k in fix}))
+                bench.ensure(rxr, fix)
+            ignore = ("mode",)
+            if set(bench.pair_diff(txr, rxr)) - set(ignore):
+                raise Refused(f"{label}: the listener on LSB is not otherwise as the sender: {bench.pair_diff(txr, rxr)}")
+        results["rx_state"][label] = {k: rxr.state.get(k) for k in bench.PAIR_KEYS}
         radio_tx_gate(txr, c, w)
         line = (f"BENCH TONES: {a.tx.upper()} SENDS {len(tones)} TONES USB {w} W, {a.rx.upper()} LISTENS "
                 f"{sideband.upper()}, {a.freq / 1e6:.3f} MHZ THROUGH {total} DB")
         for r in radios:
             r.send(f"banner {line}")
         time.sleep(1.0)
-        watch = Watch(radios, c, expect_dbm=10 * math.log10(w * 1000) - total, listener=rxr, w=w)
+        watch = Watch(radios, c, expect_dbm=10 * math.log10(w * 1000) - total, listener=rxr, w=w,
+                      label=f"tones {label} {a.tx} to {a.rx}", pair_ignore=ignore)   # the LSB pass's mode, on purpose
         bench.arm(txr, True, mode=a.tx_mode)      # arming puts USB-D into USB: the test's mode again
         tx_log({"who": txr.name, "f": a.freq, "w": txr.pwr(), "what": f"tones {label}"})
         t_begin = time.time()
@@ -455,7 +475,8 @@ def main():
     finally:
         if tci:
             tci.close()
-        bench.finish(radios, snaps, report=results)     # put back, checked, both on the Sentry's page A
+        # put back, checked, both on the Sentry's page A (the listener's LSB memory first, when the image pass set it)
+        bench.finish(radios, snaps, report=results, before={rxr.name: lsb_mem})
         if results.get("not_restored"):        # a radio not as found: the run fails, whatever it measured
             say(f"NOT put back: {results['not_restored']}")
         with open(os.path.join(run_dir, "report.json"), "w") as f:
