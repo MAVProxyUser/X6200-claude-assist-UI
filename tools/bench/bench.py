@@ -148,6 +148,7 @@ class Radio:
         self.state, self.meter, self.txm, self.ft8, self.apps = {}, None, None, {}, None
         self.rows, self.errs, self.lock = [], [], threading.Lock()
         self.tx, self.tx_since, self.ctl_mine, self.role = False, None, False, None
+        self.ctl_who = None         # who has control, as the remote last said ("ctl WHO MINE"): none, local, tci, browser NAME
         self.tx_last = None         # (on, off) of the last over: the pad's rest above HARD_MAX_W
         self.tx_off_at = 0.0       # when it last left TX (the radios' gate: one on the air at a time)
         self.last_msg = time.time()
@@ -176,7 +177,7 @@ class Radio:
             self.r.close()
         except OSError:
             pass
-        self.state, self.role, self.ctl_mine = {}, None, False
+        self.state, self.role, self.ctl_mine, self.ctl_who = {}, None, False, None
         self.r = Remote(self.host, int(self._rc.get("port", 50002)))
         self.last_msg = time.time()
         self.r.send(f"auth {self._tok}")
@@ -219,6 +220,7 @@ class Radio:
                     self.rows.append(dict(json.loads(rest), at=time.time()))
                 elif k == "ctl":
                     self.ctl_mine = rest.rsplit(" ", 1)[-1] == "1"
+                    self.ctl_who = rest.rsplit(" ", 1)[0] if " " in rest else rest
                 elif k == "role":
                     self.role = rest.split(" ", 2)
                 elif k == "err":
@@ -254,6 +256,19 @@ class Radio:
                       + (f" (the radio said: {self.errs[-1]})" if self.errs else ""))
 
     def take_control(self):
+        """Control, taken only when it is free or the bench's own: its sessions (browser bench-tx, bench-rx) or a TCI
+        client (the bench's tests' own). The radio's operator (local) or another browser keeps it: Refused, never
+        taken from them (the owner's rule: the operator at the radio has the last word, 2026-11-23; cover_a found
+        put_back taking it back at every test's end)"""
+        if self.ctl_mine:
+            return
+        try:
+            self.wait("who has control", lambda: self.ctl_who is not None, 2)
+        except Refused:
+            pass                                            # not said yet: free as far as is known
+        who = self.ctl_who or "none"
+        if who == "local" or (who.startswith("browser ") and not who.startswith("browser bench-")):
+            raise Refused(f"{self.name}: control with {who}: not taken (the radio's operator keeps it)")
         self.send("control take")
         self.wait("control", lambda: self.ctl_mine, 10)     # the X6200 took 3-5 s now and then (2026-11-19)
 
@@ -683,7 +698,8 @@ def put_back(r, snap, keep=(), before=None):
     r.stop()
     stop_bench_programs(r)
     if not r.ctl_mine:
-        r.take_control()                # an emergency stop's session, a TCI client, the radio's operator had it
+        r.take_control()                # an emergency stop's session, a TCI client had it; the operator: Refused,
+                                        # the radio recorded as not put back (finish puts it back later)
     r.send("banner")
     if not close_apps(r):
         bad["app"] = r.state.get("app") or r.state.get("win")
@@ -1405,7 +1421,10 @@ def emergency_stop(c):
             if toks.get(name, {}).get(kind):
                 try:
                     r = Radio(name, rc, kind == "tx")
-                    r.take_control()
+                    try:
+                        r.take_control()
+                    except Refused as e:            # the operator has it: stopped all the same (operate is enough)
+                        say(f"{name}: {e}; stopping without it")
                     r.stop()
                     time.sleep(0.5)
                     say(f"{name}: stopped ({'on the air' if r.tx else 'not on the air'})")

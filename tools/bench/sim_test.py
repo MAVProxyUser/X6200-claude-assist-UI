@@ -47,6 +47,7 @@ class SimRadio:
             for k in ("txf", "play", "heard", "tcim"):
                 del self.state[k]
         self.tone = None    # (hz above the dial, until): a "sim tone" plan on the air
+        self.operator = False  # someone at the radio has control ("ctl local 0", as the GUI says a touch took it)
         self.silent = False  # "silentlink": from the test's first FT8 over its link sends nothing more
         # "deaf": it never hears its peer; "deafafter": it hears the path proof's tone, not the test's overs after it
         self.ft8 = {"open": 0, "auto": 1, "cq": 0, "tx": 1, "sending": 0, "nocall": 0}
@@ -134,7 +135,9 @@ class SimRadio:
         elif a[:2] == ["panel", "1"]:
             self._state()
             self.send("ft8 " + json.dumps(self.ft8))
+            self.send("ctl local 0" if self.operator else "ctl none 0")     # who has control, as the GUI tells a client
         elif a[:2] == ["control", "take"]:
+            self.operator = False
             self.send("ctl browser bench-tx 1")
         elif a[0] == "set" and len(a) >= 3:
             k, v = a[1], float(a[2])
@@ -401,6 +404,32 @@ def main():
     left = bench.load_json(os.path.join(bench.STATE, bench.LEFT_WRONG), {})
     check(not left and sim.state["freq"] == 14074000 and sim.state["pg"] == "A",
           f"bench.py restore: put back as the test found it, on page A, the record gone ({left or 'clean'})")
+    # ---- the operator at the radio keeps control: never taken back, not even to put back (the owner's rule;
+    # cover_a found put_back taking it at every test's end, 2026-11-23) ----
+    sim, h = one_radio(None)
+    snap = bench.snapshot(h)
+    bench.ensure(h, {"freq": 14200000})
+    sim.operator = True
+    sim.send("ctl local 0")                 # a touch at the radio: control is the operator's
+    settled(lambda: h.ctl_who == "local" and not h.ctl_mine)
+    takes = sum(g == "control take" for g in sim.got)
+    rep = {}
+    bench.finish([h], {"simC": snap}, report=rep)
+    left = bench.load_json(os.path.join(bench.STATE, bench.LEFT_WRONG), {})
+    check(sum(g == "control take" for g in sim.got) == takes and sim.operator,
+          "the operator at the radio has control: finish never takes it back")
+    check("simC" in left and rep.get("not_restored") and sim.state["freq"] == 14200000,
+          f"and the radio is recorded as not put back, nothing changed under the operator ({list(left)})")
+    h2 = bench.Radio("simC", {"host": "127.0.0.1", "port": sim.port}, True)
+    why = refused(h2.take_control)
+    check(why is not None and "local" in why, f"a test's own take refused too ({why})")
+    h2.close()
+    sim.operator = False                    # the operator let it go: bench.py restore puts it back
+    sim.send("ctl none 0")
+    bench.cmd_restore(bench.conf(), None)
+    left = bench.load_json(os.path.join(bench.STATE, bench.LEFT_WRONG), {})
+    check(not left and sim.state["freq"] == 14074000,
+          f"control free again: bench.py restore puts it back ({left or 'clean'})")
 
     why, a, b, _ = run_case(None)
     check(why is None, f"a CQ and its reply between two radios pass ({why or 'passed'})")
