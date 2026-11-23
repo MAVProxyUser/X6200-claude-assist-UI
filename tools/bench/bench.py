@@ -290,7 +290,7 @@ class Radio:
 # mode (a band change loads the band's ATT, PRE and AGC, so those after it), the receiver's, the rest; LISTEN last
 SET_ORDER = ("split", "vfo", "freq", "mode", "filter", "zoom", "att", "pre", "agc", "rfg", "sql", "nb", "nr", "rit",
              "xit", "ifs", "comp",
-             "atu", "pwr", "vol", "txio", "txqo", "txig", "txip", "heard")
+             "atu", "pwr", "vol", "txio", "txqo", "txig", "txip", "wch", "heard")
 # Kept by the band (or the band's mode): put back only once the dial is on that band again
 BAND_KEYS = {"mode", "filter", "zoom", "att", "pre", "agc", "txio", "txqo", "txig", "txip", "ifs"}
 # What a test may change and finish() puts back ("heard" is not: the Sentry's page A puts its own LISTEN back)
@@ -306,6 +306,8 @@ def _value(r, k):
     s = r.state
     if k == "filter":
         return (int(s.get("flo", -1)), int(s.get("fhi", -1)))
+    if k == "wch":                      # the Sentry G's own channel (Hz, mode): a GUI without it says none
+        return None if s.get("wch") is None else (int(s["wch"]), int(s.get("wchm", -1)))
     if k == "pwr":
         return round(float(s.get("pwr", 99)), 1)
     v = s.get(k)
@@ -317,7 +319,7 @@ def _same(k, have, want):
         return False
     if k == "pwr":
         return abs(have - want) < 0.05
-    if k == "filter":
+    if k in ("filter", "wch"):
         return tuple(have) == tuple(want)
     return have == want
 
@@ -325,6 +327,8 @@ def _same(k, have, want):
 def _put(r, k, v):
     if k == "filter":
         r.send(f"set filter {int(v[0])} {int(v[1])}")
+    elif k == "wch":
+        r.send(f"set wch {int(v[0])} {int(v[1])}")
     elif k == "pwr":
         r.send(f"set pwr {round(v * 10)}")
     elif k == "vfo":
@@ -674,6 +678,9 @@ def put_back(r, snap, keep=(), before=None):
             arm(r, False)
         except Refused as e:
             bad["armed"] = str(e)
+    # page A first: G left puts A's dial back as G found it (the Sentry's G has its own channel, 2026-11-23), which
+    # would undo what is put back here if it came after
+    open_page(r, "A")
     for want in before or []:
         bad.update(restore(r, want))
     snap = {k: v for k, v in snap.items() if k not in keep}
