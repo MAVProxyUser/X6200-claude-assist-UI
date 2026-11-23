@@ -87,6 +87,7 @@
 #include "voice.h"
 #include "first_start.h"
 #include "perf_hud.h"
+#include "app_sentry.h"
 #include "gui_state.h"
 
 /* LVGL draws the areas it refreshes here, then flushes them to the panel */
@@ -536,6 +537,7 @@ int main(void) {
     lv_scr_load(screen);
     walkie_init(screen);      /* its screen instead, when on */
     gui_state_init();
+    app_sentry_g_channel_load();    /* G's own channel, for the remote's state */
     if (main_screen_restore()) {
         /* back where the GUI before this one was: a crash, an update or a restart of it (gui_state.c) */
     } else if (!walkie_on() && param_i_get(cfg_field_boot)) {

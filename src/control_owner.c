@@ -15,19 +15,31 @@
 #include <string.h>
 #include <time.h>
 
-#define INJECT_MS 150   /* an input event this soon after an injection is the injection, not the operator */
+#define INJECT_MS   150 /* an input event this soon after an injection is the injection, not the operator */
+#define INJECT_RING 16  /* the latest injections' times kept: a key's press and release, a knob's turns */
 
 static pthread_mutex_t mux = PTHREAD_MUTEX_INITIALIZER;
 static ctl_info_t      owner;
 static ctl_info_t      lender;    /* who a takeover took it from (ctl_give_back), kind CTL_NONE: no one (it was free) */
 static bool            lent;      /* that takeover is still the last change of holder: lender is to have it back */
 static atomic_uint     version;
-static atomic_uint_fast64_t injected_ms;
+/* The remote's latest injections, CLOCK_REALTIME in us (the input devices' event clock), under mux. An event read
+ * from a device is matched by the time the kernel gave it, not by when the GUI reads it: under load (an FT8 app
+ * decoding) the GUI read the remote's keys more than INJECT_MS late and took them for the operator's, and the
+ * remote lost control to "the radio's operator" with nobody at the radio (2026-11-23, both radios) */
+static int64_t  inj_us[INJECT_RING];
+static unsigned inj_n;
 
 static uint64_t now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1000ULL + ts.tv_nsec / 1000000;
+}
+
+static int64_t realtime_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
 void ctl_init(void) {
@@ -107,14 +119,33 @@ uint32_t ctl_version(void) {
 }
 
 void ctl_injected(void) {
-    atomic_store(&injected_ms, now_ms());
+    int64_t t = realtime_us();
+
+    pthread_mutex_lock(&mux);
+    inj_us[inj_n++ % INJECT_RING] = t;
+    pthread_mutex_unlock(&mux);
+}
+
+/* Under mux: t (us) within INJECT_MS after one of the injections, or 5 ms before it (its time read before the
+ * write) */
+static bool injected_at(int64_t t) {
+    for (unsigned i = 0; i < INJECT_RING; i++)
+        if (inj_us[i] && t >= inj_us[i] - 5000 && t - inj_us[i] < INJECT_MS * 1000)
+            return true;
+    return false;
+}
+
+static void local_at(int64_t t) {
+    pthread_mutex_lock(&mux);
+    if (!injected_at(t) && owner.kind != CTL_LOCAL)
+        set_owner(CTL_LOCAL, 0, "");
+    pthread_mutex_unlock(&mux);
 }
 
 void ctl_local_input(void) {
-    if (now_ms() - atomic_load(&injected_ms) < INJECT_MS)
-        return;
-    pthread_mutex_lock(&mux);
-    if (owner.kind != CTL_LOCAL)
-        set_owner(CTL_LOCAL, 0, "");
-    pthread_mutex_unlock(&mux);
+    local_at(realtime_us());
+}
+
+void ctl_local_event(int64_t sec, int64_t usec) {
+    local_at(sec * 1000000 + usec);
 }

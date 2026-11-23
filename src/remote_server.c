@@ -102,6 +102,7 @@
 #include <stdio.h>       /* before jpeglib.h, which wants FILE */
 
 #include "remote_server.h"
+#include "rtty.h"
 #include "remote_sessions.h"
 #include "control_owner.h"
 #include "clock.h"
@@ -119,6 +120,7 @@
 #include "dialog_field.h"
 #include "dsp.h"
 #include "ext_tune.h"
+#include "tune_tx.h"
 #include "ft8_window.h"
 #include "lv_drivers/display/drm.h"
 #include "main.h"
@@ -292,6 +294,7 @@ typedef struct {
     int32_t txio, txqo, txig, txip;     /* the band's TX calibration: DC offsets, I/Q balance (Settings > TX CAL) */
     int32_t linein;                     /* the base's line-in gain (Settings > Audio, 0-36: its codec's PGA, 0.5 dB) */
     int32_t tune, tune_s;   /* TUNE for an external tuner on, its time limit */
+    int32_t tpwr10;         /* TUNE's own power, tenths of a watt (Settings > TX Cal > EXTERNAL TUNER) */
     int32_t rxo;            /* the radio holds itself receive only (radio_rx_only_held: the Sentry, or a session
                              * without TX in control); an int, not a bool: no padding for memcmp to see */
     int32_t ask;            /* a TCI client's question to transmit is on the screen (tci_ask_open): the bench answers
@@ -302,6 +305,7 @@ typedef struct {
     int32_t txf;            /* the frequency it transmits on (radio_tx_freq: split, XIT, a TX shift) */
     int32_t split, rit, xit;
     int32_t ifs, comp;          /* the band's IF shift (Hz), the compressor's ratio (1 = off, 2-8 = N:1) */
+    int32_t wch, wchm;          /* G's own channel (Hz, mode; 0 and -1: none yet) */
     int32_t play;           /* the base's play mode (audio_play_mode_t): 0 the receiver to the processor */
     int32_t heard;          /* the Sentry's LISTEN: 0 the receiver, 1 the SDR, 2 both, 3 nothing; -1 no Sentry */
     int32_t spk, moni;      /* the speaker's level and the TX monitor's as last sent the base (-1 none yet) */
@@ -327,7 +331,9 @@ typedef enum { P_FREQ, P_MODE, P_AGC, P_PRE, P_ATT, P_NB, P_NR, P_SQL, P_RFG, P_
                P_LINEIN,
                /* for the bench's tests, which must know where each radio listens and sends (tools/bench, its state
                 * check): split, RIT and XIT, and what the speaker plays (the Sentry's LISTEN, for now) */
-               P_SPLIT, P_RIT, P_XIT, P_HEARD, P_IFS, P_COMP } pcmd_id_t;
+               P_SPLIT, P_RIT, P_XIT, P_HEARD, P_IFS, P_COMP, P_WCH,
+               /* TUNE's own power (tenths), for the bench's tune tests, set and put back as found */
+               P_TPWR } pcmd_id_t;
 
 typedef struct {
     pcmd_id_t id;
@@ -955,7 +961,7 @@ static void emit(int fd, uint16_t type, uint16_t code, int32_t value) {
 }
 
 static void power_cb(void *arg) {
-    keypad_power_set(*(bool *)arg);
+    keypad_power_from(*(bool *)arg, true);     /* the remote's: control stays where it is */
 }
 
 /* The POWER key where there is no device for it (the X6200), as radio.c posts the base's: told until its job is
@@ -1180,6 +1186,12 @@ static void panel_apply(void *arg) {
         /* The 1:1 suite's: the band's IF shift (the X6100's base; the GUI's own range) and the compressor's ratio */
         case P_IFS:    param_i_set(cfg_band_if_shift, LV_CLAMP(-40000, p->a, 40000)); break;
         case P_COMP:   param_i_set(cfg_comp, LV_CLAMP(1, p->a, 8)); break;
+        /* G's own channel, its memory only (the bench puts it back as found): 0 none, a frequency this radio tunes */
+        case P_WCH:    app_sentry_g_channel_set(p->a, LV_CLAMP(-1, p->b, (int32_t)radio_mode_last)); break;
+        case P_TPWR:   /* the Settings slider's range (tune_tx.h) */
+            cfg_tune_pwr_set(LV_CLAMP((int)lroundf(TUNE_PWR_MIN_W * 10), p->a, (int)lroundf(TUNE_PWR_MAX_W * 10))
+                             / 10.0f);
+            break;
     }
 }
 
@@ -1210,7 +1222,7 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
         {"txio", P_TXIO}, {"txqo", P_TXQO}, {"txig", P_TXIG}, {"txip", P_TXIP},
         {"linein", P_LINEIN},
         {"split", P_SPLIT}, {"rit", P_RIT}, {"xit", P_XIT}, {"heard", P_HEARD},
-        {"ifs", P_IFS},   {"comp", P_COMP},
+        {"ifs", P_IFS},   {"comp", P_COMP}, {"wch", P_WCH}, {"tpwr", P_TPWR},
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strcasecmp(names[i].name, name))
@@ -1227,6 +1239,8 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
             set_refused(c, "freq: locked (LOCK, or an app holds the frequency)");
         else if (names[i].id == P_FREQ && !cfg_is_valid_hw_freq(a))
             set_refused(c, "freq: not a frequency this radio tunes");
+        else if (names[i].id == P_WCH && a != 0 && !cfg_is_valid_hw_freq(a))
+            set_refused(c, "wch: not a frequency this radio tunes");
         else if (names[i].id == P_IFS && !(radio_caps() & HW_CAP_IF_SHIFT))
             set_refused(c, "ifs: this radio's base has no IF shift");   /* the X6200's: only the dial would move */
         else if (!panel_put(names[i].id, a, b)) {
@@ -1272,6 +1286,7 @@ static void pstate_read(pstate_t *s) {
     s->ulock = main_screen_freq_user_locked();
     s->tune  = ext_tune_on();
     s->tune_s = ext_tune_limit_s();
+    s->tpwr10 = (int32_t)lroundf(param_f_get(cfg_tune_pwr) * 10.0f);
     s->rxo   = radio_rx_only_held();
     s->ask   = tci_ask_open();
     s->txf   = radio_tx_freq();
@@ -1280,6 +1295,7 @@ static void pstate_read(pstate_t *s) {
     s->xit   = param_i_get(cfg_xit);
     s->ifs   = param_i_get(cfg_band_if_shift);
     s->comp  = param_i_get(cfg_comp);
+    app_sentry_g_channel(&s->wch, &s->wchm);
     s->play  = (int32_t)radio_play_mode();
     s->heard = app_sentry_page() ? app_sentry_heard() : -1;
     s->spk   = radio_rxvol_sent();
@@ -1303,16 +1319,16 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
     snprintf(buf, n,
              "state {\"freq\":%d,\"mode\":%d,\"flo\":%d,\"fhi\":%d,\"kt\":%d,\"agc\":%d,\"pre\":%d,\"att\":%d,"
              "\"nb\":%d,\"nr\":%d,\"sql\":%d,\"rfg\":%d,\"vol\":%d,\"pwr\":%d.%d,\"step\":%d,\"zoom\":%d,"
-             "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"ulock\":%d,"
+             "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"tpwr\":%d,\"ulock\":%d,"
              "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"ask\":%d,\"txio\":%d,\"txqo\":%d,\"txig\":%d,\"txip\":%d,"
              "\"linein\":%d,\"txf\":%d,\"split\":%d,\"rit\":%d,\"xit\":%d,\"play\":%d,\"heard\":%d,\"spk\":%d,"
-             "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,\"plays\":%d,\"ifs\":%d,\"comp\":%d,"
+             "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,\"plays\":%d,\"ifs\":%d,\"comp\":%d,\"wch\":%d,\"wchm\":%d,"
              "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
-             s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->txf, s->split,
-             s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->plays, s->ifs, s->comp, s->app, s->win, s->pg,
-             s->fp);
+             s->tpwr10, s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->txf,
+             s->split, s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->plays, s->ifs,
+             s->comp, s->wch, s->wchm, s->app, s->win, s->pg, s->fp);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */
@@ -1937,7 +1953,8 @@ static void app_apply(void *arg) {
             main_screen_start_app((press_action_t)a->arg);
             break;
         case A_APP_CLOSE:
-            if (dialog_is_run()) main_screen_close_app();
+            /* a window, or RTTY: the one app that is the main screen's panel, no window (screen_main.c) */
+            if (dialog_is_run() || rtty_get_state() != RTTY_OFF) main_screen_close_app();
             break;
         case A_SENTRY:
             backlight_tick();
@@ -2782,7 +2799,10 @@ static void handle_text(client_t *c, char *text) {
     } else if ((!strcmp(a[0], "ft8") || !strcmp(a[0], "js8")) && n >= 3 && !strcmp(a[1], "wf")) {
         c->appwf = atoi(a[2]) != 0;         /* only watching: no role needed */
     } else if (!strcmp(a[0], "ft8") && n >= 2) {
-        if (!allowed(c, ROLE_OPERATE, true))
+        /* "stop" with operate alone, without control: stopping puts nothing on the air, as a PTT's release and the
+         * page's own TUNE stop. Under control's rule an app's over went on after the radio gave control away and its
+         * "ft8 stop" was refused (2026-11-23) */
+        if (!allowed(c, ROLE_OPERATE, strcasecmp(a[1], "stop") != 0))
             return;
         /* The ones that send (a CQ, Auto answering, a reply, calling the station chosen) need a session that may
          * transmit, as PTT and TUNE do: up to v0.3.12.28 a session without TX could start them (2026-11-18) */
@@ -2855,7 +2875,7 @@ static void handle_text(client_t *c, char *text) {
 
         scheduler_put(app_apply, &q, sizeof(q));
     } else if (!strcmp(a[0], "js8") && n >= 2) {
-        if (!allowed(c, ROLE_OPERATE, true))
+        if (!allowed(c, ROLE_OPERATE, strcasecmp(a[1], "stop") != 0))    /* stop: without control, as FT8's */
             return;
         if (!app_js8_cmd(a[1], n >= 3 ? a[2] : NULL))
             client_textf(c, "err js8 %s", a[1]);

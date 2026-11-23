@@ -46,8 +46,12 @@ void ctl_get(ctl_info_t *out);
 uint32_t ctl_version(void);                     /* one more at every change */
 
 /* The radio's own keys and knobs: control comes back to the operator at the radio, unless the
- * event was one the remote server injected a moment ago (they come through the same devices) */
+ * event was one the remote server injected a moment ago (they come through the same devices).
+ * ctl_local_event: an event read from an input device, by the time the kernel gave it (its
+ * input_event_sec/usec, the device's clock: CLOCK_REALTIME), however late the GUI reads it;
+ * ctl_local_input: one with no such time (a touch, a keyboard's chord, the base's POWER key) */
 void ctl_local_input(void);
+void ctl_local_event(int64_t sec, int64_t usec);
 void ctl_injected(void);
 
 /* On the air, by anyone (the radio's state) */

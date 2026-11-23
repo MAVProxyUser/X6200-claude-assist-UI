@@ -209,8 +209,9 @@ static void keypad_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         data->continue_reading = true;
 
         if (in.type == EV_KEY) {
-            if (in.value)
-                ctl_local_input();   /* a key at the radio: control is the operator's (unless injected) */
+            if (in.value == 1)      /* a key at the radio: control is the operator's (unless injected); a held
+                                     * key's repeats are that press again, stamped by the kernel's timer */
+                ctl_local_event(in.input_event_sec, in.input_event_usec);
             if (backlight_tick() && in.value && !voice_is_on()) {
                 /* the press woke the screen: that was its job, the radio does not see it */
             } else if (in.code == VOL_PRESS) {
@@ -241,9 +242,13 @@ static void keypad_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
  * the browser sends it where there is no device for it: the same path as a press on a device,
  * so the wake, the hold and the control owner work the same. GUI thread */
 void keypad_power_set(bool down) {
+    keypad_power_from(down, false);
+}
+
+void keypad_power_from(bool down, bool injected) {
     struct input_event in = {.type = EV_KEY, .code = KEY_POWER, .value = down ? 1 : 0};
 
-    if (down) {
+    if (down && !injected) {
         ctl_local_input();
     }
     if (backlight_tick() && down && !voice_is_on()) {

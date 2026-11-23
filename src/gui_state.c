@@ -27,7 +27,8 @@
 #include <unistd.h>
 
 #define STATE_FILE "/mnt/gui_state.conf"
-#define KEYS       64
+#define KEYS       160     /* 64 filled up with the direction finder's: the Sentry G's own channel (s.wch, s.wchm,
+                                * s.ga) was dropped without a word and G opened on CB 19 every time (2026-11-23) */
 
 static struct {
     char    k[24];
@@ -59,7 +60,14 @@ void gui_state_set(const char *key, int32_t val) {
     int i = find(key);
 
     if (i < 0) {
-        if (add(key, val) >= 0) dirty = true;
+        static bool told;
+
+        if (add(key, val) >= 0)
+            dirty = true;
+        else if (!told) {       /* said once: a key that does not fit is a setting that is not kept */
+            told = true;
+            LV_LOG_WARN("gui state: no room for %s (%d keys): not kept", key, KEYS);
+        }
     } else if (kv[i].v != val) {
         kv[i].v = val;
         dirty   = true;

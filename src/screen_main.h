@@ -19,6 +19,7 @@
 #define MEM_FT4_ID      200
 #define MEM_WSPR_ID     300
 #define MEM_SSTV_ID     400
+#define MEM_SENTRY_ID   500     /* the Sentry's A dial while its G has the radio (app_sentry.c walkie_own) */
 
 void mem_load(uint16_t id);
 void mem_save(uint16_t id);

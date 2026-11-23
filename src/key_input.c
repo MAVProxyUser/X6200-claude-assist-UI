@@ -102,6 +102,10 @@ void keyboard_takes_typing(lv_obj_t *obj) {
     lv_obj_add_flag(obj, TYPING_FLAG);
 }
 
+void keyboard_stops_typing(lv_obj_t *obj) {
+    lv_obj_clear_flag(obj, TYPING_FLAG);
+}
+
 /* With Shortcuts off, where the keyboard's presses may go: a text box or a widget that takes typing has the focus */
 static bool typing_has_focus(void) {
     lv_obj_t *f = keyboard_group ? lv_group_get_focused(keyboard_group) : NULL;

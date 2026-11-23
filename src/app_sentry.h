@@ -35,6 +35,12 @@ char app_sentry_page(void);
  * "heard"); and set for now, each page's saved LISTEN left alone (LVGL thread) */
 int app_sentry_heard(void);
 void app_sentry_set_heard(int h);
+/* G's own channel (s.wch Hz, s.wchm the X6200's mode; 0 and -1: none yet, CB 19 then): read from any thread (the
+ * remote's "wch"); set with the LVGL thread, G's memory only, the dial not tuned (the remote's "set wch HZ MODE",
+ * what the bench puts back); loaded from the GUI's state once it is read (gui_main.c) */
+void app_sentry_g_channel(int32_t *hz, int32_t *mode);
+void app_sentry_g_channel_set(int32_t hz, int32_t mode);
+void app_sentry_g_channel_load(void);
 /* The SDR pool's panel (sdr_pool.h), the Sentry opened on F for it when it is not open (APP held on H) */
 void app_sentry_open_pool(void);
 

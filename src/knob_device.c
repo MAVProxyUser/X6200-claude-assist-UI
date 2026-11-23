@@ -42,12 +42,12 @@ static void vol_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
             if (in.type == EV_REL) {
                 sum += in.value;
                 turned = true;
+                ctl_local_event(in.input_event_sec, in.input_event_usec);  /* unless the remote's */
             }
         }
         if (turned) {
             bool woke = backlight_knob_tick();     /* the turn that ends the screensaver only ends it */
 
-            ctl_local_input();
             if (!woke) {
                 pending                = sum;
                 data->continue_reading = true;

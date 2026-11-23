@@ -29,6 +29,8 @@ keypad_t *keypad_init(char *dev_name);
 /* The POWER key from elsewhere than a device: the base's packets (hw_pack_t.power_key), the
  * browser. GUI thread; a press then a release, like the key */
 void keypad_power_set(bool down);
+/* The same, injected: the remote's POWER key where there is no device for it, never the operator's */
+void keypad_power_from(bool down, bool injected);
 
 /* One already-decoded button, the same press / hold (or repeat) / release as a matrix key. value 1 is the
  * press; 0 is the release. GUI thread. For a board whose keys are not the X6100's

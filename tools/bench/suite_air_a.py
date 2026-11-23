@@ -35,8 +35,9 @@ The tests (the features each covers; "part of" where only part of the feature is
   cw-alc            CW keyed through TCI: the ALC the base reports while it sets the power (part of alc-cw-grey)
   qsy-out           PTT on 14.320, the Panel's QSY to 14.360 under it: 0 W at once, nothing heard there
                     (tx-stopped-on-qsy-out)
-  tune              TUNE at its own power, 0.1 W only (set at the radio: Settings > TX Cal > EXTERNAL TUNER; at
-                    more, every tune test says so and does not run): the lease, its lapse, tune 0,
+  tune              TUNE at its own power, 0.1 W only (set for the test with the remote's "set tpwr" and put back
+                    after; a GUI without it: set at the radio, Settings > TX Cal > EXTERNAL TUNER, else not run):
+                    the lease, its lapse, tune 0,
                     LOCK; the state after; each change that stops it; refused on the air; split's carrier on
                     VFO B (ext-tune-panel-lease,
                     ext-tune-carrier-txfreq; part of ext-tune-restores-state, ext-tune-stops-on-change,
@@ -843,9 +844,20 @@ def tune_over(ctx, T, secs=3.0, during=None, renew=True, start=None, ignore=TUNE
 
 
 def tune_gate(ctx, max_w):
-    """TUNE's own power and limit as the sender keeps them; a power over max_w: not run (it is set only in Settings >
-    TX Cal > EXTERNAL TUNER: no remote or web setter, and the GUI is never restarted for a changed params.db)"""
-    T, L = tune_settings(ctx.snd.host)
+    """TUNE's own power and limit for the test: the power set to max_w with the remote's "set tpwr" (the owner,
+    2026-11-23: "Yes, set it"; the snapshot keeps the power as found and finish() puts it back, its settings row too)
+    and read back from the radio's state. A GUI without the setter: both as its settings database keeps them, a power
+    over max_w not run (the GUI is never restarted for a changed params.db)"""
+    snd = ctx.snd
+    if "tpwr" in snd.state:
+        want = round(max_w * 10)
+        if int(snd.state["tpwr"]) != want:
+            snd.send(f"set tpwr {want}")
+            snd.wait(f"TUNE power {max_w} W", lambda: int(snd.state.get("tpwr", -1)) == want, bench.SET_WAIT_S)
+        T, L = int(snd.state["tpwr"]) / 10.0, int(snd.state.get("tune_s", 15))
+        say(f"{snd.name}: TUNE power {T} W (set for the test, put back after), its limit {L} s")
+    else:
+        T, L = tune_settings(snd.host)
     if T > max_w + 1e-6:
         raise NotRun(f"{ctx.snd.name}'s TUNE power reads {T} W; these tune tests run at {max_w} W at most: set it at "
                      f"the radio (Settings > TX Cal > EXTERNAL TUNER, TUNE power {max_w} W)")
@@ -2265,10 +2277,13 @@ def body_ft8_tx(ctx):
     heard = bool(overs) and not any(o["deaf"] for o in overs)
     near = last.get("w") is not None and 0.3 <= last["w"] <= 0.7
     data_tx = (rig_mid or "").split()[:1] in (["PKTUSB"], ["PKTLSB"])
-    data_back = (rig_after or "").split()[:1] == ["USB"] and mode_after == 2
+    # FT8 is in USB-D for as long as the app is open, between its overs too (the manual: "FT8, JS8, WSPR, PSK, Olivia
+    # and JTTY were in USB-D already"; SSTV, RTTY and WeFax are the ones back in LSB or USB after each over); the
+    # mode as found once the app closes is finish()'s check
+    data_back = (rig_after or "").split()[:1] == ["PKTUSB"] and mode_after == 3
     ctx.row("ft8-data-mode", data_tx and data_back and heard,
             f"rigctl's mode on the air {(rig_mid or '').split()[:1]}, after it {(rig_after or '').split()[:1]}, the "
-            f"state's mode after {mode_after} (USB 2 wanted)", (), ["digi-tx-data-mode"])
+            f"state's mode after {mode_after} (FT8 keeps USB-D, 3, while it is open)", (), ["digi-tx-data-mode"])
     alc_ok = x6200 or (last.get("alc") is not None and last["alc"] <= 3.0)
     ctx.row("ft8-alc", alc_ok and near and heard,
             f"the last CQ: {fmt(last.get('w'), 2)} W at {FT8_W} W set, ALC {fmt(last.get('alc'))}"
@@ -2281,7 +2296,8 @@ def body_ft8_tx(ctx):
             + (f"; '0 W the whole TX' said: {zero[-1][-90:]!r}" if zero else ""), ["digi-tx-level-auto"])
     if x6200:
         conv = len(ws) >= 2 and all(w is not None and 0.35 <= w <= 0.65 for w in ws[-2:])
-        reached = next((i for i, o in enumerate(overs) if o["w"] is not None and o["w"] >= 0.45), None)
+        # reached as tx_level.c holds it: within the meter's 0.1 W step of the setting (power_hold)
+        reached = next((i for i, o in enumerate(overs) if o["w"] is not None and o["w"] >= FT8_W - 0.1 - 0.005), None)
         creep = [round(o["step"][1] - o["step"][0], 2) for o in overs[reached + 1:] if o["step"]] \
             if reached is not None else []
         ctx.row("ft8-level-x6200", conv and heard and reached is not None and not any(c > 0.5 for c in creep),

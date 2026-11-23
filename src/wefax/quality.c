@@ -115,11 +115,15 @@ static int best_shift(const float *a, const float *b, unsigned w)
     return abs(shift);
 }
 
+#define FADE_ROWS 41    /* the fading's window: the row and the 20 each side */
+
 static bool measure(const uint8_t *img, unsigned w, unsigned rows, wefax_quality_measures_t *m)
 {
     unsigned        r0 = (unsigned)(0.12 * rows), r1 = (unsigned)(0.93 * rows), n = r1 - r0;
     const uint8_t  *r  = img + (size_t)r0 * w;
-    float          *mean = malloc(n * sizeof(float)), *tmp = malloc(n * sizeof(float));
+    /* tmp: the fading's window of FADE_ROWS rows too, however short the fax: a Save at 11 rows wrote 41 floats
+     * into room for 7 and the GUI died (2026-11-23, both radios) */
+    float          *mean = malloc(n * sizeof(float)), *tmp = malloc((n > FADE_ROWS ? n : FADE_ROWS) * sizeof(float));
     float          *p90 = malloc(n * sizeof(float)), *white_row = malloc(n * sizeof(float));
     float          *coh = malloc(n * sizeof(float));
     float          *xa = malloc(w * sizeof(float)), *xb = malloc(w * sizeof(float));
@@ -169,13 +173,13 @@ static bool measure(const uint8_t *img, unsigned w, unsigned rows, wefax_quality
         }
     }
 
-    /* fading: the row mean against the median of the 41 rows around it */
+    /* fading: the row mean against the median of the FADE_ROWS rows around it */
     unsigned faded = 0;
 
     for (unsigned i = 0; i < n; i++) {
         unsigned k = 0;
 
-        for (int j = (int)i - 20; j <= (int)i + 20; j++)
+        for (int j = (int)i - FADE_ROWS / 2; j <= (int)i + FADE_ROWS / 2; j++)
             tmp[k++] = mean[j < 0 ? 0 : j >= (int)n ? n - 1 : (unsigned)j];
         if (fabsf(mean[i] - median_f(tmp, k)) > 25.0f)
             faded++;

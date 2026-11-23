@@ -290,7 +290,7 @@ class Radio:
 # mode (a band change loads the band's ATT, PRE and AGC, so those after it), the receiver's, the rest; LISTEN last
 SET_ORDER = ("split", "vfo", "freq", "mode", "filter", "zoom", "att", "pre", "agc", "rfg", "sql", "nb", "nr", "rit",
              "xit", "ifs", "comp",
-             "atu", "pwr", "vol", "txio", "txqo", "txig", "txip", "wch", "heard")
+             "atu", "pwr", "tpwr", "vol", "txio", "txqo", "txig", "txip", "wch", "heard")
 # Kept by the band (or the band's mode): put back only once the dial is on that band again
 BAND_KEYS = {"mode", "filter", "zoom", "att", "pre", "agc", "txio", "txqo", "txig", "txip", "ifs"}
 # What a test may change and finish() puts back ("heard" is not: the Sentry's page A puts its own LISTEN back)
@@ -614,18 +614,32 @@ def arm(r, on, mode=None):
         ensure(r, {"mode": mode})
 
 
+G_FIRST_HZ = 27185000           # the Sentry G's own channel the first time (CB 19)
+G_ENTRY_S = 3.0                 # G's entry tune comes within this of the page saying G
+
+
 def open_page(r, letter):
-    """The Sentry on its page letter, asked twice (an app still closing can take the first ask)"""
+    """The Sentry on its page letter, asked twice (an app still closing can take the first ask). G entered: its own
+    channel's tune waited for (a GUI with "wch": the page says G a moment before G tunes its channel, and a dial set
+    meanwhile was moved again, 2026-11-23); a G that does not tune (TX armed, the dial held, on an SDR's channel)
+    after G_ENTRY_S"""
     for wait in (5, 8):
         if r.state.get("pg") == letter:
             return
         r.send(f"open sentry {letter}")
         try:
             r.wait(f"the Sentry's page {letter}", lambda: r.state.get("pg") == letter, wait)
-            return
+            break
         except Refused:
             if wait == 8:
                 raise
+    if letter == "G" and r.state.get("wch") is not None:
+        want = int(r.state.get("wch") or 0) or G_FIRST_HZ
+        try:
+            r.wait("G on its own channel", lambda: abs(int(r.state.get("freq", 0)) - want) <= 3000, G_ENTRY_S)
+        except Refused:
+            pass                        # G stayed on the dial as found: its own message says why
+        time.sleep(0.3)
 
 
 def close_apps(r):
@@ -1985,7 +1999,9 @@ def clean_log(host):
           " n=d.execute(\"delete from qso_log where remote_callsign glob 'Q[0-9]TST*' or local_callsign glob "
           "'Q[0-9]TST*'\").rowcount;d.commit()\nexcept sqlite3.Error:\n pass\n"
           "p='/mnt/ft_log.adi'\ntry:\n s=open(p).read()\nexcept OSError:\n s=''\n"
-          "parts=re.split(r'(?i)(<eor>)',s);keep=[];m=0\n"
+          # the header (up to <eoh>) kept as it is: it was part of the first record, and went with a test QSO there
+          "h=re.search(r'(?i)<eoh>',s);e=h.end() if h else 0\n"
+          "parts=re.split(r'(?i)(<eor>)',s[e:]);keep=[s[:e]];m=0\n"
           "for i in range(0,len(parts)-1,2):\n"
           " r=parts[i]+parts[i+1]\n"
           " if re.search(r'(?i)<(call|station_callsign|operator):\\d+>Q\\dTST',r): m+=1\n"

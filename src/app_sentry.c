@@ -67,6 +67,7 @@
 #include "cfg/cfg_api.h"
 #include "cfg/settings_manager_api.h"
 #include "cfg/tx_ranges.h"     /* the SDR walkie's bands: tx_ranges_sdr_check */
+#include "cfg/memory.h"        /* A's dial kept while G has the radio: cfg_memory_save, MEM_SENTRY_ID */
 #include "dsp.h"
 #include "events.h"
 #include "gui_styles.h"
@@ -98,6 +99,7 @@
 #include "gps.h"
 #include "station.h"          /* station_position: the GPS, the phone, else the locator */
 
+#include <stdatomic.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2083,7 +2085,23 @@ static void walkie_group_mode(void);
 static void x62_by_hand(void);
 static bool dial_held(void);    /* TX unlocked or on the air: the tuning knobs held, and said so */
 static void w_say(const char *portrait, const char *title, const char *text);  /* G's message line, or the OSD */
-static void ws_view_next(void);
+static bool w_has_list(void);   /* G on a group of channels (CB, the SDR's): F4 lists them */
+static bool wl_on;              /* G's channel list open (F4 on CB or the SDR's groups) */
+static void wl_open(void);
+static void wl_close(void);     /* closed as it was: nothing tuned */
+static void wl_hide(void);      /* the same, without a word (G left, the Sentry closing) */
+static void wl_step(int d);     /* its pick, d channels on */
+static void wl_tune(void);      /* the pick tuned, the list closed */
+static bool wl_key(uint32_t key);   /* a key while it is open: true when it was the list's */
+static void walkie_own(void);   /* G entered: A's dial kept, G's own channel on the dial */
+static void walkie_leave(void); /* G left: A's dial back */
+static void wa_load(void);      /* A's dial kept from before a restart, read once */
+static bool wa_back(bool always);
+static bool wa_kept;            /* A's dial kept while G has the X6200 (MEM_SENTRY_ID), put back as G is left */
+static bool wa_check;           /* and kept from an earlier visit (a restart, a close that could not put it back) */
+static bool    w_in;            /* G entered (walkie_own) and not left */
+static bool    w_mine;          /* the dial G's: tuned by G, or moved while G shows: its channel is G's (w_own_note) */
+static int32_t w_entry_hz;      /* the dial once G was entered */
 static void ws_feed(void);      /* G's picture, a frame of the X6200's spectrum */
 static void g_gpu_draw(void);   /* G's two pictures by the GPU, when something of them changed */
 static bool       g_gpu;            /* G held up: its spectrum and voiceprint drawn by the GPU (g_gpu_draw) */
@@ -4741,6 +4759,7 @@ static void rtl_listen_turn(int32_t diff) {
 /* The VFO knob is the screen's radio's: on B the stick's channel always (heard or not), on C a stick entry playing,
  * on G the channel whichever radio has it (the dial is not turned a step as well) */
 static bool knob_taken(void) {
+    if (wl_on && scr == SCR_WALKIE) return true;    /* G's channel list open: the VFO goes down it */
     if (g_armed || g_sdr_armed || radio_get_state() == RADIO_TX) return true;  /* held: dial_held says why */
     if (scr == SCR_WALKIE) return w_sdr_hz != 0;    /* the dial, fine, as on A (only the arrows step CB's
                                                      * channels); on the SDR its channel */
@@ -5704,7 +5723,6 @@ static void show_legend(void) {
     static const char *const mfk[SCR_N] = {"PAN, PUSH STRONGEST", "ROW, PUSH CHANGE", "BAND, PUSH LISTEN",
                                            "FREQ, PUSH OPEN", "ITEM, PUSH OPEN", "PAN, PUSH STRONGEST",
                                            "SIGNAL, PUSH LISTEN", "GROUP, PUSH CB 19"};
-
     char v[24];
 
     vol_text(v, sizeof(v));
@@ -5713,6 +5731,12 @@ static void show_legend(void) {
     char        l[160];
     const char *who = vol_stick() ? rtl_spectrum_dev_tag() : BOARD_NAME;
 
+    if (scr == SCR_WALKIE && wl_on) {   /* G's channel list open: both knobs go down it, GEN closes it */
+        snprintf(l, sizeof(l), "VFO, MFK: CHANNEL, PUSH TUNE | " RING_HINT " | VOL: %s %s %s | GEN: BACK", who,
+                 vol_short[vol_fn], v);
+        lv_label_set_text(legend_l, l);
+        return;
+    }
     snprintf(l, sizeof(l), "VFO: TUNE | MFK: %s | " RING_HINT " | VOL: %s %s %s, PUSH %s | GEN: HELP", mfk[scr], who,
              vol_short[vol_fn], v, vol_short[(vol_fn + 1) % 3]);
     if (strlen(l) > 98)
@@ -6658,8 +6682,11 @@ static void go(scr_t s) {
     scr_t was = scr;
 
     scr = s;
-    if (was == SCR_WALKIE && s != SCR_WALKIE) w_sdr_left();    /* the SDR's transmitter off, the X6200 heard (A and
-                                                                * B put their own LISTEN on below) */
+    if (was == SCR_WALKIE && s != SCR_WALKIE) {
+        wl_hide();                      /* G's channel list goes with it */
+        w_sdr_left();                   /* the SDR's transmitter off, the X6200 heard (A and B put their own LISTEN on
+                                         * below) */
+    }
     rtl_want(s == SCR_RTL);     /* C's own state; the stick itself runs for the whole Sentry */
     if ((s == SCR_SCAN || s == SCR_RTL) && was != s) {      /* one picture, A's view or C's */
         rtl_seq  = 0;
@@ -6672,8 +6699,12 @@ static void go(scr_t s) {
     audio_scope(s == SCR_WALKIE);       /* G's voiceprint: the receiver's audio only while it shows */
     rtl_spectrum_scope(s == SCR_WALKIE && w_sdr_hz);   /* the stick's: G's on its own channels */
     if (was != s && (was == SCR_WALKIE || s == SCR_WALKIE)) walkie_show(s == SCR_WALKIE);
-    if (was != s && s == SCR_WALKIE) walkie_enter();       /* on a channel, never "--" */
+    if (was != s && s == SCR_WALKIE) {
+        walkie_enter();                 /* on a channel, never "--" */
+        walkie_own();                   /* A's dial kept, G's own channel on it */
+    }
     if (g_armed && s != SCR_SCAN && s != SCR_WALKIE) walkie_arm(false);    /* armed only on A and G */
+    if (was == SCR_WALKIE && s != SCR_WALKIE) walkie_leave();  /* A's dial back, after the lock above */
     show_screen();
 }
 
@@ -7163,6 +7194,10 @@ static void blink_cb(lv_timer_t *t) {
     state_keep();                                   /* for a restart of the GUI: gui_state.c */
     rtl_spectrum_rds_watch(rds_channel());          /* B's FM broadcast channel's RDS (C's stick entry's) */
     if (scr == SCR_SYSTEM && n % 2 == 0) sys_load_show();   /* its load each second */
+    if (wa_kept && scr != SCR_WALKIE) wa_back(false);   /* A's dial, G left while TX was armed: back once locked */
+    /* G's channel list takes a keyboard's typing (wl_open), Tab too, which LVGL takes as its own: the group's editing
+     * off, and the MFK would move the focus instead of choosing. On again */
+    if (wl_on && !lv_group_get_editing(keyboard_group)) lv_group_set_editing(keyboard_group, true);
     {                                               /* the title again when the base's version comes (after a start) */
         static char titled_ver[24];
         const char *ver = base_ver_short();
@@ -7757,11 +7792,19 @@ static void fkey(int k) {
             }
             break;
         case SCR_WALKIE:                /* F1 and F2 as the arrows: CH -/+ on CB and the SDR's groups, a step elsewhere;
-                                         * F3 the SDR's TX gain */
+                                         * F3 the SDR's TX gain; F4 the group's channels in a list (wl_open); with it
+                                         * open F1 and F2 its pick, F4 tunes it, F5 closes it as it was */
+            if (wl_on) {
+                if (k == 0 || k == 1) wl_step(k ? 1 : -1);
+                if (k == 2) w_sdr_gain_next();
+                if (k == 3) wl_tune();
+                if (k == 4) wl_close();
+                break;
+            }
             if (k == 0) walkie_arrow(-1);
             if (k == 1) walkie_arrow(1);
             if (k == 2) w_sdr_gain_next();
-            if (k == 3) ws_view_next();
+            if (k == 3 && w_has_list()) wl_open();
             if (k == 4) walkie_group_mode();
             break;
         case SCR_TRACK:
@@ -8086,6 +8129,7 @@ static void key_cb(lv_event_t *e) {
             default: break;
         }
     }
+    if (wl_on && scr == SCR_WALKIE && wl_key(key)) return;     /* G's channel list: the MFK, ENTER, BACK, digits */
 
     if (help_on && key != KEY_VOL_LEFT_EDIT && key != KEY_VOL_RIGHT_EDIT && key != KEY_VOL_LEFT_SELECT &&
         key != KEY_VOL_RIGHT_SELECT) {
@@ -8156,6 +8200,8 @@ static void click_cb(lv_event_t *e) {
             pp_action(0);
         else if (sp_on)
             sp_close(sp_units[sp_sel]);
+        else if (wl_on && scr == SCR_WALKIE)
+            wl_tune();                  /* G's channel list: the pick tuned */
         else
             press();
     }
@@ -8163,6 +8209,10 @@ static void click_cb(lv_event_t *e) {
 
 /* The main knob: the radio is the operator's again */
 static void rotary_cb(int32_t diff) {
+    if (wl_on && scr == SCR_WALKIE) {   /* G's channel list: the VFO goes down it as the MFK does (it tunes nothing, */
+        wl_step(diff);                  /* so armed too) */
+        return;
+    }
     if (dial_held()) return;            /* TX unlocked: the dial is not moved by a bump */
     if (f4_roll && scr == SCR_RTL) {    /* B's F4 held: its SDRs, one a click, used when F4 is let go */
         f4_rolled = true;
@@ -8231,8 +8281,9 @@ static void filter_step(void) {
 
 static void band_key(bool up) {
     if (scr == SCR_WALKIE) {            /* G: the arrows step: CB's and the SDR's channels, elsewhere the dial by A's
-                                         * step (the MFK goes from group to group) */
-        walkie_arrow(up ? 1 : -1);
+                                         * step (the MFK goes from group to group); the channel list open, its pick */
+        if (wl_on) wl_step(up ? 1 : -1);
+        else walkie_arrow(up ? 1 : -1);
         return;
     }
     if (scr == SCR_RTL) {               /* F: its presets, not the X6200's bands (and never A) */
@@ -8287,7 +8338,8 @@ static bool front_key(int key, int state) {
     }
     switch (key) {
         case KEYPAD_GEN:
-            if (tap && !g_portrait) help_show(true);    /* drawn on the landscape screen: none held up */
+            if (tap && wl_on && scr == SCR_WALKIE) wl_close();     /* G's channel list closed as it was */
+            else if (tap && !g_portrait) help_show(true);   /* drawn on the landscape screen: none held up */
             return true;
         case KEYPAD_APP:                /* held: the SDR pool's panel, from any screen */
             if (tap && gp_on) gp_close();
@@ -9166,7 +9218,7 @@ static void build_system(lv_obj_t *p) {
 #define P_KEYLEN 80                     /* a physical F key's length along the screen's edge (its width with the radio
                                          * lying flat): F4's and F5's boxes as long, each centred on its key */
 #define P_KW    76                      /* F5's box across: its name in two lines */
-#define P_VW    30                      /* F4's across: "3D" */
+#define P_VW    44                      /* F4's across: "CH" over "LIST" (30 for "3D", which F4 was up to 2026-11-23) */
 #define P_KEYP  190                     /* the physical keys' pitch along the edge, and F1's middle (measured on the */
 #define P_KEY0  6                       /* radio, 2026-11-14: F3 ~386, F4 ~577, F5 ~767 from the top held up) */
 #define P_LAMP  P_KEYLEN                /* the lamp's row: F4's box and the lamp */
@@ -9188,6 +9240,7 @@ static void build_system(lv_obj_t *p) {
 #define VP_HOP  512
 #define VP_HZ   4000            /* the voiceprint: 0-4 kHz up, the last seconds across */
 #define VP_MAXH 300
+#define WL_ROWS 13              /* G's channel list: the rows held up (landscape: 9) */
 
 typedef struct {
     box_t         ch, link, pow, sys;                 /* landscape: four boxes */
@@ -9207,12 +9260,15 @@ typedef struct {
     lv_obj_t     *num_l, *band_l, *lamp, *lamp_l, *vp_img, *s_fill, *a_fill, *s_l, *a_l, *cap_l;
     lv_img_dsc_t *vp_frame;
     int           vp_w, vp_h, bar_w;
+    lv_obj_t     *wl_box, *wl_head_l, *wl_foot_l, *wl_row_l[WL_ROWS];    /* the channel list (F4), over G */
+    int           wl_rows;
 } wui_t;
 
 static wui_t      w_land, w_port, *wui = &w_land;
 
 /* G's picture: the X6200's spectrum 100 kHz around the dial, the trace over its last rows, these in 3D as A's
- * picture or flat as a waterfall (F4) */
+ * picture (F4 also made them flat, a waterfall, up to 2026-11-23: the owner, "just leave it on 3d only"; ws_3d stays
+ * on, and the flat drawing is kept unused) */
 #define WS_ROWS  48
 #define WS_TRACE 34
 static uint8_t  ws_rows[WS_ROWS][PW];
@@ -9423,6 +9479,8 @@ static void vp_put(const uint8_t *lv) {
     }
 }
 
+#define G_CARRIER_DB 10                 /* G's lamp: the meter this far over its noise floor is a signal */
+
 /* G's 50 ms: the voiceprint's new columns, the bars, the lamp */
 static void walkie_step(void) {
     int16_t buf[2048];
@@ -9535,6 +9593,9 @@ static void walkie_step(void) {
     static float floor_rms = 1000;
     if (got) floor_rms = vp_rms < floor_rms ? 0.9f * floor_rms + 0.1f * vp_rms : 0.998f * floor_rms + 0.002f * vp_rms;
     bool on = from_rtl && param_i_get(cfg_rtl_sql) > 0 ? rtl_spectrum_squelch_open() : vp_rms > 2 * floor_rms + 100;
+    /* or the radio's meter G_CARRIER_DB over its noise floor (one read): a carrier the audio does not show, FM's
+     * quieting, AM's steady carrier (2026-11-22, S7-S8 on the bench cable read RX QUIET) */
+    if (!from_rtl && !ms.tx && ms.noise > S_MIN && ms.level > ms.noise + G_CARRIER_DB) on = true;
     /* a DMR call on the channel lights it too, whatever the audio: without the vocoder its voice is silence */
     rtl_dmr_t dmv;
     rtl_dsd_t ddv;
@@ -10119,6 +10180,7 @@ static void walkie_go(int i, int m) {
     if (m < 0 || m >= W_MODES) m = c->mode;
     x62_by_hand();
     tune(c->hz, w_x62(m, c->hz));
+    w_mine = true;                      /* G's own channel from now on (w_own_note) */
     w_at   = i;
     w_mode = m;
     show_walkie();
@@ -10129,6 +10191,7 @@ static void walkie_go(int i, int m) {
 static void w_mode_here(int m) {
     x62_by_hand();
     tune((int32_t)w_hz(), w_x62(m, w_hz()));
+    w_mine = true;
     w_mode = m;
     show_walkie();
     for (int k = 0; k < 5; k++) buttons_refresh(&btn[k]);
@@ -10172,8 +10235,9 @@ static void walkie_group_mode(void) {
     else walkie_group(1);
 }
 
-/* G shown: where the X6200 is, nothing tuned; the X6200 alone on the speaker (the stick's audio, alone or mixed, is
- * not G's; A or B puts its own LISTEN back when shown) */
+/* G shown: the SDR's channel it was left on, or the X6200 (its own channel then is walkie_own's); the X6200 alone on
+ * the speaker (the stick's audio, alone or mixed, is not G's; A or B puts its own LISTEN back when shown). The SDR
+ * gone (w_sdr_step): the X6200 at its dial, as ever */
 static void walkie_enter(void) {
     w_plan();
     if (w_sdr_hz && w_sdr_here()) {     /* left on the SDR's channel: there again */
@@ -10262,7 +10326,8 @@ static bool dial_held(void) {
 }
 
 /* The F keys' names on G: CH- and CH+ on a service's channels, STEP - and STEP + elsewhere (no box held up), nothing
- * on F3, the picture's view on F4 (a slim box), the group and mode on F5 */
+ * on F3 but the SDR's power, CH LIST on F4 where there are channels to list (a slim box held up: in two lines) and
+ * nothing elsewhere, the group and mode on F5. The list open: F4 TUNE, F5 BACK */
 static void walkie_key_label(int k, char *s, size_t n) {
     int i = w_match(), g;
 
@@ -10272,11 +10337,395 @@ static void walkie_key_label(int k, char *s, size_t n) {
         if (w_sdr_hz) w_sdr_power(s, n);
         else s[0] = 0;
     } else if (k == 3) {
-        snprintf(s, n, "%s", ws_3d ? "3D" : "2D");
+        snprintf(s, n, "%s", wl_on ? "TUNE" : !w_has_list() ? "" : g_portrait ? "CH\nLIST" : "CH LIST");
+    } else if (wl_on) {
+        snprintf(s, n, "BACK");
     } else {
         g = i >= 0 ? i : w_start(w_hz());
         snprintf(s, n, "%s\n%s", g >= 0 ? w_chs[g].grp : "-", w_modes[w_mode_now()].name);
     }
+}
+
+/* ---- G's channel list (F4): the group's channels, one picked and tuned ----
+ *
+ * The owner, 2026-11-23: "F4 shows CH LIST: the group's channels in a list, the MFK picks one, a push tunes it", in the
+ * place of the picture's 3D or 2D, which went ("nah just leave it on 3d only and remove the selection button, and use
+ * its old location explicitly fo rchannel changes"). The groups with channels are where F1 and F2 say CH - and CH +: CB
+ * on the X6200, and the SDR's group G is on; elsewhere (a band's one channel) F4 is blank and does nothing, as F3 with
+ * no SDR. The list opens on the channel the dial is on (between two: the nearest); the MFK, the VFO, F1 and F2 and the
+ * arrows go down it; a push of the MFK, F4 again, ENTER or a tap on a row tunes the one picked and closes it; F5, GEN or
+ * BACK closes it as it was. A keyboard's digits go to a channel by its number (the owner: "tune to a CB channel by
+ * number"): CB's own, the SDR's by its place in the group (its CALL 1), ENTER tuning it. TX armed or on the air nothing
+ * is tuned (dial_held says so) and the list stays */
+
+static int      wl_ch[48];          /* the list: w_chs[] indexes, in the plan's order */
+static int      wl_n, wl_sel, wl_top;
+static char     wl_typed[3];        /* a keyboard's digits so far */
+static uint32_t wl_typed_ms;
+static int64_t  wl_drawn_hz;        /* the dial when the rows were drawn: "(NOW)" moves with it */
+
+static bool w_has_list(void) {
+    return w_cb_here() || w_sdr_hz;
+}
+
+/* Row r's channel number: CB's own ("09" is 9), else its place in the group */
+static int wl_num(int r) {
+    return w_chan(wl_ch[r]) ? atoi(w_chs[wl_ch[r]].name) : r + 1;
+}
+
+/* The row of channel number v, -1 none */
+static int wl_find(int v) {
+    for (int r = 0; r < wl_n; r++)
+        if (wl_num(r) == v) return r;
+    return -1;
+}
+
+/* The keys' names and the knobs' line, as the list opens or closes */
+static void wl_keys(void) {
+    for (int k = 0; k < 5; k++) buttons_refresh(&btn[k]);
+    if (key_l[0]) show_keys();
+    show_legend();
+}
+
+static void wl_fill(void) {
+    wui_t  *u  = wui;
+    int64_t hz = w_hz();
+    char    f[16], row[80];
+
+    if (!u->wl_box || !wl_n) return;
+    if (wl_sel < wl_top) wl_top = wl_sel;
+    if (wl_sel >= wl_top + u->wl_rows) wl_top = wl_sel - u->wl_rows + 1;
+    snprintf(row, sizeof(row), "%s: %d CHANNELS%s%s", w_chs[wl_ch[0]].grp, wl_n, wl_typed[0] ? "   TYPED " : "",
+             wl_typed);
+    lv_label_set_text(u->wl_head_l, row);
+    for (int r = 0; r < u->wl_rows; r++) {
+        int i = wl_top + r;
+
+        if (i >= wl_n) {
+            lv_obj_add_flag(u->wl_row_l[r], LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        const wch_t *c    = &w_chs[wl_ch[i]];
+        const char  *what = !w_chan(wl_ch[i])        ? c->name     /* the SDR's: CALL, S2 */
+                            : !strcmp(c->name, "09") ? "EMERGENCY" /* as the channel's box names them */
+                            : !strcmp(c->name, "19") ? "TRUCKERS"
+                                                     : "";
+
+        fmt_mhz(f, sizeof(f), c->hz, 3);
+        snprintf(row, sizeof(row), "%c %2d  %8s MHZ  %s%s", i == wl_sel ? '>' : ' ', wl_num(i), f, what,
+                 llabs(c->hz - hz) <= 3000 ? "  (NOW)" : "");
+        lv_label_set_text(u->wl_row_l[r], row);
+        lv_obj_set_style_bg_opa(u->wl_row_l[r], i == wl_sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_text_color(u->wl_row_l[r], i == wl_sel ? ink : amb, 0);
+        lv_obj_clear_flag(u->wl_row_l[r], LV_OBJ_FLAG_HIDDEN);
+    }
+    wl_drawn_hz = hz;
+}
+
+static void wl_open(void) {
+    int     i = w_match(), g = -1;
+    int64_t hz = w_hz(), best = INT64_MAX;
+
+    if (!wui->wl_box || !w_has_list()) return;
+    w_plan();
+    if (w_sdr_hz) {                     /* the SDR's group of the channel the dial is on, else of the nearest one */
+        for (int k = 0; k < w_n; k++)
+            if (w_chs[k].sdr && (g < 0 || llabs(w_chs[k].hz - hz) < llabs(w_chs[g].hz - hz))) g = k;
+        if (i >= 0 && w_chs[i].sdr) g = i;
+    } else {
+        g = w_find("CB", "19");
+    }
+    if (g < 0) return;
+    wl_n   = 0;
+    wl_sel = 0;
+    for (int k = 0; k < w_n && wl_n < (int)N_OF(wl_ch); k++) {
+        if (w_chs[k].sdr != w_chs[g].sdr || strcmp(w_chs[k].grp, w_chs[g].grp)) continue;
+        if (llabs(w_chs[k].hz - hz) < best) {  /* on the dial's channel, or the nearest */
+            best   = llabs(w_chs[k].hz - hz);
+            wl_sel = wl_n;
+        }
+        wl_ch[wl_n++] = k;
+    }
+    wl_top = wl_sel - wui->wl_rows / 2;  /* the pick in the middle where it can be */
+    if (wl_top > wl_n - wui->wl_rows) wl_top = wl_n - wui->wl_rows;
+    if (wl_top < 0) wl_top = 0;
+    wl_typed[0] = 0;
+    wl_on       = true;
+    wl_fill();
+    lv_obj_clear_flag(wui->wl_box, LV_OBJ_FLAG_HIDDEN);
+    if (root) keyboard_takes_typing(root);     /* a keyboard's digits reach it with SHORTCUTS off too */
+    wl_keys();
+}
+
+static void wl_hide(void) {
+    bool was = wl_on;
+
+    wl_on       = false;
+    wl_typed[0] = 0;
+    for (int i = 0; i < 2; i++) {
+        wui_t *u = i ? &w_port : &w_land;
+
+        if (u->wl_box) lv_obj_add_flag(u->wl_box, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (was && root) keyboard_stops_typing(root);   /* the keyboard types nowhere in the Sentry again */
+}
+
+static void wl_close(void) {
+    if (!wl_on) return;
+    wl_hide();
+    wl_keys();
+}
+
+static void wl_step(int d) {
+    if (!wl_on || !wl_n) return;
+    wl_sel      = ((wl_sel + d) % wl_n + wl_n) % wl_n;
+    wl_typed[0] = 0;
+    wl_fill();
+}
+
+/* The pick tuned, the list closed: on CB the mode kept, as the arrows keep it; the SDR's in FM */
+static void wl_tune(void) {
+    int k;
+
+    if (!wl_on || wl_sel < 0 || wl_sel >= wl_n) return;
+    if (dial_held()) return;            /* armed or on the air: nothing tuned, said so; the list stays */
+    k = wl_ch[wl_sel];
+    wl_close();
+    walkie_go(k, w_chs[k].sdr ? WM_FM : w_cb_here() ? w_mode_now() : w_chs[k].mode);
+}
+
+/* A digit typed: the number so far and it ("1" then "9": 19), a new number after two digits, 3 s or one that no
+ * channel has ("4" then "5": 5) */
+static void wl_digit(int d) {
+    size_t n = strlen(wl_typed);
+    int    r;
+
+    if (n >= 2 || (n && lv_tick_elaps(wl_typed_ms) > 3000)) n = 0;
+    wl_typed[n]     = (char)('0' + d);
+    wl_typed[n + 1] = 0;
+    if (n && wl_find(atoi(wl_typed)) < 0) {
+        wl_typed[0] = (char)('0' + d);
+        wl_typed[1] = 0;
+    }
+    wl_typed_ms = lv_tick_get();
+    if ((r = wl_find(atoi(wl_typed))) >= 0) wl_sel = r;
+    wl_fill();
+}
+
+static bool wl_key(uint32_t key) {
+    size_t n;
+    int    r;
+
+    switch (key) {
+        case LV_KEY_LEFT:
+        case LV_KEY_UP: wl_step(-1); return true;
+        case LV_KEY_RIGHT:
+        case LV_KEY_DOWN: wl_step(1); return true;
+        case LV_KEY_HOME: wl_step(-wl_sel); return true;
+        case LV_KEY_END: wl_step(wl_n - 1 - wl_sel); return true;
+        case LV_KEY_ENTER: wl_tune(); return true;
+        case LV_KEY_ESC: wl_close(); return true;
+        case LV_KEY_BACKSPACE:
+            if ((n = strlen(wl_typed))) {
+                wl_typed[n - 1] = 0;
+                if (n > 1 && (r = wl_find(atoi(wl_typed))) >= 0) wl_sel = r;
+                wl_fill();
+            }
+            return true;
+        default:
+            if (key >= '0' && key <= '9') {
+                wl_digit((int)(key - '0'));
+                return true;
+            }
+            return key >= ' ' && key < 127;     /* a keyboard's other keys: nothing while it is open */
+    }
+}
+
+static void wl_row_tap_cb(lv_event_t *e) {
+    int r = (int)(intptr_t)lv_event_get_user_data(e);
+
+    if (!wl_on || wl_top + r >= wl_n) return;
+    wl_sel = wl_top + r;
+    wl_fill();
+    wl_tune();
+}
+
+/* The list's box in p (G's screen of that layout): its line, rows rows, the keys' words under them; hidden */
+static void wl_make(wui_t *u, lv_obj_t *p, int x, int y, int w, int h, int rows, const char *foot) {
+    u->wl_box = rect(p, x, y, w, h, 3, false);
+    lv_obj_add_flag(u->wl_box, LV_OBJ_FLAG_CLICKABLE);     /* a tap beside its rows is not G's */
+    u->wl_head_l = label(u->wl_box, &pixel_20, amb, 12, 10, w - 30, LV_TEXT_ALIGN_LEFT, "");
+    for (int r = 0; r < rows && r < WL_ROWS; r++) {
+        lv_obj_t *l = label(u->wl_box, &pixel_20, amb, 9, 40 + r * 28, w - 24, LV_TEXT_ALIGN_LEFT, "");
+
+        lv_obj_set_style_bg_color(l, amb, 0);
+        lv_obj_set_style_pad_ver(l, 2, 0);
+        lv_obj_add_flag(l, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(l, wl_row_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)r);
+        u->wl_row_l[r] = l;
+    }
+    u->wl_rows   = rows < WL_ROWS ? rows : WL_ROWS;
+    u->wl_foot_l = label(u->wl_box, &pixel_16, amb, 12, 40 + u->wl_rows * 28 + 8, w - 30, LV_TEXT_ALIGN_LEFT, foot);
+    lv_obj_add_flag(u->wl_box, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* ---- G's own channel, and A's dial while G has the X6200 ----
+ *
+ * The owner, 2026-11-23: "G keeps its own last channel and opens on it (CB 19 the first time); A's dial is put back
+ * when you leave G." Up to then G showed the X6200's dial as it found it (A's) and tuned nothing by itself. Entered now
+ * (walkie_own), G keeps A's dial as found (its frequency, mode, AGC, preamp and attenuator: the radio's memory
+ * MEM_SENTRY_ID, as an app keeps the radio while it moves it) and tunes its own channel; left for any screen, or the
+ * Sentry closed, A's dial comes back (walkie_leave). G's channel (s.wch in Hz, s.wchm the X6200's mode) is the X6200
+ * channel the dial was on while G showed (w_own_note), tuned by G's keys or from outside, never a frequency off the
+ * channels (a test tuning 14.2 MHz over TCI on G is not G's) nor an SDR channel (G goes back to those by itself:
+ * s.gsdr). Kept by
+ * gui_state.c as the Sentry's state is, but read whatever the GUI comes back to: G's own memory, as a setting.
+ *
+ * Nothing is tuned while TX is armed or on the air, or an app or the user holds the frequency: entered so, G stays on
+ * the dial as found and says so; left so (armed on G, the ring to A), A's dial comes back once that is over (blink_cb),
+ * if the dial is still where G left it. A restart of the GUI on G keeps A's dial (s.ga, and the memory itself in the
+ * settings); the GUI back elsewhere, or a close on the air, A's dial comes back as the Sentry opens next if the dial is
+ * still on G's channel, and is dropped if anything moved it since */
+
+static int64_t wa_left_hz;          /* the dial as G left it (from before a restart: G's channel) */
+static bool    wa_restart_g;        /* the GUI came back to the Sentry on G: A's kept dial stands whatever the dial */
+
+static bool wa_hold(void) {
+    return g_armed || g_sdr_armed || radio_get_state() == RADIO_TX || main_screen_freq_locked();
+}
+
+static void wa_load(void) {
+    static bool done;
+
+    if (done) return;
+    done         = true;
+    wa_kept      = gui_state_get("s.ga", 0) != 0;
+    wa_check     = wa_kept;
+    wa_left_hz   = gui_state_get("s.wch", 0);
+    wa_restart_g = gui_state_restoring() && gui_state_start_place() == GUI_PLACE_SENTRY &&
+                   gui_state_get("s.scr", -1) == SCR_WALKIE;
+}
+
+static void wa_drop(void) {
+    wa_kept  = false;
+    wa_check = false;
+    gui_state_set("s.ga", 0);
+}
+
+/* A's dial back: always (G left just now), else only while the dial is still where G left it, dropped if it is not.
+ * False while it cannot be (TX armed or on the air, the frequency held): kept for later */
+static bool wa_back(bool always) {
+    if (!wa_kept) return true;
+    if (wa_hold()) return false;
+    if (always || llabs((int64_t)cparam_i_get(cfg_fg_freq) - wa_left_hz) <= 1000) {
+        if (cfg_memory_load(MEM_SENTRY_ID)) main_screen_set_freq(cparam_i_get(cfg_fg_freq));   /* the screens told */
+    }
+    wa_drop();
+    return true;
+}
+
+/* As the Sentry opens (construct_cb, before its screen): A's dial kept from an earlier visit to G. The GUI back on G,
+ * or the dial still on G's channel and G opening: it stands; the dial still there and another screen opening: back
+ * now; the dial moved since: dropped */
+static void wa_opening(scr_t at) {
+    wa_load();
+    if (!wa_check) return;
+    wa_check = false;
+    if (!(at == SCR_WALKIE && wa_restart_g) && llabs((int64_t)cparam_i_get(cfg_fg_freq) - wa_left_hz) > 1000)
+        wa_drop();
+    else if (at != SCR_WALKIE)
+        wa_back(false);
+    wa_restart_g = false;
+}
+
+/* G entered (go): A's dial kept as found (kept already: from before a restart, or a put back still waiting), then G's
+ * own channel tuned, CB 19 in AM the first time. On the SDR's channel the X6200 is not G's meanwhile: nothing tuned */
+static void walkie_own(void) {
+    int32_t hz, m;
+    int     k = -1;
+
+    wa_load();
+    if (!wa_kept && cfg_memory_save(MEM_SENTRY_ID)) {
+        wa_kept = true;
+        gui_state_set("s.ga", 1);
+    }
+    wa_check   = false;
+    w_in       = true;
+    w_mine     = false;
+    w_entry_hz = cparam_i_get(cfg_fg_freq);
+    if (w_sdr_hz) return;
+    hz = gui_state_get("s.wch", 0);
+    m  = gui_state_get("s.wchm", -1);
+    w_plan();
+    for (int i = 0; i < w_n && k < 0; i++)
+        if (!w_chs[i].sdr && llabs(w_chs[i].hz - hz) <= 3000) k = i;
+    if (k < 0) {                        /* none yet, or no longer one of the plan's */
+        if ((k = w_find("CB", "19")) < 0) return;
+        m = -1;
+    }
+    hz = w_chs[k].hz;
+    if (m < 0 || m > radio_mode_last) m = w_x62(w_chs[k].mode, hz);
+    if (llabs((int64_t)w_entry_hz - hz) <= 3000 && cparam_i_get(cfg_cur_mode) == m) {
+        w_mine = true;                  /* there already (the GUI back on G) */
+        return;
+    }
+    if (wa_hold()) {
+        if (main_screen_freq_locked())
+            w_say("G STAYS ON THE DIAL: IT IS HELD", "G: THE DIAL AS FOUND",
+                  "THE FREQUENCY IS HELD (AN APP, OR THE LOCK), SO G DID NOT GO TO ITS CHANNEL.");
+        else
+            w_say("G STAYS ON THE DIAL: TX ARMED", "G: THE DIAL AS FOUND",
+                  "TX IS ARMED OR ON THE AIR, SO G DID NOT GO TO ITS CHANNEL. LOCK TX (A/B), THEN CHOOSE ONE.");
+        return;
+    }
+    if (!tune(hz, m)) return;
+    w_mine     = true;
+    w_entry_hz = hz;
+    w_at       = w_match();
+    w_mode     = w_mode_now();
+}
+
+/* G left (go): A's dial back; held (armed, on the air, the frequency held), once that is over */
+static void walkie_leave(void) {
+    if (!w_in) return;
+    w_in       = false;
+    w_mine     = false;
+    wa_left_hz = cparam_i_get(cfg_fg_freq);
+    if (!wa_back(true))
+        osd("A'S DIAL WAITS", "TX IS ARMED OR ON THE AIR, OR THE FREQUENCY IS HELD: A'S DIAL COMES BACK ONCE THAT IS "
+            "OVER, IF NOTHING MOVED THE DIAL MEANWHILE.", -1);
+}
+
+/* Each showing of G: the X6200 channel the dial is on is G's own from now on, once the dial is G's (tuned by G, or
+ * moved while G shows: not A's dial left as found while TX was armed). A channel: CB's, or 10 M's and 6 M's FM
+ * calling channels; not where D listens in a band (its group's one "channel", a place to start: 14.200 is 20 M's,
+ * and the owner's example of what is no channel was a test tuning 14.2 MHz on G) */
+static void w_own_note(int wi) {
+    if (!w_in || w_sdr_hz) return;
+    if (cparam_i_get(cfg_fg_freq) != w_entry_hz) w_mine = true;
+    if (!w_mine || wi < 0 || w_chs[wi].sdr || band_named(w_chs[wi].grp) >= 0) return;
+    app_sentry_g_channel_set(w_chs[wi].hz, cparam_i_get(cfg_cur_mode));
+}
+
+/* G's own channel for the remote's state (its thread): a copy of s.wch and s.wchm, which gui_state keeps for the LVGL
+ * thread alone */
+static atomic_int wch_hz = 0, wch_mode = -1;
+
+void app_sentry_g_channel(int32_t *hz, int32_t *mode) {
+    *hz   = atomic_load(&wch_hz);
+    *mode = atomic_load(&wch_mode);
+}
+
+void app_sentry_g_channel_set(int32_t hz, int32_t mode) {
+    gui_state_set("s.wch", hz);
+    gui_state_set("s.wchm", mode);
+    atomic_store(&wch_hz, hz);
+    atomic_store(&wch_mode, mode);
+}
+
+void app_sentry_g_channel_load(void) {
+    atomic_store(&wch_hz, gui_state_get("s.wch", 0));
+    atomic_store(&wch_mode, gui_state_get("s.wchm", -1));
 }
 
 /* ---- G's picture: the X6200's spectrum around the dial ---- */
@@ -10509,20 +10958,6 @@ static void g_gpu_draw(void) {
     gpu_frame_end(x0, y0, LV_MAX(a.x1 + w, v.x1 + u->vp_w) - x0, LV_MAX(a.y1 + h, v.y1 + u->vp_h) - y0);
 }
 
-/* F4 on G: the picture's rows in 3D or flat */
-static void ws_view_next(void) {
-    ws_3d   = !ws_3d;
-    g_dirty = true;
-    if (wui->ws_cap_l) {
-        char wc[24];
-
-        snprintf(wc, sizeof(wc), "%d KHZ  %s", (int)(ws_span / 1000), ws_3d ? "3D" : "2D");
-        tag_text(wui->ws_cap_l, wc, wui->ws_cap_x, wui->ws_cap_y, false);
-    }
-    ws_draw();
-    buttons_refresh(&btn[3]);
-}
-
 static void show_walkie(void) {
     char           fr[40], nm[80], lk[40], tx[24], pw1[40], pw2[40], sy1[40], sy2[40], f[24];
     int64_t        hz = w_hz();
@@ -10544,8 +10979,11 @@ static void show_walkie(void) {
 
     w_at   = wi;
     w_mode = w_mode_now();
+    w_own_note(wi);                     /* G's own channel, once the dial is G's */
+    if (wl_on && !w_has_list()) wl_close();     /* the dial off the channels (from outside): the list goes */
+    else if (wl_on && w_hz() != wl_drawn_hz) wl_fill();     /* its (NOW) where the dial is */
     {
-        int k = ((wi + 1) * W_MODES + w_mode) * 2 + (ws_3d ? 1 : 0);
+        int k = ((((wi + 1) * W_MODES + w_mode) * 2 + (ws_3d ? 1 : 0)) * 2 + w_has_list()) * 2 + wl_on;
 
         if (k != said) {
             said = k;
@@ -10793,6 +11231,10 @@ static void build_walkie(lv_obj_t *p) {
 
     bar_make(u, p, 6, by, bw, scr_h - by - 6, false);
     bar_make(u, p, 6 + bw + 6, by, bw, scr_h - by - 6, true);
+    /* the channel list (F4), over all of G's boxes */
+    wl_make(u, p, 6, y, SW - 12, scr_h - y - 6, 9,
+            "MFK, VFO, F1 OR F2: CHOOSE   PUSH, F4 OR A TAP: TUNE IT   F5, GEN OR BACK: AS IT WAS\n"
+            "A KEYBOARD: THE CHANNEL'S NUMBER GOES TO IT, ENTER TUNES IT");
 }
 
 
@@ -10885,8 +11327,9 @@ static void build_walkie_portrait(void) {
     badge_turned(PW - 43, PH - 50);     /* and the bar's other end */
 
     /* F1, F2 and F3 have no box (CH -/+ or STEP -/+ on F1 and F2, as the arrows): the channel, the spectrum and the
-     * voiceprint run from the screen's edge, the spectrum and the voiceprint as tall as each other; F4's box, as
-     * small as "3D", beside its key in the lamp's row; under it the radio's state, then F5's box and the messages */
+     * voiceprint run from the screen's edge, the spectrum and the voiceprint as tall as each other; F4's box (CH LIST
+     * in two lines), as small as that, beside its key in the lamp's row; under it the radio's state, then F5's box
+     * and the messages */
     int ys = P_TOP + P_CHH + 6, yv, hh = (P_LAMPY - 6 - ys - 6) / 2;
 
     /* the channel: its number big, beside it the radio, the group and the frequency; under them the S-meter and the
@@ -10903,7 +11346,7 @@ static void build_walkie_portrait(void) {
     lm_make(&u->sm, g_scr, false);
     lm_place(&u->sm, P_FX + 8, P_TOP + 70);
     mbar_make(u, g_scr, P_FX + 8, P_TOP + 70 + LM_H);
-    /* the X6200's spectrum around the dial (3D or 2D: F4), edge to edge */
+    /* the X6200's spectrum around the dial (in 3D), edge to edge */
     {
         int y = ys, h = hh;
 
@@ -10964,6 +11407,10 @@ static void build_walkie_portrait(void) {
         u->ab_tag   = tag_make(g_scr, amb, "A/B", PW - 146, PH - 41, false);
         lv_obj_add_flag(u->ab_tag, LV_OBJ_FLAG_HIDDEN);
     }
+    /* The channel list (F4), over the channel, the spectrum and the voiceprint, down to the lamp's row: F4's and F5's
+     * boxes beside their keys stay in sight */
+    wl_make(u, g_scr, P_FX, P_TOP, P_FW, P_LAMPY - 6 - P_TOP, WL_ROWS,
+            "MFK OR VFO: CHOOSE   PUSH OR F4: TUNE IT\nF5 OR GEN: AS IT WAS\nA KEYBOARD: THE NUMBER, THEN ENTER");
     /* The OSD held up (osd): what a knob or key just did, the VOL knob's volume, squelch or RF gain with its bar, over
      * the middle of G's screen and upright as its words are; hidden with the landscape one (osd_hide_cb) */
     {
@@ -11267,6 +11714,7 @@ static void construct_cb(lv_obj_t *parent) {
     lv_group_set_editing(keyboard_group, true);
 
     state_restore();                    /* the GUI restarted: the screen, the scans as they were */
+    wa_opening(open_at);                /* A's dial kept by G before: back, standing or dropped (walkie_own) */
     {
         scr_t s = open_at;
 
@@ -11294,8 +11742,16 @@ static void destruct_cb(void) {
     f4_pick = -1;
     if (scr == SCR_LOG) g_leave(false);
     audio_scope(false);
+    wl_hide();                          /* G's channel list, its keyboard typing */
     walkie_show(false);                 /* landscape again before anything else draws */
     walkie_arm(false);                  /* the transmitter locked (the hold let go below with the rest) */
+    if (scr == SCR_WALKIE && w_in) {    /* closed on G: A's dial back; on the air, at the next opening if the dial
+                                         * is still where G left it (wa_opening) */
+        w_in       = false;
+        w_mine     = false;
+        wa_left_hz = cparam_i_get(cfg_fg_freq);
+        if (!wa_back(true)) wa_check = true;
+    }
     radio_set_vol_override(-1);         /* the speaker at the X6200's volume again */
     /* and the X6200's receiver on it: the stick's audio is the Sentry's (nothing outside it shows the stick's channel
      * or turns it), and OFF's silence would leave the classic radio and the apps mute. On AIRSPACE, the Sentry's H,
@@ -11441,8 +11897,7 @@ static void state_keep(void) {
     gui_state_set("s.dsel", dec_sel);
     gui_state_set("s.drow", dec_row);
     gui_state_set("s.dv", 2);
-    gui_state_set("s.sys", sys_sel);
-    gui_state_set("s.3d", ws_3d);
+    gui_state_set("s.sys", sys_sel);    /* G's picture is 3D only since 2026-11-23: s.3d no longer kept */
     for (int j = 0; j < SWEEP_KEYS; j++) {
         int32_t m = 0;
 
@@ -11513,7 +11968,7 @@ static void state_restore(void) {
     if (v >= 0 && v < SYS_N) sys_sel = v;
     v = gui_state_get("s.gsel", g_sel);
     if (v >= 0 && v < nhits) g_sel = v;
-    ws_3d = gui_state_get("s.3d", ws_3d) != 0;
+    /* s.3d (G's picture flat, 0) not read: 3D only since 2026-11-23 (the owner: "just leave it on 3d only") */
     v = gui_state_get("s.gsdr", 0);     /* G back on the SDR's channel when it is there as G opens (walkie_enter) */
     if (v >= 144000 && v <= 1300000) w_sdr_resume = (int64_t)v * 1000;
     v = gui_state_get("s.sdrg", w_sdr_gain);

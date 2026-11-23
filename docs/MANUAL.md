@@ -674,7 +674,8 @@ does more than type:
 
 - Off: it only types. Its keys reach a text box (the frequency box, a
   callsign, a free text) and the windows made for typing (the CW keyboard,
-  JTTY, the shell), with Enter, Backspace, the arrows and ESC in them;
+  JTTY, the shell, the Sentry's [G channel list](#g-walkie) while it is
+  open), with Enter, Backspace, the arrows and ESC in them;
   anywhere else a key does nothing (it still lights a dark screen).
   CapsLock is plain Caps Lock, with no chords, and `[` `]` are no CW
   paddle. The knobs, the buttons and the touch screen work as always, and
@@ -1479,11 +1480,11 @@ GPS reports, every title bar says **GPS** (**GPS NO FIX** till it has one).
 ### G WALKIE
 
 The X6200 as a walkie-talkie, in the same look, **held up**: G turns the screen to portrait (480 x 800, as the
-Walkie app does). Only F4 (the spectrum's view) and F5 (the group and mode) have names, each in a box as long as its
+Walkie app does). Only F4 (the channel list) and F5 (the group and mode) have names, each in a box as long as its
 key along the screen's edge (the key's width with the radio lying flat) and centred on it (the keys are about 190 px
-apart on the X6200's screen): F4's `3D` (or `2D`) in the lamp's row, F5's beside the message box. F1, F2 and F3
-have no box (F1 and F2 still step, as the arrows do), so the channel, the spectrum and the voiceprint
-(as tall as each other) and the radio's state run from edge to edge. G is the X6200's, but for the channels of a
+apart on the X6200's screen): F4's `CH LIST` (in two lines; blank off CB and the SDR's groups) in the lamp's row, F5's
+beside the message box. F1, F2 and F3 have no box (F1 and F2 still step, as the arrows do), so the channel, the
+spectrum and the voiceprint (as tall as each other) and the radio's state run from edge to edge. G is the X6200's, but for the channels of a
 HackRF or bladeRF (below): an RTL-SDR only receives and has B for that, so G neither shows nor plays it (shown with
 LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back when shown).
 
@@ -1502,8 +1503,9 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
 - **The spectrum**, edge to edge: the radio's, 100 kHz around the dial on the X6200, 50 kHz on the X6100 (its own
   spectrum climbs from about 27 kHz either side of the dial, so A shows the same middle 50 kHz; up to v0.3.12.45 G drew
   100 kHz there and those humps looked like signals at its edges) (bracketed in the middle): its trace over the
-  last rows, in 3D as A's picture or 2D, a flat waterfall with the newest on top (**F4**). On the air it goes on at
-  its pace with rows of one dim shade, as A's picture does, a band as long as the transmission (up to v0.3.12.43 it
+  last rows, in 3D as A's picture. Up to v0.3.12.47 F4 also turned them flat (2D, a waterfall with the newest on
+  top); since 2026-11-23 the picture is 3D only (the owner: "just leave it on 3d only") and F4 is the channel list.
+  On the air it goes on at its pace with rows of one dim shade, as A's picture does, a band as long as the transmission (up to v0.3.12.43 it
   stood still while the radio sent).
 - **The voiceprint**: the receiver's audio as a sonogram, 0 to 4 kHz up and the last seconds across, in amber:
   voices show as their harmonics stacked, a tone as a line, the hiss as speckle. Its captions and kHz marks, as the
@@ -1523,7 +1525,8 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
   is not used: set while keyed, the X6100's base dropped the over within a second. Its dark is held from before the transmission, and columns of one dim shade keep its time
   when nothing comes in at all. Up to v0.3.12.43 the dark followed the transmission's near-silence down, and the
   receiver's hiss drew white for a second or two after each over.
-- **The lamp**, under the voiceprint: RX SIGNAL when the audio stands 6 dB over its own noise, RX DMR while a DMR call
+- **The lamp**, under the voiceprint: RX SIGNAL when the audio stands 6 dB over its own noise or the radio's
+  S-meter 10 dB over its noise floor (a bare carrier, an FM station's quieting), RX DMR while a DMR call
   is on the SDR's channel (lit even when its voice is silent, with no vocoder), RX QUIET, TX ARMED, ON AIR, TX LOCKED
   for a moment after PTT.
 - The radio's state in three larger lines: the squelch, the volume and the transmitter's lock; the battery and the
@@ -1535,9 +1538,30 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
   bar, for 2.5 s after a turn or push, as on the other screens (up to v0.3.12.39 it was drawn on the landscape
   screen, out of sight behind G).
 
-**G follows the X6200**: its frequency and mode are the dial's, read live, and G never tunes by itself. A's scan
-moving the dial moves G, so TX armed here is on the band A was scanning. Choosing on G (a channel, a group, a mode,
-the VFO) is by hand: the Sentry stops moving the dial (MANUAL, as a turn of A's VFO).
+**G has its own channel, and A gets its dial back** (the owner, 2026-11-23: "G keeps its own last channel and opens
+on it (CB 19 the first time); A's dial is put back when you leave G"). Up to v0.3.12.47 G showed the X6200's dial as
+it found it, A's, and tuned nothing by itself.
+
+- **Entering G** (the ring, the remote's `open sentry G`, AIRSPACE's ring back, the Sentry opening on G) keeps A's
+  dial as it was found, its frequency, mode, AGC, preamp and attenuator (in a memory of the radio's own, as an app
+  keeps the radio while it moves it), then tunes G's own channel: the last one G was on, in its mode, and **CB 19 in
+  AM** the first time. G's channel is the X6200 channel the dial was on while G showed (a CB channel, or 10 M's or
+  6 M's FM calling channel), chosen on G or tuned from outside (TCI, the web). Anything else is not remembered: a
+  frequency between channels, where D listens in a band (a band's one channel in the table below, 14.200 on 20 M: a
+  place to start), and an SDR channel (G goes back to those by itself, below). It is kept across a restart and a
+  power-off.
+- **Leaving G** for any screen, or closing the Sentry, puts A's dial back as it was, whatever G did to it. Leaving
+  G for A with TX armed (A/B on G, the ring to A, still armed) leaves the dial where it is and says `A'S DIAL WAITS`:
+  A's dial comes back once TX is locked, if nothing moved the dial meanwhile.
+- **Nothing is tuned while TX is armed or on the air, or while an app or the lock holds the frequency**: G entered
+  so stays on the dial as found and says so (`G STAYS ON THE DIAL: TX ARMED`, `... IT IS HELD`); lock TX and choose a
+  channel (F4, the arrows, the MFK).
+- **A restart of the GUI on G** comes back on G with A's dial still kept, and leaving G puts it back. Back anywhere
+  else (or a close on the air), A's dial comes back as the Sentry opens next if the dial is still on G's channel,
+  and is forgotten if anything moved the dial since.
+
+Choosing on G (a channel, a group, a mode, the VFO) is by hand: the Sentry stops moving the dial (MANUAL, as a turn
+of A's VFO). A's scan, sweep and lock wait while G shows and go on from A's dial when it is back.
 
 **The channels**: every band of D's the X6200 tunes is a group with a channel to start on, so no band is blank:
 
@@ -1560,7 +1584,18 @@ the VFO) is by hand: the Sentry stops moving the dial (MANUAL, as a turn of A's 
 - **F5** goes through the groups and each one's modes in turn: CB AM, CB SSB, CB FM, then 10 M SSB, 10 M AM, 10 M
   FM... The mode changes where the dial is; past a group's last mode, the next group at its home channel. SSB is
   single sideband: LSB on 160, 80 and 40 m as hams use it, USB everywhere else (60 m, the ship and utility stations, 20 m up).
-- **F4**: the spectrum in 3D or 2D (flat, a waterfall).
+- **F4: CH LIST** (the owner, 2026-11-23: "F4 shows CH LIST: the group's channels in a list, the MFK picks one, a
+  push tunes it"), on CB and the SDR's groups (where F1 and F2 say CH - and CH +); on a band's one channel F4 is
+  blank and does nothing. The list, over G's screen, has each channel's number, frequency and name (CB 9 EMERGENCY,
+  CB 19 TRUCKERS; the SDR's CALL, S2...), `(NOW)` on the dial's, and opens on the dial's channel (tuned between two:
+  the nearest). The **MFK**, the **VFO**, **F1 and F2** and **BAND UP and DOWN** go down it; a **push of the MFK**,
+  **F4** again (`TUNE`), ENTER or a tap on a row tunes the one picked and closes the list (on CB in the mode the dial
+  has, as the arrows keep it; the SDR's in FM); **F5** (`BACK`), **GEN** or BACK (ESC) closes it as it was. **A
+  keyboard** (USB or Bluetooth, Shortcuts on or off) types a channel's number to go to it, `1` then `9` for CB 19
+  (`TYPED 19` in the list's line; a number no channel has starts again from the last digit, Backspace takes one
+  back), and ENTER tunes it; the SDR's channels are numbered by their place in the group (CALL is 1). While TX is
+  armed or on the air nothing is tuned: `DIAL LOCKED` says so and the list stays. Up to v0.3.12.47 F4 turned the
+  picture between 3D and 2D.
 - **A/B** arms the X6200's transmitter for PTT (as on A) and locks it again; leaving G for any screen but A locks
   it. **PTT while TX is locked** says what to press, on every screen of the Sentry: `PRESS A/B ON THE TOP PANEL TO
   UNLOCK, THEN PTT` (from B to F: turn the ring to A or G first), with an arrow to where that key is: on G, held up,
@@ -10760,7 +10795,9 @@ VALUE` changes the radio: `freq`, `mode` (0-7, the order of the mode list; 8 SAM
 1-80 on the X6200, 1-50 there on battery), `step`, `zoom` (1-8), `band`
 (+1/-1), `vfo` (toggle), `filter LO HI` (in Hz, as the radio keeps them: in CW
 centred on the key tone, the low edge no lower than 0; in AM and FM LO is
-0). A `set` the radio refuses is
+0), `wch HZ MODE` (the Sentry G's own channel, the state's `wch` and `wchm`: its memory
+only, the dial not tuned; 0 -1 for none, CB 19 then), `tpwr` (TUNE's own power for an external tuner, tenths of a
+watt, the state's `tpwr`: 1 up to the radio's top, as Settings > TX Cal > EXTERNAL TUNER sets it). A `set` the radio refuses is
 answered `err ...` (`err freq: locked (LOCK, or an app holds the
 frequency)`, `err freq: not a frequency this radio tunes`, `err NAME: the
 radio is busy, try again`, `err unknown setting NAME`, the role and
@@ -10781,8 +10818,8 @@ does not know), and the panel state's `app` names the digital app open
 Sentry's page (`"A"` to `"G"`, `"S"` for SCAN CFG, `""` when it is not
 open). `apps` is answered `apps [[ACTION,"Name"],...]`, the apps this radio
 has; `open ACTION` opens one of them, `open sentry L` the Sentry on its page
-L (`H` AIRSPACE, `I` the direction finder) and `close` closes the app open
-(operate and control; never the SWR scan, WSPR or the first-start guide,
+L (`H` AIRSPACE, `I` the direction finder) and `close` closes the app open,
+the RTTY panel too (operate and control; never the SWR scan, WSPR or the first-start guide,
 `err open ACTION`): what the two-radio suite (tools/bench/suite.py)
 photographs every screen with. The WeFax app's state comes as `wefax {...}` (open,
 auto, fax: a chart coming in, tx and txp, gen: a new picture, rows kept,
@@ -10980,7 +11017,13 @@ bar does at any time); the status line then says "In control", and no longer
 stays where it is until the transmission ends.
 Release gives it up without anyone taking it. The radio's own keys and knobs
 always take control back (the operator standing at the radio has the last
-word); a browser takes it again on purpose. A TCI client takes it as the
+word); a browser takes it again on purpose. The keys and knob turns a browser
+sends come through the radio's own key devices, and the radio tells them from
+the operator's by the moment each was sent, however late it gets to read them
+(while the FT8 app decodes, say): they never hand control to "At the radio".
+A stop needs no control: the FT8 and JS8 apps' Stop from a browser stops their
+transmitting whoever holds control, as a PTT let go and the page's own TUNE
+stop do. A TCI client takes it as the
 knob always did, the moment it tunes or keys, unless someone is on the air.
 What it only asks (the frequency, the TX state: a logger through Hamlib asks
 at every poll) takes nothing, and control stays where it is.

@@ -2281,13 +2281,13 @@
  {
   "id": "g-portrait-layout",
   "area": "sentry-G",
-  "feature": "G held up: portrait 480x800, L-shaped title bar, F4 '3D/2D' and F5 boxes only, channel, spectrum, voiceprint and state lines edge to edge",
+  "feature": "G held up: portrait 480x800, L-shaped title bar, F4 'CH LIST' and F5 boxes only, channel, spectrum, voiceprint and state lines edge to edge",
   "radios": [
    "x6100",
    "x6200"
   ],
   "needs": "none",
-  "how_to_confirm": "'open sentry G': screenshot (rotate the 800x480 dump) OCR 'WALKIE TALKIE' upright and the F4 '3D' box.",
+  "how_to_confirm": "'open sentry G': screenshot (rotate the 800x480 dump) OCR 'WALKIE TALKIE' upright and the F4 'CH LIST' box.",
   "suite_has": "core/screen sentry_G",
   "manual_ref": "### G WALKIE",
   "coverage": "partial"
@@ -2295,13 +2295,13 @@
  {
   "id": "g-follows-dial",
   "area": "sentry-G",
-  "feature": "G follows the X6200's dial and mode live and never tunes by itself; choosing on G sets MANUAL",
+  "feature": "G follows the X6200's dial and mode live while it shows (tuned from outside too); it tunes only its own channel as it is entered (g-own-channel); choosing on G sets MANUAL",
   "radios": [
    "x6100",
    "x6200"
   ],
   "needs": "none",
-  "how_to_confirm": "'set freq 14200000' while on G: OCR the channel line 14.200; key F5 on G: OCR MANUAL in the title.",
+  "how_to_confirm": "on G, 'set freq 14200000': the channel line OCR 14.200 and the remote's freq; key F5 on G: OCR MANUAL in the title.",
   "suite_has": null,
   "manual_ref": "### G WALKIE"
  },
@@ -2322,13 +2322,52 @@
  {
   "id": "g-spectrum-f4",
   "area": "sentry-G",
-  "feature": "G spectrum: 100 kHz around the dial on the X6200 (50 kHz on the X6100), 3D or 2D waterfall toggled by F4; dim rows while transmitting",
+  "feature": "G spectrum: 100 kHz around the dial on the X6200 (50 kHz on the X6100), in 3D only (the owner, 2026-11-23: the 3D/2D key gone, F4 is the channel list); dim rows while transmitting",
   "radios": [
    "x6100",
    "x6200"
   ],
   "needs": "none",
-  "how_to_confirm": "key F4 on G: OCR the box '2D' and screenshot shows a flat waterfall; key F4: '3D'. Compare the span labels between the X6200 (100 kHz) and the X6100 (50 kHz).",
+  "how_to_confirm": "'open sentry G': the screenshot shows the 3D picture; F4 opens CH LIST, never a flat waterfall. Compare the span labels between the X6200 (100 kHz) and the X6100 (50 kHz).",
+  "suite_has": null,
+  "manual_ref": "### G WALKIE"
+ },
+ {
+  "id": "g-ch-list",
+  "area": "sentry-G",
+  "feature": "F4 'CH LIST' (blank off CB and the SDR's groups): the group's channels over the picture, the MFK picks, its push (or F4 again) tunes the one picked and closes the list, a keyboard's digits and Enter tune a channel by its number, the dial moved from outside closes it",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "on G at CB: key F4, screenshot shows the list with (NOW) at the dial's channel; knob mfk +2, key MFK: the remote's freq is two channels up (CB 21: 27.215 MHz), the list closed; F4 again, type '9' Enter (the remote's text keys): CB 9 (27.065 MHz). RX only (CB is never keyed).",
+  "suite_has": null,
+  "manual_ref": "### G WALKIE"
+ },
+ {
+  "id": "g-own-channel",
+  "area": "sentry-G",
+  "feature": "G opens on its own last channel (CB 19 in AM the first time) and keeps A's dial (frequency, mode, AGC, PRE, ATT), put back when G is left for any page or the Sentry closes; nothing tuned while TX is armed or the frequency held (said on G); a channel tuned on G is G's own from then on (CB, 10 M FM 29.600, 6 M FM 52.525; never a band's dial such as 14.200)",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "note A's dial; 'open sentry G': the remote's freq goes to the state's wch (27.185 MHz AM the first time), 'open sentry A': A's dial back exactly; on G 'set freq 27215000': wch 27215000; 'set freq 14200000' on G: wch unchanged. Put back with 'set wch HZ MODE'.",
+  "suite_has": null,
+  "manual_ref": "### G WALKIE"
+ },
+ {
+  "id": "g-lamp-carrier",
+  "area": "sentry-G",
+  "feature": "G's lamp RX SIGNAL on a voice (the audio 6 dB over its own floor) or a carrier (the radio's S-meter 10 dB over its noise floor: an FM carrier's quieting, AM's steady carrier), RX QUIET otherwise",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "cable",
+  "how_to_confirm": "on the bench cable: the other radio sends an FM carrier (no audio) at 0.1 W on G's channel: the listener's G screenshot OCR 'RX SIGNAL' while its S-meter reads S7-S8; key up: 'RX QUIET'.",
   "suite_has": null,
   "manual_ref": "### G WALKIE"
  },
@@ -14234,6 +14273,45 @@
   "manual_ref": "### Transmitting from the browser"
  },
  {
+  "id": "remote-close-rtty",
+  "area": "remote",
+  "feature": "The remote's 'close' closes the app open, the RTTY panel too (the one app with no window of its own)",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "'open' the RTTY app (its action from 'apps'): the state's app 'RTTY'; 'close': app '' within 2 s.",
+  "suite_has": null,
+  "manual_ref": "`close`"
+ },
+ {
+  "id": "remote-g-channel",
+  "area": "remote",
+  "feature": "The remote's state says G's own channel (wch Hz, wchm mode; 0 and -1 for none); 'set wch HZ MODE' sets that memory only, the dial not tuned; a frequency the radio does not tune refused",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "read wch/wchm; 'set wch 27065000 6': the state's wch 27065000, freq unchanged; 'set wch 5': 'err wch: not a frequency this radio tunes'; put back as found.",
+  "suite_has": null,
+  "manual_ref": "`set NAME VALUE`"
+ },
+ {
+  "id": "remote-tune-power",
+  "area": "remote",
+  "feature": "The remote's state says TUNE's own power (tpwr, tenths of a watt); 'set tpwr N' sets it as Settings > TX Cal > EXTERNAL TUNER does (0.1 W up to the radio's top, clamped), saved",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "read tpwr; 'set tpwr 1': the state's tpwr 1; 'set tpwr 0': tpwr 1 (clamped to 0.1 W); put back as found (the settings row too).",
+  "suite_has": null,
+  "manual_ref": "`set NAME VALUE`"
+ },
+ {
   "id": "remote-server-switch",
   "area": "remote",
   "feature": "Settings > General > BROWSER REMOTE turns the server (both pages) on and off, port in /mnt/remote.conf, shows who is watching",
@@ -14584,6 +14662,32 @@
   "how_to_confirm": "Browser in control; turn a knob on the radio -> every client gets 'ctl local 0'",
   "suite_has": null,
   "manual_ref": "### Pairing and control"
+ },
+ {
+  "id": "control-injected-keys-keep",
+  "area": "remote",
+  "feature": "The keys and knob turns a browser sends never hand control to 'At the radio', however late the GUI reads them (an FT8 app decoding): matched by the kernel's event time, not the read",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "Control taken; FT8 app open and decoding; 40 remote key taps and knob turns: 'ctl' stays 'browser ... 1' throughout (it said 'local' within a few taps before).",
+  "suite_has": null,
+  "manual_ref": "Control: one holder at a time"
+ },
+ {
+  "id": "control-stop-needs-none",
+  "area": "remote",
+  "feature": "'ft8 stop' and 'js8 stop' need operate only, not control: stopping the apps' transmitting goes whoever holds control",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "Control released or held by another; 'ft8 stop': no 'err controlled by', the app's TX off; 'ft8 cq' still refused without control.",
+  "suite_has": null,
+  "manual_ref": "Control: one holder at a time"
  },
  {
   "id": "control-tci-takes",

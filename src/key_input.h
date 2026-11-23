@@ -44,3 +44,5 @@ bool keyboard_shortcuts(void);
 /* obj takes typing from the keyboard though it is not a text box (the CW keyboard, JTTY, the shell): it gets the
  * keyboard's keys with Shortcuts off too */
 void keyboard_takes_typing(lv_obj_t *obj);
+/* obj takes no typing again (the Sentry's G takes it only while its channel list is open) */
+void keyboard_stops_typing(lv_obj_t *obj);
