@@ -56,7 +56,9 @@ Each is enforced in `bench.py` (a gate refuses, and says why, before anything is
    still puts the radios back (rule 12). A second Ctrl-C leaves at once.
 9. **The radios put back, on page A: NEVER left otherwise.** A test closes the apps it opened and releases
    control; a callsign set for the tests is put back with `testcall NAME restore`. Everything it changed is put back
-   and read back (`bench.finish`): the settings, each band it tuned through, a mode's own filter. Both radios end on
+   and read back (`bench.finish`): the settings, each band it tuned through, a mode's own filter, then every row of
+   the radio's settings database as the snapshot read it (a row the test left is deleted, a changed one written
+   again: VFO B's memory of each band, 2026-11-23; TCI's learned TX level is left). Both radios end on
    the Sentry's page A, whatever page they were on (the owner, 2026-11-22: "when tests finish they should always leave
    on screen A"). Up to three attempts, each renewing a stalled or dropped link, stopping the bench's own programs on
    the radio (a TCI client holds control while connected), taking control again and closing apps; a radio still not
@@ -108,8 +110,8 @@ air at 0.1 W while the other listens. Heard: the listener's own spectrum within 
 spectrum shows 40 dB up). One radio on the air at a time: the sender is armed only when the other has been out of TX
 a second, the watch stops everything when two are on the air at once (sim_test.py's case "both"). A tap of A/B or a
 key the radio missed over WiFi is tried again, an over during which the listener sent nothing (the X6200's reports
-stalled for seconds now and then) is tried once more; afterwards both on the first radio's channel, on G, each its own
-power and tuner back. `--senders`, `--keep-armed` (each radio armed through a channel's overs, as an operator keeps
+stalled for seconds now and then) is tried once more; afterwards each put back as found (dial, mode, power, tuner,
+every band's memories) on the Sentry's page A. `--senders`, `--keep-armed` (each radio armed through a channel's overs, as an operator keeps
 it). First runs: the X6200 heard by the X6100 on every band and mode; the X6100 by the X6200 on every band and mode
 while the X6200 only listened. The X6100 put out 0.9 W asked for 0.1 W on 6 m, and the watch stopped it there.
 

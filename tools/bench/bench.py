@@ -123,9 +123,11 @@ def tx_log(entry):
         f.write(json.dumps(entry) + "\n")
 
 
-def ssh(host, cmd, timeout=60):
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", f"root@{host}", cmd],
-                       capture_output=True, text=True, timeout=timeout)
+def ssh(host, cmd, timeout=60, input=None):
+    """cmd on the radio; input: its standard input. -4: the radios' .local names have no IPv6 answer, each lookup of
+    one cost about 5 s (2026-11-23)"""
+    r = subprocess.run(["ssh", "-4", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", f"root@{host}", cmd],
+                       capture_output=True, text=True, timeout=timeout, input=input)
     if r.returncode:
         raise Refused(f"{host}: {cmd.split()[0]}: {(r.stderr or r.stdout).strip()[-200:]}")
     return r.stdout
@@ -439,13 +441,92 @@ def band_memories(r):
     return {"bands": bands, "mem": mem}
 
 
+DB_LEARNED = re.compile(r"P\|tci_tx_level")   # rows the radio moves by itself (TCI's learned TX level): left
+DB_SETTLE_S = 4.0       # the GUI writes what changed every 3 s (settings_manager.cpp start_flush_thread)
+DB_QUERY = ('.separator "\\037" "\\036"\n'
+            "select 'P|'||name, quote(val) from params;"
+            "select 'B|'||bands_id||'|'||name, quote(val) from band_params;"
+            "select 'M|'||mode||'|'||name, quote(val) from mode_params;\n")
+
+
+def db_rows(r):
+    """Every row of r's params.db (params, band_params, mode_params) as {"P|name", "B|band|name", "M|mode|name": its
+    value as an SQL literal}, read only. Holds secrets (the callsign, passwords): never said, never written to a file.
+    None: not read (said)"""
+    if r.simulated:
+        return None
+    try:
+        out = ssh(r.host, "sqlite3 -readonly -cmd '.timeout 3000' /mnt/params.db", timeout=30, input=DB_QUERY)
+    except (Refused, subprocess.SubprocessError) as e:
+        say(f"{r.name}: its settings database not read ({e}): its rows are not put back")
+        return None
+    rows = {}
+    for rec in out.split("\x1e"):
+        if "\x1f" in rec:
+            k, v = rec.lstrip("\n").split("\x1f", 1)
+            rows[k] = v
+    return rows
+
+
+def _db_where(k):
+    """The table, the key's columns and its WHERE for a db_rows() key; None for one not understood"""
+    p = k.split("|")
+    q = lambda x: "'" + x.replace("'", "''") + "'"
+    if p[0] == "P" and len(p) == 2:
+        return "params", f"name={q(p[1])}", f"name", q(p[1])
+    if p[0] in ("B", "M") and len(p) == 3 and re.fullmatch(r"-?\d+", p[1]):
+        t, c = ("band_params", "bands_id") if p[0] == "B" else ("mode_params", "mode")
+        return t, f"{c}={int(p[1])} and name={q(p[2])}", f"{c},name", f"{int(p[1])},{q(p[2])}"
+    return None
+
+
+def db_put_back(r, before):
+    """r's settings database as before (db_rows) found it: a row new since deleted (a setting set and set back leaves
+    one: the split tests left VFO B's 14.230 USB in 20 m's memories on both radios, where VFO B had followed VFO A,
+    2026-11-23, and finish put back VFO A's alone), a changed one's value written again, one gone inserted again; the
+    rows the radio moves by itself (DB_LEARNED) left. Written live, after the live settings are back and DB_SETTLE_S:
+    the GUI reads a band's rows only as it goes to that band and writes only what changes, so its database is then
+    the whole truth of them. Read back; the rows not back returned. Only the rows' names are said"""
+    if before is None:
+        return {}
+    now = db_rows(r)
+    if now is None:
+        return {"db": "not read"}
+    diff = sorted(k for k in set(before) | set(now) if before.get(k) != now.get(k) and not DB_LEARNED.match(k))
+    if not diff:
+        return {}
+    sql = ["begin;"]
+    for k in diff:
+        w = _db_where(k)
+        if not w:
+            continue
+        table, where, cols, vals = w
+        sql.append(f"delete from {table} where {where};")
+        if k in before:
+            sql.append(f"insert into {table}({cols},val) values({vals},{before[k]});")
+    sql.append("commit;")
+    try:
+        ssh(r.host, "sqlite3 -cmd '.timeout 3000' /mnt/params.db", timeout=30, input="\n".join(sql) + "\n")
+    except (Refused, subprocess.SubprocessError) as e:
+        say(f"{r.name}: its settings database not written ({e})")
+    after = db_rows(r) or {}
+    bad = [k for k in diff if after.get(k) != before.get(k)]
+    new = [k for k in diff if k not in before]
+    say(f"{r.name}: its settings database put back as found: {len(diff)} row(s) "
+        f"({', '.join(k.replace('|', ' ') for k in diff[:12])}{' ...' if len(diff) > 12 else ''}"
+        f"{f'; {len(new)} new since, deleted' if new else ''})" + (f", NOT back: {bad}" if bad else ""))
+    return {"db": bad} if bad else {}
+
+
 def snapshot(r):
-    """What finish() puts back: every key a test may change, as the radio reads it now, and each band's own memories
-    ("_bands"); from here the radio's dials are noted (Radio.freqs). Refused for a radio a test left not as found"""
+    """What finish() puts back: every key a test may change, as the radio reads it now, each band's own memories
+    ("_bands") and every row of its settings database ("_db": never written to a file); from here the radio's dials
+    are noted (Radio.freqs). Refused for a radio a test left not as found"""
     left_wrong_gate(r)
     state_ready(r)
     snap = {k: _value(r, k) for k in RESTORED}
     snap["_bands"] = band_memories(r)
+    snap["_db"] = db_rows(r)
     r.freqs = {int(r.state.get("freq", 0))}
     return snap
 
@@ -611,6 +692,7 @@ def finish(radios, snaps, keep=(), report=None, before=None):
     FINISH_TRIES attempts, each renewing a stalled link, stopping the bench's own programs, taking control again; what
     is still not back then is recorded (LEFT_WRONG) and every test refuses that radio till bench.py restore puts it
     back. What did not come back is said and kept in report["not_restored"]"""
+    bads = {}
     for r in radios:
         snap, bad = snaps.get(r.name, {}), {}
         for attempt in range(FINISH_TRIES):
@@ -624,12 +706,21 @@ def finish(radios, snaps, keep=(), report=None, before=None):
                 break
             say(f"{r.name}: not all put back (try {attempt + 1} of {FINISH_TRIES}): {bad}")
             time.sleep(2.0)
+        bads[r.name] = bad
+    # then each radio's settings database (the rows its live settings cannot reach: other bands' VFO B, a row left
+    # where none was), once the GUI has written what the put back changed
+    if any(snaps.get(r.name, {}).get("_db") is not None and not bads[r.name] for r in radios):
+        time.sleep(DB_SETTLE_S)
+    for r in radios:
+        snap, bad = snaps.get(r.name, {}), bads[r.name]
+        if not bad and "_db" not in keep:
+            bad = db_put_back(r, snap.get("_db"))
         if bad:
             say(f"{r.name}: LEFT NOT AS FOUND after {FINISH_TRIES} tries: {bad}. No test touches it till "
                 f"bench.py restore puts it back")
             doc = load_json(os.path.join(STATE, LEFT_WRONG), {})
             doc[r.name] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "bad": bad,
-                           "snap": {k: v for k, v in snap.items() if k not in keep}}
+                           "snap": {k: v for k, v in snap.items() if k not in keep and k != "_db"}}
             save_json(os.path.join(STATE, LEFT_WRONG), doc)
         if report is not None and bad:
             report.setdefault("not_restored", {})[r.name] = bad
@@ -1687,8 +1778,8 @@ def run_radios_walkie(c, args):
     for r in radios:
         r.take_control()
         snaps[r.name] = snapshot(r)
-    # the owner, 2026-11-19: both radios on the first radio's channel after; 2026-11-22: and on the Sentry's page A
-    snaps[b.name] = dict(snaps[b.name], freq=snaps[a.name]["freq"], mode=snaps[a.name]["mode"])
+    # each radio put back as found, on the Sentry's page A: the owner's later rule (2026-11-22, "NEVER leave a radio
+    # not as found") over 2026-11-19's both on the first radio's channel after
     expect = 10 * math.log10(FIRST_PROBE_W * 1000) - total
     results, hold = [], [int(time.time()) % 100000]
     before = {}             # each radio's own memory of a mode (filter, zoom) before the other's was copied over it

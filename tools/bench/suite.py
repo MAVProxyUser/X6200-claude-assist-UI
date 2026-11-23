@@ -46,6 +46,7 @@ import bench  # noqa: E402
 import suite_more  # noqa: E402
 import suite_proto  # noqa: E402
 import suite_cover  # noqa: E402
+import suite_air_a  # noqa: E402
 
 try:
     from PIL import Image, ImageDraw
@@ -751,6 +752,7 @@ BATCHES = {
     "look": ("both radios on the network: every Settings tab photographed side by side, compared", suite_more.look),
     "cover": ("both radios on the network and SSH (receive only: features the other batches had not reached)",
               suite_cover.cover),
+    "air_a": ("the cable (chain-ok radios): the transmitter, one sends 0.1 W, one listens", suite_air_a.batch),
 }
 
 
