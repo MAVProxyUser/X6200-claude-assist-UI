@@ -18,6 +18,8 @@ The tests (the features each covers in brackets):
   tci-rate        TCI's audio at its default (48 kHz float32 stereo) at full rate over the radio's WiFi for 30 s
   web-writes      a PSK macro added and deleted (non-ASCII refused), a test SSH key added, logged in with and
                   removed, a page under another name refused: each file compared with its copy after, put back if not
+  tci-switches    TCI listen only (a tune ignored by TCI and by rigctl, which follows it), TCI off (rigctl refused too),
+                  everything put back, /mnt/tci.conf as found; TCI's Bluetooth service on channel 22
 
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
@@ -358,9 +360,82 @@ def t_web_writes(run):
     by_radio(run, "cover", "web-own-name", ["own-names-dhcp-domain"], own_name)
 
 
+# ---- TCI's own switches: listen only, off (put back as found, the file too), its Bluetooth service ----
+
+def tci_greets(h, port=50001, secs=2.0):
+    try:
+        c = Remote(h, port, timeout=5)
+    except (ConnectionError, OSError):
+        return None
+    try:
+        return texts(c, secs)
+    finally:
+        c.close()
+
+
+def t_tci_switches(run):
+    def fn(n, h, ip):
+        st, body = http(ip, "/api/tci")
+        orig = json.loads(body) if st == 200 else None
+        if not orig or not orig.get("enabled"):
+            return None, f"TCI not on as found ({orig}): left alone"
+        k0 = keep(h, "/mnt/tci.conf", "save")
+        res = {}
+        try:
+            conf = {"enabled": True, "port": 50001, "trust": "view", "tx_confirm": bool(orig.get("tx_confirm"))}
+            res["view"] = http(ip, "/api/tci", method="POST", body=conf)[0]
+            time.sleep(2.5)
+            c = Remote(h, 50001, timeout=5)
+            try:
+                g = texts(c, 1.5)
+                f0 = next((x for x in g if x.startswith("vfo:0,0,")), "")
+                c.send("vfo:0,0,7100000;")                     # only a tune: no transmit request is ever sent
+                ans = [x for x in texts(c, 2.0) if x.startswith("vfo:0,0,")]
+            finally:
+                c.close()
+            res["tci_tune"] = (f0, ans[-1] if ans else None)
+            rig_set = rig_ask(h, text="F 7100000\n")
+            rig_get = rig_ask(h, text="f\n")
+            res["rig"] = (rig_set, rig_get)
+            conf["trust"], conf["enabled"] = orig.get("trust", "operate"), False
+            res["off"] = http(ip, "/api/tci", method="POST", body=conf)[0]
+            time.sleep(2.5)
+            try:
+                rig_ask(h, text="f\n", secs=1.0)
+                res["rig_off"] = "answered"
+            except OSError as e:
+                res["rig_off"] = f"refused ({type(e).__name__})"
+            res["tci_off"] = "refused" if tci_greets(h) is None else "answered"
+        finally:
+            back = {"enabled": True, "port": orig.get("port", 50001), "trust": orig.get("trust", "operate"),
+                    "tx_confirm": bool(orig.get("tx_confirm"))}
+            http(ip, "/api/tci", method="POST", body=back)
+            k1 = keep(h, "/mnt/tci.conf", "back")
+            time.sleep(2.5)
+        greet = tci_greets(h)
+        again = rig_ask(h, text="f\n")
+        f0, f1 = res["tci_tune"]
+        held = bool(f0) and f1 == f0
+        rig_refused = res["rig"][0].startswith("RPRT -") and res["rig"][1].strip().splitlines()[0] == f0.split(",")[2].rstrip(";")
+        ok = res["view"] == 200 and held and rig_refused and res["off"] == 200 and res["rig_off"].startswith("refused") \
+            and res["tci_off"] == "refused" and bool(greet) and bool(again) and k1 in ("same", "removed")
+        return ok, (f"listen only: TCI's tune answered {f1!r} (was {f0!r}), rigctl's F {res['rig'][0]!r}, f "
+                    f"{res['rig'][1].splitlines()[0] if res['rig'][1] else None!r}; TCI off: rigctl {res['rig_off']}, TCI "
+                    f"{res['tci_off']}; put back: TCI greets {bool(greet)}, rigctl answers {again[:12]!r}; the file "
+                    f"{k0}, then {k1}")
+    by_radio(run, "cover", "tci-switches", ["tci-listen-only", "rigctl-follows-tci-switch"], fn)
+
+    def bt(n, h, ip):
+        out = ssh(h, "sdptool browse local 2>&1 | grep -i -B3 -A8 'tci' | grep -i -m2 'channel\\|tci'; "
+                     "grep -m1 -i 'tci: service registered' /tmp/bt_pair.log 2>/dev/null").strip()
+        ok = "22" in out and "registered" in out.lower()
+        return ok, f"{out[:220]!r}"
+    by_radio(run, "cover", "bt-tci-service", ["bt-tci-service"], bt)
+
+
 TESTS = (("filters", t_filters), ("walkie-upright", t_walkie_upright), ("refusals", t_refusals),
          ("rigctl-local", t_rigctl_local), ("sessions-mtime", t_sessions_mtime), ("config-files", t_config_files),
-         ("bootvideo", t_bootvideo), ("gui-cpu", t_gui_cpu), ("tci-rate", t_tci_rate), ("web-writes", t_web_writes))
+         ("bootvideo", t_bootvideo), ("gui-cpu", t_gui_cpu), ("tci-rate", t_tci_rate), ("web-writes", t_web_writes), ("tci-switches", t_tci_switches))
 
 
 def cover(run, only):

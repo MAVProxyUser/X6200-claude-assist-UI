@@ -7,7 +7,7 @@ here transmits until the owner says so (transmit work is not wanted for now). On
 Meteor/SCAN CFG one, the Kraken DF one and its kernel one) were folded into one backlog, in the order the owner
 approved that day.
 
-**2026-11-23 night: the 1:1 suite's "cover" batch (tools/bench/suite_cover.py)**, 39 pass 0 fail on both radios (with
+**2026-11-23 night: the 1:1 suite's "cover" batch (tools/bench/suite_cover.py)**, 45 pass 0 fail on both radios (with TCI listen only and off with rigctl following, put back as found; TCI's Bluetooth service;
 web-writes: a PSK macro and a test SSH key added and taken out, each file compared with its copy after; the own-name
 guard: a change and the SSH keys' list refused under another name, plain reads answered by design).
 Found and FIXED with it: a remote connection that wanted no screen pictures (the Panel, the bench) had the GUI thread
