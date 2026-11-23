@@ -20,6 +20,10 @@ The tests (the features each covers in brackets):
                   removed, a page under another name refused: each file compared with its copy after, put back if not
   tci-switches    TCI listen only (a tune ignored by TCI and by rigctl, which follows it), TCI off (rigctl refused too),
                   everything put back, /mnt/tci.conf as found; TCI's Bluetooth service on channel 22
+  ft8-more        FT8's MODE through FT8, FT4, FT2 with each one's 20 m frequency; the main knob moving TX Hz
+  channels-web    channels added from the web at 145.5 MHz (both) and 60 MHz (the X6200 only), taken out again
+  smartcw-guard   SmartCW's page with no stick says so, a POST from another site refused
+  winlink-pat     Pat's mailbox and its rig (rigctl on 127.0.0.1), no P2P listen; a look when Winlink is off
 
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
@@ -423,7 +427,7 @@ def t_tci_switches(run):
                     f"{res['rig'][1].splitlines()[0] if res['rig'][1] else None!r}; TCI off: rigctl {res['rig_off']}, TCI "
                     f"{res['tci_off']}; put back: TCI greets {bool(greet)}, rigctl answers {again[:12]!r}; the file "
                     f"{k0}, then {k1}")
-    by_radio(run, "cover", "tci-switches", ["tci-listen-only", "rigctl-follows-tci-switch"], fn)
+    by_radio(run, "cover", "tci-switches", ["tci-listen-only", "rigctl-follows-tci-switch", "settings-general-tci-clients"], fn)
 
     def bt(n, h, ip):
         out = ssh(h, "sdptool browse local 2>&1 | grep -i -B3 -A8 'tci' | grep -i -m2 'channel\\|tci'; "
@@ -433,9 +437,151 @@ def t_tci_switches(run):
     by_radio(run, "cover", "bt-tci-service", ["bt-tci-service"], bt)
 
 
+# ---- the apps: FT8's modes and knob, the channels from the web, SmartCW's page, Pat's mailbox ----
+
+# each mode's frequency on two bands the app opens on (it opens on its own last band, not the dial's)
+FT8_FREQS = {"80m": {"FT8": 3573000, "FT4": 3575000, "FT2": 3568000},
+             "20m": {"FT8": 14074000, "FT4": 14080000, "FT2": 14084000}}
+
+
+def ft8_band(f):
+    return "80m" if 3500000 <= f <= 4000000 else "20m" if 14000000 <= f <= 14350000 else None
+
+
+def t_ft8_more(run):
+    from suite_proto import FT8_APPS
+
+    def fn(r):
+        bench.ensure(r, {"freq": F_TEST, "mode": 2})
+        said, ok = [], True
+        r.send("ft8 open")
+        try:
+            r.wait("FT8 open", lambda: r.state.get("app") in FT8_APPS and r.ft8.get("open") == 1, 10)
+            p0, tx0 = r.ft8.get("proto"), r.ft8.get("txf")
+            seen = [(r.state.get("app"), int(r.state.get("freq", 0)))]
+            try:
+                for _ in range(3):
+                    p, f = r.ft8.get("proto"), int(r.state.get("freq", 0))
+                    r.send("ft8 mode")
+                    r.wait("FT8's mode stepped", lambda: r.ft8.get("proto") != p, 5)
+                    r.wait("its frequency", lambda: int(r.state.get("freq", 0)) != f, 4)
+                    time.sleep(0.5)
+                    seen.append((r.state.get("app"), int(r.state.get("freq", 0))))
+                table = FT8_FREQS.get(ft8_band(seen[0][1]))
+                right = all(f == table.get(a) for a, f in seen) if table else len({f for _, f in seen[:3]}) == 3
+                ok &= right and seen[-1] == seen[0] and len({a for a, _ in seen}) == 3
+                said.append("MODE: " + " -> ".join(f"{a} {f / 1e6:.3f}" for a, f in seen))
+                t1 = r.ft8.get("txf")
+                r.send("knob main 1")
+                r.wait("TX Hz +1", lambda: r.ft8.get("txf") != t1, 3)
+                one = r.ft8.get("txf") - t1
+                t2 = r.ft8.get("txf")
+                r.send("knob main 10")
+                r.wait("TX Hz on", lambda: r.ft8.get("txf") != t2, 3)
+                time.sleep(0.5)
+                ten = r.ft8.get("txf") - t2
+                ok &= one == 1 and 10 <= ten <= 100
+                said.append(f"the main knob: 1 click TX Hz {one:+d}, a burst of 10 {ten:+d}")
+            finally:
+                # the protocol is a setting the app keeps (ft8_protocol): stepped back to the one found whatever
+                # happened above (2026-11-23: a run stopped after one step left both radios on another)
+                n = 0
+                while r.ft8.get("proto") != p0 and n < 4:
+                    p = r.ft8.get("proto")
+                    r.send("ft8 mode")
+                    try:
+                        r.wait("FT8's mode back", lambda: r.ft8.get("proto") != p, 5)
+                    except bench.Refused:
+                        pass
+                    n += 1
+                if tx0 is not None and r.ft8.get("txf") != tx0:
+                    r.send(f"ft8 txfreq {tx0}")
+                    r.wait("FT8's TX Hz back", lambda: r.ft8.get("txf") == tx0, 5)
+                ok &= r.ft8.get("proto") == p0
+                said.append(f"put back: {r.state.get('app')} (as found {r.ft8.get('proto') == p0}), TX Hz {r.ft8.get('txf')}")
+        finally:
+            r.send("ft8 close")
+            r.wait("FT8 closed", lambda: r.state.get("app") not in FT8_APPS, 10)
+        return ok, "; ".join(said)
+    per_radio(run, "cover", "ft8-modes-knob", fn, ["ft8-mode-cycle", "ft8-knob-tx-offset"])
+
+
+def t_channels_web(run):
+    def fn(n, h, ip):
+        k0 = keep(h, "/mnt/channels.json", "save")
+        said, ok = [], True
+        try:
+            st, body = http(ip, "/api/channels")
+            before = json.loads(body).get("channels") if st == 200 else None
+            base = {"mode": "NFM", "agc": "FAST", "pre": False, "att": False}
+            got = {}
+            for name, f in (("BENCH 145", 145500000), ("BENCH 60", 60000000)):
+                stc, bodyc = http(ip, "/api/channels", method="POST", body=dict(base, name=name, frequency=f))
+                got[name] = (stc, bodyc[:90])
+            st2, body2 = http(ip, "/api/channels")
+            now = json.loads(body2).get("channels") if st2 == 200 else []
+            mine = [i for i, c in enumerate(now) if str(c.get("name", "")).startswith("BENCH ")]
+            for i in sorted(mine, reverse=True):
+                http(ip, f"/api/channels/{i}", method="DELETE", body={"was": now[i]})
+            st3, body3 = http(ip, "/api/channels")
+            after = json.loads(body3).get("channels") if st3 == 200 else None
+            want60 = 200 if n == "x6200" else 400
+            ok = got["BENCH 145"][0] == 200 and got["BENCH 60"][0] == want60 and after == before
+            said.append(f"{len(before or [])} channels; 145.5 MHz added {got['BENCH 145'][0]}; 60 MHz "
+                        f"{got['BENCH 60'][0]} (want {want60}: {got['BENCH 60'][1] if got['BENCH 60'][0] != 200 else 'taken'}); "
+                        f"taken out again, the list as before {after == before}")
+        finally:
+            k1 = keep(h, "/mnt/channels.json", "back")
+        ok &= k1 in ("same", "removed", "restored")     # the API writes the file in its own layout: the bytes put back
+        return ok, "; ".join(said) + f"; the file {k0}, then {k1}"
+    by_radio(run, "cover", "channels-web", ["channels-frequency-ranges", "channels-web-sync"], fn)
+
+
+def t_smartcw_guard(run):
+    def fn(n, h, ip):
+        import urllib.error
+        import urllib.request
+        out = {}
+        for method, origin in (("GET", None), ("POST", "http://example.invalid")):
+            hd = {"Host": f"{n}.local:8073"}
+            if origin:
+                hd["Origin"] = origin
+            req = urllib.request.Request(f"http://{ip}:8073/", data=b"{}" if method == "POST" else None,
+                                         headers=hd, method=method)
+            try:
+                with urllib.request.urlopen(req, timeout=6) as resp:
+                    out[method] = (resp.status, resp.read(400).decode(errors="replace"))
+            except urllib.error.HTTPError as e:
+                out[method] = (e.code, e.read(400).decode(errors="replace"))
+            except OSError as e:
+                out[method] = (None, str(e)[:60])
+        stick = ssh(h, "ls /dev/serial/by-id/ 2>/dev/null | grep -ci smartcw").strip()
+        page_says = "not plugged in" in out["GET"][1].lower()
+        refused = out["POST"][0] in (403, 400)
+        ok = (stick == "0" and page_says and refused)
+        return ok, (f"SmartCW sticks {stick}; GET :8073 {out['GET'][0]} says 'not plugged in' {page_says}; a POST from "
+                    f"another site {out['POST'][0]} {out['POST'][1][:80]!r}")
+    by_radio(run, "cover", "smartcw-guard", ["smartcw-page-guard-errors"], fn)
+
+
+def t_winlink_pat(run):
+    def fn(n, h, ip):
+        on = ssh(h, "cat /mnt/winlink.conf 2>/dev/null | grep -c '^enabled=1'").strip()
+        if on != "1":
+            return None, "Winlink is off on this radio (/mnt/winlink.conf): Pat's mailbox not running, as it should be"
+        st, _ = http(ip.split(":")[0] + ":8080", "/", host=f"{n}.local:8080")
+        cfg = ssh(h, "cat /mnt/winlink/config.json /root/.config/pat/config.json 2>/dev/null | head -200")
+        rig = '"address": "127.0.0.1:4532"' in cfg or "127.0.0.1:4532" in cfg
+        listen = '"listen": []' in cfg or '"listen":[]' in cfg
+        return st == 200 and rig and listen, f"Pat's mailbox {st}; rig at 127.0.0.1:4532 {rig}; no P2P listen {listen}"
+    by_radio(run, "cover", "winlink-pat", ["winlink-mailbox-pat"], fn)
+
+
 TESTS = (("filters", t_filters), ("walkie-upright", t_walkie_upright), ("refusals", t_refusals),
          ("rigctl-local", t_rigctl_local), ("sessions-mtime", t_sessions_mtime), ("config-files", t_config_files),
-         ("bootvideo", t_bootvideo), ("gui-cpu", t_gui_cpu), ("tci-rate", t_tci_rate), ("web-writes", t_web_writes), ("tci-switches", t_tci_switches))
+         ("bootvideo", t_bootvideo), ("gui-cpu", t_gui_cpu), ("tci-rate", t_tci_rate), ("web-writes", t_web_writes), ("tci-switches", t_tci_switches),
+         ("ft8-more", t_ft8_more), ("channels-web", t_channels_web), ("smartcw-guard", t_smartcw_guard),
+         ("winlink-pat", t_winlink_pat))
 
 
 def cover(run, only):
