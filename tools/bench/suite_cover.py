@@ -16,6 +16,8 @@ The tests (the features each covers in brackets):
   bootvideo       the last start's boot video decoded by the video engine
   gui-cpu         the GUI's main thread on the Sentry's A as a share of one core, against the manual's table
   tci-rate        TCI's audio at its default (48 kHz float32 stereo) at full rate over the radio's WiFi for 30 s
+  web-writes      a PSK macro added and deleted (non-ASCII refused), a test SSH key added, logged in with and
+                  removed, a page under another name refused: each file compared with its copy after, put back if not
 
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
@@ -29,7 +31,7 @@ import time
 import bench
 from remote_ws import Remote
 from suite_more import F_TEST, per_radio
-from suite_proto import by_radio, expect, fresh, jpeg_size, line_after, texts
+from suite_proto import by_radio, expect, fresh, http, jpeg_size, line_after, texts
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -274,9 +276,91 @@ def t_tci_rate(run):
     by_radio(run, "cover", "tci-rate", ["tci-wifi-throughput"], fn)
 
 
+# ---- the web's writes, each put back (the file compared with its copy, restored from it if it differs) ----
+
+KEEP = r"""
+f={f}; b=/tmp/bench_keep_$(basename $f)
+if [ "$1" = save ]; then if [ -e $f ]; then cp -p $f $b; echo saved; else rm -f $b; echo none; fi
+else if [ -e $b ]; then cmp -s $f $b && echo same || {{ cp -p $b $f; echo restored; }}; rm -f $b
+     else rm -f $f; echo removed; fi; fi
+"""
+
+
+def keep(h, path, what):
+    """'save' a radio's file aside, or 'back': compared with that copy and put back if it differs"""
+    return ssh(h, "set -- " + what + "\n" + KEEP.format(f=path)).strip()
+
+
+def t_web_writes(run):
+    def macros(n, h, ip):
+        path = "/mnt/psk_macros.txt"
+        k0 = keep(h, path, "save")
+        try:
+            st, body = http(ip, "/api/macros/psk")
+            before = json.loads(body)["macros"] if st == 200 else None
+            st1, body1 = http(ip, "/api/macros/psk", method="POST", body={"name": "BENCH", "text": "Q9TST TEST"})
+            after = json.loads(body1)["macros"] if st1 == 200 else []
+            mine = next((m for m in after if m["name"] == "BENCH" and m["text"] == "Q9TST TEST"), None)
+            in_file = "BENCH\tQ9TST TEST" in ssh(h, f"cat {path}")
+            bad, _ = http(ip, "/api/macros/psk", method="POST", body={"name": "BENCH2", "text": "caf\u00e9"})
+            st2 = None
+            if mine:
+                st2, _ = http(ip, f"/api/macros/psk/{mine['id']}", method="DELETE")
+            st3, body3 = http(ip, "/api/macros/psk")
+            back_list = json.loads(body3)["macros"] if st3 == 200 else None
+        finally:
+            k1 = keep(h, path, "back")
+        ok = st1 == 200 and bool(mine) and in_file and bad == 400 and st2 == 200 and back_list == before and \
+            k1 in ("same", "removed")
+        return ok, (f"{len(before or [])} PSK macros; one added: {st1}, in the file {in_file}; a non-ASCII text "
+                    f"refused {bad}; deleted {st2}, the list as before {back_list == before}; the file {k0}, then {k1}")
+    by_radio(run, "cover", "web-macros", ["web-macros-page"], macros)
+
+    def ssh_keys(n, h, ip):
+        kf = os.path.join(HERE, "..", "..", "build", "bench_ed25519")
+        if not os.path.exists(kf):
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "bench@suite", "-f", kf], check=True)
+        pub = open(kf + ".pub").read().strip()
+        path = "/root/.ssh/authorized_keys"
+        k0 = keep(h, path, "save")
+        st2 = st3 = None
+        login = False
+        try:
+            st1, body1 = http(ip, "/api/ssh/keys", method="POST", body={"key": pub})
+            keys = json.loads(body1).get("keys", []) if st1 == 200 else []
+            mine = next((k for k in keys if k.get("comment") == "bench@suite"), None)
+            if mine:
+                r = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o",
+                                    "ConnectTimeout=8", "-i", kf, f"root@{h}", "echo in"], capture_output=True,
+                                   text=True, timeout=30)
+                login = r.stdout.strip() == "in"
+                st2, _ = http(ip, "/api/ssh/keys", method="DELETE", body={"fingerprint": mine["fingerprint"]})
+                st3, body3 = http(ip, "/api/ssh/keys", method="DELETE", body={"fingerprint": mine["fingerprint"]})
+        finally:
+            k1 = keep(h, path, "back")
+        ok = st1 == 200 and bool(mine) and str(mine.get("fingerprint", "")).startswith("SHA256:") and login and \
+            st2 == 200 and st3 == 404 and k1 == "same"
+        return ok, (f"a test key added {st1} ({mine.get('fingerprint', '')[:20] if mine else None}...), ssh with it "
+                    f"{'in' if login else 'REFUSED'}; removed {st2}, again {st3} (not there); authorized_keys "
+                    f"{k0}, then {k1}")
+    by_radio(run, "cover", "web-ssh-keys", ["ssh-add-key", "ssh-remove-key"], ssh_keys)
+
+    def own_name(n, h, ip):
+        """By design (apps.py refuse_other_sites): a change needs one of the radio's own names, and so do the reads of
+        HOST_ONLY_READS (the SSH keys' list among them); other reads answer by any name"""
+        st, _ = http(ip, "/api/macros/psk", host=f"{n}.nl", method="POST", body={"name": "BENCH", "text": "X"})
+        st_read, _ = http(ip, "/api/macros/psk", host=f"{n}.nl")
+        st_keys, _ = http(ip, "/api/ssh", host=f"{n}.nl")
+        st_own, _ = http(ip, "/api/ssh", host=f"{n}.local")
+        ok = st == 403 and st_read == 200 and st_keys == 403 and st_own == 200
+        return ok, (f"Host {n}.nl: a change {st} (refused), a plain read {st_read}, the SSH keys' list {st_keys} "
+                    f"(refused); Host {n}.local: the keys' list {st_own}")
+    by_radio(run, "cover", "web-own-name", ["own-names-dhcp-domain"], own_name)
+
+
 TESTS = (("filters", t_filters), ("walkie-upright", t_walkie_upright), ("refusals", t_refusals),
          ("rigctl-local", t_rigctl_local), ("sessions-mtime", t_sessions_mtime), ("config-files", t_config_files),
-         ("bootvideo", t_bootvideo), ("gui-cpu", t_gui_cpu), ("tci-rate", t_tci_rate))
+         ("bootvideo", t_bootvideo), ("gui-cpu", t_gui_cpu), ("tci-rate", t_tci_rate), ("web-writes", t_web_writes))
 
 
 def cover(run, only):
