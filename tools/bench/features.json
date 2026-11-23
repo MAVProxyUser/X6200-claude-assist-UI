@@ -14690,6 +14690,19 @@
   "manual_ref": "Control: one holder at a time"
  },
  {
+  "id": "keys-long-press-by-event-time",
+  "area": "radio-core",
+  "feature": "A key held past the long press time is a long press by its events' own times (the kernel's), even when the GUI reads the press late (busy: an app decoding, on the air)",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "cable",
+  "how_to_confirm": "A key held 1.5 s (the remote's key 1, then 0) while the GUI is busy (an app decoding, the radio on the air) does its long action, never its tap's; the same held 0.3 s: its tap.",
+  "suite_has": null,
+  "manual_ref": "Long press."
+ },
+ {
   "id": "control-tci-takes",
   "area": "remote",
   "feature": "A TCI client takes control the moment it tunes or keys; what it only asks (vfo:0,0; trx:0;) takes nothing",

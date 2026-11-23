@@ -1675,10 +1675,16 @@ def tune_txfreq(ctx, T):
     time.sleep(1.0)
     mode, split = int(snd.state.get("mode", -1)), int(snd.state.get("split", -1))
     pk = res.get("pk")
-    ok = ((res.get("rb") or 0) >= 15 and (res.get("ra") is None or res["ra"] < 10) and pk is not None
-          and abs(pk - B) <= 600 and mode == 4 and split == 1)
+    rb, ra = res.get("rb") or 0, res.get("ra")
+    on_b = rb >= 15 and pk is not None and abs(pk - B) <= 600 and mode == 4 and split == 1
+    # A carrier sent on A would rise there as on B; 30 kHz from a carrier 60 dB up the listener's own skirts or the
+    # sender's noise can lift A (the X6200 at the X6100: 14.8 dB at A, 48 dB under B, 2026-11-23): judged against B,
+    # and a rise of 10 dB or more there is one to look at, not the carrier on A
+    ok = (on_b and (ra is None or ra < 10)) or (None if on_b and rb - ra >= 30 else False)
     return ok, (f"split, A {A / 1e6:.3f} CW, B {B / 1e6:.3f}: the carrier on B {fmt(res.get('rb'))} dB up (its peak "
-                f"{fmt(pk, 0)} Hz), on A {fmt(res.get('ra'))} dB; after it mode {mode} (CW 4 wanted), split {split}")
+                f"{fmt(pk, 0)} Hz), on A {fmt(ra)} dB" + (f" ({rb - ra:.0f} dB under B: look)"
+                                                         if ok is None else "")
+                + f"; after it mode {mode} (CW 4 wanted), split {split}")
 
 
 def body_tune(ctx):
@@ -1779,16 +1785,35 @@ def t_tune_power(run):
 
 
 def ft8_open(ctx, r, dial):
-    """r's FT8 app open on dial (its UDP to loggers off first), Auto and CQ off; closed again at the test's end"""
+    """r's FT8 app open on dial in FT8 (its UDP to loggers off first), Auto and CQ off; its protocol stepped back as it
+    was found and the app closed again at the test's end. The app opens in the protocol it was left in (the X6100's in
+    FT4, 2026-11-23: "did not come to 14074000", FT4's 30 m dial) and its MODE steps FT8, FT4, FT2 round: the steps
+    taken are stepped on round to where it was, live (the settings put-back fixes the database row only)"""
     udp_off(ctx, r)
     r.send("ft8 open")
     r.wait("the FT8 app", lambda: r.ft8.get("open") == 1, 10)
+    time.sleep(1.0)
+    steps = [0]
 
     def close():
         r.send("ft8 stop")
+        for _ in range((3 - steps[0] % 3) % 3):
+            p = r.ft8.get("proto")
+            r.send("ft8 mode")
+            if wait_for(lambda p=p: r.ft8.get("proto") != p, 5.0) is None:
+                break
+            time.sleep(0.5)
         r.send("ft8 close")
         wait_for(lambda: r.ft8.get("open") != 1, 5.0)
     ctx.undo.append(close)
+    while r.state.get("app") != "FT8" and steps[0] < 3:
+        p = r.ft8.get("proto")
+        r.send("ft8 mode")
+        r.wait("FT8's mode stepped", lambda p=p: r.ft8.get("proto") != p, 5)
+        time.sleep(0.8)
+        steps[0] += 1
+    if r.state.get("app") != "FT8":
+        raise bench.Refused(f"{r.name}: its FT8 app not in FT8 ({r.state.get('app')})")
     bench.ft8_to_band(r, dial)
     if r.ft8.get("auto"):
         r.send("ft8 auto")
@@ -1838,13 +1863,18 @@ def body_tune_app(ctx):
     pk = res.get("pk")
     after = (snd.state.get("app"), int(snd.ft8.get("txf") or 0), int(snd.state.get("freq", 0)))
     up = rise(q, res.get("db"))
-    ok = pk is not None and abs(pk - want) <= tol and (up or 0) >= 15 and after == (app0, 1500, dial) and heard_ok(o)
+    rest = (up or 0) >= 15 and after == (app0, 1500, dial) and heard_ok(o)
+    # within tol: where the app sends; further but within 20 ppm of the dial: the two radios' references apart (the
+    # X6100 read the X6200's carriers 150-170 Hz high at 14 MHz, 2026-11-23), to look at, never the dial's 1500 Hz off
+    ref = 20e-6 * want
+    ok = (pk is not None and rest and abs(pk - want) <= tol) or (
+        None if pk is not None and rest and abs(pk - want) <= tol + ref else False)
     why_back = txf_back()               # before the app closes: it takes its offset only while open
     if why_back:
         ok = False
     ctx.row("tune-app-ft8", ok, f"FT8 open, TX 1500 Hz: the tone at {fmt(pk, 0)} Hz, {fmt(up)} dB up ({want} wanted, "
                                 f"{tol:.0f} Hz at "
-                                f"most off); after it the app {after[0]!r} (was {app0!r}), its TX {after[1]} Hz, the "
+                                f"most off{'; within the references apart: look' if ok is None else ''}); after it the app {after[0]!r} (was {app0!r}), its TX {after[1]} Hz, the "
                                 f"dial {after[2]}" + (f"; {why_back}" if why_back else f"; its offset back to {txf0}"),
             (), ["ext-tune-app-button", "ext-tune-restores-state"])
     snd.send("ft8 close")
@@ -1903,7 +1933,10 @@ def body_tune_key(ctx):
     top = next((k for k in keys.get("top", []) if k.get("id") == "fst"), None)
     if act is None or top is None:
         raise NotRun(f"no 'TUNE ext. tuner' action ({act}) or no FST key ({bool(top)}) in Settings > Keys")
-    h0, step0 = int(top["hold"]), snd.state.get("step")
+    h0 = int(top["hold"])
+    at = {}                     # the step as found in the test's own mode (each mode keeps its own: read on G's AM
+                                # channel first, it was AM's 1000 against USB's 500 after, and "set back" wrote 1000
+                                # into USB's, 2026-11-23)
 
     def back():
         cfg_sock(snd.host, {"cmd": "keys_set", "key": "hold_fst", "val": h0})
@@ -1912,9 +1945,10 @@ def body_tune_key(ctx):
                     if k.get("id") == "fst"), None)
         if now != h0:
             return f"FST's long press reads {now}, was {h0}"
-        if step0 is not None and snd.state.get("step") != step0:
-            snd.send(f"set step {step0}")
-            return f"the tuning step moved ({snd.state.get('step')}, was {step0}): set back"
+        if at and int(snd.state.get("mode", -1)) == at["mode"] and snd.state.get("step") != at["step"]:
+            step = snd.state.get("step")
+            snd.send(f"set step {at['step']}")
+            return f"the tuning step moved in mode {at['mode']} ({step}, was {at['step']}): set back"
     ctx.undo.append(back)
     r = cfg_sock(snd.host, {"cmd": "keys_set", "key": "hold_fst", "val": act})
     time.sleep(0.5)
@@ -1926,6 +1960,7 @@ def body_tune_key(ctx):
     listen(ctx, F20, 2)
     sender(ctx, F20, 2, FIRST)
     time.sleep(1.2)
+    at.update(mode=int(snd.state.get("mode", -1)), step=snd.state.get("step"))
     q = level(lis, F20, time.time() - 1.0, time.time())
 
     def press():

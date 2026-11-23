@@ -35,6 +35,7 @@ static uint32_t vol_press_key(void) {
 
 #include <fcntl.h>
 #include <linux/input.h>
+#include <time.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,7 +101,19 @@ static struct {
     bool        long_sent;      /* KEYPAD_LONG went: KEYPAD_LONG_RELEASE on the release */
     lv_timer_t *hold_timer;     /* the long press, or the next repeat */
     keypad_t   *pad;            /* the device of the press; NULL for one from elsewhere (keypad_button) */
+    int64_t     press_us;       /* the press's time (its event's, CLOCK_REALTIME), 0 none */
 } key_st[KEYS];
+
+/* An event's time as the kernel gave it (the devices' clock, CLOCK_REALTIME), in us; one made here (no time on it):
+ * now */
+static int64_t ev_us(const struct input_event *in) {
+    struct timespec ts;
+
+    if (in && (in->input_event_sec || in->input_event_usec))
+        return (int64_t)in->input_event_sec * 1000000 + in->input_event_usec;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
 
 static uint32_t hold_ms = HOLD_MS;
 static bool     vol_down;       /* the VOL knob is down now: Knob press: next control tells a short press (#282) */
@@ -164,8 +177,8 @@ static keypad_key_t button_of(uint16_t code) {
 }
 
 /* One already-decoded button from pad (NULL: from elsewhere); value 1 is a press, anything else (release,
- * autorepeat) lets go */
-static void key_event(keypad_t *pad, keypad_key_t key, int value) {
+ * autorepeat) lets go; t_us the event's time (ev_us) */
+static void key_event(keypad_t *pad, keypad_key_t key, int value, int64_t t_us) {
     if ((unsigned)key >= KEYS) {
         return;     /* a key added after FST, which KEYS has no place for */
     }
@@ -177,6 +190,7 @@ static void key_event(keypad_t *pad, keypad_key_t key, int value) {
         key_st[key].down      = true;
         key_st[key].long_sent = false;
         key_st[key].pad       = pad;
+        key_st[key].press_us  = t_us;
         send(key, KEYPAD_PRESS);
         /* POWER's hold switches the radio off: always the full time, also where an app shortens the rest (JS8).
          * Made after the press went: its time counts from the end of what the press did */
@@ -185,18 +199,28 @@ static void key_event(keypad_t *pad, keypad_key_t key, int value) {
                                                                                 : hold_ms,
                                                  (void *)(intptr_t)key);
     } else if (key_st[key].down) {
+        int64_t held = t_us - key_st[key].press_us;
+        int64_t hold = (int64_t)(key == KEYPAD_POWER ? HOLD_MS : hold_ms) * 1000;
+
         key_st[key].down = false;
+        /* Held its long press time by the events' own times, the GUI too busy to see it go by (the press read late,
+         * the release already waiting: held_cb waits for it, and it went as a tap): a long press all the same. A
+         * minute or more: the clock stepped in between, not a hold */
+        if (!key_st[key].long_sent && !repeats(key) && key_st[key].press_us && held >= hold && held < 60000000) {
+            key_st[key].long_sent = true;
+            send(key, KEYPAD_LONG);
+        }
         send(key, key_st[key].long_sent ? KEYPAD_LONG_RELEASE : KEYPAD_RELEASE);
     }
 }
 
 void keypad_button(keypad_key_t key, int value) {
-    key_event(NULL, key, value);
+    key_event(NULL, key, value, ev_us(NULL));
 }
 
 /* One input event a call */
 static void button_event(keypad_t *pad, const struct input_event *in) {
-    key_event(pad, button_of(in->code), in->value);
+    key_event(pad, button_of(in->code), in->value, ev_us(in));
 }
 
 static void keypad_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {

@@ -508,6 +508,10 @@ as on the stock firmware, say). The steps are 10 Hz, 100 Hz, 500 Hz, 1 kHz,
 range of them.
 To go further at once, type the frequency (F-INP, or `f` on a keyboard).
 Where: Settings > Keys > PAGE KEYS, LONG PRESS (FST: TOP AND SIDE KEYS).
+A key held past the long press time (one second) is a long press by the
+moments it went down and came up, even when the radio is too busy to see the
+second go by (an app decoding, the radio on the air): up to v0.3.12.47 a
+hold read that late did the key's press action instead.
 
 The radio's own keys (#111). A press and a hold of FST, ATU, A/B, Band down,
 Band up, AM, CW and SSB (on the X6100 PRE and AGC too) can each be given an
