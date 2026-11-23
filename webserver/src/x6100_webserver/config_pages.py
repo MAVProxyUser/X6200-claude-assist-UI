@@ -145,7 +145,7 @@ def plain_page(view='index'):
 def secret_places():
     """The files and folders of the DATA partition that hold secrets (apps.py, SECRET_HIDDEN): the keys of the
     Wavelog and Field pages, the Zello account and developer key, SVXConnect's key and certificate (all of its pki/
-    folder), the HTTPS server's private key, the DMR hotspot password, the copy of the WiFi passwords, the SSH host
+    folder), the HTTPS server's private key, the remote's paired sessions' tokens, the DMR hotspot password, the copy of the WiFi passwords, the SSH host
     keys and root's SSH files made at each power-off and the Bluetooth link keys (backups/: backup.tgz, bluetooth.tgz), an
     uploaded backup while it waits for Restore (its WiFi passwords) and the WiFi networks a restore replaced"""
     files = [os.path.join(settings.FIELD_DIR, n + tmp) for n in ("wavelog.conf", "qrz.conf", "hota.conf", "wwff.conf")
@@ -156,6 +156,10 @@ def secret_places():
     # browser's traffic (it was served here up to v0.3.12.46, 2026-11-22); its certificate stays downloadable
     files += [os.path.join(settings.CERT_DIR, "key.pem" + tmp) for tmp in ("", ".tmp")]
     files += [os.path.join(settings.DMR_DIR, "password" + tmp) for tmp in ("", ".tmp")]
+    # the remote's paired sessions (the GUI's remote_server.c, REMOTE_SESSIONS) and its copy: each line a session's
+    # token, some allowed to operate and transmit; served here to anyone on the network up to v0.3.12.47 (the suite's
+    # files-secrets test, 2026-11-23)
+    files += [os.path.join(settings.FILEBROWSER_PATH, "remote_sessions.conf" + tmp) for tmp in ("", ".bak", ".tmp")]
     folders = [os.path.join(settings.FILEBROWSER_PATH, "backups"), settings.BACKUP_WORK,
                os.path.join(settings.BACKUP_SAFETY, "wifi"), os.path.join(settings.SVX_DIR, "pki")]
     return files, folders

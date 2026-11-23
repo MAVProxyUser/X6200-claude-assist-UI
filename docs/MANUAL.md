@@ -9686,8 +9686,10 @@ Winlink's messages) is shown with any stored secret in it replaced by
 "(hidden)". The Files page lists the files that hold them (`field/wavelog.conf`,
 `qrz.conf`, `hota.conf`, `wwff.conf`, `https/key.pem` (the HTTPS pages' private
 key: served there up to v0.3.12.46; `https/cert.pem`, the certificate, still
-downloads), and `backups/`, with the copy of the WiFi passwords, the SSH host
-keys and the Bluetooth pairings made at power-off), but does not download them;
+downloads), `remote_sessions.conf` (the paired browsers' sessions, some allowed
+to transmit: served there up to v0.3.12.47) and `backups/`, with the copy of the
+WiFi passwords, the SSH host keys and the Bluetooth pairings made at power-off),
+but does not download them;
 take the SD card out to copy them. The Backup download
 holds the WiFi passwords when its WiFi part is ticked, as it did: that file is
 yours, keep it to yourself. Up to v0.3.10 the Files page downloaded those files

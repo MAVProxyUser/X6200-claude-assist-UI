@@ -220,6 +220,8 @@ class Secrets(unittest.TestCase):
             write(settings.CERT_DIR + "/key.pem", "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIBENCH\n"
                                                   "-----END PRIVATE KEY-----\n", 0o600)
             write(settings.CERT_DIR + "/cert.pem", "-----BEGIN CERTIFICATE-----\nBENCH\n-----END CERTIFICATE-----\n")
+        for n in ("remote_sessions.conf", "remote_sessions.conf.bak"):     # the remote's tokens (up to v0.3.12.47)
+            write(r + "/mnt/" + n, "a0" * 32 + "\tbench-tx\t1\t1\t0\t0\t127.0.0.1\t0\t-\n", 0o600)
         f = settings.FIELD_DIR
         write(f + "/wavelog.conf", f"enabled=0\nurl=https://log.example.org\nkey={WAVELOG_KEY}\nstation_id=1\n"
                                    f"cat=1\ncat_token={CAT_TOKEN}\n", 0o600)
@@ -404,7 +406,8 @@ class Secrets(unittest.TestCase):
                      "/files/backup_before_restore/wifi/Club.nmconnection", "/files/zello/account.conf",
                      "/files/zello/private_key.pem", "/files/svxconnect/pki/ON6URE.key",
                      "/files/svxconnect/pki/ON6URE.csr", "/files/svxconnect/pki/ON6URE.crt",
-                     "/files/svxconnect/pki/ca-bundle.crt", "/files/https/key.pem"):
+                     "/files/svxconnect/pki/ca-bundle.crt", "/files/https/key.pem", "/files/remote_sessions.conf",
+                     "/files/remote_sessions.conf.bak"):
             self.assertNotIn(path, files)
             self.get(path, 403)              # asked for by name
         if hasattr(settings, "DMR_DIR"):
