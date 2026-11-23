@@ -11,6 +11,7 @@
  *  - A GUI held up past the hold time with the release already waiting on the device: the release is read first,
  *    the press stays a tap (a band key stepped once, an F key not its long action). Before, the timer made at the
  *    press ran before the read and sent the long press: the tap was lost.
+ *  - A key held past the hold time by its events' own times, the release read late: a long press all the same.
  */
 
 #include "front_keys.h"
@@ -34,6 +35,7 @@ bool backlight_tick() {
 }
 
 void ctl_local_input(void) {}
+void ctl_local_event(int64_t sec, int64_t usec) {}
 
 /* ---- LVGL's timers ---- */
 
@@ -251,11 +253,19 @@ static void buttons(void) {
 
 static int fifo;
 
-static void key(uint16_t code, int value) {
-    struct input_event in[2] = {{.type = EV_KEY, .code = code, .value = value}, {.type = EV_SYN, .code = SYN_REPORT}};
+/* A key event on the device, stamped as the kernel stamps it: at ms on the test's clock (1000 s on it, 0 being
+ * "no time" to front_keys.c) */
+static void key_at(uint16_t code, int value, uint32_t ms) {
+    struct input_event in[2] = {{.input_event_sec = 1000 + ms / 1000, .input_event_usec = ms % 1000 * 1000,
+                                 .type = EV_KEY, .code = code, .value = value},
+                                {.type = EV_SYN, .code = SYN_REPORT}};
 
     if (write(fifo, in, sizeof(in)) != sizeof(in))
         printf("FIFO not written\n");
+}
+
+static void key(uint16_t code, int value) {
+    key_at(code, value, now);
 }
 
 /* Through the device, the X6100's codes: BAND UP is BTN_TRIGGER_HAPPY6, F1 BTN_TRIGGER_HAPPY13 */
@@ -274,6 +284,15 @@ static void device(void) {
     stall_to(1500);
     run_to(2000);
     check("F1:PRESS@10 F1:RELEASE@1500", "F1 tapped while the GUI was busy past the hold time: a tap");
+
+    start();
+    key(BTN_TRIGGER_HAPPY13, 1);
+    run_to(10);
+    key_at(BTN_TRIGGER_HAPPY13, 0, 1200);   /* let go at 1.2 s; the GUI busy from 10 ms until 1.5 s */
+    stall_to(1500);
+    run_to(2000);
+    check("F1:PRESS@10 F1:LONG@1500 F1:LONG_RELEASE@1500",
+          "F1 held 1.2 s by its own times while the GUI was busy: a long press");
 
     start();
     key(BTN_TRIGGER_HAPPY6, 1);
