@@ -704,7 +704,7 @@ def t_screen(run):
 # ---- control: the web configurator's guards (every change sent is one it must refuse: an invalid TCI port) ----
 
 def http(ip, path, host=None, method="GET", body=None, headers=None):
-    """(status, the body's first 300 characters) of a request to the radio's web server"""
+    """(status, the body: its first 256 kB) of a request to the radio's web server"""
     import urllib.error
     import urllib.request
     h = {"Host": host or ip}
@@ -716,9 +716,9 @@ def http(ip, path, host=None, method="GET", body=None, headers=None):
     req = urllib.request.Request(f"http://{ip}{path}", data=data, headers=h, method=method)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status, resp.read(300).decode(errors="replace")
+            return resp.status, resp.read(1 << 18).decode(errors="replace")
     except urllib.error.HTTPError as e:
-        return e.code, e.read(300).decode(errors="replace")
+        return e.code, e.read(1 << 18).decode(errors="replace")
 
 
 def by_radio(run, batch, test, covers, fn):
@@ -892,10 +892,269 @@ def t_log(run):
                                                  "panel-log-mode", "log-quick-qso-fields"])
 
 
+# ---- control: the radio's core through the remote (bands, the lock, the knobs, the zoom) ----
+
+BC_BANDS = [(4750000, 5060000), (5900000, 6200000), (9400000, 9900000), (11600000, 12100000), (13570000, 13870000),
+            (15100000, 15800000), (17480000, 17900000), (21450000, 21850000), (25670000, 26050000)]   # CB A from 26.055
+UNTUNED = [(70000000, 71000000), (144000000, 148000000), (420000000, 450000000)]
+
+
+def t_core(run):
+    apps_seen = {}
+
+    def bands(r):
+        """The band step ("set band 1", the band keys' own) up the whole list from 160 m to its last band (it stops
+        there, no wrap): 60 m between 80 m and 40 m, no broadcast band, no 4 m/2 m/70 cm without a transverter; the
+        X6200's FM broadcast (WFM) and airband (AM)"""
+        bench.ensure(r, {"freq": 1900000, "mode": 0})
+        path = [(int(r.state["freq"]), int(r.state["mode"]))]
+        for _ in range(40):
+            f0 = int(r.state.get("freq", 0))
+            r.send("set band 1")
+            t0 = time.time()
+            while time.time() - t0 < 4 and int(r.state.get("freq", 0)) == f0:
+                time.sleep(0.05)
+            if int(r.state.get("freq", 0)) == f0:
+                break                               # the last band
+            time.sleep(0.4)
+            path.append((int(r.state["freq"]), int(r.state["mode"])))
+        fs = [f for f, m in path]
+        i60 = next((i for i, f in enumerate(fs) if 5351500 <= f <= 5366500), None)
+        i80 = next((i for i, f in enumerate(fs) if 3500000 <= f <= 4000000), None)
+        i40 = next((i for i, f in enumerate(fs) if 7000000 <= f <= 7300000), None)
+        bc = [f for f in fs if any(a <= f <= b for a, b in BC_BANDS)]
+        vhf = [f for f in fs if any(a <= f <= b for a, b in UNTUNED)]
+        fm = [(f, m) for f, m in path if 87500000 <= f <= 108000000]
+        air = [(f, m) for f, m in path if 118000000 <= f <= 137000000]
+        x6200 = r.name == "x6200"
+        vhf_ok = (bool(fm) and bool(air) and air[0][1] == 6) if x6200 else (not fm and not air)
+        ok = i60 is not None and i80 is not None and i40 is not None and i80 < i60 < i40 and not bc and not vhf \
+            and vhf_ok and len(fs) > 10
+        return ok, (f"{len(path) - 1} steps up to the last band: {[round(f / 1e6, 3) for f in fs]}; 60 m at step {i60} (80 m "
+                    f"{i80}, 40 m {i40}); broadcast bands {bc}; 4 m/2 m/70 cm {vhf}; FM broadcast {fm}, airband "
+                    f"{air} (mode 6 AM)")
+    per_radio(run, "control", "band-cycle", bands, ["radio-core-band-60m", "radio-core-band-keys-skip-untunable",
+                                                     "radio-core-x6200-fm-airband"])
+
+    def broadcast(r):
+        bench.ensure(r, {"freq": 9500000})
+        time.sleep(0.5)
+        mode = int(r.state.get("mode", -1))
+        return (True if mode == 6 else None), f"9.500 MHz (31 m broadcast): mode {mode} (6 AM, the band's own unless " \
+            f"changed there)"
+    per_radio(run, "control", "broadcast-am", broadcast, ["radio-core-broadcast-bands-am"])
+
+    def lock(r):
+        bench.ensure(r, {"freq": F_TEST, "mode": 2})
+        r.send("set lock 1")
+        r.wait("locked", lambda: r.state.get("ulock") in (1, True), 5)
+        said = []
+        try:
+            r.send("knob main 5")
+            time.sleep(1.0)
+            knob = int(r.state.get("freq", 0)) == F_TEST
+            t, greet = tci_session(r.host)
+            try:
+                t.send("vfo:0,0,14100000;")
+                echo = expect(t, "vfo:", 3)         # refused: answered with the frequency it keeps
+                time.sleep(1.0)
+            finally:
+                t.close()
+            tci = int(r.state.get("freq", 0)) == F_TEST
+            said = [f"locked: the main knob {'refused' if knob else 'TUNED'}", f"TCI vfo set answered {echo!r}, the "
+                    f"dial {'kept' if tci else 'MOVED'}"]
+            ok = knob and tci and echo == f"vfo:0,0,{F_TEST};"
+        finally:
+            time.sleep(0.5)
+            if not r.ctl_mine:
+                r.take_control()
+            r.send("set lock 0")
+            r.wait("unlocked", lambda: r.state.get("ulock") in (0, False), 5)
+        r.send("knob main 2")
+        time.sleep(1.0)
+        moved = int(r.state.get("freq", 0)) != F_TEST
+        said.append(f"unlocked: the knob tunes again {moved}")
+        return ok and moved, "; ".join(said)
+    per_radio(run, "control", "freq-lock", lock, ["radio-core-freq-lock"])
+
+    def tci_held(r):
+        """An app holding the dial and the mode (FT8): a TCI vfo and a modulation, each refused, answered with the
+        state as it is (they went unanswered up to v0.3.12.46: Hamlib's TCI backend waits for the answer)"""
+        bench.ensure(r, {"freq": F_TEST, "mode": 2})
+        r.send("ft8 open")
+        try:
+            r.wait("FT8 open", lambda: r.state.get("app") in FT8_APPS and r.state.get("lock") == 1, 10)
+            f0, m0 = int(r.state["freq"]), int(r.state["mode"])
+            t, greet = tci_session(r.host)
+            try:
+                t.send("vfo:0,0,14100000;")
+                v = expect(t, "vfo:", 3)
+                t.send("modulation:0,cw;")
+                m = expect(t, "modulation:", 3)
+            finally:
+                t.close()
+            time.sleep(0.5)
+            kept = int(r.state["freq"]) == f0 and int(r.state["mode"]) == m0
+            return v == f"vfo:0,0,{f0};" and m is not None and "cw" not in m and kept, \
+                f"FT8 holding {f0} Hz: vfo set answered {v!r}, modulation cw answered {m!r}; the dial and mode kept {kept}"
+        finally:
+            if not r.ctl_mine:
+                r.take_control()
+            r.send("ft8 close")
+            r.wait("FT8 closed", lambda: r.state.get("app") not in FT8_APPS, 10)
+    per_radio(run, "control", "tci-refused-answer", tci_held, ["tci-vfo", "tci-modulation", "radio-core-app-freq-hold"])
+
+    def knobs(r):
+        bench.ensure(r, {"freq": F_TEST, "mode": 2, "vol": 10})
+        step = int(r.state.get("step", 0)) or 0
+        r.send("knob main 3")
+        time.sleep(1.0)
+        df = int(r.state.get("freq", 0)) - F_TEST
+        r.send("knob vol 2")
+        time.sleep(1.0)
+        dv = int(r.state.get("vol", 0)) - 10
+        r.send("knob vol -2")
+        time.sleep(1.0)
+        dv2 = int(r.state.get("vol", 0)) - 10
+        ok = df > 0 and dv == 2 and dv2 == 0
+        return ok, f"knob main +3: the dial +{df} Hz (step {step}); knob vol +2: volume +{dv}, -2: back {dv2 == 0}"
+    per_radio(run, "control", "knobs", knobs, ["screen-knobs", "panel-set-freq"])
+
+    def zoom(r):
+        bench.ensure(r, {"freq": F_TEST, "mode": 2})
+        r.send("set zoom -1")
+        time.sleep(2.0)
+        z = r.state.get("zoom")
+        fr = [x for x in list(r.r.spectra)[-10:]]
+        wid = fr[-1][2] if fr else None
+        if r.name == "x6200":
+            return z == -1 and wid is not None and wid >= 380000, f"set zoom -1: zoom {z}, the spectrum {wid} Hz " \
+                f"wide (384 kHz, the base's widest)"
+        return z == 1 and wid is not None and wid <= 110000, f"set zoom -1: held at zoom {z} (the X6100's widest), " \
+            f"the spectrum {wid} Hz wide"
+    per_radio(run, "control", "wide-zoom", zoom, ["radio-core-x6200-wide-zoom"])
+
+    def apps(r):
+        r.send("apps")
+        r.wait("the apps list", lambda: r.apps is not None, 5)
+        # the FT8 app is named by its protocol (FT8, FT4 or FT2: the X6100's is on FT4)
+        apps_seen[r.name] = sorted("FT8" if a[1] in FT8_APPS else a[1] for a in r.apps)
+        return len(r.apps) > 10, f"{len(r.apps)} apps"
+    per_radio(run, "control", "apps-list", apps, ["panel-apps-list"])
+    if len(apps_seen) == 2:
+        (a, la), (b, lb) = apps_seen.items()
+        run.result("control", "same-apps 1:1", la == lb, f"{a} {len(la)}, {b} {len(lb)}" +
+                   ("" if la == lb else f"; only {a}: {sorted(set(la) - set(lb))}, only {b}: "
+                                        f"{sorted(set(lb) - set(la))}"), covers=["system-same-apps"])
+
+
+# ---- control: the web's HTTPS, the Files page's secrets, SSH keys, the backup and the text log ----
+
+def t_web_more(run):
+    def https(n, h, ip):
+        import ssl
+        pem = ssl.get_server_certificate((ip, 443))
+        out = subprocess.run(["openssl", "x509", "-noout", "-enddate", "-startdate"], input=pem, capture_output=True,
+                             text=True).stdout
+        dates = dict(x.split("=", 1) for x in out.split("\n") if "=" in x)
+        end = time.mktime(time.strptime(dates["notAfter"].replace(" GMT", ""), "%b %d %H:%M:%S %Y"))
+        start = time.mktime(time.strptime(dates["notBefore"].replace(" GMT", ""), "%b %d %H:%M:%S %Y"))
+        years = (end - start) / (365.25 * 86400)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
+        import urllib.request
+        with urllib.request.urlopen(urllib.request.Request(f"https://{ip}/", headers={"Host": ip}), context=ctx,
+                                    timeout=10) as resp:
+            st = resp.status
+        closed = {}
+        for p in (50003, 50004):
+            try:
+                socket.create_connection((ip, p), timeout=3).close()
+                closed[p] = False
+            except OSError:
+                closed[p] = True
+        return st == 200 and 9.5 <= years <= 10.5 and all(closed.values()), \
+            f"https:// 200 {st == 200}; its certificate {years:.1f} years ({dates.get('notBefore')} to " \
+            f"{dates.get('notAfter')}); 50003/50004 closed {closed}"
+    by_radio(run, "control", "web-https", ["web-https"], https)
+
+    def wss(n, h, ip):
+        c = Remote(ip, 443, path="/ws/remote", tls=True, headers={"Host": ip})
+        g = texts(c, 2.0)
+        c.close()
+        t = Remote(ip, 443, path="/ws/tci", tls=True, headers={"Host": ip})
+        gt = texts(t, 3.0)
+        t.close()
+        hello = next((x for x in g if x.startswith("hello ")), None)
+        ready = any(x.startswith("ready") for x in gt)
+        return hello is not None and ready, f"wss://…/ws/remote: {hello!r}; wss://…/ws/tci: TCI greeting with ready " \
+            f"{ready} ({len(gt)} lines)"
+    by_radio(run, "control", "wss-proxy", ["screen-https-ws-proxy"], wss)
+
+    def files(n, h, ip):
+        st = {}
+        for f in ("https/key.pem", "https/cert.pem", "backups/backup.tgz", "remote_sessions.conf"):
+            st[f] = http(ip, "/files/" + f, method="HEAD")[0]
+        listing = http(ip, "/files/")[0]
+        ok = listing == 200 and st["https/key.pem"] == 403 and st["backups/backup.tgz"] == 403 and \
+            st["https/cert.pem"] == 200
+        return ok, f"/files/ {listing}; asked by name (HEAD, nothing fetched): {st} (the key and backups/ never " \
+            f"sent; the certificate is)"
+    by_radio(run, "control", "files-secrets", ["web-files-page"], files)
+
+    def ssh_keys(n, h, ip):
+        d = os.path.join(HERE, "..", "..", "build", "bench_rsa2048")
+        os.makedirs(d, exist_ok=True)
+        k = os.path.join(d, "k")
+        if not os.path.exists(k + ".pub"):
+            subprocess.run(["ssh-keygen", "-q", "-t", "rsa", "-b", "2048", "-N", "", "-C", "bench@rsa2048", "-f", k],
+                           check=True)
+        st0, b0 = http(ip, "/api/ssh")
+        n0 = len(json.loads(b0).get("keys", [])) if st0 == 200 else -1
+        rsa = http(ip, "/api/ssh/keys", method="POST", body={"key": open(k + ".pub").read().strip()})
+        priv = http(ip, "/api/ssh/keys", method="POST",
+                    body={"key": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n"
+                                 "-----END OPENSSH PRIVATE KEY-----"})
+        st1, b1 = http(ip, "/api/ssh")
+        n1 = len(json.loads(b1).get("keys", [])) if st1 == 200 else -2
+        rebind = http(ip, "/api/ssh", host="evil.example")[0]
+        msg = lambda b: (json.loads(b).get("msg") or json.loads(b).get("error") or b)[:70] if b.startswith("{") \
+            else b[:70]
+        ok = rsa[0] == 400 and "2048" in rsa[1] and priv[0] == 400 and "private" in priv[1].lower() and n0 == n1 \
+            and n0 >= 1 and rebind == 403
+        return ok, (f"an RSA 2048 key {rsa[0]} {msg(rsa[1])!r}; a private key {priv[0]} {msg(priv[1])!r}; the keys "
+                    f"{n0} before, {n1} after; the list by a rebound name {rebind}")
+    by_radio(run, "control", "ssh-key-checks", ["ssh-key-validation", "ssh-page-own-name"], ssh_keys)
+
+    def backup(n, h, ip):
+        st, b = http(ip, "/api/backup")
+        parts = json.loads(b).get("parts", {}) if st == 200 else {}
+        names = json.dumps(parts).lower()       # the parts' descriptions (never printed: WiFi networks are named)
+        secrets = [w for w in ("wavelog.conf", "qrz.conf", "account.conf", "private_key.pem", "key.pem")
+                   if w in names]
+        want = {"settings", "memories", "qso", "cw"}
+        return st == 200 and want <= set(parts) and not secrets, f"GET /api/backup: parts {sorted(parts)}; " \
+            f"secret files named in them: {secrets}"
+    by_radio(run, "control", "backup-parts", ["web-backup-page"], backup)
+
+    def textlog(n, h, ip):
+        st, b = http(ip, "/api/textlog")
+        fl = json.loads(b).get("files", []) if st == 200 else []
+        if not fl:
+            return None, f"GET /api/textlog {st}: no days (nothing to read)"
+        name = sorted(f["name"] for f in fl)[-1]
+        st2, txt = http(ip, f"/textlog/{name}")
+        bad = http(ip, "/textlog/..%2Fparams.db")[0]
+        return st == 200 and st2 == 200 and bad in (400, 403, 404), \
+            f"{len(fl)} days listed; {name} read {st2} ({len(txt)} characters); a path out of the folder {bad}"
+    by_radio(run, "control", "textlog-page", ["text-log-web-logs"], textlog)
+
+
 def control(run, only):
     for name, fn in (("tci-proto", t_tci_proto), ("tci-drive", t_tci_drive), ("tci-guards", t_tci_guards),
                      ("panel", t_panel), ("control-owner", t_control_owner), ("panel-apps", t_panel_apps),
-                     ("screen", t_screen), ("web-guards", t_web_guards), ("log", t_log)):
+                     ("screen", t_screen), ("web-guards", t_web_guards), ("log", t_log), ("core", t_core),
+                     ("web-more", t_web_more)):
         if not only or name in only:
             run.banner(f"SUITE control: {name} (nothing sent)")
             fn(run)
@@ -934,6 +1193,11 @@ echo "upd=$(x6100-update status 2>/dev/null | head -c 600)"
 echo "adif=$(head -c 400 /mnt/ft_log.adi 2>/dev/null | tr '\n' ' ')"
 echo "adif_day=$(ls -t /mnt/field/logs/*.adi 2>/dev/null | head -1 | xargs -r head -c 400 | tr '\n' ' ')"
 echo "drift=$([ -s /mnt/rtc-drift.json ] && echo yes)"
+echo "libft8=$([ -s /usr/lib/libft8.so ] && echo yes)"
+echo "model_age=$(( $(date +%s) - $(date -r /mnt/battery_model.json +%s 2>/dev/null || echo 0) ))"
+echo "settle=$(grep -o 'battery: readings count from [0-9]* ms' /mnt/app_logs/start_trace.txt | tail -1 | grep -o '[0-9]*')"
+echo "sshbak=$(gzip -dc /mnt/backups/backup.tgz 2>/dev/null | tar tf - 2>/dev/null | grep -cE 'authorized_keys|ssh_host_.*_key$')"   # busybox tar: no -z
+echo "ident=$(grep -E '^(model|level)=' /etc/openx6x00-image | tr '\n' ' ') $(cat /usr/share/x6100/app-version)"
 """
 
 
@@ -1017,6 +1281,7 @@ def system(run, only):
         checks[name] = res
 
     run.banner("SUITE system: each radio read over SSH (nothing changed)")
+    idents = {}
     data = {}
     for n in run.names:
         h = run.host(n)
@@ -1028,6 +1293,7 @@ def system(run, only):
             data[n]["clock_off"] = clock_offset(h)
         except (bench.Refused, OSError, ValueError, subprocess.TimeoutExpired) as e:
             data[n] = {"error": str(e)}
+        idents[n] = data[n].get("ident", "")
 
     def battery_log(n, d):
         t = int(d["bat"].split(",")[0])
@@ -1121,8 +1387,31 @@ def system(run, only):
         return (True if "GoldCorpHF" in a else None), f"{which} starts {a[:110]!r}"
     check("adif-header", ["adif-logs-header"], adif)
 
+    def ft8lib(n, d):
+        return d.get("libft8") == "yes", f"/usr/lib/libft8.so there: {d.get('libft8') == 'yes'}"
+    check("ft8-library", ["system-update-ft8-library"], ft8lib)
+
+    def model(n, d):
+        age = int(d["model_age"])
+        return 0 <= age <= 1500, f"/mnt/battery_model.json written {age} s ago (every 20 min)"
+    check("battery-model", ["system-battery-time-model"], model)
+
+    def settle(n, d):
+        ms = int(d["settle"])
+        return 14000 <= ms <= 30000, f"the battery's readings counted from {ms} ms after the base's first (~15 s)"
+    check("battery-settle", ["system-battery-startup-settle"], settle)
+
+    def sshbak(n, d):
+        k = int(d["sshbak"])
+        return k >= 2, f"backups/backup.tgz holds {k} SSH files (root's authorized_keys, the host keys)"
+    check("ssh-keys-backup", ["ssh-keys-backup"], sshbak)
+
     def clock(n, d):
         off = d["clock_off"]
         return abs(off) < 1.5 and d.get("drift") == "yes", f"the radio's clock {off:+.2f} s from the Mac's; the " \
             f"chip's drift learnt (/mnt/rtc-drift.json) {d.get('drift') == 'yes'}"
     check("clock", ["rtc-drift-correction"], clock)
+    if len(idents) == 2 and (not only or "identity" in only):
+        vals = [v.split()[1:] for v in idents.values()]       # the level and the version, not the model
+        run.result("system", "same-version 1:1", len(set(map(tuple, vals))) == 1 and all(vals),
+                   "; ".join(f"{k}: {v}" for k, v in idents.items()), covers=["system-identity-same-version"])

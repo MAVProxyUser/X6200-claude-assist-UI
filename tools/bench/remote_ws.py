@@ -15,14 +15,21 @@ import time
 
 
 class Remote:
-    def __init__(self, host, port=50002, timeout=10, headers=None):
-        """headers: more request lines ({name: value}: an Origin, the Funnel's, a Host), for the suite's guard tests"""
+    def __init__(self, host, port=50002, timeout=10, headers=None, path="/", tls=False):
+        """headers: more request lines ({name: value}: an Origin, the Funnel's, a Host), for the suite's guard tests;
+        path and tls: the https server's proxy of these sockets (wss://<radio>/ws/remote, /ws/tci), its self-signed
+        certificate not checked"""
         self.host = host
         self.s = socket.create_connection((host, port), timeout)
+        if tls:
+            import ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
+            self.s = ctx.wrap_socket(self.s, server_hostname=host)
         key = base64.b64encode(os.urandom(16)).decode()
         extra = "".join(f"{k}: {v}\r\n" for k, v in (headers or {}).items())
         hostline = "" if any(k.lower() == "host" for k in (headers or {})) else f"Host: {host}:{port}\r\n"
-        self.s.sendall((f"GET / HTTP/1.1\r\n{hostline}Upgrade: websocket\r\nConnection: Upgrade\r\n"
+        self.s.sendall((f"GET {path} HTTP/1.1\r\n{hostline}Upgrade: websocket\r\nConnection: Upgrade\r\n"
                         f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n{extra}\r\n").encode())
         got = b""
         while b"\r\n\r\n" not in got:

@@ -228,6 +228,7 @@ typedef struct {
     cmd_id_t id;
     int32_t  a, b;      /* C_KEY: a is the start's number (key_gen); C_UNKEY of the PTT: b is */
     bool     tci;
+    int8_t   ci;        /* C_FREQ, C_MODE: the client that asked, answered with the state if refused; -1 none */
     uint64_t queued;    /* ms, when it was queued: a start that waited long says so */
 } cmd_t;
 
@@ -287,6 +288,11 @@ static uint32_t        key_gen;          /* the last start queued (socket thread
 static atomic_uint     key_keyed;        /* the last start the LVGL thread keyed */
 static uint32_t        told_key;         /* the last start whose client was told trx:0,true (state_follow) */
 static atomic_uint     key_refused;      /* the last start the LVGL thread refused */
+/* The clients whose vfo or modulation the LVGL thread refused (LOCK, an app holding the frequency or the mode, a
+ * frequency the radio does not tune): a bit each, answered with the state as it is by the socket thread. Nothing
+ * changes, so nothing was broadcast, and a client that waits for its answer (Hamlib's TCI backend: WSJT-X, JTDX)
+ * got none (the 1:1 suite, 2026-11-22) */
+static atomic_uint     freq_refused, mode_refused;
 static atomic_uint     key_cancelled;    /* the last start ended before its key ran: that key keys nothing */
 static int             ptt_owner = -1;   /* the client the radio's own PTT is keyed for (or about to be), -1 none */
 static int             tx_lent = -1;     /* the client that took control for its start alone: it gives it back at the end */
@@ -904,10 +910,14 @@ static void apply_cmd(void *arg) {
             backlight_tick();   /* tuning from the knob or a program: the screen wakes as for a key */
             if (!main_screen_freq_locked() && cfg_is_valid_hw_freq(c->a))
                 main_screen_set_freq((uint64_t)c->a);
+            else if (c->ci >= 0)
+                atomic_fetch_or(&freq_refused, 1u << c->ci);
             break;
         case C_MODE:
             if (!main_screen_mode_locked())
                 cparam_i_set(cfg_cur_mode, c->a);
+            else if (c->ci >= 0)
+                atomic_fetch_or(&mode_refused, 1u << c->ci);
             break;
         case C_FILTER:
             /* low then high, or the other way round when the band moves up: each edge is
@@ -1001,9 +1011,15 @@ static void apply_cmd(void *arg) {
 /* An unkey takes the scheduler's reserve: a flood of tuning must not keep the radio on the air.
  * False: the queue was full, the command is lost */
 static bool put_cmd(cmd_id_t id, int32_t a, int32_t b, bool tci) {
-    cmd_t c = {.id = id, .a = a, .b = b, .tci = tci, .queued = now_ms()};
+    cmd_t c = {.id = id, .a = a, .b = b, .tci = tci, .ci = -1, .queued = now_ms()};
     if (id == C_UNKEY)
         return scheduler_put_urgent(apply_cmd, &c, sizeof(c));
+    return scheduler_put(apply_cmd, &c, sizeof(c));
+}
+
+/* A tune or a mode from client ci: refused by the LVGL thread, it is answered to ci with the state (freq_refused) */
+static bool put_cmd_from(int ci, cmd_id_t id, int32_t a) {
+    cmd_t c = {.id = id, .a = a, .ci = (int8_t)ci, .queued = now_ms()};
     return scheduler_put(apply_cmd, &c, sizeof(c));
 }
 
@@ -1101,6 +1117,17 @@ static void state_follow(rstate_t *last, bool first) {
         broadcastf("vfo:0,0,%d;", s.freq);
     if (s.mode != last->mode)
         broadcastf("modulation:0,%s;", mode_name(s.mode));
+    /* A refused vfo or modulation answered to its client with the state as it is (a change meanwhile was told
+     * above, to everyone) */
+    unsigned fr = atomic_exchange(&freq_refused, 0), mr = atomic_exchange(&mode_refused, 0);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i].fd < 0 || !clients[i].up)
+            continue;
+        if (fr & (1u << i) && s.freq == last->freq)
+            client_textf(&clients[i], "vfo:0,0,%d;", s.freq);
+        if (mr & (1u << i) && s.mode == last->mode)
+            client_textf(&clients[i], "modulation:0,%s;", mode_name(s.mode));
+    }
     if (s.flo != last->flo || s.fhi != last->fhi || s.mode != last->mode) {
         filter_line(fb, sizeof(fb), &s);
         broadcast(fb);
@@ -1814,7 +1841,7 @@ static void handle_cmd(int ci, char *line) {
             if (f == s.freq)
                 client_textf(c, "vfo:0,0,%d;", s.freq);   /* nothing will change: the echo now */
             else
-                put_cmd(C_FREQ, f, 0, false);
+                put_cmd_from(ci, C_FREQ, f);
         } else {
             client_textf(c, "vfo:0,0,%d;", s.freq);
         }
@@ -1823,7 +1850,7 @@ static void handle_cmd(int ci, char *line) {
         if (m < 0 || m == s.mode)
             client_textf(c, "modulation:0,%s;", mode_name(s.mode));
         else
-            put_cmd(C_MODE, m, 0, false);
+            put_cmd_from(ci, C_MODE, m);
     } else if (!strcmp(name, "rx_filter_band")) {
         if (n >= 3) {
             int32_t lo = abs(atoi(a[1])), hi = abs(atoi(a[2]));

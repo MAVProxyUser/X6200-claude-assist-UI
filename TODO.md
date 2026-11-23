@@ -24,6 +24,12 @@ stops happening"; "a comprehensive set of unit tests to cover EVERYTHING 1:1 on 
 - suite_proto.py (control: TCI protocol, the remote's protocol, control, screen, web guards, Funnel; system: SSH reads):
   found the bench player taking a missing file in silence (fixed), the manual blurring rx_smeter (always) with
   rx_channel_sensors (after rx_sensors_enable).
+- FIXED, found by the suite (2026-11-22 evening): the Files page served the HTTPS key (/mnt/https/key.pem) on both
+  radios (3906e452; the radios keep serving it until the next image: the web server is bytecode there); a TCI vfo or
+  modulation the radio refused (LOCK, an app's hold) went unanswered; the X6200's Panel drew its 192/384 kHz zooms
+  over a 100 kHz scale (the copy for the browser labelled wf_span(): 2-4x off, a tap tuning beside the signal).
+  OPEN, the owner's call: whether to make the radios' HTTPS keys anew (rm /mnt/https/*, the web server restarted:
+  browsers warn once more), as the old ones were downloadable on the LAN.
 - DONE (the owner: "Yes, log Q9TST"): the Log tab's tests on both radios 1:1: log in USB (SSB 57/58, name and grid),
   logq sent, repeated (written once), asked, a conflict, an unknown number. WSJT-X UDP (enabled=1 on both, multicast
   and the gateway) switched off for the test and put back byte for byte, so no Q9TST reached a PC logger; the day's

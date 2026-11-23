@@ -3156,7 +3156,10 @@ to 384 kHz wide, so the X6200 has two wider zooms beyond 100 kHz: 192 and
 384 kHz, reached as the others are (Span + past 100 kHz, the MFK's Zoom, the
 browser panel's zoom and pinch, CAT's scope span). The knob line says them as
 spans ("Zoom: 384 kHz"); the spectrum, the waterfall, the frequency scale,
-the band plan, the spots and the Fixed view all follow. At 384 kHz the base's
+the band plan, the spots and the Fixed view all follow, and so does the
+browser Panel (up to v0.3.12.46 it drew the wide zooms' spectrum over a
+100 kHz scale, its signals 2-4x too near the dial and a tap tuning beside
+them). At 384 kHz the base's
 512 points are 750 Hz apart: a busy segment or a pileup shows, single FT8 or
 CW signals do not, so zoom back in for those. The 3D waterfall draws the
 noise under its floor, so a quiet part of a wide span can look empty there; the
@@ -9886,7 +9889,11 @@ the radio, hears it, keys it and sends CW with it.
 - What clients may do: Operate (the default: tune, change the mode, key, as
   always) or Listen only (the TCI page's "Clients may", the card's Clients):
   a listening client hears and follows the radio, and its tuning and keying
-  are answered with the state as it is, unchanged. An operating client takes
+  are answered with the state as it is, unchanged. So is a tune or a mode the
+  radio refuses an operating client (LOCK, an app holding the frequency or the
+  mode, a frequency it does not tune): `vfo:0,0,<the frequency kept>;`,
+  `modulation:0,<the mode kept>;` (up to v0.3.12.46 it went unanswered, and a
+  program waiting for its answer waited). An operating client takes
   control of the radio the moment it tunes or keys, as the knob always did,
   unless someone is on the air. What it only asks takes no control and is
   answered with the state: `vfo:0,0;`, `trx:0;`, and `modulation`,

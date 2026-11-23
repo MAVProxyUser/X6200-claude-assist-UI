@@ -398,15 +398,16 @@ static void auto_levels(uint64_t now) {
     waterfall_update_max(max);
 }
 
-/* A waterfall frame is in wf_db and wf_lin: the copy for the browser, the waterfall, the colours */
-static void frame_out(uint64_t now, bool tx, uint32_t base_freq) {
+/* A waterfall frame is in wf_db and wf_lin: the copy for the browser, the waterfall, the colours. covers: the span
+ * its bins cover, for the browser's copy */
+static void frame_out(uint64_t now, bool tx, uint32_t base_freq, uint32_t covers) {
     uint32_t span = wf_span();
 
     if (!tx) {
         pthread_mutex_lock(&snap_mux);
         memcpy(snap_db, wf_db, sizeof(snap_db));
         snap_center = base_freq ? base_freq : cur_freq;
-        snap_width  = span;
+        snap_width  = covers;
         snap_seq++;
         pthread_mutex_unlock(&snap_mux);
     }
@@ -454,7 +455,7 @@ void dsp_samples(cfloat *buf_samples, uint16_t size, bool tx, uint32_t base_freq
         return;
 
     s_meter();   /* on every frame, also with the waterfall hidden */
-    frame_out(now, tx, base_freq);
+    frame_out(now, tx, base_freq, wf_span());
 }
 
 /* The X6200's S-meter: the base's own reading, but in AM, synchronous AM and wide FM, where the base's does not follow
@@ -549,7 +550,11 @@ void dsp_psd(const float *db, uint16_t n, uint32_t span_hz, bool tx, int16_t sme
 
     if (dialog_msg_voice_get_state() != MSG_VOICE_RECORD)
         meter_update(psd_meter(smeter_dbm), params.spectrum_beta.x * 0.01f);
-    frame_out(now, tx, 0);
+    /* A base that sends its spectrum: the line is taken over the span shown (frac), the X6200's 192 and 384 kHz
+     * too, where wf_span() stays 100 kHz: the browser's copy was labelled 100 kHz and the Panel drew 384 kHz of
+     * bins over a 100 kHz scale, a tap tuning to the wrong frequency (the 1:1 suite, 2026-11-22: the copy matched
+     * the base's whole 384 kHz, correlation 0.64, not its middle 100 kHz, -0.05) */
+    frame_out(now, tx, 0, (uint32_t)shown_span.load(std::memory_order_relaxed));
 }
 
 static void set_zoom(uint8_t z) {
