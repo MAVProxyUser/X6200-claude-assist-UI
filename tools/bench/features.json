@@ -14703,6 +14703,19 @@
   "manual_ref": "Long press."
  },
  {
+  "id": "cw-decoder-tone-floor",
+  "area": "cw",
+  "feature": "The CW decoder searches for the tone from 150 Hz up whatever the CW filter's low edge: a filter from 0 Hz on a strong signal's loud audio no longer locks it on the keying's thumps (every element an E)",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "cable",
+  "how_to_confirm": "The X6200 keys 'VVV TEST DE Q1TST' at 15 WPM, 0.1 W; the X6100 in CW, filter 0-3000, RF gain 100: its decoder copies TEST DE Q1TST (it printed E E E before). Offline: tools/cw_replay's host check replays that recording (fails on the decoder before: 20 Hz lock, all E).",
+  "suite_has": null,
+  "manual_ref": "### CW decoder"
+ },
+ {
   "id": "control-tci-takes",
   "area": "remote",
   "feature": "A TCI client takes control the moment it tunes or keys; what it only asks (vfo:0,0; trx:0;) takes nothing",

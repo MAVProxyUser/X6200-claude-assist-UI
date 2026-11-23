@@ -65,6 +65,7 @@ ToneFinder::~ToneFinder() {
 }
 
 void ToneFinder::set_band(float lo_hz, float hi_hz) {
+    lo_hz  = std::max(lo_hz, TONE_MIN_HZ);
     first_ = static_cast<size_t>(lo_hz * static_cast<float>(FFT_LEN) / RX_RATE);
     last_  = std::min(FFT_BINS - 1, static_cast<size_t>(hi_hz * static_cast<float>(FFT_LEN) / RX_RATE));
 }

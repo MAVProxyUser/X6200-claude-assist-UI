@@ -48,7 +48,7 @@ n_pass=0 n_fail=0 n_build=0 n_skip=0
 # Checks not run here, and why. A name here is still listed, as SKIP
 skip_why() {
     case $1 in
-        cw_trainer) [ -n "$DEPS" ] || echo "needs liquid-dsp: DEPS=<dir with include/liquid and lib>";;
+        cw_trainer|cw_replay) [ -n "$DEPS" ] || echo "needs liquid-dsp: DEPS=<dir with include/liquid and lib>";;
         # The updater's own tests run on a Mac too (they caught nothing before 2026-11-19 only because they never ran
         # here: paths_test.py would have stopped v0.3.12.29's bundle); in CI their workflow runs them
         update) [ -n "$GITHUB_ACTIONS" ] && echo "CI runs these in a workflow of their own (updater.yml)";;

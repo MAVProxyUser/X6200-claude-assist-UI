@@ -17,6 +17,11 @@ namespace cw {
  * coherent detector needs no more. */
 constexpr float  RX_RATE   = 4000.0f;
 
+/* The lowest a tone is searched for, whatever the radio's filter lets through: under it is the keying's thump and
+ * DC, not a tone. A CW filter from 0 Hz had the finder lock at 20 Hz on the X6100's loud audio of a strong signal (its
+ * key-down steps) and decode every element as E (2026-11-23: the X6200's CW, copied right from 150 Hz up) */
+constexpr float  TONE_MIN_HZ = 150.0f;
+
 /* Tone search: 256-point FFT (15.6 Hz bins, 64 ms) every 64 samples (16 ms) */
 constexpr size_t FFT_LEN   = 256;
 constexpr size_t FFT_STEP  = 64;

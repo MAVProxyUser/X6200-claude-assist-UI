@@ -6879,6 +6879,10 @@ solid.
   that follows the station inside the CW filter, a detector with a noise
   floor, and a time classifier that learns the speed, 10 to 50 WPM (in the
   [CW Trainer](#cw-trainer) from 5).
+- It looks for the tone from 150 Hz up, however low the CW filter starts:
+  under it are the keying's thumps, not a tone. Up to v0.3.12.47 a CW filter
+  from 0 Hz let it lock on them in a strong signal's loud audio (the X6100
+  on a station 60 dB up) and print every element as E.
 - On test signals it copies 98-100% from 20 dB down to 0 dB SNR (in 2.5 kHz)
   and still 97-100% at -3 dB; the old decoder stopped at about +5 dB. The WPM
   reading is within about 0.5 WPM.
