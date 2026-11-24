@@ -47,6 +47,9 @@ except ImportError:
 A, B = "x6100", "x6200"
 GUARD_POLL_S = 0.2          # the sync guard's look at both radios
 GUARD_S = 0.6               # a difference lasting this long outside a change: a violation
+STALE_S = 3.0               # no word from a radio this long: its GUI down (planned or not), said on its card
+RF_ALARM_DBM = -100         # a receiver over this with neither radio saying it transmits: a signal nobody explains
+RF_ALARM_S = 1.0            # (the cable at 0.1 W: about -70 dBm; quiet -121; the X6100's own spurs about -110)
 W = bench.FIRST_PROBE_W     # every over at 0.1 W
 FS = 24000                  # TCI's audio
 STEP_HZ = [600, 1000, 1500, 2100, 2400]     # the stepped sequence, each STEP_S, in this order. Its gaps all differ
@@ -147,7 +150,8 @@ const s=d.sync;let cls=s.changing?"chg":(s.ok?"ok":"bad");
 $("sync").innerHTML=`<span class="sync ${cls}">${s.changing?"CHANGING BOTH":(s.ok?"IN SYNC":"OUT OF SYNC")}</span> <span class="muted">violations this run: ${s.violations}${s.last?" (last: "+esc(s.last)+")":""}</span>`;
 $("radios").innerHTML=Object.entries(d.radios).map(([n,r])=>`<div class="radio"><b>${n.toUpperCase()}</b> <span class="${r.tx?"tx":"rx"}">${r.tx?"ON THE AIR":"RX"}</span>
 <div class="freq">${mhz(r.freq)}</div><div>${MODES[r.mode]||r.mode} &middot; ${r.pwr} W &middot; page ${esc(r.pg)} ${r.rxo===0?"&middot; <span class=tx>TX ARMED</span>":""}</div>
-<div class="muted">S ${r.meter==null?"?":r.meter.toFixed(1)+" dBm"} &middot; role ${esc(r.role||"-")} &middot; state ${r.age<2?"live":r.age.toFixed(0)+" s old"}</div></div>`).join("");
+<div class="muted">S ${r.meter==null?"?":r.meter.toFixed(1)+" dBm"} &middot; squelch ${esc(r.sql)} &middot; role ${esc(r.role||"-")}</div>
+<div class="${r.link==="live"?"rx":(String(r.link).startsWith("GUI RESTARTING")?"LOOK":"tx")}"><b>${esc(r.link==="live"?"GUI live":r.link)}</b>${r.link==="live"?"":" &middot; "+r.age.toFixed(0)+" s"}</div></div>`).join("");
 const cur=d.cur!=null?d.tests[d.cur]:null;
 $("now").innerHTML=cur?`<div><b>${esc(cur.name)}</b> <span class="muted">(${esc(cur.role)})</span></div><div class="says">${esc(cur.what)}</div>`+
  cur.steps.map(st=>`<div class="${st.state==="confirmed"?"PASS":st.state==="failed"?"FAIL":"LOOK"}">${st.state==="running"?"&#9654;":st.state==="confirmed"?"&#10003;":"&#10007;"} ${esc(st.text)} <span class="muted">${st.secs!=null?st.secs.toFixed(1)+" s":""} ${esc(st.detail||"")}</span></div>`).join(""):"<span class=muted>no test running</span>";
@@ -202,6 +206,10 @@ class Orch:
             self._log_sends(n, r)
         self._errs = {n: len(r.errs) for n, r in self.r.items()}
         self._tx = {n: bool(r.tx) for n, r in self.r.items()}
+        self.planned = {}                   # name: why its GUI is restarting by the orchestrator's own doing
+        self._down = {}                     # name: when its state stopped coming
+        self._rf_since = None
+        self.trouble = None                 # this test's GUI or RF trouble: it fails the test
         self.roles = {A: "RX", B: "RX"}
         self.restore_calls = set()          # the radios given a test call this run (test_calls)
         self.changing = 0                   # changes to both under way: the guard looks away meanwhile
@@ -228,9 +236,42 @@ class Orch:
             rs = {}
             for n, r in self.r.items():
                 s = r.state
+                age = now - r.last_msg
+                link = "live" if age < STALE_S else (f"GUI RESTARTING ({self.planned[n]})" if n in self.planned
+                                                     else "NO STATE: GUI DOWN?")
                 rs[n] = {"freq": s.get("freq"), "mode": s.get("mode"), "tx": bool(r.tx), "pwr": s.get("pwr"),
                          "pg": s.get("pg"), "rxo": s.get("rxo"), "meter": r.meter, "role": self.roles.get(n),
-                         "age": round(now - r.last_msg, 1)}
+                         "age": round(age, 1), "link": link, "sql": s.get("sql")}
+                if age >= STALE_S and n not in self._down:
+                    self._down[n] = now
+                    if n in self.planned:
+                        self.st.ev(f"{n}: its GUI restarting ({self.planned[n]}): no state meanwhile", "radio")
+                    else:
+                        what = f"{n}: NO WORD for {age:.0f} s: its GUI down or its link lost, not by the orchestrator"
+                        self.st.ev(what, "bad")
+                        self.trouble = self.trouble or what
+                elif age < STALE_S and n in self._down:
+                    gone = now - self._down.pop(n)
+                    self.st.ev(f"{n}: state again after {gone:.0f} s (GUI {hello(r)})", "ok")
+            # a signal on a receiver that no radio says it sends (a transmitter keyed with its GUI down or its state
+            # wrong): an alarm and both stopped, whatever the GUIs say
+            keyed = any(r.tx for r in self.r.values()) or any(v != "RX" for v in self.roles.values())
+            loud = {n: r.meter for n, r in self.r.items() if r.meter is not None and r.meter > RF_ALARM_DBM}
+            if loud and not keyed and not self.changing:
+                if self._rf_since is None:
+                    self._rf_since = now
+                elif now - self._rf_since >= RF_ALARM_S:
+                    what = f"SIGNAL NOBODY SENDS: {loud} dBm with neither radio saying it transmits: both stopped"
+                    self.st.ev(what, "bad")
+                    self.trouble = self.trouble or what
+                    for r in self.r.values():
+                        try:
+                            r.stop()
+                        except OSError:
+                            pass
+                    self._rf_since = now + 30            # said once a half minute
+            elif not loud:
+                self._rf_since = None
             for n, r in self.r.items():             # each radio on and off the air, as its own state says
                 if bool(r.tx) != self._tx.get(n):
                     self._tx[n] = bool(r.tx)
@@ -375,7 +416,8 @@ class Orch:
     def close(self):
         import subprocess
         for n in sorted(self.restore_calls):     # the own calls back (each GUI restarts)
-            self.st.ev(f"{n}: its own call back, PSK Reporter as found: its GUI restarts")
+            self.st.ev(f"{n}: its own call back, PSK Reporter as found: its GUI restarts (planned)", "radio")
+            self.planned[n] = "planned: own call back"
             subprocess.run([sys.executable, "-B", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench.py"),
                             "testcall", n, "restore"], capture_output=True, timeout=120)
             t0 = time.time()
@@ -385,6 +427,7 @@ class Orch:
                     break
                 except (Refused, OSError):
                     time.sleep(3)
+            self.planned.pop(n, None)
         for r in self.r.values():
             try:
                 r.stop()
@@ -752,7 +795,8 @@ def test_calls(o):
                                          "name='callsign'\"").strip()
             if cur == call:
                 continue
-            o.st.ev(f"{n}: test call {call} set, PSK Reporter off: its GUI restarts")
+            o.st.ev(f"{n}: test call {call} set, PSK Reporter off: its GUI restarts (planned)", "radio")
+            o.planned[n] = "planned: test call set"
             subprocess.run([sys.executable, "-B", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench.py"),
                             "testcall", n, call], check=True, capture_output=True, timeout=120)
             o.restore_calls.add(n)
@@ -766,6 +810,7 @@ def test_calls(o):
                     if time.time() - t0 > 90:
                         raise Refused(f"{n}: its GUI did not come back after the test call")
                     time.sleep(3)
+            o.planned.pop(n, None)
     finally:
         o.changing -= 1
     o.calls_set = True
@@ -1421,6 +1466,7 @@ def run(names, port, lan, linger):
             st.ev(f"TEST {i + 1}/{len(tests)} {t.name} ({t.role}): {t.what}")
             o.ready()                       # never on from radios set wrong: refused here stops the run
             o.violation = None
+            o.trouble = None
             for r in o.r.values():
                 r.send(f"banner BENCH {t.name.upper()} ({t.role.upper()})"[:100])
             t0 = time.time()
@@ -1432,6 +1478,8 @@ def run(names, port, lan, linger):
                 ok, says, data = False, f"error in the test: {type(e).__name__}: {e}", {}
             if o.violation:
                 ok, says = False, f"OUT OF SYNC during the test ({o.violation}); " + says
+            if o.trouble:
+                ok, says = False, f"{o.trouble}; " + says
             res = "PASS" if ok is True else "LOOK" if ok is None else "FAIL"
             with st.lock:
                 st.tests[i].update(result=res, says=says, secs=time.time() - t0, data=data)
