@@ -456,6 +456,19 @@ class Orch:
         is put right (both locked, both on page G on the first radio's frequency and mode); what cannot be stops the
         run: no test goes on from radios set wrong"""
         rs = self.r.values()
+        for n, r in self.r.items():         # a GUI that died (or a link that dropped): connected again first, the run
+            if r.stale(STALE_S):            # goes on (the owner: "keep the tests running")
+                self.st.ev(f"{n}: no word from it: connecting again (its GUI may have died)", "bad")
+                t0 = time.time()
+                while True:
+                    try:
+                        r.reconnect()
+                        break
+                    except (Refused, OSError):
+                        if time.time() - t0 > 120:
+                            raise Refused(f"{n}: not back within 2 minutes: the run stops")
+                        time.sleep(3)
+                self.st.ev(f"{n}: connected again (GUI {hello(r)})", "ok")
         bad = []
         if any(r.tx for r in rs):
             bad.append("a radio on the air")
