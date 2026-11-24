@@ -43,6 +43,7 @@
 #include "keyboard.h"
 #include "main_screen.h"
 #include "msg.h"
+#include "obj_later.h"
 #include "params/params.h"
 #include "radio.h"
 #include "remote_server.h"
@@ -3805,9 +3806,11 @@ static void table_takes_keys(void) {
     lv_group_set_editing(keys, true);
 }
 
-/* A popup goes, deleted later: the caller may be one of its own buttons. */
+/* A popup goes, deleted later: the caller may be one of its own buttons. Through obj_later_del(), never
+ * lv_obj_del_async(): the app may close before LVGL's timers run (the bench's "js8 stop" and "js8 close" in one
+ * scheduler pass), and the delete LVGL kept would then run on the freed popup (docs/security/js8-crash-2026-11-23.md) */
 static void list_forget(lv_obj_t **list) {
-    lv_obj_del_async(*list);
+    obj_later_del(*list);
     *list = NULL;
 }
 
@@ -5313,7 +5316,7 @@ static void p3_knob_to_table(void) {
  * the object goes on the next LVGL pass; the pointer is cleared now. */
 static void p3_popup_shut(lv_obj_t **popup) {
     if (*popup == NULL) return;
-    lv_obj_del_async(*popup);
+    obj_later_del(*popup); /* list_forget() says why */
     *popup = NULL;
     p3_knob_to_table();
 }
@@ -5324,7 +5327,7 @@ static void p3_popup_drop(lv_obj_t **popup) {
     lv_obj_t *p = *popup;
     uint32_t  n = lv_obj_get_child_cnt(p);
     for (uint32_t k = 0; k < n; k++) lv_group_remove_obj(lv_obj_get_child(p, k));
-    lv_obj_del_async(p);
+    obj_later_del(p);
     *popup = NULL;
 }
 
@@ -6280,7 +6283,7 @@ static void alert_close(void)
 {
     if (!alert_box) return;
     lv_group_remove_obj(alert_box);
-    lv_obj_del_async(alert_box);
+    obj_later_del(alert_box);
     alert_box = NULL;
     if (table) table_takes_keys();
 }
@@ -7385,7 +7388,7 @@ static void freq_cb(button_data_t *b) {
 
 static void map_close(void) {
     if (!map_obj) return;
-    lv_obj_del_async(map_obj);
+    obj_later_del(map_obj);
     map_obj = NULL;
     if (table && !composing) table_takes_keys();
 }

@@ -75,6 +75,7 @@
 #include "ft8/worker.h"
 #include "widgets/tune_marker.h"
 #include "widgets/app_waterfall.h"
+#include "obj_later.h"
 
 #define SAMPLE_RATE     (AUDIO_CAPTURE_RATE / AUDIO_DECIM)
 
@@ -914,7 +915,7 @@ static void decoder_stop(void) {
 /* QSO map: the world, the station and a path to each QSO of the FT8/FT4 log (js8_map.c) */
 static void map_close(void) {
     if (!map_obj) return;
-    lv_obj_del_async(map_obj);
+    obj_later_del(map_obj); /* safe if the app closes first (obj_later.h) */
     map_obj = NULL;
     give_list_the_mfk();
 }
@@ -1575,7 +1576,7 @@ static cfg_digital_preset_t presets[48];
 static void freq_close(void) {
     if (!freq_list) return;
     for (uint32_t i = 0; i < lv_obj_get_child_cnt(freq_list); i++) lv_group_remove_obj(lv_obj_get_child(freq_list, i));
-    lv_obj_del_async(freq_list);    /* called from one of its buttons */
+    obj_later_del(freq_list);       /* called from one of its buttons; safe if the app closes first (obj_later.h) */
     freq_list = NULL;
     give_list_the_mfk();
 }

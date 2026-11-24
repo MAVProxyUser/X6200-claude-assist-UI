@@ -42,6 +42,7 @@
 #include "live_map.h"
 #include "map_geo.h"
 #include "msg_box.h"
+#include "obj_later.h"
 #include "olivia_resamp.h"
 #include "params/params.h"
 #include "radio.h"
@@ -868,7 +869,7 @@ static void map_close(void) {
     if (map_timer) lv_timer_del(map_timer);
     map_timer = NULL;
     lv_group_remove_obj(map_obj);
-    lv_obj_del_async(map_obj);  /* a key of its own may have asked: not deleted under its event */
+    obj_later_del(map_obj);     /* a key of its own may have asked: not deleted under its event (obj_later.h) */
     map_obj = NULL;
     lv_obj_clear_flag(table, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(heard_lbl, LV_OBJ_FLAG_HIDDEN);
