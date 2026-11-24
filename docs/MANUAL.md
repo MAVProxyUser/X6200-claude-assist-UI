@@ -11631,6 +11631,19 @@ the radio, hears it, keys it and sends CW with it.
   what its header says ends the transmission at once (the radio unkeys);
   WSJT-X's and JTDX's frame, twice the size with the audio in its first half,
   is taken as theirs.
+  - On the X6200 the base ignores PWR for TCI audio: the audio level alone
+    makes the power, so the radio holds it by its own power meter and keeps
+    the level it found for 1 W, scaled to the setting for the next over.
+    Under 1 W the meter (whole tenths of a watt, reading high for a second
+    after each key) cannot hold it: there the level for 1 W goes out scaled
+    to the setting, unchanged through the over, and only a power well over
+    the setting brings it down. Nothing else is learned under 1 W, so give a
+    first over at 1 W or more after a fresh install. Why: up to v0.3.12.47
+    the meter's high readings after the key cut the level at 0.1-0.5 W and
+    kept the cut, about 0.75 dB an over: on our bench (into a second radio
+    through 80 dB) 0.1 W came 4 dB low after a few overs, and 0.2, 0.5 and
+    1 W went out at 0.3, 0.8 and 0.9 W. Now the other radio hears 0.1, 0.2,
+    0.3 and 0.5 W within 1 dB of their steps.
 - CW from a client (#179): `cw_macros:0,CQ DE ON6URE K;` keys the text with
   the radio's own keyer, the one the CW keyboard, the stored messages and the
   beacon use, at KEY Speed (KEY > Speed). This is what QLog's "Morse over

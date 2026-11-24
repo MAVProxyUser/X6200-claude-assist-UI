@@ -120,6 +120,10 @@ typedef struct {
                              * 0.01 of the error a block (0.128 s): the first sound after a pause goes out over the
                              * setting by what the drive is over the knee, for a fifth of a second. The ALC reads how
                              * far the gain is down, alc_db a dB */
+    float       early_w;    /* the meter after the key: it reads this much over what goes out, less and less to none at
+                             * early_s (the bench X6200 over TCI, 2026-11-24: at 0.1 W 0.3 then 0.2 for a second, at
+                             * 0.5 W 0.8, 0.7, 0.6 to 0.5, while the other radio heard the power steady) */
+    float       early_s;
 } scenario_t;
 
 static const scenario_t *sc;
@@ -284,6 +288,7 @@ static void base_reading(void) {
     if (sc->reach_w > 0.0f && p > sc->reach_w) p = sc->reach_w;
     if (sc->ramp_w_s > 0.0f) p = fminf(p, floorf(s * sc->ramp_w_s * 10.0f) / 10.0f);
     tx.top_w = fmaxf(tx.top_w, p);
+    if (sc->early_w > 0.0f && s < sc->early_s) p += sc->early_w * (1.0f - s / sc->early_s);
     p *= sc->over > 0.0f ? sc->over : 1.0f;
     p += sc->noise_w * (2.0f * rnd01() - 1.0f);
     reading_pwr = p > 0.0f ? floorf(p * 10.0f + 1e-4f) / 10.0f : 0.0f;
@@ -801,6 +806,39 @@ int main(int argc, char **argv) {
     tci_result_t t9 = run_tci(&noisy, -20.0f, 1882, verbose);
     check(t9.over_txs == 0 && t9.short_txs <= 2, "%s: at most %.2f W (%d over), %d short", noisy.name, t9.top_w,
           t9.over_txs, t9.short_txs);
+
+    /* Under 1 W the X6200's meter, in 0.1 W steps, cannot hold the power (2026-11-24): after the key it reads high for a
+     * second or more, and its readings of a 0.1 W over run 0.0 to 0.3 W. Taken as over the setting they cut the level
+     * and kept the cut for 1 W: four overs at 0.1 W in five came 4 dB low on the bench, and steps of 0.2, 0.5, 1 W
+     * went out 0.3, 0.8, 0.9 W. Under 1 W the level for 1 W less 10 log10 of the setting goes out (the bench: within
+     * 1 dB from 0.1 to 0.5 W), cut only by a reading well over it, and nothing learned but such a cut */
+    scenario_t low = noisy;
+    low.name     = "TCI at 0.1 W, readings +-0.1 W, the meter 0.4 W high after the key";
+    low.pwr      = 0.1f;
+    low.start_db = t9.level_end;
+    low.txs      = 20;
+    low.early_w  = 0.4f;
+    low.early_s  = 2.5f;
+    tci_result_t t16 = run_tci(&low, -20.0f, 1882, verbose);
+    check(fabsf(t16.level_end - low.start_db) < 0.05f && t16.over_txs == 0, "%s: the level for 1 W %.2f dBFS after "
+          "%d overs, from %.2f; at most %.2f W", low.name, t16.level_end, low.txs, low.start_db, t16.top_w);
+    float steps_w[] = {0.2f, 0.5f, 1.0f}, steps_top[3];
+    float steps_level = t16.level_end;
+    for (int i = 0; i < 3; i++) {
+        scenario_t st = low;
+        st.name     = "a step";
+        st.pwr      = steps_w[i];
+        st.start_db = steps_level;
+        st.txs      = 1;
+        tci_result_t ts = run_tci(&st, -20.0f, 1882, false);
+        steps_top[i] = ts.top_w;
+        steps_level  = ts.level_end;
+    }
+    check(fabsf(10.0f * log10f(steps_top[1] / steps_top[0]) - 4.0f) < 1.0f
+              && fabsf(10.0f * log10f(steps_top[2] / steps_top[1]) - 3.0f) < 1.0f,
+          "then 0.2, 0.5, 1 W one over each (power-steps): %.2f, %.2f, %.2f W out, steps %+.1f and %+.1f dB (+4.0, +3.0)",
+          steps_top[0], steps_top[1], steps_top[2], 10.0f * log10f(steps_top[1] / steps_top[0]),
+          10.0f * log10f(steps_top[2] / steps_top[1]));
 
     /* TCI audio on an X6100 (tx_hold.c, a base with ALC): from the apps' level, the codec taking it, the ALC rule.
      * Up to 2026-11-21 it went out at -20 dBFS with the codec at 0 dB, 36 dB over the apps on the bench X6100's

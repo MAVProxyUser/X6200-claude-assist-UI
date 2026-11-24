@@ -31,6 +31,7 @@ void tx_hold_begin(tx_hold_t *h, float target_w, float level_1w) {
     h->alc = !no_alc;
     tx_level_start(&h->level, target_w);
     h->level.power_hold = no_alc;
+    h->level.coarse     = no_alc && target_w < TX_LEVEL_COARSE_W;
     /* as the apps' base gain (tx_player_base_gain_offset): with the power, but on a base that sets it itself */
     h->scale_db = no_alc || !(caps & HW_CAP_TX_LEVEL)
                       ? 10.0f * log10f(target_w > TX_HOLD_MIN_W ? target_w : TX_HOLD_MIN_W) : 0.0f;
@@ -122,6 +123,11 @@ float tx_hold_end(tx_hold_t *h, float level_1w) {
          * judge, or silence) leaves the last as it was, TX_HOLD_UNSET too: the next from the apps' level again */
         return h->level.windows > 0 ? found : level_1w;
     }
+    /* Under 1 W the readings found nothing (tx_level.h, TX_LEVEL_COARSE_W): the level for 1 W kept, unless a clear
+     * over brought it down. Kept as found, the meter's high readings after the key took it down a little each over, 4
+     * dB on the bench at 0.1 W (2026-11-24) */
+    if (h->level.coarse)
+        return found < level_1w ? found : level_1w;
     /* as tx_player keeps the apps': a level found (held at the setting, or brought down from over it), or one still
      * climbing, kept; one that never climbed (silence, too short to judge) leaves the last as it was */
     if (h->level.held)

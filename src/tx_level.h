@@ -43,6 +43,12 @@ extern "C" {
 #define TX_LEVEL_UP_MAX_DB     8.0f  /* the most it ramps up in one transmission */
 #define TX_LEVEL_PWR_STEP_W    0.1f  /* the radio's power reading resolution */
 #define TX_LEVEL_TRIAL_DB      0.5f  /* power_hold: the steps up judged together, from this much */
+/* power_hold under this setting (coarse): the meter's 0.1 W steps cannot hold the power (0.4 dB a step at 1 W, 3 dB at
+ * 0.1 W), and after the key the X6200's reads high for a second or more (2026-11-24: 0.3 W at a 0.1 W setting, 0.8 W
+ * at 0.5 W, while the other radio heard the power steady). No steps up; down only once it reads over the setting by
+ * TX_LEVEL_COARSE_OVER_W more than the usual 1.25 times and a step */
+#define TX_LEVEL_COARSE_W      1.0f
+#define TX_LEVEL_COARSE_OVER_W 0.4f
 /* After a block of silence, this many blocks of sound (about 0.75 s) before a reading counts again: the readings lag
  * the audio (its queue, the base's 2.5 readings a second) */
 #define TX_LEVEL_QUIET_BLOCKS  16
@@ -56,6 +62,7 @@ typedef struct {
     float sum_alc;
     bool  held;     /* the level was found (or had to come down): no more ramping up */
     bool  power_hold; /* the ALC does not follow the drive (HW_CAP_TX_NO_ALC): held once the power reaches the setting */
+    bool  coarse;     /* power_hold under TX_LEVEL_COARSE_W, set by the caller (tx_hold.c): only a clear over comes down */
     float prev_p;     /* power_hold: the last window's power, and the step up made after it */
     float last_up;
     int   flat_n;     /* power_hold: steps up in a row that brought no more power, and their sum */

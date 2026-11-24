@@ -93,7 +93,15 @@ static float tx_level_decide(tx_level_t *l) {
     l->sum_pwr = l->sum_alc = 0.0f;
 
     float d = 0.0f;
-    if (a > TX_LEVEL_ALC_HIGH) {
+    if (l->coarse) {
+        /* power_hold under 1 W: the readings cannot hold it, the level the caller scaled from 1 W goes out; only a
+         * reading well over the setting brings it down (a level for 1 W far too high), as below */
+        if (l->target_w > 0.0f && p > l->target_w * 1.25f + TX_LEVEL_PWR_STEP_W + TX_LEVEL_COARSE_OVER_W) {
+            d = -10.0f * log10f(p / l->target_w) * 0.5f;
+            if (d < -TX_LEVEL_DOWN_MAX_DB) d = -TX_LEVEL_DOWN_MAX_DB;
+            l->held = true;
+        }
+    } else if (a > TX_LEVEL_ALC_HIGH) {
         /* Overdriven: half the old formula a window (ALC 1: -0.2 dB,
          * 3: -0.6, 5: -1.2, more: the limit). */
         d = (log10f(log10f(11.1f - a)) * 20.0f - 0.38f) * 0.5f;
