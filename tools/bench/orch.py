@@ -67,15 +67,42 @@ STEP_MAX_OFFSET_HZ = 600    # and none further than this (SSB: the X6100 reads t
                             # the X6200 the X6100 ~380 Hz high, 2026-11-23)
 
 
+# ---- What has passed: kept across runs (the owner, 2026-11-23: "keep track of passed tests persistently so they
+# don't re run"; "each new test should be tacked on, and simply run ... any failures addressed, and if they can't be,
+# simply documented, and move on") ----
+
+STORE = os.path.join(bench.STATE, "orch_results.json")
+
+# Failures that cannot be put right from here: said with each, not run again until --all (or the reason is gone)
+KNOWN = {
+    "web-secrets": "both radios run the 0.3.12.46 image's web server, which serves https/key.pem and "
+                   "remote_sessions.conf to anyone on the network; fixed in the repo (3906e452 the key, 7b01807b the "
+                   "sessions), it cannot be hot-installed (that image's settings lack CERT_DIR/DMR_DIR): passes once "
+                   "the radios run an image with both (a release, the owner's word)",
+}
+
+
+def store_load():
+    return bench.load_json(STORE, {})
+
+
+def store_put(name, rec):
+    doc = store_load()
+    doc[name] = rec
+    bench.save_json(STORE, doc)
+
+
 # ---- The run's state: what the console shows ----
 
 class Status:
-    def __init__(self, tests):
+    def __init__(self, tests, kept=()):
         self.lock = threading.Lock()
         self.t0 = time.time()
         self.phase = "starting"
         self.tests = [{"name": t.name, "role": t.role, "what": t.what, "est_s": t.est_s, "result": None,
                        "says": "", "secs": None, "steps": []} for t in tests]
+        # the tests not run this time: their last result as kept (STORE), shown under this run's
+        self.kept = list(kept)
         self.cur = None             # index into tests
         self.events = collections.deque(maxlen=3000)
         self.log = None             # the run's events.jsonl: every event, kept for the audit
@@ -101,7 +128,7 @@ class Status:
             counts = collections.Counter(t["result"] for t in done)
             return json.dumps({
                 "now": time.time(), "t0": self.t0, "phase": self.phase, "cur": self.cur, "tests": self.tests,
-                "events": list(self.events)[-400:], "radios": self.radios, "sync": self.sync,
+                "events": list(self.events)[-400:], "radios": self.radios, "sync": self.sync, "kept": self.kept,
                 "counts": {"pass": counts["PASS"], "fail": counts["FAIL"], "look": counts["LOOK"],
                            "notrun": counts["NOT RUN"], "done": len(done), "total": len(self.tests)},
                 "eta_s": left, "run_dir": self.run_dir}, default=str)
@@ -135,6 +162,7 @@ th{color:var(--dim);font-weight:normal}.PASS{color:var(--ok)}.FAIL{color:var(--b
 <section><h2>Radios</h2><div id="sync"></div><div class="radios" id="radios" style="margin-top:8px"></div></section>
 <section><h2>Now</h2><div id="now"></div><div class="bar"><div id="prog" style="width:0"></div></div></section>
 <section class="wide"><h2>Tests</h2><table><thead><tr><th>#</th><th>test</th><th>role</th><th>result</th><th>secs</th><th>what it found</th></tr></thead><tbody id="tests"></tbody></table></section>
+<section class="wide"><h2>Not run this time: their last result (kept across runs; <i>orch.py run --all</i> runs them again)</h2><table><thead><tr><th>test</th><th>result</th><th>when</th><th>GUI</th><th>what it found</th></tr></thead><tbody id="kept"></tbody></table></section>
 <section class="wide"><h2>Events (everything the orchestrator does; <a href="log" style="color:var(--amb)">the whole log</a>)</h2>
 <div><label><input type="checkbox" id="fcmd" checked> commands sent</label><label><input type="checkbox" id="fconf" checked> read-backs</label><label><input type="checkbox" id="fradio" checked> the radios' errors</label></div><div class="ev" id="ev"></div></section>
 </main>
@@ -157,6 +185,7 @@ $("now").innerHTML=cur?`<div><b>${esc(cur.name)}</b> <span class="muted">(${esc(
  cur.steps.map(st=>`<div class="${st.state==="confirmed"?"PASS":st.state==="failed"?"FAIL":"LOOK"}">${st.state==="running"?"&#9654;":st.state==="confirmed"?"&#10003;":"&#10007;"} ${esc(st.text)} <span class="muted">${st.secs!=null?st.secs.toFixed(1)+" s":""} ${esc(st.detail||"")}</span></div>`).join(""):"<span class=muted>no test running</span>";
 $("prog").style.width=(100*c.done/Math.max(1,c.total))+"%";
 $("tests").innerHTML=d.tests.map((x,i)=>`<tr class="${i===d.cur?"cur":""}"><td>${i+1}</td><td>${esc(x.name)}</td><td>${esc(x.role)}</td><td class="${(x.result||"").replace(" ","")}">${esc(x.result||(i===d.cur?"running":""))}</td><td>${x.secs!=null?x.secs.toFixed(0):""}</td><td class="says">${esc(x.says)}</td></tr>`).join("");
+$("kept").innerHTML=(d.kept||[]).map(k=>`<tr><td>${esc(k.name)}</td><td class="${(k.result||"").replace(" ","")}">${esc(k.result)}${k.known?" (known)":""}</td><td>${k.at?new Date(k.at*1000).toLocaleString():""}</td><td class="says">${esc(k.gui||"")}</td><td class="says">${esc(k.known||k.says)}</td></tr>`).join("");
 const show={cmd:$("fcmd").checked,conf:$("fconf").checked,radio:$("fradio").checked};
 $("ev").innerHTML=d.events.slice().reverse().filter(e=>show[e.kind]!==false).map(e=>`<div class="${e.kind}">${t(e.t)} ${e.test?"["+esc(e.test)+"] ":""}${esc(e.text)}</div>`).join("");}
 tick();setInterval(tick,700);
@@ -694,7 +723,9 @@ def cw_text(o, sender, listener, f, label):
     return True, f"decoded {got['decoded']!r} ({got['cer']:.0%} of the characters wrong)", got
 
 
-POWER_STEPS = [0.1, 0.3, 1.0]       # W: the listener's level must rise 10*log10 of each ratio
+POWER_STEPS = [0.2, 0.5, 1.0]       # W: the listener's level must rise 10*log10 of each ratio. Not from 0.1 W: the
+# X6200 holds a TCI over's power by its own meter (its ALC reads 0, tx_level.c power_hold), which reads 0.1 W steps,
+# so 0.1 W counts as reached from about 0.05 W (2026-11-23: its 0.1 W 4 dB under its 1 W's -10 dB, four runs in five)
 POWER_TOL_DB = 2.0
 
 
@@ -1388,7 +1419,7 @@ TESTS = [
          voice(B, A, 29600000, 7, "fm-steps x6200>x6100"), 30),
     *pair("cw-text", "", "CW 14.040: 'VVV TEST DE Q1TST' keyed, the other's decoder must print TEST DE Q1TST",
           lambda s, l, n: (lambda o: cw_text(o, s, l, 14040000, n)), 30),
-    *pair("power-steps", "", "USB 14.200: a tone at 0.1, 0.3, 1.0 W; the other's level must rise 4.8 and 5.2 dB (2 dB)",
+    *pair("power-steps", "", "USB 14.200: a tone at 0.2, 0.5, 1.0 W; the other's level must rise 4.0 and 3.0 dB (2 dB)",
           lambda s, l, n: (lambda o: power_steps(o, s, l, 14200000, n)), 45),
     *pair("ft8-cq", "", "FT8 14.074: a CQ in the next slot, the other must decode exactly the message sent",
           lambda s, l, n: (lambda o: ft8_cq(o, s, l, n)), 40),
@@ -1421,11 +1452,20 @@ TESTS = [
 ]
 
 
-def run(names, port, lan, linger):
-    tests = [t for t in TESTS if not names or t.name in names or t.name.split(" ")[0] in names]
+def run(names, port, lan, linger, everything=False):
+    kept = store_load()
+    if names:
+        tests = [t for t in TESTS if t.name in names or t.name.split(" ")[0] in names]
+    elif everything:
+        tests = list(TESTS)
+    else:                       # the new ones and those that failed: what passed, or fails for a known reason, kept
+        tests = [t for t in TESTS if kept.get(t.name, {}).get("result") != "PASS" and t.name not in KNOWN]
     if not tests:
-        raise SystemExit(f"no test named {names}")
-    st = Status(tests)
+        raise SystemExit("every test has passed or fails for a known reason (orch.py run --all: run them again)")
+    run_names = {t.name for t in tests}
+    shown = [dict(kept.get(t.name, {"result": "never run"}), name=t.name, known=KNOWN.get(t.name))
+             for t in TESTS if t.name not in run_names]
+    st = Status(tests, shown)
     srv = console(st, port, lan)
     st.run_dir = os.path.join(bench.STATE, "runs", time.strftime("%Y%m%d-%H%M%S-orch"))
     os.makedirs(st.run_dir, exist_ok=True)
@@ -1483,6 +1523,8 @@ def run(names, port, lan, linger):
             res = "PASS" if ok is True else "LOOK" if ok is None else "FAIL"
             with st.lock:
                 st.tests[i].update(result=res, says=says, secs=time.time() - t0, data=data)
+            store_put(t.name, {"result": res, "says": says, "at": time.time(), "secs": round(time.time() - t0, 1),
+                               "gui": hello(o.r[A]), "run": os.path.basename(st.run_dir)})
             st.ev(f"{res} {t.name}: {says}", "ok" if res == "PASS" else "bad")
             st.ev(f"data of {t.name}: {json.dumps(data, default=str)[:4000]}", "conf")
             for r in o.r.values():
@@ -1518,12 +1560,16 @@ def main():
     rp.add_argument("--port", type=int, default=8765)
     rp.add_argument("--lan", action="store_true", help="the console on the network, not only this computer")
     rp.add_argument("--linger", type=int, default=3600, help="seconds the console stays up after the run")
+    rp.add_argument("--all", action="store_true", help="every test, the passed ones too")
     a = ap.parse_args()
     if a.cmd == "list":
+        kept = store_load()
         for t in TESTS:
-            print(f"{t.name:26s} {t.role:20s} ~{t.est_s:3d} s  {t.what}")
+            k = kept.get(t.name, {})
+            last = "KNOWN" if t.name in KNOWN else k.get("result", "never run")
+            print(f"{t.name:26s} {last:9s} {t.role:20s} ~{t.est_s:3d} s  {t.what}")
         return
-    run([x for x in a.only.split(",") if x], a.port, a.lan, a.linger)
+    run([x for x in a.only.split(",") if x], a.port, a.lan, a.linger, everything=a.all)
 
 
 if __name__ == "__main__":
