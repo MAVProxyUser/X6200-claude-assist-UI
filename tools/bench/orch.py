@@ -1475,6 +1475,179 @@ def t_apps_alike(o):
         f"{k} {v[A][0] / 1e6:.4f}" for k, v in res.items()), res
 
 
+def ft8_both(o, dial):
+    """Test calls on both, the FT8 app open on both in FT8 on dial at 0.1 W, Auto off, confirmed alike"""
+    test_calls(o)
+    o.changing += 1
+    try:
+        for r in o.r.values():
+            r.send("ft8 open")
+        for r in o.r.values():
+            r.wait("the FT8 app", lambda r=r: r.ft8.get("open") == 1, 10)
+            time.sleep(1.0)
+            for _ in range(3):
+                if r.state.get("app") == "FT8":
+                    break
+                p = r.ft8.get("proto")
+                r.send("ft8 mode")
+                r.wait("FT8's protocol stepped", lambda r=r, p=p: r.ft8.get("proto") != p, 5)
+                time.sleep(0.8)
+            if r.state.get("app") != "FT8":
+                raise Refused(f"{r.name}: its FT8 app not in FT8 ({r.state.get('app')})")
+        th = [threading.Thread(target=bench.ft8_to_band, args=(r, dial)) for r in o.r.values()]
+        [t.start() for t in th]
+        [t.join(40) for t in th]
+        for r in o.r.values():
+            if r.ft8.get("auto"):
+                r.send("ft8 auto")
+                r.wait("Auto off", lambda r=r: not r.ft8.get("auto"), 5)
+    finally:
+        o.changing -= 1
+    o.both({"freq": dial, "pwr": W})
+    alike(o, ("freq", "mode"))
+
+
+def ft8_send(o, S, L, watch, cmd, label, dial):
+    """S sends cmd (an FT8 transmission) in its next slot; returns the message it said it sent ("next")"""
+    S.send(cmd)
+    S.wait("its transmission", lambda: S.tx or watch.why, 32)
+    sent = bench.norm(S.ft8.get("next") or "")
+    bench.tx_log({"who": S.name, "f": dial, "w": S.pwr(), "what": f"orch: {label}"})
+    S.wait("the end of its transmission", lambda: not S.tx or watch.why, bench.MAX_KEY_S + 2)
+    S.send("ft8 stop")
+    if watch.why:
+        raise Refused(watch.why)
+    return sent
+
+
+def ft8_reply(o, a, b, label, dial=14074000):
+    """a calls CQ, b decodes it and replies to it (the app's own reply), a must decode exactly b's reply"""
+    A_, B_ = o.r[a], o.r[b]
+    res = {}
+    p, total = bench.chain_gate(o.c, "radios")
+    try:
+        with o.step("both on their test calls, the FT8 app open on both on the dial"):
+            ft8_both(o, dial)
+        for r in (A_, B_):
+            bench.radio_tx_gate(r, o.c, W)
+            bench.listener_gate(r)
+        watch = bench.Watch([A_, B_], o.c, expect_dbm=10 * math.log10(W * 1000) - total, w=W, label=label)
+        try:
+            with o.step(f"{a} calls CQ, {b} decodes it") as s:
+                o.roles = {a: "TX", b: "RX"}
+                n0 = len(B_.rows)
+                cq = ft8_send(o, A_, B_, watch, "ft8 cq", label, dial)
+                B_.wait("the CQ decoded", lambda: any(bench.msg(r) == cq for r in B_.rows[n0:]), 8)
+                row = next(r for r in B_.rows[n0:] if bench.msg(r) == cq)
+                s.confirm(f"{mask(cq)!r} at {row.get('snr')} dB")
+            with o.step(f"{b} replies to it, {a} decodes exactly the reply") as s:
+                o.roles = {b: "TX", a: "RX"}
+                n1 = len(A_.rows)
+                rep_ = ft8_send(o, B_, A_, watch, f"ft8 reply {row['id']}", label, dial)
+                try:
+                    A_.wait("the reply decoded", lambda: any(bench.msg(r) == rep_ for r in A_.rows[n1:]), 8)
+                except Refused:
+                    raise Refused(f"{a} decoded {[mask(bench.msg(r)) for r in A_.rows[n1:]] or 'nothing'}, not "
+                                  f"{mask(rep_)!r}")
+                row2 = next(r for r in A_.rows[n1:] if bench.msg(r) == rep_)
+                res.update(cq=mask(cq), reply=mask(rep_), snr=(row.get("snr"), row2.get("snr")))
+                s.confirm(f"{mask(rep_)!r} at {row2.get('snr')} dB")
+        finally:
+            watch.close()
+            for r in (A_, B_):
+                r.send("ft8 stop")
+            o.roles = {A: "RX", B: "RX"}
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        for r in (A_, B_):
+            r.send("ft8 close")
+    return True, f"{a}'s {res['cq']!r} decoded by {b}, {b}'s reply {res['reply']!r} decoded by {a}", res
+
+
+def remote_busy(o, radio, other, label):
+    """radio on the air (PTT held by its lease, 14.200 USB, 0.1 W): another session's control take refused while it
+    is, and the other radio never keyed"""
+    R, X = o.r[radio], o.r[other]
+    res = {}
+
+    def body(watch):
+        with o.step(f"{radio} on the air 4 s: another session's control take refused, {other} never keyed") as s:
+            rx = bench.Radio(radio, o.c["radios"][radio], False)
+            try:
+                t0 = time.time()
+                R.send("key PTT 1 7")
+                R.wait("on the air", lambda: R.tx, 3)
+                e0 = len(rx.errs)
+                rx.send("control take")
+                got = None
+                while time.time() - t0 < 4:
+                    R.send("key PTT 1 7")
+                    if X.tx:
+                        raise Refused(f"{other} WENT ON THE AIR too")
+                    if rx.ctl_mine:
+                        raise Refused("the other session took control while on the air")
+                    if len(rx.errs) > e0:
+                        got = rx.errs[-1]
+                    time.sleep(0.5)
+                R.send("key PTT 0")
+                if not got:
+                    raise Refused("the control take neither refused nor taken")
+                res["said"] = got
+                s.confirm(f"refused: {got!r}")
+            finally:
+                rx.close()
+    try:
+        over(o, radio, other, 14200000, 2, label, body)
+    except Refused as e:
+        return False, str(e), res
+    return True, f"while {radio} was on the air another session's control take was refused ({res['said']!r}); " \
+                 f"{other} never keyed", res
+
+
+def t_band_memory(o):
+    """Each band keeps its own ATT: 20 m on with ATT on, 15 m with ATT off, then 20 m (ATT on again, from its memory)
+    and 15 m (off again), on both, each confirmed and alike"""
+    with o.step("both on page G, 20 m (14.200 USB) ATT on, PRE off"):
+        o.both_page("G")
+        o.both({"freq": 14200000, "mode": 2})
+        o.both({"att": 1, "pre": 0})
+    with o.step("both to 15 m (21.200), ATT off there"):
+        o.both({"freq": 21200000})
+        o.both({"att": 0})
+    seen = {}
+    for f, want in ((14200000, 1), (21200000, 0)):
+        with o.step(f"both back to {f / 1e6:.3f} MHz: ATT {want} from that band's memory") as s:
+            o.both({"freq": f})
+            time.sleep(0.5)
+            seen[f] = {n: int(r.state.get("att", -1)) for n, r in o.r.items()}
+            alike(o, ("att",))
+            s.confirm(str(seen[f]))
+    o.both({"freq": 14200000})
+    o.both({"att": 0})
+    ok = all(v == 1 for v in seen[14200000].values()) and all(v == 0 for v in seen[21200000].values())
+    return ok, (f"each band its own ATT on both: 20 m {seen[14200000]}, 15 m {seen[21200000]}" if ok else
+                f"a band's ATT not its own: 20 m {seen[14200000]} (1 wanted), 15 m {seen[21200000]} (0 wanted)"), seen
+
+
+def t_cb_channel(o):
+    """On the Sentry's G: CB 19 (27.185 MHz AM) as G's own channel on both, then BAND UP (a channel up on G): CB 20,
+    27.205 MHz AM, on both"""
+    with o.step("both on page G, G's channel CB 19 (27.185 AM)"):
+        o.both_page("G")
+        o.both({"wch": (27185000, 6)})
+        o.both({"freq": 27185000, "mode": 6})
+    with o.step("BAND UP on both: CB 20, 27.205 AM on both") as s:
+        def up(n, r):
+            bench.tap(r, "BAND_UP")
+            r.wait("CB 20", lambda: int(r.state.get("freq", 0)) == 27205000, 5)
+            return int(r.state.get("freq")), int(r.state.get("mode"))
+        got = in_parallel(o, up)
+        alike(o, ("freq", "mode"))
+        s.confirm(str(got))
+    return True, f"CB 19 then a channel up: both on {got[A][0] / 1e6:.3f} MHz mode {got[A][1]}", got
+
+
 # ---- The tests ----
 
 class Test:
@@ -1552,6 +1725,15 @@ TESTS = [
          t_rx_session_refused, 15),
     Test("apps-alike", "both RX", "JS8, Olivia, SSTV, WeFax, NavTex, PSK each opened on both at once: the same dial",
          t_apps_alike, 60),
+    *pair("ft8-reply", "", "FT8: a CQ, the other decodes it and replies; the first must decode exactly the reply",
+          lambda s, l, n: (lambda o: ft8_reply(o, s, l, n)), 60),
+    Test("remote-busy x6100", "X6100 TX, X6200 RX", "while the X6100 is on the air another session cannot take "
+         "control, the X6200 never keyed", lambda o: remote_busy(o, A, B, "remote-busy x6100"), 20),
+    Test("remote-busy x6200", "X6200 TX, X6100 RX", "while the X6200 is on the air another session cannot take "
+         "control, the X6100 never keyed", lambda o: remote_busy(o, B, A, "remote-busy x6200"), 20),
+    Test("band-memory", "both RX", "each band its own ATT: 20 m on, 15 m off, each back from its memory on both",
+         t_band_memory, 20),
+    Test("cb-channel", "both RX", "CB 19 as G's channel, then a channel up: 27.205 AM on both", t_cb_channel, 15),
     Test("rx-settings", "both RX", "PRE, ATT, AGC, NB, NR, squelch, RF gain: each set on both, read back alike",
          t_rx_settings, 40),
     Test("ptt-lease x6100", "X6100 TX, X6200 RX", "one PTT never renewed: off the air by itself within 4 s",
