@@ -260,6 +260,7 @@ class Orch:
         self._rf_since = None
         self.trouble = None                 # this test's GUI or RF trouble: it fails the test
         self._pids = {}                     # (name, before/after): the GUI's process around a silence
+        self._unplanned = {}                # name: its silence began with no planned restart
         self.roles = {A: "RX", B: "RX"}
         self.restore_calls = set()          # the radios given a test call this run (test_calls)
         self.changing = 0                   # changes to both under way: the guard looks away meanwhile
@@ -282,6 +283,9 @@ class Orch:
             time.sleep(0.2)
         self._pid_now(n, "after")
         a_, b_ = self._pids.pop((n, "before"), None), self._pids.pop((n, "after"), None)
+        if a_ is None:                      # not read as it began: nothing to judge by, said
+            self.st.ev(f"{n}: back after {gone:.0f} s; its GUI's process not read as the silence began", "radio")
+            return
         if a_ and b_ and a_ == b_:
             self.st.ev(f"{n}: its link stalled {gone:.0f} s, its GUI the same process ({b_}): not a crash", "radio")
             if self.trouble and self.trouble.startswith(f"{n}: NO WORD"):
@@ -323,6 +327,7 @@ class Orch:
                          "age": round(age, 1), "link": link, "sql": s.get("sql")}
                 if age >= STALE_S and n not in self._down:
                     self._down[n] = now
+                    self._unplanned[n] = n not in self.planned     # only a silence nobody planned is judged
                     if n in self.planned:
                         self.st.ev(f"{n}: its GUI restarting ({self.planned[n]}): no state meanwhile", "radio")
                     else:
@@ -333,7 +338,7 @@ class Orch:
                 elif age < STALE_S and n in self._down:
                     gone = now - self._down.pop(n)
                     self.st.ev(f"{n}: state again after {gone:.0f} s (GUI {hello(r)})", "ok")
-                    if n not in self.planned:   # the GUI the same process: its link stalled (the X6200's WiFi held
+                    if self._unplanned.pop(n, False):   # the GUI the same process: its link stalled (the X6200's WiFi
                         threading.Thread(target=self._stall_or_crash, args=(n, gone), daemon=True).start()
             # a signal on a receiver that no radio says it sends (a transmitter keyed with its GUI down or its state
             # wrong): an alarm and both stopped, whatever the GUIs say
@@ -1220,6 +1225,8 @@ def ft8_stop(o, sender, listener, label, dial=14074000):
                 S.wait("its transmission", lambda: S.tx or watch.why, 32)
                 bench.tx_log({"who": sender, "f": dial, "w": S.pwr(), "what": f"orch: {label}"})
                 time.sleep(2.0)
+                if not S.tx:                        # a stop proves nothing on a sender already off the air
+                    raise Refused(f"{sender} off the air already 2 s into its CQ (before the stop)")
                 t0 = time.time()
                 S.send("ft8 stop")
                 S.wait("off the air", lambda: not S.tx, 3)
@@ -1966,12 +1973,15 @@ def t_caps(o):
     def probe(label, cmd, read, ok_if, then=None):
         def one(n, r):
             e0 = len(r.errs)
-            r.send(cmd)
-            t0 = time.time()
-            while time.time() - t0 < 2.5:
+            for attempt in range(2):            # no change and no answer: sent again once (a link stall ate it:
+                r.send(cmd)                     # the X6200's 'step 10', 2026-11-23, its link stalling then)
+                t0 = time.time()
+                while time.time() - t0 < 2.5:
+                    if len(r.errs) > e0 or ok_if(r):
+                        break
+                    time.sleep(0.05)
                 if len(r.errs) > e0 or ok_if(r):
                     break
-                time.sleep(0.05)
             time.sleep(0.2)
             return {"ok": ok_if(r) and len(r.errs) == e0, "reads": read(r),
                     "err": r.errs[-1] if len(r.errs) > e0 else None}
