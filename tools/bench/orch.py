@@ -3250,6 +3250,77 @@ def g_voiceprint(o, mic, speaker, label, f=14200000):
                   f"({len(got.get('shots', []))} pictures), its capture held them, {speaker} heard the over through "
                   f"{got['arrived_share']:.0%} of them"), got
 
+
+# ---- The Sentry's pages on both, as pictures (2026-11-24: the old suite's page walk, t_pages, into the orchestrator;
+# the owner: "all tests should ultimately use the same orchestration framework") ----
+PAGES_LOOK = "ABCDEFGH"
+
+
+def pages_look(o):
+    """Each Sentry page, A to H (H: AIRSPACE), opened on both radios together and photographed together, receive only.
+    Each picture's colours counted against the Sentry's gold on black (suite.palette): more than OFF_PALETTE_FLAG % of
+    cyan, blue or purple is an old theme's look left behind, a FAIL. The share of the screen that differs between the
+    two radios' pictures (suite.picture_diff) over DIFF_SHARE is shown to look at (a LOOK): the model's name, the
+    clock, live spectra and meters differ always. A page tunes the radio its own way (G its channel, D and E their
+    lists): the walk is one change for the sync guard, any page where the two dials differ said, both put back on one
+    frequency and mode at the end, on page A"""
+    import suite
+    f0, m0 = int(o.r[A].state.get("freq", 0)), int(o.r[A].state.get("mode", 2))
+    res, bad, look = {}, [], []
+    o.changing += 1
+    try:
+        for p in PAGES_LOOK:
+            with o.step(f"both on the Sentry's page {p}, photographed together") as s:
+                if p == "H":
+                    for r in o.r.values():
+                        r.send("open sentry H")
+                    for r in o.r.values():
+                        r.wait("AIRSPACE (page H)", lambda r=r: r.state.get("win") == "Airspace", 10)
+                else:
+                    th = [threading.Thread(target=bench.open_page, args=(r, p)) for r in o.r.values()]
+                    [t.start() for t in th]
+                    [t.join(25) for t in th]
+                    off_page = [n for n, r in o.r.items() if r.state.get("pg") != p]
+                    if off_page:
+                        raise Refused(f"{', '.join(off_page)} not on page {p}")
+                time.sleep(1.5)                     # drawn once more after it opened
+                paths = bench.screenshots_both(list(o.r.values()), f"pages-look {p}")
+                if not all(paths.get(n) for n in o.r):
+                    raise Refused(f"page {p}: a picture missing ({paths})")
+                pal = {n: suite.palette(path) for n, path in paths.items()}
+                d = suite.picture_diff([paths[A], paths[B]])
+                dials = {n: (int(r.state.get("freq", 0)), int(r.state.get("mode", -1))) for n, r in o.r.items()}
+                res[p] = {"off_pct": {n: v["off"] for n, v in pal.items()}, "differs": None if d is None else round(d, 3),
+                          "dials": dials, "pictures": {n: os.path.basename(v) for n, v in paths.items()}}
+                old = [n for n, v in pal.items() if v["off"] > suite.OFF_PALETTE_FLAG]
+                if old:
+                    bad.append(f"{p}: {old} {suite.OFF_PALETTE_FLAG}%+ cyan/blue/purple ({res[p]['off_pct']})")
+                if d is not None and d > suite.DIFF_SHARE:
+                    look.append(f"{p}: {d:.0%} differs")
+                if bad or (d is not None and d > suite.DIFF_SHARE):
+                    with o.st.lock:
+                        if o.st.cur is not None:
+                            o.st.tests[o.st.cur]["shots"].append({"t": time.time(), "label": f"page {p}",
+                                                                  "paths": paths})
+                s.confirm(f"off-palette {res[p]['off_pct']} %, {d:.0%} of the screen differs, dials {dials}"
+                          + ("" if dials[A] == dials[B] else " (the page tunes each its own way)"))
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        try:
+            o.both_page("A")
+            if f0:
+                o.both({"freq": f0, "mode": m0})
+        finally:
+            o.changing -= 1
+    if bad:
+        return False, "an old theme's colours: " + "; ".join(bad), res
+    if look:
+        return None, f"every page in the Sentry's look on both; to look at: {'; '.join(look)}", res
+    return True, (f"pages {PAGES_LOOK} in the Sentry's look on both (cyan/blue/purple at most "
+                  f"{max(max(v['off_pct'].values()) for v in res.values()):.1f} %), each pair alike within "
+                  f"{suite.DIFF_SHARE:.0%}"), res
+
 def ft8_qso(o, a, b, label, dial=14074000):
     """A whole FT8 QSO by the apps themselves: Auto on both, a calls CQ, b answers it once ("ft8 reply"), the reports,
     RR73 and 73 by the apps; both must log the QSO (their state's "logged" the other's test call) and each ADIF file
@@ -3429,6 +3500,8 @@ TESTS = [
           "variant sent", lambda s, l, n: (lambda o: olivia_text(o, s, l, n)), 75),
     *pair("cw-kbd", "", "CW Keyboard 14.040: a stored message 'VVV VVV Q1TST' keyed by the app; the other's decoder must "
           "print Q1TST", lambda s, l, n: (lambda o: cw_kbd(o, s, l, 14040000, n)), 45),
+    Test("pages-look", "both RX", "the Sentry's pages A-H on both, photographed together: the Sentry's colours on each, "
+         "the two alike", pages_look, 90),
     Test("g-voiceprint x6100>x6200", "X6100 TX (its mic), X6200 RX (its speaker plays)", "G's voiceprint on the air: "
          "the X6200 plays stepped tones on its speaker, the X6100 keyed on G at 0.1 W picks them up on its mic; its "
          "voiceprint (two pictures), its own capture and the X6200's receiver must show them",
