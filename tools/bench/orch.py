@@ -2490,9 +2490,11 @@ def wefax_chart(o, sender, listener, label):
 
 # ---- SSTV, Olivia, the CW Keyboard (2026-11-24, the owner: "Yes, add them") ----
 
-SSTV_MODE = "robot8"            # Robot 8 BW, 160 x 120, 8.9 s: an SSTV picture that fits an over (16 s at most)
+SSTV_MODE = "robot8"            # Robot 8 BW, 160 x 120, 8.9 s (9.7 with the tail): a picture that fits an over (16 s)
 SSTV_W, SSTV_H = 160, 120
 SSTV_MIN_LEVELS = 80            # the received picture's white quarters over its black ones, grey levels, at least
+SSTV_LAST_ROWS = 4              # the received picture's last rows against the sent one's: a sender that unkeys early
+SSTV_MAX_ROW_ERR = 40           # leaves them noise (100-130 grey levels off before the 0.8 s tail, 3-6 after, 2026-11-24)
 
 
 def sstv_encoder():
@@ -2524,6 +2526,14 @@ def sstv_quarters(path):
     def q(r0, r1, c0, c1):
         return round(float(a[r0 + mh:r1 - mh, c0 + mw:c1 - mw].mean()), 1)
     return q(0, h // 2, 0, w // 2), q(0, h // 2, w // 2, w), q(h // 2, h, 0, w // 2), q(h // 2, h, w // 2, w)
+
+
+def sstv_last_rows(sent, got):
+    """The received picture's last SSTV_LAST_ROWS rows, each one's mean grey difference from the sent picture's"""
+    from PIL import Image
+    s = np.asarray(Image.open(sent).convert("L"), float)
+    g = np.asarray(Image.open(got).convert("L").resize((s.shape[1], s.shape[0])), float)
+    return [round(float(x), 1) for x in np.abs(s - g).mean(axis=1)[-SSTV_LAST_ROWS:]]
 
 
 def sstv_picture(o, sender, listener, label):
@@ -2563,6 +2573,8 @@ def sstv_picture(o, sender, listener, label):
             r = subprocess.run([sstv_encoder(), SSTV_MODE, sent, raw, "24000"], capture_output=True, text=True)
             if r.returncode:
                 raise Refused(f"the encoder: {r.stderr.strip()[-200:]}")
+            with open(raw, "ab") as fh:     # keyed silence after it, as the steps have: the sender unkeys as its TCI
+                fh.write(bytes(2 * int(STEP_TAIL_S * 24000)))   # audio ends (the last rows lost, 2026-11-24)
             secs = os.path.getsize(raw) / 2 / 24000
             subprocess.run(["scp", "-q", "-o", "BatchMode=yes", raw, f"root@{S.host}:/tmp/bench_sstv.raw"], check=True)
             res.update(sent=sent, sent_quarters=sstv_quarters(sent))
@@ -2599,7 +2611,13 @@ def sstv_picture(o, sender, listener, label):
                 raise Refused(f"its quarters (top left, top right, bottom left, bottom right) {tl}, {tr}, {bl}, {br}: "
                               f"the white over the black by {apart} grey levels ({SSTV_MIN_LEVELS} wanted); "
                               f"{size[0]}x{size[1]}, kept as {os.path.basename(got)}")
-            s.confirm(f"{size[0]}x{size[1]}, quarters {tl}/{tr}/{bl}/{br}, white over black by {apart}")
+            rows = sstv_last_rows(sent, got)
+            res.update(last_rows=rows)
+            if max(rows) > SSTV_MAX_ROW_ERR:
+                raise Refused(f"its last {SSTV_LAST_ROWS} rows {rows} grey levels off the sent ones ({SSTV_MAX_ROW_ERR} "
+                              f"at most): the end of the picture lost; kept as {os.path.basename(got)}")
+            s.confirm(f"{size[0]}x{size[1]}, quarters {tl}/{tr}/{bl}/{br}, white over black by {apart}; the last "
+                      f"rows {rows} off")
     except Refused as e:
         return False, str(e), res
     finally:
@@ -2615,7 +2633,8 @@ def sstv_picture(o, sender, listener, label):
         finally:
             o.changing -= 1
     return True, (f"a {SSTV_MODE} picture: {listener}'s {res['size'][0]}x{res['size'][1]} shows the quarters "
-                  f"{res['quarters']}, white over black by {res['apart']} grey levels ({SSTV_MIN_LEVELS} wanted)"), res
+                  f"{res['quarters']}, white over black by {res['apart']} grey levels ({SSTV_MIN_LEVELS} wanted), "
+                  f"its last rows {res['last_rows']} off ({SSTV_MAX_ROW_ERR} at most)"), res
 
 
 OLIVIA_TEXT = "TEST"        # no "DE <call>" (what the app spots); the app sends "\nTEST\n": 6 characters, 7 blocks of
