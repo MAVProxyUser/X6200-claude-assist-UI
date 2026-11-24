@@ -1,11 +1,76 @@
 # To do
 
-## The owner's backlog (from the conversations, audited 2026-11-16, brought up to date 2026-11-17)
+## The owner's backlog (from the conversations, audited 2026-11-16, 2026-11-21 and 2026-11-24)
 
-What the owner asked for in the working sessions, checked against git; GitHub issues are the sections below. Nothing
-here transmits until the owner says so (transmit work is not wanted for now). On 2026-11-17 the side sessions (the
-Meteor/SCAN CFG one, the Kraken DF one and its kernel one) were folded into one backlog, in the order the owner
-approved that day.
+What the owner asked for in the working sessions, checked against git; GitHub issues are the sections below. The
+radios transmit only into the bench cable (80 dB of pads, the owner's word on it), at 1 W or less. On 2026-11-17 the
+side sessions (the Meteor/SCAN CFG one, the Kraken DF one and its kernel one) were folded into one backlog, in the
+order the owner approved that day.
+
+**2026-11-21 to 11-24: the owner's asks, audited 2026-11-24 07:45 UTC** (172 messages, direct and queued, since the
+11-21 audit, checked against git's 177 commits and the orchestrator's results; the older blocks below are kept as
+they were, each item's state brought here when it changed).
+
+Open, mine to do:
+- **The X6200's TCI power below 1 W** (orch power-steps x6200>x6100, KNOWN): its ALC reads 0, so tx_hold.c steers by
+  the radio's meter (tx_level.c power_hold), which reads in 0.1 W steps: 0.2/0.5/1.0 W read 0.3/0.4/0.9 W and the
+  X6100 heard 0.2 -> 0.5 W as +1.9 dB (+4 wanted), 4 runs in 6. At 0.1 W and 1 W it held (11-21). A GUI fault.
+- **Every test through the orchestrator** (the owner, 11-24: "all tests should ultimately use the same orchestration
+  framework", "whittle down the tests to essential testable things, not slop"): tools/bench/orch.py has 63 tests (61
+  pass, 2 KNOWN); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386 features listed,
+  ~1040 not covered on 11-23) still run outside it. Left: pick the essential ones of features.json and move them in.
+- **The X6200 takes no LSB-D (mode 1)** over the remote ("set mode 1" answers nothing, it stays USB); the X6100 does
+  (orch caps). A fault of the X6200's mode list or a difference: to find out.
+- **A TCI over unkeys before its audio is out**: the sender drops what is still in its transmit path (0.3-0.5 s on
+  the X6100, 1.2-1.4 s on the X6200): the step tests' last step and SSTV's last rows were lost until the bench padded
+  0.8 s of silence (STEP_TAIL_S). Holding the key until the path is empty would fix it for every TCI program.
+- **The web server's fix in an image**: the HTTPS key and the remote's sessions were downloadable without a login
+  (3906e452, 7b01807b); both radios run the fixed server by hot install only. The next tag carries it (the owner's
+  word to tag).
+- **The upstream merge's look on the radios** (11-23): the classic screen's 3D waterfall on upstream's thread, WeFax's
+  tiles and Night in amber, the WiFi device held over GUI restarts, Speech off by default; the USER page has no
+  labels for upstream's 200+ apps.
+- Both radios' CW decoders lose the dits of the first characters ('VVV' prints 'TTT'): a decoder that locks sooner
+  would copy short overs whole (noted; the tests send two V groups first).
+
+Open, the owner's call or hands:
+- **The X6100's CW carrier between elements** (orch cw-text x6100>x6200, KNOWN): ~15 dB under the mark at 0.1 W; the
+  X6200's decoder loses word spaces and letters on it (3 in 5). Its transmitter's carrier null on the factory base:
+  a calibration that keys the X6100.
+- The squelch (10) opens AM audio 1.3-2 s into a strong carrier (the orchestrator opens it for AM overs): right for
+  the speaker?
+- The X6100's 15 m/12 m image shifts (below, "15 m and 12 m"): left to try the battery alone, 15 m alone, the case
+  temperature. The 10 W figures want a 5 A supply (the 3 A one current-limits).
+- The X6100's 20 m "rake": most likely its stock charger; to confirm with the charger back on for a minute.
+- G's voiceprint of the microphone while keyed: a voice at the mic.
+- The X6200 heard nothing of the X6100 at 7.0-7.6 V of battery: to prove at its next low battery.
+- The factory X6100: 6 m puts out 0.8-1.2 W at 0.1 W (its base's floor, not the GUI); Comp; keyboard/mouse, the
+  sideswiper and KEY Train with a paddle untried on it; the X6200's TUNE with an external tuner.
+- From before, unchanged: the Kraken's bearing on the real array; the USB-3000's voice on B with a powered hub and an
+  SDR; screenshots of every menu (deferred).
+
+Done since 11-21 (details in git and tools/bench/ORCH_FINDINGS.md):
+- The test rig, as the owner asked it (11-22 to 11-24): bench.py's state layer and page A at the end (cad0140f); the
+  1:1 suite (7d84b748) and its batches; then orch.py (9816911d on): both radios set together and compared, a sync
+  guard, never on from radios set wrong, each step confirmed, a live console over HTTP (the HackRF as a card beside
+  the radios, pictures only on this run's fails), results kept so passed tests are not rerun, the caps map of where
+  the radios differ, volume 0 and squelch held, stepped tones judged by each radio's spectrum and its audio, data
+  sent against received (CW, FT8, JS8, RTTY, PSK31, Olivia, the CW Keyboard, WeFax, SSTV), the radios left on their
+  last frequency on page A, the operator's control never taken.
+- Fixed with it: the JS8/FT8/DMR use-after-free behind both GUIs' crashes (7da8c640, ASan; on both radios); the HTTPS
+  key and sessions served (above); a remote without pictures costing the GUI a third of a core (085ce368); the
+  Panel's CW filter; the Panel placed where the base is tuned (493fbde9); TCI answering a refused tune; D/E's ATT off
+  taking the X6100's RF gain to 100 like the X6200 (2fc81863); G's own channel and CH LIST on F4, 3D only (3b23430a);
+  the CW decoder's tone search (6cd00cb7); 1bit's pictures (5d1afc6d).
+- WiFi: the X6200's own 2457.6/2470.6 MHz lines notched in rtw88 (bcbf1dcd; channel 11 33 % -> 99-100 %; channel 13
+  too), sent upstream (#327); the receive audio's 2 s repeat (sun6i-dma, d545dd48). WSJT-X over TCI receives and
+  transmits (Q-prefixed calls, 413debdf); the X6100's TCI transmit through the drive loop (67a1d5d5). RTL sticks
+  take the gain they are opened with (6b1336e9, f6f54c04). TRIBAL KNOWLEDGE on F (9c465116). The X6100's 780.69 Hz
+  lines and the weak adapter in the manual (c0f615ad, cba95266). G's spectrum keeps time on the air (14acbc53); G
+  arms in the band's voice mode (42279ea2). The update's restart ticked by default (d4a244bb). The power watch logs
+  over-power instead of stopping (23faf3c2). Upstream's 229 commits merged, nothing of ours replaced (73ac370c).
+- Closed by the owner: BinModem (removed), the ardopcf and axspawn reports (not sent upstream), TX CAL on F SYSTEM,
+  the gcfix5 base (the X6100 back on Xiegu's factory V1.1.9), the draft PR (deleted), Bluetooth headphone code (never).
 
 **2026-11-23 night: the 1:1 suite's "cover" batch (tools/bench/suite_cover.py)**, 57 pass 0 fail on both radios (with FT8's MODE through its three protocols and the knob's TX Hz, channels from the web (60 MHz on the X6200 only), SmartCW's page guard, Pat's mailbox; a first FT8 run stopped after one MODE step left both radios' FT8 on another protocol: put back by hand (X6100 FT4, X6200 FT8, params read back) and the test now always steps back; TCI listen only and off with rigctl following, put back as found; TCI's Bluetooth service;
 web-writes: a PSK macro and a test SSH key added and taken out, each file compared with its copy after; the own-name
@@ -48,7 +113,8 @@ stops happening"; "a comprehensive set of unit tests to cover EVERYTHING 1:1 on 
 - DONE cad0140f, d5803f2e: bench.py's state layer (each radio said whole and read back, the path proved, unheard overs
   failed, finish to page A), the remote's new state, sim_test 34 cases in CI; acoustic.py (the mic on G both ways,
   PASS); the bench player ("play").
-- UNDER WAY: features.json (1386 features from the manual and the code) and suite_more.py's batches rx, control,
+- SUPERSEDED 2026-11-24 by orch.py (the owner: one orchestration framework, essential tests only; open item at the
+  top): features.json (1386 features from the manual and the code) and suite_more.py's batches rx, control,
   safety, paths: one test per feature on each radio and 1:1, coverage.md with each run (what is not covered yet).
 - SETTLED 2026-11-23 (a limit, documented in the manual's wide zooms): the X6200's remote spectrum cannot resolve a
   tone inside the passband (one clean 1000 Hz TCI tone filled 0-2500 Hz alike at zoom 1 or 8; the X6100's peaks).
