@@ -116,7 +116,7 @@ class Status:
         self.t0 = time.time()
         self.phase = "starting"
         self.tests = [{"name": t.name, "role": t.role, "what": t.what, "est_s": t.est_s, "result": None,
-                       "says": "", "secs": None, "steps": []} for t in tests]
+                       "says": "", "secs": None, "steps": [], "shots": []} for t in tests]
         # the tests not run this time: their last result as kept (STORE), shown under this run's
         self.kept = list(kept)
         self.cur = None             # index into tests
@@ -145,12 +145,13 @@ class Status:
             left = sum(t["est_s"] for t in self.tests if t["result"] is None)
             counts = collections.Counter(t["result"] for t in done)
             return json.dumps({
-                "now": time.time(), "t0": self.t0, "phase": self.phase, "cur": self.cur, "tests": self.tests,
+                "now": time.time(), "t0": self.t0, "phase": self.phase, "cur": self.cur,
+                "tests": [dict(x, shots=[{"label": sh["label"], "paths": {n: os.path.basename(p) for n, p in
+                                                                         (sh.get("paths") or {}).items() if p}}
+                                         for sh in x.get("shots", [])]) for x in self.tests],
                 "events": list(self.events)[-400:], "radios": self.radios, "sync": self.sync, "kept": self.kept,
                 "caps_diff": [dict(v, key=k) for k, v in caps_load().items() if not v.get("same", True)],
-                "shots": [{"t": x["t"], "label": x["label"],
-                           "paths": {n: os.path.basename(p) for n, p in (x.get("paths") or {}).items() if p}}
-                          for x in self.shots[-6:]], "hackrf": self.hackrf,
+                "hackrf": self.hackrf,
                 "counts": {"pass": counts["PASS"], "fail": counts["FAIL"], "look": counts["LOOK"],
                            "notrun": counts["NOT RUN"], "done": len(done), "total": len(self.tests)},
                 "eta_s": left, "run_dir": self.run_dir}, default=str)
@@ -168,7 +169,7 @@ main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;pad
 @media(max-width:900px){main{grid-template-columns:minmax(0,1fr)}}
 section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px;min-width:0}
 h2{font-size:13px;margin:0 0 8px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
-.radios{display:grid;grid-template-columns:1fr 1fr;gap:10px}.radio{border:1px solid var(--line);border-radius:6px;padding:8px}
+.radios{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}@media(max-width:560px){.radios{grid-template-columns:minmax(0,1fr)}}.radio{border:1px solid var(--line);border-radius:6px;padding:8px}
 .freq{font-size:22px;color:var(--amb)}.tx{color:var(--bad);font-weight:bold}.rx{color:var(--ok)}
 .sync{font-size:18px;font-weight:bold;padding:6px 10px;border-radius:4px;display:inline-block}
 .sync.ok{background:#173a22;color:var(--ok)}.sync.bad{background:#4a1515;color:var(--bad)}.sync.chg{background:#3a3115;color:var(--look)}
@@ -181,9 +182,8 @@ th{color:var(--dim);font-weight:normal}.PASS{color:var(--ok)}.FAIL{color:var(--b
 </style></head><body>
 <header><h1>Two-radio bench</h1><span id="phase"></span><span id="counts" class="muted"></span><span id="clock" class="muted"></span></header>
 <main>
-<section><h2>Radios</h2><div id="sync"></div><div class="radios" id="radios" style="margin-top:8px"></div></section>
-<section><h2>Pictures (both screens, on every over and every anomaly)</h2><div id="shots" class="says">none yet</div></section>
-<section><h2>Now</h2><div id="now"></div><div class="bar"><div id="prog" style="width:0"></div></div></section>
+<section class="wide"><h2>Radios</h2><div id="sync"></div><div class="radios" id="radios" style="margin-top:8px"></div></section>
+<section class="wide"><h2>Now</h2><div id="now"></div><div class="bar"><div id="prog" style="width:0"></div></div></section>
 <section class="wide"><h2>Tests</h2><table><thead><tr><th>#</th><th>test</th><th>role</th><th>result</th><th>secs</th><th>what it found</th></tr></thead><tbody id="tests"></tbody></table></section>
 <section class="wide"><h2>Where the two radios differ (the caps test: the same value sent to both, what each did)</h2><table><thead><tr><th>asked</th><th>X6100</th><th>X6200</th></tr></thead><tbody id="caps"></tbody></table></section>
 <section class="wide"><h2>Not run this time: their last result (kept across runs; <i>orch.py run --all</i> runs them again)</h2><table><thead><tr><th>test</th><th>result</th><th>when</th><th>GUI</th><th>what it found</th></tr></thead><tbody id="kept"></tbody></table></section>
@@ -201,22 +201,26 @@ const el=Math.round(d.now-d.t0);$("clock").textContent=`running ${Math.floor(el/
 const s=d.sync;let cls=s.changing?"chg":(s.ok?"ok":"bad");
 $("sync").innerHTML=`<span class="sync ${cls}">${s.changing?"CHANGING BOTH":(s.ok?"IN SYNC":"OUT OF SYNC")}</span> <span class="muted">violations this run: ${s.violations}${s.last?" (last: "+esc(s.last)+")":""}</span>`;
 const hk=d.hackrf||{};
-$("shots").innerHTML=(d.shots||[]).slice().reverse().map(x=>`<div style="margin-bottom:8px"><div>${t(x.t)} ${esc(x.label)}</div>`+Object.entries(x.paths).map(([n,p])=>`<a href="shot/${encodeURIComponent(p)}" target="_blank"><img src="shot/${encodeURIComponent(p)}" style="width:48%;margin-right:2%;border:1px solid #333" title="${esc(n)}"></a>`).join("")+"</div>").join("")||"none yet";
-$("radios").innerHTML=`<div class="radio" style="grid-column:1/-1"><b>HACKRF</b> <span class="${hk.running?"tx":"rx"}">${hk.running?"TRANSMITTING":"idle"}</span> <span class="muted">&middot; ${hk.in_test?"part of this test":"not part of this test"} &middot; ${esc(hk.what||"")}</span></div>`+Object.entries(d.radios).map(([n,r])=>`<div class="radio"><b>${n.toUpperCase()}</b> <span class="${r.tx?"tx":"rx"}">${r.tx?"ON THE AIR":"RX"}</span>
+$("radios").innerHTML=Object.entries(d.radios).map(([n,r])=>`<div class="radio"><b>${n.toUpperCase()}</b> <span class="${r.tx?"tx":"rx"}">${r.tx?"ON THE AIR":"RX"}</span>
 <div class="freq">${mhz(r.freq)}</div><div>${MODES[r.mode]||r.mode} &middot; ${r.pwr} W &middot; page ${esc(r.pg)} ${r.rxo===0?"&middot; <span class=tx>TX ARMED</span>":""}</div>
 <div class="muted">S ${r.meter==null?"?":r.meter.toFixed(1)+" dBm"} &middot; squelch ${esc(r.sql)} &middot; volume ${esc(r.vol)} &middot; app ${esc(r.app||"-")}</div>
 <div><b>should be: ${esc(r.role||"-")}</b> ${r.role==="TX"&&!r.tx?"<span class=muted>(between its sends)</span>":""}${r.role==="RX"&&r.tx?" <span class=tx>BUT TRANSMITS</span>":""}</div>
-<div class="${r.link==="live"?"rx":(String(r.link).startsWith("GUI RESTARTING")?"LOOK":"tx")}"><b>${esc(r.link==="live"?"GUI live":r.link)}</b>${r.link==="live"?"":" &middot; "+r.age.toFixed(0)+" s"}</div></div>`).join("");
+<div class="${r.link==="live"?"rx":(String(r.link).startsWith("GUI RESTARTING")?"LOOK":"tx")}"><b>${esc(r.link==="live"?"GUI live":r.link)}</b>${r.link==="live"?"":" &middot; "+r.age.toFixed(0)+" s"}</div></div>`).join("")+`<div class="radio"><b>HACKRF</b> <span class="${hk.running?"tx":"rx"}">${hk.running?"TRANSMITTING":"idle"}</span>
+<div class="freq" style="${hk.running?"":"color:var(--dim)"}">${hk.running?"ON THE AIR":"idle"}</div><div>${hk.in_test?"<b>part of this test</b>":"not part of this test"}</div>
+<div class="muted">${esc(hk.what||"")}</div></div>`;
 const cur=d.cur!=null?d.tests[d.cur]:null;
 $("now").innerHTML=cur?`<div><b>${esc(cur.name)}</b> <span class="muted">(${esc(cur.role)})</span></div><div class="says">${esc(cur.what)}</div>`+
  cur.steps.map(st=>`<div class="${st.state==="confirmed"?"PASS":st.state==="failed"?"FAIL":"LOOK"}">${st.state==="running"?"&#9654;":st.state==="confirmed"?"&#10003;":"&#10007;"} ${esc(st.text)} <span class="muted">${st.secs!=null?st.secs.toFixed(1)+" s":""} ${esc(st.detail||"")}</span></div>`).join(""):"<span class=muted>no test running</span>";
 $("prog").style.width=(100*c.done/Math.max(1,c.total))+"%";
-$("tests").innerHTML=d.tests.map((x,i)=>`<tr class="${i===d.cur?"cur":""}"><td>${i+1}</td><td>${esc(x.name)}</td><td>${esc(x.role)}</td><td class="${(x.result||"").replace(" ","")}">${esc(x.result||(i===d.cur?"running":""))}</td><td>${x.secs!=null?x.secs.toFixed(0):""}</td><td class="says">${esc(x.says)}</td></tr>`).join("");
+const pics=x=>x.shots.map(sh=>`<div class="says">${esc(sh.label)}</div>`+Object.entries(sh.paths).map(([n,p])=>`<a href="shot/${encodeURIComponent(p)}" target="_blank"><img src="shot/${encodeURIComponent(p)}" title="${esc(n)}" style="width:48%;margin:2px 1%;border:1px solid #333"></a>`).join("")).join("");
+$("tests").innerHTML=d.tests.map((x,i)=>{const failed=x.result&&x.result!=="PASS";const n=failed?x.shots.length:0;
+return `<tr class="${i===d.cur?"cur":""}"><td>${i+1}</td><td>${esc(x.name)}</td><td>${esc(x.role)}</td><td class="${(x.result||"").replace(" ","")}">${esc(x.result||(i===d.cur?"running":""))}${n?` <button onclick="tog(${i})" style="font:inherit;font-size:11px">pictures (${n})</button>`:""}</td><td>${x.secs!=null?x.secs.toFixed(0):""}</td><td class="says">${esc(x.says)}</td></tr>`+(n&&openPics.has(i)?`<tr><td></td><td colspan="5">${pics(x)}</td></tr>`:"");}).join("");
 const cs=r=>r?(r.ok?"takes it":"refuses")+(r.reads!=null?" (reads "+esc(JSON.stringify(r.reads))+")":"")+(r.err?" "+esc(r.err):""):"";
 $("caps").innerHTML=(d.caps_diff||[]).map(c=>`<tr><td>${esc(c.key)}</td><td class="says">${cs(c.radios.x6100)}</td><td class="says">${cs(c.radios.x6200)}</td></tr>`).join("")||"<tr><td class=muted colspan=3>not probed yet, or no difference</td></tr>";
 $("kept").innerHTML=(d.kept||[]).map(k=>`<tr><td>${esc(k.name)}</td><td class="${(k.result||"").replace(" ","")}">${esc(k.result)}${k.known?" (known)":""}${k.runs?" &middot; "+k.passes+"/"+k.runs+" passed":""}</td><td>${k.at?new Date(k.at*1000).toLocaleString():""}</td><td class="says">${esc(k.gui||"")}</td><td class="says">${esc(k.known||k.says)}</td></tr>`).join("");
 const show={cmd:$("fcmd").checked,conf:$("fconf").checked,radio:$("fradio").checked};
 $("ev").innerHTML=d.events.slice().reverse().filter(e=>show[e.kind]!==false).map(e=>`<div class="${e.kind}">${t(e.t)} ${e.test?"["+esc(e.test)+"] ":""}${esc(e.text)}</div>`).join("");}
+const openPics=new Set();function tog(i){openPics.has(i)?openPics.delete(i):openPics.add(i);tick();}
 tick();setInterval(tick,700);
 </script></body></html>"""
 
@@ -307,8 +311,9 @@ class Orch:
             except Exception as e:          # a picture never stops a test
                 paths = {}
                 self.st.ev(f"pictures not taken: {e}", "radio")
-            with self.st.lock:
-                self.st.shots.append({"t": time.time(), "label": label, "paths": paths})
+            with self.st.lock:                  # the test running now keeps them (shown if it fails)
+                if self.st.cur is not None:
+                    self.st.tests[self.st.cur]["shots"].append({"t": time.time(), "label": label, "paths": paths})
             self.st.ev(f"pictures: {label}: {', '.join(os.path.basename(p) for p in paths.values() if p)}", "conf")
         threading.Thread(target=go, daemon=True).start()
 
@@ -896,9 +901,10 @@ def over(o, sender, listener, f, mode, label, body, w=W, agc=0, pages=True):
         o.roles = {A: "RX", B: "RX"}
     for sh in watch.shots:
         with o.st.lock:
-            o.st.shots.append({"t": time.time(), "label": f"{label}: {sender} on the air"
-                               + ("" if sh.get("on_air") else " (NOT on the air in the picture)"),
-                               "paths": sh.get("paths") or {}})
+            if o.st.cur is not None:
+                o.st.tests[o.st.cur]["shots"].append({"t": time.time(), "label": f"{label}: {sender} on the air"
+                                                      + ("" if sh.get("on_air") else " (NOT on the air in the picture)"),
+                                                      "paths": sh.get("paths") or {}})
     o.st.ev(f"over {label}: {sender}'s meter at most {watch.tx_peak.get(sender)} W, {listener}'s S-meter at most "
             f"{watch.rx_peak} dBm, heard {watch.heard_db.get(sender) if hasattr(watch, 'heard_db') else None} dB, "
             f"deaf overs {len(watch.deaf)}" + (f", stopped: {watch.why}" if watch.why else ""), "conf")
@@ -2665,6 +2671,8 @@ def run(names, port, lan, linger, everything=False, soak=1):
                 res = "PASS" if ok is True else "LOOK" if ok is None else "FAIL"
                 with st.lock:
                     st.tests[i].update(result=res, says=says, secs=time.time() - t0, data=data)
+                    if res == "PASS":
+                        st.tests[i]["shots"] = []       # pictures only for what did not pass
                 prev = store_load().get(t.name, {})
                 tally = {"runs": prev.get("runs", 0) + 1, "passes": prev.get("passes", 0) + (res == "PASS"),
                          "fails": prev.get("fails", 0) + (res == "FAIL")}
