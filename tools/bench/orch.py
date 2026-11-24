@@ -1364,6 +1364,117 @@ def t_dial_lock(o):
     return True, f"locked: the set refused on both ({said[A]!r}), the dial kept; unlocked: taken on both", {"said": said}
 
 
+def t_remote_security(o):
+    """A connection with a token no session has (each radio): it may only watch ("role view 0 -"); its set, PTT,
+    knob and control take each refused ("err view only..."), the radio's dial and TX unmoved (its own state)"""
+    from remote_ws import Remote
+    from suite_proto import texts
+    got = {}
+    with o.step("both on page G, 14.200 MHz USB"):
+        o.both_page("G")
+        o.both({"freq": 14200000, "mode": 2})
+    with o.step("a stranger's token on each radio: watch only, every command refused") as s:
+        def one(n, r):
+            c = Remote(r.host, 50002, timeout=5)
+            try:
+                c.send("auth " + "0" * 64)
+                c.send("panel 1")
+                hello = [x for x in texts(c, 1.5) if x.startswith("role ")]
+                for cmd in ("set freq 7000000", "key PTT 1", "knob main 5", "control take", "tune 1 7", "ft8 cq"):
+                    c.send(cmd)
+                ans = [x for x in texts(c, 2.5) if x.startswith("err")]
+                c.send("key PTT 0")
+            finally:
+                c.close()
+            if not hello or not hello[0].startswith("role view"):
+                raise Refused(f"its role {hello}")
+            if len(ans) < 6:
+                raise Refused(f"only {len(ans)} of 6 refused: {ans}")
+            if int(r.state.get("freq", 0)) != 14200000 or r.tx:
+                raise Refused(f"moved: {r.state.get('freq')} Hz, on the air {r.tx}")
+            return {"role": hello[0], "refused": ans}
+        got = in_parallel(o, one)
+        alike(o, ("freq", "mode"))
+        s.confirm(f"{got[A]['role']!r}; 6 of 6 refused on both")
+    return True, f"a stranger: {got[A]['role']!r} on both, set/PTT/knob/control/TUNE/FT8 each refused, nothing moved", got
+
+
+def t_rx_session_refused(o):
+    """The bench's receive-only session (may operate, may not transmit) on each radio: PTT, TUNE and FT8 CQ each
+    refused ("err this session may not transmit"), nothing keyed (the transmitting session's own state)"""
+    errs = {}
+    with o.step("both on page G, 14.200 MHz USB"):
+        o.both_page("G")
+        o.both({"freq": 14200000, "mode": 2})
+    with o.step("PTT, TUNE and FT8 CQ from the receive-only session on both: refused, nothing keyed") as s:
+        def one(n, r):
+            rx = bench.Radio(n, o.c["radios"][n], False)
+            try:
+                if rx.may_tx:
+                    raise Refused("the receive-only session may transmit")
+                r.send("control release")           # control to the receive-only session: its refusals are then
+                r.wait("control let go", lambda: not r.ctl_mine, 5)      # the transmit rule's, not control's
+                rx.take_control()
+                e0 = len(rx.errs)
+                for cmd in ("key PTT 1 7", "tune 1 7", "ft8 cq"):
+                    rx.send(cmd)
+                t0 = time.time()
+                while time.time() - t0 < 3:
+                    if r.tx:
+                        raise Refused("WENT ON THE AIR")
+                    time.sleep(0.05)
+                rx.send("key PTT 0")
+                said = list(rx.errs[e0:])
+            finally:
+                rx.send("control release")
+                rx.close()
+                r.take_control()
+            if len([x for x in said if "may not transmit" in x]) < 3:
+                raise Refused(f"refusals: {said}")
+            return said
+        errs = in_parallel(o, one)
+        s.confirm(str(errs))
+    return True, f"PTT, TUNE and FT8 CQ refused to the receive-only session on both ({errs[A][:2]}), nothing keyed", errs
+
+
+APPS_SAME = ["JS8", "Olivia", "SSTV", "WeFax", "NavTex", "PSK"]
+
+
+def t_apps_alike(o):
+    """Each of APPS_SAME opened on both radios at once (the remote's apps list): each must say the app is open, and
+    the two must sit on the same dial and mode; closed on both after, both set alike again"""
+    import suite_more
+    res, bad = {}, []
+    for name in APPS_SAME:
+        with o.step(f"{name} open on both at once") as s:
+            o.changing += 1
+            try:
+                def one(n, r, name=name):
+                    if not suite_more.open_app(r, name.lower()):
+                        raise Refused(f"{name} did not open")
+                    time.sleep(1.5)
+                    return (int(r.state.get("freq", 0)), int(r.state.get("mode", -1)))
+                try:
+                    dial = in_parallel(o, one)
+                    res[name] = dial
+                    if dial[A] != dial[B]:
+                        bad.append(f"{name}: x6100 {dial[A]}, x6200 {dial[B]}")
+                        s.confirm(f"APART: {dial}")
+                    else:
+                        s.confirm(f"both {dial[A][0] / 1e6:.4f} MHz mode {dial[A][1]}")
+                finally:
+                    for r in o.r.values():
+                        bench.close_apps(r)
+                    o.both_page("G")
+                    o.both({"freq": 14200000, "mode": 2})
+            finally:
+                o.changing -= 1
+    if bad:
+        return False, "apps that opened on different dials on the two radios: " + "; ".join(bad), res
+    return True, f"{len(APPS_SAME)} apps each opened on the same dial on both: " + ", ".join(
+        f"{k} {v[A][0] / 1e6:.4f}" for k, v in res.items()), res
+
+
 # ---- The tests ----
 
 class Test:
@@ -1435,6 +1546,12 @@ TESTS = [
          t_rigctl, 15),
     Test("dial-lock", "both RX", "the dial lock on both: a set refused with the dial kept; off, the set taken",
          t_dial_lock, 15),
+    Test("remote-security", "both", "a stranger's token: watch only, its set/PTT/knob/control/TUNE/FT8 each refused",
+         t_remote_security, 15),
+    Test("rx-session-refused", "both", "the receive-only session's PTT, TUNE and FT8 CQ refused, nothing keyed",
+         t_rx_session_refused, 15),
+    Test("apps-alike", "both RX", "JS8, Olivia, SSTV, WeFax, NavTex, PSK each opened on both at once: the same dial",
+         t_apps_alike, 60),
     Test("rx-settings", "both RX", "PRE, ATT, AGC, NB, NR, squelch, RF gain: each set on both, read back alike",
          t_rx_settings, 40),
     Test("ptt-lease x6100", "X6100 TX, X6200 RX", "one PTT never renewed: off the air by itself within 4 s",
