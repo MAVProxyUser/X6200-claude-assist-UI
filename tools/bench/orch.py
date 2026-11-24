@@ -82,6 +82,19 @@ KNOWN = {
 }
 
 
+CAPS = os.path.join(bench.STATE, "orch_caps.json")     # what each radio takes, from the caps test
+
+
+def caps_load():
+    return bench.load_json(CAPS, {})
+
+
+def common(key, value):
+    """True unless the caps map says one of the radios does not take value for key (an unprobed one: True)"""
+    c = caps_load().get(f"{key} {value}")
+    return c is None or c.get("same", True) or all(x.get("ok") for x in c.get("radios", {}).values())
+
+
 def store_load():
     return bench.load_json(STORE, {})
 
@@ -129,6 +142,7 @@ class Status:
             return json.dumps({
                 "now": time.time(), "t0": self.t0, "phase": self.phase, "cur": self.cur, "tests": self.tests,
                 "events": list(self.events)[-400:], "radios": self.radios, "sync": self.sync, "kept": self.kept,
+                "caps_diff": [dict(v, key=k) for k, v in caps_load().items() if not v.get("same", True)],
                 "counts": {"pass": counts["PASS"], "fail": counts["FAIL"], "look": counts["LOOK"],
                            "notrun": counts["NOT RUN"], "done": len(done), "total": len(self.tests)},
                 "eta_s": left, "run_dir": self.run_dir}, default=str)
@@ -162,6 +176,7 @@ th{color:var(--dim);font-weight:normal}.PASS{color:var(--ok)}.FAIL{color:var(--b
 <section><h2>Radios</h2><div id="sync"></div><div class="radios" id="radios" style="margin-top:8px"></div></section>
 <section><h2>Now</h2><div id="now"></div><div class="bar"><div id="prog" style="width:0"></div></div></section>
 <section class="wide"><h2>Tests</h2><table><thead><tr><th>#</th><th>test</th><th>role</th><th>result</th><th>secs</th><th>what it found</th></tr></thead><tbody id="tests"></tbody></table></section>
+<section class="wide"><h2>Where the two radios differ (the caps test: the same value sent to both, what each did)</h2><table><thead><tr><th>asked</th><th>X6100</th><th>X6200</th></tr></thead><tbody id="caps"></tbody></table></section>
 <section class="wide"><h2>Not run this time: their last result (kept across runs; <i>orch.py run --all</i> runs them again)</h2><table><thead><tr><th>test</th><th>result</th><th>when</th><th>GUI</th><th>what it found</th></tr></thead><tbody id="kept"></tbody></table></section>
 <section class="wide"><h2>Events (everything the orchestrator does; <a href="log" style="color:var(--amb)">the whole log</a>)</h2>
 <div><label><input type="checkbox" id="fcmd" checked> commands sent</label><label><input type="checkbox" id="fconf" checked> read-backs</label><label><input type="checkbox" id="fradio" checked> the radios' errors</label></div><div class="ev" id="ev"></div></section>
@@ -185,6 +200,8 @@ $("now").innerHTML=cur?`<div><b>${esc(cur.name)}</b> <span class="muted">(${esc(
  cur.steps.map(st=>`<div class="${st.state==="confirmed"?"PASS":st.state==="failed"?"FAIL":"LOOK"}">${st.state==="running"?"&#9654;":st.state==="confirmed"?"&#10003;":"&#10007;"} ${esc(st.text)} <span class="muted">${st.secs!=null?st.secs.toFixed(1)+" s":""} ${esc(st.detail||"")}</span></div>`).join(""):"<span class=muted>no test running</span>";
 $("prog").style.width=(100*c.done/Math.max(1,c.total))+"%";
 $("tests").innerHTML=d.tests.map((x,i)=>`<tr class="${i===d.cur?"cur":""}"><td>${i+1}</td><td>${esc(x.name)}</td><td>${esc(x.role)}</td><td class="${(x.result||"").replace(" ","")}">${esc(x.result||(i===d.cur?"running":""))}</td><td>${x.secs!=null?x.secs.toFixed(0):""}</td><td class="says">${esc(x.says)}</td></tr>`).join("");
+const cs=r=>r?(r.ok?"takes it":"refuses")+(r.reads!=null?" (reads "+esc(JSON.stringify(r.reads))+")":"")+(r.err?" "+esc(r.err):""):"";
+$("caps").innerHTML=(d.caps_diff||[]).map(c=>`<tr><td>${esc(c.key)}</td><td class="says">${cs(c.radios.x6100)}</td><td class="says">${cs(c.radios.x6200)}</td></tr>`).join("")||"<tr><td class=muted colspan=3>not probed yet, or no difference</td></tr>";
 $("kept").innerHTML=(d.kept||[]).map(k=>`<tr><td>${esc(k.name)}</td><td class="${(k.result||"").replace(" ","")}">${esc(k.result)}${k.known?" (known)":""}</td><td>${k.at?new Date(k.at*1000).toLocaleString():""}</td><td class="says">${esc(k.gui||"")}</td><td class="says">${esc(k.known||k.says)}</td></tr>`).join("");
 const show={cmd:$("fcmd").checked,conf:$("fconf").checked,radio:$("fradio").checked};
 $("ev").innerHTML=d.events.slice().reverse().filter(e=>show[e.kind]!==false).map(e=>`<div class="${e.kind}">${t(e.t)} ${e.test?"["+esc(e.test)+"] ":""}${esc(e.text)}</div>`).join("");}
@@ -365,6 +382,9 @@ class Orch:
     def both(self, want, checks=None, what=None):
         """want set on both radios at once, each confirmed by its own state (bench.ensure), then the two compared:
         any key of want that reads differently on the two is refused"""
+        only_one = [f"{k} {v}" for k, v in want.items() if k in ("freq", "mode", "ifs") and not common(k, v)]
+        if only_one:                        # the caps map: a value only one radio takes would part them
+            raise Refused(f"not on both radios (the caps map): {', '.join(only_one)}")
         self.changing += 1
         errs = {}
         self.st.ev(f"set on both: {want}", "conf")
@@ -1714,6 +1734,290 @@ def t_tci_takes_control(o):
     return True, f"a TCI set took control on both ({got}); the client gone, control taken back", got
 
 
+JS8_TEXT = "HELLO BENCH 73"
+
+
+def js8_text(o, a, b, label):
+    """The JS8 app open on both on its dial (test calls, PSK Reporter off), a's text to b (directed, not a MSG: nothing
+    stored): b's list must show it from a's call with exactly JS8_TEXT in it"""
+    import suite_air_b as ab
+    A_, B_ = o.r[a], o.r[b]
+    res = {}
+    p, total = bench.chain_gate(o.c, "radios")
+    try:
+        with o.step("both on their test calls, the JS8 app open on both on its dial"):
+            test_calls(o)
+            o.changing += 1
+            try:
+                for r in (A_, B_):
+                    r.send("js8 open")
+                for r in (A_, B_):
+                    r.wait("the JS8 app", lambda r=r: ab.last_json(r, "js8").get("open") == 1 or
+                           r.state.get("app") == "JS8", 10)
+                time.sleep(1.5)
+                for r in (A_, B_):              # one after the other, each to the end: a thread left stepping a
+                    ab.js8_to(r, ab.F_JS8)      # band key after its join moved the X6200 off mid-over (2026-11-23)
+            finally:
+                o.changing -= 1
+            o.both({"freq": ab.F_JS8, "pwr": W})
+            alike(o, ("freq", "mode"))
+            time.sleep(2.0)
+            alike(o, ("freq", "mode"))          # and still, nothing left stepping
+        bench.radio_tx_gate(A_, o.c, W)
+        bench.listener_gate(B_)
+        o.roles = {a: "TX", b: "RX"}
+        watch = bench.Watch([A_, B_], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=B_, w=W, label=label)
+        try:
+            with o.step(f"{a} sends '{TEST_CALLS[b]} {JS8_TEXT}', every frame of it (JS8 sends a text in slots)") as s:
+                t = time.time()
+                bench.tx_log({"who": a, "f": ab.F_JS8, "w": A_.pwr(), "what": f"orch: {label}"})
+                A_.send(f"js8 send {TEST_CALLS[b]} {JS8_TEXT}")
+                A_.wait("its transmission", lambda: A_.tx or watch.why, 60)
+                # the frames come a slot each: done once b has the whole text, or nothing more is sent for a slot
+                end, last_tx = time.time() + 75, time.time()
+                while time.time() < end and not watch.why:
+                    if A_.tx:
+                        last_tx = time.time()
+                    if any(JS8_TEXT in (m.get("x") or "").upper() for m in ab.js8_msgs(B_, t, fr=TEST_CALLS[a])):
+                        break
+                    if not A_.tx and time.time() - last_tx > 20:
+                        break
+                    time.sleep(0.2)
+                A_.wait("off the air", lambda: not A_.tx or watch.why, bench.MAX_KEY_S + 2)
+                if watch.why:
+                    raise Refused(watch.why)
+                s.confirm(f"on the air {time.time() - t:.0f} s from the send")
+        finally:
+            watch.close()
+            A_.send("js8 stop")
+            o.roles = {A: "RX", B: "RX"}
+        with o.step(f"{b}'s list shows it from {TEST_CALLS[a]}, the text exact") as s:
+            try:
+                B_.wait("the message", lambda: any(JS8_TEXT in (m.get("x") or "").upper()
+                                                   for m in ab.js8_msgs(B_, t, fr=TEST_CALLS[a])), 20)
+            except Refused:
+                got = [m.get("x") for m in ab.js8_msgs(B_, t)]
+                raise Refused(f"{b}'s list: {got[:4] or 'nothing'}")
+            m = next(m for m in ab.js8_msgs(B_, t, fr=TEST_CALLS[a]) if JS8_TEXT in (m.get("x") or "").upper())
+            res["decoded"] = m.get("x")
+            s.confirm(repr(m.get("x")))
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        for r in (A_, B_):
+            r.send("js8 stop")
+            r.send("js8 close")
+    return True, f"{a}'s '{TEST_CALLS[b]} {JS8_TEXT}' in {b}'s list as {res['decoded']!r}", res
+
+
+def t_system_health(o):
+    """Each radio: its battery log written in the last 150 s, its clock within 1.5 s of this computer's, its data
+    partition mounted read-write"""
+    out = {}
+    with o.step("each radio's battery log, clock and data partition") as s:
+        def one(n, r):
+            t0 = time.time()
+            got = bench.ssh(r.host, "python3 -c 'import time; print(time.time())'; tail -1 /mnt/battery_log.csv; "
+                                    "grep ' /mnt ' /proc/mounts")
+            t1 = time.time()
+            lines = got.strip().split("\n")
+            clk = float(lines[0]) - (t0 + t1) / 2
+            row_age = time.time() - int(lines[1].split(",")[0])
+            rw = " rw," in lines[2] or " rw " in lines[2]
+            bad = []
+            if abs(clk) > 1.5:
+                bad.append(f"clock {clk:+.2f} s")
+            if row_age > 150:
+                bad.append(f"battery log {row_age:.0f} s old")
+            if not rw:
+                bad.append(f"/mnt not read-write ({lines[2][:60]})")
+            if bad:
+                raise Refused(", ".join(bad))
+            return {"clock_s": round(clk, 2), "battery_row_s": round(row_age), "mnt_rw": rw}
+        out = in_parallel(o, one)
+        s.confirm(str(out))
+    return True, f"battery logs fresh, clocks within 1.5 s, /mnt read-write on both: {out}", out
+
+
+def t_js8_close_to_g(o, rounds=5):
+    """The X6200's GUI died (SIGSEGV, exit 139, 2026-11-23 20:36) as the JS8 app closed back to the Sentry's G, which
+    tuned its own channel (CB 20, 27.205 AM) from 14.078 USB-D. The same on both, rounds times: G's channel CB 20,
+    JS8 open on both, closed on both; each GUI must stay up (its state never stale) through every round"""
+    import suite_air_b as ab
+    deaths = []
+    for k in range(rounds):
+        with o.step(f"round {k + 1}: G's channel CB 20 AM, JS8 opened and closed on both, both GUIs up") as s:
+            o.changing += 1
+            try:
+                o.both_page("G")
+                o.both({"wch": (27205000, 6)})
+                for r in o.r.values():
+                    r.send("js8 open")
+                for r in o.r.values():
+                    r.wait("the JS8 app", lambda r=r: ab.last_json(r, "js8").get("open") == 1 or
+                           r.state.get("app") == "JS8", 10)
+                time.sleep(3.0)
+                for r in o.r.values():
+                    r.send("js8 close")
+                t0 = time.time()
+                while time.time() - t0 < 6:
+                    for n, r in o.r.items():
+                        if r.stale(3.0) and n not in deaths:
+                            deaths.append(f"{n} in round {k + 1}")
+                    time.sleep(0.2)
+            finally:
+                o.changing -= 1
+            if deaths:
+                for n in o.r:
+                    if o.r[n].stale(3.0):           # back, for the rounds and tests after
+                        t1 = time.time()
+                        while time.time() - t1 < 60:
+                            try:
+                                o.r[n].reconnect()
+                                break
+                            except (Refused, OSError):
+                                time.sleep(3)
+                raise Refused(f"a GUI died: {deaths}")
+            s.confirm("both GUIs up")
+    o.both_page("G")
+    o.both({"freq": 14200000, "mode": 2})
+    return True, f"{rounds} rounds of JS8 closed back to G on CB 20 AM: both GUIs up throughout", {}
+
+
+CAP_FREQS = [100000, 500000, 1000000, 1800000, 3500000, 5330500, 7000000, 10100000, 14000000, 18068000, 21000000,
+             24890000, 27185000, 28000000, 29700000, 30000000, 49900000, 50000000, 54000000, 60000000, 70000000,
+             88000000, 99900000, 108000000, 118000000, 144000000, 146000000, 430000000]
+
+
+def t_caps(o):
+    """Every option probed on both radios at once: the same value sent to both, what each takes and reads back
+    (frequencies 0.1-430 MHz, each mode, each mode's widest filter, IF shift, zoom, steps, AGC, NB, NR); both put
+    alike again after each probe. The map (orch_caps.json, the console) is what the tests choose their values from"""
+    caps = {}
+
+    def probe(label, cmd, read, ok_if, then=None):
+        def one(n, r):
+            e0 = len(r.errs)
+            r.send(cmd)
+            t0 = time.time()
+            while time.time() - t0 < 2.5:
+                if len(r.errs) > e0 or ok_if(r):
+                    break
+                time.sleep(0.05)
+            time.sleep(0.2)
+            return {"ok": ok_if(r) and len(r.errs) == e0, "reads": read(r),
+                    "err": r.errs[-1] if len(r.errs) > e0 else None}
+        got = in_parallel(o, one)
+        same = got[A]["ok"] == got[B]["ok"] and got[A]["reads"] == got[B]["reads"]
+        caps[label] = {"radios": got, "same": same}
+        if not same:
+            o.st.ev(f"differ: {label}: x6100 {got[A]}, x6200 {got[B]}", "radio")
+        if then:
+            then()
+
+    def base():
+        o.changing += 1
+        try:
+            o.both({"freq": 14200000, "mode": 2})
+        finally:
+            o.changing -= 1
+    with o.step("both on page G, 14.200 MHz USB"):
+        o.both_page("G")
+        base()
+    found = {n: {"step": r.state.get("step"), "zoom": r.state.get("zoom")} for n, r in o.r.items()}
+    o.changing += 1
+    try:
+        with o.step("each mode's own tuning step on each radio, as it holds it (a knob turn moves the dial by it)") as s:
+            steps = {}
+            for m in range(8):
+                o.both({"mode": m})
+                steps[m] = {n: r.state.get("step") for n, r in o.r.items()}
+                same = steps[m][A] == steps[m][B]
+                caps[f"step held in mode {m}"] = {"radios": {n: {"ok": True, "reads": v} for n, v in steps[m].items()},
+                                                  "same": same}
+                if not same:
+                    o.st.ev(f"differ: mode {m}'s step: {steps[m]}", "radio")
+            base()
+            s.confirm(str(steps))
+        with o.step("one detent of the main knob on both at 14.200 USB: the same move") as s:
+            def detent(n, r):
+                f0 = int(r.state.get("freq", 0))
+                r.send("knob main 1")
+                r.wait("the dial moved", lambda: int(r.state.get("freq", 0)) != f0, 3)
+                return int(r.state.get("freq", 0)) - f0
+            moved = in_parallel(o, detent)
+            caps["knob main 1 at 14.200 USB"] = {"radios": {n: {"ok": True, "reads": v} for n, v in moved.items()},
+                                                 "same": moved[A] == moved[B]}
+            base()
+            s.confirm(f"moved {moved} Hz")
+        with o.step("each radio's band table (its web page's /api/bands): names, edges, kinds") as s:
+            from suite_proto import http
+            tables = {}
+            for n, r in o.r.items():
+                st_, body = http(r.host, "/api/bands")
+                tables[n] = {b["name"]: (b["start_freq"], b["stop_freq"], b.get("type"))
+                             for b in (json.loads(body) if st_ == 200 else [])}
+            for name in sorted(set(tables[A]) | set(tables[B])):
+                a_, b_ = tables[A].get(name), tables[B].get(name)
+                caps[f"band {name}"] = {"radios": {A: {"ok": a_ is not None, "reads": a_},
+                                                   B: {"ok": b_ is not None, "reads": b_}}, "same": a_ == b_}
+            s.confirm(f"{len(tables[A])}/{len(tables[B])} bands, "
+                      f"{sum(not v['same'] for k, v in caps.items() if k.startswith('band '))} differ")
+        with o.step(f"{len(CAP_FREQS)} frequencies, 0.1 to 430 MHz") as s:
+            for f in CAP_FREQS:
+                probe(f"freq {f}", f"set freq {f}", lambda r: r.state.get("freq"),
+                      lambda r, f=f: int(r.state.get("freq", 0)) == f, base)
+            s.confirm(f"{sum(not caps[f'freq {f}']['same'] for f in CAP_FREQS)} differ")
+        with o.step("each mode 0-8 at 14.200 MHz (8 at 99.9 MHz too)") as s:
+            for m in range(9):
+                probe(f"mode {m}", f"set mode {m}", lambda r: r.state.get("mode"),
+                      lambda r, m=m: int(r.state.get("mode", -1)) == m, base)
+            probe("mode 8 at 99.9 MHz", "set freq 99900000", lambda r: (r.state.get("freq"), r.state.get("mode")),
+                  lambda r: int(r.state.get("freq", 0)) == 99900000)
+            for r in o.r.values():
+                r.send("set mode 8")
+            time.sleep(1.0)
+            caps["mode 8 at 99.9 MHz"]["radios"] = {n: {"ok": int(r.state.get("freq", 0)) == 99900000 and
+                                                        int(r.state.get("mode", -1)) == 8,
+                                                        "reads": (r.state.get("freq"), r.state.get("mode"))}
+                                                    for n, r in o.r.items()}
+            v = caps["mode 8 at 99.9 MHz"]["radios"]
+            caps["mode 8 at 99.9 MHz"]["same"] = v[A] == v[B]
+            base()
+            s.confirm(f"{sum(not v['same'] for k, v in caps.items() if k.startswith('mode'))} differ")
+        with o.step("each mode's widest filter (0-6000 Hz asked)") as s:
+            for m, f in ((0, 7200000), (2, 14200000), (4, 14040000), (6, 29000000), (7, 29600000)):
+                o.both({"freq": f, "mode": m})
+                probe(f"filter 0-6000 in mode {m}", "set filter 0 6000", lambda r: (r.state.get("flo"), r.state.get("fhi")),
+                      lambda r: True)
+            base()
+            s.confirm(f"{sum(not v['same'] for k, v in caps.items() if k.startswith('filter'))} differ")
+        with o.step("IF shift, zoom, steps, AGC, NB, NR at 14.200 USB") as s:
+            for v in (500, 0):
+                probe(f"ifs {v}", f"set ifs {v}", lambda r: r.state.get("ifs"), lambda r, v=v: int(r.state.get("ifs") or 0) == v)
+            for z in (1, 2, 4, 8, 16, 32):
+                probe(f"zoom {z}", f"set zoom {z}", lambda r: r.state.get("zoom"), lambda r, z=z: int(r.state.get("zoom", 0)) == z)
+            for st_ in (10, 100, 500, 1000, 5000, 9000, 10000):
+                probe(f"step {st_}", f"set step {st_}", lambda r: r.state.get("step"),
+                      lambda r, st_=st_: int(r.state.get("step", 0)) == st_)
+            for k, vals in (("agc", (0, 1, 2, 3)), ("nb", (1, 0)), ("nr", (1, 0))):
+                for v in vals:
+                    probe(f"{k} {v}", f"set {k} {v}", lambda r, k=k: r.state.get(k), lambda r, k=k, v=v: int(r.state.get(k, -1)) == v)
+            s.confirm(f"{sum(not v['same'] for v in caps.values())} differ in all")
+    finally:
+        o.changing -= 1
+        base()
+        with o.step("each radio's USB step and zoom put back as found"):     # settings, not the dial: back
+            for n, r in o.r.items():
+                for k in ("step", "zoom"):
+                    if found[n][k] is not None:
+                        r.send(f"set {k} {int(found[n][k])}")
+            time.sleep(1.0)
+    bench.save_json(CAPS, caps)
+    diff = [k for k, v in caps.items() if not v["same"]]
+    return True, f"{len(caps)} options probed on both, {len(diff)} differ: {', '.join(diff)[:900]}", {"diff": diff}
+
+
 # ---- The tests ----
 
 class Test:
@@ -1750,6 +2054,8 @@ TESTS = [
     Test("services", "both", "the ports and pages that must answer, and the two that must not", t_services, 15),
     Test("web-secrets", "both", "the HTTPS key, the backups and the remote's sessions refused (403) by the Files page",
          t_web_secrets, 5),
+    Test("caps", "both RX", "every option probed on both at once (frequencies, modes, filters, IF shift, zoom, steps, "
+         "AGC, NB, NR): what each takes, the differences mapped for the tests", t_caps, 120),
     Test("sync-bands", "both RX", "both radios through 10 bands/modes together, each confirmed on both", t_sync_bands, 40),
     Test("usb-steps x6100>x6200", "X6100 TX, X6200 RX", "USB 14.200: a stepped tone sequence from the X6100 heard in "
          "order in the X6200's audio", voice(A, B, 14200000, 2, "usb-steps x6100>x6200"), 30),
@@ -1802,6 +2108,12 @@ TESTS = [
     Test("band-memory", "both RX", "each band its own ATT: 20 m on, 15 m off, each back from its memory on both",
          t_band_memory, 20),
     Test("cb-channel", "both RX", "CB 19 as G's channel, then a channel up: 27.205 AM on both", t_cb_channel, 15),
+    *pair("js8-text", "", "JS8: a directed text, the other's list must show it from the sender with the text exact",
+          lambda s, l, n: (lambda o: js8_text(o, s, l, n)), 90),
+    Test("js8-close-to-g", "both RX", "JS8 closed back to G on CB 20 AM, five times on both: no GUI dies (the X6200's "
+         "SIGSEGV of 20:36)", t_js8_close_to_g, 90),
+    Test("system-health", "both", "battery log fresh, clock within 1.5 s, the data partition read-write, on both",
+         t_system_health, 10),
     Test("tci-audio-rate", "both RX", "each radio's TCI receiver audio at 97-103 % of real time", t_tci_audio_rate, 15),
     Test("tci-takes-control", "both RX", "a TCI client's set takes control (ctl tci) on both; gone, control back",
          t_tci_takes_control, 20),
