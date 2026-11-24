@@ -254,7 +254,18 @@ class Orch:
         self.r = {}
         for n in (A, B):
             self.r[n] = bench.Radio(n, self.c["radios"][n], True)
-            self.r[n].take_control()        # only when free or the bench's own (bench.Radio.take_control)
+            t0 = time.time()
+            while True:                     # only when free or the bench's own (bench.Radio.take_control): someone
+                try:                        # at the radio keeps it; the run waits for them, said on the console
+                    self.r[n].take_control()
+                    break
+                except Refused as e:
+                    if time.time() - t0 > 900:
+                        raise
+                    if int(time.time() - t0) % 60 < 5:
+                        status.ev(f"waiting for {n}'s operator to let go of control ({e})", "radio")
+                    status.phase = f"waiting: {n}'s control is at the radio"
+                    time.sleep(5)
         for n, r in self.r.items():
             self._log_sends(n, r)
             hello(r)                        # the version kept now, while its first line is still there
