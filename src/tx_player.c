@@ -64,7 +64,14 @@ static void *stall_watch(void *arg) {
     (void)arg;
     for (;;) {
         usleep(500000);
-        if (atomic_load(&playing) && now_ms() - atomic_load(&last_block_ms) > STALL_MS && radio_get_modem()) {
+        if (!atomic_load(&playing)) continue;
+        /* The last block's time read before the clock, and still the same after: with the clock read first, a block
+         * played in between made now - last fall under 0, a huge stall in unsigned arithmetic, and a transmission
+         * whose audio was flowing was cut (2026-11-24: the host test's one flake in seven, its clock moving fast) */
+        uint64_t last = atomic_load(&last_block_ms);
+        uint64_t now  = now_ms();
+
+        if (now > last && now - last > STALL_MS && atomic_load(&last_block_ms) == last && radio_get_modem()) {
             radio_set_modem(false);
             msg_schedule_text_fmt("TX stopped: no audio for %d s", STALL_MS / 1000);
         }

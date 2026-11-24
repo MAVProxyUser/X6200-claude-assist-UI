@@ -4424,6 +4424,11 @@ keyed. The radio watches for it; there is nothing to set.
     sent"). N is 3000 or more for one the radio keyed, 30000 or more for one
     the hand mic's PTT, VOX or the KEY jack keyed.
   - "SWR scan: no data from the base for N ms, stopped".
+- An app's transmission (FT8 and the other digital apps, TUNE, WSPR) whose
+  audio stops coming for 3 s while keyed is let go, said on the screen: "TX
+  stopped: no audio for 3 s". Up to v0.3.12.47 this could, rarely, also cut
+  a transmission whose audio was still flowing, when the audio's next block
+  came just as the watch read the time; now only 3 s without a block counts.
 
 ### Info tab
 

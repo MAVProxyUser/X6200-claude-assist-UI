@@ -12,12 +12,9 @@ order the owner approved that day.
 they were, each item's state brought here when it changed).
 
 Open, mine to do:
-- **The X6200's TCI power below 1 W** (orch power-steps x6200>x6100, KNOWN): its ALC reads 0, so tx_hold.c steers by
-  the radio's meter (tx_level.c power_hold), which reads in 0.1 W steps: 0.2/0.5/1.0 W read 0.3/0.4/0.9 W and the
-  X6100 heard 0.2 -> 0.5 W as +1.9 dB (+4 wanted), 4 runs in 6. At 0.1 W and 1 W it held (11-21). A GUI fault.
 - **Every test through the orchestrator** (the owner, 11-24: "all tests should ultimately use the same orchestration
-  framework", "whittle down the tests to essential testable things, not slop"): tools/bench/orch.py has 63 tests (61
-  pass, 2 KNOWN); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386 features listed,
+  framework", "whittle down the tests to essential testable things, not slop"): tools/bench/orch.py has 67 tests (all
+  pass, 2026-11-24); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386 features listed,
   ~1040 not covered on 11-23) still run outside it. Left: pick the essential ones of features.json and move them in.
 - The X6200 taking no LSB-D (mode 1): NOT REPRODUCED 2026-11-24 (the later caps runs read it on both; both took it
   from LSB on 7.074). Closed.
@@ -54,14 +51,17 @@ Open, the owner's call or hands:
   steps heard). It switched itself off sending 0.2 W at 7.1 V on its stock charger.
 - The factory X6100: 6 m puts out 0.8-1.2 W at 0.1 W (its base's floor, not the GUI); Comp; keyboard/mouse, the
   sideswiper and KEY Train with a paddle untried on it (the 6 m floor: ignored for now, the owner 2026-11-24).
-- TUNE for an external tuner (no tuner on the bench; the owner: "do that"): orch ext-tune from the FT8 app's Ext tune
-  PASSED x6100>x6200 2026-11-24 (the tone at 1492.6 Hz for 1500, off 0.87 s after the second press, the app and dial
-  kept, off by its 15 s limit after 15.3 s); x6200>x6100 waits for the X6200's battery. The remote's TUNE passes
-  both ways (tune-carrier).
 - Later (the owner, 2026-11-24): the image shift, the 5 A supply, the rake, the Kraken. From before: the USB-3000's
   voice on B with a powered hub and an SDR; screenshots of every menu (deferred).
 
 Done since 11-21 (details in git and tools/bench/ORCH_FINDINGS.md):
+- **The X6200's TCI power below 1 W** (orch power-steps x6200>x6100): its meter reads high for a second or more after
+  each key, and the hold cut the drive on that and kept the cut. Fixed 38430917 (under 1 W the level for 1 W goes out
+  scaled, cut only by a clear over); PASSED 2026-11-24 07:36: the X6100 heard 0.2/0.5/1.0 W at -59/-55/-52 dB.
+- TUNE for an external tuner (no tuner on the bench; the owner: "do that"): orch ext-tune from the FT8 app's Ext tune
+  PASSED both ways 2026-11-24 (x6200>x6100 07:38: the tone at 1507 Hz for 1500, off 1.08 s after the second press, the
+  app and dial kept, off by its 15 s limit after 15.5 s; x6100>x6200 1492.6 Hz, 0.87 s, 15.3 s). The remote's TUNE
+  passes both ways (tune-carrier).
 - The test rig, as the owner asked it (11-22 to 11-24): bench.py's state layer and page A at the end (cad0140f); the
   1:1 suite (7d84b748) and its batches; then orch.py (9816911d on): both radios set together and compared, a sync
   guard, never on from radios set wrong, each step confirmed, a live console over HTTP (the HackRF as a card beside

@@ -2302,7 +2302,9 @@ static void bg_timer_cb(lv_timer_t *t) {
         auto_target();
         follow_tick();
     }
-    if (mono_ms() - atomic_load(&web_last_ms) > WEB_IDLE_MS) {
+    uint32_t web_last = atomic_load(&web_last_ms);  /* before the clock: one stored after it made the idle huge */
+
+    if (mono_ms() - web_last > WEB_IDLE_MS) {
         lv_timer_del(bg_timer);
         bg_timer = NULL;
         df_use(DF_USER_WEB, false);

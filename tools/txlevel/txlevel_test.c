@@ -87,9 +87,11 @@ void params_float_set(params_float_t *p, float v) {
 }
 
 static int zero_w_said;     /* "TX 0 W" on the screen */
+static _Atomic int stalls;  /* "TX stopped: no audio" from tx_player's watch (its own thread), the whole run */
 
 void msg_schedule_text_fmt(const char *fmt, ...) {
     zero_w_said += !strncmp(fmt, "TX 0 W", 6);
+    if (!strncmp(fmt, "TX stopped: no audio", 20)) atomic_fetch_add(&stalls, 1);
 }
 
 /* ---- The model X6200 ---------------------------------------------------------------------------------------- */
@@ -904,6 +906,11 @@ int main(int argc, char **argv) {
     tci_result_t t15 = run_tci(&x61, -6.0f, 1882, verbose);
     check(t15.over_txs == 0 && t15.short_txs <= 1 && t15.codec_left == 0, "%s: at most %.2f W (%d over), %d short, "
           "the codec back after each (%d not)", x61.name, t15.top_w, t15.over_txs, t15.short_txs, t15.codec_left);
+
+    /* The audio never stops in these transmissions, so the stall watch (tx_player.c, its own thread, the clock here
+     * far faster than real time) must cut none: reading the clock before the last block's time, it once cut one whose
+     * audio was flowing (2026-11-24, one run in seven; a later case's readings then fell elsewhere, 5 short) */
+    check(atomic_load(&stalls) == 0, "no transmission cut by the stall watch (%d cut)", atomic_load(&stalls));
 
     printf("TXLEVEL %s: %d of %d cases\n", good == cases ? "OK" : "FAILED", good, cases);
     return good == cases ? 0 : 1;

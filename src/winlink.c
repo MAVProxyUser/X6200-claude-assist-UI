@@ -626,7 +626,7 @@ static const char *tx_off_freq(void) {
     char        a[16], b[16];
     const char *no;
     int32_t     rx, tx, xit, rit, missed, ref;
-    uint64_t    now;
+    uint64_t    now, at;
 
     rig_pending_tune();     /* a QSY Pat asked during the last key: this one goes out there */
     rx     = cparam_i_get(cfg_fg_freq);
@@ -641,9 +641,10 @@ static const char *tx_off_freq(void) {
         }
         atomic_compare_exchange_strong(&missed_hz, &missed, 0);    /* there after all */
     }
-    now = now_ms();
     ref = atomic_load(&ref_hz);
-    if (!ref || now - atomic_load(&ref_ms) >= REF_MS)
+    at  = atomic_load(&ref_ms);     /* before the clock: one stored after it made now - at fall under 0, a huge age */
+    now = now_ms();
+    if (!ref || now - at >= REF_MS)
         ref = rx;
     atomic_store(&ref_hz, ref);
     atomic_store(&ref_ms, now);     /* the modem keys, keyed or not: its connection goes on */
@@ -1188,8 +1189,9 @@ void winlink_preset_back(bool after_call) {
     }
     /* No call from the app, but Pat tuned there after the first press: a connection from the web mailbox, on the
      * frequency the radio was put on for it. The radio is that connection's, and Pat's tune back leaves it there */
-    if (!after_call && atomic_load(&ref_hz) == hz && atomic_load(&ref_ms) >= preset_ms &&
-        now_ms() - atomic_load(&ref_ms) < REF_MS) {
+    uint64_t at = atomic_load(&ref_ms);    /* before the clock: one stored after it made the age huge */
+
+    if (!after_call && atomic_load(&ref_hz) == hz && at >= preset_ms && now_ms() - at < REF_MS) {
         preset_hz = 0;
         return;
     }
