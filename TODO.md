@@ -14,7 +14,7 @@ they were, each item's state brought here when it changed).
 Open, mine to do:
 - **Every test through the orchestrator** (the owner, 11-24: "all tests should ultimately use the same orchestration
   framework", "whittle down the tests to essential testable things, not slop"; and "ensure that your changes have
-  tests, that in turn get run through http://127.0.0.1:8765"): tools/bench/orch.py has 96 tests (2026-11-24 14:20:
+  tests, that in turn get run through http://127.0.0.1:8765"): tools/bench/orch.py has 97 tests (2026-11-24 14:30:
   all pass, none KNOWN; documented in tools/bench/ORCH.md); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386
   features listed, ~1040 not covered on 11-23) still run outside it. Left: pick the essential ones of features.json
   and move them in (surveyed 11-24: receive settings beyond rx-settings (VFO, split, RIT, XIT, filters, zoom, IF

@@ -3792,6 +3792,136 @@ def tci_refused(o, radio, other, kind, label):
     return True, f"{kind} on {radio}: {said}", {}
 
 
+def t_system_checks(o):
+    """Each radio read over SSH, nothing changed (suite_proto's system batch): the battery log and model, the data
+    partition's check, the settings' good copy, password logins refused, Tailscale's status, the run logs kept, the
+    start trace, the services and ports, the CPU, temperatures, the GPU, the remote's sessions file, the update state,
+    the logs' ADIF header, libft8, the clock; and the two on the same image level and version"""
+    import suite_proto as sp
+    data, fails, looks = {}, [], []
+    with o.step("both radios read (SSH, the ports, a password login tried, the clock)") as s:
+        def read(n, r):
+            toks = bench.load_json(os.path.join(bench.STATE, "tokens.json"), {}).get(n, {}).values()
+            d = sp.sys_read(r.host, list(toks))
+            d["ports"] = sp.ports_open(r.host, [22, 80, 443, 4532, 50001, 50002])
+            d["pw"] = sp.password_refused(r.host)
+            d["clock_off"] = sp.clock_offset(r.host)
+            return d
+        try:
+            data = in_parallel(o, read, 120)
+        except Refused as e:
+            return False, str(e), {}
+        s.confirm(", ".join(f"{n}: {d.get('ident', '')}" for n, d in data.items()))
+
+    def battery_log(n, d):
+        age = int(d["now"]) - int(d["bat"].split(",")[0])
+        return 0 <= age <= 150, f"its last line {age} s old (a line a minute)"
+
+    def fsck(n, d):
+        return "exit 0" in d["fsck"] or "left" in d["fsck"], f"data_fsck.log ends {d['fsck'][-60:]!r}"
+
+    def good_copy(n, d):
+        mt, integ = d["good"].split(" ", 1)
+        newer = int(mt) >= int(d["gui_start"]) - 5 or int(d["now"]) - int(d["gui_start"]) < 90
+        return integ.strip() == "ok" and newer, f"integrity {integ.strip()!r}, written {int(d['now']) - int(mt)} s ago"
+
+    def ssh_keys(n, d):
+        ok, last = d["pw"]
+        return ok, f"a password login refused, offering {last[-50:]!r}"
+
+    def tailscale(n, d):
+        return "state=" in d["ts"] and "version=" in d["ts"], f"{d['ts'][:60]!r}"
+
+    def logs(n, d):
+        return int(d["logs"]) <= 50, f"{d['logs']} run logs (50 kept)"
+
+    def trace(n, d):
+        have = d.get("trace_has", [])
+        return len(have) == 6, f"start_trace.txt has {len(have)} of the 6 steps"
+
+    def services(n, d):
+        procs = set(d.get("proc", []))
+        need = {"x6100_gui", "x6x00-gui-watch", "gpsd", "NetworkManager", "pulseaudio", "x6100_webserver"}
+        return need <= procs and all(d["ports"].values()), (f"ports {sum(d['ports'].values())}/{len(d['ports'])} "
+                                                           f"open" + (f", missing {sorted(need - procs)}" if need - procs
+                                                                      else ""))
+
+    def cpu(n, d):
+        gov, mhz = d["gov"].split()
+        return gov == "performance" and (int(mhz) == 1008000 or n == B), f"{gov}, {int(mhz) // 1000} MHz"
+
+    def temps(n, d):
+        if n == B:
+            c = int(d["cputemp"]) / 1000
+            return 15 < c < 90, f"processor {c:.1f} C"
+        cs = []
+        for x in d.get("iio", []):
+            raw, off, scale = x.split()[-3:]
+            cs.append(round((int(raw) + int(off)) * float(scale) / 1000, 1))
+        return any(5 < c < 90 for c in cs), f"power chip {cs} C"
+
+    def gpu(n, d):
+        return "draws" in d.get("gpu", []), f"Mali400 draws {'draws' in d.get('gpu', [])}"
+
+    def sessions(n, d):
+        lines, hashed, bak, plain = (d["sess"].split() + ["", "", "", ""])[:4]
+        return int(lines) <= 16 and int(hashed) >= 1 and bak == "bak" and plain == "0", \
+            f"{lines} lines, {hashed} hashed, .bak {bak == 'bak'}, the bench's tokens in plain {plain}"
+
+    def update(n, d):
+        j = json.loads(d["upd"])
+        last = j.get("last") or {}
+        return j.get("pending") is None and last.get("result") == "confirmed", \
+            f"running {j.get('running')}, pending {j.get('pending')}, last {last.get('result')} {last.get('version')}"
+
+    def adif(n, d):
+        a = d.get("adif_day") or d["adif"]
+        if not a:
+            return None, "no ADIF log on it yet"
+        if "<ADIF_VER:5>3.1.8" not in a or "<PROGRAMID:" not in a:
+            return False, f"starts {a[:60]!r}"
+        return (True if "GoldCorpHF" in a else None), f"PROGRAMID {'GoldCorpHF' if 'GoldCorpHF' in a else 'an older name'}"
+
+    def ft8lib(n, d):
+        return d.get("libft8") == "yes", f"/usr/lib/libft8.so {d.get('libft8') == 'yes'}"
+
+    def model(n, d):
+        age = int(d["model_age"])
+        return 0 <= age <= 1500, f"battery_model.json {age} s old"
+
+    def clock(n, d):
+        return abs(d["clock_off"]) < 1.5 and d.get("drift") == "yes", (f"{d['clock_off']:+.2f} s, drift learnt "
+                                                                        f"{d.get('drift') == 'yes'}")
+    for name, fn in (("battery log", battery_log), ("data partition's check", fsck), ("settings' good copy", good_copy),
+                     ("password logins refused", ssh_keys), ("Tailscale's status", tailscale),
+                     ("run logs kept", logs), ("start trace", trace), ("services and ports", services),
+                     ("CPU", cpu), ("temperature", temps), ("GPU", gpu), ("remote's sessions file", sessions),
+                     ("update state", update), ("ADIF header", adif), ("libft8", ft8lib), ("battery model", model),
+                     ("clock", clock)):
+        with o.step(f"{name} on both") as s:
+            said = []
+            for n, d in data.items():
+                try:
+                    ok, says = fn(n, d)
+                except (KeyError, ValueError, IndexError, TypeError) as e:
+                    ok, says = False, f"could not read it: {type(e).__name__} {e}"
+                said.append(f"{n}: {says}")
+                if ok is False:
+                    fails.append(f"{name} {n}: {says}")
+                elif ok is None:
+                    looks.append(f"{name} {n}: {says}")
+            s.confirm("; ".join(said))
+    with o.step("the same image level and version on both") as s:
+        vals = {n: tuple(d.get("ident", "").split()[1:]) for n, d in data.items()}
+        if len(set(vals.values())) != 1 or not all(vals.values()):
+            fails.append(f"versions differ: {vals}")
+        s.confirm(str(vals))
+    got = {"fails": fails, "looks": looks}
+    if fails:
+        return False, "; ".join(fails), got
+    return True, "every check passed on both" + (f" (to look at: {'; '.join(looks)})" if looks else ""), got
+
+
 def image_test(o, sender, listener, bands=("20", "17", "15", "12", "10"), off=1500, tones=(600, 900), amp=0.3):
     """The sender's opposite-sideband image and carrier leak, band by band (image.py's measurement, the owner's
     2026-11-20 "you MUST prove this via testing"): USB tones 600 and 900 Hz at 0.1 W, the listener OFF Hz below the
@@ -4459,6 +4589,10 @@ TESTS = [
                    ("cw-usb", "CW text through the {n}'s TCI in USB, armed: refused, off the air, nobody asked"),
                    ("key-cw", "a TCI audio key on the {n} in CW, armed: refused, off the air"))
       for n in (A, B)],
+    Test("system-checks", "both", "each radio read over SSH, nothing changed: battery log and model, data partition, "
+         "settings' good copy, password logins refused, Tailscale, logs, start trace, services and ports, CPU, "
+         "temperature, GPU, sessions file, update state, ADIF header, libft8, clock; the same version on both",
+         t_system_checks, 60),
     Test("image x6100", "X6100 TX, X6200 RX (1500 Hz below, declared)", "the X6100's opposite-sideband image and "
          "carrier leak on 20, 17, 15, 12 and 10 m at 0.1 W: each image -35 dBc or lower (its 15 m shifts, 11-22); the "
          "carrier leak said",
