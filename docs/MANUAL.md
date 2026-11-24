@@ -2064,8 +2064,9 @@ DMR's sync in the channel's FM; once found, the channel is DMR's till no sync co
   `TS2 TO 1234567 FROM 7654321` (a private one), `(ENDED)` after its end. The head and B's half say DMR in place of
   NFM. On G the channel's name gives way to the talker and the talkgroup, and the mode says DMR.
 - **The voice**: DMR's AMBE+2 has no open decoder; a DVSI USB-3000 (an AMBE-3000R) on the HOST port (a powered hub)
-  decodes it. The daemon finds it by itself (it loads the kernel's ftdi_sio for it) and the first timeslot heard holds
-  the speaker till its call ends. Without one the channel is silent while it is DMR (not its buzz), and B's line says
+  decodes it, or DVMega's AMBE-3000 USB stick (it says `AMBE3000F`): the two decode DMR, D-STAR, YSF and NXDN alike
+  and each decodes the other's frames. The daemon finds either by itself (it loads the kernel's ftdi_sio for it) and
+  the first timeslot heard holds the speaker till its call ends. Without one the channel is silent while it is DMR (not its buzz), and B's line says
   `NO VOCODER: SILENT`.
 - **Where**: B's presets DMR 70 CM (441.000, the DMR simplex calling channel), UHF LMR (450-470 MHz) and VHF LMR
   (150-174 MHz); G's DMR group (the simplex channels). Around Columbus the 70 cm repeaters are on 443.150, 443.425,
@@ -2096,7 +2097,9 @@ once a call is decoded (who to whom, through its codes).
   scrambled with the trunked system's own IDs, which dsd-fme learns only by following the control channel, and B
   listens to one channel. A P25 frame too damaged to trust is replaced by the last
   good one (three times, then silence): this USB-3000 restarts itself on some garbled P25 frames, and the daemon
-  picks it up again by itself if it does.
+  picks it up again by itself if it does. P25 phase 1's voice needs DVSI's P25 option in the chip (the USB-3000's
+  says `AMBE3000P25F`): DVMega's stick (`AMBE3000F`) has not got it and makes a wrong voice of P25's frames, so with
+  it a P25 call is shown but silent.
 - It is there when `/usr/bin/dsd-fme` is (the firmware has it): about 11% of one core for the three while B listens
   in narrow FM (2.7-5% each, 12-13 MB each), started with it and ended a minute after. Three syncs within 1.2 s (or a decoded call) make a channel digital, so the odd sync FM's
   noise gives does not mute it or put garbage on B's line; a D-STAR header must pass its CRC.
@@ -9127,9 +9130,10 @@ station when the pointer is on its dot.
 - A report for a problem: `/mnt/app_logs/dmr.txt` (Files page): the logins,
   why they ended, the calls heard; never the password.
 
-**The voice** goes through a DVSI USB-3000 (an AMBE-3000R) only: DMR's
+**The voice** goes through a DVSI USB-3000 (an AMBE-3000R) or DVMega's
+AMBE-3000 USB stick only: DMR's
 AMBE+2 has no open decoder, and this firmware has no software vocoder (no
-mbelib). Plug the USB-3000 into the radio's USB (the HOST port, through a
+mbelib). Plug the USB-3000 (or the stick) into the radio's USB (the HOST port, through a
 powered hub), as for the Sentry's [DMR](#dmr) and
 [dsd-fme](#p25-d-star-ysf-nxdn-and-the-other-digital-voice-dsd-fme): the SDR
 daemon finds it by itself and serves it on 127.0.0.1:2460, and the app hands

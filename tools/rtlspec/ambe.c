@@ -133,6 +133,18 @@ static int recv_raw(uint8_t *b, int max, int ms) {
     return len + 4;
 }
 
+/* The whole packet b (its 0x61 first, n bytes) ends in a parity field: 0x2F and the XOR of every byte after the 0x61
+ * before it. A chip may send none: the DVMega's AMBE3000F leaves it off until asked (PKT_PARITYMODE), and a field
+ * whose next to last byte is 0x2F lost its last two bytes to a check of that byte alone (2026-11-24: 9 of 525 DMR
+ * frames from its encoder cut short) */
+static bool has_parity(const uint8_t *b, int n) {
+    uint8_t x = 0;
+
+    if (n < 6 || b[n - 2] != 0x2F) return false;
+    for (int i = 1; i < n; i++) x ^= b[i];
+    return x == 0;
+}
+
 /* A packet within ms: its type and fields (its parity field off), their length; -1 none */
 static int recv_pkt(int *type, uint8_t *p, int max, int ms) {
     uint8_t b[400];
@@ -142,7 +154,7 @@ static int recv_pkt(int *type, uint8_t *p, int max, int ms) {
     len   = n - 4;
     *type = b[3];
     memcpy(p, b + 4, (size_t)len);
-    if (len >= 2 && p[len - 2] == 0x2F) len -= 2;
+    if (has_parity(b, n)) len -= 2;
     return len;
 }
 
@@ -155,6 +167,15 @@ static int ask(const uint8_t *q, int n, uint8_t *r, int max, int ms) {
     while (now_ms() < end)
         if ((got = recv_pkt(&type, r, max, (int)(end - now_ms()))) > 0 && type == 0 && r[0] == q[0]) return got;
     return -1;
+}
+
+/* Every packet from the chip with its parity field, as the USB-3000 sends them from power-on and the DVMega's stick
+ * only when asked: one layout for every client of the port. Set up and after each restart (power-on's again); a chip
+ * that refuses it is read all the same (has_parity) */
+static void parity_on(void) {
+    uint8_t r[16];
+
+    ask((const uint8_t[]){0x3F, 1}, 2, r, sizeof(r), 300);
 }
 
 /* Another program on the port: gpsd (an image whose udev took the USB-3000 for a GPS, before 26-usb3000.rules) */
@@ -294,6 +315,7 @@ static bool set_up(const char *path, speed_t speed) {
         return false;
     }
     snprintf(prod, sizeof(prod), "%.*s", n - 1, (const char *)r + 1);
+    parity_on();
     if ((n = ask((const uint8_t[]){0x09, 33}, 2, r, sizeof(r), 500)) < 2 || r[1] != 0) {   /* rate 33: DMR's */
         fprintf(stderr, "rtlspec: %s on %s refused rate 33\n", prod, path);
         close(fd);
@@ -413,7 +435,7 @@ static int port_pkt(int type, const uint8_t *p, int n, int *rtype, uint8_t *r, i
 
         *rtype = a[3];
         memcpy(r, a + 4, (size_t)l);
-        if (l >= 2 && r[l - 2] == 0x2F) l -= 2;
+        if (has_parity(a, (int)k)) l -= 2;
         return l;
     }
     return -1;
@@ -442,6 +464,7 @@ static void serve_udp(void) {
             static int  since;
 
             chip_rate = -1;
+            parity_on();                                /* power-on's layout again: the parity field asked for */
             since++;
             if (now_ms() - said > 60000) {              /* said once a minute at most, with how many */
                 said = now_ms();
@@ -524,7 +547,8 @@ static void *thread(void *arg) {
             }
             continue;
         }
-        if (chip_rate != 33) {          /* another rate set through the port: DMR's again */
+        if (chip_rate != 33) {          /* another rate set through the port, or the chip restarted: DMR's again */
+            parity_on();
             if (ask((const uint8_t[]){0x09, 33}, 2, r, sizeof(r), 300) < 2 || r[1] != 0) {
                 if (++misses >= 5) lost();
                 continue;

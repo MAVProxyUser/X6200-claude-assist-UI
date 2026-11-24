@@ -82,8 +82,21 @@ STORE = os.path.join(bench.STATE, "orch_results.json")
 SNAPSHOT = os.path.join(bench.STATE, "orch_status.json")
 SNAPSHOT_STALE_S = 10       # older than this: no run is writing it
 
-# Failures that cannot be put right from here: said with each, not run again until --all (or the reason is gone)
+# Failures that cannot be put right from here (or not found yet): said with each, not run again until --all (or the
+# reason is gone)
 KNOWN = {
+    "dv-dstar": "B's D-STAR voice drops out partway through a 5 s call on both radios (r 0.30-0.73 run to run, the "
+                "call and its text shown throughout): dsd-fme's syncs and calls come steadily (paced test), so it is in "
+                "the SDR daemon's play-out of dsd-fme's speech (dsd.c): to find (ORCH_FINDINGS, 2026-11-24)",
+    "power-6m-fm x6100>x6200": "the factory X6100's base (Xiegu's V1.1.9) puts out its 6 m FM carrier at about 1.0 W "
+                               "for any setting under 1 W (0.1/0.3/1.0 W heard alike, its meter 1.0 W, 2026-11-24): "
+                               "its power control on 6 m is the ALC's alone. Where the GUI sets the drive (TCI, FT8, "
+                               "the digital apps) it follows the setting (power-6m passes). A base fix (true power "
+                               "control as a hook on V1.1.9) waits on the owner's go",
+    "dv-p25": "the X6100's P25 voice (the 1 kHz frames) turns into a 400 Hz tone after its first half second: dsd-fme "
+              "puts out 1 kHz throughout (its own UDP speech caught, paced) and the chip through libmbe-dvsi too, so "
+              "the SDR daemon's play-out (dsd.c) makes it: to find. The X6200 (DVMega, no P25 option) silent as it "
+              "should be (ORCH_FINDINGS, 2026-11-24)",
 }
 
 
@@ -194,7 +207,7 @@ th{color:var(--dim);font-weight:normal}.PASS{color:var(--ok)}.FAIL{color:var(--b
 <section class="wide"><h2>Radios</h2><div id="sync"></div><div class="radios" id="radios" style="margin-top:8px"></div></section>
 <section class="wide"><h2>Now</h2><div id="now"></div><div class="bar"><div id="prog" style="width:0"></div></div></section>
 <section class="wide"><h2>This run: only the tests not passed yet (and any new ones)</h2><table><thead><tr><th>#</th><th>test</th><th>role</th><th>result</th><th>secs</th><th>what it found</th></tr></thead><tbody id="tests"></tbody></table></section>
-<section class="wide"><h2 id="kepth">Not rerun: passed in an earlier run (or a known fault), kept in orch_results.json</h2><table><thead><tr><th>test</th><th>result</th><th>when</th><th>GUI</th><th>what it found</th></tr></thead><tbody id="kept"></tbody></table></section>
+<section class="wide"><h2 id="kepth">Not rerun: passed in an earlier run (or a known fault), kept in orch_results.json, the latest first</h2><table><thead><tr><th>test</th><th>result</th><th>when</th><th>GUI</th><th>what it found</th></tr></thead><tbody id="kept"></tbody></table></section>
 <section class="wide"><h2>Where the two radios differ (the caps test: the same value sent to both, what each did)</h2><table><thead><tr><th>asked</th><th>X6100</th><th>X6200</th></tr></thead><tbody id="caps"></tbody></table></section>
 
 <section class="wide"><h2>Events (everything the orchestrator does; <a href="log" style="color:var(--amb)">the whole log</a>)</h2>
@@ -206,7 +219,7 @@ const mhz=f=>f?(f/1e6).toFixed(4)+" MHz":"?";const t=s=>new Date(s*1000).toLocal
 const MODES={0:"LSB",1:"LSB-D",2:"USB",3:"USB-D",4:"CW",5:"CW-R",6:"AM",7:"NFM",8:"WFM"};
 async function tick(){let d;try{d=await (await fetch("status",{cache:"no-store"})).json()}catch(e){$("phase").textContent="console: no answer";return}
 $("phase").innerHTML="<b>"+esc(d.phase)+"</b>";const c=d.counts;
-const kp=(d.kept||[]).filter(k=>k.result==="PASS"&&!k.known).length,kk=(d.kept||[]).filter(k=>k.known).length;$("counts").textContent=`this run: ${c.done}/${c.total} done: ${c.pass} pass, ${c.fail} fail, ${c.look} look, ${c.notrun} not run · not rerun: ${kp} passed before, ${kk} known faults (of ${c.total+(d.kept||[]).length} tests)`;$("kepth").textContent=`Not rerun: ${kp} passed in an earlier run, ${kk} known faults (kept in orch_results.json; orch.py run --all would run them again)`;
+const kp=(d.kept||[]).filter(k=>k.result==="PASS"&&!k.known).length,kk=(d.kept||[]).filter(k=>k.known).length;$("counts").textContent=`this run: ${c.done}/${c.total} done: ${c.pass} pass, ${c.fail} fail, ${c.look} look, ${c.notrun} not run · not rerun: ${kp} passed before, ${kk} known faults (of ${c.total+(d.kept||[]).length} tests)`;$("kepth").textContent=`Not rerun: ${kp} passed in an earlier run, ${kk} known faults, the latest first (kept in orch_results.json; orch.py run --all would run them again)`;
 const el=Math.round(d.now-d.t0);$("clock").textContent=`running ${Math.floor(el/60)}m${el%60}s, about ${Math.round(d.eta_s/60)} min left`;
 const s=d.sync;let cls=s.changing?"chg":(s.ok?"ok":"bad");
 $("sync").innerHTML=`<span class="sync ${cls}">${s.changing?"CHANGING BOTH":(s.ok?"IN SYNC":"OUT OF SYNC")}</span> <span class="muted">violations this run: ${s.violations}${s.last?" (last: "+esc(s.last)+")":""}</span>`;
@@ -227,7 +240,7 @@ $("tests").innerHTML=d.tests.map((x,i)=>{const failed=x.result&&x.result!=="PASS
 return `<tr class="${i===d.cur?"cur":""}"><td>${i+1}</td><td>${esc(x.name)}</td><td>${esc(x.role)}</td><td class="${(x.result||"").replace(" ","")}">${esc(x.result||(i===d.cur?"running":""))}${n?` <button onclick="tog(${i})" style="font:inherit;font-size:11px">pictures (${n})</button>`:""}</td><td>${x.secs!=null?x.secs.toFixed(0):""}</td><td class="says">${esc(x.says)}</td></tr>`+(n&&openPics.has(i)?`<tr><td></td><td colspan="5">${pics(x)}</td></tr>`:"");}).join("");
 const cs=r=>r?(r.ok?"takes it":"refuses")+(r.reads!=null?" (reads "+esc(JSON.stringify(r.reads))+")":"")+(r.err?" "+esc(r.err):""):"";
 $("caps").innerHTML=(d.caps_diff||[]).map(c=>`<tr><td>${esc(c.key)}</td><td class="says">${cs(c.radios.x6100)}</td><td class="says">${cs(c.radios.x6200)}</td></tr>`).join("")||"<tr><td class=muted colspan=3>not probed yet, or no difference</td></tr>";
-$("kept").innerHTML=(d.kept||[]).map(k=>`<tr><td>${esc(k.name)}</td><td class="${(k.result||"").replace(" ","")}">${esc(k.result)}${k.known?" (known)":""}${k.runs?" &middot; "+k.passes+"/"+k.runs+" passed":""}</td><td>${k.at?new Date(k.at*1000).toLocaleString():""}</td><td class="says">${esc(k.gui||"")}</td><td class="says">${esc(k.known||k.says)}</td></tr>`).join("");
+$("kept").innerHTML=(d.kept||[]).slice().sort((a,b)=>(b.at||0)-(a.at||0)).map(k=>`<tr><td>${esc(k.name)}</td><td class="${(k.result||"").replace(" ","")}">${esc(k.result)}${k.known?" (known)":""}${k.runs?" &middot; "+k.passes+"/"+k.runs+" passed":""}</td><td>${k.at?new Date(k.at*1000).toLocaleString():""}</td><td class="says">${esc(k.gui||"")}</td><td class="says">${esc(k.known||k.says)}</td></tr>`).join("");
 const show={cmd:$("fcmd").checked,conf:$("fconf").checked,radio:$("fradio").checked};
 $("ev").innerHTML=d.events.slice().reverse().filter(e=>show[e.kind]!==false).map(e=>`<div class="${e.kind}">${t(e.t)} ${e.test?"["+esc(e.test)+"] ":""}${esc(e.text)}</div>`).join("");}
 const openPics=new Set();function tog(i){openPics.has(i)?openPics.delete(i):openPics.add(i);tick();}
@@ -1160,6 +1173,8 @@ POWER_TAIL_S = 1.6          # keyed silence after it: the X6200's transmit path 
                             # unkey (STEP_TAIL_S's 0.8 s cut the end of its 2 s tones, and the level, averaged over a
                             # window that took in that silence, moved with it: 2026-11-24)
 POWER_TONE_DB = 15          # a frame carries the tone: within this of the over's strongest frame
+POWER_6M = [0.1, 0.3, 1.0]  # 6 m from 0.1 W: the factory X6100 put out 0.8-1.2 W there at any setting under 1 W (its
+                            # base's ALC-only power control, 2026-11-19/22); a floor reads as a step under +4.8 dB
 
 
 def power_level(L, hz, on, off):
@@ -1184,15 +1199,16 @@ def power_level(L, hz, on, off):
     return (mid[len(mid) // 2] if mid else None), len(mid), series
 
 
-def power_steps(o, sender, listener, f, label):
-    """A 1000 Hz tone POWER_TONE_S at each of POWER_STEPS (USB, one over each): the listener's spectrum at the tone
+def power_steps(o, sender, listener, f, label, steps=None, mode=2):
+    """A 1000 Hz tone POWER_TONE_S at each of steps (POWER_STEPS; USB, one over each; mode 7: FM with no audio, its
+    carrier the level: what the base sets itself, the audio's drive no part of it): the listener's spectrum at the tone
     (power_level: the median of the frames that carry it, while the sender said it was on the air) must rise by the
     power's ratio in dB, within POWER_TOL_DB (the spectrum is the receiver's before its AGC; RF gain fixed). Every
     frame and the sender's meter readings kept in the data"""
     levels, got = [], {}
     S, L = o.r[sender], o.r[listener]
     try:
-        for w in POWER_STEPS:
+        for w in steps or POWER_STEPS:
             peak = {}
 
             def body(watch, w=w):
@@ -1207,7 +1223,7 @@ def power_steps(o, sender, listener, f, label):
                     th = threading.Thread(target=sample, daemon=True)
                     th.start()
                     try:
-                        bench.tci_send(S, [[0, 0.3], [1000, POWER_TONE_S], [0, POWER_TAIL_S]],
+                        bench.tci_send(S, [[0, 0.3], [0 if mode == 7 else 1000, POWER_TONE_S], [0, POWER_TAIL_S]],
                                        max_s=POWER_TONE_S + POWER_TAIL_S + 4, watch=watch)
                     finally:
                         stop.set()
@@ -1215,18 +1231,18 @@ def power_steps(o, sender, listener, f, label):
                         raise Refused(watch.why)
                     peak["w"] = watch.tx_peak.get(sender)
                     peak["meters"] = meters
-            over(o, sender, listener, f, 2, f"{label} {w} W", body, w=w)
+            over(o, sender, listener, f, mode, f"{label} {w} W", body, w=w)
             with o.step(f"{listener}'s level while {sender} said it was on the air") as s:
                 if not S.tx_last:
                     raise Refused(f"{sender} never said it was on the air")
                 on, off = S.tx_last
                 time.sleep(0.6)                     # the spectrum's last frames
-                lvl, n, series = power_level(L, f + 1000, on, off)
+                lvl, n, series = power_level(L, f + (0 if mode == 7 else 1000), on, off)
                 got.setdefault("overs", []).append({"w": w, "on_s": round(off - on, 1), "level": lvl, "frames": n,
                                                     "series": series,
                                                     "meters": [[round(t - on, 1), m] for t, m in peak.get("meters", [])]})
                 if lvl is None or n < 10:
-                    raise Refused(f"{listener}'s spectrum: {n} frames carried {f + 1000} Hz while {sender} was on "
+                    raise Refused(f"{listener}'s spectrum: {n} frames carried {f + (0 if mode == 7 else 1000)} Hz while {sender} was on "
                                   f"the air ({off - on:.1f} s)")
                 levels.append((w, float(lvl), peak.get("w")))
                 s.confirm(f"{lvl} dB, the median of {n} frames of the tone, {off - on:.1f} s on the air")
@@ -1681,9 +1697,9 @@ def digi_text(o, sender, listener, mode, label):
     return True, f"sent {text!r}, decoded {res['decoded']!r} ({res['cer']:.0%} of the characters wrong)", res
 
 
-def in_parallel(o, fn):
+def in_parallel(o, fn, wait=30):
     """fn(name, radio) on both radios at once, inside one guarded change: {name: its return}; a Refused in either is
-    raised after both are done"""
+    raised after both are done (each waited for up to wait s)"""
     out, errs = {}, {}
 
     def one(n):
@@ -1695,9 +1711,12 @@ def in_parallel(o, fn):
     try:
         th = [threading.Thread(target=one, args=(n,)) for n in o.r]
         [t.start() for t in th]
-        [t.join(30) for t in th]
+        [t.join(wait) for t in th]
     finally:
         o.changing -= 1
+    late = [n for n in o.r if n not in out and n not in errs]
+    if late:
+        raise Refused(f"{', '.join(late)}: no answer within {wait} s")
     if errs:
         raise Refused("; ".join(errs.values()))
     return out
@@ -3392,6 +3411,400 @@ def ft8_qso(o, a, b, label, dial=14074000):
 
 # ---- The tests ----
 
+# ---- The AMBE vocoders (each radio's DVSI chip behind its SDR daemon's port 127.0.0.1:2460) and B's digital voice ----
+# Receive only: nothing is keyed. The test speech is this computer's own voice (say), 8 kHz; the calls made of it by
+# the repository's generators (tools/dsdfme, tools/rtlspec/dmr_test gen) and replayed into a test SDR daemon on each
+# radio (dv_replay.py), as a signal from an SDR would come.
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOP = os.path.abspath(os.path.join(HERE, "../.."))
+DV = os.path.join(bench.STATE, "dv")                # what the AMBE tests make: speech, frames, calls, tools
+SAY = "Testing the vocoder on the bench. One, two, three, four, five."
+P25_FRAMES = os.path.join(TOP, "tools/dsdfme/mbe_dvsi/p25_chip_frames.bin")     # a 1 kHz tone, a USB-3000's P25 frames
+VOC_ENV_R, VOC_SPEC_R = 0.90, 0.85      # a chip's speech against what went in (both chips measured 0.96 / 0.94)
+# B's chain, the voice heard against the speech (2026-11-24, both radios: DMR 0.97, NXDN48 0.93, YSF 0.81-0.88,
+# D-STAR 0.49-0.73: dsd-fme loses D-STAR's sync two or three times in a 5 s call, its voice gone meanwhile; to find)
+DV_R = {"dmr": 0.90, "nxdn": 0.75, "ysf": 0.70, "dstar": 0.40}
+DV_CALL = {"dmr": "DMR TS1 CC1 TG 3100 FROM 3112345", "dstar": "DSTAR TO CQCQCQ FROM N0CALL",
+           "ysf": "YSF TO CQCQCQ FROM N0CALL", "nxdn": "NXDN48 TG 100 FROM 1234 RAN 1",
+           "p25": "P25P1 TG 4321 FROM 1234567 NAC 123"}
+
+
+def run_ok(cmd, env=None, out=None, timeout=300):
+    import subprocess
+    r = subprocess.run(cmd, capture_output=True, timeout=timeout, env=dict(os.environ, **(env or {})))
+    if r.returncode:
+        raise Refused(f"{os.path.basename(cmd[0])}: {(r.stderr or r.stdout).decode(errors='replace').strip()[-300:]}")
+    if out:
+        with open(out, "wb") as f:
+            f.write(r.stdout)
+    return r.stdout.decode(errors="replace")
+
+
+def scp_to(host, files, dest="/tmp/"):
+    run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes"] + list(files) + [f"root@{host}:{dest}"], timeout=180)
+
+
+def scp_from(host, path, dest):
+    run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", f"root@{host}:{path}", dest], timeout=180)
+
+
+def dv_speech():
+    """The test speech, 8 kHz s16, peak 20000 (made once: this computer's say)"""
+    os.makedirs(DV, exist_ok=True)
+    out = os.path.join(DV, "speech.s16")
+    if not os.path.exists(out):
+        aiff, wav = os.path.join(DV, "speech.aiff"), os.path.join(DV, "speech8k.wav")
+        run_ok(["say", "-v", "Samantha", SAY, "-o", aiff])
+        run_ok(["afconvert", "-f", "WAVE", "-d", "LEI16@8000", "-c", "1", aiff, wav])
+        import wave
+        w = wave.open(wav)
+        x = np.frombuffer(w.readframes(w.getnframes()), "<i2").astype(float)
+        (x / np.max(np.abs(x)) * 20000).astype("<i2").tofile(out)
+    return out
+
+
+def dv_tools():
+    """The generators' programs, built on this computer when missing or older than their sources; mbe_dvsi_test for
+    the radios (ARM, the cross compiler and the sysroot tools/cross_x6200/setup.sh made)"""
+    os.makedirs(DV, exist_ok=True)
+    sys_ = os.path.join(TOP, "build/x6200/sysroot")
+    ma = os.path.join(sys_, "usr/lib/arm-linux-gnueabihf")
+    dsd = os.path.join(TOP, "build/x6200/dsdfme/src")
+    mb = os.path.join(TOP, "tools/dsdfme/mbe_dvsi")
+    want = {
+        "dmr_test": (["cc", "-O2", "-o", "{out}", f"{TOP}/tools/rtlspec/dmr_test.c", f"{TOP}/tools/rtlspec/dmr.c", "-lm"],
+                     [f"{TOP}/tools/rtlspec/dmr_test.c", f"{TOP}/tools/rtlspec/dmr.c"]),
+        "dmr_to_ambed": (["cc", "-O2", "-o", "{out}", f"{TOP}/tools/dsdfme/ysf/dmr_to_ambed.c", f"{mb}/mbe_dvsi.c"],
+                         [f"{TOP}/tools/dsdfme/ysf/dmr_to_ambed.c", f"{mb}/mbe_dvsi.c"]),
+        "p25_gen": (["c++", "-O2", "-I", f"{dsd}/include", f"{TOP}/tools/dsdfme/p25_gen.cpp", f"{dsd}/src/Hamming.cpp",
+                     "-o", "{out}"], [f"{TOP}/tools/dsdfme/p25_gen.cpp"]),
+        "mbe_dvsi_test.arm": (["arm-linux-gnueabihf-gcc", f"--sysroot={sys_}", "-isystem",
+                               f"{sys_}/usr/include/arm-linux-gnueabihf", f"-L{ma}", f"-Wl,-rpath-link,{ma}", "-O2",
+                               "-D_FORTIFY_SOURCE=1", "-static-libgcc", "-o", "{out}", f"{mb}/mbe_dvsi_test.c",
+                               f"{mb}/mbe_dvsi.c", "-lm"], [f"{mb}/mbe_dvsi_test.c", f"{mb}/mbe_dvsi.c"]),
+    }
+    paths = {}
+    for name, (cmd, srcs) in want.items():
+        out = os.path.join(DV, name)
+        if not os.path.exists(out) or any(os.path.getmtime(x) > os.path.getmtime(out) for x in srcs):
+            run_ok([c.replace("{out}", out) for c in cmd])
+        paths[name] = out
+    return paths
+
+
+def frames_of(path):
+    """ambe_port.py's frames file: [(bits, bytes)]"""
+    d, i, out = open(path, "rb").read(), 0, []
+    while i < len(d):
+        n = (d[i] + 7) // 8
+        out.append((d[i], d[i + 1:i + 1 + n]))
+        i += 1 + n
+    return out
+
+
+def env_r(x, fsx, y, fsy, ms=10):
+    """y's loudness against x's (RMS in ms windows), at y's best lag: (r, lag s)"""
+    def env(v, fs):
+        w = int(fs * ms / 1000)
+        n = len(v) // w
+        return np.sqrt(np.mean(v[:n * w].reshape(n, w) ** 2, axis=1))
+    ex, ey = env(x, fsx), env(y, fsy)
+    best = (-1.0, 0)
+    for L in range(0, max(1, len(ey) - int(0.8 * len(ex)) + 1)):    # y later than x by L windows, 80 % overlap at least
+        seg = ey[L:L + len(ex)]
+        if len(seg) < 0.8 * len(ex):
+            break
+        r = float(np.corrcoef(ex[:len(seg)], seg)[0, 1])
+        if r > best[0]:
+            best = (r, L)
+    return best[0], best[1] * ms / 1000
+
+
+def spec_r(x, y, fs=8000):
+    """The log spectra (20 ms, 300-3400 Hz) of x and y (aligned, the same rate) correlated"""
+    w = fs // 50
+    n = min(len(x), len(y)) // w
+    def sp(v):
+        f = np.abs(np.fft.rfft(v[:n * w].reshape(n, w) * np.hanning(w), axis=1))
+        b = np.fft.rfftfreq(w, 1 / fs)
+        return np.log10(f[:, (b >= 300) & (b <= 3400)] + 1)
+    return float(np.corrcoef(sp(x).ravel(), sp(y).ravel())[0, 1])
+
+
+def tone_frames(y, fs, hz=1000):
+    """20 ms frames of y louder than 300 RMS whose 300-3400 Hz energy is mostly within 50 Hz of hz"""
+    w = fs // 50
+    n = len(y) // w
+    fr = y[:n * w].reshape(n, w)
+    F = np.abs(np.fft.rfft(fr * np.hanning(w), axis=1)) ** 2
+    b = np.fft.rfftfreq(w, 1 / fs)
+    share = F[:, (b >= hz - 50) & (b <= hz + 50)].sum(1) / (F[:, (b >= 300) & (b <= 3400)].sum(1) + 1e-9)
+    loud = np.sqrt(np.mean(fr ** 2, axis=1)) > 300
+    return int(np.sum(loud & (share > 0.5))), int(np.sum(loud))
+
+
+def chip_ids(o):
+    return in_parallel(o, lambda n, r: bench.ssh(r.host, "python3 /tmp/ambe_port.py id").split("\n")[0].strip(), 30)
+
+
+def parity(o, want=None):
+    """Both chips' parity field (PKT_PARITYMODE) set to want ("on"/"off") or read: {name: "parity on"/"parity off"}"""
+    return in_parallel(o, lambda n, r: bench.ssh(r.host, "python3 /tmp/ambe_port.py parity" +
+                                                 (f" {want}" if want else "")).strip(), 30)
+
+
+def t_ambe_vocoder(o):
+    """Each radio's AMBE-3000 through its SDR daemon's port, the two at once: the daemon has it send its packets'
+    parity field (the DVMega stick's AMBE3000F sends none until asked: parsed as if it did, a frame ending in 0x2F lost
+    two bytes); the test speech through each chip at DMR's rate (33: YSF's and NXDN's too) and D-STAR's and back, and
+    each chip's frames through the other; libmbe-dvsi (dsd-fme's and the GUI's) alike with the chip's parity field on
+    and off; P25 phase 1's full rate where the chip has DVSI's P25 option, silence where it has not"""
+    got = {}
+    tools = dv_tools()
+    sp = dv_speech()
+    x = np.fromfile(sp, "<i2").astype(float)
+    work = os.path.join(o.st.run_dir or DV, "ambe")
+    os.makedirs(work, exist_ok=True)
+    try:
+        with o.step("each radio's AMBE chip answers through its SDR daemon's port 127.0.0.1:2460") as s:
+            def push(n, r):
+                scp_to(r.host, [os.path.join(HERE, "ambe_port.py"), sp, P25_FRAMES, tools["mbe_dvsi_test.arm"]])
+                bench.ssh(r.host, "chmod 755 /tmp/mbe_dvsi_test.arm")
+            in_parallel(o, push, 120)
+            ids = chip_ids(o)
+            got["chips"] = ids
+            bad = [f"{n}: {v!r}" for n, v in ids.items() if not v.startswith("AMBE")]
+            if bad:
+                raise Refused(f"no AMBE chip: {'; '.join(bad)}")
+            s.confirm(", ".join(f"{n} {v}" for n, v in ids.items()))
+        with o.step("the SDR daemon asks for the parity field when it takes the chip (off, then the daemon restarted)") as s:
+            off = parity(o, "off")
+            if any(v != "parity off" for v in off.values()):
+                raise Refused(f"the parity field not turned off: {off}")
+
+            def restart(n, r):
+                old = bench.ssh(r.host, "pidof x6x00-rtlspec || true").strip()
+                bench.ssh(r.host, "killall x6x00-rtlspec 2>/dev/null; true")
+                t0 = time.time()
+                while time.time() - t0 < 60:        # the GUI starts it again within seconds; then it takes the chip
+                    time.sleep(2)                   # (ambe_port.py gives up on a silent port in a second or two)
+                    pid = bench.ssh(r.host, "pidof x6x00-rtlspec || true").strip()
+                    if pid and pid != old and "AMBE" in bench.ssh(
+                            r.host, "python3 /tmp/ambe_port.py id 2>/dev/null | head -1 || true"):
+                        return f"{pid} after {time.time() - t0:.0f} s"
+                raise Refused("the daemon not back with the chip within 60 s")
+            pids = in_parallel(o, restart, 90)
+            on = parity(o)
+            got["parity_after_restart"] = on
+            if any(v != "parity on" for v in on.values()):
+                raise Refused(f"after the daemon took the chip again: {on}")
+            s.confirm(f"daemons {pids}: {on}")
+        for rate in ("33", "dstar"):
+            with o.step(f"the speech through each chip and back at {'DMR' if rate == '33' else 'D-STAR'}'s rate "
+                        f"(envelope r >= {VOC_ENV_R}, spectrum r >= {VOC_SPEC_R})") as s:
+                def rt(n, r, rate=rate):
+                    bench.ssh(r.host, f"cd /tmp && python3 ambe_port.py enc {rate} speech.s16 {rate}.frames && "
+                                      f"python3 ambe_port.py dec {rate} {rate}.frames {rate}.dec.s16", timeout=120)
+                    for f in (f"{rate}.frames", f"{rate}.dec.s16"):
+                        scp_from(r.host, f"/tmp/{f}", os.path.join(work, f"{n}_{f}"))
+                    fr = frames_of(os.path.join(work, f"{n}_{rate}.frames"))
+                    odd = sum(1 for b, _ in fr if b != 72)
+                    y = np.fromfile(os.path.join(work, f"{n}_{rate}.dec.s16"), "<i2").astype(float)
+                    re, lag = env_r(x, 8000, y, 8000)
+                    rs = spec_r(x, y[int(lag * 8000):])
+                    res = {"frames": len(fr), "not_72_bits": odd, "env_r": round(re, 3), "spec_r": round(rs, 3),
+                           "delay_ms": round(lag * 1000)}
+                    if odd or len(fr) < len(x) // 160 or re < VOC_ENV_R or rs < VOC_SPEC_R:
+                        raise Refused(str(res))
+                    return res
+                res = in_parallel(o, rt, 180)
+                got[f"roundtrip_{rate}"] = res
+                s.confirm("; ".join(f"{n} r {v['env_r']}/{v['spec_r']}, {v['frames']} frames" for n, v in res.items()))
+            with o.step(f"each chip decodes the other's {'DMR' if rate == '33' else 'D-STAR'} frames as well") as s:
+                def cross(n, r, rate=rate):
+                    other = B if n == A else A
+                    scp_to(r.host, [os.path.join(work, f"{other}_{rate}.frames")])
+                    bench.ssh(r.host, f"cd /tmp && python3 ambe_port.py dec {rate} {other}_{rate}.frames "
+                                      f"{rate}.cross.s16", timeout=120)
+                    scp_from(r.host, f"/tmp/{rate}.cross.s16", os.path.join(work, f"{n}_{rate}.cross.s16"))
+                    y = np.fromfile(os.path.join(work, f"{n}_{rate}.cross.s16"), "<i2").astype(float)
+                    re, lag = env_r(x, 8000, y, 8000)
+                    rs = spec_r(x, y[int(lag * 8000):])
+                    if re < VOC_ENV_R or rs < VOC_SPEC_R:
+                        raise Refused(f"the other's frames: envelope r {re:.3f}, spectrum r {rs:.3f}")
+                    return {"env_r": round(re, 3), "spec_r": round(rs, 3)}
+                res = in_parallel(o, cross, 180)
+                got[f"cross_{rate}"] = res
+                s.confirm("; ".join(f"{n} r {v['env_r']}/{v['spec_r']}" for n, v in res.items()))
+        with o.step("libmbe-dvsi (dsd-fme's, the GUI's DMR) gives the same speech with the chip's parity field on and off") as s:
+            def frames9(n):
+                return b"".join(b for _, b in frames_of(os.path.join(work, f"{n}_33.frames")))
+
+            def shim(n, r, tag):
+                open(os.path.join(work, f"{n}_dmr9.ambe"), "wb").write(frames9(n))
+                scp_to(r.host, [os.path.join(work, f"{n}_dmr9.ambe")])
+                said = bench.ssh(r.host, f"cd /tmp && ./mbe_dvsi_test.arm {n}_dmr9.ambe shim_{tag}.s16 shim_{tag}_e.s16",
+                                 timeout=120).strip()
+                return bench.ssh(r.host, f"md5sum /tmp/shim_{tag}.s16").split()[0], said
+            try:
+                parity(o, "on")
+                on = in_parallel(o, lambda n, r: shim(n, r, "on"), 180)
+                parity(o, "off")
+                off = in_parallel(o, lambda n, r: shim(n, r, "off"), 180)
+            finally:
+                parity(o, "on")
+            got["shim"] = {"on": on, "off": off}
+            for n in o.r:
+                scp_from(o.r[n].host, "/tmp/shim_off.s16", os.path.join(work, f"{n}_shim_off.s16"))
+                y = np.fromfile(os.path.join(work, f"{n}_shim_off.s16"), "<i2").astype(float)
+                re, _ = env_r(x, 8000, y, 8000)
+                if on[n][0] != off[n][0] or re < VOC_ENV_R:
+                    raise Refused(f"{n}: parity on {on[n][0][:8]}, off {off[n][0][:8]}, speech r {re:.3f}")
+            s.confirm("; ".join(f"{n} the same speech both ways ({on[n][1]})" for n in o.r))
+        with o.step("P25 phase 1's full rate through libmbe-dvsi: a 1 kHz tone from a chip with DVSI's P25 option, "
+                    "silence from one without") as s:
+            def p25(n, r):
+                said = bench.ssh(r.host, "cd /tmp && ./mbe_dvsi_test.arm p25 p25_chip_frames.bin p25.s16", timeout=60)
+                scp_from(r.host, "/tmp/p25.s16", os.path.join(work, f"{n}_p25.s16"))
+                y = np.fromfile(os.path.join(work, f"{n}_p25.s16"), "<i2").astype(float)
+                tone, loud = tone_frames(y, 8000)
+                has = "P25" in got["chips"][n]
+                if has and tone < 20 or not has and loud:
+                    raise Refused(f"{got['chips'][n]}: {tone} frames of 1 kHz, {loud} loud ({said.strip()})")
+                return {"p25_option": has, "tone_frames": tone, "loud_frames": loud}
+            res = in_parallel(o, p25, 90)
+            got["p25"] = res
+            s.confirm("; ".join(f"{n} {'1 kHz in ' + str(v['tone_frames']) + ' of 30 frames' if v['p25_option'] else 'silent (no P25 option)'}"
+                                for n, v in res.items()))
+        with o.step("both chips left sending their parity field, as their daemons set them") as s:
+            on = parity(o)
+            if any(v != "parity on" for v in on.values()):
+                raise Refused(str(on))
+            s.confirm(str(on))
+    except Refused as e:
+        return False, str(e), got
+    return True, ("both chips: " + ", ".join(f"{n} {v}" for n, v in got["chips"].items()) + "; DMR and D-STAR speech "
+                  "through each and the other's, libmbe-dvsi alike with the parity field off, P25 where the chip has "
+                  "it"), got
+
+
+def dv_calls(o, work):
+    """The five calls as I/Q (2 MS/s int8, 200 kHz above centre) from the test speech: its DMR and D-STAR frames
+    made by the first radio's chip; {mode: path}"""
+    tools = dv_tools()
+    sp = dv_speech()
+    h = o.r[A].host
+    scp_to(h, [os.path.join(HERE, "ambe_port.py"), sp])
+    bench.ssh(h, "cd /tmp && python3 ambe_port.py enc 33 speech.s16 dv33.frames && "
+                 "python3 ambe_port.py enc dstar speech.s16 dvdstar.frames", timeout=120)
+    for f in ("dv33.frames", "dvdstar.frames"):
+        scp_from(h, f"/tmp/{f}", os.path.join(work, f))
+    for f, out in (("dv33.frames", "dmr9.ambe"), ("dvdstar.frames", "dstar9.ambe")):
+        fr = frames_of(os.path.join(work, f))
+        if any(b != 72 for b, _ in fr):
+            raise Refused(f"{f}: frames of another length")
+        open(os.path.join(work, out), "wb").write(b"".join(b for _, b in fr))
+    n = len(frames_of(os.path.join(work, "dv33.frames")))
+    d = os.path.join(TOP, "tools/dsdfme")
+    w = lambda f: os.path.join(work, f)         # noqa: E731
+    run_ok([tools["dmr_test"], "gen", w("dmr9.ambe"), w("dmr.dibits")])
+    run_ok([sys.executable, f"{d}/p25_mod.py", "iq", w("dmr.dibits"), w("dmr.iq"), "200000"],
+           env={"SHAPE": "rrc", "DEV": "648"})
+    run_ok([sys.executable, f"{d}/dstar_gen.py", "iq", w("dstar.iq"), "200000", "6"], env={"DSTAR_VOICE": w("dstar9.ambe")})
+    run_ok([tools["dmr_to_ambed"], w("dmr9.ambe")], out=w("v.ambed"))
+    run_ok([sys.executable, f"{d}/ysf/ysf_gen.py", w("v.ambed"), str((n + 4) // 5)], out=w("ysf.dibits"))
+    run_ok([sys.executable, f"{d}/p25_mod.py", "iq", w("ysf.dibits"), w("ysf.iq"), "200000"], env={"SHAPE": "rrc"})
+    run_ok([sys.executable, f"{d}/nxdn/nxdn_gen.py", w("dmr9.ambe"), str(n)], out=w("nxdn.dibits"))
+    run_ok([sys.executable, f"{d}/p25_mod.py", "iq", w("nxdn.dibits"), w("nxdn.iq"), "200000"],
+           env={"BAUD": "2400", "DEV": "350", "SHAPE": "rrc"})
+    run_ok([tools["p25_gen"], P25_FRAMES, "8"], out=w("p25.dibits"))
+    run_ok([sys.executable, f"{d}/p25_mod.py", "iq", w("p25.dibits"), w("p25.iq"), "200000"])
+    return {m: w(f"{m}.iq") for m in ("dmr", "dstar", "ysf", "nxdn", "p25")}
+
+
+def dv_replay(o, n, iq, wav):
+    """iq replayed into a test SDR daemon on radio n (dv_replay.py, 1.0584 MS/s): (calls said, the audio, its rate)"""
+    import subprocess
+    import wave
+    r = subprocess.run([sys.executable, os.path.join(HERE, "dv_replay.py"), o.r[n].host, iq, "--rate", "1058400",
+                        "--secs", "12", "--wav", wav], capture_output=True, text=True, timeout=240)
+    calls = [l[5:] for l in r.stdout.splitlines() if l.startswith("CALL ")]
+    if not os.path.exists(wav):
+        raise Refused(f"no audio from the test daemon: {(r.stdout + r.stderr).strip()[-200:]}")
+    w = wave.open(wav)
+    return calls, np.frombuffer(w.readframes(w.getnframes()), "<i2").astype(float), w.getframerate()
+
+
+_DV_CALLS = {}          # the calls made this process: {run dir: {mode: path}} (each dv test makes them once a run)
+
+
+def dv_voice(o, m, parity_off=False):
+    """B's digital voice on both radios, each through its own AMBE chip: a call of mode m (DMR, D-STAR, YSF, NXDN48,
+    P25 phase 1) made of the test speech, replayed into a test SDR daemon beside B's (no SDR needed): the call shown
+    with its IDs (DV_CALL) and its voice heard (against the speech: DV_R); P25's 1 kHz frames heard where the chip has
+    DVSI's P25 option and silent where not (libmbe-dvsi's rule). parity_off: with the chips' parity field off (the
+    test daemon's reading of the chip's answers through B's daemon's port), put back on after"""
+    got = {}
+    x = np.fromfile(dv_speech(), "<i2").astype(float)
+    work = os.path.join(o.st.run_dir or DV, "dv")
+    os.makedirs(work, exist_ok=True)
+    try:
+        with o.step(f"the {m.upper()} call made from the test speech (its voice frames by {A}'s chip)") as s:
+            if work not in _DV_CALLS:
+                _DV_CALLS[work] = dv_calls(o, work)
+            iq = _DV_CALLS[work][m]
+            ids = chip_ids(o)
+            got["chips"] = ids
+            s.confirm(f"{os.path.getsize(iq) / 4e6:.1f} s of I/Q; chips {ids}")
+        what = f"{m.upper()} replayed into both radios' SDR" + (" with the chips' parity field off" if parity_off else "")
+        with o.step(f"{what}: the call ({DV_CALL[m]}) and its voice") as s:
+            def one(n, r):
+                said, y, fs = dv_replay(o, n, iq, os.path.join(work, f"{n}_{m}{'_nopar' if parity_off else ''}.wav"))
+                want = DV_CALL[m]
+                seen = [c for c in said if want in c]
+                if not seen:
+                    raise Refused(f"no call '{want}' ({said[:3]})")
+                if m == "p25":
+                    tone, loud = tone_frames(y, fs)
+                    if "P25" in ids[n]:
+                        if tone < 100:
+                            raise Refused(f"{tone} frames of its 1 kHz (of {loud} loud), 100 wanted")
+                        return {"call": seen[0], "tone_frames": tone}
+                    if tone:
+                        raise Refused(f"{ids[n]} (no P25 option): {tone} frames of a tone, silence wanted")
+                    return {"call": seen[0], "silent": True}
+                r_, lag = env_r(x, 8000, y, fs)
+                if r_ < DV_R[m]:
+                    raise Refused(f"the voice against the speech r {r_:.3f} (>= {DV_R[m]} wanted)")
+                return {"call": seen[0], "voice_r": round(r_, 3)}
+            try:
+                if parity_off:
+                    p = parity(o, "off")
+                    if any(v != "parity off" for v in p.values()):
+                        raise Refused(f"the parity field not turned off: {p}")
+                res = in_parallel(o, one, 300)
+            finally:
+                if parity_off:
+                    parity(o, "on")
+            got[m] = res
+            s.confirm("; ".join(f"{n} " + (f"voice r {v['voice_r']}" if "voice_r" in v else
+                                           f"{v['tone_frames']} frames of 1 kHz" if "tone_frames" in v
+                                           else "silent (no P25 option)") for n, v in res.items()))
+        if parity_off:
+            with o.step("both chips' parity field on again") as s:
+                p = parity(o)
+                if any(v != "parity on" for v in p.values()):
+                    raise Refused(str(p))
+                s.confirm(str(p))
+    except Refused as e:
+        return False, str(e), got
+    return True, f"{m.upper()}: " + "; ".join(f"{n} {v['call']}, " + (f"voice r {v['voice_r']}" if "voice_r" in v else
+                                                                   f"{v['tone_frames']} frames of 1 kHz" if
+                                                                   "tone_frames" in v else "silent")
+                                              for n, v in got[m].items()), got
+
+
 class Test:
     def __init__(self, name, role, what, fn, est_s):
         self.name, self.role, self.what, self.fn, self.est_s = name, role, what, fn, est_s
@@ -3451,6 +3864,12 @@ TESTS = [
           lambda s, l, n: (lambda o: cw_text(o, s, l, 14040000, n)), 30),
     *pair("power-steps", "", "USB 14.200: a tone at 0.2, 0.5, 1.0 W; the other's level must rise 4.0 and 3.0 dB (2 dB)",
           lambda s, l, n: (lambda o: power_steps(o, s, l, 14200000, n)), 45),
+    *pair("power-6m", "", "USB 50.200: a tone at 0.1, 0.3, 1.0 W; the other's level must rise 4.8 and 5.2 dB (2 dB): "
+          "no floor under 1 W (the factory X6100's 0.8 W at 0.1 W)",
+          lambda s, l, n: (lambda o: power_steps(o, s, l, 50200000, n, POWER_6M)), 45),
+    *pair("power-6m-fm", "", "FM 52.525 with no audio: the carrier at 0.1, 0.3, 1.0 W; the other's level must rise "
+          "4.8 and 5.2 dB (2 dB): no floor in the base's own power setting (the factory X6100's 1.0-1.2 W in FM at "
+          "0.1 W, 2026-11-22)", lambda s, l, n: (lambda o: power_steps(o, s, l, 52525000, n, POWER_6M, mode=7)), 45),
     *pair("ft8-cq", "", "FT8 14.074: a CQ in the next slot, the other must decode exactly the message sent",
           lambda s, l, n: (lambda o: ft8_cq(o, s, l, n)), 40),
     *pair("psk31-text", "", "PSK31 on the listener's app dial: 'CQ CQ DE Q1TST Q1TST K' sent, decoded with at most 5 % "
@@ -3509,6 +3928,23 @@ TESTS = [
          "SIGSEGV of 20:36)", t_js8_close_to_g, 90),
     Test("system-health", "both", "battery log fresh, clock within 1.5 s, the data partition read-write, on both",
          t_system_health, 10),
+    Test("ambe-vocoder", "both RX", "each radio's AMBE chip through its SDR daemon: the parity field asked for, the "
+         "speech through each chip at DMR's and D-STAR's rates and the other's frames, libmbe-dvsi alike with the "
+         "parity field off, P25 full rate only on a chip with the P25 option", t_ambe_vocoder, 150),
+    Test("dv-dmr", "both RX", "a DMR call of the test speech replayed into each radio's SDR daemon: TG 3100 from "
+         "3112345 shown, its voice through the radio's own AMBE chip like the speech (r >= 0.9)",
+         lambda o: dv_voice(o, "dmr"), 70),
+    Test("dv-dmr-noparity", "both RX", "the DMR call again with both chips' parity field off: the test daemon reads "
+         "the chip's answers whole through B's daemon's port; the field on again after",
+         lambda o: dv_voice(o, "dmr", parity_off=True), 60),
+    Test("dv-dstar", "both RX", "a D-STAR call of the test speech: CQCQCQ from N0CALL shown, its voice heard "
+         "(r >= 0.4)", lambda o: dv_voice(o, "dstar"), 60),
+    Test("dv-ysf", "both RX", "a YSF call of the test speech: CQCQCQ from N0CALL shown, its voice heard (r >= 0.7)",
+         lambda o: dv_voice(o, "ysf"), 60),
+    Test("dv-nxdn", "both RX", "an NXDN48 call of the test speech: TG 100 from 1234 shown, its voice heard "
+         "(r >= 0.75)", lambda o: dv_voice(o, "nxdn"), 60),
+    Test("dv-p25", "both RX", "a P25 phase 1 call (1 kHz IMBE frames): TG 4321 from 1234567 shown; the tone heard "
+         "where the chip has DVSI's P25 option, silence where it has not", lambda o: dv_voice(o, "p25"), 60),
     Test("tci-audio-rate", "both RX", "each radio's TCI receiver audio at 97-103 % of real time", t_tci_audio_rate, 15),
     Test("tci-takes-control", "both RX", "a TCI client's set takes control (ctl tci) on both; gone, control back",
          t_tci_takes_control, 20),

@@ -30,9 +30,13 @@ define X6X00_DSD_FME_MBE_DVSI
 endef
 X6X00_DSD_FME_PRE_CONFIGURE_HOOKS += X6X00_DSD_FME_MBE_DVSI
 
+# No RTL-SDR in it: its samples come from the SDR daemon on stdin, and with the image's librtlsdr found it needed
+# librtlsdr.so.0, which a card from before the shared library (the X6200's) lacks: the bundle's dsd-fme did not start
+# there, and B had no P25, D-STAR, YSF or NXDN on it from 2026-11-19 (found 2026-11-24)
 X6X00_DSD_FME_CONF_OPTS = \
 	-DMBE_INCLUDE_DIR=$(@D)/mbe-dvsi \
 	-DMBE_LIBRARY=$(@D)/mbe-dvsi/libmbe.a \
+	-DCMAKE_DISABLE_FIND_PACKAGE_RTLSDR=TRUE \
 	-DCOLORS=OFF
 
 $(eval $(cmake-package))

@@ -120,7 +120,14 @@ static int xfer(int type, const uint8_t *p, int n, int *rtype, uint8_t *r, int m
         len = in[1] << 8 | in[2];
         if (len + 4 > (int)sizeof(in) || read_by(in + 4, len, end)) return -1;
     }
-    if (len >= 2 && in[4 + len - 2] == 0x2F) len -= 2;
+    {                                   /* the parity field off, when there is one: 0x2F and the XOR of every byte
+                                         * after the 0x61 before it. The DVMega's AMBE3000F sends none until asked: a
+                                         * frame whose next to last byte was 0x2F lost its last two (2026-11-24) */
+        uint8_t x = 0;
+
+        for (int i = 1; i < 4 + len; i++) x ^= in[i];
+        if (len >= 2 && in[4 + len - 2] == 0x2F && x == 0) len -= 2;
+    }
     if (len > max) len = max;
     *rtype = in[3];
     memcpy(r, in + 4, (size_t)len);
@@ -133,6 +140,8 @@ static int ctl(const uint8_t *q, int n) {
 
     return k >= 2 && t == 0 && r[0] == q[0] && r[1] == 0 ? 0 : -1;
 }
+
+static int p25_full;                    /* the chip has P25 phase 1's full rate (open_chip) */
 
 static void open_chip(void) {
     const char *w = getenv("DSD_DVSI");
@@ -172,6 +181,13 @@ static void open_chip(void) {
 
     if (fd >= 0 && (k = xfer(0, (const uint8_t[]){0x30}, 1, &t, r, sizeof(r))) > 1 && memmem(r, (size_t)k, "AMBE", 4)) {
         fprintf(stderr, "libmbe-dvsi: %.*s at %s\n", k - 1, (const char *)r + 1, w && *w ? w : "127.0.0.1:2460");
+        /* P25 phase 1's full rate is DVSI's P25 option, in the product ID: the USB-3000's AMBE3000P25F has it; the
+         * DVMega stick's AMBE3000F takes the rate words all the same and makes a wrong voice of the frames (a 1 kHz
+         * test frame came out at 782 Hz, 2026-11-24) */
+        p25_full = memmem(r, (size_t)k, "P25", 3) != NULL;
+        if (!p25_full)
+            fprintf(stderr, "libmbe-dvsi: %.*s has no P25 full rate (DVSI's P25 option): P25 phase 1 voice "
+                            "silent on it\n", k - 1, (const char *)r + 1);
         rate = -1;
         return;
     }
@@ -183,6 +199,7 @@ static void open_chip(void) {
 
 /* One stream holds the chip; another's frames are silence till 300 ms after its last */
 static const void *holder;
+static int         fresh;               /* the decoder to start from fresh (PKT_INIT) before the next frame */
 
 static int may(const void *who) {
     long t = now_ms();
@@ -190,10 +207,18 @@ static int may(const void *who) {
     if (holder && holder != who && t - last_ms < 300) return 0;
     if (holder != who) {
         holder = who;
-        if (fd >= 0) ctl((const uint8_t[]){0x0B, 0x02}, 2);     /* the decoder from fresh for it */
+        fresh  = 1;                     /* the decoder from fresh for it (at_rate: once its rate is set) */
     }
     last_ms = t;
     return 1;
+}
+
+/* The decoder started from fresh when a stream took the chip, or when the rate it decodes at was changed: after the
+ * rate is set, as a decoder set up at another rate and then given this one carried that state on (the X6100's
+ * USB-3000 after D-STAR's rate: a DMR call's first 115 frames decoded otherwise, up to 5045 apart, 2026-11-24) */
+static void at_rate(int changed) {
+    if ((fresh || changed) && fd >= 0) ctl((const uint8_t[]){0x0B, 0x02}, 2);
+    fresh = 0;
 }
 
 /* 49 voice bits (u0 u1 u2 u3) at rate 34: 160 samples, 0 none */
@@ -204,8 +229,11 @@ static int decode49(const char d[49], float *out) {
     open_chip();
     if (fd < 0) return 0;
     /* rate 34 when it was not, and again after a pause (the SDR daemon sets 33 for its own DMR in between) */
+    int was = rate;
+
     if ((rate != 34 || now_ms() - rate_ms > 100) && ctl((const uint8_t[]){0x09, 34}, 2) == 0) rate = 34;
     rate_ms = now_ms();
+    at_rate(was != 34);
     for (int i = 0; i < 49; i++)
         if (d[i] & 1) q[2 + u_to_chip[i] / 8] |= (uint8_t)(0x80 >> (u_to_chip[i] % 8));
     n = xfer(1, q, sizeof(q), &t, r, sizeof(r));
@@ -351,7 +379,12 @@ static int decode_p25(const uint8_t b[18], float *out) {
     int                  t, n;
 
     open_chip();
-    if (fd < 0) return 0;
+    if (fd < 0 || !p25_full) return 0;
+    if (fresh) {                        /* before the full rate is set, as before: a PKT_INIT at full rate may make
+                                         * this chip restart (its encoder's does) */
+        ctl((const uint8_t[]){0x0B, 0x02}, 2);
+        fresh = 0;
+    }
     if (rate == -1) warm = 0;           /* just found, or it rebooted */
     if (!warm) {                        /* a frame at rate 33 first: full rate as the first frame reboots it */
         uint8_t z[11] = {0x01, 72};
@@ -567,8 +600,11 @@ static int decode_dstar(char ambe_fr[4][24], float *out) {
 
     open_chip();
     if (fd < 0) return 0;
+    int was = rate;
+
     if ((rate != RATE_DSTAR || now_ms() - rate_ms > 100) && ctl(ratep, sizeof(ratep)) == 0) rate = RATE_DSTAR;
     rate_ms = now_ms();
+    at_rate(was != RATE_DSTAR);
     for (int i = 0; i < 72; i++)
         if (ambe_fr[dW[i]][dX[i]] & 1) q[2 + i / 8] |= (uint8_t)(1 << (i % 8));
     n = xfer(1, q, sizeof(q), &t, r, sizeof(r));

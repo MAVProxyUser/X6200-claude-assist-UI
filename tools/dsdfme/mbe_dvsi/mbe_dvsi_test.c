@@ -6,19 +6,61 @@
  *  three bit errors in each of C0 and C1: the same speech out of both (the codes put them right).
  *
  *      mbe_dvsi_test frames.ambe out_clean.s16 out_errors.s16
+ *
+ *  And P25 phase 1 (the orchestrator's ambe-vocoder test): IMBE frames (144 bits as sent, 18 bytes each, from a file)
+ *  sorted as dsd-fme sorts them and through mbe_processImbe7200x4400Framef: speech from a chip with DVSI's P25 option,
+ *  silence from one without it (the DVMega stick's AMBE3000F decodes them wrong).
+ *
+ *      mbe_dvsi_test p25 frames.bin out.s16
  */
 #include "mbelib.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static const int rW[36] = {0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2};
 static const int rX[36] = {23, 10, 22, 9, 21, 8, 20, 7, 19, 6, 18, 5, 17, 4, 16, 3, 15, 2, 14, 1, 13, 0, 12, 10, 11, 9, 10, 8, 9, 7, 8, 6, 7, 5, 6, 4};
 static const int rY[36] = {0, 2, 0, 2, 0, 2, 0, 2, 0, 3, 0, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3};
 static const int rZ[36] = {5, 3, 4, 2, 3, 1, 2, 0, 1, 13, 0, 12, 22, 11, 21, 10, 20, 9, 19, 8, 18, 7, 17, 6, 16, 5, 15, 4, 14, 3, 13, 2, 12, 1, 11, 0};
 
+void mbe_dvsi_imbe_sort(const unsigned char b[18], char imbe_fr[8][23]);
+
+static int p25(const char *in, const char *out_path) {
+    FILE         *f = fopen(in, "rb"), *o = fopen(out_path, "wb");
+    unsigned char b[18];
+    int           n = 0, voiced = 0;
+    mbe_parms     cur, prev, enh;
+
+    const char *g = getenv("P25_BURST_MS");     /* as dsd-fme gives them: nine frames (an LDU) at a time, this apart */
+    int         gap = g ? atoi(g) : 0;
+
+    if (!f || !o) return 2;
+    mbe_initMbeParms(&cur, &prev, &enh);
+    while (fread(b, 18, 1, f) == 1) {
+        if (gap && n && n % 9 == 0) usleep((useconds_t)gap * 1000);
+        char  fr[8][23], d[88];
+        float out[160];
+        short s[160];
+        int   errs = 0, errs2 = 0, loud = 0;
+
+        mbe_dvsi_imbe_sort(b, fr);
+        mbe_processImbe7200x4400Framef(out, &errs, &errs2, NULL, fr, d, &cur, &prev, &enh, 3);
+        mbe_floattoshort(out, s);
+        for (int i = 0; i < 160; i++) loud |= s[i] > 100 || s[i] < -100;
+        voiced += loud;
+        fwrite(s, 2, 160, o);
+        n++;
+    }
+    fclose(f);
+    fclose(o);
+    printf("%d frames; %d with sound\n", n, voiced);
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 4 && !strcmp(argv[1], "p25")) return p25(argv[2], argv[3]);
     FILE         *f = fopen(argv[1], "rb");
     unsigned char b[9];
     int           n = 0, fixed = 0;

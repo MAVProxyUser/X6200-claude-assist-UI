@@ -13,9 +13,20 @@ they were, each item's state brought here when it changed).
 
 Open, mine to do:
 - **Every test through the orchestrator** (the owner, 11-24: "all tests should ultimately use the same orchestration
-  framework", "whittle down the tests to essential testable things, not slop"): tools/bench/orch.py has 67 tests (all
-  pass, 2026-11-24); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386 features listed,
-  ~1040 not covered on 11-23) still run outside it. Left: pick the essential ones of features.json and move them in.
+  framework", "whittle down the tests to essential testable things, not slop"; and "ensure that your changes have
+  tests, that in turn get run through http://127.0.0.1:8765"): tools/bench/orch.py has 77 tests (2026-11-24 13:00:
+  74 pass, 3 KNOWN below); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386
+  features listed, ~1040 not covered on 11-23) still run outside it. Left: pick the essential ones of features.json
+  and move them in (surveyed 11-24: receive settings beyond rx-settings (VFO, split, RIT, XIT, filters, zoom, IF
+  shift), the band plan (mode from plan, lock per band, transverters, TX shift), the safety refusals not in orch
+  (TCI out of band, TCI CW, A/B arming), TCI and rigctl answers, the web pages and guards, the system checks).
+- **B's D-STAR and P25 voice through the SDR daemon** (found 11-24 with dv-dstar, dv-p25: KNOWN): D-STAR's voice drops
+  out partway through a call on both radios, and the X6100's P25 voice (1 kHz frames) turns into 400 Hz after half a
+  second. dsd-fme's own speech is right (caught on its UDP port) and the chip through libmbe-dvsi too: the daemon's
+  play-out of it (tools/rtlspec/dsd.c) is where to look.
+- **The X6200's dsd-fme in the image**: the bundle's copy needed librtlsdr.so.0, which the X6200's card lacks: B had
+  no P25, D-STAR, YSF or NXDN there from 11-19 to 11-24. The package builds it without RTL-SDR now; the X6200 runs the
+  Mac build (hot install) till the next image and bundle (a tag, the owner's word).
 - The X6200 taking no LSB-D (mode 1): NOT REPRODUCED 2026-11-24 (the later caps runs read it on both; both took it
   from LSB on 7.074). Closed.
 - **A TCI over unkeys before its audio is out**: the sender drops what is still in its transmit path (0.3-0.5 s on
@@ -30,6 +41,23 @@ Open, mine to do:
   upstream's thread; the USER page has no labels for upstream's 200+ apps.
 - Both radios' CW decoders lose the dits of the first characters ('VVV' prints 'TTT'): a decoder that locks sooner
   would copy short overs whole (noted; the tests send two V groups first).
+
+Done 2026-11-24 afternoon (the owner: "I just connected a DVMega to the 6200 and a p25 USB3000 to the other... do some
+more AMBE tests", "The 6 m output floor... maybe time to revisit now? same with the image shifts?"):
+- AMBE: the DVMega stick (`AMBE3000F`, X6200) and the USB-3000 (`AMBE3000P25F`, X6100) decode DMR and D-STAR alike (the
+  speech r 0.97/0.95 through each, and through the other's frames). Fixed: the stick sends no parity field until
+  asked and three parsers cut frames ending in 0x2F (ambe.c, libmbe-dvsi); P25 full rate only on a chip with the P25
+  option (the stick decoded it to 782 Hz); libmbe-dvsi's decoder reset before its rate. Tests in orch: ambe-vocoder,
+  dv-dmr, dv-dmr-noparity, dv-ysf, dv-nxdn (pass), dv-dstar, dv-p25 (KNOWN, above).
+- 6 m: power-6m (USB, a TCI tone at 0.1/0.3/1.0 W) passes both ways: the X6100 heard +6.0/+5.0 dB apart, its meter
+  0.1/0.3/1.1 W, so its 6 m floor is gone wherever the GUI sets the drive (TCI, the digital apps). power-6m-fm (the
+  base's own carrier): the X6200 follows; the factory X6100 stays at about 1 W at any setting under 1 W (KNOWN: its
+  base's ALC-only control; the base fix waits on the owner's go).
+- The image shift (X6100 15/12 m): not measurable under the bench's rule since 11-23 (image.py needs the listener 1.5
+  kHz below the sender; the Watch stops an over from radios set apart, and the X6200's spectrum cannot tell its own RX
+  image from the X6100's TX image on one dial). The owner's call: an exception for that test, or leave it.
+- The console (http://127.0.0.1:8765) lists the earlier results the latest first (the owner).
+- Closed by the owner: new HTTPS keys on the radios ("nope, we don't care").
 
 Open, the owner's call or hands:
 - **CW from the X6100 misread by the X6200's decoder** (orch cw-text x6100>x6200): FIXED 2026-11-24, no longer a
@@ -147,8 +175,7 @@ stops happening"; "a comprehensive set of unit tests to cover EVERYTHING 1:1 on 
   radios (3906e452; the radios keep serving it until the next image: the web server is bytecode there); a TCI vfo or
   modulation the radio refused (LOCK, an app's hold) went unanswered; the X6200's Panel drew its 192/384 kHz zooms
   over a 100 kHz scale (the copy for the browser labelled wf_span(): 2-4x off, a tap tuning beside the signal).
-  OPEN, the owner's call: whether to make the radios' HTTPS keys anew (rm /mnt/https/*, the web server restarted:
-  browsers warn once more), as the old ones were downloadable on the LAN.
+  CLOSED 2026-11-24 (the owner: "nope, we don't care"): the radios' HTTPS keys are kept, not made anew.
 - DONE (the owner: "Yes, log Q9TST"): the Log tab's tests on both radios 1:1: log in USB (SSB 57/58, name and grid),
   logq sent, repeated (written once), asked, a conflict, an unknown number. WSJT-X UDP (enabled=1 on both, multicast
   and the gateway) switched off for the test and put back byte for byte, so no Q9TST reached a PC logger; the day's

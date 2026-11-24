@@ -52,7 +52,7 @@ TC
 cmake -S "$B/src" -B "$B/cmake" -DCMAKE_TOOLCHAIN_FILE="$B/toolchain.cmake" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="$B/prefix" -DMBE_INCLUDE_DIR="$B/prefix/include" -DMBE_LIBRARY="$B/prefix/lib/libmbe.a" \
     -DCURSES_INCLUDE_PATH="$SYS/usr/include" -DCURSES_LIBRARY="$MA/libncurses.so" \
-    -DCURSES_NCURSES_LIBRARY="$MA/libncurses.so" -DCOLORS=OFF > "$B/cmake.log" 2>&1 || { tail -30 "$B/cmake.log"; exit 1; }
+    -DCURSES_NCURSES_LIBRARY="$MA/libncurses.so" -DCMAKE_DISABLE_FIND_PACKAGE_RTLSDR=TRUE -DCOLORS=OFF > "$B/cmake.log" 2>&1 || { tail -30 "$B/cmake.log"; exit 1; }
 cmake --build "$B/cmake" -j8 > "$B/build.log" 2>&1 || { grep -E "error|Error" "$B/build.log" | head -30; exit 1; }
 cp "$B/cmake/dsd-fme" "$B/out/dsd-fme"
 arm-linux-gnueabihf-strip -o "$B/out/dsd-fme.stripped" "$B/out/dsd-fme"

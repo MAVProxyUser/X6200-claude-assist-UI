@@ -5,9 +5,10 @@ its own DMR and dsd-fme's P25, D-STAR, YSF and NXDN, their voice through the USB
 (127.0.0.1:2460). What the test daemon says of the call, and the audio it makes, are counted; the audio kept as a WAV.
 
     dv_replay.py HOST FILE.iq [--fs 2000000] [--offset 200000] [--at 441000000] [--secs 20] [--daemon PATH]
-                 [--wav OUT.wav]
+                 [--wav OUT.wav] [--rate 2116800]
 
-FILE.iq is resampled to 2.1168 MS/s (the daemon listens only at multiples of 264.6 kHz) as unsigned 8-bit I/Q with its
+FILE.iq is resampled to RATE, 2.1168 MS/s or 1.0584 (the daemon listens only at multiples of 264.6 kHz: the second
+half the file to copy over) as unsigned 8-bit I/Q with its
 signal OFFSET above centre. The test daemon is the radio's own /usr/bin/x6x00-rtlspec unless --daemon names a build to
 copy over (it must leave the vocoder's serial port to B's daemon and reach the chip through its port: ambe.c's
 "another daemon's" rule, DMR's frames too from 2026-11-18). Receive only: nothing goes on the air.
@@ -86,8 +87,10 @@ def main():
     ap.add_argument("--fs", type=int, default=2000000); ap.add_argument("--offset", type=int, default=200000)
     ap.add_argument("--at", type=int, default=441000000); ap.add_argument("--secs", type=float, default=20)
     ap.add_argument("--daemon", default=None); ap.add_argument("--wav", default=None)
+    ap.add_argument("--rate", type=int, default=2116800, choices=(1058400, 2116800))
+    ap.add_argument("--env", action="append", default=[], help="NAME=VALUE for the test daemon (its dsd-fme too)")
     a = ap.parse_args()
-    fs_out = 2116800
+    fs_out = a.rate
     with tempfile.TemporaryDirectory() as td:
         u8 = os.path.join(td, "dv.u8")
         resample(a.file, u8, a.fs, fs_out, a.offset)
@@ -98,7 +101,8 @@ def main():
         if r.returncode:
             sys.exit(f"scp: {r.stderr.strip()}")
     daemon = "/tmp/" + os.path.basename(a.daemon) if a.daemon else "/usr/bin/x6x00-rtlspec"
-    r = ssh(a.host, f"chmod 755 {daemon}; RTLSPEC_DSD_PORT=23480 {daemon} -F -S x6x00-dvtest -i /tmp/dv.u8 -s {fs_out} "
+    env = " ".join(e for e in a.env if "=" in e and " " not in e and ";" not in e)
+    r = ssh(a.host, f"chmod 755 {daemon}; {env} RTLSPEC_DSD_PORT=23480 {daemon} -F -S x6x00-dvtest -i /tmp/dv.u8 -s {fs_out} "
                     f"-f {a.at - a.offset} 2> /tmp/dvtest.log & sleep 3; python3 /tmp/dvclient.py x6x00-dvtest {a.at} "
                     f"{a.secs} /tmp/dvaud.raw {a.offset}; kill $! 2>/dev/null; sleep 1; "
                     f"grep -c 'another daemon' /tmp/dvtest.log; rm -f /tmp/dv.u8 /tmp/dvclient.py"

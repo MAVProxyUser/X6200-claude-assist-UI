@@ -9,6 +9,12 @@
  *  the calls end. Then noise alone and an FM tone: no sync.
  *
  *      cc -O2 -o dmr_test dmr_test.c dmr.c -lm && ./dmr_test
+ *
+ *  And a call made for the bench (the orchestrator's dv-voice test: tools/dsdfme/p25_mod.py, SHAPE=rrc DEV=648,
+ *  modulates it): the same repeater's group call on TS1 (3100 from 3112345, colour code 1) carrying the AMBE+2
+ *  frames of a file (9 bytes each, as an AMBE-3000 at rate 33 gives them), TS2 idle, one byte a dibit:
+ *
+ *      dmr_test gen FRAMES.ambe OUT.dibits
  */
 
 #include "dmr.h"
@@ -119,6 +125,8 @@ static void idle_burst(int slot) {
 /* The frames sent, by slot, to be found again */
 #define MAXF 256
 static uint8_t sent[3][MAXF][9], got[3][MAXF][9];
+static uint8_t *gen_fr;                 /* dmr_test gen: the call's frames (9 bytes each), gen_n of them */
+static int      gen_n, gen_i;
 static int     nsent[3], ngot[3];
 
 /* A voice burst: three random frames; A its sync, B-F the EMB (colour code 1, lcss) and 32 bits of the embedded LC */
@@ -128,7 +136,8 @@ static void voice_burst(int slot, int vf, const uint8_t elc[128]) {
     for (int f = 0; f < 3; f++) {
         uint8_t *s = sent[slot][nsent[slot]];
 
-        for (int i = 0; i < 9; i++) s[i] = (uint8_t)rand();
+        if (gen_n) memcpy(s, gen_fr + 9 * (gen_i++ % gen_n), 9);     /* the bench's call: its frames in turn */
+        else for (int i = 0; i < 9; i++) s[i] = (uint8_t)rand();
         bits_of(s, 72, fr[f]);
         if (nsent[slot] < MAXF - 1) nsent[slot]++;
     }
@@ -347,7 +356,39 @@ static void no_dmr(const char *name, int tone) {
     dmr_free(d);
 }
 
-int main(void) {
+/* dmr_test gen: TS1's group call with every frame of the file once (whole superframes: the last frames again to
+ * fill the last), its headers and terminators, TS2 idle; the dibits out */
+static int gen(const char *in, const char *out) {
+    static const uint8_t lc1[9] = {0x00, 0x00, 0x00, 0x00, 0x0C, 0x1C, 0x2F, 0x7D, 0x99};   /* group 3100 <- 3112345 */
+    uint8_t              elc1[128];
+    FILE                *f = fopen(in, "rb"), *o;
+    long                 len;
+
+    if (!f || fseek(f, 0, SEEK_END) || (len = ftell(f)) < 9) return 2;
+    rewind(f);
+    gen_n  = (int)(len / 9);
+    gen_fr = malloc((size_t)gen_n * 9);
+    if (!gen_fr || fread(gen_fr, 9, (size_t)gen_n, f) != (size_t)gen_n) return 2;
+    fclose(f);
+    dmr_elc_encode(lc1, elc1);
+    for (int i = 0; i < 4; i++) idle_burst(1), idle_burst(2);
+    for (int i = 0; i < 3; i++) lc_burst(1, lc1, 0x96, 1), idle_burst(2);
+    for (int sf = 0; sf * 18 < gen_n; sf++)
+        for (int vf = 0; vf < 6; vf++) {
+            voice_burst(1, vf, elc1);
+            nsent[1] = 0;               /* the check's record of frames sent: not kept for a call this long */
+            idle_burst(2);
+        }
+    for (int i = 0; i < 2; i++) lc_burst(1, lc1, 0x99, 2), idle_burst(2);
+    for (int i = 0; i < 4; i++) idle_burst(1), idle_burst(2);
+    if (!(o = fopen(out, "wb")) || fwrite(dibits, 1, (size_t)ndib, o) != (size_t)ndib) return 2;
+    fclose(o);
+    printf("%d frames in %d dibits (%.1f s)\n", gen_n, ndib, ndib / 4800.0);
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    if (argc == 4 && !strcmp(argv[1], "gen")) return gen(argv[2], argv[3]);
     srand(1);
     run("clean", 0.0, 0, 0);
     run("noisy (SNR about 20 dB), 300 Hz off, clock 20 ppm fast", 0.02, 300, 20);
