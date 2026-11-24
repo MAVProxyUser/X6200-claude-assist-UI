@@ -32,6 +32,7 @@ import os
 import signal
 import sys
 import threading
+import types
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -184,9 +185,10 @@ th{color:var(--dim);font-weight:normal}.PASS{color:var(--ok)}.FAIL{color:var(--b
 <main>
 <section class="wide"><h2>Radios</h2><div id="sync"></div><div class="radios" id="radios" style="margin-top:8px"></div></section>
 <section class="wide"><h2>Now</h2><div id="now"></div><div class="bar"><div id="prog" style="width:0"></div></div></section>
-<section class="wide"><h2>Tests</h2><table><thead><tr><th>#</th><th>test</th><th>role</th><th>result</th><th>secs</th><th>what it found</th></tr></thead><tbody id="tests"></tbody></table></section>
+<section class="wide"><h2>This run: only the tests not passed yet (and any new ones)</h2><table><thead><tr><th>#</th><th>test</th><th>role</th><th>result</th><th>secs</th><th>what it found</th></tr></thead><tbody id="tests"></tbody></table></section>
+<section class="wide"><h2 id="kepth">Not rerun: passed in an earlier run (or a known fault), kept in orch_results.json</h2><table><thead><tr><th>test</th><th>result</th><th>when</th><th>GUI</th><th>what it found</th></tr></thead><tbody id="kept"></tbody></table></section>
 <section class="wide"><h2>Where the two radios differ (the caps test: the same value sent to both, what each did)</h2><table><thead><tr><th>asked</th><th>X6100</th><th>X6200</th></tr></thead><tbody id="caps"></tbody></table></section>
-<section class="wide"><h2>Not run this time: their last result (kept across runs; <i>orch.py run --all</i> runs them again)</h2><table><thead><tr><th>test</th><th>result</th><th>when</th><th>GUI</th><th>what it found</th></tr></thead><tbody id="kept"></tbody></table></section>
+
 <section class="wide"><h2>Events (everything the orchestrator does; <a href="log" style="color:var(--amb)">the whole log</a>)</h2>
 <div><label><input type="checkbox" id="fcmd" checked> commands sent</label><label><input type="checkbox" id="fconf" checked> read-backs</label><label><input type="checkbox" id="fradio" checked> the radios' errors</label></div><div class="ev" id="ev"></div></section>
 </main>
@@ -196,12 +198,12 @@ const mhz=f=>f?(f/1e6).toFixed(4)+" MHz":"?";const t=s=>new Date(s*1000).toLocal
 const MODES={0:"LSB",1:"LSB-D",2:"USB",3:"USB-D",4:"CW",5:"CW-R",6:"AM",7:"NFM",8:"WFM"};
 async function tick(){let d;try{d=await (await fetch("status",{cache:"no-store"})).json()}catch(e){$("phase").textContent="console: no answer";return}
 $("phase").innerHTML="<b>"+esc(d.phase)+"</b>";const c=d.counts;
-$("counts").textContent=`${c.done}/${c.total} done: ${c.pass} pass, ${c.fail} fail, ${c.look} look, ${c.notrun} not run`;
+const kp=(d.kept||[]).filter(k=>k.result==="PASS"&&!k.known).length,kk=(d.kept||[]).filter(k=>k.known).length;$("counts").textContent=`this run: ${c.done}/${c.total} done: ${c.pass} pass, ${c.fail} fail, ${c.look} look, ${c.notrun} not run · not rerun: ${kp} passed before, ${kk} known faults (of ${c.total+(d.kept||[]).length} tests)`;$("kepth").textContent=`Not rerun: ${kp} passed in an earlier run, ${kk} known faults (kept in orch_results.json; orch.py run --all would run them again)`;
 const el=Math.round(d.now-d.t0);$("clock").textContent=`running ${Math.floor(el/60)}m${el%60}s, about ${Math.round(d.eta_s/60)} min left`;
 const s=d.sync;let cls=s.changing?"chg":(s.ok?"ok":"bad");
 $("sync").innerHTML=`<span class="sync ${cls}">${s.changing?"CHANGING BOTH":(s.ok?"IN SYNC":"OUT OF SYNC")}</span> <span class="muted">violations this run: ${s.violations}${s.last?" (last: "+esc(s.last)+")":""}</span>`;
 const hk=d.hackrf||{};
-$("radios").innerHTML=Object.entries(d.radios).map(([n,r])=>`<div class="radio"><b>${n.toUpperCase()}</b> <span class="${r.tx?"tx":"rx"}">${r.tx?"ON THE AIR":"RX"}</span>
+$("radios").innerHTML=["x6100","x6200"].map(n=>[n,d.radios[n]]).map(([n,r])=>!r?`<div class="radio"><b>${n.toUpperCase()}</b> <span class="LOOK">connecting</span><div class="freq" style="color:var(--dim)">?</div><div class="muted">no state from it yet</div></div>`:`<div class="radio"><b>${n.toUpperCase()}</b> <span class="${r.tx?"tx":"rx"}">${r.tx?"ON THE AIR":"RX"}</span>
 <div class="freq">${mhz(r.freq)}</div><div>${MODES[r.mode]||r.mode} &middot; ${r.pwr} W &middot; page ${esc(r.pg)} ${r.rxo===0?"&middot; <span class=tx>TX ARMED</span>":""}</div>
 <div class="muted">S ${r.meter==null?"?":r.meter.toFixed(1)+" dBm"} &middot; squelch ${esc(r.sql)} &middot; volume ${esc(r.vol)} &middot; app ${esc(r.app||"-")}</div>
 <div><b>should be: ${esc(r.role||"-")}</b> ${r.role==="TX"&&!r.tx?"<span class=muted>(between its sends)</span>":""}${r.role==="RX"&&r.tx?" <span class=tx>BUT TRANSMITS</span>":""}</div>
@@ -516,7 +518,7 @@ class Orch:
             self.changing -= 1
         return {k: bench._value(self.r[A], k) for k in want}
 
-    SQL_TRY = (2, 4, 6, 8, 10, 12, 15, 20, 25, 30)
+    SQL_TRY = (2, 4, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60)
 
     def squelch_cal(self):
         """The lowest squelch that silences both radios' quiet (their TCI audio with nothing sent: 20 dB under its
@@ -535,19 +537,23 @@ class Orch:
             self.both({"vol": 0, "sql": 0})
             time.sleep(1.0)
             open_ = {n: level(n) for n in self.r}
+            curve = []
             for q in self.SQL_TRY:
                 self.both({"sql": q})
                 time.sleep(1.0)
                 now = {n: level(n) for n in self.r}
-                if all(now[n] <= min(open_[n] - 20, -60) for n in self.r):
+                curve.append(f"{q}: " + "/".join(f"{now[n]:.0f}" for n in sorted(self.r)))
+                if all(now[n] <= max(open_[n] - 20, -60) for n in self.r):     # 20 dB down, or silent
                     self.sql = q
                     break
+            self.st.ev("squelch tried (dBFS of the quiet, " + "/".join(sorted(self.r)) + "): open "
+                       + "/".join(f"{open_[n]:.0f}" for n in sorted(self.r)) + "; " + ", ".join(curve), "conf")
         finally:
             for c in rx.values():
                 c.close()
         if self.sql is None:
             self.sql = 10
-            self.st.ev(f"no squelch up to {self.SQL_TRY[-1]} silenced the quiet ({open_} dBFS open): held at 10", "bad")
+            self.st.ev(f"no squelch up to {self.SQL_TRY[-1]} silenced the quiet ({open_} dBFS open): held at 10 (the TCI audio may not follow the squelch)", "bad")
         else:
             self.st.ev(f"squelch {self.sql} silences the quiet on both (open: {({n: round(v) for n, v in open_.items()})} "
                        f"dBFS, at {self.sql}: {({n: round(v) for n, v in now.items()})} dBFS); volume 0 on both", "ok")
@@ -762,82 +768,108 @@ def find_steps(x, fs=FS):
 
 
 SPEC_LO, SPEC_HI = 100, 3300   # Hz from the dial the spectrum judge looks in (a step 380 Hz low lands at 220 Hz)
+SPEC_TOL_HZ = 150           # a step in a fine spectrum within this of its tone + the radios' offset: the X6100's frames
+                            # are 1024 bins over 100 kHz (it keeps zoom 1 there), drawn in pairs: ~195 Hz a real bin;
+                            # its steps came within 120 Hz (2026-11-23, 6 overs saved)
+SPEC_MIN_DB = 6             # a step's own energy over the keyed silence around the sequence, at least
+SPEC_CARRIER_DB = 15        # AM: the carrier over the frames before the sender keyed
+# The radios whose spectrum cannot place a tone: the X6200 sends its base's own spectrum (dsp_psd: ~750 Hz bins, the
+# zoom only stretches them), one tone a hump ~2-3 kHz wide. There the steps' centres must rise in order; their exact
+# frequencies come from its audio
+SPEC_COARSE = {B: "its base's own spectrum (bins ~750 Hz wide, stretched over the zoom)"}
 
 
-def spec_steps(L, f, mode, t0, t1):
-    """The stepped sequence in the listener's own spectrum (the remote's frames, ~10 a second; zoom 8: 12 Hz a bin)
-    between t0 and t1 (the sender's own on and off): per frame the strongest bin 100-3300 Hz from the dial on the side
-    the mode sends (below it in LSB; AM's upper sideband, its carrier left out), its height over the frame's median.
-    The clear steps (runs of one bin within 25 Hz, 15 dB up, at least STEP_S * 0.5) give the timing and the radios'
-    offset; then each step's own frames (its window trimmed 0.1 s) averaged: the bin at the dial + (tone + offset) must
-    be the strongest there and STEP_SNR_DB over the median. Returns (found, offset, [per step: (heard Hz from the dial,
-    dB, frames)], frames seen)"""
-    frames = [(t, cen, wid, v) for (t, cen, wid, v) in list(L.r.spectra) if t0 <= t <= t1 and v]
-    if len(frames) < 10:
-        return False, None, [], len(frames)
+def spec_steps(L, f, mode, on, off, coarse=False):
+    """The stepped sequence in the listener's own spectrum (the frames its screen draws, ~8 a second) while the
+    sender was on the air (on..off, the sender's own state). The sequence's start is fitted (the tones begin after the
+    lead and the transmitter's latency, 0.7-0.9 s here): each step's frames (trimmed 0.06 s) averaged, the keyed
+    frames outside the sequence (the lead and tail: a carrier leak, the transmitter's noise) taken off, the centre of
+    what is left (the bins within 3 dB of its top, SPEC_LO..SPEC_HI from the dial on the mode's side). The start that
+    best fits the plan is kept.
+      fine (the X6100): every step within SPEC_TOL_HZ of its tone + one offset (at most STEP_MAX_OFFSET_HZ) and
+        SPEC_MIN_DB up; AM: the carrier SPEC_CARRIER_DB over the quiet (its sidebands at 0.1 W stay under the carrier's
+        skirt in these bins; their tones are judged in the audio)
+      coarse (SPEC_COARSE): every step SPEC_MIN_DB up and the centres rising in order; AM: the carrier
+    Returns a dict: ok, kind ('steps', 'order' or 'carrier'), says, frames, start (s after on), offset, steps
+    [(Hz heard, its error, dB)]"""
+    fr = [(t, cen, wid, v) for (t, cen, wid, v) in list(L.r.spectra) if on - 1.5 <= t <= off + 1.0 and v]
+    keyed = [x for x in fr if on + 0.05 <= x[0] <= off - 0.05]
+    out = {"ok": False, "kind": None, "frames": len(keyed), "start": None, "offset": None, "steps": []}
+    if len(keyed) < 12:
+        out["says"] = f"{len(keyed)} spectrum frames while on the air"
+        return out
+    nb = len(keyed[0][3])
+    fr = [x for x in fr if len(x[3]) == nb and x[1] == keyed[0][1] and x[2] == keyed[0][2]]
+    _, cen, wid, _ = keyed[0]
+    per = wid / nb
     sign = -1 if mode in (0, 1) else 1
-
-    def offsets(cen, wid, n):
-        per = wid / n
-        return [((cen - wid / 2 + (i + 0.5) * per) - f) * sign for i in range(n)]
-    pts = []
-    for t, cen, wid, v in frames:
-        off = offsets(cen, wid, len(v))
-        med = sorted(v)[len(v) // 2]
-        cand = [(v[i], off[i]) for i in range(len(v)) if SPEC_LO <= off[i] <= SPEC_HI]
-        if not cand:
+    offs = ((cen - wid / 2 + np.arange(nb) * per) - f) * sign      # bin i at centre - width/2 + i * width/n (dsp.h)
+    T = np.array([x[0] for x in fr])
+    P = 10 ** (np.array([x[3] for x in fr], float) / 10)
+    k_m = (T >= on + 0.05) & (T <= off - 0.05)
+    q_m = T < on - 0.1
+    if mode == 6:                                                   # AM: the carrier, the reference
+        ka = P[k_m].mean(axis=0)
+        near = np.where(np.abs(offs) <= STEP_MAX_OFFSET_HZ)[0]
+        ic = near[int(np.argmax(ka[near]))]
+        quiet = P[q_m].mean(axis=0)[ic] if q_m.any() else np.median(ka)
+        up = 10 * math.log10(ka[ic] / max(quiet, 1e-30))
+        out.update(kind="carrier", offset=round(float(offs[ic])), carrier_db=round(up, 1),
+                   ok=up >= SPEC_CARRIER_DB,
+                   says=f"the carrier at {offs[ic]:+.0f} Hz from the dial, {up:.0f} dB over the quiet before the "
+                        f"over (want {SPEC_CARRIER_DB}); its sidebands are judged in the audio")
+        return out
+    band = (offs >= SPEC_LO) & (offs <= SPEC_HI)
+    n = len(STEP_HZ)
+    best = None
+    for ts in np.arange(on - 0.2, on + 1.5, 0.02):
+        st = []
+        for k in range(n):
+            m = (T >= ts + k * STEP_S + 0.06) & (T <= ts + (k + 1) * STEP_S - 0.06)
+            if not m.any():
+                break
+            st.append(P[m].mean(axis=0))
+        if len(st) < n:
             continue
-        db, a = max(cand)
-        pts.append((t, a, db - med))
-    runs, cur = [], None
-    for t, a, h in pts + [(None, None, None)]:
-        if t is not None and h >= STEP_ANCHOR_DB and cur and abs(a - cur["a"][-1]) <= 25:
-            cur["a"].append(a)
-            cur["t1"] = t
+        bm = k_m & ~((T >= ts - 0.1) & (T <= ts + n * STEP_S + 0.1))
+        base = P[bm].mean(axis=0) if bm.sum() >= 2 else np.min(st, axis=0)
+        got = []
+        for sp_ in st:
+            lin = np.where(band, np.clip(sp_ - base, 0, None), 0)
+            if lin.max() <= 0:
+                break
+            w = np.where(lin >= lin.max() * 0.5, lin, 0)
+            i = int(np.argmax(lin))
+            got.append(((w * offs).sum() / w.sum(), 10 * math.log10(sp_[i] / max(base[i], 1e-30))))
+        if len(got) < n:
             continue
-        if cur and cur["t1"] - cur["t0"] >= STEP_S * 0.5:
-            runs.append({"f": float(np.median(cur["a"])), "t": cur["t0"]})
-        cur = {"a": [a], "t0": t, "t1": t} if t is not None and h >= STEP_ANCHOR_DB else None
-    n, best = len(STEP_HZ), None
-    for i, r in enumerate(runs):
-        for k0 in range(n):
-            o_ = r["f"] - STEP_HZ[k0]
-            if abs(o_) > STEP_MAX_OFFSET_HZ:
-                continue
-            m = 1
-            while i + m < len(runs) and k0 + m < n and abs(runs[i + m]["f"] - STEP_HZ[k0 + m] - o_) <= STEP_SPREAD_HZ:
-                m += 1
-            if m >= 2 and (best is None or m > best[0] or (m == best[0] and abs(o_) < abs(best[3]))):
-                best = (m, k0, r["t"], o_)
+        c = np.array([g[0] for g in got])
+        o_ = float(np.median(c - np.array(STEP_HZ)))
+        err = c - np.array(STEP_HZ) - o_
+        sse = float(np.sum(err ** 2))
+        if best is None or sse < best[0]:
+            best = (sse, ts - on, o_, got, err)
     if best is None:
-        return False, None, [], len(frames)
-    _, k0, t_k0, o_ = best
-    steps, ok = [], True
-    for k, hz in enumerate(STEP_HZ):
-        a, b = t_k0 + (k - k0) * STEP_S + 0.1, t_k0 + (k - k0 + 1) * STEP_S - 0.1
-        fr = [(cen, wid, v) for (t, cen, wid, v) in frames if a <= t <= b]
-        if not fr:
-            steps.append((None, None, 0))
-            ok = False
-            continue
-        cen, wid, _ = fr[0]
-        nb = len(fr[0][2])
-        avg = [sum(x[2][i] for x in fr if len(x[2]) == nb) / len(fr) for i in range(nb)]
-        off = offsets(cen, wid, nb)
-        band = [i for i in range(nb) if SPEC_LO <= off[i] <= SPEC_HI]
-        near = [i for i in band if abs(off[i] - (hz + o_)) <= 25]
-        med = sorted(avg)[nb // 2]
-        if not near:
-            steps.append((None, None, len(fr)))
-            ok = False
-            continue
-        i_t = max(near, key=lambda i: avg[i])
-        top = max(avg[i] for i in band)
-        h = avg[i_t] - med
-        steps.append((round(off[i_t]), round(h, 1), len(fr)))
-        if h < STEP_SNR_DB or avg[i_t] < top - 0.5:
-            ok = False
-    return ok, round(o_), steps, len(frames)
+        out["says"] = "no start fits: a step without frames or without energy over the keyed silence"
+        return out
+    _, ts, o_, got, err = best
+    out.update(start=round(float(ts), 2), offset=round(o_),
+               steps=[(round(g[0]), round(float(e)), round(g[1], 1)) for g, e in zip(got, err)])
+    weak = [h for h, g in zip(STEP_HZ, got) if g[1] < SPEC_MIN_DB]
+    if coarse:
+        rising = all(a[0] < b[0] for a, b in zip(got, got[1:]))
+        out.update(kind="order", ok=rising and not weak,
+                   says=("every step up and their centres rising in order" if rising and not weak else
+                         (f"steps {weak} under {SPEC_MIN_DB} dB" if weak else "the centres not rising in order"))
+                   + f" ({SPEC_COARSE.get(L.name, 'a coarse spectrum')}: the exact tones from its audio)")
+        return out
+    far = [h for h, e in zip(STEP_HZ, err) if abs(e) > SPEC_TOL_HZ]
+    out.update(kind="steps", ok=not far and not weak and abs(o_) <= STEP_MAX_OFFSET_HZ,
+               says=("every step at its tone" if not far and not weak else
+                     ", ".join(x for x in (f"steps {far} more than {SPEC_TOL_HZ} Hz off" if far else "",
+                                           f"steps {weak} under {SPEC_MIN_DB} dB" if weak else "") if x))
+               + (f"; the offset {o_:+.0f} Hz more than {STEP_MAX_OFFSET_HZ}" if abs(o_) > STEP_MAX_OFFSET_HZ else ""))
+    return out
 
 
 def save_wav(o, label, x):
@@ -850,6 +882,36 @@ def save_wav(o, label, x):
         w.setframerate(FS)
         w.writeframes((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
     return path
+
+
+def save_spectrum(o, label, L, f, mode, on, off):
+    """The listener's spectrum frames around an over (1 s either side), kept in the run's folder: the judge can be
+    replayed on them (orch.py spec FILE)"""
+    frames = [(t, cen, wid, list(v)) for (t, cen, wid, v) in list(L.r.spectra) if on - 1.0 <= t <= off + 1.0 and v]
+    path = os.path.join(o.st.run_dir, "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in label)
+                        + "_spectrum.json")
+    with open(path, "w") as fh:
+        json.dump({"label": label, "listener": L.name, "f": f, "mode": mode, "on": on, "off": off,
+                   "frames": frames}, fh)
+    return os.path.basename(path)
+
+
+def spec_track(L, f, mode, t0, t1):
+    """Per frame in t0..t1 the strongest bin SPEC_LO..SPEC_HI Hz from the dial on the mode's side: (t, Hz, dB over the
+    frame's median), the judge's own first look, logged when it finds nothing"""
+    sign = -1 if mode in (0, 1) else 1
+    out = []
+    for t, cen, wid, v in list(L.r.spectra):
+        if not (t0 <= t <= t1) or not v:
+            continue
+        per = wid / len(v)
+        med = sorted(v)[len(v) // 2]
+        cand = [(v[i], ((cen - wid / 2 + (i + 0.5) * per) - f) * sign) for i in range(len(v))]
+        cand = [c for c in cand if SPEC_LO <= c[1] <= SPEC_HI]
+        if cand:
+            db, a = max(cand)
+            out.append((t, a, db - med))
+    return out
 
 
 def over(o, sender, listener, f, mode, label, body, w=W, agc=0, pages=True):
@@ -914,8 +976,11 @@ def over(o, sender, listener, f, mode, label, body, w=W, agc=0, pages=True):
 
 
 def audio_steps(o, sender, listener, f, mode, label):
-    """The stepped sequence sent by sender's TCI on f in mode, recorded from listener's own receiver (its TCI audio),
-    found there step by step in order: (ok, says, data)"""
+    """The stepped sequence sent by sender's TCI on f in mode, judged twice at the listener: in its own spectrum (the
+    frames its screen draws, spec_steps: what that spectrum can show) and in its own audio (its TCI, find_steps: every
+    step's exact tone, in order). PASS when both find it; one without the other is a LOOK (both said); neither a FAIL.
+    FM is judged by its audio (its sidebands spread with the deviation). The spectrum frames and the audio are kept in
+    the run's folder (orch.py spec FILE replays the spectrum judge). Returns (ok, says, data)"""
     from tones import TciRx
     L = o.r[listener]
     rx = TciRx(L.host)
@@ -930,46 +995,63 @@ def audio_steps(o, sender, listener, f, mode, label):
                 if not watch.tx_peak.get(sender):
                     raise Refused(f"{sender}'s meter showed no power")
         over(o, sender, listener, f, mode, label, body)
-        time.sleep(1.0)                     # the audio's last frames
-        if mode != 7:                       # FM: its sidebands spread with the deviation; judged by its audio
-            with o.step(f"{listener}'s own spectrum shows every step at the dial "
-                        f"{'-' if mode in (0, 1) else '+'} its tone, in order, between {sender}'s own on and off") as s:
-                S = o.r[sender]
-                on, off = S.tx_last if S.tx_last else got["t"]
-                sfound, soff, ssteps, nfr = spec_steps(L, f, mode, on - 0.2, off + 0.5)
-                got.update(spectrum={"found": sfound, "offset": soff, "steps": ssteps, "frames": nfr})
-                if not sfound:
-                    raise Refused(f"{listener}'s spectrum ({nfr} frames while {sender} was on the air): the sequence "
-                                  f"not there whole; per step (Hz from the dial, dB, frames) {ssteps or 'no anchor'}")
-                s.confirm(f"offset {soff:+d} Hz; " + ", ".join(f"{h} Hz {d} dB" for h, d, _ in ssteps))
-        with o.step(f"{listener} heard every step, in order (its audio)") as s:
-            t_on, t_off = got["t"]
-            x, _ = rx.audio(t_on - 0.5, t_off + 1.5)
-            if len(x) < FS:
-                raise Refused(f"{listener}'s TCI sent {len(x) / FS:.1f} s of audio")
-            found, off, steps, seen = find_steps(x)
-            got.update(found=found, offset=off, steps=steps, seen=seen, wav=save_wav(o, label, x))
-            if not found:
-                if got.get("spectrum", {}).get("found"):     # on the air and in its spectrum, not in its audio
-                    return None, (f"in {listener}'s spectrum every step at its frequency (offset "
-                                  f"{got['spectrum']['offset']:+d} Hz), but NOT whole in its audio: per step {steps} "
-                                  f"(its audio path, the squelch {L.state.get('sql')}?)"), got
-                raise Refused(f"the sequence not heard whole in {listener}'s audio: per step (Hz, dB over the noise, "
-                              f"s) {steps or 'no anchor'}; clear tones (Hz, s) {seen[:8]}")
-            spread = max(d for _, d, _ in steps) - min(d for _, d, _ in steps)
-            got["spread_db"] = round(spread, 1)
-            s.confirm(f"offset {off:+d} Hz; " + ", ".join(f"{h} Hz {d} dB" for h, d, _ in steps)
-                      + f"; spread {spread:.1f} dB")
+        time.sleep(1.0)                     # the audio's and the spectrum's last frames
+        S = o.r[sender]
+        on, off = S.tx_last if S.tx_last else got["t"]
+        sp = None
+        if mode != 7:
+            coarse = listener in SPEC_COARSE
+            try:
+                with o.step(f"{listener}'s own spectrum: " + ("the carrier" if mode == 6 else
+                            "every step up, their centres rising in order" if coarse else
+                            f"every step at the dial {'-' if mode in (0, 1) else '+'} its tone (within "
+                            f"{SPEC_TOL_HZ} Hz)") + f", while {sender} was on the air") as s:
+                    sp = spec_steps(L, f, mode, on, off, coarse=coarse)
+                    sp["saved"] = save_spectrum(o, label, L, f, mode, on, off)
+                    got["spectrum"] = sp
+                    detail = (f"{sp['says']}; start {sp['start']:+.2f} s after on, offset {sp['offset']:+d} Hz; per step "
+                              f"(Hz heard, error, dB): {sp['steps']}" if sp.get("steps") else sp["says"])
+                    if not sp["ok"]:
+                        o.st.ev(f"{listener}'s spectrum, per frame the strongest bin {SPEC_LO}-{SPEC_HI} Hz from the "
+                                f"dial (s from {sender}'s on, Hz, dB over the frame's median): "
+                                + " ".join(f"{t - on:.1f}/{a:.0f}/{h:.0f}"
+                                           for t, a, h in spec_track(L, f, mode, on - 0.2, off + 0.5)), "bad")
+                        raise Refused(f"{listener}'s spectrum ({sp['frames']} frames on the air): {detail}")
+                    s.confirm(detail)
+            except Refused:
+                pass
+        audio_ok, audio_says = False, ""
+        try:
+            with o.step(f"{listener} heard every step, in order, at its tone (its audio)") as s:
+                t_on, t_off = got["t"]
+                x, _ = rx.audio(t_on - 0.5, t_off + 1.5)
+                if len(x) < FS:
+                    raise Refused(f"{listener}'s TCI sent {len(x) / FS:.1f} s of audio")
+                found, off_a, steps, seen = find_steps(x)
+                got.update(found=found, offset=off_a, steps=steps, seen=seen, wav=save_wav(o, label, x))
+                if not found:
+                    raise Refused(f"the sequence not heard whole in {listener}'s audio: per step (Hz, dB over the "
+                                  f"noise, s) {steps or 'no anchor'}; clear tones (Hz, s) {seen[:8]}")
+                spread = max(d for _, d, _ in steps) - min(d for _, d, _ in steps)
+                got["spread_db"] = round(spread, 1)
+                audio_says = (f"audio: all {len(STEP_HZ)} at their tones in order, offset {off_a:+d} Hz, weakest "
+                              f"{min(d for _, d, _ in steps)} dB, spread {spread:.1f} dB")
+                s.confirm(audio_says)
+                audio_ok = True
+        except Refused as e:
+            audio_says = f"audio: {e}"
     except Refused as e:
         return False, str(e), got
     finally:
         rx.close()
-    sp = got.get("spectrum")
-    return True, ((f"spectrum: all {len(STEP_HZ)} steps at the dial {'-' if mode in (0, 1) else '+'} their tones, "
-                   f"offset {sp['offset']:+d} Hz, weakest {min(d for _, d, _ in sp['steps'])} dB; " if sp else
-                   "FM (judged by its audio): ")
-                  + f"audio: all heard in order, weakest {min(d for _, d, _ in got['steps'])} dB, spread "
-                    f"{got['spread_db']} dB"), got
+    if sp is None:                          # FM
+        return (True, "FM (judged by its audio): " + audio_says, got) if audio_ok else (False, audio_says, got)
+    spec_says = f"spectrum ({sp['kind'] or 'nothing'}): {sp['says']}"
+    if sp["ok"] and audio_ok:
+        return True, f"{spec_says}; {audio_says}", got
+    if sp["ok"] or audio_ok:
+        return None, f"{'only the spectrum' if sp['ok'] else 'only the audio'} found it: {spec_says}; {audio_says}", got
+    return False, f"{spec_says}; {audio_says}", got
 
 
 CW_TEXT = "VVV TEST DE Q1TST"
@@ -2715,7 +2797,18 @@ def main():
     rp.add_argument("--linger", type=int, default=3600, help="seconds the console stays up after the run")
     rp.add_argument("--all", action="store_true", help="every test, the passed ones too")
     rp.add_argument("--soak", type=int, default=1, help="the tests this many times over (each test's tally kept)")
+    sp = sub.add_parser("spec", help="replay the spectrum judge on an over's saved frames (*_spectrum.json)")
+    sp.add_argument("file")
     a = ap.parse_args()
+    if a.cmd == "spec":
+        d = json.load(open(a.file))
+        L = types.SimpleNamespace(name=d["listener"], r=types.SimpleNamespace(spectra=[tuple(x) for x in d["frames"]]))
+        on, off = d["on"], d["off"]
+        print(f"{d['label']}: {len(d['frames'])} frames, the listener {d['listener']}, {d['f']} Hz mode {d['mode']}")
+        for t, a_, h in spec_track(L, d["f"], d["mode"], on - 0.2, off + 0.5):
+            print(f"  {t - on:5.2f} s  {a_:7.0f} Hz  {h:5.1f} dB")
+        print(spec_steps(L, d["f"], d["mode"], on, off, coarse=d["listener"] in SPEC_COARSE))
+        return
     if a.cmd == "list":
         kept = store_load()
         for t in TESTS:
