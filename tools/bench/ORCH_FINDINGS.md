@@ -15,6 +15,7 @@ in `orch_caps.json` (the caps test, shown on the console).
 | 2026-11-23 | **The X6200 cannot hold a TCI over at 0.1 W**: its ALC reads 0, so it holds power by its own meter, which reads 0.1 W steps; its 0.1 W came 4 dB under its 1 W's -10 dB in four runs of five (its meter peaking 0.2-0.3 W meanwhile). | power-steps from 0.1 W | power-steps now steps 0.2, 0.5, 1.0 W (both pass). |
 | 2026-11-23 | **The X6100's transmitted audio rises ~15 dB from 600 to 2400 Hz** in SSB (the X6200's 4-6 dB), 14 dB in AM. Heard either way; noted, not judged. | the steps' "spread" in usb/lsb/am-steps | Noted. |
 | 2026-11-23 | **The X6200 does not take LSB-D (mode 1)**: "set mode 1" answers nothing and it stays in USB; the X6100 takes it. | caps "mode 1" | Open (a difference or a fault of the X6200's mode list). |
+| 2026-11-23 | **The X6200's link to the bench stalls for 3-6 s now and then** (no state, the same GUI process: its WiFi), as air_c saw. | "NO WORD" during rtty-text 21:08; air_c's Watch stops | The orchestrator tells a stall (the same GUI process after) from a crash (another): a stall is said, not failed. |
 
 ## Where the radios differ (the caps test, by design)
 
