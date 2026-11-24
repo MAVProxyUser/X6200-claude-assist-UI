@@ -15,6 +15,7 @@ in `orch_caps.json` (the caps test, shown on the console).
 | 2026-11-23 | **The X6200 does not hold a TCI over's power to its setting below 1 W**: its ALC reads 0, so the GUI holds power by the radio's own meter (`tx_level.c` power_hold), which reads 0.1 W steps. At 0.1 W it came 4 dB low (4 runs in 5); stepping 0.2/0.5/1.0 W it read 0.3/0.8/0.9 W on its meter and the X6100 heard 0.5 and 1.0 W alike (4 runs in 6). | power-steps x6200>x6100 | A GUI fault to fix (the hold's steps and its overshoot); KNOWN in orch.py. The X6100's steps pass. |
 | 2026-11-23 | **The X6100's transmitted audio rises ~15 dB from 600 to 2400 Hz** in SSB (the X6200's 4-6 dB), 14 dB in AM. Heard either way; noted, not judged. | the steps' "spread" in usb/lsb/am-steps | Noted. |
 | 2026-11-23 | **The X6200 does not take LSB-D (mode 1)**: "set mode 1" answers nothing and it stays in USB; the X6100 takes it. | caps "mode 1" | Open (a difference or a fault of the X6200's mode list). |
+| 2026-11-23 | **The squelch (10) keeps both radios' AM audio closed 1.3-2 s into a strong carrier** (57 dB over the quiet): the TCI audio began late and missed the first steps; at squelch 0 both passed. In SSB the squelch does not touch the TCI audio at all (2..60 changed neither radio's quiet). | am-steps with squelch 10, then 0 (runs 23:09, 23:12) | The orchestrator holds 10 and opens it for AM overs. Whether the late opening is right for the speaker is the owner's call. |
 | 2026-11-23 | **The X6200's link to the bench stalls for 3-6 s now and then** (no state, the same GUI process: its WiFi), as air_c saw. | "NO WORD" during rtty-text 21:08; air_c's Watch stops | The orchestrator tells a stall (the same GUI process after) from a crash (another): a stall is said, not failed. |
 
 ## Where the radios differ (the caps test, by design)
@@ -23,5 +24,11 @@ in `orch_caps.json` (the caps test, shown on the console).
   frequency this radio tunes", "mode: not on this radio"). Tests never take both radios there: they cannot be on one
   frequency (the orchestrator refuses such a value up front).
 - IF shift: only the X6100's base has it.
+- Their spectra (the frames each screen draws, sent to the bench): the X6100's are its own FFT, 1024 bins over 100 kHz
+  whatever the zoom (drawn in pairs of 98 Hz: ~195 Hz a real bin); a tone lands within ~120 Hz. The X6200's are its
+  base's own spectrum (dsp_psd, ~750 Hz bins) stretched over the zoom: one tone is a hump 2-3 kHz wide, so its spectrum
+  shows the stepped tones rising in order but cannot place each; their exact tones come from its audio. In AM at
+  0.1 W neither spectrum shows the sidebands beside the carrier (2026-11-23, six overs saved and replayed:
+  `orch.py spec FILE`).
 - The same on both: every HF/6 m frequency probed, the modes but WFM and LSB-D, each mode's tuning step, a knob
   detent, the filters in USB/CW/AM/NFM, zoom, steps, AGC, NB, NR.

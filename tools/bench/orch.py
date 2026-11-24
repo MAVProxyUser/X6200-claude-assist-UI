@@ -49,6 +49,7 @@ A, B = "x6100", "x6200"
 GUARD_POLL_S = 0.2          # the sync guard's look at both radios
 GUARD_S = 0.6               # a difference lasting this long outside a change: a violation
 STALE_S = 3.0               # no word from a radio this long: its GUI down (planned or not), said on its card
+SQL_HOLD = 10               # the squelch every test holds (the owner: "a reasonable level before each test")
 RF_ALARM_DBM = -100         # a receiver over this with neither radio saying it transmits: a signal nobody explains
 RF_ALARM_S = 1.0            # (the cable at 0.1 W: about -70 dBm; quiet -121; the X6100's own spurs about -110)
 W = bench.FIRST_PROBE_W     # every over at 0.1 W
@@ -772,6 +773,8 @@ SPEC_TOL_HZ = 150           # a step in a fine spectrum within this of its tone 
                             # are 1024 bins over 100 kHz (it keeps zoom 1 there), drawn in pairs: ~195 Hz a real bin;
                             # its steps came within 120 Hz (2026-11-23, 6 overs saved)
 SPEC_MIN_DB = 6             # a step's own energy over the keyed silence around the sequence, at least
+SPEC_MIN_DB_COARSE = 3      # in a coarse spectrum (the X6100's 600 Hz, its TX ~15 dB down there, came 6.0 dB; quiet
+                            # frames give at most 1.5)
 SPEC_CARRIER_DB = 15        # AM: the carrier over the frames before the sender keyed
 # The radios whose spectrum cannot place a tone: the X6200 sends its base's own spectrum (dsp_psd: ~750 Hz bins, the
 # zoom only stretches them), one tone a hump ~2-3 kHz wide. There the steps' centres must rise in order; their exact
@@ -855,12 +858,12 @@ def spec_steps(L, f, mode, on, off, coarse=False):
     _, ts, o_, got, err = best
     out.update(start=round(float(ts), 2), offset=round(o_),
                steps=[(round(g[0]), round(float(e)), round(g[1], 1)) for g, e in zip(got, err)])
-    weak = [h for h, g in zip(STEP_HZ, got) if g[1] < SPEC_MIN_DB]
+    weak = [h for h, g in zip(STEP_HZ, got) if g[1] < (SPEC_MIN_DB_COARSE if coarse else SPEC_MIN_DB)]
     if coarse:
         rising = all(a[0] < b[0] for a, b in zip(got, got[1:]))
         out.update(kind="order", ok=rising and not weak,
                    says=("every step up and their centres rising in order" if rising and not weak else
-                         (f"steps {weak} under {SPEC_MIN_DB} dB" if weak else "the centres not rising in order"))
+                         (f"steps {weak} under {SPEC_MIN_DB_COARSE} dB" if weak else "the centres not rising in order"))
                    + f" ({SPEC_COARSE.get(L.name, 'a coarse spectrum')}: the exact tones from its audio)")
         return out
     far = [h for h, e in zip(STEP_HZ, err) if abs(e) > SPEC_TOL_HZ]
@@ -928,7 +931,12 @@ def over(o, sender, listener, f, mode, label, body, w=W, agc=0, pages=True):
         # the same filter on both in SSB (each radio's own differed: the X6100 300-2700, the X6200 100-3000; a step
         # heard 380 Hz high went past the X6100's top); AM and FM keep their own, a width of their own kind
         if pages:
-            want, checks = bench.rx_profile(f, mode, pre=0, att=0, rfg=100, agc=agc, sql=o.sql or 0,
+            # AM: the squelch open for the over: at 10 both radios' AM audio stayed closed 1.3-2 s into a carrier 57 dB
+            # up (am-steps, 2026-11-23; at 0 both passed); ready() puts SQL_HOLD back before the next test
+            if mode == 6 and o.sql:
+                o.st.ev(f"AM: the squelch 0 on both for this over (held at {o.sql} it keeps AM audio closed seconds into "
+                        f"a carrier), {o.sql} again before the next test", "conf")
+            want, checks = bench.rx_profile(f, mode, pre=0, att=0, rfg=100, agc=agc, sql=0 if mode == 6 else (o.sql or 0),
                                             filt=(100, 3000) if mode in (0, 1, 2, 3) else None)
             # zoom 8: the spectrum 12.5 kHz wide, 12 Hz a bin, each tone where it should be told apart
             o.both(dict(want, pwr=w, atu=0, xit=0, zoom=8), checks)
@@ -992,8 +1000,11 @@ def audio_steps(o, sender, listener, f, mode, label):
                 got["t"] = (t_on, t_off)
                 if watch.why:
                     raise Refused(watch.why)
-                if not watch.tx_peak.get(sender):
-                    raise Refused(f"{sender}'s meter showed no power")
+                # at 0.1 W the X6100's meter (0.1 W steps) can read 0 through a whole over: the listener's S-meter
+                # over RF_ALARM_DBM proves the power then
+                if not watch.tx_peak.get(sender) and not (watch.rx_peak is not None and watch.rx_peak > RF_ALARM_DBM):
+                    raise Refused(f"{sender}'s meter showed no power, and {listener}'s S-meter at most "
+                                  f"{watch.rx_peak} dBm")
         over(o, sender, listener, f, mode, label, body)
         time.sleep(1.0)                     # the audio's and the spectrum's last frames
         S = o.r[sender]
@@ -2673,7 +2684,7 @@ TESTS = [
 ]
 
 
-def run(names, port, lan, linger, everything=False, soak=1):
+def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, sql=None):
     kept = store_load()
     if names:
         tests = [t for t in TESTS if t.name in names or t.name.split(" ")[0] in names]
@@ -2720,8 +2731,17 @@ def run(names, port, lan, linger, everything=False, soak=1):
         o.both_page("G")
         o.both({"freq": 14200000, "mode": 2})
         st.ev("both locked, on page G, on 14.2000 MHz USB, confirmed alike", "ok")
-        st.phase = "squelch"
-        o.squelch_cal()
+        # The squelch held at SQL_HOLD and the volume 0 on both, before every test (ready()). Not calibrated: the TCI
+        # audio the tests judge is taken before the squelch, which gates the speaker only (squelch_cal measured it,
+        # 2026-11-23: 2..60 changed neither radio's quiet, -30/-48 dBFS); orch.py run --squelch-cal measures again
+        if squelch_cal:
+            st.phase = "squelch"
+            o.squelch_cal()
+        else:
+            o.sql = SQL_HOLD if sql is None else sql
+            o.both({"vol": 0, "sql": o.sql})
+            st.ev(f"squelch {o.sql} and volume 0 on both, held before every test (in SSB the TCI audio judged is "
+                  f"taken before the squelch; AM overs open it: it keeps AM audio closed seconds into a carrier)", "ok")
         st.phase = "running"
         for k in range(soak):
             if soak > 1:
@@ -2796,6 +2816,8 @@ def main():
     rp.add_argument("--lan", action="store_true", help="the console on the network, not only this computer")
     rp.add_argument("--linger", type=int, default=3600, help="seconds the console stays up after the run")
     rp.add_argument("--all", action="store_true", help="every test, the passed ones too")
+    rp.add_argument("--squelch-cal", action="store_true", help="measure the squelch against the TCI audio first")
+    rp.add_argument("--sql", type=int, default=None, help=f"the squelch to hold (default {SQL_HOLD})")
     rp.add_argument("--soak", type=int, default=1, help="the tests this many times over (each test's tally kept)")
     sp = sub.add_parser("spec", help="replay the spectrum judge on an over's saved frames (*_spectrum.json)")
     sp.add_argument("file")
@@ -2817,7 +2839,8 @@ def main():
             tally = f"{k.get('passes', '-')}/{k.get('runs', '-')}"
             print(f"{t.name:26s} {last:9s} {tally:>7s} {t.role:20s} ~{t.est_s:3d} s  {t.what}")
         return
-    run([x for x in a.only.split(",") if x], a.port, a.lan, a.linger, everything=a.all or a.soak > 1, soak=a.soak)
+    run([x for x in a.only.split(",") if x], a.port, a.lan, a.linger, everything=a.all or a.soak > 1, soak=a.soak,
+        squelch_cal=a.squelch_cal, sql=a.sql)
 
 
 if __name__ == "__main__":
