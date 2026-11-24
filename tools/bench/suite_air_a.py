@@ -771,6 +771,18 @@ def tune_over(ctx, T, secs=3.0, during=None, renew=True, start=None, ignore=TUNE
         raise bench.Refused(f"TUNE power {T} W: never over {POWER_MAX_W} W here")
     bench.radio_tx_gate(snd, ctx.c, snd.pwr())         # its supply, ATU off, the dial on a band, PWR in the limit
     ctx.lis.wait("the listener out of TX", lambda: not ctx.lis.tx, 5)
+    lm = int(ctx.lis.state.get("mode", 2))
+    decl = bench.apart({"mode": [(3, lm)], "filter": bench.STEPPED},
+                       f"TUNE: the sender as USB-D (its filter) for the carrier, the listener in mode {lm}")
+    decl.__enter__()
+    try:
+        return _tune_over(ctx, T, secs, during, renew, start, ignore)
+    finally:
+        decl.__exit__(None, None, None)
+
+
+def _tune_over(ctx, T, secs, during, renew, start, ignore):
+    snd = ctx.snd
     watch = make_watch(ctx, T, ignore, "TUNE")
     halt = threading.Event()
     o = {"on": None, "off": None, "hold": next(HOLD), "renew": [renew], "over": None, "watch": watch,
@@ -923,8 +935,10 @@ def body_smeter_front_end(ctx):
     ctx.banner(f"S-METER FRONT END: {snd.name.upper()} SENDS A STEADY TONE 0.1 W, {lis.name.upper()}'S S-METER WITH "
                f"PRE, ATT, RF GAIN")
     # the listener's PRE, ATT and RF gain changed under the over on purpose (what is measured)
-    o = tci_over(ctx, plan=[[0, 0.3], [1000, 12.6]], mode=3, max_s=13.6, during=during, what="S-meter front end",
-                 ignore=("pre", "att", "rfg"))
+    with bench.apart({"pre": bench.STEPPED, "att": bench.STEPPED, "rfg": bench.STEPPED},
+                     "smeter-front-end: the listener's PRE, ATT and RF gain stepped under the over, what it measures"):
+        o = tci_over(ctx, plan=[[0, 0.3], [1000, 12.6]], mode=3, max_s=13.6, during=during, what="S-meter front end",
+                     ignore=("pre", "att", "rfg"))
     base = got[0][1] if got else None
     off = [(n, None if v is None or base is None else v - base) for n, v in got]
     ok = (len(got) == len(steps) and base is not None and quiet is not None and base - quiet >= 15
@@ -1096,7 +1110,9 @@ def body_keys_with_ptt(ctx):
         res["came_back"] = any(v for _, v in state_vals(snd, "tx", t1, time.time())) or snd.tx
     ctx.banner(f"KEYS WITH PTT: {snd.name.upper()} SENDS AM 0.1 W, DFN TAPPED AND HELD UNDER PTT, {lis.name.upper()} "
                f"LISTENS")
-    o = ptt_over(ctx, 6, 8.0, during=during, what="keys with PTT", ignore=("nr", "nb"))  # DFN turns them, on purpose
+    with bench.apart({"nr": bench.STEPPED, "nb": bench.STEPPED},
+                     "keys-with-ptt: DFN tapped and held under PTT turns the sender's NR and NB, what it tests"):
+        o = ptt_over(ctx, 6, 8.0, during=during, what="keys with PTT", ignore=("nr", "nb"))
     nr1, nb1 = int(snd.state.get("nr", -1)), int(snd.state.get("nb", -1))
     ok = (res.get("nr_s") is not None and res.get("nb_s") is not None and res.get("tx_tap") and res.get("tx_hold")
           and res.get("nr_after_hold") == 1 - nr0 and nr1 == 1 - nr0 and nb1 == 1 - nb0
@@ -1178,6 +1194,17 @@ def body_smeter_am(ctx):
     listen(ctx, F20, 6)
     time.sleep(2.0)
     q_am = med([v for _, v in meters(lis, time.time() - 1.5, time.time())])
+    decl = bench.apart({"freq": 1000, "mode": [(6, 2), (6, 8)], "filter": bench.STEPPED},
+                       "smeter-am: the listener reads the AM carrier in USB 1 kHz under it, then AM and SAM on its "
+                       "dial (each mode's own filter)")
+    decl.__enter__()
+    try:
+        return _smeter_am(ctx, snd, lis, q_am)
+    finally:
+        decl.__exit__(None, None, None)
+
+
+def _smeter_am(ctx, snd, lis, q_am):
     listen(ctx, F20 - 1000, 2)
     sender(ctx, F20, 6, FIRST, apart=SMETER_AM_APART)     # the listener in USB 1 kHz under it, on purpose
     win = {}
@@ -1353,6 +1380,13 @@ def body_split(ctx):
     snd, lis = ctx.snd, ctx.lis
     A, B = F20, F20 + 30000
     prove(ctx, A)
+    with bench.apart({"freq": 15000, "split": (1, 0), "vfo": (1, 0), "mode": [(6, 3)], "filter": bench.STEPPED},
+                     "split: the sender on A with its TX on B (VFO B, split), the listener between them, 15 kHz from "
+                     "each; the X6200's PTT in AM (its own filter)"):
+        return _split(ctx, snd, lis, A, B)
+
+
+def _split(ctx, snd, lis, A, B):
     listen(ctx, A + 15000, 3)
     sender(ctx, A, 3, FIRST, apart=("freq",))     # the listener between A and B, on purpose
     vfo_b(ctx, B, 3)
@@ -1396,6 +1430,13 @@ def body_split_cw(ctx):
     snd, lis = ctx.snd, ctx.lis
     A, B = 14050000, 14060000
     prove(ctx, A)
+    with bench.apart({"freq": B - A, "split": (1, 0), "vfo": (1, 0)},
+                     "split-cw: the sender in split, A 14.050 and B 14.060, keyed on its listen VFO A; the listener "
+                     "on A"):
+        return _split_cw(ctx, snd, lis, A, B)
+
+
+def _split_cw(ctx, snd, lis, A, B):
     listen(ctx, A, 4, agc=2)
     sender(ctx, A, 4, FIRST)
     vfo_b(ctx, B, 4)
@@ -1467,6 +1508,12 @@ def body_qsy_out(ctx):
     f_in, f_out, f_lis = 14320000, 14360000, 14340000
     keep_out_of_band(ctx, snd)          # the QSY to 14.36 MHz writes its memory of the dials outside the bands
     prove(ctx, F20)
+    with bench.apart({"freq": 20000}, "qsy-out: the listener on 14.340, between the sender's 14.320 and the 14.360 "
+                                      "the Panel tunes it to under PTT: 20 kHz from each"):
+        return _qsy_out(ctx, snd, lis, f_in, f_out, f_lis)
+
+
+def _qsy_out(ctx, snd, lis, f_in, f_out, f_lis):
     listen(ctx, f_lis, 6)
     sender(ctx, f_in, 6, FIRST, apart=("freq",))    # the listener between the two dials, on purpose
     time.sleep(1.3)
@@ -2090,14 +2137,16 @@ def body_codec_clock(ctx):
     got = []
     for off in (off_c, off_e):
         rf = cen + int(round(off))
-        sender(ctx, rf - 1000, 3, FIRST, apart=("freq",))     # the tone placed across the listener's span, on purpose
-        time.sleep(1.3)
-        q = level(lis, rf, time.time() - 1.0, time.time(), half=300)
-        ctx.banner(f"SPECTRUM SCALE: {snd.name.upper()} SENDS A TONE 0.1 W AT {rf / 1e6:.4f} MHZ, {lis.name.upper()}'S "
-                   f"SPECTRUM PLACES IT")
-        o = tci_over(ctx, plan=[[0, 0.3], [1000, 3.0]], mode=3, what=f"codec clock {off:.0f}", ignore=("freq",))
-        pk, pdb, per = spectrum_peak_hz(lis, rf, o["on"] + 0.8, min(o["sent"][1], o["off"]) - 0.2, span=400)
-        got.append((off, rf, pk, per, (rise(q, pdb) or 0) >= 15))
+        with bench.apart({"freq": abs((rf - 1000) - int(lis.state.get("freq") or F20))},
+                         f"codec-clock: the sender's tone at {rf / 1e6:.4f} MHz, across the listener's span"):
+            sender(ctx, rf - 1000, 3, FIRST, apart=("freq",))     # the tone placed across the listener's span
+            time.sleep(1.3)
+            q = level(lis, rf, time.time() - 1.0, time.time(), half=300)
+            ctx.banner(f"SPECTRUM SCALE: {snd.name.upper()} SENDS A TONE 0.1 W AT {rf / 1e6:.4f} MHZ, "
+                       f"{lis.name.upper()}'S SPECTRUM PLACES IT")
+            o = tci_over(ctx, plan=[[0, 0.3], [1000, 3.0]], mode=3, what=f"codec clock {off:.0f}", ignore=("freq",))
+            pk, pdb, per = spectrum_peak_hz(lis, rf, o["on"] + 0.8, min(o["sent"][1], o["off"]) - 0.2, span=400)
+            got.append((off, rf, pk, per, (rise(q, pdb) or 0) >= 15))
     (o_c, rf_c, pk_c, per, h_c), (o_e, rf_e, pk_e, _, h_e) = got
     if pk_c is None or pk_e is None or not (h_c and h_e):
         return False, f"the tone not found on {lis.name}'s spectrum (centre {pk_c}, edge {pk_e}, heard {h_c}/{h_e})"

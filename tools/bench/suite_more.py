@@ -57,45 +57,58 @@ def sync_set(r):
 
 
 def sync_both(run):
-    """Both radios on the set-up, on the Sentry's page A, each read back: (their snapshots as found, what each reads,
-    why they are not in sync or None)"""
-    snaps, seen, why = {}, {}, []
-    for n in run.names:
-        r = None
-        try:
+    """Both radios on the set-up, on the Sentry's page A, through the one sync (bench.sync_pair: both set at once, read
+    back, compared): (their snapshots as found, what each reads, why they are not in sync or None)"""
+    snaps, seen, why, radios = {}, {}, [], []
+    try:
+        for n in run.names:
             r = bench.Radio(n, run.c["radios"][n], False)
+            radios.append(r)
             r.take_control()
             snaps[n] = bench.snapshot(r)
-            bench.open_page(r, "A")
-            seen[n] = sync_set(r)
-        except (bench.Refused, OSError) as e:
-            why.append(f"{n} not set up: {e}")
-        finally:
-            if r:
-                r.close()
+        with bench.transition():
+            th = [threading.Thread(target=bench.open_page, args=(r, "A")) for r in radios]
+            [t.start() for t in th]
+            [t.join(30) for t in th]
+            want, checks = SYNC_PROFILE
+            bench.sync_pair(radios, dict(want, **SYNC_EXTRA), checks)
+        for r in radios:
+            seen[r.name] = {k: r.state.get(k) for k in SYNC_KEYS}
+    except (bench.Refused, OSError) as e:
+        why.append(f"not set up alike: {e}")
+    finally:
+        for r in radios:
+            r.close()
     if len(seen) == 2 and not why:
         a, b = seen.values()
-        diff = [k for k in SYNC_KEYS if a.get(k) != b.get(k)]
+        diff = [k for k in SYNC_KEYS if a.get(k) != b.get(k) and not bench.declared(k, a.get(k), b.get(k))]
         if diff:
             why.append("not in sync: " + ", ".join(f"{k} {a.get(k)}/{b.get(k)}" for k in diff))
     return snaps, seen, ("; ".join(why) or None)
 
 
 def unsync_both(run, snaps):
-    """Each radio back as it was found before the sync (finish: put back, read back, page A)"""
-    for n, snap in snaps.items():
-        r = None
-        try:
+    """Both radios back as they were found before the sync, together (finish: put back, read back, page A): they
+    were alike, so they are alike again"""
+    radios = []
+    try:
+        for n in snaps:
             r = bench.Radio(n, run.c["radios"][n], False)
+            radios.append(r)
             r.take_control()
-            rep = {}
-            bench.finish([r], {n: snap}, report=rep)
-            if rep.get("not_restored"):
-                say(f"{n}: NOT put back after the sync: {rep['not_restored'][n]}")
-        except (bench.Refused, OSError) as e:
-            say(f"{n}: not put back after the sync: {e}")
-            if r:
+        rep = {}
+        with bench.transition():
+            bench.finish(radios, {r.name: snaps[r.name] for r in radios}, report=rep)
+        for n, why in (rep.get("not_restored") or {}).items():
+            say(f"{n}: NOT put back after the sync: {why}")
+        bench.dial_settled()
+    except (bench.Refused, OSError) as e:
+        say(f"not put back after the sync: {e}")
+        for r in radios:
+            try:
                 r.close()
+            except OSError:
+                pass
 
 
 def per_radio(run, batch, test, fn, covers, want_tx=False):

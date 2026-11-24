@@ -331,6 +331,14 @@ def refused(fn):
         return str(e)
 
 
+def refused_why(fn):
+    try:
+        fn()
+    except bench.Refused as e:
+        return str(e)
+    return None
+
+
 def main():
     results = []
 
@@ -499,14 +507,55 @@ def main():
     for d in DIRS:
         __import__("shutil").rmtree(d, ignore_errors=True)
     bad = results.count(False)
-    # ---- a difference declared by a test (the owner, 2026-11-24: the radios apart only "specifically part of a test
-    # that does so INTENTIONALLY"): the Watch passes exactly that, nothing else ----
-    w = bench.Watch.__new__(bench.Watch)
-    w.offsets = {"freq": 1500}
-    check(w._declared("freq", (14200000, 14198500)) and w._declared("freq", (14198500, 14200000)) and
-          not w._declared("freq", (14200000, 14199000)) and not w._declared("mode", (2, 3)) and
-          not w._declared("freq", (None, 14200000)),
-          "the Watch passes a declared difference (freq 1500 Hz, either way) exactly, and no other")
+    # ---- the one sync framework (the owner, 2026-11-24: "EVERY test should use the same unified framework to sync
+    # the radios or make exceptions for tests so that there is NO deviation"): bench.apart's declarations, read by the
+    # Watch and orch's guard alike; transitions; sync_pair ----
+    check(not bench.declared("freq", 14200000, 14198500), "nothing declared: a difference is not passed")
+    with bench.apart({"freq": 1500}, "a test's listener 1500 Hz below"):
+        ok1 = bench.declared("freq", 14200000, 14198500) and bench.declared("freq", 14198500, 14200000)
+        ok2 = not bench.declared("freq", 14200000, 14199000) and not bench.declared("mode", 2, 3)
+        seen = bench.declarations()
+        w = bench.Watch.__new__(bench.Watch)
+        ok3 = w._declared("freq", (14200000, 14198500)) and not w._declared("freq", (14200000, 14199000))
+    check(ok1 and ok2 and ok3 and bool(seen) and not bench.declared("freq", 14200000, 14198500),
+          "freq 1500 declared: exactly that passes, either way, the Watch reading the same; gone with its block")
+    with bench.apart({"mode": [(6, 2), (6, 8)], "split": (1, 0), "filter": bench.STEPPED}, "a test's phases"):
+        ok = (bench.declared("mode", 2, 6) and bench.declared("mode", 6, 8) and not bench.declared("mode", 2, 8) and
+              bench.declared("split", 0, 1) and not bench.declared("split", 1, 2) and
+              bench.declared("flo", 100, 300) and bench.declared("fhi", 2700, 3000) and not bench.declared("agc", 1, 3))
+    check(ok, "pairs for each phase (either way), STEPPED for the filter's edges; nothing undeclared passes")
+    try:
+        bench.apart({}, "nothing")
+        empty_refused = False
+    except ValueError:
+        empty_refused = True
+    check(empty_refused, "a declaration of nothing (or without a reason) refused")
+    with bench.apart({"freq": 1000}, "image x: a band"):
+        bench.undeclare("image x:")
+        gone = not bench.declared("freq", 0, 1000)
+    check(gone, "undeclare ends a test's own declarations a refusal left")
+    bench.dial_settled()
+    c0 = bench.changing()
+    with bench.transition():
+        c1 = bench.changing()
+    c2 = bench.changing()
+    bench._dial_moved()
+    c3 = bench.changing()
+    bench.dial_settled()
+    c4 = bench.changing()
+    check(not c0 and c1 and not c2 and c3 and not c4, "a transition counts while it runs; a dial set on one radio "
+          "leaves the other DIAL_FOLLOW_S to follow, closed once the two are alike")
+    sa, ha = one_radio(None)
+    sb, hb = one_radio(None)
+    sb.state["freq"], sb.state["mode"] = 7074000, 0
+    got = bench.sync_pair([ha, hb], {"freq": 14200000, "mode": 2})
+    check(got == {"freq": 14200000, "mode": 2} and sb.state["freq"] == 14200000 and sb.state["mode"] == 2 and
+          sa.state["freq"] == 14200000, f"sync_pair: both set at once, read back alike ({got})")
+    sb.fault = "stuckatt"
+    why = refused_why(lambda: bench.sync_pair([ha, hb], {"att": 0}))
+    check(why is not None and "att" in why, f"sync_pair: a radio that will not take it refused ({why})")
+    ha.close()
+    hb.close()
     print(f"bench sim: {len(results) - bad} of {len(results)} cases as they should be")
     sys.exit(1 if bad else 0)
 

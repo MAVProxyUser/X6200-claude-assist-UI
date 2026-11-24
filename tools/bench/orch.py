@@ -210,7 +210,7 @@ $("phase").innerHTML="<b>"+esc(d.phase)+"</b>";const c=d.counts;
 const kp=(d.kept||[]).filter(k=>k.result==="PASS"&&!k.known).length,kk=(d.kept||[]).filter(k=>k.known).length;$("counts").textContent=`this run: ${c.done}/${c.total} done: ${c.pass} pass, ${c.fail} fail, ${c.look} look, ${c.notrun} not run · not rerun: ${kp} passed before, ${kk} known faults (of ${c.total+(d.kept||[]).length} tests)`;$("kepth").textContent=`Not rerun: ${kp} passed in an earlier run, ${kk} known faults, the latest first (kept in orch_results.json; orch.py run --all would run them again)`;
 const el=Math.round(d.now-d.t0);$("clock").textContent=`running ${Math.floor(el/60)}m${el%60}s, about ${Math.round(d.eta_s/60)} min left`;
 const s=d.sync;let cls=s.changing?"chg":(s.ok?"ok":"bad");
-$("sync").innerHTML=`<span class="sync ${cls}">${s.changing?"CHANGING BOTH":(s.ok?"IN SYNC":"OUT OF SYNC")}</span> <span class="muted">violations this run: ${s.violations}${s.last?" (last: "+esc(s.last)+")":""}</span>`;
+$("sync").innerHTML=`<span class="sync ${cls}">${s.changing?"CHANGING BOTH":(s.ok?"IN SYNC":"OUT OF SYNC")}</span> <span class="muted">violations this run: ${s.violations}${s.last?" (last: "+esc(s.last)+")":""}</span>`+((s.declared||[]).length?`<div class="says">declared apart by the test (bench.apart): ${(s.declared||[]).map(esc).join("; ")}</div>`:"");
 const hk=d.hackrf||{};
 $("radios").innerHTML=["x6100","x6200"].map(n=>[n,d.radios[n]]).map(([n,r])=>!r?`<div class="radio"><b>${n.toUpperCase()}</b> <span class="LOOK">connecting</span><div class="freq" style="color:var(--dim)">?</div><div class="muted">no state from it yet</div></div>`:`<div class="radio"><b>${n.toUpperCase()}</b> <span class="${r.tx?"tx":"rx"}">${r.tx?"ON THE AIR":"RX"}</span>
 <div class="freq">${mhz(r.freq)}</div><div>${MODES[r.mode]||r.mode} &middot; ${r.pwr} W &middot; page ${esc(r.pg)} ${r.rxo===0?"&middot; <span class=tx>TX ARMED</span>":""}</div>
@@ -331,10 +331,7 @@ class Orch:
         self.restore_calls = set()          # the radios given a test call this run (test_calls)
         self.changing = 0                   # changes to both under way: the guard looks away meanwhile
         self.violation = None               # this test's first sync violation
-        self.sync_paused = 0                # a suite group running (air batches: the radios apart on purpose in some
-                                            # of their overs, each under the suite's own Watch): the sync guard only
-        self.apart = None                   # a difference this test makes on purpose, declared: {"freq": Hz} (the
-                                            # owner: apart only when a test does it INTENTIONALLY); None: none
+
         self._diff_since = None
         self.on = True
         threading.Thread(target=self._guard, daemon=True).start()
@@ -470,15 +467,21 @@ class Orch:
                     self.st.ev(f"<- {n} said: err {e}", "radio")
                 self._errs[n] = len(errs)
             a, b = rs[A], rs[B]
-            ap = self.apart or {}
-            freq_ok = a["freq"] == b["freq"] or (
-                ap.get("freq") is not None and a["freq"] is not None and b["freq"] is not None
-                and abs(int(a["freq"]) - int(b["freq"])) == int(ap["freq"]))
-            differ = not freq_ok or a["mode"] != b["mode"]
+            # the one registry (bench.apart): a difference passes only when a running test declared it, exactly; a
+            # change under way (bench.transition, a dial still within DIAL_FOLLOW_S for the other to follow, or a
+            # change orch makes to both) is not a difference
+            freq_ok = a["freq"] == b["freq"] or bench.declared("freq", a["freq"], b["freq"])
+            mode_ok = a["mode"] == b["mode"] or bench.declared("mode", a["mode"], b["mode"])
+            differ = not (freq_ok and mode_ok)
+            moving = self.changing > 0 or bench.changing()
+            if not differ and not self.changing:
+                bench.dial_settled()        # alike again: the follow window closed
             with self.st.lock:
                 self.st.radios = rs
-                self.st.sync["changing"] = self.changing > 0 or self.sync_paused > 0
-                if self.changing or self.sync_paused:
+                self.st.sync["changing"] = moving
+                self.st.sync["declared"] = [f"{', '.join(f'{k} {v}' for k, v in sp.items())}: {why}"
+                                            for sp, why in bench.declarations()]
+                if moving:
                     self._diff_since = None
                 elif differ:
                     if self._diff_since is None:
@@ -532,26 +535,13 @@ class Orch:
         if only_one:                        # the caps map: a value only one radio takes would part them
             raise Refused(f"not on both radios (the caps map): {', '.join(only_one)}")
         self.changing += 1
-        errs = {}
         self.st.ev(f"set on both: {want}", "conf")
         try:
-            def one(n):
-                try:
-                    bench.ensure(self.r[n], want, checks)
-                except Refused as e:
-                    errs[n] = str(e)
-            th = [threading.Thread(target=one, args=(n,)) for n in self.r]
-            [t.start() for t in th]
-            [t.join(30) for t in th]
-            if errs:
-                raise Refused("; ".join(errs.values()))
-            diff = {k: (bench._value(self.r[A], k), bench._value(self.r[B], k)) for k in want
-                    if bench._value(self.r[A], k) != bench._value(self.r[B], k)}
-            self.st.ev("read back: " + "; ".join(f"{n} " + ", ".join(f"{k} {bench._value(r, k)}" for k in want)
-                                                 for n, r in self.r.items()), "conf")
-            if diff:
-                raise Refused("the two read differently after the set: " + ", ".join(f"{k} {a}/{b}"
-                                                                                     for k, (a, b) in diff.items()))
+            try:
+                bench.sync_pair([self.r[A], self.r[B]], want, checks)     # the one sync: both at once, compared
+            finally:
+                self.st.ev("read back: " + "; ".join(f"{n} " + ", ".join(f"{k} {bench._value(r, k)}" for k in want)
+                                                     for n, r in self.r.items()), "conf")
         finally:
             self.changing -= 1
         return {k: bench._value(self.r[A], k) for k in want}
@@ -3931,7 +3921,6 @@ def suite_group(o, module, t_name, name, call=None):
     f0, m0 = int(o.r[A].state.get("freq") or F_TEST), int(o.r[A].state.get("mode") or 2)
     rows = []
     with o.step(f"{module}: {name}, its directions as the suite runs them (its own Watch on each over)") as s:
-        o.sync_paused += 1
         o.roles = {A: "TX", B: "TX"}
         try:
             (call or (lambda m_, r_: getattr(m_, t_name)(r_)))(m, run)
@@ -3943,7 +3932,6 @@ def suite_group(o, module, t_name, name, call=None):
                 run.close()
             finally:
                 o.roles = {A: "RX", B: "RX"}
-                o.sync_paused -= 1
         rows = run.results
         s.confirm(f"{len(rows)} rows: {sum(1 for x in rows if x['ok'] is True)} pass, "
                   f"{sum(1 for x in rows if x['ok'] is None)} to look at, {sum(1 for x in rows if x['ok'] is False)} fail")
@@ -4211,14 +4199,12 @@ def image_test(o, sender, listener, bands=("20", "17", "15", "12", "10"), off=15
             with o.step(f"{band} m: both on {f / 1e6:.3f} USB, the receiver profile alike") as s:
                 want, checks = bench.rx_profile(f, 2, pre=0, att=0, rfg=100, agc=3, sql=0, filt=(100, 3000))
                 o.both(dict(want, pwr=W, atu=0, xit=0, rit=0, split=0), checks)
+            decl = bench.apart({"freq": off}, f"image {sender}: {listener} {off} Hz below {sender} on {band} m, the "
+                                              f"image's place in its USB audio")
+            decl.__enter__()                    # declared until the two are on one frequency again (below)
             with o.step(f"{band} m: {listener} {off} Hz below (declared: the one difference)") as s:
-                o.apart = {"freq": off}
                 o.st.ev(f"declared: {listener} {off} Hz below {sender} for this over", "conf")
-                o.changing += 1
-                try:
-                    bench.ensure(L, {"freq": f - off})
-                finally:
-                    o.changing -= 1
+                bench.ensure(L, {"freq": f - off})
                 s.confirm(f"{sender} {S.state.get('freq')}, {listener} {L.state.get('freq')}")
             with o.step(f"{band} m: {sender} sends {tones} Hz at {W} W") as s:
                 _, total = bench.chain_gate(o.c, "radios")
@@ -4227,7 +4213,7 @@ def image_test(o, sender, listener, bands=("20", "17", "15", "12", "10"), off=15
                 bench.listener_gate(L)
                 o.roles = {sender: "TX", listener: "RX"}
                 watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=L, w=W,
-                                    label=f"image {band} m", offsets={"freq": off})
+                                    label=f"image {band} m")      # the offset declared above (bench.apart)
                 try:
                     o.changing += 1
                     try:
@@ -4281,18 +4267,16 @@ def image_test(o, sender, listener, bands=("20", "17", "15", "12", "10"), off=15
                 s.confirm("; ".join(f"{t['fa']} Hz: image {t['image_dbc']} dBc, carrier {t['carrier_dbc']} dBc"
                                     for t in row["tones"]))
             with o.step(f"{band} m: the two on one frequency again") as s:
-                o.changing += 1
                 try:
                     bench.ensure(L, {"freq": f})
-                    o.apart = None
                 finally:
-                    o.changing -= 1
+                    decl.__exit__(None, None, None)
                 alike(o, ["freq", "mode"])
                 s.confirm("alike")
     except Refused as e:
         return False, str(e), {"bands": rows}
     finally:
-        o.apart = None
+        bench.undeclare(f"image {sender}:")         # a band's declaration a refusal left: ended with the test
         if tci is not None:
             tci.close()
         try:

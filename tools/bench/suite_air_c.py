@@ -612,6 +612,7 @@ class Pair:
         self.S = self.L = None
         self.snaps, self.rep, self.extra, self.watch, self.copied, self.stops = {}, {}, [], None, False, []
         self.apart = set()
+        self._decl = None
         self.done = []                  # every watch closed: its overs' pictures, named in the result
         self.proof_shots = None         # the path proof's pair of pictures
         self.cleanups = []              # (what, fn) run before finish (the last registered first)
@@ -721,14 +722,28 @@ class Pair:
         out = set(self.apart) - {"filter"}
         return out | ({"flo", "fhi"} if "filter" in self.apart else set())
 
-    def sender(self, f, mode, w, apart=()):
+    def set_apart(self, keys, why=None):
+        """What this test keeps apart on purpose, declared in the one registry (bench.apart, the owner, 2026-11-24:
+        "NO deviation"): each key as the test's own (STEPPED), with why; () ends the declaration"""
+        old = getattr(self, "_decl", None)
+        if old is not None:
+            old.__exit__(None, None, None)
+            self._decl = None
+        self.apart = set(keys)
+        if keys:
+            spec = {("filter" if k in ("flo", "fhi") else k): bench.STEPPED for k in keys}
+            self._decl = bench.apart(spec, why or f"air_c {self.test}: {', '.join(sorted(keys))} kept apart on "
+                                                  f"purpose")
+            self._decl.__enter__()
+
+    def sender(self, f, mode, w, apart=(), why=None):
         """Both alike (the owner, 2026-11-23: "they should have the same settings"): the listener first on f in mode,
         then the sender given the listener's set-up (bench.PAIR_SET) on f in mode at w, armed on G (locked first: an
         armed radio holds its dial; arming puts CW and the data modes into the voice mode: set again), the two
         compared, a difference refused. apart: what the test keeps apart on purpose (A's scan moves the listener's
         dial: freq, mode, filter), not set on the listener nor compared, by the watch neither"""
         S, L = self.S, self.L
-        self.apart = set(apart)
+        self.set_apart(apart, why)
         self.ctl_check("before the sender's set-up")
         if L.tx or S.tx:
             raise bench.Refused(f"{(L if L.tx else S).name} on the air before the over was set up")
@@ -758,7 +773,7 @@ class Pair:
         the apps hold the dial and the mode, so those must already match), its own memory of the mode kept for
         finish; compared (suite_air_b's apps_alike). An app that will not take it: Refused, naming what differs"""
         S, L = self.S, self.L
-        self.apart = set()
+        self.set_apart(())
         self.keep_filter(S, int(S.state.get("freq", 0)), int(S.state.get("mode", -1)))
         d = bench.pair_diff(S, L)
         if d:
@@ -773,7 +788,7 @@ class Pair:
         """The listener given the sender's set-up (an app holds the sender's: the FT8 app's dial, mode and filter),
         compared: a difference refused"""
         S, L = self.S, self.L
-        self.apart = set()
+        self.set_apart(())
         f, mode = int(S.state.get("freq", 0)), int(S.state.get("mode", -1))
         self.keep_filter(L, f, mode)
         bench.ensure(L, {k: bench._value(S, k) for k in bench.PAIR_SET if bench._value(S, k) is not None})
@@ -841,6 +856,7 @@ class Pair:
             self.watch_off()
         except Exception:      # noqa: BLE001 - the end puts the radios back whatever went wrong before it
             pass
+        self.set_apart(())     # its declaration ended (bench.apart): the put-back makes the two alike again
         for x in self.extra:
             try:
                 x.close()
@@ -2314,7 +2330,9 @@ def b_sentry(P):
         purpose: the dial, mode and filter (the sender in USB-D under the carrier, the listener's A where it looks)
         and the AGC and zoom (A's scan and its stops load each segment's own: round 1 2026-11-23, the listener went
         to AGC 3, zoom 4 under the sender, and the Watch stopped the over); the rest alike"""
-        P.retune(f - 1000, 3, W0, apart=("freq", "mode", "filter", "agc", "zoom"))
+        P.retune(f - 1000, 3, W0, apart=("freq", "mode", "filter", "agc", "zoom"),
+                 why="sentry-lock: A's scan moves the listener's dial and loads each segment's mode, filter, AGC and "
+                     "zoom (the test's subject); the sender's carrier 1000 Hz under each frequency")
         P.watch_on(W0, f"carrier {f / 1e6:.3f}")
         return tone_over(P, 1000, secs, W0)
 

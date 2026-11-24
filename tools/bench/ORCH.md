@@ -6,8 +6,8 @@ pads) are tested. It holds both radios, runs every test on them as a pair, and s
 
 - **Both radios always on the same frequency and mode.** The only thing that changes from test to test is the role:
   both listen, or one sends and the other listens. A sync guard samples both every 0.2 s (`GUARD_POLL_S`); outside a
-  change the orchestrator makes to both, a difference lasting 0.6 s (`GUARD_S`) fails the test it happened in ("OUT
-  OF SYNC") and is photographed. A test that needs them apart must declare it (see "Intentional offsets").
+  transition, a difference lasting 0.6 s (`GUARD_S`) that no test declared fails the test it happened in ("OUT OF
+  SYNC") and is photographed (see "The one sync framework").
 - **Every step is confirmed.** A setting is sent to both and the test goes on only once each radio's own state says
   it (`bench.ensure`), then the two are compared (`Orch.both`): never after a fixed wait. Each step is shown on the
   console as running, confirmed or failed, with what it found.
@@ -71,19 +71,45 @@ Guards running all the while: the sync guard; a radio that transmits while its r
 photographed); a signal over -100 dBm on a receiver with neither radio saying it sends (`RF_ALARM_DBM`: both stopped);
 a radio silent for 3 s (`STALE_S`: its GUI's process checked, a crash fails the test, a WiFi stall is said).
 
-### Intentional offsets
+### The one sync framework: no deviation that is not declared
 
-The radios are on different frequencies only when a test declares it, for its own overs (the owner: "UNLESS
-specifically part of a test that does so INTENTIONALLY"). Nothing else may part them. A test declares the exact
-difference, and only that difference passes:
+The owner, 2026-11-24: "EVERY test should use the same unified framework to sync the radios or make exceptions for
+tests so that there is NO deviation". Every test, orch's own and the earlier suite's run through orch, goes through
+one framework in `bench.py`:
 
-- **The sync guard**: `o.apart = {"freq": 1500}` while the listener is moved, `None` again once both are back on one
-  frequency (the image tests). The guard then takes the two dials 1500 Hz apart as in step; any other difference, or
-  a mode difference, is still a violation. The declaration is said on the console's events.
-- **The over's Watch** (`bench.Watch(..., offsets={"freq": 1500})`): as the sender keys, every receiver setting of the
-  other radio is still compared with its own (`bench.PAIR_KEYS`); only the declared key at exactly that amount
-  passes. image.py declares its offset the same way.
-- The radios are put back on one frequency (and `o.apart` cleared) before the test ends, whatever happens.
+- **One way to set the two alike: `bench.sync_pair(radios, want)`**: both radios set at once (each read back by
+  `ensure`), then compared; a difference that is not declared is refused. orch's `both()` and `ready()`, the suite's
+  `sync_both`/`unsync_both` (both radios taken, page A on both, the set-up and the put-back together) and
+  `pair_align` (the sender given the listener's set-up) all call it.
+- **One registry of declared differences: `with bench.apart(spec, reason):`**. A test that sets the radios apart on
+  purpose says what and why, and only that passes. A rule is an exact distance (`{"freq": 15000}`: the two exactly
+  15 kHz apart, either way), an exact pair of values (`{"split": (1, 0)}`), a list of pairs, one for each phase of
+  the test (`{"mode": [(6, 2), (6, 8)]}`), or `bench.STEPPED`, a setting the test sets or steps itself as what it
+  measures (its reason says how; `"filter"` covers the filter's edges). Every declaration in force is shown on the
+  console's sync line.
+- **One reader of it**: `bench.Watch` (as a radio keys, every receiver setting of the other compared: a difference
+  not declared stops the over, and a setting a test keeps apart without declaring it is named) and orch's sync guard
+  (the dial and the mode, every 0.2 s, never paused) both call `bench.declared()`.
+- **Transitions are not differences**: `ensure()`, `open_page()` and `arm()` are transitions while they run, and a dial
+  set on one radio leaves the other `DIAL_FOLLOW_S` (8 s, one test step) to follow; once the two are alike the window
+  closes. orch's own changes to both (`both()`, `in_parallel`: the same steps on both radios at once) count the same.
+
+The declarations in the tests today (each with its reason in the code):
+
+| test | declared |
+|---|---|
+| image x6100/x6200 | `freq` 1500: the listener 1500 Hz below, the image's place in its USB audio |
+| air split | `freq` 15000, `split` (1, 0), `vfo` (1, 0), `mode` [(6, 3)], `filter` STEPPED: TX on B, the listener between |
+| air split-cw | `freq` 10000, `split` (1, 0), `vfo` (1, 0): keyed on the listen VFO A |
+| air qsy-out | `freq` 20000: the listener midway between 14.320 and the 14.360 the Panel tunes to under PTT |
+| air smeter-am | `freq` 1000, `mode` [(6, 2), (6, 8)], `filter` STEPPED: the carrier read in USB, then AM and SAM |
+| air codec-clock | `freq` exactly the tone's place across the listener's span |
+| air TUNE (every tune over) | `mode` [(3, the listener's)], `filter` STEPPED: TUNE sends as USB-D |
+| air smeter-front-end | `pre`, `att`, `rfg` STEPPED: the listener's front end stepped under the over |
+| air keys-with-ptt | `nr`, `nb` STEPPED: DFN turns them under PTT |
+| air sentry-lock | `freq`, `mode`, `filter`, `agc`, `zoom` STEPPED: A's scan moves the listener (the subject) |
+
+sim_test.py checks the framework itself (every rule, the Watch reading the registry, transitions, sync_pair).
 
 ## The console (http://127.0.0.1:8765/)
 
@@ -150,8 +176,8 @@ The rest of the old batches stay outside until each is worth bringing in.
 ## Over-the-air coverage (every transmission test, 0.1 W over the 80 dB cable unless said)
 
 orch's own tests and the earlier suite's over-the-air groups, run whole through orch (`air ...`: `suite_group` runs a
-batch's `t_*` with a `suite.Run` of its own, its sync_both, its put-back and a `bench.Watch` on every over; orch keeps
-the radios ready before, pauses only its sync guard while the group runs, takes control back and puts both alike
+batch's `t_*` with a `suite.Run` of its own, its sync_both and put-back through the one framework, a `bench.Watch` on
+every over; orch's sync guard stays on, every deviation in them declared; orch takes control back and puts both alike
 after; the group passes with no row failed). Every test runs both ways unless it says otherwise.
 
 | area | orch's own | the suite's, run whole (`air ...`) |

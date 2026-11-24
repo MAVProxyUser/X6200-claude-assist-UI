@@ -29,6 +29,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
 import argparse
 import base64
 import collections
+import contextlib
 import json
 import math
 import os
@@ -360,10 +361,162 @@ def state_ready(r):
                       f"2026-11-22): install a newer one first")
 
 
+# ---- The one framework that keeps the two radios in sync (the owner, 2026-11-24: "EVERY test should use the same
+# unified framework to sync the radios or make exceptions for tests so that there is NO deviation") ----
+# Every difference between the two radios that a test makes on purpose is declared with apart(), exactly, with its
+# reason, and only that passes: bench.Watch (as a radio keys, every receiver setting compared) and orch's sync guard
+# (the dial and mode, all the while) read the same declarations. A setting being changed is a transition, not a
+# difference: ensure(), open_page() and arm() are one while they run, and a dial changed on one radio leaves the other
+# DIAL_FOLLOW_S to follow. sync_pair() sets the two alike at once: orch's both() and ready(), the suite's sync_both
+# and pair_align all go through it.
+
+STEPPED = "stepped"         # a rule: the setting is what the test steps and measures (the reason says how)
+DIAL_FOLLOW_S = 8.0         # a dial or mode set on one radio: the other set within this (one test step), else a
+                            # difference
+_sync_lock = threading.RLock()
+_declared = []              # [{"spec": {key: rule}, "reason": str, "at": t}]
+_transitions = 0
+_dial_until = 0.0
+
+
+class apart:
+    """with bench.apart({"freq": 1500}, "the listener 1500 Hz below, the image's place"): the radios that far apart
+    on purpose while the block runs. A rule: an int, the two exactly that far apart (|a - b|); a tuple of two values,
+    the two reading them (in either order); a list of such tuples (one for each phase of the test); STEPPED, a setting
+    the test sets or steps itself as what it measures (the reason says how). "filter" covers the filter's edges (flo,
+    fhi)"""
+
+    def __init__(self, spec, reason):
+        if not spec or not reason:
+            raise ValueError("apart() needs what is apart and why")
+        self.d = {"spec": dict(spec), "reason": str(reason), "at": time.time()}
+
+    def __enter__(self):
+        with _sync_lock:
+            _declared.append(self.d)
+        return self
+
+    def __exit__(self, *a):
+        with _sync_lock:
+            if self.d in _declared:
+                _declared.remove(self.d)
+        return False
+
+
+def _rule_ok(rule, a, b):
+    if rule == STEPPED:
+        return True
+    if isinstance(rule, bool):
+        return False
+    if isinstance(rule, int):
+        try:
+            return abs(int(a) - int(b)) == rule
+        except (TypeError, ValueError):
+            return False
+    if isinstance(rule, tuple) and len(rule) == 2:
+        return (a, b) == rule or (b, a) == rule
+    if isinstance(rule, list):                  # several pairs, one for each phase of the test
+        return any(_rule_ok(tuple(x), a, b) for x in rule)
+    return False
+
+
+def declared(key, a, b):
+    """The difference a/b of key is one a running test declared (apart)"""
+    with _sync_lock:
+        specs = [d["spec"] for d in _declared]
+    for spec in specs:
+        if key in spec and _rule_ok(spec[key], a, b):
+            return True
+        if key in ("flo", "fhi") and spec.get("filter") == STEPPED:
+            return True
+    return False
+
+
+def undeclare(reason_prefix):
+    """Every declaration whose reason starts with reason_prefix ended (a test's own, left by a refusal)"""
+    with _sync_lock:
+        _declared[:] = [d for d in _declared if not d["reason"].startswith(reason_prefix)]
+
+
+def declarations():
+    """What is declared apart now: [(spec, reason)] (orch's console says it)"""
+    with _sync_lock:
+        return [(dict(d["spec"]), d["reason"]) for d in _declared]
+
+
+@contextlib.contextmanager
+def transition():
+    """A change under way (one or both radios being set): no difference counted meanwhile"""
+    global _transitions
+    with _sync_lock:
+        _transitions += 1
+    try:
+        yield
+    finally:
+        with _sync_lock:
+            _transitions -= 1
+
+
+def changing():
+    """A change under way, or a dial set on one radio still within DIAL_FOLLOW_S for the other to follow"""
+    with _sync_lock:
+        return _transitions > 0 or time.time() < _dial_until
+
+
+def _dial_moved():
+    global _dial_until
+    with _sync_lock:
+        _dial_until = time.time() + DIAL_FOLLOW_S
+
+
+def dial_settled():
+    """The two radios are alike again: the window for the other to follow closed"""
+    global _dial_until
+    with _sync_lock:
+        _dial_until = 0.0
+
+
+def sync_pair(radios, want, checks=None):
+    """want set on every radio at once, each read back (ensure), then compared: any key of want the radios read
+    differently, unless declared apart, Refused. The one way the radios are set alike (orch both/ready, the suite's
+    sync_both, pair_align). Returns the first radio's values"""
+    errs = {}
+
+    def one(r):
+        try:
+            ensure(r, want, checks)
+        except Refused as e:
+            errs[r.name] = str(e)
+    with transition():
+        th = [threading.Thread(target=one, args=(r,)) for r in radios]
+        [t.start() for t in th]
+        [t.join(60) for t in th]
+    if errs:
+        raise Refused("; ".join(errs.values()))
+    first = radios[0]
+    diff = {k: [_value(r, k) for r in radios] for k in want
+            if len({repr(_value(r, k)) for r in radios}) > 1 and not (len(radios) == 2 and declared(
+                k, _value(radios[0], k), _value(radios[1], k)))}
+    if diff:
+        raise Refused("the radios read differently after the set: " + ", ".join(
+            f"{k} {'/'.join(str(v) for v in vals)}" for k, vals in diff.items()))
+    dial_settled()
+    return {k: _value(first, k) for k in want}
+
+
 def ensure(r, want, checks=None):
     """want ({key: value}; "filter": (lo, hi), "pwr": W) set on r in SET_ORDER, each read back before the next; then
     all of them again at once (a band change must not have moved one set before it) and checks ({key: (test, words)},
-    the state "set" does not take) held. Anything not as asked: Refused, naming it and what the radio reads"""
+    the state "set" does not take) held. Anything not as asked: Refused, naming it and what the radio reads. A
+    transition while it runs; a dial or mode moved leaves the other radio DIAL_FOLLOW_S to follow"""
+    with transition():
+        got = _ensure(r, want, checks)
+    if "freq" in want or "mode" in want:
+        _dial_moved()
+    return got
+
+
+def _ensure(r, want, checks=None):
     state_ready(r)
     for k in SET_ORDER:
         if k not in want:
@@ -619,6 +772,12 @@ def tap(r, key="AB"):
 
 
 def arm(r, on, mode=None):
+    """_arm as a transition (arming puts CW and the data modes into the band's voice mode, then mode again)"""
+    with transition():
+        return _arm(r, on, mode)
+
+
+def _arm(r, on, mode=None):
     """The Sentry's A/B on A or G: the transmitter armed (rxo 0) or locked again (rxo 1), checked, three tries. Arming
     puts CW and the data modes into the band's voice mode (app_sentry.c arm_voice_mode, 42279ea2): mode, given, is
     set again after it and read back (the audit, 2026-11-22: tones.py's USB-D went out as USB, nothing said)"""
@@ -644,6 +803,15 @@ G_ENTRY_S = 3.0                 # G's entry tune comes within this of the page s
 
 
 def open_page(r, letter):
+    """_open_page as a transition (G tunes its own channel, page A brings back A's dial): the other radio's page and
+    dial follow within DIAL_FOLLOW_S"""
+    with transition():
+        got = _open_page(r, letter)
+    _dial_moved()
+    return got
+
+
+def _open_page(r, letter):
     """The Sentry on its page letter, asked twice (an app still closing can take the first ask). G entered: its own
     channel's tune waited for (a GUI with "wch": the page says G a moment before G tunes its channel, and a dial set
     meanwhile was moved again, 2026-11-23); a G that does not tune (TX armed, the dial held, on an SDR's channel)
@@ -859,9 +1027,9 @@ def pair_align(sender, listener, f=None, mode=None):
     if first:
         ensure(listener, first)
     want = {k: _value(listener, k) for k in PAIR_SET if _value(listener, k) is not None}
-    ensure(sender, want)
+    sync_pair([listener, sender], want)         # the one way the two are set alike
     time.sleep(0.5)
-    diff = pair_diff(sender, listener)
+    diff = {k: v for k, v in pair_diff(sender, listener).items() if not declared(k, *v)}
     if diff:
         raise Refused(f"{sender.name} and {listener.name} are not set alike before the over: " +
                       ", ".join(f"{k} {x}/{y}" for k, (x, y) in diff.items()))
@@ -1238,9 +1406,14 @@ class Watch:
     def __init__(self, radios, c, hackrf=None, expect_dbm=None, listener=None, w=None, label="over", pair_ignore=(),
                  offsets=None):
         self.radios, self.c, self.hackrf, self.why = radios, c, hackrf, None
-        # A difference a test makes on purpose and declares, exactly (the owner, 2026-11-24: the radios apart only
-        # "specifically part of a test that does so INTENTIONALLY"): {key: amount}, e.g. {"freq": 1500} for a listener
-        # 1500 Hz from the sender (image.py). Only that amount passes; any other difference still stops the over
+        # A difference a test makes on purpose is declared in the one registry (apart(), the owner, 2026-11-24: "NO
+        # deviation"); offsets: {key: amount} declared there for this over's life (image.py: the listener 1500 Hz
+        # below). pair_ignore names what the test keeps apart: each must be declared (apart) as the radio keys, else
+        # the over stops
+        self._own_apart = apart({k: abs(int(v)) for k, v in offsets.items()}, f"{label}: declared by its Watch") \
+            if offsets else None
+        if self._own_apart:
+            self._own_apart.__enter__()
         self.offsets = {k: abs(int(v)) for k, v in (offsets or {}).items()}
         # Every over of one radio to another (the owner, 2026-11-23: "when you TX on one radio screenshot them BOTH,
         # you should see the RX happening! and they should have the same settings. IF they don't something is
@@ -1338,11 +1511,13 @@ class Watch:
                 if since and self.hackrf is None and len(self.radios) > 1 and self._shot_seen.get(r.name) != since:
                     self._shot_seen[r.name] = since
                     for o in self.radios:
-                        diff = {k: v for k, v in pair_diff(r, o).items() if k not in self.pair_ignore and
-                                not self._declared(k, v)} if o is not r else {}
+                        diff = {k: v for k, v in pair_diff(r, o).items() if not declared(k, *v)} if o is not r else {}
+                        undeclared = sorted(k for k in diff if k in self.pair_ignore)
                         if diff:
                             self.trip(f"{r.name} went on the air not set as {o.name}: " +
-                                      ", ".join(f"{k} {x}/{y}" for k, (x, y) in diff.items()))
+                                      ", ".join(f"{k} {x}/{y}" for k, (x, y) in diff.items()) +
+                                      (f" (kept apart by the test but never declared: {', '.join(undeclared)}: "
+                                       f"bench.apart)" if undeclared else ""))
                     self._shot_threads.append((r.name, since, shots_during(self.radios, f"{self.label} {r.name} TX",
                                                                            r)))
                 if self.hackrf is not None and r.tx:
@@ -1395,14 +1570,14 @@ class Watch:
         tx_log({"stop": why})
 
     def _declared(self, k, v):
-        """The difference v (a's, b's) of key k is the one the test declared (offsets)"""
-        try:
-            return k in self.offsets and abs(int(v[0]) - int(v[1])) == self.offsets[k]
-        except (TypeError, ValueError):
-            return False
+        """The difference v (a's, b's) of key k is declared (the one registry)"""
+        return declared(k, *v)
 
     def close(self):
         """The Watch ended: an over still being followed is judged now (a test closes it as its sender unkeys)"""
+        if getattr(self, "_own_apart", None):
+            self._own_apart.__exit__(None, None, None)
+            self._own_apart = None
         self.on = False
         time.sleep(0.06)                    # its last pass
         if self.listener is not None:
