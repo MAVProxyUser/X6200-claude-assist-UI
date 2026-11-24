@@ -450,6 +450,28 @@ class Orch:
             self.st.sync.update(ok=True, since=time.time())
         self.st.ev("ready after putting right: both locked, alike", "ok")
 
+    PAIR = ("filter", "pre", "att", "agc", "rfg", "sql", "nb", "nr", "rit", "split", "zoom")
+
+    def pair_alike(self, ref=A):
+        """Every receiver setting the Watch compares (bench.PAIR_KEYS) made the same on both: ref's values set on both,
+        each confirmed (an app's filter per mode had parted them: the X6100's USB-D from 100 Hz, the X6200's from 200,
+        2026-11-23, and the Watch stopped the FT8 QSO before it began)"""
+        want = {k: bench._value(self.r[ref], k) for k in self.PAIR}
+        want = {k: v for k, v in want.items() if v is not None and v != (-1, -1)}
+        self.both(want)
+
+    def apps_closed(self, f, m):
+        """The apps closed on both and both on the Sentry's G on f in m, in one guarded change"""
+        self.changing += 1
+        try:
+            for r in self.r.values():
+                r.stop()
+                bench.close_apps(r)
+            self.both_page("G")
+            self.both({"freq": f, "mode": m})
+        finally:
+            self.changing -= 1
+
     def both_page(self, letter):
         self.changing += 1
         try:
@@ -609,6 +631,8 @@ def over(o, sender, listener, f, mode, label, body, w=W, agc=0, pages=True):
             want, checks = bench.rx_profile(f, mode, pre=0, att=0, rfg=100, agc=agc, sql=0,
                                             filt=(100, 3000) if mode in (0, 1, 2, 3) else None)
             o.both(dict(want, pwr=w, atu=0, xit=0), checks)
+    with o.step("every receiver setting the Watch compares alike on both"):
+        o.pair_alike()
     with o.step(f"{sender} may send, {listener} may listen") as s:
         bench.ensure(S, *bench.tx_profile(f, mode, w))
         bench.radio_tx_gate(S, o.c, w)
@@ -947,6 +971,7 @@ def ft8_cq(o, sender, listener, label, dial=14074000):
     finally:
         for r in (S, L):
             r.send("ft8 close")
+        o.apps_closed(dial, 3)
     return True, f"sent {got['sent']!r}, decoded the same at {got['snr']} dB", got
 
 
@@ -1178,6 +1203,7 @@ def ft8_stop(o, sender, listener, label, dial=14074000):
     finally:
         for r in (S, L):
             r.send("ft8 close")
+        o.apps_closed(dial, 3)
     return True, f"off the air {res['off_s']} s after ft8 stop, not again", res
 
 
@@ -1534,6 +1560,7 @@ def ft8_both(o, dial):
         o.changing -= 1
     o.both({"freq": dial, "pwr": W})
     alike(o, ("freq", "mode"))
+    o.pair_alike()
 
 
 def ft8_send(o, S, L, watch, cmd, label, dial):
@@ -1591,6 +1618,7 @@ def ft8_reply(o, a, b, label, dial=14074000):
     finally:
         for r in (A_, B_):
             r.send("ft8 close")
+        o.apps_closed(dial, 3)
     return True, f"{a}'s {res['cq']!r} decoded by {b}, {b}'s reply {res['reply']!r} decoded by {a}", res
 
 
@@ -1763,6 +1791,7 @@ def js8_text(o, a, b, label):
             alike(o, ("freq", "mode"))
             time.sleep(2.0)
             alike(o, ("freq", "mode"))          # and still, nothing left stepping
+            o.pair_alike()
         bench.radio_tx_gate(A_, o.c, W)
         bench.listener_gate(B_)
         o.roles = {a: "TX", b: "RX"}
@@ -1807,6 +1836,7 @@ def js8_text(o, a, b, label):
         for r in (A_, B_):
             r.send("js8 stop")
             r.send("js8 close")
+        o.apps_closed(ab.F_JS8, 3)
     return True, f"{a}'s '{TEST_CALLS[b]} {JS8_TEXT}' in {b}'s list as {res['decoded']!r}", res
 
 
@@ -2140,6 +2170,79 @@ def wefax_chart(o, sender, listener, label):
     return True, f"{res['rows']} rows of the chart, its two halves {res['contrast']} grey levels apart (80 wanted)", res
 
 
+def ft8_qso(o, a, b, label, dial=14074000):
+    """A whole FT8 QSO by the apps themselves: Auto on both, a calls CQ, b answers it once ("ft8 reply"), the reports,
+    RR73 and 73 by the apps; both must log the QSO (their state's "logged" the other's test call) and each ADIF file
+    hold exactly one record of it. The test's records taken out of both logs after (bench.clean_log)"""
+    import suite_air_b as ab
+    A_, B_ = o.r[a], o.r[b]
+    ca, cb = TEST_CALLS[a], TEST_CALLS[b]
+    res = {}
+    p, total = bench.chain_gate(o.c, "radios")
+    try:
+        with o.step("both on their test calls, the FT8 app open on both on the dial, Auto on both"):
+            ft8_both(o, dial)
+            for r in (A_, B_):
+                bench.radio_tx_gate(r, o.c, W)
+                bench.listener_gate(r)
+                if not r.ft8.get("auto"):
+                    r.send("ft8 auto")
+                    r.wait("Auto on", lambda r=r: r.ft8.get("auto"), 5)
+        o.roles = {a: "TX", b: "TX"}            # they take turns: the RF watchdog leaves them be
+        watch = bench.Watch([A_, B_], o.c, w=W, label=label)
+        t0 = time.time()
+        try:
+            with o.step(f"{a} calls CQ, {b} decodes it and answers once") as s:
+                nb = len(B_.rows)
+                bench.tx_log({"who": a, "f": dial, "w": A_.pwr(), "what": f"orch: {label} CQ"})
+                A_.send("ft8 cq")
+                B_.wait(f"{a}'s CQ", lambda: watch.why or any(ab.calls_are(r, "CQ", ca) for r in B_.rows[nb:]), 70)
+                if watch.why:
+                    raise Refused(watch.why)
+                cq = next(r for r in B_.rows[nb:] if ab.calls_are(r, "CQ", ca))
+                bench.tx_log({"who": b, "f": dial, "w": B_.pwr(), "what": f"orch: {label} reply"})
+                B_.send(f"ft8 reply {cq['id']}")
+                s.confirm(f"{mask(bench.msg(cq))!r} at {cq.get('snr')} dB, answered")
+            with o.step("the apps finish the QSO by themselves: both log it") as s:
+                def logged(r, call):
+                    age = r.ft8.get("logged_s")
+                    return r.ft8.get("logged") == call and age is not None and 0 <= age <= time.time() - t0
+                B_.wait("both logged", lambda: watch.why or (logged(A_, cb) and logged(B_, ca)), 170)
+                if watch.why:
+                    raise Refused(watch.why)
+                s.confirm(f"{a} logged {cb}, {b} logged {ca}, {time.time() - t0:.0f} s from the CQ")
+        finally:
+            for r in (A_, B_):
+                r.send("ft8 stop")
+            t1 = time.time()
+            while time.time() - t1 < 20 and (A_.tx or B_.tx):
+                time.sleep(0.2)
+            watch.close()
+            for r in (A_, B_):
+                if r.ft8.get("auto"):
+                    r.send("ft8 auto")
+            o.roles = {A: "RX", B: "RX"}
+        with o.step("each ADIF holds exactly one record of the QSO") as s:
+            n_a, _ = ab.ft8_logged(A_.host, cb, t0 - 10)
+            n_b, _ = ab.ft8_logged(B_.host, ca, t0 - 10)
+            res.update(records={a: n_a, b: n_b}, secs=round(time.time() - t0))
+            if (n_a, n_b) != (1, 1):
+                raise Refused(f"records of the QSO: {a} {n_a}, {b} {n_b} (one each wanted)")
+            s.confirm(f"{a} 1, {b} 1")
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        for r in (A_, B_):
+            r.send("ft8 close")
+        o.apps_closed(dial, 3)
+        for r in (A_, B_):
+            try:
+                bench.clean_log(r.host)             # the test calls' records out of the logs
+            except (Refused, OSError) as e:
+                o.st.ev(f"{r.name}: the test QSO not taken out of its log: {e}", "bad")
+    return True, f"the apps made the QSO ({res['secs']} s): both logged it, one ADIF record each", res
+
+
 # ---- The tests ----
 
 class Test:
@@ -2211,6 +2314,8 @@ TESTS = [
           "halves at least 80 grey levels apart", lambda s, l, n: (lambda o: wefax_chart(o, s, l, n)), 60),
     *pair("tune-carrier", "", "TUNE at 0.1 W: on the air, heard 15 dB up, off by itself 2.5-5 s after the lease's last "
           "renewal", lambda s, l, n: (lambda o: tune_carrier(o, s, l, n)), 25),
+    *pair("ft8-qso", "", "FT8: a whole QSO by the apps (Auto), logged on both, one ADIF record each (taken out after)",
+          lambda s, l, n: (lambda o: ft8_qso(o, s, l, n)), 180),
     *pair("ft8-stop", "", "FT8: ft8 stop 2 s into a CQ takes the sender off the air within 1 s, not again",
           lambda s, l, n: (lambda o: ft8_stop(o, s, l, n)), 35),
     Test("tci-control", "both RX", "TCI vfo and modulation on both radios' own TCI: each confirmed by its own state, "
