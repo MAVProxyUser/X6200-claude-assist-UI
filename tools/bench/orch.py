@@ -342,12 +342,17 @@ class Orch:
         try:
             for r in rs:
                 r.stop()
-                if r.state.get("rxo") == 0:
-                    bench.arm(r, False)
                 bench.close_apps(r)
         finally:
             self.changing -= 1
-        self.both_page("G")
+        self.both_page("G")                 # the Sentry's page first: its A/B is what locks the transmitter
+        self.changing += 1
+        try:
+            for r in rs:
+                if r.state.get("rxo") == 0:
+                    bench.arm(r, False)
+        finally:
+            self.changing -= 1
         self.both({"freq": int(self.r[A].state.get("freq") or 14200000), "mode": int(self.r[A].state.get("mode") or 2)})
         if any(r.tx or r.state.get("rxo") == 0 for r in rs):
             raise Refused("the radios could not be made ready (keyed or armed): the run stops")
@@ -1104,24 +1109,28 @@ def digi_text(o, sender, listener, mode, label):
     text = suite_more.DIGI_TEXT[mode]
     res = {"sent": text}
     try:
-        with o.step(f"{listener}'s {mode} app open") as s:
-            o.changing += 1
+        with o.step(f"{listener}'s {mode} app open, {sender} put on its dial and mode in the same change") as s:
+            o.changing += 1             # the app moves the listener: the sender follows before the guard looks again
             try:
                 if not suite_more.open_app(L, suite_more.DIGI_APP[mode]):
                     raise Refused(f"{listener}'s {mode} app did not open")
-                time.sleep(1.5)
+                L.wait("the app's dial", lambda: L.state.get("app") or L.state.get("win"), 5)
+                time.sleep(1.0)
+                f, m = int(L.state.get("freq", 0)), int(L.state.get("mode", -1))
+                o.both({"freq": f, "mode": m})
             finally:
                 o.changing -= 1
-            f, m = int(L.state.get("freq", 0)), int(L.state.get("mode", -1))
-            s.confirm(f"on {f / 1e6:.4f} MHz mode {m}")
+            s.confirm(f"both on {f / 1e6:.4f} MHz mode {m}")
         x = digimodes.psk31_audio(text)
         local = os.path.join(o.st.run_dir, f"{mode}_{sender}.raw")
         secs = digimodes.write_raw(x, local)
         subprocess.run(["scp", "-q", "-o", "BatchMode=yes", local, f"root@{S.host}:/tmp/bench_digi.raw"], check=True)
         subprocess.run(["scp", "-q", "-o", "BatchMode=yes", os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "tci_tone_tx.py"), f"root@{S.host}:/tmp/tci_tone_tx.py"], check=True)
-        log0 = bench.ssh(L.host, "f=$(ls -t /mnt/digi_text/*.txt 2>/dev/null | head -1); [ -n \"$f\" ] && wc -c < $f "
-                                 "|| echo 0").strip()
+        sizes = "cd /mnt/digi_text 2>/dev/null && for f in *.txt; do echo \"$f $(wc -c < $f)\"; done"
+        # every day's file and its size: the line may go into a new day's file (UTC midnight, 2026-11-24: the
+        # text was decoded right and the reader looked in yesterday's)
+        log0 = dict(ln.split() for ln in bench.ssh(L.host, sizes).split("\n") if len(ln.split()) == 2)
 
         def body(watch):
             with o.step(f"{sender} sends {text!r} ({secs:.1f} s of {mode})"):
@@ -1129,15 +1138,18 @@ def digi_text(o, sender, listener, mode, label):
                 if watch.why:
                     raise Refused(watch.why)
         over(o, sender, listener, f, m, label, body, pages=False)
-        with o.step(f"{listener}'s app closed, its decoded line read") as s:
+        with o.step(f"{listener}'s app closed (both on the dial again), its decoded line read") as s:
             o.changing += 1
             try:
                 bench.close_apps(L)
+                o.both({"freq": f, "mode": m})
             finally:
                 o.changing -= 1
             got, t0 = "", time.time()
             while time.time() - t0 < 30:
-                got = bench.ssh(L.host, f"f=$(ls -t /mnt/digi_text/*.txt | head -1); tail -c +{int(log0 or 0) + 1} $f")
+                now = dict(ln.split() for ln in bench.ssh(L.host, sizes).split("\n") if len(ln.split()) == 2)
+                got = "".join(bench.ssh(L.host, f"tail -c +{int(log0.get(n, 0)) + 1} /mnt/digi_text/{n}")
+                              for n, size in sorted(now.items()) if int(size) > int(log0.get(n, 0)))
                 cer, seg = best_cer(got, text)
                 if cer <= 0.05:
                     break
