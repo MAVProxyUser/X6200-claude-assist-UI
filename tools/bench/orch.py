@@ -1197,7 +1197,15 @@ def digi_text(o, sender, listener, mode, label):
             finally:
                 o.changing -= 1
             s.confirm(f"both on {f / 1e6:.4f} MHz mode {m}")
-        x = digimodes.psk31_audio(text)
+        if mode == "rtty":                  # made to the listener's own centre, shift, rate and sense
+            rows = bench.ssh(L.host, "sqlite3 -readonly /mnt/params.db \"select name,val from params where name like "
+                                     "'rtty%'\"")
+            cfg = {k: int(v) for k, v in (ln.split("|") for ln in rows.split() if "|" in ln)}
+            mark_low = (m in (2, 3)) == bool(cfg.get("rtty_reverse", 1))     # rtty.c tx_start: mark_hi = USB != rev
+            x = digimodes.rtty_audio(text, center=cfg.get("rtty_center", 800), shift=cfg.get("rtty_shift", 450),
+                                     baud=cfg.get("rtty_rate", 5000) / 100, mark_low=mark_low)
+        else:
+            x = digimodes.psk31_audio(text)
         local = os.path.join(o.st.run_dir, f"{mode}_{sender}.raw")
         secs = digimodes.write_raw(x, local)
         subprocess.run(["scp", "-q", "-o", "BatchMode=yes", local, f"root@{S.host}:/tmp/bench_digi.raw"], check=True)
@@ -1217,7 +1225,8 @@ def digi_text(o, sender, listener, mode, label):
         with o.step(f"{listener}'s app closed (both on the dial again), its decoded line read") as s:
             o.changing += 1
             try:
-                bench.close_apps(L)
+                if not bench.close_apps(L):         # the RTTY panel is no dialog: the Sentry's page closes it
+                    bench.open_page(L, "G")
                 o.both({"freq": f, "mode": m})
             finally:
                 o.changing -= 1
@@ -1648,6 +1657,63 @@ def t_cb_channel(o):
     return True, f"CB 19 then a channel up: both on {got[A][0] / 1e6:.3f} MHz mode {got[A][1]}", got
 
 
+def t_tci_audio_rate(o):
+    """Each radio's receiver audio over its TCI (24 kHz int16): 8 s of it must arrive at 97-103 % of real time, both
+    radios listening on one frequency"""
+    from tones import TciRx
+    with o.step("both on page G, 14.200 MHz USB"):
+        o.both_page("G")
+        o.both({"freq": 14200000, "mode": 2})
+    rates = {}
+    with o.step("8 s of each radio's TCI audio, counted") as s:
+        rx = {n: TciRx(r.host) for n, r in o.r.items()}
+        try:
+            time.sleep(2.0)                     # the stream started
+            t0 = time.time()
+            time.sleep(8.0)
+            t1 = time.time()
+            for n, c in rx.items():
+                x, _ = c.audio(t0, t1)
+                rates[n] = round(100 * len(x) / FS / (t1 - t0), 1)
+        finally:
+            for c in rx.values():
+                c.close()
+        bad = {n: v for n, v in rates.items() if not 97 <= v <= 103}
+        if bad:
+            raise Refused(f"audio at {bad} % of real time (97-103 wanted)")
+        s.confirm(f"{rates} % of real time")
+    return True, f"each radio's TCI audio at {rates} % of real time", rates
+
+
+def t_tci_takes_control(o):
+    """A TCI client's set takes control ("ctl tci" to the orchestrator's sessions) on both; the client gone, control
+    is free and taken back (when free: bench.Radio.take_control)"""
+    from remote_ws import Remote
+    with o.step("both on page G, 14.200 MHz USB"):
+        o.both_page("G")
+        o.both({"freq": 14200000, "mode": 2})
+    seen = {}
+    with o.step("a TCI set on both: control goes to TCI, confirmed by the remote's ctl line") as s:
+        def one(n, r):
+            c = Remote(r.host, 50001, timeout=5)
+            try:
+                time.sleep(1.0)
+                c.send("vfo:0,0,14201000;")
+                r.wait("ctl tci", lambda: (r.ctl_who or "").startswith("tci"), 5)
+                r.wait("the set", lambda: int(r.state.get("freq", 0)) == 14201000, 5)
+                seen[n] = r.ctl_who
+            finally:
+                c.close()
+            r.wait("control free after the client left", lambda: r.ctl_who in ("none", None) or r.ctl_mine, 8)
+            r.take_control()
+            return seen[n]
+        got = in_parallel(o, one)
+        alike(o, ("freq", "mode"))
+        s.confirm(str(got))
+    o.both({"freq": 14200000})
+    return True, f"a TCI set took control on both ({got}); the client gone, control taken back", got
+
+
 # ---- The tests ----
 
 class Test:
@@ -1709,6 +1775,8 @@ TESTS = [
           lambda s, l, n: (lambda o: ft8_cq(o, s, l, n)), 40),
     *pair("psk31-text", "", "PSK31 on the listener's app dial: 'CQ CQ DE Q1TST Q1TST K' sent, decoded with at most 5 % "
           "of the characters wrong", lambda s, l, n: (lambda o: digi_text(o, s, l, "psk31", n)), 45),
+    *pair("rtty-text", "", "RTTY made to the listener's own settings: 'RYRY CQ DE Q1TST Q1TST K' sent, decoded with at "
+          "most 5 % of the characters wrong", lambda s, l, n: (lambda o: digi_text(o, s, l, "rtty", n)), 120),
     *pair("tune-carrier", "", "TUNE at 0.1 W: on the air, heard 15 dB up, off by itself 2.5-5 s after the lease's last "
           "renewal", lambda s, l, n: (lambda o: tune_carrier(o, s, l, n)), 25),
     *pair("ft8-stop", "", "FT8: ft8 stop 2 s into a CQ takes the sender off the air within 1 s, not again",
@@ -1734,6 +1802,9 @@ TESTS = [
     Test("band-memory", "both RX", "each band its own ATT: 20 m on, 15 m off, each back from its memory on both",
          t_band_memory, 20),
     Test("cb-channel", "both RX", "CB 19 as G's channel, then a channel up: 27.205 AM on both", t_cb_channel, 15),
+    Test("tci-audio-rate", "both RX", "each radio's TCI receiver audio at 97-103 % of real time", t_tci_audio_rate, 15),
+    Test("tci-takes-control", "both RX", "a TCI client's set takes control (ctl tci) on both; gone, control back",
+         t_tci_takes_control, 20),
     Test("rx-settings", "both RX", "PRE, ATT, AGC, NB, NR, squelch, RF gain: each set on both, read back alike",
          t_rx_settings, 40),
     Test("ptt-lease x6100", "X6100 TX, X6200 RX", "one PTT never renewed: off the air by itself within 4 s",
