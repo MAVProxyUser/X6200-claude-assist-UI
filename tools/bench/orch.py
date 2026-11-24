@@ -84,10 +84,6 @@ SNAPSHOT_STALE_S = 10       # older than this: no run is writing it
 
 # Failures that cannot be put right from here: said with each, not run again until --all (or the reason is gone)
 KNOWN = {
-    "power-steps x6200>x6100": "the X6200 does not hold a TCI over's power to its setting below 1 W: its meter read 0.3 W "
-                               "at 0.2, 0.8 at 0.5, and the X6100 heard 0.5 and 1.0 W alike (+0.3 dB), 4 runs in 6; "
-                               "its ALC reads 0 and tx_level.c power_hold steers by its own 0.1 W-step meter (a GUI "
-                               "fault to fix: ORCH_FINDINGS.md); the X6100's own steps pass",
 }
 
 
