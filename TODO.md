@@ -14,7 +14,7 @@ they were, each item's state brought here when it changed).
 Open, mine to do:
 - **Every test through the orchestrator** (the owner, 11-24: "all tests should ultimately use the same orchestration
   framework", "whittle down the tests to essential testable things, not slop"; and "ensure that your changes have
-  tests, that in turn get run through http://127.0.0.1:8765"): tools/bench/orch.py has 132 tests (2026-11-24 14:40:
+  tests, that in turn get run through http://127.0.0.1:8765"): tools/bench/orch.py has 152 tests (2026-11-24 15:40:
   all pass, none KNOWN; documented in tools/bench/ORCH.md); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386
   features listed, ~1040 not covered on 11-23) still run outside it. Left: pick the essential ones of features.json
   and move them in (surveyed 11-24: receive settings beyond rx-settings (VFO, split, RIT, XIT, filters, zoom, IF
@@ -52,8 +52,13 @@ more AMBE tests", "The 6 m output floor... maybe time to revisit now? same with 
   tci-key-cw); system-checks (the system batch); and 35 of suite_proto's checks run as they are through an adapter
   (suite_checks/suite_pair: TCI's answers, CW speed, sensors, audio, drive, four clients, origins; the panel; control;
   the screen; the band keys, broadcast AM, knobs, wide zoom; the web's guards, HTTPS, WSS, SSH keys, backup, text log).
-  Left of the old batches: suite_cover_a's band plan (it changes settings through the web and the database),
-  cover_b/c/d's app and system checks, air_a/b/c's over-the-air ones orch does not have yet, panel-log, if-shift.
+  Then suite_cover_a's 20 (Bluetooth, backlight, screen off, screensaver with orch's sessions closed for it, themes,
+  zoom/step, band plan, own band, mode from plan, lock per band, channel snap, speaker, line in, transverters, TX
+  shift, TX outside): all pass. Left of the old batches: cover_b/c/d's app and system checks, air_a/b/c's
+  over-the-air ones orch does not have yet, panel-log, if-shift, tz-alike.
+- Deep backlog (the owner, 2026-11-24: "those feel like things to put deep in the backlog"): nulling the X6100's
+  carrier leak with a calibration that keys it and writes its per-band DC offsets (txcal.py); whether the patched
+  gcfix5 base goes back on the X6100 (it lowers the 6 m floor).
 - 6 m: power-6m (USB, a TCI tone at 0.1/0.3/1.0 W) passes both ways: the X6100 heard +6.0/+5.0 dB apart, its meter
   0.1/0.3/1.1 W, so its 6 m floor is gone wherever the GUI sets the drive (TCI, the digital apps). power-6m-fm (the
   base's own carrier): the X6200 follows; the factory X6100 stays at about 1 W at any setting under 1 W (its base's

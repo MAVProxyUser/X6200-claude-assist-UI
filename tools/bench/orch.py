@@ -3844,6 +3844,30 @@ SUITE_PORTED = [
     ("t_web_more", "textlog-page", "the text log page"),
 ]
 
+# suite_cover_a's settings and display checks (receive only; each puts back what it changes, guarded)
+SUITE_PORTED_COVER_A = [
+    ("t_btcat", "btcat-bridge", "the Bluetooth CAT bridge on its serial port, its RFCOMM listening"),
+    ("t_btcat", "btcat-power", "the Bluetooth adapter's power as set"),
+    ("t_bt_pairing", "bt-pairing", "the pairing window opened and closed by itself"),
+    ("t_backlight", "backlight", "the backlight setting changes the screen's brightness, put back"),
+    ("t_screen_off", "screen-off", "the screen off and on again"),
+    ("t_screensaver", "screensaver", "the screensaver after its minute, gone at a touch"),
+    ("t_themes", "themes", "each theme taken live, 1bit included, put back"),
+    ("t_themes_alike", "themes-alike", "the built-in themes drawn alike on the two radios"),
+    ("t_zoom_step", "zoom-step", "the zoom kept per mode"),
+    ("t_step_zoom", "step-zoom", "the tuning step kept per zoom"),
+    ("t_band_plan", "band-plan", "the band plan's segments as set"),
+    ("t_own_band", "own-band", "a band of the operator's own on the main screen's plan"),
+    ("t_mode_from_plan", "mode-from-plan", "the mode taken from the band plan as the dial moves"),
+    ("t_lock_per_band", "lock-per-band", "the dial lock kept per band"),
+    ("t_channel_snap", "channel-snap", "a channel band's dial snapped to its channels"),
+    ("t_speaker_off", "speaker-off", "the speaker off keeps the audio elsewhere"),
+    ("t_line_in", "line-in", "the line in as the audio source"),
+    ("t_transverters", "transverters", "a transverter's offsets and its power limit"),
+    ("t_tx_shift", "tx-shift", "a TX shift's frequency, and a shift below 0 Hz refused"),
+    ("t_tx_outside", "tx-outside", "transmitting outside the ham bands: the switch refuses it while off"),
+]
+
 
 def suite_checks(module, t_name):
     """{test: (kind, fn, want_tx)} that module's t_name registers (kind "r": fn(radio), "host": fn(name, host, ip))"""
@@ -3860,14 +3884,26 @@ def suite_checks(module, t_name):
 
     def by_radio(run, batch, test, covers, fn):
         got[test] = ("host", fn, False)
-    saved = {k: getattr(m, k) for k in ("per_radio", "by_radio") if hasattr(m, k)}
+
+    def both_radios(run, test, covers, fn):        # suite_cover_a's, for a check that waits: fn(name, host, ip)
+        got[test] = ("host", fn, False)
+    saved = {k: getattr(m, k) for k in ("per_radio", "by_radio", "both_radios") if hasattr(m, k)}
     m.per_radio = per_radio
     if "by_radio" in saved:
         m.by_radio = by_radio
+    if "both_radios" in saved:
+        m.both_radios = both_radios
     c = bench.conf()
     fake = types.SimpleNamespace(c=c, names=[A, B], host=lambda n: c["radios"][n]["host"],
                                  banner=lambda *a, **k: None, result=lambda *a, **k: None,
-                                 radios={})     # the suite's own extra sessions: none under orch (its one is the check's)
+                                 radios={}, shown={},   # the suite's own sessions: none under orch (its one is the check's)
+                                 dir=os.path.join(bench.STATE, "runs", "suite_checks"))
+    os.makedirs(os.path.join(fake.dir, "shots"), exist_ok=True)
+
+    def shot(name, label):                  # the suite's own screen picture (suite.Run.shot), into fake.dir/shots
+        import suite
+        return suite.Run.shot(fake, name, label)
+    fake.shot = shot
     try:
         getattr(m, t_name)(fake)
     finally:
@@ -3877,13 +3913,21 @@ def suite_checks(module, t_name):
     return got
 
 
-def suite_pair(o, module, t_name, test):
+def suite_pair(o, module, t_name, test, alone=False):
     """One of the 1:1 suite's checks on both radios at once: each must pass (a LOOK, its own "to look at", is said);
-    both put back alike on the frequency and mode they started from, the power at 0.1 W, control the bench's"""
+    both put back alike on the frequency and mode they started from, the power at 0.1 W, control the bench's.
+    alone: the bench's own remote sessions closed while it runs (every remote client is a viewer, and a viewer keeps
+    the screensaver away), their silence planned, then connected again"""
     import socket
     kind, fn, _ = suite_checks(module, t_name)[test]
     f0, m0 = int(o.r[A].state.get("freq") or F_TEST), int(o.r[A].state.get("mode") or 2)
     out = {}
+    if alone:
+        o.changing += 1                     # no state from either while closed, nor while each connects again
+        for n, r in o.r.items():
+            o.planned[n] = f"planned: {test}, the bench's remote session closed meanwhile"
+            r.close()
+        time.sleep(1.5)
     try:
         with o.step(f"{module}: {test} on both at once") as s:
             def one(n, r):
@@ -3895,6 +3939,13 @@ def suite_pair(o, module, t_name, test):
         return False, str(e), out
     finally:
         try:
+            if alone:
+                try:
+                    for n, r in o.r.items():
+                        r.reconnect()       # its session again, control the bench's (when free)
+                        o.planned.pop(n, None)
+                finally:
+                    o.changing -= 1
             for r in o.r.values():
                 if not r.ctl_mine:
                     r.take_control()        # the bench's own back (a TCI client of the check's had it); never the
@@ -4710,6 +4761,11 @@ TESTS = [
     *[Test(name, "both", f"the 1:1 suite's {name} ({t_name[2:].replace('_', ' ')}) on both radios at once: {what}",
            (lambda o, t_name=t_name, name=name: suite_pair(o, "suite_proto", t_name, name)), 30)
       for t_name, name, what in SUITE_PORTED],
+    *[Test(name, "both RX", f"the 1:1 suite's cover_a {name} on both radios at once (it puts back what it changes): "
+                            f"{what}", (lambda o, t_name=t_name, name=name: suite_pair(o, "suite_cover_a", t_name,
+                                                                                        name, alone=name == "screensaver")),
+           150 if name == "screensaver" else 45)
+      for t_name, name, what in SUITE_PORTED_COVER_A],
     Test("system-checks", "both", "each radio read over SSH, nothing changed: battery log and model, data partition, "
          "settings' good copy, password logins refused, Tailscale, logs, start trace, services and ports, CPU, "
          "temperature, GPU, sessions file, update state, ADIF header, libft8, clock; the same version on both",
