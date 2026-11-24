@@ -34,11 +34,12 @@ Open, mine to do:
   would copy short overs whole (noted; the tests send two V groups first).
 
 Open, the owner's call or hands:
-- **CW from the X6100 misread by the X6200's decoder** (orch cw-text x6100>x6200, KNOWN): its word spaces FIXED
-  2026-11-24 (the decoder keyed on the X6100's carrier, 62 dB under its marks, as the X6200's AGC lifted it through
-  each word gap; a key down must now be a rise, src/cw_decoder/key_detector.cpp). Left (mine): the first over after
-  half a minute of noise reads its first dits as dahs (the speed read from the noise); 2 of 5 separate runs passed,
-  6 of 6 back to back.
+- **CW from the X6100 misread by the X6200's decoder** (orch cw-text x6100>x6200): FIXED 2026-11-24, no longer a
+  known fault (5 of 5). Two causes: the word spaces (the decoder keyed on the X6100's carrier, 62 dB under its marks,
+  as the X6200's AGC lifted it through each word gap; a key down must now be a rise, key_detector.cpp), and the first
+  dits read as dahs (the bench's caps test had left both radios' CW filter 6 kHz wide, and the band's noise set the
+  decoder's speed; filters back to 800 Hz, the caps test puts them back now). AM and NFM were left at 6 kHz too
+  (kept: plausible as they were).
 - The squelch mutes the received audio (speaker, decoders, TCI), not the spectrum: ANSWERED 2026-11-24 (the owner:
   "I don't want wrong squelch to prevent reception"): the tests hold it open (0).
 - The X6100's 15 m/12 m image shifts (below, "15 m and 12 m"): left to try the battery alone, 15 m alone, the case

@@ -88,12 +88,6 @@ KNOWN = {
                                "at 0.2, 0.8 at 0.5, and the X6100 heard 0.5 and 1.0 W alike (+0.3 dB), 4 runs in 6; "
                                "its ALC reads 0 and tx_level.c power_hold steers by its own 0.1 W-step meter (a GUI "
                                "fault to fix: ORCH_FINDINGS.md); the X6100's own steps pass",
-    "cw-text x6100>x6200": "the X6200's decoder read the X6100's CW with its word spaces lost: FIXED 2026-11-24 (a key "
-                           "down must be a rise, key_detector.cpp RISE_DB: the X6100's carrier between elements, 62 dB "
-                           "under, crept up with the X6200's AGC through each word gap and keyed it ~200 ms early); "
-                           "what still fails is the first over after the decoder sat on noise: its speed read from the "
-                           "noise takes the first dits for dahs ('TTTT TTTT' for 'VVV'), 2 of 5 separate runs passed, "
-                           "6 of 6 back to back (ORCH_FINDINGS.md)",
 }
 
 
@@ -2417,11 +2411,24 @@ def t_caps(o):
             caps["mode 8 at 99.9 MHz"]["same"] = v[A] == v[B]
             base()
             s.confirm(f"{sum(not v['same'] for k, v in caps.items() if k.startswith('mode'))} differ")
-        with o.step("each mode's widest filter (0-6000 Hz asked)") as s:
+        with o.step("each mode's widest filter (0-6000 Hz asked), each radio's own put back after") as s:
             for m, f in ((0, 7200000), (2, 14200000), (4, 14040000), (6, 29000000), (7, 29600000)):
                 o.both({"freq": f, "mode": m})
-                probe(f"filter 0-6000 in mode {m}", "set filter 0 6000", lambda r: (r.state.get("flo"), r.state.get("fhi")),
-                      lambda r: True)
+                # each radio's filter in this mode, put back once probed: kept, 0-6000 stayed in CW, AM and NFM on
+                # both radios from 2026-11-23 20:39 (CW 6 kHz wide: the CW decoder's floor taken over 0-2 kHz, the
+                # band's noise in the real passband keyed it and set its speed; the first dits read as dahs)
+                was = {n: (int(r.state.get("flo", -1)), int(r.state.get("fhi", -1))) for n, r in o.r.items()}
+                try:
+                    probe(f"filter 0-6000 in mode {m}", "set filter 0 6000",
+                          lambda r: (r.state.get("flo"), r.state.get("fhi")), lambda r: True)
+                finally:
+                    o.changing += 1
+                    try:
+                        for n, r in o.r.items():
+                            if min(was[n]) >= 0:
+                                bench.ensure(r, {"filter": was[n]})
+                    finally:
+                        o.changing -= 1
             base()
             s.confirm(f"{sum(not v['same'] for k, v in caps.items() if k.startswith('filter'))} differ")
         with o.step("IF shift, zoom, steps, AGC, NB, NR at 14.200 USB") as s:
