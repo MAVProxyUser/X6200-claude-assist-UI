@@ -75,6 +75,13 @@ static atomic_uint     fed_ms;      /* the last sample given (each 23 ms) */
 static atomic_int      shown = -1;  /* the one whose call is said and whose speech is played, -1 none */
 static uint32_t        said_ms;
 
+static int             trace = -1;  /* RTLSPEC_DSD_TRACE in the environment: what each dsd-fme says and sends, timed */
+
+static bool tracing(void) {
+    if (trace < 0) trace = getenv("RTLSPEC_DSD_TRACE") != NULL;
+    return trace;
+}
+
 static pthread_mutex_t pcm_lock = PTHREAD_MUTEX_INITIALIZER;
 static int16_t         pcm[PCM];
 static uint32_t        pcm_w, pcm_r;
@@ -136,6 +143,7 @@ static void update_active(void) {
     bool a = false;
 
     for (int k = 0; k < KIDS && !a; k++) a = kid_active(&kids[k]);
+    if (tracing() && a != atomic_load(&any_active)) fprintf(stderr, "dsdtrace %u active %d\n", ms_now(), (int)a);
     atomic_store(&any_active, a);
 }
 
@@ -160,7 +168,10 @@ float dsd_audio(void) {
     float         v;
 
     pthread_mutex_lock(&pcm_lock);
-    if (!playing && pcm_w - pcm_r >= START) playing = true;
+    if (!playing && pcm_w - pcm_r >= START) {
+        playing = true;
+        if (tracing()) fprintf(stderr, "dsdtrace %u playing (%u in hand)\n", ms_now(), pcm_w - pcm_r);
+    }
     if (!playing) {
         pthread_mutex_unlock(&pcm_lock);
         return 0;
@@ -174,6 +185,7 @@ float dsd_audio(void) {
         } else {                        /* out: silent till the next 100 ms */
             b       = 0;
             playing = false;
+            if (tracing()) fprintf(stderr, "dsdtrace %u out of speech\n", ms_now());
         }
     }
     v = (a + (b - a) * (float)ph) * GAIN;
@@ -186,6 +198,13 @@ float dsd_audio(void) {
 static void speech(kid_t *k, const int16_t *s, int bytes) {
     int frames = bytes / (2 * k->channels);
 
+    if (tracing()) {
+        static FILE *dump;
+
+        fprintf(stderr, "dsdtrace %u speech %s %d bytes, %u in hand\n", ms_now(), k->mode, bytes, pcm_w - pcm_r);
+        if (!dump) dump = fopen("/tmp/dsd_speech.raw", "wb");     /* every datagram as it came, for the trace */
+        if (dump) fwrite(s, 1, (size_t)bytes, dump), fflush(dump);
+    }
     pthread_mutex_lock(&pcm_lock);
     for (int i = 0; i < frames; i++) {
         if (pcm_w - pcm_r >= PCM) pcm_r++;  /* a second behind: the oldest dropped */
@@ -280,6 +299,7 @@ static void show_if_active(kid_t *k) {
 
     if (s == k - kids || !kid_active(k) || (s >= 0 && kid_active(&kids[s]))) return;
     atomic_store(&shown, (int)(k - kids));
+    if (tracing()) fprintf(stderr, "dsdtrace %u shown %s\n", ms_now(), k->mode);
     if (k->proto[0]) say(k, 0);
 }
 
@@ -290,6 +310,8 @@ static bool tdma(kid_t *k) {
 
 static void line(kid_t *k, char *l) {
     uint32_t t = ms_now();
+
+    if (tracing()) fprintf(stderr, "dsdtrace %u %s says %s\n", t, k->mode, l);
 
     for (const char *q = l; *q; q++)    /* a garbled one (a header decoded out of noise): not taken */
         if ((unsigned char)*q < 0x20 || (unsigned char)*q > 0x7E) return;

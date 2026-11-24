@@ -89,6 +89,7 @@ def main():
     ap.add_argument("--daemon", default=None); ap.add_argument("--wav", default=None)
     ap.add_argument("--rate", type=int, default=2116800, choices=(1058400, 2116800))
     ap.add_argument("--env", action="append", default=[], help="NAME=VALUE for the test daemon (its dsd-fme too)")
+    ap.add_argument("--log", default=None, help="the test daemon's own log kept here")
     a = ap.parse_args()
     fs_out = a.rate
     with tempfile.TemporaryDirectory() as td:
@@ -114,6 +115,8 @@ def main():
         with open(raw, "rb") as f, wave.open(a.wav, "wb") as w:
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(44100); w.writeframes(f.read())
         print("audio in", a.wav)
+    if a.log:
+        subprocess.run(["scp", "-q", f"root@{a.host}:/tmp/dvtest.log", a.log])
     ssh(a.host, "rm -f /tmp/dvaud.raw /tmp/dvtest.log")
     calls = [l for l in r.stdout.splitlines() if l.startswith("CALL")]
     aud = [l for l in r.stdout.splitlines() if l.startswith("AUDIO")]

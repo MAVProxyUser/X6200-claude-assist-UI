@@ -85,18 +85,11 @@ SNAPSHOT_STALE_S = 10       # older than this: no run is writing it
 # Failures that cannot be put right from here (or not found yet): said with each, not run again until --all (or the
 # reason is gone)
 KNOWN = {
-    "dv-dstar": "B's D-STAR voice drops out partway through a 5 s call on both radios (r 0.30-0.73 run to run, the "
-                "call and its text shown throughout): dsd-fme's syncs and calls come steadily (paced test), so it is in "
-                "the SDR daemon's play-out of dsd-fme's speech (dsd.c): to find (ORCH_FINDINGS, 2026-11-24)",
     "power-6m-fm x6100>x6200": "the factory X6100's base (Xiegu's V1.1.9) puts out its 6 m FM carrier at about 1.0 W "
                                "for any setting under 1 W (0.1/0.3/1.0 W heard alike, its meter 1.0 W, 2026-11-24): "
                                "its power control on 6 m is the ALC's alone. Where the GUI sets the drive (TCI, FT8, "
                                "the digital apps) it follows the setting (power-6m passes). A base fix (true power "
                                "control as a hook on V1.1.9) waits on the owner's go",
-    "dv-p25": "the X6100's P25 voice (the 1 kHz frames) turns into a 400 Hz tone after its first half second: dsd-fme "
-              "puts out 1 kHz throughout (its own UDP speech caught, paced) and the chip through libmbe-dvsi too, so "
-              "the SDR daemon's play-out (dsd.c) makes it: to find. The X6200 (DVMega, no P25 option) silent as it "
-              "should be (ORCH_FINDINGS, 2026-11-24)",
 }
 
 
@@ -3411,6 +3404,361 @@ def ft8_qso(o, a, b, label, dial=14074000):
 
 # ---- The tests ----
 
+# ---- Ported from the 1:1 suite (the owner, 2026-11-24: "all tests should ultimately use the same orchestration
+# framework", "whittle down the tests to essential testable things"): suite_more.py's receiver, control and safety
+# batches, as tests of the two radios at once ----
+
+F_TEST = 14200000
+F_CW = 14040000
+
+
+def t_rx_vfo_split(o):
+    """VFO B and back, split on and off, RIT and XIT at +200, -200 and 0: each set on both at once, read back alike
+    (suite_more set-vfo, set-split, set-rit, set-xit); all four off and VFO A after"""
+    seen = []
+    try:
+        with o.step("both on 14.200 USB, VFO A, no split, RIT or XIT"):
+            o.both({"vfo": 0, "split": 0, "freq": F_TEST, "mode": 2, "rit": 0, "xit": 0})
+        with o.step("VFO B on both, set to 14.200 USB alike, then VFO A again") as s:
+            o.both({"vfo": 1, "freq": F_TEST, "mode": 2})
+            o.both({"vfo": 0, "freq": F_TEST, "mode": 2})
+            s.confirm("VFO B and A each read back alike")
+            seen.append("vfo B/A")
+        for key, vals in (("split", [1, 0]), ("rit", [200, -200, 0]), ("xit", [200, -200, 0])):
+            with o.step(f"{key} " + ", ".join(str(v) for v in vals) + " on both, each read back alike") as s:
+                for v in vals:
+                    o.both({key: v})
+                s.confirm(f"{key} read back alike at each")
+                seen.append(f"{key} " + "/".join(str(v) for v in vals))
+    except Refused as e:
+        return False, str(e), {"seen": seen}
+    finally:
+        try:
+            o.both({"vfo": 0, "split": 0, "rit": 0, "xit": 0, "freq": F_TEST, "mode": 2})
+        except Refused as e:
+            o.st.ev(f"VFO A, split, RIT, XIT not put back alike: {e}", "bad")
+    return True, "set on both, read back alike: " + "; ".join(seen), {"seen": seen}
+
+
+def tci_open(host):
+    """A TCI session from this computer (a client on the network): (session, its greeting up to ready)"""
+    from remote_ws import Remote
+    t = Remote(host, 50001)
+    greet, end = [], time.time() + 6
+    while time.time() < end:
+        m = t.recv(timeout=0.5)
+        if m is None:
+            continue
+        greet.append(m)
+        if m.startswith("ready"):
+            break
+    return t, greet
+
+
+def tci_wait(t, prefix, secs=3.0):
+    end = time.time() + secs
+    while time.time() < end:
+        m = t.recv(timeout=0.3)
+        if m and m.lower().startswith(prefix):
+            return m
+    return None
+
+
+def t_tci_receiver(o):
+    """TCI's receiver commands on both radios' own TCI at once, each confirmed by the radio's state (suite_more
+    tci-receiver): the filter, AGC fast and slow, RIT on and off, a VFO in capitals (TCI is case-insensitive), an
+    unknown command ignored and the session going on; the two alike after; the filter and AGC put back"""
+    before = {k: bench._value(o.r[A], k) for k in ("filter", "agc")}
+    cmds = (("rx_filter_band:0,300,2400;", lambda r: (r.state.get("flo"), r.state.get("fhi")) == (300, 2400),
+             "filter 300-2400"),
+            ("agc_mode:0,fast;", lambda r: r.state.get("agc") == 2, "AGC fast"),
+            ("agc_mode:0,slow;", lambda r: r.state.get("agc") == 1, "AGC slow"),
+            ("rit_offset:0,200;", lambda r: r.state.get("rit") == 200, "RIT +200"),
+            ("rit_enable:0,false;", lambda r: r.state.get("rit") == 0, "RIT off"),
+            ("VFO:0,0,14100000;", lambda r: int(r.state.get("freq", 0)) == 14100000, "VFO in capitals"))
+    got = {}
+    try:
+        with o.step("both on 14.200 USB, RIT 0"):
+            o.both({"freq": F_TEST, "mode": 2, "rit": 0})
+        with o.step("each radio's TCI: " + ", ".join(w for _, _, w in cmds) + ", then an unknown command") as s:
+            def one(n, r):
+                t, greet = tci_open(r.host)
+                said = []
+                try:
+                    if not any(g.startswith("ready") for g in greet):
+                        raise Refused(f"no TCI greeting ending in ready ({greet[:3]})")
+                    for cmd, cond, what in cmds:
+                        t.send(cmd)
+                        r.wait(what, lambda: cond(r), 5)
+                        said.append(what)
+                    t.send("no_such_command:0,1;")
+                    t.send("vfo:0,0;")
+                    back = tci_wait(t, "vfo:0,0,")
+                    if not back:
+                        raise Refused(f"{', '.join(said)}; after an unknown command the session answered nothing")
+                    return ", ".join(said) + f"; an unknown command ignored ({back})"
+                finally:
+                    t.close()
+            got = in_parallel(o, one, 60)
+            s.confirm("; ".join(f"{n}: {v}" for n, v in got.items()))
+        with o.step("the two alike after (14.100, AGC slow, RIT 0, filter 300-2400)") as s:
+            time.sleep(1.0)
+            alike(o, ["freq", "mode", "agc", "rit", "filter"])
+            s.confirm("alike")
+    except Refused as e:
+        return False, str(e), got
+    finally:
+        try:
+            o.both({"freq": F_TEST, "mode": 2, "rit": 0, **{k: v for k, v in before.items() if v is not None}})
+        except Refused as e:
+            o.st.ev(f"filter/AGC not put back: {e}", "bad")
+    return True, "TCI's receiver commands taken on both: " + got.get(A, ""), got
+
+
+def rig_ask(host, lines, secs=4.0):
+    import socket
+    s = socket.create_connection((host, 4532), timeout=secs)
+    out = []
+    try:
+        for ln in lines:
+            s.sendall((ln + "\n").encode())
+            time.sleep(0.4)
+            s.settimeout(1.5)
+            try:
+                out.append(s.recv(4096).decode(errors="replace").strip())
+            except socket.timeout:
+                out.append("")
+    finally:
+        s.close()
+    return out
+
+
+def t_rigctl_more(o):
+    """Hamlib's rigctl on both (suite_more rigctl-more): the levels answered (STRENGTH a number), split asked and its
+    setting refused (receive only), the state dump; nothing keyed"""
+    try:
+        with o.step("both on 14.200 USB"):
+            o.both({"freq": F_TEST, "mode": 2})
+        with o.step("l STRENGTH, l PREAMP, l AF, s, S 1 VFOB, \\dump_state on each") as s:
+            def one(n, r):
+                out = rig_ask(r.host, ["l STRENGTH", "l PREAMP", "l AF", "s", "S 1 VFOB", "\\dump_state"])
+                strength = out[0].lstrip("-").isdigit()
+                split_refused = out[3].split()[:1] == ["0"] and out[4].startswith("RPRT -")
+                dump = out[5][:1] in ("0", "1")
+                said = (f"STRENGTH {out[0]!r}, PREAMP {out[1]!r}, AF {out[2]!r}; s {out[3]!r}, S 1 VFOB {out[4]!r}; "
+                        f"dump_state {out[5][:20]!r}")
+                if not (strength and split_refused and dump) or r.tx:
+                    raise Refused(said)
+                return said
+            got = in_parallel(o, one, 40)
+            s.confirm("; ".join(f"{n}: {v}" for n, v in got.items()))
+    except Refused as e:
+        return False, str(e), {}
+    return True, "rigctl's levels, split (refused) and state dump on both", got
+
+
+def t_remote_apps(o):
+    """The remote's apps list on both (suite_more remote-apps): more than ten, the same on both; opening WSPR (it
+    transmits by opening) refused on both"""
+    got = {}
+    try:
+        with o.step("each radio's apps list, the two the same") as s:
+            def lst(n, r):
+                r.apps = None
+                r.send("apps")
+                r.wait("the apps list", lambda: r.apps is not None, 5)
+                return [a[1] for a in r.apps]
+            got = in_parallel(o, lst)
+            if len(got[A]) <= 10 or sorted(got[A]) != sorted(got[B]):
+                raise Refused(f"{A} {len(got[A])}, {B} {len(got[B])}: " + ", ".join(
+                    sorted(set(got[A]) ^ set(got[B]))[:8]))
+            s.confirm(f"{len(got[A])} apps on each, the same")
+        with o.step("opening WSPR refused on both (it would transmit by opening)") as s:
+            def wspr(n, r):
+                w = next((a for a in r.apps if "WSPR" in a[1].upper()), None)
+                if not w:
+                    return "no WSPR in its list"
+                n0 = len(r.errs)
+                r.send(f"open {w[0]}")
+                time.sleep(1.5)
+                if r.state.get("app") == "WSPR" or not any("open" in e for e in r.errs[n0:]):
+                    raise Refused(f"WSPR opened ({r.errs[n0:]})")
+                return r.errs[-1]
+            said = in_parallel(o, wspr)
+            s.confirm("; ".join(f"{n}: {v}" for n, v in said.items()))
+    except Refused as e:
+        return False, str(e), {"apps": got}
+    return True, f"{len(got[A])} apps alike on both, WSPR's opening refused on both", {"apps": got}
+
+
+def t_power_cap(o):
+    """20 W asked of both (suite_more power-cap): each setting reads its radio's own top (the X6100 10 W, the X6200
+    8 W; 5 W on its battery alone, radio.c supply_cb); nothing keyed; 0.1 W again after"""
+    got = {}
+    try:
+        with o.step("20 W asked of both: each reads its own top") as s:
+            def one(n, r):
+                sup = bench.listener_gate_read(r)
+                on_bat = sup is not None and sup["dc_in"] < 5.0
+                top = 5.0 if on_bat else {"x6200": 8.0, "x6100": 10.0}[n]
+                r.send("set pwr 200")
+                time.sleep(1.5)
+                pw = r.pwr()
+                if abs(pw - top) > 0.05 or r.tx:
+                    raise Refused(f"20 W asked: {pw} W (its top {top} W{', on its battery' if on_bat else ''})")
+                return {"reads_w": pw, "top_w": top, "on_battery": on_bat}
+            got = in_parallel(o, one)
+            s.confirm("; ".join(f"{n} {v['reads_w']} W (top {v['top_w']})" for n, v in got.items()))
+    except Refused as e:
+        return False, str(e), got
+    finally:
+        o.both({"pwr": W})
+    return True, "; ".join(f"{n}: 20 W asked, {v['reads_w']} W, its top" for n, v in got.items()), got
+
+
+WEB_SKIP = {"/api/backup/download", "/api/gallery/zip", "/api/update/check", "/api/flights", "/api/meteo",
+            "/api/boot_picture/png", "/files/"}      # big downloads, the internet, binaries (suite_more's)
+
+
+def web_routes():
+    import re
+    seen = set()
+    for root, _, files in os.walk(os.path.join(TOP, "webserver", "src")):
+        for f in files:
+            if f.endswith(".py"):
+                for m in re.finditer(r"@(?:app|[a-z_]+)\.(?:route|get)\(['\"]([^'\"]+)['\"]",
+                                     open(os.path.join(root, f)).read()):
+                    if "<" not in m.group(1):
+                        seen.add(m.group(1))
+    return sorted(seen - WEB_SKIP)
+
+
+def t_web_pages(o):
+    """Every page and GET API of the web configurator on both radios (suite_more's web sweep): each answers the same
+    on the two, and none with a server error (5xx) or not at all"""
+    import socket
+    import urllib.error
+    import urllib.request
+    routes = web_routes()
+    codes = {}
+    with o.step(f"{len(routes)} pages and APIs asked of both") as s:
+        def one(n, r):
+            ip = socket.gethostbyname(r.host)
+            got = {}
+            for path in routes:
+                try:
+                    req = urllib.request.Request(f"http://{ip}{path}", headers={"Host": r.host})
+                    with urllib.request.urlopen(req, timeout=8) as resp:
+                        got[path] = resp.status
+                except urllib.error.HTTPError as e:
+                    got[path] = e.code
+                except (urllib.error.URLError, OSError):
+                    got[path] = "none"
+            return got
+        try:
+            codes = in_parallel(o, one, 240)
+        except Refused as e:
+            return False, str(e), {}
+        s.confirm(f"{sum(1 for p in routes if codes[A][p] == 200)}/{len(routes)} answered 200 on {A}, "
+                  f"{sum(1 for p in routes if codes[B][p] == 200)} on {B}")
+    differ = [f"{p} {codes[A][p]}/{codes[B][p]}" for p in routes if codes[A][p] != codes[B][p]]
+    broken = [f"{p} {codes[A][p]}/{codes[B][p]}" for p in routes
+              if any(c == "none" or (isinstance(c, int) and c >= 500) for c in (codes[A][p], codes[B][p]))]
+    other = sorted({f"{p} {codes[A][p]}" for p in routes if codes[A][p] != 200 and f"{p} {codes[A][p]}/{codes[B][p]}"
+                    not in differ + broken})
+    with o.step("the two alike, none broken") as s:
+        if differ or broken:
+            return False, "; ".join((["differ: " + ", ".join(differ)] if differ else []) +
+                                    (["broken: " + ", ".join(broken)] if broken else [])), codes
+        s.confirm(f"all alike; not 200 on both (by design): {', '.join(other) or 'none'}")
+    return True, f"{len(routes)} pages and APIs answered alike on both" + (f"; not 200 by design: {', '.join(other)}"
+                                                                           if other else ""), codes
+
+
+def tci_refused(o, radio, other, kind, label):
+    """A TCI transmission that must be refused, the radio armed, watched 4 s off the air (suite_more's safety batch):
+    out-of-band (a program on the radio keying audio on 15.000 MHz), ask (a client on the network keying: asked on the
+    radio's screen, not keyed; the question gone ~20 s after the client leaves), cw-usb (CW text through TCI in USB),
+    key-cw (an audio key in CW). The other radio, on the same frequency, must hear nothing"""
+    import subprocess
+    R, X = o.r[radio], o.r[other]
+    f, mode = {"out-of-band": (15000000, 3), "ask": (F_TEST, 3), "cw-usb": (F_CW, 2), "key-cw": (F_CW, 4)}[kind]
+    went, said, t = False, "", None
+    with o.step(f"both on {f / 1e6:.3f} MHz mode {mode}, {W} W, alike"):
+        o.both_page("G")
+        o.both({"freq": f, "mode": mode, "pwr": W})
+    if kind != "out-of-band":                       # a failure would key it: the bench's gates as for an over
+        bench.chain_gate(o.c, "radios")
+        bench.radio_tx_gate(R, o.c, W)
+    with o.step(f"{radio}'s transmitter armed (the Sentry's A/B)"):
+        o.changing += 1
+        try:
+            bench.arm(R, True, mode=mode)
+        finally:
+            o.changing -= 1
+    try:
+        quiet = X.meter
+        with o.step(f"{kind}: {radio} must stay off the air 4 s") as s:
+            if kind in ("out-of-band", "key-cw"):
+                run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_tone_tx.py"),
+                        f"root@{R.host}:/tmp/tci_tone_tx.py"])
+                subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{R.host}",
+                                  f"python3 /tmp/tci_tone_tx.py '[[{700 if kind == 'key-cw' else 1000}, 2.0]]' 0.3 3.0 "
+                                  f"50001 0.05"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif kind == "cw-usb":
+                run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_cw_tx.py"),
+                        f"root@{R.host}:/tmp/tci_cw_tx.py"])
+                subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{R.host}",
+                                  "python3 /tmp/tci_cw_tx.py 'Q9TST' 3"], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+            else:
+                t, _ = tci_open(R.host)
+                t.send("trx:0,true;")
+            t0 = time.time()
+            while time.time() - t0 < 4.0:
+                if R.tx:
+                    went = True
+                    break
+                time.sleep(0.05)
+            asked = R.state.get("ask") == 1
+            if went:
+                raise Refused(f"{radio} WENT ON THE AIR")
+            if kind == "ask" and not asked:
+                raise Refused("not asked on the radio's screen")
+            if kind == "cw-usb" and asked:
+                raise Refused("a program on the radio was asked about (only a network client is)")
+            said = f"off the air{', asked on its screen' if asked else ''}; {other}'s S-meter {quiet} -> {X.meter} dBm"
+            s.confirm(said)
+        if kind == "ask":
+            with o.step("the client gone: the question gone by itself within 24 s (its 20 s), nothing keyed") as s:
+                t.close()
+                t = None
+                t0 = time.time()
+                while time.time() - t0 < 24 and R.state.get("ask") == 1:
+                    if R.tx:
+                        raise Refused(f"{radio} WENT ON THE AIR")
+                    time.sleep(0.5)
+                if R.state.get("ask") == 1:
+                    raise Refused("the question still up 24 s after the client left")
+                s.confirm(f"gone after {time.time() - t0:.1f} s")
+    except Refused as e:
+        return False, str(e), {}
+    finally:
+        if t is not None:
+            t.close()
+        R.send("key PTT 0")
+        bench.stop_bench_programs(R)
+        time.sleep(1.0)
+        R.stop()
+        try:
+            if not R.ctl_mine:
+                R.take_control()            # our own TCI program had it; never the operator's (take_control refuses)
+            bench.arm(R, False)
+        except Refused as e:
+            o.st.ev(f"{radio}: {e}", "bad")
+    return True, f"{kind} on {radio}: {said}", {}
+
+
 # ---- The AMBE vocoders (each radio's DVSI chip behind its SDR daemon's port 127.0.0.1:2460) and B's digital voice ----
 # Receive only: nothing is keyed. The test speech is this computer's own voice (say), 8 kHz; the calls made of it by
 # the repository's generators (tools/dsdfme, tools/rtlspec/dmr_test gen) and replayed into a test SDR daemon on each
@@ -3424,7 +3772,7 @@ P25_FRAMES = os.path.join(TOP, "tools/dsdfme/mbe_dvsi/p25_chip_frames.bin")     
 VOC_ENV_R, VOC_SPEC_R = 0.90, 0.85      # a chip's speech against what went in (both chips measured 0.96 / 0.94)
 # B's chain, the voice heard against the speech (2026-11-24, both radios: DMR 0.97, NXDN48 0.93, YSF 0.81-0.88,
 # D-STAR 0.49-0.73: dsd-fme loses D-STAR's sync two or three times in a 5 s call, its voice gone meanwhile; to find)
-DV_R = {"dmr": 0.90, "nxdn": 0.75, "ysf": 0.70, "dstar": 0.40}
+DV_R = {"dmr": 0.90, "nxdn": 0.85, "ysf": 0.75, "dstar": 0.70}
 DV_CALL = {"dmr": "DMR TS1 CC1 TG 3100 FROM 3112345", "dstar": "DSTAR TO CQCQCQ FROM N0CALL",
            "ysf": "YSF TO CQCQCQ FROM N0CALL", "nxdn": "NXDN48 TG 100 FROM 1234 RAN 1",
            "p25": "P25P1 TG 4321 FROM 1234567 NAC 123"}
@@ -3928,6 +4276,26 @@ TESTS = [
          "SIGSEGV of 20:36)", t_js8_close_to_g, 90),
     Test("system-health", "both", "battery log fresh, clock within 1.5 s, the data partition read-write, on both",
          t_system_health, 10),
+    Test("rx-vfo-split", "both RX", "VFO B and back, split, RIT and XIT at +200/-200/0: each set on both, read back "
+         "alike", t_rx_vfo_split, 30),
+    Test("tci-receiver", "both RX", "TCI's filter, AGC, RIT, a VFO in capitals and an unknown command on both radios' "
+         "TCI: each confirmed by the radio's state, the two alike", t_tci_receiver, 30),
+    Test("rigctl-more", "both RX", "rigctl's levels, split (its setting refused) and state dump on both, nothing keyed",
+         t_rigctl_more, 20),
+    Test("remote-apps", "both RX", "the remote's apps list the same on both (more than ten); WSPR's opening refused on "
+         "both", t_remote_apps, 20),
+    Test("power-cap", "both RX", "20 W asked of both: each reads its own top (X6100 10 W, X6200 8 W, 5 W on a "
+         "battery), nothing keyed, 0.1 W after", t_power_cap, 15),
+    Test("web-pages", "both", "every page and GET API of the web configurator: answered alike on both, none with a "
+         "server error", t_web_pages, 120),
+    *[Test(f"tci-{k} {n}", "both RX", w.format(n=n.upper()), (lambda o, k=k, n=n: tci_refused(o, n, B if n == A else A,
+                                                                                            k, f"tci-{k} {n}")), 15)
+      for k, w in (("out-of-band", "a TCI audio key from a program on the {n} on 15.000 MHz, armed: refused, off the air"),
+                   ("ask", "a network TCI client's trx on the {n}, armed: asked on its screen, not keyed; the question "
+                           "gone ~20 s after the client leaves"),
+                   ("cw-usb", "CW text through the {n}'s TCI in USB, armed: refused, off the air, nobody asked"),
+                   ("key-cw", "a TCI audio key on the {n} in CW, armed: refused, off the air"))
+      for n in (A, B)],
     Test("ambe-vocoder", "both RX", "each radio's AMBE chip through its SDR daemon: the parity field asked for, the "
          "speech through each chip at DMR's and D-STAR's rates and the other's frames, libmbe-dvsi alike with the "
          "parity field off, P25 full rate only on a chip with the P25 option", t_ambe_vocoder, 150),

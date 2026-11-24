@@ -14,16 +14,12 @@ they were, each item's state brought here when it changed).
 Open, mine to do:
 - **Every test through the orchestrator** (the owner, 11-24: "all tests should ultimately use the same orchestration
   framework", "whittle down the tests to essential testable things, not slop"; and "ensure that your changes have
-  tests, that in turn get run through http://127.0.0.1:8765"): tools/bench/orch.py has 77 tests (2026-11-24 13:00:
-  74 pass, 3 KNOWN below); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386
+  tests, that in turn get run through http://127.0.0.1:8765"): tools/bench/orch.py has 92 tests (2026-11-24 14:05:
+  91 pass, 1 KNOWN: the X6100's 6 m FM floor, below); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386
   features listed, ~1040 not covered on 11-23) still run outside it. Left: pick the essential ones of features.json
   and move them in (surveyed 11-24: receive settings beyond rx-settings (VFO, split, RIT, XIT, filters, zoom, IF
   shift), the band plan (mode from plan, lock per band, transverters, TX shift), the safety refusals not in orch
   (TCI out of band, TCI CW, A/B arming), TCI and rigctl answers, the web pages and guards, the system checks).
-- **B's D-STAR and P25 voice through the SDR daemon** (found 11-24 with dv-dstar, dv-p25: KNOWN): D-STAR's voice drops
-  out partway through a call on both radios, and the X6100's P25 voice (1 kHz frames) turns into 400 Hz after half a
-  second. dsd-fme's own speech is right (caught on its UDP port) and the chip through libmbe-dvsi too: the daemon's
-  play-out of it (tools/rtlspec/dsd.c) is where to look.
 - **The X6200's dsd-fme in the image**: the bundle's copy needed librtlsdr.so.0, which the X6200's card lacks: B had
   no P25, D-STAR, YSF or NXDN there from 11-19 to 11-24. The package builds it without RTL-SDR now; the X6200 runs the
   Mac build (hot install) till the next image and bundle (a tag, the owner's word).
@@ -47,8 +43,13 @@ more AMBE tests", "The 6 m output floor... maybe time to revisit now? same with 
 - AMBE: the DVMega stick (`AMBE3000F`, X6200) and the USB-3000 (`AMBE3000P25F`, X6100) decode DMR and D-STAR alike (the
   speech r 0.97/0.95 through each, and through the other's frames). Fixed: the stick sends no parity field until
   asked and three parsers cut frames ending in 0x2F (ambe.c, libmbe-dvsi); P25 full rate only on a chip with the P25
-  option (the stick decoded it to 782 Hz); libmbe-dvsi's decoder reset before its rate. Tests in orch: ambe-vocoder,
-  dv-dmr, dv-dmr-noparity, dv-ysf, dv-nxdn (pass), dv-dstar, dv-p25 (KNOWN, above).
+  option (the stick decoded it to 782 Hz); libmbe-dvsi's decoder reset before its rate; and B's D-STAR dropouts and
+  the X6100's P25 400 Hz (the owner: "fix that"): the NXDN dsd-fme's false frames set the shared chip's rate between
+  the P25/D-STAR one's; the daemon's port now sets each client's own rate before its frame. Tests in orch, all pass:
+  ambe-vocoder, dv-dmr, dv-dmr-noparity, dv-dstar, dv-ysf, dv-nxdn, dv-p25.
+- Ported from the 1:1 suite into orch (all pass both radios): rx-vfo-split, tci-receiver, rigctl-more, remote-apps,
+  power-cap, web-pages (77 routes alike), and TCI's refusals on each radio (tci-out-of-band, tci-ask, tci-cw-usb,
+  tci-key-cw).
 - 6 m: power-6m (USB, a TCI tone at 0.1/0.3/1.0 W) passes both ways: the X6100 heard +6.0/+5.0 dB apart, its meter
   0.1/0.3/1.1 W, so its 6 m floor is gone wherever the GUI sets the drive (TCI, the digital apps). power-6m-fm (the
   base's own carrier): the X6200 follows; the factory X6100 stays at about 1 W at any setting under 1 W (KNOWN: its

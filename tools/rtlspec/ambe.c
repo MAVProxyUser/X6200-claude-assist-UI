@@ -51,6 +51,9 @@ static atomic_bool     ready, started;
 static int             fd = -1;
 static int             udp = -1;
 static int             chip_rate = -1;  /* the rate it was set to last (33 DMR's), -1 another or not known */
+static uint8_t         chip_cfg[16];    /* the rate fields it was last set with by anyone (0x09 n, or 0x0A and six
+                                         * words), chip_cfg_n bytes: 0 not known */
+static int             chip_cfg_n;
 static char            dev[32], prod[48];
 
 static long now_ms(void) {
@@ -443,6 +446,64 @@ static int port_pkt(int type, const uint8_t *p, int n, int *rtype, uint8_t *r, i
 
 static void lost(void);
 
+/* The chip set to the rate fields f (n bytes): said for the port's clients and DMR's own frames */
+static void chip_is(const uint8_t *f, int n) {
+    if (n <= 0 || n > (int)sizeof(chip_cfg)) {
+        chip_cfg_n = 0;
+        chip_rate  = -1;
+        return;
+    }
+    memcpy(chip_cfg, f, (size_t)n);
+    chip_cfg_n = n;
+    chip_rate  = f[0] == 0x09 && n >= 2 ? f[1] : -1;
+}
+
+/* The port's clients (B's three dsd-fme, the GUI's DMR app, a test daemon's DMR), each one's rate as it last set it.
+ * The chip has one rate: with two decoding at once, each frame went out at whichever rate was set last (an NXDN
+ * dsd-fme's false syncs in a P25 call sent its frames at NXDN's rate between the P25 one's: the call's 1 kHz came out
+ * at 400 Hz, and D-STAR's voice dropped out, 2026-11-24). A client's frame now goes with its own rate whenever
+ * another's is on the chip */
+#define CLIENTS 8
+static struct {
+    struct sockaddr_in a;
+    uint8_t            rate[16];
+    int                rn;          /* its rate fields' length, 0 none set yet */
+    long               used;
+} clients[CLIENTS];
+
+static int client_of(const struct sockaddr_in *a) {
+    int old = 0;
+
+    for (int i = 0; i < CLIENTS; i++) {
+        if (clients[i].used && clients[i].a.sin_addr.s_addr == a->sin_addr.s_addr &&
+            clients[i].a.sin_port == a->sin_port) {
+            clients[i].used = now_ms();
+            return i;
+        }
+        if (clients[i].used < clients[old].used) old = i;
+    }
+    memset(&clients[old], 0, sizeof(clients[old]));     /* new, or the longest unheard replaced */
+    clients[old].a    = *a;
+    clients[old].used = now_ms();
+    return old;
+}
+
+/* Client i's rate on the chip again before its frame, when another's is there: its answer taken here. False: the chip
+ * gone */
+static bool rate_for(int i) {
+    uint8_t q[16 + 340], r[64];
+    int     len, t, k;
+
+    if (!clients[i].rn || (chip_cfg_n == clients[i].rn && !memcmp(chip_cfg, clients[i].rate, (size_t)chip_cfg_n)))
+        return true;
+    if ((len = build_pkt(q, 0, clients[i].rate, clients[i].rn)) < 0) return true;
+    if (!put_all(q, (size_t)len)) return false;
+    k = recv_pkt(&t, r, sizeof(r), 400);
+    if (k >= 2 && t == 0 && r[0] == clients[i].rate[0] && r[1] == 0) chip_is(clients[i].rate, clients[i].rn);
+    else chip_is(NULL, 0);
+    return true;
+}
+
 static void serve_udp(void) {
     uint8_t            b[400], r[400];
     struct sockaddr_in from;
@@ -451,19 +512,31 @@ static void serve_udp(void) {
 
     while (udp >= 0 && (n = recvfrom(udp, b, sizeof(b), 0, (struct sockaddr *)&from, &fl)) > 0) {
         if (n < 5 || b[0] != 0x61 || (b[1] << 8 | b[2]) + 4 != n || fd < 0) continue;     /* no chip: no answer */
-        if (b[3] == 0) chip_rate = b[4] == 0x09 && n >= 6 ? b[5] : b[4] == 0x0A || b[4] == 0x33 ? -1 : chip_rate;
+        int ci = client_of(&from), fn = (int)n - 4 - (has_parity(b, (int)n) ? 2 : 0);
+        bool rate_pkt = b[3] == 0 && fn >= 2 && fn <= 16 && (b[4] == 0x09 || b[4] == 0x0A);
+
+        if (rate_pkt) {                 /* its rate, kept for its frames */
+            memcpy(clients[ci].rate, b + 4, (size_t)fn);
+            clients[ci].rn = fn;
+        } else if ((b[3] == 1 || b[3] == 2) && !rate_for(ci)) {
+            lost();
+            return;
+        }
+        if (b[3] == 0 && (b[4] == 0x33 || rate_pkt)) chip_is(NULL, 0);     /* till its answer says */
         if (!put_all(b, (size_t)n)) {
             lost();
             return;
         }
         int rn = recv_raw(r, sizeof(r), b[3] == 0 && b[4] == 0x33 ? 1500 : 400);
 
+        if (rate_pkt && rn >= 6 && r[3] == 0 && r[4] == b[4] && r[5] == 0) chip_is(b + 4, fn);
+
         if (rn >= 5 && r[3] == 0 && r[4] == 0x39) {     /* READY: it rebooted (P25's full rate can make it), its
                                                          * power-on rate again: DMR's set afresh before its frames */
             static long said;
             static int  since;
 
-            chip_rate = -1;
+            chip_is(NULL, 0);
             parity_on();                                /* power-on's layout again: the parity field asked for */
             since++;
             if (now_ms() - said > 60000) {              /* said once a minute at most, with how many */
@@ -522,8 +595,8 @@ static void *thread(void *arg) {
             fprintf(stderr, "rtlspec: AMBE vocoder %s on %s, rate 33 (DMR); 127.0.0.1:%d for others\n", prod, dev,
                     PORT);
             atomic_store(&ready, true);
-            chip_rate = -1;
-            misses    = 0;
+            chip_is(NULL, 0);
+            misses = 0;
         }
         serve_udp();
         pthread_mutex_lock(&lock);
@@ -553,7 +626,7 @@ static void *thread(void *arg) {
                 if (++misses >= 5) lost();
                 continue;
             }
-            chip_rate = 33;
+            chip_is((const uint8_t[]){0x09, 33}, 2);
         }
         memcpy(q + 2, f, 9);
         if (!send_pkt(1, q, sizeof(q))) {
@@ -567,7 +640,7 @@ static void *thread(void *arg) {
         }
         misses = 0;
         if (type == 0 && n >= 1 && r[0] == 0x39) {     /* READY: it rebooted, its rate the power-on one */
-            chip_rate = -1;
+            chip_is(NULL, 0);
             continue;
         }
         if (type != 2 || n < 2 || r[0] != 0x00) continue;

@@ -602,6 +602,11 @@ static void at_264k(chan_t *c, float r, float i) {
             if (off < 0) off = getenv("RTLSPEC_NO_DMR") != NULL;
             if (off) c->dmr_on = false;
         }
+        static int path_was = -1, path_trace = -1;     /* RTLSPEC_DSD_TRACE: which audio B's listener gets, as it
+                                                         * changes (0 FM, 1 DMR's voice, 2 dsd-fme's) */
+        int        path_now = 0;
+
+        if (path_trace < 0) path_trace = getenv("RTLSPEC_DSD_TRACE") != NULL;
         if (c->dmr_on) {
             if (!c->dmr) {
                 c->dmr = dmr_new(AUD_RATE, dmr_ambe, dmr_call, c);
@@ -610,18 +615,29 @@ static void at_264k(chan_t *c, float r, float i) {
             if (c->dmr) {
                 dmr_feed(c->dmr, &d, 1);
                 dmr_dump(d, dmr_active(c->dmr) || (c == &lis && dsd_on && dsd_active()));
-                if (dmr_active(c->dmr)) {
-                    c->out(dmr_audio());
-                    return;
-                }
+                if (dmr_active(c->dmr)) path_now = 1;
             }
         }
-        if (c == &lis && dsd_on) {      /* the other digital voice: dsd-fme's speech (or silence) for its buzz */
+        if (c == &lis && dsd_on && !path_now) {     /* the other digital voice: dsd-fme's speech (or silence) for
+                                                     * its buzz; not fed while DMR's voice plays */
             dsd_feed(d);
-            if (dsd_active()) {
-                c->out(dsd_audio());
-                return;
-            }
+            if (dsd_active()) path_now = 2;
+        }
+        if (c == &lis && path_trace && path_now != path_was) {
+            struct timespec ts;
+
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            fprintf(stderr, "dsdtrace %u path %s\n", (unsigned)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000),
+                    path_now == 1 ? "DMR" : path_now == 2 ? "dsd-fme" : "FM");
+            path_was = path_now;
+        }
+        if (path_now == 1) {
+            c->out(dmr_audio());
+            return;
+        }
+        if (path_now == 2) {
+            c->out(dsd_audio());
+            return;
         }
         if (c->raw) {
             c->dc += 0.002f * (d - c->dc);
