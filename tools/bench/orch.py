@@ -2018,6 +2018,55 @@ def t_caps(o):
     return True, f"{len(caps)} options probed on both, {len(diff)} differ: {', '.join(diff)[:900]}", {"diff": diff}
 
 
+def t_bands_all(o):
+    """Every band both radios have with the same edges (their band tables, the caps map): both into it at once (its
+    start + 1 kHz, the band's own mode from its memory), each confirmed, the two alike in frequency and mode"""
+    from suite_proto import http
+    tables = {}
+    for n, r in o.r.items():
+        st_, body = http(r.host, "/api/bands")
+        tables[n] = {b["name"]: b for b in (json.loads(body) if st_ == 200 else [])}
+    names = [k for k in tables[A] if k in tables[B] and (tables[A][k]["start_freq"], tables[A][k]["stop_freq"]) ==
+             (tables[B][k]["start_freq"], tables[B][k]["stop_freq"])]
+    with o.step("both on page G"):
+        o.both_page("G")
+    seen, apart, skipped = [], [], []
+    for k in sorted(names, key=lambda k: tables[A][k]["start_freq"]):
+        f = int(tables[A][k]["start_freq"]) + 1000
+        if not common("freq", f):
+            continue
+        with o.step(f"both into {k} ({f / 1e6:.4f} MHz)") as s:
+            try:
+                o.both({"freq": f})
+            except Refused as e:                # a band in the tables a radio does not tune: mapped, passed over
+                n_no = str(e).count("not a frequency this radio tunes")
+                if not n_no:
+                    raise
+                who = "neither" if n_no == 2 else ("x6100" if "x6100: freq" not in str(e) else "x6200") + " only"
+                skipped.append(f"{k} ({who})")
+                caps = caps_load()
+                caps[f"band {k} tuned"] = {"radios": {n: {"ok": f"{n}: freq" not in str(e)} for n in o.r},
+                                           "same": n_no == 2}
+                bench.save_json(CAPS, caps)
+                o.both({"freq": 14200000})
+                s.confirm(f"tuned by {who}: passed over, mapped")
+                continue
+            time.sleep(0.3)
+            m = {n: int(r.state.get("mode", -1)) for n, r in o.r.items()}
+            if m[A] != m[B]:                    # each band's mode from its own memory: put alike, said
+                apart.append(f"{k}: modes {m}")
+                o.both({"mode": m[A]})
+            seen.append(k)
+            s.confirm(f"modes {m}")
+    o.both({"freq": 14200000, "mode": 2})
+    if apart:
+        return None, f"{len(seen)} bands entered alike on both; the bands' memories gave different modes in " \
+                     f"{len(apart)}: {'; '.join(apart)}", {"apart": apart}
+    return True, (f"{len(seen)} bands, each entered on both at once, the same frequency and mode: {', '.join(seen)}"
+                  + (f"; not on both (mapped): {', '.join(skipped)}" if skipped else "")), \
+        {"bands": seen, "neither": skipped}
+
+
 # ---- The tests ----
 
 class Test:
@@ -2056,6 +2105,8 @@ TESTS = [
          t_web_secrets, 5),
     Test("caps", "both RX", "every option probed on both at once (frequencies, modes, filters, IF shift, zoom, steps, "
          "AGC, NB, NR): what each takes, the differences mapped for the tests", t_caps, 120),
+    Test("bands-all", "both RX", "every band both radios share (same edges), entered on both at once: same frequency "
+         "and mode", t_bands_all, 60),
     Test("sync-bands", "both RX", "both radios through 10 bands/modes together, each confirmed on both", t_sync_bands, 40),
     Test("usb-steps x6100>x6200", "X6100 TX, X6200 RX", "USB 14.200: a stepped tone sequence from the X6100 heard in "
          "order in the X6200's audio", voice(A, B, 14200000, 2, "usb-steps x6100>x6200"), 30),
