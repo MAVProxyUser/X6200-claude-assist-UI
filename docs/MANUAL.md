@@ -4278,9 +4278,22 @@ and wide FM the base's reading does not follow a signal (an AM carrier its
 spectrum showed 41 dB up left it at the floor). In those modes the meter is
 the power inside the filter from the spectrum, as the X6100's always is,
 matched to the base's reading by the difference the radio learns in the
-other modes (a few minutes in USB, LSB, CW or FM after a start); before
-that it reads on the spectrum's own scale. Up to v0.3.12.34 the X6200's
-meter stood still in AM.
+other modes, on a signal received S3 or stronger (the first such signal
+after a start sets it, later ones refine it over a few seconds; nothing
+while the radio transmits or for 1.5 s after); before that it reads on the
+spectrum's own scale. Up to v0.3.12.34 the X6200's meter stood
+still in AM. Up to v0.3.12.48 it read an AM carrier 9 dB over the same
+carrier in USB when the two modes had different zooms (AM's 8, USB's 1:
+the spectrum was summed as stretched to the zoom), and it learned in the
+noise and while it transmitted too, where the base's reading says nothing
+of the spectrum; it reads the same at any zoom now.
+
+The three values were measured on one radio, so they rarely fit another
+exactly: on two radios the defaults read 3 to 4 dB low with PRE and 4 to
+6 dB high at RF gain 40. Press Measure on a steady signal (below) and the
+reading stays within a dB or two. The remote can run Measure too (the
+bench's front-end test does: it measures, checks the steps and puts the
+figures back as they were).
 
 | Setting | Range | Default |
 |---|---|---|

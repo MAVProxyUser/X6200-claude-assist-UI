@@ -30,6 +30,8 @@
 #include <cstring>
 #include <cstdarg>
 #include <functional>
+#include <atomic>
+#include <mutex>
 
 extern "C" {
 
@@ -4436,6 +4438,9 @@ static float       smc_sum, smc_min, smc_max;
 static float       smc_read[SMC_STEPS];
 static int32_t     smc_pre, smc_att, smc_rfg;     /* as they were */
 static int32_t     smc_band;                       /* the band measured: PRE and ATT are per band */
+static std::atomic<bool> smc_running;              /* the timer on, for smc? from the socket thread */
+static std::mutex  smc_mux;
+static char        smc_last[192];                  /* the last note, the page's or not, for smc? */
 #ifdef BOARD_X6200
 static bool        smc_bat;                        /* measured on the battery alone: the attenuator's figure for it */
 #endif
@@ -4449,6 +4454,10 @@ static void sm_rfg_cb(lv_event_t *e) {
 }
 
 static void smc_note_set(const char *text) {
+    {
+        std::lock_guard<std::mutex> g(smc_mux);
+        snprintf(smc_last, sizeof(smc_last), "%s", text);
+    }
     if (smc_note) lv_label_set_text(smc_note, text);
     voice_say_text_fmt("%s", text);
 }
@@ -4468,6 +4477,7 @@ static void smc_stop_fe(const char *text, bool front_end) {
     if (smc_timer) {
         lv_timer_del(smc_timer);
         smc_timer = NULL;
+        smc_running = false;
         if (front_end) {
             cparam_i_set(cfg_cur_pre, smc_pre);
             cparam_i_set(cfg_cur_att, smc_att);
@@ -4634,6 +4644,7 @@ static void smc_btn_cb(lv_event_t *e) {
     smc_step = 0;
     smc_tick = 0;
     smc_timer = lv_timer_create(smc_timer_cb, 100, NULL);
+    smc_running = true;
     smc_btn_label("Stop");
     smc_note_set("Keep the signal steady: about 12 s.");
 }
@@ -4642,6 +4653,48 @@ static void smc_btn_cb(lv_event_t *e) {
 static void smc_delete_cb(lv_event_t *e) {
     smc_note = NULL;
     smc_stop(NULL);
+}
+
+/* The remote's Measure (remote_server.c "smc start|stop", the 1:1 suite's front-end check): as the page's button,
+ * the page open or not. LVGL thread */
+void settings_smeter_measure(bool start) {
+    if (start != (smc_timer != NULL))
+        smc_btn_cb(NULL);
+}
+
+/* "smc put PRE,ATT,RFG": the three figures set as the sliders set them, ATT the band's for the power the radio is on
+ * (a test puts back what it found). A Measure under way stops first. LVGL thread */
+void settings_smeter_put(int32_t pre, int32_t att, int32_t rfg) {
+    if (smc_timer)
+        smc_stop("Stopped. Nothing changed.");
+#ifdef BOARD_X6200
+    ParamInt &sm_att = cfg_sm.smeter_att_for(meter_on_battery());
+#endif
+    cfg_sm.p_smeter_pre.set(LV_CLAMP(0, pre, 40));
+    sm_att.set(LV_CLAMP(0, att, SM_ATT_MAX));
+    cfg_sm.p_smeter_rfg.set(LV_CLAMP(0, rfg, 200));
+    smc_slider_set(smc_sl[0], cfg_sm.p_smeter_pre.get(), 1);
+#ifdef BOARD_X6200
+    smc_slider_set(smc_sl[meter_on_battery() ? 3 : 1], sm_att.get(), 1);
+#else
+    smc_slider_set(smc_sl[1], sm_att.get(), 1);
+#endif
+    smc_slider_set(smc_sl[2], cfg_sm.p_smeter_rfg.get(), 5);
+}
+
+/* "smc?": Measure running, the three figures in use (ATT the band's for the power the radio is on) and the last note.
+ * Any thread (the settings' getters are) */
+bool settings_smeter_status(int32_t fig[3], char *note, size_t n) {
+#ifdef BOARD_X6200
+    fig[1] = cfg_sm.smeter_att_for(meter_on_battery()).get();
+#else
+    fig[1] = sm_att.get();
+#endif
+    fig[0] = cfg_sm.p_smeter_pre.get();
+    fig[2] = cfg_sm.p_smeter_rfg.get();
+    std::lock_guard<std::mutex> g(smc_mux);
+    snprintf(note, n, "%s", smc_last);
+    return smc_running;
 }
 
 /* Power off: the settings are saved right after (radio_poweroff), and the timer's own stop came too late for them,

@@ -895,8 +895,7 @@ def cw_over(run, s_name, l_name):
         snaps[r.name] = bench.snapshot(r)
     try:
         bench.listener_gate(lis)
-        for r in radios:
-            bench.open_page(r, "G")
+        bench.open_page_both(radios, "G")       # G tunes each radio to its own channel: set alike again
         bench.ensure(lis, *bench.rx_profile(F_CW, 4, pre=0, att=0, rfg=100, agc=2))
         bench.path_proof(c, total, snd, lis, F_CW, rep, label=f"cw path proof {s_name} to {l_name}")
         # both alike for the over: the listener first, back on CW and read back, then the sender exactly as it (its
@@ -957,8 +956,7 @@ def band_proofs(run):
             snaps[r.name] = bench.snapshot(r)
         try:
             bench.listener_gate(lis)
-            for r in radios:
-                bench.open_page(r, "G")
+            bench.open_page_both(radios, "G")   # G tunes each radio to its own channel: set alike again
             for band, f in PROOF_BANDS:
                 try:
                     bench.ensure(lis, *bench.rx_profile(f, 2, pre=0, att=0, rfg=100, agc=3))

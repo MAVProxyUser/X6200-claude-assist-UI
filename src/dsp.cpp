@@ -470,19 +470,54 @@ void dsp_samples(cfloat *buf_samples, uint16_t size, bool tx, uint32_t base_freq
  * (s_meter), set against the base's reading by their difference, learned slowly in the modes where the base's
  * follows. Until it is learned (a start in AM) the spectrum's own level, SMETER_DB's scale */
 static float psd_meter_off = NAN;
+#define PSD_LEARN_DBM S3        /* the base's reading clear of its floor (S1): a signal it follows */
+#define PSD_AFTER_TX_MS 1500    /* nothing learned this long after a transmission */
+#define PSD_STEADY_DB   1.5f    /* learned only from a line whose difference moved no more than this */
 
-static float psd_meter(int16_t smeter_dbm) {
-    float bin_hz = (float)wf_span() / WATERFALL_NFFT;
+static float psd_meter(int16_t smeter_dbm, uint32_t span_hz, uint16_t n, bool tx) {
+    /* The line as shown: the base sends 512 bins over 384 kHz (750 Hz each) whatever the zoom (measured 2026-11-24),
+     * and its middle part (the zoom's span) is stretched over WATERFALL_NFFT bins, each of the base's counted as many
+     * times as it was stretched: the sum scaled back by that, so a carrier reads the same at any zoom. Summed as
+     * stretched, it read 9 dB more at AM's zoom 8 than at USB's 1, where the difference to the base's reading is
+     * learned (the 1:1 suite's smeter-am: USB -78, AM -67.7 dBm) */
+    float shown  = span_hz ? std::min((float)shown_span.load(std::memory_order_relaxed), (float)span_hz)
+                           : (float)wf_span();
+    float bin_hz = shown / WATERFALL_NFFT;
     float p      = dsp_band_power(wf_lin, WATERFALL_NFFT, bin_hz, filter_from, filter_to);
+
+    if (span_hz && n)
+        p *= bin_hz / ((float)span_hz / n);
     float spec   = p > 0 ? 10.0f * log10f(p) + SMETER_DB : NAN;
     bool  blind  = cur_mode == radio_mode_am || cur_mode == radio_mode_sam || cur_mode == radio_mode_wfm;
 
     if (!isfinite(spec))
         return smeter_dbm;
-    if (!blind) {
-        float d = (float)smeter_dbm - spec;
+    static uint64_t tx_ms;      /* the last transmission seen: the base's reading recovers after it */
+    static float    last_d;     /* the difference a line before: a signal coming or going moves it */
+    static uint32_t learned;    /* lines learned from: the first ones averaged alike */
+    uint64_t        now = get_time();
 
-        psd_meter_off = std::isnan(psd_meter_off) ? d : psd_meter_off * 0.99f + d * 0.01f;
+    if (tx)
+        tx_ms = now;
+    if (!blind) {
+        float d      = (float)smeter_dbm - spec;
+        bool  steady = fabsf(d - last_d) <= PSD_STEADY_DB;   /* the base's reading is instant, the line an average:
+                                                               * as a signal rises they disagree for a line or two */
+        last_d = d;
+
+        /* Only on a signal received: in the noise the base's reading sits at its floor (S1) whatever the spectrum's
+         * power; on the air the spectrum is the TX one and the base's reading another thing, and right after it the
+         * line settles (settle). An X6200 that had just sent read the next AM carrier 15 dB over its USB reading
+         * (the 1:1 suite, 2026-11-24) */
+        if (smeter_dbm >= PSD_LEARN_DBM && steady && !tx && !settle && now - tx_ms > PSD_AFTER_TX_MS) {
+            /* the first lines averaged alike (a running mean), then slowly: one line taken whole after a start read
+             * the next AM carrier 8.6 dB high (2026-11-24) */
+            if (learned < 100)
+                learned++;
+            float a = 1.0f / (float)learned;     /* down to 0.01 */
+
+            psd_meter_off = std::isnan(psd_meter_off) ? d : psd_meter_off + (d - psd_meter_off) * a;
+        }
         return smeter_dbm;
     }
     return spec + (std::isnan(psd_meter_off) ? 0.0f : psd_meter_off);
@@ -555,7 +590,7 @@ void dsp_psd(const float *db, uint16_t n, uint32_t span_hz, bool tx, int16_t sme
     wf_time = now;
 
     if (dialog_msg_voice_get_state() != MSG_VOICE_RECORD)
-        meter_update(psd_meter(smeter_dbm), params.spectrum_beta.x * 0.01f);
+        meter_update(psd_meter(smeter_dbm, span_hz, n, tx), params.spectrum_beta.x * 0.01f);
     /* A base that sends its spectrum: the line is taken over the span shown (frac), the X6200's 192 and 384 kHz
      * too, where wf_span() stays 100 kHz: the browser's copy was labelled 100 kHz and the Panel drew 384 kHz of
      * bins over a 100 kHz scale, a tap tuning to the wrong frequency (the 1:1 suite, 2026-11-22: the copy matched

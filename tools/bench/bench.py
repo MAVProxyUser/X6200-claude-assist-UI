@@ -245,6 +245,8 @@ class Radio:
 
     def send(self, cmd):
         self.r.send(cmd)
+        if cmd.startswith(DIAL_CMDS):
+            _dial_moved()           # an app opening on its own memory, closing, a raw set: the other DIAL_FOLLOW_S
 
     def wait(self, what, cond, timeout):
         t = time.time()
@@ -370,6 +372,11 @@ def state_ready(r):
 # DIAL_FOLLOW_S to follow. sync_pair() sets the two alike at once: orch's both() and ready(), the suite's sync_both
 # and pair_align all go through it.
 
+# The bench's own commands that may move one radio's dial or mode outside ensure() (an app opening on its own memory:
+# PSK31 on 3.580 MHz, 2026-11-23; an app closing; a raw "set freq"): sent through Radio.send, each leaves the other
+# radio DIAL_FOLLOW_S to follow, as ensure() does. Keys are not among them: a test that moves a dial with a key says so
+DIAL_CMDS = ("open ", "close", "ft8 open", "ft8 close", "js8 open", "js8 close", "wefax open", "wefax close",
+             "set freq", "set mode", "set band", "set vfo")
 STEPPED = "stepped"         # a rule: the setting is what the test steps and measures (the reason says how)
 DIAL_FOLLOW_S = 8.0         # a dial or mode set on one radio: the other set within this (one test step), else a
                             # difference
@@ -811,6 +818,35 @@ def open_page(r, letter):
     return got
 
 
+def settled(r, still=1.5, timeout=8.0, keys=("freq", "mode", "app", "win", "pg")):
+    """r's dial, mode, app and page unchanged for still seconds (an app closing puts its dial back a moment after it
+    says it closed: text-log's X6100 went back to 14.2 MHz after it had been set to the app's 3.58, 2026-11-24), at
+    most timeout; True when it settled"""
+    t0 = time.time()
+    last, since = None, t0
+    while time.time() - t0 < timeout:
+        cur = tuple(r.state.get(k) for k in keys)
+        if cur != last:
+            last, since = cur, time.time()
+        elif time.time() - since >= still:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def open_page_both(radios, letter):
+    """The Sentry's page letter on every radio as one transition, then the radios set alike again on the dial and mode
+    they shared before: G tunes each to its own channel, the last each was on there, which differ once a test left one
+    radio on G apart (air armed-ptt-a: the X6100's G on 14.2 AM against the X6200's USB, 11 s apart, 2026-11-24)"""
+    want = {k: _value(radios[0], k) for k in ("freq", "mode")}
+    alike = all(_value(r, k) == want[k] for r in radios[1:] for k in want)
+    with transition():
+        for r in radios:
+            open_page(r, letter)
+        if alike and len(radios) > 1:
+            sync_pair(radios, want)
+
+
 def _open_page(r, letter):
     """The Sentry on its page letter, asked twice (an app still closing can take the first ask). G entered: its own
     channel's tune waited for (a GUI with "wch": the page says G a moment before G tunes its channel, and a dial set
@@ -900,6 +936,15 @@ def put_back(r, snap, keep=(), before=None):
 
 
 def finish(radios, snaps, keep=(), report=None, before=None):
+    """The radios put back (_finish) as one transition: each set in turn, no difference counted meanwhile; a dial
+    moved leaves the other DIAL_FOLLOW_S to follow"""
+    with transition():
+        out = _finish(radios, snaps, keep, report, before)
+    _dial_moved()
+    return out
+
+
+def _finish(radios, snaps, keep=(), report=None, before=None):
     """The end of every test, passed or not: each radio stopped, its transmitter locked, put back as snaps found it
     (all but keep), read back, on the Sentry's page A, the harness's control released. before ({name: [want, ...]}):
     put back first what snaps cannot hold (a mode's own filter). A radio NEVER stays not as found (the owner,
@@ -924,6 +969,14 @@ def finish(radios, snaps, keep=(), report=None, before=None):
             say(f"{r.name}: not all put back (try {attempt + 1} of {FINISH_TRIES}): {bad}")
             time.sleep(2.0)
         bads[r.name] = bad
+    # the dial left where the test left it, the idle radio following (the owner, 11-23): the second radio of a pair
+    # set to the first's dial and mode, the two read back alike. Left as each was, a sender in AM on A and a listener
+    # whose page A brought back A's own dial stayed apart into the next test (air armed-ptt-a, 2026-11-24)
+    if LEAVE_TUNING and len(radios) == 2 and not any(bads.values()):
+        try:
+            sync_pair(radios, {k: _value(radios[0], k) for k in ("freq", "mode")})
+        except Refused as e:
+            bads[radios[1].name] = {"follow": str(e)}
     # then each radio's settings database (the rows its live settings cannot reach: other bands' VFO B, a row left
     # where none was), once the GUI has written what the put back changed
     if any(snaps.get(r.name, {}).get("_db") is not None and not bads[r.name] for r in radios):

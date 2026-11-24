@@ -60,12 +60,18 @@ while time.time() - t0 < 5 and not any(f.startswith("ready") for f in frames()):
     pass
 send(f"cw_macros:0,{text};")
 print(f"start {time.time():.3f}", flush=True)
+# The server ends the session with cw_macros_empty (after a trx:0,false when it was cut short); every change of the
+# radio's TX goes out as trx too, and with break-in the radio leaves the air between words: a trx:0,false after a
+# trx:0,true is no end (it cut 'TEST TEST' after the first word, the 1:1 suite, 2026-11-24). Refused before it keyed:
+# trx:0,false with no trx:0,true
+keyed = False
 while time.time() - t0 < max_s:
     got = frames()
     if any(f.startswith("cw_macros_empty") for f in got):
         break
-    if any(f.startswith("trx:0,false") for f in got) and time.time() - t0 > 2:
-        print("refused or ended: trx:0,false", flush=True)
+    keyed = keyed or any(f.startswith("trx:0,true") for f in got)
+    if not keyed and any(f.startswith("trx:0,false") for f in got) and time.time() - t0 > 2:
+        print("refused: trx:0,false before it keyed", flush=True)
         break
 s.close()
 print(f"end {time.time():.3f}", flush=True)

@@ -547,6 +547,14 @@ def main():
           "leaves the other DIAL_FOLLOW_S to follow, closed once the two are alike")
     sa, ha = one_radio(None)
     sb, hb = one_radio(None)
+    bench.dial_settled()
+    ha.send("open 12")
+    d1 = bench.changing()
+    bench.dial_settled()
+    ha.send("set pwr 1")
+    d2 = bench.changing()
+    check(d1 and not d2, "an app opened through Radio.send leaves the other radio DIAL_FOLLOW_S to follow; a power "
+          "set does not")
     sb.state["freq"], sb.state["mode"] = 7074000, 0
     got = bench.sync_pair([ha, hb], {"freq": 14200000, "mode": 2})
     check(got == {"freq": 14200000, "mode": 2} and sb.state["freq"] == 14200000 and sb.state["mode"] == 2 and

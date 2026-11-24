@@ -382,8 +382,8 @@ class Over:
         bench.listener_gate(self.lis)
         if self.listener_tx:
             bench.listener_gate(self.snd)       # each listens in turn
-        for r in self.radios:
-            bench.open_page(r, "G")             # the Walkie holds the dial where it is put (A's scan retunes)
+        bench.open_page_both(self.radios, "G")  # the Walkie holds the dial where it is put (A's scan retunes); G tunes
+                                                # each to its own channel: set alike again
 
     def res(self, name, ok, says):
         self.out[name] = (None if ok is None else bool(ok), says)

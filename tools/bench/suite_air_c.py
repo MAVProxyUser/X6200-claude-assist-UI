@@ -700,8 +700,7 @@ class Pair:
         USB-D on G, the sender's 0.1 W tone 20 dB over the listener's quiet, both screens pictured), then the listener
         on l_page in l_mode: the proof's words"""
         self.supply = bench.listener_gate(self.L)
-        bench.open_page(self.S, "G")
-        bench.open_page(self.L, "G")
+        bench.open_page_both([self.S, self.L], "G")      # G tunes each to its own channel: set alike again
         self.keep_filter(self.L, f, 3)          # the listener's own USB-D filter and zoom as found, for finish
         bench.ensure(self.L, *bench.rx_profile(f, 3, pre=0, att=0, rfg=100, agc=agc, filt=filt))
         self.keep_filter(self.S, f, 3)          # the proof gives the sender the listener's USB-D filter and zoom

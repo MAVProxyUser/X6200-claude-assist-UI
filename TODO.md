@@ -38,6 +38,20 @@ Open, mine to do:
 - Both radios' CW decoders lose the dits of the first characters ('VVV' prints 'TTT'): a decoder that locks sooner
   would copy short overs whole (noted; the tests send two V groups first).
 
+Done 2026-11-24 evening (the owner: "get the over the air test coverage hammered out in full", "EVERY test should use
+the same unified framework to sync the radios or make exceptions for tests so that there is NO deviation"):
+- The one sync framework (bench.sync_pair, bench.apart, transitions; tools/bench/ORCH.md) in every test, and the 11
+  air_a groups that failed under it all pass: finish() is one transition and ends a pair with the idle radio following;
+  open_page_both() (G tunes each radio to its own channel); app commands open the follow window (bench.DIAL_CMDS);
+  text-log's app peek; split's zoom after its mode change; qsy-out's listener zoom; orch's guard says the 20 s before
+  a violation.
+- Real faults the air groups found, fixed in the GUI (on both radios by hot install, in the next tag): the X6200's
+  AM/SAM/WFM S-meter read a carrier up to 15 dB over its USB reading (it learned its offset in the noise, on the air,
+  from a signal's rise, and summed the spectrum as stretched to the zoom); TX Cal's S-meter Measure from the remote
+  ("smc", the smeter-front-end test runs each radio's own Measure: neither radio had ever been measured, PRE read
+  3-4 dB low and RF gain 40 4-6 dB high on the defaults). The bench's TCI CW keyer left at the first break-in drop.
+- Left: the other 32 over-the-air groups (air_a tune*, comp, cw-alc, power-loop, ft8-tx; air_b; air_c; air paths).
+
 Done 2026-11-24 afternoon (the owner: "I just connected a DVMega to the 6200 and a p25 USB3000 to the other... do some
 more AMBE tests", "The 6 m output floor... maybe time to revisit now? same with the image shifts?"):
 - AMBE: the DVMega stick (`AMBE3000F`, X6200) and the USB-3000 (`AMBE3000P25F`, X6100) decode DMR and D-STAR alike (the

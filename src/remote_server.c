@@ -53,7 +53,9 @@
  *  thirty). "screen 0" stops the screen frames for a client that does not show them. "set NAME
  *  VALUE" changes the radio on the LVGL thread: freq, mode, agc, pre, att, nb, nr, sql, rfg,
  *  vol, pwr (tenths of a watt), step, zoom, band (+1/-1), vfo (toggle), filter LO HI, atu, lock;
- *  one refused ("err ...") is followed by the whole state, changed or not (audit C13).
+ *  one refused ("err ...") is followed by the whole state, changed or not (audit C13). "smc start|stop" runs TX Cal >
+ *  S-METER's Measure as its button, "smc put PRE,ATT,RFG" sets its three figures, "smc?" answers "smc RUN PRE ATT RFG
+ *  NOTE" (the bench's front-end check: it measures, checks and puts back what it found).
  *  A panel thread reads the radio (the settings' getters are safe from any thread, as the TCI
  *  server uses them) and tells the panel clients what changed every 50 ms. The apps: the FT8
  *  list's rows go out as they come ("ft8r {...}", the last 48 to a page that opens later), the
@@ -127,6 +129,7 @@
 #include "params/params.h"
 #include "radio.h"
 #include "scheduler.h"
+#include "settings_window.h"
 #include "screen_light.h"
 #include "screen_main.h"
 #include "app_sentry.h"      /* "open sentry L" */
@@ -2344,6 +2347,32 @@ static void rx_hold_sync(void) {
                                      "control away from the session without TX: receive only off");
 }
 
+/* "smc": TX Cal > S-METER's Measure from the remote, on the LVGL thread */
+typedef struct {
+    int     op;         /* 1 start, 2 stop, 3 put */
+    int     fig[3];     /* put: PRE, ATT, RF gain (hundredths of a dB a step) */
+} smc_cmd_t;
+
+static void smc_apply(void *arg) {
+    smc_cmd_t *q = (smc_cmd_t *)arg;
+
+    if (q->op == 3)
+        settings_smeter_put(q->fig[0], q->fig[1], q->fig[2]);
+    else
+        settings_smeter_measure(q->op == 1);
+}
+
+/* "smc RUN PRE ATT RFG NOTE": Measure running (1/0), the figures in use, its last note as a JSON string */
+static void smc_answer(client_t *c) {
+    int32_t fig[3];
+    char    note[192], out[320];
+    bool    run = settings_smeter_status(fig, note, sizeof(note));
+    size_t  k   = (size_t)snprintf(out, sizeof(out), "smc %d %d %d %d ", run, (int)fig[0], (int)fig[1], (int)fig[2]);
+
+    json_str(out + k, sizeof(out) - k, note);
+    client_text(c, out);
+}
+
 static bool allowed(client_t *c, uint8_t role, bool control) {
     if (c->role < role) {
         client_text(c, role == ROLE_ADMIN ? "err admin only" : "err view only: pair this browser to operate");
@@ -2820,6 +2849,21 @@ static void handle_text(client_t *c, char *text) {
             return;
         if (!app_wefax_cmd(a[1]))
             client_textf(c, "err wefax %s", a[1]);
+    } else if (!strcmp(a[0], "smc?")) {
+        smc_answer(c);
+    } else if (!strcmp(a[0], "smc") && n >= 2) {
+        /* "smc start|stop": TX Cal > S-METER's Measure, as its button; "smc put PRE,ATT,RFG": its three figures (the
+         * 1:1 suite's front-end check puts back what it found). Operate and control: it steps PRE, ATT and RF gain */
+        if (!allowed(c, ROLE_OPERATE, true))
+            return;
+        smc_cmd_t q = {.op = !strcmp(a[1], "start") ? 1 : !strcmp(a[1], "stop") ? 2 : !strcmp(a[1], "put") ? 3 : 0};
+
+        /* put's three in one word: a command is four words at most */
+        if (!q.op || (q.op == 3 && (n < 3 || sscanf(a[2], "%d,%d,%d", &q.fig[0], &q.fig[1], &q.fig[2]) != 3))) {
+            client_textf(c, "err smc %s", a[1]);
+            return;
+        }
+        scheduler_put(smc_apply, &q, sizeof(q));
     } else if (!strcmp(a[0], "apps")) {
         /* "apps": the apps this radio has, "apps [[ACTION,"Name"],...]" (the end-to-end suite, tools/bench/suite.py) */
         press_action_t ids[96];

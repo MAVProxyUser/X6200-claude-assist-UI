@@ -47,6 +47,7 @@ except ImportError:
 
 A, B = "x6100", "x6200"
 GUARD_POLL_S = 0.2          # the sync guard's look at both radios
+TRAIL_S = 20.0             # with a violation, both radios' dial, mode, page and app over this long before it
 GUARD_S = 0.6               # a difference lasting this long outside a change: a violation
 STALE_S = 3.0               # no word from a radio this long: its GUI down (planned or not), said on its card
 SQL_HOLD = 0                # the squelch every test holds: open. The base mutes the received audio while it is closed
@@ -333,6 +334,8 @@ class Orch:
         self.violation = None               # this test's first sync violation
 
         self._diff_since = None
+        self._trail = collections.deque(maxlen=int(TRAIL_S / GUARD_POLL_S))   # both radios' last TRAIL_S, said with a
+                                                                             # violation: what moved them apart
         self.on = True
         threading.Thread(target=self._guard, daemon=True).start()
 
@@ -474,6 +477,9 @@ class Orch:
             mode_ok = a["mode"] == b["mode"] or bench.declared("mode", a["mode"], b["mode"])
             differ = not (freq_ok and mode_ok)
             moving = self.changing > 0 or bench.changing()
+            cur = tuple((x["freq"], x["mode"], x["pg"], x["app"]) for x in (a, b)) + (moving,)
+            if not self._trail or self._trail[-1][1:] != cur:
+                self._trail.append((now,) + cur)
             if not differ and not self.changing:
                 bench.dial_settled()        # alike again: the follow window closed
             with self.st.lock:
@@ -491,7 +497,15 @@ class Orch:
                         self.st.sync.update(ok=False, since=now, last=what)
                         self.st.sync["violations"] += 1
                         self.violation = self.violation or what
-                        self.st.events.append({"t": now, "kind": "bad", "text": f"OUT OF SYNC: {what}"})
+                        trail = (f"the {TRAIL_S:.0f} s before it ({A}; {B}; a change under way): " + " | ".join(
+                            f"{time.strftime('%H:%M:%S', time.localtime(t))}.{int(t % 1 * 10)} "
+                            f"{ra[0]} m{ra[1]} {ra[2]} {ra[3] or ''}; {rb[0]} m{rb[1]} {rb[2]} {rb[3] or ''}"
+                            f"{' (changing)' if mv else ''}" for t, ra, rb, mv in
+                            [x for x in self._trail if x[0] >= now - TRAIL_S]))
+                        # said once out of the lock (ev takes it): in the run's events.jsonl and the log
+                        threading.Thread(target=lambda w=what, tr=trail: (self.st.ev(f"OUT OF SYNC: {w}", "bad"),
+                                                                          self.st.ev(tr, "conf")),
+                                         daemon=True).start()
                         self.snap(f"OUT OF SYNC: {what}")
                 else:
                     self._diff_since = None
@@ -3643,6 +3657,47 @@ def t_power_cap(o):
     return True, "; ".join(f"{n}: 20 W asked, {v['reads_w']} W, its top" for n, v in got.items()), got
 
 
+def t_smc_remote(o):
+    """TX Cal > S-METER's Measure from the remote (remote_server.c "smc"), nothing on the air: "smc?" on both reads the
+    figures in use; Measure on the noise refuses ("feed one ...": nothing changed, the figures as before, PRE, ATT and
+    RF gain put back); "smc put" sets PRE a dB off, then the figures found, each read back. The measuring itself: air
+    smeter-front-end"""
+    import suite_air_a
+    got = {}
+    try:
+        with o.step("smc? on both; Measure on the noise refused; the figures, PRE, ATT and RF gain as before") as s:
+            def one(n, r):
+                fe = {k: r.state.get(k) for k in ("pre", "att", "rfg")}
+                a = suite_air_a.smc_ask(r)
+                if a["run"]:
+                    raise Refused(f"{n}: a Measure already running ({a['note']!r})")
+                r.send("smc start")
+                t0, b = time.time(), a
+                while time.time() - t0 < 8.0:
+                    time.sleep(0.5)
+                    b = suite_air_a.smc_ask(r, 2.0)
+                    if not b["run"] and time.time() - t0 > 1.0:
+                        break
+                if b["run"]:
+                    r.send("smc stop")
+                    raise Refused(f"{n}: Measure on the noise still running after 8 s ({b['note']!r})")
+                time.sleep(0.5)
+                fe2 = {k: r.state.get(k) for k in ("pre", "att", "rfg")}
+                moved = (a["fig"][0] + (1 if a["fig"][0] < 40 else -1),) + tuple(a["fig"][1:])
+                put = suite_air_a.smc_put(r, moved)       # put changes one: PRE a dB, read back, then as found
+                put = (f"PRE a dB off: {put}; " if put else "") + (suite_air_a.smc_put(r, a["fig"]) or "")
+                if not b["note"].endswith("Nothing changed.") or b["fig"] != a["fig"] or fe2 != fe or put:
+                    raise Refused(f"{n}: Measure on the noise: {b['note']!r}, the figures {a['fig']} -> {b['fig']}, "
+                                  f"PRE/ATT/RF gain {fe} -> {fe2}; put again: {put or 'as found'}")
+                return {"fig": a["fig"], "note": b["note"], "secs": round(time.time() - t0, 1)}
+            got = in_parallel(o, one, 30)
+            s.confirm("; ".join(f"{n} {v['fig']}: {v['note']!r}" for n, v in got.items()))
+    except Refused as e:
+        return False, str(e), got
+    return True, "; ".join(f"{n}: figures (PRE, ATT, RF gain) {v['fig']}, Measure on the noise: {v['note']!r}"
+                           for n, v in got.items()), got
+
+
 WEB_SKIP = {"/api/backup/download", "/api/gallery/zip", "/api/update/check", "/api/flights", "/api/meteo",
             "/api/boot_picture/png", "/files/"}      # big downloads, the internet, binaries (suite_more's)
 
@@ -4830,6 +4885,8 @@ TESTS = [
          "both", t_remote_apps, 20),
     Test("power-cap", "both RX", "20 W asked of both: each reads its own top (X6100 10 W, X6200 8 W, 5 W on a "
          "battery), nothing keyed, 0.1 W after", t_power_cap, 15),
+    Test("smc-remote", "both RX", "TX Cal's S-meter Measure from the remote on both: its figures read, a Measure on "
+         "the noise refused with nothing changed, PRE put a dB off and back, each read back", t_smc_remote, 30),
     Test("web-pages", "both", "every page and GET API of the web configurator: answered alike on both, none with a "
          "server error", t_web_pages, 120),
     *[Test(f"tci-{k} {n}", "both RX", w.format(n=n.upper()), (lambda o, k=k, n=n: tci_refused(o, n, B if n == A else A,

@@ -399,8 +399,7 @@ def one_pair(run, s_name, l_name, body, test, covers, partial):
         ctx = Ctx(run, total, snd, lis)
         internet_gate(ctx)
         ctx.rep["supply"] = bench.listener_gate(lis)
-        for r in radios:
-            bench.open_page(r, "G")
+        bench.open_page_both(radios, "G")       # G tunes each radio to its own channel: set alike again
         out = body(ctx)
         rows = list(out) if isinstance(out, list) else [(test, out[0] if out[0] is None else bool(out[0]), out[1],
                                                         tuple(covers), tuple(partial))]
@@ -911,15 +910,69 @@ def split_on(ctx, f_b):
 
 # ---- the tests ----
 
+# The X6200's Measure takes a signal of S9 - 3 (-76 dBm) or more: the X6100's 0.1 W read -82 dBm there over the bench's
+# 80 dB (2026-11-24), 1 W -72; the X6100's takes S5, its 0.1 W from the X6200 -79
+SMC_W_X6200 = 1.0
+SMC_S = 12.0                    # Measure's four steps, 3 s each (settings_window.cpp: SMC_SETTLE + SMC_SAMPLE)
+
+
+def smc_put(r, fig):
+    """The three S-meter figures (PRE, ATT, RF gain) set on r ("smc put PRE,ATT,RFG"), read back: what is not as asked
+    said, None when they are"""
+    t0 = time.time()
+    r.send("smc put " + ",".join(str(int(v)) for v in fig))
+    time.sleep(0.8)
+    err = [x for at, x in list(r.lines) if at >= t0 and x.startswith("err smc")]
+    now = smc_ask(r)["fig"]
+    if err or now != tuple(fig):
+        return f"S-meter figures {now}, {tuple(fig)} asked" + (f" ({err[-1]})" if err else "")
+    return None
+
+
+def smc_ask(r, timeout=4.0):
+    """TX Cal > S-METER's Measure as the remote reads it ("smc?"): running, (PRE, ATT, RF gain), its last note"""
+    t0 = time.time()
+    r.send("smc?")
+    while time.time() - t0 < timeout:
+        for at, t in reversed(list(r.lines)):
+            if at >= t0 and t.startswith("smc "):
+                p = t.split(" ", 5)
+                return {"run": p[1] == "1", "fig": (int(p[2]), int(p[3]), int(p[4])),
+                        "note": json.loads(p[5]) if len(p) > 5 else ""}
+        time.sleep(0.1)
+    raise bench.Refused(f"{r.name}: no answer to 'smc?' (a GUI before the remote Measure, v0.3.12.49)")
+
+
 def body_smeter_front_end(ctx):
-    """settings-txcal-smeter-front-end: the listener's S-meter stays put (within 3 dB) when PRE, ATT or RF gain change,
-    a steady 0.1 W tone through the pads"""
+    """settings-txcal-smeter-front-end: the listener's own Measure (TX Cal > S-METER) on a steady tone through the
+    pads, then its S-meter stays put (within 3 dB) when PRE, ATT or RF gain change. Measure first: the figures are each
+    radio's own (the defaults were one radio's; neither bench radio was ever measured, and PRE read 3 to 4 dB low, RF
+    gain 40 4 to 6 dB high on both, 11-23 and 11-24). The figures as found put back after"""
     snd, lis = ctx.snd, ctx.lis
+    w = SMC_W_X6200 if str(lis.state.get("fp", "")).startswith("x6200") else FIRST
     prove(ctx, F20)
     listen(ctx, F20, 3)
     time.sleep(1.5)
     quiet = med([v for _, v in meters(lis, time.time() - 1.2, time.time())])
-    sender(ctx, F20, 3, FIRST)
+    found = smc_ask(lis)
+    if found["run"]:
+        raise bench.Refused(f"{lis.name}: a Measure already running ({found['note']!r})")
+
+    ctx.undo.append(lambda: smc_put(lis, found["fig"]))
+    sender(ctx, F20, 3, w)
+    meas = {}
+
+    def measure(o):                 # Measure from the tone's start: its first 1.5 s are its own settling
+        lis.send("smc start")
+        t0 = time.time()
+        while time.time() - t0 < SMC_S + 1.2:
+            time.sleep(0.5)
+            a = smc_ask(lis, 2.0)
+            if not a["run"] and time.time() - t0 > 1.0:
+                meas.update(a, secs=time.time() - t0)
+                return
+        lis.send("smc stop")
+        meas.update(smc_ask(lis), secs=None)
     steps = [("as set", {}), ("PRE on", {"pre": 1}), ("ATT on", {"pre": 0, "att": 1}), ("RF gain 40", {"att": 0,
                                                                                                        "rfg": 40}),
              ("as set again", {"rfg": 100})]
@@ -932,20 +985,33 @@ def body_smeter_front_end(ctx):
                 bench.ensure(lis, want)
             time.sleep(0.3)
             got.append((name, window(lis, 1.2)))
-    ctx.banner(f"S-METER FRONT END: {snd.name.upper()} SENDS A STEADY TONE 0.1 W, {lis.name.upper()}'S S-METER WITH "
-               f"PRE, ATT, RF GAIN")
-    # the listener's PRE, ATT and RF gain changed under the over on purpose (what is measured)
+    # the listener's PRE, ATT and RF gain changed under the overs on purpose (Measure's steps, then what is measured)
     with bench.apart({"pre": bench.STEPPED, "att": bench.STEPPED, "rfg": bench.STEPPED},
-                     "smeter-front-end: the listener's PRE, ATT and RF gain stepped under the over, what it measures"):
-        o = tci_over(ctx, plan=[[0, 0.3], [1000, 12.6]], mode=3, max_s=13.6, during=during, what="S-meter front end",
-                     ignore=("pre", "att", "rfg"))
+                     "smeter-front-end: the listener's PRE, ATT and RF gain stepped under the overs, by its own "
+                     "Measure, then by the test"):
+        ctx.banner(f"S-METER MEASURE: {snd.name.upper()} SENDS A STEADY TONE {w} W, {lis.name.upper()} MEASURES ITS "
+                   f"PRE, ATT, RF GAIN (TX CAL)")
+        o1 = tci_over(ctx, plan=[[0, 0.3], [1000, SMC_S + 1.4]], mode=3, w=w, max_s=SMC_S + 1.7, during=measure,
+                      what="S-meter Measure", ignore=("pre", "att", "rfg"))
+        done = str(meas.get("note", "")).startswith("Done")
+        if not done:
+            return False, (f"{lis.name}'s Measure did not finish ({meas.get('note')!r}; the figures "
+                           f"{found['fig']} before, {meas.get('fig')} after); {snd.name}'s meter "
+                           f"{fmt(o1['peak_w'], 2)} W")
+        listen(ctx, F20, 3)         # PRE and ATT off, RF gain 100 again (Measure puts them back itself)
+        ctx.banner(f"S-METER FRONT END: {snd.name.upper()} SENDS A STEADY TONE {w} W, {lis.name.upper()}'S S-METER "
+                   f"WITH PRE, ATT, RF GAIN")
+        o = tci_over(ctx, plan=[[0, 0.3], [1000, 12.6]], mode=3, w=w, max_s=13.6, during=during,
+                     what="S-meter front end", ignore=("pre", "att", "rfg"))
     base = got[0][1] if got else None
     off = [(n, None if v is None or base is None else v - base) for n, v in got]
     ok = (len(got) == len(steps) and base is not None and quiet is not None and base - quiet >= 15
           and all(d is not None and abs(d) <= 3.0 for _, d in off) and heard_ok(o))
-    return ok, (f"{lis.name}'s S-meter: quiet {fmt(quiet)} dBm, the tone {fmt(base)} dBm as set; "
-                + ", ".join(f"{n} {fmt(d, 1)} dB" for n, d in off[1:]) + " from it (3 dB at most); "
-                f"{snd.name}'s meter {fmt(o['peak_w'], 2)} W" + ("" if heard_ok(o) else "; the over NOT heard"))
+    return ok, (f"{lis.name}'s Measure ({fmt(meas.get('secs'), 1)} s): PRE, ATT, RF gain {found['fig']} -> "
+                f"{meas.get('fig')} ({meas.get('note')!r}); its S-meter: quiet {fmt(quiet)} dBm, the tone "
+                f"{fmt(base)} dBm as set; " + ", ".join(f"{n} {fmt(d, 1)} dB" for n, d in off[1:])
+                + f" from it (3 dB at most); {snd.name}'s meter {fmt(o['peak_w'], 2)} W"
+                + ("" if heard_ok(o) else "; the over NOT heard") + "; the figures put back after")
 
 
 def t_smeter_front_end(run):
@@ -1204,25 +1270,51 @@ def body_smeter_am(ctx):
         decl.__exit__(None, None, None)
 
 
+def raw_peak(r, t0, t1):
+    """The X6200 base's own spectrum ("wide 1": 512 bins over 384 kHz) t0..t1: its strongest bin, dB (the median of
+    the packets'), None without packets"""
+    import struct
+    pk = []
+    for at, _n, data in list(r.r.frames):
+        if t0 <= at <= t1 and data[:2] == b"\xfc\xff" and len(data) >= 16:
+            n = struct.unpack_from("<H", data, 2)[0]
+            pk.append(max(struct.unpack_from(f"<{n}b", data, 16)))
+    return med(pk) if pk else None
+
+
+def shown(r, t0, t1):
+    """The spectrum as r shows it t0..t1: (its span Hz, its strongest bin dB) of the last frame, (None, None)"""
+    fr = [(w, max(v)) for at, _c, w, v in list(r.r.spectra) if t0 <= at <= t1 and v]
+    return fr[-1] if fr else (None, None)
+
+
 def _smeter_am(ctx, snd, lis, q_am):
     listen(ctx, F20 - 1000, 2)
     sender(ctx, F20, 6, FIRST, apart=SMETER_AM_APART)     # the listener in USB 1 kHz under it, on purpose
-    win = {}
+    win, why = {}, {}
+
+    def one(name):                  # the reading, and what it came from: the base's own bins, the line as shown
+        t0 = time.time()
+        win[name] = window(lis, 1.8)
+        why[name] = (raw_peak(lis, t0, time.time()),) + shown(lis, t0, time.time())
 
     def during(o):                  # about 10 s: each mode's reading 1.8 s after 0.6 s to settle
         time.sleep(1.0)
-        win["usb"] = window(lis, 1.8)
+        one("usb")
         bench.ensure(lis, {"freq": F20, "mode": 6})
         time.sleep(0.6)
-        win["am"] = window(lis, 1.8)
+        one("am")
         try:
             bench.ensure(lis, {"mode": 8})
             time.sleep(0.6)
-            win["sam"] = window(lis, 1.8)
+            one("sam")
         except bench.Refused as e:
             win["sam_no"] = str(e)
         bench.ensure(lis, {"mode": 6})
         o["release"]()
+    if str(lis.state.get("fp", "")).startswith("x6200"):
+        lis.send("wide 1")
+        ctx.undo.append(lambda: (lis.send("wide 0"), None)[1])
     ctx.banner(f"S-METER IN AM: {snd.name.upper()} SENDS AN AM CARRIER 0.1 W, {lis.name.upper()} READS IT IN USB, AM, "
                f"SAM")
     o = ptt_over(ctx, 6, 12.0, during=during, what="AM carrier for the S-meter",
@@ -1234,7 +1326,9 @@ def _smeter_am(ctx, snd, lis, q_am):
           and abs(sam - usb) <= 6 and "sam_no" not in win and heard_ok(o))
     return ok, (f"{lis.name}'s S-meter: AM quiet {fmt(q_am)} dBm; the carrier ({fmt(o['peak_w'], 2)} W) in USB "
                 f"{fmt(usb)}, AM {fmt(am)}, SAM {fmt(sam)}" + (f" (SAM refused: {win['sam_no']})" if "sam_no" in win
-                                                              else "") + f"; AM after it {fmt(after)} dBm")
+                                                              else "") + f"; AM after it {fmt(after)} dBm; from "
+                + ", ".join(f"{k}: the base's peak bin {fmt(v[0])} dB, shown over {v[1]} Hz peak {fmt(v[2])}"
+                            for k, v in why.items()))
 
 
 def t_smeter_am(run):
@@ -1410,6 +1504,8 @@ def _split(ctx, snd, lis, A, B):
     check("split-tci", o, A + 1000, B + 1000, ["tx-shift-apps-on-txfreq"])
     if str(snd.state.get("fp", "")).startswith("x6200"):
         bench.ensure(snd, {"mode": 6})
+        keep_mode_mem(ctx, snd, A, 6)       # AM's own filter and zoom, for finish
+        align(ctx)                          # its receiver keys as the listener's again: AM brings its own zoom
         time.sleep(1.3)
         qa = level(lis, A, time.time() - 1.0, time.time(), half=300)
         qb = level(lis, B, time.time() - 1.0, time.time(), half=300)
@@ -1451,10 +1547,13 @@ def _split_cw(ctx, snd, lis, A, B):
     time.sleep(1.5)
     t0, t1 = (o["on"] or o["t0"]) + 0.5, o["off"]
     ra, rb = rise(qa, level(lis, A, t0, t1, half=1000)), rise(qb, level(lis, B, t0, t1, half=1000))
+    pk, _, per = spectrum_peak_hz(lis, A, t0, t1, span=1500)     # where on A it went: the listener's CW passband
     got = " ".join(lis.cw.split())
     ok = "TEST" in got.upper() and ra is not None and ra >= 15 and nothing_there(rb, ra)
     return ok, (f"{snd.name} keyed 'TEST TEST' ({fmt(o['peak_w'], 2)} W, {o['out']}); {lis.name}'s decoder on A: "
-                f"{got[-60:]!r}; A {fmt(ra)} dB up, B {fmt(rb)} dB ("
+                f"{got[-60:]!r}; the carrier {'at ' + format(pk - A, '+.0f') + ' Hz from A' if pk else 'not found'}"
+                f" (bins {fmt(per, 0)} Hz; {lis.name}'s CW filter {lis.state.get('flo')}-{lis.state.get('fhi')} Hz, "
+                f"key tone {lis.state.get('kt')}); A {fmt(ra)} dB up, B {fmt(rb)} dB ("
                 f"{'nothing of its own' if nothing_there(rb, ra) else 'SENT THERE TOO'})")
 
 
@@ -1515,6 +1614,10 @@ def body_qsy_out(ctx):
 
 def _qsy_out(ctx, snd, lis, f_in, f_out, f_lis):
     listen(ctx, f_lis, 6)
+    # its spectrum over both dials, 20 kHz each side: AM's own zoom (8 on both radios, 12.5 kHz) shows neither (the
+    # 1:1 suite, 2026-11-24); AM's own filter and zoom kept for finish, the sender takes the zoom from it (align)
+    keep_mode_mem(ctx, lis, f_lis, 6)
+    bench.ensure(lis, {"zoom": 1})
     sender(ctx, f_in, 6, FIRST, apart=("freq",))    # the listener between the two dials, on purpose
     time.sleep(1.3)
     q_in = level(lis, f_in, time.time() - 1.0, time.time())
@@ -2064,13 +2167,16 @@ def body_text_log(ctx):
     # where the PSK app listens: opened once to see, closed for the path proof (which tunes the listener itself),
     # opened again for the over
     ctx.undo.append(lambda: (bench.close_apps(lis), None)[1])
-    if not suite_more.open_app(lis, "psk"):
-        raise bench.Refused(f"{lis.name}: its PSK app did not open")
-    time.sleep(2.0)
-    f, m = int(lis.state.get("freq", 0)), int(lis.state.get("mode", -1))
-    bench.close_apps(lis)
-    if m not in (2, 3, 0, 1) or not any(lo <= f <= hi for lo, hi in bench.HAM_HF):
-        raise NotRun(f"the PSK app opened on {f} Hz mode {m}: no amateur sideband frequency")
+    with bench.transition():            # the listener's app tunes it alone: the sender follows before it ends
+        if not suite_more.open_app(lis, "psk"):
+            raise bench.Refused(f"{lis.name}: its PSK app did not open")
+        time.sleep(2.0)
+        f, m = int(lis.state.get("freq", 0)), int(lis.state.get("mode", -1))
+        bench.close_apps(lis)
+        bench.settled(lis)              # the app's dial put back as it closes, a moment after
+        if m not in (2, 3, 0, 1) or not any(lo <= f <= hi for lo, hi in bench.HAM_HF):
+            raise NotRun(f"the PSK app opened on {f} Hz mode {m}: no amateur sideband frequency")
+        bench.sync_pair([snd, lis], {"freq": f, "mode": m})
     x = digimodes.psk31_audio(TEXT_LOG_TEXT)
     local = os.path.join(ctx.run.dir, f"air_psk_{snd.name}.raw")
     secs = digimodes.write_raw(x, local)
