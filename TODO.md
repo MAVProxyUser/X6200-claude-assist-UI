@@ -58,7 +58,9 @@ more AMBE tests", "The 6 m output floor... maybe time to revisit now? same with 
   over-the-air ones orch does not have yet, panel-log, if-shift, tz-alike.
 - Deep backlog (the owner, 2026-11-24: "those feel like things to put deep in the backlog"): nulling the X6100's
   carrier leak with a calibration that keys it and writes its per-band DC offsets (txcal.py); whether the patched
-  gcfix5 base goes back on the X6100 (it lowers the 6 m floor).
+  gcfix5 base goes back on the X6100 (it lowers the 6 m floor); the screensaver's rain drawn by the GPU (the owner:
+  "put GPU screen saver deep in backlog"): it is LVGL's software blend cell by cell, 15 frames a second
+  (src/screen_saver.c), 15-16 % of a core against the lit page A's 10 %; the Mali400 path is in src/gpu.c.
 - 6 m: power-6m (USB, a TCI tone at 0.1/0.3/1.0 W) passes both ways: the X6100 heard +6.0/+5.0 dB apart, its meter
   0.1/0.3/1.1 W, so its 6 m floor is gone wherever the GUI sets the drive (TCI, the digital apps). power-6m-fm (the
   base's own carrier): the X6200 follows; the factory X6100 stays at about 1 W at any setting under 1 W (its base's

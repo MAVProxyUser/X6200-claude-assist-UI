@@ -331,6 +331,8 @@ class Orch:
         self.restore_calls = set()          # the radios given a test call this run (test_calls)
         self.changing = 0                   # changes to both under way: the guard looks away meanwhile
         self.violation = None               # this test's first sync violation
+        self.sync_paused = 0                # a suite group running (air batches: the radios apart on purpose in some
+                                            # of their overs, each under the suite's own Watch): the sync guard only
         self.apart = None                   # a difference this test makes on purpose, declared: {"freq": Hz} (the
                                             # owner: apart only when a test does it INTENTIONALLY); None: none
         self._diff_since = None
@@ -475,8 +477,8 @@ class Orch:
             differ = not freq_ok or a["mode"] != b["mode"]
             with self.st.lock:
                 self.st.radios = rs
-                self.st.sync["changing"] = self.changing > 0
-                if self.changing:
+                self.st.sync["changing"] = self.changing > 0 or self.sync_paused > 0
+                if self.changing or self.sync_paused:
                     self._diff_since = None
                 elif differ:
                     if self._diff_since is None:
@@ -3893,6 +3895,78 @@ def suite_more_ported():
     return out
 
 
+# ---- The 1:1 suite's over-the-air groups run whole (air_a, air_b, air_c): each t_* runs as the suite runs it, with a
+# suite.Run of its own (its sessions, sync_both and its put-back, a Watch on every over), its result rows collected.
+# orch around it: the radios ready before, its sync guard paused (some overs set the radios apart on purpose: split,
+# TX shift; each under the suite's Watch, which compares every receiver setting as a radio keys), both radios as
+# possible senders (the Watch stops two on the air at once), then control back and the two alike ----
+
+AIR_SKIP = {"power-steps", "ft8-stop", "remote-busy", "ext-tune", "ft8-cq"}     # orch's own already
+
+
+def air_groups():
+    import importlib
+    out = []
+    for module in ("suite_air_a", "suite_air_b", "suite_air_c"):
+        try:
+            m = importlib.import_module(module)
+        except Exception as e:
+            say(f"orch: {module} not loaded ({type(e).__name__} {e})")
+            continue
+        for name, fn in m.TESTS:
+            if name in AIR_SKIP:
+                continue
+            doc = " ".join((fn.__doc__ or "").split())
+            out.append((module, fn.__name__, name, doc.split(". ")[0][:220] if doc else name))
+    return out
+
+
+def suite_group(o, module, t_name, name, call=None):
+    """module's t_name run whole on both radios (its own directions, sessions and put-back): passes with no row
+    failed; the rows to look at said. call(m, run): another way in (suite_more.paths' parts)"""
+    import importlib
+    import suite
+    m = importlib.import_module(module)
+    run = suite.Run([A, B], [f"orch-{name}".replace(" ", "_")])
+    f0, m0 = int(o.r[A].state.get("freq") or F_TEST), int(o.r[A].state.get("mode") or 2)
+    rows = []
+    with o.step(f"{module}: {name}, its directions as the suite runs them (its own Watch on each over)") as s:
+        o.sync_paused += 1
+        o.roles = {A: "TX", B: "TX"}
+        try:
+            (call or (lambda m_, r_: getattr(m_, t_name)(r_)))(m, run)
+        except Exception as e:              # the group's own fault: its rows so far, and this
+            run.results.append({"batch": module, "test": name, "ok": False,
+                                "says": f"error: {type(e).__name__}: {e}"})
+        finally:
+            try:
+                run.close()
+            finally:
+                o.roles = {A: "RX", B: "RX"}
+                o.sync_paused -= 1
+        rows = run.results
+        s.confirm(f"{len(rows)} rows: {sum(1 for x in rows if x['ok'] is True)} pass, "
+                  f"{sum(1 for x in rows if x['ok'] is None)} to look at, {sum(1 for x in rows if x['ok'] is False)} fail")
+    try:
+        for r in o.r.values():
+            if r.stale():
+                r.reconnect()
+            if not r.ctl_mine:
+                r.take_control()
+        o.both({"freq": f0, "mode": m0, "pwr": W})
+    except Refused as e:
+        o.st.ev(f"not put back alike after {name}: {e}", "bad")
+    got = {"rows": [{k: x.get(k) for k in ("test", "ok", "says")} for x in rows], "run_dir": run.dir}
+    bad = [f"{x['test']}: {x['says']}" for x in rows if x["ok"] is False]
+    if bad:
+        return False, "; ".join(bad)[:1500], got
+    if not rows:
+        return False, "the group recorded nothing", got
+    look = [x["test"] for x in rows if x["ok"] is None]
+    return True, (f"{sum(1 for x in rows if x['ok'])} rows pass: " + ", ".join(x["test"] for x in rows if x["ok"])[:600]
+                  + (f"; to look at: {', '.join(look)}" if look else "")), got
+
+
 def suite_checks(module, t_name):
     """{test: (kind, fn, want_tx)} that module's t_name registers (kind "r": fn(radio), "host": fn(name, host, ip))"""
     import importlib
@@ -4793,6 +4867,18 @@ TESTS = [
     *[Test(name, "both RX", f"the 1:1 suite's {module[6:]} {name} on both radios at once: {what}",
            (lambda o, module=module, t_name=t_name, name=name: suite_pair(o, module, t_name, name)), 45)
       for module, t_name, name, what in suite_more_ported()],
+    *[Test(f"air {name}", "both ways (each direction: one sends 0.1 W, the other listens)",
+           f"the 1:1 suite's {module[6:]} {name} over the air, run whole: {what}",
+           (lambda o, module=module, t_name=t_name, name=name: suite_group(o, module, t_name, name)), 120)
+      for module, t_name, name, what in air_groups()],
+    *[Test(f"air paths {part}", role, what, (lambda o, part=part: suite_group(
+        o, "suite_more", "paths", f"paths {part}", call=lambda m, run: m.paths(run, (part,)))), est)
+      for part, role, what, est in (
+          ("bands", "both ways", "an over on every band both radios share, 160 to 6 m, each way: heard, the receiver's "
+                                 "level per band (suite_more band_proofs)", 600),
+          ("walkie", "both ways", "the walkie in AM and FM on 20 m and 10 m FM, each way (bench.py radios-walkie)", 400),
+          ("if-shift", "X6200 TX, X6100 RX", "the X6100's IF shift at +-2000 Hz: the tone's pitch kept, the base "
+                                             "2.1 kHz the other way (ifshift.py)", 120))],
     Test("system-checks", "both", "each radio read over SSH, nothing changed: battery log and model, data partition, "
          "settings' good copy, password logins refused, Tailscale, logs, start trace, services and ports, CPU, "
          "temperature, GPU, sessions file, update state, ADIF header, libft8, clock; the same version on both",
