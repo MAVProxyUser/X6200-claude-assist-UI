@@ -2067,6 +2067,79 @@ def t_bands_all(o):
         {"bands": seen, "neither": skipped}
 
 
+def wefax_chart(o, sender, listener, label):
+    """Both on 14.100 MHz USB, the listener's WeFax app open in Cont; 12 s of a chart (each line half white, half
+    black) through the sender's TCI at 0.1 W; the listener's fax saved and fetched: at least 6 rows, and its two halves
+    at least 80 grey levels apart (the chart about 200, noise under 30). The test's fax taken off the card after"""
+    import subprocess
+    import suite_air_b as ab
+    S, L = o.r[sender], o.r[listener]
+    res = {}
+    files0 = set(bench.ssh(L.host, "find /mnt/wefax -type f 2>/dev/null").split())
+    try:
+        with o.step(f"{listener}'s WeFax open in Cont, both on 14.100 MHz USB, alike") as s:
+            o.changing += 1
+            try:
+                o.both_page("G")
+                L.send("wefax open")
+                L.wait("WeFax open", lambda: L.state.get("app") == "WeFax" or ab.last_json(L, "wefax").get("open") == 1,
+                       10)
+                time.sleep(1.5)
+                if ab.last_json(L, "wefax").get("plan"):
+                    raise Refused(f"{listener}'s WeFax Auto Plan is on (it follows the day's charts)")
+                L.send("wefax cont")
+                L.wait("Cont", lambda: ab.last_json(L, "wefax").get("auto") == 0, 5)
+                o.both({"freq": ab.F_FAX, "mode": 2})
+            finally:
+                o.changing -= 1
+            s.confirm("WeFax in Cont, both 14.100 USB")
+        x = ab.fax_audio([("chart", 12.0)])
+        local = os.path.join(o.st.run_dir, f"fax_{sender}.raw")
+        import digimodes
+        secs = digimodes.write_raw(x, local)
+        subprocess.run(["scp", "-q", "-o", "BatchMode=yes", local, f"root@{S.host}:/tmp/bench_fax.raw"], check=True)
+        subprocess.run(["scp", "-q", "-o", "BatchMode=yes", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "tci_tone_tx.py"), f"root@{S.host}:/tmp/tci_tone_tx.py"], check=True)
+        L.send("wefax clear")
+        saves0 = ab.last_json(L, "wefax").get("saves", 0)
+
+        def body(watch):
+            with o.step(f"{sender} sends 12 s of the chart"):
+                bench.tci_send(S, None, max_s=secs + 4, watch=watch, file="/tmp/bench_fax.raw", amp=0.5)
+                if watch.why:
+                    raise Refused(watch.why)
+        over(o, sender, listener, ab.F_FAX, 2, label, body, pages=False)
+        with o.step(f"{listener}'s fax saved, fetched, its two halves compared") as s:
+            rows = ab.last_json(L, "wefax").get("rows", 0)
+            L.send("wefax save")
+            L.wait("the save", lambda: ab.last_json(L, "wefax").get("saves", 0) > saves0, 8)
+            name = ab.last_json(L, "wefax").get("saved", "")
+            pic = os.path.join(o.st.run_dir, f"wefax_{listener}_{os.path.basename(name)}")
+            subprocess.run(["scp", "-q", "-o", "BatchMode=yes", f"root@{L.host}:/mnt/wefax/{os.path.basename(name)}",
+                            pic], capture_output=True, timeout=60)
+            contrast = ab.fax_contrast(pic) if os.path.exists(pic) else None
+            res.update(rows=rows, saved=os.path.basename(name), contrast=contrast, picture=pic)
+            if rows < 6 or contrast is None or contrast < 80:
+                raise Refused(f"{rows} rows, its halves {contrast} grey levels apart (6 rows and 80 wanted)")
+            s.confirm(f"{rows} rows, halves {contrast} grey levels apart, kept as {os.path.basename(pic)}")
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        new = set(bench.ssh(L.host, "find /mnt/wefax -type f 2>/dev/null").split()) - files0
+        if new:
+            bench.ssh(L.host, "rm -f " + " ".join(sorted(new)))
+        o.changing += 1
+        try:
+            L.send("wefax close")
+            time.sleep(1.5)
+            bench.close_apps(L)
+            o.both_page("G")
+            o.both({"freq": ab.F_FAX, "mode": 2})
+        finally:
+            o.changing -= 1
+    return True, f"{res['rows']} rows of the chart, its two halves {res['contrast']} grey levels apart (80 wanted)", res
+
+
 # ---- The tests ----
 
 class Test:
@@ -2134,6 +2207,8 @@ TESTS = [
           "of the characters wrong", lambda s, l, n: (lambda o: digi_text(o, s, l, "psk31", n)), 45),
     *pair("rtty-text", "", "RTTY made to the listener's own settings: 'RYRY CQ DE Q1TST Q1TST K' sent, decoded with at "
           "most 5 % of the characters wrong", lambda s, l, n: (lambda o: digi_text(o, s, l, "rtty", n)), 120),
+    *pair("wefax-chart", "", "WeFax: 12 s of a half-white, half-black chart; the other's saved fax must show the two "
+          "halves at least 80 grey levels apart", lambda s, l, n: (lambda o: wefax_chart(o, s, l, n)), 60),
     *pair("tune-carrier", "", "TUNE at 0.1 W: on the air, heard 15 dB up, off by itself 2.5-5 s after the lease's last "
           "renewal", lambda s, l, n: (lambda o: tune_carrier(o, s, l, n)), 25),
     *pair("ft8-stop", "", "FT8: ft8 stop 2 s into a CQ takes the sender off the air within 1 s, not again",
