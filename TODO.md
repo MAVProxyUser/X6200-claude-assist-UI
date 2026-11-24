@@ -14,8 +14,8 @@ they were, each item's state brought here when it changed).
 Open, mine to do:
 - **Every test through the orchestrator** (the owner, 11-24: "all tests should ultimately use the same orchestration
   framework", "whittle down the tests to essential testable things, not slop"; and "ensure that your changes have
-  tests, that in turn get run through http://127.0.0.1:8765"): tools/bench/orch.py has 92 tests (2026-11-24 14:05:
-  91 pass, 1 KNOWN: the X6100's 6 m FM floor, below); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386
+  tests, that in turn get run through http://127.0.0.1:8765"): tools/bench/orch.py has 96 tests (2026-11-24 14:20:
+  all pass, none KNOWN; documented in tools/bench/ORCH.md); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386
   features listed, ~1040 not covered on 11-23) still run outside it. Left: pick the essential ones of features.json
   and move them in (surveyed 11-24: receive settings beyond rx-settings (VFO, split, RIT, XIT, filters, zoom, IF
   shift), the band plan (mode from plan, lock per band, transverters, TX shift), the safety refusals not in orch
@@ -52,11 +52,15 @@ more AMBE tests", "The 6 m output floor... maybe time to revisit now? same with 
   tci-key-cw).
 - 6 m: power-6m (USB, a TCI tone at 0.1/0.3/1.0 W) passes both ways: the X6100 heard +6.0/+5.0 dB apart, its meter
   0.1/0.3/1.1 W, so its 6 m floor is gone wherever the GUI sets the drive (TCI, the digital apps). power-6m-fm (the
-  base's own carrier): the X6200 follows; the factory X6100 stays at about 1 W at any setting under 1 W (KNOWN: its
-  base's ALC-only control; the base fix waits on the owner's go).
-- The image shift (X6100 15/12 m): not measurable under the bench's rule since 11-23 (image.py needs the listener 1.5
-  kHz below the sender; the Watch stops an over from radios set apart, and the X6200's spectrum cannot tell its own RX
-  image from the X6100's TX image on one dial). The owner's call: an exception for that test, or leave it.
+  base's own carrier): the X6200 follows; the factory X6100 stays at about 1 W at any setting under 1 W (its base's
+  ALC-only control: the GUI now says so, below; the base fix gcfix5 waits on the owner's go).
+- The image shift (X6100 15/12 m): measured in orch with the listener 1500 Hz below, declared to the sync guard and
+  the Watch (the owner: apart only when a test does it "INTENTIONALLY"): image x6100/x6200 pass, the X6100's 15 m
+  -43 dBc in two runs (no shift today). Its carrier leak at 0.1 W, -12.5 to -27 dBc (no DC offsets on the factory
+  base), is said with each run: nulling it (txcal.py keys it and writes the offsets) is the owner's call.
+- The X6100's 6 m AM/FM floor (about 1 W at any setting under 1 W, its factory base): worked around (the owner: no
+  known flaws without one): the GUI says so at a keying there and logs it; power-6m-fm/-am check the floor and the
+  note. In USB through TCI and the apps the power follows the setting (power-6m).
 - The console (http://127.0.0.1:8765) lists the earlier results the latest first (the owner).
 - Closed by the owner: new HTTPS keys on the radios ("nope, we don't care").
 

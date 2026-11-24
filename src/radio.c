@@ -1978,6 +1978,33 @@ static void band_note(void) {
     fprintf(stderr, "radio: the base keyed by itself while held at 0 W (#121)\n");
 }
 
+#ifndef BOARD_X6200
+/* The X6100's base (Xiegu's own V1.1.9) holds its power on 6 m by its ALC alone, whose least there is about 1 W: in AM and
+ * FM, where the base makes the carrier itself, any setting under 1 W goes out at about 1 W (orch power-6m-fm and
+ * power-6m-am, 2026-11-24: 0.1, 0.3 and 1.0 W heard alike, its own meter 1.0 W). What the GUI drives in SSB and the
+ * data modes (TCI, the digital apps: their audio's level is the power) follows the setting (power-6m). Said at a
+ * keying there, once a minute at most, on the screen and in the log, so the operator knows what goes out */
+#define FLOOR_6M_W  1.0f
+
+static void floor_note(void) {
+    static uint64_t said;
+    radio_mode_t    m = cparam_i_get(cfg_cur_mode);
+    int32_t         f = radio_tx_freq();
+    uint64_t        now = get_time();
+
+    if (f < 50000000 || f > 54000000 || txpwr_asked >= FLOOR_6M_W || (m != radio_mode_am && m != radio_mode_nfm) ||
+        atomic_load(&band_hold) || atomic_load(&train_hold) || (said && now - said < 60000) ||
+        strstr(radio_base_ver_str(), "gcfix")) {   /* GoldCorpHF's patched base: its loop reaches 0.1 W there */
+        return;
+    }
+    said = now;
+    msg_schedule_text_fmt("6 m %s: this radio sends about %.0f W at any power under %.0f W",
+                          m == radio_mode_am ? "AM" : "FM", FLOOR_6M_W, FLOOR_6M_W);
+    fprintf(stderr, "radio: 6 m %s keyed at %.1f W: the base's least there is about %.0f W (said on the screen)\n",
+            m == radio_mode_am ? "AM" : "FM", txpwr_asked, FLOOR_6M_W);
+}
+#endif
+
 unsigned radio_band_stops(void) {
     return atomic_load(&band_stops);
 }
@@ -3252,6 +3279,9 @@ static bool radio_tick() {
                     }
                     train_note();
                     band_note();
+#ifndef BOARD_X6200
+                    floor_note();
+#endif
                 }
                 break;
 

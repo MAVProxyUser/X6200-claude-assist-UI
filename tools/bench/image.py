@@ -189,7 +189,8 @@ def main():
                    f"{f / 1e6:.3f} MHZ THROUGH {total} DB")
         time.sleep(1.5)
         q0 = time.time() - 1.2
-        watch = Watch(radios, c, expect_dbm=10 * math.log10(w * 1000) - total, listener=rxr, w=w)
+        watch = Watch(radios, c, expect_dbm=10 * math.log10(w * 1000) - total, listener=rxr, w=w,
+                      offsets={"freq": off})      # the listener OFF Hz below: this test's own, declared
         bench.arm(txr, True, mode=2)
         tx_log({"who": txr.name, "f": f, "w": txr.pwr(), "what": f"image {label}"})
         t_begin = time.time()

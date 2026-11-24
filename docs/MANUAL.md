@@ -2549,6 +2549,13 @@ low while the base is reset, as Xiegu's own X6100 updater does. More in
 - Checked on one X6100 on 15 November 2026: the test base written and
   Xiegu's V1.1.8 back, the base's calibration the same after each.
 
+**Low power on 6 m with Xiegu's own base.** Xiegu's V1.1.9 cannot bring its power on 6 m under about 1 W where it
+makes the carrier itself: in AM and FM any setting under 1 W goes out at about 1 W (0.1, 0.3 and 1 W measured
+alike, 24 November 2026). When you key there under 1 W the radio says so: "6 m FM: this radio sends about 1 W at
+any power under 1 W" (once a minute at most). In SSB and the data modes the power is as set, because the GUI drives
+the audio to it (TCI and the digital apps: 0.1, 0.3 and 1 W measured 4.8 and 5.2 dB apart). gcfix5, below, lowers
+the floor itself.
+
 #### GoldCorpHF's fixes to Xiegu's V1.1.9 (gcfix5)
 
 GoldCorpHF ships no base firmware. It ships a patch: the few encrypted blocks

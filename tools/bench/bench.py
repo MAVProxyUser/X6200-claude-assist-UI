@@ -1235,8 +1235,13 @@ class Watch:
     or a receiver hearing far more than the chain lets through, stops everything at once. More power than asked, under
     the pad's rating, is logged (said, tx_log, over_power) and the over goes on"""
 
-    def __init__(self, radios, c, hackrf=None, expect_dbm=None, listener=None, w=None, label="over", pair_ignore=()):
+    def __init__(self, radios, c, hackrf=None, expect_dbm=None, listener=None, w=None, label="over", pair_ignore=(),
+                 offsets=None):
         self.radios, self.c, self.hackrf, self.why = radios, c, hackrf, None
+        # A difference a test makes on purpose and declares, exactly (the owner, 2026-11-24: the radios apart only
+        # "specifically part of a test that does so INTENTIONALLY"): {key: amount}, e.g. {"freq": 1500} for a listener
+        # 1500 Hz from the sender (image.py). Only that amount passes; any other difference still stops the over
+        self.offsets = {k: abs(int(v)) for k, v in (offsets or {}).items()}
         # Every over of one radio to another (the owner, 2026-11-23: "when you TX on one radio screenshot them BOTH,
         # you should see the RX happening! and they should have the same settings. IF they don't something is
         # wrong"): as a radio goes on the air the others' receiver settings are compared with its own (PAIR_KEYS
@@ -1333,8 +1338,8 @@ class Watch:
                 if since and self.hackrf is None and len(self.radios) > 1 and self._shot_seen.get(r.name) != since:
                     self._shot_seen[r.name] = since
                     for o in self.radios:
-                        diff = {k: v for k, v in pair_diff(r, o).items() if k not in self.pair_ignore} if o is not r \
-                            else {}
+                        diff = {k: v for k, v in pair_diff(r, o).items() if k not in self.pair_ignore and
+                                not self._declared(k, v)} if o is not r else {}
                         if diff:
                             self.trip(f"{r.name} went on the air not set as {o.name}: " +
                                       ", ".join(f"{k} {x}/{y}" for k, (x, y) in diff.items()))
@@ -1388,6 +1393,13 @@ class Watch:
         for r in self.radios:
             r.stop()
         tx_log({"stop": why})
+
+    def _declared(self, k, v):
+        """The difference v (a's, b's) of key k is the one the test declared (offsets)"""
+        try:
+            return k in self.offsets and abs(int(v[0]) - int(v[1])) == self.offsets[k]
+        except (TypeError, ValueError):
+            return False
 
     def close(self):
         """The Watch ended: an over still being followed is judged now (a test closes it as its sender unkeys)"""

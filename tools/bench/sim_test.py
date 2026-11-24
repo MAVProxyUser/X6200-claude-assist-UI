@@ -499,6 +499,14 @@ def main():
     for d in DIRS:
         __import__("shutil").rmtree(d, ignore_errors=True)
     bad = results.count(False)
+    # ---- a difference declared by a test (the owner, 2026-11-24: the radios apart only "specifically part of a test
+    # that does so INTENTIONALLY"): the Watch passes exactly that, nothing else ----
+    w = bench.Watch.__new__(bench.Watch)
+    w.offsets = {"freq": 1500}
+    check(w._declared("freq", (14200000, 14198500)) and w._declared("freq", (14198500, 14200000)) and
+          not w._declared("freq", (14200000, 14199000)) and not w._declared("mode", (2, 3)) and
+          not w._declared("freq", (None, 14200000)),
+          "the Watch passes a declared difference (freq 1500 Hz, either way) exactly, and no other")
     print(f"bench sim: {len(results) - bad} of {len(results)} cases as they should be")
     sys.exit(1 if bad else 0)
 

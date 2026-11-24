@@ -85,11 +85,6 @@ SNAPSHOT_STALE_S = 10       # older than this: no run is writing it
 # Failures that cannot be put right from here (or not found yet): said with each, not run again until --all (or the
 # reason is gone)
 KNOWN = {
-    "power-6m-fm x6100>x6200": "the factory X6100's base (Xiegu's V1.1.9) puts out its 6 m FM carrier at about 1.0 W "
-                               "for any setting under 1 W (0.1/0.3/1.0 W heard alike, its meter 1.0 W, 2026-11-24): "
-                               "its power control on 6 m is the ALC's alone. Where the GUI sets the drive (TCI, FT8, "
-                               "the digital apps) it follows the setting (power-6m passes). A base fix (true power "
-                               "control as a hook on V1.1.9) waits on the owner's go",
 }
 
 
@@ -336,6 +331,8 @@ class Orch:
         self.restore_calls = set()          # the radios given a test call this run (test_calls)
         self.changing = 0                   # changes to both under way: the guard looks away meanwhile
         self.violation = None               # this test's first sync violation
+        self.apart = None                   # a difference this test makes on purpose, declared: {"freq": Hz} (the
+                                            # owner: apart only when a test does it INTENTIONALLY); None: none
         self._diff_since = None
         self.on = True
         threading.Thread(target=self._guard, daemon=True).start()
@@ -471,7 +468,11 @@ class Orch:
                     self.st.ev(f"<- {n} said: err {e}", "radio")
                 self._errs[n] = len(errs)
             a, b = rs[A], rs[B]
-            differ = (a["freq"], a["mode"]) != (b["freq"], b["mode"])
+            ap = self.apart or {}
+            freq_ok = a["freq"] == b["freq"] or (
+                ap.get("freq") is not None and a["freq"] is not None and b["freq"] is not None
+                and abs(int(a["freq"]) - int(b["freq"])) == int(ap["freq"]))
+            differ = not freq_ok or a["mode"] != b["mode"]
             with self.st.lock:
                 self.st.radios = rs
                 self.st.sync["changing"] = self.changing > 0
@@ -1192,14 +1193,29 @@ def power_level(L, hz, on, off):
     return (mid[len(mid) // 2] if mid else None), len(mid), series
 
 
+# A radio's least power where its base sets the carrier itself (AM, FM) and the GUI cannot drive it lower: the X6100's
+# factory base (Xiegu's V1.1.9) on 6 m, about 1 W at any setting under 1 W (its ALC's least; measured 2026-11-24).
+# The GUI says so at a keying there (radio.c floor_note, its log line FLOOR_LOG); power_steps then checks that floor
+# (the levels alike, the note logged) where other radios must follow the setting
+FLOOR_6M = {"x6100": 1.0}
+FLOOR_LOG = "the base's least there is about"
+
+
+def floor_of(sender, f, mode):
+    return FLOOR_6M.get(sender) if 50000000 <= f <= 54000000 and mode in (6, 7) else None
+
+
 def power_steps(o, sender, listener, f, label, steps=None, mode=2):
-    """A 1000 Hz tone POWER_TONE_S at each of steps (POWER_STEPS; USB, one over each; mode 7: FM with no audio, its
-    carrier the level: what the base sets itself, the audio's drive no part of it): the listener's spectrum at the tone
+    """A 1000 Hz tone POWER_TONE_S at each of steps (POWER_STEPS; USB, one over each; mode 7 FM or 6 AM: no audio, its
+    carrier the level: what the base sets itself, the audio's drive no part of it). Where the sender's base has a floor
+    there (floor_of): the levels alike within POWER_TOL_DB, and the GUI's note of it in the sender's log: the listener's spectrum at the tone
     (power_level: the median of the frames that carry it, while the sender said it was on the air) must rise by the
     power's ratio in dB, within POWER_TOL_DB (the spectrum is the receiver's before its AGC; RF gain fixed). Every
     frame and the sender's meter readings kept in the data"""
     levels, got = [], {}
     S, L = o.r[sender], o.r[listener]
+    floor = floor_of(sender, f, mode)
+    log0 = int(bench.ssh(S.host, "wc -c < /tmp/x6100_log.txt").strip() or 0) if floor else 0
     try:
         for w in steps or POWER_STEPS:
             peak = {}
@@ -1216,7 +1232,7 @@ def power_steps(o, sender, listener, f, label, steps=None, mode=2):
                     th = threading.Thread(target=sample, daemon=True)
                     th.start()
                     try:
-                        bench.tci_send(S, [[0, 0.3], [0 if mode == 7 else 1000, POWER_TONE_S], [0, POWER_TAIL_S]],
+                        bench.tci_send(S, [[0, 0.3], [0 if mode in (6, 7) else 1000, POWER_TONE_S], [0, POWER_TAIL_S]],
                                        max_s=POWER_TONE_S + POWER_TAIL_S + 4, watch=watch)
                     finally:
                         stop.set()
@@ -1230,30 +1246,47 @@ def power_steps(o, sender, listener, f, label, steps=None, mode=2):
                     raise Refused(f"{sender} never said it was on the air")
                 on, off = S.tx_last
                 time.sleep(0.6)                     # the spectrum's last frames
-                lvl, n, series = power_level(L, f + (0 if mode == 7 else 1000), on, off)
+                lvl, n, series = power_level(L, f + (0 if mode in (6, 7) else 1000), on, off)
                 got.setdefault("overs", []).append({"w": w, "on_s": round(off - on, 1), "level": lvl, "frames": n,
                                                     "series": series,
                                                     "meters": [[round(t - on, 1), m] for t, m in peak.get("meters", [])]})
                 if lvl is None or n < 10:
-                    raise Refused(f"{listener}'s spectrum: {n} frames carried {f + (0 if mode == 7 else 1000)} Hz while {sender} was on "
+                    raise Refused(f"{listener}'s spectrum: {n} frames carried {f + (0 if mode in (6, 7) else 1000)} Hz while {sender} was on "
                                   f"the air ({off - on:.1f} s)")
                 levels.append((w, float(lvl), peak.get("w")))
                 s.confirm(f"{lvl} dB, the median of {n} frames of the tone, {off - on:.1f} s on the air")
-        with o.step(f"{listener}'s level rose with the power") as s:
-            got["levels"] = levels
-            bad = []
-            for (w0, l0, _), (w1, l1, _) in zip(levels, levels[1:]):
-                want = 10 * math.log10(w1 / w0)
-                if abs((l1 - l0) - want) > POWER_TOL_DB:
-                    bad.append(f"{w0}->{w1} W: {l1 - l0:+.1f} dB (want {want:+.1f})")
-            say_lv = ", ".join(f"{w} W {l} dB (meter {m and round(m, 2)} W)" for w, l, m in levels)
-            if bad:
-                raise Refused(f"levels {say_lv}; off by more than {POWER_TOL_DB} dB: {'; '.join(bad)}")
-            s.confirm(say_lv)
+        say_lv = ", ".join(f"{w} W {l} dB (meter {m and round(m, 2)} W)" for w, l, m in levels)
+        got["levels"] = levels
+        if floor:
+            with o.step(f"{sender}'s base at its floor (~{floor:g} W) for every setting under it: the levels alike, the "
+                        f"GUI's note in its log") as s:
+                spread = max(l for _, l, _ in levels) - min(l for _, l, _ in levels)
+                if spread > POWER_TOL_DB:
+                    raise Refused(f"levels {say_lv}: {spread:.1f} dB apart (the floor would keep them within "
+                                  f"{POWER_TOL_DB} dB): the floor changed, take it off FLOOR_6M")
+                notes = [ln for ln in bench.ssh(S.host, f"tail -c +{log0 + 1} /tmp/x6100_log.txt").splitlines()
+                         if FLOOR_LOG in ln]
+                got["notes"] = notes
+                if not notes:
+                    raise Refused(f"levels {say_lv} at the floor, but the GUI said nothing of it")
+                s.confirm(f"{say_lv}; the GUI: {notes[0]}")
+        else:
+            with o.step(f"{listener}'s level rose with the power") as s:
+                bad = []
+                for (w0, l0, _), (w1, l1, _) in zip(levels, levels[1:]):
+                    want = 10 * math.log10(w1 / w0)
+                    if abs((l1 - l0) - want) > POWER_TOL_DB:
+                        bad.append(f"{w0}->{w1} W: {l1 - l0:+.1f} dB (want {want:+.1f})")
+                if bad:
+                    raise Refused(f"levels {say_lv}; off by more than {POWER_TOL_DB} dB: {'; '.join(bad)}")
+                s.confirm(say_lv)
     except Refused as e:
         return False, str(e), got
     finally:
         o.both({"pwr": W})                  # the power back at 0.1 W on both
+    if floor:
+        return True, (f"{sender}'s base at its floor as expected: " + ", ".join(f"{w} W {l} dB" for w, l, _ in levels)
+                      + "; the GUI said so"), got
     return True, f"the listener's level followed the power: " + ", ".join(f"{w} W {l} dB" for w, l, _ in levels), got
 
 
@@ -3759,6 +3792,133 @@ def tci_refused(o, radio, other, kind, label):
     return True, f"{kind} on {radio}: {said}", {}
 
 
+def image_test(o, sender, listener, bands=("20", "17", "15", "12", "10"), off=1500, tones=(600, 900), amp=0.3):
+    """The sender's opposite-sideband image and carrier leak, band by band (image.py's measurement, the owner's
+    2026-11-20 "you MUST prove this via testing"): USB tones 600 and 900 Hz at 0.1 W, the listener OFF Hz below the
+    sender's dial (declared to the sync guard and the Watch: the one difference this test makes), so in its USB audio
+    the wanted tone is at OFF + fa, the carrier at OFF and the image (the tone mirrored around the sender's dial) at
+    OFF - fa. Passes with every image and carrier leak IMAGE_MAX_DBC or lower; each band's figures kept"""
+    import subprocess
+    import image as im
+    from tones import TciRx, peak, FS as TFS
+    S, L = o.r[sender], o.r[listener]
+    plan = [[0, im.LEAD_S]] + [[t, im.TONE_S] for t in tones] + [[0, im.TAIL_S]]
+    key_s = sum(x for _, x in plan) + 1.0
+    run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_tone_tx.py"),
+            f"root@{S.host}:/tmp/tci_tone_tx.py"])
+    rows, worst, tci = [], None, None
+    try:
+        tci = TciRx(L.host)
+        for band in bands:
+            f = im.BANDS[band]
+            with o.step(f"{band} m: both on {f / 1e6:.3f} USB, the receiver profile alike") as s:
+                want, checks = bench.rx_profile(f, 2, pre=0, att=0, rfg=100, agc=3, sql=0, filt=(100, 3000))
+                o.both(dict(want, pwr=W, atu=0, xit=0, rit=0, split=0), checks)
+            with o.step(f"{band} m: {listener} {off} Hz below (declared: the one difference)") as s:
+                o.apart = {"freq": off}
+                o.st.ev(f"declared: {listener} {off} Hz below {sender} for this over", "conf")
+                o.changing += 1
+                try:
+                    bench.ensure(L, {"freq": f - off})
+                finally:
+                    o.changing -= 1
+                s.confirm(f"{sender} {S.state.get('freq')}, {listener} {L.state.get('freq')}")
+            with o.step(f"{band} m: {sender} sends {tones} Hz at {W} W") as s:
+                _, total = bench.chain_gate(o.c, "radios")
+                bench.ensure(S, *bench.tx_profile(f, 2, W))
+                bench.radio_tx_gate(S, o.c, W)
+                bench.listener_gate(L)
+                o.roles = {sender: "TX", listener: "RX"}
+                watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=L, w=W,
+                                    label=f"image {band} m", offsets={"freq": off})
+                try:
+                    o.changing += 1
+                    try:
+                        bench.arm(S, True, mode=2)
+                    finally:
+                        o.changing -= 1
+                    bench.tx_log({"who": sender, "f": f, "w": S.pwr(), "what": f"orch: image {band} m"})
+                    t0 = time.time()
+                    proc = subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
+                                             f"python3 /tmp/tci_tone_tx.py '{json.dumps(plan)}' {amp} {key_s:.1f} "
+                                             f"50001 {im.FADE_S}"], stdout=subprocess.DEVNULL,
+                                            stderr=subprocess.DEVNULL)
+                    while proc.poll() is None and not watch.why:
+                        time.sleep(0.05)
+                    if proc.poll() is None:
+                        bench.stop_bench_programs(S)
+                    t1 = time.time()
+                    try:
+                        S.wait("off the air", lambda: not S.tx, 5)
+                    except Refused:
+                        S.stop()
+                finally:
+                    watch.close()
+                    o.changing += 1
+                    try:
+                        bench.arm(S, False)
+                    finally:
+                        o.changing -= 1
+                    o.roles = {A: "RX", B: "RX"}
+                if watch.why:
+                    raise Refused(f"the watch stopped the over: {watch.why}")
+                time.sleep(1.0)
+                x, _ = tci.audio(t0 - 0.5, t1 + 1.0)
+                on = im.band_onset(x, off + tones[0]) if len(x) else None
+                if on is None:
+                    raise Refused(f"no tone in {listener}'s audio")
+                row = {"band": band, "f": f, "tones": []}
+                for fa, (s0, s1) in zip(tones, im.segs(on, tones)):
+                    seg = x[int(s0 * TFS):int(s1 * TFS)]
+                    fw, lw = peak(seg, off + fa, 40)
+                    fc, lc = peak(seg, off, 40)
+                    fi, li = peak(seg, off - fa, 40)
+                    fl = im.floor_db(seg)
+                    t = {"fa": fa, "wanted_dbfs": round(lw, 1), "floor_dbfs": round(fl, 1),
+                         "image_dbc": round(li - lw, 1), "carrier_dbc": round(lc - lw, 1),
+                         "image_over_floor_db": round(li - fl, 1)}
+                    row["tones"].append(t)
+                    w_ = max(t["image_dbc"], t["carrier_dbc"])
+                    worst = w_ if worst is None else max(worst, w_)
+                rows.append(row)
+                s.confirm("; ".join(f"{t['fa']} Hz: image {t['image_dbc']} dBc, carrier {t['carrier_dbc']} dBc"
+                                    for t in row["tones"]))
+            with o.step(f"{band} m: the two on one frequency again") as s:
+                o.changing += 1
+                try:
+                    bench.ensure(L, {"freq": f})
+                    o.apart = None
+                finally:
+                    o.changing -= 1
+                alike(o, ["freq", "mode"])
+                s.confirm("alike")
+    except Refused as e:
+        return False, str(e), {"bands": rows}
+    finally:
+        o.apart = None
+        if tci is not None:
+            tci.close()
+        try:
+            o.both({"freq": int(o.r[A].state.get("freq") or 14200000), "mode": 2})
+        except Refused as e:
+            o.st.ev(f"not alike after the image test: {e}", "bad")
+    said = "; ".join(f"{r['band']} m " + "/".join(str(t["image_dbc"]) for t in r["tones"]) for r in rows)
+    carriers = "; ".join(f"{r['band']} m " + "/".join(str(t["carrier_dbc"]) for t in r["tones"]) for r in rows)
+    bad = [f"{r['band']} m {t['fa']} Hz {t['image_dbc']}" for r in rows for t in r["tones"]
+           if t["image_dbc"] > IMAGE_MAX_DBC]
+    if bad:
+        return False, (f"image over {IMAGE_MAX_DBC} dBc: {', '.join(bad)} (images dBc: {said}; carrier leak dBc: "
+                       f"{carriers})"), {"bands": rows}
+    return True, (f"{sender}'s images (dBc, 600/900 Hz): {said}, all {IMAGE_MAX_DBC} dBc or lower; its carrier leak "
+                  f"(dBc, said, not judged here): {carriers}"), {"bands": rows}
+
+
+IMAGE_MAX_DBC = -35         # an image above this is a fault (the X6100's 15 m went to -29 at times on 11-22). The
+                            # carrier leak is said with it: the factory X6100's (no DC offsets of its own, its log's
+                            # "No results for load dac_offset") reads -17 to -26 dBc at 0.1 W, nulled only by a
+                            # calibration that keys it and writes the offsets (the owner's call)
+
+
 # ---- The AMBE vocoders (each radio's DVSI chip behind its SDR daemon's port 127.0.0.1:2460) and B's digital voice ----
 # Receive only: nothing is keyed. The test speech is this computer's own voice (say), 8 kHz; the calls made of it by
 # the repository's generators (tools/dsdfme, tools/rtlspec/dmr_test gen) and replayed into a test SDR daemon on each
@@ -4216,8 +4376,11 @@ TESTS = [
           "no floor under 1 W (the factory X6100's 0.8 W at 0.1 W)",
           lambda s, l, n: (lambda o: power_steps(o, s, l, 50200000, n, POWER_6M)), 45),
     *pair("power-6m-fm", "", "FM 52.525 with no audio: the carrier at 0.1, 0.3, 1.0 W; the other's level must rise "
-          "4.8 and 5.2 dB (2 dB): no floor in the base's own power setting (the factory X6100's 1.0-1.2 W in FM at "
-          "0.1 W, 2026-11-22)", lambda s, l, n: (lambda o: power_steps(o, s, l, 52525000, n, POWER_6M, mode=7)), 45),
+          "4.8 and 5.2 dB (2 dB), or, from the X6100 (its base's ~1 W floor there, FLOOR_6M), stay alike with the "
+          "GUI's note of it in the log", lambda s, l, n: (lambda o: power_steps(o, s, l, 52525000, n, POWER_6M, mode=7)),
+          45),
+    *pair("power-6m-am", "", "AM 50.400 with no audio: the carrier at 0.1, 0.3, 1.0 W; as power-6m-fm",
+          lambda s, l, n: (lambda o: power_steps(o, s, l, 50400000, n, POWER_6M, mode=6)), 45),
     *pair("ft8-cq", "", "FT8 14.074: a CQ in the next slot, the other must decode exactly the message sent",
           lambda s, l, n: (lambda o: ft8_cq(o, s, l, n)), 40),
     *pair("psk31-text", "", "PSK31 on the listener's app dial: 'CQ CQ DE Q1TST Q1TST K' sent, decoded with at most 5 % "
@@ -4296,6 +4459,12 @@ TESTS = [
                    ("cw-usb", "CW text through the {n}'s TCI in USB, armed: refused, off the air, nobody asked"),
                    ("key-cw", "a TCI audio key on the {n} in CW, armed: refused, off the air"))
       for n in (A, B)],
+    Test("image x6100", "X6100 TX, X6200 RX (1500 Hz below, declared)", "the X6100's opposite-sideband image and "
+         "carrier leak on 20, 17, 15, 12 and 10 m at 0.1 W: each image -35 dBc or lower (its 15 m shifts, 11-22); the "
+         "carrier leak said",
+         lambda o: image_test(o, A, B), 120),
+    Test("image x6200", "X6200 TX, X6100 RX (1500 Hz below, declared)", "the X6200's image and carrier leak, as "
+         "image x6100", lambda o: image_test(o, B, A), 120),
     Test("ambe-vocoder", "both RX", "each radio's AMBE chip through its SDR daemon: the parity field asked for, the "
          "speech through each chip at DMR's and D-STAR's rates and the other's frames, libmbe-dvsi alike with the "
          "parity field off, P25 full rate only on a chip with the P25 option", t_ambe_vocoder, 150),
@@ -4476,7 +4645,8 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("list")
+    lp = sub.add_parser("list")
+    lp.add_argument("--md", action="store_true", help="the tests as a Markdown table, for ORCH.md (no results)")
     rp = sub.add_parser("run")
     rp.add_argument("--only", default="")
     rp.add_argument("--port", type=int, default=8765)
@@ -4506,6 +4676,12 @@ def main():
         for t, a_, h in spec_track(L, d["f"], d["mode"], on - 0.2, off + 0.5):
             print(f"  {t - on:5.2f} s  {a_:7.0f} Hz  {h:5.1f} dB")
         print(spec_steps(L, d["f"], d["mode"], on, off, coarse=d["listener"] in SPEC_COARSE))
+        return
+    if a.cmd == "list" and a.md:
+        print("| # | test | role | about | what passes |")
+        print("|---|---|---|---|---|")
+        for i, t in enumerate(TESTS, 1):
+            print(f"| {i} | `{t.name}` | {t.role} | {t.est_s} s | {t.what.replace('|', '/')} |")
         return
     if a.cmd == "list":
         kept = store_load()

@@ -1,5 +1,9 @@
 # The bench harness
 
+**The radios are tested through the orchestrator: [ORCH.md](ORCH.md)** (`orch.py`, its console at
+http://127.0.0.1:8765/, every test, the scripts it uses, the files it keeps). What follows is the harness underneath
+it (bench.py: the gates, the Watch, the radios through their remotes) and the earlier tools.
+
 Automated tests through attenuators, run by `bench.py` on the computer beside the radios: the HackRF into a radio
 that only listens (profile `hackrf`), or two radios keying into each other (profile `radios`). The radios are worked
 through their browser remote (port 50002) with sessions of the harness's own; SSH only to provision those sessions,
