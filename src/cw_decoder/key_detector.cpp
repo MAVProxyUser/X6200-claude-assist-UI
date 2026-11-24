@@ -35,6 +35,16 @@ constexpr float  CARRIER_UP  = 1.05f;   /* per step, once it is a carrier */
 /* A mark alone must peak this much over the decode floor (see ElementTimer) */
 constexpr float  LONE_MARK_DB = 3.0f;
 
+/* A key down is a rise: this much over the lowest of the steps before it (rose()). A station's element comes up in a
+ * few ms; what a strong station sends between its elements, lifted by the receiver's AGC climbing back through its
+ * word gap (some 40 dB in 0.6 s: half a dB a step), creeps over the thresholds, which fell 20 dB with the last mark's
+ * peak: the decoder keyed on it ~200 ms before the next element and the word spaces went ("VVV TEST DE Q1TST" from
+ * the X6100, whose carrier between elements is 62 dB under its marks, printed "VVVTESTDEQ1TST" by the X6200,
+ * 2026-11-24; tools/cw_replay's x6100_cw_on_x6200 now copies whole). 4 dB, not 6: at 6 a weak element in a 20 dB
+ * fade, rising out of an element gap its integrator had not let all the way down, was lost (a synthetic QSO with
+ * QSB: 13 % -> 18 % of its characters wrong); at 4 the same as before the rule there and in noise to 2 dB SNR */
+constexpr float  RISE_DB = 4.0f;
+
 } // namespace
 
 KeyEdge KeyDetector::step(float power, float noise) {
@@ -89,7 +99,11 @@ KeyEdge KeyDetector::schmitt(float r) {
             leaving = true;
             if (run_ == 0)
                 r_new_ = r;
-            if (++run_ >= need) {
+            if (++run_ >= need && !own_ && !rose(r)) {
+                /* a level creeping up, not a mark keyed: the edge is looked for again from here */
+                run_   = 0;
+                r_old_ = r;
+            } else if (run_ >= need) {
                 /* the extra step of a first mark is given back */
                 back      = -crossing() + static_cast<float>((need - EDGE_STEPS) * INTEG_STEP);
                 up_steps_ = 0;
@@ -119,7 +133,17 @@ KeyEdge KeyDetector::schmitt(float r) {
         r_old_ = r;
 
     follow_peak(r);
+    std::copy_backward(past_.begin(), past_.end() - 1, past_.end());
+    past_[0] = r;
     return {dir, 1000.0f * back / RX_RATE, false};
+}
+
+/* r a rise: RISE_DB over the lowest of the steps before the one before it (past_[1..]: the edge's own first step is
+ * past_[0] or past_[1], the level it rose from further back). Before any steps, a rise */
+bool KeyDetector::rose(float r) const {
+    float low = *std::min_element(past_.begin() + 1, past_.end());
+
+    return r >= low * from_db(RISE_DB);
 }
 
 /* Thresholds from the mark's peak, which decays slowly (faster with key up) */

@@ -48,6 +48,7 @@ void Receiver::feed(const float *x, size_t n) {
 }
 
 void Receiver::detector_step(float power) {
+    keyer_.own(text_.owning() || tx_);
     KeyEdge e = keyer_.step(power, step_noise_);
 
     /*

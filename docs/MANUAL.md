@@ -6890,6 +6890,12 @@ solid.
   be. Lower copies weaker signals but can print noise.
 - No characters from noise: lone blips, clicks and steady carriers (birdies)
   on the tone are not decoded and do not change the speed estimate.
+- A strong station's word spaces: a key-down must be a rise, up 4 dB in a
+  few ms as a keyed element comes up. What a strong station sends between
+  its elements (its carrier, 60 dB under its marks) creeps up with the AGC
+  through each word gap, and up to v0.3.12.47 the decoder keyed on it about
+  200 ms early and printed the words run together ("VVVTESTDEQ1TST" from an
+  X6100 60 dB over the X6200's noise). Your own keying is not held to it.
 - It knows A-Z, the figures, punctuation and the prosigns, and Å Ä Ö Ü É Ñ
   and CH; up to v0.3.12 those came out as <?> (#265). The CW Keyboard and
   TCI key them too.

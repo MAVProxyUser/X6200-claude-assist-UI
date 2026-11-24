@@ -88,11 +88,12 @@ KNOWN = {
                                "at 0.2, 0.8 at 0.5, and the X6100 heard 0.5 and 1.0 W alike (+0.3 dB), 4 runs in 6; "
                                "its ALC reads 0 and tx_level.c power_hold steers by its own 0.1 W-step meter (a GUI "
                                "fault to fix: ORCH_FINDINGS.md); the X6100's own steps pass",
-    "cw-text x6100>x6200": "the X6200's own CW decoder misreads the X6100's CW (dits as dahs: 'VVV' as 'TTT', word "
-                           "spaces lost), worst with AGC fast; NOT the X6100's carrier (62 dB under its mark between "
-                           "the elements, 2026-11-24), and the X6200's own TCI audio of the same over copies "
-                           "'VSE TEST DE Q1TST' through the same decoder code on this computer: what differs on the "
-                           "radio is to find (ORCH_FINDINGS.md); the other way copies clean",
+    "cw-text x6100>x6200": "the X6200's decoder read the X6100's CW with its word spaces lost: FIXED 2026-11-24 (a key "
+                           "down must be a rise, key_detector.cpp RISE_DB: the X6100's carrier between elements, 62 dB "
+                           "under, crept up with the X6200's AGC through each word gap and keyed it ~200 ms early); "
+                           "what still fails is the first over after the decoder sat on noise: its speed read from the "
+                           "noise takes the first dits for dahs ('TTTT TTTT' for 'VVV'), 2 of 5 separate runs passed, "
+                           "6 of 6 back to back (ORCH_FINDINGS.md)",
 }
 
 

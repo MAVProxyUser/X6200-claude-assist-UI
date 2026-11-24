@@ -49,6 +49,9 @@ class KeyDetector {
     /* The CW trainer is open, down to 5 WPM (ElementTimer::trainer_range): a
      * mark raises the carrier floor only after 1.92 s, not 480 ms */
     void  trainer_range(bool on) { trainer_ = on; }
+    /* Our own keying (the radio transmitting, or the trainer's own text): a key down needs no rise (rose()). The
+     * raised sidetone of the X6200's keying at KEY Volume 63 kept its element gaps too full for one */
+    void  own(bool on) { own_ = on; }
 
     /* Last step, for the tests and the SNR shown */
     float on_level() const { return on_lvl_; }
@@ -61,6 +64,7 @@ class KeyDetector {
     KeyEdge schmitt(float r);
     float   crossing() const;
     void    follow_peak(float r);
+    bool    rose(float r) const;
 
     /* Schmitt trigger */
     float  floor_db_  = 5.0f;
@@ -73,6 +77,7 @@ class KeyDetector {
     size_t up_steps_  = 0;      /* steps since key up */
     float  r_old_     = 0.0f;   /* last step on the old side */
     float  r_new_     = 0.0f;   /* first step on the new side */
+    std::array<float, 5> past_{};   /* the last steps' levels, the newest first (rose()) */
 
     /* Carrier floor */
     static constexpr int BATCH = 125;   /* 1 s of steps */
@@ -82,6 +87,7 @@ class KeyDetector {
     float  carrier_   = 0.0f;   /* 5th percentile of power/noise */
     int    down_steps_ = 0;
     bool   trainer_    = false; /* trainer_range */
+    bool   own_        = false; /* own() */
 
     float  mark_peak_  = 0.0f;
     float  last_power_ = 0.0f;

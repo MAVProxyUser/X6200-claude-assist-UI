@@ -34,11 +34,11 @@ Open, mine to do:
   would copy short overs whole (noted; the tests send two V groups first).
 
 Open, the owner's call or hands:
-- **CW from the X6100 misread by the X6200's decoder** (orch cw-text x6100>x6200, KNOWN): NOT the X6100's carrier
-  (2026-11-24, keyed at the owner's word: 62 dB under the mark between the elements, 5 dB over the X6200's quiet). The
-  X6200's decoder prints 'TTT' for 'VVV' with AGC fast, the letters but not the word spaces with AGC slow, while its
-  own TCI audio of the same overs copies through the same decoder code on the Mac (tools/cw_replay): what differs on
-  the radio is open (mine to find; ORCH_FINDINGS.md).
+- **CW from the X6100 misread by the X6200's decoder** (orch cw-text x6100>x6200, KNOWN): its word spaces FIXED
+  2026-11-24 (the decoder keyed on the X6100's carrier, 62 dB under its marks, as the X6200's AGC lifted it through
+  each word gap; a key down must now be a rise, src/cw_decoder/key_detector.cpp). Left (mine): the first over after
+  half a minute of noise reads its first dits as dahs (the speed read from the noise); 2 of 5 separate runs passed,
+  6 of 6 back to back.
 - The squelch mutes the received audio (speaker, decoders, TCI), not the spectrum: ANSWERED 2026-11-24 (the owner:
   "I don't want wrong squelch to prevent reception"): the tests hold it open (0).
 - The X6100's 15 m/12 m image shifts (below, "15 m and 12 m"): left to try the battery alone, 15 m alone, the case
