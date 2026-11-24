@@ -27,9 +27,10 @@ Open, mine to do:
 - **The web server's fix in an image**: the HTTPS key and the remote's sessions were downloadable without a login
   (3906e452, 7b01807b); both radios run the fixed server by hot install only. The next tag carries it (the owner's
   word to tag).
-- **The upstream merge's look on the radios** (11-23): the classic screen's 3D waterfall on upstream's thread, WeFax's
-  tiles and Night in amber, the WiFi device held over GUI restarts, Speech off by default; the USER page has no
-  labels for upstream's 200+ apps.
+- **The upstream merge's look on the radios** (11-23): CHECKED 2026-11-24 (receive only): WeFax on both alike in the
+  Sentry's amber, its All Charts tiles and page 4's "Night Auto (on)" at night; the WiFi held through both GUIs'
+  restarts; Speech off by default (no voice_mode stored on either). Left: the classic screen's 3D waterfall on
+  upstream's thread; the USER page has no labels for upstream's 200+ apps.
 - Both radios' CW decoders lose the dits of the first characters ('VVV' prints 'TTT'): a decoder that locks sooner
   would copy short overs whole (noted; the tests send two V groups first).
 
