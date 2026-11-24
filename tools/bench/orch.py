@@ -257,6 +257,7 @@ class Orch:
             self.r[n].take_control()        # only when free or the bench's own (bench.Radio.take_control)
         for n, r in self.r.items():
             self._log_sends(n, r)
+            hello(r)                        # the version kept now, while its first line is still there
         self._errs = {n: len(r.errs) for n, r in self.r.items()}
         self._tx = {n: bool(r.tx) for n, r in self.r.items()}
         self.planned = {}                   # name: why its GUI is restarting by the orchestrator's own doing
@@ -961,37 +962,8 @@ def ft8_cq(o, sender, listener, label, dial=14074000):
     S, L = o.r[sender], o.r[listener]
     got = {}
     try:
-        with o.step("both on their test calls (PSK Reporter off)"):
-            test_calls(o)
-        with o.step(f"the FT8 app open on both, on {dial / 1e6:.3f} MHz"):
-            o.changing += 1
-            try:
-                for r in (S, L):
-                    r.send("ft8 open")
-                for r in (S, L):
-                    r.wait("the FT8 app", lambda r=r: r.ft8.get("open") == 1, 10)
-                    time.sleep(1.0)
-                    for _ in range(3):              # it opens in the protocol it was left in (the X6100's in FT4):
-                        if r.state.get("app") == "FT8":     # its MODE steps FT8, FT4, FT2 round
-                            break
-                        p = r.ft8.get("proto")
-                        r.send("ft8 mode")
-                        r.wait("FT8's protocol stepped", lambda r=r, p=p: r.ft8.get("proto") != p, 5)
-                        time.sleep(0.8)
-                    if r.state.get("app") != "FT8":
-                        raise Refused(f"{r.name}: its FT8 app not in FT8 ({r.state.get('app')})")
-                th = [threading.Thread(target=bench.ft8_to_band, args=(r, dial)) for r in (S, L)]
-                [t.start() for t in th]
-                [t.join(40) for t in th]
-                for r in (S, L):
-                    if r.ft8.get("auto"):
-                        r.send("ft8 auto")
-                        r.wait("Auto off", lambda r=r: not r.ft8.get("auto"), 5)
-            finally:
-                o.changing -= 1
-            o.both({"freq": dial, "pwr": W})
-            if int(S.state.get("mode", -1)) != int(L.state.get("mode", -2)):
-                raise Refused(f"the two in different modes: {S.state.get('mode')}/{L.state.get('mode')}")
+        with o.step("both on their test calls, the FT8 app open on both on the dial, everything alike"):
+            ft8_both(o, dial)
         p, total = bench.chain_gate(o.c, "radios")
         with o.step(f"{sender} may send, {listener} may listen"):
             bench.radio_tx_gate(S, o.c, W)
@@ -1034,11 +1006,13 @@ def ft8_cq(o, sender, listener, label, dial=14074000):
 
 
 def hello(r):
-    """The GUI's version from the remote's first line ("hello <version> <boot>")"""
+    """The GUI's version from the remote's first line ("hello <name> <version> <boot>"), kept on the session once seen
+    (the session's recent lines roll over in a long run: identity read None after an hour, 2026-11-23)"""
     for _, x in list(r.lines):
         if x.startswith("hello "):
-            return " ".join(x.split()[1:-1]) or x.split()[1]     # "hello <name> <version> <boot>": all but the boot
-    return None
+            r._hello = " ".join(x.split()[1:-1]) or x.split()[1]
+            break
+    return getattr(r, "_hello", None)
 
 
 def t_identity(o):
@@ -1209,28 +1183,8 @@ def ft8_stop(o, sender, listener, label, dial=14074000):
     S, L = o.r[sender], o.r[listener]
     res = {}
     try:
-        with o.step("both on their test calls, the FT8 app open on both"):
-            test_calls(o)
-            o.changing += 1
-            try:
-                for r in (S, L):
-                    r.send("ft8 open")
-                for r in (S, L):
-                    r.wait("the FT8 app", lambda r=r: r.ft8.get("open") == 1, 10)
-                    time.sleep(1.0)
-                    for _ in range(3):
-                        if r.state.get("app") == "FT8":
-                            break
-                        p = r.ft8.get("proto")
-                        r.send("ft8 mode")
-                        r.wait("FT8's protocol stepped", lambda r=r, p=p: r.ft8.get("proto") != p, 5)
-                        time.sleep(0.8)
-                th = [threading.Thread(target=bench.ft8_to_band, args=(r, dial)) for r in (S, L)]
-                [t.start() for t in th]
-                [t.join(40) for t in th]
-            finally:
-                o.changing -= 1
-            o.both({"freq": dial, "pwr": W})
+        with o.step("both on their test calls, the FT8 app open on both on the dial, everything alike"):
+            ft8_both(o, dial)
         p, total = bench.chain_gate(o.c, "radios")
         bench.radio_tx_gate(S, o.c, W)
         bench.listener_gate(L)
