@@ -1733,6 +1733,8 @@ def in_parallel(o, fn, wait=30):
             out[n] = fn(n, o.r[n])
         except (Refused, OSError, ValueError, IndexError) as e:
             errs[n] = f"{n}: {e}"
+        except Exception as e:              # any other: said with its kind, never taken for a radio that did not answer
+            errs[n] = f"{n}: {type(e).__name__}: {e}"
     o.changing += 1
     try:
         th = [threading.Thread(target=one, args=(n,)) for n in o.r]
@@ -3792,6 +3794,122 @@ def tci_refused(o, radio, other, kind, label):
     return True, f"{kind} on {radio}: {said}", {}
 
 
+# ---- The 1:1 suite's own checks run through orch (the owner: every test through the orchestrator): a batch's t_*
+# registers each check with per_radio(run, batch, test, fn(r), covers, want_tx) or by_radio(run, batch, test, covers,
+# fn(name, host, ip)); those are collected here without running, and each chosen one runs on both radios at once,
+# both put back alike after ----
+
+_SUITE = {}
+
+# (its t_ function, the check, what passes): the essential ones not already orch's own (control-tci, freq-lock,
+# apps-list and files-secrets are: tci-takes-control, dial-lock, remote-apps, web-secrets)
+SUITE_PORTED = [
+    ("t_tci_proto", "tci-answers", "dds, start/stop and TCI's fixed answers as the code has them, the unsupported CW "
+                                   "commands left unanswered"),
+    ("t_tci_proto", "tci-cw-speed", "the KEY speed asked (control kept), set (both names echoed, control to TCI), "
+                                    "99 clamped to the radio's top, put back"),
+    ("t_tci_proto", "tci-rx-sensors", "rx_smeter ten a second always, rx_channel_sensors only while enabled"),
+    ("t_tci_proto", "tci-audio", "the greeting's audio defaults, 24k int16 mono 512 set and streamed, none after stop"),
+    ("t_tci_drive", "tci-drive", "drive read and set lower: the power follows, nothing keyed"),
+    ("t_tci_guards", "tci-four", "four TCI clients at most, the fifth refused"),
+    ("t_tci_guards", "tci-origin", "a page from another site, a rebound name and Pat's mailbox refused; the radio's own "
+                                   "page and a program without Origin taken"),
+    ("t_panel", "panel-greeting", "the remote's hello, keys list and token"),
+    ("t_panel", "panel-bands-plan", "the bands plan as the remote sends it"),
+    ("t_panel", "panel-view-only", "a view-only session sends nothing"),
+    ("t_panel", "panel-ping-clock", "the link's ping and the clock's answer"),
+    ("t_panel", "panel-meter", "the S-meter and the battery in the remote's state"),
+    ("t_panel", "panel-kt-cwrise", "the CW rise time read"),
+    ("t_panel", "panel-filter-am", "AM/FM filters as the panel sets them"),
+    ("t_panel", "panel-refused-set", "a refused setting reverted on the panel"),
+    ("t_panel", "panel-play-guard", "a file play refused where it must be"),
+    ("t_panel", "panel-wide", "the wide spectrum as the remote sends it"),
+    ("t_control_owner", "control-needed", "a setting without control refused"),
+    ("t_control_owner", "control-lost-free", "control free again when its holder leaves"),
+    ("t_screen", "screen-stream", "the screen's JPEG stream and its quality"),
+    ("t_screen", "screen-viewers", "the most screen viewers at once"),
+    ("t_screen", "remote-origin", "the remote's WebSocket refuses other sites, takes its own names"),
+    ("t_core", "band-cycle", "the band keys through every band, 60 m included, the untunable skipped"),
+    ("t_core", "broadcast-am", "the broadcast bands in AM"),
+    ("t_core", "tci-refused-answer", "a TCI tune the radio refuses (an app's hold) answered with what it kept"),
+    ("t_core", "knobs", "the knobs through the remote tune the radio"),
+    ("t_core", "wide-zoom", "the X6200's wide zooms"),
+    ("t_web_guards", "web-tci", "the web TCI page"),
+    ("t_web_guards", "web-guards", "the web's guarded pages refuse what they must"),
+    ("t_web_guards", "funnel-sim", "a Funnel (internet) connection's limits"),
+    ("t_web_more", "web-https", "HTTPS served with its own certificate"),
+    ("t_web_more", "wss-proxy", "the WebSocket proxy over HTTPS"),
+    ("t_web_more", "ssh-key-checks", "the SSH keys page refuses bad keys"),
+    ("t_web_more", "backup-parts", "the backup's parts listed"),
+    ("t_web_more", "textlog-page", "the text log page"),
+]
+
+
+def suite_checks(module, t_name):
+    """{test: (kind, fn, want_tx)} that module's t_name registers (kind "r": fn(radio), "host": fn(name, host, ip))"""
+    import importlib
+    key = (module, t_name)
+    if key in _SUITE:
+        return _SUITE[key]
+    m = importlib.import_module(module)
+    got = {}
+
+    def per_radio(run, batch, test, fn, covers, want_tx=False):
+        got[test] = ("r", fn, want_tx)
+        return {}
+
+    def by_radio(run, batch, test, covers, fn):
+        got[test] = ("host", fn, False)
+    saved = {k: getattr(m, k) for k in ("per_radio", "by_radio") if hasattr(m, k)}
+    m.per_radio = per_radio
+    if "by_radio" in saved:
+        m.by_radio = by_radio
+    c = bench.conf()
+    fake = types.SimpleNamespace(c=c, names=[A, B], host=lambda n: c["radios"][n]["host"],
+                                 banner=lambda *a, **k: None, result=lambda *a, **k: None,
+                                 radios={})     # the suite's own extra sessions: none under orch (its one is the check's)
+    try:
+        getattr(m, t_name)(fake)
+    finally:
+        for k, v in saved.items():
+            setattr(m, k, v)
+    _SUITE[key] = got
+    return got
+
+
+def suite_pair(o, module, t_name, test):
+    """One of the 1:1 suite's checks on both radios at once: each must pass (a LOOK, its own "to look at", is said);
+    both put back alike on the frequency and mode they started from, the power at 0.1 W, control the bench's"""
+    import socket
+    kind, fn, _ = suite_checks(module, t_name)[test]
+    f0, m0 = int(o.r[A].state.get("freq") or F_TEST), int(o.r[A].state.get("mode") or 2)
+    out = {}
+    try:
+        with o.step(f"{module}: {test} on both at once") as s:
+            def one(n, r):
+                ok, says = fn(r) if kind == "r" else fn(n, r.host, socket.gethostbyname(r.host))
+                return {"ok": ok if ok is None else bool(ok), "says": says}
+            out = in_parallel(o, one, 240)
+            s.confirm("; ".join(f"{n}: {v['says']}"[:400] for n, v in out.items()))
+    except Refused as e:
+        return False, str(e), out
+    finally:
+        try:
+            for r in o.r.values():
+                if not r.ctl_mine:
+                    r.take_control()        # the bench's own back (a TCI client of the check's had it); never the
+                                            # operator's (take_control refuses that)
+            o.both({"freq": f0, "mode": m0, "pwr": W})
+        except Refused as e:
+            o.st.ev(f"not put back alike after {test}: {e}", "bad")
+    bad = [f"{n}: {v['says']}" for n, v in out.items() if v["ok"] is False]
+    if bad:
+        return False, "; ".join(bad), out
+    look = [n for n, v in out.items() if v["ok"] is None]
+    return True, ("; ".join(f"{n}: {v['says']}" for n, v in out.items()) +
+                  (f" (to look at on {', '.join(look)})" if look else "")), out
+
+
 def t_system_checks(o):
     """Each radio read over SSH, nothing changed (suite_proto's system batch): the battery log and model, the data
     partition's check, the settings' good copy, password logins refused, Tailscale's status, the run logs kept, the
@@ -4589,6 +4707,9 @@ TESTS = [
                    ("cw-usb", "CW text through the {n}'s TCI in USB, armed: refused, off the air, nobody asked"),
                    ("key-cw", "a TCI audio key on the {n} in CW, armed: refused, off the air"))
       for n in (A, B)],
+    *[Test(name, "both", f"the 1:1 suite's {name} ({t_name[2:].replace('_', ' ')}) on both radios at once: {what}",
+           (lambda o, t_name=t_name, name=name: suite_pair(o, "suite_proto", t_name, name)), 30)
+      for t_name, name, what in SUITE_PORTED],
     Test("system-checks", "both", "each radio read over SSH, nothing changed: battery log and model, data partition, "
          "settings' good copy, password logins refused, Tailscale, logs, start trace, services and ports, CPU, "
          "temperature, GPU, sessions file, update state, ADIF header, libft8, clock; the same version on both",
