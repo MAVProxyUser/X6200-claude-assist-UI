@@ -129,6 +129,8 @@ class Status:
         self.radios = {}
         self.sync = {"ok": True, "since": time.time(), "violations": 0, "last": None, "changing": False}
         self.run_dir = None
+        self.shots = []             # both screens as photographed: {"t", "label", "paths": {name: path}}
+        self.hackrf = {"in_test": False, "running": False, "what": "not part of any test yet"}
 
     def ev(self, text, kind="info"):
         e = {"t": time.time(), "kind": kind, "text": text,
@@ -150,6 +152,9 @@ class Status:
                 "now": time.time(), "t0": self.t0, "phase": self.phase, "cur": self.cur, "tests": self.tests,
                 "events": list(self.events)[-400:], "radios": self.radios, "sync": self.sync, "kept": self.kept,
                 "caps_diff": [dict(v, key=k) for k, v in caps_load().items() if not v.get("same", True)],
+                "shots": [{"t": x["t"], "label": x["label"],
+                           "paths": {n: os.path.basename(p) for n, p in (x.get("paths") or {}).items() if p}}
+                          for x in self.shots[-6:]], "hackrf": self.hackrf,
                 "counts": {"pass": counts["PASS"], "fail": counts["FAIL"], "look": counts["LOOK"],
                            "notrun": counts["NOT RUN"], "done": len(done), "total": len(self.tests)},
                 "eta_s": left, "run_dir": self.run_dir}, default=str)
@@ -181,6 +186,7 @@ th{color:var(--dim);font-weight:normal}.PASS{color:var(--ok)}.FAIL{color:var(--b
 <header><h1>Two-radio bench</h1><span id="phase"></span><span id="counts" class="muted"></span><span id="clock" class="muted"></span></header>
 <main>
 <section><h2>Radios</h2><div id="sync"></div><div class="radios" id="radios" style="margin-top:8px"></div></section>
+<section><h2>Pictures (both screens, on every over and every anomaly)</h2><div id="shots" class="says">none yet</div></section>
 <section><h2>Now</h2><div id="now"></div><div class="bar"><div id="prog" style="width:0"></div></div></section>
 <section class="wide"><h2>Tests</h2><table><thead><tr><th>#</th><th>test</th><th>role</th><th>result</th><th>secs</th><th>what it found</th></tr></thead><tbody id="tests"></tbody></table></section>
 <section class="wide"><h2>Where the two radios differ (the caps test: the same value sent to both, what each did)</h2><table><thead><tr><th>asked</th><th>X6100</th><th>X6200</th></tr></thead><tbody id="caps"></tbody></table></section>
@@ -198,9 +204,12 @@ $("counts").textContent=`${c.done}/${c.total} done: ${c.pass} pass, ${c.fail} fa
 const el=Math.round(d.now-d.t0);$("clock").textContent=`running ${Math.floor(el/60)}m${el%60}s, about ${Math.round(d.eta_s/60)} min left`;
 const s=d.sync;let cls=s.changing?"chg":(s.ok?"ok":"bad");
 $("sync").innerHTML=`<span class="sync ${cls}">${s.changing?"CHANGING BOTH":(s.ok?"IN SYNC":"OUT OF SYNC")}</span> <span class="muted">violations this run: ${s.violations}${s.last?" (last: "+esc(s.last)+")":""}</span>`;
-$("radios").innerHTML=Object.entries(d.radios).map(([n,r])=>`<div class="radio"><b>${n.toUpperCase()}</b> <span class="${r.tx?"tx":"rx"}">${r.tx?"ON THE AIR":"RX"}</span>
+const hk=d.hackrf||{};
+$("shots").innerHTML=(d.shots||[]).slice().reverse().map(x=>`<div style="margin-bottom:8px"><div>${t(x.t)} ${esc(x.label)}</div>`+Object.entries(x.paths).map(([n,p])=>`<a href="shot/${encodeURIComponent(p)}" target="_blank"><img src="shot/${encodeURIComponent(p)}" style="width:48%;margin-right:2%;border:1px solid #333" title="${esc(n)}"></a>`).join("")+"</div>").join("")||"none yet";
+$("radios").innerHTML=`<div class="radio" style="grid-column:1/-1"><b>HACKRF</b> <span class="${hk.running?"tx":"rx"}">${hk.running?"TRANSMITTING":"idle"}</span> <span class="muted">&middot; ${hk.in_test?"part of this test":"not part of this test"} &middot; ${esc(hk.what||"")}</span></div>`+Object.entries(d.radios).map(([n,r])=>`<div class="radio"><b>${n.toUpperCase()}</b> <span class="${r.tx?"tx":"rx"}">${r.tx?"ON THE AIR":"RX"}</span>
 <div class="freq">${mhz(r.freq)}</div><div>${MODES[r.mode]||r.mode} &middot; ${r.pwr} W &middot; page ${esc(r.pg)} ${r.rxo===0?"&middot; <span class=tx>TX ARMED</span>":""}</div>
-<div class="muted">S ${r.meter==null?"?":r.meter.toFixed(1)+" dBm"} &middot; squelch ${esc(r.sql)} &middot; role ${esc(r.role||"-")}</div>
+<div class="muted">S ${r.meter==null?"?":r.meter.toFixed(1)+" dBm"} &middot; squelch ${esc(r.sql)} &middot; volume ${esc(r.vol)} &middot; app ${esc(r.app||"-")}</div>
+<div><b>should be: ${esc(r.role||"-")}</b> ${r.role==="TX"&&!r.tx?"<span class=muted>(between its sends)</span>":""}${r.role==="RX"&&r.tx?" <span class=tx>BUT TRANSMITS</span>":""}</div>
 <div class="${r.link==="live"?"rx":(String(r.link).startsWith("GUI RESTARTING")?"LOOK":"tx")}"><b>${esc(r.link==="live"?"GUI live":r.link)}</b>${r.link==="live"?"":" &middot; "+r.age.toFixed(0)+" s"}</div></div>`).join("");
 const cur=d.cur!=null?d.tests[d.cur]:null;
 $("now").innerHTML=cur?`<div><b>${esc(cur.name)}</b> <span class="muted">(${esc(cur.role)})</span></div><div class="says">${esc(cur.what)}</div>`+
@@ -221,6 +230,13 @@ def console(status, port, lan):
         def do_GET(self):
             if self.path.startswith("/status"):
                 body, ctype = status.to_json().encode(), "application/json"
+            elif self.path.startswith("/shot/"):        # a picture of a radio's screen (bench.SHOTS_DIR only)
+                name = os.path.basename(self.path[6:].split("?")[0])
+                path = os.path.join(bench.SHOTS_DIR, name)
+                if not name.endswith(".png") or not os.path.isfile(path):
+                    self.send_error(404)
+                    return
+                body, ctype = open(path, "rb").read(), "image/png"
             elif self.path.startswith("/log"):          # the run's every event, as kept in events.jsonl
                 path = os.path.join(status.run_dir or "", "events.jsonl")
                 body = open(path, "rb").read() if os.path.exists(path) else b""
@@ -277,6 +293,8 @@ class Orch:
         self.trouble = None                 # this test's GUI or RF trouble: it fails the test
         self._pids = {}                     # (name, before/after): the GUI's process around a silence
         self._unplanned = {}                # name: its silence began with no planned restart
+        self._role_said = {}                # name: its "transmits but its role is RX" said for this over
+        self.sql = None                     # the squelch both are held at (squelch_cal: closed on the bench's quiet)
         self.roles = {A: "RX", B: "RX"}
         self.restore_calls = set()          # the radios given a test call this run (test_calls)
         self.changing = 0                   # changes to both under way: the guard looks away meanwhile
@@ -284,6 +302,19 @@ class Orch:
         self._diff_since = None
         self.on = True
         threading.Thread(target=self._guard, daemon=True).start()
+
+    def snap(self, label):
+        """Both screens photographed now (in a thread: the guard does not wait), kept for the console and the run"""
+        def go():
+            try:
+                paths = bench.screenshots_both(list(self.r.values()), label.replace(" ", "_")[:60])
+            except Exception as e:          # a picture never stops a test
+                paths = {}
+                self.st.ev(f"pictures not taken: {e}", "radio")
+            with self.st.lock:
+                self.st.shots.append({"t": time.time(), "label": label, "paths": paths})
+            self.st.ev(f"pictures: {label}: {', '.join(os.path.basename(p) for p in paths.values() if p)}", "conf")
+        threading.Thread(target=go, daemon=True).start()
 
     def _pid_now(self, n, when):
         try:
@@ -340,7 +371,8 @@ class Orch:
                                                      else "NO STATE: GUI DOWN?")
                 rs[n] = {"freq": s.get("freq"), "mode": s.get("mode"), "tx": bool(r.tx), "pwr": s.get("pwr"),
                          "pg": s.get("pg"), "rxo": s.get("rxo"), "meter": r.meter, "role": self.roles.get(n),
-                         "age": round(age, 1), "link": link, "sql": s.get("sql")}
+                         "age": round(age, 1), "link": link, "sql": s.get("sql"), "vol": s.get("vol"),
+                         "app": s.get("app") or s.get("win")}
                 if age >= STALE_S and n not in self._down:
                     self._down[n] = now
                     self._unplanned[n] = n not in self.planned     # only a silence nobody planned is judged
@@ -356,6 +388,20 @@ class Orch:
                     self.st.ev(f"{n}: state again after {gone:.0f} s (GUI {hello(r)})", "ok")
                     if self._unplanned.pop(n, False):   # the GUI the same process: its link stalled (the X6200's WiFi
                         threading.Thread(target=self._stall_or_crash, args=(n, gone), daemon=True).start()
+            for n, r in self.r.items():             # a radio on the air that should be listening: stopped, photographed
+                if r.tx and self.roles.get(n) == "RX" and not self.changing and not self._role_said.get(n):
+                    self._role_said[n] = True
+                    what = f"{n} TRANSMITS but its role is RX: both stopped"
+                    self.st.ev(what, "bad")
+                    self.trouble = self.trouble or what
+                    for x in self.r.values():
+                        try:
+                            x.stop()
+                        except OSError:
+                            pass
+                    self.snap(f"ANOMALY: {what}")
+                elif not r.tx:
+                    self._role_said[n] = False
             # a signal on a receiver that no radio says it sends (a transmitter keyed with its GUI down or its state
             # wrong): an alarm and both stopped, whatever the GUIs say
             keyed = any(r.tx for r in self.r.values()) or any(v != "RX" for v in self.roles.values())
@@ -372,6 +418,7 @@ class Orch:
                             r.stop()
                         except OSError:
                             pass
+                    self.snap(f"ANOMALY: {what}")
                     self._rf_since = now + 30            # said once a half minute
             elif not loud:
                 self._rf_since = None
@@ -401,6 +448,7 @@ class Orch:
                         self.st.sync["violations"] += 1
                         self.violation = self.violation or what
                         self.st.events.append({"t": now, "kind": "bad", "text": f"OUT OF SYNC: {what}"})
+                        self.snap(f"OUT OF SYNC: {what}")
                 else:
                     self._diff_since = None
                     if not self.st.sync["ok"]:
@@ -467,6 +515,43 @@ class Orch:
             self.changing -= 1
         return {k: bench._value(self.r[A], k) for k in want}
 
+    SQL_TRY = (2, 4, 6, 8, 10, 12, 15, 20, 25, 30)
+
+    def squelch_cal(self):
+        """The lowest squelch that silences both radios' quiet (their TCI audio with nothing sent: 20 dB under its
+        level with the squelch open, or -60 dBFS), the volume 0 on both: the level every test then holds (the owner,
+        2026-11-23: "make sure squelch is at a reasonable level before each test", "turn the volume down")"""
+        from tones import TciRx
+        rx = {n: TciRx(r.host) for n, r in self.r.items()}
+
+        def level(n):
+            t0 = time.time()
+            time.sleep(1.5)
+            x, _ = rx[n].audio(t0, time.time())
+            return 20 * math.log10(float(np.sqrt(np.mean(x ** 2))) + 1e-9) if len(x) else 0.0
+        try:
+            time.sleep(1.0)
+            self.both({"vol": 0, "sql": 0})
+            time.sleep(1.0)
+            open_ = {n: level(n) for n in self.r}
+            for q in self.SQL_TRY:
+                self.both({"sql": q})
+                time.sleep(1.0)
+                now = {n: level(n) for n in self.r}
+                if all(now[n] <= min(open_[n] - 20, -60) for n in self.r):
+                    self.sql = q
+                    break
+        finally:
+            for c in rx.values():
+                c.close()
+        if self.sql is None:
+            self.sql = 10
+            self.st.ev(f"no squelch up to {self.SQL_TRY[-1]} silenced the quiet ({open_} dBFS open): held at 10", "bad")
+        else:
+            self.st.ev(f"squelch {self.sql} silences the quiet on both (open: {({n: round(v) for n, v in open_.items()})} "
+                       f"dBFS, at {self.sql}: {({n: round(v) for n, v in now.items()})} dBFS); volume 0 on both", "ok")
+        self.both({"sql": self.sql})
+
     def ready(self):
         """Before every test: neither keyed, both transmitters locked, the two on one frequency and mode. What is not
         is put right (both locked, both on page G on the first radio's frequency and mode); what cannot be stops the
@@ -493,6 +578,9 @@ class Orch:
         if (self.r[A].state.get("freq"), self.r[A].state.get("mode")) != \
                 (self.r[B].state.get("freq"), self.r[B].state.get("mode")):
             bad.append("the two apart")
+        if not bad and self.sql is not None and any(int(r.state.get("sql", -1)) != self.sql or
+                                                    int(r.state.get("vol", -1)) != 0 for r in rs):
+            self.both({"sql": self.sql, "vol": 0})      # the squelch and the volume as calibrated, before every test
         if not bad:
             self.st.ev("ready: both locked, off the air, on "
                        f"{int(self.r[A].state.get('freq', 0)) / 1e6:.4f} MHz mode {self.r[A].state.get('mode')}", "conf")
@@ -672,6 +760,85 @@ def find_steps(x, fs=FS):
     return ok, round(off), steps, seen
 
 
+SPEC_LO, SPEC_HI = 100, 3300   # Hz from the dial the spectrum judge looks in (a step 380 Hz low lands at 220 Hz)
+
+
+def spec_steps(L, f, mode, t0, t1):
+    """The stepped sequence in the listener's own spectrum (the remote's frames, ~10 a second; zoom 8: 12 Hz a bin)
+    between t0 and t1 (the sender's own on and off): per frame the strongest bin 100-3300 Hz from the dial on the side
+    the mode sends (below it in LSB; AM's upper sideband, its carrier left out), its height over the frame's median.
+    The clear steps (runs of one bin within 25 Hz, 15 dB up, at least STEP_S * 0.5) give the timing and the radios'
+    offset; then each step's own frames (its window trimmed 0.1 s) averaged: the bin at the dial + (tone + offset) must
+    be the strongest there and STEP_SNR_DB over the median. Returns (found, offset, [per step: (heard Hz from the dial,
+    dB, frames)], frames seen)"""
+    frames = [(t, cen, wid, v) for (t, cen, wid, v) in list(L.r.spectra) if t0 <= t <= t1 and v]
+    if len(frames) < 10:
+        return False, None, [], len(frames)
+    sign = -1 if mode in (0, 1) else 1
+
+    def offsets(cen, wid, n):
+        per = wid / n
+        return [((cen - wid / 2 + (i + 0.5) * per) - f) * sign for i in range(n)]
+    pts = []
+    for t, cen, wid, v in frames:
+        off = offsets(cen, wid, len(v))
+        med = sorted(v)[len(v) // 2]
+        cand = [(v[i], off[i]) for i in range(len(v)) if SPEC_LO <= off[i] <= SPEC_HI]
+        if not cand:
+            continue
+        db, a = max(cand)
+        pts.append((t, a, db - med))
+    runs, cur = [], None
+    for t, a, h in pts + [(None, None, None)]:
+        if t is not None and h >= STEP_ANCHOR_DB and cur and abs(a - cur["a"][-1]) <= 25:
+            cur["a"].append(a)
+            cur["t1"] = t
+            continue
+        if cur and cur["t1"] - cur["t0"] >= STEP_S * 0.5:
+            runs.append({"f": float(np.median(cur["a"])), "t": cur["t0"]})
+        cur = {"a": [a], "t0": t, "t1": t} if t is not None and h >= STEP_ANCHOR_DB else None
+    n, best = len(STEP_HZ), None
+    for i, r in enumerate(runs):
+        for k0 in range(n):
+            o_ = r["f"] - STEP_HZ[k0]
+            if abs(o_) > STEP_MAX_OFFSET_HZ:
+                continue
+            m = 1
+            while i + m < len(runs) and k0 + m < n and abs(runs[i + m]["f"] - STEP_HZ[k0 + m] - o_) <= STEP_SPREAD_HZ:
+                m += 1
+            if m >= 2 and (best is None or m > best[0] or (m == best[0] and abs(o_) < abs(best[3]))):
+                best = (m, k0, r["t"], o_)
+    if best is None:
+        return False, None, [], len(frames)
+    _, k0, t_k0, o_ = best
+    steps, ok = [], True
+    for k, hz in enumerate(STEP_HZ):
+        a, b = t_k0 + (k - k0) * STEP_S + 0.1, t_k0 + (k - k0 + 1) * STEP_S - 0.1
+        fr = [(cen, wid, v) for (t, cen, wid, v) in frames if a <= t <= b]
+        if not fr:
+            steps.append((None, None, 0))
+            ok = False
+            continue
+        cen, wid, _ = fr[0]
+        nb = len(fr[0][2])
+        avg = [sum(x[2][i] for x in fr if len(x[2]) == nb) / len(fr) for i in range(nb)]
+        off = offsets(cen, wid, nb)
+        band = [i for i in range(nb) if SPEC_LO <= off[i] <= SPEC_HI]
+        near = [i for i in band if abs(off[i] - (hz + o_)) <= 25]
+        med = sorted(avg)[nb // 2]
+        if not near:
+            steps.append((None, None, len(fr)))
+            ok = False
+            continue
+        i_t = max(near, key=lambda i: avg[i])
+        top = max(avg[i] for i in band)
+        h = avg[i_t] - med
+        steps.append((round(off[i_t]), round(h, 1), len(fr)))
+        if h < STEP_SNR_DB or avg[i_t] < top - 0.5:
+            ok = False
+    return ok, round(o_), steps, len(frames)
+
+
 def save_wav(o, label, x):
     """The listener's audio of a test, kept in the run's folder as the evidence of what it heard"""
     import wave
@@ -698,9 +865,10 @@ def over(o, sender, listener, f, mode, label, body, w=W, agc=0, pages=True):
         # the same filter on both in SSB (each radio's own differed: the X6100 300-2700, the X6200 100-3000; a step
         # heard 380 Hz high went past the X6100's top); AM and FM keep their own, a width of their own kind
         if pages:
-            want, checks = bench.rx_profile(f, mode, pre=0, att=0, rfg=100, agc=agc, sql=0,
+            want, checks = bench.rx_profile(f, mode, pre=0, att=0, rfg=100, agc=agc, sql=o.sql or 0,
                                             filt=(100, 3000) if mode in (0, 1, 2, 3) else None)
-            o.both(dict(want, pwr=w, atu=0, xit=0), checks)
+            # zoom 8: the spectrum 12.5 kHz wide, 12 Hz a bin, each tone where it should be told apart
+            o.both(dict(want, pwr=w, atu=0, xit=0, zoom=8), checks)
     with o.step("every receiver setting the Watch compares alike on both"):
         o.pair_alike()
     with o.step(f"{sender} may send, {listener} may listen") as s:
@@ -730,6 +898,11 @@ def over(o, sender, listener, f, mode, label, body, w=W, agc=0, pages=True):
         except Refused as e:
             o.st.ev(f"{sender}: TX not locked again: {e}", "bad")
         o.roles = {A: "RX", B: "RX"}
+    for sh in watch.shots:
+        with o.st.lock:
+            o.st.shots.append({"t": time.time(), "label": f"{label}: {sender} on the air"
+                               + ("" if sh.get("on_air") else " (NOT on the air in the picture)"),
+                               "paths": sh.get("paths") or {}})
     o.st.ev(f"over {label}: {sender}'s meter at most {watch.tx_peak.get(sender)} W, {listener}'s S-meter at most "
             f"{watch.rx_peak} dBm, heard {watch.heard_db.get(sender) if hasattr(watch, 'heard_db') else None} dB, "
             f"deaf overs {len(watch.deaf)}" + (f", stopped: {watch.why}" if watch.why else ""), "conf")
@@ -756,7 +929,18 @@ def audio_steps(o, sender, listener, f, mode, label):
                     raise Refused(f"{sender}'s meter showed no power")
         over(o, sender, listener, f, mode, label, body)
         time.sleep(1.0)                     # the audio's last frames
-        with o.step(f"{listener} heard every step, in order") as s:
+        if mode != 7:                       # FM: its sidebands spread with the deviation; judged by its audio
+            with o.step(f"{listener}'s own spectrum shows every step at the dial "
+                        f"{'-' if mode in (0, 1) else '+'} its tone, in order, between {sender}'s own on and off") as s:
+                S = o.r[sender]
+                on, off = S.tx_last if S.tx_last else got["t"]
+                sfound, soff, ssteps, nfr = spec_steps(L, f, mode, on - 0.2, off + 0.5)
+                got.update(spectrum={"found": sfound, "offset": soff, "steps": ssteps, "frames": nfr})
+                if not sfound:
+                    raise Refused(f"{listener}'s spectrum ({nfr} frames while {sender} was on the air): the sequence "
+                                  f"not there whole; per step (Hz from the dial, dB, frames) {ssteps or 'no anchor'}")
+                s.confirm(f"offset {soff:+d} Hz; " + ", ".join(f"{h} Hz {d} dB" for h, d, _ in ssteps))
+        with o.step(f"{listener} heard every step, in order (its audio)") as s:
             t_on, t_off = got["t"]
             x, _ = rx.audio(t_on - 0.5, t_off + 1.5)
             if len(x) < FS:
@@ -764,6 +948,10 @@ def audio_steps(o, sender, listener, f, mode, label):
             found, off, steps, seen = find_steps(x)
             got.update(found=found, offset=off, steps=steps, seen=seen, wav=save_wav(o, label, x))
             if not found:
+                if got.get("spectrum", {}).get("found"):     # on the air and in its spectrum, not in its audio
+                    return None, (f"in {listener}'s spectrum every step at its frequency (offset "
+                                  f"{got['spectrum']['offset']:+d} Hz), but NOT whole in its audio: per step {steps} "
+                                  f"(its audio path, the squelch {L.state.get('sql')}?)"), got
                 raise Refused(f"the sequence not heard whole in {listener}'s audio: per step (Hz, dB over the noise, "
                               f"s) {steps or 'no anchor'}; clear tones (Hz, s) {seen[:8]}")
             spread = max(d for _, d, _ in steps) - min(d for _, d, _ in steps)
@@ -774,9 +962,12 @@ def audio_steps(o, sender, listener, f, mode, label):
         return False, str(e), got
     finally:
         rx.close()
-    return True, (f"all {len(STEP_HZ)} steps heard in order, offset {got['offset']:+d} Hz, weakest "
-                  f"{min(d for _, d, _ in got['steps'])} dB over the audio's noise, spread {got['spread_db']} dB "
-                  f"across the steps"), got
+    sp = got.get("spectrum")
+    return True, ((f"spectrum: all {len(STEP_HZ)} steps at the dial {'-' if mode in (0, 1) else '+'} their tones, "
+                   f"offset {sp['offset']:+d} Hz, weakest {min(d for _, d, _ in sp['steps'])} dB; " if sp else
+                   "FM (judged by its audio): ")
+                  + f"audio: all heard in order, weakest {min(d for _, d, _ in got['steps'])} dB, spread "
+                    f"{got['spread_db']} dB"), got
 
 
 CW_TEXT = "VVV TEST DE Q1TST"
@@ -2445,6 +2636,8 @@ def run(names, port, lan, linger, everything=False, soak=1):
         o.both_page("G")
         o.both({"freq": 14200000, "mode": 2})
         st.ev("both locked, on page G, on 14.2000 MHz USB, confirmed alike", "ok")
+        st.phase = "squelch"
+        o.squelch_cal()
         st.phase = "running"
         for k in range(soak):
             if soak > 1:
