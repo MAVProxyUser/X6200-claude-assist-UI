@@ -100,6 +100,10 @@ def t_filters(run):
 
 def t_walkie_upright(run):
     def fn(r):
+        # the Sentry's G opened here (it had relied on the page an earlier test left; orch starts each on A), and the
+        # page found put back after
+        page = r.state.get("pg")
+        bench.open_page(r, "G")
         c, _ = fresh(r.host, secs=0.3)
         try:
             c.send("screen 1")
@@ -109,7 +113,10 @@ def t_walkie_upright(run):
             c.close()
         sizes = [jpeg_size(f[2][8:]) for f in fr[-3:]]
         ok = bool(sizes) and all(s and s[1] > s[0] for s in sizes) and r.state.get("pg") == "G"
-        return ok, f"page {r.state.get('pg')}: {len(fr)} pictures, the last {sizes} (width, height): portrait {ok}"
+        said = f"page {r.state.get('pg')}: {len(fr)} pictures, the last {sizes} (width, height): portrait {ok}"
+        if page and page != "G":
+            bench.open_page(r, page)
+        return ok, said
     per_radio(run, "cover", "walkie-upright", fn, ["screen-walkie-upright"])
 
 
@@ -193,6 +200,13 @@ def t_rigctl_local(run):
 
 def t_sessions_mtime(run):
     def fn(n, h, ip):
+        # one connection first: a session not seen for an hour is written at its first connection, by design
+        # (remote_server.c sess_touch: another address, or an hour on); the three after it must write nothing
+        # (orch, 2026-11-24: the bench's receive-only session, an hour unused, wrote the file inside the check)
+        r = bench.Radio(n, run.c["radios"][n], False)
+        time.sleep(1.0)
+        r.close()
+        time.sleep(1.5)
         before = ssh(h, "date -r /mnt/remote_sessions.conf +%s").strip()
         for _ in range(3):
             r = bench.Radio(n, run.c["radios"][n], False)

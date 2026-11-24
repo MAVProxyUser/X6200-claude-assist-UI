@@ -3868,6 +3868,30 @@ SUITE_PORTED_COVER_A = [
     ("t_tx_outside", "tx-outside", "transmitting outside the ham bands: the switch refuses it while off"),
 ]
 
+# suite_cover's and suite_cover_b's checks, all but those orch has already (tci-rate is tci-audio-rate, freq-lock is
+# dial-lock): (module, its t_ function, the check, what: the t_ function's first line)
+SUITE_MORE_SKIP = {"tci-rate", "freq-lock"}
+
+
+def suite_more_ported():
+    import importlib
+    out = []
+    for module in ("suite_cover", "suite_cover_b"):
+        try:
+            m = importlib.import_module(module)
+        except Exception as e:              # a batch that does not load: said, the rest of orch goes on
+            say(f"orch: {module} not loaded ({type(e).__name__} {e})")
+            continue
+        for t_name in sorted(n for n in dir(m) if n.startswith("t_") and callable(getattr(m, n))):
+            try:
+                checks = suite_checks(module, t_name)
+            except Exception:
+                continue
+            doc = " ".join((getattr(m, t_name).__doc__ or "").split())
+            what = doc.split(". ")[0][:200] if doc else t_name[2:].replace("_", " ")
+            out += [(module, t_name, name, what) for name in checks if name not in SUITE_MORE_SKIP]
+    return out
+
 
 def suite_checks(module, t_name):
     """{test: (kind, fn, want_tx)} that module's t_name registers (kind "r": fn(radio), "host": fn(name, host, ip))"""
@@ -4766,6 +4790,9 @@ TESTS = [
                                                                                         name, alone=name == "screensaver")),
            150 if name == "screensaver" else 45)
       for t_name, name, what in SUITE_PORTED_COVER_A],
+    *[Test(name, "both RX", f"the 1:1 suite's {module[6:]} {name} on both radios at once: {what}",
+           (lambda o, module=module, t_name=t_name, name=name: suite_pair(o, module, t_name, name)), 45)
+      for module, t_name, name, what in suite_more_ported()],
     Test("system-checks", "both", "each radio read over SSH, nothing changed: battery log and model, data partition, "
          "settings' good copy, password logins refused, Tailscale, logs, start trace, services and ports, CPU, "
          "temperature, GPU, sessions file, update state, ADIF header, libft8, clock; the same version on both",
