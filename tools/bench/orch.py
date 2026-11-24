@@ -82,10 +82,6 @@ KNOWN = {
     "cw-text x6100>x6200": "the X6100 leaks carrier about 15 dB under its mark between the elements at 0.1 W and the "
                            "X6200's decoder loses word spaces and letters on it (3 runs in 5): the X6100's TX DC-offset "
                            "calibration (the owner's call); the other way copies clean (ORCH_FINDINGS.md)",
-    "web-secrets": "both radios run the 0.3.12.46 image's web server, which serves https/key.pem and "
-                   "remote_sessions.conf to anyone on the network; fixed in the repo (3906e452 the key, 7b01807b the "
-                   "sessions), it cannot be hot-installed (that image's settings lack CERT_DIR/DMR_DIR): passes once "
-                   "the radios run an image with both (a release, the owner's word)",
 }
 
 
