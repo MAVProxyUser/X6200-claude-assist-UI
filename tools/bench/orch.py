@@ -75,6 +75,10 @@ STORE = os.path.join(bench.STATE, "orch_results.json")
 
 # Failures that cannot be put right from here: said with each, not run again until --all (or the reason is gone)
 KNOWN = {
+    "power-steps x6200>x6100": "the X6200 does not hold a TCI over's power to its setting below 1 W: its meter read 0.3 W "
+                               "at 0.2, 0.8 at 0.5, and the X6100 heard 0.5 and 1.0 W alike (+0.3 dB), 4 runs in 6; "
+                               "its ALC reads 0 and tx_level.c power_hold steers by its own 0.1 W-step meter (a GUI "
+                               "fault to fix: ORCH_FINDINGS.md); the X6100's own steps pass",
     "cw-text x6100>x6200": "the X6100 leaks carrier about 15 dB under its mark between the elements at 0.1 W and the "
                            "X6200's decoder loses word spaces and letters on it (3 runs in 5): the X6100's TX DC-offset "
                            "calibration (the owner's call); the other way copies clean (ORCH_FINDINGS.md)",
@@ -205,7 +209,7 @@ $("prog").style.width=(100*c.done/Math.max(1,c.total))+"%";
 $("tests").innerHTML=d.tests.map((x,i)=>`<tr class="${i===d.cur?"cur":""}"><td>${i+1}</td><td>${esc(x.name)}</td><td>${esc(x.role)}</td><td class="${(x.result||"").replace(" ","")}">${esc(x.result||(i===d.cur?"running":""))}</td><td>${x.secs!=null?x.secs.toFixed(0):""}</td><td class="says">${esc(x.says)}</td></tr>`).join("");
 const cs=r=>r?(r.ok?"takes it":"refuses")+(r.reads!=null?" (reads "+esc(JSON.stringify(r.reads))+")":"")+(r.err?" "+esc(r.err):""):"";
 $("caps").innerHTML=(d.caps_diff||[]).map(c=>`<tr><td>${esc(c.key)}</td><td class="says">${cs(c.radios.x6100)}</td><td class="says">${cs(c.radios.x6200)}</td></tr>`).join("")||"<tr><td class=muted colspan=3>not probed yet, or no difference</td></tr>";
-$("kept").innerHTML=(d.kept||[]).map(k=>`<tr><td>${esc(k.name)}</td><td class="${(k.result||"").replace(" ","")}">${esc(k.result)}${k.known?" (known)":""}</td><td>${k.at?new Date(k.at*1000).toLocaleString():""}</td><td class="says">${esc(k.gui||"")}</td><td class="says">${esc(k.known||k.says)}</td></tr>`).join("");
+$("kept").innerHTML=(d.kept||[]).map(k=>`<tr><td>${esc(k.name)}</td><td class="${(k.result||"").replace(" ","")}">${esc(k.result)}${k.known?" (known)":""}${k.runs?" &middot; "+k.passes+"/"+k.runs+" passed":""}</td><td>${k.at?new Date(k.at*1000).toLocaleString():""}</td><td class="says">${esc(k.gui||"")}</td><td class="says">${esc(k.known||k.says)}</td></tr>`).join("");
 const show={cmd:$("fcmd").checked,conf:$("fconf").checked,radio:$("fradio").checked};
 $("ev").innerHTML=d.events.slice().reverse().filter(e=>show[e.kind]!==false).map(e=>`<div class="${e.kind}">${t(e.t)} ${e.test?"["+esc(e.test)+"] ":""}${esc(e.text)}</div>`).join("");}
 tick();setInterval(tick,700);
@@ -2429,7 +2433,7 @@ TESTS = [
 ]
 
 
-def run(names, port, lan, linger, everything=False):
+def run(names, port, lan, linger, everything=False, soak=1):
     kept = store_load()
     if names:
         tests = [t for t in TESTS if t.name in names or t.name.split(" ")[0] in names]
@@ -2477,37 +2481,47 @@ def run(names, port, lan, linger, everything=False):
         o.both({"freq": 14200000, "mode": 2})
         st.ev("both locked, on page G, on 14.2000 MHz USB, confirmed alike", "ok")
         st.phase = "running"
-        for i, t in enumerate(tests):
-            with st.lock:
-                st.cur = i
-            st.ev(f"TEST {i + 1}/{len(tests)} {t.name} ({t.role}): {t.what}")
-            o.ready()                       # never on from radios set wrong: refused here stops the run
-            o.violation = None
-            o.trouble = None
-            for r in o.r.values():
-                r.send(f"banner BENCH {t.name.upper()} ({t.role.upper()})"[:100])
-            t0 = time.time()
-            try:
-                ok, says, data = t.fn(o)
-            except Refused as e:
-                ok, says, data = False, f"refused: {e}", {}
-            except Exception as e:      # a bug in the test itself: said, the run goes on
-                ok, says, data = False, f"error in the test: {type(e).__name__}: {e}", {}
-            if o.violation:
-                ok, says = False, f"OUT OF SYNC during the test ({o.violation}); " + says
-            if o.trouble:
-                ok, says = False, f"{o.trouble}; " + says
-            res = "PASS" if ok is True else "LOOK" if ok is None else "FAIL"
-            with st.lock:
-                st.tests[i].update(result=res, says=says, secs=time.time() - t0, data=data)
-            store_put(t.name, {"result": res, "says": says, "at": time.time(), "secs": round(time.time() - t0, 1),
-                               "gui": hello(o.r[A]), "run": os.path.basename(st.run_dir)})
-            st.ev(f"{res} {t.name}: {says}", "ok" if res == "PASS" else "bad")
-            st.ev(f"data of {t.name}: {json.dumps(data, default=str)[:4000]}", "conf")
-            for r in o.r.values():
-                r.send("banner")
-            with open(os.path.join(st.run_dir, "results.json"), "w") as fh:
-                json.dump(st.tests, fh, indent=1, default=str)
+        for k in range(soak):
+            if soak > 1:
+                st.phase = f"soak {k + 1} of {soak}"
+                st.ev(f"SOAK ROUND {k + 1} OF {soak}", "ok")
+                with st.lock:
+                    for x in st.tests:
+                        x.update(result=None, says="", secs=None, steps=[])
+            for i, t in enumerate(tests):
+                with st.lock:
+                    st.cur = i
+                st.ev(f"TEST {i + 1}/{len(tests)} {t.name} ({t.role}): {t.what}")
+                o.ready()                       # never on from radios set wrong: refused here stops the run
+                o.violation = None
+                o.trouble = None
+                for r in o.r.values():
+                    r.send(f"banner BENCH {t.name.upper()} ({t.role.upper()})"[:100])
+                t0 = time.time()
+                try:
+                    ok, says, data = t.fn(o)
+                except Refused as e:
+                    ok, says, data = False, f"refused: {e}", {}
+                except Exception as e:      # a bug in the test itself: said, the run goes on
+                    ok, says, data = False, f"error in the test: {type(e).__name__}: {e}", {}
+                if o.violation:
+                    ok, says = False, f"OUT OF SYNC during the test ({o.violation}); " + says
+                if o.trouble:
+                    ok, says = False, f"{o.trouble}; " + says
+                res = "PASS" if ok is True else "LOOK" if ok is None else "FAIL"
+                with st.lock:
+                    st.tests[i].update(result=res, says=says, secs=time.time() - t0, data=data)
+                prev = store_load().get(t.name, {})
+                tally = {"runs": prev.get("runs", 0) + 1, "passes": prev.get("passes", 0) + (res == "PASS"),
+                         "fails": prev.get("fails", 0) + (res == "FAIL")}
+                store_put(t.name, {"result": res, "says": says, "at": time.time(), "secs": round(time.time() - t0, 1),
+                                   "gui": hello(o.r[A]), "run": os.path.basename(st.run_dir), **tally})
+                st.ev(f"{res} {t.name}: {says}", "ok" if res == "PASS" else "bad")
+                st.ev(f"data of {t.name}: {json.dumps(data, default=str)[:4000]}", "conf")
+                for r in o.r.values():
+                    r.send("banner")
+                with open(os.path.join(st.run_dir, "results.json"), "w") as fh:
+                    json.dump(st.tests, fh, indent=1, default=str)
         st.phase = "done"
     except Refused as e:
         st.phase = f"stopped: {e}"
@@ -2538,15 +2552,17 @@ def main():
     rp.add_argument("--lan", action="store_true", help="the console on the network, not only this computer")
     rp.add_argument("--linger", type=int, default=3600, help="seconds the console stays up after the run")
     rp.add_argument("--all", action="store_true", help="every test, the passed ones too")
+    rp.add_argument("--soak", type=int, default=1, help="the tests this many times over (each test's tally kept)")
     a = ap.parse_args()
     if a.cmd == "list":
         kept = store_load()
         for t in TESTS:
             k = kept.get(t.name, {})
             last = "KNOWN" if t.name in KNOWN else k.get("result", "never run")
-            print(f"{t.name:26s} {last:9s} {t.role:20s} ~{t.est_s:3d} s  {t.what}")
+            tally = f"{k.get('passes', '-')}/{k.get('runs', '-')}"
+            print(f"{t.name:26s} {last:9s} {tally:>7s} {t.role:20s} ~{t.est_s:3d} s  {t.what}")
         return
-    run([x for x in a.only.split(",") if x], a.port, a.lan, a.linger, everything=a.all)
+    run([x for x in a.only.split(",") if x], a.port, a.lan, a.linger, everything=a.all or a.soak > 1, soak=a.soak)
 
 
 if __name__ == "__main__":
