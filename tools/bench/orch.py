@@ -1164,6 +1164,130 @@ def digi_text(o, sender, listener, mode, label):
     return True, f"sent {text!r}, decoded {res['decoded']!r} ({res['cer']:.0%} of the characters wrong)", res
 
 
+def in_parallel(o, fn):
+    """fn(name, radio) on both radios at once, inside one guarded change: {name: its return}; a Refused in either is
+    raised after both are done"""
+    out, errs = {}, {}
+
+    def one(n):
+        try:
+            out[n] = fn(n, o.r[n])
+        except (Refused, OSError, ValueError, IndexError) as e:
+            errs[n] = f"{n}: {e}"
+    o.changing += 1
+    try:
+        th = [threading.Thread(target=one, args=(n,)) for n in o.r]
+        [t.start() for t in th]
+        [t.join(30) for t in th]
+    finally:
+        o.changing -= 1
+    if errs:
+        raise Refused("; ".join(errs.values()))
+    return out
+
+
+def alike(o, keys):
+    """The two radios read the same for keys (their state as they last said it): refused naming what differs"""
+    d = {k: (bench._value(o.r[A], k), bench._value(o.r[B], k)) for k in keys
+         if bench._value(o.r[A], k) != bench._value(o.r[B], k)}
+    if d:
+        raise Refused("the two differ: " + ", ".join(f"{k} {a}/{b}" for k, (a, b) in d.items()))
+
+
+def t_tci_control(o):
+    """Each radio's own TCI (port 50001) given the same VFO and modulation at once: each radio's remote state must
+    say them (confirmed), the two alike; then back"""
+    from remote_ws import Remote
+    plan = [(7074000, "USB", 2), (14040000, "CW", 4), (21074000, "LSB", 0), (14200000, "USB", 2)]
+    seen = []
+    with o.step("both on page G"):
+        o.both_page("G")
+    clients = {n: Remote(r.host, 50001, timeout=5) for n, r in o.r.items()}
+    time.sleep(1.0)                             # the server's greeting first (it ends with ready)
+    try:
+        for f, mod, m in plan:
+            with o.step(f"TCI vfo:0,0,{f}; modulation:0,{mod}; on both, each confirmed by its own state") as s:
+                def one(n, r, f=f, mod=mod, m=m):
+                    clients[n].send(f"vfo:0,0,{f};")
+                    clients[n].send(f"modulation:0,{mod};")
+                    r.wait(f"{f} Hz {mod}", lambda: int(r.state.get("freq", 0)) == f and int(r.state.get("mode", -1)) == m,
+                           6)
+                in_parallel(o, one)
+                alike(o, ("freq", "mode"))
+                seen.append(f"{f / 1e6:.3f} {mod}")
+                s.confirm(f"both {f} Hz mode {m}")
+    finally:
+        for c in clients.values():
+            c.close()
+    return True, f"TCI set {len(plan)} VFO/modulation pairs, each confirmed on both: {', '.join(seen)}", {"seen": seen}
+
+
+def t_rigctl(o):
+    """Hamlib's NET rigctl (4532) on both at once: F/f, M/m read back and confirmed by each radio's own state, the two
+    alike; T 1 (PTT) refused and nothing keyed"""
+    from suite_more import rig
+    with o.step("both on page G"):
+        o.both_page("G")
+    with o.step("F 14074000, f, M USB 2400, m on both; each radio's state confirms") as s:
+        def one(n, r):
+            out = rig(r.host, ["F 14074000", "f", "M USB 2400", "m"])
+            if not out[0].startswith("RPRT 0") or out[1].split()[:1] != ["14074000"] or out[3].split()[:1] != ["USB"]:
+                raise Refused(f"rigctl answered {out}")
+            r.wait("14.074 USB", lambda: int(r.state.get("freq", 0)) == 14074000 and int(r.state.get("mode", -1)) == 2, 5)
+            return out
+        got = in_parallel(o, one)
+        alike(o, ("freq", "mode"))
+        s.confirm(str(got))
+    with o.step("T 1 (rigctl's PTT) on both: refused, nothing keyed") as s:
+        def ptt(n, r):
+            out = rig(r.host, ["T 1", "t"])
+            time.sleep(0.5)
+            if not out[0].startswith("RPRT -") or out[1].split()[:1] != ["0"] or r.tx:
+                raise Refused(f"rigctl's T 1 answered {out}, on the air {r.tx}")
+            return out
+        got2 = in_parallel(o, ptt)
+        s.confirm(str(got2))
+    return True, "rigctl F/f and M/m confirmed on both and alike; its PTT refused on both, nothing keyed", \
+        {"set": got, "ptt": got2}
+
+
+def t_dial_lock(o):
+    """The dial locked on both: a frequency set refused (err, the dial where it was once the err came); unlocked, the
+    same set taken on both"""
+    f0, f1 = 14200000, 14201000
+    with o.step("both on page G, 14.200 MHz USB"):
+        o.both_page("G")
+        o.both({"freq": f0, "mode": 2})
+    try:
+        with o.step("the dial lock on, on both, confirmed"):
+            def lock(n, r):
+                r.send("set lock 1")
+                r.wait("locked", lambda: int(r.state.get("ulock", 0)) == 1, 5)
+            in_parallel(o, lock)
+        with o.step(f"set freq {f1} on both: refused, the dial kept") as s:
+            def try_set(n, r):
+                e0 = len(r.errs)
+                r.send(f"set freq {f1}")
+                r.wait("its refusal", lambda: len(r.errs) > e0, 5)
+                time.sleep(0.3)
+                if int(r.state.get("freq", 0)) != f0:
+                    raise Refused(f"the dial moved to {r.state.get('freq')} while locked")
+                return r.errs[-1]
+            said = in_parallel(o, try_set)
+            alike(o, ("freq", "mode"))
+            s.confirm(str(said))
+    finally:
+        with o.step("the dial lock off on both, confirmed"):
+            def unlock(n, r):
+                r.send("set lock 0")
+                r.wait("unlocked", lambda: int(r.state.get("ulock", 1)) == 0, 5)
+            in_parallel(o, unlock)
+    with o.step(f"set freq {f1} on both: taken"):
+        o.both({"freq": f1})
+        o.both({"freq": f0})
+    return True, f"locked: the set refused on both ({said[A]!r}), the dial kept; unlocked: taken on both", {"said": said}
+
+
 # ---- The tests ----
 
 class Test:
@@ -1229,6 +1353,12 @@ TESTS = [
           "renewal", lambda s, l, n: (lambda o: tune_carrier(o, s, l, n)), 25),
     *pair("ft8-stop", "", "FT8: ft8 stop 2 s into a CQ takes the sender off the air within 1 s, not again",
           lambda s, l, n: (lambda o: ft8_stop(o, s, l, n)), 35),
+    Test("tci-control", "both RX", "TCI vfo and modulation on both radios' own TCI: each confirmed by its own state, "
+         "the two alike", t_tci_control, 20),
+    Test("rigctl", "both RX", "rigctl F/f M/m on both: confirmed by each radio's state, alike; its PTT refused",
+         t_rigctl, 15),
+    Test("dial-lock", "both RX", "the dial lock on both: a set refused with the dial kept; off, the set taken",
+         t_dial_lock, 15),
     Test("rx-settings", "both RX", "PRE, ATT, AGC, NB, NR, squelch, RF gain: each set on both, read back alike",
          t_rx_settings, 40),
     Test("ptt-lease x6100", "X6100 TX, X6200 RX", "one PTT never renewed: off the air by itself within 4 s",
