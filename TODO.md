@@ -19,8 +19,8 @@ Open, mine to do:
   framework", "whittle down the tests to essential testable things, not slop"): tools/bench/orch.py has 63 tests (61
   pass, 2 KNOWN); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386 features listed,
   ~1040 not covered on 11-23) still run outside it. Left: pick the essential ones of features.json and move them in.
-- **The X6200 takes no LSB-D (mode 1)** over the remote ("set mode 1" answers nothing, it stays USB); the X6100 does
-  (orch caps). A fault of the X6200's mode list or a difference: to find out.
+- The X6200 taking no LSB-D (mode 1): NOT REPRODUCED 2026-11-24 (the later caps runs read it on both; both took it
+  from LSB on 7.074). Closed.
 - **A TCI over unkeys before its audio is out**: the sender drops what is still in its transmit path (0.3-0.5 s on
   the X6100, 1.2-1.4 s on the X6200): the step tests' last step and SSTV's last rows were lost until the bench padded
   0.8 s of silence (STEP_TAIL_S). Holding the key until the path is empty would fix it for every TCI program.

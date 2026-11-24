@@ -2354,7 +2354,7 @@ def t_caps(o):
         with o.step("each mode's own tuning step on each radio, as it holds it (a knob turn moves the dial by it)") as s:
             steps = {}
             for m in range(8):
-                if not common("mode", m):           # a mode only one radio has (LSB-D on the X6200)
+                if not common("mode", m):           # a mode only one radio has (the caps map says)
                     continue
                 o.both({"mode": m})
                 steps[m] = {n: r.state.get("step") for n, r in o.r.items()}
