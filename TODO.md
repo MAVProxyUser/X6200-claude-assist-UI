@@ -34,20 +34,30 @@ Open, mine to do:
   would copy short overs whole (noted; the tests send two V groups first).
 
 Open, the owner's call or hands:
-- **The X6100's CW carrier between elements** (orch cw-text x6100>x6200, KNOWN): ~15 dB under the mark at 0.1 W; the
-  X6200's decoder loses word spaces and letters on it (3 in 5). Its transmitter's carrier null on the factory base:
-  a calibration that keys the X6100.
-- The squelch (10) opens AM audio 1.3-2 s into a strong carrier (the orchestrator opens it for AM overs): right for
-  the speaker?
+- **CW from the X6100 misread by the X6200's decoder** (orch cw-text x6100>x6200, KNOWN): NOT the X6100's carrier
+  (2026-11-24, keyed at the owner's word: 62 dB under the mark between the elements, 5 dB over the X6200's quiet). The
+  X6200's decoder prints 'TTT' for 'VVV' with AGC fast, the letters but not the word spaces with AGC slow, while its
+  own TCI audio of the same overs copies through the same decoder code on the Mac (tools/cw_replay): what differs on
+  the radio is open (mine to find; ORCH_FINDINGS.md).
+- The squelch mutes the received audio (speaker, decoders, TCI), not the spectrum: ANSWERED 2026-11-24 (the owner:
+  "I don't want wrong squelch to prevent reception"): the tests hold it open (0).
 - The X6100's 15 m/12 m image shifts (below, "15 m and 12 m"): left to try the battery alone, 15 m alone, the case
   temperature. The 10 W figures want a 5 A supply (the 3 A one current-limits).
 - The X6100's 20 m "rake": most likely its stock charger; to confirm with the charger back on for a minute.
-- G's voiceprint of the microphone while keyed: a voice at the mic.
-- The X6200 heard nothing of the X6100 at 7.0-7.6 V of battery: to prove at its next low battery.
+- G's voiceprint of the microphone while keyed: DONE 2026-11-24 (orch g-voiceprint x6100>x6200, the owner: "with the
+  output from the other radio stepping tones"): the X6200's speaker played 2000-500 Hz steps, the X6100 keyed on G at
+  0.1 W; its voiceprint drew all six in order (two pictures, read by their lines), its capture held them, the X6200
+  heard the over. The X6200 as the mic radio: its G does not raise its monitor (issue #15), so not tested that way.
+- The X6200 heard nothing of the X6100 at 7.0-7.6 V of battery: NOT REPRODUCED 2026-11-24 at 7.5 V, 9 % (all the
+  steps heard). It switched itself off sending 0.2 W at 7.1 V on its stock charger.
 - The factory X6100: 6 m puts out 0.8-1.2 W at 0.1 W (its base's floor, not the GUI); Comp; keyboard/mouse, the
-  sideswiper and KEY Train with a paddle untried on it; the X6200's TUNE with an external tuner.
-- From before, unchanged: the Kraken's bearing on the real array; the USB-3000's voice on B with a powered hub and an
-  SDR; screenshots of every menu (deferred).
+  sideswiper and KEY Train with a paddle untried on it (the 6 m floor: ignored for now, the owner 2026-11-24).
+- TUNE for an external tuner (no tuner on the bench; the owner: "do that"): orch ext-tune from the FT8 app's Ext tune
+  PASSED x6100>x6200 2026-11-24 (the tone at 1492.6 Hz for 1500, off 0.87 s after the second press, the app and dial
+  kept, off by its 15 s limit after 15.3 s); x6200>x6100 waits for the X6200's battery. The remote's TUNE passes
+  both ways (tune-carrier).
+- Later (the owner, 2026-11-24): the image shift, the 5 A supply, the rake, the Kraken. From before: the USB-3000's
+  voice on B with a powered hub and an SDR; screenshots of every menu (deferred).
 
 Done since 11-21 (details in git and tools/bench/ORCH_FINDINGS.md):
 - The test rig, as the owner asked it (11-22 to 11-24): bench.py's state layer and page A at the end (cad0140f); the

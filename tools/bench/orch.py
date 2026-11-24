@@ -49,7 +49,10 @@ A, B = "x6100", "x6200"
 GUARD_POLL_S = 0.2          # the sync guard's look at both radios
 GUARD_S = 0.6               # a difference lasting this long outside a change: a violation
 STALE_S = 3.0               # no word from a radio this long: its GUI down (planned or not), said on its card
-SQL_HOLD = 10               # the squelch every test holds (the owner: "a reasonable level before each test")
+SQL_HOLD = 0                # the squelch every test holds: open. The base mutes the received audio while it is closed
+                            # (speaker, decoders, TCI; not the spectrum), and the owner, 2026-11-24: "that is all I
+                            # care about is signal. I don't want wrong squelch to prevent reception" (10 kept AM audio
+                            # closed 1.3-2 s into a carrier). The volume is 0, so nothing is heard; --sql N for another
 RF_ALARM_DBM = -100         # a receiver over this with neither radio saying it transmits: a signal nobody explains
 RF_ALARM_S = 1.0            # (the cable at 0.1 W: about -70 dBm; quiet -121; the X6100's own spurs about -110)
 W = bench.FIRST_PROBE_W     # every over at 0.1 W
@@ -74,6 +77,10 @@ STEP_MAX_OFFSET_HZ = 600    # and none further than this (SSB: the X6100 reads t
 # simply documented, and move on") ----
 
 STORE = os.path.join(bench.STATE, "orch_results.json")
+# The run's state as the console shows it, written every second: the console (orch.py console) is a process of its own
+# that serves it, up between runs (the owner, 2026-11-24: "ensure http://127.0.0.1:8765 stays up!")
+SNAPSHOT = os.path.join(bench.STATE, "orch_status.json")
+SNAPSHOT_STALE_S = 10       # older than this: no run is writing it
 
 # Failures that cannot be put right from here: said with each, not run again until --all (or the reason is gone)
 KNOWN = {
@@ -81,9 +88,11 @@ KNOWN = {
                                "at 0.2, 0.8 at 0.5, and the X6100 heard 0.5 and 1.0 W alike (+0.3 dB), 4 runs in 6; "
                                "its ALC reads 0 and tx_level.c power_hold steers by its own 0.1 W-step meter (a GUI "
                                "fault to fix: ORCH_FINDINGS.md); the X6100's own steps pass",
-    "cw-text x6100>x6200": "the X6100 leaks carrier about 15 dB under its mark between the elements at 0.1 W and the "
-                           "X6200's decoder loses word spaces and letters on it (3 runs in 5): the X6100's TX DC-offset "
-                           "calibration (the owner's call); the other way copies clean (ORCH_FINDINGS.md)",
+    "cw-text x6100>x6200": "the X6200's own CW decoder misreads the X6100's CW (dits as dahs: 'VVV' as 'TTT', word "
+                           "spaces lost), worst with AGC fast; NOT the X6100's carrier (62 dB under its mark between "
+                           "the elements, 2026-11-24), and the X6200's own TCI audio of the same over copies "
+                           "'VSE TEST DE Q1TST' through the same decoder code on this computer: what differs on the "
+                           "radio is to find (ORCH_FINDINGS.md); the other way copies clean",
 }
 
 
@@ -140,6 +149,13 @@ class Status:
                 self.log.flush()
         if kind != "cmd":
             say(text)
+
+    def snapshot(self):
+        """to_json() into SNAPSHOT, whole (a new file renamed over the old)"""
+        tmp = SNAPSHOT + ".tmp"
+        with open(tmp, "w") as fh:
+            fh.write(self.to_json())
+        os.replace(tmp, SNAPSHOT)
 
     def to_json(self):
         with self.lock:
@@ -228,11 +244,31 @@ tick();setInterval(tick,700);
 </script></body></html>"""
 
 
+def snapshot_json():
+    """SNAPSHOT as the console serves it: a run not writing it said in its phase (the run's last state kept)"""
+    try:
+        d = json.load(open(SNAPSHOT))
+    except (OSError, ValueError):
+        return json.dumps({"now": time.time(), "t0": time.time(), "phase": "no run yet", "cur": None, "tests": [],
+                           "events": [], "radios": {}, "sync": {}, "kept": [], "caps_diff": [], "hackrf": {},
+                           "counts": {"pass": 0, "fail": 0, "look": 0, "notrun": 0, "done": 0, "total": 0},
+                           "eta_s": 0, "run_dir": None})
+    age = time.time() - float(d.get("now") or 0)
+    if age > SNAPSHOT_STALE_S:
+        d["phase"] = f"no run going: the last ({os.path.basename(d.get('run_dir') or '')}) {d.get('phase')}, " \
+                     f"its last word {int(age // 60)} min ago"
+        d["cur"] = None
+    d["now"] = time.time()
+    return json.dumps(d, default=str)
+
+
 def console(status, port, lan):
+    """The console on port: status's own state, or (status None: orch.py console) the runs' SNAPSHOT"""
     class H(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path.startswith("/status"):
-                body, ctype = status.to_json().encode(), "application/json"
+                body = status.to_json() if status is not None else snapshot_json()
+                body, ctype = body.encode(), "application/json"
             elif self.path.startswith("/shot/"):        # a picture of a radio's screen (bench.SHOTS_DIR only)
                 name = os.path.basename(self.path[6:].split("?")[0])
                 path = os.path.join(bench.SHOTS_DIR, name)
@@ -241,7 +277,8 @@ def console(status, port, lan):
                     return
                 body, ctype = open(path, "rb").read(), "image/png"
             elif self.path.startswith("/log"):          # the run's every event, as kept in events.jsonl
-                path = os.path.join(status.run_dir or "", "events.jsonl")
+                rd = status.run_dir if status is not None else json.loads(snapshot_json()).get("run_dir")
+                path = os.path.join(rd or "", "events.jsonl")
                 body = open(path, "rb").read() if os.path.exists(path) else b""
                 ctype = "text/plain; charset=utf-8"
             elif self.path in ("/", "/index.html"):
@@ -1127,12 +1164,40 @@ POWER_STEPS = [0.2, 0.5, 1.0]       # W: the listener's level must rise 10*log10
 # X6200 holds a TCI over's power by its own meter (its ALC reads 0, tx_level.c power_hold), which reads 0.1 W steps,
 # so 0.1 W counts as reached from about 0.05 W (2026-11-23: its 0.1 W 4 dB under its 1 W's -10 dB, four runs in five)
 POWER_TOL_DB = 2.0
+POWER_TONE_S = 4.0          # each power's tone; its level the median of the frames that carry it (power_level)
+POWER_TAIL_S = 1.6          # keyed silence after it: the X6200's transmit path holds 1.2-1.4 s of TCI audio at the
+                            # unkey (STEP_TAIL_S's 0.8 s cut the end of its 2 s tones, and the level, averaged over a
+                            # window that took in that silence, moved with it: 2026-11-24)
+POWER_TONE_DB = 15          # a frame carries the tone: within this of the over's strongest frame
+
+
+def power_level(L, hz, on, off):
+    """The listener's spectrum at hz (+-300 Hz) between on and off: per frame its top bin; the frames within
+    POWER_TONE_DB of the strongest are the tone's, their first and last 0.5 s left out; (median dB, frames, the
+    series as [[s from on, dB]])"""
+    fr = []
+    for t, cen, wid, v in list(L.r.spectra):
+        if on <= t <= off + 0.5 and v:
+            per = wid / len(v)
+            a, b = int((hz - 300 - (cen - wid / 2)) / per), int((hz + 300 - (cen - wid / 2)) / per)
+            seg = v[max(a, 0):min(b + 1, len(v))]
+            if seg and a < len(v) and b >= 0:
+                fr.append((t, max(seg)))
+    if not fr:
+        return None, 0, []
+    top = max(v for _, v in fr)
+    tone = [(t, v) for t, v in fr if v >= top - POWER_TONE_DB]
+    t0, t1 = tone[0][0] + 0.5, tone[-1][0] - 0.5
+    mid = sorted(v for t, v in tone if t0 <= t <= t1)
+    series = [[round(t - on, 2), v] for t, v in fr]
+    return (mid[len(mid) // 2] if mid else None), len(mid), series
 
 
 def power_steps(o, sender, listener, f, label):
-    """A 1000 Hz tone 2 s at each of POWER_STEPS (USB, one over each): the listener's spectrum at the tone, between the
-    moments the sender's own state said it went on and off the air, must rise by the power's ratio in dB, within
-    POWER_TOL_DB (the spectrum is the receiver's before its AGC; RF gain fixed)"""
+    """A 1000 Hz tone POWER_TONE_S at each of POWER_STEPS (USB, one over each): the listener's spectrum at the tone
+    (power_level: the median of the frames that carry it, while the sender said it was on the air) must rise by the
+    power's ratio in dB, within POWER_TOL_DB (the spectrum is the receiver's before its AGC; RF gain fixed). Every
+    frame and the sender's meter readings kept in the data"""
     levels, got = [], {}
     S, L = o.r[sender], o.r[listener]
     try:
@@ -1140,22 +1205,40 @@ def power_steps(o, sender, listener, f, label):
             peak = {}
 
             def body(watch, w=w):
-                with o.step(f"{sender} sends 1000 Hz 2 s at {w} W"):
-                    bench.tci_send(S, [[0, 0.3], [1000, 2.0], [0, STEP_TAIL_S]], watch=watch)
+                with o.step(f"{sender} sends 1000 Hz {POWER_TONE_S:g} s at {w} W"):
+                    meters, stop = [], threading.Event()
+
+                    def sample():
+                        while not stop.is_set():
+                            if S.txm:
+                                meters.append([round(time.time(), 2), S.txm[0]])
+                            time.sleep(0.2)
+                    th = threading.Thread(target=sample, daemon=True)
+                    th.start()
+                    try:
+                        bench.tci_send(S, [[0, 0.3], [1000, POWER_TONE_S], [0, POWER_TAIL_S]],
+                                       max_s=POWER_TONE_S + POWER_TAIL_S + 4, watch=watch)
+                    finally:
+                        stop.set()
                     if watch.why:
                         raise Refused(watch.why)
                     peak["w"] = watch.tx_peak.get(sender)
+                    peak["meters"] = meters
             over(o, sender, listener, f, 2, f"{label} {w} W", body, w=w)
             with o.step(f"{listener}'s level while {sender} said it was on the air") as s:
                 if not S.tx_last:
                     raise Refused(f"{sender} never said it was on the air")
                 on, off = S.tx_last
-                lvl, n = bench.spectrum_level(L, f + 1000, on + 0.6, off - 0.4, half=300)
-                if lvl is None or n < 3:
-                    raise Refused(f"{listener} sent {n} spectrum frames covering {f + 1000} Hz while {sender} was on "
+                time.sleep(0.6)                     # the spectrum's last frames
+                lvl, n, series = power_level(L, f + 1000, on, off)
+                got.setdefault("overs", []).append({"w": w, "on_s": round(off - on, 1), "level": lvl, "frames": n,
+                                                    "series": series,
+                                                    "meters": [[round(t - on, 1), m] for t, m in peak.get("meters", [])]})
+                if lvl is None or n < 10:
+                    raise Refused(f"{listener}'s spectrum: {n} frames carried {f + 1000} Hz while {sender} was on "
                                   f"the air ({off - on:.1f} s)")
-                levels.append((w, round(lvl, 1), peak.get("w")))
-                s.confirm(f"{lvl:.1f} dB over {n} frames, {off - on:.1f} s on the air")
+                levels.append((w, float(lvl), peak.get("w")))
+                s.confirm(f"{lvl} dB, the median of {n} frames of the tone, {off - on:.1f} s on the air")
         with o.step(f"{listener}'s level rose with the power") as s:
             got["levels"] = levels
             bad = []
@@ -2878,6 +2961,287 @@ def cw_kbd(o, sender, listener, f, label):
                  f"of the characters wrong; all it printed: {got['printed'][-70:]!r})", got
 
 
+
+# ---- TUNE for an external tuner from an app (2026-11-24, the owner: "tune with external tuner, do that") ----
+EXT_TUNE_HZ = 1500          # FT8's TX offset for the test: the tune's tone lands there (MANUAL "TUNE for an external tuner")
+EXT_TUNE_TOL_HZ = 25        # the tone heard in the listener's audio within this of it
+EXT_TUNE_MIN_DB = 15        # over the listener's quiet before it
+
+
+def tone_at(x, lo=200, hi=3000):
+    """The strongest tone in audio x (FS): (Hz, dB over the median of lo-hi)"""
+    if len(x) < FS // 2:
+        return None, None
+    w = np.hanning(len(x))
+    sp = np.abs(np.fft.rfft(x * w))
+    hz = np.fft.rfftfreq(len(x), 1 / FS)
+    band = (hz >= lo) & (hz <= hi)
+    k = int(np.argmax(np.where(band, sp, 0)))
+    return round(float(hz[k]), 1), round(float(20 * np.log10(sp[k] / (np.median(sp[band]) + 1e-12))), 1)
+
+
+def ext_tune_app(o, sender, listener, label, dial=14074000):
+    """The FT8 app on both on dial (USB-D), the sender's TX offset EXT_TUNE_HZ, TUNE's power 0.1 W on both. The
+    sender's Ext tune (FT8 page 4, F5): on the air with tune 1, the listener's audio a tone at the offset (within
+    EXT_TUNE_TOL_HZ) EXT_TUNE_MIN_DB over its quiet; pressed again: off within 1.5 s; the dial, the mode and the app
+    as they were. Pressed once more and left: off by its time limit (tune_s, 15 s), within 2 s of it"""
+    import suite_air_b as ab
+    from tones import TciRx
+    S, L = o.r[sender], o.r[listener]
+    got = {}
+    rx = None
+    try:
+        with o.step("both on their test calls, the FT8 app open on both on the dial, everything alike"):
+            ft8_both(o, dial)
+        with o.step(f"TUNE's power 0.1 W on both, {sender}'s FT8 TX offset {EXT_TUNE_HZ} Hz") as s:
+            o.both({"tpwr": 1})
+            S.send(f"ft8 txfreq {EXT_TUNE_HZ}")
+            time.sleep(1.0)
+            lim = int(S.state.get("tune_s") or 15)
+            got["limit_s"] = lim
+            if lim > 16:
+                raise Refused(f"{sender}'s TUNE time limit {lim} s: over the bench's 16 s for one over")
+            s.confirm(f"TUNE power {int(S.state.get('tpwr', -1)) / 10} W, its limit {lim} s")
+        p, total = bench.chain_gate(o.c, "radios")
+        bench.radio_tx_gate(S, o.c, W)
+        bench.listener_gate(L)
+        rx = TciRx(L.host)
+        time.sleep(2.0)
+        o.roles = {sender: "TX", listener: "RX"}
+        watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=L, w=W, label=label)
+        pg = ab.Pages(S, n=5)
+        try:
+            with o.step(f"{sender}'s Ext tune (FT8 page 4, F5): on the air with tune 1") as s:
+                q0 = time.time()
+                pg.to(3)
+                bench.tx_log({"who": sender, "f": dial + EXT_TUNE_HZ, "w": W, "what": f"orch: {label}"})
+                ab.tap(S, "F5")
+                S.wait("on the air with TUNE", lambda: (S.tx and S.state.get("tune")) or watch.why, 3)
+                if watch.why:
+                    raise Refused(watch.why)
+                t_on = time.time()
+                s.confirm(f"tune {S.state.get('tune')}, {S.state.get('tune_s')} s limit")
+            time.sleep(4.0)
+            with o.step(f"Ext tune pressed again: off within 1.5 s") as s:
+                t_stop = time.time()
+                ab.tap(S, "F5")
+                S.wait("off the air", lambda: not S.tx and not S.state.get("tune"), 3)
+                d = time.time() - t_stop
+                got["stop_s"] = round(d, 2)
+                if d > 1.5:
+                    raise Refused(f"off {d:.1f} s after the press")
+                s.confirm(f"off {d:.2f} s after the press")
+            with o.step(f"{listener} heard a tone at the app's offset ({EXT_TUNE_HZ} Hz), "
+                        f"{EXT_TUNE_MIN_DB} dB over its quiet") as s:
+                time.sleep(1.5)
+                x, _ = rx.audio(t_on + 1.0, t_stop - 0.3)
+                q, _ = rx.audio(q0 - 1.8, q0 - 0.1)
+                hz, db = tone_at(x)
+                qhz, qdb = tone_at(q)
+                lvl = 10 * np.log10(np.mean(np.square(x)) + 1e-12) if len(x) else None
+                qlvl = 10 * np.log10(np.mean(np.square(q)) + 1e-12) if len(q) else None
+                got.update(hz=hz, peak_db=db, level_db=lvl and round(lvl, 1), quiet_db=qlvl and round(qlvl, 1))
+                if hz is None or abs(hz - EXT_TUNE_HZ) > EXT_TUNE_TOL_HZ:
+                    raise Refused(f"the strongest tone {hz} Hz ({db} dB over the band's median), not "
+                                  f"{EXT_TUNE_HZ} Hz")
+                if lvl is None or qlvl is None or lvl - qlvl < EXT_TUNE_MIN_DB:
+                    raise Refused(f"its audio {qlvl} -> {lvl} dBFS, not {EXT_TUNE_MIN_DB} dB up")
+                s.confirm(f"{hz} Hz, {db} dB over the band's median; the audio {qlvl:.0f} -> {lvl:.0f} dBFS")
+            with o.step(f"{sender} still in its FT8 app on {dial} Hz USB-D") as s:
+                app, f_now, m_now = S.state.get("app"), int(S.state.get("freq", 0)), int(S.state.get("mode", -1))
+                got["after"] = (app, f_now, m_now)
+                if app != "FT8" or f_now != dial or m_now != 3:
+                    raise Refused(f"after the tune: app {app}, {f_now} Hz, mode {m_now}")
+                s.confirm(f"{app}, {f_now} Hz, mode {m_now}")
+            time.sleep(1.5)
+            with o.step(f"Ext tune pressed and left: off by its {lim} s limit") as s:
+                ab.tap(S, "F5")
+                S.wait("on the air with TUNE", lambda: (S.tx and S.state.get("tune")) or watch.why, 3)
+                t1 = time.time()
+                S.wait("off by the time limit", lambda: (not S.tx and not S.state.get("tune")) or watch.why, lim + 4)
+                if watch.why:
+                    raise Refused(watch.why)
+                d = time.time() - t1
+                got["limit_off_s"] = round(d, 1)
+                if abs(d - lim) > 2.0:
+                    raise Refused(f"off {d:.1f} s after it keyed, the limit {lim} s")
+                s.confirm(f"off {d:.1f} s after it keyed (the limit {lim} s)")
+        finally:
+            S.send("tune 0")
+            watch.close()
+            try:
+                S.wait("off the air", lambda: not S.tx, 5)
+            except Refused:
+                S.stop()
+            o.roles = {A: "RX", B: "RX"}
+        if watch.why:
+            raise Refused(f"the watch stopped the tune: {watch.why}")
+    except Refused as e:
+        return False, str(e), got
+    finally:
+        if rx:
+            rx.close()
+        o.changing += 1
+        try:
+            for r in o.r.values():
+                bench.close_apps(r)
+            o.both_page("G")
+            o.both({"freq": dial, "mode": 3})
+        finally:
+            o.changing -= 1
+    return True, (f"Ext tune from the FT8 app: a tone at {got['hz']} Hz in {listener}'s audio ({EXT_TUNE_HZ} set), "
+                  f"off {got['stop_s']} s after the second press, the app and dial as they were, off by its "
+                  f"{got['limit_s']} s limit after {got['limit_off_s']} s"), got
+
+
+# ---- G's voiceprint of the microphone on the air (2026-11-24, the owner: "you can do G's voiceprint with the output
+# from the other radio stepping tones. they are right next to each other") ----
+VP_TONES = [2000, 1700, 1400, 1100, 800, 500]   # acoustic.py's steps, 1 s each, on the speaker radio's own speaker
+VP_VOL = 35                 # the speaker radio's volume while it plays them (0 again after: ready())
+# The X6100's G (held up) in its landscape screenshot: the voiceprint's box, 0-4 kHz across (0 Hz at the right edge,
+# its 1K/2K/3K marks 41 px apart), time down the box (the newest at the top). Measured on its screenshots, 2026-11-24
+VP_BOX = (366, 60, 527, 466)    # x0, y0, x1, y1
+VP_X0_HZ, VP_PX_PER_KHZ = 525.5, 41.0
+VP_RISE = 80                # a step's line this far over the columns beside it (grey levels): the two
+                            # pictures of 2026-11-24 03:30 read every step there, CW overs' pictures none
+VP_GAP = 4                  # rows of a step's line missing (the hiss's stripes) bridged
+VP_MIN_ROWS = 40            # a step seen: an unbroken run of this many rows (a second is ~85 there)
+
+
+def vp_steps(png):
+    """Each VP_TONES step in a voiceprint picture: the longest unbroken run of rows (a gap of VP_GAP rows bridged) where
+    its line (its tone's column +-1 px) stands VP_RISE grey levels over the columns 4-7 px either side (a step is a
+    narrow line; the passband's hiss is as bright beside it); seen from VP_MIN_ROWS rows, its middle y. In order when
+    the seen steps run from the bottom (older) up (newer), as they were played. (steps, seen, ordered)"""
+    from PIL import Image
+    a = np.asarray(Image.open(png).convert("L"), float)
+    x0, y0, x1, y1 = VP_BOX
+    st = []
+    for hz in VP_TONES:
+        xc = int(round(VP_X0_HZ - hz * VP_PX_PER_KHZ / 1000.0))
+        line = a[y0:y1, xc - 1:xc + 2].max(axis=1)
+        side = np.concatenate([a[y0:y1, xc - 7:xc - 3], a[y0:y1, xc + 4:xc + 8]], axis=1).mean(axis=1)
+        lit = (line - side) >= VP_RISE
+        best, cur, start, gap = (0, None), 0, None, 0
+        for k, on in enumerate(lit):
+            if on:
+                if start is None:
+                    start = k
+                cur, gap = k - start + 1, 0
+                if cur > best[0]:
+                    best = (cur, start + cur // 2)
+            elif start is not None:
+                gap += 1
+                if gap > VP_GAP:
+                    start, cur, gap = None, 0, 0
+        st.append({"tone": hz, "rows": best[0], "y": y0 + best[1] if best[1] is not None else None})
+    seen = [x for x in st if x["rows"] >= VP_MIN_ROWS]
+    ordered = len(seen) >= 2 and all(a["y"] > b["y"] for a, b in zip(seen, seen[1:]))
+    return st, seen, ordered
+
+
+def g_voiceprint(o, mic, speaker, label, f=14200000):
+    """speaker plays VP_TONES on its own speaker; mic, on G in USB at 0.1 W, keyed with PTT, its mic hearing them. PASS
+    when (1) mic's G voiceprint, pictured twice on the air (mid-over and at the end), shows the steps in order, every
+    step in one of the pictures, (2) mic's own capture of its over (its monitor, on the processor's capture line)
+    holds them in order, (3) the over reaches the speaker radio's receiver (its passband up through 80 % of the steps)"""
+    import subprocess
+    import acoustic as ac
+    M, Sp = o.r[mic], o.r[speaker]
+    got = {"tones": VP_TONES}
+    wav = os.path.join(o.st.run_dir, "vp_steps.wav")
+    play_s = ac.steps_wav(wav, VP_TONES, 1.0)
+    subprocess.run(["scp", "-q", "-o", "BatchMode=yes", wav, f"root@{Sp.host}:{ac.WAV_ON_RADIO}"], check=True)
+    t = {}
+    shots = []
+
+    def body(watch):
+        with o.step(f"{speaker}'s volume {VP_VOL} for its speaker"):
+            bench.ensure(Sp, {"vol": VP_VOL})
+        bench.ssh(M.host, "rm -f /tmp/bench_mic.raw; (parecord --server=/var/run/pulse/native -d "
+                          "alsa_input.platform-sound.stereo-fallback --raw --format=s16le --channels=1 "
+                          "--rate=44100 /tmp/bench_mic.raw >/dev/null 2>&1 &)")
+        t["rec0"] = time.time()
+        t["q0"] = time.time()
+        time.sleep(1.2)
+        t["quiet"] = ac.quiet_bins(Sp, t["q0"], time.time())
+        with o.step(f"{mic} keyed with PTT on G; {speaker} plays {'-'.join(map(str, VP_TONES))} Hz on its speaker"):
+            hold, on_at, t_play, t0 = o.hold(), None, None, time.time()
+            while not watch.why and time.time() - t0 < 14.5:
+                M.send(f"key PTT 1 {hold}")
+                if on_at is None and M.tx:
+                    on_at = time.time()
+                if on_at and t_play is None and time.time() - on_at > 0.8:
+                    Sp.send(f"play {ac.WAV_ON_RADIO}")
+                    Sp.wait("the speaker playing", lambda: Sp.state.get("plays") == 1, 4)
+                    t_play = time.time()
+                if t_play and not shots and time.time() - t_play > ac.LEAD_S + 3.6:
+                    shots.append(bench.screenshot(M, f"{label} mid"))
+                if t_play and Sp.state.get("plays") == 0:
+                    shots.append(bench.screenshot(M, f"{label} end"))
+                    break
+                if on_at is None and time.time() - t0 > 6:
+                    raise Refused(f"{mic} did not come on the air with PTT")
+                time.sleep(0.4)
+            M.send("key PTT 0")
+            Sp.send("play stop")
+            t.update(on=on_at, play=t_play, off=time.time())
+            if watch.why:
+                raise Refused(watch.why)
+            if t_play is None:
+                raise Refused(f"{speaker}'s speaker never played the steps")
+    try:
+        try:
+            over(o, mic, speaker, f, 2, label, body)
+        finally:
+            bench.ssh(M.host, "kill $(pidof parecord) 2>/dev/null; true")
+            Sp.send("play stop")
+            bench.ensure(Sp, {"vol": 0})
+        with o.step(f"{mic}'s G voiceprint on the air: the steps in order") as s:
+            per = []
+            for png in shots:
+                if png:
+                    per.append(vp_steps(png))
+                    got.setdefault("shots", []).append(png)
+            if not per:
+                raise Refused(f"no picture of {mic}'s screen on the air")
+            got["voiceprint"] = [st for st, _, _ in per]
+            union = {x["tone"] for _, seen, _ in per for x in seen}
+            ordered = all(od or len(seen) < 2 for _, seen, od in per) and any(od for _, _, od in per)
+            if union != set(VP_TONES) or not ordered:
+                raise Refused(f"in its voiceprint (per picture, each step's unbroken rows and their middle y): "
+                              f"{got['voiceprint']}; steps seen {sorted(union)}, in order {ordered}")
+            s.confirm(f"all {len(VP_TONES)} steps in order across {len(per)} pictures: {got['voiceprint']}")
+        with o.step(f"{mic}'s own capture of its over: the steps in order") as s:
+            raw = os.path.join(o.st.run_dir, f"vp_{mic}_capture.raw")
+            subprocess.run(["scp", "-q", f"root@{M.host}:/tmp/bench_mic.raw", raw], capture_output=True)
+            x = np.fromfile(raw, dtype=np.int16).astype(float) if os.path.exists(raw) else np.zeros(0)
+            msteps, mheard, mord = ac.staircase(ac.audio_points(x, VP_TONES), VP_TONES, 40)
+            got["capture"] = msteps
+            if not (mheard and mord):
+                raise Refused(f"its capture: {msteps}")
+            s.confirm(", ".join(f"{m['tone']} Hz {m['frames']}" for m in msteps))
+        with o.step(f"the over on {speaker}'s receiver through the steps") as s:
+            present = []
+            for tt, cen, wid, v in list(Sp.r.spectra):
+                if not (t["play"] + 0.4 <= tt <= t["play"] + play_s - ac.TAIL_S - 0.2) or not v:
+                    continue
+                per_ = wid / len(v)
+                a_, b_ = int((f + 300 - (cen - wid / 2)) / per_), int((f + 2700 - (cen - wid / 2)) / per_)
+                q = t["quiet"].get((cen, wid, len(v)))
+                if q is not None and b_ > a_:
+                    present.append(float(np.max(np.array(v[a_:b_ + 1], float) - q[a_:b_ + 1])) >= ac.RISE_DB)
+            share = sum(present) / len(present) if present else 0.0
+            got["arrived_share"] = round(share, 2)
+            if share < ac.PRESENT_SHARE:
+                raise Refused(f"{speaker}'s passband up {ac.RISE_DB} dB through {share:.0%} of the steps' frames")
+            s.confirm(f"up through {share:.0%} of the steps' frames")
+    except Refused as e:
+        return False, str(e), got
+    return True, (f"{mic}'s G voiceprint drew {speaker}'s {len(VP_TONES)} steps in order on the air "
+                  f"({len(got.get('shots', []))} pictures), its capture held them, {speaker} heard the over through "
+                  f"{got['arrived_share']:.0%} of them"), got
+
 def ft8_qso(o, a, b, label, dial=14074000):
     """A whole FT8 QSO by the apps themselves: Auto on both, a calls CQ, b answers it once ("ft8 reply"), the reports,
     RR73 and 73 by the apps; both must log the QSO (their state's "logged" the other's test call) and each ADIF file
@@ -3057,6 +3421,13 @@ TESTS = [
           "variant sent", lambda s, l, n: (lambda o: olivia_text(o, s, l, n)), 75),
     *pair("cw-kbd", "", "CW Keyboard 14.040: a stored message 'VVV VVV Q1TST' keyed by the app; the other's decoder must "
           "print Q1TST", lambda s, l, n: (lambda o: cw_kbd(o, s, l, 14040000, n)), 45),
+    Test("g-voiceprint x6100>x6200", "X6100 TX (its mic), X6200 RX (its speaker plays)", "G's voiceprint on the air: "
+         "the X6200 plays stepped tones on its speaker, the X6100 keyed on G at 0.1 W picks them up on its mic; its "
+         "voiceprint (two pictures), its own capture and the X6200's receiver must show them",
+         lambda o: g_voiceprint(o, A, B, "g-voiceprint x6100>x6200"), 45),
+    *pair("ext-tune", "", "TUNE for an external tuner from the FT8 app's Ext tune at 0.1 W: a tone at its TX offset "
+          "in the other's audio, off on the second press, the app and dial kept, off by its time limit",
+          lambda s, l, n: (lambda o: ext_tune_app(o, s, l, n)), 60),
     Test("js8-close-to-g", "both RX", "JS8 closed back to G on CB 20 AM, five times on both: no GUI dies (the X6200's "
          "SIGSEGV of 20:36)", t_js8_close_to_g, 90),
     Test("system-health", "both", "battery log fresh, clock within 1.5 s, the data partition read-write, on both",
@@ -3095,12 +3466,26 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
     shown = [dict(kept.get(t.name, {"result": "never run"}), name=t.name, known=KNOWN.get(t.name))
              for t in TESTS if t.name not in run_names]
     st = Status(tests, shown)
-    srv = console(st, port, lan)
+    try:
+        srv = console(st, port, lan)
+    except OSError:                 # the standing console (orch.py console) has the port: it shows SNAPSHOT
+        srv = None
     st.run_dir = os.path.join(bench.STATE, "runs", time.strftime("%Y%m%d-%H%M%S-orch"))
     os.makedirs(st.run_dir, exist_ok=True)
     st.log = open(os.path.join(st.run_dir, "events.jsonl"), "a")
-    st.ev(f"console: http://{'0.0.0.0' if lan else '127.0.0.1'}:{port}/ ; run {st.run_dir}")
+    st.ev(f"console: http://{'0.0.0.0' if lan else '127.0.0.1'}:{port}/ "
+          f"({'this run' + chr(39) + 's own' if srv else 'the standing one, orch.py console'}); run {st.run_dir}")
     o = None
+    snap_on = threading.Event()
+
+    def snap():
+        while not snap_on.is_set():
+            try:
+                st.snapshot()
+            except OSError:
+                pass
+            snap_on.wait(1.0)
+    threading.Thread(target=snap, daemon=True).start()
 
     def stop(*_):
         if st.phase in ("done",) or st.phase.startswith("stopped"):
@@ -3197,6 +3582,10 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
               f"{sum(1 for t in st.tests if t['result'] is None)} not run; both radios on the Sentry's page A")
         with open(os.path.join(st.run_dir, "results.json"), "w") as fh:
             json.dump(st.tests, fh, indent=1, default=str)
+        snap_on.set()
+        st.snapshot()
+    if srv is None:
+        return
     if linger > 0:
         st.ev(f"the console stays up {linger} s")
         time.sleep(linger)
@@ -3216,9 +3605,18 @@ def main():
     rp.add_argument("--squelch-cal", action="store_true", help="measure the squelch against the TCI audio first")
     rp.add_argument("--sql", type=int, default=None, help=f"the squelch to hold (default {SQL_HOLD})")
     rp.add_argument("--soak", type=int, default=1, help="the tests this many times over (each test's tally kept)")
+    cp = sub.add_parser("console", help="the console alone, up until stopped: it shows each run's state as it goes "
+                        "and the last run's between runs")
+    cp.add_argument("--port", type=int, default=8765)
+    cp.add_argument("--lan", action="store_true", help="on the network, not only this computer")
     sp = sub.add_parser("spec", help="replay the spectrum judge on an over's saved frames (*_spectrum.json)")
     sp.add_argument("file")
     a = ap.parse_args()
+    if a.cmd == "console":
+        console(None, a.port, a.lan)
+        say(f"console: http://{'0.0.0.0' if a.lan else '127.0.0.1'}:{a.port}/ (the runs' {SNAPSHOT})")
+        while True:
+            time.sleep(3600)
     if a.cmd == "spec":
         d = json.load(open(a.file))
         L = types.SimpleNamespace(name=d["listener"], r=types.SimpleNamespace(spectra=[tuple(x) for x in d["frames"]]))
