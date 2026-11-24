@@ -18,6 +18,8 @@ in `orch_caps.json` (the caps test, shown on the console).
 | 2026-11-23 | **The squelch (10) keeps both radios' AM audio closed 1.3-2 s into a strong carrier** (57 dB over the quiet): the TCI audio began late and missed the first steps; at squelch 0 both passed. In SSB the squelch does not touch the TCI audio at all (2..60 changed neither radio's quiet). | am-steps with squelch 10, then 0 (runs 23:09, 23:12) | The orchestrator holds 10 and opens it for AM overs. Whether the late opening is right for the speaker is the owner's call. |
 | 2026-11-23 | **The X6200's link to the bench stalls for 3-6 s now and then** (no state, the same GUI process: its WiFi), as air_c saw. | "NO WORD" during rtty-text 21:08; air_c's Watch stops | The orchestrator tells a stall (the same GUI process after) from a crash (another): a stall is said, not failed. |
 
+| 2026-11-24 | **Both radios' CW decoders lose the dits of the first characters**: 'VVV VVV Q1TST' from the CW Keyboard prints as 'TTT TTT TU Q1TST' on both (the call exact once the speed locks, ~6 characters in), and the decoder prints the band's noise for seconds after the over. | cw-kbd both ways, cw-text | Noted: the tests send two V groups first and judge the call. A decoder that locks sooner would copy short overs whole. |
+
 ## Where the radios differ (the caps test, by design)
 
 - The X6200 tunes 88-118 MHz (its band table has FM broadcast and Airband) and WFM; the X6100 refuses them ("not a

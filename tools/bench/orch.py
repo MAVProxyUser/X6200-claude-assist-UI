@@ -2488,6 +2488,377 @@ def wefax_chart(o, sender, listener, label):
     return True, f"{res['rows']} rows of the chart, its two halves {res['contrast']} grey levels apart (80 wanted)", res
 
 
+# ---- SSTV, Olivia, the CW Keyboard (2026-11-24, the owner: "Yes, add them") ----
+
+SSTV_MODE = "robot8"            # Robot 8 BW, 160 x 120, 8.9 s: an SSTV picture that fits an over (16 s at most)
+SSTV_W, SSTV_H = 160, 120
+SSTV_MIN_LEVELS = 80            # the received picture's white quarters over its black ones, grey levels, at least
+
+
+def sstv_encoder():
+    """The GUI's own SSTV encoder (src/sstv/sstv_tx.c) built for this computer (sstv_enc.c, libpng), rebuilt when a
+    source is newer: its path"""
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    sstv = os.path.join(here, "..", "..", "src", "sstv")
+    src = [os.path.join(here, "sstv_enc.c")] + [os.path.join(sstv, n) for n in ("sstv_tx.c", "sstv_png.c",
+                                                                                "sstv_mode.c")]
+    out = os.path.join(os.path.dirname(STORE), "sstv_enc")
+    if os.path.exists(out) and os.path.getmtime(out) >= max(os.path.getmtime(p) for p in src):
+        return out
+    png = subprocess.run(["pkg-config", "--cflags", "--libs", "libpng"], capture_output=True, text=True).stdout.split()
+    r = subprocess.run(["cc", "-O2", "-I", sstv, *src, *png, "-lm", "-o", out], capture_output=True, text=True)
+    if r.returncode:
+        raise Refused(f"the SSTV encoder did not build here: {r.stderr.strip()[-300:]}")
+    return out
+
+
+def sstv_quarters(path):
+    """A picture's four quarters' mean grey (a margin of 15 % of each side left out: the edges of a received picture
+    lean with the clocks): (top left, top right, bottom left, bottom right)"""
+    from PIL import Image
+    a = np.asarray(Image.open(path).convert("L"), float)
+    h, w = a.shape
+    mh, mw = int(h * 0.15 / 2), int(w * 0.15 / 2)
+
+    def q(r0, r1, c0, c1):
+        return round(float(a[r0 + mh:r1 - mh, c0 + mw:c1 - mw].mean()), 1)
+    return q(0, h // 2, 0, w // 2), q(0, h // 2, w // 2, w), q(h // 2, h, 0, w // 2), q(h // 2, h, w // 2, w)
+
+
+def sstv_picture(o, sender, listener, label):
+    """The listener's SSTV app open on its dial (both on it, alike), Auto RX started; a Robot 8 picture (its top left
+    and bottom right quarters white, the others black) made by the GUI's own encoder here and played through the
+    sender's TCI at 0.1 W; the listener's saved picture fetched: its white quarters at least SSTV_MIN_LEVELS grey
+    levels over its black ones, each white one over each black one. The test's pictures taken off the card after"""
+    import subprocess
+    import suite_air_b as ab
+    import suite_more
+    from PIL import Image
+    S, L = o.r[sender], o.r[listener]
+    res = {"mode": SSTV_MODE}
+    ls = "ls /mnt/sstv/*.png 2>/dev/null; true"
+    files0 = set(bench.ssh(L.host, ls).split())
+    f = m = None
+    try:
+        with o.step(f"{listener}'s SSTV app open, both on its dial and mode, alike") as s:
+            o.changing += 1
+            try:
+                o.both_page("G")
+                if not suite_more.open_app(L, "sstv"):
+                    raise Refused(f"{listener}'s SSTV app did not open")
+                time.sleep(1.5)
+                f, m = int(L.state.get("freq", 0)), int(L.state.get("mode", -1))
+                o.both({"freq": f, "mode": m})
+            finally:
+                o.changing -= 1
+            s.confirm(f"both on {f / 1e6:.4f} MHz mode {m}")
+        with o.step(f"the test picture made in {SSTV_MODE} by the GUI's own encoder") as s:
+            a = np.zeros((SSTV_H, SSTV_W), np.uint8)
+            a[:SSTV_H // 2, :SSTV_W // 2] = 255
+            a[SSTV_H // 2:, SSTV_W // 2:] = 255
+            sent = os.path.join(o.st.run_dir, f"sstv_sent_{sender}.png")
+            Image.fromarray(a).convert("RGB").save(sent)
+            raw = os.path.join(o.st.run_dir, f"sstv_{sender}.raw")
+            r = subprocess.run([sstv_encoder(), SSTV_MODE, sent, raw, "24000"], capture_output=True, text=True)
+            if r.returncode:
+                raise Refused(f"the encoder: {r.stderr.strip()[-200:]}")
+            secs = os.path.getsize(raw) / 2 / 24000
+            subprocess.run(["scp", "-q", "-o", "BatchMode=yes", raw, f"root@{S.host}:/tmp/bench_sstv.raw"], check=True)
+            res.update(sent=sent, sent_quarters=sstv_quarters(sent))
+            s.confirm(f"{secs:.1f} s of audio, the quarters {res['sent_quarters']}")
+        with o.step(f"{listener}'s Auto RX started (its page 1, F2)"):
+            ab.tap(L, "F2")
+            time.sleep(1.0)
+
+        def body(watch):
+            with o.step(f"{sender} sends the picture ({secs:.1f} s of {SSTV_MODE})"):
+                bench.tci_send(S, None, max_s=secs + 4, watch=watch, file="/tmp/bench_sstv.raw", amp=0.5)
+                if watch.why:
+                    raise Refused(watch.why)
+        over(o, sender, listener, f, m, label, body, pages=False)
+        with o.step(f"{listener} saved the picture, fetched, its quarters compared with the sent one's") as s:
+            new, t0 = [], time.time()
+            while time.time() - t0 < 20:
+                new = sorted(p for p in set(bench.ssh(L.host, ls).split()) - files0 if not p.endswith("_dn.png"))
+                if new:
+                    break
+                time.sleep(2.0)
+            if not new:
+                raise Refused(f"{listener} saved no picture within 20 s of the over")
+            got = os.path.join(o.st.run_dir, f"sstv_{listener}_{os.path.basename(new[-1])}")
+            subprocess.run(["scp", "-q", "-o", "BatchMode=yes", f"root@{L.host}:{new[-1]}", got], capture_output=True,
+                           timeout=60)
+            if not os.path.exists(got):
+                raise Refused(f"{new[-1]} not fetched from {listener}")
+            tl, tr, bl, br = sstv_quarters(got)
+            size = Image.open(got).size
+            apart = round(min(tl, br) - max(tr, bl), 1)
+            res.update(received=got, size=size, quarters=(tl, tr, bl, br), apart=apart)
+            if apart < SSTV_MIN_LEVELS:
+                raise Refused(f"its quarters (top left, top right, bottom left, bottom right) {tl}, {tr}, {bl}, {br}: "
+                              f"the white over the black by {apart} grey levels ({SSTV_MIN_LEVELS} wanted); "
+                              f"{size[0]}x{size[1]}, kept as {os.path.basename(got)}")
+            s.confirm(f"{size[0]}x{size[1]}, quarters {tl}/{tr}/{bl}/{br}, white over black by {apart}")
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        new = set(bench.ssh(L.host, ls).split()) - files0
+        if new:
+            bench.ssh(L.host, "rm -f " + " ".join(sorted(new)))
+        o.changing += 1
+        try:
+            bench.close_apps(L)
+            o.both_page("G")
+            if f:
+                o.both({"freq": f, "mode": m})
+        finally:
+            o.changing -= 1
+    return True, (f"a {SSTV_MODE} picture: {listener}'s {res['size'][0]}x{res['size'][1]} shows the quarters "
+                  f"{res['quarters']}, white over black by {res['apart']} grey levels ({SSTV_MIN_LEVELS} wanted)"), res
+
+
+OLIVIA_TEXT = "TEST"        # no "DE <call>" (what the app spots); the app sends "\nTEST\n": 6 characters, 7 blocks of
+                            # Olivia 8/250, 14.3 s on the air (suite_air_b)
+OLIVIA_MACROS = "/mnt/olivia_macros.txt"
+
+
+def textlog_lines(host, before):
+    """The text log's lines (/mnt/digi_text) since its sizes before (suite_air_b.tl_sizes)"""
+    import suite_air_b as ab
+    return ab.tl_new(host, before)
+
+
+def textlog_back(host, before):
+    """The text log cut back to its sizes before: the test's lines out (a file the test began removed)"""
+    import suite_air_b as ab
+    now = ab.tl_sizes(host)
+    cmds = [f"rm -f {p}" if p not in before else f"python3 -c \"import os;os.truncate('{p}',{before[p]})\""
+            for p, n in now.items() if p not in before or n > before[p]]
+    if cmds:
+        bench.ssh(host, "; ".join(cmds))
+
+
+def olivia_text(o, a, b, label):
+    """Both radios' Olivia apps open on their dial (each app's memory: alike, else refused), a macro OLIVIA_TEXT added
+    to the sender's list (its file kept and put back after), sent by its page key at 0.1 W; the listener's text log:
+    an RX line in the variant the sender's TX line names, with OLIVIA_TEXT in it. The test's lines taken out of both
+    text logs after"""
+    import suite_air_b as ab
+    import suite_cover
+    S, L = o.r[a], o.r[b]
+    res = {"sent": OLIVIA_TEXT}
+    p, total = bench.chain_gate(o.c, "radios")
+    logs = {r.name: ab.tl_sizes(r.host) for r in (S, L)}
+    kept = suite_cover.keep(S.host, OLIVIA_MACROS, "save")
+    if kept not in ("saved", "none"):
+        return False, f"{a}: {OLIVIA_MACROS} not kept aside ({kept!r})", res
+    f = m = None
+    try:
+        with o.step(f"the macro {OLIVIA_TEXT!r} added to {a}'s Olivia list (its web page)") as s:
+            ip = ab.web_ip(S.host)
+            st, body0 = ab.http(ip, "/api/macros/olivia")
+            if st != 200:
+                raise Refused(f"{a}'s /api/macros/olivia answered {st}")
+            have = json.loads(body0)
+            if len(have["macros"]) >= have["max"]:
+                raise Refused(f"{a}'s Olivia list is full ({len(have['macros'])} of {have['max']})")
+            st, b_ = ab.http(ip, "/api/macros/olivia", method="POST", body={"name": "BENCH", "text": OLIVIA_TEXT})
+            if st != 200:
+                raise Refused(f"the macro not added ({st} {b_[:80]})")
+            listed = json.loads(b_)["macros"]
+            i_m = next((k for k, x in enumerate(listed) if x["name"] == "BENCH" and x["text"] == OLIVIA_TEXT), None)
+            if i_m is None:
+                raise Refused("the macro not in the list its web page gave back")
+            s.confirm(f"macro {i_m + 1} of {len(listed)}")
+        with o.step("the Olivia app open on both, on one dial, alike") as s:
+            o.changing += 1
+            try:
+                o.both_page("G")
+                for r in (L, S):
+                    ab.open_listed(r, "olivia", "contestia")
+                if ab.app_name(S) != ab.app_name(L):
+                    raise Refused(f"the apps differ: {a} {ab.app_name(S)}, {b} {ab.app_name(L)}")
+                f, m = int(L.state.get("freq", 0)), int(L.state.get("mode", -1))
+                if (int(S.state.get("freq", 0)), int(S.state.get("mode", -1))) != (f, m):
+                    raise Refused(f"the apps on two dials ({a} {S.state.get('freq')}, {b} {f}): each opens where its "
+                                  f"memory (/mnt/app_freqs) says")
+                o.both({"pwr": W})
+            finally:
+                o.changing -= 1
+            alike(o, ("freq", "mode"))
+            o.pair_alike()
+            s.confirm(f"{ab.app_name(L)} on {f / 1e6:.4f} MHz mode {m}")
+        bench.radio_tx_gate(S, o.c, W)
+        bench.listener_gate(L)
+        o.roles = {a: "TX", b: "RX"}
+        watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=L, w=W, label=label)
+        try:
+            with o.step(f"{a} sends the macro (its page key), on the air till it is done") as s:
+                t = time.time()
+                bench.tx_log({"who": a, "f": f, "w": S.pwr(), "what": f"orch: {label}"})
+                ab.Pages(S).macro(i_m)
+                S.wait("its transmission", lambda: S.tx or watch.why, 8)
+                ab.settle(S, watch)
+                S.wait("off the air", lambda: not S.tx or watch.why, bench.MAX_KEY_S + 2)
+                if watch.why:
+                    raise Refused(watch.why)
+                s.confirm(f"on the air {time.time() - t:.0f} s from the key")
+        finally:
+            watch.close()
+            o.roles = {A: "RX", B: "RX"}
+        with o.step(f"{b}'s text log: an RX line in {a}'s variant with {OLIVIA_TEXT!r}") as s:
+            time.sleep(4.0)                     # the decoder's last block
+            # both apps closed in one change (the listener's line ends onto the card as it closes), both on the dial
+            # again: a radio leaving its app goes back to the dial it had before it (2026-11-24: the X6100 on 7.200
+            # LSB while the X6200's app still held 3.5815, out of sync)
+            o.changing += 1
+            try:
+                for r in (L, S):
+                    bench.close_apps(r)
+                o.both_page("G")
+                o.both({"freq": f, "mode": m})
+            finally:
+                o.changing -= 1
+            tx = [ln for ln in textlog_lines(S.host, logs[a]) if " TX " in ln]
+            variant = tx[-1].split()[3] if tx and len(tx[-1].split()) > 3 else None
+            rx, t0 = [], time.time()
+            while time.time() - t0 < 15:
+                rx = [ln for ln in textlog_lines(L.host, logs[b]) if " RX " in ln]
+                if any(OLIVIA_TEXT in ln.upper() for ln in rx):
+                    break
+                time.sleep(3.0)
+            hit = [ln for ln in rx if OLIVIA_TEXT in ln.upper()]
+            res.update(variant=variant, rx=[ln[-100:] for ln in rx[-3:]])
+            if not hit:
+                raise Refused(f"{b}'s RX lines: {[ln[-80:] for ln in rx[-3:]] or 'none'} ({a} sent in {variant})")
+            if variant and f" {variant} RX " not in hit[-1]:
+                raise Refused(f"{b} decoded it in another variant: {hit[-1][-80:]!r} ({a} sent {variant})")
+            res["decoded"] = hit[-1].split(" ", 6)[-1].strip()
+            s.confirm(f"{variant}: {hit[-1][-80:]!r}")
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        o.changing += 1
+        try:
+            for r in (S, L):
+                if r.tx:
+                    r.stop()
+                bench.close_apps(r)
+            back = suite_cover.keep(S.host, OLIVIA_MACROS, "back")
+            if back not in ("same", "restored", "removed"):
+                o.st.ev(f"{a}: {OLIVIA_MACROS} not put back ({back!r})", "bad")
+            for r in (S, L):
+                textlog_back(r.host, logs[r.name])
+            o.both_page("G")
+            if f:
+                o.both({"freq": f, "mode": m})
+        finally:
+            o.changing -= 1
+    return True, f"{a}'s {res['variant']} macro {OLIVIA_TEXT!r}, {b}'s line {res['decoded']!r}", res
+
+
+CW_KBD_TEXT = "VVV VVV Q1TST"   # two V groups first: the listener's decoder finds the speed on them (suite_air_b)
+CW_KBD_MUST = "Q1TST"
+
+
+def cw_kbd(o, sender, listener, f, label):
+    """A CW message CW_KBD_TEXT added on the sender's web page (taken out after), both in CW on f on G (AGC fast, as
+    cw-text), the sender's CW Keyboard opened on that dial and its message keyed by its page key at 0.1 W; the
+    listener's decoder (the remote's cw lines) must print CW_KBD_MUST"""
+    import suite_air_b as ab
+    S, L = o.r[sender], o.r[listener]
+    got = {"sent": CW_KBD_TEXT}
+    ip = ab.web_ip(S.host)
+    mine = []
+    try:
+        with o.step(f"the message {CW_KBD_TEXT!r} added to {sender}'s CW messages (its web page)") as s:
+            wpm = ab.key_wpm(S.host)
+            secs = ab.morse_secs(CW_KBD_TEXT, wpm)
+            if secs > ab.CW_MAX_S:
+                raise Refused(f"{sender}'s KEY Speed {wpm} WPM: {CW_KBD_TEXT!r} takes {secs:.1f} s, over "
+                              f"{ab.CW_MAX_S:.0f} s (the speed left alone)")
+            st, b0 = ab.http(ip, "/api/cw_messages")
+            if st != 200:
+                raise Refused(f"{sender}'s /api/cw_messages answered {st}")
+            before = json.loads(b0)["messages"]
+            if len(before) > 7:
+                raise Refused(f"{sender} has {len(before)} CW messages: the CW Keyboard shows eight")
+            st, b_ = ab.http(ip, "/api/cw_messages", method="POST", body={"text": CW_KBD_TEXT})
+            if st != 200:
+                raise Refused(f"the message not added ({st} {b_[:80]})")
+            mine.append(max(x["id"] for x in json.loads(b_)["messages"] if x["text"] == CW_KBD_TEXT))
+            order = [x["id"] for x in json.loads(ab.http(ip, "/api/cw_messages")[1])["messages"]]
+            i, n = order.index(mine[0]), len(order)
+            npg = (n + 3) // 4              # dialog_cw_kbd.c: page 1, the message pages, Live
+            s.confirm(f"message {i + 1} of {n}, {secs:.1f} s at {wpm} WPM")
+
+        def body(watch):
+            with o.step(f"{sender}'s CW Keyboard open on the dial, its message keyed (page {2 + i // 4}, "
+                        f"F{2 + i % 4})") as s:
+                # the app opens on the radio's own dial, not G's (2026-11-24: on 7.200 LSB): put on f in CW, both
+                o.changing += 1
+                try:
+                    ab.open_listed(S, "cw keyboard")
+                    opened = (int(S.state.get("freq", 0)), int(S.state.get("mode", -1)))
+                    if opened != (f, 4):
+                        o.both({"freq": f, "mode": 4})
+                finally:
+                    o.changing -= 1
+                if (int(S.state.get("freq", 0)), int(S.state.get("mode", -1))) != (f, 4):
+                    raise Refused(f"the CW Keyboard opened on {opened[0]} mode {opened[1]} and stayed there, not CW "
+                                  f"on {f}")
+                alike(o, ("freq", "mode"))
+                try:
+                    L.cw = ""
+                    for _ in range((1 + i // 4) % (npg + 2)):
+                        ab.tap(S, "F1")
+                    t = time.time()
+                    ab.tap(S, f"F{2 + i % 4}")
+                    S.wait("its keying", lambda: S.tx or watch.why, 6)
+                    ab.settle(S, watch)
+                    if watch.why:
+                        raise Refused(watch.why)
+                    s.confirm(f"keyed {time.time() - t:.0f} s")
+                finally:
+                    o.changing += 1
+                    try:
+                        if S.tx:
+                            S.stop()
+                        bench.close_apps(S)     # the CW Keyboard's keyer goes on past the remote's stop: closed
+                        bench.open_page(S, "G")
+                        o.both({"freq": f, "mode": 4})
+                    finally:
+                        o.changing -= 1
+        over(o, sender, listener, f, 4, label, body, agc=2)
+        with o.step(f"{listener}'s decoder printed {CW_KBD_MUST}") as s:
+            t0, last, t_last = time.time(), None, time.time()
+            while time.time() - t0 < 6:
+                if L.cw != last:
+                    last, t_last = L.cw, time.time()
+                elif time.time() - t_last > 1.5:
+                    break
+                time.sleep(0.1)
+            text = " ".join(L.cw.split()).upper()
+            # the decoder prints the band's noise before and after the over: the error rate of its stretch nearest
+            # to the message, the whole print kept
+            cer, seg = best_cer(text, CW_KBD_TEXT)
+            got.update(printed=text, decoded=seg, cer=round(cer, 3))
+            if CW_KBD_MUST not in text:
+                raise Refused(f"{listener} printed {text!r}: {CW_KBD_MUST} not in it")
+            s.confirm(f"{seg!r} ({cer:.0%} of the characters wrong) in {text!r}")
+    except Refused as e:
+        return False, str(e), got
+    finally:
+        for k in mine:
+            ab.http(ip, f"/api/cw_messages/{k}", method="DELETE")
+        left = [x for x in json.loads(ab.http(ip, "/api/cw_messages")[1])["messages"] if x["id"] in mine]
+        if left:
+            o.st.ev(f"{sender}: the test's CW message not taken out ({left})", "bad")
+    return True, f"the CW Keyboard keyed {CW_KBD_TEXT!r}, {listener} copied {got['decoded']!r} ({got['cer']:.0%} " \
+                 f"of the characters wrong; all it printed: {got['printed'][-70:]!r})", got
+
+
 def ft8_qso(o, a, b, label, dial=14074000):
     """A whole FT8 QSO by the apps themselves: Auto on both, a calls CQ, b answers it once ("ft8 reply"), the reports,
     RR73 and 73 by the apps; both must log the QSO (their state's "logged" the other's test call) and each ADIF file
@@ -2660,6 +3031,13 @@ TESTS = [
     Test("cb-channel", "both RX", "CB 19 as G's channel, then a channel up: 27.205 AM on both", t_cb_channel, 15),
     *pair("js8-text", "", "JS8: a directed text, the other's list must show it from the sender with the text exact",
           lambda s, l, n: (lambda o: js8_text(o, s, l, n)), 90),
+    *pair("sstv-picture", "", "SSTV: a Robot 8 picture (two white quarters, two black) made by the GUI's own encoder; "
+          "the other's saved picture must show the white quarters 80 grey levels over the black",
+          lambda s, l, n: (lambda o: sstv_picture(o, s, l, n)), 60),
+    *pair("olivia-text", "", "Olivia: the sender's app sends a macro 'TEST'; the other's text log must show it in the "
+          "variant sent", lambda s, l, n: (lambda o: olivia_text(o, s, l, n)), 75),
+    *pair("cw-kbd", "", "CW Keyboard 14.040: a stored message 'VVV VVV Q1TST' keyed by the app; the other's decoder must "
+          "print Q1TST", lambda s, l, n: (lambda o: cw_kbd(o, s, l, 14040000, n)), 45),
     Test("js8-close-to-g", "both RX", "JS8 closed back to G on CB 20 AM, five times on both: no GUI dies (the X6200's "
          "SIGSEGV of 20:36)", t_js8_close_to_g, 90),
     Test("system-health", "both", "battery log fresh, clock within 1.5 s, the data partition read-write, on both",
