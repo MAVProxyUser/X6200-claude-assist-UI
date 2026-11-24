@@ -406,7 +406,7 @@ def d_back(r, h, bsel0):
 def hear_next(r, h, prev):
     """A's F4 (on A): LISTEN's next, read back from params.db once it moved (else what it reads)"""
     bench.tap(r, "F4")
-    v = pwait(h, "sentry_hear_a", lambda v: v is not None and int(v) != prev, 2.5, str(prev))
+    v = pwait(h, "sentry_hear_a", lambda v: v is not None and int(v) != prev, 5.0, str(prev))   # params.db over the X6200's WiFi: 2.5 s missed one (2026-11-24)
     return int(v)
 
 
@@ -623,6 +623,9 @@ def t_manual(run):
         f_m = S(r, "freq")
         time.sleep(dwell * 2 + 0.5)
         held = S(r, "freq") == f_m
+        # the step where the clicks were: the scan can take the dial into another mode's part of the band (mode from
+        # the band plan), whose step is its own (the zoom and step per mode): CW's 100 Hz on 20 m (orch, 2026-11-24)
+        step = S(r, "step")
         by_step = abs(fs[2] - fs[1]) == step and abs(fs[1] - fs[0]) == step
         ok &= moving and g.get("s.rout") == 0 and held and by_step
         said.append(f"A: F1 scanning {moving}; the VFO 3 clicks: {' '.join(f'{v / 1e6:.4f}' for v in fs)} "
@@ -1013,7 +1016,9 @@ def t_f_open(run):
             res["SETTINGS: Settings"] = wait_state(r, lambda s: s.get("win") == "Settings", 6)
             r.send("close")
             wait_state(r, lambda s: s.get("pg") in LETTERS, 6)
-            res["closed: back on F"] = r.state.get("pg") == "F"
+            # the Sentry again, on A: after any app it opens on A (app_sentry.c open_at), the manual's "comes back to
+            # it when an app closes"; F was this check's own guess (orch, 2026-11-24)
+            res["closed: back in the Sentry"] = r.state.get("pg") in LETTERS
             said.append(f"Settings closed: page {r.state.get('pg')!r}")
             sys_open(r, h, "MODES")
             res["DIGITAL MODES: the Modes menu"] = wait_state(
@@ -1994,7 +1999,10 @@ def df_close(r, h):
         bench.open_page(r, "A")
     finally:
         keep(h, "/mnt/df_synth", "back")
-    end = time.time() + 6
+    # the GUI keeps x6x00-df WEB_IDLE_MS (20 s) after the last web request (app_df.c: the browser's DF page goes on
+    # working without page I), and these checks read page I through the web: 26 s, no web request meanwhile (6 s was
+    # too short: orch, 2026-11-24)
+    end = time.time() + 26
     while time.time() < end:
         if not ssh(h, "pidof x6x00-df").strip():
             return True
@@ -2116,6 +2124,7 @@ def t_df_tune(run):
             d = df_open(r, h, ip)
             if not d.get("connected"):
                 raise bench.Refused(f"{r.name}: page I's daemon not connected")
+            t_before = df_get(ip)["cfg"]["target"]
             df_set(ip, "follow", 1)                 # FOLLOW A
             r.send(f"set freq {fx}")
             res["the dial set"] = wait_state(r, lambda s: int(s.get("freq", 0)) == fx, 3.0)
@@ -2123,14 +2132,20 @@ def t_df_tune(run):
             while time.time() < end and df_get(ip)["cfg"]["target"] != fx:
                 time.sleep(0.4)
             x = df_get(ip)["cfg"]
-            res["FOLLOW A: the target is A's dial"] = x["target"] == fx and x["follow"] == 1
-            said.append(f"target {x['target']} follow {x['follow']}")
+            # the target follows A's dial when the antenna set takes it (the Kraken's own 24-1766 MHz), and waits
+            # outside (its whips' 100-1000 MHz: the X6100's dial, 54 MHz at most, never in it; app_df.c follow_tick
+            # says "OUTSIDE ...: WAITING"): either is right, the web does not say which antenna is set (2026-11-24)
+            took = x["target"] == fx and x["follow"] == 1
+            waits = x["target"] == t_before and x["follow"] == 1
+            res["FOLLOW A: the target is A's dial, or waits outside the antenna's range"] = took or waits
+            said.append(f"target {x['target']} follow {x['follow']} ({'followed' if took else 'waiting' if waits else '?'})")
+            base = fx if took else t_before
             r.send("knob main 1")
             end = time.time() + 3
             while time.time() < end and df_get(ip)["cfg"]["follow"] != 0:
                 time.sleep(0.3)
             x = df_get(ip)["cfg"]
-            res["the VFO: FOLLOW OFF"] = x["follow"] == 0 and x["target"] == fx + 1000
+            res["the VFO: FOLLOW OFF"] = x["follow"] == 0 and x["target"] == base + 1000
             a0 = x["auto"]
             hold(r, "F1")
             time.sleep(0.6)
@@ -2523,8 +2538,10 @@ def t_walk(run):
             dnf1 = params(h, ["dnf"]).get("dnf")
             sys_back(r, h, sys0)
         changed = [k for k in WALK if after[k] != mid[k]]
+        if "mode" in changed:           # the step and zoom kept per mode come with it (zoom-step): not a second value
+            changed = [k for k in changed if k not in ("step", "zoom")]
         ok = mid == before and len(changed) == 1 and undone == before and dnf1 == dnf0
-        what = ", ".join(f"{k} {mid[k]} -> {after[k]}" for k in changed) or "NOTHING changed"
+        what = ", ".join(f"{k} {mid[k]} -> {after[k]}" for k in WALK if after[k] != mid[k]) or "NOTHING changed"
         return ok, (f"MFK held, one click, a press, one click: {what} (the manual's walk: VFO, then mode); turned "
                     f"back: as before {undone == before}; nothing else "
                     f"moved on the way {mid == before}; DNF untouched {dnf1 == dnf0} (the frame on screen not read)")
