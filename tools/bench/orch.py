@@ -74,15 +74,22 @@ class Status:
         self.tests = [{"name": t.name, "role": t.role, "what": t.what, "est_s": t.est_s, "result": None,
                        "says": "", "secs": None, "steps": []} for t in tests]
         self.cur = None             # index into tests
-        self.events = collections.deque(maxlen=300)
+        self.events = collections.deque(maxlen=3000)
+        self.log = None             # the run's events.jsonl: every event, kept for the audit
         self.radios = {}
         self.sync = {"ok": True, "since": time.time(), "violations": 0, "last": None, "changing": False}
         self.run_dir = None
 
     def ev(self, text, kind="info"):
+        e = {"t": time.time(), "kind": kind, "text": text,
+             "test": self.tests[self.cur]["name"] if self.cur is not None else None}
         with self.lock:
-            self.events.append({"t": time.time(), "kind": kind, "text": text})
-        say(text)
+            self.events.append(e)
+            if self.log:
+                self.log.write(json.dumps(e, default=str) + "\n")
+                self.log.flush()
+        if kind != "cmd":
+            say(text)
 
     def to_json(self):
         with self.lock:
@@ -91,7 +98,7 @@ class Status:
             counts = collections.Counter(t["result"] for t in done)
             return json.dumps({
                 "now": time.time(), "t0": self.t0, "phase": self.phase, "cur": self.cur, "tests": self.tests,
-                "events": list(self.events)[-120:], "radios": self.radios, "sync": self.sync,
+                "events": list(self.events)[-400:], "radios": self.radios, "sync": self.sync,
                 "counts": {"pass": counts["PASS"], "fail": counts["FAIL"], "look": counts["LOOK"],
                            "notrun": counts["NOT RUN"], "done": len(done), "total": len(self.tests)},
                 "eta_s": left, "run_dir": self.run_dir}, default=str)
@@ -118,13 +125,15 @@ th{color:var(--dim);font-weight:normal}.PASS{color:var(--ok)}.FAIL{color:var(--b
 .cur{background:#211d10}.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:6px}.bar>div{height:100%;background:var(--amb)}
 .ev{max-height:340px;overflow:auto;font-size:12px}.ev div{padding:1px 0;border-bottom:1px solid #1d1d1d}.ev .bad{color:var(--bad)}.ev .ok{color:var(--ok)}
 .wide{grid-column:1/-1}.says{color:var(--dim);font-size:12px;word-break:break-word}
+.ev .cmd{color:#7d8aa0}.ev .conf{color:#9fd3b0}.ev .radio{color:#d9a35a}label{color:var(--dim);font-size:12px;margin-right:10px}
 </style></head><body>
 <header><h1>Two-radio bench</h1><span id="phase"></span><span id="counts" class="muted"></span><span id="clock" class="muted"></span></header>
 <main>
 <section><h2>Radios</h2><div id="sync"></div><div class="radios" id="radios" style="margin-top:8px"></div></section>
 <section><h2>Now</h2><div id="now"></div><div class="bar"><div id="prog" style="width:0"></div></div></section>
 <section class="wide"><h2>Tests</h2><table><thead><tr><th>#</th><th>test</th><th>role</th><th>result</th><th>secs</th><th>what it found</th></tr></thead><tbody id="tests"></tbody></table></section>
-<section class="wide"><h2>Events</h2><div class="ev" id="ev"></div></section>
+<section class="wide"><h2>Events (everything the orchestrator does; <a href="log" style="color:var(--amb)">the whole log</a>)</h2>
+<div><label><input type="checkbox" id="fcmd" checked> commands sent</label><label><input type="checkbox" id="fconf" checked> read-backs</label><label><input type="checkbox" id="fradio" checked> the radios' errors</label></div><div class="ev" id="ev"></div></section>
 </main>
 <script>
 const $=id=>document.getElementById(id);const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -144,7 +153,8 @@ $("now").innerHTML=cur?`<div><b>${esc(cur.name)}</b> <span class="muted">(${esc(
  cur.steps.map(st=>`<div class="${st.state==="confirmed"?"PASS":st.state==="failed"?"FAIL":"LOOK"}">${st.state==="running"?"&#9654;":st.state==="confirmed"?"&#10003;":"&#10007;"} ${esc(st.text)} <span class="muted">${st.secs!=null?st.secs.toFixed(1)+" s":""} ${esc(st.detail||"")}</span></div>`).join(""):"<span class=muted>no test running</span>";
 $("prog").style.width=(100*c.done/Math.max(1,c.total))+"%";
 $("tests").innerHTML=d.tests.map((x,i)=>`<tr class="${i===d.cur?"cur":""}"><td>${i+1}</td><td>${esc(x.name)}</td><td>${esc(x.role)}</td><td class="${(x.result||"").replace(" ","")}">${esc(x.result||(i===d.cur?"running":""))}</td><td>${x.secs!=null?x.secs.toFixed(0):""}</td><td class="says">${esc(x.says)}</td></tr>`).join("");
-$("ev").innerHTML=d.events.slice().reverse().map(e=>`<div class="${e.kind}">${t(e.t)} ${esc(e.text)}</div>`).join("");}
+const show={cmd:$("fcmd").checked,conf:$("fconf").checked,radio:$("fradio").checked};
+$("ev").innerHTML=d.events.slice().reverse().filter(e=>show[e.kind]!==false).map(e=>`<div class="${e.kind}">${t(e.t)} ${e.test?"["+esc(e.test)+"] ":""}${esc(e.text)}</div>`).join("");}
 tick();setInterval(tick,700);
 </script></body></html>"""
 
@@ -154,6 +164,10 @@ def console(status, port, lan):
         def do_GET(self):
             if self.path.startswith("/status"):
                 body, ctype = status.to_json().encode(), "application/json"
+            elif self.path.startswith("/log"):          # the run's every event, as kept in events.jsonl
+                path = os.path.join(status.run_dir or "", "events.jsonl")
+                body = open(path, "rb").read() if os.path.exists(path) else b""
+                ctype = "text/plain; charset=utf-8"
             elif self.path in ("/", "/index.html"):
                 body, ctype = PAGE.encode(), "text/html; charset=utf-8"
             else:
@@ -184,12 +198,28 @@ class Orch:
         for n in (A, B):
             self.r[n] = bench.Radio(n, self.c["radios"][n], True)
             self.r[n].take_control()        # only when free or the bench's own (bench.Radio.take_control)
+        for n, r in self.r.items():
+            self._log_sends(n, r)
+        self._errs = {n: len(r.errs) for n, r in self.r.items()}
+        self._tx = {n: bool(r.tx) for n, r in self.r.items()}
         self.roles = {A: "RX", B: "RX"}
+        self.restore_calls = set()          # the radios given a test call this run (test_calls)
         self.changing = 0                   # changes to both under way: the guard looks away meanwhile
         self.violation = None               # this test's first sync violation
         self._diff_since = None
         self.on = True
         threading.Thread(target=self._guard, daemon=True).start()
+
+    def _log_sends(self, n, r):
+        """Every command sent to radio n logged (the console's "commands sent"), its session's own send kept"""
+        send = r.send
+        st = self.st
+
+        def logged(cmd, send=send):
+            if not cmd.startswith(("ping", "banner")):
+                st.ev(f"-> {n}: {cmd}", "cmd")
+            return send(cmd)
+        r.send = logged
 
     # -- the sync guard --
     def _guard(self):
@@ -201,6 +231,16 @@ class Orch:
                 rs[n] = {"freq": s.get("freq"), "mode": s.get("mode"), "tx": bool(r.tx), "pwr": s.get("pwr"),
                          "pg": s.get("pg"), "rxo": s.get("rxo"), "meter": r.meter, "role": self.roles.get(n),
                          "age": round(now - r.last_msg, 1)}
+            for n, r in self.r.items():             # each radio on and off the air, as its own state says
+                if bool(r.tx) != self._tx.get(n):
+                    self._tx[n] = bool(r.tx)
+                    self.st.ev(f"<- {n} {'ON THE AIR' if r.tx else 'off the air'} ({r.state.get('freq')} Hz mode "
+                               f"{r.state.get('mode')}, {r.state.get('pwr')} W set)", "radio")
+            for n, r in self.r.items():             # what each radio answered as an error
+                errs = list(r.errs)
+                for e in errs[self._errs.get(n, 0):]:
+                    self.st.ev(f"<- {n} said: err {e}", "radio")
+                self._errs[n] = len(errs)
             a, b = rs[A], rs[B]
             differ = (a["freq"], a["mode"]) != (b["freq"], b["mode"])
             with self.st.lock:
@@ -257,6 +297,7 @@ class Orch:
         any key of want that reads differently on the two is refused"""
         self.changing += 1
         errs = {}
+        self.st.ev(f"set on both: {want}", "conf")
         try:
             def one(n):
                 try:
@@ -270,12 +311,49 @@ class Orch:
                 raise Refused("; ".join(errs.values()))
             diff = {k: (bench._value(self.r[A], k), bench._value(self.r[B], k)) for k in want
                     if bench._value(self.r[A], k) != bench._value(self.r[B], k)}
+            self.st.ev("read back: " + "; ".join(f"{n} " + ", ".join(f"{k} {bench._value(r, k)}" for k in want)
+                                                 for n, r in self.r.items()), "conf")
             if diff:
                 raise Refused("the two read differently after the set: " + ", ".join(f"{k} {a}/{b}"
                                                                                      for k, (a, b) in diff.items()))
         finally:
             self.changing -= 1
         return {k: bench._value(self.r[A], k) for k in want}
+
+    def ready(self):
+        """Before every test: neither keyed, both transmitters locked, the two on one frequency and mode. What is not
+        is put right (both locked, both on page G on the first radio's frequency and mode); what cannot be stops the
+        run: no test goes on from radios set wrong"""
+        rs = self.r.values()
+        bad = []
+        if any(r.tx for r in rs):
+            bad.append("a radio on the air")
+        if any(r.state.get("rxo") == 0 for r in rs):
+            bad.append("a transmitter armed")
+        if (self.r[A].state.get("freq"), self.r[A].state.get("mode")) != \
+                (self.r[B].state.get("freq"), self.r[B].state.get("mode")):
+            bad.append("the two apart")
+        if not bad:
+            self.st.ev("ready: both locked, off the air, on "
+                       f"{int(self.r[A].state.get('freq', 0)) / 1e6:.4f} MHz mode {self.r[A].state.get('mode')}", "conf")
+            return
+        self.st.ev(f"not ready ({', '.join(bad)}): put right first", "bad")
+        self.changing += 1
+        try:
+            for r in rs:
+                r.stop()
+                if r.state.get("rxo") == 0:
+                    bench.arm(r, False)
+                bench.close_apps(r)
+        finally:
+            self.changing -= 1
+        self.both_page("G")
+        self.both({"freq": int(self.r[A].state.get("freq") or 14200000), "mode": int(self.r[A].state.get("mode") or 2)})
+        if any(r.tx or r.state.get("rxo") == 0 for r in rs):
+            raise Refused("the radios could not be made ready (keyed or armed): the run stops")
+        with self.st.lock:
+            self.st.sync.update(ok=True, since=time.time())
+        self.st.ev("ready after putting right: both locked, alike", "ok")
 
     def both_page(self, letter):
         self.changing += 1
@@ -290,20 +368,45 @@ class Orch:
             self.changing -= 1
 
     def close(self):
-        self.on = False
+        import subprocess
+        for n in sorted(self.restore_calls):     # the own calls back (each GUI restarts)
+            self.st.ev(f"{n}: its own call back, PSK Reporter as found: its GUI restarts")
+            subprocess.run([sys.executable, "-B", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench.py"),
+                            "testcall", n, "restore"], capture_output=True, timeout=120)
+            t0 = time.time()
+            while time.time() - t0 < 90:
+                try:
+                    self.r[n].reconnect()
+                    break
+                except (Refused, OSError):
+                    time.sleep(3)
         for r in self.r.values():
             try:
                 r.stop()
             except OSError:
                 pass
+        # the last test's frequency and mode, the same on both (they were, on G): page A brings back each radio's own
+        # A dial (each different: the audit, 2026-11-23, why they were never alike after a test), so A's dial is set
+        # to it on both and confirmed
+        last = {k: self.r[A].state.get(k) for k in ("freq", "mode")}
         for n, r in self.r.items():
             try:
                 if r.state.get("rxo") == 0:
                     bench.arm(r, False)
                 bench.close_apps(r)
-                bench.open_page(r, "A")
             except (Refused, OSError) as e:
-                self.st.ev(f"{n}: not on the Sentry's page A at the end: {e}", "bad")
+                self.st.ev(f"{n}: {e}", "bad")
+        try:
+            self.both_page("A")
+            if None not in last.values():
+                self.both({"freq": int(last["freq"]), "mode": int(last["mode"])})
+            self.st.ev(f"both on the Sentry's page A on {int(last['freq']) / 1e6:.4f} MHz mode {last['mode']}, "
+                       f"confirmed alike", "ok")
+        except Refused as e:
+            self.st.ev(f"the end: {e}", "bad")
+        time.sleep(1.0)                     # the guard's last look at the two
+        self.on = False
+        for r in self.r.values():
             r.close()
 
 
@@ -392,25 +495,30 @@ def save_wav(o, label, x):
     return path
 
 
-def over(o, sender, listener, f, mode, label, body):
+def over(o, sender, listener, f, mode, label, body, w=W, agc=0, pages=True):
     """One transmission from sender to listener, both on f in mode (set alike and confirmed first): the gates, the
     Watch, the transmitter armed for it and locked after; body(watch) sends. Returns the Watch (closed)"""
     S, L = o.r[sender], o.r[listener]
     p, total = bench.chain_gate(o.c, "radios")
     with o.step(f"both on {f / 1e6:.4f} MHz mode {mode}, alike"):
-        o.both_page("G")
+        if not pages:                       # the listener in an app that holds its dial: the sender put on it
+            o.both({"freq": f, "mode": mode, "pwr": w, "atu": 0, "xit": 0, "split": 0, "rit": 0})
+    with o.step(f"both on page G, {f / 1e6:.4f} MHz mode {mode}, alike") if pages else o.step("(the app's page kept)"):
+        if pages:
+            o.both_page("G")
         # the same filter on both in SSB (each radio's own differed: the X6100 300-2700, the X6200 100-3000; a step
         # heard 380 Hz high went past the X6100's top); AM and FM keep their own, a width of their own kind
-        want, checks = bench.rx_profile(f, mode, pre=0, att=0, rfg=100, agc=0, sql=0,
-                                        filt=(100, 3000) if mode in (0, 1, 2, 3) else None)
-        o.both(dict(want, pwr=W, atu=0, xit=0), checks)
+        if pages:
+            want, checks = bench.rx_profile(f, mode, pre=0, att=0, rfg=100, agc=agc, sql=0,
+                                            filt=(100, 3000) if mode in (0, 1, 2, 3) else None)
+            o.both(dict(want, pwr=w, atu=0, xit=0), checks)
     with o.step(f"{sender} may send, {listener} may listen") as s:
-        bench.ensure(S, *bench.tx_profile(f, mode, W))
-        bench.radio_tx_gate(S, o.c, W)
+        bench.ensure(S, *bench.tx_profile(f, mode, w))
+        bench.radio_tx_gate(S, o.c, w)
         sup = bench.listener_gate(L)
         s.confirm(f"{listener}'s supply {sup}" if sup else "")
     o.roles = {sender: "TX", listener: "RX"}
-    watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=L, w=W, label=label)
+    watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(w * 1000) - total, listener=L, w=w, label=label)
     try:
         with o.step(f"{sender}'s transmitter armed (the Sentry's A/B), confirmed"):
             o.changing += 1                 # arming puts a data mode into voice and back (bench.arm): not a slip
@@ -431,6 +539,9 @@ def over(o, sender, listener, f, mode, label, body):
         except Refused as e:
             o.st.ev(f"{sender}: TX not locked again: {e}", "bad")
         o.roles = {A: "RX", B: "RX"}
+    o.st.ev(f"over {label}: {sender}'s meter at most {watch.tx_peak.get(sender)} W, {listener}'s S-meter at most "
+            f"{watch.rx_peak} dBm, heard {watch.heard_db.get(sender) if hasattr(watch, 'heard_db') else None} dB, "
+            f"deaf overs {len(watch.deaf)}" + (f", stopped: {watch.why}" if watch.why else ""), "conf")
     if watch.why:
         raise Refused(f"the watch stopped the over: {watch.why}")
     return watch
@@ -477,6 +588,570 @@ def audio_steps(o, sender, listener, f, mode, label):
                   f"across the steps"), got
 
 
+CW_TEXT = "VVV TEST DE Q1TST"
+CW_MUST = "TEST DE Q1TST"
+
+
+def lev(a, b):
+    """Levenshtein distance"""
+    d = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        prev, d[0] = d[0], i
+        for j, cb in enumerate(b, 1):
+            prev, d[j] = d[j], min(d[j] + 1, d[j - 1] + 1, prev + (ca != cb))
+    return d[len(b)]
+
+
+def cw_text(o, sender, listener, f, label):
+    """CW_TEXT keyed by sender's own keyer (its TCI) on f, both in CW; the listener's decoder (the remote's cw lines):
+    PASS when CW_MUST is in what it printed (spaces as they come), its character error rate against CW_TEXT said"""
+    import subprocess
+    L, S = o.r[listener], o.r[sender]
+    got = {}
+
+    def body(watch):
+        with o.step(f"{sender} keys '{CW_TEXT}' at its KEY Speed"):
+            subprocess.run(["scp", "-q", "-o", "BatchMode=yes", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "tci_cw_tx.py"), f"root@{S.host}:/tmp/tci_cw_tx.py"], check=True)
+            L.cw = ""
+            proc = subprocess.Popen(["ssh", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
+                                     f"python3 /tmp/tci_cw_tx.py '{CW_TEXT}' 14"], stdout=subprocess.PIPE, text=True)
+            while proc.poll() is None:
+                if watch.why:
+                    S.stop()
+                    raise Refused(watch.why)
+                time.sleep(0.05)
+            if not watch.tx_peak.get(sender):
+                raise Refused(f"{sender}'s meter showed no power")
+    try:
+        # AGC fast on both: with it off a signal 60 dB up overloaded the X6100's audio and its decoder printed garbage
+        # (2026-11-23; cw_diag, which copied, had it fast)
+        over(o, sender, listener, f, 4, label, body, agc=2)
+        with o.step(f"{listener}'s decoder printed the text") as s:
+            t0, last = time.time(), None
+            while time.time() - t0 < 6:             # the decoder's last characters: settled when 1.5 s unchanged
+                if L.cw != last:
+                    last, t_last = L.cw, time.time()
+                elif time.time() - t_last > 1.5:
+                    break
+                time.sleep(0.1)
+            text = " ".join(L.cw.split()).upper()
+            cer = lev(text.replace(" ", ""), CW_TEXT.replace(" ", "")) / len(CW_TEXT.replace(" ", ""))
+            got.update(decoded=text, cer=round(cer, 3))
+            if CW_MUST not in text:
+                raise Refused(f"{listener} decoded {text!r} ({cer:.0%} of the characters wrong): {CW_MUST!r} not in it")
+            s.confirm(f"{text!r}, {cer:.0%} of the characters wrong")
+    except Refused as e:
+        return False, str(e), got
+    return True, f"decoded {got['decoded']!r} ({got['cer']:.0%} of the characters wrong)", got
+
+
+POWER_STEPS = [0.1, 0.3, 1.0]       # W: the listener's level must rise 10*log10 of each ratio
+POWER_TOL_DB = 2.0
+
+
+def power_steps(o, sender, listener, f, label):
+    """A 1000 Hz tone 2 s at each of POWER_STEPS (USB, one over each): the listener's spectrum at the tone, between the
+    moments the sender's own state said it went on and off the air, must rise by the power's ratio in dB, within
+    POWER_TOL_DB (the spectrum is the receiver's before its AGC; RF gain fixed)"""
+    levels, got = [], {}
+    S, L = o.r[sender], o.r[listener]
+    try:
+        for w in POWER_STEPS:
+            peak = {}
+
+            def body(watch, w=w):
+                with o.step(f"{sender} sends 1000 Hz 2 s at {w} W"):
+                    bench.tci_send(S, [[0, 0.3], [1000, 2.0], [0, STEP_TAIL_S]], watch=watch)
+                    if watch.why:
+                        raise Refused(watch.why)
+                    peak["w"] = watch.tx_peak.get(sender)
+            over(o, sender, listener, f, 2, f"{label} {w} W", body, w=w)
+            with o.step(f"{listener}'s level while {sender} said it was on the air") as s:
+                if not S.tx_last:
+                    raise Refused(f"{sender} never said it was on the air")
+                on, off = S.tx_last
+                lvl, n = bench.spectrum_level(L, f + 1000, on + 0.6, off - 0.4, half=300)
+                if lvl is None or n < 3:
+                    raise Refused(f"{listener} sent {n} spectrum frames covering {f + 1000} Hz while {sender} was on "
+                                  f"the air ({off - on:.1f} s)")
+                levels.append((w, round(lvl, 1), peak.get("w")))
+                s.confirm(f"{lvl:.1f} dB over {n} frames, {off - on:.1f} s on the air")
+        with o.step(f"{listener}'s level rose with the power") as s:
+            got["levels"] = levels
+            bad = []
+            for (w0, l0, _), (w1, l1, _) in zip(levels, levels[1:]):
+                want = 10 * math.log10(w1 / w0)
+                if abs((l1 - l0) - want) > POWER_TOL_DB:
+                    bad.append(f"{w0}->{w1} W: {l1 - l0:+.1f} dB (want {want:+.1f})")
+            say_lv = ", ".join(f"{w} W {l} dB (meter {m and round(m, 2)} W)" for w, l, m in levels)
+            if bad:
+                raise Refused(f"levels {say_lv}; off by more than {POWER_TOL_DB} dB: {'; '.join(bad)}")
+            s.confirm(say_lv)
+    except Refused as e:
+        return False, str(e), got
+    finally:
+        o.both({"pwr": W})                  # the power back at 0.1 W on both
+    return True, f"the listener's level followed the power: " + ", ".join(f"{w} W {l} dB" for w, l, _ in levels), got
+
+
+def ptt_refused(o, radio, other, f, arm, label):
+    """PTT on radio with its transmitter locked (arm False) or armed outside the amateur bands (f): it must stay off
+    the air, and the other radio, on the same frequency, must hear nothing"""
+    R, X = o.r[radio], o.r[other]
+    with o.step(f"both on {f / 1e6:.3f} MHz USB, alike"):
+        o.both_page("G")
+        o.both({"freq": f, "mode": 2, "pwr": W})
+    with o.step(f"{radio}'s transmitter {'armed' if arm else 'locked'}"):
+        o.changing += 1
+        try:
+            bench.arm(R, arm)
+        finally:
+            o.changing -= 1
+    went, t0 = False, time.time()
+    quiet = X.meter
+    try:
+        with o.step(f"PTT pressed on {radio}: it must stay off the air 2.5 s") as s:
+            R.send("key PTT 1 9")
+            while time.time() - t0 < 2.5:
+                if R.tx:
+                    went = True
+                    break
+                time.sleep(0.05)
+            R.send("key PTT 0")
+            if went:
+                raise Refused(f"{radio} WENT ON THE AIR")
+            s.confirm(f"{other}'s S-meter {quiet} -> {X.meter} dBm")
+    finally:
+        R.send("key PTT 0")
+        R.stop()
+        if arm:
+            bench.arm(R, False)
+    return (not went), f"PTT on {radio} ({'armed out of the amateur bands' if arm else 'transmitter locked'}): " + \
+        ("stayed off the air" if not went else "WENT ON THE AIR"), {}
+
+
+TEST_CALLS = {A: "Q1TST", B: "Q2TST"}
+
+
+def test_calls(o):
+    """Both radios on their test calls (bench.py testcall: PSK Reporter off with it, the own call kept to put back;
+    each GUI restarted to read it), the sessions connected again. Once a run; close() puts the own calls back"""
+    import subprocess
+    if getattr(o, "calls_set", False):
+        return
+    o.changing += 1
+    try:
+        for n, call in TEST_CALLS.items():
+            cur = bench.ssh(o.r[n].host, "sqlite3 -readonly /mnt/params.db \"select val from params where "
+                                         "name='callsign'\"").strip()
+            if cur == call:
+                continue
+            o.st.ev(f"{n}: test call {call} set, PSK Reporter off: its GUI restarts")
+            subprocess.run([sys.executable, "-B", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench.py"),
+                            "testcall", n, call], check=True, capture_output=True, timeout=120)
+            o.restore_calls.add(n)
+        for n in o.restore_calls:
+            t0 = time.time()
+            while True:
+                try:
+                    o.r[n].reconnect()
+                    break
+                except (Refused, OSError):
+                    if time.time() - t0 > 90:
+                        raise Refused(f"{n}: its GUI did not come back after the test call")
+                    time.sleep(3)
+    finally:
+        o.changing -= 1
+    o.calls_set = True
+
+
+def mask(m):
+    """An FT8 message as the console may show it: the third word (a locator) hidden"""
+    w = m.split()
+    return " ".join(w[:2] + ["****"] * (len(w) > 2) + w[3:])
+
+
+def ft8_cq(o, sender, listener, label, dial=14074000):
+    """The FT8 app on both on dial (USB-D), the sender's CQ (its test call) in the next slot at 0.1 W: the listener
+    must decode exactly the message the sender said it sent ("next" in its FT8 state)"""
+    S, L = o.r[sender], o.r[listener]
+    got = {}
+    try:
+        with o.step("both on their test calls (PSK Reporter off)"):
+            test_calls(o)
+        with o.step(f"the FT8 app open on both, on {dial / 1e6:.3f} MHz"):
+            o.changing += 1
+            try:
+                for r in (S, L):
+                    r.send("ft8 open")
+                for r in (S, L):
+                    r.wait("the FT8 app", lambda r=r: r.ft8.get("open") == 1, 10)
+                    time.sleep(1.0)
+                    for _ in range(3):              # it opens in the protocol it was left in (the X6100's in FT4):
+                        if r.state.get("app") == "FT8":     # its MODE steps FT8, FT4, FT2 round
+                            break
+                        p = r.ft8.get("proto")
+                        r.send("ft8 mode")
+                        r.wait("FT8's protocol stepped", lambda r=r, p=p: r.ft8.get("proto") != p, 5)
+                        time.sleep(0.8)
+                    if r.state.get("app") != "FT8":
+                        raise Refused(f"{r.name}: its FT8 app not in FT8 ({r.state.get('app')})")
+                th = [threading.Thread(target=bench.ft8_to_band, args=(r, dial)) for r in (S, L)]
+                [t.start() for t in th]
+                [t.join(40) for t in th]
+                for r in (S, L):
+                    if r.ft8.get("auto"):
+                        r.send("ft8 auto")
+                        r.wait("Auto off", lambda r=r: not r.ft8.get("auto"), 5)
+            finally:
+                o.changing -= 1
+            o.both({"freq": dial, "pwr": W})
+            if int(S.state.get("mode", -1)) != int(L.state.get("mode", -2)):
+                raise Refused(f"the two in different modes: {S.state.get('mode')}/{L.state.get('mode')}")
+        p, total = bench.chain_gate(o.c, "radios")
+        with o.step(f"{sender} may send, {listener} may listen"):
+            bench.radio_tx_gate(S, o.c, W)
+            bench.listener_gate(L)
+        o.roles = {sender: "TX", listener: "RX"}
+        watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=L, w=W, label=label)
+        try:
+            with o.step(f"{sender} calls CQ in the next slot") as s:
+                n0 = len(L.rows)
+                S.send("ft8 cq")
+                S.wait("its transmission", lambda: S.tx or watch.why, 32)
+                sent = bench.norm(S.ft8.get("next") or "")
+                bench.tx_log({"who": sender, "f": dial, "w": S.pwr(), "what": f"orch: {label}"})
+                S.wait("the end of its transmission", lambda: not S.tx or watch.why, bench.MAX_KEY_S + 2)
+                S.send("ft8 stop")
+                if watch.why:
+                    raise Refused(watch.why)
+                got["sent"] = mask(sent)
+                s.confirm(f"sent {mask(sent)!r}")
+        finally:
+            watch.close()
+            S.send("ft8 stop")
+            o.roles = {A: "RX", B: "RX"}
+        with o.step(f"{listener} decoded exactly that") as s:
+            try:
+                L.wait("the decode", lambda: any(bench.msg(r) == sent for r in L.rows[n0:]), 8)
+            except Refused:
+                heard = [mask(bench.msg(r)) for r in L.rows[n0:]]
+                raise Refused(f"{listener} decoded {heard or 'nothing'}, not {mask(sent)!r}")
+            row = next(r for r in L.rows[n0:] if bench.msg(r) == sent)
+            got.update(decoded=mask(bench.msg(row)), snr=row.get("snr"))
+            s.confirm(f"{mask(bench.msg(row))!r} at {row.get('snr')} dB")
+    except Refused as e:
+        return False, str(e), got
+    finally:
+        for r in (S, L):
+            r.send("ft8 close")
+    return True, f"sent {got['sent']!r}, decoded the same at {got['snr']} dB", got
+
+
+def hello(r):
+    """The GUI's version from the remote's first line ("hello <version> <boot>")"""
+    for _, x in list(r.lines):
+        if x.startswith("hello "):
+            return " ".join(x.split()[1:-1]) or x.split()[1]     # "hello <name> <version> <boot>": all but the boot
+    return None
+
+
+def t_identity(o):
+    """Both radios run the same GUI and offer the same apps, and neither's Sentry A runs a routine of its own (it
+    would retune A away from the other)"""
+    with o.step("the GUI's version, the apps and A's routine on both") as s:
+        for r in o.r.values():
+            if r.apps is None:
+                r.send("apps")
+                r.wait("its apps", lambda r=r: r.apps is not None, 5)
+        v = {n: hello(r) for n, r in o.r.items()}
+        apps = {n: sorted(a[1] for a in (r.apps or [])) for n, r in o.r.items()}
+        rout = {n: bench.ssh(r.host, "grep -h '^s.rout=' /mnt/gui_state.conf 2>/dev/null | tail -1").strip()
+                for n, r in o.r.items()}
+        bad = []
+        if len(set(v.values())) != 1 or None in v.values():
+            bad.append(f"GUI versions {v}")
+        if apps[A] != apps[B]:
+            bad.append(f"apps only on one: {sorted(set(apps[A]) ^ set(apps[B]))}")
+        busy = [n for n, x in rout.items() if x and x != "s.rout=0"]
+        if busy:
+            bad.append(f"A's routine on: {busy} ({rout})")
+        if bad:
+            raise Refused("; ".join(bad))
+        s.confirm(f"GUI {v[A]}, {len(apps[A])} apps alike, A's routine off")
+    return True, f"same GUI ({v[A]}) and {len(apps[A])} apps on both; A's routine off on both", {"gui": v}
+
+
+def t_services(o):
+    """The ports and pages each radio must answer, and the two it must not (50003/50004, closed since the HTTPS proxy)"""
+    import socket
+    from suite_proto import http
+    found = {}
+    with o.step("ports and pages on both") as s:
+        bad = []
+        for n, r in o.r.items():
+            ports = {}
+            for port in (22, 80, 443, 4532, 50001, 50002, 50003, 50004):
+                try:
+                    socket.create_connection((r.host, port), timeout=3).close()
+                    ports[port] = True
+                except OSError:
+                    ports[port] = False
+            page = http(r.host, "/")[0]
+            disp = http(r.host, "/api/display")[0]
+            found[n] = {"ports": ports, "/": page, "/api/display": disp}
+            miss = [p for p in (22, 80, 443, 4532, 50001, 50002) if not ports[p]]
+            open_ = [p for p in (50003, 50004) if ports[p]]
+            if miss or open_ or page != 200 or disp != 200:
+                bad.append(f"{n}: not answering {miss}, open {open_}, / {page}, /api/display {disp}")
+        if bad:
+            raise Refused("; ".join(bad))
+        s.confirm("22, 80, 443, 4532, 50001, 50002 answer and 50003/50004 closed on both; / and /api/display 200")
+    return True, "every service answers on both radios, the closed ports closed", found
+
+
+def t_web_secrets(o):
+    """The Files page never hands out the HTTPS private key, the backups or the remote's sessions (their tokens):
+    each asked for by name (HEAD, nothing fetched) must be 403"""
+    from suite_proto import http
+    want = ("https/key.pem", "backups/backup.tgz", "remote_sessions.conf")
+    got, bad = {}, []
+    with o.step("the secrets asked for by name on both (HEAD only)") as s:
+        for n, r in o.r.items():
+            got[n] = {f: http(r.host, "/files/" + f, method="HEAD")[0] for f in want}
+            served = [f for f, st in got[n].items() if st == 200]
+            if served:
+                bad.append(f"{n} SERVES {served}")
+        if bad:
+            raise Refused("; ".join(bad) + " (fixed in the repo: 3906e452 key.pem, 7b01807b sessions; the radios run "
+                                           "an image older than both)")
+        s.confirm(str(got))
+    return True, "the key, the backups and the sessions refused (403) on both", got
+
+
+RX_TRIES = [("att", 1), ("att", 0), ("pre", 1), ("pre", 0), ("agc", 1), ("agc", 2), ("agc", 3), ("agc", 0),
+            ("nb", 1), ("nb", 0), ("nr", 1), ("nr", 0), ("sql", 20), ("sql", 0), ("rfg", 50), ("rfg", 100)]
+
+
+def t_rx_settings(o):
+    """The receiver's settings, each set on both radios at once, read back on each and alike"""
+    with o.step("both on 14.200 MHz USB"):
+        o.both_page("G")
+        o.both({"freq": 14200000, "mode": 2})
+    for k, v in RX_TRIES:
+        with o.step(f"{k} {v} on both"):
+            o.both({k: v})
+    return True, f"{len(RX_TRIES)} settings ({', '.join(sorted({k for k, _ in RX_TRIES}))}), each confirmed on both " \
+                 f"and alike", {}
+
+
+def ptt_lease(o, radio, other, label):
+    """One PTT on radio, armed on 14.200 USB at 0.1 W, never renewed: off the air within 4 s (the lease, 3 s); the
+    other radio on the same frequency"""
+    R = o.r[radio]
+    res = {}
+
+    def body(watch):
+        with o.step(f"one PTT on {radio}, never renewed: off by itself within 4 s") as s:
+            t0 = time.time()
+            R.send("key PTT 1 7")
+            on = off = None
+            while time.time() - t0 < 6:
+                if R.tx and on is None:
+                    on = time.time() - t0
+                if on is not None and not R.tx:
+                    off = time.time() - t0
+                    break
+                time.sleep(0.05)
+            R.send("key PTT 0")
+            res.update(on=on, off=off)
+            if on is None:
+                raise Refused(f"{radio} never went on the air")
+            if off is None or off > 4.0:
+                raise Refused(f"{radio} still on the air {off or '6+'} s after the one PTT")
+            s.confirm(f"on at {on:.1f} s, off at {off:.1f} s")
+    try:
+        over(o, radio, other, 14200000, 2, label, body)
+    except Refused as e:
+        return False, str(e), res
+    return True, f"on the air at {res['on']:.1f} s, off by itself at {res['off']:.1f} s (the lease: 3 s)", res
+
+
+def tune_carrier(o, sender, listener, label, f=14200000):
+    """TUNE at 0.1 W (tpwr) on f USB: its lease renewed 3 s, then let lapse. The sender on the air with tune 1; the
+    listener's spectrum within 3 kHz of f up >= 15 dB over its quiet; off by itself 2.5-5 s after the last renewal"""
+    S, L = o.r[sender], o.r[listener]
+    res = {}
+    with o.step("TUNE's power 0.1 W on both"):
+        o.both({"tpwr": 1})
+
+    def body(watch):
+        with o.step(f"{sender}'s TUNE held 3 s by its lease, then let lapse") as s:
+            t0 = time.time()
+            quiet, _ = bench.spectrum_level(L, f, t0 - 2.0, t0, half=3000)
+            last = None
+            while time.time() - t0 < 3.0:
+                S.send("tune 1 7")
+                last = time.time()
+                time.sleep(0.8)
+            on = S.state.get("tune") and S.tx
+            off_at = None
+            while time.time() - last < 7:
+                if not S.tx and not S.state.get("tune"):
+                    off_at = time.time() - last
+                    break
+                time.sleep(0.05)
+            S.send("tune 0")
+            loud, n = bench.spectrum_level(L, f, t0 + 0.8, last, half=3000)
+            res.update(on=bool(on), off_after_s=off_at and round(off_at, 1), quiet=quiet, loud=loud, frames=n)
+            if not on:
+                raise Refused(f"{sender} not on the air with TUNE (tune {S.state.get('tune')}, tx {S.tx})")
+            if quiet is None or loud is None or loud - quiet < 15:
+                raise Refused(f"{listener}'s spectrum near {f} Hz: {quiet} -> {loud} dB, not 15 dB up")
+            if off_at is None or not 2.5 <= off_at <= 5.0:
+                raise Refused(f"TUNE off {off_at} s after the last renewal (2.5-5 s wanted)")
+            s.confirm(f"{listener} {quiet:.0f} -> {loud:.0f} dB; off {off_at:.1f} s after the last renewal")
+    try:
+        over(o, sender, listener, f, 2, label, body)
+    except Refused as e:
+        return False, str(e), res
+    return True, (f"on the air with TUNE, {listener} {res['loud'] - res['quiet']:.0f} dB up, off by itself "
+                  f"{res['off_after_s']} s after the last renewal"), res
+
+
+def ft8_stop(o, sender, listener, label, dial=14074000):
+    """The FT8 app on both on dial, the sender's CQ stopped 2 s into its transmission: off the air within 1 s"""
+    S, L = o.r[sender], o.r[listener]
+    res = {}
+    try:
+        with o.step("both on their test calls, the FT8 app open on both"):
+            test_calls(o)
+            o.changing += 1
+            try:
+                for r in (S, L):
+                    r.send("ft8 open")
+                for r in (S, L):
+                    r.wait("the FT8 app", lambda r=r: r.ft8.get("open") == 1, 10)
+                    time.sleep(1.0)
+                    for _ in range(3):
+                        if r.state.get("app") == "FT8":
+                            break
+                        p = r.ft8.get("proto")
+                        r.send("ft8 mode")
+                        r.wait("FT8's protocol stepped", lambda r=r, p=p: r.ft8.get("proto") != p, 5)
+                        time.sleep(0.8)
+                th = [threading.Thread(target=bench.ft8_to_band, args=(r, dial)) for r in (S, L)]
+                [t.start() for t in th]
+                [t.join(40) for t in th]
+            finally:
+                o.changing -= 1
+            o.both({"freq": dial, "pwr": W})
+        p, total = bench.chain_gate(o.c, "radios")
+        bench.radio_tx_gate(S, o.c, W)
+        bench.listener_gate(L)
+        o.roles = {sender: "TX", listener: "RX"}
+        watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=L, w=W, label=label)
+        try:
+            with o.step(f"{sender}'s CQ stopped 2 s into it: off the air within 1 s") as s:
+                S.send("ft8 cq")
+                S.wait("its transmission", lambda: S.tx or watch.why, 32)
+                bench.tx_log({"who": sender, "f": dial, "w": S.pwr(), "what": f"orch: {label}"})
+                time.sleep(2.0)
+                t0 = time.time()
+                S.send("ft8 stop")
+                S.wait("off the air", lambda: not S.tx, 3)
+                res["off_s"] = round(time.time() - t0, 2)
+                if res["off_s"] > 1.0:
+                    raise Refused(f"off the air {res['off_s']} s after ft8 stop")
+                time.sleep(3.0)
+                if S.tx:
+                    raise Refused(f"{sender} on the air again after the stop")
+                s.confirm(f"off {res['off_s']} s after the stop, not again")
+        finally:
+            watch.close()
+            S.send("ft8 stop")
+            o.roles = {A: "RX", B: "RX"}
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        for r in (S, L):
+            r.send("ft8 close")
+    return True, f"off the air {res['off_s']} s after ft8 stop, not again", res
+
+
+def best_cer(got, want):
+    """The character error rate of the stretch of got nearest to want (spaces squeezed): (rate, that stretch)"""
+    g, w = " ".join(got.upper().split()), " ".join(want.upper().split())
+    best = (1.0, "")
+    for n in range(max(1, len(w) - 6), len(w) + 7):
+        for i in range(0, max(1, len(g) - n + 1)):
+            seg = g[i:i + n]
+            r = lev(seg, w) / len(w)
+            if r < best[0]:
+                best = (r, seg)
+    return best
+
+
+def digi_text(o, sender, listener, mode, label):
+    """The listener's app for mode (PSK31) open, the sender on its dial and mode (confirmed alike), the text played as
+    the mode's audio through the sender's TCI at 0.1 W; the listener's decoded line (its text log, once the app
+    closed): PASS at most 5 % of the characters wrong against the text sent"""
+    import subprocess
+    import digimodes
+    import suite_more
+    S, L = o.r[sender], o.r[listener]
+    text = suite_more.DIGI_TEXT[mode]
+    res = {"sent": text}
+    try:
+        with o.step(f"{listener}'s {mode} app open") as s:
+            o.changing += 1
+            try:
+                if not suite_more.open_app(L, suite_more.DIGI_APP[mode]):
+                    raise Refused(f"{listener}'s {mode} app did not open")
+                time.sleep(1.5)
+            finally:
+                o.changing -= 1
+            f, m = int(L.state.get("freq", 0)), int(L.state.get("mode", -1))
+            s.confirm(f"on {f / 1e6:.4f} MHz mode {m}")
+        x = digimodes.psk31_audio(text)
+        local = os.path.join(o.st.run_dir, f"{mode}_{sender}.raw")
+        secs = digimodes.write_raw(x, local)
+        subprocess.run(["scp", "-q", "-o", "BatchMode=yes", local, f"root@{S.host}:/tmp/bench_digi.raw"], check=True)
+        subprocess.run(["scp", "-q", "-o", "BatchMode=yes", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "tci_tone_tx.py"), f"root@{S.host}:/tmp/tci_tone_tx.py"], check=True)
+        log0 = bench.ssh(L.host, "f=$(ls -t /mnt/digi_text/*.txt 2>/dev/null | head -1); [ -n \"$f\" ] && wc -c < $f "
+                                 "|| echo 0").strip()
+
+        def body(watch):
+            with o.step(f"{sender} sends {text!r} ({secs:.1f} s of {mode})"):
+                bench.tci_send(S, None, max_s=secs + 4, watch=watch, file="/tmp/bench_digi.raw", amp=0.5)
+                if watch.why:
+                    raise Refused(watch.why)
+        over(o, sender, listener, f, m, label, body, pages=False)
+        with o.step(f"{listener}'s app closed, its decoded line read") as s:
+            o.changing += 1
+            try:
+                bench.close_apps(L)
+            finally:
+                o.changing -= 1
+            got, t0 = "", time.time()
+            while time.time() - t0 < 30:
+                got = bench.ssh(L.host, f"f=$(ls -t /mnt/digi_text/*.txt | head -1); tail -c +{int(log0 or 0) + 1} $f")
+                cer, seg = best_cer(got, text)
+                if cer <= 0.05:
+                    break
+                time.sleep(3.0)
+            res.update(decoded=seg, cer=round(cer, 3))
+            if cer > 0.05:
+                raise Refused(f"{listener} decoded {seg!r} ({cer:.0%} wrong against {text!r}; the log's new text: "
+                              f"{' '.join(got.split())[:160]!r})")
+            s.confirm(f"{seg!r}, {cer:.0%} wrong")
+    except Refused as e:
+        return False, str(e), res
+    return True, f"sent {text!r}, decoded {res['decoded']!r} ({res['cer']:.0%} of the characters wrong)", res
+
+
 # ---- The tests ----
 
 class Test:
@@ -502,7 +1177,17 @@ def voice(sender, listener, f, mode, name):
     return lambda o: audio_steps(o, sender, listener, f, mode, name)
 
 
+def pair(name, role, what, mk, est):
+    """A test both ways: the X6100 sending to the X6200, then the other way round"""
+    return [Test(f"{name} x6100>x6200", "X6100 TX, X6200 RX", what, mk(A, B, f"{name} x6100>x6200"), est),
+            Test(f"{name} x6200>x6100", "X6200 TX, X6100 RX", what, mk(B, A, f"{name} x6200>x6100"), est)]
+
+
 TESTS = [
+    Test("identity", "both", "the same GUI and apps on both, neither's A running a routine of its own", t_identity, 10),
+    Test("services", "both", "the ports and pages that must answer, and the two that must not", t_services, 15),
+    Test("web-secrets", "both", "the HTTPS key, the backups and the remote's sessions refused (403) by the Files page",
+         t_web_secrets, 5),
     Test("sync-bands", "both RX", "both radios through 10 bands/modes together, each confirmed on both", t_sync_bands, 40),
     Test("usb-steps x6100>x6200", "X6100 TX, X6200 RX", "USB 14.200: a stepped tone sequence from the X6100 heard in "
          "order in the X6200's audio", voice(A, B, 14200000, 2, "usb-steps x6100>x6200"), 30),
@@ -520,6 +1205,32 @@ TESTS = [
          voice(A, B, 29600000, 7, "fm-steps x6100>x6200"), 30),
     Test("fm-steps x6200>x6100", "X6200 TX, X6100 RX", "FM 29.600: the stepped sequence heard",
          voice(B, A, 29600000, 7, "fm-steps x6200>x6100"), 30),
+    *pair("cw-text", "", "CW 14.040: 'VVV TEST DE Q1TST' keyed, the other's decoder must print TEST DE Q1TST",
+          lambda s, l, n: (lambda o: cw_text(o, s, l, 14040000, n)), 30),
+    *pair("power-steps", "", "USB 14.200: a tone at 0.1, 0.3, 1.0 W; the other's level must rise 4.8 and 5.2 dB (2 dB)",
+          lambda s, l, n: (lambda o: power_steps(o, s, l, 14200000, n)), 45),
+    *pair("ft8-cq", "", "FT8 14.074: a CQ in the next slot, the other must decode exactly the message sent",
+          lambda s, l, n: (lambda o: ft8_cq(o, s, l, n)), 40),
+    *pair("psk31-text", "", "PSK31 on the listener's app dial: 'CQ CQ DE Q1TST Q1TST K' sent, decoded with at most 5 % "
+          "of the characters wrong", lambda s, l, n: (lambda o: digi_text(o, s, l, "psk31", n)), 45),
+    *pair("tune-carrier", "", "TUNE at 0.1 W: on the air, heard 15 dB up, off by itself 2.5-5 s after the lease's last "
+          "renewal", lambda s, l, n: (lambda o: tune_carrier(o, s, l, n)), 25),
+    *pair("ft8-stop", "", "FT8: ft8 stop 2 s into a CQ takes the sender off the air within 1 s, not again",
+          lambda s, l, n: (lambda o: ft8_stop(o, s, l, n)), 35),
+    Test("rx-settings", "both RX", "PRE, ATT, AGC, NB, NR, squelch, RF gain: each set on both, read back alike",
+         t_rx_settings, 40),
+    Test("ptt-lease x6100", "X6100 TX, X6200 RX", "one PTT never renewed: off the air by itself within 4 s",
+         lambda o: ptt_lease(o, A, B, "ptt-lease x6100"), 20),
+    Test("ptt-lease x6200", "X6200 TX, X6100 RX", "one PTT never renewed: off the air by itself within 4 s",
+         lambda o: ptt_lease(o, B, A, "ptt-lease x6200"), 20),
+    Test("ptt-locked x6100", "both RX", "the X6100's PTT with its transmitter locked: stays off the air",
+         lambda o: ptt_refused(o, A, B, 14200000, False, "ptt-locked x6100"), 12),
+    Test("ptt-locked x6200", "both RX", "the X6200's PTT with its transmitter locked: stays off the air",
+         lambda o: ptt_refused(o, B, A, 14200000, False, "ptt-locked x6200"), 12),
+    Test("ptt-out-of-band x6100", "both RX", "the X6100 armed on 15.000 MHz (WWV, no amateur band): PTT refused",
+         lambda o: ptt_refused(o, A, B, 15000000, True, "ptt-out-of-band x6100"), 12),
+    Test("ptt-out-of-band x6200", "both RX", "the X6200 armed on 15.000 MHz (WWV, no amateur band): PTT refused",
+         lambda o: ptt_refused(o, B, A, 15000000, True, "ptt-out-of-band x6200"), 12),
 ]
 
 
@@ -531,6 +1242,7 @@ def run(names, port, lan, linger):
     srv = console(st, port, lan)
     st.run_dir = os.path.join(bench.STATE, "runs", time.strftime("%Y%m%d-%H%M%S-orch"))
     os.makedirs(st.run_dir, exist_ok=True)
+    st.log = open(os.path.join(st.run_dir, "events.jsonl"), "a")
     st.ev(f"console: http://{'0.0.0.0' if lan else '127.0.0.1'}:{port}/ ; run {st.run_dir}")
     o = None
 
@@ -545,12 +1257,28 @@ def run(names, port, lan, linger):
     try:
         st.phase = "connecting"
         o = Orch(st)
+        st.phase = "syncing both"
+        # the start: both transmitters locked, both on the Sentry's page G on one frequency and mode, confirmed, before
+        # any test (the first full run began with the X6100 armed on 14.074 USB-D and the X6200 on 29.600 NFM)
+        o.changing += 1
+        try:
+            for n, r in o.r.items():
+                bench.close_apps(r)
+                if r.state.get("rxo") == 0:
+                    bench.arm(r, False)
+                r.send("apps")
+        finally:
+            o.changing -= 1
+        o.both_page("G")
+        o.both({"freq": 14200000, "mode": 2})
+        st.ev("both locked, on page G, on 14.2000 MHz USB, confirmed alike", "ok")
         st.phase = "running"
         for i, t in enumerate(tests):
             with st.lock:
                 st.cur = i
+            st.ev(f"TEST {i + 1}/{len(tests)} {t.name} ({t.role}): {t.what}")
+            o.ready()                       # never on from radios set wrong: refused here stops the run
             o.violation = None
-            st.ev(f"TEST {i + 1}/{len(tests)} {t.name} ({t.role})")
             for r in o.r.values():
                 r.send(f"banner BENCH {t.name.upper()} ({t.role.upper()})"[:100])
             t0 = time.time()
@@ -566,6 +1294,7 @@ def run(names, port, lan, linger):
             with st.lock:
                 st.tests[i].update(result=res, says=says, secs=time.time() - t0, data=data)
             st.ev(f"{res} {t.name}: {says}", "ok" if res == "PASS" else "bad")
+            st.ev(f"data of {t.name}: {json.dumps(data, default=str)[:4000]}", "conf")
             for r in o.r.values():
                 r.send("banner")
             with open(os.path.join(st.run_dir, "results.json"), "w") as fh:
