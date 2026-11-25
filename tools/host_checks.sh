@@ -6,7 +6,8 @@
 #   BUILD  did not build: a harness that no longer compiles, told apart from a failing case (the compiler's or the
 #          linker's own words in its output)
 #   SKIP   not run here, and why (a library the machine lacks, a check that needs the radio)
-# The exit status is 0 only with no FAIL and no BUILD. A Mac or Linux with a C compiler and make; CI runs it.
+# The exit status is 0 only with no FAIL and no BUILD. A Mac or Linux with a C compiler and make; CI runs it. On a Mac
+# the checks that build only on Linux (tune, txlevel, beacon, tci) run on a radio instead: tools/radio_checks.sh.
 #
 #   tools/host_checks.sh [-v] [name ...]     -v: each check's output; names: only those (ham_bands adsb ...)
 #
