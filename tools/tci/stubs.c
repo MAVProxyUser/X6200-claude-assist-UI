@@ -288,7 +288,11 @@ void audio_play_lowlat_end(void) {
 }
 bool audio_play_if_room(int16_t *buf, size_t n) {
     played += n;
-    if (played_f) fwrite(buf, sizeof(*buf), n, played_f);
+    if (played_f) {
+        fwrite(buf, sizeof(*buf), n, played_f);
+        fflush(played_f);   /* played as it came: the client test reads it at trx:0,false, before the unkey (held
+                             * TCI_UNKEY_TAIL_MS after the queue) closes the file */
+    }
     return true;
 }
 

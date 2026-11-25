@@ -80,6 +80,12 @@ static void client_from(int ci, const char *addr, const char *app) {
     peer[ci] = sv[1];
 }
 
+/* A connection through its handshake taken as one that has been up a while: a start in a connection's first second
+ * waits KEY_GRACE_MS (handle_cmd), which its own case (young_start) looks at; the others are about who may key */
+static void established(int ci) {
+    clients[ci].open_ms = now_ms() - KEY_YOUNG_MS - 1;
+}
+
 /* The cases of who owns a transmission: programs on the radio, which are never asked */
 static void client_open(int ci) {
     client_from(ci, "127.0.0.1", "");
@@ -109,6 +115,7 @@ static bool funnel_connect(int ci, const char *addr) {
     if (send(peer[ci], req, strlen(req), MSG_NOSIGNAL) != (ssize_t)strlen(req))
         exit(2);
     client_read(ci);
+    established(ci);
     ssize_t n = recv(peer[ci], resp, sizeof(resp) - 1, 0);
     return c->fd >= 0 && c->ws && n > 12 && !strncmp(resp, "HTTP/1.1 101", 12);
 }
@@ -944,6 +951,7 @@ static void funnel_same_browser_back(void) {
 
 /* A connection through its handshake as client_read takes it: from addr (the TCP peer), with more request headers
  * ("Name: value\r\n" lines). True when it was taken (the 101 read here) */
+static bool lan_young;      /* lan_connect leaves the connection in its first second (young_start) */
 static bool lan_connect(int ci, const char *addr, const char *headers) {
     static char resp[65536];    /* the 101 and the greeting after it, all the server wrote: frames read whole later */
     client_t   *c = &clients[ci];
@@ -966,6 +974,8 @@ static bool lan_connect(int ci, const char *addr, const char *headers) {
     if (send(peer[ci], req, strlen(req), MSG_NOSIGNAL) != (ssize_t)strlen(req))
         exit(2);
     client_read(ci);
+    if (!lan_young)
+        established(ci);
     ssize_t n = recv(peer[ci], resp, sizeof(resp) - 1, 0);
     return c->fd >= 0 && c->up && n > 12 && !strncmp(resp, "HTTP/1.1 101", 12);
 }
@@ -1712,6 +1722,7 @@ static int bt_connect(const char *addr, bool en, int *bluez) {
         if (send(sv[1], req, strlen(req), MSG_NOSIGNAL) != (ssize_t)strlen(req))
             exit(2);
         client_read(i);
+        established(i);
         ssize_t n = recv(sv[1], resp, sizeof(resp) - 1, 0);
         return n > 12 && !strncmp(resp, "HTTP/1.1 101", 12) ? i : -1;
     }
@@ -1785,6 +1796,29 @@ static void bluetooth(void) {
     close(bluez);
 }
 
+/* A start in a connection's first second (2026-11-25): a program that keyed and quit at once put the X6200 on the air
+ * for an instant when its close came after its key. It waits KEY_GRACE_MS and keys only if its client is still there;
+ * gone meanwhile, it keys nothing at all */
+static void young_start(void) {
+    lan_young = true;
+    check(lan_connect(A, "127.0.0.1", "User-Agent: Pat/1.0\r\n") && clients[A].local, "A program on the radio, connected now");
+    say(A, "trx:0,true;");
+    gui(-1);
+    check(!on_air() && ptt_owner < 0 && clients[A].key_wait, "its start at once: waits, nothing keyed");
+    tx_session_tick(now_ms() + KEY_GRACE_MS + 1);
+    gui(-1);
+    check(on_air() && ptt_owner == A && strstr(heard(A), "trx:0,true;"), "KEY_GRACE_MS on, still there: it keys");
+    unkey(A);
+    check(lan_connect(B, "127.0.0.1", "User-Agent: Lab/1.0\r\n"), "another program, connected now");
+    say(B, "trx:0,true,tci;");
+    gui(-1);
+    client_gone(B);
+    tx_session_tick(now_ms() + KEY_GRACE_MS + 1);
+    gui(-1);
+    check(!on_air() && txs.owner < 0 && !radio_get_modem(), "it keys and quits at once: nothing keyed at all");
+    lan_young = false;
+}
+
 static int run(const char *name, void (*fn)(void)) {
     int   st;
     pid_t pid;
@@ -1807,6 +1841,7 @@ int main(void) {
         void (*fn)(void);
     } cases[] = {
         {"Two starts before the LVGL thread keys, A ends it", two_starts_a_ends},
+        {"A start in a connection's first second: KEY_GRACE_MS, nothing if its client quit", young_start},
         {"Two starts before the LVGL thread keys, B unkeys", two_starts_b_unkeys},
         {"Two starts before the LVGL thread keys, A leaves", two_starts_a_leaves},
         {"A PTT start, then B's TCI audio start", ptt_then_tci_start},

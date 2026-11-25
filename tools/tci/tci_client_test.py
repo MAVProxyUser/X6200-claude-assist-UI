@@ -959,8 +959,15 @@ def wsjtx_open():
         # after the over. The peak is the interpolated frame's highest sample, the tone's own peak sample, while the
         # tone comes out under the linear interpolation's sinc^2 at 1.5 kHz (-0.03 dB): 0.9974 of it (simulated);
         # beside it, that interpolation's own products
-        with open(PLAYED + ".codec") as f:
-            codec = [tuple(float(v) for v in l.split()) for l in f if l.strip()]
+        # the codec back after the over: the unkey sets it, TCI_UNKEY_TAIL_MS after the queue has played out, and
+        # trx:0,false comes before that (the over still on the air): waited for, 2 s at most
+        t_back = time.time()
+        while True:
+            with open(PLAYED + ".codec") as f:
+                codec = [tuple(float(v) for v in l.split()) for l in f if l.strip()]
+            if len(codec) >= 2 or time.time() - t_back > 2.0:
+                break
+            time.sleep(0.05)
         assert len(codec) == 2 and codec[1][0] == 0.0, f"the codec set at the key and back after it: {codec}"
         (codec_db, w) = codec[0]
         total = -55.82 + 10 * math.log10(max(w, 0.1))

@@ -802,6 +802,7 @@ static void client_close(client_t *c) {
     c->leaving  = false;
     c->key_grace  = false;
     c->grace_done = false;
+    c->open_ms    = 0;          /* no connection, no first second (KEY_YOUNG_MS) */
     if (txs.unkeyed_ci == (int)(c - clients))
         txs.unkeyed_ci = -1;
     pthread_mutex_unlock(&c->lock);
@@ -2174,8 +2175,11 @@ static void tx_session_tick(uint64_t now) {
     key_wait_tick(now);
     /* A start key_wait_tick just made took its time after now (txs.start_ms, last_audio_ms): the times below from a
      * fresh now, or now - start_ms wrapped round and ended it at once as one that 'did not key within 1 s' (a young
-     * connection's start, its grace over, 2026-11-25: the X6200's path proof put out nothing) */
-    now = now_ms();
+     * connection's start, its grace over, 2026-11-25: the X6200's path proof put out nothing). Forward only: a now
+     * ahead of the clock (tci_own_test's rounds later on) stays */
+    uint64_t fresh = now_ms();
+    if (fresh > now)
+        now = fresh;
     cw_tick(now);
     if (ptt_owner >= 0 && (clients[ptt_owner].fd < 0 || now - ptt_ms > TX_LIMIT_MS))
         tx_session_end(ptt_owner, false);
