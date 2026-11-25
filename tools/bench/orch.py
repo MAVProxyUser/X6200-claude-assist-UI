@@ -4983,10 +4983,19 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
     shown = [dict(kept.get(t.name, {"result": "never run"}), name=t.name, known=KNOWN.get(t.name))
              for t in TESTS if t.name not in run_names]
     st = Status(tests, shown)
+    # A console already answering on the port (the standing orch.py console): this run serves none and leaves at its
+    # END. Its own bind could succeed beside it (127.0.0.1 next to the console's 0.0.0.0, SO_REUSEADDR on macOS),
+    # and a finished run lingering an hour on 127.0.0.1 showed "no test running" while the next run transmitted
+    # (the owner heard the radio click, 2026-11-24)
+    import socket
     try:
-        srv = console(st, port, lan)
-    except OSError:                 # the standing console (orch.py console) has the port: it shows SNAPSHOT
+        socket.create_connection(("127.0.0.1", port), timeout=1.0).close()
         srv = None
+    except OSError:
+        try:
+            srv = console(st, port, lan)
+        except OSError:             # the standing console (orch.py console) has the port: it shows SNAPSHOT
+            srv = None
     st.run_dir = os.path.join(bench.STATE, "runs", time.strftime("%Y%m%d-%H%M%S-orch"))
     os.makedirs(st.run_dir, exist_ok=True)
     st.log = open(os.path.join(st.run_dir, "events.jsonl"), "a")
