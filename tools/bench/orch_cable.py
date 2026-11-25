@@ -1,0 +1,3107 @@
+#!/usr/bin/env python3
+"""The cable's features that had no test yet (FACILITATE.md "What the bench runs alone", 2026-11-25: the owner, "write
+ALL the tests first, then we can debug them via the runs"): orch.py's tests over the 80 dB cable at 0.1 W, one radio
+sending, the other listening, written against features.json's how_to_confirm.
+
+orch.py imports this module and sets H to itself (its over(), its gates, its FT8 and TCI helpers, A, B, W); TESTS()
+gives the Test rows and COVERS the features each covers (orch's coverage map). Every test:
+  - both radios on one frequency and mode, any difference declared (bench.apart) for its time;
+  - 0.1 W (H.W) over the pads, one radio on the air at a time, the Watch on both, the roles told to the sync guard;
+  - the settings it changes through the remote's "cfg NAME VALUE" (by their database names, read back with "cfg?")
+    and put back as found; what the radio says in its message box read from the remote's "msg" lines;
+  - a main-screen button by its name ("btn NAME"), an app's F keys only in that app's own window (guarded);
+  - ends with every app closed and both on the Sentry's page A, on the last frequency.
+A picture alone is no proof: a feature only a picture shows is LOOK (the run keeps the picture), never PASS.
+
+SPDX-License-Identifier: LGPL-2.1-or-later
+"""
+import contextlib
+import json
+import math
+import os
+import re
+import subprocess
+import threading
+import time
+
+import bench
+from bench import Refused
+
+H = None                        # the running orch module (orch.py: orch_cable.H = sys.modules[__name__])
+HERE = os.path.dirname(os.path.abspath(__file__))
+F_CW = 14040000
+F_USB = 14200000
+F_FT8 = 14074000
+F_JS8 = 14078000
+F_PSK = 14070000
+F_SSTV = 14230000
+F_FAX = 14100000
+CW_WPM_FAST = 28                # the key speed the tests set for their longer sends (put back after)
+
+
+# ---- the radios: settings, messages, windows, keys ----
+
+def ssh(host, cmd, timeout=40):
+    return bench.ssh(host, cmd, timeout=timeout)
+
+
+def msgs_since(r, t0):
+    with r.lock:
+        return [t for at, t in r.msgs if at >= t0]
+
+
+def wait_msg(r, t0, pattern, secs=6.0):
+    """The first message box text since t0 matching pattern (a regex, any case); Refused when none comes"""
+    rx = re.compile(pattern, re.I)
+    end = time.time() + secs
+    while time.time() < end:
+        for t in msgs_since(r, t0):
+            if rx.search(t):
+                return t
+        time.sleep(0.1)
+    raise Refused(f"{r.name}: no message like {pattern!r} within {secs:.0f} s (it said: {msgs_since(r, t0)[-4:]})")
+
+
+@contextlib.contextmanager
+def cfg_kept(r, values):
+    """r's settings set (through the remote's cfg, each read back), every one put back as found after"""
+    was = {}
+    try:
+        for name, v in values.items():
+            old, now = bench.cfg_set(r, name, v)
+            was[name] = old
+            if str(now) != str(v) and not _same_num(now, v):
+                raise Refused(f"{r.name}: setting {name} reads {now!r} after asking {v!r}")
+        yield was
+    finally:
+        for name, old in was.items():
+            try:
+                bench.cfg_set(r, name, old)
+            except Refused:
+                pass
+
+
+def _same_num(a, b):
+    try:
+        return abs(float(a) - float(b)) < 1e-6
+    except (TypeError, ValueError):
+        return False
+
+
+def win(r):
+    return r.state.get("win") or ""
+
+
+def guard(r, names, what):
+    names = (names,) if isinstance(names, str) else tuple(names)
+    if not any(win(r).lower().startswith(n.lower()) for n in names):
+        raise Refused(f"{r.name}: {what} not sent: the screen shows {win(r) or 'no window'!r}, not {names}")
+
+
+def press(r, key, names, hold=False, rest=0.5):
+    """KEY pressed (held 1.5 s) while one of the windows names is on the screen, else nothing (Refused)"""
+    guard(r, names, f"key {key}")
+    r.send(f"key {key} 1")
+    time.sleep(1.5 if hold else 0.15)
+    r.send(f"key {key} 0")
+    time.sleep(rest)
+
+
+def turn(r, knob, n, names, rest=0.5):
+    guard(r, names, f"knob {knob} {n}")
+    r.send(f"knob {knob} {n}")
+    time.sleep(rest)
+
+
+def btn(r, name, hold=False, rest=0.6):
+    """A main-screen button by its name (the remote's "btn"), as its F key on its page"""
+    n0 = len(r.errs)
+    r.send(f"btn {name}" + (" hold" if hold else ""))
+    time.sleep(rest)
+    if len(r.errs) > n0 and "btn" in r.errs[-1]:
+        raise Refused(f"{r.name}: {r.errs[-1]}")
+
+
+def open_app(r, action, name, secs=10.0):
+    """App ACTION ("open ACTION") on the screen as window name; from the Sentry's A"""
+    if (r.state.get("win") or "") == "Sentry" and r.state.get("pg") == "G":
+        bench.open_page(r, "A")
+    r.send(f"open {action}")
+    r.wait(f"the {name} window", lambda: win(r).lower().startswith(name.lower()), secs)
+    time.sleep(1.0)
+
+
+def home(o, r):
+    """Every app closed, r on the Sentry's page A (on the frequency it is on)"""
+    try:
+        bench.close_apps(r)
+    except Refused:
+        pass
+    try:
+        bench.open_page(r, "A")
+    except Refused as e:
+        o.st.ev(f"{r.name}: not back on A: {e}", "bad")
+
+
+def classic(r):
+    """r on the classic radio screen (from the Sentry's F SYSTEM > CLASSIC)"""
+    import suite_cover_b as cb
+    if not cb.on_classic(r):
+        cb.to_classic(r, r.host)
+
+
+def settled(r, key="freq", quiet=1.0, limit=6.0):
+    end = time.time() + limit
+    last, since = r.state.get(key), time.time()
+    while time.time() < end:
+        v = r.state.get(key)
+        if v != last:
+            last, since = v, time.time()
+        elif time.time() - since >= quiet:
+            break
+        time.sleep(0.05)
+    v = r.state.get(key)
+    return int(v) if isinstance(v, (int, float)) else v
+
+
+def cw_settled(L, secs=6.0, quiet=1.5):
+    """The listener's CW decoder print once it stopped growing for quiet s"""
+    t0, last, t_last = time.time(), None, time.time()
+    while time.time() - t0 < secs:
+        if L.cw != last:
+            last, t_last = L.cw, time.time()
+        elif time.time() - t_last > quiet:
+            break
+        time.sleep(0.1)
+    return " ".join(L.cw.split()).upper()
+
+
+def tx_spans(r, t0, t1=None):
+    """[(on, off)] of r's overs since t0 (its "tx" lines and state)"""
+    with r.lock:
+        lines = [(at, x) for at, x in list(r.lines) if at >= t0 and (t1 is None or at <= t1)]
+    spans, on = [], None
+    for at, x in lines:
+        v = None
+        if x.startswith("tx "):
+            v = x[3:].strip() == "1"
+        elif x.startswith("state "):
+            try:
+                v = bool(json.loads(x[6:]).get("tx"))
+            except ValueError:
+                pass
+        if v is True and on is None:
+            on = at
+        elif v is False and on is not None:
+            spans.append((on, at))
+            on = None
+    if on is not None:
+        spans.append((on, None))
+    return spans
+
+
+def t_frames(r, t0, t1=None):
+    """[(when, W, SWR, ALC)] of r's TX meters since t0"""
+    out = []
+    with r.lock:
+        lines = [(at, x) for at, x in list(r.lines) if at >= t0 and (t1 is None or at <= t1) and x.startswith("t ")]
+    for at, x in lines:
+        try:
+            v = [float(y) for y in x[2:].split()]
+            out.append((at, *v[:3]))
+        except ValueError:
+            pass
+    return out
+
+
+def meters(r, t0, t1):
+    with r.lock:
+        got = [x for at, x in list(r.lines) if t0 <= at <= t1 and x.startswith("m ")]
+    vals = []
+    for x in got:
+        try:
+            vals.append(float(x[2:]))
+        except ValueError:
+            pass
+    return vals
+
+
+# ---- on the air ----
+
+@contextlib.contextmanager
+def session(o, label, senders, f=None):
+    """The gates for a test whose radios transmit from an app or the classic screen (not the Sentry's armed A, which
+    over() arms and locks with A/B: on the classic screen A/B is the VFO key): the chain, each sender's TX gate, the
+    listener's supply, the Watch on both. Yields the Watch; after: everything stopped, the roles back to RX"""
+    p, total = bench.chain_gate(o.c, "radios")
+    for n in senders:
+        bench.radio_tx_gate(o.r[n], o.c, H.W)
+    for n in o.r:
+        bench.listener_gate(o.r[n])
+    watch = bench.Watch(list(o.r.values()), o.c, expect_dbm=10 * math.log10(H.W * 1000) - total, w=H.W, label=label)
+    try:
+        bench.tx_log({"who": ",".join(senders), "f": f or int(o.r[senders[0]].state.get("freq", 0)), "w": H.W,
+                      "what": f"orch: {label}"})
+        yield watch
+    finally:
+        watch.close()
+        for r in o.r.values():
+            r.stop()
+        o.roles = {H.A: "RX", H.B: "RX"}
+        if watch.why:
+            o.st.ev(f"{label}: the watch stopped it: {watch.why}", "bad")
+
+
+def role(o, sender):
+    o.roles = {n: ("TX" if n == sender else "RX") for n in o.r}
+
+
+def tci_cw(o, S, text, watch, max_s=30):
+    """text keyed by S's own keyer through its TCI (tci_cw_tx.py on S, a client from 127.x: never asked); (on, off)"""
+    subprocess.run(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_cw_tx.py"),
+                    f"root@{S.host}:/tmp/tci_cw_tx.py"], check=True)
+    t0 = time.time()
+    proc = subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
+                             f"python3 /tmp/tci_cw_tx.py '{text}' {max_s}"], stdout=subprocess.PIPE, text=True)
+    while proc.poll() is None:
+        if watch is not None and watch.why:
+            S.stop()
+            proc.kill()
+            raise Refused(watch.why)
+        time.sleep(0.05)
+    return t0, time.time()
+
+
+def cw_over(o, s, l, text, label, f=F_CW, mode=4, listener_cfg=None, sender_cfg=None, check_power=True):
+    """One CW over: both on f in mode (AGC fast, as cw-text), the listener's and the sender's settings set for it
+    (put back after), the sender keys text through its TCI at 0.1 W (over(): the Sentry's A armed); the listener's
+    decoder print since the over began, and the over's (on, off)"""
+    S, L = o.r[s], o.r[l]
+    got = {}
+
+    def body(watch):
+        with o.step(f"{s} keys {text!r}") as st:
+            L.cw = ""
+            got["t"] = tci_cw(o, S, text, watch)
+            time.sleep(1.0)
+            if check_power and not watch.tx_peak.get(s) and not (watch.rx_peak or -200) > H.RF_ALARM_DBM:
+                raise Refused(f"{s}'s meter showed no power")
+            st.confirm(f"keyed {got['t'][1] - got['t'][0]:.1f} s")
+
+    with contextlib.ExitStack() as ex:
+        if listener_cfg:
+            ex.enter_context(cfg_kept(L, listener_cfg))
+        if sender_cfg:
+            ex.enter_context(cfg_kept(S, sender_cfg))
+        H.over(o, s, l, f, mode, label, body, agc=2)
+        got["text"] = cw_settled(L)
+    return got["text"], got["t"]
+
+
+def offset_over(o, s, l, f_s, mode, label, body):
+    """An over from s on f_s with the two radios where the test put them, apart as the test declared (bench.apart):
+    over() would put both on one frequency. Both on the Sentry's page G first (the caller), s armed there, locked after"""
+    S, L = o.r[s], o.r[l]
+    p, total = bench.chain_gate(o.c, "radios")
+    with o.step(f"{s} may send on {f_s / 1e6:.6f} MHz, {l} on {int(L.state.get('freq', 0)) / 1e6:.6f}") as st:
+        bench.ensure(S, *bench.tx_profile(f_s, mode, H.W))
+        bench.radio_tx_gate(S, o.c, H.W)
+        sup = bench.listener_gate(L)
+        st.confirm(f"{l}'s supply {sup}" if sup else "")
+    o.roles = {s: "TX", l: "RX"}
+    watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(H.W * 1000) - total, listener=L, w=H.W, label=label)
+    try:
+        o.changing += 1
+        try:
+            bench.arm(S, True, mode=mode)
+        finally:
+            o.changing -= 1
+        bench.tx_log({"who": s, "f": f_s, "w": S.pwr(), "what": f"orch: {label}"})
+        body(watch)
+    finally:
+        watch.close()
+        try:
+            S.wait("off the air", lambda: not S.tx, 5)
+        except Refused:
+            S.stop()
+        try:
+            bench.arm(S, False)
+        except Refused as e:
+            o.st.ev(f"{s}: TX not locked again: {e}", "bad")
+        o.roles = {H.A: "RX", H.B: "RX"}
+    if watch.why:
+        raise Refused(f"the watch stopped the over: {watch.why}")
+    return watch
+
+
+def on_g_alike(o, f, mode, **more):
+    """Both on the Sentry's page G, on f in mode, alike (an offset test's start)"""
+    with o.step(f"both on page G, {f / 1e6:.4f} MHz mode {mode}, alike"):
+        o.both_page("G")
+        o.both(dict({"freq": f, "mode": mode, "pwr": H.W, "atu": 0, "xit": 0, "rit": 0, "split": 0}, **more))
+
+
+def ensure_alike(o, f, mode, **more):
+    with o.step(f"both on {f / 1e6:.4f} MHz mode {mode}, alike"):
+        o.both(dict({"freq": f, "mode": mode, "pwr": H.W}, **more))
+
+
+# ---- CW: the decoder's settings and keys ----
+
+def t_cw_dec_snr(o, s, l):
+    """Dec SNR (CW 2:2): with it at 5 dB the listener copies a signal its RF gain has brought down; at 30 dB the same
+    signal prints nothing of it; at 5 dB again it copies (the threshold, not the signal, made the difference)"""
+    L = o.r[l]
+    res = {}
+    try:
+        text, _ = cw_over(o, s, l, "TEST TEST", "dec-snr 5 dB full", listener_cfg={"cw_decoder_snr_3": 5})
+        res["snr5_full"] = text
+        if "TEST" not in text:
+            raise Refused(f"at Dec SNR 5 dB and full RF gain {l} printed {text!r}")
+        with cfg_kept(L, {}):
+            rfg0 = int(L.state.get("rfg", 100))
+            try:
+                bench.ensure(L, {"rfg": 15})
+                text30, _ = cw_over(o, s, l, "TEST TEST", "dec-snr 30 dB weak", listener_cfg={"cw_decoder_snr_3": 30})
+                text5, _ = cw_over(o, s, l, "TEST TEST", "dec-snr 5 dB weak", listener_cfg={"cw_decoder_snr_3": 5})
+            finally:
+                bench.ensure(L, {"rfg": rfg0})
+        res.update(snr30_weak=text30, snr5_weak=text5)
+        if "TEST" in text30:
+            return None, f"RF gain 15: Dec SNR 30 still copied ({text30!r}); 5 copied {text5!r}: the signal too strong " \
+                         f"for the threshold to show", res
+        if "TEST" not in text5:
+            return None, f"RF gain 15: Dec SNR 30 printed {text30!r} (as it should), but 5 also missed ({text5!r})", res
+        return True, f"Dec SNR 5 copies {text5!r}, 30 prints {text30!r} on the same weak signal", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_cw_parse(o, s, l):
+    """Parse (CW 2:2): run-together CW ('CQCQDEQ1TSTK', no spaces) printed split ('CQ CQ DE Q1TST K') with Parse on,
+    run together with it off"""
+    res = {}
+    try:
+        on, _ = cw_over(o, s, l, "CQCQDEQ1TSTK", "parse on", listener_cfg={"cw_parse": 1})
+        off, _ = cw_over(o, s, l, "CQCQDEQ1TSTK", "parse off", listener_cfg={"cw_parse": 0})
+        res.update(on=on, off=off)
+        split_ok = "DE Q1TST" in on or "CQ CQ" in on
+        run_ok = "DEQ1TST" in off.replace(" ", "") and "DE Q1TST" not in off
+        if split_ok and run_ok:
+            return True, f"Parse on {on!r}, off {off!r}", res
+        return False, f"Parse on printed {on!r} (split: {split_ok}), off {off!r} (run together: {run_ok})", res
+    except Refused as e:
+        return False, str(e), res
+
+
+ZAP_OFF = 200
+
+
+def t_cw_zap(o, s, l):
+    """ZAP (CW 1:2): the listener ZAP_OFF Hz off the sender's CW (declared) tunes onto it within 10 Hz while the
+    decoder follows it; in CW and in CW-R"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        for mode in (4, 5):
+            on_g_alike(o, F_CW, mode, agc=2)
+            got = {}
+            with bench.apart({"freq": (F_CW, F_CW + ZAP_OFF)}, f"cw-zap: {l} {ZAP_OFF} Hz off {s}, then ZAP"):
+                with o.step(f"{l} {ZAP_OFF} Hz above {s} (declared)"):
+                    bench.ensure(L, {"freq": F_CW + ZAP_OFF})
+
+                def body(watch):
+                    with o.step(f"{s} keys a long VVV; {l} presses ZAP while it hears it") as st:
+                        th = threading.Thread(target=lambda: got.update(t=tci_cw(o, S, "VVV VVV VVV VVV VVV", watch)))
+                        th.start()
+                        time.sleep(3.5)
+                        btn(L, "cw_zap")
+                        th.join(40)
+                        f_l = settled(L)
+                        got["f"] = f_l
+                        st.confirm(f"{l} on {f_l}, {s} on {S.state.get('freq')}")
+                offset_over(o, s, l, F_CW, mode, f"cw-zap mode {mode}", body)
+            res[f"mode{mode}"] = got.get("f")
+            if got.get("f") is None or abs(int(got["f"]) - F_CW) > 10:
+                raise Refused(f"mode {mode}: ZAP left {l} on {got.get('f')}, not within 10 Hz of {F_CW}")
+        ensure_alike(o, F_CW, 4)
+        return True, f"ZAP put {l} within 10 Hz of {s} in CW ({res['mode4']}) and CW-R ({res['mode5']})", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_cw_tuner(o, s, l):
+    """Tuner (CW 2:2): the bars, one per 10 Hz, lit on the station's side; the listener 30 Hz off the sender in CW,
+    then CW-R: pictures (LOOK: only a picture shows the bars)"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with cfg_kept(L, {"cw_tune": 1}):
+            for mode in (4, 5):
+                on_g_alike(o, F_CW, mode, agc=2)
+                with bench.apart({"freq": 30}, f"cw-tuner: {l} 30 Hz off {s}"):
+                    bench.ensure(L, {"freq": F_CW + 30})
+
+                    def body(watch, mode=mode):
+                        th = threading.Thread(target=lambda: tci_cw(o, S, "VVV VVV VVV", watch))
+                        th.start()
+                        time.sleep(2.5)
+                        o.snap(f"cw-tuner {l} 30 Hz off, mode {mode}")
+                        th.join(30)
+                    offset_over(o, s, l, F_CW, mode, f"cw-tuner mode {mode}", body)
+        ensure_alike(o, F_CW, 4)
+        return None, f"{l}'s tuning bars photographed 30 Hz off in CW and CW-R (the bars: look at the pictures)", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_cw_peak_q(o, s, l):
+    """CW peak (CW 1:2) on the X6100 (its base's peaking filter at the key tone): the sender 300 Hz off the key tone
+    (declared); the listener's TCI RX audio at that tone lower with CW peak on than off"""
+    from tones import TciRx
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        levels = {}
+        for peak in (0, 1):
+            on_g_alike(o, F_CW, 4, agc=0)
+            with cfg_kept(L, {"cw_peak_on": peak}), bench.apart({"freq": 300}, f"cw-peak: {s} 300 Hz off the tone"):
+                bench.ensure(S, {"freq": F_CW + 300})
+                rx = TciRx(L.host)
+                try:
+                    got = {}
+
+                    def body(watch):
+                        got["t"] = tci_cw(o, S, "TTTT", watch)
+                    offset_over(o, s, l, F_CW + 300, 4, f"cw-peak {peak}", body)
+                    x, fs = rx.audio(got["t"][0], got["t"][1])
+                finally:
+                    rx.close()
+                levels[peak] = _tone_db(x, fs, int(L.state.get("kt", 700)) + 300)
+        ensure_alike(o, F_CW, 4)
+        res["levels_db"] = levels
+        if levels[1] is None or levels[0] is None:
+            return False, f"no audio from {l}'s TCI ({levels})", res
+        drop = levels[0] - levels[1]
+        res["drop_db"] = round(drop, 1)
+        if drop >= 3:
+            return True, f"CW peak on: the tone 300 Hz off the key tone {drop:.1f} dB lower in {l}'s audio", res
+        return False, f"CW peak on lowered the off-tone only {drop:.1f} dB ({levels})", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def _tone_db(x, fs, hz):
+    import numpy as np
+    x = np.asarray(x, dtype=float)
+    if len(x) < fs // 4:
+        return None
+    n = len(x)
+    spec = np.abs(np.fft.rfft(x * np.hanning(n))) / n
+    freqs = np.fft.rfftfreq(n, 1 / fs)
+    band = (freqs > hz - 25) & (freqs < hz + 25)
+    return float(20 * np.log10(spec[band].max() + 1e-12))
+
+
+def t_cw_key_train(o, s, l):
+    """KEY Train: the sender's TCI CW goes out as sidetone only (TX power held at 0 W, its message 'KEY Train...'),
+    the listener hears nothing of it; Train off, the listener decodes it"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        t0 = time.time()
+        with cfg_kept(S, {"key_train": 1}):
+            text, (on, off) = cw_over(o, s, l, "TEST", "key-train on", check_power=False)
+        w = [x[1] for x in t_frames(S, on, off + 1)]
+        res.update(train_text=text, train_w=max(w) if w else None, said=msgs_since(S, t0)[-3:])
+        if w and max(w) > 0.05:
+            raise Refused(f"Train on: {s} read {max(w)} W on the air")
+        if "TEST" in text:
+            raise Refused(f"Train on: {l} decoded {text!r}")
+        if not any(re.search(r"train", m, re.I) for m in msgs_since(S, t0)):
+            res["no_message"] = True
+        text2, _ = cw_over(o, s, l, "TEST", "key-train off")
+        res["off_text"] = text2
+        if "TEST" not in text2:
+            raise Refused(f"Train off: {l} decoded {text2!r}, not TEST")
+        return (None if res.get("no_message") else True), \
+            f"Train on: 0 W, {l} heard nothing ({text!r}); off: {l} decoded {text2!r}" + \
+            ("; its 'KEY Train' message not seen" if res.get("no_message") else ""), res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_cw_own_carrier(o, s, l):
+    """While the sender keys CW its own spectrum peaks on its VFO line (the dial's bin) and its TX meters carry an ALC
+    reading; the TX panel (ALC grey in CW) photographed"""
+    S = o.r[s]
+    res = {}
+    try:
+        got = {}
+
+        def body(watch):
+            th = threading.Thread(target=lambda: got.update(t=tci_cw(o, S, "TTTTT TTTTT", watch)))
+            th.start()
+            time.sleep(2.0)
+            o.snap(f"cw-own-carrier {s} sending CW")
+            th.join(30)
+        H.over(o, s, l, F_CW, 4, "cw-own-carrier", body, agc=2)
+        on, off = got["t"]
+        track = H.spec_track(S, F_CW, 4, on + 0.5, off)
+        offs = [h for _, h, a in track if a > 15]
+        frames = t_frames(S, on, off)
+        res.update(peaks=len(offs), near=sum(1 for h in offs if abs(h) <= 30), alc=[x[3] for x in frames][:5])
+        if not offs:
+            return False, f"{s}'s own spectrum showed no peak while it sent ({len(track)} frames)", res
+        if res["near"] < len(offs) / 2:
+            return False, f"{s}'s own peaks not on its VFO line: {sorted(offs)[:8]} Hz from the dial", res
+        if not frames:
+            return None, f"the carrier on {s}'s VFO line ({res['near']} of {len(offs)} frames); no TX meter frames", res
+        return None, f"{s}'s carrier on its VFO line ({res['near']} of {len(offs)} frames), its ALC read {res['alc']} " \
+                     f"(the grey ALC bar: look at the picture)", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_cw_log_qso(o, s, l):
+    """Log QSO (CW 1:2) after the listener's decoder confirmed the sender's call: the quick log opens with the call in
+    it and logs it (the day's log, web Logs page: CALL Q1TST/Q2TST, CW); out of CW (SSB) the box is empty"""
+    import suite_air_b as ab
+    S, L = o.r[s], o.r[l]
+    call = H.TEST_CALLS[s]
+    res = {}
+    ip = ab.web_ip(L.host)
+    try:
+        text, _ = cw_over(o, s, l, f"DE {call} {call} K", "cw-log-qso")
+        res["decoded"] = text
+        if call not in text:
+            raise Refused(f"{l} decoded {text!r}: no {call} for Log QSO")
+        with o.step(f"{l}'s classic screen, Log QSO (CW 1:2)") as st:
+            classic(L)
+            n0 = _log_count(ip, call)
+            btn(L, "cw_log", rest=1.5)
+            o.snap(f"cw-log-qso {l}: the quick log with the call")
+            L.send("key MFK 1")
+            time.sleep(0.15)
+            L.send("key MFK 0")                     # the quick log's OK (its default button)
+            time.sleep(2.0)
+            n1 = _log_count(ip, call)
+            res["logged"] = n1 - n0
+            st.confirm(f"{call} in the day's log {n0} -> {n1}")
+        if n1 <= n0:
+            return False, f"Log QSO did not log {call} ({n0} -> {n1} rows with it)", res
+        return True, f"{l}'s decoder confirmed {call}; Log QSO logged it", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        _log_forget(ip, call)
+        home(o, L)
+
+
+def _log_count(ip, call):
+    import suite_air_b as ab
+    st, b = ab.http(ip, "/api/logs")
+    if st != 200:
+        return 0
+    try:
+        rows = json.loads(b)
+    except ValueError:
+        return 0
+    rows = rows.get("qsos", rows) if isinstance(rows, dict) else rows
+    return sum(1 for x in rows if isinstance(x, dict) and str(x.get("call", x.get("CALL", ""))).upper() == call)
+
+
+def _log_forget(ip, call):
+    """The test's QSOs out of the logs again (the web Logs page's delete)"""
+    import suite_air_b as ab
+    try:
+        ab.http(ip, "/api/logs/delete", method="POST", body={"call": call})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# ---- MSG > CW: messages, tokens, break-in, beacon, QRSS3 ----
+
+def _cw_msg_add(S, text):
+    """A CW message added on S's web page; (its id, its place in the list, how many)"""
+    import suite_air_b as ab
+    ip = ab.web_ip(S.host)
+    st, b = ab.http(ip, "/api/cw_messages", method="POST", body={"text": text})
+    if st != 200:
+        raise Refused(f"{S.name}: the CW message not added ({st})")
+    msgs = json.loads(b)["messages"]
+    mid = max(x["id"] for x in msgs if x["text"] == text)
+    order = [x["id"] for x in msgs]
+    return mid, order.index(mid), len(order)
+
+
+def _cw_msg_del(S, mid):
+    import suite_air_b as ab
+    ab.http(ab.web_ip(S.host), f"/api/cw_messages/{mid}", method="DELETE")
+
+
+def _msg_cw_open(S, index):
+    """S's MSG > CW from the classic screen in CW, its row index chosen (the MFK from the top)"""
+    classic(S)
+    S.send("key MSG 1")
+    time.sleep(0.15)
+    S.send("key MSG 0")
+    S.wait("MSG > CW", lambda: "msg" in win(S).lower() or "cw" in win(S).lower(), 5)
+    time.sleep(0.8)
+    S.send(f"knob mfk -{60}")                       # the top row
+    time.sleep(0.6)
+    if index:
+        S.send(f"knob mfk {index}")
+        time.sleep(0.6)
+
+
+def _msg_cw_page(S, page):
+    """MSG > CW's page (1..3) from page 1 (F1 steps the pages)"""
+    for _ in range(page - 1):
+        S.send("key F1 1")
+        time.sleep(0.15)
+        S.send("key F1 0")
+        time.sleep(0.5)
+
+
+def t_cw_msg(o, s, l):
+    """MSG > CW: a stored message 'TEST {CALL} TEST' sent by TX (page 1 F2): the listener decodes it with the
+    sender's call filled in; the sender's TX one over for the whole message (the break-in delay raised through its
+    word gaps)"""
+    S, L = o.r[s], o.r[l]
+    call = H.TEST_CALLS[s]
+    res = {}
+    mid = None
+    try:
+        ensure_alike(o, F_CW, 4, agc=2)
+        mid, idx, n = _cw_msg_add(S, "TEST {CALL} TEST")
+        with session(o, "cw-msg", [s], F_CW) as watch:
+            role(o, s)
+            with o.step(f"{s}'s MSG > CW, message {idx + 1} of {n}, TX") as st:
+                _msg_cw_open(S, idx)
+                L.cw = ""
+                t0 = time.time()
+                S.send("key F2 1")
+                time.sleep(0.15)
+                S.send("key F2 0")
+                S.wait("its keying", lambda: S.tx or watch.why, 6)
+                S.wait("the end of the message", lambda: not S.tx or watch.why, 25)
+                spans = tx_spans(S, t0)
+                res["overs"] = len(spans)
+                st.confirm(f"{len(spans)} over(s)")
+        text = cw_settled(L)
+        res["decoded"] = text
+        if f"TEST {call}" not in text and call not in text:
+            return False, f"{l} decoded {text!r}, not 'TEST {call} TEST'", res
+        if res["overs"] != 1:
+            return False, f"{l} decoded {text!r}, but {s} keyed {res['overs']} overs, not one through the gaps", res
+        return True, f"{l} decoded {text!r} ({{CALL}} filled in), {s} on the air once through the message", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        if mid is not None:
+            _cw_msg_del(S, mid)
+        home(o, S)
+
+
+def t_cw_msg_his(o, s, l):
+    """{HIS}: the call the decoder confirmed last. s sends 'CQ DE <s's call> <s's call>' (TCI); l's message
+    '{HIS} UR 599' sent from its MSG > CW: s decodes '<s's call> UR 599'"""
+    S, L = o.r[s], o.r[l]
+    call = H.TEST_CALLS[s]
+    res = {}
+    mid = None
+    try:
+        text, _ = cw_over(o, s, l, f"CQ DE {call} {call} K", "cw-his: the call")
+        res["l_decoded"] = text
+        if call not in text:
+            raise Refused(f"{l} decoded {text!r}: no {call} confirmed")
+        mid, idx, n = _cw_msg_add(L, "{HIS} UR 599")
+        with session(o, "cw-his", [l], F_CW) as watch:
+            role(o, l)
+            with o.step(f"{l}'s MSG > CW '{{HIS}} UR 599', TX"):
+                _msg_cw_open(L, idx)
+                S.cw = ""
+                L.send("key F2 1")
+                time.sleep(0.15)
+                L.send("key F2 0")
+                L.wait("its keying", lambda: L.tx or watch.why, 6)
+                L.wait("the end", lambda: not L.tx or watch.why, 25)
+        back = cw_settled(S)
+        res["s_decoded"] = back
+        if f"{call} UR 599" in back or (call in back and "599" in back):
+            return True, f"{l} sent {{HIS}} as {call}: {s} decoded {back!r}", res
+        return False, f"{s} decoded {back!r}, not '{call} UR 599'", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        if mid is not None:
+            _cw_msg_del(L, mid)
+        home(o, L)
+
+
+def t_cw_beacon(o, s, l):
+    """MSG > CW's beacon: pause 10 s, Until 2 sends: exactly two sends decoded by the listener, then 'Beacon over: 2
+    sends'; a beacon stopped in its pause by another transmission (rigctl T 1 / T 0) sends no more"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    mid = None
+    try:
+        ensure_alike(o, F_CW, 4, agc=2)
+        mid, idx, n = _cw_msg_add(S, "BCN")
+        with cfg_kept(S, {"cw_bcn_until": 1, "cw_bcn_sends": 2, "cw_bcn_start": -1}):
+            with session(o, "cw-beacon", [s], F_CW) as watch:
+                role(o, s)
+                with o.step(f"{s}'s beacon: 10 s pause, Until 2 sends") as st:
+                    _msg_cw_open(S, idx)
+                    _msg_cw_page(S, 2)
+                    for _ in range(6):                      # Beacon: Off > 10 s ...
+                        if any("10" in m for m in msgs_since(S, time.time() - 1.5)):
+                            break
+                        S.send("key F2 1")
+                        time.sleep(0.15)
+                        S.send("key F2 0")
+                        time.sleep(0.8)
+                    _msg_cw_page(S, 3)                      # page 1 again (3 -> 1)
+                    L.cw = ""
+                    t0 = time.time()
+                    S.send("key F2 1")
+                    time.sleep(0.15)
+                    S.send("key F2 0")                      # TX
+                    over = wait_msg(S, t0, r"beacon over", 45)
+                    spans = tx_spans(S, t0)
+                    res.update(spans=len(spans), said=over)
+                    st.confirm(f"{len(spans)} sends, then {over!r}")
+            text = cw_settled(L)
+            res["decoded"] = text
+        if res["spans"] != 2 or text.count("BCN") < 2:
+            return False, f"{s} sent {res['spans']} times, {l} decoded {text!r} (two sends wanted)", res
+        return True, f"two sends 10 s apart decoded ({text!r}), then {res['said']!r}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        if mid is not None:
+            _cw_msg_del(S, mid)
+        home(o, S)
+
+
+def t_cw_beacon_stops(o, s, l):
+    """A beacon in its pause stopped by another transmission: rigctl 'T 1' then 'T 0' on the sender: no more sends"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    mid = None
+    try:
+        ensure_alike(o, F_CW, 4, agc=2)
+        mid, idx, n = _cw_msg_add(S, "BCN")
+        with cfg_kept(S, {"cw_bcn_until": 0, "cw_bcn_start": -1}):
+            with session(o, "cw-beacon-stops", [s], F_CW) as watch:
+                role(o, s)
+                _msg_cw_open(S, idx)
+                _msg_cw_page(S, 2)
+                for _ in range(6):
+                    if any("10" in m for m in msgs_since(S, time.time() - 1.5)):
+                        break
+                    S.send("key F2 1")
+                    time.sleep(0.15)
+                    S.send("key F2 0")
+                    time.sleep(0.8)
+                _msg_cw_page(S, 3)
+                t0 = time.time()
+                S.send("key F2 1")
+                time.sleep(0.15)
+                S.send("key F2 0")
+                S.wait("the first send", lambda: S.tx or watch.why, 6)
+                S.wait("its pause", lambda: not S.tx or watch.why, 20)
+                time.sleep(2.0)
+                H.rig_ask(S.host, ["T 1"], 2.0)
+                time.sleep(0.5)
+                H.rig_ask(S.host, ["T 0"], 2.0)
+                t_stop = time.time()
+                time.sleep(15)
+                later = [sp for sp in tx_spans(S, t_stop + 1.0)]
+                res.update(sends_after=len(later))
+        if later:
+            return False, f"the beacon sent {len(later)} more time(s) after rigctl's T 1 / T 0 in its pause", res
+        return True, "rigctl's transmission in the pause stopped the beacon: nothing sent after it in 15 s", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        if mid is not None:
+            _cw_msg_del(S, mid)
+        home(o, S)
+
+
+F_QRSS = 10140050
+
+
+def t_qrss3(o, s, l):
+    """QRSS3 (MSG > CW page 2 F4) on 30 m: TX of the message 'E' sends a 3 s dot on 10.140050 MHz (the sender moves
+    there; the listener put there first); then a send stopped by a retune: 'QRSS3 stopped: tuned away'"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    mid = None
+    try:
+        ensure_alike(o, F_QRSS, 4, agc=2)
+        mid, idx, n = _cw_msg_add(S, "E")
+        with session(o, "qrss3", [s], F_QRSS) as watch:
+            role(o, s)
+            with o.step(f"{s}'s QRSS3 on, message 'E' sent") as st:
+                _msg_cw_open(S, idx)
+                _msg_cw_page(S, 2)
+                t0 = time.time()
+                S.send("key F4 1")
+                time.sleep(0.15)
+                S.send("key F4 0")
+                time.sleep(1.0)
+                _msg_cw_page(S, 3)
+                S.send("key F2 1")
+                time.sleep(0.15)
+                S.send("key F2 0")
+                S.wait("the dot", lambda: S.tx or watch.why, 8)
+                f_tx = int(S.state.get("freq", 0))
+                S.wait("its end", lambda: not S.tx or watch.why, 8)
+                sp = tx_spans(S, t0)
+                res.update(freq=f_tx, spans=[round((b or time.time()) - a, 1) for a, b in sp])
+                st.confirm(f"on {f_tx}, keyed {res['spans']} s")
+            with o.step(f"{s}'s QRSS3 again, retuned mid-send: stopped") as st:
+                t1 = time.time()
+                S.send("key F2 1")
+                time.sleep(0.15)
+                S.send("key F2 0")
+                S.wait("the dot", lambda: S.tx or watch.why, 8)
+                with bench.apart({"freq": 150}, "qrss3: the sender retuned to stop it"):
+                    S.send(f"set freq {F_QRSS + 150}")
+                    S.wait("off the air", lambda: not S.tx, 3)
+                    said = wait_msg(S, t1, r"QRSS3 stopped", 4)
+                    res["stopped"] = said
+                    bench.ensure(S, {"freq": F_QRSS})
+                st.confirm(said)
+        long_ = [x for x in res["spans"] if 2.4 <= x <= 4.0]
+        if res["freq"] != F_QRSS or not long_:
+            return False, f"QRSS3 sent on {res['freq']} for {res['spans']} s (a 3 s dot on {F_QRSS} wanted)", res
+        return True, f"a 3 s dot on {F_QRSS} ({res['spans']} s); retuned mid-send: {res['stopped']!r}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        if mid is not None:
+            _cw_msg_del(S, mid)
+        home(o, S)
+
+
+def t_qrss3_key_safety(o, s, l):
+    """QRSS3's key-safety on a crash (the GUI killed mid-dash: the key let go at once) needs the owner's word: killing
+    the GUI on the air is the owner's to allow (features.json). Refused without ~/.config/x6x00-bench/owner_ok_qrss_kill"""
+    if not os.path.exists(os.path.join(bench.STATE, "owner_ok_qrss_kill")):
+        raise Refused("needs the owner's word: a GUI killed mid-dash on the air (owner_ok_qrss_kill not there)")
+    return None, "the owner's word is there; the kill test itself is not written yet", {}
+
+
+# ---- the test beacon (the Bands app and Field Ops' BANDS: dialog_field_test_beacon), Field Ops' CQ ----
+
+def _beacon_two_presses(o, S, L, s, l, names, label, third=False):
+    """First press: S moves to the band's CW frequency, says 'Press again'; the listener put there too; second press
+    within 10 s: 'TEST DE <call>' x3 (KEY Speed raised for it), the listener decodes TEST DE; S back where it was.
+    third: a third press 1 s into the send stops it at once and S goes back"""
+    res = {}
+    f0 = int(S.state.get("freq", 0))
+    t0 = time.time()
+    press(S, "F2", names, rest=1.5)
+    f_b = settled(S)
+    res["moved_to"] = f_b
+    said = wait_msg(S, t0, r"press again|again to send", 4)
+    res["said"] = said
+    if f_b == f0:
+        raise Refused(f"the first press left {S.name} on {f0}")
+    with bench.apart({"freq": (f0, f_b)}, f"{label}: {s} on the band's CW frequency before {l} follows"):
+        bench.ensure(L, {"freq": f_b, "mode": 4})
+    with session(o, label, [s], f_b) as watch:
+        role(o, s)
+        L.cw = ""
+        t1 = time.time()
+        press(S, "F2", names, rest=0.2)
+        S.wait("the beacon on the air", lambda: S.tx or watch.why, 6)
+        if third:
+            time.sleep(1.0)
+            press(S, "F2", names, rest=0.2)
+            S.wait("off the air at once", lambda: not S.tx, 2)
+            res["stopped_s"] = round(time.time() - t1, 1)
+        S.wait("the send's end", lambda: not S.tx or watch.why, 30)
+        res["spans"] = len(tx_spans(S, t1))
+    back = settled(S, limit=8)
+    res["back_on"] = back
+    res["decoded"] = cw_settled(L)
+    with bench.apart({"freq": (f0, f_b)}, f"{label}: {l} back to {s}"):
+        bench.ensure(L, {"freq": back})
+    return res
+
+
+def t_bands_beacon(o, s, l):
+    """The Bands app's Test beacon: two presses as Field Ops' (first moves and asks, second sends TEST DE <call>
+    three times), the radio back where it was after; ESC while waiting: nothing sent within 11 s"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        ensure_alike(o, F_CW, 4)
+        with cfg_kept(S, {"key_speed": CW_WPM_FAST}):
+            open_app(S, 119, "Bands")
+            r1 = _beacon_two_presses(o, S, L, s, l, ("Bands",), "bands-beacon")
+            res.update(r1)
+            if "TEST DE" not in r1["decoded"]:
+                raise Refused(f"{l} decoded {r1['decoded']!r}, no TEST DE")
+            if r1["back_on"] != F_CW:
+                raise Refused(f"{s} on {r1['back_on']} after the beacon, not back on {F_CW}")
+            with o.step(f"{s}: first press, then ESC: nothing sent within 11 s") as st:
+                t0 = time.time()
+                press(S, "F2", ("Bands",), rest=1.0)
+                f_b = settled(S)
+                with bench.apart({"freq": (F_CW, f_b)}, "bands-beacon: the first press alone, then ESC"):
+                    S.send("close")
+                    time.sleep(11.5)
+                    sent = tx_spans(S, t0)
+                    res["esc_sent"] = len(sent)
+                    bench.ensure(S, {"freq": F_CW, "mode": 4})
+                st.confirm(f"{len(sent)} transmissions")
+            if res["esc_sent"]:
+                return False, f"after the first press and ESC {s} transmitted {res['esc_sent']} time(s)", res
+        return True, f"first press to {r1['moved_to']} ({r1['said']!r}), second: {l} decoded {r1['decoded']!r}, " \
+                     f"{s} back on {F_CW}; first press then ESC: nothing sent", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        home(o, S)
+
+
+FIELD_BANDS_TILE = 14           # dialog_field.c tiles[]: LOG, N, S, P, B, H, F, T, C, M, L, G, K, X, BANDS
+FIELD_SOTA_TILE = 2
+
+
+def _field_home_tile(S, k):
+    open_app(S, 118, "Field")
+    for _ in range(3):                              # back to the home row from a page it remembered
+        if (S.state.get("win") or "").lower().startswith("field"):
+            break
+    S.send("knob mfk -30")
+    time.sleep(0.8)
+    if k:
+        S.send(f"knob mfk {k}")
+        time.sleep(0.8)
+    press(S, "F2", ("Field",), rest=1.5)            # Select
+
+
+def t_field_beacon(o, s, l):
+    """Field Ops > BANDS > Test beacon: the two presses (sends TEST DE <call> x3, back after); a third press 1 s into
+    the send stops it at once and the radio goes back"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        ensure_alike(o, F_CW, 4)
+        with cfg_kept(S, {"key_speed": CW_WPM_FAST}):
+            _field_home_tile(S, FIELD_BANDS_TILE)
+            r1 = _beacon_two_presses(o, S, L, s, l, ("Field",), "field-beacon")
+            res["send"] = r1
+            if "TEST DE" not in r1["decoded"]:
+                raise Refused(f"{l} decoded {r1['decoded']!r}, no TEST DE")
+            r2 = _beacon_two_presses(o, S, L, s, l, ("Field",), "field-beacon-stop", third=True)
+            res["stop"] = r2
+            if r2.get("stopped_s") is None or r2["stopped_s"] > 3.0:
+                raise Refused(f"the third press did not stop the send at once ({r2.get('stopped_s')} s)")
+            if r2["back_on"] != F_CW:
+                raise Refused(f"after the stop {s} on {r2['back_on']}, not back on {F_CW}")
+        return True, f"Field Ops' test beacon: {l} decoded {r1['decoded']!r}; a third press stopped it at " \
+                     f"{r2['stopped_s']} s and {s} went back", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        home(o, S)
+
+
+def t_field_cq(o, s, l):
+    """Field Ops in a SOTA activation (Select SOTA, Activate), CW: CQ sends 'CQ CQ SOTA DE <call> <call> K', the
+    listener decodes it; CQ again mid-send stops it. In SSB: CQ plays the voice CQ ('CQ SOTA' in /mnt/msg) when there
+    is one, else says 'No voice CQ yet'"""
+    S, L = o.r[s], o.r[l]
+    call = H.TEST_CALLS[s]
+    res = {}
+    try:
+        ensure_alike(o, F_CW, 4, agc=2)
+        with cfg_kept(S, {"key_speed": CW_WPM_FAST}):
+            _field_home_tile(S, FIELD_SOTA_TILE)
+            t0 = time.time()
+            press(S, "F2", ("Field",), rest=2.0)        # Activate (page REF 1:3, F2)
+            res["said"] = msgs_since(S, t0)[-3:]
+            bench.ensure(S, {"freq": F_CW, "mode": 4})
+            with session(o, "field-cq", [s], F_CW) as watch:
+                role(o, s)
+                L.cw = ""
+                t1 = time.time()
+                press(S, "F2", ("Field",), rest=0.3)    # CQ (ACT 1:2, F2)
+                S.wait("CQ on the air", lambda: S.tx or watch.why, 6)
+                S.wait("its end", lambda: not S.tx or watch.why, 25)
+                text = cw_settled(L)
+                res["decoded"] = text
+                t2 = time.time()
+                press(S, "F2", ("Field",), rest=0.2)
+                S.wait("CQ again on the air", lambda: S.tx or watch.why, 6)
+                time.sleep(1.0)
+                press(S, "F2", ("Field",), rest=0.2)
+                S.wait("stopped at once", lambda: not S.tx, 2.5)
+                res["stop_s"] = round(time.time() - t2, 1)
+            if f"SOTA DE {call}" not in text and not ("SOTA" in text and call in text):
+                raise Refused(f"{l} decoded {text!r}, not 'CQ CQ SOTA DE {call}'")
+            with o.step(f"{s} in USB: CQ plays the voice CQ or says there is none") as st:
+                with bench.apart({"mode": (4, 2)}, "field-cq: the sender's SSB CQ check (nothing sent without a file)"):
+                    bench.ensure(S, {"mode": 2})
+                    t3 = time.time()
+                    press(S, "F2", ("Field",), rest=1.5)
+                    if S.tx:
+                        S.stop()
+                        res["ssb"] = "played a voice CQ (stopped)"
+                    else:
+                        res["ssb"] = wait_msg(S, t3, r"voice CQ|sending", 4)
+                    bench.ensure(S, {"mode": 4})
+                st.confirm(res["ssb"])
+        return True, f"CQ in CW: {l} decoded {text!r}; CQ again stopped it ({res['stop_s']} s); SSB: {res['ssb']!r}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        try:
+            if (S.state.get("win") or "").lower().startswith("field"):
+                press(S, "F5", ("Field",))              # Back to the home row
+        except Refused:
+            pass
+        home(o, S)
+
+
+# ---- Propagation's beacon cells, the Scanner ----
+
+NCDXF_20M = 14100000
+
+
+def t_prop_beacon(o, s, l):
+    """Propagation (Band 20 m) scores the S-meter in each 10 s beacon slot: s keys a 0.1 W carrier on 14.100 through
+    one slot (two 6 s overs, under the Watch's limit) while l shows the 20 m table; its cells photographed (LOOK)"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        ensure_alike(o, NCDXF_20M, 2)
+        open_app(L, 126, "Propagation")
+        bench.ensure(L, {"freq": NCDXF_20M})
+        while int(time.time()) % 10 > 1:
+            time.sleep(0.2)
+        for k in range(2):
+            def body(watch):
+                bench.tci_send(S, [[1000, 4.5]], watch=watch)
+            H.over(o, s, l, NCDXF_20M, 2, f"prop-beacon {k}", body, pages=False)
+        time.sleep(2)
+        o.snap(f"prop-beacon {l}: the 20 m row after {s}'s carrier in a slot")
+        return None, f"{s} keyed 14.100 through a beacon slot; {l}'s Propagation table photographed (look at the 20 m " \
+                     f"cells)", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        home(o, L)
+
+
+SCAN_CH = [14210000, 14230000, 14250000]
+
+
+def _channels_add(r, freqs):
+    import suite_air_b as ab
+    ip = ab.web_ip(r.host)
+    added = []
+    for i, f in enumerate(freqs):
+        st, b = ab.http(ip, "/api/channels", method="POST",
+                        body={"name": f"BENCH {i + 1}", "freq": f, "mode": "USB"})
+        if st != 200:
+            raise Refused(f"{r.name}: the bench channel {f} not added ({st} {b[:80]})")
+        added.append(f)
+    return ip
+
+
+def _channels_drop(ip, names=("BENCH 1", "BENCH 2", "BENCH 3")):
+    import suite_air_b as ab
+    for _ in range(6):
+        st, b = ab.http(ip, "/api/channels")
+        try:
+            chans = json.loads(b).get("channels", [])
+        except (ValueError, AttributeError):
+            return
+        idx = next((i for i, c in enumerate(chans) if c.get("name") in names), None)
+        if idx is None:
+            return
+        ab.http(ip, f"/api/channels/{idx}", method="DELETE", body={"was": chans[idx]})
+
+
+def t_scanner(o, s, l):
+    """The Scanner (subject l) through three bench channels (14.210/230/250 USB, added on its web page, taken out
+    after): s keys a tone on 14.230: l stops there (its dial holds, its S-meter up) and goes on Hang seconds after s
+    ends; l keyed itself (PTT 3 s at 0.1 W) while scanning: its dial frozen meanwhile, the scan on after"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    ip = None
+    try:
+        ensure_alike(o, SCAN_CH[1], 2)
+        ip = _channels_add(L, SCAN_CH)
+        open_app(L, 127, "Scanner")
+        with bench.apart({"freq": bench.STEPPED}, "scanner: the scanning radio steps through its channels"):
+            for _ in range(5):                                  # Source: the Channels
+                if any("channel" in m.lower() for m in msgs_since(L, time.time() - 1.2)):
+                    break
+                press(L, "F2", ("Scanner",), rest=1.0)
+            t0 = time.time()
+            press(L, "F3", ("Scanner",), rest=4.0)              # Start
+            seen = sorted({f for _, f, _ in _visits(L, t0)})
+            res["visits"] = seen
+            if not set(SCAN_CH) & set(seen):
+                raise Refused(f"the scan visited {seen}, none of the bench channels")
+            bench.ensure(S, {"freq": SCAN_CH[1], "mode": 2})
+            got = {}
+
+            def body(watch):
+                t1 = time.time()
+                bench.tci_send(S, [[1000, 6.0]], watch=watch)
+                got["on"] = (t1, time.time())
+            offset_over(o, s, l, SCAN_CH[1], 2, "scanner: the carrier", body)
+            on0, on1 = got["on"]
+            held = [f for _, f, _ in _visits(L, on0 + 2.0, on1)]
+            res["held"] = sorted(set(held))
+            time.sleep(8.0)
+            after = [f for _, f, _ in _visits(L, on1 + 0.5)]
+            res["after"] = after[:6]
+            if set(held) != {SCAN_CH[1]}:
+                raise Refused(f"while {s} sent on {SCAN_CH[1]} the scan was on {res['held']}")
+            if len(set(after)) < 2:
+                raise Refused(f"after the carrier the scan stayed on {after}")
+            with o.step(f"{l} keyed 3 s while scanning: its dial frozen") as st:
+                with session(o, "scanner: keyed", [l]) as watch:
+                    role(o, l)
+                    t2 = time.time()
+                    L.send(f"key PTT 1 {int(t2)}")
+                    for _ in range(3):
+                        time.sleep(1.0)
+                        L.send(f"key PTT 1 {int(t2)}")
+                    L.send("key PTT 0")
+                    L.wait("off the air", lambda: not L.tx, 4)
+                    t3 = time.time()
+                frozen = {f for _, f, _ in _visits(L, t2 + 0.5, t3)}
+                res["frozen"] = sorted(frozen)
+                st.confirm(f"on {sorted(frozen)} while keyed")
+            if len(frozen) > 1:
+                raise Refused(f"the scan moved while {l} was on the air: {res['frozen']}")
+        return True, f"stopped on {SCAN_CH[1]} while {s} sent, went on after ({after[:3]}); frozen on {res['frozen']} " \
+                     f"while {l} was keyed", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        home(o, L)
+        if ip:
+            _channels_drop(ip)
+        try:
+            ensure_alike(o, int(L.state.get("freq", F_USB)), 2)
+        except Refused:
+            pass
+
+
+def _visits(r, t0, t1=None):
+    out = []
+    with r.lock:
+        lines = [(at, x) for at, x in list(r.lines) if at >= t0 and (t1 is None or at <= t1) and x.startswith("state ")]
+    for at, x in lines:
+        try:
+            st = json.loads(x[6:])
+        except ValueError:
+            continue
+        f, m = int(st.get("freq", 0)), int(st.get("mode", -1))
+        if not out or out[-1][1] != f:
+            out.append((at, f, m))
+    return out
+
+
+# ---- FT8 ----
+
+TEST_GRID = "JO22"              # a test locator for the grid tests (not the station's own)
+
+
+def run_dir(o):
+    d = getattr(o.st, "run_dir", None) or os.path.join(bench.STATE, "runs", "orch_cable")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def ft8_tci_msg(o, S, text, watch, hz=1500):
+    """An FT8 message the app cannot be told to send (gen_ft8's, at hz) keyed through S's TCI into the next slot,
+    by S's own clock (suite_air_b's way): (on, off)"""
+    import numpy as np
+    import digimodes
+    import suite_air_b as ab
+    x = ab.gen_ft8_24k(o.c, text, hz, run_dir(o))
+    on = np.flatnonzero(np.abs(x) > 1e-3 * max(np.abs(x).max(), 1e-9))
+    x = x[max(0, on[0] - int(ab.FT8_LEAD * ab.FAX_FS)):on[-1] + int(0.1 * ab.FAX_FS)]
+    x = 0.45 * x / max(np.abs(x).max(), 1e-9)
+    local = os.path.join(run_dir(o), f"ft8msg_{S.name}.raw")
+    secs = digimodes.write_raw(x, local)
+    subprocess.run(["scp", "-4", "-q", "-o", "BatchMode=yes", local, f"root@{S.host}:/tmp/bench_ft8msg.raw"], check=True)
+    subprocess.run(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_tone_tx.py"),
+                    f"root@{S.host}:/tmp/tci_tone_tx.py"], check=True)
+    off = ab.radio_offset(S.host) or 0.0
+    slot = math.ceil((time.time() + off + 3.0) / 15.0) * 15.0
+    _, t0, t1 = ab.tci_play(S, "/tmp/bench_ft8msg.raw", secs + 2, watch,
+                            radio_at=slot + 0.5 - ab.FT8_LEAD - ab.FT8_KEY_LAG)
+    return t0, t1
+
+
+@contextlib.contextmanager
+def ft8_pair(o, label, dial=F_FT8, senders=None):
+    """Both radios' FT8 apps open on dial (test calls, Auto off), the gates for senders (both by default); after:
+    stopped, closed, both on A"""
+    try:
+        with o.step("both on their test calls, the FT8 app open on both on the dial"):
+            H.ft8_both(o, dial)
+        with session(o, label, senders or list(o.r), dial) as watch:
+            yield watch
+    finally:
+        for r in o.r.values():
+            r.send("ft8 stop")
+        for r in o.r.values():
+            r.send("ft8 close")
+        try:
+            o.apps_closed(dial, 3)
+        except Refused:
+            pass
+        for r in o.r.values():
+            home(o, r)
+
+
+def _decoded(L, n0, want=None, secs=8):
+    """L's FT8 rows since n0 (want: wait for one with want in its message)"""
+    if want:
+        try:
+            L.wait(f"{want!r} decoded", lambda: any(want in bench.msg(r) for r in L.rows[n0:]), secs)
+        except Refused:
+            pass
+    return [bench.msg(r) for r in L.rows[n0:]]
+
+
+def t_ft8_cq_grid(o, s, l):
+    """FT8's CQ: the QTH's 4-character square in capitals ('CQ <call> JO22' from QTH jo22ab), none from a 2-character
+    QTH ('CQ <call>'), and the CQ Modifier ('CQ POTA <call> JO22')"""
+    S, L = o.r[s], o.r[l]
+    call = H.TEST_CALLS[s]
+    res = {}
+    try:
+        with cfg_kept(S, {"qth": TEST_GRID.lower() + "ab", "ft8_cq_modifier": ""}):
+            with ft8_pair(o, "ft8-cq-grid", senders=[s]) as watch:
+                role(o, s)
+                for qth, mod, want in ((TEST_GRID.lower() + "ab", "", f"CQ {call} {TEST_GRID}"),
+                                       ("JO", "", f"CQ {call}"),
+                                       (TEST_GRID.lower() + "ab", "POTA", f"CQ POTA {call} {TEST_GRID}")):
+                    bench.cfg_set(S, "qth", qth)
+                    bench.cfg_set(S, "ft8_cq_modifier", mod)
+                    n0 = len(L.rows)
+                    sent = H.ft8_send(o, S, L, watch, "ft8 cq", "ft8-cq-grid", F_FT8)
+                    got = _decoded(L, n0, call)
+                    res[f"{qth}/{mod}"] = {"sent": sent, "decoded": got}
+                    if want not in got or (qth == "JO" and any(TEST_GRID in g for g in got if call in g)):
+                        raise Refused(f"QTH {qth!r}, modifier {mod!r}: {l} decoded {got}, wanted {want!r}")
+        return True, f"CQ with a 4-character square, none from a 2-character QTH, and the POTA modifier, each " \
+                     f"decoded by {l} as sent", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_ft8_retries(o, s, l):
+    """Retries: l answers s's CQ and s never replies: l's reply goes out Retries times (3 set for the test), then its
+    QSO is dropped; Auto off, nothing moves on by itself: s's answer row needs a press ('ft8 reply') to move l on"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with cfg_kept(L, {"ft8_max_repeats": 3}):
+            with ft8_pair(o, "ft8-retries") as watch:
+                role(o, s)
+                n0 = len(L.rows)
+                cq = H.ft8_send(o, S, L, watch, "ft8 cq", "ft8-retries: the CQ", F_FT8)
+                rows = [r for r in L.rows[n0:] if bench.msg(r) == cq]
+                if not rows:
+                    L.wait("the CQ decoded", lambda: any(bench.msg(r) == cq for r in L.rows[n0:]), 8)
+                    rows = [r for r in L.rows[n0:] if bench.msg(r) == cq]
+                role(o, l)
+                t0 = time.time()
+                L.send(f"ft8 reply {rows[0]['id']}")
+                deadline = time.time() + 3 * 30 + 20
+                while time.time() < deadline and not watch.why:
+                    if len(tx_spans(L, t0)) >= 3 and not L.tx and not L.ft8.get("qso"):
+                        break
+                    time.sleep(0.5)
+                L.send("ft8 stop")
+                sends = len(tx_spans(L, t0))
+                res.update(replies=sends, qso_after=L.ft8.get("qso"))
+        if sends != 3:
+            return False, f"with Retries 3 and no answer {l} sent its reply {sends} times", res
+        return True, f"{l}'s unanswered reply went out 3 times (Retries 3), then its QSO was dropped", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_ft8_auto_off(o, s, l):
+    """Auto off: l answers s's CQ; s's report to l arrives; l does not move on by itself (its reply repeats) until
+    'ft8 reply' on s's answer row moves it to the report"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with ft8_pair(o, "ft8-auto-off") as watch:
+            role(o, s)
+            n0 = len(L.rows)
+            cq = H.ft8_send(o, S, L, watch, "ft8 cq", "ft8-auto-off: CQ", F_FT8)
+            L.wait("the CQ", lambda: any(bench.msg(r) == cq for r in L.rows[n0:]), 8)
+            row = next(r for r in L.rows[n0:] if bench.msg(r) == cq)
+            role(o, l)
+            n1 = len(S.rows)
+            rep1 = H.ft8_send(o, L, S, watch, f"ft8 reply {row['id']}", "ft8-auto-off: reply", F_FT8)
+            S.wait("the reply", lambda: any(bench.msg(r) == rep1 for r in S.rows[n1:]), 8)
+            srow = next(r for r in S.rows[n1:] if bench.msg(r) == rep1)
+            role(o, s)
+            n2 = len(L.rows)
+            rpt = H.ft8_send(o, S, L, watch, f"ft8 reply {srow['id']}", "ft8-auto-off: report", F_FT8)
+            L.wait("the report", lambda: any(bench.msg(r) == rpt for r in L.rows[n2:]), 8)
+            nxt = bench.norm(L.ft8.get("next") or "")
+            res.update(cq=H.mask(cq), reply=H.mask(rep1), report=H.mask(rpt), l_next_unpressed=H.mask(nxt))
+            moved = nxt and nxt != rep1
+            rrow = next(r for r in L.rows[n2:] if bench.msg(r) == rpt)
+            L.send(f"ft8 reply {rrow['id']}")
+            time.sleep(1.0)
+            nxt2 = bench.norm(L.ft8.get("next") or "")
+            res["l_next_pressed"] = H.mask(nxt2)
+            L.send("ft8 stop")
+        if moved:
+            return False, f"Auto off, {l} moved on by itself to {res['l_next_unpressed']!r}", res
+        if not nxt2 or nxt2 == rep1:
+            return False, f"the press on the report row left {l}'s next message {res['l_next_pressed']!r}", res
+        return True, f"Auto off: {l} kept {res['reply']!r} until the press, then {res['l_next_pressed']!r}", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_ft8_compound(o, s, l):
+    """A compound own call (Q?TST/6Y): 'ft8 cq' sends 'CQ Q?TST/6Y' (no QTH); one that does not fit FT8 (12
+    characters): 'No CQ: callsign ... does not fit FT8', nothing sent"""
+    S, L = o.r[s], o.r[l]
+    call = H.TEST_CALLS[s]
+    res = {}
+    try:
+        with cfg_kept(S, {"callsign": call + "/6Y"}):
+            with ft8_pair(o, "ft8-compound", senders=[s]) as watch:
+                role(o, s)
+                n0 = len(L.rows)
+                sent = H.ft8_send(o, S, L, watch, "ft8 cq", "ft8-compound", F_FT8)
+                got = _decoded(L, n0, f"{call}/6Y")
+                res.update(sent=sent, decoded=got)
+                if f"CQ {call}/6Y" not in got:
+                    raise Refused(f"{l} decoded {got}, not 'CQ {call}/6Y'")
+                bench.cfg_set(S, "callsign", call + "/6YZ/QRPX")
+                t0 = time.time()
+                S.send("ft8 cq")
+                said = wait_msg(S, t0, r"does not fit|No CQ", 6)
+                time.sleep(16)
+                res.update(said=said, keyed=len(tx_spans(S, t0)))
+                S.send("ft8 stop")
+                if res["keyed"]:
+                    raise Refused(f"the 12-character call keyed {s} ({said!r})")
+        return True, f"'CQ {call}/6Y' decoded by {l}; a call too long refused: {said!r}", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_ft8_list_look(o, s, l):
+    """The FT8 list's looks after s's CQ: the row's country, distance and SNR column (Settings > Display > FT8/FT4
+    info: km, then Country + mi), the For you strip (s calls l, l not answering), the Live Map: pictures (LOOK); the
+    For you strip off: the row only in the list"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with cfg_kept(L, {"ft8_info": 0, "ft8_foryou": 1}):
+            with ft8_pair(o, "ft8-list-look", senders=[s]) as watch:
+                role(o, s)
+                n0 = len(L.rows)
+                cq = H.ft8_send(o, S, L, watch, "ft8 cq", "ft8-list-look: CQ", F_FT8)
+                got = _decoded(L, n0, cq)
+                row = next((r for r in L.rows[n0:] if bench.msg(r) == cq), None)
+                res.update(cq=H.mask(cq), snr=row.get("snr") if row else None)
+                o.snap("ft8-list-look: the CQ row, info km")
+                bench.cfg_set(L, "ft8_info", 4)
+                time.sleep(1.0)
+                o.snap("ft8-list-look: the CQ row, info Country + mi")
+                cq_l = f"{H.TEST_CALLS[l]} {H.TEST_CALLS[s]} {TEST_GRID}"
+                ft8_tci_msg(o, S, cq_l, watch)
+                time.sleep(2.0)
+                o.snap("ft8-list-look: the For you strip with s's call")
+                bench.cfg_set(L, "ft8_foryou", 0)
+                time.sleep(1.0)
+                o.snap("ft8-list-look: For you off")
+        if not row or row.get("snr") is None:
+            return False, f"{l} did not decode the CQ with its SNR ({res})", res
+        return None, f"{l} decoded {res['cq']!r} at {res['snr']} dB; the list's columns, the For you strip and its " \
+                     f"switch photographed (look at them)", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_ft8_hound(o, s, l):
+    """Hound (FT8 page 4): s plays the Fox (a CQ from Q?FOX through its TCI); l with Hound on calls it in the other
+    period with an offset of 1000 Hz or more ('Q?FOX <l's call> <grid>')"""
+    S, L = o.r[s], o.r[l]
+    fox = "Q9FOX"
+    res = {}
+    try:
+        with ft8_pair(o, "ft8-hound") as watch:
+            role(o, s)
+            n0 = len(L.rows)
+            ft8_tci_msg(o, S, f"CQ {fox} {TEST_GRID}", watch)
+            L.wait("the Fox's CQ", lambda: any(fox in bench.msg(r) for r in L.rows[n0:]), 10)
+            row = next(r for r in L.rows[n0:] if fox in bench.msg(r))
+            if not L.ft8.get("hound"):
+                for _ in range(3):                      # Hound: page 4, F-key (the app's own)
+                    L.send("ft8 hound")
+                    time.sleep(0.8)
+                    if L.ft8.get("hound"):
+                        break
+            if not L.ft8.get("hound"):
+                raise Refused(f"{l}'s Hound not on (the remote has no 'ft8 hound'; page 4's key)")
+            role(o, l)
+            n1 = len(S.rows)
+            sent = H.ft8_send(o, L, S, watch, f"ft8 reply {row['id']}", "ft8-hound: the call", F_FT8)
+            txf = int(L.ft8.get("txf") or 0)
+            res.update(call=H.mask(sent), txf=txf)
+        if txf < 1000:
+            return False, f"{l}'s Hound called at {txf} Hz, under 1000", res
+        return True, f"{l} as a Hound called the Fox: {res['call']!r} at {txf} Hz", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        try:
+            if L.ft8.get("hound"):
+                L.send("ft8 hound")
+        except Exception:  # noqa: BLE001
+            pass
+
+
+# ---- JS8 ----
+
+def _js8_last(r):
+    import suite_air_b as ab
+    return ab.last_json(r, "js8")
+
+
+@contextlib.contextmanager
+def js8_pair(o, label, dial=F_JS8):
+    """The JS8 app open on both on dial (test calls), the gates for both; after: stopped, closed, both on A"""
+    import suite_air_b as ab
+    try:
+        with o.step("both on their test calls, the JS8 app open on both"):
+            H.test_calls(o)
+            o.changing += 1
+            try:
+                for r in o.r.values():
+                    r.send("js8 open")
+                for r in o.r.values():
+                    r.wait("the JS8 app", lambda r=r: _js8_last(r).get("open") == 1 or
+                           (r.state.get("app") or "").upper().startswith("JS8"), 10)
+                time.sleep(1.5)
+                o.both({"freq": dial, "pwr": H.W})
+            finally:
+                o.changing -= 1
+        with session(o, label, list(o.r), dial) as watch:
+            yield watch
+    finally:
+        for r in o.r.values():
+            r.send("js8 stop")
+            r.send("js8 close")
+        for r in o.r.values():
+            home(o, r)
+
+
+def js8_rows(r, t0):
+    with r.lock:
+        got = [(at, x) for at, x in list(r.lines) if at >= t0 and x.startswith("js8r ")]
+    out = []
+    for at, x in got:
+        try:
+            out.append(json.loads(x[5:]))
+        except ValueError:
+            pass
+    return out
+
+
+def js8_send(o, S, text, watch, secs=40):
+    """S sends text (its JS8 app, "js8 send"); (on, off) of its over"""
+    t0 = time.time()
+    S.send(f"js8 send {text}")
+    S.wait("its JS8 over", lambda: S.tx or watch.why, secs)
+    S.wait("its end", lambda: not S.tx or watch.why, 20)
+    return t0, time.time()
+
+
+def _js8_heard(L, t0, needle, secs=20):
+    end = time.time() + secs
+    while time.time() < end:
+        for m in js8_rows(L, t0):
+            if needle.upper() in json.dumps(m).upper():
+                return m
+        time.sleep(0.3)
+    return None
+
+
+def t_js8_speed(o, s, l):
+    """Speed and Decode: s at Turbo; l at Normal with All speeds hears it, with My speed it does not"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with cfg_kept(S, {"js8_speed": 2}), cfg_kept(L, {"js8_speed": 0, "js8_rx_all": 1}):
+            with js8_pair(o, "js8-speed") as watch:
+                role(o, s)
+                t0 = time.time()
+                js8_send(o, S, "SPEEDTEST ALL", watch)
+                heard_all = _js8_heard(L, t0, "SPEEDTEST")
+                bench.cfg_set(L, "js8_rx_all", 0)
+                t1 = time.time()
+                js8_send(o, S, "SPEEDTEST MINE", watch)
+                heard_mine = _js8_heard(L, t1, "SPEEDTEST", 15)
+                res.update(all=bool(heard_all), mine=bool(heard_mine))
+        if not heard_all:
+            return False, f"{l} with All speeds did not hear {s}'s Turbo", res
+        if heard_mine:
+            return False, f"{l} with My speed (Normal) heard {s}'s Turbo too", res
+        return True, f"{s}'s Turbo heard by {l} with All speeds, not with My speed", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_js8_groups(o, s, l):
+    """@X6100 (a group of every radio by default): s's '@X6100 HELLO' shows on l (red; picture) and l never
+    transmits for it even with AUTO on; '@GSTFLASH TEST': l's red message for 20 s (picture), l stays off the air"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with cfg_kept(L, {"js8_auto": 1}):
+            with js8_pair(o, "js8-groups") as watch:
+                for text, key in (("@X6100 HELLO", "x6100"), ("@GSTFLASH TEST", "gstflash")):
+                    role(o, s)
+                    t0 = time.time()
+                    js8_send(o, S, text, watch)
+                    m = _js8_heard(L, t0, text.split()[1])
+                    o.snap(f"js8-groups {l}: {text}")
+                    time.sleep(16)
+                    res[key] = {"heard": bool(m), "l_keyed": len(tx_spans(L, t0))}
+                    if not m:
+                        raise Refused(f"{l} did not show {text!r}")
+                    if res[key]["l_keyed"]:
+                        raise Refused(f"{l} transmitted after {text!r} (AUTO on)")
+        return None, f"{l} showed '@X6100 HELLO' and '@GSTFLASH TEST' and stayed off the air (red rows: look at the " \
+                     f"pictures)", res
+    except Refused as e:
+        return False, str(e), res
+
+
+GHOSTNET_HZ = 7107000
+
+
+def t_ghostnet(o, s, l):
+    """GhostNet on 7.107: s's '@GHOSTNET SNR?' answered by l (AUTO on, in GhostNet's group); l's
+    /mnt/ghostnet_log.txt keeps s's '@GHOSTNET TEST'"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with cfg_kept(L, {"js8_auto": 1, "js8_ghostnet": 1}), cfg_kept(S, {"js8_ghostnet": 1}):
+            with js8_pair(o, "ghostnet", dial=GHOSTNET_HZ) as watch:
+                role(o, s)
+                t0 = time.time()
+                js8_send(o, S, "@GHOSTNET SNR?", watch)
+                o.roles = {s: "RX", l: "TX"}             # l may answer
+                try:
+                    L.wait("l's answer", lambda: L.tx or watch.why, 45)
+                    L.wait("its end", lambda: not L.tx or watch.why, 20)
+                    res["answered"] = True
+                except Refused:
+                    res["answered"] = False
+                role(o, s)
+                t1 = time.time()
+                js8_send(o, S, "@GHOSTNET TEST", watch)
+                time.sleep(4)
+                log = ssh(L.host, "tail -20 /mnt/ghostnet_log.txt 2>/dev/null")
+                res["logged"] = "@GHOSTNET TEST" in log.upper() or "GHOSTNET TEST" in log.upper()
+        if not res["answered"]:
+            return False, f"{l} (AUTO on, GhostNet) did not answer '@GHOSTNET SNR?'", res
+        if not res["logged"]:
+            return False, f"{l}'s ghostnet_log.txt has no '@GHOSTNET TEST'", res
+        return True, f"{l} answered '@GHOSTNET SNR?' and logged '@GHOSTNET TEST'", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_js8_look(o, s, l):
+    """JS8's list after s's heartbeat and a directed message: Show No HB / Directed / All, Stations / Messages, an
+    alert word (purple), the log popup at 73 (pictures, LOOK); the log saved: js8call_log.adi gets the QSO with POTA"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with cfg_kept(L, {"js8_log_prompt": 1, "js8_log_activation": 1}):
+            with js8_pair(o, "js8-look") as watch:
+                role(o, s)
+                t0 = time.time()
+                js8_send(o, S, f"{H.TEST_CALLS[l]} TESTWORD HELLO", watch)
+                _js8_heard(L, t0, "TESTWORD")
+                o.snap("js8-look: a directed message on l")
+                js8_send(o, S, f"{H.TEST_CALLS[l]} 73", watch)
+                _js8_heard(L, t0, " 73")
+                time.sleep(2)
+                o.snap("js8-look: the log popup at 73 on l")
+                adi = ssh(L.host, "tail -c 600 /mnt/js8call_log.adi 2>/dev/null")
+                res["adi_has_call"] = H.TEST_CALLS[s] in adi
+        return None, f"{l}'s JS8 list photographed after a directed message and 73 (log popup); ADIF has " \
+                     f"{H.TEST_CALLS[s]}: {res['adi_has_call']}", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_js8_time_sync(o, s, l):
+    """Time Sync needs l's clock 1 s off with NTP stopped (then put back): the owner's word first (the radios' clock
+    and NTP; gpsd is fed from them). Refused without ~/.config/x6x00-bench/owner_ok_clock"""
+    if not os.path.exists(os.path.join(bench.STATE, "owner_ok_clock")):
+        raise Refused("needs the owner's word: a radio's clock set 1 s off with NTP stopped (owner_ok_clock)")
+    return None, "the owner's word is there; the clock test itself is not written yet", {}
+
+
+# ---- SSTV: the app's own TX (Robot 8: under the Watch's 16 s), the listener's pictures ----
+
+SSTV_ROBOT8 = 1                 # sstv_mode.h: the TX Mode as params.sstv_tx_mode stores it
+
+
+def _sstv_pics(r):
+    return set(ssh(r.host, "ls /mnt/sstv/*.png 2>/dev/null; true").split())
+
+
+def _sstv_tx_menu(S, row, watch, picks=6):
+    """S's SSTV TX (page 1 F5) menu at row (0 CALL CQ, 3 TX IMAGE ONLY, 4 REPEAT LAST TX), then MFK presses through
+    its steps (picture, colours, text) until S is on the air; the time it keyed"""
+    press(S, "F5", ("SSTV",), rest=1.0)
+    S.send("knob mfk -10")
+    time.sleep(0.5)
+    if row:
+        S.send(f"knob mfk {row}")
+        time.sleep(0.5)
+    for _ in range(picks):
+        S.send("key MFK 1")
+        time.sleep(0.15)
+        S.send("key MFK 0")
+        try:
+            S.wait("its picture on the air", lambda: S.tx or watch.why, 3)
+            return time.time()
+        except Refused:
+            continue
+    raise Refused(f"{S.name}'s SSTV TX did not start after {picks} presses through its menu")
+
+
+@contextlib.contextmanager
+def sstv_pair(o, label, s, l):
+    """Both SSTV apps open on one dial (the listener's), the sender's TX Mode Robot 8; after: closed, both on A, the
+    test's pictures taken off the listener's card"""
+    import suite_more
+    S, L = o.r[s], o.r[l]
+    before = _sstv_pics(L)
+    try:
+        with cfg_kept(S, {"sstv_tx_mode": SSTV_ROBOT8}):
+            with o.step("both SSTV apps open, one dial"):
+                o.changing += 1
+                try:
+                    for r in (L, S):
+                        if not suite_more.open_app(r, "sstv"):
+                            raise Refused(f"{r.name}'s SSTV app did not open")
+                        time.sleep(1.0)
+                    o.both({"freq": int(L.state.get("freq", F_SSTV)), "mode": int(L.state.get("mode", 2)), "pwr": H.W})
+                finally:
+                    o.changing -= 1
+            with session(o, label, [s]) as watch:
+                role(o, s)
+                yield watch, before
+    finally:
+        new = _sstv_pics(L) - before
+        if new:
+            ssh(L.host, "rm -f " + " ".join(new) + " " + " ".join(p.replace(".png", "_dn.png") for p in new))
+        for r in (S, L):
+            home(o, r)
+
+
+def t_sstv_rx(o, s, l):
+    """Manual RX (Robot 8) started on l just before s's CQ picture: a picture saved, with Denoise on its _dn.png beside
+    it; with Denoise off the next picture alone"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with cfg_kept(L, {"sstv_denoise": 1}):
+            with sstv_pair(o, "sstv-rx", s, l) as (watch, before):
+                press(L, "F4", ("SSTV",), rest=0.8)          # RX Mode: Auto -> Robot 8
+                press(L, "F3", ("SSTV",), rest=0.8)          # Start Manual RX
+                _sstv_tx_menu(S, 0, watch)
+                S.wait("the picture's end", lambda: not S.tx or watch.why, 20)
+                time.sleep(4)
+                new1 = _sstv_pics(L) - before
+                res["denoise_on"] = sorted(os.path.basename(p) for p in new1)
+                bench.cfg_set(L, "sstv_denoise", 0)
+                press(L, "F3", ("SSTV",), rest=0.8)
+                _sstv_tx_menu(S, 4, watch)                   # REPEAT LAST TX
+                S.wait("the picture's end", lambda: not S.tx or watch.why, 20)
+                time.sleep(4)
+                new2 = _sstv_pics(L) - before - new1
+                res["denoise_off"] = sorted(os.path.basename(p) for p in new2)
+        dn1 = [p for p in res["denoise_on"] if p.endswith("_dn.png")]
+        if len(res["denoise_on"]) < 2 or not dn1:
+            return False, f"Manual RX with Denoise on saved {res['denoise_on']} (a picture and its _dn wanted)", res
+        if len(res["denoise_off"]) != 1:
+            return False, f"Denoise off saved {res['denoise_off']} (one picture wanted)", res
+        return True, f"Manual RX saved {res['denoise_on']} (Denoise on), then {res['denoise_off']} (off; the repeat)", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_sstv_image_only(o, s, l):
+    """TX IMAGE ONLY, then REPEAT LAST TX: l (Auto RX) saves two pictures, alike"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with sstv_pair(o, "sstv-image-only", s, l) as (watch, before):
+            press(L, "F2", ("SSTV",), rest=0.8)              # Start Auto RX
+            for row in (3, 4):
+                _sstv_tx_menu(S, row, watch)
+                S.wait("the picture's end", lambda: not S.tx or watch.why, 20)
+                time.sleep(4)
+            new = sorted(p for p in _sstv_pics(L) - before if not p.endswith("_dn.png"))
+            res["pictures"] = [os.path.basename(p) for p in new]
+            if len(new) < 2:
+                raise Refused(f"{l} saved {res['pictures']} (two wanted)")
+            res["alike"] = _pngs_alike(L, new[-2], new[-1])
+        if res["alike"] is False:
+            return False, f"the image-only picture and its repeat differ ({res})", res
+        return True, f"{l} saved the image-only picture and the repeat ({res['pictures'][-2:]}), alike", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def _pngs_alike(r, a, b):
+    import io
+    from PIL import Image
+    import numpy as np
+    try:
+        ia = Image.open(io.BytesIO(subprocess.run(["ssh", "-4", "-o", "BatchMode=yes", f"root@{r.host}", f"cat {a}"],
+                                                  capture_output=True, timeout=30).stdout)).convert("L")
+        ib = Image.open(io.BytesIO(subprocess.run(["ssh", "-4", "-o", "BatchMode=yes", f"root@{r.host}", f"cat {b}"],
+                                                  capture_output=True, timeout=30).stdout)).convert("L")
+    except Exception:  # noqa: BLE001
+        return None
+    if ia.size != ib.size:
+        ib = ib.resize(ia.size)
+    d = np.abs(np.asarray(ia, dtype=float) - np.asarray(ib, dtype=float)).mean()
+    return bool(d < 40)
+
+
+def t_sstv_halt_hold(o, s, l):
+    """While s's picture goes out: the main knob, BAND_UP and A/B leave its frequency, band and mode; Halt TX (page 1
+    F5) takes it off the air at once"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with sstv_pair(o, "sstv-halt-hold", s, l) as (watch, before):
+            press(L, "F2", ("SSTV",), rest=0.8)
+            f0, m0 = int(S.state.get("freq", 0)), int(S.state.get("mode", -1))
+            _sstv_tx_menu(S, 0, watch)
+            time.sleep(1.5)
+            S.send("knob main 10")
+            time.sleep(0.6)
+            S.send("key BAND_UP 1")
+            time.sleep(0.15)
+            S.send("key BAND_UP 0")
+            time.sleep(0.8)
+            f1, m1 = int(S.state.get("freq", 0)), int(S.state.get("mode", -1))
+            res.update(held=(f1, m1) == (f0, m0), during=(f1, m1))
+            t_halt = time.time()
+            press(S, "F5", ("SSTV",), rest=0.1)              # Halt TX
+            S.wait("off the air at once", lambda: not S.tx, 2.0)
+            res["halt_s"] = round(time.time() - t_halt, 2)
+        if not res["held"]:
+            return False, f"during the picture {s} moved to {res['during']} from {(f0, m0)}", res
+        return True, f"{s}'s frequency and mode held through the knob and BAND_UP; Halt TX off the air in " \
+                     f"{res['halt_s']} s", res
+    except Refused as e:
+        return False, str(e), res
+
+
+# ---- WeFax: the fax drawn inverted on the screen, the PNG black on white; the tilt ----
+
+def _png_mean(r, path):
+    import io
+    from PIL import Image
+    import numpy as np
+    data = subprocess.run(["ssh", "-4", "-o", "BatchMode=yes", f"root@{r.host}", f"cat '{path}'"], capture_output=True,
+                          timeout=30).stdout
+    im = Image.open(io.BytesIO(data)).convert("L")
+    return float(np.asarray(im, dtype=float).mean()), im
+
+
+def t_wefax_look(o, s, l):
+    """After l received s's chart (half white, half black): its saved PNG is black on white (its paper light), the
+    screen shows the fax inverted (photographed); with Tilt set the saved chart's edge slants, with 0 it stands"""
+    import numpy as np
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        ok, says, data = H.wefax_chart(o, s, l, "wefax-look")
+        res["chart"] = says
+        if not ok:
+            raise Refused(f"no chart to look at: {says}")
+        o.snap("wefax-look: the fax on l's screen (drawn inverted)")
+        res["tilts"] = {}
+        for tilt in (0, 40):
+            with cfg_kept(L, {"wefax_tilt": tilt}):
+                ok2, says2, d2 = H.wefax_chart(o, s, l, f"wefax-tilt {tilt}")
+                path = (d2 or {}).get("path") or (d2 or {}).get("file")
+                if not path:
+                    files = ssh(L.host, "ls -t /mnt/wefax/*.png 2>/dev/null | head -1").strip()
+                    path = files or None
+                if not path:
+                    raise Refused(f"tilt {tilt}: no fax file")
+                mean, im = _png_mean(L, path)
+                a = np.asarray(im, dtype=float)
+                edges = [int(np.argmax(np.abs(np.diff(row)))) for row in a[::max(1, len(a) // 20)]]
+                res["tilts"][tilt] = {"paper": round(mean), "edge_cols": edges[:6],
+                                      "slant": int(edges[-1] - edges[0]) if edges else None}
+        light = all(v["paper"] > 100 for v in res["tilts"].values())
+        slant0, slant40 = res["tilts"][0]["slant"], res["tilts"][40]["slant"]
+        if not light:
+            return False, f"the saved PNGs' paper not light: {res['tilts']}", res
+        if slant0 is None or slant40 is None or abs(slant40) <= abs(slant0) + 3:
+            return None, f"PNGs black on white; Tilt 40 did not slant the edge more than Tilt 0 ({res['tilts']})", res
+        return None, f"PNGs black on white, the edge slants {slant40} px with Tilt 40 against {slant0} with 0; the " \
+                     f"screen's inverted fax photographed (look)", res
+    except Refused as e:
+        return False, str(e), res
+
+
+# ---- PSK31: the DX call from 'DE <call>', the status and text buttons (pictures), the cursor ----
+
+def t_psk_look(o, s, l):
+    """PSK31: s's macro 'CQ CQ DE <call> <call> K' (added on its web page, taken out after); l's DX call button
+    takes the call (picture), its text log has it; the status button's audio frequency and quality, the text
+    scroll-back ('knob mfk -3'), and a cursor 40 Hz off snapping onto the signal: pictures (LOOK)"""
+    import suite_air_b as ab
+    S, L = o.r[s], o.r[l]
+    call = H.TEST_CALLS[s]
+    text = f"CQ CQ DE {call} {call} K"
+    res = {}
+    ip = ab.web_ip(S.host)
+    mid = None
+    try:
+        st, b_ = ab.http(ip, "/api/macros/psk", method="POST", body={"name": "BENCH", "text": text})
+        if st != 200:
+            raise Refused(f"{s}: the PSK macro not added ({st})")
+        listed = json.loads(b_)["macros"]
+        i_m = max(i for i, m in enumerate(listed) if m.get("text") == text)
+        mid = listed[i_m].get("id")
+        with o.step("both PSK31 apps open on one dial"):
+            o.changing += 1
+            try:
+                for r in (L, S):
+                    ab.open_listed(r, "psk31", "psk")
+                o.both({"freq": int(L.state.get("freq", F_PSK)), "mode": int(L.state.get("mode", 3)), "pwr": H.W})
+            finally:
+                o.changing -= 1
+        t0 = time.time()
+        with session(o, "psk-look", [s]) as watch:
+            role(o, s)
+            ab.Pages(S).macro(i_m)
+            S.wait("its PSK on the air", lambda: S.tx or watch.why, 8)
+            time.sleep(3)
+            o.snap("psk-look: l's status button (audio frequency, quality) during s's PSK")
+            S.wait("its end", lambda: not S.tx or watch.why, 30)
+        time.sleep(2)
+        o.snap("psk-look: l's DX call button after 'DE <call>'")
+        lines = H.textlog_back(L.host, t0) if hasattr(H, "textlog_back") else ""
+        res["textlog"] = str(lines)[-120:]
+        L.send("knob mfk -3")
+        time.sleep(1.0)
+        o.snap("psk-look: l's text 3 back")
+        if call not in str(lines):
+            return False, f"{l}'s text log has no {call} ({res['textlog']!r})", res
+        return None, f"{l} decoded {call} from s's macro (its text log); DX call, status and scroll-back photographed", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        if mid is not None:
+            ab.http(ip, f"/api/macros/psk/{mid}", method="DELETE")
+        for r in (S, L):
+            home(o, r)
+
+
+# ---- RADE: a recorded over (the hand-mic session's) sent by s's RADE app, decoded by l ----
+
+def t_rade_rx(o, s, l):
+    """RADE V1: s's RADE app sends its recorded over (Rec from the hand mic: the owner's hand-mic session makes one)
+    at its own power; l's RADE shows Sync, SNR and 'last over <call>' (picture), its TCI audio is speech. Refused
+    without a recording on s"""
+    S = o.r[s]
+    have = ssh(S.host, "ls /mnt/rade/*.raw /mnt/rade/*.wav /tmp/rade_over* 2>/dev/null | head -1").strip()
+    if not have:
+        raise Refused(f"{s} has no recorded RADE over: the hand-mic session (Rec) first")
+    return None, f"a recording is there ({have}); the RADE send/decode steps are not written yet", {"file": have}
+
+
+# ---- TX settings: the transverter's limit, the 0 W warning, AGC, CESSB, Moni, the mic, the TX panel ----
+
+XV_DIAL = 144174000
+XV_SHIFT = 116000000            # 144.174 on a 28.174 MHz IF
+
+
+def t_transverter(o, s, l):
+    """Transverter 0 (144-146 MHz, IF 28 MHz) with a 0.1 W limit, the sender's PWR 1 W: a TCI tone from 144.174 goes
+    out at 0.1 W or less (its meters) and l hears it on the 28.174 IF; the ATU's long press there: 'No tuner: ...
+    transverter', nothing keyed"""
+    S, L = o.r[s], o.r[l]
+    f_if = XV_DIAL - XV_SHIFT
+    res = {}
+    try:
+        on_g_alike(o, f_if, 2)
+        with cfg_kept(S, {"transverter_0_from": 144000000, "transverter_0_to": 146000000,
+                          "transverter_0_shift": XV_SHIFT, "transverter_0_pwr_max": 0.1}):
+            with bench.apart({"freq": (XV_DIAL, f_if)}, f"transverter: {s} on 144.174 through its 28.174 IF"):
+                p0 = S.pwr()
+                try:
+                    got = {}
+
+                    def body(watch):
+                        bench.ensure(S, {"pwr": 1.0})
+                        _, t0, t1 = bench.tci_send(S, [[1000, 4.0]], watch=watch)
+                        got["t"] = (t0, t1)
+                    offset_over(o, s, l, XV_DIAL, 2, "transverter: the tone through the limit", body)
+                    t0, t1 = got["t"]
+                    w = [x[1] for x in t_frames(S, t0, t1 + 1)]
+                    m = meters(L, t0 + 1, t1)
+                    res.update(watts=max(w) if w else None, l_meter_max=max(m) if m else None)
+                    with o.step(f"{s}: the ATU's long press on the limited band") as st:
+                        classic(S)
+                        t2 = time.time()
+                        S.send("key ATU 1")
+                        time.sleep(1.5)
+                        S.send("key ATU 0")
+                        said = wait_msg(S, t2, r"No tuner", 4)
+                        res.update(atu_said=said, atu_keyed=len(tx_spans(S, t2)))
+                        st.confirm(said)
+                finally:
+                    bench.ensure(S, {"pwr": p0})
+                    home(o, S)
+                    bench.ensure(S, {"freq": f_if})
+        if res["watts"] is None or res["watts"] > 0.15:
+            return False, f"through the 0.1 W limit {s}'s meters read {res['watts']} W (PWR 1 W)", res
+        if res["atu_keyed"]:
+            return False, f"the ATU keyed {s} on the limited band ({res['atu_said']!r})", res
+        return True, f"limit held: {res['watts']} W at PWR 1 W, {l} heard it on the IF ({res['l_meter_max']} dB); ATU: " \
+                     f"{res['atu_said']!r}", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_zero_power(o, s, l):
+    """Line-in 0 (put back after): one FT8 CQ goes out at 0 W ('t' 0.0) and the radio says 'TX 0 W: level ...,
+    Line-in ...'"""
+    S = o.r[s]
+    res = {}
+    li0 = int(S.state.get("linein", 10))
+    try:
+        S.send("set linein 0")
+        S.wait("Line-in 0", lambda: int(S.state.get("linein", -1)) == 0, 4)
+        with ft8_pair(o, "zero-power", senders=[s]) as watch:
+            role(o, s)
+            t0 = time.time()
+            S.send("ft8 cq")
+            S.wait("its over", lambda: S.tx or watch.why, 32)
+            S.wait("its end", lambda: not S.tx or watch.why, 18)
+            S.send("ft8 stop")
+            said = wait_msg(S, t0, r"TX 0 W", 6)
+            w = [x[1] for x in t_frames(S, t0)]
+            res.update(said=said, watts=max(w) if w else 0.0)
+        if res["watts"] > 0.05:
+            return False, f"Line-in 0 still sent {res['watts']} W", res
+        return True, f"0 W over with Line-in 0, the radio said {said!r}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        S.send(f"set linein {li0}")
+
+
+def _rx_level_db(L, t0, t1):
+    from tones import TciRx
+    return None
+
+
+def t_agc_knee(o, s, l):
+    """AGC Knee (Settings > Audio): s's tone stepped 0.1, 0.3, 1.0 W through the pads; l's TCI audio level at each,
+    with two Knee settings: the curves differ (the setting acts)"""
+    import numpy as np
+    from tones import TciRx
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        k0 = int(bench.cfg_get(L, "agc_knee"))
+        curves = {}
+        for knee in (k0, k0 + 15 if k0 < 50 else k0 - 15):
+            with cfg_kept(L, {"agc_knee": knee}):
+                curve = []
+                for w in (0.1, 0.3, 1.0):
+                    rx = TciRx(L.host)
+                    try:
+                        got = {}
+
+                        def body(watch, w=w):
+                            bench.ensure(S, {"pwr": w})
+                            _, t0, t1 = bench.tci_send(S, [[1000, 2.5]], watch=watch)
+                            got["t"] = (t0, t1)
+                        H.over(o, s, l, F_USB, 2, f"agc-knee {knee} {w} W", body, w=w, agc=1)
+                        x, fs = rx.audio(got["t"][0] + 1.0, got["t"][1] - 0.3)
+                        curve.append(round(float(20 * np.log10(np.sqrt(np.mean(np.square(x))) + 1e-9)), 1)
+                                     if len(x) else None)
+                    finally:
+                        rx.close()
+                curves[knee] = curve
+        bench.ensure(S, {"pwr": H.W})
+        res["curves_db"] = curves
+        a, b = list(curves.values())
+        if None in a or None in b:
+            return False, f"no audio at some step: {curves}", res
+        diff = max(abs(x - y) for x, y in zip(a, b))
+        res["max_diff_db"] = round(diff, 1)
+        if diff < 1.5:
+            return False, f"Knee {list(curves)} gave the same audio levels {curves}", res
+        return True, f"l's audio over 0.1/0.3/1 W: {curves} dB (the knee moves it up to {diff:.1f} dB)", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_cessb(o, s, l):
+    """CESSB (Settings > TX Cal): the same two-tone audio through s's TCI at 0.1 W: its average power higher with
+    CESSB on (its meters, l's S-meter)"""
+    import numpy as np
+    import digimodes
+    import suite_air_b as ab
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        fs = 24000
+        t = np.arange(int(4.0 * fs)) / fs
+        x = 0.25 * (np.sin(2 * np.pi * 700 * t) + np.sin(2 * np.pi * 1900 * t))
+        local = os.path.join(run_dir(o), f"twotone_{s}.raw")
+        secs = digimodes.write_raw(x, local)
+        subprocess.run(["scp", "-4", "-q", "-o", "BatchMode=yes", local, f"root@{S.host}:/tmp/bench_twotone.raw"],
+                       check=True)
+        subprocess.run(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_tone_tx.py"),
+                        f"root@{S.host}:/tmp/tci_tone_tx.py"], check=True)
+        avg = {}
+        for on in (0, 1):
+            with cfg_kept(S, {"cessb_on": on}):
+                got = {}
+
+                def body(watch):
+                    _, t0, t1 = ab.tci_play(S, "/tmp/bench_twotone.raw", secs + 2, watch)
+                    got["t"] = (t0, t1)
+                H.over(o, s, l, F_USB, 2, f"cessb {on}", body)
+                w = [x[1] for x in t_frames(S, got["t"][0] + 1, got["t"][1])]
+                m = meters(L, got["t"][0] + 1, got["t"][1] - 0.5)
+                avg[on] = {"w": round(float(np.mean(w)), 3) if w else None,
+                           "m": round(float(np.mean(m)), 1) if m else None}
+        res["avg"] = avg
+        up = (avg[1]["m"] or -200) - (avg[0]["m"] or -200)
+        res["s_meter_up_db"] = round(up, 1)
+        if up >= 0.5:
+            return True, f"CESSB on raised the average: {l}'s S-meter {up:+.1f} dB ({avg})", res
+        return False, f"CESSB on did not raise the average ({avg})", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        ssh(S.host, "rm -f /tmp/bench_twotone.raw")
+
+
+def t_moni(o, s, l):
+    """Moni level (Settings > Audio > MICROPHONE): the state's moni follows the setting; with 30 an over is played on
+    the sender's own speaker (on the X6100 its TX monitor reaches the processor: G's voiceprint draws it: picture)"""
+    S = o.r[s]
+    res = {}
+    try:
+        with cfg_kept(S, {"moni": 30}):
+            S.wait("the state's moni 30", lambda: int(S.state.get("moni", -1)) == 30, 4)
+
+            def body(watch):
+                th = threading.Thread(target=lambda: bench.tci_send(S, [[1000, 3.0]], watch=watch))
+                th.start()
+                time.sleep(1.5)
+                o.snap(f"moni {s}: its G during its own over (Moni 30)")
+                th.join(15)
+            H.over(o, s, H.B if s == H.A else H.A, F_USB, 2, "moni 30", body)
+            res["moni"] = S.state.get("moni")
+        return None, f"the state's moni read {res['moni']} with the setting 30; the over photographed on {s}'s G " \
+                     f"(look: its voiceprint)", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_mic_gain(o, s, l):
+    """Mic gain per microphone and Input: the state's mic follows Input (Auto/Hand/Built-in); the gains read back. Its
+    level through the air needs sound at the microphone (acoustic.py's speaker by the radio: not set up here): the
+    settings' half only"""
+    S = o.r[s]
+    res = {}
+    try:
+        for name, vals in (("hmic", (20, 35)), ("imic", (30, 45))):
+            with cfg_kept(S, {name: vals[1]}):
+                res[name] = bench.cfg_get(S, name)
+        mic0 = int(S.state.get("mic", 0))
+        seen = []
+        with cfg_kept(S, {}):
+            for v in (0, 1, 2):
+                bench.cfg_set(S, "mic", v)
+                time.sleep(0.6)
+                seen.append(S.state.get("mic"))
+            bench.cfg_set(S, "mic", mic0)
+        res["mic_states"] = seen
+        if len(set(str(x) for x in seen)) < 2:
+            return False, f"the state's mic did not follow Input (read {seen})", res
+        return None, f"gains read back {res['hmic']}/{res['imic']}, Input stepped the state's mic {seen} (the level " \
+                     f"through the air needs a speaker at the mic)", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_tx_panel(o, s, l):
+    """Popups TX (Settings > Display): s keyed 3 s at 0.1 W from the classic screen with it on (the TX panel) and off
+    (PWR/SWR/ALC in the S-meter box): pictures (LOOK); the panel's values are its 't' frames"""
+    S = o.r[s]
+    res = {}
+    try:
+        ensure_alike(o, F_USB, 2)
+        classic(S)
+        for on in (1, 0):
+            with cfg_kept(S, {"mag_alc": on}):
+                with session(o, f"tx-panel {on}", [s], F_USB) as watch:
+                    role(o, s)
+                    hold = int(time.time())
+                    t0 = time.time()
+                    S.send(f"key PTT 1 {hold}")
+                    S.wait("on the air", lambda: S.tx or watch.why, 4)
+                    time.sleep(1.2)
+                    o.snap(f"tx-panel {s}: Popups TX {'on' if on else 'off'}")
+                    S.send(f"key PTT 1 {hold}")
+                    time.sleep(1.0)
+                    S.send("key PTT 0")
+                    S.wait("off the air", lambda: not S.tx, 4)
+                    res[f"frames_{on}"] = len(t_frames(S, t0))
+        return None, f"keyed with Popups TX on and off ({res}): look at the TX panel and the S-meter box", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        home(o, S)
+
+
+def t_screensaver_tx(o, s, l):
+    """The screensaver (1 min) ends within a second of any TX and none starts on the air: s's screen dumped under the
+    saver, then 1 s after its PTT (0.1 W): the GUI back; pictures"""
+    import suite_cover_a as ca
+    import numpy as np
+    S = o.r[s]
+    res = {}
+    try:
+        with cfg_kept(S, {"screen_saver": 1, "screen_saver_min": 1}):
+            time.sleep(68)
+            im0 = ca.dump(None, S.host) if hasattr(ca, "dump") else None
+            with session(o, "screensaver-tx", [s], int(S.state.get("freq", F_USB))) as watch:
+                role(o, s)
+                hold = int(time.time())
+                S.send(f"key PTT 1 {hold}")
+                S.wait("on the air", lambda: S.tx or watch.why, 4)
+                time.sleep(1.0)
+                im1 = ca.dump(None, S.host) if hasattr(ca, "dump") else None
+                S.send("key PTT 0")
+                S.wait("off the air", lambda: not S.tx, 4)
+        if im0 is None or im1 is None:
+            return False, "the screen could not be dumped", res
+        a0, a1 = np.asarray(im0, dtype=float), np.asarray(im1, dtype=float)
+        res.update(mean_saver=round(a0.mean(), 1), mean_on_air=round(a1.mean(), 1),
+                   changed=round(float(np.abs(a0 - a1).mean()), 1))
+        if res["changed"] < 5:
+            return False, f"the screen 1 s into TX looks as under the saver ({res})", res
+        return None, f"the screen changed {res['changed']} grey levels 1 s into TX ({res}): look that it is the GUI", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_stuck_tx_log(o, s, l):
+    """The stuck-TX guard's lines in the base logs of every cabled run so far (passive): each 'TX power set to 0'
+    followed by 'restored'"""
+    res = {}
+    bad = []
+    for n, r in o.r.items():
+        out = ssh(r.host, "grep -h -i 'TX power set to 0\\|TX power restored\\|PTT off resent\\|register write failed' "
+                          "/mnt/app_logs/*.log /mnt/app_logs/*.txt 2>/dev/null | tail -200")
+        lines = out.splitlines()
+        zero = sum(1 for x in lines if "set to 0" in x.lower())
+        back = sum(1 for x in lines if "restored" in x.lower())
+        res[n] = {"set_to_0": zero, "restored": back, "resends": sum(1 for x in lines if "resent" in x.lower())}
+        if zero > back:
+            bad.append(f"{n}: {zero} 'TX power set to 0' but {back} 'restored'")
+    if bad:
+        return False, "; ".join(bad), res
+    return True, f"every 'TX power set to 0' restored ({res})", res
+
+
+def t_long_press_busy(o, s, l):
+    """A key held 1.5 s while the GUI is busy (s on the air, 0.1 W) is a long press by its own events' times: the
+    classic screen's AB held copies VFO A to B (A=B: the VFOs read alike after), never its tap's VFO swap"""
+    S = o.r[s]
+    res = {}
+    try:
+        ensure_alike(o, F_USB, 2)
+        classic(S)
+        vfo0 = S.state.get("vfo")
+        with session(o, "long-press-busy", [s], F_USB) as watch:
+            role(o, s)
+            hold = int(time.time())
+            S.send(f"key PTT 1 {hold}")
+            S.wait("on the air", lambda: S.tx or watch.why, 4)
+            S.send("key AB 1")
+            time.sleep(1.5)
+            S.send(f"key PTT 1 {hold}")
+            S.send("key AB 0")
+            time.sleep(0.8)
+            S.send("key PTT 0")
+            S.wait("off the air", lambda: not S.tx, 4)
+        vfo1 = S.state.get("vfo")
+        res.update(vfo_before=vfo0, vfo_after=vfo1)
+        if vfo1 != vfo0:
+            return False, f"AB held 1.5 s on the air acted as a tap: the VFO {vfo0} -> {vfo1}", res
+        return None, f"AB held on the air did not swap the VFO ({vfo0}); the A=B copy itself not read by the remote", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        home(o, S)
+
+
+# ---- the Sentry: G's walkie (PTT, ATU), G's lamp, A's TX rows, SCAN CFG's priority and skip ----
+
+def t_walkie(o, s, l):
+    """G WALKIE armed: PTT (the remote's lease, 3 s at 0.1 W) sends with the walkie microphone (the state's mic) and
+    the Audio tab's microphone is back after; G's ATU held tunes (TUNE power 0.5 W, its carrier on the pads)"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        on_g_alike(o, 28400000, 2)
+        mic0 = S.state.get("mic")
+        got = {}
+
+        def body(watch):
+            hold = int(time.time())
+            S.send(f"key PTT 1 {hold}")
+            S.wait("on the air", lambda: S.tx or watch.why, 4)
+            time.sleep(1.0)
+            got["mic_on_air"] = S.state.get("mic")
+            o.snap(f"walkie {s}: PTT on G (red border)")
+            S.send(f"key PTT 1 {hold}")
+            time.sleep(1.0)
+            S.send("key PTT 0")
+        offset_over(o, s, l, 28400000, 2, "walkie PTT", body)
+        res.update(mic_before=mic0, mic_on_air=got.get("mic_on_air"))
+        bench.open_page(S, "A")
+        time.sleep(1.0)
+        res["mic_after"] = S.state.get("mic")
+        o.both_page("G")
+        tp0 = S.state.get("tpwr")
+        try:
+            def body2(watch):
+                S.send("key ATU 1")
+                time.sleep(1.6)
+                S.send("key ATU 0")
+                S.wait("the tune on the air", lambda: S.tx or S.state.get("tune") or watch.why, 4)
+                S.wait("its end", lambda: not S.tx or watch.why, 16)
+                got["tuned"] = True
+            S.send("set tpwr 5")
+            offset_over(o, s, l, 28400000, 2, "walkie ATU", body2)
+        finally:
+            if tp0 is not None:
+                S.send(f"set tpwr {int(round(float(tp0) * 10))}")
+        res["tuned"] = got.get("tuned")
+        if res["mic_on_air"] == res["mic_before"]:
+            return False, f"on G's PTT the state's mic stayed {res['mic_before']} (the walkie mic wanted)", res
+        if res["mic_after"] != res["mic_before"]:
+            return False, f"after G the mic read {res['mic_after']}, not {res['mic_before']}", res
+        return True, f"G's PTT: mic {res['mic_before']} -> {res['mic_on_air']} -> {res['mic_after']}; ATU held tuned", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        home(o, S)
+
+
+def t_g_lamp(o, s, l):
+    """G's lamp: l on G on 29.600 FM; s's FM over (a tone) at 0.1 W: l's lamp RX SIGNAL, after it RX QUIET; s armed:
+    TX ARMED, keyed: ON AIR (pictures of both: LOOK)"""
+    S = o.r[s]
+    res = {}
+    try:
+        def body(watch):
+            th = threading.Thread(target=lambda: bench.tci_send(S, [[1000, 4.0]], watch=watch))
+            th.start()
+            time.sleep(2.0)
+            o.snap(f"g-lamp: {s} ON AIR, {l} RX SIGNAL")
+            th.join(15)
+        H.over(o, s, l, 29600000, 7, "g-lamp", body)
+        time.sleep(2.0)
+        o.snap(f"g-lamp: after the over, {l} RX QUIET")
+        return None, "G's lamps photographed on the air and after (look: RX SIGNAL, ON AIR, RX QUIET)", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_a_tx_rows(o, s, l):
+    """A's picture keeps time while transmitting: s keyed 5 s from A (armed there, 0.1 W); A's history shows a dim band
+    as long as the over (picture: LOOK)"""
+    S = o.r[s]
+    res = {}
+    try:
+        with o.step("both on A, 14.200 USB"):
+            o.both_page("A")
+            o.both({"freq": F_USB, "mode": 2, "pwr": H.W})
+
+        def body(watch):
+            bench.tci_send(S, [[1000, 5.0]], watch=watch)
+        offset_over(o, s, l, F_USB, 2, "a-tx-rows", body)
+        time.sleep(3)
+        o.snap(f"a-tx-rows: {s}'s A after its 5 s over")
+        return None, f"{s}'s A photographed after a 5 s over (look: the dim band in the history)", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_scancfg_priority(o, s, l):
+    """SCAN CFG's PRIORITY set on l's A at 14.200 (a push on its row), A scanning 20 m: s keys a 0.1 W tone on 14.200:
+    l's dial goes to 14.200 within ~3 s; then F3 SKIP passes it over (the scan moves on while s still sends). Priority
+    cleared after"""
+    import suite_cover_b as cb
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        with o.step("both on A, 14.200 USB"):
+            o.both_page("A")
+            o.both({"freq": F_USB, "mode": 2, "pwr": H.W})
+        cb.cfg_open(L, "A")
+        try:
+            cur, _ = cb.cfg_find(L, L.host)
+            cb.cfg_goto(L, cur, cb.CR["PRIO"])
+            bench.ensure(L, {"freq": F_USB})
+            cb.cfg_push(L)
+            prio = cb.cfg_wait(L.host, lambda a: a.get("prio"), 4).get("prio")
+            res["prio"] = prio
+        finally:
+            cb.cfg_close(L)
+        if not prio:
+            raise Refused(f"{l}'s PRIORITY not set by the push ({cb.cfg_look(L.host)})")
+        with bench.apart({"freq": bench.STEPPED}, "scancfg-priority: l's A scans 20 m"):
+            bench.tap(L, "F1")                          # SCAN
+            time.sleep(4)
+            got = {}
+
+            def body(watch):
+                t0 = time.time()
+                th = threading.Thread(target=lambda: bench.tci_send(S, [[1000, 9.0]], watch=watch))
+                th.start()
+                try:
+                    L.wait("the dial on the priority", lambda: int(L.state.get("freq", 0)) == F_USB, 5)
+                    got["to_prio_s"] = round(time.time() - t0, 1)
+                    time.sleep(1.0)
+                    bench.tap(L, "F3")                  # SKIP
+                    time.sleep(3.0)
+                    got["after_skip"] = int(L.state.get("freq", 0))
+                finally:
+                    th.join(15)
+            offset_over(o, s, l, F_USB, 2, "scancfg-priority", body)
+            bench.tap(L, "F1")                          # scan off
+        res.update(got)
+        if got.get("to_prio_s") is None:
+            return False, f"{l}'s scan did not go to the priority 14.200 while {s} sent", res
+        if got.get("after_skip") == F_USB:
+            return False, f"F3 SKIP left {l} on 14.200 while {s} still sent", res
+        return True, f"to the priority in {got['to_prio_s']} s; SKIP moved on ({got['after_skip']})", res
+    except (Refused, cb.Unsure) as e:
+        return False, str(e), res
+    finally:
+        try:
+            cb.cfg_open(L, "A")
+            cur, _ = cb.cfg_find(L, L.host) if not cb.cfg_look(L.host).get("prio") else (cb.CR["PRIO"], 0)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            cb.cfg_close(L)
+        except Exception:  # noqa: BLE001
+            pass
+        home(o, L)
+
+
+def t_iradio_tx(o, s, l):
+    """Internet radio stops the moment the radio transmits (its player ends, the header Stopped) and does not resume:
+    needs the internet (the owner's OK for the read-only internet session: owner_ok_internet)"""
+    if not os.path.exists(os.path.join(bench.STATE, "owner_ok_internet")):
+        raise Refused("needs the owner's OK for the internet apps (owner_ok_internet)")
+    return None, "the OK is there; the player steps are not written yet", {}
+
+
+# ---- MSG > Voice: a message played on the air, refused out of the bands ----
+
+VOICE_NAME = "0 BENCH VOICE"
+
+
+def t_voice_msg(o, s, l):
+    """A voice message (a 3 s tone made here as MP3, put in /mnt/msg, taken out after) played by MSG > Voice's TX
+    (page 1 F4) at 0.1 W on 28.400 USB: s on the air, l hears it (its S-meter up); on 27.185 MHz refused (its message),
+    nothing sent"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    local = os.path.join(run_dir(o), "bench_voice.mp3")
+    try:
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=1000:duration=3",
+                        "-ar", "16000", "-ac", "1", local], check=True)
+        subprocess.run(["scp", "-4", "-q", "-o", "BatchMode=yes", local, f"root@{S.host}:'/mnt/msg/{VOICE_NAME}.mp3'"],
+                       check=True)
+        ensure_alike(o, 28400000, 2)
+        classic(S)
+        with session(o, "voice-msg", [s], 28400000) as watch:
+            role(o, s)
+            S.send("key MSG 1")
+            time.sleep(0.15)
+            S.send("key MSG 0")
+            S.wait("MSG > Voice", lambda: "voice" in win(S).lower() or "msg" in win(S).lower(), 5)
+            time.sleep(0.8)
+            S.send("knob mfk -40")
+            time.sleep(0.6)
+            t0 = time.time()
+            press(S, "F4", ("Voice", "MSG", "Message"), rest=0.3)
+            S.wait("the message on the air", lambda: S.tx or watch.why, 5)
+            S.wait("its end", lambda: not S.tx or watch.why, 12)
+            t1 = time.time()
+            m = meters(L, t0, t1)
+            res.update(sent_s=round(t1 - t0, 1), l_meter_max=max(m) if m else None)
+            with bench.apart({"freq": (28400000, 27185000)}, "voice-msg: s on 27.185 for the refusal"):
+                bench.ensure(S, {"freq": 27185000})
+                t2 = time.time()
+                press(S, "F4", ("Voice", "MSG", "Message"), rest=1.5)
+                res["refused"] = msgs_since(S, t2)[-2:]
+                res["keyed_on_cb"] = len(tx_spans(S, t2))
+                S.stop()
+                bench.ensure(S, {"freq": 28400000})
+        if res["keyed_on_cb"]:
+            return False, f"the voice message keyed {s} on 27.185 MHz", res
+        if not res["l_meter_max"]:
+            return False, f"no S-meter from {l} while {s} played the message", res
+        return True, f"played {res['sent_s']} s on the air ({l}'s S-meter up to {res['l_meter_max']}); on 27.185 " \
+                     f"refused ({res['refused']})", res
+    except (Refused, subprocess.CalledProcessError) as e:
+        return False, str(e), res
+    finally:
+        ssh(S.host, f"rm -f '/mnt/msg/{VOICE_NAME}.mp3'")
+        home(o, S)
+
+
+# ---- Winlink over the cable: Pat's ARDOP call to the other radio (it never answers), Mercury, XARA ----
+
+def _winlink(r, body=None):
+    import suite_air_b as ab
+    ip = ab.web_ip(r.host)
+    st, b = ab.http(ip, "/api/winlink", method="POST" if body else "GET", body=body)
+    try:
+        return st, json.loads(b)
+    except ValueError:
+        return st, {}
+
+
+def _pat(r, path, method="POST"):
+    """Pat's own HTTP API on the radio (its web mailbox, port 8080)"""
+    import urllib.request
+    import socket
+    url = f"http://{socket.gethostbyname(r.host)}:8080{path}"
+    req = urllib.request.Request(url, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as f:
+            return f.status, f.read().decode(errors="replace")
+    except Exception as e:  # noqa: BLE001
+        return getattr(e, "code", 0), str(e)
+
+
+WL_DIAL = 14105000
+
+
+@contextlib.contextmanager
+def winlink_on(o, modem):
+    """Winlink on, on both, with modem (ardop, mercury, xara); every setting it had put back after"""
+    kept = {}
+    try:
+        for n, r in o.r.items():
+            st, conf = _winlink(r)
+            kept[n] = {k: conf.get(k) for k in ("enabled", "modem_choice") if k in conf}
+            st, _ = _winlink(r, {"enabled": True, "modem_choice": modem})
+            if st != 200:
+                raise Refused(f"{n}: Winlink not switched on ({st})")
+        time.sleep(6)
+        yield
+    finally:
+        for n, r in o.r.items():
+            if kept.get(n):
+                body = {k: (v in (True, "1", 1)) if k == "enabled" else v for k, v in kept[n].items() if v is not None}
+                if body:
+                    _winlink(r, body)
+
+
+def t_winlink_ardop(o, s, l):
+    """Pat on s calls l over ARDOP on 14.105 (l never answers: its P2P listening off): s's dial goes there in USB-D,
+    it keys at 0.1 W (meters near 0.1 W frame after frame: the shared TX level), l's ardopcf logs frames; the dial
+    turned mid-call stops its TX at once ('Winlink: TX stopped, it left ...'); after the session s goes back"""
+    S, L = o.r[s], o.r[l]
+    call = H.TEST_CALLS[l]
+    res = {}
+    try:
+        ensure_alike(o, WL_DIAL, 3)
+        with winlink_on(o, "ardop"):
+            with session(o, "winlink-ardop", [s], WL_DIAL) as watch:
+                role(o, s)
+                n0 = ssh(L.host, "wc -c < /mnt/winlink/ardopcf.log 2>/dev/null || echo 0").strip() or "0"
+                t0 = time.time()
+                st, b = _pat(S, f"/api/connect?url=ardop:///{call}?freq={WL_DIAL // 1000}")
+                res["connect"] = (st, b[:120])
+                S.wait("its first frame", lambda: S.tx or watch.why, 40)
+                res["dial"] = (int(S.state.get("freq", 0)), int(S.state.get("mode", -1)))
+                S.wait("the frame's end", lambda: not S.tx or watch.why, 15)
+                S.wait("its next frame", lambda: S.tx or watch.why, 20)
+                S.send("knob main 1")
+                t_k = time.time()
+                S.wait("off the air at once", lambda: not S.tx, 2.0)
+                res["stop_s"] = round(time.time() - t_k, 2)
+                res["stop_said"] = msgs_since(S, t_k)[-2:]
+                _pat(S, "/api/disconnect?dirty=true")
+                time.sleep(5)
+                w = [x[1] for x in t_frames(S, t0)]
+                res["watts"] = [round(x, 2) for x in w[:12]]
+                n1 = ssh(L.host, "wc -c < /mnt/winlink/ardopcf.log 2>/dev/null || echo 0").strip() or "0"
+                res["l_log_grew"] = int(n1) > int(n0)
+        if res["dial"] != (WL_DIAL, 3):
+            return False, f"Pat's call left {s} on {res['dial']}, not 14.105 USB-D", res
+        if not res["watts"] or max(res["watts"]) > 0.15 or min(x for x in res["watts"] if x > 0) < 0.03:
+            return False, f"{s}'s meters over the frames {res['watts']}", res
+        if not res["l_log_grew"]:
+            return False, f"{l}'s ardopcf.log did not grow while {s} called", res
+        return True, f"{s} called over ARDOP on 14.105 USB-D at {res['watts'][:4]} W, {l}'s modem heard it; the dial " \
+                     f"turned: off the air in {res['stop_s']} s ({res['stop_said']})", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_winlink_mercury_xara(o, s, l):
+    """Mercury and XARA (VARA HF transport, station to station): s calls l, keys at 0.1 W (no key over 40/30 s), l's
+    mercury.log / xara.log show the call; neither answers"""
+    S, L = o.r[s], o.r[l]
+    call = H.TEST_CALLS[l]
+    res = {}
+    try:
+        for modem, log in (("mercury", "mercury.log"), ("xara", "xara.log")):
+            ensure_alike(o, WL_DIAL, 3)
+            with winlink_on(o, modem):
+                with session(o, f"winlink-{modem}", [s], WL_DIAL) as watch:
+                    role(o, s)
+                    n0 = int(ssh(L.host, f"wc -c < /mnt/winlink/{log} 2>/dev/null || echo 0").strip() or 0)
+                    t0 = time.time()
+                    _pat(S, f"/api/connect?url=vara:///{call}?freq={WL_DIAL // 1000}")
+                    try:
+                        S.wait("its call on the air", lambda: S.tx or watch.why, 40)
+                        S.wait("its end", lambda: not S.tx or watch.why, 16)
+                    finally:
+                        _pat(S, "/api/disconnect?dirty=true")
+                        time.sleep(4)
+                    n1 = int(ssh(L.host, f"wc -c < /mnt/winlink/{log} 2>/dev/null || echo 0").strip() or 0)
+                    res[modem] = {"keyed": len(tx_spans(S, t0)), "l_log_grew": n1 > n0,
+                                  "l_keyed": len(tx_spans(L, t0))}
+        bad = [m for m, v in res.items() if not v["keyed"] or v["l_keyed"]]
+        if bad:
+            return False, f"{bad}: {res}", res
+        logs = [m for m, v in res.items() if v["l_log_grew"]]
+        return (True if len(logs) == 2 else None), f"Mercury and XARA called (keyed, {l} silent); {l}'s logs grew for " \
+                                                   f"{logs}", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_winlink_busy(o, s, l):
+    """Pat listens before it calls: l sends a tone on 14.105 while s's Pat connects: s does not key over it (its
+    mailbox asks to go ahead); the bandwidth cap: a call asking 2000MAX with the page at 500 goes at 500 (pat.log)"""
+    S, L = o.r[s], o.r[l]
+    call = H.TEST_CALLS[l]
+    res = {}
+    try:
+        ensure_alike(o, WL_DIAL, 3)
+        with winlink_on(o, "ardop"):
+            st, _ = _winlink(S, {"bandwidth": 500})
+            got = {}
+
+            def body(watch):
+                t0 = time.time()
+                th = threading.Thread(target=lambda: bench.tci_send(L, [[1500, 9.0]], watch=watch))
+                th.start()
+                time.sleep(1.0)
+                _pat(S, f"/api/connect?url=ardop:///{call}?freq={WL_DIAL // 1000}&bw=2000MAX")
+                th.join(15)
+                got["s_keyed_during"] = len(tx_spans(S, t0, time.time()))
+                _pat(S, "/api/disconnect?dirty=true")
+            H.over(o, l, s, WL_DIAL, 3, "winlink-busy: l's tone", body, pages=False)
+            plog = ssh(S.host, "tail -40 /run/winlink/pat.log 2>/dev/null")
+            res.update(got, cap_line=next((x for x in plog.splitlines() if "500MAX" in x), None))
+        if res["s_keyed_during"]:
+            return False, f"{s}'s Pat keyed over {l}'s tone", res
+        return (True if res["cap_line"] else None), f"{s}'s Pat held off while {l} sent; cap: {res['cap_line']!r}", res
+    except Refused as e:
+        return False, str(e), res
+
+
+# ---- the browser's Panel (headless Chromium, the bench's own session): PTT states, Tap, a stalled link ----
+
+@contextlib.contextmanager
+def panel_page(r, path="/panel", wav=None):
+    """r's Panel page in headless Chromium with the bench's tx session (its key in localStorage), control taken"""
+    from playwright.sync_api import sync_playwright
+    tok = json.load(open(os.path.join(bench.STATE, "tokens.json")))[r.name]["tx"]
+    args = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"]
+    if wav:
+        args.append(f"--use-file-for-fake-audio-capture={wav}")
+    pw = sync_playwright().start()
+    br = pw.chromium.launch(headless=True, args=args)
+    try:
+        ctx = br.new_context()
+        ctx.add_init_script(f"try{{localStorage.setItem('x6100session','{tok}');localStorage.setItem('x6100name','bench-tx')}}catch(e){{}}")
+        page = ctx.new_page()
+        page.goto(f"http://{r.host}{path}", wait_until="domcontentloaded", timeout=20000)
+        time.sleep(3)
+        take = page.locator("text=Take control")
+        if take.count():
+            take.first.click()
+            time.sleep(1.5)
+        yield page, ctx
+    finally:
+        br.close()
+        pw.stop()
+
+
+def _ptt_text(page):
+    try:
+        return page.locator("#pttbtn").inner_text(timeout=1000)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def t_panel_ptt(o, s, l):
+    """The Panel's PTT (s on the classic screen, 0.1 W, l listening): held: 'Keying...' then 'ON AIR' within 1.5 s,
+    released: back; Tap on, tap off: a tap keys, the next unkeys, the option kept after a reload; keyed from another
+    client: 'TX (not this browser)'; a stalled link (the page offline) ends the over within 3 s"""
+    S = o.r[s]
+    res = {}
+    try:
+        ensure_alike(o, F_USB, 2)
+        classic(S)
+        with session(o, "panel-ptt", [s], F_USB) as watch:
+            role(o, s)
+            with panel_page(S) as (page, ctx):
+                btn_ = page.locator("#pttbtn")
+                box = btn_.bounding_box()
+                page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                t0 = time.time()
+                page.mouse.down()
+                texts = []
+                while time.time() - t0 < 2.0:
+                    texts.append(_ptt_text(page))
+                    time.sleep(0.1)
+                on_air_s = next((round(i * 0.1, 1) for i, t in enumerate(texts) if "ON AIR" in t), None)
+                res.update(states=sorted(set(t.split("\n")[0] for t in texts if t)), on_air_s=on_air_s,
+                           keyed=bool(S.tx))
+                page.mouse.up()
+                S.wait("off the air", lambda: not S.tx, 4)
+                page.select_option('[data-o="tap"]', "1")
+                btn_.click()
+                S.wait("on the air by a tap", lambda: S.tx or watch.why, 4)
+                time.sleep(1.0)
+                btn_.click()
+                S.wait("off by the next tap", lambda: not S.tx, 4)
+                page.reload()
+                time.sleep(3)
+                res["tap_kept"] = page.eval_on_selector('[data-o="tap"]', "e => e.value") if \
+                    page.locator('[data-o="tap"]').count() else None
+                page.select_option('[data-o="tap"]', "0")
+                hold = int(time.time())
+                S.send(f"key PTT 1 {hold}")
+                S.wait("keyed by the bench's other client", lambda: S.tx, 4)
+                time.sleep(1.0)
+                res["other_client"] = _ptt_text(page)
+                S.send("key PTT 0")
+                S.wait("off", lambda: not S.tx, 4)
+                box = btn_.bounding_box()
+                page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                page.mouse.down()
+                S.wait("held from the page", lambda: S.tx or watch.why, 4)
+                ctx.set_offline(True)
+                t_off = time.time()
+                S.wait("the lease ends", lambda: not S.tx, 5)
+                res["stall_unkey_s"] = round(time.time() - t_off, 1)
+                ctx.set_offline(False)
+                page.mouse.up()
+        bad = []
+        if res["on_air_s"] is None or res["on_air_s"] > 1.5:
+            bad.append(f"ON AIR at {res['on_air_s']} s ({res['states']})")
+        if res["tap_kept"] != "1":
+            bad.append(f"Tap option after reload {res['tap_kept']!r}")
+        if "not this browser" not in (res["other_client"] or ""):
+            bad.append(f"keyed by another client the button read {res['other_client']!r}")
+        if res["stall_unkey_s"] > 3.5:
+            bad.append(f"stalled link unkeyed after {res['stall_unkey_s']} s")
+        if bad:
+            return False, "; ".join(bad), res
+        return True, f"PTT states {res['states']}, ON AIR at {res['on_air_s']} s; Tap kept; 'TX (not this browser)'; " \
+                     f"a stalled page unkeyed in {res['stall_unkey_s']} s", res
+    except Exception as e:  # noqa: BLE001
+        return False, f"{type(e).__name__}: {e}", res
+    finally:
+        home(o, S)
+
+
+def t_panel_3min(o, s, l):
+    """Three minutes on the air at most whatever happens: a 3-minute key-down at 0.1 W is past the Watch's 16 s, the
+    owner's word first (owner_ok_3min)"""
+    if not os.path.exists(os.path.join(bench.STATE, "owner_ok_3min")):
+        raise Refused("needs the owner's word: a 3-minute key-down at 0.1 W into the pads (owner_ok_3min)")
+    return None, "the word is there; the long key test itself is not written yet", {}
+
+
+# ---- PSK Reporter: its report caught on the radio itself ----
+
+PSKR_HOST = "report.pskreporter.info"
+PSKR_CATCH = r'''
+import socket, sys, time
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind(("127.0.0.1", 4739))
+s.settimeout(float(sys.argv[1]))
+end = time.time() + float(sys.argv[1])
+with open("/tmp/pskr_catch.bin", "wb") as f:
+    while time.time() < end:
+        try:
+            d, a = s.recvfrom(65535)
+        except socket.timeout:
+            break
+        f.write(len(d).to_bytes(4, "big") + d)
+        f.flush()
+'''
+
+
+def t_pskreporter(o, s, l):
+    """PSK Reporter (Report decodes) with the report kept on the radio: l's /etc/hosts points report.pskreporter.info
+    at itself and its real addresses are routed nowhere (both taken back after), a catcher on 127.0.0.1:4739; s sends
+    FT8 CQs over the cable; within its 5-minute batch l's report arrives at the catcher with l's test call and s's"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    import socket
+    real = sorted({a[4][0] for a in socket.getaddrinfo(PSKR_HOST, 4739, socket.AF_INET)})
+    hosts0 = ssh(L.host, "cat /etc/hosts")
+    try:
+        ssh(L.host, f"cp /etc/hosts /tmp/hosts.bench && echo '127.0.0.1 {PSKR_HOST}' >> /etc/hosts && "
+                    + " && ".join(f"ip route add blackhole {ip}/32" for ip in real))
+        check = ssh(L.host, f"getent hosts {PSKR_HOST}; ip route show | grep blackhole")
+        if "127.0.0.1" not in check:
+            raise Refused(f"{l}: {PSKR_HOST} not pointed at itself ({check!r}): nothing sent")
+        subprocess.run(["ssh", "-4", "-o", "BatchMode=yes", f"root@{L.host}", "cat > /tmp/pskr_catch.py"],
+                       input=PSKR_CATCH, text=True, check=True)
+        ssh(L.host, "rm -f /tmp/pskr_catch.bin; (python3 /tmp/pskr_catch.py 420 >/dev/null 2>&1 &)")
+        with cfg_kept(L, {"pskreporter": 1}):
+            with ft8_pair(o, "pskreporter", senders=[s]) as watch:
+                role(o, s)
+                n0 = len(L.rows)
+                end = time.time() + 400
+                cqs = 0
+                while time.time() < end and not watch.why:
+                    H.ft8_send(o, S, L, watch, "ft8 cq", "pskreporter: CQ", F_FT8)
+                    cqs += 1
+                    got = ssh(L.host, "ls -l /tmp/pskr_catch.bin 2>/dev/null | awk '{print $5}'").strip()
+                    if got and int(got) > 0:
+                        break
+                    time.sleep(30)
+                res["cqs"] = cqs
+                res["decoded"] = sum(1 for r in L.rows[n0:] if H.TEST_CALLS[s] in bench.msg(r))
+        raw = subprocess.run(["ssh", "-4", "-o", "BatchMode=yes", f"root@{L.host}", "cat /tmp/pskr_catch.bin"],
+                             capture_output=True, timeout=30).stdout
+        res["caught_bytes"] = len(raw)
+        txt = raw.decode("latin-1")
+        res.update(has_receiver=H.TEST_CALLS[l] in txt, has_sender=H.TEST_CALLS[s] in txt, has_ft8="FT8" in txt)
+        if not raw:
+            return False, f"no report caught in {res['cqs']} CQs ({res['decoded']} decoded by {l})", res
+        if not (res["has_receiver"] and res["has_sender"]):
+            return False, f"a report caught ({len(raw)} bytes) without both test calls ({res})", res
+        return True, f"{l}'s report caught on itself ({len(raw)} bytes): receiver {H.TEST_CALLS[l]}, heard " \
+                     f"{H.TEST_CALLS[s]}, FT8 {res['has_ft8']}; nothing left the radio", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        ssh(L.host, "pkill -f pskr_catch.py; [ -f /tmp/hosts.bench ] && cp /tmp/hosts.bench /etc/hosts; "
+                    + "; ".join(f"ip route del blackhole {ip}/32 2>/dev/null" for ip in real)
+                    + "; rm -f /tmp/hosts.bench /tmp/pskr_catch.py /tmp/pskr_catch.bin")
+        if ssh(L.host, "cat /etc/hosts") != hosts0:
+            o.st.ev(f"{l}: /etc/hosts not as found after the PSK Reporter test", "bad")
+
+
+# ---- the X6100's TX Cal: IQ offsets per band; the patched-base rows hidden on Xiegu's factory base ----
+
+def t_iq_offsets(o, s, l):
+    """The X6100's IQ offsets (TX Cal, per band): set on 20 m and read back; a carrier at 0.1 W into the X6200: the
+    carrier at the dial measured with the offsets as found and with them moved (its level changes); on a band never
+    calibrated (17 m here, if so) they read 0. Put back after"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        ensure_alike(o, F_USB, 2)
+        io0, qo0 = int(S.state.get("txio", 0)), int(S.state.get("txqo", 0))
+        levels = {}
+        for io, qo in ((io0, qo0), (io0 + 40, qo0 - 40)):
+            S.send(f"set txio {io}")
+            S.send(f"set txqo {qo}")
+            S.wait("the offsets", lambda: (int(S.state.get("txio", 9999)), int(S.state.get("txqo", 9999))) == (io, qo), 4)
+            got = {}
+
+            def body(watch):
+                _, t0, t1 = bench.tci_send(S, [[1000, 3.0]], watch=watch)
+                got["t"] = (t0, t1)
+            H.over(o, s, l, F_USB, 2, f"iq-offsets {io},{qo}", body)
+            track = H.spec_track(L, F_USB, 2, got["t"][0] + 0.5, got["t"][1])
+            dial = [a for _, h, a in track if abs(h) < 40]
+            levels[(io, qo)] = round(max(dial), 1) if dial else None
+        S.send(f"set txio {io0}")
+        S.send(f"set txqo {qo0}")
+        res["carrier_db"] = {f"{k[0]},{k[1]}": v for k, v in levels.items()}
+        vals = list(levels.values())
+        if None in vals:
+            return None, f"the carrier at the dial not seen in {l}'s spectrum ({res})", res
+        if abs(vals[0] - vals[1]) < 2:
+            return False, f"moving the offsets by 40 did not change the carrier ({res})", res
+        return True, f"the X6100's IQ offsets act: carrier {res['carrier_db']} dB at the dial in {l}'s spectrum", res
+    except Refused as e:
+        return False, str(e), res
+
+
+def t_patched_rows(o, s, l):
+    """On Xiegu's factory base (the bench X6100 since 2026-11-21) the patched-base rows (codec and band output gain,
+    compressor threshold/makeup, TX filter, FM emphasis, IQ balance) are hidden: Settings > TX Cal and Audio > TX AUDIO
+    photographed (LOOK); the base's version said"""
+    S = o.r[s]
+    res = {"base": ssh(S.host, "grep -h -o 'base[^,]*V1[.0-9a-z_-]*' /mnt/app_logs/start_trace.txt 2>/dev/null | tail -1").strip()}
+    try:
+        open_app(S, 104, "Settings")
+        o.snap(f"patched-rows {s}: Settings (TX Cal and Audio tabs)")
+        for _ in range(6):
+            S.send("knob mfk 1")
+            time.sleep(0.6)
+            o.snap(f"patched-rows {s}: Settings tab")
+        return None, f"{s}'s base {res['base'] or '(not read)'}: Settings tabs photographed (look: no codec/output " \
+                     f"gain, TX filter, compressor or IQ balance rows on a factory base)", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        home(o, S)
+
+
+# ---- the CW Keyboard's on-screen keyboard and Live ----
+
+def t_cwkbd_live(o, s, l):
+    """The CW Keyboard without a keyboard: an MFK press with the line empty opens the on-screen keyboard; with Live on
+    (its last page, off by default) each key pressed is keyed at once, no OK: two presses of the MFK key two letters
+    the listener decodes"""
+    S, L = o.r[s], o.r[l]
+    res = {}
+    try:
+        ensure_alike(o, F_CW, 4, agc=2)
+        with cfg_kept(S, {"cw_live": 1}):
+            open_app(S, 117, "CW Keyboard")
+            bench.ensure(S, {"freq": F_CW, "mode": 4})
+            with session(o, "cwkbd-live", [s], F_CW) as watch:
+                role(o, s)
+                L.cw = ""
+                press(S, "MFK", ("CW Keyboard",), rest=1.0)       # the on-screen keyboard
+                o.snap(f"cwkbd-live {s}: the on-screen keyboard")
+                t0 = time.time()
+                for _ in range(2):
+                    press(S, "MFK", ("CW Keyboard",), rest=1.2)
+                time.sleep(2.0)
+                res["keyed"] = len(tx_spans(S, t0))
+            res["decoded"] = cw_settled(L)
+        letters = re.sub(r"[^A-Z0-9]", "", res["decoded"])
+        if not res["keyed"] or not letters:
+            return False, f"Live: two key presses keyed {res['keyed']} over(s), {l} decoded {res['decoded']!r}", res
+        return True, f"Live keyed each on-screen key at once: {l} decoded {res['decoded']!r} with no OK", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        home(o, S)
+
+
+# ---- what each test covers (features.json ids), its rows ----
+
+COVERS = {
+    "cw-dec-snr": (["cw-decoder-dec-snr"], []),
+    "cw-parse": (["cw-parse"], []),
+    "cw-zap": (["cw-zap"], []),
+    "cw-tuner": ([], ["cw-tuning-indicator"]),
+    "cw-peak-q": (["cw-peak-q"], []),
+    "cw-key-train": (["cw-key-train"], []),
+    "cw-own-carrier": (["cw-own-carrier-on-vfo-line"], ["cw-alc-grey"]),
+    "cw-log-qso": (["cw-log-qso-button"], ["log-quick-qso-decoder-call"]),
+    "cw-msg": (["cw-msg-tx", "cw-msg-breakin-raised"], ["cw-msg-tokens"]),
+    "cw-his": (["cw-msg-tokens"], []),
+    "cw-beacon": (["cw-beacon"], ["cw-beacon-start-until"]),
+    "cw-beacon-stops": (["cw-beacon-stops"], []),
+    "qrss3": (["qrss3-send", "qrss3-stops"], []),
+    "qrss3-key-safety": (["qrss3-key-safety"], []),
+    "cwkbd-live": (["cwkbd-live"], ["cwkbd-onscreen-keyboard"]),
+    "bands-beacon": (["bands-test-beacon"], []),
+    "field-beacon": (["field-test-beacon-send", "field-test-beacon-stop"], []),
+    "field-cq": (["field-cq-cw"], ["field-cq-ssb-voice"]),
+    "prop-beacon": ([], ["prop-beacons-heard"]),
+    "scanner": (["scanner-stop-and-hang", "scanner-holds-on-tx"], []),
+    "ft8-cq-grid": (["ft8-grid-4char", "ft8-cq-modifier"], []),
+    "ft8-retries": (["ft8-retries"], []),
+    "ft8-auto-off": (["ft8-auto-off-manual"], []),
+    "ft8-compound": (["ft8-compound-call"], []),
+    "ft8-list-look": ([], ["ft8-list-info-display", "ft8-for-you-strip"]),
+    "ft8-hound": ([], ["ft8-hound-mode"]),
+    "js8-speed": (["js8-speed-decode"], []),
+    "js8-groups": (["ghostnet-gstflash"], ["js8-x6100-group"]),
+    "ghostnet": (["ghostnet-auto-group-queries", "ghostnet-message-log"], []),
+    "js8-look": ([], ["js8-show-filters", "js8-alerts", "js8-log-qso"]),
+    "js8-time-sync": (["js8-time-sync"], []),
+    "sstv-rx": (["sstv-manual-rx", "sstv-denoise"], []),
+    "sstv-image-only": (["sstv-tx-image-only-repeat"], []),
+    "sstv-halt-hold": (["sstv-tx-halt", "sstv-tx-freq-locked", "radio-core-sstv-tx-hold"], []),
+    "wefax-look": ([], ["wefax-display-inverted", "wefax-align-tilt"]),
+    "psk-look": ([], ["psk-dx-call-rst", "psk-status-button", "psk-text-scrollback"]),
+    "rade-rx": (["rade-rx-decode"], []),
+    "transverter": (["tx-transverter-power-limit", "transverter-no-internal-atu"], ["transverter-limit-held-in-tx"]),
+    "zero-power": (["digi-tx-zero-power-warning", "digital-tx-0w-message"], []),
+    "agc-knee": (["settings-audio-agc"], []),
+    "cessb": (["settings-txcal-cessb"], []),
+    "moni": ([], ["tx-moni-level"]),
+    "mic-gain": ([], ["tx-mic-gain-input"]),
+    "tx-panel": ([], ["settings-display-tx-panel"]),
+    "screensaver-tx": ([], ["display-screensaver-tx"]),
+    "stuck-tx-log": (["system-stuck-tx-watchdog"], []),
+    "long-press-busy": ([], ["keys-long-press-by-event-time"]),
+    "walkie": (["app-walkie-ptt", "app-walkie-atu-tune"], []),
+    "g-lamp": ([], ["g-lamp-carrier", "g-lamp"]),
+    "a-tx-rows": ([], ["sentry-a-tx-rows"]),
+    "scancfg-priority": (["scancfg-priority", "scancfg-f3-skip"], []),
+    "iradio-tx": (["iradio-stops-on-tx"], []),
+    "voice-msg": (["voice-msg-tx"], []),
+    "winlink-ardop": (["winlink-ardop-call-keys", "winlink-tx-stopped-when-left", "winlink-tx-level-shared"], []),
+    "winlink-mercury-xara": (["winlink-mercury-call"], ["winlink-xara-call-and-id"]),
+    "winlink-busy": (["winlink-ardop-bandwidth-cap"], ["winlink-busy-and-password-prompts"]),
+    "panel-ptt": (["panel-ptt-ui-states", "ptt-option-tap", "link-stall-ptt-ends"], []),
+    "panel-3min": (["panel-ptt-3min"], []),
+    "pskreporter": (["pskreporter-upload", "settings-cluster-psk-reporter"], []),
+    "iq-offsets": (["tx-iq-offsets", "settings-txcal-iq-offsets"], []),
+    "patched-rows": ([], ["tx-patched-base-levels", "tx-patched-base-processing", "tx-iq-balance",
+                          "tx-x6100-gcfix5-pause-hold", "settings-audio-tx-audio-x6100", "settings-txcal-iq-balance",
+                          "settings-txcal-output-codec-gain"]),
+}
+
+# (name, fn, est s, both ways?, "what"): both ways = "name x6100>x6200" and "name x6200>x6100", else as named
+PAIRS = [
+    ("cw-dec-snr", t_cw_dec_snr, 90, "Dec SNR 5 copies a weak signal, 30 misses it, 5 again copies"),
+    ("cw-parse", t_cw_parse, 60, "run-together CW printed split with Parse on, run together off"),
+    ("cw-zap", t_cw_zap, 90, "200 Hz off, ZAP tunes onto the station within 10 Hz, in CW and CW-R"),
+    ("cw-tuner", t_cw_tuner, 70, "the tuning bars 30 Hz off in CW and CW-R (pictures)"),
+    ("cw-key-train", t_cw_key_train, 60, "KEY Train: TCI CW at 0 W, nothing heard; Train off: decoded"),
+    ("cw-own-carrier", t_cw_own_carrier, 40, "the sender's own carrier on its VFO line, its ALC read (picture)"),
+    ("cw-log-qso", t_cw_log_qso, 70, "the decoder's confirmed call logged by Log QSO (CW 1:2)"),
+    ("cw-msg", t_cw_msg, 60, "MSG > CW 'TEST {CALL} TEST': decoded with the call, one over through the gaps"),
+    ("cw-his", t_cw_msg_his, 80, "{HIS}: the call the decoder confirmed sent back"),
+    ("cw-beacon", t_cw_beacon, 90, "the beacon: 10 s pause, Until 2 sends, then 'Beacon over: 2 sends'"),
+    ("cw-beacon-stops", t_cw_beacon_stops, 70, "a beacon stopped in its pause by rigctl's T 1 / T 0"),
+    ("qrss3", t_qrss3, 70, "QRSS3 on 30 m: a 3 s dot on 10.140050; retuned mid-send: stopped"),
+    ("cwkbd-live", t_cwkbd_live, 60, "CW Keyboard's on-screen keyboard with Live: each key keyed at once"),
+    ("bands-beacon", t_bands_beacon, 90, "the Bands app's Test beacon: two presses, decoded, back; ESC: nothing"),
+    ("field-beacon", t_field_beacon, 120, "Field Ops' Test beacon: decoded; a third press stops it at once"),
+    ("field-cq", t_field_cq, 90, "Field Ops' CQ in a SOTA activation: decoded, CQ again stops it; SSB's voice CQ"),
+    ("prop-beacon", t_prop_beacon, 60, "Propagation's 20 m cell after a carrier in a beacon slot (picture)"),
+    ("scanner", t_scanner, 120, "the Scanner stops on a carrier and goes on after Hang; frozen while keyed"),
+    ("ft8-cq-grid", t_ft8_cq_grid, 120, "FT8 CQ: the 4-character square, none from 2, the POTA modifier"),
+    ("ft8-retries", t_ft8_retries, 150, "an unanswered reply sent Retries (3) times, then dropped"),
+    ("ft8-auto-off", t_ft8_auto_off, 120, "Auto off: nothing moves on until the press"),
+    ("ft8-compound", t_ft8_compound, 90, "a compound call's CQ; a call too long refused"),
+    ("ft8-list-look", t_ft8_list_look, 90, "the list's info column and the For you strip (pictures)"),
+    ("ft8-hound", t_ft8_hound, 90, "Hound calls a Fox at 1000 Hz or more"),
+    ("js8-speed", t_js8_speed, 120, "Turbo heard with All speeds, not with My speed"),
+    ("js8-groups", t_js8_groups, 120, "@X6100 and @GSTFLASH shown, never answered"),
+    ("ghostnet", t_ghostnet, 150, "@GHOSTNET SNR? answered (AUTO); @GHOSTNET TEST logged"),
+    ("js8-look", t_js8_look, 120, "JS8's list, alert and the log popup at 73 (pictures); the ADIF"),
+    ("sstv-rx", t_sstv_rx, 90, "Manual RX Robot 8: picture and _dn with Denoise, one without"),
+    ("sstv-image-only", t_sstv_image_only, 90, "TX IMAGE ONLY then REPEAT LAST TX: two pictures alike"),
+    ("sstv-halt-hold", t_sstv_halt_hold, 60, "knob and BAND_UP held off during TX; Halt TX at once"),
+    ("wefax-look", t_wefax_look, 150, "the PNG black on white, the screen inverted; Tilt slants the edge"),
+    ("psk-look", t_psk_look, 90, "PSK31: the DX call from 'DE <call>', the text log; pictures"),
+    ("transverter", t_transverter, 70, "the transverter's 0.1 W limit at PWR 1 W; ATU refused there"),
+    ("zero-power", t_zero_power, 60, "Line-in 0: a 0 W FT8 over and its 'TX 0 W' message"),
+    ("agc-knee", t_agc_knee, 120, "the AGC Knee changes the audio over 0.1/0.3/1 W"),
+    ("cessb", t_cessb, 60, "CESSB on raises the average power of the same audio"),
+    ("walkie", t_walkie, 70, "G's PTT with the walkie mic, the mic back after; G's ATU held tunes"),
+    ("g-lamp", t_g_lamp, 40, "G's lamps on the air and after (pictures)"),
+    ("scancfg-priority", t_scancfg_priority, 90, "SCAN CFG's PRIORITY catches a carrier; F3 SKIP passes it"),
+    ("voice-msg", t_voice_msg, 60, "MSG > Voice on the air on 28.400; refused on 27.185"),
+    ("winlink-ardop", t_winlink_ardop, 120, "Pat's ARDOP call keys at 0.1 W on 14.105 USB-D; the dial turned stops it"),
+    ("winlink-mercury-xara", t_winlink_mercury_xara, 150, "Mercury and XARA calls keyed, the other silent"),
+    ("winlink-busy", t_winlink_busy, 90, "Pat holds off a busy frequency; the 500 bandwidth cap"),
+    ("panel-ptt", t_panel_ptt, 90, "the Panel's PTT states, Tap, another client, a stalled link (headless browser)"),
+    ("pskreporter", t_pskreporter, 450, "PSK Reporter's report caught on the radio itself, nothing sent out"),
+]
+SINGLES = [
+    # (name, fn, est, (sender, listener) by role names, "what")
+    ("cw-peak-q x6200>x6100", t_cw_peak_q, 70, ("B", "A"), "the X6100's CW peak lowers a tone 300 Hz off"),
+    ("iq-offsets x6100>x6200", t_iq_offsets, 70, ("A", "B"), "the X6100's IQ offsets change its carrier"),
+    ("patched-rows x6100", t_patched_rows, 40, ("A", "B"), "the patched-base rows hidden on the factory base"),
+    ("moni x6100", t_moni, 40, ("A", "B"), "Moni 30 in the state, the X6100's own over on G (picture)"),
+    ("moni x6200", t_moni, 40, ("B", "A"), "Moni 30 in the state, the X6200's own over (picture)"),
+    ("mic-gain x6100", t_mic_gain, 20, ("A", "B"), "the mic gains read back, Input steps the state's mic"),
+    ("mic-gain x6200", t_mic_gain, 20, ("B", "A"), "the mic gains read back, Input steps the state's mic"),
+    ("tx-panel x6100", t_tx_panel, 40, ("A", "B"), "Popups TX on and off while keyed (pictures)"),
+    ("tx-panel x6200", t_tx_panel, 40, ("B", "A"), "Popups TX on and off while keyed (pictures)"),
+    ("screensaver-tx x6100", t_screensaver_tx, 100, ("A", "B"), "a TX ends the screensaver within a second"),
+    ("screensaver-tx x6200", t_screensaver_tx, 100, ("B", "A"), "a TX ends the screensaver within a second"),
+    ("stuck-tx-log", t_stuck_tx_log, 10, ("A", "B"), "every 'TX power set to 0' restored in the base logs"),
+    ("long-press-busy x6100", t_long_press_busy, 30, ("A", "B"), "AB held 1.5 s on the air is a long press"),
+    ("long-press-busy x6200", t_long_press_busy, 30, ("B", "A"), "AB held 1.5 s on the air is a long press"),
+    ("a-tx-rows x6100", t_a_tx_rows, 30, ("A", "B"), "A's dim band after a 5 s over (picture)"),
+    ("a-tx-rows x6200", t_a_tx_rows, 30, ("B", "A"), "A's dim band after a 5 s over (picture)"),
+    ("qrss3-key-safety", t_qrss3_key_safety, 30, ("B", "A"), "QRSS3's key let go on a crash (the owner's word)"),
+    ("js8-time-sync", t_js8_time_sync, 30, ("A", "B"), "JS8's Time Sync with a clock 1 s off (the owner's word)"),
+    ("iradio-tx", t_iradio_tx, 30, ("A", "B"), "Internet radio stops on TX (the owner's OK for the internet)"),
+    ("rade-rx x6100>x6200", t_rade_rx, 60, ("A", "B"), "RADE: a recorded over decoded (the hand-mic session's)"),
+    ("panel-3min", t_panel_3min, 200, ("A", "B"), "three minutes on the air at most (the owner's word)"),
+]
+
+
+def tests(Test, A, B):
+    """orch's Test rows of this module"""
+    out = []
+    for name, fn, est, what in PAIRS:
+        for s, l in ((A, B), (B, A)):
+            label = f"{name} {s}>{l}"
+            out.append(Test(label, f"{s.upper()} TX, {l.upper()} RX", what,
+                            (lambda o, fn=fn, s=s, l=l: fn(o, s, l)), est))
+    for name, fn, est, (sr, lr), what in SINGLES:
+        s, l = (A if sr == "A" else B), (A if lr == "A" else B)
+        out.append(Test(name, f"{s.upper()} TX, {l.upper()} RX", what, (lambda o, fn=fn, s=s, l=l: fn(o, s, l)), est))
+    return out

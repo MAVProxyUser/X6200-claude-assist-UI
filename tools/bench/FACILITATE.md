@@ -1,6 +1,6 @@
 # Tests the owner facilitates
 
-From 20261125-124652-coverage (`orch.py coverage`, then `python3 facilitate.py`). 271 features still wait on you: internet services, Bluetooth, GPS or your hands. Each session says what you do and what the bench does; a ticked line is covered.
+From 20261125-124652-coverage (`orch.py coverage`, then `python3 facilitate.py`). 273 features still wait on you: internet services, Bluetooth, GPS or your hands. Each session says what you do and what the bench does; a ticked line is covered.
 
 ## The X6100 as the X6200's Bluetooth client (your OK, no hands)
 
@@ -104,17 +104,151 @@ From 20261125-124652-coverage (`orch.py coverage`, then `python3 facilitate.py`)
 ## Public posts under your callsign (your yes for each)
 
 - **You:** Each of these publishes on the internet under your call: say which (if any) to post. Their first press (what would be posted, nothing sent) the bench checks without asking.
-- **The bench:** POTA self-spot and re-spots, the DX cluster spot, FreeDV Reporter, WSPRnet upload, PSK Reporter (off on both radios while they carry test calls).
+- **The bench:** POTA self-spot and re-spots, the DX cluster spot, FreeDV Reporter, WSPRnet upload. (PSK Reporter is the bench's own: its report caught on the radio, report.pskreporter.info pointed at itself, nothing sent.)
 - **Your time:** a few minutes each, while you are really on the air
-- **Left:** 7 of 7
+- **Left:** 5 of 5
 
   - [ ] `field-pota-spot-two-press` (app-field-ops): Spot: POTA self-spot on pota.app with the radio's frequency and mode; first press shows what will be posted and the button reads 'Spot?', a 
   - [ ] `field-pota-auto-spots` (app-field-ops): Re-spot (on by default): in POTA the radio spots at Start and after a QSY (1 kHz+ or mode change) once it has transmitted and stayed a minut
   - [ ] `field-spot-dx-cluster` (app-field-ops): Spot also posts on the DX cluster ('POTA IT-0123 SSB', 'SOTA I/LO-123 CW', 'TOTA OKR-0150 SSB', 'WCA DL-01156 CW', 'MOTA X42018 SSB', 'LH AR
   - [ ] `rade-freedv-reporter` (app-rade): FreeDV Reporter (page 2, off by default) publishes callsign, locator, frequency, TX state and heard callsigns to qso.freedv.org over TLS whi
   - [ ] `wspr-upload` (app-wspr): Each cycle's spots uploaded to WSPRnet (plain HTTP over WiFi) with that cycle's dial; status line counts sent and failed
-  - [ ] `settings-cluster-psk-reporter` (settings-cluster): PSK REPORTER Report decodes (on by default)
+
+## PSK Reporter, caught on the radio (the bench alone)
+
+- **You:** Nothing: no report leaves the radio.
+- **The bench:** Points report.pskreporter.info at the radio itself for the test (a hosts entry, removed after), turns Report decodes on with the test calls, has the other radio send FT8 over the cable, and decodes the IPFIX report caught: receiver call and locator, the sender's call, frequency, SNR, mode.
+- **Your time:** none
+- **Left:** 2 of 2
+
   - [ ] `pskreporter-upload` (settings-cluster): PSK Reporter (Settings > Cluster > PSK REPORTER > Report decodes, on by default): FT8/FT4/FT2/JS8/JTTY decodes, and PSK/Olivia/Contestia 'DE
+  - [ ] `settings-cluster-psk-reporter` (settings-cluster): PSK REPORTER Report decodes (on by default)
+
+## The Rii keyboard (already paired to the X6200)
+
+- **You:** Switch the Rii X1 Plus on and type what the bench asks (it says each line: a word, CapsLock chords, [ ] in CW, the touchpad). With a uinput module built for the radios' kernel (none there now) the bench could type most of these itself and you would only confirm the real keyboard once.
+- **The bench:** Watches state, screenshots and the other radio's decoder; CW from the keyboard over the cable at 0.1 W.
+- **Your time:** 30 min
+- **Left:** 22 of 22
+
+  - [ ] `cwkbd-usb-keyboard` (app-cw-kbd): With a keyboard: type the line under the log, Enter keys it, queue; Backspace corrects; Esc stops what is on air and queued, with nothing to
+  - [ ] `jtty-capslock-macros` (app-jtty): With a keyboard CapsLock+1 to CapsLock+8 send the macros
+  - [ ] `input-kbd-capslock-cw-messages` (cw): CapsLock+1..5 in CW key MSG > CW messages 1-5 from the CW line
+  - [ ] `log-cw-line-capslock-l` (cw): In CW with a line typed in the CW line, CapsLock+L logs that line instead of sending it
+  - [ ] `cw-kbd-line-main` (cw): USB/Bluetooth keyboard keys CW from the main screen in CW/CW-R inside a CW segment with no app open: a line over the waterfall, Backspace, E
+  - [ ] `cw-kbd-mfk-speed` (cw): While the line is open the MFK turns the key speed (yellow MFK tag), back to its control when it closes
+  - [ ] `cw-kbd-capslock` (cw): CapsLock+1..5 key MSG > CW messages 1-5; CapsLock+L logs the typed line; CapsLock+F opens the frequency box; a window drops the queue
+  - [ ] `cw-kbd-bracket-paddle` (cw): In CW [ and ] are the paddle's dit and dah (any USB keyboard too); out of CW they are the volume keys
+  - [ ] `input-kbd-shortcuts-setting` (input): Settings > Keys > KEYBOARD AND MOUSE > Shortcuts: off = keyboard only types (text boxes, CW keyboard, JTTY, shell); on = knob keys, CapsLock
+  - [ ] `input-kbd-layout` (input): Keyboard layout (US, UK, German, Swiss German, French, Belgian, Spanish, Italian, Portuguese, Swedish, Finnish, Danish, Norwegian, Polish, C
+  - [ ] `input-kbd-main-screen-keys` (input): Main-screen keyboard keys: arrows = MFK, Enter = MFK press, { } choose / [ ] turn VOL's control, - = knobs, f = frequency box, Scroll Lock =
+  - [ ] `input-kbd-capslock-chords` (input): CapsLock chords: K lock, P screenshot, S Settings, F frequency box, Up/Down band, 1-8 JTTY macros; main screen only, once per press, wake a 
+  - [ ] `input-mouse` (input): Mouse (USB, Bluetooth, BT keyboard touchpad) with Settings > Keys > KEYBOARD AND MOUSE > Mouse on: arrow, left click = tap (held = long pres
+  - [ ] `sentry-touch-mouse-tap` (sentry-common): A tap or mouse click picks the option, row or signal (A's picture: lock on the signal; B's half: take that channel)
+  - [ ] `scancfg-a-tap-mark` (sentry-scancfg): A tap on A's picture marks a signal and keeps A from stopping elsewhere 10 s; a second tap stops on it, held
+  - [ ] `settings-keys-keyboard-mouse` (settings-keys): KEYBOARD AND MOUSE: layout of a USB or Bluetooth keyboard (US default, UK, German, French...), Shortcuts (off), Mouse (off)
+  - [ ] `input-kbd-capslock-ptt` (tx): CapsLock+Space PTT toggle with the radio's refusals, 0 W hold, SWR protection; lets go on CapsLock+Space, not on air in 2 s, keyboard gone, 
+  - [ ] `tx-cw-line-band-plan` (tx): The main screen's CW line keys only in a CW segment (not NOT YOUR CLASS; Region 3 not above 3535/7030 kHz)
+  - [ ] `bt-keyboard-pairing` (bluetooth): Keyboards found by Scan marked *keyboard* (unnamed: 'Keyboard' + address); press the keyboard's pairing key when asked; a code to type shows
+  - [ ] `settings-bluetooth-scan-pair` (settings-bluetooth): DEVICES Scan (16 s) and the list with tags (headphones, keyboard, phone, CAT, GPS, new, connected); MFK on a new device pairs and connects (
+  - [ ] `settings-bluetooth-device-menu` (settings-bluetooth): Paired-device menu: Connect/Disconnect, Connect at startup (headphones), GPS for gpsd, Forget (asks again, Cancel first)
+  - [ ] `main-screen-status-bt-icons` (main-screen): Bluetooth icon (blue device connected, grey on, dark off), Note (A2DP headphones), Keyboard (amber BT CAT client, grey CAT bridge ready)
+
+## Bluetooth headphones, a phone or a PC
+
+- **You:** Pair headphones (if you have a pair) in Settings > Bluetooth; listen where the bench asks. Pair a phone or PC once to see it offered a speaker and no microphone; a headset button as the browser's PTT.
+- **The bench:** RX loopback, volume, speaker mute, A2DP only, BOTH's mix, what a PC sends dropped.
+- **Your time:** 20 min
+- **Left:** 11 of 11
+
+  - [ ] `bt-headphones-pair` (bluetooth): Settings > Bluetooth DEVICES: Scan (16 s); an MFK press on a *new* device pairs, trusts and connects it and opens the pairing window; Activi
+  - [ ] `bt-rx-to-headphones` (bluetooth): HEADPHONES: RX to headphones (PulseAudio loopback from alsa_input.platform-sound.stereo-fallback, mono, ~0.4-0.7 s late) and Volume (the sin
+  - [ ] `bt-mute-speaker` (bluetooth): Mute speaker: AF volume and TX monitor 0 while headphones are connected, the previous values back on disconnect; AF volume does not change t
+  - [ ] `bt-headset-a2dp-only` (bluetooth): Bluetooth headsets use A2DP only: no HFP/HSP microphone
+  - [ ] `btaudio-headphones` (bluetooth): Bluetooth headphones: RX loopback (rx on|off), volume 0-100 %, speaker mute while connected, Connect at startup
+  - [ ] `settings-bluetooth-headphones` (settings-bluetooth): HEADPHONES RX to headphones, Volume, Mute speaker; one pair at a time
+  - [ ] `sentry-both-mix-headphones` (sentry-common): BOTH mixes the X6200 and the stick only on Bluetooth headphones (speaker: the stick alone, base in play mode); each radio keeps its own volu
+  - [ ] `bt-cw-sidetone-headphones` (bluetooth): CW on headphones: X6100 hears its base's full-scale sidetone (late); the X6200's base puts it in at about -89 dBFS (nearly nothing, #192)
+  - [ ] `bt-pc-speaker-dropped` (bluetooth): A paired PC/phone sees the radio as an A2DP speaker; what it sends is dropped and never reaches the TX audio
+  - [ ] `bt-pc-no-input` (bluetooth): A PC on Bluetooth gets an audio output that plays nowhere and no input
+  - [ ] `ptt-option-bt-headset` (web): Bluetooth headset button as PTT (Play/pause, Next, Previous as tap on/off, or Speaker mic held to talk) via the page as media player
+
+## The Bluetooth GPS (GLO 2)
+
+- **You:** Switch the GLO 2 on by a window; once, switch it off for a minute and on again.
+- **The bench:** gpsd's bridge, reconnects and back-off, the GPS panel, the icon, title tag, DF heading, the web block.
+- **Your time:** 15 min
+- **Left:** 10 of 10
+
+  - [ ] `btgps-gpsd-bridge` (bluetooth): btgps-bridge gives gpsd a pseudo-terminal (/var/run/btgps.tty while connected) since the kernel makes no Bluetooth serial devices; positions
+  - [ ] `btgps-reconnect-backoff` (bluetooth): btgps-ctl reconnects: 10 s after a drop, doubling to 5 minutes (a new choice restarts at 10 s), ~5 s a try; log /tmp/btgps.log
+  - [ ] `btgps-ctl` (bluetooth): btgps-ctl set MAC [CHANNEL] / off / status: the Bluetooth GPS gpsd reads (BTGPS_MAC, BTGPS_CH in /mnt/btcat.conf)
+  - [ ] `main-screen-status-gps-icon` (main-screen): Arrow icon: green with a GPS fix in the last 10 s, grey GPS on without a fix
+  - [ ] `gps-panel` (sentry-F): F SYSTEM > GPS: sky plot by system colour, signal bars, systems used/in view, LINK, GPSD device/driver/rate, FIX (2D/3D, HDOP word, PDOP), E
+  - [ ] `df-gpsd-heading` (sentry-I): Heading from gpsd: a USB compass, else GPS course when moving >2 m/s (held 2 min); HEADING row 'IN USE: GPS COURSE 135 (GPSD)', N UP GPS/CMP
+  - [ ] `gps-title-tag` (sentry-common): While a GPS reports every title says GPS (GPS NO FIX till it has one)
+  - [ ] `settings-bluetooth-gps` (settings-bluetooth): GPS for gpsd on a paired Bluetooth device
+  - [ ] `gps-reconnect` (system): GPS arrow green with a fix in the last 10 s; reconnects to gpsd after 5 s of nothing; restarts gpsd after a minute then 2, 4, 8 ... up to 30
+  - [ ] `web-df-gps` (web): Web DF GPS block: gpsd fix, position, speed, heading; Bluetooth GPS choice and its link
+
+## The hand mics plugged in (nothing pressed)
+
+- **You:** Plug the H-22 into the X6200 and the X6100's mic into the X6100; nothing to press or say.
+- **The bench:** Records from them (the room's sound is enough: a recording is made, none without the mic), plays the recordings over the cable at 0.1 W: Rec CQ, RADE's Rec and Send, voice messages.
+- **Your time:** 2 min
+- **Left:** 5 of 5
+
+  - [ ] `field-rec-cq` (app-field-ops): Rec CQ (page 2): record the voice CQ from the hand mic, 60 s max, Stop rec; kept as 'CQ SOTA' / 'CQ POTA' in /mnt/msg (MSG > Voice lists it)
+  - [ ] `rade-rec` (app-rade): Rec from the hand mic (up to 60 s) encoded as you speak, receiver off meanwhile, 'encoding' then 'over ready'; dropped if the radio keys; bu
+  - [ ] `rade-send` (app-rade): Send keys at RADE's own Power (radio PWR and the apps' level untouched); the End-of-Over carries your callsign; Send again, Discard, Stop; r
+  - [ ] `voice-msg-hand-mic-only` (system): Voice messages record only from the hand mic
+  - [ ] `voice-msg-record-hand-mic` (tx): Voice messages (MSG > Voice Rec, Field Ops Rec CQ) record only from the hand mic; without it 'No audio: recording uses the hand mic' after 3
+
+## WSPR and SWR Scan (opened only at the radio)
+
+- **You:** Open WSPR, then SWR Scan, at the radio (neither opens remotely, by design); press TX next / Run when asked.
+- **The bench:** Everything after the open over the cable at 0.2-1 W: decodes, TX %, power, hop, the ATU rule, the transverter limit, sweeps, spans, band limits, refusals, the look.
+- **Your time:** 40 min
+- **Left:** 17 of 17
+
+  - [ ] `wspr-open` (app-wspr): APP > Modes > WSPR tunes the nearest WSPR dial (USB-D, WSJT-X's list), band keys step; always opens with TX % 0 (also after a power-off)
+  - [ ] `wspr-rx-decode` (app-wspr): Every RX cycle decoded at 1:54: table with UTC, band, SNR, DT, audio Hz, drift, call, grid, dBm, km; band of the cycle heard
+  - [ ] `wspr-tx-percent-next` (app-wspr): TX % (0/10/20/33/50, random cycles) and TX next (one beacon next cycle, again cancels; TX % 0 cancels a chosen one); without callsign or loc
+  - [ ] `wspr-stop-tx` (app-wspr): Stop TX (the TX next button while a beacon is on) takes it off at once, TX % 0, TX next off; closing WSPR (ESC) also stops and sets TX % 0
+  - [ ] `wspr-power` (app-wspr): WSPR's own Power (page 2): 0.1/0.2/0.5/1/2/5 W, 0.2 W default; the radio's PWR is not changed (beacon at WSPR's power, back after)
+  - [ ] `wspr-knob-offset` (app-wspr): Main knob moves the TX audio offset (1410-1590 Hz)
+  - [ ] `wspr-hop` (app-wspr): Band hopping (page 2 F5 / page 3 F4): WSJT-X's coordinated schedule by minute (:00 160m ... :18 10m), Off slots shared in turn (6 m takes Of
+  - [ ] `wspr-hop-bands-page3` (app-wspr): Page 3 band table: F2 Band, F3 Use Off/RX/RX+TX, F4 Hop, F5 Go to; columns frequency, use, slots, ATU match Stored/None
+  - [ ] `wspr-hop-atu-rule` (app-wspr): With the ATU on, an RX+TX band transmits on its hop only when an ATU match is stored for its WSPR frequency ('40m: no ATU match stored, RX o
+  - [ ] `transverter-wspr-at-limit` (app-wspr): WSPR's beacon goes out at the transverter limit when its own Power is higher, still reporting its own Power
+  - [ ] `swrscan-run-stop` (app-swrscan): SWR Scan (APP 1:6): Run sweeps a carrier (AM X6100, FM X6200) around the TX frequency (split's other VFO) and draws SWR; Stop or closing res
+  - [ ] `swrscan-x6200-sweep-mode` (app-swrscan): X6200 Sweep: Carrier (default: plain FM carrier, waits for power, 3 readings averaged, ends first then the gaps, a thin line marks the point
+  - [ ] `swrscan-span-scale` (app-swrscan): Span 50/100/200/500/1000/1500/2000/2500 kHz and Scale Log/Linear (not while scanning); 50 readings (25 with Carrier), 100 from 1000 kHz
+  - [ ] `swrscan-band-limited` (app-swrscan): The sweep stays inside the band of the band list for the IARU region (Region 1 40 m 7.000-7.200), moves inside near the HF/transverter/band/
+  - [ ] `swrscan-refusals` (app-swrscan): Run refused while transmitting or tuning ('SWR scan: not while transmitting or tuning'), out of band ('No TX on ...'), without base data; th
+  - [ ] `lookfeel-screen-wspr` (lookfeel): WSPR window looks and opens alike on both radios (gold on black)
+  - [ ] `lookfeel-screen-swr-scan` (lookfeel): SWR Scan window looks and opens alike on both radios (gold on black)
+
+## At the radio: knobs, lights, pairing, boot, by ear
+
+- **You:** Turn the X6200's MFK inner ring; a knob while a browser has control; look at the key lights; Pair code and Forget all (the bench pairs again after); watch one reboot from the logo; listen to the boot sound, a scan and Internet radio replacing the receiver.
+- **The bench:** Reads state and the remote's control line meanwhile.
+- **Your time:** 20 min
+- **Left:** 11 of 11
+
+  - [ ] `input-x6200-mfk-inner-ring` (input): X6200 MFK inner ring chooses the MFK's control (and moves the walk frame); outer ring changes the value without a press
+  - [ ] `control-local-takes-back` (remote): The radio's own keys and knobs always take control back ('At the radio')
+  - [ ] `settings-display-buttons-brightness` (settings-display): Buttons brightness Always Off / Always On / Temporarily On (the key lights, through the base)
+  - [ ] `pair-code-at-radio` (system): Settings > General > BROWSER REMOTE > Pair code shows a code at once and starts the waits over
+  - [ ] `sessions-forget-all` (system): Settings > General > BROWSER REMOTE > Forget all revokes every browser (and the .bak); the next pairing is the new admin
+  - [ ] `boot-picture-at-start` (system): At start the picture fades in over ~3 s from its top-left pixel's colour (transparent shows black), ending with 'CQ CQ' when the boot sound 
+  - [ ] `boot-dark-before-video` (system): Before the video the screen stays dark: no kernel logo, no U-Boot picture on the X6200
+  - [ ] `settings-audio-boot-sound` (settings-audio): Boot sound: CQ CQ in CW with the boot logo, quiet, at volume 28 when VOL is lower; off by default; none with Speaker always off
+  - [ ] `iradio-replaces-receiver` (app-iradio): While a station plays the speaker plays it in place of the receiver; the receiver comes back at Stop
+  - [ ] `scanner-quiet-while-looking` (app-scanner): The speaker is quiet while the scan looks, so there is no burst of noise at every step
+  - [ ] `digi-tx-monitor-muted` (tx): With AF volume 0 or the speaker muted (mute action, BT headphones Mute speaker, a TCI client transmitting) the TX monitor does not play the 
+
+# Later (the owner, 2026-11-25: no accounts for these services; the gear, the mic keys later)
 
 ## Zello (your account and a test channel)
 
@@ -187,79 +321,12 @@ From 20261125-124652-coverage (`orch.py coverage`, then `python3 facilitate.py`)
   - [ ] `funnel-persist` (network): Funnel stays on through restarts; Tailscale off and shutdown take it out of tailscaled, the next start puts it back within seconds
   - [ ] `system-update-funnel-off-downgrade` (network): Going back to v0.3.6 first turns Tailscale Funnel off and removes funnels from tailscaled; refuses (page says why) if it cannot within 30 s;
 
-## The Rii keyboard (already paired to the X6200)
+## The hand mics' keys and voice
 
-- **You:** Switch the Rii X1 Plus on and type what the bench asks (it says each line: a word, CapsLock chords, [ ] in CW, the touchpad). With a uinput module built for the radios' kernel (none there now) the bench could type most of these itself and you would only confirm the real keyboard once.
-- **The bench:** Watches state, screenshots and the other radio's decoder; CW from the keyboard over the cable at 0.1 W.
-- **Your time:** 30 min
-- **Left:** 22 of 22
-
-  - [ ] `cwkbd-usb-keyboard` (app-cw-kbd): With a keyboard: type the line under the log, Enter keys it, queue; Backspace corrects; Esc stops what is on air and queued, with nothing to
-  - [ ] `jtty-capslock-macros` (app-jtty): With a keyboard CapsLock+1 to CapsLock+8 send the macros
-  - [ ] `input-kbd-capslock-cw-messages` (cw): CapsLock+1..5 in CW key MSG > CW messages 1-5 from the CW line
-  - [ ] `log-cw-line-capslock-l` (cw): In CW with a line typed in the CW line, CapsLock+L logs that line instead of sending it
-  - [ ] `cw-kbd-line-main` (cw): USB/Bluetooth keyboard keys CW from the main screen in CW/CW-R inside a CW segment with no app open: a line over the waterfall, Backspace, E
-  - [ ] `cw-kbd-mfk-speed` (cw): While the line is open the MFK turns the key speed (yellow MFK tag), back to its control when it closes
-  - [ ] `cw-kbd-capslock` (cw): CapsLock+1..5 key MSG > CW messages 1-5; CapsLock+L logs the typed line; CapsLock+F opens the frequency box; a window drops the queue
-  - [ ] `cw-kbd-bracket-paddle` (cw): In CW [ and ] are the paddle's dit and dah (any USB keyboard too); out of CW they are the volume keys
-  - [ ] `input-kbd-shortcuts-setting` (input): Settings > Keys > KEYBOARD AND MOUSE > Shortcuts: off = keyboard only types (text boxes, CW keyboard, JTTY, shell); on = knob keys, CapsLock
-  - [ ] `input-kbd-layout` (input): Keyboard layout (US, UK, German, Swiss German, French, Belgian, Spanish, Italian, Portuguese, Swedish, Finnish, Danish, Norwegian, Polish, C
-  - [ ] `input-kbd-main-screen-keys` (input): Main-screen keyboard keys: arrows = MFK, Enter = MFK press, { } choose / [ ] turn VOL's control, - = knobs, f = frequency box, Scroll Lock =
-  - [ ] `input-kbd-capslock-chords` (input): CapsLock chords: K lock, P screenshot, S Settings, F frequency box, Up/Down band, 1-8 JTTY macros; main screen only, once per press, wake a 
-  - [ ] `input-mouse` (input): Mouse (USB, Bluetooth, BT keyboard touchpad) with Settings > Keys > KEYBOARD AND MOUSE > Mouse on: arrow, left click = tap (held = long pres
-  - [ ] `sentry-touch-mouse-tap` (sentry-common): A tap or mouse click picks the option, row or signal (A's picture: lock on the signal; B's half: take that channel)
-  - [ ] `scancfg-a-tap-mark` (sentry-scancfg): A tap on A's picture marks a signal and keeps A from stopping elsewhere 10 s; a second tap stops on it, held
-  - [ ] `settings-keys-keyboard-mouse` (settings-keys): KEYBOARD AND MOUSE: layout of a USB or Bluetooth keyboard (US default, UK, German, French...), Shortcuts (off), Mouse (off)
-  - [ ] `input-kbd-capslock-ptt` (tx): CapsLock+Space PTT toggle with the radio's refusals, 0 W hold, SWR protection; lets go on CapsLock+Space, not on air in 2 s, keyboard gone, 
-  - [ ] `tx-cw-line-band-plan` (tx): The main screen's CW line keys only in a CW segment (not NOT YOUR CLASS; Region 3 not above 3535/7030 kHz)
-  - [ ] `bt-keyboard-pairing` (bluetooth): Keyboards found by Scan marked *keyboard* (unnamed: 'Keyboard' + address); press the keyboard's pairing key when asked; a code to type shows
-  - [ ] `settings-bluetooth-scan-pair` (settings-bluetooth): DEVICES Scan (16 s) and the list with tags (headphones, keyboard, phone, CAT, GPS, new, connected); MFK on a new device pairs and connects (
-  - [ ] `settings-bluetooth-device-menu` (settings-bluetooth): Paired-device menu: Connect/Disconnect, Connect at startup (headphones), GPS for gpsd, Forget (asks again, Cancel first)
-  - [ ] `main-screen-status-bt-icons` (main-screen): Bluetooth icon (blue device connected, grey on, dark off), Note (A2DP headphones), Keyboard (amber BT CAT client, grey CAT bridge ready)
-
-## Bluetooth headphones, a phone or a PC
-
-- **You:** Pair headphones (if you have a pair) in Settings > Bluetooth; listen where the bench asks. Pair a phone or PC once to see it offered a speaker and no microphone; a headset button as the browser's PTT.
-- **The bench:** RX loopback, volume, speaker mute, A2DP only, BOTH's mix, what a PC sends dropped.
-- **Your time:** 20 min
-- **Left:** 11 of 11
-
-  - [ ] `bt-headphones-pair` (bluetooth): Settings > Bluetooth DEVICES: Scan (16 s); an MFK press on a *new* device pairs, trusts and connects it and opens the pairing window; Activi
-  - [ ] `bt-rx-to-headphones` (bluetooth): HEADPHONES: RX to headphones (PulseAudio loopback from alsa_input.platform-sound.stereo-fallback, mono, ~0.4-0.7 s late) and Volume (the sin
-  - [ ] `bt-mute-speaker` (bluetooth): Mute speaker: AF volume and TX monitor 0 while headphones are connected, the previous values back on disconnect; AF volume does not change t
-  - [ ] `bt-headset-a2dp-only` (bluetooth): Bluetooth headsets use A2DP only: no HFP/HSP microphone
-  - [ ] `btaudio-headphones` (bluetooth): Bluetooth headphones: RX loopback (rx on|off), volume 0-100 %, speaker mute while connected, Connect at startup
-  - [ ] `settings-bluetooth-headphones` (settings-bluetooth): HEADPHONES RX to headphones, Volume, Mute speaker; one pair at a time
-  - [ ] `sentry-both-mix-headphones` (sentry-common): BOTH mixes the X6200 and the stick only on Bluetooth headphones (speaker: the stick alone, base in play mode); each radio keeps its own volu
-  - [ ] `bt-cw-sidetone-headphones` (bluetooth): CW on headphones: X6100 hears its base's full-scale sidetone (late); the X6200's base puts it in at about -89 dBFS (nearly nothing, #192)
-  - [ ] `bt-pc-speaker-dropped` (bluetooth): A paired PC/phone sees the radio as an A2DP speaker; what it sends is dropped and never reaches the TX audio
-  - [ ] `bt-pc-no-input` (bluetooth): A PC on Bluetooth gets an audio output that plays nowhere and no input
-  - [ ] `ptt-option-bt-headset` (web): Bluetooth headset button as PTT (Play/pause, Next, Previous as tap on/off, or Speaker mic held to talk) via the page as media player
-
-## The Bluetooth GPS (GLO 2)
-
-- **You:** Switch the GLO 2 on by a window; once, switch it off for a minute and on again.
-- **The bench:** gpsd's bridge, reconnects and back-off, the GPS panel, the icon, title tag, DF heading, the web block.
-- **Your time:** 15 min
-- **Left:** 10 of 10
-
-  - [ ] `btgps-gpsd-bridge` (bluetooth): btgps-bridge gives gpsd a pseudo-terminal (/var/run/btgps.tty while connected) since the kernel makes no Bluetooth serial devices; positions
-  - [ ] `btgps-reconnect-backoff` (bluetooth): btgps-ctl reconnects: 10 s after a drop, doubling to 5 minutes (a new choice restarts at 10 s), ~5 s a try; log /tmp/btgps.log
-  - [ ] `btgps-ctl` (bluetooth): btgps-ctl set MAC [CHANNEL] / off / status: the Bluetooth GPS gpsd reads (BTGPS_MAC, BTGPS_CH in /mnt/btcat.conf)
-  - [ ] `main-screen-status-gps-icon` (main-screen): Arrow icon: green with a GPS fix in the last 10 s, grey GPS on without a fix
-  - [ ] `gps-panel` (sentry-F): F SYSTEM > GPS: sky plot by system colour, signal bars, systems used/in view, LINK, GPSD device/driver/rate, FIX (2D/3D, HDOP word, PDOP), E
-  - [ ] `df-gpsd-heading` (sentry-I): Heading from gpsd: a USB compass, else GPS course when moving >2 m/s (held 2 min); HEADING row 'IN USE: GPS COURSE 135 (GPSD)', N UP GPS/CMP
-  - [ ] `gps-title-tag` (sentry-common): While a GPS reports every title says GPS (GPS NO FIX till it has one)
-  - [ ] `settings-bluetooth-gps` (settings-bluetooth): GPS for gpsd on a paired Bluetooth device
-  - [ ] `gps-reconnect` (system): GPS arrow green with a fix in the last 10 s; reconnects to gpsd after 5 s of nothing; restarts gpsd after a minute then 2, 4, 8 ... up to 30
-  - [ ] `web-df-gps` (web): Web DF GPS block: gpsd fix, position, speed, heading; Bluetooth GPS choice and its link
-
-## The hand mics (H-22 on the X6200, the X6100's)
-
-- **You:** Press the mic keys the bench names; record a CQ, a RADE over and a voice message; speak for VOX; key the hand mic once outside the bands.
-- **The bench:** Reads state after each key; plays the recordings over the cable at 0.1 W to the other radio.
+- **You:** Press the mic keys the bench names; speak for VOX; key the hand mic once outside the bands.
+- **The bench:** Reads state after each key.
 - **Your time:** 25 min
-- **Left:** 15 of 15
+- **Left:** 10 of 10
 
   - [ ] `input-handmic-band-digits` (input): Hand mic digits 1-9, 0 (and H-22 dot = 10 m) select the band printed on the key (X6100 mic and H-22 maps differ); long press recalls memory 
   - [ ] `input-handmic-frequency-box` (input): F-INP (H-22 red F-INP/ENT) opens the frequency box, digits and dot type MHz, CE deletes, F-INP again tunes; not while locked; digits type in
@@ -269,55 +336,8 @@ From 20261125-124652-coverage (`orch.py coverage`, then `python3 facilitate.py`)
   - [ ] `input-handmic-h22-vol-ab` (input): H-22 VOL+/VOL- step the RX volume (held: auto-repeat ~10/s from 0.4 s); A/B toggles VFO, long press copies VFO
   - [ ] `input-handmic-x6100-keys` (input): X6100 mic keys FIL (filter pages / DFL long), XFC (VFO A/B), SPCH (lock), TUNER (tuner on/off, long = tune cycle, transmits), GENE (SWL pane
   - [ ] `channels-hand-mic-keys` (app-channels): Hand mic V/M opens the window (not over WeFax, NavTex, SSTV, JS8, PSK, Olivia, JTTY); UP/DOWN tune the channel after/before the last one tun
-  - [ ] `field-rec-cq` (app-field-ops): Rec CQ (page 2): record the voice CQ from the hand mic, 60 s max, Stop rec; kept as 'CQ SOTA' / 'CQ POTA' in /mnt/msg (MSG > Voice lists it)
-  - [ ] `rade-rec` (app-rade): Rec from the hand mic (up to 60 s) encoded as you speak, receiver off meanwhile, 'encoding' then 'over ready'; dropped if the radio keys; bu
-  - [ ] `rade-send` (app-rade): Send keys at RADE's own Power (radio PWR and the apps' level untouched); the End-of-Over carries your callsign; Send again, Discard, Stop; r
-  - [ ] `voice-msg-hand-mic-only` (system): Voice messages record only from the hand mic
-  - [ ] `voice-msg-record-hand-mic` (tx): Voice messages (MSG > Voice Rec, Field Ops Rec CQ) record only from the hand mic; without it 'No audio: recording uses the hand mic' after 3
   - [ ] `settings-audio-vox` (settings-audio): VOX On, Gain, Anti-VOX, Delay
   - [ ] `tx-base-hold-outside` (tx): Outside the bands the base is held for what it keys itself (hand mic PTT, VOX, KEY jack): PWR 0 W, VOX off, KEY Train on; first such key say
-
-## WSPR and SWR Scan (opened only at the radio)
-
-- **You:** Open WSPR, then SWR Scan, at the radio (neither opens remotely, by design); press TX next / Run when asked.
-- **The bench:** Everything after the open over the cable at 0.2-1 W: decodes, TX %, power, hop, the ATU rule, the transverter limit, sweeps, spans, band limits, refusals, the look.
-- **Your time:** 40 min
-- **Left:** 15 of 15
-
-  - [ ] `wspr-open` (app-wspr): APP > Modes > WSPR tunes the nearest WSPR dial (USB-D, WSJT-X's list), band keys step; always opens with TX % 0 (also after a power-off)
-  - [ ] `wspr-rx-decode` (app-wspr): Every RX cycle decoded at 1:54: table with UTC, band, SNR, DT, audio Hz, drift, call, grid, dBm, km; band of the cycle heard
-  - [ ] `wspr-tx-percent-next` (app-wspr): TX % (0/10/20/33/50, random cycles) and TX next (one beacon next cycle, again cancels; TX % 0 cancels a chosen one); without callsign or loc
-  - [ ] `wspr-stop-tx` (app-wspr): Stop TX (the TX next button while a beacon is on) takes it off at once, TX % 0, TX next off; closing WSPR (ESC) also stops and sets TX % 0
-  - [ ] `wspr-power` (app-wspr): WSPR's own Power (page 2): 0.1/0.2/0.5/1/2/5 W, 0.2 W default; the radio's PWR is not changed (beacon at WSPR's power, back after)
-  - [ ] `wspr-knob-offset` (app-wspr): Main knob moves the TX audio offset (1410-1590 Hz)
-  - [ ] `wspr-hop` (app-wspr): Band hopping (page 2 F5 / page 3 F4): WSJT-X's coordinated schedule by minute (:00 160m ... :18 10m), Off slots shared in turn (6 m takes Of
-  - [ ] `wspr-hop-bands-page3` (app-wspr): Page 3 band table: F2 Band, F3 Use Off/RX/RX+TX, F4 Hop, F5 Go to; columns frequency, use, slots, ATU match Stored/None
-  - [ ] `wspr-hop-atu-rule` (app-wspr): With the ATU on, an RX+TX band transmits on its hop only when an ATU match is stored for its WSPR frequency ('40m: no ATU match stored, RX o
-  - [ ] `transverter-wspr-at-limit` (app-wspr): WSPR's beacon goes out at the transverter limit when its own Power is higher, still reporting its own Power
-  - [ ] `swrscan-run-stop` (app-swrscan): SWR Scan (APP 1:6): Run sweeps a carrier (AM X6100, FM X6200) around the TX frequency (split's other VFO) and draws SWR; Stop or closing res
-  - [ ] `swrscan-x6200-sweep-mode` (app-swrscan): X6200 Sweep: Carrier (default: plain FM carrier, waits for power, 3 readings averaged, ends first then the gaps, a thin line marks the point
-  - [ ] `swrscan-span-scale` (app-swrscan): Span 50/100/200/500/1000/1500/2000/2500 kHz and Scale Log/Linear (not while scanning); 50 readings (25 with Carrier), 100 from 1000 kHz
-  - [ ] `swrscan-band-limited` (app-swrscan): The sweep stays inside the band of the band list for the IARU region (Region 1 40 m 7.000-7.200), moves inside near the HF/transverter/band/
-  - [ ] `swrscan-refusals` (app-swrscan): Run refused while transmitting or tuning ('SWR scan: not while transmitting or tuning'), out of band ('No TX on ...'), without base data; th
-
-## At the radio: knobs, lights, pairing, boot, by ear
-
-- **You:** Turn the X6200's MFK inner ring; a knob while a browser has control; look at the key lights; Pair code and Forget all (the bench pairs again after); watch one reboot from the logo; listen to the boot sound, a scan and Internet radio replacing the receiver.
-- **The bench:** Reads state and the remote's control line meanwhile.
-- **Your time:** 20 min
-- **Left:** 11 of 11
-
-  - [ ] `input-x6200-mfk-inner-ring` (input): X6200 MFK inner ring chooses the MFK's control (and moves the walk frame); outer ring changes the value without a press
-  - [ ] `control-local-takes-back` (remote): The radio's own keys and knobs always take control back ('At the radio')
-  - [ ] `settings-display-buttons-brightness` (settings-display): Buttons brightness Always Off / Always On / Temporarily On (the key lights, through the base)
-  - [ ] `pair-code-at-radio` (system): Settings > General > BROWSER REMOTE > Pair code shows a code at once and starts the waits over
-  - [ ] `sessions-forget-all` (system): Settings > General > BROWSER REMOTE > Forget all revokes every browser (and the .bak); the next pairing is the new admin
-  - [ ] `boot-picture-at-start` (system): At start the picture fades in over ~3 s from its top-left pixel's colour (transparent shows black), ending with 'CQ CQ' when the boot sound 
-  - [ ] `boot-dark-before-video` (system): Before the video the screen stays dark: no kernel logo, no U-Boot picture on the X6200
-  - [ ] `settings-audio-boot-sound` (settings-audio): Boot sound: CQ CQ in CW with the boot logo, quiet, at volume 28 when VOL is lower; off by default; none with Speaker always off
-  - [ ] `iradio-replaces-receiver` (app-iradio): While a station plays the speaker plays it in place of the receiver; the receiver comes back at Stop
-  - [ ] `scanner-quiet-while-looking` (app-scanner): The speaker is quiet while the scan looks, so there is no burst of noise at every step
-  - [ ] `digi-tx-monitor-muted` (tx): With AF volume 0 or the speaker muted (mute action, BT headphones Mute speaker, a TCI client transmitting) the TX monitor does not play the 
 
 ## Paddles and CW keyers (the ones you have)
 
@@ -437,7 +457,7 @@ From 20261125-124652-coverage (`orch.py coverage`, then `python3 facilitate.py`)
 
 No hands: over the cable between the radios (your cable word, at most 1 W), the SDRs on HOST, the HackRF into the X6200 (receive only), or nothing at all.
 
-- **cable** (112): cw 18, tx 12, app-ft8 10, app-js8 9, app-sstv 8, winlink 8, app-psk 4, web 4, settings-txcal 4, app-field-ops 4, system 3, settings-display 2, lookfeel 2, sentry-scancfg 2, radio-core 2, remote 2, app-wefax 2, app-cw-kbd 2, app-walkie 2, app-scanner 2, sentry-G 2, settings-audio 2, sentry-A 1, app-bands 1, app-propagation 1, display 1, app-iradio 1, app-rade 1
-- **rtl** (51): sentry-B 11, sdr 9, sentry-H 7, sentry-pool 4, sentry-common 4, sentry-I 3, sentry-G 3, sentry-E 3, network 2, sentry-D 1, tx 1, sentry-A 1, sentry-C 1, sentry-scancfg 1
+- **cable** (110): cw 18, tx 12, app-ft8 10, app-js8 9, winlink 8, app-sstv 8, settings-txcal 4, app-psk 4, web 4, app-field-ops 4, system 3, app-scanner 2, settings-audio 2, sentry-scancfg 2, sentry-G 2, app-walkie 2, radio-core 2, app-wefax 2, remote 2, app-cw-kbd 2, settings-display 2, app-rade 1, app-bands 1, sentry-A 1, app-propagation 1, app-iradio 1, display 1
+- **rtl** (51): sentry-B 11, sdr 9, sentry-H 7, sentry-common 4, sentry-pool 4, sentry-G 3, sentry-E 3, sentry-I 3, network 2, sentry-scancfg 1, sentry-D 1, tx 1, sentry-A 1, sentry-C 1
 - **hackrf** (4): sentry-B 3, sentry-G 1
-- **none** (302): system 31, tx 29, app-field-ops 25, settings-display 20, remote 16, display 15, web 15, settings-general 10, app-js8 9, app-cw-trainer 8, app-first-start 7, main-screen 7, sentry-common 7, tci 7, cw 6, app-walkie 5, settings-audio 5, winlink 5, app-zello 5, radio-core 5, app-channels 4, app-wefax 4, app-ft8 3, network 3, settings-info 3, sentry-C 3, sentry-G 3, sentry-F 3, app-sstv 2, app-bands 2, settings-txcal 2, app-rade 2, settings-walkie 2, input 2, app-hf-air 2, lookfeel 2, app-flights 2, sentry-I 2, app-svx 2, settings-bluetooth 2, app-birdie 1, app-cb 1, sentry-H 1, app-weather 1, settings-wireless 1, app-cw-kbd 1, sentry-E 1, sentry-scancfg 1, app-psk 1, sentry-A 1, sentry-D 1, app-wspr 1, wavelog 1, app-propagation 1, app-timesig 1
+- **none** (302): system 31, tx 29, app-field-ops 25, settings-display 20, remote 16, web 15, display 15, settings-general 10, app-js8 9, app-cw-trainer 8, sentry-common 7, app-first-start 7, main-screen 7, tci 7, cw 6, winlink 5, app-zello 5, app-walkie 5, radio-core 5, settings-audio 5, app-channels 4, app-wefax 4, sentry-G 3, network 3, sentry-C 3, app-ft8 3, settings-info 3, sentry-F 3, input 2, settings-bluetooth 2, settings-txcal 2, lookfeel 2, sentry-I 2, settings-walkie 2, app-bands 2, app-svx 2, app-hf-air 2, app-flights 2, app-sstv 2, app-rade 2, app-weather 1, sentry-scancfg 1, sentry-H 1, sentry-E 1, settings-wireless 1, sentry-A 1, app-timesig 1, app-birdie 1, sentry-D 1, app-cb 1, wavelog 1, app-psk 1, app-wspr 1, app-cw-kbd 1, app-propagation 1

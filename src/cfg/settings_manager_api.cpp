@@ -408,3 +408,19 @@ bool cfg_band_dial_put(const cfg_band_dial_t *d) {
     cfg_db_tx_unlock();
     return true;
 }
+
+bool cfg_text_get(const char *name, char *out, size_t size) {
+    ParamBase *p = cfg_sm.find(name);
+    if (!p)
+        return false;
+    snprintf(out, size, "%s", p->text().c_str());
+    return true;
+}
+
+bool cfg_text_set(const char *name, const char *value) {
+    ParamBase *p = cfg_sm.find(name);
+    if (!p)
+        return false;
+    p->set_text(value);
+    return true;
+}

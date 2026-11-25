@@ -53,7 +53,11 @@
  *  thirty). "screen 0" stops the screen frames for a client that does not show them. "set NAME
  *  VALUE" changes the radio on the LVGL thread: freq, mode, agc, pre, att, nb, nr, sql, rfg,
  *  vol, pwr (tenths of a watt), step, zoom, band (+1/-1), vfo (toggle), filter LO HI, atu, lock;
- *  one refused ("err ...") is followed by the whole state, changed or not (audit C13). "smc start|stop" runs TX Cal >
+ *  one refused ("err ...") is followed by the whole state, changed or not (audit C13). For the bench's tests: "cfg NAME
+ *  VALUE" sets any stored setting by its database name through its own validator and "cfg? NAME" reads it ("cfg NAME
+ *  VALUE" back; cfg_apply), and what the radio puts in its message box goes to every panel client as 'msg "TEXT"'
+ *  (remote_server_note); "btn NAME [hold]" presses a main-screen button by its name (button_bar.h buttons_named).
+ *  "smc start|stop" runs TX Cal >
  *  S-METER's Measure as its button, "smc put PRE,ATT,RFG" sets its three figures, "smc?" answers "smc RUN PRE ATT RFG
  *  NOTE" (the bench's front-end check: it measures, checks and puts back what it found).
  *  A panel thread reads the radio (the settings' getters are safe from any thread, as the TCI
@@ -117,6 +121,8 @@
 
 #include "band_plan.h"
 #include "cfg/cfg_api.h"
+#include "cfg/settings_manager_api.h"
+#include "button_bar.h"
 #include "cluster/client.h"
 #include "cluster/spots.h"
 #include "dialog_field.h"
@@ -1520,6 +1526,8 @@ static char        cw_new[512];     /* decoded since the last flush */
 static size_t      cw_new_len;
 static char        cw_hist[CW_HIST + 1];
 static size_t      cw_hist_len;
+static char        note_new[1024];  /* on-screen messages since the last flush, each ended by a NUL */
+static size_t      note_new_len;
 static uint32_t    boot_id;         /* this GUI run, told in "hello" */
 #define LOG_ANSWERS 64
 static struct {                     /* the last log commands' answers: id 0 is the old "log" without one */
@@ -1648,6 +1656,104 @@ void remote_server_cw_text(const char *text) {
         cw_hist_len += n;
     }
     pthread_mutex_unlock(&app_mux);
+}
+
+void remote_server_note(const char *text) {
+    size_t n = strlen(text) + 1;
+
+    pthread_mutex_lock(&app_mux);
+    if (note_new_len + n <= sizeof(note_new)) {     /* more than a kilobyte in 50 ms: the rest dropped */
+        memcpy(note_new + note_new_len, text, n);
+        note_new_len += n;
+    }
+    pthread_mutex_unlock(&app_mux);
+}
+
+/* ---- "cfg NAME VALUE", "cfg? NAME": a setting by its database name, for the bench's tests ----------------------
+ * The stored settings (cfg/settings_manager.h: "cw_parse", "key_train", "cw_decoder_snr_3", "agc_hang", "moni",
+ * "transverter_0_pwr"...: the global ones, then the current band's and mode's) and the older ones of params.h below.
+ * The set through the setting's own validator on the LVGL thread, as the Settings pages set it; the bench reads it back
+ * with "cfg? NAME" (answered "cfg NAME VALUE", or "err cfg: no NAME") and puts back what it changed. */
+typedef enum { LP_BOOL, LP_U8, LP_U16, LP_I32, LP_FLOAT, LP_STR } lp_kind_t;
+static const struct {
+    void     *p;
+    lp_kind_t kind;
+} cfg_legacy[] = {
+    {&params.js8_speed, LP_U8},          {&params.js8_rx_all, LP_BOOL},     {&params.js8_alerts, LP_U8},
+    {&params.js8_log_prompt, LP_BOOL},   {&params.js8_log_activation, LP_U8}, {&params.js8_auto, LP_BOOL},
+    {&params.js8_ghostnet, LP_BOOL},     {&params.js8_hb, LP_BOOL},         {&params.js8_tx_freq, LP_U16},
+    {&params.ft8_tx_freq, LP_U16},       {&params.ft8_cq_modifier, LP_STR}, {&params.sstv_denoise, LP_BOOL},
+    {&params.sstv_reply_rx, LP_BOOL},    {&params.sstv_tx_mode, LP_U8},     {&params.mag_alc, LP_BOOL},
+    {&params.screen_saver, LP_U8},       {&params.screen_saver_min, LP_U16}, {&params.cw_bcn_start, LP_I32},
+    {&params.cw_bcn_until, LP_U8},       {&params.cw_bcn_sends, LP_U16},    {&params.cw_bcn_end, LP_I32},
+    {&params.qth, LP_STR},               {&params.callsign, LP_STR},
+};
+
+static int cfg_legacy_find(const char *name) {
+    for (size_t i = 0; i < sizeof(cfg_legacy) / sizeof(cfg_legacy[0]); i++) {
+        if (!strcmp(((params_bool_t *)cfg_legacy[i].p)->name, name))     /* each type's name comes first */
+            return (int)i;
+    }
+    return -1;
+}
+
+static bool cfg_value(const char *name, char *out, size_t n) {
+    if (cfg_text_get(name, out, n))
+        return true;
+    int i = cfg_legacy_find(name);
+    if (i < 0)
+        return false;
+    void *p = cfg_legacy[i].p;
+    switch (cfg_legacy[i].kind) {
+        case LP_BOOL:  snprintf(out, n, "%d", ((params_bool_t *)p)->x); break;
+        case LP_U8:    snprintf(out, n, "%u", ((params_uint8_t *)p)->x); break;
+        case LP_U16:   snprintf(out, n, "%u", ((params_uint16_t *)p)->x); break;
+        case LP_I32:   snprintf(out, n, "%d", (int)((params_int32_t *)p)->x); break;
+        case LP_FLOAT: snprintf(out, n, "%g", ((params_float_t *)p)->x); break;
+        case LP_STR:   snprintf(out, n, "%s", ((params_str_t *)p)->x); break;
+    }
+    return true;
+}
+
+typedef struct {
+    char name[48];
+    char value[96];
+} cfg_put_t;
+
+static void cfg_apply(void *arg) {
+    const cfg_put_t *q = arg;
+
+    if (cfg_text_set(q->name, q->value))
+        return;
+    int i = cfg_legacy_find(q->name);
+    if (i < 0)
+        return;
+    void *p = cfg_legacy[i].p;
+    long  v = strtol(q->value, NULL, 10);
+    switch (cfg_legacy[i].kind) {
+        case LP_BOOL:  params_bool_set(p, v != 0); break;
+        case LP_U8: {
+            params_uint8_t *u = p;
+            if (u->max > u->min)
+                v = LV_CLAMP(u->min, v, u->max);
+            params_uint8_set(u, (uint8_t)LV_CLAMP(0, v, 255));
+            break;
+        }
+        case LP_U16:   params_uint16_set(p, (uint16_t)LV_CLAMP(0, v, 65535)); break;
+        case LP_I32:   params_int32_set(p, (int32_t)v); break;
+        case LP_FLOAT: params_float_set(p, strtof(q->value, NULL)); break;
+        case LP_STR:   params_str_set(p, q->value); break;
+    }
+}
+
+typedef struct {
+    char name[32];
+    bool hold;
+} btn_put_t;
+
+static void btn_apply(void *arg) {
+    const btn_put_t *q = arg;
+    buttons_press_named(q->name, q->hold);
 }
 
 /* The JS8 messages kept for a page that opens later, ours too. A message still coming in has one place, written
@@ -1783,6 +1889,22 @@ static void panel_cw_flush(void) {
     size_t k = snprintf(line, sizeof(line), "cw ");
     json_str(line + k, sizeof(line) - k, text);
     panel_broadcast(line);
+}
+
+/* New on-screen messages to everyone, from the panel thread: one 'msg "TEXT"' line each */
+static void panel_note_flush(void) {
+    char notes[sizeof(note_new)], line[1100];
+
+    pthread_mutex_lock(&app_mux);
+    size_t n = note_new_len;
+    memcpy(notes, note_new, n);
+    note_new_len = 0;
+    pthread_mutex_unlock(&app_mux);
+    for (size_t at = 0; at < n; at += strlen(notes + at) + 1) {
+        size_t k = snprintf(line, sizeof(line), "msg ");
+        json_str(line + k, sizeof(line) - k, notes + at);
+        panel_broadcast(line);
+    }
 }
 
 static void ft8_status_line(char *buf, size_t n, const ft8_status_t *s) {
@@ -2301,6 +2423,7 @@ static void *panel_thread(void *arg) {
                 panel_broadcast(jline);
             }
             panel_cw_flush();
+            panel_note_flush();
             log_flush();
         }
         usleep(20000);
@@ -2652,6 +2775,54 @@ static void handle_text(client_t *c, char *text) {
         snprintf(q.text, sizeof(q.text), "%s", text[6] ? text + 7 : "");
         atomic_store(&banner_by, q.text[0] ? (int)(c - clients) : -1);
         scheduler_put(app_apply, &q, sizeof(q));
+        return;
+    }
+    if (!strncmp(text, "btn ", 4)) {        /* "btn NAME [hold]": a main-screen button by its name (the bench's) */
+        btn_put_t   q = {0};
+        const char *sp = strchr(text + 4, ' ');
+        size_t      len = sp ? (size_t)(sp - (text + 4)) : strlen(text + 4);
+        if (!allowed(c, ROLE_OPERATE, true))
+            return;
+        if (len >= sizeof(q.name)) {
+            client_text(c, "err btn: no such button");
+            return;
+        }
+        memcpy(q.name, text + 4, len);
+        q.hold = sp && !strcmp(sp + 1, "hold");
+        if (!buttons_named(q.name)) {
+            client_textf(c, "err btn: no %s", q.name);
+            return;
+        }
+        scheduler_put(btn_apply, &q, sizeof(q));
+        return;
+    }
+    if (!strncmp(text, "cfg? ", 5)) {       /* a setting by its name (the bench's): reading it touches nothing */
+        char value[96];
+        if (!allowed(c, ROLE_OPERATE, false))
+            return;
+        if (cfg_value(text + 5, value, sizeof(value)))
+            client_textf(c, "cfg %s %s", text + 5, value);
+        else
+            client_textf(c, "err cfg: no %s", text + 5);
+        return;
+    }
+    if (!strncmp(text, "cfg ", 4)) {        /* "cfg NAME VALUE": the value as it is (a string may have spaces) */
+        cfg_put_t   q = {0};
+        const char *sp = strchr(text + 4, ' ');
+        char        value[96];
+        if (!allowed(c, ROLE_OPERATE, true))
+            return;
+        if (!sp || sp - (text + 4) >= (long)sizeof(q.name)) {
+            client_text(c, "err cfg: cfg NAME VALUE");
+            return;
+        }
+        memcpy(q.name, text + 4, sp - (text + 4));
+        snprintf(q.value, sizeof(q.value), "%s", sp + 1);
+        if (!cfg_value(q.name, value, sizeof(value))) {
+            client_textf(c, "err cfg: no %s", q.name);
+            return;
+        }
+        scheduler_put(cfg_apply, &q, sizeof(q));
         return;
     }
     if (!strncmp(text, "js8 send ", 9)) {   /* the message as it is: it has spaces */

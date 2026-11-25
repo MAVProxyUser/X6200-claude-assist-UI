@@ -159,6 +159,8 @@ class Radio:
         self.last_msg = time.time()
         self.freqs = set()          # every dial it reported since snapshot(): the bands a test tuned it into
         self.cw = ""                # the CW decoder's text since the session began (the remote's "cw" lines)
+        self.msgs = []              # [(when, text)]: what the radio put in its message box (the remote's "msg" lines)
+        self.cfgv = {}              # {name: value}: the settings the remote's "cfg? NAME" answered
         self.lines = collections.deque(maxlen=600)     # every text the radio sent, with when: the suite's protocol tests
         self.r.send(f"auth {tok}")
         self.r.send("panel 1")
@@ -233,6 +235,14 @@ class Radio:
                 elif k == "cw":
                     try:
                         self.cw += json.loads(rest)
+                    except ValueError:
+                        pass
+                elif k == "cfg":
+                    name, _, val = rest.partition(" ")
+                    self.cfgv[name] = val
+                elif k == "msg":
+                    try:
+                        self.msgs.append((self.last_msg, json.loads(rest)))
                     except ValueError:
                         pass
 
@@ -919,6 +929,29 @@ def _arm(r, on, mode=None):
 
 G_FIRST_HZ = 27185000           # the Sentry G's own channel the first time (CB 19)
 G_ENTRY_S = 3.0                 # G's entry tune comes within this of the page saying G
+
+
+def cfg_get(r, name, timeout=4.0):
+    """A setting by its database name (the remote's "cfg? NAME"), as text"""
+    r.cfgv.pop(name, None)
+    r.send(f"cfg? {name}")
+    r.wait(f"the setting {name}", lambda: name in r.cfgv, timeout)
+    return r.cfgv[name]
+
+
+def cfg_set(r, name, value, timeout=4.0):
+    """A setting by its database name set (the remote's "cfg NAME VALUE", through its validator on the radio) and read
+    back; returns (as it was, as it is now)"""
+    was = cfg_get(r, name, timeout)
+    r.send(f"cfg {name} {value}")
+    end = time.time() + timeout
+    now = was
+    while time.time() < end:
+        now = cfg_get(r, name, timeout)
+        if now != was or str(value) == now:
+            break
+        time.sleep(0.2)
+    return was, now
 
 
 def open_page(r, letter):

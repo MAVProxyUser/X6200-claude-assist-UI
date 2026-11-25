@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstring>
+
 // SettingsManager: orchestrator that owns the global/band/mode parameters and
 // the deferred-write queue (PendingWrites), and implements band/mode switching
 // semantics.
@@ -1149,6 +1151,32 @@ class SettingsManager {
 
     // The TX shift of the current band, Hz (Settings, the web Bands page): split comes on with a shift, off with 0
     void tx_shift_set(int32_t hz);
+
+    // A stored setting by its database name ("cw_parse", "key_train"): the global ones, then the current band's and
+    // mode's, and the transverters' as "transverter_N_from|to|shift|pwr_max"; nullptr when none. For the bench's
+    // remote (cfg_text_get / cfg_text_set)
+    ParamBase *find(const char *name) {
+        struct {
+            const char *name;
+            ParamBase  *p;
+        } xv[] = {
+            {"transverter_0_from", &p_transverter_0_from}, {"transverter_0_to", &p_transverter_0_to},
+            {"transverter_0_shift", &p_transverter_0_shift}, {"transverter_0_pwr_max", &p_transverter_0_pwr},
+            {"transverter_1_from", &p_transverter_1_from}, {"transverter_1_to", &p_transverter_1_to},
+            {"transverter_1_shift", &p_transverter_1_shift}, {"transverter_1_pwr_max", &p_transverter_1_pwr},
+        };
+        for (const auto &x : xv) {
+            if (!strcmp(x.name, name))
+                return x.p;
+        }
+        for (const auto *group : {&global_params_, &band_params_, &mode_params_}) {
+            for (ParamBase *p : *group) {
+                if (!strcmp(p->db_name(), name))
+                    return p;
+            }
+        }
+        return nullptr;
+    }
 
     // Transverter shift for a frequency: the shift of the transverter whose
     // [from, to] range contains `freq`, or 0 when no transverter covers it.

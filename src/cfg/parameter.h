@@ -3,6 +3,8 @@
 #include <cmath>
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <string>
 #include <type_traits>
@@ -63,6 +65,10 @@ class ParamBase {
     virtual int         context_id() const             = 0;
     virtual StorageType storage_type() const           = 0;
     virtual const char *db_name() const                = 0;
+    // The value as text, and set from text through the validator: the bench's remote ("cfg NAME VALUE", "cfg? NAME",
+    // remote_server.c). The set on the LVGL thread, as every other
+    virtual std::string text() const { return {}; }
+    virtual void        set_text(const char *) {}
 };
 
 // Deferred-write sink injected by type. PendingWrites implements it;
@@ -123,6 +129,28 @@ class Parameter : public SubjectT<ValueType>, public ParamBase {
 
     const char *db_name() const override { return db_name_; }
     StorageType storage_type() const override { return storage_; }
+
+    std::string text() const override {
+        const ValueType v = SubjectT<ValueType>::get();
+        if constexpr (std::is_same_v<ValueType, std::string>) {
+            return v;
+        } else if constexpr (std::is_floating_point_v<ValueType>) {
+            char b[32];
+            snprintf(b, sizeof(b), "%g", (double)v);
+            return b;
+        } else {
+            return std::to_string((long long)v);
+        }
+    }
+    void set_text(const char *s) override {
+        if constexpr (std::is_same_v<ValueType, std::string>) {
+            set(std::string(s));
+        } else if constexpr (std::is_floating_point_v<ValueType>) {
+            set((ValueType)strtod(s, nullptr));
+        } else {
+            set((ValueType)strtoll(s, nullptr, 10));
+        }
+    }
 
     // Context (band_id for BAND, mode_id for MODE) bound to this parameter and
     // used when enqueuing deferred writes. GLOBAL parameters ignore it.

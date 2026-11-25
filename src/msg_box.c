@@ -15,6 +15,7 @@
 #include "util.h"
 #include "gui_events.h"
 #include "voice.h"
+#include "remote_server.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -102,6 +103,7 @@ static void post(bool queued, uint16_t ms, const char *fmt, va_list ap) {
     note_t *note = malloc(sizeof(note_t));
 
     vsnprintf(note->text, sizeof(note->text), i18n_tr(fmt), ap);   /* the language's, its conversions checked as read */
+    remote_server_note(note->text);         /* the bench's remote session reads what the radio said */
     note->queued = queued;
     note->ms = ms;
     note->quiet = voice_msg_held();

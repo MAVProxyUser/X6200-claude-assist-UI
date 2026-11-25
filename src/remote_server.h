@@ -52,6 +52,10 @@ void remote_flush(const lv_area_t *area, const lv_color_t *color_p);
 void remote_server_ft8_row(const void *cell);
 void remote_server_cw_text(const char *text);
 
+/* An on-screen message (msg_box.c, any thread) to the panel clients as 'msg "TEXT"': what the radio said, read by
+ * the bench's tests ("QRSS3 stopped: tuned away", "TX 0 W: level ...") */
+void remote_server_note(const char *text);
+
 /* For the WeFax page: a row of the picture coming in (LVGL thread), to the pages that asked ("wefax rows 1");
  * number counts the picture's rows from 1, a new picture starts at 1 again */
 void remote_server_wefax_row(const uint8_t *row, unsigned width, uint32_t number);

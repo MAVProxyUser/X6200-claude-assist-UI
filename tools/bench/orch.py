@@ -6158,6 +6158,12 @@ TESTS = [
          lambda o: ptt_refused(o, B, A, 15000000, True, "ptt-out-of-band x6200"), 12),
 ]
 
+# The cable's features that had no test yet (orch_cable.py, 2026-11-25): their tests, and what each covers
+import orch_cable as _oc                    # noqa: E402
+_oc.H = sys.modules[__name__]
+TESTS += _oc.tests(Test, A, B)
+ORCH_COVERS.update(_oc.COVERS)
+
 
 def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, sql=None):
     kept = store_load()

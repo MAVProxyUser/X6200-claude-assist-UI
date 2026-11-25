@@ -1354,3 +1354,34 @@ static void set_btn_text(disp_btn_t *b, const char *text) {
     if (!img) img = theme_image(TI_btn, btn_w(b), btn_h(b));
     if (img) lv_obj_set_style_bg_img_src(b->parent, img, 0);
 }
+
+/* The bench's remote: a few main-screen buttons by name (button_bar.h) */
+static button_data_t *named_button(const char *name) {
+    static const struct {
+        const char    *name;
+        button_data_t *b;
+    } named[] = {
+        {"cw_zap", &btn_cw_zap},         {"cw_log", &btn_cw_log},       {"cw_peak", &btn_cw_peak},
+        {"cw_peak_q", &btn_cw_peak_q},   {"cw_decoder", &btn_cw_decoder}, {"cw_tuner", &btn_cw_tuner},
+        {"cw_snr", &btn_cw_snr},         {"cw_parse", &btn_cw_parse},   {"key_train", &btn_key_train},
+        {"key_mode", &btn_key_mode},
+    };
+    for (const auto &x : named) {
+        if (!strcmp(x.name, name))
+            return x.b;
+    }
+    return NULL;
+}
+
+bool buttons_named(const char *name) {
+    return named_button(name) != NULL;
+}
+
+bool buttons_press_named(const char *name, bool hold) {
+    button_data_t *b = named_button(name);
+    void (*fn)(button_data_t *) = !b ? NULL : hold ? buttons_hold_fn(b) : b->press;
+    if (!fn)
+        return false;
+    fn(b);
+    return true;
+}

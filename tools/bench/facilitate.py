@@ -61,11 +61,18 @@ SESSIONS = [
     ("ok-public-posts", "Public posts under your callsign (your yes for each)",
      "Each of these publishes on the internet under your call: say which (if any) to post. Their first press "
      "(what would be posted, nothing sent) the bench checks without asking.",
-     "POTA self-spot and re-spots, the DX cluster spot, FreeDV Reporter, WSPRnet upload, PSK Reporter (off on "
-     "both radios while they carry test calls).",
+     "POTA self-spot and re-spots, the DX cluster spot, FreeDV Reporter, WSPRnet upload. (PSK Reporter is the "
+     "bench's own: its report caught on the radio, report.pskreporter.info pointed at itself, nothing sent.)",
      "a few minutes each, while you are really on the air",
      ["field-pota-spot-two-press", "field-pota-auto-spots", "field-spot-dx-cluster", "rade-freedv-reporter",
-      "wspr-upload", "settings-cluster-psk-reporter", "pskreporter-upload"]),
+      "wspr-upload"]),
+    ("bench-pskreporter", "PSK Reporter, caught on the radio (the bench alone)",
+     "Nothing: no report leaves the radio.",
+     "Points report.pskreporter.info at the radio itself for the test (a hosts entry, removed after), turns Report "
+     "decodes on with the test calls, has the other radio send FT8 over the cable, and decodes the IPFIX report "
+     "caught: receiver call and locator, the sender's call, frequency, SNR, mode.",
+     "none",
+     ["pskreporter-upload", "settings-cluster-psk-reporter"]),
     ("acct-zello", "Zello (your account and a test channel)",
      "Type a Zello account and a channel only you use into the radio's web Zello page; talk into the hand mic "
      "once.",
@@ -125,15 +132,19 @@ SESSIONS = [
      "15 min",
      ["btgps-gpsd-bridge", "btgps-reconnect-backoff", "btgps-ctl", "main-screen-status-gps-icon", "gps-panel",
       "df-gpsd-heading", "gps-title-tag", "settings-bluetooth-gps", "gps-reconnect", "web-df-gps"]),
-    ("hand-mic", "The hand mics (H-22 on the X6200, the X6100's)",
-     "Press the mic keys the bench names; record a CQ, a RADE over and a voice message; speak for VOX; key the "
-     "hand mic once outside the bands.",
-     "Reads state after each key; plays the recordings over the cable at 0.1 W to the other radio.",
+    ("hand-mic", "The hand mics plugged in (nothing pressed)",
+     "Plug the H-22 into the X6200 and the X6100's mic into the X6100; nothing to press or say.",
+     "Records from them (the room's sound is enough: a recording is made, none without the mic), plays the "
+     "recordings over the cable at 0.1 W: Rec CQ, RADE's Rec and Send, voice messages.",
+     "2 min",
+     ["field-rec-cq", "rade-rec", "rade-send", "voice-msg-hand-mic-only", "voice-msg-record-hand-mic"]),
+    ("hand-mic-keys", "The hand mics' keys and voice",
+     "Press the mic keys the bench names; speak for VOX; key the hand mic once outside the bands.",
+     "Reads state after each key.",
      "25 min",
      ["input-handmic-band-digits", "input-handmic-frequency-box", "input-handmic-f-keys",
       "input-handmic-up-down-channels", "input-handmic-mode-vm", "input-handmic-h22-vol-ab",
-      "input-handmic-x6100-keys", "channels-hand-mic-keys", "field-rec-cq", "rade-rec", "rade-send",
-      "voice-msg-hand-mic-only", "voice-msg-record-hand-mic", "settings-audio-vox", "tx-base-hold-outside"]),
+      "input-handmic-x6100-keys", "channels-hand-mic-keys", "settings-audio-vox", "tx-base-hold-outside"]),
     ("at-radio-apps", "WSPR and SWR Scan (opened only at the radio)",
      "Open WSPR, then SWR Scan, at the radio (neither opens remotely, by design); press TX next / Run when asked.",
      "Everything after the open over the cable at 0.2-1 W: decodes, TX %, power, hop, the ATU rule, the "
@@ -141,7 +152,8 @@ SESSIONS = [
      "40 min",
      ["wspr-open", "wspr-rx-decode", "wspr-tx-percent-next", "wspr-stop-tx", "wspr-power", "wspr-knob-offset",
       "wspr-hop", "wspr-hop-bands-page3", "wspr-hop-atu-rule", "transverter-wspr-at-limit", "swrscan-run-stop",
-      "swrscan-x6200-sweep-mode", "swrscan-span-scale", "swrscan-band-limited", "swrscan-refusals"]),
+      "swrscan-x6200-sweep-mode", "swrscan-span-scale", "swrscan-band-limited", "swrscan-refusals",
+      "lookfeel-screen-wspr", "lookfeel-screen-swr-scan"]),
     ("at-radio-look", "At the radio: knobs, lights, pairing, boot, by ear",
      "Turn the X6200's MFK inner ring; a knob while a browser has control; look at the key lights; Pair code and "
      "Forget all (the bench pairs again after); watch one reboot from the logo; listen to the boot sound, a scan "
@@ -207,6 +219,12 @@ SESSIONS = [
 ]
 
 
+# Not now (the owner, 2026-11-25): no accounts for any of these services ("hard omit them as a maybe later thing"), the
+# gear later, the hand mics plugged in but never pressed
+LATER = {"acct-zello", "acct-svx", "acct-logs", "acct-tailscale", "hand-mic-keys", "keys-paddles", "power",
+         "cards-firmware", "network", "rf-loads", "sdr-hands"}
+
+
 def latest_coverage():
     runs = sorted(glob.glob(os.path.expanduser("~/.config/x6x00-bench/runs/*-coverage/coverage.md")))
     if not runs:
@@ -242,8 +260,12 @@ def main():
              f"From {os.path.basename(os.path.dirname(src)) if src else 'no coverage run'} (`orch.py coverage`, "
              f"then `python3 facilitate.py`). {len(owner_nc)} features still wait on you: internet services, Bluetooth, "
              f"GPS or your hands. Each session says what you do and what the bench does; a ticked line is covered.", ""]
-    for key, title, you, me, how_long, ids in SESSIONS:
+    later_said = False
+    for key, title, you, me, how_long, ids in sorted(SESSIONS, key=lambda x: x[0] in LATER):
         left = [fid for fid in ids if fid in nc]
+        if key in LATER and not later_said:
+            later_said = True
+            lines += ["# Later (the owner, 2026-11-25: no accounts for these services; the gear, the mic keys later)", ""]
         lines += [f"## {title}", "", f"- **You:** {you}", f"- **The bench:** {me}", f"- **Your time:** {how_long}",
                   f"- **Left:** {len(left)} of {len(ids)}", ""]
         for fid in ids:

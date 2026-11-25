@@ -197,6 +197,11 @@ bool cfg_freq_step_at_end(bool up);
 // The tuning step as the radio writes it: in Hz up to 5000 Hz, as it always did, then in kHz ("25 kHz")
 const char *cfg_freq_step_text(int32_t step, char *buf, size_t size);
 
+/* A stored setting by its database name, as text (the bench's remote: "cfg? NAME", "cfg NAME VALUE"): false when no
+ * setting has that name. The get from any thread, the set on the LVGL thread (through the setting's validator) */
+bool cfg_text_get(const char *name, char *out, size_t size);
+bool cfg_text_set(const char *name, const char *value);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

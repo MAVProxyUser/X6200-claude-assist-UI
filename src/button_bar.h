@@ -113,6 +113,11 @@ buttons_page_t *buttons_page_before(const button_data_t *data);
 void          (*buttons_hold_fn(const button_data_t *data))(button_data_t *);
 /* The press of F1-F5, or its hold */
 void            buttons_press(uint8_t n, bool hold);
+/* The bench's remote ("btn NAME [hold]", remote_server.c): a main-screen button pressed or held by its name, as its F-key
+ * does while its page is shown (cw_zap, cw_log, cw_peak, cw_peak_q, cw_decoder, cw_tuner, cw_snr, cw_parse, key_train,
+ * key_mode). buttons_named: the name is one; buttons_press_named on the LVGL thread, false when it does nothing */
+bool            buttons_named(const char *name);
+bool            buttons_press_named(const char *name, bool hold);
 void            buttons_load_page_group(buttons_group_t group);
 /* One of the group's pages is the one loaded (also while Hide buttons hides it) */
 bool            buttons_group_shown(buttons_group_t group);
