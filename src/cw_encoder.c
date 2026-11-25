@@ -20,7 +20,6 @@
 
 #include "lvgl/lvgl.h"
 #include <ctype.h>
-#include <stdio.h>               /* the keyer's late edges, in the log */
 #include <unistd.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -466,8 +465,9 @@ static void * endecode_thread(void *arg) {
     radio_set_morse_key(false);
     hold_tx(world_space_nsec, false);
     if (edges_n) {      /* what the keyer did, for what the air shows to be set against (orch's cw-timing) */
-        fprintf(stderr, "cw_encoder: %d key edges, %d more than %d ms late on their time, the latest %ld ms\n",
-                edges_n, late_n, KEYER_LATE_MS, late_worst);
+        /* through the GUI's log, as the other threads write it: an unbuffered stderr line landed inside its lines */
+        LV_LOG_USER("cw_encoder: %d key edges, %d more than %d ms late on their time, the latest %ld ms", edges_n,
+                    late_n, KEYER_LATE_MS, late_worst);
     }
     if (qrss) {
         radio_set_morse_key_limit(0);
