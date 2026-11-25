@@ -4601,10 +4601,11 @@ def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.
                         f"; none {SPUR_HZ} Hz off over {SPUR_MAX_DBC} dBc")), {"rows": rows}
 
 
-def ft8_tci_copy_test(o, sender, listener, hz=1500):
+def ft8_tci_copy_test(o, sender, listener, hz=1500, app=False):
     """The FT8 app's copies 156 Hz either side, the same message sent through TCI instead (gen_ft8 here, 24 kHz, the
     sender's TCI): whether the X6200's skirt is the waveform through its base (here too) or the app's way out (not
-    here: its TCI tone has none, 2026-11-25). Said, not judged"""
+    here: its TCI tone has none, 2026-11-25). app: the sender's FT8 app open meanwhile (its waterfall, decoder and
+    capture running: whether that is what disturbs its audio). Said, not judged"""
     import subprocess
     import digimodes
     import suite_air_b as ab
@@ -4634,19 +4635,46 @@ def ft8_tci_copy_test(o, sender, listener, hz=1500):
             time.sleep(1.0)
             res["x"] = tci.audio(t0, time.time())[0]
             st_.confirm(f"{len(res['x']) / 24000:.1f} s of audio")
+    steps = None
     try:
-        over(o, sender, listener, ab.FT_DIAL["FT8"], 3, f"FT8 over TCI {sender}", body, agc=3)
+        if app:
+            with o.step(f"{sender}'s FT8 app open on its dial, Auto off, {listener} set as it") as st_:
+                want, checks = bench.rx_profile(ab.FT_DIAL["FT8"], 3, pre=0, att=0, rfg=100, agc=3, sql=0,
+                                                filt=(100, 3000))
+                o.both(dict(want, pwr=W, atu=0, xit=0, rit=0, split=0), checks)
+                o.changing += 1
+                try:
+                    steps = ab.ft8_open(S, "FT8")
+                finally:
+                    o.changing -= 1
+                ab.ft8_set(S, "auto", False)
+                bench.pair_align(L, S)
+                st_.confirm(f"{S.state.get('app')} on {S.state.get('freq')}")
+        over(o, sender, listener, ab.FT_DIAL["FT8"], 3, f"FT8 over TCI {sender}", body, agc=3 if not app else 0,
+             pages=not app)
     except Refused as e:
         return False, str(e), {}
     finally:
         tci.close()
         subprocess.run(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}", "rm -f /tmp/bench_ft8.raw"],
                        capture_output=True, timeout=20)
+        if steps is not None:
+            o.changing += 1
+            try:
+                with bench.transition():
+                    ab.ft8_close(S, steps)
+                    bench.close_apps(S)
+                    bench.sync_pair([L, S], {"freq": int(L.state.get("freq") or ab.FT_DIAL["FT8"]),
+                                             "mode": int(L.state.get("mode", 3))})
+            except Refused as e:
+                o.st.ev(f"{sender}'s FT8 app not closed as found: {e}", "bad")
+            finally:
+                o.changing -= 1
     c = ab.ft8_copies(res.get("x"), hz)
     if c is None:
         return False, "no audio", {}
     c["wav"] = save_wav(o, res["x"], f"ft8_tci_{sender}_to_{listener}.wav")
-    return None, (f"{sender}'s FT8 message through its TCI in {listener}'s audio at {c['hz']} Hz: {SPUR_HZ} Hz below "
+    return None, (f"{sender}'s FT8 message through its TCI{' (its FT8 app open)' if app else ''} in {listener}'s audio at {c['hz']} Hz: {SPUR_HZ} Hz below "
                   f"{c['below_dbc']} dBc, above {c['above_dbc']} dBc, 400 Hz above (noise) {c['noise_dbc']} dBc: said, "
                   f"not judged"), c
 
@@ -5433,6 +5461,9 @@ TESTS = [
     Test("ft8-copies x6200 tci", "X6200 TX, X6100 RX", "the same FT8 message through the X6200's TCI (made here): whether "
          "its skirt is the FT8 waveform through its base or the app's way out (said)",
          lambda o: ft8_tci_copy_test(o, B, A), 90),
+    Test("ft8-copies x6200 tci app", "X6200 TX, X6100 RX", "ft8-copies x6200 tci with its FT8 app open meanwhile: "
+         "whether the app's waterfall, decoder and capture are what disturb its audio (said)",
+         lambda o: ft8_tci_copy_test(o, B, A, app=True), 120),
     Test("ft8-copies x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's FT8 app's CQs in the X6200's "
          "audio", lambda o: ft8_copy_test(o, A, B), 150),
     Test("cw-timing x6100", "X6100 TX, X6200 RX", "the X6100's CW keyer as it reaches the air: PARIS x4 at 20 WPM through "

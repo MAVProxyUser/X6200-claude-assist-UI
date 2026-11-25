@@ -64,9 +64,10 @@ Done 2026-11-25 night (the same asks, continued):
   then and at times runs two elements together (said, not judged; cw-timing x6100 / x6200 / x6100 1w measure it, the
   keyer's own log tells whose a fault is). The X6200 keys within 7 ms.
 - The X6200's 0.1 W skirt is the apps' way out, not its base: the same FT8 through TCI is clean, the app's overs carry
-  10-13 % AM noise and 5-7 Hz FM jitter (orch: ft8-copies x6200 tci, skirt x6200 levels). TCI's 100 ms stream for the
-  apps broke their TX (reverted at once). NEXT: a TX stream sized for tx_player's 2048-sample blocks (tlength ~400 ms,
-  prebuf ~200), tested on ft8-copies x6200 before anything else.
+  10-13 % AM noise and 5-7 Hz FM jitter (orch: ft8-copies x6200 tci / tci app, skirt x6200 levels). Ruled out, each
+  measured: the waveform, the level, the play stream (a 300 ms TX stream of its own: no change, reverted), the app's
+  load, the VFO move. NEXT: diff what tx_player does around the over against TCI's tx_hold on the X6200 (the meters'
+  reads, the codec's level writes, the keepalive's register block with the moved VFO), one at a time.
 - comp through the mic (orch comp-mic x6100): the X6100's factory base does not compress at 4:1 (MANUAL). The X6200's
   capture holds no monitor of its over: its Comp needs a third sound source (this computer's speaker by its mic, with
   the X6100 receiving) or a third receiver. power-loop's X6200 figure: measured (Xiegu's loop, said).
