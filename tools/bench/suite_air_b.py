@@ -845,13 +845,34 @@ def t_cw_copy(run):
             digimodes.write_raw(xa, os.path.join(o.run.dir, f"cw_copy_{snd.name}_to_{lis.name}.raw"))
         except (ImportError, OSError, ValueError):
             pass
+        # whose a misread is (cw_timing.py): the keyer late on its deadline is the GUI's (a fail); the keyer on time and
+        # the carrier not, on an X6100 with Xiegu's factory base, is that base's keying (said, not judged: 2026-11-25,
+        # its carrier ran on 30-80 ms after the key went up now and then); clean keying misread is the decoder's
+        whose = ""
+        if not ok and not w.why and len(xa) > 24000:
+            import cw_timing as ct
+            import suite_air_a as aa
+            fw, _ = peak(xa, kt or 700, 120)
+            tj = ct.judge(ct.cw_elements(xa, 24000, fw or kt or 700)[0], ct.cw_ideal(text), 1200.0 / wpm)
+            keyer = ct.keyer_said(lambda h, c: sh(h, c, 15), snd.host)
+            base = aa.base_of(snd.host) if snd.name == "x6100" else ""
+            if keyer is not None and keyer[1]:
+                whose = f"; the keyer itself late ({keyer[1]} of {keyer[0]} edges over 15 ms): the GUI's"
+            elif ct.clean(tj):
+                whose = f"; the air as keyed ({ct.words(tj)}): the decoder misread clean keying"
+            elif snd.name == "x6100" and aa.gcfix_of(base) == 0 and keyer is not None:
+                ok = None
+                whose = (f"; the keyer on time ({keyer[0]} edges, the latest {keyer[2]} ms), the air not "
+                         f"({ct.words(tj)}): {snd.name}'s base, Xiegu's {base or 'factory'} (said, not judged)")
+            else:
+                whose = f"; the air: {ct.words(tj)}"
         o.res("cw-letters", ok, f"{snd.name} keyed {text!r} at {wpm} WPM ({secs:.1f} s, its meter "
                                 f"{w.tx_peak.get(snd.name)} W); {lis.name}'s decoder: {got[-90:]!r}: of the six "
                                 f"letters {''.join(letters) or 'none'}, <?> {got.count('<?>')} times, Q1TST "
                                 f"{'copied' if 'Q1TST' in got.upper() else 'NOT copied'}; heard "
                                 f"{w.heard_db.get(snd.name)} dB over its quiet (CH is a sign the keyer cannot send: "
                                 f"its typed CH goes as C and H); its TCI audio read here element by element: "
-                                f"{els!r} ({el_words}); {shots_words(w)}{stop}")
+                                f"{els!r} ({el_words}){whose}; {shots_words(w)}{stop}")
         # the station on L's dial: L's own spectrum frames during the over, and its TCI audio at its key tone
         a0, a1 = t_on + 1.5, t_off - 0.5
         x, _ = tci.audio(a0, a1)

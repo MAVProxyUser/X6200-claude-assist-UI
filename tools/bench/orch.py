@@ -4586,6 +4586,79 @@ def ft8_copy_test(o, sender, listener, txfs=(1325, 1500, 2000), w=W, judge=True)
                      f"{said}" + (f"; a copy over {SPUR_MAX_DBC} dBc from TX Hz {bad}" if bad else "")), {"rows": rows}
 
 
+CW_TIMING_TEXT = "PARIS PARIS PARIS PARIS"
+
+
+def _num(v, spec=".0f"):
+    """v as spec, "-" for None"""
+    return "-" if v is None else format(v, spec)
+
+
+def cw_timing_test(o, sender, listener, w=W):
+    """The sender's keyer's timing as it reaches the air: CW_TIMING_TEXT keyed through its TCI at 20 WPM (its KEY Speed
+    with TCI's speed steps), the listener's audio read element by element and set against the text (cw_timing.py):
+    none merged or lost, each mark and gap within 25 ms of its kind's median. The keyer's own account (its GUI's log)
+    tells whose an error is: an edge late on its deadline is the GUI's, and fails; with the keyer on time an X6100 on
+    Xiegu's factory base is said, not judged (2026-11-25: its base let the carrier run on 30-80 ms after the key went
+    up now and then, the keyer's 112 edges within 2 ms; its keyer's sleeps cut short by a signal before, fixed)"""
+    import subprocess
+    import cw_timing as ct
+    import suite_air_a as aa
+    import suite_air_b as ab
+    from tones import TciRx, peak, FS as TFS
+    S, L = o.r[sender], o.r[listener]
+    res = {}
+    text, wpm, secs = ab.cw_speedup(CW_TIMING_TEXT, ab.key_wpm(S.host), most=14.0)
+    tci = TciRx(L.host)
+
+    def body(watch):
+        with o.step(f"{sender} keys {text!r} ({wpm} WPM, {secs:.1f} s), {listener} records its audio") as s:
+            run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_cw_tx.py"),
+                    f"root@{S.host}:/tmp/tci_cw_tx.py"])
+            t0 = time.time()
+            proc = subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
+                                     f"python3 /tmp/tci_cw_tx.py '{text}' {secs + 6:.0f}"], stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+            while proc.poll() is None:
+                if watch.why:
+                    S.stop()
+                    raise Refused(watch.why)
+                time.sleep(0.05)
+            time.sleep(1.0)
+            res["x"] = tci.audio(t0, time.time())[0]
+            s.confirm(f"{len(res['x']) / TFS:.1f} s of audio")
+    try:
+        over(o, sender, listener, ab.F_CW, 4, f"CW timing {sender}", body, w=w, agc=2)
+    except Refused as e:
+        return False, str(e), {}
+    finally:
+        tci.close()
+    x = res.get("x")
+    if x is None or len(x) < TFS:
+        return False, "no audio", {}
+    kt = int(L.state.get("kt") or 700)
+    pitch, _ = peak(x, kt, 120)
+    runs, depth = ct.cw_elements(x, TFS, pitch or kt)
+    j = ct.judge(runs, ct.cw_ideal(text), 1200.0 / wpm)
+    keyer = ct.keyer_said(bench.ssh, S.host)
+    base = aa.base_of(S.host) if sender == "x6100" else ""
+    factory = sender == "x6100" and aa.gcfix_of(base) == 0
+    data = dict(j, wpm=wpm, pitch=pitch, depth_db=depth, runs=runs, keyer=keyer, base=base,
+                wav=save_wav(o, x, f"cw_timing_{sender}_to_{listener}_{w}W.wav"))
+    kw = ("its keyer said nothing (a GUI before 11-25)" if keyer is None else
+          f"its keyer: {keyer[0]} edges, {keyer[1]} late over 15 ms, the latest {keyer[2]} ms")
+    says = (f"{sender}'s {text!r} at {wpm} WPM, {w} W, in {listener}'s audio: {ct.words(j)}; {kw} (key tone "
+            f"{_num(pitch)} Hz, {depth} dB deep)")
+    if keyer is not None and keyer[1]:
+        return False, says + ": the keyer itself late (the GUI's)", data
+    if ct.clean(j):
+        return True, says, data
+    if factory and keyer is not None:
+        return None, says + (f": the keyer on time, the carrier not: {sender}'s base, Xiegu's {base or 'factory'} "
+                             f"(said, not judged)"), data
+    return False, says, data
+
+
 # ---- The AMBE vocoders (each radio's DVSI chip behind its SDR daemon's port 127.0.0.1:2460) and B's digital voice ----
 # Receive only: nothing is keyed. The test speech is this computer's own voice (say), 8 kHz; the calls made of it by
 # the repository's generators (tools/dsdfme, tools/rtlspec/dmr_test gen) and replayed into a test SDR daemon on each
@@ -5175,6 +5248,14 @@ TESTS = [
          90),
     Test("ft8-copies x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's FT8 app's CQs in the X6200's "
          "audio", lambda o: ft8_copy_test(o, A, B), 150),
+    Test("cw-timing x6100", "X6100 TX, X6200 RX", "the X6100's CW keyer as it reaches the air: PARIS x4 at 20 WPM through "
+         "its TCI, read element by element in the X6200's audio: none merged or lost, each mark and gap within 25 ms of "
+         "its kind (11-25: its gaps cut short by a signal, its base's key-up late)",
+         lambda o: cw_timing_test(o, A, B), 90),
+    Test("cw-timing x6200", "X6200 TX, X6100 RX", "the same the other way: the X6200's keyer in the X6100's audio",
+         lambda o: cw_timing_test(o, B, A), 90),
+    Test("cw-timing x6100 1w", "X6100 TX at 1 W, X6200 RX", "the X6100's keyer at 1 W: whether its base's late key-ups "
+         "at 0.1 W are its power loop that low", lambda o: cw_timing_test(o, A, B, w=1.0), 90),
     Test("ambe-vocoder", "both RX", "each radio's AMBE chip through its SDR daemon: the parity field asked for, the "
          "speech through each chip at DMR's and D-STAR's rates and the other's frames, libmbe-dvsi alike with the "
          "parity field off, P25 full rate only on a chip with the P25 option", t_ambe_vocoder, 150),

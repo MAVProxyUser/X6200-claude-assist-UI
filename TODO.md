@@ -59,8 +59,12 @@ Done 2026-11-25 night (the same asks, continued):
   an over a link stall stopped runs once more (bench.once_more_after_stall).
 - comp: through TCI it cannot see Comp (the X6100's factory base levels even 0.15 s steps; the X6200's Comp leaves
   TCI's modem audio alone). NEXT: judge Comp through the mic, the other radio's speaker into it (acoustic.py's path).
-- Left: comp through the mic; power-loop's X6200 figure; cw-copy X6100 -> X6200 (the X6200's decoder on the X6100's
-  keying, also in tci-cw x6100 -> x6200).
+- cw-copy X6100 -> X6200 taken apart (the owner chose it first, 11-25 night): the GUI's keyer lost the rest of a sleep a
+  signal cut short (fixed: deadlines, tools/beacon's test); the X6100's factory base moves key edges 30-50 ms now and
+  then and at times runs two elements together (said, not judged; cw-timing x6100 / x6200 / x6100 1w measure it, the
+  keyer's own log tells whose a fault is). The X6200 keys within 7 ms.
+- Left: comp through the mic; power-loop's X6200 figure; the X6200's 0.1 W skirt (a higher app audio level); the
+  61.4 Hz component in the X6100's tone at the X6200.
 
 Done 2026-11-24 evening (the owner: "get the over the air test coverage hammered out in full", "EVERY test should use
 the same unified framework to sync the radios or make exceptions for tests so that there is NO deviation"):
