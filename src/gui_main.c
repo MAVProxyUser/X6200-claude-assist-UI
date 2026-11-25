@@ -161,6 +161,15 @@ bool main_display_portrait(bool on) {
 #endif
 }
 
+/* An empty file made (the boot animation's sign that the GUI is up): an fopen that fails is not handed to fclose, which
+ * crashed on it (clang's analyzer, 2026-11-25) */
+static __attribute__((unused)) void touch(const char *path) {
+    FILE *f = fopen(path, "w");
+
+    if (f)
+        fclose(f);
+}
+
 /* The panel: DRM planes (the GUI over the waterfall) when the kernel has them, the old
  * framebuffer otherwise */
 static void panel_open(void) {
@@ -174,7 +183,7 @@ static void panel_open(void) {
     signal(SIGUSR1, dump_signal);
     if (drm_init()) {
         screen_rec_out = drm_flush;
-        fclose(fopen("/tmp/x6100_gui.drm", "w"));  /* the GUI owns the screen: the boot animation stops */
+        touch("/tmp/x6100_gui.drm");  /* the GUI owns the screen: the boot animation stops */
         return;
     }
     unlink("/tmp/x6100_gui.drm");
@@ -183,7 +192,7 @@ static void panel_open(void) {
     fbdev_init();
     /* As with DRM: the boot animation sees the GUI is up and stops drawing into fb0 (it draws only on a portrait
      * one). No screenshot tool reads it, and SIGUSR1's dump to /tmp/screen.raw has nothing to write on fbdev */
-    fclose(fopen("/tmp/x6100_gui.drm", "w"));
+    touch("/tmp/x6100_gui.drm");
 #endif
 }
 
@@ -233,6 +242,14 @@ static void inputs_open(void) {
     if (vol) gui_wake_add_fd(vol->fd);
     if (mfk) gui_wake_add_fd(mfk->fd);
 
+    /* No VOL device (rotary_init found none): a stand-in, as BOARD_INPUT_CUSTOM's, which vol_update reads; written to
+     * as it was, the GUI crashed at every start (clang's analyzer, 2026-11-25) */
+    if (!vol) {
+        static rotary_t vol_none;
+
+        fprintf(stderr, "gui: no VOL knob (%s)\n", BOARD_DEV_VOL);
+        vol = &vol_none;
+    }
     /* VOL turns are keys to the focused widget: the value, or the choice of what it controls */
     vol->left[VOL_STATE_EDIT]    = KEY_VOL_LEFT_EDIT;
     vol->right[VOL_STATE_EDIT]   = KEY_VOL_RIGHT_EDIT;
