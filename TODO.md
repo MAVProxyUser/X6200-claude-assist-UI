@@ -74,8 +74,8 @@ Done 2026-11-25 night (the same asks, continued):
 - CW decoder: a new station's first characters whole (the owner's 'VVV prints TTT', 11-25 morning): the lock given the
   audio it skipped when it moves to a station, a line of the noise giving way to one in 64 ms, a just-started decoder's
   first second decoded once measured; the speed learned only from a station (the X6200 drifted to ~50 WPM in a quiet
-  and read the X6100's 15 WPM VVV as TTT); the band measured again when the decoder's audio comes back or the CW
-  filter changes. 31 bench recordings old against new (tools/cw_replay, four new checks; tools/cw_trainer's noise
+  and read the X6100's 15 WPM VVV as TTT); the band measured again when the decoder's audio comes back, the CW
+  filter changes or the radio's own over has ended (aed0bd7a). 31 bench recordings old against new (tools/cw_replay, four new checks; tools/cw_trainer's noise
   jump); cw-text and cw-carrier keep the listener's audio now. Both radios by hot install, in the next tag.
   Left: the X6200's noise in CW has a 17 dB hump at the key tone (its base's CW filter), against which every tone is
   judged; after a strong signal near its passband (the X6100's path proof: its S-meter -121 -> -79 dBm) its decoder
