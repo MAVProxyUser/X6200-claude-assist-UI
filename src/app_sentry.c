@@ -3646,7 +3646,7 @@ static void trib_turn(int dir) {
 #define NF_IW   (NF_W - 6)              /* the page's window, inside the frame's borders: 782 */
 #define NF_STEP 24                      /* px a VFO click */
 static lv_obj_t     *nf_frame_o, *nf_cap_l, *nf_line_o, *nf_img_o, *nf_where_l;
-static lv_img_dsc_t *nf_buf;
+static lv_color_t   *nf_px;            /* the window's pixels (NF_IW x nf_ih), copied out by nf_draw_cb */
 static int           nf_ih;             /* the window's height */
 static int           nf_page = 1, nf_y; /* the page shown (the PDF's own numbering) and how far down it */
 static uint8_t      *nf_grey;           /* that page, grey */
@@ -3687,9 +3687,29 @@ static void nf_where(void) {
     for (char *c = nf_url; *c; c++) *c = (char)toupper((unsigned char)*c);
 }
 
+/* The window's pixels into LVGL's draw buffer, as direct_hole_cb writes its holes there: an lv_img of the page stayed
+ * unpainted on the radios once G had been held up (2026-11-25: the window the theme's background in every picture
+ * after a visit to G, drawn before it) */
+static void nf_draw_cb(lv_event_t *e) {
+    lv_obj_t      *o   = lv_event_get_target(e);
+    lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
+    lv_area_t      a;
+
+    if (!nf_px || !_lv_area_intersect(&a, &o->coords, ctx->clip_area)) return;
+    if (!_lv_area_intersect(&a, &a, ctx->buf_area)) return;
+    int32_t stride = lv_area_get_width(ctx->buf_area), w = lv_area_get_width(&a);
+
+    for (int32_t y = a.y1; y <= a.y2; y++) {
+        lv_color_t       *row = (lv_color_t *)ctx->buf + (y - ctx->buf_area->y1) * stride + (a.x1 - ctx->buf_area->x1);
+        const lv_color_t *src = nf_px + (size_t)(y - o->coords.y1) * NF_IW + (a.x1 - o->coords.x1);
+
+        memcpy(row, src, (size_t)w * sizeof(lv_color_t));
+    }
+}
+
 static void nf_draw(void) {
-    if (!nf_buf) return;
-    lv_color_t *px = (lv_color_t *)nf_buf->data, bg = nf_lut[255];
+    if (!nf_px) return;
+    lv_color_t *px = nf_px, bg = nf_lut[255];
     int         x0 = nf_grey && (int)nf_gw < NF_IW ? (NF_IW - (int)nf_gw) / 2 : 0;
     int         w  = nf_grey ? LV_MIN((int)nf_gw, NF_IW - x0) : 0;
 
@@ -3707,7 +3727,6 @@ static void nf_draw(void) {
         for (int x = 0; x < w; x++) row[x0 + x] = nf_lut[g[x]];
         for (int x = x0 + w; x < NF_IW; x++) row[x] = bg;
     }
-    lv_img_cache_invalidate_src(nf_buf);
     lv_obj_invalidate(nf_img_o);
 }
 
@@ -3763,13 +3782,9 @@ static void nf_objs(bool on) {
 static void nf_open(void) {
     trib_close();
     if (!nf_frame_o) return;
-    if (!nf_buf) {
-        nf_buf = lv_img_buf_alloc(NF_IW, nf_ih, LV_IMG_CF_TRUE_COLOR);
-        if (!nf_buf) {
-            osd("NIFOG", "NO MEMORY FOR ITS PAGE.", -1);
-            return;
-        }
-        lv_img_set_src(nf_img_o, nf_buf);
+    if (!nf_px && !(nf_px = malloc((size_t)NF_IW * nf_ih * sizeof(lv_color_t)))) {
+        osd("NIFOG", "NO MEMORY FOR ITS PAGE.", -1);
+        return;
     }
     for (int g = 0; g < 256; g++) nf_lut[g] = lv_color_mix(ink, amb, (uint8_t)g);
     nifog_load();
@@ -3778,13 +3793,19 @@ static void nf_open(void) {
     nf_objs(true);
     if (f_obj) lv_obj_add_flag(f_obj, LV_OBJ_FLAG_HIDDEN);     /* F's spectrogram (a GPU hole) under it: away */
     show_screen();
+    int ink_px = 0;                     /* said in the log: how much print the window holds (one left unpainted) */
+
+    for (int i = 0; i < NF_IW * nf_ih; i++) ink_px += nf_px[i].full != nf_lut[255].full;
+    fprintf(stderr, "NIFOG: open on page %d, %d px of print in its window\n", nf_page, ink_px);
 }
 
 static void nf_close(void) {
     if (!nf_on) return;
     nf_on = false;
     nf_objs(false);
-    free(nf_grey);                      /* its page (the window's buffer stays, for the next time) */
+    free(nf_grey);                      /* its page and the window's pixels */
+    free(nf_px);
+    nf_px        = NULL;
     nf_grey      = NULL;
     nf_grey_page = 0;
 }
@@ -3854,7 +3875,10 @@ static void build_nifog(lv_obj_t *p) {
     lv_label_set_long_mode(nf_cap_l, LV_LABEL_LONG_DOT);
     lv_obj_set_height(nf_cap_l, 22);
     nf_line_o = rect(p, 6, y + 25, NF_W, 3, 0, true);
-    nf_img_o  = lv_img_create(p);
+    nf_img_o  = lv_obj_create(p);       /* drawn by nf_draw_cb */
+    lv_obj_remove_style_all(nf_img_o);
+    lv_obj_clear_flag(nf_img_o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(nf_img_o, nf_draw_cb, LV_EVENT_DRAW_MAIN, NULL);
     lv_obj_set_pos(nf_img_o, 9, y + 28);
     lv_obj_set_size(nf_img_o, NF_IW, nf_ih);
     nf_where_l = label(p, &pixel_16, dim, 9, y + h - 21, NF_W - 6, LV_TEXT_ALIGN_CENTER, "");

@@ -59,6 +59,17 @@ def _next_section(p):
     return min([s["page"] for s in IDX["secs"] if s["level"] <= 1 and s["page"] > p], default=p)
 
 
+def _print_px(path):
+    """Pixels of NIFOG's page window (app_sentry.c build_nifog: x 9-790, y 78-380 on the 800x480 picture) that differ
+    from its commonest colour (the paper, the theme's background) by more than 60 in a channel: the page's print.
+    A window left unpainted reads 0"""
+    from PIL import Image
+    im = Image.open(path).convert("RGB").crop((9, 78, 791, 381))
+    px = list(im.getdata())
+    bg = max(set(px[::97]), key=px[::97].count)
+    return sum(1 for p in px if max(abs(p[0] - bg[0]), abs(p[1] - bg[1]), abs(p[2] - bg[2])) > 60)
+
+
 def _http(host, path, headers=None, timeout=60):
     req = urllib.request.Request(f"http://{host}{path}", headers=headers or {})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -66,29 +77,50 @@ def _http(host, path, headers=None, timeout=60):
 
 
 def t_nifog(o):
-    """F SYSTEM > NIFOG on both radios: chosen on F's list and opened with F2 (a page open); the MFK turns a page, F3
-    goes to the next section's page as the contents have it, the VFO scrolls down the page 24 px a click (the dial
-    unmoved), F2 closes it (F's choice still NIFOG); a picture of it open. Then the web page: /nifog with the contents,
+    """F SYSTEM > NIFOG on both radios: chosen on F's list and opened with F2 (a page open); F4 the contents, the page
+    drawn (its print counted in a picture of the window); the MFK turns a page, F3 goes to the next section's page as
+    the contents have it, the VFO scrolls down the page (the dial unmoved), F2 closes it (F's choice still NIFOG), F2
+    opens it again where it was left, drawn again (picture). Then the web page: /nifog with the contents,
     /nifog.pdf whole (CISA's bytes, its SHA-256) and in a Range (206), /nifog/page/68 a PNG. Both end on page A"""
     if IDX["pages"] != 192:
         raise Refused("tools/nifog/nifog.idx: no 192 pages")
-    a0 = {n: {k: bench._value(r, k) for k in ("freq", "mode")} for n, r in o.r.items()}
+    mfk_sign = {}
     with o.step("both on the Sentry's page F, F's choice NIFOG") as s:
         o.both_page("F")
 
         def choose(n, r):
+            """F's choice turned to NIFOG by the MFK, as suite_cover_b's pick(): the plain difference first, then the
+            way round; a knob the remote turns the other way on this radio is found and remembered (sign)"""
             h = r.host
+            time.sleep(0.6)
             g = _gstate(h)
-            if "s.sys" not in g:
+            cur = g.get("s.sys")
+            if cur is None:
                 raise Refused(f"{n}: no s.sys in its GUI's state")
             if g.get("s.nf"):
                 raise Refused(f"{n}: NIFOG open already (s.nf {g['s.nf']})")
-            d = (SYS_NIFOG - g["s.sys"]) % SYS_N
-            d = d - SYS_N if d > SYS_N // 2 else d
-            for _ in range(abs(d)):
-                r.send(f"knob mfk {1 if d > 0 else -1}")
-                time.sleep(0.15)
-            return _gwait(h, "F's choice NIFOG", lambda g: g.get("s.sys") == SYS_NIFOG)["s.sys"]
+            sign = 1
+            for k in range(4):
+                if cur == SYS_NIFOG:
+                    break
+                d = SYS_NIFOG - cur
+                start = cur
+                for _ in range(abs(d)):
+                    r.send(f"knob mfk {sign if d > 0 else -sign}")
+                    time.sleep(0.15)
+                end = time.time() + 5
+                while time.time() < end:
+                    cur = _gstate(h).get("s.sys")
+                    if cur != start:
+                        break
+                    time.sleep(0.5)
+                if cur != SYS_NIFOG and cur != start and (cur - start) * d < 0:
+                    sign = -sign            # the knob went the other way on this radio
+            if cur != SYS_NIFOG:
+                raise Refused(f"{n}: F's choice reads {cur}, not NIFOG ({SYS_NIFOG}), after the MFK")
+            if k:
+                mfk_sign[n] = sign
+            return cur
         got = H.in_parallel(o, choose)
         s.confirm("; ".join(f"{n} s.sys {v}" for n, v in got.items()))
     with o.step("F2 opens NIFOG: a page open, its picture") as s:
@@ -99,22 +131,55 @@ def t_nifog(o):
         page = H.in_parallel(o, open_)
         pics = {n: bench.screenshot(r, "nifog-open") for n, r in o.r.items()}
         s.confirm("; ".join(f"{n} page {p}, picture {os.path.basename(pics[n] or '-')}" for n, p in page.items()))
+    with o.step("F4: the contents (page iii), the page drawn (its print in the picture)") as s:
+        toc = next((x["page"] for x in IDX["secs"] if x["title"] == "Table of Contents"), 4)
+
+        def contents(n, r):
+            bench.tap(r, "F4")
+            _gwait(r.host, f"F4: page {toc}", lambda g: g.get("s.nf") == toc and g.get("s.nfy") == 0)
+            time.sleep(0.8)
+            shot = bench.screenshot(r, "nifog-contents")
+            ink = _print_px(shot) if shot else 0
+            if ink < 500:
+                raise Refused(f"{n}: the contents page not drawn: {ink} px of print in the window ({shot})")
+            page[n] = toc
+            return f"page {toc}, {ink} px of print"
+        s.confirm("; ".join(f"{n} {v}" for n, v in H.in_parallel(o, contents).items()))
     with o.step("the MFK turns a page, F3 to the next section, the VFO scrolls") as s:
+        # the dials as NIFOG found them (page G, orch's set-up, puts A's own dial back when left: not NIFOG's doing)
+        a0 = {n: {k: bench._value(r, k) for k in ("freq", "mode")} for n, r in o.r.items()}
         def keys(n, r):
             h, p0 = r.host, page[n]
-            r.send("knob mfk 1")
-            p1 = min(p0 + 1, IDX["pages"])
-            _gwait(h, f"the MFK: page {p1}", lambda g: g.get("s.nf") == p1 and g.get("s.nfy") == 0)
+            # the MFK: a click at a time till the page changes (a radio may not take every single click, as
+            # suite_cover_b's pick() finds), on to the next page or back to the one before
+            p1 = None
+            for _ in range(3):
+                r.send(f"knob mfk {mfk_sign.get(n, 1)}")
+                try:
+                    p1 = _gwait(h, "the MFK", lambda g: g.get("s.nf") not in (None, 0, p0) and g.get("s.nfy") == 0,
+                                3.5)["s.nf"]
+                    break
+                except Refused:
+                    continue
+            if p1 is None or abs(p1 - p0) > 2:
+                raise Refused(f"{n}: the MFK did not turn NIFOG's page {p0} (now {p1})")
             bench.tap(r, "F3")
             p2 = _next_section(p1)
             _gwait(h, f"F3: page {p2}", lambda g: g.get("s.nf") == p2 and g.get("s.nfy") == 0)
-            for _ in range(2):
-                r.send("knob vfo 1")
-                time.sleep(0.2)
-            g = _gwait(h, "the VFO: down the page (or on to the next)",
-                       lambda g: (g.get("s.nf") == p2 and g.get("s.nfy") == 2 * NF_STEP) or g.get("s.nf") == p2 + 1)
-            return f"page {p0} > MFK {p1} > F3 {p2} ({IDX['labels'].get(p2, '?')}) > VFO 2 clicks: page {g['s.nf']} " \
-                   f"{g['s.nfy']} px down"
+            # the VFO (the remote's "main" knob): down the page, or (turned the other way here) onto the page before
+            g = None
+            for _ in range(3):
+                r.send("knob main 2")
+                try:
+                    g = _gwait(h, "the VFO", lambda g: (g.get("s.nf") == p2 and g.get("s.nfy", 0) > 0)
+                               or g.get("s.nf") in (p2 - 1, p2 + 1), 3.5)
+                    break
+                except Refused:
+                    continue
+            if g is None:
+                raise Refused(f"{n}: the VFO did not scroll NIFOG's page {p2}")
+            way = f"{g['s.nfy']} px down" if g["s.nf"] == p2 else f"onto page {g['s.nf']}"
+            return f"page {p0} > MFK {p1} > F3 {p2} ({IDX['labels'].get(p2, '?')}) > VFO: {way}"
         moved = H.in_parallel(o, keys)
         H.alike(o, ("freq", "mode"))
         for n, r in o.r.items():
@@ -128,6 +193,20 @@ def t_nifog(o):
             return _gwait(r.host, "NIFOG closed", lambda g: g.get("s.nf") == 0 and g.get("s.sys") == SYS_NIFOG)["s.sys"]
         H.in_parallel(o, close)
         s.confirm("both closed")
+    with o.step("F2 opens it again where it was left, the page drawn again") as s:
+        def reopen(n, r):
+            before = _gstate(r.host)
+            bench.tap(r, "F2")
+            g = _gwait(r.host, "NIFOG open again", lambda g: g.get("s.nf", 0) >= 1)
+            time.sleep(0.8)
+            shot = bench.screenshot(r, "nifog-reopen")
+            ink = _print_px(shot) if shot else 0
+            bench.tap(r, "F2")
+            _gwait(r.host, "NIFOG closed", lambda g: g.get("s.nf") == 0)
+            if ink < 500:
+                raise Refused(f"{n}: page {g['s.nf']} not drawn when opened again: {ink} px of print ({shot})")
+            return f"page {g['s.nf']} {g.get('s.nfy')} px down, {ink} px of print (s.sys was {before.get('s.sys')})"
+        s.confirm("; ".join(f"{n} {v}" for n, v in H.in_parallel(o, reopen).items()))
     with o.step("the web page: /nifog, the PDF (whole and a Range), a page's PNG") as s:
         def web(n, r):
             st, _, body = _http(r.host, "/nifog")
