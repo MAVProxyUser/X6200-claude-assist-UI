@@ -86,7 +86,7 @@ static uint32_t            rx_count = UINT32_MAX;   /* samples since the radio l
 #ifdef BOARD_X6200
 /* The X6200's base colours CW's receive audio itself, CW and CW-R alike: one resonance at the key tone, its noise
  * 17-21 dB over the band's floor there (orch cw-noise-shape, 2026-11-25, nothing on the air: fitted by Q 9.4-10.9
- * through 300-1100 to 100-1300 Hz; measured at the 700 Hz key tone, taken to follow it). Judged against the band's
+ * through 300-1100 to 100-1300 Hz; at a 600 Hz key tone it sat at 600, orch cw-noise-tone). Judged against the band's
  * floor, that noise keyed the decoder in every quiet (orch cw-quiet: 'ESI I I EI E T E I'). Taken out as the APF's
  * (Receiver::set_base_peak) */
 #define BASE_PEAK_Q 10.0f

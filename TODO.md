@@ -88,6 +88,8 @@ Done 2026-11-25 night (the same asks, continued):
   carrier floor's jump at a station's first second (KeyDetector::rescale, 'VV' read 'VS'), the lock's emptied filters
   after a move (Receiver::rewind, 'VVV' read 'UVV'), the X6200's CW peak (no filter in its base) no longer misleading
   its decoder. cw-quiet passes; 46 bench recordings as good or better; tools/cw_replay 13 checks, CW Trainer 73.
+  The resonance follows the key tone (orch cw-noise-tone, 09:44: 20.4 dB at 600 Hz with the key tone at 600; the
+  remote's `set kt` for it).
   NEXT (TX, the chain-ok word): cw-text both ways, air cw-kbd, air cw-carrier, air tci-cw.
 - The apps on the X6200 under 1 W hold their level as TCI's do (tx_player coarse; tools/txlevel: -3.0 dB in 20 overs
   before, 0.0 now). The 0.1 W skirt is not this (ft8-copies x6200 unchanged).

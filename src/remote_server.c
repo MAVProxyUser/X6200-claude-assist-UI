@@ -338,7 +338,7 @@ typedef enum { P_FREQ, P_MODE, P_AGC, P_PRE, P_ATT, P_NB, P_NR, P_SQL, P_RFG, P_
                 * check): split, RIT and XIT, and what the speaker plays (the Sentry's LISTEN, for now) */
                P_SPLIT, P_RIT, P_XIT, P_HEARD, P_IFS, P_COMP, P_WCH,
                /* TUNE's own power (tenths), for the bench's tune tests, set and put back as found */
-               P_TPWR } pcmd_id_t;
+               P_TPWR, P_KT } pcmd_id_t;
 
 typedef struct {
     pcmd_id_t id;
@@ -1144,6 +1144,10 @@ static void panel_apply(void *arg) {
                 atomic_store(&state_resend, true);
             break;
         case P_AGC:    cparam_i_set(cfg_cur_agc, LV_CLAMP(0, p->a, 3)); break;
+        /* CW's key tone, as KEY 1:2's Tone sets it (10 Hz a step, 400-1200): the state's kt. The bench's measure of the
+         * X6200's resonance at another tone (orch cw-noise-tone) set it through the KEY page and the MFK, whose page
+         * key steps through its pages: a press too many put the MFK on the keyer's ratio (2026-11-25) */
+        case P_KT:     param_i_set(cfg_key_tone, LV_CLAMP(400, p->a, 1200) / 10 * 10); break;
         case P_PRE:    cparam_i_set(cfg_cur_pre, p->a != 0); break;
         case P_ATT:    cparam_i_set(cfg_cur_att, p->a != 0); break;
         case P_NB:     param_i_set(cfg_nb, p->a != 0); break;
@@ -1228,6 +1232,7 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
         {"linein", P_LINEIN},
         {"split", P_SPLIT}, {"rit", P_RIT}, {"xit", P_XIT}, {"heard", P_HEARD},
         {"ifs", P_IFS},   {"comp", P_COMP}, {"wch", P_WCH}, {"tpwr", P_TPWR},
+        {"kt", P_KT},
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strcasecmp(names[i].name, name))

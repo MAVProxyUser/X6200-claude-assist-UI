@@ -1313,6 +1313,56 @@ def t_cw_noise_shape(o):
         {"kt": kt, "shapes": shapes}
 
 
+KT_TRY = 600                # cw-noise-tone: the key tone tried (the default 700; 10 Hz a click of the MFK)
+
+
+def t_cw_noise_tone(o):
+    """Whether the X6200's CW resonance follows the key tone (the decoder's colour takes it to, src/cw.cpp BASE_PEAK_Q),
+    nothing sent: both on page G in CW on F_CW, the key tone KT_TRY on both (the remote's set kt, read back as kt), the
+    noise's shape (cw-noise-shape's) through an 800 Hz filter around it; the key tone put back as found. PASS when the
+    X6200's noise peaks within 30 Hz of KT_TRY (2026-11-25: 19.8 dB at 600 Hz, where 700 gave it at 700); the X6100's
+    said. (Its first form set the tone through the classic screen's KEY page and the MFK; its put-back pressed KEY
+    once more, which steps to KEY 2:2, and the MFK moved the keyer's ratio: the remote's kt since)"""
+    from tones import TciRx
+    got, kt0 = {}, {n: int(r.state.get("kt") or 700) for n, r in o.r.items()}
+    lo, hi = KT_TRY - 400, KT_TRY + 400
+    try:
+        with o.step(f"both on page G, {F_CW / 1e6:.3f} MHz CW, the key tone {KT_TRY} Hz (kt)") as s:
+            o.both_page("G")
+            want, checks = bench.rx_profile(F_CW, 4, pre=0, att=0, rfg=100, agc=2, sql=0)
+            o.both(dict(want, zoom=8), checks)
+            o.both({"kt": KT_TRY})
+            o.both({"filter": (lo, hi)})
+            s.confirm(f"key tones as found {kt0}, now {KT_TRY}; filter {lo}-{hi}")
+        with o.step(f"both through {lo}-{hi} Hz, {CW_SHAPE_S:.0f} s of quiet each: the noise's peak") as s:
+            rec = {n: TciRx(r.host) for n, r in o.r.items()}
+            try:
+                time.sleep(2.5)
+                t0 = time.time()
+                time.sleep(CW_SHAPE_S)
+                for n, c in rec.items():
+                    x, _ = c.audio(t0, time.time())
+                    got[n] = noise_shape(x, FS, lo, hi)
+            finally:
+                for c in rec.values():
+                    c.close()
+            s.confirm("; ".join(f"{n} peak {v['peak_db']} dB at {v['peak_hz']} Hz, {v['width6_hz']} Hz wide"
+                                for n, v in got.items()))
+    except Refused as e:
+        return False, str(e), {"kt0": kt0, "shapes": got}
+    finally:
+        with o.step("the key tone as found"):
+            in_parallel(o, lambda n, r: bench.ensure(r, {"kt": kt0[n]}), wait=30)
+    x62 = got.get(B, {})
+    follows = x62 and abs(x62["peak_hz"] - KT_TRY) <= 30
+    words = "; ".join(f"{n}: the noise's peak {v['peak_db']} dB over the band's 25th percentile at {v['peak_hz']} Hz "
+                      f"({v['width6_hz']} Hz wide)" for n, v in got.items())
+    if not follows:
+        return False, (f"the X6200's resonance did NOT follow the key tone {KT_TRY} Hz: {words} (the decoder's colour, "
+                       f"src/cw.cpp, assumes it does)"), {"kt0": kt0, "shapes": got}
+    return True, f"the X6200's resonance followed the key tone {KT_TRY} Hz: {words}", {"kt0": kt0, "shapes": got}
+
+
 WF3D_ACTION = 18            # ACTION_WF_3D (src/params/params.h), the action Settings > Keys names "WF 3D on/off"
 WF3D_KEY = "fst"            # whose hold is lent to it (its own: a step down, nothing that parts the radios)
 WF_MOVING_MIN = 0.05        # the waterfall's half changing this much a second (0-255 mean): not frozen
@@ -5674,6 +5724,9 @@ TESTS = [
     Test("cw-quiet", "both RX", "CW 14.040, nothing sent: both from USB-D to CW three times and a stay in CW, 12 s of "
          "the cable's quiet each: neither decoder prints a character (their audio kept for tools/cw_replay)",
          t_cw_quiet, 120),
+    Test("cw-noise-tone", "both RX", "the X6200's CW resonance at another key tone (600 Hz, the remote's kt, put back "
+         "after): the noise peaks there, as the decoder's colour takes it",
+         t_cw_noise_tone, 90),
     Test("classic-wf3d", "both RX", "the classic screen's waterfall in 3D (upstream's drawing thread) and 2D on both: "
          "lit and moving in each, the GUI's CPU said, the GUI still the same process; the screen and keys put back",
          t_classic_wf3d, 90),

@@ -312,7 +312,7 @@ class Radio:
 # mode (a band change loads the band's ATT, PRE and AGC, so those after it), the receiver's, the rest; LISTEN last
 SET_ORDER = ("split", "vfo", "freq", "mode", "filter", "zoom", "att", "pre", "agc", "rfg", "sql", "nb", "nr", "rit",
              "xit", "ifs", "comp",
-             "atu", "pwr", "tpwr", "vol", "txio", "txqo", "txig", "txip", "wch", "heard")
+             "atu", "pwr", "tpwr", "vol", "txio", "txqo", "txig", "txip", "wch", "heard", "kt")
 # Kept by the band (or the band's mode): put back only once the dial is on that band again
 BAND_KEYS = {"mode", "filter", "zoom", "att", "pre", "agc", "txio", "txqo", "txig", "txip", "ifs"}
 # What a test may change and finish() puts back ("heard" is not: the Sentry's page A puts its own LISTEN back)

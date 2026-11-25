@@ -6968,8 +6968,8 @@ solid.
   tone printed "E I T" in pauses, and a station after a pause could start
   with stray letters or come out "TTT TTT" for "VVV VVV". The same goes for the X6100's CW
   peak filter: with it on (a higher Q colours the noise more), each tone
-  is judged against the noise the filter leaves at it. This was measured
-  with a 700 Hz key tone; the shape is taken to follow the key tone.
+  is judged against the noise the filter leaves at it. The X6200's
+  resonance follows the key tone (measured at 700 and 600 Hz).
 - It looks for the tone from 150 Hz up, however low the CW filter starts:
   under it are the keying's thumps, not a tone. Up to v0.3.12.47 a CW filter
   from 0 Hz let it lock on them in a strong signal's loud audio (the X6100
@@ -10905,7 +10905,8 @@ VALUE` changes the radio: `freq`, `mode` (0-7, the order of the mode list; 8 SAM
 centred on the key tone, the low edge no lower than 0; in AM and FM LO is
 0), `wch HZ MODE` (the Sentry G's own channel, the state's `wch` and `wchm`: its memory
 only, the dial not tuned; 0 -1 for none, CB 19 then), `tpwr` (TUNE's own power for an external tuner, tenths of a
-watt, the state's `tpwr`: 1 up to the radio's top, as Settings > TX Cal > EXTERNAL TUNER sets it). A `set` the radio refuses is
+watt, the state's `tpwr`: 1 up to the radio's top, as Settings > TX Cal > EXTERNAL TUNER sets it), `kt` (CW's key
+tone in Hz, 400-1200 in 10 Hz steps, the state's `kt`, as KEY 1:2's Tone sets it). A `set` the radio refuses is
 answered `err ...` (`err freq: locked (LOCK, or an app holds the
 frequency)`, `err freq: not a frequency this radio tunes`, `err NAME: the
 radio is busy, try again`, `err unknown setting NAME`, the role and

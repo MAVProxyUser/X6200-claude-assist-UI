@@ -27,7 +27,7 @@ float apf_gain2(float tone_hz, float q, float hz);
 /* The X6200's base colours CW's receive audio itself, the GUI's APF off: one resonance at the key tone, signal and
  * noise alike (2026-11-25, orch cw-noise-shape, nothing on the air: through 100-1300 Hz the noise 21 dB over the far
  * band at 700 Hz, -18 dB at 150 Hz, -6 dB 100-145 Hz wide; fitted within 0.5-1.7 dB rms by Q 9.4-10.9 at 709-714 Hz,
- * every CW filter alike). Its |H|^2, 1 at the tone */
+ * every CW filter alike; at a 600 Hz key tone at 600 Hz: it follows the key tone). Its |H|^2, 1 at the tone */
 float base_peak_gain2(float tone_hz, float q, float hz);
 
 class ToneFinder {
