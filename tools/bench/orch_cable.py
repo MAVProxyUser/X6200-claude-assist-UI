@@ -202,25 +202,18 @@ def cw_settled(L, secs=6.0, quiet=1.5):
 
 
 def tx_spans(r, t0, t1=None):
-    """[(on, off)] of r's overs since t0 (its "tx" lines and state)"""
+    """[(on, off)] of r's overs since t0 (its tx history: bench.Radio.tx_hist), an over still on: (on, None)"""
     with r.lock:
-        lines = [(at, x) for at, x in list(r.lines) if at >= t0 and (t1 is None or at <= t1)]
+        hist = list(r.tx_hist)
     spans, on = [], None
-    for at, x in lines:
-        v = None
-        if x.startswith("tx "):
-            v = x[3:].strip() == "1"
-        elif x.startswith("state "):
-            try:
-                v = bool(json.loads(x[6:]).get("tx"))
-            except ValueError:
-                pass
-        if v is True and on is None:
+    for at, v in hist:
+        if v and on is None:
             on = at
-        elif v is False and on is not None:
-            spans.append((on, at))
+        elif not v and on is not None:
+            if on >= t0 - 0.5 and (t1 is None or on <= t1):
+                spans.append((on, at))
             on = None
-    if on is not None:
+    if on is not None and on >= t0 - 0.5 and (t1 is None or on <= t1):
         spans.append((on, None))
     return spans
 
@@ -271,18 +264,19 @@ def meters(r, t0, t1):
 # ---- on the air ----
 
 @contextlib.contextmanager
-def session(o, label, senders, f=None):
+def session(o, label, senders, f=None, w=None):
     """The gates for a test whose radios transmit from an app or the classic screen (not the Sentry's armed A, which
     over() arms and locks with A/B: on the classic screen A/B is the VFO key): the chain, each sender's TX gate, the
     listener's supply, the Watch on both. Yields the Watch; after: everything stopped, the roles back to RX"""
+    w = w or H.W
     p, total = bench.chain_gate(o.c, "radios")
     for n in senders:
-        bench.radio_tx_gate(o.r[n], o.c, H.W)
+        bench.radio_tx_gate(o.r[n], o.c, w)
     for n in o.r:
         bench.listener_gate(o.r[n])
-    watch = bench.Watch(list(o.r.values()), o.c, expect_dbm=10 * math.log10(H.W * 1000) - total, w=H.W, label=label)
+    watch = bench.Watch(list(o.r.values()), o.c, expect_dbm=10 * math.log10(w * 1000) - total, w=w, label=label)
     try:
-        bench.tx_log({"who": ",".join(senders), "f": f or int(o.r[senders[0]].state.get("freq", 0)), "w": H.W,
+        bench.tx_log({"who": ",".join(senders), "f": f or int(o.r[senders[0]].state.get("freq", 0)), "w": w,
                       "what": f"orch: {label}"})
         yield watch
     finally:
@@ -342,14 +336,14 @@ def cw_over(o, s, l, text, label, f=F_CW, mode=4, listener_cfg=None, sender_cfg=
     return got["text"], got["t"]
 
 
-def offset_over(o, s, l, f_s, mode, label, body, pair_ignore=()):
+def offset_over(o, s, l, f_s, mode, label, body, pair_ignore=(), rf_hz=None):
     """An over from s on f_s with the two radios where the test put them, apart as the test declared (bench.apart):
     over() would put both on one frequency. Both on the Sentry's page G first (the caller), s armed there, locked after"""
     S, L = o.r[s], o.r[l]
     p, total = bench.chain_gate(o.c, "radios")
     with o.step(f"{s} may send on {f_s / 1e6:.6f} MHz, {l} on {int(L.state.get('freq', 0)) / 1e6:.6f}") as st:
         bench.ensure(S, *bench.tx_profile(f_s, mode, H.W))
-        bench.radio_tx_gate(S, o.c, H.W)
+        bench.radio_tx_gate(S, o.c, H.W, rf_hz=rf_hz)
         sup = bench.listener_gate(L)
         st.confirm(f"{l}'s supply {sup}" if sup else "")
     o.roles = {s: "TX", l: "RX"}
@@ -1441,17 +1435,21 @@ def ft8_tci_msg(o, S, text, watch, hz=1500):
     slot = math.ceil((time.time() + off + 3.0) / 15.0) * 15.0
     _, t0, t1 = ab.tci_play(S, "/tmp/bench_ft8msg.raw", secs + 2, watch,
                             radio_at=slot + 0.5 - ab.FT8_LEAD - ab.FT8_KEY_LAG)
-    return t0, t1
+    S.wait("off the air (the TCI tail)", lambda: not S.tx, 5)
+    return t0, time.time()
 
 
 @contextlib.contextmanager
-def ft8_pair(o, label, dial=F_FT8, senders=None):
-    """Both radios' FT8 apps open on dial (test calls, Auto off), the gates for senders (both by default); after:
-    stopped, closed, both on A"""
+def ft8_pair(o, label, dial=F_FT8, senders=None, w=None):
+    """Both radios' FT8 apps open on dial (test calls, Auto off), the gates for senders (both by default), their power
+    w (0.1 W unless said); after: stopped, closed, both on A"""
     try:
         with o.step("both on their test calls, the FT8 app open on both on the dial"):
             H.ft8_both(o, dial)
-        with session(o, label, senders or list(o.r), dial) as watch:
+            if w:
+                for n in (senders or list(o.r)):
+                    bench.ensure(o.r[n], {"pwr": w})
+        with session(o, label, senders or list(o.r), dial, w=w) as watch:
             yield watch
     finally:
         for r in o.r.values():
@@ -1477,28 +1475,27 @@ def _decoded(L, n0, want=None, secs=8):
 
 
 def t_ft8_cq_grid(o, s, l):
-    """FT8's CQ: the QTH's 4-character square in capitals ('CQ <call> JO22' from QTH jo22ab), none from a 2-character
-    QTH ('CQ <call>'), and the CQ Modifier ('CQ POTA <call> JO22')"""
+    """FT8's CQ with the bench's test calls (Q?TST: non-standard FT8 calls on purpose): the radio says 'no QTH or
+    modifier with this call' and sends 'CQ <call>' alone, whatever the QTH (JO22ab) and the CQ Modifier (POTA). The
+    4-character square and the modifier themselves need a standard call (not the bench's): partial"""
     S, L = o.r[s], o.r[l]
     call = H.TEST_CALLS[s]
     res = {}
     try:
-        with cfg_kept(S, {"qth": TEST_GRID.lower() + "ab", "ft8_cq_modifier": ""}):
+        with cfg_kept(S, {"qth": TEST_GRID + "ab", "ft8_cq_modifier": "POTA"}):
             with ft8_pair(o, "ft8-cq-grid", senders=[s]) as watch:
                 role(o, s)
-                for qth, mod, want in ((TEST_GRID.lower() + "ab", "", f"CQ {call} {TEST_GRID}"),
-                                       ("JO", "", f"CQ {call}"),
-                                       (TEST_GRID.lower() + "ab", "POTA", f"CQ POTA {call} {TEST_GRID}")):
-                    bench.cfg_set(S, "qth", qth)
-                    bench.cfg_set(S, "ft8_cq_modifier", mod)
-                    n0 = len(L.rows)
-                    sent = H.ft8_send(o, S, L, watch, "ft8 cq", "ft8-cq-grid", F_FT8)
-                    got = _decoded(L, n0, call)
-                    res[f"{qth}/{mod}"] = {"sent": sent, "decoded": got}
-                    if want not in got or (qth == "JO" and any(TEST_GRID in g for g in got if call in g)):
-                        raise Refused(f"QTH {qth!r}, modifier {mod!r}: {l} decoded {got}, wanted {want!r}")
-        return True, f"CQ with a 4-character square, none from a 2-character QTH, and the POTA modifier, each " \
-                     f"decoded by {l} as sent", res
+                n0 = len(L.rows)
+                t0 = time.time()
+                sent = H.ft8_send(o, S, L, watch, "ft8 cq", "ft8-cq-grid", F_FT8)
+                got = _decoded(L, n0, call)
+                said = msgs_since(S, t0)
+                res.update(sent=sent, decoded=got, said=said[-3:])
+        if f"CQ {call}" not in got or any(TEST_GRID in g or "POTA" in g for g in got):
+            return False, f"{l} decoded {got} (wanted 'CQ {call}' alone with a non-standard call)", res
+        if not any("no QTH or modifier" in m for m in said):
+            return None, f"{l} decoded 'CQ {call}' alone; the radio's note not seen ({said[-3:]})", res
+        return True, f"a non-standard call's CQ: 'CQ {call}' alone, the radio said so ({[m for m in said if 'QTH' in m][0]!r})", res
     except Refused as e:
         return False, str(e), res
 
@@ -1556,11 +1553,14 @@ def t_ft8_auto_off(o, s, l):
             role(o, s)
             n2 = len(L.rows)
             rpt = H.ft8_send(o, S, L, watch, f"ft8 reply {srow['id']}", "ft8-auto-off: report", F_FT8)
-            L.wait("the report", lambda: any(bench.msg(r) == rpt for r in L.rows[n2:]), 8)
+            ca, cb = H.TEST_CALLS[l], H.TEST_CALLS[s]
+            L.wait("the report", lambda: any(bench.msg(r) == rpt or (bench.msg(r).startswith(ca) and cb in bench.msg(r))
+                                             for r in L.rows[n2:]), 12)
             nxt = bench.norm(L.ft8.get("next") or "")
             res.update(cq=H.mask(cq), reply=H.mask(rep1), report=H.mask(rpt), l_next_unpressed=H.mask(nxt))
             moved = nxt and nxt != rep1
-            rrow = next(r for r in L.rows[n2:] if bench.msg(r) == rpt)
+            rrow = next(r for r in L.rows[n2:] if bench.msg(r) == rpt or (bench.msg(r).startswith(ca) and
+                                                                        cb in bench.msg(r)))
             L.send(f"ft8 reply {rrow['id']}")
             time.sleep(1.0)
             nxt2 = bench.norm(L.ft8.get("next") or "")
@@ -1650,6 +1650,7 @@ def t_ft8_hound(o, s, l):
             role(o, s)
             n0 = len(L.rows)
             ft8_tci_msg(o, S, f"CQ {fox} {TEST_GRID}", watch)
+            S.wait("the Fox off the air", lambda: not S.tx, 5)
             L.wait("the Fox's CQ", lambda: any(fox in bench.msg(r) for r in L.rows[n0:]), 10)
             row = next(r for r in L.rows[n0:] if fox in bench.msg(r))
             if not L.ft8.get("hound"):
@@ -1957,7 +1958,7 @@ def t_sstv_rx(o, s, l):
                 new1 = _sstv_pics(L) - before
                 res["denoise_on"] = sorted(os.path.basename(p) for p in new1)
                 bench.cfg_set(L, "sstv_denoise", 0)
-                press(L, "F3", ("SSTV",), rest=0.8)
+                press(L, "F2", ("SSTV",), rest=0.8)          # Start Auto RX (Manual's key would stop it if it waits)
                 _sstv_tx_menu(S, 4, watch)                   # REPEAT LAST TX
                 S.wait("the picture's end", lambda: not S.tx or watch.why, 20)
                 time.sleep(4)
@@ -2109,6 +2110,7 @@ def t_psk_look(o, s, l):
     res = {}
     ip = ab.web_ip(S.host)
     mid = None
+    tl0 = ab.tl_sizes(L.host)
     try:
         st, b_ = ab.http(ip, "/api/macros/psk", method="POST", body={"name": "BENCH", "text": text})
         if st != 200:
@@ -2135,7 +2137,7 @@ def t_psk_look(o, s, l):
             S.wait("its end", lambda: not S.tx or watch.why, 30)
         time.sleep(2)
         snap(o, "psk-look: l's DX call button after 'DE <call>'")
-        lines = H.textlog_back(L.host, t0) if hasattr(H, "textlog_back") else ""
+        lines = H.textlog_lines(L.host, tl0)
         res["textlog"] = str(lines)[-120:]
         L.send("knob mfk -3")
         time.sleep(1.0)
@@ -2146,6 +2148,7 @@ def t_psk_look(o, s, l):
     except Refused as e:
         return False, str(e), res
     finally:
+        H.textlog_back(L.host, tl0)
         if mid is not None:
             ab.http(ip, f"/api/macros/psk/{mid}", method="DELETE")
         for r in (S, L):
@@ -2191,7 +2194,7 @@ def t_transverter(o, s, l):
                         bench.ensure(S, {"pwr": 1.0})
                         _, t0, t1 = bench.tci_send(S, [[1000, 4.0]], watch=watch)
                         got["t"] = (t0, t1)
-                    offset_over(o, s, l, XV_DIAL, 2, "transverter: the tone through the limit", body)
+                    offset_over(o, s, l, XV_DIAL, 2, "transverter: the tone through the limit", body, rf_hz=f_if)
                     t0, t1 = got["t"]
                     w = [x[1] for x in t_frames(S, t0, t1 + 1)]
                     m = meters(L, t0 + 1, t1)
@@ -2220,15 +2223,17 @@ def t_transverter(o, s, l):
 
 
 def t_zero_power(o, s, l):
-    """Line-in 0 (put back after): one FT8 CQ goes out at 0 W ('t' 0.0) and the radio says 'TX 0 W: level ...,
-    Line-in ...'"""
+    """Line-in 0 (put back after), PWR 1 W (nothing goes out with Line-in 0; at 0.1 W the radio cannot tell 0 W from
+    its setting): one FT8 CQ goes out at 0 W ('t' 0.0) and the radio says 'TX 0 W: level ..., Line-in ...'"""
     S = o.r[s]
     res = {}
     li0 = int(S.state.get("linein", 10))
+    p0 = None
     try:
         S.send("set linein 0")
         S.wait("Line-in 0", lambda: int(S.state.get("linein", -1)) == 0, 4)
-        with ft8_pair(o, "zero-power", senders=[s]) as watch:
+        p0 = S.pwr()
+        with ft8_pair(o, "zero-power", senders=[s], w=1.0) as watch:
             role(o, s)
             t0 = time.time()
             S.send("ft8 cq")
@@ -2245,6 +2250,8 @@ def t_zero_power(o, s, l):
         return False, str(e), res
     finally:
         S.send(f"set linein {li0}")
+        if p0 is not None:
+            bench.ensure(S, {"pwr": p0})
 
 
 def _rx_level_db(L, t0, t1):
@@ -2253,17 +2260,17 @@ def _rx_level_db(L, t0, t1):
 
 
 def t_agc_knee(o, s, l):
-    """AGC Knee (Settings > Audio): s's tone stepped 0.1, 0.3, 1.0 W through the pads; l's TCI audio level at each,
-    with two Knee settings: the curves differ (the setting acts)"""
+    """AGC Knee and Slope (Settings > Audio): with the knee at -100 (every signal over it) the slope decides how the
+    audio grows with the signal: s's tone stepped 0.1, 0.3, 1.0 W through the pads, l's TCI audio level at each with
+    Slope 0 and Slope 10: the growth from 0.1 to 1 W differs (2 dB or more)"""
     import numpy as np
     from tones import TciRx
     S, L = o.r[s], o.r[l]
     res = {}
     try:
-        k0 = int(bench.cfg_get(L, "agc_knee"))
         curves = {}
-        for knee in (k0, k0 + 15 if k0 < 50 else k0 - 15):
-            with cfg_kept(L, {"agc_knee": knee}):
+        for slope in (0, 10):
+            with cfg_kept(L, {"agc_knee": -100, "agc_slope": slope}):
                 curve = []
                 for w in (0.1, 0.3, 1.0):
                     rx = TciRx(L.host)
@@ -2271,26 +2278,26 @@ def t_agc_knee(o, s, l):
                         got = {}
 
                         def body(watch, w=w):
-                            bench.ensure(S, {"pwr": w})
                             _, t0, t1 = bench.tci_send(S, [[1000, 2.5]], watch=watch)
                             got["t"] = (t0, t1)
-                        H.over(o, s, l, F_USB, 2, f"agc-knee {knee} {w} W", body, w=w, agc=1)
-                        x, fs = rx.audio(got["t"][0] + 1.0, got["t"][1] - 0.3)
+                        H.over(o, s, l, F_USB, 2, f"agc slope {slope} {w} W", body, w=w, agc=1)
+                        x, _ = rx.audio(got["t"][0] + 1.0, got["t"][1] - 0.3)
                         curve.append(round(float(20 * np.log10(np.sqrt(np.mean(np.square(x))) + 1e-9)), 1)
                                      if len(x) else None)
                     finally:
                         rx.close()
-                curves[knee] = curve
+                curves[slope] = curve
         bench.ensure(S, {"pwr": H.W})
         res["curves_db"] = curves
-        a, b = list(curves.values())
-        if None in a or None in b:
+        if any(v is None for c in curves.values() for v in c):
             return False, f"no audio at some step: {curves}", res
-        diff = max(abs(x - y) for x, y in zip(a, b))
-        res["max_diff_db"] = round(diff, 1)
-        if diff < 1.5:
-            return False, f"Knee {list(curves)} gave the same audio levels {curves}", res
-        return True, f"l's audio over 0.1/0.3/1 W: {curves} dB (the knee moves it up to {diff:.1f} dB)", res
+        growth = {k: round(c[-1] - c[0], 1) for k, c in curves.items()}
+        res["growth_db"] = growth
+        if abs(growth[10] - growth[0]) < 2:
+            return None, f"Slope 0 and 10 grew the audio alike from 0.1 to 1 W ({growth} dB; {curves}): the setting's " \
+                         f"effect not seen in the TCI audio", res
+        return True, f"the AGC slope acts: from 0.1 to 1 W the audio grew {growth[0]} dB with Slope 0, {growth[10]} dB " \
+                     f"with 10 (knee -100)", res
     except Refused as e:
         return False, str(e), res
 
@@ -3129,6 +3136,77 @@ def t_patched_rows(o, s, l):
         home(o, S)
 
 
+# ---- Field Ops' reference lists from the internet (the owner, 2026-11-25: a download is no issue, test it) ----
+
+FIELD_MTIME = "python3 -c \"import os;print(int(os.path.getmtime('/mnt/field/refs.tsv')))\" 2>/dev/null || echo 0"
+# x6100-field holds /mnt/field/.update.lock with flock while it runs and leaves the empty file: free when it can be taken
+FIELD_LOCK_HELD = ("python3 -c \"import fcntl;f=open('/mnt/field/.update.lock','a');"
+                   "fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB);print('free')\" 2>/dev/null || echo held")
+
+
+def t_field_update(o, s, l):
+    """Update list (Field Ops page 2, or the web Field Ops page) on s: the web's POST /api/field/update, followed by
+    GET /api/field to its end ('<list> (n/10): x / y MB' while it runs); then its result no error, the list there
+    (refs.tsv with parks and summits counted, its time new), no lock or part file left. Nothing tuned, nothing sent"""
+    import suite_air_b as ab
+    S = o.r[s]
+    ip = ab.web_ip(S.host)
+    res = {"progress": []}
+    try:
+        with o.step(f"{s}: the lists as found") as st:
+            st0, b0 = ab.http(ip, "/api/field")
+            if st0 != 200:
+                raise Refused(f"{s}'s /api/field answered {st0}")
+            before = json.loads(b0)
+            t_file0 = ssh(S.host, FIELD_MTIME).strip() or "0"
+            res["before"] = {"refs": before.get("refs"), "mtime": int(t_file0)}
+            st.confirm(str(res["before"]))
+        with o.step(f"{s}: Update list started (the web page's), followed to its end") as st:
+            t0 = time.time()
+            code, b1 = ab.http(ip, "/api/field/update", method="POST", body={})
+            if code == 409:
+                res["already_running"] = True
+            elif code != 200:
+                raise Refused(f"{s}: the update not started ({code} {b1[:80]})")
+            end = time.time() + 1500
+            upd = {}
+            while time.time() < end:
+                time.sleep(3)
+                code, b = ab.http(ip, "/api/field")
+                if code != 200:
+                    continue
+                upd = json.loads(b).get("update") or {}
+                p = upd.get("progress")
+                if p and (not res["progress"] or res["progress"][-1] != p):
+                    res["progress"].append(p)
+                if not upd.get("running"):
+                    break
+            else:
+                raise Refused(f"{s}: the update still running after {time.time() - t0:.0f} s ({res['progress'][-1:]})")
+            res.update(result=upd.get("result"), secs=round(time.time() - t0))
+            st.confirm(f"{res['secs']} s, {len(res['progress'])} progress steps, result {res['result']!r}")
+        after = json.loads(ab.http(ip, "/api/field")[1])
+        refs = after.get("refs") or {}
+        t_file1 = int(ssh(S.host, FIELD_MTIME).strip() or 0)
+        left = ssh(S.host, "ls -a /mnt/field | grep -E '^\\.update\\.download$|\\.tmp$' || true").split()
+        held = ssh(S.host, FIELD_LOCK_HELD).strip()
+        if held != "free":
+            left.append(f".update.lock ({held})")
+        res.update(refs=refs, mtime=t_file1, left=left)
+        if (res["result"] or "").lower().startswith("error"):
+            return False, f"{s}'s update ended with {res['result']!r} after {res['secs']} s", res
+        if not refs or not refs.get("parks") or not refs.get("summits"):
+            return False, f"{s}: no lists after the update ({refs})", res
+        if left:
+            return False, f"{s}: the update left {left} behind", res
+        new = t_file1 > res["before"]["mtime"]
+        return True, f"{s}: lists updated in {res['secs']} s ({len(res['progress'])} progress steps, " \
+                     f"{res['progress'][-1] if res['progress'] else 'no download needed'}), result {res['result']!r}: " \
+                     f"{refs.get('parks')} parks, {refs.get('summits')} summits, file {'new' if new else 'unchanged (the same lists)'}", res
+    except Refused as e:
+        return False, str(e), res
+
+
 # ---- the CW Keyboard's on-screen keyboard and Live ----
 
 def t_cwkbd_live(o, s, l):
@@ -3189,7 +3267,7 @@ COVERS = {
     "field-cq": (["field-cq-cw"], ["field-cq-ssb-voice"]),
     "prop-beacon": ([], ["prop-beacons-heard"]),
     "scanner": (["scanner-stop-and-hang", "scanner-holds-on-tx"], []),
-    "ft8-cq-grid": (["ft8-grid-4char", "ft8-cq-modifier"], []),
+    "ft8-cq-grid": ([], ["ft8-grid-4char", "ft8-cq-modifier", "ft8-compound-call"]),   # a standard call: not the bench's
     "ft8-retries": (["ft8-retries"], []),
     "ft8-auto-off": (["ft8-auto-off-manual"], []),
     "ft8-compound": (["ft8-compound-call"], []),
@@ -3228,6 +3306,7 @@ COVERS = {
     "panel-ptt": (["panel-ptt-ui-states", "ptt-option-tap", "link-stall-ptt-ends"], []),
     "panel-3min": (["panel-ptt-3min"], []),
     "pskreporter": (["pskreporter-upload", "settings-cluster-psk-reporter"], []),
+    "field-update-lists": (["field-update-lists"], []),
     "iq-offsets": (["tx-iq-offsets", "settings-txcal-iq-offsets"], []),
     "patched-rows": ([], ["tx-patched-base-levels", "tx-patched-base-processing", "tx-iq-balance",
                           "tx-x6100-gcfix5-pause-hold", "settings-audio-tx-audio-x6100", "settings-txcal-iq-balance",
@@ -3272,7 +3351,6 @@ PAIRS = [
     ("transverter", t_transverter, 70, "the transverter's 0.1 W limit at PWR 1 W; ATU refused there"),
     ("zero-power", t_zero_power, 60, "Line-in 0: a 0 W FT8 over and its 'TX 0 W' message"),
     ("agc-knee", t_agc_knee, 120, "the AGC Knee changes the audio over 0.1/0.3/1 W"),
-    ("cessb", t_cessb, 60, "CESSB on raises the average power of the same audio"),
     ("walkie", t_walkie, 70, "G's PTT with the walkie mic, the mic back after; G's ATU held tunes"),
     ("g-lamp", t_g_lamp, 40, "G's lamps on the air and after (pictures)"),
     ("scancfg-priority", t_scancfg_priority, 90, "SCAN CFG's PRIORITY catches a carrier; F3 SKIP passes it"),
@@ -3286,6 +3364,8 @@ PAIRS = [
 SINGLES = [
     # (name, fn, est, (sender, listener) by role names, "what")
     ("cw-peak-q x6200>x6100", t_cw_peak_q, 70, ("B", "A"), "the X6100's CW peak lowers a tone 300 Hz off"),
+    ("cessb x6200>x6100", t_cessb, 60, ("B", "A"), "the X6200's CESSB raises the average power of the same audio "
+     "(the X6100's needs a patched base)"),
     ("iq-offsets x6100>x6200", t_iq_offsets, 70, ("A", "B"), "the X6100's IQ offsets change its carrier"),
     ("patched-rows x6100", t_patched_rows, 40, ("A", "B"), "the patched-base rows hidden on the factory base"),
     ("moni x6100", t_moni, 40, ("A", "B"), "Moni 30 in the state, the X6100's own over on G (picture)"),
@@ -3306,6 +3386,10 @@ SINGLES = [
     ("iradio-tx", t_iradio_tx, 30, ("A", "B"), "Internet radio stops on TX (the owner's OK for the internet)"),
     ("rade-rx x6100>x6200", t_rade_rx, 60, ("A", "B"), "RADE: a recorded over decoded (the hand-mic session's)"),
     ("panel-3min", t_panel_3min, 200, ("A", "B"), "three minutes on the air at most (the owner's word)"),
+    ("field-update-lists x6100", t_field_update, 300, ("A", "B"), "Field Ops' Update list through the web page: "
+     "the ten lists downloaded, counted, nothing left behind"),
+    ("field-update-lists x6200", t_field_update, 300, ("B", "A"), "Field Ops' Update list through the web page: "
+     "the ten lists downloaded, counted, nothing left behind"),
 ]
 
 

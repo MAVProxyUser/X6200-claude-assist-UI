@@ -155,6 +155,7 @@ class Radio:
         self.tx, self.tx_since, self.ctl_mine, self.role = False, None, False, None
         self.ctl_who = None         # who has control, as the remote last said ("ctl WHO MINE"): none, local, tci, browser NAME
         self.tx_last = None         # (on, off) of the last over: the pad's rest above HARD_MAX_W
+        self.tx_hist = []           # [(when, on)]: every change of tx, the session's whole
         self.tx_off_at = 0.0       # when it last left TX (the radios' gate: one on the air at a time)
         self.last_msg = time.time()
         self.freqs = set()          # every dial it reported since snapshot(): the bands a test tuned it into
@@ -247,6 +248,9 @@ class Radio:
                         pass
 
     def _tx(self, on):
+        if on != self.tx:
+            self.tx_hist.append((time.time(), on))      # every change, kept (the lines' deque holds about a minute)
+            del self.tx_hist[:-4000]
         if on and not self.tx:
             self.tx_since = time.time()
         if not on:
@@ -1594,7 +1598,9 @@ def listener_gate(radio):
     return {"battery_pct": bat, "vbat": vbat, "dc_in": dc}
 
 
-def radio_tx_gate(radio, c, w):
+def radio_tx_gate(radio, c, w, rf_hz=None):
+    """rf_hz: what the base transmits on when it is not the dial (a transverter's IF: the dial 144.174 goes out on
+    28.174), checked against the amateur bands in its place"""
     if not radio.may_tx:
         raise Refused(f"{radio.name}: the harness's session there may not transmit")
     supply_gate(radio, w)
@@ -1609,7 +1615,7 @@ def radio_tx_gate(radio, c, w):
             time.sleep(rest)
     if radio.state.get("atu"):
         raise Refused(f"{radio.name}: the ATU is on (it tunes by transmitting): off first")
-    freq = int(radio.state.get("freq", 0))
+    freq = int(rf_hz if rf_hz is not None else radio.state.get("freq", 0))
     if not any(lo <= freq <= hi for lo, hi in HAM_HF):
         raise Refused(f"{radio.name}: {freq} Hz is outside the amateur bands")
     if abs(radio.pwr() - w) > 0.05:

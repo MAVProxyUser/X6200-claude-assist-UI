@@ -103,6 +103,31 @@ def common(key, value):
     return c is None or c.get("same", True) or all(x.get("ok") for x in c.get("radios", {}).values())
 
 
+def test_code(t):
+    """A test's own code as a fingerprint: the source of its function (the one a lambda wraps, by its defaults or its
+    closure). The tally ("passes/runs") counts from the last change to it: a test failed six times while it was being
+    fixed and passed the seventh read 1/7 (the owner, 2026-11-25: "several 1/7 passed, but never 7/7")"""
+    import hashlib
+    import inspect
+    fns, seen = [t.fn], []
+    while fns:
+        f = fns.pop()
+        if not callable(f) or not hasattr(f, "__code__") or f in seen:
+            continue
+        seen.append(f)
+        fns += list(f.__defaults__ or ()) + [c.cell_contents for c in (f.__closure__ or ())
+                                             if callable(getattr(c, "cell_contents", None))]
+    h = hashlib.sha1()
+    for f in seen:
+        if f.__name__ == "<lambda>":
+            continue
+        try:
+            h.update(inspect.getsource(f).encode())
+        except (OSError, TypeError):
+            h.update(f.__code__.co_code)
+    return h.hexdigest()[:12]
+
+
 def store_load():
     return bench.load_json(STORE, {})
 
@@ -230,7 +255,7 @@ $("tests").innerHTML=d.tests.map((x,i)=>{const failed=x.result&&x.result!=="PASS
 return `<tr class="${i===d.cur?"cur":""}"><td>${i+1}</td><td>${esc(x.name)}</td><td>${esc(x.role)}</td><td class="${(x.result||"").replace(" ","")}">${esc(x.result||(i===d.cur?"running":""))}${n?` <button onclick="tog(${i})" style="font:inherit;font-size:11px">pictures (${n})</button>`:""}</td><td>${x.secs!=null?x.secs.toFixed(0):""}</td><td class="says">${esc(x.says)}</td></tr>`+(n&&openPics.has(i)?`<tr><td></td><td colspan="5">${pics(x)}</td></tr>`:"");}).join("");
 const cs=r=>r?(r.ok?"takes it":"refuses")+(r.reads!=null?" (reads "+esc(JSON.stringify(r.reads))+")":"")+(r.err?" "+esc(r.err):""):"";
 $("caps").innerHTML=(d.caps_diff||[]).map(c=>`<tr><td>${esc(c.key)}</td><td class="says">${cs(c.radios.x6100)}</td><td class="says">${cs(c.radios.x6200)}</td></tr>`).join("")||"<tr><td class=muted colspan=3>not probed yet, or no difference</td></tr>";
-$("kept").innerHTML=(d.kept||[]).slice().sort((a,b)=>(b.at||0)-(a.at||0)).map(k=>`<tr><td>${esc(k.name)}</td><td class="${(k.result||"").replace(" ","")}">${esc(k.result)}${k.known?" (known)":""}${k.runs?" &middot; "+k.passes+"/"+k.runs+" passed":""}</td><td>${k.at?new Date(k.at*1000).toLocaleString():""}</td><td class="says">${esc(k.gui||"")}</td><td class="says">${esc(k.known||k.says)}</td></tr>`).join("");
+$("kept").innerHTML=(d.kept||[]).slice().sort((a,b)=>(b.at||0)-(a.at||0)).map(k=>`<tr><td>${esc(k.name)}</td><td class="${(k.result||"").replace(" ","")}">${esc(k.result)}${k.known?" (known)":""}${k.runs?" &middot; "+k.passes+"/"+k.runs+" passed since its code last changed"+(k.all_runs&&k.all_runs!==k.runs?" ("+k.all_passes+"/"+k.all_runs+" in all)":""):""}</td><td>${k.at?new Date(k.at*1000).toLocaleString():""}</td><td class="says">${esc(k.gui||"")}</td><td class="says">${esc(k.known||k.says)}</td></tr>`).join("");
 const show={cmd:$("fcmd").checked,conf:$("fconf").checked,radio:$("fradio").checked};
 $("ev").innerHTML=d.events.slice().reverse().filter(e=>show[e.kind]!==false).map(e=>`<div class="${e.kind}">${t(e.t)} ${e.test?"["+esc(e.test)+"] ":""}${esc(e.text)}</div>`).join("");}
 const openPics=new Set();function tog(i){openPics.has(i)?openPics.delete(i):openPics.add(i);tick();}
@@ -6280,8 +6305,13 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
                     if res == "PASS":
                         st.tests[i]["shots"] = []       # pictures only for what did not pass
                 prev = store_load().get(t.name, {})
-                tally = {"runs": prev.get("runs", 0) + 1, "passes": prev.get("passes", 0) + (res == "PASS"),
-                         "fails": prev.get("fails", 0) + (res == "FAIL")}
+                code = test_code(t)
+                same = prev.get("code") == code             # none yet (before the fingerprint): counts afresh
+                tally = {"runs": (prev.get("runs", 0) if same else 0) + 1,
+                         "passes": (prev.get("passes", 0) if same else 0) + (res == "PASS"),
+                         "fails": (prev.get("fails", 0) if same else 0) + (res == "FAIL"),
+                         "all_runs": prev.get("all_runs", prev.get("runs", 0)) + 1,
+                         "all_passes": prev.get("all_passes", prev.get("passes", 0)) + (res == "PASS"), "code": code}
                 store_put(t.name, {"result": res, "says": says, "at": time.time(), "secs": round(time.time() - t0, 1),
                                    "gui": hello(o.r[A]), "run": os.path.basename(st.run_dir), **tally})
                 st.ev(f"{res} {t.name}: {says}", "ok" if res == "PASS" else "bad")
