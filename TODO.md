@@ -111,6 +111,13 @@ Done 2026-11-25 night (the same asks, continued):
   settings' volume back after. Of this morning's suspects only that write is not ruled out: first try tx_player on a
   no-ALC base leaving the codec as TCI does (orch ft8-copies x6200 against ft8-copies x6200 tci, the skirt 55-170 Hz
   off). Then the meters' reads and the keepalive's register block, one at a time.
+  Read in the recordings (09:10): the apps' overs at 0.1 W carry 7-13 % AM noise, flat 1-50 Hz with no lines; at 1 W
+  1.0 %; TCI's same FT8 at 0.1 W 0.4 %. The X6200's play volume is the codec's AIF1 DA0 (digital, 160 = 0 dB): the
+  apps put it at total + 6 dB (-3.4 dB at their learned 0, -17 dB in the morning's "app at TCI's level" try, which so
+  lowered the codec, not the samples); TCI leaves it at 0 dB and plays at -23 dBFS for 1 W less 10 dB at 0.1 W. And
+  TCI plays through the low-latency stream (audio_play_lowlat), the apps through the normal one (the morning's stream
+  try was a 300 ms stream of its own, not that one). So two tries, one at a time: (1) tx_player without the AIF1 DA0
+  write, its samples scaled instead; (2) tx_player through TCI's low-latency stream.
 
 Done 2026-11-24 evening (the owner: "get the over the air test coverage hammered out in full", "EVERY test should use
 the same unified framework to sync the radios or make exceptions for tests so that there is NO deviation"):
