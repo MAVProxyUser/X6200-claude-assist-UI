@@ -6924,6 +6924,12 @@ solid.
   that follows the station inside the CW filter, a detector with a noise
   floor, and a time classifier that learns the speed, 10 to 50 WPM (in the
   [CW Trainer](#cw-trainer) from 5).
+- A station back after a quiet is taken up at once: the decoder keeps the
+  station it last held (a tone 10 dB and more over the noise) and goes back
+  to it the moment it is on the air again. Up to v0.3.12.48, in a quiet of
+  a few seconds the tracker went to a faint line of the band's noise and
+  held it, and the station's first characters were lost or misread
+  ("TEST" as "T ST").
 - It looks for the tone from 150 Hz up, however low the CW filter starts:
   under it are the keying's thumps, not a tone. Up to v0.3.12.47 a CW filter
   from 0 Hz let it lock on them in a strong signal's loud audio (the X6100

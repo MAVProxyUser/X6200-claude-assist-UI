@@ -3,6 +3,7 @@
 # /usr/local). `make` builds it and runs test.sh, the host check: a recording of the X6100's audio of the X6200's CW
 # over the bench cable must copy with the CW filter from 0 Hz (TONE_MIN_HZ). By hand: `python3 replay.py
 # RECORDING.wav [LO HI [FLOOR_DB]]`. Found the CW filter from 0 Hz that locked it on 20 Hz (2026-11-23).
+# And a text after a quiet: the lock taken back by the station held before (2026-11-25).
 TOP  := ../..
 S    := $(TOP)/src/cw_decoder
 DEPS ?= $(TOP)/build-host/deps

@@ -22,5 +22,15 @@ check 300 3000
 # ~200 ms early and printed "VVTESTZEQ1TST"; a key down must now be a rise (key_detector.cpp RISE_DB). The radios'
 # CW filter, 400-6000 Hz
 check 400 6000 x6100_cw_on_x6200.s16
+# A text after a quiet (2026-11-25): the X6100's audio of the X6200's TCI CW, then 8 s with nothing on the air, then
+# "TEST". In the quiet the lock went to a line of the X6100's noise at 297 Hz and held it; the station back, the lock
+# stayed on the line, or went back to it in every gap, and the decoder printed "T ST" or "EEIT". The station held
+# before now takes the lock back at once (tone_lock.cpp HELD_SNR): the text must end "VE TEST"
+n=$((n + 1))
+out=$(S16=1 ./cw_replay 300 1100 8 21 < x6200_text_after_quiet_on_x6100.s16 2> /dev/null)
+case $out in
+    *"Q1TST"*"VE TEST "*) echo "ok   a text after a quiet: $out" ;;
+    *) echo "FAIL a text after a quiet: $out"; bad=$((bad + 1)) ;;
+esac
 echo "cw_replay: $n checks, $bad failed"
 [ $bad -eq 0 ]

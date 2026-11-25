@@ -28,6 +28,8 @@ constexpr float PLL_FULL_SNR = 5.0f;
 
 /* Moving the lock needs the peak 2 bins away from it */
 constexpr float MOVE_BINS    = 2.0f;
+/* A tone held this far over the noise (smoothed run power) is a station the lock goes back to when it returns */
+constexpr float HELD_SNR     = 10.0f;
 
 /* A strong station 50 Hz off leaks enough into our bin to look "alive" here.
  * Strong frames where our bin stays 12 dB under the peak count +1, others -2
@@ -111,6 +113,20 @@ bool ToneLock::follow(const PeakReport &peak) {
     }
     if (peak.steady < PEAK_STEADY_MIN)
         return false;
+
+    /* The station held before (a tone 10 dB and more over the noise), back after a quiet in which the lock went to a
+     * line of the band's noise and held that: back on it at once, and here at once, not after 256 ms of it, which a
+     * dit or a short dah never reach. Before, the line kept the lock until half a second of the station had shown it
+     * was not here, and the station's first characters were lost; or the lock went back to the line in every gap and
+     * each element started the lock and the element timer over (2026-11-25: the X6200's TEST, 8 s after its last
+     * text, copied 'T ST' by the X6100, whose audio has a line at 297 Hz) */
+    if (held_hz_ > 0.0f && std::fabs(peak.hz - held_hz_) < MOVE_BINS * BIN_HZ &&
+        std::fabs(hz() - held_hz_) >= MOVE_BINS * BIN_HZ) {
+        tune(peak.hz);
+        alive_runs_ = HOLD_RUNS;
+        quiet_runs_ = 0;
+        return true;
+    }
 
     /* Our station is (still) here: keep it, unless the strong frames show it is
      * only the skirt of another one */
@@ -200,6 +216,8 @@ void ToneLock::every_4_steps(std::complex<float> mean) {
         last_dir_ = dir;
     }
     alive_ = alive;
+    if (holding() && level_ > HELD_SNR * noise4_)
+        held_hz_ = hz();      /* a station, not a line of the noise (those sit a few dB over it) */
 }
 
 } // namespace cw

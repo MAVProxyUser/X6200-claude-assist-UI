@@ -2,6 +2,7 @@
 // stdin: raw float32 mono at 4000 Hz (the receiver's rate; replay.py makes it from a WAV), or with S16=1 16-bit
 // little-endian, full scale 2.0 (test.sh's recording: the radio's audio peaks over 1). Args: band_lo band_hi
 // floor_db [expect_wpm] (the CW filter's edges, Dec SNR). KEYS=1: each key down and up on stderr, by time
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -31,13 +32,20 @@ int main(int argc, char **argv) {
     std::vector<int16_t> s16(buf.size());
     bool   is_s16 = getenv("S16") != nullptr;
     size_t n;
-    float last_wpm = -1;
+    float last_wpm = -1, last_lock = 0;
     while ((n = is_s16 ? fread(s16.data(), sizeof(int16_t), s16.size(), stdin)
                        : fread(buf.data(), sizeof(float), buf.size(), stdin)) > 0) {
         if (is_s16)
             for (size_t i = 0; i < n; i++) buf[i] = s16[i] / 16384.0f;
         rx->feed(buf.data(), n);
         t += n / 4000.0;
+        if (getenv("LOCKS") && std::abs(rx->lock_hz() - last_lock) >= 5.0f) {
+            /* LOCKS=1: each move of the tone lock, by time (a lock that wanders in a quiet and comes back resets the
+             * element timer: the first characters after it lost) */
+            fprintf(stderr, "%7.3f lock %.0f -> %.0f Hz (peak %.0f Hz, snr %.1f)\n", t, last_lock, rx->lock_hz(),
+                    rx->peak_hz(), rx->snr_db());
+            last_lock = rx->lock_hz();
+        }
         if (rx->wpm() != last_wpm) {
             fprintf(stderr, "%6.2f s: wpm %.1f lock %.0f Hz peak %.0f Hz snr %.1f\n", t, rx->wpm(), rx->lock_hz(),
                     rx->peak_hz(), rx->snr_db());

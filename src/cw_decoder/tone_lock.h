@@ -77,6 +77,7 @@ class ToneLock {
     int   quiet_runs_ = GONE_RUNS;    /* runs since it was last there (starts "gone") */
     int   alive_runs_ = 0;            /* runs it has been there, up to HOLD_RUNS */
     int   elsewhere_  = 0;            /* evidence that the strong frames are not here */
+    float held_hz_    = -1.0f;        /* the last station held here (holding()), -1 none yet */
 };
 
 } // namespace cw
