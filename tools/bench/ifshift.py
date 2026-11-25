@@ -42,6 +42,7 @@ def main():
     for r in (tx, rx):
         r.take_control()
         snaps[r.name] = bench.snapshot(r)
+    decl = None
     try:
         bench.listener_gate(rx)
         bench.open_page(rx, "G")
@@ -62,8 +63,13 @@ def main():
                 rx.send(f"set ifs {s}")
                 marks.append((time.time(), s))
                 time.sleep(STEP_S)
+        # the listener's IF shift is what this measures: declared in the one registry (bench.apart, the owner,
+        # 2026-11-24: "NO deviation"), till it is back at 0 (2026-11-25: undeclared, the Watch stopped the over)
+        decl = bench.apart({"ifs": bench.STEPPED}, f"if-shift: {rx.name}'s IF shift stepped through {SHIFTS} Hz, "
+                                                   f"what the test measures")
+        decl.__enter__()
         watch = bench.Watch([tx, rx], c, expect_dbm=10 * math.log10(bench.FIRST_PROBE_W * 1000) - total, listener=rx,
-                            w=bench.FIRST_PROBE_W, label=f"IF shift {tx.name} to {rx.name}", pair_ignore=("ifs",))   # its IF shift on purpose
+                            w=bench.FIRST_PROBE_W, label=f"IF shift {tx.name} to {rx.name}", pair_ignore=("ifs",))
         try:
             bench.arm(tx, True, mode=3)
             bench.tx_log({"who": tx.name, "f": F, "w": tx.pwr(), "what": "IF shift test"})
@@ -120,6 +126,11 @@ def main():
         print(f"REFUSED {e}")
     finally:
         rx.send("set ifs 0")
+        if decl is not None:
+            end = time.time() + 5
+            while rx.state.get("ifs") not in (0, None) and time.time() < end:
+                time.sleep(0.1)
+            decl.__exit__(None, None, None)
         bench.finish([tx, rx], snaps, report=rep)
     return 0 if ok else 1
 

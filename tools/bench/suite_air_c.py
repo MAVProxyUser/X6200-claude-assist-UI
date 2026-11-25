@@ -1600,10 +1600,14 @@ def b_tci_level(P):
                    f"{scaled})")
     else:
         r1, r2, r3, r4 = rows
-        at01 = 0.05 <= r1["meter"] <= 0.16
         at1 = 0.7 <= r2["meter"] <= 1.3
         span = r2["lvl"] - r1["lvl"]
         ten = 6.0 <= span <= 14.0
+        # the meter at 0.1 W: 0.05-0.16, or under 0.05 with the power proved by the listener (heard, 10 dB under the
+        # 1 W over): the X6100's factory base's reading is whole tenths cut off, a true 0.09 W reads 0.0 (2026-11-25,
+        # the listener 10.0 dB apart)
+        at01 = 0.05 <= r1["meter"] <= 0.16 or (r1["meter"] < 0.05 and ten and at1 and r1["rise"] is not None and
+                                                r1["rise"] >= HEARD_DB)
         same = r3["meter"] >= 0.6 and r4["meter"] >= 0.6 and abs(10 * math.log10(r4["meter"] / r3["meter"])) <= 1.5
         ok = heard_all and at01 and at1 and ten and same
         if not ok and heard_all and at1 and ten and same and 0.16 < r1["meter"] <= 0.45:

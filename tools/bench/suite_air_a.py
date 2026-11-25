@@ -668,6 +668,13 @@ def ptt_over(ctx, mode, secs, during=None, w=FIRST, what="PTT", ignore=()):
 
 def tci_over(ctx, plan=None, file=None, mode=3, w=FIRST, max_s=None, during=None, amp=0.3, fade=0.05, what="TCI",
              ignore=()):
+    """_tci_over, once more after a link's stall stopped it (bench.once_more_after_stall)"""
+    return bench.once_more_after_stall([ctx.snd, ctx.lis], lambda: _tci_over(ctx, plan, file, mode, w, max_s, during,
+                                                                             amp, fade, what, ignore), what)
+
+
+def _tci_over(ctx, plan=None, file=None, mode=3, w=FIRST, max_s=None, during=None, amp=0.3, fade=0.05, what="TCI",
+              ignore=()):
     """The sender armed and fed through its own TCI (tci_tone_tx.py on it: plan [[hz, s], ...], or file, 16-bit 24 kHz
     audio already on the radio) in mode at w, watched; during(o) while it sends. The sender stopped, off the air,
     control back and locked again whatever happens. o: on, sent (its begin and end here), off, peak_w, deaf"""
@@ -1368,8 +1375,9 @@ def comp_audio(path):
 
 def two_levels(x):
     """The loud and the soft steps in received audio (24 kHz, the 1000 Hz band only, 10 ms frames): the median of each
-    kind's middle frames in dBFS, the steps timed from the onset (15 dB over the quiet start), the first two pairs left
-    out (the loops' and the compressor's start); (None, None) when not found"""
+    kind's middle frames in dBFS. The steps' phase is the one that sets the two kinds furthest apart over the whole
+    over (an onset fell on a soft step when the first 0.15 s went out late, 2026-11-25, and swapped them), its first
+    and last 0.6 s left out (the loops' and the compressor's start, the fade); (None, None) when not found"""
     import numpy as np
     fs, n = 24000, 240
     if len(x) < fs:
@@ -1378,22 +1386,27 @@ def two_levels(x):
     f = np.fft.rfftfreq(len(x), 1 / fs)
     X[(f < 900) | (f > 1100)] = 0
     y = np.fft.irfft(X, len(x))
-    lv = [20 * math.log10(np.sqrt(np.mean(y[i:i + n] ** 2)) + 1e-12) for i in range(0, len(y) - n, n)]
+    lv = np.array([20 * math.log10(np.sqrt(np.mean(y[i:i + n] ** 2)) + 1e-12) for i in range(0, len(y) - n, n)])
     if len(lv) < 60:
         return None, None
     quiet = float(np.median(lv[:20]))
-    on = next((i for i, v in enumerate(lv) if v > quiet + 15), None)
-    if on is None:
+    on = np.where(lv > quiet + 10)[0]
+    if len(on) < 120:
         return None, None
     per = n / fs
-    loud, soft = [], []
-    for k in range(4, 2 * COMP_PAIRS):
-        a, b = on * per + k * COMP_SEG_S + 0.04, on * per + (k + 1) * COMP_SEG_S - 0.03
-        seg = [v for i, v in enumerate(lv) if a <= i * per <= b]
-        (loud if k % 2 == 0 else soft).extend(seg)
-    if len(loud) < 20 or len(soft) < 20:
-        return None, None
-    return float(np.median(loud)), float(np.median(soft))
+    a, b = on[0] + int(0.6 / per), on[-1] - int(0.6 / per)
+    step = int(round(COMP_SEG_S / per))         # frames a step
+    idx = np.arange(a, b)
+    best = None
+    for ph in range(2 * step):
+        k = (idx - ph) % (2 * step)
+        mid = lambda lo: idx[(k >= lo + 4) & (k <= lo + step - 3)]       # noqa: E731 (a step's middle frames)
+        if len(mid(0)) < 20 or len(mid(step)) < 20:
+            continue
+        loud, soft = float(np.median(lv[mid(0)])), float(np.median(lv[mid(step)]))
+        if best is None or loud - soft > best[0] - best[1]:
+            best = (loud, soft)
+    return best if best else (None, None)
 
 
 def body_comp(ctx):
@@ -1452,7 +1465,14 @@ def body_comp(ctx):
             return None, says + ("; no compression seen in USB: on Xiegu's own X6100 base the manual leaves Comp "
                                  "unmeasured")
         return data, says + ("" if data else "; USB-D CHANGED with Comp (the X6100's base leaves the data modes out)")
-    return voice, says + ("" if voice else "; no compression in USB") + ("" if data else " (USB-D changed too: said)")
+    if not voice:
+        # TCI's audio goes in as the modem's (radio_set_modem), and on the X6200 Comp left it alone in USB as in USB-D
+        # (2026-11-25: 16.9 dB at 1:1, 17.4 at 4:1, steps the power loop does not level): its base keeps Comp for the
+        # mic's voice (MANUAL: "It is for your voice"). Judged through the mic (the other radio's speaker into it,
+        # acoustic.py's path) next: TODO
+        return None, says + ("; Comp leaves TCI's audio alone, USB as USB-D (it goes in as the modem's; Comp is the "
+                             "mic's voice processing): to be judged through the mic")
+    return voice, says + ("" if data else " (USB-D changed too: said)")
 
 
 def t_comp(run):

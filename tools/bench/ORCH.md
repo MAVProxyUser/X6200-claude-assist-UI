@@ -136,6 +136,7 @@ The declarations in the tests today (each with its reason in the code):
 | air smeter-front-end | `pre`, `att`, `rfg` STEPPED: the listener's own Measure steps them, then the test does |
 | air keys-with-ptt | `nr`, `nb` STEPPED: DFN turns them under PTT |
 | air sentry-lock | `freq`, `mode`, `filter`, `agc`, `zoom` STEPPED: A's scan moves the listener (the subject) |
+| air paths if-shift | `ifs` STEPPED: the listener's IF shift stepped through +-2000 Hz, what it measures |
 
 sim_test.py checks the framework itself (every rule, the Watch reading the registry, transitions, sync_pair).
 

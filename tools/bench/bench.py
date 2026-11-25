@@ -1578,6 +1578,35 @@ def radio_tx_gate(radio, c, w):
         raise Refused(f"{radio.name}: its power reads {radio.pwr()} W, not the {w} W asked")
 
 
+def gui_pids(radios):
+    """Each radio's GUI process (pidof x6100_gui), None when it could not be read: a link's stall leaves it, a crash
+    changes it"""
+    out = {}
+    for r in radios:
+        try:
+            out[r.name] = ssh(r.host, "pidof x6100_gui", timeout=15).strip() or None
+        except Exception:               # noqa: BLE001 (the link to it down: unknown)
+            out[r.name] = None
+    return out
+
+
+def once_more_after_stall(radios, fn, what):
+    """fn() (an over); once more when a Watch stopped it for a radio's silent link and every GUI is the same process
+    after: a WiFi stall (the X6200's, 3-6 s now and then: ORCH_FINDINGS 2026-11-23), no fault of what the over tests.
+    Never after a crash (a new GUI process) or any other stop"""
+    pids = gui_pids(radios)
+    try:
+        return fn()
+    except Refused as e:
+        if "no word from" not in str(e) or any(v is None for v in pids.values()):
+            raise
+        time.sleep(2.0)
+        if gui_pids(radios) != pids:
+            raise
+        say(f"{what}: stopped by a stalled link ({e}); the GUIs the same processes: the over once more")
+        return fn()
+
+
 def stale_limit(r, listener=None):
     """How long r may go unheard before a Watch stops the over: STALE_HELD_S for a radio off the air at its last word
     that cannot go on it unseen (its TX locked, rxo 1; or the over's listener in an app that keys only when told to,

@@ -515,6 +515,28 @@ def main():
           (lambda j: bench.stale_limit(j, j))(R(False, rxo=0, app="JS8")) == bench.STALE_S,
           "a stall stops the over at STALE_S for a radio on the air, a sender in WeFax, or one in an app that keys "
           "by itself")
+    # an over a stall stopped runs once more when the GUIs are the same processes; never after a crash or another stop
+    real = bench.gui_pids
+    try:
+        for pids_after, err, want in (("same", "no word from simB for 6.1 s", 2), ("new", "no word from simB", 1),
+                                      ("same", "two radios on the air at once", 1)):
+            seq = iter([{"simA": "11", "simB": "22"}, {"simA": "11", "simB": "22" if pids_after == "same" else "33"}])
+            bench.gui_pids = lambda radios, seq=seq: next(seq)
+            calls = []
+
+            def over(err=err):
+                calls.append(1)
+                if len(calls) == 1:
+                    raise bench.Refused(f"stopped: {err}")
+                return "done"
+            try:
+                got = bench.once_more_after_stall([], over, "sim over")
+            except bench.Refused:
+                got = None
+            check(len(calls) == want and (got == "done") == (want == 2),
+                  f"an over stopped by '{err}', the GUIs {pids_after} after: run {len(calls)} time(s)")
+    finally:
+        bench.gui_pids = real
     # ---- finish leaves the dial where the test left it (the owner, 2026-11-23: "simply leave the radio on the last
     # frequency it was on ... short of simply being on the same screen") ----
     bench.LEAVE_TUNING = True
