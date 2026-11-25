@@ -150,6 +150,15 @@ def link():
     return None
 
 
+def nm_log_tail(lines=25):
+    """NetworkManager's last log lines, for a failure's message (why a link did not come up)"""
+    try:
+        with open(os.path.join(work, "nm.log")) as f:
+            return "NetworkManager's log:\n" + "".join(f.readlines()[-lines:])
+    except (OSError, TypeError):
+        return "no NetworkManager log"
+
+
 def until(get, want, secs=20):
     """get() once it gives want, or what it gives after secs"""
     end = time.monotonic() + secs
@@ -189,6 +198,11 @@ def setUpModule():
         os.makedirs(d, exist_ok=True)
     with open("/etc/NetworkManager/NetworkManager.conf", "w") as f:
         f.write(NM_CONF)
+    # Ubuntu's /usr/lib/NetworkManager/conf.d/10-globally-managed-devices.conf leaves every device but WiFi and
+    # modems unmanaged, the test's dummy link too (it never came up on CI's runner): masked by an empty file of
+    # its name in /etc's conf.d, as Ubuntu's desktops do. Harmless where it is not
+    os.makedirs("/etc/NetworkManager/conf.d", exist_ok=True)
+    open("/etc/NetworkManager/conf.d/10-globally-managed-devices.conf", "w").close()
     with open(os.path.join(work, "bus.conf"), "w") as f:
         f.write(BUS_CONF)
     log = open(os.path.join(work, "nm.log"), "w")
@@ -334,7 +348,7 @@ class WifiRestore(unittest.TestCase):
 
     def test_network_in_use_replaced(self):
         self.have("Ethernet.nmconnection", wired(UUID_ETH, "10.9.0.2"))
-        self.assertEqual(until(link, (UUID_ETH, "10.9.0.2/24")), (UUID_ETH, "10.9.0.2/24"))
+        self.assertEqual(until(link, (UUID_ETH, "10.9.0.2/24")), (UUID_ETH, "10.9.0.2/24"), nm_log_tail())
         r = self.restore({"wifi/Ethernet.nmconnection": wired(UUID_ETH_OTHER, "10.9.0.3")})
         self.assertEqual(link(), (UUID_ETH, "10.9.0.2/24"))     # the answer went out on the link it came in on
         self.assertEqual((r["restored"], r["failed"]), (["wifi"], {}))

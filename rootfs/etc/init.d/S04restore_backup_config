@@ -25,15 +25,17 @@ backup() {
     for f in /etc/NetworkManager/system-connections/* /etc/ssh/*_key* /root/.ssh/*; do
         [ -f "$f" ] && echo "${f#/}"
     done > $list
-    # into a temporary file first: a power cut during the write leaves the previous backup
-    set -o pipefail
-    if [ -s $list ] && tar cf - -C / -T $list 2>/dev/null | gzip > "${BACKUP_PATH}.tmp"; then
+    # into a temporary file first: a power cut during the write leaves the previous backup. tar's own failure counts
+    # too, marked by a file: a pipeline's status is gzip's, and `set -o pipefail` is not POSIX (dash, the sh of
+    # tools/wifi_restore's host test on Ubuntu, refuses it with exit 2, and the copy was never made there)
+    rm -f $list.failed
+    if [ -s $list ] && { tar cf - -C / -T $list 2>/dev/null || : > $list.failed; } | gzip > "${BACKUP_PATH}.tmp" &&
+            [ ! -e $list.failed ]; then
         mv -f "${BACKUP_PATH}.tmp" "${BACKUP_PATH}"
     else
         rm -f "${BACKUP_PATH}.tmp"
     fi
-    set +o pipefail
-    rm -f $list
+    rm -f $list $list.failed
 }
 
 # What may come back, as the archive names them (no leading /): what backup() writes, the files right in the
