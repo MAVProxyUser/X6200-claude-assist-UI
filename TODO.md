@@ -80,7 +80,8 @@ Done 2026-11-25 night (the same asks, continued):
   Left: the X6200's noise in CW has a 17 dB hump at the key tone (its base's CW filter), against which every tone is
   judged; after a strong signal near its passband (the X6100's path proof: its S-meter -121 -> -79 dBm) its decoder
   stays trapped printing noise and runs fast into the next text (cw-carrier x6100>x6200's quiet, now and then cw-kbd's
-  'TTT TTT'). Six tries reverted (ORCH_FINDINGS). Next to try: Receiver::start_over when the S-meter falls 20 dB and
+  'TTT TTT', and tci-cw x6100>x6200's 'TTTET TTTT T T TTT', which its attribution then lays on the X6100's base).
+  Six tries reverted (ORCH_FINDINGS). Next to try: Receiver::start_over when the S-meter falls 20 dB and
   more after a second or more up (dsp_psd carries smeter_dbm), so the band is measured again once a strong signal ends;
   needs a TX round (the chain-ok word).
 - The apps on the X6200 under 1 W hold their level as TCI's do (tx_player coarse; tools/txlevel: -3.0 dB in 20 overs
