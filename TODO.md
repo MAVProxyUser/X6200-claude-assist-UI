@@ -104,6 +104,12 @@ Done 2026-11-25 night (the same asks, continued):
   X6200's misread of the X6100's elements.
 - Left: the apps' TX stream on the X6200 (the skirt); the X6200's Comp (a third source); the X6100's +61.4 Hz line (a
   third receiver).
+- The skirt, read in the code (2026-11-25 08:40, for the next TX round): on the X6200 (no ALC) TCI's path never
+  writes the codec's play volume (tx_hold.c: alc false, codec_db 0, the samples alone scaled), while tx_player writes
+  it at every over's start (audio_set_play_vol(total + 6), the samples at total less what the codec took) and puts the
+  settings' volume back after. Of this morning's suspects only that write is not ruled out: first try tx_player on a
+  no-ALC base leaving the codec as TCI does (orch ft8-copies x6200 against ft8-copies x6200 tci, the skirt 55-170 Hz
+  off). Then the meters' reads and the keepalive's register block, one at a time.
 
 Done 2026-11-24 evening (the owner: "get the over the air test coverage hammered out in full", "EVERY test should use
 the same unified framework to sync the radios or make exceptions for tests so that there is NO deviation"):
