@@ -50,8 +50,25 @@ bool ham_band_of(int32_t hz, int32_t *lo, int32_t *hi) {
 }
 
 /* A transverter's range starts at 70 MHz (its from's minimum), above every band here */
+/* GMRS (47 CFR 95.1763): the 462 MHz channels (1-7, 15-22) and the 467 MHz ones (8-14 and the repeater inputs of
+ * 15-22), each 25 kHz block's edges half a channel past its outermost channels. Only transmitters certified for GMRS
+ * may send there (95.1761): never this radio through a transverter, nor an SDR */
+static const struct {
+    int32_t lo, hi;
+} gmrs[] = {
+    {462537500, 462737500},
+    {467537500, 467737500},
+};
+
+bool ham_gmrs(int64_t hz) {
+    for (size_t i = 0; i < sizeof(gmrs) / sizeof(gmrs[0]); i++)
+        if (hz >= gmrs[i].lo && hz <= gmrs[i].hi) return true;
+    return false;
+}
+
 ham_tx_t ham_tx_check(int32_t hz, bool hw_tx, bool xvtr, bool any) {
     if (!hw_tx) return HAM_TX_RX_ONLY;
+    if (ham_gmrs(hz)) return HAM_TX_GMRS;
     if (xvtr || any || ham_band_of(hz, NULL, NULL)) return HAM_TX_OK;
     return HAM_TX_OFF_BAND;
 }

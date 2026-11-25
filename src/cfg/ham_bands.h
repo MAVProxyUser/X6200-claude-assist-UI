@@ -24,14 +24,20 @@ typedef enum {
     HAM_TX_OFF_BAND,    /* HF outside the amateur bands, with TX outside them off */
     HAM_TX_OFF_RANGE,   /* outside South Korea's ranges or the own list (tx_ranges.h, #247), whatever the switch */
     HAM_TX_NO_RANGES,   /* the own list chosen with no range in it: nowhere (tx_ranges.h) */
+    HAM_TX_GMRS,        /* GMRS (47 CFR 95E, gmrs.h): only radios certified for it, never this one, a transverter's
+                         * or an SDR's, whatever the switch or the ranges */
 } ham_tx_t;
 
 /* The amateur band hz is in, its edges into *lo and *hi (Hz, both in; either may be NULL); false: none. Any thread */
 bool ham_band_of(int32_t hz, int32_t *lo, int32_t *hi);
 
 /* hw_tx: the hardware transmits at hz (band_use). xvtr: a transverter that is on covers hz. any: Settings > TX Cal >
- * TX outside ham bands on */
+ * TX outside ham bands on. GMRS's channels are HAM_TX_GMRS whatever xvtr and any say */
 ham_tx_t ham_tx_check(int32_t hz, bool hw_tx, bool xvtr, bool any);
+
+/* hz is on GMRS's channels or their repeater inputs, half a 25 kHz channel either side: 462.5375-462.7375 and
+ * 467.5375-467.7375 MHz (gmrs.h; tools/gmrs checks every channel inside). Any thread */
+bool ham_gmrs(int64_t hz);
 
 /* What the SWR scan sweeps on the amateur band freq is in: [*lo, *hi] no wider than the band list's active rows (start
  * and stop, Hz, n of them) that lie inside that band. Those follow the IARU region where this table is the union of all

@@ -1287,6 +1287,7 @@ bool radio_say_no_tx(const char *what, int32_t freq, bool now) {
         switch (cfg_tx_check(freq)) {
             case HAM_TX_OFF_RANGE: msg_schedule_text_fmt("TX ranges: Settings > TX Cal"); break;
             case HAM_TX_NO_RANGES: msg_schedule_text_fmt("No TX ranges: Settings > TX Cal"); break;
+            case HAM_TX_GMRS: msg_schedule_text_fmt("GMRS: certified radios only"); break;   /* a transverter's */
             default:
                 msg_schedule_text_fmt("%s", cfg_is_tx_freq(freq) ? "Out of band: Settings > TX Cal" : "Receive only there");
                 break;

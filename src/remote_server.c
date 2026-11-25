@@ -331,6 +331,7 @@ typedef struct {
     char    win[24];        /* the app whose window is open (main_screen_window_name), "" for none */
     char    pg[2];          /* the Sentry's page, "A"-"G" or "S" (app_sentry_page), "" when it is not open */
     char    fp[24];         /* this radio's fingerprint (radio_fingerprint), for the bench's calibration files */
+    app_sentry_sdr_t sdr;   /* B and G on the SDR (app_sentry_sdr_state): the bench's GMRS test reads them */
 } pstate_t;
 
 /* A change asked by a panel client, for the LVGL thread */
@@ -345,7 +346,9 @@ typedef enum { P_FREQ, P_MODE, P_AGC, P_PRE, P_ATT, P_NB, P_NR, P_SQL, P_RFG, P_
                 * check): split, RIT and XIT, and what the speaker plays (the Sentry's LISTEN, for now) */
                P_SPLIT, P_RIT, P_XIT, P_HEARD, P_IFS, P_COMP, P_WCH,
                /* TUNE's own power (tenths), for the bench's tune tests, set and put back as found */
-               P_TPWR, P_KT } pcmd_id_t;
+               P_TPWR, P_KT,
+               /* B's channel and G's SDR channel (app_sentry.h), for the bench's SDR tests (GMRS, receive only) */
+               P_BCH, P_GSDR, P_GMP } pcmd_id_t;
 
 typedef struct {
     pcmd_id_t id;
@@ -1204,6 +1207,9 @@ static void panel_apply(void *arg) {
         case P_COMP:   param_i_set(cfg_comp, LV_CLAMP(1, p->a, 8)); break;
         /* G's own channel, its memory only (the bench puts it back as found): 0 none, a frequency this radio tunes */
         case P_WCH:    app_sentry_g_channel_set(p->a, LV_CLAMP(-1, p->b, (int32_t)radio_mode_last)); break;
+        case P_BCH:    app_sentry_b_channel_set(p->a); break;
+        case P_GSDR:   app_sentry_g_sdr_set(p->a); break;
+        case P_GMP:    app_sentry_gmrs_panel(p->a != 0); break;
         case P_TPWR:   /* the Settings slider's range (tune_tx.h) */
             cfg_tune_pwr_set(LV_CLAMP((int)lroundf(TUNE_PWR_MIN_W * 10), p->a, (int)lroundf(TUNE_PWR_MAX_W * 10))
                              / 10.0f);
@@ -1239,7 +1245,7 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
         {"linein", P_LINEIN},
         {"split", P_SPLIT}, {"rit", P_RIT}, {"xit", P_XIT}, {"heard", P_HEARD},
         {"ifs", P_IFS},   {"comp", P_COMP}, {"wch", P_WCH}, {"tpwr", P_TPWR},
-        {"kt", P_KT},
+        {"kt", P_KT},     {"bch", P_BCH},   {"gsdr", P_GSDR}, {"gmp", P_GMP},
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strcasecmp(names[i].name, name))
@@ -1258,6 +1264,12 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
             set_refused(c, "freq: not a frequency this radio tunes");
         else if (names[i].id == P_WCH && a != 0 && !cfg_is_valid_hw_freq(a))
             set_refused(c, "wch: not a frequency this radio tunes");
+        else if (names[i].id == P_BCH && app_sentry_page() != 'B')
+            set_refused(c, "bch: only while the Sentry shows B");
+        else if (names[i].id == P_GSDR && app_sentry_page() != 'G')
+            set_refused(c, "gsdr: only while the Sentry shows G");
+        else if (names[i].id == P_GMP && app_sentry_page() != 'F')
+            set_refused(c, "gmp: only while the Sentry shows F");
         else if (names[i].id == P_IFS && !(radio_caps() & HW_CAP_IF_SHIFT))
             set_refused(c, "ifs: this radio's base has no IF shift");   /* the X6200's: only the dial would move */
         else if (!panel_put(names[i].id, a, b)) {
@@ -1273,6 +1285,7 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
 
 /* Any thread */
 static void pstate_read(pstate_t *s) {
+    memset(s, 0, sizeof(*s));           /* compared whole with memcmp: its padding too (the int64s in sdr) */
     s->freq  = cparam_i_get(cfg_fg_freq);
     s->mode  = cparam_i_get(cfg_cur_mode);
     s->flo   = cparam_i_get(cfg_cur_filter_low);
@@ -1329,6 +1342,7 @@ static void pstate_read(pstate_t *s) {
     snprintf(s->win, sizeof(s->win), "%s", main_screen_window_name());
     memset(s->pg, 0, sizeof(s->pg));
     s->pg[0] = app_sentry_page();
+    app_sentry_sdr_state(&s->sdr);
     memset(s->fp, 0, sizeof(s->fp));
     snprintf(s->fp, sizeof(s->fp), "%s", radio_fingerprint());
 }
@@ -1341,12 +1355,16 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"ask\":%d,\"txio\":%d,\"txqo\":%d,\"txig\":%d,\"txip\":%d,"
              "\"linein\":%d,\"txf\":%d,\"split\":%d,\"rit\":%d,\"xit\":%d,\"play\":%d,\"heard\":%d,\"spk\":%d,"
              "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,\"plays\":%d,\"ifs\":%d,\"comp\":%d,\"wch\":%d,\"wchm\":%d,\"av\":%d,"
-             "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\"}",
+             "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\",\"bhz\":%lld,\"bpre\":\"%s\",\"bmode\":\"%s\",\"bname\":\"%s\","
+             "\"bscan\":%d,\"ghz\":%lld,\"garm\":%d,\"gno\":\"%s\",\"sdr\":%d,\"fsel\":\"%s\",\"gmp\":%d,"
+             "\"gmhz\":%lld,\"gmrx\":%d}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
              s->tpwr10, s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->txf,
              s->split, s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->plays, s->ifs,
-             s->comp, s->wch, s->wchm, s->av, s->app, s->win, s->pg, s->fp);
+             s->comp, s->wch, s->wchm, s->av, s->app, s->win, s->pg, s->fp, (long long)s->sdr.bhz, s->sdr.bpre,
+             s->sdr.bmode, s->sdr.bname, s->sdr.bscan, (long long)s->sdr.ghz, s->sdr.garm, s->sdr.gno, s->sdr.sdr,
+             s->sdr.fsel, s->sdr.gmp, (long long)s->sdr.gmhz, s->sdr.gmrx);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */
@@ -2257,7 +2275,7 @@ static void *panel_thread(void *arg) {
     bool           have_last = false;
     uint32_t       sp_seq = 0, spots_gen = 0, plan_gen = band_plan_gen();
     uint64_t       state_ms = 0, meter_ms = 0, spots_ms = 0, ft8_ms = 0, ft8_sent_ms = 0;
-    char           line[768];      /* the state line: about 570 at most (the bench's checks in it, 2026-11-22) */
+    char           line[1024];     /* the state line: about 800 at most (the bench's checks, B and G's SDR, 2026-11-25) */
     (void)arg;
 
     while (true) {

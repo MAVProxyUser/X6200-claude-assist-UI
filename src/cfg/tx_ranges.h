@@ -86,8 +86,9 @@ bool tx_ranges_narrow(tx_ranges_t p, int32_t freq, int32_t shift, int32_t *lo, i
 /* The SDR's amateur band hz is in, its edges into *lo and *hi (Hz, both in; either may be NULL). False: none */
 bool tx_ranges_sdr_band(int32_t hz, int32_t *lo, int32_t *hi);
 
-/* Why the SDR may not transmit at hz with profile p: HAM_TX_OK; HAM_TX_OFF_BAND, not one of its amateur bands;
- * HAM_TX_OFF_RANGE, the profile (South Korea, the own list) holds no range there. Any thread */
+/* Why the SDR may not transmit at hz with profile p: HAM_TX_OK; HAM_TX_GMRS, GMRS's channels (ham_gmrs: no SDR here is
+ * certified for it); HAM_TX_OFF_BAND, not one of its amateur bands; HAM_TX_OFF_RANGE, the profile (South Korea, the
+ * own list) holds no range there. Any thread */
 ham_tx_t tx_ranges_sdr_check(tx_ranges_t p, int32_t hz);
 
 /* The words of a refusal, "outside the TX ranges (Settings > TX Cal)" (cfg_tx_refusal); NULL for HAM_TX_OK */

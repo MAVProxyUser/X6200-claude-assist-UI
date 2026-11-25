@@ -83,11 +83,13 @@ in the middle of its picture is taken out; a bladeRF needs its FPGA image from N
 
 - **The spectrum**: the middle 1.8 MHz of the stick's span. The strongest signals are labelled with what they are
   where it is known: NOAA WX1 to WX7, AIS, APRS, the ISS, marine channel 16, guard 121.500, the airband, weather
-  balloons, the Meteor-M satellites, ISM, GMRS, UAT, ADS-B; FM broadcast stations on their channel (97.900).
+  balloons, the Meteor-M satellites, ISM, GMRS (by channel: GMRS 20, GMRS 20 IN), UAT, ADS-B; FM broadcast stations
+  on their channel (97.900).
 - **F2 PRESET**: NOAA weather, 2 m, 2 m repeaters, the airband, FM broadcast, marine VHF, the weather satellites,
   the weather balloons, 70 cm, ISM 433, GMRS, ISM 915, UAT 978, ADS-B 1090, 6 m, 1.25 m, 23 cm, GPS L1, and with a
   HackRF or bladeRF 2.4 GHz, 13 cm, 5.8 GHz and (a HackRF) HF (or the band D's LISTEN brought).
-  Its scan goes on behind the other screens.
+  Its scan goes on behind the other screens; on GMRS it goes down the 22 channels. GMRS is listened to only (on B and
+  G's GMRS groups): nothing here may transmit there (47 CFR 95E: radios certified for GMRS only).
 - **LISTEN BOTH** mixes the X6200's receiver into the stick's audio on Bluetooth headphones. On the speaker it is the
   stick alone, and says why: while the speaker plays the stick, the X6200's base sends no receiver audio (its
   mixing that copy back in was the old echo). OFF silences both. The speaker changes only when A or B is shown; the other screens keep what was heard last. RTL or BOTH chosen

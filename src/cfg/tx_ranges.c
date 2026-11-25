@@ -278,7 +278,7 @@ bool tx_ranges_sdr_band(int32_t hz, int32_t *lo, int32_t *hi) {
 
 ham_tx_t tx_ranges_sdr_check(tx_ranges_t p, int32_t hz) {
     if (!tx_ranges_sdr_band(hz, NULL, NULL)) {
-        return HAM_TX_OFF_BAND;
+        return ham_gmrs(hz) ? HAM_TX_GMRS : HAM_TX_OFF_BAND;
     }
     if (p == TX_RANGES_KR) {
         return kr_find(hz, NULL, NULL) ? HAM_TX_OK : HAM_TX_OFF_RANGE;
@@ -334,6 +334,7 @@ const char *tx_ranges_why(ham_tx_t why) {
         case HAM_TX_OFF_BAND:  return "outside the amateur bands (Settings > TX Cal)";
         case HAM_TX_OFF_RANGE: return "outside the TX ranges (Settings > TX Cal)";
         case HAM_TX_NO_RANGES: return "no TX ranges in the own list (Settings > TX Cal)";
+        case HAM_TX_GMRS:      return "GMRS: only radios certified for it (47 CFR 95E)";
         default:               return NULL;
     }
 }

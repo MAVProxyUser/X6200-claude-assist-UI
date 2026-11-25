@@ -67,6 +67,7 @@
 #include "cfg/cfg_api.h"
 #include "cfg/settings_manager_api.h"
 #include "cfg/tx_ranges.h"     /* the SDR walkie's bands: tx_ranges_sdr_check */
+#include "cfg/gmrs.h"          /* GMRS's channels: B's scan of them, G's groups, their names (receive only) */
 #include "cfg/memory.h"        /* A's dial kept while G has the radio: cfg_memory_save, MEM_SENTRY_ID */
 #include "dsp.h"
 #include "events.h"
@@ -102,6 +103,7 @@
 #include "settings_window.h"  /* settings_network_name: where NIFOG's PDF is on the web */
 
 #include <stdatomic.h>
+#include <pthread.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -376,7 +378,7 @@ static const band_t bands[] = {
     {"UHF LMR", 450000, 470000, "BUSINESS, PUBLIC SERVICE", "DIPOLE 2X15 CM", 'L', 460000000, radio_mode_nfm, false,
      "Land mobile radio 450-470: businesses and public services, much of it DMR (B finds DMR itself)."},
     {"GMRS", 462550, 467725, "FAMILY RADIOS: FRS, GMRS", "DIPOLE 2X15 CM", 'L', 462562500, radio_mode_nfm, false,
-     "Handheld family radios, FRS and GMRS, 12.5 kHz apart: a few miles at most."},
+     "GMRS and FRS: 22 channels, repeaters on 15-22 (inputs 5 MHz up). B scans them, G lists them; receive only."},
     {"ISM 915", 902000, 928000, "METERS AND SENSORS", "DIPOLE 2X78 MM", 'L', 915000000, radio_mode_nfm, false,
      "Utility meters, sensors and LoRa in 902-928 (the 33 cm ham band shares it): bursts and hopping signals."},
     {"UAT 978", 977000, 979000, "LIGHT AIRCRAFT, UAT DATA", "DIPOLE 2X73 MM", 'L', 978000000, radio_mode_nfm, false,
@@ -960,6 +962,31 @@ static int chan_count(bool sdr) {
     return k;
 }
 
+/* B's F1 on GMRS (its preset, or D's band of that name: the owner's licence, 2026-11-25) goes down GMRS's 22 channels
+ * as the channel scan goes down the list: by frequency (gmrs_scan_ch: the stick moves twice a round), the step time on
+ * each, stopping on one that talks as the style says, named "GMRS 20" in C's log. SCAN CFG's F1 SCANS: THE CHANNELS
+ * and EMERGENCY's scan come first, their lists chosen by hand. Receive only: nothing on G or here sends there */
+static const char *f_name(void);
+
+static bool b_gmrs(void) {
+    return !emer_scan && !scan_chans && !strcmp(f_name(), "GMRS");
+}
+
+/* B's channel scan's next (from -1: its first), its frequency: GMRS's, else the channel list's or EMERGENCY's */
+static int b_ch_next(int from) {
+    if (b_gmrs()) return from < 0 ? 0 : (from + 1) % GMRS_CHANNELS;
+    return chan_next(true, from);
+}
+
+static int64_t b_ch_hz(int i) {
+    if (b_gmrs()) {
+        const gmrs_ch_t *c = gmrs_ch(gmrs_scan_ch(i));
+
+        return c ? c->hz : 0;
+    }
+    return scan_ch_hz(i);
+}
+
 /* SCAN CFG's PRIORITY (the same backlog item): one channel looked at every PRIO_EVERY_MS while a scan moves on the
  * radio that takes it, A's or B's; heard there, the scan stops on it as long as it talks (whatever the style), then
  * goes on. In the picture already (A's 360 kHz, B's SDR picture) it is read from the picture; elsewhere the radio is
@@ -1008,6 +1035,16 @@ static uint32_t  sweep_next;
 static int       scan_a_band = -1;      /* SCAN: the band swept end to end, and when it moves on (0: from its low end) */
 static uint32_t  scan_a_next;
 static int       logged;
+
+/* A's F1 on GMRS (the X6200 through the WR12, 54 MHz-1 GHz: the owner, 2026-11-25, "add GMRS rx support for all
+ * devices that can"): GMRS's 22 channels in turn, as B's (b_gmrs), in NFM, each the step time, locking on one that
+ * talks as the style says. Started by F1 on A's GMRS band or F's GMRS panel; any other scan or routine ends it */
+static bool a_gmrs_on;
+
+static bool a_gmrs(void) {
+    return a_gmrs_on && routine == ROUT_SCAN && scan_a_band < 0 && !scan_chans && !emer_scan;
+}
+static void a_gmrs_start(void);
 
 static struct {
     bool     on, held, auto_;
@@ -1085,7 +1122,7 @@ static lv_obj_t *badge_l[2], *title_l, *status_l, *batt_l;
 static lv_obj_t *ab_arrow, *ab_tag;     /* PTT refused: where the A/B key is (landscape) */
 extern const lv_font_t power_sym_14;    /* the clock's: Montserrat's battery and bolt, and a plug (clock.c) */
 #define SYMBOL_PLUG "\xEF\x87\xA6"     /* U+F1E6 */
-typedef struct { lv_obj_t *frame, *cap, *line, *opt[13]; int n; } box_t;     /* opt: F SYSTEM's 13 rows the most */
+typedef struct { lv_obj_t *frame, *cap, *line, *opt[14]; int n; } box_t;     /* opt: F SYSTEM's 14 rows the most */
 static lv_obj_t *tick_l[TICKS], *tgt_l[LABELS];
 /* SCAN CFG: its rows (the MFK goes through them, its push or a tap changes the one chosen), what the chosen one does,
  * and what each radio's scan does now */
@@ -1109,6 +1146,7 @@ static list_sbar_t *sb_bd, *sb_lg, *sb_dsel, *sb_drow;     /* D's bands, C's log
 typedef enum {
     SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_POOL, SYS_GPS, SYS_CLASSIC, SYS_SHELL, SYS_BASEFW,
     SYS_TRIBAL, SYS_NIFOG, SYS_HOME,
+    SYS_GMRS,                           /* last: the items before it keep their places (the bench counts them) */
     SYS_N
 } sysitem_t;
 static const struct {
@@ -1158,7 +1196,12 @@ static const struct {
               "ON THE WEB CONFIGURATOR'S NIFOG PAGE."},
     {"START IN", "WHERE THE RADIO STARTS AND COMES BACK TO WHEN AN APP CLOSES: THE SENTRY, OR THE CLASSIC RADIO "
                  "SCREEN. PUSH TO SWITCH."},
+    {"GMRS (LISTEN)", "GMRS'S 22 CHANNELS AND THE REPEATER INPUTS OF 15-22, EACH TUNED ON WHATEVER RECEIVES IT: B'S SDR "
+                      "(AN RTL-SDR, A KRAKENSDR'S, A HACKRF, A BLADERF) OR THE " BOARD_NAME "'S OWN RECEIVER WHERE IT "
+                      "REACHES 462 MHZ (THE X6200 THROUGH THE WR12). F1 TUNES, F2 SCANS THE 22, F3 WATCHES ONE ON A "
+                      "SPARE RTL, F4 THE CTCSS AND DCS CODES. RECEIVE ONLY: GMRS IS FOR RADIOS CERTIFIED FOR IT."},
 };
+_Static_assert(sizeof(sys_items) / sizeof(sys_items[0]) == SYS_N, "F SYSTEM: an item for each of sysitem_t");
 static int       sys_sel;
 static box_t     s_list, s_what, s_look, s_home, s_keys, s_load;
 static bool      trib_on;               /* TRIBAL KNOWLEDGE open: WHAT IT DOES reads it (trib_open) */
@@ -1377,6 +1420,21 @@ static void identify_ex(int64_t hz, ident_t *id, bool full) {
         snprintf(id->label, sizeof(id->label), "%d.%d", ch / 1000000, (ch / 100000) % 10);
         snprintf(id->name, sizeof(id->name), "FM BROADCAST %d.%d MHZ", ch / 1000000, (ch / 100000) % 10);
         return;
+    }
+    {   /* GMRS (the X6200 through the WR12, an SDR on G): its channel, never sent on */
+        bool in;
+        int  gc = gmrs_find(hz, 3000, &in);
+
+        if (gc) {
+            const gmrs_ch_t *c = gmrs_ch(gc);
+
+            id->tune_hz = in ? c->in_hz : c->hz;
+            id->mode    = radio_mode_nfm;
+            snprintf(id->label, sizeof(id->label), in ? "G%d IN" : "GMRS%d", gc);
+            if (in) snprintf(id->name, sizeof(id->name), "GMRS %d'S REPEATER INPUT - RECEIVE ONLY", gc);
+            else snprintf(id->name, sizeof(id->name), "GMRS CHANNEL %d - %s, RECEIVE ONLY", gc, c->note);
+            return;
+        }
     }
     for (size_t i = 0; i < sizeof(ft8_khz) / sizeof(ft8_khz[0]); i++) {
         if (hz >= ft8_khz[i] * 1000LL && hz <= ft8_khz[i] * 1000LL + 3200) {
@@ -2069,6 +2127,7 @@ static void walkie_ch(int dir, int to);
 static void walkie_arrow(int dir);      /* G's arrows: a channel, or a step of the dial */
 static void walkie_show(bool on);
 static bool g_portrait;         /* G held up: its own portrait screen shows (walkie_show) */
+#define W_GMRS_NO "GMRS: ONLY RADIOS CERTIFIED FOR IT (47 CFR 95E)"     /* why nothing here sends there */
 static bool g_armed;            /* G's transmitter armed (the A/B key): the Sentry's receive-only hold let go */
 /* G on the SDR's channels (a HackRF or a bladeRF on the HOST port: they transmit): its own channel there, its own
  * transmitter. The X6200 stays held at 0 W (receive only) all the while */
@@ -2098,6 +2157,8 @@ static void x62_by_hand(void);
 static bool dial_held(void);    /* TX unlocked or on the air: the tuning knobs held, and said so */
 static void w_say(const char *portrait, const char *title, const char *text);  /* G's message line, or the OSD */
 static bool w_has_list(void);   /* G on a group of channels (CB, the SDR's): F4 lists them */
+static int  w_gmrs_ch(int i);   /* w_chs[i] one of GMRS's: its channel number, 0 none */
+static bool w_gmrs_here(void);  /* G on one of GMRS's channels through the radio's own receiver (the WR12) */
 static bool wl_on;              /* G's channel list open (F4 on CB or the SDR's groups) */
 static void wl_open(void);
 static void wl_close(void);     /* closed as it was: nothing tuned */
@@ -2852,7 +2913,7 @@ static const struct {
     {"UHF LMR", 460000000, 450000000, 470000000, "BUSINESS AND PUBLIC SERVICE RADIO 450-470 (MUCH OF IT DMR)"},
     {"VHF LMR", 152000000, 150000000, 174000000, "BUSINESS AND PUBLIC SERVICE RADIO 150-174 (DMR AND FM)"},
     {"ISM 433", 433920000, 433050000, 434790000, "SENSORS, KEY FOBS, WEATHER STATIONS"},
-    {"GMRS", 462600000, 462550000, 467725000, "GMRS AND FRS RADIOS"},
+    {"GMRS", 462600000, 462550000, 467725000, "GMRS 1-22 (FRS TOO): F1 SCANS THE 22 CHANNELS, RECEIVE ONLY"},
     {"ISM 915", 915000000, 902000000, 928000000, "METERS AND SENSORS 902-928 MHZ"},
     {"UAT 978", 978000000, 977000000, 979000000, "AIRCRAFT UAT, 978 MHZ"},
     {"ADS-B", 1090000000, 1089000000, 1091000000, "AIRCRAFT, 1090 MHZ (AIRSPACE DECODES THEM)"},
@@ -2981,6 +3042,9 @@ static const char *rtl_name(int64_t hz) {
 
     for (int i = 0; i < N_OF(exact); i++)
         if (llabs(hz - exact[i].hz) <= exact[i].w) return exact[i].n;
+    const char *gm = gmrs_name(hz, 3000);   /* a GMRS channel by its number, a repeater input as such: "GMRS 20 IN" */
+
+    if (gm) return gm;
     for (int i = 0; i < N_OF(ranges); i++)
         if (hz >= ranges[i].lo && hz < ranges[i].hi) return ranges[i].n;
     return "";
@@ -3989,8 +4053,10 @@ static void show_a_boxes(void) {
         snprintf(bn, sizeof(bn), "%s%s", in || routine == ROUT_SCAN ? "" : "NEAR ", bi >= 0 ? bands[bi].name : "-");
         opt_set(&r_pre, 0, bn, 0);
     }
-    if (routine == ROUT_SCAN && scan_a_band < 0 && (scan_chans || emer_scan)) {
-        const char *nm = scan_ch_name(a_chan);
+    if (routine == ROUT_SCAN && scan_a_band < 0 && (scan_chans || emer_scan || a_gmrs())) {
+        const char *nm = a_gmrs() ? gmrs_ch(gmrs_scan_ch(a_chan))   /* GMRS's: "GMRS 20" */
+                                        ? gmrs_ch(gmrs_scan_ch(a_chan))->name : "GMRS"
+                                  : scan_ch_name(a_chan);
 
         snprintf(t, sizeof(t), "%s %.13s", emer_scan ? "EMG" : "CH", nm[0] ? nm : "SCAN");
         opt_set(&r_pre, 1, t, 1);
@@ -4545,6 +4611,14 @@ static bool b_listen_next_sdr(void) {
  * LISTEN; a watch channel's: in the mix or not), F4 watches B's channel on a free RTL, F5 back ---- */
 static lv_obj_t  *pp_box, *pp_head_l, *pp_row_l[SDR_POOL_UNITS], *pp_foot_l;
 static bool       pp_on;
+static bool       gm_on;                /* F SYSTEM's GMRS panel (gm_open) */
+static void       gm_open(void);
+static void       gm_close(void);
+static void       gm_hide(void);        /* gm_close without redrawing: as another screen is shown */
+static void       gm_fill(void);
+static void       gm_action(int k);
+static void       gm_move(int d);
+static const char *gm_label(int k);
 static int        pp_sel, pp_n;
 static sdr_unit_t pp_u[SDR_POOL_UNITS];
 static void       show_keys(void);
@@ -5006,6 +5080,7 @@ static void rtl_listen_turn(int32_t diff) {
 static bool knob_taken(void) {
     if (wl_on && scr == SCR_WALKIE) return true;    /* G's channel list open: the VFO goes down it */
     if (nf_on && scr == SCR_SYSTEM) return true;    /* F's NIFOG open: the VFO scrolls its page */
+    if (gm_on) return true;                         /* F's GMRS panel: the VFO goes down it, never the dial */
     if (g_armed || g_sdr_armed || radio_get_state() == RADIO_TX) return true;  /* held: dial_held says why */
     if (scr == SCR_WALKIE) return w_sdr_hz != 0;    /* the dial, fine, as on A (only the arrows step CB's
                                                      * channels); on the SDR its channel */
@@ -5182,8 +5257,8 @@ static bool b_prio_step(uint32_t now) {
     return true;
 }
 
-/* B's channel scan: each of the SDR's channels of the channel list in turn, the step time on each; one that talks
- * goes into C's log and stops the scan as the style says */
+/* B's channel scan: each of the SDR's channels of the channel list (or GMRS's, b_gmrs) in turn, the step time on
+ * each; one that talks goes into C's log and stops the scan as the style says */
 static void b_chan_step(uint32_t now) {
     if (b_stop_step(now)) return;
     if (scan_pick && now >= scan_pick) {
@@ -5203,11 +5278,11 @@ static void b_chan_step(uint32_t now) {
         }
     }
     if (scan_next && now < scan_next) return;
-    int i = chan_next(true, b_chan);
+    int i = b_ch_next(b_chan);
 
     scan_next = now + SCAN_DWELL_MS;
     if (i < 0) return;
-    int64_t hz = scan_ch_hz(i);
+    int64_t hz = b_ch_hz(i);
 
     b_chan = i;
     if (llabs(hz - rtl_hz) > rtl_view_hz() / 2 - rtl_view_hz() / 10)     /* not in the picture: the stick round it */
@@ -5222,7 +5297,7 @@ static void rtl_scan_step(void) {
     /* on whatever screen (B's log and SCAN CFG see it), but not while C plays a stick entry of its own */
     if (!rtl_scan || rtl_spectrum_state() != RTL_SPEC_ON || (scr == SCR_LOG && g_onr >= 0)) return;
     if (b_prio_step(now)) return;
-    if (scan_chans || emer_scan) {
+    if (scan_chans || emer_scan || b_gmrs()) {
         b_chan_step(now);
         return;
     }
@@ -5265,6 +5340,8 @@ static void rtl_scan_step(void) {
     show_head();
 }
 
+static void sdr_publish(bool closed);
+
 static void rtl_timer_cb(lv_timer_t *t) {
     uint16_t n;
     uint32_t rate;
@@ -5276,6 +5353,7 @@ static void rtl_timer_cb(lv_timer_t *t) {
 
     (void)t;
     rtl_scan_step();
+    sdr_publish(false);                 /* B and G for the remote's state */
     {   /* The radio's own transmitter keyed by its PTT while armed (A or G): out of play mode for the over
          * (rtl_spectrum_own_tx). With B's stick on the speaker the base is in play mode, its mics at 0, and the over
          * went out silent. Let go 0.3 s after the over, so a PTT's bounce does not flip it */
@@ -5589,9 +5667,15 @@ static void watch_show(void) {
 }
 
 /* F4 held on B: B's channel watched on a spare RTL of its own, or no longer (the user, 2026-11-16, "Tuners at once":
- * the Kraken's free RTLs each on a channel, squelched, heard when it opens) */
+ * the Kraken's free RTLs each on a channel, squelched, heard when it opens); watch_toggle_at: any channel so (F's
+ * GMRS panel's F3) */
+static void watch_toggle_at(int64_t hz);
+
 static void b_watch_toggle(void) {
-    int64_t hz = listen_hz ? listen_hz : rtl_hz;
+    watch_toggle_at(listen_hz ? listen_hz : rtl_hz);
+}
+
+static void watch_toggle_at(int64_t hz) {
     int     r;
     char    f[16], t[200], title[40];
 
@@ -5601,7 +5685,7 @@ static void b_watch_toggle(void) {
     if (r == 1) {
         snprintf(title, sizeof(title), "WATCH: %s MHZ", f);
         snprintf(t, sizeof(t), "ON A SPARE RTL OF ITS OWN, SQUELCHED: HEARD WHEN IT OPENS (THE " BOARD_NAME " OFF THE SPEAKER "
-                               "MEANWHILE). F4 HELD AGAIN ON IT: NO LONGER.");
+                               "MEANWHILE). AGAIN (F4 HELD ON B AT IT, OR F3 ON F'S GMRS): NO LONGER.");
     } else if (r == 0) {
         snprintf(title, sizeof(title), "NOT WATCHED: %s MHZ", f);
         snprintf(t, sizeof(t), "ITS RTL IS FREE AGAIN (AIRSPACE MAY TAKE IT).");
@@ -6934,6 +7018,7 @@ static void go(scr_t s) {
     if (s != SCR_SYSTEM) trib_close();     /* leaving F closes TRIBAL KNOWLEDGE */
     if (s != SCR_SYSTEM) nf_close();       /* and NIFOG */
     if (scr == SCR_LOG && s != SCR_LOG) g_leave(s == SCR_RTL);
+    if (s != SCR_SYSTEM) gm_hide();     /* F's GMRS panel: F's alone */
     scr_t was = scr;
 
     scr = s;
@@ -7112,6 +7197,10 @@ static void a_scan_set(bool on) {
         osd("NO BAND HERE", "F2 OR THE BAND KEYS CHOOSE ONE; F1 THEN SCANS IT END TO END.", -1);
         return;
     }
+    if (!strcmp(bands[i].name, "GMRS")) {   /* the X6200 tunes it (the WR12): its channels, not the band */
+        a_gmrs_start();
+        return;
+    }
     scan_a_band = i;
     if (smode == MODE_MAN) smode = scan_stay == STAY_NONE ? MODE_SEMI : MODE_AUTO;     /* the style's own again */
     set_routine(ROUT_SCAN);
@@ -7124,8 +7213,40 @@ static void a_scan_set(bool on) {
     osd(t, how, -1);
 }
 
+/* A's GMRS scan started (a_gmrs): the X6200 through the WR12 only, its dial as SCAN CFG's style has it */
+static void a_gmrs_start(void) {
+    char t[200];
+
+    if (!cfg_is_valid_hw_freq(462550000) || !cfg_is_valid_hw_freq(467712500)) {
+        osd("NO GMRS ON THE " BOARD_NAME, "ITS RECEIVER REACHES GMRS ONLY THROUGH THE WR12 ON THE HOST PORT. AN SDR THERE "
+                                          "HEARS IT ON B.", -1);
+        return;
+    }
+    scan_a_band = -1;
+    a_chan      = -1;
+    if (smode == MODE_MAN) smode = scan_stay == STAY_NONE ? MODE_SEMI : MODE_AUTO;
+    set_routine(ROUT_SCAN);
+    a_gmrs_on   = true;                 /* set_routine let any earlier one go */
+    scan_a_next = 0;
+    snprintf(t, sizeof(t), "GMRS'S %d CHANNELS THROUGH THE WR12 IN TURN, NFM, THE STEP TIME ON EACH, %s. RECEIVE ONLY.",
+             GMRS_CHANNELS, smode == MODE_AUTO ? "STOPPING ON ONE THAT TALKS AS SCAN CFG'S STYLE SAYS"
+                                               : "MARKING WHAT IT HEARS (BROWSE: SCAN CFG'S STYLE MAKES IT STOP)");
+    osd("SCAN: GMRS", t, -1);
+}
+
 /* A's channel scan: the next of the X6200's channels, on its own frequency and mode */
 static void a_chan_hop(uint32_t now) {
+    if (a_gmrs()) {                     /* GMRS's, by frequency */
+        const gmrs_ch_t *c = gmrs_ch(gmrs_scan_ch(a_chan < 0 ? 0 : (a_chan + 1) % GMRS_CHANNELS));
+
+        scan_a_next = now + scan_dwell_ms;
+        a_chan      = a_chan < 0 ? 0 : (a_chan + 1) % GMRS_CHANNELS;
+        anchor      = c->hz;
+        if (cparam_i_get(cfg_fg_freq) != c->hz || cparam_i_get(cfg_cur_mode) != radio_mode_nfm)
+            tune(c->hz, radio_mode_nfm);
+        show_screen();
+        return;
+    }
     int i = chan_next(false, a_chan);
 
     scan_a_next = now + scan_dwell_ms;
@@ -7242,7 +7363,8 @@ static void sentry_step(void) {
         a_scan_hop(now);
         return;
     }
-    if (routine == ROUT_SCAN && scan_a_band < 0 && (scan_chans || emer_scan) && (scan_a_next == 0 || now > scan_a_next)) {
+    if (routine == ROUT_SCAN && scan_a_band < 0 && (scan_chans || emer_scan || a_gmrs()) &&
+        (scan_a_next == 0 || now > scan_a_next)) {
         a_chan_hop(now);
         return;
     }
@@ -7301,6 +7423,7 @@ static void a_sweep_toggle(void) {
 
 static void set_routine(routine_t r) {
     routine     = r;
+    a_gmrs_on   = false;                /* A's GMRS scan: only as a_gmrs_start sets it again */
     sweep_next  = 0;
     scan_a_next = 0;
     if (r != ROUT_SWEEP) anchor = centre ? centre : dial_centre();
@@ -7464,6 +7587,7 @@ static void blink_cb(lv_timer_t *t) {
     }
     if (scr == SCR_RTL) watch_show();                       /* the watch channels, open or quiet */
     if (pp_on) pp_fill();                                   /* the pool's panel: who has what, as it changes */
+    if (gm_on && n % 2 == 0) gm_fill();                     /* F's GMRS panel: where B and A are, each second */
     if (gp_on && n % 2 == 0) gp_fill();                     /* the GPS panel: each second */
     rds_show(false);
     g_rds_take();                                   /* C's entries named by it */
@@ -7518,6 +7642,7 @@ static const char *f_label(int k) {
 
     if (pp_on) return pp_label(k);
     if (gp_on) return gp_label(k);
+    if (gm_on) return gm_label(k);
     switch (scr) {
         case SCR_SCAN: {        /* C's keys, for the X6200: SCAN its band, the BAND, VIEW, LISTEN, SCAN CFG */
             static const char *const views[] = {"RTL", "Split", BOARD_NAME};
@@ -7890,6 +8015,10 @@ static void sys_open(int i) {
         return;
     }
     trib_close();
+    if (i == SYS_GMRS) {
+        gm_open();
+        return;
+    }
     if (i == SYS_VHF) {
         go(SCR_RTL);
         return;
@@ -8028,6 +8157,10 @@ static void fkey(int k) {
     }
     if (gp_on) {                        /* the GPS panel: F5 closes it, the rest nothing */
         if (k == 4) gp_close();
+        return;
+    }
+    if (gm_on) {                        /* F's GMRS panel: its keys */
+        gm_action(k);
         return;
     }
     if (sp_on) {                        /* B's SDR box: F4 (LISTEN) goes down it, the rest wait */
@@ -8378,6 +8511,17 @@ static void key_cb(lv_event_t *e) {
         if (key == LV_KEY_ESC || key == LV_KEY_ENTER) gp_close();
         return;
     }
+    if (gm_on) {                        /* F's GMRS panel: the MFK goes through it, its push tunes the one chosen */
+        switch (key) {
+            case LV_KEY_LEFT:
+            case LV_KEY_UP: gm_move(-1); return;
+            case LV_KEY_RIGHT:
+            case LV_KEY_DOWN: gm_move(1); return;
+            case LV_KEY_ENTER: gm_action(0); return;
+            case LV_KEY_ESC: gm_close(); return;
+            default: break;
+        }
+    }
     if (pp_on) {                        /* the SDR pool's panel: the MFK goes through it, its push uses one on B */
         switch (key) {
             case LV_KEY_LEFT:
@@ -8469,6 +8613,8 @@ static void click_cb(lv_event_t *e) {
             gp_close();
         else if (pp_on)
             pp_action(0);
+        else if (gm_on)
+            gm_action(0);               /* F's GMRS panel: the one chosen tuned */
         else if (sp_on)
             sp_close(sp_units[sp_sel]);
         else if (wl_on && scr == SCR_WALKIE)
@@ -8486,6 +8632,10 @@ static void rotary_cb(int32_t diff) {
     }
     if (wl_on && scr == SCR_WALKIE) {   /* G's channel list: the VFO goes down it as the MFK does (it tunes nothing, */
         wl_step(diff);                  /* so armed too) */
+        return;
+    }
+    if (gm_on) {                        /* F's GMRS panel: the VFO goes down it too */
+        gm_move(diff > 0 ? 1 : -1);
         return;
     }
     if (dial_held()) return;            /* TX unlocked: the dial is not moved by a bump */
@@ -8619,6 +8769,7 @@ static bool front_key(int key, int state) {
         case KEYPAD_APP:                /* held: the SDR pool's panel, from any screen */
             if (tap && gp_on) gp_close();
             else if (tap && pp_on) pp_close();
+            else if (tap && gm_on) gm_close();
             else if (tap) go(SCR_SYSTEM);
             else if (hold && pp_on) pp_close();
             else if (hold) pp_open();
@@ -8673,7 +8824,11 @@ static bool front_key(int key, int state) {
             return false;       /* the main screen switches it */
         case KEYPAD_AB:
             if (scr == SCR_WALKIE && w_sdr_hz) {            /* G on the SDR's channels: its transmitter */
-                if (tap && !g_sdr_armed && !rtl_spectrum_can_tx()) {    /* an RTL-SDR: heard, never sent */
+                if (tap && !g_sdr_armed && ham_gmrs(w_sdr_hz)) {        /* GMRS: heard, never sent, by any SDR */
+                    w_say("NO TX: " W_GMRS_NO, "RECEIVE ONLY",
+                          "GMRS MAY BE SENT ON ONLY BY RADIOS CERTIFIED FOR IT (47 CFR 95.1761): NOT A HACKRF OR A "
+                          "BLADERF. G LISTENS HERE; A GMRS RADIO OF ITS OWN TALKS.");
+                } else if (tap && !g_sdr_armed && !rtl_spectrum_can_tx()) {    /* an RTL-SDR: heard, never sent */
                     snprintf(t, sizeof(t), "THE %s ONLY RECEIVES", rtl_spectrum_dev_name());
                     w_say(t, "RECEIVE ONLY", "G HEARS ITS CHANNELS THROUGH IT. TO TRANSMIT ON THEM: A HACKRF OR A "
                                              "BLADERF ON THE HOST PORT.");
@@ -8683,6 +8838,12 @@ static bool front_key(int key, int state) {
                 return true;
             }
             if (scr == SCR_WALKIE || scr == SCR_SCAN) {     /* A and G, the X6200's: the transmitter armed or locked */
+                if (tap && !g_armed && ham_gmrs(scr == SCR_WALKIE ? w_hz() : cparam_i_get(cfg_fg_freq))) {
+                    w_say("NO TX: " W_GMRS_NO, "RECEIVE ONLY",       /* GMRS through the WR12: heard, never sent */
+                          "GMRS MAY BE SENT ON ONLY BY RADIOS CERTIFIED FOR IT (47 CFR 95.1761): NOT THIS ONE, NOR "
+                          "THROUGH A TRANSVERTER. THE SENTRY LISTENS HERE; A GMRS RADIO OF ITS OWN TALKS.");
+                    return true;
+                }
                 if (tap) walkie_arm(!g_armed);
                 return true;
             }
@@ -8949,6 +9110,12 @@ static void cr_now(char *s, size_t n) {
         fmt_freq(f, sizeof(f), a_chan >= 0 ? scan_ch_hz(a_chan) : centre);
         at = (size_t)snprintf(s, n, "A  " BOARD_NAME "  SCANNING EMERGENCY'S %d, NOW ON %s %s", chan_count(false),
                               scan_ch_name(a_chan), f);
+    } else if (routine == ROUT_SCAN && a_gmrs()) {
+        const gmrs_ch_t *c = gmrs_ch(gmrs_scan_ch(a_chan));
+
+        fmt_freq(f, sizeof(f), c ? c->hz : centre);
+        at = (size_t)snprintf(s, n, "A  " BOARD_NAME "  SCANNING GMRS'S %d CHANNELS (WR12), NOW ON %s %s%s", GMRS_CHANNELS,
+                              c ? c->name : "-", f, smode == MODE_AUTO ? "" : " (MARKS ONLY)");
     } else if (routine == ROUT_SCAN && scan_chans) {
         const channel_t *c = a_chan >= 0 ? channels_get((uint16_t)a_chan) : NULL;
 
@@ -8983,7 +9150,10 @@ static void cr_now(char *s, size_t n) {
 
         at += (size_t)snprintf(s + at, n - at, "\nB  %s  SCANNING ITS %d CHANNELS, NOW ON %.16s %s", dev,
                                chan_count(true), c && c->name[0] ? c->name : "", f);
-    } else if (rtl_scan)
+    } else if (rtl_scan && b_gmrs())
+        at += (size_t)snprintf(s + at, n - at, "\nB  %s  SCANNING GMRS'S %d CHANNELS, NOW ON %s %s", dev,
+                               GMRS_CHANNELS, rtl_name(listen_hz), f);
+    else if (rtl_scan)
         at += (size_t)snprintf(s + at, n - at, "\nB  %s  SCANNING %s, NOW AT %s", dev, f_name(), f);
     else
         at += (size_t)snprintf(s + at, n - at, "\nB  %s  ON %s %s (B'S F1 SCANS %s)", dev, f, rtl_name(listen_hz), f_name());
@@ -10025,7 +10195,8 @@ static void w_add(const char *grp, const char *name, int32_t hz, int mode, bool 
 }
 
 /* The SDR's FM simplex channels, Region 2's band plans (the owner's): each group's national calling channel first.
- * Only amateur bands (tx_ranges_sdr_check): no MURS, marine, FRS/GMRS or NOAA here, where nothing may be sent */
+ * Only amateur bands (tx_ranges_sdr_check): no MURS, marine or NOAA here, where nothing may be sent. GMRS's channels
+ * come from gmrs.c (w_plan), heard only: its PTT is refused there (w_sdr_refusal, HAM_TX_GMRS) */
 static const struct {
     const char *grp, *name;
     int32_t     hz;
@@ -10046,6 +10217,12 @@ static const struct {
 
 /* An SDR on the HOST port, its daemon up: G's plan has its groups. Any of them hears the channels (an RTL-SDR too); only
  * one that transmits (a HackRF, a bladeRF: rtl_spectrum_can_tx) is armed by A/B */
+/* The radio's own receiver tunes GMRS's channels and inputs: the X6200 through the WR12 (54 MHz-1 GHz), or a
+ * transverter whose range takes them in. Heard only (ham_tx_check: HAM_TX_GMRS) */
+static bool w_gmrs_x62(void) {
+    return cfg_is_valid_hw_freq(462550000) && cfg_is_valid_hw_freq(467725000);
+}
+
 static bool w_sdr_here(void) {
     return rtl_spectrum_daemon() && rtl_spectrum_dev() != RTL_DEV_NONE;
 }
@@ -10073,23 +10250,44 @@ static void w_plan(void) {
                                       "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
                                       "40"};
 
-    static int sdr_in = -1;     /* the plan made with the SDR's groups (1) or without (0) */
+    static int sdr_in = -1;     /* the plan made with the SDR's groups (1), GMRS's on the radio's own receiver (2) */
+    int        now    = w_sdr_here() ? 1 : w_gmrs_x62() ? 2 : 0;
 
-    if (w_n && sdr_in == (int)w_sdr_here()) return;
-    w_n    = 0;                     /* made again: an SDR came or went */
-    sdr_in = w_sdr_here();
+    if (w_n && sdr_in == now) return;
+    w_n    = 0;                     /* made again: an SDR came or went, the WR12 or a transverter */
+    sdr_in = now;
     for (int i = 0; i < BANDS_N && bands[i].hi < 26965; i++) w_band(i);     /* MF and HF, each its starting channel */
     for (int i = 0; i < 40; i++) w_add("CB", n40[i], cb_khz[i] * 1000, WM_AM, i == 18);
     w_band(band_named("10 M"));
     w_add("10 M FM", "S", 29600000, WM_FM, true);
     w_band(band_named("6 M"));
     w_add("6 M FM", "S", 52525000, WM_FM, true);
-    for (int i = 0; sdr_in && i < (int)N_OF(w_sdr_plan); i++) {     /* the SDR's, after the X6200's */
-        int64_t hz = w_sdr_plan[i].hz;
+    /* the SDR's, after the X6200's, by frequency: the amateur groups under GMRS's 462 MHz, GMRS (the owner's licence,
+     * 2026-11-25: its 22 channels by number, channel 20 home, then the repeater inputs of 15-22), the rest */
+    for (int pass = 0; sdr_in && pass < 3; pass++) {
+        if (pass == 1) {                /* GMRS's: the SDR's, else the radio's own (the WR12) */
+            static const char *const num[GMRS_CHANNELS] = {"1",  "2",  "3",  "4",  "5",  "6",  "7",  "8",
+                                                           "9",  "10", "11", "12", "13", "14", "15", "16",
+                                                           "17", "18", "19", "20", "21", "22"};
 
-        if (hz < rtl_spectrum_min_hz() || hz > rtl_spectrum_max_hz() || w_n >= (int)N_OF(w_chs)) continue;
-        w_chs[w_n++] = (wch_t){w_sdr_plan[i].grp, w_sdr_plan[i].name, w_sdr_plan[i].hz, WM_FM,
-                               !strcmp(w_sdr_plan[i].name, "CALL"), true};
+            for (int in = 0; in < 2; in++)
+                for (int ch = in ? 15 : 1; ch <= GMRS_CHANNELS && w_n < (int)N_OF(w_chs); ch++) {
+                    const gmrs_ch_t *c = gmrs_ch(ch);
+
+                    if (sdr_in == 1 && c->hz + (in ? GMRS_RPT_SHIFT : 0) > rtl_spectrum_max_hz()) continue;
+                    w_chs[w_n++] = (wch_t){in ? "GMRS RPT IN" : "GMRS", num[ch - 1], in ? c->in_hz : c->hz, WM_FM,
+                                           ch == 20, sdr_in == 1};
+                }
+            continue;
+        }
+        for (int i = 0; sdr_in == 1 && i < (int)N_OF(w_sdr_plan); i++) {
+            int64_t hz = w_sdr_plan[i].hz;
+
+            if ((hz < 462000000) != (pass == 0)) continue;
+            if (hz < rtl_spectrum_min_hz() || hz > rtl_spectrum_max_hz() || w_n >= (int)N_OF(w_chs)) continue;
+            w_chs[w_n++] = (wch_t){w_sdr_plan[i].grp, w_sdr_plan[i].name, w_sdr_plan[i].hz, WM_FM,
+                                   !strcmp(w_sdr_plan[i].name, "CALL"), true};
+        }
     }
     if (w_at >= w_n) w_at = -1;
 }
@@ -10264,10 +10462,12 @@ static void w_sdr_arm(bool on) {
     show_walkie();
 }
 
-/* Why G's SDR may not transmit at its channel now, NULL when it may */
+/* Why G's SDR may not transmit at its channel now, NULL when it may. GMRS first, whatever the SDR: the reason there
+ * is the rule's, not the hardware's (47 CFR 95.1761: only radios certified for GMRS send on it, and no SDR is) */
 static const char *w_sdr_refusal(void) {
     static char only[40];
 
+    if (ham_gmrs(w_sdr_hz)) return W_GMRS_NO;
     if (!rtl_spectrum_can_tx()) {
         snprintf(only, sizeof(only), "THE %s ONLY RECEIVES", rtl_spectrum_dev_name());
         return only;
@@ -10282,6 +10482,7 @@ static const char *w_sdr_refusal(void) {
     }
     switch (tx_ranges_sdr_check((tx_ranges_t)param_i_get(cfg_tx_ranges), (int32_t)w_sdr_hz)) {
         case HAM_TX_OK: return NULL;
+        case HAM_TX_GMRS: return W_GMRS_NO;
         case HAM_TX_OFF_RANGE: return "OUTSIDE THE TX RANGES (SETTINGS > TX CAL)";
         default: return "NOT AN AMATEUR BAND";
     }
@@ -10535,7 +10736,8 @@ static void walkie_ch(int dir, int to) {
     int64_t hz = w_hz();
     char    cb[12];
 
-    if (w_sdr_hz && !to) {              /* on the SDR: its group's channels, round; off them, the group's call */
+    if ((w_sdr_hz || w_gmrs_here()) && !to) {   /* on the SDR (or GMRS's on the radio): its group's channels, round;
+                                                 * off them, the group's call */
         if (dial_held()) return;
         const char *g = i >= 0 ? w_chs[i].grp : NULL;
 
@@ -10578,7 +10780,7 @@ static void walkie_ch(int dir, int to) {
  * elsewhere the X6200's dial by A's step (SCAN CFG's STEP, 10 kHz unless set), to the step's next multiple that way,
  * the mode kept: the VFO tunes fine, the MFK goes from group to group */
 static void walkie_arrow(int dir) {
-    if (w_cb_here() || w_sdr_hz) {
+    if (w_cb_here() || w_sdr_hz || w_gmrs_here()) {
         walkie_ch(dir, 0);
         return;
     }
@@ -10608,7 +10810,7 @@ static void walkie_key_label(int k, char *s, size_t n) {
     int i = w_match(), g;
 
     if (k <= 1) {
-        snprintf(s, n, "%s", w_cb_here() || w_sdr_hz ? (k ? "CH +" : "CH -") : (k ? "STEP +" : "STEP -"));
+        snprintf(s, n, "%s", w_cb_here() || w_sdr_hz || w_gmrs_here() ? (k ? "CH +" : "CH -") : (k ? "STEP +" : "STEP -"));
     } else if (k == 2) {
         if (w_sdr_hz) w_sdr_power(s, n);
         else s[0] = 0;
@@ -10641,12 +10843,24 @@ static uint32_t wl_typed_ms;
 static int64_t  wl_drawn_hz;        /* the dial when the rows were drawn: "(NOW)" moves with it */
 
 static bool w_has_list(void) {
-    return w_cb_here() || w_sdr_hz;
+    return w_cb_here() || w_sdr_hz || w_gmrs_here();
 }
 
-/* Row r's channel number: CB's own ("09" is 9), else its place in the group */
+/* A channel of GMRS's (its channels or its repeater inputs, the SDR's or the radio's): its number, 0 for none */
+static int w_gmrs_ch(int i) {
+    return i >= 0 && i < w_n && !strncmp(w_chs[i].grp, "GMRS", 4) ? atoi(w_chs[i].name) : 0;
+}
+
+static bool w_gmrs_here(void) {
+    int i = w_match();
+
+    return !w_sdr_hz && i >= 0 && !w_chs[i].sdr && w_gmrs_ch(i);
+}
+
+/* Row r's channel number: CB's and GMRS's own ("09" is 9, a repeater input its channel's), else its place in the
+ * group */
 static int wl_num(int r) {
-    return w_chan(wl_ch[r]) ? atoi(w_chs[wl_ch[r]].name) : r + 1;
+    return w_chan(wl_ch[r]) ? atoi(w_chs[wl_ch[r]].name) : w_gmrs_ch(wl_ch[r]) ? w_gmrs_ch(wl_ch[r]) : r + 1;
 }
 
 /* The row of channel number v, -1 none */
@@ -10681,13 +10895,16 @@ static void wl_fill(void) {
             lv_obj_add_flag(u->wl_row_l[r], LV_OBJ_FLAG_HIDDEN);
             continue;
         }
-        const wch_t *c    = &w_chs[wl_ch[i]];
-        const char  *what = !w_chan(wl_ch[i])        ? c->name     /* the SDR's: CALL, S2 */
-                            : !strcmp(c->name, "09") ? "EMERGENCY" /* as the channel's box names them */
-                            : !strcmp(c->name, "19") ? "TRUCKERS"
-                                                     : "";
+        const wch_t     *c    = &w_chs[wl_ch[i]];
+        const gmrs_ch_t *gm   = gmrs_ch(w_gmrs_ch(wl_ch[i]));
+        const char      *what = gm && c->hz == gm->in_hz ? "RPT INPUT"   /* GMRS's: what the channel is */
+                                : gm                     ? gm->note
+                                : !w_chan(wl_ch[i])      ? c->name       /* the SDR's: CALL, S2 */
+                                : !strcmp(c->name, "09") ? "EMERGENCY"   /* as the channel's box names them */
+                                : !strcmp(c->name, "19") ? "TRUCKERS"
+                                                         : "";
 
-        fmt_mhz(f, sizeof(f), c->hz, 3);
+        fmt_mhz(f, sizeof(f), c->hz, gm ? 4 : 3);     /* GMRS's 462.5625: its whole frequency */
         snprintf(row, sizeof(row), "%c %2d  %8s MHZ  %s%s", i == wl_sel ? '>' : ' ', wl_num(i), f, what,
                  llabs(c->hz - hz) <= 3000 ? "  (NOW)" : "");
         lv_label_set_text(u->wl_row_l[r], row);
@@ -10704,7 +10921,9 @@ static void wl_open(void) {
 
     if (!wui->wl_box || !w_has_list()) return;
     w_plan();
-    if (w_sdr_hz) {                     /* the SDR's group of the channel the dial is on, else of the nearest one */
+    if (w_gmrs_here()) {                /* GMRS's on the radio (the WR12): that group */
+        g = i;
+    } else if (w_sdr_hz) {              /* the SDR's group of the channel the dial is on, else of the nearest one */
         for (int k = 0; k < w_n; k++)
             if (w_chs[k].sdr && (g < 0 || llabs(w_chs[k].hz - hz) < llabs(w_chs[g].hz - hz))) g = k;
         if (i >= 0 && w_chs[i].sdr) g = i;
@@ -11004,6 +11223,297 @@ void app_sentry_g_channel_load(void) {
     atomic_store(&wch_mode, gui_state_get("s.wchm", -1));
 }
 
+/* ---- B and G on the SDR for the remote (app_sentry.h): what the bench reads, and its two settings ---- */
+
+/* B's channel at hz, as by hand: its scan stopped, the narrowest preset it is in, the stick round it */
+static void b_goto(int64_t hz) {
+    int best = -1;
+
+    if (hz < rtl_spectrum_min_hz() || hz > rtl_spectrum_max_hz()) return;
+    hz = rtl_snap(hz);
+    rtl_scan_set(false);                /* chosen by hand: B's scan stops there */
+    for (int i = 0; i < (int)RTL_PRESETS; i++)  /* the narrowest preset it is in (GMRS's, not UHF LMR's) */
+        if (hz >= rtl_presets[i].lo && hz <= rtl_presets[i].hi &&
+            (best < 0 || rtl_presets[i].hi - rtl_presets[i].lo < rtl_presets[best].hi - rtl_presets[best].lo))
+            best = i;
+    if (best >= 0) {
+        f_band     = -1;
+        rtl_preset = best;
+    }
+    if (llabs(hz - rtl_hz) > rtl_view_hz() / 2 - rtl_view_hz() / 10)   /* the stick round it, off its centre spike */
+        rtl_tune_to(hz - rtl_view_hz() / 4, true);
+    b_listen(hz);
+    show_rtl();
+}
+
+void app_sentry_b_channel_set(int64_t hz) {
+    if (root && scr == SCR_RTL) b_goto(hz);
+}
+
+/* ---- F SYSTEM's GMRS (the owner, 2026-11-25: "add GMRS rx support for all devices that can. and put a GMRS option on
+ * F too"): GMRS's 22 channels and the repeater inputs of 15-22 over F, each tuned on whatever receives it: B's SDR (an
+ * RTL-SDR, a KrakenSDR's, a HackRF or a bladeRF on HOST), else the radio's own receiver where it reaches 462 MHz (the
+ * X6200 through the WR12, a transverter whose range takes it in) on A; with neither it says so (the X6100's own
+ * receiver stops at 55 MHz, the X6200's at 137 without the WR12). The MFK or the VFO chooses, F1 or a push tunes it
+ * there and shows that screen, F2 scans the 22 there, F3 watches it on a spare RTL (a KrakenSDR's: rtl_watch.c), F4
+ * shows the CTCSS privacy codes and the DCS codes, F5, BACK or APP closes. Never sent on: its last line says why ---- */
+#define GM_N         (GMRS_CHANNELS + 8)    /* the 22, then the inputs of 15-22 */
+#define GM_SHOW      10                     /* rows in view */
+#define GM_TONE_ROWS 21                     /* a heading, 10 rows of privacy codes, a heading, 9 of DCS codes */
+
+static lv_obj_t *gm_box, *gm_head_l, *gm_row_l[GM_SHOW], *gm_foot_l;
+static int       gm_sel = 19, gm_top, gm_ttop;  /* channel 20 first */
+static bool      gm_tones;
+
+static const gmrs_ch_t *gm_ch(int r) {
+    return gmrs_ch(r < GMRS_CHANNELS ? r + 1 : 15 + r - GMRS_CHANNELS);
+}
+
+static int64_t gm_hz(int r) {
+    const gmrs_ch_t *c = gm_ch(r);
+
+    return c ? (r < GMRS_CHANNELS ? c->hz : c->in_hz) : 0;
+}
+
+/* GMRS's receiver here: 1 B's SDR, 2 the radio's own (the WR12, a transverter), 0 none */
+static int gm_rx(void) {
+    return w_sdr_here() ? 1 : w_gmrs_x62() ? 2 : 0;
+}
+
+static const char *gm_none(void) {
+#ifdef BOARD_X6200
+    return "NO RECEIVER FOR GMRS: AN SDR (RTL-SDR, KRAKENSDR, HACKRF, BLADERF) OR THE WR12 ON THE HOST PORT. THE "
+           "X6200'S OWN RECEIVER STOPS AT 137 MHZ WITHOUT THE WR12.";
+#else
+    return "NO RECEIVER FOR GMRS: AN SDR (RTL-SDR, KRAKENSDR, HACKRF, BLADERF) ON THE USB HOST PORT, OR A TRANSVERTER "
+           "WHOSE RANGE TAKES 462-468 MHZ IN. THE X6100'S OWN RECEIVER STOPS AT 55 MHZ.";
+#endif
+}
+
+/* The tones' row r: the privacy codes four a row, then the DCS codes twelve a row */
+static void gm_tone_line(int r, char *t, size_t n) {
+    t[0] = 0;
+    if (r == 0) {
+        snprintf(t, n, "PRIVACY CODES: CTCSS HZ (22 = 141.3, HEARD WITH CHANNEL 20)");
+    } else if (r <= 10) {
+        size_t at = 0;
+
+        for (int k = (r - 1) * 4 + 1; k <= (r - 1) * 4 + 4 && k <= GMRS_CTCSS_N && at < n; k++)
+            at += (size_t)snprintf(t + at, n - at, "%2d %3d.%d    ", k, gmrs_ctcss(k) / 10, gmrs_ctcss(k) % 10);
+    } else if (r == 11) {
+        snprintf(t, n, "DCS CODES (RADIOS NUMBER THEM FROM 39 UP, EACH ITS OWN WAY)");
+    } else {
+        size_t at = 0;
+
+        for (int k = (r - 12) * 12; k < (r - 11) * 12 && k < GMRS_DCS_N && at < n; k++)
+            at += (size_t)snprintf(t + at, n - at, "%03d ", gmrs_dcs(k));
+    }
+}
+
+static void gm_fill(void) {
+    char row[120], f[16];
+    int  rx = gm_rx();
+
+    if (!gm_box) return;
+    if (rx == 1) snprintf(row, sizeof(row), "GMRS, RECEIVE ONLY: HEARD ON B (%s)", rtl_spectrum_dev_name());
+    else if (rx == 2) snprintf(row, sizeof(row), "GMRS, RECEIVE ONLY: HEARD ON A (THE " BOARD_NAME "'S OWN RECEIVER)");
+    else snprintf(row, sizeof(row), "GMRS, RECEIVE ONLY: NO RECEIVER HERE");
+    lv_label_set_text(gm_head_l, row);
+    if (gm_sel < gm_top) gm_top = gm_sel;
+    if (gm_sel >= gm_top + GM_SHOW) gm_top = gm_sel - GM_SHOW + 1;
+    for (int r = 0; r < GM_SHOW; r++) {
+        if (gm_tones) {
+            gm_tone_line(gm_ttop + r, row, sizeof(row));
+            lv_label_set_text(gm_row_l[r], row);
+            lv_obj_set_style_bg_opa(gm_row_l[r], LV_OPA_TRANSP, 0);
+            lv_obj_set_style_text_color(gm_row_l[r], amb, 0);
+            continue;
+        }
+        int              i  = gm_top + r;
+        const gmrs_ch_t *c  = gm_ch(i);
+        int64_t          hz = gm_hz(i);
+        char             in[24];
+        const char      *at = rx == 1 && listen_hz == hz ? "  (B)" : rx == 2 && cparam_i_get(cfg_fg_freq) == hz ? "  (A)" : "";
+
+        if (!c) continue;
+        fmt_mhz(f, sizeof(f), hz, 4);
+        snprintf(in, sizeof(in), "INPUT OF %d", c->ch);
+        snprintf(row, sizeof(row), "%c %2d%s  %s  %4.1f KHZ  %-22s%s%s", i == gm_sel ? '>' : ' ', c->ch,
+                 i < GMRS_CHANNELS ? "   " : " IN", f, c->bw_hz / 1000.0, i < GMRS_CHANNELS ? c->note : in,
+                 rtl_watch_has(hz) ? "  WATCHED" : "", at);
+        lv_label_set_text(gm_row_l[r], row);
+        lv_obj_set_style_bg_opa(gm_row_l[r], i == gm_sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_text_color(gm_row_l[r], i == gm_sel ? ink : amb, 0);
+    }
+    snprintf(row, sizeof(row), "%s", rx ? "" : gm_none());
+    lv_label_set_text_fmt(gm_foot_l, "MFK OR VFO: CHOOSE   F1/PUSH: TUNE   F2: SCAN THE 22   F3: WATCH   F4: %s   "
+                                     "F5: CLOSE\nNO TX: " W_GMRS_NO ". THE SENTRY ONLY LISTENS.%s%s",
+                          gm_tones ? "CHANNELS" : "TONES", rx ? "" : "\n", row);
+}
+
+void app_sentry_gmrs_panel(bool on) {
+    if (!root || scr != SCR_SYSTEM) return;
+    if (!on) {
+        if (gm_on) gm_close();
+        return;
+    }
+    trib_close();
+    nf_close();
+    sys_sel = SYS_GMRS;                 /* as chosen on F's list, then F2 */
+    show_screen();
+    gm_open();
+}
+
+static void gm_move(int d) {
+    if (gm_tones) gm_ttop = LV_CLAMP(0, gm_ttop + d, GM_TONE_ROWS - GM_SHOW);
+    else gm_sel = (gm_sel + d + GM_N) % GM_N;
+    gm_fill();
+}
+
+static void gm_open(void) {
+    if (g_portrait || !gm_box) return;
+    if (pp_on) pp_close();
+    if (gp_on) gp_close();
+    gm_on = true;
+    gm_fill();
+    lv_obj_clear_flag(gm_box, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(gm_box);
+    pp_keys();
+}
+
+static void gm_hide(void) {
+    if (!gm_on) return;
+    gm_on = false;
+    if (gm_box) lv_obj_add_flag(gm_box, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void gm_close(void) {
+    gm_hide();
+    pp_keys();
+    show_screen();
+}
+
+/* The one chosen (scan: GMRS's scan) on the receiver that takes it, that screen shown */
+static void gm_tune(bool scan) {
+    int64_t hz = scan ? gmrs_ch(gmrs_scan_ch(0))->hz : gm_hz(gm_sel);
+    int     rx = gm_rx();
+
+    if (!rx) {
+        osd("NO RECEIVER FOR GMRS", gm_none(), -1);
+        return;
+    }
+    if (scan && scan_chans) {
+        osd("SCAN CFG: THE CHANNELS", "F1 SCANS THE CHANNEL LIST NOW: SCAN CFG'S F1 SCANS: THE BAND, THEN GMRS'S F2 SCANS "
+                                      "ITS 22.", -1);
+        return;
+    }
+    if (rx == 2 && dial_held()) return;     /* the radio's own dial: not while TX is unlocked */
+    gm_close();
+    if (scan && emer_scan) emer_scan_set(false);
+    if (rx == 1) {                          /* B's SDR: B's channel, its GMRS preset, LISTEN the SDR */
+        b_goto(hz);
+        if (scan) rtl_scan_set(true);
+        go(SCR_RTL);
+        b_tuned();
+        return;
+    }
+    x62_by_hand();                          /* the X6200 through the WR12: A's dial, NFM */
+    if (!tune((int32_t)hz, radio_mode_nfm)) {
+        osd("THE DIAL IS HELD", "AN APP OR THE LOCK HOLDS THE FREQUENCY: GMRS WAS NOT TUNED.", -1);
+        return;
+    }
+    if (scan) a_gmrs_start();
+    go(SCR_SCAN);
+    a_tuned();
+}
+
+static void gm_action(int k) {
+    switch (k) {
+        case 0: if (!gm_tones) gm_tune(false); break;
+        case 1: gm_tune(true); break;
+        case 2:
+            if (gm_tones) break;
+            if (!w_sdr_here()) osd("NO SDR", "A WATCH CHANNEL IS AN RTL OF ITS OWN BESIDE B'S (A KRAKENSDR'S, ON A HUB WITH ITS "
+                                             "OWN POWER).", -1);
+            else watch_toggle_at(gm_hz(gm_sel));
+            gm_fill();
+            break;
+        case 3:
+            gm_tones = !gm_tones;
+            gm_fill();
+            pp_keys();
+            break;
+        default: gm_close(); break;
+    }
+}
+
+static const char *gm_label(int k) {
+    switch (k) {
+        case 0: return gm_tones ? "" : "Tune";
+        case 1: return "Scan\n22";
+        case 2: return gm_tones ? "" : rtl_watch_has(gm_hz(gm_sel)) ? "Unwatch" : "Watch";
+        case 3: return gm_tones ? "Channels" : "Tones";
+        default: return "Back";
+    }
+}
+
+/* B, G and F's GMRS panel for the remote (app_sentry.h) */
+static pthread_mutex_t  sdr_pub_mux = PTHREAD_MUTEX_INITIALIZER;
+static app_sentry_sdr_t sdr_pub;
+
+/* Each 50 ms (rtl_timer_cb), and all zero as the Sentry closes (closed: true) */
+static void sdr_publish(bool closed) {
+    app_sentry_sdr_t p;
+    const char      *no;
+
+    memset(&p, 0, sizeof(p));
+    if (!closed) {
+        p.bhz   = listen_hz;
+        p.bscan = !rtl_scan ? 0 : emer_scan ? 3 : scan_chans ? 2 : b_gmrs() ? 4 : 1;   /* what B's F1 scans */
+        p.sdr   = w_sdr_here();
+        p.ghz   = w_sdr_hz;
+        p.garm  = g_sdr_armed;
+        snprintf(p.bpre, sizeof(p.bpre), "%s", f_name());
+        snprintf(p.bmode, sizeof(p.bmode), "%s", listen_hz ? rtl_mode_word(listen_hz) : "");
+        snprintf(p.bname, sizeof(p.bname), "%s", listen_hz ? rtl_name(listen_hz) : "");
+        if (w_sdr_hz && (no = w_sdr_refusal())) snprintf(p.gno, sizeof(p.gno), "%s", no);
+        if (scr == SCR_SYSTEM) snprintf(p.fsel, sizeof(p.fsel), "%s", sys_items[sys_sel].name);
+        p.gmp  = gm_on;
+        p.gmhz = gm_on && !gm_tones ? gm_hz(gm_sel) : 0;
+        p.gmrx = gm_rx();
+    }
+    pthread_mutex_lock(&sdr_pub_mux);
+    sdr_pub = p;
+    pthread_mutex_unlock(&sdr_pub_mux);
+}
+
+void app_sentry_sdr_state(app_sentry_sdr_t *out) {
+    pthread_mutex_lock(&sdr_pub_mux);
+    *out = sdr_pub;
+    pthread_mutex_unlock(&sdr_pub_mux);
+}
+
+void app_sentry_g_sdr_set(int64_t hz) {
+    if (!root || scr != SCR_WALKIE || w_sdr_ptt || g_armed || g_sdr_armed || !w_sdr_here()) return;
+    w_plan();
+    if (!hz) {                          /* back on the X6200: G's own channel, in its own mode */
+        int32_t own = gui_state_get("s.wch", 0);
+        int     k   = -1;
+
+        if (!w_sdr_hz) return;
+        for (int i = 0; i < w_n && k < 0; i++)
+            if (!w_chs[i].sdr && llabs(w_chs[i].hz - own) <= 3000) k = i;
+        if (k < 0) k = w_find("CB", "19");
+        if (k >= 0) walkie_go(k, -1);
+        return;
+    }
+    for (int k = 0; k < w_n; k++)
+        if (w_chs[k].sdr && llabs(w_chs[k].hz - hz) <= 1000) {
+            walkie_go(k, WM_FM);
+            return;
+        }
+}
+
 /* ---- G's picture: the X6200's spectrum around the dial ---- */
 
 static uint8_t ws_level(float db) {
@@ -11273,7 +11783,10 @@ static void show_walkie(void) {
     bool      dmr = w_sdr_hz && rtl_spectrum_dmr(&dm) && dm.hz == w_sdr_hz;
     bool      dsd = !dmr && w_sdr_hz && rtl_spectrum_dsd(&dd) && dd.hz == w_sdr_hz;     /* P25, D-STAR, YSF... */
 
+    const gmrs_ch_t *gm = w_sdr_hz ? gmrs_ch(gmrs_find(w_sdr_hz, 1000, NULL)) : NULL;    /* GMRS 8-14: narrow */
+
     snprintf(fr, sizeof(fr), "%s %s", f, dmr ? "DMR" : dsd ? rtl_dsd_name(dd.proto)
+                                         : gm && gm->bw_hz < 20000 ? "NFM"
                                          : w_sdr_hz ? "FM" : mode_name(cparam_i_get(cfg_cur_mode)));
     identify_ex(fq, &id, false);
     snprintf(nm, sizeof(nm), "%s", id.name);
@@ -11306,8 +11819,10 @@ static void show_walkie(void) {
     }
     if (wui->via_l) lv_label_set_text(wui->via_l, via);
     snprintf(lk, sizeof(lk), "SQL %d  VOL %d", param_i_get(cfg_squelch), radio_change_vol(0));
-    snprintf(tx, sizeof(tx), "%s", (w_sdr_hz ? g_sdr_armed : g_armed) ? "TX ARMED" : rx_held ? "TX LOCKED"
-                                                                                           : "TX NOT LOCKED");
+    snprintf(tx, sizeof(tx), "%s", ham_gmrs(w_hz())                        ? "GMRS: RX ONLY"   /* never sent on */
+                                    : (w_sdr_hz ? g_sdr_armed : g_armed) ? "TX ARMED"
+                                    : rx_held                            ? "TX LOCKED"
+                                                                         : "TX NOT LOCKED");
     char txp[24];                       /* what goes out: the X6200's watts, or the SDR's gain */
 
     if (w_sdr_hz) w_sdr_power(txp, sizeof(txp));
@@ -11819,6 +12334,20 @@ static void build_overlays(void) {
     lv_obj_add_flag(pp_box, LV_OBJ_FLAG_HIDDEN);
     pp_on = false;
 
+    gm_box = rect(root, 30, 56, SW - 60, 50 + GM_SHOW * 26 + 8 + 3 * 22 + 10, 3, false);    /* F's GMRS panel */
+    lv_obj_add_flag(gm_box, LV_OBJ_FLAG_CLICKABLE);
+    gm_head_l = label(gm_box, &pixel_20, amb, 12, 12, SW - 90, LV_TEXT_ALIGN_LEFT, "");
+    lv_label_set_long_mode(gm_head_l, LV_LABEL_LONG_CLIP);
+    for (int r = 0; r < GM_SHOW; r++) {
+        gm_row_l[r] = label(gm_box, &pixel_20, amb, 9, 46 + r * 26, SW - 84, LV_TEXT_ALIGN_LEFT, "");
+        lv_label_set_long_mode(gm_row_l[r], LV_LABEL_LONG_CLIP);
+        lv_obj_set_style_bg_color(gm_row_l[r], amb, 0);
+        lv_obj_set_style_pad_ver(gm_row_l[r], 1, 0);
+    }
+    gm_foot_l = label(gm_box, &pixel_16, amb, 12, 50 + GM_SHOW * 26 + 8, SW - 90, LV_TEXT_ALIGN_LEFT, "");
+    lv_obj_add_flag(gm_box, LV_OBJ_FLAG_HIDDEN);
+    gm_on = false;
+
     gp_box = rect(root, 14, 52, GP_W, scr_h - 56, 3, false);
     lv_obj_add_flag(gp_box, LV_OBJ_FLAG_CLICKABLE);
     gp_head_l = label(gp_box, &pixel_20, amb, 12, 8, GP_W - 30, LV_TEXT_ALIGN_LEFT, "");
@@ -12015,6 +12544,7 @@ static void destruct_cb(void) {
     if (blink_timer) lv_timer_del(blink_timer);
     if (rtl_timer) lv_timer_del(rtl_timer);
     timer = blink_timer = rtl_timer = NULL;
+    sdr_publish(true);                  /* the remote's B and G: none while the Sentry is closed */
     f2_roll = f2_rolled = false;
     f4_roll = f4_rolled = false;
     f4_pick = -1;

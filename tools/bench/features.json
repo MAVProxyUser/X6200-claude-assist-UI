@@ -18237,5 +18237,108 @@
   "suite_has": null,
   "manual_ref": "## Transmitting",
   "bench_has": "bench.py Watch (over_power_w)"
+ },
+ {
+  "id": "sentry-b-gmrs-channels",
+  "area": "sentry-B",
+  "feature": "B knows GMRS's 22 channels and the repeater inputs of 15-22: a GMRS frequency set as B's channel goes with the GMRS preset (not UHF LMR's), heard in NFM, named 'GMRS 20' / 'GMRS 20 IN' on B's peaks, its title and C's log",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "page B, 'set bch 462675000': state bpre GMRS, bmode NFM, bname 'GMRS 20'; 467562500: 'GMRS 8'; 467675000: 'GMRS 20 IN'; A's freq/mode unchanged (orch gmrs-b)",
+  "suite_has": null,
+  "manual_ref": "### GMRS: listening only"
+ },
+ {
+  "id": "sentry-b-gmrs-scan",
+  "area": "sentry-B",
+  "feature": "B's F1 on the GMRS preset (SCAN CFG's F1 SCANS: THE BAND) scans GMRS's 22 channels in frequency order, the step time on each, stopping on one that talks as the style says, named in C's log",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "rtl",
+  "how_to_confirm": "page B on GMRS 15, key F1: state bscan 4, bhz steps 462.550, 462.5625 ... in order, bname each 'GMRS n'; F1 again: bscan 0 (orch gmrs-scan; a replay of noise with no SDR on HOST)",
+  "suite_has": null,
+  "manual_ref": "### GMRS: listening only"
+ },
+ {
+  "id": "g-gmrs-groups",
+  "area": "sentry-G",
+  "feature": "G's GMRS group (channels 1-22, home 20) and GMRS RPT IN group (inputs of 15-22) with any SDR on HOST: CH-/CH+ round the group, CH LIST numbers them by channel, 4-decimal frequencies, a note each (interstitial, narrow 12.5 kHz, repeater output); 8-14 shown NFM",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "rtl",
+  "how_to_confirm": "page G, 'set gsdr 462675000': state ghz 462675000; F4 CH LIST: 22 rows numbered 1-22; 'set gsdr 467675000': GMRS RPT IN 20 (orch gmrs-g)",
+  "suite_has": null,
+  "manual_ref": "#### G on an SDR: RTL-SDR, HackRF or bladeRF"
+ },
+ {
+  "id": "g-gmrs-no-tx",
+  "area": "sentry-G",
+  "feature": "G's SDR never sends on GMRS: A/B there arms nothing and says 'NO TX: GMRS: ONLY RADIOS CERTIFIED FOR IT (47 CFR 95E)'; PTT refused with the same words whatever the SDR (HackRF, bladeRF); G's TX line 'GMRS: RX ONLY'",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "rtl",
+  "how_to_confirm": "G on GMRS 20 through an SDR: state gno 'GMRS: ONLY RADIOS CERTIFIED FOR IT (47 CFR 95E)'; key AB: garm 0, rxo 1, tx 0 (orch gmrs-g)",
+  "suite_has": null,
+  "manual_ref": "### GMRS: listening only"
+ },
+ {
+  "id": "tx-gmrs-never",
+  "area": "tx",
+  "feature": "No TX on GMRS's channels and repeater inputs (462.5375-462.7375, 467.5375-467.7375 MHz) by any path: a transverter covering them, TX outside ham bands on, any TX ranges profile, the SDR: refused 'GMRS: certified radios only'",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "tools/gmrs host check: ham_tx_check with a transverter and the switch on, tx_ranges_check, tx_ranges_sdr_check: HAM_TX_GMRS for every channel and input",
+  "suite_has": null,
+  "manual_ref": "### GMRS: listening only"
+ },
+ {
+  "id": "remote-sdr-state",
+  "area": "remote",
+  "feature": "The remote's state says B and G on the SDR (bhz, bpre, bmode, bname, bscan 0-4, ghz, garm, gno, sdr) and F's choice and GMRS panel (fsel, gmp, gmhz, gmrx); 'set gmp 1|0' (page F only) opens or closes F's GMRS panel; 'set bch HZ' (page B only) sets B's channel with the narrowest preset, 'set gsdr HZ' (page G with an SDR) G's SDR channel, 0 back on the radio",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "'set bch 462675000' on page B: bhz 462675000, bpre GMRS; on page A: 'err bch: only while the Sentry shows B' (orch gmrs-b)",
+  "suite_has": null,
+  "manual_ref": "`set NAME VALUE`"
+ },
+ {
+  "id": "f-system-gmrs",
+  "area": "sentry-F",
+  "feature": "F SYSTEM's GMRS (LISTEN): a panel of GMRS's 22 channels and the repeater inputs of 15-22 (number, 4-decimal frequency, bandwidth, what each is, WATCHED, where B or A is on it); the MFK or VFO chooses, F1 or a push tunes it on the receiver there (B's SDR, else the radio's own through the WR12 on A; none: says why), F2 scans the 22 there, F3 watches it on a spare RTL, F4 the CTCSS privacy codes 1-38 and the 104 DCS codes, F5/BACK/APP closes; its last line: no TX, certified GMRS radios only",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "page F, 'set gmp 1': fsel 'GMRS (LISTEN)', gmp 1, gmhz a GMRS channel, gmrx the receiver; the VFO moves gmhz a row; F4: gmhz 0, F4: back; F1: with an SDR page B on it, with none nothing tuned; F5: gmp 0 (orch gmrs-f)",
+  "suite_has": null,
+  "manual_ref": "### GMRS: listening only"
+ },
+ {
+  "id": "a-gmrs-wr12",
+  "area": "sentry-A",
+  "feature": "GMRS on the X6200's own receiver through the WR12 (or a transverter covering 462-468 MHz): A's F1 on D's GMRS band scans the 22 channels in NFM (not the band), A's targets named GMRS20 / G20 IN, G's GMRS and GMRS RPT IN groups on the radio with CH-/CH+ and CH LIST; A/B there arms nothing ('NO TX: GMRS: ONLY RADIOS CERTIFIED FOR IT (47 CFR 95E)')",
+  "radios": [
+   "x6200"
+  ],
+  "needs": "wr12",
+  "how_to_confirm": "with the WR12 on HOST and no SDR: D's GMRS LISTEN, A's F1: 'SCAN: GMRS', the dial steps 462.550, 462.5625...; key AB on A at 462.675: rxo stays 1; page G: group GMRS on the X6200 (VIA X6200)",
+  "suite_has": null,
+  "manual_ref": "### GMRS: listening only"
  }
 ]

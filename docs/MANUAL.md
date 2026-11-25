@@ -1018,6 +1018,10 @@ the time they show stays true (up to v0.3.12.39 they stopped while it sent).
 - **F1 SCAN** sweeps the band end to end (or the channel list: SCAN CFG's F1 SCANS): A 360 kHz at a time, B a picture at a time (SCAN CFG's STEP TIME, 2 s;
   C's F5 sets it too), each
   a little overlapped, from the bottom again past the top; a band narrower than the picture stays in its middle.
+  On B's **GMRS** preset (or D's GMRS band) F1 goes down GMRS's 22 channels instead, one at a time as the channel
+  list's scan does, by frequency (462.550, 462.5625 ... 462.725, then 467.5625 ... 467.7125, round), the step time
+  on each, stopping on one that talks as the style says, named `GMRS 20` in C's log: the land mobile radio round them
+  never stops it. SCAN CFG's F1 SCANS: THE CHANNELS and EMERGENCY's scan come first ([GMRS](#gmrs-listening-only)).
   What each does on a signal is SCAN CFG's style: BROWSE marks it (A) or moves B's channel to each picture's
   strongest and goes on; SCANNER, SAMPLER, STOP & STAY and SURVEY stop on it (A only inside the band scanned). Both
   put what they stop on into C LOG, and B's scan goes on behind the other screens. Turning the MFK or the VFO stops
@@ -1025,7 +1029,8 @@ the time they show stays true (up to v0.3.12.39 they stopped while it sent).
 - **F2 BAND** (A: the next band, the BAND keys too, the scan going on there; 30 M and 19 M BC are heard on WWV at
   10 and 15 MHz, just outside them, and BAND and SCAN still count that as the band) or **PRESET** (B: NOAA weather, 2 m,
   2 m repeaters, the airband, FM broadcast, marine VHF, the weather satellites, the weather balloons, 70 cm, ISM 433,
-  GMRS, ISM 915, UAT 978 and ADS-B 1090; then 6 m, 1.25 m, 23 cm and GPS L1, and with a HackRF or bladeRF Wi-Fi
+  GMRS (its 22 channels, F1 scanning them), ISM 915, UAT 978 and ADS-B 1090; then 6 m, 1.25 m, 23 cm and GPS L1,
+  and with a HackRF or bladeRF Wi-Fi
   2.4 GHz, 13 cm, 5.8 GHz, and with a HackRF HF 20 m and 10 m: a preset past what the stick tunes is passed over).
   To roll through them, hold F2 and turn the VFO knob: a preset a click, each tuned and named as it comes, and
   backwards when the knob turns back; letting F2 go then steps no further (F2 let go unturned is the next preset).
@@ -1445,6 +1450,8 @@ written through to the card before it replaces the last copy, so a power cut kee
   DOES shows a spectrogram of A's: the X6200's spectrum around the dial as A takes it, flat, the newest row on top,
   following the dial as A's rows do; the GPU draws it where the image has Mesa, the processor elsewhere. A's title names
   what its scope takes in: `MF/HF/VHF SPECTRUM` (the X6200 from 100 kHz to 55 MHz, and 87.5 to 137 MHz).
+- **GMRS (LISTEN)**, last on F's list: GMRS's channels in a panel, each tuned on whatever receives it. See
+  [GMRS](#gmrs-listening-only).
 - **TRIBAL KNOWLEDGE** on F: what hams pass on by word of mouth, read a page at a time in WHAT IT DOES, which grows
   down over the processor's box while it is open (its title `TRIBAL KNOWLEDGE 3/10`); the MFK turns the pages, a push
   or F2 closes it, and so does leaving F. The radio's own text (`/usr/share/x6100/tribal.txt`): the digital nets
@@ -1654,10 +1661,11 @@ of A's VFO). A's scan, sweep and lock wait while G shows and go on from A's dial
 
 #### G on an SDR: RTL-SDR, HackRF or bladeRF
 
-With an SDR on the HOST port, G's plan gets six more groups after the X6200's: FM simplex channels of the amateur
-bands, and DMR's (below), heard through it. A HackRF or a bladeRF (the daemon says it transmits) sends on them too; an RTL-SDR only
-hears them: A/B there says "THE RTL-SDR ONLY RECEIVES". Up to v0.3.12.24 the groups came only with a HackRF or a
-bladeRF, so an RTL-SDR gave G none of them:
+With an SDR on the HOST port, G's plan gets eight more groups after the X6200's: FM simplex channels of the amateur
+bands, DMR's and GMRS's (below), heard through it. A HackRF or a bladeRF (the daemon says it transmits) sends on the
+amateur ones too; an RTL-SDR only
+hears them: A/B there says "THE RTL-SDR ONLY RECEIVES". GMRS and DMR are heard only, whatever the SDR. Up to
+v0.3.12.24 the groups came only with a HackRF or a bladeRF, so an RTL-SDR gave G none of them:
 
 | Group | Channels (home: CALL) |
 |---|---|
@@ -1667,10 +1675,17 @@ bladeRF, so an RTL-SDR gave G none of them:
 | 33 CM FM | CALL 927.500 |
 | 23 CM FM | CALL 1294.500 |
 | DMR | CALL 441.000, S2 446.500, S3 446.075, S4 433.450, 2M 145.790, 2M2 145.510 (receive only: no FM is sent on them) |
+| GMRS | 1-22 by number (home: 20, 462.675): 1-7 462.5625-462.7125, 8-14 467.5625-467.7125 (narrow, shown NFM), 15-22 462.550-462.725 (receive only) |
+| GMRS RPT IN | 15-22, the repeaters' inputs 467.550-467.725 (home: 20; receive only) |
 
-They are Region 2's (North America's) simplex channels; the VFO tunes anywhere from there. **Only amateur bands**: the
+They are Region 2's (North America's) simplex channels; the VFO tunes anywhere from there. GMRS's groups come between
+DMR and 33 cm; their CH LIST numbers them by channel (type `2` `0` for 20, an input by its repeater's number), with
+the whole frequency (462.5625) and what each is (`462 INTERSTITIAL, 5 W`, `NARROW 12.5 KHZ, 0.5 W`, `RPT OUT, IN
+467.675`, `RPT INPUT`). **Only amateur bands**: the
 owner asked for "anything the HackRF can", and that is narrowed on purpose. No aviation, marine, NOAA, GPS,
-cellular, FRS/GMRS, MURS, ISM or any other non-amateur frequency is ever keyed, whatever the setting.
+cellular, FRS/GMRS, MURS, ISM or any other non-amateur frequency is ever keyed, whatever the setting. On GMRS's
+channels G's line says `GMRS: RX ONLY` where it says TX LOCKED elsewhere, and A/B arms nothing: `NO TX: GMRS: ONLY
+RADIOS CERTIFIED FOR IT (47 CFR 95E)` ([why](#gmrs-listening-only)).
 
 - **On an SDR channel G is the SDR's**: `VIA HACKRF` (or `VIA BLADERF`, `VIA RTL-SDR`), FM, the channel heard on the speaker at B's
   volume and squelch, G's spectrum and voiceprint from the SDR (the device tuned 200 kHz over the channel, its
@@ -1683,8 +1698,10 @@ cellular, FRS/GMRS, MURS, ISM or any other non-amateur frequency is ever keyed, 
   locks it. While armed the knobs and the channel keys are locked.
 - **PTT transmits while held**: the top panel's PTT key, or the hand mic's PTT (the base keys itself at 0 W, as it
   always did in the Sentry; G sees it and keys the SDR). The lamp says ON AIR. Released, it stops (ramped down over
-  5 ms). Refused with a word in G's line: `NO TX: NOT AN AMATEUR BAND` off the bands below, `NO TX: OUTSIDE THE TX
-  RANGES (SETTINGS > TX CAL)` with South Korea's ranges or the own list chosen, `NO TX: THE WR12 HOLDS TX`.
+  5 ms). Refused with a word in G's line: `NO TX: GMRS: ONLY RADIOS CERTIFIED FOR IT (47 CFR 95E)` on GMRS's
+  channels and repeater inputs (first, whatever the SDR), `NO TX: NOT AN AMATEUR BAND` off the bands below, `NO TX:
+  OUTSIDE THE TX RANGES (SETTINGS > TX CAL)` with South Korea's ranges or the own list chosen, `NO TX: THE WR12 HOLDS
+  TX`.
 - **The voice is the hand mic's**: while transmitting the base is put in record mode, as the voice messages record
   (Settings' hand-mic gain), so the hand mic's audio comes into Linux live and goes to the SDR's daemon as it comes;
   the radio's built-in mic is not heard by Linux there. No audio from it for 3 s says `TX: NO MIC AUDIO`.
@@ -1703,6 +1720,68 @@ cellular, FRS/GMRS, MURS, ISM or any other non-amateur frequency is ever keyed, 
   no audio, and the FM itself from the daemon's test device (tools/rtlspec/tx_check.py: its deviation, the tones, the
   ramps, its bandwidth). Whether the base still sends the hand mic to Linux while the hand mic's PTT has it keyed
   is not known: if `NO MIC AUDIO` shows only with the hand mic's PTT, use the top panel's PTT key.
+
+### GMRS: listening only
+
+GMRS, the US General Mobile Radio Service (47 CFR Part 95 Subpart E), is a licensed service on 22 channels FRS shares,
+with repeaters on 15-22. The Sentry listens to it on **every receiver that reaches 462-468 MHz**:
+
+- **An SDR on the HOST port** (an RTL-SDR, each of a KrakenSDR's five, a HackRF or a bladeRF, receiving): **B**'s
+  GMRS preset (F2, or D's GMRS band with LISTEN) names each channel on its picture, its title and C's log (`GMRS 20`,
+  a repeater's input `GMRS 20 IN`) and **F1 scans the 22 channels** (above); **G**'s GMRS and GMRS RPT IN groups put
+  one channel on the speaker at a time, the arrows stepping them; a KrakenSDR's spare RTLs **watch** GMRS channels
+  beside B's (F4 held on B, or F3 on F's panel below), each heard when it opens; and page I's direction finder has an
+  FRS/GMRS band preset (462.5625) for a bearing on a GMRS transmitter.
+- **The X6200's own receiver through the WR12** (54 MHz-1 GHz, receive only), when one is on HOST and no SDR is: A
+  tunes GMRS's channels in NFM (D's GMRS band, or F's panel), names them on its picture (`GMRS20`, `G20 IN`), and
+  **A's F1 on the GMRS band scans the 22 channels** (`SCAN: GMRS`, each the step time, stopping on one that talks as
+  SCAN CFG's style says) instead of the band; G's GMRS and GMRS RPT IN groups are then the X6200's (CH - and CH +,
+  CH LIST). A transverter whose range takes 462-468 MHz in does the same on either radio.
+- **Not** the X6100's own receiver (it stops at 55 MHz) nor the X6200's without the WR12 (137 MHz): F's panel says so.
+
+All in narrow FM (the SDR daemon's FM takes the 20 kHz channels' 5 kHz deviation; the narrow ones are heard 6 dB
+quieter).
+
+**F SYSTEM > GMRS (LISTEN)** (the last item; F2 or a push) opens a panel over F: its title says where GMRS is heard
+(`HEARD ON B (RTL-SDR)`, `HEARD ON A (THE X6200'S OWN RECEIVER)` or `NO RECEIVER HERE`), then the 22 channels and the
+8 repeater inputs, a row each: the number, the whole frequency (462.5625), the bandwidth, what it is, `WATCHED` on a
+watch channel, `(B)` or `(A)` where that receiver is on it. The **MFK** or the **VFO** chooses (channel 20 first);
+**F1** or a **push** tunes it on the receiver there and shows that screen (B's channel with the GMRS preset, B's SDR
+on the speaker; or A's dial in NFM); **F2** starts GMRS's scan there (B's or A's, from 462.550); **F3** watches the
+channel on a spare RTL (or stops watching it); **F4** shows the privacy codes and the DCS codes (the MFK scrolls
+them; F4 again: the channels); **F5**, **BACK** or **APP** closes it, and so does leaving F. With no receiver F1 and F2
+say what is needed. Its last line says why nothing is sent.
+
+| Channels | Frequencies (MHz) | Bandwidth | GMRS power limit | What |
+|---|---|---|---|---|
+| 1-7 | 462.5625, 462.5875 ... 462.7125 | 20 kHz | 5 W ERP | 462 MHz interstitial, FRS's 1-7 too |
+| 8-14 | 467.5625, 467.5875 ... 467.7125 | 12.5 kHz (narrow FM) | 0.5 W ERP, hand-helds | 467 MHz interstitial, FRS's 8-14 |
+| 15-22 | 462.550, 462.575 ... 462.725 | 20 kHz | 50 W | 462 MHz main: simplex and the repeaters' outputs |
+| 15-22 inputs | 467.550, 467.575 ... 467.725 | 20 kHz | 50 W | the repeaters' inputs, each its output + 5 MHz |
+
+Repeaters and many groups add a tone under the voice that the radios' squelch opens on: a **CTCSS** tone, which
+FRS/GMRS radios number as **privacy codes 1-38** (67.0, 71.9, 74.4, 77.0, 79.7, 82.5, 85.4, 88.5, 91.5, 94.8, 97.4,
+100.0, 103.5, 107.2, 110.9, 114.8, 118.8, 123.0, 127.3, 131.8, 136.5, 141.3, 146.2, 151.4, 156.7, 162.2, 167.9,
+173.8, 179.9, 186.2, 192.8, 203.5, 210.7, 218.1, 225.7, 233.6, 241.8 and 250.3 Hz: code 22 is 141.3 Hz, the tone
+heard with channel 20 for travel and emergencies), or a **DCS** code, one of the 104 standard ones (023, 025, 026 ...
+754), which radios number from 39 up each in its own order: check the radio's manual. The Sentry hears every channel
+whatever its tone (its squelch is the signal's level); the table of both is in `src/cfg/gmrs.c`.
+
+**Receive only, on purpose.** GMRS may be transmitted on only by radios certified for it (47 CFR 95.1761), with the
+licence. Nothing here is: the X6100 and the X6200 do not reach 462 MHz themselves, and a transverter, a HackRF or a
+bladeRF is not a GMRS radio. So nothing in this firmware sends there:
+
+- **G's SDR** refuses GMRS's channels and inputs first, whatever the SDR: A/B arms nothing there, PTT is refused,
+  both with `NO TX: GMRS: ONLY RADIOS CERTIFIED FOR IT (47 CFR 95E)`, and G's TX line says `GMRS: RX ONLY`. The
+  daemon's own limit (the amateur bands only) would refuse it too.
+- **A transverter** whose range takes in GMRS keys nothing between 462.5375 and 462.7375 MHz or between 467.5375 and
+  467.7375 MHz (the channels and inputs, half a 25 kHz channel either side), whatever TX outside ham bands and the TX
+  ranges say: `GMRS: certified radios only` in the message box ([Amateur bands only](#amateur-bands-only)). Up to
+  this version an enabled transverter covering them would have keyed.
+
+Talk on GMRS with a GMRS radio of its own; the Sentry is the scanner beside it. `tools/gmrs` checks the channel table
+and every refusal (`make -C tools/gmrs`); orch's `gmrs-b`, `gmrs-scan` and `gmrs-g` check B, B's scan and G on the
+radios, receive only.
 
 ### The SDRs (RTL-SDR, HackRF, bladeRF), the GNS 5890 and the microADSB on USB
 
@@ -4661,6 +4740,10 @@ of a transverter you turned on, and never on the X6200's receive-only ranges
 - Not in the table, the switch below covers them: Ireland's blocks at 30-40,
   45-49 and 54-55 MHz (Irish operators turn it on for those), Somalia's
   5.060-5.250 MHz, Japan's 4.630 MHz emergency channel.
+- Never, through a transverter or with the switch on: GMRS's channels and
+  repeater inputs, 462.5375-462.7375 and 467.5375-467.7375 MHz (`GMRS:
+  certified radios only`): only radios certified for GMRS may send there
+  ([GMRS](#gmrs-listening-only)).
 - The Simplex repeaters of [Zello](#zello-simplex-repeater) and
   [SVXConnect](#svxconnect-simplex-repeater) key only inside this table or a
   transverter's range you turned on, whatever TX outside ham bands and the TX
@@ -10946,7 +11029,16 @@ centred on the key tone, the low edge no lower than 0; in AM and FM LO is
 0), `wch HZ MODE` (the Sentry G's own channel, the state's `wch` and `wchm`: its memory
 only, the dial not tuned; 0 -1 for none, CB 19 then), `tpwr` (TUNE's own power for an external tuner, tenths of a
 watt, the state's `tpwr`: 1 up to the radio's top, as Settings > TX Cal > EXTERNAL TUNER sets it), `kt` (CW's key
-tone in Hz, 400-1200 in 10 Hz steps, the state's `kt`, as KEY 1:2's Tone sets it). A `set` the radio refuses is
+tone in Hz, 400-1200 in 10 Hz steps, the state's `kt`, as KEY 1:2's Tone sets it), `bch HZ` (the Sentry B's
+channel, with the narrowest preset it is in, B's scan stopped: only while B shows, else `err bch: only while the
+Sentry shows B`), `gsdr HZ` (G's SDR channel, one of G's plan's: only while G shows with an SDR there and nothing
+armed; 0 puts G back on the radio at its own channel), `gmp 1|0` (F SYSTEM's GMRS chosen and its panel opened, or
+closed: only while F shows). The state says B and G on the SDR: `bhz` (B's channel), `bpre`
+(its preset or band), `bmode` (`NFM`, `DMR`...), `bname` (`GMRS 20`, "" none), `bscan` (0 off, 1 the band, 2 the
+channel list, 3 EMERGENCY's, 4 GMRS's 22), `ghz` (G's SDR channel, 0 none), `garm` (its transmitter armed), `gno`
+(why it may not send there, "" it may), `sdr` (an SDR there), `fsel` (F's chosen item, "" off F), `gmp` (F's GMRS panel
+open), `gmhz` (its chosen channel, 0 on the tones), `gmrx` (where its F1 tunes: 0 nowhere, 1 B's SDR, 2 the radio's
+own through the WR12); all zero while the Sentry is closed. A `set` the radio refuses is
 answered `err ...` (`err freq: locked (LOCK, or an app holds the
 frequency)`, `err freq: not a frequency this radio tunes`, `err NAME: the
 radio is busy, try again`, `err unknown setting NAME`, the role and

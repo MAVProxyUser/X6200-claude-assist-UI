@@ -6278,6 +6278,11 @@ _oc.H = sys.modules[__name__]
 TESTS += _oc.tests(Test, A, B)
 ORCH_COVERS.update(_oc.COVERS)
 
+# GMRS on the Sentry (orch_gmrs.py, the owner's licence, 2026-11-25): B's preset and scan, G's groups, receive only
+import orch_gmrs as _og                     # noqa: E402
+_og.H = sys.modules[__name__]
+TESTS += _og.tests(Test, A, B)
+ORCH_COVERS.update(_og.COVERS)
 
 
 # Other sessions put new GUIs on the radios (tools/cross_x6200/install.sh): one replaced both mid-run on 2026-11-25
