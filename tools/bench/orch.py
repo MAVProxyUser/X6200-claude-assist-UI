@@ -6069,6 +6069,8 @@ TESTS = [
           ("bands", "both ways", "an over on every band both radios share, 160 to 6 m, each way: heard, the receiver's "
                                  "level per band (suite_more band_proofs)", 600),
           ("walkie", "both ways", "the walkie in AM and FM on 20 m and 10 m FM, each way (bench.py radios-walkie)", 400),
+          ("cw", "both ways", "CW text through TCI each way ('VVV TEST DE <test call>'): the listener's decoder copies "
+                              "the words (suite_more cw_over)", 180),
           ("if-shift", "X6200 TX, X6100 RX", "the X6100's IF shift at +-2000 Hz: the tone's pitch kept, the base "
                                              "2.1 kHz the other way (ifshift.py)", 120))],
     Test("system-checks", "both", "each radio read over SSH, nothing changed: battery log and model, data partition, "

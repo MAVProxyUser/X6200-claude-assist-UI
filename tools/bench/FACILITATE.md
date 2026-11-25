@@ -1,6 +1,6 @@
 # Tests the owner facilitates
 
-From 20261125-124333-coverage (`orch.py coverage`, then `python3 facilitate.py`). 271 features still wait on you: internet services, Bluetooth, GPS or your hands. Each session says what you do and what the bench does; a ticked line is covered.
+From 20261125-124652-coverage (`orch.py coverage`, then `python3 facilitate.py`). 271 features still wait on you: internet services, Bluetooth, GPS or your hands. Each session says what you do and what the bench does; a ticked line is covered.
 
 ## The X6100 as the X6200's Bluetooth client (your OK, no hands)
 
@@ -437,7 +437,7 @@ From 20261125-124333-coverage (`orch.py coverage`, then `python3 facilitate.py`)
 
 No hands: over the cable between the radios (your cable word, at most 1 W), the SDRs on HOST, the HackRF into the X6200 (receive only), or nothing at all.
 
-- **cable** (112): cw 18, tx 12, app-ft8 10, app-js8 9, winlink 8, app-sstv 8, settings-txcal 4, web 4, app-psk 4, app-field-ops 4, system 3, radio-core 2, settings-audio 2, sentry-scancfg 2, app-walkie 2, app-cw-kbd 2, sentry-G 2, app-wefax 2, lookfeel 2, settings-display 2, remote 2, app-scanner 2, app-rade 1, app-propagation 1, sentry-A 1, app-bands 1, display 1, app-iradio 1
-- **rtl** (51): sentry-B 11, sdr 9, sentry-H 7, sentry-pool 4, sentry-common 4, sentry-E 3, sentry-G 3, sentry-I 3, network 2, sentry-A 1, sentry-D 1, tx 1, sentry-scancfg 1, sentry-C 1
+- **cable** (112): cw 18, tx 12, app-ft8 10, app-js8 9, app-sstv 8, winlink 8, app-psk 4, web 4, settings-txcal 4, app-field-ops 4, system 3, settings-display 2, lookfeel 2, sentry-scancfg 2, radio-core 2, remote 2, app-wefax 2, app-cw-kbd 2, app-walkie 2, app-scanner 2, sentry-G 2, settings-audio 2, sentry-A 1, app-bands 1, app-propagation 1, display 1, app-iradio 1, app-rade 1
+- **rtl** (51): sentry-B 11, sdr 9, sentry-H 7, sentry-pool 4, sentry-common 4, sentry-I 3, sentry-G 3, sentry-E 3, network 2, sentry-D 1, tx 1, sentry-A 1, sentry-C 1, sentry-scancfg 1
 - **hackrf** (4): sentry-B 3, sentry-G 1
-- **none** (302): system 31, tx 29, app-field-ops 25, settings-display 20, remote 16, display 15, web 15, settings-general 10, app-js8 9, app-cw-trainer 8, main-screen 7, tci 7, app-first-start 7, sentry-common 7, cw 6, app-walkie 5, radio-core 5, app-zello 5, settings-audio 5, winlink 5, app-wefax 4, app-channels 4, network 3, app-ft8 3, sentry-F 3, settings-info 3, sentry-G 3, sentry-C 3, input 2, settings-bluetooth 2, settings-txcal 2, app-bands 2, app-rade 2, app-flights 2, lookfeel 2, settings-walkie 2, app-hf-air 2, app-sstv 2, sentry-I 2, app-svx 2, app-timesig 1, sentry-A 1, app-propagation 1, app-weather 1, settings-wireless 1, sentry-H 1, app-wspr 1, sentry-scancfg 1, app-cw-kbd 1, app-cb 1, sentry-E 1, app-psk 1, sentry-D 1, app-birdie 1, wavelog 1
+- **none** (302): system 31, tx 29, app-field-ops 25, settings-display 20, remote 16, display 15, web 15, settings-general 10, app-js8 9, app-cw-trainer 8, app-first-start 7, main-screen 7, sentry-common 7, tci 7, cw 6, app-walkie 5, settings-audio 5, winlink 5, app-zello 5, radio-core 5, app-channels 4, app-wefax 4, app-ft8 3, network 3, settings-info 3, sentry-C 3, sentry-G 3, sentry-F 3, app-sstv 2, app-bands 2, settings-txcal 2, app-rade 2, settings-walkie 2, input 2, app-hf-air 2, lookfeel 2, app-flights 2, sentry-I 2, app-svx 2, settings-bluetooth 2, app-birdie 1, app-cb 1, sentry-H 1, app-weather 1, settings-wireless 1, app-cw-kbd 1, sentry-E 1, sentry-scancfg 1, app-psk 1, sentry-A 1, sentry-D 1, app-wspr 1, wavelog 1, app-propagation 1, app-timesig 1
