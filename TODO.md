@@ -109,7 +109,9 @@ Done 2026-11-25 night (the same asks, continued):
   format-truncation and comments) and clang's analyzer over its 421 C files (81 reports). Real, fixed: the CI-V CAT
   set an unknown mode as whatever the stack held (c3c023c5, tools/cat_modes); the GUI's start crashed on a failed
   fopen of the boot animation's sign and on a missing VOL knob (c1855271); the CAT's set_vfo read through a NULL it
-  had logged (9e6d3a7d, the analyzer over the 62 C++ files too); orch's two save_wav (0d45f6cd, found by a scan of
+  had logged (9e6d3a7d, the analyzer over the 62 C++ files too); the SDR daemon's TX called a receive-only device's
+  NULL tx when the stick changed between the ask and the run (tools/rtlspec, in the next image, not hot-installed);
+  orch's two save_wav (0d45f6cd, found by a scan of
   the bench scripts). The rest read as false (loops the analyzer could not bound, a VLA, callers' guards) or
   harmless (EAGAIN == EWOULDBLOCK, a switch over every value of its enum).
 - The skirt, read in the code (2026-11-25 08:40, for the next TX round): on the X6200 (no ALC) TCI's path never
