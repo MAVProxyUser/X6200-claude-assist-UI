@@ -78,7 +78,11 @@ Done 2026-11-25 night (the same asks, continued):
   filter changes. 31 bench recordings old against new (tools/cw_replay, four new checks; tools/cw_trainer's noise
   jump); cw-text and cw-carrier keep the listener's audio now. Both radios by hot install, in the next tag.
   Left: the X6200's noise in CW has a 17 dB hump at the key tone (its base's CW filter), against which every tone is
-  judged: whitening tried two ways and reverted (ORCH_FINDINGS); the next try keeps the lock on a held station.
+  judged; after a strong signal near its passband (the X6100's path proof: its S-meter -121 -> -79 dBm) its decoder
+  stays trapped printing noise and runs fast into the next text (cw-carrier x6100>x6200's quiet, now and then cw-kbd's
+  'TTT TTT'). Six tries reverted (ORCH_FINDINGS). Next to try: Receiver::start_over when the S-meter falls 20 dB and
+  more after a second or more up (dsp_psd carries smeter_dbm), so the band is measured again once a strong signal ends;
+  needs a TX round (the chain-ok word).
 - The apps on the X6200 under 1 W hold their level as TCI's do (tx_player coarse; tools/txlevel: -3.0 dB in 20 overs
   before, 0.0 now). The 0.1 W skirt is not this (ft8-copies x6200 unchanged).
 - TCI over's end (the owner's 'TCI unkeys before its audio is out'): DONE. New orch tests tci-tail x6200/x6100
