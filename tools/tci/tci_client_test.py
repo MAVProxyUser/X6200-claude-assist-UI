@@ -76,7 +76,8 @@ class WS:
         assert b"101" in head.split(b"\r\n")[0], head
         assert want.encode() in head, "bad Sec-WebSocket-Accept"
 
-    def send(self, opcode, payload):
+    def send(self, opcode, payload, out=False):
+        """One frame; out: its bytes returned, not sent (several sent in one write: send_all)"""
         mask = os.urandom(4)
         n = len(payload)
         head = bytes([0x80 | opcode])
@@ -87,7 +88,14 @@ class WS:
         else:
             head += bytes([0x80 | 127]) + struct.pack(">Q", n)
         m = int.from_bytes((mask * (n // 4 + 1))[:n], "little")
-        self.s.sendall(head + mask + (int.from_bytes(payload, "little") ^ m).to_bytes(n, "little"))
+        data = head + mask + (int.from_bytes(payload, "little") ^ m).to_bytes(n, "little")
+        if out:
+            return data
+        self.s.sendall(data)
+
+    def send_all(self, *frames):
+        """Several frames ((opcode, payload), ...) in one write: they come in together"""
+        self.s.sendall(b"".join(self.send(op, p, out=True) for op, p in frames))
 
     def text(self, s):
         self.send(1, s.encode())
@@ -291,6 +299,7 @@ def main():
     funnel()
     ask()
     cw()
+    left_keyed()
     print("ALL OK")
 
 
@@ -317,6 +326,27 @@ def nothing_for(ws, seconds):
         pass
     ws.s.settimeout(5)
     return got
+
+
+def left_keyed():
+    """A client that keys and leaves in one breath, its close behind its start in the same write (a close frame, or
+    the connection's end): the start is refused, nothing keyed even for an instant (air tci-audio, 2026-11-25: the
+    X6100 keyed before its socket thread came to the close). Another connection watches the state"""
+    watch = WS()
+    watch.wait_text("ready;")
+    for how in ("close frame", "connection's end"):
+        ws = WS()
+        ws.wait_text("ready;")
+        if how == "close frame":
+            ws.send_all((1, b"trx:0,true,tci;"), (8, struct.pack(">H", 1000)))
+        else:
+            ws.s.sendall(ws.send(1, b"trx:0,true,tci;", out=True))
+            ws.s.shutdown(socket.SHUT_WR)
+        got = [p for op, p in nothing_for(watch, 1.5) if op == 1]
+        assert not any(b"trx:0,true" in p for p in got), f"{how}: a client that left keyed the radio ({got})"
+        ws.s.close()
+        print(f"left keyed ({how} behind its start): nothing keyed")
+    watch.s.close()
 
 
 def closed_within(ws, seconds):

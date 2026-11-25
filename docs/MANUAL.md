@@ -11544,7 +11544,9 @@ the radio, hears it, keys it and sends CW with it.
   alone, and so is a PTT key that, once at the radio, does not put it on the
   air within a second (a frequency it does not transmit on, no data from the
   base). A key still on its way when its client unkeys or leaves keys
-  nothing, and a client whose key was refused or cancelled unkeys nothing:
+  nothing; a key whose client's close came in with it (the program sent it
+  and quit) is refused, and the radio does not key even for an instant. A
+  client whose key was refused or cancelled unkeys nothing:
   a transmission keyed meanwhile with the PTT key on the radio or the
   browser's PTT stays on the air. A client's CW text is a transmission too
   (CW from a client, below).

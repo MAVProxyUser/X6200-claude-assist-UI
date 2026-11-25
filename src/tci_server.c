@@ -177,6 +177,7 @@ typedef struct {
     bool            local;          /* a program on the radio itself: from 127.x, neither a browser nor a proxy's */
     char            app[32];        /* the name it gives itself (its User-Agent), "" none */
     bool            key_wait;       /* a start waiting for its own last over to play out (key_wait_tick) */
+    bool            leaving;        /* its close is here already, behind what client_read is handling (leaving_now) */
     bool            key_wait_tci;   /* ... with its TCI audio */
     uint64_t        key_wait_ms;
     uint8_t         said;           /* what the operator said to its asking to transmit, on this connection (SAID_*) */
@@ -792,6 +793,7 @@ static void client_close(client_t *c) {
     c->said   = SAID_NOTHING;
     c->app[0] = 0;
     c->key_wait = false;
+    c->leaving  = false;
     if (txs.unkeyed_ci == (int)(c - clients))
         txs.unkeyed_ci = -1;
     pthread_mutex_unlock(&c->lock);
@@ -1803,8 +1805,10 @@ static void handle_cmd(int ci, char *line) {
      * CW and CW-R before anyone is asked */
     bool key     = (!strcmp(name, "trx") && n >= 2 && parse_bool(a[1])) || (cw && !more);
     bool not_cw  = cw && !more && !cw_mode(s.mode);
-    bool refused = key && (!tx_free(&s) || not_cw || (atomic_load(&trust_operate) && !tx_permit(ci)));
-    if (refused && key && !cw && txs.unkeyed_ci == ci && now_ms() - txs.unkeyed_ms < KEY_WAIT_MS && txs.owner < 0 &&
+    /* A client leaving in the same breath (its close behind this start in what came in) is refused: run and then
+     * undone, its key put the radio on the air for an instant (tci-audio, 2026-11-25, the X6100) */
+    bool refused = key && (c->leaving || !tx_free(&s) || not_cw || (atomic_load(&trust_operate) && !tx_permit(ci)));
+    if (refused && key && !cw && !c->leaving && txs.unkeyed_ci == ci && now_ms() - txs.unkeyed_ms < KEY_WAIT_MS && txs.owner < 0 &&
         ptt_owner < 0 && cw_owner < 0 && (s.tx || atomic_load(&txs.keyed))) {
         /* its own last over still playing out: this start waits for the radio (key_wait_tick), answered then */
         c->key_wait     = true;
@@ -2434,6 +2438,37 @@ static void funnel_auth(int ci, const char *text) {
     LV_LOG_USER("tci: %s's sound over Tailscale Funnel from %s", name, c->ip);
 }
 
+/* Whether a client's close is here already: a close frame among the frames in its buffer (their heads walked, not
+ * parsed: ws_frame_parse unmasks in place), or the end of its connection waiting behind them. A start it sent just
+ * before is then refused (handle_cmd): the LVGL thread could key the radio before this thread came to the close and
+ * cancelled it, and the radio went on the air for an instant for a client already gone (the X6100, 2026-11-25) */
+static bool leaving_now(const client_t *c) {
+    size_t pos = 0;
+
+    while (pos + 2 <= c->in_len) {
+        uint8_t b0 = c->in[pos], b1 = c->in[pos + 1];
+        size_t  plen = b1 & 0x7f, head = 2;
+
+        if ((b0 & 0x0f) == WS_OP_CLOSE)
+            return true;
+        if (plen == 126) {
+            if (pos + 4 > c->in_len) break;
+            plen = (size_t)c->in[pos + 2] << 8 | c->in[pos + 3];
+            head = 4;
+        } else if (plen == 127) {
+            if (pos + 10 > c->in_len) break;
+            plen = 0;
+            for (int i = 0; i < 8; i++) plen = plen << 8 | c->in[pos + 2 + i];
+            head = 10;
+        }
+        if (b1 & 0x80) head += 4;
+        if (plen > IN_SIZE) break;
+        pos += head + plen;
+    }
+    char b;
+    return recv(c->fd, &b, 1, MSG_PEEK | MSG_DONTWAIT) == 0;
+}
+
 static void client_read(int ci) {
     client_t *c = &clients[ci];
     ssize_t   n = recv(c->fd, c->in + c->in_len, IN_SIZE - c->in_len, MSG_DONTWAIT);
@@ -2494,6 +2529,7 @@ static void client_read(int ci) {
     }
 
     size_t pos = 0;
+    c->leaving = leaving_now(c);
     while (c->fd >= 0) {
         ws_frame_t f;
         int        used = ws_frame_parse(c->in + pos, c->in_len - pos, IN_SIZE - 16, &f);
