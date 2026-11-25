@@ -532,6 +532,9 @@ Where: Settings > Keys > TOP AND SIDE KEYS.
 The USER page (#111). F1-F5 of your own on the main screen: each is given
 an action of the list below in Settings > Keys > USER PAGE, and the button
 is named after it (FT8, Lock, Mode +, Band -...); one with none shows "-".
+Every action of the list has its name there; up to v0.3.12.48 upstream's
+apps (Weather, Internet radio, Zello, SVXConnect, Flights, HF Air Band, CB)
+showed "?".
 APP 4:6's User keys shows the page, and so does any key given "USER page"
 (a long press of GEN, say). It has no page button: a page key (GEN, APP...)
 goes on to its own pages, as from any page. The apps keep their own F keys.

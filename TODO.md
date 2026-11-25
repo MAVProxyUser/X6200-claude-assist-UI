@@ -14,12 +14,12 @@ they were, each item's state brought here when it changed).
 Open, mine to do:
 - **Every test through the orchestrator** (the owner, 11-24: "all tests should ultimately use the same orchestration
   framework", "whittle down the tests to essential testable things, not slop"; and "ensure that your changes have
-  tests, that in turn get run through http://127.0.0.1:8765"): tools/bench/orch.py has 152 tests (2026-11-24 15:40:
-  all pass, none KNOWN; documented in tools/bench/ORCH.md); the 1:1 suite's batches (suite.py, suite_more.py, suite_cover*.py, air_*.py; 1386
-  features listed, ~1040 not covered on 11-23) still run outside it. Left: pick the essential ones of features.json
-  and move them in (surveyed 11-24: receive settings beyond rx-settings (VFO, split, RIT, XIT, filters, zoom, IF
-  shift), the band plan (mode from plan, lock per band, transverters, TX shift), the safety refusals not in orch
-  (TCI out of band, TCI CW, A/B arming), TCI and rigctl answers, the web pages and guards, the system checks).
+  tests, that in turn get run through http://127.0.0.1:8765"): DONE. tools/bench/orch.py has 279 tests (ORCH.md),
+  the suite's batches (receive settings, band plan, transverters, TX shift, safety refusals, TCI and rigctl, the web
+  pages, the system checks, the air groups) inside it. Their latest results (2026-11-25 08:30): 271 PASS; 7 LOOK,
+  measured and said (the X6200's apps' skirt and FT8 copies, comp-mic x6100, cw-timing x6100 / 1w on Xiegu's factory
+  base); 1 FAIL, air cw-carrier x6100>x6200 (the X6200's CW hump: fixed 68eaa37f, its rerun needs the chain-ok word).
+  What has no test at all is in features.json's coverage (mostly the apps' and the screens' details).
 - **The X6200's dsd-fme in the image**: the bundle's copy needed librtlsdr.so.0, which the X6200's card lacks: B had
   no P25, D-STAR, YSF or NXDN there from 11-19 to 11-24. The package builds it without RTL-SDR now; the X6200 runs the
   Mac build (hot install) till the next image and bundle (a tag, the owner's word).
@@ -34,7 +34,8 @@ Open, mine to do:
 - **The upstream merge's look on the radios** (11-23): CHECKED 2026-11-24 (receive only): WeFax on both alike in the
   Sentry's amber, its All Charts tiles and page 4's "Night Auto (on)" at night; the WiFi held through both GUIs'
   restarts; Speech off by default (no voice_mode stored on either). Left: the classic screen's 3D waterfall on
-  upstream's thread; the USER page has no labels for upstream's 200+ apps.
+  upstream's thread; the USER page had no labels for upstream's 200+ apps (DONE 2026-11-25: named as their APP
+  pages name them, tools/user_keys checks every action Settings > Keys offers).
 - Both radios' CW decoders lose the dits of the first characters ('VVV' prints 'TTT'): DONE 2026-11-25 (below).
 
 Done 2026-11-25 night (the same asks, continued):

@@ -493,6 +493,14 @@ static const char *user_label_of(int32_t a) {
         case ACTION_APP_SWL:        return "On the\nAir";
         case ACTION_APP_MAIL:       return "Mail";
         case ACTION_APP_DMR:        return "DMR";
+        /* Upstream's apps (200 on), as their APP pages name them: up to v0.3.12.48 these showed "?" */
+        case ACTION_APP_IRADIO:     return "Internet\nradio";
+        case ACTION_APP_ZELLO:      return "Zello";
+        case ACTION_APP_SVX:        return "SVXConnect";
+        case ACTION_APP_FLIGHTS:    return "Flights";
+        case ACTION_APP_AERO:       return "HF Air\nBand";
+        case ACTION_APP_CB:         return "CB";
+        case ACTION_APP_METEO:      return "Weather";
         default:                    return "?";
     }
 }
