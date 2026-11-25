@@ -415,11 +415,12 @@ def one_pair(run, s_name, l_name, body, test, covers, partial):
         rows = (ctx.rows if ctx else []) + [(test, False, f"error: {type(e).__name__}: {e} ({tb[-3:]})",
                                              tuple(covers), tuple(partial))]
     finally:
-        bad = ctx.run_undo() if ctx else []
-        rep = ctx.rep if ctx else {}
-        if snaps:
-            bench.finish([r for r in radios if r.name in snaps], snaps, report=rep,
-                         before=ctx.before if ctx else None)
+        with bench.transition():        # the put-back, the test's own undo and finish, one transition
+            bad = ctx.run_undo() if ctx else []
+            rep = ctx.rep if ctx else {}
+            if snaps:
+                bench.finish([r for r in radios if r.name in snaps], snaps, report=rep,
+                             before=ctx.before if ctx else None)
         for r in radios:
             if r.name not in snaps:
                 r.close()
@@ -2339,8 +2340,12 @@ def t_power_loop(run):
             # hid the tones' onset ("no tone found", 2026-11-23): the noise is after the attenuator
             # a child (its TCI audio read in a process of its own: in orch's, two bursts' windows slipped, 11-24);
             # its set-ups count in the one sync framework through bench's SYNC_DIR
+            # the X6100 listener 7.5 dB lower (its RF gain 85, the base's attenuator at 0.50 dB a step as its own
+            # Measure found, 11-24): at 100 the X6200's bursts came at -4 dBFS and 7 of 8 clipped; its ATT (15 dB and
+            # more) buried their onsets in its own noise (11-23)
             cmd = [sys.executable, "-B", os.path.join(HERE, "tones.py"), s, li, "--bursts", BURSTS, "--tag",
-                   "suite-air"] + (["--w", str(POWER_MAX_W)] if x6100 and g >= 4 else [])
+                   "suite-air"] + (["--w", str(POWER_MAX_W)] if x6100 and g >= 4 else []) + (
+                ["--rx-rfg", "85"] if model(run, li) == "x6100" else [])
             r = run_child(cmd, 420)
             out = (r.stdout + r.stderr).strip().splitlines()
             with open(os.path.join(run.dir, f"power_loop_{s}_{li}.txt"), "w") as fo:

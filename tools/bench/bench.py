@@ -979,20 +979,33 @@ def _open_page(r, letter):
         time.sleep(0.3)
 
 
-def close_apps(r):
+def close_apps(r, keep_dial=True):
     """An app open closed (it holds the dial: a band's memories cannot be put back under it, 2026-11-22); the Sentry
-    itself is no app. Said if it stays"""
-    for _ in range(3):
-        if not (r.state.get("app") or (r.state.get("win") or "Sentry") != "Sentry"):
-            return True
-        r.send("close")
-        try:
-            r.wait("the app closed", lambda: not r.state.get("app") and (r.state.get("win") or "Sentry") == "Sentry", 4)
-            return True
-        except Refused:
-            pass
-    say(f"{r.name}: its app {r.state.get('app') or r.state.get('win')} did not close")
-    return False
+    itself is no app. Said if it stays. keep_dial: r back on the dial and mode the app was on, one transition: closing
+    puts it on the Sentry page's own dial (G's channel, 29.6 FM), apart from the other radio while the test goes on
+    (psk, rtty, jtty, olivia, 2026-11-24)"""
+    if not (r.state.get("app") or (r.state.get("win") or "Sentry") != "Sentry"):
+        return True
+    f, m = int(r.state.get("freq") or 0), int(r.state.get("mode", -1))
+    with transition():
+        for _ in range(3):
+            r.send("close")
+            try:
+                r.wait("the app closed", lambda: not r.state.get("app") and (r.state.get("win") or "Sentry") == "Sentry",
+                       4)
+                break
+            except Refused:
+                pass
+        else:
+            say(f"{r.name}: its app {r.state.get('app') or r.state.get('win')} did not close")
+            return False
+        if keep_dial and f and m >= 0:
+            settled(r)
+            try:
+                ensure(r, {"freq": f, "mode": m})
+            except Refused as e:
+                say(f"{r.name}: not back on its app's dial {f} mode {m} after closing it ({e})")
+    return True
 
 
 FINISH_TRIES = 3                # finish()'s attempts at a radio before it is recorded as left wrong

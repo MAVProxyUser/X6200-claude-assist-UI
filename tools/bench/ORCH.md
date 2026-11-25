@@ -97,6 +97,11 @@ one framework in `bench.py`:
 - **The follow window closes only after the guard saw the two apart in it**: an app asked to open has not tuned yet
   when the two still read alike, and closing the window then let its tune a moment later count as a violation;
   `sync_pair` closes it outright.
+- **Teardown is one transition**: a test's own cleanups (apps closed, files put back) and `finish()` run as one
+  transition, which ends with the pair alike. `bench.close_apps()` keeps a radio on the dial and mode its app was on
+  (closing an app puts it on the Sentry page's own dial, G's channel). air_b's `listen_at()` sets both radios' dial and
+  mode together with the listener's receiver, and tests set the receiver they need (the CW tests an 800 Hz filter on
+  the key tone): tests leave the receiver as they end, so a probe's wide filter is not inherited.
 - **A test ends with the two alike**: tests leave the dial where they ended (the owner, 11-23), so `finish()` ends a
   two-radio test with the idle radio following: the second set to the first's dial and mode by `sync_pair`.
 - **Transitions are not differences**: `ensure()`, `open_page()`, `arm()` and `finish()` (the put-back of both radios

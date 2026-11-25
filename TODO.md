@@ -56,7 +56,13 @@ the same unified framework to sync the radios or make exceptions for tests so th
   the guard (bench.SYNC_DIR), tune-app judged by the listener's audio (the references cancel).
 - Left in air_a: comp (both radios' loops level 2 s stretches: reshape with shorter ones, judged in the audio);
   power-loop's X6200 figure (the X6100 listener's audio clips at 0.1 W).
-- Left: air_b (15 groups), air_c (7), air paths bands/walkie/if-shift.
+- air_b CW and text (cw-copy, cw-carrier, cw-kbd, rtty, psk, jtty, olivia): every row copies both ways; fixed on the
+  way: apps closed mid-test (close_apps keeps the app's dial), the teardown one transition, lock_again's G, listen_at
+  (both radios with the listener), the CW filter the tests need (800 Hz: a probe had left 400-3000 and the X6200's
+  decoder printed the noise), the CW Keyboard from page A, cw-carrier judged on its steady middle (and its dip
+  measured), cw-copy at 20 WPM (a dot lost at 25 X6100 -> X6200), cw-vfo-line to the X6200 picture's 750 Hz bins.
+- The console showed a finished run ("no test running") while the next keyed (the owner): fixed 40982314.
+- Left: air_b WeFax, FT8, JS8 (7 groups), air_c (7), air paths bands/walkie/if-shift; comp; power-loop's X6200 figure.
 
 Done 2026-11-24 afternoon (the owner: "I just connected a DVMega to the 6200 and a p25 USB3000 to the other... do some
 more AMBE tests", "The 6 m output floor... maybe time to revisit now? same with the image shifts?"):

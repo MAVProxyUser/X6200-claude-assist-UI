@@ -887,6 +887,7 @@ class Pair:
                         r.take_control()
                 except (bench.Refused, OSError) as e:
                     say(f"{r.name}: not ready for the cleanups ({e})")
+        with bench.transition():        # the put-back, the cleanups and finish (which ends the pair alike), one
             for what, fn in reversed(self.cleanups):
                 try:
                     fn()
@@ -894,9 +895,9 @@ class Pair:
                     say(f"{what}: not done ({type(e).__name__} {e})")
                     self.rep.setdefault("unclean", []).append(f"{what}: {e}")
             self.cleanups = []
-        if radios:
-            bench.finish(radios, {r.name: self.snaps[r.name] for r in radios if r.name in self.snaps}, report=self.rep,
-                         before=self.before)
+            if radios:
+                bench.finish(radios, {r.name: self.snaps[r.name] for r in radios if r.name in self.snaps},
+                             report=self.rep, before=self.before)
         bad = dict(self.rep.get("not_restored") or {})
         if self.rep.get("unclean"):
             bad["cleanups"] = self.rep["unclean"]

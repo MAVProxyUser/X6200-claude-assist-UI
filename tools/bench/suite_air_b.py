@@ -344,14 +344,18 @@ def tl_keep(o, r):
     before = tl_sizes(r.host)
 
     def back():
-        now = tl_sizes(r.host)
-        cmds = [f"rm -f {f}" if f not in before else f"python3 -c \"import os;os.truncate('{f}',{before[f]})\""
-                for f, n in now.items() if f not in before or n > before[f]]
-        if cmds:
-            sh(r.host, "; ".join(cmds), 30)
-        after = tl_sizes(r.host)
-        if any(after.get(f) != n for f, n in before.items()) or set(after) - set(before):
-            raise bench.Refused(f"{r.name}: its text log not as before")
+        for attempt in range(3):            # a line an app writes as it closes can land just after a cut (jtty,
+            if attempt:                     # 2026-11-24): cut again
+                time.sleep(2.0)
+            now = tl_sizes(r.host)
+            cmds = [f"rm -f {f}" if f not in before else f"python3 -c \"import os;os.truncate('{f}',{before[f]})\""
+                    for f, n in now.items() if f not in before or n > before[f]]
+            if cmds:
+                sh(r.host, "; ".join(cmds), 30)
+            after = tl_sizes(r.host)
+            if not (any(after.get(f) != n for f, n in before.items()) or set(after) - set(before)):
+                return
+        raise bench.Refused(f"{r.name}: its text log not as before")
     o.later(f"{r.name}: the test's lines out of its text log", back)
     return before
 
@@ -443,7 +447,7 @@ class Over:
             raise bench.Refused(f"{what}: {self.snd.name} and {self.lis.name} not set alike: "
                                 + ", ".join(f"{k} {x}/{y}" for k, (x, y) in d.items()))
 
-    def sender(self, f, mode, what, apart=()):
+    def sender(self, f, mode, what, apart=(), page="G"):
         """S set for an over on G, the two alike (the owner, 2026-11-23: "they should have the same settings. IF they
         don't something is wrong"). L is set first (its dial and mode, read back); S on f in mode (its own memory of
         the mode kept for finish), then given exactly L's set-up (bench.pair_align: filter, zoom, PRE, ATT, AGC, RF
@@ -451,7 +455,10 @@ class Over:
         receiver keys (ALIGN_KEYS); then its TX set-up at 0.1 W, read back; the two compared, nothing apart but
         apart (the over's watch's pair_ignore)"""
         snd, lis = self.snd, self.lis
-        bench.open_page(snd, "G")
+        bench.open_page(snd, page)          # A for an app opened after it: G keeps its own channel, and an app opened
+                                            # from G came up on the main dial (cw-kbd: 14.2 USB, not CW on 14.040)
+        if apart:                           # the mode first: a 1 kHz move in CW was snapped back (cw-carrier)
+            bench.ensure(snd, {"split": 0, "vfo": 0, "mode": mode})
         bench.ensure(snd, {"split": 0, "vfo": 0, "freq": f, "mode": mode})
         self.keep_mem(snd, f, mode)
         if not apart:
@@ -491,10 +498,16 @@ class Over:
             return True
         raise bench.Refused(f"{r.name} still on the air after its over was stopped")
 
-    def keyed(self, what, f, mode, fn, apart=()):
+    def keyed(self, what, f, mode, fn, apart=(), decl=None):
         """S on G set as L (sender(): L set before), on f in mode at 0.1 W (tx_profile, read back), the two compared,
         the gates, the banner; armed under a labelled Watch (both screens pictured on the air), fn(watch) run; then
         the watch closed, S off the air and locked again (rxo 1). (fn's result, the watch)"""
+        if decl:                            # what apart says is kept apart, declared exactly (bench.apart)
+            with bench.apart(decl, f"{self.test}: {what}"):
+                return self._keyed(what, f, mode, fn, apart)
+        return self._keyed(what, f, mode, fn, apart)
+
+    def _keyed(self, what, f, mode, fn, apart):
         snd = self.snd
         self.sender(f, mode, what, apart)
         bench.radio_tx_gate(snd, self.c, W)
@@ -521,8 +534,12 @@ class Over:
         """An app's overs done: r off the air, its app closed, the Sentry's G open, its transmitter locked (rxo 1)"""
         self.control_back(r, "before its app closed")
         self.off_air(r)
-        bench.close_apps(r)
-        bench.open_page(r, "G")
+        f, m = int(r.state.get("freq") or 0), int(r.state.get("mode", -1))
+        with bench.transition():            # G tunes its own channel as it opens: back on the app's dial after it
+            bench.close_apps(r)             # (psk, 2026-11-24: 29.6 FM against the other's 3.580)
+            bench.open_page(r, "G")
+            if f and m >= 0:
+                bench.ensure(r, {"freq": f, "mode": m})
         if r.state.get("rxo") != 1 and r.may_tx:
             bench.arm(r, False)
         if r.state.get("rxo") != 1:
@@ -556,19 +573,22 @@ class Over:
                     r.take_control()
                 except (bench.Refused, OSError) as e:
                     say(f"{r.name}: control not taken back for the cleanups ({e})")
-        for what, fn in reversed(self.cleanups):
-            try:
-                fn()
-            except Exception as e:          # every cleanup tried, whatever one of them met
-                say(f"{what}: not done ({type(e).__name__} {e})")
-                self.unclean.append(f"{what}: {e}")
-        self.cleanups = []
-        took = [r for r in self.radios if r.name in self.snaps]
-        for r in self.radios:
-            if r.name not in self.snaps:
-                r.close()
-        if took:
-            bench.finish(took, self.snaps, report=self.rep, before=self.before)
+        # the put-back is one transition, the cleanups and finish (which ends the pair alike): an app closed here
+        # puts its radio on its own dial (G's channel) while the files are put back (rtty, 2026-11-24)
+        with bench.transition():
+            for what, fn in reversed(self.cleanups):
+                try:
+                    fn()
+                except Exception as e:      # every cleanup tried, whatever one of them met
+                    say(f"{what}: not done ({type(e).__name__} {e})")
+                    self.unclean.append(f"{what}: {e}")
+            self.cleanups = []
+            took = [r for r in self.radios if r.name in self.snaps]
+            for r in self.radios:
+                if r.name not in self.snaps:
+                    r.close()
+            if took:
+                bench.finish(took, self.snaps, report=self.rep, before=self.before)
 
 
 def over(run, s_name, l_name, parts, body, listener_tx=False, test=""):
@@ -754,9 +774,24 @@ def heard_elements(x, hz, wpm, fs=24000):
     return "".join(out).strip(), words
 
 
+def listen_at(o, f, mode, agc=3, filt=None):
+    """L on f in mode, its receiver said whole (PRE and ATT off, RF gain 100, the AGC, squelch open), read back; S on
+    the same dial and mode with it (sync_pair), so the two are not apart while the test readies the over (cw-copy's
+    listener sat in CW 9 s before its sender followed, 2026-11-24). S holding an app (its dial the app's): L alone"""
+    if not (o.snd.state.get("app") or (o.snd.state.get("win") or "Sentry") != "Sentry"):
+        bench.sync_pair([o.snd, o.lis], {"freq": f, "mode": mode})
+    return bench.ensure(o.lis, *bench.rx_profile(f, mode, pre=0, att=0, rfg=100, agc=agc, filt=filt))
+
+
+PSD_BIN_HZ = 750            # the X6200 base's spectrum: 512 bins over 384 kHz at any zoom (measured 2026-11-24)
+CW_FILTER = (300, 1100)     # 800 Hz on the 700 Hz key tone: a CW operator's; the probes leave CW 400-3000 (tests leave
+                            # the receiver as they end), and through it the X6200's decoder printed the cable's noise
+
+
 def listen_cw(o, f=F_CW):
-    """L in CW on f, its receiver said whole (PRE and ATT off, RF gain 100, AGC slow, squelch open), read back"""
-    bench.ensure(o.lis, *bench.rx_profile(f, 4, pre=0, att=0, rfg=100, agc=2))
+    """L in CW on f, its receiver said whole (PRE and ATT off, RF gain 100, AGC slow, the CW filter, squelch open),
+    read back; S with it (listen_at)"""
+    listen_at(o, f, 4, agc=2, filt=CW_FILTER)
 
 
 def rx_keys(r, agc=3):
@@ -780,7 +815,11 @@ def t_cw_copy(run):
         o.prove(F_CW)
         listen_cw(o)
         scp_to(os.path.join(HERE, "tci_cw_tx.py"), snd.host, "/tmp/tci_cw_tx.py")
-        text, wpm, secs = cw_speedup("VVV ÅÄÖÜÉÑ Q1TST", key_wpm(snd.host))     # 20 WPM at the default 15
+        # two V groups first: the decoder finds the speed on them (with one, Å came while both were still locking,
+        # 2026-11-24: 'TQÄÖÜÉ', 'TTTTTÄÖÜÉÑ'), as cw-kbd's and cw-carrier's
+        # at 20 WPM, not the 25 a 12 s over needs: at 25 a dot of the X6100's went missing in the X6200's audio
+        # (Ä read as W, 2026-11-24); 14.2 s, under the over's 16
+        text, wpm, secs = cw_speedup("VVV VVV ÅÄÖÜÉÑ Q1TST", key_wpm(snd.host), most=14.5)
         kt = int(lis.state.get("kt", 0))
         tci = TciRx(lis.host)
         o.later(f"{lis.name}: its TCI audio closed", tci.close)
@@ -827,9 +866,12 @@ def t_cw_copy(run):
         if at is None or pitch is None:
             ok2, note = False, "no spectrum frames or no TCI audio during the over"
         elif per > (kt or 700) / 2 or (kt and width > kt):
-            # the X6200's base gives the Sentry its whole spectrum (radio_psd_wide): bins of hundreds of Hz
-            ok2, note = None, (f"its picture cannot tell a key tone off the line (bins of {per:.0f} Hz, {width:.0f} "
-                               f"Hz within 6 dB of its top)")
+            # the X6200's base sends 512 bins over 384 kHz (750 Hz each) whatever the zoom, stretched to the shown
+            # span: its picture places a station on the line to half a bin; the audio at the key tone places it
+            # exactly (on the dial in CW: heard at the key tone)
+            ok2 = abs(at - F_CW) <= PSD_BIN_HZ / 2 and abs(pitch - kt) <= 25 and not w.why
+            note = (f"its picture is its base's {PSD_BIN_HZ} Hz bins stretched ({width:.0f} Hz within 6 dB of its "
+                    f"top): on the line within half a bin, {PSD_BIN_HZ // 2} Hz, and the audio at the key tone")
         else:
             ok2, note = abs(at - F_CW) <= tol and abs(pitch - kt) <= 25 and not w.why, ""
         o.res("cw-vfo-line", ok2,
@@ -842,28 +884,55 @@ def t_cw_copy(run):
 
 
 CARRIER_APART = ("freq", "mode", "flo", "fhi")    # S in USB-D 1000 Hz under L's CW dial: a carrier on it, at its tone
+CARRIER_DECL = {"freq": 1000, "mode": [(3, 4)], "filter": bench.STEPPED}    # the same, exactly
 
 
 def t_cw_carrier(run):
     parts = [("cw-carrier", ["cw-decoder-no-noise"])]
 
     def body(o):
+        import numpy as np
+        from tones import TciRx
         snd, lis = o.snd, o.lis
         listen_cw(o)
         o.prove(F_CW)
         listen_cw(o)
         kt = int(lis.state.get("kt", 0))
+        tci = TciRx(lis.host)               # the carrier's envelope as the listener hears it
+        o.later(f"{lis.name}: its TCI audio closed", tci.close)
         time.sleep(1.5)                     # the proof's tone (1000 Hz off its dial, outside its CW filter) gone
         lis.cw = ""
         time.sleep(12.0)                    # the cable's quiet
         quiet = " ".join(lis.cw.split())
         lis.cw = ""
+        mid = {}
+
+        def carrier_over(w):
+            """the 10 s carrier, the decoder read over its steady middle (from 2 s after the key to 2 s before the
+            end): as an over starts the X6200's power comes up from 0 in steps, which the decoder takes for dots
+            ('EE E SH' one run in two, 2026-11-24); a steady carrier is what must print nothing"""
+            th = threading.Thread(target=lambda: bench.tci_send(snd, [[0, 0.3], [1000, 10.0]], max_s=13, watch=w),
+                                  daemon=True)
+            th.start()
+            if wait_for(lambda: snd.tx or w.why, 6):
+                time.sleep(2.0)
+                lis.cw = ""
+                t0 = time.time()
+                time.sleep(6.0)
+                mid["text"] = " ".join(lis.cw.split())
+                x, _ = tci.audio(t0, time.time())
+                if len(x) > 24000:          # 20 ms blocks: its deepest dip under the middle's median, dB
+                    n = len(x) // 480
+                    lv = 20 * np.log10(np.sqrt(np.mean(x[:n * 480].reshape(n, 480) ** 2, axis=1)) + 1e-9)
+                    mid["dip"] = float(np.median(lv) - np.min(lv))
+            th.join(20)
         # S in USB-D 1000 Hz under L's dial sends 1000 Hz: a carrier on L's dial, at L's key tone in its decoder
-        _, w = o.keyed("A STEADY CARRIER ON THE LISTENER'S CW TONE", F_CW - 1000, 3,
-                       lambda w: bench.tci_send(snd, [[0, 0.3], [1000, 10.0]], max_s=13, watch=w),
-                       apart=CARRIER_APART)
+        _, w = o.keyed("A STEADY CARRIER ON THE LISTENER'S CW TONE", F_CW - 1000, 3, carrier_over,
+                       apart=CARRIER_APART, decl=CARRIER_DECL)
+        bench.sync_pair([snd, lis], {"freq": F_CW, "mode": 4})     # S back on L's dial in CW, the two alike again
         time.sleep(3.0)
-        carrier = " ".join(lis.cw.split())
+        edges = " ".join(lis.cw.split())    # the carrier's last 2 s and its end
+        carrier = mid.get("text")
         heard = w.heard_db.get(snd.name) or []
         # its decoder was listening: S keys CW on L's dial and L copies it
         scp_to(os.path.join(HERE, "tci_cw_tx.py"), snd.host, "/tmp/tci_cw_tx.py")
@@ -873,13 +942,23 @@ def t_cw_carrier(run):
         time.sleep(2.5)
         copy = " ".join(lis.cw.split())
         why = w.why or w2.why
-        ok = (not why and not quiet and not carrier and bool(heard) and max(heard) >= bench.DEAF_DB
-              and "Q1TST" in copy.upper())
+        # a character in the middle with the carrier dipping 6 dB or more under its median is the carrier's own gap
+        # (the sender's loop), not the decoder printing noise: said, the decoder judged on a carrier that held
+        dip = mid.get("dip")
+        held = dip is not None and dip < 6.0
+        ok = (not why and not quiet and bool(heard) and max(heard) >= bench.DEAF_DB and "Q1TST" in copy.upper()
+              and (carrier == "" or (carrier is not None and not held)))
+        if ok and carrier:
+            ok = None                       # the carrier itself dipped: the decoder not judged on it, to look at
         o.res("cw-carrier", ok, f"{lis.name}'s decoder (key tone {kt} Hz): 12 s of quiet gave {quiet[-40:]!r}; "
                                 f"{snd.name}'s 10 s carrier on its dial (its spectrum {heard} dB over its quiet, "
                                 f"{bench.DEAF_DB} at least; {snd.name}'s meter {w.tx_peak.get(snd.name)} W; "
                                 f"{snd.name} in USB-D {F_CW - 1000} Hz, the dial, mode and filter apart on purpose, "
-                                f"the rest alike) gave {carrier[-40:]!r}; then {text!r} at {wpm} WPM gave "
+                                f"the rest alike) gave {(carrier or '')[-40:]!r} in its steady middle 6 s (the "
+                                f"carrier's deepest dip there {fmt(dip, '.1f')} dB under its median in "
+                                f"{lis.name}'s audio, 20 ms blocks)"
+                                f"{'' if carrier is not None else ' (NOT read: the carrier did not come)'}, "
+                                f"{edges[-30:]!r} as it ended; then {text!r} at {wpm} WPM gave "
                                 f"{copy[-50:]!r}; the carrier {shots_words(w)}; the CW {shots_words(w2)}"
                                 + (f"; STOPPED: {why}" if why else ""))
     two_way(run, "cw-carrier", parts, body)
@@ -931,7 +1010,7 @@ def t_cw_kbd(run):
         npg = (n + 3) // 4                  # the message pages (dialog_cw_kbd.c msgs_load): page 1, these, Live
         # S in CW on the dial at 0.1 W set as L, then its CW Keyboard (it replaces the Sentry and keys by itself),
         # the two compared again with it open
-        o.sender(F_CW, 4, "the CW Keyboard")
+        o.sender(F_CW, 4, "the CW Keyboard", page="A")
         o.later(f"{snd.name}: the CW Keyboard closed", lambda: bench.close_apps(snd))
         open_listed(snd, "cw keyboard")
         if int(snd.state.get("mode", -1)) != 4 or int(snd.state.get("freq", 0)) != F_CW:
@@ -997,6 +1076,17 @@ def t_cw_kbd(run):
 
 # ---- the keyboard modes: RTTY made here, PSK31 and Olivia from the apps ----
 
+def close_on_dial(r, close=None):
+    """r's app closed (its line ends onto the card) and r back on the dial and mode it was on: closing puts it on the
+    Sentry's own dial (G's channel, 29.6 FM), apart from the other radio while the test reads the text log for up to
+    half a minute (rtty, psk, jtty, olivia, 2026-11-24). One transition"""
+    f, m = int(r.state.get("freq", 0)), int(r.state.get("mode", -1))
+    with bench.transition():
+        (close or (lambda: bench.close_apps(r)))()
+        bench.settled(r)
+        bench.ensure(r, {"freq": f, "mode": m})
+
+
 def open_rtty(o, r):
     """r's RTTY panel (no window, so not in the remote's apps list) from the Modes menu: RTTY is its first row, and
     the MFK turned left goes there whatever row it was on (dialog_modes.c: no wrap); its press opens it"""
@@ -1019,7 +1109,7 @@ def t_rtty(run):
 
     def body(o):
         snd, lis = o.snd, o.lis
-        bench.ensure(lis, *bench.rx_profile(F_RTTY, 2, pre=0, att=0, rfg=100, agc=3))
+        listen_at(o, F_RTTY, 2)
         o.prove(F_RTTY)
         keep_file(o, lis, APP_FREQS)
         logs = tl_keep(o, lis)
@@ -1030,7 +1120,7 @@ def t_rtty(run):
             # opens the Sentry's G on both, which closed the panel under the over, round 1 2026-11-23: L's G took the
             # over, its panel's text log got noise) and opened again, back on the same dial
             bench.open_page(lis, "G")
-            bench.ensure(lis, *bench.rx_profile(f, m, pre=0, att=0, rfg=100, agc=3))
+            listen_at(o, f, m)
             o.prove(f)
             open_rtty(o, lis)
             if (int(lis.state.get("freq", 0)), int(lis.state.get("mode", -1))) != (f, m):
@@ -1051,7 +1141,7 @@ def t_rtty(run):
         _, w = o.keyed("RTTY", f, m, lambda w: tci_play(snd, path, secs + 3, w))
         panel = app_name(lis)               # still open after the over (nothing closed it under it)
         time.sleep(2.0)
-        bench.open_page(lis, "G")           # the panel closed: its line ends onto the card
+        close_on_dial(lis, lambda: bench.open_page(lis, "G"))   # the panel closed: its line ends onto the card
         new = tl_wait(lis.host, mark, lambda ls: any(" RTTY RX " in ln and "Q1TST" in ln for ln in ls))
         rx = [ln for ln in new if " RTTY RX " in ln]
         ok = not w.why and any("Q1TST" in ln for ln in rx)
@@ -1142,9 +1232,9 @@ def both_in_app(o, names, f0):
         say(f"{app} opened on {f} Hz on both (its memory), not {f0}: the test goes there")
     for r in (snd, lis):
         bench.close_apps(r)
-    bench.ensure(lis, *bench.rx_profile(f, m, pre=0, att=0, rfg=100, agc=3))
+    listen_at(o, f, m)
     o.prove(f)                          # on G: inside the app the listener sends no spectrum
-    bench.ensure(lis, *bench.rx_profile(f, m, pre=0, att=0, rfg=100, agc=3))
+    listen_at(o, f, m)
     o.sender(f, m, app)                 # both alike before the apps open again (each takes the radio as it is)
     fs, fl = open_both()
     if (fs, fl) != (f, f):
@@ -1193,7 +1283,7 @@ def t_psk(run):
         finally:
             w.close()
             o.lock_again(snd)
-        bench.close_apps(lis)               # its line ends onto the card (PSK31's never pauses on noise)
+        close_on_dial(lis)                  # its line ends onto the card (PSK31's never pauses on noise)
         got = tl_wait(lis.host, logs[lis.name], lambda ls: any("Q1TST" in ln.upper() for ln in ls))
         rx = [ln for ln in got if f" {app} RX " in ln]
         sent = [ln for ln in tl_new(snd.host, logs[snd.name]) if f" {app} TX " in ln]
@@ -1239,7 +1329,7 @@ def t_jtty(run):
         finally:
             w.close()
             o.lock_again(snd)
-        bench.close_apps(lis)               # its lines end onto the card
+        close_on_dial(lis)                  # its lines end onto the card
         got = tl_wait(lis.host, logs[lis.name], lambda ls: any(" JTTY RX " in ln and TEXT in ln.upper() for ln in ls))
         rx = [ln for ln in got if " JTTY RX " in ln]
         ok = bool(on) and not w.why and any(TEXT in ln.upper() and re.search(r" JTTY RX [+-]\d+dB ", ln) for ln in rx)
@@ -1307,7 +1397,7 @@ def t_olivia(run):
             while pressed % OLIVIA_VARIANTS:    # both back on the variant they were on
                 mode_next()
             o.lock_again(snd)
-        bench.close_apps(lis)               # its lines end onto the card
+        close_on_dial(lis)                  # its lines end onto the card
         rx = [ln for ln in tl_wait(lis.host, logs[lis.name], lambda ls: False, 6) if " RX " in ln]
         for row in rows:
             row["rx"] = bool(row["variant"]) and any(f" {row['variant']} RX " in ln and TEXT in ln.upper()
@@ -1383,7 +1473,7 @@ def fax_listen(o):
     """The path proved on G at F_FAX, then L's WeFax app open there in USB (it opens where its memory says: put back on
     F_FAX), Auto Plan off; the faxes the test saves and its memory file put back after"""
     lis = o.lis
-    bench.ensure(lis, *bench.rx_profile(F_FAX, 2, pre=0, att=0, rfg=100, agc=3))
+    listen_at(o, F_FAX, 2)
     o.prove(F_FAX)
     keep_file(o, lis, APP_FREQS)
     files0 = set(sh(lis.host, "find /mnt/wefax -type f 2>/dev/null", 20).split())
@@ -1661,7 +1751,7 @@ def t_ft8_multistream(run):
         gen = o.c.get("gen_ft8") or "gen_ft8"
         if not (os.path.exists(gen) or shutil.which(gen)):
             raise bench.Refused(f"no gen_ft8 on this computer ({gen}): bench.json's gen_ft8")
-        bench.ensure(lis, *bench.rx_profile(FT_DIAL["FT8"], 3, pre=0, att=0, rfg=100, agc=3))
+        listen_at(o, FT_DIAL["FT8"], 3)
         o.prove(FT_DIAL["FT8"])
         x = sum(gen_ft8_24k(o.c, t, hz, o.run.dir) for t, hz in MSGS)
         # gen_ft8's WAV is the whole 15 s slot, the signal 1.18 s to 13.82 s in it (2026-11-23: with 1 s more in
