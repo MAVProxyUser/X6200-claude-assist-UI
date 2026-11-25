@@ -71,6 +71,10 @@ Done 2026-11-25 night (the same asks, continued):
 - comp through the mic (orch comp-mic x6100): the X6100's factory base does not compress at 4:1 (MANUAL). The X6200's
   capture holds no monitor of its over: its Comp needs a third sound source (this computer's speaker by its mic, with
   the X6100 receiving) or a third receiver. power-loop's X6200 figure: measured (Xiegu's loop, said).
+- CW decoder: a text after a quiet copies whole now (the lock takes back the station it held; tools/cw_replay's check).
+  Left: the X6200's decoder keys on its noisier audio in a quiet and its speed drifts (the first letters of the next
+  text read slow); its first dits from a cold start (the tone finder locks during them: keep the last second and run
+  it again once locked).
 - Left: the apps' TX stream on the X6200 (the skirt); the X6200's Comp (a third source); the X6100's +61.4 Hz line (a
   third receiver).
 

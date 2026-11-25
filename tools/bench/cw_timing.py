@@ -75,15 +75,17 @@ def cw_ideal(text):
     return out
 
 
-def keyer_said(ssh, host):
-    """The sender's keyer on its last send, from its GUI's log: (edges, late, the latest ms), None when unsaid (a GUI
-    before the line, 2026-11-25)"""
+def keyer_said(ssh, host, last=1):
+    """The sender's keyer on its last `last` sends, from its GUI's log: (edges, late, the latest ms) summed over them,
+    None when unsaid (a GUI before the line, 2026-11-25)"""
     try:
-        out = ssh(host, f"grep 'cw_encoder: .* key edges' {GUI_LOG} | tail -1")
+        out = ssh(host, f"grep 'cw_encoder: .* key edges' {GUI_LOG} | tail -{int(last)}")
     except Exception:                       # noqa: BLE001 (unread: unsaid)
         return None
-    m = re.search(r"(\d+) key edges, (\d+) more than \d+ ms late on their time, the latest (-?\d+) ms", out or "")
-    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+    got = re.findall(r"(\d+) key edges, (\d+) more than \d+ ms late on their time, the latest (-?\d+) ms", out or "")
+    if not got:
+        return None
+    return (sum(int(a) for a, _, _ in got), sum(int(b) for _, b, _ in got), max(int(c) for _, _, c in got))
 
 
 def judge(runs, ideal, unit_ms):

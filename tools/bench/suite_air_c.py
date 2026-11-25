@@ -1452,6 +1452,10 @@ def b_tci_cw(P):
     P.banner(f"TCI CW TEXT: '{CW_TEXT1}{CW_TEXT2}', CW_MACROS_STOP, A PTT HOLDER'S TEXT REFUSED")
     P.watch_on(W0, "TCI CW text")
     bench.tx_log({"who": S.name, "f": F_CW, "w": S.pwr(), "what": "air_c tci-cw"})
+    # the listener's audio of the whole of it kept (cw_replay replays it through the decoder: 2026-11-25 the X6100
+    # printed nothing of the X6200's TEST 2 s after the X6200's PTT over, twice)
+    from tones import TciRx
+    rec = TciRx(L.host)
     t0 = time.time()
     doc = P.lab([{"open": 0}, {"open": 1}, {"speed": 0, "min": lo, "max": 28}, {"wait": 1.0}, {"mark": "syntax"},
                  {"send": 0, "text": f"cw_macros:0,{CW_TEXT1};"}, {"wait": 0.4},
@@ -1467,6 +1471,13 @@ def b_tci_cw(P):
                  {"until": 1, "text": "trx:0,false", "secs": 3}, {"wait": 2.5}, {"mark": "after"},
                  {"send": 1, "text": "cw_macros:0,TEST;"}, {"until": 1, "text": "cw_macros_empty", "secs": 8},
                  {"wait": 2.5}], 70)
+    try:
+        import digimodes
+        digimodes.write_raw(rec.audio(t0, time.time())[0], os.path.join(P.run.dir, f"tci_cw_{S.name}_to_{L.name}.raw"))
+    except (ImportError, OSError, ValueError):
+        pass
+    finally:
+        rec.close()
     stop = P.watch_off()
     P.off_air(5)
     time.sleep(1.5)
@@ -1526,14 +1537,24 @@ def b_tci_cw(P):
         k.append(s1.find(x, k[-1] + 1) if k[-1] >= 0 else -1)
     loose = (all(x >= 0 for x in k) and ("," in s1[:k[0]] or ":" in s1[:k[0]]) and "EST" in squeeze(txt4) and
              "EEE" not in squeeze(txt3))
-    garble = model(P.run, L.name) == "x6100" and model(P.run, S.name) == "x6200"
     known = ""
-    if not ok and rest and (loose or garble):
-        ok = None
-        known = ("; LOOK: the X6200's decoder misreads letters at this speed (known: word-initial letters; here "
-                 "also ':', ',' or S): the stand-ins as signs, |BT| as '=', FAST and the queued text in order" if loose
-                 else "; LOOK: the X6100's decoder garbles the X6200's CW (known): every TCI "
-                 "check right but the decoded text")
+    if not ok and rest and not in_order and "EEE" not in squeeze(txt3) and txt1.strip():
+        # whose the misread is (cw_timing.py, 2026-11-25): the sender's keyer late on its deadlines is the GUI's (a
+        # fail); on time, an X6100 on Xiegu's factory base moves its key edges 30-50 ms now and then (cw-timing x6100:
+        # said); from clean keying (the X6200's, within 7 ms) a misread is the decoder's (a fail)
+        import cw_timing as ct
+        import suite_air_a as aa
+        keyer = ct.keyer_said(lambda h, c: bench.ssh(h, c, timeout=15), S.host, last=6)
+        base = aa.base_of(S.host) if model(P.run, S.name) == "x6100" else ""
+        if keyer is not None and keyer[1]:
+            known = f"; the keyer itself late ({keyer[1]} of {keyer[0]} edges over 15 ms): the GUI's"
+        elif model(P.run, S.name) == "x6100" and aa.gcfix_of(base) == 0 and keyer is not None:
+            ok = None
+            known = (f"; LOOK: the keyer on time ({keyer[0]} edges, the latest {keyer[2]} ms), {S.name}'s base "
+                     f"(Xiegu's {base or 'factory'}) moves its key edges (cw-timing x6100): every TCI check right but "
+                     f"the decoded text (said)")
+        else:
+            known = "; the decoder misread clean keying"
     df = a_f - m["stop"] if a_f is not None else None
     de = a_e - m["stop"] if a_e is not None else None
     return ok, (f"{proof}; KEY Speed {speed[0][3] if speed else '?'} (was, set) for {units} dits; {L.name}'s "
