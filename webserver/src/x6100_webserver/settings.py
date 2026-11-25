@@ -58,4 +58,5 @@ GHOSTNET_CONF = "/mnt/ghostnet.conf"     # the GhostNet page and the JS8 app's G
 GHOSTNET_LOG = "/mnt/ghostnet_log.txt"   # GhostNet's messages as the JS8 app heard them (and .1, the one before)
 GHOSTNET_NETS_USER = "/mnt/ghostnet_nets.txt"           # a newer schedule of GhostNet's nets, read first
 GHOSTNET_NETS = "/usr/share/x6100/ghostnet_nets.txt"    # the image's: GhostNet version 1.5
+NIFOG_DIR = "/usr/share/x6100/nifog"   # CISA's NIFOG: nifog.pdf as CISA publishes it, nifog.idx, p001.png ... (nifog_web.py)
 TZ_CONF = "/mnt/tz.conf"                 # the GUI's time zone, a POSIX TZ string (src/clock.c)

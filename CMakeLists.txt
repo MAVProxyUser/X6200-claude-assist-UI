@@ -138,6 +138,35 @@ else()
         install(DIRECTORY images DESTINATION share/x6100)
         # Callsign -> country for the FT8/FT4 table (AD1C, country-files.com)
         install(FILES third-party/cty/cty.dat DESTINATION share/x6100)
+        # CISA's NIFOG (third-party/nifog, the PDF as CISA publishes it) in /usr/share/x6100/nifog: the PDF for the
+        # web configurator's /nifog, its contents (tools/nifog/nifog.idx) and its pages drawn here for the Sentry's
+        # F > NIFOG (the radio has no PDF renderer): tools/nifog/render.py with poppler's pdftoppm, 5.2 MB of 4-bit
+        # PNGs. Without pdftoppm the GUI still builds (a PC, the Mac's cross-build), but an install, the image's, stops
+        # there: an image without the pages would show F's NIFOG empty. The rootfs takes them (12 MB with the PDF):
+        # the update bundle writes nowhere else, and the data partition is made at the first start
+        set(NIFOG_PDF ${CMAKE_SOURCE_DIR}/third-party/nifog/NIFOG_2.02.pdf)
+        set(NIFOG_PAGES ${CMAKE_BINARY_DIR}/nifog)
+        if(HOST_BUILD)                  # the host's share directory has them all
+                set(NIFOG_PAGES ${CMAKE_BINARY_DIR}/share/nifog)
+                configure_file(${NIFOG_PDF} ${NIFOG_PAGES}/nifog.pdf COPYONLY)
+                configure_file(tools/nifog/nifog.idx ${NIFOG_PAGES}/nifog.idx COPYONLY)
+        endif()
+        find_program(PDFTOPPM pdftoppm)
+        find_program(NIFOG_PYTHON python3)
+        if(PDFTOPPM AND NIFOG_PYTHON)
+                add_custom_command(OUTPUT ${NIFOG_PAGES}/p001.png
+                        COMMAND ${NIFOG_PYTHON} ${CMAKE_SOURCE_DIR}/tools/nifog/render.py --pdf ${NIFOG_PDF}
+                                --out ${NIFOG_PAGES} --pdftoppm ${PDFTOPPM}
+                        DEPENDS ${NIFOG_PDF} ${CMAKE_SOURCE_DIR}/tools/nifog/render.py
+                        COMMENT "NIFOG: its pages for the Sentry's F")
+                add_custom_target(nifog_pages ALL DEPENDS ${NIFOG_PAGES}/p001.png)
+        else()
+                install(CODE "message(FATAL_ERROR \"NIFOG's pages were not drawn: poppler's pdftoppm (poppler-utils) \
+and python3 are needed (CMakeLists.txt)\")")
+        endif()
+        install(DIRECTORY ${NIFOG_PAGES}/ DESTINATION share/x6100/nifog FILES_MATCHING PATTERN "p[0-9][0-9][0-9].png")
+        install(FILES ${NIFOG_PDF} DESTINATION share/x6100/nifog RENAME nifog.pdf)
+        install(FILES tools/nifog/nifog.idx DESTINATION share/x6100/nifog)
         # The languages (above); their fonts are in the rootfs overlay (rootfs/usr/share/x6100/fonts)
         install(FILES ${OX_PO_FILES} DESTINATION share/x6100/i18n)
         # No folder theme is installed: themes/ has them to copy to /mnt/themes (themes/README.md); themes/RS is

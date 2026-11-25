@@ -26,6 +26,9 @@ case $MODEL in
     x6200) M=X6200; BRDEF=AetherX6200Buildroot; GUI_PKG=x6200-gui; GUI_VAR=X6200_GUI; OUT=GoldCorpHF-x6200 ;;
     *) echo "MODEL must be x6100 or x6200, not '$MODEL'"; exit 1 ;;
 esac
+# The GUI's build draws CISA's NIFOG's pages with poppler's pdftoppm (tools/nifog/render.py): said now, not when the
+# GUI's install stops an hour in (an older container: docker build again, the Dockerfile has poppler-utils)
+command -v pdftoppm > /dev/null || { echo "poppler's pdftoppm is needed (NIFOG's pages): apt-get install poppler-utils"; exit 1; }
 GUI=${GUI_DIR:-/work/OpenX6X00}
 # The commit the GUI is built from, for the Sentry's title (cmake/git_commit.cmake): buildroot copies the tree
 # without its .git, so it goes with the tree as build-commit.txt ("+": changes not committed)

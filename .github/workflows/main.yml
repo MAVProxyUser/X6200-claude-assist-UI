@@ -101,6 +101,15 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-${{ matrix.model }}-ccache-
 
+    # poppler's pdftoppm: the GUI's build draws CISA's NIFOG's pages with it for the Sentry's F > NIFOG
+    # (tools/nifog/render.py, CMakeLists.txt; the image's install stops without them)
+    - name: Install poppler (NIFOG's pages)
+      run: |
+        command -v pdftoppm && exit 0
+        for i in 1 2 3; do sudo apt-get update -q -o Acquire::Retries=3 > /dev/null && break; sleep 20; done
+        for i in 1 2 3; do sudo apt-get install -y -q -o Acquire::Retries=3 poppler-utils > /dev/null && break; sleep 20; done
+        command -v pdftoppm
+
     # The script builds the image and the update bundle a running radio installs by itself (x6100-update; not
     # signed, no key anywhere: the radio checks each file against the bundle's SHA-256 list, and updates from this
     # repository's releases, GITHUB_REPOSITORY). It also patches the buildroot tree (the X6100's U-Boot: mainline

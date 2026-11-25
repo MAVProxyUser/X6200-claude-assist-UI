@@ -1,0 +1,103 @@
+% rebase('base.html', title='NIFOG')
+% ver = idx['edition'].split(',')[0].strip()
+<h2><svg class="i"><use href="#i-book"/></svg>NIFOG</h2>
+<p class="sub">CISA's National Interoperability Field Operations Guide{{' version ' + idx['edition'] if idx['edition'] else ''}}: the land mobile radio channels agencies share in disasters (the national interoperability and calling channels on VHF, UHF, 700 and 800 MHz), CTCSS and NAC codes, marine, aviation, HF and amateur emergency frequencies, and the references around them. The PDF here is CISA's own, unchanged. The radio shows the same pages on the Sentry's F &gt; NIFOG, without a network.</p>
+
+% if not idx['pdf_size'] and not idx['pages']:
+<div class="dp-card"><div class="dp-body"><p>Not on this radio: /usr/share/x6100/nifog is empty (an image or an update from before NIFOG). An update installs it.</p></div></div>
+% else:
+<div class="dp-card">
+  <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-file"/></svg></span><div><h3>The guide</h3><p>{{idx['pages'] or '?'}} pages{{', %.1f MB' % (idx['pdf_size'] / 1e6) if idx['pdf_size'] else ''}}, published by the Cybersecurity and Infrastructure Security Agency (CISA)</p></div></div>
+  <div class="dp-body">
+    % if idx['pdf_size']:
+    <div class="actions" style="margin-top:0">
+      <a class="btn primary" href="/nifog.pdf" target="_blank" rel="noopener">Open the PDF</a>
+      <a class="btn" href="/nifog.pdf?dl=1" download="NIFOG_{{ver or 'guide'}}.pdf">Save it</a>
+    </div>
+    % else:
+    <p>The PDF is not on this radio; its pages are, below.</p>
+    % end
+    <p class="sub" style="margin:12px 0 0">From cisa.gov (cisa.gov/safecom/field-operations-guides), a work of the U.S. Government. GoldCorpHF is not affiliated with CISA; comments on the guide go to CISA (NIFOG@cisa.dhs.gov).</p>
+  </div>
+</div>
+
+% if idx['pages']:
+<div class="dp-card" id="viewer">
+  <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-image"/></svg></span><div><h3 id="vt">Page</h3><p id="vs">The pages as the radio shows them: arrow keys or a swipe turn them</p></div></div>
+  <div class="dp-body">
+    <div class="actions" style="margin-top:0">
+      <button type="button" id="prev">Previous</button>
+      <button type="button" id="next">Next</button>
+      <select id="vsel" aria-label="Section" style="width:auto;flex:1;min-width:0"></select>
+      % if idx['pdf_size']:
+      <a class="btn" id="vpdf" href="/nifog.pdf" target="_blank" rel="noopener">In the PDF</a>
+      % end
+    </div>
+    <div style="margin-top:12px;overflow-x:auto"><img id="vimg" alt="NIFOG page" style="display:block;max-width:100%;height:auto;background:#fff;border-radius:6px;margin:0 auto"></div>
+  </div>
+</div>
+
+<div class="dp-card">
+  <div class="dp-head"><span class="dp-ico"><svg class="i"><use href="#i-list"/></svg></span><div><h3>Contents</h3><p>A section opens at its page above</p></div></div>
+  <div class="dp-body" id="toc" style="columns:2 320px;column-gap:28px;font-size:14px;line-height:1.5"></div>
+</div>
+
+<script>
+(function() {
+  const IDX = {{!idx_json}};
+  const N = IDX.pages, secs = IDX.secs;
+  let page = 1;
+
+  function label(p) { return IDX.labels[String(p)] || ""; }
+  function secOf(p) { let s = null; for (const e of secs) if (e.page <= p && e.level <= 1) s = e; return s; }
+
+  function show(p, scroll) {
+    page = Math.max(1, Math.min(N, p));
+    const lab = label(page), s = secOf(page);
+    $("#vt").text("Page " + (lab ? lab + " (" + page + " of " + N + ")" : page + " of " + N));
+    $("#vs").text(s ? s.title : "");
+    $("#vimg").attr("src", "/nifog/page/" + page);
+    $("#vpdf").attr("href", "/nifog.pdf#page=" + page);
+    $("#prev").prop("disabled", page <= 1);
+    $("#next").prop("disabled", page >= N);
+    const i = secs.indexOf(s);
+    $("#vsel").val(i >= 0 ? String(i) : "");
+    history.replaceState(null, "", "#p=" + page);
+    if (scroll) document.getElementById("viewer").scrollIntoView({behavior: "smooth"});
+    if (page < N) (new Image()).src = "/nifog/page/" + (page + 1);   // the next one ready
+  }
+
+  const sel = $("#vsel"), toc = $("#toc");
+  sel.append($("<option>").val("").text("Go to a section"));
+  secs.forEach(function(e, i) {
+    if (e.level <= 1) sel.append($("<option>").val(String(i)).text((e.level ? "  " : "") + e.title));
+    const lab = label(e.page);
+    const a = $("<a href='#'>").text(e.title).on("click", function(ev) { ev.preventDefault(); show(e.page, true); });
+    const row = $("<div>").css({"break-inside": "avoid", "padding-left": (e.level * 16) + "px",
+                                "font-weight": e.level ? "400" : "700", "margin-top": e.level ? "0" : "8px"})
+      .append(a).append($("<span>").css("color", "var(--dim)").text(lab ? "  " + lab : ""));
+    toc.append(row);
+  });
+  sel.on("change", function() { const e = secs[+this.value]; if (e) show(e.page, false); });
+  $("#prev").on("click", function() { show(page - 1); });
+  $("#next").on("click", function() { show(page + 1); });
+  document.addEventListener("keydown", function(ev) {
+    if (ev.target.closest && ev.target.closest("input,select,textarea")) return;
+    if (ev.key === "ArrowRight" || ev.key === "PageDown") show(page + 1);
+    if (ev.key === "ArrowLeft" || ev.key === "PageUp") show(page - 1);
+  });
+  let x0 = null;
+  const img = document.getElementById("vimg");
+  img.addEventListener("touchstart", function(ev) { x0 = ev.touches[0].clientX; }, {passive: true});
+  img.addEventListener("touchend", function(ev) {
+    if (x0 === null) return;
+    const dx = ev.changedTouches[0].clientX - x0;
+    x0 = null;
+    if (Math.abs(dx) > 60) show(page + (dx < 0 ? 1 : -1));
+  });
+  const m = /p=(\d+)/.exec(location.hash);
+  show(m ? +m[1] : 1);
+})();
+</script>
+% end
+% end

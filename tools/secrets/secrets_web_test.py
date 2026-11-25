@@ -104,6 +104,7 @@ ROUTES = {
     "/gallery/thumb/<kind>/<name>": ["/gallery/thumb/shots/shot.png"],
     "/api/backup/download": None,
     "/cat/<token>/<freq>/<mode>": [f"/cat/{CAT_TOKEN}/7074000/usb", "/cat/x/7074000/usb"],
+    "/nifog/page/<n:int>": ["/nifog/page/1"],
 }
 KEEP = {"PACKAGE_DIR", "STATIC_PATH", "TOP"}     # paths of the web server's own files, not the radio's
 

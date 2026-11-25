@@ -98,6 +98,8 @@
 #include "btaudio.h"
 #include "gps.h"
 #include "station.h"          /* station_position: the GPS, the phone, else the locator */
+#include "nifog.h"            /* F's NIFOG: CISA's guide, its pages drawn at build time */
+#include "settings_window.h"  /* settings_network_name: where NIFOG's PDF is on the web */
 
 #include <stdatomic.h>
 #include <math.h>
@@ -106,6 +108,10 @@
 #include <ctype.h>
 #include <string.h>
 #include <time.h>
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
 
 extern const lv_font_t pixel_12, pixel_16, pixel_20, pixel_24, pixel_28, pixel_32, pixel_44;
 
@@ -1079,7 +1085,7 @@ static lv_obj_t *badge_l[2], *title_l, *status_l, *batt_l;
 static lv_obj_t *ab_arrow, *ab_tag;     /* PTT refused: where the A/B key is (landscape) */
 extern const lv_font_t power_sym_14;    /* the clock's: Montserrat's battery and bolt, and a plug (clock.c) */
 #define SYMBOL_PLUG "\xEF\x87\xA6"     /* U+F1E6 */
-typedef struct { lv_obj_t *frame, *cap, *line, *opt[12]; int n; } box_t;     /* opt: F SYSTEM's 12 rows the most */
+typedef struct { lv_obj_t *frame, *cap, *line, *opt[13]; int n; } box_t;     /* opt: F SYSTEM's 13 rows the most */
 static lv_obj_t *tick_l[TICKS], *tgt_l[LABELS];
 /* SCAN CFG: its rows (the MFK goes through them, its push or a tap changes the one chosen), what the chosen one does,
  * and what each radio's scan does now */
@@ -1102,7 +1108,7 @@ static list_sbar_t *sb_bd, *sb_lg, *sb_dsel, *sb_drow;     /* D's bands, C's log
 /* F SYSTEM: the rest of the radio, from here */
 typedef enum {
     SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_POOL, SYS_GPS, SYS_CLASSIC, SYS_SHELL, SYS_BASEFW,
-    SYS_TRIBAL, SYS_HOME,
+    SYS_TRIBAL, SYS_NIFOG, SYS_HOME,
     SYS_N
 } sysitem_t;
 static const struct {
@@ -1146,12 +1152,18 @@ static const struct {
                          "FILES FOR WHEN A DISASTER TAKES THE PHONES AND THE INTERNET, HOW TO FIND YOURS, AND HOW TO "
                          "READ THE TROPOSPHERIC DUCTING MAP. PUSH TO READ, THE MFK TURNS THE PAGES. YOUR OWN NOTES "
                          "(/MNT/TRIBAL.TXT ON THE CARD'S DATA PARTITION) COME FIRST."},
+    {"NIFOG", "CISA'S NATIONAL INTEROPERABILITY FIELD OPERATIONS GUIDE (NIFOG 2.02), ALL 192 PAGES: THE "
+              "INTEROPERABILITY AND CALLING CHANNELS, CTCSS AND NAC CODES, MARINE, AIR, HF AND HAM EMERGENCY "
+              "FREQUENCIES. PUSH TO READ: THE VFO SCROLLS, THE MFK TURNS THE PAGES, F1/F3 GO BY SECTION. THE PDF IS "
+              "ON THE WEB CONFIGURATOR'S NIFOG PAGE."},
     {"START IN", "WHERE THE RADIO STARTS AND COMES BACK TO WHEN AN APP CLOSES: THE SENTRY, OR THE CLASSIC RADIO "
                  "SCREEN. PUSH TO SWITCH."},
 };
 static int       sys_sel;
 static box_t     s_list, s_what, s_look, s_home, s_keys, s_load;
 static bool      trib_on;               /* TRIBAL KNOWLEDGE open: WHAT IT DOES reads it (trib_open) */
+static bool      nf_on;                 /* NIFOG open: its page over F (nf_open) */
+static void      nf_show(void);
 static void      trib_show(void);
 static lv_obj_t *key_l[5];
 
@@ -2783,6 +2795,10 @@ static void show_system(void) {
     char s[48];
     bool home = param_i_get(cfg_sentry_home);
 
+    if (nf_on) {                        /* NIFOG over the whole of F */
+        nf_show();
+        return;
+    }
     for (int i = 0; i < SYS_N; i++) {
         if (i == SYS_HOME)
             snprintf(s, sizeof(s), "START IN: %s", home ? "SENTRY" : "CLASSIC");
@@ -3256,7 +3272,7 @@ static int           f_x, f_w, f_ty, f_tw, f_bot, f_hmax, f_h;  /* the box's ins
                                                                  * and width, the bottom; the picture's height now */
 
 static void sys_spec_draw(void) {
-    if (scr != SCR_SYSTEM || !f_obj || f_h < F_MIN_H) return;
+    if (scr != SCR_SYSTEM || !f_obj || f_h < F_MIN_H || nf_on) return;
     if (f_gpu) {        /* into the display's plane under the hole: the picture flat, the newest row on top */
         lv_area_t a;
 
@@ -3552,6 +3568,235 @@ static void trib_turn(int dir) {
     if (!trib_n) return;
     trib_i = LV_CLAMP(0, trib_i + dir, trib_n - 1);
     show_screen();
+}
+
+/* ---- F's NIFOG: CISA's National Interoperability Field Operations Guide ---- */
+
+/* The owner, 2026-11-25: CISA's NIFOG (v2.02) in the firmware, on F and on the web server. Its 192 pages are drawn by
+ * the build (tools/nifog/render.py: 130 dpi, 16 greys, the tables 780 px wide: their 9 pt figures 16 px) and shown
+ * here a window at a time, over the whole of F, in the theme's colours (the paper its background, the print its
+ * accent): the VFO scrolls (past a page's end onto the next), the MFK turns the pages, F1/F3 go by section, F4 to
+ * the contents, F5 to the next chapter; a tap on the page's lower or upper half scrolls a window; a push, F2 or
+ * leaving F closes it, and it opens again where it was. The PDF itself is the web configurator's (/nifog) */
+#define NF_W    (SW - 12)               /* the frame, over F's boxes */
+#define NF_IW   (NF_W - 6)              /* the page's window, inside the frame's borders: 782 */
+#define NF_STEP 24                      /* px a VFO click */
+static lv_obj_t     *nf_frame_o, *nf_cap_l, *nf_line_o, *nf_img_o, *nf_where_l;
+static lv_img_dsc_t *nf_buf;
+static int           nf_ih;             /* the window's height */
+static int           nf_page = 1, nf_y; /* the page shown (the PDF's own numbering) and how far down it */
+static uint8_t      *nf_grey;           /* that page, grey */
+static unsigned      nf_gw, nf_gh;
+static int           nf_grey_page;      /* the page nf_grey holds, 0 none */
+static lv_color_t    nf_lut[256];       /* grey to the theme: 255 the background, 0 the accent */
+static char          nf_url[128];
+
+/* The page's grey, read when another is wanted */
+static void nf_load(void) {
+    if (nf_grey_page == nf_page) return;
+    free(nf_grey);
+    nf_grey      = nifog_page_grey(nf_page, &nf_gw, &nf_gh);
+    nf_grey_page = nf_grey ? nf_page : 0;
+}
+
+static int nf_max_y(void) {
+    return nf_grey && (int)nf_gh > nf_ih ? (int)nf_gh - nf_ih : 0;
+}
+
+/* Where the web configurator is (the PDF): the radio's name and its address on the network, if it has one */
+static void nf_where(void) {
+    char            name[40], ip[INET_ADDRSTRLEN] = "";
+    struct ifaddrs *ifs, *i;
+
+    settings_network_name(name, sizeof(name));
+    if (getifaddrs(&ifs) == 0) {        /* the WiFi's or the Ethernet's first, else any (Tailscale's) */
+        for (int pass = 0; pass < 2 && !ip[0]; pass++)
+            for (i = ifs; i && !ip[0]; i = i->ifa_next)
+                if (i->ifa_addr && i->ifa_addr->sa_family == AF_INET && (i->ifa_flags & IFF_UP)
+                    && !(i->ifa_flags & IFF_LOOPBACK)
+                    && (pass || !strncmp(i->ifa_name, "wlan", 4) || !strncmp(i->ifa_name, "eth", 3)))
+                    inet_ntop(AF_INET, &((struct sockaddr_in *)i->ifa_addr)->sin_addr, ip, sizeof(ip));
+        freeifaddrs(ifs);
+    }
+    if (ip[0]) snprintf(nf_url, sizeof(nf_url), "HTTP://%s.LOCAL/NIFOG OR HTTP://%s/NIFOG", name, ip);
+    else snprintf(nf_url, sizeof(nf_url), "HTTP://%s.LOCAL/NIFOG (ON THE RADIO'S NETWORK)", name);
+    for (char *c = nf_url; *c; c++) *c = (char)toupper((unsigned char)*c);
+}
+
+static void nf_draw(void) {
+    if (!nf_buf) return;
+    lv_color_t *px = (lv_color_t *)nf_buf->data, bg = nf_lut[255];
+    int         x0 = nf_grey && (int)nf_gw < NF_IW ? (NF_IW - (int)nf_gw) / 2 : 0;
+    int         w  = nf_grey ? LV_MIN((int)nf_gw, NF_IW - x0) : 0;
+
+    for (int r = 0; r < nf_ih; r++) {
+        lv_color_t *row = px + (size_t)r * NF_IW;
+        int         y   = nf_y + r;
+
+        if (!nf_grey || y >= (int)nf_gh) {
+            for (int x = 0; x < NF_IW; x++) row[x] = bg;
+            continue;
+        }
+        const uint8_t *g = nf_grey + (size_t)y * nf_gw;
+
+        for (int x = 0; x < x0; x++) row[x] = bg;
+        for (int x = 0; x < w; x++) row[x0 + x] = nf_lut[g[x]];
+        for (int x = x0 + w; x < NF_IW; x++) row[x] = bg;
+    }
+    lv_img_cache_invalidate_src(nf_buf);
+    lv_obj_invalidate(nf_img_o);
+}
+
+static void nf_show(void) {
+    char cap[160], where[200];
+    int  n = nifog_pages();
+
+    if (!n) {
+        lv_label_set_text(nf_cap_l, "NIFOG");
+        lv_label_set_text(nf_where_l, "NOT ON THIS RADIO: /USR/SHARE/X6100/NIFOG HAS NO PAGES (AN IMAGE OR AN UPDATE "
+                                      "FROM BEFORE IT). F2 OR PUSH: CLOSE");
+        free(nf_grey);
+        nf_grey      = NULL;
+        nf_grey_page = 0;
+        nf_draw();
+        return;
+    }
+    nf_page = LV_CLAMP(1, nf_page, n);
+    nf_load();
+    nf_y = LV_CLAMP(0, nf_y, nf_max_y());
+    const char        *lab = nifog_label(nf_page);
+    const nifog_sec_t *s   = nifog_sec(nifog_sec_of(nf_page));
+    char               ver[16];
+
+    snprintf(ver, sizeof(ver), "%s", nifog_edition());
+    ver[strcspn(ver, ",")] = 0;         /* "2.02, January 2025": the version */
+    if (lab[0]) snprintf(cap, sizeof(cap), "NIFOG %s  PAGE %s (%d OF %d)", ver, lab, nf_page, n);
+    else snprintf(cap, sizeof(cap), "NIFOG %s  PAGE %d OF %d", ver, nf_page, n);
+    if (s) snprintf(cap + strlen(cap), sizeof(cap) - strlen(cap), "  %s", s->title);
+    for (char *c = cap; *c; c++) *c = (char)toupper((unsigned char)*c);
+    lv_label_set_text(nf_cap_l, cap);
+    snprintf(where, sizeof(where), "%s  |  THE PDF: %s",
+             !nf_grey ? "PAGE NOT READ" : nf_y < nf_max_y() ? "MORE BELOW (VFO)"
+                      : nf_page < n ? "END OF PAGE (VFO: NEXT)" : "THE LAST PAGE", nf_url);
+    lv_label_set_text(nf_where_l, where);
+    nf_draw();
+}
+
+static void nf_objs(bool on) {
+    lv_obj_t *o[] = {nf_frame_o, nf_cap_l, nf_line_o, nf_img_o, nf_where_l};
+
+    for (size_t i = 0; i < N_OF(o); i++) {
+        if (!o[i]) continue;
+        if (on) {
+            lv_obj_clear_flag(o[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(o[i]);
+        } else {
+            lv_obj_add_flag(o[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+static void nf_open(void) {
+    trib_close();
+    if (!nf_frame_o) return;
+    if (!nf_buf) {
+        nf_buf = lv_img_buf_alloc(NF_IW, nf_ih, LV_IMG_CF_TRUE_COLOR);
+        if (!nf_buf) {
+            osd("NIFOG", "NO MEMORY FOR ITS PAGE.", -1);
+            return;
+        }
+        lv_img_set_src(nf_img_o, nf_buf);
+    }
+    for (int g = 0; g < 256; g++) nf_lut[g] = lv_color_mix(ink, amb, (uint8_t)g);
+    nifog_load();
+    nf_where();
+    nf_on = true;
+    nf_objs(true);
+    if (f_obj) lv_obj_add_flag(f_obj, LV_OBJ_FLAG_HIDDEN);     /* F's spectrogram (a GPU hole) under it: away */
+    show_screen();
+}
+
+static void nf_close(void) {
+    if (!nf_on) return;
+    nf_on = false;
+    nf_objs(false);
+    free(nf_grey);                      /* its page (the window's buffer stays, for the next time) */
+    nf_grey      = NULL;
+    nf_grey_page = 0;
+}
+
+static void nf_goto(int page) {
+    nf_page = page;
+    nf_y    = 0;
+    show_screen();
+}
+
+/* The VFO: down the page, past its end onto the next one's top (back up: onto the last one's end) */
+static void nf_scroll(int dy) {
+    int n = nifog_pages();
+
+    nf_load();
+    if (dy > 0 && nf_y >= nf_max_y() && nf_page < n) {
+        nf_page++;
+        nf_y = 0;
+    } else if (dy < 0 && nf_y <= 0 && nf_page > 1) {
+        nf_page--;
+        nf_load();
+        nf_y = nf_max_y();
+    } else {
+        nf_y = LV_CLAMP(0, nf_y + dy, nf_max_y());
+    }
+    show_screen();
+}
+
+static void nf_key(int k) {
+    int n = nifog_pages();
+
+    if (!n) return;
+    switch (k) {
+        case 0: nf_goto(nifog_step(nf_page, -1, 1)); break;     /* the section's start, else the one before */
+        case 2: nf_goto(nifog_step(nf_page, 1, 1)); break;
+        case 3: nf_goto(nifog_toc_page()); break;
+        case 4: {                       /* the next chapter; after the last, the first page */
+            int to = nifog_step(nf_page, 1, 0);
+
+            nf_goto(to == nf_page ? 1 : to);
+            break;
+        }
+        default: break;
+    }
+}
+
+/* A tap on the page: its lower half a window down, its upper half a window up */
+static void nf_tap_cb(lv_event_t *e) {
+    lv_point_t p;
+    lv_area_t  a;
+
+    (void)e;
+    if (!nf_on) return;
+    lv_indev_get_point(lv_indev_get_act(), &p);
+    lv_obj_get_coords(nf_img_o, &a);
+    nf_scroll(p.y >= (a.y1 + a.y2) / 2 ? nf_ih - NF_STEP : -(nf_ih - NF_STEP));
+}
+
+static void build_nifog(lv_obj_t *p) {
+    int y = BODY_Y, h = scr_h - BODY_Y - 4;
+
+    nf_ih      = h - 28 - 3 - 20;
+    nf_frame_o = rect(p, 6, y, NF_W, h, 3, false);
+    lv_obj_add_flag(nf_frame_o, LV_OBJ_FLAG_CLICKABLE);    /* taps stop here: F's list is under it */
+    lv_obj_add_event_cb(nf_frame_o, nf_tap_cb, LV_EVENT_CLICKED, NULL);
+    nf_cap_l = label(p, &pixel_20, amb, 9, y + 3, NF_W - 6, LV_TEXT_ALIGN_CENTER, "NIFOG");
+    lv_label_set_long_mode(nf_cap_l, LV_LABEL_LONG_DOT);
+    lv_obj_set_height(nf_cap_l, 22);
+    nf_line_o = rect(p, 6, y + 25, NF_W, 3, 0, true);
+    nf_img_o  = lv_img_create(p);
+    lv_obj_set_pos(nf_img_o, 9, y + 28);
+    lv_obj_set_size(nf_img_o, NF_IW, nf_ih);
+    nf_where_l = label(p, &pixel_16, dim, 9, y + h - 21, NF_W - 6, LV_TEXT_ALIGN_CENTER, "");
+    lv_label_set_long_mode(nf_where_l, LV_LABEL_LONG_DOT);
+    lv_obj_set_height(nf_where_l, 18);
+    nf_objs(false);
 }
 
 /* MHz without the zeros at the end: 118, 162.55, 467.725 */
@@ -4760,6 +5005,7 @@ static void rtl_listen_turn(int32_t diff) {
  * on G the channel whichever radio has it (the dial is not turned a step as well) */
 static bool knob_taken(void) {
     if (wl_on && scr == SCR_WALKIE) return true;    /* G's channel list open: the VFO goes down it */
+    if (nf_on && scr == SCR_SYSTEM) return true;    /* F's NIFOG open: the VFO scrolls its page */
     if (g_armed || g_sdr_armed || radio_get_state() == RADIO_TX) return true;  /* held: dial_held says why */
     if (scr == SCR_WALKIE) return w_sdr_hz != 0;    /* the dial, fine, as on A (only the arrows step CB's
                                                      * channels); on the SDR its channel */
@@ -5734,6 +5980,11 @@ static void show_legend(void) {
     char        l[160];
     const char *who = vol_stick() ? rtl_spectrum_dev_tag() : BOARD_NAME;
 
+    if (scr == SCR_SYSTEM && nf_on) {   /* F's NIFOG open */
+        lv_label_set_text(legend_l, "VFO: SCROLL | MFK: PAGE, PUSH CLOSE | F1 F3: SECTION, F4: CONTENTS | " RING_HINT
+                                    " | GEN: HELP");
+        return;
+    }
     if (scr == SCR_WALKIE && wl_on) {   /* G's channel list open: both knobs go down it, GEN closes it */
         snprintf(l, sizeof(l), "VFO, MFK: CHANNEL, PUSH TUNE | " RING_HINT " | VOL: %s %s %s | GEN: BACK", who,
                  vol_short[vol_fn], v);
@@ -6681,6 +6932,7 @@ static void show_glog(void) {
 
 static void go(scr_t s) {
     if (s != SCR_SYSTEM) trib_close();     /* leaving F closes TRIBAL KNOWLEDGE */
+    if (s != SCR_SYSTEM) nf_close();       /* and NIFOG */
     if (scr == SCR_LOG && s != SCR_LOG) g_leave(s == SCR_RTL);
     scr_t was = scr;
 
@@ -7329,7 +7581,9 @@ static const char *f_label(int k) {
         }
         case SCR_SYSTEM: {
             const char *const l[] = {"", "Open", "", "", ""};    /* the ring and the list reach the rest */
-            return l[k];
+            const char *const nf[] = {"Section:\nBack", "Close", "Section:\nNext", "Contents", "Chapter:\nNext"};
+
+            return nf_on ? nf[k] : l[k];
         }
         case SCR_RTL: {
             int g = param_i_get(cfg_rtl_gain);
@@ -7631,6 +7885,10 @@ static void sys_open(int i) {
         trib_open();
         return;
     }
+    if (i == SYS_NIFOG) {
+        nf_open();
+        return;
+    }
     trib_close();
     if (i == SYS_VHF) {
         go(SCR_RTL);
@@ -7849,6 +8107,11 @@ static void fkey(int k) {
             }
             break;
         case SCR_SYSTEM:                /* F2 opens the item (or closes TRIBAL KNOWLEDGE); the others nothing */
+            if (nf_on) {                /* NIFOG: F1/F3 by section, F4 the contents, F5 a chapter, F2 closes */
+                if (k == 1) nf_close(), show_screen();
+                else nf_key(k);
+                break;
+            }
             if (k == 1 && trib_on) trib_close(), show_screen();
             else if (k == 1) sys_open(sys_sel);
             break;
@@ -8027,6 +8290,10 @@ static void step(int dir) {
             break;
         }
         case SCR_SYSTEM:
+            if (nf_on) {                /* NIFOG: its pages */
+                nf_goto(LV_CLAMP(1, nf_page + dir, LV_MAX(1, nifog_pages())));
+                break;
+            }
             if (trib_on) {              /* reading: its pages */
                 trib_turn(dir);
                 break;
@@ -8080,7 +8347,8 @@ static void press(void) {
         case SCR_BANDS: listen_band(); break;
         case SCR_DECODE: open_decoder(); break;
         case SCR_SYSTEM:
-            if (trib_on) trib_close(), show_screen();
+            if (nf_on) nf_close(), show_screen();
+            else if (trib_on) trib_close(), show_screen();
             else sys_open(sys_sel);
             break;
         case SCR_RTL:                   /* the strongest signal in view: C's channel to it */
@@ -8212,6 +8480,10 @@ static void click_cb(lv_event_t *e) {
 
 /* The main knob: the radio is the operator's again */
 static void rotary_cb(int32_t diff) {
+    if (nf_on && scr == SCR_SYSTEM) {   /* F's NIFOG: down or up its page (it tunes nothing) */
+        nf_scroll((int)diff * NF_STEP);
+        return;
+    }
     if (wl_on && scr == SCR_WALKIE) {   /* G's channel list: the VFO goes down it as the MFK does (it tunes nothing, */
         wl_step(diff);                  /* so armed too) */
         return;
@@ -9199,6 +9471,7 @@ static void build_system(lv_obj_t *p) {
         lv_obj_set_style_text_font(s_home.opt[i], &pixel_16, 0);
         lv_obj_set_style_text_font(s_keys.opt[i], &pixel_16, 0);
     }
+    build_nifog(p);
 }
 
 /* ---- G WALKIE: the radio as a walkie-talkie on CB, its voice drawn as it is heard ----
@@ -11903,6 +12176,8 @@ static void state_keep(void) {
     gui_state_set("s.drow", dec_row);
     gui_state_set("s.dv", 2);
     gui_state_set("s.sys", sys_sel);    /* G's picture is 3D only since 2026-11-23: s.3d no longer kept */
+    gui_state_set("s.nf", nf_on ? nf_page : 0);     /* F's NIFOG: the page open (0: closed), how far down */
+    gui_state_set("s.nfy", nf_on ? nf_y : 0);
     for (int j = 0; j < SWEEP_KEYS; j++) {
         int32_t m = 0;
 

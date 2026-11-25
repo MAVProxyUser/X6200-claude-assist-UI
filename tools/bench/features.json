@@ -2187,6 +2187,19 @@
   "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
  },
  {
+  "id": "f-system-nifog",
+  "area": "sentry-F",
+  "feature": "NIFOG: CISA's National Interoperability Field Operations Guide 2.02, its 192 pages (drawn at build time, /usr/share/x6100/nifog) over F in the theme's colours, caption 'NIFOG 2.02  PAGE 31 (38 OF 192)  VHF INLAND - VTAC17'; VFO scrolls (past a page's end to the next), MFK turns pages, F1/F3 by section, F4 contents, F5 next chapter, push/F2 or leaving F closes; the bottom line names the PDF's URL",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "Choose NIFOG on F, key F2: OCR 'NIFOG 2.02' and 'PAGE' in the caption and 'THE PDF: HTTP://' at the bottom; knob mfk 1: the page number +1; key F3: the next section's page; knob vfo 5: 'MORE BELOW' or the page changes; key F2 closes (F's list again, s.sys NIFOG).",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
   "id": "f-system-start-in",
   "area": "sentry-F",
   "feature": "START IN: the Sentry or the classic screen as the start/return place (applies when nothing was kept)",
@@ -12601,6 +12614,19 @@
   ],
   "needs": "none",
   "how_to_confirm": "GET /api/tci; POST an invalid port (99999): refused with the radio's reason; the TCI WebSocket on 50001 still answers",
+  "suite_has": null,
+  "manual_ref": "## Web configurator"
+ },
+ {
+  "id": "web-nifog-page",
+  "area": "web",
+  "feature": "Frequencies > NIFOG (/nifog): CISA's NIFOG, the PDF as CISA publishes it (/nifog.pdf inline, ?dl=1 saved, Range answered), its contents, and its pages as PNG (/nifog/page/N) with Previous/Next, a section list and swipes, for a phone",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "GET /nifog: 200 with the contents; GET /nifog.pdf: application/pdf, 6735362 bytes, SHA-256 45c2f5d9... (third-party/nifog/README.md); Range bytes=0-99: 206; GET /nifog/page/68: a PNG (the CTCSS table); /nifog/page/193: 404",
   "suite_has": null,
   "manual_ref": "## Web configurator"
  },

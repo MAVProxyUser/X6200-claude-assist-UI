@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential bc bison bzip2 ca-certificates ccache cmake cpio curl file flex gawk git gperf \
     gzip libncurses5-dev libssl-dev make patch perl python3 python3-dev python3-setuptools rsync \
-    sqlite3 texinfo unzip wget xz-utils zip zlib1g-dev locales \
+    sqlite3 texinfo unzip wget xz-utils zip zlib1g-dev locales poppler-utils \
     && rm -rf /var/lib/apt/lists/* \
     && locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8

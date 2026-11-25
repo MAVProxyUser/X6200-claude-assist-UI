@@ -31,6 +31,7 @@ import zipfile
 import bottle
 
 from . import ghostnet_web
+from . import nifog_web
 from . import settings
 from . import sites
 from . import smartcw
@@ -410,6 +411,38 @@ def read_tci_conf():
 @app.route('/tci')
 def tci():
     return bottle.template('tci')
+
+
+# CISA's NIFOG (nifog_web.py, settings.NIFOG_DIR): the page with its contents, the PDF as CISA publishes it (a
+# browser's own viewer, or saved; Range requests answered, for a viewer that reads it in pieces) and its pages as
+# the radio's F > NIFOG shows them (PNG, for a phone without a PDF viewer). Nothing of the owner's in them: by any name
+@app.route('/nifog')
+def nifog_page():
+    idx = nifog_web.read_index(settings.NIFOG_DIR)
+    data = {"pages": idx["pages"], "labels": {str(p): v for p, v in idx["labels"].items()}, "secs": idx["secs"]}
+    return bottle.template('nifog', idx=idx, idx_json=json.dumps(data).replace("</", "<\\/"))
+
+
+@app.get('/nifog.pdf')
+def nifog_pdf():
+    ver = nifog_web.read_index(settings.NIFOG_DIR)["edition"].split(",")[0].strip()
+    name = "NIFOG_%s.pdf" % ver if re.fullmatch(r"[0-9.]+", ver or "") else "NIFOG.pdf"
+    r = bottle.static_file("nifog.pdf", root=settings.NIFOG_DIR, mimetype="application/pdf",
+                           download=name if bottle.request.query.get("dl") else False)
+    if not isinstance(r, bottle.HTTPError):
+        r.set_header("Cache-Control", "max-age=86400")
+    return r
+
+
+@app.get('/nifog/page/<n:int>')
+def nifog_page_png(n):
+    name = nifog_web.page_file(settings.NIFOG_DIR, n, 999)
+    if not name:
+        raise bottle.HTTPError(404, "No such page")
+    r = bottle.static_file(name, root=settings.NIFOG_DIR, mimetype="image/png")
+    if not isinstance(r, bottle.HTTPError):
+        r.set_header("Cache-Control", "max-age=86400")
+    return r
 
 
 # Browser remote (src/remote_server.c): the page is views/remote.html, the radio serves the screen

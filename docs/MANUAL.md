@@ -1438,7 +1438,7 @@ written through to the card before it replaces the last copy, so a power cut kee
 - **F SYSTEM**: Settings, the apps (APPS: the APP grid; its WHAT IT DOES names them, Weather, Flights, HF Air Band,
   CB, Web radio, Zello and SVXConnect among them), the digital modes, AIRSPACE, VHF/UHF, the SDR pool, the
   [GPS](#the-gps-panel),
-  the classic radio screen, a shell, the [base firmware](#the-x6200s-base-firmware), TRIBAL KNOWLEDGE and where the radio starts. F2 opens the item chosen
+  the classic radio screen, a shell, the [base firmware](#the-x6200s-base-firmware), TRIBAL KNOWLEDGE, [NIFOG](#nifog) and where the radio starts. F2 opens the item chosen
   (CLASSIC RADIO is on the list); the other F keys do nothing here. Every Sentry title says the release, the GUI's
   commit and the base's firmware, written the same on both radios: `... DECODER SENTRY: v0.3.12.32 62273334 - base
   v1.1.9` (G held up says BASE V1.0.8 under its clock). Under the chosen item's text (in the small font), WHAT IT
@@ -1457,12 +1457,51 @@ written through to the card before it replaces the last copy, so a power cut kee
   Your own notes come first: `/mnt/tribal.txt` on the card's DATA partition (the web page's Files, or the card in a
   PC), plain text, a blank line between paragraphs; the nets near you belong there, not in the image. Upper case on
   screen, as the Sentry draws everything.
+- **NIFOG** on F: CISA's National Interoperability Field Operations Guide on the radio itself, every page, with the
+  knobs; the PDF is on the web configurator. See [NIFOG](#nifog).
 - **PROCESSOR, GRAPHICS, MEMORY** under WHAT IT DOES on F, each second with a bar: CPU, the four cores' load in all
   and each (and the clock); GPU, the share of the last second the Mali-400 spent drawing (the Sentry's pictures, F's
   spectrogram among them, and the GUI turned onto the display), its clock beside it (144 to 384 MHz as its governor
   sets it). Under a light load the governor keeps the lowest clock, so up to v0.3.12.32 the figure, then the clock's
   place between its lowest and highest, read 0% however much was drawn; on an image without Mesa (no drawing by the
   GPU) it is still that; RAM, what is in use of the 1 GB.
+
+#### NIFOG
+
+CISA's **National Interoperability Field Operations Guide** (NIFOG), version 2.02 of January 2025: the land mobile
+radio channels agencies share in disasters (the national interoperability channels and the calling channels: VCALL10,
+VTAC11-14, the VTAC33-38 repeaters, UCALL40, UTAC41-43, the 700 and 800 MHz ones, the federal IR and LE channels), CTCSS, DCS and NAC codes,
+marine, aviation, railroad and search-and-rescue frequencies, HF and amateur emergency frequencies, and the references
+around them (time zones, the phonetic alphabet, network and wiring tables). It is in the image and the update bundle,
+so it is there without a network: the PDF as CISA publishes it, unchanged ([third-party/nifog](../third-party/nifog/README.md)),
+and its 192 pages drawn from it when the firmware is built (the radio has no PDF reader), in `/usr/share/x6100/nifog`
+(12 MB on the system partition: the update writes nowhere else).
+
+**On the radio**: F SYSTEM > **NIFOG**, F2 or the MFK's push. The page covers F, in the theme's colours (the paper
+the background, the print the accent), a window of it at a time; its title says the page as printed and among the
+PDF's (`NIFOG 2.02  PAGE 31 (38 OF 192)  VHF INLAND - VTAC17`) and the section it is in. The landscape tables
+(the channel tables, CTCSS) fill the width; the portrait pages are their text's size, centred.
+
+| Control | Does |
+|---|---|
+| VFO | scrolls the page (24 px a click); past its end, the next page's top; back past its top, the page before's end. It tunes nothing while NIFOG is open |
+| MFK | the next or previous page, from its top |
+| F1 / F3 | the section's start (again: the section before) / the next section |
+| F4 | the contents (page iii); its page numbers are the printed ones in the title |
+| F5 | the next chapter (after the last one, the cover) |
+| A tap | on the page's lower half a window down, on its upper half a window up |
+| F2, a push of the MFK | closes it, back to F's list; so does leaving F. It opens again where it was left, until the GUI restarts |
+
+The line under the page says whether more of it is below, and where the PDF is: `THE PDF: HTTP://X6200.LOCAL/NIFOG OR
+HTTP://192.168.1.23/NIFOG` (the [network name](#network-name) and the radio's address, when it has one). A radio
+updated from a release before NIFOG gets it with the update; until then F says `NOT ON THIS RADIO`.
+
+**On the web**: Frequencies > **NIFOG** (`http://x6200.local/nifog`, `http://x6100.local/nifog`): Open the PDF (in the
+browser's own viewer: `/nifog.pdf`), Save it (`NIFOG_2.02.pdf`), and the same pages the radio shows, for a phone
+without a PDF viewer: Previous and Next, the arrow keys or a swipe, a list to go to a section, In the PDF for the
+page in the PDF (a desktop browser opens it there), and the contents, each entry opening its page. A page's address
+keeps its number (`/nifog#p=68`, the CTCSS table). The pages need no login and hold nothing of yours: they open by
+any of the radio's names, as the other pages that only read do.
 
 #### The GPS panel
 
@@ -9705,6 +9744,7 @@ The menu has General and six groups:
 | Frequencies | Bands | band edges, default modes and TX shifts ([TX shift](#tx-shift)); the band plan the radio uses, whose region 160m, 80m, 40m SSB and 6m follow unless edited ([Band plan](#band-plan)). A band may overlap an inactive broadcast band (80m to 4 MHz over Broadcast 75m): the radio takes the band |
 | | Digital modes | add, edit and delete the FT8/FT4, JS8, WSPR and FT2 frequencies, and your own for PSK, Olivia and JTTY in the place of their built-in ones; a card shows what the band keys of those three step through, with the band plan ([Frequencies of PSK, Olivia and JTTY](#frequencies-of-psk-olivia-and-jtty)); WSPR band hopping: Hop and each band's Off, RX or RX+TX, set live (see [Band hopping](#band-hopping)) |
 | | Memories | MEM 1-9 slots and the named channel list ([Channels](#channels)), on the frequencies the radio tunes |
+| | NIFOG | CISA's National Interoperability Field Operations Guide 2.02: the PDF as CISA publishes it, its contents and its pages as the radio shows them on F > NIFOG, for a phone (see [NIFOG](#nifog)) |
 | Operating | Cluster | DX cluster servers, filters and alerts (writes `/mnt/cluster.conf`) |
 | | Field Ops | QRZ Logbook profiles (three callsigns with their API keys, the active one), HOTA key, WWFF key, update the reference lists, download the activation logs |
 | | Wavelog | every logged QSO to your Wavelog: URL, API key, station profile (one, or Automatic by the radio's callsign), connection test, Send now; the live link: Show the radio in Wavelog, Radio name, Tune from Wavelog, the radio's address for Wavelog, Wavelog in the browser (writes `/mnt/field/wavelog.conf`, see [Wavelog](#wavelog) and [live link](#live-link)) |

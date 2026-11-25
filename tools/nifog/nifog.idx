@@ -1,0 +1,335 @@
+# CISA's NIFOG, its pages' printed numbers and its contents, for the Sentry's F NIFOG (src/nifog.c)
+# and the web page /nifog (webserver apps.py): tools/nifog/render.py --index, from the PDF's own contents.
+# pages N: the PDF's pages; page P LABEL: PDF page P is printed LABEL; sec P LEVEL TITLE: the contents'
+# entry on PDF page P (level 0 a chapter, 1 a section, 2 a part of one)
+edition 2.02, January 2025
+pages 192
+page 2 i
+page 3 ii
+page 4 iii
+page 5 iv
+page 6 v
+page 7 vi
+page 8 1
+page 9 2
+page 10 3
+page 11 4
+page 12 5
+page 13 6
+page 14 7
+page 15 8
+page 16 9
+page 17 10
+page 18 11
+page 19 12
+page 20 13
+page 21 14
+page 22 15
+page 23 16
+page 24 17
+page 25 18
+page 26 19
+page 27 20
+page 28 21
+page 29 22
+page 30 23
+page 31 24
+page 32 25
+page 33 26
+page 34 27
+page 35 28
+page 36 29
+page 37 30
+page 38 31
+page 39 32
+page 40 33
+page 41 34
+page 42 35
+page 43 36
+page 44 37
+page 45 38
+page 46 39
+page 47 40
+page 48 41
+page 49 42
+page 50 43
+page 51 44
+page 52 45
+page 53 46
+page 54 47
+page 55 48
+page 56 49
+page 57 50
+page 58 51
+page 59 52
+page 60 53
+page 61 54
+page 62 55
+page 63 56
+page 64 57
+page 65 58
+page 66 59
+page 67 60
+page 68 61
+page 69 62
+page 70 63
+page 71 64
+page 72 65
+page 73 66
+page 74 67
+page 75 68
+page 76 69
+page 77 70
+page 78 71
+page 79 72
+page 80 73
+page 81 74
+page 82 75
+page 83 76
+page 84 77
+page 85 78
+page 86 79
+page 87 80
+page 88 81
+page 89 82
+page 90 83
+page 91 84
+page 92 85
+page 93 86
+page 94 87
+page 95 88
+page 96 89
+page 97 90
+page 98 91
+page 99 92
+page 100 93
+page 101 94
+page 102 95
+page 103 96
+page 104 97
+page 105 98
+page 106 99
+page 107 100
+page 108 101
+page 109 102
+page 110 103
+page 111 104
+page 112 105
+page 113 106
+page 114 107
+page 115 108
+page 116 109
+page 117 110
+page 118 111
+page 119 112
+page 120 113
+page 121 114
+page 122 115
+page 123 116
+page 124 117
+page 125 118
+page 126 119
+page 127 120
+page 128 121
+page 129 122
+page 130 123
+page 131 124
+page 132 125
+page 133 126
+page 134 127
+page 135 128
+page 136 129
+page 137 130
+page 138 131
+page 139 132
+page 140 133
+page 141 134
+page 142 135
+page 143 136
+page 144 137
+page 145 138
+page 146 139
+page 147 140
+page 148 141
+page 149 142
+page 150 143
+page 151 144
+page 152 145
+page 153 146
+page 154 147
+page 155 148
+page 156 149
+page 157 150
+page 158 151
+page 159 152
+page 160 153
+page 161 154
+page 162 155
+page 163 156
+page 164 157
+page 165 158
+page 166 159
+page 167 160
+page 168 161
+page 169 162
+page 170 163
+page 171 164
+page 172 165
+page 173 166
+page 174 167
+page 175 168
+page 176 169
+page 177 170
+page 178 171
+page 179 172
+page 180 173
+page 181 174
+page 182 175
+page 183 176
+page 184 177
+page 185 178
+page 186 179
+page 187 180
+page 188 181
+page 189 182
+page 190 183
+page 191 184
+page 192 185
+sec 3 0 INTRODUCTION
+sec 4 0 Table of Contents
+sec 8 0 HOW TO USE THE NATIONAL INTEROPERABILITY FIELD OPERATIONS GUIDE
+sec 12 1 FCC Rules and Regulations
+sec 12 1 NTIA Rules and Regulations
+sec 13 1 FCC Rules for Interoperability
+sec 15 1 NTIA Rules for Interoperability
+sec 19 1 United States/Canada Frequency Coordination Lines
+sec 21 1 How do I request a Special Temporary Authorization (STA)?
+sec 25 1 Regulations and Guidelines for National Interoperability
+sec 26 1 Conditions for Use of Federal Interoperability Channels
+sec 29 1 Recommendations for Programming the Federal Interoperability Channels
+sec 30 0 INTEROPERABILITY CHANNELS
+sec 30 1 Conventions of Use for Interoperability
+sec 31 1 Interoperability "Watch-Out" Situations
+sec 32 1 ICS 205 Sample & Channel Instructions
+sec 34 1 Notes on Interoperability Channels
+sec 34 1 Field Programming
+sec 35 1 VHF National Interoperability Channels
+sec 35 2 Low Band - LLAW & LFIRE
+sec 36 2 VHF Tactical Simplex - VCALL & VTAC
+sec 37 2 VHF Tactical Repeater - VTAC
+sec 38 2 VHF Inland - VTAC17
+sec 41 2 VHF Public Safety Mutual Aid and Common Channels
+sec 42 2 VHF Incident Response (IR) Federal Interoperability Channels
+sec 43 2 VHF Law Enforcement (LE) Federal Interoperability Channels
+sec 44 2 NOAA Weather Radio (NWR) "All Hazards" Broadcasts
+sec 45 1 UHF Nationwide Interoperability Channels
+sec 45 2 UCALL & UTAC
+sec 46 2 UHF Incident Response (IR) Federal Interoperability Channels
+sec 47 2 UHF Law Enforcement (LE) Federal Interoperability Channels
+sec 48 2 UHF Medical (MED, EMS) Channels
+sec 52 1 700 MHz Nationwide Interoperability Channels
+sec 58 2 700 MHz Nationwide Air-Ground Channels
+sec 60 2 700 MHz Low Power Itinerant Channels
+sec 61 2 700 MHz Nationwide Deployable Trunked System Channels
+sec 62 2 700 MHz Nationwide Deployable Trunked System Talkgroups
+sec 66 1 800 MHz Nationwide Interoperability Channels
+sec 67 1 P25 Digital Codes
+sec 68 1 Continuous Tone-Coded Squelch System - CTCSS, Codes, & NAC Conversions
+sec 69 1 Continuous Digital-Coded Squelch System - CDCSS Codes
+sec 70 1 Federal / Non-Federal SAR Command Interoperability Plan
+sec 71 1 Federal / Non-Federal VHF SAR Operations Interoperability Plan
+sec 72 1 Common Emission Designators in Public Safety Licensing
+sec 73 1 FCC Part 90 Common Station Class Codes
+sec 74 1 Line-of-Sight Formulas
+sec 75 1 25 Cities Project Federal Interoperability Channels
+sec 84 1 Encryption - National Reserved SLN Table
+sec 86 1 Commonly Used Frequencies
+sec 86 1 Aviation Frequencies
+sec 87 1 Notice to Airmen (NOTAM) Filing Instructions
+sec 88 1 Unmanned Aircraft (UAS) Incident Reporting - Tips in Responding to a UAS Incident
+sec 90 1 UAS Frequency Reference
+sec 92 1 VHF Marine Channel Listing
+sec 96 1 VHF Marine Channels & Frequencies
+sec 102 1 Common Business Frequencies
+sec 103 1 Railroad Frequencies
+sec 104 1 SAR (Search and Rescue) Frequencies
+sec 105 1 Standard Time and Frequency Broadcasts
+sec 105 1 Standard Time by Telephone
+sec 106 1 HF Disaster Communications
+sec 107 1 HF Long Distance Communications
+sec 108 1 Maritime HF and VHF Distress Frequencies
+sec 109 1 SHARES HF
+sec 109 1 Alaska Emergency Frequency
+sec 110 1 Amateur Radio Emergency Frequencies
+sec 110 1 60-meter Band (5 MHz)
+sec 112 1 Amateur Radio Calling Frequencies
+sec 112 1 Amateur Radio Repeater Coordinators
+sec 113 1 Amateur Radio Bands (US)
+sec 119 1 Amateur Radio Power Limits (US)
+sec 120 1 Personal Radio Services
+sec 124 1 Interference Management
+sec 128 0 USEFUL REFERENCES
+sec 128 1 Operations Center Telephone Numbers
+sec 130 1 CISA/FEMA Regions - States and Territories
+sec 131 1 CISA Region Contacts
+sec 132 1 FEMA Region Contacts
+sec 133 1 Emergency Support Functions (ESF)
+sec 134 1 Priority Telecommunications Services Programs
+sec 134 2 GETS - Govt. Emergency Telecommunications Service
+sec 134 2 WPS - Wireless Priority Service
+sec 134 2 TSP - Telecommunications Service Priority
+sec 136 0 EMERGENCY WIRELESS CARRIER SERVICES
+sec 137 1 Typical Customer Support Request Information
+sec 138 1 FirstNet Response Operations Group (ROG)
+sec 139 1 How do FirstNet Deployables work?
+sec 139 1 How do you request a FirstNet deployable?
+sec 140 1 FirstNet Central: Uplift Portal and Incident Management
+sec 140 1 FirstNet Assist App
+sec 141 1 T-Mobile Emergency Response Team
+sec 142 1 Verizon Response Team
+sec 143 1 Telephone Keypad Letters
+sec 143 1 N11 Numbers
+sec 143 1 DSN Area Codes
+sec 144 1 Text Messaging
+sec 146 0 SATELLITE SERVICES
+sec 146 1 M-SAT Satellite Mutual Aid Radio Talkgroups (SMARTTM)
+sec 148 1 Satellite Phone Dialing Instructions
+sec 148 2 IRIDIUM
+sec 149 2 BGAN
+sec 149 2 MSAT
+sec 149 2 INMARSAT
+sec 150 2 INMARSAT-M Service Codes
+sec 151 0 INFORMATION TECHNOLOGY
+sec 151 1 Network Troubleshooting
+sec 152 1 Information Technology Disaster Resource Center
+sec 153 1 Cisco Crisis Response (formerly Tactical Operations)
+sec 154 1 Open Source Interconnection (OSI) Seven Layer Model
+sec 155 1 Physical Media for Data Networks
+sec 156 1 Public DNS Servers IPv4 & IPv6
+sec 158 1 Reserved Address Spaces
+sec 159 1 Subnetting / CIDR Notation
+sec 160 1 Public Network Time Protocol (NTP) Servers
+sec 161 1 Examples of Troubleshooting with Packet Captures
+sec 162 1 Comparison of Common VPN Protocols
+sec 163 1 WAN Technologies / Common Data Rates
+sec 164 1 North America WIFI Channel Plan and Best Practices
+sec 165 1 WIFI Configuration Best Practices
+sec 166 1 RJ-45 Pinout
+sec 167 1 RJ-45 Wiring
+sec 168 1 Telephone Connectors
+sec 169 1 25-Pair Telephone Block Wiring Color Code
+sec 170 1 Notes on Fiber Optic Cable and Connectors
+sec 171 1 RS-232 Connectors (DE9 and DB25)
+sec 172 1 Uniform Color Code of Underground Utility Markings
+sec 174 0 CYBERSECURITY
+sec 174 1 Top Cybersecurity Tactics
+sec 175 1 Cyber Incident Response
+sec 176 1 Federal Cybersecurity Resources
+sec 177 1 Common TCP/UDP Ports
+sec 178 1 Cryptographic Cipher Recommendations
+sec 179 0 ACKNOWLEDGEMENTS
+sec 180 0 NOTES
+sec 188 0 TIME ZONES
+sec 189 0 UTC (ZULU) - TIME ZONE CONVERSION CHART
+sec 190 0 PHONETIC ALPHABET STANDARDS
+sec 191 0 EMERGENCY MEDICAL PROCEDURES

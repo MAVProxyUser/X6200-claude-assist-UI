@@ -6183,6 +6183,12 @@ TESTS = [
          lambda o: ptt_refused(o, B, A, 15000000, True, "ptt-out-of-band x6200"), 12),
 ]
 
+# CISA's NIFOG (orch_nifog.py, 2026-11-25): F > NIFOG and the web page /nifog, receive only
+import orch_nifog as _on                    # noqa: E402
+_on.H = sys.modules[__name__]
+TESTS += _on.tests(Test, A, B)
+ORCH_COVERS.update(_on.COVERS)
+
 # The cable's features that had no test yet (orch_cable.py, 2026-11-25): their tests, and what each covers
 import orch_cable as _oc                    # noqa: E402
 _oc.H = sys.modules[__name__]
