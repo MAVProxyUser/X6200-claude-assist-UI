@@ -918,10 +918,21 @@ def spec_steps(L, f, mode, on, off, coarse=False):
     return out
 
 
-def save_wav(o, label, x):
-    """The listener's audio of a test, kept in the run's folder as the evidence of what it heard"""
+def file_name(label):
+    """A test's label as a file name in its run's folder"""
+    return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in label)
+
+
+def save_wav(o, x, name):
+    """Received audio (TciRx, 24 kHz float) kept in the run's folder as a 16-bit WAV, the evidence of what the listener
+    heard: its path, None without a folder. (One definition: a second one with the arguments the other way round,
+    11cb8f8b, took the place of this one and the step tests' call would have failed on its next run)"""
     import wave
-    path = os.path.join(o.st.run_dir, "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in label) + ".wav")
+    d = getattr(o.st, "run_dir", None)
+    if not d:
+        return None
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, name)
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
@@ -934,8 +945,7 @@ def save_spectrum(o, label, L, f, mode, on, off):
     """The listener's spectrum frames around an over (1 s either side), kept in the run's folder: the judge can be
     replayed on them (orch.py spec FILE)"""
     frames = [(t, cen, wid, list(v)) for (t, cen, wid, v) in list(L.r.spectra) if on - 1.0 <= t <= off + 1.0 and v]
-    path = os.path.join(o.st.run_dir, "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in label)
-                        + "_spectrum.json")
+    path = os.path.join(o.st.run_dir, file_name(label) + "_spectrum.json")
     with open(path, "w") as fh:
         json.dump({"label": label, "listener": L.name, "f": f, "mode": mode, "on": on, "off": off,
                    "frames": frames}, fh)
@@ -1082,7 +1092,7 @@ def audio_steps(o, sender, listener, f, mode, label):
                 if len(x) < FS:
                     raise Refused(f"{listener}'s TCI sent {len(x) / FS:.1f} s of audio")
                 found, off_a, steps, seen = find_steps(x)
-                got.update(found=found, offset=off_a, steps=steps, seen=seen, wav=save_wav(o, label, x))
+                got.update(found=found, offset=off_a, steps=steps, seen=seen, wav=save_wav(o, x, file_name(label) + ".wav"))
                 if not found:
                     raise Refused(f"the sequence not heard whole in {listener}'s audio: per step (Hz, dB over the "
                                   f"noise, s) {steps or 'no anchor'}; clear tones (Hz, s) {seen[:8]}")
@@ -4813,23 +4823,6 @@ def ft8_tci_copy_test(o, sender, listener, hz=1500, app=False):
     return None, (f"{sender}'s FT8 message through its TCI{' (its FT8 app open)' if app else ''} in {listener}'s audio at {c['hz']} Hz: {SPUR_HZ} Hz below "
                   f"{c['below_dbc']} dBc, above {c['above_dbc']} dBc, 400 Hz above (noise) {c['noise_dbc']} dBc: said, "
                   f"not judged"), c
-
-
-def save_wav(o, x, name):
-    """Received audio (TciRx, 24 kHz float) kept in the run's folder as a 16-bit WAV: its path, None without a folder"""
-    import wave
-    import numpy as np
-    d = getattr(o.st, "run_dir", None)
-    if not d:
-        return None
-    os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, name)
-    with wave.open(path, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(24000)
-        w.writeframes((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
-    return path
 
 
 TAIL_LOST_MAX_S = 0.15      # a TCI over may lose this much of its audio's end at the unkey (the envelope's edges)
