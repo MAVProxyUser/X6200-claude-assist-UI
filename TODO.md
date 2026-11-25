@@ -105,6 +105,12 @@ Done 2026-11-25 night (the same asks, continued):
   X6200's misread of the X6100's elements.
 - Left: the apps' TX stream on the X6200 (the skirt); the X6200's Comp (a third source); the X6100's +61.4 Hz line (a
   third receiver).
+- Static checks of the GUI (2026-11-25 morning, nothing on the air): a -Wall -Wextra cross build (366 warnings, most
+  format-truncation and comments) and clang's analyzer over its 421 C files (81 reports). Real, fixed: the CI-V CAT
+  set an unknown mode as whatever the stack held (c3c023c5, tools/cat_modes); the GUI's start crashed on a failed
+  fopen of the boot animation's sign and on a missing VOL knob (c1855271); orch's two save_wav (0d45f6cd, found by a
+  scan of the bench scripts). The rest read as false (loops the analyzer could not bound, a VLA, callers' guards) or
+  harmless (EAGAIN == EWOULDBLOCK, a switch over every value of its enum).
 - The skirt, read in the code (2026-11-25 08:40, for the next TX round): on the X6200 (no ALC) TCI's path never
   writes the codec's play volume (tx_hold.c: alc false, codec_db 0, the samples alone scaled), while tx_player writes
   it at every over's start (audio_set_play_vol(total + 6), the samples at total less what the codec took) and puts the
