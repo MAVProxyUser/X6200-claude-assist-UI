@@ -50,7 +50,13 @@ the same unified framework to sync the radios or make exceptions for tests so th
   from a signal's rise, and summed the spectrum as stretched to the zoom); TX Cal's S-meter Measure from the remote
   ("smc", the smeter-front-end test runs each radio's own Measure: neither radio had ever been measured, PRE read
   3-4 dB low and RF gain 40 4-6 dB high on the defaults). The bench's TCI CW keyer left at the first break-in drop.
-- Left: the other 32 over-the-air groups (air_a tune*, comp, cw-alc, power-loop, ft8-tx; air_b; air_c; air paths).
+- Then the rest of air_a: tune, tune-power, tune-key, tune-app, cw-alc and ft8-tx pass both ways; power-loop measures
+  both bases' loops (Xiegu's, said); fixed on the way: the Watch stopped an over on one bad 18.5 W meter frame (now
+  two in a row), the follow window closed before an app had tuned, a child bench program's set-ups were invisible to
+  the guard (bench.SYNC_DIR), tune-app judged by the listener's audio (the references cancel).
+- Left in air_a: comp (both radios' loops level 2 s stretches: reshape with shorter ones, judged in the audio);
+  power-loop's X6200 figure (the X6100 listener's audio clips at 0.1 W).
+- Left: air_b (15 groups), air_c (7), air paths bands/walkie/if-shift.
 
 Done 2026-11-24 afternoon (the owner: "I just connected a DVMega to the 6200 and a p25 USB3000 to the other... do some
 more AMBE tests", "The 6 m output floor... maybe time to revisit now? same with the image shifts?"):

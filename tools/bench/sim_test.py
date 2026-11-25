@@ -19,6 +19,7 @@ import json
 import os
 import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import threading
@@ -260,8 +261,11 @@ class SimRadio:
                     self._end()
                     continue
                 w = 12.0 if self.fault == "power" else 0.9 if self.fault == "hot" else self.state["pwr"]
+                shown = w
+                if self.fault == "spike" and not getattr(self, "spiked", False) and self.tx_until - time.time() < 0.5:
+                    self.spiked, shown = True, 18.5  # one bad meter frame as an over ends, the power itself as set
                 swr = 3.0 if self.fault == "swr" else 1.1
-                self.send(f"t {w:.1f} {swr:.2f} 0.0")
+                self.send(f"t {shown:.1f} {swr:.2f} 0.0")
                 if self.peer:   # what the other one hears through the pads (70 dB), or with none (loud)
                     dbm = 10 * __import__("math").log10(max(w, 1e-3) * 1000) - (10 if self.fault == "loud" else 70)
                     self.peer.heard_dbm = dbm
@@ -459,10 +463,20 @@ def main():
         logged = []
     check(any(x.get("who") == "simA" and (x.get("over_power_w") or 0) >= 0.85 for x in logged),
           "hot: the over-power logged in tx_log.jsonl")
-    for fault, word in (("stuck", "on the air for over"), ("swr", "SWR"), ("power", "its pad takes"),
+    why, a, b, _ = run_case("spike")
+    try:
+        logged = [json.loads(l) for l in open(os.path.join(bench.STATE, "tx_log.jsonl"))]
+    except OSError:
+        logged = []
+    check(why is None and any(x.get("one_frame_over_pad_w") == 18.5 for x in logged),
+          f"spike: one TX meter frame over the pad's rating is logged, not stopped ({why or 'passed'})")
+    # power: the pad's rating takes two TX meter frames in a row, so the listener hearing far too much (the first
+    # frame) may stop it first: either way at once
+    for fault, word in (("stuck", "on the air for over"), ("swr", "SWR"), ("power", ("its pad takes", "pads missing")),
                         ("loud", "pads missing")):
         why, a, b, _ = run_case(fault)
-        check(why is not None and word in why, f"{fault}: refused ({why})")
+        words = word if isinstance(word, tuple) else (word,)
+        check(why is not None and any(w in why for w in words), f"{fault}: refused ({why})")
         check(settled(lambda: not a.state["tx"] and any(g == "ft8 stop" for g in a.got)),
               f"{fault}: the sender stopped, off the air")
     # the owner, 2026-11-19 ("won't that damage the radios? don't do that again"): a listener that keys while the
@@ -534,7 +548,7 @@ def main():
         bench.undeclare("image x:")
         gone = not bench.declared("freq", 0, 1000)
     check(gone, "undeclare ends a test's own declarations a refusal left")
-    bench.dial_settled()
+    bench.dial_settled(force=True)
     c0 = bench.changing()
     with bench.transition():
         c1 = bench.changing()
@@ -543,14 +557,32 @@ def main():
     c3 = bench.changing()
     bench.dial_settled()
     c4 = bench.changing()
-    check(not c0 and c1 and not c2 and c3 and not c4, "a transition counts while it runs; a dial set on one radio "
-          "leaves the other DIAL_FOLLOW_S to follow, closed once the two are alike")
+    bench.dial_apart()
+    bench.dial_settled()
+    c5 = bench.changing()
+    check(not c0 and c1 and not c2 and c3 and c4 and not c5, "a transition counts while it runs; a dial set on one "
+          "radio leaves the other DIAL_FOLLOW_S to follow, closed once the two are alike again after the guard saw "
+          "them apart (not while the app asked to open has not tuned yet)")
+    # a bench program run as a child: its transition and declaration count in this process while it runs
+    code = ("import sys, time; sys.path.insert(0, %r); import bench\n"
+            "with bench.apart({'freq': 777}, 'a child test'):\n"
+            "    with bench.transition():\n"
+            "        print('in', flush=True)\n"
+            "        time.sleep(2.5)\n") % os.path.dirname(os.path.abspath(__file__))
+    bench.dial_settled(force=True)
+    child = subprocess.Popen([sys.executable, "-B", "-c", code], stdout=subprocess.PIPE, text=True)
+    child.stdout.readline()
+    ch1, dc1 = bench.changing(), bench.declared("freq", 14200000, 14200777)
+    child.wait(20)
+    ch2, dc2 = bench.changing(), bench.declared("freq", 14200000, 14200777)
+    check(ch1 and dc1 and not ch2 and not dc2, "a child bench program's transition and declaration count in its "
+          f"parent while it runs, not after ({ch1}, {dc1}; {ch2}, {dc2})")
     sa, ha = one_radio(None)
     sb, hb = one_radio(None)
-    bench.dial_settled()
+    bench.dial_settled(force=True)
     ha.send("open 12")
     d1 = bench.changing()
-    bench.dial_settled()
+    bench.dial_settled(force=True)
     ha.send("set pwr 1")
     d2 = bench.changing()
     check(d1 and not d2, "an app opened through Radio.send leaves the other radio DIAL_FOLLOW_S to follow; a power "

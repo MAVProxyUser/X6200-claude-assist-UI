@@ -375,8 +375,8 @@ def state_ready(r):
 # The bench's own commands that may move one radio's dial or mode outside ensure() (an app opening on its own memory:
 # PSK31 on 3.580 MHz, 2026-11-23; an app closing; a raw "set freq"): sent through Radio.send, each leaves the other
 # radio DIAL_FOLLOW_S to follow, as ensure() does. Keys are not among them: a test that moves a dial with a key says so
-DIAL_CMDS = ("open ", "close", "ft8 open", "ft8 close", "js8 open", "js8 close", "wefax open", "wefax close",
-             "set freq", "set mode", "set band", "set vfo")
+DIAL_CMDS = ("open ", "close", "ft8 open", "ft8 close", "ft8 mode", "js8 open", "js8 close", "wefax open",
+             "wefax close", "set freq", "set mode", "set band", "set vfo")
 STEPPED = "stepped"         # a rule: the setting is what the test steps and measures (the reason says how)
 DIAL_FOLLOW_S = 8.0         # a dial or mode set on one radio: the other set within this (one test step), else a
                             # difference
@@ -384,6 +384,89 @@ _sync_lock = threading.RLock()
 _declared = []              # [{"spec": {key: rule}, "reason": str, "at": t}]
 _transitions = 0
 _dial_until = 0.0
+_dial_apart = False         # the radios seen apart since the follow window opened (dial_settled)
+# A bench program run as a child of another (suite.run_child: tones.py --bursts, bench.py radios-walkie) sets the radios
+# in its own process: its transitions, follow window and declarations go to SYNC_DIR/<pid>.json, and the parent's
+# changing() and declared() read them too, so the one framework covers it (orch's guard counted a child's set-ups as
+# violations, air power-loop 2026-11-24). Every bench process owns the directory for its own children
+if not os.environ.get("BENCH_SYNC_DIR"):
+    os.environ["BENCH_SYNC_DIR"] = tempfile.mkdtemp(prefix="bench-sync-")
+    os.environ["BENCH_SYNC_OWNER"] = str(os.getpid())
+SYNC_DIR = os.environ["BENCH_SYNC_DIR"]
+_SYNC_CHILD = os.environ.get("BENCH_SYNC_OWNER") != str(os.getpid())
+_others_cache = {}          # file -> (mtime, doc)
+
+
+def _enc_rule(rule):
+    if isinstance(rule, tuple):
+        return {"pair": list(rule)}
+    if isinstance(rule, list):
+        return {"pairs": [list(x) for x in rule]}
+    return rule
+
+
+def _dec_rule(rule):
+    if isinstance(rule, dict) and "pair" in rule:
+        return tuple(rule["pair"])
+    if isinstance(rule, dict) and "pairs" in rule:
+        return [tuple(x) for x in rule["pairs"]]
+    return rule
+
+
+def _publish():
+    """A child's sync state for its parent (under _sync_lock)"""
+    if not _SYNC_CHILD:
+        return
+    doc = {"pid": os.getpid(), "transitions": _transitions, "dial_until": _dial_until,
+           "declared": [{"spec": {k: _enc_rule(v) for k, v in d["spec"].items()}, "reason": d["reason"]}
+                        for d in _declared]}
+    path = os.path.join(SYNC_DIR, f"{os.getpid()}.json")
+    try:
+        with open(path + ".tmp", "w") as fh:
+            json.dump(doc, fh)
+        os.replace(path + ".tmp", path)
+    except OSError:
+        pass
+
+
+def _unpublish():
+    if _SYNC_CHILD:
+        try:
+            os.remove(os.path.join(SYNC_DIR, f"{os.getpid()}.json"))
+        except OSError:
+            pass
+
+
+import atexit                                       # noqa: E402
+if _SYNC_CHILD:
+    atexit.register(_unpublish)
+else:                                               # the owner: its children's directory gone with it
+    atexit.register(lambda: __import__("shutil").rmtree(SYNC_DIR, ignore_errors=True))
+
+
+def _others():
+    """The sync state of the bench programs this one runs as children (those still alive)"""
+    out = []
+    try:
+        names = [n for n in os.listdir(SYNC_DIR) if n.endswith(".json") and n[:-5] != str(os.getpid())]
+    except OSError:
+        return out
+    for n in names:
+        path = os.path.join(SYNC_DIR, n)
+        try:
+            os.kill(int(n[:-5]), 0)
+            mt = os.stat(path).st_mtime
+            hit = _others_cache.get(path)
+            if not hit or hit[0] != mt:
+                with open(path) as fh:
+                    d = json.load(fh)
+                d["declared"] = [{"spec": {k: _dec_rule(v) for k, v in x["spec"].items()}, "reason": x["reason"]}
+                                 for x in d.get("declared", [])]
+                hit = _others_cache[path] = (mt, d)
+            out.append(hit[1])
+        except (OSError, ValueError, ProcessLookupError):
+            continue
+    return out
 
 
 class apart:
@@ -401,12 +484,14 @@ class apart:
     def __enter__(self):
         with _sync_lock:
             _declared.append(self.d)
+            _publish()
         return self
 
     def __exit__(self, *a):
         with _sync_lock:
             if self.d in _declared:
                 _declared.remove(self.d)
+            _publish()
         return False
 
 
@@ -431,6 +516,7 @@ def declared(key, a, b):
     """The difference a/b of key is one a running test declared (apart)"""
     with _sync_lock:
         specs = [d["spec"] for d in _declared]
+    specs += [d["spec"] for o in _others() for d in o["declared"]]     # a child's (a bench program it runs)
     for spec in specs:
         if key in spec and _rule_ok(spec[key], a, b):
             return True
@@ -443,12 +529,15 @@ def undeclare(reason_prefix):
     """Every declaration whose reason starts with reason_prefix ended (a test's own, left by a refusal)"""
     with _sync_lock:
         _declared[:] = [d for d in _declared if not d["reason"].startswith(reason_prefix)]
+        _publish()
 
 
 def declarations():
     """What is declared apart now: [(spec, reason)] (orch's console says it)"""
     with _sync_lock:
-        return [(dict(d["spec"]), d["reason"]) for d in _declared]
+        own = [(dict(d["spec"]), d["reason"]) for d in _declared]
+    return own + [(dict(d["spec"]), f"{d['reason']} (a child, pid {o['pid']})") for o in _others()
+                  for d in o["declared"]]
 
 
 @contextlib.contextmanager
@@ -457,30 +546,49 @@ def transition():
     global _transitions
     with _sync_lock:
         _transitions += 1
+        _publish()
     try:
         yield
     finally:
         with _sync_lock:
             _transitions -= 1
+            _publish()
 
 
 def changing():
     """A change under way, or a dial set on one radio still within DIAL_FOLLOW_S for the other to follow"""
+    now = time.time()
     with _sync_lock:
-        return _transitions > 0 or time.time() < _dial_until
+        if _transitions > 0 or now < _dial_until:
+            return True
+    return any(o.get("transitions", 0) > 0 or now < o.get("dial_until", 0) for o in _others())   # a child's
 
 
 def _dial_moved():
-    global _dial_until
+    global _dial_until, _dial_apart
     with _sync_lock:
         _dial_until = time.time() + DIAL_FOLLOW_S
+        _dial_apart = False
+        _publish()
 
 
-def dial_settled():
-    """The two radios are alike again: the window for the other to follow closed"""
+def dial_apart():
+    """The radios seen apart within the window (orch's guard): once alike again it may close"""
+    global _dial_apart
+    with _sync_lock:
+        if time.time() < _dial_until:
+            _dial_apart = True
+
+
+def dial_settled(force=False):
+    """The two radios are alike again: the window for the other to follow closed. By the guard only once it has seen
+    them apart within it: an app asked to open has not tuned yet when the two still read alike, and closing then let
+    its tune a moment later count as a violation (air tune-app, 2026-11-24). sync_pair closes it always (force)"""
     global _dial_until
     with _sync_lock:
-        _dial_until = 0.0
+        if force or _dial_apart:
+            _dial_until = 0.0
+            _publish()
 
 
 def sync_pair(radios, want, checks=None):
@@ -507,7 +615,7 @@ def sync_pair(radios, want, checks=None):
     if diff:
         raise Refused("the radios read differently after the set: " + ", ".join(
             f"{k} {'/'.join(str(v) for v in vals)}" for k, vals in diff.items()))
-    dial_settled()
+    dial_settled(force=True)
     return {k: _value(first, k) for k in want}
 
 
@@ -936,11 +1044,12 @@ def put_back(r, snap, keep=(), before=None):
 
 
 def finish(radios, snaps, keep=(), report=None, before=None):
-    """The radios put back (_finish) as one transition: each set in turn, no difference counted meanwhile; a dial
-    moved leaves the other DIAL_FOLLOW_S to follow"""
+    """The radios put back (_finish) as one transition: each set in turn, no difference counted meanwhile; a pair ends
+    alike (the idle radio following), one radio put back leaves the other DIAL_FOLLOW_S to follow"""
     with transition():
         out = _finish(radios, snaps, keep, report, before)
-    _dial_moved()
+    if len(radios) != 2:
+        _dial_moved()               # one radio put back: the other follows; a pair ends alike (sync_pair)
     return out
 
 
@@ -1268,7 +1377,8 @@ def path_proof(c, total, sender, listener, f, report=None, label=None):
            "shots": (watch.shots[-1]["paths"] if watch.shots else {}),
            "shots_on_air": bool(watch.shots and watch.shots[-1]["on_air"]),
            "rise_db": None if quiet is None or loud is None else round(loud - quiet, 1), "frames": [nq, nl],
-           "sender_peak_w": peak, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+           "sender_peak_w": peak, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "tone_hz": hz, "t_on": t_on,
+           "t_off": t_off}
     if report is not None:
         report["path_proof"] = res
     if not nq or not nl:
@@ -1486,6 +1596,7 @@ class Watch:
         # said): its spectrum around the sender's TX frequency never rose DEAF_DB over its quiet from before the over
         # while the sender's meter showed power. Said and kept here; a test treats its run as failed, it does not stop
         self.deaf, self.heard_db, self._ov = [], {}, {}
+        self._pad_frame, self._pad_n, self._pad_said = {}, {}, {}   # TX meter frames over the pad's rating in a row
         self._no_spec_said = False
         self.on = True
         threading.Thread(target=self._run, daemon=True).start()
@@ -1584,11 +1695,24 @@ class Watch:
                               f"{FULL_RATING_KEY_S if (self.w or 0) > HARD_MAX_W else self.c['limits']['max_key_s']:.0f} s")
                 elif since and txm and time.time() - since > 1.0:
                     w, swr = txm[0], txm[1]
+                    pad = self.pad_w.get(r.name, HARD_MAX_W)
+                    # over the pad's rating: two TX meter frames in a row. One is said and logged: the X6100's meter
+                    # sent one 18.5 W frame as a 0.1 W over ended, its listener hearing -86 dBm, 0.1 W's (air comp,
+                    # 2026-11-24); a real overload holds, and the next frame (a tenth of a second) stops it
+                    if self._pad_frame.get(r.name) is not txm:
+                        self._pad_frame[r.name] = txm
+                        self._pad_n[r.name] = self._pad_n.get(r.name, 0) + 1 if w > pad else 0
                     if swr > MAX_SWR:
                         self.trip(f"{r.name}: SWR {swr:.2f} on the air: the chain is not a load")
-                    elif w > self.pad_w.get(r.name, HARD_MAX_W):
-                        self.trip(f"{r.name}: {w:.1f} W on the air, over the {self.pad_w.get(r.name, HARD_MAX_W):g} W "
-                                  f"its pad takes")
+                    elif self._pad_n.get(r.name, 0) >= 2:
+                        self.trip(f"{r.name}: {w:.1f} W on the air, over the {pad:g} W its pad takes (two TX meter "
+                                  f"frames in a row)")
+                    elif w > pad:
+                        if self._pad_said.get(r.name) is not txm:
+                            self._pad_said[r.name] = txm
+                            say(f"{r.name}: one TX meter frame of {w:.1f} W, over the {pad:g} W its pad takes: logged, "
+                                f"stopped if the next says so too")
+                            tx_log({"who": r.name, "one_frame_over_pad_w": w, "asked_w": self.w})
                     elif self.w is not None and w > max(self.w * 2, self.w + 0.5):
                         # the owner, 2026-11-21: "don't kill just log. we have attenuators" (the X6100's factory base
                         # starts a TCI over at 0.9-1.0 W for a 0.1 W setting, and the stop hid what came after it).

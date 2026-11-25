@@ -1576,8 +1576,13 @@ def body_cw_alc(ctx):
     down = [(w, alc) for _, w, _, alc in tx_frames(snd, (o["on"] or o["t0"]) + 0.3, o["off"])
             if w >= 0.05 or alc >= 0.5]
     alc, w = med([a for _, a in down]), med([x for x, _ in down])
-    ok = len(down) >= 5 and alc is not None and 2.0 <= alc <= 10.0 and w is not None and w <= 0.3
-    return ok, (f"{len(down)} key-down TX meter frames: ALC {fmt(alc)} (about 5 wanted), {fmt(w, 2)} W at a 0.1 W "
+    # each base's own: the X6100's ALC brings the carrier down to the power set (2 to 10, the manual's "about 5");
+    # the X6200's reads about 0 from 0.03 to 5 W, whatever the drive (HW_CAP_TX_NO_ALC, hw_x6200.c; 0.0 at 0.1 W in
+    # CW, 2026-11-24), its power held all the same
+    x6200 = str(snd.state.get("fp", "")).startswith("x6200")
+    lo, hi, want = (0.0, 1.0, "about 0 on the X6200") if x6200 else (2.0, 10.0, "about 5")
+    ok = len(down) >= 5 and alc is not None and lo <= alc <= hi and w is not None and w <= 0.3
+    return ok, (f"{len(down)} key-down TX meter frames: ALC {fmt(alc)} ({want} wanted), {fmt(w, 2)} W at a 0.1 W "
                 f"setting ({o['out']})")
 
 
@@ -1760,6 +1765,17 @@ def tune_stops(ctx, T):
                ("split", "set split 1", {"split": 0})]
     said, good = [], True
     listen(ctx, F20, 2)
+    decl = bench.apart({"freq": 1000, "vfo": (1, 0), "split": (1, 0)},
+                       "tune-stops: the sender's dial 1 kHz up, its VFO B and split set under TUNE on purpose, each "
+                       "put back after (the mode: TUNE's own USB-D, declared by its over)")
+    decl.__enter__()
+    try:
+        return _tune_stops(ctx, T, snd, changes, said, good)
+    finally:
+        decl.__exit__(None, None, None)
+
+
+def _tune_stops(ctx, T, snd, changes, said, good):
     for name, cmd, back in changes:
         sender(ctx, F20, 2, FIRST)
         res = {}
@@ -1807,6 +1823,13 @@ def tune_refused(ctx, T):
 def tune_txfreq(ctx, T):
     snd, lis = ctx.snd, ctx.lis
     A, B = F20, F20 + 30000
+    with bench.apart({"freq": 15000, "mode": [(4, 2)], "split": (1, 0), "vfo": (1, 0), "filter": bench.STEPPED},
+                     "tune-txfreq: the sender in split, A in CW and B 30 kHz up, the listener in USB midway, 15 kHz "
+                     "from each (TUNE's own USB-D declared by its over)"):
+        return _tune_txfreq(ctx, T, snd, lis, A, B)
+
+
+def _tune_txfreq(ctx, T, snd, lis, A, B):
     listen(ctx, A + 15000, 2)
     sender(ctx, A, 4, FIRST, apart=TUNE_IGNORE + ("freq",))     # between A and B in USB, on purpose
     vfo_b(ctx, B, 4)
@@ -1827,13 +1850,14 @@ def tune_txfreq(ctx, T):
     pk = res.get("pk")
     rb, ra = res.get("rb") or 0, res.get("ra")
     on_b = rb >= 15 and pk is not None and abs(pk - B) <= 600 and mode == 4 and split == 1
-    # A carrier sent on A would rise there as on B; 30 kHz from a carrier 60 dB up the listener's own skirts or the
-    # sender's noise can lift A (the X6200 at the X6100: 14.8 dB at A, 48 dB under B, 2026-11-23): judged against B,
-    # and a rise of 10 dB or more there is one to look at, not the carrier on A
-    ok = (on_b and (ra is None or ra < 10)) or (None if on_b and rb - ra >= 30 else False)
+    # A carrier sent on A would rise there as much as on B; 30 kHz from a carrier 60 dB up the listener's own skirts
+    # or the sender's noise lift A (the X6200 at the X6100: 14.8-15.9 dB at A, 48-49 dB under B, 11-23 and 11-24; the
+    # X6100 at the X6200: none): judged against B, A 30 dB or more under it is no carrier there, its rise said
+    ok = on_b and (ra is None or ra < 10 or rb - ra >= 30)
     return ok, (f"split, A {A / 1e6:.3f} CW, B {B / 1e6:.3f}: the carrier on B {fmt(res.get('rb'))} dB up (its peak "
-                f"{fmt(pk, 0)} Hz), on A {fmt(ra)} dB" + (f" ({rb - ra:.0f} dB under B: look)"
-                                                         if ok is None else "")
+                f"{fmt(pk, 0)} Hz), on A {fmt(ra)} dB" + (f" ({rb - ra:.0f} dB under B: no carrier there, the "
+                                                         f"skirts 30 kHz from it)" if ra is not None and ra >= 10
+                                                         else "")
                 + f"; after it mode {mode} (CW 4 wanted), split {split}")
 
 
@@ -1978,10 +2002,18 @@ def body_tune_app(ctx):
     ext-tune-restores-state (part: the app and its TX offset): with FT8 open on 14.074 and its TX at 1500 Hz the tone
     on 14.0755 MHz, FT8 still open and at 1500 after; with SSTV open, 1900 Hz from its dial on its sideband"""
     import suite_more
+    from tones import TciRx, peak as audio_peak
     snd, lis = ctx.snd, ctx.lis
     T, L = tune_gate(ctx, TUNE_W_OTHER)
     dial = 14074000
-    prove(ctx, dial)
+    # the listener's audio, the path proof's 1000 Hz tone and then TUNE's in it, both in USB-D on the dial: the two
+    # 500 Hz apart whatever the two radios' references (the X6100 reads the X6200's carriers 150-170 Hz high at
+    # 14 MHz) and the X6200's 750 Hz spectrum bins (its carrier's peak read 404 Hz off, 2026-11-24)
+    tci = TciRx(lis.host)
+    ctx.undo.append(tci.close)
+    proof = prove(ctx, dial)
+    x, _ = tci.audio(proof["t_on"] + 0.8, proof["t_off"] - 0.2)
+    a_proof = audio_peak(x, 1000, 400)[0]
     listen(ctx, dial, 2)
     sender(ctx, dial, 2, FIRST)
     ft8_open(ctx, snd, dial)
@@ -2006,26 +2038,28 @@ def body_tune_app(ctx):
     def during(o):
         time.sleep(2.5)
         res["pk"], res["db"], res["bin"] = spectrum_peak_hz(lis, want, o["on"] + 0.8, time.time(), span=2500)
+        xa, _ = tci.audio(o["on"] + 0.8, time.time())
+        res["audio"] = audio_peak(xa, 1500, 600)[0]
     ctx.banner(f"TUNE IN AN APP: {snd.name.upper()} FT8 OPEN, TX 1500 HZ: TUNE {T} W, {lis.name.upper()} LISTENS")
     o = tune_over(ctx, T, during=during)
     time.sleep(1.0)
-    tol = max(100.0, 1.5 * (res.get("bin") or 0))
-    pk = res.get("pk")
+    pk, ta = res.get("pk"), res.get("audio")
     after = (snd.state.get("app"), int(snd.ft8.get("txf") or 0), int(snd.state.get("freq", 0)))
     up = rise(q, res.get("db"))
     rest = (up or 0) >= 15 and after == (app0, 1500, dial) and heard_ok(o)
-    # within tol: where the app sends; further but within 20 ppm of the dial: the two radios' references apart (the
-    # X6100 read the X6200's carriers 150-170 Hz high at 14 MHz, 2026-11-23), to look at, never the dial's 1500 Hz off
-    ref = 20e-6 * want
-    ok = (pk is not None and rest and abs(pk - want) <= tol) or (
-        None if pk is not None and rest and abs(pk - want) <= tol + ref else False)
+    # TUNE's carrier 500 Hz over the proof's 1000 Hz tone in the listener's audio: at the app's TX offset (1500), not
+    # the dial's nor any other; both from the same sender on the same dial, so the references cancel
+    apart = None if ta is None or a_proof is None else ta - a_proof
+    ok = rest and apart is not None and abs(apart - 500.0) <= 10.0
     why_back = txf_back()               # before the app closes: it takes its offset only while open
     if why_back:
         ok = False
-    ctx.row("tune-app-ft8", ok, f"FT8 open, TX 1500 Hz: the tone at {fmt(pk, 0)} Hz, {fmt(up)} dB up ({want} wanted, "
-                                f"{tol:.0f} Hz at "
-                                f"most off{'; within the references apart: look' if ok is None else ''}); after it the app {after[0]!r} (was {app0!r}), its TX {after[1]} Hz, the "
-                                f"dial {after[2]}" + (f"; {why_back}" if why_back else f"; its offset back to {txf0}"),
+    ctx.row("tune-app-ft8", ok, f"FT8 open, TX 1500 Hz: in {lis.name}'s audio TUNE's carrier at {fmt(ta, 1)} Hz, "
+                                f"the path proof's 1000 Hz tone at {fmt(a_proof, 1)} Hz: {fmt(apart, 1)} Hz apart "
+                                f"(500 wanted, 10 at most off); its spectrum {fmt(up)} dB up at {fmt(pk, 0)} Hz "
+                                f"({want} sent, {fmt(res.get('bin'), 0)} Hz bins); after it the app {after[0]!r} "
+                                f"(was {app0!r}), its TX {after[1]} Hz, the dial {after[2]}"
+                                + (f"; {why_back}" if why_back else f"; its offset back to {txf0}"),
             (), ["ext-tune-app-button", "ext-tune-restores-state"])
     snd.send("ft8 close")
     wait_for(lambda: snd.ft8.get("open") != 1, 5.0)
@@ -2303,6 +2337,8 @@ def t_power_loop(run):
             # the listener's ATT stays off: through 80 dB at 0.1 W the X6100's audio comes at -4 dBFS, the bursts'
             # peaks clipped (tones.py says CLIPPED: said in the result), but with its ATT on its own audio noise
             # hid the tones' onset ("no tone found", 2026-11-23): the noise is after the attenuator
+            # a child (its TCI audio read in a process of its own: in orch's, two bursts' windows slipped, 11-24);
+            # its set-ups count in the one sync framework through bench's SYNC_DIR
             cmd = [sys.executable, "-B", os.path.join(HERE, "tones.py"), s, li, "--bursts", BURSTS, "--tag",
                    "suite-air"] + (["--w", str(POWER_MAX_W)] if x6100 and g >= 4 else [])
             r = run_child(cmd, 420)
@@ -2329,7 +2365,15 @@ def t_power_loop(run):
             refused = next((x.split(" ", 1)[-1] for x in out if "REFUSED" in x or "STOP" in x), "")
             ok = good
             if not good and x6100 and g < 4 and passes and r.returncode == 0:
-                ok, said = None, said + f" (its base {base or 'not read'}: Xiegu's loop, gcfix4/5 hold it)"
+                # the pause-hold is gcfix4/5's: on Xiegu's own base its loop overshoots by design, measured and said
+                ok, said = None, (f"not this base's feature: the pause-hold is gcfix4/5's, this X6100's base is "
+                                  f"{base or 'not read'} (Xiegu's loop, which overshoots by design); measured: " + said)
+            elif not good and not x6100 and passes and r.returncode == 0:
+                # the X6200's base is Xiegu's alone (closed firmware, no gcfix): its loop measured and said, as the
+                # factory X6100's; under 1 W the GUI's level does not move (tx_level.c coarse), so it is the base's
+                # (1.6-1.7 dB over after a pause, 11-23 and 11-24, its peaks clipped in the X6100's audio: more)
+                ok, said = None, ("not this base's feature: the X6200's base is Xiegu's own loop (no gcfix for it), "
+                                  "the GUI's level fixed under 1 W; measured: " + said)
             run.result(BATCH, f"power-loop {s}->{li}", ok, (said or refused or (out[-1] if out else "no output"))
                        + f" (rc {r.returncode})", covers=covers, radio=s)
             oks.append(ok)

@@ -5394,7 +5394,9 @@ TX power while a digital app is open:
 In CW and CW-R the ALC bar of the TX panel and of the S-meter box is grey.
 In CW the base makes the carrier itself and its own ALC brings it down to
 the power set, so the bar only shows how much it turned it down. Readings
-around 5 on a dummy load are normal; there is nothing to adjust.
+around 5 on a dummy load are normal; there is nothing to adjust. The
+X6200's base reads about 0 here, as in every mode from 0.03 to 5 W: its
+reading does not follow, and its power is held at the setting all the same.
 
 
 ### Recording voice messages

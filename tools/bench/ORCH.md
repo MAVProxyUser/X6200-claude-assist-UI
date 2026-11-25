@@ -90,6 +90,13 @@ one framework in `bench.py`:
 - **One reader of it**: `bench.Watch` (as a radio keys, every receiver setting of the other compared: a difference
   not declared stops the over, and a setting a test keeps apart without declaring it is named) and orch's sync guard
   (the dial and the mode, every 0.2 s, never paused) both call `bench.declared()`.
+- **Children too**: a bench program a test runs as a child (`suite.run_child`: tones.py --bursts for power-loop,
+  bench.py radios-walkie for the paths) publishes its transitions, follow window and declarations to
+  `bench.SYNC_DIR/<pid>.json`; the parent's `changing()`, `declared()` and `declarations()` read them, so orch's guard
+  sees a child's set-ups as its own. Every bench process owns the directory for its own children.
+- **The follow window closes only after the guard saw the two apart in it**: an app asked to open has not tuned yet
+  when the two still read alike, and closing the window then let its tune a moment later count as a violation;
+  `sync_pair` closes it outright.
 - **A test ends with the two alike**: tests leave the dial where they ended (the owner, 11-23), so `finish()` ends a
   two-radio test with the idle radio following: the second set to the first's dial and mode by `sync_pair`.
 - **Transitions are not differences**: `ensure()`, `open_page()`, `arm()` and `finish()` (the put-back of both radios

@@ -101,7 +101,7 @@ def unsync_both(run, snaps):
             bench.finish(radios, {r.name: snaps[r.name] for r in radios}, report=rep)
         for n, why in (rep.get("not_restored") or {}).items():
             say(f"{n}: NOT put back after the sync: {why}")
-        bench.dial_settled()
+        bench.dial_settled(force=True)
     except (bench.Refused, OSError) as e:
         say(f"not put back after the sync: {e}")
         for r in radios:

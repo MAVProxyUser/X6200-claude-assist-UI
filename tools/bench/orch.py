@@ -480,8 +480,10 @@ class Orch:
             cur = tuple((x["freq"], x["mode"], x["pg"], x["app"]) for x in (a, b)) + (moving,)
             if not self._trail or self._trail[-1][1:] != cur:
                 self._trail.append((now,) + cur)
-            if not differ and not self.changing:
-                bench.dial_settled()        # alike again: the follow window closed
+            if differ:
+                bench.dial_apart()          # seen apart within the follow window: alike again closes it
+            elif not self.changing:
+                bench.dial_settled()        # alike again (after apart): the follow window closed
             with self.st.lock:
                 self.st.radios = rs
                 self.st.sync["changing"] = moving

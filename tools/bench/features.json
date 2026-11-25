@@ -16646,7 +16646,7 @@
  {
   "id": "alc-cw-grey",
   "area": "system",
-  "feature": "In CW the base sets the power with its own ALC (reads ~5) and the bar is grey",
+  "feature": "In CW the base sets the power with its own ALC (the X6100 reads ~5, the X6200 ~0: its reading does not follow) and the bar is grey",
   "radios": [
    "x6100",
    "x6200"
@@ -18089,7 +18089,7 @@
  {
   "id": "path-tx-power-loop-bursts",
   "area": "path",
-  "feature": "The transmitter's power loop on the first sound after a pause: no overshoot or dip (gcfix vs Xiegu's base)",
+  "feature": "The transmitter's power loop on the first sound after a pause: no overshoot or dip on gcfix4/5; Xiegu's own bases (the factory X6100, the X6200) measured and said, their loops overshoot",
   "radios": [
    "x6100",
    "x6200"
