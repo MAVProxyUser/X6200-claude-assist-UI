@@ -1313,6 +1313,133 @@ def t_cw_noise_shape(o):
         {"kt": kt, "shapes": shapes}
 
 
+WF3D_ACTION = 18            # ACTION_WF_3D (src/params/params.h), the action Settings > Keys names "WF 3D on/off"
+WF3D_KEY = "fst"            # whose hold is lent to it (its own: a step down, nothing that parts the radios)
+WF_MOVING_MIN = 0.05        # the waterfall's half changing this much a second (0-255 mean): not frozen
+WF_3D_APART_MIN = 1.5       # the 3D screen's lower half this far from 2D's: the perspective drawn
+
+
+def gui_cpu(host, secs=3.0):
+    """The GUI's share of one core over secs (/proc's utime + stime, 100 ticks a second), and its pid"""
+    import subprocess
+    out = subprocess.run(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{host}",
+                          f"p=$(pidof x6100_gui); a=$(cut -d' ' -f14,15 /proc/$p/stat); sleep {secs}; "
+                          f"b=$(cut -d' ' -f14,15 /proc/$p/stat); echo $p $a $b"],
+                         capture_output=True, text=True, timeout=secs + 30).stdout.split()
+    if len(out) != 5:
+        raise Refused(f"{host}: the GUI's CPU not read ({' '.join(out)!r})")
+    p, a1, a2, b1, b2 = (int(x) for x in out)
+    return round((b1 + b2 - a1 - a2) / secs, 1), p
+
+
+def shot_stats(paths):
+    """Two screenshots of one radio (landscape PNGs) a second apart: the lower half's (the waterfall's) mean level
+    0-255 in the first and the mean change between them"""
+    from PIL import Image
+    import numpy as np
+    a, b = (np.asarray(Image.open(p).convert("L"), dtype=float) for p in paths)
+    h = a.shape[0]
+    lo_a, lo_b = a[h // 2:], b[h // 2:]
+    return round(float(lo_a.mean()), 1), round(float(np.abs(lo_a - lo_b).mean()), 2)
+
+
+def t_classic_wf3d(o):
+    """The classic screen's waterfall in 3D and in 2D on both radios (upstream's 3D drawing thread, merged 11-23: a look
+    left from the merge), nothing sent: both on 14.200 USB, on the classic screen (F SYSTEM > CLASSIC RADIO), where the 3D waterfall
+    is on by default; two screenshots a second apart in each, the waterfall's half lit and moving, and the GUI's CPU;
+    then 2D (FST's hold lent to "WF 3D on/off" through Settings > Keys' web page, wf_3d read back), the same, and 3D
+    again, the key, the screen and the Sentry put back. PASS when both draw a moving waterfall both ways and their
+    GUIs ran on (the same pid); the CPU said"""
+    import suite_cover_b as cb
+    from bench import screenshots_both
+    rec = {n: {} for n in o.r}
+    kept, sys0 = {}, {}
+
+    def to_classic(n, r):
+        kept[n] = cb.keys_get(cb.ip_of(r))
+        sys0[n] = cb.gstate(r.host).get("s.sys")
+        cb.to_classic(r, r.host)
+        return cb.on_classic(r)
+
+    def look(label):
+        for n, r in o.r.items():
+            rec[n][f"{label}_cpu"], rec[n][f"{label}_pid"] = gui_cpu(r.host)
+        a = screenshots_both(list(o.r.values()), f"classic {label} a")
+        time.sleep(1.0)
+        b = screenshots_both(list(o.r.values()), f"classic {label} b")
+        for n in o.r:
+            if not a.get(n) or not b.get(n):
+                raise Refused(f"{n}: no screenshot of the classic screen in {label}")
+            rec[n][f"{label}_level"], rec[n][f"{label}_moving"] = shot_stats([a[n], b[n]])
+            rec[n][f"{label}_shots"] = [a[n], b[n]]
+        return "; ".join(f"{n}: the waterfall's half at {rec[n][label + '_level']} of 255, changing "
+                         f"{rec[n][label + '_moving']} a second, the GUI {rec[n][label + '_cpu']} % of a core"
+                         for n in o.r)
+
+    def toggle(n, r, want):
+        ip = cb.ip_of(r)
+        cb.keys_set(ip, f"hold_{WF3D_KEY}", WF3D_ACTION)
+        cb.chold(r, WF3D_KEY.upper())
+        got = cb.pwait(r.host, "wf_3d", lambda v: v == str(want), secs=6.0, default="1")
+        if got != str(want):
+            raise Refused(f"{n}: wf_3d read {got} after FST's hold, {want} wanted")
+        return got
+
+    try:
+        with o.step("both on the classic screen (F SYSTEM > CLASSIC RADIO), the 3D waterfall on (its default)") as s:
+            got = in_parallel(o, to_classic, wait=40)
+            if not all(got.values()):
+                raise Refused(f"not on the classic screen: {got}")
+            # USB, set there: in CW the decoder's panel lies over the waterfall (a run after cw-quiet showed only the
+            # panel), and set before, the Sentry's page F brought its own dial back (14.040 CW)
+            want, checks = bench.rx_profile(14200000, 2, pre=0, att=0, rfg=100, agc=3, sql=0)
+            o.both(want, checks)
+            w = {n: cb.params(r.host, ["wf_3d"]).get("wf_3d", "1") for n, r in o.r.items()}
+            if any(v != "1" for v in w.values()):
+                raise Refused(f"wf_3d not on as found: {w}")
+            time.sleep(2.0)
+            s.confirm(f"wf_3d {w}")
+        with o.step("3D: each waterfall lit and moving, the GUI's CPU") as s:
+            s.confirm(look("3d"))
+        with o.step("2D: FST's hold lent to WF 3D on/off, held: wf_3d 0, each waterfall lit and moving") as s:
+            in_parallel(o, lambda n, r: toggle(n, r, 0), wait=40)
+            time.sleep(2.0)
+            s.confirm(look("2d"))
+        with o.step("3D again (FST held once more: wf_3d 1)") as s:
+            in_parallel(o, lambda n, r: toggle(n, r, 1), wait=40)
+            s.confirm("wf_3d 1 on both")
+    except Refused as e:
+        return False, str(e), rec
+    finally:
+        with o.step("FST's hold, F SYSTEM's choice and the Sentry as found"):
+            def back(n, r):
+                if n in kept:
+                    cb.keys_put_back(cb.ip_of(r), kept[n])
+                if n in sys0:
+                    cb.sys_back(r, r.host, sys0[n])
+                bench.open_page(r, "A")
+            in_parallel(o, back, wait=60)
+    # Judged: moving = any change in a second (a frozen one, or one under a panel, changes 0.0: the CW decoder's panel
+    # over it read 0.0 on both, 2026-11-25; the X6100's waterfall of the quiet cable is near black and changes 0.15-0.5);
+    # 3D drawn = its screen apart from 2D's (the perspective and its grid: 3.1 on the X6100, 10.7 on the X6200)
+    from PIL import Image
+    import numpy as np
+    for n in o.r:
+        a, b = (np.asarray(Image.open(rec[n][f"{m}_shots"][0]).convert("L"), dtype=float) for m in ("3d", "2d"))
+        rec[n]["3d_vs_2d"] = round(float(np.abs(a[a.shape[0] // 2:] - b[b.shape[0] // 2:]).mean()), 2)
+    bad = [f"{n} {m} still" for n in o.r for m in ("3d", "2d") if rec[n].get(f"{m}_moving", 0) < WF_MOVING_MIN]
+    bad += [f"{n}: 3D as 2D" for n in o.r if rec[n]["3d_vs_2d"] < WF_3D_APART_MIN]
+    crashed = [n for n in o.r if len({rec[n].get(k) for k in ("3d_pid", "2d_pid")}) != 1]
+    says = "; ".join(f"{n}: 3D {rec[n]['3d_cpu']} % of a core (changing {rec[n]['3d_moving']} a second), 2D "
+                     f"{rec[n]['2d_cpu']} % ({rec[n]['2d_moving']}), 3D apart from 2D by {rec[n]['3d_vs_2d']}"
+                     for n in o.r)
+    if crashed:
+        return False, f"the GUI started again during the look on {crashed}: {says}", rec
+    if bad:
+        return False, f"{bad}: {says}", rec
+    return True, f"the classic screen's waterfall drawn and moving in 3D and 2D on both: {says}", rec
+
+
 POWER_STEPS = [0.2, 0.5, 1.0]       # W: the listener's level must rise 10*log10 of each ratio. Not from 0.1 W: the
 # X6200 holds a TCI over's power by its own meter (its ALC reads 0, tx_level.c power_hold), which reads 0.1 W steps,
 # so 0.1 W counts as reached from about 0.05 W (2026-11-23: its 0.1 W 4 dB under its 1 W's -10 dB, four runs in five)
@@ -5547,6 +5674,9 @@ TESTS = [
     Test("cw-quiet", "both RX", "CW 14.040, nothing sent: both from USB-D to CW three times and a stay in CW, 12 s of "
          "the cable's quiet each: neither decoder prints a character (their audio kept for tools/cw_replay)",
          t_cw_quiet, 120),
+    Test("classic-wf3d", "both RX", "the classic screen's waterfall in 3D (upstream's drawing thread) and 2D on both: "
+         "lit and moving in each, the GUI's CPU said, the GUI still the same process; the screen and keys put back",
+         t_classic_wf3d, 90),
     Test("cw-quiet wide", "both RX", "cw-quiet through a wide CW filter, 100-1300 Hz (the X6200's resonance taken out "
          "down to 150 Hz, the X6100's noise rising under 300 Hz): neither decoder prints a character",
          lambda o: t_cw_quiet(o, (100, 1300)), 120),

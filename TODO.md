@@ -33,8 +33,9 @@ Open, mine to do:
   word to tag).
 - **The upstream merge's look on the radios** (11-23): CHECKED 2026-11-24 (receive only): WeFax on both alike in the
   Sentry's amber, its All Charts tiles and page 4's "Night Auto (on)" at night; the WiFi held through both GUIs'
-  restarts; Speech off by default (no voice_mode stored on either). Left: the classic screen's 3D waterfall on
-  upstream's thread; the USER page had no labels for upstream's 200+ apps (DONE 2026-11-25: named as their APP
+  restarts; Speech off by default (no voice_mode stored on either). The classic screen's 3D waterfall on
+  upstream's thread: CHECKED 2026-11-25 (orch classic-wf3d, receive only: drawn and moving in 3D and 2D on both, the
+  GUI 28 % / 25 % of a core on the X6100 in 3D / 2D, 19 % / 12 % on the X6200, the same process throughout); the USER page had no labels for upstream's 200+ apps (DONE 2026-11-25: named as their APP
   pages name them, tools/user_keys checks every action Settings > Keys offers).
 - Both radios' CW decoders lose the dits of the first characters ('VVV' prints 'TTT'): DONE 2026-11-25 (below).
 
