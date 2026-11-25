@@ -1195,17 +1195,19 @@ CW_QUIET_S = 12.0           # then CW's quiet, as cw-carrier's after its path pr
 CW_QUIET_FILTER = (300, 1100)   # air_b's CW filter (CW_FILTER there): through it the X6200 printed its noise
 
 
-def t_cw_quiet(o):
+def t_cw_quiet(o, filt=CW_QUIET_FILTER):
     """Both radios' CW decoders in the cable's quiet, nothing sent by anyone: each round both in USB-D on F_CW for
     CW_QUIET_USB_S, then both in CW (air_b's listener: the 300-1100 Hz filter, AGC slow) for CW_QUIET_S, and once more
-    in CW without the switch. PASS when neither decoder printed a character. Both radios' TCI audio is kept from before
+    in CW without the switch (filt: CW's filter, air_b's by default; "cw-quiet wide" 100-1300 Hz, the X6200's resonance
+    model 5 dB under its noise at 150 Hz and the X6100's noise 9-15 dB up under 300 Hz, cw-noise-shape). PASS when
+    neither decoder printed a character. Both radios' TCI audio is kept from before
     the first switch, the switches' times in the result (tools/cw_replay replays it through the decoder): 2026-11-25
     the X6200 printed noise in cw-carrier's 12 s quiet after the path proof's USB-D, which the quiet's audio alone,
     replayed from cold, did not"""
     from tones import TciRx
     # the squelch open (the base's: held closed it would give the decoders silence); ready() holds it again after
     want_u, checks = bench.rx_profile(F_CW, 3, pre=0, att=0, rfg=100, agc=2, sql=0)
-    want_c, _ = bench.rx_profile(F_CW, 4, pre=0, att=0, rfg=100, agc=2, sql=0, filt=CW_QUIET_FILTER)
+    want_c, _ = bench.rx_profile(F_CW, 4, pre=0, att=0, rfg=100, agc=2, sql=0, filt=filt)
     with o.step(f"both on page G, {F_CW / 1e6:.3f} MHz USB-D, the receiver alike"):
         o.both_page("G")
         o.both(dict(want_u, zoom=8), checks)
@@ -1219,8 +1221,7 @@ def t_cw_quiet(o):
                     if k:
                         o.both(want_u, checks)
                     time.sleep(CW_QUIET_USB_S)
-            what = ("both stay in CW" if stay else f"round {k + 1}: both to CW (filter {CW_QUIET_FILTER[0]}-"
-                    f"{CW_QUIET_FILTER[1]} Hz, AGC slow)")
+            what = ("both stay in CW" if stay else f"round {k + 1}: both to CW (filter {filt[0]}-{filt[1]} Hz, AGC slow)")
             with o.step(f"{what}, {CW_QUIET_S:.0f} s of quiet: neither decoder prints a character") as s:
                 for r in o.r.values():
                     r.cw = ""
@@ -1236,15 +1237,15 @@ def t_cw_quiet(o):
     finally:
         for n, c in rec.items():
             try:
-                got[f"wav_{n}"] = save_wav(o, c.audio(t_rec, time.time())[0], f"cw_quiet_{n}.wav")
+                got[f"wav_{n}"] = save_wav(o, c.audio(t_rec, time.time())[0], f"cw_quiet_{filt[0]}_{filt[1]}_{n}.wav")
             finally:
                 c.close()
     noisy = [(i, n, v) for i, said in enumerate(got["printed"]) for n, v in said.items() if v]
     words = "; ".join(f"{'stay' if i == CW_QUIET_ROUNDS else f'round {i + 1}'} {n} {v!r}" for i, n, v in noisy)
     if noisy:
         return False, f"decoders printed in the quiet: {words} (switches at {got['switch_s']} s of the recordings)", got
-    return True, (f"{CW_QUIET_ROUNDS} switches from USB-D to CW and a stay in CW, {CW_QUIET_S:.0f} s of quiet each: "
-                  f"neither decoder printed a character"), got
+    return True, (f"{CW_QUIET_ROUNDS} switches from USB-D to CW and a stay in CW through {filt[0]}-{filt[1]} Hz, "
+                  f"{CW_QUIET_S:.0f} s of quiet each: neither decoder printed a character"), got
 
 
 CW_SHAPE_FILTERS = [(300, 1100), (500, 900), (600, 800), (200, 1200), (100, 1300)]   # centred on the 700 Hz key tone (CW's filters are)
@@ -5546,6 +5547,9 @@ TESTS = [
     Test("cw-quiet", "both RX", "CW 14.040, nothing sent: both from USB-D to CW three times and a stay in CW, 12 s of "
          "the cable's quiet each: neither decoder prints a character (their audio kept for tools/cw_replay)",
          t_cw_quiet, 120),
+    Test("cw-quiet wide", "both RX", "cw-quiet through a wide CW filter, 100-1300 Hz (the X6200's resonance taken out "
+         "down to 150 Hz, the X6100's noise rising under 300 Hz): neither decoder prints a character",
+         lambda o: t_cw_quiet(o, (100, 1300)), 120),
     Test("cw-noise-shape", "both RX", "CW 14.040, nothing sent: the receive noise's shape through five CW filters and CW-R on both "
          "(over the band's 25th percentile, the decoder's floor): measured, said", t_cw_noise_shape, 70),
     *pair("power-steps", "", "USB 14.200: a tone at 0.2, 0.5, 1.0 W; the other's level must rise 4.0 and 3.0 dB (2 dB)",
