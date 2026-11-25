@@ -4363,7 +4363,8 @@ SPUR_HZ = 156.25            # 25 FT8 tone steps: the X6100's FT8 app decoded the
 SPUR_MAX_DBC = -30          # a component near the tone above this is a fault (an FT8 decode of it lands 156 Hz off)
 
 
-def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.3), (0, 0.3), (3, 0.9))):
+def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.3), (0, 0.3), (3, 0.9)),
+              judge=True):
     """What else comes with a clean tone near it: the sender's TCI tone at `tone` Hz in USB-D at 0.1 W on the FT8
     dial, the listener's TCI audio recorded with its AGC on (3, as the FT8 tests listen) and off (0); the components
     SPUR_HZ either side of the tone and the strongest one within 400 Hz (not within 20 Hz of the tone), in dB under it,
@@ -4472,9 +4473,63 @@ def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.
     said = "; ".join(f"AGC {r['agc']} amplitude {r['amp']}: -{SPUR_HZ} Hz {r['below_dbc']}, +{SPUR_HZ} Hz {r['above_dbc']} dBc (the "
                      f"strongest within 400 Hz {r['worst_dbc']} dBc at {r['worst_off_hz']:+.1f} Hz)" for r in rows)
     bad = [r for r in rows if max(r["below_dbc"], r["above_dbc"]) > SPUR_MAX_DBC]
+    if not judge:
+        skirt = "; ".join(f"{r['amp']}: {max(r['skirt_100_dbc'])}" for r in rows)
+        return None, (f"{sender}'s {tone} Hz tone in {listener}'s audio, the skirt 100-155 Hz off per 55 Hz (dBc, the "
+                      f"higher side) at each amplitude in turn: {skirt}: said, not judged"), {"rows": rows}
     return not bad, (f"{sender}'s {tone} Hz tone in {listener}'s audio: {said}"
                      + (f"; a component {SPUR_HZ} Hz off over {SPUR_MAX_DBC} dBc" if bad else
                         f"; none {SPUR_HZ} Hz off over {SPUR_MAX_DBC} dBc")), {"rows": rows}
+
+
+def ft8_tci_copy_test(o, sender, listener, hz=1500):
+    """The FT8 app's copies 156 Hz either side, the same message sent through TCI instead (gen_ft8 here, 24 kHz, the
+    sender's TCI): whether the X6200's skirt is the waveform through its base (here too) or the app's way out (not
+    here: its TCI tone has none, 2026-11-25). Said, not judged"""
+    import subprocess
+    import digimodes
+    import suite_air_b as ab
+    from tones import TciRx
+    S, L = o.r[sender], o.r[listener]
+    os.makedirs(o.st.run_dir, exist_ok=True)
+    x24 = ab.gen_ft8_24k(o.c, "CQ Q2TST FN00", hz, o.st.run_dir)
+    local = os.path.join(o.st.run_dir, f"ft8_tci_{sender}.raw")
+    secs = digimodes.write_raw(0.8 * x24 / max(1e-9, float(abs(x24).max())), local)
+    run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", local, f"root@{S.host}:/tmp/bench_ft8.raw"])
+    run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_tone_tx.py"),
+            f"root@{S.host}:/tmp/tci_tone_tx.py"])
+    tci = TciRx(L.host)
+    res = {}
+
+    def body(watch):
+        with o.step(f"{sender} sends the FT8 message ({secs:.1f} s) through its TCI, {listener} records") as st_:
+            t0 = time.time()
+            proc = subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
+                                     f"python3 /tmp/tci_tone_tx.py '@/tmp/bench_ft8.raw' 0.3 {secs + 2:.1f} 50001 "
+                                     f"0.05"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            while proc.poll() is None:
+                if watch.why:
+                    bench.stop_bench_programs(S)
+                    raise Refused(watch.why)
+                time.sleep(0.05)
+            time.sleep(1.0)
+            res["x"] = tci.audio(t0, time.time())[0]
+            st_.confirm(f"{len(res['x']) / 24000:.1f} s of audio")
+    try:
+        over(o, sender, listener, ab.FT_DIAL["FT8"], 3, f"FT8 over TCI {sender}", body, agc=3)
+    except Refused as e:
+        return False, str(e), {}
+    finally:
+        tci.close()
+        subprocess.run(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}", "rm -f /tmp/bench_ft8.raw"],
+                       capture_output=True, timeout=20)
+    c = ab.ft8_copies(res.get("x"), hz)
+    if c is None:
+        return False, "no audio", {}
+    c["wav"] = save_wav(o, res["x"], f"ft8_tci_{sender}_to_{listener}.wav")
+    return None, (f"{sender}'s FT8 message through its TCI in {listener}'s audio at {c['hz']} Hz: {SPUR_HZ} Hz below "
+                  f"{c['below_dbc']} dBc, above {c['above_dbc']} dBc, 400 Hz above (noise) {c['noise_dbc']} dBc: said, "
+                  f"not judged"), c
 
 
 def save_wav(o, x, name):
@@ -5237,6 +5292,11 @@ TESTS = [
     Test("spurs x6200", "X6200 TX, X6100 RX", "what comes with the X6200's clean 1500 Hz tone in the X6100's audio "
          "(USB-D, the FT8 dial), the X6100's AGC on and off, the tone at 0.3 and 0.9 of full scale: nothing 156.25 Hz either side over -30 dBc (the X6100's "
          "FT8 app decoded the X6200's answers 156 Hz off, 11-23 to 11-25)", lambda o: spur_test(o, B, A), 90),
+    Test("skirt x6200 levels", "X6200 TX, X6100 RX", "the X6200's skirt at 0.1 W against its TCI audio's level: a tone at 0.1 "
+         "to 0.95 of full scale up, then down again (a level its TCI learns over the overs told from the level itself), "
+         "the power 100-155 Hz off it per 55 Hz: said, not judged (11-25: -31 dBc at 0.3, -55 at 0.9)",
+         lambda o: spur_test(o, B, A, runs=tuple((3, a) for a in (0.1, 0.2, 0.4, 0.6, 0.8, 0.95, 0.8, 0.6, 0.4, 0.2,
+                                                                  0.1)), judge=False), 240),
     Test("spurs x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's tone in the X6200's audio",
          lambda o: spur_test(o, A, B), 90),
     Test("ft8-copies x6200", "X6200 TX, X6100 RX", "the X6200's FT8 app's CQs from TX Hz 1325 (no VFO move), 1500 and "
@@ -5246,6 +5306,9 @@ TESTS = [
     Test("ft8-copies x6200 1w", "X6200 TX at 1 W, X6100 RX", "the X6200's FT8 CQ from 1500 Hz at 1 W: nothing 156.25 Hz "
          "either side over -30 dBc (-44 on 11-25, against -25 at 0.1 W)", lambda o: ft8_copy_test(o, B, A, (1500,), 1.0),
          90),
+    Test("ft8-copies x6200 tci", "X6200 TX, X6100 RX", "the same FT8 message through the X6200's TCI (made here): whether "
+         "its skirt is the FT8 waveform through its base or the app's way out (said)",
+         lambda o: ft8_tci_copy_test(o, B, A), 90),
     Test("ft8-copies x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's FT8 app's CQs in the X6200's "
          "audio", lambda o: ft8_copy_test(o, A, B), 150),
     Test("cw-timing x6100", "X6100 TX, X6200 RX", "the X6100's CW keyer as it reaches the air: PARIS x4 at 20 WPM through "
