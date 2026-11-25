@@ -5348,6 +5348,12 @@ WeFax) set their audio level by themselves.
   0.1 W steps and wobbles, and taken one by one it let the level creep up a
   little each transmission where the power reads around or under the
   setting.
+- Under 1 W on the X6200 the level is held as it is, as for TCI audio: the
+  meter reads whole tenths of a watt and, for a second or more after the
+  key, high (0.3 W at a 0.1 W setting). Only a reading well over the setting
+  (by 0.4 W more than the usual margin) brings it down. Up to v0.3.12.48
+  those first readings cut the drive 0.75 dB every half second of a 0.1 W
+  transmission, and the cut was kept for the next.
 - The level never goes so high that the audio would be clipped. Up to
   v0.3.8 the X6200's could climb there over many transmissions (seen:
   33.4 dB, the audio a square wave 14 dB over the default); since then every

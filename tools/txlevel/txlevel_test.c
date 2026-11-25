@@ -669,6 +669,18 @@ int main(int argc, char **argv) {
     check(r.level_end >= 3.0f && r.level_end <= 4.5f && r.short_txs <= 1, "%s: the level %.1f dB, %d short",
           needy_reach.name, r.level_end, r.short_txs);
 
+    /* The apps under 1 W on the X6200 (2026-11-25), as TCI's (below): its meter in 0.1 W steps reads high for a second
+     * or more after the key. Taken as over the setting they cut the drive 0.75 dB a window as the over went (a step
+     * in the audio every half second) and kept the cut for the next: from 0.1 W to well under it in a few overs. Under
+     * 1 W the drive holds (tx_level coarse); only a reading well over the setting cuts it */
+    static const scenario_t apps01 = {.name = "FT8 at 0.1 W, readings +-0.1 W 2.5 a second, the meter 0.4 W high after "
+                                      "the key", .pwr = 0.1f, .knee_db = -6.0f, .noise_w = 0.1f, .txs = 20,
+                                      .read_every = 8, .early_w = 0.4f, .early_s = 2.5f};
+    r = run(&apps01, verbose);
+    check(fabsf(r.level_end) < 0.05f && fabsf(r.level_top) < 0.05f && fabsf(r.drive_top) < 0.05f,
+          "%s: the level %.2f dB after %d overs (at most %.2f), the drive at most %.2f dB", apps01.name, r.level_end,
+          apps01.txs, r.level_top, r.drive_top);
+
     /* An X6100's ALC follows the drive: the level settles where it reads about 1 */
     static const scenario_t x6100 = {.name = "an X6100 (its ALC 0.6 a dB over the knee), 5 W", .pwr = 5.0f,
                                      .knee_db = -6.0f, .start_db = -8.0f, .txs = 10, .alc_db = 0.6f};

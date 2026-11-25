@@ -208,6 +208,11 @@ bool tx_player_stream(tx_fill_fn_t fill, void *fill_ctx, int32_t offset_hz, floa
 
     tx_level_start(&level, pwr_w);
     level.power_hold = radio_caps() & HW_CAP_TX_NO_ALC;
+    /* Under 1 W the X6200's meter cannot hold the power (tx_level.h TX_LEVEL_COARSE_W): as TCI's (tx_hold.c), the drive
+     * holds and only a reading well over the setting cuts it. Before (2026-11-25), the meter's high readings after
+     * the key cut it 0.75 dB a window as the over went, a step in the audio every half second, and the cut was kept
+     * for the next over */
+    level.coarse = level.power_hold && pwr_w < TX_LEVEL_COARSE_W;
     tx_info_refresh(&reading, NULL, NULL, NULL);    /* what came before this TX is not ours */
 
     /* Baseband r13 at 5 W (2026-10-12): the power holds at the setting from 0 dB down to -36 dB of
