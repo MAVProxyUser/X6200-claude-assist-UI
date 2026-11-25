@@ -384,6 +384,7 @@ typedef struct {
 static void set_vfo(void *arg) {
     if (!arg) {
         LV_LOG_ERROR("arg is NULL");
+        return;     /* not read through after all (clang's analyzer, 2026-11-25) */
     }
     radio_vfo_t vfo = *(radio_vfo_t *)arg;
     cfg_sm.p_band_current_vfo.set(vfo);
