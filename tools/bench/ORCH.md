@@ -35,6 +35,11 @@ pads) are tested. It holds both radios, runs every test on them as a pair, and s
     python3 orch.py coverage             # features.json against every test's latest result, orch's and the suite's
     python3 facilitate.py                # FACILITATE.md: what still waits on the owner, in sessions
 
+One run at a time, whichever session starts it: `run` takes `~/.config/x6x00-bench/orch_run.lock` (created with
+O_EXCL, its pid in it) and waits while another live run holds it; it also waits while a GUI install holds
+`gui_install.lock` or a `tools/cross_x6200/install.sh` runs (another session's install replaced both GUIs mid-run,
+2026-11-25). An install takes `gui_install.lock` (its pid) after no run is going and drops it after both radios.
+
 `run` options: `--port 8765`, `--lan` (the console on the network as well), `--linger S` (how long a run's own console
 stays up after it; 0 with the standing console), `--sql N` (the squelch held, default 0), `--squelch-cal`.
 

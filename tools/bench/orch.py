@@ -6279,7 +6279,81 @@ TESTS += _oc.tests(Test, A, B)
 ORCH_COVERS.update(_oc.COVERS)
 
 
+
+# Other sessions put new GUIs on the radios (tools/cross_x6200/install.sh): one replaced both mid-run on 2026-11-25
+# (15:43, its "no run going" check a moment before this run began). Who installs holds GUI_LOCK for the time it does
+# (its pid in it) and waits while a run goes; a run waits while the lock is held by a live process
+GUI_LOCK = os.path.join(bench.STATE, "gui_install.lock")
+
+
+def gui_lock_wait(limit_s=1800):
+    import subprocess
+    t0 = time.time()
+    while True:
+        try:
+            pid = int(open(GUI_LOCK).read().split()[0])
+            os.kill(pid, 0)                     # alive: an install under way elsewhere
+        except (OSError, ValueError, IndexError):
+            pid = None
+        if pid is None:                         # and no install.sh going without the lock
+            r = subprocess.run(["pgrep", "-f", "cross_x6200/install.sh"], capture_output=True, text=True)
+            pid = int(r.stdout.split()[0]) if r.stdout.split() else None
+            if pid is None:
+                return
+        if time.time() - t0 > limit_s:
+            raise SystemExit(f"{GUI_LOCK} held by {pid} for {limit_s} s: no run")
+        if int(time.time() - t0) % 60 < 5:
+            say(f"a GUI install under way (pid {pid}, {GUI_LOCK}): the run waits")
+        time.sleep(5)
+
+
+# One run at a time on the two radios, whichever session starts it (2026-11-25: runs of three sessions overlapped,
+# two controllers on the radios, one on the air while the other had it listening). RUN_LOCK made with O_EXCL holds the
+# run's pid; a run waits while it names a live process, takes it over from a dead one
+RUN_LOCK = os.path.join(bench.STATE, "orch_run.lock")
+
+
+def run_lock_take(limit_s=3600):
+    import atexit
+    t0, said = time.time(), 0.0
+    while True:
+        try:
+            fd = os.open(RUN_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            os.write(fd, f"{os.getpid()} {time.strftime('%H:%M:%S')} {' '.join(sys.argv[1:])}\n".encode())
+            os.close(fd)
+            atexit.register(lambda: _run_lock_drop())
+            return
+        except FileExistsError:
+            pass
+        try:
+            held = open(RUN_LOCK).read().strip()
+            pid = int(held.split()[0])
+            os.kill(pid, 0)
+        except (OSError, ValueError, IndexError):
+            try:                                # its run is gone: the lock is stale
+                os.remove(RUN_LOCK)
+            except OSError:
+                pass
+            continue
+        if time.time() - t0 > limit_s:
+            raise SystemExit(f"another orch run holds the radios for {limit_s} s ({held}): no run")
+        if time.time() - said > 60:
+            say(f"another orch run holds the radios ({held}): this one waits")
+            said = time.time()
+        time.sleep(5)
+
+
+def _run_lock_drop():
+    try:
+        if open(RUN_LOCK).read().split()[0] == str(os.getpid()):
+            os.remove(RUN_LOCK)
+    except (OSError, IndexError):
+        pass
+
+
 def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, sql=None):
+    run_lock_take()
+    gui_lock_wait()
     kept = store_load()
     if names:
         tests = [t for t in TESTS if t.name in names or t.name.split(" ")[0] in names]
