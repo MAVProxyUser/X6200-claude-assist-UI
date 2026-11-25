@@ -389,8 +389,11 @@ static void set_vfo(void *arg) {
     cfg_sm.p_band_current_vfo.set(vfo);
 }
 
-static radio_mode_t ci_mode_2_x_mode(uint8_t mode, bool data_mode=false) {
-    radio_mode_t r_mode;
+/* -1 for a mode of another Icom this radio has none of (RTTY 04, RTTY-R 08, PSK 12, DV 17...): refused (NG), the mode
+ * left as it is. Up to v0.3.12.48 r_mode was left unset there and the radio went to whatever it held, clamped into its
+ * modes (found by a -Wall build, 2026-11-25) */
+static int ci_mode_2_x_mode(uint8_t mode, bool data_mode=false) {
+    int r_mode = -1;
 
     switch (mode) {
         case M_LSB:
@@ -643,7 +646,7 @@ static Frame *process_req(const Frame *req) {
             break;
 
         case C_SET_MODE:
-            if ((data_size >= 1) && (data_size <= 2)) {
+            if ((data_size >= 1) && (data_size <= 2) && ci_mode_2_x_mode(req->data[0]) >= 0) {
                 cfg_sm.cp_cur_mode.set(ci_mode_2_x_mode(req->data[0]));
                 if (data_size == 2) {
                     // filter selector -> req->data[1]
@@ -1061,7 +1064,7 @@ static Frame *process_req(const Frame *req) {
         case C_SEND_SEL_MODE:
             {
                 uint8_t v;
-                radio_mode_t new_mode;
+                int new_mode;
                 bool data_mode = false;
                 Parameter<int32_t> *mode_par;
 
@@ -1095,6 +1098,10 @@ static Frame *process_req(const Frame *req) {
                     case 2:
                         // Write command
                         new_mode = ci_mode_2_x_mode(req->data[1], data_mode);
+                        if (new_mode < 0) {
+                            set_unsupported(req, resp);
+                            break;
+                        }
                         mode_par->set(new_mode);
                         resp->set_code(CODE_OK);
                         break;

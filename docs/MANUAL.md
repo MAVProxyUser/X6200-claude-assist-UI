@@ -12934,7 +12934,7 @@ of QSOs not on the page stay as they are.
 | `03` | - | Read frequency | yes | - |
 | `04` | - | Read mode | yes | - |
 | `05` | - | Set frequency (5 BCD bytes) | - | yes |
-| `06` | - | Set mode (`00` LSB, `01` USB, `02` AM, `03` CW, `05` NFM, `07` CW-R) | - | yes |
+| `06` | - | Set mode (`00` LSB, `01` USB, `02` AM, `03` CW, `05` NFM, `07` CW-R, `06` WFM: NFM on the X6100). Another Icom's mode this radio has none of (`04` RTTY, `08` RTTY-R, `17` DV...) is refused (`FA`) and the mode stays; up to v0.3.12.48 it put the radio in some other mode (AM on the bench) | - | yes |
 | `07` | - / `00` / `01` / `A0` / `B0` | VFO: read current, VFO A, VFO B, A=B, swap A/B; `07 00` / `07 01` also sent automatically when the VFO changes (transceive) | yes | yes |
 | `0F` | - | Split off/on | yes | yes |
 | `10` | - | Tuning step (`00` 10 Hz, `01` 100 Hz, `02` 500 Hz, `03` 1 kHz, `04` 5 kHz; the 10, 25 and 100 kHz steps are read as `04`) | yes | yes |
@@ -12959,7 +12959,7 @@ of QSOs not on the page stay as they are.
 | `1A` | `06` | Data mode + filter; write only adds or drops the data mode (USB ↔ USB-D, LSB ↔ LSB-D) | yes | yes |
 | `1C` | `00` | PTT (`00` RX, `01` TX); a TX the radio refuses (outside the [amateur bands](#amateur-bands-only) or the TX ranges, receive only, [no data from the base](#no-tx-without-data-from-the-base)) answers NG (`FA`) | yes | yes |
 | `25` | `00` / `01` | Frequency of selected / unselected VFO | yes | yes |
-| `26` | `00` / `01` | Mode + data mode of selected / unselected VFO | yes | yes |
+| `26` | `00` / `01` | Mode + data mode of selected / unselected VFO (a mode this radio has none of refused, as with `06`) | yes | yes |
 | `27` | `10` / `11` | Scope on (always) / wave data output: accepted, a stub | yes | yes |
 | `27` | `14` / `15` | Scope centre mode (always centre) / span (follows the waterfall zoom, write sets the zoom) | yes | yes |
 | `27` | `19` | Scope reference level (stub) | yes | - |
