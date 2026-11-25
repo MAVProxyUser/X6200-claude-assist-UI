@@ -7831,7 +7831,7 @@ the start and the last call.
   the activation): press, speak, Stop rec (60 s at most). It records from the
   hand mic only (see [recording voice messages](#recording-voice-messages)). It is `CQ SOTA` /
   `CQ POTA` in `/mnt/msg`, so MSG > Voice lists it too. CQ again while it is
-  on air stops it.
+  on air stops it, in CW as in SSB ("CQ stopped").
 - Log QSO: type `CALL`, or `CALL rst_sent rst_rcvd`, the report you sent
   first, as in the main screen's [quick QSO log](#quick-qso-log) (default 599
   in CW, 59 otherwise): `F4ABC 59 57` is 59 sent, 57 received. Up to v0.3.8
@@ -8463,7 +8463,7 @@ frequency and mode: a band key goes where it went before the scan.
 
 | Button | What |
 |---|---|
-| Source | the list: **Channels** (the [Channels](#channels) app's, with their modes; not their AGC, PRE and ATT), **Airband** (118 to 137 MHz, AM, 25 kHz steps; the X6200), **HF Air** (the [HF Air Band](#hf-air-band) app's frequencies of the area it shows, USB), **CB** (the channels of the plan the [CB](#cb) app shows, in its mode), **Segment** (the band plan segment the dial is in, in 3 kHz steps in SSB, 500 Hz in CW, 5 kHz in AM) |
+| Source | the list: **Channels** (the [Channels](#channels) app's, with their modes; not their AGC, PRE and ATT), **Airband** (118 to 137 MHz, AM, 25 kHz steps; the X6200), **HF Air** (the [HF Air Band](#hf-air-band) app's frequencies of the area it shows, USB), **CB** (the channels of the plan the [CB](#cb) app shows, in its mode), **Segment** (the band plan segment the dial is in, in 3 kHz steps in SSB, 500 Hz in CW, 5 kHz in AM); each press says the list it chose and how many it holds ("Source: Channels, 3 to scan") |
 | Start / Pause / Resume | from the channel the dial is on, else the top |
 | Skip | on to the next one, from a stop or a pause |
 | Lock out | leaves the one it is on out until the list changes (a carrier that is always there) |

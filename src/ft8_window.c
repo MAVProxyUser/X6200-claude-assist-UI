@@ -2494,6 +2494,7 @@ bool ft8_window_remote(ft8_rc_t what, int32_t arg, const cell_data_t *cell) {
             msg_schedule_text_fmt("Stopped: nothing transmits until TX Call, CQ or a call is pressed");
             break;
         case FT8_RC_TXCALL: tx_call_cb(NULL); break;
+        case FT8_RC_HOUND:  hound_cb(NULL); break;     /* page 4's Hound, the bench's ft8-hound test */
         case FT8_RC_AUTO:   auto_cb(NULL); break;
         case FT8_RC_HOLD:   hold_cb(NULL); break;
         case FT8_RC_MODE:   mode_cb(NULL); break;

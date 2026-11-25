@@ -419,6 +419,7 @@ static void source_cb(button_data_t *b) {
     radio_set_scan_mute(false);
     labels_refresh();
     fill();
+    msg_update_text_fmt("Source: %s, %d to scan", source_name[source], list_n);
 }
 
 static void skip_cb(button_data_t *b) {

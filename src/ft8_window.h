@@ -40,7 +40,8 @@ typedef struct {
 void ft8_window_status(ft8_status_t *s);
 
 /* What the panel asks: the buttons' own handlers. LVGL thread; false when the app is not open */
-typedef enum { FT8_RC_CQ, FT8_RC_STOP, FT8_RC_AUTO, FT8_RC_HOLD, FT8_RC_MODE, FT8_RC_TXFREQ, FT8_RC_REPLY, FT8_RC_TXCALL } ft8_rc_t;
+typedef enum { FT8_RC_CQ, FT8_RC_STOP, FT8_RC_AUTO, FT8_RC_HOLD, FT8_RC_MODE, FT8_RC_TXFREQ, FT8_RC_REPLY, FT8_RC_TXCALL,
+               FT8_RC_HOUND } ft8_rc_t;
 
 bool ft8_window_remote(ft8_rc_t what, int32_t arg, const cell_data_t *cell);
 

@@ -709,6 +709,14 @@ static void beacon_cb(button_data_t *btn) {
     timer_cb(NULL);
 }
 
+int dialog_msg_cw_beacon_s(void) {
+    return beacon_on ? params.cw_encoder_period : 0;
+}
+
+bool dialog_msg_cw_qrss(void) {
+    return qrss_on;
+}
+
 static void qrss_cb(button_data_t *btn) {
     (void)btn;
     if (sending()) return;

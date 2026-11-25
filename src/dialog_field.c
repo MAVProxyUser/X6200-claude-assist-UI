@@ -2218,6 +2218,13 @@ static void cq_cb(button_data_t *b) {
             msg_update_text_fmt("No voice CQ yet: Rec CQ on page 2, speak, Stop rec");
         return;
     }
+    /* CQ again while the keyer sends: stopped, as the voice CQ (the bench's field-cq found a second press keyed a
+     * second CQ after the first, 2026-11-25) */
+    if (cw_encoder_sending()) {
+        cw_encoder_stop();
+        msg_update_text_fmt("CQ stopped");
+        return;
+    }
     snprintf(text, sizeof(text), "CQ CQ %s DE %s %s K", prog_name(), my_call(), my_call());
     cw_encoder_send(text, false);
 }

@@ -64,7 +64,7 @@
  *  server uses them) and tells the panel clients what changed every 50 ms. The apps: the FT8
  *  list's rows go out as they come ("ft8r {...}", the last 48 to a page that opens later), the
  *  app's state when it changes ("ft8 {...}"), the CW decoder's text ("cw \"...\""); "ft8
- *  open|close|cq|stop|auto|hold|mode", "ft8 txfreq HZ", "ft8 reply ID" work the app, "wefax
+ *  open|close|cq|stop|auto|hold|mode|hound", "ft8 txfreq HZ", "ft8 reply ID" work the app, "wefax
  *  open|close|auto|cont|save|clear|plan|unplan" the WeFax app (the state's "app" names the one open), whose state goes
  *  out as "wefax {...}" and, to a page that sent "wefax rows 1", its picture row by row (binary 0xFFFE,
  *  remote_server_wefax_row); "ft8 wf 1" asks for the FT8 app's waterfall row by row (binary 0xFFFD,
@@ -123,6 +123,7 @@
 #include "cfg/cfg_api.h"
 #include "cfg/settings_manager_api.h"
 #include "button_bar.h"
+#include "cw_messages.h"
 #include "cluster/client.h"
 #include "cluster/spots.h"
 #include "dialog_field.h"
@@ -1700,6 +1701,14 @@ static int cfg_legacy_find(const char *name) {
 static bool cfg_value(const char *name, char *out, size_t n) {
     if (cfg_text_get(name, out, n))
         return true;
+    if (!strcmp(name, "msg_cw_beacon")) {       /* read only: MSG > CW's switches, kept while the GUI runs */
+        snprintf(out, n, "%d", dialog_msg_cw_beacon_s());
+        return true;
+    }
+    if (!strcmp(name, "msg_cw_qrss")) {
+        snprintf(out, n, "%d", dialog_msg_cw_qrss());
+        return true;
+    }
     int i = cfg_legacy_find(name);
     if (i < 0)
         return false;
@@ -2114,7 +2123,8 @@ static bool app_ft8_cmd(const char *what, const char *arg) {
         const char *name;
         ft8_rc_t    rc;
     } rcs[] = {{"cq", FT8_RC_CQ},     {"stop", FT8_RC_STOP},     {"auto", FT8_RC_AUTO},   {"hold", FT8_RC_HOLD},
-               {"mode", FT8_RC_MODE}, {"txfreq", FT8_RC_TXFREQ}, {"reply", FT8_RC_REPLY}, {"txcall", FT8_RC_TXCALL}};
+               {"mode", FT8_RC_MODE}, {"txfreq", FT8_RC_TXFREQ}, {"reply", FT8_RC_REPLY}, {"txcall", FT8_RC_TXCALL},
+               {"hound", FT8_RC_HOUND}};
     acmd_t a = {.id = A_FT8};
 
     if (!strcasecmp(what, "open")) {
