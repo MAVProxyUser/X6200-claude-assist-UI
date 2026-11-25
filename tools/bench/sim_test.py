@@ -502,6 +502,19 @@ def main():
     why, a, b, _ = run_case("silentlink")
     check(why is not None and "no word from" in why, f"a radio whose link stalls on the air: stopped ({why})")
     check(settled(lambda: not a.state["tx"]), "silentlink: off the air")
+    # a stall of a radio that cannot key unseen goes on to STALE_HELD_S (2026-11-24: the X6200's WiFi held its link 4 s
+    # in WeFax's Auto; the over was stopped though it could not have keyed)
+    class R:
+        def __init__(self, tx, **st):
+            self.tx, self.state = tx, st
+    lis = R(False, rxo=0, app="WeFax")
+    check(bench.stale_limit(lis, lis) == bench.STALE_HELD_S and bench.stale_limit(R(False, rxo=1)) ==
+          bench.STALE_HELD_S, "a stalled listener in WeFax, or a radio with its TX locked: said, the over goes on")
+    check(bench.stale_limit(R(True, rxo=0, app="WeFax"), None) == bench.STALE_S and
+          bench.stale_limit(lis, None) == bench.STALE_S and
+          (lambda j: bench.stale_limit(j, j))(R(False, rxo=0, app="JS8")) == bench.STALE_S,
+          "a stall stops the over at STALE_S for a radio on the air, a sender in WeFax, or one in an app that keys "
+          "by itself")
     # ---- finish leaves the dial where the test left it (the owner, 2026-11-23: "simply leave the radio on the last
     # frequency it was on ... short of simply being on the same screen") ----
     bench.LEAVE_TUNING = True

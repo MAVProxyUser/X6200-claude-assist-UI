@@ -1343,18 +1343,23 @@ COMP_LOUD, COMP_SOFT = 0.3, 0.03        # 20 dB apart
 # put the 20 dB out as 10-11 on the listener's spectrum at 1:1, at 0.3/0.03 and at 0.08/0.008 alike (the TCI audio's
 # level set per transmission and the base's power loop), the X6200's meter 0.2 W in the loud part at 1:1, 0.1 at 4:1
 COMP_LINEAR_DB = 16.0
-COMP_SEG_S = 2.0
+COMP_SEG_S = 0.15           # loud and soft take turns this fast: under the power loops (each levels a stretch of 0.5 s
+COMP_PAIRS = 16             # and more: 2 s stretches went out 10-11 dB apart at 1:1, 2026-11-23/24), over the base's
+                            # compressor's attack (milliseconds)
 
 
 def comp_audio(path):
-    """1000 Hz loud for 2 s then 20 dB softer for 2 s, 16-bit 24 kHz: its length (s)"""
+    """1000 Hz, loud and 20 dB softer taking turns every COMP_SEG_S, COMP_PAIRS times, after 0.3 s of quiet, 16-bit 24
+    kHz, the tone's phase kept across the steps (no click): its length (s)"""
     import numpy as np
     fs = 24000
-    t = np.arange(int(COMP_SEG_S * fs)) / fs
-    tone = np.sin(2 * np.pi * 1000 * t)
-    x = np.concatenate([np.zeros(int(0.3 * fs)), COMP_LOUD * tone, COMP_SOFT * tone, np.zeros(int(0.4 * fs))])
+    n = int(round(COMP_SEG_S * fs))
+    k = np.arange(2 * COMP_PAIRS * n)
+    amp = np.where((k // n) % 2 == 0, COMP_LOUD, COMP_SOFT)
+    tone = amp * np.sin(2 * np.pi * 1000 * k / fs)
+    x = np.concatenate([np.zeros(int(0.3 * fs)), tone, np.zeros(int(0.4 * fs))])
     r = int(0.02 * fs)
-    a, b = int(0.3 * fs), int((0.3 + 2 * COMP_SEG_S) * fs)
+    a, b = int(0.3 * fs), int(0.3 * fs) + len(tone)
     x[a:a + r] *= np.linspace(0, 1, r)
     x[b - r:b] *= np.linspace(1, 0, r)
     (np.clip(x, -1, 1) * 32767).astype("<i2").tofile(path)
@@ -1362,36 +1367,41 @@ def comp_audio(path):
 
 
 def two_levels(x):
-    """The tone's loud and soft stretch in received audio (24 kHz, the 1000 Hz band only, 50 ms frames): their medians
-    in dBFS, timed from the onset (15 dB over the quiet start); (None, None) when not found"""
+    """The loud and the soft steps in received audio (24 kHz, the 1000 Hz band only, 10 ms frames): the median of each
+    kind's middle frames in dBFS, the steps timed from the onset (15 dB over the quiet start), the first two pairs left
+    out (the loops' and the compressor's start); (None, None) when not found"""
     import numpy as np
-    fs, n = 24000, 1200
+    fs, n = 24000, 240
     if len(x) < fs:
         return None, None
     X = np.fft.rfft(x)
     f = np.fft.rfftfreq(len(x), 1 / fs)
-    X[(f < 800) | (f > 1200)] = 0
+    X[(f < 900) | (f > 1100)] = 0
     y = np.fft.irfft(X, len(x))
     lv = [20 * math.log10(np.sqrt(np.mean(y[i:i + n] ** 2)) + 1e-12) for i in range(0, len(y) - n, n)]
-    if len(lv) < 12:
+    if len(lv) < 60:
         return None, None
-    quiet = float(np.median(lv[:6]))
+    quiet = float(np.median(lv[:20]))
     on = next((i for i, v in enumerate(lv) if v > quiet + 15), None)
     if on is None:
         return None, None
     per = n / fs
-
-    def stretch(a, b):
-        seg = [v for i, v in enumerate(lv) if on * per + a <= i * per <= on * per + b]
-        return float(np.median(seg)) if len(seg) >= 5 else None
-    return stretch(0.5, COMP_SEG_S - 0.3), stretch(COMP_SEG_S + 0.5, 2 * COMP_SEG_S - 0.3)
+    loud, soft = [], []
+    for k in range(4, 2 * COMP_PAIRS):
+        a, b = on * per + k * COMP_SEG_S + 0.04, on * per + (k + 1) * COMP_SEG_S - 0.03
+        seg = [v for i, v in enumerate(lv) if a <= i * per <= b]
+        (loud if k % 2 == 0 else soft).extend(seg)
+    if len(loud) < 20 or len(soft) < 20:
+        return None, None
+    return float(np.median(loud)), float(np.median(soft))
 
 
 def body_comp(ctx):
-    """settings-audio-compressor, tx-comp-ratio: a tone loud then 20 dB softer through the sender's TCI, in USB and in
-    USB-D, at Comp 1:1 and 4:1; the loud-to-soft range at 4:1 at least 3 dB under 1:1's in USB; in USB-D the same
-    (the X6100's base leaves the data modes out). Judged on the listener's spectrum at the tone (what the sender put
-    on the air, before the listener's own audio path), its audio (AGC off) said beside it. Comp put back by finish()"""
+    """settings-audio-compressor, tx-comp-ratio: a tone taking turns loud and 20 dB softer every 0.15 s through the
+    sender's TCI, in USB and in USB-D, at Comp 1:1 and 4:1; the loud-to-soft range at 4:1 at least 3 dB under 1:1's in
+    USB; in USB-D the same (the X6100's base leaves the data modes out). Judged on the listener's audio (AGC off, the
+    1000 Hz band in 10 ms frames): its spectrum comes too seldom for 0.15 s steps (2 s steps, judged there, were
+    levelled by both senders' power loops at 1:1 already, 2026-11-23/24). Comp put back by finish()"""
     from tones import TciRx
     snd, lis = ctx.snd, ctx.lis
     x6100 = str(snd.state.get("fp", "")).startswith("x6100")
@@ -1418,28 +1428,21 @@ def body_comp(ctx):
             time.sleep(0.8)
             x, _ = tci.audio(o["on"] - 1.0, o["off"] + 0.3)
             loud, soft = two_levels(x)
-            w_loud = med_w(snd, o["on"] + 0.8, o["on"] + 0.3 + COMP_SEG_S - 0.2)
-            # the listener's spectrum at the tone in the middle of each stretch (the file's 0.3 s of silence first,
-            # the TX's start a few tenths either side of the audio's)
-            a0 = o["on"] + 0.3
-            sl = level(lis, F20 + 1000, a0 + 0.6, a0 + COMP_SEG_S - 0.3, half=150)
-            ss = level(lis, F20 + 1000, a0 + COMP_SEG_S + 0.6, a0 + 2 * COMP_SEG_S - 0.3, half=150)
-            res[(m, comp)] = (loud, soft, w_loud, heard_ok(o), sl, ss)
+            w = med_w(snd, o["on"] + 0.8, o["off"] - 0.5)
+            res[(m, comp)] = (loud, soft, w, heard_ok(o))
 
-    def rng(k, i=0):
-        a, b = res[k][i], res[k][i + 1]
+    def rng(k):
+        a, b = res[k][0], res[k][1]
         return None if a is None or b is None else a - b
-    r1, r4, d1, d4 = rng((2, 1), 4), rng((2, 4), 4), rng((3, 1), 4), rng((3, 4), 4)
-    a1, a4, e1, e4 = rng((2, 1)), rng((2, 4)), rng((3, 1)), rng((3, 4))
+    r1, r4, d1, d4 = rng((2, 1)), rng((2, 4)), rng((3, 1)), rng((3, 4))
     voice = None not in (r1, r4) and r4 <= r1 - 3.0
     data = None not in (d1, d4) and abs(d4 - d1) <= 1.5
     heard = all(v[3] for v in res.values())
-    says = (f"Comp as found {comp0}; the loud-to-soft range (20 dB sent) on {lis.name}'s spectrum: USB 1:1 {fmt(r1)} "
-            f"dB, 4:1 {fmt(r4)} dB; USB-D 1:1 {fmt(d1)}, 4:1 {fmt(d4)} (in its audio: USB {fmt(a1)} / {fmt(a4)}, USB-D "
-            f"{fmt(e1)} / {fmt(e4)}); {snd.name}'s meter in the loud part: USB "
-            f"{fmt(res[(2, 1)][2], 2)} -> {fmt(res[(2, 4)][2], 2)} W at 4:1; all heard {heard}")
+    says = (f"Comp as found {comp0}; the loud-to-soft range (20 dB sent, steps of {COMP_SEG_S} s) in {lis.name}'s "
+            f"audio: USB 1:1 {fmt(r1)} dB, 4:1 {fmt(r4)} dB; USB-D 1:1 {fmt(d1)}, 4:1 {fmt(d4)}; {snd.name}'s meter "
+            f"over the over: USB {fmt(res[(2, 1)][2], 2)} -> {fmt(res[(2, 4)][2], 2)} W at 4:1; all heard {heard}")
     if not heard or None in (r1, r4, d1, d4):
-        return False, says + " (a stretch not found in the spectrum)"
+        return False, says + " (the steps not found in the audio)"
     if r1 < COMP_LINEAR_DB:
         # its power loop levelled the tone at 1:1 already: what Comp does is not to be told from it
         return None, says + (f"; at 1:1 the 20 dB went out as {r1:.1f} (under {COMP_LINEAR_DB:.0f}): the sender's own "

@@ -4357,6 +4357,235 @@ IMAGE_MAX_DBC = -35         # an image above this is a fault (the X6100's 15 m w
                             # calibration that keys it and writes the offsets (the owner's call)
 
 
+SPUR_HZ = 156.25            # 25 FT8 tone steps: the X6100's FT8 app decoded the X6200's answers 156 Hz off, weak (-7 dB
+                            # against +9 to +14), and the real one was dropped as its duplicate (2026-11-23, 11-24, 11-25;
+                            # the X6200's log said its VFO right): a copy of the signal that far off
+SPUR_MAX_DBC = -30          # a component near the tone above this is a fault (an FT8 decode of it lands 156 Hz off)
+
+
+def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.3), (0, 0.3), (3, 0.9))):
+    """What else comes with a clean tone near it: the sender's TCI tone at `tone` Hz in USB-D at 0.1 W on the FT8
+    dial, the listener's TCI audio recorded with its AGC on (3, as the FT8 tests listen) and off (0); the components
+    SPUR_HZ either side of the tone and the strongest one within 400 Hz (not within 20 Hz of the tone), in dB under it,
+    for each (AGC, the tone's amplitude) of runs: the tone at 0.3 and near full scale (0.9: the FT8 app's level is
+    learned up to the top, where a base that sets the power itself may hunt). Whether a copy 156 Hz off is the sender's
+    transmitter or the listener's receiver: present with the AGC off too and in one direction only says the sender;
+    gone with the listener's AGC off says its AGC"""
+    import subprocess
+    import numpy as np
+    import image as im
+    from tones import TciRx, peak, FS as TFS
+    S, L = o.r[sender], o.r[listener]
+    plan = [[0, 0.5], [tone, secs], [0, 0.3]]
+    key_s = sum(x for _, x in plan) + 1.0
+    run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_tone_tx.py"),
+            f"root@{S.host}:/tmp/tci_tone_tx.py"])
+    rows, tci = [], None
+    try:
+        tci = TciRx(L.host)
+        for agc, amp in runs:
+            with o.step(f"AGC {agc}: both on {f / 1e6:.3f} USB-D, the receiver profile alike") as s:
+                want, checks = bench.rx_profile(f, 3, pre=0, att=0, rfg=100, agc=agc, sql=0, filt=(100, 3000))
+                o.both(dict(want, pwr=W, atu=0, xit=0, rit=0, split=0), checks)
+                s.confirm(f"both on {f} mode 3, AGC {agc}")
+            with o.step(f"AGC {agc}: {sender} sends {tone} Hz (amplitude {amp}) at {W} W, {listener} records its "
+                        f"audio") as s:
+                _, total = bench.chain_gate(o.c, "radios")
+                bench.ensure(S, *bench.tx_profile(f, 3, W))
+                bench.radio_tx_gate(S, o.c, W)
+                bench.listener_gate(L)
+                o.roles = {sender: "TX", listener: "RX"}
+                watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=L, w=W,
+                                    label=f"spurs {sender} AGC {agc} amplitude {amp}")
+                try:
+                    o.changing += 1
+                    try:
+                        bench.arm(S, True, mode=3)
+                    finally:
+                        o.changing -= 1
+                    bench.tx_log({"who": sender, "f": f, "w": S.pwr(), "what": f"orch: spurs AGC {agc}"})
+                    t0 = time.time()
+                    proc = subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
+                                             f"python3 /tmp/tci_tone_tx.py '{json.dumps(plan)}' {amp} {key_s:.1f} "
+                                             f"50001 0.02"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    while proc.poll() is None and not watch.why:
+                        time.sleep(0.05)
+                    if proc.poll() is None:
+                        bench.stop_bench_programs(S)
+                    t1 = time.time()
+                    try:
+                        S.wait("off the air", lambda: not S.tx, 5)
+                    except Refused:
+                        S.stop()
+                finally:
+                    watch.close()
+                    o.changing += 1
+                    try:
+                        bench.arm(S, False)
+                    finally:
+                        o.changing -= 1
+                    o.roles = {A: "RX", B: "RX"}
+                if watch.why:
+                    raise Refused(f"the watch stopped the over: {watch.why}")
+                time.sleep(1.0)
+                x, _ = tci.audio(t0 - 0.5, t1 + 1.0)
+                on = im.band_onset(x, tone) if len(x) else None
+                if on is None:
+                    raise Refused(f"no tone in {listener}'s audio")
+                seg = x[int((on + 1.0) * TFS):int((on + secs - 0.6) * TFS)]
+                fw, lw = peak(seg, tone, 40)
+                _, ll = peak(seg, fw - SPUR_HZ, 6)
+                _, lh = peak(seg, fw + SPUR_HZ, 6)
+                w = np.hanning(len(seg))
+                nfft = 1 << (int(math.ceil(math.log2(len(seg)))) + 1)
+                X = 20 * np.log10(np.abs(np.fft.rfft(seg * w, nfft)) + 1e-12)
+                fr = np.fft.rfftfreq(nfft, 1 / TFS)
+                m = (np.abs(fr - fw) <= 400) & (np.abs(fr - fw) >= 20)
+                k = int(np.argmax(np.where(m, X, -1e9)))
+                top = X[np.searchsorted(fr, fw)]
+                P = 10 ** (X / 10)
+
+                def band(a, b):         # the power from a to b Hz off the tone (both sides), dB under the tone's
+                    lo_ = (fr >= fw - b) & (fr <= fw - a)
+                    hi_ = (fr >= fw + a) & (fr <= fw + b)
+                    t_ = np.abs(fr - fw) <= 3
+                    return round(10 * math.log10(P[lo_].sum() / P[t_].sum()), 1), \
+                        round(10 * math.log10(P[hi_].sum() / P[t_].sum()), 1)
+                row = {"agc": agc, "amp": amp, "tone_hz": round(fw, 1), "tone_dbfs": round(lw, 1),
+                       "below_dbc": round(ll - lw, 1), "above_dbc": round(lh - lw, 1),
+                       "worst_off_hz": round(float(fr[k] - fw), 1), "worst_dbc": round(float(X[k] - top), 1),
+                       "floor_dbc": round(im.floor_db(seg) - lw, 1),
+                       # the skirt (an oscillator's phase noise, 2026-11-25: the X6200's FT8 overs -25 dBc per 55 Hz
+                       # out to 170 Hz), per 55 Hz as ft8_copies measures it
+                       "skirt_100_dbc": band(100, 155), "skirt_400_dbc": band(400, 455)}
+                row["wav"] = save_wav(o, x, f"spurs_{sender}_to_{listener}_agc{agc}_amp{amp}.wav")
+                rows.append(row)
+                s.confirm(f"tone {row['tone_hz']} Hz {row['tone_dbfs']} dBFS; -{SPUR_HZ} Hz {row['below_dbc']} dBc, "
+                          f"+{SPUR_HZ} Hz {row['above_dbc']} dBc; the strongest within 400 Hz "
+                          f"{row['worst_dbc']} dBc at {row['worst_off_hz']:+.1f} Hz; per 55 Hz 100-155 Hz off "
+                          f"{row['skirt_100_dbc']}, 400-455 Hz off {row['skirt_400_dbc']} dBc")
+    except Refused as e:
+        return False, str(e), {"rows": rows}
+    finally:
+        if tci is not None:
+            tci.close()
+    said = "; ".join(f"AGC {r['agc']} amplitude {r['amp']}: -{SPUR_HZ} Hz {r['below_dbc']}, +{SPUR_HZ} Hz {r['above_dbc']} dBc (the "
+                     f"strongest within 400 Hz {r['worst_dbc']} dBc at {r['worst_off_hz']:+.1f} Hz)" for r in rows)
+    bad = [r for r in rows if max(r["below_dbc"], r["above_dbc"]) > SPUR_MAX_DBC]
+    return not bad, (f"{sender}'s {tone} Hz tone in {listener}'s audio: {said}"
+                     + (f"; a component {SPUR_HZ} Hz off over {SPUR_MAX_DBC} dBc" if bad else
+                        f"; none {SPUR_HZ} Hz off over {SPUR_MAX_DBC} dBc")), {"rows": rows}
+
+
+def save_wav(o, x, name):
+    """Received audio (TciRx, 24 kHz float) kept in the run's folder as a 16-bit WAV: its path, None without a folder"""
+    import wave
+    import numpy as np
+    d = getattr(o.st, "run_dir", None)
+    if not d:
+        return None
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, name)
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(24000)
+        w.writeframes((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
+    return path
+
+
+def ft8_copy_test(o, sender, listener, txfs=(1325, 1500, 2000), w=W, judge=True):
+    """Where the copies 156.25 Hz either side of an FT8 app's transmission come from (spur_test: a TCI tone has none):
+    the sender's FT8 app sends one CQ at each TX Hz of txfs, the listener on G in USB-D on the same dial recording its
+    audio, the power over the same 50 Hz SPUR_HZ below and above each CQ in dB under it (suite_air_b.ft8_copies). At
+    1325 Hz the app moves no VFO (tx_player synthesises there); at 1500 and 2000 it moves the VFO 175 and 675 Hz up for
+    the over. Passes with no copy over SPUR_MAX_DBC. w: the power (1 W at most here). judge False: the figures said,
+    not judged (the X6200 at 0.1 W, a hundredth of its rating: its base puts a skirt round the signal, -25 dBc in each
+    55 Hz out to 170 Hz, -44 at 1 W, 2026-11-25; the decoders take the station, not the copies, since 11-25)"""
+    import suite_air_b as ab
+    from tones import TciRx
+    S, L = o.r[sender], o.r[listener]
+    rows, tci, steps = [], None, None
+    p, total = bench.chain_gate(o.c, "radios")
+    try:
+        with o.step(f"both on {ab.FT_DIAL['FT8'] / 1e6:.3f} USB-D, {sender}'s FT8 app open there, Auto off") as s:
+            test_calls(o)
+            want, checks = bench.rx_profile(ab.FT_DIAL["FT8"], 3, pre=0, att=0, rfg=100, agc=3, sql=0,
+                                            filt=(100, 3000))
+            o.both(dict(want, pwr=w, atu=0, xit=0, rit=0, split=0), checks)
+            o.changing += 1
+            try:
+                steps = ab.ft8_open(S, "FT8")
+            finally:
+                o.changing -= 1
+            ab.ft8_set(S, "auto", False)
+            bench.pair_align(L, S)          # the app sets its own receiver as it opens (AGC off): the listener takes it
+            alike(o, ("freq", "mode"))
+            s.confirm(f"{sender} {S.state.get('app')} on {S.state.get('freq')}, {listener} on G "
+                      f"{L.state.get('freq')}")
+        tci = TciRx(L.host)
+        bench.radio_tx_gate(S, o.c, w)
+        bench.listener_gate(L)
+        for txf in txfs:
+            with o.step(f"{sender}'s FT8 app: one CQ from TX Hz {txf}, {listener} records") as s:
+                S.send(f"ft8 txfreq {txf}")
+                S.wait(f"TX Hz {txf}", lambda: S.ft8.get("txf") == txf, 5)
+                o.roles = {sender: "TX", listener: "RX"}
+                watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(w * 1000) - total, listener=L, w=w,
+                                    label=f"ft8 copies {sender} {txf} Hz {w} W")
+                try:
+                    bench.tx_log({"who": sender, "f": ab.FT_DIAL["FT8"], "w": S.pwr(),
+                                  "what": f"orch: FT8 CQ from {txf} Hz"})
+                    t0 = time.time()
+                    S.send("ft8 cq")
+                    S.wait("its CQ on the air", lambda: S.tx or watch.why, 40)
+                    S.wait("its CQ over", lambda: not S.tx or watch.why, bench.MAX_KEY_S + 2)
+                    t1 = time.time()
+                    S.send("ft8 stop")
+                finally:
+                    watch.close()
+                    o.roles = {A: "RX", B: "RX"}
+                if watch.why:
+                    raise Refused(f"the watch stopped the over: {watch.why}")
+                time.sleep(1.0)
+                x = tci.audio(t0, t1 + 0.5)[0]
+                c = ab.ft8_copies(x, txf)
+                if c is None:
+                    raise Refused(f"no audio from {listener}")
+                c["wav"] = save_wav(o, x, f"ft8_copies_{sender}_to_{listener}_{txf}_{w}W.wav")
+                rows.append(dict(c, txf=txf))
+                s.confirm(f"at {c['hz']} Hz: {SPUR_HZ} Hz below {c['below_dbc']} dBc, above {c['above_dbc']} dBc, "
+                          f"400 Hz above (noise) {c['noise_dbc']} dBc")
+                time.sleep(2.0)
+    except Refused as e:
+        return False, str(e), {"rows": rows}
+    finally:
+        if tci is not None:
+            tci.close()
+        if steps is not None:
+            o.changing += 1
+            try:
+                with bench.transition():
+                    ab.ft8_close(S, steps)
+                    bench.close_apps(S)
+                    bench.sync_pair([L, S], {"freq": int(L.state.get("freq") or ab.FT_DIAL["FT8"]),
+                                             "mode": int(L.state.get("mode", 3))})
+            except Refused as e:
+                o.st.ev(f"{sender}'s FT8 app not closed as found: {e}", "bad")
+            finally:
+                o.changing -= 1
+    said = "; ".join(f"TX Hz {r['txf']}: {r['below_dbc']}/{r['above_dbc']} dBc (noise {r['noise_dbc']})" for r in rows)
+    # a copy counts where it stands 6 dB over the listener's noise: the X6200's audio is noisier (-32 dBc at 0.1 W
+    # through the cable), and a figure at its noise says nothing either way
+    bad = [r["txf"] for r in rows if max(r["below_dbc"], r["above_dbc"]) > max(SPUR_MAX_DBC, r["noise_dbc"] + 6)]
+    if not judge:
+        return None, (f"{sender}'s FT8 CQs at {w} W in {listener}'s audio, the power {SPUR_HZ} Hz below/above each, "
+                      f"dB under it: {said}: said, not judged (at {w} W the X6200's base puts this skirt round its "
+                      f"signal; judged at 1 W, ft8-copies x6200 1w)"), {"rows": rows}
+    return not bad, (f"{sender}'s FT8 CQs at {w} W in {listener}'s audio, the power {SPUR_HZ} Hz below/above each, dB under it: "
+                     f"{said}" + (f"; a copy over {SPUR_MAX_DBC} dBc from TX Hz {bad}" if bad else "")), {"rows": rows}
+
+
 # ---- The AMBE vocoders (each radio's DVSI chip behind its SDR daemon's port 127.0.0.1:2460) and B's digital voice ----
 # Receive only: nothing is keyed. The test speech is this computer's own voice (say), 8 kHz; the calls made of it by
 # the repository's generators (tools/dsdfme, tools/rtlspec/dmr_test gen) and replayed into a test SDR daemon on each
@@ -4932,6 +5161,20 @@ TESTS = [
          lambda o: image_test(o, A, B), 120),
     Test("image x6200", "X6200 TX, X6100 RX (1500 Hz below, declared)", "the X6200's image and carrier leak, as "
          "image x6100", lambda o: image_test(o, B, A), 120),
+    Test("spurs x6200", "X6200 TX, X6100 RX", "what comes with the X6200's clean 1500 Hz tone in the X6100's audio "
+         "(USB-D, the FT8 dial), the X6100's AGC on and off, the tone at 0.3 and 0.9 of full scale: nothing 156.25 Hz either side over -30 dBc (the X6100's "
+         "FT8 app decoded the X6200's answers 156 Hz off, 11-23 to 11-25)", lambda o: spur_test(o, B, A), 90),
+    Test("spurs x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's tone in the X6200's audio",
+         lambda o: spur_test(o, A, B), 90),
+    Test("ft8-copies x6200", "X6200 TX, X6100 RX", "the X6200's FT8 app's CQs from TX Hz 1325 (no VFO move), 1500 and "
+         "2000 at 0.1 W in the X6100's audio, the power 156.25 Hz either side: said, not judged (its base's skirt at "
+         "0.1 W, -25 dBc; the X6100's decoder took a copy in it for the station till 11-25)",
+         lambda o: ft8_copy_test(o, B, A, judge=False), 150),
+    Test("ft8-copies x6200 1w", "X6200 TX at 1 W, X6100 RX", "the X6200's FT8 CQ from 1500 Hz at 1 W: nothing 156.25 Hz "
+         "either side over -30 dBc (-44 on 11-25, against -25 at 0.1 W)", lambda o: ft8_copy_test(o, B, A, (1500,), 1.0),
+         90),
+    Test("ft8-copies x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's FT8 app's CQs in the X6200's "
+         "audio", lambda o: ft8_copy_test(o, A, B), 150),
     Test("ambe-vocoder", "both RX", "each radio's AMBE chip through its SDR daemon: the parity field asked for, the "
          "speech through each chip at DMR's and D-STAR's rates and the other's frames, libmbe-dvsi alike with the "
          "parity field off, P25 full rate only on a chip with the P25 option", t_ambe_vocoder, 150),

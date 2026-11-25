@@ -61,6 +61,10 @@ MAX_SWR = 2.0               # higher on a radio's TX meter: the chain is not the
 TOO_STRONG_DB = 20          # a receiver hearing this much more than the chain lets through: pads missing
 STALE_S = 6.0               # a radio silent this long (its meters come every 100 ms; WiFi has held them back 2-3 s,
                             # 2026-11-19): the Watch cannot see it, stopped
+STALE_HELD_S = 15.0         # ... unless it cannot go on the air (stale_limit): its stall said, the over goes on this long
+                            # (the X6200's WiFi held its link 4 s under WeFax's Auto as the X6100 sent, 2026-11-24)
+RX_APPS = ("WeFax", "NavTex", "Time Signal", "Airspace")   # a listener's app that keys only when told to (WeFax's TX
+                            # sends a picture named to it; the others have none): nothing of an over tells it to
 DEAF_DB = 15                # the listener's spectrum at the sender's frequency over its quiet: under it, an over unheard
 DEAF_MIN_W = 0.05           # the sender's meter at least this for a pass of the Watch to count (SSB with no audio: 0)
 DEAF_MIN_POWERED = 10       # passes (50 ms each) with power before an over can be called unheard
@@ -1574,6 +1578,19 @@ def radio_tx_gate(radio, c, w):
         raise Refused(f"{radio.name}: its power reads {radio.pwr()} W, not the {w} W asked")
 
 
+def stale_limit(r, listener=None):
+    """How long r may go unheard before a Watch stops the over: STALE_HELD_S for a radio off the air at its last word
+    that cannot go on it unseen (its TX locked, rxo 1; or the over's listener in an app that keys only when told to,
+    RX_APPS); STALE_S for any other (a sender, a radio on the air, an app that may key by itself: FT8's, JS8's)"""
+    if r.tx:
+        return STALE_S
+    if r.state.get("rxo") == 1:
+        return STALE_HELD_S
+    if r is listener and (r.state.get("app") or r.state.get("win") or "") in RX_APPS:
+        return STALE_HELD_S
+    return STALE_S
+
+
 class Watch:
     """While a test runs: a radio on the air past max_key_s, on a bad SWR, or over the rating of the pad on its jack,
     or a receiver hearing far more than the chain lets through, stops everything at once. More power than asked, under
@@ -1611,6 +1628,7 @@ class Watch:
         self.deaf, self.heard_db, self._ov = [], {}, {}
         self._pad_frame, self._pad_n, self._pad_said = {}, {}, {}   # TX meter frames over the pad's rating in a row
         self._no_spec_said = False
+        self._stall_said = {}             # a radio's stall said once: its last word then
         self.on = True
         threading.Thread(target=self._run, daemon=True).start()
 
@@ -1675,9 +1693,15 @@ class Watch:
     def _run(self):
         while self.on and not self.why:
             for r in self.radios:
-                if time.time() - r.last_msg > STALE_S or not r.r.alive:
-                    self.trip(f"no word from {r.name} for {time.time() - r.last_msg:.1f} s: it cannot be watched "
+                quiet = time.time() - r.last_msg
+                if quiet > stale_limit(r, self.listener) or not r.r.alive:
+                    self.trip(f"no word from {r.name} for {quiet:.1f} s: it cannot be watched "
                               f"(its link to the harness stalled or dropped)")
+                elif quiet > STALE_S and self._stall_said.get(r.name) != r.last_msg:
+                    self._stall_said[r.name] = r.last_msg
+                    say(f"{r.name}: no word for {quiet:.1f} s, off the air and unable to key unseen (TX locked, or the "
+                        f"listener in {r.state.get('app') or r.state.get('win')}): the over goes on, stopped at "
+                        f"{STALE_HELD_S:.0f} s")
             if self.hackrf is None and sum(1 for r in self.radios if r.tx) > 1:
                 # the owner, 2026-11-19: "won't that damage the radios? don't do that again" (at 0.1 W through 70 dB
                 # each hears the other at -50 dBm, no harm; never all the same): one on the air at a time

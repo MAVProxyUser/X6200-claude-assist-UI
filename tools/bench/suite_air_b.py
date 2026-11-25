@@ -774,6 +774,12 @@ def heard_elements(x, hz, wpm, fs=24000):
     return "".join(out).strip(), words
 
 
+def both_at(o, f, mode):
+    """Both radios on f in mode at once (sync_pair), before each one's receiver is said (rx_profile, a radio at a time:
+    2026-11-24, JS8's first radio took 9 s over its PRE, ATT, AGC and filter while the other sat on the old dial)"""
+    bench.sync_pair(list(o.radios), {"freq": f, "mode": mode})
+
+
 def listen_at(o, f, mode, agc=3, filt=None):
     """L on f in mode, its receiver said whole (PRE and ATT off, RF gain 100, the AGC, squelch open), read back; S on
     the same dial and mode with it (sync_pair), so the two are not apart while the test readies the over (cw-copy's
@@ -1205,8 +1211,9 @@ class Pages:
         tap(self.r, f"F{2 + i % 4}")
 
 
-def both_in_app(o, names, f0):
-    """The same app open on both radios on one dial, the path proved there, the two alike. Each app opens where its
+def both_in_app(o, names, f0, same=None):
+    """The same app open on both radios on one dial, the path proved there, the two alike (same(o), given, after each
+    opening: what else of the app the two must share, Olivia's variant). Each app opens where its
     memory says and holds its dial (the remote's "set freq" is refused under it: 2026-11-23 PSK31 opened on 3.580 MHz
     on both, not f0), so: L's and S's app opened (L first) from the apps list; on one dial, the apps closed again (the
     path proof opens the Sentry's G on both: it would close them under the over), the path proved there on G in the
@@ -1220,6 +1227,8 @@ def both_in_app(o, names, f0):
         for r in (lis, snd):
             o.later(f"{r.name}: its app closed", lambda r=r: bench.close_apps(r))
             open_listed(r, *names)
+        if same:
+            same(o)
         if app_name(snd) != app_name(lis):
             raise bench.Refused(f"the apps differ: {snd.name} {app_name(snd)}, {lis.name} {app_name(lis)}")
         return int(snd.state.get("freq", 0)), int(lis.state.get("freq", 0))
@@ -1344,6 +1353,44 @@ OLIVIA_VARIANTS = 11                # olivia_tx.h: Olivia 8/250, 16/500, 32/1000
 OLIVIA_N = {"OLIVIA": 3, "CONTESTIA": 8}
 
 
+def olivia_variant(r):
+    """r's Olivia variant (0-10) as its remote says it ("av"), None from a GUI that does not"""
+    v = r.state.get("av")
+    return int(v) if isinstance(v, int) and v >= 0 else None
+
+
+def olivia_to(o, r, k, pages=None):
+    """r's Olivia app on variant k, its Mode key (page 1's F4) tapped a step at a time, each step read back ("av"):
+    a tap that did not take tapped again, three tries a step (2026-11-24: one lost tap left the two radios a variant
+    apart for the rest of the test, and the next run found one in Olivia, the other in Contestia). False from a GUI
+    that does not say its variant"""
+    if olivia_variant(r) is None:
+        return False
+    for _ in range(OLIVIA_VARIANTS):
+        v = olivia_variant(r)
+        if v == k:
+            return True
+        o.off_air(r)                        # refused while sending
+        if pages:
+            pages.to(0)
+        want = (v + 1) % OLIVIA_VARIANTS
+        for _ in range(3):
+            tap(r, "F4")
+            if wait_for(lambda: olivia_variant(r) == want, 3):
+                break
+        else:
+            raise bench.Refused(f"{r.name}: Olivia's Mode did not step from variant {v} to {want} in three taps")
+    if olivia_variant(r) != k:
+        raise bench.Refused(f"{r.name}: Olivia not on variant {k} (on {olivia_variant(r)})")
+    return True
+
+
+def olivia_alike(o):
+    """L's Olivia on S's variant, as both open (each keeps its own while its GUI runs)"""
+    if olivia_variant(o.snd) is not None:
+        olivia_to(o, o.lis, olivia_variant(o.snd))
+
+
 def t_olivia(run):
     parts = [("olivia-modes", ["olivia-modes-txrx"]), ("contestia-modes", ["contestia-modes-txrx"])]
     # no "DE <call>" (the app's PSK Reporter spot); four letters: the app sends "\nTEXT\n" (dialog_olivia.c send_text),
@@ -1355,22 +1402,31 @@ def t_olivia(run):
         snd, lis = o.snd, o.lis
         (i_m,) = add_macros(o, "olivia", [("BENCH1", TEXT)])
         logs = {r.name: tl_keep(o, r) for r in (snd, lis)}
-        app0, f = both_in_app(o, ("olivia", "contestia"), F_OLIVIA)     # the path proved on the apps' dial, both alike
-        o.app_gate(snd)
+        app0, f = both_in_app(o, ("olivia", "contestia"), F_OLIVIA, same=olivia_alike)   # the path proved on the
+        o.app_gate(snd)                                                                  # apps' dial, both alike
         pages = {r.name: Pages(r) for r in (snd, lis)}
-        pressed = 0                         # the Mode key pressed on both this many times: 11 is round to the start
+        # both from the first variant (Olivia 8/250), each step read back on both; a GUI that does not say its variant
+        # (older than "av") steps blind as before, the two compared by the app's name alone
+        said = all(olivia_to(o, r, 0, pages[r.name]) for r in (snd, lis))
+        pressed = 0                         # the Mode key stepped on both this many times: 11 is round to the start
         rows = []
 
         def mode_next():
             nonlocal pressed
-            for r in (snd, lis):
-                o.off_air(r)
-                pages[r.name].to(0)
-                tap(r, "F4")                # Mode, page 1 (refused while sending: off the air first)
             pressed += 1
+            for r in (snd, lis):
+                if said:
+                    olivia_to(o, r, pressed % OLIVIA_VARIANTS, pages[r.name])
+                else:
+                    o.off_air(r)
+                    pages[r.name].to(0)
+                    tap(r, "F4")            # Mode, page 1 (refused while sending: off the air first)
             time.sleep(1.5)
         try:
             for k in range(OLIVIA_VARIANTS):
+                if said and olivia_variant(snd) != olivia_variant(lis):
+                    raise bench.Refused(f"the variants differ: {snd.name} {olivia_variant(snd)}, {lis.name} "
+                                        f"{olivia_variant(lis)}")
                 app = app_name(snd)
                 o.banner(f"{app.upper()} VARIANT {k + 1} OF {OLIVIA_VARIANTS}: {snd.name.upper()} SENDS {W} W, "
                          f"{lis.name.upper()} DECODES (RX ONLY)")
@@ -1490,13 +1546,18 @@ def fax_listen(o):
         lis.send("wefax close")
         wait_for(lambda: lis.state.get("app") != "WeFax" and last_json(lis, "wefax").get("open") != 1, 8)
     o.later(f"{lis.name}: WeFax closed", close)
-    lis.send("wefax open")
-    if not wait_for(lambda: lis.state.get("app") == "WeFax" or last_json(lis, "wefax").get("open") == 1, 10):
-        raise bench.Refused(f"{lis.name}: its WeFax app did not open")
-    time.sleep(1.5)
-    if last_json(lis, "wefax").get("plan"):
-        raise bench.Refused(f"{lis.name}: WeFax's Auto Plan is on (it follows the day's charts off the amateur bands)")
-    bench.ensure(lis, {"freq": F_FAX, "mode": 2})
+    # one change: the proof left both in USB-D, the app opens on its memory in USB; back on F_FAX, S with it in USB
+    # (2026-11-24: S sat 20 s in USB-D on G while L's WeFax was in USB, the files for the overs being made)
+    with bench.transition():
+        lis.send("wefax open")
+        if not wait_for(lambda: lis.state.get("app") == "WeFax" or last_json(lis, "wefax").get("open") == 1, 10):
+            raise bench.Refused(f"{lis.name}: its WeFax app did not open")
+        time.sleep(1.5)
+        if last_json(lis, "wefax").get("plan"):
+            raise bench.Refused(f"{lis.name}: WeFax's Auto Plan is on (it follows the day's charts off the amateur "
+                                f"bands)")
+        bench.ensure(lis, {"freq": F_FAX, "mode": 2})
+        bench.ensure(o.snd, {"split": 0, "vfo": 0, "freq": F_FAX, "mode": 2})
     rx_keys(lis)
 
 
@@ -1982,6 +2043,7 @@ def t_ft8_qso(run):
         a, b = o.snd, o.lis
         calls = apps_prepare(o)
         ca, cb = calls[a.name], calls[b.name]
+        both_at(o, FT_DIAL["FT8"], 3)
         for r in o.radios:
             bench.ensure(r, *bench.rx_profile(FT_DIAL["FT8"], 3, pre=0, att=0, rfg=100, agc=3))
         o.prove(FT_DIAL["FT8"], both=True)
@@ -2105,6 +2167,7 @@ def t_ft8_stop(run):
     def body(o):
         a, b = o.snd, o.lis                 # B receive only: its session may not send, whatever its FT8 app is set to
         calls = apps_prepare(o, [a])
+        both_at(o, FT_DIAL["FT8"], 3)
         for r in o.radios:
             bench.ensure(r, *bench.rx_profile(FT_DIAL["FT8"], 3, pre=0, att=0, rfg=100, agc=3))
         o.prove(FT_DIAL["FT8"])
@@ -2150,6 +2213,31 @@ def ft8_stop_both(o):
         o.off_air(r)
 
 
+FT8_COPY_HZ = 156.25        # 25 tone steps: the X6100's FT8 app decoded the X6200's answers this far off, weak (-7 dB
+                            # against +9 to +14), the real one then dropped as its duplicate (11-23 to 11-25; the X6200's
+                            # log said its VFO right, and a clean TCI tone has nothing there: orch's spurs test)
+
+
+def ft8_copies(x, txf):
+    """An FT8 over in received audio x (TciRx, 24 kHz) sent from TX Hz txf: its 50 Hz (eight tones) found within 20 Hz
+    of txf, its power, and the power over the same 50 Hz FT8_COPY_HZ below and above and 400 Hz above (the noise), each
+    in dB under it. None without audio"""
+    import numpy as np
+    from tones import FS
+    if x is None or len(x) < FS or not txf:
+        return None
+    X = np.abs(np.fft.rfft(x * np.hanning(len(x)))) ** 2
+    fr = np.fft.rfftfreq(len(x), 1 / FS)
+
+    def band(a):
+        m = (fr >= a - 3) & (fr <= a + 47)
+        return 10 * math.log10(float(X[m].sum()) + 1e-20)
+    f0 = max((txf + d for d in range(-20, 21)), key=band)
+    main = band(f0)
+    return {"hz": f0, "below_dbc": round(band(f0 - FT8_COPY_HZ) - main, 1),
+            "above_dbc": round(band(f0 + FT8_COPY_HZ) - main, 1), "noise_dbc": round(band(f0 + 400) - main, 1)}
+
+
 def t_ft8_hold(run):
     parts = [("ft8-hold", ["ft8-hold-freq"])]
 
@@ -2157,6 +2245,7 @@ def t_ft8_hold(run):
         a, b = o.snd, o.lis                 # A calls CQ at 1500 Hz, B answers it, its TX Hz set to 2000 first
         calls = apps_prepare(o)
         ca, cb = calls[a.name], calls[b.name]
+        both_at(o, FT_DIAL["FT8"], 3)
         for r in o.radios:
             bench.ensure(r, *bench.rx_profile(FT_DIAL["FT8"], 3, pre=0, att=0, rfg=100, agc=3))
         o.prove(FT_DIAL["FT8"], both=True)
@@ -2169,7 +2258,10 @@ def t_ft8_hold(run):
         o.banner(f"FT8 HOLD: {a.name.upper()} CQ AT 1500 HZ, {b.name.upper()} ANSWERS FROM 2000 HZ (HOLD ON, THEN "
                  f"OFF), {W} W EACH, ONE AT A TIME")
         wa = wb = o.watch("FT8 Hold", both=True)          # one Watch: the two take turns
-        rounds = []
+        rounds, copies = [], []
+        from tones import TciRx
+        tci = {r.name: TciRx(r.host) for r in (a, b)}     # each over's copies FT8_COPY_HZ off, in the other's audio
+        o.later("the TCI recorders", lambda: [t.close() for t in tci.values()])
         try:
             for hold in (True, False):
                 ft8_set(b, "hold", hold)
@@ -2185,6 +2277,8 @@ def t_ft8_hold(run):
                 cq = heard_cq()
                 if not cq:
                     raise bench.Refused(f"{b.name} did not decode {a.name}'s CQ ({wa.why or wb.why})")
+                copies.append((f"{a.name}'s CQ in {b.name}'s audio",
+                               ft8_copies(tci[b.name].audio(t_cq, time.time())[0], a.ft8.get("txf"))))
                 bench.tx_log({"who": b.name, "f": FT_DIAL["FT8"], "w": b.pwr(), "what": "suite air_b: FT8 answer"})
                 t_reply = time.time()
                 b.send(f"ft8 reply {cq['id']}")
@@ -2195,6 +2289,8 @@ def t_ft8_hold(run):
                 a.wait(f"{b.name}'s answer decoded", lambda: wa.why or wb.why or heard(), 4 * slot + 6)
                 ans = heard()
                 txf_b = b.ft8.get("txf")
+                copies.append((f"{b.name}'s answer in {a.name}'s audio",
+                               ft8_copies(tci[a.name].audio(t_reply, time.time())[0], txf_b)))
                 ft8_stop_both(o)
                 if wa.why or wb.why or not ans:
                     raise bench.Refused(f"{a.name} did not decode {b.name}'s answer ({wa.why or wb.why})")
@@ -2209,7 +2305,11 @@ def t_ft8_hold(run):
               abs(tx2 - cq2) <= 10 and not (wa.why or wb.why))
         o.res("ft8-hold", ok, f"Hold on: {a.name}'s CQ at {cq1} Hz, {b.name}'s answer heard at {at1} Hz (2000 asked), "
                               f"its TX Hz {tx1}; Hold off: CQ at {cq2} Hz, the answer at {at2} Hz (the CQ's asked), "
-                              f"its TX Hz {tx2}; its overs: {shots_words(wa)}")
+                              f"its TX Hz {tx2}; each over's power {FT8_COPY_HZ} Hz below/above it and 400 Hz above "
+                              f"(noise), dB under it: "
+                              + "; ".join(f"{w}: " + (f"{c['below_dbc']}/{c['above_dbc']}/{c['noise_dbc']} at "
+                                                      f"{c['hz']} Hz" if c else "no audio") for w, c in copies)
+                              + f"; its overs: {shots_words(wa)}")
         run_cleanups(o, "its FT8 app")
         for r in o.radios:
             o.lock_again(r)
@@ -2223,6 +2323,7 @@ def t_ft8_late(run):
         a, b = o.snd, o.lis                 # B calls CQ, A answers; B calls CQ again once its report went
         calls = apps_prepare(o)
         ca, cb = calls[a.name], calls[b.name]
+        both_at(o, FT_DIAL["FT8"], 3)
         for r in o.radios:
             bench.ensure(r, *bench.rx_profile(FT_DIAL["FT8"], 3, pre=0, att=0, rfg=100, agc=3))
         o.prove(FT_DIAL["FT8"], both=True)
@@ -2327,6 +2428,7 @@ def t_js8(run):
         a, b = o.snd, o.lis
         calls = apps_prepare(o)
         ca, cb = calls[a.name], calls[b.name]
+        both_at(o, F_JS8, 2)
         for r in o.radios:
             for f in FILES:
                 keep_file(o, r, f)

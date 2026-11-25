@@ -701,6 +701,9 @@ class Pair:
         on l_page in l_mode: the proof's words"""
         self.supply = bench.listener_gate(self.L)
         bench.open_page_both([self.S, self.L], "G")      # G tunes each to its own channel: set alike again
+        # both on the proof's dial at once, then each one's receiver (a radio at a time: 2026-11-24, JS8's listener
+        # took 9 s over its PRE, ATT, AGC and filter while the other sat on the old dial)
+        bench.sync_pair([self.S, self.L], {"freq": f, "mode": 3})
         self.keep_filter(self.L, f, 3)          # the listener's own USB-D filter and zoom as found, for finish
         bench.ensure(self.L, *bench.rx_profile(f, 3, pre=0, att=0, rfg=100, agc=agc, filt=filt))
         self.keep_filter(self.S, f, 3)          # the proof gives the sender the listener's USB-D filter and zoom
@@ -712,7 +715,8 @@ class Pair:
             + ", ".join(os.path.basename(x) for x in (res.get("shots") or {}).values() if x))
         bench.open_page(self.L, l_page)
         if l_mode != 3:
-            self.keep_filter(self.L, f, l_mode)
+            bench.sync_pair([self.S, self.L], {"freq": f, "mode": l_mode})     # the sender with it, not after the
+            self.keep_filter(self.L, f, l_mode)                                 # test's own set-up (sender())
         bench.ensure(self.L, *bench.rx_profile(f, l_mode, pre=0, att=0, rfg=100, agc=agc, filt=filt))
         return f"path {res['rise_db']} dB ({self.S.name}'s meter {res['sender_peak_w']} W)"
 

@@ -38,6 +38,24 @@ Open, mine to do:
 - Both radios' CW decoders lose the dits of the first characters ('VVV' prints 'TTT'): a decoder that locks sooner
   would copy short overs whole (noted; the tests send two V groups first).
 
+Done 2026-11-25 night (the same asks, continued):
+- air_b's WeFax, FT8 and JS8 groups pass both ways with no sync gap: wefax-cont, wefax-auto, ft8-multistream, ft8-qso,
+  ft8-hold, ft8-late, js8; olivia passes again. Fixed on the way: the radios set up one at a time sat on two dials
+  (both_at(): JS8, FT8, air_c's proof); WeFax's sender left in USB-D; the Olivia app now says its variant (the remote's
+  `av`) and the test reads every Mode step back; a WiFi stall of a listener that cannot key no longer stops an over
+  (bench.stale_limit).
+- A real fault ft8-hold found, fixed in the GUI (both radios by hot install, in the next tag): the X6100's FT8 app
+  listed the X6200's overs 156 Hz off and dropped the real decode (src/ft8/worker.c kept ft8_lib's candidate delete,
+  which put the list out of its order); a bench recording in radio_captures/bench is its regression test
+  (tools/ft8_sync decoder_test).
+- New orch tests: spurs x6200/x6100 (what comes with a clean tone), ft8-copies x6200/x6100 and x6200 1w (an FT8 app's
+  overs, the power 156 Hz either side). comp reshaped: loud and soft every 0.15 s, judged in the audio (to run).
+- To look at: the X6200 at 0.1 W transmits with a noise skirt (-25 dBc per 55 Hz out to 170 Hz; -44 at 1 W): try a
+  higher audio level into its base for the apps at low power (its TCI tone at 0.9 of full scale was clean). The X6100's
+  tone in the X6200's audio has a component 61.4 Hz either side at -30 dBc (whose: its TX or the X6200's RX).
+- Left: air_c (7 groups), air paths bands/walkie/if-shift; comp (reshaped, to run); power-loop's X6200 figure;
+  cw-copy X6100 -> X6200 (the X6200's decoder on the X6100's keying).
+
 Done 2026-11-24 evening (the owner: "get the over the air test coverage hammered out in full", "EVERY test should use
 the same unified framework to sync the radios or make exceptions for tests so that there is NO deviation"):
 - The one sync framework (bench.sync_pair, bench.apart, transitions; tools/bench/ORCH.md) in every test, and the 11
