@@ -11592,6 +11592,10 @@ the radio, hears it, keys it and sends CW with it.
   base). A key still on its way when its client unkeys or leaves keys
   nothing; a key whose client's close came in with it (the program sent it
   and quit) is refused, and the radio does not key even for an instant. A
+  key in the first second after a client connected waits a tenth of a
+  second and keys only if the client is still there (up to v0.3.12.48 one
+  whose close came just after its key put the X6200 on the air for an
+  instant); a program that stays connected (WSJT-X) keys at once. A
   client whose key was refused or cancelled unkeys nothing:
   a transmission keyed meanwhile with the PTT key on the radio or the
   browser's PTT stays on the air. A client's CW text is a transmission too
