@@ -67,7 +67,11 @@ Done 2026-11-25 night (the same asks, continued):
   10-13 % AM noise and 5-7 Hz FM jitter (orch: ft8-copies x6200 tci, skirt x6200 levels). TCI's 100 ms stream for the
   apps broke their TX (reverted at once). NEXT: a TX stream sized for tx_player's 2048-sample blocks (tlength ~400 ms,
   prebuf ~200), tested on ft8-copies x6200 before anything else.
-- Left: comp through the mic; power-loop's X6200 figure; the 61.4 Hz component in the X6100's tone at the X6200.
+- comp through the mic (orch comp-mic x6100): the X6100's factory base does not compress at 4:1 (MANUAL). The X6200's
+  capture holds no monitor of its over: its Comp needs a third sound source (this computer's speaker by its mic, with
+  the X6100 receiving) or a third receiver. power-loop's X6200 figure: measured (Xiegu's loop, said).
+- Left: the apps' TX stream on the X6200 (the skirt); the X6200's Comp (a third source); the X6100's +61.4 Hz line (a
+  third receiver).
 
 Done 2026-11-24 evening (the owner: "get the over the air test coverage hammered out in full", "EVERY test should use
 the same unified framework to sync the radios or make exceptions for tests so that there is NO deviation"):

@@ -242,8 +242,11 @@ computer, OpenX6X00's writer does both (see
      both radios. From 2:1 to 8:1 it compresses more and more: at 4:1, 4 dB
      more voice above the threshold gives 1 dB more out. On the X6200 the base
      has three levels: 2:1 and 3:1 go as 2:1, 4:1 to 7:1 as 4:1, 8:1 as 8:1.
-     On the X6100 the compressor came with the patched base (r3); what Comp
-     does with Xiegu's own X6100 base we haven't measured.
+     On the X6100 the compressor came with the patched base (r3). On Xiegu's
+     own X6100 base (V1.1.9) Comp 4:1 left loud and soft as they were: a
+     tone stepping 20 dB up and down every 0.15 s into its mic kept 16.7 dB
+     at 1:1 and 16.0 at 4:1 on the radio's own monitor of its transmission
+     (2026-11-25).
    - **Compressor, makeup** (patched base) are two sliders, -15 to +15 dB in
      0.5 dB steps, both 0 by default. They shift the base's own values. The
      first moves the threshold, the level where the compressor starts to act.

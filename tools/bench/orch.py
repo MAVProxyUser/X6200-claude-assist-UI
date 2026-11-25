@@ -3302,6 +3302,125 @@ def g_voiceprint(o, mic, speaker, label, f=14200000):
                   f"{got['arrived_share']:.0%} of them"), got
 
 
+COMP_MIC_WAV = "/tmp/bench_comp_steps.wav"
+
+
+def comp_mic_wav(path):
+    """1000 Hz loud (0.5) and 20 dB softer taking turns every suite_air_a.COMP_SEG_S, COMP_PAIRS times, 44.1 kHz, the
+    tone's phase kept across the steps, acoustic.py's lead and tail: its seconds"""
+    import wave
+    import acoustic as ac
+    import suite_air_a as aa
+    fs = ac.FS
+    n = int(round(aa.COMP_SEG_S * fs))
+    k = np.arange(2 * aa.COMP_PAIRS * n)
+    amp = np.where((k // n) % 2 == 0, 0.5, 0.05)
+    x = np.concatenate([np.zeros(int(ac.LEAD_S * fs)), amp * np.sin(2 * np.pi * 1000 * k / fs),
+                        np.zeros(int(ac.TAIL_S * fs))])
+    r = int(0.02 * fs)
+    a = int(ac.LEAD_S * fs)
+    x[a:a + r] *= np.linspace(0, 1, r)
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(fs)
+        w.writeframes((x * 32767).astype("<i2").tobytes())
+    return len(x) / fs
+
+
+def comp_mic_test(o, mic, speaker, f=14200000, vol=VP_VOL):
+    """Comp through the mic (settings-audio-compressor, tx-comp-ratio): the speaker radio plays a 1000 Hz tone taking
+    turns loud and 20 dB softer every 0.15 s on its own speaker; the mic radio, keyed with PTT on G in USB at 0.1 W,
+    its mic hearing them, at Comp 1:1 and then 4:1; its own capture of each over (its monitor on the processor's
+    capture line, before the RF and its power loop) read loud against soft (suite_air_a.two_levels, the steps' phase
+    from the whole over). Through TCI Comp could not be seen (its audio goes in as the modem's, 2026-11-25). Passes
+    with the range at 4:1 at least 3 dB under 1:1's, the path through the room carrying 12 dB of the 20 at least at
+    1:1; on Xiegu's factory X6100 base, no compression is said (Comp came with the patched base, MANUAL), not failed"""
+    import subprocess
+    import acoustic as ac
+    import suite_air_a as aa
+    from scipy.signal import resample_poly
+    M, Sp = o.r[mic], o.r[speaker]
+    wav = os.path.join(o.st.run_dir, "comp_steps.wav")
+    os.makedirs(o.st.run_dir, exist_ok=True)
+    play_s = comp_mic_wav(wav)
+    run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", wav, f"root@{Sp.host}:{COMP_MIC_WAV}"])
+    comp0 = M.state.get("comp")
+    got = {"comp_as_found": comp0}
+    levels = {}
+
+    def one(comp):
+        cap = {}
+
+        def body(watch):
+            with o.step(f"{mic}'s Comp {comp}:1, {speaker}'s volume {vol}") as s:
+                bench.ensure(M, {"comp": comp})
+                bench.ensure(Sp, {"vol": vol})
+                s.confirm(f"comp {M.state.get('comp')}")
+            bench.ssh(M.host, "rm -f /tmp/bench_mic.raw; (parecord --server=/var/run/pulse/native -d "
+                              "alsa_input.platform-sound.stereo-fallback --raw --format=s16le --channels=1 "
+                              "--rate=44100 /tmp/bench_mic.raw >/dev/null 2>&1 &)")
+            with o.step(f"{mic} keyed with PTT on G; {speaker} plays the loud and soft steps on its speaker"):
+                hold, on_at, t_play, t0 = o.hold(), None, None, time.time()
+                while not watch.why and time.time() - t0 < play_s + 6:
+                    M.send(f"key PTT 1 {hold}")
+                    if on_at is None and M.tx:
+                        on_at = time.time()
+                    if on_at and t_play is None and time.time() - on_at > 0.8:
+                        Sp.send(f"play {COMP_MIC_WAV}")
+                        Sp.wait("the speaker playing", lambda: Sp.state.get("plays") == 1, 4)
+                        t_play = time.time()
+                    if t_play and Sp.state.get("plays") == 0:
+                        break
+                    if on_at is None and time.time() - t0 > 6:
+                        raise Refused(f"{mic} did not come on the air with PTT")
+                    time.sleep(0.4)
+                M.send("key PTT 0")
+                Sp.send("play stop")
+                if watch.why:
+                    raise Refused(watch.why)
+                if t_play is None:
+                    raise Refused(f"{speaker}'s speaker never played the steps")
+        try:
+            over(o, mic, speaker, f, 2, f"Comp {comp}:1 through {mic}'s mic", body)
+        finally:
+            bench.ssh(M.host, "kill $(pidof parecord) 2>/dev/null; true")
+            Sp.send("play stop")
+        raw = os.path.join(o.st.run_dir, f"comp_{mic}_{comp}.raw")
+        subprocess.run(["scp", "-4", "-q", f"root@{M.host}:/tmp/bench_mic.raw", raw], capture_output=True)
+        x = np.fromfile(raw, dtype=np.int16).astype(float) / 32768 if os.path.exists(raw) else np.zeros(0)
+        cap["levels"] = aa.two_levels(resample_poly(x, 80, 147)) if len(x) > ac.FS else (None, None)
+        return cap["levels"]
+    try:
+        for comp in (1, 4):
+            with o.step(f"Comp {comp}:1: the over, {mic}'s capture read loud against soft") as s:
+                levels[comp] = one(comp)
+                lo = levels[comp]
+                if None in lo:
+                    raise Refused(f"the steps not found in {mic}'s capture at Comp {comp}:1")
+                s.confirm(f"loud {lo[0]:.1f}, soft {lo[1]:.1f} dBFS: {lo[0] - lo[1]:.1f} dB apart")
+    except Refused as e:
+        return False, str(e), got
+    finally:
+        try:
+            bench.ensure(M, {"comp": comp0} if comp0 is not None else {"comp": 1})
+            bench.ensure(Sp, {"vol": 0})
+        except Refused as e:
+            o.st.ev(f"{mic}'s Comp or {speaker}'s volume not put back: {e}", "bad")
+    r1, r4 = levels[1][0] - levels[1][1], levels[4][0] - levels[4][1]
+    got.update(range_1=round(r1, 1), range_4=round(r4, 1), levels={k: [round(v, 1) for v in lv] for k, lv in levels.items()})
+    says = (f"{mic}'s capture of its over, {speaker}'s steps 20 dB apart through the room ({speaker}'s volume {vol}): at 1:1 {r1:.1f} dB apart, at "
+            f"4:1 {r4:.1f} (loud {levels[1][0]:.1f} -> {levels[4][0]:.1f} dBFS)")
+    if r1 < 12:
+        return False, says + ": the room carried too little of the 20 dB at 1:1 to tell", got
+    if r4 <= r1 - 3:
+        return True, says + ": compressed", got
+    base = aa.base_of(M.host) if mic == "x6100" else ""
+    if mic == "x6100" and aa.gcfix_of(base) == 0:
+        return None, says + f": no compression on Xiegu's {base or 'factory'} base (Comp came with the patched base; said)", got
+    return False, says + ": NOT compressed at 4:1", got
+
+
 # ---- The Sentry's pages on both, as pictures (2026-11-24: the old suite's page walk, t_pages, into the orchestrator;
 # the owner: "all tests should ultimately use the same orchestration framework") ----
 PAGES_LOOK = "ABCDEFGH"
@@ -5223,6 +5342,11 @@ TESTS = [
           "print Q1TST", lambda s, l, n: (lambda o: cw_kbd(o, s, l, 14040000, n)), 45),
     Test("pages-look", "both RX", "the Sentry's pages A-H on both, photographed together: the Sentry's colours on each, "
          "the two alike", pages_look, 90),
+    Test("comp-mic x6100", "X6100 TX (its mic), X6200 RX (its speaker plays)", "Comp through the X6100's mic: the X6200's "
+         "speaker (at 60) plays loud and soft steps 20 dB apart every 0.15 s, the X6100 keyed with PTT on G at Comp 1:1 "
+         "and 4:1, its capture of each over (its monitor) read: 4:1 at least 3 dB narrower (on Xiegu's factory base: "
+         "said; 11-25 none, 16.7 against 16.0 dB). The X6200's capture holds no monitor of its over: its Comp is not "
+         "measured this way", lambda o: comp_mic_test(o, A, B, vol=60), 90),
     Test("g-voiceprint x6100>x6200", "X6100 TX (its mic), X6200 RX (its speaker plays)", "G's voiceprint on the air: "
          "the X6200 plays stepped tones on its speaker, the X6100 keyed on G at 0.1 W picks them up on its mic; its "
          "voiceprint (two pictures), its own capture and the X6200's receiver must show them",
