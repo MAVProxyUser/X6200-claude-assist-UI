@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.join(TOP, "webserver", "src"))
 from x6100_webserver import nifog_web  # noqa: E402  (no bottle in it)
 
 IDX = nifog_web.read_index(os.path.join(TOP, "tools", "nifog"))
-SYS_NIFOG, SYS_N = 11, 13       # app_sentry.c sys_items[]: NIFOG after TRIBAL KNOWLEDGE, START IN last
+SYS_NIFOG = 11                  # app_sentry.c sys_items[]: NIFOG after TRIBAL KNOWLEDGE (START IN 12, GMRS 13 last)
 PDF_SHA = re.search(r"SHA-256 `([0-9a-f]{64})`", open(os.path.join(TOP, "third-party", "nifog", "README.md")).read())
 PDF_SHA = PDF_SHA.group(1) if PDF_SHA else None
 NF_STEP = 24                    # app_sentry.c: px a VFO click
