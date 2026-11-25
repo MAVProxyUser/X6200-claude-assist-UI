@@ -6875,6 +6875,18 @@ Iambic is B by default (up to v0.3.9, A).
   to B and back to A before: only a changed setting is saved, and A was
   the default. If you want A, set it again after the update and it stays A.
 
+The radio's own keyer (CW messages, the CW Keyboard, the beacon, TCI and
+SmartCW texts) keys each element on a deadline from the one before, so
+its marks and gaps keep their length to a millisecond or two. Up to
+v0.3.12.48 a signal to the GUI (a screenshot over the network) could cut a
+mark or a gap short, now and then running two elements together.
+
+- On an X6100 with Xiegu's own base (V1.1.9) the base itself moves a
+  key edge 30 to 50 ms late now and then, and at times holds the carrier
+  through a gap: measured over the bench cable at 20 WPM, the GUI's key
+  line exact. A receiving decoder may read such a letter wrong. The X6200
+  keys to within a few milliseconds.
+
 Train is for practice: the key, the paddle, the CW messages and the
 [CW Trainer](#cw-trainer) sound only the sidetone, and nothing goes out.
 

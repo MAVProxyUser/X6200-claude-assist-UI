@@ -9,7 +9,8 @@
 # next send at KEY Speed again.
 # The sources are copied to build/ first: a quoted #include looks beside the including file before the -I paths, and
 # the shims in stub_include must win over src/ (as in tools/tune). The clocks are the test's own (--wrap=clock_gettime,
-# nanosleep, usleep, time): the keyer's sleeps move them on, a beacon of an hour takes no hour.
+# nanosleep, clock_nanosleep, usleep, time): the keyer's sleeps move them on, a beacon of an hour takes no hour; and
+# sleeps cut short as a signal cuts them (the keyer's marks and gaps must keep their times).
 SRC    := ../../src
 CFLAGS := -std=gnu11 -Wall -Wextra -O1 -g -pthread -I stub_include
 COPIED := cw_encoder.c cw_encoder.h cw_beacon.c cw_beacon.h cw_decoder.h board.h
@@ -26,7 +27,7 @@ build/.copied: $(addprefix $(SRC)/,$(COPIED) $(MORSE))
 
 beacon_test: beacon_test.c build/.copied $(SHIMS)
 	$(CC) $(CFLAGS) -I build -o $@ beacon_test.c build/cw_encoder.c build/cw_beacon.c build/cw_decoder/morse_code.c \
-		-Wl,--wrap=clock_gettime,--wrap=nanosleep,--wrap=usleep,--wrap=time
+		-Wl,--wrap=clock_gettime,--wrap=nanosleep,--wrap=clock_nanosleep,--wrap=usleep,--wrap=time
 
 test: beacon_test
 	./beacon_test

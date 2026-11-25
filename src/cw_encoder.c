@@ -20,6 +20,7 @@
 
 #include "lvgl/lvgl.h"
 #include <ctype.h>
+#include <stdio.h>               /* the keyer's late edges, in the log */
 #include <unistd.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -94,15 +95,66 @@ static bool key_down(void) {
 
 static volatile int  pause_left;
 
-/* Sleeps nsec, in short steps so a stop is quick. False when stopped. */
+/* The keyer's schedule: each key edge on a deadline nsec after the one before (CLOCK_MONOTONIC), not a sleep counted
+ * from whenever the call came. A relative nanosleep cut short by a signal (the bench's screen grab, SIGUSR1: nanosleep
+ * is never restarted) had its rest counted as slept, and the mark or gap came out short (2026-11-25). A late wake-up
+ * shortens the element it starts, not every one after it */
+#define KEYER_STEP_NS   50000000L   /* the longest sleep: a stop is seen this soon */
+#define KEYER_LATE_MS   15          /* a key edge later than this on its deadline is counted (late_n) and logged */
+
+static struct timespec  tick;       /* the deadline the last edge was on */
+static int              edges_n;    /* key edges of this send */
+static int              late_n;     /* of them later than KEYER_LATE_MS */
+static long             late_worst; /* the latest edge's lateness, ms */
+
+static void ts_add_ns(struct timespec *t, long ns) {
+    t->tv_nsec += ns % 1000000000L;
+    t->tv_sec += ns / 1000000000L;
+    if (t->tv_nsec >= 1000000000L) {
+        t->tv_sec++;
+        t->tv_nsec -= 1000000000L;
+    }
+}
+
+static long long ts_left_ns(const struct timespec *t, const struct timespec *now);
+
+/* The schedule from now: a send's start, a beacon's next send */
+static void tick_now(void) {
+    clock_gettime(CLOCK_MONOTONIC, &tick);
+}
+
+/* Sleeps till the schedule's next deadline, nsec after the last one, in steps so a stop is quick (a signal's early
+ * wake-up just goes round again). False when stopped */
 static bool wait_nsec(long nsec) {
-    struct timespec t = {0, 0};
-    while (nsec > 0 && !stop_req) {
-        t.tv_nsec = nsec > 50000000L ? 50000000L : nsec;
-        nanosleep(&t, NULL);
-        nsec -= t.tv_nsec;
+    ts_add_ns(&tick, nsec);
+    while (!stop_req) {
+        struct timespec now, step;
+
+        clock_gettime(CLOCK_MONOTONIC, &now);
+
+        long long left = ts_left_ns(&tick, &now);
+
+        if (left <= 0) {
+            break;
+        }
+        step = now;
+        ts_add_ns(&step, left > KEYER_STEP_NS ? KEYER_STEP_NS : (long)left);
+        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &step, NULL);
     }
     return !stop_req;
+}
+
+/* A key edge just made: how late on its deadline, counted when over KEYER_LATE_MS (the thread kept from running) */
+static void edge_made(void) {
+    struct timespec now;
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    long late = (long)(-ts_left_ns(&tick, &now) / 1000000LL);
+
+    edges_n++;
+    if (late > late_worst) late_worst = late;
+    if (late > KEYER_LATE_MS) late_n++;
 }
 
 static void hold_tx(long world_space_nsec, bool on);
@@ -114,16 +166,20 @@ static void send_morse(char *str, long dit_nsec, long dah_nsec, bool last) {
         switch (*str) {
             case '.':
                 if (!key_down()) return;
+                edge_made();
                 if (last && !str[1]) hold_tx(0, false);
                 wait_nsec(dit_nsec);
                 radio_set_morse_key(false);
+                edge_made();
                 break;
 
             case '-':
                 if (!key_down()) return;
+                edge_made();
                 if (last && !str[1]) hold_tx(0, false);
                 wait_nsec(dah_nsec);
                 radio_set_morse_key(false);
+                edge_made();
                 break;
 
             default:
@@ -337,6 +393,10 @@ static void * endecode_thread(void *arg) {
     if (!qrss && !over) {
         hold_tx(world_space_nsec, true);
     }
+    tick_now();
+    edges_n    = 0;
+    late_n     = 0;
+    late_worst = 0;
 
     while (!stop_req && !over) {
         char    *morse;
@@ -398,12 +458,17 @@ static void * endecode_thread(void *arg) {
             if (!qrss) {
                 hold_tx(world_space_nsec, true);
             }
+            tick_now();
             state        = CW_ENCODER_BEACON;
             current_char = current_msg;
         }
     }
     radio_set_morse_key(false);
     hold_tx(world_space_nsec, false);
+    if (edges_n) {      /* what the keyer did, for what the air shows to be set against (orch's cw-timing) */
+        fprintf(stderr, "cw_encoder: %d key edges, %d more than %d ms late on their time, the latest %ld ms\n",
+                edges_n, late_n, KEYER_LATE_MS, late_worst);
+    }
     if (qrss) {
         radio_set_morse_key_limit(0);
         qrss_said();

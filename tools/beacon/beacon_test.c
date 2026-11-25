@@ -14,6 +14,7 @@
 
 #include <pthread.h>
 #include <stdarg.h>
+#include <errno.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -69,6 +70,7 @@ time_t __wrap_time(time_t *t) {
 
 int __real_clock_gettime(clockid_t c, struct timespec *ts);
 int __real_nanosleep(const struct timespec *req, struct timespec *rem);
+int __real_clock_nanosleep(clockid_t c, int flags, const struct timespec *req, struct timespec *rem);
 int __real_usleep(useconds_t us);
 
 static bool keyer_thread(void) {
@@ -97,11 +99,52 @@ int __wrap_clock_gettime(clockid_t c, struct timespec *ts) {
     return 0;
 }
 
+/* Every eintr-th sleep of the keyer's is cut short half way, as a signal cuts one on the radio (the bench's screen
+ * grab, SIGUSR1: nanosleep is never restarted), 0 none */
+static int eintr, n_sleeps;
+
+static bool cut_now(void) {
+    return eintr && ++n_sleeps % eintr == 0;
+}
+
 int __wrap_nanosleep(const struct timespec *req, struct timespec *rem) {
     if (!keyer_thread()) {
         return __real_nanosleep(req, rem);
     }
-    atomic_fetch_add(&virt_ns, (uint64_t)req->tv_sec * 1000000000ULL + req->tv_nsec);
+
+    uint64_t ns = (uint64_t)req->tv_sec * 1000000000ULL + req->tv_nsec;
+
+    if (cut_now()) {
+        atomic_fetch_add(&virt_ns, ns / 2);
+        if (rem) {
+            rem->tv_sec  = (ns - ns / 2) / 1000000000ULL;
+            rem->tv_nsec = (ns - ns / 2) % 1000000000ULL;
+        }
+        tick();
+        errno = EINTR;
+        return -1;
+    }
+    atomic_fetch_add(&virt_ns, ns);
+    tick();
+    return 0;
+}
+
+/* The keyer's sleeps to a deadline (TIMER_ABSTIME) or for a time; cut short as nanosleep's. Returns the error, as
+ * clock_nanosleep does */
+int __wrap_clock_nanosleep(clockid_t c, int flags, const struct timespec *req, struct timespec *rem) {
+    if (c != CLOCK_MONOTONIC || !keyer_thread()) {
+        return __real_clock_nanosleep(c, flags, req, rem);
+    }
+
+    uint64_t want = (uint64_t)req->tv_sec * 1000000000ULL + req->tv_nsec, now = atomic_load(&virt_ns);
+    uint64_t ns   = flags & TIMER_ABSTIME ? (want > now ? want - now : 0) : want;
+
+    if (cut_now()) {
+        atomic_fetch_add(&virt_ns, ns / 2);
+        tick();
+        return EINTR;
+    }
+    atomic_fetch_add(&virt_ns, ns);
     tick();
     return 0;
 }
@@ -819,6 +862,35 @@ static void test_cw(void) {
     check(wait_idle() && n_key == 0 && !key_on, "a message refused: stopped, never keyed");
 }
 
+/* Signals on the keyer's thread (the bench's screen grab during an over, SIGUSR1) cut its sleeps short: its marks
+ * and gaps keep their times all the same (2026-11-25: on the X6100 a gap of 60 ms came out 10 ms and none, two
+ * elements one, and the X6200's decoder read Å as J and Q as K) */
+static void test_cw_signals(void) {
+    /* "EE TT" at 20 WPM: E 60, the letter's gap 180, E, the word's 420, T 180, gap 180, T */
+    static const uint32_t want[] = {0, 60, 240, 300, 720, 900, 1080, 1260};
+
+    puts("CW with its sleeps cut short by signals");
+    for (int every = 2; every <= 5; every++) {
+        reset();
+        eintr = every;
+        cw_encoder_send("EE TT", false);
+
+        bool ok = wait_idle() && n_key == 8;
+
+        for (int i = 0; ok && i < 8; i++) {
+            ok = keylog[i].t - keylog[0].t == want[i];
+        }
+        eintr = 0;
+        if (!ok) {
+            printf("    the edges:");
+            for (int i = 0; i < n_key; i++) printf(" %s%u", keylog[i].on ? "v" : "^", keylog[i].t - keylog[0].t);
+            printf("\n");
+        }
+        check(ok && key_left_up(), "every %d sleep(s) cut short half way: the edges at 0 60 240 300 720 900 1080 1260 "
+              "ms (%d edges, the last at %u)", every, n_key, n_key ? keylog[n_key - 1].t - keylog[0].t : 0);
+    }
+}
+
 /* The time a dot of the key log took, the i-th element */
 static uint32_t dot_ms(int i) {
     return keylog[2 * i + 1].t - keylog[2 * i].t;
@@ -895,6 +967,7 @@ int main(void) {
     test_qrss_send();
     test_qrss_stops();
     test_cw();
+    test_cw_signals();
     test_cw_wpm();
     test_cw_tci();
     test_sched_rules();
