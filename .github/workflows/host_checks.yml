@@ -1,8 +1,9 @@
 # Every host check of the repository (tools/host_checks.sh, upstream #46): each tools/*/ test built and run on
 # Linux, with what they need from outside the repository at the radio's own versions (liquid-dsp 1.4.0 and ft8_lib at
 # tools/cross_x6200/setup.sh's revision). A check that does not build fails the job as a failing case does, and the
-# table tells them apart (BUILD against FAIL); the ones that need a buildroot tree or the GUI's host build are SKIP,
-# each saying what. Minutes.
+# table tells them apart (BUILD against FAIL); the ones that need a buildroot tree are SKIP here, each saying what, and
+# run in the image build (main.yml, "Host checks with the image's tree": gps, hw_x6200, wifi_restore); the updater's in
+# updater.yml. Minutes.
 name: Host checks
 
 on:

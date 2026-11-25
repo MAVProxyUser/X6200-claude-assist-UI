@@ -154,3 +154,19 @@ jobs:
         files: |
           ${{ env.X6CI_IMAGES }}/${{ env.X6CI_IMG }}.zip
           ${{ env.X6CI_IMAGES }}/${{ env.X6CI_BUNDLE }}
+
+    # The host checks that need a radio image's buildroot tree, which the host checks' workflow has not (it SKIPs
+    # them): here, with this build's tree beside the checkout, where their Makefiles look for it. tools/gps (the GUI's
+    # gpsd client against gpsd 3.25's own libgps), tools/hw_x6200 (the X6200's start against its control library;
+    # the X6200's tree only) and tools/wifi_restore (the Backup page's WiFi restore and the factory reset's WiFi
+    # choice, against a NetworkManager in namespaces of its own, with only the programs this image has). After the
+    # release: a failing check marks the run, it does not hold the release back
+    - name: Host checks with the image's tree
+      run: |
+        for i in 1 2 3; do sudo apt-get update -q -o Acquire::Retries=3 > /dev/null && break; sleep 20; done
+        for i in 1 2 3; do sudo apt-get install -y -q -o Acquire::Retries=3 network-manager dbus util-linux \
+          > /dev/null && break; sleep 20; [ $i = 3 ] && exit 1; done
+        cd x6100_gui
+        make -C tools/gps
+        if [ "${{ matrix.model }}" = x6200 ]; then make -C tools/hw_x6200; fi
+        make -C tools/wifi_restore TARGETS=$GITHUB_WORKSPACE/${{ matrix.tree }}/build/target

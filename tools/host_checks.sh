@@ -107,11 +107,11 @@ missing() {
     elif grep -q "autoreconf is needed" "$log"; then
         echo "needs RADE built (tools/rade/build.sh: autotools)"
     elif grep -q -E "GPSD=.*needed" "$log"; then
-        echo "needs a gpsd 3.25 build: GPSD=<its buildroot build folder>"
+        echo "needs a gpsd 3.25 build: GPSD=<its buildroot build folder> (CI: the image build runs it)"
     elif grep -q "no radio image found: give TARGETS" "$log"; then
-        echo "needs a radio image's buildroot target: TARGETS=<its folders>"
+        echo "needs a radio image's buildroot target: TARGETS=<its folders> (CI: the image build runs it)"
     elif grep -q "No X6200 control library sources" "$log"; then
-        echo "needs the X6200 control library's sources: X6200_CONTROL=<folder>"
+        echo "needs the X6200 control library's sources: X6200_CONTROL=<folder> (CI: the X6200 image build runs it)"
     elif grep -q -E "(No rule to make target|[Nn]o such file or directory)[^a-z]*[^ ]*build-host/lib/(liblvgl|liblv_drivers)\.a" "$log"; then
         # the library missing, not its path on a command line that failed for another reason
         echo "needs the GUI's host build (build-host, cmake with SDL)"
