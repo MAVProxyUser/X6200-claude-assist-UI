@@ -151,6 +151,13 @@ their tallies and GUI versions. **Where the radios differ**: the caps test's map
 orchestrator does, the newest first; `/log` the whole run's events, `/status` the state as JSON, `/shot/<file>` a
 screen picture.
 
+A test's tally ("3/3 passed") counts from the last change to its own code (`test_code`: its function's source), the
+lifetime totals beside it: a test fixed over several runs no longer reads 1/7 for ever. **Between runs** the standing
+console watches the radios itself (`idle_watch`): their frequency and mode over receive-only sessions every 2 s,
+nothing set and control never taken; a difference over 3 s shows OUT OF SYNC in the sync state and the events, and
+goes to `~/.config/x6x00-bench/idle_sync.jsonl` (a dial bumped at the radio between runs, 2026-11-25). The next run's
+own check puts the two alike, its guard watching from then on.
+
 ## Files
 
 | where | what |

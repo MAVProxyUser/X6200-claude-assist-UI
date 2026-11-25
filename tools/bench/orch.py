@@ -263,6 +263,82 @@ tick();setInterval(tick,700);
 </script></body></html>"""
 
 
+# Between runs the standing console watches the two radios itself (the owner, 2026-11-25: one found on USB-D, the other
+# on CW after a dial bumped at the radio, "make sure that is part of the scripted radio sync checks"): their frequency
+# and mode read over receive-only sessions (nothing set, control never taken), a difference standing over
+# IDLE_APART_S shown as OUT OF SYNC on the console and kept in idle_sync.jsonl. A run's own guard takes over while it
+# runs (the sessions closed meanwhile); its ready() puts the two alike again
+IDLE_POLL_S = 2.0
+IDLE_APART_S = 3.0
+IDLE_LOG = os.path.join(bench.STATE, "idle_sync.jsonl")
+IDLE = {"ok": None, "radios": {}, "since": None, "said": False, "events": [], "violations": 0, "last": ""}
+IDLE_LOCK = threading.Lock()
+
+
+def idle_watch():
+    """The standing console's watch between runs (IDLE)"""
+    rs = {}
+    c = bench.conf()
+    while True:
+        time.sleep(IDLE_POLL_S)
+        try:
+            age = time.time() - float(json.load(open(SNAPSHOT)).get("now") or 0)
+        except (OSError, ValueError):
+            age = 1e9
+        if age < SNAPSHOT_STALE_S:              # a run is going: its guard watches, the sessions stand aside
+            for r in rs.values():
+                try:
+                    r.r.close()
+                except OSError:
+                    pass
+            rs = {}
+            with IDLE_LOCK:
+                IDLE.update(ok=None, since=None, said=False)
+            continue
+        for n in (A, B):
+            if n not in rs or rs[n].stale(10):
+                try:
+                    if n in rs:
+                        rs[n].r.close()
+                    rs[n] = bench.Radio(n, c["radios"][n], False)
+                except (Refused, OSError):
+                    rs.pop(n, None)
+        if len(rs) < 2:
+            continue
+        now = {n: {"freq": int(r.state.get("freq", 0)), "mode": int(r.state.get("mode", -1)),
+                   "pg": r.state.get("pg"), "app": r.state.get("app") or r.state.get("win"), "tx": bool(r.tx)}
+               for n, r in rs.items()}
+        apart = [k for k in ("freq", "mode") if now[A][k] != now[B][k]]
+        t = time.time()
+        with IDLE_LOCK:
+            IDLE["radios"] = now
+            if not apart:
+                if IDLE["said"]:
+                    e = {"t": t, "kind": "ok", "text": f"idle: both alike again ({now[A]['freq']} Hz mode "
+                                                        f"{now[A]['mode']})", "test": None}
+                    IDLE["events"].append(e)
+                    _idle_log(e)
+                IDLE.update(ok=True, since=None, said=False)
+                continue
+            IDLE["since"] = IDLE["since"] or t
+            if t - IDLE["since"] >= IDLE_APART_S and not IDLE["said"]:
+                text = (f"idle: OUT OF SYNC, {' and '.join(apart)} apart: {A} {now[A]['freq']} Hz mode {now[A]['mode']}"
+                        f", {B} {now[B]['freq']} Hz mode {now[B]['mode']} (the next run puts them alike)")
+                e = {"t": t, "kind": "bad", "text": text, "test": None}
+                IDLE["events"].append(e)
+                del IDLE["events"][:-50]
+                IDLE.update(ok=False, said=True, violations=IDLE["violations"] + 1, last=text)
+                _idle_log(e)
+
+
+def _idle_log(e):
+    try:
+        with open(IDLE_LOG, "a") as f:
+            f.write(json.dumps(e) + "\n")
+    except OSError:
+        pass
+
+
 def snapshot_json():
     """SNAPSHOT as the console serves it: a run not writing it said in its phase (the run's last state kept)"""
     try:
@@ -277,6 +353,13 @@ def snapshot_json():
         d["phase"] = f"no run going: the last ({os.path.basename(d.get('run_dir') or '')}) {d.get('phase')}, " \
                      f"its last word {int(age // 60)} min ago"
         d["cur"] = None
+        with IDLE_LOCK:                         # the console's own watch between runs (idle_watch)
+            if IDLE["ok"] is not None:
+                d["sync"] = {"ok": IDLE["ok"], "changing": False, "violations": IDLE["violations"],
+                             "last": IDLE["last"], "declared": []}
+                for n, v in IDLE["radios"].items():
+                    d.setdefault("radios", {}).setdefault(n, {}).update(v, age=0, link="live (idle watch)")
+            d["events"] = list(d.get("events") or []) + list(IDLE["events"])
     d["now"] = time.time()
     return json.dumps(d, default=str)
 
@@ -6378,6 +6461,7 @@ def main():
         return
     if a.cmd == "console":
         console(None, a.port, a.lan)
+        threading.Thread(target=idle_watch, daemon=True).start()
         say(f"console: http://{'0.0.0.0' if a.lan else '127.0.0.1'}:{a.port}/ (the runs' {SNAPSHOT})")
         while True:
             time.sleep(3600)

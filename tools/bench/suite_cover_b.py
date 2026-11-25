@@ -300,12 +300,16 @@ def pick(r, h, key, want, n, secs=7.0):
     if cur is None:
         raise bench.Refused(f"{r.name}: {key} not in /mnt/gui_state.conf")
     sign = 1
-    for _ in range(3):
+    for k in range(3):
         if cur == want:
             return cur
-        d = (want - cur) % n
-        if d > n // 2:
-            d -= n
+        # the plain difference first: never across the list's ends, so right whatever its length (n is only for
+        # the way back round; 2026-11-25 F SYSTEM grew by NIFOG and GMRS and its shortcut round the end landed wrong)
+        d = want - cur
+        if k:
+            d = (want - cur) % n
+            if d > n // 2:
+                d -= n
         start = cur
         clicks(r, "mfk", sign * d)
         cur = gwait(h, lambda g: g.get(key) == want, secs).get(key)
