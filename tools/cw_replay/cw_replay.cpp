@@ -3,7 +3,7 @@
 // little-endian, full scale 2.0 (test.sh's recording: the radio's audio peaks over 1). Args: band_lo band_hi
 // floor_db [expect_wpm] (the CW filter's edges, Dec SNR). KEYS=1: each key down and up on stderr, by time (and by the
 // detector's own step clock: what the receiver gives the detector again after a lock move or its first second comes
-// out at once); TEXTS=1: each piece of text, by time
+// out at once); TEXTS=1: each piece of text, by time; BASE_PEAK=tone:q: the X6200 base's resonance taken out (cw.cpp); APF=tone:q: the peak filter's
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -34,6 +34,18 @@ int main(int argc, char **argv) {
         [&]() { steps++; });
     rx->set_floor_db(floor_db);
     rx->set_band(lo, hi);
+    /* APF=tone:q: the radio's peak filter on (its colour in the audio: replay.py does not put it there) */
+    if (const char *ap = getenv("APF")) {
+        float tone = 0, q = 0;
+        if (sscanf(ap, "%f:%f", &tone, &q) == 2 && tone > 0 && q > 0)
+            rx->set_apf(true, tone, q);
+    }
+    /* BASE_PEAK=tone:q: the X6200 base's resonance at its key tone in CW, as src/cw.cpp gives it there */
+    if (const char *bp = getenv("BASE_PEAK")) {
+        float tone = 0, q = 0;
+        if (sscanf(bp, "%f:%f", &tone, &q) == 2 && tone > 0 && q > 0)
+            rx->set_base_peak(true, tone, q);
+    }
     if (argc > 4) rx->expect(atof(argv[4]));
     std::vector<float> buf(32);
     std::vector<int16_t> s16(buf.size());

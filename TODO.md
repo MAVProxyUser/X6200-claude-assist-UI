@@ -77,13 +77,16 @@ Done 2026-11-25 night (the same asks, continued):
   and read the X6100's 15 WPM VVV as TTT); the band measured again when the decoder's audio comes back, the CW
   filter changes or the radio's own over has ended (aed0bd7a). 31 bench recordings old against new (tools/cw_replay, four new checks; tools/cw_trainer's noise
   jump); cw-text and cw-carrier keep the listener's audio now. Both radios by hot install, in the next tag.
-  Left: the X6200's noise in CW has a 17 dB hump at the key tone (its base's CW filter), against which every tone is
-  judged; after a strong signal near its passband (the X6100's path proof: its S-meter -121 -> -79 dBm) its decoder
-  stays trapped printing noise and runs fast into the next text (cw-carrier x6100>x6200's quiet, now and then cw-kbd's
-  'TTT TTT', and tci-cw x6100>x6200's 'TTTET TTTT T T TTT', which its attribution then lays on the X6100's base).
-  Six tries reverted (ORCH_FINDINGS). Next to try: Receiver::start_over when the S-meter falls 20 dB and
-  more after a second or more up (dsp_psd carries smeter_dbm), so the band is measured again once a strong signal ends;
-  needs a TX round (the chain-ok word).
+  The X6200's hump: DONE 2026-11-25 08:20 (receive verified; the over-the-air reruns wait for the chain-ok word).
+  New orch cw-quiet (receive only) showed it needs no strong signal: the X6200 printed 'ESI I I EI E T E I' in a quiet
+  after a plain USB-D to CW switch, the X6100 nothing. New orch cw-noise-shape measured it: the X6200's base puts CW
+  and CW-R's receive audio through one resonance at the key tone (Q about 10, 21 dB over the far band, any CW filter).
+  The decoder now takes that colour out of the spectrum and puts it into the noise at the lock (this morning's fixed
+  colour had taken it out of the spectrum alone, as the APF's always was: the quiets no better). Fixed on the way: the
+  carrier floor's jump at a station's first second (KeyDetector::rescale, 'VV' read 'VS'), the lock's emptied filters
+  after a move (Receiver::rewind, 'VVV' read 'UVV'), the X6200's CW peak (no filter in its base) no longer misleading
+  its decoder. cw-quiet passes; 46 bench recordings as good or better; tools/cw_replay 13 checks, CW Trainer 73.
+  NEXT (TX, the chain-ok word): cw-text both ways, air cw-kbd, air cw-carrier, air tci-cw.
 - The apps on the X6200 under 1 W hold their level as TCI's do (tx_player coarse; tools/txlevel: -3.0 dB in 20 overs
   before, 0.0 now). The 0.1 W skirt is not this (ft8-copies x6200 unchanged).
 - TCI over's end (the owner's 'TCI unkeys before its audio is out'): DONE. New orch tests tci-tail x6200/x6100

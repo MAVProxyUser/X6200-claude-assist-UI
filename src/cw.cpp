@@ -83,6 +83,15 @@ static int                 wpm_sent = 0;
 static bool                own_tx   = false;
 static uint32_t            rx_count = UINT32_MAX;   /* samples since the radio left TX */
 
+#ifdef BOARD_X6200
+/* The X6200's base colours CW's receive audio itself, CW and CW-R alike: one resonance at the key tone, its noise
+ * 17-21 dB over the band's floor there (orch cw-noise-shape, 2026-11-25, nothing on the air: fitted by Q 9.4-10.9
+ * through 300-1100 to 100-1300 Hz; measured at the 700 Hz key tone, taken to follow it). Judged against the band's
+ * floor, that noise keyed the decoder in every quiet (orch cw-quiet: 'ESI I I EI E T E I'). Taken out as the APF's
+ * (Receiver::set_base_peak) */
+#define BASE_PEAK_Q 10.0f
+#endif
+
 /* Squelch: noise keys the detector now and then and prints lone Es, Ts and Is. A character counts
  * when its keyed frames average SQ_MARGIN_DB over the Dec SNR threshold: on 40 m the noise's
  * characters averaged 6-11 dB, a real station's 14-28 dB (Dec SNR 8). The text opens after
@@ -178,8 +187,19 @@ static void apply_rx_params() {
         peak_on = rx_peak_on;
         peak_tone = rx_peak_tone;
         peak_q = rx_peak_q;
+#ifdef BOARD_X6200
+        /* The X6200's base has no peaking filter (hw_x6200.c: CW peak has no register there): its audio has no such
+         * colour to take out. Told of one, the decoder took it out of audio that did not have it and judged the
+         * noise off the key tone up to 12 dB too low: with CW peak on most of the X6200's 29 bench recordings of the
+         * X6100's CW copied worse than with it off ('VS', 'PARI'), at Q 8 their gaps printed noise (2026-11-25) */
+        receiver->set_apf(false, peak_tone, peak_q);
+#else
         receiver->set_apf(peak_on, peak_tone, peak_q);
+#endif
     }
+#ifdef BOARD_X6200
+    receiver->set_base_peak(true, rx_peak_tone, BASE_PEAK_Q);   /* a change only: the band measured again */
+#endif
 }
 
 bool cw_audio_wanted(void) {

@@ -70,7 +70,10 @@ class KeyDetector {
     KeyEdge schmitt(float r);
     float   crossing() const;
     void    follow_peak(float r);
+    void    levels();
     bool    rose(float r) const;
+    float   lift() const;           /* the carrier floor's raise of the noise reference, 1 or more */
+    void    rescale(float f);       /* the levels kept in the noise reference's units after it moved by 1/f */
 
     /* Schmitt trigger */
     float  floor_db_  = 5.0f;

@@ -40,6 +40,53 @@ float apf_gain2(float tone_hz, float q, float hz) {
     return den > 0.0f ? num * num / den : 0.0f;
 }
 
+float base_peak_gain2(float tone_hz, float q, float hz) {
+    if (hz <= 0.0f || tone_hz <= 0.0f)
+        return 0.0f;
+    float d = hz / tone_hz - tone_hz / hz;
+    return 1.0f / (1.0f + q * q * d * d);
+}
+
+/* The colours' least |H|^2 the spectrum is divided by: a tone far outside the band must not divide by 0. The base's
+ * resonance is -33 dB at TONE_MIN_HZ; the APF's can go much lower */
+constexpr float APF_G2_MIN  = 1e-8f;
+constexpr float BASE_G2_MIN = 1e-4f;
+
+/* The tone lock's step (src/cw_decoder/tone_lock.cpp: the mean of INTEG_LEN samples, 16 ms) takes in the noise
+ * within some 31 Hz either side of its tone: sinc^2 at the bin steps around it, the colour averaged with them */
+constexpr std::array<float, 4> STEP_W = {1.0f, 0.81f, 0.405f, 0.09f};
+
+float ToneFinder::colour2(float hz, bool base) const {
+    float g = 1.0f;
+    if (apf_on_)
+        g *= std::max(apf_gain2(apf_tone_, apf_q_, hz), APF_G2_MIN);
+    if (base && base_on_)
+        g *= std::max(base_peak_gain2(base_tone_, base_q_, hz), BASE_G2_MIN);
+    return g;
+}
+
+void ToneFinder::colour() {
+    for (size_t i = 0; i < FFT_BINS; i++) {
+        g2_[i]    = colour2(static_cast<float>(i) * BIN_HZ, true);
+        g2_tx_[i] = colour2(static_cast<float>(i) * BIN_HZ, false);
+    }
+}
+
+/* While the radio transmits the decoder hears its own sidetone (the CW Trainer's groups), which nothing says the
+ * X6200's base puts through its resonance: there the finder divides out only the APF's colour, and the lock's noise
+ * is the floor's, as before the resonance was known */
+float ToneFinder::colour_at(float hz) const {
+    if ((!apf_on_ && !base_on_) || tx_)
+        return 1.0f;
+    float sum = 0.0f, w = 0.0f;
+    for (size_t k = 0; k < STEP_W.size(); k++) {
+        float d = static_cast<float>(k) * BIN_HZ;
+        sum += STEP_W[k] * (k ? colour2(hz - d, true) + colour2(hz + d, true) : colour2(hz, true));
+        w   += STEP_W[k] * (k ? 2.0f : 1.0f);
+    }
+    return sum / w;
+}
+
 ToneFinder::ToneFinder() {
     plan_ = fft_create_plan(FFT_LEN, time_.data(), freq_.data(), LIQUID_FFT_FORWARD, 0);
     if (!plan_)
@@ -55,7 +102,8 @@ ToneFinder::ToneFinder() {
     for (float &h : hann_)
         h *= scale;
 
-    apf_g2_.fill(1.0f);
+    g2_.fill(1.0f);
+    g2_tx_.fill(1.0f);
     set_band(400.0f, 1200.0f);
 }
 
@@ -71,15 +119,23 @@ void ToneFinder::set_band(float lo_hz, float hi_hz) {
 }
 
 void ToneFinder::set_apf(bool on, float tone_hz, float q) {
-    apf_on_ = on;
-    if (on) {
-        for (size_t i = 0; i < FFT_BINS; i++) {
-            float g2   = apf_gain2(tone_hz, q, static_cast<float>(i) * BIN_HZ);
-            apf_g2_[i] = g2 > 1e-8f ? g2 : 1e-8f;  /* a tone outside the band must not divide by 0 */
-        }
-    }
+    apf_on_   = on;
+    apf_tone_ = tone_hz;
+    apf_q_    = q;
+    colour();
     /* The floor was measured in other units: start again */
     noise_ = -1.0f;
+}
+
+bool ToneFinder::set_base_peak(bool on, float tone_hz, float q) {
+    if (on == base_on_ && (!on || (tone_hz == base_tone_ && q == base_q_)))
+        return false;
+    base_on_   = on;
+    base_tone_ = tone_hz;
+    base_q_    = q;
+    colour();
+    noise_ = -1.0f;
+    return true;
 }
 
 bool ToneFinder::push(float x, float lock_hz, PeakReport &out) {
@@ -106,7 +162,7 @@ bool ToneFinder::push(float x, float lock_hz, PeakReport &out) {
 
 void ToneFinder::analyse(float lock_hz, PeakReport &out) {
     for (size_t i = first_; i <= last_; i++)
-        pwr_[i] = apf_on_ ? std::norm(spec_[i]) / apf_g2_[i] : std::norm(spec_[i]);
+        pwr_[i] = !apf_on_ && !base_on_ ? std::norm(spec_[i]) : std::norm(spec_[i]) / (tx_ ? g2_tx_[i] : g2_[i]);
 
     size_t top = first_;
     for (size_t i = first_ + 1; i <= last_; i++)

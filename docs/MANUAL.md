@@ -6919,8 +6919,9 @@ Train is for practice: the key, the paddle, the CW messages and the
 In CW mode the decoder buttons are on the CW pages: CW 1:2 has ZAP, CW
 peak, CW peak Q and Log QSO (the [quick QSO log](#quick-qso-log)), CW 2:2 Decoder on/off, Tuner (tuning
 indicator), Dec SNR and Parse. CW peak and its Q shape what you hear on the X6100 (the base's peaking filter at the
-key tone) and the decoder's input on both radios; the X6200's base has no such filter, so there they act on the
-decoder only. Text and speed (WPM) appear in the panel
+key tone) and the decoder's input. The X6200's base has no such filter, so there they do nothing (up to v0.3.12.48
+its decoder took the filter's shape out of audio that did not have it and copied worse with CW peak on). Text and
+speed (WPM) appear in the panel
 over the waterfall. The panel is see-through in every theme (up to v0.3.12.30 the
 flat themes, the Sentry's gold on black among them, filled it solid, so with the
 decoder on the classic screen showed no waterfall in CW); High contrast keeps it
@@ -6955,6 +6956,17 @@ solid.
   from the noise it had last measured (after a transmission, from the
   receiver's first audio, still coming back), the band's noise could key
   it, and that noise kept itself keying and set the speed.
+- On the X6200 a quiet band prints nothing. Its base shapes CW's (and
+  CW-R's) receive audio itself, whatever the CW filter: a resonance at the
+  key tone about 100 Hz wide, the noise there some 20 dB over the rest of
+  the band. The decoder now takes that shape out of the band it measures
+  and judges each tone against the noise at that tone. Up to v0.3.12.48 it
+  judged every tone against the band's quieter part: the noise at the key
+  tone printed "E I T" in pauses, and a station after a pause could start
+  with stray letters or come out "TTT TTT" for "VVV VVV". The same goes for the X6100's CW
+  peak filter: with it on (a higher Q colours the noise more), each tone
+  is judged against the noise the filter leaves at it. This was measured
+  with a 700 Hz key tone; the shape is taken to follow the key tone.
 - It looks for the tone from 150 Hz up, however low the CW filter starts:
   under it are the keying's thumps, not a tone. Up to v0.3.12.47 a CW filter
   from 0 Hz let it lock on them in a strong signal's loud audio (the X6100

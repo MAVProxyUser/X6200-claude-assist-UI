@@ -51,5 +51,35 @@ whole 300 3000 x6200_cw_on_x6100.s16 cold
 whole 400 6000 x6100_cw_on_x6200.s16 cold
 whole 400 3000 x6200_cw_on_x6100.s16 warm
 whole 400 3000 x6100_cw_on_x6200.s16 warm
+# The X6200's base colours CW's receive audio itself: one resonance at the key tone, Q about 10, its noise 17-21 dB
+# over the band's floor there (2026-11-25, orch cw-noise-shape), against which the decoder judged every tone: in a
+# quiet it keyed on that noise and printed it (orch cw-quiet: 'ESI I I EI E T E I' with nothing on the air). src/cw.cpp
+# gives the X6200's decoder the resonance (BASE_PEAK here), taken out of the spectrum and put back into the noise at
+# the lock. Then: 12 s of its quiet print nothing (' EE EE E ' before); the X6100's TCI 'VV TEST' whole, its lock no
+# longer on the noise's hump when the station began (the carrier floor measured over the station's first second
+# raised the detector's noise 17 dB at once and its levels stayed in the old units: 'VS TES', KeyDetector::rescale);
+# 'VVV' whole, the lock that keyed on the first dit's leak 39 Hz off moving to it (its filters filled from the audio
+# before, not empty: 'VVU', Receiver::rewind)
+colour() {  # FILE WANT: the text must be WANT (an empty one for a quiet)
+    n=$((n + 1))
+    out=$(BASE_PEAK=700:10 S16=1 ./cw_replay 300 1100 8 20 < "$1" 2> /dev/null)
+    case $out in
+        *"text: '$2'"*) echo "ok   the X6200's resonance taken out, $1: $out" ;;
+        *) echo "FAIL the X6200's resonance taken out, $1: $out"; bad=$((bad + 1)) ;;
+    esac
+}
+colour x6200_quiet.s16 ""
+colour x6100_tci_vv_on_x6200.s16 "VV TES"
+colour x6100_vvv_on_x6200.s16 "VVV IT"
+colour x6100_cw_on_x6200.s16 "VVV TEST DE Q1TST "
+# The radio's peak filter (APF) colours the noise as the X6200's resonance does (Q 8: +5.6 dB at the tone, -9 to -12
+# at the band's edges), and its colour was taken out of the spectrum alone: the X6100's audio of the X6200's TCI
+# "VV TEST", put through the APF's own filter at Q 8 (12.5 kHz, tone_finder.cpp apf_gain2's), read 'VI TEST'
+n=$((n + 1))
+out=$(APF=700:8 S16=1 ./cw_replay 300 1100 8 20 < x6200_tci_vv_on_x6100_apf8.s16 2> /dev/null)
+case $out in
+    *"text: 'VV TEST'"*) echo "ok   the APF's colour taken out at the lock too: $out" ;;
+    *) echo "FAIL the APF's colour taken out at the lock too: $out"; bad=$((bad + 1)) ;;
+esac
 echo "cw_replay: $n checks, $bad failed"
 [ $bad -eq 0 ]

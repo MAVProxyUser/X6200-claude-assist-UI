@@ -42,15 +42,30 @@ void Receiver::set_apf(bool on, float tone_hz, float q) {
     held_n_ = 0;
 }
 
+void Receiver::set_base_peak(bool on, float tone_hz, float q) {
+    if (finder_.set_base_peak(on, tone_hz, q))     /* the floor in other units */
+        start_over();
+}
+
 void Receiver::feed(const float *x, size_t n) {
     for (size_t i = 0; i < n; i++) {
         /* The noise floor is the gaps': not followed while the key is down, nor
          * while its mark is still in the FFT's 64 ms (ToneFinder::analyse) */
         finder_.hold_noise(keyer_.down() || keyer_.up_steps() * INTEG_STEP < FFT_LEN);
         if (finder_.push(x[i], lock_.hz(), peak_) && finder_.noise() > 0.0f) {
-            step_noise_ = finder_.noise() * NOISE_TO_STEP;
+            /* The floor is the band's with its colour divided out (the APF's, the X6200 base's resonance); the noise
+             * at the lock's tone has it: there the X6200's CW noise stands 17-21 dB over the band's floor at the key
+             * tone. Judged against the band's floor, that noise keyed the detector in every quiet and counted as a
+             * station (2026-11-25, orch cw-quiet: 'ESI I I EI E T E I' with nothing on the air; the X6100, flat, nothing).
+             * A colour taken out of the spectrum alone (the APF's till then) lowered the floor under it and not the
+             * noise at the lock: the quiets no better, a station at the tone found later */
+            step_noise_ = finder_.noise() * NOISE_TO_STEP * finder_.colour_at(lock_.hz());
             lock_.set_noise(step_noise_);
             if (lock_.follow(peak_)) {
+                /* The noise at the new tone: with a colour it can be 30 dB from the old one's, and the audio given
+                 * again (rewind) is judged against it */
+                step_noise_ = finder_.noise() * NOISE_TO_STEP * finder_.colour_at(lock_.hz());
+                lock_.set_noise(step_noise_);
                 timer_.new_tone();
                 keyer_.new_tone();
                 held_n_ = 0;   /* the carrier floor is measured again on this tone, from here (KeyDetector) */
@@ -84,13 +99,21 @@ void Receiver::lock_step(float x, bool rewound) {
  * detector was still on (its elements given twice, from the leak of a strong station 50 Hz away that the lock left)
  */
 void Receiver::rewind() {
-    size_t up = keyer_.down() || pend_ ? 0 : keyer_.up_steps() * INTEG_STEP;
-    size_t n  = std::min({since_move_, up, REWIND_LEN});
-    size_t at = (past_pos_ + REWIND_LEN - n) % REWIND_LEN;
+    size_t up   = keyer_.down() || pend_ ? 0 : keyer_.up_steps() * INTEG_STEP;
+    size_t n    = std::min({since_move_, up, REWIND_LEN});
+    size_t warm = std::min(WARM_LEN, REWIND_LEN - n);
+    size_t at   = (past_pos_ + 2 * REWIND_LEN - n - warm) % REWIND_LEN;
 
+    /* The lock's low-pass and integrator, emptied by the move (ToneLock::tune), filled first from the audio before
+     * what is given again, nothing keyed by it: else their first steps on the new tone read the noise or less. With
+     * the detector on a mark (nothing given again: the lock 39 Hz off a station keyed on its first dit's leak, then
+     * moved to it) that first step ended the mark and the dit was dropped as a blip: the X6200's 'VVV' came out 'UVV'
+     * once its lock wandered the band in a quiet, its resonance taken out (2026-11-25) */
     since_move_ = 0;
-    rewinding_  = true;
-    for (size_t k = 0; k < n; k++)
+    for (size_t k = 0; k < warm; k++)
+        lock_.push(past_[(at + k) % REWIND_LEN], true);
+    rewinding_ = true;
+    for (size_t k = warm; k < warm + n; k++)
         lock_step(past_[(at + k) % REWIND_LEN], true);
     rewinding_ = false;
 }

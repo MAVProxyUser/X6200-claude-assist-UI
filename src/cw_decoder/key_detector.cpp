@@ -58,10 +58,18 @@ KeyEdge KeyDetector::step(float power, float noise) {
          * of the X6100's noise (297 Hz) keyed E after E (2026-11-25) */
         batch_[batch_n_++] = power;
         if (batch_n_ == BATCH) {
-            auto q = batch_.begin() + static_cast<long>(PCT * BATCH);
+            float was = lift();
+            auto  q   = batch_.begin() + static_cast<long>(PCT * BATCH);
             std::nth_element(batch_.begin(), q, batch_.end());
             carrier_ = std::max({carrier_, *q / noise, 1e-3f * PCT_NOISE});
             muted_   = false;
+            /* A floor measured over a station's first second (the lock moved to it as it began) raises the noise
+             * reference at once, by what the station sends between its elements: the mark's peak and the steps
+             * before stay in its units. Left in the old ones, the thresholds stood that much over the marks: the
+             * X6100's gaps 7 dB over the X6200's noise at its tone raised it 17 dB, and the dah then keyed (16 dB
+             * over the new reference, 13 dB under the old peak's threshold) was lost: 'VV' came out 'VS' (2026-11-25,
+             * the X6200's resonance taken out, its lock no longer on the noise's hump when the station came) */
+            rescale(was / lift());
         }
     }
     if (muted) {
@@ -75,7 +83,7 @@ KeyEdge KeyDetector::step(float power, float noise) {
     }
     last_power_ = power;
 
-    float n  = noise * std::max(1.0f, carrier_ / (CARRIER_K * PCT_NOISE));
+    float n  = noise * lift();
     float rn = power / n;
 
     KeyEdge e = schmitt(rn);
@@ -157,10 +165,29 @@ void KeyDetector::follow_peak(float r) {
     peak_ *= down_ ? 0.97f : 0.94f;
     if (peak_ < 1.0f)
         peak_ = 1.0f;
+    levels();
+}
 
+void KeyDetector::levels() {
     on_lvl_  = std::max(peak_ * from_db(-3.0f), from_db(floor_db_));
     off_lvl_ = std::max(peak_ * from_db(-6.0f), from_db(floor_db_ - 3.0f));
     mid_lvl_ = 1.0f + (peak_ - 1.0f) * from_db(-6.0f);
+}
+
+float KeyDetector::lift() const {
+    return std::max(1.0f, carrier_ / (CARRIER_K * PCT_NOISE));
+}
+
+void KeyDetector::rescale(float f) {
+    if (f == 1.0f)
+        return;
+    peak_       = std::max(1.0f, peak_ * f);
+    mark_peak_ *= f;
+    r_old_     *= f;
+    r_new_     *= f;
+    for (float &p : past_)
+        p *= f;
+    levels();
 }
 
 /* Where between the last old-side step and the first new-side step the

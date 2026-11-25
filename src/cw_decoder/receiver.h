@@ -58,6 +58,9 @@ class Receiver {
     void  start_over();
     /* The radio's peak filter (APF) is on: its colour is taken out of the noise */
     void  set_apf(bool on, float tone_hz, float q);
+    /* The X6200's base's own resonance at the key tone in CW (ToneFinder::set_base_peak): taken out as the APF's.
+     * A change measures the band again (start_over) */
+    void  set_base_peak(bool on, float tone_hz, float q);
     /* The VFO moved: the station is df Hz further up in the audio */
     void  follow_vfo(float df) { lock_.shift(df); }
     /* The next n dits and dahs are our own keying (MorseText::own), not
@@ -88,6 +91,7 @@ class Receiver {
     /* The audio the lock is given again when it moves (rewind): the tone finder sees a station's first mark 40-70 ms
      * after it began, and its first dit was lost or a blip */
     static constexpr size_t REWIND_LEN = 768;   /* 192 ms */
+    static constexpr size_t WARM_LEN   = 160;   /* the lock's low-pass (81 taps) and integrator (64) filled (rewind) */
 
     ToneFinder   finder_;
     ToneLock     lock_;

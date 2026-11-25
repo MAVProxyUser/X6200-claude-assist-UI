@@ -24,6 +24,12 @@ namespace cw {
 constexpr float APF_RATE = 12500.0f;
 float apf_gain2(float tone_hz, float q, float hz);
 
+/* The X6200's base colours CW's receive audio itself, the GUI's APF off: one resonance at the key tone, signal and
+ * noise alike (2026-11-25, orch cw-noise-shape, nothing on the air: through 100-1300 Hz the noise 21 dB over the far
+ * band at 700 Hz, -18 dB at 150 Hz, -6 dB 100-145 Hz wide; fitted within 0.5-1.7 dB rms by Q 9.4-10.9 at 709-714 Hz,
+ * every CW filter alike). Its |H|^2, 1 at the tone */
+float base_peak_gain2(float tone_hz, float q, float hz);
+
 class ToneFinder {
   public:
     ToneFinder();
@@ -38,6 +44,10 @@ class ToneFinder {
 
     void  set_band(float lo_hz, float hi_hz);
     void  set_apf(bool on, float tone_hz, float q);
+    bool  set_base_peak(bool on, float tone_hz, float q);   /* true when it changed */
+    /* The colour (|H|^2 of the APF and the base's resonance) the finder divides out of the spectrum, as the tone
+     * lock's step at hz takes it in: averaged over the step's 16 ms integrator (62 Hz wide). 1 with no colour */
+    float colour_at(float hz) const;
     float noise() const { return noise_; }   /* per-bin noise power, < 0 until the first frame */
     /* The key is down, or its mark is still in the FFT window: the noise is not
      * followed then (Receiver::feed) */
@@ -76,8 +86,15 @@ class ToneFinder {
     std::array<std::complex<float>, FFT_BINS> spec_;
     fftplan plan_ = nullptr;
 
+    float colour2(float hz, bool base) const;   /* |H|^2 at hz: the APF's, and the base's with base */
+    void  colour();                             /* g2_ and g2_tx_ from them */
+
     bool                         apf_on_ = false;
-    std::array<float, FFT_BINS>  apf_g2_;
+    float                        apf_tone_ = 0.0f, apf_q_ = 1.0f;
+    bool                         base_on_ = false;
+    float                        base_tone_ = 0.0f, base_q_ = 1.0f;
+    std::array<float, FFT_BINS>  g2_;       /* receiving: the APF's and the base's */
+    std::array<float, FFT_BINS>  g2_tx_;    /* transmitting: the APF's alone (colour_at) */
     std::array<float, FFT_BINS>  pwr_{};
     std::array<float, FFT_BINS>  sorted_{};
 
