@@ -14,6 +14,14 @@
  *     the audio's stamp (slot_info_t's rx_start_ns) is 0.3 s in both kinds of slot. (Upstream's worker started that
  *     slot late, by the hold, and its test asked for that.) Takes about 30 s.
  *
+ *  3. A strong station on a noise skirt: the X6100's audio of the X6200's CQ at 0.1 W from TX Hz 2000 (orch's
+ *     ft8-copies x6200, 2026-11-25; radio_captures/bench/ft8_x6200_skirt_cq_2000hz.wav, 11025 Hz). At that power
+ *     the X6200's base puts a skirt around it, -25 dBc in each 55 Hz out to 170 Hz either side, holding weak copies
+ *     of the message at any offset in it. The decoder must give the station once, at its own frequency (2006 Hz).
+ *     ft8_lib's ftx_delete_candidates had the candidates out of their order after a pass: a copy 25 tones off, at
+ *     1853 Hz, was tried first and given, the station then a duplicate (the X6100 listed the X6200's answers 156 Hz
+ *     off, and FT8's Hold off moved its TX Hz there).
+ *
  *    decoder_test
  */
 
@@ -26,6 +34,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,6 +66,72 @@ uint64_t get_time(void) {
 
 static float noise(void) {
     return 0.01f * ((float)rand() / (float)RAND_MAX - 0.5f);
+}
+
+/* ---- 3. a strong station on a noise skirt ---- */
+
+#define SKIRT_WAV CAPTURES "/bench/ft8_x6200_skirt_cq_2000hz.wav"
+
+static int   skirt_n;
+static float skirt_f;
+
+static void skirt_cb(const char *text, int snr, float freq_hz, float time_sec, void *user) {
+    (void)text, (void)snr, (void)time_sec, (void)user;
+    if (!skirt_n++) skirt_f = freq_hz;
+}
+
+/* A 16-bit mono WAV at RATE: its samples as float, the count in *n; NULL if it is not one */
+static float *read_wav(const char *path, int *n) {
+    FILE    *f = fopen(path, "rb");
+    uint8_t  h[44];
+    float   *x = NULL;
+
+    if (!f) return NULL;
+    if (fread(h, 1, 44, f) == 44 && !memcmp(h, "RIFF", 4) && !memcmp(h + 8, "WAVE", 4) && h[22] == 1 &&
+        h[34] == 16 && (uint32_t)(h[24] | h[25] << 8 | h[26] << 16 | (uint32_t)h[27] << 24) == RATE) {
+        uint32_t bytes = h[40] | h[41] << 8 | h[42] << 16 | (uint32_t)h[43] << 24;
+        int16_t *pcm   = malloc(bytes);
+
+        *n = (int)(bytes / 2);
+        x  = malloc(*n * sizeof(float));
+        if (pcm && x && fread(pcm, 2, *n, f) == (size_t)*n) {
+            for (int k = 0; k < *n; k++) x[k] = pcm[k] / 32768.0f;
+        } else {
+            free(x);
+            x = NULL;
+        }
+        free(pcm);
+    }
+    fclose(f);
+    return x;
+}
+
+static void decoder_skirt(void) {
+    int    n  = 0;
+    float *x  = read_wav(SKIRT_WAV, &n);
+    char   what[160];
+
+    if (!x) {
+        check(false, "the skirt recording read (" SKIRT_WAV ")");
+        return;
+    }
+    ftx_worker_init(RATE, FT8);
+    ftx_worker_reset();
+    skirt_n = 0;
+    int bs = ftx_worker_get_block_size();
+    for (int p = 0; p + bs <= n && !ftx_worker_is_full(); p += bs) {
+        ftx_worker_put_rx_samples(x + p, bs);
+        ftx_worker_decode(skirt_cb, false, NULL);
+    }
+    ftx_worker_decode(skirt_cb, true, NULL);
+    snprintf(what, sizeof(what), "the X6200's 0.1 W CQ on its skirt given once at its own 2006 Hz (%d decodes, the "
+             "first at %.1f Hz; a copy 25 tones off is 1850 or 2162)", skirt_n, skirt_n ? skirt_f : 0.0f);
+    bool ok = skirt_n == 1 && fabsf(skirt_f - 2006.0f) <= 10.0f;
+
+    check(ok, what);
+    if (ok) printf("ok    %s\n", what);
+    free(x);
+    ftx_worker_free();
 }
 
 /* ---- 1. the decoder's lag ---- */
@@ -265,6 +340,7 @@ static void decoder_thread(void) {
 }
 
 int main(void) {
+    decoder_skirt();
     decoder_lag(FT8);
     decoder_lag(FT4);
     decoder_thread();

@@ -315,6 +315,8 @@ typedef struct {
     int32_t muted, tcim;    /* the speaker muted (any reason); a TCI client's over muting it */
     int32_t mic;            /* the mic in use (radio_mic_sel_t: 0 built-in, 1 hand, 2 auto) */
     int32_t plays;          /* the bench's file on the speaker (bench_player_busy) */
+    int32_t av;             /* the open app's variant (main_screen_app_variant: Olivia's Mode, 0-10), -1 none: the bench
+                             * puts two radios on one variant and sees a Mode tap that did not take (2026-11-24) */
     bool    tx, lock;
     bool    ulock;          /* the user's lock alone (LOCK), not an app's hold: the page's LOCK button */
     bool    cwrise;         /* CW's tone rises with the dial, as CW-R's (the X6200): its CW passband the other side */
@@ -1307,6 +1309,7 @@ static void pstate_read(pstate_t *s) {
     s->tcim  = radio_tci_muted();
     s->mic   = radio_get_mic();
     s->plays = bench_player_busy();
+    s->av    = main_screen_app_variant();
     const char *app = main_screen_digital_app();
     memset(s->app, 0, sizeof(s->app));      /* compared whole with memcmp */
     snprintf(s->app, sizeof(s->app), "%s", app ? app : "");
@@ -1325,13 +1328,13 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "\"vfo\":%d,\"atu\":%d,\"bat\":%d,\"tx\":%d,\"lock\":%d,\"tune\":%d,\"tune_s\":%d,\"tpwr\":%d,\"ulock\":%d,"
              "\"cwrise\":%d,\"zmin\":%d,\"rxo\":%d,\"ask\":%d,\"txio\":%d,\"txqo\":%d,\"txig\":%d,\"txip\":%d,"
              "\"linein\":%d,\"txf\":%d,\"split\":%d,\"rit\":%d,\"xit\":%d,\"play\":%d,\"heard\":%d,\"spk\":%d,"
-             "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,\"plays\":%d,\"ifs\":%d,\"comp\":%d,\"wch\":%d,\"wchm\":%d,"
+             "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,\"plays\":%d,\"ifs\":%d,\"comp\":%d,\"wch\":%d,\"wchm\":%d,\"av\":%d,"
              "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
              s->tpwr10, s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->txf,
              s->split, s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->plays, s->ifs,
-             s->comp, s->wch, s->wchm, s->app, s->win, s->pg, s->fp);
+             s->comp, s->wch, s->wchm, s->av, s->app, s->win, s->pg, s->fp);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */

@@ -10927,7 +10927,10 @@ when the radio keys or unkeys. A session without TX is refused what sends:
 (up to v0.3.12.28 those four were let through), and while it controls the
 radio the radio holds itself receive only (its keys and knobs cannot send
 either); the state's `rxo` is 1 while the radio holds itself receive only,
-for the Sentry or for such a session. `key PTT 1 N` keys the radio's own microphone,
+for the Sentry or for such a session. The state's `av` is the open app's
+variant where it has one: the Olivia app's Mode, 0 (Olivia 8/250) to 10
+(Contestia 32/1000), as each press of its Mode key steps it; -1 in any other
+app or none. `key PTT 1 N` keys the radio's own microphone,
 N the page's number for this press, and is repeated every second as the
 lease; `key PTT 0` lets go (see Transmitting from the browser). `tune 1 N`
 starts a TUNE for an external tuner the same way, repeated every second while

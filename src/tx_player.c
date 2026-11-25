@@ -195,6 +195,11 @@ bool tx_player_stream(tx_fill_fn_t fill, void *fill_ctx, int32_t offset_hz, floa
     if (mode >= 0) radio_set_tx_mode(mode);
     radio_set_tx_freq(dial + offset_hz - TX_PLAYER_AUDIO_HZ);
     radio_set_modem(true);      /* keyed, the audio from the GUI */
+    /* Where it went, with the time: what another radio heard is set against it (2026-11-25: the X6100 listed the
+     * X6200's FT8 answers 156 Hz off; this line said the X6200's VFO right, and the fault was the X6100's decoder) */
+    LV_LOG_USER("tx_player: keyed, the VFO on %d Hz for a tone %d Hz above the dial %d (synthesised at %d Hz), "
+                "mode %d", (int)(dial + offset_hz - TX_PLAYER_AUDIO_HZ), (int)offset_hz, (int)dial,
+                TX_PLAYER_AUDIO_HZ, mode);
 
     /* The drive from the ALC and power readback (tx_level.c): ramped up while the ALC reads
      * zero, held once it shows, kept for the next transmission */

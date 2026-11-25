@@ -73,6 +73,7 @@
 #include "wifi_window.h"
 #include "dialog_psk.h"
 #include "dialog_olivia.h"
+#include "olivia_tx.h"         /* olivia_tx_get_mode: the variant in the remote's state */
 #include "dialog_jtty.h"
 #include "app_sstv.h"
 #include "dialog_cluster.h"
@@ -2394,6 +2395,10 @@ const char *main_screen_digital_app(void) {
 
 press_action_t main_screen_digital_app_action(void) {
     return radio_digi_cap() ? last_app : ACTION_NONE;
+}
+
+int main_screen_app_variant(void) {
+    return main_screen_digital_app_action() == ACTION_APP_OLIVIA ? (int)olivia_tx_get_mode() : -1;
 }
 
 /* A jump, not a turn of the knob: the spectrum starts again */

@@ -377,11 +377,9 @@ static void decode_messages(const ftx_waterfall_t *wf, int *num_candidates, ftx_
 
     if (!num_candidates || *num_candidates <= 0) return;
 
-    /* Use fixed-size array sized to MAX_CANDIDATES instead of a VLA based
-     * on *num_candidates so a zero value cannot create a zero-length VLA
-     * (undefined behaviour). The early-return guard above makes this safe. */
-    int to_delete_idx[MAX_CANDIDATES];
-    int to_delete_size = 0;
+    /* Each candidate tried once, when the whole of it is in, in the list's order: strongest sync first, as
+     * ftx_find_candidates sorts them. Fixed size (MAX_CANDIDATES), not a VLA on *num_candidates */
+    bool tried[MAX_CANDIDATES] = {false};
 
     for (int idx = 0; idx < *num_candidates; ++idx) {
         const ftx_candidate_t *cand = &candidate_list[idx];
@@ -391,7 +389,7 @@ static void decode_messages(const ftx_waterfall_t *wf, int *num_candidates, ftx_
             continue;
         }
 
-        to_delete_idx[to_delete_size++] = idx;
+        tried[idx] = true;
 
         ftx_message_t       message;
         ftx_decode_status_t status;
@@ -445,8 +443,17 @@ static void decode_messages(const ftx_waterfall_t *wf, int *num_candidates, ftx_
             }
         }
     }
-    // Remove decoded candidate;
-    ftx_delete_candidates(to_delete_idx, to_delete_size, candidate_list, num_candidates);
+    /* The tried ones out, the rest kept in their order. ft8_lib's ftx_delete_candidates moved the list's last
+     * candidate into each gap and heapified from the root: the order went, and on the X6100 a weak copy of a station
+     * 25 tones off (the X6200's skirt at 0.1 W, -25 dBc) was tried before the station and took its decode, the
+     * station's own then a duplicate (2026-11-23 to 11-25: answers listed 156 Hz off, Hold off moved TX Hz there);
+     * a gap filled from one still to go kept a tried candidate, tried again */
+    int kept = 0;
+
+    for (int idx = 0; idx < *num_candidates; idx++) {
+        if (!tried[idx]) candidate_list[kept++] = candidate_list[idx];
+    }
+    *num_candidates = kept;
 }
 
 static int get_message_snr(const ftx_waterfall_t *wf, const ftx_candidate_t *candidate, ftx_message_t *msg) {
