@@ -6936,6 +6936,25 @@ solid.
   a few seconds the tracker went to a faint line of the band's noise and
   held it, and the station's first characters were lost or misread
   ("TEST" as "T ST").
+- A new station's first characters are copied whole: when the tracker
+  moves to a strong one (25 dB over the noise), the decoder goes over the
+  audio it skipped (up to 0.2 s) on the new tone, so its first dit is there
+  from its start; a faint line of the noise the tracker sat on gives way to
+  it in 64 ms, not half a second; and the first second after the GUI starts
+  (or the CW peak filter is switched), in which the decoder measures the
+  noise and keys nothing, is decoded once it is measured. Up to v0.3.12.48 "VVV TEST" often came
+  out "VV TEST", "TV TEST" or "UV TEST", and "PARIS" as "TRIS".
+- The speed is learned only from a station (a tone 10 dB and more over the
+  noise), never from the noise keying the decoder in a quiet. Up to
+  v0.3.12.48 a minute or two of a quiet band could take it to 50 WPM, and
+  the next station's dits then read as dahs ("VVV" as "TTT TTT TTT").
+- Back in CW from another mode, or with the decoder turned on again, or
+  with another CW filter, or after the radio's own transmission (outside
+  the CW Trainer), the decoder measures the band's noise again (a second,
+  decoded once measured if a station is there). Up to v0.3.12.48 it went on
+  from the noise it had last measured (after a transmission, from the
+  receiver's first audio, still coming back), the band's noise could key
+  it, and that noise kept itself keying and set the speed.
 - It looks for the tone from 150 Hz up, however low the CW filter starts:
   under it are the keying's thumps, not a tone. Up to v0.3.12.47 a CW filter
   from 0 Hz let it lock on them in a strong signal's loud audio (the X6100

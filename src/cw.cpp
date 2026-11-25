@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -32,6 +33,10 @@ extern "C" {
 
 /* Frames (8 ms) between updates of the tune indicator */
 #define TUNE_UPDATE_FRAMES  12
+/* The decoder's audio stopped this long: the band measured again when it is back (Receiver::start_over) */
+#define RESUME_GAP_MS       500
+/* Receive this long after our own transmission: the over ended, the band measured again */
+#define OVER_END_S          0.4
 
 static std::atomic<bool> started{false};
 
@@ -159,6 +164,15 @@ static void apply_rx_params() {
     receiver->set_floor_db(rx_threshold);
     receiver->set_band(rx_hpf, rx_lpf);
 
+    /* Another CW filter: another band's level under the decoder (Receiver::start_over) */
+    static float band_lo_set = -1.0f, band_hi_set = -1.0f;
+    if (rx_hpf != band_lo_set || rx_lpf != band_hi_set) {
+        if (band_lo_set >= 0.0f)
+            receiver->start_over();
+        band_lo_set = rx_hpf;
+        band_hi_set = rx_lpf;
+    }
+
     /* Changing the peak filter re-seeds the noise floor: only on a change */
     if (peak_on != rx_peak_on || peak_tone != rx_peak_tone || peak_q != rx_peak_q) {
         peak_on = rx_peak_on;
@@ -179,6 +193,13 @@ void cw_put_audio_samples(unsigned int n, float *samples) {
 
     if (!started || !wanted)
         return;
+    /* The decoder's audio back after a gap (the radio in another mode, the decoder or the tuning bars off): what it
+     * measured of the band is from before (Receiver::start_over). Blocks come every 100 ms or so */
+    static std::chrono::steady_clock::time_point last;
+    auto now = std::chrono::steady_clock::now();
+    if (last.time_since_epoch().count() != 0 && now - last > std::chrono::milliseconds(RESUME_GAP_MS))
+        receiver->start_over();
+    last = now;
     apply_rx_params();
     /* The trainer's speed range (down to 5 WPM) while it is open, the band's (10 WPM) again from the first block
      * after it closed; set before the trainer's speed, which the range clamps */
@@ -196,6 +217,18 @@ void cw_put_audio_samples(unsigned int n, float *samples) {
     bool tx = radio_get_state() == RADIO_TX;
     if (tx && !own_tx && !tr && rx_count >= OWN_OVER_GAP_S * (AUDIO_CAPTURE_RATE / AUDIO_DECIM))
         receiver->expect(key_wpm);
+    /* Our own over ended (0.4 s of receive after it, longer than a QSK break between characters): the band measured
+     * again (Receiver::start_over). The floor seeded from the first frame after the key (ToneFinder::transmitting)
+     * could be the base's receive audio still coming back: too low, the band's noise then keyed the detector, which
+     * held it there, and the X6200 went into the X6100's next text at some 50 WPM (cw-kbd, cw-carrier after its own
+     * overs, 2026-11-25: 'EKTT TTT TTT TTT XV Q1TST' for VVV VVV Q1TST) */
+    static bool over_end = false;
+    if (tx)
+        over_end = !tr;     /* not the CW Trainer's groups and answers: its timing is its own */
+    else if (over_end && rx_count >= OVER_END_S * (AUDIO_CAPTURE_RATE / AUDIO_DECIM)) {
+        over_end = false;
+        receiver->start_over();
+    }
     own_tx   = tx;
     rx_count = tx ? 0 : rx_count > UINT32_MAX - n ? UINT32_MAX : rx_count + n;
     receiver->transmitting(tx);

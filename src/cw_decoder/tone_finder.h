@@ -44,6 +44,12 @@ class ToneFinder {
     void  hold_noise(bool on) { hold_ = on; }
     /* The radio is transmitting: its own sidetone, no band (analyse). When the
      * band comes back the floor is seeded again from its first frame */
+    /* The band's level changed (the decoder's audio back after other modes, another CW filter): the floor seeded
+     * again from the next frame, as after a transmission */
+    void  reseed() {
+        noise_  = -1.0f;
+        wait_n_ = 0;
+    }
     void  transmitting(bool on) {
         if (tx_ && !on) {
             noise_  = -1.0f;

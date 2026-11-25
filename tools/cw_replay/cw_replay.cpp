@@ -1,7 +1,9 @@
 // Offline replay of a radio's RX audio through the GUI's CW receiver (src/cw_decoder), as src/cw.cpp feeds it.
 // stdin: raw float32 mono at 4000 Hz (the receiver's rate; replay.py makes it from a WAV), or with S16=1 16-bit
 // little-endian, full scale 2.0 (test.sh's recording: the radio's audio peaks over 1). Args: band_lo band_hi
-// floor_db [expect_wpm] (the CW filter's edges, Dec SNR). KEYS=1: each key down and up on stderr, by time
+// floor_db [expect_wpm] (the CW filter's edges, Dec SNR). KEYS=1: each key down and up on stderr, by time (and by the
+// detector's own step clock: what the receiver gives the detector again after a lock move or its first second comes
+// out at once); TEXTS=1: each piece of text, by time
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -17,14 +19,19 @@ int main(int argc, char **argv) {
     std::string text;
     int keys = 0;
     double t = 0;
+    long steps = 0;   /* detector steps (8 ms): the time the detector keys by, also through its replays */
     cw::Receiver *rx = nullptr;
     rx = new cw::Receiver(
-        [&](const char *s, bool own) { text += s; (void)own; },
+        [&](const char *s, bool own) {
+            text += s;
+            (void)own;
+            if (getenv("TEXTS")) fprintf(stderr, "%7.3f text '%s'\n", t, s);   /* TEXTS=1: each piece, by time */
+        },
         [&](bool down) {
             if (down) keys++;
-            if (getenv("KEYS")) fprintf(stderr, "%7.3f %s\n", t, down ? "down" : "up");
+            if (getenv("KEYS")) fprintf(stderr, "%7.3f %s (step %.3f s)\n", t, down ? "down" : "up", steps * 0.008);
         },
-        {});
+        [&]() { steps++; });
     rx->set_floor_db(floor_db);
     rx->set_band(lo, hi);
     if (argc > 4) rx->expect(atof(argv[4]));
@@ -42,8 +49,8 @@ int main(int argc, char **argv) {
         if (getenv("LOCKS") && std::abs(rx->lock_hz() - last_lock) >= 5.0f) {
             /* LOCKS=1: each move of the tone lock, by time (a lock that wanders in a quiet and comes back resets the
              * element timer: the first characters after it lost) */
-            fprintf(stderr, "%7.3f lock %.0f -> %.0f Hz (peak %.0f Hz, snr %.1f)\n", t, last_lock, rx->lock_hz(),
-                    rx->peak_hz(), rx->snr_db());
+            fprintf(stderr, "%7.3f lock %.0f -> %.0f Hz (peak %.0f Hz %.1f dB over the bins' noise, snr %.1f)\n", t,
+                    last_lock, rx->lock_hz(), rx->peak_hz(), rx->peak_snr_db(), rx->snr_db());
             last_lock = rx->lock_hz();
         }
         if (rx->wpm() != last_wpm) {

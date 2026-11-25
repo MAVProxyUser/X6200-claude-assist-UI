@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <array>
 #include <functional>
 
 #include "element_timer.h"
@@ -42,12 +43,19 @@ class Receiver {
 
     float wpm() const { return timer_.wpm(); }
     float peak_hz() const { return finder_.peak_hz(); }   /* FFT peak of the last frame */
+    /* The last frame's peak over the per-bin noise (dB) and its frames in a row on the bin (PeakReport) */
+    float peak_snr_db() const { return 10.0f * std::log10(peak_.snr + 1e-12f); }
+    int   peak_steady() const { return peak_.steady; }
     float lock_hz() const { return lock_.hz(); }          /* the tone being decoded */
     bool  locked() const { return lock_.holding(); }
     float snr_db() const { return snr_db_; }              /* last step, on the locked tone */
 
     void  set_floor_db(float db) { keyer_.set_floor_db(db); }
     void  set_band(float lo_hz, float hi_hz) { finder_.set_band(lo_hz, hi_hz); }
+    /* The band's level may have changed under the decoder: its audio back after a gap (the radio in another mode,
+     * the decoder off), another CW filter. The noise measured again and the detector muted a second, as at start
+     * (that second given again if the lock holds a station: detector_step); the speed and the station kept */
+    void  start_over();
     /* The radio's peak filter (APF) is on: its colour is taken out of the noise */
     void  set_apf(bool on, float tone_hz, float q);
     /* The VFO moved: the station is df Hz further up in the audio */
@@ -73,7 +81,13 @@ class Receiver {
   private:
     friend struct ReceiverPeek;   /* tests only */
 
-    void detector_step(float power);
+    void lock_step(float x, bool rewound = false);
+    void rewind();
+    void detector_step(float power, float noise);
+
+    /* The audio the lock is given again when it moves (rewind): the tone finder sees a station's first mark 40-70 ms
+     * after it began, and its first dit was lost or a blip */
+    static constexpr size_t REWIND_LEN = 768;   /* 192 ms */
 
     ToneFinder   finder_;
     ToneLock     lock_;
@@ -92,6 +106,15 @@ class Receiver {
     float snr_db_     = 0.0f;
     bool  moved_      = false;   /* the lock moved since the last step (for the tests) */
     PeakReport peak_{};
+
+    std::array<float, REWIND_LEN> past_{};   /* the last audio, a ring (rewind) */
+    size_t past_pos_   = 0;
+    size_t since_move_ = 0;      /* samples the lock has had on this tone, up to REWIND_LEN */
+    /* The steps' powers the key detector was muted for (KeyDetector::muted): given to it again once it is not */
+    std::array<float, KeyDetector::BATCH> held_{};
+    size_t held_n_     = 0;
+    bool   replaying_  = false;
+    bool   rewinding_  = false;   /* in rewind() */
 };
 
 } // namespace cw

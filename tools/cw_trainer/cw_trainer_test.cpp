@@ -892,9 +892,76 @@ static void silence_first(void) {
           t.c_str());
 }
 
+/* The band's noise 15 dB up under a decoder that has run a while (2026-11-25: the X6200 back in CW from another mode,
+ * its filter and AGC set, 10 s before a 15 WPM text): what it had measured of the noise was the old band's, the new
+ * noise keyed the detector, and a key down holds the floor where it is. Told (Receiver::start_over, as src/cw.cpp does
+ * when its audio comes back after a gap or the CW filter changes), it measures the band again: no characters of noise
+ * (untold, some), and the text after it */
+static std::pair<size_t, std::string> after_jump(bool start_over) {
+    std::mt19937                     rng(5);
+    portable::normal                 gauss(0.0, 1.0);
+    std::vector<Mark>                marks;
+    const double                     dit = 1200.0 / 15, jump = 10000.0, text_at = 20000.0, n1 = NOISE * 5.62;
+    double                           k = text_at;
+    for (const char *c = "VVV TEST DE Q1TST"; *c; c++) {
+        if (*c == ' ') {
+            k += 4 * dit;
+            continue;
+        }
+        for (const char *p = morse_of(*c); *p; p++) {
+            double el = *p == '.' ? dit : 3 * dit;
+            marks.push_back({k, k + el});
+            k += el + dit;
+        }
+        k += 2 * dit;
+    }
+    std::string        text, noise;
+    bool               told = false;
+    cw::Receiver       rx([&](const char *t, bool) { text += t; }, [](bool) {});
+    cw::AudioResampler rs(RATE);
+    std::vector<float> buf(FRAG);
+
+    rx.set_floor_db(8.0f);
+    rx.set_band(TONE - 250.0, TONE + 250.0);
+    rx.expect(15.0f);
+    for (long n = 0; 1000.0 * n / RATE < k + 2000.0;) {
+        double now = 1000.0 * n / RATE;
+        if (now >= jump && !told) {
+            if (start_over)
+                rx.start_over();
+            told = true;
+            text.clear();
+        }
+        if (now >= text_at && noise.empty() && !text.empty())
+            noise = text, text.clear();
+        else if (now >= text_at && noise.empty())
+            noise = " ";
+        for (int i = 0; i < FRAG; i++, n++) {
+            double ms = 1000.0 * n / RATE, x = (ms < jump ? NOISE : n1) * gauss(rng);
+            for (const Mark &m : marks)
+                if (ms >= m.on && ms <= m.off) x += 30.0 * n1 * sin(2.0 * M_PI * TONE * n / RATE);
+            buf[i] = (float)x;
+        }
+        rs.process(buf.size(), buf.data(), rx);
+    }
+    size_t chars = 0;
+    for (char c : noise)
+        chars += c != ' ';
+    return {chars, text};
+}
+
+static void noise_jump(void) {
+    printf("The band's noise 15 dB up under a decoder that has run a while\n");
+    auto was = after_jump(false), now = after_jump(true);
+    check(now.first == 0 && was.first > 0 && now.second.find("TEST DE Q1TST") != std::string::npos,
+          "told (Receiver::start_over): %zu characters of noise in the 10 s after it, the text \"%s\" (not told: %zu, "
+          "\"%s\")", now.first, now.second.c_str(), was.first, was.second.c_str());
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IOLBF, 0);
     silence_first();
+    noise_jump();
     morse_text_rules();
     table_rules();
     element_timer_rules();

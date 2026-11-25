@@ -37,6 +37,11 @@ constexpr float HELD_SNR     = 10.0f;
  * second of key-down) the station here is taken as not there. */
 constexpr float HERE_REL     = 0.063f;
 constexpr int   ELSEWHERE    = 32;
+/* A tone held that is no station (a line of the noise a few dB over it: station()) is left after 4 such frames (64
+ * ms) for a peak that is one (PEAK_STATION_DB): before, the X6100's line at 297 Hz kept the lock a second into a
+ * station 40 dB over the noise, its first characters lost (2026-11-25, the bench's CW recordings with the band's
+ * noise before them) */
+constexpr int   ELSEWHERE_LINE = 4;
 
 } // namespace
 
@@ -131,7 +136,8 @@ bool ToneLock::follow(const PeakReport &peak) {
     /* Our station is (still) here: keep it, unless the strong frames show it is
      * only the skirt of another one */
     bool here = quiet_runs_ < GONE_RUNS && alive_runs_ >= HOLD_RUNS;
-    if (here && elsewhere_ < ELSEWHERE)
+    bool line = !station() && peak.snr >= from_db(PEAK_STATION_DB);   /* no station here, one there */
+    if (here && elsewhere_ < (line ? ELSEWHERE_LINE : ELSEWHERE))
         return false;
 
     if (std::fabs(peak.hz - hz()) < MOVE_BINS * BIN_HZ)
@@ -141,7 +147,11 @@ bool ToneLock::follow(const PeakReport &peak) {
     return true;
 }
 
-float ToneLock::push(float x) {
+bool ToneLock::station() const {
+    return holding() && level_ > HELD_SNR * noise4_;
+}
+
+float ToneLock::push(float x, bool rewound) {
     if (!nco_ || !lpf_)
         return -1.0f;
 
@@ -167,6 +177,10 @@ float ToneLock::push(float x) {
         mean += w[i];
     mean /= static_cast<float>(INTEG_LEN);
 
+    /* Not what holds the lock: 192 ms of a line of the noise given again made it a station held within 64 ms, where
+     * live it takes 256 ms that such lines seldom last (2026-11-25: the lock stuck on the X6100's 297 Hz line) */
+    if (rewound)
+        return std::norm(mean);
     sum4_ += mean;
     if (++steps_ >= 4) {
         std::complex<float> m4 = sum4_ / 4.0f;
@@ -216,7 +230,7 @@ void ToneLock::every_4_steps(std::complex<float> mean) {
         last_dir_ = dir;
     }
     alive_ = alive;
-    if (holding() && level_ > HELD_SNR * noise4_)
+    if (station())
         held_hz_ = hz();      /* a station, not a line of the noise (those sit a few dB over it) */
 }
 

@@ -30,8 +30,9 @@ class ToneLock {
     ToneLock(const ToneLock &)            = delete;
     ToneLock &operator=(const ToneLock &) = delete;
 
-    /* One sample in; every INTEG_STEP samples the baseband power, else -1 */
-    float push(float x);
+    /* One sample in; every INTEG_STEP samples the baseband power, else -1. rewound: audio given again after a move
+     * (Receiver::rewind): only the power, the station's liveness and the PLL are the live audio's */
+    float push(float x, bool rewound = false);
 
     /* Noise power of one integrator step (from the tone finder) */
     void  set_noise(float step_noise) { noise4_ = step_noise * NOISE_4STEPS; }
@@ -51,6 +52,9 @@ class ToneLock {
     /* A tone has been held here for a while (256 ms): noise keying the
      * detector seldom stays coherent that long */
     bool  holding() const { return alive_ && alive_runs_ >= HOLD_RUNS; }
+
+    /* A station held here: a tone HELD_SNR over the noise (a line of the noise sits a few dB over it) */
+    bool  station() const;
 
   private:
     static constexpr int HOLD_RUNS = 8;     /* 4-step runs: 256 ms */

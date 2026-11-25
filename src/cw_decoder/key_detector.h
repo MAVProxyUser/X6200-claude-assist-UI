@@ -29,12 +29,18 @@ struct KeyEdge {
  * floor: the low 5% of power/noise, which CW keying leaves at the noise. */
 class KeyDetector {
   public:
+    /* Steps of the carrier floor's first measure on a tone: 1 s */
+    static constexpr int BATCH = 125;
+
     /* power and noise of one integrator step */
     KeyEdge step(float power, float noise);
 
     void  set_floor_db(float db) { floor_db_ = db; }
     float floor_db() const { return floor_db_; }
     bool  down() const { return down_; }
+    /* The first second since restart(): the carrier floor not measured yet, nothing keyed. The step that ends it is
+     * muted too (Receiver::detector_step gives all of that second's steps again, in order, once it is measured) */
+    bool  muted() const { return muted_; }
     /* Steps since key up (counted while up) */
     size_t up_steps() const { return up_steps_; }
 
@@ -80,7 +86,6 @@ class KeyDetector {
     std::array<float, 5> past_{};   /* the last steps' levels, the newest first (rose()) */
 
     /* Carrier floor */
-    static constexpr int BATCH = 125;   /* 1 s of steps */
     std::array<float, BATCH> batch_{};
     int    batch_n_   = 0;
     bool   muted_     = true;

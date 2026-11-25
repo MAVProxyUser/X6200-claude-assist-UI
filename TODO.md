@@ -35,8 +35,7 @@ Open, mine to do:
   Sentry's amber, its All Charts tiles and page 4's "Night Auto (on)" at night; the WiFi held through both GUIs'
   restarts; Speech off by default (no voice_mode stored on either). Left: the classic screen's 3D waterfall on
   upstream's thread; the USER page has no labels for upstream's 200+ apps.
-- Both radios' CW decoders lose the dits of the first characters ('VVV' prints 'TTT'): a decoder that locks sooner
-  would copy short overs whole (noted; the tests send two V groups first).
+- Both radios' CW decoders lose the dits of the first characters ('VVV' prints 'TTT'): DONE 2026-11-25 (below).
 
 Done 2026-11-25 night (the same asks, continued):
 - air_b's WeFax, FT8 and JS8 groups pass both ways with no sync gap: wefax-cont, wefax-auto, ft8-multistream, ft8-qso,
@@ -72,9 +71,23 @@ Done 2026-11-25 night (the same asks, continued):
   capture holds no monitor of its over: its Comp needs a third sound source (this computer's speaker by its mic, with
   the X6100 receiving) or a third receiver. power-loop's X6200 figure: measured (Xiegu's loop, said).
 - CW decoder: a text after a quiet copies whole now (the lock takes back the station it held; tools/cw_replay's check).
-  Left: the X6200's decoder keys on its noisier audio in a quiet and its speed drifts (the first letters of the next
-  text read slow); its first dits from a cold start (the tone finder locks during them: keep the last second and run
-  it again once locked).
+- CW decoder: a new station's first characters whole (the owner's 'VVV prints TTT', 11-25 morning): the lock given the
+  audio it skipped when it moves to a station, a line of the noise giving way to one in 64 ms, a just-started decoder's
+  first second decoded once measured; the speed learned only from a station (the X6200 drifted to ~50 WPM in a quiet
+  and read the X6100's 15 WPM VVV as TTT); the band measured again when the decoder's audio comes back or the CW
+  filter changes. 31 bench recordings old against new (tools/cw_replay, four new checks; tools/cw_trainer's noise
+  jump); cw-text and cw-carrier keep the listener's audio now. Both radios by hot install, in the next tag.
+  Left: the X6200's noise in CW has a 17 dB hump at the key tone (its base's CW filter), against which every tone is
+  judged: whitening tried two ways and reverted (ORCH_FINDINGS); the next try keeps the lock on a held station.
+- The apps on the X6200 under 1 W hold their level as TCI's do (tx_player coarse; tools/txlevel: -3.0 dB in 20 overs
+  before, 0.0 now). The 0.1 W skirt is not this (ft8-copies x6200 unchanged).
+- TCI over's end (the owner's 'TCI unkeys before its audio is out'): new orch tests tci-tail x6200/x6100 measured
+  0.22 s / 0.36 s lost after the GUI's queue had played out (nothing with 1.5 s of silence after); the key is now held
+  300 / 450 ms longer (src/tci_server.c).
+- tci-cw x6200>x6100 was stopped by the Watch once in two (the X6200 on the air over 16 s: 13.8 s of text and its QSK
+  tail in one over): its texts now planned for 13.5 s (23 WPM). The keyer's log line went through stderr into the
+  GUI's own lines: LV_LOG_USER now (8006c4c4). To look at: air cw-kbd x6100>x6200 refused once (the X6100 back on
+  14.200 USB after it was set; it passed in the next two runs).
 - Left: the apps' TX stream on the X6200 (the skirt); the X6200's Comp (a third source); the X6100's +61.4 Hz line (a
   third receiver).
 

@@ -1134,6 +1134,7 @@ def cw_text(o, sender, listener, f, label):
             subprocess.run(["scp", "-q", "-o", "BatchMode=yes", os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "tci_cw_tx.py"), f"root@{S.host}:/tmp/tci_cw_tx.py"], check=True)
             L.cw = ""
+            got["keyed_at_s"] = round(time.time() - rec_t0, 2)
             proc = subprocess.Popen(["ssh", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
                                      f"python3 /tmp/tci_cw_tx.py '{CW_TEXT}' 14"], stdout=subprocess.PIPE, text=True)
             while proc.poll() is None:
@@ -1141,8 +1142,15 @@ def cw_text(o, sender, listener, f, label):
                     S.stop()
                     raise Refused(watch.why)
                 time.sleep(0.05)
+            time.sleep(1.0)
             if not watch.tx_peak.get(sender):
                 raise Refused(f"{sender}'s meter showed no power")
+    # The listener's audio from before the set-up to the end, kept (tools/cw_replay replays it through the decoder):
+    # 2026-11-25 the X6200 printed the X6100's VVV as 'TTTT TTTT TTTT', its decoder some 50 WPM fast at the over's
+    # start, which the over's audio alone, replayed, did not make. Its decoder gets audio only in CW: the switch to CW
+    # and the receiver's settings just before the over are in it (got's keyed_at_s: where the sender began)
+    from tones import TciRx
+    rec, rec_t0 = TciRx(L.host), time.time()
     try:
         # AGC fast on both: with it off a signal 60 dB up overloaded the X6100's audio and its decoder printed garbage
         # (2026-11-23; cw_diag, which copied, had it fast)
@@ -1163,6 +1171,11 @@ def cw_text(o, sender, listener, f, label):
             s.confirm(f"{text!r}, {cer:.0%} of the characters wrong")
     except Refused as e:
         return False, str(e), got
+    finally:
+        try:
+            got["wav"] = save_wav(o, rec.audio(rec_t0, time.time())[0], f"cw_text_{sender}_to_{listener}.wav")
+        finally:
+            rec.close()
     return True, f"decoded {got['decoded']!r} ({got['cer']:.0%} of the characters wrong)", got
 
 

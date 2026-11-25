@@ -51,6 +51,11 @@ constexpr float  NOISE_4STEPS  = 7.0f / 16.0f;
 constexpr float  PEAK_STRONG_DB  = 15.5f;
 /* Frames in a row the peak must hold its bin before the lock follows it */
 constexpr int    PEAK_STEADY_MIN = 2;
+/* A peak this far above the noise (dB) is a station, not a line of the band's noise: those came 16-19 dB over it in
+ * the X6100's quiet, the bench's stations 40-55 (2026-11-25). Only to such a peak does the lock give way at once
+ * (ToneLock::follow, ELSEWHERE_LINE) and is the audio it skipped given again (Receiver::rewind): the lock moving from
+ * line to line in a quiet, each line's noise given again, printed "ETE T TT" where the decoder must print nothing */
+constexpr float  PEAK_STATION_DB = 25.0f;
 
 inline float from_db(float db) {
     return powf(10.0f, db * 0.1f);

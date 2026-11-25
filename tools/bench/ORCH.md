@@ -156,7 +156,7 @@ screen picture.
 | `~/.config/x6x00-bench/orch_results.json` | each test's last result, passes and runs (what is not rerun) |
 | `~/.config/x6x00-bench/orch_status.json` | the run's state for the console, each second |
 | `~/.config/x6x00-bench/orch_caps.json` | what each radio takes (the caps test), the tests' guide to their differences |
-| `~/.config/x6x00-bench/runs/<time>-orch/` | a run: `events.jsonl`, `results.json`, each over's WAV and spectrum frames, the AMBE and digital voice files |
+| `~/.config/x6x00-bench/runs/<time>-orch/` | a run: `events.jsonl`, `results.json`, each over's WAV and spectrum frames, the AMBE and digital voice files; the CW tests' listener audio (cw-text's `cw_text_*.wav`; cw-copy, cw-carrier and tci-cw's `*.raw`, 24 kHz int16) for `tools/cw_replay` |
 | `~/.config/x6x00-bench/dv/` | the AMBE tests' speech (this computer's voice) and their built tools |
 | `~/.config/x6x00-bench/shots/` | the screen pictures (never committed: they show the operator's locator) |
 | `~/.config/x6x00-bench/tx_log.jsonl` | every transmission: who, frequency, power, why |

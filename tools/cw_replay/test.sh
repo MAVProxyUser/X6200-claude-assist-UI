@@ -32,5 +32,24 @@ case $out in
     *"Q1TST"*"VE TEST "*) echo "ok   a text after a quiet: $out" ;;
     *) echo "FAIL a text after a quiet: $out"; bad=$((bad + 1)) ;;
 esac
+# The first word whole (2026-11-25): the tone finder moved the lock 40-70 ms into a station's first mark and its first
+# dit was lost (the receiver now gives the lock the audio it skipped: Receiver::rewind); a line of the noise the lock
+# sat on kept it half a second into a station 40 dB over it (tone_lock.cpp ELSEWHERE_LINE); and a decoder just started
+# keyed nothing for a second (KeyDetector::muted; that second given again, Receiver::detector_step). Cold, as recorded,
+# and warm: the recording's first 0.9 s of the band's noise five times first, a decoder that has run on the band. Each
+# read "VV TEST" or "UV TEST" before
+whole() {   # LO HI FILE WARM
+    n=$((n + 1))
+    out=$( { [ "$4" = warm ] && for i in 1 2 3 4 5; do head -c 7200 "$3"; done; cat "$3"; } |
+        S16=1 ./cw_replay "$1" "$2" 8 15 2> /dev/null)
+    case $out in
+        *"text: 'VVV TEST DE Q1TST "*) echo "ok   the first word, $4, filter $1-$2 $3: $out" ;;
+        *) echo "FAIL the first word, $4, filter $1-$2 $3: $out"; bad=$((bad + 1)) ;;
+    esac
+}
+whole 300 3000 x6200_cw_on_x6100.s16 cold
+whole 400 6000 x6100_cw_on_x6200.s16 cold
+whole 400 3000 x6200_cw_on_x6100.s16 warm
+whole 400 3000 x6100_cw_on_x6200.s16 warm
 echo "cw_replay: $n checks, $bad failed"
 [ $bad -eq 0 ]

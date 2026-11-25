@@ -973,6 +973,11 @@ def t_cw_carrier(run):
         # (the sender's loop), not the decoder printing noise: said, the decoder judged on a carrier that held
         dip = mid.get("dip")
         held = dip is not None and dip < 6.0
+        try:                                # the listener's audio of it all kept: tools/cw_replay replays it through
+            import digimodes                # the decoder (2026-11-25: the X6200 printed 'ETE T TT' in the quiet)
+            digimodes.write_raw(tci.audio()[0], os.path.join(o.run.dir, f"cw_carrier_{snd.name}_to_{lis.name}.raw"))
+        except (ImportError, OSError, ValueError, AttributeError):
+            pass
         ok = (not why and not quiet and bool(heard) and max(heard) >= bench.DEAF_DB and "Q1TST" in copy.upper()
               and (carrier == "" or (carrier is not None and not held)))
         if ok and carrier:

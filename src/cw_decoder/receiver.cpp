@@ -8,6 +8,7 @@
 
 #include "receiver.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace cw {
@@ -20,10 +21,25 @@ Receiver::Receiver(TextFn text, KeyFn key, StepFn step)
     set_floor_db(5.0f);
 }
 
+/*
+ * 2026-11-25: the X6200 switched to CW 10 s before the X6100's "VVV TEST" read it as "TTTT TTTT TTTT", its decoder at
+ * some 50 WPM: it had last measured the noise in other conditions (or seeded it in the switch's quiet first frame), the
+ * band's noise came up over that floor and keyed the detector, and a key down holds the floor where it is (the gaps'
+ * noise, ToneFinder::analyse): the noise kept itself keying and its short marks set the speed. Replayed from the over
+ * alone the same audio copied whole
+ */
+void Receiver::start_over() {
+    finder_.reseed();
+    step_noise_ = -1.0f;
+    keyer_.restart();
+    held_n_ = 0;
+}
+
 void Receiver::set_apf(bool on, float tone_hz, float q) {
     finder_.set_apf(on, tone_hz, q);
     step_noise_ = -1.0f;
     keyer_.restart();
+    held_n_ = 0;
 }
 
 void Receiver::feed(const float *x, size_t n) {
@@ -37,19 +53,77 @@ void Receiver::feed(const float *x, size_t n) {
             if (lock_.follow(peak_)) {
                 timer_.new_tone();
                 keyer_.new_tone();
-                moved_ = true;
+                held_n_ = 0;   /* the carrier floor is measured again on this tone, from here (KeyDetector) */
+                moved_  = true;
+                if (peak_.snr >= from_db(PEAK_STATION_DB))
+                    rewind();
+                else
+                    since_move_ = 0;
             }
         }
-
-        float power = lock_.push(x[i]);
-        if (power >= 0.0f && step_noise_ > 0.0f)
-            detector_step(power);
+        lock_step(x[i]);
+        past_[past_pos_] = x[i];
+        past_pos_        = (past_pos_ + 1) % REWIND_LEN;
+        since_move_      = std::min(since_move_ + 1, REWIND_LEN);
     }
 }
 
-void Receiver::detector_step(float power) {
+void Receiver::lock_step(float x, bool rewound) {
+    float power = lock_.push(x, rewound);
+    if (power >= 0.0f && step_noise_ > 0.0f)
+        detector_step(power, step_noise_);
+}
+
+/*
+ * The lock just moved: the audio it skipped, up to REWIND_LEN, through it again on the new tone, so the new station's
+ * first mark is there from its start. The tone finder moves the lock 40-70 ms into a station's first mark (its 64 ms
+ * FFT, two frames in a row on the bin): a dit at 20 WPM is 60 ms, and a station's first dit was lost or came out a
+ * blip (2026-11-25: the X6100's audio of the X6200's "VV TEST", the lock moved 37 ms into the first V). Only to a
+ * station (PEAK_STATION_DB), not from one line of the noise to the next in a quiet. Never the
+ * audio of another tone since (the lock moved twice: a station's elements given twice), nor that of a mark the
+ * detector was still on (its elements given twice, from the leak of a strong station 50 Hz away that the lock left)
+ */
+void Receiver::rewind() {
+    size_t up = keyer_.down() || pend_ ? 0 : keyer_.up_steps() * INTEG_STEP;
+    size_t n  = std::min({since_move_, up, REWIND_LEN});
+    size_t at = (past_pos_ + REWIND_LEN - n) % REWIND_LEN;
+
+    since_move_ = 0;
+    rewinding_  = true;
+    for (size_t k = 0; k < n; k++)
+        lock_step(past_[(at + k) % REWIND_LEN], true);
+    rewinding_ = false;
+}
+
+void Receiver::detector_step(float power, float noise) {
     keyer_.own(text_.owning() || tx_);
-    KeyEdge e = keyer_.step(power, step_noise_);
+
+    /*
+     * The key detector's first second (a cold start, or the APF switched: KeyDetector::muted): it measures the carrier
+     * floor and keys nothing. The steps are kept and given to it again, in order, once it has the floor: before, a
+     * decoder started as a station began lost all of its first second (2026-11-25: the X6100's of the X6200's "VV
+     * TEST" printed "V TEST", the lock found it at 3.49 s and the detector keyed from 4.49 s on). The element timer
+     * and the step callback (the squelch's frame counts) get them only then, once each. All against the noise as it is
+     * at the end of that second: in it the noise is not held through the marks (no key down to hold it by), and as it
+     * settles it can rise a lot: 15 dB in 0.4 s from the X6200's first mark on the X6100 (the X6200's transmitter
+     * noise, 2026-11-25), its first dit 56 dB over the noise of before and the elements after it 41, under the
+     * thresholds that dit had set: "VVV" came out "E T" */
+    if (!replaying_ && keyer_.muted()) {
+        if (held_n_ < held_.size())
+            held_[held_n_++] = power;
+        keyer_.step(power, noise);
+        if (keyer_.muted())
+            return;
+        /* Only a station's: a line of the noise the lock sat on, given again, keyed the detector on its swings (E E
+         * E on the X6100's 297 Hz line), where muted it did not, and the quiet before the next element was lost */
+        replaying_ = lock_.station();
+        for (size_t k = 0; replaying_ && k < held_n_; k++)
+            detector_step(held_[k], noise);
+        replaying_ = false;
+        held_n_    = 0;
+        return;
+    }
+    KeyEdge e = keyer_.step(power, noise);
 
     /*
      * A key down goes on to the timer only once the mark has lasted BLIP_K dots,
@@ -81,8 +155,12 @@ void Receiver::detector_step(float power) {
     }
 
     /* Our own keying is not learned: its speed is known (expect), and its dah heard in pieces while the lock
-     * finds the tone would only move it */
-    if (text_.owning())
+     * finds the tone would only move it. Nor what a rewind gives again, nor anything while the lock holds no station
+     * (ToneLock::station: a tone 10 dB over the noise): the noise keying the detector in a quiet is no speed to learn.
+     * Learned, its short marks and gaps took the speed up a little at a time (each estimate within NEW_SPEED of the
+     * last), and the shorter the dot the more blips passed BLIP_K: the X6200, a minute or two after a text, was at
+     * some 50 WPM and printed the X6100's 15 WPM "VVV" as "TTT TTT TTT" (2026-11-25, cw-text) */
+    if (text_.owning() || rewinding_ || (!tx_ && !lock_.station()))
         timer_.ours();
     Sym s = timer_.step(e.dir, e.back_ms, e.strong);
 
@@ -95,7 +173,7 @@ void Receiver::detector_step(float power) {
     if (e.dir != 0 && key_fn_)
         key_fn_(e.dir > 0);
 
-    snr_db_ = 10.0f * std::log10(keyer_.power() / step_noise_ + 1e-12f);
+    snr_db_ = 10.0f * std::log10(keyer_.power() / noise + 1e-12f);
     if (step_fn_)
         step_fn_();
     moved_ = false;

@@ -48,20 +48,24 @@ constexpr float  RISE_DB = 4.0f;
 } // namespace
 
 KeyEdge KeyDetector::step(float power, float noise) {
-    float r = power / noise;
+    float r     = power / noise;
+    bool  muted = muted_;
 
     if (batch_n_ < BATCH) {
-        /* First second on a tone: the floor from a batch, tracked from there */
-        batch_[batch_n_++] = r;
+        /* First second on a tone: the floor from a batch, tracked from there. Its powers against the noise as it is at
+         * its end, as Receiver::detector_step gives a muted second's steps again: measured against each step's own
+         * noise, the floor was not that of the steps given, and their tracking took it down 1-2 % a step until a line
+         * of the X6100's noise (297 Hz) keyed E after E (2026-11-25) */
+        batch_[batch_n_++] = power;
         if (batch_n_ == BATCH) {
             auto q = batch_.begin() + static_cast<long>(PCT * BATCH);
             std::nth_element(batch_.begin(), q, batch_.end());
-            carrier_ = std::max({carrier_, *q, 1e-3f * PCT_NOISE});
+            carrier_ = std::max({carrier_, *q / noise, 1e-3f * PCT_NOISE});
             muted_   = false;
         }
     }
-    if (muted_) {
-        power = 0.0f;   /* the noise floors are still settling */
+    if (muted) {
+        power = 0.0f;   /* the noise floors are still settling (and the step that ends the batch: muted()) */
     } else if (down_steps_ > (trainer_ ? TRAINER_CARRIER_STEPS : CARRIER_STEPS)) {
         carrier_ *= CARRIER_UP;
     } else {
