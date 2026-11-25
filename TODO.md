@@ -90,6 +90,12 @@ Done 2026-11-25 night (the same asks, continued):
   its decoder. cw-quiet passes; 46 bench recordings as good or better; tools/cw_replay 13 checks, CW Trainer 73.
   The resonance follows the key tone (orch cw-noise-tone, 09:44: 20.4 dB at 600 Hz with the key tone at 600; the
   remote's `set kt` for it).
+  Over the air (11:11-11:23, the owner's cable word): cw-text both ways 0 % wrong; air cw-carrier PASS both ways, the
+  X6200's 12 s quiet '' (was 'E E NA TE TW EDESSE DEEE'); air cw-kbd PASS both ways; air tci-cw x6200>x6100 PASS,
+  x6100>x6200 a LOOK as before ('UAST QJTST' for 'FAST Q1TST': in the X6200's audio the X6100's factory base ran two
+  dahs of '1' into one 411 ms mark and left 12 ms between F's dah and its last dit). The X6100 read the X6200's
+  keyboard 'VVV' as 'EUVV' once, as it did in runs before today's change (the X6200's power stepping up at an over's
+  start).
   NEXT (TX, the chain-ok word): cw-text both ways, air cw-kbd, air cw-carrier, air tci-cw.
 - The apps on the X6200 under 1 W hold their level as TCI's do (tx_player coarse; tools/txlevel: -3.0 dB in 20 overs
   before, 0.0 now). The 0.1 W skirt is not this (ft8-copies x6200 unchanged).
@@ -129,6 +135,13 @@ Done 2026-11-25 night (the same asks, continued):
   TCI plays through the low-latency stream (audio_play_lowlat), the apps through the normal one (the morning's stream
   try was a 300 ms stream of its own, not that one). So two tries, one at a time: (1) tx_player without the AIF1 DA0
   write, its samples scaled instead; (2) tx_player through TCI's low-latency stream.
+  Tried 11:24-11:30 (a hot-installed experiment build, a /tmp flag; ft8-copies x6200 at 0.1 W, dBc at 156 Hz for TX
+  Hz 1325/1500/2000): as committed -28.1/-27.6/-24.6; (1) no AIF1 DA0 write -28.4/-27.1/-25.9: the codec's volume is
+  NOT it. (2) told nothing: the apps' 2048-sample blocks did not fit what PulseAudio left of the low-latency stream (60
+  ms prebuffer), audio_play waited for room that never came, the over went out broken and the app's TX thread stayed
+  blocked till a GUI restart (the X6200 put back on the clean build; its FT8 app's protocol read FT8 after). A fair try
+  writes in pieces as TCI's audio_play_if_room does. Left after that: the meters' reads, the keepalive's register
+  block.
 
 Done 2026-11-24 evening (the owner: "get the over the air test coverage hammered out in full", "EVERY test should use
 the same unified framework to sync the radios or make exceptions for tests so that there is NO deviation"):
