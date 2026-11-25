@@ -29,6 +29,7 @@ import html
 import json
 import math
 import os
+import re
 import signal
 import sys
 import threading
@@ -4292,6 +4293,7 @@ def tci_refused(o, radio, other, kind, label):
 # both put back alike after ----
 
 _SUITE = {}
+SUITE_FEATURES = {}     # (module, t_name, check): (its batch in the suite's reports, the features.json ids it covers)
 
 # (its t_ function, the check, what passes): the essential ones not already orch's own (control-tci, freq-lock,
 # apps-list and files-secrets are: tci-takes-control, dial-lock, remote-apps, web-secrets)
@@ -4444,7 +4446,8 @@ def suite_group(o, module, t_name, name, call=None):
         o.both({"freq": f0, "mode": m0, "pwr": W})
     except Refused as e:
         o.st.ev(f"not put back alike after {name}: {e}", "bad")
-    got = {"rows": [{k: x.get(k) for k in ("test", "ok", "says")} for x in rows], "run_dir": run.dir}
+    got = {"rows": [{k: x.get(k) for k in ("batch", "test", "ok", "says", "covers", "partial")} for x in rows],
+           "run_dir": run.dir}
     bad = [f"{x['test']}: {x['says']}" for x in rows if x["ok"] is False]
     if bad:
         return False, "; ".join(bad)[:1500], got
@@ -4466,13 +4469,16 @@ def suite_checks(module, t_name):
 
     def per_radio(run, batch, test, fn, covers, want_tx=False):
         got[test] = ("r", fn, want_tx)
+        SUITE_FEATURES[(module, t_name, test)] = (batch, list(covers or []))
         return {}
 
     def by_radio(run, batch, test, covers, fn):
         got[test] = ("host", fn, False)
+        SUITE_FEATURES[(module, t_name, test)] = (batch, list(covers or []))
 
     def both_radios(run, test, covers, fn):        # suite_cover_a's, for a check that waits: fn(name, host, ip)
         got[test] = ("host", fn, False)
+        SUITE_FEATURES[(module, t_name, test)] = (module.replace("suite_", ""), list(covers or []))
     saved = {k: getattr(m, k) for k in ("per_radio", "by_radio", "both_radios") if hasattr(m, k)}
     m.per_radio = per_radio
     if "by_radio" in saved:
@@ -4497,6 +4503,211 @@ def suite_checks(module, t_name):
             setattr(m, k, v)
     _SUITE[key] = got
     return got
+
+
+# ---- Coverage: every feature of features.json against the latest result of each test that confirms it, orch's own
+# and the 1:1 suite's runs before it (orch.py coverage, suite.py coverage the same). orch's own tests say their
+# features here; a suite check run by orch (suite_pair) has those it registered; a suite batch run whole (suite_group)
+# has its rows' (from 2026-11-25 kept in orch's results; before, borrowed from the suite's report of the same row).
+# A suite result that orch has run again since gives way to orch's ----
+
+# What each of orch's own tests confirms, by features.json id: (covers, partial). A test's radio and direction
+# suffixes ("cw-text x6100>x6200", "ft8-copies x6200 tci") are left off its name here (test_base)
+ORCH_COVERS = {
+    "identity": (["system-identity-same-version", "system-same-apps"], []),
+    "services": (["system-services-up"], []),
+    "web-secrets": (["web-secrets-never-returned", "web-files-page"], []),
+    "caps": (["panel-filter-limits"], ["panel-filter-ssb-dig", "panel-filter-cw", "panel-filter-am-fm",
+                                       "panel-filter-wfm", "panel-set-step-zoom", "panel-rx-switches",
+                                       "radio-core-x6200-fm-airband"]),
+    "bands-all": ([], ["radio-core-band-keys", "main-screen-band-list-region-edges", "panel-set-band"]),
+    "sync-bands": ([], ["panel-set-freq", "panel-set-mode"]),
+    "usb-steps": (["path-usb-tones"], []),
+    "lsb-steps": (["path-lsb-tones"], []),
+    "am-steps": (["path-am-voice"], []),
+    "fm-steps": (["path-fm-voice"], []),
+    "cw-text": (["cw-decoder-copy", "path-cw-both-ways"], []),
+    "cw-quiet": (["cw-decoder-no-noise"], []),
+    "cw-quiet wide": (["cw-decoder-no-noise", "cw-decoder-tone-floor"], []),
+    "cw-noise-tone": ([], ["cw-decoder-no-noise"]),
+    "cw-noise-shape": ([], ["cw-decoder-no-noise"]),
+    "classic-wf3d": (["settings-display-waterfall-3d"], ["lookfeel-classic-main-screen", "gpu-gui-layer"]),
+    "power-steps": (["path-tx-power-readback", "tci-drive"], []),
+    "power-6m": (["path-tx-power-readback"], []),
+    "power-6m-fm": ([], ["path-tx-power-readback"]),
+    "power-6m-am": ([], ["path-tx-power-readback"]),
+    "ft8-cq": (["ft8-tx-cq", "panel-ft8-cq", "path-data-ft8-both-ways"], []),
+    "psk31-text": (["psk-mode-txrx"], ["psk-macros-tx"]),
+    "rtty-text": (["rtty-rx-decode", "rtty-tx-player"], []),
+    "wefax-chart": (["wefax-tx-player", "wefax-rx-auto-cont"], ["wefax-save-clear"]),
+    "tune-carrier": (["remote-tune-power"], ["panel-ext-tune"]),
+    "ft8-qso": (["ft8-auto-sequence", "ft8-auto-log", "ft8-qso-two-logs"], ["panel-ft8-auto-hold"]),
+    "ft8-stop": (["panel-ft8-stop", "ft8-tx-call-stop"], []),
+    "tci-control": (["tci-vfo", "tci-modulation"], []),
+    "rigctl": (["rigctl-get-freq", "rigctl-set-freq", "rigctl-mode", "rigctl-ptt-refused"], []),
+    "dial-lock": (["radio-core-freq-lock", "panel-user-lock"], []),
+    "remote-security": (["auth-token", "role-view-refusals"], []),
+    "rx-session-refused": (["panel-ptt-refused-no-tx", "panel-ft8-tx-refused-no-tx"], ["role-view-refusals"]),
+    "apps-alike": ([], ["js8-open", "olivia-open", "sstv-open-freq", "navtex-open", "psk-open",
+                        "digi-app-reopen-last-freq"]),
+    "ft8-reply": (["panel-ft8-reply", "ft8-reply-row"], []),
+    "remote-busy": (["control-stays-during-tx"], []),
+    "band-memory": (["radio-core-pre-att-per-band"], ["radio-core-band-last-frequency"]),
+    "cb-channel": (["g-own-channel"], ["cb-knob-channels", "radio-core-band-cb-c"]),
+    "js8-text": (["js8-reply-send-box"], ["js8-directed-queries"]),
+    "sstv-picture": (["sstv-auto-rx"], ["sstv-tx-mode", "sstv-tx-cq"]),
+    "olivia-text": (["olivia-modes-txrx"], []),
+    "cw-kbd": (["cwkbd-message-pages"], []),
+    "pages-look": ([], ["lookfeel-sentry-a", "lookfeel-sentry-b", "lookfeel-sentry-c", "lookfeel-sentry-d",
+                        "lookfeel-sentry-e", "lookfeel-sentry-f", "lookfeel-sentry-g", "lookfeel-sentry-h"]),
+    "comp-mic": (["settings-audio-compressor"], ["tx-comp-ratio"]),
+    "g-voiceprint": (["g-voiceprint", "g-voiceprint-tx-x6100", "path-mic-voice"], []),
+    "ext-tune": (["ext-tune-app-button", "ext-tune-time-limit", "ext-tune-carrier-txfreq"], []),
+    "js8-close-to-g": ([], ["js8-open"]),
+    "system-health": (["system-battery-log"], ["rtc-drift-correction"]),
+    "rx-vfo-split": (["panel-set-vfo"], ["settings-general-independent-vfos"]),
+    "tci-receiver": (["tci-rx-filter-band", "tci-agc-mode", "tci-rit", "tci-case-insensitive", "tci-unknown-silent"],
+                     []),
+    "rigctl-more": (["rigctl-levels", "rigctl-split-off", "rigctl-dump-state"], []),
+    "remote-apps": (["panel-apps-list", "panel-open-refused"], []),
+    "power-cap": (["tx-power-cap-per-radio", "panel-pwr-range"], ["tx-power-battery-5w"]),
+    "smc-remote": (["settings-txcal-smeter-measure"], []),
+    "web-pages": (["web-configurator-reachable"], "WEB_PAGES"),
+    "tci-out-of-band": (["tci-key-refused-band"], []),
+    "tci-ask": (["tci-ask-prompt", "tci-ask-timeout"], []),
+    "tci-cw-usb": (["tci-cw-refused-not-cw"], []),
+    "tci-key-cw": (["tci-key-refused-cw"], []),
+    "system-checks": (["system-battery-log", "data-fsck-log", "settings-good-copy", "ssh-keys-only",
+                       "tailscale-cli-status", "app-logs-retention", "start-trace-gui", "system-services-up",
+                       "cpu-speed", "cpu-temp-x6200", "pmu-temp-x6100", "gpu-mali-draws", "sessions-file-hashed",
+                       "adif-logs-header", "system-update-ft8-library", "system-identity-same-version"],
+                      ["system-update-check", "rtc-drift-correction"]),
+    "image": (["path-tx-image-carrier"], []),
+    "spurs": ([], ["path-data-ft8-both-ways"]),
+    "skirt": ([], ["tx-tci-transmit-level"]),
+    "tci-tail": (["tci-trx-tci-audio", "tci-wsjtx-compat"], []),
+    "ft8-copies": ([], ["path-data-ft8-both-ways", "digi-tx-level-x6200-power"]),
+    "cw-timing": (["path-cw-both-ways"], ["cw-keyer-settings"]),
+    "ambe-vocoder": (["dmr-voice-usb3000"], ["dsdfme-voice"]),
+    "dv-dmr": (["dmr-detect", "dmr-voice-usb3000"], []),
+    "dv-dmr-noparity": ([], ["dmr-voice-usb3000"]),
+    "dv-dstar": (["dsdfme-detect", "dsdfme-voice"], []),
+    "dv-ysf": (["dsdfme-detect", "dsdfme-voice"], []),
+    "dv-nxdn": (["dsdfme-detect", "dsdfme-voice"], []),
+    "dv-p25": (["dsdfme-detect", "dsdfme-voice"], []),
+    "tci-audio-rate": (["tci-rx-audio-stream", "tci-audio-format"], []),
+    "tci-takes-control": (["control-tci-takes"], []),
+    "rx-settings": (["panel-rx-switches", "panel-levels"], []),
+    "ptt-lease": (["panel-ptt-lease", "panel-ptt-release"], []),
+    "ptt-locked": (["sentry-tx-locked"], []),
+    "ptt-out-of-band": (["panel-ptt-refused-band", "tx-out-of-band-ptt-refused"], []),
+}
+
+
+def test_base(name):
+    """A test's name without its radios and direction ("cw-text x6100>x6200", "ft8-copies x6200 tci app")"""
+    return re.sub(r" (x6100>x6200|x6200>x6100|x6100|x6200)( .*)?$", "", name)
+
+
+def test_features(t):
+    """(batch, covers, partial) of one of TESTS (not a suite batch run whole: its rows say theirs)"""
+    if t.suite:
+        module, t_name, check = t.suite
+        suite_checks(module, t_name)        # registers them, nothing run
+        batch, covers = SUITE_FEATURES.get(t.suite, (module.replace("suite_", ""), []))
+        return batch, covers, []
+    covers, partial = ORCH_COVERS.get(test_base(t.name), ([], []))
+    if partial == "WEB_PAGES":
+        feats = json.load(open(os.path.join(HERE, "features.json")))
+        partial = [f["id"] for f in feats if f["area"] == "web" and f["id"].endswith("-page")]
+    return "orch", list(covers), list(partial)
+
+
+def _ok_of(result):
+    return True if result == "PASS" else None if result in ("LOOK", "KNOWN") else False
+
+
+def coverage_all():
+    """features.json against the latest result of every test, orch's and the suite's: a coverage run of its own
+    (runs/<time>-coverage: coverage.md, results.json). Its folder"""
+    import glob
+    import suite_more
+    runs = os.path.join(bench.STATE, "runs")
+    suite = {}                              # (batch, test): the suite's latest row
+    for path in sorted(glob.glob(os.path.join(runs, "*", "report.json"))):
+        try:
+            rows = json.load(open(path))
+        except (OSError, ValueError):
+            continue
+        if isinstance(rows, list):
+            for x in rows:
+                if isinstance(x, dict) and "batch" in x and "test" in x:
+                    suite[(x["batch"], x["test"])] = dict(x, run=os.path.basename(os.path.dirname(path)))
+    by_test = {}
+    for (b, t), x in suite.items():
+        by_test.setdefault(t, x)
+    latest = {}                             # orch's: test name -> (its result, its run)
+    for path in sorted(glob.glob(os.path.join(runs, "*-orch*", "results.json"))):
+        try:
+            res = json.load(open(path))
+        except (OSError, ValueError):
+            continue
+        if isinstance(res, list):
+            for x in res:
+                if isinstance(x, dict) and x.get("name") and x.get("result"):
+                    latest[x["name"]] = (x, os.path.basename(os.path.dirname(path)))
+    rows, no_features, orch_n = dict(suite), [], 0
+    for t in TESTS:
+        if t.name not in latest:
+            continue
+        res, rdir = latest[t.name]
+        orch_n += 1
+        if t.group:
+            module = t.group[0]
+            for x in (res.get("data") or {}).get("rows") or []:
+                batch = x.get("batch") or ("paths" if module == "suite_more" else module.replace("suite_", ""))
+                old = suite.get((batch, x["test"])) or by_test.get(x["test"]) or {}
+                rows[(batch, x["test"])] = {"batch": batch, "test": x["test"], "ok": x.get("ok"),
+                                            "covers": x.get("covers") or old.get("covers") or [],
+                                            "partial": x.get("partial") or old.get("partial") or [], "run": rdir}
+            continue
+        batch, covers, partial = test_features(t)
+        if t.suite:                         # the suite's own rows of this check give way to orch's result
+            check = t.suite[2]
+            for k in [k for k in rows if k[0] == batch and k[1] in (check, f"{check} {A}", f"{check} {B}",
+                                                                     f"{check} 1:1")]:
+                del rows[k]
+        if not covers and not partial:
+            no_features.append(t.name)
+        rows[("orch", t.name)] = {"batch": "orch", "test": t.name, "ok": _ok_of(res["result"]), "covers": covers,
+                                  "partial": partial, "run": rdir}
+    # Each feature by its latest result: an older row's claim on a feature gives way to a newer row's (an air
+    # group's rows renamed since the suite ran it, "ft8-tx x6100->x6200" now "ft8-level x6100->x6200"): a newer
+    # full test of it outranks any older; a newer partial one outranks only older partial ones
+    newest_full, newest_any = {}, {}
+    for x in rows.values():
+        x["covers"], x["partial"] = list(x.get("covers") or []), list(x.get("partial") or [])
+        when = x["run"][:15]
+        for fid in x["covers"]:
+            newest_full[fid] = max(newest_full.get(fid, ""), when)
+            newest_any[fid] = max(newest_any.get(fid, ""), when)
+        for fid in x["partial"]:
+            newest_any[fid] = max(newest_any.get(fid, ""), when)
+    for x in rows.values():
+        when = x["run"][:15]
+        x["covers"] = [fid for fid in x["covers"] if when >= newest_full[fid]]
+        x["partial"] = [fid for fid in x["partial"] if when >= newest_any[fid]]
+    run = types.SimpleNamespace(dir=os.path.join(runs, time.strftime("%Y%m%d-%H%M%S-coverage")),
+                                results=list(rows.values()))
+    os.makedirs(run.dir, exist_ok=True)
+    with open(os.path.join(run.dir, "results.json"), "w") as f:
+        json.dump(run.results, f, indent=1)
+    suite_more.coverage(run)
+    with open(os.path.join(run.dir, "coverage.md"), "a") as f:
+        f.write(f"\nFrom {orch_n} of orch's {len(TESTS)} tests' latest results (the suite's own runs before them where "
+                f"orch has not run a check again), each feature by its latest result." +(f" orch's tests that name no feature: {', '.join(no_features)}."
+                                                     if no_features else "") + "\n")
+    return run.dir
 
 
 def suite_pair(o, module, t_name, test, alone=False):
@@ -5665,8 +5876,10 @@ def dv_voice(o, m, parity_off=False):
 
 
 class Test:
-    def __init__(self, name, role, what, fn, est_s):
+    def __init__(self, name, role, what, fn, est_s, suite=None, group=None):
         self.name, self.role, self.what, self.fn, self.est_s = name, role, what, fn, est_s
+        self.suite = suite      # (module, t_name, check): one of the 1:1 suite's checks (suite_pair)
+        self.group = group      # (module, t_name, name): a suite batch run whole (suite_group), its rows its own
 
 
 SYNC_PLAN = [(3573000, 2), (7074000, 2), (7200000, 0), (14040000, 4), (14074000, 3), (14200000, 2), (21074000, 3),
@@ -5832,22 +6045,26 @@ TESTS = [
                    ("key-cw", "a TCI audio key on the {n} in CW, armed: refused, off the air"))
       for n in (A, B)],
     *[Test(name, "both", f"the 1:1 suite's {name} ({t_name[2:].replace('_', ' ')}) on both radios at once: {what}",
-           (lambda o, t_name=t_name, name=name: suite_pair(o, "suite_proto", t_name, name)), 30)
+           (lambda o, t_name=t_name, name=name: suite_pair(o, "suite_proto", t_name, name)), 30,
+           suite=("suite_proto", t_name, name))
       for t_name, name, what in SUITE_PORTED],
     *[Test(name, "both RX", f"the 1:1 suite's cover_a {name} on both radios at once (it puts back what it changes): "
                             f"{what}", (lambda o, t_name=t_name, name=name: suite_pair(o, "suite_cover_a", t_name,
                                                                                         name, alone=name == "screensaver")),
-           150 if name == "screensaver" else 45)
+           150 if name == "screensaver" else 45, suite=("suite_cover_a", t_name, name))
       for t_name, name, what in SUITE_PORTED_COVER_A],
     *[Test(name, "both RX", f"the 1:1 suite's {module[6:]} {name} on both radios at once: {what}",
-           (lambda o, module=module, t_name=t_name, name=name: suite_pair(o, module, t_name, name)), 45)
+           (lambda o, module=module, t_name=t_name, name=name: suite_pair(o, module, t_name, name)), 45,
+           suite=(module, t_name, name))
       for module, t_name, name, what in suite_more_ported()],
     *[Test(f"air {name}", "both ways (each direction: one sends 0.1 W, the other listens)",
            f"the 1:1 suite's {module[6:]} {name} over the air, run whole: {what}",
-           (lambda o, module=module, t_name=t_name, name=name: suite_group(o, module, t_name, name)), 120)
+           (lambda o, module=module, t_name=t_name, name=name: suite_group(o, module, t_name, name)), 120,
+           group=(module, t_name, name))
       for module, t_name, name, what in air_groups()],
     *[Test(f"air paths {part}", role, what, (lambda o, part=part: suite_group(
-        o, "suite_more", "paths", f"paths {part}", call=lambda m, run: m.paths(run, (part,)))), est)
+        o, "suite_more", "paths", f"paths {part}", call=lambda m, run: m.paths(run, (part,)))), est,
+        group=("suite_more", "paths", f"paths {part}"))
       for part, role, what, est in (
           ("bands", "both ways", "an over on every band both radios share, 160 to 6 m, each way: heard, the receiver's "
                                  "level per band (suite_more band_proofs)", 600),
@@ -6109,7 +6326,12 @@ def main():
     cp.add_argument("--lan", action="store_true", help="on the network, not only this computer")
     sp = sub.add_parser("spec", help="replay the spectrum judge on an over's saved frames (*_spectrum.json)")
     sp.add_argument("file")
+    sub.add_parser("coverage", help="features.json against every test's latest result, orch's and the suite's "
+                                    "(runs/<time>-coverage/coverage.md)")
     a = ap.parse_args()
+    if a.cmd == "coverage":
+        print(os.path.join(coverage_all(), "coverage.md"))
+        return
     if a.cmd == "console":
         console(None, a.port, a.lan)
         say(f"console: http://{'0.0.0.0' if a.lan else '127.0.0.1'}:{a.port}/ (the runs' {SNAPSHOT})")

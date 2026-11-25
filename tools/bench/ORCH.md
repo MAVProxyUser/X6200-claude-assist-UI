@@ -32,6 +32,8 @@ pads) are tested. It holds both radios, runs every test on them as a pair, and s
     python3 orch.py run --all            # every test, the passed ones too (only on the owner's word)
     python3 orch.py run --soak 3         # every test three times, each one's tally kept (only on the owner's word)
     python3 orch.py spec RUN/…_spectrum.json   # replay the spectrum judge on an over's saved frames
+    python3 orch.py coverage             # features.json against every test's latest result, orch's and the suite's
+    python3 facilitate.py                # FACILITATE.md: what still waits on the owner, in sessions
 
 `run` options: `--port 8765`, `--lan` (the console on the network as well), `--linger S` (how long a run's own console
 stays up after it; 0 with the standing console), `--sql N` (the squelch held, default 0), `--squelch-cal`.
@@ -228,8 +230,14 @@ after; the group passes with no row failed). Every test runs both ways unless it
 
 Not over the air in orch yet: nothing of the suite's over-the-air batches is left out except what orch has already
 (power-steps, ft8-stop, remote-busy, ext-tune, ft8-cq) and the paths parts it repeats (tones, mic-on-g, cw, rtty,
-psk31). What still has no test at all is in features.json's coverage (about 1000 of 1397 features, most of them the
-apps' and the screens' details).
+psk31).
+
+**Coverage.** `orch.py coverage` writes `runs/<time>-coverage/coverage.md`: each of features.json's 1397 features
+pass, fail, look, partial or not covered, by area. Orch's tests name the features they cover (`ORCH_COVERS` for the
+native ones; the suite's own rows for the 1:1 ports and the air groups); the suite's older runs count where orch has
+not run a check again, and each feature goes by its latest result (2026-11-25: 491 pass, 5 fail, 24 look, 137 in
+part, 740 not covered). `facilitate.py` turns what is left and needs internet services, Bluetooth, GPS or the owner's
+hands into sessions in [FACILITATE.md](FACILITATE.md), and counts what the bench can still write and run alone.
 
 ## The tests (282)
 

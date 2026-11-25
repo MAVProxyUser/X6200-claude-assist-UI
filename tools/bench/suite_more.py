@@ -1314,29 +1314,8 @@ def coverage(run):
 
 
 def coverage_all():
-    """The coverage of every suite run so far: the latest result of each test across ~/.config/x6x00-bench/runs/*/
-    report.json, into a coverage run of its own (runs/<time>-coverage/coverage.md)"""
-    import glob
-
-    latest = {}
-    for path in sorted(glob.glob(os.path.join(bench.STATE, "runs", "*", "report.json"))):
-        try:
-            rows = json.load(open(path))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(rows, list):
-            continue                        # a bench test's own report, not the suite's
-        for x in rows:
-            if isinstance(x, dict) and "batch" in x and "test" in x:
-                latest[(x["batch"], x["test"])] = dict(x, run=os.path.basename(os.path.dirname(path)))
-
-    class Run:
-        pass
-    run = Run()
-    run.dir = os.path.join(bench.STATE, "runs", time.strftime("%Y%m%d-%H%M%S-coverage"))
-    os.makedirs(run.dir, exist_ok=True)
-    run.results = list(latest.values())
-    with open(os.path.join(run.dir, "results.json"), "w") as f:
-        json.dump(run.results, f, indent=1)
-    coverage(run)
-    return run.dir
+    """The coverage of every run so far: orch's (orch.py coverage), which takes the latest of each suite run's rows
+    (~/.config/x6x00-bench/runs/*/report.json) with orch's own results, each feature by its latest result, into a
+    coverage run of its own (runs/<time>-coverage/coverage.md). Its folder"""
+    import orch
+    return orch.coverage_all()

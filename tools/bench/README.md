@@ -226,7 +226,7 @@ side (`~/.config/x6x00-bench/runs/<time>-<batches>/report.md`), for a release to
                                   # RTTY, PSK31, CW, AM/FM, each both ways and confirmed by the other radio
     suite.py run look             # every Settings tab on both, side by side, compared pixel by pixel
     suite.py run cover            # features the others had not reached (suite_cover.py), receive only
-    suite.py coverage             # every feature against the latest result of each test of every run so far
+    suite.py coverage             # every feature against the latest result of each test, orch's too (orch.py coverage)
     suite.py release              # core and the batches bench.json's "attached" names
 
 **One test per feature, both radios, 1:1** (the owner, 2026-11-22: "a comprehensive set of unit tests to cover
