@@ -81,13 +81,18 @@ Done 2026-11-25 night (the same asks, continued):
   judged: whitening tried two ways and reverted (ORCH_FINDINGS); the next try keeps the lock on a held station.
 - The apps on the X6200 under 1 W hold their level as TCI's do (tx_player coarse; tools/txlevel: -3.0 dB in 20 overs
   before, 0.0 now). The 0.1 W skirt is not this (ft8-copies x6200 unchanged).
-- TCI over's end (the owner's 'TCI unkeys before its audio is out'): new orch tests tci-tail x6200/x6100 measured
-  0.22 s / 0.36 s lost after the GUI's queue had played out (nothing with 1.5 s of silence after); the key is now held
-  300 / 450 ms longer (src/tci_server.c).
+- TCI over's end (the owner's 'TCI unkeys before its audio is out'): DONE. New orch tests tci-tail x6200/x6100
+  measured 0.22 s / 0.36 s lost after the GUI's queue had played out (nothing with 1.5 s of silence after); the key is
+  held 300 / 450 ms longer now (src/tci_server.c) and both pass, the whole 2.0 s on the air.
+- A TCI program that keyed and quit at once keyed the X6200 for an instant (tci-audio x6200>x6100): a start in a
+  connection's first second waits 100 ms and keys only if its client is still there.
 - tci-cw x6200>x6100 was stopped by the Watch once in two (the X6200 on the air over 16 s: 13.8 s of text and its QSK
-  tail in one over): its texts now planned for 13.5 s (23 WPM). The keyer's log line went through stderr into the
-  GUI's own lines: LV_LOG_USER now (8006c4c4). To look at: air cw-kbd x6100>x6200 refused once (the X6100 back on
-  14.200 USB after it was set; it passed in the next two runs).
+  tail in one over): the X6200's texts now planned for 13.5 s (23 WPM; the X6100's stay at 21: at 23 the X6200's
+  decoder misread them); the PTT holder's keyless over no longer counts as unheard. The keyer's log line went through stderr into the
+  GUI's own lines: LV_LOG_USER now (8006c4c4). air cw-kbd x6100>x6200 refused once (the X6100 back on page A's
+  14.200 USB after it was set): bench.open_page now waits for a page's dial to settle. To look at: tci-cw x6100>x6200
+  failed at 06:28 on its stop (trx:0,false 0.83 s after cw_macros_stop, 0.8 asked; 0.24-0.27 s before) beside the
+  X6200's misread of the X6100's elements.
 - Left: the apps' TX stream on the X6200 (the skirt); the X6200's Comp (a third source); the X6100's +61.4 Hz line (a
   third receiver).
 

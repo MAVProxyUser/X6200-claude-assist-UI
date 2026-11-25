@@ -981,6 +981,11 @@ def _open_page(r, letter):
         except Refused:
             pass                        # G stayed on the dial as found: its own message says why
         time.sleep(0.3)
+    elif letter != "G":
+        # Another page brings back its own dial a moment after it says it is there: waited for, or a dial set right
+        # after was moved again (air cw-kbd 2026-11-25: the X6100 back on page A's 14.200 USB after it was set to CW
+        # on 14.040, 'moved again after being set')
+        settled(r, still=0.6, timeout=3.0, keys=("freq", "mode", "pg"))
 
 
 def close_apps(r, keep_dial=True):

@@ -1445,10 +1445,12 @@ def b_tci_cw(P):
     proof = P.prove(F_CW, l_mode=4, agc=2)
     P.sender(F_CW, 4, W0)
     units = morse_units(CW_TEXT1 + CW_TEXT2)
-    # both texts within 14.3 s (the watch's limit is 16 s; FAST goes 5 WPM up, the rest at 21 WPM): at 28 and 24
-    # WPM, rounds 1-4 2026-11-23, the X6200's decoder misread the X6100's fast elements (',' as 'Q M' or <?>, ':' as
-    # '8' or '9', S as 'EEE' or 'I')
-    lo = max(18, min(24, math.ceil(1.2 * units / 14.3)))
+    # both texts within 14.3 s (the watch's limit is 16 s; FAST goes 5 WPM up, the rest at 21 WPM): at 28, 24 and 23
+    # WPM (rounds 1-4 2026-11-23, 2026-11-25) the X6200's decoder misread the X6100's fast elements (',' as 'Q M',
+    # <?> or 'Ñ', ':' as '8' or '9', S as 'EEE' or 'I', FAST as 'ENAST'). The X6200 sending, 13.5 s (23 WPM): its texts
+    # keyed 13.8 s at 21 WPM and it stays on the air a second or two after its last element (its QSK delay and its
+    # base's tail), and one over in two went over 16 s and the Watch stopped it (2026-11-25 05:41)
+    lo = max(18, min(24, math.ceil(1.2 * units / (13.5 if model(P.run, S.name) == "x6200" else 14.3))))
     P.banner(f"TCI CW TEXT: '{CW_TEXT1}{CW_TEXT2}', CW_MACROS_STOP, A PTT HOLDER'S TEXT REFUSED")
     P.watch_on(W0, "TCI CW text")
     bench.tx_log({"who": S.name, "f": F_CW, "w": S.pwr(), "what": "air_c tci-cw"})
@@ -1493,6 +1495,12 @@ def b_tci_cw(P):
 
     def mac(r):
         return m_key + (r - r_key)
+    # The PTT holder's over (trx:0,true and no text of its own that keys: in CW nothing goes out) is no over to hear:
+    # the Watch's 'did NOT hear' of it dropped (2026-11-25: its rise 12.1 and 15.0 dB, the deaf check's 15 at the
+    # edge, failed a test whose every check was right)
+    ptt_lo, ptt_hi = mac(m["ptt"]) - 0.5, mac(m["unkey"]) + 1.5
+    for w_ in P.done:
+        w_.deaf[:] = [d for d in w_.deaf if not ptt_lo <= d.get("since", 0) <= ptt_hi]
     txt1 = decoded(L, mac(m["syntax"]), mac(m["long"]))
     s1 = squeeze(txt1)
     i_t = s1.find("TEST:1,2")

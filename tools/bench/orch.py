@@ -4709,6 +4709,108 @@ def save_wav(o, x, name):
     return path
 
 
+TAIL_LOST_MAX_S = 0.15      # a TCI over may lose this much of its audio's end at the unkey (the envelope's edges)
+TAIL_PAD_S = 1.5            # the control: this much keyed silence after the tone, all of the tone must come then
+
+
+def tail_test(o, sender, listener, f=14074000, tone=1000, secs=2.0, amp=0.3):
+    """A TCI over's last audio on the air (the owner's ask, 2026-11-24: a TCI over unkeys before its audio is out; the
+    bench pads STEP_TAIL_S): the sender's TCI plays `secs` of `tone` and unkeys at once, trx:0,false right after its
+    last frame as WSJT-X does; the listener's TCI audio measures how much of the tone came. Then the same with
+    TAIL_PAD_S of silence after it (the bench's way: all of it comes). PASS when neither lost more than
+    TAIL_LOST_MAX_S at its end"""
+    import subprocess
+    import numpy as np
+    from scipy.signal import butter, filtfilt
+    from tones import TciRx, FS as TFS
+    S, L = o.r[sender], o.r[listener]
+    run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_tone_tx.py"),
+            f"root@{S.host}:/tmp/tci_tone_tx.py"])
+    rows, tci = [], None
+    try:
+        tci = TciRx(L.host)
+        with o.step(f"both on {f / 1e6:.3f} USB-D, the receiver profile alike (AGC off: the tone's edges as sent)") as s:
+            want, checks = bench.rx_profile(f, 3, pre=0, att=0, rfg=100, agc=0, sql=0, filt=(100, 3000))
+            o.both(dict(want, pwr=W, atu=0, xit=0, rit=0, split=0), checks)
+            s.confirm(f"both on {f} mode 3, AGC 0")
+        for pad in (0.0, TAIL_PAD_S):
+            plan = [[0, 0.5], [tone, secs]] + ([[0, pad]] if pad else [])
+            key_s = sum(x for _, x in plan) + 3.0
+            with o.step(f"{sender}'s TCI plays {secs} s of {tone} Hz at {W} W, "
+                        + (f"then {pad} s of silence, then unkeys" if pad else "then unkeys at once")
+                        + f"; {listener} records its audio") as s:
+                _, total = bench.chain_gate(o.c, "radios")
+                bench.ensure(S, *bench.tx_profile(f, 3, W))
+                bench.radio_tx_gate(S, o.c, W)
+                bench.listener_gate(L)
+                o.roles = {sender: "TX", listener: "RX"}
+                watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=L, w=W,
+                                    label=f"tci-tail {sender} pad {pad}")
+                try:
+                    o.changing += 1
+                    try:
+                        bench.arm(S, True, mode=3)
+                    finally:
+                        o.changing -= 1
+                    bench.tx_log({"who": sender, "f": f, "w": S.pwr(), "what": f"orch: tci-tail pad {pad}"})
+                    t0 = time.time()
+                    proc = subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
+                                             f"python3 /tmp/tci_tone_tx.py '{json.dumps(plan)}' {amp} {key_s:.1f} "
+                                             f"50001 0.01"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    while proc.poll() is None and not watch.why:
+                        time.sleep(0.05)
+                    if proc.poll() is None:
+                        bench.stop_bench_programs(S)
+                    t1 = time.time()
+                    try:
+                        S.wait("off the air", lambda: not S.tx, 5)
+                    except Refused:
+                        S.stop()
+                finally:
+                    watch.close()
+                    o.changing += 1
+                    try:
+                        bench.arm(S, False)
+                    finally:
+                        o.changing -= 1
+                    o.roles = {A: "RX", B: "RX"}
+                if watch.why:
+                    raise Refused(f"the watch stopped the over: {watch.why}")
+                time.sleep(1.0)
+                x, _ = tci.audio(t0 - 0.5, t1 + 2.0)
+                if len(x) < TFS:
+                    raise Refused(f"no audio from {listener}")
+                n = np.arange(len(x))
+                z = x * np.exp(-2j * np.pi * tone * n / TFS)
+                b, a = butter(3, 40 / (TFS / 2))
+                db = 20 * np.log10(np.abs(filtfilt(b, a, z.real) + 1j * filtfilt(b, a, z.imag)) + 1e-9)
+                on = db > np.percentile(db, 97) - 10
+                runs, k = [], 0         # the longest stretch over 10 dB under the tone's level: the tone as it came
+                while k < len(on):
+                    j = k
+                    while j < len(on) and on[j] == on[k]:
+                        j += 1
+                    if on[k]:
+                        runs.append(j - k)
+                    k = j
+                came = max(runs, default=0) / TFS
+                row = {"pad_s": pad, "came_s": round(came, 3), "lost_s": round(max(secs - came, 0.0), 3),
+                       "wav": save_wav(o, x, f"tci_tail_{sender}_to_{listener}_pad{pad}.wav")}
+                rows.append(row)
+                s.confirm(f"{came:.2f} s of the {secs} s tone came, {row['lost_s']:.2f} s lost at its end")
+    except Refused as e:
+        return False, str(e), {"rows": rows}
+    finally:
+        if tci is not None:
+            tci.close()
+    lost = {r["pad_s"]: r["lost_s"] for r in rows}
+    ok = all(v <= TAIL_LOST_MAX_S for v in lost.values())
+    return ok, (f"{sender}'s TCI over of {secs} s of {tone} Hz in {listener}'s audio: unkeyed at once "
+                f"{secs - lost[0.0]:.2f} s came ({lost[0.0]:.2f} s of its end lost), with {TAIL_PAD_S} s of silence "
+                f"after it {secs - lost[TAIL_PAD_S]:.2f} s ({lost[TAIL_PAD_S]:.2f} s lost); "
+                f"{TAIL_LOST_MAX_S} s at most"), {"rows": rows}
+
+
 def ft8_copy_test(o, sender, listener, txfs=(1325, 1500, 2000), w=W, judge=True):
     """Where the copies 156.25 Hz either side of an FT8 app's transmission come from (spur_test: a TCI tone has none):
     the sender's FT8 app sends one CQ at each TX Hz of txfs, the listener on G in USB-D on the same dial recording its
@@ -5464,6 +5566,12 @@ TESTS = [
                                                                   0.1)), judge=False), 240),
     Test("spurs x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's tone in the X6200's audio",
          lambda o: spur_test(o, A, B), 90),
+    Test("tci-tail x6200", "X6200 TX, X6100 RX", "a TCI over's end on the air: the X6200's TCI plays 2 s of 1000 Hz "
+         "and unkeys at once (WSJT-X's way), the X6100 must hear all of it; then with 1.5 s of silence after it "
+         "(the owner's ask, 11-24: the X6200 dropped 1.2-1.4 s, the X6100 0.3-0.5 s, and the bench pads 0.8 s)",
+         lambda o: tail_test(o, B, A), 90),
+    Test("tci-tail x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's TCI over in the X6200's audio",
+         lambda o: tail_test(o, A, B), 90),
     Test("ft8-copies x6200", "X6200 TX, X6100 RX", "the X6200's FT8 app's CQs from TX Hz 1325 (no VFO move), 1500 and "
          "2000 at 0.1 W in the X6100's audio, the power 156.25 Hz either side: said, not judged (its base's skirt at "
          "0.1 W, -25 dBc; the X6100's decoder took a copy in it for the station till 11-25)",

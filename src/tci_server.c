@@ -141,6 +141,10 @@
 /* A client's start after its own unkey, while the radio still plays that over out (its unkey is answered at once: the
  * X6200 has 1.2-1.4 s to go): kept until the radio is free, this long at most, then keyed, instead of refused */
 #define KEY_WAIT_MS   3000
+/* A start in a connection's first KEY_YOUNG_MS waits KEY_GRACE_MS and keys only if its client is still there
+ * (handle_cmd) */
+#define KEY_YOUNG_MS  1000
+#define KEY_GRACE_MS  100
 #define TX_LIMIT_MS   (180 * 1000)
 #define BT_PING_MS    2000          /* over Bluetooth: silent this long, it is pinged (its answer shows the link is up) */
 #define BT_TX_SILENT_MS 5000        /* over Bluetooth: silent this long while it transmits, its transmission ends. The
@@ -180,6 +184,8 @@ typedef struct {
     bool            leaving;        /* its close is here already, behind what client_read is handling (leaving_now) */
     bool            key_wait_tci;   /* ... with its TCI audio */
     uint64_t        key_wait_ms;
+    bool            key_grace;      /* ... or a start in its first second, waiting KEY_GRACE_MS (handle_cmd) */
+    bool            grace_done;     /* its first start has waited that */
     uint8_t         said;           /* what the operator said to its asking to transmit, on this connection (SAID_*) */
     bool            seen;           /* its address in the allowed list was marked as seen on this connection */
     uint8_t         in[IN_SIZE];
@@ -794,6 +800,8 @@ static void client_close(client_t *c) {
     c->app[0] = 0;
     c->key_wait = false;
     c->leaving  = false;
+    c->key_grace  = false;
+    c->grace_done = false;
     if (txs.unkeyed_ci == (int)(c - clients))
         txs.unkeyed_ci = -1;
     pthread_mutex_unlock(&c->lock);
@@ -875,6 +883,16 @@ static void tx_hold_learn(void) {
     }
 }
 
+/* The base still holds this much of a TCI over's audio once the GUI's own queue has played out (audio_play_wait): an
+ * over unkeyed then lost its last 0.22 s on the X6200 and 0.36 s on the X6100 (orch tci-tail, 2026-11-25: 2 s of tone
+ * and trx:0,false at once, as WSJT-X sends it; with 1.5 s of silence after it, nothing). The key is held that much
+ * longer, with a margin */
+#ifdef BOARD_X6200
+#define TCI_UNKEY_TAIL_MS   300
+#else
+#define TCI_UNKEY_TAIL_MS   450
+#endif
+
 /* tci: the TCI audio session (if there is one); else the radio's own PTT */
 static void tx_unkey(bool tci, bool drain) {
     if (tci) {
@@ -883,7 +901,8 @@ static void tx_unkey(bool tci, bool drain) {
         if (drain) {
             uint64_t t = now_ms();
             audio_play_wait();
-            if (now_ms() - t > 200)
+            usleep(TCI_UNKEY_TAIL_MS * 1000);
+            if (now_ms() - t > 200 + TCI_UNKEY_TAIL_MS)
                 LV_LOG_USER("tci: the unkey waited %llu ms for the audio to play out",
                             (unsigned long long)(now_ms() - t));
         } else {
@@ -1816,6 +1835,17 @@ static void handle_cmd(int ci, char *line) {
         c->key_wait_ms  = now_ms();
         return;
     }
+    /* A start in a connection's first second waits KEY_GRACE_MS (key_wait_tick) and keys only if its client is still
+     * there then: a program that keyed and quit at once put the X6200 on the air for an instant when its close came
+     * after its key, behind what client_read had (leaving_now sees only what came with it; tci-audio x6200>x6100,
+     * 2026-11-25, a local client). A program that stays (WSJT-X) is older than that when it keys */
+    if (key && !refused && !cw && !c->grace_done && now_ms() - c->open_ms < KEY_YOUNG_MS) {
+        c->key_wait     = true;
+        c->key_grace    = true;
+        c->key_wait_tci = n >= 3 && strcasecmp(a[2], "tci") == 0;
+        c->key_wait_ms  = now_ms();
+        return;
+    }
     /* A question takes no control: a vfo without its frequency (vfo:0,0;), a trx without true or false, the filter
      * without its two edges, the others without their value. It is answered with the state below, so a program that
      * polls (Hamlib's TCI backend asks VFO:0,0; and TRX:0; at every poll) leaves control with a browser that has it.
@@ -1921,7 +1951,8 @@ static void handle_cmd(int ci, char *line) {
                     atomic_store(&key_refused, key_gen);    /* lost: refused, as the LVGL thread would */
             }
         } else {
-            c->key_wait = false;                    /* a start of its waiting: given up */
+            c->key_wait  = false;                   /* a start of its waiting: given up */
+            c->key_grace = false;
             if (txs.owner == ci || ptt_owner == ci || cw_owner == ci) {
                 /* Its unkey answered now: the X6200 has 1.2-1.4 s of the over still to play, and the radio's state
                  * says receive only after it, later than the second WSJT-X and JTDX wait, which then hung up (their
@@ -2118,16 +2149,22 @@ static void key_wait_tick(uint64_t now) {
 
         if (c->fd < 0 || !c->key_wait)
             continue;
+        if (c->key_grace && now - c->key_wait_ms < KEY_GRACE_MS)
+            continue;               /* a young connection's start: still there after the grace? */
         state_read(&s);
         if (tx_free(&s)) {
             char cmd[24];
 
-            c->key_wait = false;
+            c->key_wait   = false;
+            c->key_grace  = false;
+            c->grace_done = true;
             snprintf(cmd, sizeof(cmd), "%s", c->key_wait_tci ? "trx:0,true,tci;" : "trx:0,true;");
             txs.unkeyed_ci = -1;            /* no second wait: refused as ever if the radio is busy again */
             handle_text(i, cmd);
         } else if (now - c->key_wait_ms > KEY_WAIT_MS) {
-            c->key_wait = false;
+            c->key_wait   = false;
+            c->key_grace  = false;
+            c->grace_done = true;
             client_text(c, "trx:0,false;");
         }
     }
@@ -2135,6 +2172,10 @@ static void key_wait_tick(uint64_t now) {
 
 static void tx_session_tick(uint64_t now) {
     key_wait_tick(now);
+    /* A start key_wait_tick just made took its time after now (txs.start_ms, last_audio_ms): the times below from a
+     * fresh now, or now - start_ms wrapped round and ended it at once as one that 'did not key within 1 s' (a young
+     * connection's start, its grace over, 2026-11-25: the X6200's path proof put out nothing) */
+    now = now_ms();
     cw_tick(now);
     if (ptt_owner >= 0 && (clients[ptt_owner].fd < 0 || now - ptt_ms > TX_LIMIT_MS))
         tx_session_end(ptt_owner, false);

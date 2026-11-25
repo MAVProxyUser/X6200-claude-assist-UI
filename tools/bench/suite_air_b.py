@@ -1069,11 +1069,30 @@ def t_cw_kbd(run):
             o.off_air(snd)
             time.sleep(2.5)
             got = " ".join(lis.cw.split())
-            o.res("cwkbd-message", on and not w.why and want in got.upper(),
+            ok = on and not w.why and want in got.upper()
+            known = ""
+            if on and not w.why and not ok and "VVV" in got.upper():
+                # whose the misread is, as tci-cw tells it (cw_timing.py): the keyer late on its deadlines is the GUI's
+                # (a fail); on time, an X6100 on Xiegu's factory base runs elements together now and then (cw-timing
+                # x6100: said; 2026-11-25 the X6200 read its Q1TST as QCHTST, the V groups right); from clean keying a
+                # misread is the decoder's (a fail)
+                import cw_timing as ct
+                import suite_air_a as aa
+                keyer = ct.keyer_said(lambda h, c: bench.ssh(h, c, timeout=15), snd.host, last=1)
+                base = aa.base_of(snd.host) if aa.model(o.run, snd.name) == "x6100" else ""
+                if keyer is not None and keyer[1]:
+                    known = f"; the keyer itself late ({keyer[1]} of {keyer[0]} edges over 15 ms): the GUI's"
+                elif aa.model(o.run, snd.name) == "x6100" and aa.gcfix_of(base) == 0 and keyer is not None:
+                    ok = None
+                    known = (f"; LOOK: the keyer on time ({keyer[0]} edges, the latest {keyer[2]} ms), {snd.name}'s "
+                             f"base (Xiegu's {base or 'factory'}) moves its key edges (cw-timing x6100): said")
+                else:
+                    known = "; the decoder misread clean keying"
+            o.res("cwkbd-message", ok,
                   f"{snd.name}'s CW Keyboard, message {i_short + 1} of {n} ({short!r}: page {2 + i_short // 4}, "
                   f"F{2 + i_short % 4}): on the air {bool(on)}, its meter {w.tx_peak.get(snd.name)} W; {lis.name}'s "
                   f"decoder {got[-60:]!r} ({want} {'copied' if want in got.upper() else 'NOT copied'}"
-                  + ("" if call else "; {CALL} not tried: its callsign is not a test call") + ")"
+                  + ("" if call else "; {CALL} not tried: its callsign is not a test call") + ")" + known
                   + (f"; STOPPED: {w.why}" if w.why else ""))
             # the long one, stopped with Stop (page 1, F3) a few seconds in
             secs_long = morse_secs(long_, wpm)

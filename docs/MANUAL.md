@@ -11843,7 +11843,10 @@ the radio, hears it, keys it and sends CW with it.
     audio and the 3 Mbit/s of receive audio together were more than the
     link carries, and its overs were cut short. Its first audio may come up
     to 2 s after the key, and its unkey is answered at once while the radio
-    plays out its last half second or so.
+    plays out its last half second or so. The radio stays keyed until all of
+    the over's audio is on the air: up to v0.3.12.48 it unkeyed as the GUI's
+    own queue emptied, and the base still held the last 0.2 s (X6200) or
+    0.35 s (X6100) of it, lost from every over that ended with a sound.
 
 ## Hamlib (NET rigctl)
 
