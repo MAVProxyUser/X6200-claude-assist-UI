@@ -1641,6 +1641,14 @@ static void tx_run(const sdr_ops_t *o) {
         tx_say("END", hz, tx_why ? tx_why : "ASKED");
         return;
     }
+    /* tx_ask looked at the device then: one swapped in since (a replug) may not transmit, and its tx is NULL (clang's
+     * analyzer, 2026-11-25) */
+    if (!o->tx) {
+        tx_say("NO", hz, "RECEIVE-ONLY");
+        fprintf(stderr, "rtlspec: transmitting on %llu Hz refused: the device changed to a receive-only one\n",
+                (unsigned long long)hz);
+        return;
+    }
     mod_reset();
     atomic_store(&tx_from_ms, now_ms());
     atomic_store(&tx_on, true);
