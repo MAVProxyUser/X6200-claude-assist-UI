@@ -12886,6 +12886,16 @@ ground between the two boards. We have found no public report of them; 780.69 Hz
 to but not exactly a base DSP rate. Nothing filters them yet: a notch in the radio's receive audio at 780.69 Hz and
 its harmonics would take the main series out.
 
+#### The X6100's receive audio came in at full scale, clipped
+
+Fixed in the GUI on 2026-11-26. On Xiegu's own base from V1.1.9 (and GoldCorpHF's gcfix bases, which are that base)
+the GUI set the codec's MIC1 input, where the base's receive audio comes in, to +24 dB, as it does for Xiegu's 1.1.8
+and the patched bases before r12. That base sends its audio hotter: a signal at S9+13 reached the processor at full
+scale with every AGC setting, some 11 dB over it with AGC Fast, so the apps, TCI clients, recordings and the CW
+decoder were given clipped audio, and two signals together made new ones between them. The boost is 0 dB there now:
+the same signal comes in at -26, -22 and -13 dBFS with AGC Off, Slow and Fast, as on an X6200. The speaker, which
+the base drives itself, is as it was. Xiegu's 1.1.8 and the patched bases before r12 keep the boost.
+
 #### The receiver's audio played the last 2 seconds again, and decodes came 2 s late after it
 
 Fixed in the SD card's kernel of the bundles built after v0.3.12.42 (both radios). The processor's audio input

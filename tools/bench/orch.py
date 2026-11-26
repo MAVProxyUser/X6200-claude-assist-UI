@@ -906,6 +906,7 @@ class Orch:
         self._down = {}                     # name: when its state stopped coming
         self._rf_since = None
         self.trouble = None                 # this test's GUI or RF trouble: it fails the test
+        self.stalls = []                    # this test's link stalls, the GUI the same process: [(radio, s)]
         self._pids = {}                     # (name, before/after): the GUI's process around a silence
         self._unplanned = {}                # name: its silence began with no planned restart
         self._role_said = {}                # name: its "transmits but its role is RX" said for this over
@@ -954,6 +955,7 @@ class Orch:
             return
         if a_ and b_ and a_ == b_:
             self.st.ev(f"{n}: its link stalled {gone:.0f} s, its GUI the same process ({b_}): not a crash", "radio")
+            self.stalls.append((n, round(gone)))
             if self.trouble and self.trouble.startswith(f"{n}: NO WORD"):
                 self.trouble = None
         else:
@@ -6966,6 +6968,13 @@ _oa.H = sys.modules[__name__]
 TESTS += _oa.tests(Test, A, B)
 ORCH_COVERS.update(_oa.COVERS)
 
+# The receivers measured, not read back (orch_rx.py, 2026-11-26, the owner: "RX first"): filter, RIT/XIT, PRE/ATT,
+# AGC, DNF, NR, NB and the S-meter, each both ways
+import orch_rx as _orx                      # noqa: E402
+_orx.H = sys.modules[__name__]
+TESTS += _orx.tests(Test, A, B)
+ORCH_COVERS.update(_orx.COVERS)
+
 
 # Other sessions put new GUIs on the radios (tools/cross_x6200/install.sh): one replaced both mid-run on 2026-11-25
 # (15:43, its "no run going" check a moment before this run began). Who installs holds GUI_LOCK for the time it does
@@ -7072,6 +7081,23 @@ def update_check_on(st, radios, made):
                       timeout=15)
         except (OSError, subprocess.SubprocessError, Refused) as e:
             st.ev(f"{n}: the run's {NO_CHECK} not taken away ({e})", "bad")
+
+
+
+SENDS_RE = re.compile(r"\bTX\b|both ways|keyed")
+
+
+def sends_gate(o, t):
+    """Why t may not run now, when it transmits (its role says so: TX, both ways, keyed) and the owner's word on the
+    radios cable has lapsed (bench.chain_gate's 12 h): such a test is NOT RUN, not failed (2026-11-26: power-steps'
+    "flakiness" and rit-xit's first FAILs were that refusal). None: it may run"""
+    if not SENDS_RE.search(t.role or ""):
+        return None
+    try:
+        bench.chain_gate(o.c, "radios")
+    except Refused as e:
+        return str(e)
+    return None
 
 
 def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, sql=None):
@@ -7185,23 +7211,56 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
                 for r in o.r.values():
                     r.send(f"banner BENCH {t.name.upper()} ({t.role.upper()})"[:100])
                 t0 = time.time()
-                try:
-                    ok, says, data = t.fn(o)
-                except Refused as e:
-                    ok, says, data = False, f"refused: {e}", {}
-                except Exception as e:      # a bug in the test itself: said, the run goes on
-                    ok, says, data = False, f"error in the test: {type(e).__name__}: {e}", {}
-                if o.violation:
-                    ok, says = False, f"OUT OF SYNC during the test ({o.violation}); " + says
-                if o.trouble:
-                    ok, says = False, f"{o.trouble}; " + says
-                res = "PASS" if ok is True else "LOOK" if ok is None else "FAIL"
+                gate = sends_gate(o, t)
+                first = None
+                for attempt in (0, 1):
+                    o.stalls = []
+                    if gate:                    # the owner's word on the cable lapsed: not run, never a fail
+                        ok, says, data = None, f"not run: {gate}", {}
+                        break
+                    try:
+                        ok, says, data = t.fn(o)
+                    except Refused as e:
+                        ok, says, data = False, f"refused: {e}", {}
+                    except Exception as e:      # a bug in the test itself: said, the run goes on
+                        ok, says, data = False, f"error in the test: {type(e).__name__}: {e}", {}
+                    if o.violation:
+                        ok, says = False, f"OUT OF SYNC during the test ({o.violation}); " + says
+                    if o.trouble:
+                        ok, says = False, f"{o.trouble}; " + says
+                    # A radio's link stalled under it (the X6100's WiFi drops itself for ~10 s, its GUI the same
+                    # process): the test once more, the first try's words kept. A GUI that restarted is a crash: no
+                    # retry (o.trouble says it)
+                    stalled = o.stalls or ("NO WORD for" in (says or "") and "RESTARTED" not in (says or ""))
+                    if attempt == 0 and ok is False and stalled:
+                        first = says
+                        st.ev(f"RETRY {t.name}: a radio's link stalled during it ({o.stalls or 'NO WORD'}): once "
+                              f"more", "bad")
+                        live_by = time.time() + 60
+                        while time.time() < live_by and any(time.time() - r.last_msg >= STALE_S
+                                                            for r in o.r.values()):
+                            time.sleep(0.5)
+                        o.ready()
+                        o.violation = None
+                        o.trouble = None
+                        continue
+                    break
+                if first is not None:
+                    says = f"{says} (its first try, cut by a link stall: {first[:300]})"
+                res = "NOT RUN" if gate else "PASS" if ok is True else "LOOK" if ok is None else "FAIL"
                 code = test_code(t)
                 with st.lock:
                     st.tests[i].update(result=res, says=says, secs=time.time() - t0, data=data, code=code)
                     if res == "PASS":
                         st.tests[i]["shots"] = []       # pictures only for what did not pass
                 prev = store_load().get(t.name, {})
+                if res == "NOT RUN":            # its last real result kept; this run says why it did not run
+                    store_put(t.name, dict(prev, not_run={"at": time.time(), "says": says,
+                                                          "run": os.path.basename(st.run_dir)}))
+                    st.ev(f"{res} {t.name}: {says}", "bad")
+                    with open(os.path.join(st.run_dir, "results.json"), "w") as fh:
+                        json.dump(st.tests, fh, indent=1, default=str)
+                    continue
                 same = prev.get("code") == code             # none yet (before the fingerprint): counts afresh
                 tally = {"runs": (prev.get("runs", 0) if same else 0) + 1,
                          "passes": (prev.get("passes", 0) if same else 0) + (res == "PASS"),
@@ -7230,7 +7289,8 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
             o.close()
         c = collections.Counter(t["result"] for t in st.tests)
         st.ev(f"END: {c['PASS']} pass, {c['FAIL']} fail, {c['LOOK']} look, "
-              f"{sum(1 for t in st.tests if t['result'] is None)} not run; both radios on the Sentry's page A")
+              f"{sum(1 for t in st.tests if t['result'] in (None, 'NOT RUN'))} not run; both radios on the Sentry's "
+              f"page A")
         with open(os.path.join(st.run_dir, "results.json"), "w") as fh:
             json.dump(st.tests, fh, indent=1, default=str)
         snap_on.set()

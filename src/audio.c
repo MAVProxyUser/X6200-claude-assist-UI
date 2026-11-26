@@ -358,8 +358,14 @@ void audio_mixer_setup(radio_base_ver_t base_ver) {
 #ifdef BOARD_X6200
     res = system("amixer sset 'Mic1 Boost',0 0");     /* as the stock X6200 GUI sets it */
 #else
-    if (base_ver.rev >= 12) {
-        // no need for mic boost on r12 and later
+    /* No boost on the patched bases from r12, nor on Xiegu's own from V1.1.9 (rev 0; GoldCorpHF's gcfix bases are
+     * that base too): its receiver audio came in at full scale with the boost's +24 dB, AGC Fast clipped some 11 dB
+     * over it (a tone at S9+13: -26/-22/-13 dBFS with AGC off/slow/fast unboosted, the X6200's level; orch rx-agc and
+     * rx-filter, 2026-11-26). Xiegu's 1.1.8 and the patched bases before r12 keep it */
+    bool xiegu_119 = base_ver.rev == 0 &&
+                     (base_ver.major > 1 || (base_ver.major == 1 && (base_ver.minor > 1 ||
+                                                                     (base_ver.minor == 1 && base_ver.patch >= 9))));
+    if (base_ver.rev >= 12 || xiegu_119) {
         res = system("amixer sset 'Mic1 Boost',0 0");
     } else {
         res = system("amixer sset 'Mic1 Boost',0 1");

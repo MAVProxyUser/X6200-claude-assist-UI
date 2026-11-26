@@ -18486,6 +18486,118 @@
   "bench_has": "bench.py Watch (over_power_w)"
  },
  {
+  "id": "path-rx-filter-passband",
+  "area": "path",
+  "feature": "The receiver's SSB filter as set, measured: flat inside, 15 dB or more down 300 Hz outside, the -6 dB points within 150 Hz of the edges set (100-3000 against 500-2300 and 1250-1750), both radios",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "cable",
+  "how_to_confirm": "orch rx-filter: a pilot at 1500 Hz with a tone stepped 150-3450 Hz through the listener's filters; each step against the pilot, the narrow runs against the wide one",
+  "suite_has": null,
+  "manual_ref": "### Buttons and knobs",
+  "bench_has": "orch_rx.py"
+ },
+ {
+  "id": "path-rx-rit-xit",
+  "area": "path",
+  "feature": "RIT moves what the receiver hears and XIT what the transmitter sends: +-200 Hz heard as the tone's pitch moving 200 Hz the right way, both radios",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "cable",
+  "how_to_confirm": "orch rit-xit: a 1000 Hz tone; the listener's RIT +200/-200 heard at 800/1200 Hz, the sender's XIT +200/-200 at 1200/800 Hz, within 25 Hz",
+  "suite_has": null,
+  "manual_ref": "### Buttons and knobs",
+  "bench_has": "orch_rx.py"
+ },
+ {
+  "id": "path-rx-pre-att",
+  "area": "path",
+  "feature": "PRE and ATT act in the base (the spectrum at a steady signal moves the right way) while the S-meter, by its PRE/ATT figures, reads the signal alike",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "cable",
+  "how_to_confirm": "orch rx-pre-att: a steady tone, the listener's ATT and PRE stepped in one over; spectrum and S-meter per stretch",
+  "suite_has": null,
+  "manual_ref": "### S-meter",
+  "bench_has": "orch_rx.py"
+ },
+ {
+  "id": "path-rx-agc-speeds",
+  "area": "path",
+  "feature": "AGC Slow and Fast level a step down in the signal (the listener's ATT put in: 6 dB at most left in the audio), Fast settling within 1.5 s and Slow 1.5 times as long at least",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "cable",
+  "how_to_confirm": "orch rx-agc: a steady tone, the listener's ATT put in mid-over with AGC Slow and with Fast; the audio's level in 50 ms blocks round the step",
+  "suite_has": null,
+  "manual_ref": "### Buttons and knobs",
+  "bench_has": "orch_rx.py"
+ },
+ {
+  "id": "path-rx-dnf",
+  "area": "path",
+  "feature": "DNF notches a steady tone at its centre 20 dB or more against a tone 700 Hz away; the auto notch where the base has it, refused where not",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "cable",
+  "how_to_confirm": "orch rx-dnf: tones at 1000 and 1700 Hz; where the 1000 Hz tone lands heard first, the notch centred there (width 50); off, on, auto (with the cap) in one over",
+  "suite_has": null,
+  "manual_ref": "### Buttons and knobs",
+  "bench_has": "orch_rx.py"
+ },
+ {
+  "id": "path-rx-nr",
+  "area": "path",
+  "feature": "NR raises a tone over the noise near it by 3 dB or more",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "cable",
+  "how_to_confirm": "orch rx-nr: a 1000 Hz tone with white noise 300-2800 Hz sent under it; NR off, on (level 60), off; the tone over the noise within 250 Hz in each",
+  "suite_has": null,
+  "manual_ref": "### Buttons and knobs",
+  "bench_has": "orch_rx.py"
+ },
+ {
+  "id": "path-rx-smeter-steps",
+  "area": "path",
+  "feature": "The S-meter follows steps of the signal as the receiver's spectrum does (within 3 dB or 30 %)",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "cable",
+  "how_to_confirm": "orch rx-smeter: a tone stepped -20, -30, -40 dB (under the X6200's knee); the S-meter's step against the spectrum's where the signal moved 4 dB or more (within 3 dB or 30 %)",
+  "suite_has": null,
+  "manual_ref": "### S-meter",
+  "bench_has": "orch_rx.py"
+ },
+ {
+  "id": "path-rx-audio-headroom",
+  "area": "path",
+  "feature": "The receive audio reaches the processor with headroom with every AGC setting (a strong signal's peaks under -1 dBFS, nothing at full scale); the X6100's MIC1 boost 0 dB on Xiegu's own V1.1.9 base",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "cable",
+  "how_to_confirm": "orch rx-level: a tone at the bench's level, the listener's AGC Off, Slow, Fast, Auto in one over; peaks and the share at full scale in each; amixer's Mic1 Boost read",
+  "suite_has": null,
+  "manual_ref": "#### The X6100's receive audio came in at full scale, clipped",
+  "bench_has": "orch_rx.py"
+ },
+ {
   "id": "sentry-b-gmrs-channels",
   "area": "sentry-B",
   "feature": "B knows GMRS's 22 channels and the repeater inputs of 15-22: a GMRS frequency set as B's channel goes with the GMRS preset (not UHF LMR's), heard in NFM, named 'GMRS 20' / 'GMRS 20 IN' on B's peaks, its title and C's log",
