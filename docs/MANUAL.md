@@ -421,10 +421,12 @@ brackets (#279).
 - What is on each list is yours to choose. Hold a value button (TX power, RF
   gain, Squelch, the filter edges, RIT, XIT, Spectrum Zoom, WF ref, AGC,
   Comp, IF shift, VOX, PRE, ATT, ATU, Step, Brightness, NB, NR, DNF, the KEY
-  and CW values...; only those the radio's base has, so no Comp on Xiegu's
-  own X6100 base, no IF shift on the X6200 and CW peak only on the patched
-  X6100 base: the page's other buttons move up, and a knob skips one that was
-  bound to it): each hold steps it from no knob to VOL ("Added to VOL
+  and CW values...). A button of a setting the radio's base has not got is
+  greyed where it is, so both radios' pages are alike: Comp on Xiegu's own
+  X6100 base, IF shift and XIT on the X6200, CW peak and its Q but on the
+  patched X6100 base. Its press says "...: not on this radio's base", and a
+  knob skips it (up to 2026-11-26 such a button was dropped and the page's
+  others moved up). Each hold steps it from no knob to VOL ("Added to VOL
   encoder"), then to the MFK ("Moved to MFK encoder"), then off again
   ("Removed from MFK encoder"). A mark on the left of the button shows which
   knob it is on, in another colour while that knob turns it.
@@ -458,6 +460,11 @@ order: VFO, mode, AGC, PRE, ATT, ATU, NR, NB, DNF, RIT, XIT and the step.
 Only the ones this theme shows are on the walk: the box at the top, the
 frequency strip, Black Metal's and Total Black's two rows and VISION each
 have their own. RIT and XIT show on the strip while you walk, even at 0.
+The X6200's base has no XIT: it keys the dial whatever XIT says (+-200 Hz
+went out at the same frequency in SSB and CW, measured 2026-11-26), so its
+XIT button is greyed, a turn on the walk's XIT says "XIT: not on this
+radio's base", the remote (`set xit`) and CAT (21 02 on) refuse it, and an
+XIT kept from before is set to 0 at the start.
 - A press picks the framed value (the frame fills in), and a turn changes
   it where it is, as the knob would with that control on it: AGC goes
   Off, Slow, Fast, Auto, PRE, ATT, ATU, NR, NB and DNF switch, RIT and XIT
@@ -2366,7 +2373,11 @@ web configurator (System > Update).
   round, and the installer refuses a bundle made for the other radio. An empty
   file `/mnt/update/no-check` turns the daily check off, and with it the
   question about a release an earlier check found (Settings > Info > Update
-  still installs). The bench's tests make that file while they run.
+  still installs). The bench's tests make that file while they run. A
+  question already on the screen when the file appears goes away within a
+  quarter of a second, unanswered, and one being downloaded is not shown: both
+  come back at the next check after the file is gone. The box asking for a
+  power-off after an SD card update waits the same way.
 - Going back from v0.3.7 to v0.3.6 (that button, or v0.3.6's bundle): the
   radio first turns [Tailscale Funnel](#tailscale-funnel) off and takes its
   funnel, and any set up by hand, out of tailscaled. v0.3.6 knows nothing of
@@ -7272,9 +7283,9 @@ the base's own noise and its centre away from a signal. The browser Panel
 places the picture where the base is tuned too, as the radio's own
 waterfall does: the IF shift and, in CW, the key tone allowed for (up to
 v0.3.12.47 it placed it on the dial, so with a shift every signal was drawn
-that far off). The X6200's base has no IF shift: its MFK 2:4 page has none
-(AGC, Comp, VOX; up to v0.3.12.49 the button said only "IF shift is not
-supported") and its remote refuses one (`set ifs`).
+that far off). The X6200's base has no IF shift: its MFK 2:4 button is greyed
+in its place (up to v0.3.12.49 it said only "IF shift is not supported",
+then until 2026-11-26 it was gone) and its remote refuses one (`set ifs`).
 
 Parse. Where: CW 2:2 > Parse (on by default). The decoder often runs words
 together when the spacing is tight: "CQCQDEON6UREK". With Parse on, each
@@ -11128,9 +11139,10 @@ DX call), `radio_caps` (what the base can do, a number), `a_tx_rows` (the rows A
 `cwt_target` and `cwt_state` (the CW Trainer's group or call, and where its round is: `closed`, `due`, `ready`,
 `playing`, `listen`, `result`) and `beacons_heard_20m` (each band's: the NCDXF beacons heard, `beacon:snr:slot`). `buttons?` answers `buttons ...`:
 the main screen's pages as the radio made them, split by `|`, each its page button then its buttons' names split by
-`; ` (`(MFK 2:4); AGC; IF shift; VOX`). A setting the radio's base lacks is refused: `cfg comp`, `cfg cessb_on`,
-`cfg cw_peak_on`, `cfg agc_knee`... answer `err cfg: NAME: this radio's base has no ...` and `set comp` answers
-`err comp: this radio's base has no compressor` where it has none. A `set` the radio refuses is
+`; `, a greyed one (its base lacks the setting) marked `~` (`(MFK 2:4); AGC; Comp; ~IF shift; VOX` on an X6200). A
+setting the radio's base lacks is refused: `cfg comp`, `cfg cessb_on`, `cfg cw_peak_on`, `cfg agc_knee`... answer
+`err cfg: NAME: this radio's base has no ...`, `set comp` answers `err comp: this radio's base has no compressor`
+where it has none and `set xit` (other than 0) `err xit: this radio's base has no XIT` on an X6200. A `set` the radio refuses is
 answered `err ...` (`err freq: locked (LOCK, or an app holds the
 frequency)`, `err freq: not a frequency this radio tunes`, `err NAME: the
 radio is busy, try again`, `err unknown setting NAME`, the role and

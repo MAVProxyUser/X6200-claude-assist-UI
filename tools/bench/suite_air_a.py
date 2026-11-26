@@ -1416,7 +1416,18 @@ def body_comp(ctx):
     1000 Hz band in 10 ms frames): its spectrum comes too seldom for 0.15 s steps (2 s steps, judged there, were
     levelled by both senders' power loops at 1:1 already, 2026-11-23/24). Comp put back by finish()"""
     from tones import TciRx
+    import orch_cable as oc
     snd, lis = ctx.snd, ctx.lis
+    caps = oc.caps_of(snd)
+    if caps is not None and not caps & oc.CAP_COMP:
+        # Xiegu's own X6100 base has no compressor (radio_caps without HW_CAP_COMP; at 4:1 it sent as at 1:1,
+        # 2026-11-25): Comp greyed in its place and refused, as comp-mic judges it; nothing sent
+        got = {"caps": caps}
+        bad = oc.lacks_check(snd, got, cfgs={"comp": 4}, sets={"comp": 4}, buttons=("Comp",))
+        if bad:
+            return False, f"{snd.name}'s base has no compressor, yet {'; '.join(bad)}"
+        return True, (f"{snd.name}'s base has no compressor (radio_caps {caps}): Comp greyed on MFK 2:4 "
+                      f"'{got['pages'].get('MFK 2:4')}', refused: {', '.join(got['refused'])}; nothing sent")
     x6100 = str(snd.state.get("fp", "")).startswith("x6100")
     comp0 = snd.state.get("comp")
     local = os.path.join(ctx.run.dir, f"air_comp_{snd.name}.raw")

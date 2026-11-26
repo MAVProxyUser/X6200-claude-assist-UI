@@ -63,7 +63,11 @@ it is restarted (kill it, `nohup python3 -B orch.py console --lan &`).
 
 ## What a run does
 
-1. Takes control of both radios through their remotes (`bench.Radio`), logs every command it sends.
+1. Takes control of both radios through their remotes (`bench.Radio`), logs every command it sends, and turns both
+   radios' update check off for the run (`/mnt/update/no-check`, marked as the run's, taken away at its end; an
+   owner's own file is left). While that file is there the GUI keeps the update question and the power-on box away:
+   not opened, and one already open put away unanswered within a quarter second (an X6200 question fetched 6 minutes
+   before a run stayed over its tests 3 h, 2026-11-26). `update-check-off` checks both, with `cfg? upd_state`.
 2. Before every test (`Orch.ready`): neither keyed, both transmitters locked (the Sentry's A/B), the two on one
    frequency and mode, the squelch at 0 and the volume at 0 on both; anything else is put right first, or the run stops.
 3. Runs the test: its steps, each confirmed; an over goes through `over()`: both set alike (page G, the receiver
@@ -71,13 +75,24 @@ it is restarted (kill it, `nohup python3 -B orch.py console --lan &`).
    Watch (`bench.Watch`: too long keyed, too much power over the pad's rating, a listener hearing nothing), then
    locked again. A test whose role transmits (TX, both ways, keyed) is not started while the owner's word on the
    radios cable has lapsed (`sends_gate`: `chain_gate`'s 12 h): it is NOT RUN, with the reason, its last real result
-   kept, never a FAIL (2026-11-26: rit-xit's first two "failures" and most of power-steps' were that refusal). A test
+   kept, never a FAIL (2026-11-26: rit-xit's first two "failures" and most of power-steps' were that refusal). Nor
+   while a sender is an X6200 on a supply under 12.0 V with its battery under 7.3 V at rest (`bench.battery_tx_gate`):
+   the over would sag it to 7.0 V and its GUI would switch the radio off 30 s later, as it did mid js8-groups
+   2026-11-26 on the bench's 11.8 V supply (the radio stays off till its POWER key); an X6200 listener on such a
+   supply at 7.1 V or under is refused too (`listener_gate`: receive alone drains it to the cut). A test
    that fails while a radio's link stalled under it (its GUI the same process: the X6100's WiFi drops itself for
    ~10 s) runs once more, after both radios answer again; the first try's words are kept with the result (`RETRY` in
    the events). A GUI that restarted is a crash: no retry.
+   Every test ends in `bench._finish`: each radio put back as its snapshot found it, read back, then its settings
+   database. A radio not put back is recorded (`left_wrong.json`) and every test refuses it till `bench.py restore`.
+   The database's read is tried three times 8 s apart (`DB_RETRY_S`), and a radio recorded only because it could
+   not be read (its live settings were already back) is let go by the next test that finds it reading as that
+   snapshot (`left_wrong_gate`): one stalled link at the end of air olivia refused the 44 tests after it, 2026-11-26.
+   A radio's link gone between tests stops the run with that said (`run stopped`), not a traceback.
 4. Records the result in `orch_results.json` (kept across runs), the run's events in `runs/<time>-orch/events.jsonl`
    and its results in `results.json`.
-5. Ends with both radios on the Sentry's page A, transmitters locked, on the last test's frequency, alike.
+5. Ends with both radios on the Sentry's page A, transmitters locked, on the last test's frequency, alike; the END
+   line says when it could not.
 
 Guards running all the while: the sync guard; a radio that transmits while its role is RX (both stopped,
 photographed); a signal over -100 dBm on a receiver with neither radio saying it sends (`RF_ALARM_DBM`: both stopped);
@@ -200,7 +215,7 @@ tally counts them.
 | `~/.config/x6x00-bench/orch_status.json` | the run's state for the console, each second |
 | `~/.config/x6x00-bench/orch_judged.jsonl` | every verdict by hand (the console's It passes / It fails / Undo, `orch.py judge`) |
 | `~/.config/x6x00-bench/orch_caps.json` | what each radio takes (the caps test), the tests' guide to their differences |
-| `~/.config/x6x00-bench/runs/<time>-orch/` | a run: `events.jsonl`, `results.json` (each test's code fingerprint with its result), `meta.json` (the md5 of each radio's GUI binary at its start), each over's WAV and spectrum frames, the AMBE and digital voice files; the CW tests' listener audio (cw-text's `cw_text_*.wav`, cw-quiet's `cw_quiet_<lo>_<hi>_<radio>.wav` from before the first switch; cw-copy, cw-carrier and tci-cw's `*.raw`, 24 kHz int16) for `tools/cw_replay` |
+| `~/.config/x6x00-bench/runs/<time>-orch/` | a run: `events.jsonl`, `results.json` (each test's code fingerprint with its result), `meta.json` (the md5 of each radio's GUI binary at its start), each over's WAV and spectrum frames, the AMBE and digital voice files; the CW tests' listener audio (cw-text's `cw_text_*.wav`, cw-quiet's `cw_quiet_<lo>_<hi>_<radio>.wav` from before the first switch; cw-copy, cw-carrier and tci-cw's `*.raw`, 24 kHz int16; every `cw_over`'s `cw_<label>_<sender>_to_<listener>_<time>.wav`: cw-dec-snr, cw-key-train, cw-his and the rest) for `tools/cw_replay` |
 | `~/.config/x6x00-bench/dv/` | the AMBE tests' speech (this computer's voice) and their built tools |
 | `~/.config/x6x00-bench/shots/` | the screen pictures (never committed: they show the operator's locator) |
 | `~/.config/x6x00-bench/tx_log.jsonl` | every transmission: who, frequency, power, why |
@@ -245,6 +260,16 @@ step, the band plan, own bands, mode from the plan, the lock per band, channel s
 TX shift, TX outside the bands). A check that needs no remote client on the radios (the screensaver: a client keeps
 it away) runs with `alone=True`: orch closes its own sessions for it, their silence planned, then connects again.
 The rest of the old batches stay outside until each is worth bringing in.
+
+**What a radio's base lacks** (`radio_caps`) is greyed in its place, never dropped, so both radios' pages stay alike
+(the owner, 2026-11-26: "we want 1:1 unity"): `buttons?` marks such a button `~NAME`, its press only says it is not on
+this radio's base, and its `set`/`cfg` is refused. `lacks_check(r, res, cfgs=, sets=, buttons=, cmds=)` wants each
+button greyed (not live, not missing) and each setting refused with nothing changed.
+
+**Remote hooks for the tests** besides `set`/`cfg`: read-only `cfg?` names (`radio_caps`, `cwt_target` and
+`cwt_state` for the CW Trainer, `upd_state` for the update question, `a_tx_rows`, `beacons_heard_<band>`), and
+`cwsend TEXT` (operate, a session that may transmit): the radio's own keyer sends TEXT in CW/CW-R when it is idle, as
+TCI's CW macros do, without a TCI client (the CW Trainer's answers).
 
 ## Over-the-air coverage (every transmission test, 0.1 W over the 80 dB cable unless said)
 

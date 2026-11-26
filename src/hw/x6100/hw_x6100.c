@@ -265,7 +265,7 @@ const char *hw_base_ver_str(void) {
  * then, as in receive, and the patched bases say in each packet where they are (#191) */
 uint32_t hw_caps(void) {
     x6100_base_ver_t v    = x6100_control_get_base_ver();
-    uint32_t         caps = HW_CAP_TX_IQ_OFFSET;
+    uint32_t         caps = HW_CAP_TX_IQ_OFFSET | HW_CAP_XIT;     /* XIT: Xiegu's V1.1.9 measured, 2026-11-26 */
 
     if (ver_cmp(v, (x6100_base_ver_t){1, 1, 9, 0}) >= 0 || v.rev >= 8) {
         caps |= HW_CAP_ZOOM | HW_CAP_IF_SHIFT;

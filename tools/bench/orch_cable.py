@@ -134,16 +134,21 @@ def refusal(r, cmd, timeout=3.0):
 
 
 def lacks_check(r, res, cfgs=None, sets=None, buttons=(), cmds=()):
-    """What r's base lacks offered nowhere (the owner, 2026-11-26: every FAIL fixed; radio_caps): no button named in
-    buttons on any main-screen page ("buttons?"), each 'cfg NAME VALUE' and 'set NAME VALUE' refused with the setting
-    as found after, each of cmds refused. What it found in res (pages, refused); returns what was wrong, [] for
-    nothing. A set that was taken is put back"""
+    """What r's base lacks offered nowhere (the owner, 2026-11-26: every FAIL fixed; radio_caps): each button named in
+    buttons greyed in its place on its main-screen page ("buttons?" marks it "~"; the owner, 2026-11-26: "instead of
+    hiding it, grey it out, we want 1:1 unity"), never live; each 'cfg NAME VALUE' and 'set NAME VALUE' refused with
+    the setting as found after, each of cmds refused. What it found in res (pages, refused); returns what was wrong,
+    [] for nothing. A set that was taken is put back"""
     bad = []
     pages = buttons_of(r)
     res["pages"] = {p[0].strip("()"): "; ".join(p[1:]) for p in pages if p}
-    shown = sorted({b for p in pages for b in p[1:] if b in buttons})
-    if shown:
-        bad.append(f"its main screen shows {shown}")
+    names = [b for p in pages for b in p[1:]]
+    live = sorted({b for b in names if b in buttons})
+    gone = sorted(b for b in buttons if "~" + b not in names)
+    if live:
+        bad.append(f"its main screen offers {live} (live, not greyed)")
+    if gone:
+        bad.append(f"its main screen has no greyed {gone} in its place (the pages not alike on both radios)")
     res["refused"] = {}
     for kind, items in (("cfg", cfgs or {}), ("set", sets or {})):
         for name, v in items.items():
@@ -404,7 +409,8 @@ def cw_over(o, s, l, text, label, f=F_CW, mode=4, listener_cfg=None, sender_cfg=
     (put back after), the sender keys text through its TCI at 0.1 W (over(): the Sentry's A armed); the listener's
     decoder print since the over began, and the over's (on, off). listener_set: the listener's state set after over()'s
     own set-up (which puts both on the bench's receive profile; the caller declares the difference, bench.apart);
-    info (a dict): gets "heard", how far the over rose in the listener's spectrum (dB, the Watch's)"""
+    info (a dict): gets "heard", how far the over rose in the listener's spectrum (dB, the Watch's), and "wav", the
+    listener's audio of the over kept in the run's folder (its TCI: what its decoder heard), for tools/cw_replay"""
     S, L = o.r[s], o.r[l]
     got = {}
 
@@ -413,8 +419,25 @@ def cw_over(o, s, l, text, label, f=F_CW, mode=4, listener_cfg=None, sender_cfg=
             bench.ensure(L, listener_set)
         with o.step(f"{s} keys {text!r}") as st:
             L.cw = ""
-            got["t"] = tci_cw(o, S, text, watch)
-            time.sleep(1.0)
+            rec = None
+            try:
+                from tones import TciRx
+                rec = TciRx(L.host)
+            except (Refused, OSError) as e:     # the evidence only: the over goes on without it
+                o.st.ev(f"{l}: its audio not recorded for the over ({e})", "info")
+            try:
+                t0 = time.time()
+                got["t"] = tci_cw(o, S, text, watch)
+                time.sleep(1.0)
+                if rec is not None:
+                    x, _ = rec.audio(t0, time.time())
+                    name = re.sub(r"[^A-Za-z0-9]+", "_", f"cw_{label}_{s}_to_{l}").strip("_")
+                    got["wav"] = H.save_wav(o, x, f"{name}_{time.strftime('%H%M%S')}.wav") if len(x) else None
+            finally:
+                if rec is not None:
+                    rec.close()
+            if info is not None:
+                info["wav"] = got.get("wav")
             if info is not None:
                 info["heard"] = (watch.heard_db.get(s) or [None])[-1]
             if check_power and not watch.tx_peak.get(s) and not (watch.rx_peak or -200) > H.RF_ALARM_DBM:
@@ -527,7 +550,8 @@ def t_cw_dec_snr(o, s, l):
                                    listener_set={"rfg": weak_rfg}, info=i5, sender_cfg=CW_DEC_SPEED)
         finally:
             bench.ensure(L, {"rfg": rfg0})
-        res.update(snr30_weak=text30, snr5_weak=text5, heard30_db=i30.get("heard"), heard5_db=i5.get("heard"))
+        res.update(snr30_weak=text30, snr5_weak=text5, heard30_db=i30.get("heard"), heard5_db=i5.get("heard"),
+                   wav30=i30.get("wav"), wav5=i5.get("wav"))
         weak = [h for h in (i30.get("heard"), i5.get("heard")) if h is not None]
         if not weak:
             return None, f"the Watch kept no level for the weak overs: {res}", res
@@ -790,7 +814,9 @@ def t_cw_key_train(o, s, l):
             raise Refused(f"Train on: MSG > CW put {res['msg_w']} W on the air")
         if "TEST" in res["msg_heard"]:
             raise Refused(f"Train on: {l} decoded MSG > CW's {res['msg_heard']!r}")
-        text2, _ = cw_over(o, s, l, "TEST", "key-train off")
+        # two words at 20 WPM: one 'TEST' at the X6200's own 28 WPM is a second on the air, its meter came 0 once
+        # (round 2 2026-11-26: "x6200's meter showed no power")
+        text2, _ = cw_over(o, s, l, "TEST TEST", "key-train off", sender_cfg=CW_DEC_SPEED)
         res["off_text"] = text2
         if "TEST" not in text2:
             raise Refused(f"Train off: {l} decoded {text2!r}, not TEST")
@@ -1119,7 +1145,12 @@ def t_cw_msg_his(o, s, l):
                     m.close()
         back = cw_settled(S)
         res["s_decoded"] = back
-        if f"{call} UR 599" in back or (call in back and "599" in back):
+        # the token is what is tested: the call in its place, between the message's own TU and UR. The 599 is the
+        # message's literal text, and the X6100's factory base keys it late in places (its 5 copied as 'S 9', round 2
+        # 2026-11-26; cw-timing x6100 measures that keying)
+        words = back.split()
+        at = [i for i, w in enumerate(words) if call in w]
+        if f"{call} UR 599" in back or (at and "UR" in words[at[-1] + 1:at[-1] + 3]):
             return True, f"{l} sent {{HIS}} as {call}: {s} decoded {back!r}", res
         return False, f"{s} decoded {back!r}, not '{call} UR 599'", res
     except Refused as e:
@@ -3208,17 +3239,28 @@ def t_screensaver_tx(o, s, l):
 
 def t_update_check_off(o, s, l):
     """While a run goes, both radios' update check and its question are off (the owner, 2026-11-25: "Yes, during
-    tests"): /mnt/update/no-check on each, the run's own (marked) or one the owner made; nothing sent"""
-    res = {}
+    tests"): /mnt/update/no-check on each, the run's own (marked) or one the owner made, and no update question or
+    power-on box open on either (cfg? upd_state: the X6200's question, fetched 6 min before a run made no-check, stayed
+    over its tests 3 h, 2026-11-26; the GUI now puts it away when no-check appears); nothing sent"""
+    res, boxes = {}, {}
     for n, r in o.r.items():
         res[n] = ssh(r.host, f"[ -e {H.NO_CHECK} ] && {{ cat {H.NO_CHECK}; echo .; }} || echo none").strip()
-    missing = [n for n, v in res.items() if v == "none"]
+        try:
+            boxes[n] = str(bench.cfg_get(r, "upd_state", timeout=3))
+        except Refused as e:
+            boxes[n] = f"unread ({e})"
+    res["upd_state"] = boxes
+    missing = [n for n in o.r if res[n] == "none"]
     if missing:
         return False, f"no {H.NO_CHECK} on {', '.join(missing)} during the run: an update question could take " \
                       f"the MFK mid-test", res
+    open_ = [f"{n} {v}" for n, v in boxes.items() if v in ("asking", "restart") or v.startswith("unread")]
+    if open_:
+        return False, f"an update box over the tests ({', '.join(open_)}) with {H.NO_CHECK} there: the MFK and " \
+                      f"keys go to it, not to the test", res
     return True, "the update check off on both while the run goes (" + \
-        ", ".join(f"{n}: {'the run' + chr(39) + 's' if v.startswith(H.NO_CHECK_MARK) else 'the owner' + chr(39) + 's'}"
-                  for n, v in res.items()) + ")", res
+        ", ".join(f"{n}: {'the run' + chr(39) + 's' if res[n].startswith(H.NO_CHECK_MARK) else 'the owner' + chr(39) + 's'}"
+                  f", upd_state {boxes[n]}" for n in o.r) + ")", res
 
 
 def t_stuck_tx_log(o, s, l):

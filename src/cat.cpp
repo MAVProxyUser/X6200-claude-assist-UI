@@ -1026,6 +1026,8 @@ static Frame *process_req(const Frame *req) {
                 if (data_size == 1) {
                     resp->set_payload_len(3);
                     resp->data[1] = p.get() != 0;
+                } else if (req->data[0] == 0x02 && req->data[1] != 0 && !(radio_caps() & HW_CAP_XIT)) {
+                    resp->set_code(CODE_NG);    /* XIT on: the X6200's base has none (the read answers off) */
                 } else {
                     if (req->data[1] == 0)
                         p.set(0);

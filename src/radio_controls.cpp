@@ -183,6 +183,21 @@ static bool from_table(cfg_ctrl_t ctrl, int32_t diff, char *buf, size_t size) {
  * and later); the auto notch: the X6100's from revision 3, the X6200's; the compressor: not Xiegu's own X6100 base
  * (its mic audio went out at 4:1 as at 1:1, orch comp-mic 2026-11-25); CW peak: the patched X6100 base from r12;
  * the AGC's knee and slope: not the X6200's, nor Xiegu's own X6100 base from V1.1.9 (radio_types.h) */
+/* The name a control the base lacks is said by ("... : not on this radio's base") */
+extern "C" const char *controls_unsupported_name(cfg_ctrl_t ctrl) {
+    switch (ctrl) {
+        case CTRL_COMP:         return "Compressor";
+        case CTRL_IF_SHIFT:     return "IF shift";
+        case CTRL_DNF_AUTO:     return "DNF auto";
+        case CTRL_CW_PEAK_ON:   return "CW peak";
+        case CTRL_CW_PEAK_Q:    return "CW peak Q";
+        case CTRL_AGC_KNEE:     return "AGC knee";
+        case CTRL_AGC_SLOPE:    return "AGC slope";
+        case CTRL_XIT:          return "XIT";
+        default:                return "That";
+    }
+}
+
 extern "C" bool controls_supported(cfg_ctrl_t ctrl) {
     uint32_t caps = radio_caps();
 
@@ -194,6 +209,7 @@ extern "C" bool controls_supported(cfg_ctrl_t ctrl) {
         case CTRL_CW_PEAK_Q:    return (caps & HW_CAP_CW_PEAK) != 0;
         case CTRL_AGC_KNEE:
         case CTRL_AGC_SLOPE:    return (caps & HW_CAP_AGC_SHAPE) != 0;
+        case CTRL_XIT:          return (caps & HW_CAP_XIT) != 0;
         default:                return true;
     }
 }
@@ -204,11 +220,7 @@ void controls_encoder_update(cfg_ctrl_t ctrl, int32_t diff, std::string &msg) {
     int32_t i;
 
     if (!controls_supported(ctrl)) {
-        const char *name = ctrl == CTRL_COMP ? "Compressor" : ctrl == CTRL_IF_SHIFT ? "IF shift"
-                         : ctrl == CTRL_DNF_AUTO ? "DNF auto" : ctrl == CTRL_CW_PEAK_ON ? "CW peak"
-                         : ctrl == CTRL_CW_PEAK_Q ? "CW peak Q" : ctrl == CTRL_AGC_KNEE ? "AGC knee" : "AGC slope";
-
-        snprintf(buf, size, "%s: not on this radio's base", name);
+        snprintf(buf, size, "%s: not on this radio's base", controls_unsupported_name(ctrl));
         return;
     }
     if (from_table(ctrl, diff, buf, size)) {

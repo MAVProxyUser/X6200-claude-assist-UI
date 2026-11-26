@@ -571,6 +571,8 @@ void radio_start() {
     subject_subscribe_and_notify((Subject*)cfg_moni, on_volume_change, NULL);   /* radio_vol_refresh: muted with the speaker */
 
     subject_subscribe_and_notify((Subject*)cfg_rit, on_rit_change, NULL);
+    if (!(caps & HW_CAP_XIT) && param_i_get(cfg_xit))
+        param_i_set(cfg_xit, 0);    /* the X6200's base keys the dial whatever it says: none kept */
     subject_subscribe_and_notify((Subject*)cfg_xit, on_change_i, (void*)HW_XIT);
     subject_subscribe_and_notify((Subject*)cfg_fm_emphasis, on_change_i, (void*)HW_FM_EMP);
 

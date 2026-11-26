@@ -807,15 +807,14 @@ static void knob_binds_cb(Subject *subj, void *user_data) {
     for (disp_btn_t &s : slots) slot_refresh(&s);
 }
 
-/* A page without its buttons of settings this radio's base lacks (controls_supported): those after them move up */
-static void page_drop_unsupported(buttons_page_t *page) {
+/* A page's buttons of settings this radio's base lacks (controls_supported) greyed where they are, so both radios'
+ * pages are alike (the owner, 2026-11-26: "instead of hiding it, grey it out, we want 1:1 unity as much as
+ * possible"; up to then they were dropped and the rest moved up). A press says what it is (buttons_press) */
+static void page_grey_unsupported(buttons_page_t *page) {
     for (int i = 1; i < BUTTONS; i++) {
         button_data_t *b = page->items[i];
 
-        if (!b || !b->encoder_allowed || controls_supported((cfg_ctrl_t)b->ctrl)) continue;
-        for (int k = i; k + 1 < BUTTONS; k++) page->items[k] = page->items[k + 1];
-        page->items[BUTTONS - 1] = NULL;
-        i--;
+        if (b && b->encoder_allowed && !controls_supported((cfg_ctrl_t)b->ctrl)) b->disabled = true;
     }
 }
 
@@ -843,7 +842,8 @@ static void layout_build() {
                     name[m++] = *c == '\n' ? ' ' : *c;
                 }
                 name[m] = 0;
-                n += snprintf(t + n, sizeof(t) - n, "%s%s", k == 0 ? (n ? "|" : "") : "; ", name);
+                n += snprintf(t + n, sizeof(t) - n, "%s%s%s", k == 0 ? (n ? "|" : "") : "; ", d->disabled ? "~" : "",
+                              name);
                 if (n >= sizeof(t)) n = sizeof(t) - 1;
             }
         }
@@ -861,11 +861,11 @@ void buttons_layout_text(char *out, size_t size) {
 }
 
 void buttons_init(lv_obj_t *parent) {
-    /* No button for what the base has not got (radio_caps): the auto notch on X6100 boards before revision 3, Comp
-     * on Xiegu's own X6100 base (MFK 2:4: AGC, IF shift, VOX), CW peak and its Q but on the patched X6100 base from
-     * r12 (CW 1:2: ZAP, Log QSO), IF shift on the X6200 (MFK 2:4: AGC, Comp, VOX) */
+    /* What the base has not got (radio_caps) greyed in its place: the auto notch on X6100 boards before revision 3,
+     * Comp on Xiegu's own X6100 base, CW peak and its Q but on the patched X6100 base from r12, IF shift and XIT on
+     * the X6200 */
     for (const auto &g : groups) {
-        for (size_t i = 0; i < g.n; i++) page_drop_unsupported(g.pages[i]);
+        for (size_t i = 0; i < g.n; i++) page_grey_unsupported(g.pages[i]);
     }
 
     for (const auto &g : groups) {
@@ -1173,6 +1173,9 @@ void buttons_press(uint8_t n, bool hold) {
         return;
     }
     if (d->disabled) {
+        if (d->encoder_allowed && !controls_supported((cfg_ctrl_t)d->ctrl)) {
+            msg_update_text_fmt("%s: not on this radio's base", controls_unsupported_name((cfg_ctrl_t)d->ctrl));
+        }
         if (voice_auto_active()) {
             char s[96];
 

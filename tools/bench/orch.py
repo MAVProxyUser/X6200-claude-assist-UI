@@ -1317,7 +1317,8 @@ class Orch:
                 self.both({"freq": int(last["freq"]), "mode": int(last["mode"])})
             self.st.ev(f"both on the Sentry's page A on {int(last['freq']) / 1e6:.4f} MHz mode {last['mode']}, "
                        f"confirmed alike", "ok")
-        except Refused as e:
+            self.on_a = True
+        except (Refused, OSError) as e:
             self.st.ev(f"the end: {e}", "bad")
         time.sleep(1.0)                     # the guard's last look at the two
         self.on = False
@@ -7097,6 +7098,15 @@ def sends_gate(o, t):
         bench.chain_gate(o.c, "radios")
     except Refused as e:
         return str(e)
+    # and a sender's battery: an X6200 near its low cut on a supply that does not hold it up switches itself off under
+    # an over (js8-groups, 2026-11-26: the run's last 44 tests lost with it). Its senders by the role, else both
+    role = t.role or ""
+    senders = [n for n in o.r if f"{n.upper()} TX" in role.upper()] or list(o.r)
+    for n in senders:
+        try:
+            bench.battery_tx_gate(o.r[n])
+        except Refused as e:
+            return str(e)
     return None
 
 
@@ -7209,7 +7219,10 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
                 o.violation = None
                 o.trouble = None
                 for r in o.r.values():
-                    r.send(f"banner BENCH {t.name.upper()} ({t.role.upper()})"[:100])
+                    try:
+                        r.send(f"banner BENCH {t.name.upper()} ({t.role.upper()})"[:100])
+                    except OSError:             # its link gone: ready() above or the test says so
+                        pass
                 t0 = time.time()
                 gate = sends_gate(o, t)
                 first = None
@@ -7246,7 +7259,8 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
                         continue
                     break
                 if first is not None:
-                    says = f"{says} (its first try, cut by a link stall: {first[:300]})"
+                    says = f"{says} (its first try, cut by a link stall: {first[:1500]})"   # 300 hid air olivia's
+                                                                                           # rows (2026-11-26)
                 res = "NOT RUN" if gate else "PASS" if ok is True else "LOOK" if ok is None else "FAIL"
                 code = test_code(t)
                 with st.lock:
@@ -7274,13 +7288,19 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
                 st.ev(f"{res} {t.name}: {says}", "ok" if res == "PASS" else "bad")
                 st.ev(f"data of {t.name}: {json.dumps(data, default=str)[:4000]}", "conf")
                 for r in o.r.values():
-                    r.send("banner")
+                    try:
+                        r.send("banner")
+                    except OSError:             # the X6200 gone at the end of js8-groups: a broken pipe here ended
+                        pass                    # the run unsaid (2026-11-26); the next test's ready() says it
                 with open(os.path.join(st.run_dir, "results.json"), "w") as fh:
                     json.dump(st.tests, fh, indent=1, default=str)
         st.phase = "done"
     except Refused as e:
         st.phase = f"stopped: {e}"
         st.ev(f"run stopped: {e}", "bad")
+    except OSError as e:                # a radio's link gone between tests (ready(), a banner): said, not a traceback
+        st.phase = f"stopped: a radio's link: {type(e).__name__} {e}"
+        st.ev(f"run stopped: a radio's link failed between tests ({type(e).__name__}: {e})", "bad")
     finally:
         with st.lock:
             st.cur = None
@@ -7289,8 +7309,9 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
             o.close()
         c = collections.Counter(t["result"] for t in st.tests)
         st.ev(f"END: {c['PASS']} pass, {c['FAIL']} fail, {c['LOOK']} look, "
-              f"{sum(1 for t in st.tests if t['result'] in (None, 'NOT RUN'))} not run; both radios on the Sentry's "
-              f"page A")
+              f"{sum(1 for t in st.tests if t['result'] in (None, 'NOT RUN'))} not run; "
+              + ("both radios on the Sentry's page A" if getattr(o, "on_a", False) else
+                 "NOT both on the Sentry's page A (said above)"))
         with open(os.path.join(st.run_dir, "results.json"), "w") as fh:
             json.dump(st.tests, fh, indent=1, default=str)
         snap_on.set()

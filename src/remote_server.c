@@ -66,7 +66,8 @@
  *  its line break a space, "" for none; m: 1 marked, 2 greyed; hid: the buttons hidden), so a test sees an
  *  app's page before it presses a key.
  *  "type TEXT" gives the text window open (a reference, a QSO line, a callsign) TEXT and its Enter, as a keyboard;
- *  "hkey VM|UP|DOWN 1|0" presses or lets go a hand mic key, as the base reports one.
+ *  "hkey VM|UP|DOWN 1|0" presses or lets go a hand mic key, as the base reports one; "cwsend TEXT" keys the text with
+ *  the radio's own keyer in CW (a session that may transmit), as a CW message is sent: no TCI client round it.
  *  A panel thread reads the radio (the settings' getters are safe from any thread, as the TCI
  *  server uses them) and tells the panel clients what changed every 50 ms. The apps: the FT8
  *  list's rows go out as they come ("ft8r {...}", the last 48 to a page that opens later), the
@@ -133,6 +134,7 @@
 #include "text_popup.h"    /* "type TEXT" */
 #include "mic_keys.h"      /* "hkey NAME 1|0" */
 #include "cw_messages.h"
+#include "cw_encoder.h"    /* "cwsend TEXT" */
 #include "beacons.h"
 #include "digi_qso.h"
 #include "dialog_cw_trainer.h"
@@ -160,6 +162,7 @@
 #include "tci_server.h"
 #include "tci_ws.h"
 #include "tx_meters.h"
+#include "update_watch.h"   /* "cfg? upd_state" */
 #include "wefax_window.h"
 #include "voice.h"
 
@@ -1287,6 +1290,8 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
             set_refused(c, "ifs: this radio's base has no IF shift");   /* the X6200's: only the dial would move */
         else if (names[i].id == P_COMP && !(radio_caps() & HW_CAP_COMP))
             set_refused(c, "comp: this radio's base has no compressor");   /* Xiegu's own X6100 base (radio.c) */
+        else if (names[i].id == P_XIT && a != 0 && !(radio_caps() & HW_CAP_XIT))
+            set_refused(c, "xit: this radio's base has no XIT");   /* the X6200's keys the dial whatever it says */
         else if (!panel_put(names[i].id, a, b)) {
             char why[48];                       /* named as the others: a page takes "busy..." for its PTT's refusal */
             snprintf(why, sizeof(why), "%s: the radio is busy, try again", names[i].name);
@@ -1763,6 +1768,11 @@ static bool cfg_value(const char *name, char *out, size_t n) {
         snprintf(out, n, "%s", dialog_cw_trainer_state());
         return true;
     }
+    if (!strcmp(name, "upd_state")) {           /* read only: the update question's state (update_watch.h): idle,
+                                                 * fetching, asking, installing, restart */
+        snprintf(out, n, "%s", update_watch_state());
+        return true;
+    }
     if (!strcmp(name, "a_tx_rows")) {           /* read only: A's history rows drawn on the air (app_sentry.c) */
         snprintf(out, n, "%u", (unsigned)app_sentry_tx_rows());
         return true;
@@ -1886,6 +1896,17 @@ static void type_apply(void *arg) {
 /* "hkey NAME 1|0": a hand mic key pressed or let go, as the base reports one (the bench's: V/M, UP, DOWN) */
 static void hkey_apply(void *arg) {
     hkey_put(*(const uint32_t *)arg);
+}
+
+/* "cwsend TEXT": the text keyed by the radio's own keyer, as a CW message or the CW keyboard sends it (the bench's: the
+ * CW Trainer's answers as a paddle's would come, without a TCI client's session round them). In CW or CW-R with the
+ * keyer idle; the keyer's first key down is the radio's to refuse, as for any send. LVGL thread */
+static void cwsend_apply(void *arg) {
+    const char *t = (const char *)arg;
+    int32_t     m = cparam_i_get(cfg_cur_mode);
+
+    if ((m == radio_mode_cw || m == radio_mode_cwr) && cw_encoder_state() == CW_ENCODER_IDLE)
+        cw_encoder_send(t, false);
 }
 
 /* The JS8 messages kept for a page that opens later, ours too. A message still coming in has one place, written
@@ -3039,6 +3060,23 @@ static void handle_text(client_t *c, char *text) {
         }
         snprintf(q.text, sizeof(q.text), "%s", text + 5);
         scheduler_put(type_apply, &q, sizeof(q));
+        return;
+    }
+    if (!strncmp(text, "cwsend ", 7)) {     /* the radio's keyer sends a text (the bench's): "cwsend TEXT" */
+        char t[128];
+
+        if (!allowed(c, ROLE_OPERATE, true))
+            return;
+        if (!c->tx_ok) {
+            client_text(c, "err this session may not transmit");
+            return;
+        }
+        snprintf(t, sizeof(t), "%s", text + 7);
+        if (!t[0]) {
+            client_text(c, "err cwsend: no text");
+            return;
+        }
+        scheduler_put(cwsend_apply, t, strlen(t) + 1);
         return;
     }
     if (!strncmp(text, "hkey ", 5)) {       /* a hand mic key (the bench's): "hkey VM|UP|DOWN 1|0" */

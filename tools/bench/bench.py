@@ -765,6 +765,7 @@ LEAVE_TUNING = True
 TUNING = ("split", "vfo", "freq", "mode", "filter", "zoom", "att", "pre", "agc", "rfg", "sql", "nb", "nr", "rit", "xit",
           "ifs", "wch", "txio", "txqo", "txig", "txip", "_bands")
 DB_TUNING = re.compile(r"[BM]\||P\|(band_id|vfo[ab]_\w+|rfgain|sql)$")
+DB_RETRY_S = 8.0        # between db_put_back's reads of a database not read (a stalled link came back in 8 s)
 DB_SETTLE_S = 4.0       # the GUI writes what changed every 3 s (settings_manager.cpp start_flush_thread)
 DB_QUERY = ('.separator "\\037" "\\036"\n'
             "select 'P|'||name, quote(val) from params;"
@@ -813,6 +814,11 @@ def db_put_back(r, before, skip=None):
     if before is None:
         return {}
     now = db_rows(r)
+    for _ in range(FINISH_TRIES - 1):   # a link stalled a few seconds (both radios at once at 16:53, 2026-11-26) is
+        if now is not None:             # not a radio left wrong: read again
+            break
+        time.sleep(DB_RETRY_S)
+        now = db_rows(r)
     if now is None:
         return {"db": "not read"}
     diff = sorted(k for k in set(before) | set(now)
@@ -1176,8 +1182,24 @@ def _finish(radios, snaps, keep=(), report=None, before=None):
 
 
 def left_wrong_gate(r):
-    """No test on a radio a test could not put back (finish() recorded it): bench.py restore first"""
+    """No test on a radio a test could not put back (finish() recorded it): bench.py restore first. One recorded only
+    because its settings database could not be read (its live settings were put back and read back first: finish()
+    reads the database only then) is let go when the radio reads now as that snapshot: bench.py restore would put
+    back no more than that (the database's rows before are never kept in a file). A stalled link at the end of one
+    test refused 44 after it (2026-11-26)"""
     doc = load_json(os.path.join(STATE, LEFT_WRONG), {})
+    ent = doc.get(r.name)
+    if ent and ent.get("bad") == {"db": "not read"} and not r.simulated:
+        state_ready(r)
+        off = {k: [_value(r, k), v] for k, v in ent.get("snap", {}).items()
+               if k in RESTORED and k != "heard" and not _same(k, _value(r, k), v)}   # restore() never sets heard
+        if not off:
+            doc.pop(r.name)
+            save_json(os.path.join(STATE, LEFT_WRONG), doc)
+            say(f"{r.name}: recorded left not as found at {ent['at']} only for its settings database not read; it "
+                f"reads as that test's snapshot now: let go")
+            return
+        say(f"{r.name}: its settings database was not read at {ent['at']}, and it is not as found either: {off}")
     if r.name in doc:
         raise Refused(f"{r.name} was left not as found ({doc[r.name]['at']}: {doc[r.name]['bad']}): "
                       f"bench.py restore puts it back first")
@@ -1567,6 +1589,36 @@ def supply_gate(radio, w):
                       f"the last minutes)")
 
 
+X6200_HOLDS_V = 12.0        # the X6200's base holds its battery up only on DC in at 12.0 V and more (board.h
+                            # BOARD_BAT_EXT_MIN): its stock 12 V charger reads 11.7-11.9 V, and on it the battery runs
+                            # the radio down, on receive too (65 % to 53 % in 90 min of tests, 2026-11-26)
+X6200_TX_MIN_VBAT = 7.3     # an X6200 on such a supply sends only with its battery at rest at this or more: under it a
+                            # TX sags it to 7.0 V (BOARD_BAT_LOW), where its GUI switches the radio off 30 s later.
+                            # 2026-11-26: at 7.2 V (53 %) three JS8 frames in a row did, mid js8-groups
+X6200_LISTEN_MIN_VBAT = 7.1     # and listens only over this: its receive alone runs the battery down to the 7.0 V cut
+
+
+def battery_tx_gate(radio):
+    """No over from an X6200 whose supply does not hold its battery up while the battery is near the GUI's low cut: the
+    TX would sag it there and the radio would switch itself off. Its battery log's last rows (a row a minute); the
+    highest battery voltage of them taken as its rest (a row written under TX reads lower). Unread: said, no stop"""
+    if radio.simulated or radio._rc.get("model", radio.name) != "x6200":
+        return
+    try:
+        rows = [r.split(",") for r in ssh(radio.host, "tail -3 /mnt/battery_log.csv", timeout=20).split()]
+        rows = [(int(r[0]), float(r[1]), float(r[3])) for r in rows if len(r) > 3 and r[0].isdigit()]
+    except (Refused, subprocess.SubprocessError, ValueError) as e:
+        say(f"{radio.name}: its battery log not read ({e}): its battery not checked")
+        return
+    if not rows or time.time() - rows[-1][0] > 300:
+        return
+    rest, dc = max(r[1] for r in rows), min(r[2] for r in rows)
+    if dc < X6200_HOLDS_V and rest < X6200_TX_MIN_VBAT:
+        raise Refused(f"{radio.name}: its battery at {rest} V on DC in {dc} V, a supply that does not hold it up (the "
+                      f"X6200's needs {X6200_HOLDS_V} V): a TX would sag it to 7.0 V and the radio would switch "
+                      f"itself off. A supply of 12.0 V or more, or charge it first")
+
+
 LISTENER_MIN_PCT = 25       # a listener's battery at least this, unless its DC in holds it (12 V and over)
 LISTENER_DC_HOLDS_V = 12.0
 
@@ -1605,6 +1657,12 @@ def listener_gate(radio):
     if bat < LISTENER_MIN_PCT and dc < LISTENER_DC_HOLDS_V:
         raise Refused(f"{radio.name}: listening on a battery at {bat} % ({vbat} V, DC in {dc} V): its receiver went deaf "
                       f"like this (2026-11-22) and it switches itself off at 7.0 V. A full battery or a supply first")
+    # the X6200's GUI switches it off at 7.0 V (BOARD_BAT_LOW), which its base's % puts near 45 %, far over
+    # LISTENER_MIN_PCT (2026-11-26: off at 53 % under a TX). A listener there drains on to it on receive alone
+    if (radio._rc.get("model", radio.name) == "x6200" and dc < X6200_HOLDS_V
+            and max(r[1] for r in rows) <= X6200_LISTEN_MIN_VBAT):
+        raise Refused(f"{radio.name}: listening on a battery at {vbat} V (DC in {dc} V, under the {X6200_HOLDS_V} V that "
+                      f"holds it up): it switches itself off at 7.0 V. A supply of 12.0 V or more, or charge it first")
     return {"battery_pct": bat, "vbat": vbat, "dc_in": dc}
 
 
@@ -1614,6 +1672,7 @@ def radio_tx_gate(radio, c, w, rf_hz=None):
     if not radio.may_tx:
         raise Refused(f"{radio.name}: the harness's session there may not transmit")
     supply_gate(radio, w)
+    battery_tx_gate(radio)
     if w > c["limits"]["radio_w"] or (w > HARD_MAX_W and (power_ok() or 0) < w):
         raise Refused(f"{w} W is over the limit ({c['limits']['radio_w']} W)")
     if w > HARD_MAX_W and radio.tx_last:

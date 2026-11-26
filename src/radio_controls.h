@@ -22,6 +22,8 @@ extern "C" {
 /* Whether this radio's base has what the control sets (radio_caps: Comp, CW peak and its Q, IF shift, the auto notch,
  * the AGC's knee and slope): one it lacks is on no knob and no button, and a turn of it changes nothing */
 bool controls_supported(cfg_ctrl_t ctrl);
+/* The name of a control controls_supported() says the base lacks, for "...: not on this radio's base" */
+const char *controls_unsupported_name(cfg_ctrl_t ctrl);
 
 /* The control after current (dir > 0), before it (dir < 0) or current itself if it is
  * bound and supported (dir 0) among those bound to the encoder (ENCODER_BIND_VOL or _MFK) */

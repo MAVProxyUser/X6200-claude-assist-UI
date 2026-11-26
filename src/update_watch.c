@@ -172,6 +172,8 @@ static bool        uw_image;        /* a newer card image wanted all the same (S
 static lv_obj_t   *back;            /* focused before the box took the keys */
 static bool        back_editing, picked;
 static int         sel;             /* the item chosen: the offered tick boxes, then Yes, then No */
+static bool        uw_daily;        /* the fetch the daily look started (not Settings' Install): the bench's
+                                     * no-check keeps its question away */
 
 /* A box's width: 640 (700 VISION), narrower on a screen turned to portrait (the Sentry's G: 480 wide) */
 static lv_coord_t box_w(void) {
@@ -643,6 +645,12 @@ static void bundle_info_done(const char *out, int status, void *user) {
     opt_offer[OPT_REBOOT] = true;
     if (status == 0) uw_image = json_true(out, "image_needed");
     json_str(out, "kernel_release", uw_krel, sizeof(uw_krel));
+    /* The bench's tests began while it was fetched (the X6200's question opened 6 min before a run turned the check
+     * off, and stayed over its tests 3 h, 2026-11-26): not asked, nor said, so the next look after the run asks */
+    if (uw_daily && access(NO_CHECK, F_OK) == 0) {
+        uw = UW_IDLE;
+        return;
+    }
     ask();
 }
 
@@ -701,6 +709,7 @@ static void watch_cb(lv_timer_t *t) {
         fclose(f);
     }
     if (!strcmp(seen, latest)) return;
+    uw_daily = true;
     if (image || !url_ok(url)) {
         /* a card image wanted too (or no bundle to fetch): said, for Settings > Info > Update */
         msg_schedule_long_text_fmt("GoldCorpHF %s is out: Settings > Info > Update", latest);
@@ -718,6 +727,7 @@ bool update_watch_now(void) {
     if (!newer_release_ex(latest, sizeof(latest), &image, url, sizeof(url), uw_commit, sizeof(uw_commit)) ||
         !url_ok(url))
         return false;
+    uw_daily = false;       /* asked for at the radio: asked whatever the bench's switch says */
     fetch(latest, url, image);
     return true;
 }
@@ -788,6 +798,7 @@ static void poweron_cb(lv_timer_t *t) {
         return;
     }
     if (pon || box || pbox) return;             /* another box up: the next start asks */
+    if (access(NO_CHECK, F_OK) == 0) return;    /* the bench's tests going: the next start after them asks */
     backlight_tick();
 
     pon = lv_obj_create(lv_layer_top());
@@ -845,9 +856,21 @@ static void poweron_cb(lv_timer_t *t) {
 static lv_timer_t *keep_t;
 
 static void keep_cb(lv_timer_t *t) {
-    lv_obj_t *o = box ? box : pbox ? pbox : pon;
+    lv_obj_t *o;
 
     (void)t;
+    /* The bench's no-check made while the daily look's question (or the power-on box) is open: put away unanswered,
+     * not said, so it is asked again after the tests; an install going on is left alone */
+    if ((box && uw == UW_ASKING && uw_daily && !picked) || pon) {
+        if (access(NO_CHECK, F_OK) == 0) {
+            if (box) {
+                box_close();
+                uw = UW_IDLE;
+            }
+            if (pon) pon_close(NULL);
+        }
+    }
+    o = box ? box : pbox ? pbox : pon;
     if (!o) {
         lv_timer_del(keep_t);
         keep_t = NULL;
@@ -861,6 +884,16 @@ static void keep_cb(lv_timer_t *t) {
 
 static void keep_focus_start(void) {
     if (!keep_t) keep_t = lv_timer_create(keep_cb, 250, NULL);
+}
+
+const char *update_watch_state(void) {
+    if (pon) return "restart";
+    switch (uw) {
+        case UW_FETCHING: return "fetching";
+        case UW_ASKING: return box ? "asking" : "idle";
+        case UW_INSTALLING: return "installing";
+        default: return "idle";
+    }
 }
 
 void update_watch_init(void) {

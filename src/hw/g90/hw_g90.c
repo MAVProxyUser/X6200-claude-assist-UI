@@ -193,7 +193,7 @@ const char *hw_base_ver_str(void) {
 /* The spectrum ready-made at one width. Where CW's spectrum and tone sit on the G90 is not known yet:
  * the X6100's way (no CW caps) until a capture says otherwise */
 uint32_t hw_caps(void) {
-    return HW_CAP_PSD;
+    return HW_CAP_PSD | HW_CAP_XIT;     /* its XIT register (has_register): not measured */
 }
 
 /* ---- Settings ------------------------------------------------------------------------- */

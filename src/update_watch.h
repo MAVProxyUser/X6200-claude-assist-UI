@@ -30,6 +30,11 @@ void update_watch_init(void);
  * or one is being fetched, asked about or installed already */
 bool update_watch_now(void);
 
+/* For the bench (the remote's "cfg? upd_state"): idle, fetching, asking (the question open), installing, restart (the
+ * power-on box open). While /mnt/update/no-check is there the daily look's question and the power-on box are kept
+ * away: not opened, and put away unanswered within a quarter second when it appears */
+const char *update_watch_state(void);
+
 #ifdef __cplusplus
 }
 #endif

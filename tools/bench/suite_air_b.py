@@ -1166,7 +1166,11 @@ def t_rtty(run):
         logs = tl_keep(o, lis)
         open_rtty(o, lis)
         f, m = int(lis.state.get("freq", 0)), int(lis.state.get("mode", -1))
-        if abs(f - F_RTTY) > 20000:
+        if abs(f - F_RTTY) <= 20000:
+            # the panel set L's mode from its memory (USB on 7077000, S still in LSB: the two apart 6 s while the
+            # over was readied, round 2 2026-11-26): S with it at once
+            both_at(o, f, m)
+        else:
             # the panel went where its memory said: the path proved there too, the panel closed for it (the proof
             # opens the Sentry's G on both, which closed the panel under the over, round 1 2026-11-23: L's G took the
             # over, its panel's text log got noise) and opened again, back on the same dial
@@ -1177,6 +1181,7 @@ def t_rtty(run):
             if (int(lis.state.get("freq", 0)), int(lis.state.get("mode", -1))) != (f, m):
                 raise bench.Refused(f"{lis.name}: its RTTY panel opened again on {lis.state.get('freq')} mode "
                                     f"{lis.state.get('mode')}, not {f} mode {m}")
+            both_at(o, f, m)
         rx_keys(lis)
         if not app_name(lis).lower().startswith("rtty"):
             raise bench.Refused(f"{lis.name}: its RTTY panel not open for the over ({app_name(lis)!r})")

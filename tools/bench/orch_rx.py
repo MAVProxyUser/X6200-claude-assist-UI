@@ -35,6 +35,7 @@ FS = 24000
 F_RX = 14200000             # 20 m USB, the bench's voice frequency
 USB = 2
 CAP_DNF_AUTO = 1 << 2       # radio_types.h HW_CAP_DNF_AUTO
+CAP_XIT = 1 << 23           # radio_types.h HW_CAP_XIT
 
 # rx-filter
 PILOT_HZ = 1500             # inside every filter the test sets
@@ -492,21 +493,34 @@ def t_rit_xit(o, s, l):
             res[f"rit_{rit:+d}_hz"] = p
             if p is None or abs(p - want) > PITCH_HZ:
                 bad.append(f"RIT {rit:+d}: heard at {p} Hz, {want:.0f} wanted")
-        for xit in RIT_STEPS:
-            def send(watch, xit=xit):
-                bench.ensure(S, {"xit": xit})
-                return _send_plan(S, plan)(watch)
-            got = _over(o, s, l, f"xit {xit:+d}", send, sender_keep=("xit",))
-            p = pitch_of(got)
-            want = base + xit
-            res[f"xit_{xit:+d}_hz"] = p
-            if p is None or abs(p - want) > PITCH_HZ:
-                bad.append(f"{s}'s XIT {xit:+d}: heard at {p} Hz, {want:.0f} wanted")
-        bench.ensure(S, {"xit": 0})
+        caps = oc.caps_of(S)
+        res["sender_caps"] = caps
+        if caps is not None and not caps & CAP_XIT:
+            # the X6200's base keys the dial whatever XIT says (measured: +-200 heard at the same pitch, SSB and
+            # CW): XIT greyed in its place, refused, none kept
+            lack = oc.lacks_check(S, res, sets={"xit": 200}, buttons=("XIT",))
+            if S.state.get("xit") not in (0, None):
+                lack.append(f"its XIT reads {S.state.get('xit')}, not 0")
+            if lack:
+                bad.append(f"{s}'s base has no XIT, yet " + "; ".join(lack))
+            xit_said = f"{s}'s base has no XIT: greyed, refused ({'; '.join(v for v in res['refused'].values() if v)})"
+        else:
+            for xit in RIT_STEPS:
+                def send(watch, xit=xit):
+                    bench.ensure(S, {"xit": xit})
+                    return _send_plan(S, plan)(watch)
+                got = _over(o, s, l, f"xit {xit:+d}", send, sender_keep=("xit",))
+                p = pitch_of(got)
+                want = base + xit
+                res[f"xit_{xit:+d}_hz"] = p
+                if p is None or abs(p - want) > PITCH_HZ:
+                    bad.append(f"{s}'s XIT {xit:+d}: heard at {p} Hz, {want:.0f} wanted")
+            xit_said = f"{s}'s XIT +200/-200 to {res.get('xit_+200_hz')}/{res.get('xit_-200_hz')} Hz"
+            bench.ensure(S, {"xit": 0})
         if bad:
             return False, f"with neither the tone at {base} Hz; " + "; ".join(bad), res
         return True, f"the tone at {base} Hz with neither; {l}'s RIT +200/-200 moved it to {res['rit_+200_hz']}/" \
-                     f"{res['rit_-200_hz']} Hz, {s}'s XIT +200/-200 to {res['xit_+200_hz']}/{res['xit_-200_hz']} Hz", res
+                     f"{res['rit_-200_hz']} Hz; " + xit_said, res
     except Refused as e:
         return False, str(e), res
     finally:

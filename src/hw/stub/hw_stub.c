@@ -143,7 +143,7 @@ uint32_t hw_caps(void) {
         const char *e = getenv("HOST_STUB_CW");
         cw = e && !strcmp(e, "x6200");
     }
-    return cw ? HW_CAP_CW_SPECTRUM_ON_DIAL | HW_CAP_CW_TONE_RISES : 0;
+    return (cw ? HW_CAP_CW_SPECTRUM_ON_DIAL | HW_CAP_CW_TONE_RISES : 0) | HW_CAP_XIT;
 }
 
 /* ---- Settings ------------------------------------------------------------------------- */

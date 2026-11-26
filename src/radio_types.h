@@ -68,6 +68,10 @@ typedef enum {
      * the X6200's stock base 1.0.8 and Xiegu's own X6100 base from V1.1.9 on (RF gain 100, 30 and 5 alike). The
      * X6100's older and patched bases keep them, not measured */
     HW_CAP_AGC_SHAPE           = 1 << 22,
+    /* XIT (HW_XIT) moves what the radio sends. The X6200's stock base 1.0.8 takes register 43 and keys the dial all
+     * the same, in SSB and CW (orch rit-xit, 2026-11-26: +-200 Hz heard at the same pitch); the X6100's applies it.
+     * Without it the XIT button is greyed, a knob skips it, the remote, CAT and TCI refuse it, a saved one is 0 */
+    HW_CAP_XIT                 = 1 << 23,
 } hw_cap_t;
 
 /* The hand mic's keys as the base reports them (mic_keys.c): the X6100 mic's codes. The X6200's library has the
