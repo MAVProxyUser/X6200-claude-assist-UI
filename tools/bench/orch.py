@@ -31,6 +31,7 @@ import math
 import os
 import re
 import signal
+import subprocess
 import sys
 import threading
 import types
@@ -584,7 +585,10 @@ class Orch:
             # change orch makes to both) is not a difference
             freq_ok = a["freq"] == b["freq"] or bench.declared("freq", a["freq"], b["freq"])
             mode_ok = a["mode"] == b["mode"] or bench.declared("mode", a["mode"], b["mode"])
-            differ = not (freq_ok and mode_ok)
+            # a radio with no state yet (a reconnect's first moments) or silent by plan (a GUI restart, a link the
+            # test closed) has nothing to compare: its silence is judged above, not as a difference
+            blind = any(n in self.planned or rs[n]["freq"] is None for n in (A, B))
+            differ = not blind and not (freq_ok and mode_ok)
             moving = self.changing > 0 or bench.changing()
             cur = tuple((x["freq"], x["mode"], x["pg"], x["app"]) for x in (a, b)) + (moving,)
             if not self._trail or self._trail[-1][1:] != cur:
@@ -1799,6 +1803,9 @@ def test_calls(o):
                         raise Refused(f"{n}: its GUI did not come back after the test call")
                     time.sleep(3)
             o.planned.pop(n, None)
+        if o.restore_calls:         # each restarted GUI came back on its own saved dial: both alike again, at once
+            a = o.r[A].state
+            o.both({"freq": int(a.get("freq") or 14200000), "mode": int(a.get("mode") or 2)})
     finally:
         o.changing -= 1
     o.calls_set = True
@@ -6356,6 +6363,42 @@ def _run_lock_drop():
         pass
 
 
+NO_CHECK = "/mnt/update/no-check"     # S99updatecheck's and the GUI's update watch's off switch
+NO_CHECK_MARK = "orch"                 # its text when a run made it: an owner's own file (empty) is left alone
+
+
+def update_check_off(st, radios):
+    """The radios' update check and its question off while a run goes (the owner, 2026-11-25: "Yes, during tests";
+    the X6100's update question took the MFK mid-test, 11-24): /mnt/update/no-check made on each, marked as the
+    run's. A file of a run that a signal ended (os._exit, no finally) is taken as this run's; an owner's stays.
+    Returns the names whose file this run made"""
+    made = []
+    for n, r in radios.items():
+        try:
+            out = bench.ssh(r.host, f"if [ -e {NO_CHECK} ] && [ \"$(cat {NO_CHECK} 2>/dev/null)\" != {NO_CHECK_MARK} ]; "
+                                    f"then echo owner; else mkdir -p /mnt/update && echo {NO_CHECK_MARK} > {NO_CHECK} && "
+                                    f"echo made; fi", timeout=15).strip()
+        except (OSError, subprocess.SubprocessError, Refused) as e:
+            st.ev(f"{n}: the update check not turned off for the run ({e})", "bad")
+            continue
+        if out == "made":
+            made.append(n)
+    st.ev(f"update check off for the run on {', '.join(made) or 'none'}"
+          + (f" (the owner's own no-check on {', '.join(n for n in radios if n not in made)})"
+             if len(made) < len(radios) else ""), "conf")
+    return made
+
+
+def update_check_on(st, radios, made):
+    """The run's no-check taken away again (only one with the run's mark)"""
+    for n in made:
+        try:
+            bench.ssh(radios[n].host, f"[ \"$(cat {NO_CHECK} 2>/dev/null)\" = {NO_CHECK_MARK} ] && rm -f {NO_CHECK}; true",
+                      timeout=15)
+        except (OSError, subprocess.SubprocessError, Refused) as e:
+            st.ev(f"{n}: the run's {NO_CHECK} not taken away ({e})", "bad")
+
+
 def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, sql=None):
     run_lock_take()
     gui_lock_wait()
@@ -6391,6 +6434,7 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
     st.ev(f"console: http://{'0.0.0.0' if lan else '127.0.0.1'}:{port}/ "
           f"({'this run' + chr(39) + 's own' if srv else 'the standing one, orch.py console'}); run {st.run_dir}")
     o = None
+    no_check = []
     snap_on = threading.Event()
 
     def snap():
@@ -6413,6 +6457,7 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
     try:
         st.phase = "connecting"
         o = Orch(st)
+        no_check = update_check_off(st, o.r)
         st.phase = "syncing both"
         # the start: both transmitters locked, both on the Sentry's page G on one frequency and mode, confirmed, before
         # any test (the first full run began with the X6100 armed on 14.074 USB-D and the X6200 on 29.600 NFM)
@@ -6496,6 +6541,7 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
         with st.lock:
             st.cur = None
         if o:
+            update_check_on(st, o.r, no_check)
             o.close()
         c = collections.Counter(t["result"] for t in st.tests)
         st.ev(f"END: {c['PASS']} pass, {c['FAIL']} fail, {c['LOOK']} look, "

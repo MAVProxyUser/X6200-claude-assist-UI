@@ -151,7 +151,9 @@ class Radio:
         self._rc, self._tok, self._want_tx = rc, tok, want_tx     # for reconnect()
         self.r = Remote(self.host, int(rc.get("port", 50002)))     # another port: the simulated radios' (sim_test.py)
         self.state, self.meter, self.txm, self.ft8, self.apps = {}, None, None, {}, None
-        self.rows, self.errs, self.lock = [], [], threading.Lock()
+        # reentrant: wait() holds it while its condition runs, and a condition may take it again (orch_cable's
+        # tx_spans in a wait: run 29 hung 1 h 40 min on a plain Lock, 2026-11-25)
+        self.rows, self.errs, self.lock = [], [], threading.RLock()
         self.tx, self.tx_since, self.ctl_mine, self.role = False, None, False, None
         self.ctl_who = None         # who has control, as the remote last said ("ctl WHO MINE"): none, local, tci, browser NAME
         self.tx_last = None         # (on, off) of the last over: the pad's rest above HARD_MAX_W
@@ -162,6 +164,7 @@ class Radio:
         self.cw = ""                # the CW decoder's text since the session began (the remote's "cw" lines)
         self.msgs = []              # [(when, text)]: what the radio put in its message box (the remote's "msg" lines)
         self.cfgv = {}              # {name: value}: the settings the remote's "cfg? NAME" answered
+        self.js8_hist = []          # [(when, message)]: every JS8 message line ("js8r"), the session's whole
         self.lines = collections.deque(maxlen=600)     # every text the radio sent, with when: the suite's protocol tests
         self.r.send(f"auth {tok}")
         self.r.send("panel 1")
@@ -241,6 +244,12 @@ class Radio:
                 elif k == "cfg":
                     name, _, val = rest.partition(" ")
                     self.cfgv[name] = val
+                elif k == "js8r":
+                    try:
+                        self.js8_hist.append((self.last_msg, json.loads(rest)))
+                        del self.js8_hist[:-2000]
+                    except ValueError:
+                        pass
                 elif k == "msg":
                     try:
                         self.msgs.append((self.last_msg, json.loads(rest)))
@@ -947,6 +956,7 @@ def cfg_set(r, name, value, timeout=4.0):
     """A setting by its database name set (the remote's "cfg NAME VALUE", through its validator on the radio) and read
     back; returns (as it was, as it is now)"""
     was = cfg_get(r, name, timeout)
+    r.take_control()                    # a set needs control: a TCI client that keyed took it (its "take control first")
     r.send(f"cfg {name} {value}")
     end = time.time() + timeout
     now = was
