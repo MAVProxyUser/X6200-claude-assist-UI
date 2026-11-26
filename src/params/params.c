@@ -115,8 +115,10 @@ params_t params = {
     /* Its own name: v0.3.0 to v0.3.3 read the X6200's ALC the wrong way round (as the X6100's) and learned the
      * drive down to the floor, 40 dB under the power (issues #1, #8); that value is left behind. Again after
      * v0.3.8, which kept the steps made while the base's power still came up after the key: the level climbed to
-     * the codec's top, 33.4 dB (#126). Every X6200 starts once from the default, where it gives its setting at once */
-    .ft8_output_gain_offset = { .x = 0.0f,      .name = "ft8_output_gain_offset_v3" },
+     * the codec's top, 33.4 dB (#126). And from 2026-11-26 the level is the power's, as TCI's (tx_player_base_gain_offset:
+     * before, one level that the base took down to its setting, a noisy skirt round the signal under 1 W): a level
+     * learned against the old one would be off by the power. Every X6200 starts once from the default, the new level */
+    .ft8_output_gain_offset = { .x = 0.0f,      .name = "ft8_output_gain_offset_v4" },
 #else
     .ft8_output_gain_offset = { .x = 0.0f,      .name = "ft8_output_gain_offset" },
 #endif

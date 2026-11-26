@@ -22,6 +22,7 @@
 #include "params/params.h"       /* the learned gain offset */
 #include "radio.h"               /* radio_set_modem, radio_set_tx_freq, radio_set_tx_mode */
 #include "tx_info.h"             /* tx_info_refresh: ALC and power */
+#include "tx_hold.h"             /* TX_HOLD_FIRST, TX_HOLD_MIN_W: TCI's level for 1 W, the X6200's apps' too */
 #include "tx_level.h"
 
 
@@ -277,9 +278,10 @@ bool tx_player_stream(tx_fill_fn_t fill, void *fill_ctx, int32_t offset_hz, floa
     tx_info_set_length(0);      /* the strip back to the time alone */
 
     /* Learned for the next transmission of any app: they share the audio path. With no ALC to go by, a level that
-     * was found; one still climbing to the setting only back up towards the default (0), where the X6200 gives 5 W
-     * at once. Without that, a level knocked down once (an ALC or power reading over: a mag loop not yet tuned)
-     * climbed its 8 dB a transmission, never reached the setting, was never saved, and FT8 stayed at 0 W (#16) */
+     * was found; one still climbing to the setting only back up towards the default (0), the level for the power on
+     * the X6200 (tx_player_base_gain_offset; where it gave 5 W at once up to 2026-11-26). Without that, a level
+     * knocked down once (an ALC or power reading over: a mag loop not yet tuned) climbed its 8 dB a transmission,
+     * never reached the setting, was never saved, and FT8 stayed at 0 W (#16) */
     float level_db = drive - base_gain + codec;
     float learned = LV_MAX(level_db, LEARNED_MIN_DB);
 
@@ -303,8 +305,8 @@ bool tx_player_stream(tx_fill_fn_t fill, void *fill_ctx, int32_t offset_hz, floa
         /* Stopped by the radio where it may not transmit (#121): held at 0 W before the stop, its readings are not the
          * band's. On the X6100 the level climbing at 0 W was kept for every app */
     } else if (level.power_hold && no_rf) {
-        /* Nothing came out: the next transmission from the default, where the X6200 gives the setting at once, not
-         * 8 dB a transmission up from a level near the floor */
+        /* Nothing came out: the next transmission from the default, the X6200's level for the power, not 8 dB a
+         * transmission up from a level near the floor */
         params_float_set(&params.ft8_output_gain_offset, 0.0f);
     } else if (!level.power_hold || level.held) {
         params_float_set(&params.ft8_output_gain_offset, learned);
@@ -336,18 +338,39 @@ bool tx_player_stream(tx_fill_fn_t fill, void *fill_ctx, int32_t offset_hz, floa
 #define BASE_GAIN_1W_DB     (-16.4f)
 /* The apps' waveforms' peak, 0.8 of full scale (gfsk.c, tune_tx.c, rtty.c), dBFS */
 #define APPS_PEAK_DBFS      (-1.938f)
+/* A base whose ALC does not hold the power (HW_CAP_TX_NO_ALC: the X6200), for 1 W: the apps' peak where TCI's audio
+ * starts for 1 W (tx_hold.h TX_HOLD_FIRST), with the power as TCI's, 10 log10 of it (no less than TX_HOLD_MIN_W) */
+#define BASE_GAIN_NO_ALC_1W_DB (TX_HOLD_FIRST - APPS_PEAK_DBFS)
+
+/* The apps' base gain for 1 W on this base, and whether it goes with the power */
+static float base_gain_1w(bool *with_pwr) {
+    uint32_t caps = radio_caps();
+
+    *with_pwr = !(caps & HW_CAP_TX_LEVEL) || (caps & HW_CAP_TX_NO_ALC);
+    if (caps & HW_CAP_TX_NO_ALC) return BASE_GAIN_NO_ALC_1W_DB;
+    return caps & HW_CAP_TX_LEVEL ? BASE_GAIN_LEVEL_DB : BASE_GAIN_1W_DB;
+}
 
 float tx_player_base_gain_offset(void) {
-    /* A base that sets the power itself (the X6100 from rev 3 on, the X6200, whose stock GUI
-     * plays at one level too) takes the audio at one level; the OEM X6100 base scales it, to the
-     * power this transmission goes out at */
-    if (radio_caps() & HW_CAP_TX_LEVEL) return BASE_GAIN_LEVEL_DB;
+    /* A base that sets the power itself (the X6100 from rev 3 on) takes the audio at one level; the OEM X6100 base
+     * scales it, to the power this transmission goes out at. So does the X6200's, whose stock GUI plays at one level:
+     * there its base caps the power at the setting, and under 1 W its cap is a loop that works the whole over on the
+     * envelope. Its FT8 at 0.1 W went out 22 dB over TCI's level, the base taking it down to the same power, with AM
+     * and FM noise flat out to 175 Hz either side: -25 to -31 dBc on the neighbouring FT8 slots, -44 at 1 W, where
+     * TCI's audio, scaled to the power, kept -55 (2026-11-25). Now the apps' level is TCI's */
+    bool  with_pwr;
+    float base = base_gain_1w(&with_pwr);
 
-    return BASE_GAIN_1W_DB + 10.0f * log10f(tx_pwr());
+    if (!with_pwr) return base;
+    float w = tx_pwr();
+
+    if ((radio_caps() & HW_CAP_TX_NO_ALC) && w < TX_HOLD_MIN_W) w = TX_HOLD_MIN_W;
+    return base + 10.0f * log10f(w);
 }
 
 float tx_player_level_1w(void) {
-    float base = radio_caps() & HW_CAP_TX_LEVEL ? BASE_GAIN_LEVEL_DB : BASE_GAIN_1W_DB;
+    bool  with_pwr;
+    float base = base_gain_1w(&with_pwr);
     float kept = LV_MAX(params.ft8_output_gain_offset.x, LEARNED_MIN_DB);
 
     /* as tx_player_stream makes its whole gain: the base's and the learned, the whole at most TOTAL_TOP_DB */

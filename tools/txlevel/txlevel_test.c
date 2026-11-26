@@ -7,8 +7,8 @@
  *
  *  The base: a model X6200 behind the real tx_player.c and tx_level.c. What it is driven with is the audio played, the
  *  samples' gain and the codec's (the X6200's AIF1 DA0: -120 to +24 dB in 0.75 dB steps, its output cut at full
- *  scale), as a level in dB from the default's (the level 0 dB of the apps, where the stock X6200 gives its setting at
- *  once). From its knee up the base holds the power at the setting itself; under it the power falls with the drive.
+ *  scale), as a level in dB from the default's (the level 0 dB of the apps: on the X6200 their start for the power,
+ *  DEFAULT_RMS). From its knee up the base holds the power at the setting itself; under it the power falls with the drive.
  *  After the key it comes up at most so fast (PR #140: from 0 in 0.1 W steps after each move); the band, the antenna
  *  or the supply may give less than the setting; its readings come 20 a second (2.5 in some scenarios), the power in
  *  whole tenths cut off, with noise; the ALC as the scenario reads it (the X6200's reads about 0 whatever the drive),
@@ -243,9 +243,16 @@ void audio_gain_db_transition(int16_t *buf, size_t n, float g1, float g2, int16_
     }
 }
 
-/* The FT8 tone at 0.8 of full scale (gfsk.c) at the default level: what the stock X6200 is driven with */
-#define TONE_AMP    (32767.0f * 0.8f)
-#define DEFAULT_RMS (TONE_AMP / sqrtf(2.0f) * powf(10.0f, -9.4f / 20.0f))
+/* The FT8 tone at 0.8 of full scale (gfsk.c) at the default level, the drive counted from it. The X6200's apps: their
+ * own start for the scenario's power (tx_player_base_gain_offset, the learned level 0: TCI's level for 1 W and 10 log10
+ * of the power, from 2026-11-26), so a scenario's knee is where that base holds its setting from the apps' start at any
+ * power, as before at the one level. The rest (an X6100, TCI's free base, Xiegu's own) from the stock X6200's one
+ * level, STOCK_GAIN_DB, what the apps played the X6200 at before: there its base took the audio down to its setting,
+ * under 1 W with a noisy skirt round the signal */
+#define TONE_AMP      (32767.0f * 0.8f)
+#define STOCK_GAIN_DB (-9.4f)
+static float default_gain_db = STOCK_GAIN_DB;
+#define DEFAULT_RMS   (TONE_AMP / sqrtf(2.0f) * powf(10.0f, default_gain_db / 20.0f))
 
 /* The drive of the last 3.2 s, a 50 ms tick each, for readings that come late; Xiegu's loop's power and gain too */
 #define DRIVE_HIST 64
@@ -400,6 +407,12 @@ static void send(void) {
     atomic_fetch_add(&virt_ns, 2360000000ULL);      /* the rest of the slot */
 }
 
+/* The most the learned level and the drive go over the default: the whole gain at most 0 dB (tx_player.c TOTAL_TOP_DB,
+ * the apps' audio unclipped), a rounding's 0.1 dB over */
+static float top_db(void) {
+    return 0.1f - default_gain_db;
+}
+
 typedef struct {
     float first_at2, last_at2;      /* the power 2 s in, first and last transmission */
     float lowest;                   /* the lowest power read after 1.5 s, all transmissions */
@@ -418,6 +431,8 @@ static result_t run(const scenario_t *s, bool verbose) {
     base        = (typeof(base)){0};
     zero_w_said = 0;
     rnd         = 1;
+    default_gain_db = (radio_caps() & HW_CAP_TX_NO_ALC) && s->free_w <= 0.0f ? tx_player_base_gain_offset()
+                                                                            : STOCK_GAIN_DB;
     params.ft8_output_gain_offset.x = s->start_db;
     if (verbose) printf("  %s\n", s->name);
     for (int i = 0; i < s->txs; i++) {
@@ -533,6 +548,7 @@ static tci_result_t run_tci(const scenario_t *s, float client_dbfs, size_t frame
     setting   = s->pwr;
     base      = (typeof(base)){0};
     rnd       = 1;
+    default_gain_db = STOCK_GAIN_DB;    /* TCI's base driven as it was measured: from the stock one level */
     tci_level = s->start_db;
     if (verbose) printf("  %s, the client at %.0f dBFS in frames of %zu\n", s->name, client_dbfs, frame);
     for (int i = 0; i < s->txs; i++) {
@@ -609,17 +625,17 @@ int main(int argc, char **argv) {
 
     r = run(&ceiling, verbose);
     check(r.clipped == 0, "%s: no transmission clipped in the codec (%d did)", ceiling.name, r.clipped);
-    check(r.level_end <= 9.5f && r.drive_top <= 9.5f, "%s: the level %.1f dB, the drive at most %.1f dB over the default",
-          ceiling.name, r.level_end, r.drive_top);
+    check(r.level_end <= top_db() && r.drive_top <= top_db(), "%s: the level %.1f dB, the drive at most %.1f dB over "
+          "the default (%.1f the top)", ceiling.name, r.level_end, r.drive_top, top_db());
     check(r.lowest >= 6.9f, "%s: still 7 W, never under %.1f W", ceiling.name, r.lowest);
 
     r = run(&ramp, verbose);
-    check(r.level_top <= 9.5f && r.clipped == 0, "%s: the level at most %.1f dB, %d clipped", ramp.name, r.level_top,
+    check(r.level_top <= top_db() && r.clipped == 0, "%s: the level at most %.1f dB, %d clipped", ramp.name, r.level_top,
           r.clipped);
     check(r.short_txs == 0, "%s: every transmission ends at the setting (%d short)", ramp.name, r.short_txs);
 
     r = run(&reach, verbose);
-    check(r.level_top <= 9.5f && r.clipped == 0, "%s: the level at most %.1f dB, %d clipped", reach.name, r.level_top,
+    check(r.level_top <= top_db() && r.clipped == 0, "%s: the level at most %.1f dB, %d clipped", reach.name, r.level_top,
           r.clipped);
     check(r.short_txs == 0, "%s: every transmission ends at the band's 6 W (%d short)", reach.name, r.short_txs);
 

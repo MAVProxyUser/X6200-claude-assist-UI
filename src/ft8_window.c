@@ -209,7 +209,6 @@ static adif_log         ft8_log;
 
 static double  my_lat, my_lon;
 static int32_t filter_low, filter_high;
-static float   base_gain_offset;
 
 static button_data_t button_freq, button_hound, button_foryou;
 
@@ -2201,7 +2200,10 @@ static bool transmit(const slot_info_t *slot, float sec, bool first) {
 
     add_tx_row(out.msg);
 
-    tx_worker_rc_t rc = tx_worker_run(out.msg, AUDIO_PLAY_RATE, base_gain_offset, tx_stopped_cb, NULL);
+    /* The gain read for each message, as JS8 does: on the X6200 and the OEM X6100 base it goes with the power, which
+     * may be changed while the app is open (read once at its opening, a slot went out at the gain of the power the
+     * app was opened at; on the X6200 an over the setting is the noisy skirt tx_player_base_gain_offset tells of) */
+    tx_worker_rc_t rc = tx_worker_run(out.msg, AUDIO_PLAY_RATE, tx_player_base_gain_offset(), tx_stopped_cb, NULL);
 
     /* It counts for the message that went out, not for one the operator chose meanwhile. One too late into its slot
      * to key (the clock stepped since the slot's tick, a long last decode) did not go: its repeat is kept */
@@ -2379,8 +2381,6 @@ static void construct_cb(lv_obj_t *parent) {
         radio_set_pwr(TX_PLAYER_MAX_PWR_W);
         msg_schedule_text_fmt("Power is limited to %0.0fW", TX_PLAYER_MAX_PWR_W);
     }
-    /* TX gain to start from, for this base firmware and power */
-    base_gain_offset = tx_player_base_gain_offset();   /* tx_player.c */
 }
 
 static void destruct_cb(void) {

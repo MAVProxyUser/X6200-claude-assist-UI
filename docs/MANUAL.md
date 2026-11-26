@@ -5504,6 +5504,22 @@ WeFax) set their audio level by themselves.
   0.1 W steps and wobbles, and taken one by one it let the level creep up a
   little each transmission where the power reads around or under the
   setting.
+- On the X6200 the level goes with the power, as TCI audio's does: the
+  level for 1 W, 10 dB under it at 0.1 W, 7 dB over it at 5 W. Its base
+  holds the power at the setting by itself over a wide range of audio
+  levels, and up to v0.3.12.49 the apps sent one level at any power and
+  left the rest to the base: at 0.1 W the audio was 22 dB over what the
+  power needs. Under 1 W the base's hold works through the whole
+  transmission on that much audio and put a noisy skirt round the signal,
+  flat out to about 175 Hz either side: 25 to 31 dB under it in the next
+  FT8 slots, where other stations' decoders could read a copy of it
+  (44 dB under at 1 W). Now an FT8 transmission is 50 to 55 dB under there
+  at 0.1 W, as TCI audio's. Now and then the base still puts a milder skirt
+  round one whole transmission, TCI audio's too (31 to 46 dB under), and
+  the next is clean. The level learned before belonged to the old way:
+  every X6200 starts once from the default (0 dB, the level for the power)
+  and learns it again. FT8 reads it for each message, so a power changed
+  while the app is open counts from the next.
 - Under 1 W on the X6200 the level is held as it is, as for TCI audio: the
   meter reads whole tenths of a watt and, for a second or more after the
   key, high (0.3 W at a 0.1 W setting). Only a reading well over the setting

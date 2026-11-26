@@ -5619,6 +5619,12 @@ SKIRT_MAX_DBC = -40         # and each over's skirt 100-155 Hz off the tone, per
                             # transmitter's -40; the X6200's usual -55)
 FT8_COPY_MAX_DBC = -40      # an FT8 message's neighbours (156 Hz either side) at most this under it: a clean SSB
                             # transmitter keeps -40; the X6200 through TCI -55/-56 at 0.1 W (2026-11-25)
+FT8_COPY_VS_TCI_DB = 6      # ft8-copies: an app's neighbours at most this over the same message's through its TCI, the
+                            # same test (the X6200's base drifts: TCI -55 on 11-25, -41 to -45 on 11-26)
+FT8_FLOOR_OVER_DB = 6       # a figure this far over the listener's floor (its audio before the key) at least is the
+                            # sender's; under it the floor's, which must be FT8_COPY_MAX_DBC less this to judge
+FT8_COPY_TRIES = 3          # overs of each, the next only when the last read over FT8_COPY_MAX_DBC: the X6200's base
+                            # puts a skirt round a few overs of either path now and then (11-26: -33 dBc, TCI's too)
 
 
 def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.3), (0, 0.3), (3, 0.9)),
@@ -5752,16 +5758,14 @@ def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.
                         f"; none {SPUR_HZ} Hz off over {SPUR_MAX_DBC} dBc")), {"rows": rows}
 
 
-def ft8_tci_copy_test(o, sender, listener, hz=1500, app=False):
-    """The FT8 app's copies 156 Hz either side, the same message sent through TCI instead (gen_ft8 here, 24 kHz, the
-    sender's TCI): whether the X6200's skirt is the waveform through its base (here too) or the app's way out (not
-    here: its TCI tone has none, 2026-11-25). app: the sender's FT8 app open meanwhile (its waterfall, decoder and
-    capture running: whether that is what disturbs its audio). Judged: its neighbours FT8_COPY_MAX_DBC under it at most"""
+def ft8_tci_over(o, sender, listener, tci, hz=1500, app=False, w=W):
+    """One FT8 message made here (gen_ft8 "CQ Q2TST FN00" at hz, 24 kHz) sent through the sender's TCI at w, the
+    listener's TCI audio of it (tci, a TciRx on the listener) returned. app: the sender's FT8 app open on its dial (its
+    page kept, the receivers as the app set them)"""
     import subprocess
     import digimodes
     import suite_air_b as ab
-    from tones import TciRx
-    S, L = o.r[sender], o.r[listener]
+    S = o.r[sender]
     os.makedirs(o.st.run_dir, exist_ok=True)
     x24 = ab.gen_ft8_24k(o.c, "CQ Q2TST FN00", hz, o.st.run_dir)
     local = os.path.join(o.st.run_dir, f"ft8_tci_{sender}.raw")
@@ -5769,7 +5773,6 @@ def ft8_tci_copy_test(o, sender, listener, hz=1500, app=False):
     run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", local, f"root@{S.host}:/tmp/bench_ft8.raw"])
     run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_tone_tx.py"),
             f"root@{S.host}:/tmp/tci_tone_tx.py"])
-    tci = TciRx(L.host)
     res = {}
 
     def body(watch):
@@ -5786,6 +5789,66 @@ def ft8_tci_copy_test(o, sender, listener, hz=1500, app=False):
             time.sleep(1.0)
             res["x"] = tci.audio(t0, time.time())[0]
             st_.confirm(f"{len(res['x']) / 24000:.1f} s of audio")
+    try:
+        over(o, sender, listener, ab.FT_DIAL["FT8"], 3, f"FT8 over TCI {sender}", body, w=w, agc=3 if not app else 0,
+             pages=not app)
+    finally:
+        subprocess.run(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}", "rm -f /tmp/bench_ft8.raw"],
+                       capture_output=True, timeout=20)
+    return res.get("x")
+
+
+def ft8_over_of(x, hz):
+    """x from an FT8 over's first sound to its last (its eight tones from hz to hz + 44 Hz up), None without: the rest
+    of a recording is the listener's noise, which its AGC raises in the silence (a CQ waits up to a slot for its
+    start: 14 s of it read -43 dBc in ft8_copies' bands round a clean over, 2026-11-26)"""
+    import numpy as np
+    from tones import FS
+    if x is None or len(x) < FS:
+        return None
+    k = FS // 100                       # 10 ms: the eight tones all through, mixed to their middle
+    z = np.cumsum(x * np.exp(-2j * np.pi * (hz + 22) * np.arange(len(x)) / FS))
+    z = np.abs(z[k:] - z[:-k]) / k
+    up = np.where(z > 0.5 * np.percentile(z, 99))[0]
+    return x[up[0]:up[-1] + k] if len(up) >= FS else None
+
+
+def ft8_floor(pre, x, c):
+    """The listener's floor where ft8_copies measured the copies (50 Hz, SPUR_HZ below and above c["hz"]), from pre, its
+    audio before the key, in dB under the over's own 50 Hz in x while it is up; the higher side. None without either"""
+    import numpy as np
+    from tones import FS
+    if pre is None or x is None or len(pre) < FS or len(x) < FS:
+        return None
+
+    def band(y, a):
+        """the power in a's 50 Hz, per sample: alike from recordings of any length"""
+        w = np.hanning(len(y))
+        P = np.abs(np.fft.rfft(y * w)) ** 2 / (float((w * w).sum()) * len(y))
+        fr = np.fft.rfftfreq(len(y), 1 / FS)
+        m = (fr >= a - 3) & (fr <= a + 47)
+        return float(P[m].sum()) + 1e-20
+    f0 = c["hz"]
+    k = FS // 100                       # 10 ms: the eight tones (f0 to f0 + 44 Hz) all through, mixed to their middle
+    z = np.cumsum(x * np.exp(-2j * np.pi * (f0 + 22) * np.arange(len(x)) / FS))
+    z = np.abs(z[k:] - z[:-k]) / k
+    up = np.where(z > 0.5 * np.percentile(z, 99))[0]
+    if len(up) < FS:
+        return None
+    main = band(x[up[0]:up[-1]], f0)
+    return round(10 * math.log10(max(band(pre, f0 - SPUR_HZ), band(pre, f0 + SPUR_HZ)) / main), 1)
+
+
+def ft8_tci_copy_test(o, sender, listener, hz=1500, app=False):
+    """The FT8 app's copies 156 Hz either side, the same message sent through TCI instead (gen_ft8 here, 24 kHz, the
+    sender's TCI): whether the X6200's skirt is the waveform through its base (here too) or the app's way out (not
+    here: its TCI tone has none, 2026-11-25). app: the sender's FT8 app open meanwhile (its waterfall, decoder and
+    capture running: whether that is what disturbs its audio). Judged: its neighbours FT8_COPY_MAX_DBC under it at most"""
+    import suite_air_b as ab
+    from tones import TciRx
+    S, L = o.r[sender], o.r[listener]
+    tci = TciRx(L.host)
+    res = {}
     steps = None
     try:
         if app:
@@ -5801,14 +5864,11 @@ def ft8_tci_copy_test(o, sender, listener, hz=1500, app=False):
                 ab.ft8_set(S, "auto", False)
                 bench.pair_align(L, S)
                 st_.confirm(f"{S.state.get('app')} on {S.state.get('freq')}")
-        over(o, sender, listener, ab.FT_DIAL["FT8"], 3, f"FT8 over TCI {sender}", body, agc=3 if not app else 0,
-             pages=not app)
+        res["x"] = ft8_tci_over(o, sender, listener, tci, hz, app)
     except Refused as e:
         return False, str(e), {}
     finally:
         tci.close()
-        subprocess.run(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}", "rm -f /tmp/bench_ft8.raw"],
-                       capture_output=True, timeout=20)
         if steps is not None:
             o.changing += 1
             try:
@@ -5936,18 +5996,25 @@ def tail_test(o, sender, listener, f=14074000, tone=1000, secs=2.0, amp=0.3):
                 f"{TAIL_LOST_MAX_S} s at most"), {"rows": rows}
 
 
-def ft8_copy_test(o, sender, listener, txfs=(1325, 1500, 2000), w=W, judge=True):
-    """Where the copies 156.25 Hz either side of an FT8 app's transmission come from (spur_test: a TCI tone has none):
-    the sender's FT8 app sends one CQ at each TX Hz of txfs, the listener on G in USB-D on the same dial recording its
-    audio, the power over the same 50 Hz SPUR_HZ below and above each CQ in dB under it (suite_air_b.ft8_copies). At
-    1325 Hz the app moves no VFO (tx_player synthesises there); at 1500 and 2000 it moves the VFO 175 and 675 Hz up for
-    the over. Passes with no copy over SPUR_MAX_DBC. w: the power (1 W at most here). judge False: the figures said,
-    not judged (the X6200 at 0.1 W, a hundredth of its rating: its base puts a skirt round the signal, -25 dBc in each
-    55 Hz out to 170 Hz, -44 at 1 W, 2026-11-25; the decoders take the station, not the copies, since 11-25)"""
+def ft8_copy_test(o, sender, listener, txfs=(1325, 1500, 2000), w=W):
+    """An FT8 app's transmission against the same message through TCI: the sender's FT8 app sends one CQ at each TX Hz
+    of txfs, the listener on its dial in USB-D set as the sender (pair_align) recording its audio, the power over the
+    same 50 Hz SPUR_HZ below and above each CQ in dB under it, in the over's own audio (ft8_over_of;
+    suite_air_b.ft8_copies: the next FT8 slots, where another station's decoder reads a copy). At 1325 Hz the app
+    moves no VFO (tx_player synthesises there); at 1500 and 2000 it moves the VFO 175 and 675 Hz up for the over.
+    First, the app open, the same message through the sender's TCI at 1500 Hz (ft8_tci_over). The floor: the
+    listener's audio before the first key, in the same bands (ft8_floor: an upper bound, the listener's audio
+    levelled by its AGC in the silence), and the least figure of any over at most. w: the power (1 W at most here).
+    FAIL: a CQ's copies over FT8_COPY_MAX_DBC dBc or FT8_COPY_VS_TCI_DB over TCI's, and FT8_FLOOR_OVER_DB over the
+    floor (the sender's). LOOK: over FT8_COPY_MAX_DBC at the floor, or the listener's audio clipped. An over that reads
+    over FT8_COPY_MAX_DBC (a CQ's: or FT8_COPY_VS_TCI_DB over TCI's) is sent again, FT8_COPY_TRIES in all, each judged
+    by its best: the X6200's base puts a skirt round a few overs of either path now and then (every over said). Up to
+    2026-11-26 the X6200's apps played one level at any power and its base took the audio down to the setting: -25 to
+    -31 dBc at 0.1 W, -44 at 1 W, TCI -55 (tx_player_base_gain_offset)"""
     import suite_air_b as ab
     from tones import TciRx
     S, L = o.r[sender], o.r[listener]
-    rows, tci, steps = [], None, None
+    rows, tcis, tci, steps, pre, ref = [], [], None, None, None, None
     p, total = bench.chain_gate(o.c, "radios")
     try:
         with o.step(f"both on {ab.FT_DIAL['FT8'] / 1e6:.3f} USB-D, {sender}'s FT8 app open there, Auto off") as s:
@@ -5966,41 +6033,68 @@ def ft8_copy_test(o, sender, listener, txfs=(1325, 1500, 2000), w=W, judge=True)
             s.confirm(f"{sender} {S.state.get('app')} on {S.state.get('freq')}, {listener} on G "
                       f"{L.state.get('freq')}")
         tci = TciRx(L.host)
+        with o.step(f"{listener}'s floor: its audio for 3 s before the key") as s:
+            t_pre = time.time() + 0.5
+            time.sleep(3.5)
+            pre = tci.audio(t_pre, time.time())[0]
+            if len(pre) < 24000:
+                raise Refused(f"no audio from {listener} before the key")
+            s.confirm(f"{len(pre) / 24000:.1f} s, AGC {L.state.get('agc')}")
         bench.radio_tx_gate(S, o.c, w)
         bench.listener_gate(L)
+        for k in range(1, FT8_COPY_TRIES + 1):
+            x = ft8_tci_over(o, sender, listener, tci, 1500, app=True, w=w)
+            r_ = ab.ft8_copies(ft8_over_of(x, 1500), 1500)
+            if r_ is None:
+                raise Refused(f"no audio from {listener} for the TCI over")
+            r_["wav"] = save_wav(o, x, f"ft8_copies_tci_{sender}_to_{listener}_1500_{w}W" + (f"_{k}" if k > 1 else "")
+                                 + ".wav")
+            r_.update(floor_dbc=ft8_floor(pre, x, r_), peak=round(float(abs(x).max()), 3), over=k)
+            tcis.append(r_)
+            if max(r_["below_dbc"], r_["above_dbc"]) <= FT8_COPY_MAX_DBC:
+                break
+        ref = min(tcis, key=lambda r: max(r["below_dbc"], r["above_dbc"]))
         for txf in txfs:
-            with o.step(f"{sender}'s FT8 app: one CQ from TX Hz {txf}, {listener} records") as s:
-                S.send(f"ft8 txfreq {txf}")
-                S.wait(f"TX Hz {txf}", lambda: S.ft8.get("txf") == txf, 5)
-                o.roles = {sender: "TX", listener: "RX"}
-                watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(w * 1000) - total, listener=L, w=w,
-                                    label=f"ft8 copies {sender} {txf} Hz {w} W")
-                try:
-                    bench.tx_log({"who": sender, "f": ab.FT_DIAL["FT8"], "w": S.pwr(),
-                                  "what": f"orch: FT8 CQ from {txf} Hz"})
-                    t0 = time.time()
-                    S.send("ft8 cq")
-                    S.wait("its CQ on the air", lambda: S.tx or watch.why, 40)
-                    S.wait("its CQ over", lambda: not S.tx or watch.why, bench.MAX_KEY_S + 2)
-                    t1 = time.time()
-                    S.send("ft8 stop")
-                finally:
-                    watch.close()
-                    o.roles = {A: "RX", B: "RX"}
-                if watch.why:
-                    raise Refused(f"the watch stopped the over: {watch.why}")
-                time.sleep(1.0)
-                x = tci.audio(t0, t1 + 0.5)[0]
-                c = ab.ft8_copies(x, txf)
-                if c is None:
-                    raise Refused(f"no audio from {listener}")
-                c["wav"] = save_wav(o, x, f"ft8_copies_{sender}_to_{listener}_{txf}_{w}W.wav")
-                rows.append(dict(c, txf=txf))
-                s.confirm(f"at {c['hz']} Hz: {SPUR_HZ} Hz below {c['below_dbc']} dBc, above {c['above_dbc']} dBc, "
-                          f"400 Hz above (noise) {c['noise_dbc']} dBc")
-                time.sleep(2.0)
+            for k in range(1, FT8_COPY_TRIES + 1):
+                with o.step(f"{sender}'s FT8 app: one CQ from TX Hz {txf}, {listener} records"
+                            + (f" (over {k}: the last over {FT8_COPY_MAX_DBC} dBc or {FT8_COPY_VS_TCI_DB} dB over "
+                               f"TCI's)" if k > 1 else "")) as s:
+                    S.send(f"ft8 txfreq {txf}")
+                    S.wait(f"TX Hz {txf}", lambda: S.ft8.get("txf") == txf, 5)
+                    o.roles = {sender: "TX", listener: "RX"}
+                    watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(w * 1000) - total, listener=L, w=w,
+                                        label=f"ft8 copies {sender} {txf} Hz {w} W")
+                    try:
+                        bench.tx_log({"who": sender, "f": ab.FT_DIAL["FT8"], "w": S.pwr(),
+                                      "what": f"orch: FT8 CQ from {txf} Hz"})
+                        t0 = time.time()
+                        S.send("ft8 cq")
+                        S.wait("its CQ on the air", lambda: S.tx or watch.why, 40)
+                        S.wait("its CQ over", lambda: not S.tx or watch.why, bench.MAX_KEY_S + 2)
+                        t1 = time.time()
+                        S.send("ft8 stop")
+                    finally:
+                        watch.close()
+                        o.roles = {A: "RX", B: "RX"}
+                    if watch.why:
+                        raise Refused(f"the watch stopped the over: {watch.why}")
+                    time.sleep(1.0)
+                    x = tci.audio(t0, t1 + 0.5)[0]
+                    c = ab.ft8_copies(ft8_over_of(x, txf), txf)
+                    if c is None:
+                        raise Refused(f"no audio from {listener}")
+                    c["wav"] = save_wav(o, x, f"ft8_copies_{sender}_to_{listener}_{txf}_{w}W"
+                                        + (f"_{k}" if k > 1 else "") + ".wav")
+                    c.update(floor_dbc=ft8_floor(pre, x, c), peak=round(float(abs(x).max()), 3))
+                    rows.append(dict(c, txf=txf, over=k))
+                    s.confirm(f"at {c['hz']} Hz: {SPUR_HZ} Hz below {c['below_dbc']} dBc, above {c['above_dbc']} dBc, "
+                              f"400 Hz above {c['noise_dbc']} dBc, the floor {c['floor_dbc']} dBc")
+                    time.sleep(2.0)
+                worst_, tci_ = max(c["below_dbc"], c["above_dbc"]), max(ref["below_dbc"], ref["above_dbc"])
+                if worst_ <= FT8_COPY_MAX_DBC and worst_ <= tci_ + FT8_COPY_VS_TCI_DB:
+                    break
     except Refused as e:
-        return False, str(e), {"rows": rows}
+        return False, str(e), {"rows": rows, "tci": tcis}
     finally:
         if tci is not None:
             tci.close()
@@ -6016,16 +6110,41 @@ def ft8_copy_test(o, sender, listener, txfs=(1325, 1500, 2000), w=W, judge=True)
                 o.st.ev(f"{sender}'s FT8 app not closed as found: {e}", "bad")
             finally:
                 o.changing -= 1
-    said = "; ".join(f"TX Hz {r['txf']}: {r['below_dbc']}/{r['above_dbc']} dBc (noise {r['noise_dbc']})" for r in rows)
-    # a copy counts where it stands 6 dB over the listener's noise: the X6200's audio is noisier (-32 dBc at 0.1 W
-    # through the cable), and a figure at its noise says nothing either way
-    bad = [r["txf"] for r in rows if max(r["below_dbc"], r["above_dbc"]) > max(SPUR_MAX_DBC, r["noise_dbc"] + 6)]
-    if not judge:
-        return None, (f"{sender}'s FT8 CQs at {w} W in {listener}'s audio, the power {SPUR_HZ} Hz below/above each, "
-                      f"dB under it: {said}: said, not judged (at {w} W the X6200's base puts this skirt round its "
-                      f"signal; judged at 1 W, ft8-copies x6200 1w)"), {"rows": rows}
-    return not bad, (f"{sender}'s FT8 CQs at {w} W in {listener}'s audio, the power {SPUR_HZ} Hz below/above each, dB under it: "
-                     f"{said}" + (f"; a copy over {SPUR_MAX_DBC} dBc from TX Hz {bad}" if bad else "")), {"rows": rows}
+    def worst(r):
+        return max(r["below_dbc"], r["above_dbc"])
+    tries = rows
+    rows = [min((r for r in tries if r["txf"] == f), key=worst) for f in txfs]
+
+    # the listener's floor at most its audio before the key (levelled up by its AGC there) and the least figure of any
+    # over: a figure is the floor and a copy over it
+    floor = min([r["floor_dbc"] for r in tries + tcis if r["floor_dbc"] is not None] + [worst(r) for r in tries + tcis])
+
+    def senders(r):
+        """the copy stands FT8_FLOOR_OVER_DB over the listener's floor: the sender's, not the floor's"""
+        return worst(r) >= floor + FT8_FLOOR_OVER_DB
+
+    def overs(rs):
+        return ", then ".join(f"{r['below_dbc']}/{r['above_dbc']}" for r in rs)
+    said = "; ".join(f"TX Hz {f}: {overs([r for r in tries if r['txf'] == f])} dBc" for f in txfs)
+    dirty = sum(worst(r) > FT8_COPY_MAX_DBC for r in tries + tcis)
+    said = (f"{sender}'s FT8 CQs at {w} W in {listener}'s audio, the power {SPUR_HZ} Hz below/above each, dB under it: "
+            f"{said}; the same message through its TCI first: {overs(tcis)} dBc; {listener}'s floor at most {floor} dBc"
+            + (f"; {dirty} of {len(tries + tcis)} overs over {FT8_COPY_MAX_DBC} dBc" if dirty else ""))
+    got = {"rows": rows, "tries": tries, "tci": ref, "tci_overs": tcis}
+    over_max = [r["txf"] for r in rows if worst(r) > FT8_COPY_MAX_DBC and senders(r)]
+    vs_tci = [r["txf"] for r in rows if worst(r) > worst(ref) + FT8_COPY_VS_TCI_DB and senders(r)]
+    if over_max or vs_tci:
+        said += (f"; over {FT8_COPY_MAX_DBC} dBc from TX Hz {over_max}" if over_max else "") + \
+            (f"; over {FT8_COPY_VS_TCI_DB} dB worse than TCI's from TX Hz {vs_tci}" if vs_tci else "")
+        clipped = [r["txf"] for r in rows + [dict(ref, txf="TCI")] if r.get("peak", 0) >= 0.999]
+        if clipped:     # the listener's own audio cut at full scale (its AGC off): its splatter, not the sender's
+            return None, said + f"; {listener}'s audio clipped at {clipped}: said, not judged", got
+        return False, said, got
+    unclear = [r["txf"] for r in rows if worst(r) > FT8_COPY_MAX_DBC]
+    if unclear:
+        return None, said + (f"; at {unclear} over {FT8_COPY_MAX_DBC} dBc but within {FT8_FLOOR_OVER_DB} dB of "
+                             f"{listener}'s floor: said, not judged"), got
+    return True, said + f"; every CQ within {FT8_COPY_MAX_DBC} dBc and {FT8_COPY_VS_TCI_DB} dB of TCI's", got
 
 
 CW_TIMING_TEXT = "PARIS PARIS PARIS PARIS"
@@ -6760,20 +6879,20 @@ TESTS = [
     Test("tci-tail x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's TCI over in the X6200's audio",
          lambda o: tail_test(o, A, B), 90),
     Test("ft8-copies x6200", "X6200 TX, X6100 RX", "the X6200's FT8 app's CQs from TX Hz 1325 (no VFO move), 1500 and "
-         "2000 at 0.1 W in the X6100's audio, the power 156.25 Hz either side: said, not judged (its base's skirt at "
-         "0.1 W, -25 dBc; the X6100's decoder took a copy in it for the station till 11-25)",
-         lambda o: ft8_copy_test(o, B, A, judge=False), 150),
-    Test("ft8-copies x6200 1w", "X6200 TX at 1 W, X6100 RX", "the X6200's FT8 CQ from 1500 Hz at 1 W: nothing 156.25 Hz "
-         "either side over -30 dBc (-44 on 11-25, against -25 at 0.1 W)", lambda o: ft8_copy_test(o, B, A, (1500,), 1.0),
-         90),
+         "2000 at 0.1 W in the X6100's audio, then the same message through its TCI: the power 156.25 Hz either side "
+         "-40 dBc at most and no more than 6 dB over TCI's (till 11-26 -25 to -31 dBc, TCI -55: the app played one "
+         "level at any power and the base took it down to its setting)", lambda o: ft8_copy_test(o, B, A), 210),
+    Test("ft8-copies x6200 1w", "X6200 TX at 1 W, X6100 RX", "the X6200's FT8 CQ from 1500 Hz at 1 W, then through its "
+         "TCI: as ft8-copies x6200 (-44 dBc on 11-25)", lambda o: ft8_copy_test(o, B, A, (1500,), 1.0), 150),
     Test("ft8-copies x6200 tci", "X6200 TX, X6100 RX", "the same FT8 message through the X6200's TCI (made here): whether "
          "its skirt is the FT8 waveform through its base or the app's way out (said)",
          lambda o: ft8_tci_copy_test(o, B, A), 90),
     Test("ft8-copies x6200 tci app", "X6200 TX, X6100 RX", "ft8-copies x6200 tci with its FT8 app open meanwhile: "
          "whether the app's waterfall, decoder and capture are what disturb its audio (said)",
          lambda o: ft8_tci_copy_test(o, B, A, app=True), 120),
-    Test("ft8-copies x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's FT8 app's CQs in the X6200's "
-         "audio", lambda o: ft8_copy_test(o, A, B), 150),
+    Test("ft8-copies x6100", "X6100 TX at 1 W, X6200 RX", "the same the other way at 1 W: the X6100's FT8 app's CQs, "
+         "then through its TCI, in the X6200's audio (at 0.1 W the X6200's floor, -33 dBc through the cable, hides "
+         "-40: LOOK 11-26)", lambda o: ft8_copy_test(o, A, B, w=1.0), 210),
     Test("cw-timing x6100", "X6100 TX, X6200 RX", "the X6100's CW keyer as it reaches the air: PARIS x4 at 20 WPM through "
          "its TCI, read element by element in the X6200's audio: none merged or lost, each mark and gap within 25 ms of "
          "its kind (11-25: its gaps cut short by a signal, its base's key-up late)",
