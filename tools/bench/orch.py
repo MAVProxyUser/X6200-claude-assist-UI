@@ -222,6 +222,12 @@ th{color:var(--dim);font-weight:normal}.PASS{color:var(--ok)}.FAIL{color:var(--b
 <main>
 <section class="wide"><h2>Radios</h2><div id="sync"></div><div class="radios" id="radios" style="margin-top:8px"></div></section>
 <section class="wide"><h2>Now</h2><div id="now"></div><div class="bar"><div id="prog" style="width:0"></div></div></section>
+<section class="wide"><h2>Tally</h2><table><thead><tr><th></th><th id="tb">this batch</th><th id="ta">all time</th></tr></thead><tbody id="tally"><tr><td class="muted" colspan="3">counting...</td></tr></tbody></table>
+<div id="tnow" style="margin-top:8px"></div>
+<div class="says" style="margin-top:6px">LOOK: the test ran but cannot judge it by itself. What it found (a picture, a reading) is for a person to look at, so it is neither a pass nor a fail. Came good: a test passed after a FAIL, either after a change (a commit landed in between, or the test's own code or a radio's GUI changed) or on a retest alone (nothing the runs can see changed). Runs before 26 Nov did not keep which GUI they tested: a fix installed on the radio before its commit reads "unclear" there.</div>
+<div id="rerun" style="margin-top:10px"></div></section>
+<section><h2>Fail most often (all time)</h2><table><thead><tr><th>test</th><th>fails</th><th>runs</th><th>latest</th><th>its last fail</th></tr></thead><tbody id="most"></tbody></table></section>
+<section><h2>Came good: passed after a fail (the latest first)</h2><table><thead><tr><th>test</th><th>when</th><th>fails</th><th>how</th></tr></thead><tbody id="came"></tbody></table></section>
 <section class="wide"><h2>This run: only the tests not passed yet (and any new ones)</h2><table><thead><tr><th>#</th><th>test</th><th>role</th><th>result</th><th>secs</th><th>what it found</th></tr></thead><tbody id="tests"></tbody></table></section>
 <section class="wide"><h2 id="kepth">Not rerun: passed in an earlier run (or a known fault), kept in orch_results.json, the latest first</h2><table><thead><tr><th>test</th><th>result</th><th>when</th><th>GUI</th><th>what it found</th></tr></thead><tbody id="kept"></tbody></table></section>
 <section class="wide"><h2>Where the two radios differ (the caps test: the same value sent to both, what each did)</h2><table><thead><tr><th>asked</th><th>X6100</th><th>X6200</th></tr></thead><tbody id="caps"></tbody></table></section>
@@ -260,7 +266,32 @@ $("kept").innerHTML=(d.kept||[]).slice().sort((a,b)=>(b.at||0)-(a.at||0)).map(k=
 const show={cmd:$("fcmd").checked,conf:$("fconf").checked,radio:$("fradio").checked};
 $("ev").innerHTML=d.events.slice().reverse().filter(e=>show[e.kind]!==false).map(e=>`<div class="${e.kind}">${t(e.t)} ${e.test?"["+esc(e.test)+"] ":""}${esc(e.text)}</div>`).join("");}
 const openPics=new Set();function tog(i){openPics.has(i)?openPics.delete(i):openPics.add(i);tick();}
-tick();setInterval(tick,700);
+const TOKEN="__TOKEN__",LOCAL=["127.0.0.1","localhost"].includes(location.hostname);let rrMsg="",rrEst=0,rrN=0;
+const num=n=>(n||0).toLocaleString(),pc=(n,of)=>of?` <span class=muted>${Math.round(100*n/of)}%</span>`:"";
+const ago=s=>{const m=Math.round((Date.now()/1000-s)/60);return m<60?m+" min ago":m<2880?Math.round(m/60)+" h ago":Math.round(m/1440)+" days ago"};
+async function tally(){let d;try{d=await (await fetch("tally",{cache:"no-store"})).json()}catch(e){return}
+if(d.error){$("tally").innerHTML=`<tr><td class=FAIL colspan=3>tally: ${esc(d.error)}</td></tr>`;return}
+const b=d.batch,a=d.all,n=d.now,c=b.counts||{};
+$("tb").innerHTML=`this batch <span class=muted>(${esc(b.run||"none yet")}, ${b.going?"<b class=LOOK>going</b>":"finished"})</span>`;
+$("ta").innerHTML=`all time <span class=muted>(${num(a.runs)} runs${a.since?" since "+new Date(a.since*1000).toLocaleDateString():""})</span>`;
+const togo=b.going&&c.total?` of ${num(c.total)}, ${num(c.total-c.done)} to go`:"";
+const row=(k,x,y,cl)=>`<tr><td>${k}</td><td class="${cl||""}">${x}</td><td class="${cl||""}">${y}</td></tr>`;
+$("tally").innerHTML=row("tests run",num(b.results)+togo,`${num(a.results)} <span class=muted>(${num(a.tests)} tests)</span>`)+
+ row("pass",num(b.pass)+pc(b.pass,b.results),num(a.pass)+pc(a.pass,a.results),"PASS")+
+ row("fail",num(b.fail)+pc(b.fail,b.results),num(a.fail)+pc(a.fail,a.results),"FAIL")+
+ row("look",num(b.look)+pc(b.look,b.results),num(a.look)+pc(a.look,a.results),"LOOK")+
+ (b.notrun||a.notrun?row("not run",num(b.notrun),num(a.notrun),"NOTRUN"):"")+
+ row("sync violations",num(b.violations),`${num(a.violations)} in runs, ${num(a.idle_violations)} between runs`,(b.violations?"FAIL":""))+
+ row("came good",`${num(b.came.length)}${b.came.length?` <span class=muted>(${b.came_change} after a change, ${b.came.length-b.came_change-b.came_unclear} on a retest${b.came_unclear?", "+b.came_unclear+" unclear":""}${b.came.length?": "+b.came.map(x=>esc(x.name)).join(", "):""})</span>`:""}`,
+  `${num(a.came)} times, ${num(a.came_tests)} tests <span class=muted>(${num(a.came_change)} after a change, ${num(a.came-a.came_change-a.came_unclear)} on a retest, ${num(a.came_unclear)} unclear)</span>`);
+$("tnow").innerHTML=`<b>every test now, by its latest result:</b> ${num(n.of)} tests: <span class=PASS>${num(n.pass)} pass</span>, <span class=FAIL>${num(n.fail)} fail</span>, <span class=LOOK>${num(n.look)} look</span>, <span class=muted>${num(n.never)} never run${n.notrun?", "+num(n.notrun)+" not run":""}${n.known?", "+n.known+" known faults":""}</span>`;
+$("most").innerHTML=d.most.map(p=>`<tr><td>${esc(p.name)}</td><td class=FAIL>${p.fails}</td><td>${p.runs} <span class=muted>(${p.passes} pass)</span></td><td class="${p.last}">${esc(p.last)} <span class=muted>${ago(p.last_t)}</span></td><td class="says" title="${esc(p.fail_says)}">${esc(String(p.fail_says||"").slice(0,140))}${String(p.fail_says||"").length>140?"...":""}</td></tr>`).join("")||"<tr><td class=muted colspan=5>no fails yet</td></tr>";
+$("came").innerHTML=d.came_good.map(x=>`<tr><td>${esc(x.name)}</td><td>${ago(x.t)}</td><td>${x.fails}</td><td class="says">${x.how==="change"?"after a change: ":x.how==="retest"?"on a retest: ":"unclear: "}${esc(x.why)}</td></tr>`).join("")||"<tr><td class=muted colspan=4>none yet</td></tr>";
+const r=d.rerun||{};rrEst=n.est_s;rrN=n.of;const why=LOCAL?r.why:"only from this computer: http://127.0.0.1"+(location.port?":"+location.port:"")+"/";
+$("rerun").innerHTML=`<button id="rr" onclick="rerun()" style="font:inherit;padding:6px 12px;background:${r.ok&&LOCAL?"var(--amb)":"var(--line)"};color:${r.ok&&LOCAL?"#000":"var(--dim)"};border:0;border-radius:4px;cursor:${r.ok&&LOCAL?"pointer":"default"}" ${r.ok&&LOCAL?"":"disabled"}>Re-run all ${num(n.of)} tests</button> <span class=muted>about ${(n.est_s/3600).toFixed(1)} h by each test's last time &middot; ${esc(why)}${r.log?" &middot; the last one started here: "+esc(r.log):""}</span>${rrMsg?`<div class="says">${esc(rrMsg)}</div>`:""}`;}
+async function rerun(){if(!confirm(`Run all ${rrN} tests again? About ${(rrEst/3600).toFixed(1)} hours. Both radios go through every test, keying at 0.1 W into the cable, and each test checks the owner's go-aheads it needs.`))return;
+try{const x=await (await fetch("rerun",{method:"POST",headers:{"X-Orch-Token":TOKEN}})).json();rrMsg=x.why}catch(e){rrMsg="no answer: "+e}tally();}
+tick();setInterval(tick,700);tally();setInterval(tally,5000);
 </script></body></html>"""
 
 
@@ -365,10 +396,249 @@ def snapshot_json():
     return json.dumps(d, default=str)
 
 
+# ---- The tally (the owner, 2026-11-26: "a running tally of how many tests total, how many we've passed, how many have
+# failed, and how many have a LOOK status ... over the life time of everything pushed into it, and in the current batch
+# being run. same with any violations, and tests that finished successful after a code adjust / retest. and which tests
+# fail most often by count, and some way to 're-run all' when testing is idle") ----
+#
+# Counted from every run's events.jsonl, where each result is said as "PASS <test>: ..." and each sync violation as
+# "OUT OF SYNC: ...", read once and then only as it grows; the violations between runs from IDLE_LOG. A test came good
+# when it passed after a FAIL: after a change when a commit landed in the repository between the two, or the test's own
+# code (results.json's "code") or either radio's GUI binary (meta.json) differed, both kept from 2026-11-26; otherwise
+# on a retest alone
+
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+RESULT_WORDS = ("PASS", "FAIL", "LOOK", "NOT RUN")
+TALLY_LOCK = threading.Lock()
+_TALLY = {"runs": {}, "commits": (0.0, [])}
+MOST_FAILED_N = 15
+CAME_GOOD_N = 15
+
+
+def _commit_times():
+    """The repository's commit times, ascending (read again after a minute)"""
+    at, times = _TALLY["commits"]
+    if time.time() - at > 60:
+        try:
+            out = subprocess.run(["git", "-C", REPO, "log", "--format=%ct"], capture_output=True, text=True,
+                                 timeout=20).stdout
+            times = sorted(int(x) for x in out.split() if x.isdigit())
+        except (OSError, subprocess.SubprocessError):
+            pass
+        _TALLY["commits"] = (time.time(), times)
+    return times
+
+
+def _run_read(rd):
+    """A run's results and sync violations from its events.jsonl, read on from where it was last; its tests' code
+    (results.json) and the radios' GUI (meta.json) read again when results.json changes. None: no events"""
+    path = os.path.join(rd, "events.jsonl")
+    c = _TALLY["runs"].get(rd)
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return c
+    if c is None or size < c["off"]:
+        c = _TALLY["runs"][rd] = {"off": 0, "results": [], "violations": [], "code": {}, "gui": None, "rmt": None}
+    if size > c["off"]:
+        with open(path, "rb") as fh:
+            fh.seek(c["off"])
+            data = fh.read(size - c["off"])
+        end = data.rfind(b"\n") + 1                 # whole lines only: the run may be writing the next
+        c["off"] += end
+        for line in data[:end].splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            text, test = e.get("text") or "", e.get("test")
+            if e.get("kind") == "bad" and text.startswith("OUT OF SYNC: "):
+                c["violations"].append({"t": e.get("t") or 0, "test": test, "what": text[13:]})
+            elif test and e.get("kind") in ("ok", "bad"):
+                for w in RESULT_WORDS:
+                    if text.startswith(f"{w} {test}: "):
+                        c["results"].append({"t": e.get("t") or 0, "name": test, "res": w,
+                                             "says": text[len(w) + len(test) + 3:][:240]})
+                        break
+    rj = os.path.join(rd, "results.json")
+    try:
+        m = os.path.getmtime(rj)
+    except OSError:
+        m = None
+    if m is not None and m != c["rmt"]:
+        c["rmt"] = m
+        c["code"] = {x.get("name"): x.get("code") for x in bench.load_json(rj, []) if isinstance(x, dict) and x.get("code")}
+        c["gui"] = bench.load_json(os.path.join(rd, "meta.json"), {}).get("gui") or None
+    return c
+
+
+def _changed(fx, fc, px, pc, commits):
+    """What changed between a FAIL (fx, of run fc) and the PASS after it (px, of pc), as far as the runs tell; '' for
+    nothing seen"""
+    import bisect
+    k = bisect.bisect_right(commits, px["t"]) - bisect.bisect_right(commits, fx["t"])
+    if k > 0:
+        return f"{k} commit{'s' if k > 1 else ''} between"
+    a, b = fc["code"].get(fx["name"]), pc["code"].get(px["name"])
+    if a and b and a != b:
+        return "the test's own code"
+    ga, gb = fc["gui"] or {}, pc["gui"] or {}
+    if any(ga.get(n) and gb.get(n) and ga[n] != gb[n] for n in ga):
+        return "the radios' GUI"
+    return ""
+
+
+def tally(batch, going, counts):
+    """The console's tally: batch (a run directory's name: the run going, or the last one), all time, every test by its
+    latest result, the tests that fail most often and those that came good"""
+    with TALLY_LOCK:
+        runs_dir = os.path.join(bench.STATE, "runs")
+        try:
+            dirs = sorted(d for d in os.listdir(runs_dir) if d.endswith("-orch"))
+        except OSError:
+            dirs = []
+        runs = [(d, c) for d, c in ((d, _run_read(os.path.join(runs_dir, d))) for d in dirs) if c is not None]
+        commits = _commit_times()
+        allr = sorted(((x, d, c) for d, c in runs for x in c["results"]), key=lambda v: v[0]["t"])
+        per, came, pending = {}, [], {}
+        for x, d, c in allr:
+            n = x["name"]
+            p = per.setdefault(n, {"name": n, "runs": 0, "fails": 0, "passes": 0, "looks": 0})
+            p["runs"] += 1
+            p["last"], p["last_t"] = x["res"], x["t"]
+            if x["res"] == "FAIL":
+                p["fails"] += 1
+                p["fail_says"], p["fail_t"] = x["says"], x["t"]
+                f = pending.get(n)
+                pending[n] = (x, c, (f[2] if f else 0) + 1)
+            elif x["res"] == "PASS":
+                p["passes"] += 1
+                f = pending.pop(n, None)
+                if f:
+                    why = _changed(f[0], f[1], x, c, commits)
+                    seen = f[1]["gui"] and c["gui"]     # runs before meta.json: a fix installed before its commit
+                    how = "change" if why else "retest" if seen else "unclear"     # is not seen
+                    came.append({"name": n, "t": x["t"], "run": d, "fails": f[2], "how": how, "why": why or (
+                        "no commit between, nor a change to the test's code or the radios' GUI" if seen else
+                        "no commit between (the runs kept which GUI they tested only from 26 Nov)")})
+            elif x["res"] == "LOOK":
+                p["looks"] += 1
+        cnt = collections.Counter(x["res"] for x, _, _ in allr)
+        mine = dict(runs).get(batch) or {"results": [], "violations": []}
+        bcnt = collections.Counter(x["res"] for x in mine["results"])
+    idle = [json.loads(x) for x in open(IDLE_LOG)] if os.path.exists(IDLE_LOG) else []
+    store = store_load()
+    names = [t.name for t in TESTS]
+    latest = collections.Counter(store.get(n, {}).get("result", "never run") for n in names)
+    est = sum(store.get(t.name, {}).get("secs") or t.est_s for t in TESTS)
+    bcame = [x for x in came if x["run"] == batch]
+    return {
+        "batch": {"run": batch, "going": going, "counts": counts, "results": len(mine["results"]),
+                  "pass": bcnt["PASS"], "fail": bcnt["FAIL"], "look": bcnt["LOOK"], "notrun": bcnt["NOT RUN"],
+                  "violations": len(mine["violations"]), "came": bcame[::-1],
+                  "came_change": sum(1 for x in bcame if x["how"] == "change"),
+                  "came_unclear": sum(1 for x in bcame if x["how"] == "unclear")},
+        "all": {"runs": len(runs), "since": allr[0][0]["t"] if allr else None, "results": len(allr), "tests": len(per),
+                "pass": cnt["PASS"], "fail": cnt["FAIL"], "look": cnt["LOOK"], "notrun": cnt["NOT RUN"],
+                "violations": sum(len(c["violations"]) for _, c in runs),
+                "idle_violations": sum(1 for e in idle if e.get("kind") == "bad"),
+                "came": len(came), "came_tests": len({x["name"] for x in came}),
+                "came_change": sum(1 for x in came if x["how"] == "change"),
+                "came_unclear": sum(1 for x in came if x["how"] == "unclear")},
+        "now": {"of": len(names), "pass": latest["PASS"], "fail": latest["FAIL"], "look": latest["LOOK"],
+                "notrun": latest["NOT RUN"], "never": latest["never run"], "known": len(KNOWN), "est_s": est},
+        "most": sorted((p for p in per.values() if p["fails"]), key=lambda p: (-p["fails"], p["name"]))[:MOST_FAILED_N],
+        "came_good": came[::-1][:CAME_GOOD_N],
+    }
+
+
+# The console's "Re-run all": orch.py run --all started by the standing console (orch.py console) when no run goes, no
+# run holds the radios and no GUI install is under way. Only from this computer (the console may be on the network,
+# --lan): a POST from 127.0.0.1 to a Host of 127.0.0.1 or localhost, with the token the page was served with (a page of
+# another site cannot read it, nor send its header without asking first)
+RERUN = {"proc": None, "at": None, "log": None}
+RERUN_LOCK = threading.Lock()
+RERUN_ARGV = [sys.executable, "-B", os.path.abspath(__file__), "run", "--all"]
+CONSOLE_TOKEN = os.urandom(16).hex()
+
+
+def rerun_state(status):
+    """(may a re-run of every test start now, why not)"""
+    if status is not None:
+        return False, "this console is a run's own: the button works on the standing console (orch.py console)"
+    p = RERUN["proc"]
+    if p is not None and p.poll() is None:
+        return False, f"the re-run started here at {time.strftime('%H:%M', time.localtime(RERUN['at']))} is going"
+    try:
+        age = time.time() - float(json.load(open(SNAPSHOT)).get("now") or 0)
+    except (OSError, ValueError):
+        age = 1e9
+    if age < SNAPSHOT_STALE_S:
+        return False, "a run is going"
+    for lock, what in ((RUN_LOCK, "a run holds the radios"), (GUI_LOCK, "a GUI install is under way")):
+        try:
+            held = open(lock).read().strip()
+            os.kill(int(held.split()[0]), 0)
+            return False, f"{what} ({held})"
+        except (OSError, ValueError, IndexError):
+            pass
+    return True, "idle: no run going"
+
+
+def rerun_start():
+    """orch.py run --all, a process of its own (it outlives a restart of the console); its output in runs/"""
+    log = os.path.join(bench.STATE, "runs", time.strftime("%Y%m%d-%H%M%S") + "-console-rerun.log")
+    with open(log, "ab") as fh:
+        p = subprocess.Popen(RERUN_ARGV, cwd=os.path.dirname(os.path.abspath(__file__)), stdin=subprocess.DEVNULL,
+                             stdout=fh, stderr=subprocess.STDOUT, start_new_session=True)
+    RERUN.update(proc=p, at=time.time(), log=log)
+    threading.Thread(target=p.wait, daemon=True).start()
+    say(f"console: Re-run all started (pid {p.pid}, its output in {log})")
+    return f"started: orch.py run --all (pid {p.pid}); its output in {log}"
+
+
 def console(status, port, lan):
     """The console on port: status's own state, or (status None: orch.py console) the runs' SNAPSHOT"""
     class H(BaseHTTPRequestHandler):
+        def _answer(self, code, doc):
+            body = json.dumps(doc, default=str).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4096))
+            if self.path != "/rerun":
+                self.send_error(404)
+                return
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
+            if self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1") \
+                    or host not in ("127.0.0.1", "localhost") or self.headers.get("X-Orch-Token") != CONSOLE_TOKEN:
+                self._answer(403, {"ok": False, "why": "only from this computer's own console page "
+                                                       "(http://127.0.0.1:%d/)" % port})
+                return
+            with RERUN_LOCK:
+                ok, why = rerun_state(status)
+                if ok:
+                    why = rerun_start()
+            self._answer(200 if ok else 409, {"ok": ok, "why": why})
+
         def do_GET(self):
+            if self.path.startswith("/tally"):
+                d = json.loads(status.to_json() if status is not None else snapshot_json())
+                phase = str(d.get("phase") or "")
+                going = not (phase.startswith(("no run", "done", "stopped")))
+                try:
+                    doc = tally(os.path.basename(d.get("run_dir") or ""), going, d.get("counts") or {})
+                except Exception as e:      # the tally never takes the console down
+                    doc = {"error": f"{type(e).__name__}: {e}"}
+                ok, why = rerun_state(status)
+                doc["rerun"] = {"ok": ok, "why": why, "log": RERUN["log"]}
+                self._answer(200, doc)
+                return
             if self.path.startswith("/status"):
                 body = status.to_json() if status is not None else snapshot_json()
                 body, ctype = body.encode(), "application/json"
@@ -385,7 +655,7 @@ def console(status, port, lan):
                 body = open(path, "rb").read() if os.path.exists(path) else b""
                 ctype = "text/plain; charset=utf-8"
             elif self.path in ("/", "/index.html"):
-                body, ctype = PAGE.encode(), "text/html; charset=utf-8"
+                body, ctype = PAGE.replace("__TOKEN__", CONSOLE_TOKEN).encode(), "text/html; charset=utf-8"
             else:
                 self.send_error(404)
                 return
@@ -6457,6 +6727,14 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
     try:
         st.phase = "connecting"
         o = Orch(st)
+        gui = {}                        # the GUI each radio runs, for the tally's "came good after a change" (tally)
+        for n, r in o.r.items():
+            try:
+                gui[n] = (bench.ssh(r.host, "md5sum /usr/sbin/x6100_gui", timeout=15).split() or [None])[0]
+            except (OSError, subprocess.SubprocessError, Refused):
+                gui[n] = None
+        with open(os.path.join(st.run_dir, "meta.json"), "w") as fh:
+            json.dump({"gui": gui}, fh)
         no_check = update_check_off(st, o.r)
         st.phase = "syncing both"
         # the start: both transmitters locked, both on the Sentry's page G on one frequency and mode, confirmed, before
@@ -6513,12 +6791,12 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
                 if o.trouble:
                     ok, says = False, f"{o.trouble}; " + says
                 res = "PASS" if ok is True else "LOOK" if ok is None else "FAIL"
+                code = test_code(t)
                 with st.lock:
-                    st.tests[i].update(result=res, says=says, secs=time.time() - t0, data=data)
+                    st.tests[i].update(result=res, says=says, secs=time.time() - t0, data=data, code=code)
                     if res == "PASS":
                         st.tests[i]["shots"] = []       # pictures only for what did not pass
                 prev = store_load().get(t.name, {})
-                code = test_code(t)
                 same = prev.get("code") == code             # none yet (before the fingerprint): counts afresh
                 tally = {"runs": (prev.get("runs", 0) if same else 0) + 1,
                          "passes": (prev.get("passes", 0) if same else 0) + (res == "PASS"),

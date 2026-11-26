@@ -149,7 +149,7 @@ sim_test.py checks the framework itself (every rule, the Watch reading the regis
 
 ## The console (http://127.0.0.1:8765/)
 
-Read only. **Radios**: both live (frequency, mode, on the air or not, power, page, app, link), the sync state.
+Read only, but for its Re-run all button. **Radios**: both live (frequency, mode, on the air or not, power, page, app, link), the sync state.
 **Now**: the test and its steps as they go, the progress. **This run**: the tests run now, their results and what
 each found (pictures of both screens for a failed one). **Not rerun**: the earlier results, the latest first, with
 their tallies and GUI versions. **Where the radios differ**: the caps test's map. **Events**: everything the
@@ -163,6 +163,19 @@ nothing set and control never taken; a difference over 3 s shows OUT OF SYNC in 
 goes to `~/.config/x6x00-bench/idle_sync.jsonl` (a dial bumped at the radio between runs, 2026-11-25). The next run's
 own check puts the two alike, its guard watching from then on.
 
+**Tally** (the owner, 2026-11-26): this batch (the run going, or the last) beside all time: the results (pass, fail,
+LOOK, each with its share), the sync violations (in runs; between runs from `idle_sync.jsonl`) and the tests that came
+good, passing after a FAIL. Counted from every run's `events.jsonl` (`tally`; `/tally` as JSON), each read again only
+as it grows. A test came good after a change when a commit landed between the FAIL and the PASS, or its own code
+(`results.json`'s `code`) or either radio's GUI binary (`meta.json`'s md5) differed; on a retest alone when none did;
+"unclear" for runs before 2026-11-26, which kept neither (a fix installed on the radio before its commit). Under it:
+every test by its latest result (`orch_results.json`), the tests that fail most often, all time, and the latest to come
+good. LOOK means the test ran but cannot judge by itself: what it found (a picture, a reading) is for a person to look
+at. **Re-run all** starts `orch.py run --all` from the standing console when no run goes, none holds the radios
+(`orch_run.lock`) and no GUI install is under way. Only from this computer (a POST from 127.0.0.1 with the page's own
+token) and after a confirmation; its output goes to `runs/<time>-console-rerun.log`. A run's own console has no working
+button: the standing one must be up.
+
 ## Files
 
 | where | what |
@@ -170,7 +183,7 @@ own check puts the two alike, its guard watching from then on.
 | `~/.config/x6x00-bench/orch_results.json` | each test's last result, passes and runs (what is not rerun) |
 | `~/.config/x6x00-bench/orch_status.json` | the run's state for the console, each second |
 | `~/.config/x6x00-bench/orch_caps.json` | what each radio takes (the caps test), the tests' guide to their differences |
-| `~/.config/x6x00-bench/runs/<time>-orch/` | a run: `events.jsonl`, `results.json`, each over's WAV and spectrum frames, the AMBE and digital voice files; the CW tests' listener audio (cw-text's `cw_text_*.wav`, cw-quiet's `cw_quiet_<lo>_<hi>_<radio>.wav` from before the first switch; cw-copy, cw-carrier and tci-cw's `*.raw`, 24 kHz int16) for `tools/cw_replay` |
+| `~/.config/x6x00-bench/runs/<time>-orch/` | a run: `events.jsonl`, `results.json` (each test's code fingerprint with its result), `meta.json` (the md5 of each radio's GUI binary at its start), each over's WAV and spectrum frames, the AMBE and digital voice files; the CW tests' listener audio (cw-text's `cw_text_*.wav`, cw-quiet's `cw_quiet_<lo>_<hi>_<radio>.wav` from before the first switch; cw-copy, cw-carrier and tci-cw's `*.raw`, 24 kHz int16) for `tools/cw_replay` |
 | `~/.config/x6x00-bench/dv/` | the AMBE tests' speech (this computer's voice) and their built tools |
 | `~/.config/x6x00-bench/shots/` | the screen pictures (never committed: they show the operator's locator) |
 | `~/.config/x6x00-bench/tx_log.jsonl` | every transmission: who, frequency, power, why |
