@@ -87,7 +87,7 @@ bool nifog_load(void) {
 
     free(buf);
     if (ok) {                           /* the pages drawn, the first one at least */
-        char p[96];
+        char p[512];                    /* BOARD_SHARE is a build folder on a PC: a long path */
 
         snprintf(p, sizeof(p), NIFOG_DIR "/p%03d.png", 1);
         FILE *t = fopen(p, "rb");
@@ -144,7 +144,7 @@ int nifog_step(int page, int dir, int max_level) {
 }
 
 uint8_t *nifog_page_grey(int page, unsigned *w, unsigned *h) {
-    char path[96];
+    char path[512];
 
     *w = *h = 0;
     if (page < 1 || page > n_pages) return NULL;
