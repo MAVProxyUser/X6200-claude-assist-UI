@@ -172,7 +172,7 @@ static void panel(void) {
 /* The tones' rows as F's panel lists them: every privacy code and every DCS code once, in order, each row short enough
  * for the panel (60 characters) */
 static void tone_rows(void) {
-    char t[128], want[16];
+    char t[128], want[48];    /* room for any int, or GCC 11's -Wformat-truncation stops the build (CI) */
     int  code = 1, dcs = 0;
 
     for (int r = 0; r < GMRS_TONE_ROWS; r++) {
