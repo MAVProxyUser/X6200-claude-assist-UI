@@ -3469,7 +3469,7 @@ def t_bands_all(o):
         {"bands": seen, "neither": skipped}
 
 
-def wefax_chart(o, sender, listener, label):
+def wefax_chart(o, sender, listener, label, kind="chart", before_save=None, after_clear=None):
     """Both on 14.100 MHz USB, the listener's WeFax app open in Cont; 12 s of a chart (each line half white, half
     black) through the sender's TCI at 0.1 W; the listener's fax saved and fetched: at least 6 rows, and its two halves
     at least 80 grey levels apart (the chart about 200, noise under 30). The test's fax taken off the card after"""
@@ -3495,7 +3495,7 @@ def wefax_chart(o, sender, listener, label):
             finally:
                 o.changing -= 1
             s.confirm("WeFax in Cont, both 14.100 USB")
-        x = ab.fax_audio([("chart", 12.0)])
+        x = ab.fax_audio([(kind, 12.0)])
         local = os.path.join(o.st.run_dir, f"fax_{sender}.raw")
         import digimodes
         secs = digimodes.write_raw(x, local)
@@ -3504,6 +3504,9 @@ def wefax_chart(o, sender, listener, label):
                         "tci_tone_tx.py"), f"root@{S.host}:/tmp/tci_tone_tx.py"], check=True)
         L.send("wefax clear")
         saves0 = ab.last_json(L, "wefax").get("saves", 0)
+        if after_clear:                         # the app's own empty screen, before the fax (wefax-look)
+            time.sleep(1.0)
+            after_clear()
 
         def body(watch):
             with o.step(f"{sender} sends 12 s of the chart"):
@@ -3513,6 +3516,8 @@ def wefax_chart(o, sender, listener, label):
         over(o, sender, listener, ab.F_FAX, 2, label, body, pages=False)
         with o.step(f"{listener}'s fax saved, fetched, its two halves compared") as s:
             rows = ab.last_json(L, "wefax").get("rows", 0)
+            if before_save:                     # the fax as the screen shows it: the save clears it (wefax-look)
+                before_save()
             L.send("wefax save")
             L.wait("the save", lambda: ab.last_json(L, "wefax").get("saves", 0) > saves0, 8)
             name = ab.last_json(L, "wefax").get("saved", "")

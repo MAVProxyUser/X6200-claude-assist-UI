@@ -1528,7 +1528,7 @@ FAX_LINE_S = 0.5                    # 120 LPM
 def fax_audio(segments, amp=0.5):
     """WeFax audio as wefax/decoder.h takes it: FM, black 1075 Hz, white 1925 Hz (1500 +- 425). segments: [(kind, s)]:
     start (the APT start: black and white alternating at 300 Hz), stop (at 450 Hz), black, chart (each 0.5 s line
-    white for its first half, black for the second)"""
+    white for its first half, black for the second), chart_q (white for its first three quarters)"""
     import numpy as np
     parts, t0 = [], 0.0
     for kind, secs in segments:
@@ -1538,6 +1538,8 @@ def fax_audio(segments, amp=0.5):
             grey = (np.sin(2 * np.pi * (300.0 if kind == "start" else 450.0) * t) >= 0).astype(float)
         elif kind == "black":
             grey = np.zeros(n)
+        elif kind == "chart_q":                 # each line white for its first three quarters, black for the last:
+            grey = ((t % FAX_LINE_S) < FAX_LINE_S * 0.75).astype(float)     # paper and ink told apart (wefax-look)
         else:
             grey = ((t % FAX_LINE_S) < FAX_LINE_S / 2).astype(float)
         parts.append(1075.0 + 850.0 * grey)

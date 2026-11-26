@@ -2527,42 +2527,93 @@ def _png_mean(r, path):
     return float(np.asarray(im, dtype=float).mean()), im
 
 
-def t_wefax_look(o, s, l):
-    """After l received s's chart (half white, half black): its saved PNG is black on white (its paper light); the
-    screen shows the fax inverted (photographed while it comes in); with Tilt 40 the saved chart's edge slants more
-    than with 0"""
+WEFAX_PAPER_MIN = 150            # the saved PNG's paper (its clean rows' mean, three quarters white) at least this light
+WEFAX_INK_MIN_PX = 800           # the fax area's amber more than on the app's empty screen by this much (its ink
+                                 # drawn amber: a 12 s chart is a strip about 14 px tall, its black quarter ~2500 px)
+WEFAX_WHITE_MAX_PX = 100         # and near-white pixels in it at most this many (paper drawn white: not inverted)
+WEFAX_AREA = (172, 392, 18, 778)  # the WeFax view's fax area in the 800x480 picture: rows, then columns
+
+
+def _fax_edges(pic):
+    """A saved fax's chart rows: (row, the edge's column) for each row of light paper (mean over WEFAX_PAPER_MIN - 30:
+    the noise before the chart left out) whose white-to-black step (the steepest fall, 30 px from either border: the
+    smoothing's own fall at the ends was taken for it) lies within 30 px of the rows' median; and their mean
+    brightness"""
     import numpy as np
     from PIL import Image
-    res = {"tilts": {}}
+    a = np.asarray(Image.open(pic).convert("L"), dtype=float)
+    k = np.ones(25) / 25
+    edges = []
+    for i, r in enumerate(a):
+        if r.mean() < WEFAX_PAPER_MIN - 30:
+            continue
+        sm = np.convolve(r, k, mode="same")[30:-30]
+        edges.append((i, 30 + int(np.argmin(np.diff(sm)))))
+    if not edges:
+        return [], None
+    med = float(np.median([c for _, c in edges]))
+    clean = [e for e in edges if abs(e[1] - med) <= 30]
+    paper = float(np.mean([a[i].mean() for i, _ in clean])) if clean else None
+    return clean, paper
+
+
+def _screen_colours(pic):
+    """(amber, near-white) pixel counts in the WeFax view's fax area (WEFAX_AREA)"""
+    import numpy as np
+    from PIL import Image
+    y0, y1, x0, x1 = WEFAX_AREA
+    a = np.asarray(Image.open(pic).convert("RGB"), dtype=int)[y0:y1, x0:x1]
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    amber = int(((r > 50) & (r - b > 40)).sum())     # the fax's ink is a dim amber (95, 70, 14 on 3, 3, 5 paper)
+    white = int(((r > 200) & (g > 200) & (b > 200)).sum())
+    return amber, white
+
+
+def t_wefax_look(o, s, l):
+    """WeFax's looks, judged (before 2026-11-26 photographed after the save had cleared the screen). s sends a chart
+    three quarters white per line, l at Tilt 0:
+    - the saved PNG is black on white: its chart rows' mean at least WEFAX_PAPER_MIN;
+    - the screen shows it inverted, ink amber on dark paper (photographed before the save): amber up by
+      WEFAX_INK_MIN_PX against l's screen before the fax, near-white at most WEFAX_WHITE_MAX_PX.
+    Tilt is not judged here: at its +-400 ends it moves a 12 s chart's edge about 4 px over its 24 rows, under the
+    rows' own +-6 px (2026-11-26). tools/wefax_plan's host test checks it, a known tilt found again within 2"""
+    L = o.r[l]
+    res = {}
     try:
-        for tilt in (0, 40):
-            snaps = [threading.Timer(t, lambda t=t: snap(o, f"wefax-look {l}: the fax on its screen, tilt {tilt}"))
-                     for t in (22.0, 30.0)]
-            for th in snaps:
-                th.start()
-            try:
-                with cfg_kept(o.r[l], {"wefax_tilt": tilt}):
-                    ok, says, data = H.wefax_chart(o, s, l, f"wefax-look tilt {tilt}")
-            finally:
-                for th in snaps:
-                    th.cancel()
-            pic = (data or {}).get("picture")
-            if not ok or not pic or not os.path.exists(pic):
-                raise Refused(f"tilt {tilt}: no chart ({says})")
-            a = np.asarray(Image.open(pic).convert("L"), dtype=float)
-            rows = a[a.mean(axis=1) > 20]
-            edges = [int(np.argmax(np.abs(np.diff(r)))) for r in rows[::max(1, len(rows) // 20)]]
-            res["tilts"][tilt] = {"paper": round(float(np.percentile(a, 90))), "rows": len(rows),
-                                  "slant": int(edges[-1] - edges[0]) if len(edges) > 1 else None}
-        light = all(v["paper"] > 150 for v in res["tilts"].values())
-        s0, s40 = res["tilts"][0]["slant"], res["tilts"][40]["slant"]
-        if not light:
-            return False, f"the saved PNGs' paper not light: {res['tilts']}", res
-        if s0 is None or s40 is None or abs(s40) <= abs(s0) + 3:
-            return None, f"PNGs black on white; Tilt 40 did not slant the edge more than 0 ({res['tilts']}); the " \
-                         f"screen's fax photographed (look: inverted)", res
-        return None, f"PNGs black on white; the edge slants {s40} px with Tilt 40, {s0} with 0; the screen's fax " \
-                     f"photographed (look: inverted)", res
+        shots = {}
+
+        def after_clear():
+            shots["blank"] = snap(o, f"wefax-look {l}: its WeFax screen empty, before the fax").get(l)
+
+        def before_save():
+            shots["fax"] = snap(o, f"wefax-look {l}: the fax on its screen before the save").get(l)
+        with cfg_kept(L, {"wefax_tilt": 0}):
+            ok, says, data = H.wefax_chart(o, s, l, "wefax-look", kind="chart_q", before_save=before_save,
+                                           after_clear=after_clear)
+        pic = (data or {}).get("picture")
+        if not ok or not pic or not os.path.exists(pic):
+            raise Refused(f"no chart ({says})")
+        clean, paper = _fax_edges(pic)
+        res.update(chart_rows=len(clean), paper=round(paper, 1) if paper is not None else None, picture=pic)
+        if shots.get("blank") and shots.get("fax"):
+            res["screen"] = {"blank": _screen_colours(shots["blank"]), "fax": _screen_colours(shots["fax"])}
+        bad = []
+        if len(clean) < 6 or paper is None or paper < WEFAX_PAPER_MIN:
+            bad.append(f"the saved PNG: {len(clean)} chart rows, paper {res['paper']} (6 rows, at least "
+                       f"{WEFAX_PAPER_MIN} wanted)")
+        sc = res.get("screen")
+        if not sc:
+            bad.append("the screen not photographed before and with the fax")
+        else:
+            ink = sc["fax"][0] - sc["blank"][0]
+            res["ink_px"] = ink
+            if ink < WEFAX_INK_MIN_PX or sc["fax"][1] > WEFAX_WHITE_MAX_PX:
+                bad.append(f"the screen's fax not inverted: amber {sc['blank'][0]} -> {sc['fax'][0]}, near-white "
+                           f"{sc['fax'][1]} (ink up {WEFAX_INK_MIN_PX}, white at most {WEFAX_WHITE_MAX_PX} wanted)")
+        if bad:
+            return False, "; ".join(bad), res
+        return True, f"the PNG black on white ({len(clean)} chart rows, paper {res['paper']}); the screen inverted " \
+                     f"(amber +{res['ink_px']}, near-white {sc['fax'][1]})", res
     except Refused as e:
         return False, str(e), res
 
@@ -4417,7 +4468,7 @@ COVERS = {
     "sstv-rx": (["sstv-manual-rx", "sstv-denoise"], []),
     "sstv-image-only": (["sstv-tx-image-only-repeat"], []),
     "sstv-halt-hold": (["sstv-tx-halt", "sstv-tx-freq-locked", "radio-core-sstv-tx-hold"], []),
-    "wefax-look": ([], ["wefax-display-inverted", "wefax-align-tilt"]),
+    "wefax-look": (["wefax-display-inverted"], []),
     "psk-look": (["psk-status-button"], ["psk-dx-call-rst"]),
     "rade-rx": (["rade-rx-decode"], []),
     "transverter": (["tx-transverter-power-limit", "transverter-no-internal-atu"], ["transverter-limit-held-in-tx"]),
@@ -4483,7 +4534,7 @@ PAIRS = [
     ("sstv-rx", t_sstv_rx, 90, "Manual RX Robot 8: picture and _dn with Denoise, one without"),
     ("sstv-image-only", t_sstv_image_only, 90, "TX IMAGE ONLY then REPEAT LAST TX: two pictures alike"),
     ("sstv-halt-hold", t_sstv_halt_hold, 60, "knob and BAND_UP held off during TX; Halt TX at once"),
-    ("wefax-look", t_wefax_look, 150, "the PNG black on white, the screen inverted; Tilt slants the edge"),
+    ("wefax-look", t_wefax_look, 60, "the saved PNG black on white, the screen's fax inverted (Tilt: tools/wefax_plan)"),
     ("psk-look", t_psk_look, 90, "PSK31: the status's audio and quality, the DX call from 'DE <call>'"),
     ("transverter", t_transverter, 70, "the transverter's 0.1 W limit at PWR 1 W; ATU refused there"),
     ("zero-power", t_zero_power, 60, "Line-in 0 still sends: no false 'TX 0 W' (the warning: tools/txlevel)"),
