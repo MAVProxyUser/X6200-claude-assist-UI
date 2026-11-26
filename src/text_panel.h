@@ -34,9 +34,11 @@ void panel_keep_below(lv_coord_t y);
 /* The last callsign the decoder wrote (CW / RTTY panel), "" when none */
 const char *panel_last_call(void);
 
-/* Any thread (the remote's "his?"): that call as the panel's text last had it, the text's length and whether the panel
- * shows */
-void panel_last_call_copy(char *call, size_t n, int *chars, bool *shown);
+/* Any thread (the remote's "his?"): that call as the panel's text last had it, the text's length, whether the panel
+ * shows and the text's last PANEL_TAIL characters (its line breaks as spaces; tail NULL: not wanted) as Parse left
+ * them (the bench's cw-parse) */
+#define PANEL_TAIL 48
+void panel_last_call_copy(char *call, size_t n, int *chars, bool *shown, char *tail, size_t tn);
 
 #ifdef __cplusplus
 }

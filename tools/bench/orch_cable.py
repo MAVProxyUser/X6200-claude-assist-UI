@@ -15,6 +15,7 @@ A picture alone is no proof: a feature only a picture shows is LOOK (the run kee
 
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
+import collections
 import contextlib
 import json
 import math
@@ -286,6 +287,10 @@ def session(o, label, senders, f=None, w=None):
         o.roles = {H.A: "RX", H.B: "RX"}
         if watch.why:
             o.st.ev(f"{label}: the watch stopped it: {watch.why}", "bad")
+    # the test's body ended without its own error, but the Watch stopped the over: the test fails with it (only said
+    # until 2026-11-26: tx-panel x6100 and long-press-busy x6100 came back LOOK, their overs cut 0.2 s in)
+    if watch.why:
+        raise Refused(f"the watch stopped the over: {watch.why}")
 
 
 def role(o, sender):
@@ -308,18 +313,25 @@ def tci_cw(o, S, text, watch, max_s=30):
     return t0, time.time()
 
 
-def cw_over(o, s, l, text, label, f=F_CW, mode=4, listener_cfg=None, sender_cfg=None, check_power=True):
+def cw_over(o, s, l, text, label, f=F_CW, mode=4, listener_cfg=None, sender_cfg=None, check_power=True,
+            listener_set=None, info=None):
     """One CW over: both on f in mode (AGC fast, as cw-text), the listener's and the sender's settings set for it
     (put back after), the sender keys text through its TCI at 0.1 W (over(): the Sentry's A armed); the listener's
-    decoder print since the over began, and the over's (on, off)"""
+    decoder print since the over began, and the over's (on, off). listener_set: the listener's state set after over()'s
+    own set-up (which puts both on the bench's receive profile; the caller declares the difference, bench.apart);
+    info (a dict): gets "heard", how far the over rose in the listener's spectrum (dB, the Watch's)"""
     S, L = o.r[s], o.r[l]
     got = {}
 
     def body(watch):
+        if listener_set:
+            bench.ensure(L, listener_set)
         with o.step(f"{s} keys {text!r}") as st:
             L.cw = ""
             got["t"] = tci_cw(o, S, text, watch)
             time.sleep(1.0)
+            if info is not None:
+                info["heard"] = (watch.heard_db.get(s) or [None])[-1]
             if check_power and not watch.tx_peak.get(s) and not (watch.rx_peak or -200) > H.RF_ALARM_DBM:
                 raise Refused(f"{s}'s meter showed no power")
             st.confirm(f"keyed {got['t'][1] - got['t'][0]:.1f} s")
@@ -385,59 +397,107 @@ def on_g_alike(o, f, mode, agc=2, **more):
 
 
 def ensure_alike(o, f, mode, **more):
+    """Both on f in mode at the bench's power, and every receiver setting the Watch compares alike (Orch.pair_alike, as
+    over() does): a test keying from the classic screen went on the air with an earlier test's AGC left on one radio,
+    and the Watch stopped its over 0.2 s in (agc 2/0: tx-panel x6100, long-press-busy x6100, 2026-11-25)"""
     with o.step(f"both on {f / 1e6:.4f} MHz mode {mode}, alike"):
         o.both(dict({"freq": f, "mode": mode, "pwr": H.W}, **more))
+    with o.step("every receiver setting the Watch compares alike on both"):
+        o.pair_alike()
 
 
 # ---- CW: the decoder's settings and keys ----
 
+CW_WEAK_RFG = {"x6100": 40, "x6200": 15}   # cw-dec-snr: the listener's RF gain for its weak overs, heard about 20 dB
+                          # up (2026-11-26: the X6100 at 15 heard it 13-14 dB up, at 30 18.8 dB, where Dec SNR 5 copied
+                          # garble; the X6200 at 15, 23-25 dB, copied clean)
+CW_DEC_SPEED = {"key_speed": 20}    # and the sender's speed: at its own 28 WPM the X6200 copied nothing of the
+                                    # X6100's 'TEST TEST' even at full gain (2026-11-26; cw-his found it too)
+CW_WEAK_MAX_DB = 30       # a weak over heard at most this far over the quiet: Dec SNR 30 (with its 5 dB margin) must
+                          # be able to refuse it
+
+
 def t_cw_dec_snr(o, s, l):
     """Dec SNR (CW 2:2): with it at 5 dB the listener copies a signal its RF gain has brought down; at 30 dB the same
-    signal prints nothing of it; at 5 dB again it copies (the threshold, not the signal, made the difference)"""
+    signal prints nothing of it; at 5 dB again it copies (the threshold, not the signal, made the difference). The weak
+    overs' RF gain is set after over()'s own set-up (which put it back to 100 before 2026-11-26: the "weak" overs were
+    heard ~50 dB up and no threshold could show), and each is heard at most CW_WEAK_MAX_DB up or the test fails"""
     L = o.r[l]
     res = {}
+    weak_rfg = CW_WEAK_RFG.get(l, 15)
     try:
-        text, _ = cw_over(o, s, l, "TEST TEST", "dec-snr 5 dB full", listener_cfg={"cw_decoder_snr_3": 5})
+        text, _ = cw_over(o, s, l, "TEST TEST", "dec-snr 5 dB full", listener_cfg={"cw_decoder_snr_3": 5},
+                          sender_cfg=CW_DEC_SPEED)
         res["snr5_full"] = text
         if "TEST" not in text:
             raise Refused(f"at Dec SNR 5 dB and full RF gain {l} printed {text!r}")
-        with cfg_kept(L, {}):
-            rfg0 = int(L.state.get("rfg", 100))
-            try:
-                bench.ensure(L, {"rfg": 15})
-                text30, _ = cw_over(o, s, l, "TEST TEST", "dec-snr 30 dB weak", listener_cfg={"cw_decoder_snr_3": 30})
-                text5, _ = cw_over(o, s, l, "TEST TEST", "dec-snr 5 dB weak", listener_cfg={"cw_decoder_snr_3": 5})
-            finally:
-                bench.ensure(L, {"rfg": rfg0})
-        res.update(snr30_weak=text30, snr5_weak=text5)
+        rfg0 = int(L.state.get("rfg", 100))
+        i30, i5 = {}, {}
+        try:
+            with bench.apart({"rfg": (weak_rfg, 100)}, f"cw-dec-snr: {l}'s RF gain {weak_rfg} brings the signal "
+                                                          f"down for the threshold to show"):
+                text30, _ = cw_over(o, s, l, "TEST TEST", "dec-snr 30 dB weak", listener_cfg={"cw_decoder_snr_3": 30},
+                                    listener_set={"rfg": weak_rfg}, info=i30, sender_cfg=CW_DEC_SPEED)
+                text5, _ = cw_over(o, s, l, "TEST TEST", "dec-snr 5 dB weak", listener_cfg={"cw_decoder_snr_3": 5},
+                                   listener_set={"rfg": weak_rfg}, info=i5, sender_cfg=CW_DEC_SPEED)
+        finally:
+            bench.ensure(L, {"rfg": rfg0})
+        res.update(snr30_weak=text30, snr5_weak=text5, heard30_db=i30.get("heard"), heard5_db=i5.get("heard"))
+        weak = [h for h in (i30.get("heard"), i5.get("heard")) if h is not None]
+        if not weak:
+            return None, f"the Watch kept no level for the weak overs: {res}", res
+        if max(weak) > CW_WEAK_MAX_DB:
+            return False, f"RF gain {weak_rfg} did not bring the signal down enough to test the threshold: heard " \
+                          f"{weak} dB up (at most {CW_WEAK_MAX_DB} wanted)", res
         if "TEST" in text30:
-            return None, f"RF gain 15: Dec SNR 30 still copied ({text30!r}); 5 copied {text5!r}: the signal too strong " \
-                         f"for the threshold to show", res
+            return False, f"Dec SNR 30 still copied {text30!r} from a signal heard {i30.get('heard')} dB up", res
         if "TEST" not in text5:
-            return None, f"RF gain 15: Dec SNR 30 printed {text30!r} (as it should), but 5 also missed ({text5!r})", res
-        return True, f"Dec SNR 5 copies {text5!r}, 30 prints {text30!r} on the same weak signal", res
+            return False, f"Dec SNR 30 printed {text30!r} (as it should), but 5 also missed ({text5!r}) at " \
+                          f"{i5.get('heard')} dB", res
+        return True, f"heard {weak} dB up: Dec SNR 5 copies {text5!r}, 30 prints {text30!r}", res
     except Refused as e:
         return False, str(e), res
 
 
+CW_PARSE_TRIES = 3        # cw-parse: overs at most per setting for one the decoder copies right
+
+
 def t_cw_parse(o, s, l):
-    """Parse (CW 2:2) splits run-together CW on the screen only (the remote's cw lines are the decoder's raw text):
-    'CQCQDEQ1TSTK' (no spaces) decoded whole, the listener's classic CW panel photographed with Parse on ('CQ CQ DE
-    Q1TST K') and off (run together): LOOK"""
+    """Parse (CW 2:2) splits run-together CW in the decoder's panel (the remote's cw lines are the decoder's raw text):
+    s keys 'CQCQDE<its call>K' (no spaces) once with Parse off, once on. The panel's own text (his?'s tail, the
+    remote's view of it, from 2026-11-26): run together with Parse off; 'CQ CQ DE <call> K' with it on, and the call
+    taken as the station's ({HIS}'s call). Off first, so a call the panel had before cannot pass for Parse's"""
     L = o.r[l]
+    call = H.TEST_CALLS[s]
     res = {}
     try:
-        for parse in (1, 0):
-            text, _ = cw_over(o, s, l, "CQCQDEQ1TSTK", f"parse {parse}", listener_cfg={"cw_parse": parse})
-            res[f"raw_{parse}"] = text
-            classic(L)
-            time.sleep(1.0)
-            snap(o, f"cw-parse {l}: the CW panel with Parse {'on' if parse else 'off'}")
-            home(o, L)
-        whole = all("DEQ1TST" in v.replace(" ", "") for v in res.values())
-        if not whole:
-            return False, f"the decoder did not get the run-together text whole ({res})", res
-        return None, f"decoded whole both times ({res}); Parse's split is on the screen: look at the two pictures", res
+        for parse in (0, 1):
+            # Parse is judged on an over the decoder copied right ('QCHTST' for Q1TST once, 2026-11-26: nothing for
+            # Parse to split): up to CW_PARSE_TRIES overs
+            for k in range(CW_PARSE_TRIES):
+                text, _ = cw_over(o, s, l, f"CQCQDE{call}K", f"parse {parse}", listener_cfg={"cw_parse": parse},
+                                  sender_cfg=CW_DEC_SPEED)   # 20 WPM: the X6100's own 28 came out garbled
+                if f"DE{call}" in text.replace(" ", ""):
+                    break
+            h = his(L)
+            tail = " ".join(str(h.get("tail", "")).split())
+            res[f"parse_{parse}"] = {"raw": text, "tail": tail, "call": h.get("call"), "overs": k + 1}
+            if f"DE{call}" not in text.replace(" ", ""):
+                return False, f"Parse {parse}: {l}'s decoder never copied {call} in {CW_PARSE_TRIES} overs " \
+                              f"(the last {text!r}): nothing for Parse to judge", res
+        if "tail" not in str(his(L)):
+            return None, f"the remote's his? has no tail (a GUI before it): {res}", res
+        off, on = res["parse_0"], res["parse_1"]
+        bad = []
+        if f"DE{call}" not in off["tail"].replace(" ", "") or f"DE {call}" in off["tail"]:
+            bad.append(f"Parse off: the panel ends {off['tail']!r} (run together wanted)")
+        if f"DE {call}" not in on["tail"] or "CQ CQ" not in on["tail"]:
+            bad.append(f"Parse on: the panel ends {on['tail']!r} ('CQ CQ DE {call} K' wanted)")
+        if on["call"] != call:
+            bad.append(f"Parse on: the call taken {on['call']!r}, not {call}")
+        if bad:
+            return False, "; ".join(bad), res
+        return True, f"Parse off: {off['tail'][-20:]!r}; on: {on['tail'][-20:]!r}, the call {call} taken", res
     except Refused as e:
         return False, str(e), res
     finally:
@@ -636,9 +696,34 @@ def t_cw_key_train(o, s, l):
         return False, str(e), res
 
 
+OWN_CARRIER_HZ = 300      # cw-own-carrier: the sender's own carrier looked for this far either side of its dial
+OWN_CARRIER_DB = 15       # at least this over the frame's median, in a frame while the key is down (keyed T's leave
+                          # most frames in a gap, and the X6100's base sends few on the air: 1 of 6, 36 dB, 11-26)
+
+
+def _own_peaks(r, f, t0, t1):
+    """Per spectrum frame of r in t0..t1: (Hz from f, dB over the frame's median) of its strongest bin within
+    OWN_CARRIER_HZ of f, either side (spec_track looks only from 100 Hz on the mode's side: a carrier on the dial never
+    counted)"""
+    out = []
+    for t, cen, wid, v in list(r.r.spectra):          # the remote's frames, as spec_track reads them
+        if not (t0 <= t <= t1) or not v:
+            continue
+        per = wid / len(v)
+        med = sorted(v)[len(v) // 2]
+        cand = [(v[i], (cen - wid / 2 + (i + 0.5) * per) - f) for i in range(len(v))]
+        cand = [c for c in cand if abs(c[1]) <= OWN_CARRIER_HZ]
+        if cand:
+            db, hz = max(cand)
+            out.append((round(hz), round(db - med, 1)))
+    return out
+
+
 def t_cw_own_carrier(o, s, l):
-    """While the sender keys CW its own spectrum peaks on its VFO line (the dial's bin) and its TX meters carry an ALC
-    reading; the TX panel (ALC grey in CW) photographed"""
+    """While the sender keys CW its own spectrum shows its carrier at its dial: in its frames on the air, a peak
+    OWN_CARRIER_DB over the frame's median within OWN_CARRIER_HZ of the dial; and its TX meters come (with an ALC
+    reading on the X6100; the X6200's ALC stays about 0, HW_CAP_TX_NO_ALC). Before 2026-11-26 the search began 100 Hz
+    from the dial and pictures of G (no VFO line there) were the proof"""
     S = o.r[s]
     res = {}
     try:
@@ -652,16 +737,23 @@ def t_cw_own_carrier(o, s, l):
             th.join(30)
         H.over(o, s, l, F_CW, 4, "cw-own-carrier", body, agc=2)
         on, off = got["t"]
-        track = H.spec_track(S, F_CW, 4, on + 0.5, off)
-        offs = [h for _, h, a in track if a > 15]
+        peaks = _own_peaks(S, F_CW, on + 0.5, off)
+        strong = [p for p in peaks if p[1] >= OWN_CARRIER_DB]
         frames = t_frames(S, on, off)
-        res.update(peaks=len(offs), near=sum(1 for h in offs if abs(h) <= 30), alc=[x[3] for x in frames][:5])
-        res["fft_peaks_hz"] = sorted(offs)[:8]
+        res.update(frames=len(peaks), strong=len(strong), offsets_hz=sorted({p[0] for p in strong})[:8],
+                   best_db=max((p[1] for p in peaks), default=None), alc=[x[3] for x in frames][:5])
         if not frames:
             return False, f"no TX meter frames from {s} while it sent", res
-        return None, f"{s} on the air, its meters' ALC {res['alc'][:3]}; its carrier drawn on the VFO line and the " \
-                     f"grey ALC bar: look at the picture (its spectrum frames peak {res['fft_peaks_hz']} Hz from the " \
-                     f"dial: the line is drawn by the GUI, not in them)", res
+        if s == H.A and not any((x or 0) > 0 for x in res["alc"]):
+            return False, f"the X6100's TX meters carry no ALC reading ({res['alc']})", res
+        if not peaks:
+            return False, f"{s} sent no spectrum frames while on the air", res
+        if not strong:
+            return False, f"{s}'s own spectrum showed its carrier in {len(strong)} of {len(peaks)} frames on the air " \
+                          f"(within {OWN_CARRIER_HZ} Hz of its dial, {OWN_CARRIER_DB} dB up; the best " \
+                          f"{res['best_db']} dB)", res
+        return True, f"{s}'s own spectrum showed its carrier in {len(strong)} of {len(peaks)} frames, " \
+                     f"{res['offsets_hz']} Hz from its dial; its ALC {res['alc'][:3]}", res
     except Refused as e:
         return False, str(e), res
 
@@ -1298,25 +1390,77 @@ def t_field_cq(o, s, l):
 NCDXF_20M = 14100000
 
 
+BEACON_BANDS_N = 5        # the NCDXF round's bands (beacons.h); 20 m the first
+PROP_BEACON_MIN_DB = 10   # prop-beacon: the slot's beacon heard at least this over the band's noise
+
+
 def t_prop_beacon(o, s, l):
-    """Propagation (Band 20 m) scores the S-meter in each 10 s beacon slot: s keys a 0.1 W carrier on 14.100 through
-    one slot (two 6 s overs, under the Watch's limit) while l shows the 20 m table; its cells photographed (LOOK)"""
+    """Propagation's Beacons (NCDXF, 10 s slots): l's app on Beacons, held on 20 m (Band: F4 until it listens on
+    14.100 CW); s puts a 0.1 W carrier on 14.100000 itself (USB 1 kHz under it, a 1 kHz tone: in l's CW passband) for 7
+    s of one slot. Once the next slot starts that slot is scored: l's beacons on 20 m (the remote's read-only
+    beacons_heard_20m, from 2026-11-26) have the slot's beacon ((t mod 180) / 10) heard PROP_BEACON_MIN_DB or more. Before
+    2026-11-26 the test never left the Conditions view and photographed it"""
     S, L = o.r[s], o.r[l]
     res = {}
     try:
         ensure_alike(o, NCDXF_20M, 2)
-        open_app(L, 126, "Propagation")
-        bench.ensure(L, {"freq": NCDXF_20M})
-        while int(time.time()) % 10 > 1:
-            time.sleep(0.2)
-        for k in range(2):
+        with bench.apart({"freq": bench.STEPPED, "mode": bench.STEPPED, "filter": bench.STEPPED, "agc": bench.STEPPED},
+                         f"prop-beacon: {l}'s Beacons listen in CW on 14.100, {s} USB 1 kHz under it puts its carrier "
+                         f"there"):
+            with o.step(f"{l}'s Propagation on Beacons, held on 20 m") as st:
+                o.changing += 1
+                try:
+                    open_app(L, 126, "Propagation")
+                    press(L, "F2", ("Propagation",), rest=1.5)         # Beacons
+                    for _ in range(BEACON_BANDS_N):
+                        press(L, "F4", ("Propagation",), rest=1.5)     # Band: the one it is on, then the next
+                        if int(L.state.get("freq", 0)) == NCDXF_20M:
+                            break
+                    else:
+                        raise Refused(f"{l}'s Beacons never held 20 m ({L.state.get('freq')})")
+                finally:
+                    o.changing -= 1
+                st.confirm(f"{l} on {L.state.get('freq')} mode {L.state.get('mode')}")
+            with o.step(f"{s} on page G"):
+                o.changing += 1
+                try:
+                    S.send("open sentry G")
+                    S.wait("page G", lambda: S.state.get("pg") == "G", 6)
+                finally:
+                    o.changing -= 1
+            while int(time.time()) % 10 != 1:              # a slot's first half second is left out
+                time.sleep(0.05)
+            slot = int(time.time()) // 10 * 10
+            res["slot"], res["expect"] = slot, (slot % 180) // 10
+
             def body(watch):
-                bench.tci_send(S, [[1000, 4.5]], watch=watch)
-            H.over(o, s, l, NCDXF_20M, 2, f"prop-beacon {k}", body, pages=False)
-        time.sleep(2)
-        snap(o, f"prop-beacon {l}: the 20 m row after {s}'s carrier in a slot")
-        return None, f"{s} keyed 14.100 through a beacon slot; {l}'s Propagation table photographed (look at the 20 m " \
-                     f"cells)", res
+                bench.tci_send(S, [[1000, 7.0]], watch=watch)
+            offset_over(o, s, l, NCDXF_20M - 1000, 2, "prop-beacon", body)
+            while time.time() < slot + 12:                 # scored once the next slot starts
+                time.sleep(0.2)
+            res["heard"] = bench.cfg_get(L, "beacons_heard_20m")
+            snap(o, f"prop-beacon {l}: the 20 m row after {s}'s carrier in a slot")
+            o.changing += 1
+            try:
+                home(o, L)
+                bench.ensure(S, {"freq": NCDXF_20M, "mode": 2})
+            finally:
+                o.changing -= 1
+        if res["heard"] is None:
+            return None, f"no beacons_heard_20m from {l}'s remote (a GUI before it)", res
+        got = {}
+        for e in str(res["heard"]).split(","):
+            parts = e.split(":")
+            if len(parts) == 3 and int(parts[2]) == slot:
+                got[int(parts[0])] = int(parts[1])
+        res["in_slot"] = got
+        if res["expect"] not in got:
+            return False, f"{l}'s Beacons scored no beacon {res['expect']} in the slot of {s}'s carrier ({got}; all: " \
+                          f"{res['heard']!r})", res
+        if got[res["expect"]] < PROP_BEACON_MIN_DB:
+            return False, f"beacon {res['expect']} heard only {got[res['expect']]} dB (at least {PROP_BEACON_MIN_DB})", res
+        return True, f"{s}'s carrier in beacon {res['expect']}'s slot: {l}'s Beacons scored it heard " \
+                     f"{got[res['expect']]} dB over the noise", res
     except Refused as e:
         return False, str(e), res
     finally:
@@ -1705,35 +1849,62 @@ def t_ft8_compound(o, s, l):
 
 
 def t_ft8_list_look(o, s, l):
-    """The FT8 list's looks after s's CQ: the row's country, distance and SNR column (Settings > Display > FT8/FT4
-    info: km, then Country + mi), the For you strip (s calls l, l not answering), the Live Map: pictures (LOOK); the
-    For you strip off: the row only in the list"""
+    """The FT8 list's columns and the For you strip, from the rows the remote gets (ft8r: d the distance in km, mi
+    shown in miles, me addressed to this radio): s's CQ decoded with its SNR; s's 'l s TEST_GRID' (to l, with a
+    locator) decoded as l's (me), its distance worked out (d over 0) and shown in km with FT8/FT4 info 0; the same
+    again with info 4 (Country + mi): the same distance, shown in miles. The strip turned off by Show held (F4 on page
+    1: show_hold_cb, which says it), on again the same way. Before 2026-11-26 the test photographed these and set the
+    strip off by its setting, which leaves the pinned row (only the button clears it); Q-calls have no country"""
     S, L = o.r[s], o.r[l]
     res = {}
+    msg_l = f"{H.TEST_CALLS[l]} {H.TEST_CALLS[s]} {TEST_GRID}"
+
+    def to_l(watch, info):
+        bench.cfg_set(L, "ft8_info", info)
+        time.sleep(0.5)
+        n0 = len(L.rows)
+        ft8_tci_msg(o, S, msg_l, watch)
+        end = time.time() + 20
+        while time.time() < end:
+            row = next((r for r in L.rows[n0:] if bench.msg(r) == msg_l), None)
+            if row:
+                return {k: row.get(k) for k in ("snr", "d", "mi", "me")}
+            time.sleep(0.3)
+        raise Refused(f"{l} did not decode {H.mask(msg_l)!r} (info {info})")
     try:
         with cfg_kept(L, {"ft8_info": 0, "ft8_foryou": 1}):
             with ft8_pair(o, "ft8-list-look", senders=[s]) as watch:
                 role(o, s)
                 n0 = len(L.rows)
                 cq = H.ft8_send(o, S, L, watch, "ft8 cq", "ft8-list-look: CQ", F_FT8)
-                got = _decoded(L, n0, cq)
+                _decoded(L, n0, cq)
                 row = next((r for r in L.rows[n0:] if bench.msg(r) == cq), None)
                 res.update(cq=H.mask(cq), snr=row.get("snr") if row else None)
-                snap(o, "ft8-list-look: the CQ row, info km")
-                bench.cfg_set(L, "ft8_info", 4)
-                time.sleep(1.0)
-                snap(o, "ft8-list-look: the CQ row, info Country + mi")
-                cq_l = f"{H.TEST_CALLS[l]} {H.TEST_CALLS[s]} {TEST_GRID}"
-                ft8_tci_msg(o, S, cq_l, watch)
-                time.sleep(2.0)
-                snap(o, "ft8-list-look: the For you strip with s's call")
-                bench.cfg_set(L, "ft8_foryou", 0)
-                time.sleep(1.0)
-                snap(o, "ft8-list-look: For you off")
+                res["km"] = to_l(watch, 0)
+                res["mi"] = to_l(watch, 4)
+                snap(o, "ft8-list-look: the row to l, info Country + mi, the For you strip")
+                t0 = time.time()
+                press(L, "F4", ("FT8",), hold=True)
+                res["foryou_off"] = next((t for t in msgs_since(L, t0) if "For you strip" in t), None)
+                t1 = time.time()
+                press(L, "F4", ("FT8",), hold=True)
+                res["foryou_on"] = next((t for t in msgs_since(L, t1) if "For you strip" in t), None)
+        bad = []
         if not row or row.get("snr") is None:
-            return False, f"{l} did not decode the CQ with its SNR ({res})", res
-        return None, f"{l} decoded {res['cq']!r} at {res['snr']} dB; the list's columns, the For you strip and its " \
-                     f"switch photographed (look at them)", res
+            bad.append(f"the CQ not decoded with its SNR ({res.get('cq')})")
+        km, mi = res["km"], res["mi"]
+        if not km["me"] or not mi["me"]:
+            bad.append(f"the message to {l} not marked as its own (me: {km['me']}, {mi['me']})")
+        if not km["d"] or km["d"] <= 0 or abs((mi["d"] or 0) - km["d"]) > 2:
+            bad.append(f"the distance {km['d']} km, then {mi['d']} (one figure over 0 wanted)")
+        if km["mi"] != 0 or mi["mi"] != 1:
+            bad.append(f"shown in miles: {km['mi']} with info 0, {mi['mi']} with info 4 (0, then 1 wanted)")
+        if not (res["foryou_off"] or "").endswith("off") or not (res["foryou_on"] or "").endswith("on"):
+            bad.append(f"Show held said {res['foryou_off']!r}, then {res['foryou_on']!r} (off, then on wanted)")
+        if bad:
+            return False, "; ".join(bad), res
+        return True, f"{l}: the CQ at {res['snr']} dB; the message to it its own, {km['d']} km, shown in km then miles; " \
+                     f"Show held: {res['foryou_off']!r}, {res['foryou_on']!r}", res
     except Refused as e:
         return False, str(e), res
 
@@ -1911,13 +2082,16 @@ def t_js8_speed(o, s, l):
 
 
 def t_js8_groups(o, s, l):
-    """@X6100 (a group of every radio by default): s's '@X6100 HELLO' shows on l (red; picture) and l never
-    transmits for it even with AUTO on; '@GSTFLASH TEST': l's red message for 20 s (picture), l stays off the air"""
+    """Groups: l's Groups hold @X6100 and @GSTFLASH (its JS8 texts' GROUPS=, before the app opens). s's '@X6100 HELLO'
+    shows on l as a group message (its row's grp) and l never transmits for it, even with AUTO on; s's
+    '@GSTFLASH TEST' puts l's 'EMERGENCY @GSTFLASH' notice up (a message the remote gets) and l stays off the air.
+    Before 2026-11-26 the test left @GSTFLASH out of Groups, and the GUI rightly showed nothing for it"""
     S, L = o.r[s], o.r[l]
     res = {}
     try:
         # AUTO on once the app is open: opening it turns AUTO, HB and HB ACK off (js8_window.c construct_cb)
-        with js8_pair(o, "js8-groups") as watch, cfg_kept(L, {"js8_auto": 1}):
+        with js8_texts(o, L, ["GROUPS=@X6100 @GSTFLASH"]), js8_pair(o, "js8-groups") as watch, \
+                cfg_kept(L, {"js8_auto": 1}):
             for text, key in (("@X6100 HELLO", "x6100"), ("@GSTFLASH TEST", "gstflash")):
                 role(o, s)
                 t0 = time.time()
@@ -1925,13 +2099,22 @@ def t_js8_groups(o, s, l):
                 m = _js8_heard(L, t0, text.split()[1])
                 snap(o, f"js8-groups {l}: {text}")
                 time.sleep(16)
-                res[key] = {"heard": bool(m), "l_keyed": len(tx_spans(L, t0))}
+                notice = next((t for t in msgs_since(L, t0) if "EMERGENCY @GSTFLASH" in t.upper()), None)
+                res[key] = {"heard": bool(m), "grp": (m or {}).get("grp"), "to": (m or {}).get("to"),
+                            "notice": notice, "l_keyed": len(tx_spans(L, t0))}
                 if not m:
                     raise Refused(f"{l} did not show {text!r}")
                 if res[key]["l_keyed"]:
                     raise Refused(f"{l} transmitted after {text!r} (AUTO on)")
-        return None, f"{l} showed '@X6100 HELLO' and '@GSTFLASH TEST' and stayed off the air (red rows: look at the " \
-                     f"pictures)", res
+        bad = []
+        if not res["x6100"]["grp"]:
+            bad.append(f"'@X6100 HELLO' not shown as a group message ({res['x6100']})")
+        if not res["gstflash"]["notice"]:
+            bad.append(f"no 'EMERGENCY @GSTFLASH' notice for '@GSTFLASH TEST' ({res['gstflash']})")
+        if bad:
+            return False, "; ".join(bad), res
+        return True, f"{l}: '@X6100 HELLO' a group message, '@GSTFLASH TEST' its notice " \
+                     f"{res['gstflash']['notice'][:60]!r}; off the air both times (AUTO on)", res
     except Refused as e:
         return False, str(e), res
 
@@ -1984,26 +2167,64 @@ def t_ghostnet(o, s, l):
 
 
 def t_js8_look(o, s, l):
-    """JS8's list after s's heartbeat and a directed message: Show No HB / Directed / All, Stations / Messages, an
-    alert word (purple), the log popup at 73 (pictures, LOOK); the log saved: js8call_log.adi gets the QSO with POTA"""
+    """JS8: s's directed 'l TESTWORD HELLO' raises l's alert ('Alert TESTWORD: ...', TESTWORD in its ALERTS=); l
+    answers s (the QSO two-way: the log offers only then), s's 73 puts up l's 'QSO with s ended - Save to log?' (Log
+    prompt on), the MFK pressed on Save says 'Logged s' and js8call_log.adi gets the QSO (s's call, MFSK JS8) in what
+    it wrote since the test began. Before 2026-11-26 l never answered, so no popup could come, and pictures were the
+    proof"""
     S, L = o.r[s], o.r[l]
+    call_s, call_l = H.TEST_CALLS[s], H.TEST_CALLS[l]
     res = {}
+    adi = "/mnt/js8call_log.adi"
     try:
+        adi0 = int(ssh(L.host, f"wc -c < {adi} 2>/dev/null || echo 0").strip() or 0)
         with cfg_kept(L, {"js8_log_prompt": 1, "js8_log_activation": 1}), js8_texts(o, L, ["ALERTS=TESTWORD"]):
             with js8_pair(o, "js8-look") as watch:
                 role(o, s)
                 t0 = time.time()
-                js8_send(o, S, f"{H.TEST_CALLS[l]} TESTWORD HELLO", watch)
+                js8_send(o, S, f"{call_l} TESTWORD HELLO", watch)
                 _js8_heard(L, t0, "TESTWORD")
-                snap(o, "js8-look: a directed message on l")
-                js8_send(o, S, f"{H.TEST_CALLS[l]} 73", watch)
-                _js8_heard(L, t0, " 73")
-                time.sleep(2)
+                res["alert"] = next((t for t in msgs_since(L, t0) if t.startswith("Alert TESTWORD")), None)
+                role(o, l)
+                t1 = time.time()
+                js8_send(o, L, f"{call_s} HELLO", watch)
+                res["s_heard_l"] = bool(_js8_heard(S, t1, "HELLO"))
+                role(o, s)
+                t2 = time.time()
+                js8_send(o, S, f"{call_l} 73", watch)
+                _js8_heard(L, t2, " 73")
+                end = time.time() + 8              # the offer, the popup or (l busy) the line saying Log QSO
+                while time.time() < end and not any("ended" in t for t in msgs_since(L, t2)):
+                    time.sleep(0.3)
+                res["l_said"] = msgs_since(L, t2)[-6:]
+                res["popup"] = next((t for t in msgs_since(L, t2) if "Save to log?" in t), None)
                 snap(o, "js8-look: the log popup at 73 on l")
-                adi = ssh(L.host, "tail -c 600 /mnt/js8call_log.adi 2>/dev/null; true")
-                res["adi_has_call"] = H.TEST_CALLS[s] in adi
-        return None, f"{l}'s JS8 list photographed after a directed message and 73 (log popup); ADIF has " \
-                     f"{H.TEST_CALLS[s]}: {res['adi_has_call']}", res
+                if res["popup"]:
+                    t3 = time.time()
+                    L.take_control()
+                    L.send("key MFK 1")
+                    time.sleep(0.15)
+                    L.send("key MFK 0")
+                    time.sleep(2.0)
+                    res["logged"] = next((t for t in msgs_since(L, t3) if t.startswith(("Logged", "Not logged"))), None)
+                new = ssh(L.host, f"tail -c +{adi0 + 1} {adi} 2>/dev/null; true")
+                res.update(adi_new=len(new), adi_has_call=call_s in new, adi_js8="JS8" in new.upper())
+        bad = []
+        if not res["alert"]:
+            bad.append(f"no 'Alert TESTWORD' on {l} ({msgs_since(L, t0)[-3:]})")
+        if not res["s_heard_l"]:
+            bad.append(f"{s} did not hear {l}'s answer: the QSO not two-way")
+        if not res["popup"]:
+            bad.append(f"no 'Save to log?' on {l} after {call_s}'s 73 (it said {res['l_said']})")
+        elif not (res.get("logged") or "").startswith(f"Logged {call_s}"):
+            bad.append(f"Save said {res.get('logged')!r}")
+        if not (res["adi_has_call"] and res["adi_js8"]):
+            bad.append(f"js8call_log.adi's new {res['adi_new']} bytes: {call_s} {res['adi_has_call']}, JS8 "
+                       f"{res['adi_js8']}")
+        if bad:
+            return False, "; ".join(bad), res
+        return True, f"{l}: 'Alert TESTWORD' up; after the QSO {res['popup']!r}, Save: {res['logged']!r}, the ADIF " \
+                     f"record written ({call_s}, JS8)", res
     except Refused as e:
         return False, str(e), res
 
@@ -2243,10 +2464,15 @@ def t_wefax_look(o, s, l):
 
 # ---- PSK31: the DX call from 'DE <call>', the status and text buttons (pictures), the cursor ----
 
+PSK_TX_HZ = 1000          # psk-look: the sender's PSK cursor (its audio frequency)
+PSK_HZ_TOL = 15           # the listener's status within this of it (the two radios ~7 Hz apart)
+PSK_Q_MIN = 70            # and its quality at least this over the cable
+
+
 def t_psk_look(o, s, l):
-    """PSK31: s's macro 'CQ CQ DE <call> <call> K' (added on its web page, taken out after); l's DX call button
-    takes the call (picture), its text log has it; the status button's audio frequency and quality, the text
-    scroll-back ('knob mfk -3'), and a cursor 40 Hz off snapping onto the signal: pictures (LOOK)"""
+    """PSK31: s's macro 'CQ CQ DE <call> <call> K' (added on its web page, taken out after); l's text log has it with
+    the status's audio frequency (PSK_TX_HZ, within PSK_HZ_TOL) and quality (PSK_Q_MIN or better), and its DX call
+    takes the call (the remote's read-only digi_dx, from 2026-11-26; the button is on page 2, never in the pictures)"""
     import suite_air_b as ab
     S, L = o.r[s], o.r[l]
     call = H.TEST_CALLS[s]
@@ -2269,6 +2495,9 @@ def t_psk_look(o, s, l):
                 for r in (L, S):
                     ab.open_listed(r, "psk31", "psk")
                 _same_dial(o, S, L, "PSK31")
+                # every setting the Watch compares made alike: each app's filter is its own radio's (the X6100's
+                # USB-D from 100 Hz, the X6200's from 200) and the Watch stopped the over for it (2026-11-26)
+                bench.pair_align(S, L)
             finally:
                 o.changing -= 1
         t0 = time.time()
@@ -2283,12 +2512,27 @@ def t_psk_look(o, s, l):
         snap(o, "psk-look: l's DX call button after 'DE <call>'")
         lines = H.textlog_lines(L.host, tl0)
         res["textlog"] = str(lines)[-120:]
-        L.send("knob mfk -3")
-        time.sleep(1.0)
-        snap(o, "psk-look: l's text 3 back")
         if call not in str(lines):
             return False, f"{l}'s text log has no {call} ({res['textlog']!r})", res
-        return None, f"{l} decoded {call} from s's macro (its text log); DX call, status and scroll-back photographed", res
+        # the status button's audio frequency and quality, as the text log keeps them with each line: '<date> <time>
+        # <MHz> PSK31 RX Q<n>% <text>' (the dial plus the audio); the sender's cursor at PSK_TX_HZ
+        dial = int(L.state.get("freq") or 0)
+        m = next((re.search(r"\s(\d+\.\d{6})\s+PSK\w*\s+RX\s+Q(\d+)%", x) for x in lines if call in x), None)
+        if not m:
+            return False, f"{l}'s text log line has no frequency and quality: {res['textlog']!r}", res
+        res.update(audio_hz=round(float(m.group(1)) * 1e6) - dial, quality=int(m.group(2)))
+        res["dx"] = bench.cfg_get(L, "digi_dx")
+        bad = []
+        if abs(res["audio_hz"] - PSK_TX_HZ) > PSK_HZ_TOL:
+            bad.append(f"the status's audio {res['audio_hz']} Hz, not within {PSK_HZ_TOL} of {PSK_TX_HZ}")
+        if res["quality"] < PSK_Q_MIN:
+            bad.append(f"the quality {res['quality']}% (at least {PSK_Q_MIN} wanted over the cable)")
+        if str(res["dx"]).upper() != call:
+            bad.append(f"the DX call {res['dx']!r}, not {call}")
+        if bad:
+            return False, "; ".join(bad), res
+        return True, f"{l} decoded {call} from s's macro: the status {res['audio_hz']} Hz Q {res['quality']}%, the DX " \
+                     f"call {res['dx']}", res
     except Refused as e:
         return False, str(e), res
     finally:
@@ -2387,9 +2631,14 @@ def t_transverter(o, s, l):
         return False, str(e), res
 
 
+ZERO_POWER_SEEN_W = 0.2   # zero-power: an over at least this strong is no 0 W over
+
+
 def t_zero_power(o, s, l):
-    """Line-in 0 (put back after), PWR 1 W (nothing goes out with Line-in 0; at 0.1 W the radio cannot tell 0 W from
-    its setting): one FT8 CQ goes out at 0 W ('t' 0.0) and the radio says 'TX 0 W: level ..., Line-in ...'"""
+    """Line-in 0 (put back after), PWR 1 W, one FT8 CQ. Line-in is the codec's input gain, 0.5 dB a step: 0 is 5 dB
+    under the default, not off, so power still goes out (0.4 W from the X6100, 1.0 from the X6200, 2026-11-25): no 'TX
+    0 W' may be said for it (no false alarm). An over that did go out at 0 W must be said ('TX 0 W: level ..., Line-in
+    ...'); a true 0 W over cannot be made safely on the air, so the warning itself is tools/txlevel's dead-PA case"""
     S = o.r[s]
     res = {}
     li0 = int(S.state.get("linein", 10))
@@ -2409,9 +2658,11 @@ def t_zero_power(o, s, l):
             w = [x[1] for x in t_frames(S, t0)]
             said = [m for m in msgs_since(S, t0) if "TX 0 W" in m]
             res.update(said=said, watts=max(w) if w else 0.0)
-        if res["watts"] > 0.05:
-            return None, f"Line-in 0 did not take {s}'s FT8 to 0 W ({res['watts']} W: its digital audio does not go " \
-                         f"through Line-in): no 0 W over to warn about", res
+        if res["watts"] >= ZERO_POWER_SEEN_W:
+            if said:
+                return False, f"{res['watts']} W went out at PWR 1 W, yet the radio said {said[0]!r}", res
+            return True, f"Line-in 0 (5 dB down, not off) still sent {res['watts']} W at PWR 1 W, and no 'TX 0 W' was " \
+                         f"said (the warning itself: tools/txlevel's dead-PA case)", res
         if not said:
             return False, f"a 0 W over ({res['watts']} W at PWR 1 W) and no 'TX 0 W' message", res
         return True, f"0 W over with Line-in 0, the radio said {said[0]!r}", res
@@ -2428,19 +2679,26 @@ def _rx_level_db(L, t0, t1):
     return None
 
 
+AGC_STEP_MIN_DB = 8       # agc-knee: the listener's S-meter rises at least this from 0.1 to 1 W (the input stepped)
+AGC_PEAK_MAX_DBFS = -3    # and its loudest step's audio peaks under this (room for a slope to show)
+AGC_SLOPE_MIN_DB = 3      # Slope 0 and 10 grow the audio this differently at least (10x the 0.2-0.3 dB between runs)
+
+
 def t_agc_knee(o, s, l):
     """AGC Knee and Slope (Settings > Audio): with the knee at -100 (every signal over it) the slope decides how the
     audio grows with the signal: s's tone stepped 0.1, 0.3, 1.0 W through the pads, l's TCI audio level at each with
-    Slope 0 and Slope 10: the growth from 0.1 to 1 W differs (2 dB or more)"""
+    Slope 0 and Slope 10. Valid when l's S-meter shows the step (AGC_STEP_MIN_DB) and its audio has room
+    (AGC_PEAK_MAX_DBFS): then the growth from 0.1 to 1 W differs by AGC_SLOPE_MIN_DB. A run that cannot show it
+    fails saying so (2026-11-26: the X6100 listening sat at -5 dBFS, its AGC's own level; the X6200 grew 3.1 and 2.8)"""
     import numpy as np
     from tones import TciRx
     S, L = o.r[s], o.r[l]
     res = {}
     try:
-        curves = {}
+        curves, meters, peaks = {}, {}, {}
         for slope in (0, 10):
             with cfg_kept(L, {"agc_knee": -100, "agc_slope": slope}):
-                curve = []
+                curve, mtr, pk = [], [], []
                 for w in (0.1, 0.3, 1.0):
                     rx = TciRx(L.host)
                     try:
@@ -2449,24 +2707,34 @@ def t_agc_knee(o, s, l):
                         def body(watch, w=w):
                             _, t0, t1 = bench.tci_send(S, [[1000, 2.5]], watch=watch)
                             got["t"] = (t0, t1)
-                        H.over(o, s, l, F_USB, 2, f"agc slope {slope} {w} W", body, w=w, agc=1)
+                        wt = H.over(o, s, l, F_USB, 2, f"agc slope {slope} {w} W", body, w=w, agc=1)
                         x, _ = rx.audio(got["t"][0] + 1.0, got["t"][1] - 0.3)
                         curve.append(round(float(20 * np.log10(np.sqrt(np.mean(np.square(x))) + 1e-9)), 1)
                                      if len(x) else None)
+                        pk.append(round(float(20 * np.log10(np.max(np.abs(x)) + 1e-9)), 1) if len(x) else None)
+                        mtr.append(getattr(wt, "rx_peak", None))
                     finally:
                         rx.close()
-                curves[slope] = curve
+                curves[slope], meters[slope], peaks[slope] = curve, mtr, pk
         bench.ensure(S, {"pwr": H.W})
-        res["curves_db"] = curves
+        res.update(curves_db=curves, s_meter_dbm=meters, peaks_dbfs=peaks)
         if any(v is None for c in curves.values() for v in c):
             return False, f"no audio at some step: {curves}", res
+        steps = [m[-1] - m[0] for m in meters.values() if m[0] is not None and m[-1] is not None]
+        if not steps or min(steps) < AGC_STEP_MIN_DB:
+            return False, f"{l}'s S-meter did not show the 0.1-1 W step ({meters} dBm; {AGC_STEP_MIN_DB} dB wanted): " \
+                          f"the input never stepped", res
+        loud = max(p for c in peaks.values() for p in c)
+        if loud > AGC_PEAK_MAX_DBFS:
+            return False, f"{l}'s audio peaked at {loud} dBFS (its AGC's own level; under {AGC_PEAK_MAX_DBFS} wanted): " \
+                          f"no room for the slope to show on this listener ({curves})", res
         growth = {k: round(c[-1] - c[0], 1) for k, c in curves.items()}
         res["growth_db"] = growth
-        if abs(growth[10] - growth[0]) < 2:
-            return None, f"Slope 0 and 10 grew the audio alike from 0.1 to 1 W ({growth} dB; {curves}): the setting's " \
-                         f"effect not seen in the TCI audio", res
-        return True, f"the AGC slope acts: from 0.1 to 1 W the audio grew {growth[0]} dB with Slope 0, {growth[10]} dB " \
-                     f"with 10 (knee -100)", res
+        if abs(growth[10] - growth[0]) < AGC_SLOPE_MIN_DB:
+            return False, f"Slope 0 and 10 grew {l}'s audio alike from 0.1 to 1 W ({growth} dB, the input " \
+                          f"{[round(x, 1) for x in steps]} dB up): Knee/Slope show no effect there", res
+        return True, f"the AGC slope acts: from 0.1 to 1 W (the S-meter {round(min(steps), 1)} dB up) the audio grew " \
+                     f"{growth[0]} dB with Slope 0, {growth[10]} dB with 10 (knee -100)", res
     except Refused as e:
         return False, str(e), res
 
@@ -2516,25 +2784,30 @@ def t_cessb(o, s, l):
 
 
 def t_moni(o, s, l):
-    """Moni level (Settings > Audio > MICROPHONE): the state's moni follows the setting; with 30 an over is played on
-    the sender's own speaker (on the X6100 its TX monitor reaches the processor: G's voiceprint draws it: picture)"""
+    """Moni level (Settings > Audio > MICROPHONE): the setting reads back; the level the base gets (the state's moni,
+    radio_moni_sent) follows it while the speaker is up and is 0 at VOL 0 (radio_vol_refresh: issue #1's rule; the
+    bench runs at VOL 0). Until 2026-11-26 the test looked for Moni 30 at VOL 0, and for a TCI over on G's voiceprint,
+    which TCI's mute keeps off by design"""
     S = o.r[s]
     res = {}
     try:
+        vol0 = int(S.state.get("vol", 0))
         with cfg_kept(S, {"moni": 30}):
-            time.sleep(1.0)
-            res["state_moni"] = S.state.get("moni")     # the remote's state key (its own units)
-
-            def body(watch):
-                th = threading.Thread(target=lambda: bench.tci_send(S, [[1000, 3.0]], watch=watch))
-                th.start()
-                time.sleep(1.5)
-                snap(o, f"moni {s}: its G during its own over (Moni 30)")
-                th.join(15)
-            H.over(o, s, H.B if s == H.A else H.A, F_USB, 2, "moni 30", body)
-            res["moni"] = S.state.get("moni")
-        return None, f"Moni set to 30 (read back), the state's moni {res['state_moni']}; the over photographed on {s}'s " \
-                     f"G (look: its voiceprint)", res
+            res["setting"] = bench.cfg_get(S, "moni")
+            try:
+                for vol in (0, 1, 0):
+                    bench.ensure(S, {"vol": vol})
+                    time.sleep(0.8)
+                    res[f"moni_at_vol_{vol}" + ("_again" if f"moni_at_vol_{vol}" in res else "")] = S.state.get("moni")
+            finally:
+                bench.ensure(S, {"vol": vol0})
+        want = {"moni_at_vol_0": 0, "moni_at_vol_1": 30, "moni_at_vol_0_again": 0}
+        bad = [f"{k} {res.get(k)} ({v} wanted)" for k, v in want.items() if str(res.get(k)) != str(v)]
+        if str(res["setting"]) != "30":
+            bad.insert(0, f"the setting read back {res['setting']!r}")
+        if bad:
+            return False, f"{s}: " + "; ".join(bad), res
+        return True, f"{s}: Moni 30 read back; the base got 0 at VOL 0, 30 at VOL 1, 0 again at VOL 0", res
     except Refused as e:
         return False, str(e), res
 
@@ -2558,22 +2831,47 @@ def t_mic_gain(o, s, l):
                 seen.append(S.state.get("mic"))
             bench.cfg_set(S, "mic", mic0)
         res["mic_states"] = seen
-        if len(set(str(x) for x in seen)) < 2:
-            return False, f"the state's mic did not follow Input (read {seen})", res
-        return None, f"gains read back {res['hmic']}/{res['imic']}, Input stepped the state's mic {seen} (the level " \
-                     f"through the air needs a speaker at the mic)", res
+        if [str(x) for x in seen] != ["0", "1", "2"]:
+            return False, f"the state's mic did not follow Input 0/1/2 (read {seen})", res
+        if str(res["hmic"]) != "35" or str(res["imic"]) != "45":
+            return False, f"the gains read back {res['hmic']}/{res['imic']}, not 35/45 as set", res
+        return True, f"gains read back {res['hmic']}/{res['imic']}, Input stepped the state's mic {seen} (the settings' " \
+                     f"half: the level through the air is comp-mic's room path, not judged here)", res
     except Refused as e:
         return False, str(e), res
 
 
+# The classic screen as photographed (800x480): the S-meter box's frame and the TX popup's border, TX red while on the
+# air (amber, the theme's ink, receiving); the popup's place is the screen's dark ground without it (2026-11-26, from
+# the X6200's pictures of tx-panel)
+TX_RED = (248, 113, 113)
+SCREEN_DARK = (8, 9, 12)
+METER_FRAME_XY = (366, 45)
+TX_POPUP_XY = (151, 220)
+
+
+def _px(path, xy):
+    from PIL import Image
+    try:
+        return Image.open(path).convert("RGB").getpixel(xy)
+    except (OSError, ValueError):
+        return None
+
+
+def _near(rgb, want, tol=30):
+    return rgb is not None and all(abs(a - b) <= tol for a, b in zip(rgb, want))
+
+
 def t_tx_panel(o, s, l):
-    """Popups TX (Settings > Display): s keyed 3 s at 0.1 W from the classic screen with it on (the TX panel) and off
-    (PWR/SWR/ALC in the S-meter box): pictures (LOOK); the panel's values are its 't' frames"""
+    """Popups TX (Settings > Display): s keyed 3 s at 0.1 W from the classic screen with it on and off, photographed on
+    the air (the PTT renewed first, s on the air when taken): with it on, the TX panel's red border; either way the
+    S-meter box framed TX red; more than 10 't' frames (the panel's values) in each over"""
     S = o.r[s]
     res = {}
     try:
         ensure_alike(o, F_USB, 2)
         classic(S)
+        bad = []
         for on in (1, 0):
             with cfg_kept(S, {"mag_alc": on}):
                 with session(o, f"tx-panel {on}", [s], F_USB) as watch:
@@ -2583,13 +2881,29 @@ def t_tx_panel(o, s, l):
                     S.send(f"key PTT 1 {hold}")
                     S.wait("on the air", lambda: S.tx or watch.why, 4)
                     time.sleep(1.2)
-                    snap(o, f"tx-panel {s}: Popups TX {'on' if on else 'off'}")
+                    S.send(f"key PTT 1 {hold}")     # renewed: taking the pictures outlasted the lease (11-25)
+                    on_air = bool(S.tx)
+                    paths = snap(o, f"tx-panel {s}: Popups TX {'on' if on else 'off'}")
                     S.send(f"key PTT 1 {hold}")
                     time.sleep(1.0)
                     S.send("key PTT 0")
                     S.wait("off the air", lambda: not S.tx, 4)
-                    res[f"frames_{on}"] = len(t_frames(S, t0))
-        return None, f"keyed with Popups TX on and off ({res}): look at the TX panel and the S-meter box", res
+                    frames = len(t_frames(S, t0))
+                    frame, popup = _px(paths.get(s), METER_FRAME_XY), _px(paths.get(s), TX_POPUP_XY)
+                    res[f"popups_{on}"] = {"on_air": on_air, "frames": frames, "meter_frame": frame, "popup": popup}
+                    what = f"Popups TX {'on' if on else 'off'}"
+                    if not on_air:
+                        bad.append(f"{what}: {s} off the air when photographed")
+                    if not _near(frame, TX_RED):
+                        bad.append(f"{what}: the S-meter box's frame {frame}, not TX red")
+                    if not _near(popup, TX_RED if on else SCREEN_DARK):
+                        bad.append(f"{what}: the TX popup's border {popup}, " + ("no panel" if on else "a panel shown"))
+                    if frames <= 10:
+                        bad.append(f"{what}: {frames} 't' frames")
+        if bad:
+            return False, "; ".join(bad), res
+        return True, f"Popups TX on: the TX panel and a red S-meter frame; off: no panel, the S-meter box red " \
+                     f"({res['popups_1']['frames']}/{res['popups_0']['frames']} 't' frames)", res
     except Refused as e:
         return False, str(e), res
     finally:
@@ -2757,18 +3071,27 @@ def t_long_press_busy(o, s, l):
             hold = int(time.time())
             S.send(f"key PTT 1 {hold}")
             S.wait("on the air", lambda: S.tx or watch.why, 4)
+            t_ab = time.time()
             S.send("key AB 1")
+            res["tx_at_ab_down"] = bool(S.tx)
             time.sleep(1.5)
             S.send(f"key PTT 1 {hold}")
+            res["tx_at_ab_up"] = bool(S.tx)
             S.send("key AB 0")
             time.sleep(0.8)
             S.send("key PTT 0")
             S.wait("off the air", lambda: not S.tx, 4)
         vfo1 = S.state.get("vfo")
-        res.update(vfo_before=vfo0, vfo_after=vfo1)
+        # the hold's own word (screen_main.c ab_key: "Clone VFO A->B" on A), which the remote gets as a message
+        said = next((t for t in msgs_since(S, t_ab) if re.search(r"Clone VFO", t, re.I)), None)
+        res.update(vfo_before=vfo0, vfo_after=vfo1, said=said)
+        if not (res["tx_at_ab_down"] and res["tx_at_ab_up"]):
+            return False, f"{s} was not on the air through AB's hold ({res}): the long press not tried while busy", res
         if vfo1 != vfo0:
             return False, f"AB held 1.5 s on the air acted as a tap: the VFO {vfo0} -> {vfo1}", res
-        return None, f"AB held on the air did not swap the VFO ({vfo0}); the A=B copy itself not read by the remote", res
+        if not said:
+            return False, f"AB held 1.5 s on the air: no 'Clone VFO' (it said {msgs_since(S, t_ab)[-4:]})", res
+        return True, f"AB held 1.5 s on the air was a long press: {said!r}, the VFO kept ({vfo0})", res
     except Refused as e:
         return False, str(e), res
     finally:
@@ -2826,29 +3149,76 @@ def t_walkie_atu(o, s, l):
     return None, "the word is there; the tune steps themselves are not written yet", {}
 
 
+G_LAMP_SETTLE_S = 1.0     # the listener's lamp lit this soon into the over (its meter and audio smoothed)
+G_LAMP_QUIET_S = 3.0      # and dark again this soon after it (the hiss after an FM over read SIGNAL for long, 11-26)
+
+
 def t_g_lamp(o, s, l):
-    """G's lamp: l on G on 29.600 FM; s's FM over (a tone) at 0.1 W: l's lamp RX SIGNAL, after it RX QUIET; s armed:
-    TX ARMED, keyed: ON AIR (pictures of both: LOOK)"""
-    S = o.r[s]
+    """G's lamp: l on G on 29.600 FM; s's FM over (a tone) at 0.1 W: s's lamp ON AIR, l's RX SIGNAL from
+    G_LAMP_SETTLE_S into it to its end, RX QUIET within G_LAMP_QUIET_S after it and from then on. Judged on the lamp's
+    word in each radio's state (glamp, from 2026-11-26), sampled every 0.1 s; pictures of both kept"""
+    S, L = o.r[s], o.r[l]
     res = {}
+    seen, stop = [], threading.Event()
+
+    def sample():
+        while not stop.is_set():
+            seen.append((time.time(), bool(S.tx), S.state.get("glamp"), L.state.get("glamp")))
+            time.sleep(0.1)
     try:
+        t0 = time.time()
+        th_s = threading.Thread(target=sample, daemon=True)
+        th_s.start()
+
         def body(watch):
             th = threading.Thread(target=lambda: bench.tci_send(S, [[1000, 4.0]], watch=watch))
             th.start()
             time.sleep(2.0)
             snap(o, f"g-lamp: {s} ON AIR, {l} RX SIGNAL")
             th.join(15)
-        H.over(o, s, l, 29600000, 7, "g-lamp", body)
-        time.sleep(2.0)
-        snap(o, f"g-lamp: after the over, {l} RX QUIET")
-        return None, "G's lamps photographed on the air and after (look: RX SIGNAL, ON AIR, RX QUIET)", res
+        try:
+            H.over(o, s, l, 29600000, 7, "g-lamp", body)
+            time.sleep(G_LAMP_QUIET_S + 3.0)
+            snap(o, f"g-lamp: after the over, {l} RX QUIET")
+        finally:
+            stop.set()
+            th_s.join(2)
+        if not any(x[2] or x[3] for x in seen):
+            return None, "no lamp word in the radios' state (a GUI before glamp): G's lamps photographed (look)", res
+        spans = tx_spans(S, t0)
+        if not spans:
+            raise Refused(f"{s} never went on the air")
+        on, off = spans[0]
+        during = [x for x in seen if on + G_LAMP_SETTLE_S <= x[0] <= off - 0.2]
+        after = [x for x in seen if off + G_LAMP_QUIET_S <= x[0]]
+        first_quiet = next((x[0] - off for x in seen if x[0] > off and x[3] == "QUIET"), None)
+        res.update(over_s=round(off - on, 1), sender_on_air=sum(1 for x in seen if on <= x[0] <= off and x[2] == "ON AIR"),
+                   l_during=dict(collections.Counter(x[3] for x in during)),
+                   l_after=dict(collections.Counter(x[3] for x in after)),
+                   l_quiet_after_s=None if first_quiet is None else round(first_quiet, 1))
+        bad = []
+        if not res["sender_on_air"]:
+            bad.append(f"{s}'s lamp never read ON AIR on the air")
+        if not during or sum(1 for x in during if x[3] == "SIGNAL") < 0.9 * len(during):
+            bad.append(f"{l}'s lamp during the over: {res['l_during']} (SIGNAL wanted)")
+        if not after or any(x[3] != "QUIET" for x in after):
+            bad.append(f"{l}'s lamp from {G_LAMP_QUIET_S:.0f} s after the over: {res['l_after']} (QUIET wanted)")
+        if bad:
+            return False, "; ".join(bad), res
+        return True, f"{s} ON AIR on the air; {l} SIGNAL through the over ({res['l_during']}), QUIET " \
+                     f"{res['l_quiet_after_s']} s after it and from then on", res
     except Refused as e:
         return False, str(e), res
 
 
+A_TX_ROWS_MIN_PER_S = 2   # a-tx-rows: A's history keeps moving on the air at least this many rows a second (none before
+                          # 2026-11-20); it draws them at its own receive pace (app_sentry.c wf_tx_row)
+
+
 def t_a_tx_rows(o, s, l):
-    """A's picture keeps time while transmitting: s keyed 5 s from A (armed there, 0.1 W); A's history shows a dim band
-    as long as the over (picture: LOOK)"""
+    """A's picture keeps time while transmitting: s keyed 5 s from A (armed there, 0.1 W); A's history draws its dim
+    rows all through the over (the remote's read-only a_tx_rows counts them, from 2026-11-26: at least
+    A_TX_ROWS_MIN_PER_S a second) and none after it; a picture kept"""
     S = o.r[s]
     res = {}
     try:
@@ -2857,12 +3227,31 @@ def t_a_tx_rows(o, s, l):
             want, checks = bench.rx_profile(F_USB, 2, pre=0, att=0, rfg=100, agc=2, sql=0, filt=(100, 3000))
             o.both(dict(want, pwr=H.W, atu=0, xit=0, rit=0, split=0, zoom=8), checks)
 
+        n0 = bench.cfg_get(S, "a_tx_rows")
+        if n0 in (None, ""):
+            raise Refused(f"{s}: no a_tx_rows from the remote (a GUI before it)")
+        t0 = time.time()
+
         def body(watch):
             bench.tci_send(S, [[1000, 5.0]], watch=watch)
         offset_over(o, s, l, F_USB, 2, "a-tx-rows", body)
+        n1 = int(bench.cfg_get(S, "a_tx_rows"))
         time.sleep(3)
+        n2 = int(bench.cfg_get(S, "a_tx_rows"))
         snap(o, f"a-tx-rows: {s}'s A after its 5 s over")
-        return None, f"{s}'s A photographed after a 5 s over (look: the dim band in the history)", res
+        spans = tx_spans(S, t0)
+        over_s = sum(b - a for a, b in spans)
+        res.update(rows=n1 - int(n0), rows_after=n2 - n1, over_s=round(over_s, 1),
+                   per_s=round((n1 - int(n0)) / over_s, 1) if over_s else None)
+        if not over_s:
+            raise Refused(f"{s} never went on the air")
+        if res["rows"] < A_TX_ROWS_MIN_PER_S * over_s:
+            return False, f"A drew {res['rows']} rows through {over_s:.1f} s on the air (at least " \
+                          f"{A_TX_ROWS_MIN_PER_S} a second wanted: the picture stopped)", res
+        if res["rows_after"]:
+            return False, f"A went on drawing on-air rows after the over ({res['rows_after']} in 3 s)", res
+        return True, f"A drew {res['rows']} dim rows through {over_s:.1f} s on the air ({res['per_s']} a second), none " \
+                     f"after", res
     except Refused as e:
         return False, str(e), res
 
@@ -3717,25 +4106,37 @@ def t_iq_offsets(o, s, l):
         return False, str(e), res
 
 
+# The rows of Settings > TX Cal and Audio > TX AUDIO only a patched base has, each shown by its own capability
+# (settings_window.cpp: radio_caps() & HW_CAP_*; radio_types.h's values)
+PATCHED_ROW_CAPS = {"TX IQ balance": 1 << 20, "band output gain": 1 << 5, "codec gain": 1 << 6,
+                    "compressor threshold/makeup": 1 << 9, "TX filter": 1 << 10, "FM emphasis": 1 << 11}
+
+
 def t_patched_rows(o, s, l):
     """On Xiegu's factory base (the bench X6100 since 2026-11-21) the patched-base rows (codec and band output gain,
-    compressor threshold/makeup, TX filter, FM emphasis, IQ balance) are hidden: Settings > TX Cal and Audio > TX AUDIO
-    photographed (LOOK); the base's version said"""
+    compressor threshold/makeup, TX filter, FM emphasis, IQ balance) are hidden. Each row is shown by its own
+    capability alone (settings_window.cpp), so the GUI's capabilities (the remote's read-only radio_caps, from
+    2026-11-26) judge it: on a factory base none of them; on a patched one all"""
     S = o.r[s]
     res = {"base": ssh(S.host, "grep -h -o 'base[^,]*V1[.0-9a-z_-]*' /mnt/app_logs/start_trace.txt 2>/dev/null | tail -1").strip()}
     try:
-        open_app(S, 104, "Settings")
-        snap(o, f"patched-rows {s}: Settings (TX Cal and Audio tabs)")
-        for _ in range(6):
-            S.send("knob mfk 1")
-            time.sleep(0.6)
-            snap(o, f"patched-rows {s}: Settings tab")
-        return None, f"{s}'s base {res['base'] or '(not read)'}: Settings tabs photographed (look: no codec/output " \
-                     f"gain, TX filter, compressor or IQ balance rows on a factory base)", res
+        caps = bench.cfg_get(S, "radio_caps")
+        if caps in (None, ""):
+            return None, f"{s}: no radio_caps from the remote (a GUI before it); base {res['base'] or '?'}", res
+        caps = int(caps)
+        res["caps"] = caps
+        res["rows"] = {k: bool(caps & v) for k, v in PATCHED_ROW_CAPS.items()}
+        factory = "V1.1.9" in res["base"]
+        shown = [k for k, v in res["rows"].items() if v]
+        if factory and shown:
+            return False, f"{s}'s factory base ({res['base']}): the GUI would show {shown}", res
+        if not factory and len(shown) < len(PATCHED_ROW_CAPS):
+            return False, f"{s}'s base {res['base'] or '(not read)'} is not the factory one, yet hides " \
+                          f"{[k for k in PATCHED_ROW_CAPS if k not in shown]}", res
+        return True, (f"{s}'s factory base ({res['base']}): none of the patched rows ({', '.join(PATCHED_ROW_CAPS)})"
+                      if factory else f"{s}'s patched base {res['base']}: all the patched rows"), res
     except Refused as e:
         return False, str(e), res
-    finally:
-        home(o, S)
 
 
 # ---- Field Ops' reference lists from the internet (the owner, 2026-11-25: a download is no issue, test it) ----
@@ -3868,24 +4269,24 @@ COVERS = {
     "bands-beacon": (["bands-test-beacon"], []),
     "field-beacon": (["field-test-beacon-send", "field-test-beacon-stop"], []),
     "field-cq": (["field-cq-cw"], ["field-cq-ssb-voice"]),
-    "prop-beacon": ([], ["prop-beacons-heard"]),
+    "prop-beacon": (["prop-beacons-heard"], []),
     "scanner": (["scanner-stop-and-hang", "scanner-holds-on-tx"], []),
     "ft8-cq-grid": ([], ["ft8-grid-4char", "ft8-cq-modifier", "ft8-compound-call"]),   # a standard call: not the bench's
     "ft8-retries": (["ft8-retries"], []),
     "ft8-auto-off": (["ft8-auto-off-manual"], []),
     "ft8-compound": (["ft8-compound-call"], []),
-    "ft8-list-look": ([], ["ft8-list-info-display", "ft8-for-you-strip"]),
+    "ft8-list-look": (["ft8-for-you-strip"], ["ft8-list-info-display"]),
     "ft8-hound": ([], ["ft8-hound-mode"]),
     "js8-speed": (["js8-speed-decode"], []),
-    "js8-groups": (["ghostnet-gstflash"], ["js8-x6100-group"]),
+    "js8-groups": (["ghostnet-gstflash", "js8-x6100-group"], []),
     "ghostnet": (["ghostnet-auto-group-queries", "ghostnet-message-log"], []),
-    "js8-look": ([], ["js8-show-filters", "js8-alerts", "js8-log-qso"]),
+    "js8-look": (["js8-alerts", "js8-log-qso"], []),
     "js8-time-sync": (["js8-time-sync"], []),
     "sstv-rx": (["sstv-manual-rx", "sstv-denoise"], []),
     "sstv-image-only": (["sstv-tx-image-only-repeat"], []),
     "sstv-halt-hold": (["sstv-tx-halt", "sstv-tx-freq-locked", "radio-core-sstv-tx-hold"], []),
     "wefax-look": ([], ["wefax-display-inverted", "wefax-align-tilt"]),
-    "psk-look": ([], ["psk-dx-call-rst", "psk-status-button", "psk-text-scrollback"]),
+    "psk-look": (["psk-status-button"], ["psk-dx-call-rst"]),
     "rade-rx": (["rade-rx-decode"], []),
     "transverter": (["tx-transverter-power-limit", "transverter-no-internal-atu"], ["transverter-limit-held-in-tx"]),
     "zero-power": (["digi-tx-zero-power-warning", "digital-tx-0w-message"], []),
@@ -3893,14 +4294,14 @@ COVERS = {
     "cessb": (["settings-txcal-cessb"], []),
     "moni": ([], ["tx-moni-level"]),
     "mic-gain": ([], ["tx-mic-gain-input"]),
-    "tx-panel": ([], ["settings-display-tx-panel"]),
+    "tx-panel": (["settings-display-tx-panel"], []),
     "screensaver-tx": ([], ["display-screensaver-tx"]),
     "stuck-tx-log": (["system-stuck-tx-watchdog"], []),
-    "long-press-busy": ([], ["keys-long-press-by-event-time"]),
+    "long-press-busy": (["keys-long-press-by-event-time"], []),
     "walkie": (["app-walkie-ptt"], []),
     "walkie-atu": (["app-walkie-atu-tune"], []),
-    "g-lamp": ([], ["g-lamp-carrier", "g-lamp"]),
-    "a-tx-rows": ([], ["sentry-a-tx-rows"]),
+    "g-lamp": (["g-lamp-carrier", "g-lamp"], []),
+    "a-tx-rows": (["sentry-a-tx-rows"], []),
     "scancfg-priority": (["scancfg-priority", "scancfg-f3-skip"], []),
     "iradio-tx": (["iradio-stops-on-tx"], []),
     "voice-msg": (["voice-msg-tx"], []),
@@ -3924,7 +4325,7 @@ PAIRS = [
     ("cw-zap", t_cw_zap, 90, "200 Hz off, ZAP tunes onto the station within 10 Hz, in CW and CW-R"),
     ("cw-tuner", t_cw_tuner, 70, "the tuning bars 30 Hz off in CW and CW-R (pictures)"),
     ("cw-key-train", t_cw_key_train, 60, "KEY Train: TCI CW at 0 W, nothing heard; Train off: decoded"),
-    ("cw-own-carrier", t_cw_own_carrier, 40, "the sender's own carrier on its VFO line, its ALC read (picture)"),
+    ("cw-own-carrier", t_cw_own_carrier, 40, "the sender's own carrier in its own spectrum at its dial, its ALC read"),
     ("cw-log-qso", t_cw_log_qso, 70, "the decoder's confirmed call logged by Log QSO (CW 1:2)"),
     ("cw-msg", t_cw_msg, 60, "MSG > CW 'TEST {CALL} TEST': decoded with the call, one over through the gaps"),
     ("cw-his", t_cw_msg_his, 80, "{HIS}: the call the decoder confirmed sent back"),
@@ -3935,28 +4336,28 @@ PAIRS = [
     ("bands-beacon", t_bands_beacon, 90, "the Bands app's Test beacon: two presses, decoded, back; ESC: nothing"),
     ("field-beacon", t_field_beacon, 120, "Field Ops' Test beacon: decoded; a third press stops it at once"),
     ("field-cq", t_field_cq, 90, "Field Ops' CQ in a SOTA activation: decoded, CQ again stops it; SSB's voice CQ"),
-    ("prop-beacon", t_prop_beacon, 60, "Propagation's 20 m cell after a carrier in a beacon slot (picture)"),
+    ("prop-beacon", t_prop_beacon, 75, "Propagation's Beacons on 20 m score a carrier in a beacon's slot"),
     ("scanner", t_scanner, 120, "the Scanner stops on a carrier and goes on after Hang; frozen while keyed"),
     ("ft8-cq-grid", t_ft8_cq_grid, 120, "FT8 CQ: the 4-character square, none from 2, the POTA modifier"),
     ("ft8-retries", t_ft8_retries, 150, "an unanswered reply sent Retries (3) times, then dropped"),
     ("ft8-auto-off", t_ft8_auto_off, 120, "Auto off: nothing moves on until the press"),
     ("ft8-compound", t_ft8_compound, 90, "a compound call's CQ; a call too long refused"),
-    ("ft8-list-look", t_ft8_list_look, 90, "the list's info column and the For you strip (pictures)"),
+    ("ft8-list-look", t_ft8_list_look, 120, "the list's distance in km and miles, the For you rows and Show held"),
     ("ft8-hound", t_ft8_hound, 90, "Hound calls a Fox at 1000 Hz or more"),
     ("js8-speed", t_js8_speed, 120, "Turbo heard with All speeds, not with My speed"),
     ("js8-groups", t_js8_groups, 120, "@X6100 and @GSTFLASH shown, never answered"),
     ("ghostnet", t_ghostnet, 150, "@GHOSTNET SNR? answered (AUTO); @GHOSTNET TEST logged"),
-    ("js8-look", t_js8_look, 120, "JS8's list, alert and the log popup at 73 (pictures); the ADIF"),
+    ("js8-look", t_js8_look, 180, "JS8's alert word, a two-way QSO's log popup at 73, Save, the ADIF"),
     ("sstv-rx", t_sstv_rx, 90, "Manual RX Robot 8: picture and _dn with Denoise, one without"),
     ("sstv-image-only", t_sstv_image_only, 90, "TX IMAGE ONLY then REPEAT LAST TX: two pictures alike"),
     ("sstv-halt-hold", t_sstv_halt_hold, 60, "knob and BAND_UP held off during TX; Halt TX at once"),
     ("wefax-look", t_wefax_look, 150, "the PNG black on white, the screen inverted; Tilt slants the edge"),
-    ("psk-look", t_psk_look, 90, "PSK31: the DX call from 'DE <call>', the text log; pictures"),
+    ("psk-look", t_psk_look, 90, "PSK31: the status's audio and quality, the DX call from 'DE <call>'"),
     ("transverter", t_transverter, 70, "the transverter's 0.1 W limit at PWR 1 W; ATU refused there"),
-    ("zero-power", t_zero_power, 60, "Line-in 0: a 0 W FT8 over and its 'TX 0 W' message"),
+    ("zero-power", t_zero_power, 60, "Line-in 0 still sends: no false 'TX 0 W' (the warning: tools/txlevel)"),
     ("agc-knee", t_agc_knee, 120, "the AGC Knee changes the audio over 0.1/0.3/1 W"),
     ("walkie", t_walkie, 70, "Walkie Talkie mode's PTT with the walkie mic at 0.1 W, the mic back after"),
-    ("g-lamp", t_g_lamp, 40, "G's lamps on the air and after (pictures)"),
+    ("g-lamp", t_g_lamp, 45, "G's lamps on the air and after, judged on their words in the state"),
     ("scancfg-priority", t_scancfg_priority, 90, "SCAN CFG's PRIORITY catches a carrier; F3 SKIP passes it"),
     ("voice-msg", t_voice_msg, 60, "MSG > Voice on the air on 28.400; refused on 27.185"),
     ("winlink-ardop", t_winlink_ardop, 120, "Pat's ARDOP call keys at 0.1 W on 14.105 USB-D; the dial turned stops it"),
@@ -3973,20 +4374,20 @@ SINGLES = [
      "(the X6100's needs a patched base)"),
     ("iq-offsets x6100>x6200", t_iq_offsets, 70, ("A", "B"), "the X6100's IQ offsets change its carrier"),
     ("patched-rows x6100", t_patched_rows, 40, ("A", "B"), "the patched-base rows hidden on the factory base"),
-    ("moni x6100", t_moni, 40, ("A", "B"), "Moni 30 in the state, the X6100's own over on G (picture)"),
-    ("moni x6200", t_moni, 40, ("B", "A"), "Moni 30 in the state, the X6200's own over (picture)"),
+    ("moni x6100", t_moni, 20, ("A", "B"), "Moni 30: the base gets it with the speaker up, 0 at VOL 0"),
+    ("moni x6200", t_moni, 20, ("B", "A"), "Moni 30: the base gets it with the speaker up, 0 at VOL 0"),
     ("mic-gain x6100", t_mic_gain, 20, ("A", "B"), "the mic gains read back, Input steps the state's mic"),
     ("mic-gain x6200", t_mic_gain, 20, ("B", "A"), "the mic gains read back, Input steps the state's mic"),
-    ("tx-panel x6100", t_tx_panel, 40, ("A", "B"), "Popups TX on and off while keyed (pictures)"),
-    ("tx-panel x6200", t_tx_panel, 40, ("B", "A"), "Popups TX on and off while keyed (pictures)"),
+    ("tx-panel x6100", t_tx_panel, 40, ("A", "B"), "Popups TX on and off while keyed: the panel and the red frames, judged on the pictures"),
+    ("tx-panel x6200", t_tx_panel, 40, ("B", "A"), "Popups TX on and off while keyed: the panel and the red frames, judged on the pictures"),
     ("screensaver-tx x6100", t_screensaver_tx, 100, ("A", "B"), "a TX ends the screensaver within a second"),
     ("screensaver-tx x6200", t_screensaver_tx, 100, ("B", "A"), "a TX ends the screensaver within a second"),
     ("stuck-tx-log", t_stuck_tx_log, 10, ("A", "B"), "every 'TX power set to 0' restored in the base logs"),
     ("update-check-off", t_update_check_off, 5, (None, "A"), "both radios' update check off while a run goes"),
     ("long-press-busy x6100", t_long_press_busy, 30, ("A", "B"), "AB held 1.5 s on the air is a long press"),
     ("long-press-busy x6200", t_long_press_busy, 30, ("B", "A"), "AB held 1.5 s on the air is a long press"),
-    ("a-tx-rows x6100", t_a_tx_rows, 30, ("A", "B"), "A's dim band after a 5 s over (picture)"),
-    ("a-tx-rows x6200", t_a_tx_rows, 30, ("B", "A"), "A's dim band after a 5 s over (picture)"),
+    ("a-tx-rows x6100", t_a_tx_rows, 30, ("A", "B"), "A's on-air rows through a 5 s over and none after, counted"),
+    ("a-tx-rows x6200", t_a_tx_rows, 30, ("B", "A"), "A's on-air rows through a 5 s over and none after, counted"),
     ("qrss3-key-safety", t_qrss3_key_safety, 30, ("B", "A"), "QRSS3's key let go on a crash (the owner's word)"),
     ("js8-time-sync", t_js8_time_sync, 30, ("A", "B"), "JS8's Time Sync with a clock 1 s off (the owner's word)"),
     ("iradio-tx", t_iradio_tx, 30, ("A", "B"), "Internet radio stops on TX (the owner's OK for the internet)"),

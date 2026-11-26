@@ -7313,7 +7313,7 @@
  {
   "id": "ft8-for-you-strip",
   "area": "app-ft8",
-  "feature": "'For you' strip: up to 3 stations calling you pinned under the list, 2 min after their last message, gone after your RR73/73, cleared on band/mode change; MFK enters it; For you (page 4) turns it off",
+  "feature": "'For you' strip: up to 3 stations calling you pinned under the list, 2 min after their last message, gone after your RR73/73, cleared on band/mode change; MFK enters it; For you (page 5) turns it off",
   "radios": [
    "x6100",
    "x6200"
@@ -7711,7 +7711,7 @@
    "x6200"
   ],
   "needs": "cable",
-  "how_to_confirm": "After a directed exchange ending in 73: popup on A (screenshot), OK -> SSH tail /mnt/js8call_log.adi with CALL Q2TST, MODE MFSK SUBMODE JS8; with Activ. POTA a MY_POTA_REF field.",
+  "how_to_confirm": "After a directed exchange ending in 73: popup on A (screenshot), OK -> SSH tail /mnt/js8call_log.adi with CALL Q2TST, MODE MFSK SUBMODE JS8; with Activ. POTA the MY_SIG POTA and MY_SIG_INFO fields.",
   "suite_has": null,
   "manual_ref": "### JS8"
  },

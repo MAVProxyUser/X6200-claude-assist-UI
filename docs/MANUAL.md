@@ -1582,9 +1582,12 @@ LISTEN on RTL or BOTH, G plays the X6200 alone; A or B puts its own LISTEN back 
   when nothing comes in at all. Up to v0.3.12.43 the dark followed the transmission's near-silence down, and the
   receiver's hiss drew white for a second or two after each over.
 - **The lamp**, under the voiceprint: RX SIGNAL when the audio stands 6 dB over its own noise or the radio's
-  S-meter 10 dB over its noise floor (a bare carrier, an FM station's quieting), RX DMR while a DMR call
+  S-meter 10 dB over the quiet (a bare carrier, an FM station's quieting), RX DMR while a DMR call
   is on the SDR's channel (lit even when its voice is silent, with no vocoder), RX QUIET, TX ARMED, ON AIR, TX LOCKED
-  for a moment after PTT.
+  for a moment after PTT. On FM (NFM, WFM) only the carrier lights it: the hiss after an over is louder than a
+  station's quieted audio, and it no longer reads as a signal. The quiet is the lower of the meter's noise floor and
+  G's own record of the meter while the lamp was dark (it rises a dB a second; a strong station's skirt lifts the
+  noise floor with it, and an S7 FM carrier read RX QUIET).
 - The radio's state in three larger lines: the squelch, the volume and the transmitter's lock; the battery and the
   supply; the processor, the base's version and the TX power setting (the time is in both title bars), refreshed
   each second.
@@ -5497,8 +5500,10 @@ WeFax) set their audio level by themselves.
   power reading (in whole tenths of a watt) can show 0.0 all along. The log
   gets a line with the level, the Line-in, the ALC and the power set; send it
   with a report. On the X6200 the level then goes back to its default (0 dB)
-  for the next transmission, instead of climbing back 8 dB a transmission. A
-  Line-in of 0 is the other known cause: see [Audio tab](#audio-tab).
+  for the next transmission, instead of climbing back 8 dB a transmission.
+  Line-in is not a cause: it is the codec's input gain, 0.5 dB a step, so 0 is
+  5 dB under the default 10, not off (on the bench at a 1 W setting the X6100
+  sent 0.4 W with it, the X6200, whose apps hold their power, 1 W).
 - At start the log has a line with the base's version, Line-in, Line-out,
   Play and Rec gain and the level kept.
 - Each transmission that moved the level kept adds a line to the log: the
@@ -11062,12 +11067,16 @@ closed: only while F shows). The state says B and G on the SDR: `bhz` (B's chann
 channel list, 3 EMERGENCY's, 4 GMRS's 22), `ghz` (G's SDR channel, 0 none), `garm` (its transmitter armed), `gno`
 (why it may not send there, "" it may), `sdr` (an SDR there), `fsel` (F's chosen item, "" off F), `gmp` (F's GMRS panel
 open), `gmhz` (its chosen channel, 0 on the tones), `gmrx` (where its F1 tunes: 0 nowhere, 1 B's SDR, 2 the radio's
-own through the WR12); all zero while the Sentry is closed. `nifog?` answers `nifog {...}`: F's
+own through the WR12), `glamp` (G's lamp's word while G shows: `ON AIR`, `LOCKED`, `ARMED`, `DMR`, a digital
+voice's name, `SIGNAL` or `QUIET`; "" off G); all zero while the Sentry is closed. `nifog?` answers `nifog {...}`: F's
 [NIFOG](#nifog) as the screen has it, `open`, `page` (the PDF's numbering), `y` (px down it) and `maxy`, `cap`
 (its caption), `where` (the line under the page), `legend` and `keys` (the F keys' boxes); zero and empty while
 it is closed or the Sentry is (the bench's tools/bench/orch_nifog.py). `his?` answers `his {...}`: `call`, what
-MSG > CW's `{HIS}` would send now ("" none), `chars` (the decoder panel's text) and `shown` (the panel on the screen)
-(the bench's cw-his reads it before the reply goes out). A `set` the radio refuses is
+MSG > CW's `{HIS}` would send now ("" none), `chars` (the decoder panel's text), `shown` (the panel on the screen)
+and `tail`, the panel text's last 48 characters as Parse left them (the bench's cw-his reads it before the reply goes
+out, cw-parse for Parse's split). A few read-only values answer `cfg?` for the bench: `digi_dx` (the keyboard modes'
+DX call), `radio_caps` (what the base can do, a number), `a_tx_rows` (the rows A's history has drawn on the air)
+and `beacons_heard_20m` (each band's: the NCDXF beacons heard, `beacon:snr:slot`). A `set` the radio refuses is
 answered `err ...` (`err freq: locked (LOCK, or an app holds the
 frequency)`, `err freq: not a frequency this radio tunes`, `err NAME: the
 radio is busy, try again`, `err unknown setting NAME`, the role and
@@ -12892,9 +12901,11 @@ the app.
 #### FT8 or another digital app transmits at 0 W
 
 The radio says "TX 0 W: level ... dB, Line-in ..." after such a
-transmission. Check Settings > Audio > Line-in: it should be 10 unless you
-changed it yourself (see [Audio tab](#audio-tab)). On the X6200 the next
-transmission starts again from the default level. If it happens again, send
+transmission: no power was read from start to end. Look at the antenna, the
+feed line and the supply first. A low Line-in (Settings > Audio, see
+[Audio tab](#audio-tab)) only lowers the power (0 is 5 dB under the default
+10), it does not stop it. On the X6200 the next transmission starts again
+from the default level. If it happens again, send
 the newest log in `/mnt/app_logs/` (a power-off with the POWER key saves the
 run's log there) and the base log `/mnt/base_i2c.log` with your report.
 

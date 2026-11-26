@@ -48,13 +48,17 @@ void app_sentry_g_channel_load(void);
  * 4 GMRS's 22 channels); G's SDR channel (Hz, 0 G on the X6200), its
  * transmitter armed (A/B) and why the SDR may not transmit there ("" it may: w_sdr_refusal's words, "GMRS: ..." on
  * GMRS's channels); an SDR there; F's choice (its item's name, "" off F) and F's GMRS panel: open, its chosen
- * channel (Hz) and the receiver its F1 tunes (0 none, 1 B's SDR, 2 the radio's own: the WR12) */
+ * channel (Hz) and the receiver its F1 tunes (0 none, 1 B's SDR, 2 the radio's own: the WR12); G's lamp's word while
+ * G is shown ("ON AIR", "LOCKED", "ARMED", "DMR", a digital voice's name, "SIGNAL", "QUIET"; "" off G) */
 typedef struct {
     int64_t bhz, ghz, gmhz;
     int32_t bscan, sdr, garm, gmp, gmrx;
-    char    bpre[16], bmode[12], bname[16], gno[56], fsel[24];
+    char    bpre[16], bmode[12], bname[16], gno[56], fsel[24], glamp[12];
 } app_sentry_sdr_t;
 void app_sentry_sdr_state(app_sentry_sdr_t *out);
+/* Any thread: the rows A's history has drawn for the time on the air (dim, at the rows' pace) since the GUI started:
+ * the bench's a-tx-rows counts them over an over */
+uint32_t app_sentry_tx_rows(void);
 /* F's NIFOG for the remote's "nifog?" (any thread; the LVGL thread publishes it every 50 ms while the Sentry is open,
  * all zero while it is not): open or not, the page (the PDF's numbering), how far down it (px) and the most it goes,
  * and the words as the screen has them: the caption, the line under the page, the legend, the F keys' boxes */

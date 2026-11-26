@@ -88,6 +88,9 @@ def keyer_said(ssh, host, last=1):
     return (sum(int(a) for a, _, _ in got), sum(int(b) for _, b, _ in got), max(int(c) for _, _, c in got))
 
 
+PAIR_MS = 6     # two neighbouring errors adding to within this are one edge moved (judge's "shifted")
+
+
 def judge(runs, ideal, unit_ms):
     """runs (cw_elements) against ideal (cw_ideal): {"as_keyed": every element there, none merged or split; "medians":
     each kind's median ms; "worst_ms"; "out": the errors over TIMING_MS; "marks", "want"; "longest"}"""
@@ -105,6 +108,24 @@ def judge(runs, ideal, unit_ms):
     names = {(True, 1): "dot", (True, 3): "dash", (False, 1): "gap", (False, 3): "letter gap", (False, 7): "word gap"}
     res.update(medians={names.get(k, str(k)): round(v) for k, v in med.items()},
                worst_ms=round(max(abs(e) for e in errs)), out=[round(e) for e in errs if abs(e) > TIMING_MS])
+    # An edge that moved: an element out of time whose next one is out the other way by the same (their errors adding
+    # to within PAIR_MS) and by at most a dot, is one shifted edge and no time gained or lost (a gap long and the mark
+    # after it short: a late key-down; a mark long and the gap after it short: a late key-up). Any other outlier is
+    # unpaired: time gained or lost. weight_ms: the dots' median over the dot's length
+    shifted, used = [], set()
+    for i, e in enumerate(errs[:-1]):
+        if abs(e) <= TIMING_MS or i in used:
+            continue
+        f = errs[i + 1]
+        if abs(e + f) <= PAIR_MS and abs(e) <= unit_ms:
+            # the edge between element i and the next: after a gap a key-down, after a mark a key-up; late when
+            # element i ran long
+            shifted.append({"at": i, "ms": round(abs(e)), "edge": "key-up" if runs[i][0] else "key-down",
+                            "late": e > 0})
+            used.update((i, i + 1))
+    res["shifted"] = shifted
+    res["unpaired"] = [round(e) for i, e in enumerate(errs) if abs(e) > TIMING_MS and i not in used]
+    res["weight_ms"] = round(med.get((True, 1), unit_ms) - unit_ms) if (True, 1) in med else None
     return res
 
 

@@ -1852,11 +1852,18 @@ static void wf_row(void) {
  * instead: a band across the picture as long as the transmission */
 #define TX_ROW_LEVEL 56
 
+static volatile uint32_t tx_rows_n;     /* wf_tx_row's rows since the GUI started (app_sentry_tx_rows: the bench) */
+
 static void wf_tx_row(void) {
     uint8_t *row = d3_lv[d3_head];
 
     memset(row, TX_ROW_LEVEL, IMG_W);
     row_in(row);
+    tx_rows_n++;
+}
+
+uint32_t app_sentry_tx_rows(void) {
+    return tx_rows_n;
 }
 
 /* ---- Widgets ---- */
@@ -9980,6 +9987,8 @@ static void vp_put(const uint8_t *lv) {
 }
 
 #define G_CARRIER_DB 10                 /* G's lamp: the meter this far over its noise floor is a signal */
+#define G_QUIET_RISE_DB 1.0f            /* G's own record of the quiet rises this much a second while the lamp is dark */
+static char g_lamp_word[12];            /* G's lamp's word as last drawn, for the remote's state (sdr_publish) */
 
 /* G's 50 ms: the voiceprint's new columns, the bars, the lamp */
 static void walkie_step(void) {
@@ -10092,10 +10101,38 @@ static void walkie_step(void) {
      * squelch open where one is set */
     static float floor_rms = 1000;
     if (got) floor_rms = vp_rms < floor_rms ? 0.9f * floor_rms + 0.1f * vp_rms : 0.998f * floor_rms + 0.002f * vp_rms;
-    bool on = from_rtl && param_i_get(cfg_rtl_sql) > 0 ? rtl_spectrum_squelch_open() : vp_rms > 2 * floor_rms + 100;
-    /* or the radio's meter G_CARRIER_DB over its noise floor (one read): a carrier the audio does not show, FM's
-     * quieting, AM's steady carrier (2026-11-22, S7-S8 on the bench cable read RX QUIET) */
-    if (!from_rtl && !ms.tx && ms.noise > S_MIN && ms.level > ms.noise + G_CARRIER_DB) on = true;
+    /* On FM the carrier alone says (FM's voice always has one): its audio misleads both ways, quieter under a carrier
+     * than the hiss without one, so the floor followed the quieted audio down and the hiss after an over read RX SIGNAL
+     * for many seconds at S1 (both radios, 2026-11-26) */
+    int  mode = cparam_i_get(cfg_cur_mode);
+    bool fm = !from_rtl && (mode == radio_mode_nfm || mode == radio_mode_wfm);
+    bool on = from_rtl && param_i_get(cfg_rtl_sql) > 0 ? rtl_spectrum_squelch_open()
+                                                        : !fm && vp_rms > 2 * floor_rms + 100;
+    /* or the radio's meter G_CARRIER_DB over the quiet: a carrier the audio does not show, FM's quieting, AM's steady
+     * carrier (2026-11-22, S7-S8 on the bench cable read RX QUIET). The quiet: the filter's noise reading, or G's own
+     * record of the meter while nothing lit the lamp, the lower. A strong carrier's skirt raises the noise reading
+     * with it (the X6100 on FM read an S7 carrier RX QUIET, 2026-11-26), so G keeps its own: down at once, up
+     * G_QUIET_RISE_DB a second while dark, a twentieth of that under a carrier (a long over does not put itself
+     * out); a new frequency starts it again */
+    static float    quiet_db = NAN;
+    static uint32_t quiet_ms;
+    static int32_t  quiet_hz;
+    if (!from_rtl && !ms.tx) {
+        int32_t  hz  = cparam_i_get(cfg_fg_freq);
+        uint32_t now = lv_tick_get();
+        float    dt  = quiet_ms ? lv_tick_elaps(quiet_ms) / 1000.0f : 0;
+
+        quiet_ms = now | 1;
+        if (hz != quiet_hz || !isfinite(quiet_db) || ms.level < quiet_db) {
+            quiet_db = ms.level;
+            quiet_hz = hz;
+        }
+        float ref = ms.noise > S_MIN && ms.noise < quiet_db ? ms.noise : quiet_db;
+        bool  carrier = ms.level > ref + G_CARRIER_DB;
+
+        quiet_db = carrier ? quiet_db + G_QUIET_RISE_DB / 20 * dt : fminf(ms.level, quiet_db + G_QUIET_RISE_DB * dt);
+        if (carrier) on = true;
+    }
     /* a DMR call on the channel lights it too, whatever the audio: without the vocoder its voice is silence */
     rtl_dmr_t dmv;
     rtl_dsd_t ddv;
@@ -10111,6 +10148,8 @@ static void walkie_step(void) {
     on = on || dmr || dsd;
     lv_obj_set_style_bg_opa(wui->lamp, air || ptt || on || (armed && blink) ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(wui->lamp_l, air || ptt || on || (armed && blink) ? ink : amb, 0);
+    snprintf(g_lamp_word, sizeof(g_lamp_word), "%s", air ? "ON AIR" : ptt ? "LOCKED" : armed ? "ARMED" : dmr ? "DMR"
+                                                       : dsd ? rtl_dsd_name(ddv.proto) : on ? "SIGNAL" : "QUIET");
     lv_label_set_text(wui->lamp_l, air ? (g_portrait ? "TX  ON AIR" : "TX\nON AIR")
                                    : ptt ? (g_portrait ? "TX LOCKED" : "TX\nLOCKED")
                                    : armed ? (g_portrait ? "TX  ARMED" : "TX\nARMED")
@@ -11503,6 +11542,7 @@ static void sdr_publish(bool closed) {
         p.gmp  = gm_on;
         p.gmhz = gm_on && !gm_tones ? gmrs_row_hz(gm_sel) : 0;
         p.gmrx = gm_rx();
+        if (scr == SCR_WALKIE) snprintf(p.glamp, sizeof(p.glamp), "%s", g_lamp_word);
     }
     pthread_mutex_lock(&sdr_pub_mux);
     sdr_pub = p;

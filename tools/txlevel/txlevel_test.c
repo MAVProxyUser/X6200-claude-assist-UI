@@ -576,6 +576,12 @@ int main(int argc, char **argv) {
                                       7.0f, 10.0f, 0.4f, 0, 0, 0.0f, 30};
     static const scenario_t pickup2 = {"the same at 2 W, ALC 6 in two thirds of the readings", 2.0f, -6.0f, 0, 2.0f,
                                        6.0f, 0.67f, 0, 0, 0.0f, 30};
+    /* Nothing goes out at all (a dead PA, an open feed line): the meter 0.0 a whole over. The bench cannot make one on
+     * the air (Line-in 0 is 5 dB down, not off: orch zero-power, 2026-11-26), so the warning is checked here */
+    static const scenario_t dead = {"nothing goes out (a dead PA): 1 W set, the meter 0.0 a whole over", 1.0f, -6.0f,
+                                    0.01f, 0, 0, 0, 0, 0, 0.0f, 3};
+    static const scenario_t dead_low = {"the same at 0.1 W, where the meter's tenths cannot tell", 0.1f, -6.0f, 0.001f, 0,
+                                        0, 0, 0, 0, 0.0f, 3};
     static const scenario_t needy = {"a radio that needs 4 dB over the default (#16), 5 W", 5.0f, 4.0f, 0, 5.0f, 0, 0,
                                      0.05f, 0, 0.0f, 20};
     static const scenario_t needy_slow = {"the same, its power up in 2.5 s (2 W a second)", 5.0f, 4.0f, 0, 2.0f, 0, 0,
@@ -625,6 +631,12 @@ int main(int argc, char **argv) {
     r = run(&pickup2, verbose);
     check(r.zero_w == 0 && r.lowest >= 1.9f, "%s: never under %.1f W, \"TX 0 W\" %d times", pickup2.name, r.lowest,
           r.zero_w);
+
+    r = run(&dead, verbose);
+    check(r.zero_w >= 1, "%s: \"TX 0 W\" said (%d times in %d overs)", dead.name, r.zero_w, dead.txs);
+
+    r = run(&dead_low, verbose);
+    check(r.zero_w == 0, "%s: \"TX 0 W\" never said (%d times)", dead_low.name, r.zero_w);
 
     r = run(&needy, verbose);
     check(r.last_at2 >= 4.9f, "%s: %.1f W 2 s in from the second transmission on", needy.name, r.last_at2);

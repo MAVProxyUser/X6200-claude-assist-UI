@@ -277,20 +277,26 @@ const char *panel_last_call(void) {
 static pthread_mutex_t pub_mux = PTHREAD_MUTEX_INITIALIZER;
 static char            pub_call[16];
 static int             pub_chars;
+static char            pub_tail[PANEL_TAIL + 1];   /* the text's end, line breaks as spaces */
 
 static void publish(void) {
     const char *c = panel_last_call();
+    size_t      len = strlen(buf);
 
     pthread_mutex_lock(&pub_mux);
     snprintf(pub_call, sizeof(pub_call), "%s", c);
-    pub_chars = (int)strlen(buf);
+    pub_chars = (int)len;
+    snprintf(pub_tail, sizeof(pub_tail), "%s", buf + (len > PANEL_TAIL ? len - PANEL_TAIL : 0));
+    for (char *p = pub_tail; *p; p++)
+        if (*p == '\n') *p = ' ';
     pthread_mutex_unlock(&pub_mux);
 }
 
-void panel_last_call_copy(char *call, size_t n, int *chars, bool *shown) {
+void panel_last_call_copy(char *call, size_t n, int *chars, bool *shown, char *tail, size_t tn) {
     pthread_mutex_lock(&pub_mux);
     snprintf(call, n, "%s", pub_call);
     *chars = pub_chars;
+    if (tail) snprintf(tail, tn, "%s", pub_tail);
     pthread_mutex_unlock(&pub_mux);
     *shown = panel_shown();
 }

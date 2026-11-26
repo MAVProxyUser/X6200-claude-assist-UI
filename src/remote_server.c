@@ -125,6 +125,8 @@
 #include "cfg/settings_manager_api.h"
 #include "button_bar.h"
 #include "cw_messages.h"
+#include "beacons.h"
+#include "digi_qso.h"
 #include "text_panel.h"
 #include "cluster/client.h"
 #include "cluster/spots.h"
@@ -1359,14 +1361,14 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,\"plays\":%d,\"ifs\":%d,\"comp\":%d,\"wch\":%d,\"wchm\":%d,\"av\":%d,"
              "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\",\"bhz\":%lld,\"bpre\":\"%s\",\"bmode\":\"%s\",\"bname\":\"%s\","
              "\"bscan\":%d,\"ghz\":%lld,\"garm\":%d,\"gno\":\"%s\",\"sdr\":%d,\"fsel\":\"%s\",\"gmp\":%d,"
-             "\"gmhz\":%lld,\"gmrx\":%d}",
+             "\"gmhz\":%lld,\"gmrx\":%d,\"glamp\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
              s->tpwr10, s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->txf,
              s->split, s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->plays, s->ifs,
              s->comp, s->wch, s->wchm, s->av, s->app, s->win, s->pg, s->fp, (long long)s->sdr.bhz, s->sdr.bpre,
              s->sdr.bmode, s->sdr.bname, s->sdr.bscan, (long long)s->sdr.ghz, s->sdr.garm, s->sdr.gno, s->sdr.sdr,
-             s->sdr.fsel, s->sdr.gmp, (long long)s->sdr.gmhz, s->sdr.gmrx);
+             s->sdr.fsel, s->sdr.gmp, (long long)s->sdr.gmhz, s->sdr.gmrx, s->sdr.glamp);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */
@@ -1730,6 +1732,32 @@ static bool cfg_value(const char *name, char *out, size_t n) {
     }
     if (!strcmp(name, "msg_cw_qrss")) {
         snprintf(out, n, "%d", dialog_msg_cw_qrss());
+        return true;
+    }
+    if (!strcmp(name, "digi_dx")) {             /* read only: the keyboard modes' DX call (PSK's DX button; the bench) */
+        snprintf(out, n, "%s", digi_qso_dx());
+        return true;
+    }
+    if (!strcmp(name, "radio_caps")) {          /* read only: what the base can do (radio_types.h HW_CAP_*, a number) */
+        snprintf(out, n, "%u", (unsigned)radio_caps());
+        return true;
+    }
+    if (!strcmp(name, "a_tx_rows")) {           /* read only: A's history rows drawn on the air (app_sentry.c) */
+        snprintf(out, n, "%u", (unsigned)app_sentry_tx_rows());
+        return true;
+    }
+    if (!strncmp(name, "beacons_heard_", 14)) { /* read only: a band's beacons heard ("20m"...): "i:snr:slot,..." (the
+                                                 * beacon's index, dB over the band's noise, the slot's UTC start) */
+        int b = -1;
+        for (int k = 0; k < BEACON_BANDS; k++)
+            if (!strcmp(name + 14, beacon_band_name[k])) b = k;
+        if (b < 0) return false;
+        size_t o = 0;
+        out[0] = 0;
+        for (int i = 0; i < BEACONS_N && o + 24 < n; i++) {
+            const beacon_heard_t *h = beacons_heard(i, b);
+            if (h && h->heard) o += snprintf(out + o, n - o, "%s%d:%d:%lld", o ? "," : "", i, h->snr, (long long)h->when);
+        }
         return true;
     }
     int i = cfg_legacy_find(name);
@@ -2282,7 +2310,7 @@ static void *panel_thread(void *arg) {
     bool           have_last = false;
     uint32_t       sp_seq = 0, spots_gen = 0, plan_gen = band_plan_gen();
     uint64_t       state_ms = 0, meter_ms = 0, spots_ms = 0, ft8_ms = 0, ft8_sent_ms = 0;
-    char           line[1024];     /* the state line: about 800 at most (the bench's checks, B and G's SDR, 2026-11-25) */
+    char           line[1024];     /* the state line: about 820 at most (the bench's checks, B and G's SDR, G's lamp, 2026-11-26) */
     (void)arg;
 
     while (true) {
@@ -2856,14 +2884,15 @@ static void handle_text(client_t *c, char *text) {
         return;
     }
     if (!strcmp(text, "his?")) {            /* what MSG > CW's {HIS} sends now, from the decoder's panel (the bench's) */
-        char out[160], call[16];
+        char out[320], call[16], tail[PANEL_TAIL + 1], tj[PANEL_TAIL * 6 + 8];
         int  chars;
         bool shown;
 
         if (!allowed(c, ROLE_OPERATE, false))
             return;
-        panel_last_call_copy(call, sizeof(call), &chars, &shown);
-        snprintf(out, sizeof(out), "his {\"call\":\"%s\",\"chars\":%d,\"shown\":%d}", call, chars, shown);
+        panel_last_call_copy(call, sizeof(call), &chars, &shown, tail, sizeof(tail));
+        json_str(tj, sizeof(tj), tail);
+        snprintf(out, sizeof(out), "his {\"call\":\"%s\",\"chars\":%d,\"shown\":%d,\"tail\":%s}", call, chars, shown, tj);
         client_text(c, out);
         return;
     }

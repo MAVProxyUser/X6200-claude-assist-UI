@@ -5602,17 +5602,23 @@ SPUR_HZ = 156.25            # 25 FT8 tone steps: the X6100's FT8 app decoded the
                             # against +9 to +14), and the real one was dropped as its duplicate (2026-11-23, 11-24, 11-25;
                             # the X6200's log said its VFO right): a copy of the signal that far off
 SPUR_MAX_DBC = -30          # a component near the tone above this is a fault (an FT8 decode of it lands 156 Hz off)
+SKIRT_OVERS = 8             # skirt x6200 levels: this many alike overs (the skirt came in one over of eleven, 11-26)
+SKIRT_MAX_DBC = -40         # and each over's skirt 100-155 Hz off the tone, per 55 Hz, at most this (a clean SSB
+                            # transmitter's -40; the X6200's usual -55)
+FT8_COPY_MAX_DBC = -40      # an FT8 message's neighbours (156 Hz either side) at most this under it: a clean SSB
+                            # transmitter keeps -40; the X6200 through TCI -55/-56 at 0.1 W (2026-11-25)
 
 
 def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.3), (0, 0.3), (3, 0.9)),
-              judge=True):
+              judge=True, skirt_max=None):
     """What else comes with a clean tone near it: the sender's TCI tone at `tone` Hz in USB-D at 0.1 W on the FT8
     dial, the listener's TCI audio recorded with its AGC on (3, as the FT8 tests listen) and off (0); the components
     SPUR_HZ either side of the tone and the strongest one within 400 Hz (not within 20 Hz of the tone), in dB under it,
     for each (AGC, the tone's amplitude) of runs: the tone at 0.3 and near full scale (0.9: the FT8 app's level is
     learned up to the top, where a base that sets the power itself may hunt). Whether a copy 156 Hz off is the sender's
     transmitter or the listener's receiver: present with the AGC off too and in one direction only says the sender;
-    gone with the listener's AGC off says its AGC"""
+    gone with the listener's AGC off says its AGC. skirt_max (dBc): each over judged on its skirt instead, the higher side
+    100-155 Hz off per 55 Hz at most that; a FAIL names the over"""
     import subprocess
     import numpy as np
     import image as im
@@ -5625,7 +5631,7 @@ def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.
     rows, tci = [], None
     try:
         tci = TciRx(L.host)
-        for agc, amp in runs:
+        for i_run, (agc, amp) in enumerate(runs):
             with o.step(f"AGC {agc}: both on {f / 1e6:.3f} USB-D, the receiver profile alike") as s:
                 want, checks = bench.rx_profile(f, 3, pre=0, att=0, rfg=100, agc=agc, sql=0, filt=(100, 3000))
                 o.both(dict(want, pwr=W, atu=0, xit=0, rit=0, split=0), checks)
@@ -5700,7 +5706,10 @@ def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.
                        # the skirt (an oscillator's phase noise, 2026-11-25: the X6200's FT8 overs -25 dBc per 55 Hz
                        # out to 170 Hz), per 55 Hz as ft8_copies measures it
                        "skirt_100_dbc": band(100, 155), "skirt_400_dbc": band(400, 455)}
-                row["wav"] = save_wav(o, x, f"spurs_{sender}_to_{listener}_agc{agc}_amp{amp}.wav")
+                row.update(over=i_run + 1, tx_w=watch.tx_peak.get(sender))
+                # the over's number in the name: a repeated amplitude wrote over the over before (11-25: the one bad
+                # over's audio lost)
+                row["wav"] = save_wav(o, x, f"spurs_{sender}_to_{listener}_{i_run + 1:02d}_agc{agc}_amp{amp}.wav")
                 rows.append(row)
                 s.confirm(f"tone {row['tone_hz']} Hz {row['tone_dbfs']} dBFS; -{SPUR_HZ} Hz {row['below_dbc']} dBc, "
                           f"+{SPUR_HZ} Hz {row['above_dbc']} dBc; the strongest within 400 Hz "
@@ -5714,6 +5723,14 @@ def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.
     said = "; ".join(f"AGC {r['agc']} amplitude {r['amp']}: -{SPUR_HZ} Hz {r['below_dbc']}, +{SPUR_HZ} Hz {r['above_dbc']} dBc (the "
                      f"strongest within 400 Hz {r['worst_dbc']} dBc at {r['worst_off_hz']:+.1f} Hz)" for r in rows)
     bad = [r for r in rows if max(r["below_dbc"], r["above_dbc"]) > SPUR_MAX_DBC]
+    if skirt_max is not None:
+        skirt = [(r["over"], max(r["skirt_100_dbc"])) for r in rows]
+        over_max = [(n, v) for n, v in skirt if v > skirt_max]
+        said = (f"{sender}'s {tone} Hz tone in {listener}'s audio over {len(rows)} overs alike, the skirt 100-155 Hz off "
+                f"per 55 Hz (dBc, the higher side): {', '.join(f'{v}' for _, v in skirt)}")
+        if over_max:
+            return False, said + f": over {skirt_max} dBc in over {', '.join(str(n) for n, _ in over_max)}", {"rows": rows}
+        return True, said + f": every over within {skirt_max} dBc", {"rows": rows}
     if not judge:
         skirt = "; ".join(f"{r['amp']}: {max(r['skirt_100_dbc'])}" for r in rows)
         return None, (f"{sender}'s {tone} Hz tone in {listener}'s audio, the skirt 100-155 Hz off per 55 Hz (dBc, the "
@@ -5727,7 +5744,7 @@ def ft8_tci_copy_test(o, sender, listener, hz=1500, app=False):
     """The FT8 app's copies 156 Hz either side, the same message sent through TCI instead (gen_ft8 here, 24 kHz, the
     sender's TCI): whether the X6200's skirt is the waveform through its base (here too) or the app's way out (not
     here: its TCI tone has none, 2026-11-25). app: the sender's FT8 app open meanwhile (its waterfall, decoder and
-    capture running: whether that is what disturbs its audio). Said, not judged"""
+    capture running: whether that is what disturbs its audio). Judged: its neighbours FT8_COPY_MAX_DBC under it at most"""
     import subprocess
     import digimodes
     import suite_air_b as ab
@@ -5796,9 +5813,13 @@ def ft8_tci_copy_test(o, sender, listener, hz=1500, app=False):
     if c is None:
         return False, "no audio", {}
     c["wav"] = save_wav(o, res["x"], f"ft8_tci_{sender}_to_{listener}.wav")
-    return None, (f"{sender}'s FT8 message through its TCI{' (its FT8 app open)' if app else ''} in {listener}'s audio at {c['hz']} Hz: {SPUR_HZ} Hz below "
-                  f"{c['below_dbc']} dBc, above {c['above_dbc']} dBc, 400 Hz above (noise) {c['noise_dbc']} dBc: said, "
-                  f"not judged"), c
+    worse = max(c["below_dbc"], c["above_dbc"])
+    said = (f"{sender}'s FT8 message through its TCI{' (its FT8 app open)' if app else ''} in {listener}'s audio at "
+            f"{c['hz']} Hz: {SPUR_HZ} Hz below {c['below_dbc']} dBc, above {c['above_dbc']} dBc, 400 Hz above (noise) "
+            f"{c['noise_dbc']} dBc")
+    if worse > FT8_COPY_MAX_DBC:
+        return False, f"{said}: over {FT8_COPY_MAX_DBC} dBc (another station's FT8 decodes a copy)", c
+    return True, f"{said}: within {FT8_COPY_MAX_DBC} dBc", c
 
 
 TAIL_LOST_MAX_S = 0.15      # a TCI over may lose this much of its audio's end at the unkey (the envelope's edges)
@@ -5996,6 +6017,7 @@ def ft8_copy_test(o, sender, listener, txfs=(1325, 1500, 2000), w=W, judge=True)
 
 
 CW_TIMING_TEXT = "PARIS PARIS PARIS PARIS"
+CW_TIMING_WPM = 20          # the speed it is keyed at (KEY Speed set for the over): a 60 ms dot
 
 
 def _num(v, spec=".0f"):
@@ -6008,8 +6030,10 @@ def cw_timing_test(o, sender, listener, w=W):
     with TCI's speed steps), the listener's audio read element by element and set against the text (cw_timing.py):
     none merged or lost, each mark and gap within 25 ms of its kind's median. The keyer's own account (its GUI's log)
     tells whose an error is: an edge late on its deadline is the GUI's, and fails; with the keyer on time an X6100 on
-    Xiegu's factory base is said, not judged (2026-11-25: its base let the carrier run on 30-80 ms after the key went
-    up now and then, the keyer's 112 edges within 2 ms; its keyer's sleeps cut short by a signal before, fixed)"""
+    Xiegu's factory base passes when each edge out of time is a single one its base moved (cw_timing.judge's shifted:
+    the next element out the other way by as much), and fails on time gained or lost (2026-11-25: its base let the
+    carrier run on 30-80 ms after the key went up now and then, the keyer's 112 edges within 2 ms; its keyer's sleeps
+    cut short by a signal before, fixed)"""
     import subprocess
     import cw_timing as ct
     import suite_air_a as aa
@@ -6017,7 +6041,9 @@ def cw_timing_test(o, sender, listener, w=W):
     from tones import TciRx, peak, FS as TFS
     S, L = o.r[sender], o.r[listener]
     res = {}
-    text, wpm, secs = ab.cw_speedup(CW_TIMING_TEXT, ab.key_wpm(S.host), most=14.0)
+    # at the test's own speed, set for the over and put back (the keyer keys at the radio's KEY Speed: the X6100's
+    # was 28 WPM on 2026-11-26, a 43 ms dot its base's 30-50 ms late edges swallowed)
+    text, wpm, secs = ab.cw_speedup(CW_TIMING_TEXT, CW_TIMING_WPM, most=14.0)
     tci = TciRx(L.host)
 
     def body(watch):
@@ -6036,12 +6062,21 @@ def cw_timing_test(o, sender, listener, w=W):
             time.sleep(1.0)
             res["x"] = tci.audio(t0, time.time())[0]
             s.confirm(f"{len(res['x']) / TFS:.1f} s of audio")
+    speed0 = None
     try:
+        speed0, now = bench.cfg_set(S, "key_speed", wpm)
+        if str(now) != str(wpm):
+            raise Refused(f"{sender}'s KEY Speed reads {now!r} after asking {wpm}")
         over(o, sender, listener, ab.F_CW, 4, f"CW timing {sender}", body, w=w, agc=2)
     except Refused as e:
         return False, str(e), {}
     finally:
         tci.close()
+        if speed0 is not None:
+            try:
+                bench.cfg_set(S, "key_speed", speed0)
+            except Refused as e:
+                o.st.ev(f"{sender}: KEY Speed not put back to {speed0}: {e}", "bad")
     x = res.get("x")
     if x is None or len(x) < TFS:
         return False, "no audio", {}
@@ -6049,7 +6084,15 @@ def cw_timing_test(o, sender, listener, w=W):
     pitch, _ = peak(x, kt, 120)
     runs, depth = ct.cw_elements(x, TFS, pitch or kt)
     j = ct.judge(runs, ct.cw_ideal(text), 1200.0 / wpm)
-    keyer = ct.keyer_said(bench.ssh, S.host)
+    # the keyer's own line for this over: written as it ends (read at once, an earlier over's 20 edges were taken for
+    # this one's 112, 2026-11-26)
+    edges_want = 2 * j["want"]
+    keyer, end = None, time.time() + 5
+    while time.time() < end:
+        keyer = ct.keyer_said(bench.ssh, S.host)
+        if keyer is None or keyer[0] >= edges_want:
+            break
+        time.sleep(0.5)
     base = aa.base_of(S.host) if sender == "x6100" else ""
     factory = sender == "x6100" and aa.gcfix_of(base) == 0
     data = dict(j, wpm=wpm, pitch=pitch, depth_db=depth, runs=runs, keyer=keyer, base=base,
@@ -6062,9 +6105,19 @@ def cw_timing_test(o, sender, listener, w=W):
         return False, says + ": the keyer itself late (the GUI's)", data
     if ct.clean(j):
         return True, says, data
+    if factory and keyer is not None and keyer[0] >= edges_want and not j.get("as_keyed"):
+        # the keyer keyed every edge on time, and the base merged or split elements on the air: its edges, not the GUI's
+        return True, says + (f": the keyer on time, all {keyer[0]} edges; {sender}'s base, Xiegu's "
+                             f"{base or 'factory'}, merged or split elements on the air (its late edges)"), data
+    if factory and keyer is not None and j.get("as_keyed") and not j.get("unpaired"):
+        # the GUI's keyer on time and no time lost: every edge out of time a single one moved by the base (2026-11-26:
+        # its late key-downs, at 0.1 W and at 1 W alike). The GUI's part passes; the base's edges listed
+        edges = ", ".join(f"{e['edge']} {'late' if e['late'] else 'early'} {e['ms']} ms" for e in j.get("shifted", []))
+        return True, says + (f": the keyer on time; {sender}'s base, Xiegu's {base or 'factory'}, moved "
+                             f"{len(j.get('shifted', []))} edges ({edges}), no time lost"), data
     if factory and keyer is not None:
-        return None, says + (f": the keyer on time, the carrier not: {sender}'s base, Xiegu's {base or 'factory'} "
-                             f"(said, not judged)"), data
+        return False, says + (f": the keyer on time, but the air lost or gained time ({j.get('unpaired')} ms not "
+                              f"made up by the next element)"), data
     return False, says, data
 
 
@@ -6673,11 +6726,11 @@ TESTS = [
     Test("spurs x6200", "X6200 TX, X6100 RX", "what comes with the X6200's clean 1500 Hz tone in the X6100's audio "
          "(USB-D, the FT8 dial), the X6100's AGC on and off, the tone at 0.3 and 0.9 of full scale: nothing 156.25 Hz either side over -30 dBc (the X6100's "
          "FT8 app decoded the X6200's answers 156 Hz off, 11-23 to 11-25)", lambda o: spur_test(o, B, A), 90),
-    Test("skirt x6200 levels", "X6200 TX, X6100 RX", "the X6200's skirt at 0.1 W against its TCI audio's level: a tone at 0.1 "
-         "to 0.95 of full scale up, then down again (a level its TCI learns over the overs told from the level itself), "
-         "the power 100-155 Hz off it per 55 Hz: said, not judged (11-25: -31 dBc at 0.3, -55 at 0.9)",
-         lambda o: spur_test(o, B, A, runs=tuple((3, a) for a in (0.1, 0.2, 0.4, 0.6, 0.8, 0.95, 0.8, 0.6, 0.4, 0.2,
-                                                                  0.1)), judge=False), 240),
+    Test("skirt x6200 levels", "X6200 TX, X6100 RX", "the X6200's skirt at 0.1 W over SKIRT_OVERS alike TCI overs (a tone "
+         "at 0.3 of full scale; the levels' sweep could not reach the base, its TCI holding the drive): each over's "
+         "power 100-155 Hz off the tone per 55 Hz at most SKIRT_MAX_DBC (11-25/26: now and then an early over -31 to "
+         "-35 dBc, the rest -55)",
+         lambda o: spur_test(o, B, A, runs=((3, 0.3),) * SKIRT_OVERS, skirt_max=SKIRT_MAX_DBC), 200),
     Test("spurs x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's tone in the X6200's audio",
          lambda o: spur_test(o, A, B), 90),
     Test("tci-tail x6200", "X6200 TX, X6100 RX", "a TCI over's end on the air: the X6200's TCI plays 2 s of 1000 Hz "
