@@ -254,6 +254,18 @@ const char *dialog_cw_trainer_target(void) {
     return target;
 }
 
+const char *dialog_cw_trainer_state(void) {
+    if (!active) return "closed";
+    if (play_due) return "due";
+    switch (st) {
+        case ST_READY:   return "ready";
+        case ST_PLAYING: return "playing";
+        case ST_LISTEN:  return "listen";
+        case ST_RESULT:  return "result";
+    }
+    return "?";
+}
+
 /* Safety */
 
 /* Key train on. False when it could not be set: nothing must be keyed then. */

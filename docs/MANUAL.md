@@ -11124,8 +11124,9 @@ it is closed or the Sentry is (the bench's tools/bench/orch_nifog.py). `his?` an
 MSG > CW's `{HIS}` would send now ("" none), `chars` (the decoder panel's text), `shown` (the panel on the screen)
 and `tail`, the panel text's last 48 characters as Parse left them (the bench's cw-his reads it before the reply goes
 out, cw-parse for Parse's split). A few read-only values answer `cfg?` for the bench: `digi_dx` (the keyboard modes'
-DX call), `radio_caps` (what the base can do, a number), `a_tx_rows` (the rows A's history has drawn on the air)
-and `beacons_heard_20m` (each band's: the NCDXF beacons heard, `beacon:snr:slot`). `buttons?` answers `buttons ...`:
+DX call), `radio_caps` (what the base can do, a number), `a_tx_rows` (the rows A's history has drawn on the air),
+`cwt_target` and `cwt_state` (the CW Trainer's group or call, and where its round is: `closed`, `due`, `ready`,
+`playing`, `listen`, `result`) and `beacons_heard_20m` (each band's: the NCDXF beacons heard, `beacon:snr:slot`). `buttons?` answers `buttons ...`:
 the main screen's pages as the radio made them, split by `|`, each its page button then its buttons' names split by
 `; ` (`(MFK 2:4); AGC; IF shift; VOX`). A setting the radio's base lacks is refused: `cfg comp`, `cfg cessb_on`,
 `cfg cw_peak_on`, `cfg agc_knee`... answer `err cfg: NAME: this radio's base has no ...` and `set comp` answers

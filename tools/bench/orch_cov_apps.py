@@ -4004,20 +4004,6 @@ def _tci_cw(r, text, max_s=40):
                             stderr=subprocess.DEVNULL)
 
 
-def _cw_group(r, since_len, quiet=1.5, limit=40.0):
-    """The decoder's text that came after since_len characters, once it has stopped growing for quiet s (letters and
-    digits, spaces out)"""
-    t0, last, t_last = time.time(), None, time.time()
-    while time.time() - t0 < limit:
-        cur = r.cw[since_len:]
-        if cur != last:
-            last, t_last = cur, time.time()
-        elif cur.strip() and time.time() - t_last > quiet:
-            break
-        time.sleep(0.1)
-    return re.sub(r"\s+", "", (last or "")).upper()
-
-
 def _cwt_start(r):
     """Start, then at once Pause: the group (or call) still comes a second after the press, and after its result
     nothing follows by itself (Learn and Calls play on otherwise, the next one a second after a right answer: a
@@ -4043,43 +4029,60 @@ def _cwt_start(r):
     return n_start
 
 
+def _cwt_state(r, want, limit, what):
+    """Until the trainer's round (the remote's cfg? cwt_state) is one of want: its state then. A few reads a second
+    over the bench's own remote connection, nothing over SSH (a new SSH session every 0.5 s, on the radio's CPU, made
+    the decoder hear 'MMM' as 'EE', 11-26)"""
+    end, last = time.time() + limit, None
+    while True:
+        try:
+            last = str(bench.cfg_get(r, "cwt_state", timeout=3))
+        except Exception as e:          # a reply lost: read again
+            last = f"? ({e})"
+        if last in want:
+            return last
+        if time.time() > end:
+            raise Refused(f"{r.name}: {what}: the trainer's round {last!r} after {limit:.0f} s")
+        time.sleep(0.3)
+
+
 def _cwt_round(o, r, answer=None, start=True, speed=None, n0=None, on_start=None):
-    """One group or call: Start (or the trainer's own next one), its text from the decoder (from n0 of its text, else
-    from now), answered by TCI (answer: a function of the group, None: the group itself); the stats file's tries
-    after. Returns (group, answer, stats)"""
-    given = n0
+    """One group or call: Start (or the trainer's own next one); the group from the trainer itself (the remote's
+    cwt_target once cwt_state says it has been keyed: the radio's decoder copying its own sidetone gave 'MMM' as
+    'EE', 'E1M' for a level-2 group on the X6100 and nothing on the X6200, 11-26: the test then keyed back what the
+    decoder made of it); answered by TCI (answer: a function of the group, None: the group itself); the trainer's
+    result awaited, the stats file's tries read once after. Returns (group, answer, stats)"""
     n0 = len(r.cw) if n0 is None else n0
     tries0 = _cwt_stats(r).get("tries", 0)
     if start:
-        n_start = _cwt_start(r)
-        if given is None:
-            n0 = n_start
+        n0 = _cwt_start(r)
     if on_start:
         on_start()
-    g = _cw_group(r, n0, quiet=1.5 if not speed or speed >= 10 else 4.0, limit=60)
+    _cwt_state(r, ("listen",), 60 if speed and speed < 10 else 30, "the group keyed")
+    g = str(bench.cfg_get(r, "cwt_target", timeout=3) or "")
     if not g:
-        raise Refused(f"{r.name}: no group decoded after Start")
+        raise Refused(f"{r.name}: 'Your turn' with no group (cwt_target empty)")
+    time.sleep(1.0)                     # the group's last character out of the decoder (about 8 dots), then the answer
+    dec = re.sub(r"\s+", " ", r.cw[n0:]).strip()
     a = answer(g) if answer else g
-    time.sleep(0.8)
     n1 = len(r.cw)
-    # Nothing else on the radio while the answer is keyed: the stats file read over SSH every 0.5 s meanwhile (a new
-    # session each time, on the radio's CPU) and the decoder heard 'MMM' as 'EE' (11-26). The keyer's end awaited,
-    # then the file read once
+    # Nothing else on the radio while the answer is keyed: the keyer's end awaited, then the trainer's result
     p = _tci_cw(r, a, 60)
     try:
         p.wait(timeout=60)
     except subprocess.TimeoutExpired:
         p.kill()
-    end = time.time() + 15
-    st = {}
-    while time.time() < end:
-        time.sleep(2.0)                             # the answer's end: the trainer's silence after the last character
+    heard = lambda: re.sub(r"\s+", " ", r.cw[n1:]).strip()
+    try:
+        _cwt_state(r, ("result", "ready"), 20 if not speed or speed >= 10 else 40, "the answer keyed")
+    except Refused as e:
+        raise Refused(f"{e}: the answer {a!r} to {g!r} not taken (the decoder heard {heard()!r})")
+    st = _cwt_stats(r)
+    if st.get("tries", 0) == tries0:    # the file written a moment after the result
+        time.sleep(1.5)
         st = _cwt_stats(r)
-        if st.get("tries", 0) != tries0:
-            break
-    # what the decoder heard of the answer: kept with the run (no picture here: see _cwt_start)
-    heard = re.sub(r"\s+", " ", r.cw[n1:]).strip()
-    o.st.ev(f"{r.name}: trainer group {g!r}, keyed back {a!r}, the decoder heard {heard!r}", "conf")
+    o.st.ev(f"{r.name}: trainer group {g!r} (the decoder's copy of the sidetone {dec!r}), keyed back {a!r}, the "
+            f"decoder heard {heard()!r}", "conf")
     return g, a, st
 
 

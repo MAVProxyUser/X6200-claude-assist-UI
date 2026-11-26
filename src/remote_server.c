@@ -135,6 +135,7 @@
 #include "cw_messages.h"
 #include "beacons.h"
 #include "digi_qso.h"
+#include "dialog_cw_trainer.h"
 #include "text_panel.h"
 #include "cluster/client.h"
 #include "cluster/spots.h"
@@ -1750,6 +1751,16 @@ static bool cfg_value(const char *name, char *out, size_t n) {
     }
     if (!strcmp(name, "radio_caps")) {          /* read only: what the base can do (radio_types.h HW_CAP_*, a number) */
         snprintf(out, n, "%u", (unsigned)radio_caps());
+        return true;
+    }
+    if (!strcmp(name, "cwt_target")) {          /* read only: the CW Trainer's group or call being played or keyed
+                                                 * back ("" none): the bench checks the trainer against it, as the
+                                                 * radio's decoder copying its own sidetone garbles it */
+        snprintf(out, n, "%s", dialog_cw_trainer_target());
+        return true;
+    }
+    if (!strcmp(name, "cwt_state")) {           /* read only: closed, due, ready, playing, listen, result */
+        snprintf(out, n, "%s", dialog_cw_trainer_state());
         return true;
     }
     if (!strcmp(name, "a_tx_rows")) {           /* read only: A's history rows drawn on the air (app_sentry.c) */
