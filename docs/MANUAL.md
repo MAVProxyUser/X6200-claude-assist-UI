@@ -6120,7 +6120,10 @@ What it does:
   JS8Call.
 - Log: the Log popup (Settings..., Log QSO, or when a QSO ends with 73/SK) saves to
   `js8call_log.adi` in desktop JS8Call's ADIF format, with POTA/SOTA
-  activation fields. FT8 keeps its own `ft_log.adi`.
+  activation fields. FT8 keeps its own `ft_log.adi`. Each two-way QSO is offered
+  once, at its end; a later exchange with the same station is a QSO of its own,
+  offered again at its end (up to v0.3.12.49 nothing more was offered for that
+  station for half an hour). A 73 back after the QSO ended stays in it.
 - Map (page 4): the stations of the JS8 log on the same map as FT8.
 - Translate (page 4): the message on the list's cursor, translated into the
   GUI's language; see [GhostNet](#ghostnet), Translation.

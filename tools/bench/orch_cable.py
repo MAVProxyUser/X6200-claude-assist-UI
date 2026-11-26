@@ -169,7 +169,8 @@ def classic(r):
     import suite_cover_b as cb
     if cb.on_classic(r):
         return
-    keep = {k: int(r.state[k]) for k in ("freq", "mode", "agc", "att", "pre", "rfg") if r.state.get(k) is not None}
+    # the VFO too: the X6200's classic screen came up on B, and the Watch stopped the over for it (vfo 0/1, 11-26)
+    keep = {k: int(r.state[k]) for k in ("vfo", "freq", "mode", "agc", "att", "pre", "rfg") if r.state.get(k) is not None}
     with bench.transition():
         r.take_control()
         cb.to_classic(r, r.host)
@@ -408,9 +409,9 @@ def ensure_alike(o, f, mode, **more):
 
 # ---- CW: the decoder's settings and keys ----
 
-CW_WEAK_RFG = {"x6100": 40, "x6200": 15}   # cw-dec-snr: the listener's RF gain for its weak overs, heard about 20 dB
-                          # up (2026-11-26: the X6100 at 15 heard it 13-14 dB up, at 30 18.8 dB, where Dec SNR 5 copied
-                          # garble; the X6200 at 15, 23-25 dB, copied clean)
+CW_WEAK_RFG = {"x6100": 55, "x6200": 15}   # cw-dec-snr: the listener's RF gain for its weak overs, heard about 20 dB
+                          # up (2026-11-26: the X6100 at 15 heard it 13.9 dB up, at 30 18.8, at 40 21.8, where Dec SNR 5
+                          # still copied garble; the X6200 at 15, 23-25 dB, copied clean)
 CW_DEC_SPEED = {"key_speed": 20}    # and the sender's speed: at its own 28 WPM the X6200 copied nothing of the
                                     # X6100's 'TEST TEST' even at full gain (2026-11-26; cw-his found it too)
 CW_WEAK_MAX_DB = 30       # a weak over heard at most this far over the quiet: Dec SNR 30 (with its 5 dB margin) must
@@ -720,42 +721,41 @@ def _own_peaks(r, f, t0, t1):
 
 
 def t_cw_own_carrier(o, s, l):
-    """While the sender keys CW its own spectrum shows its carrier at its dial: in its frames on the air, a peak
-    OWN_CARRIER_DB over the frame's median within OWN_CARRIER_HZ of the dial; and its TX meters come (with an ALC
-    reading on the X6100; the X6200's ALC stays about 0, HW_CAP_TX_NO_ALC). Before 2026-11-26 the search began 100 Hz
-    from the dial and pictures of G (no VFO line there) were the proof"""
+    """While the sender keys CW from the classic screen its TX meters come (with an ALC reading on the X6100; the
+    X6200's ALC stays about 0, HW_CAP_TX_NO_ALC): judged. Its carrier on the VFO line and the grey ALC bar are drawn by
+    the GUI, not carried in the spectrum frames on the air (the X6100's base sends few, unzoomed; the X6200's showed
+    none within 300 Hz of the dial, 2026-11-26): the classic screen photographed on the air, LOOK, with the frames'
+    peaks near the dial kept as data"""
     S = o.r[s]
     res = {}
     try:
         got = {}
+        ensure_alike(o, F_CW, 4)
+        classic(S)
 
         def body(watch):
             th = threading.Thread(target=lambda: got.update(t=tci_cw(o, S, "TTTTT TTTTT", watch)))
             th.start()
             time.sleep(2.0)
-            snap(o, f"cw-own-carrier {s} sending CW")
+            snap(o, f"cw-own-carrier {s}'s classic screen sending CW (the VFO line, the ALC bar)")
             th.join(30)
-        H.over(o, s, l, F_CW, 4, "cw-own-carrier", body, agc=2)
+        H.over(o, s, l, F_CW, 4, "cw-own-carrier", body, agc=2, pages=False)
         on, off = got["t"]
         peaks = _own_peaks(S, F_CW, on + 0.5, off)
-        strong = [p for p in peaks if p[1] >= OWN_CARRIER_DB]
         frames = t_frames(S, on, off)
-        res.update(frames=len(peaks), strong=len(strong), offsets_hz=sorted({p[0] for p in strong})[:8],
+        res.update(frames=len(peaks), strong=sum(1 for p in peaks if p[1] >= OWN_CARRIER_DB),
                    best_db=max((p[1] for p in peaks), default=None), alc=[x[3] for x in frames][:5])
         if not frames:
             return False, f"no TX meter frames from {s} while it sent", res
         if s == H.A and not any((x or 0) > 0 for x in res["alc"]):
             return False, f"the X6100's TX meters carry no ALC reading ({res['alc']})", res
-        if not peaks:
-            return False, f"{s} sent no spectrum frames while on the air", res
-        if not strong:
-            return False, f"{s}'s own spectrum showed its carrier in {len(strong)} of {len(peaks)} frames on the air " \
-                          f"(within {OWN_CARRIER_HZ} Hz of its dial, {OWN_CARRIER_DB} dB up; the best " \
-                          f"{res['best_db']} dB)", res
-        return True, f"{s}'s own spectrum showed its carrier in {len(strong)} of {len(peaks)} frames, " \
-                     f"{res['offsets_hz']} Hz from its dial; its ALC {res['alc'][:3]}", res
+        return None, f"{s}'s TX meters came, ALC {res['alc'][:3]}; its classic screen photographed on the air (look: " \
+                     f"the carrier on the VFO line, the ALC bar grey); its spectrum frames near the dial: " \
+                     f"{res['strong']} of {res['frames']} over {OWN_CARRIER_DB} dB, the best {res['best_db']}", res
     except Refused as e:
         return False, str(e), res
+    finally:
+        home(o, S)
 
 
 def t_cw_log_qso(o, s, l):
@@ -2192,7 +2192,8 @@ def t_js8_look(o, s, l):
                 role(o, s)
                 t2 = time.time()
                 js8_send(o, S, f"{call_l} 73", watch)
-                _js8_heard(L, t2, " 73")
+                m73 = _js8_heard(L, t2, " 73") or {}
+                res["row_73"] = {k: m73.get(k) for k in ("fr", "to", "lc", "chk", "part", "x")}
                 end = time.time() + 8              # the offer, the popup or (l busy) the line saying Log QSO
                 while time.time() < end and not any("ended" in t for t in msgs_since(L, t2)):
                     time.sleep(0.3)
@@ -4257,7 +4258,7 @@ COVERS = {
     "cw-peak-q": (["cw-peak-q"], []),
     "update-check-off": ([], ["system-update-daily-check"]),   # its off switch only: no check is made to see it
     "cw-key-train": ([], ["cw-key-train"]),          # its message and ON AIR at 0 W: the KEY jack, a paddle
-    "cw-own-carrier": (["cw-own-carrier-on-vfo-line"], ["cw-alc-grey"]),
+    "cw-own-carrier": ([], ["cw-own-carrier-on-vfo-line", "cw-alc-grey"]),
     "cw-log-qso": (["cw-log-qso-button"], ["log-quick-qso-decoder-call"]),
     "cw-msg": (["cw-msg-tx", "cw-msg-breakin-raised"], ["cw-msg-tokens"]),
     "cw-his": (["cw-msg-tokens"], []),
@@ -4325,7 +4326,7 @@ PAIRS = [
     ("cw-zap", t_cw_zap, 90, "200 Hz off, ZAP tunes onto the station within 10 Hz, in CW and CW-R"),
     ("cw-tuner", t_cw_tuner, 70, "the tuning bars 30 Hz off in CW and CW-R (pictures)"),
     ("cw-key-train", t_cw_key_train, 60, "KEY Train: TCI CW at 0 W, nothing heard; Train off: decoded"),
-    ("cw-own-carrier", t_cw_own_carrier, 40, "the sender's own carrier in its own spectrum at its dial, its ALC read"),
+    ("cw-own-carrier", t_cw_own_carrier, 50, "the sender's TX meters and ALC; its classic screen on the air (picture)"),
     ("cw-log-qso", t_cw_log_qso, 70, "the decoder's confirmed call logged by Log QSO (CW 1:2)"),
     ("cw-msg", t_cw_msg, 60, "MSG > CW 'TEST {CALL} TEST': decoded with the call, one over through the gaps"),
     ("cw-his", t_cw_msg_his, 80, "{HIS}: the call the decoder confirmed sent back"),

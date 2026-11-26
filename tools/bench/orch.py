@@ -6050,6 +6050,9 @@ def cw_timing_test(o, sender, listener, w=W):
         with o.step(f"{sender} keys {text!r} ({wpm} WPM, {secs:.1f} s), {listener} records its audio") as s:
             run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_cw_tx.py"),
                     f"root@{S.host}:/tmp/tci_cw_tx.py"])
+            # starts (a GUI restart before it, as the test calls make, begins a new log: a mark taken earlier found
+            # nothing after it, 2026-11-26)
+            mark["n"] = ct.keyer_lines(bench.ssh, S.host)
             t0 = time.time()
             proc = subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
                                      f"python3 /tmp/tci_cw_tx.py '{text}' {secs + 6:.0f}"], stdout=subprocess.DEVNULL,
@@ -6063,6 +6066,7 @@ def cw_timing_test(o, sender, listener, w=W):
             res["x"] = tci.audio(t0, time.time())[0]
             s.confirm(f"{len(res['x']) / TFS:.1f} s of audio")
     speed0 = None
+    mark = {}                   # the keyer's lines after this are the over's (it logs each send): taken as the over
     try:
         speed0, now = bench.cfg_set(S, "key_speed", wpm)
         if str(now) != str(wpm):
@@ -6084,12 +6088,12 @@ def cw_timing_test(o, sender, listener, w=W):
     pitch, _ = peak(x, kt, 120)
     runs, depth = ct.cw_elements(x, TFS, pitch or kt)
     j = ct.judge(runs, ct.cw_ideal(text), 1200.0 / wpm)
-    # the keyer's own line for this over: written as it ends (read at once, an earlier over's 20 edges were taken for
-    # this one's 112, 2026-11-26)
+    # the keyer's own lines for this over, every one since the mark (it logs each send: the last line alone held 20 of
+    # the over's 112 edges, 2026-11-26), written as each ends
     edges_want = 2 * j["want"]
     keyer, end = None, time.time() + 5
     while time.time() < end:
-        keyer = ct.keyer_said(bench.ssh, S.host)
+        keyer = ct.keyer_said(bench.ssh, S.host, since=mark.get("n"))
         if keyer is None or keyer[0] >= edges_want:
             break
         time.sleep(0.5)
@@ -6109,6 +6113,8 @@ def cw_timing_test(o, sender, listener, w=W):
         # the keyer keyed every edge on time, and the base merged or split elements on the air: its edges, not the GUI's
         return True, says + (f": the keyer on time, all {keyer[0]} edges; {sender}'s base, Xiegu's "
                              f"{base or 'factory'}, merged or split elements on the air (its late edges)"), data
+    if factory and keyer is not None and keyer[0] < edges_want:
+        return False, says + f": the keyer's log has {keyer[0]} edges of the over's {edges_want}: its timing unproven", data
     if factory and keyer is not None and j.get("as_keyed") and not j.get("unpaired"):
         # the GUI's keyer on time and no time lost: every edge out of time a single one moved by the base (2026-11-26:
         # its late key-downs, at 0.1 W and at 1 W alike). The GUI's part passes; the base's edges listed

@@ -75,11 +75,20 @@ def cw_ideal(text):
     return out
 
 
-def keyer_said(ssh, host, last=1):
+def keyer_lines(ssh, host):
+    """How many keyer lines the sender's GUI log has now (keyer_said's since=: the lines after it are the over's)"""
+    try:
+        return int((ssh(host, f"grep -c 'cw_encoder: .* key edges' {GUI_LOG}") or "0").strip() or 0)
+    except Exception:                       # noqa: BLE001
+        return None
+
+
+def keyer_said(ssh, host, last=1, since=None):
     """The sender's keyer on its last `last` sends, from its GUI's log: (edges, late, the latest ms) summed over them,
     None when unsaid (a GUI before the line, 2026-11-25)"""
     try:
-        out = ssh(host, f"grep 'cw_encoder: .* key edges' {GUI_LOG} | tail -{int(last)}")
+        out = ssh(host, f"grep 'cw_encoder: .* key edges' {GUI_LOG} | " +
+                  (f"tail -n +{int(since) + 1}" if since is not None else f"tail -{int(last)}"))
     except Exception:                       # noqa: BLE001 (unread: unsaid)
         return None
     got = re.findall(r"(\d+) key edges, (\d+) more than \d+ ms late on their time, the latest (-?\d+) ms", out or "")

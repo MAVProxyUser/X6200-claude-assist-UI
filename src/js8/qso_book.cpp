@@ -111,12 +111,17 @@ static std::optional<std::string> offer(Qso &q, bool closing) {
 
 /* ---- QsoTracker ---- */
 
-/* The QSO with `call`, started afresh if there is none or the last one
- * went quiet too long ago, and marked as active now. */
-Qso &QsoTracker::touch(const std::string &call, std::int64_t now) {
+/* The QSO with `call`, started afresh if there is none, the last one
+ * went quiet too long ago, or the last one ended (offered for the log) and
+ * this message does not close too: a later exchange with the same station
+ * is a QSO of its own, offered again at its end (the bench's js8-look,
+ * 2026-11-26: two QSOs three minutes apart, the second never offered). A
+ * closing answer to the end ('73' back after ours) stays in the QSO ended,
+ * its reports kept for Log QSO. Marked as active now. */
+Qso &QsoTracker::touch(const std::string &call, std::int64_t now, bool closing) {
     const std::string key = base_callsign(call);
     auto found = live_.find(key);
-    if (found != live_.end() && now - found->second.last_ms > EXPIRE_MS) {
+    if (found != live_.end() && (now - found->second.last_ms > EXPIRE_MS || (found->second.offered && !closing))) {
         live_.erase(found);
         found = live_.end();
     }
@@ -146,7 +151,7 @@ std::optional<std::string> QsoTracker::received(const std::string &from, const s
     }
 
     const std::vector<std::string> w = words_after_to(text);
-    Qso &qso = touch(from, now);
+    Qso &qso = touch(from, now, closes_qso(w));
     qso.heard_snr = db;
     if (const auto r = report_in(w)) qso.rcvd_snr = r;
     qso.grid = better_grid(qso.grid, find_grid(after_colon(text)));
@@ -161,7 +166,7 @@ std::optional<std::string> QsoTracker::sent(const std::string &text, const std::
     if (base_callsign(mc.to) == base_callsign(mine)) return {};
 
     const std::vector<std::string> w = words_after_to(text);
-    Qso &qso = touch(mc.to, now);
+    Qso &qso = touch(mc.to, now, closes_qso(w));
     if (const auto r = report_in(w)) qso.sent_snr = r;
     if (heartbeat_ack(w)) return {};
     qso.we_sent = true;

@@ -57,7 +57,7 @@ public: /* used by the dialog's operations and the tests */
     void clear() { live_.clear(); }
 
 private: /* keyed by base call */
-    Qso &touch(const std::string &call, std::int64_t now);
+    Qso &touch(const std::string &call, std::int64_t now, bool closing);
 
     std::map<std::string, Qso> live_;
 };
