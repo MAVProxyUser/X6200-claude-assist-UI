@@ -107,12 +107,9 @@ def t_gmrs_b(o):
 
 # ---- B's scan: a real SDR, or the X6200's daemon replaying noise ----
 
-def _sdr_radio(o):
-    """The radio with an SDR on its HOST port (the state's sdr), the X6200 first; None for neither"""
-    for n in (H.B, H.A):
-        if o.r[n].state.get("sdr") == 1:
-            return n
-    return None
+def _sdr_radios(o):
+    """The radios with an SDR on their HOST port (the state's sdr), the X6200 first; none: []"""
+    return [n for n in (H.B, H.A) if o.r[n].state.get("sdr") == 1]
 
 
 def _daemon_args(host, wait=15.0):
@@ -182,11 +179,10 @@ def _replay_off(o, n, pid):
 def t_gmrs_scan(o):
     """B's F1 on the GMRS preset goes down GMRS's 22 channels: B's scan kind 4 (GMRS's, not the band sweep), every
     channel it stops at a GMRS channel by its name, at least six of them, each the next of the 22 in frequency order
-    (462.550, 462.5625 ... 462.725, 467.5625 ... 467.7125, round), then F1 again ends it. On the radio with an SDR, else
-    on the X6200 with its daemon replaying noise; the other radio's B set alike and A's dial alike on both"""
+    (462.550, 462.5625 ... 462.725, 467.5625 ... 467.7125, round), then F1 again ends it. On each radio with an SDR in
+    turn, else on the X6200 with its daemon replaying noise; the other radio's B set alike and A's dial alike on both"""
     _need_state(o)
-    n = _sdr_radio(o)
-    replay = None
+    ns = _sdr_radios(o)
     with o.step("both on the Sentry's page B, B's channel GMRS 15 (462.550): its preset GMRS") as s:
         _page(o, "B")
 
@@ -196,12 +192,23 @@ def t_gmrs_scan(o):
             return _b_state(r)
         got = H.in_parallel(o, one)
         s.confirm(str(got))
-    if n is None:
-        n = H.B
+    said = {}
+    for n in ns or [H.B]:
+        hops, via = _b_scan(o, n, replay=not ns)
+        said[n] = f"through {via}: {', '.join(nm for _, nm in hops)}"
+    return True, "B scanned GMRS: " + "; ".join(f"{n} {v}" for n, v in said.items()), said
+
+
+def _b_scan(o, n, replay):
+    """n's B's GMRS scan (t_gmrs_scan), through its SDR or (replay) its daemon replaying noise: the hops, and through
+    what"""
+    r = o.r[n]
+    if replay:
         with o.step(f"no SDR on either HOST port: {n}'s daemon replaying noise in its place") as s:
             replay = _replay_on(o, n)
             s.confirm(f"replay daemon pid {replay}")
-    r = o.r[n]
+    else:
+        replay = None
     hops = []
     try:
         with o.step(f"F1 on {n}'s B: its scan goes down GMRS's channels (bscan 4)") as s:
@@ -244,28 +251,33 @@ def t_gmrs_scan(o):
         if replay:
             with o.step(f"{n}'s own SDR daemon back") as s:
                 s.confirm(f"pid {_replay_off(o, n, replay)}")
-    via = "its SDR" if replay is None else "a replay of noise"
-    return True, f"{n}'s B scanned GMRS through {via}: {', '.join(nm for _, nm in hops)}", hops
+    return hops, "its SDR" if replay is None else "a replay of noise"
 
 
 # ---- G: GMRS's groups through the SDR, never sent on ----
 
 def t_gmrs_g(o):
-    """G on GMRS through the SDR of the radio that has one: GMRS 20 and GMRS 20's repeater input as G's SDR channel,
-    each read back with the reason it is not sent on (GMRS's own, whatever the SDR); A/B tapped there must not arm the
-    SDR (garm 0) nor the radio (rxo 1); a ham channel (446.000) gets no GMRS reason; G back on the radio's own
+    """G on GMRS through the SDR of each radio that has one, in turn: GMRS 20 and GMRS 20's repeater input as G's SDR
+    channel, each read back with the reason it is not sent on (GMRS's own, whatever the SDR); A/B tapped there must not
+    arm the SDR (garm 0) nor the radio (rxo 1); a ham channel (446.000) gets no GMRS reason; G back on the radio's own
     channel, A's dial alike on both all the while"""
     _need_state(o)
-    n = _sdr_radio(o)
-    if n is None:
+    ns = _sdr_radios(o)
+    if not ns:
         raise Refused("needs an SDR (RTL-SDR, HackRF or bladeRF) on a radio's HOST port for G's SDR groups: neither "
-                      "radio has one (the X6200's holds the AMBE stick)")
-    r = o.r[n]
+                      "radio has one")
     with o.step("both on page G, G's channel CB 19 (27.185 AM) on both") as s:
         _page(o, "G")
         o.both({"wch": (27185000, 6)})
         o.both({"freq": 27185000, "mode": 6})
-        s.confirm(f"{bench._value(r, 'freq')} {bench._value(r, 'mode')}")
+        s.confirm(f"{bench._value(o.r[ns[0]], 'freq')} {bench._value(o.r[ns[0]], 'mode')}")
+    said = {n: _g_gmrs(o, n) for n in ns}
+    return True, f"G on GMRS 20 and its input through the SDR of {', '.join(ns)}: {NO_TX}; A/B armed nothing", said
+
+
+def _g_gmrs(o, n):
+    """n's G through its SDR on GMRS (t_gmrs_g): what G said on each channel"""
+    r = o.r[n]
     said = {}
     try:
         for hz in (CH[20], INPUT[20]):
@@ -301,7 +313,7 @@ def t_gmrs_g(o):
             r.wait("G on the radio", lambda: r.state.get("ghz") == 0, 8)
             H.alike(o, ("freq", "mode"))
             s.confirm(f"{bench._value(r, 'freq')}")
-    return True, f"{n}'s G on GMRS 20 and its input: {NO_TX}; A/B armed nothing", said
+    return said
 
 
 # ---- F SYSTEM's GMRS panel ----
@@ -418,7 +430,9 @@ def t_gmrs_xvtr(o):
     A hears it (gmrx 2) and its F1 tunes A to the chosen channel in NFM on both; A/B there arms nothing; the radio's
     own PTT there is refused with GMRS's words, nothing keyed; A's F1 on the GMRS band scans the channels in frequency
     order (each radio's own dial, declared apart while it steps); G's GMRS group is the radio's own: CH + steps it,
-    A/B arms nothing there; 'set gsdr' refused off G and nothing without an SDR on G. Receive only throughout"""
+    A/B arms nothing there; 'set gsdr' refused off G and nothing without an SDR on G. A radio with an SDR on HOST hears
+    GMRS on B's SDR first: its panel says gmrx 1 (F1 would tune B), so A's dial is tuned straight, and G's GMRS group is
+    the SDR's (CH + steps its SDR channel). Receive only throughout"""
     import orch_cable as oc
     _need_state(o)
     A, B = H.A, H.B
@@ -433,13 +447,18 @@ def t_gmrs_xvtr(o):
         s.confirm(r.errs[-1])
     with oc.cfg_kept(o.r[A], XV), oc.cfg_kept(o.r[B], XV):
         try:
-            with o.step("the transverter on both; F's GMRS panel: heard on A (gmrx 2), both on one channel") as s:
+            sdr = {n: r.state.get("sdr") == 1 for n, r in o.r.items()}    # B's SDR comes before the radio's own
+            res["sdr"] = sdr
+            with o.step("the transverter on both; F's GMRS panel: heard on A (gmrx 2), or on B's SDR where a radio has "
+                        "one (gmrx 1: it comes first); both on one channel") as s:
                 _page(o, "F")
 
                 def panel(n, r):
                     r.send("set gmp 1")
                     r.wait("the panel", lambda: r.state.get("gmp") == 1, 5)
-                    r.wait("A hears GMRS", lambda: r.state.get("gmrx") == 2, 5)
+                    rx = 1 if sdr[n] else 2
+                    what = "B's SDR hears GMRS (first)" if sdr[n] else "A hears GMRS"
+                    r.wait(what, lambda: r.state.get("gmrx") == rx, 5)
                     return r.state.get("gmhz")
                 got = H.in_parallel(o, panel)
                 want = got[A]
@@ -452,14 +471,25 @@ def t_gmrs_xvtr(o):
                 if rb.state.get("gmhz") != want:
                     raise Refused(f"{B}'s panel choice {rb.state.get('gmhz')} never reached {A}'s {want}")
                 res["channel"] = NAMES[want]
-                s.confirm(f"both on {NAMES[want]}, gmrx 2")
-            with o.step(f"F1 (TUNE) on both: A on {res['channel']} in NFM, alike") as s:
+                s.confirm(f"both on {NAMES[want]}, gmrx {({n: r.state.get('gmrx') for n, r in o.r.items()})}")
+            how = "the dial (F1 would tune B's SDR)" if any(sdr.values()) else "F1 (TUNE)"
+            with o.step(f"{how} on both: A on {res['channel']} in NFM, alike") as s:
                 def tune(n, r):
                     bench.tap(r, "F1")
                     r.wait("A on it", lambda: r.state.get("pg") == "A" and int(r.state.get("freq", 0)) == want and
                            int(r.state.get("mode", -1)) == 7, 8)
                     return int(r.state.get("freq"))
-                got = H.in_parallel(o, tune)
+
+                def close(n, r):
+                    r.send("set gmp 0")
+                    r.wait("the panel closed", lambda: r.state.get("gmp") == 0, 4)
+                if any(sdr.values()):           # the radio's own receiver tuned straight: page A, A's dial there
+                    H.in_parallel(o, close)
+                    _page(o, "A")
+                    o.both({"freq": want, "mode": 7})
+                    got = {n: int(r.state.get("freq", 0)) for n, r in o.r.items()}
+                else:
+                    got = H.in_parallel(o, tune)
                 _apart_ok(o)
                 s.confirm(str(got))
             res["rx"] = {n: {k: r.state.get(k) for k in ("pre", "att", "agc")} | {"meter": r.meter}
@@ -543,36 +573,51 @@ def t_gmrs_xvtr(o):
                     res.setdefault("scan_meter_over_alarm", {})[n] = loud[:10]
                     s.confirm(", ".join(res["a_scan"][n]) + (f"; its meter over {H.RF_ALARM_DBM} dBm at times "
                                                              f"({max(loud)}), nothing keyed" if loud else ""))
-            with o.step("G on GMRS 20 through the radio on both; CH + (BAND UP): GMRS 21 on both") as s:
+            with o.step("G on GMRS 20 on both, through the radio (B's SDR first where a radio has one: the radio's own "
+                        "GMRS group is not offered then); CH + (BAND UP): GMRS 21 on both") as s:
                 _page(o, "G")
                 o.both({"freq": CH[20], "mode": 7})
-                r = o.r[B]
-                r.send(f"set gsdr {CH[20]}")            # no SDR: G stays the radio's
+                for n, r in o.r.items():
+                    r.send(f"set gsdr {CH[20]}")        # an SDR: G's GMRS 20 is its; none: G stays the radio's
                 time.sleep(1.0)
-                if r.state.get("ghz"):
-                    raise Refused(f"{B}: G went to an SDR channel with no SDR ({r.state.get('ghz')})")
+                for n, r in o.r.items():
+                    if (r.state.get("ghz") == CH[20]) != sdr[n]:
+                        raise Refused(f"{n}: G's GMRS 20 on {r.state.get('ghz') or 'the radio'} with "
+                                      f"{'an' if sdr[n] else 'no'} SDR")
 
                 def up(n, r):
                     bench.tap(r, "BAND_UP")
+                    if sdr[n]:
+                        r.wait("GMRS 21 on its SDR", lambda: r.state.get("ghz") == CH[21], 5)
+                        return f"its SDR on {r.state.get('ghz')}"
                     r.wait("GMRS 21", lambda: int(r.state.get("freq", 0)) == CH[21], 5)
                     return int(r.state.get("freq"))
-                got = H.in_parallel(o, up)
-                _apart_ok(o)
+                if len(set(sdr.values())) > 1:  # one through its SDR (its dial stays), the other its own dial
+                    with bench.apart({"freq": bench.STEPPED}, "G's CH +: one radio's on its SDR, the other's dial"):
+                        got = H.in_parallel(o, up)
+                    o.both({"freq": CH[20], "mode": 7})
+                else:
+                    got = H.in_parallel(o, up)
+                    _apart_ok(o)
                 s.confirm(str(got))
             with o.step("A/B on G at GMRS on both: nothing armed") as s:
                 for r in o.r.values():
                     bench.tap(r, "AB")
                 time.sleep(1.5)
-                bad = [n for n, r in o.r.items() if r.state.get("rxo") != 1 or r.state.get("tx")]
+                bad = [n for n, r in o.r.items() if r.state.get("rxo") != 1 or r.state.get("tx") or r.state.get("garm")]
                 if bad:
                     for n in bad:
+                        if o.r[n].state.get("garm"):
+                            bench.tap(o.r[n], "AB")
                         bench.arm(o.r[n], False)
                     raise Refused(f"A/B on G armed {bad} on GMRS")
-                s.confirm("rxo 1, tx 0 on both")
+                s.confirm("garm 0, rxo 1, tx 0 on both")
         finally:
             for r in o.r.values():
                 if r.state.get("gmp") == 1:
                     r.send("set gmp 0")
+                if r.state.get("ghz"):
+                    r.send("set gsdr 0")
             o.both({"freq": 14200000, "mode": 2})   # off GMRS before the transverter goes
             _page(o, "A")
     return True, (f"through a GMRS transverter on both: A on {res.get('channel')} in NFM, A/B and the PTT refused "
@@ -593,12 +638,13 @@ def tests(Test, A, B):
     return [
         Test("gmrs-b", "both RX", "B's channel GMRS 20, GMRS 8 and GMRS 20 IN on both: preset GMRS, NFM, named; A's "
              "dial untouched and alike", t_gmrs_b, 40),
-        Test("gmrs-scan", "both RX", "B's F1 on GMRS: GMRS's 22 channels in frequency order, each named (an SDR, "
-             "else the X6200's daemon replaying noise)", t_gmrs_scan, 90),
-        Test("gmrs-g", "both RX", "G on GMRS 20 and its input through an SDR: refused for GMRS's reason, A/B arms "
-             "nothing; G back on the radio", t_gmrs_g, 40),
+        Test("gmrs-scan", "both RX", "B's F1 on GMRS: GMRS's 22 channels in frequency order, each named (each radio's "
+             "SDR in turn, else the X6200's daemon replaying noise)", t_gmrs_scan, 120),
+        Test("gmrs-g", "both RX", "G on GMRS 20 and its input through each radio's SDR: refused for GMRS's reason, "
+             "A/B arms nothing; G back on the radio", t_gmrs_g, 60),
         Test("gmrs-f", "both RX", "F SYSTEM's GMRS panel on both: chosen, opened, the MFK, the tones, F1 tunes on the "
              "receiver there (none: nothing), F5 closes; A's dial untouched", t_gmrs_f, 60),
         Test("gmrs-xvtr", "both RX", "a GMRS transverter on both (the WR12's stand-in): F's panel tunes A in NFM, "
-             "A/B and the PTT refused as GMRS, A's scan of the 22, G's GMRS group on the radio", t_gmrs_xvtr, 120),
+             "A/B and the PTT refused as GMRS, A's scan of the 22, G's GMRS group on the radio (the SDR's where a "
+             "radio has one)", t_gmrs_xvtr, 120),
     ]

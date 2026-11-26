@@ -1743,8 +1743,10 @@ All in narrow FM (the SDR daemon's FM takes the 20 kHz channels' 5 kHz deviation
 quieter).
 
 **F SYSTEM > GMRS (LISTEN)** (the last item; F2 or a push) opens a panel over F: its title says where GMRS is heard
-(`HEARD ON B (RTL-SDR)`, `HEARD ON A (THE X6200'S OWN RECEIVER)` or `NO RECEIVER HERE`), then the 22 channels and the
-8 repeater inputs, a row each: the number, the whole frequency (462.5625), the bandwidth, what it is, `WATCHED` on a
+(`HEARD ON B (RTL-SDR)`, `HEARD ON A (THE X6200'S OWN RECEIVER)` or `NO RECEIVER HERE`; B's SDR comes first: with an
+SDR and a transverter both there the panel and G's GMRS groups use the SDR, and A still tunes GMRS by its dial), then
+the 22 channels and the 8 repeater inputs, a row each: the number, the whole frequency (462.5625), the bandwidth,
+what it is, `WATCHED` on a
 watch channel, `(B)` or `(A)` where that receiver is on it. The **MFK** or the **VFO** chooses (channel 20 first);
 **F1** or a **push** tunes it on the receiver there and shows that screen (B's channel with the GMRS preset, B's SDR
 on the speaker; or A's dial in NFM); **F2** starts GMRS's scan there (B's or A's, from 462.550); **F3** watches the
@@ -1783,9 +1785,10 @@ Talk on GMRS with a GMRS radio of its own; the Sentry is the scanner beside it. 
 tools/gmrs`) checks the channel table, the scans' order, F's panel's rows and the tones' rows, and on the real settings
 of each model that GMRS is out of the radio's own reach as it comes, received through the WR12 or a transverter, and
 refused as GMRS through a transverter whatever the switch and the TX ranges; `tools/ham_bands` and `tools/tx_ranges`
-check GMRS's spans. On the radios, orch's `gmrs-b` (B on GMRS on both), `gmrs-scan` (B's scan of the 22), `gmrs-f`
-(F's panel), `gmrs-xvtr` (a transverter taking GMRS in on both, the WR12's stand-in: A tuned and scanning, G's group on
-the radio, A/B and the PTT refused) and `gmrs-g` (G through an SDR), all receive only.
+check GMRS's spans. On the radios, orch's `gmrs-b` (B on GMRS on both), `gmrs-scan` (B's scan of the 22, on each
+radio's SDR), `gmrs-f` (F's panel), `gmrs-xvtr` (a transverter taking GMRS in on both, the WR12's stand-in: A tuned
+and scanning, G's group on the radio or its SDR, A/B and the PTT refused) and `gmrs-g` (G through each radio's SDR),
+all receive only.
 
 ### The SDRs (RTL-SDR, HackRF, bladeRF), the GNS 5890 and the microADSB on USB
 
