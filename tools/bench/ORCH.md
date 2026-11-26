@@ -149,7 +149,7 @@ sim_test.py checks the framework itself (every rule, the Watch reading the regis
 
 ## The console (http://127.0.0.1:8765/)
 
-Read only, but for its Re-run all button. **Radios**: both live (frequency, mode, on the air or not, power, page, app, link), the sync state.
+Read only, but for its Re-run all button and the verdicts by hand. **Radios**: both live (frequency, mode, on the air or not, power, page, app, link), the sync state.
 **Now**: the test and its steps as they go, the progress. **This run**: the tests run now, their results and what
 each found (pictures of both screens for a failed one). **Not rerun**: the earlier results, the latest first, with
 their tallies and GUI versions. **Where the radios differ**: the caps test's map. **Events**: everything the
@@ -176,12 +176,24 @@ at. **Re-run all** starts `orch.py run --all` from the standing console when no 
 token) and after a confirmation; its output goes to `runs/<time>-console-rerun.log`. A run's own console has no working
 button: the standing one must be up.
 
+**To look at** (the owner, 2026-11-26: "none of the look items have artifacts for me to look at, nor an approval method
+to say they pass manually"): every test whose latest result is LOOK, the latest first. Each one's **show** (on any
+LOOK or FAIL row, in this run's table and the kept one too) opens what a person needs to judge it (`/detail?name=`):
+what passes, what the test said, its pictures, the run's files written while it ran (pictures shown, audio played in
+the page, a `.raw` as 24 kHz audio: `/runfile/<run>/<file>`), its steps and the numbers it returned. **It passes** /
+**It fails** (an optional note) record a verdict by hand on that result, **Undo** takes it back: only from this computer,
+as Re-run all. The verdict stands in `orch_results.json` (`judged`: who, when, the note, what the test said) until the
+test runs again; a LOOK again keeps it beside the new result as `judged_before`. `python3 orch.py judge <test>
+PASS|FAIL|UNDO [note] [--by who]` does the same from a shell. Every verdict is kept in `orch_judged.jsonl`, and the
+tally counts them.
+
 ## Files
 
 | where | what |
 |---|---|
 | `~/.config/x6x00-bench/orch_results.json` | each test's last result, passes and runs (what is not rerun) |
 | `~/.config/x6x00-bench/orch_status.json` | the run's state for the console, each second |
+| `~/.config/x6x00-bench/orch_judged.jsonl` | every verdict by hand (the console's It passes / It fails / Undo, `orch.py judge`) |
 | `~/.config/x6x00-bench/orch_caps.json` | what each radio takes (the caps test), the tests' guide to their differences |
 | `~/.config/x6x00-bench/runs/<time>-orch/` | a run: `events.jsonl`, `results.json` (each test's code fingerprint with its result), `meta.json` (the md5 of each radio's GUI binary at its start), each over's WAV and spectrum frames, the AMBE and digital voice files; the CW tests' listener audio (cw-text's `cw_text_*.wav`, cw-quiet's `cw_quiet_<lo>_<hi>_<radio>.wav` from before the first switch; cw-copy, cw-carrier and tci-cw's `*.raw`, 24 kHz int16) for `tools/cw_replay` |
 | `~/.config/x6x00-bench/dv/` | the AMBE tests' speech (this computer's voice) and their built tools |

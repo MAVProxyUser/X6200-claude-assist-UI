@@ -133,10 +133,61 @@ def store_load():
     return bench.load_json(STORE, {})
 
 
+class store_lock:
+    """STORE read, changed and written by one at a time: a run's result and a verdict by hand at the same moment
+    (the console's Pass/Fail) would otherwise lose one of them"""
+    def __enter__(self):
+        import fcntl
+        self.fh = open(STORE + ".lock", "a")
+        fcntl.flock(self.fh, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *a):
+        self.fh.close()
+
+
 def store_put(name, rec):
-    doc = store_load()
-    doc[name] = rec
-    bench.save_json(STORE, doc)
+    with store_lock():
+        doc = store_load()
+        doc[name] = rec
+        bench.save_json(STORE, doc)
+
+
+# A verdict by hand on a test's latest result (the owner, 2026-11-26: "none of the look items have artifacts for me to
+# look at, nor an approval method to say they pass manually"): the console's Pass/Fail/Undo, or orch.py judge. It
+# stands in STORE until the test is run again (a LOOK again keeps the old verdict beside it, judged_before, as a
+# hint); every verdict is kept in JUDGE_LOG
+JUDGE_LOG = os.path.join(bench.STATE, "orch_judged.jsonl")
+
+
+def judge(name, verdict, note="", by="owner"):
+    """verdict PASS or FAIL on name's latest result, or UNDO (back to what the test said); the record as it now is"""
+    if verdict not in ("PASS", "FAIL", "UNDO"):
+        raise ValueError(f"verdict {verdict!r}: PASS, FAIL or UNDO")
+    note = str(note or "").strip()[:500]
+    with store_lock():
+        doc = store_load()
+        rec = doc.get(name)
+        if rec is None:
+            raise ValueError(f"{name}: no result kept")
+        j = rec.get("judged")
+        if verdict == "UNDO":
+            if not j:
+                raise ValueError(f"{name}: no verdict by hand to undo")
+            rec["result"], rec["says"] = j["was"], j["was_says"]
+            rec.pop("judged")
+        else:
+            was, was_says = (j["was"], j["was_says"]) if j else (rec.get("result"), rec.get("says", ""))
+            rec["judged"] = {"by": by, "at": time.time(), "verdict": verdict, "note": note, "was": was,
+                             "was_says": was_says}
+            rec["result"] = verdict
+            rec["says"] = f"{verdict} by {by}'s look{': ' + note if note else ''} (the test said {was}: {was_says})"
+        doc[name] = rec
+        bench.save_json(STORE, doc)
+    with open(JUDGE_LOG, "a") as fh:
+        fh.write(json.dumps({"t": time.time(), "name": name, "verdict": verdict, "note": note, "by": by,
+                             "run": rec.get("run")}) + "\n")
+    return rec
 
 
 # ---- The run's state: what the console shows ----
@@ -216,6 +267,11 @@ th{color:var(--dim);font-weight:normal}.PASS{color:var(--ok)}.FAIL{color:var(--b
 .cur{background:#211d10}.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:6px}.bar>div{height:100%;background:var(--amb)}
 .ev{max-height:340px;overflow:auto;font-size:12px}.ev div{padding:1px 0;border-bottom:1px solid #1d1d1d}.ev .bad{color:var(--bad)}.ev .ok{color:var(--ok)}
 .wide{grid-column:1/-1}.says{color:var(--dim);font-size:12px;word-break:break-word}
+.det{background:#101010;border:1px solid var(--line);border-radius:4px;padding:8px 10px;margin:4px 0}
+.det pre{white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:320px;overflow:auto;margin:4px 0}
+.det .pic{width:48%;margin:2px 1%;border:1px solid #333}.det audio{height:28px;vertical-align:middle;max-width:100%}
+.sb,.jb{font:inherit;font-size:11px;padding:2px 8px;margin-left:4px;background:var(--line);color:var(--ink);border:0;border-radius:3px;cursor:pointer}
+.jb{font-size:13px;padding:5px 12px;margin:0 6px 0 0}.jb.ok{background:#1d4a2a}.jb.bad{background:#5a1d1d}summary{cursor:pointer;color:var(--dim)}
 .ev .cmd{color:#7d8aa0}.ev .conf{color:#9fd3b0}.ev .radio{color:#d9a35a}label{color:var(--dim);font-size:12px;margin-right:10px}
 </style></head><body>
 <header><h1>Two-radio bench</h1><span id="phase"></span><span id="counts" class="muted"></span><span id="clock" class="muted"></span></header>
@@ -228,6 +284,7 @@ th{color:var(--dim);font-weight:normal}.PASS{color:var(--ok)}.FAIL{color:var(--b
 <div id="rerun" style="margin-top:10px"></div></section>
 <section><h2>Fail most often (all time)</h2><table><thead><tr><th>test</th><th>fails</th><th>runs</th><th>latest</th><th>its last fail</th></tr></thead><tbody id="most"></tbody></table></section>
 <section><h2>Came good: passed after a fail (the latest first)</h2><table><thead><tr><th>test</th><th>when</th><th>fails</th><th>how</th></tr></thead><tbody id="came"></tbody></table></section>
+<section class="wide"><h2 id="lookh">To look at</h2><table><thead><tr><th>test</th><th>when</th><th>what it found</th></tr></thead><tbody id="look"></tbody></table></section>
 <section class="wide"><h2>This run: only the tests not passed yet (and any new ones)</h2><table><thead><tr><th>#</th><th>test</th><th>role</th><th>result</th><th>secs</th><th>what it found</th></tr></thead><tbody id="tests"></tbody></table></section>
 <section class="wide"><h2 id="kepth">Not rerun: passed in an earlier run (or a known fault), kept in orch_results.json, the latest first</h2><table><thead><tr><th>test</th><th>result</th><th>when</th><th>GUI</th><th>what it found</th></tr></thead><tbody id="kept"></tbody></table></section>
 <section class="wide"><h2>Where the two radios differ (the caps test: the same value sent to both, what each did)</h2><table><thead><tr><th>asked</th><th>X6100</th><th>X6200</th></tr></thead><tbody id="caps"></tbody></table></section>
@@ -258,18 +315,48 @@ $("now").innerHTML=cur?`<div><b>${esc(cur.name)}</b> <span class="muted">(${esc(
  cur.steps.map(st=>`<div class="${st.state==="confirmed"?"PASS":st.state==="failed"?"FAIL":"LOOK"}">${st.state==="running"?"&#9654;":st.state==="confirmed"?"&#10003;":"&#10007;"} ${esc(st.text)} <span class="muted">${st.secs!=null?st.secs.toFixed(1)+" s":""} ${esc(st.detail||"")}</span></div>`).join(""):"<span class=muted>no test running</span>";
 $("prog").style.width=(100*c.done/Math.max(1,c.total))+"%";
 const pics=x=>x.shots.map(sh=>`<div class="says">${esc(sh.label)}</div>`+Object.entries(sh.paths).map(([n,p])=>`<a href="shot/${encodeURIComponent(p)}" target="_blank"><img src="shot/${encodeURIComponent(p)}" title="${esc(n)}" style="width:48%;margin:2px 1%;border:1px solid #333"></a>`).join("")).join("");
-$("tests").innerHTML=d.tests.map((x,i)=>{const failed=x.result&&x.result!=="PASS";const n=failed?x.shots.length:0;
-return `<tr class="${i===d.cur?"cur":""}"><td>${i+1}</td><td>${esc(x.name)}</td><td>${esc(x.role)}</td><td class="${(x.result||"").replace(" ","")}">${esc(x.result||(i===d.cur?"running":""))}${n?` <button onclick="tog(${i})" style="font:inherit;font-size:11px">pictures (${n})</button>`:""}</td><td>${x.secs!=null?x.secs.toFixed(0):""}</td><td class="says">${esc(x.says)}</td></tr>`+(n&&openPics.has(i)?`<tr><td></td><td colspan="5">${pics(x)}</td></tr>`:"");}).join("");
+setHTML($("tests"),d.tests.map((x,i)=>{const failed=x.result&&x.result!=="PASS";const n=failed?x.shots.length:0;
+return `<tr class="${i===d.cur?"cur":""}"><td>${i+1}</td><td>${esc(x.name)}</td><td>${esc(x.role)}</td><td class="${(x.result||"").replace(" ","")}">${esc(x.result||(i===d.cur?"running":""))}${n?` <button onclick="tog(${i})" style="font:inherit;font-size:11px">pictures (${n})</button>`:""}${failed&&i!==d.cur?detBtn(x.name):""}</td><td>${x.secs!=null?x.secs.toFixed(0):""}</td><td class="says">${esc(x.says)}</td></tr>`+(n&&openPics.has(i)?`<tr><td></td><td colspan="5">${pics(x)}</td></tr>`:"")+(openDet.has(x.name)?`<tr><td></td><td colspan="5">${detHTML(x.name)}</td></tr>`:"");}).join(""));
 const cs=r=>r?(r.ok?"takes it":"refuses")+(r.reads!=null?" (reads "+esc(JSON.stringify(r.reads))+")":"")+(r.err?" "+esc(r.err):""):"";
 $("caps").innerHTML=(d.caps_diff||[]).map(c=>`<tr><td>${esc(c.key)}</td><td class="says">${cs(c.radios.x6100)}</td><td class="says">${cs(c.radios.x6200)}</td></tr>`).join("")||"<tr><td class=muted colspan=3>not probed yet, or no difference</td></tr>";
-$("kept").innerHTML=(d.kept||[]).slice().sort((a,b)=>(b.at||0)-(a.at||0)).map(k=>`<tr><td>${esc(k.name)}</td><td class="${(k.result||"").replace(" ","")}">${esc(k.result)}${k.known?" (known)":""}${k.runs?" &middot; "+k.passes+"/"+k.runs+" passed since its code last changed"+(k.all_runs&&k.all_runs!==k.runs?" ("+k.all_passes+"/"+k.all_runs+" in all)":""):""}</td><td>${k.at?new Date(k.at*1000).toLocaleString():""}</td><td class="says">${esc(k.gui||"")}</td><td class="says">${esc(k.known||k.says)}</td></tr>`).join("");
+setHTML($("kept"),(d.kept||[]).map(k=>LIVE[k.name]?Object.assign({},k,LIVE[k.name]):k).sort((a,b)=>(b.at||0)-(a.at||0)).map(k=>`<tr><td>${esc(k.name)}${k.result!=="PASS"||k.judged?detBtn(k.name):""}</td><td class="${(k.result||"").replace(" ","")}">${esc(k.result)}${k.judged?" (by "+esc(k.judged.by)+")":""}${k.known?" (known)":""}${k.runs?" &middot; "+k.passes+"/"+k.runs+" passed since its code last changed"+(k.all_runs&&k.all_runs!==k.runs?" ("+k.all_passes+"/"+k.all_runs+" in all)":""):""}</td><td>${k.at?new Date(k.at*1000).toLocaleString():""}</td><td class="says">${esc(k.gui||"")}</td><td class="says">${esc(k.known||k.says)}</td></tr>`+(openDet.has(k.name)?`<tr><td colspan="5">${detHTML(k.name)}</td></tr>`:"")).join(""));
 const show={cmd:$("fcmd").checked,conf:$("fconf").checked,radio:$("fradio").checked};
 $("ev").innerHTML=d.events.slice().reverse().filter(e=>show[e.kind]!==false).map(e=>`<div class="${e.kind}">${t(e.t)} ${e.test?"["+esc(e.test)+"] ":""}${esc(e.text)}</div>`).join("");}
 const openPics=new Set();function tog(i){openPics.has(i)?openPics.delete(i):openPics.add(i);tick();}
+const openDet=new Set(),detCache={};let LIVE={},lastT=null;
+function setHTML(el,h){if(el._h!==h){el._h=h;el.innerHTML=h}}
+async function loadDet(n){try{detCache[n]=await (await fetch("detail?name="+encodeURIComponent(n),{cache:"no-store"})).json()}catch(e){detCache[n]={error:String(e)}}tick();renderT();}
+function detBtn(n){return ` <button class="sb" data-act="show" data-name="${esc(n)}">${openDet.has(n)?"hide":"show"}</button>`}
+function detHTML(n){const d=detCache[n];if(!d)return `<div class="det muted">loading...</div>`;if(d.error)return `<div class="det FAIL">${esc(d.error)}</div>`;
+const e=d.entry||{},r=d.rec||{},j=r.judged,was=j?j.was:r.result,wasSays=j?j.was_says:(e.says||r.says);
+const shots=(e.shots||[]).map(sh=>`<div class="says">${esc(sh.label)}</div>`+Object.entries(sh.paths).map(([k,p])=>`<a href="shot/${encodeURIComponent(p)}" target="_blank"><img src="shot/${encodeURIComponent(p)}" title="${esc(k)}" loading="lazy" class="pic"></a>`).join("")).join("");
+const kb=f=>(f.size/1024).toFixed(0)+" kB";
+const files=(d.files||[]).map(f=>[".png",".jpg"].includes(f.ext)?`<div class="says">${esc(f.name)}</div><a href="${esc(f.url)}" target="_blank"><img src="${esc(f.url)}" class="pic" loading="lazy"></a>`:[".wav",".mp3",".raw"].includes(f.ext)?`<div class="says">${esc(f.name)} <span class=muted>(${kb(f)}${f.ext===".raw"?", played as 24 kHz audio":""})</span></div><audio controls preload="none" src="${esc(f.url)}"></audio> <a href="${esc(f.url)}" download="${esc(f.name.replace(/\.raw$/,".wav"))}" style="color:var(--amb)">save</a>`:`<div class="says"><a href="${esc(f.url)}" target="_blank" style="color:var(--amb)">${esc(f.name)}</a> <span class=muted>(${kb(f)})</span></div>`).join("");
+const steps=(e.steps||[]).map(st=>`<div class="${st.state==="confirmed"?"PASS":st.state==="failed"?"FAIL":"LOOK"}">${st.state==="confirmed"?"&#10003;":st.state==="failed"?"&#10007;":"&#9654;"} ${esc(st.text)} <span class=muted>${esc(st.detail||"")}</span></div>`).join("");
+const hist=(d.judged||[]).map(x=>`<div class="says">${new Date(x.t*1000).toLocaleString()}: ${esc(x.verdict)} by ${esc(x.by)}${x.note?": "+esc(x.note):""}</div>`).join("");
+const jb=(v,l,c)=>`<button class="jb ${c}" data-act="judge" data-v="${v}" data-name="${esc(n)}">${l}</button>`;
+return `<div class="det"><div><b>what passes:</b> ${esc(d.what||"?")} <span class=muted>(${esc(d.role||"")}; run ${esc(r.run||"?")})</span></div>
+<div><b>the test said</b> <span class="${esc(String(was||"").replace(" ",""))}">${esc(was)}</span>: ${esc(wasSays)}</div>
+${j?`<div><b>verdict by hand:</b> <span class="${esc(j.verdict)}">${esc(j.verdict)}</span> by ${esc(j.by)}, ${new Date(j.at*1000).toLocaleString()}${j.note?": "+esc(j.note):""}</div>`:""}
+${r.judged_before?`<div class="says">an earlier run's verdict: ${esc(r.judged_before.verdict)} by ${esc(r.judged_before.by)}${r.judged_before.note?": "+esc(r.judged_before.note):""}</div>`:""}
+${shots?`<div style="margin-top:6px"><b>its pictures</b></div>${shots}`:""}
+${files?`<div style="margin-top:6px"><b>the run's files from while it ran</b></div>${files}`:""}
+${!shots&&!files?`<div class="muted" style="margin-top:6px">no pictures or files: what it found is in its numbers below</div>`:""}
+${steps?`<details style="margin-top:6px"><summary>its steps (${(e.steps||[]).length})</summary>${steps}</details>`:""}
+<details style="margin-top:6px" ${shots||files?"":"open"}><summary>the numbers it returned</summary><pre>${esc(JSON.stringify(e.data===undefined?null:e.data,null,1))}</pre></details>
+${hist?`<details><summary>verdicts by hand (${(d.judged||[]).length})</summary>${hist}</details>`:""}
+<div style="margin-top:8px">${LOCAL?jb("PASS","It passes","ok")+jb("FAIL","It fails","bad")+(j?jb("UNDO","Undo the verdict",""):""):`<span class=muted>verdicts only from this computer (http://127.0.0.1${location.port?":"+location.port:""}/)</span>`}</div></div>`;}
+document.addEventListener("click",async ev=>{const b=ev.target.closest("button[data-act]");if(!b)return;const n=b.dataset.name;
+if(b.dataset.act==="show"){if(openDet.has(n))openDet.delete(n);else{openDet.add(n);loadDet(n)}tick();renderT();return}
+if(b.dataset.act==="judge"){const v=b.dataset.v;const note=v==="UNDO"?"":prompt(`${v==="PASS"?"It passes":"It fails"}: ${n}\nA note (optional):`,"");if(note===null)return;
+try{const x=await (await fetch("judge",{method:"POST",headers:{"X-Orch-Token":TOKEN,"Content-Type":"application/json"},body:JSON.stringify({name:n,verdict:v,note})})).json();if(!x.ok)alert(x.why)}catch(e){alert("no answer: "+e)}
+loadDet(n);tally();}});
 const TOKEN="__TOKEN__",LOCAL=["127.0.0.1","localhost"].includes(location.hostname);let rrMsg="",rrEst=0,rrN=0;
 const num=n=>(n||0).toLocaleString(),pc=(n,of)=>of?` <span class=muted>${Math.round(100*n/of)}%</span>`:"";
 const ago=s=>{const m=Math.round((Date.now()/1000-s)/60);return m<60?m+" min ago":m<2880?Math.round(m/60)+" h ago":Math.round(m/1440)+" days ago"};
 async function tally(){let d;try{d=await (await fetch("tally",{cache:"no-store"})).json()}catch(e){return}
+lastT=d;LIVE=d.live||{};renderT();}
+function renderT(){const d=lastT;if(!d)return;
 if(d.error){$("tally").innerHTML=`<tr><td class=FAIL colspan=3>tally: ${esc(d.error)}</td></tr>`;return}
 const b=d.batch,a=d.all,n=d.now,c=b.counts||{};
 $("tb").innerHTML=`this batch <span class=muted>(${esc(b.run||"none yet")}, ${b.going?"<b class=LOOK>going</b>":"finished"})</span>`;
@@ -284,8 +371,11 @@ $("tally").innerHTML=row("tests run",num(b.results)+togo,`${num(a.results)} <spa
  row("sync violations",num(b.violations),`${num(a.violations)} in runs, ${num(a.idle_violations)} between runs`,(b.violations?"FAIL":""))+
  row("came good",`${num(b.came.length)}${b.came.length?` <span class=muted>(${b.came_change} after a change, ${b.came.length-b.came_change-b.came_unclear} on a retest${b.came_unclear?", "+b.came_unclear+" unclear":""}${b.came.length?": "+b.came.map(x=>esc(x.name)).join(", "):""})</span>`:""}`,
   `${num(a.came)} times, ${num(a.came_tests)} tests <span class=muted>(${num(a.came_change)} after a change, ${num(a.came-a.came_change-a.came_unclear)} on a retest, ${num(a.came_unclear)} unclear)</span>`);
+const jg=a.judged||{};if(Object.keys(jg).length)$("tally").innerHTML+=row("verdicts by hand","",Object.entries(jg).map(([k,v])=>`${v} ${esc(k.split(" ")[1].toLowerCase())} by ${esc(k.split(" ")[0])}`).join(", "));
 $("tnow").innerHTML=`<b>every test now, by its latest result:</b> ${num(n.of)} tests: <span class=PASS>${num(n.pass)} pass</span>, <span class=FAIL>${num(n.fail)} fail</span>, <span class=LOOK>${num(n.look)} look</span>, <span class=muted>${num(n.never)} never run${n.notrun?", "+num(n.notrun)+" not run":""}${n.known?", "+n.known+" known faults":""}</span>`;
 $("most").innerHTML=d.most.map(p=>`<tr><td>${esc(p.name)}</td><td class=FAIL>${p.fails}</td><td>${p.runs} <span class=muted>(${p.passes} pass)</span></td><td class="${p.last}">${esc(p.last)} <span class=muted>${ago(p.last_t)}</span></td><td class="says" title="${esc(p.fail_says)}">${esc(String(p.fail_says||"").slice(0,140))}${String(p.fail_says||"").length>140?"...":""}</td></tr>`).join("")||"<tr><td class=muted colspan=5>no fails yet</td></tr>";
+const tl=d.to_look||[];$("lookh").textContent=`To look at: ${tl.length} tests said LOOK, the latest first (show: what each found; It passes / It fails records your verdict)`;
+setHTML($("look"),tl.map(x=>`<tr><td>${esc(x.name)}${detBtn(x.name)}</td><td>${x.at?new Date(x.at*1000).toLocaleString():""}</td><td class="says">${esc(x.says)}${x.before?` <span class=muted>(an earlier run's verdict: ${esc(x.before.verdict)} by ${esc(x.before.by)})</span>`:""}</td></tr>`+(openDet.has(x.name)?`<tr><td colspan="3">${detHTML(x.name)}</td></tr>`:"")).join("")||"<tr><td class=muted colspan=3>nothing waits for a look</td></tr>");
 $("came").innerHTML=d.came_good.map(x=>`<tr><td>${esc(x.name)}</td><td>${ago(x.t)}</td><td>${x.fails}</td><td class="says">${x.how==="change"?"after a change: ":x.how==="retest"?"on a retest: ":"unclear: "}${esc(x.why)}</td></tr>`).join("")||"<tr><td class=muted colspan=4>none yet</td></tr>";
 const r=d.rerun||{};rrEst=n.est_s;rrN=n.of;const why=LOCAL?r.why:"only from this computer: http://127.0.0.1"+(location.port?":"+location.port:"")+"/";
 $("rerun").innerHTML=`<button id="rr" onclick="rerun()" style="font:inherit;padding:6px 12px;background:${r.ok&&LOCAL?"var(--amb)":"var(--line)"};color:${r.ok&&LOCAL?"#000":"var(--dim)"};border:0;border-radius:4px;cursor:${r.ok&&LOCAL?"pointer":"default"}" ${r.ok&&LOCAL?"":"disabled"}>Re-run all ${num(n.of)} tests</button> <span class=muted>about ${(n.est_s/3600).toFixed(1)} h by each test's last time &middot; ${esc(why)}${r.log?" &middot; the last one started here: "+esc(r.log):""}</span>${rrMsg?`<div class="says">${esc(rrMsg)}</div>`:""}`;}
@@ -439,7 +529,8 @@ def _run_read(rd):
     except OSError:
         return c
     if c is None or size < c["off"]:
-        c = _TALLY["runs"][rd] = {"off": 0, "results": [], "violations": [], "code": {}, "gui": None, "rmt": None}
+        c = _TALLY["runs"][rd] = {"off": 0, "results": [], "violations": [], "code": {}, "gui": None, "rmt": None,
+                                  "starts": {}}
     if size > c["off"]:
         with open(path, "rb") as fh:
             fh.seek(c["off"])
@@ -452,6 +543,8 @@ def _run_read(rd):
             except ValueError:
                 continue
             text, test = e.get("text") or "", e.get("test")
+            if test and text.startswith("TEST ") and f" {test} (" in text:
+                c["starts"][test] = e.get("t") or 0     # its start: the run's files written from then on are its
             if e.get("kind") == "bad" and text.startswith("OUT OF SYNC: "):
                 c["violations"].append({"t": e.get("t") or 0, "test": test, "what": text[13:]})
             elif test and e.get("kind") in ("ok", "bad"):
@@ -527,6 +620,7 @@ def tally(batch, going, counts):
         mine = dict(runs).get(batch) or {"results": [], "violations": []}
         bcnt = collections.Counter(x["res"] for x in mine["results"])
     idle = [json.loads(x) for x in open(IDLE_LOG)] if os.path.exists(IDLE_LOG) else []
+    judged = [json.loads(x) for x in open(JUDGE_LOG)] if os.path.exists(JUDGE_LOG) else []
     store = store_load()
     names = [t.name for t in TESTS]
     latest = collections.Counter(store.get(n, {}).get("result", "never run") for n in names)
@@ -544,12 +638,91 @@ def tally(batch, going, counts):
                 "idle_violations": sum(1 for e in idle if e.get("kind") == "bad"),
                 "came": len(came), "came_tests": len({x["name"] for x in came}),
                 "came_change": sum(1 for x in came if x["how"] == "change"),
-                "came_unclear": sum(1 for x in came if x["how"] == "unclear")},
+                "came_unclear": sum(1 for x in came if x["how"] == "unclear"),
+                "judged": collections.Counter(f"{j.get('by')} {j.get('verdict')}" for j in judged)},
         "now": {"of": len(names), "pass": latest["PASS"], "fail": latest["FAIL"], "look": latest["LOOK"],
                 "notrun": latest["NOT RUN"], "never": latest["never run"], "known": len(KNOWN), "est_s": est},
         "most": sorted((p for p in per.values() if p["fails"]), key=lambda p: (-p["fails"], p["name"]))[:MOST_FAILED_N],
         "came_good": came[::-1][:CAME_GOOD_N],
+        "live": {n: {k: store[n].get(k) for k in ("result", "says", "judged", "at")} for n in names if n in store},
+        "to_look": sorted(({"name": n, "at": store[n].get("at"), "says": store[n].get("says"), "run": store[n].get("run"),
+                            "before": store[n].get("judged_before")} for n in names
+                           if store.get(n, {}).get("result") == "LOOK"), key=lambda x: -(x["at"] or 0)),
     }
+
+
+RUN_NAME_RE = re.compile(r"^\d{8}-\d{6}-orch$")
+RUN_FILE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".wav": "audio/wav", ".mp3": "audio/mpeg",
+                  ".json": "application/json", ".txt": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
+                  ".raw": "application/octet-stream", ".csv": "text/plain; charset=utf-8"}
+RAW_RATE = 24000            # the runs' .raw files: TCI audio, 24 kHz int16 mono (ORCH.md)
+
+
+def detail(name):
+    """What a person needs to judge name's latest result: the result kept, what the test checks, its steps, the data it
+    returned, the pictures it took (results.json of its run) and the run's files written while it ran"""
+    rec = store_load().get(name)
+    t = next((x for x in TESTS if x.name == name), None)
+    out = {"name": name, "rec": rec, "what": t.what if t else None, "role": t.role if t else None, "entry": None,
+           "files": [], "judged": []}
+    run = (rec or {}).get("run")
+    if run and RUN_NAME_RE.match(run):
+        rd = os.path.join(bench.STATE, "runs", run)
+        entry = next((x for x in reversed(bench.load_json(os.path.join(rd, "results.json"), []))
+                      if isinstance(x, dict) and x.get("name") == name), None)
+        if entry:
+            out["entry"] = {"says": entry.get("says"), "result": entry.get("result"), "steps": entry.get("steps"),
+                            "data": entry.get("data"),
+                            "shots": [{"label": sh.get("label"), "paths": {n: os.path.basename(p) for n, p in
+                                                                         (sh.get("paths") or {}).items() if p}}
+                                      for sh in entry.get("shots", [])]}
+        with TALLY_LOCK:
+            c = _run_read(rd)
+            t0 = (c or {}).get("starts", {}).get(name)
+        t1 = rec.get("at") or 0
+        if not t0 and rec.get("secs"):
+            t0 = t1 - rec["secs"]
+        if t0:
+            try:
+                names = os.listdir(rd)
+            except OSError:
+                names = []
+            for f in sorted(names):
+                path = os.path.join(rd, f)
+                if f in ("events.jsonl", "results.json", "meta.json") or not os.path.isfile(path):
+                    continue
+                m = os.path.getmtime(path)
+                if t0 - 1 <= m <= t1 + 3:
+                    ext = os.path.splitext(f)[1].lower()
+                    out["files"].append({"name": f, "size": os.path.getsize(path), "ext": ext,
+                                         "url": f"runfile/{run}/{f}" + ("?wav=1" if ext == ".raw" else "")})
+    if os.path.exists(JUDGE_LOG):
+        for line in open(JUDGE_LOG):
+            try:
+                j = json.loads(line)
+            except ValueError:
+                continue
+            if j.get("name") == name:
+                out["judged"].append(j)
+    return out
+
+
+def run_file(run, f, wav):
+    """(body, type) of a run's file, None for none; a .raw as WAV when asked (RAW_RATE, int16 mono)"""
+    import struct
+    if not RUN_NAME_RE.match(run) or f != os.path.basename(f) or f.startswith("."):
+        return None
+    path = os.path.join(bench.STATE, "runs", run, f)
+    ext = os.path.splitext(f)[1].lower()
+    if ext not in RUN_FILE_TYPES or not os.path.isfile(path):
+        return None
+    body = open(path, "rb").read()
+    if ext == ".raw" and wav:
+        body = body[:len(body) // 2 * 2]
+        hdr = b"RIFF" + struct.pack("<I", 36 + len(body)) + b"WAVEfmt " + struct.pack(
+            "<IHHIIHH", 16, 1, 1, RAW_RATE, RAW_RATE * 2, 2, 16) + b"data" + struct.pack("<I", len(body))
+        return hdr + body, "audio/wav"
+    return body, RUN_FILE_TYPES[ext]
 
 
 # The console's "Re-run all": orch.py run --all started by the standing console (orch.py console) when no run goes, no
@@ -610,8 +783,8 @@ def console(status, port, lan):
             self.wfile.write(body)
 
         def do_POST(self):
-            self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4096))
-            if self.path != "/rerun":
+            raw = self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 8192))
+            if self.path not in ("/rerun", "/judge"):
                 self.send_error(404)
                 return
             host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
@@ -620,6 +793,14 @@ def console(status, port, lan):
                 self._answer(403, {"ok": False, "why": "only from this computer's own console page "
                                                        "(http://127.0.0.1:%d/)" % port})
                 return
+            if self.path == "/judge":
+                try:
+                    a = json.loads(raw or b"{}")
+                    rec = judge(str(a.get("name") or ""), str(a.get("verdict") or ""), a.get("note") or "", "owner")
+                    self._answer(200, {"ok": True, "result": rec.get("result"), "says": rec.get("says")})
+                except (ValueError, TypeError) as e:
+                    self._answer(400, {"ok": False, "why": str(e)})
+                return
             with RERUN_LOCK:
                 ok, why = rerun_state(status)
                 if ok:
@@ -627,6 +808,27 @@ def console(status, port, lan):
             self._answer(200 if ok else 409, {"ok": ok, "why": why})
 
         def do_GET(self):
+            from urllib.parse import parse_qs, unquote, urlparse
+            u = urlparse(self.path)
+            if u.path == "/detail":
+                try:
+                    self._answer(200, detail((parse_qs(u.query).get("name") or [""])[0]))
+                except Exception as e:      # a test's record never takes the console down
+                    self._answer(500, {"error": f"{type(e).__name__}: {e}"})
+                return
+            if u.path.startswith("/runfile/"):
+                parts = unquote(u.path[len("/runfile/"):]).split("/")
+                got = run_file(parts[0], parts[1], "wav=1" in u.query) if len(parts) == 2 else None
+                if got is None:
+                    self.send_error(404)
+                    return
+                body, ctype = got
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path.startswith("/tally"):
                 d = json.loads(status.to_json() if status is not None else snapshot_json())
                 phase = str(d.get("phase") or "")
@@ -6803,8 +7005,10 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
                          "fails": (prev.get("fails", 0) if same else 0) + (res == "FAIL"),
                          "all_runs": prev.get("all_runs", prev.get("runs", 0)) + 1,
                          "all_passes": prev.get("all_passes", prev.get("passes", 0)) + (res == "PASS"), "code": code}
+                before = prev.get("judged") or prev.get("judged_before")
                 store_put(t.name, {"result": res, "says": says, "at": time.time(), "secs": round(time.time() - t0, 1),
-                                   "gui": hello(o.r[A]), "run": os.path.basename(st.run_dir), **tally})
+                                   "gui": hello(o.r[A]), "run": os.path.basename(st.run_dir), **tally,
+                                   **({"judged_before": before} if res == "LOOK" and before else {})})
                 st.ev(f"{res} {t.name}: {says}", "ok" if res == "PASS" else "bad")
                 st.ev(f"data of {t.name}: {json.dumps(data, default=str)[:4000]}", "conf")
                 for r in o.r.values():
@@ -6856,9 +7060,18 @@ def main():
     cp.add_argument("--lan", action="store_true", help="on the network, not only this computer")
     sp = sub.add_parser("spec", help="replay the spectrum judge on an over's saved frames (*_spectrum.json)")
     sp.add_argument("file")
+    jp = sub.add_parser("judge", help="a verdict by hand on a test's latest result (as the console's Pass/Fail)")
+    jp.add_argument("name")
+    jp.add_argument("verdict", choices=["PASS", "FAIL", "UNDO"])
+    jp.add_argument("note", nargs="?", default="")
+    jp.add_argument("--by", default="owner")
     sub.add_parser("coverage", help="features.json against every test's latest result, orch's and the suite's "
                                     "(runs/<time>-coverage/coverage.md)")
     a = ap.parse_args()
+    if a.cmd == "judge":
+        rec = judge(a.name, a.verdict, a.note, a.by)
+        print(f"{a.name}: {rec['result']}: {rec['says']}")
+        return
     if a.cmd == "coverage":
         print(os.path.join(coverage_all(), "coverage.md"))
         return
