@@ -1132,6 +1132,9 @@ def radio_fix(refused):
     r = refused.lower()
     if " is open" in r:
         return "Close the app on the radio, then connect again"
+    if "receive only" in r:
+        return ("Arm the transmitter (A/B on the Sentry's A or G) or leave the Sentry, or take TX in the remote "
+                "session, then connect again")
     if "swr" in r:
         return ("Check the antenna and the tuner: after a high SWR stopped a Winlink transmission the radio keys "
                 "there again only after 5 minutes; another band keys at once")

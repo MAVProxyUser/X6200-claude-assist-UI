@@ -3105,23 +3105,104 @@ def _pat_logs(r):
     return out
 
 
-def _pat_connect(r, url, res):
-    """Pat's /api/connect in the background: it answers only when the session is over (run 30: a 20 s ask timed out
-    before the first frame, and the test waited for the TX only after it). Its answer into res["connect"]"""
-    def go():
-        res["connect"] = _pat(r, f"/api/connect?url={url}", timeout=150)
-        res["connect"] = (res["connect"][0], res["connect"][1][:120])
-    th = threading.Thread(target=go, daemon=True)
-    th.start()
-    return th
+WL_RECENT = "/mnt/winlink/mail_recent.json"   # APP > Mail's recent gateways: a session puts its call on top
+
+
+class PatSession:
+    """A connection as APP > Mail makes it: x6100-winlink-mail session URL on r (Pat's /api/connect, its log, its
+    questions and the outcome, a JSON object a line), in the background. Pat's question about an account it cannot
+    confirm is answered Continue anyway, as the app's button answers it (src/winlink_mail.c; MANUAL, APP > Mail): Pat
+    asks it before anything else for a call the Winlink server does not know, as the test calls are, waits 2 minutes
+    for the answer and says nothing in its log meanwhile (runs 27-33: 'its first frame did not come within 60 s', 7
+    of 7). The answer holds 100 days (Pat's .account-confirmed mark). Every other question is left to the test"""
+
+    def __init__(self, r, url):
+        self.r, self.url, self.t0 = r, url, time.time()
+        self.log, self.prompts, self.answered, self.done, self.other = [], [], [], None, []
+        self.lock = threading.Lock()
+        self.p = subprocess.Popen(["ssh", "-4", "-o", "BatchMode=yes", f"root@{r.host}",
+                                   f"x6100-winlink-mail session '{url}'"],
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                  bufsize=1)
+        self.th = threading.Thread(target=self._read, daemon=True)
+        self.th.start()
+
+    def _read(self):
+        for line in self.p.stdout:
+            line = line.strip()
+            try:
+                m = json.loads(line)
+            except ValueError:
+                m = None
+            if not isinstance(m, dict):
+                if line:
+                    self.other.append(line[:200])
+                continue
+            at = round(time.time() - self.t0, 1)
+            if "log" in m:
+                self.log.append(f"{at} {str(m['log'])[:160]}")
+            elif "prompt" in m and isinstance(m["prompt"], dict):
+                p = m["prompt"]
+                with self.lock:
+                    self.prompts.append({"at": at, "kind": p.get("kind"), "message": str(p.get("message"))[:100]})
+                if p.get("kind") == "pre-account-activation":
+                    self.answer(p.get("id"), "confirmed")
+            elif "done" in m:
+                self.done = m["done"]
+            elif "error" in m:
+                self.other.append(str(m["error"])[:200])
+
+    def answer(self, pid, value):
+        """One of Pat's questions answered, as the app's buttons answer them"""
+        try:
+            self.p.stdin.write(json.dumps({"prompt": {"id": str(pid), "value": value}}) + "\n")
+            self.p.stdin.flush()
+            self.answered.append(value)
+        except (OSError, ValueError):
+            pass
+
+    def kinds(self):
+        with self.lock:
+            return [p["kind"] for p in self.prompts]
+
+    def alive(self):
+        return self.p.poll() is None
+
+    def close(self, wait=20):
+        """Abort, as the Connection page's (a busy channel's wait ends with it at once); then at once if it is still
+        on; the session's own process gone either way. What Pat did: the result's keys"""
+        for line in ("abort", "abort!"):
+            if not self.alive():
+                break
+            try:
+                self.p.stdin.write(line + "\n")
+                self.p.stdin.flush()
+            except (OSError, ValueError):
+                break
+            end = time.time() + wait / 2
+            while self.alive() and time.time() < end:
+                time.sleep(0.2)
+        if self.alive():
+            _pat(self.r, "/api/disconnect?dirty=true")
+            try:
+                self.p.wait(10)
+            except subprocess.TimeoutExpired:
+                self.p.kill()
+        self.th.join(3)
+
+    def result(self):
+        return {"prompts": self.prompts, "answered": self.answered, "done": self.done,
+                "log": self.log[-14:], "other": self.other[-4:]}
 
 
 @contextlib.contextmanager
 def winlink_on(o, modem):
-    """Winlink on, on both, with modem (ardop, mercury, xara); every setting it had put back after"""
-    kept = {}
+    """Winlink on, on both, with modem (ardop, mercury, xara); every setting it had put back after, and APP > Mail's
+    recent gateways (a PatSession puts the test call on top)"""
+    kept, recent = {}, {}
     try:
         for n, r in o.r.items():
+            recent[n] = ssh(r.host, f"cat {WL_RECENT} 2>/dev/null || echo NONE", 20)
             st, conf = _winlink(r)
             kept[n] = {k: conf.get(k) for k in ("enabled", "modem_choice") if k in conf}
             st, _ = _winlink(r, {"enabled": True, "modem_choice": modem})
@@ -3141,127 +3222,224 @@ def winlink_on(o, modem):
                                     f"{({k: now.get(k) for k in body})} now", "bad")
                     except Refused as e:
                         o.st.ev(f"{n}: Winlink NOT put back ({e}): {body} to set by hand", "bad")
+            if n in recent:
+                was = recent[n]
+                try:
+                    if was.strip() == "NONE":
+                        ssh(r.host, f"rm -f {WL_RECENT}", 20)
+                    else:
+                        bench.ssh(r.host, f"cat > {WL_RECENT}.t && mv {WL_RECENT}.t {WL_RECENT}", 20, input=was)
+                except Refused as e:
+                    o.st.ev(f"{n}: APP > Mail's recent gateways NOT put back ({e})", "bad")
 
 
 def t_winlink_ardop(o, s, l):
-    """Pat on s calls l over ARDOP on 14.105 (l never answers: its P2P listening off): s's dial goes there in USB-D,
-    it keys at 0.1 W (meters near 0.1 W frame after frame: the shared TX level), l's ardopcf logs frames; the dial
-    turned mid-call stops its TX at once ('Winlink: TX stopped, it left ...'); after the session s goes back"""
+    """Pat on s calls l over ARDOP on 14.105 from APP > Mail's path (PatSession; l never answers: its P2P listening
+    off): s's dial goes there in USB-D, it keys at 0.1 W (meters near 0.1 W frame after frame: the shared TX level),
+    l's ardopcf logs frames; the dial turned mid-call stops its TX at once ('Winlink: TX stopped, it left ...'); after
+    the session s goes back"""
     S, L = o.r[s], o.r[l]
     call = H.TEST_CALLS[l]
     res = {}
     try:
         ensure_alike(o, WL_DIAL, 3)
+        classic(S)          # the Sentry holds the radio receive only until A/B arms it: Winlink keys from classic
         with winlink_on(o, "ardop"):
             with session(o, "winlink-ardop", [s], WL_DIAL) as watch:
                 role(o, s)
                 n0 = ssh(L.host, "wc -c < /run/winlink/ardopcf.log 2>/dev/null || echo 0").strip() or "0"
                 t0 = time.time()
-                th = _pat_connect(S, f"ardop:///{call}?freq={WL_DIAL // 1000}", res)
+                ps = PatSession(S, f"ardop:///{call}?freq={WL_DIAL // 1000}")
                 try:
-                    S.wait("its first frame", lambda: S.tx or watch.why or not th.is_alive(), 60)
-                    if not S.tx and not th.is_alive():
-                        raise Refused(f"Pat answered the connect without keying: {res.get('connect')}")
-                except Refused:
-                    res["pat_log"] = _pat_logs(S)        # run 31: Pat closed the connect without an answer
-                    raise
-                res["dial"] = (int(S.state.get("freq", 0)), int(S.state.get("mode", -1)))
-                S.wait("the frame's end", lambda: not S.tx or watch.why, 15)
-                S.wait("its next frame", lambda: S.tx or watch.why, 20)
-                S.send("knob main 1")
-                t_k = time.time()
-                S.wait("off the air at once", lambda: not S.tx, 2.0)
-                res["stop_s"] = round(time.time() - t_k, 2)
-                res["stop_said"] = msgs_since(S, t_k)[-2:]
-                _pat(S, "/api/disconnect?dirty=true")
+                    try:
+                        S.wait("its first frame", lambda: S.tx or watch.why or not ps.alive(), 60)
+                        if not S.tx and not ps.alive():
+                            raise Refused(f"Pat ended the connection without keying: {ps.done or ps.other}")
+                    except Refused:
+                        res["pat_log"] = _pat_logs(S)        # run 31: Pat closed the connect without an answer
+                        raise
+                    res["first_frame_s"] = round(time.time() - t0, 1)
+                    res["dial"] = (int(S.state.get("freq", 0)), int(S.state.get("mode", -1)))
+                    S.wait("the frame's end", lambda: not S.tx or watch.why, 15)
+                    S.wait("its next frame", lambda: S.tx or watch.why, 20)
+                    with bench.apart({"freq": bench.STEPPED}, "winlink-ardop: the sender's dial turned a step "
+                                                              "mid-frame to stop it"):
+                        try:
+                            S.send("knob main 1")
+                            t_k = time.time()
+                            S.wait("off the air at once", lambda: not S.tx, 2.0)
+                            res["stop_s"] = round(time.time() - t_k, 2)
+                            try:
+                                res["stop_said"] = wait_msg(S, t_k, r"Winlink: TX stopped", 3)
+                            except Refused:
+                                res["stop_said"] = None
+                        finally:
+                            ps.close()                       # Pat's tune back follows the end of the session
+                            res["pat"] = ps.result()
+                            bench.ensure(S, {"freq": WL_DIAL})
+                finally:
+                    ps.close()
+                    res["pat"] = ps.result()
                 time.sleep(5)
-                w = [x[1] for x in t_frames(S, t0)]
-                res["watts"] = [round(x, 2) for x in w[:12]]
+                # each key's first half second is its key-up (the X6100's factory base read 0.5 W there at 0.1 W,
+                # 2026-11-26): kept apart; the rest of the key is the level judged
+                spans = [(a, b or time.time()) for a, b in tx_spans(S, t0)]
+                fr = t_frames(S, t0)
+                res["keyup"] = [round(x[1], 2) for x in fr if any(a <= x[0] < a + 0.5 for a, b in spans)][:12]
+                res["watts"] = [round(x[1], 2) for x in fr if any(a + 0.5 <= x[0] <= b for a, b in spans)][:24]
                 n1 = ssh(L.host, "wc -c < /run/winlink/ardopcf.log 2>/dev/null || echo 0").strip() or "0"
                 res["l_log_grew"] = int(n1) > int(n0)
         if res["dial"] != (WL_DIAL, 3):
             return False, f"Pat's call left {s} on {res['dial']}, not 14.105 USB-D", res
-        if not res["watts"] or max(res["watts"]) > 0.15 or min(x for x in res["watts"] if x > 0) < 0.03:
-            return False, f"{s}'s meters over the frames {res['watts']}", res
+        lit = sorted(x for x in res["watts"] if x > 0)
+        if max(res["watts"] + res["keyup"] + [0]) > 1.0:
+            return False, f"{s} over 1 W on the cable: {res['keyup']} at key-up, {res['watts']} after", res
+        if not lit or not 0.03 <= lit[len(lit) // 2] <= 0.15:
+            return False, f"{s}'s meters over the frames {res['watts']} (key-up {res['keyup']}): not near 0.1 W", res
         if not res["l_log_grew"]:
             return False, f"{l}'s ardopcf.log did not grow while {s} called", res
-        return True, f"{s} called over ARDOP on 14.105 USB-D at {res['watts'][:4]} W, {l}'s modem heard it; the dial " \
-                     f"turned: off the air in {res['stop_s']} s ({res['stop_said']})", res
+        return True, f"{s} called over ARDOP on 14.105 USB-D at {lit[len(lit) // 2]} W (median; key-up " \
+                     f"{max(res['keyup'] + [0])} W at most) {res['first_frame_s']} s after Connect (Pat asked " \
+                     f"{[p['kind'] for p in res['pat']['prompts']] or 'nothing'}), {l}'s modem heard it; the dial " \
+                     f"turned: off the air in {res['stop_s']} s ({res['stop_said']!r})", res
     except Refused as e:
         return False, str(e), res
+    finally:
+        home(o, S)
 
 
 def t_winlink_mercury_xara(o, s, l):
-    """Mercury and XARA (VARA HF transport, station to station): s calls l, keys at 0.1 W (no key over 40/30 s), l's
-    mercury.log / xara.log show the call; neither answers"""
+    """Mercury and XARA (Pat's VARA HF transport, varahf://, station to station) from APP > Mail's path: s calls l,
+    keys at 0.1 W (no key over 40/30 s), l hears it (its S-meter 10 dB up while s keys; its xara.log grows, a Mercury
+    that does not listen logs nothing of a CALL); neither answers"""
     S, L = o.r[s], o.r[l]
     call = H.TEST_CALLS[l]
     res = {}
     try:
         for modem, log in (("mercury", "mercury.log"), ("xara", "xara.log")):
             ensure_alike(o, WL_DIAL, 3)
+            classic(S)      # the Sentry holds the radio receive only until A/B arms it: Winlink keys from classic
             with winlink_on(o, modem):
                 with session(o, f"winlink-{modem}", [s], WL_DIAL) as watch:
                     role(o, s)
                     n0 = int(ssh(L.host, f"wc -c < /run/winlink/{log} 2>/dev/null || echo 0").strip() or 0)
                     t0 = time.time()
-                    got = {}
-                    th = _pat_connect(S, f"vara:///{call}?freq={WL_DIAL // 1000}", got)
+                    ps = PatSession(S, f"varahf:///{call}?freq={WL_DIAL // 1000}")
                     try:
                         try:
-                            S.wait("its call on the air", lambda: S.tx or watch.why or not th.is_alive(), 60)
-                            if not S.tx and not th.is_alive():
-                                raise Refused(f"{modem}: Pat answered the connect without keying: "
-                                              f"{got.get('connect')}")
+                            S.wait("its call on the air", lambda: S.tx or watch.why or not ps.alive(), 60)
+                            if not S.tx and not ps.alive():
+                                raise Refused(f"{modem}: Pat ended the connection without keying: "
+                                              f"{ps.done or ps.other}")
                         except Refused:
-                            res[f"{modem}_connect"], res[f"{modem}_pat_log"] = got.get("connect"), _pat_logs(S)
+                            res[f"{modem}_pat_log"] = _pat_logs(S)
                             raise
+                        first = round(time.time() - t0, 1)
                         S.wait("its end", lambda: not S.tx or watch.why, 16)
+                        try:                                 # the call once more: one CALL may go unheard
+                            S.wait("its call again", lambda: S.tx or watch.why, 20)
+                            S.wait("its end", lambda: not S.tx or watch.why, 16)
+                        except Refused:
+                            pass
                     finally:
-                        _pat(S, "/api/disconnect?dirty=true")
+                        ps.close()
+                        res[f"{modem}_pat"] = ps.result()
                         time.sleep(4)
                     n1 = int(ssh(L.host, f"wc -c < /run/winlink/{log} 2>/dev/null || echo 0").strip() or 0)
-                    res[modem] = {"keyed": len(tx_spans(S, t0)), "l_log_grew": n1 > n0,
+                    # l heard the call: its S-meter while s keyed, against its quiet before the first key (a Mercury
+                    # that does not listen drops a CALL without a line in its log, arq_fsm.c: its log is no witness)
+                    spans = [(a, b or time.time()) for a, b in tx_spans(S, t0)]
+                    quiet = meters(L, t0, spans[0][0] - 0.3) if spans else []
+                    heard = [v for a, b in spans for v in meters(L, a + 0.3, b)]
+                    up = round(sum(heard) / len(heard) - sum(quiet) / len(quiet), 1) if heard and quiet else None
+                    res[modem] = {"keyed": len(spans), "first_s": first, "l_up_db": up, "l_log_grew": n1 > n0,
                                   "l_keyed": len(tx_spans(L, t0))}
-        bad = [m for m, v in res.items() if not v["keyed"] or v["l_keyed"]]
+                    if n1 <= n0:
+                        res[f"{modem}_l_log"] = ssh(L.host, f"tail -n 8 /run/winlink/{log} 2>/dev/null", 20)[-800:]
+        both = {m: res[m] for m in ("mercury", "xara")}
+        bad = [m for m in both if not res[m]["keyed"] or res[m]["l_keyed"]]
         if bad:
-            return False, f"{bad}: {res}", res
-        logs = [m for m, v in res.items() if v["l_log_grew"]]
-        return (True if len(logs) == 2 else None), f"Mercury and XARA called (keyed, {l} silent); {l}'s logs grew for " \
-                                                   f"{logs}", res
+            return False, f"{bad}: {both}", res
+        deaf = [m for m in both if (res[m]["l_up_db"] or 0) < 10]
+        logs = [m for m in both if res[m]["l_log_grew"]]
+        said = f"Mercury and XARA called (keyed {res['mercury']['first_s']} and {res['xara']['first_s']} s after " \
+               f"Connect, {l} silent); {l}'s S-meter up {res['mercury']['l_up_db']} and {res['xara']['l_up_db']} dB " \
+               f"while they keyed; {l}'s logs grew for {logs}"
+        return (None if deaf else True), said + (f"; {l} did not hear {deaf}" if deaf else ""), res
     except Refused as e:
         return False, str(e), res
+    finally:
+        home(o, S)
+
+
+WL_TONE_S = 13.0       # winlink-busy's tone: over Pat's account question (its server asked, up to 10 s) and its dial
 
 
 def t_winlink_busy(o, s, l):
-    """Pat listens before it calls: l sends a tone on 14.105 while s's Pat connects: s does not key over it (its
-    mailbox asks to go ahead); the bandwidth cap: a call asking 2000MAX with the page at 500 goes at 500 (pat.log)"""
+    """Pat listens before it calls: l sends a tone on 14.105 while s's Pat connects from APP > Mail's path: s does not
+    key over it; Pat waits for the channel to clear and asks (the busy-channel question, left unanswered); Abort,
+    while l still sends, ends the wait at once and nothing goes out after. The bandwidth cap: a call asking 2000MAX
+    with the page at 500 goes at 500 (Pat's log). Should s key over the tone after all: off the air at once (its dial
+    turned) and the test fails"""
     S, L = o.r[s], o.r[l]
     call = H.TEST_CALLS[l]
     res = {}
     try:
         ensure_alike(o, WL_DIAL, 3)
+        classic(S)          # s may key here (the Sentry holds it receive only): Pat's holding off is tested
         with winlink_on(o, "ardop"):
             st, _ = _winlink(S, {"bandwidth": 500})
             got = {}
 
             def body(watch):
                 t0 = time.time()
-                th = threading.Thread(target=lambda: bench.tci_send(L, [[1500, 9.0]], watch=watch))
+                th = threading.Thread(target=lambda: bench.tci_send(L, [[1500, WL_TONE_S]], max_s=WL_TONE_S + 1.5,
+                                                                    watch=watch))
                 th.start()
                 time.sleep(1.0)
-                _pat(S, f"/api/connect?url=ardop:///{call}?freq={WL_DIAL // 1000}&bw=2000MAX")
-                th.join(15)
-                got["s_keyed_during"] = len(tx_spans(S, t0, time.time()))
-                _pat(S, "/api/disconnect?dirty=true")
+                ps = PatSession(S, f"ardop:///{call}?freq={WL_DIAL // 1000}&bw=2000MAX")
+                try:
+                    asked = None
+                    end = t0 + WL_TONE_S - 2.5        # Abort while l still sends
+                    while time.time() < end and ps.alive() and not watch.why:
+                        if S.tx:                      # s on the air over l's tone: off at once
+                            S.send("knob main 1")
+                            got["keyed_over_s"] = round(time.time() - t0, 1)
+                            break
+                        if asked is None and "busy-channel" in ps.kinds():
+                            asked = time.time()
+                            got["busy_asked_s"] = round(asked - t0, 1)
+                        if asked is not None and time.time() - asked > 2.0:
+                            break                     # 2 s of the wait seen without a key
+                        time.sleep(0.05)
+                finally:
+                    t_a = time.time()
+                    ps.close()
+                    got["abort_s"] = round(time.time() - t_a, 1)
+                    got["pat"] = ps.result()
+                th.join(20)
+                time.sleep(2.0)                       # the channel clear: no call goes out after the Abort
+                got["s_keyed"] = len(tx_spans(S, t0, time.time()))
             H.over(o, l, s, WL_DIAL, 3, "winlink-busy: l's tone", body, pages=False)
-            plog = ssh(S.host, "tail -40 /run/winlink/pat.log 2>/dev/null")
-            res.update(got, cap_line=next((x for x in plog.splitlines() if "500MAX" in x), None))
-        if res["s_keyed_during"]:
-            return False, f"{s}'s Pat keyed over {l}'s tone", res
-        return (True if res["cap_line"] else None), f"{s}'s Pat held off while {l} sent; cap: {res['cap_line']!r}", res
+            plog = ssh(S.host, "tail -60 /run/winlink/pat-own.log 2>/dev/null")
+            lines = got.get("pat", {}).get("log", []) + plog.splitlines()
+            res.update(got, cap_line=next((x for x in lines if "500MAX" in x), None),
+                       waited=any("Waiting for clear channel" in x for x in lines))
+        if res.get("keyed_over_s") is not None or res["s_keyed"]:
+            return False, f"{s}'s Pat keyed over {l}'s tone (at {res.get('keyed_over_s')} s, " \
+                          f"{res['s_keyed']} overs)", res
+        if res.get("busy_asked_s") is None and not res["waited"]:
+            return False, f"{s}'s Pat neither keyed nor waited for the channel: {res['pat']['prompts']} " \
+                          f"{res['pat']['done']}", res
+        if res["abort_s"] > 6:
+            return None, f"{s}'s Pat held off while {l} sent, but Abort took {res['abort_s']} s to end its wait", res
+        said = f"{s}'s Pat held off while {l} sent (asked about the busy channel {res.get('busy_asked_s')} s in), " \
+               f"Abort ended it in {res['abort_s']} s; cap: {res['cap_line']!r}"
+        return (True if res["cap_line"] else None), said, res
     except Refused as e:
         return False, str(e), res
+    finally:
+        home(o, S)
 
 
 # ---- the browser's Panel (headless Chromium, the bench's own session): PTT states, Tap, a stalled link ----

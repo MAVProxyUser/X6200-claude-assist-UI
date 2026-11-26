@@ -10181,7 +10181,8 @@ Setting it up:
    transmitting, or from being heard well:
    - Frequency: where the radio listens, and whether it transmits there too
      ("No TX: split would send on 14.200.000, not 14.105.000", XIT, RIT, a
-     TX shift, outside the amateur bands, "No TX: no data from the base").
+     TX shift, outside the amateur bands, "No TX: no data from the base",
+     "No TX: receive only (the Sentry: ...)").
    - Mode: Pat's QSY to a gateway sets USB-D (USB is kept), and so does the
      modem's first key in any other mode, for a connection with no
      frequency in it (a call typed in): up to v0.3.12 it keyed in the
@@ -10397,6 +10398,14 @@ Connecting to a gateway:
   [No TX without data from the base](#no-tx-without-data-from-the-base)):
   no key, "Winlink: no TX, no data from the base", on the page's last
   connection and its line before a connection too.
+- While the radio is held receive only (the [Sentry](#the-sentry) until A/B
+  arms it on A or G, or a remote session without TX in control): no key,
+  "Winlink: no TX, receive only (the Sentry: A/B on A or G arms TX; or a
+  remote without TX)", on the page's last connection and its line before a
+  connection too, with what to do: arm the transmitter, leave the Sentry
+  (F SYSTEM > CLASSIC RADIO), or take TX in the remote session. Up to
+  v0.3.12.49 the key was refused without a word, and Pat said only "No
+  answer from" the gateway, as if it had been on the air.
 - The ARDOP bandwidth: Pat's gateway list fills in each gateway's widest
   ARDOP bandwidth (2000MAX for a gateway listed as ARDOP 2000), the Connect
   dialog takes it over and the browser remembers it for the next time. The

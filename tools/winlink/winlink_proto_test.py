@@ -595,6 +595,23 @@ def main():
         finally:
             host.stop()
 
+        print("receive only (the Sentry's TX locked, a remote without TX): the key refused, the page told why")
+        host = Host(tmp, "r", rig_port=14549, env={"WL_RX_ONLY": "1"})
+        try:
+            m = Modem(host.sock)
+            m.send("H", 2, [12000, 30])
+            check(host.wait_log("protocol 2, 12000 Hz"), "the hello")
+            why = "receive only (the Sentry: A/B on A or G arms TX; or a remote without TX)"
+            ok, radio = host.wait_radio({"modem": "connected", "simplex": why})
+            check(ok, f"the radio file before a key says why ({radio})")
+            m.transmit(12000, 0.5)
+            check(host.wait_log("winlink: not keyed, " + why), "the key refused, the log says why")
+            ok, radio = host.wait_radio({"refused": why})
+            check(ok and host.played_count() == 0, f"the page's refused line says it, nothing played ({radio})")
+            m.close()
+        finally:
+            host.stop()
+
         print("a key in CW with no QSY before it: USB-D set for it, then keyed")
         host = Host(tmp, "f", rig_port=14537, env={"WL_MODE": "4"})
         try:
