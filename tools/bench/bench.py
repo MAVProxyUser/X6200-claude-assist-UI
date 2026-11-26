@@ -1698,6 +1698,9 @@ class Watch:
         # photographed while it is on the air (shots_during), their paths in self.shots after close()
         self.label, self.pair_ignore = label, set(pair_ignore)
         self._shot_threads, self._shot_seen, self.shots = [], {}, []
+        # the pictures each over starts: off for a test whose radio decodes its own keying (the CW Trainer's sidetone:
+        # a screen grab during it made the decoder misread the group and the answer, 2026-11-26)
+        self.shots_on_tx = True
         self.expect_dbm, self.listener, self.w = expect_dbm, listener, w
         self.tx_peak = {}       # each radio's own forward-power meter, its highest while on the air (W)
         self.over_power = {}      # the radios that went over the power asked, and their highest reading (W)
@@ -1802,8 +1805,9 @@ class Watch:
                                       ", ".join(f"{k} {x}/{y}" for k, (x, y) in diff.items()) +
                                       (f" (kept apart by the test but never declared: {', '.join(undeclared)}: "
                                        f"bench.apart)" if undeclared else ""))
-                    self._shot_threads.append((r.name, since, shots_during(self.radios, f"{self.label} {r.name} TX",
-                                                                           r)))
+                    if self.shots_on_tx:
+                        self._shot_threads.append((r.name, since, shots_during(self.radios,
+                                                                               f"{self.label} {r.name} TX", r)))
                 if self.hackrf is not None and r.tx:
                     self.trip(f"{r.name} went on the air while the HackRF fed it")
                 elif self.hackrf is not None and (not r.ctl_mine or r.state.get("rxo") != 1):

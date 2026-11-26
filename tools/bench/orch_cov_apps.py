@@ -241,6 +241,16 @@ def press_label(r, pattern, names, hold=False, rest=0.6, pages=4):
     raise Refused(f"{r.name}: no button like {pattern!r} on its pages (shows {[flat(t) for t in fkeys(r)[0]]})")
 
 
+def press_if(r, key, pattern, names, hold=False, rest=0.6):
+    """KEY pressed only while its button still reads like pattern, read again right before (Field Ops rebuilds its
+    page by itself, back to page 1, when a position or a list changes: a View press landed on Start, then on CQ, 11-26)"""
+    texts = fkeys(r)[0]
+    lbl = flat(texts[int(key[1]) - 1])
+    if not re.search(pattern, lbl, re.I):
+        raise Refused(f"{r.name}: {key} reads {lbl!r} now, not {pattern!r}: not pressed")
+    press(r, key, names, hold=hold, rest=rest)
+
+
 def turn(r, knob, n, names, rest=0.5):
     guard(r, names, f"knob {knob} {n}")
     r.take_control()
@@ -278,10 +288,11 @@ def shot(o, r, label):
 OCR_FIX = str.maketrans({"0": "O", "1": "I", "|": "I", "5": "S", "8": "B", "@": "O", "$": "S"})
 
 
-def ocr(path, box=None, scale=3, psm=11, upright=False):
+def ocr(path, box=None, scale=3, psm=11, upright=False, stretch=False):
     """The text tesseract reads on a screenshot (or its box (x0, y0, x1, y1), landscape px): the picture grey,
     inverted (the GUI's light text on dark), scaled up; upright: turned a quarter (the walkie screen's portrait text,
-    which the landscape picture has running downwards). '' when there is no picture or no tesseract"""
+    which the landscape picture has running downwards); stretch: its darkest and lightest grey spread to black and
+    white first (a fax shown dim, 3-71 of 255, 11-26). '' when there is no picture or no tesseract"""
     if not path or not os.path.exists(TESSERACT):
         return ""
     from PIL import Image, ImageOps
@@ -290,17 +301,28 @@ def ocr(path, box=None, scale=3, psm=11, upright=False):
         im = im.crop(box)
     if upright:
         im = im.rotate(-90, expand=True)
-    im = ImageOps.invert(im).resize((im.width * scale, im.height * scale), Image.LANCZOS)
-    tmp = path + ".ocr.png"
-    im.save(tmp)
-    try:
-        out = subprocess.run([TESSERACT, tmp, "-", "--psm", str(psm)], capture_output=True, text=True, timeout=60)
-        return out.stdout
-    finally:
+    if stretch:
+        im = ImageOps.autocontrast(im, cutoff=1)
+        # the row with the focus (dark text on a light bar) turned like the rest (light on dark): one pass reads all
+        for y in range(im.height):
+            row = im.crop((0, y, im.width, y + 1))
+            if sorted(row.getdata())[im.width // 2] > 128:
+                im.paste(ImageOps.invert(row), (0, y))
+    big = im.resize((im.width * scale, im.height * scale), Image.LANCZOS)
+    out = []
+    # inverted (light text on the dark screen) and as it is (dark text on a highlighted row): both read
+    for k, pic in enumerate((ImageOps.invert(big), big)):
+        tmp = f"{path}.ocr{k}.png"
+        pic.save(tmp)
         try:
-            os.remove(tmp)
-        except OSError:
-            pass
+            out.append(subprocess.run([TESSERACT, tmp, "-", "--psm", str(psm)], capture_output=True, text=True,
+                                      timeout=60).stdout)
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return "\n".join(out)
 
 
 def squash(s):
@@ -318,6 +340,53 @@ def shot_text(o, r, label, box=None, psm=11):
     """(picture path, its OCR text)"""
     p = shot(o, r, label)
     return p, ocr(p, box, psm=psm)
+
+
+POPUP_BOX = (150, 120, 790, 425)            # the apps' popups and lists over the middle of the screen
+
+
+def popup_text(o, r, label, box=POPUP_BOX):
+    """(picture path, its OCR text): the whole screen, then the popup's area (box) alone, stretched (its rows' dim
+    text read nothing whole-screen: JS8's Freq, GhostNet's and the texts' popups, the first-start summary, 11-26)"""
+    p, txt = shot_text(o, r, label)
+    txt += "\n" + ocr(p, box=box, psm=6, stretch=True)
+    for bar in _bars(p, box):               # the row with the focus, read on its own (its text read nowhere else)
+        txt += "\n" + ocr(p, box=bar, psm=7, stretch=True, scale=2)
+    return p, txt
+
+
+def _bars(path, box, least=12):
+    """The light bars (a focused row: dark text on gold) in box of the picture: [(x0, y0, x1, y1)] in its coordinates,
+    each least px tall at least, as wide as the bar's light runs in its middle row (a waterfall beside the popup kept
+    the bar's text from being read)"""
+    if not path or not os.path.exists(path):
+        return []
+    from PIL import Image
+    im = Image.open(path).convert("L").crop(box)
+    out, start = [], None
+    for y in range(im.height + 1):
+        light = y < im.height and sorted(im.crop((0, y, im.width, y + 1)).getdata())[im.width // 2] > 110
+        if light and start is None:
+            start = y
+        elif not light and start is not None:
+            if y - start >= least:
+                # the bar's own extent: the longest light run along a row near its top, above its text (a waterfall
+                # beside it is light too, but broken)
+                top = list(im.crop((0, start + 2, im.width, start + 3)).getdata())
+                best, run0 = (0, 0), None
+                for x, v in enumerate(top + [0]):
+                    if v > 110 and run0 is None:
+                        run0 = x
+                    elif v <= 110 and run0 is not None:
+                        if x - run0 > best[1] - best[0]:
+                            best = (run0, x)
+                        run0 = None
+                out.append((box[0] + best[0], box[1] + start - 1, box[0] + best[1], box[1] + y + 1))
+            start = None
+    return out
+
+
+WINDOW_BOX = (10, 118, 790, 418)            # an app's window under the frequency strip, above the buttons
 
 
 # ---- both radios ----
@@ -1828,7 +1897,7 @@ def t_wefax_view(o):
         home_both(o)
 
 
-WEFAX_TEST_PNG = "wefax-20991231-235959.png"
+WEFAX_TEST_PNG = "wefax-20371231-235959.png"   # newest by its name, yet inside the radio's 32-bit time_t
 
 
 def _test_png(path, text, size=(800, 600)):
@@ -1874,6 +1943,8 @@ def t_wefax_browser(o):
                 press_label(r, r"^Newest", WEFAX_NAMES, rest=1.0)
                 press_label(r, r"^Open", WEFAX_NAMES, rest=2.5)
                 p, txt = shot_text(o, r, "wefax browser open", psm=6)
+                # the fax pane alone, its dim picture stretched (QXZ 4729 shown in 3-71 of 255: not read whole-screen)
+                txt += "\n" + ocr(p, box=(15, 120, 405, 420), psm=6, stretch=True)
                 if not ocr_has(txt, "QXZ") and not ocr_has(txt, "4729"):
                     raise Refused(f"{n}: the opened fax does not read QXZ 4729 ({' '.join(txt.split())[:120]!r})")
                 return " ".join(txt.split())[:80]
@@ -1887,7 +1958,7 @@ def t_wefax_browser(o):
         for r in o.r.values():
             try:
                 ssh(r, f"rm -f /mnt/wefax/{WEFAX_TEST_PNG} /mnt/wefax/thumbs/{WEFAX_TEST_PNG}* "
-                       f"/mnt/wefax/thumbs/*20991231-235959*")
+                       f"/mnt/wefax/thumbs/*20371231-235959*")
             except (Refused, OSError, subprocess.SubprocessError):
                 pass
 
@@ -2099,7 +2170,7 @@ def _js8_settings_row(o, r, back, what):
     in its key group whatever comes before them), the row pressed; the list's screen read first (its title)"""
     k = _to_label(r, r"^Settings", JS8_NAMES)
     press(r, k, JS8_NAMES, rest=1.0)
-    p, txt = shot_text(o, r, f"js8 settings for {what}")
+    p, txt = popup_text(o, r, f"js8 settings for {what}")
     if not (ocr_has(txt, "Clear the list") or ocr_has(txt, "Send a heartbeat")):       # its title scrolls off
         raise Refused(f"{r.name}: JS8 Settings not on the screen ({' '.join(txt.split())[:100]!r}): nothing pressed")
     turn(r, "mfk", -back, JS8_NAMES, rest=0.8)
@@ -2109,10 +2180,53 @@ def _js8_settings_row(o, r, back, what):
 def _js8_freq_popup(o, r):
     """JS8's Freq popup (Settings row 9), seen on its screen"""
     _js8_settings_row(o, r, 10, "Freq")
-    p, txt = shot_text(o, r, "js8 freq popup")
-    if not ocr_has(txt, "GhostNet") or not ocr_has(txt, "Custom"):
+    p, txt = popup_text(o, r, "js8 freq popup")
+    # the row with the focus (dark on gold) may not read: GhostNet's rows and one of the other two
+    if not ocr_has(txt, "GhostNet", "nets") or not (ocr_has(txt, "Custom") or ocr_has(txt, "JS8Call frequencies")):
         raise Refused(f"{r.name}: the Freq popup not on the screen ({' '.join(txt.split())[:140]!r})")
     return txt
+
+
+FQ = {"JS8": 0, "GHOSTNET": 1, "GN_MORE": 2, "CUSTOM": 3, "CLOSE": 4}    # js8_window.c enum freq_choice
+
+
+def _fq_now(r):
+    """The Freq popup's row its focus starts on: the list in use (Custom, GhostNet, else JS8Call's)"""
+    custom = ssh(r, "sqlite3 -readonly /mnt/params.db \"select val from params where name='js8_custom_on'\" "
+                    "|| true").strip()
+    if custom == "1":
+        return FQ["CUSTOM"]
+    return FQ["GHOSTNET"] if str(cfg(r, "js8_ghostnet")) == "1" else FQ["JS8"]
+
+
+GN_SAID = r"(: reminder set|: no reminder| marked, Reminder off)"     # a GhostNet net's row pressed
+
+
+def _js8_custom_on(r):
+    return ssh(r, "sqlite3 -readonly /mnt/params.db \"select val from params where name='js8_custom_on'\" "
+                  "|| true").strip() == "1"
+
+
+def _js8_custom_back(o, r, was):
+    """JS8's Custom dial off again (Freq > JS8Call frequencies) when a test left it on and it was off before; JS8
+    still open on r. Said, never raised"""
+    if was or not _js8_custom_on(r) or win(r) != "JS8":
+        return
+    o.changing += 1
+    try:
+        _js8_freq_popup(o, r)
+        _fq_go(r, FQ["JS8"])
+        o.st.ev(f"{r.name}: JS8's Custom dial left on by a failed step: JS8Call frequencies chosen again", "radio")
+    except Refused as e:
+        o.st.ev(f"{r.name}: JS8's Custom dial left on ({e})", "bad")
+    finally:
+        o.changing -= 1
+
+
+def _fq_go(r, row):
+    """From the row in use to row in the open Freq popup, then pressed"""
+    turn(r, "mfk", row - _fq_now(r), JS8_NAMES, rest=0.6)
+    press(r, "MFK", JS8_NAMES, rest=1.2)
 
 
 def _js8_open(o, dial=14078000):
@@ -2129,33 +2243,66 @@ def _js8_open(o, dial=14078000):
     return got
 
 
+def _js8_alone(o, n, dial=14078000):
+    """JS8 open on n alone (the other radio on the Sentry's A, following n's dial: an active JS8 holds its own, so the
+    other cannot follow it under a JS8 of its own), brought to dial by the band keys"""
+    r = o.r[n]
+    other = next(x for m, x in o.r.items() if m != n)
+    H.test_calls(o)
+    o.changing += 1
+    try:
+        bench.close_apps(other)
+        bench.open_page(other, "A")
+        r.take_control()
+        if win(r) != "JS8":
+            if (r.state.get("win") or "Sentry") == "Sentry" and r.state.get("pg") != "A":
+                bench.open_page(r, "A")
+            r.send("open 111")
+            r.wait("JS8", lambda: win(r) == "JS8", 12)
+            bench.settled(r, still=1.0, timeout=5.0)
+        bench.ft8_to_band(r, dial)
+        bench.ensure(r, {"pwr": H.W})
+        bench.ensure(other, {"freq": int(r.state.get("freq", 0)), "mode": int(r.state.get("mode", 3))})
+    finally:
+        o.changing -= 1
+    return r, other
+
+
+def _follow(o, r, other):
+    """The other radio on r's dial again (r's JS8 moved it), inside one change"""
+    f = settled(r)
+    bench.ensure(other, {"freq": f, "mode": int(r.state.get("mode", 3))})
+    return f
+
+
 def t_js8_freq(o):
-    """JS8's Freq (Settings row 9) on each radio in turn, in a TX session (a row of Settings sends a heartbeat: never
-    pressed, but the Watch is on): GhostNet mode: 7.107 USB-D, 'GhostNet 40m', @GHOSTNET and @GSTFLASH in GROUPS=,
-    BAND_UP to 14.107; Custom kHz... typed 14080: 14.080, 'JS8 14080 kHz'; JS8Call frequencies again: its preset;
-    the other radio following each move. Its switches and files put back"""
+    """JS8's Freq (Settings row 9) on each radio in turn, JS8 open on it alone, the other radio following its dial from
+    the Sentry's A, in a TX session (a row of Settings sends a heartbeat: never pressed, but the Watch is on): GhostNet
+    mode: 7.107 USB-D, 'GhostNet 40m', @GHOSTNET and @GSTFLASH in GROUPS=, BAND_UP to 14.107; Custom kHz... typed
+    14080: 14.080, 'JS8 14080 kHz'; JS8Call frequencies again: its preset. Its switches and files put back"""
     import orch_cable as oc
     res = {}
     try:
         with js8_kept(o):
-            _js8_open(o, 14078000)
             for n in (H.A, H.B):
-                r = o.r[n]
-                other = next(x for m, x in o.r.items() if m != n)
+                r, other = _js8_alone(o, n)
                 out = {}
-                with oc.session(o, f"js8-freq {n}", [n], int(r.state.get("freq", 0))) as watch:
+                t_on = time.time()
+                custom0 = _js8_custom_on(r)
+                stack = contextlib.ExitStack()
+                stack.callback(_js8_custom_back, o, r, custom0)     # a step that failed left Custom's dial on
+                with stack, oc.session(o, f"js8-freq {n}", [n], int(r.state.get("freq", 0))) as watch:
                     oc.role(o, n)
                     with o.step(f"{n}: Freq > GhostNet mode: 7.107 USB-D, its groups; the other follows") as s:
                         o.changing += 1
                         try:
                             _js8_freq_popup(o, r)
                             t0 = time.time()
-                            turn(r, "mfk", 1, JS8_NAMES, rest=0.6)
-                            press(r, "MFK", JS8_NAMES, rest=1.2)
+                            _fq_go(r, FQ["GHOSTNET"])
                             out["gn"] = wait_msg(r, t0, r"GhostNet 40m", 5)
                             r.wait("7.107 USB-D", lambda: int(r.state.get("freq", 0)) == 7107000 and
                                    int(r.state.get("mode", -1)) == 3, 5)
-                            bench.ensure(other, {"freq": 7107000, "mode": 3})
+                            _follow(o, r, other)
                         finally:
                             o.changing -= 1
                         g = ssh(r, "grep '^GROUPS=' /mnt/js8_texts.txt || true")
@@ -2168,7 +2315,7 @@ def t_js8_freq(o):
                         try:
                             bench.tap(r, "BAND_UP")
                             r.wait("14.107", lambda: int(r.state.get("freq", 0)) == 14107000, 5)
-                            bench.ensure(other, {"freq": 14107000, "mode": int(r.state.get("mode", 3))})
+                            _follow(o, r, other)
                         finally:
                             o.changing -= 1
                         s.confirm(str(r.state.get("freq")))
@@ -2177,12 +2324,11 @@ def t_js8_freq(o):
                         try:
                             _js8_freq_popup(o, r)
                             t0 = time.time()
-                            turn(r, "mfk", 2, JS8_NAMES, rest=0.6)      # from GhostNet (in use): Custom
-                            press(r, "MFK", JS8_NAMES, rest=1.2)
+                            _fq_go(r, FQ["CUSTOM"])
                             r.send("type 14080")
                             out["custom"] = wait_msg(r, t0, r"JS8 14080 kHz", 5)
                             r.wait("14.080", lambda: int(r.state.get("freq", 0)) == 14080000, 5)
-                            bench.ensure(other, {"freq": 14080000, "mode": int(r.state.get("mode", 3))})
+                            _follow(o, r, other)
                         finally:
                             o.changing -= 1
                         s.confirm(repr(out["custom"]))
@@ -2191,19 +2337,23 @@ def t_js8_freq(o):
                         try:
                             _js8_freq_popup(o, r)
                             t0 = time.time()
-                            turn(r, "mfk", -3, JS8_NAMES, rest=0.6)     # from Custom (in use): JS8Call
-                            press(r, "MFK", JS8_NAMES, rest=1.2)
+                            _fq_go(r, FQ["JS8"])
                             out["js8"] = wait_msg(r, t0, r"JS8 \d+m", 5)
-                            f = settled(r)
-                            bench.ensure(other, {"freq": f, "mode": int(r.state.get("mode", 3))})
+                            f = _follow(o, r, other)
                         finally:
                             o.changing -= 1
                         if str(cfg(r, "js8_ghostnet")) != "0":
                             raise Refused(f"{n}: js8_ghostnet still on after JS8Call frequencies")
                         s.confirm(f"{out['js8']!r} on {f}")
-                if any(x[0] >= t0 - 60 for x in oc.tx_spans(r, t0 - 60)):
+                if oc.tx_spans(r, t_on):
                     raise Refused(f"{n} went on the air during its Freq steps")
                 res[n] = out
+                o.changing += 1
+                try:
+                    bench.close_apps(r)
+                    bench.ensure(other, {"freq": int(r.state.get("freq", 0)), "mode": int(r.state.get("mode", 2))})
+                finally:
+                    o.changing -= 1
         return True, (f"JS8 Freq on both: {res[H.A]['gn']!r} with {res[H.A]['groups']}, BAND_UP 14.107, "
                       f"{res[H.A]['custom']!r}, {res[H.A]['js8']!r}"), res
     except Refused as e:
@@ -2237,32 +2387,32 @@ def t_ghostnet_popup(o):
               "('rtty_rate','rtty_shift','rtty_reverse') order by name\"")
     try:
         with js8_kept(o):
-            _js8_open(o, 14078000)
             for n in (H.A, H.B):
-                r = o.r[n]
-                other = next(x for m, x in o.r.items() if m != n)
+                r, other = _js8_alone(o, n)             # the other on A, free to follow the RTTY entry's dial
                 out = {}
                 with oc.session(o, f"ghostnet {n}", [n], int(r.state.get("freq", 0))) as watch:
                     oc.role(o, n)
                     t_on = time.time()
                     with o.step(f"{n}: the first net's row pressed twice: its reminder set, then cleared") as s:
                         _js8_freq_popup(o, r)
-                        turn(r, "mfk", 2, JS8_NAMES, rest=0.6)          # JS8Call (in use) -> GhostNet: nets...
-                        press(r, "MFK", JS8_NAMES, rest=1.2)
-                        p, txt = shot_text(o, r, "ghostnet popup")
-                        if not ocr_has(txt, "Reminder") or not ocr_has(txt, "RTTY"):
+                        _fq_go(r, FQ["GN_MORE"])                        # GhostNet: nets, reminder, RTTY...
+                        p, txt = popup_text(o, r, "ghostnet popup")
+                        # the row with the focus may not read: two of its rows
+                        if not (ocr_has(txt, "Reminder") or ocr_has(txt, "Translate")) or not ocr_has(txt, "RTTY"):
                             raise Refused(f"{n}: GhostNet's popup not on the screen ({' '.join(txt.split())[:140]!r})")
                         t0 = time.time()
                         turn(r, "mfk", 5, JS8_NAMES, rest=0.6)          # Reminder -> the first net
                         press(r, "MFK", JS8_NAMES, rest=1.0)
-                        said = wait_msg(r, t0, r": (reminder set|no reminder|marked)", 4)
-                        net = said.split(":")[0].strip()
+                        # '<net>: reminder set' / '<net>: no reminder', or with GhostNet's Reminder off '<net> marked,
+                        # Reminder off' (js8_window.c gn_item_cb)
+                        said = wait_msg(r, t0, GN_SAID, 4)
+                        net = re.split(r":| marked", said)[0].strip()
                         conf = ssh(r, "grep '^nets=' /mnt/ghostnet.conf 2>/dev/null || true").strip()
                         t1 = time.time()
                         press(r, "MFK", JS8_NAMES, rest=1.0)
-                        said2 = wait_msg(r, t1, r": (reminder set|no reminder|marked)", 4)
+                        said2 = wait_msg(r, t1, GN_SAID, 4)
                         conf2 = ssh(r, "grep '^nets=' /mnt/ghostnet.conf 2>/dev/null || true").strip()
-                        if "reminder set" in said and net not in conf:
+                        if ("reminder set" in said or "marked" in said) and net not in conf:
                             raise Refused(f"{n}: {said!r} but ghostnet.conf has {conf!r}")
                         if said2 == said or conf2 == conf:
                             raise Refused(f"{n}: the second press said {said2!r}, nets {conf!r} -> {conf2!r}")
@@ -2303,8 +2453,6 @@ def t_ghostnet_popup(o):
                     if oc.tx_spans(r, t_on):
                         raise Refused(f"{n} went on the air during GhostNet's popup")
                 res[n] = out
-                if n == H.A:
-                    _js8_open(o, 14078000)
         return True, (f"GhostNet's nets toggled ({res[H.A]['net'][0]!r}), its RTTY entry: {res[H.A]['rtty']!r}, the "
                       "stored RTTY settings untouched, the radio back after"), res
     except Refused as e:
@@ -2437,8 +2585,9 @@ def t_js8_texts(o):
                     oc.role(o, n)
                     with o.step(f"{n}: Settings row 17, INFO: 'BENCH INFO' typed, in js8_texts.txt") as s:
                         _js8_settings_row(o, r, 2, "texts")
-                        p, txt = shot_text(o, r, "js8 texts popup")
-                        if not ocr_has(txt, "INFO") or not ocr_has(txt, "STATUS"):
+                        p, txt = popup_text(o, r, "js8 texts popup")
+                        # INFO's row has the focus (dark on gold): read or not, STATUS and Relay below it
+                        if not ocr_has(txt, "STATUS") or not (ocr_has(txt, "INFO") or ocr_has(txt, "Relay")):
                             raise Refused(f"{n}: the texts popup not on the screen ({' '.join(txt.split())[:120]!r})")
                         press(r, "MFK", JS8_NAMES, rest=1.0)            # its first row: INFO
                         r.send("type BENCH INFO")
@@ -2457,7 +2606,7 @@ def t_js8_texts(o):
                     with oc.session(o, f"js8-texts {n} again", [n], 14078000) as watch:
                         oc.role(o, n)
                         _js8_settings_row(o, r, 2, "texts again")
-                        p, txt = shot_text(o, r, "js8 texts popup again")
+                        p, txt = popup_text(o, r, "js8 texts popup again")
                         shown[n] = ocr_has(txt, "BENCH INFO")
                         k = _to_label(r, r"^Settings", JS8_NAMES)
                         press(r, k, JS8_NAMES, rest=0.8)               # the popup closed again
@@ -2643,7 +2792,7 @@ def _field_back(o, r):
 def _field_type(r, button, text, names=FIELD_NAMES):
     """A Field Ops button that opens its text window (Ref..., Log QSO), TEXT typed and taken (the remote's type)"""
     k = _to_label(r, button, names)
-    press(r, k, names, rest=0.8)
+    press_if(r, k, button, names, rest=0.8)
     r.send(f"type {text}")
     time.sleep(1.2)
 
@@ -2667,7 +2816,7 @@ def _start(o, r, ref):
     """Start (reference page 1) on r: 'Activation started: REF', active=1 and its log file named"""
     t0 = time.time()
     k = _to_label(r, r"^Start$", FIELD_NAMES)
-    press(r, k, FIELD_NAMES, rest=1.0)
+    press_if(r, k, r"^Start$", FIELD_NAMES, rest=1.0)
     said = wait_msg(r, t0, rf"Activation started: {re.escape(ref)}", 5)
     st = _fwait(r, "the activation", lambda x: x.get("active") == "1" and "/" in x.get("log", ""), 6)
     return said, st["log"]
@@ -2683,10 +2832,10 @@ def _end(o, r):
     """End (activation page 2) pressed twice: 'Press End again', then 'Activation complete'; active=0"""
     t0 = time.time()
     k = _to_label(r, r"^End", FIELD_NAMES)
-    press(r, k, FIELD_NAMES, rest=0.8)
+    press_if(r, k, r"^End", FIELD_NAMES, rest=0.8)
     first = wait_msg(r, t0, r"Press End again", 4)
     k = fkey_of(r, r"^End") or k
-    press(r, k, FIELD_NAMES, rest=1.0)
+    press_if(r, k, r"^End", FIELD_NAMES, rest=1.0)
     done = wait_msg(r, t0, r"Activation complete", 5)
     _fwait(r, "the activation ended", lambda x: x.get("active") == "0", 6)
     return first, done
@@ -2811,7 +2960,7 @@ def t_field_sota(o):
     """A SOTA activation on both, end to end (a summit of the radio's own list, the phone's position 50 m from it):
     the nearest summit taken, the next by the MFK, one typed by Ref...; PHONE in the header, QTH when the phone's
     position is coarser than 1 km; Start ('Activation started', its ADIF named); the counter 'QSOs / 4'; Log QSO
-    'Q9TST 59 57' (59 sent, 57 received, MY_SOTA_REF) in USB (SSB), on 14.074 (FT8), on 14.080 USB-D (no mode, said;
+    'Q9TST 59 57' (59 sent, 57 received, MY_SOTA_REF) in USB (SSB), on 14.074 (FT8), on 14.110 USB-D (no mode, said;
     the web Logs page sets it); a QSO onto a read-only log folder: 'QSO not saved'; the LOG tile's logbook lists them;
     End twice; the phone's position '(old)' after 150 s. Field Ops, the logs and the position put back"""
     res = {}
@@ -2870,8 +3019,9 @@ def t_field_sota(o):
                     return rec[-1].get("MODE")
                 res["ft8"] = each(o, ft8)
                 s.confirm(str(res["ft8"]))
-            with o.step("both on 14.080 USB-D: Log QSO Q7TST: no mode, said; the web Logs page sets PSK31") as s:
-                align(o, 14080000, 3)
+            # (14.080 is 20 m's FT4 dial: a QSO there is logged FT4, 11-26: 14.110 is no digital mode's)
+            with o.step("both on 14.110 USB-D: Log QSO Q7TST: no mode, said; the web Logs page sets PSK31") as s:
+                align(o, 14110000, 3)
 
                 def data(n, r):
                     said = _log_qso(o, r, "Q7TST", r"logged without a mode")
@@ -2911,7 +3061,8 @@ def t_field_sota(o):
                     _field_tile(o, r, "LOG")
                     time.sleep(1.0)
                     p, txt = shot_text(o, r, "field logbook")
-                    found = [c for c in ("Q9TST", "Q8TST", "Q7TST") if ocr_has(txt, c)]
+                    txt += "\n" + ocr(p, box=(10, 85, 790, 175), psm=6, stretch=True)       # the rows alone
+                    found = [c for c in ("Q9TST", "Q8TST", "Q7TST") if _call_read(txt, c)]
                     if not ocr_has(txt, "LOGBOOK") or len(found) < 2:
                         raise Refused(f"{n}: the logbook reads {' '.join(txt.split())[:160]!r}")
                     _field_back(o, r)
@@ -3064,6 +3215,26 @@ def _ref_of(refs, t, pattern=None, skip=0):
     return rows[skip]
 
 
+# the screen's slashed zero reads as 4 (WCA's 'QSOs / 50' as '/ 54', the clock's 05:55 as 45:55, 11-26)
+LOOKALIKE = {"5": "56S", "6": "65", "0": "0O@4", "1": "1Il", "3": "38", "8": "836B", "4": "4A", "2": "2Z",
+             "9": "9og?S", "7": "7?r"}
+
+
+def _call_read(txt, call):
+    """call (a test call, Q9TST) somewhere in the OCR text, its digit's look-alikes taken, any case (the logbook's
+    Q9TST read 'QoTst', Q7TST 'QrTsT', Q8TST 'Q6TST', 11-26)"""
+    pat = "".join(f"[{re.escape(LOOKALIKE.get(c, c))}]" if c.isdigit() else re.escape(c) for c in call)
+    return re.search(pat, txt, re.I) is not None
+
+
+def _counter_read(txt, need):
+    """'QSOs / 25' (or 'CALLS / 5') read on the screen, OCR's digit look-alikes taken (it read 25 as 26, 11-26)"""
+    num = need.split("/")[-1].strip()
+    word = "CALLS" if need.startswith("CALLS") else ""
+    pat = r"/\s*" + "".join(f"[{re.escape(LOOKALIKE.get(c, c))}]" for c in num) + r"(?![0-9])"
+    return bool(re.search(pat, txt)) and (not word or ocr_has(txt, word))
+
+
 def _activation(o, tile, ref, qso_line, want, typed=None, said_ref=None):
     """On both: tile opened (its nearest taken first), Ref... typed (typed, else ref), Start, Log QSO qso_line, the
     record holding want ({tag: value}); the counter its programme needs read; End twice; Back. Its message after
@@ -3087,7 +3258,7 @@ def _activation(o, tile, ref, qso_line, want, typed=None, said_ref=None):
         out["after_start"] = msgs_since(r, t1)
         txt = shot_text(o, r, f"field {tile.lower()} activation")[1]
         need = NEEDS[prog]
-        if not re.search(re.escape(need).replace(r"\ ", r"\s*"), txt):
+        if not _counter_read(txt, need):
             raise Refused(f"{n}: no '{need}' on the {tile} activation ({' '.join(txt.split())[:120]!r})")
         out["qso"] = _log_qso(o, r, qso_line)
         rec = [x for x in _adif(r, log) if x.get("CALL") == qso_line.split()[0]]
@@ -3113,11 +3284,11 @@ def t_field_programmes(o):
         with field_kept(o):
             _pos_forget(o)
             _field_open(o)
-            with o.step("WCA: 'DL-99999' taken as it is; 'DL-1156' -> DL-01156, started, a QSO with DL-01157") as s:
+            with o.step("WCA: 'DL-9999' taken as it is; 'DL-1156' -> DL-01156, started, a QSO with DL-01157") as s:
                 def unknown(n, r):
                     _field_tile(o, r, "WCA")
                     t0 = time.time()
-                    _field_type(r, r"^Ref", "DL-99999")
+                    _field_type(r, r"^Ref", "DL-9999")          # padded to DL-09999, a castle not in the list
                     said = wait_msg(r, t0, r"not in the castle list, taken as it is", 4)
                     _field_back(o, r)
                     return said
@@ -3221,7 +3392,7 @@ def t_field_xota_nota(o):
                     _field_tile(o, r, "XOTA")
                     time.sleep(2.0)
                     txt = shot_text(o, r, "field xota no list")[1]
-                    if not ocr_has(txt, "xota.tsv"):
+                    if not ocr_has(txt, "your xota"):            # (OCR read "xota.tsy", then "opy your", 11-26)
                         raise Refused(f"{n}: the screen reads {' '.join(txt.split())[:140]!r}")
                     return True
                 res["none"] = each(o, none, wait=60)
@@ -3233,11 +3404,14 @@ def t_field_xota_nota(o):
                     _fwait(r, "XOTA-BENCH1 taken", lambda x: (x.get("ref_f") or ["", ""])[1] == "XOTA-BENCH1", 30)
                     t0 = time.time()
                     k = _to_label(r, r"^Spot", FIELD_NAMES)
-                    press(r, k, FIELD_NAMES, rest=0.8)
+                    press_if(r, k, r"^Spot$", FIELD_NAMES, rest=0.8)
                     out["spot"] = wait_msg(r, t0, r"XOTA is a list of your own: no spot|Press Spot again", 4)
                     if "again" in out["spot"]:
-                        time.sleep(5.0)                     # its 4 s gone by: nothing posted
-                        raise Refused(f"{n}: XOTA's Spot asked for a second press: {out['spot']!r}")
+                        # Spot asks twice before it posts anything (dialog_field.c spot_cb); the second press reaches
+                        # spot_to, where an XOTA reference stops before any posting ('no spot')
+                        t0 = time.time()
+                        press_if(r, k, r"^Spot", FIELD_NAMES, rest=0.8)
+                        out["spot"] = wait_msg(r, t0, r"XOTA is a list of your own: no spot", 4)
                     said, log = _start(o, r, "XOTA-BENCH1")
                     _log_qso(o, r, "Q9TST")
                     rec = [x for x in _adif(r, log) if x.get("CALL") == "Q9TST"]
@@ -3257,11 +3431,12 @@ def t_field_xota_nota(o):
                     txt = shot_text(o, r, "field nota list")[1]
                     t0 = time.time()
                     k = _to_label(r, r"^Spot", FIELD_NAMES)
-                    press(r, k, FIELD_NAMES, rest=0.8)
+                    press_if(r, k, r"^Spot$", FIELD_NAMES, rest=0.8)
                     said = wait_msg(r, t0, r"NOTA: press the row|Press Spot again", 4)
-                    if "again" in said:
-                        time.sleep(5.0)
-                        raise Refused(f"{n}: NOTA's Spot asked for a second press: {said!r}")
+                    if "again" in said:                     # the second press: NOTA stops before any posting
+                        t0 = time.time()
+                        press_if(r, k, r"^Spot", FIELD_NAMES, rest=0.8)
+                        said = wait_msg(r, t0, r"NOTA: press the row", 4)
                     press(r, "MFK", FIELD_NAMES, rest=1.5)
                     st = _fwait(r, "a programme of its own", lambda x: x.get("prog") not in ("N", None), 6)
                     _field_back(o, r)
@@ -3329,7 +3504,7 @@ def t_field_map(o):
                     s.confirm(str(res["there"]))
                 with o.step("3 km away on both: the distance and heading under the map") as s:
                     _pos(o, (s1[2] + 0.027, s1[3]), 20)
-                    time.sleep(3.0)
+                    time.sleep(13.0)            # the nearest list rebuilt for the new place (10 s timer): page 1 again
                     got = {n: " ".join(shot_text(o, r, "field map 3 km")[1].split()) for n, r in o.r.items()}
                     res["km"] = {n: re.findall(r"\d+[.,]\d+\s*km", t) for n, t in got.items()}
                     if not all(res["km"].values()):
@@ -3340,7 +3515,7 @@ def t_field_map(o):
                         k = _to_label(r, r"^View", FIELD_NAMES)
                         seen, shots = [_label(r, k)], [shot(o, r, "field map view 0")]
                         for i in range(3):
-                            press(r, k, FIELD_NAMES, rest=1.2)
+                            press_if(r, k, r"^View", FIELD_NAMES, rest=1.2)
                             seen.append(_label(r, k))
                             shots.append(shot(o, r, f"field map view {i + 1}"))
                         if len(set(seen[:3])) != 3 or seen[3] != seen[0]:
@@ -3350,7 +3525,7 @@ def t_field_map(o):
                             raise Refused(f"{n}: the views look alike ({moves})")
                         kz = _to_label(r, r"^Zoom\s*\+", FIELD_NAMES)
                         a = shot(o, r, "field map zoom before")
-                        press(r, kz, FIELD_NAMES, rest=1.5)
+                        press_if(r, kz, r"^Zoom\s*\+", FIELD_NAMES, rest=1.5)
                         b = shot(o, r, "field map zoom +")
                         zm = round(_region_moves(a, b, (0, 40, 800, 400)), 3)
                         if zm < 0.02:
@@ -3358,12 +3533,14 @@ def t_field_map(o):
                         return {"views": seen, "moves": moves, "zoom": zm}
                     res["view"] = each(o, view, wait=90)
                     s.confirm(str(res["view"]))
-                with o.step(f"Ref... {far[0]} (far from the tiles) on both: 'No map here'") as s:
+                # The map is on the list's row the MFK is on, else the reference in use (dialog_field.c map_target): a
+                # typed far reference left the map on the nearest row (11-26). The phone's position by far's summit
+                # instead: the list is then its summits, none on the tiles
+                with o.step(f"the phone's position by {far[0]} (far from the tiles) on both: 'No map here'") as s:
+                    _pos(o, (far[2] + 0.0005, far[3]), 20)
+                    time.sleep(13.0)                         # the nearest looked up again (its page back to 1)
+
                     def nomap(n, r):
-                        _to_label(r, r"^Ref", FIELD_NAMES)
-                        _field_type(r, r"^Ref", far[0])
-                        _fwait(r, f"{far[0]}", lambda x: (x.get("ref_f") or ["", ""])[1] == far[0], 6)
-                        time.sleep(2.0)
                         txt = shot_text(o, r, "field no map")[1]
                         if not ocr_has(txt, "No map here"):
                             raise Refused(f"{n}: the screen {' '.join(txt.split())[:140]!r}")
@@ -3841,49 +4018,89 @@ def _cw_group(r, since_len, quiet=1.5, limit=40.0):
     return re.sub(r"\s+", "", (last or "")).upper()
 
 
-def _cwt_round(o, r, answer=None, start=True, speed=None, n0=None):
+def _cwt_start(r):
+    """Start, then at once Pause: the group (or call) still comes a second after the press, and after its result
+    nothing follows by itself (Learn and Calls play on otherwise, the next one a second after a right answer: a
+    picture or a slow poll then fell into its keying, and the decoder misread it, 11-26). Nothing on the radio meanwhile:
+    a picture taken while the group plays made the decoder read 'EÄMM' for KMM"""
+    k = _to_label(r, r"^Start", CWT_NAMES)
+    t_press = time.time()
+    press(r, k, CWT_NAMES, rest=0.05)
+
+    def label_is(pat, what):
+        end = time.time() + 2.0
+        while not re.match(pat, _label(r, k)):
+            if time.time() > end:
+                raise Refused(f"{r.name}: after {what} the key reads {_label(r, k)!r}")
+            time.sleep(0.1)
+    label_is(r"^Pause", "Start")
+    # the decoder's text from just before the group (PRESS_MS, a second after the press): the receiver's noise
+    # decoded while the keys were pressed ('EIIEEI' before a call, 11-26) is not the group's
+    time.sleep(max(0.0, t_press + 0.85 - time.time()))
+    n_start = len(r.cw)
+    press(r, k, CWT_NAMES, rest=0.05)
+    label_is(r"^Start", "Pause")
+    return n_start
+
+
+def _cwt_round(o, r, answer=None, start=True, speed=None, n0=None, on_start=None):
     """One group or call: Start (or the trainer's own next one), its text from the decoder (from n0 of its text, else
     from now), answered by TCI (answer: a function of the group, None: the group itself); the stats file's tries
     after. Returns (group, answer, stats)"""
+    given = n0
     n0 = len(r.cw) if n0 is None else n0
     tries0 = _cwt_stats(r).get("tries", 0)
     if start:
-        press_label(r, r"^Start", CWT_NAMES, rest=0.3)
+        n_start = _cwt_start(r)
+        if given is None:
+            n0 = n_start
+    if on_start:
+        on_start()
     g = _cw_group(r, n0, quiet=1.5 if not speed or speed >= 10 else 4.0, limit=60)
     if not g:
         raise Refused(f"{r.name}: no group decoded after Start")
     a = answer(g) if answer else g
     time.sleep(0.8)
+    n1 = len(r.cw)
+    # Nothing else on the radio while the answer is keyed: the stats file read over SSH every 0.5 s meanwhile (a new
+    # session each time, on the radio's CPU) and the decoder heard 'MMM' as 'EE' (11-26). The keyer's end awaited,
+    # then the file read once
     p = _tci_cw(r, a, 60)
     try:
-        end = time.time() + 60
-        while time.time() < end:
-            st = _cwt_stats(r)
-            if st.get("tries", 0) != tries0 or (st.get("copy") is None and False):
-                break
-            time.sleep(0.5)
-        return g, a, _cwt_stats(r)
-    finally:
-        try:
-            p.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            p.kill()
+        p.wait(timeout=60)
+    except subprocess.TimeoutExpired:
+        p.kill()
+    end = time.time() + 15
+    st = {}
+    while time.time() < end:
+        time.sleep(2.0)                             # the answer's end: the trainer's silence after the last character
+        st = _cwt_stats(r)
+        if st.get("tries", 0) != tries0:
+            break
+    # what the decoder heard of the answer: kept with the run (no picture here: see _cwt_start)
+    heard = re.sub(r"\s+", " ", r.cw[n1:]).strip()
+    o.st.ev(f"{r.name}: trainer group {g!r}, keyed back {a!r}, the decoder heard {heard!r}", "conf")
+    return g, a, st
 
 
 @contextlib.contextmanager
-def trainer_on(o, n, label, settings):
+def trainer_on(o, n, label, settings, f=14040000):
     """n's CW Trainer open in a TX session (its sidetone keys the base at 0 W: the Watch on, n's role TX, the other
-    radio on the same dial listening), its settings and stats file as found after"""
+    radio on the same dial listening) on f, CW; its settings and stats file as found after"""
     import orch_cable as oc
     r = o.r[n]
-    align(o, 14040000, 4)
-    with file_kept(r, CWT_FILE), cfg_kept(r, settings), oc.session(o, label, [n], 14040000) as watch:
+    align(o, f, 4)
+    with file_kept(r, CWT_FILE), cfg_kept(r, settings), oc.session(o, label, [n], f) as watch:
+        watch.shots_on_tx = False       # train mode's keying is an over to the Watch: no screen grab into the sidetone
         oc.role(o, n)
         o.changing += 1
         try:
             r.send("open 115")
             r.wait("the CW Trainer", lambda: win(r) == "CW Trainer", 10)
             time.sleep(1.0)
+            # leaving the Sentry gave back the classic screen's own dial (14.074 came up, 11-26): f again, the other
+            # radio with it
+            bench.ensure(r, {"freq": f, "mode": 4})
             other = next(x for m, x in o.r.items() if m != n)
             bench.ensure(other, {"freq": int(r.state.get("freq", 0)), "mode": int(r.state.get("mode", 4))})
         finally:
@@ -3906,55 +4123,66 @@ def t_cwtrainer_learn(o):
     keyed back right"""
     res = {}
     try:
+        errs = {}
         for n in (H.A, H.B):
             out = {}
-            with o.step(f"{n}: Learn at level 2, 20 WPM: 'Listen...', a group of K and M, keyed back: right") as s:
-                with trainer_on(o, n, f"cwtrainer-learn {n}",
-                                {"cwt_level": 2, "cwt_group": 3, "key_speed": 20}) as (r, watch):
-                    k = _to_label(r, r"^Start", CWT_NAMES)
-                    st0 = _cwt_stats(r)
-                    n0 = len(r.cw)
-                    press(r, k, CWT_NAMES, rest=0.1)
-                    out["listen"] = ocr_has(shot_text(o, r, "cw trainer after Start")[1], "Listen")
-                    g, a, st = _cwt_round(o, r, start=False, n0=n0)
-                    if set(g) - set("KM"):
-                        raise Refused(f"{n}: level 2's group decoded {g!r}: not K and M only")
-                    if st.get("tries", 0) != st0.get("tries", 0) + 1 or st.get("right", 0) != st0.get("right", 0) + 1:
-                        raise Refused(f"{n}: answered {a!r} to {g!r}: tries {st0.get('tries')} -> {st.get('tries')}, "
-                                      f"right {st0.get('right')} -> {st.get('right')}")
-                    if not out["listen"]:
-                        raise Refused(f"{n}: no 'Listen...' on the screen right after Start")
-                    lens = {c: (v[0] if isinstance(v, list) else v) for c, v in (st.get("chars") or {}).items()}
-                    if any(isinstance(x, int) and x > 20 for x in lens.values()):
-                        raise Refused(f"{n}: a character keeps more than its last 20 tries: {lens}")
-                    out["right"] = (g, a)
-                    s.confirm(str(out))
-                    with o.step(f"{n}: the next group answered with a prosign: '<?> = not a character', wrong") as s2:
+            try:
+                with o.step(f"{n}: Learn at level 2, 20 WPM: 'Listen...', a group of K and M, keyed back: right") as s:
+                    with trainer_on(o, n, f"cwtrainer-learn {n}",
+                                    {"cwt_level": 2, "cwt_group": 3, "key_speed": 20}) as (r, watch):
+                        k = _to_label(r, r"^Start", CWT_NAMES)
                         st0 = _cwt_stats(r)
-                        g2, a2, st2 = _cwt_round(o, r, answer=lambda grp: grp[:-1] + "|AR|", start=False)
-                        time.sleep(0.8)
-                        txt = shot_text(o, r, "cw trainer prosign")[1]
-                        if st2.get("tries", 0) != st0.get("tries", 0) + 1 or st2.get("right") != st0.get("right"):
-                            raise Refused(f"{n}: {a2!r} to {g2!r}: tries {st0.get('tries')} -> {st2.get('tries')}, "
-                                          f"right {st0.get('right')} -> {st2.get('right')}")
-                        if not ocr_has(txt, "not a character"):
-                            raise Refused(f"{n}: no 'not a character' on the screen ({' '.join(txt.split())[:140]!r})")
-                        out["prosign"] = (g2, a2)
-                        s2.confirm(str(out["prosign"]))
-                    with o.step(f"{n}: 5 WPM: a group still K and M, keyed back right") as s3:
-                        bench.cfg_set(r, "key_speed", 5)
-                        bench.cfg_set(r, "cwt_group", 2)
-                        st0 = _cwt_stats(r)
-                        time.sleep(6.0)                 # the group of the wrong answer's result goes by first
-                        g3, a3, st3 = _cwt_round(o, r, start=True, speed=5)
-                        if set(g3) - set("KM"):
-                            raise Refused(f"{n}: at 5 WPM the group decoded {g3!r}")
-                        if st3.get("right", 0) <= st0.get("right", 0):
-                            raise Refused(f"{n}: at 5 WPM {a3!r} to {g3!r} not right (stats {st0.get('right')} -> "
-                                          f"{st3.get('right')})")
-                        out["slow"] = (g3, a3)
-                        s3.confirm(str(out["slow"]))
+                        # no picture while the group plays: the screen's capture (and the banner taken off and put back)
+                        # held the radio long enough for the decoder to read 'EÄMM' for KMM (11-26); 'Listen...' last
+                        g, a, st = _cwt_round(o, r, start=True)
+                        if set(g) - set("KM"):
+                            raise Refused(f"{n}: level 2's group decoded {g!r}: not K and M only")
+                        if st.get("tries", 0) != st0.get("tries", 0) + 1 or st.get("right", 0) != st0.get("right", 0) + 1:
+                            raise Refused(f"{n}: answered {a!r} to {g!r}: tries {st0.get('tries')} -> {st.get('tries')}, "
+                                          f"right {st0.get('right')} -> {st.get('right')}")
+                        lens = {c: (v[0] if isinstance(v, list) else v) for c, v in (st.get("chars") or {}).items()}
+                        if any(isinstance(x, int) and x > 20 for x in lens.values()):
+                            raise Refused(f"{n}: a character keeps more than its last 20 tries: {lens}")
+                        out["right"] = (g, a)
+                        s.confirm(str(out))
+                        with o.step(f"{n}: the next group answered with a prosign: '<?> = not a character', wrong") as s2:
+                            st0 = _cwt_stats(r)
+                            g2, a2, st2 = _cwt_round(o, r, answer=lambda grp: grp[:-1] + "|AR|")
+                            time.sleep(0.8)
+                            txt = shot_text(o, r, "cw trainer prosign")[1]
+                            if st2.get("tries", 0) != st0.get("tries", 0) + 1 or st2.get("right") != st0.get("right"):
+                                raise Refused(f"{n}: {a2!r} to {g2!r}: tries {st0.get('tries')} -> {st2.get('tries')}, "
+                                              f"right {st0.get('right')} -> {st2.get('right')}")
+                            if not ocr_has(txt, "not a character"):
+                                raise Refused(f"{n}: no 'not a character' on the screen ({' '.join(txt.split())[:140]!r})")
+                            out["prosign"] = (g2, a2)
+                            s2.confirm(str(out["prosign"]))
+                        with o.step(f"{n}: 5 WPM: a group still K and M, keyed back right") as s3:
+                            bench.cfg_set(r, "key_speed", 5)
+                            bench.cfg_set(r, "cwt_group", 2)
+                            st0 = _cwt_stats(r)
+                            time.sleep(1.0)
+                            g3, a3, st3 = _cwt_round(o, r, start=True, speed=5)
+                            if set(g3) - set("KM"):
+                                raise Refused(f"{n}: at 5 WPM the group decoded {g3!r}")
+                            if st3.get("right", 0) <= st0.get("right", 0):
+                                raise Refused(f"{n}: at 5 WPM {a3!r} to {g3!r} not right (stats {st0.get('right')} -> "
+                                              f"{st3.get('right')})")
+                            out["slow"] = (g3, a3)
+                            s3.confirm(str(out["slow"]))
+                        with o.step(f"{n}: Start once more: 'Listen...' on the screen before the group") as s4:
+                            time.sleep(1.5)
+                            k = _to_label(r, r"^Start", CWT_NAMES)
+                            press(r, k, CWT_NAMES, rest=0.1)
+                            out["listen"] = ocr_has(shot_text(o, r, "cw trainer after Start")[1], "Listen")
+                            if not out["listen"]:
+                                raise Refused(f"{n}: no 'Listen...' on the screen right after Start")
+                            s4.confirm("Listen... read")
+            except Refused as e:     # the other radio still tried: what each did is known
+                errs[n] = str(e)
             res[n] = out
+        if errs:
+            return False, "; ".join(errs.values()), res
         return True, f"CW Trainer Learn on both: {res}", res
     except Refused as e:
         return False, str(e), res
@@ -3969,47 +4197,57 @@ def t_cwtrainer_calls(o):
     Follows again and out of Calls: KEY Speed back to 20"""
     res = {}
     try:
+        errs = {}
         for n in (H.A, H.B):
             out = {}
-            with trainer_on(o, n, f"cwtrainer-calls {n}",
-                            {"key_speed": 20, "cwt_tx_fixed": 0}) as (r, watch):
-                with o.step(f"{n}: Mode to Calls; a call keyed back with a space inside: right, KEY Speed 21") as s:
-                    k = _to_label(r, r"^Mode", CWT_NAMES)
-                    for _ in range(3):
-                        if "Calls" in _label(r, k):
-                            break
-                        press(r, k, CWT_NAMES, rest=0.8)
-                    if "Calls" not in _label(r, k):
-                        raise Refused(f"{n}: Mode reads {_label(r, k)!r}")
-                    g, a, st = _cwt_round(o, r, answer=lambda c: c[:2] + " " + c[2:])
-                    wait_cfg(r, "KEY Speed 21 for the next call", lambda v: str(v) == "21", "key_speed", 12)
-                    out["follows"] = (g, a, cfg(r, "key_speed"))
-                    s.confirm(str(out["follows"]))
-                with o.step(f"{n}: TX speed Fixed: KEY Speed 20 again, kept after a right call; the hint") as s:
-                    _to_label(r, r"^TX speed", CWT_NAMES)
-                    press_label(r, r"^TX speed", CWT_NAMES, rest=0.8)
-                    if str(cfg(r, "cwt_tx_fixed")) != "1" or str(cfg(r, "key_speed")) != "20":
-                        raise Refused(f"{n}: Fixed: cwt_tx_fixed {cfg(r, 'cwt_tx_fixed')}, KEY Speed "
-                                      f"{cfg(r, 'key_speed')}")
-                    hint = ocr_has(shot_text(o, r, "cw trainer fixed hint")[1], "at your 20 WPM")
-                    _to_label(r, r"^\(CWT 1", CWT_NAMES)
-                    g2, a2, st2 = _cwt_round(o, r, start=False)
-                    time.sleep(3.0)
-                    if str(cfg(r, "key_speed")) != "20":
-                        raise Refused(f"{n}: Fixed, KEY Speed moved to {cfg(r, 'key_speed')}")
-                    out["fixed"] = (g2, a2, hint)
-                    if not hint:
-                        raise Refused(f"{n}: the hint 'Key back the callsign at your 20 WPM' not read")
-                    s.confirm(str(out["fixed"]))
-                with o.step(f"{n}: Follows again, Mode on out of Calls: KEY Speed 20, Fixed kept as set") as s:
-                    press_label(r, r"^TX speed", CWT_NAMES, rest=0.8)
-                    k = _to_label(r, r"^Mode", CWT_NAMES)
-                    press(r, k, CWT_NAMES, rest=1.0)
-                    out["out"] = (cfg(r, "key_speed"), cfg(r, "cwt_tx_fixed"), _label(r, k))
-                    if str(out["out"][0]) != "20":
-                        raise Refused(f"{n}: out of Calls KEY Speed {out['out'][0]}")
-                    s.confirm(str(out["out"]))
+            try:
+                with trainer_on(o, n, f"cwtrainer-calls {n}",
+                                {"key_speed": 20, "cwt_tx_fixed": 0}) as (r, watch):
+                    with o.step(f"{n}: Mode to Calls; a call keyed back with a space inside: right, KEY Speed 21") as s:
+                        k = _to_label(r, r"^Mode", CWT_NAMES)
+                        for _ in range(3):
+                            if "Calls" in _label(r, k):
+                                break
+                            press(r, k, CWT_NAMES, rest=0.8)
+                        if "Calls" not in _label(r, k):
+                            raise Refused(f"{n}: Mode reads {_label(r, k)!r}")
+                        g, a, st = _cwt_round(o, r, answer=lambda c: c[:2] + " " + c[2:])
+                        o.st.ev(f"{n}: call {g!r} keyed back as {a!r}", "conf")
+                        # right: the next call 1 WPM faster (wrong: slower). Follows: the next call 1 WPM faster, KEY Speed with it as it starts (start_call)
+                        sp = {}
+                        g1, a1, st1 = _cwt_round(o, r, on_start=lambda: sp.update(
+                            k=wait_cfg(r, "KEY Speed 21 for the next call", lambda v: str(v) == "21", "key_speed", 4)))
+                        out["follows"] = (g, a, g1, a1, cfg(r, "key_speed"))
+                        s.confirm(str(out["follows"]))
+                    with o.step(f"{n}: TX speed Fixed: KEY Speed 20 again, kept after a right call; the hint") as s:
+                        _to_label(r, r"^TX speed", CWT_NAMES)
+                        press_label(r, r"^TX speed", CWT_NAMES, rest=0.8)
+                        if str(cfg(r, "cwt_tx_fixed")) != "1" or str(cfg(r, "key_speed")) != "20":
+                            raise Refused(f"{n}: Fixed: cwt_tx_fixed {cfg(r, 'cwt_tx_fixed')}, KEY Speed "
+                                          f"{cfg(r, 'key_speed')}")
+                        hint = ocr_has(shot_text(o, r, "cw trainer fixed hint")[1], "at your 20 WPM")
+                        _to_label(r, r"^\(CWT 1", CWT_NAMES)
+                        g2, a2, st2 = _cwt_round(o, r)
+                        time.sleep(3.0)
+                        if str(cfg(r, "key_speed")) != "20":
+                            raise Refused(f"{n}: Fixed, KEY Speed moved to {cfg(r, 'key_speed')}")
+                        out["fixed"] = (g2, a2, hint)
+                        if not hint:
+                            raise Refused(f"{n}: the hint 'Key back the callsign at your 20 WPM' not read")
+                        s.confirm(str(out["fixed"]))
+                    with o.step(f"{n}: Follows again, Mode on out of Calls: KEY Speed 20, Fixed kept as set") as s:
+                        press_label(r, r"^TX speed", CWT_NAMES, rest=0.8)
+                        k = _to_label(r, r"^Mode", CWT_NAMES)
+                        press(r, k, CWT_NAMES, rest=1.0)
+                        out["out"] = (cfg(r, "key_speed"), cfg(r, "cwt_tx_fixed"), _label(r, k))
+                        if str(out["out"][0]) != "20":
+                            raise Refused(f"{n}: out of Calls KEY Speed {out['out'][0]}")
+                        s.confirm(str(out["out"]))
+            except Refused as e:     # the other radio still tried: what each did is known
+                errs[n] = str(e)
             res[n] = out
+        if errs:
+            return False, "; ".join(errs.values()), res
         return True, f"CW Trainer Calls on both: {res}", res
     except Refused as e:
         return False, str(e), res
@@ -4017,42 +4255,36 @@ def t_cwtrainer_calls(o):
         home_both(o)
 
 
-def t_cwtrainer_rx_only(o):
-    """The CW Trainer where the radio can't transmit at all (0.600 MHz, a receive-only range of both): its Start's
-    group refused ('No TX on 0.600 MHz', 'Receive only there'), nothing keyed; each radio in turn"""
+def t_cwtrainer_out_of_band(o):
+    """The CW Trainer where the radio may not transmit, each radio in turn (its group at 0 W in train mode, the Watch
+    on): with Settings > TX Cal > TX ranges on South Korea (cfg tx_ranges 1, put back after) on 7.250 MHz (US 40 m,
+    outside Korea's 7.000-7.200) Start says 'No TX on 7.250 MHz' and 'TX ranges: Settings > TX Cal', nothing keyed or
+    decoded. Not here: the trainer sounding outside the amateur bands (0.600 MHz): the bench keys nothing there, not
+    even at 0 W (its TX gate: '600000 Hz is outside the amateur bands'); the X6200's airband (receive only): set to
+    120 MHz CW under the trainer, the X6200 showed the Sentry's AIR page instead (11-26)"""
     import orch_cable as oc
     res = {}
     try:
         for n in (H.A, H.B):
-            r = o.r[n]
-            with o.step(f"{n}: the trainer on 0.600 MHz CW: Start refused, 'Receive only there'") as s:
-                align(o, 600000, 4)
-                with file_kept(r, CWT_FILE), cfg_kept(r, {"cwt_level": 2, "cwt_group": 1}):
-                    o.changing += 1
-                    try:
-                        r.send("open 115")
-                        r.wait("the CW Trainer", lambda: win(r) == "CW Trainer", 10)
-                        time.sleep(1.0)
-                        bench.ensure(r, {"freq": 600000, "mode": 4})
-                    finally:
-                        o.changing -= 1
-                    try:
-                        t0 = time.time()
-                        press_label(r, r"^Start", CWT_NAMES, rest=0.5)
-                        said = wait_msg(r, t0, r"No TX on 0\.600", 6)
-                        why = wait_msg(r, t0, r"Receive only|TX ranges|Out of band", 4)
+            out = {}
+            with o.step(f"{n}: TX ranges South Korea, 7.250 MHz CW: Start refused ('No TX on 7.250', 'TX ranges'), "
+                        f"nothing keyed") as s:
+                with cfg_kept(o.r[n], {"tx_ranges": 1}):
+                    with trainer_on(o, n, f"cwtrainer-out-of-band {n} 7.250 KR", {"cwt_level": 2, "cwt_group": 2},
+                                    f=7250000) as (r, watch):
+                        t0, n0 = time.time(), len(r.cw)
+                        _cwt_start(r)
+                        said = wait_msg(r, t0, r"No TX on 7\.250", 6)
+                        why = wait_msg(r, t0, r"TX ranges", 4)
                         time.sleep(2.0)
-                        if oc.tx_spans(r, t0):
-                            raise Refused(f"{n} keyed on 0.600 MHz")
-                        res[n] = (said, why)
-                    finally:
-                        o.changing += 1
-                        try:
-                            bench.close_apps(r)
-                        finally:
-                            o.changing -= 1
-                s.confirm(str(res[n]))
-        return True, f"the CW Trainer refused where the radio receives only, on both ({res[H.A]})", res
+                        # nothing keyed (the decoder is no judge: with the trainer open it reads the receiver's noise
+                        # too, 'IHES' with nothing sent, 11-26)
+                        if oc.tx_spans(r, t0) or r.state.get("tx"):
+                            raise Refused(f"{n}: refused, yet it keyed")
+                        out["kr"] = (said, why)
+                        s.confirm(str(out["kr"]))
+            res[n] = out
+        return True, f"the CW Trainer outside the bands and where it may not transmit: {res}", res
     except Refused as e:
         return False, str(e), res
     finally:
@@ -4082,14 +4314,25 @@ def t_first_start(o):
         for n, r in o.r.items():
             keep[n] = {k: cfg(r, k) for k in ("callsign", "qth", "country", "first_start_done")}
             ssh(r, "set -- save\n" + KEEP.format(f="/mnt/tz.conf"))
-        with o.step("the callsign blank, first_start_done 0, each GUI restarted: the guide opens by itself") as s:
+        with o.step("the callsign blank, first_start_done 0, each GUI restarted from the classic screen: the guide "
+                    "opens by itself") as s:
+            import orch_cable as oc
             for n, r in o.r.items():
                 r.send("cfg callsign ")
                 wait_cfg(r, "the callsign blank", lambda v: not v.strip(), "callsign", 6)
                 bench.cfg_set(r, "first_start_done", 0)
+                # The guide waits while a window is up (first_start.c start_cb): a GUI restarted on the Sentry (its
+                # home, gui_state's place) brings the Sentry back first, and the guide never comes. From the classic
+                # screen the place is the main screen, with no window over it
+                o.changing += 1
+                try:
+                    oc.classic(r)
+                    time.sleep(1.5)                     # gui_state's place written (every 0.5 s)
+                finally:
+                    o.changing -= 1
                 gui_restart(o, n, "the first-start guide (no callsign)")
                 r.wait("the guide", lambda: win(r) == "First start", 15)
-            got = {n: " ".join(shot_text(o, r, "first start step 1")[1].split())[:120] for n, r in o.r.items()}
+            got = {n: " ".join(popup_text(o, r, box=WINDOW_BOX, label="first start step 1")[1].split())[:120] for n, r in o.r.items()}
             if not all(ocr_has(t, "FIRST START") and ocr_has(t, "Language") for t in got.values()):
                 raise Refused(f"step 1 not read: {got}")
             res["open"] = got
@@ -4110,13 +4353,13 @@ def t_first_start(o):
                 press(r, "MFK", FS_NAMES, rest=3.0)
                 r.wait("the guide again", lambda: win(r) == "First start", 10)
                 other = ssh(r, lang_q).strip()
-                t = " ".join(shot_text(o, r, "first start other language")[1].split())
+                t = " ".join(popup_text(o, r, box=WINDOW_BOX, label="first start other language")[1].split())
                 press_label(r, r"^Language$", FS_NAMES, rest=1.0)
                 turn(r, "mfk", -1, FS_NAMES, rest=0.6)
                 press(r, "MFK", FS_NAMES, rest=3.0)
                 r.wait("the guide again", lambda: win(r) == "First start", 10)
                 back = ssh(r, lang_q).strip()
-                t2 = " ".join(shot_text(o, r, "first start english again")[1].split())
+                t2 = " ".join(popup_text(o, r, box=WINDOW_BOX, label="first start english again")[1].split())
                 if other in ("", "en") or back not in ("", "en"):
                     raise Refused(f"{n}: language {was!r} -> {other!r} -> {back!r}")
                 if not ocr_has(t2, "Language") or ocr_has(t, "The language of the screens"):
@@ -4134,11 +4377,11 @@ def t_first_start(o):
         with o.step("Next, Skip (the keyboard step, nothing scanned), WiFi: its line, Networks and GEN back") as s:
             def wifi(n, r):
                 nxt(r)                                   # 2: the keyboard
-                t = shot_text(o, r, "first start keyboard")[1]
+                t = popup_text(o, r, box=WINDOW_BOX, label="first start keyboard")[1]
                 if not ocr_has(t, "Keyboard") and not ocr_has(t, "Bluetooth"):
                     raise Refused(f"{n}: step 2 reads {' '.join(t.split())[:100]!r}")
                 nxt(r, "Skip")                           # 3: WiFi
-                t = " ".join(shot_text(o, r, "first start wifi")[1].split())
+                t = " ".join(popup_text(o, r, box=WINDOW_BOX, label="first start wifi")[1].split())
                 ssid = ssh(r, "iw dev wlan0 link 2>/dev/null | sed -n 's/.*SSID: //p'").strip()
                 if not ocr_has(t, "Networks") or (ssid and not ocr_has(t, ssid)):
                     raise Refused(f"{n}: the WiFi step reads {t[:140]!r} (network {ssid!r})")
@@ -4165,9 +4408,9 @@ def t_first_start(o):
         with o.step("Next: the Country step's band plan line; Next: the Clock step set by NTP") as s:
             def country_clock(n, r):
                 nxt(r)                                   # 5: country
-                t5 = " ".join(shot_text(o, r, "first start country")[1].split())
+                t5 = " ".join(popup_text(o, r, box=WINDOW_BOX, label="first start country")[1].split())
                 nxt(r)                                   # 6: clock
-                t6 = " ".join(shot_text(o, r, "first start clock")[1].split())
+                t6 = " ".join(popup_text(o, r, box=WINDOW_BOX, label="first start clock")[1].split())
                 if not ocr_has(t5, "Region") and not ocr_has(t5, "Band plan"):
                     raise Refused(f"{n}: the Country step reads {t5[:140]!r}")
                 if not ocr_has(t6, "NTP"):
@@ -4178,8 +4421,11 @@ def t_first_start(o):
         with o.step("Next: the summary (Skipped, the web address); Done: the guide closed, first_start_done 1") as s:
             def done(n, r):
                 nxt(r)                                   # the summary
-                t = " ".join(shot_text(o, r, "first start summary")[1].split())
-                if not ocr_has(t, "Skipped") or not ocr_has(t, f"{n}.local"):
+                p, t = popup_text(o, r, box=WINDOW_BOX, label="first start summary")
+                # the web configurator's row alone (two lines: the whole window's read skipped it; its zeros read 8)
+                web = ocr(p, box=(210, 290, 790, 345), psm=6, stretch=True)
+                t = " ".join((t + " " + web).split())
+                if not ocr_has(t, "Skipped") or not re.search(r"x6\w{3}\s*\.\s*local", web, re.I):
                     raise Refused(f"{n}: the summary reads {t[:160]!r}")
                 nxt(r, "Done")
                 r.wait("the guide closed", lambda: win(r) != "First start", 6)
@@ -4330,6 +4576,16 @@ def _rows_with(L, n0, text, secs=10.0):
     return []
 
 
+def _map_heard(o, r, label):
+    """The Live Map's head line on r's screen: (its 'N heard', None unread; the text read). Its box alone, stretched,
+    at twice the size: the whole screen at three times read the slashed zero of '0 heard' as 4 (11-26)"""
+    p, txt = shot_text(o, r, label)
+    head = ocr(p, box=(18, 134, 520, 158), psm=7, stretch=True, scale=2)
+    m = re.search(r"([0-9@Oo]+)\s*heard", head)
+    n = int(m.group(1).translate(str.maketrans("@Oo", "000"))) if m else None
+    return n, " ".join((head + " " + txt).split())
+
+
 def t_ft8_show_pota(o, s, l):
     """FT8 over the cable at 0.1 W, s sending messages through its TCI, l's list (the remote's ft8r rows: kind t, POTA
     p): Show: CQ drops a message to a third call; Show: All lists it (t RX_MSG); 'CQ POTA Q9TST JO22' is a CQ with
@@ -4385,31 +4641,35 @@ def t_ft8_show_pota(o, s, l):
                 with o.step(f"{l}'s Live Map: the stations heard with a grid; a band change empties it") as st:
                     k = _to_label(L, r"^Live\s*Map", ("FT8",))
                     press(L, k, ("FT8",), rest=2.0)
-                    t1 = " ".join(shot_text(o, L, "ft8 live map")[1].split())
-                    m = re.search(r"(\d+)\s*heard", t1)
+                    n1, t1 = _map_heard(o, L, "ft8 live map")
                     press(L, k, ("FT8",), rest=1.0)
-                    if not m or int(m.group(1)) < 1 or not ocr_has(t1, "Q9TST"):
+                    if n1 is None or n1 < 1 or not _call_read(t1, "Q9TST"):
                         raise Refused(f"the Live Map reads {t1[:140]!r}")
-                    res["live"] = m.group(0)
-                    o.changing += 1
-                    try:
-                        for key in ("BAND_UP", "BAND_DOWN"):
+                    res["live"] = f"{n1} heard"
+                    def band(key):
+                        o.changing += 1
+                        try:
                             for r in o.r.values():
                                 f0 = int(r.state.get("freq", 0))
                                 bench.tap(r, key)
                                 r.wait("the band moved", lambda r=r, f0=f0: int(r.state.get("freq", 0)) != f0, 5)
                             time.sleep(0.8)
+                        finally:
+                            o.changing -= 1
+                        H.alike(o, ("freq", "mode"))
+                    # read on the band it moved to (as the feature has it: BAND_UP, the map again: empty); back on 20 m
+                    # after, where a decode due may come again (11-26: '4 heard' read back on 20 m)
+                    band("BAND_UP")
+                    try:
+                        _to_label(L, r"^Live\s*Map", ("FT8",))
+                        press(L, k, ("FT8",), rest=2.0)
+                        n2, t2 = _map_heard(o, L, "ft8 live map emptied")
+                        press(L, k, ("FT8",), rest=1.0)
                     finally:
-                        o.changing -= 1
-                    H.alike(o, ("freq", "mode"))
-                    _to_label(L, r"^Live\s*Map", ("FT8",))
-                    press(L, k, ("FT8",), rest=2.0)
-                    t2 = " ".join(shot_text(o, L, "ft8 live map emptied")[1].split())
-                    press(L, k, ("FT8",), rest=1.0)
-                    m2 = re.search(r"(\d+)\s*heard", t2)
-                    if not m2 or int(m2.group(1)) != 0:
+                        band("BAND_DOWN")
+                    if n2 != 0:
                         raise Refused(f"after a band change the Live Map reads {t2[:140]!r}")
-                    res["emptied"] = m2.group(0)
+                    res["emptied"] = f"{n2} heard"
                     st.confirm(f"{res['live']}, then {res['emptied']}")
         return True, (f"{l}: Show CQ drops a third call's message, All lists it; CQ POTA tagged, a plain CQ not; its own "
                       f"row; Live Map {res['live']} then {res['emptied']}"), res
@@ -4422,16 +4682,43 @@ def t_ft8_show_pota(o, s, l):
 PSK_OFF_HZ = 40
 
 
+def _psk_center(r):
+    """r's PSK cursor (its audio frequency, Hz) as its status button says it ('1000 Hz Q 0%', page 1 F5)"""
+    for t in fkeys(r)[0]:
+        m = re.match(r"^(?:TX\s+)?(\d+)\s*Hz", flat(t))
+        if m:
+            return int(m.group(1))
+    raise Refused(f"{r.name}: no PSK status button ({[flat(t) for t in fkeys(r)[0]]})")
+
+
+def _psk_to(r, hz, names=("PSK31", "PSK63")):
+    """r's PSK cursor brought to hz: the main knob a click at a time (5 Hz; a turn of more clicks in one goes 3 or 6
+    times as far each: 8 clicks moved it 240 Hz, 11-26), the rest by the MFK's 1 Hz; the status read back each time.
+    The cursor is the app's for the GUI's run (psk_tx.c, 1000 at its start), so tests left it anywhere"""
+    for _ in range(80):
+        d = hz - _psk_center(r)
+        if d == 0:
+            return
+        if abs(d) >= 15:
+            turn(r, "main", 3 if d > 0 else -3, names, rest=0.6)        # 15 Hz: three clicks, no faster
+        elif abs(d) >= 5:
+            turn(r, "main", 1 if d > 0 else -1, names, rest=0.6)
+        else:
+            turn(r, "mfk", d, names, rest=0.6)
+    raise Refused(f"{r.name}: its PSK cursor at {_psk_center(r)} Hz, not brought to {hz}")
+
+
 def t_psk_cursor(o, s, l):
-    """PSK31 at 0.1 W: s's macro 'CQ CQ DE <call> ...' (added on its web page, taken out after) on its cursor (1000 Hz);
-    l's cursor first 40 Hz off it (8 clicks of the main knob, 5 Hz each, before the over), then one click while it
-    sends: PSK snaps onto the signal when the knob stops, and l's text log has the call at the sender's audio
-    frequency (within 15 Hz)"""
+    """PSK31 at 0.1 W: s's macro 'CQ CQ DE <call> ...' (added on its web page, taken out after) on its cursor (1000 Hz,
+    brought there first); l's cursor 30 Hz off it before the over, then one click of the main knob (5 Hz) while it
+    sends: PSK snaps onto the signal when the knob stops (within 45 Hz), and l's text log has the call at the
+    sender's audio frequency (within 15 Hz)"""
     import orch_cable as oc
     import suite_air_b as ab
     S, L = o.r[s], o.r[l]
     call = H.TEST_CALLS[s]
-    text = " ".join([f"CQ CQ DE {call} {call}"] * 3) + " K"
+    # once (about 8 s at PSK31): three times ran past the Watch's 16 s for one over (11-26)
+    text = f"CQ CQ DE {call} {call} K"
     res = {}
     ip = ab.web_ip(S.host)
     mid = None
@@ -4444,7 +4731,7 @@ def t_psk_cursor(o, s, l):
         listed = json.loads(b_)["macros"]
         i_m = max(i for i, m in enumerate(listed) if m.get("text") == text)
         mid = listed[i_m].get("id")
-        with o.step("both PSK31 apps open on one dial; l's cursor 8 main-knob clicks (40 Hz) up") as stp:
+        with o.step("both PSK31 apps open on one dial; s's cursor on 1000 Hz, l's 30 Hz above") as stp:
             o.changing += 1
             try:
                 o.both_page("G")
@@ -4454,13 +4741,18 @@ def t_psk_cursor(o, s, l):
                 bench.pair_align(S, L)
             finally:
                 o.changing -= 1
-            turn(L, "main", 8, names, rest=1.5)
-            stp.confirm(f"dial {L.state.get('freq')}")
+            _psk_to(S, oc.PSK_TX_HZ)
+            _psk_to(L, oc.PSK_TX_HZ + 30)
+            time.sleep(1.0)                                     # the snap after the knob (nothing to snap onto)
+            res["cursors"] = (_psk_center(S), _psk_center(L))
+            if res["cursors"] != (oc.PSK_TX_HZ, oc.PSK_TX_HZ + 30):
+                raise Refused(f"the cursors at {res['cursors']}")
+            stp.confirm(f"dial {L.state.get('freq')}, cursors {res['cursors']}")
         with oc.session(o, "psk-cursor", [s]) as watch:
             oc.role(o, s)
             ab.Pages(S).macro(i_m)
             S.wait("its PSK on the air", lambda: S.tx or watch.why, 8)
-            time.sleep(2.0)
+            time.sleep(1.0)
             turn(L, "main", 1, names, rest=0.5)
             S.wait("its end", lambda: not S.tx or watch.why, 40)
         time.sleep(2)
@@ -4481,6 +4773,12 @@ def t_psk_cursor(o, s, l):
         H.textlog_back(L.host, tl0)
         if mid is not None:
             ab.http(ip, f"/api/macros/psk/{mid}", method="DELETE")
+        for r in (S, L):                    # the cursors where the GUI starts them: psk-look sends from 1000 Hz
+            try:
+                if win(r) in names:
+                    _psk_to(r, oc.PSK_TX_HZ)
+            except Refused as e:
+                o.st.ev(f"{r.name}: its PSK cursor not put back on {oc.PSK_TX_HZ} Hz: {e}", "bad")
         home_both(o)
 
 
@@ -4496,7 +4794,8 @@ def _sstv_menu_row(S, row, watch, picks=6):
 
 
 def _sstv_set_target(S, call):
-    """SET TARGET CALLSIGN (menu row 5): the text window given call"""
+    """SET TARGET CALLSIGN (menu row 5): the text window given call; the TX menu it comes back to closed (F5, then
+    'Cancel TX', back to 'TX'): left open, the next menu's F5 cancelled it and its MFK presses went nowhere (11-26)"""
     press(S, "F5", ("SSTV",), rest=1.0)
     S.send("knob mfk -10")
     time.sleep(0.5)
@@ -4508,6 +4807,35 @@ def _sstv_set_target(S, call):
     time.sleep(1.0)
     S.send(f"type {call}")
     time.sleep(1.0)
+    if _label(S, "F5") != "TX":
+        press(S, "F5", ("SSTV",), rest=1.0)
+    if _label(S, "F5") != "TX":
+        raise Refused(f"{S.name}: SSTV's F5 reads {_label(S, 'F5')!r} after the target, not TX")
+
+
+def _sstv_wait_pics(L, n0, secs=25):
+    """The pictures L saved since n0 (a set of its /mnt/sstv/*.png): polled from the over's end until one is there
+    (and its _dn copy a moment later), at most secs. The X6200 writes its picture about 6 s after the X6100 does
+    (decoded, then denoised): a fixed 4 s found none there (sstv-reply x6200>x6100, 11-26)"""
+    import orch_cable as oc
+    end = time.time() + secs
+    while time.time() < end:
+        got = oc._sstv_pics(L) - n0
+        if any(not x.endswith("_dn.png") for x in got):
+            time.sleep(3.0)
+            return oc._sstv_pics(L) - n0
+        time.sleep(1.0)
+    return oc._sstv_pics(L) - n0
+
+
+def _sstv_auto_rx(r):
+    """r's SSTV on Auto RX (page 1: 'Start Auto RX' pressed, read back 'Stop Auto RX'); left on when it was. A receiver
+    that never started saved nothing (sstv-reply, sstv-restart, 11-26); TX ends with it on again (app_sstv_tx.c)"""
+    if fkey_of(r, r"^Stop Auto RX"):
+        return
+    k = press_label(r, r"^Start Auto RX", ("SSTV",), rest=0.8)
+    if not re.match(r"^Stop Auto RX", _label(r, k)):
+        raise Refused(f"{r.name}: Auto RX not started ({_label(r, k)!r})")
 
 
 def t_sstv_reply(o, s, l):
@@ -4533,6 +4861,8 @@ def t_sstv_reply(o, s, l):
                     oc._same_dial(o, S, L, "SSTV")
                 finally:
                     o.changing -= 1
+                for r in (L, S):                    # each receives in turn: the CQ, then the replies
+                    _sstv_auto_rx(r)
                 st.confirm(str(S.state.get("freq")))
             with oc.session(o, f"sstv-reply {s}>{l}", [s, l]) as watch:
                 with o.step(f"{s}'s CQ in Robot 8: {l} saves a picture") as st:
@@ -4540,8 +4870,7 @@ def t_sstv_reply(o, s, l):
                     n0 = oc._sstv_pics(L)
                     _sstv_menu_row(S, 0, watch)
                     S.wait("its end", lambda: not S.tx or watch.why, 20)
-                    time.sleep(4)
-                    got = oc._sstv_pics(L) - n0
+                    got = _sstv_wait_pics(L, n0)
                     if not got:
                         raise Refused(f"{l} saved no picture of {s}'s CQ")
                     st.confirm(str(sorted(os.path.basename(x) for x in got)))
@@ -4554,12 +4883,12 @@ def t_sstv_reply(o, s, l):
                         t0 = _sstv_menu_row(L, row, watch)
                         L.wait("its end", lambda: not L.tx or watch.why, 20)
                         secs = round(time.time() - t0, 1)
-                        time.sleep(4)
-                        got = oc._sstv_pics(S) - n0
+                        got = _sstv_wait_pics(S, n0)
                         if secs > 11 or not got:
                             raise Refused(f"{what}: on the air {secs} s, {s} saved {len(got)} picture(s)")
                         res[what] = {"secs": secs, "saved": sorted(os.path.basename(x) for x in got)}
                         st.confirm(str(res[what]))
+                        time.sleep(5.0)                 # s done with it (denoised), listening for the next
                 with o.step(f"{l}'s REPLY MODE TX MODE, REPLY TO: Robot 36 (still on at 11 s), halted") as st:
                     bench.cfg_set(L, "sstv_reply_rx", 0)
                     t0 = _sstv_menu_row(L, 1, watch)
@@ -4586,25 +4915,28 @@ def t_sstv_reply(o, s, l):
 # ---- SSTV over the cable: Auto RX Restart ----
 
 def _sstv_restart_round(o, S, L, watch, label):
-    """S's CQ in Robot 8, halted 3.5 s in, its CQ again at once: (when each keyed, the pictures L saved, each with
-    the time it was written)"""
+    """S's last complete picture again (REPEAT LAST TX: one press, on the air in about 2 s), halted 2 s in, and again
+    at once: the second header comes inside the first's Robot 8 (8 s). CALL CQ's steps (picture, colours, text) took
+    13 s between the two starts, and the first picture was over before the second came (11-26). (When each keyed,
+    the pictures L saved, each with the time it was written)"""
     import orch_cable as oc
     n0 = oc._sstv_pics(L)
-    t1 = _sstv_menu_row(S, 0, watch)
-    time.sleep(max(0.0, 3.5 - (time.time() - t1)))
+    t1 = _sstv_menu_row(S, 4, watch)
+    time.sleep(max(0.0, 2.0 - (time.time() - t1)))
     press_label(S, r"^Halt", ("SSTV",), rest=0.2)
     S.wait("off the air", lambda: not S.tx, 3)
-    t2 = _sstv_menu_row(S, 0, watch)
+    t2 = _sstv_menu_row(S, 4, watch)
     S.wait("its end", lambda: not S.tx or watch.why, 20)
-    time.sleep(6)
-    new = sorted(oc._sstv_pics(L) - n0)
+    new = sorted(_sstv_wait_pics(L, n0))
     new = [x for x in new if not x.endswith("_dn.png")]
     when = {x: float(ssh(L, f"python3 -c 'import os;print(os.path.getmtime(\"{x}\"))'")) for x in new}
+    time.sleep(8.0)         # L listening again before the next round: a header while it decodes is never seen
     return t1, t2, when
 
 
 def t_sstv_restart(o, s, l):
-    """SSTV over the cable at 0.1 W, l on Auto RX: s's CQ (Robot 8) halted 3.5 s in and sent again at once. With
+    """SSTV over the cable at 0.1 W, l on Auto RX: s's CQ (Robot 8) sent whole, then again (REPEAT LAST TX) halted 2 s
+    in and sent again at once. With
     Auto RX Restart ON (page 2) l restarts its recording at the second header: the picture it saves is the second
     send's (written about a picture's length after the second start); OFF: the first's (written a picture's length
     after the first start, the second header ignored). Restart as found after, the pictures taken off"""
@@ -4626,11 +4958,20 @@ def t_sstv_restart(o, s, l):
                     oc._same_dial(o, S, L, "SSTV")
                 finally:
                     o.changing -= 1
+                _sstv_auto_rx(L)
                 k = _to_label(L, r"^Auto RX Restart", names)
                 was = _label(L, k)
                 st.confirm(was)
             with oc.session(o, f"sstv-restart {s}>{l}", [s]) as watch:
                 oc.role(o, s)
+                with o.step(f"{s}'s CQ in Robot 8 whole: the picture REPEAT LAST TX sends again") as st:
+                    _to_label(S, r"^TX$", names)
+                    n0 = oc._sstv_pics(L)
+                    _sstv_menu_row(S, 0, watch)
+                    S.wait("its end", lambda: not S.tx or watch.why, 20)
+                    _sstv_wait_pics(L, n0)
+                    time.sleep(8.0)                 # L done with that picture (decoded, denoised), listening again
+                    st.confirm("sent")
                 for want in ("ON", "OFF"):
                     with o.step(f"Restart {want} on {l}: the CQ halted and sent again") as st:
                         k = _to_label(L, r"^Auto RX Restart", names)
@@ -4638,7 +4979,7 @@ def t_sstv_restart(o, s, l):
                             press(L, k, names, rest=0.8)
                         if not _label(L, k).endswith(want):
                             raise Refused(f"{l}: Restart reads {_label(L, k)!r}")
-                        _to_label(S, r"^\(", names)
+                        _to_label(S, r"^TX$", names)            # page 1: its TX menu on F5
                         t1, t2, when = _sstv_restart_round(o, S, L, watch, want)
                         if not when:
                             raise Refused(f"Restart {want}: {l} saved no picture")
@@ -4719,7 +5060,7 @@ COVERS = {
     "cwtrainer-learn": (["cwtrainer-speed-5-50", "cwtrainer-unreadable"], ["cwtrainer-learn-koch",
                                                                         "cwtrainer-answer-timing"]),
     "cwtrainer-calls": (["cwtrainer-calls", "cwtrainer-tx-speed"], []),
-    "cwtrainer-rx-only": ([], ["cwtrainer-out-of-band"]),
+    "cwtrainer-out-of-band": ([], ["cwtrainer-out-of-band"]),     # not: outside the bands (bench gate), the airband
     "first-start": (["first-start-open", "first-start-wifi", "first-start-language"],
                     ["first-start-callsign-locator", "first-start-country-tz", "first-start-clock-tz",
                      "first-start-done-skip"]),
@@ -4796,7 +5137,8 @@ ROWS = [
      "a prosign <?> wrong, 5 WPM right (one radio at a time, 0 W sidetone)"),
     ("cwtrainer-calls", t_cwtrainer_calls, 240, "CW Trainer Calls: right with a space inside, +1 WPM (Follows), Fixed "
      "keeps KEY Speed, back after Calls"),
-    ("cwtrainer-rx-only", t_cwtrainer_rx_only, 90, "CW Trainer on 0.600 MHz: Start refused, receive only"),
+    ("cwtrainer-out-of-band", t_cwtrainer_out_of_band, 150, "CW Trainer: refused outside South Korea's ranges "
+     "(7.250): 'No TX on 7.250 MHz', nothing keyed"),
     ("first-start", t_first_start, 300, "the first-start guide opens with no callsign (GUI restarts), walked, Done, "
      "not again"),
     ("zello-ptt", t_zello_ptt, 90, "Zello holds the PTT while open; closed, the PTT keys at 0.1 W (cable)"),
@@ -4808,6 +5150,12 @@ def _vfo_kept(fn):
     """fn with each radio's VFO (A or B) put back as found after it: an app's A/B key is the VFO's. Two radios on
     different VFOs at the start (one left on B by an earlier test): the X6100's made the X6200's first, said"""
     def run(o):
+        for n, r in o.r.items():            # a GUI from before the bench hooks (another session's install): said once
+            try:
+                fkeys(r)
+            except Refused:
+                return False, (f"{n}'s GUI has no fkeys? (a build from before main's 0e0b7579 put on by another "
+                               f"install): every key of these tests reads the page first"), {}
         v = {n: r.state.get("vfo") for n, r in o.r.items()}
         if None not in v.values() and v[H.A] != v[H.B]:
             o.st.ev(f"the radios on different VFOs ({v}): the {H.A}'s made the {H.B}'s", "bad")
@@ -4844,7 +5192,7 @@ ROLES = {
     "svx-ptt": "each TX in turn (0.1 W), the other RX",
     "cwtrainer-learn": "each in turn keyed at 0 W (train), the other RX",
     "cwtrainer-calls": "each in turn keyed at 0 W (train), the other RX",
-    "cwtrainer-rx-only": "both RX (the trainer's key refused)",
+    "cwtrainer-out-of-band": "each in turn keyed at 0 W (train), the other RX",
     "cb-refused": "both RX (PTT refused)",
     "hfair": "both RX (PTT refused)",
     "cwkbd-refusals": "both RX (CW refused)",
