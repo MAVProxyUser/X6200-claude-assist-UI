@@ -43,6 +43,9 @@ void textarea_window_cancel(void);
  * on-screen keys focused a key event typed nothing */
 bool textarea_window_type(uint32_t key);
 bool textarea_window_is_open(void);
+/* The open window's text made text and taken as Enter takes it (the bench's remote "type TEXT", remote_server.c):
+ * its OK callback judges it, the window stays where that refuses it; false with no window */
+bool textarea_window_enter(const char *text);
 /* Open without the keys on the screen (a keyboard is plugged in): Enter and ESC are the keyboard's */
 bool textarea_window_no_screen_keys(void);
 

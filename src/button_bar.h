@@ -92,6 +92,10 @@ void            buttons_vertical_place(uint8_t i, lv_coord_t y, lv_coord_t w, lv
 void            buttons_horizontal(lv_obj_t *parent);
 /* The five and the knob lines over them hidden, or shown again (Settings > Display > Hide buttons, screen_main.c) */
 void            buttons_hide(bool hide);
+/* What F1-F5 show now (the remote's read-only "fkeys?", any thread): each one's text as the code gives it, its
+ * line break a space ("Set clock: Auto", "(BANDS 1:1)"; "" for none), marked (checked), greyed; hid: Hide
+ * buttons has them hidden */
+void            buttons_shown(char text[][64], bool mark[], bool off[], bool *hid);
 bool            buttons_hidden();
 /* Show the button again (label, mark, disabled) if it is on screen */
 void            buttons_refresh(button_data_t *data);

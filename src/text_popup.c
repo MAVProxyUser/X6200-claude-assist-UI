@@ -253,6 +253,15 @@ bool textarea_window_type(uint32_t key) {
     return true;
 }
 
+bool textarea_window_enter(const char *text) {
+    if (!window) {
+        return false;
+    }
+    lv_textarea_set_text(field, text);
+    accept();
+    return true;
+}
+
 const char *textarea_window_get() {
     return lv_textarea_get_text(field);
 }

@@ -62,6 +62,11 @@
  *  S-METER's Measure as its button, "smc put PRE,ATT,RFG" sets its three figures, "smc?" answers "smc RUN PRE ATT RFG
  *  NOTE" (the bench's front-end check: it measures, checks and puts back what it found). "his?" answers what MSG > CW's
  *  {HIS} would send now: 'his {"call":..,"chars":..,"shown":..}' (the decoder panel's text length, the panel shown).
+ *  "fkeys?" answers what F1-F5 show now: 'fkeys {"hid":0,"t":[TEXT x5],"m":[N x5]}' (each as the code gives it,
+ *  its line break a space, "" for none; m: 1 marked, 2 greyed; hid: the buttons hidden), so a test sees an
+ *  app's page before it presses a key.
+ *  "type TEXT" gives the text window open (a reference, a QSO line, a callsign) TEXT and its Enter, as a keyboard;
+ *  "hkey VM|UP|DOWN 1|0" presses or lets go a hand mic key, as the base reports one.
  *  A panel thread reads the radio (the settings' getters are safe from any thread, as the TCI
  *  server uses them) and tells the panel clients what changed every 50 ms. The apps: the FT8
  *  list's rows go out as they come ("ft8r {...}", the last 48 to a page that opens later), the
@@ -125,6 +130,8 @@
 #include "cfg/cfg_api.h"
 #include "cfg/settings_manager_api.h"
 #include "button_bar.h"
+#include "text_popup.h"    /* "type TEXT" */
+#include "mic_keys.h"      /* "hkey NAME 1|0" */
 #include "cw_messages.h"
 #include "beacons.h"
 #include "digi_qso.h"
@@ -1855,6 +1862,21 @@ static void btn_apply(void *arg) {
     buttons_press_named(q->name, q->hold);
 }
 
+/* "type TEXT": the text window open (a reference, a QSO, a callsign...) given TEXT and its Enter (the bench's) */
+typedef struct {
+    char text[96];
+} type_put_t;
+
+static void type_apply(void *arg) {
+    const type_put_t *q = arg;
+    textarea_window_enter(q->text);
+}
+
+/* "hkey NAME 1|0": a hand mic key pressed or let go, as the base reports one (the bench's: V/M, UP, DOWN) */
+static void hkey_apply(void *arg) {
+    hkey_put(*(const uint32_t *)arg);
+}
+
 /* The JS8 messages kept for a page that opens later, ours too. A message still coming in has one place, written
  * again as its frames arrive (the same msg_id), so the page grows its row */
 #define JS8_RING 64
@@ -2920,6 +2942,25 @@ static void handle_text(client_t *c, char *text) {
         client_text(c, out);
         return;
     }
+    if (!strcmp(text, "fkeys?")) {         /* what F1-F5 show now (the bench's): reading touches nothing */
+        char   t[BUTTONS][64], out[1024];
+        bool   mark[BUTTONS], off[BUTTONS], hid;
+        size_t k;
+
+        if (!allowed(c, ROLE_OPERATE, false))
+            return;
+        buttons_shown(t, mark, off, &hid);
+        k = (size_t)snprintf(out, sizeof(out), "fkeys {\"hid\":%d,\"t\":[", hid);
+        for (int i = 0; i < BUTTONS && k + 140 < sizeof(out); i++) {
+            k += json_str(out + k, sizeof(out) - k, t[i]);
+            out[k++] = i + 1 < BUTTONS ? ',' : ']';
+        }
+        for (int i = 0; i < BUTTONS && k + 8 < sizeof(out); i++)
+            k += (size_t)snprintf(out + k, sizeof(out) - k, "%s%d", i ? "," : ",\"m\":[", mark[i] | off[i] << 1);
+        snprintf(out + k, sizeof(out) - k, "]}");
+        client_text(c, out);
+        return;
+    }
     if (!strcmp(text, "his?")) {            /* what MSG > CW's {HIS} sends now, from the decoder's panel (the bench's) */
         char out[320], call[16], tail[PANEL_TAIL + 1], tj[PANEL_TAIL * 6 + 8];
         int  chars;
@@ -2974,6 +3015,43 @@ static void handle_text(client_t *c, char *text) {
         memcpy(out, "buttons ", 8);
         buttons_layout_text(out + 8, sizeof(out) - 8);
         client_text(c, out);
+        return;
+    }
+    if (!strncmp(text, "type ", 5)) {       /* the text window's text (the bench's): as it is, spaces too */
+        type_put_t q = {0};
+
+        if (!allowed(c, ROLE_OPERATE, true))
+            return;
+        if (!textarea_window_is_open()) {
+            client_text(c, "err type: no text window open");
+            return;
+        }
+        snprintf(q.text, sizeof(q.text), "%s", text + 5);
+        scheduler_put(type_apply, &q, sizeof(q));
+        return;
+    }
+    if (!strncmp(text, "hkey ", 5)) {       /* a hand mic key (the bench's): "hkey VM|UP|DOWN 1|0" */
+        static const struct {
+            const char *name;
+            uint32_t    code;
+        } hk[] = {{"VM", RADIO_HKEY_VM}, {"UP", RADIO_HKEY_UP}, {"DOWN", RADIO_HKEY_DOWN}};
+        char     name[8] = "";
+        int      down = -1;
+        uint32_t code = 0;
+
+        if (!allowed(c, ROLE_OPERATE, true))
+            return;
+        if (sscanf(text + 5, "%7s %d", name, &down) == 2 && (down == 0 || down == 1)) {
+            for (size_t i = 0; i < sizeof(hk) / sizeof(hk[0]); i++)
+                if (!strcmp(hk[i].name, name))
+                    code = hk[i].code;
+        }
+        if (!code) {
+            client_text(c, "err hkey: VM, UP or DOWN, then 1 or 0");
+            return;
+        }
+        code = down ? code : 0;
+        scheduler_put(hkey_apply, &code, sizeof(code));
         return;
     }
     if (!strncmp(text, "js8 send ", 9)) {   /* the message as it is: it has spaces */

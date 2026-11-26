@@ -823,6 +823,13 @@ bool main_screen_app_known(press_action_t app) {
 }
 
 void main_screen_start_app(press_action_t app_action) {
+    /* No app in walkie mode: its window would open under the walkie screen, unseen and with no way to it, and a
+     * digital app there would hold the dial (and could key). The radio's own keys reach no app in it; the browser's
+     * app list did ("open"), and a start in walkie mode with Start here on would have (orch walkie-mode) */
+    if (walkie_on()) {
+        msg_schedule_text_fmt("Not in walkie mode: hold APP to leave it first");
+        return;
+    }
     main_screen_buttons_wake();     /* the app's buttons seen, also when it is opened from afar */
 
     /* Modes again closes its menu. */

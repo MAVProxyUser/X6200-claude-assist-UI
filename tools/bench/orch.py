@@ -6836,6 +6836,12 @@ _og.H = sys.modules[__name__]
 TESTS += _og.tests(Test, A, B)
 ORCH_COVERS.update(_og.COVERS)
 
+# The apps' features that had no test (orch_cov_apps.py, 2026-11-26): their tests on both radios, what each covers
+import orch_cov_apps as _oa                 # noqa: E402
+_oa.H = sys.modules[__name__]
+TESTS += _oa.tests(Test, A, B)
+ORCH_COVERS.update(_oa.COVERS)
+
 
 # Other sessions put new GUIs on the radios (tools/cross_x6200/install.sh): one replaced both mid-run on 2026-11-25
 # (15:43, its "no run going" check a moment before this run began). Who installs holds GUI_LOCK for the time it does

@@ -3762,6 +3762,9 @@ restart.
 | WLK 4 | Store, Clear (held), Vol Sql RF Pwr (the levels page), Exit (held) |
 
 - GEN, KEY, DFN, DFL and VM open their pages as on the main screen.
+- No app opens in walkie mode, from the browser's app list or a long-press action either: the radio says
+  "Not in walkie mode: hold APP to leave it first". Up to v0.3.12.49 the browser's list opened one under the
+  walkie screen, unseen, a digital app holding the dial there.
 - Walkie channels: 32 channels of their own, apart from Channel Memory. Each
   keeps frequency, mode, AGC, PRE and ATT, like a memory.
   - MEM: the main knob steps through channels 1-32, the empty ones too. The

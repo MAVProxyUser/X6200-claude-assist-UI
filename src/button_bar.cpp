@@ -26,6 +26,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
 
 extern "C" {
@@ -61,6 +62,27 @@ static std::string     knob_binds;   /* cfg encoder_bind as last notified: a cha
 
 static void slot_refresh(disp_btn_t *s);
 static void set_btn_text(disp_btn_t *b, const char *text);
+
+/* What the five places show now, for the bench's remote ("fkeys?", any thread): each one's text as the code has it
+ * (before the language and the capitals), its mark and whether it is greyed, kept as they are drawn (LVGL thread):
+ * a test reads the page an app shows before it presses a key there, and a label that toggles */
+static char       shown_text[BUTTONS][64];
+static bool       shown_mark[BUTTONS], shown_off[BUTTONS];
+static std::mutex shown_lock;
+
+static void shown_put(const disp_btn_t *b, const char *text, int mark, int off) {
+    long i = b - slots;
+
+    if (i < 0 || i >= BUTTONS) return;
+    std::lock_guard<std::mutex> g(shown_lock);
+    if (text) {
+        snprintf(shown_text[i], sizeof(shown_text[i]), "%s", text);
+        for (char *c = shown_text[i]; *c; c++)
+            if (*c == '\n') *c = ' ';     /* "Set clock:\nAuto" read "Set clock: Auto" */
+    }
+    if (mark >= 0) shown_mark[i] = mark;
+    if (off >= 0) shown_off[i] = off;
+}
 
 /* ---- what the buttons do ---- */
 
@@ -683,6 +705,7 @@ static void slot_refresh(disp_btn_t *s) {
     }
     set_state(s->parent, LV_STATE_CHECKED, d->mark);
     set_state(s->parent, LV_STATE_DISABLED, d->disabled);
+    shown_put(s, NULL, d->mark, d->disabled);
     marks_refresh(s);
 }
 
@@ -690,6 +713,7 @@ static void slot_clear(disp_btn_t *s) {
     button_data_t *d = s->data;
 
     set_btn_text(s, "");
+    shown_put(s, NULL, 0, 0);
     lv_obj_clear_state(s->parent, LV_STATE_CHECKED | LV_STATE_DISABLED);
     for (lv_obj_t *m : {s->vol_mark, s->mfk_mark}) {
         lv_obj_clear_state(m, STATE_ASSIGNED);
@@ -864,6 +888,16 @@ void buttons_hide(bool hide) {
     hidden = hide;
     for (disp_btn_t &s : slots) set_hidden(s.parent, hide);
     knobs_hide(hide);
+}
+
+void buttons_shown(char text[][64], bool mark[], bool off[], bool *hid) {
+    std::lock_guard<std::mutex> g(shown_lock);
+    for (int i = 0; i < BUTTONS; i++) {
+        memcpy(text[i], shown_text[i], sizeof(shown_text[i]));
+        mark[i] = shown_mark[i];
+        off[i]  = shown_off[i];
+    }
+    *hid = hidden;
 }
 
 bool buttons_hidden() {
@@ -1354,6 +1388,7 @@ static void set_btn_text(disp_btn_t *b, const char *text) {
     bool even = !theme_shape.vision && !btn_narrow(b);
     char upper[64];
 
+    shown_put(b, text ? text : "", -1, -1);
     text = i18n_tr(text);   /* the language's, before the capitals and the line split: its file has the code's text */
     if (even && theme_shape.btn_caps) {
         btn_upper(upper, sizeof(upper), text);
