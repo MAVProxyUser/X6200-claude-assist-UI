@@ -32,6 +32,10 @@ static bool      radio_back;         /* dialog_restore_radio_on_close() */
 static char      app_name[8];        /* dialog_app_memory(): the app being opened, "" none */
 static dialog_t *step_window;        /* dialog_on_close(): opened as another window's step */
 static lv_async_cb_t step_back;      /* and what brings that one back */
+static dialog_t *under;              /* the window one was opened over, still running (Channels by the hand
+                                      * mic's V/M over FT8 or WSPR, a typed frequency, Settings by the
+                                      * keyboard): on top again as that one closes */
+static char      under_app[8];       /* its app memory's name (app_name) meanwhile */
 
 bool app_mem_load(const char *name, int32_t *freq, int32_t *mode) {
     FILE *f = fopen(APP_FREQS, "r");
@@ -127,6 +131,14 @@ static void open_window(dialog_t *d, lv_obj_t *parent) {
 
 void dialog_construct(dialog_t *dialog, lv_obj_t *parent) {
     if (dialog && !dialog->run) {
+        /* Over a window still running: that one stays under it and comes back on top as it closes. Up to
+         * v0.3.12.49 it was left running unseen and never closed: FT8 under Channels held its lock on the
+         * frequency for good, its app memory and its digital audio dropped (orch channels-app-holds) */
+        if (dialog_is_run() && shown != dialog) {
+            under = shown;
+            snprintf(under_app, sizeof(under_app), "%s", app_name);
+            app_name[0] = 0;        /* the memory is the app's under it, not this window's */
+        }
         open_window(dialog, parent);
     }
     shown = dialog;
@@ -196,12 +208,24 @@ static void closed_async(void *arg) {
 }
 
 void dialog_destruct() {
-    freq_strip_set_app(NULL);
+    bool back = dialog_is_run() && under && under->run && under != shown;   /* a window under this one */
+
+    if (!back) freq_strip_set_app(NULL);    /* the app's name stays on the strip for the one under */
     if (dialog_is_run()) {
         close_window(shown);
         shown = NULL;
-        lv_async_call(closed_async, NULL);
+        if (back) {                 /* the one under on top again, as open_window left it */
+            shown = under;
+            snprintf(app_name, sizeof(app_name), "%s", under_app);
+            knobs_display(false);
+            waterfall_refresh_period_set(2);
+            main_screen_keys_enable(false);
+            freq_strip_set_dialog(true);
+        } else {
+            lv_async_call(closed_async, NULL);
+        }
     }
+    under = NULL;
     if (mode_back >= 0) {
         if (cparam_i_get(cfg_cur_mode) == mode_forced) {    /* not changed again meanwhile */
             cparam_i_set(cfg_cur_mode, mode_back);

@@ -731,6 +731,7 @@ static void close_apps(void) {
     sql_give_back();
     wf_full_set(false);     /* an app coming, the buttons asked for, a new theme: the normal screen */
     dialog_destruct();
+    if (dialog_is_run()) dialog_destruct();     /* the window it was opened over (app_window.c: under) */
     freq_strip_set_app(NULL);
     if (rtty_get_state() != RTTY_OFF) {
         app_mem_save("RTTY");
@@ -2473,7 +2474,9 @@ static void on_if_shift_zoom(Subject *subj, void *user_data) {
  * is (a band of their own for the tags was a tall grey bar that took its room). */
 #define SPOT_LINE_H 8
 
-/* Settings > Display > MAIN SCREEN > Channels, or the web Display page: the channels' marks drawn or gone (#203) */
+/* Settings > Display > MAIN SCREEN > Channels, or the web Display page: the channels' marks drawn or gone (#203);
+ * Birdies (Off, Marks, + notch: there, Birdie Cal's Marks, the web Display page) the same, at once (up to
+ * v0.3.12.49 the ticks came or went only with the next tune or zoom: orch birdie-marks) */
 static void channel_marks_cb(Subject *subj, void *user_data) {
     spot_marks_refresh();
 }
@@ -2812,6 +2815,7 @@ static void build(void) {
     wf_block_n = lv_obj_get_child_cnt(obj) - wf_block_n;
     subject_subscribe_delayed_and_notify((Subject*)cfg_cluster_spots_wf, on_cluster_spots_wf_change, NULL);
     subject_subscribe_delayed((Subject*)cfg_channel_marks, channel_marks_cb, NULL);
+    subject_subscribe_delayed((Subject*)cfg_birdie_marks, channel_marks_cb, NULL);
     subject_subscribe_delayed((Subject*)cfg_band_plan, on_band_plan_change, NULL);
     subject_subscribe_delayed((Subject*)cfg_band_region, on_band_region_change, NULL);
     subject_subscribe_delayed((Subject*)cfg_band_id, on_band_id_change, NULL);

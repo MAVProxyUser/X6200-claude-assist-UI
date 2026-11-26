@@ -996,12 +996,20 @@ static const char *where_label(void) {
     return buf;
 }
 
+/* Back to the presets: the custom dial off, and the Freq button saying so at once (it kept "Freq: 14.091" after a
+ * band key or Mode till its page was loaded again: orch ft8-custom-freq, 2026-11-26) */
+static void custom_off(void) {
+    if (!params.ft8_custom_on.x) return;
+    params_bool_set(&params.ft8_custom_on, false);
+    buttons_refresh(&button_freq);
+}
+
 /* The band's preset, or the custom frequency (in the preset's mode) */
 static void load_base(void) {
     load_band(0);
     if (!params.ft8_custom_on.x) return;
     if (params.ft8_custom_hz.x < CUSTOM_MIN_HZ || params.ft8_custom_hz.x > CUSTOM_MAX_HZ) {
-        params_bool_set(&params.ft8_custom_on, false);
+        custom_off();
         return;
     }
     int32_t mode = cparam_i_get(cfg_cur_mode);
@@ -1064,7 +1072,7 @@ static void band_cb(lv_event_t *e) {
         rx_hold(false);
         return;
     }
-    if (params.ft8_custom_on.x) params_bool_set(&params.ft8_custom_on, false); /* back to the presets */
+    custom_off();       /* back to the presets */
     retuned();
 }
 
@@ -1268,7 +1276,7 @@ static void mode_cb(button_data_t *btn) {
     param_i_set(cfg_ft8_protocol, next);
     freq_strip_set_app(ftx_protocol_name(next));
     decoder_restart();      /* a CQ ends with no note: TX CQ is next to Mode */
-    if (params.ft8_custom_on.x) params_bool_set(&params.ft8_custom_on, false); /* FT4/FT2 elsewhere */
+    custom_off();       /* FT4/FT2 elsewhere */
     if (next != FTX_PROTOCOL_FT8) {
         qso_lock();
         hound_on = false;

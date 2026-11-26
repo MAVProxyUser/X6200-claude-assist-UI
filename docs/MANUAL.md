@@ -6003,12 +6003,14 @@ log program's WSJT-X input) gets the phone and CW QSOs too. `enabled=0` turns
 all of it off.
 
 Custom frequency. DXpeditions often work away from 14.074, e.g. H49A on
-14.091. Page 4 > Freq lists the mode's preset frequencies, one per band: pick
+14.091. Page 3 > Freq lists the mode's preset frequencies, one per band: pick
 one with the knob and press. Hold Freq for the keyboard: type the dial frequency in kHz
 (14091) or MHz (14.091) and press Enter. The radio goes there in USB-D, the
 rows say "RX FT8 Custom 14.091" and the button shows 14.091. It is kept for
 the next time. An empty entry, a band key or a Mode change goes back to the
-preset list. Range 1800 - 54000 kHz. The web remote's "base" reports it.
+preset list, and the button says Preset again at once (up to v0.3.12.49 it kept
+showing 14.091 after a band key or Mode). Range 1800 - 54000 kHz. The web
+remote's state gives the dial (freq).
 
 Hound mode. For an FT8 DXpedition in Fox and Hound mode (FT8 only). Page 4 >
 Hound: On, then select the Fox's CQ and press. The rules are WSJT-X's (K1JT
@@ -8413,7 +8415,8 @@ tick at each one at the top of the waterfall; *Marks + notch* also puts the DNF
 notch on a birdie that falls inside the passband in USB, LSB and the digital
 modes, and takes it off again when you tune away (a notch you set yourself is
 left alone). The receiver's own centre spike, which moves with the VFO, is not a
-birdie and is not kept.
+birdie and is not kept. The ticks come and go as the setting changes (up to
+v0.3.12.49 only with the next tune or zoom).
 
 ### On the Air
 
@@ -8566,7 +8569,11 @@ APP Channels, or the V/M key of the hand mic.
   Olivia or JTTY); UP and DOWN (the H-22's arrow keys) tune the channel
   before or after the last one tuned and show its name for a moment, without
   opening the window. With an app holding the frequency or the mode they do
-  not tune either; LOCK lets them through.
+  not tune either; LOCK lets them through. Opened over FT8 or WSPR, the window's
+  Close brings that app back as it was (GEN closes both). Up to v0.3.12.49 the
+  app was left running unseen, its hold on the frequency for good (a restart
+  cleared it); the same with a frequency typed or Settings opened from a keyboard
+  over an app.
 - Up to 100 channels. They are the same as on the web configurator's
   Memories page; a change made there shows on the radio within a few
   seconds, unless the window is open. The window has the list it read when
