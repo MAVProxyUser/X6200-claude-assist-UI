@@ -55,6 +55,14 @@ typedef struct {
     char    bpre[16], bmode[12], bname[16], gno[56], fsel[24];
 } app_sentry_sdr_t;
 void app_sentry_sdr_state(app_sentry_sdr_t *out);
+/* F's NIFOG for the remote's "nifog?" (any thread; the LVGL thread publishes it every 50 ms while the Sentry is open,
+ * all zero while it is not): open or not, the page (the PDF's numbering), how far down it (px) and the most it goes,
+ * and the words as the screen has them: the caption, the line under the page, the legend, the F keys' boxes */
+typedef struct {
+    int32_t open, page, y, maxy;
+    char    cap[160], where[200], legend[160], keys[5][32];
+} app_sentry_nifog_t;
+void app_sentry_nifog_state(app_sentry_nifog_t *out);
 /* The remote's "set bch HZ" (LVGL thread): B's channel at HZ with the narrowest preset it is in, B's scan stopped, as
  * by hand; only while B shows. "set gsdr HZ": G's SDR channel at HZ (one of G's plan's, GMRS's among them), 0 G back
  * on the X6200 at its own channel (s.wch, CB 19 for none); only while G shows with an SDR there and nothing armed or

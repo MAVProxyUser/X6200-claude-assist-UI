@@ -2200,6 +2200,201 @@
   "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
  },
  {
+  "id": "f-nifog-list",
+  "area": "sentry-F",
+  "feature": "F SYSTEM's list has NIFOG as its 12th row (index 11, before START IN); WHAT IT DOES says what it is and that the PDF is on the web configurator's NIFOG page",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "MFK on F to NIFOG: s.sys 11 and the remote's fsel 'NIFOG'",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-open-close",
+  "area": "sentry-F",
+  "feature": "F2 or the MFK's push opens NIFOG over F; F2, the push, or leaving F closes it; F's choice stays NIFOG",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "nifog? open 1 after F2 and after the push; open 0 after F2, after the push and after page A; s.sys 11",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-drawn",
+  "area": "sentry-F",
+  "feature": "The page drawn in the window in the theme's colours (paper the background, print the accent): portrait pages centred, the landscape tables the window's width; drawn after page G has been shown too; each opening says in the GUI's log how much print the window holds",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "Pictures of page 30 (portrait) and 68 (CTCSS, landscape): print counted, its colours between the background and the accent, the portrait's margins empty, the table across; after G; the log's 'NIFOG: open on page N'",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-caption",
+  "area": "sentry-F",
+  "feature": "The caption: NIFOG 2.02, the page as printed and among the PDF's ('PAGE III (4 OF 192)', the cover 'PAGE 1 OF 192') and the section it is in",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "nifog? cap on pages 1, 4, 38 and 68 against tools/nifog/nifog.idx",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-mfk",
+  "area": "sentry-F",
+  "feature": "The MFK turns a page forward or back, from its top; it stops at the first and the last page",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "nifog? page +1, -1 with y 0; back from 1 stays 1; on from 192 stays 192",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-vfo",
+  "area": "sentry-F",
+  "feature": "The VFO scrolls the page 24 px a click (MORE BELOW, then END OF PAGE under it); past its end the next page's top, back past its top the page before's end; the dial is not tuned and F's choice not moved",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "nifog? y +24 a click up to maxy, the line under the page, then page+1 y 0; back: page-1 y maxy; the state's freq/mode and s.sys unchanged",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-sections",
+  "area": "sentry-F",
+  "feature": "F1 goes to the section's start (again: the section before), F3 to the next section, as the contents have them (chapters and sections)",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "From page 40: F1 35, F1 34, F3 35, F3 45 (tools/nifog/nifog.idx)",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-contents",
+  "area": "sentry-F",
+  "feature": "F4 goes to the contents (page iii)",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "From page 68: F4 page 4, y 0",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-chapter",
+  "area": "sentry-F",
+  "feature": "F5 goes to the next chapter; after the last one, the cover",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "From page 4: F5 8; from 191 (the last chapter): F5 1",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-legend-keys",
+  "area": "sentry-F",
+  "feature": "While NIFOG is open the legend says VFO: SCROLL | MFK: PAGE, PUSH CLOSE | F1 F3: SECTION, F4: CONTENTS and the F keys SECTION BACK, CLOSE, SECTION NEXT, CONTENTS, CHAPTER NEXT; F's own again when it closes",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "nifog? legend and keys open; the keys' F2 OPEN again when closed (s.sys 11)",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-url",
+  "area": "sentry-F",
+  "feature": "The line under the page names the PDF: HTTP://<NETWORK NAME>.LOCAL/NIFOG OR HTTP://<ADDRESS>/NIFOG (the WiFi's or the Ethernet's address)",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "nifog? where against the radio's hostname and its wlan0/eth0 IPv4 address (SSH)",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-reopen",
+  "area": "sentry-F",
+  "feature": "NIFOG opens again on the page and at the scroll it was left at (till the GUI restarts)",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "Close on page 68 at y 48: F2 opens on 68 at 48, drawn",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-sentry-closed",
+  "area": "sentry-F",
+  "feature": "The Sentry closed while NIFOG is open (an app opened): when it comes back F shows its list and NIFOG opens and draws again",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "NIFOG open, 'open sentry H' (AIRSPACE), 'close': nifog? open 0 on F, s.nf 0; F2 opens, drawn",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-tap",
+  "area": "sentry-F",
+  "feature": "A tap on the page's lower half scrolls a window down, on its upper half a window up",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "a touch screen or a mouse: neither radio has a touch device (/proc/bus/input: keypad, rotaries, the power key)",
+  "how_to_confirm": "A touch or a mouse on the page",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-nifog-files",
+  "area": "system",
+  "feature": "The image and the update bundle put CISA's NIFOG in /usr/share/x6100/nifog: nifog.pdf (CISA's file unchanged), nifog.idx (the repository's) and p001.png ... p192.png (4-bit grey, at most 780 px wide), 12 MB on the root filesystem",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "SSH: the files, the PDF's SHA-256 (third-party/nifog/README.md), nifog.idx byte for byte, each PNG's header",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
   "id": "f-system-start-in",
   "area": "sentry-F",
   "feature": "START IN: the Sentry or the classic screen as the start/return place (applies when nothing was kept)",
@@ -12627,6 +12822,58 @@
   ],
   "needs": "none",
   "how_to_confirm": "GET /nifog: 200 with the contents; GET /nifog.pdf: application/pdf, 6735362 bytes, SHA-256 45c2f5d9... (third-party/nifog/README.md); Range bytes=0-99: 206; GET /nifog/page/68: a PNG (the CTCSS table); /nifog/page/193: 404",
+  "suite_has": null,
+  "manual_ref": "## Web configurator"
+ },
+ {
+  "id": "web-nifog-pdf",
+  "area": "web",
+  "feature": "/nifog.pdf: CISA's PDF in the browser's own viewer (application/pdf, no attachment), ?dl=1 saved as NIFOG_2.02.pdf, a Range answered with 206",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "GET /nifog.pdf: 200, application/pdf, its SHA-256; ?dl=1: Content-Disposition attachment NIFOG_2.02.pdf; Range bytes=1000-1999: 206 and those bytes",
+  "suite_has": null,
+  "manual_ref": "## Web configurator"
+ },
+ {
+  "id": "web-nifog-pages",
+  "area": "web",
+  "feature": "/nifog/page/N: each of the 192 pages as the radio draws it (PNG), 404 past the ends",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "GET /nifog/page/1..192: the radio's own p<N>.png byte for byte (SHA-256); 0 and 193: 404",
+  "suite_has": null,
+  "manual_ref": "## Web configurator"
+ },
+ {
+  "id": "web-nifog-viewer",
+  "area": "web",
+  "feature": "The /nifog page's viewer: a page's address (#p=68), Previous and Next, the arrow keys, the section list and the contents' links open pages; Open the PDF and Save it links",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "Headless Chromium on /nifog#p=68: the picture /nifog/page/68 shown and its title; Next 69, ArrowLeft 68; the section list's CTCSS entry 68; the contents' 'VHF Inland - VTAC17' 38; the links' href and download",
+  "suite_has": null,
+  "manual_ref": "## Web configurator"
+ },
+ {
+  "id": "web-nifog-menu",
+  "area": "web",
+  "feature": "NIFOG in the web configurator's menu (Frequencies) and a tile on General",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "GET / and /nifog: the menu's /nifog link under Frequencies, General's NIFOG tile",
   "suite_has": null,
   "manual_ref": "## Web configurator"
  },

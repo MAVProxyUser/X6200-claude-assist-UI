@@ -55,7 +55,7 @@ jobs:
             libsqlite3-dev sqlite3 libxkbcommon-dev libnm-dev libpng-dev libasound2-dev python3-bottle python3-numpy \
             fdisk util-linux parted dosfstools exfatprogs bsdextrautils network-manager dbus iproute2 \
             libsdl2-dev libdrm-dev libdbus-glib-1-dev libsndfile1-dev libudev-dev libpulse-dev libjpeg-dev \
-            libglib2.0-dev libboost-dev && break; sleep 20; [ $i = 3 ] && exit 1; done
+            libglib2.0-dev libboost-dev poppler-utils && break; sleep 20; [ $i = 3 ] && exit 1; done
           sudo rm -rf "$A/partial" "$A/lock"
           sudo chown -R "$(id -u):$(id -g)" "$A"
           echo "packages kept: $(ls "$A" | wc -l) ($(du -sh "$A" | cut -f1))"

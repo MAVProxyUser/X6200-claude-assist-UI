@@ -11038,7 +11038,10 @@ closed: only while F shows). The state says B and G on the SDR: `bhz` (B's chann
 channel list, 3 EMERGENCY's, 4 GMRS's 22), `ghz` (G's SDR channel, 0 none), `garm` (its transmitter armed), `gno`
 (why it may not send there, "" it may), `sdr` (an SDR there), `fsel` (F's chosen item, "" off F), `gmp` (F's GMRS panel
 open), `gmhz` (its chosen channel, 0 on the tones), `gmrx` (where its F1 tunes: 0 nowhere, 1 B's SDR, 2 the radio's
-own through the WR12); all zero while the Sentry is closed. A `set` the radio refuses is
+own through the WR12); all zero while the Sentry is closed. `nifog?` answers `nifog {...}`: F's
+[NIFOG](#nifog) as the screen has it, `open`, `page` (the PDF's numbering), `y` (px down it) and `maxy`, `cap`
+(its caption), `where` (the line under the page), `legend` and `keys` (the F keys' boxes); zero and empty while
+it is closed or the Sentry is (the bench's tools/bench/orch_nifog.py). A `set` the radio refuses is
 answered `err ...` (`err freq: locked (LOCK, or an app holds the
 frequency)`, `err freq: not a frequency this radio tunes`, `err NAME: the
 radio is busy, try again`, `err unknown setting NAME`, the role and

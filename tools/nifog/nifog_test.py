@@ -244,6 +244,161 @@ class WebPages(unittest.TestCase):
         self.assertEqual(call("/nifog/page/1")[0], 404)
 
 
+class LoadFromDisk(unittest.TestCase):
+    """build/nifog_load: src/nifog.c's nifog_load with its share folder build/share (the Makefile's BOARD_SHARE)"""
+
+    def setUp(self):
+        import shutil
+        self.dir = os.path.join(BUILD, "share", "nifog")
+        shutil.rmtree(os.path.join(BUILD, "share"), ignore_errors=True)
+        os.makedirs(self.dir)
+
+    def load(self):
+        return subprocess.run([os.path.join(BUILD, "nifog_load")], capture_output=True, text=True, check=True).stdout
+
+    def test_none_without_the_contents(self):
+        self.assertIn("load 0 pages 0", self.load())
+
+    def test_none_without_its_first_page(self):
+        """The contents there but no page drawn (an image whose build had no pdftoppm): F says NOT ON THIS RADIO"""
+        with open(IDX) as f, open(os.path.join(self.dir, "nifog.idx"), "w") as g:
+            g.write(f.read())
+        self.assertIn("load 0 pages 0", self.load())
+
+    def test_loaded_with_both(self):
+        with open(IDX) as f, open(os.path.join(self.dir, "nifog.idx"), "w") as g:
+            g.write(f.read())
+        open(os.path.join(self.dir, "p001.png"), "wb").close()
+        out = self.load()
+        self.assertIn("load 1 pages 192 edition 2.02, January 2025", out)
+        self.assertIn("read " + os.path.join(os.path.abspath(BUILD), "share", "nifog", "p192.png"), out)
+        self.assertIn("past none", out)
+
+    def test_parse_guards(self):
+        """A short or broken index: no pages is none; entries past the last page dropped; junk lines skipped"""
+        path = os.path.join(BUILD, "broken.idx")
+        for text, want in (("pages 0\n", "parsed 0"), ("# nothing\n", "parsed 0"),
+                           ("pages 3\nsec 2 0 Two\nsec 9 1 Past the end\nnonsense line\npage 2 ii\n", "parsed 1")):
+            with open(path, "w") as f:
+                f.write(text)
+            out = subprocess.run([os.path.join(BUILD, "nifog_idx"), path], capture_output=True, text=True,
+                                 check=True).stdout
+            self.assertIn(want, out, text)
+        self.assertIn("sec 2 0 Two", out)
+        self.assertNotIn("Past the end", out)
+        self.assertIn("toc 1", out)                         # no Table of Contents entry: the first page
+        self.assertIn("page 2 label=ii", out)
+
+
+def poppler():
+    import shutil
+    return all(shutil.which(t) for t in ("pdftoppm", "pdftotext", "pdfinfo", "pdftohtml"))
+
+
+PDF = os.path.join(TOP, "third-party", "nifog", "NIFOG_2.02.pdf")
+
+
+@unittest.skipUnless(poppler(), "no poppler-utils here (the image build has them: main.yml's step)")
+class FromThePdf(unittest.TestCase):
+    """render.py on CISA's PDF itself: the committed contents are the PDF's, the pages as the image draws them"""
+
+    def test_the_committed_index_is_the_pdfs(self):
+        out = subprocess.run([sys.executable, "-I", os.path.join(HERE, "render.py"), "--pdf", PDF, "--index"],
+                             capture_output=True, text=True, check=True).stdout
+        with open(IDX) as f:
+            self.assertEqual(out, f.read(), "tools/nifog/nifog.idx is not render.py --index of the PDF")
+
+    def test_the_pages(self):
+        out = os.path.join(BUILD, "pages")
+        subprocess.run([sys.executable, "-I", os.path.join(HERE, "render.py"), "--pdf", PDF, "--out", out],
+                       capture_output=True, check=True)
+        names = sorted(os.listdir(out))
+        self.assertEqual(names, ["p%03d.png" % i for i in range(1, 193)])
+        sizes = {}
+        total = 0
+        for n in names:
+            w, h, bits, colour, rows = png_rows(os.path.join(out, n))
+            self.assertEqual((bits, colour), (4, 0), n)
+            self.assertLessEqual(w, render.MAX_W, n)
+            sizes[(w, h)] = sizes.get((w, h), 0) + 1
+            total += os.path.getsize(os.path.join(out, n))
+        self.assertEqual(sorted(sizes.values()), [10, 75, 107])     # the guide's three kinds of page, as cut
+        self.assertIn((780, 487), sizes)                           # the tables: the Sentry's window across
+        self.assertLess(total, 6_000_000)                          # 5.2 MB on the rootfs
+        w, h, _, _, rows = png_rows(os.path.join(out, "p068.png"))  # the CTCSS table: print, not paper alone
+        self.assertGreater(sum(1 for r in rows for v in r if v < 8), 10000)
+
+
+class Packaging(unittest.TestCase):
+    """What puts NIFOG in the image and the bundle: CMake's install, the updater's paths, CI's and Docker's poppler"""
+
+    def read(self, *p):
+        with open(os.path.join(TOP, *p)) as f:
+            return f.read()
+
+    def test_cmake_installs_it(self):
+        c = self.read("CMakeLists.txt")
+        self.assertIn("third-party/nifog/NIFOG_2.02.pdf", c)
+        self.assertIn("install(FILES ${NIFOG_PDF} DESTINATION share/x6100/nifog RENAME nifog.pdf)", c)
+        self.assertIn("install(FILES tools/nifog/nifog.idx DESTINATION share/x6100/nifog)", c)
+        self.assertIn('DESTINATION share/x6100/nifog FILES_MATCHING PATTERN "p[0-9][0-9][0-9].png"', c)
+        self.assertIn("message(FATAL_ERROR", c[c.index("NIFOG_PAGES"):])      # no pages: the image's install stops
+        self.assertIn("nifog.c", self.read("src", "CMakeLists.txt"))
+
+    def test_the_updater_takes_its_files(self):
+        spec = importlib.util.spec_from_file_location("mkbundle", os.path.join(TOP, "tools", "update", "mkbundle.py"))
+        mk = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mk)
+        allowed = mk.updater_allowed()
+        for p in ("/usr/share/x6100/nifog/nifog.pdf", "/usr/share/x6100/nifog/nifog.idx",
+                  "/usr/share/x6100/nifog/p001.png", "/usr/share/x6100/nifog/p192.png"):
+            self.assertFalse(mk.path_refused(p, allowed), p)
+
+    def test_the_builds_have_poppler(self):
+        main = self.read(".github", "workflows", "main.yml")
+        self.assertIn("poppler-utils", main)
+        self.assertLess(main.index("Install poppler (NIFOG's pages)"), main.index("- name: Build\n"))
+        self.assertIn("poppler-utils", self.read("buildroot", "Dockerfile"))
+        self.assertIn("command -v pdftoppm", self.read("buildroot", "local-build.sh"))
+
+    def test_the_pdf_is_cisas(self):
+        import hashlib
+        with open(PDF, "rb") as f:
+            data = f.read()
+        readme = self.read("third-party", "nifog", "README.md")
+        self.assertIn(hashlib.sha256(data).hexdigest(), readme)
+        self.assertIn(f"{len(data):,} bytes", readme)
+
+
+@unittest.skipIf(apps is None, "no bottle: give BOTTLE=<a folder with bottle.py>")
+class WebEdges(unittest.TestCase):
+    def setUp(self):
+        self.dir = os.path.join(BUILD, "edges%d" % id(self))
+        os.makedirs(self.dir, exist_ok=True)
+        self.addCleanup(setattr, settings, "NIFOG_DIR", settings.NIFOG_DIR)
+        settings.NIFOG_DIR = self.dir
+
+    def test_pages_without_the_pdf(self):
+        """The pages and the contents there, the PDF not: the viewer, and the page says the PDF is missing"""
+        with open(IDX) as f, open(os.path.join(self.dir, "nifog.idx"), "w") as g:
+            g.write(f.read())
+        st, body, _ = call("/nifog")
+        self.assertEqual(st, 200)
+        self.assertIn(b"The PDF is not on this radio", body)
+        self.assertIn(b'id="viewer"', body)
+        self.assertNotIn(b'href="/nifog.pdf"', body)
+        self.assertEqual(call("/nifog.pdf")[0], 404)
+
+    def test_a_broken_index(self):
+        with open(os.path.join(self.dir, "nifog.idx"), "w") as f:
+            f.write("pages x\nsec a b c\npage q\nsec 5 1 Past\npages 3\nsec 2 0 Fine\n")
+        idx = nifog_web.read_index(self.dir)
+        self.assertEqual(idx["pages"], 3)
+        self.assertEqual(idx["secs"], [{"page": 2, "level": 0, "title": "Fine"}])
+        self.assertIsNone(nifog_web.page_file(self.dir, 1, 3))          # no file: none
+        self.assertIsNone(nifog_web.page_file(self.dir, 4, 3))          # past the last: none
+
+
 if __name__ == "__main__":
     os.makedirs(BUILD, exist_ok=True)
     unittest.main(verbosity=2 if "-v" in sys.argv else 1, argv=[sys.argv[0]])

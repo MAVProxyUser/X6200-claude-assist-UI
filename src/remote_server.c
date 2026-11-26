@@ -2824,6 +2824,30 @@ static void handle_text(client_t *c, char *text) {
         scheduler_put(btn_apply, &q, sizeof(q));
         return;
     }
+    if (!strcmp(text, "nifog?")) {          /* F's NIFOG as the screen has it (the bench's): reading touches nothing */
+        app_sentry_nifog_t s;
+        char               out[1400];
+        size_t             k;
+
+        if (!allowed(c, ROLE_OPERATE, false))
+            return;
+        app_sentry_nifog_state(&s);
+        k = (size_t)snprintf(out, sizeof(out), "nifog {\"open\":%d,\"page\":%d,\"y\":%d,\"maxy\":%d,\"cap\":", s.open,
+                             s.page, s.y, s.maxy);
+        k += json_str(out + k, sizeof(out) - k, s.cap);
+        k += (size_t)snprintf(out + k, sizeof(out) - k, ",\"where\":");
+        k += json_str(out + k, sizeof(out) - k, s.where);
+        k += (size_t)snprintf(out + k, sizeof(out) - k, ",\"legend\":");
+        k += json_str(out + k, sizeof(out) - k, s.legend);
+        k += (size_t)snprintf(out + k, sizeof(out) - k, ",\"keys\":[");
+        for (int i = 0; i < 5 && k < sizeof(out) - 80; i++) {
+            k += (size_t)snprintf(out + k, sizeof(out) - k, "%s", i ? "," : "");
+            k += json_str(out + k, sizeof(out) - k, s.keys[i]);
+        }
+        snprintf(out + k, sizeof(out) - k, "]}");
+        client_text(c, out);
+        return;
+    }
     if (!strncmp(text, "cfg? ", 5)) {       /* a setting by its name (the bench's): reading it touches nothing */
         char value[96];
         if (!allowed(c, ROLE_OPERATE, false))

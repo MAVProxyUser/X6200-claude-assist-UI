@@ -14,6 +14,8 @@ all: test
 test:
 	rm -rf build && mkdir -p build
 	$(CC) -std=gnu11 -Wall -Wextra -O1 -I $(TOP)/src -o build/nifog_idx nifog_idx.c $(TOP)/src/nifog.c
+	$(CC) -std=gnu11 -Wall -Wextra -O1 -I $(TOP)/src -DBOARD_SHARE='"$(abspath build)/share"' -o build/nifog_load \
+	      nifog_load.c $(TOP)/src/nifog.c
 	BOTTLE=$(if $(BOTTLE),$(abspath $(BOTTLE))) python3 -I -B nifog_test.py
 
 clean:

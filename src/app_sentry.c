@@ -3654,6 +3654,8 @@ static unsigned      nf_gw, nf_gh;
 static int           nf_grey_page;      /* the page nf_grey holds, 0 none */
 static lv_color_t    nf_lut[256];       /* grey to the theme: 255 the background, 0 the accent */
 static char          nf_url[128];
+static pthread_mutex_t    nf_pub_mux = PTHREAD_MUTEX_INITIALIZER;
+static app_sentry_nifog_t nf_pub;       /* the reader as drawn, for the remote's "nifog?" (nf_publish) */
 
 /* The page's grey, read when another is wanted */
 static void nf_load(void) {
@@ -3808,6 +3810,33 @@ static void nf_close(void) {
     nf_px        = NULL;
     nf_grey      = NULL;
     nf_grey_page = 0;
+}
+
+/* The reader as the screen has it, for the remote (app_sentry.h): each 50 ms (rtl_timer_cb), zero when closed */
+static void nf_publish(void) {
+    app_sentry_nifog_t p;
+
+    memset(&p, 0, sizeof(p));
+    if (root && nf_on && scr == SCR_SYSTEM && nf_cap_l) {
+        p.open = 1;
+        p.page = nf_page;
+        p.y    = nf_y;
+        p.maxy = nf_max_y();
+        snprintf(p.cap, sizeof(p.cap), "%s", lv_label_get_text(nf_cap_l));
+        snprintf(p.where, sizeof(p.where), "%s", lv_label_get_text(nf_where_l));
+        if (legend_l) snprintf(p.legend, sizeof(p.legend), "%s", lv_label_get_text(legend_l));
+        for (int k = 0; k < 5; k++)
+            if (key_l[k]) snprintf(p.keys[k], sizeof(p.keys[k]), "%s", lv_label_get_text(key_l[k]));
+    }
+    pthread_mutex_lock(&nf_pub_mux);
+    nf_pub = p;
+    pthread_mutex_unlock(&nf_pub_mux);
+}
+
+void app_sentry_nifog_state(app_sentry_nifog_t *out) {
+    pthread_mutex_lock(&nf_pub_mux);
+    *out = nf_pub;
+    pthread_mutex_unlock(&nf_pub_mux);
 }
 
 static void nf_goto(int page) {
@@ -5378,6 +5407,7 @@ static void rtl_timer_cb(lv_timer_t *t) {
     (void)t;
     rtl_scan_step();
     sdr_publish(false);                 /* B and G for the remote's state */
+    nf_publish();                       /* F's NIFOG for the remote's "nifog?" */
     {   /* The radio's own transmitter keyed by its PTT while armed (A or G): out of play mode for the over
          * (rtl_spectrum_own_tx). With B's stick on the speaker the base is in play mode, its mics at 0, and the over
          * went out silent. Let go 0.3 s after the over, so a PTT's bounce does not flip it */
@@ -12621,6 +12651,16 @@ static void destruct_cb(void) {
     }
     f_frame = NULL;
     f_obj   = NULL;
+    /* F's NIFOG: its objects went with the screen; closed, so the next Sentry opens on F's list (open, it had left
+     * nf_on set with the objects gone: F's keys and knobs on a reader no longer drawn) */
+    nf_on        = false;
+    nf_frame_o   = nf_cap_l = nf_line_o = nf_img_o = nf_where_l = NULL;
+    free(nf_grey);
+    free(nf_px);
+    nf_grey      = NULL;
+    nf_px        = NULL;
+    nf_grey_page = 0;
+    nf_publish();
     f_gpu   = false;
     for (int i = 0; i < 3; i++) {       /* F SYSTEM's load bars */
         if (ld_frame[i]) {
