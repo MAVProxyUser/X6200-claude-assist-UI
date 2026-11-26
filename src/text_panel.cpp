@@ -7,6 +7,7 @@
  */
 #include <cmath>
 #include <cstring>
+#include <pthread.h>
 #include <strings.h>
 
 #include "text_panel.h"
@@ -37,10 +38,12 @@ static char        *buf_write = buf;   /* its end, where the next text goes */
 static bool         own[sizeof(buf)];   /* buf's characters that were sent (RTTY's TX, #312), not received */
 static char         shown[6144];    /* buf with the words coloured (label recolour), up to 9 more chars a word */
 static uint8_t      max_line_count;
-static radio_mode_t prev_mode;      /* CW-R kept as CW: switching between them keeps the text */
+static int          text_kind;      /* the decoder buf's text is from: 0 none yet, 1 CW, 2 RTTY (decoder_kind) */
 
 static void mode_cb(Subject *subj, void *user_data);
 static void dim_on_tuning(Subject *subj, void *user_data);
+static void publish(void);
+static int  decoder_kind(void);
 static void fade_to(void *var, int32_t opa);
 static bool too_wide();
 
@@ -221,6 +224,7 @@ static void show() {
     }
     *o = '\0';
     lv_label_set_text_static(obj, shown);
+    publish();
 }
 
 /* CW with Parse: the words this text finished, split in place where they ran together
@@ -269,6 +273,28 @@ const char *panel_last_call(void) {
     return call;
 }
 
+/* What panel_last_call() gives, kept at every change of the text for another thread (panel_last_call_copy) */
+static pthread_mutex_t pub_mux = PTHREAD_MUTEX_INITIALIZER;
+static char            pub_call[16];
+static int             pub_chars;
+
+static void publish(void) {
+    const char *c = panel_last_call();
+
+    pthread_mutex_lock(&pub_mux);
+    snprintf(pub_call, sizeof(pub_call), "%s", c);
+    pub_chars = (int)strlen(buf);
+    pthread_mutex_unlock(&pub_mux);
+}
+
+void panel_last_call_copy(char *call, size_t n, int *chars, bool *shown) {
+    pthread_mutex_lock(&pub_mux);
+    snprintf(call, n, "%s", pub_call);
+    *chars = pub_chars;
+    pthread_mutex_unlock(&pub_mux);
+    *shown = panel_shown();
+}
+
 /* Settings > Display > Decoder text: Large (the stock sony_24) or Compact (sony_18, more lines).
  * Follows the setting live; ported from SP2KMO's upstream c2fbe40c, with his fix 0736fa9c: every
  * line that no longer fits goes, not one */
@@ -311,6 +337,9 @@ static bool too_wide() {
 static void add(const char *text, bool mine) {
     size_t tl = strlen(text);
     char  *at;
+    int    kind = decoder_kind();
+
+    if (kind) text_kind = kind;
 
     if (tl + 2 > sizeof(buf) / 2)
         return;
@@ -400,7 +429,6 @@ lv_obj_t *panel_init(lv_obj_t *parent) {
     lv_anim_set_time(&dim_anim, 200);
 
     /* Shown by the mode and the CW decoder switch; the font follows Settings */
-    prev_mode = (radio_mode_t)cfg_sm.cp_cur_mode.get();
     cfg_sm.cp_cur_mode.subscribe_delayed(mode_cb, NULL);
     cfg_sm.p_cw_decoder.subscribe_delayed_and_notify(mode_cb, NULL);
     cfg_sm.cp_fg_freq.subscribe_delayed(dim_on_tuning, NULL);
@@ -456,10 +484,13 @@ bool panel_shown(void) {
 /* A hidden panel keeps its text */
 void panel_clear(void) {
     cw_parse_forget();      /* the calls the app confirmed: they go with the text */
-    if (lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) return;
-    buf_write = buf;
-    *buf = '\0';
-    lv_label_set_text_static(obj, buf);
+    if (!lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+        buf_write = buf;
+        *buf = '\0';
+        text_kind = 0;
+        lv_label_set_text_static(obj, buf);
+    }
+    publish();
 }
 
 /* CW with the decoder on, or SSB with RTTY (and NavTex) running; *rtty for the second */
@@ -528,17 +559,21 @@ void panel_update_visibility(bool clear) {
     if (clear) panel_clear();
 }
 
-static radio_mode_t cw_as_one(radio_mode_t m) {
-    return m == radio_mode_cwr ? radio_mode_cw : m;
+/* The decoder whose text the panel takes now: 0 none, 1 CW, 2 RTTY (and NavTex) */
+static int decoder_kind(void) {
+    bool rtty, on = decoder_on(&rtty);
+
+    return on ? (rtty ? 2 : 1) : 0;
 }
 
-/* A new mode clears the text, CW to CW-R and back does not */
+/* Another decoder's text clears the panel (CW's for RTTY's, and back). A mode without a decoder between keeps it: CW,
+ * then SSB, then CW again finds the text, and the call MSG > CW's {HIS} sends with it. Up to v0.3.12.49 every new mode
+ * cleared it (CW to CW-R and back did not): the call decoded on the Sentry's G went as leaving G gave A's dial back
+ * in USB and the dial came back to CW (the bench's cw-his, 2026-11-25), and {HIS} sent nothing */
 static void mode_cb(Subject *subj, void *user_data) {
-    radio_mode_t mode = cw_as_one((radio_mode_t)cfg_sm.cp_cur_mode.get());
-    bool         clear = mode != cw_as_one(prev_mode);
+    int kind = decoder_kind();
 
-    prev_mode = mode;
-    panel_update_visibility(clear);
+    panel_update_visibility(kind && text_kind && kind != text_kind);
 }
 
 /* The parts' opacities, not the object's: an object opa below COVER makes LVGL

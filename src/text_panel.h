@@ -34,6 +34,10 @@ void panel_keep_below(lv_coord_t y);
 /* The last callsign the decoder wrote (CW / RTTY panel), "" when none */
 const char *panel_last_call(void);
 
+/* Any thread (the remote's "his?"): that call as the panel's text last had it, the text's length and whether the panel
+ * shows */
+void panel_last_call_copy(char *call, size_t n, int *chars, bool *shown);
+
 #ifdef __cplusplus
 }
 #endif

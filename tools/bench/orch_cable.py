@@ -868,8 +868,22 @@ def t_cw_msg(o, s, l):
         home(o, S)
 
 
+def his(r, timeout=4.0):
+    """The remote's "his?": what MSG > CW's {HIS} would send now ({call, chars, shown}: the decoder panel's text length
+    and whether the panel shows)"""
+    t0 = time.time()
+    r.send("his?")
+    while time.time() - t0 < timeout:
+        with r.lock:
+            got = [x for when, x in list(r.lines) if when >= t0 and x.startswith("his ")]
+        if got:
+            return json.loads(got[-1][4:])
+        time.sleep(0.05)
+    raise Refused(f"{r.name}: no answer to 'his?' (a GUI from before it)")
+
+
 def t_cw_msg_his(o, s, l):
-    """{HIS}: the call the decoder confirmed last. s sends 'CQ DE <s's call> <s's call>' (TCI); l's message
+    """{HIS}: the call the decoder confirmed last. s sends 'CQ DE <s's call> x3' (TCI, 20 WPM); l's message
     'TU {HIS} UR 599' sent from its MSG > CW: s decodes '<s's call> UR 599'. The lead-in TU: the X6100's factory base
     keys an over's first elements 30-50 ms late, and run 30's X6200 decoded the call's first two letters as <?>"""
     S, L = o.r[s], o.r[l]
@@ -877,10 +891,23 @@ def t_cw_msg_his(o, s, l):
     res = {}
     mid = None
     try:
-        text, _ = cw_over(o, s, l, f"CQ DE {call} {call} K", "cw-his: the call")
+        # three calls at 20 WPM: at 28 the X6200 copied the X6100's 'CQ DE Q1TST Q1TST K' as 'CODE Q1TST MT1TST K', no
+        # DE and one clean call, so none confirmed and {HIS} rightly empty (2026-11-25)
+        text, _ = cw_over(o, s, l, f"CQ DE {call} {call} {call} K", "cw-his: the call", sender_cfg={"key_speed": 20})
         res["l_decoded"] = text
         if call not in text:
             raise Refused(f"{l} decoded {text!r}: no {call} confirmed")
+        # {HIS} read where it was decoded (the Sentry's G) and on the classic screen it is sent from: leaving G gives
+        # A's dial back (here 14.200 USB), and back in CW every new mode had cleared the decoder's text and the call
+        # with it (text_panel.cpp mode_cb, 2026-11-25). Read before the send: a wrong {HIS} never goes on the air
+        res["his"] = {"decoded": his(L)}
+        classic(L)
+        time.sleep(1.0)
+        res["his"]["classic"] = his(L)
+        if res["his"]["classic"]["call"] != call:
+            snap(o, f"cw-his {l}: on the classic screen before MSG, {{HIS}} not {call}")
+            raise Refused(f"{l}'s {{HIS}} is {res['his']['classic']['call']!r} on the classic screen, not {call}: "
+                          f"{res['his']}")
         mid, idx, n = _cw_msg_add(L, "TU {HIS} UR 599")
         # 20 WPM: run 31's X6200 copied the X6100's message at 28 as 'TA UR 5CH9' (the token is what is tested)
         with session(o, "cw-his", [l], F_CW) as watch, cfg_kept(L, {"key_speed": 20}):

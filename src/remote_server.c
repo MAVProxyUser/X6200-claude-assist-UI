@@ -59,7 +59,8 @@
  *  (remote_server_note); "btn NAME [hold]" presses a main-screen button by its name (button_bar.h buttons_named).
  *  "smc start|stop" runs TX Cal >
  *  S-METER's Measure as its button, "smc put PRE,ATT,RFG" sets its three figures, "smc?" answers "smc RUN PRE ATT RFG
- *  NOTE" (the bench's front-end check: it measures, checks and puts back what it found).
+ *  NOTE" (the bench's front-end check: it measures, checks and puts back what it found). "his?" answers what MSG > CW's
+ *  {HIS} would send now: 'his {"call":..,"chars":..,"shown":..}' (the decoder panel's text length, the panel shown).
  *  A panel thread reads the radio (the settings' getters are safe from any thread, as the TCI
  *  server uses them) and tells the panel clients what changed every 50 ms. The apps: the FT8
  *  list's rows go out as they come ("ft8r {...}", the last 48 to a page that opens later), the
@@ -124,6 +125,7 @@
 #include "cfg/settings_manager_api.h"
 #include "button_bar.h"
 #include "cw_messages.h"
+#include "text_panel.h"
 #include "cluster/client.h"
 #include "cluster/spots.h"
 #include "dialog_field.h"
@@ -2850,6 +2852,18 @@ static void handle_text(client_t *c, char *text) {
             k += json_str(out + k, sizeof(out) - k, s.keys[i]);
         }
         snprintf(out + k, sizeof(out) - k, "]}");
+        client_text(c, out);
+        return;
+    }
+    if (!strcmp(text, "his?")) {            /* what MSG > CW's {HIS} sends now, from the decoder's panel (the bench's) */
+        char out[160], call[16];
+        int  chars;
+        bool shown;
+
+        if (!allowed(c, ROLE_OPERATE, false))
+            return;
+        panel_last_call_copy(call, sizeof(call), &chars, &shown);
+        snprintf(out, sizeof(out), "his {\"call\":\"%s\",\"chars\":%d,\"shown\":%d}", call, chars, shown);
         client_text(c, out);
         return;
     }

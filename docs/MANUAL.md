@@ -7059,7 +7059,9 @@ speed (WPM) appear in the panel
 over the waterfall. The panel is see-through in every theme (up to v0.3.12.30 the
 flat themes, the Sentry's gold on black among them, filled it solid, so with the
 decoder on the classic screen showed no waterfall in CW); High contrast keeps it
-solid.
+solid. The text stays through a change to a mode without a decoder and back
+(CW, SSB, CW again); RTTY's text replaces it, and CW's RTTY's (up to v0.3.12.49
+every new mode cleared it, CW to CW-R and back excepted).
 
 - The receiver comes from gdyuldin x6100_gui 1.0.1: a coherent tone tracker
   that follows the station inside the CW filter, a detector with a noise
@@ -7469,6 +7471,10 @@ Edit; page 2: Beacon, Delete, QRSS3; page 3: Start, Until, Freq.
   beacons and when the message ends. Not in [QRSS3](#qrss3).
 - `{CALL}` is your callsign and `{HIS}` the other station's: the last call
   the decoder confirmed (the one Log QSO offers), e.g. `{HIS} UR 599 599 BK`.
+  It is still there after a mode without the decoder and back to CW: a call
+  copied on the Sentry's G goes out from the classic screen, though leaving G
+  gave A's dial back in SSB. Up to v0.3.12.49 every change of mode cleared the
+  decoder's text, and `{HIS}` sent nothing.
 - The side panel shows how long the message takes as sent (`{CALL}` filled
   in), whether the beacon is on, and its start and end.
 
@@ -11050,7 +11056,9 @@ open), `gmhz` (its chosen channel, 0 on the tones), `gmrx` (where its F1 tunes: 
 own through the WR12); all zero while the Sentry is closed. `nifog?` answers `nifog {...}`: F's
 [NIFOG](#nifog) as the screen has it, `open`, `page` (the PDF's numbering), `y` (px down it) and `maxy`, `cap`
 (its caption), `where` (the line under the page), `legend` and `keys` (the F keys' boxes); zero and empty while
-it is closed or the Sentry is (the bench's tools/bench/orch_nifog.py). A `set` the radio refuses is
+it is closed or the Sentry is (the bench's tools/bench/orch_nifog.py). `his?` answers `his {...}`: `call`, what
+MSG > CW's `{HIS}` would send now ("" none), `chars` (the decoder panel's text) and `shown` (the panel on the screen)
+(the bench's cw-his reads it before the reply goes out). A `set` the radio refuses is
 answered `err ...` (`err freq: locked (LOCK, or an app holds the
 frequency)`, `err freq: not a frequency this radio tunes`, `err NAME: the
 radio is busy, try again`, `err unknown setting NAME`, the role and
