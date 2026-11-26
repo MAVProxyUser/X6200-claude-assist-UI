@@ -196,7 +196,7 @@
  {
   "id": "tx-comp-ratio",
   "area": "tx",
-  "feature": "Comp ratio on MFK 2:4 (1:1 off .. 8:1); X6200 base has three levels (2:1, 4:1, 8:1)",
+  "feature": "Comp ratio on MFK 2:4 (1:1 off .. 8:1); X6200 base has three levels (2:1, 4:1, 8:1); none on Xiegu's own X6100 base (no button, set comp refused)",
   "radios": [
    "x6100",
    "x6200"
@@ -5478,7 +5478,7 @@
  {
   "id": "settings-audio-agc",
   "area": "settings-audio",
-  "feature": "AGC Hang, Knee, Slope",
+  "feature": "AGC Hang, Knee, Slope (Knee and Slope hidden and refused where the base ignores them: the X6200's, Xiegu's own X6100 base from V1.1.9)",
   "radios": [
    "x6100",
    "x6200"
@@ -5929,7 +5929,7 @@
  {
   "id": "settings-txcal-cessb",
   "area": "settings-txcal",
-  "feature": "CESSB on and level",
+  "feature": "CESSB on and level (a patched X6100 base from r12; elsewhere no card, cessb_on refused)",
   "radios": [
    "x6100",
    "x6200"
@@ -9057,7 +9057,7 @@
  {
   "id": "cw-peak-q",
   "area": "cw",
-  "feature": "CW peak and CW peak Q (CW 1:2): the base's peaking filter at the key tone on the X6100 (what you hear and the decoder), the decoder's input only on the X6200",
+  "feature": "CW peak and CW peak Q (CW 1:2): the base's peaking filter at the key tone on the patched X6100 base from r12 (what you hear and the decoder); Xiegu's own X6100 base and the X6200's have none: no buttons, the decoder told of no peak, the remote refuses them",
   "radios": [
    "x6100",
    "x6200"

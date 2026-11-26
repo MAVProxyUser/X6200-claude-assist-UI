@@ -5136,8 +5136,11 @@ static void make_audio_page() {
 
     row = card_begin("AGC");
     row = make_param_switch(row, "Hang", cfg_sm.p_agc_hang);
-    row = make_param_slider(row, "Knee", &agc_knee_slider);
-    row = make_param_slider(row, "Slope", &agc_slope_slider);
+    if (caps & HW_CAP_AGC_SHAPE) {  /* not the X6200's, nor Xiegu's own X6100 base from V1.1.9: they take them and
+                                     * change nothing (radio_types.h) */
+        row = make_param_slider(row, "Knee", &agc_knee_slider);
+        row = make_param_slider(row, "Slope", &agc_slope_slider);
+    }
     card_end(row);
 }
 

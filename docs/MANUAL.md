@@ -175,7 +175,7 @@ Baseband shows which base the radio runs.
 | IQ offsets | Settings > TX Cal > TX CALIBRATION | yes | yes | yes | - |
 | IQ balance | Settings > TX Cal > TX CALIBRATION | - | gcfix5 | - | - |
 | Mic gain | Settings > Audio > MICROPHONE | yes | yes | yes | yes |
-| Comp (the ratio) | the MFK 2:4 page | the button (see 4) | yes | yes | three levels |
+| Comp (the ratio) | the MFK 2:4 page | - (see 4) | r3 and later | yes | three levels |
 | Compressor, makeup | Settings > Audio > TX AUDIO | - | r3 and later | yes | - |
 | TX filter | Settings > Audio > TX AUDIO | - | r9 and later | yes | - |
 | FM pre/de-emphasis | Settings > Audio > TX AUDIO | - | r8 and later | - | - |
@@ -246,7 +246,10 @@ computer, OpenX6X00's writer does both (see
      own X6100 base (V1.1.9) Comp 4:1 left loud and soft as they were: a
      tone stepping 20 dB up and down every 0.15 s into its mic kept 16.7 dB
      at 1:1 and 16.0 at 4:1 on the radio's own monitor of its transmission
-     (2026-11-25).
+     (2026-11-25). So on that base the MFK 2:4 page has no Comp (AGC, IF
+     shift, VOX), a knob it was on skips it, nothing is sent to the base and
+     the remote refuses `set comp` (up to v0.3.12.49 the button was there and
+     did nothing).
    - **Compressor, makeup** (patched base) are two sliders, -15 to +15 dB in
      0.5 dB steps, both 0 by default. They shift the base's own values. The
      first moves the threshold, the level where the compressor starts to act.
@@ -257,7 +260,8 @@ computer, OpenX6X00's writer does both (see
    A careful start is 2:1, the ratio the patched base starts with, and both
    sliders at 0. More makeup means more drive into what follows, so watch the
    ALC as you raise it.
-5. **CESSB** (patched base r12 and later, X6100 only) is for SSB: it clips
+5. **CESSB** (patched base r12 and later, X6100 only; elsewhere TX Cal has
+   no CESSB card and the remote refuses `cessb_on`) is for SSB: it clips
    and filters the voice so the average power goes up without splatter. On
    or off (off by default), and a level from 0.0 to 5.0 dB (3.7 by default),
    how far the signal is raised before the clipping. The base's notes give
@@ -417,7 +421,10 @@ brackets (#279).
 - What is on each list is yours to choose. Hold a value button (TX power, RF
   gain, Squelch, the filter edges, RIT, XIT, Spectrum Zoom, WF ref, AGC,
   Comp, IF shift, VOX, PRE, ATT, ATU, Step, Brightness, NB, NR, DNF, the KEY
-  and CW values...): each hold steps it from no knob to VOL ("Added to VOL
+  and CW values...; only those the radio's base has, so no Comp on Xiegu's
+  own X6100 base, no IF shift on the X6200 and CW peak only on the patched
+  X6100 base: the page's other buttons move up, and a knob skips one that was
+  bound to it): each hold steps it from no knob to VOL ("Added to VOL
   encoder"), then to the MFK ("Moved to MFK encoder"), then off again
   ("Removed from MFK encoder"). A mark on the left of the button shows which
   knob it is on, in another colour while that knob turns it.
@@ -4100,7 +4107,16 @@ are. Leave it off on a screen without stripes.
 | TX AUDIO | compressor (threshold, makeup), TX filter, FM pre/de-emphasis: an X6100 with a patched base only (r3, r8, r9 and later, see [the table at the top](#setting-up-the-transmitter)); hidden on Xiegu's own base and on the X6200 |
 | MICROPHONE | Input (Built-in, Hand, Auto), Hand mic gain, Built-in gain, Moni level (0-100, 0 by default) |
 | VOX | On, Gain, Anti-VOX, Delay |
-| AGC | Hang, Knee, Slope |
+| AGC | Hang, Knee, Slope (Hang alone on the X6200 and on Xiegu's own X6100 base from V1.1.9) |
+
+AGC Knee and Slope go to the base as they are, and two bases take them and
+change nothing: the X6200's (1.0.8) and Xiegu's own X6100 base from V1.1.9 on.
+A tone at -82 to -72 dBm in USB, AGC slow, sounded within 1 dB at Knee 0 and
+-100, and alike at Slope 0 and 10, on both (2026-11-26; the X6100 at RF gain
+100, 30 and 5). There the AGC card has Hang alone, nothing of them is sent to
+the base and the remote refuses `agc_knee` and `agc_slope` (up to v0.3.12.49
+the sliders were there and did nothing). An X6100 with a patched base or an
+older Xiegu one keeps them (not measured).
 
 Speaker always off, for a radio run from a browser or a TCI client: the
 speaker and the TX monitor stay silent whatever the volume, and there is no
@@ -7060,9 +7076,12 @@ Train is for practice: the key, the paddle, the CW messages and the
 
 In CW mode the decoder buttons are on the CW pages: CW 1:2 has ZAP, CW
 peak, CW peak Q and Log QSO (the [quick QSO log](#quick-qso-log)), CW 2:2 Decoder on/off, Tuner (tuning
-indicator), Dec SNR and Parse. CW peak and its Q shape what you hear on the X6100 (the base's peaking filter at the
-key tone) and the decoder's input. The X6200's base has no such filter, so there they do nothing (up to v0.3.12.48
-its decoder took the filter's shape out of audio that did not have it and copied worse with CW peak on). Text and
+indicator), Dec SNR and Parse. CW peak and its Q shape what you hear (the base's peaking filter at the key tone) and
+the decoder's input on an X6100 with the patched base r12 and later only. Xiegu's own X6100 base takes the setting and
+applies no peak (V1.1.9: none at any Q, the noise 485 Hz wide at Q 1 and Q 16 alike, 2026-11-25) and the X6200's base
+has no such filter: there CW 1:2 has ZAP and Log QSO alone, the decoder is told of no peak and the remote refuses
+`cw_peak_on` and `cw_peak_q` (up to v0.3.12.48 on the X6200 and v0.3.12.49 on the X6100 the buttons were there, and
+with CW peak on the decoder took the filter's shape out of audio that did not have it and copied worse). Text and
 speed (WPM) appear in the panel
 over the waterfall. The panel is see-through in every theme (up to v0.3.12.30 the
 flat themes, the Sentry's gold on black among them, filled it solid, so with the
@@ -7232,8 +7251,9 @@ the base's own noise and its centre away from a signal. The browser Panel
 places the picture where the base is tuned too, as the radio's own
 waterfall does: the IF shift and, in CW, the key tone allowed for (up to
 v0.3.12.47 it placed it on the dial, so with a shift every signal was drawn
-that far off). The X6200's base has no IF shift; its remote refuses one
-(`set ifs`).
+that far off). The X6200's base has no IF shift: its MFK 2:4 page has none
+(AGC, Comp, VOX; up to v0.3.12.49 the button said only "IF shift is not
+supported") and its remote refuses one (`set ifs`).
 
 Parse. Where: CW 2:2 > Parse (on by default). The decoder often runs words
 together when the spacing is tight: "CQCQDEON6UREK". With Parse on, each
@@ -11079,7 +11099,11 @@ MSG > CW's `{HIS}` would send now ("" none), `chars` (the decoder panel's text),
 and `tail`, the panel text's last 48 characters as Parse left them (the bench's cw-his reads it before the reply goes
 out, cw-parse for Parse's split). A few read-only values answer `cfg?` for the bench: `digi_dx` (the keyboard modes'
 DX call), `radio_caps` (what the base can do, a number), `a_tx_rows` (the rows A's history has drawn on the air)
-and `beacons_heard_20m` (each band's: the NCDXF beacons heard, `beacon:snr:slot`). A `set` the radio refuses is
+and `beacons_heard_20m` (each band's: the NCDXF beacons heard, `beacon:snr:slot`). `buttons?` answers `buttons ...`:
+the main screen's pages as the radio made them, split by `|`, each its page button then its buttons' names split by
+`; ` (`(MFK 2:4); AGC; IF shift; VOX`). A setting the radio's base lacks is refused: `cfg comp`, `cfg cessb_on`,
+`cfg cw_peak_on`, `cfg agc_knee`... answer `err cfg: NAME: this radio's base has no ...` and `set comp` answers
+`err comp: this radio's base has no compressor` where it has none. A `set` the radio refuses is
 answered `err ...` (`err freq: locked (LOCK, or an app holds the
 frequency)`, `err freq: not a frequency this radio tunes`, `err NAME: the
 radio is busy, try again`, `err unknown setting NAME`, the role and

@@ -256,7 +256,10 @@ const char *hw_base_ver_str(void) {
 
 /* The patched firmware (1.1.9, and every rev 8 board) zooms and shifts the IF itself; the auto
  * notch, the compressor and the codec gain came with rev 3, the band gain and FM emphasis with
- * rev 8, the TX filter with rev 9, CESSB with rev 12. Xiegu's own base from 1.1.9 on sends its TX
+ * rev 8, the TX filter with rev 9, CESSB and the CW peak filter with rev 12 (gdyuldin's changelog;
+ * Xiegu's own base takes the CW peak's register and applies none, V1.1.9 measured). The AGC's knee
+ * and slope on all but Xiegu's own base from V1.1.9 on (measured to do nothing there; the test base
+ * and GoldCorpHF's gcfix ones are that base too). Xiegu's own base from 1.1.9 on sends its TX
  * frames as if unzoomed, and no frequency to say where they are: at zoom 8 the carrier was drawn
  * an eighth of the key tone off the line (cfg/lo_offset.h). Its 1.1.8 keeps them on the oscillator
  * then, as in receive, and the patched bases say in each packet where they are (#191) */
@@ -270,6 +273,9 @@ uint32_t hw_caps(void) {
     if (ver_cmp(v, (x6100_base_ver_t){1, 1, 9, 0}) >= 0 && v.rev < 8) {
         caps |= HW_CAP_TX_SPECTRUM_ON_DIAL;
     }
+    if (ver_cmp(v, (x6100_base_ver_t){1, 1, 9, 0}) < 0 || v.rev > 0) {
+        caps |= HW_CAP_AGC_SHAPE;   /* Xiegu's own from V1.1.9 on takes them and changes nothing (radio_types.h) */
+    }
     if (v.rev >= 3) {
         caps |= HW_CAP_DNF_AUTO | HW_CAP_COMP | HW_CAP_COMP_SHAPE | HW_CAP_CODEC_GAIN | HW_CAP_TX_LEVEL;
     }
@@ -280,7 +286,7 @@ uint32_t hw_caps(void) {
         caps |= HW_CAP_TX_FILTER;
     }
     if (v.rev >= 12) {
-        caps |= HW_CAP_CESSB;
+        caps |= HW_CAP_CESSB | HW_CAP_CW_PEAK;
     }
     /* GoldCorpHF's base gcfix5 and later ("V1.1.9 Nov 27 2025,gcfix5"): the transmitter's I/Q balance */
     const char *fw  = x6100_control_get_fw_version_str();

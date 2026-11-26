@@ -22,6 +22,7 @@
 #include "cfg/encoder_defaults.h"
 
 #include <algorithm>
+#include <pthread.h>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -782,9 +783,66 @@ static void knob_binds_cb(Subject *subj, void *user_data) {
     for (disp_btn_t &s : slots) slot_refresh(&s);
 }
 
+/* A page without its buttons of settings this radio's base lacks (controls_supported): those after them move up */
+static void page_drop_unsupported(buttons_page_t *page) {
+    for (int i = 1; i < BUTTONS; i++) {
+        button_data_t *b = page->items[i];
+
+        if (!b || !b->encoder_allowed || controls_supported((cfg_ctrl_t)b->ctrl)) continue;
+        for (int k = i; k + 1 < BUTTONS; k++) page->items[k] = page->items[k + 1];
+        page->items[BUTTONS - 1] = NULL;
+        i--;
+    }
+}
+
+/* The pages as buttons_init() left them, for the bench's remote ("buttons?", any thread): each page's buttons by their
+ * names, made on the LVGL thread, where the labels' text is made */
+static char            layout[1536];
+static pthread_mutex_t layout_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void layout_build() {
+    char   t[sizeof(layout)];
+    size_t n = 0;
+
+    t[0] = 0;
+    for (const auto &g : groups) {
+        for (size_t i = 0; i < g.n && n + 8 < sizeof(t); i++) {
+            for (int k = 0; k < BUTTONS && n + 8 < sizeof(t); k++) {
+                button_data_t *d = g.pages[i]->items[k];
+                const char    *raw = !d ? NULL : d->type == BTN_TEXT_FN ? d->label_fn() : d->type == BTN_TEXT ? d->label : NULL;
+                char           name[40];
+                size_t         m = 0;
+
+                if (!raw) continue;
+                for (const char *c = raw; *c && m + 1 < sizeof(name); c++) {
+                    if (c[0] == ':' && c[1] == '\n') break;        /* "Comp:\n1:1": the name */
+                    name[m++] = *c == '\n' ? ' ' : *c;
+                }
+                name[m] = 0;
+                n += snprintf(t + n, sizeof(t) - n, "%s%s", k == 0 ? (n ? "|" : "") : "; ", name);
+                if (n >= sizeof(t)) n = sizeof(t) - 1;
+            }
+        }
+    }
+    pthread_mutex_lock(&layout_lock);
+    memcpy(layout, t, sizeof(layout));
+    pthread_mutex_unlock(&layout_lock);
+}
+
+void buttons_layout_text(char *out, size_t size) {
+    if (!out || !size) return;
+    pthread_mutex_lock(&layout_lock);
+    snprintf(out, size, "%s", layout);
+    pthread_mutex_unlock(&layout_lock);
+}
+
 void buttons_init(lv_obj_t *parent) {
-    /* No auto notch where the base has none (X6100 boards before revision 3) */
-    if (!(radio_caps() & HW_CAP_DNF_AUTO)) page_dfn_1.items[4] = NULL;
+    /* No button for what the base has not got (radio_caps): the auto notch on X6100 boards before revision 3, Comp
+     * on Xiegu's own X6100 base (MFK 2:4: AGC, IF shift, VOX), CW peak and its Q but on the patched X6100 base from
+     * r12 (CW 1:2: ZAP, Log QSO), IF shift on the X6200 (MFK 2:4: AGC, Comp, VOX) */
+    for (const auto &g : groups) {
+        for (size_t i = 0; i < g.n; i++) page_drop_unsupported(g.pages[i]);
+    }
 
     for (const auto &g : groups) {
         for (size_t i = 0; i < g.n; i++) {
@@ -795,6 +853,7 @@ void buttons_init(lv_obj_t *parent) {
             first->prev = g.pages[(i + g.n - 1) % g.n];
         }
     }
+    layout_build();
     for (int i = 0; i < BUTTONS; i++) make_slot(&slots[i], parent, i * BTN_WIDTH, (uint8_t)i);
     hidden = false;     /* made shown (a theme change), the knob lines too (knobs_init()) */
     cfg_sm.p_encoder_bind.subscribe_delayed_and_notify(knob_binds_cb, NULL);
@@ -1367,8 +1426,8 @@ static button_data_t *named_button(const char *name) {
         {"key_mode", &btn_key_mode},
     };
     for (const auto &x : named) {
-        if (!strcmp(x.name, name))
-            return x.b;
+        if (!strcmp(x.name, name))      /* CW peak and its Q: none where the base has no such filter */
+            return x.b->encoder_allowed && !controls_supported((cfg_ctrl_t)x.b->ctrl) ? NULL : x.b;
     }
     return NULL;
 }

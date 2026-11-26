@@ -57,6 +57,17 @@ typedef enum {
     /* The transmitter's I/Q balance per band (HW_TX_IQ_BAL): GoldCorpHF's X6100 base from gcfix5 on (x6100_patch.py,
      * fix "txiq"), the image on the other side of the dial cancelled by the TX calibration */
     HW_CAP_TX_IQ_BAL           = 1 << 20,
+    /* The base's CW peaking filter at the key tone in its receive audio (HW_CW_PEAK, HW_CW_PEAK_Q): the patched X6100
+     * base from r12 on. Xiegu's own X6100 base takes register 36 and applies none (V1.1.9: no peak at any Q, orch
+     * cw-peak-q 2026-11-25); the X6200's base has no such register. Without it CW 1:2's CW peak and its Q are not
+     * shown, and the CW decoder is not told of a peak its audio lacks */
+    HW_CAP_CW_PEAK             = 1 << 21,
+    /* The AGC's knee and slope (HW_AGC_KNEE, HW_AGC_SLOPE: Settings > Audio > AGC; register 27, Xiegu's own, which
+     * the patched X6100 base leaves alone) act on the receive audio. Not where they were measured to do nothing
+     * (2026-11-26, a tone at -82 to -72 dBm, AGC slow: the audio within 1 dB at Knee 0 and -100, Slope 0 and 10 alike):
+     * the X6200's stock base 1.0.8 and Xiegu's own X6100 base from V1.1.9 on (RF gain 100, 30 and 5 alike). The
+     * X6100's older and patched bases keep them, not measured */
+    HW_CAP_AGC_SHAPE           = 1 << 22,
 } hw_cap_t;
 
 /* The hand mic's keys as the base reports them (mic_keys.c): the X6100 mic's codes. The X6200's library has the

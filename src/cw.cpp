@@ -187,15 +187,13 @@ static void apply_rx_params() {
         peak_on = rx_peak_on;
         peak_tone = rx_peak_tone;
         peak_q = rx_peak_q;
-#ifdef BOARD_X6200
-        /* The X6200's base has no peaking filter (hw_x6200.c: CW peak has no register there): its audio has no such
-         * colour to take out. Told of one, the decoder took it out of audio that did not have it and judged the
-         * noise off the key tone up to 12 dB too low: with CW peak on most of the X6200's 29 bench recordings of the
-         * X6100's CW copied worse than with it off ('VS', 'PARI'), at Q 8 their gaps printed noise (2026-11-25) */
-        receiver->set_apf(false, peak_tone, peak_q);
-#else
-        receiver->set_apf(peak_on, peak_tone, peak_q);
-#endif
+        /* Only a base that applies its peaking filter (HW_CAP_CW_PEAK: the patched X6100 base) colours the audio: the
+         * X6200's has no such filter, and Xiegu's own X6100 base takes the setting and applies none (V1.1.9: no peak
+         * at any Q, orch cw-peak-q 2026-11-25). Told of one, the decoder took it out of audio that did not have it
+         * and judged the noise off the key tone up to 12 dB too low: with CW peak on most of the X6200's 29 bench
+         * recordings of the X6100's CW copied worse than with it off ('VS', 'PARI'), at Q 8 their gaps printed
+         * noise (2026-11-25) */
+        receiver->set_apf(peak_on && (radio_caps() & HW_CAP_CW_PEAK), peak_tone, peak_q);
     }
 #ifdef BOARD_X6200
     receiver->set_base_peak(true, rx_peak_tone, BASE_PEAK_Q);   /* a change only: the band measured again */

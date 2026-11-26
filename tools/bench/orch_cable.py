@@ -89,6 +89,90 @@ def _same_num(a, b):
         return False
 
 
+# radio_types.h's HW_CAP_* the tests judge the GUI by (the remote's read-only radio_caps): what the base does itself
+CAP_CESSB, CAP_COMP, CAP_CW_PEAK, CAP_AGC_SHAPE = 1 << 7, 1 << 8, 1 << 21, 1 << 22
+
+
+def caps_of(r):
+    """r's base as its GUI judges it (the remote's radio_caps), None from a GUI before the remote had it"""
+    v = str(bench.cfg_get(r, "radio_caps")).strip()
+    return int(v) if v.isdigit() else None
+
+
+def patched_rev(base):
+    """The patched X6100 base's revision ("V1.1.6 ...,r13": 13), 0 for Xiegu's own and GoldCorpHF's gcfix bases"""
+    m = re.search(r",r(\d+)", base or "")
+    return int(m.group(1)) if m else 0
+
+
+def buttons_of(r, timeout=4.0):
+    """r's main-screen pages as its GUI made them (the remote's "buttons?"): [[page, name, ...], ...]"""
+    t0 = time.time()
+    r.send("buttons?")
+    while time.time() - t0 < timeout:
+        with r.lock:
+            got = [x for when, x in list(r.lines) if when >= t0 and x.startswith("buttons ")]
+        if got:
+            return [p.split("; ") for p in got[-1][8:].split("|") if p]
+        time.sleep(0.05)
+    raise Refused(f"{r.name}: no answer to 'buttons?' (a GUI from before it)")
+
+
+def refusal(r, cmd, timeout=3.0):
+    """cmd to r's remote: the 'err' it answered naming cmd's subject (its second word) within timeout, None: taken"""
+    subject = cmd.split()[1]
+    r.take_control()
+    t0 = time.time()
+    r.send(cmd)
+    while time.time() - t0 < timeout:
+        with r.lock:
+            got = [x for when, x in list(r.lines) if when >= t0 and x.startswith("err ") and subject in x]
+        if got:
+            return got[0][4:]
+        time.sleep(0.05)
+    return None
+
+
+def lacks_check(r, res, cfgs=None, sets=None, buttons=(), cmds=()):
+    """What r's base lacks offered nowhere (the owner, 2026-11-26: every FAIL fixed; radio_caps): no button named in
+    buttons on any main-screen page ("buttons?"), each 'cfg NAME VALUE' and 'set NAME VALUE' refused with the setting
+    as found after, each of cmds refused. What it found in res (pages, refused); returns what was wrong, [] for
+    nothing. A set that was taken is put back"""
+    bad = []
+    pages = buttons_of(r)
+    res["pages"] = {p[0].strip("()"): "; ".join(p[1:]) for p in pages if p}
+    shown = sorted({b for p in pages for b in p[1:] if b in buttons})
+    if shown:
+        bad.append(f"its main screen shows {shown}")
+    res["refused"] = {}
+    for kind, items in (("cfg", cfgs or {}), ("set", sets or {})):
+        for name, v in items.items():
+            was = bench.cfg_get(r, name) if kind == "cfg" else r.state.get(name)
+            why = refusal(r, f"{kind} {name} {v}")
+            time.sleep(0.6)
+            now = bench.cfg_get(r, name) if kind == "cfg" else r.state.get(name)
+            res["refused"][f"{kind} {name} {v}"] = why
+            if not why:
+                bad.append(f"'{kind} {name} {v}' taken")
+            if str(now) != str(was):
+                bad.append(f"{name} {was} -> {now}")
+                try:
+                    if kind == "cfg":
+                        bench.cfg_set(r, name, was)
+                    elif was is not None:
+                        r.send(f"set {name} {was}")
+                except Refused:
+                    pass
+    for cmd in cmds:
+        why = refusal(r, cmd)
+        res["refused"][cmd] = why
+        if not why:
+            bad.append(f"'{cmd}' taken")
+            if cmd.startswith("btn "):
+                r.send(cmd)                     # a toggle pressed: pressed again
+    return bad
+
+
 def win(r):
     return r.state.get("win") or ""
 
@@ -573,13 +657,38 @@ def t_cw_tuner(o, s, l):
 
 
 def t_cw_peak_q(o, s, l):
-    """CW peak (CW 1:2) and its Q on the X6100 (its base's peaking filter at the key tone), nothing sent: l's receive
-    noise (cw-noise-shape's measure) through an 800 Hz filter around the key tone with CW peak off, on at Q 16 and on
-    at Q 1. PASS when Q 16 lifts the noise at the key tone 3 dB or more over the peak off and is narrower than Q 1.
-    (Its first form keyed s 300 Hz off the tone at the default Q 1 and saw -1 dB: a Q 1 peak is the key tone wide)"""
+    """CW peak (CW 1:2) and its Q on the X6100 (its base's peaking filter at the key tone), nothing sent. The base
+    read from the GUI's log (suite_air_a.base_of: the state has none). On a base with the filter (the patched base
+    from r12, HW_CAP_CW_PEAK): l's receive noise (cw-noise-shape's measure) through an 800 Hz filter around the key
+    tone with CW peak off, on at Q 16 and on at Q 1; PASS when Q 16 lifts the noise at the key tone 3 dB or more over
+    the peak off and is narrower than Q 1. On any other (Xiegu's own: no peak at any Q, 2026-11-25): PASS when the GUI
+    assumes none: its radio_caps without the bit (cw.cpp then tells the decoder of no peak), CW 1:2 without CW peak
+    and its Q, the remote refusing cw_peak_on, cw_peak_q and 'btn cw_peak'. (Its first form keyed s 300 Hz off the
+    tone at the default Q 1 and saw -1 dB: a Q 1 peak is the key tone wide)"""
     from tones import TciRx
+    import suite_air_a as aa
     L = o.r[l]
-    res = {}
+    base = aa.base_of(L.host)
+    res = {"base": base, "patched_rev": patched_rev(base)}
+    try:
+        caps = caps_of(L)
+        res["caps"] = caps
+        if caps is None:
+            return False, f"{l}: no radio_caps from the remote (a GUI before it)", res
+        has, want = bool(caps & CAP_CW_PEAK), res["patched_rev"] >= 12
+        if has != want:
+            return False, f"{l}'s base {base or '(not read)'}: the GUI {'assumes' if has else 'denies'} a CW peak " \
+                          f"filter (radio_caps {caps}); only the patched base from r12 has one", res
+        if not has:
+            bad = lacks_check(L, res, cfgs={"cw_peak_on": 1, "cw_peak_q": 16}, buttons=("CW peak", "CW peak Q"),
+                              cmds=("btn cw_peak",))
+            if bad:
+                return False, f"{l}'s base {base or '(not read)'} applies no CW peak, yet {'; '.join(bad)}", res
+            return True, f"{l}'s base {base or '(not read)'} applies no CW peak and the GUI assumes none: radio_caps " \
+                         f"{caps} without it (the decoder told of no peak), CW 1:2 '{res['pages'].get('CW 1:2')}', " \
+                         f"refused: {', '.join(res['refused'])}", res
+    except Refused as e:
+        return False, str(e), res
     kt = int(L.state.get("kt") or 700)
     lo, hi = kt - 400, kt + 400
     at = int(round(kt / 50.0) * 50)
@@ -617,14 +726,9 @@ def t_cw_peak_q(o, s, l):
             f"Q 1 {res['q1']['width6_hz']} Hz"
     if lift >= 3 and res["q16"]["width6_hz"] < res["q1"]["width6_hz"]:
         return True, f"CW peak lifts {l}'s noise at the key tone {lift} dB at Q 16, narrower than Q 1 ({words})", res
-    base = (L.state.get("base") or L.state.get("bv") or "")
-    if abs(lift) < 1 and abs(q1 - off) < 1:
-        # 2026-11-25, the X6100 on Xiegu's factory base V1.1.9: the GUI writes the peak (x6100_control_cw_peak_set,
-        # register 36) and its receive audio has no peak at any Q: for the owner (hide it on the factory base, as the
-        # X6200's does nothing too?)
-        return None, f"no CW peak in {l}'s receive audio at any Q (the factory base{' ' + base if base else ''} " \
-                     f"takes the setting and shows none): {words}", res
-    return False, f"CW peak at Q 16 lifts {l}'s noise at the key tone {lift} dB ({words})", res
+    # 2026-11-25, on Xiegu's factory base V1.1.9: no peak at any Q (0.4/0.5/0.9 dB, 485 Hz wide at all), the GUI
+    # writing the peak and telling the decoder of it: radio_caps' HW_CAP_CW_PEAK since 2026-11-26, the check above
+    return False, f"CW peak at Q 16 lifts {l}'s noise at the key tone {lift} dB on the base {base} ({words})", res
 
 
 def _tone_db(x, fs, hz):
@@ -2690,12 +2794,27 @@ def t_agc_knee(o, s, l):
     audio grows with the signal: s's tone stepped 0.1, 0.3, 1.0 W through the pads, l's TCI audio level at each with
     Slope 0 and Slope 10. Valid when l's S-meter shows the step (AGC_STEP_MIN_DB) and its audio has room
     (AGC_PEAK_MAX_DBFS): then the growth from 0.1 to 1 W differs by AGC_SLOPE_MIN_DB. A run that cannot show it
-    fails saying so (2026-11-26: the X6100 listening sat at -5 dBFS, its AGC's own level; the X6200 grew 3.1 and 2.8)"""
+    fails saying so (2026-11-26: the X6100 listening sat at -5 dBFS, its AGC's own level; the X6200 grew 3.1 and 2.8).
+    On a base whose Knee and Slope do nothing (radio_caps without HW_CAP_AGC_SHAPE: the X6200's stock 1.0.8 and
+    Xiegu's own X6100 base from V1.1.9, which take register 27 and change nothing: Knee 0 and -100 within 1 dB, the
+    X6100 at RF gain 100, 30 and 5, 2026-11-26): PASS when they are offered nowhere, Settings > Audio > AGC showing
+    Hang alone (by that bit, settings_window.cpp) and the remote refusing agc_knee and agc_slope"""
     import numpy as np
     from tones import TciRx
     S, L = o.r[s], o.r[l]
     res = {}
     try:
+        caps = caps_of(L)
+        res["caps"] = caps
+        if caps is None:
+            return False, f"{l}: no radio_caps from the remote (a GUI before it)", res
+        if not caps & CAP_AGC_SHAPE:
+            bad = lacks_check(L, res, cfgs={"agc_knee": -100, "agc_slope": 10})
+            if bad:
+                return False, f"{l}'s base does nothing with Knee and Slope, yet {'; '.join(bad)}", res
+            return True, f"{l}'s base does nothing with Knee and Slope and the GUI offers them nowhere: radio_caps " \
+                         f"{caps} without them (Settings > Audio > AGC: Hang alone; radio.c sends neither), refused: " \
+                         f"{', '.join(res['refused'])}", res
         curves, meters, peaks = {}, {}, {}
         for slope in (0, 10):
             with cfg_kept(L, {"agc_knee": -100, "agc_slope": slope}):
@@ -2742,13 +2861,25 @@ def t_agc_knee(o, s, l):
 
 def t_cessb(o, s, l):
     """CESSB (Settings > TX Cal): the same two-tone audio through s's TCI at 0.1 W: its average power higher with
-    CESSB on (its meters, l's S-meter)"""
+    CESSB on (its meters, l's S-meter). On a base without it (radio_caps without HW_CAP_CESSB: the X6200's stock base,
+    Xiegu's own X6100 base): PASS when TX Cal has no CESSB card (by that bit alone, settings_window.cpp; radio.c sends
+    none) and the remote refuses cessb_on and cessb_power_up"""
     import numpy as np
     import digimodes
     import suite_air_b as ab
     S, L = o.r[s], o.r[l]
     res = {}
     try:
+        caps = caps_of(S)
+        res["caps"] = caps
+        if caps is None:
+            return False, f"{s}: no radio_caps from the remote (a GUI before it)", res
+        if not caps & CAP_CESSB:
+            bad = lacks_check(S, res, cfgs={"cessb_on": 1, "cessb_power_up": 5.0})
+            if bad:
+                return False, f"{s}'s base has no CESSB, yet {'; '.join(bad)}", res
+            return True, f"{s}'s base has no CESSB and the GUI offers none: radio_caps {caps} without it (no CESSB " \
+                         f"card in TX Cal), refused: {', '.join(res['refused'])}", res
         fs = 24000
         t = np.arange(int(4.0 * fs)) / fs
         x = 0.25 * (np.sin(2 * np.pi * 700 * t) + np.sin(2 * np.pi * 1900 * t))
@@ -4356,7 +4487,8 @@ PAIRS = [
     ("psk-look", t_psk_look, 90, "PSK31: the status's audio and quality, the DX call from 'DE <call>'"),
     ("transverter", t_transverter, 70, "the transverter's 0.1 W limit at PWR 1 W; ATU refused there"),
     ("zero-power", t_zero_power, 60, "Line-in 0 still sends: no false 'TX 0 W' (the warning: tools/txlevel)"),
-    ("agc-knee", t_agc_knee, 120, "the AGC Knee changes the audio over 0.1/0.3/1 W"),
+    ("agc-knee", t_agc_knee, 120, "the AGC Knee changes the audio over 0.1/0.3/1 W; where the base ignores them "
+     "(the X6200's, Xiegu's own X6100 base), Knee and Slope offered nowhere"),
     ("walkie", t_walkie, 70, "Walkie Talkie mode's PTT with the walkie mic at 0.1 W, the mic back after"),
     ("g-lamp", t_g_lamp, 45, "G's lamps on the air and after, judged on their words in the state"),
     ("scancfg-priority", t_scancfg_priority, 90, "SCAN CFG's PRIORITY catches a carrier; F3 SKIP passes it"),
@@ -4370,9 +4502,9 @@ PAIRS = [
 SINGLES = [
     # (name, fn, est, (sender, listener) by role names, "what")
     ("cw-peak-q x6100", t_cw_peak_q, 50, (None, "A"), "the X6100's CW peak and its Q in its receive noise, "
-     "nothing sent"),
-    ("cessb x6200>x6100", t_cessb, 60, ("B", "A"), "the X6200's CESSB raises the average power of the same audio "
-     "(the X6100's needs a patched base)"),
+     "nothing sent; on a base without the filter (Xiegu's own), the GUI assumes none and offers none"),
+    ("cessb x6200>x6100", t_cessb, 60, ("B", "A"), "the X6200's CESSB raises the average power of the same audio; "
+     "on a base without it (the X6200's stock one), no CESSB card and the remote refuses it"),
     ("iq-offsets x6100>x6200", t_iq_offsets, 70, ("A", "B"), "the X6100's IQ offsets change its carrier"),
     ("patched-rows x6100", t_patched_rows, 40, ("A", "B"), "the patched-base rows hidden on the factory base"),
     ("moni x6100", t_moni, 20, ("A", "B"), "Moni 30: the base gets it with the speaker up, 0 at VOL 0"),

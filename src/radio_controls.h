@@ -19,8 +19,12 @@ void controls_encoder_update(cfg_ctrl_t ctrl, int32_t diff, std::string &msg);
 extern "C" {
 #endif
 
+/* Whether this radio's base has what the control sets (radio_caps: Comp, CW peak and its Q, IF shift, the auto notch,
+ * the AGC's knee and slope): one it lacks is on no knob and no button, and a turn of it changes nothing */
+bool controls_supported(cfg_ctrl_t ctrl);
+
 /* The control after current (dir > 0), before it (dir < 0) or current itself if it is
- * bound (dir 0) among those bound to the encoder (ENCODER_BIND_VOL or _MFK) */
+ * bound and supported (dir 0) among those bound to the encoder (ENCODER_BIND_VOL or _MFK) */
 cfg_ctrl_t controls_encoder_get_next(encoder_binds_t encoder, cfg_ctrl_t current, int16_t dir);
 
 /* One step of a setting, and the same message line the knobs use. */

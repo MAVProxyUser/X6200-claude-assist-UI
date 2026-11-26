@@ -563,7 +563,9 @@ const char *hw_base_ver_str(void) {
  * spectrum ready-made, and has a compressor with a ratio. No IF shift, no TX calibration of
  * the X6100's kind, no CESSB, no TX filter. In CW and CW-R its spectrum stays centred on the
  * dial, and the tone rises as the dial goes up in both: a broadcast carrier on the dial sounded
- * at the key tone and sat in the middle of the base's spectrum, base 1.0.8 (#115) */
+ * at the key tone and sat in the middle of the base's spectrum, base 1.0.8 (#115). No CW peak filter (no register),
+ * and no AGC knee or slope: base 1.0.8 takes register 27 and changes nothing (2026-11-26, a -82 dBm tone in USB, AGC
+ * slow: the audio within 0.5 dB at Knee 0 and -100, within 0.9 dB at Slope 0 and 10) */
 uint32_t hw_caps(void) {
     return HW_CAP_ZOOM | HW_CAP_DNF_AUTO | HW_CAP_PSD | HW_CAP_COMP | HW_CAP_TX_LEVEL | HW_CAP_SAM_WFM | HW_CAP_KEEPALIVE
          | HW_CAP_TX_NO_ALC | HW_CAP_CW_SPECTRUM_ON_DIAL | HW_CAP_CW_TONE_RISES;

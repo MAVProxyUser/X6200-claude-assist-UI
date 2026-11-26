@@ -551,8 +551,11 @@ void radio_start() {
         start_trace("base: TEST ONLY base, compressor and CESSB off, TX filter 300-3000 Hz");
     }
 
-    /* Compressor */
-    subject_subscribe_and_notify((Subject*)cfg_comp, on_change_comp_ratio, NULL);
+    /* Compressor: only to a base that has one (HW_CAP_COMP; Xiegu's own X6100 base has none: at 4:1 its mic audio
+     * went out as at 1:1, orch comp-mic 2026-11-25). Register 25 is the patched base's */
+    uint32_t caps = hw_caps();
+    if (caps & HW_CAP_COMP)
+        subject_subscribe_and_notify((Subject*)cfg_comp, on_change_comp_ratio, NULL);
     subject_subscribe_and_notify((Subject*)cfg_comp_threshold_offset, on_change_f, (void*)HW_COMP_THRESHOLD_F);
     subject_subscribe_and_notify((Subject*)cfg_comp_makeup_offset, on_change_f, (void*)HW_COMP_MAKEUP_F);
 
@@ -574,8 +577,10 @@ void radio_start() {
     subject_subscribe_and_notify((Subject*)cfg_tx_filter_low, on_change_i, (void*)HW_TX_FILTER_LOW);
     subject_subscribe_and_notify((Subject*)cfg_tx_filter_high, on_change_i, (void*)HW_TX_FILTER_HIGH);
 
-    subject_subscribe_and_notify((Subject*)cfg_cessb_on, on_change_i, (void*)HW_CESSB);
-    subject_subscribe_and_notify((Subject*)cfg_cessb_power_up, on_change_f, (void*)HW_CESSB_POWER_UP_F);
+    if (caps & HW_CAP_CESSB) {
+        subject_subscribe_and_notify((Subject*)cfg_cessb_on, on_change_i, (void*)HW_CESSB);
+        subject_subscribe_and_notify((Subject*)cfg_cessb_power_up, on_change_f, (void*)HW_CESSB_POWER_UP_F);
+    }
 
     subject_subscribe_and_notify((Subject*)cfg_key_tone, on_change_i, (void*)HW_KEY_TONE);
     subject_subscribe_and_notify((Subject*)cfg_key_speed, on_change_i, (void*)HW_KEY_SPEED);
@@ -585,8 +590,10 @@ void radio_start() {
     subject_subscribe_and_notify((Subject*)cfg_key_train, on_key_train_change, NULL);
     subject_subscribe_and_notify((Subject*)cfg_qsk_time, on_change_i, (void*)HW_QSK_TIME);
     subject_subscribe_and_notify((Subject*)cfg_key_ratio, on_change_f, (void*)HW_KEY_RATIO_F);
-    subject_subscribe_and_notify((Subject*)cfg_cw_peak_on, on_change_i, (void*)HW_CW_PEAK);
-    subject_subscribe_and_notify((Subject*)cfg_cw_peak_q, on_change_i, (void*)HW_CW_PEAK_Q);
+    if (caps & HW_CAP_CW_PEAK) {     /* the patched X6100 base's from r12 (radio_types.h) */
+        subject_subscribe_and_notify((Subject*)cfg_cw_peak_on, on_change_i, (void*)HW_CW_PEAK);
+        subject_subscribe_and_notify((Subject*)cfg_cw_peak_q, on_change_i, (void*)HW_CW_PEAK_Q);
+    }
 
     /* KEY Train holds the power at 0 W in CW and CW-R (set_txpwr): looked at again when Train, a VFO's mode, the VFO
      * in use or split changes (a band key, a memory, CAT and TCI change the mode through them) */
@@ -600,8 +607,10 @@ void radio_start() {
     on_train_hold_change(NULL, NULL);
 
     subject_subscribe_and_notify((Subject*)cfg_agc_hang, on_change_i, (void*)HW_AGC_HANG);
-    subject_subscribe_and_notify((Subject*)cfg_agc_knee, on_change_i, (void*)HW_AGC_KNEE);
-    subject_subscribe_and_notify((Subject*)cfg_agc_slope, on_change_i, (void*)HW_AGC_SLOPE);
+    if (caps & HW_CAP_AGC_SHAPE) {   /* not the X6200's, nor Xiegu's own X6100 base from V1.1.9 (radio_types.h) */
+        subject_subscribe_and_notify((Subject*)cfg_agc_knee, on_change_i, (void*)HW_AGC_KNEE);
+        subject_subscribe_and_notify((Subject*)cfg_agc_slope, on_change_i, (void*)HW_AGC_SLOPE);
+    }
 
     subject_subscribe_and_notify((Subject*)cfg_dnf, on_change_i, (void*)HW_DNF);
     subject_subscribe_and_notify((Subject*)cfg_dnf_center, on_change_i, (void*)HW_DNF_CENTER);

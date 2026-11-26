@@ -115,9 +115,13 @@ void          (*buttons_hold_fn(const button_data_t *data))(button_data_t *);
 void            buttons_press(uint8_t n, bool hold);
 /* The bench's remote ("btn NAME [hold]", remote_server.c): a main-screen button pressed or held by its name, as its F-key
  * does while its page is shown (cw_zap, cw_log, cw_peak, cw_peak_q, cw_decoder, cw_tuner, cw_snr, cw_parse, key_train,
- * key_mode). buttons_named: the name is one; buttons_press_named on the LVGL thread, false when it does nothing */
+ * key_mode). buttons_named: the name is one (not CW peak or its Q where the base has no such filter);
+ * buttons_press_named on the LVGL thread, false when it does nothing */
 bool            buttons_named(const char *name);
 bool            buttons_press_named(const char *name, bool hold);
+/* Every page of the main screen's groups (the remote's read-only "buttons?", any thread): pages split by '|', each its
+ * buttons' names ("(MFK 2:4); AGC; IF shift; VOX"), split by "; ": none of a setting the base lacks */
+void            buttons_layout_text(char *out, size_t size);
 void            buttons_load_page_group(buttons_group_t group);
 /* One of the group's pages is the one loaded (also while Hide buttons hides it) */
 bool            buttons_group_shown(buttons_group_t group);

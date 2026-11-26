@@ -178,9 +178,24 @@ static bool from_table(cfg_ctrl_t ctrl, int32_t diff, char *buf, size_t size) {
     return false;
 }
 
-/* IF shift: the X6100 base firmware 1.1.9 (or a board revision 8 and later) */
-static bool if_shift_supported() {
-    return (radio_caps() & HW_CAP_IF_SHIFT) != 0;
+/* What this radio's base does (radio_caps): a control of a setting it lacks is on no knob and no button (button_bar.cpp
+ * buttons_init), and a turn of one changes nothing. IF shift: the X6100 base firmware 1.1.9 (or a board revision 8
+ * and later); the auto notch: the X6100's from revision 3, the X6200's; the compressor: not Xiegu's own X6100 base
+ * (its mic audio went out at 4:1 as at 1:1, orch comp-mic 2026-11-25); CW peak: the patched X6100 base from r12;
+ * the AGC's knee and slope: not the X6200's, nor Xiegu's own X6100 base from V1.1.9 (radio_types.h) */
+extern "C" bool controls_supported(cfg_ctrl_t ctrl) {
+    uint32_t caps = radio_caps();
+
+    switch (ctrl) {
+        case CTRL_IF_SHIFT:     return (caps & HW_CAP_IF_SHIFT) != 0;
+        case CTRL_DNF_AUTO:     return (caps & HW_CAP_DNF_AUTO) != 0;
+        case CTRL_COMP:         return (caps & HW_CAP_COMP) != 0;
+        case CTRL_CW_PEAK_ON:
+        case CTRL_CW_PEAK_Q:    return (caps & HW_CAP_CW_PEAK) != 0;
+        case CTRL_AGC_KNEE:
+        case CTRL_AGC_SLOPE:    return (caps & HW_CAP_AGC_SHAPE) != 0;
+        default:                return true;
+    }
 }
 
 void controls_encoder_update(cfg_ctrl_t ctrl, int32_t diff, std::string &msg) {
@@ -188,6 +203,14 @@ void controls_encoder_update(cfg_ctrl_t ctrl, int32_t diff, std::string &msg) {
     size_t size = msg.capacity();
     int32_t i;
 
+    if (!controls_supported(ctrl)) {
+        const char *name = ctrl == CTRL_COMP ? "Compressor" : ctrl == CTRL_IF_SHIFT ? "IF shift"
+                         : ctrl == CTRL_DNF_AUTO ? "DNF auto" : ctrl == CTRL_CW_PEAK_ON ? "CW peak"
+                         : ctrl == CTRL_CW_PEAK_Q ? "CW peak Q" : ctrl == CTRL_AGC_KNEE ? "AGC knee" : "AGC slope";
+
+        snprintf(buf, size, "%s: not on this radio's base", name);
+        return;
+    }
     if (from_table(ctrl, diff, buf, size)) {
         return;
     }
@@ -304,12 +327,8 @@ void controls_encoder_update(cfg_ctrl_t ctrl, int32_t diff, std::string &msg) {
             snprintf(buf, size, "Brightness: %s", backlight_normal_text());
             break;
 
-        case CTRL_IF_SHIFT:
-            if (if_shift_supported()) {
-                snprintf(buf, size, "IF shift: %i Hz", turn(cfg_sm.p_band_if_shift, diff, 100));
-            } else {
-                msg_update_text_fmt("IF shift is not supported");
-            }
+        case CTRL_IF_SHIFT:     /* controls_supported() above: the base has it */
+            snprintf(buf, size, "IF shift: %i Hz", turn(cfg_sm.p_band_if_shift, diff, 100));
             break;
 
         default:
@@ -350,8 +369,9 @@ extern "C" void controls_split_toggle(void) {
 }
 
 extern "C" void controls_comp_toggle(void) {
-    cfg_sm.p_comp.set(cfg_sm.p_comp.get() <= 1 ? 2 : 1);
-    controls_turn(CTRL_COMP, 0);
+    if (controls_supported(CTRL_COMP))
+        cfg_sm.p_comp.set(cfg_sm.p_comp.get() <= 1 ? 2 : 1);
+    controls_turn(CTRL_COMP, 0);    /* or that the base has none */
 }
 
 /* The next control (dir > 0) or the one before bound to this knob, round the list;
@@ -362,6 +382,9 @@ cfg_ctrl_t controls_encoder_get_next(encoder_binds_t encoder, cfg_ctrl_t current
     size_t      n     = binds.size();
 
     auto bound = [&](size_t c) {
+        if (!controls_supported((cfg_ctrl_t)c)) {
+            return false;               /* bound, but the base has no such setting */
+        }
         if (c == CTRL_CLUSTER || c == CTRL_CLUSTER_ORDER || c == CTRL_CLUSTER_BANDS || c == CTRL_CLUSTER_MODES) {
             return encoder == ENCODER_BIND_MFK && cfg_sm.p_cluster_column.get();
         }
@@ -408,6 +431,7 @@ void controls_toggle_cw_tuner(button_data_t *data) {
 }
 
 void controls_toggle_cw_peak(button_data_t *data) {
+    if (!controls_supported(CTRL_CW_PEAK_ON)) return;
     flip(cfg_sm.p_cw_peak_on);
 }
 

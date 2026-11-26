@@ -55,9 +55,10 @@
  *  vol, pwr (tenths of a watt), step, zoom, band (+1/-1), vfo (toggle), filter LO HI, atu, lock;
  *  one refused ("err ...") is followed by the whole state, changed or not (audit C13). For the bench's tests: "cfg NAME
  *  VALUE" sets any stored setting by its database name through its own validator and "cfg? NAME" reads it ("cfg NAME
- *  VALUE" back; cfg_apply), and what the radio puts in its message box goes to every panel client as 'msg "TEXT"'
- *  (remote_server_note); "btn NAME [hold]" presses a main-screen button by its name (button_bar.h buttons_named).
- *  "smc start|stop" runs TX Cal >
+ *  VALUE" back; cfg_apply; one of what this radio's base lacks is refused, cfg_by_cap, as "set comp" is there), "buttons?"
+ *  answers the main screen's pages ("buttons PAGE; NAME; ...|PAGE; ...", button_bar.h buttons_layout_text), and what
+ *  the radio puts in its message box goes to every panel client as 'msg "TEXT"' (remote_server_note); "btn NAME [hold]"
+ *  presses a main-screen button by its name (button_bar.h buttons_named). "smc start|stop" runs TX Cal >
  *  S-METER's Measure as its button, "smc put PRE,ATT,RFG" sets its three figures, "smc?" answers "smc RUN PRE ATT RFG
  *  NOTE" (the bench's front-end check: it measures, checks and puts back what it found). "his?" answers what MSG > CW's
  *  {HIS} would send now: 'his {"call":..,"chars":..,"shown":..}' (the decoder panel's text length, the panel shown).
@@ -1276,6 +1277,8 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
             set_refused(c, "gmp: only while the Sentry shows F");
         else if (names[i].id == P_IFS && !(radio_caps() & HW_CAP_IF_SHIFT))
             set_refused(c, "ifs: this radio's base has no IF shift");   /* the X6200's: only the dial would move */
+        else if (names[i].id == P_COMP && !(radio_caps() & HW_CAP_COMP))
+            set_refused(c, "comp: this radio's base has no compressor");   /* Xiegu's own X6100 base (radio.c) */
         else if (!panel_put(names[i].id, a, b)) {
             char why[48];                       /* named as the others: a page takes "busy..." for its PTT's refusal */
             snprintf(why, sizeof(why), "%s: the radio is busy, try again", names[i].name);
@@ -1773,6 +1776,40 @@ static bool cfg_value(const char *name, char *out, size_t n) {
         case LP_STR:   snprintf(out, n, "%s", ((params_str_t *)p)->x); break;
     }
     return true;
+}
+
+/* The stored settings of what a base may lack (radio_caps): "cfg NAME VALUE" refuses them where it has not got it, as
+ * the GUI shows them nowhere there and sends them to no base (radio.c). Reading them ("cfg? NAME") still answers */
+static const struct {
+    const char *name;
+    uint32_t    cap;
+    const char *what;
+} cfg_by_cap[] = {
+    {"comp", HW_CAP_COMP, "no compressor"},
+    {"comp_threshold_offset", HW_CAP_COMP_SHAPE, "no compressor threshold"},
+    {"comp_makeup_offset", HW_CAP_COMP_SHAPE, "no compressor makeup"},
+    {"cessb_on", HW_CAP_CESSB, "no CESSB"},
+    {"cessb_power_up", HW_CAP_CESSB, "no CESSB"},
+    {"cw_peak_on", HW_CAP_CW_PEAK, "no CW peak filter"},
+    {"cw_peak_q", HW_CAP_CW_PEAK, "no CW peak filter"},
+    {"agc_knee", HW_CAP_AGC_SHAPE, "no AGC knee (it takes it and changes nothing)"},
+    {"agc_slope", HW_CAP_AGC_SHAPE, "no AGC slope (it takes it and changes nothing)"},
+    {"tx_filter_low", HW_CAP_TX_FILTER, "no TX filter"},
+    {"tx_filter_high", HW_CAP_TX_FILTER, "no TX filter"},
+    {"fm_emphasis", HW_CAP_FM_EMP, "no FM emphasis"},
+    {"if_shift", HW_CAP_IF_SHIFT, "no IF shift"},
+    {"dnf_auto", HW_CAP_DNF_AUTO, "no auto notch"},
+};
+
+/* What this radio's base lacks of the setting NAME, or NULL */
+static const char *cfg_base_lacks(const char *name) {
+    uint32_t caps = radio_caps();
+
+    for (size_t i = 0; i < sizeof(cfg_by_cap) / sizeof(cfg_by_cap[0]); i++) {
+        if (!strcmp(cfg_by_cap[i].name, name))
+            return caps & cfg_by_cap[i].cap ? NULL : cfg_by_cap[i].what;
+    }
+    return NULL;
 }
 
 typedef struct {
@@ -2922,7 +2959,21 @@ static void handle_text(client_t *c, char *text) {
             client_textf(c, "err cfg: no %s", q.name);
             return;
         }
+        const char *lacks = cfg_base_lacks(q.name);
+        if (lacks) {
+            client_textf(c, "err cfg: %s: this radio's base has %s", q.name, lacks);
+            return;
+        }
         scheduler_put(cfg_apply, &q, sizeof(q));
+        return;
+    }
+    if (!strcmp(text, "buttons?")) {        /* the main screen's pages (the bench's): reading touches nothing */
+        char out[1600];
+        if (!allowed(c, ROLE_OPERATE, false))
+            return;
+        memcpy(out, "buttons ", 8);
+        buttons_layout_text(out + 8, sizeof(out) - 8);
+        client_text(c, out);
         return;
     }
     if (!strncmp(text, "js8 send ", 9)) {   /* the message as it is: it has spaces */

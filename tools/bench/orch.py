@@ -4247,12 +4247,27 @@ def comp_mic_test(o, mic, speaker, f=14200000, vol=VP_VOL):
     capture line, before the RF and its power loop) read loud against soft (suite_air_a.two_levels, the steps' phase
     from the whole over). Through TCI Comp could not be seen (its audio goes in as the modem's, 2026-11-25). Passes
     with the range at 4:1 at least 3 dB under 1:1's, the path through the room carrying 12 dB of the 20 at least at
-    1:1; on Xiegu's factory X6100 base, no compression is said (Comp came with the patched base, MANUAL), not failed"""
+    1:1. On a base without a compressor (radio_caps without HW_CAP_COMP: Xiegu's own X6100 base, which at 4:1 sent
+    its mic as at 1:1, 2026-11-25): PASS when Comp is offered nowhere, MFK 2:4 without it and the remote refusing
+    'set comp 4' and 'cfg comp 4' with Comp as found (radio.c sends it to no such base)"""
     import subprocess
     import acoustic as ac
+    import orch_cable as oc
     import suite_air_a as aa
     from scipy.signal import resample_poly
     M, Sp = o.r[mic], o.r[speaker]
+    try:
+        caps = oc.caps_of(M)
+        if caps is not None and not caps & oc.CAP_COMP:
+            base = aa.base_of(M.host) if mic == "x6100" else ""
+            got = {"caps": caps, "base": base}
+            bad = oc.lacks_check(M, got, cfgs={"comp": 4}, sets={"comp": 4}, buttons=("Comp",))
+            if bad:
+                return False, f"{mic}'s base {base or ''} has no compressor, yet {'; '.join(bad)}", got
+            return True, f"{mic}'s base {base or ''} has no compressor and the GUI offers none: radio_caps {caps} " \
+                         f"without it, MFK 2:4 '{got['pages'].get('MFK 2:4')}', refused: {', '.join(got['refused'])}", got
+    except Refused as e:
+        return False, str(e), {}
     wav = os.path.join(o.st.run_dir, "comp_steps.wav")
     os.makedirs(o.st.run_dir, exist_ok=True)
     play_s = comp_mic_wav(wav)
@@ -4327,9 +4342,6 @@ def comp_mic_test(o, mic, speaker, f=14200000, vol=VP_VOL):
         return False, says + ": the room carried too little of the 20 dB at 1:1 to tell", got
     if r4 <= r1 - 3:
         return True, says + ": compressed", got
-    base = aa.base_of(M.host) if mic == "x6100" else ""
-    if mic == "x6100" and aa.gcfix_of(base) == 0:
-        return None, says + f": no compression on Xiegu's {base or 'factory'} base (Comp came with the patched base; said)", got
     return False, says + ": NOT compressed at 4:1", got
 
 
@@ -6655,9 +6667,10 @@ TESTS = [
          "the two alike", pages_look, 90),
     Test("comp-mic x6100", "X6100 TX (its mic), X6200 RX (its speaker plays)", "Comp through the X6100's mic: the X6200's "
          "speaker (at 60) plays loud and soft steps 20 dB apart every 0.15 s, the X6100 keyed with PTT on G at Comp 1:1 "
-         "and 4:1, its capture of each over (its monitor) read: 4:1 at least 3 dB narrower (on Xiegu's factory base: "
-         "said; 11-25 none, 16.7 against 16.0 dB). The X6200's capture holds no monitor of its over: its Comp is not "
-         "measured this way", lambda o: comp_mic_test(o, A, B, vol=60), 90),
+         "and 4:1, its capture of each over (its monitor) read: 4:1 at least 3 dB narrower. On a base without a "
+         "compressor (Xiegu's factory one: 11-25 none, 16.7 against 16.0 dB): MFK 2:4 without Comp, 'set comp 4' and "
+         "'cfg comp 4' refused. The X6200's capture holds no monitor of its over: its Comp is not measured this way",
+         lambda o: comp_mic_test(o, A, B, vol=60), 90),
     Test("g-voiceprint x6100>x6200", "X6100 TX (its mic), X6200 RX (its speaker plays)", "G's voiceprint on the air: "
          "the X6200 plays stepped tones on its speaker, the X6100 keyed on G at 0.1 W picks them up on its mic; its "
          "voiceprint (two pictures), its own capture and the X6200's receiver must show them",
