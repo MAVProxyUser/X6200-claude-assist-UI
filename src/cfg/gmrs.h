@@ -11,6 +11,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -46,6 +47,23 @@ const char *gmrs_name(int64_t hz, int32_t tol);
 /* The channels in the order a scan goes, by frequency (the 462 MHz ones, then the 467 MHz ones, so a receiver moves
  * least): its i-th (0..GMRS_CHANNELS-1), the channel number */
 int gmrs_scan_ch(int i);
+
+/* The scan's next place after from (-1: its first), round: B's and A's GMRS scans (gmrs_scan_ch gives its channel) */
+int gmrs_scan_next(int from);
+
+/* F SYSTEM's GMRS panel: its GMRS_ROWS rows, the 22 channels by number, then the repeater inputs of 15-22: row r's
+ * channel number (0 none; *input, may be NULL: the row is that channel's repeater input) and frequency (0 none) */
+#define GMRS_ROWS (GMRS_CHANNELS + 8)
+int     gmrs_row_ch(int r, bool *input);
+int64_t gmrs_row_hz(int r);
+
+/* A channel's number as G's plan names it, "1" to "22"; "" none */
+const char *gmrs_num(int ch);
+
+/* The tones as F's panel lists them, GMRS_TONE_ROWS rows: a heading, the privacy codes four a row ("22 141.3"), a
+ * heading, the DCS codes twelve a row ("023"); row r into t (n bytes), "" past the last */
+#define GMRS_TONE_ROWS 21
+void gmrs_tone_row(int r, char *t, size_t n);
 
 /* Privacy code n (1-38): its CTCSS tone, tenths of a hertz; 0 none */
 int gmrs_ctcss(int n);

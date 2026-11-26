@@ -1,1 +1,5 @@
 gmrs_test
+gmrs_tx_x6100
+gmrs_tx_x6200
+build/
+*.dSYM/

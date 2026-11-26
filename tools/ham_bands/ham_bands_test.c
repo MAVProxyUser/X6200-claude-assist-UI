@@ -149,6 +149,29 @@ int main(void) {
     check(ham_tx_check(28074000, true, false, false) == HAM_TX_OK, "10 m, limited", 28074000);
     check(ham_tx_check(29700001, true, false, false) == HAM_TX_OFF_BAND, "past 10 m, limited", 29700001);
 
+    /* GMRS (47 CFR 95E): its two spans, written out, refused whatever a transverter or the switch say; the hardware
+     * not sending there stays receive only; 1 Hz outside each span, a transverter's range as before */
+    {
+        static const struct {
+            int32_t lo, hi;
+        } gmrs[] = {{462537500, 462737500}, {467537500, 467737500}};
+
+        for (size_t i = 0; i < sizeof(gmrs) / sizeof(gmrs[0]); i++) {
+            check(ham_gmrs(gmrs[i].lo) && ham_gmrs(gmrs[i].hi), "GMRS: its span's edges in", gmrs[i].lo);
+            check(!ham_gmrs(gmrs[i].lo - 1) && !ham_gmrs(gmrs[i].hi + 1), "GMRS: 1 Hz past its span out", gmrs[i].lo);
+            for (int32_t f = gmrs[i].lo; f <= gmrs[i].hi; f += 12500) {
+                check(ham_tx_check(f, true, true, true) == HAM_TX_GMRS, "GMRS: a transverter, the switch on", f);
+                check(ham_tx_check(f, true, false, false) == HAM_TX_GMRS, "GMRS: the hardware sending, limited", f);
+                check(ham_tx_check(f, false, true, true) == HAM_TX_RX_ONLY, "GMRS: no hardware TX: receive only", f);
+            }
+            check(ham_tx_check(gmrs[i].lo - 1, true, true, false) == HAM_TX_OK, "a transverter just under GMRS", gmrs[i].lo);
+            check(ham_tx_check(gmrs[i].hi + 1, true, true, false) == HAM_TX_OK, "a transverter just over GMRS", gmrs[i].hi);
+        }
+        check(!ham_gmrs(465000000) && !ham_gmrs(446000000) && !ham_gmrs(14200000), "GMRS: nothing between or elsewhere",
+              465000000);
+        check(!ham_band_of(462675000, NULL, NULL), "GMRS 20 is no amateur band", 462675000);
+    }
+
     scan_ranges();
 
     printf("ham_bands: %d checks, %d failed\n", checks, fails);

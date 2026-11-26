@@ -9,6 +9,7 @@
 
 #include "gmrs.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 
 static const gmrs_ch_t chs[GMRS_CHANNELS] = {
@@ -78,6 +79,49 @@ const char *gmrs_name(int64_t hz, int32_t tol) {
 
 int gmrs_scan_ch(int i) {
     return i >= 0 && i < GMRS_CHANNELS ? scan_order[i] : 0;
+}
+
+int gmrs_scan_next(int from) {
+    return from < 0 ? 0 : (from + 1) % GMRS_CHANNELS;
+}
+
+int gmrs_row_ch(int r, bool *input) {
+    if (input) *input = r >= GMRS_CHANNELS && r < GMRS_ROWS;
+    if (r < 0 || r >= GMRS_ROWS) return 0;
+    return r < GMRS_CHANNELS ? r + 1 : 15 + r - GMRS_CHANNELS;
+}
+
+int64_t gmrs_row_hz(int r) {
+    bool             in;
+    const gmrs_ch_t *c = gmrs_ch(gmrs_row_ch(r, &in));
+
+    return c ? (in ? c->in_hz : c->hz) : 0;
+}
+
+const char *gmrs_num(int ch) {
+    static const char *const num[GMRS_CHANNELS] = {"1",  "2",  "3",  "4",  "5",  "6",  "7",  "8",  "9",  "10", "11",
+                                                   "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22"};
+
+    return ch >= 1 && ch <= GMRS_CHANNELS ? num[ch - 1] : "";
+}
+
+void gmrs_tone_row(int r, char *t, size_t n) {
+    size_t at = 0;
+
+    if (!n) return;
+    t[0] = 0;
+    if (r == 0) {
+        snprintf(t, n, "PRIVACY CODES: CTCSS HZ (22 = 141.3, HEARD WITH CHANNEL 20)");
+    } else if (r >= 1 && r <= 10) {
+        for (int k = (r - 1) * 4 + 1; k <= (r - 1) * 4 + 4 && k <= GMRS_CTCSS_N && at < n; k++)
+            at += (size_t)snprintf(t + at, n - at, "%s%2d %3d.%d", k > (r - 1) * 4 + 1 ? "    " : "", k,
+                                   gmrs_ctcss(k) / 10, gmrs_ctcss(k) % 10);
+    } else if (r == 11) {
+        snprintf(t, n, "DCS CODES (RADIOS NUMBER THEM FROM 39 UP, EACH ITS OWN WAY)");
+    } else if (r >= 12 && r < GMRS_TONE_ROWS) {
+        for (int k = (r - 12) * 12; k < (r - 11) * 12 && k < GMRS_DCS_N && at < n; k++)
+            at += (size_t)snprintf(t + at, n - at, "%s%03d", k > (r - 12) * 12 ? " " : "", gmrs_dcs(k));
+    }
 }
 
 int gmrs_ctcss(int n) {

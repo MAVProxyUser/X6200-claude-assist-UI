@@ -1779,9 +1779,13 @@ bladeRF is not a GMRS radio. So nothing in this firmware sends there:
   ranges say: `GMRS: certified radios only` in the message box ([Amateur bands only](#amateur-bands-only)). Up to
   this version an enabled transverter covering them would have keyed.
 
-Talk on GMRS with a GMRS radio of its own; the Sentry is the scanner beside it. `tools/gmrs` checks the channel table
-and every refusal (`make -C tools/gmrs`); orch's `gmrs-b`, `gmrs-scan` and `gmrs-g` check B, B's scan and G on the
-radios, receive only.
+Talk on GMRS with a GMRS radio of its own; the Sentry is the scanner beside it. The tests: `tools/gmrs` (`make -C
+tools/gmrs`) checks the channel table, the scans' order, F's panel's rows and the tones' rows, and on the real settings
+of each model that GMRS is out of the radio's own reach as it comes, received through the WR12 or a transverter, and
+refused as GMRS through a transverter whatever the switch and the TX ranges; `tools/ham_bands` and `tools/tx_ranges`
+check GMRS's spans. On the radios, orch's `gmrs-b` (B on GMRS on both), `gmrs-scan` (B's scan of the 22), `gmrs-f`
+(F's panel), `gmrs-xvtr` (a transverter taking GMRS in on both, the WR12's stand-in: A tuned and scanning, G's group on
+the radio, A/B and the PTT refused) and `gmrs-g` (G through an SDR), all receive only.
 
 ### The SDRs (RTL-SDR, HackRF, bladeRF), the GNS 5890 and the microADSB on USB
 

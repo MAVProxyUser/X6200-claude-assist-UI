@@ -18546,7 +18546,7 @@
    "x6200"
   ],
   "needs": "none",
-  "how_to_confirm": "tools/gmrs host check: ham_tx_check with a transverter and the switch on, tx_ranges_check, tx_ranges_sdr_check: HAM_TX_GMRS for every channel and input",
+  "how_to_confirm": "tools/gmrs host check (gmrs_test, gmrs_tx_x6100/x6200 on the real settings: every channel, input and edge refused as GMRS through a transverter, the switch on, each TX ranges profile), tools/ham_bands and tools/tx_ranges (GMRS's spans written out); orch gmrs-xvtr: the remote's PTT at GMRS through a transverter answered 'err ptt: no TX on GMRS: ...', nothing keyed",
   "suite_has": null,
   "manual_ref": "### GMRS: listening only"
  },
@@ -18584,7 +18584,7 @@
    "x6200"
   ],
   "needs": "wr12",
-  "how_to_confirm": "with the WR12 on HOST and no SDR: D's GMRS LISTEN, A's F1: 'SCAN: GMRS', the dial steps 462.550, 462.5625...; key AB on A at 462.675: rxo stays 1; page G: group GMRS on the X6200 (VIA X6200)",
+  "how_to_confirm": "with the WR12 on HOST, or a transverter taking 462.5-467.8 MHz in (orch gmrs-xvtr sets one on both radios): F's GMRS panel gmrx 2, its F1 tunes A in NFM; A's F1: the dial steps 462.550, 462.5625... in order; key AB on A and G at GMRS: rxo stays 1; G's CH + steps the GMRS group on the radio; tools/gmrs gmrs_tx_x6200: the WR12 receives every channel and input, sends none",
   "suite_has": null,
   "manual_ref": "### GMRS: listening only"
  }

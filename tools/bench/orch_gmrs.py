@@ -402,11 +402,189 @@ def t_gmrs_f(o):
     return True, f"F's GMRS panel on both: {out.get('tune')}", out
 
 
+# ---- the radio's own receiver: a transverter taking GMRS in, the WR12's stand-in on both radios ----
+
+XV = {"transverter_1_from": 462500000, "transverter_1_to": 467800000, "transverter_1_shift": 434000000,
+      "transverter_1_pwr_max": 0.1}         # 462.5-467.8 MHz on a 28.5-33.8 MHz IF, 0.1 W at most there
+
+
+def _apart_ok(o, keys=("freq", "mode")):
+    H.alike(o, keys)
+
+
+def t_gmrs_xvtr(o):
+    """GMRS on the radio's own receiver, through a transverter set on both radios for the test (462.5-467.8 MHz on a
+    28.5-33.8 MHz IF: what the X6200's WR12 does, which neither radio has today), put back after: F's GMRS panel says
+    A hears it (gmrx 2) and its F1 tunes A to the chosen channel in NFM on both; A/B there arms nothing; the radio's
+    own PTT there is refused with GMRS's words, nothing keyed; A's F1 on the GMRS band scans the channels in frequency
+    order (each radio's own dial, declared apart while it steps); G's GMRS group is the radio's own: CH + steps it,
+    A/B arms nothing there; 'set gsdr' refused off G and nothing without an SDR on G. Receive only throughout"""
+    import orch_cable as oc
+    _need_state(o)
+    A, B = H.A, H.B
+    res = {}
+    with o.step("both on 14.200 USB, page A; 'set gsdr' refused off page G") as s:
+        _page(o, "A")
+        o.both({"freq": 14200000, "mode": 2})
+        r = o.r[B]
+        n0 = len(r.errs)
+        r.send(f"set gsdr {CH[20]}")
+        r.wait("the refusal", lambda: any("gsdr: only while the Sentry shows G" in e for e in r.errs[n0:]), 5)
+        s.confirm(r.errs[-1])
+    with oc.cfg_kept(o.r[A], XV), oc.cfg_kept(o.r[B], XV):
+        try:
+            with o.step("the transverter on both; F's GMRS panel: heard on A (gmrx 2), both on one channel") as s:
+                _page(o, "F")
+
+                def panel(n, r):
+                    r.send("set gmp 1")
+                    r.wait("the panel", lambda: r.state.get("gmp") == 1, 5)
+                    r.wait("A hears GMRS", lambda: r.state.get("gmrx") == 2, 5)
+                    return r.state.get("gmhz")
+                got = H.in_parallel(o, panel)
+                want = got[A]
+                rb = o.r[B]
+                for _ in range(len(ROWS)):                  # the X6200's choice to the X6100's, the VFO a row a click
+                    if rb.state.get("gmhz") == want:
+                        break
+                    rb.send("knob main 1")
+                    time.sleep(0.4)
+                if rb.state.get("gmhz") != want:
+                    raise Refused(f"{B}'s panel choice {rb.state.get('gmhz')} never reached {A}'s {want}")
+                res["channel"] = NAMES[want]
+                s.confirm(f"both on {NAMES[want]}, gmrx 2")
+            with o.step(f"F1 (TUNE) on both: A on {res['channel']} in NFM, alike") as s:
+                def tune(n, r):
+                    bench.tap(r, "F1")
+                    r.wait("A on it", lambda: r.state.get("pg") == "A" and int(r.state.get("freq", 0)) == want and
+                           int(r.state.get("mode", -1)) == 7, 8)
+                    return int(r.state.get("freq"))
+                got = H.in_parallel(o, tune)
+                _apart_ok(o)
+                s.confirm(str(got))
+            res["rx"] = {n: {k: r.state.get(k) for k in ("pre", "att", "agc")} | {"meter": r.meter}
+                         for n, r in o.r.items()}           # the transverter band's own receiver set-up, its noise
+            with o.step("A/B on A at GMRS on both: nothing armed") as s:
+                for r in o.r.values():
+                    bench.tap(r, "AB")
+                time.sleep(1.5)
+                bad = [n for n, r in o.r.items() if r.state.get("rxo") != 1 or r.state.get("tx")]
+                if bad:
+                    for n in bad:
+                        bench.arm(o.r[n], False)
+                    raise Refused(f"A/B armed {bad} on GMRS")
+                s.confirm("rxo 1, tx 0 on both")
+            with o.step("the radio's own PTT at GMRS on each: refused with GMRS's words, off the air") as s:
+                said = {}
+                for n, r in o.r.items():
+                    n0, t0, went = len(r.errs), time.time(), False
+                    r.send(f"key PTT 1 {o.hold()}")
+                    while time.time() - t0 < 2.5:
+                        went = went or bool(r.tx)
+                        time.sleep(0.05)
+                    r.send("key PTT 0")
+                    r.stop()
+                    if went:
+                        raise Refused(f"{n} WENT ON THE AIR at GMRS")
+                    e = [x for x in r.errs[n0:] if x.startswith("ptt:")]
+                    if not e or "GMRS" not in e[-1]:
+                        raise Refused(f"{n}: PTT at GMRS not refused for GMRS (it said {r.errs[n0:]})")
+                    said[n] = e[-1]
+                res["ptt"] = said
+                s.confirm(str(said))
+            res["a_scan"] = {}
+            for n, r in o.r.items():
+                other = H.B if n == H.A else H.A
+                with o.step(f"A's F1 on {n} (the other on 14.200 USB meanwhile, declared apart): GMRS's channels in "
+                            f"frequency order, F1 ends it, neither radio keyed") as s:
+                    hops, loud, keyed = [], [], []
+                    with bench.apart({"freq": bench.STEPPED, "mode": bench.STEPPED},
+                                     f"A's GMRS scan on {n}: its dial steps GMRS's channels, {other} waits on 14.200"):
+                        # A change under way while the scan moves the dial by itself (the guard's RF alarm paused: the
+                        # transverter band's noise reads near its -100 dBm, gmrs-xvtr 20:09 against -115 tuned there
+                        # straight); this step watches for a key itself
+                        o.changing += 1
+                        try:
+                            bench.ensure(o.r[other], {"freq": 14200000, "mode": 2})
+                            start, moved = int(r.state.get("freq", 0)), False
+                            bench.tap(r, "F1")
+                            t0 = time.time()
+                            while time.time() - t0 < 45 and len(hops) < 6:
+                                f = int(r.state.get("freq", 0))
+                                moved = moved or f != start     # the channel it starts on is no hop of the scan's
+                                if moved and f in SCAN_ORDER and (not hops or hops[-1] != f):
+                                    hops.append(f)
+                                keyed += [x for x, y in o.r.items() if y.tx]
+                                if r.meter is not None and r.meter > H.RF_ALARM_DBM:
+                                    loud.append(round(r.meter, 1))
+                                time.sleep(0.1)
+                            for _ in range(3):          # F1 again, till the dial stays put (a key a stalled link
+                                bench.tap(r, "F1")      # dropped is pressed again)
+                                f0, t1, still = r.state.get("freq"), time.time(), True
+                                while time.time() - t1 < 5:
+                                    if r.state.get("freq") != f0:
+                                        still = False
+                                        break
+                                    time.sleep(0.1)
+                                if still:
+                                    break
+                            else:
+                                raise Refused(f"{n}: A's scan did not stop on F1")
+                        finally:
+                            o.changing -= 1
+                        o.both({"freq": CH[20], "mode": 7})
+                    if keyed:
+                        raise Refused(f"{sorted(set(keyed))} ON THE AIR during A's GMRS scan")
+                    order = [SCAN_ORDER.index(f) for f in hops]
+                    skips = [(a, b) for a, b in zip(order, order[1:]) if b != (a + 1) % len(SCAN_ORDER)]
+                    if len(hops) < 4 or skips:
+                        raise Refused(f"{n}: A's GMRS scan went {[NAMES[f] for f in hops]}")
+                    res["a_scan"][n] = [NAMES[f] for f in hops]
+                    res.setdefault("scan_meter_over_alarm", {})[n] = loud[:10]
+                    s.confirm(", ".join(res["a_scan"][n]) + (f"; its meter over {H.RF_ALARM_DBM} dBm at times "
+                                                             f"({max(loud)}), nothing keyed" if loud else ""))
+            with o.step("G on GMRS 20 through the radio on both; CH + (BAND UP): GMRS 21 on both") as s:
+                _page(o, "G")
+                o.both({"freq": CH[20], "mode": 7})
+                r = o.r[B]
+                r.send(f"set gsdr {CH[20]}")            # no SDR: G stays the radio's
+                time.sleep(1.0)
+                if r.state.get("ghz"):
+                    raise Refused(f"{B}: G went to an SDR channel with no SDR ({r.state.get('ghz')})")
+
+                def up(n, r):
+                    bench.tap(r, "BAND_UP")
+                    r.wait("GMRS 21", lambda: int(r.state.get("freq", 0)) == CH[21], 5)
+                    return int(r.state.get("freq"))
+                got = H.in_parallel(o, up)
+                _apart_ok(o)
+                s.confirm(str(got))
+            with o.step("A/B on G at GMRS on both: nothing armed") as s:
+                for r in o.r.values():
+                    bench.tap(r, "AB")
+                time.sleep(1.5)
+                bad = [n for n, r in o.r.items() if r.state.get("rxo") != 1 or r.state.get("tx")]
+                if bad:
+                    for n in bad:
+                        bench.arm(o.r[n], False)
+                    raise Refused(f"A/B on G armed {bad} on GMRS")
+                s.confirm("rxo 1, tx 0 on both")
+        finally:
+            for r in o.r.values():
+                if r.state.get("gmp") == 1:
+                    r.send("set gmp 0")
+            o.both({"freq": 14200000, "mode": 2})   # off GMRS before the transverter goes
+            _page(o, "A")
+    return True, (f"through a GMRS transverter on both: A on {res.get('channel')} in NFM, A/B and the PTT refused "
+                  f"({res.get('ptt', {}).get(A, '')}), A's scan {res.get('a_scan', {}).get(A)}, G's CH + on GMRS"), res
+
+
 COVERS = {
     "gmrs-b": (["sentry-b-gmrs-channels", "remote-sdr-state"], ["sentry-b-f2-preset"]),
     "gmrs-scan": (["sentry-b-gmrs-scan"], []),
     "gmrs-g": (["g-gmrs-groups", "g-gmrs-no-tx"], ["g-sdr-tx-refusals"]),
     "gmrs-f": (["f-system-gmrs"], []),
+    "gmrs-xvtr": (["a-gmrs-wr12", "tx-gmrs-never"], ["g-gmrs-groups", "g-gmrs-no-tx", "f-system-gmrs"]),
 }
 
 
@@ -421,4 +599,6 @@ def tests(Test, A, B):
              "nothing; G back on the radio", t_gmrs_g, 40),
         Test("gmrs-f", "both RX", "F SYSTEM's GMRS panel on both: chosen, opened, the MFK, the tones, F1 tunes on the "
              "receiver there (none: nothing), F5 closes; A's dial untouched", t_gmrs_f, 60),
+        Test("gmrs-xvtr", "both RX", "a GMRS transverter on both (the WR12's stand-in): F's panel tunes A in NFM, "
+             "A/B and the PTT refused as GMRS, A's scan of the 22, G's GMRS group on the radio", t_gmrs_xvtr, 120),
     ]

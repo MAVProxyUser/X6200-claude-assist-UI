@@ -335,6 +335,7 @@ static void words(void) {
     check(!strcmp(tx_ranges_why(HAM_TX_OFF_BAND), "outside the amateur bands (Settings > TX Cal)"), "off band", 0);
     check(!strcmp(tx_ranges_why(HAM_TX_OFF_RANGE), "outside the TX ranges (Settings > TX Cal)"), "off range", 0);
     check(!strcmp(tx_ranges_why(HAM_TX_NO_RANGES), "no TX ranges in the own list (Settings > TX Cal)"), "no ranges", 0);
+    check(!strcmp(tx_ranges_why(HAM_TX_GMRS), "GMRS: only radios certified for it (47 CFR 95E)"), "GMRS", 0);
 }
 
 /* A read of the own list on one thread while others check: each check sees one list or the other, never half of one
@@ -404,6 +405,19 @@ static void test_sdr(void) {
         for (int p = TX_RANGES_BANDS; p <= TX_RANGES_OWN; p++)
             check(tx_ranges_sdr_check((tx_ranges_t)p, never[i]) != HAM_TX_OK, "SDR: never there", never[i]);
     }
+    /* GMRS's channels and inputs: the SDR refuses them as GMRS (its own words on G), with every profile; a transverter
+     * whose range takes them in is refused as GMRS too, with the switch on */
+    static const int32_t gmrs[] = {462550000, 462562500, 462675000, 462725000, 467562500, 467712500, 467550000,
+                                   467725000};
+
+    for (size_t i = 0; i < sizeof(gmrs) / sizeof(gmrs[0]); i++) {
+        for (int p = TX_RANGES_BANDS; p <= TX_RANGES_OWN; p++)
+            check(tx_ranges_sdr_check((tx_ranges_t)p, gmrs[i]) == HAM_TX_GMRS, "SDR: GMRS refused as GMRS", gmrs[i]);
+        check(tx_ranges_check(TX_RANGES_BANDS, gmrs[i], true, 434000000, true) == HAM_TX_GMRS,
+              "a GMRS transverter, the switch on: GMRS", gmrs[i]);
+    }
+    check(tx_ranges_sdr_check(TX_RANGES_BANDS, 465000000) == HAM_TX_OFF_BAND, "SDR: between GMRS's spans: off band",
+          465000000);
     tx_ranges_own_set("144.000-148.000\n7.000-7.300\n");      /* the 2 m line is not read: past 55 MHz */
     check(tx_ranges_sdr_check(TX_RANGES_OWN, 146520000) == HAM_TX_OFF_RANGE, "SDR: none with the own list", 146520000);
     check(tx_ranges_sdr_check(TX_RANGES_BANDS, 146520000) == HAM_TX_OK, "SDR: 146.520 with Ham bands", 146520000);

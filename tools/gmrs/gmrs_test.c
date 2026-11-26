@@ -7,7 +7,8 @@
  *  lookups' tolerance, the 38 privacy codes (each one of ctcss.c's tones) and the 104 DCS codes. And receive only:
  *  every channel and input refused by every TX check there is (ham_tx_check through a transverter with the switch
  *  on, tx_ranges_check with each profile, tx_ranges_sdr_check, the daemon's own amateur bands never reaching them),
- *  with GMRS's own reason, and the 70 cm band's top still sent on.
+ *  with GMRS's own reason, and the 70 cm band's top still sent on. And what the Sentry draws from it: the scan's next
+ *  place (B's and A's GMRS scans), F's GMRS panel's 30 rows, G's channel numbers, the tones' rows.
  */
 
 #include "cfg/gmrs.h"
@@ -33,6 +34,10 @@ static int32_t want_hz(int ch) {
     if (ch <= 7) return 462562500 + (ch - 1) * 25000;       /* 462 MHz interstitial */
     if (ch <= 14) return 467562500 + (ch - 8) * 25000;      /* 467 MHz interstitial */
     return 462550000 + (ch - 15) * 25000;                   /* 462 MHz main */
+}
+
+static int32_t want_in(int ch) {
+    return ch >= 15 ? want_hz(ch) + 5000000 : 0;
 }
 
 static void channels(void) {
@@ -123,6 +128,86 @@ static void tones(void) {
     check(gmrs_dcs(GMRS_DCS_N) == 0, "none past the 104", 0);
 }
 
+/* The scans' next place: -1 the first, each of the 22 once a round, round again */
+static void scan_next(void) {
+    int at = -1, seen[GMRS_CHANNELS + 1] = {0};
+
+    check(gmrs_scan_next(-1) == 0, "the scan starts at its first", 0);
+    for (int k = 0; k < GMRS_CHANNELS; k++) {
+        at = gmrs_scan_next(at);
+        check(at == k, "the scan's places in turn", at);
+        seen[gmrs_scan_ch(at)]++;
+    }
+    for (int ch = 1; ch <= GMRS_CHANNELS; ch++) check(seen[ch] == 1, "a round: each channel once", ch);
+    check(gmrs_scan_next(GMRS_CHANNELS - 1) == 0, "round again after the last", 0);
+    check(gmrs_scan_next(57) == 58 % GMRS_CHANNELS, "a place left from another list: on from there", 57);
+}
+
+/* F SYSTEM's GMRS panel: 1-22 by number, then the inputs of 15-22; G's names "1".."22" */
+static void panel(void) {
+    bool in;
+    char want[8];
+
+    check(GMRS_ROWS == 30, "the panel's rows", GMRS_ROWS);
+    for (int r = 0; r < GMRS_ROWS; r++) {
+        int              ch = gmrs_row_ch(r, &in);
+        const gmrs_ch_t *c  = gmrs_ch(ch);
+
+        check(c != NULL, "a row's channel", r);
+        if (!c) continue;
+        check(ch == (r < GMRS_CHANNELS ? r + 1 : r - GMRS_CHANNELS + 15), "the rows' order", r);
+        check(in == (r >= GMRS_CHANNELS), "the inputs after the channels", r);
+        check(gmrs_row_hz(r) == (in ? c->in_hz : c->hz), "a row's frequency", r);
+        check(gmrs_row_hz(r) == (in ? want_in(ch) : want_hz(ch)), "a row's frequency as the rules give it", r);
+    }
+    check(gmrs_row_ch(-1, &in) == 0 && !in && gmrs_row_hz(-1) == 0, "no row before the first", -1);
+    check(gmrs_row_ch(GMRS_ROWS, &in) == 0 && !in && gmrs_row_hz(GMRS_ROWS) == 0, "no row past the last", GMRS_ROWS);
+    for (int ch = 1; ch <= GMRS_CHANNELS; ch++) {
+        snprintf(want, sizeof(want), "%d", ch);
+        check(!strcmp(gmrs_num(ch), want), "G's channel name", ch);
+    }
+    check(!strcmp(gmrs_num(0), "") && !strcmp(gmrs_num(23), ""), "no name past 1-22", 0);
+}
+
+/* The tones' rows as F's panel lists them: every privacy code and every DCS code once, in order, each row short enough
+ * for the panel (60 characters) */
+static void tone_rows(void) {
+    char t[128], want[16];
+    int  code = 1, dcs = 0;
+
+    for (int r = 0; r < GMRS_TONE_ROWS; r++) {
+        gmrs_tone_row(r, t, sizeof(t));
+        check(t[0] != 0, "a tone row there", r);
+        check(strlen(t) <= 60, "a tone row fits the panel", (long)strlen(t));
+        if (r == 0) check(strstr(t, "141.3") != NULL, "the heading names channel 20's tone", r);
+        if (r == 11) check(strstr(t, "DCS") != NULL, "the DCS heading", r);
+        if (r >= 1 && r <= 10) {
+            for (const char *p = t; code <= GMRS_CTCSS_N;) {
+                snprintf(want, sizeof(want), "%2d %3d.%d", code, gmrs_ctcss(code) / 10, gmrs_ctcss(code) % 10);
+                if (!(p = strstr(p, want))) break;
+                p += strlen(want);
+                code++;
+            }
+        }
+        if (r >= 12) {
+            for (const char *p = t; dcs < GMRS_DCS_N;) {
+                snprintf(want, sizeof(want), "%03d", gmrs_dcs(dcs));
+                if (!(p = strstr(p, want))) break;
+                p += strlen(want);
+                dcs++;
+            }
+        }
+    }
+    check(code == GMRS_CTCSS_N + 1, "every privacy code in the rows, in order", code - 1);
+    check(dcs == GMRS_DCS_N, "every DCS code in the rows, in order", dcs);
+    gmrs_tone_row(GMRS_TONE_ROWS, t, sizeof(t));
+    check(t[0] == 0, "nothing past the last tone row", GMRS_TONE_ROWS);
+    gmrs_tone_row(-1, t, sizeof(t));
+    check(t[0] == 0, "nothing before the first tone row", -1);
+    gmrs_tone_row(1, t, 8);
+    check(strlen(t) < 8, "a short buffer kept", (long)strlen(t));
+}
+
 /* Receive only: whatever the checks are asked, nothing on GMRS */
 static void no_tx_at(int32_t hz, int ch) {
     check(ham_gmrs(hz), "in ham_gmrs's spans", ch);
@@ -159,6 +244,9 @@ int main(void) {
     lookups();
     scan_order();
     tones();
+    scan_next();
+    panel();
+    tone_rows();
     receive_only();
     printf("%s: %d checks, %d failed\n", fails ? "FAIL" : "PASS", checks, fails);
     return fails ? 1 : 0;
