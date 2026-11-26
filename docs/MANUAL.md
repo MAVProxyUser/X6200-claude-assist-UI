@@ -2347,7 +2347,9 @@ web configurator (System > Update).
   downloads or installs anything by itself. Each radio looks only at its own
   bundle: an X6200 never takes the X6100's (`-x6100-`), nor the other way
   round, and the installer refuses a bundle made for the other radio. An empty
-  file `/mnt/update/no-check` turns the daily check off.
+  file `/mnt/update/no-check` turns the daily check off, and with it the
+  question about a release an earlier check found (Settings > Info > Update
+  still installs). The bench's tests make that file while they run.
 - Going back from v0.3.7 to v0.3.6 (that button, or v0.3.6's bundle): the
   radio first turns [Tailscale Funnel](#tailscale-funnel) off and takes its
   funnel, and any set up by hand, out of tailscaled. v0.3.6 knows nothing of

@@ -49,6 +49,7 @@ static bool back_by_itself(void) {
 
 #define CHECK_JSON   BOARD_DATA "/update/check.json"     /* x6100-update check, from S99updatecheck */
 #define ANNOUNCED    BOARD_DATA "/update/announced"      /* the version it was said for */
+#define NO_CHECK     BOARD_DATA "/update/no-check"       /* S99updatecheck's off switch: no question either */
 #define REPO_FILE    BOARD_SHARE "/update-repo"
 #define APP_VERSION  BOARD_SHARE "/app-version"
 #define DEFAULT_REPO "MAVProxyUser/X6200-claude-assist-UI" /* x6100-update's own default */
@@ -691,6 +692,9 @@ static void watch_cb(lv_timer_t *t) {
 
     lv_timer_set_period(t, 600000);
     if (uw != UW_IDLE) return;
+    /* The daily check off: nor asked about from a check made before (the bench turns both off while its tests run:
+     * a question over the screen took the MFK mid-test). Settings > Info > Update still installs */
+    if (access(NO_CHECK, F_OK) == 0) return;
     if (!newer_release_ex(latest, sizeof(latest), &image, url, sizeof(url), uw_commit, sizeof(uw_commit))) return;
     if ((f = fopen(ANNOUNCED, "r"))) {
         if (fgets(seen, sizeof(seen), f)) seen[strcspn(seen, "\r\n")] = '\0';

@@ -1697,13 +1697,16 @@ typedef enum { LP_BOOL, LP_U8, LP_U16, LP_I32, LP_FLOAT, LP_STR } lp_kind_t;
 static const struct {
     void     *p;
     lp_kind_t kind;
+    void    (*after)(void);   /* what the Settings page and the web configurator do after the set, if anything */
 } cfg_legacy[] = {
     {&params.js8_speed, LP_U8},          {&params.js8_rx_all, LP_BOOL},     {&params.js8_alerts, LP_U8},
     {&params.js8_log_prompt, LP_BOOL},   {&params.js8_log_activation, LP_U8}, {&params.js8_auto, LP_BOOL},
     {&params.js8_ghostnet, LP_BOOL},     {&params.js8_hb, LP_BOOL},         {&params.js8_tx_freq, LP_U16},
     {&params.ft8_tx_freq, LP_U16},       {&params.ft8_cq_modifier, LP_STR}, {&params.sstv_denoise, LP_BOOL},
     {&params.sstv_reply_rx, LP_BOOL},    {&params.sstv_tx_mode, LP_U8},     {&params.mag_alc, LP_BOOL},
-    {&params.screen_saver, LP_U8},       {&params.screen_saver_min, LP_U16}, {&params.cw_bcn_start, LP_I32},
+    /* the idle minutes re-read (cfg_socket.cpp disp_apply): a set alone left the saver's timer as it was */
+    {&params.screen_saver, LP_U8, backlight_settings_changed},
+    {&params.screen_saver_min, LP_U16, backlight_settings_changed},  {&params.cw_bcn_start, LP_I32},
     {&params.cw_bcn_until, LP_U8},       {&params.cw_bcn_sends, LP_U16},    {&params.cw_bcn_end, LP_I32},
     {&params.qth, LP_STR},               {&params.callsign, LP_STR},
 };
@@ -1771,6 +1774,8 @@ static void cfg_apply(void *arg) {
         case LP_FLOAT: params_float_set(p, strtof(q->value, NULL)); break;
         case LP_STR:   params_str_set(p, q->value); break;
     }
+    if (cfg_legacy[i].after)
+        cfg_legacy[i].after();
 }
 
 typedef struct {
