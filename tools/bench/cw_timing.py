@@ -76,9 +76,10 @@ def cw_ideal(text):
 
 
 def keyer_lines(ssh, host):
-    """How many keyer lines the sender's GUI log has now (keyer_said's since=: the lines after it are the over's)"""
+    """The sender's uptime now (s): keyer_said's since=, its lines stamped later are the over's. Their own stamp, not a
+    count: a GUI restart between starts a new log (2026-11-26: the line count taken before it found nothing after)"""
     try:
-        return int((ssh(host, f"grep -c 'cw_encoder: .* key edges' {GUI_LOG}") or "0").strip() or 0)
+        return float((ssh(host, "cut -d' ' -f1 /proc/uptime") or "").strip())
     except Exception:                       # noqa: BLE001
         return None
 
@@ -87,8 +88,10 @@ def keyer_said(ssh, host, last=1, since=None):
     """The sender's keyer on its last `last` sends, from its GUI's log: (edges, late, the latest ms) summed over them,
     None when unsaid (a GUI before the line, 2026-11-25)"""
     try:
-        out = ssh(host, f"grep 'cw_encoder: .* key edges' {GUI_LOG} | " +
-                  (f"tail -n +{int(since) + 1}" if since is not None else f"tail -{int(last)}"))
+        out = ssh(host, f"grep 'cw_encoder: .* key edges' {GUI_LOG}" + ("" if since is not None else f" | tail -{int(last)}"))
+        if since is not None:               # the lines stamped (their uptime, '(128906.980, +11767)') since the mark
+            out = "\n".join(ln for ln in (out or "").splitlines()
+                            if (m := re.search(r"\((\d+\.\d+),", ln)) and float(m.group(1)) >= since)
     except Exception:                       # noqa: BLE001 (unread: unsaid)
         return None
     got = re.findall(r"(\d+) key edges, (\d+) more than \d+ ms late on their time, the latest (-?\d+) ms", out or "")

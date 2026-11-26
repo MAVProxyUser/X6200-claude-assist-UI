@@ -521,6 +521,10 @@ static void gui_loop(void) {
 }
 
 int main(void) {
+    /* The log a line at a time: x6100_daemon sends stdout to /tmp/x6100_log.txt, where it was buffered whole, so a
+     * line came there a minute or more after it was written (the bench's cw-timing read the keyer's line before it
+     * came, 2026-11-26), and the logs kept on the card lagged a crash by up to 45 s. About 40 bytes a second */
+    setvbuf(stdout, NULL, _IOLBF, 0);
     tick_start();       /* LVGL's clock, from the start */
     gui_wake_init();    /* the loop's wake, before any thread that posts to it */
     scheduler_init();   /* this is the GUI thread */
