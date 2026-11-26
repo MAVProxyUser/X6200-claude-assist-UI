@@ -430,6 +430,60 @@ static void test_scan(void) {
     CHECK(scan_state() == SCAN_SEEKING && now > 8950 && now < 9000, "on again at %lld ms, 2 s after the reply", (long long)now);
 }
 
+/* A meter that lags the tune, as the X6100's factory base's (2026-11-25): its frames (15 a second) show a step to
+ * another band about 0.21 s late (0.13 s in the band), so a frame holds what the base was on 0.21 s before its span.
+ * Ten channels, the 5th busy throughout: with the settle (dsp_meter_lag_ms) it stops there and only there; with none
+ * at Normal it read each channel's predecessor */
+static int scan_lagged(int dwell_ms, int settle_ms, int *held_on) {
+    int64_t tuned_at[64];
+    int     tuned_idx[64], n_tunes = 0, stops = 0;
+    bool    was_hold = false;
+
+    scan_init(10);
+    scan_config(dwell_ms, 2000, -100, 10);
+    scan_settle(settle_ms);
+    scan_start(0, 0);
+    *held_on = -1;
+    for (int64_t now = 0; now < 12000; now += 10) {
+        int t = scan_tick(now, 0);
+        if (t >= 0 && n_tunes < 64) {
+            tuned_at[n_tunes]  = now;
+            tuned_idx[n_tunes] = t;
+            n_tunes++;
+        }
+        if (now % 70 == 0) {    /* a frame ends: the channel the base was on 0.21 s ago, over its 70 ms */
+            int64_t from = now - 70 - 210, to = now - 210;
+            int     on_from = -1, on_to = -1;
+            for (int k = 0; k < n_tunes; k++) {
+                if (tuned_at[k] <= from) on_from = tuned_idx[k];
+                if (tuned_at[k] <= to) on_to = tuned_idx[k];
+            }
+            float db = on_from == 4 && on_to == 4 ? -80 : on_from == 4 || on_to == 4 ? -86 : -115;
+            scan_reading(now, db + (float)noise(1.0));
+        }
+        bool hold = scan_state() == SCAN_HOLD;
+        if (hold && !was_hold) {
+            stops++;
+            if (*held_on < 0) *held_on = scan_current();
+            else if (*held_on != scan_current()) *held_on = 100 + scan_current();
+        }
+        was_hold = hold;
+    }
+    return stops;
+}
+
+static void test_scan_lag(void) {
+    int on;
+
+    for (int d = 0; d < 3; d++) {
+        int dwell = (int[]){120, 250, 500}[d];
+        int stops = scan_lagged(dwell, 250, &on);
+        CHECK(stops >= 1 && on == 4, "settle 250, dwell %d: %d stops, held on %d (4 only)", dwell, stops, on);
+    }
+    int stops = scan_lagged(250, 0, &on);
+    CHECK(stops == 0 || on != 4, "no settle, dwell 250: the lag shows (%d stops, on %d)", stops, on);
+}
+
 int main(void) {
     srand(1);
     test_sun();
@@ -440,6 +494,7 @@ int main(void) {
     test_hand_round();
     test_cut_slot();
     test_scan();
+    test_scan_lag();
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails != 0;
 }

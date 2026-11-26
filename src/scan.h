@@ -50,6 +50,10 @@ void scan_init(int n);
  * in Auto */
 void scan_config(int dwell_ms, int hang_ms, float stop_db, float margin_db);
 
+/* The receiver's lag after a tune, ms: readings sooner than that are still of the frequency before, and the look
+ * (dwell_ms) counts from it. 0 by default; the X6100's factory base: dsp_meter_lag_ms() */
+void scan_settle(int ms);
+
 /* From i (the next one not locked out) */
 void scan_start(int i, int64_t now_ms);
 void scan_stop(void);

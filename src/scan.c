@@ -17,6 +17,7 @@
 static struct {
     int          n, cur, passes;
     int          dwell_ms, hang_ms;
+    int          settle_ms;     /* the receiver's lag after a tune (scan_settle) */
     float        stop_db, margin_db;
     scan_state_t state;
     int64_t      tuned_ms, active_ms;
@@ -41,6 +42,10 @@ void scan_init(int n) {
         s.quiet[i]  = NAN;
         s.locked[i] = false;
     }
+}
+
+void scan_settle(int ms) {
+    s.settle_ms = ms < 0 ? 0 : ms;
 }
 
 void scan_config(int dwell_ms, int hang_ms, float stop_db, float margin_db) {
@@ -152,7 +157,7 @@ void scan_reading(int64_t now_ms, float db) {
     if (isnan(db) || s.cur < 0) return;
 
     if (s.state == SCAN_SEEKING) {
-        if (now_ms - s.tuned_ms < s.dwell_ms / 2) return;    /* still settling */
+        if (now_ms - s.tuned_ms < s.settle_ms + s.dwell_ms / 2) return;   /* still settling */
         s.sum += db;
         s.got++;
     } else if (s.state == SCAN_HOLD || s.state == SCAN_PAUSED) {
@@ -184,7 +189,7 @@ int scan_tick(int64_t now_ms, time_t wall) {
     }
     if (s.state != SCAN_SEEKING || s.cur < 0) return -1;
 
-    int64_t age = now_ms - s.tuned_ms;
+    int64_t age = now_ms - s.tuned_ms - s.settle_ms;     /* the look, from when the receiver is there */
 
     if (age < s.dwell_ms || (!s.got && age < (int64_t)s.dwell_ms * WAIT_MAX)) return -1;
 

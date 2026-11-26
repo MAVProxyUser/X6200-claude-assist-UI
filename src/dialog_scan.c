@@ -29,6 +29,7 @@
 #include "channel_list.h"
 #include "dialog.h"
 #include "dialog_aero.h"
+#include "dsp.h"
 #include "dialog_cb.h"
 #include "events.h"
 #include "keyboard.h"
@@ -279,6 +280,7 @@ static void labels_refresh(void) {
 
 static void configure(void) {
     scan_config(speeds[speed_i].ms, hangs_s[hang_i] * 1000, stops[stop_i].db, 10.0f);
+    scan_settle(dsp_meter_lag_ms());    /* the X6100's factory base: its meter a quarter second behind a tune */
 }
 
 /* ---- Running ---- */

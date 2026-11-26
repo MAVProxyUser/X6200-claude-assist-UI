@@ -54,6 +54,7 @@ extern "C" {
 #define SMETER_DB       (LEVEL_DB + 30.103f)
 #define FRAME_MS        (1000 / 15)
 #define OEM_SETTLE      4           /* OEM base: frames to drop after a tune */
+#define METER_LAG_MS    250         /* OEM X6100 base: the S-meter's frames clear of a tune's frequency before */
 #define TURNING_MS      500         /* a tune within this of the one before: the dial is turning (#51) */
 #define FLOOR_PCT       0.25f       /* noise floor: percentile of the bin groups */
 #define FLOOR_GROUP     8
@@ -238,6 +239,16 @@ static void set_zoom(uint8_t z);
 
 static uint8_t settle_frames() {
     return base_ver.rev < 8 ? OEM_SETTLE : 0;
+}
+
+/* How long after a tune the S-meter reads the new frequency, ms (the Scanner's settle, scan_settle). Xiegu's X6100
+ * base says no frequency with its samples, and they come late: a step in the band shows in the waterfall's frames
+ * about 0.13 s after the GUI made it, a step to another band later, and the frames (1/15 s each) are clear of the
+ * frequency before from about 0.21 s and 0.29 s on (the bench's carrier, 2026-11-25). Its Scanner at Normal (a
+ * quarter second a channel) read mostly the channel before, and passed a carrier. A base that says its frequency (the
+ * patched X6100's) has its frames cut there (dsp_samples), and the X6200's meter is the base's own reading: none */
+int dsp_meter_lag_ms() {
+    return base_ver.rev < 8 && !(caps & HW_CAP_PSD) ? METER_LAG_MS : 0;
 }
 
 /* Span of the waterfall FFT in Hz */

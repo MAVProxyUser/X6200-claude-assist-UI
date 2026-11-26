@@ -1296,7 +1296,10 @@ def t_prop_beacon(o, s, l):
         home(o, L)
 
 
-SCAN_CH = [14210000, 14230000, 14250000]
+# The carrier's channel between two in other bands (phone segments: the scanning radio keys on them): 20 kHz apart
+# (14.210/230/250) the X6200's 0.1 W skirt put -94 dB into its neighbours, 20 over their quiet, and the X6100's
+# scanner stopped on 14.210 (2026-11-25). A step across bands is also the X6100's meter's slowest (dsp_meter_lag_ms)
+SCAN_CH = [7200000, 14230000, 21300000]
 
 
 def _channels_add(r, freqs):
@@ -1328,7 +1331,7 @@ def _channels_drop(ip, names=("BENCH 1", "BENCH 2", "BENCH 3")):
 
 
 def t_scanner(o, s, l):
-    """The Scanner (subject l) through three bench channels (14.210/230/250 USB, added on its web page, taken out
+    """The Scanner (subject l) through three bench channels (7.200/14.230/21.300 USB, added on its web page, taken out
     after): s keys a tone on 14.230: l stops there (its dial holds, its S-meter up) and goes on Hang seconds after s
     ends; l keyed itself (PTT 3 s at 0.1 W) while scanning: its dial frozen meanwhile, the scan on after"""
     S, L = o.r[s], o.r[l]
@@ -1355,20 +1358,26 @@ def t_scanner(o, s, l):
             got = {}
 
             def body(watch):
-                # the carrier from the bench channel before it: a list of 21 (the X6100's own 18 and the bench's 3,
-                # added together at its end) takes longer round than the 12 s carrier (run 30 never came to it)
-                L.wait(f"the scan on {SCAN_CH[0]}", lambda: int(L.state.get("freq", 0)) == SCAN_CH[0] or watch.why, 60)
+                # the carrier once the scan has left its channel (its first look there, quiet, learned its level in
+                # Auto), on long before the scan comes round again: a round of 21 (the radio's own 18 and the bench's
+                # 3) takes about 11 s on the X6100 (dsp_meter_lag_ms), 6 s on the X6200. Started when the scan was on
+                # the channel before, the carrier came up after the scan's look (2026-11-25: both passed it once and
+                # stopped there a round later)
+                L.wait(f"the scan off {SCAN_CH[1]}", lambda: int(L.state.get("freq", 0)) != SCAN_CH[1] or watch.why,
+                       20)
                 t1 = time.time()
                 meters, done = [], threading.Event()
 
-                def sample():                           # l's S-meter and dial through the carrier: why it left (run 31:
-                    while not done.is_set():            # the X6100 left 14.230 while the X6200 still sent)
+                def sample():                           # l's S-meter and dial, and s on the air, through the carrier
+                    while not done.is_set():
                         meters.append((round(time.time() - t1, 1), L.meter, int(L.state.get("freq", 0))))
-                        done.wait(0.5)
+                        if S.tx and "air" not in got:
+                            got["air"] = time.time()
+                        done.wait(0.25)
                 th_m = threading.Thread(target=sample, daemon=True)
                 th_m.start()
                 try:
-                    bench.tci_send(S, [[1000, 12.0]], max_s=14.0, watch=watch)
+                    bench.tci_send(S, [[1000, 14.5]], max_s=15.5, watch=watch)
                 finally:
                     done.set()
                 got["on"] = (t1, time.time())
@@ -1376,32 +1385,58 @@ def t_scanner(o, s, l):
             offset_over(o, s, l, SCAN_CH[1], 2, "scanner: the carrier", body,
                         pair_ignore=("mode", "flo", "fhi", "att", "pre", "agc", "zoom", "rfg"))
             on0, on1 = got["on"]
-            vis = _visits(L, on0, on1)
-            stop_at = next((at for at, f, _ in vis if f == SCAN_CH[1]), None)
-            held = [f for at, f, _ in vis if stop_at and at > stop_at]
-            res.update(stopped_after_s=round(stop_at - on0, 1) if stop_at else None, moved_after_stop=held)
+            if "air" not in got:
+                raise Refused(f"{s} never on the air for the carrier")
+            air = got["air"] + 1.0                      # the carrier up and steady
+            # l's stays (from, to, f) from the Start on; the first on the carrier's channel still there once the
+            # carrier was steady must last to its end
+            vis = _visits(L, t0, on1)
+            stays = [(at, nxt, f) for (at, f, _), nxt in zip(vis, [v[0] for v in vis[1:]] + [on1])]
+            first = next((st for st in stays if st[2] == SCAN_CH[1] and st[1] > air), None)
+            res.update(air_after_s=round(got["air"] - on0, 1),
+                       stays=[(round(a - on0, 1), round(b - on0, 1), f) for a, b, f in stays if b > on0])
+            if first is None:
+                raise Refused(f"the scan never came to {SCAN_CH[1]} while {s} sent there 14.5 s")
+            res["stopped_after_s"] = round(max(first[0], air) - on0, 1)
+            if first[1] < on1 - 0.5:
+                snap(o, f"scanner {l}: left {SCAN_CH[1]} while {s} still sent (its threshold on the screen)")
+                raise Refused(f"the scan left {SCAN_CH[1]} {first[1] - on0:.1f} s into {s}'s carrier, "
+                              f"{on1 - first[1]:.1f} s before its end")
             time.sleep(8.0)
             after = [f for _, f, _ in _visits(L, on1 + 0.5)]
             res["after"] = after[:6]
-            if stop_at is None:
-                raise Refused(f"the scan never came to {SCAN_CH[1]} while {s} sent there 12 s")
-            if held:
-                snap(o, f"scanner {l}: left {SCAN_CH[1]} while {s} still sent (its threshold on the screen)")
-                raise Refused(f"the scan left {SCAN_CH[1]} while {s} still sent: {held}")
             if len(set(after)) < 2:
                 raise Refused(f"after the carrier the scan stayed on {after}")
             with o.step(f"{l} keyed 3 s while scanning, on a bench channel: its dial frozen") as st:
-                L.wait("the scan on a bench channel (20 m)", lambda: int(L.state.get("freq", 0)) in SCAN_CH, 20)
-                with session(o, "scanner: keyed", [l]) as watch:
+                on_ham = lambda: int(L.state.get("freq", 0)) in SCAN_CH[:2]     # noqa: E731
+                gated = contextlib.ExitStack()
+                for k in range(8):          # the gates read the dial, and the scan moves on while they run
+                    L.wait("the scan on 7.200 or 14.230", on_ham, 30)
+                    try:
+                        gated.enter_context(session(o, "scanner: keyed", [l]))
+                        break
+                    except Refused as e:
+                        if "outside the amateur bands" not in str(e) or k == 7:
+                            raise
+                with gated:
                     role(o, l)
-                    t2 = time.time()
+                    # keyed as the scan comes to 7.200 or 14.230: the next one is in an amateur band too if it moves
+                    # on first. Waited for before the session's set-up (5 s), the X6200's scan was on 4.2085 by the
+                    # key, which it refuses outside the bands, and scanned on (2026-11-25)
+                    L.wait("the scan on 7.200 or 14.230", on_ham, 30)
+                    t2, aired = time.time(), False
                     L.send(f"key PTT 1 {int(t2)}")
                     for _ in range(3):
-                        time.sleep(1.0)
+                        for _ in range(10):
+                            time.sleep(0.1)
+                            aired = aired or L.tx
                         L.send(f"key PTT 1 {int(t2)}")
                     L.send("key PTT 0")
                     L.wait("off the air", lambda: not L.tx, 4)
                     t3 = time.time()
+                if not aired:
+                    said = L.errs[-1] if L.errs else "no error said"
+                    raise Refused(f"{l} never on the air for its PTT ({said})")
                 frozen = {f for _, f, _ in _visits(L, t2 + 0.5, t3)}
                 res["frozen"] = sorted(frozen)
                 st.confirm(f"on {sorted(frozen)} while keyed")

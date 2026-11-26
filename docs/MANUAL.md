@@ -8596,7 +8596,7 @@ frequency and mode: a band key goes where it went before the scan.
 | Skip | on to the next one, from a stop or a pause |
 | Lock out | leaves the one it is on out until the list changes (a carrier that is always there) |
 | Stop at | **Auto**, S3, S5, S7, S9: what counts as busy |
-| Speed | Fast, Normal, Slow: 120, 250, 500 ms a frequency (Slow for a radio whose S-meter is slow to follow). The first S-meter reading after each step is left out (it may still be of the frequency before), so Fast takes 150 to 200 ms |
+| Speed | Fast, Normal, Slow: 120, 250, 500 ms a frequency (Slow for a radio whose S-meter is slow to follow). The first S-meter reading after each step is left out (it may still be of the frequency before), so Fast takes 150 to 200 ms. The X6100 with Xiegu's base waits a quarter of a second more on each one: its S-meter follows a step that late, and without the wait it read the frequency before and passed a busy one |
 | Hang | 2, 5 or 10 s of quiet before it goes on |
 | Clear | the levels learnt, the lockouts and the list of what was heard |
 
