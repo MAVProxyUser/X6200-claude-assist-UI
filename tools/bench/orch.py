@@ -6103,7 +6103,7 @@ def cw_timing_test(o, sender, listener, w=W):
     # the keyer's own lines for this over, every one since the mark (it logs each send: the last line alone held 20 of
     # the over's 112 edges, 2026-11-26), written as each ends
     edges_want = 2 * j["want"]
-    keyer, end = None, time.time() + 5
+    keyer, end = None, time.time() + 15
     while time.time() < end:                # nothing yet: its line is written a moment after the over
         keyer = ct.keyer_said(bench.ssh, S.host, since=mark.get("n"))
         if keyer is not None and keyer[0] >= edges_want:
@@ -6111,7 +6111,7 @@ def cw_timing_test(o, sender, listener, w=W):
         time.sleep(0.5)
     base = aa.base_of(S.host) if sender == "x6100" else ""
     factory = sender == "x6100" and aa.gcfix_of(base) == 0
-    data = dict(j, wpm=wpm, pitch=pitch, depth_db=depth, runs=runs, keyer=keyer, base=base,
+    data = dict(j, wpm=wpm, pitch=pitch, depth_db=depth, runs=runs, keyer=keyer, base=base, keyer_since=mark.get("n"),
                 wav=save_wav(o, x, f"cw_timing_{sender}_to_{listener}_{w}W.wav"))
     kw = ("its keyer's line not in its log (a GUI before 11-25, or one before 11-26, whose log came out a minute late)"
           if keyer is None else
