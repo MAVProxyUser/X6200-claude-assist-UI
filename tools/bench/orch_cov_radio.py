@@ -380,6 +380,209 @@ def t_sentry_pages(o):
         oa.home_both(o)
 
 
+
+# ---- The main screen's pages as the radio lists them (radio-core-gen-pages-defaults, app-button-pages) ----
+
+GEN_PAGES = {
+    "VOL 1:2": ["Volume", "Squelch", "RF gain", "TX power"],
+    "VOL 2:2": ["Brightness", "PRE", "ATT", "ATU"],
+    "APP 1:6": ["Modes", "Cluster", "SWR Scan", "RX Recorder"],
+    "APP 2:6": ["Settings", "CW Trainer", "Field Ops", "Channels"],
+}
+
+
+def _pages(r):
+    """{page name: [its buttons]} from the remote's buttons? (button_bar.h buttons_layout_text)"""
+    n0 = len(r.lines)
+    r.send("buttons?")
+    end = time.time() + 4
+    while time.time() < end:
+        for _, t in list(r.lines)[n0:]:
+            if t.startswith("buttons "):
+                out = {}
+                for part in t[len("buttons "):].split("|"):
+                    bits = [b.strip() for b in part.split(";")]
+                    if bits and bits[0].startswith("("):
+                        out[bits[0].strip("()")] = [b.lstrip("~") for b in bits[1:] if b]
+                return out
+        time.sleep(0.1)
+    raise Refused(f"{r.name}: no answer to buttons?")
+
+
+def t_gen_pages(o):
+    """Each radio's main-screen pages as its remote lists them (buttons?): VOL 1:2 Volume, Squelch, RF gain, TX power;
+    VOL 2:2 Brightness, PRE, ATT, ATU; MFK 1:4 to 4:4 there; APP 1:6 to 6:6, the first two Modes, Cluster, SWR Scan,
+    RX Recorder and Settings, CW Trainer, Field Ops, Channels"""
+    res = {}
+    with o.step("buttons? on both: the GEN pages' defaults, MFK 1:4-4:4, APP 1:6-6:6") as s:
+        for n, r in _both(o):
+            pages = _pages(r)
+            res[n] = {k: v for k, v in pages.items() if k in GEN_PAGES}
+            for page, want in GEN_PAGES.items():
+                if pages.get(page, [])[:len(want)] != want:
+                    return False, f"{n}: {page} lists {pages.get(page)}, not {want}", res
+            miss = [p for p in [f"MFK {i}:4" for i in range(1, 5)] + [f"APP {i}:6" for i in range(1, 7)]
+                    if p not in pages]
+            if miss:
+                return False, f"{n}: no page {miss} in {list(pages)}", res
+        s.confirm(str(res[H.A]))
+    return True, f"both list the GEN pages' defaults, MFK 1:4-4:4 and APP 1:6-6:6: {res[H.A]}", res
+
+
+# ---- What needs control and what does not (control-stop-needs-none, control-injected-keys-keep) ----
+
+def t_control_rules(o):
+    """On the X6100, a second connection of the bench's own session (operate, not holding control): 'set freq' is
+    refused ('controlled by ... take control first'), 'ft8 stop' is not (stopping the apps' sending needs operate
+    only). Then, with the FT8 app open and decoding, sixty main-knob detents sent by the remote (thirty each way): the
+    bench keeps control all along and the GUI's log has no 'control: to the radio's operator' line"""
+    from remote_ws import Remote
+    r = o.r[H.A]
+    res, c = {}, None
+    try:
+        with o.step("x6100: a second connection without control: set freq refused, ft8 stop taken") as s:
+            r.take_control()
+            c = Remote(r.host, 50002, timeout=8)
+            c.send(f"auth {r._tok}")
+            if not _until(c, lambda t: t.startswith("role "), 5):
+                raise Refused("x6100: the second connection got no role")
+            c.send(f"set freq {int(r.state.get('freq', 14200000)) + 1000}")
+            ans = _until(c, lambda t: t.startswith("err"), 4)
+            if not ans or "take control first" not in ans:
+                raise Refused(f"x6100: 'set freq' without control answered {ans!r}")
+            res["set_freq"] = ans
+            c.send("ft8 stop")
+            bad = _until(c, lambda t: t.startswith("err"), 2.5)
+            if bad:
+                raise Refused(f"x6100: 'ft8 stop' without control answered {bad!r}")
+            res["ft8_stop"] = "no error"
+            s.confirm(f"{ans}; ft8 stop taken")
+        with o.step("x6100: FT8 decoding, sixty detents from the remote: control kept, no claim at the radio") as s:
+            oa._ft8_open(o)
+            n0 = int(oa.ssh(r, "grep -c \"control: to the radio's operator\" /tmp/x6100_log.txt || true").strip() or 0)
+            r.take_control()
+            o.changing += 1
+            try:
+                for i in range(30):
+                    r.send("knob main 1")
+                    time.sleep(0.15)
+                    r.send("knob main -1")
+                    time.sleep(0.15)
+                    if r.ctl_who == "local":
+                        raise Refused(f"x6100: control went to the radio's operator after {2 * i + 2} detents")
+            finally:
+                o.changing -= 1
+            time.sleep(1.0)
+            n1 = int(oa.ssh(r, "grep -c \"control: to the radio's operator\" /tmp/x6100_log.txt || true").strip() or 0)
+            if not r.ctl_mine or n1 != n0:
+                raise Refused(f"x6100: after the detents control is {r.ctl_who} (mine {r.ctl_mine}), the log's claims "
+                              f"{n0} -> {n1}")
+            res["detents"] = f"60, control kept ({r.ctl_who})"
+            s.confirm(res["detents"])
+        return True, f"set freq needs control, ft8 stop does not; the remote's detents under FT8 keep control: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        if c is not None:
+            c.close()
+        oa._ft8_close(o)
+        oa.home_both(o)
+
+
+# ---- A transverter's band and its power limit (transverter-waterfall-band, transverter-limit-caps-pwr) ----
+
+XV = {"transverter_0_from": 144000000, "transverter_0_to": 148000000, "transverter_0_shift": 116000000,
+      "transverter_0_pwr_max": 0.5}
+
+
+def t_xvtr(o):
+    """A 2 m transverter on both (144-148 MHz through 28 MHz, its power limit 0.5 W): the dial on 144.300 USB, the
+    power the radio would send held at the limit (5 W asked, 0.5 read), the classic screen's scale reading the band
+    tuned (144.3), not the IF; back on 20 m the power as asked; the transverter put back as found. Nothing keyed"""
+    import orch_cable as oc
+    res = {}
+    try:
+        with oa.cfg_kept(o.r[H.A], XV), oa.cfg_kept(o.r[H.B], XV):
+            with o.step("both on 144.300 USB through the transverter, 5 W asked: 0.5 W held") as s:
+                o.changing += 1
+                try:
+                    for n, r in _both(o):
+                        oc.classic(r)
+                        bench.ensure(r, {"freq": 144300000, "mode": 2})
+                        r.send("set pwr 50")        # 5 W asked (tenths): the band's limit holds it at 0.5
+                finally:
+                    o.changing -= 1
+                for n, r in _both(o):
+                    try:
+                        r.wait("0.5 W held", lambda r=r: _pwr(r) <= 0.5, 4)
+                    except Refused:
+                        raise Refused(f"{n}: on the limited transverter band the power reads {_pwr(r)} W, not 0.5")
+                    res[f"{n} pwr"] = _pwr(r)
+                s.confirm(str(res))
+            with o.step("both: the classic screen's scale reads 144.3, the band tuned") as s:
+                for n, r in _both(o):
+                    p = oa.shot(o, r, "transverter scale")
+                    txt = oa.ocr(p, psm=11) + oa.ocr(p, box=(0, 100, 800, 330), psm=6, stretch=True)
+                    if not re.search(r"144[.,]?[23]", txt):
+                        raise Refused(f"{n}: the classic screen reads no 144.3 on the transverter's band "
+                                      f"({' '.join(txt.split())[:120]!r})")
+                    res[f"{n} scale"] = "144.3"
+                s.confirm("144.3 on both")
+            with o.step("both back on 14.200 USB: the power as asked again") as s:
+                o.changing += 1
+                try:
+                    for n, r in _both(o):
+                        bench.ensure(r, {"freq": 14200000, "mode": 2, "pwr": H.W})
+                finally:
+                    o.changing -= 1
+                s.confirm("14.2 USB")
+        return True, f"the transverter's band held the power at its limit and showed the band tuned: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        o.changing += 1
+        try:
+            for n, r in _both(o):
+                try:
+                    bench.ensure(r, {"freq": 14200000, "mode": 2, "pwr": H.W})
+                except Refused as e:
+                    o.st.ev(f"{n}: not back on 20 m: {e}", "bad")
+        finally:
+            o.changing -= 1
+        oa.home_both(o)
+
+
+# ---- CW's Train outside the bands (cw-train-out-of-band) ----
+
+def t_train_oob(o):
+    """On each radio, CW on 15.000 MHz (outside the bands) with KEY Train on: the remote's CW text is refused as any
+    CW there ('No TX on 15.000 MHz'), the radio never keyed; KEY Train and the dial put back"""
+    res = {}
+    try:
+        for n, r in _both(o):
+            with o.step(f"{n}: CW on 15.000 MHz, KEY Train on: cwsend refused, nothing keyed") as s:
+                with oa.cfg_kept(r, {"key_train": 1}):
+                    o.changing += 1
+                    try:
+                        bench.ensure(r, {"freq": 15000000, "mode": 4})
+                        t0 = time.time()
+                        r.send("cwsend E")
+                        said = oa.wait_msg(r, t0, r"No (TX|CW) on 15\.000", 5)
+                        time.sleep(1.0)
+                        if any(on for t, on in r.tx_hist if t >= t0):
+                            raise Refused(f"{n}: the radio keyed for Train outside the bands")
+                    finally:
+                        bench.ensure(r, {"freq": 14200000, "mode": 2})
+                        o.changing -= 1
+                res[n] = said
+                s.confirm(said)
+        return True, f"Train outside the bands refused as any CW on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
 COVERS = {
     "ft8-nocall": (["ft8-nocall", "ft8-tx-off-dry-run"], []),
     "x6200-start": (["register-32-x6200", "pa-bias-x6200", "tx-x6200-base-band-table"], []),
@@ -387,6 +590,10 @@ COVERS = {
     "app-power-cap": (["digi-app-power-cap-7w", "digital-app-power-cap", "digi-app-power-button"], []),
     "remote-pairing": (["pair-code-request", "pair-with-code", "pair-rate-limit", "pair-mirror-pause"],
                        ["role-admin-first"]),
+    "gen-pages": (["radio-core-gen-pages-defaults", "app-button-pages"], []),
+    "control-rules": (["control-stop-needs-none", "control-injected-keys-keep"], []),
+    "xvtr-limit": (["transverter-limit-caps-pwr", "transverter-waterfall-band"], []),
+    "train-oob": (["cw-train-out-of-band"], []),
     "sentry-pages-text": (["c-log-columns-colours", "d-bands-list", "e-decode-list", "f-system-cpu-gpu-ram",
                            "g-channel-meters", "g-state-lines", "sentry-a-smeter"], []),
 }
@@ -406,6 +613,14 @@ def tests(Test, A, B):
         Test("remote-pairing", "X6100", "a new browser's pair?: a code on the screen, a second paused, a viewer's "
              "mirror stopped meanwhile; paired as an operator with TX; its token a session again; unpaired after",
              t_pairing, 40),
+        Test("gen-pages", "both", "the main screen's pages as the remote lists them: VOL 1:2/2:2 defaults, MFK 1:4-4:4, "
+             "APP 1:6-6:6 with the first two pages' apps", t_gen_pages, 10),
+        Test("control-rules", "X6100", "set freq needs control, ft8 stop does not; sixty remote detents under FT8's "
+             "decoding keep control (no claim at the radio in the log)", t_control_rules, 50),
+        Test("xvtr-limit", "both RX", "a 2 m transverter with a 0.5 W limit: 144.300 holds the power at 0.5 W and the "
+             "classic screen's scale reads 144.3; nothing keyed", t_xvtr, 40),
+        Test("train-oob", "both RX", "CW Train outside the bands (15.000 MHz): the remote's CW refused as any CW, "
+             "nothing keyed", t_train_oob, 30),
         Test("sentry-pages-text", "both RX", "pages C, D, E, F, G read off the screen (their columns, bars and "
              "radio), page A's S-meter line against the remote's", t_sentry_pages, 60),
     ]

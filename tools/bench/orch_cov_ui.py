@@ -347,12 +347,144 @@ def t_system_readonly(o):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+
+# ---- The classic screen's status line (main-screen-status-bar-state, main-screen-battery-indicator,
+#      main-screen-status-wifi-icon) ----
+
+def _green_px(path, box):
+    """Pixels in box that are plainly green (the WiFi icon connected)"""
+    from PIL import Image
+    im = Image.open(path).convert("RGB").crop(box)
+    return sum(1 for (rr, g, b) in im.getdata() if g > 120 and g > rr + 40 and g > b + 40)
+
+
+def t_classic_status(o):
+    """Each radio's classic screen, its top lines read off the picture: VFO-A, the mode, AGC and its setting, PRE/ATT;
+    the charge at the top right ('NN%'); the WiFi icon green (the radio is on its network: the bench talks to it)"""
+    import orch_cable as oc
+    res = {}
+    try:
+        for n, r in _both(o):
+            with o.step(f"{n}: the classic screen's status line, charge and WiFi icon") as s:
+                oc.classic(r)
+                time.sleep(1.5)
+                p = oa.shot(o, r, "classic status")
+                txt = oa.ocr(p, box=(0, 0, 800, 60), psm=6, scale=3) + "\n" + oa.ocr(p, box=(0, 0, 800, 60), psm=11)
+                up = txt.upper()
+                miss = [w for w, rx in (("VFO-A", r"VFO[- ]?A"), ("the mode", r"\b(USB|LSB|CW|AM|NFM)"),
+                                        ("AGC", r"AGC|FAST|SLOW|AUTO"), ("the charge", r"\d{1,3}\s?%"))
+                        if not re.search(rx, up)]
+                green = _green_px(p, (560, 0, 800, 40))
+                res[n] = {"text": " ".join(up.split())[:100], "green": green}
+                if miss:
+                    raise Refused(f"{n}: the status line reads no {miss} ({res[n]['text']!r})")
+                if green < 6:
+                    raise Refused(f"{n}: no green WiFi icon at the top right ({green} green pixels)")
+                s.confirm(f"{res[n]['text'][:60]}; WiFi icon green ({green} px)")
+        return True, f"both classic screens show VFO-A, the mode, AGC, the charge and a green WiFi icon: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+# ---- Settings taken and kept (settings-general-freq-acceleration, text-log-settings, settings-walkie-microphone,
+#      settings-audio-microphone, settings-audio-moni-level, settings-txcal-tx-ranges, tx-ranges-choice,
+#      settings-general-transverters) ----
+
+# (feature, setting, the other value): each set through its own validator (the remote's cfg), read back, put back
+KEPT = [
+    ("settings-general-freq-acceleration", "freq_accel_onset", lambda v: 4 if str(v) != "4" else 2),
+    ("text-log-settings", "textlog_mb", lambda v: 5 if str(v) != "5" else 10),
+    ("settings-walkie-microphone", "walkie_mic", lambda v: 1 if str(v) != "1" else 0),
+    ("settings-audio-microphone", "hmic", lambda v: 25 if str(v) != "25" else 20),
+    ("settings-audio-moni-level", "moni", lambda v: 5 if str(v) != "5" else 0),
+    ("settings-txcal-tx-ranges", "tx_ranges", lambda v: 1 if str(v) != "1" else 0),
+    ("settings-general-transverters", "transverter_1_shift", lambda v: 116000000 if str(v) != "116000000" else 0),
+]
+
+
+def t_settings_kept(o):
+    """On each radio a set of settings each set the other way through its own validator (the remote's cfg), read back
+    as set, read again a second later (kept), and put back as found: the frequency acceleration's onset, the text
+    log's size limit, the walkie's microphone, the hand mic's gain, the Moni level, the TX ranges, a transverter's
+    shift; an out-of-range value refused (the onset 9: still as it was)"""
+    res = {}
+    try:
+        for n, r in _both(o):
+            out = res[n] = {}
+            with o.step(f"{n}: each setting set the other way, kept, put back; the onset 9 refused") as s:
+                for feat, name, other in KEPT:
+                    v0 = oa.cfg(r, name)
+                    with oa.cfg_kept(r, {name: other(v0)}):
+                        time.sleep(1.0)
+                        again = oa.cfg(r, name)
+                        if str(again) != str(other(v0)) and not oa._same_num(again, other(v0)):
+                            raise Refused(f"{n}: {name} read {again!r} a second after it was set to {other(v0)!r}")
+                    out[name] = f"{v0} -> {other(v0)} -> {oa.cfg(r, name)}"
+                v0 = oa.cfg(r, "freq_accel_onset")
+                bench.cfg_set(r, "freq_accel_onset", 9)
+                if str(oa.cfg(r, "freq_accel_onset")) != str(v0):
+                    bench.cfg_set(r, "freq_accel_onset", v0)
+                    raise Refused(f"{n}: the onset 9 (outside 1-5) was taken")
+                out["onset 9"] = "refused"
+                s.confirm(str(out))
+        return True, f"each setting taken, kept and put back on both; out of range refused: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+# ---- The Sentry's NOW readings (scancfg-now-box, sentry-now-sun) ----
+
+def t_sentry_now(o):
+    """Each radio's SCAN CFG (from page A) shows its NOW box naming what each radio's scan does ('A X6100/X6200 ...');
+    page D's rows say NOW as OPEN, CLOSED, LOCAL, OPENING, CLOSING or 'n SIG' (from the sun at the fix, the phone's
+    position or the QTH locator)"""
+    import suite_cover_b as cb
+    res = {}
+    try:
+        for n, r in _both(o):
+            with o.step(f"{n}: SCAN CFG's NOW box names the X6x00's scan") as s:
+                bench.open_page(r, "A")
+                cb.cfg_open(r, "A")
+                time.sleep(1.2)
+                p = oa.shot(o, r, "scan cfg now")
+                txt = (oa.ocr(p, psm=11) + "\n" + oa.ocr(p, psm=6, stretch=True)).upper()
+                cb.cfg_close(r)
+                if "NOW" not in txt or not re.search(r"\bA\s+X\s?6\s?[12I]\s?[0O]\s?[0O]", txt):
+                    raise Refused(f"{n}: SCAN CFG reads no NOW box naming A's radio ({' '.join(txt.split())[:140]!r})")
+                res[f"{n} scan cfg"] = "NOW: A " + n.upper()
+                s.confirm(res[f"{n} scan cfg"])
+        with o.step("both on page D: its rows' NOW from the sun or live signals") as s:
+            oa.page_both(o, "D")
+            time.sleep(1.5)
+            for n, r in _both(o):
+                p = oa.shot(o, r, "page D now")
+                txt = (oa.ocr(p, psm=11) + "\n" + oa.ocr(p, psm=6, stretch=True)).upper()
+                words = re.findall(r"\b(OPEN|CLOSED|LOCAL|OPENING|CLOSING|\d+\s?SIG)\b", txt)
+                res[f"{n} D"] = sorted(set(words))
+                if len(words) < 3:
+                    raise Refused(f"{n}: page D's NOW column reads {words}")
+            s.confirm(str({k: v for k, v in res.items() if k.endswith(" D")}))
+        return True, f"SCAN CFG's NOW box and page D's NOW read on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
 COVERS = {
     "ui-restart": (["perf-overlay", "gpu-off-file", "sentry-resume-after-restart", "cw-beacon-off-after-restart",
                     "sdr-daemon-persistent", "network-x6100-wifi-power-held", "system-x6200-base-keeper",
                     "incoming-log-import", "gui-restart-on-audio-loss"],
                    ["radio-core-freq-lock-per-band-mode", "sentry-b-state-kept"]),
     "ui-display-settings": ([f for f, _, _, _ in DISPLAY] + ["display-knob-info-lines"], []),
+    "ui-classic-status": (["main-screen-status-bar-state", "main-screen-battery-indicator",
+                           "main-screen-status-wifi-icon"], []),
+    "ui-settings-kept": ([], [f for f, _, _ in KEPT] + ["tx-ranges-choice"]),
+    "ui-sentry-now": (["scancfg-now-box", "sentry-now-sun"], []),
     "ui-system-readonly": (["system-base-fw-flash-check"], ["system-update-integrity", "system-update-sd-card-guard"]),
 }
 
@@ -366,6 +498,12 @@ def tests(Test, A, B):
         Test("ui-display-settings", "both", "on the classic screen each display setting (band plan, filter shade, "
              "needle lamp, spectrum, waterfall mode, broadcast names, knob info) changes its part of the screen and "
              "comes back", t_display_settings, 180),
+        Test("ui-classic-status", "both", "the classic screen's status line (VFO-A, mode, AGC), the charge and a green "
+             "WiFi icon", t_classic_status, 30),
+        Test("ui-settings-kept", "both", "seven settings set through their validators, kept, put back; an onset "
+             "outside 1-5 refused", t_settings_kept, 40),
+        Test("ui-sentry-now", "both", "SCAN CFG's NOW box names A's radio; page D's rows say NOW (OPEN, CLOSED, ... or "
+             "n SIG)", t_sentry_now, 40),
         Test("ui-system-readonly", "both", "read only: base-flash --check takes the radio's own firmware and refuses "
              "the other's (named and renamed); bundle-info refuses another radio's bundle and one writing outside",
              t_system_readonly, 60),
