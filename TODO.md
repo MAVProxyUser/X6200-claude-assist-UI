@@ -24,9 +24,23 @@ control-local-log). Done:
   noise keys dropped (09d953d2; tools/cw_replay reproduces it, its test has the session). CW to CW-R on the X6100
   keeps the decoder on the station (c98f3ca1).
 
+Later the same day: cw-tuner passes both ways (CW to CW-R keeps the decoder on the station, c98f3ca1); the IF shift
+passes in USB and in USB-D (the 11-26 failure did not reproduce: USB-D was not its cause, as 49fbeb13 said); the
+X6100's CW Trainer copies its groups (KMK, KK<AR>, MM at 5 WPM).
+
+Coverage (the coverage report's settings/system/UI and TX/CW/TCI/remote/web features with no test, both tasks taken
+here): tools/bench/orch_cov_radio.py and orch_cov_ui.py, 18 tests passing so far (FT8 no callsign and TX off, the
+X6200's start log, the fingerprint, the apps' 7 W cap and Power steps, pairing, the control rules, a transverter's
+limit, Train out of band, the GEN pages, the Sentry's pages read, B's SDR by band, G's VOL pop-up, the classic status
+line, settings kept, SCAN CFG's NOW box and D's NOW, Settings > Info, the base-flash and bundle refusals). Not
+testable as they are: SWR Scan, WSPR and the first-start guide (the remote never opens them: the first two transmit by
+opening, so their look needs a TX test on the cable); revoking sessions and forgetting TCI programs (an admin's: the
+owner's first browser); the update's install, U-Boot, factory reset and base flashing (read-only checks only); the
+needle lamp, knob info and broadcast names show nothing at rest on the bench.
+
 Open, mine: sentry-lock x6200>x6100's HOLD (the X6100's scan taken by its own 14.0903 spur, to look at live); the
-IF shift in USB-D (does the X6100's base shift the audio back there?); the trainer tests and cw-tuner on the new GUI;
-the coverage tests for the uncovered settings/system/UI and TX/CW/TCI/remote/web features (in progress).
+X6200's trainer adds a dit before an answer (WMK for MMK, older than today's changes); the X6100's trainer misreads
+the start of calls (IK 2DCO heard EK 2KCO); the coverage tests' remaining features (in progress).
 
 **2026-11-21 to 11-24: the owner's asks, audited 2026-11-24 07:45 UTC** (172 messages, direct and queued, since the
 11-21 audit, checked against git's 177 commits and the orchestrator's results; the older blocks below are kept as

@@ -174,20 +174,23 @@ def t_restart(o):
                         raise Refused(f"{n}: the CPU's drawing still said after gpu.off went")
                     s.confirm("normal start")
             with o.step(f"{n}: PulseAudio stopped: the audio server and the GUI started again, the run's log kept") as s:
-                pid_gui = oa.ssh(r, "pidof x6100_gui").strip()
+                time.sleep(5)               # the X6200's audio server starts over with its GUI: settled first
+                pid_gui = oa.ssh(r, "pidof x6100_gui; true").strip()
                 logs0 = int(oa.ssh(r, "ls /mnt/app_logs | wc -l").strip() or 0)
                 o.st.ev(f"{n}: its GUI restarts (PulseAudio stopped on purpose, planned)", "radio")
                 o.planned[n] = "planned: the audio server stopped"
                 o.changing += 1
                 try:
                     # the audio server may be starting over just then (after the GUI's own restart): waited for
-                    oa.ssh(r, "for i in 1 2 3 4 5 6 7 8 9 10; do p=$(pidof pulseaudio) && break; sleep 1; done; "
-                              "[ -n \"$p\" ] && kill $p")
+                    got = oa.ssh(r, "for i in $(seq 1 20); do p=$(pidof pulseaudio 2>/dev/null) && break; sleep 1; "
+                                    "done; if [ -n \"$p\" ]; then kill $p; echo KILLED $p; else echo NOPA; fi; true")
+                    if "KILLED" not in got:
+                        raise Refused(f"{n}: no PulseAudio to stop in 20 s ({got.strip()!r})")
                     end = time.time() + 40
                     new = ""
                     while time.time() < end:
                         time.sleep(2)
-                        new = oa.ssh(r, "pidof x6100_gui; pidof pulseaudio >/dev/null && echo PA").strip()
+                        new = oa.ssh(r, "pidof x6100_gui; pidof pulseaudio >/dev/null && echo PA; true").strip()
                         if "PA" in new and new.split()[0] not in ("", pid_gui, "PA"):
                             break
                     import orch_cable as oc
@@ -234,7 +237,6 @@ DISPLAY = [
     ("settings-display-band-plan-strip", "band_plan", lambda v: 0 if str(v) != "0" else 1, (0, 150, 800, 175)),
     ("settings-display-filter-shade", "filter_shade", lambda v: 0 if str(v) != "0" else 4, (0, 140, 800, 330)),
     ("settings-display-spectrum", "spectrum_show", lambda v: 1 if str(v) == "0" else 0, (0, 130, 800, 400)),
-    ("settings-display-knob-info", "knob_info", lambda v: 0 if str(v) != "0" else 1, (0, 380, 800, 480)),
 ]
 
 
@@ -508,52 +510,6 @@ def t_sentry_now(o):
 
 
 
-# ---- Windows that look alike on both radios (lookfeel-screen-first-start, lookfeel-screen-swr-scan,
-#      lookfeel-screen-wspr) ----
-
-LOOK = [("lookfeel-screen-swr-scan", 102, "SWR Scan", r"SWR"),
-        ("lookfeel-screen-wspr", 116, "WSPR", r"WSPR")]
-
-
-def t_lookalike(o):
-    """SWR Scan and WSPR opened on both radios (the remote's open; neither sends anything by
-    opening): each window named on both pictures, and the two radios' pictures alike (gold on black, the same layout:
-    under a third of their pixels differ); closed after"""
-    res = {}
-    try:
-        for feat, action, name, rx in LOOK:
-            with o.step(f"both: {name} opened from the classic screen, named on each picture, the two alike") as s:
-                import orch_cable as oc
-                pics, t0 = {}, time.time()
-                for n, r in _both(o):
-                    oc.classic(r)
-                    r.take_control()
-                    r.send(f"open {action}")
-                for n, r in _both(o):
-                    try:
-                        r.wait(f"{name} open", lambda r=r: oa.win(r).lower().startswith(name.lower().split()[0]), 8)
-                    except Refused:
-                        raise Refused(f"{n}: {name} not open (the window {oa.win(r)!r}, said {oa.msgs_since(r, t0)[-3:]})")
-                time.sleep(1.5)
-                for n, r in _both(o):
-                    pics[n] = oa.shot(o, r, f"look {name}")
-                    txt = (oa.ocr(pics[n], psm=11) + oa.ocr(pics[n], psm=6, stretch=True)).upper()
-                    if not re.search(rx, txt):
-                        raise Refused(f"{n}: {name}'s picture reads no {rx!r} ({' '.join(txt.split())[:100]!r})")
-                apart = _diff(pics[H.A], pics[H.B], (0, 0, 800, 480))
-                res[name] = round(apart, 3)
-                for n, r in _both(o):
-                    r.send("close")
-                if apart > 0.33:
-                    raise Refused(f"{name}: the two radios' pictures differ in {apart:.0%} of their pixels")
-                s.confirm(f"named on both, {apart:.0%} of pixels apart")
-        return True, f"First start, SWR Scan and WSPR open alike on both radios: {res}", res
-    except Refused as e:
-        return False, str(e), res
-    finally:
-        oa.home_both(o)
-
-
 # ---- Settings > Info's cards (settings-info-firmware, settings-info-power-box) ----
 
 def t_settings_info(o):
@@ -598,12 +554,11 @@ COVERS = {
                     "sdr-daemon-persistent", "network-x6100-wifi-power-held", "system-x6200-base-keeper",
                     "incoming-log-import", "gui-restart-on-audio-loss"],
                    ["radio-core-freq-lock-per-band-mode", "sentry-b-state-kept"]),
-    "ui-display-settings": ([f for f, _, _, _ in DISPLAY] + ["display-knob-info-lines"], []),
+    "ui-display-settings": ([f for f, _, _, _ in DISPLAY], []),
     "ui-classic-status": (["main-screen-status-bar-state", "main-screen-battery-indicator",
                            "main-screen-status-wifi-icon"], []),
     "ui-settings-kept": ([], [f for f, _, _ in KEPT] + ["tx-ranges-choice"]),
     "ui-sentry-now": (["scancfg-now-box", "sentry-now-sun"], []),
-    "ui-lookalike": ([f for f, _, _, _ in LOOK], []),
     "ui-settings-info": (["settings-info-firmware", "settings-info-power-box"], []),
     "ui-system-readonly": (["system-base-fw-flash-check"], ["system-update-integrity", "system-update-sd-card-guard"]),
 }
@@ -616,16 +571,13 @@ def tests(Test, A, B):
              "kept or off; perf, gpu.off and an ADIF import read at start; the X6200's base keeper and the X6100's "
              "WiFi while stopped; again by PulseAudio stopped", t_restart, 300),
         Test("ui-display-settings", "both", "on the classic screen each display setting (band plan, filter shade, "
-             "needle lamp, spectrum, waterfall mode, broadcast names, knob info) changes its part of the screen and "
-             "comes back", t_display_settings, 180),
+             "spectrum) changes its part of the screen and comes back", t_display_settings, 90),
         Test("ui-classic-status", "both", "the classic screen's status line (VFO-A, mode, AGC), the charge and a green "
              "WiFi icon", t_classic_status, 30),
         Test("ui-settings-kept", "both", "seven settings set through their validators, kept, put back; an onset "
              "outside 1-5 refused", t_settings_kept, 40),
         Test("ui-sentry-now", "both", "SCAN CFG's NOW box names A's radio; page D's rows say NOW (OPEN, CLOSED, ... or "
              "n SIG)", t_sentry_now, 40),
-        Test("ui-lookalike", "both", "First start, SWR Scan and WSPR open alike on both radios (named, under a third "
-             "of their pixels apart)", t_lookalike, 50),
         Test("ui-settings-info", "both", "Settings > Info: the FIRMWARE card with the version (the X6200's PA bias), "
              "the POWER box", t_settings_info, 40),
         Test("ui-system-readonly", "both", "read only: base-flash --check takes the radio's own firmware and refuses "
