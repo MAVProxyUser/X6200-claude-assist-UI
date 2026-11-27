@@ -4076,14 +4076,16 @@ def _cwt_round(o, r, answer=None, start=True, speed=None, n0=None, on_start=None
     try:
         _cwt_state(r, ("result", "ready"), 20 if not speed or speed >= 10 else 40, "the answer keyed")
     except Refused as e:
-        # the X6200's base puts its sidetone, the decoder's only copy of the answer, in at the KEY Volume: none at 0
-        # (cw_own_tone.h); the X6200 heard nothing of its own group or answer (11-26)
+        # the X6200's base puts its sidetone, the decoder's only copy of the answer, in at the KEY Volume (none at 0,
+        # cw_own_tone.h) and, it seems, not at all at VOL 0: at KEY Volume 10 the X6200 heard 'E' or nothing of its
+        # own group or answer at VOL 0 and copied them at VOL 20 (11-26/27); trainer_on sets TRAIN_VOL
         try:
             kv = bench.cfg_get(r, "key_vol", timeout=3)
+            av = bench.cfg_get(r, "vol", timeout=3)
         except Refused:
-            kv = "unread"
+            kv = av = "unread"
         raise Refused(f"{e}: the answer {a!r} to {g!r} not taken (the decoder heard {heard()!r}, of the group "
-                      f"{dec!r}; KEY Volume {kv})")
+                      f"{dec!r}; KEY Volume {kv}, VOL {av})")
     st = _cwt_stats(r)
     if st.get("tries", 0) == tries0:    # the file written a moment after the result
         time.sleep(1.5)
@@ -4093,13 +4095,20 @@ def _cwt_round(o, r, answer=None, start=True, speed=None, n0=None, on_start=None
     return g, a, st
 
 
+# The CW Trainer at a volume one trains at: the bench's VOL 0 left the X6200's trainer deaf to its own sidetone
+# (11-26/27, KEY Volume 10), where a person would hear nothing of the groups either
+TRAIN_VOL = 20
+
+
 @contextlib.contextmanager
 def trainer_on(o, n, label, settings, f=14040000):
     """n's CW Trainer open in a TX session (its sidetone keys the base at 0 W: the Watch on, n's role TX, the other
-    radio on the same dial listening) on f, CW; its settings and stats file as found after"""
+    radio on the same dial listening) on f, CW, at VOL TRAIN_VOL unless settings say; its settings and stats file
+    as found after"""
     import orch_cable as oc
     r = o.r[n]
     align(o, f, 4)
+    settings = {"vol": TRAIN_VOL, **settings}
     with file_kept(r, CWT_FILE), cfg_kept(r, settings), oc.session(o, label, [n], f) as watch:
         watch.shots_on_tx = False       # train mode's keying is an over to the Watch: no screen grab into the sidetone
         oc.role(o, n)
