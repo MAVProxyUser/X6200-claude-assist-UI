@@ -354,6 +354,12 @@ struct Scenario {
     double      pause    = 0;       /* dots the user waits after the answer's first character, past its gap */
     int         tx_wpm   = 0;       /* Calls with TX speed Fixed (#270): the KEY Speed, the user's keyer, the calls
                                      * at their own speed; 0 Follows, the KEY Speed set to each call's */
+    /* the base's keying, the group's and the answer's (its sidetone the decoder's only copy of either): each mark
+     * weight ms longer, its gap after that much shorter, each edge jitter ms either way at random, and runon of the
+     * key-ups 30-80 ms late. The X6100's factory V1.1.9 over the cable (cw-timing x6100, 11-26, PARIS at 20 WPM):
+     * marks +18 ms and gaps -18 where the X6200's clean keying read +9 and -9 the same way (the base's own about 10),
+     * scattered about 8 ms, a dot now and then 72 ms long (no decoder reads that one) */
+    double      weight = 0, jitter = 0, runon = 0;
 };
 
 struct Result {
@@ -400,6 +406,17 @@ static Result learn(const Scenario &sc, unsigned seed) {
     bool        heard_end = false, last_ok = false, own_taken = false, lost = false, garbled = false;
     double      idle = 0, listen_t = 0, last_rx_t = 0, result_t = 0, user_first_end = 1e12, user_last = -1;
 
+    /* the base's late edges (no draw without them: the other scenarios' groups stay as they were) */
+    auto late = [&](Mark m) {
+        if (sc.weight > 0 || sc.jitter > 0 || sc.runon > 0) {
+            m.on += urand(-sc.jitter, sc.jitter);
+            m.off += sc.weight + urand(-sc.jitter, sc.jitter) + (urand(0.0, 1.0) < sc.runon ? urand(30.0, 80.0) : 0.0);
+            if (!marks.empty() && m.on < marks.back().off + 5) m.on = marks.back().off + 5;
+            if (m.off < m.on + 5) m.off = m.on + 5;
+        }
+        return m;
+    };
+
     /* play(): the own count, the speed when it is new (the slower of the group's and the KEY Speed), then the
      * encoder at the group's speed (cw_encoder.c send_morse); the user keys it back at the KEY Speed */
     auto play = [&](double t) {
@@ -427,7 +444,7 @@ static Result learn(const Scenario &sc, unsigned seed) {
         for (char c : target) {
             for (const char *p = morse_of(c); *p; p++) {
                 double el = *p == '.' ? dit : dah;
-                marks.push_back({k + sc.delay, k + el + sc.delay});
+                marks.push_back(late({k + sc.delay, k + el + sc.delay}));
                 k += el + dit;
             }
             k += dah - dit;
@@ -442,7 +459,7 @@ static Result learn(const Scenario &sc, unsigned seed) {
         for (size_t i = 0; i < target.size(); i++) {
             for (const char *p = garbled && target[i] == '?' ? "..--..." : morse_of(target[i]); *p; p++) {
                 double el = *p == '.' ? udit : udah;
-                marks.push_back({u + sc.delay, u + el + sc.delay});
+                marks.push_back(late({u + sc.delay, u + el + sc.delay}));
                 u += el + udit;
             }
             if (i == 0) user_first_end = marks.back().off;
@@ -499,7 +516,7 @@ static Result learn(const Scenario &sc, unsigned seed) {
                     r.wrong++;
                     r.guard_lost += lost;
                     if (!garbled)
-                        printf("        group %d: \"%s\" heard as \"%s\"%s\n", r.rounds, target.c_str(),
+                        printf("        group %d (%d WPM): \"%s\" heard as \"%s\"%s\n", r.rounds, wpm, target.c_str(),
                                heard.c_str(), lost ? " (its first character inside GUARD_MS)" : "");
                 }
                 st       = RESULT;
@@ -597,6 +614,15 @@ static void end_to_end(void) {
         {"Learn, group 3, all 40, KEY Ratio 4, answers after 2 dots", 6, 30, 40, 3, 40, 500, 1400, 0, 0, false, 4.0},
         /* a 0 at Ratio 4.5 (26.5 dots) and the decoder's end of it: once past 30 dots (cwt_answer_ms) */
         {"Learn, group 5, all 40, KEY Ratio 4.5", 10, 30, 40, 5, 40, 300, 1200, 0, 0, false, 4.5},
+        /* the X6100's factory base's keying (Scenario::weight: 10 ms, 8 either way): its sidetone, the decoder's
+         * only copy of the group and the answer, with it. The decoder holds there; from 15 ms of weight at 20 WPM
+         * the dits and the element gaps make two clusters and the dot became the gaps' (K read O, R W) */
+        {"Learn, group 3, level 2, the X6100 base's keying", 20, 30, 2, 3, 40, 300, 1200, 0, 0, false, 3.0, 0, 0, 10, 8, 0},
+        {"Learn, group 5, all 40, the X6100 base's keying", 20, 30, 40, 5, 40, 300, 1200, 0, 0, false, 3.0, 0, 0, 10, 8, 0},
+        {"Learn, group 3, level 10, the X6100 base's keying", 15, 30, 10, 3, 40, 300, 1200, 0, 0, false, 3.0, 0, 0, 10, 8, 0},
+        /* Calls with TX speed Fixed at 20: the answers keyed at 20 WPM through it (Follows took the calls and the
+         * KEY Speed to 31 WPM, a 40 ms dot with element gaps of 22 ms and less: its base swallowed dots at 28) */
+        {"Calls, TX speed Fixed 20 WPM, the X6100 base's keying, from", 20, 30, 0, 0, 20, 400, 1200, 0, 0, false, 3.0, 0, 20, 10, 8, 0},
     };
 
     printf("Learn and Calls: the radio's group and the user's answer, through the decoder\n");

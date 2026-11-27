@@ -12,7 +12,9 @@
 # before), and that the word boundary stays at 5 dots; also groups of 5 of all 40 at 10 WPM, a straight key at 10 WPM
 # answering groups keyed at 14 (the end of a short answer, cwt_answer_ms), groups of 1 and 5 at 5 WPM, answered
 # 0.5-1.4 s after them, and at 5 and 6 WPM with KEY Ratio 4.5 and 4 (dahs of 800-1080 ms: the key detector's carrier
-# floor, KeyDetector::trainer_range), and groups of 5 at 10 WPM with Ratio 4.5 (a 0 of 26.5 dots, cwt_answer_ms). Then
+# floor, KeyDetector::trainer_range), and groups of 5 at 10 WPM with Ratio 4.5 (a 0 of 26.5 dots, cwt_answer_ms); and
+# the X6100's factory base's keying under the group and the answer (marks 10 ms long, gaps as short, each edge 8 ms
+# either way): groups of 3 and 5 at 15 and 20 WPM, Calls answered at a Fixed 20 WPM. Then
 # groups of 1 and 3 of 3 8 B ? with every ? keyed a dit too many (..--..., no character): never right, the ? heard as
 # no character. Calls with a pause of 8, 15 and 22 dots after the call's first character, from 12 and 20 WPM: the word
 # space there does not end the answer (cwt_space_ends), every one right (#202). Last the first 4 groups after the trainer opens, 84 runs of them for each of Learn's groups of 1 and 3
