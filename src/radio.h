@@ -167,6 +167,10 @@ void radio_speaker_play(bool speaker);
 /* What the base streams: the receiver, our audio to the speaker, or the hand mic and our audio */
 void radio_set_play_mode(audio_play_mode_t mode);
 audio_play_mode_t radio_play_mode(void);
+/* What the base has that decides whether a key puts it on the air, as text for a log: its play mode (the record bit),
+ * the hold at 0 W with KEY Train on (band_hold_set), the user's KEY Train, the receive-only holds, Train's own hold.
+ * Into buf, which it returns. Any thread */
+const char *radio_key_state(char *buf, size_t n);
 /* What radio_vol_refresh last sent the base (-1 before the first): the speaker's level (0 while muted) and the TX
  * monitor's; whether the speaker is muted (mute, a TCI client's over, the scanner, Bluetooth, Speaker off); whether a
  * TCI client's over mutes it. For the browser remote's state, which the bench checks. Any thread */

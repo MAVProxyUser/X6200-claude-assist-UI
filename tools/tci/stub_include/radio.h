@@ -1,6 +1,7 @@
 /* Host test shim of src/radio.h: what the TCI server and control_owner.c call */
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "radio_types.h"
 typedef enum { RADIO_RX = 0, RADIO_TX, RADIO_ATU_START, RADIO_ATU_WAIT, RADIO_ATU_RUN, RADIO_SWRSCAN, RADIO_POWEROFF,
@@ -12,3 +13,4 @@ bool radio_get_modem(void);
 void radio_set_pwr(float d);
 void radio_set_tci_mute(bool on);
 uint32_t radio_caps(void);
+const char *radio_key_state(char *buf, size_t n);

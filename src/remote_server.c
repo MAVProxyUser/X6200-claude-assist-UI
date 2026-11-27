@@ -340,6 +340,9 @@ typedef struct {
     int32_t plays;          /* the bench's file on the speaker (bench_player_busy) */
     int32_t av;             /* the open app's variant (main_screen_app_variant: Olivia's Mode, 0-10), -1 none: the bench
                              * puts two radios on one variant and sees a Mode tap that did not take (2026-11-24) */
+    int32_t btx;            /* the base itself on the air (its own TX flag, radio_get_state), where tx is also the GUI's
+                             * key (the modem bit): 2026-11-26 the X6100's factory base let five TCI overs in a row go by
+                             * on receive, the bit set, and the bench took them for overs */
     bool    tx, lock;
     bool    ulock;          /* the user's lock alone (LOCK), not an app's hold: the page's LOCK button */
     bool    cwrise;         /* CW's tone rises with the dial, as CW-R's (the X6200): its CW passband the other side */
@@ -1332,6 +1335,7 @@ static void pstate_read(pstate_t *s) {
     s->atu   = param_i_get(cfg_atu_enabled);
     s->bat   = radio_get_battery();
     s->tx    = radio_get_state() != RADIO_RX || radio_get_modem();
+    s->btx   = radio_get_state() == RADIO_TX;
     s->lock  = main_screen_freq_locked();
     s->ulock = main_screen_freq_user_locked();
     s->tune  = ext_tune_on();
@@ -1377,14 +1381,14 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,\"plays\":%d,\"ifs\":%d,\"comp\":%d,\"wch\":%d,\"wchm\":%d,\"av\":%d,"
              "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\",\"bhz\":%lld,\"bpre\":\"%s\",\"bmode\":\"%s\",\"bname\":\"%s\","
              "\"bscan\":%d,\"ghz\":%lld,\"garm\":%d,\"gno\":\"%s\",\"sdr\":%d,\"fsel\":\"%s\",\"gmp\":%d,"
-             "\"gmhz\":%lld,\"gmrx\":%d,\"glamp\":\"%s\"}",
+             "\"gmhz\":%lld,\"gmrx\":%d,\"glamp\":\"%s\",\"btx\":%d}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
              s->tpwr10, s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->txf,
              s->split, s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->plays, s->ifs,
              s->comp, s->wch, s->wchm, s->av, s->app, s->win, s->pg, s->fp, (long long)s->sdr.bhz, s->sdr.bpre,
              s->sdr.bmode, s->sdr.bname, s->sdr.bscan, (long long)s->sdr.ghz, s->sdr.garm, s->sdr.gno, s->sdr.sdr,
-             s->sdr.fsel, s->sdr.gmp, (long long)s->sdr.gmhz, s->sdr.gmrx, s->sdr.glamp);
+             s->sdr.fsel, s->sdr.gmp, (long long)s->sdr.gmhz, s->sdr.gmrx, s->sdr.glamp, s->btx);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */
@@ -2401,7 +2405,7 @@ static void *panel_thread(void *arg) {
     bool           have_last = false;
     uint32_t       sp_seq = 0, spots_gen = 0, plan_gen = band_plan_gen();
     uint64_t       state_ms = 0, meter_ms = 0, spots_ms = 0, ft8_ms = 0, ft8_sent_ms = 0;
-    char           line[1024];     /* the state line: about 820 at most (the bench's checks, B and G's SDR, G's lamp, 2026-11-26) */
+    char           line[1024];     /* the state line: about 830 at most (the bench's checks, B and G's SDR, G's lamp, btx, 2026-11-27) */
     (void)arg;
 
     while (true) {

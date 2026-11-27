@@ -11243,7 +11243,10 @@ either); the state's `rxo` is 1 while the radio holds itself receive only,
 for the Sentry or for such a session. The state's `av` is the open app's
 variant where it has one: the Olivia app's Mode, 0 (Olivia 8/250) to 10
 (Contestia 32/1000), as each press of its Mode key steps it; -1 in any other
-app or none. `key PTT 1 N` keys the radio's own microphone,
+app or none. The state's `tx` is 1 from the moment the radio keys itself (a
+digital app's or a TCI client's key sets it at once), `btx` only while the base
+says it is on the air: a `tx` without `btx` past a second is a key the base
+did not follow. `key PTT 1 N` keys the radio's own microphone,
 N the page's number for this press, and is repeated every second as the
 lease; `key PTT 0` lets go (see Transmitting from the browser). `tune 1 N`
 starts a TUNE for an external tuner the same way, repeated every second while
@@ -11997,6 +12000,14 @@ the radio, hears it, keys it and sends CW with it.
     through 80 dB) 0.1 W came 4 dB low after a few overs, and 0.2, 0.5 and
     1 W went out at 0.3, 0.8 and 0.9 W. Now the other radio hears 0.1, 0.2,
     0.3 and 0.5 W within 1 dB of their steps.
+  - A key the base doesn't follow ends: if the radio isn't on the air 1.5 s
+    after the key took, the client hears `trx:0,false;`, the display says
+    "TCI: the radio did not go on the air", and the radio's log has a line
+    naming its base audio mode and holds at that moment. Why: on 2026-11-26
+    the X6100's base (Xiegu's V1.1.9) went on the air for the first of six
+    WeFax overs from a TCI client, then stayed on receive for the other five
+    while the client's audio streamed for 14 s each, and nothing said so.
+    The cause is not known yet; the log line is there to find it.
 - CW from a client (#179): `cw_macros:0,CQ DE ON6URE K;` keys the text with
   the radio's own keyer, the one the CW keyboard, the stored messages and the
   beacon use, at KEY Speed (KEY > Speed). This is what QLog's "Morse over

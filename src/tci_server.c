@@ -145,6 +145,10 @@
  * (handle_cmd) */
 #define KEY_YOUNG_MS  1000
 #define KEY_GRACE_MS  100
+/* A TCI audio start the base has not gone on the air for this long after its key took (the modem bit set) ends: its
+ * client is told and what the base had is logged (tx_session_tick). Under TX_FIRST_AUDIO_MS, so it is this that ends
+ * a start the base ignores, not the wait for its audio; a PTT key that never took has 1000 ms */
+#define TX_BASE_WAIT_MS 1500
 #define TX_LIMIT_MS   (180 * 1000)
 #define BT_PING_MS    2000          /* over Bluetooth: silent this long, it is pinged (its answer shows the link is up) */
 #define BT_TX_SILENT_MS 5000        /* over Bluetooth: silent this long while it transmits, its transmission ends. The
@@ -329,6 +333,8 @@ static struct {
     int         unkeyed_ci;     /* the client whose own unkey ended the last over, and when: its next start while that */
     uint64_t    unkeyed_ms;     /* over plays out waits for the radio (KEY_WAIT_MS) instead of being refused */
     bool        took;       /* the socket thread has seen this start's key take (tx_session_tick) */
+    uint64_t    took_ms;    /* when it did */
+    bool        base_on;    /* the base has been on the air for it since (its own TX flag, radio_get_state) */
 } txs;
 
 /* A client's CW (cw_macros): its text keyed by the radio's own keyer (cw_encoder.c), the CW keyboard's and the stored
@@ -2223,10 +2229,29 @@ static void tx_session_tick(uint64_t now) {
          * WSJT-X on the X6200 lost two overs in three, then every one (2026-11-21, "0 audio frames taken") */
         txs.took          = true;
         txs.last_audio_ms = now;
+        txs.took_ms       = now;
+        txs.base_on       = false;
     }
     if (!radio_get_modem()) {               /* the SWR guard or an app took the modem bit */
         LV_LOG_USER("tci: start %u of %s ended: the modem bit went off after %llu ms", key_gen, c->ip,
                     (unsigned long long)(now - txs.start_ms));
+        tx_session_end(txs.owner, false);
+        return;
+    }
+    /* The over is the base's own TX flag (radio_get_state), not the modem bit alone, which is only the GUI's key:
+     * 2026-11-26 the X6100's factory base stayed on receive through five bench WeFax overs in a row, the bit set and
+     * the client's audio streamed for 14 s each (its minute log: 0 s on the air), and the bench took them for overs
+     * (the remote's tx is the bit as well). A start the base has not followed in TX_BASE_WAIT_MS ends, its client
+     * told, the base's state logged: what kept it off the air */
+    if (radio_get_state() == RADIO_TX) {
+        txs.base_on = true;
+    } else if (!txs.base_on && now > txs.took_ms && now - txs.took_ms > TX_BASE_WAIT_MS) {
+        char ks[200];
+
+        LV_LOG_USER("tci: start %u of %s ended: the base did not go on the air in %llu ms (%s)", key_gen, c->ip,
+                    (unsigned long long)(now - txs.took_ms), radio_key_state(ks, sizeof(ks)));
+        msg_schedule_text_fmt("TCI: the radio did not go on the air");
+        client_text(c, "trx:0,false;");
         tx_session_end(txs.owner, false);
         return;
     }

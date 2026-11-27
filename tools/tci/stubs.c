@@ -132,7 +132,15 @@ void msg_schedule_text_fmt(const char *fmt, ...) {
 /* ---- the radio. stub_tx_refused: a key does nothing, as radio.c's tx_refused() on a frequency
  * the radio may not transmit on (the key is taken, the radio stays on receive) ---- */
 static bool ptt, modem;
-radio_state_t radio_get_state(void) { return ptt || modem || atomic_load(&cw_on) ? RADIO_TX : RADIO_RX; }
+/* stub_base_deaf: the modem bit set, the base stays on receive (the X6100's factory base, 2026-11-26) */
+bool stub_base_deaf;
+radio_state_t radio_get_state(void) {
+    return ptt || (modem && !stub_base_deaf) || atomic_load(&cw_on) ? RADIO_TX : RADIO_RX;
+}
+const char *radio_key_state(char *buf, size_t n) {
+    snprintf(buf, n, "the stub's base");
+    return buf;
+}
 bool radio_set_ptt(bool tx) {
     if (tx && stub_tx_refused) return false;
     ptt = tx;

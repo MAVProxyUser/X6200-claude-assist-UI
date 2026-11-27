@@ -5193,6 +5193,7 @@ ORCH_COVERS = {
     "spurs": ([], ["path-data-ft8-both-ways"]),
     "skirt": ([], ["tx-tci-transmit-level"]),
     "tci-tail": (["tci-trx-tci-audio", "tci-wsjtx-compat"], []),
+    "tci-row": (["tci-trx-tci-audio"], ["tci-wsjtx-compat"]),
     "ft8-copies": ([], ["path-data-ft8-both-ways", "digi-tx-level-x6200-power"]),
     "cw-timing": (["path-cw-both-ways"], ["cw-keyer-settings"]),
     "ambe-vocoder": (["dmr-voice-usb3000"], ["dsdfme-voice"]),
@@ -6064,6 +6065,172 @@ def tail_test(o, sender, listener, f=14074000, tone=1000, secs=2.0, amp=0.3):
                 f"{secs - lost[0.0]:.2f} s came ({lost[0.0]:.2f} s of its end lost), with {TAIL_PAD_S} s of silence "
                 f"after it {secs - lost[TAIL_PAD_S]:.2f} s ({lost[TAIL_PAD_S]:.2f} s lost); "
                 f"{TAIL_LOST_MAX_S} s at most"), {"rows": rows}
+
+
+ROW_OVERS = 6               # TCI overs in a row, as wefax-auto sends them
+ROW_SECS = 10.0             # each over's tone
+ROW_GAP_S = 8.0             # between them (wefax-auto's: 9 s)
+ROW_PLAY_OVERS = 2          # then this many with the sender's base in play mode (the bench's silent file playing)
+ROW_ON_MIN = 0.7            # an over counts as on the air with the base's own TX flag for this share of its tone
+ROW_HEARD_DB = 15.0         # and the tone this far over the gap before it in the listener's audio
+ROW_SILENT_WAV = "/tmp/bench_tcirow_silence.wav"
+
+
+def tci_row_test(o, sender, listener, f=14100000, tone=1000, amp=0.3):
+    """TCI overs in a row (2026-11-26, wefax-auto x6100>x6200: the X6100's base went on the air for the first of six
+    WeFax overs and stayed on receive for the other five, the modem bit set and the audio streamed, its minute log 0 s
+    on the air; the bench took them for overs, the remote's tx being the bit too). The sender's TCI keys ROW_OVERS overs
+    of ROW_SECS of a tone, ROW_GAP_S apart, as wefax-auto's; each judged by the base's own TX flag (the remote's btx)
+    and the tone in the listener's TCI audio. Then ROW_PLAY_OVERS with the sender's base in play mode, as when the
+    Sentry plays the stick on the speaker (the bench's silent file there): the record bit that Xiegu's factory X6100
+    base drops an over for when it is set under a key (2026-11-22). Every over: the play mode the sender had at its key
+    and what its TCI told the client. PASS when every over was on the air and heard"""
+    import subprocess
+    import wave
+    import numpy as np
+    from scipy.signal import butter, filtfilt
+    from tones import TciRx, FS as TFS
+    S, L = o.r[sender], o.r[listener]
+    run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_tone_tx.py"),
+            f"root@{S.host}:/tmp/tci_tone_tx.py"])
+    silent = os.path.join(o.st.run_dir, "tcirow_silence.wav")
+    with wave.open(silent, "wb") as wv:        # mono at the play rate (bench_player.c), long enough for the overs
+        wv.setnchannels(1)
+        wv.setsampwidth(2)
+        wv.setframerate(44100)
+        wv.writeframes(b"\0\0" * int(44100 * (ROW_PLAY_OVERS * (ROW_SECS + ROW_GAP_S + 6) + 10)))
+    run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", silent, f"root@{S.host}:{ROW_SILENT_WAV}"])
+    plan = [[0, 0.3], [tone, ROW_SECS]]
+    key_s = ROW_SECS + 3.0
+    rows, tci = [], None
+    b, a = butter(3, 40 / (TFS / 2))
+
+    def tone_db(x):
+        n = np.arange(len(x))
+        z = x * np.exp(-2j * np.pi * tone * n / TFS)
+        e = np.abs(filtfilt(b, a, z.real) + 1j * filtfilt(b, a, z.imag)) if len(x) > 30 else np.zeros(1)
+        return 20 * np.log10(np.median(e) + 1e-9)
+
+    def one_over(k, phase):
+        _, total = bench.chain_gate(o.c, "radios")
+        bench.radio_tx_gate(S, o.c, W)
+        bench.listener_gate(L)
+        o.roles = {sender: "TX", listener: "RX"}
+        watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=L, w=W,
+                            label=f"tci-row {sender} {phase} {k}")
+        btx, plays, said = [], [], []
+        try:
+            o.changing += 1
+            try:
+                bench.arm(S, True, mode=3)
+            finally:
+                o.changing -= 1
+            bench.tx_log({"who": sender, "f": f, "w": S.pwr(), "what": f"orch: tci-row {phase} over {k}"})
+            play_at_key = S.state.get("play")
+            t0 = time.time()
+            proc = subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
+                                     f"python3 /tmp/tci_tone_tx.py '{json.dumps(plan)}' {amp} {key_s:.1f} 50001 0.05"],
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            while proc.poll() is None and not watch.why:
+                btx.append((time.time(), S.state.get("btx"), S.state.get("tx")))
+                plays.append(S.state.get("play"))
+                time.sleep(0.1)
+            if proc.poll() is None:
+                bench.stop_bench_programs(S)
+            out = proc.communicate(timeout=20)[0]
+            said = [ln for ln in out.splitlines() if not ln.startswith(("start ", "end "))]
+            t_start = next((float(ln.split()[1]) for ln in out.splitlines() if ln.startswith("start ")), None)
+            t1 = time.time()
+            try:
+                S.wait("off the air", lambda: not S.tx, 5)
+            except Refused:
+                S.stop()
+        finally:
+            watch.close()
+            o.changing += 1
+            try:
+                bench.arm(S, False)
+            finally:
+                o.changing -= 1
+            o.roles = {A: "RX", B: "RX"}
+        if watch.why:
+            raise Refused(f"the watch stopped over {k}: {watch.why}")
+        time.sleep(1.0)
+        # the tone's stretch by the radio's own clock is not known here: the samples over the tone's middle, from 1 s
+        # after the key to 1 s before its end
+        mid = [v for t, v, _ in btx if t0 + 1.5 <= t <= t0 + 1.5 + ROW_SECS - 2.0]
+        on_share = round(sum(1 for v in mid if v == 1) / len(mid), 2) if mid else 0.0
+        keyed_share = round(sum(1 for t, _, v in btx if t0 + 1.5 <= t <= t0 + ROW_SECS - 0.5 and v) /
+                            max(1, sum(1 for t, _, _ in btx if t0 + 1.5 <= t <= t0 + ROW_SECS - 0.5)), 2)
+        x, x0 = tci.audio(t0 - 3.0, t1 + 1.0)
+        heard = None
+        if x0 is not None and len(x) > 4 * TFS:
+            i0 = int((t0 - 3.0 - x0) * TFS)
+            before = x[max(0, i0):max(0, i0) + int(2.5 * TFS)]
+            during = x[max(0, i0) + int(4.5 * TFS):max(0, i0) + int((3.0 + ROW_SECS - 0.5) * TFS)]
+            if len(before) > TFS // 2 and len(during) > TFS // 2:
+                heard = round(tone_db(during) - tone_db(before), 1)
+        row = {"phase": phase, "over": k, "play_at_key": play_at_key, "plays_seen": sorted({p for p in plays
+                                                                                            if p is not None}),
+               "base_on_share": on_share, "gui_keyed_share": keyed_share, "heard_db": heard,
+               "tci_said": said[:3], "audio_from_tci": t_start is not None}
+        row["ok"] = on_share >= ROW_ON_MIN and heard is not None and heard >= ROW_HEARD_DB
+        rows.append(row)
+        return row
+
+    try:
+        if "btx" not in S.state:
+            raise Refused(f"{sender}'s GUI says nothing of its base's own TX flag (the remote's btx, 2026-11-27): "
+                          f"an older build")
+        tci = TciRx(L.host)
+        with o.step(f"both on {f / 1e6:.3f} USB-D, the receiver profile alike") as s:
+            want, checks = bench.rx_profile(f, 3, pre=0, att=0, rfg=100, agc=0, sql=0, filt=(100, 3000))
+            o.both(dict(want, pwr=W, atu=0, xit=0, rit=0, split=0), checks)
+            s.confirm(f"both on {f} mode 3")
+        for k in range(1, ROW_OVERS + 1):
+            with o.step(f"{sender}'s TCI over {k} of {ROW_OVERS}: {ROW_SECS:.0f} s of {tone} Hz at {W} W; its base's "
+                        f"own TX flag and {listener}'s audio") as s:
+                r = one_over(k, "row")
+                s.confirm(f"its base on the air {r['base_on_share']:.0%} of the tone (the GUI keyed "
+                          f"{r['gui_keyed_share']:.0%}), heard {r['heard_db']} dB, play mode {r['play_at_key']} at "
+                          f"the key" + (f", its TCI said {r['tci_said']}" if r["tci_said"] else ""))
+            time.sleep(ROW_GAP_S)
+        for k in range(1, ROW_PLAY_OVERS + 1):
+            with o.step(f"{sender}'s base in play mode (the bench's silent file on its speaker), then TCI over {k} of "
+                        f"{ROW_PLAY_OVERS}") as s:
+                S.send(f"play {ROW_SILENT_WAV}")
+                S.wait("the base in play mode", lambda: S.state.get("plays") == 1 and S.state.get("play") == 1, 5)
+                try:
+                    r = one_over(k, "play mode")
+                finally:
+                    S.send("play stop")
+                    try:
+                        S.wait("the speaker free", lambda: S.state.get("plays") == 0, 5)
+                    except Refused:
+                        pass
+                s.confirm(f"its base on the air {r['base_on_share']:.0%} of the tone (the GUI keyed "
+                          f"{r['gui_keyed_share']:.0%}), heard {r['heard_db']} dB, play mode at the key "
+                          f"{r['play_at_key']}, seen {r['plays_seen']}"
+                          + (f", its TCI said {r['tci_said']}" if r["tci_said"] else ""))
+            time.sleep(ROW_GAP_S)
+    except Refused as e:
+        return False, str(e), {"rows": rows}
+    finally:
+        if tci is not None:
+            tci.close()
+        try:
+            bench.ssh(S.host, f"rm -f {ROW_SILENT_WAV}", timeout=15)
+        except (Refused, subprocess.SubprocessError):
+            pass
+    bad = [r for r in rows if not r["ok"]]
+
+    def words(r):
+        return (f"{r['phase']} {r['over']}: on {r['base_on_share']:.0%} (keyed {r['gui_keyed_share']:.0%}), heard "
+                f"{r['heard_db']} dB, play {r['play_at_key']}" + (f", TCI: {r['tci_said'][0]}" if r["tci_said"] else ""))
+    return not bad, (f"{sender}'s TCI overs in a row into {listener}: {len(rows) - len(bad)} of {len(rows)} on the air "
+                     f"and heard (the base's own TX flag {ROW_ON_MIN:.0%} of the tone, the tone {ROW_HEARD_DB} dB up)"
+                     + ("; not: " + "; ".join(words(r) for r in bad) if bad else "")
+                     + "; all: " + "; ".join(words(r) for r in rows)), {"rows": rows}
 
 
 def ft8_copy_test(o, sender, listener, txfs=(1325, 1500, 2000), w=W):
@@ -6952,6 +7119,13 @@ TESTS = [
          lambda o: tail_test(o, B, A), 90),
     Test("tci-tail x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's TCI over in the X6200's audio",
          lambda o: tail_test(o, A, B), 90),
+    Test("tci-row x6100", "X6100 TX, X6200 RX", "six TCI overs in a row from the X6100, 10 s of 1000 Hz 8 s apart, "
+         "each judged by its base's own TX flag (the remote's btx) and the X6200's audio; then two with its base in "
+         "play mode (the bench's silent file on its speaker, as the Sentry's stick there). 11-26 wefax-auto: its base "
+         "went on the air for the first over and stayed on receive for five, the modem bit set (its TCI now ends such "
+         "a start in 1.5 s and logs why)", lambda o: tci_row_test(o, A, B), 330),
+    Test("tci-row x6200", "X6200 TX, X6100 RX", "the same from the X6200 into the X6100",
+         lambda o: tci_row_test(o, B, A), 330),
     Test("ft8-copies x6200", "X6200 TX, X6100 RX", "the X6200's FT8 app's CQs from TX Hz 1325 (no VFO move), 1500 and "
          "2000 at 0.1 W in the X6100's audio, then the same message through its TCI: the power 156.25 Hz either side "
          "-40 dBc at most and no more than 6 dB over TCI's (till 11-26 -25 to -31 dBc, TCI -55: the app played one "

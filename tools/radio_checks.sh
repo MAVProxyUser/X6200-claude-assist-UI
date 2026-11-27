@@ -11,6 +11,7 @@
 #     RADIO=root@x6200.local tools/radio_checks.sh tci
 #     git diff --name-only origin/main | tools/radio_checks.sh --changed [--dry]   only the checks those files touch
 #                                                     (before a push); none: exit 0; --dry: only named
+#     KEEP_OUT=DIR tools/radio_checks.sh tci       each check's whole output kept in DIR as CHECK.log
 #
 # The X6100 by default (the bench's second radio). TCI's test server listens on TCI_TEST_PORT 50091, not the radio's
 # own 50001; its files go under /tmp/radio_checks on the radio, removed after. Exit status 0 when every check passed.
@@ -53,7 +54,7 @@ else
     [ ${#CHECKS[@]} -gt 0 ] || CHECKS=("${ALL[@]}")
 fi
 OUT=$(mktemp -d "${TMPDIR:-/tmp}/radio_checks.XXXXXX")
-trap 'rm -rf "$OUT"' EXIT
+trap '[ -n "${KEEP_OUT:-}" ] && cp "$OUT"/*.log "$KEEP_OUT"/ 2>/dev/null; rm -rf "$OUT"' EXIT
 
 # The compiler as each Makefile calls it ($(CC) ... -o file sources -lm): ARM, the radio's sysroot, and libatomic
 # linked in statically when it links (ARM has no 8-byte atomics of its own; the radios have no libatomic.so)

@@ -22,7 +22,7 @@
 
 enum { A = 0, B = 1 };
 
-extern bool     stub_defer, stub_tx_refused;
+extern bool     stub_defer, stub_tx_refused, stub_base_deaf;
 extern void (*stub_modem_on)(void);
 int             stub_run(int n);
 extern char     stub_cw_text[4096], stub_said[128];
@@ -650,6 +650,41 @@ static void tci_modem_first(void) {
     say(A, "trx:0,true,tci;");
     gui(-1);
     check(radio_get_modem() && atomic_load(&txs.keyed) && txs.owner == A, "A's next TCI audio start keys");
+    say(A, "trx:0,false;");
+    gui(-1);
+    check(!on_air(), "A's unkey ends it");
+}
+
+/* A TCI audio start the base does not go on the air for (2026-11-26: the X6100's factory base stayed on receive for
+ * five overs in a row, the modem bit set and the audio streamed): still keyed within TX_BASE_WAIT_MS, ended after it,
+ * its client told trx:0,false and the modem bit dropped, the screen says so. The next start, the base following, stays
+ * on the air past it */
+static void base_not_on_air(void) {
+    const char *h;
+    int         said = stub_said_n;
+
+    client_open(A);
+    stub_base_deaf = true;
+    say(A, "trx:0,true,tci;");
+    gui(-1);
+    h = heard(A);
+    check(radio_get_modem() && txs.owner == A && strstr(h, "trx:0,true;"), "A's TCI audio start keys (the modem bit)");
+    tx_session_tick(now_ms() + 1000);
+    stub_run(-1);
+    check(radio_get_modem() && txs.owner == A, "a second on, the base still on receive: A's start goes on");
+    tx_session_tick(now_ms() + TX_BASE_WAIT_MS + 100);
+    stub_run(-1);
+    h = heard(A);
+    check(!radio_get_modem() && txs.owner < 0 && strstr(h, "trx:0,false;"),
+          "past TX_BASE_WAIT_MS with the base on receive: ended, A hears trx:0,false, the modem bit off");
+    check(stub_said_n > said && strstr(stub_said, "did not go on the air"), "the screen says the radio did not go on the air");
+    stub_base_deaf = false;
+    say(A, "trx:0,true,tci;");
+    gui(-1);
+    heard(A);
+    tx_session_tick(now_ms() + TX_BASE_WAIT_MS + 100);
+    stub_run(-1);
+    check(radio_get_modem() && txs.owner == A, "A's next start, the base on the air, stays past TX_BASE_WAIT_MS");
     say(A, "trx:0,false;");
     gui(-1);
     check(!on_air(), "A's unkey ends it");
@@ -1868,6 +1903,7 @@ int main(void) {
         {"TCI audio in DIGU and DIGL", tci_audio_in_dig},
         {"A TCI audio start sets the modem bit before it counts as keyed; refused where the radio does not transmit",
          tci_modem_first},
+        {"A TCI audio start the base does not go on the air for ends, its client told", base_not_on_air},
         {"A browser's TCI audio start gives the browser its control back at the end", control_given_back},
         {"Listen only: a client's tuning and key answered with the state", listen_only},
         {"dds answered with the frequency, an unknown command with nothing", dds_and_unknown},

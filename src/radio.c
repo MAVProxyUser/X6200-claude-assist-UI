@@ -1499,6 +1499,17 @@ audio_play_mode_t radio_play_mode(void) {
     return atomic_load(&play_mode_now);
 }
 
+const char *radio_key_state(char *buf, size_t n) {
+    audio_play_mode_t m = atomic_load(&play_mode_now);
+
+    snprintf(buf, n, "play mode %s, held at 0 W with KEY Train %s, KEY Train %s, receive-only holds %d, Train hold %d",
+             m == AUDIO_PLAY_OFF ? "off" : m == AUDIO_PLAY_ON ? "on (record bit set)"
+                                         : m == AUDIO_PLAY_VOICE_REC ? "voice (record bit set)" : "?",
+             atomic_load(&band_hold) ? "on" : "off", param_i_get(cfg_key_train) ? "on" : "off",
+             atomic_load(&rx_only), atomic_load(&train_hold) ? 1 : 0);
+    return buf;
+}
+
 static void play_mode_apply(audio_play_mode_t mode) {
     atomic_store(&play_mode_now, mode);
     switch (mode) {
