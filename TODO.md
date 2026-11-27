@@ -38,6 +38,17 @@ opening, so their look needs a TX test on the cable); revoking sessions and forg
 owner's first browser); the update's install, U-Boot, factory reset and base flashing (read-only checks only); the
 needle lamp, knob info and broadcast names show nothing at rest on the bench.
 
+Later (15:40): page A's VOL line kept 'VOLUME 0' after the remote set volume 1: the Sentry drew its legend only on
+its own events. It follows the level each half second now (app_sentry.c blink_cb, set only when its text changes).
+The night's seven coverage failures reshaped (the TCI ask's No holds for its connection: each step asks on a new one;
+RDS read on its own line over the waterfall, on the strongest FM stations by rtl_over: it decoded on both radios
+all along, the test read TUNED's call letters, which the X6100's band plan does not give; F's spectrogram judged in
+its own box at 8 grey levels; the locator's, the channel's and the TCI card's dim, framed and lookalike text). A
+sixth batch, orch_cov_look.py: Hide buttons and Keep knob lines, Knob info, the waterfall's Centered/Fixed modes and
+speed, the 12-hour clock, the pop-ups, the icon menus. It found Knob info set from the web or the remote doing nothing
+till a window opened or closed (knob_info.cpp's callback took the value and drew nothing): it shows or hides the lines
+at once now, and a theme change keeps them as it says.
+
 Open, mine: sentry-lock x6200>x6100's HOLD (the X6100's scan taken by its own 14.0903 spur, to look at live); the
 X6200's trainer adds a dit before an answer (WMK for MMK, older than today's changes); the X6100's trainer misreads
 the start of calls (IK 2DCO heard EK 2KCO); the coverage tests' remaining features (in progress).

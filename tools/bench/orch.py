@@ -7536,6 +7536,10 @@ import orch_cov_ui as _ocu                  # noqa: E402
 _ocu.H = sys.modules[__name__]
 TESTS += _ocu.tests(Test, A, B)
 ORCH_COVERS.update(_ocu.COVERS)
+import orch_cov_look as _ocl                # noqa: E402  the classic screen's look settings
+_ocl.H = sys.modules[__name__]
+TESTS += _ocl.tests(Test, A, B)
+ORCH_COVERS.update(_ocl.COVERS)
 
 
 # Other sessions put new GUIs on the radios (tools/cross_x6200/install.sh): one replaced both mid-run on 2026-11-25
