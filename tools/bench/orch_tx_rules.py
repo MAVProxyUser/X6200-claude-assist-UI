@@ -294,6 +294,62 @@ def t_tx_ranges_kr(o):
         oa.home_both(o)
 
 
+XV = {"transverter_0_from": 144000000, "transverter_0_to": 148000000, "transverter_0_shift": 116000000,
+      "transverter_0_pwr_max": 0.1}         # 2 m through a 28 MHz IF, 0.1 W at most (as tx-transverter's)
+F_XV_OUT = 145800000                        # its IF 29.800: past Korea's 10 m (28.000-29.700)
+
+
+def t_tx_ranges_xvtr(o):
+    """South Korea's TX ranges through a transverter (2 m on a 28 MHz IF, on both, put back after): 145.800 MHz, its
+    IF 29.800 past Korea's 10 m, refused on each as outside the TX ranges; the ranges are the IF's (tx_ranges.c: hz
+    less the shift)"""
+    import contextlib
+    res = {}
+    was = {}
+    try:
+        for n in o.r:
+            _outside_on(o, n)
+        with contextlib.ExitStack() as keep:
+            with o.step("both on the Sentry's A on 14.200, nothing armed; transverter 0 (144-148 MHz, shift 116 MHz, "
+                        "0.1 W) and TX ranges South Korea on both") as s:
+                oa.page_both(o, "A")
+                _both_on(o, F_HOME)
+                _off_air(o)
+                for n, r in o.r.items():
+                    keep.enter_context(oa.cfg_kept(r, XV))
+                for n, r in o.r.items():
+                    was[n] = str(oa.cfg(r, "tx_ranges"))
+                    old, now = bench.cfg_set(r, "tx_ranges", 1)
+                    if str(now) != "1":
+                        raise Refused(f"{n}: tx_ranges reads {now!r} after asking 1")
+                s.confirm(f"tx_ranges as found {was}")
+            try:
+                with o.step(f"{mhz(F_XV_OUT)} on both (its IF {mhz(F_XV_OUT - XV['transverter_0_shift'])}): the PTT "
+                            f"refused as outside the TX ranges") as s:
+                    _both_on(o, F_XV_OUT)
+                    _off_air(o)
+                    res["said"] = {n: press(o, r, "ptt", F_XV_OUT, OFF_RANGE) for n, r in o.r.items()}
+                    s.confirm(res["said"][H.A])
+            finally:
+                _ranges_back(o, was)
+                was = {}
+                try:
+                    _both_on(o, F_HOME)     # off the transverter's band before it goes
+                except Refused as e:
+                    o.st.ev(f"not back on {mhz(F_HOME)} before the transverter went: {e}", "bad")
+        return True, f"South Korea's ranges through a 2 m transverter: {mhz(F_XV_OUT)} (IF past 29.700) refused on " \
+                     f"both ({res['said'][H.A]})", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        _ranges_back(o, was)
+        try:
+            _both_on(o, F_HOME)
+        except Refused:
+            pass
+        oa.home_both(o)
+
+
 def t_tx_ranges_own(o):
     """The own list on both: /mnt/tx_ranges.conf (kept, put back byte for byte after) with 7.000-7.100, a line with a
     decimal comma (not a range) and 14.000-14.100 with spaces and a comment; Own list chosen as the web chooses it (the
@@ -692,6 +748,7 @@ COVERS = {
     "tx-shift-rules": (["tx-shift-reverse", "tx-shift-band-scope", "tx-shift-out-of-band-refused"],
                        ["tx-shift-setting", "tx-shift-vfo-b-rules", "settings-general-tx-shift"]),
     "armed-knob-lock": ([], ["sentry-armed-knob-lock"]),
+    "tx-ranges-xvtr": ([], ["tx-ranges-transverter-if"]),
 }
 
 
@@ -705,6 +762,8 @@ def tests(Test, A, B):
              "14.200: the PTT and TUNE refused as receive only", t_tx_rx_only, 40),
         Test("tx-ranges-kr", role, "TX ranges South Korea on both: ham-band frequencies outside Korea's refused as "
              "outside the TX ranges (TUNE too on 7.250); put back", t_tx_ranges_kr, 50),
+        Test("tx-ranges-xvtr", role, "South Korea's ranges through a 2 m transverter (28 MHz IF) on both: 145.800, its "
+             "IF past 29.700, refused as outside the TX ranges; put back", t_tx_ranges_xvtr, 40),
         Test("tx-ranges-own", role, "the own list's file (two ranges, a bad line) chosen as the web does: read back 2 "
              "ranges and the bad line, frequencies outside it refused; the file and the choice put back",
              t_tx_ranges_own, 60),
