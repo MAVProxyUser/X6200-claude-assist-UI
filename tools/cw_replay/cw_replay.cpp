@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "receiver.h"
+#include "trainer_gate.h"
 
 int main(int argc, char **argv) {
     float lo = argc > 1 ? atof(argv[1]) : 0, hi = argc > 2 ? atof(argv[2]) : 3000;
@@ -21,17 +22,27 @@ int main(int argc, char **argv) {
     double t = 0;
     long steps = 0;   /* detector steps (8 ms): the time the detector keys by, also through its replays */
     cw::Receiver *rx = nullptr;
+    /* TRAINER=1: the trainer's gate on the text too (trainer_gate.h, as src/cw.cpp has it) */
+    cw::TrainerGate gate;
+    bool down_now = false, gated = getenv("TRAINER") != nullptr;
     rx = new cw::Receiver(
         [&](const char *s, bool own) {
+            if (gated && !gate.pass(s, own)) {
+                if (getenv("TEXTS")) fprintf(stderr, "%7.3f text '%s' dropped (the trainer's gate)\n", t, s);
+                return;
+            }
             text += s;
-            (void)own;
             if (getenv("TEXTS")) fprintf(stderr, "%7.3f text '%s'\n", t, s);   /* TEXTS=1: each piece, by time */
         },
         [&](bool down) {
+            down_now = down;
             if (down) keys++;
             if (getenv("KEYS")) fprintf(stderr, "%7.3f %s (step %.3f s)\n", t, down ? "down" : "up", steps * 0.008);
         },
-        [&]() { steps++; });
+        [&]() {
+            steps++;
+            if (down_now) gate.keyed_step(rx->snr_db());
+        });
     rx->set_floor_db(floor_db);
     rx->set_band(lo, hi);
     /* APF=tone:q: the radio's peak filter on (its colour in the audio: replay.py does not put it there) */
@@ -47,6 +58,24 @@ int main(int argc, char **argv) {
             rx->set_base_peak(true, tone, q);
     }
     if (argc > 4) rx->expect(atof(argv[4]));
+    /* TRAINER=1: the CW trainer open (its speed range, Receiver::trainer_range); OWN=n: its next n elements our own
+     * (Receiver::own); TX=a-b,c-d: the radio transmitting over those seconds (Receiver::transmitting), as in the
+     * trainer's key train at 0 W, where the audio is its own sidetone */
+    if (getenv("TRAINER")) rx->trainer_range(true);
+    if (getenv("TRAINER") && argc > 4) rx->expect(atof(argv[4]));      /* the range clamps the speed: told after it */
+    if (const char *on = getenv("OWN")) rx->own(atoi(on));
+    if (const char *pn = getenv("PIN")) rx->pin(atof(pn));      /* PIN=hz: the tone pinned (the trainer's key tone) */
+    std::vector<std::pair<double, double>> tx_spans;
+    if (const char *sp = getenv("TX")) {
+        for (const char *q = sp; *q;) {
+            double a = 0, b = 0;
+            if (sscanf(q, "%lf-%lf", &a, &b) == 2) tx_spans.emplace_back(a, b);
+            const char *c = strchr(q, ',');
+            if (!c) break;
+            q = c + 1;
+        }
+    }
+    bool tx_now = false;
     std::vector<float> buf(32);
     std::vector<int16_t> s16(buf.size());
     bool   is_s16 = getenv("S16") != nullptr;
@@ -56,6 +85,15 @@ int main(int argc, char **argv) {
                        : fread(buf.data(), sizeof(float), buf.size(), stdin)) > 0) {
         if (is_s16)
             for (size_t i = 0; i < n; i++) buf[i] = s16[i] / 16384.0f;
+        if (!tx_spans.empty()) {
+            bool on = false;
+            for (auto &sp : tx_spans) on = on || (t >= sp.first && t < sp.second);
+            if (on != tx_now) {
+                rx->transmitting(on);
+                tx_now = on;
+                if (getenv("KEYS")) fprintf(stderr, "%7.3f transmitting %d\n", t, on ? 1 : 0);
+            }
+        }
         rx->feed(buf.data(), n);
         t += n / 4000.0;
         if (getenv("LOCKS") && std::abs(rx->lock_hz() - last_lock) >= 5.0f) {

@@ -10,6 +10,7 @@
 // First: the decoder headers bring <complex>, which liquid.h must see before
 // it is included anywhere else
 #include "cw_decoder/audio_resampler.h"
+#include "cw_decoder/trainer_gate.h"
 
 #include "cw.h"
 #include "dsp.h"
@@ -109,6 +110,7 @@ static uint32_t            rx_count = UINT32_MAX;   /* samples since the radio l
 #define SQ_CLOSE        2
 #define SQ_IDLE_FRAMES  375     /* 3 s of 8 ms frames */
 static int         sq_keyed;              /* frames since the last character */
+static cw::TrainerGate tgate;             /* the CW trainer's: its noise keys dropped (trainer_gate.h), audio thread */
 static float       sq_snr;                /* sum of the keyed frames' SNR (dB) */
 static int         sq_idle;
 static bool        sq_open = false;
@@ -233,6 +235,14 @@ void cw_put_audio_samples(unsigned int n, float *samples) {
     if (tr != trainer_range) {
         receiver->trainer_range(tr);
         trainer_range = tr;
+        tgate.reset();
+    }
+    /* The trainer's: its own sidetone at the key tone, nothing else (Receiver::pin) */
+    static float pinned = 0.0f;
+    float        pin_at = tr ? (float)key_tone : 0.0f;
+    if (pin_at != pinned) {
+        receiver->pin(pin_at);
+        pinned = pin_at;
     }
     int wpm = trainer_wpm.exchange(0);
     if (wpm > 0)
@@ -327,6 +337,8 @@ static void on_text(const char *text, bool own) {
         return;
     if (!trainer && !squelch(text))
         return;
+    if (trainer && !tgate.pass(text, own))
+        return;
     cw_decoder_text(text, own);
 
     int wpm = lroundf(receiver->wpm());
@@ -351,6 +363,7 @@ static void on_frame() {
     if (keyed) {
         sq_keyed++;
         sq_snr += receiver->snr_db();
+        tgate.keyed_step(receiver->snr_db());
         sq_idle = 0;
     } else if (++sq_idle >= SQ_IDLE_FRAMES && (sq_open || !sq_pending.empty())) {
         sq_open = false;

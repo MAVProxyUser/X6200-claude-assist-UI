@@ -61,7 +61,7 @@ void Receiver::feed(const float *x, size_t n) {
              * noise at the lock: the quiets no better, a station at the tone found later */
             step_noise_ = finder_.noise() * NOISE_TO_STEP * finder_.colour_at(lock_.hz());
             lock_.set_noise(step_noise_);
-            if (lock_.follow(peak_)) {
+            if (pin_hz_ <= 0.0f && lock_.follow(peak_)) {
                 /* The noise at the new tone: with a colour it can be 30 dB from the old one's, and the audio given
                  * again (rewind) is judged against it */
                 step_noise_ = finder_.noise() * NOISE_TO_STEP * finder_.colour_at(lock_.hz());

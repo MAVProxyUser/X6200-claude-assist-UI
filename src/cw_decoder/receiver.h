@@ -62,7 +62,17 @@ class Receiver {
      * A change measures the band again (start_over) */
     void  set_base_peak(bool on, float tone_hz, float q);
     /* The VFO moved: the station is df Hz further up in the audio */
-    void  follow_vfo(float df) { lock_.shift(df); }
+    void  follow_vfo(float df) {
+        if (pin_hz_ <= 0.0f) lock_.shift(df);
+    }
+    /* The tone pinned at hz (the CW trainer open: all it decodes is the radio's own sidetone at the key tone), 0 free:
+     * the lock tuned there and moved by nothing it finds. Free, it went to a line of the X6100's band 19-26 dB over
+     * its noise (297 Hz) in the seconds between groups, held it as "the station", and the group's first dah broke on
+     * the way to the sidetone (the trainer read MMM as 'EE<?>HAMM', 2026-11-27; tools/cw_replay TRAINER=1) */
+    void  pin(float hz) {
+        pin_hz_ = hz;
+        if (hz > 0.0f) lock_.tune(hz);
+    }
     /* The next n dits and dahs are our own keying (MorseText::own), not
      * learned (ElementTimer::ours) */
     void  own(int n) { text_.own(n); }
@@ -103,6 +113,7 @@ class Receiver {
 
     float step_noise_ = -1.0f;   /* noise of one integrator step, < 0 = not known */
     bool  tx_         = false;   /* the radio is transmitting (transmitting) */
+    float pin_hz_     = 0.0f;    /* the tone pinned (pin), 0 free */
     /* A key down not passed on yet (detector_step): since this long, its crossing this long before its step */
     bool  pend_       = false;
     float pend_ms_    = 0.0f;

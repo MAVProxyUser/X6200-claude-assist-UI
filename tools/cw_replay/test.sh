@@ -102,5 +102,16 @@ case $out in
     *"text: 'TEST TEST "*) echo "ok   dits through the AGC's overshoot: $out" ;;
     *) echo "FAIL dits through the AGC's overshoot: $out"; bad=$((bad + 1)) ;;
 esac
+# The CW trainer on the X6100 (2026-11-27, orch trainer probe): seconds of its band in CW (lines at 297, 331 and 388 Hz,
+# 19-26 dB over the bins' noise), its own group MMM at 20 WPM in train mode, then the same keyed as an answer through
+# the radio's keyer. Free, the tracker held the 297 Hz line as the station and the group's first dah broke on the way
+# to the sidetone: 'T'; and the quiet after keyed noise E's the trainer took for the answer. Pinned at the key tone
+# (Receiver::pin) with the trainer's gate (trainer_gate.h): both MMM, nothing else
+n=$((n + 1))
+out=$(TRAINER=1 OWN=6 PIN=700 S16=1 ./cw_replay 300 3000 8 20 < x6100_trainer_session.s16 2> /dev/null)
+case $out in
+    *"text: 'MMM MMM '"*) echo "ok   the trainer's group and answer after the band's lines: $out" ;;
+    *) echo "FAIL the trainer's group and answer after the band's lines: $out"; bad=$((bad + 1)) ;;
+esac
 echo "cw_replay: $n checks, $bad failed"
 [ $bad -eq 0 ]
