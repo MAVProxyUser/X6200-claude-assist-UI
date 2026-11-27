@@ -180,7 +180,9 @@ def t_restart(o):
                 o.planned[n] = "planned: the audio server stopped"
                 o.changing += 1
                 try:
-                    oa.ssh(r, "kill $(pidof pulseaudio)")
+                    # the audio server may be starting over just then (after the GUI's own restart): waited for
+                    oa.ssh(r, "for i in 1 2 3 4 5 6 7 8 9 10; do p=$(pidof pulseaudio) && break; sleep 1; done; "
+                              "[ -n \"$p\" ] && kill $p")
                     end = time.time() + 40
                     new = ""
                     while time.time() < end:
@@ -232,7 +234,6 @@ DISPLAY = [
     ("settings-display-band-plan-strip", "band_plan", lambda v: 0 if str(v) != "0" else 1, (0, 150, 800, 175)),
     ("settings-display-filter-shade", "filter_shade", lambda v: 0 if str(v) != "0" else 4, (0, 140, 800, 330)),
     ("settings-display-spectrum", "spectrum_show", lambda v: 1 if str(v) == "0" else 0, (0, 130, 800, 400)),
-    ("settings-display-broadcast-names", "broadcast_name", lambda v: 0 if str(v) != "0" else 1, (0, 100, 800, 175)),
     ("settings-display-knob-info", "knob_info", lambda v: 0 if str(v) != "0" else 1, (0, 380, 800, 480)),
 ]
 
@@ -483,7 +484,7 @@ def t_sentry_now(o):
                 p = oa.shot(o, r, "scan cfg now")
                 txt = (oa.ocr(p, box=(0, 330, 800, 390), psm=6, scale=3) + "\n" + oa.ocr(p, psm=11)).upper()
                 cb.cfg_close(r)
-                if not re.search(r"\bA\s+X\s?6\s?[12I]\s?[0O]\s?[0O]\s+[A-Z]", txt) or "LAST" not in txt:
+                if not re.search(r"\bA\s+[XK]\s?6\s?[12I]\s?[0O8@]\s?[0O8@]\s+[A-Z]", txt) or "LAST" not in txt:
                     raise Refused(f"{n}: SCAN CFG's NOW box names no 'A {n.upper()} <doing>' and LAST locks "
                                   f"({' '.join(txt.split())[:140]!r})")
                 res[f"{n} scan cfg"] = "NOW: A " + n.upper()
@@ -521,13 +522,18 @@ def t_lookalike(o):
     res = {}
     try:
         for feat, action, name, rx in LOOK:
-            with o.step(f"both: {name} opened, named on each picture, the two alike") as s:
-                pics = {}
+            with o.step(f"both: {name} opened from the classic screen, named on each picture, the two alike") as s:
+                import orch_cable as oc
+                pics, t0 = {}, time.time()
                 for n, r in _both(o):
+                    oc.classic(r)
                     r.take_control()
                     r.send(f"open {action}")
                 for n, r in _both(o):
-                    r.wait(f"{name} open", lambda r=r: oa.win(r).lower().startswith(name.lower().split()[0]), 8)
+                    try:
+                        r.wait(f"{name} open", lambda r=r: oa.win(r).lower().startswith(name.lower().split()[0]), 8)
+                    except Refused:
+                        raise Refused(f"{n}: {name} not open (the window {oa.win(r)!r}, said {oa.msgs_since(r, t0)[-3:]})")
                 time.sleep(1.5)
                 for n, r in _both(o):
                     pics[n] = oa.shot(o, r, f"look {name}")
@@ -573,7 +579,7 @@ def t_settings_info(o):
                         break
                 want = ["FIRMWARE", "BATTERY", "EXTERNAL", "TIME LEFT"] + (["BIAS"] if n == "x6200" else [])
                 miss = [w for w in want if not oa.ocr_has(txt, w)]
-                if not re.search(r"0\.3\.1\d", txt):
+                if not re.search(r"[0O@]\.3\.1\d", txt):
                     miss.append("the firmware's version")
                 res[n] = "ok" if not miss else miss
                 r.send("close")

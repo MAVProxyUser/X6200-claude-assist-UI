@@ -246,8 +246,9 @@ def _code_on_screen(o, r, label):
         p = oa.shot(o, r, f"{label} {k + 1}")
         got = set()
         # two ways that read it right (one read 922628 as 222028 the same both times, 11-27): both must agree
-        for box, psm, scale in (((100, 265, 700, 350), 6, 2), ((180, 280, 620, 335), 7, 4)):
-            txt = oa.ocr(p, box=box, psm=psm, scale=scale)
+        for box, psm, scale, up in (((100, 265, 700, 350), 6, 2, False), ((180, 280, 620, 335), 7, 4, False),
+                                    ((360, 20, 440, 460), 7, 3, True)):     # drawn standing on page G
+            txt = oa.ocr(p, box=box, psm=psm, scale=scale, upright=up)
             for m in re.finditer(r"code\W*([0-9OoDQIl|SBZG]{6})\b", txt, re.I):
                 got.add(m.group(1).translate(DIGITS))
         reads.append(next(iter(got)) if len(got) == 1 and next(iter(got)).isdigit() else None)
@@ -266,6 +267,7 @@ def t_pairing(o):
     r = o.r[H.A]
     res, c, v, tok = {}, None, None, None
     try:
+        oa.page_both(o, "A")            # the code's box over page A (on G it stands, drawn upright)
         with o.step("x6100: a viewer's mirror flowing; 'pair?' from a new browser: the code shown, the mirror stopped") \
                 as s:
             v = Remote(r.host, 50002, timeout=8)
