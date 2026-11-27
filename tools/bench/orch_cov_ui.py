@@ -549,6 +549,96 @@ def t_settings_info(o):
         oa.home_both(o)
 
 
+
+# ---- The QTH locator on the screen; a memory channel's name on the strip (settings-general-callsign-qth,
+#      main-screen-channel-name) ----
+
+def t_qth_channel(o):
+    """On each radio's classic screen: the QTH locator set to AA00aa (the remote's cfg, read back) shows at the top
+    right as AA00AA, and back as found; a memory channel BENCHCH added at 14.205 USB (the channels file kept aside,
+    put back byte for byte): on its frequency the strip says 'CH BENCHCH', tuned 1 kHz off it does not"""
+    import orch_cable as oc
+    res = {}
+    try:
+        for n, r in _both(o):
+            out = res[n] = {}
+            with o.step(f"{n}: the QTH locator AA00aa on the classic screen, and back") as s:
+                oc.classic(r)
+                with oa.cfg_kept(r, {"qth": "AA00aa"}):
+                    time.sleep(1.5)
+                    p = oa.shot(o, r, "qth aa00aa")
+                    txt = oa.ocr(p, box=(600, 60, 800, 115), psm=6, scale=3).upper().replace("0", "O")
+                    if "AAOOAA" not in txt.replace(" ", ""):
+                        raise Refused(f"{n}: the locator AA00aa not shown at the top right ({txt.strip()!r})")
+                out["qth"] = "AA00AA shown"
+                s.confirm(out["qth"])
+            with o.step(f"{n}: a memory channel BENCHCH at 14.205 USB: 'CH BENCHCH' on its frequency, not 1 kHz off") \
+                    as s:
+                with oa.file_kept(r, "/mnt/channels.json"):
+                    oa._ch_add(r, "BENCHCH", 14205000, "USB")
+                    o.changing += 1
+                    try:
+                        bench.ensure(r, {"freq": 14205000, "mode": 2})
+                        time.sleep(1.5)
+                        on = oa.ocr(oa.shot(o, r, "channel on"), box=(0, 60, 800, 120), psm=6, scale=3).upper()
+                        bench.ensure(r, {"freq": 14206000})
+                        time.sleep(1.5)
+                        off = oa.ocr(oa.shot(o, r, "channel off"), box=(0, 60, 800, 120), psm=6, scale=3).upper()
+                    finally:
+                        bench.ensure(r, {"freq": 14200000, "mode": 2})
+                        o.changing -= 1
+                    # the channel file put back as it was: the GUI reads it again (its time changes)
+                if "BENCHCH" not in on.replace(" ", "") or "BENCHCH" in off.replace(" ", ""):
+                    raise Refused(f"{n}: on the channel the strip read {on.strip()[:80]!r}, 1 kHz off "
+                                  f"{off.strip()[:80]!r}")
+                out["channel"] = "CH BENCHCH on, gone off"
+                s.confirm(out["channel"])
+        return True, f"the locator and a channel's name shown on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+# ---- C LOG's WHAT IT WAS, F's spectrogram (c-log-what-it-was, f-system-spectrogram) ----
+
+def t_c_f(o):
+    """Page C on both: C LOG's rows say what each frequency was (HAM .., FT8, AM BC, WWV, CB .., NOAA ..: its known
+    use); page F: WHAT IT DOES under the chosen item shows the spectrogram of A's spectrum, moving (two pictures a
+    second apart differ there)"""
+    res = {}
+    try:
+        with o.step("both on page C: the rows' WHAT IT WAS") as s:
+            oa.page_both(o, "C")
+            time.sleep(1.5)
+            for n, r in _both(o):
+                p = oa.shot(o, r, "c log what")
+                txt = (oa.ocr(p, psm=6, stretch=True) + oa.ocr(p, psm=11)).upper()
+                words = sorted(set(re.findall(r"\b(HAM\s+\d+\s*M|FT8|FT4|AM\s+BC|WWV\w?|CB\s+\d+|NOAA|NAVTEX|SW\s+BC|"
+                                              r"UNKNOWN|AIR\w*|MARINE)\b", txt)))
+                res[f"{n} C"] = words
+                if not words:
+                    raise Refused(f"{n}: C LOG's rows say no known use ({' '.join(txt.split())[:120]!r})")
+            s.confirm(str({k: v for k, v in res.items() if k.endswith(" C")}))
+        with o.step("both on page F: the spectrogram under the chosen item moves") as s:
+            oa.page_both(o, "F")
+            time.sleep(1.5)
+            for n, r in _both(o):
+                a = oa.shot(o, r, "f spectrogram a")
+                time.sleep(1.2)
+                b = oa.shot(o, r, "f spectrogram b")
+                moved = _diff(a, b, (400, 150, 800, 400))
+                res[f"{n} F"] = round(moved, 3)
+                if moved < 0.01:
+                    raise Refused(f"{n}: F's WHAT IT DOES part did not move in 1.2 s ({moved:.1%})")
+            s.confirm(str({k: v for k, v in res.items() if k.endswith(" F")}))
+        return True, f"C LOG's known uses and F's moving spectrogram on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
 COVERS = {
     "ui-restart": (["perf-overlay", "gpu-off-file", "sentry-resume-after-restart", "cw-beacon-off-after-restart",
                     "sdr-daemon-persistent", "network-x6100-wifi-power-held", "system-x6200-base-keeper",
@@ -560,6 +650,8 @@ COVERS = {
     "ui-settings-kept": ([], [f for f, _, _ in KEPT] + ["tx-ranges-choice"]),
     "ui-sentry-now": (["scancfg-now-box", "sentry-now-sun"], []),
     "ui-settings-info": (["settings-info-firmware", "settings-info-power-box"], []),
+    "ui-qth-channel": (["settings-general-callsign-qth", "main-screen-channel-name"], []),
+    "ui-c-f": (["c-log-what-it-was", "f-system-spectrogram"], []),
     "ui-system-readonly": (["system-base-fw-flash-check"], ["system-update-integrity", "system-update-sd-card-guard"]),
 }
 
@@ -580,6 +672,9 @@ def tests(Test, A, B):
              "n SIG)", t_sentry_now, 40),
         Test("ui-settings-info", "both", "Settings > Info: the FIRMWARE card with the version (the X6200's PA bias), "
              "the POWER box", t_settings_info, 40),
+        Test("ui-qth-channel", "both", "the QTH locator AA00aa shown at the top right; a memory channel's 'CH NAME' on "
+             "the strip on its frequency, gone 1 kHz off", t_qth_channel, 60),
+        Test("ui-c-f", "both", "page C's rows say what each frequency was; page F's spectrogram moves", t_c_f, 40),
         Test("ui-system-readonly", "both", "read only: base-flash --check takes the radio's own firmware and refuses "
              "the other's (named and renamed); bundle-info refuses another radio's bundle and one writing outside",
              t_system_readonly, 60),

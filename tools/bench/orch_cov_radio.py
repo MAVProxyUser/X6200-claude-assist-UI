@@ -925,6 +925,58 @@ def t_sentry_rds(o):
 
 
 
+# ---- The TCI SERVER card names its client (tci-card-client) ----
+
+def t_tci_card(o):
+    """On each radio, a TCI client connected from this computer: Settings > General, walked down with the MFK to the
+    TCI SERVER card, shows the client's address (compared, never said); the client gone, the card says no client"""
+    names = ("Settings",)
+    res = {}
+    try:
+        for n, r in _both(o):
+            with o.step(f"{n}: Settings > General's TCI SERVER card with a client, then without") as s:
+                me = oa.ssh(r, "echo ${SSH_CLIENT%% *}").strip()
+                st, conf = oa.http_json(r, "/api/tci")
+                port = int(conf.get("port", 50001)) if isinstance(conf, dict) else 50001
+                c = _tci_client(r, port)
+                try:
+                    r.take_control()
+                    r.send("open 104")
+                    r.wait("Settings open", lambda: oa.win(r).lower().startswith("settings"), 8)
+                    oa.press_label(r, r"^General", names, rest=1.0)
+                    seen = ""
+                    for k in range(14):
+                        p = oa.shot(o, r, f"tci card {k + 1}")
+                        seen = oa.ocr(p, box=(160, 120, 795, 420), psm=6, scale=2).upper()
+                        if "TCI" in seen and "SERVER" in seen:
+                            break
+                        oa.turn(r, "mfk", 3, names, rest=0.6)
+                    if "TCI" not in seen:
+                        raise Refused(f"{n}: no TCI SERVER card found walking Settings > General")
+                    with_client = me in seen.replace(" ", "")
+                    c.close()
+                    c = None
+                    time.sleep(2.5)
+                    p = oa.shot(o, r, "tci card after")
+                    after = oa.ocr(p, box=(160, 120, 795, 420), psm=6, scale=2).upper()
+                    r.send("close")
+                finally:
+                    if c is not None:
+                        c.close()
+                gone = me not in after.replace(" ", "") and re.search(r"NO\s+CLIENT", after)
+                res[n] = {"with": with_client, "gone": bool(gone)}
+                if not with_client or not gone:
+                    raise Refused(f"{n}: the TCI SERVER card {'named' if with_client else 'did not name'} the client, "
+                                  f"after it left {'said no client' if gone else 'did not say no client'}")
+                s.confirm("the client named, then no client")
+        return True, f"the TCI SERVER card names its client and then says no client on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+
 COVERS = {
     "ft8-nocall": (["ft8-nocall", "ft8-tx-off-dry-run"], []),
     "x6200-start": (["register-32-x6200", "pa-bias-x6200", "tx-x6200-base-band-table"], []),
@@ -933,6 +985,7 @@ COVERS = {
     "remote-pairing": (["pair-code-request", "pair-with-code", "pair-rate-limit", "pair-mirror-pause"],
                        ["role-admin-first"]),
     "gen-pages": (["radio-core-gen-pages-defaults", "app-button-pages"], []),
+    "tci-card": (["tci-card-client"], []),
     "tci-ask-flow": (["tci-ask-one-question", "tci-cw-ask-first-text"], ["tci-ask-always", "tci-browser-key-no-ask"]),
     "sentry-rds": (["sentry-b-rds", "sentry-title-usb-tags", "scancfg-b-gain-squelch"], []),
     "sentry-b-sdr": (["sentry-b-mode-by-band", "sentry-b-vfo-channel"], []),
@@ -962,6 +1015,8 @@ def tests(Test, A, B):
         Test("sentry-b-sdr", "both RX", "B's SDR on 98.1, 121.5 and 146.52 MHz: WFM, AM, NFM; a VFO click 100, 25 and "
              "12.5 kHz", t_sentry_b, 50),
         Test("g-vol-popup", "both", "page G: a VOL click draws the pop-up, gone 3.5 s later", t_g_vol_popup, 30),
+        Test("tci-card", "both", "Settings > General's TCI SERVER card names a connected client, then says no client",
+             t_tci_card, 60),
         Test("tci-ask-flow", "both, one at a time", "TCI's Ask before TX on the classic screen: one question for two "
              "starts, the other radio's start refused unasked, a CW text asks and is not sent, Always kept, a no-TX "
              "browser key refused unasked; nothing keyed; the GUI restarted after (planned)", t_tci_ask, 120),
