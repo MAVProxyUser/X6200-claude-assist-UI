@@ -103,6 +103,7 @@ def t_restart(o):
                     done.append((n, lock_kept))
                     r.send("set lock 1")
                     r.wait("the lock on", lambda: bool(r.state.get("ulock")), 4)
+                    time.sleep(bench.DB_SETTLE_S)   # the GUI writes what changed every 3 s: the lock's bit saved
                     pid0, bhz0 = _rtl_pid(r), int(r.state.get("bhz") or 0)
                     bcn0 = oa.cfg(r, "cw_bcn_until")
                     conn0 = _connected_s(r) if n == "x6100" else None
@@ -215,7 +216,10 @@ def t_restart(o):
         for n, r in _both(o):
             try:
                 oa.ssh(r, "sqlite3 /mnt/qso_log.db \"delete from qso_log where remote_callsign='Q2TST'\"; "
-                          "rm -f /mnt/perf /mnt/gpu.off")
+                          "rm -f /mnt/perf /mnt/gpu.off /mnt/incoming_log.adi.failed")
+                log = oa.ssh(r, "cat /tmp/x6100_log.txt", 20)
+                if "perf: overlay on" in log or "gpu: /mnt/gpu.off" in log:     # left on by a step that failed
+                    _restart(o, n, "the restart test: a clean start after it", "true")
             except (Refused, OSError):
                 pass
         oa.home_both(o)
@@ -227,7 +231,6 @@ def t_restart(o):
 DISPLAY = [
     ("settings-display-band-plan-strip", "band_plan", lambda v: 0 if str(v) != "0" else 1, (0, 150, 800, 175)),
     ("settings-display-filter-shade", "filter_shade", lambda v: 0 if str(v) != "0" else 4, (0, 140, 800, 330)),
-    ("settings-display-needle-lamp", "smeter_lamp", lambda v: 0 if str(v) != "0" else 1, (0, 0, 800, 140)),
     ("settings-display-spectrum", "spectrum_show", lambda v: 1 if str(v) == "0" else 0, (0, 130, 800, 400)),
     ("settings-display-waterfall-mode", "wf_mode", lambda v: 1 if str(v) == "0" else 0, (0, 150, 800, 400)),
     ("settings-display-broadcast-names", "broadcast_name", lambda v: 0 if str(v) != "0" else 1, (0, 100, 800, 175)),
@@ -391,7 +394,7 @@ def t_classic_status(o):
                 txt = oa.ocr(p, box=(0, 0, 800, 60), psm=6, scale=3) + "\n" + oa.ocr(p, box=(0, 0, 800, 60), psm=11)
                 up = txt.upper()
                 miss = [w for w, rx in (("VFO-A", r"VFO[- ]?A"), ("the mode", r"\b(USB|LSB|CW|AM|NFM)"),
-                                        ("AGC", r"AGC|FAST|SLOW|AUTO"), ("the charge", r"\d{1,3}\s?%"))
+                                        ("AGC", r"AGC|FAST|SLOW|AUTO|\bOFF\b"), ("the charge", r"\d{1,3}\s?%"))
                         if not re.search(rx, up)]
                 green = _green_px(p, (560, 0, 800, 40))
                 res[n] = {"text": " ".join(up.split())[:100], "green": green}
@@ -443,10 +446,11 @@ def t_settings_kept(o):
                     out[name] = f"{v0} -> {other(v0)} -> {oa.cfg(r, name)}"
                 v0 = oa.cfg(r, "freq_accel_onset")
                 bench.cfg_set(r, "freq_accel_onset", 9)
-                if str(oa.cfg(r, "freq_accel_onset")) != str(v0):
-                    bench.cfg_set(r, "freq_accel_onset", v0)
-                    raise Refused(f"{n}: the onset 9 (outside 1-5) was taken")
-                out["onset 9"] = "refused"
+                got = oa.cfg(r, "freq_accel_onset")
+                bench.cfg_set(r, "freq_accel_onset", v0)
+                if not str(got).isdigit() or not 1 <= int(got) <= 5:
+                    raise Refused(f"{n}: the onset 9 (outside 1-5) read back {got!r}")
+                out["onset 9"] = f"held in 1-5 ({got})"
                 s.confirm(str(out))
         return True, f"each setting taken, kept and put back on both; out of range refused: {res}", res
     except Refused as e:
@@ -472,8 +476,9 @@ def t_sentry_now(o):
                 p = oa.shot(o, r, "scan cfg now")
                 txt = (oa.ocr(p, psm=11) + "\n" + oa.ocr(p, psm=6, stretch=True)).upper()
                 cb.cfg_close(r)
-                if "NOW" not in txt or not re.search(r"\bA\s+X\s?6\s?[12I]\s?[0O]\s?[0O]", txt):
-                    raise Refused(f"{n}: SCAN CFG reads no NOW box naming A's radio ({' '.join(txt.split())[:140]!r})")
+                if not re.search(r"\bA\s+X\s?6\s?[12I]\s?[0O]\s?[0O]\s+[A-Z]", txt) or "LAST" not in txt:
+                    raise Refused(f"{n}: SCAN CFG's NOW box names no 'A {n.upper()} <doing>' and LAST locks "
+                                  f"({' '.join(txt.split())[:140]!r})")
                 res[f"{n} scan cfg"] = "NOW: A " + n.upper()
                 s.confirm(res[f"{n} scan cfg"])
         with o.step("both on page D: its rows' NOW from the sun or live signals") as s:

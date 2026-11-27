@@ -175,12 +175,23 @@ def t_app_power(o):
             finally:
                 o.changing -= 1
             s.confirm(f"{[_pwr(r) for _, r in _both(o)]} W")
-        with o.step("FT8 opened on both: 'Power is limited to 7W', the setting still 8 W") as s:
+        with o.step("FT8 opened on both: 'Power is limited to 7W', the setting still 8 W; closed: 8 W") as s:
             t0 = time.time()
-            oa._ft8_open(o)
             for n, r in _both(o):
+                r.take_control()
+                r.send("ft8 open")
+            for n, r in _both(o):
+                r.wait("the FT8 window", lambda r=r: oa.win(r) == "FT8", 8)
                 res[f"{n} said"] = oa.wait_msg(r, t0, r"Power is limited to 7 ?W", 5)
+                if _pwr(r) != 8.0:
+                    raise Refused(f"{n}: the power setting reads {_pwr(r)} W with FT8 open, not the 8 W asked")
+            oa._ft8_close(o)
+            for n, r in _both(o):
+                r.wait("8 W", lambda r=r: _pwr(r) == 8.0, 6)
             s.confirm(str(res))
+        with o.step("FT8 opened on both for its Power button") as s:
+            oa._ft8_open(o)
+            s.confirm("open")
         with o.step("the app's Power button on both: 0.1, 0.2, 0.5, 1, 2, 3, 5, 7 W round, its label read") as s:
             def steps(n, r):
                 k = oa._to_label(r, r"^Power", names)
@@ -201,11 +212,6 @@ def t_app_power(o):
                 if want != seen:
                     raise Refused(f"{n}: the Power button read {seen}, not round {APP_STEPS}")
             s.confirm(str(got))
-        with o.step("FT8 closed on both: the power setting 8 W") as s:
-            oa._ft8_close(o)
-            for n, r in _both(o):
-                r.wait("8 W", lambda r=r: _pwr(r) == 8.0, 6)
-            s.confirm("8 W")
         return True, f"the apps say 7 W and leave the setting; their Power button steps {APP_STEPS}: {res}", res
     except Refused as e:
         return False, str(e), res
@@ -228,15 +234,23 @@ def t_app_power(o):
 PAIR_NAME = "bench-pair-test"
 
 
+DIGITS = str.maketrans({"O": "0", "o": "0", "D": "0", "Q": "0", "I": "1", "l": "1", "|": "1", "S": "5", "B": "8",
+                        "Z": "2", "G": "6"})
+
+
 def _code_on_screen(o, r, label):
-    """The six-digit pairing code read off r's screen (OCR), or None"""
-    for k in range(3):
+    """The six-digit pairing code read off r's screen ('Pair code: 061346 (2 min)' in its box over the middle), the
+    same in two pictures running, or None: a wrong code tried burns it (and three double the wait)"""
+    reads = []
+    for k in range(4):
         p = oa.shot(o, r, f"{label} {k + 1}")
-        txt = oa.ocr(p, psm=11) + "\n" + oa.ocr(p, box=(150, 100, 650, 380), psm=6, scale=3)
-        m = re.findall(r"(?<!\d)(\d{3})\s?(\d{3})(?!\d)", txt)
+        txt = oa.ocr(p, box=(100, 265, 700, 350), psm=7, scale=3)
+        m = re.search(r"code\W*([0-9OoDQIl|SBZG]{6})\b", txt, re.I)
         if m:
-            return "".join(m[0])
-        time.sleep(0.8)
+            reads.append(m.group(1).translate(DIGITS))
+            if len(reads) >= 2 and reads[-1] == reads[-2] and reads[-1].isdigit():
+                return reads[-1]
+        time.sleep(0.6)
     return None
 
 
@@ -363,6 +377,9 @@ def t_sentry_pages(o):
                 time.sleep(1.5)
                 for n, r in _both(o):
                     p, txt = _page_text(o, r, letter, f"page {letter}")
+                    if letter == "G":           # G is drawn upright: its text runs down the landscape picture
+                        txt += "\n" + oa.ocr(p, psm=11, upright=True) + "\n" + oa.ocr(p, psm=6, upright=True,
+                                                                                         stretch=True)
                     miss = [w for w in words if not oa.ocr_has(txt, w)]
                     if letter == "G" and not re.search(r"VIA\s*X\s*6\s*[12I][0O]\s*[0O]", txt.upper()):
                         miss.append(f"VIA {n.upper()}")
@@ -407,12 +424,12 @@ GEN_PAGES = {
 
 def _pages(r):
     """{page name: [its buttons]} from the remote's buttons? (button_bar.h buttons_layout_text)"""
-    n0 = len(r.lines)
+    t0 = time.time()
     r.send("buttons?")
     end = time.time() + 4
     while time.time() < end:
-        for _, t in list(r.lines)[n0:]:
-            if t.startswith("buttons "):
+        for at, t in list(r.lines):
+            if at >= t0 and t.startswith("buttons "):
                 out = {}
                 for part in t[len("buttons "):].split("|"):
                     bits = [b.strip() for b in part.split(";")]
@@ -574,7 +591,9 @@ def t_train_oob(o):
     res = {}
     try:
         for n, r in _both(o):
-            with o.step(f"{n}: CW on 15.000 MHz, KEY Train on: cwsend refused, nothing keyed") as s:
+            with o.step(f"{n}: the classic screen, CW on 15.000 MHz, KEY Train on: cwsend refused, nothing keyed") as s:
+                import orch_cable as oc
+                oc.classic(r)       # the Sentry holds the radio receive only: every key refused there without a word
                 with oa.cfg_kept(r, {"key_train": 1}):
                     o.changing += 1
                     try:

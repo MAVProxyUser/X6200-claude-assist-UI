@@ -6236,7 +6236,8 @@ def tci_row_test(o, sender, listener, f=14100000, tone=1000, amp=0.3):
 
 QUIET_FM_HZ = 107900000     # B's channel for it: a strong FM broadcast here (the RDS tests' station), WFM
 QUIET_SECS = 8.0            # each over's tone
-QUIET_LEAK_DB = 6.0         # the listener's audio off the tone this far over the over without the stick: the stick's
+QUIET_LEAK_DB = 6.0         # the sender's codec off the tone this far over the overs without the stick: the stick's
+QUIET_LEAK_RF_DB = 12.0     # the listener's: the X6200's own skirt wanders +-5 dB over by over (the leak was +22)
 QUIET_TONE_DB = 15.0        # the tone this far over the gap before it: on the air and heard
 QUIET_SINK = "alsa_output.platform-sound.stereo-fallback"   # the codec's PulseAudio sink on both radios
 QUIET_MON = "/tmp/bench_codec_monitor.raw"
@@ -6514,7 +6515,7 @@ def tci_rtl_quiet_test(o, sender, listener, f=14100000, tone=1000, amp=0.3):
                        f"{r1['codec_off_dbc'] - ref_c:+.1f} dB over the overs without it")
     if leak is None:
         bad.append("the listener's audio not measured")
-    elif leak > QUIET_LEAK_DB:
+    elif leak > QUIET_LEAK_RF_DB:
         bad.append(f"the stick's audio went out with the over: {leak:+.1f} dB off the tone over the over in play mode "
                    f"alone")
     words = (f"{sender} into {listener}: own receiver on {r0['base_on_share']:.0%}, tone {r0['tone_db']} dB, off it "
