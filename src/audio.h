@@ -33,6 +33,13 @@ void audio_mixer_setup(radio_base_ver_t base_ver);
 int audio_play(int16_t *buf, size_t samples);
 void audio_play_wait();
 void audio_play_flush();
+/* The speaker's own audio (the Sentry's stick, a recording, a preview, FreeDV's speech, a beep): audio_play, but
+ * dropped (paced as if it played) while the codec's audio is the transmitter's, a modem over or a network client's
+ * stream: whatever reaches the codec then goes out on the air, mixed into the over (on the headphones it plays on).
+ * audio_speaker_flush drops what the speaker's stream has queued: radio_set_modem does at the key, before an over's
+ * own audio is written */
+int audio_speaker_play(int16_t *buf, size_t samples);
+void audio_speaker_flush(void);
 
 /* Local playback on the Bluetooth headphones, from the playing thread (see audio.c) */
 bool audio_play_bt_begin(void);

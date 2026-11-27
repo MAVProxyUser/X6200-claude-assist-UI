@@ -6233,6 +6233,209 @@ def tci_row_test(o, sender, listener, f=14100000, tone=1000, amp=0.3):
                      + "; all: " + "; ".join(words(r) for r in rows)), {"rows": rows}
 
 
+
+QUIET_FM_HZ = 107900000     # B's channel for it: a strong FM broadcast here (the RDS tests' station), WFM
+QUIET_SECS = 8.0            # each over's tone
+QUIET_LEAK_DB = 6.0         # the listener's audio off the tone this far over the over without the stick: the stick's
+QUIET_TONE_DB = 15.0        # the tone this far over the gap before it: on the air and heard
+
+
+def _pages(o, letter):
+    """Both radios on the Sentry's page letter as one change, alike on the dial they shared (orch_cov_apps.page_both)"""
+    o.changing += 1
+    try:
+        bench.open_page_both([o.r[A], o.r[B]], letter)
+    finally:
+        o.changing -= 1
+
+
+def _off_tone_db(x, tone, fs):
+    """The power of x in 300-2700 Hz, the tone's +-150 Hz left out (dB, Welch)"""
+    import numpy as np
+    from scipy.signal import welch
+    if len(x) < fs // 2:
+        return None
+    f, p = welch(x, fs=fs, nperseg=4096)
+    band = (f >= 300) & (f <= 2700) & (np.abs(f - tone) > 150)
+    return float(10 * np.log10(np.sum(p[band]) + 1e-20))
+
+
+def tci_rtl_quiet_test(o, sender, listener, f=14100000, tone=1000, amp=0.3):
+    """Nothing but the over's own audio on the air while the Sentry plays the stick on the speaker (LISTEN on the SDR:
+    the base in play mode, the stick's audio written to the codec all the while, rtl_spectrum.c). The codec's audio is
+    the transmitter's in a modem over, and TCI's network stream (audio.c's low-latency one) took every writer's audio
+    while open, the stick's among them. The sender's TCI keys a tone over as the speaker plays its receiver (0), then
+    one as it plays B's SDR on an FM broadcast station (1); the listener's TCI audio off the tone (300-2700 Hz, the
+    tone's 150 Hz out) during each, over the gap before it. PASS: both on the air (the base's own TX flag, the tone
+    heard), the second no more than QUIET_LEAK_DB over the first off the tone. The X6100's base ignored a modem key in
+    play mode (tci-row, 2026-11-27): its over in (1) then never goes on the air"""
+    import subprocess
+    from tones import TciRx, FS as TFS
+    S, L = o.r[sender], o.r[listener]
+    run_ok(["scp", "-4", "-q", "-o", "BatchMode=yes", os.path.join(HERE, "tci_tone_tx.py"),
+            f"root@{S.host}:/tmp/tci_tone_tx.py"])
+    plan = [[0, 0.3], [tone, QUIET_SECS]]
+    key_s = QUIET_SECS + 3.0
+    rows, tci, was, apart = [], None, None, False
+
+    def one_over(phase):
+        _, total = bench.chain_gate(o.c, "radios")
+        bench.radio_tx_gate(S, o.c, W)
+        bench.listener_gate(L)
+        o.roles = {sender: "TX", listener: "RX"}
+        watch = bench.Watch([S, L], o.c, expect_dbm=10 * math.log10(W * 1000) - total, listener=L, w=W,
+                            label=f"tci-rtl-quiet {sender} {phase}")
+        btx, plays = [], []
+        try:
+            o.changing += 1
+            try:
+                bench.arm(S, True, mode=3)
+            finally:
+                o.changing -= 1
+            bench.tx_log({"who": sender, "f": f, "w": S.pwr(), "what": f"orch: tci-rtl-quiet {phase}"})
+            play_at_key, heard_at_key = S.state.get("play"), S.state.get("heard")
+            t0 = time.time()
+            proc = subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
+                                     f"python3 /tmp/tci_tone_tx.py '{json.dumps(plan)}' {amp} {key_s:.1f} 50001 0.05"],
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            while proc.poll() is None and not watch.why:
+                btx.append((time.time(), S.state.get("btx")))
+                plays.append(S.state.get("play"))
+                time.sleep(0.1)
+            if proc.poll() is None:
+                bench.stop_bench_programs(S)
+            out = proc.communicate(timeout=20)[0]
+            said = [ln for ln in out.splitlines() if not ln.startswith(("start ", "end "))]
+            t1 = time.time()
+            try:
+                S.wait("off the air", lambda: not S.tx, 5)
+            except Refused:
+                S.stop()
+        finally:
+            watch.close()
+            o.changing += 1
+            try:
+                bench.arm(S, False)
+            finally:
+                o.changing -= 1
+            o.roles = {A: "RX", B: "RX"}
+        if watch.why:
+            raise Refused(f"the watch stopped the over ({phase}): {watch.why}")
+        time.sleep(1.0)
+        mid = [v for t, v in btx if t0 + 1.5 <= t <= t0 + QUIET_SECS - 0.5]
+        on_share = round(sum(1 for v in mid if v == 1) / len(mid), 2) if mid else 0.0
+        x, x0 = tci.audio(t0 - 3.0, t1 + 1.0)
+        row = {"phase": phase, "play_at_key": play_at_key, "heard_at_key": heard_at_key,
+               "plays_seen": sorted({p for p in plays if p is not None}), "base_on_share": on_share,
+               "tci_said": said[:3], "tone_db": None, "off_tone_db": None}
+        if x0 is not None and len(x) > 4 * TFS:
+            i0 = max(0, int((t0 - 3.0 - x0) * TFS))
+            before = x[i0:i0 + int(2.5 * TFS)]
+            during = x[i0 + int(5.0 * TFS):i0 + int((3.0 + QUIET_SECS - 0.5) * TFS)]
+            if len(before) > TFS // 2 and len(during) > TFS // 2:
+                tb, td = _off_tone_db(before, tone, TFS), _off_tone_db(during, tone, TFS)
+                import numpy as np
+                from scipy.signal import welch
+                fb, pb = welch(before, fs=TFS, nperseg=4096)
+                fd, pd = welch(during, fs=TFS, nperseg=4096)
+                at = np.abs(fd - tone) <= 20
+                row["tone_db"] = round(float(10 * np.log10(np.sum(pd[at]) + 1e-20) -
+                                             10 * np.log10(np.sum(pb[at]) + 1e-20)), 1)
+                row["off_tone_db"] = round(td - tb, 1) if tb is not None and td is not None else None
+        row["on_air"] = on_share >= ROW_ON_MIN and (row["tone_db"] or -99) >= QUIET_TONE_DB
+        rows.append(row)
+        return row
+
+    try:
+        if "btx" not in S.state or "heard" not in S.state:
+            raise Refused(f"{sender}'s GUI says nothing of its base's own TX flag or LISTEN (btx, heard): an older "
+                          f"build")
+        if S.state.get("sdr") != 1:
+            raise Refused(f"{sender}: no SDR on its HOST port (the state's sdr {S.state.get('sdr')}): B has nothing "
+                          f"to play")
+        tci = TciRx(L.host)
+        with o.step(f"both on {f / 1e6:.3f} USB-D, the receiver profile alike, page A") as s:
+            _pages(o, "A")
+            want, checks = bench.rx_profile(f, 3, pre=0, att=0, rfg=100, agc=0, sql=0, filt=(100, 3000))
+            o.both(dict(want, pwr=W, atu=0, xit=0, rit=0, split=0), checks)
+            was = {"heard": S.state.get("heard"), "bhz": int(S.state.get("bhz") or 0)}
+            s.confirm(f"both on {f} mode 3; {sender}'s LISTEN {was['heard']}, B's channel {was['bhz']}")
+        with o.step(f"{sender}'s TCI over of {tone} Hz with its own receiver on the speaker (LISTEN 0): the "
+                    f"listener's audio off the tone") as s:
+            if S.state.get("heard") != 0:
+                S.send("set heard 0")
+                S.wait("LISTEN on the radio", lambda: S.state.get("heard") == 0, 5)
+            r0 = one_over("own receiver")
+            s.confirm(f"on the air {r0['base_on_share']:.0%}, the tone {r0['tone_db']} dB, off the tone "
+                      f"{r0['off_tone_db']} dB, play {r0['play_at_key']}")
+        with o.step(f"{sender}'s B on {QUIET_FM_HZ / 1e6:.1f} MHz (an FM broadcast station), LISTEN on the SDR: the "
+                    f"stick on the speaker, the base in play mode") as s:
+            o.changing += 1                 # the sender's speaker and B apart from the listener's on purpose
+            apart = True
+            _pages(o, "B")
+            S.send(f"set bch {QUIET_FM_HZ}")
+            S.wait("B on the station", lambda: int(S.state.get("bhz") or 0) == QUIET_FM_HZ, 8)
+            _pages(o, "A")
+            S.send("set heard 1")
+            S.wait("LISTEN on the SDR, the base in play mode", lambda: S.state.get("heard") == 1 and
+                   S.state.get("play") == 1, 8)
+            try:
+                lvl = bench.cfg_get(S, "rtl_over", timeout=2)
+            except Refused:
+                lvl = None
+            if lvl not in (None, "") and float(lvl) < 15:
+                raise Refused(f"{sender}: B's station only {lvl} dB over the noise: too weak to say it is heard")
+            time.sleep(2.0)                 # the stick's audio queued and playing
+            s.confirm(f"B {S.state.get('bmode')} {S.state.get('bname') or S.state.get('bpre')}, LISTEN 1, play "
+                      f"{S.state.get('play')}" + (f", the station {lvl} dB over the noise" if lvl not in (None, "")
+                                                  else ""))
+        with o.step(f"{sender}'s TCI over of {tone} Hz with the stick on the speaker: on the air, nothing of the "
+                    f"stick's off the tone") as s:
+            r1 = one_over("stick on the speaker")
+            s.confirm(f"on the air {r1['base_on_share']:.0%}, the tone {r1['tone_db']} dB, off the tone "
+                      f"{r1['off_tone_db']} dB, play {r1['play_at_key']} (seen {r1['plays_seen']})"
+                      + (f", its TCI said {r1['tci_said']}" if r1["tci_said"] else ""))
+    except Refused as e:
+        return False, str(e), {"rows": rows}
+    finally:
+        if tci is not None:
+            tci.close()
+        if was is not None:
+            try:
+                S.send(f"set heard {was['heard'] if was['heard'] in (0, 1, 2, 3) else 0}")
+                if was["bhz"] and int(S.state.get("bhz") or 0) != was["bhz"]:
+                    _pages(o, "B")
+                    S.send(f"set bch {was['bhz']}")
+                    S.wait("B back", lambda: int(S.state.get("bhz") or 0) == was["bhz"], 8)
+                _pages(o, "A")
+            except Refused as e:
+                o.st.ev(f"{sender}: LISTEN or B not put back: {e}", "bad")
+            finally:
+                if apart:
+                    o.changing -= 1
+    r0 = next((r for r in rows if r["phase"] == "own receiver"), None)
+    r1 = next((r for r in rows if r["phase"] == "stick on the speaker"), None)
+    if not r0 or not r1:
+        return False, "the overs did not both run", {"rows": rows}
+    leak = (r1["off_tone_db"] - r0["off_tone_db"]) if None not in (r0["off_tone_db"], r1["off_tone_db"]) else None
+    bad = []
+    if not r0["on_air"]:
+        bad.append(f"the over with its own receiver not on the air and heard (on {r0['base_on_share']:.0%}, the tone "
+                   f"{r0['tone_db']} dB)")
+    if not r1["on_air"]:
+        bad.append(f"the over with the stick on the speaker not on the air and heard (on {r1['base_on_share']:.0%}, "
+                   f"the tone {r1['tone_db']} dB, play {r1['play_at_key']}"
+                   + (f", TCI: {r1['tci_said'][0]}" if r1["tci_said"] else "") + ")")
+    if leak is None:
+        bad.append("the listener's audio not measured")
+    elif leak > QUIET_LEAK_DB:
+        bad.append(f"the stick's audio went out with the over: {leak:+.1f} dB off the tone over the over without it")
+    words = (f"{sender} into {listener}: own receiver on {r0['base_on_share']:.0%}, tone {r0['tone_db']} dB, off it "
+             f"{r0['off_tone_db']} dB; the stick on the speaker on {r1['base_on_share']:.0%}, tone {r1['tone_db']} dB, "
+             f"off it {r1['off_tone_db']} dB" + (f" ({leak:+.1f} dB)" if leak is not None else ""))
+    return not bad, ("; ".join(bad) + "; " if bad else "") + words, {"rows": rows, "leak_db": leak}
+
+
 def ft8_copy_test(o, sender, listener, txfs=(1325, 1500, 2000), w=W):
     """An FT8 app's transmission against the same message through TCI: the sender's FT8 app sends one CQ at each TX Hz
     of txfs, the listener on its dial in USB-D set as the sender (pair_align) recording its audio, the power over the
@@ -7126,6 +7329,12 @@ TESTS = [
          "a start in 1.5 s and logs why)", lambda o: tci_row_test(o, A, B), 330),
     Test("tci-row x6200", "X6200 TX, X6100 RX", "the same from the X6200 into the X6100",
          lambda o: tci_row_test(o, B, A), 330),
+    Test("tci-rtl-quiet x6200", "X6200 TX, X6100 RX", "a TCI tone over from the X6200 with its own receiver on the "
+         "speaker, then one with the Sentry playing B's SDR (an FM station) there: both on the air, the X6100 hearing "
+         "nothing more off the tone in the second (the codec's audio is the transmitter's in a modem over)",
+         lambda o: tci_rtl_quiet_test(o, B, A), 120),
+    Test("tci-rtl-quiet x6100", "X6100 TX, X6200 RX", "the same from the X6100 into the X6200 (its base dropped modem "
+         "overs in play mode, tci-row 11-27)", lambda o: tci_rtl_quiet_test(o, A, B), 120),
     Test("ft8-copies x6200", "X6200 TX, X6100 RX", "the X6200's FT8 app's CQs from TX Hz 1325 (no VFO move), 1500 and "
          "2000 at 0.1 W in the X6100's audio, then the same message through its TCI: the power 156.25 Hz either side "
          "-40 dBc at most and no more than 6 dB over TCI's (till 11-26 -25 to -31 dBc, TCI -55: the app played one "

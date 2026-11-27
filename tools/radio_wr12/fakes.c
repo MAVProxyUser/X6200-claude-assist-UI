@@ -886,6 +886,9 @@ bool btaudio_speaker_muted(void) {
 void audio_listen_cut(void) {
 }
 
+void audio_speaker_flush(void) {
+}
+
 void clock_update_estimate(int minutes, bool approx) {
     (void)approx;
     shown.est = minutes;

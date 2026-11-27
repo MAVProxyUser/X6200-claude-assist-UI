@@ -6750,7 +6750,7 @@ static void p3_beep_feed(const int16_t *pcm, size_t count) {
     size_t done = 0;
     while (done < count && !atomic_load(&keyed)) {
         size_t step = count - done < 2048 ? count - done : 2048;
-        audio_play((int16_t *)pcm + done, step);
+        audio_speaker_play((int16_t *)pcm + done, step);
         done += step;
     }
 }

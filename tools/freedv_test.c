@@ -35,6 +35,11 @@ int  audio_play(int16_t *buf, size_t n)
     return 0;
 }
 
+int  audio_speaker_play(int16_t *buf, size_t n)    /* freedv_rx.c's speech goes this way (the speaker's) */
+{
+    return audio_play(buf, n);
+}
+
 static void wav_header(FILE *f, uint32_t rate, uint32_t bytes)
 {
     uint32_t v;

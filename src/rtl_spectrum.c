@@ -60,7 +60,7 @@ static uint32_t rate_for(rtl_dev_t d) {
 }
 static uint32_t asked_rate;             /* the rate said to the daemon last */
 #define RING        (44100 * 2) /* audio waiting to play: two seconds at most */
-#define CHUNK       1024        /* audio_play() needs room for the whole write: a bigger one may never find it */
+#define CHUNK       1024        /* audio_speaker_play() needs room for the whole write: a bigger one may never find it */
 #define ST_FILL     17640       /* the stick's audio buffered, 400 ms: its 50 ms messages come in clumps (and BOTH's
                                  * X6200 100 ms fragments take it in bursts); at 150 ms it ran dry, a gap each time
                                  * (up to 130 ms, two of three 10 s tone tests, 2026-11-15); at 300 ms its lowest in
@@ -1224,7 +1224,7 @@ static void *player_thread(void *arg) {
         if (want_play && !atomic_load(&listen_mode) && watch) {   /* the watch channels alone: they pace it */
             memset(chunk, 0, sizeof(chunk));
             rtl_watch_mix(chunk, CHUNK);
-            audio_play(chunk, CHUNK);
+            audio_speaker_play(chunk, CHUNK);
             continue;
         }
         if (!want_play || !atomic_load(&listen_mode)) {     /* nothing, or OFF: the speaker silent */
@@ -1268,7 +1268,7 @@ static void *player_thread(void *arg) {
                 chunk[k] = (int16_t)v;
             }
             rtl_watch_mix(chunk, n);            /* the watch channels open, added */
-            audio_play(chunk, n);
+            audio_speaker_play(chunk, n);
             continue;
         }
 
@@ -1294,7 +1294,7 @@ static void *player_thread(void *arg) {
                 }
                 pthread_mutex_unlock(&rscope_lock);
             }
-            audio_play(chunk, n);
+            audio_speaker_play(chunk, n);
         } else {
             usleep(5000);
         }

@@ -133,7 +133,7 @@ static void *play_thread(void *arg) {
         int n = sf_read_short(job->f, play_buf, PLAY_CHUNK);
 
         if (n <= 0) break;
-        audio_play(play_buf, n);
+        audio_speaker_play(play_buf, n);     /* the speaker's: none of it on the air (audio.h) */
     }
     playing = false;
     sf_close(job->f);

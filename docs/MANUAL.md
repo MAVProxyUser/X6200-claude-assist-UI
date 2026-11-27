@@ -11152,7 +11152,7 @@ and `tail`, the panel text's last 48 characters as Parse left them (the bench's 
 out, cw-parse for Parse's split). A few read-only values answer `cfg?` for the bench: `digi_dx` (the keyboard modes'
 DX call), `radio_caps` (what the base can do, a number), `a_tx_rows` (the rows A's history has drawn on the air),
 `cwt_target` and `cwt_state` (the CW Trainer's group or call, and where its round is: `closed`, `due`, `ready`,
-`playing`, `listen`, `result`), `cw_tune_hz` (the CW tuning bars' offset in Hz as they show it, positive with the bars to the left: in CW the dial above the station; empty when no bar was lit in the last second) and `beacons_heard_20m` (each band's: the NCDXF beacons heard, `beacon:snr:slot`). `buttons?` answers `buttons ...`:
+`playing`, `listen`, `result`), `cw_tune_hz` (the CW tuning bars' offset in Hz as they show it, positive with the bars to the left: in CW the dial above the station; empty when no bar was lit in the last second), `rtl_over` (the SDR channel listened to, dB over the noise of the stick's picture as the squelch takes it; empty when none) and `beacons_heard_20m` (each band's: the NCDXF beacons heard, `beacon:snr:slot`). `buttons?` answers `buttons ...`:
 the main screen's pages as the radio made them, split by `|`, each its page button then its buttons' names split by
 `; `, a greyed one (its base lacks the setting) marked `~` (`(MFK 2:4); AGC; Comp; ~IF shift; VOX` on an X6200). A
 setting the radio's base lacks is refused: `cfg comp`, `cfg cessb_on`, `cfg cw_peak_on`, `cfg agc_knee`... answer
@@ -12007,7 +12007,22 @@ the radio, hears it, keys it and sends CW with it.
     the X6100's base (Xiegu's V1.1.9) went on the air for the first of six
     WeFax overs from a TCI client, then stayed on receive for the other five
     while the client's audio streamed for 14 s each, and nothing said so.
-    The cause is not known yet; the log line is there to find it.
+    The cause was the base's play mode (2026-11-27, below).
+  - The speaker's own sound stays off the air. While a client's over (or an
+    app's: FT8, WeFax, a voice message) sends the radio's audio, nothing the
+    speaker was playing for you reaches the transmitter: the Sentry's SDR on
+    the speaker (LISTEN on an RTL-SDR, BOTH), a recording or a voice message
+    played back, FreeDV's speech, JS8's beep. They go quiet for the over and
+    play on after it (on Bluetooth headphones they play on through it). Why:
+    the codec's audio is the transmitter's during such an over, and
+    everything played to it was mixed into the over.
+  - On the X6100 such an over takes its base out of play mode for its
+    length, and puts it back after. Why: Xiegu's X6100 base (V1.1.9) takes
+    no key from the radio's audio while it plays the GUI's sound on the
+    speaker: on 2026-11-27 two TCI overs keyed while the Sentry's file
+    played there never went on the air (its own TX flag 0%), and six out of
+    play mode all did. The X6200's base keys either way. A voice recording
+    or FreeDV's microphone (record mode) is left as it is.
 - CW from a client (#179): `cw_macros:0,CQ DE ON6URE K;` keys the text with
   the radio's own keyer, the one the CW keyboard, the stored messages and the
   beacon use, at KEY Speed (KEY > Speed). This is what QLog's "Morse over

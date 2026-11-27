@@ -392,7 +392,7 @@ static void *play_thread(void *arg)
             buf[i] = rx.out_ring[(t + i) % OUT_RING];
         atomic_store_explicit(&rx.out_idx.tail, t + n, memory_order_release);
         burst_written += n;
-        if (audio_play(buf, n) < 0) {
+        if (audio_speaker_play(buf, n) < 0) {     /* the speaker's: none of it on the air (audio.h) */
             audio_play_bt_end();
             bt = false;
             playing = false;

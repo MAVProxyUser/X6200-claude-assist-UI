@@ -283,7 +283,8 @@ static int interval_s(void) {
     return v < PERIOD_MIN ? PERIOD_MIN : (v > PERIOD_MAX ? PERIOD_MAX : v);
 }
 
-static bool play_file(void) {
+/* tx: the over's own audio (audio_play); else the preview, the speaker's (audio_speaker_play) */
+static bool play_file(bool tx) {
     SF_INFO info;
     memset(&info, 0, sizeof(info));
     SNDFILE *f = sf_open(play_path, SFM_READ, &info);
@@ -296,7 +297,10 @@ static bool play_file(void) {
         if (n <= 0) break;
         int gain = param_i_get(cfg_voice_msg_gain);   /* read each block: Field Ops changes it while the CQ plays */
         if (gain) audio_gain_db(samples_buf, n, gain, samples_buf);
-        audio_play(samples_buf, n);
+        if (tx)
+            audio_play(samples_buf, n);
+        else
+            audio_speaker_play(samples_buf, n);
         play_pos += n;
     }
     sf_close(f);
@@ -316,7 +320,7 @@ static void *worker_cb(void *arg) {
             radio_set_modem(true);
             /* Stop during the lead-in: play_file drops the audio at once */
             if (!stop_req) usleep(LEAD_IN_US);
-            ok = play_file();
+            ok = play_file(true);
             radio_set_modem(false);
             air_off_tick = lv_tick_get();
             on_air       = false;
@@ -324,7 +328,7 @@ static void *worker_cb(void *arg) {
             /* Preview: on the Bluetooth headphones while they replace the speaker */
             bool bt = audio_play_bt_begin();
             if (!bt) radio_set_play_mode(AUDIO_PLAY_ON);
-            ok = play_file();
+            ok = play_file(false);
             if (bt) audio_play_bt_end();
             else radio_set_play_mode(AUDIO_PLAY_OFF);
         }

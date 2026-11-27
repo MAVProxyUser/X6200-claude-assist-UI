@@ -139,6 +139,7 @@
 #include "digi_qso.h"
 #include "dialog_cw_trainer.h"
 #include "cw_tune_view.h"     /* cfg? cw_tune_hz */
+#include "rtl_spectrum.h"     /* cfg? rtl_over */
 #include "text_panel.h"
 #include "cluster/client.h"
 #include "cluster/spots.h"
@@ -1781,6 +1782,18 @@ static bool cfg_value(const char *name, char *out, size_t n) {
 
         if (cw_tune_recent(&hz))
             snprintf(out, n, "%d", hz);
+        else
+            out[0] = 0;
+        return true;
+    }
+    if (!strcmp(name, "rtl_over")) {            /* read only: the SDR channel listened to over the noise of the
+                                                 * stick's picture, dB (as the squelch takes it), "" none: the bench
+                                                 * knows its station is there before it judges what the speaker
+                                                 * played */
+        float db = rtl_spectrum_level();
+
+        if (db >= 0)
+            snprintf(out, n, "%.1f", db);
         else
             out[0] = 0;
         return true;

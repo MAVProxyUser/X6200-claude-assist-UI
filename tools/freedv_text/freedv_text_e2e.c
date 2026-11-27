@@ -38,6 +38,7 @@ bool audio_play_bt_begin(void) { return true; }
 void audio_play_bt_end(void) {}
 void audio_play_flush(void) {}
 int  audio_play(int16_t *buf, size_t n) { (void)buf; (void)n; return 0; }
+int  audio_speaker_play(int16_t *buf, size_t n) { (void)buf; (void)n; return 0; }
 
 enum { FORM_FREEDV, FORM_OURS, FORM_ZEROS, FORM_RANDOM };
 static const char *form_name[] = {"FreeDV's", "ours", "no bits", "random bits"};

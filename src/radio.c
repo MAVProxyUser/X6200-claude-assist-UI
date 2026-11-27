@@ -1198,6 +1198,19 @@ static void save_log(void) {
 }
 
 static void play_mode_apply(audio_play_mode_t mode);
+/* Under the lock: the record, PTT, modem, tune and split bits share one register, and the
+ * library's read-modify-write of it from two threads lost a PTT or modem change */
+static _Atomic audio_play_mode_t play_mode_now = AUDIO_PLAY_OFF;
+#ifndef BOARD_X6200
+/* Xiegu's X6100 base takes no modem key with the record bit set (play mode: the Sentry's stick on the speaker, the
+ * recorder, a preview): tci-row 2026-11-27, 2 of 2 TCI overs keyed in play mode never on the air (its own TX flag 0%,
+ * the GUI's TCI ended each in 1.5 s), 6 of 6 out of it on; the X6200's base keys either way. So a modem over holds the
+ * base out of play mode for its length and puts back the mode asked meanwhile after it (radio_set_modem); the speaker's
+ * own audio reaches the codec meanwhile no more (audio_speaker_play). Under the radio lock */
+static bool play_held;
+#endif
+
+static void play_hw(audio_play_mode_t mode);
 
 void radio_poweroff() {
     /* Every switch-off from the same base state, whatever was showing (2026-11-15: one left the radio on, the screen
@@ -1461,8 +1474,31 @@ void radio_set_modem(bool tx) {
     if (tx) {
         WITH_RADIO_LOCK(open_tx_key());     /* the X6200's open TX still due goes first, on the TX frequency */
     }
-    atomic_store(&modem_on, tx);
-    WITH_RADIO_LOCK(hw_set_i(HW_MODEM, tx));
+    bool was = atomic_exchange(&modem_on, tx);
+
+    if (tx && !was) {
+        /* What the speaker's own stream had queued (the Sentry's stick: up to 800 ms) dropped before the over's own
+         * audio is written: from here the codec's audio is the transmitter's (audio_speaker_play writes none) */
+        audio_speaker_flush();
+    }
+    radio_lock();
+#ifndef BOARD_X6200
+    if (tx && !play_held && atomic_load(&play_mode_now) == AUDIO_PLAY_ON) {
+        /* the speaker's play mode only: record mode (AUDIO_PLAY_VOICE_REC) is the hand mic into Linux, which
+         * FreeDV's over and the voice links take while the modem sends */
+        play_hw(AUDIO_PLAY_OFF);
+        play_held = true;
+        LV_LOG_USER("modem: the base out of play mode for the over (the X6100's takes no modem key in it)");
+    }
+#endif
+    hw_set_i(HW_MODEM, tx);
+#ifndef BOARD_X6200
+    if (!tx && play_held) {
+        play_held = false;
+        play_hw(atomic_load(&play_mode_now));
+    }
+#endif
+    radio_unlock();
     if (!tx && modem_moved) {
         modem_moved = false;
         radio_set_tx_freq(0);
@@ -1473,10 +1509,6 @@ void radio_set_modem(bool tx) {
 bool radio_get_modem(void) {
     return atomic_load(&modem_on);
 }
-
-/* Under the lock: the record, PTT, modem, tune and split bits share one register, and the
- * library's read-modify-write of it from two threads lost a PTT or modem change */
-static _Atomic audio_play_mode_t play_mode_now = AUDIO_PLAY_OFF;
 
 int radio_rxvol_sent(void) {
     return atomic_load(&rxvol_sent);
@@ -1511,7 +1543,19 @@ const char *radio_key_state(char *buf, size_t n) {
 }
 
 static void play_mode_apply(audio_play_mode_t mode) {
-    atomic_store(&play_mode_now, mode);
+    atomic_store(&play_mode_now, mode);     /* the mode asked: radio_play_mode() says it while an over holds it */
+#ifndef BOARD_X6200
+    if (!play_held && mode == AUDIO_PLAY_ON && atomic_load(&modem_on)) {
+        play_held = true;                   /* asked during an over (LISTEN put on the stick): kept for after it */
+    }
+    if (play_held) {
+        return;
+    }
+#endif
+    play_hw(mode);
+}
+
+static void play_hw(audio_play_mode_t mode) {
     switch (mode) {
     case AUDIO_PLAY_OFF:
         hw_set_i(HW_RECORD, false);

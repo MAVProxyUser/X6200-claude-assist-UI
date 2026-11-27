@@ -44,6 +44,9 @@ static char                 *play_device = BOARD_PA_SINK;
 /* Local playback on the Bluetooth headphones (audio_play_bt_begin), per
  * thread: the TX players never see it, so TX audio always goes to the codec. */
 static __thread pa_stream   *bt_stm = NULL;
+/* A network client's over (TCI: audio_play_lowlat_begin) has its stream on the codec, from whichever thread: any
+ * thread's. With the mainloop locked */
+static bool                 lowlat_on;
 
 static pa_stream            *capture_stm;
 static char                 *capture_device = BOARD_PA_SOURCE;
@@ -412,6 +415,52 @@ int audio_play(int16_t *samples_buf, size_t samples) {
     return res;
 }
 
+/* The speaker's own audio (audio.h audio_speaker_play) may reach the codec: not while a network client's over has its
+ * stream there, nor while the modem is keyed (the codec's audio is then the transmitter's: what an over writes goes
+ * out, and PulseAudio mixes every stream on the codec into it). This thread's own headphones are not the codec. With
+ * the mainloop locked */
+static bool speaker_may(void) {
+    if (lowlat_on) {
+        return false;
+    }
+    return bt_stm != NULL || !radio_get_modem();
+}
+
+int audio_speaker_play(int16_t *samples_buf, size_t samples) {
+    while (true) {
+        pa_threaded_mainloop_lock(mloop);
+        if (!speaker_may()) {
+            pa_threaded_mainloop_unlock(mloop);
+            usleep((useconds_t)(samples * 1000000ULL / AUDIO_PLAY_RATE));    /* dropped, paced as if it played */
+            return 0;
+        }
+        pa_stream *stm = cur_stm();
+
+        if (pa_stream_writable_size(stm) >= samples * 2) {
+            int res = pa_stream_write(stm, samples_buf, samples * 2, NULL, 0, PA_SEEK_RELATIVE);
+
+            pa_threaded_mainloop_unlock(mloop);
+            if (res < 0) {
+                LV_LOG_ERROR("pa_stream_write() failed: %s", pa_strerror(pa_context_errno(ctx)));
+            }
+            return res;
+        }
+        pa_threaded_mainloop_unlock(mloop);
+        usleep(1000);
+    }
+}
+
+void audio_speaker_flush(void) {
+    pa_operation *op;
+
+    pa_threaded_mainloop_lock(mloop);
+    op = play_stm ? pa_stream_flush(play_stm, NULL, NULL) : NULL;
+    if (op) {
+        pa_operation_unref(op);
+    }
+    pa_threaded_mainloop_unlock(mloop);
+}
+
 /* Drops the queued audio, so a stop is immediate. */
 void audio_play_flush() {
     pa_operation *op;
@@ -559,6 +608,7 @@ bool audio_play_lowlat_begin(void) {
 
     pa_threaded_mainloop_lock(mloop);
     bt_stm = stream_open("X6100 GUI Network voice", play_device, &attr);
+    lowlat_on = bt_stm != NULL;
     pa_threaded_mainloop_unlock(mloop);
     return bt_stm != NULL;
 }
@@ -570,6 +620,7 @@ void audio_play_lowlat_end(void) {
     pa_threaded_mainloop_lock(mloop);
     pa_stream_disconnect(bt_stm);
     pa_stream_unref(bt_stm);
+    lowlat_on = false;
     pa_threaded_mainloop_unlock(mloop);
     bt_stm = NULL;
 }
