@@ -5117,9 +5117,63 @@ def t_sentry_title_tags(o):
         home_both(o)
 
 
+LEGEND_BOX = (6, 404, 794, 430)     # the Sentry's legend over the F keys: legend_l, pixel_16 (dim) at y scr_h + 1
+
+
+def _vol_said(text):
+    """(radio named, number) after 'VOL:' in the legend's OCR text, or (None, None): 'VOL: X6200 VOLUME 2'"""
+    t = " ".join(text.upper().split())
+    m = re.search(r"VOL[:;.]?\s*(X6[1I][0O][0O]|X62[0O][0O]|RTL\S*)\s*V[O0]LUME\s*([0-9OIL]+)", t)
+    if not m:
+        return None, None
+    who = m.group(1).replace("I", "1").replace("O", "0")
+    return who, int(m.group(2).replace("O", "0").replace("I", "1").replace("L", "1"))
+
+
+def t_sentry_vol_line(o):
+    """The legend at the foot of page A names the radio VOL sets and its level, on each radio: 'VOL: X6100 VOLUME
+    0' and 'VOL: X6200 VOLUME 0' at the bench's VOL 0, the number 1 after VOL 1, 0 again after (app_sentry.c
+    show_legend: E said VOLUME 0 while A said 2, 11-17, the SDR's and the X6200's)"""
+    res = {}
+    try:
+        with o.step("both on page A, 14.200 MHz USB"):
+            page_both(o, "A")
+            o.both({"freq": 14200000, "mode": 2})
+        for n in (H.A, H.B):
+            r, out = o.r[n], {}
+            res[n] = out
+            v0 = int(r.state.get("vol") or 0)
+            try:
+                for v in (v0, 1 if v0 != 1 else 2, v0):
+                    with o.step(f"{n}: VOL {v}: the legend 'VOL: {n.upper()} VOLUME {v}'") as st:
+                        bench.ensure(r, {"vol": v})
+                        got = (None, None)
+                        for i in range(3):
+                            time.sleep(0.6)
+                            p = shot(o, r, f"legend vol {v} {i + 1}")
+                            txt = ocr(p, LEGEND_BOX, scale=4, psm=7, stretch=True) if p else ""
+                            got = _vol_said(txt)
+                            if got == (n.upper(), v):
+                                break
+                        out[f"vol {v}"] = got
+                        if got != (n.upper(), v):
+                            raise Refused(f"{n}: VOL {v}, the legend read {' '.join(txt.split())[:120]!r} "
+                                          f"({got[0]} {got[1]})")
+                        st.confirm(f"{got[0]} VOLUME {got[1]}")
+            finally:
+                bench.ensure(r, {"vol": v0})
+        return True, "the legend names its radio and follows VOL on both: " + \
+            "; ".join(f"{n} {res[n]}" for n in res), res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        home_both(o)
+
+
 # ---- what each test covers, its rows ----
 
 COVERS = {
+    "sentry-vol-line": ([], ["sentry-vol-line"]),
     "sentry-title-tags": (["sentry-title-remote-tags"], ["sentry-title-battery"]),
     "bands-app": (["bands-app-open", "bands-use-band"], []),
     "timesig-f2": (["timesig-f2-set-clock"], []),
@@ -5189,6 +5243,8 @@ ROWS = [
      "frequency in LSB, from CW its CW frequency in CW, from CW-R 20 m's in CW-R"),
     ("sentry-title-tags", t_sentry_title_tags, 90, "page A's head on each radio: WEB CTL with the bench in control, WEB "
      "once it lets go, TCI CTL under a TCI program's set, WEB CTL again; its battery %"),
+    ("sentry-vol-line", t_sentry_vol_line, 50, "page A's legend on each radio: 'VOL: X6100/X6200 VOLUME n' following VOL "
+     "0, 1, 0"),
     ("timesig-f2", t_timesig, 40, "Time Signal's F2 Set clock: Auto, Off, Auto again, as the button reads"),
     ("channels-api", t_channels_web, 60, "the Memories API: a stale Delete refused, Delete and Undo at its place, a "
      "Save of the frequency alone keeps a 40-byte name and an extra key (the files put back)"),
