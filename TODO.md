@@ -1,11 +1,32 @@
 # To do
 
-## The owner's backlog (from the conversations, audited 2026-11-16, 2026-11-21 and 2026-11-24)
+## The owner's backlog (from the conversations, audited 2026-11-16, 2026-11-21 and 2026-11-24; 2026-11-27 below)
 
 What the owner asked for in the working sessions, checked against git; GitHub issues are the sections below. The
 radios transmit only into the bench cable (80 dB of pads, the owner's word on it), at 1 W or less. On 2026-11-17 the
 side sessions (the Meteor/SCAN CFG one, the Kraken DF one and its kernel one) were folded into one backlog, in the
 order the owner approved that day.
+
+**2026-11-27: the night's runs, the owner asleep** ("start all of the tasks ... do em without stopping"). The X6100
+read control "local" from 04:29 with nobody at it, and the bench takes control from no operator, so nothing ran till
+10:52 (the owner's "do whatever you want"); claims at the radio are now logged with what made them (2a9860dc, orch
+control-local-log). Done:
+- **The X6100's TCI overs that never went on the air** (11-26's WeFax): its factory base takes no modem key in play
+  mode (orch tci-row: 2 of 2 at 0% in play mode, 6 of 6 out of it). A modem over now holds it out of the speaker's
+  play mode and puts it back after (18a31fc3); tci-row 8 of 8 both ways.
+- **The speaker's sound went out with modem overs**: during one the codec's audio is the transmitter's, and the
+  Sentry's stick kept playing into it; the X6200 put an FM station on the air at +22 dB with a TCI tone. The speaker's
+  own writers (the stick, the recorder, previews, FreeDV's speech, JS8's beep) are silent while the modem is keyed
+  (audio_speaker_play, 18a31fc3); orch tci-rtl-quiet both ways, the sender's codec monitor recorded (0cf3b69c).
+- **The 13 air groups refused on 11-26** (a stalled settings read, fixed 1bea0d7b) ran: 10 pass; tci-cw, if-shift and
+  sentry-lock's go on reshaped (49fbeb13).
+- **The CW Trainer's decoder** (X6100: MMM read 'EE<?>HAMM' from clean audio): pinned at the key tone, the quiet's
+  noise keys dropped (09d953d2; tools/cw_replay reproduces it, its test has the session). CW to CW-R on the X6100
+  keeps the decoder on the station (c98f3ca1).
+
+Open, mine: sentry-lock x6200>x6100's HOLD (the X6100's scan taken by its own 14.0903 spur, to look at live); the
+IF shift in USB-D (does the X6100's base shift the audio back there?); the trainer tests and cw-tuner on the new GUI;
+the coverage tests for the uncovered settings/system/UI and TX/CW/TCI/remote/web features (in progress).
 
 **2026-11-21 to 11-24: the owner's asks, audited 2026-11-24 07:45 UTC** (172 messages, direct and queued, since the
 11-21 audit, checked against git's 177 commits and the orchestrator's results; the older blocks below are kept as
