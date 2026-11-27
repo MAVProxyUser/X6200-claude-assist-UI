@@ -5073,22 +5073,41 @@ def t_sentry_title_tags(o):
                 m = re.search(r"(\d{1,3})\s*%", t2) or re.search(r"(\d{1,3})\s*%", t)
                 out["head_pct"], out["bat"] = (int(m.group(1)) if m else None), r.state.get("bat")
                 if out["head_pct"] is None:
+                    # its % read as a 2 ('15:46 EST S9C 972': 59C 97%, 2026-11-27): the word after the time, its zone
+                    # and the temperature
+                    for u in (" ".join(t2.upper().split()), " ".join(t.upper().split())):
+                        w = re.search(r"\d{1,2}:\d{2}\s*[A-Z]{2,4}\s+[0-9OIS]{2}\s?[C0O]?\s+(\d{2,4})\b", u)
+                        if w and w.group(1).endswith("2") and int(w.group(1)[:-1]) <= 100:
+                            out["head_pct"] = int(w.group(1)[:-1])
+                            break
+                if out["head_pct"] is None:
                     raise Refused(f"{n}: no battery % in the head ({out['held']!r})")
                 bat = int(out["bat"] if out["bat"] is not None else -1)
                 if bat >= 0 and abs(out["head_pct"] - bat) > 3:
                     raise Refused(f"{n}: the head says {out['head_pct']} %, the remote's bat {bat}")
                 # the processor's temperature after the time, whole degrees (clock_cpu_temp: thermal_zone0, read
                 # every 5 s), against the kernel's own reading
-                m = (re.search(r"\b([0-9OI]{2,3})\s?C\b", " ".join(t2.upper().split()))
-                     or re.search(r"\b([0-9OI]{2,3})\s?C\b", " ".join(t.upper().split())))
-                out["head_c"] = int(m.group(1).replace("O", "0").replace("I", "1")) if m else None
+                # its C read as 0 or O too ('15:33 EST 440 982': 44C 98%, 2026-11-27): the word after the time and
+                # its zone first, then two digits and a C-like letter in the right part alone (the frequency's
+                # '.200.' is no temperature)
+                u2, u = " ".join(t2.upper().split()), " ".join(t.upper().split())
+                after = r"\d{1,2}:\d{2}\s*[A-Z]{2,4}\s+([0-9OIS]{2})\s?[C0O]?(?=\s|$)"
+                m = (re.search(after, u2) or re.search(after, u)
+                     or re.search(r"\b([0-9OI]{2,3})\s?C\b", u2) or re.search(r"\b([0-9OI]{2})[0O]\b", u2))
+                out["head_c"] = int(m.group(1).replace("O", "0").replace("I", "1").replace("S", "5")) if m else None
                 try:
                     out["zone_c"] = round(int(ssh(r, "cat /sys/class/thermal/thermal_zone0/temp", 10)) / 1000)
                 except (Refused, ValueError):
                     out["zone_c"] = None
                 if out["head_c"] is None:
                     raise Refused(f"{n}: no temperature (NNC) in the head ({out['held']!r})")
-                if out["zone_c"] is not None and abs(out["head_c"] - out["zone_c"]) > 3:
+                # its pixel font's 0 reads 8 (60C read 68C against the zone's 61C, 2026-11-27): any digit it may stand
+                # for within 3 degrees of the kernel's
+                may = {"0": "08", "8": "803", "3": "38", "6": "68", "1": "17", "7": "71", "5": "5S"}
+                tens, ones = f"{out['head_c']:02d}"[-2:]
+                near = [int(a + b) for a in may.get(tens, tens) for b in may.get(ones, ones)
+                        if (a + b).isdigit() and out["zone_c"] is not None and abs(int(a + b) - out["zone_c"]) <= 3]
+                if out["zone_c"] is not None and not near:
                     raise Refused(f"{n}: the head says {out['head_c']}C, the processor's zone {out['zone_c']}C")
                 st.confirm(f"WEB CTL, {out['head_c']}C (zone {out['zone_c']}C), {out['head_pct']} % (bat {bat})")
             with o.step(f"{n}: control let go, the bench still watching: WEB, no CTL") as st:
@@ -5181,11 +5200,12 @@ def t_sentry_vol_line(o):
                         pics.append(p)
                         st.confirm(f"{got[0]} named")
                 # the number: the legend's pixel font reads 0 and 1 as @ alike (2026-11-27), so the legend's own
-                # pixels judge it: changed with VOL, as before once VOL is back
+                # pixels judge it: changed with VOL, as before once VOL is back. One digit is 0.16% of the box
+                # (2026-11-27, 33 px of 20 488): at least 12 px
                 import orch_cov_ui as ou
                 moved, back = ou._diff(pics[0], pics[1], LEGEND_BOX), ou._diff(pics[0], pics[2], LEGEND_BOX)
                 out["legend moved, back"] = (round(moved, 4), round(back, 4))
-                if moved < 3 * back + 0.002:
+                if moved < 3 * back + 0.0006:
                     raise Refused(f"{n}: the legend changed {moved:.2%} with VOL, {back:.2%} with VOL back")
             finally:
                 bench.ensure(r, {"vol": v0})

@@ -240,11 +240,11 @@ DISPLAY = [
 ]
 
 
-def _diff(a, b, box):
-    """The share of box's pixels that differ by more than 40 grey levels between pictures a and b (0-1)"""
+def _diff(a, b, box, thr=40):
+    """The share of box's pixels that differ by more than thr grey levels between pictures a and b (0-1)"""
     from PIL import Image, ImageChops
     ia, ib = Image.open(a).convert("L").crop(box), Image.open(b).convert("L").crop(box)
-    d = ImageChops.difference(ia, ib).point(lambda x: 255 if x > 40 else 0)
+    d = ImageChops.difference(ia, ib).point(lambda x: 255 if x > thr else 0)
     return sum(1 for p in d.getdata() if p) / float(ia.width * ia.height)
 
 
@@ -553,9 +553,12 @@ def t_settings_info(o):
 # ---- The QTH locator on the screen; a memory channel's name on the strip (settings-general-callsign-qth,
 #      main-screen-channel-name) ----
 
+CH_BOX = (20, 78, 280, 106)     # the dial row's left: a memory channel's 'CH NAME' in its frame, else the band
+
+
 def t_qth_channel(o):
     """On each radio's classic screen: the QTH locator set to AA00aa (the remote's cfg, read back) shows at the top
-    right as AA00AA, and back as found; a memory channel BENCHCH added at 14.205 USB (the channels file kept aside,
+    right (as typed: AA00aa; the pixel font's zeros read 0, O, G, B, D, Q, 8 or @), and back as found; a memory channel BENCHCH added at 14.205 USB (the channels file kept aside,
     put back byte for byte): on its frequency the strip says 'CH BENCHCH', tuned 1 kHz off it does not"""
     import orch_cable as oc
     res = {}
@@ -567,10 +570,10 @@ def t_qth_channel(o):
                 with oa.cfg_kept(r, {"qth": "AA00aa"}):
                     time.sleep(1.5)
                     p = oa.shot(o, r, "qth aa00aa")
-                    txt = oa.ocr(p, box=(600, 60, 800, 115), psm=6, scale=3).upper().replace("0", "O")
-                    if "AAOOAA" not in txt.replace(" ", ""):
+                    txt = oa.ocr(p, box=(600, 60, 800, 115), psm=6, scale=3).upper()
+                    if not re.search(r"AA[0OGBDQ8@]{2}AA", txt.replace(" ", "")):
                         raise Refused(f"{n}: the locator AA00aa not shown at the top right ({txt.strip()!r})")
-                out["qth"] = "AA00AA shown"
+                out["qth"] = "AA00aa shown"
                 s.confirm(out["qth"])
             with o.step(f"{n}: a memory channel BENCHCH at 14.205 USB: 'CH BENCHCH' on its frequency, not 1 kHz off") \
                     as s:
@@ -580,10 +583,12 @@ def t_qth_channel(o):
                     try:
                         bench.ensure(r, {"freq": 14205000, "mode": 2})
                         time.sleep(1.5)
-                        on = oa.ocr(oa.shot(o, r, "channel on"), box=(0, 60, 800, 120), psm=6, scale=3).upper()
+                        # its framed box at the dial row's left, read alone: across the whole row the frame hid it
+                        # (2026-11-27)
+                        on = oa.ocr(oa.shot(o, r, "channel on"), box=CH_BOX, psm=6, scale=3).upper()
                         bench.ensure(r, {"freq": 14206000})
                         time.sleep(1.5)
-                        off = oa.ocr(oa.shot(o, r, "channel off"), box=(0, 60, 800, 120), psm=6, scale=3).upper()
+                        off = oa.ocr(oa.shot(o, r, "channel off"), box=CH_BOX, psm=6, scale=3).upper()
                     finally:
                         bench.ensure(r, {"freq": 14200000, "mode": 2})
                         o.changing -= 1
@@ -604,8 +609,9 @@ def t_qth_channel(o):
 
 def t_c_f(o):
     """Page C on both: C LOG's rows say what each frequency was (HAM .., FT8, AM BC, WWV, CB .., NOAA ..: its known
-    use); page F: WHAT IT DOES under the chosen item shows the spectrogram of A's spectrum, moving (two pictures a
-    second apart differ there)"""
+    use); page F: WHAT IT DOES under the chosen item shows the spectrogram of A's spectrum: lit there, and moving (two
+    pictures 3 s apart differ there). It is drawn dim: 1.5% of its pixels changed by more than 8 grey levels in 3 s
+    and none by 40 (2026-11-27), so its own box is judged at 8, not the CPU bars beside it"""
     res = {}
     try:
         with o.step("both on page C: the rows' WHAT IT WAS") as s:
@@ -620,17 +626,21 @@ def t_c_f(o):
                 if not words:
                     raise Refused(f"{n}: C LOG's rows say no known use ({' '.join(txt.split())[:120]!r})")
             s.confirm(str({k: v for k, v in res.items() if k.endswith(" C")}))
-        with o.step("both on page F: the spectrogram under the chosen item moves") as s:
+        with o.step("both on page F: the spectrogram under the chosen item is lit and moves") as s:
+            from PIL import Image
             oa.page_both(o, "F")
             time.sleep(1.5)
+            box = (320, 120, 795, 204)          # WHAT IT DOES under its two lines of text
             for n, r in _both(o):
                 a = oa.shot(o, r, "f spectrogram a")
-                time.sleep(1.2)
+                time.sleep(3.0)
                 b = oa.shot(o, r, "f spectrogram b")
-                moved = _diff(a, b, (400, 150, 800, 400))
-                res[f"{n} F"] = round(moved, 3)
-                if moved < 0.01:
-                    raise Refused(f"{n}: F's WHAT IT DOES part did not move in 1.2 s ({moved:.1%})")
+                lit = sum(1 for v in Image.open(b).convert("L").crop(box).getdata() if v > 12) / \
+                    float((box[2] - box[0]) * (box[3] - box[1]))
+                moved = _diff(a, b, box, thr=8)
+                res[f"{n} F"] = {"lit": round(lit, 3), "moved": round(moved, 4)}
+                if lit < 0.02 or moved < 0.003:
+                    raise Refused(f"{n}: F's spectrogram lit {lit:.1%} of its box, moved {moved:.2%} in 3 s")
             s.confirm(str({k: v for k, v in res.items() if k.endswith(" F")}))
         return True, f"C LOG's known uses and F's moving spectrogram on both: {res}", res
     except Refused as e:

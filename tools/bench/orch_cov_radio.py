@@ -7,6 +7,7 @@ ends with both radios on the Sentry's page A (home_both).
 
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
+import os
 import re
 import time
 
@@ -793,10 +794,15 @@ def t_tci_ask(o):
                             raise Refused(f"{n}: the radio keyed while it asked")
                         out["one question"] = "asked once for two starts, the other address refused unasked, No"
                         s.confirm(out["one question"])
+                    # A No holds for its connection (src/tci_server.c ask_end: SAID_NO, refused unasked while it
+                    # stays): each step after asks on a connection of its own
+                    c.close()
+                    c = None
                     with o.step(f"{n}: in CW the client's first CW text asks and does not go out; No") as s:
                         o.changing += 1
                         try:
                             bench.ensure(r, {"freq": 14040000, "mode": 4})
+                            c = _tci_client(r, port)
                             t0, a0 = time.time(), _asked_count(r)
                             c.send("cw_macros:0,TEST;")
                             r.wait("the question for the CW text", lambda: r.state.get("ask") == 1, 4)
@@ -810,6 +816,8 @@ def t_tci_ask(o):
                             o.changing -= 1
                         out["cw text"] = "asked, not sent, No"
                         s.confirm(out["cw text"])
+                    c.close()
+                    c = _tci_client(r, port)
                     with o.step(f"{n}: the client's start again, Always (one click left, push): kept in "
                                 f"tci_allowed.conf") as s:
                         c.send("trx:0,true;")
@@ -867,10 +875,17 @@ def t_tci_ask(o):
 # ---- B names an FM station from RDS; the title's SDR tag; B's gain and squelch in SCAN CFG (sentry-b-rds,
 #      sentry-title-usb-tags, scancfg-b-gain-squelch) ----
 
+RDS_FM = [107.9, 97.1, 92.3, 99.7, 106.7, 94.7]     # FM stations heard here; the strongest on each SDR tried first
+
+
 def t_sentry_rds(o):
-    """On each radio with an SDR: B on 107.9 MHz (a strong FM station with RDS here): within 20 s TUNED names it (the
-    remote's bname: call letters or the PS name); the head's title names the SDR (RTL0..); SCAN CFG's B: GAIN and B:
-    SQUELCH rows show the gain and squelch set (rtl_gain, rtl_sql), each changed and read back, put back"""
+    """On each radio with an SDR: B on the FM stations of RDS_FM, each's level over the noise read (cfg? rtl_over);
+    the strongest three tried in turn, each 25 s: the RDS line over the waterfall names the station ('RDS 92.300
+    KEITH COUNTRY': its frequency, its name (PS), its programme type); the head's title names the SDR (RTL0..); SCAN
+    CFG's B: GAIN and B: SQUELCH rows show the gain and squelch set (rtl_gain, rtl_sql), each changed and read back,
+    put back. The remote's bname is the band's name (FM), not RDS: the screen is read. TUNED's call letters come only
+    when the PI maps to them, and TUNED is the stick's own centre; the X6100's stick heard 107.9 at 11 dB over and
+    named nothing in 40 s, 92.3 at 18 dB within 10 s (2026-11-27)"""
     import suite_cover_b as cb
     res = {}
     try:
@@ -879,22 +894,39 @@ def t_sentry_rds(o):
                 res[n] = "no SDR"
                 continue
             out = res[n] = {}
-            with o.step(f"{n}: B on 107.9 MHz: the station named from RDS; the title names the SDR") as s:
+            with o.step(f"{n}: B on the strongest FM stations: one named on the RDS line; the title names the SDR") \
+                    as s:
                 oa.page_both(o, "B")
                 bhz0 = int(r.state.get("bhz") or 0)
                 try:
-                    r.send("set bch 107900000")
-                    r.wait("B on 107.9", lambda: int(r.state.get("bhz") or 0) == 107900000, 8)
-                    end, name, txt = time.time() + 25, "", ""
-                    while time.time() < end and not name:
-                        time.sleep(4.0)
-                        p = oa.shot(o, r, "b rds tuned")
-                        txt = oa.ocr(p, box=(205, 50, 600, 125), psm=6, scale=3, stretch=True).upper()
-                        m = re.search(r"\b([WK][A-Z]{2,3})(?:-FM)?\b", txt)
-                        name = m.group(1) if m else ""
-                    out["rds"] = name
+                    level = {}
+                    for f in RDS_FM:
+                        hz = int(round(f * 1e6))
+                        r.send(f"set bch {hz}")
+                        r.wait(f"B on {f}", lambda: int(r.state.get("bhz") or 0) == hz, 8)
+                        time.sleep(1.5)
+                        try:
+                            level[f] = float(oa.cfg(r, "rtl_over"))
+                        except (TypeError, ValueError):
+                            level[f] = -99.0
+                    tried, name, txt = [], "", ""
+                    for f in sorted(level, key=lambda k: -level[k])[:3]:
+                        hz = int(round(f * 1e6))
+                        r.send(f"set bch {hz}")
+                        r.wait(f"B on {f}", lambda: int(r.state.get("bhz") or 0) == hz, 8)
+                        tried.append(f"{f} ({level[f]:.0f} dB)")
+                        end = time.time() + 25
+                        while time.time() < end and not name:
+                            time.sleep(4.0)
+                            p = oa.shot(o, r, "b rds line")
+                            txt = oa.ocr(p, box=(10, 240, 600, 264), psm=7, scale=3).upper()
+                            m = re.search(r"RDS\s*[0-9.,@O]{5,8}\s+([A-Z0-9&'-]{2,8})", txt)
+                            name = m.group(1) if m else ""
+                        if name:
+                            break
+                    out["rds"] = f"{name} on {tried[-1]}" if name else ""
                     if not name:
-                        raise Refused(f"{n}: B on 107.9 shows no station's call letters from RDS in 25 s "
+                        raise Refused(f"{n}: B named no station from RDS on {', '.join(tried)}, 25 s each "
                                       f"({' '.join(txt.split())[:90]!r})")
                     p = oa.shot(o, r, "b title sdr")
                     head = oa.ocr(p, box=(400, 24, 744, 50), psm=7, scale=5).upper()
@@ -903,7 +935,7 @@ def t_sentry_rds(o):
                 finally:
                     if bhz0:
                         r.send(f"set bch {bhz0}")
-                s.confirm(f"RDS {name!r}, the title names the RTL")
+                s.confirm(f"RDS {out['rds']!r}, the title names the RTL")
             with o.step(f"{n}: SCAN CFG's B: GAIN and B: SQUELCH follow rtl_gain and rtl_sql") as s:
                 def rows(label):
                     bench.open_page(r, "A")
@@ -913,8 +945,10 @@ def t_sentry_rds(o):
                     cb.cfg_close(r)
                     txt = oa.ocr(p, box=(0, 230, 800, 275), psm=6, scale=3).upper().replace(",", ".")
                     g = re.search(r"GAIN\W+(AUTO|\d+[.]\d)", txt)
-                    q = re.search(r"SQUELCH\W+(OFF|\d+)", txt)
-                    return (g.group(1) if g else None), (q.group(1) if q else None), " ".join(txt.split())[:100]
+                    q = re.search(r"SQUELCH\W+(OFF|\d[\dO@]*)", txt)       # 10 read '1@' (2026-11-27)
+                    qv = q.group(1).replace("@", "0").replace("O", "0") if q and q.group(1) != "OFF" else (
+                        q.group(1) if q else None)
+                    return (g.group(1) if g else None), qv, " ".join(txt.split())[:100]
                 g0, q0 = oa.cfg(r, "rtl_gain"), oa.cfg(r, "rtl_sql")
                 before = rows("scan cfg b rows before")
                 g1 = 280 if str(g0) != "280" else 400
@@ -936,9 +970,34 @@ def t_sentry_rds(o):
 
 # ---- The TCI SERVER card names its client (tci-card-client) ----
 
+LOOKALIKE = {"0": "0468OGBDQ@", "1": "1IL|7", "2": "2Z", "3": "38", "4": "4A", "5": "5S", "6": "68G", "7": "71",
+             "8": "863B", "9": "9G"}
+
+
+def _addr_like(ip, text):
+    """Whether address ip is in text as the pixel font's digits read (a 0 read 4 or 8, 168 read 166: 2026-11-27)"""
+    pat = "".join("[.,]" if ch == "." else f"[{re.escape(LOOKALIKE.get(ch, ch))}]" for ch in ip)
+    return bool(ip) and re.search(pat, text.replace(" ", "")) is not None
+
+
+def _card_line(p):
+    """The card's 'Connected from' line read: its dim grey (no client) lifted to white first, or ''"""
+    from PIL import Image
+    if not p:
+        return ""
+    lifted = p + ".lift.png"
+    Image.open(p).convert("L").crop((160, 120, 795, 420)).point(lambda v: 255 if v > 30 else 0).save(lifted)
+    try:
+        txt = oa.ocr(lifted, psm=6, scale=3).upper()
+    finally:
+        os.remove(lifted)
+    return next((x.strip() for x in txt.splitlines() if "CONNECTED" in x and "FROM" in x), "")
+
+
 def t_tci_card(o):
     """On each radio, a TCI client connected from this computer: Settings > General, walked down with the MFK to the
-    TCI SERVER card, shows the client's address (compared, never said); the client gone, the card says no client"""
+    TCI SERVER card's Connected from row, shows the client's address (compared, never said); the client gone, the row
+    says no client. 'no client' is drawn dim grey: read with the dim pixels lifted (_card_line)"""
     names = ("Settings",)
     res = {}
     try:
@@ -954,25 +1013,24 @@ def t_tci_card(o):
                     r.wait("Settings open", lambda: oa.win(r).lower().startswith("settings"), 8)
                     oa.press_label(r, r"^General", names, rest=1.0)
                     seen = ""
-                    for k in range(14):
+                    for k in range(16):
                         p = oa.shot(o, r, f"tci card {k + 1}")
-                        seen = oa.ocr(p, box=(160, 120, 795, 420), psm=6, scale=2).upper()
-                        if "TCI" in seen and "SERVER" in seen:
+                        seen = _card_line(p)
+                        if seen:
                             break
                         oa.turn(r, "mfk", 3, names, rest=0.6)
-                    if "TCI" not in seen:
-                        raise Refused(f"{n}: no TCI SERVER card found walking Settings > General")
-                    with_client = me in seen.replace(" ", "")
+                    if not seen:
+                        raise Refused(f"{n}: no TCI SERVER card's Connected from row found walking Settings > General")
+                    with_client = _addr_like(me, seen)
                     c.close()
                     c = None
                     time.sleep(2.5)
-                    p = oa.shot(o, r, "tci card after")
-                    after = oa.ocr(p, box=(160, 120, 795, 420), psm=6, scale=2).upper()
+                    after = _card_line(oa.shot(o, r, "tci card after"))
                     r.send("close")
                 finally:
                     if c is not None:
                         c.close()
-                gone = me not in after.replace(" ", "") and re.search(r"NO\s+CLIENT", after)
+                gone = not _addr_like(me, after) and re.search(r"NO\s*CLIENT", after) is not None
                 res[n] = {"with": with_client, "gone": bool(gone)}
                 if not with_client or not gone:
                     raise Refused(f"{n}: the TCI SERVER card {'named' if with_client else 'did not name'} the client, "
@@ -1029,8 +1087,8 @@ def tests(Test, A, B):
         Test("tci-ask-flow", "both, one at a time", "TCI's Ask before TX on the classic screen: one question for two "
              "starts, the other radio's start refused unasked, a CW text asks and is not sent, Always kept, a no-TX "
              "browser key refused unasked; nothing keyed; the GUI restarted after (planned)", t_tci_ask, 120),
-        Test("sentry-rds", "both RX", "B on 107.9 names the station from RDS; the title names the SDR; SCAN CFG's B "
-             "gain and squelch rows follow their settings", t_sentry_rds, 60),
+        Test("sentry-rds", "both RX", "B on the strongest FM station names it from RDS; the title names the SDR; "
+             "SCAN CFG's B gain and squelch rows follow their settings", t_sentry_rds, 130),
         Test("gen-pages", "both", "the main screen's pages as the remote lists them: VOL 1:2/2:2 defaults, MFK 1:4-4:4, "
              "APP 1:6-6:6 with the first two pages' apps", t_gen_pages, 10),
         Test("control-rules", "X6100", "set freq needs control, ft8 stop does not; sixty remote detents under FT8's "
