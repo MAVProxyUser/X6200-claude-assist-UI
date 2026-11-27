@@ -7216,6 +7216,13 @@ _orx.H = sys.modules[__name__]
 TESTS += _orx.tests(Test, A, B)
 ORCH_COVERS.update(_orx.COVERS)
 
+# Where the radios may not transmit (orch_tx_rules.py, 2026-11-27): the band edges, the X6200's receive-only ranges,
+# South Korea's and the own TX ranges, split's other VFO: each refusal's reason read, nothing armed
+import orch_tx_rules as _otr                # noqa: E402
+_otr.H = sys.modules[__name__]
+TESTS += _otr.tests(Test, A, B)
+ORCH_COVERS.update(_otr.COVERS)
+
 
 # Other sessions put new GUIs on the radios (tools/cross_x6200/install.sh): one replaced both mid-run on 2026-11-25
 # (15:43, its "no run going" check a moment before this run began). Who installs holds GUI_LOCK for the time it does
