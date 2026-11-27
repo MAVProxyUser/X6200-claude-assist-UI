@@ -5635,6 +5635,60 @@ FT8_COPY_TRIES = 3          # overs of each, the next only when the last read ov
                             # puts a skirt round a few overs of either path now and then (11-26: -33 dBc, TCI's too)
 
 
+SKIRT_BURST_DBC = -45       # skirt_bursts: a quarter second whose skirt reads over this is a burst
+
+
+def skirt_bursts(seg, fw, fs=24000):
+    """How the skirt comes within an over (2026-11-26: the X6200's sat at -55 dBc with bursts of 0.25-1 s to -30..-36,
+    a symmetric pedestal 30-155 Hz either side and a bump at 400 Hz, at any time in any over; the overs that failed
+    caught more of them): the skirt 100-155 Hz off per 55 Hz (the higher side) in 0.5 s windows every 0.25 s, the
+    share of them over SKIRT_BURST_DBC; in the bursts and out of them the tone's phase wander (rms, degrees, a line
+    taken out, 450 Hz either side) and its amplitude's (rms, dB): the saved overs' bursts were smooth phase and
+    amplitude wobble, an oscillator modulated, never a jump; and the tone's phase slips (its frequency in 20 ms
+    windows more than 1 Hz off its median: a sample dropped or repeated in an audio path jumps it 22 degrees at
+    1500 Hz) per second"""
+    import numpy as np
+    from scipy.signal import butter, filtfilt
+    t = np.arange(len(seg)) / fs
+    z = seg * np.exp(-2j * np.pi * fw * t)
+
+    def low(hz):
+        b, a = butter(4, hz / (fs / 2))
+        return filtfilt(b, a, z.real) + 1j * filtfilt(b, a, z.imag)
+    wide = low(450)
+    ph, am = np.unwrap(np.angle(wide)), 20 * np.log10(np.abs(wide) + 1e-12)
+    n, hop = int(0.5 * fs), int(0.25 * fs)
+    wins, wob = [], []
+    for i in range(0, len(seg) - n, hop):
+        P = np.abs(np.fft.rfft(seg[i:i + n] * np.hanning(n), 4 * n)) ** 2
+        fr = np.fft.rfftfreq(4 * n, 1 / fs)
+        tone = np.abs(fr - fw) <= 3
+        lo, hi = (fr >= fw - 155) & (fr <= fw - 100), (fr >= fw + 100) & (fr <= fw + 155)
+        if P[tone].sum() > 0:
+            wins.append(round(10 * math.log10(max(P[lo].sum(), P[hi].sum()) / P[tone].sum()), 1))
+            k = np.arange(n)
+            p = ph[i:i + n]
+            wob.append((math.degrees(float(np.std(p - np.polyval(np.polyfit(k, p, 1), k)))),
+                        float(np.std(am[i:i + n]))))
+    fd = np.diff(np.unwrap(np.angle(low(40)))) * fs / (2 * np.pi)
+    step = int(0.02 * fs)
+    f20 = np.array([fd[i:i + step].mean() for i in range(0, len(fd) - step, step)])
+    slips = int((np.abs(f20 - np.median(f20)) > 1.0).sum()) if len(f20) else 0
+    burst = [w for v, w in zip(wins, wob) if v > SKIRT_BURST_DBC]
+    calm = [w for v, w in zip(wins, wob) if v <= SKIRT_BURST_DBC]
+
+    def med(ws, j):
+        return round(float(np.median([w[j] for w in ws])), 2) if ws else None
+    return {"skirt_windows_dbc": wins, "burst_share": round(len(burst) / max(len(wins), 1), 2),
+            "burst_phase_deg": med(burst, 0), "calm_phase_deg": med(calm, 0),
+            "burst_am_db": med(burst, 1), "calm_am_db": med(calm, 1),
+            "slips_per_s": round(slips / max(len(seg) / fs, 1e-9), 1)}
+
+
+def _supply_said(sup):
+    return f"{sup['dc_in']}/{sup['vbat']}/{sup.get('charging')}" if sup else "unread"
+
+
 def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.3), (0, 0.3), (3, 0.9)),
               judge=True, skirt_max=None):
     """What else comes with a clean tone near it: the sender's TCI tone at `tone` Hz in USB-D at 0.1 W on the FT8
@@ -5733,6 +5787,10 @@ def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.
                        # out to 170 Hz), per 55 Hz as ft8_copies measures it
                        "skirt_100_dbc": band(100, 155), "skirt_400_dbc": band(400, 455)}
                 row.update(over=i_run + 1, tx_w=watch.tx_peak.get(sender))
+                row.update(skirt_bursts(seg, fw))
+                # the sender's supply with each over (11-26: whether the bursts follow the X6200's charger, which says
+                # charging on its 11.9 V supply while the battery drains)
+                row["sender_supply"] = bench.listener_gate_read(S)
                 # the over's number in the name: a repeated amplitude wrote over the over before (11-25: the one bad
                 # over's audio lost)
                 row["wav"] = save_wav(o, x, f"spurs_{sender}_to_{listener}_{i_run + 1:02d}_agc{agc}_amp{amp}.wav")
@@ -5753,7 +5811,11 @@ def spur_test(o, sender, listener, f=14074000, tone=1500, secs=6.0, runs=((3, 0.
         skirt = [(r["over"], max(r["skirt_100_dbc"])) for r in rows]
         over_max = [(n, v) for n, v in skirt if v > skirt_max]
         said = (f"{sender}'s {tone} Hz tone in {listener}'s audio over {len(rows)} overs alike, the skirt 100-155 Hz off "
-                f"per 55 Hz (dBc, the higher side): {', '.join(f'{v}' for _, v in skirt)}")
+                f"per 55 Hz (dBc, the higher side): {', '.join(f'{v}' for _, v in skirt)}; quarter seconds over "
+                f"{SKIRT_BURST_DBC} dBc: {', '.join(str(r.get('burst_share')) for r in rows)}; the tone's phase wander in them / out of them "
+                f"(deg rms): {', '.join(str(r.get('burst_phase_deg')) + '/' + str(r.get('calm_phase_deg')) for r in rows)}; phase "
+                f"slips a second: {', '.join(str(r.get('slips_per_s')) for r in rows)}; {sender}'s supply (DC in, "
+                f"battery V, charging): {', '.join(_supply_said(r.get('sender_supply')) for r in rows)}")
         if over_max:
             return False, said + f": over {skirt_max} dBc in over {', '.join(str(n) for n, _ in over_max)}", {"rows": rows}
         return True, said + f": every over within {skirt_max} dBc", {"rows": rows}
@@ -6878,6 +6940,10 @@ TESTS = [
          "power 100-155 Hz off the tone per 55 Hz at most SKIRT_MAX_DBC (11-25/26: now and then an early over -31 to "
          "-35 dBc, the rest -55)",
          lambda o: spur_test(o, B, A, runs=((3, 0.3),) * SKIRT_OVERS, skirt_max=SKIRT_MAX_DBC), 200),
+    Test("skirt x6100 levels", "X6100 TX, X6200 RX", "the same the other way: the X6100's tone in the X6200's audio "
+         "over SKIRT_OVERS alike overs, each over's skirt and its bursts (whether the X6200's skirt bursts are its "
+         "transmitter's or the listening X6100's: 2026-11-26)",
+         lambda o: spur_test(o, A, B, runs=((3, 0.3),) * SKIRT_OVERS, skirt_max=SKIRT_MAX_DBC), 200),
     Test("spurs x6100", "X6100 TX, X6200 RX", "the same the other way: the X6100's tone in the X6200's audio",
          lambda o: spur_test(o, A, B), 90),
     Test("tci-tail x6200", "X6200 TX, X6100 RX", "a TCI over's end on the air: the X6200's TCI plays 2 s of 1000 Hz "

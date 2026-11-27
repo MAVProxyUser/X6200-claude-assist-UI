@@ -1630,17 +1630,19 @@ LISTENER_DC_HOLDS_V = 12.0
 
 
 def listener_gate_read(radio):
-    """The radio's last battery log row: {battery_pct, vbat, dc_in}, or None unread (simulated, no row in 5 min)"""
+    """The radio's last battery log row: {battery_pct, vbat, dc_in, charging}, or None unread (simulated, no row in 5
+    min). charging: the base's flag (the X6200's says 1 on its 11.9 V supply while the battery drains)"""
     if radio.simulated:
         return None
     try:
         rows = [r.split(",") for r in ssh(radio.host, "tail -2 /mnt/battery_log.csv", timeout=20).split()]
-        rows = [(int(r[0]), float(r[1]), int(float(r[2])), float(r[3])) for r in rows if len(r) > 3 and r[0].isdigit()]
+        rows = [(int(r[0]), float(r[1]), int(float(r[2])), float(r[3]), int(r[4]) if len(r) > 4 and r[4].isdigit()
+                 else None) for r in rows if len(r) > 3 and r[0].isdigit()]
     except (Refused, subprocess.SubprocessError, ValueError):
         return None
     if not rows or time.time() - rows[-1][0] > 300:
         return None
-    return {"battery_pct": rows[-1][2], "vbat": rows[-1][1], "dc_in": rows[-1][3]}
+    return {"battery_pct": rows[-1][2], "vbat": rows[-1][1], "dc_in": rows[-1][3], "charging": rows[-1][4]}
 
 
 def listener_gate(radio):
