@@ -6240,8 +6240,9 @@ QUIET_LEAK_DB = 6.0         # the listener's audio off the tone this far over th
 QUIET_TONE_DB = 15.0        # the tone this far over the gap before it: on the air and heard
 QUIET_SINK = "alsa_output.platform-sound.stereo-fallback"   # the codec's PulseAudio sink on both radios
 QUIET_MON = "/tmp/bench_codec_monitor.raw"
-QUIET_CODEC_DBC = -50.0     # the codec's audio off the tone during an over, under its tone: the over's own audio is a
-                            # clean tone (-80 and lower); the speaker's audio mixed in came 20-30 dB under it
+QUIET_CODEC_DBC = -30.0     # the codec's audio off the tone during the stick's over, under its tone, at most: the
+                            # over's own audio carries -43..-54 dBc (2026-11-27); judged against the overs without the
+                            # stick too (QUIET_LEAK_DB)
 QUIET_STATION_DB = 8.0      # B's station this far over the stick's noise (rtl_over) at least: playing (the X6100's
                             # stick has it at 11.7 dB, 2026-11-27; its audio is there, noisy)
 
@@ -6303,10 +6304,10 @@ def tci_rtl_quiet_test(o, sender, listener, f=14100000, tone=1000, amp=0.3):
             bench.tx_log({"who": sender, "f": f, "w": S.pwr(), "what": f"orch: tci-rtl-quiet {phase}"})
             play_at_key, heard_at_key = S.state.get("play"), S.state.get("heard")
             # what reaches the sender's codec, from its sink's monitor (PulseAudio): the over's tone and anything
-            # mixed into it, before the base and the air
+            # mixed into it, before the base and the air (the radios' busybox has no timeout: parec killed after)
             mon = subprocess.Popen(["ssh", "-4", "-n", "-o", "BatchMode=yes", f"root@{S.host}",
-                                    f"rm -f {QUIET_MON}; timeout {key_s + 4:.0f} parec -d {QUIET_SINK}.monitor --raw "
-                                    f"--format=s16le --channels=1 --rate={TFS} {QUIET_MON}"],
+                                    f"rm -f {QUIET_MON}; parec -d {QUIET_SINK}.monitor --raw --format=s16le "
+                                    f"--channels=1 --rate={TFS} {QUIET_MON} & p=$!; sleep {key_s + 4:.0f}; kill $p"],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(0.5)
             t0 = time.time()
@@ -6501,10 +6502,16 @@ def tci_rtl_quiet_test(o, sender, listener, f=14100000, tone=1000, amp=0.3):
         bad.append(f"the over with the stick on the speaker not on the air and heard (on {r1['base_on_share']:.0%}, "
                    f"the tone {r1['tone_db']} dB, play {r1['play_at_key']}"
                    + (f", TCI: {r1['tci_said'][0]}" if r1["tci_said"] else "") + ")")
-    for r_ in (r0, rp, r1):
-        if r_["codec_off_dbc"] is not None and r_["codec_off_dbc"] > QUIET_CODEC_DBC:
-            bad.append(f"{r_['phase']}: the sender's codec had {r_['codec_off_dbc']} dBc off the tone (more than the "
-                       f"over's own audio: {QUIET_CODEC_DBC} dBc at most)")
+    # the codec: the over with the stick against the more of the two without it (each over's own audio carries
+    # some: -43 to -49 dBc on the X6200 with nothing playing, 2026-11-27), and never near the tone itself
+    ref_c = max([x for x in (r0["codec_off_dbc"], rp["codec_off_dbc"]) if x is not None], default=None)
+    if r1["codec_off_dbc"] is not None:
+        if r1["codec_off_dbc"] > QUIET_CODEC_DBC:
+            bad.append(f"the stick's over: the sender's codec had {r1['codec_off_dbc']} dBc off the tone "
+                       f"({QUIET_CODEC_DBC} at most)")
+        elif ref_c is not None and r1["codec_off_dbc"] > ref_c + QUIET_LEAK_DB:
+            bad.append(f"the stick's over: the sender's codec had {r1['codec_off_dbc']} dBc off the tone, "
+                       f"{r1['codec_off_dbc'] - ref_c:+.1f} dB over the overs without it")
     if leak is None:
         bad.append("the listener's audio not measured")
     elif leak > QUIET_LEAK_DB:
@@ -7517,6 +7524,17 @@ import orch_tx_rules as _otr                # noqa: E402
 _otr.H = sys.modules[__name__]
 TESTS += _otr.tests(Test, A, B)
 ORCH_COVERS.update(_otr.COVERS)
+
+# The coverage report's features with no test (2026-11-27): the radio side (orch_cov_radio.py: TX, CW, TCI, remote,
+# web, SDR, Sentry A/C-G/I) and the settings, system and screens (orch_cov_ui.py), each judged by itself
+import orch_cov_radio as _ocr               # noqa: E402
+_ocr.H = sys.modules[__name__]
+TESTS += _ocr.tests(Test, A, B)
+ORCH_COVERS.update(_ocr.COVERS)
+import orch_cov_ui as _ocu                  # noqa: E402
+_ocu.H = sys.modules[__name__]
+TESTS += _ocu.tests(Test, A, B)
+ORCH_COVERS.update(_ocu.COVERS)
 
 
 # Other sessions put new GUIs on the radios (tools/cross_x6200/install.sh): one replaced both mid-run on 2026-11-25
