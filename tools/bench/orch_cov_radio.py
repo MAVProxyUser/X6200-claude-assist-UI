@@ -704,6 +704,227 @@ def t_g_vol_popup(o):
         oa.home_both(o)
 
 
+# ---- TCI's Ask before TX (tci-ask-one-question, tci-cw-ask-first-text, tci-ask-always, tci-browser-key-no-ask) ----
+
+def _tci_client(r, port):
+    from remote_ws import Remote
+    c = Remote(r.host, port, timeout=5)
+    end = time.time() + 6
+    while time.time() < end:
+        t = c.recv(timeout=0.5)
+        if t is not None and t.lower().startswith("ready"):
+            break
+    return c
+
+
+def _tci_answer(c, secs=3.0):
+    """The radio's trx answer on TCI client c, or None"""
+    return _until(c, lambda t: t.lower().startswith("trx:0,"), secs)
+
+
+def _asked_count(r):
+    return int(oa.ssh(r, "grep -c 'wants to transmit: asked on the screen' /tmp/x6100_log.txt; true").strip() or 0)
+
+
+def t_tci_ask(o):
+    """On each radio's classic screen with TCI's Ask before TX on (/api/tci): a client's start is answered trx:0,false
+    and asked on the screen; its second start asks nothing more; a start from the other radio's address meanwhile is
+    refused without a question ('refused, the radio asks about ...' in the GUI's log); No (MFK push) closes it. In CW
+    its first CW text asks, nothing goes out, No. Then Always: the client's address kept in /mnt/tci_allowed.conf.
+    A start with a no-TX browser session's key (auth:TOKEN;) is refused without a question. Nothing keyed all along;
+    tci.conf and tci_allowed.conf put back, and the GUI restarted (planned) so the Always is forgotten"""
+    import json
+    import os
+    import subprocess
+    import orch_cable as oc
+    import orch_cov_ui as ou
+    res = {}
+    toks = bench.load_json(os.path.join(bench.STATE, "tokens.json"), {})
+    try:
+        for n, r in _both(o):
+            out = res[n] = {}
+            other = next(x for m, x in o.r.items() if m != n)
+            st, conf = oa.http_json(r, "/api/tci")
+            if st != 200 or not isinstance(conf, dict) or not conf.get("enabled"):
+                raise Refused(f"{n}: TCI not on ({st} {conf})")
+            port = int(conf.get("port", 50001))
+            me = oa.ssh(r, "echo ${SSH_CLIENT%% *}").strip()
+            allowed0 = oa.ssh(r, "cat /mnt/tci_allowed.conf 2>/dev/null; true")
+            if any(x.split("\t")[0] in (me, other.host) for x in allowed0.splitlines() if x):
+                raise Refused(f"{n}: this computer or the other radio is allowed always there: nothing to ask")
+            restart_after = False
+            with oa.file_kept(r, "/mnt/tci.conf", "/mnt/tci_allowed.conf"):
+                c = None
+                try:
+                    with o.step(f"{n}: the classic screen, TCI's Ask before TX on") as s:
+                        oc.classic(r)
+                        body = {"enabled": True, "port": port, "trust": conf.get("trust", "operate"), "tx_confirm": True}
+                        code = oa.http(r, "/api/tci", "POST", body)[0]
+                        time.sleep(2.6)         # the radio reads tci.conf when its time changes (a second's grain)
+                        s.confirm(f"POST {code}")
+                    with o.step(f"{n}: a client's start asked; its second start asks nothing more; the other radio's "
+                                f"start refused without a question; No") as s:
+                        c = _tci_client(r, port)
+                        a0, t0 = _asked_count(r), time.time()
+                        c.send("trx:0,true;")
+                        ans = _tci_answer(c)
+                        r.wait("the question on the screen", lambda: r.state.get("ask") == 1, 4)
+                        if not ans or "false" not in ans.lower():
+                            raise Refused(f"{n}: the start was answered {ans!r}, not trx:0,false;")
+                        c.send("trx:0,true;")
+                        _tci_answer(c, 2.0)
+                        a1 = _asked_count(r)
+                        if a1 != a0 + 1:
+                            raise Refused(f"{n}: the log says {a1 - a0} questions for two starts of one client")
+                        subprocess.run(["scp", "-4", "-q", "-o", "BatchMode=yes",
+                                        os.path.join(os.path.dirname(os.path.abspath(__file__)), "tci_start_once.py"),
+                                        f"root@{other.host}:/tmp/tci_start_once.py"], check=True, timeout=30)
+                        theirs = oa.ssh(other, f"python3 /tmp/tci_start_once.py {r.host} {port}; true", 30).strip()
+                        time.sleep(0.5)
+                        log = oa.ssh(r, "grep 'wants to transmit: refused, the radio asks about' /tmp/x6100_log.txt "
+                                        "| tail -1; true")
+                        if "false" not in theirs.lower() or not log.strip() or _asked_count(r) != a1:
+                            raise Refused(f"{n}: the other radio's start answered {theirs!r}, the log "
+                                          f"{log.strip()[-90:]!r}, questions {_asked_count(r) - a0}")
+                        bench.tap(r, "MFK")     # No: the answer chosen as the question opens
+                        r.wait("the question closed", lambda: r.state.get("ask") == 0, 4)
+                        if any(on for t, on in r.tx_hist if t >= t0):
+                            raise Refused(f"{n}: the radio keyed while it asked")
+                        out["one question"] = "asked once for two starts, the other address refused unasked, No"
+                        s.confirm(out["one question"])
+                    with o.step(f"{n}: in CW the client's first CW text asks and does not go out; No") as s:
+                        o.changing += 1
+                        try:
+                            bench.ensure(r, {"freq": 14040000, "mode": 4})
+                            t0, a0 = time.time(), _asked_count(r)
+                            c.send("cw_macros:0,TEST;")
+                            r.wait("the question for the CW text", lambda: r.state.get("ask") == 1, 4)
+                            time.sleep(1.0)
+                            bench.tap(r, "MFK")
+                            r.wait("the question closed", lambda: r.state.get("ask") == 0, 4)
+                            if any(on for t, on in r.tx_hist if t >= t0):
+                                raise Refused(f"{n}: the CW text keyed the radio before the answer")
+                        finally:
+                            bench.ensure(r, {"freq": 14200000, "mode": 2})
+                            o.changing -= 1
+                        out["cw text"] = "asked, not sent, No"
+                        s.confirm(out["cw text"])
+                    with o.step(f"{n}: the client's start again, Always (one click left, push): kept in "
+                                f"tci_allowed.conf") as s:
+                        c.send("trx:0,true;")
+                        _tci_answer(c)
+                        r.wait("the question again", lambda: r.state.get("ask") == 1, 4)
+                        r.send("knob mfk -1")
+                        time.sleep(0.4)
+                        bench.tap(r, "MFK")
+                        r.wait("the question closed", lambda: r.state.get("ask") == 0, 4)
+                        restart_after = True
+                        kept = oa.ssh(r, "cat /mnt/tci_allowed.conf 2>/dev/null; true")
+                        row = next((x for x in kept.splitlines() if x.split("\t")[0] == me), "")
+                        if not row or len(row.split("\t")) < 3:
+                            raise Refused(f"{n}: Always kept no row for this computer in tci_allowed.conf")
+                        c.send("trx:0,false;")
+                        out["always"] = f"kept ({len(row.split(chr(9)))} fields)"
+                        s.confirm(out["always"])
+                    with o.step(f"{n}: a start with a no-TX browser session's key: refused without a question") as s:
+                        tok = toks.get(n, {}).get("rx")
+                        if not tok:
+                            raise Refused(f"{n}: no no-TX session's key in tokens.json")
+                        d = _tci_client(r, port)
+                        try:
+                            a0 = _asked_count(r)
+                            d.send(f"auth:{tok};")
+                            time.sleep(0.5)
+                            d.send("trx:0,true;")
+                            ans = _tci_answer(d)
+                            time.sleep(1.0)
+                            if not ans or "false" not in ans.lower() or _asked_count(r) != a0 or r.state.get("ask"):
+                                raise Refused(f"{n}: the no-TX key's start answered {ans!r}, asked "
+                                              f"{_asked_count(r) - a0}")
+                        finally:
+                            d.close()
+                        out["no-TX key"] = "refused, not asked"
+                        s.confirm(out["no-TX key"])
+                finally:
+                    if c is not None:
+                        c.close()
+            if restart_after:
+                ou._restart(o, n, "the TCI ask test: its Always forgotten (tci_allowed.conf put back)", "true")
+        return True, f"TCI's ask on both: {json.dumps(res)}", res
+    except (Refused, subprocess.SubprocessError) as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+# ---- B names an FM station from RDS; the title's SDR tag; B's gain and squelch in SCAN CFG (sentry-b-rds,
+#      sentry-title-usb-tags, scancfg-b-gain-squelch) ----
+
+def t_sentry_rds(o):
+    """On each radio with an SDR: B on 107.9 MHz (a strong FM station with RDS here): within 20 s TUNED names it (the
+    remote's bname: call letters or the PS name); the head's title names the SDR (RTL0..); SCAN CFG's B: GAIN and B:
+    SQUELCH rows show the gain and squelch set (rtl_gain, rtl_sql), each changed and read back, put back"""
+    import suite_cover_b as cb
+    res = {}
+    try:
+        for n, r in _both(o):
+            if r.state.get("sdr") != 1:
+                res[n] = "no SDR"
+                continue
+            out = res[n] = {}
+            with o.step(f"{n}: B on 107.9 MHz: the station named from RDS; the title names the SDR") as s:
+                oa.page_both(o, "B")
+                bhz0 = int(r.state.get("bhz") or 0)
+                try:
+                    r.send("set bch 107900000")
+                    r.wait("B on 107.9", lambda: int(r.state.get("bhz") or 0) == 107900000, 8)
+                    end, name = time.time() + 20, ""
+                    while time.time() < end:
+                        name = str(r.state.get("bname") or "")
+                        if re.search(r"[A-Z]{3,}", name):
+                            break
+                        time.sleep(0.5)
+                    out["rds"] = name
+                    if not re.search(r"[A-Z]{3,}", name):
+                        raise Refused(f"{n}: B on 107.9 named no station from RDS in 20 s (bname {name!r})")
+                    p = oa.shot(o, r, "b title sdr")
+                    head = oa.ocr(p, box=(400, 24, 744, 50), psm=7, scale=5).upper()
+                    if not re.search(r"RT[L1I]\s?[0-9O@]", head):
+                        raise Refused(f"{n}: the title names no RTL ({head.strip()!r})")
+                finally:
+                    if bhz0:
+                        r.send(f"set bch {bhz0}")
+                s.confirm(f"RDS {name!r}, the title names the RTL")
+            with o.step(f"{n}: SCAN CFG's B: GAIN and B: SQUELCH follow rtl_gain and rtl_sql") as s:
+                def rows(label):
+                    bench.open_page(r, "A")
+                    cb.cfg_open(r, "A")
+                    time.sleep(1.0)
+                    p = oa.shot(o, r, label)
+                    cb.cfg_close(r)
+                    txt = oa.ocr(p, box=(0, 230, 800, 275), psm=6, scale=3).upper().replace(",", ".")
+                    g = re.search(r"GAIN\W+(AUTO|\d+[.]\d)", txt)
+                    q = re.search(r"SQUELCH\W+(OFF|\d+)", txt)
+                    return (g.group(1) if g else None), (q.group(1) if q else None), " ".join(txt.split())[:100]
+                g0, q0 = oa.cfg(r, "rtl_gain"), oa.cfg(r, "rtl_sql")
+                before = rows("scan cfg b rows before")
+                g1 = 280 if str(g0) != "280" else 400
+                q1 = 10 if str(q0) != "10" else 15
+                with oa.cfg_kept(r, {"rtl_gain": g1, "rtl_sql": q1}):
+                    after = rows("scan cfg b rows after")
+                out["rows"] = f"{before[:2]} -> {after[:2]}"
+                if not after[0] or after[0] == before[0] or after[1] != str(q1):
+                    raise Refused(f"{n}: SCAN CFG's B rows {before[2]!r} -> {after[2]!r} for rtl_gain {g0}->{g1}, "
+                                  f"rtl_sql {q0}->{q1}")
+                s.confirm(out["rows"])
+        return True, f"B's RDS name, the title's SDR, SCAN CFG's B rows: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+
 COVERS = {
     "ft8-nocall": (["ft8-nocall", "ft8-tx-off-dry-run"], []),
     "x6200-start": (["register-32-x6200", "pa-bias-x6200", "tx-x6200-base-band-table"], []),
@@ -712,6 +933,8 @@ COVERS = {
     "remote-pairing": (["pair-code-request", "pair-with-code", "pair-rate-limit", "pair-mirror-pause"],
                        ["role-admin-first"]),
     "gen-pages": (["radio-core-gen-pages-defaults", "app-button-pages"], []),
+    "tci-ask-flow": (["tci-ask-one-question", "tci-cw-ask-first-text"], ["tci-ask-always", "tci-browser-key-no-ask"]),
+    "sentry-rds": (["sentry-b-rds", "sentry-title-usb-tags", "scancfg-b-gain-squelch"], []),
     "sentry-b-sdr": (["sentry-b-mode-by-band", "sentry-b-vfo-channel"], []),
     "g-vol-popup": (["g-vol-popup"], []),
     "control-rules": (["control-stop-needs-none", "control-injected-keys-keep"], []),
@@ -739,6 +962,11 @@ def tests(Test, A, B):
         Test("sentry-b-sdr", "both RX", "B's SDR on 98.1, 121.5 and 146.52 MHz: WFM, AM, NFM; a VFO click 100, 25 and "
              "12.5 kHz", t_sentry_b, 50),
         Test("g-vol-popup", "both", "page G: a VOL click draws the pop-up, gone 3.5 s later", t_g_vol_popup, 30),
+        Test("tci-ask-flow", "both, one at a time", "TCI's Ask before TX on the classic screen: one question for two "
+             "starts, the other radio's start refused unasked, a CW text asks and is not sent, Always kept, a no-TX "
+             "browser key refused unasked; nothing keyed; the GUI restarted after (planned)", t_tci_ask, 120),
+        Test("sentry-rds", "both RX", "B on 107.9 names the station from RDS; the title names the SDR; SCAN CFG's B "
+             "gain and squelch rows follow their settings", t_sentry_rds, 60),
         Test("gen-pages", "both", "the main screen's pages as the remote lists them: VOL 1:2/2:2 defaults, MFK 1:4-4:4, "
              "APP 1:6-6:6 with the first two pages' apps", t_gen_pages, 10),
         Test("control-rules", "X6100", "set freq needs control, ft8 stop does not; sixty remote detents under FT8's "
