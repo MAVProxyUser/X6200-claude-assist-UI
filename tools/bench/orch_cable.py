@@ -4686,7 +4686,8 @@ PAIRS = [
     ("cw-dec-snr", t_cw_dec_snr, 90, "Dec SNR 5 copies a weak signal, 30 misses it, 5 again copies"),
     ("cw-parse", t_cw_parse, 60, "run-together CW printed split with Parse on, run together off"),
     ("cw-zap", t_cw_zap, 90, "200 Hz off, ZAP tunes onto the station within 10 Hz, in CW and CW-R"),
-    ("cw-tuner", t_cw_tuner, 70, "the tuning bars 30 Hz off in CW and CW-R (pictures)"),
+    ("cw-tuner", t_cw_tuner, 70, "the tuning bars 30 Hz off in CW and CW-R: on the station's side, within a bar "
+     "of the tone heard (cw_tune_hz); pictures"),
     ("cw-key-train", t_cw_key_train, 60, "KEY Train: TCI CW at 0 W, nothing heard; Train off: decoded"),
     ("cw-own-carrier", t_cw_own_carrier, 50, "the sender's TX meters and ALC; its classic screen on the air (picture)"),
     ("cw-own-decode", t_cw_own_decode, 40, "KEY Train, 25 WPM: the sender's TCI CW 'VVV TEST' read back by its "

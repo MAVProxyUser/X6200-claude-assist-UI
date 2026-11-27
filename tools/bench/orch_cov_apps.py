@@ -5026,9 +5026,101 @@ def t_sstv_restart(o, s, l):
         home_both(o)
 
 
+# ---- The Sentry's head: who works the radio from afar (app_sentry.c dev_tags), the battery ----
+
+HEAD_BOX = (56, 24, 744, 50)        # page A's status line: build_head's status_l, pixel_16 at y 27, x 60 to SW - 60
+
+
+def _head_until(o, r, label, want, tries=3):
+    """Page A's status line read (OCR, squashed) until want(text) holds, a few pictures, OCR missing a tag now and
+    then: (its last text as read, whether it held)"""
+    t = ""
+    for i in range(tries):
+        p = shot(o, r, f"{label} {i + 1}")
+        t = ocr(p, HEAD_BOX, scale=4, psm=7) + "\n" + ocr(p, HEAD_BOX, scale=3, psm=11) if p else ""
+        if want(squash(t)):
+            return t, True
+        time.sleep(1.0)
+    return t, False
+
+
+def t_sentry_title_tags(o):
+    """The head's tags on page A (every screen's status line), each radio in turn: WEB CTL while the bench's remote
+    holds control; WEB alone once it lets go, its session still on the Remote page (a viewer); TCI CTL as well while
+    a TCI program's set (the same dial) holds control; WEB CTL again once the program has gone and the bench took
+    control back (taken only when free: never from the radio's operator). The head's battery % read too: within 3 of
+    the remote's bat on battery (bat -1 on a supply, where only the head has it)"""
+    from remote_ws import Remote
+    res = {}
+    o.changing += 1                     # control let go on purpose here: nothing to put back while it is free
+    try:
+        with o.step("both on page A, 14.200 MHz USB"):
+            page_both(o, "A")
+            o.both({"freq": 14200000, "mode": 2})
+        for n in (H.A, H.B):
+            r, out = o.r[n], {}
+            res[n] = out
+            with o.step(f"{n}: the bench holds control: WEB CTL in the head") as st:
+                r.take_control()
+                t, ok = _head_until(o, r, "head web ctl", lambda q: "WEBCTL" in q)
+                out["held"] = " ".join(t.split())[:160]
+                if not ok:
+                    raise Refused(f"{n}: no WEB CTL in the head while the bench holds control ({out['held']!r})")
+                m = re.search(r"(\d{1,3})\s*%", t)
+                out["head_pct"], out["bat"] = (int(m.group(1)) if m else None), r.state.get("bat")
+                if out["head_pct"] is None:
+                    raise Refused(f"{n}: no battery % in the head ({out['held']!r})")
+                bat = int(out["bat"] if out["bat"] is not None else -1)
+                if bat >= 0 and abs(out["head_pct"] - bat) > 3:
+                    raise Refused(f"{n}: the head says {out['head_pct']} %, the remote's bat {bat}")
+                st.confirm(f"WEB CTL, {out['head_pct']} % (bat {bat})")
+            with o.step(f"{n}: control let go, the bench still watching: WEB, no CTL") as st:
+                r.send("control release")
+                r.wait("control free", lambda: not r.ctl_mine and (r.ctl_who or "none") == "none", 5)
+                t, ok = _head_until(o, r, "head web", lambda q: "WEB" in q and "CTL" not in q)
+                out["free"] = " ".join(t.split())[:160]
+                if not ok:
+                    raise Refused(f"{n}: control free, the head not WEB alone ({out['free']!r})")
+                st.confirm("WEB")
+            with o.step(f"{n}: a TCI program's set (the same dial) holds control: TCI CTL in the head") as st:
+                c = Remote(r.host, 50001, timeout=5)
+                try:
+                    time.sleep(1.0)                 # the server's greeting first
+                    c.send(f"vfo:0,0,{int(r.state.get('freq') or 14200000)};")
+                    r.wait("ctl tci", lambda: (r.ctl_who or "").startswith("tci"), 5)
+                    t, ok = _head_until(o, r, "head tci ctl", lambda q: "TCICTL" in q)
+                    out["tci"] = " ".join(t.split())[:160]
+                finally:
+                    c.close()
+                if not ok:
+                    raise Refused(f"{n}: a TCI program holds control, no TCI CTL in the head ({out['tci']!r})")
+                st.confirm("TCI CTL")
+            with o.step(f"{n}: the program gone, control taken back: WEB CTL again") as st:
+                r.wait("control free after the program left", lambda: (r.ctl_who or "none") == "none" or r.ctl_mine, 8)
+                r.take_control()
+                t, ok = _head_until(o, r, "head web ctl again", lambda q: "WEBCTL" in q and "TCICTL" not in q)
+                out["back"] = " ".join(t.split())[:160]
+                if not ok:
+                    raise Refused(f"{n}: control back with the bench, the head reads {out['back']!r}")
+                st.confirm("WEB CTL")
+        return True, "the head's tags on both: WEB CTL, WEB, TCI CTL, WEB CTL; its battery % " + \
+            ", ".join(f"{n} {res[n].get('head_pct')} %" for n in res), res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        for r in o.r.values():
+            try:
+                r.take_control()
+            except Refused as e:
+                o.st.ev(f"{r.name}: control not taken back: {e}", "bad")
+        o.changing -= 1
+        home_both(o)
+
+
 # ---- what each test covers, its rows ----
 
 COVERS = {
+    "sentry-title-tags": (["sentry-title-remote-tags"], ["sentry-title-battery"]),
     "bands-app": (["bands-app-open", "bands-use-band"], []),
     "timesig-f2": (["timesig-f2-set-clock"], []),
     "channels-api": (["channels-web-concurrency", "channels-web-partial-save"], []),
@@ -5095,6 +5187,8 @@ ROWS = [
     # (name, fn, est s, "what")
     ("bands-app", t_bands, 60, "the Bands app opened and closed on both; the MFK and its press tune 40 m's phone "
      "frequency in LSB, from CW its CW frequency in CW, from CW-R 20 m's in CW-R"),
+    ("sentry-title-tags", t_sentry_title_tags, 90, "page A's head on each radio: WEB CTL with the bench in control, WEB "
+     "once it lets go, TCI CTL under a TCI program's set, WEB CTL again; its battery %"),
     ("timesig-f2", t_timesig, 40, "Time Signal's F2 Set clock: Auto, Off, Auto again, as the button reads"),
     ("channels-api", t_channels_web, 60, "the Memories API: a stale Delete refused, Delete and Undo at its place, a "
      "Save of the frequency alone keeps a 40-byte name and an extra key (the files put back)"),
