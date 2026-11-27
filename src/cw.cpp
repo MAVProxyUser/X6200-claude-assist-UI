@@ -72,6 +72,12 @@ static size_t              freq_hist_w = 0;
 static size_t              freq_hist_n = 0;
 static uint8_t             frame_counter = 0;
 static std::atomic<float>  rx_shift{0.0f};   /* audio Hz the VFO moved, for the audio thread */
+/* CW <-> CW-R where the tone changes sides of the key tone (the X6100: CW the upper sideband, CW-R the lower), the
+ * dial where it was: the station's tone mirrored about the key tone (676 Hz in CW, 724 in CW-R at a 700 Hz key tone),
+ * which the audio thread follows as it follows a dial move. Left to the tracker, it locked on the new place a few
+ * frames in four and read 8 Hz for 24 for seconds (orch cw-tuner, 2026-11-27); the X6200's tone rises in both */
+static std::atomic<bool>   rx_mirror{false};
+static int                 last_dir;    /* radio_cw_tone_dir of the last CW mode, GUI thread */
 static int32_t             last_freq;
 static int                 wpm_sent = 0;
 
@@ -161,6 +167,9 @@ static void apply_rx_params() {
     static float peak_tone, peak_q;
 
     float shift = rx_shift.exchange(0.0f);
+    if (rx_mirror.exchange(false)) {
+        shift += 2.0f * ((float)key_tone - (tone_freq + shift));
+    }
     if (shift != 0.0f) {
         receiver->follow_vfo(shift);
         tone_freq += shift;
@@ -418,8 +427,15 @@ static void on_key_speed(Subject *subj, void *user_data) {
  * goes up, as CW-R's does: there the offset is turned round in CW, the bars the same way up on both radios (#115) */
 static void on_mode_change(Subject *subj, void *user_data) {
     radio_mode_t mode = (radio_mode_t)cfg_sm.cp_cur_mode.get();
+    int          dir  = radio_cw_tone_dir(mode);
 
-    tune_turned = mode == radio_mode_cw && radio_cw_tone_dir(mode) > 0;
+    tune_turned = mode == radio_mode_cw && dir > 0;
+    if (dir) {
+        if (last_dir && dir != last_dir) {
+            rx_mirror = true;           /* the tone to the key tone's other side (rx_mirror) */
+        }
+        last_dir = dir;
+    }
 }
 
 static void on_rx_param_change(Subject *subj, void *user_data) {

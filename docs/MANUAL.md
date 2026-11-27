@@ -7126,6 +7126,12 @@ every new mode cleared it, CW to CW-R and back excepted).
   that follows the station inside the CW filter, a detector with a noise
   floor, and a time classifier that learns the speed, 10 to 50 WPM (in the
   [CW Trainer](#cw-trainer) from 5).
+- On the X6100, CW to CW-R and back keeps the decoder and the tuning bars
+  on the station: its tone goes to the key tone's other side (CW is the upper
+  sideband there, CW-R the lower; 676 Hz in CW is 724 Hz in CW-R at a 700 Hz key
+  tone), and the decoder goes with it as it follows a turn of the dial. Up to
+  v0.3.12.49 it had to find the station again, and for seconds the bars said
+  8 Hz off for 24 (the X6200's tone is on the same side in both).
 - A station back after a quiet is taken up at once: the decoder keeps the
   station it last held (a tone 10 dB and more over the noise) and goes back
   to it the moment it is on the air again. Up to v0.3.12.48, in a quiet of
