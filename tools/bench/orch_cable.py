@@ -523,6 +523,7 @@ CW_DEC_SPEED = {"key_speed": 20}    # and the sender's speed: at its own 28 WPM 
                                     # X6100's 'TEST TEST' even at full gain (2026-11-26; cw-his found it too)
 CW_WEAK_MAX_DB = 30       # a weak over heard at most this far over the quiet: Dec SNR 30 (with its 5 dB margin) must
                           # be able to refuse it
+CW_WEAK_STEP = 15         # the RF gain stepped down by this until the weak over is that weak (t_cw_dec_snr)
 
 
 def t_cw_dec_snr(o, s, l):
@@ -541,23 +542,35 @@ def t_cw_dec_snr(o, s, l):
             raise Refused(f"at Dec SNR 5 dB and full RF gain {l} printed {text!r}")
         rfg0 = int(L.state.get("rfg", 100))
         i30, i5 = {}, {}
+        tried = []
         try:
-            with bench.apart({"rfg": (weak_rfg, 100)}, f"cw-dec-snr: {l}'s RF gain {weak_rfg} brings the signal "
-                                                          f"down for the threshold to show"):
-                text30, _ = cw_over(o, s, l, "TEST TEST", "dec-snr 30 dB weak", listener_cfg={"cw_decoder_snr_3": 30},
-                                    listener_set={"rfg": weak_rfg}, info=i30, sender_cfg=CW_DEC_SPEED)
-                text5, _ = cw_over(o, s, l, "TEST TEST", "dec-snr 5 dB weak", listener_cfg={"cw_decoder_snr_3": 5},
-                                   listener_set={"rfg": weak_rfg}, info=i5, sender_cfg=CW_DEC_SPEED)
+            with bench.apart({"rfg": bench.STEPPED}, f"cw-dec-snr: {l}'s RF gain brings the signal down for the "
+                                                      f"threshold to show"):
+                # the RF gain that leaves it at most CW_WEAK_MAX_DB up, stepped down from the table's: the same 55
+                # left the X6100 28.9 dB up once and 33-36 dB the next run (2026-11-26)
+                while True:
+                    i30 = {}
+                    text30, _ = cw_over(o, s, l, "TEST TEST", f"dec-snr 30 dB weak rfg {weak_rfg}",
+                                        listener_cfg={"cw_decoder_snr_3": 30}, listener_set={"rfg": weak_rfg},
+                                        info=i30, sender_cfg=CW_DEC_SPEED)
+                    tried.append((weak_rfg, i30.get("heard")))
+                    if i30.get("heard") is None or i30["heard"] <= CW_WEAK_MAX_DB or weak_rfg - CW_WEAK_STEP < 5:
+                        break
+                    weak_rfg -= CW_WEAK_STEP
+                text5, _ = cw_over(o, s, l, "TEST TEST", f"dec-snr 5 dB weak rfg {weak_rfg}",
+                                   listener_cfg={"cw_decoder_snr_3": 5}, listener_set={"rfg": weak_rfg}, info=i5,
+                                   sender_cfg=CW_DEC_SPEED)
         finally:
             bench.ensure(L, {"rfg": rfg0})
+        res["rfg_tried"] = tried
         res.update(snr30_weak=text30, snr5_weak=text5, heard30_db=i30.get("heard"), heard5_db=i5.get("heard"),
                    wav30=i30.get("wav"), wav5=i5.get("wav"))
         weak = [h for h in (i30.get("heard"), i5.get("heard")) if h is not None]
         if not weak:
             return None, f"the Watch kept no level for the weak overs: {res}", res
         if max(weak) > CW_WEAK_MAX_DB:
-            return False, f"RF gain {weak_rfg} did not bring the signal down enough to test the threshold: heard " \
-                          f"{weak} dB up (at most {CW_WEAK_MAX_DB} wanted)", res
+            return False, f"RF gain down to {weak_rfg} did not bring the signal down enough to test the threshold: " \
+                          f"heard {weak} dB up (at most {CW_WEAK_MAX_DB} wanted; tried {tried})", res
         if "TEST" in text30:
             return False, f"Dec SNR 30 still copied {text30!r} from a signal heard {i30.get('heard')} dB up", res
         if "TEST" not in text5:
@@ -860,16 +873,19 @@ def t_cw_own_carrier(o, s, l):
     res = {}
     try:
         got = {}
-        ensure_alike(o, F_CW, 4)
+        ensure_alike(o, F_CW, 4, agc=2)
         classic(S)
-
-        def body(watch):
+        # session(), not over(): over() arms with the Sentry's A/B, which on the classic screen is the VFO key: the
+        # X6200 went on the air on VFO B and the Watch stopped the over (vfo 0/1, 2026-11-26)
+        with session(o, "cw-own-carrier", [s], F_CW) as watch:
+            role(o, s)
             th = threading.Thread(target=lambda: got.update(t=tci_cw(o, S, "TTTTT TTTTT", watch)))
             th.start()
             time.sleep(2.0)
             snap(o, f"cw-own-carrier {s}'s classic screen sending CW (the VFO line, the ALC bar)")
             th.join(30)
-        H.over(o, s, l, F_CW, 4, "cw-own-carrier", body, agc=2, pages=False)
+        if "t" not in got:
+            return False, f"{s}'s TCI CW did not finish", res
         on, off = got["t"]
         peaks = _own_peaks(S, F_CW, on + 0.5, off)
         frames = t_frames(S, on, off)

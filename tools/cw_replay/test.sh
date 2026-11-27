@@ -91,5 +91,16 @@ case $out in
     *"text: 'VVV TEST DE Q1TST "*) echo "ok   a new speed from the first letter: $out" ;;
     *) echo "FAIL a new speed from the first letter: $out"; bad=$((bad + 1)) ;;
 esac
+# A strong station through the receiver's AGC (2026-11-26, orch cw-dec-snr): the X6100 at RF gain 55, AGC fast, on
+# the X6200's "TEST TEST" at 20 WPM, some 40 dB over the noise. Each element's first step comes out 6-13 dB over the
+# rest and then dips 5 dB under where it settles; the threshold to go up, 6 dB under that first step, ended every E
+# in 30 ms (dropped as a blip): "T S T S". A young mark now goes up only under halfway to its peak
+# (key_detector.cpp schmitt, YOUNG_STEPS)
+n=$((n + 1))
+out=$(S16=1 ./cw_replay 300 1100 8 < x6200_agc_dits_on_x6100.s16 2> /dev/null)
+case $out in
+    *"text: 'TEST TEST "*) echo "ok   dits through the AGC's overshoot: $out" ;;
+    *) echo "FAIL dits through the AGC's overshoot: $out"; bad=$((bad + 1)) ;;
+esac
 echo "cw_replay: $n checks, $bad failed"
 [ $bad -eq 0 ]

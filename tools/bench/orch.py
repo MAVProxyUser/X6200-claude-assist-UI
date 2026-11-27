@@ -7266,6 +7266,11 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
                 if first is not None:
                     says = f"{says} (its first try, cut by a link stall: {first[:1500]})"   # 300 hid air olivia's
                                                                                            # rows (2026-11-26)
+                # a test that waits on an owner_ok file the owner has not made is NOT RUN, its last real result kept,
+                # as for a lapsed word on the cable: qrss3-key-safety's refusal counted as a FAIL (2026-11-26)
+                if not gate and ok is False and str(says).startswith("refused: needs the owner's word"):
+                    gate = says[len("refused: "):]
+                    says = f"not run: {gate}"
                 res = "NOT RUN" if gate else "PASS" if ok is True else "LOOK" if ok is None else "FAIL"
                 if AIR_WAYS and t.name.startswith("air ") and not gate:
                     says = f"only {', '.join('>'.join(w) for w in AIR_WAYS)} ran (AIR_B_WAYS): {says}"

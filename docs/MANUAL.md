@@ -7149,6 +7149,12 @@ every new mode cleared it, CW to CW-R and back excepted).
   the speed it had go out at once. Up to v0.3.12.49 the decoder learned the
   new speed only after eight elements, and the X6200's 15 WPM "VVV TEST"
   came out "EEETVV TEST" or "EUVV TEST" on the X6100 after a quiet.
+- A strong station through the receiver's AGC keeps its dits: the AGC lets
+  an element's first few milliseconds out louder than the rest and then
+  dips, and the decoder now ends a mark in its first 40 ms only once it has
+  fallen halfway (in dB) from its peak to the noise, not 6 dB under that
+  first loud moment. Up to v0.3.12.49 the X6100 at RF gain 55 read the
+  X6200's "TEST TEST", 40 dB over the noise, as "T S T S".
 - The speed is learned only from a station (a tone 10 dB and more over the
   noise), never from the noise keying the decoder in a quiet. Up to
   v0.3.12.48 a minute or two of a quiet band could take it to 50 WPM, and

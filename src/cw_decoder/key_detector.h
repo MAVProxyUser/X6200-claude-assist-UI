@@ -94,6 +94,7 @@ class KeyDetector {
     bool   muted_     = true;
     float  carrier_   = 0.0f;   /* 5th percentile of power/noise */
     int    down_steps_ = 0;
+    float  rise_from_  = 0.0f;  /* the level the mark keyed rose from (the lowest of the steps before it) */
     bool   trainer_    = false; /* trainer_range */
     bool   own_        = false; /* own() */
 

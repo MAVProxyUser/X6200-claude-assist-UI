@@ -87,7 +87,8 @@ it is restarted (kill it, `nohup python3 -B orch.py console --lan &`).
    while a sender is an X6200 on a supply under 12.0 V with its battery under 7.3 V at rest (`bench.battery_tx_gate`):
    the over would sag it to 7.0 V and its GUI would switch the radio off 30 s later, as it did mid js8-groups
    2026-11-26 on the bench's 11.8 V supply (the radio stays off till its POWER key); an X6200 listener on such a
-   supply at 7.1 V or under is refused too (`listener_gate`: receive alone drains it to the cut). A test
+   supply at 7.1 V or under is refused too (`listener_gate`: receive alone drains it to the cut). A test that
+   waits on an `owner_ok_*` file the owner has not made ("needs the owner's word") is NOT RUN as well. A test
    that fails while a radio's link stalled under it (its GUI the same process: the X6100's WiFi drops itself for
    ~10 s) runs once more, after both radios answer again; the first try's words are kept with the result (`RETRY` in
    the events). A GUI that restarted is a crash: no retry.

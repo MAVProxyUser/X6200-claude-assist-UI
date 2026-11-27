@@ -9,6 +9,7 @@
 #include "key_detector.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace cw {
 
@@ -44,6 +45,8 @@ constexpr float  LONE_MARK_DB = 3.0f;
  * fade, rising out of an element gap its integrator had not let all the way down, was lost (a synthetic QSO with
  * QSB: 13 % -> 18 % of its characters wrong); at 4 the same as before the rule there and in noise to 2 dB SNR */
 constexpr float  RISE_DB = 4.0f;
+constexpr int    YOUNG_STEPS = 5;   /* a mark's first 40 ms: the AGC's overshoot and dip (schmitt) */
+constexpr float  YOUNG_MIN_DB = 30.0f;   /* ... of a mark peaking this far over the noise */
 
 } // namespace
 
@@ -116,6 +119,7 @@ KeyEdge KeyDetector::schmitt(float r) {
                 run_   = 0;
                 r_old_ = r;
             } else if (run_ >= need) {
+                rise_from_ = *std::min_element(past_.begin() + 1, past_.end());   /* (schmitt's young marks) */
                 /* the extra step of a first mark is given back */
                 back      = -crossing() + static_cast<float>((need - EDGE_STEPS) * INTEG_STEP);
                 up_steps_ = 0;
@@ -127,7 +131,21 @@ KeyEdge KeyDetector::schmitt(float r) {
             run_ = 0;
         }
     } else {
-        if (r < off_lvl_) {
+        /* A young mark (YOUNG_STEPS since its key down) goes up only under halfway, in dB, from the noise to its peak
+         * (and 6 dB under it): through the receiver's AGC a strong element's first step comes out 6-13 dB over the
+         * rest of it and then dips 5 dB under where it settles (the X6100 at RF gain 55, AGC fast, 8 ms steps: -17,
+         * -23, -28, -30, -30, -29, -27, -25 dB, some 40 dB over the noise). 6 dB under that first step its dits ended
+         * in 30 ms and were dropped as blips, its dahs came in two ("TEST TEST" as "T S T S" and "TEST A ST", orch
+         * cw-dec-snr 2026-11-26). Only while young: lower at a mark's end, the X6100's carrier between its elements
+         * (lifted by the X6200's AGC through each gap) ran its elements together. Nor under 3 dB over the level it rose
+         * from (rose()). And only for a mark YOUNG_MIN_DB over the noise (the AGC's shape is a strong signal's): a
+         * blip 18 dB up, held to halfway (9 dB), lasted 32 ms and came out a dit ('4VV' for 'VVV'). Nor for our own
+         * keying: the X6200's sidetone raised at KEY Volume 63 fills its element gaps, and its N came out a D */
+        float off = down_steps_ < YOUNG_STEPS && peak_ >= from_db(YOUNG_MIN_DB) && !own_
+                        ? std::max({std::min(peak_ * from_db(-6.0f), std::sqrt(peak_)), from_db(floor_db_ - 3.0f),
+                                    rise_from_ * from_db(3.0f)})
+                        : off_lvl_;
+        if (r < off) {
             leaving = true;
             if (run_ == 0)
                 r_new_ = r;
