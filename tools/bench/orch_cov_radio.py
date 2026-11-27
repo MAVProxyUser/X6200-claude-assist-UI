@@ -314,7 +314,8 @@ def t_pairing(o):
             c.close()
             c = Remote(r.host, 50002, timeout=8)
             c.send(f"auth {tok}")
-            ans = _until(c, lambda t: t.startswith("role "), 5)
+            # a new connection is told 'role view 0 -' first (watching only): the answer to auth is the role after
+            ans = _until(c, lambda t: t.startswith("role ") and not t.startswith("role view 0 -"), 5)
             if not ans or not ans.startswith(f"role operate {tx} {PAIR_NAME}"):
                 raise Refused(f"x6100: 'auth TOKEN' at a new connection answered {ans!r}")
             res["auth"] = ans
@@ -480,7 +481,7 @@ def t_control_rules(o):
             r.take_control()
             c = Remote(r.host, 50002, timeout=8)
             c.send(f"auth {r._tok}")
-            if not _until(c, lambda t: t.startswith("role "), 5):
+            if not _until(c, lambda t: t.startswith("role ") and not t.startswith("role view 0 -"), 5):
                 raise Refused("x6100: the second connection got no role")
             c.send(f"set freq {int(r.state.get('freq', 14200000)) + 1000}")
             ans = _until(c, lambda t: t.startswith("err"), 4)
