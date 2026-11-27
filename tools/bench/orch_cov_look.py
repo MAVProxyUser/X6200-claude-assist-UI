@@ -470,6 +470,219 @@ def t_icon_menus(o):
         oa.home_both(o)
 
 
+# ---- The waterfall's Fixed-mode jumps, 3D look and VFO line; the S-meter's colours (settings-display-waterfall-jump,
+#      settings-display-waterfall-3d-params, settings-display-waterfall-line-zoom-smooth,
+#      settings-display-smeter-colours)
+
+WF_BOX = (0, 175, 800, 400)     # the waterfall (3D on the classic screen) between the band plan strip and its scale
+METER_BOX = (365, 0, 628, 62)   # the S-meter at the top
+
+# Fixed mode on a 100 kHz view at 14.200 (8 px a kHz, the line at x 400): (Jump at, Jump to, kHz tuned up, where
+# the line lands, the scale moved). 40%: the line within 40 kHz of the centre, then Center (back to 400), Other edge
+# (-40 kHz: x 80) or Scroll (+40 kHz: x 720); Line: 100 Hz from the edge, so 48.5 kHz up stays (x 788); Passband:
+# the passband (2.8 kHz right of the line in USB) whole on the screen, so 48.5 kHz up jumps (Center)
+# (waterfall_view.c line_room, waterfall_view_shift)
+JUMPS = [(0, 0, 45.0, 400, True), (0, 1, 45.0, 80, True), (0, 2, 45.0, 720, True), (2, 0, 48.5, 788, False),
+         (1, 0, 48.5, 400, True)]
+JUMP_AT, JUMP_TO = ("40%", "Passband", "Line"), ("Center", "Other edge", "Scroll")
+
+
+def t_wf_jump(o):
+    """On each radio's classic screen in Fixed mode at 14.200 MHz (each case from Centered, so the view starts on the
+    dial): JUMPS' Jump at and Jump to, the dial tuned up: the VFO's line lands where the case says (within 25 px)
+    and the scale moves or stands still as it says. The dial put back, the settings as found"""
+    from orch_cov_ui import _diff
+    res = {}
+    try:
+        for n, r in _both(o):
+            out = res[n] = {}
+            _classic(o, n, r)
+            for at, to, khz, want_x, moves in JUMPS:
+                label = f"Jump at {JUMP_AT[at]}, to {JUMP_TO[to]}"
+                with o.step(f"{n}: Fixed, {label}: {khz} kHz up, the line at x {want_x}, the scale "
+                            f"{'moves' if moves else 'stays'}") as s:
+                    o.changing += 1
+                    try:
+                        with oa.cfg_kept(r, {"wf_mode": 0, "wf_fixed_jump": at, "wf_fixed_after": to}):
+                            bench.ensure(r, {"freq": 14200000})
+                            time.sleep(1.0)
+                            bench.cfg_set(r, "wf_mode", 1)
+                            time.sleep(2.0)
+                            a = oa.shot(o, r, f"{label} at 14.200")
+                            bench.ensure(r, {"freq": 14200000 + int(khz * 1000)})
+                            time.sleep(2.5)
+                            b = oa.shot(o, r, f"{label} at +{khz}")
+                    finally:
+                        bench.ensure(r, {"freq": 14200000})
+                        o.changing -= 1
+                    x, scale = _vfo_x(b), _diff(a, b, SCALE_BOX)
+                    out[label] = {"x": x, "scale": round(scale, 3)}
+                    if abs(x - want_x) > 25 or (scale > 0.01) != moves:
+                        raise Refused(f"{n}: Fixed, {label}, {khz} kHz up: the line at x {x} (wanted {want_x}), the "
+                                      f"scale changed {scale:.1%} (should {'move' if moves else 'stay'})")
+                    s.confirm(f"line at x {x}, scale {scale:.1%}")
+        return True, f"the Fixed mode's jumps on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+def _rgb_diff(a, b, box, thr=40):
+    """The share of box's pixels whose red, green or blue differ by more than thr between pictures a and b: colour
+    changes of one brightness (green to yellow) too"""
+    from PIL import Image, ImageChops
+    ia, ib = Image.open(a).convert("RGB").crop(box), Image.open(b).convert("RGB").crop(box)
+    d = ImageChops.difference(ia, ib)
+    return sum(1 for px in d.getdata() if max(px) > thr) / float(ia.width * ia.height)
+
+
+def _changes(o, n, r, name, other, box, what):
+    """name set the other way (other(found)): box's colours change more than they do by themselves between two
+    pictures, and set back they come back near; (alone, moved, back)"""
+    v0 = oa.cfg(r, name)
+    a1 = oa.shot(o, r, f"{name} as found a")
+    time.sleep(0.6)
+    a2 = oa.shot(o, r, f"{name} as found b")
+    alone = _rgb_diff(a1, a2, box)
+    with oa.cfg_kept(r, {name: other(v0)}):
+        time.sleep(1.5)
+        moved = _rgb_diff(a2, oa.shot(o, r, f"{name} {other(v0)}"), box)
+    time.sleep(1.5)
+    back = _rgb_diff(a2, oa.shot(o, r, f"{name} back"), box)
+    if moved < max(0.02, 3 * alone):
+        raise Refused(f"{n}: {name} {v0} -> {other(v0)} changed {what} {moved:.1%}, by itself {alone:.1%}")
+    if back > max(0.6 * moved, 3 * alone + 0.02):
+        raise Refused(f"{n}: {name} back to {v0}: {what} {back:.1%} off the first picture (the change {moved:.1%})")
+    return round(alone, 3), round(moved, 3), round(back, 3)
+
+
+# Not the 3D colours: the Sentry's look (the bench's theme) keeps the waterfall's amber whatever they say
+# (waterfall_view.c d3_palette; 0.9% changed, as much as by itself, 2026-11-27). The traces are small dim dots on a
+# quiet band: depth, floor and range judged by how many there are (depth 32 -> 8: 2.1% -> 1.2% of the box lit, 6%
+# apart by itself), tilt by the perspective grid's dim lines moving
+WF3D = [("wf_3d_depth", lambda v: 8 if int(v) > 20 else 64, "density"),
+        ("wf_3d_tilt", lambda v: 0 if int(v) > 3 else 10, "grid"),
+        ("wf_3d_floor", lambda v: 30 if int(v) < 20 else 0, "density"),
+        ("wf_3d_range", lambda v: 20 if int(v) > 35 else 60, "density")]
+TRACE_BOX = (0, 280, 800, 398)      # the 3D traces' rows above the waterfall's scale
+GRID_BOX = (0, 195, 800, 290)       # the 3D view's back wall and grid above the traces: still by itself (0.0%), 6.2%
+                                    # changed by tilt 5 -> 0 on the X6200, whose busier traces moved 5.2% over the
+                                    # whole box (2026-11-27)
+
+
+def _density(path):
+    """The share of TRACE_BOX lighter than 50 grey: how many of the 3D traces' dots there are"""
+    from PIL import Image
+    im = Image.open(path).convert("L").crop(TRACE_BOX)
+    return sum(1 for v in im.getdata() if v > 50) / float(im.width * im.height)
+
+
+def _changes_3d(o, n, r, name, other, kind):
+    """name set the other way: the traces' density (kind density) or the grid (kind grid: a 12-grey change) moves
+    more than by itself between two pictures, and comes back near when put back; (alone, moved, back)"""
+    from orch_cov_ui import _diff
+    v0 = oa.cfg(r, name)
+    a1 = oa.shot(o, r, f"{name} as found a")
+    time.sleep(0.6)
+    a2 = oa.shot(o, r, f"{name} as found b")
+    with oa.cfg_kept(r, {name: other(v0)}):
+        time.sleep(2.0)
+        b = oa.shot(o, r, f"{name} {other(v0)}")
+    time.sleep(3.0)                     # the traces fill again (6 s of them)
+    c = oa.shot(o, r, f"{name} back")
+    if kind == "grid":
+        alone, moved, back = (_diff(a1, a2, GRID_BOX, thr=12), _diff(a2, b, GRID_BOX, thr=12),
+                              _diff(a2, c, GRID_BOX, thr=12))
+        ok = moved >= max(0.02, 3 * alone) and back <= max(0.6 * moved, 3 * alone + 0.02)
+    else:
+        d1, d2, db, dc = _density(a1), _density(a2), _density(b), _density(c)
+        base = max((d1 + d2) / 2, 1e-4)
+        alone, moved, back = abs(d1 - d2) / base, abs(db - base) / base, abs(dc - base) / base
+        ok = moved >= max(0.25, 3 * alone) and back <= 0.6 * moved
+    if not ok:
+        raise Refused(f"{n}: {name} {v0} -> {other(v0)}: the 3D {'grid' if kind == 'grid' else 'traces'} changed "
+                      f"{moved:.1%} (by itself {alone:.1%}), back {back:.1%}")
+    return round(alone, 3), round(moved, 3), round(back, 3)
+
+
+def t_wf_3d_params(o):
+    """On each radio's classic screen with the waterfall in 3D: its depth, tilt, floor and range (WF3D), each set the
+    other way: the waterfall's picture changes more than it moves by itself, and comes back when put back"""
+    res = {}
+    try:
+        for n, r in _both(o):
+            out = res[n] = {}
+            _classic(o, n, r)
+            with oa.cfg_kept(r, {"wf_3d": 1}):
+                time.sleep(1.5)
+                for name, other, kind in WF3D:
+                    with o.step(f"{n}: {name} the other way: the 3D waterfall's "
+                                f"{'grid' if kind == 'grid' else 'traces'} change, and back") as s:
+                        out[name] = _changes_3d(o, n, r, name, other, kind)
+                        s.confirm(f"by itself {out[name][0]:.1%}, set {out[name][1]:.1%}, back {out[name][2]:.1%}")
+        return True, f"the 3D waterfall's settings on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+def _line(path):
+    """The VFO line's brightness on the waterfall: the lightest of columns 394-406 down rows 220-380 (214 grey with
+    the line, 51 in the passband shade beside it, 10 outside, 2026-11-27)"""
+    from PIL import Image
+    px = Image.open(path).convert("L").load()
+    return max(sum(px[x, y] for y in range(220, 380)) / 160 for x in range(394, 407))
+
+
+def t_wf_line(o):
+    """On each radio's classic screen at 14.200 MHz (Centered): Waterfall line on the VFO on (the web Display page's
+    wf_center_line) draws the line down the waterfall at the VFO, off leaves only the passband's shade there. Put
+    back as found"""
+    import orch_cable as oc
+    res = {}
+    try:
+        for n, r in _both(o):
+            _classic(o, n, r)
+            with o.step(f"{n}: the waterfall's VFO line on, then off") as s:
+                with oc.disp_kept(r, {"wf_center_line": 1}):
+                    time.sleep(1.5)
+                    on = _line(oa.shot(o, r, "wf line on"))
+                with oc.disp_kept(r, {"wf_center_line": 0}):
+                    time.sleep(1.5)
+                    off = _line(oa.shot(o, r, "wf line off"))
+                res[n] = {"on": round(on), "off": round(off)}
+                if on < 150 or off > 120:
+                    raise Refused(f"{n}: the VFO line's column {on:.0f} grey with the line on, {off:.0f} off")
+                s.confirm(f"{on:.0f} grey on, {off:.0f} off")
+        return True, f"the waterfall's VFO line on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+def t_meter_colours(o):
+    """On each radio's classic screen: the S-meter's colours (smeter_color: Theme, Scale green/yellow/red, Level),
+    each of the other two set: the S-meter's colours change more than they do by themselves, and come back"""
+    res = {}
+    try:
+        for n, r in _both(o):
+            out = res[n] = {}
+            _classic(o, n, r)
+            v0 = int(oa.cfg(r, "smeter_color") or 0)
+            for v in [x for x in (0, 1, 2) if x != v0]:
+                with o.step(f"{n}: S-meter colours {v0} -> {v}: the S-meter's colours change, and back") as s:
+                    out[v] = _changes(o, n, r, "smeter_color", lambda _v, v=v: v, METER_BOX, "the S-meter")
+                    s.confirm(f"by itself {out[v][0]:.1%}, set {out[v][1]:.1%}, back {out[v][2]:.1%}")
+        return True, f"the S-meter's colours on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
 COVERS = {
     "look-hide-buttons": (["display-hide-buttons", "settings-display-hide-buttons", "display-keep-knob-lines"], []),
     "look-knob-info": (["display-knob-info-lines", "settings-display-knob-info"], []),
@@ -478,6 +691,10 @@ COVERS = {
     "look-clock-12h": (["settings-general-12h-clock"], []),
     "look-popups": (["settings-display-popups-freq", "settings-display-popups-info"], []),
     "look-icon-menus": (["settings-display-icon-menus", "app-icon-grid"], []),
+    "look-wf-jump": (["settings-display-waterfall-jump"], []),
+    "look-wf-3d-params": ([], ["settings-display-waterfall-3d-params"]),     # colours (Sentry), peaks, glide not
+    "look-wf-line": ([], ["settings-display-waterfall-line-zoom-smooth"]),   # the line; zoom and smooth not
+    "look-meter-colours": (["settings-display-smeter-colours"], []),
 }
 
 
@@ -497,4 +714,11 @@ def tests(Test, A, B):
              "A/B; neither when off", t_popups, 70),
         Test("look-icon-menus", "both", "Icon menus: APP opens the app tiles and closes them; off, the button pages",
              t_icon_menus, 50),
+        Test("look-wf-jump", "both", "Fixed mode's Jump at 40% (to Center, Other edge, Scroll), Line and Passband: "
+             "the VFO line lands where each says, the scale moves or stays", t_wf_jump, 110),
+        Test("look-wf-3d-params", "both", "the 3D waterfall's depth, tilt, floor and range each change its picture "
+             "and come back", t_wf_3d_params, 80),
+        Test("look-wf-line", "both", "the waterfall's VFO line drawn with its setting on, gone off", t_wf_line, 30),
+        Test("look-meter-colours", "both", "the S-meter's three colour schemes each change it and come back",
+             t_meter_colours, 40),
     ]

@@ -47,7 +47,11 @@ its own box at 8 grey levels; the locator's, the channel's and the TCI card's di
 sixth batch, orch_cov_look.py: Hide buttons and Keep knob lines, Knob info, the waterfall's Centered/Fixed modes and
 speed, the 12-hour clock, the pop-ups, the icon menus. It found Knob info set from the web or the remote doing nothing
 till a window opened or closed (knob_info.cpp's callback took the value and drew nothing): it shows or hides the lines
-at once now, and a theme change keeps them as it says.
+at once now, and a theme change keeps them as it says. A seventh batch (the same file): the Fixed mode's jumps (40% to
+Center, Other edge and Scroll, Line, Passband: each line within 5 px of where waterfall_view.c puts it), the 3D
+waterfall's depth, tilt, floor and range, the VFO line, the S-meter's colours. It found the waterfall's VFO line, set
+from the web, waiting for the dial to move (waterfall_view_line_apply, 2156e668); the 3D colours do nothing under the
+Sentry theme, by design (now in the manual).
 
 Open, mine: sentry-lock x6200>x6100's HOLD (the X6100's scan taken by its own 14.0903 spur, to look at live); the
 X6200's trainer adds a dit before an answer (WMK for MMK, older than today's changes); the X6100's trainer misreads
