@@ -7540,6 +7540,10 @@ import orch_cov_look as _ocl                # noqa: E402  the classic screen's l
 _ocl.H = sys.modules[__name__]
 TESTS += _ocl.tests(Test, A, B)
 ORCH_COVERS.update(_ocl.COVERS)
+import orch_cov_more as _ocm                # noqa: E402  the Network page's checks, VOL's press, page I's panels
+_ocm.H = sys.modules[__name__]
+TESTS += _ocm.tests(Test, A, B)
+ORCH_COVERS.update(_ocm.COVERS)
 
 
 # Other sessions put new GUIs on the radios (tools/cross_x6200/install.sh): one replaced both mid-run on 2026-11-25

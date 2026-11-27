@@ -1,0 +1,286 @@
+"""More features no test covered (2026-11-27, the coverage report's eighth batch, each needing nothing but the two
+radios): the web Network page's checks on a static Ethernet address, the VOL knob's press, and the direction finder's
+F2 ARRAY and F5 SET panels on page I. Judged from the web page's answers, the remote's state and a picture of the
+screen read with tesseract; nothing kept changed, nothing transmitted. Every test ends with both radios on the
+Sentry's page A (home_both).
+
+SPDX-License-Identifier: LGPL-2.1-or-later
+"""
+import re
+import time
+
+import bench
+from bench import Refused
+import orch_cov_apps as oa
+
+H = None                        # the running orch module (orch.py: orch_cov_more.H = sys.modules[__name__])
+
+
+def _both(o):
+    return [(H.A, o.r[H.A]), (H.B, o.r[H.B])]
+
+
+# ---- The web Network page's checks on a static address (ethernet-static-validation, ethernet-no-adapter) ----
+
+# (what is sent besides dhcp false, a word of the reason the GUI gives: src/wifi.cpp eth_check_field, eth_check)
+ETH_BAD = [
+    ({"ip": "10.1.2", "mask": "255.255.255.0"}, "IP address is not valid"),
+    ({"ip": "127.0.0.5", "mask": "/8"}, "IP address is not valid"),
+    ({"ip": "10.1.2.3", "mask": "255.0.255.0"}, "Netmask is not valid"),
+    ({"ip": "10.1.2.3", "mask": "/33"}, "Netmask is not valid"),
+    ({"ip": "10.1.2.0", "mask": "/24"}, "network or broadcast"),
+    ({"ip": "10.1.2.255", "mask": "255.255.255.0"}, "network or broadcast"),
+    ({"ip": "10.1.2.3", "mask": "/24", "gw": "10.1.3.1"}, "gateway is not in the subnet"),
+    ({"ip": "10.1.2.3", "mask": "/24", "gw": "10.1.2.3"}, "gateway is not in the subnet"),
+    ({"ip": "10.1.2.3", "mask": "/24", "dns": "300.1.1.1"}, "DNS is not valid"),
+    ({"ip": "10.1.2.3"}, "needs an IP address and a netmask"),
+]
+
+
+def t_eth_validation(o):
+    """On each radio, the web Network page (POST /api/network) with a static address it must refuse (ETH_BAD: not a
+    dotted quad, loopback, a bad netmask, the network or broadcast address, a gateway outside the subnet or the
+    address itself, a bad DNS, no netmask): each answered 409 with the GUI's reason, and GET /api/network the same
+    after as before (no adapter here: 'no adapter', present 0). Only refused settings are sent; one taken would be
+    put back to DHCP at once and the test fails"""
+    res = {}
+    try:
+        for n, r in _both(o):
+            out = res[n] = {}
+            with o.step(f"{n}: the Network page refuses {len(ETH_BAD)} bad static addresses, each with its reason") \
+                    as s:
+                st, before = oa.http_json(r, "/api/network")
+                if st != 200 or not isinstance(before, dict):
+                    raise Refused(f"{n}: GET /api/network {st} ({str(before)[:80]})")
+                out["state"] = before.get("state")
+                bad = []
+                for fields, why in ETH_BAD:
+                    body = {"dhcp": False, "ip": "", "mask": "", "gw": "", "dns": ""}
+                    body.update(fields)
+                    st, ans = oa.http_json(r, "/api/network", "POST", body)
+                    said = ans.get("msg", "") if isinstance(ans, dict) else str(ans)     # api_error's {"msg"}
+                    if st == 200:
+                        oa.http_json(r, "/api/network", "POST", {"dhcp": True, "ip": "", "mask": "", "gw": "",
+                                                                 "dns": ""})
+                        raise Refused(f"{n}: the Network page took {fields} (put back to DHCP)")
+                    if st != 409 or why.lower() not in str(said).lower():
+                        bad.append(f"{fields} -> {st} {str(said)[:60]!r}")
+                st, after = oa.http_json(r, "/api/network")
+                if bad:
+                    raise Refused(f"{n}: refusals without the reason: {bad}")
+                if after != before:
+                    raise Refused(f"{n}: GET /api/network changed: {before} -> {after}")
+                if before.get("present") or before.get("state") != "no adapter":
+                    out["note"] = f"an adapter is here ({before.get('state')}): its card not judged"
+                s.confirm(f"{len(ETH_BAD)} refused with their reasons; {before.get('state')}, unchanged")
+        return True, f"the Network page's checks on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+
+
+# ---- The VOL knob's press (input-knob-press-choose) ----
+
+def _vol_line(o, r, label):
+    """The first knob line's control name as read ('VOLUME', 'SQUELCH', ...), or '': the knob lines over the buttons,
+    VOL's the first ('Volume: 0')"""
+    import os
+    from PIL import Image
+    p = oa.shot(o, r, label)
+    if not p:
+        return ""
+    reads = [lambda: oa.ocr(p, box=(0, 368, 330, 394), psm=7, scale=3)]
+    for thr in (70, 40):                        # drawn dim over the X6200's busier waterfall: read '' plain
+        def lifted(thr=thr):
+            q = p + ".lift.png"
+            Image.open(p).convert("L").crop((0, 368, 200, 394)).point(lambda v: 255 if v > thr else 0).save(q)
+            try:
+                return oa.ocr(q, psm=7, scale=3)
+            finally:
+                os.remove(q)
+        reads.append(lifted)
+    for read in reads:
+        m = re.search(r"([A-Z]{3,14})\s*:", read().upper())    # the word before the colon: the arrow reads a letter
+        if m:
+            return m.group(1)
+    return ""
+
+
+def _is_volume(name):
+    """Whether a knob line's name read is VOLUME: dim over the X6200's waterfall it read 'NOTUME' (2026-11-27)"""
+    import difflib
+    return difflib.SequenceMatcher(None, name, "VOLUME").ratio() >= 0.6
+
+
+def t_knob_press(o):
+    """On each radio's classic screen, Knob info on: VOL pressed (Knob press: next control off, the default) chooses
+    the control: a turn then takes VOL to its next one (the knob line names another, the volume unchanged), the turn
+    back to Volume; pressed again it changes the value (a turn moves the volume, turned back). With Knob press: next
+    control on, a short press takes the next control at once (the volume unchanged); put back with the press off,
+    choosing and turning back to Volume. Settings as found"""
+    import orch_cable as oc
+    res = {}
+    try:
+        for n, r in _both(o):
+            out = res[n] = {}
+            with o.step(f"{n}: the classic screen") as s:
+                oc.classic(r)
+                time.sleep(1.5)
+                s.confirm("classic")
+            with o.step(f"{n}: VOL pressed chooses the control, a turn takes the next, pressed again changes the "
+                        f"value") as s:
+                with oa.cfg_kept(r, {"knob_info": 1, "knob_press_next": 0}):
+                    time.sleep(1.0)
+                    r.take_control()
+                    name0, v0 = _vol_line(o, r, "knob line as found"), int(r.state.get("vol") or 0)
+                    if not _is_volume(name0):
+                        raise Refused(f"{n}: VOL's knob line names {name0!r}, not VOLUME, as found")
+                    try:
+                        bench.tap(r, "VOL")             # choosing
+                        time.sleep(0.6)
+                        r.send("knob vol 1")
+                        time.sleep(0.8)
+                        name1, v1 = _vol_line(o, r, "knob line chose next"), int(r.state.get("vol") or 0)
+                        r.send("knob vol -1")           # back to Volume
+                        time.sleep(0.8)
+                        name2 = _vol_line(o, r, "knob line chose back")
+                    finally:
+                        bench.tap(r, "VOL")             # changing again
+                        time.sleep(0.6)
+                    step = 1 if v0 < 5 else -1
+                    r.send(f"knob vol {step}")
+                    time.sleep(0.8)
+                    v3 = int(r.state.get("vol") or 0)
+                    r.send(f"knob vol {-step}")
+                    time.sleep(0.8)
+                    v4 = int(r.state.get("vol") or 0)
+                out["choose"] = {"next": name1, "volume": [v0, v1, v3, v4], "back": name2}
+                if not name1 or _is_volume(name1) or v1 != v0:
+                    raise Refused(f"{n}: choosing, a turn named {name1!r} with the volume {v0} -> {v1}")
+                if not _is_volume(name2):
+                    raise Refused(f"{n}: choosing, the turn back named {name2!r}, not VOLUME")
+                if v3 != v0 + step or v4 != v0:
+                    raise Refused(f"{n}: changing again, the volume {v0} -> {v3} -> {v4} for {step:+d} and back")
+                s.confirm(f"VOLUME -> {name1} (volume {v0} kept) -> VOLUME; then volume {v0} -> {v3} -> {v4}")
+            with o.step(f"{n}: Knob press: next control on: a short press takes the next control") as s:
+                v0 = int(r.state.get("vol") or 0)
+                try:
+                    with oa.cfg_kept(r, {"knob_info": 1, "knob_press_next": 1}):
+                        time.sleep(1.0)
+                        bench.tap(r, "VOL")
+                        time.sleep(1.0)                 # a held press is told apart from a short one first
+                        name5, v5 = _vol_line(o, r, "knob line next control"), int(r.state.get("vol") or 0)
+                finally:
+                    with oa.cfg_kept(r, {"knob_press_next": 0}):
+                        time.sleep(0.6)
+                        if not _is_volume(_vol_line(o, r, "knob line before put back")):
+                            bench.tap(r, "VOL")         # choosing
+                            time.sleep(0.6)
+                            r.send("knob vol -1")
+                            time.sleep(0.8)
+                            bench.tap(r, "VOL")         # changing
+                            time.sleep(0.6)
+                    name6 = _vol_line(o, r, "knob line put back")
+                out["next"] = {"after press": name5, "volume": [v0, v5], "put back": name6}
+                if not name5 or _is_volume(name5) or v5 != v0:
+                    raise Refused(f"{n}: Knob press: next control: a press named {name5!r}, the volume {v0} -> {v5}")
+                if not _is_volume(name6):
+                    raise Refused(f"{n}: VOL left on {name6!r} after the test")
+                s.confirm(f"a press took {name5} (volume {v0} kept); put back on VOLUME")
+        return True, f"the VOL knob's press on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+# ---- Page I's F2 ARRAY and F5 SET panels (df-f2-array, df-f5-set, df-daemon-lifecycle) ----
+
+PANEL_BOX = (60, 55, 740, 470)  # the panel over page I (app_df.c: PANEL_W wide, from y 60, its footer at 448)
+# The panel's footer: page I's own boxes say ARRAY AGAINST THE BAND and ANTENNAS too, so closed is judged by it alone
+PANEL_FOOT = r"CHANGE\s*IT|DO\s*IT\s*/\s*CLOSE|MFK\W+A\s*ROW"
+ARRAY_WORDS = ["BAND", "ARRAY", "HEADING", "ANTENNAS"]      # and RADIUS, SPACING, UNIT or LAYOUT
+SET_WORDS = ["RATE", "GAIN", "SQUELCH", "CALIBRATE", "SOURCE"]
+
+
+def _panel_words(o, r, label, words):
+    """The panel's words read, whether its footer is there, and the text"""
+    p = oa.shot(o, r, label)
+    t = (oa.ocr(p, box=PANEL_BOX, psm=6, scale=2) + "\n" + oa.ocr(p, box=PANEL_BOX, psm=11, scale=2)).upper()
+    return [w for w in words if w in t], re.search(PANEL_FOOT, t) is not None, t
+
+
+def t_df_panels(o):
+    """On each radio, the Sentry's page I (the direction finder, no Kraken here): x6x00-df running while it is open;
+    F2 opens the ARRAY panel (BAND, ARRAY, the size row: RADIUS, SPACING, UNIT or LAYOUT, HEADING, ANTENNAS read), F2
+    again closes it; F5 opens the SET panel (RATE, GAIN, SQUELCH, CALIBRATE, SOURCE), F5 again closes it. F3 and F4
+    (method, calibrate) never pressed. Back on page A, x6x00-df ends within 30 s"""
+    res = {}
+    try:
+        for n, r in _both(o):
+            out = res[n] = {}
+            with o.step(f"{n}: page I: the direction finder's daemon runs") as s:
+                # page I is a window of its own (ACTION_APP_DF), not one of the Sentry's pages: the remote's win names
+                # it ('Direction finder'), its pg is empty
+                r.take_control()
+                r.send("open sentry I")
+                r.wait("page I (the direction finder)", lambda: oa.win(r).lower().startswith("direction"), 10)
+                time.sleep(3.0)
+                pid = oa.ssh(r, "pidof x6x00-df; true").strip()
+                out["df running"] = bool(pid)
+                if not pid:
+                    raise Refused(f"{n}: page I open, no x6x00-df running")
+                s.confirm(f"x6x00-df {pid}")
+            for key, words, size in (("F2", ARRAY_WORDS, True), ("F5", SET_WORDS, False)):
+                with o.step(f"{n}: {key} opens its panel ({', '.join(words)}), {key} again closes it") as s:
+                    r.take_control()
+                    bench.tap(r, key)
+                    time.sleep(1.2)
+                    seen, foot, t = _panel_words(o, r, f"df {key} panel", words)
+                    has_size = bool(re.search(r"RADIUS|SPACING|UNIT|LAYOUT", t)) if size else True
+                    bench.tap(r, key)
+                    time.sleep(1.2)
+                    _, foot_after, _ = _panel_words(o, r, f"df {key} closed", words)
+                    out[key] = {"read": seen, "footer": foot, "footer after closing": foot_after}
+                    if len(seen) < len(words) - 1 or not has_size or not foot:
+                        raise Refused(f"{n}: {key}'s panel read {seen} of {words}"
+                                      f"{'' if has_size else ', no size row'}{'' if foot else ', no footer'} "
+                                      f"({' '.join(t.split())[:100]!r})")
+                    if foot_after:
+                        raise Refused(f"{n}: {key} again left the panel up (its footer still read)")
+                    s.confirm(f"read {seen}; closed")
+            with o.step(f"{n}: back on page A: x6x00-df ends") as s:
+                bench.open_page(r, "A")
+                end, pid = time.time() + 30, "?"
+                while time.time() < end:
+                    pid = oa.ssh(r, "pidof x6x00-df; true").strip()
+                    if not pid:
+                        break
+                    time.sleep(2.0)
+                out["df after"] = pid or "ended"
+                if pid:
+                    raise Refused(f"{n}: x6x00-df still running 30 s after leaving page I ({pid})")
+                s.confirm("ended")
+        return True, f"page I's panels on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+COVERS = {
+    "more-eth-validation": (["ethernet-static-validation"], ["ethernet-no-adapter"]),
+    "more-knob-press": (["input-knob-press-choose"], []),
+    "more-df-panels": (["df-f2-array", "df-f5-set"], ["df-daemon-lifecycle"]),
+}
+
+
+def tests(Test, A, B):
+    """orch's Test rows of this module"""
+    return [
+        Test("more-eth-validation", "both", "the web Network page refuses ten bad static addresses with the GUI's "
+             "reasons, nothing changed", t_eth_validation, 20),
+        Test("more-knob-press", "both", "VOL pressed chooses its control (a turn takes the next, the volume kept), "
+             "pressed again changes the value; Knob press: next control takes the next at once", t_knob_press, 60),
+        Test("more-df-panels", "both", "page I: x6x00-df runs; F2 ARRAY's and F5 SET's panels open and close; the "
+             "daemon ends after", t_df_panels, 70),
+    ]

@@ -51,7 +51,11 @@ at once now, and a theme change keeps them as it says. A seventh batch (the same
 Center, Other edge and Scroll, Line, Passband: each line within 5 px of where waterfall_view.c puts it), the 3D
 waterfall's depth, tilt, floor and range, the VFO line, the S-meter's colours. It found the waterfall's VFO line, set
 from the web, waiting for the dial to move (waterfall_view_line_apply, 2156e668); the 3D colours do nothing under the
-Sentry theme, by design (now in the manual).
+Sentry theme, by design (now in the manual). An eighth batch (orch_cov_more.py): the web Network page refuses ten bad
+static addresses with the GUI's reasons, VOL's press chooses and changes (and Knob press: next control), page I's F2
+ARRAY and F5 SET panels and its daemon's lifetime. Left as not testable here: the screen recorder's monitor (raised in
+the base, not a setting the remote reads), a dropped link's held keys (released with no sign outside), the scroll
+bars (no list long enough on the bench's pages).
 
 Open, mine: sentry-lock x6200>x6100's HOLD (the X6100's scan taken by its own 14.0903 spur, to look at live); the
 X6200's trainer adds a dit before an answer (WMK for MMK, older than today's changes); the X6100's trainer misreads
