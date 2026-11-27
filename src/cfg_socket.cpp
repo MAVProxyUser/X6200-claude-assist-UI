@@ -77,6 +77,7 @@ extern "C" {
     #include "screen_main.h"
     #include "theme.h"
     #include "walkie.h"
+    #include "waterfall_view.h"
     #include "wavelog_cat.h"
 
     #include "lvgl/lvgl.h"
@@ -213,6 +214,8 @@ static void disp_apply(void *arg) {
     for (auto &o : disp_bools)
         if (!strcmp(d->name, o.name))
             params_bool_set(o.b, d->val);
+    if (!strcmp(d->name, "wf_center_line"))
+        waterfall_view_line_apply();    /* at once, not at the waterfall layer's next draw (a dial move) */
     if (!strcmp(d->name, "auto_level_offset")) {
         cfg_sm.p_auto_level_offset.set(d->val / 10.0f);
     } else if (!strcmp(d->name, "bright_normal")) {

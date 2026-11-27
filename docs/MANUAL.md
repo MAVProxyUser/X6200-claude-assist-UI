@@ -3379,11 +3379,11 @@ Where: Settings > Display > WATERFALL.
 | Jump at, Jump to | shown with Fixed: when the view moves on, and where the VFO line goes then (below) |
 | Auto level, offset | the levels follow the noise floor; the offset makes it darker or brighter |
 | Min / max | the manual levels, used when auto level is off |
-| Line, zoom | a line on the VFO; zoom with the waterfall instead of the span |
+| Line, zoom | a line on the VFO (set on the web Display page too, at once: before 2026-11-27 it waited for the dial to move); zoom with the waterfall instead of the span |
 | Smooth scroll | scrolls by pixels instead of lines |
 | Speed | 3 = 15 lines/s (default), 4 = 20, 5 = 30; 2 = 7.5 and 1 = 5 average the frames into a line: less noise and less CPU |
 | 3D | the last 6 seconds as traces one behind the other, the newest in front (below); on by default, off for the flat waterfall; off and greyed under Amber Trey, which draws no 3D |
-| 3D colours | shown with 3D: Strength (blue, green, yellow, red as the signal grows), Waterfall (the waterfall's colours), Blue |
+| 3D colours | shown with 3D: Strength (blue, green, yellow, red as the signal grows), Waterfall (the waterfall's colours), Blue; the Sentry theme keeps its amber whatever is chosen |
 | 3D depth, tilt, floor | shown with 3D: the traces (8-64, every third line), the view from the front (0) to from above (10), how much above the noise floor is cut away |
 | 3D range | shown with 3D: the dB above the noise floor at a trace's full height (20-60, 40 by default); less makes weak signals taller |
 | 3D peaks | shown with 3D: the newest trace's peaks held a moment |

@@ -2617,8 +2617,10 @@ static void update_middle_line(void) {
     filter_out_move(x1, x1 + LV_MAX(x2 - x1, 1) - 1);
 }
 
-/* Shown or not as set (params), checked at each draw */
-static void vfo_line_cb(lv_event_t *e) {
+void waterfall_view_line_apply(void) {
+    if (!vfo_line) {
+        return;
+    }
     bool hide = !params.waterfall_center_line.x;
 
     if (hide != lv_obj_has_flag(vfo_line, LV_OBJ_FLAG_HIDDEN)) {
@@ -2628,6 +2630,13 @@ static void vfo_line_cb(lv_event_t *e) {
             lv_obj_clear_flag(vfo_line, LV_OBJ_FLAG_HIDDEN);
         }
     }
+}
+
+/* Shown or not as set (params), checked at each draw of the waterfall's own layer: that layer is drawn only when
+ * something on it moves (its picture is on a plane of its own), so a set from the web waits for
+ * waterfall_view_line_apply() */
+static void vfo_line_cb(lv_event_t *e) {
+    waterfall_view_line_apply();
 }
 
 /* 1bit: the VFO line 1 px of ink in its 3 px paper halo, readable over the dots and the carriers */

@@ -51,3 +51,7 @@ void waterfall_refresh_reset();
 /* Drawn again now, whole, at the next refresh even under a dialog: the screen seen again after the dark or the
  * screensaver (screen_light.c) */
 void waterfall_redraw();
+
+/* The VFO line shown or hidden as Waterfall line on the VFO says (params.waterfall_center_line), now: the web Display
+ * page's set left it as it was till the dial moved (orch look-wf-line, 2026-11-27) */
+void waterfall_view_line_apply(void);
