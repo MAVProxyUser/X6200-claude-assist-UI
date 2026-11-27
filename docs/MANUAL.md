@@ -11152,7 +11152,7 @@ and `tail`, the panel text's last 48 characters as Parse left them (the bench's 
 out, cw-parse for Parse's split). A few read-only values answer `cfg?` for the bench: `digi_dx` (the keyboard modes'
 DX call), `radio_caps` (what the base can do, a number), `a_tx_rows` (the rows A's history has drawn on the air),
 `cwt_target` and `cwt_state` (the CW Trainer's group or call, and where its round is: `closed`, `due`, `ready`,
-`playing`, `listen`, `result`) and `beacons_heard_20m` (each band's: the NCDXF beacons heard, `beacon:snr:slot`). `buttons?` answers `buttons ...`:
+`playing`, `listen`, `result`), `cw_tune_hz` (the CW tuning bars' offset in Hz as they show it, positive with the bars to the left: in CW the dial above the station; empty when no bar was lit in the last second) and `beacons_heard_20m` (each band's: the NCDXF beacons heard, `beacon:snr:slot`). `buttons?` answers `buttons ...`:
 the main screen's pages as the radio made them, split by `|`, each its page button then its buttons' names split by
 `; `, a greyed one (its base lacks the setting) marked `~` (`(MFK 2:4); AGC; Comp; ~IF shift; VOX` on an X6200). A
 setting the radio's base lacks is refused: `cfg comp`, `cfg cessb_on`, `cfg cw_peak_on`, `cfg agc_knee`... answer

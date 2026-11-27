@@ -138,6 +138,7 @@
 #include "beacons.h"
 #include "digi_qso.h"
 #include "dialog_cw_trainer.h"
+#include "cw_tune_view.h"     /* cfg? cw_tune_hz */
 #include "text_panel.h"
 #include "cluster/client.h"
 #include "cluster/spots.h"
@@ -1770,6 +1771,18 @@ static bool cfg_value(const char *name, char *out, size_t n) {
     }
     if (!strcmp(name, "cwt_state")) {           /* read only: closed, due, ready, playing, listen, result */
         snprintf(out, n, "%s", dialog_cw_trainer_state());
+        return true;
+    }
+    if (!strcmp(name, "cw_tune_hz")) {          /* read only: the CW tuning bars' offset in Hz (cw_tune_set_freq's: in
+                                                 * CW the dial minus the station as the X6100 hears it, a bar per 10
+                                                 * Hz), "" when none was lit in the last second: the bench judges the
+                                                 * bars against the tone it measures */
+        int hz;
+
+        if (cw_tune_recent(&hz))
+            snprintf(out, n, "%d", hz);
+        else
+            out[0] = 0;
         return true;
     }
     if (!strcmp(name, "upd_state")) {           /* read only: the update question's state (update_watch.h): idle,

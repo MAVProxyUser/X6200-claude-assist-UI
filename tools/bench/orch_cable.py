@@ -666,31 +666,100 @@ def t_cw_zap(o, s, l):
         return False, str(e), res
 
 
+TUNER_OFF_HZ = 30          # the listener above the sender
+TUNER_TOL_HZ = 10          # a bar
+
+
+def _tune_hz(r):
+    """r's tuning bars' offset now (cfg? cw_tune_hz): an int, None when no bar is lit; KeyError for a GUI before it"""
+    try:
+        v = bench.cfg_get(r, "cw_tune_hz", timeout=2)
+    except Refused:
+        raise KeyError("cw_tune_hz")
+    v = str(v).strip()
+    return int(v) if re.fullmatch(r"-?\d+", v) else None
+
+
 def t_cw_tuner(o, s, l):
-    """Tuner (CW 2:2): the bars, one per 10 Hz, lit on the station's side; the listener 30 Hz off the sender in CW,
-    then CW-R: pictures (LOOK: only a picture shows the bars)"""
+    """Tuner (CW 2:2): the bars, one per 10 Hz, lit on the station's side; the listener TUNER_OFF_HZ above the sender
+    in CW, then CW-R, while the sender keys VVV. The bars' offset as the remote reads it (cw_tune_hz: in CW the dial
+    minus the station, the other way in CW-R) against the tone measured in the listener's audio (its key tone minus
+    it, the offset the radios really are apart, the radios' own frequencies some 5-10 Hz apart): within a bar, and on
+    the station's side (CW positive, CW-R negative). A picture of each kept. Until 11-27 it ended LOOK every run
+    ('photographed 30 Hz off'), judged by eye: the bars 2 to the station's side for the ~23 Hz the radios were apart"""
+    from tones import TciRx, peak
     S, L = o.r[s], o.r[l]
     res = {}
+    old_gui = False
     try:
         with cfg_kept(L, {"cw_tune": 1}):
             for mode in (4, 5):
+                name = "CW" if mode == 4 else "CW-R"
                 on_g_alike(o, F_CW, mode, agc=2)
-                with bench.apart({"freq": 30}, f"cw-tuner: {l} 30 Hz off {s}"):
-                    bench.ensure(L, {"freq": F_CW + 30})
+                with bench.apart({"freq": TUNER_OFF_HZ}, f"cw-tuner: {l} {TUNER_OFF_HZ} Hz off {s}"):
+                    bench.ensure(L, {"freq": F_CW + TUNER_OFF_HZ})
                     classic(L)                          # the bars are the classic screen's (not on G)
+                    kt = int(L.state.get("kt") or 700)
+                    bars, rec = [], TciRx(L.host)
 
                     def body(watch, mode=mode):
                         th = threading.Thread(target=lambda: tci_cw(o, S, "VVV VVV VVV", watch))
+                        t0 = time.time()
                         th.start()
-                        time.sleep(2.5)
-                        snap(o, f"cw-tuner {l} 30 Hz off, mode {mode}")
+                        time.sleep(1.5)
+                        snapped = False
+                        nonlocal old_gui
+                        while th.is_alive() and time.time() - t0 < 30:
+                            try:
+                                if not old_gui:
+                                    bars.append(_tune_hz(L))
+                            except KeyError:        # a GUI before cw_tune_hz: asked once
+                                old_gui = True
+                            if not snapped and time.time() - t0 > 2.5:
+                                snap(o, f"cw-tuner {l} {TUNER_OFF_HZ} Hz off, mode {mode}")
+                                snapped = True
+                            time.sleep(0.3)
                         th.join(30)
-                    offset_over(o, s, l, F_CW, mode, f"cw-tuner mode {mode}", body)
+                        res[name + "_t"] = (t0, time.time())
+                    try:
+                        offset_over(o, s, l, F_CW, mode, f"cw-tuner mode {mode}", body)
+                        t0, t1 = res.pop(name + "_t")
+                        x, _ = rec.audio(t0, t1)
+                    finally:
+                        rec.close()
+                    f, lvl = peak(x, kt, 120) if len(x) else (None, None)
+                    lit = [b for b in bars if b is not None]
+                    res[name] = {"kt": kt, "tone_hz": round(f, 1) if f else None,
+                                 "tone_dbfs": round(lvl, 1) if lvl is not None else None,
+                                 "bars_hz": lit, "unlit": len(bars) - len(lit)}
                     home(o, L)
         ensure_alike(o, F_CW, 4)
-        return None, f"{l}'s tuning bars photographed 30 Hz off in CW and CW-R (the bars: look at the pictures)", res
     except Refused as e:
         return False, str(e), res
+    if old_gui:
+        return None, f"{l}'s tuning bars photographed {TUNER_OFF_HZ} Hz off in CW and CW-R (a GUI without " \
+                     f"cw_tune_hz: look at the pictures)", res
+    bad = []
+    for name, sign in (("CW", 1), ("CW-R", -1)):
+        m = res[name]
+        if not m["tone_hz"]:
+            bad.append(f"{name}: no tone in {l}'s audio near its key tone {m['kt']} Hz")
+            continue
+        apart = abs(m["tone_hz"] - m["kt"])
+        if len(m["bars_hz"]) < 3:
+            bad.append(f"{name}: the bars lit {len(m['bars_hz'])} times in the over ({m['unlit']} unlit)")
+            continue
+        med = sorted(m["bars_hz"])[len(m["bars_hz"]) // 2]
+        m["bars_med"], m["apart_hz"] = med, round(apart, 1)
+        if med * sign <= 0:
+            bad.append(f"{name}: the bars at {med:+d} Hz, not on the station's side ({'+' if sign > 0 else '-'})")
+        elif abs(abs(med) - apart) > TUNER_TOL_HZ:
+            bad.append(f"{name}: the bars at {med:+d} Hz, the tone {apart:.0f} Hz off the key tone {m['kt']} Hz")
+    said = "; ".join(f"{n}: bars {res[n].get('bars_med', '-')} Hz, tone {res[n].get('apart_hz', '-')} Hz off"
+                     for n in ("CW", "CW-R"))
+    if bad:
+        return False, f"{l}'s tuning bars: " + "; ".join(bad) + f" ({said})", res
+    return True, f"{l}'s tuning bars on the station's side, within a bar of the tone: {said}", res
 
 
 def t_cw_peak_q(o, s, l):

@@ -276,9 +276,9 @@ this radio's base, and its `set`/`cfg` is refused. `lacks_check(r, res, cfgs=, s
 button greyed (not live, not missing) and each setting refused with nothing changed.
 
 **Remote hooks for the tests** besides `set`/`cfg`: read-only `cfg?` names (`radio_caps`, `cwt_target` and
-`cwt_state` for the CW Trainer, `upd_state` for the update question, `a_tx_rows`, `beacons_heard_<band>`), and
-`cwsend TEXT` (operate, a session that may transmit): the radio's own keyer sends TEXT in CW/CW-R when it is idle, as
-TCI's CW macros do, without a TCI client (the CW Trainer's answers).
+`cwt_state` for the CW Trainer, `cw_tune_hz` for the tuning bars, `upd_state` for the update question, `a_tx_rows`,
+`beacons_heard_<band>`), and `cwsend TEXT` (operate, a session that may transmit): the radio's own keyer sends
+TEXT in CW/CW-R when it is idle, as TCI's CW macros do, without a TCI client (the CW Trainer's answers).
 
 ## Over-the-air coverage (every transmission test, 0.1 W over the 80 dB cable unless said)
 
