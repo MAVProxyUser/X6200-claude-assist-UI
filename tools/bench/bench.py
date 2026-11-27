@@ -1795,7 +1795,14 @@ class Watch:
         if since:
             if st is None or st["since"] != since:
                 q, _ = spectrum_level(lis, hz, since - 2.5, since - 0.2)
-                st = self._ov[r.name] = {"since": since, "quiet": q, "powered": 0, "best": None, "frames": 0}
+                # The over before ended inside that window (back to back: tci-cw's cw_macros_stop over keyed as its
+                # first text unkeyed, 2026-11-27, and its "quiet" held that text: 14.0 dB of rise, "did NOT hear"):
+                # the quiet from before that over is still the quiet on the same frequency
+                if st is not None and st.get("end") and since - st["end"] < 2.5 and st.get("hz") == hz and \
+                        st.get("quiet") is not None:
+                    q = st["quiet"] if q is None else min(q, st["quiet"])
+                st = self._ov[r.name] = {"since": since, "quiet": q, "powered": 0, "best": None, "frames": 0,
+                                         "hz": hz}
             if time.time() - since > 1.2 and txm and txm[0] >= DEAF_MIN_W:
                 st["powered"] += 1
                 lvl, n = spectrum_level(lis, hz, time.time() - 0.6, time.time())
@@ -1827,6 +1834,7 @@ class Watch:
         if st.get("done"):
             return
         st["done"] = True
+        st["end"] = time.time()
         lis = self.listener
         if st["powered"] < DEAF_MIN_POWERED:
             return

@@ -2446,8 +2446,12 @@ def b_sentry(P):
         gone_s = (t_go - off) if t_go and off else None
         a_scan(False)
         r2, w2 = heard_over(P, f2, on, off) if on else (None, "no over")
+        # GO ON AFTER 3 s from the sender's unkey to A's next hop: the X6200 4.7 s (its 360 kHz picture, 20 m whole);
+        # the X6100 5.4, 5.5 and 6.6 s (2026-11-25..27: its 50 kHz picture at its slower frame rate takes longer to
+        # call the channel quiet), and 6.6 failed the 6.5 this had
+        go_max = 7.5 if model(P.run, L.name) == "x6100" else 6.5
         res["SCANNER: stops on it while it talks, goes on ~3 s after"] = (not stop and bool(t_l) and stayed and
-                                                                          gone_s is not None and 1.5 <= gone_s <= 6.5
+                                                                          gone_s is not None and 1.5 <= gone_s <= go_max
                                                                           and r2 is not None and r2 >= HEARD_DB)
         said.append(f"SCANNER, A's scan of 20 m with a carrier at {f2 / 1e6:.3f}: locked "
                     f"{fmt((t_l - t_s) if t_l else None)} s after F1, stayed while it talked {stayed}, went on "

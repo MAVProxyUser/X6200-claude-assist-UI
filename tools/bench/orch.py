@@ -6250,13 +6250,15 @@ def _pages(o, letter):
 
 
 def _off_tone_db(x, tone, fs):
-    """The power of x in 300-2700 Hz, the tone's +-150 Hz left out (dB, Welch)"""
+    """The power of x in 300-2700 Hz, the tone's +-150 Hz and its 2nd and 3rd harmonics' left out (dB, Welch): the
+    X6100's own 2nd harmonic put 29 dB there with nothing else playing (2026-11-27), and would hide what the speaker
+    adds"""
     import numpy as np
     from scipy.signal import welch
     if len(x) < fs // 2:
         return None
     f, p = welch(x, fs=fs, nperseg=4096)
-    band = (f >= 300) & (f <= 2700) & (np.abs(f - tone) > 150)
+    band = (f >= 300) & (f <= 2700) & np.all([np.abs(f - k * tone) > 150 for k in (1, 2, 3)], axis=0)
     return float(10 * np.log10(np.sum(p[band]) + 1e-20))
 
 
@@ -7290,8 +7292,8 @@ TESTS = [
           ("walkie", "both ways", "the walkie in AM and FM on 20 m and 10 m FM, each way (bench.py radios-walkie)", 400),
           ("cw", "both ways", "CW text through TCI each way ('VVV TEST DE <test call>'): the listener's decoder copies "
                               "the words (suite_more cw_over)", 180),
-          ("if-shift", "X6200 TX, X6100 RX", "the X6100's IF shift at +-2000 Hz: the tone's pitch kept, the base "
-                                             "2.1 kHz the other way (ifshift.py)", 120))],
+          ("if-shift", "X6200 TX, X6100 RX", "the X6100's IF shift at +-2000 Hz in USB, then in USB-D: the tone's "
+                                             "pitch kept, the base 2.1 kHz the other way (ifshift.py)", 160))],
     Test("system-checks", "both", "each radio read over SSH, nothing changed: battery log and model, data partition, "
          "settings' good copy, password logins refused, Tailscale, logs, start trace, services and ports, CPU, "
          "temperature, GPU, sessions file, update state, ADIF header, libft8, clock; the same version on both",
