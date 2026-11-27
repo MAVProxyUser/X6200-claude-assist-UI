@@ -146,18 +146,26 @@ def t_restart(o):
                     if not re.search(r"^perf: (?!overlay)", log, re.M):
                         raise Refused(f"{n}: the overlay's figures never came in the GUI's log")
                     own = oa.cfg(r, "callsign")
-                    rows = oa.ssh(r, "sqlite3 /mnt/qso_log.db \"select local_callsign from qso_log where "
-                                     "remote_callsign='Q2TST'\"").split()
-                    files = oa.ssh(r, "ls /mnt/incoming_log.adi /mnt/incoming_log.adi.bak 2>/dev/null")
+                    files, rows = "", []
+                    for _ in range(10):         # the import runs in a thread of its own at start
+                        files = oa.ssh(r, "ls /mnt/incoming_log.adi* 2>/dev/null; true")
+                        rows = oa.ssh(r, "sqlite3 /mnt/qso_log.db \"select local_callsign from qso_log where "
+                                         "remote_callsign='Q2TST'\"; true").split()
+                        if rows or ".failed" in files:
+                            break
+                        time.sleep(1.0)
+                    said = [t for _, t in r.msgs if "mport" in t][-2:]
                     if not rows or (own and rows[0] != own):
-                        raise Refused(f"{n}: the imported QSO {'not in the log' if not rows else 'not under the radio callsign'}")
+                        raise Refused(f"{n}: the imported QSO {'not in the log' if not rows else 'not under the radio callsign'}"
+                                      f" (files {files.split()}, said {said})")
                     if "incoming_log.adi.bak" not in files or re.search(r"incoming_log\.adi$", files, re.M):
-                        raise Refused(f"{n}: the ADIF file after the import: {files.split()}")
+                        raise Refused(f"{n}: the ADIF file after the import: {files.split()} (said {said})")
                     out["after"] = "page D, lock on, daemon kept, B kept, beacon off, perf and CPU drawing said, " \
                                    "QSO imported (.bak)"
                     s.confirm(out["after"])
                 with o.step(f"{n}: the QSO out of the log, the lock off; started again without perf and gpu.off") as s:
-                    oa.ssh(r, "sqlite3 /mnt/qso_log.db \"delete from qso_log where remote_callsign='Q2TST'\"")
+                    oa.ssh(r, "sqlite3 /mnt/qso_log.db \"delete from qso_log where remote_callsign='Q2TST'\"; "
+                              "rm -f /mnt/incoming_log.adi.failed")
                     r.send("set lock 0")
                     _restart(o, n, "the restart test: perf and gpu.off taken away", "rm -f /mnt/perf /mnt/gpu.off")
                     log = oa.ssh(r, "cat /tmp/x6100_log.txt", 20)
@@ -255,6 +263,15 @@ def t_display_settings(o):
                     time.sleep(0.6)
                     a2 = oa.shot(o, r, f"{name} as found b")
                     alone = _diff(a1, a2, box)
+                    extra = {"smeter_needle": 1} if name == "smeter_lamp" else {}     # the lamp lights the needle
+                    if extra:
+                        needle = oa.cfg_kept(r, extra)
+                        needle.__enter__()
+                        time.sleep(1.0)
+                        a1 = oa.shot(o, r, f"{name} as found a (needle)")
+                        time.sleep(0.6)
+                        a2 = oa.shot(o, r, f"{name} as found b (needle)")
+                        alone = _diff(a1, a2, box)
                     with oa.cfg_kept(r, {name: other(v0)}):
                         time.sleep(1.5)
                         b = oa.shot(o, r, f"{name} {other(v0)}")
@@ -262,6 +279,8 @@ def t_display_settings(o):
                     time.sleep(1.5)
                     c = oa.shot(o, r, f"{name} back")
                     back = _diff(a2, c, box)
+                    if extra:
+                        needle.__exit__(None, None, None)
                     out[name] = (round(alone, 3), round(moved, 3), round(back, 3))
                     if moved < max(0.01, 2.5 * alone):
                         raise Refused(f"{n}: {name} {v0} -> {other(v0)} changed its part of the screen {moved:.1%}, "
@@ -296,7 +315,7 @@ def t_system_readonly(o):
         with o.step("base firmware: each radio's own file checked, the other's refused by its name and renamed") as s:
             for n, r in _both(o):
                 other_n = next(m for m in own if m != n)
-                ok = oa.ssh(r, f"x6x00-base-flash --check {own[n]} 2>&1")
+                ok = oa.ssh(r, f"x6x00-base-flash --check {own[n]} 2>&1; true")
                 if f"this radio is an {n.upper()}" not in ok or "refused" in ok:
                     raise Refused(f"{n}: --check of its own file said {' '.join(ok.split())[:160]!r}")
                 local = os.path.join(tmp, os.path.basename(own[other_n]))
@@ -306,7 +325,7 @@ def t_system_readonly(o):
                     subprocess.run(["scp", "-4", "-q", "-o", "BatchMode=yes", local, f"root@{r.host}:{dest}"],
                                    check=True, timeout=60)
                     try:
-                        out = oa.ssh(r, f"x6x00-base-flash --check {dest} 2>&1")
+                        out = oa.ssh(r, f"x6x00-base-flash --check {dest} 2>&1; echo RC=$?")
                     finally:
                         oa.ssh(r, f"rm -f {dest}")
                     if "refused" not in out or "nothing was sent to the base" not in out:

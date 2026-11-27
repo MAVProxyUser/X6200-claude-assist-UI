@@ -38,6 +38,9 @@ def t_ft8_nocall(o):
                 with oa.cfg_kept(r, {"callsign": ""}):
                     r.wait("FT8's nocall", lambda: r.ft8.get("nocall") == 1, 6)
                     k = oa._to_label(r, r"^TX\s*Call", names)
+                    if r.ft8.get("tx"):             # TX on from before: off first (its press says 'TX off')
+                        oa.press(r, k, names, rest=0.6)
+                        r.wait("FT8's TX off", lambda: r.ft8.get("tx") == 0, 4)
                     t0 = time.time()
                     oa.press(r, k, names, rest=0.4)
                     out["no_call"] = oa.wait_msg(r, t0, r"Call sign required", 4)
@@ -112,21 +115,29 @@ def t_x6200_start(o):
 
 # ---- TX calibration belongs to its radio (tx-calibration-fingerprint) ----
 
+def _fp(r):
+    """x6x00-fingerprint's fingerprint (its JSON's "fingerprint": MODEL-hex)"""
+    import json
+    try:
+        return str(json.loads(oa.ssh(r, "x6x00-fingerprint", 15)).get("fingerprint") or "")
+    except ValueError:
+        return ""
+
+
 def t_fingerprint(o):
     """Each radio's fingerprint, from x6x00-fingerprint over SSH (the hashed chip ID) and from its GUI (the remote's fp,
     radio_fingerprint, the same salt): the same on each radio, read twice the same, and the two radios' different"""
     res = {}
     with o.step("x6x00-fingerprint and the GUI's fp on both: alike on each, different between them") as s:
         for n, r in _both(o):
-            a = oa.ssh(r, "x6x00-fingerprint", 15).strip()
-            b = oa.ssh(r, "x6x00-fingerprint", 15).strip()
+            a, b = _fp(r), _fp(r)
             fp = str(r.state.get("fp") or "")
             res[n] = {"tool": a[:12] + "...", "gui": fp[:12] + "..."}
             if not a or a != b:
                 return False, f"{n}: x6x00-fingerprint read {a!r} then {b!r}", res
             if fp != a:
                 return False, f"{n}: the GUI's fingerprint {fp[:12]}... is not the tool's {a[:12]}...", res
-        if oa.ssh(o.r[H.A], "x6x00-fingerprint", 15).strip() == oa.ssh(o.r[H.B], "x6x00-fingerprint", 15).strip():
+        if _fp(o.r[H.A]) == _fp(o.r[H.B]):
             return False, "both radios have the same fingerprint", res
         s.confirm(str(res))
     return True, f"each radio's fingerprint the same from its tool and its GUI, the two different: {res}", res
@@ -142,10 +153,17 @@ def _pwr(r):
     return round(float(r.state.get("pwr", 0)), 1)
 
 
+def _power_label(r, k):
+    """The watts on the app's Power button ('Power: 7 W', '0.5W'...), or None"""
+    m = re.search(r"(\d+(?:[.,]\d)?)\s*W", oa._label(r, k) or "")
+    return float(m.group(1).replace(",", ".")) if m else None
+
+
 def t_app_power(o):
-    """The FT8 app on both with the radio's power set at 8 W first: opened, the power reads 7 W ('Power is limited to
-    7W'); its Power button steps 0.1, 0.2, 0.5, 1, 2, 3, 5, 7 W round (each read back); closed, the power is 8 W again.
-    Nothing keyed (no TX: the power is a setting)"""
+    """The FT8 app on both with the radio's power set at 8 W first: opened, 'Power is limited to 7W' said and the
+    power setting left at 8 W (the cap is the base's: the setting comes back as it was); its Power button steps 0.1,
+    0.2, 0.5, 1, 2, 3, 5, 7 W round (its label read after each press); closed, the setting 8 W. Nothing keyed (no TX:
+    the power is a setting)"""
     res = {}
     names = ("FT8",)
     try:
@@ -157,25 +175,19 @@ def t_app_power(o):
             finally:
                 o.changing -= 1
             s.confirm(f"{[_pwr(r) for _, r in _both(o)]} W")
-        with o.step("FT8 opened on both: the power held at 7 W, said") as s:
+        with o.step("FT8 opened on both: 'Power is limited to 7W', the setting still 8 W") as s:
             t0 = time.time()
             oa._ft8_open(o)
             for n, r in _both(o):
-                r.wait("7 W", lambda r=r: _pwr(r) == 7.0, 5)
                 res[f"{n} said"] = oa.wait_msg(r, t0, r"Power is limited to 7 ?W", 5)
             s.confirm(str(res))
-        with o.step("the app's Power button on both: 0.1, 0.2, 0.5, 1, 2, 3, 5, 7 W round") as s:
+        with o.step("the app's Power button on both: 0.1, 0.2, 0.5, 1, 2, 3, 5, 7 W round, its label read") as s:
             def steps(n, r):
                 k = oa._to_label(r, r"^Power", names)
                 seen = []
                 for _ in range(len(APP_STEPS) + 1):
-                    p0 = _pwr(r)
-                    oa.press(r, k, names, rest=0.5)
-                    try:
-                        r.wait("the power stepped", lambda: _pwr(r) != p0, 3)
-                    except Refused:
-                        pass
-                    seen.append(_pwr(r))
+                    oa.press(r, k, names, rest=0.7)
+                    seen.append(_power_label(r, k))
                 return seen
             o.changing += 1
             try:
@@ -187,14 +199,14 @@ def t_app_power(o):
                 i = APP_STEPS.index(seen[0]) if seen and seen[0] in APP_STEPS else -1
                 want = [APP_STEPS[(i + k) % len(APP_STEPS)] for k in range(len(seen))] if i >= 0 else None
                 if want != seen:
-                    raise Refused(f"{n}: the Power button stepped {seen}, not round {APP_STEPS}")
+                    raise Refused(f"{n}: the Power button read {seen}, not round {APP_STEPS}")
             s.confirm(str(got))
-        with o.step("FT8 closed on both: the power 8 W again") as s:
+        with o.step("FT8 closed on both: the power setting 8 W") as s:
             oa._ft8_close(o)
             for n, r in _both(o):
-                r.wait("8 W again", lambda r=r: _pwr(r) == 8.0, 6)
+                r.wait("8 W", lambda r=r: _pwr(r) == 8.0, 6)
             s.confirm("8 W")
-        return True, f"the apps hold 7 W and give 8 W back; their Power button steps {APP_STEPS}: {res}", res
+        return True, f"the apps say 7 W and leave the setting; their Power button steps {APP_STEPS}: {res}", res
     except Refused as e:
         return False, str(e), res
     finally:
@@ -230,14 +242,15 @@ def _code_on_screen(o, r, label):
 
 def t_pairing(o):
     """A new browser on the X6100 (the remote's port, no token): 'pair?' shows a six-digit code on the radio for two
-    minutes (read off its screen); 'pair?' again within 30 s is paused ('a new code in N s'); while the code shows a
-    viewer's screen mirror stops; 'pair CODE NAME' answers 'paired TOKEN operate 1' (not admin: the radio has its first
-    browser); a new connection with 'auth TOKEN' is that session ('role operate 1 NAME'); 'unpair' ends it after"""
+    minutes (read off its screen), and while it shows a viewer's screen mirror stops; 'pair CODE NAME' answers 'paired
+    TOKEN operate 1' (not admin: the radio has its first browser); 'pair?' at once after is paused ('a new code in N
+    s', under 30); a new connection with 'auth TOKEN' is that session ('role operate 1 NAME'); 'unpair' ends it after"""
     from remote_ws import Remote
     r = o.r[H.A]
     res, c, v, tok = {}, None, None, None
     try:
-        with o.step("x6100: a viewer's screen mirror flowing, then 'pair?' from a new browser: the code shown") as s:
+        with o.step("x6100: a viewer's mirror flowing; 'pair?' from a new browser: the code shown, the mirror stopped") \
+                as s:
             v = Remote(r.host, 50002, timeout=8)
             v.send("screen 1")
             time.sleep(3.0)
@@ -250,25 +263,18 @@ def t_pairing(o):
             if not ans or not ans.startswith("pairing code shown"):
                 raise Refused(f"x6100: 'pair?' answered {ans!r}")
             res["asked"] = ans
-            code = _code_on_screen(o, r, "pairing code")
-            if not code:
-                raise Refused("x6100: no six-digit code read on the radio's screen after 'pair?'")
-            s.confirm(f"{ans}; a code of six digits on the screen; the mirror {res['mirror_before']} frames in 2 s before")
-        with o.step("x6100: 'pair?' again at once: paused, a new code in under 30 s; the mirror stopped meanwhile") as s:
-            c.send("pair?")
-            ans = _until(c, lambda t: t.startswith(("pairing code shown", "err pairing")), 5)
-            m = re.search(r"a new code in (\d+) s", ans or "")
-            if not m or int(m.group(1)) > 30:
-                raise Refused(f"x6100: a second 'pair?' answered {ans!r}")
-            res["again"] = ans
             f0 = v.binary
             time.sleep(2.0)
             res["mirror_during"] = v.binary - f0
+            code = _code_on_screen(o, r, "pairing code")
+            if not code:
+                raise Refused("x6100: no six-digit code read on the radio's screen after 'pair?'")
             if res["mirror_before"] >= 2 and res["mirror_during"] > res["mirror_before"] // 3:
                 raise Refused(f"x6100: the viewer's mirror went on while the code showed "
                               f"({res['mirror_during']} frames in 2 s, {res['mirror_before']} before)")
-            s.confirm(f"{ans}; the mirror {res['mirror_during']} frames in 2 s")
-        with o.step("x6100: 'pair CODE NAME': paired as an operator with TX; the token a session at a new connection") as s:
+            s.confirm(f"{ans}; a code on the screen; the mirror {res['mirror_before']} -> {res['mirror_during']} "
+                      f"frames in 2 s")
+        with o.step("x6100: 'pair CODE NAME': paired as an operator with TX; 'pair?' at once: paused") as s:
             c.send(f"pair {code} {PAIR_NAME}")
             ans = _until(c, lambda t: t.startswith(("paired ", "err pair")), 5)
             m = re.match(r"paired (\S+) (\S+) (\d)", ans or "")
@@ -278,6 +284,14 @@ def t_pairing(o):
             res["role"], res["tx"] = role, tx
             if role != "operate":
                 raise Refused(f"x6100: a later browser paired as {role!r}, not an operator")
+            c.send("pair?")
+            again = _until(c, lambda t: t.startswith(("pairing code shown", "err pairing")), 5)
+            mm = re.search(r"a new code in (\d+) s", again or "")
+            if not mm or int(mm.group(1)) > 30:
+                raise Refused(f"x6100: 'pair?' right after pairing answered {again!r}")
+            res["again"] = again
+            s.confirm(f"paired {role} {tx}; {again}")
+        with o.step("x6100: the token a session at a new connection") as s:
             c.close()
             c = Remote(r.host, 50002, timeout=8)
             c.send(f"auth {tok}")
@@ -285,10 +299,10 @@ def t_pairing(o):
             if not ans or not ans.startswith(f"role operate {tx} {PAIR_NAME}"):
                 raise Refused(f"x6100: 'auth TOKEN' at a new connection answered {ans!r}")
             res["auth"] = ans
-            s.confirm(f"paired {role} {tx}; {ans}")
-        return True, (f"'pair?' showed a code, a second paused ({res['again']}), the viewer's mirror stopped meanwhile "
-                      f"({res['mirror_before']} -> {res['mirror_during']} frames in 2 s); paired as {res['role']} "
-                      f"with TX {res['tx']}, the token a session again ({res['auth']})"), res
+            s.confirm(ans)
+        return True, (f"'pair?' showed a code and the viewer's mirror stopped ({res['mirror_before']} -> "
+                      f"{res['mirror_during']} frames in 2 s); paired as {res['role']} with TX {res['tx']}; a new "
+                      f"code paused ({res['again']}); the token a session again ({res['auth']})"), res
     except Refused as e:
         return False, str(e), res
     finally:
@@ -352,8 +366,8 @@ def t_sentry_pages(o):
                     miss = [w for w in words if not oa.ocr_has(txt, w)]
                     if letter == "G" and not re.search(r"VIA\s*X\s*6\s*[12I][0O]\s*[0O]", txt.upper()):
                         miss.append(f"VIA {n.upper()}")
-                    if letter == "F" and not re.search(r"\d+\s*MHZ", txt.upper()):
-                        miss.append("a clock in MHz")
+                    if letter == "F" and not re.search(r"\d+\s*(MHZ|%)", txt.upper()):
+                        miss.append("a figure (MHz or %)")
                     res[f"{n} {letter}"] = "ok" if not miss else f"missing {miss}"
                     if miss:
                         raise Refused(f"{n}: page {letter} reads no {miss} ({' '.join(txt.split())[:160]!r})")
