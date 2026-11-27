@@ -5067,7 +5067,10 @@ def t_sentry_title_tags(o):
                 out["held"] = " ".join(t.split())[:160]
                 if not ok:
                     raise Refused(f"{n}: no WEB CTL in the head while the bench holds control ({out['held']!r})")
-                m = re.search(r"(\d{1,3})\s*%", t)
+                # the charge read on the head's right part alone, larger: across the whole head OCR read 98% as 982
+                hp = shot(o, r, "head charge")
+                t2 = ocr(hp, box=(400, 24, 744, 50), psm=7, scale=5) if hp else ""
+                m = re.search(r"(\d{1,3})\s*%", t2) or re.search(r"(\d{1,3})\s*%", t)
                 out["head_pct"], out["bat"] = (int(m.group(1)) if m else None), r.state.get("bat")
                 if out["head_pct"] is None:
                     raise Refused(f"{n}: no battery % in the head ({out['held']!r})")
@@ -5136,11 +5139,16 @@ LEGEND_BOX = (6, 404, 794, 430)     # the Sentry's legend over the F keys: legen
 def _vol_said(text):
     """(radio named, number) after 'VOL:' in the legend's OCR text, or (None, None): 'VOL: X6200 VOLUME 2'"""
     t = " ".join(text.upper().split())
-    m = re.search(r"VOL[:;.]?\s*(X6[1I][0O][0O]|X62[0O][0O]|RTL\S*)\s*V[O0]LUME\s*([0-9OIL]+)", t)
+    # the legend's pixel font reads X6100 as 6168, 6186 or %61@@ and 0 as @ (2026-11-27): the radio by its 61/62
+    m = re.search(r"VOL[:;.]?\s*(RTL\S*|\S{0,2}6\s?[12I]\S{0,3})\s*V[O0]LUME\s*([0-9OIL@]+)", t)
     if not m:
         return None, None
-    who = m.group(1).replace("I", "1").replace("O", "0")
-    return who, int(m.group(2).replace("O", "0").replace("I", "1").replace("L", "1"))
+    name = m.group(1)
+    if name.startswith("RTL"):
+        who = name
+    else:
+        who = "X6200" if re.search(r"62", name) else "X6100" if re.search(r"6\s?[1I]", name) else name
+    return who, int(m.group(2).replace("O", "0").replace("@", "0").replace("I", "1").replace("L", "1"))
 
 
 def t_sentry_vol_line(o):
