@@ -24,22 +24,35 @@ public:
         snr_ += snr_db;
     }
 
+    /* How far under the trainer's own a character may be, dB; 0: none dropped, only told (would_drop). The X6200's
+     * decoder audio is raised only in the blocks its state reads TX (dsp.cpp, cw_own_tone.h), so its group and an
+     * answer keyed another way can come to it 20 dB apart: there the gate tells, measured before it drops anything
+     * (2026-11-27: cwtrainer-learn heard 'M' for an answer 'MMM' with it at 20) */
+    void set_margin(float db) { margin_ = db; }
+
     /* A piece of text from the decoder (own: the trainer's own keying, MorseText::own): true when it is let through */
     bool pass(const char *text, bool own) {
         if (text[0] == ' ')
             return !dropped_;
         float snr = keyed_ > 0 ? snr_ / keyed_ : -100.0f;
 
-        keyed_ = 0;
-        snr_   = 0.0f;
+        keyed_     = 0;
+        snr_       = 0.0f;
+        last_snr_  = snr;
+        would_     = false;
         if (own) {
             own_snr_ = own_snr_ < 0.0f ? snr : 0.7f * own_snr_ + 0.3f * snr;
             dropped_ = false;
             return true;
         }
-        dropped_ = own_snr_ >= 0.0f && snr < own_snr_ - GATE_DB;
+        would_   = own_snr_ >= 0.0f && snr < own_snr_ - GATE_DB;
+        dropped_ = would_ && margin_ > 0.0f && snr < own_snr_ - margin_;
         return !dropped_;
     }
+
+    /* The last character, judged: its keyed SNR, and whether it was under the trainer's own by GATE_DB */
+    float last_snr() const { return last_snr_; }
+    bool  would_drop() const { return would_; }
 
     /* The trainer opened or closed: its level is learned again */
     void reset() {
@@ -47,6 +60,7 @@ public:
         keyed_   = 0;
         snr_     = 0.0f;
         dropped_ = false;
+        would_   = false;
     }
 
     float own_snr() const { return own_snr_; }
@@ -56,6 +70,9 @@ private:
     int   keyed_   = 0;         /* keyed steps since the last character */
     float snr_     = 0.0f;      /* their SNR, summed */
     bool  dropped_ = false;     /* the last character was dropped: its space too */
+    bool  would_   = false;     /* the last character was GATE_DB under the trainer's own */
+    float last_snr_ = 0.0f;     /* the last character's keyed SNR */
+    float margin_  = GATE_DB;   /* set_margin */
 };
 
 }  // namespace cw

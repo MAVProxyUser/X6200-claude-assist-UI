@@ -236,6 +236,9 @@ void cw_put_audio_samples(unsigned int n, float *samples) {
         receiver->trainer_range(tr);
         trainer_range = tr;
         tgate.reset();
+#ifdef BOARD_X6200
+        tgate.set_margin(0.0f);         /* told, not dropped: its decoder audio raised by state blocks (trainer_gate.h) */
+#endif
     }
     /* The trainer's: its own sidetone at the key tone, nothing else (Receiver::pin) */
     static float pinned = 0.0f;
@@ -337,8 +340,15 @@ static void on_text(const char *text, bool own) {
         return;
     if (!trainer && !squelch(text))
         return;
-    if (trainer && !tgate.pass(text, own))
-        return;
+    if (trainer) {
+        bool ok = tgate.pass(text, own);
+
+        if (tgate.would_drop())
+            fprintf(stderr, "cw trainer: '%s' at %.1f dB, the trainer's own at %.1f dB: %s\n", text, tgate.last_snr(),
+                    tgate.own_snr(), ok ? "kept (told only)" : "dropped");
+        if (!ok)
+            return;
+    }
     cw_decoder_text(text, own);
 
     int wpm = lroundf(receiver->wpm());

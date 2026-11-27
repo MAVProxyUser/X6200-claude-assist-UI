@@ -7662,9 +7662,11 @@ too. Turning the RF gain while the trainer is open gives you what you set.
 
 The decoder that checks your keying listens for the side tone alone while the
 trainer is open: it stays on the key tone (KEY > Tone) instead of following
-what it finds, and a character far weaker than the trainer's own keying (20 dB
-and more under it: the band's noise keying it in a quiet) is not taken as your
-answer. Up to v0.3.12.49 the X6100's decoder went to a line of its band's
+what it finds, and on the X6100 a character far weaker than the trainer's own
+keying (20 dB and more under it: the band's noise keying it in a quiet) is not
+taken as your answer (the X6200 notes such characters in its log and keeps
+them: its decoder hears its side tone raised only while its base keys, so a
+group and an answer can reach it at levels further apart). Up to v0.3.12.49 the X6100's decoder went to a line of its band's
 noise (297 Hz, 19-26 dB over the rest) between groups and held it, so the
 group's first dah broke on its way back to the side tone (MMM read as
 "EE?HAMM"), and the quiet before an answer put stray E's into it.
