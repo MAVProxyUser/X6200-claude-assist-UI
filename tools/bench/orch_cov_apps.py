@@ -4076,7 +4076,14 @@ def _cwt_round(o, r, answer=None, start=True, speed=None, n0=None, on_start=None
     try:
         _cwt_state(r, ("result", "ready"), 20 if not speed or speed >= 10 else 40, "the answer keyed")
     except Refused as e:
-        raise Refused(f"{e}: the answer {a!r} to {g!r} not taken (the decoder heard {heard()!r})")
+        # the X6200's base puts its sidetone, the decoder's only copy of the answer, in at the KEY Volume: none at 0
+        # (cw_own_tone.h); the X6200 heard nothing of its own group or answer (11-26)
+        try:
+            kv = bench.cfg_get(r, "key_vol", timeout=3)
+        except Refused:
+            kv = "unread"
+        raise Refused(f"{e}: the answer {a!r} to {g!r} not taken (the decoder heard {heard()!r}, of the group "
+                      f"{dec!r}; KEY Volume {kv})")
     st = _cwt_stats(r)
     if st.get("tries", 0) == tries0:    # the file written a moment after the result
         time.sleep(1.5)
