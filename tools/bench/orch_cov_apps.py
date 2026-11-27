@@ -5079,7 +5079,8 @@ def t_sentry_title_tags(o):
                     raise Refused(f"{n}: the head says {out['head_pct']} %, the remote's bat {bat}")
                 # the processor's temperature after the time, whole degrees (clock_cpu_temp: thermal_zone0, read
                 # every 5 s), against the kernel's own reading
-                m = re.search(r"\b([0-9OI]{2,3})\s?C\b", " ".join(t.upper().split()))
+                m = (re.search(r"\b([0-9OI]{2,3})\s?C\b", " ".join(t2.upper().split()))
+                     or re.search(r"\b([0-9OI]{2,3})\s?C\b", " ".join(t.upper().split())))
                 out["head_c"] = int(m.group(1).replace("O", "0").replace("I", "1")) if m else None
                 try:
                     out["zone_c"] = round(int(ssh(r, "cat /sys/class/thermal/thermal_zone0/temp", 10)) / 1000)
@@ -5165,22 +5166,27 @@ def t_sentry_vol_line(o):
             res[n] = out
             v0 = int(r.state.get("vol") or 0)
             try:
+                pics = []
                 for v in (v0, 1 if v0 != 1 else 2, v0):
                     with o.step(f"{n}: VOL {v}: the legend 'VOL: {n.upper()} VOLUME {v}'") as st:
                         bench.ensure(r, {"vol": v})
-                        got = (None, None)
-                        for i in range(3):
-                            time.sleep(0.6)
-                            p = shot(o, r, f"legend vol {v} {i + 1}")
-                            txt = ocr(p, LEGEND_BOX, scale=4, psm=7, stretch=True) if p else ""
-                            got = _vol_said(txt)
-                            if got == (n.upper(), v):
-                                break
+                        time.sleep(1.0)
+                        p = shot(o, r, f"legend vol {v}")
+                        txt = ocr(p, LEGEND_BOX, scale=4, psm=7, stretch=True) if p else ""
+                        got = _vol_said(txt)
                         out[f"vol {v}"] = got
-                        if got != (n.upper(), v):
+                        if got[0] != n.upper():
                             raise Refused(f"{n}: VOL {v}, the legend read {' '.join(txt.split())[:120]!r} "
-                                          f"({got[0]} {got[1]})")
-                        st.confirm(f"{got[0]} VOLUME {got[1]}")
+                                          f"(it names {got[0]})")
+                        pics.append(p)
+                        st.confirm(f"{got[0]} named")
+                # the number: the legend's pixel font reads 0 and 1 as @ alike (2026-11-27), so the legend's own
+                # pixels judge it: changed with VOL, as before once VOL is back
+                import orch_cov_ui as ou
+                moved, back = ou._diff(pics[0], pics[1], LEGEND_BOX), ou._diff(pics[0], pics[2], LEGEND_BOX)
+                out["legend moved, back"] = (round(moved, 4), round(back, 4))
+                if moved < 3 * back + 0.002:
+                    raise Refused(f"{n}: the legend changed {moved:.2%} with VOL, {back:.2%} with VOL back")
             finally:
                 bench.ensure(r, {"vol": v0})
         return True, "the legend names its radio and follows VOL on both: " + \

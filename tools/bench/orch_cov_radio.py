@@ -779,7 +779,8 @@ def t_tci_ask(o):
                         subprocess.run(["scp", "-4", "-q", "-o", "BatchMode=yes",
                                         os.path.join(os.path.dirname(os.path.abspath(__file__)), "tci_start_once.py"),
                                         f"root@{other.host}:/tmp/tci_start_once.py"], check=True, timeout=30)
-                        theirs = oa.ssh(other, f"python3 /tmp/tci_start_once.py {r.host} {port}; true", 30).strip()
+                        theirs = oa.ssh(other, f"python3 /tmp/tci_start_once.py {oa._addr(r.host)} {port} 2>&1; true",
+                                        30).strip()
                         time.sleep(0.5)
                         log = oa.ssh(r, "grep 'wants to transmit: refused, the radio asks about' /tmp/x6100_log.txt "
                                         "| tail -1; true")
@@ -846,6 +847,12 @@ def t_tci_ask(o):
                         out["no-TX key"] = "refused, not asked"
                         s.confirm(out["no-TX key"])
                 finally:
+                    if r.state.get("ask") == 1:     # never left on the screen: No, with its client still there
+                        bench.tap(r, "MFK")
+                        try:
+                            r.wait("the question closed", lambda: r.state.get("ask") == 0, 4)
+                        except Refused as e:
+                            o.st.ev(f"{n}: the TCI question not closed: {e}", "bad")
                     if c is not None:
                         c.close()
             if restart_after:
@@ -878,15 +885,17 @@ def t_sentry_rds(o):
                 try:
                     r.send("set bch 107900000")
                     r.wait("B on 107.9", lambda: int(r.state.get("bhz") or 0) == 107900000, 8)
-                    end, name = time.time() + 20, ""
-                    while time.time() < end:
-                        name = str(r.state.get("bname") or "")
-                        if re.search(r"[A-Z]{3,}", name):
-                            break
-                        time.sleep(0.5)
+                    end, name, txt = time.time() + 25, "", ""
+                    while time.time() < end and not name:
+                        time.sleep(4.0)
+                        p = oa.shot(o, r, "b rds tuned")
+                        txt = oa.ocr(p, box=(205, 50, 600, 125), psm=6, scale=3, stretch=True).upper()
+                        m = re.search(r"\b([WK][A-Z]{2,3})(?:-FM)?\b", txt)
+                        name = m.group(1) if m else ""
                     out["rds"] = name
-                    if not re.search(r"[A-Z]{3,}", name):
-                        raise Refused(f"{n}: B on 107.9 named no station from RDS in 20 s (bname {name!r})")
+                    if not name:
+                        raise Refused(f"{n}: B on 107.9 shows no station's call letters from RDS in 25 s "
+                                      f"({' '.join(txt.split())[:90]!r})")
                     p = oa.shot(o, r, "b title sdr")
                     head = oa.ocr(p, box=(400, 24, 744, 50), psm=7, scale=5).upper()
                     if not re.search(r"RT[L1I]\s?[0-9O@]", head):
