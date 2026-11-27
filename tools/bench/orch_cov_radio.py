@@ -242,14 +242,17 @@ def _code_on_screen(o, r, label):
     """The six-digit pairing code read off r's screen ('Pair code: 061346 (2 min)' in its box over the middle), the
     same in two pictures running, or None: a wrong code tried burns it (and three double the wait)"""
     reads = []
-    for k in range(4):
+    for k in range(5):
         p = oa.shot(o, r, f"{label} {k + 1}")
-        txt = oa.ocr(p, box=(100, 265, 700, 350), psm=7, scale=3)
-        m = re.search(r"code\W*([0-9OoDQIl|SBZG]{6})\b", txt, re.I)
-        if m:
-            reads.append(m.group(1).translate(DIGITS))
-            if len(reads) >= 2 and reads[-1] == reads[-2] and reads[-1].isdigit():
-                return reads[-1]
+        got = set()
+        # two ways that read it right (one read 922628 as 222028 the same both times, 11-27): both must agree
+        for box, psm, scale in (((100, 265, 700, 350), 6, 2), ((180, 280, 620, 335), 7, 4)):
+            txt = oa.ocr(p, box=box, psm=psm, scale=scale)
+            for m in re.finditer(r"code\W*([0-9OoDQIl|SBZG]{6})\b", txt, re.I):
+                got.add(m.group(1).translate(DIGITS))
+        reads.append(next(iter(got)) if len(got) == 1 and next(iter(got)).isdigit() else None)
+        if len(reads) >= 2 and reads[-1] and reads[-1] == reads[-2]:
+            return reads[-1]
         time.sleep(0.6)
     return None
 
@@ -394,12 +397,12 @@ def t_sentry_pages(o):
             time.sleep(1.5)
             for n, r in _both(o):
                 p = oa.shot(o, r, "page A smeter")
-                txt = oa.ocr(p, psm=11) + "\n" + oa.ocr(p, psm=6, stretch=True)
-                m = re.search(r"S\s?([1-9I])\S*\s+-\s?(\d{2,3}[.,]\d)\s?DBM", txt.upper().replace("O", "0"))
+                txt = oa.ocr(p, box=(0, 128, 800, 158), psm=7, scale=4)
+                m = re.search(r"(S)?\W{0,3}-\s?(\d{2,3}[.,][0-9@O])\s?D[BE]M", txt.upper())
                 dbm = float(r.meter) if r.meter is not None else None
                 if not m:
                     raise Refused(f"{n}: page A shows no 'S<n> -NNN.N DBM' line ({' '.join(txt.split())[:120]!r})")
-                shown = -float(m.group(2).replace(",", "."))
+                shown = -float(m.group(2).replace(",", ".").replace("@", "0").replace("O", "0"))
                 res[f"{n} smeter"] = (shown, dbm)
                 if dbm is not None and abs(shown - dbm) > 3.0:
                     raise Refused(f"{n}: page A's S-meter says {shown} dBm, the remote's {dbm}")
@@ -619,11 +622,11 @@ def t_train_oob(o):
 
 # ---- B's SDR: its demodulation by band, its VFO's channels (sentry-b-mode-by-band, sentry-b-vfo-channel) ----
 
-B_BANDS = [(98100000, "WFM", 100000), (121500000, "AM", 25000), (146520000, "NFM", 12500)]
+B_BANDS = [(98100000, "WFM", 100000), (121500000, "AM", 25000), (146525000, "NFM", 12500)]   # on each band's grid
 
 
 def t_sentry_b(o):
-    """On each radio with an SDR on HOST, page B: B's channel on 98.1 (FM broadcast), 121.5 (the airband) and 146.52
+    """On each radio with an SDR on HOST, page B: B's channel on 98.1 (FM broadcast), 121.5 (the airband) and 146.525
     MHz: WFM, AM and NFM as the band says (bmode); one VFO click moves B's channel 100 kHz, 25 kHz and 12.5 kHz there;
     B's channel put back as found"""
     res = {}
@@ -666,30 +669,31 @@ def t_sentry_b(o):
 # ---- G's VOL pop-up (g-vol-popup) ----
 
 def t_g_vol_popup(o):
-    """Page G on each radio: a VOL click draws the pop-up over G (its part of the picture changes at once) and it is
-    gone 3.5 s later (the picture as before); the volume put back"""
-    import orch_cov_ui as ou
+    """Page G on each radio: a VOL click draws the pop-up over G ('<RADIO> VOLUME n', 'PUSH THE VOL KNOB FOR SQUELCH',
+    read upright: G is drawn standing) and 3.5 s later it is gone; the volume put back"""
     res = {}
     try:
         oa.page_both(o, "G")
         for n, r in _both(o):
-            with o.step(f"{n}: page G, a VOL click: the pop-up, gone in 3.5 s") as s:
+            with o.step(f"{n}: page G, a VOL click: the pop-up's words, gone in 3.5 s") as s:
                 time.sleep(1.0)
-                before = oa.shot(o, r, "g before")
                 v0 = int(r.state.get("vol") or 0)
                 r.take_control()
                 r.send("knob vol 1")
-                time.sleep(0.3)
+                time.sleep(0.4)
                 during = oa.shot(o, r, "g vol popup")
                 time.sleep(3.5)
                 after = oa.shot(o, r, "g after")
                 bench.ensure(r, {"vol": v0})
-                box = (100, 80, 700, 400)
-                on, off = ou._diff(before, during, box), ou._diff(before, after, box)
-                res[n] = (round(on, 3), round(off, 3))
-                if on < 0.02 or off > max(0.02, on / 3):
-                    raise Refused(f"{n}: G's picture {on:.1%} changed with the pop-up, {off:.1%} 3.5 s later")
-                s.confirm(f"{on:.1%} with it, {off:.1%} after")
+                box = (280, 20, 520, 460)
+                t_on = (oa.ocr(during, box=box, psm=6, upright=True) + oa.ocr(during, psm=11, upright=True)).upper()
+                t_off = (oa.ocr(after, box=box, psm=6, upright=True) + oa.ocr(after, psm=11, upright=True)).upper()
+                on, off = "VOLUME" in t_on.replace("0", "O"), "VOLUME" in t_off.replace("0", "O")
+                res[n] = (on, off)
+                if not on or off:
+                    raise Refused(f"{n}: the pop-up's VOLUME read {'with' if on else 'not with'} the click, "
+                                  f"{'still' if off else 'not'} 3.5 s later ({' '.join(t_on.split())[:80]!r})")
+                s.confirm("VOLUME with the click, gone after")
         return True, f"G's VOL pop-up came and went on both: {res}", res
     except Refused as e:
         return False, str(e), res

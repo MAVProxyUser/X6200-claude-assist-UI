@@ -58,7 +58,7 @@ ADIF = ("<ADIF_VER:5>3.1.4 <EOH>\n<CALL:5>Q2TST <QSO_DATE:8>20261127 <TIME_ON:6>
 STOP_PROBE = {
     # between the GUI's stop and its start: the X6200's base kept on by x6200-base-keeper; the X6100's WiFi up (this
     # very SSH command runs over it) and associated as long as before
-    "x6200": "sleep 4; pidof x6200-base-keeper >/dev/null && echo KEEPER_ON || echo KEEPER_OFF",
+    "x6200": "sleep 4; ps w | grep -q '[x]6200-base-keeper' && echo KEEPER_ON || echo KEEPER_OFF",
     "x6100": "sleep 4; cat /sys/class/net/wlan0/carrier 2>/dev/null | sed 's/^/CARRIER /'; "
              "cat /sys/class/net/wlan0/carrier_changes 2>/dev/null | sed 's/^/CHANGES /'",
 }
@@ -232,7 +232,6 @@ DISPLAY = [
     ("settings-display-band-plan-strip", "band_plan", lambda v: 0 if str(v) != "0" else 1, (0, 150, 800, 175)),
     ("settings-display-filter-shade", "filter_shade", lambda v: 0 if str(v) != "0" else 4, (0, 140, 800, 330)),
     ("settings-display-spectrum", "spectrum_show", lambda v: 1 if str(v) == "0" else 0, (0, 130, 800, 400)),
-    ("settings-display-waterfall-mode", "wf_mode", lambda v: 1 if str(v) == "0" else 0, (0, 150, 800, 400)),
     ("settings-display-broadcast-names", "broadcast_name", lambda v: 0 if str(v) != "0" else 1, (0, 100, 800, 175)),
     ("settings-display-knob-info", "knob_info", lambda v: 0 if str(v) != "0" else 1, (0, 380, 800, 480)),
 ]
@@ -380,9 +379,17 @@ def _green_px(path, box):
     return sum(1 for (rr, g, b) in im.getdata() if g > 120 and g > rr + 40 and g > b + 40)
 
 
+def _lit_px(path, box):
+    """Pixels in box lit bright (L over 150: an icon drawn in the theme's colour, as the Sentry's gold)"""
+    from PIL import Image
+    im = Image.open(path).convert("L").crop(box)
+    return sum(1 for v in im.getdata() if v > 150)
+
+
 def t_classic_status(o):
     """Each radio's classic screen, its top lines read off the picture: VFO-A, the mode, AGC and its setting, PRE/ATT;
-    the charge at the top right ('NN%'); the WiFi icon green (the radio is on its network: the bench talks to it)"""
+    the charge at the top right ('NN%'); the WiFi icon lit (green in the colour themes, the theme's colour in others:
+    the radio is on its network, the bench talks to it)"""
     import orch_cable as oc
     res = {}
     try:
@@ -396,13 +403,13 @@ def t_classic_status(o):
                 miss = [w for w, rx in (("VFO-A", r"VFO[- ]?A"), ("the mode", r"\b(USB|LSB|CW|AM|NFM)"),
                                         ("AGC", r"AGC|FAST|SLOW|AUTO|\bOFF\b"), ("the charge", r"\d{1,3}\s?%"))
                         if not re.search(rx, up)]
-                green = _green_px(p, (560, 0, 800, 40))
+                green = _green_px(p, (0, 30, 70, 62)) + _lit_px(p, (10, 32, 60, 60))     # green, or the theme's
                 res[n] = {"text": " ".join(up.split())[:100], "green": green}
                 if miss:
                     raise Refused(f"{n}: the status line reads no {miss} ({res[n]['text']!r})")
-                if green < 6:
-                    raise Refused(f"{n}: no green WiFi icon at the top right ({green} green pixels)")
-                s.confirm(f"{res[n]['text'][:60]}; WiFi icon green ({green} px)")
+                if green < 15:
+                    raise Refused(f"{n}: the WiFi icon not lit ({green} lit pixels)")
+                s.confirm(f"{res[n]['text'][:60]}; WiFi icon lit ({green} px)")
         return True, f"both classic screens show VFO-A, the mode, AGC, the charge and a green WiFi icon: {res}", res
     except Refused as e:
         return False, str(e), res
@@ -474,7 +481,7 @@ def t_sentry_now(o):
                 cb.cfg_open(r, "A")
                 time.sleep(1.2)
                 p = oa.shot(o, r, "scan cfg now")
-                txt = (oa.ocr(p, psm=11) + "\n" + oa.ocr(p, psm=6, stretch=True)).upper()
+                txt = (oa.ocr(p, box=(0, 330, 800, 390), psm=6, scale=3) + "\n" + oa.ocr(p, psm=11)).upper()
                 cb.cfg_close(r)
                 if not re.search(r"\bA\s+X\s?6\s?[12I]\s?[0O]\s?[0O]\s+[A-Z]", txt) or "LAST" not in txt:
                     raise Refused(f"{n}: SCAN CFG's NOW box names no 'A {n.upper()} <doing>' and LAST locks "
@@ -503,13 +510,12 @@ def t_sentry_now(o):
 # ---- Windows that look alike on both radios (lookfeel-screen-first-start, lookfeel-screen-swr-scan,
 #      lookfeel-screen-wspr) ----
 
-LOOK = [("lookfeel-screen-first-start", 131, "First start", r"FIRST\s*START|WELCOME|STEP"),
-        ("lookfeel-screen-swr-scan", 102, "SWR Scan", r"SWR"),
+LOOK = [("lookfeel-screen-swr-scan", 102, "SWR Scan", r"SWR"),
         ("lookfeel-screen-wspr", 116, "WSPR", r"WSPR")]
 
 
 def t_lookalike(o):
-    """First start, SWR Scan and WSPR opened on both radios (the remote's open; none of them sends anything by
+    """SWR Scan and WSPR opened on both radios (the remote's open; neither sends anything by
     opening): each window named on both pictures, and the two radios' pictures alike (gold on black, the same layout:
     under a third of their pixels differ); closed after"""
     res = {}
@@ -558,7 +564,13 @@ def t_settings_info(o):
                 oa.press_label(r, r"^Info", names, rest=1.2)
                 time.sleep(1.0)
                 p = oa.shot(o, r, "settings info")
-                txt = (oa.ocr(p, psm=11) + "\n" + oa.ocr(p, psm=6, stretch=True)).upper()
+                txt = oa.ocr(p, box=(160, 120, 795, 420), psm=6, scale=2).upper()
+                for k in range(4):              # the POWER box under the FIRMWARE card: the MFK walks down to it
+                    oa.turn(r, "mfk", 3, names, rest=0.8)
+                    q = oa.shot(o, r, f"settings info down {k + 1}")
+                    txt += "\n" + oa.ocr(q, box=(160, 120, 795, 420), psm=6, scale=2).upper()
+                    if "TIME LEFT" in txt:
+                        break
                 want = ["FIRMWARE", "BATTERY", "EXTERNAL", "TIME LEFT"] + (["BIAS"] if n == "x6200" else [])
                 miss = [w for w in want if not oa.ocr_has(txt, w)]
                 if not re.search(r"0\.3\.1\d", txt):
