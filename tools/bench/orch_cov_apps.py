@@ -5048,8 +5048,9 @@ def t_sentry_title_tags(o):
     """The head's tags on page A (every screen's status line), each radio in turn: WEB CTL while the bench's remote
     holds control; WEB alone once it lets go, its session still on the Remote page (a viewer); TCI CTL as well while
     a TCI program's set (the same dial) holds control; WEB CTL again once the program has gone and the bench took
-    control back (taken only when free: never from the radio's operator). The head's battery % read too: within 3 of
-    the remote's bat on battery (bat -1 on a supply, where only the head has it)"""
+    control back (taken only when free: never from the radio's operator). The head's processor temperature (NNC)
+    within 3 of the kernel's thermal_zone0, and its battery % within 3 of the remote's bat on battery (bat -1 on a
+    supply, where only the head has it)"""
     from remote_ws import Remote
     res = {}
     o.changing += 1                     # control let go on purpose here: nothing to put back while it is free
@@ -5073,7 +5074,19 @@ def t_sentry_title_tags(o):
                 bat = int(out["bat"] if out["bat"] is not None else -1)
                 if bat >= 0 and abs(out["head_pct"] - bat) > 3:
                     raise Refused(f"{n}: the head says {out['head_pct']} %, the remote's bat {bat}")
-                st.confirm(f"WEB CTL, {out['head_pct']} % (bat {bat})")
+                # the processor's temperature after the time, whole degrees (clock_cpu_temp: thermal_zone0, read
+                # every 5 s), against the kernel's own reading
+                m = re.search(r"\b([0-9OI]{2,3})\s?C\b", " ".join(t.upper().split()))
+                out["head_c"] = int(m.group(1).replace("O", "0").replace("I", "1")) if m else None
+                try:
+                    out["zone_c"] = round(int(ssh(r, "cat /sys/class/thermal/thermal_zone0/temp", 10)) / 1000)
+                except (Refused, ValueError):
+                    out["zone_c"] = None
+                if out["head_c"] is None:
+                    raise Refused(f"{n}: no temperature (NNC) in the head ({out['held']!r})")
+                if out["zone_c"] is not None and abs(out["head_c"] - out["zone_c"]) > 3:
+                    raise Refused(f"{n}: the head says {out['head_c']}C, the processor's zone {out['zone_c']}C")
+                st.confirm(f"WEB CTL, {out['head_c']}C (zone {out['zone_c']}C), {out['head_pct']} % (bat {bat})")
             with o.step(f"{n}: control let go, the bench still watching: WEB, no CTL") as st:
                 r.send("control release")
                 r.wait("control free", lambda: not r.ctl_mine and (r.ctl_who or "none") == "none", 5)
@@ -5103,8 +5116,8 @@ def t_sentry_title_tags(o):
                 if not ok:
                     raise Refused(f"{n}: control back with the bench, the head reads {out['back']!r}")
                 st.confirm("WEB CTL")
-        return True, "the head's tags on both: WEB CTL, WEB, TCI CTL, WEB CTL; its battery % " + \
-            ", ".join(f"{n} {res[n].get('head_pct')} %" for n in res), res
+        return True, "the head's tags on both: WEB CTL, WEB, TCI CTL, WEB CTL; its temperature and battery % " + \
+            ", ".join(f"{n} {res[n].get('head_c')}C {res[n].get('head_pct')} %" for n in res), res
     except Refused as e:
         return False, str(e), res
     finally:
@@ -5174,7 +5187,7 @@ def t_sentry_vol_line(o):
 
 COVERS = {
     "sentry-vol-line": ([], ["sentry-vol-line"]),
-    "sentry-title-tags": (["sentry-title-remote-tags"], ["sentry-title-battery"]),
+    "sentry-title-tags": (["sentry-title-remote-tags"], ["sentry-title-battery", "temp-on-screen"]),
     "bands-app": (["bands-app-open", "bands-use-band"], []),
     "timesig-f2": (["timesig-f2-set-clock"], []),
     "channels-api": (["channels-web-concurrency", "channels-web-partial-save"], []),
