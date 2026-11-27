@@ -43,6 +43,11 @@ O_EXCL, its pid in it) and waits while another live run holds it; it also waits 
 `run` options: `--port 8765`, `--lan` (the console on the network as well), `--linger S` (how long a run's own console
 stays up after it; 0 with the standing console), `--sql N` (the squelch held, default 0), `--squelch-cal`.
 
+`AIR_B_WAYS="x6100>x6200" python3 orch.py run --only "air wefax-auto,..."`: the air groups (suite_air_a, b and c) run
+only those directions, and only their senders are held to the battery gate (an X6200 too low to send can still
+listen). Such a group is recorded LOOK, never PASS, its words beginning "only x6100>x6200 ran": the next run picks it
+again for the other direction.
+
 **The standing console** is its own process (`orch.py console --lan`): every run writes its state to
 `orch_status.json` each second and, finding port 8765 taken, leaves the serving to it. Between runs it shows the last
 run. It must stay up: stop runs with `pkill -f 'orch.py run'`, never the console. After its page changes in orch.py
@@ -73,7 +78,10 @@ it is restarted (kill it, `nohup python3 -B orch.py console --lan &`).
 3. Runs the test: its steps, each confirmed; an over goes through `over()`: both set alike (page G, the receiver
    profile, the power), the bench's gates (`chain_gate`, `radio_tx_gate`, `listener_gate`), the sender armed, the
    Watch (`bench.Watch`: too long keyed, too much power over the pad's rating, a listener hearing nothing), then
-   locked again. A test whose role transmits (TX, both ways, keyed) is not started while the owner's word on the
+   locked again. The air suites' path proof (`bench.path_proof`, 0.1 W at f + 1000 Hz) needs the listener's spectrum
+   to rise 20 dB; the sender's meter under 0.03 W refuses it only when the listener did not hear it either (the
+   X6100's meter reads 0.0 W at 0.1 W in many overs: ft8-hold's proof was refused for that, 2026-11-26). A test whose
+   role transmits (TX, both ways, keyed) is not started while the owner's word on the
    radios cable has lapsed (`sends_gate`: `chain_gate`'s 12 h): it is NOT RUN, with the reason, its last real result
    kept, never a FAIL (2026-11-26: rit-xit's first two "failures" and most of power-steps' were that refusal). Nor
    while a sender is an X6200 on a supply under 12.0 V with its battery under 7.3 V at rest (`bench.battery_tx_gate`):

@@ -111,8 +111,11 @@ def model(run, n):
 
 
 def both_ways(run):
+    """Both directions; AIR_B_WAYS="x6100>x6200": only those, as suite_air_b's two_way (orch: the half recorded as
+    such)"""
     a, b = run.names[0], run.names[1]
-    return [(a, b), (b, a)]
+    only = [tuple(x.split(">", 1)) for x in os.environ.get("AIR_B_WAYS", "").split(",") if ">" in x]
+    return [w for w in ((a, b), (b, a)) if not only or w in only]
 
 
 def one_way(run, sender_model, listener_model):

@@ -1474,10 +1474,16 @@ def path_proof(c, total, sender, listener, f, report=None, label=None):
         report["path_proof"] = res
     if not nq or not nl:
         raise Refused(f"path proof: {listener.name} sent no spectrum covering {hz} Hz ({nq} frames before, {nl} during)")
-    if not peak or peak < 0.03:
-        raise Refused(f"path proof: {sender.name} put out no power (its meter's highest {peak} W)")
+    if (not peak or peak < 0.03) and (res["rise_db"] is None or res["rise_db"] < PROOF_MIN_DB):
+        raise Refused(f"path proof: {sender.name} put out no power (its meter's highest {peak} W, and {listener.name} "
+                      f"heard it {res['rise_db']} dB over its quiet)")
+    # The X6100's meter reads 0.0 W at a 0.1 W setting in many overs (its floor: tci 'the power 0.0 W at a 0.1 W
+    # setting' while heard 59 dB up, 2026-11-26), and ft8-hold's proof was refused for it: the listener's rise proves
+    # the power then
+    meter = f"the sender's meter {peak} W" + (" (its floor: the listener's rise proves it)" if not peak or peak < 0.03
+                                               else "")
     say(f"path proof: {listener.name} sees {sender.name}'s 0.1 W tone {res['rise_db']} dB over its quiet "
-        f"({quiet:.0f} -> {loud:.0f}; the sender's meter {peak} W)")
+        f"({quiet:.0f} -> {loud:.0f}; {meter})")
     if res["rise_db"] < PROOF_MIN_DB:
         raise Refused(f"path proof: {listener.name} hears {sender.name}'s 0.1 W tone only {res['rise_db']} dB over its "
                       f"quiet (at least {PROOF_MIN_DB}): it does not hear the sender. Its state: "

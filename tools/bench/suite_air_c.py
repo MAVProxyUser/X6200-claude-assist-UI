@@ -1081,6 +1081,10 @@ def directions(run, test, body, covers, partial=(), senders=None, mfk=None):
     fresh_run(run)
     a, b = run.names[0], run.names[1]
     dirs = [(s, l_) for s, l_ in ((a, b), (b, a)) if senders is None or s in senders]
+    # AIR_B_WAYS="x6100>x6200": only those directions, as suite_air_b's two_way (orch: the half recorded as such)
+    only = [tuple(x.split(">", 1)) for x in os.environ.get("AIR_B_WAYS", "").split(",") if ">" in x]
+    if only:
+        dirs = [d for d in dirs if d in only]
     busy = mfk_busy()
     if mfk is not None:
         for s, l_ in list(dirs):

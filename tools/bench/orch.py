@@ -7086,6 +7086,9 @@ def update_check_on(st, radios, made):
 
 
 SENDS_RE = re.compile(r"\bTX\b|both ways|keyed")
+# AIR_B_WAYS="x6100>x6200": the air groups run only those directions (suite_air_a/b/c). A group passed so is recorded
+# LOOK, never PASS (the other direction not run: the next run picks it again), its words saying which ran
+AIR_WAYS = [tuple(x.split(">", 1)) for x in os.environ.get("AIR_B_WAYS", "").split(",") if ">" in x]
 
 
 def sends_gate(o, t):
@@ -7102,6 +7105,8 @@ def sends_gate(o, t):
     # an over (js8-groups, 2026-11-26: the run's last 44 tests lost with it). Its senders by the role, else both
     role = t.role or ""
     senders = [n for n in o.r if f"{n.upper()} TX" in role.upper()] or list(o.r)
+    if AIR_WAYS and t.name.startswith("air "):     # only those directions run (AIR_B_WAYS): only their senders
+        senders = sorted({s for s, _ in AIR_WAYS if s in o.r})
     for n in senders:
         try:
             bench.battery_tx_gate(o.r[n])
@@ -7262,6 +7267,10 @@ def run(names, port, lan, linger, everything=False, soak=1, squelch_cal=False, s
                     says = f"{says} (its first try, cut by a link stall: {first[:1500]})"   # 300 hid air olivia's
                                                                                            # rows (2026-11-26)
                 res = "NOT RUN" if gate else "PASS" if ok is True else "LOOK" if ok is None else "FAIL"
+                if AIR_WAYS and t.name.startswith("air ") and not gate:
+                    says = f"only {', '.join('>'.join(w) for w in AIR_WAYS)} ran (AIR_B_WAYS): {says}"
+                    if res == "PASS":
+                        res = "LOOK"
                 code = test_code(t)
                 with st.lock:
                     st.tests[i].update(result=res, says=says, secs=time.time() - t0, data=data, code=code)
