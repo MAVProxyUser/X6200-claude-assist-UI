@@ -597,6 +597,87 @@ def t_train_oob(o):
         oa.home_both(o)
 
 
+
+# ---- B's SDR: its demodulation by band, its VFO's channels (sentry-b-mode-by-band, sentry-b-vfo-channel) ----
+
+B_BANDS = [(98100000, "WFM", 100000), (121500000, "AM", 25000), (146520000, "NFM", 12500)]
+
+
+def t_sentry_b(o):
+    """On each radio with an SDR on HOST, page B: B's channel on 98.1 (FM broadcast), 121.5 (the airband) and 146.52
+    MHz: WFM, AM and NFM as the band says (bmode); one VFO click moves B's channel 100 kHz, 25 kHz and 12.5 kHz there;
+    B's channel put back as found"""
+    res = {}
+    try:
+        for n, r in _both(o):
+            if r.state.get("sdr") != 1:
+                res[n] = "no SDR: not tried"
+                continue
+            out = res[n] = {}
+            with o.step(f"{n}: page B, its channel by band: the mode, one VFO click") as s:
+                oa.page_both(o, "B")
+                bhz0 = int(r.state.get("bhz") or 0)
+                try:
+                    for hz, mode, step in B_BANDS:
+                        r.send(f"set bch {hz}")
+                        r.wait(f"B on {hz}", lambda: int(r.state.get("bhz") or 0) == hz, 8)
+                        r.wait(f"B in {mode}", lambda: r.state.get("bmode") == mode, 6)
+                        r.take_control()
+                        r.send("knob main 1")
+                        r.wait("B's channel moved", lambda: int(r.state.get("bhz") or 0) != hz, 4)
+                        moved = int(r.state.get("bhz") or 0) - hz
+                        out[hz] = (r.state.get("bmode"), moved)
+                        if abs(moved) != step:
+                            raise Refused(f"{n}: a VFO click on {hz / 1e6:.3f} moved B {moved} Hz, not {step}")
+                finally:
+                    if bhz0:
+                        r.send(f"set bch {bhz0}")
+                        try:
+                            r.wait("B back", lambda: int(r.state.get("bhz") or 0) == bhz0, 8)
+                        except Refused as e:
+                            o.st.ev(f"{n}: B not back on {bhz0}: {e}", "bad")
+                s.confirm(str(out))
+        return True, f"B's mode follows the band and its VFO steps the band's channel: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+# ---- G's VOL pop-up (g-vol-popup) ----
+
+def t_g_vol_popup(o):
+    """Page G on each radio: a VOL click draws the pop-up over G (its part of the picture changes at once) and it is
+    gone 3.5 s later (the picture as before); the volume put back"""
+    import orch_cov_ui as ou
+    res = {}
+    try:
+        oa.page_both(o, "G")
+        for n, r in _both(o):
+            with o.step(f"{n}: page G, a VOL click: the pop-up, gone in 3.5 s") as s:
+                time.sleep(1.0)
+                before = oa.shot(o, r, "g before")
+                v0 = int(r.state.get("vol") or 0)
+                r.take_control()
+                r.send("knob vol 1")
+                time.sleep(0.3)
+                during = oa.shot(o, r, "g vol popup")
+                time.sleep(3.5)
+                after = oa.shot(o, r, "g after")
+                bench.ensure(r, {"vol": v0})
+                box = (100, 80, 700, 400)
+                on, off = ou._diff(before, during, box), ou._diff(before, after, box)
+                res[n] = (round(on, 3), round(off, 3))
+                if on < 0.02 or off > max(0.02, on / 3):
+                    raise Refused(f"{n}: G's picture {on:.1%} changed with the pop-up, {off:.1%} 3.5 s later")
+                s.confirm(f"{on:.1%} with it, {off:.1%} after")
+        return True, f"G's VOL pop-up came and went on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
 COVERS = {
     "ft8-nocall": (["ft8-nocall", "ft8-tx-off-dry-run"], []),
     "x6200-start": (["register-32-x6200", "pa-bias-x6200", "tx-x6200-base-band-table"], []),
@@ -605,6 +686,8 @@ COVERS = {
     "remote-pairing": (["pair-code-request", "pair-with-code", "pair-rate-limit", "pair-mirror-pause"],
                        ["role-admin-first"]),
     "gen-pages": (["radio-core-gen-pages-defaults", "app-button-pages"], []),
+    "sentry-b-sdr": (["sentry-b-mode-by-band", "sentry-b-vfo-channel"], []),
+    "g-vol-popup": (["g-vol-popup"], []),
     "control-rules": (["control-stop-needs-none", "control-injected-keys-keep"], []),
     "xvtr-limit": (["transverter-limit-caps-pwr", "transverter-waterfall-band"], []),
     "train-oob": (["cw-train-out-of-band"], []),
@@ -627,6 +710,9 @@ def tests(Test, A, B):
         Test("remote-pairing", "X6100", "a new browser's pair?: a code on the screen, a second paused, a viewer's "
              "mirror stopped meanwhile; paired as an operator with TX; its token a session again; unpaired after",
              t_pairing, 40),
+        Test("sentry-b-sdr", "both RX", "B's SDR on 98.1, 121.5 and 146.52 MHz: WFM, AM, NFM; a VFO click 100, 25 and "
+             "12.5 kHz", t_sentry_b, 50),
+        Test("g-vol-popup", "both", "page G: a VOL click draws the pop-up, gone 3.5 s later", t_g_vol_popup, 30),
         Test("gen-pages", "both", "the main screen's pages as the remote lists them: VOL 1:2/2:2 defaults, MFK 1:4-4:4, "
              "APP 1:6-6:6 with the first two pages' apps", t_gen_pages, 10),
         Test("control-rules", "X6100", "set freq needs control, ft8 stop does not; sixty remote detents under FT8's "

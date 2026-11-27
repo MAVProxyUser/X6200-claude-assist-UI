@@ -494,6 +494,82 @@ def t_sentry_now(o):
         oa.home_both(o)
 
 
+
+# ---- Windows that look alike on both radios (lookfeel-screen-first-start, lookfeel-screen-swr-scan,
+#      lookfeel-screen-wspr) ----
+
+LOOK = [("lookfeel-screen-first-start", 131, "First start", r"FIRST\s*START|WELCOME|STEP"),
+        ("lookfeel-screen-swr-scan", 102, "SWR Scan", r"SWR"),
+        ("lookfeel-screen-wspr", 116, "WSPR", r"WSPR")]
+
+
+def t_lookalike(o):
+    """First start, SWR Scan and WSPR opened on both radios (the remote's open; none of them sends anything by
+    opening): each window named on both pictures, and the two radios' pictures alike (gold on black, the same layout:
+    under a third of their pixels differ); closed after"""
+    res = {}
+    try:
+        for feat, action, name, rx in LOOK:
+            with o.step(f"both: {name} opened, named on each picture, the two alike") as s:
+                pics = {}
+                for n, r in _both(o):
+                    r.take_control()
+                    r.send(f"open {action}")
+                for n, r in _both(o):
+                    r.wait(f"{name} open", lambda r=r: oa.win(r).lower().startswith(name.lower().split()[0]), 8)
+                time.sleep(1.5)
+                for n, r in _both(o):
+                    pics[n] = oa.shot(o, r, f"look {name}")
+                    txt = (oa.ocr(pics[n], psm=11) + oa.ocr(pics[n], psm=6, stretch=True)).upper()
+                    if not re.search(rx, txt):
+                        raise Refused(f"{n}: {name}'s picture reads no {rx!r} ({' '.join(txt.split())[:100]!r})")
+                apart = _diff(pics[H.A], pics[H.B], (0, 0, 800, 480))
+                res[name] = round(apart, 3)
+                for n, r in _both(o):
+                    r.send("close")
+                if apart > 0.33:
+                    raise Refused(f"{name}: the two radios' pictures differ in {apart:.0%} of their pixels")
+                s.confirm(f"named on both, {apart:.0%} of pixels apart")
+        return True, f"First start, SWR Scan and WSPR open alike on both radios: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
+# ---- Settings > Info's cards (settings-info-firmware, settings-info-power-box) ----
+
+def t_settings_info(o):
+    """Settings opened on both, its Info tab: the FIRMWARE card names the firmware's version (the remote's own) and
+    the base's; the X6200's its PA bias; the POWER box says Battery, External and Time left; closed after"""
+    res = {}
+    names = ("Settings",)
+    try:
+        for n, r in _both(o):
+            with o.step(f"{n}: Settings > Info: the FIRMWARE card and the POWER box") as s:
+                r.take_control()
+                r.send("open 104")
+                r.wait("Settings open", lambda: oa.win(r).lower().startswith("settings"), 8)
+                oa.press_label(r, r"^Info", names, rest=1.2)
+                time.sleep(1.0)
+                p = oa.shot(o, r, "settings info")
+                txt = (oa.ocr(p, psm=11) + "\n" + oa.ocr(p, psm=6, stretch=True)).upper()
+                want = ["FIRMWARE", "BATTERY", "EXTERNAL", "TIME LEFT"] + (["BIAS"] if n == "x6200" else [])
+                miss = [w for w in want if not oa.ocr_has(txt, w)]
+                if not re.search(r"0\.3\.1\d", txt):
+                    miss.append("the firmware's version")
+                res[n] = "ok" if not miss else miss
+                r.send("close")
+                if miss:
+                    raise Refused(f"{n}: Settings > Info reads no {miss} ({' '.join(txt.split())[:140]!r})")
+                s.confirm("FIRMWARE with its version, POWER box" + (", PA bias" if n == "x6200" else ""))
+        return True, f"Settings > Info's FIRMWARE card and POWER box read on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
 COVERS = {
     "ui-restart": (["perf-overlay", "gpu-off-file", "sentry-resume-after-restart", "cw-beacon-off-after-restart",
                     "sdr-daemon-persistent", "network-x6100-wifi-power-held", "system-x6200-base-keeper",
@@ -504,6 +580,8 @@ COVERS = {
                            "main-screen-status-wifi-icon"], []),
     "ui-settings-kept": ([], [f for f, _, _ in KEPT] + ["tx-ranges-choice"]),
     "ui-sentry-now": (["scancfg-now-box", "sentry-now-sun"], []),
+    "ui-lookalike": ([f for f, _, _, _ in LOOK], []),
+    "ui-settings-info": (["settings-info-firmware", "settings-info-power-box"], []),
     "ui-system-readonly": (["system-base-fw-flash-check"], ["system-update-integrity", "system-update-sd-card-guard"]),
 }
 
@@ -523,6 +601,10 @@ def tests(Test, A, B):
              "outside 1-5 refused", t_settings_kept, 40),
         Test("ui-sentry-now", "both", "SCAN CFG's NOW box names A's radio; page D's rows say NOW (OPEN, CLOSED, ... or "
              "n SIG)", t_sentry_now, 40),
+        Test("ui-lookalike", "both", "First start, SWR Scan and WSPR open alike on both radios (named, under a third "
+             "of their pixels apart)", t_lookalike, 50),
+        Test("ui-settings-info", "both", "Settings > Info: the FIRMWARE card with the version (the X6200's PA bias), "
+             "the POWER box", t_settings_info, 40),
         Test("ui-system-readonly", "both", "read only: base-flash --check takes the radio's own firmware and refuses "
              "the other's (named and renamed); bundle-info refuses another radio's bundle and one writing outside",
              t_system_readonly, 60),
