@@ -81,5 +81,15 @@ case $out in
     *"text: 'VV TEST'"*) echo "ok   the APF's colour taken out at the lock too: $out" ;;
     *) echo "FAIL the APF's colour taken out at the lock too: $out"; bad=$((bad + 1)) ;;
 esac
+# A station at another speed than the decoder's (2026-11-26): the X6100's audio of the X6200's 15 WPM "VVV TEST DE
+# Q1TST" after a quiet, its dots 64-90 ms and its element gaps 104 there, from a decoder at its 20 WPM start (a
+# character gap from 102 ms): the first V came out "EEET". A text's first elements are now held while the speed held
+# cannot tell them apart, and timed together from their dits and element gaps (element_timer.cpp hold, flush)
+n=$((n + 1))
+out=$(S16=1 ./cw_replay 300 1100 8 < x6200_new_speed_on_x6100.s16 2> /dev/null)
+case $out in
+    *"text: 'VVV TEST DE Q1TST "*) echo "ok   a new speed from the first letter: $out" ;;
+    *) echo "FAIL a new speed from the first letter: $out"; bad=$((bad + 1)) ;;
+esac
 echo "cw_replay: $n checks, $bad failed"
 [ $bad -eq 0 ]

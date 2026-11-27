@@ -7140,6 +7140,15 @@ every new mode cleared it, CW to CW-R and back excepted).
   (or the CW peak filter is switched), in which the decoder measures the
   noise and keys nothing, is decoded once it is measured. Up to v0.3.12.48 "VVV TEST" often came
   out "VV TEST", "TV TEST" or "UV TEST", and "PARIS" as "TRIS".
+- A station that starts at another speed than the last one is copied
+  from its first letter: a text's first elements are held while the speed
+  the decoder had cannot tell them apart (a mark near the dit/dah line, a
+  gap near the letter or word line), timed together, and the station's own
+  speed taken from its dits and the gaps between them before any is
+  printed (a few tenths of a second later than the rest); elements plain at
+  the speed it had go out at once. Up to v0.3.12.49 the decoder learned the
+  new speed only after eight elements, and the X6200's 15 WPM "VVV TEST"
+  came out "EEETVV TEST" or "EUVV TEST" on the X6100 after a quiet.
 - The speed is learned only from a station (a tone 10 dB and more over the
   noise), never from the noise keying the decoder in a quiet. Up to
   v0.3.12.48 a minute or two of a quiet band could take it to 50 WPM, and

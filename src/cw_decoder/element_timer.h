@@ -29,6 +29,9 @@ constexpr float  TRAINER_DOT_MAX_MS = PARIS_MS / 5.0f;
 /* Every histogram entry ages by this when a new one comes in */
 constexpr float  AGE = 0.9f;
 
+/* A text's first elements are held (as many as this) and timed together before any is classified: see hold() */
+constexpr int    FRESH_MAX = 12;
+
 /* Each step the timer gets the detector's edge (if any). The time of a step
  * that holds an edge is split at the crossing, so the closing mark or gap
  * gets its part and the new one the rest: marks and gaps of one unit then
@@ -56,7 +59,10 @@ class ElementTimer {
      * speed it gave: expect): not learned. Right after the lock has found the
      * tone the first dah can come in pieces, and in a histogram expect() had
      * just started over a few of them set the speed to 50 WPM */
-    void  ours() { unsure_ = true; }
+    void  ours() { unsure_ = true; own_ = true; }
+    /* The running mark or gap is not learned, though a station's: given again by a rewind (Receiver::rewind), or
+     * while the lock holds no station yet. A text's held first elements are timed with it all the same (hold) */
+    void  unlearned() { unsure_ = true; }
     /* Keying at a known speed follows (the CW trainer's own, at the key
      * speed): a dot more than NEW_SPEED off is taken at once, the histogram
      * started over, instead of after MIN_ENTRIES and CONFIRM estimates */
@@ -74,6 +80,10 @@ class ElementTimer {
     friend struct ElementTimerPeek;   /* tests only */
 
     Sym   close(bool mark, float ms, bool learn);
+    void  hold(bool mark, float ms, bool learn, bool own);
+    bool  plain(bool mark, float ms) const;
+    void  flush();
+    void  put(Sym s);
     void  learn(float ms);
     float dot_estimate(float min_peak) const;
     void  set_dot(float ms, float entry_ms);   /* entry_ms: the element just learned */
@@ -88,6 +98,7 @@ class ElementTimer {
     float run_ms_  = 0.0f;  /* length of the running mark or gap */
     bool  ended_   = true;  /* the end of the text was already sent for this gap */
     bool  unsure_  = false; /* the running mark or gap began on another tone */
+    bool  own_     = false; /* the running mark or gap is our own keying (ours) */
 
     /* A mark with a word gap before it is held until we know whether more
      * follows: alone it is an E or a T, or a noise blip */
@@ -96,7 +107,23 @@ class ElementTimer {
     float held_ms_     = 0.0f;
     bool  held_learn_  = false;
     bool  held_strong_ = false;
-    Sym   next_        = SYM_NONE;  /* a second symbol due in the same step: sent with the next one */
+    bool  held_own_    = false;
+
+    /* The symbols due, one sent each step, in order: a step can close two, and a flush (hold) as many as were held */
+    std::array<Sym, 2 * FRESH_MAX + 8> q_{};
+    int   q_head_ = 0, q_n_ = 0;
+
+    /* A text's first elements, held while fresh_ (hold) */
+    struct Raw {
+        bool  mark;
+        float ms;
+        bool  learn;
+        bool  own;
+    };
+    std::array<Raw, FRESH_MAX> buf_{};
+    int   buf_n_  = 0;
+    bool  fresh_  = true;
+    int   plain_n_ = 0;     /* a fresh text's elements in a row so far that were plain at the speed held (plain) */
 
     /* The last gaps of a character gap or longer: their median is the
      * character gap, which slow (Farnsworth) sending stretches */

@@ -59,6 +59,18 @@ constexpr int   GAPS_MIN = 8;
 constexpr float FARNS_K  = 5.0f / 3.0f;
 constexpr float FARNS_MAX_MS = 3000.0f;   /* 5 WPM Farnsworth needs 2.5 s */
 
+/* A text's first elements, held (hold): their speed taken only from this many learnable ones and two marks or more */
+constexpr int   FRESH_LEARNED = 4;
+/* A fresh text's element far from every boundary at the speed held (under PLAIN_LO of it or over PLAIN_HI) is plain:
+ * sent at once, not held; PLAIN_RUN plain ones in a row and the text holds nothing more */
+constexpr float PLAIN_LO  = 0.75f;
+constexpr float PLAIN_HI  = 1.3f;
+constexpr int   PLAIN_RUN = 4;
+constexpr float PLAIN_MARK_MAX = 2.5f;   /* a decoder at 46 WPM read a 15 WPM 'VVV' as 'TTT TTMV': its dits 6 dots */
+constexpr float FRESH_DIT_SPREAD = 1.6f;   /* the held dits' longest over their shortest, at most */
+constexpr float FRESH_GAP_SPREAD = 2.0f;   /* and their element gaps, each within this of their median (the first,
+                                             * given again by a rewind, came out 150 ms among 71-104) */
+
 /* End of text: no mark after 5 character gaps (at least 200 ms, and never
  * before the word boundary) */
 constexpr float END_K      = 5.0f;
@@ -125,6 +137,8 @@ void ElementTimer::set_dot(float ms, float entry_ms) {
 void ElementTimer::expect(float wpm) {
     float ms = std::clamp(static_cast<float>(PARIS_MS) / wpm, DOT_MIN_MS, dot_max_);
 
+    flush();            /* the speed is known from here: nothing held for it to be found (what was, at its own) */
+
     if (std::fabs(ms - dot_ms_) <= NEW_SPEED * dot_ms_)
         return;
     hist_.fill(0.0f);
@@ -146,17 +160,15 @@ void ElementTimer::trainer_range(bool on) {
     }
 }
 
-void ElementTimer::learn(float ms) {
-    /* Everything ages, even when the new entry falls outside */
-    for (float &h : hist_)
-        h *= age_;
-    if (ms <= 0.0f)
-        return;
+namespace {
 
+/* One entry of ms into a histogram, spread over +-SPREAD slots (a triangle) adding exactly 1. False: out of range */
+bool spread(std::array<float, SLOTS> &hist, float ms) {
+    if (ms <= 0.0f)
+        return false;
     int mid = static_cast<int>(std::lround(ms / SLOT_MS));
     if (mid < 0 || mid >= static_cast<int>(SLOTS))
-        return;
-    hist_n_++;
+        return false;
 
     /* Weights of the slots that exist, so each entry adds exactly 1 */
     float total = 0.0f;
@@ -166,19 +178,38 @@ void ElementTimer::learn(float ms) {
             total += static_cast<float>(SPREAD + 1 - std::abs(k));
     }
     if (total <= 0.0f)
-        return;
+        return false;
     for (int k = -SPREAD; k <= SPREAD; k++) {
         int s = mid + k;
         if (s >= 0 && s < static_cast<int>(SLOTS))
-            hist_[s] += static_cast<float>(SPREAD + 1 - std::abs(k)) / total;
+            hist[s] += static_cast<float>(SPREAD + 1 - std::abs(k)) / total;
     }
+    return true;
 }
+
+float lowest_cluster(const std::array<float, SLOTS> &hist_, float min_frac);
+
+} // namespace
+
+void ElementTimer::learn(float ms) {
+    /* Everything ages, even when the new entry falls outside */
+    for (float &h : hist_)
+        h *= age_;
+    if (spread(hist_, ms))
+        hist_n_++;
+}
+
+float ElementTimer::dot_estimate(float min_frac) const {
+    return lowest_cluster(hist_, min_frac);
+}
+
+namespace {
 
 /* Centre of mass of the lowest cluster: dots and element gaps (marks come out
  * a little long, gaps as much short) make one cluster whose top alone could
  * sit on either side, the centre does not. The cluster runs from 0 to the
  * lowest point before the next cluster. */
-float ElementTimer::dot_estimate(float min_frac) const {
+float lowest_cluster(const std::array<float, SLOTS> &hist_, float min_frac) {
     const int n = static_cast<int>(SLOTS);
 
     float top = *std::max_element(hist_.begin(), hist_.end());
@@ -222,6 +253,8 @@ float ElementTimer::dot_estimate(float min_frac) const {
     return (moment / mass) * SLOT_MS;
 }
 
+} // namespace
+
 Sym ElementTimer::close(bool mark, float ms, bool learn_it) {
     Sym s;
 
@@ -246,18 +279,139 @@ Sym ElementTimer::close(bool mark, float ms, bool learn_it) {
     return s;
 }
 
+void ElementTimer::put(Sym s) {
+    if (s == SYM_NONE || q_n_ >= static_cast<int>(q_.size()))
+        return;
+    q_[(q_head_ + q_n_) % static_cast<int>(q_.size())] = s;
+    q_n_++;
+}
+
+/*
+ * A text's first elements (fresh_, from its first key down) are held, not classified at the speed of whatever came
+ * before: a station that starts after a quiet keys at its own speed, and the timer takes a new one only after
+ * MIN_ENTRIES elements and CONFIRM estimates of it (set_dot), so up to then the old speed classified them. The X6200's
+ * 15 WPM 'VVV TEST' reaches the X6100 with 64 ms dots and 104 ms element gaps: from a decoder at 20 WPM (a character
+ * gap from 102 ms) its first V came out 'EEET', and the bench's recordings of the X6200's CW on the X6100 began
+ * 'EEETVV', 'EUVV', 'UVV' (cw-text, 2026-11-25); the CW Trainer's answers after a quiet the same. Held, they are timed
+ * together (flush) once FRESH_MAX are in, a gap reaches the word boundary, or the text ends
+ */
+bool ElementTimer::plain(bool mark, float ms) const {
+    if (mark)   /* a mark of more than PLAIN_MARK_MAX dah boundaries (5 dots) is no element at the speed held */
+        return ms < PLAIN_LO * dah_from_ || (ms > PLAIN_HI * dah_from_ && ms < PLAIN_MARK_MAX * dah_from_);
+    if (ms < PLAIN_LO * char_from_)
+        return true;
+    if (ms <= PLAIN_HI * char_from_)
+        return false;
+    return ms < PLAIN_LO * word_from_ || ms > PLAIN_HI * word_from_;
+}
+
+void ElementTimer::hold(bool mark, float ms, bool learn_it, bool own) {
+    /* Held only from the first element the speed held cannot tell (near the dit/dah, the character or the word
+     * boundary): a text that keys at that speed, or our own keying, goes out as it comes. Held, an answer's
+     * characters after a pause came too late for the CW Trainer, which ends an answer some time after its last
+     * character (its "Calls, a pause after the first character" cases, 12 WPM) */
+    if (fresh_ && buf_n_ == 0 && (own || plain(mark, ms))) {
+        put(close(mark, ms, learn_it));
+        if (++plain_n_ >= PLAIN_RUN)
+            fresh_ = false;
+        return;
+    }
+    if (!fresh_) {
+        put(close(mark, ms, learn_it));
+        return;
+    }
+    buf_[buf_n_++] = {mark, ms, learn_it, own};
+    if (buf_n_ >= FRESH_MAX || (!mark && ms >= word_from_))
+        flush();
+}
+
+/*
+ * The held elements' own speed, from their dits and element gaps: keying comes out weighted (the X6100's factory base
+ * on the X6200: dits 78 ms, element gaps 41 at 20 WPM; the X6200's on the X6100: 64 and 104 at 15 WPM), so a dit alone
+ * or a gap alone is off by the weight, and the lowest cluster of all the lengths held (dot_estimate's way, which needs
+ * many) can be the gaps alone: the X6100's 'VVV' came out 'TTTT' from it. The dit plus the element gap is two units
+ * whatever the weight: the unit is their mean. Dits and dahs told apart by their own lengths (a dah at least twice the
+ * shortest mark: the geometric mean between), element gaps those under the mean of a dit and a dah. Taken only when
+ * all of it holds (two dits and a dah seen, the dits within FRESH_DIT_SPREAD, two element gaps or more each within
+ * FRESH_GAP_SPREAD of their median, the dah 2.2-4.5 units, and they are a station's:
+ * FRESH_LEARNED learnable, not our own keying nor a turn) and it is more than NEW_SPEED from the speed held: then at
+ * once, the histogram started over, as expect() does. Then each is classified and learned in order, as it would have
+ * been
+ */
+namespace {
+
+float median(float *v, int n) {
+    std::sort(v, v + n);
+    return n % 2 ? v[n / 2] : 0.5f * (v[n / 2 - 1] + v[n / 2]);
+}
+
+} // namespace
+
+void ElementTimer::flush() {
+    if (!fresh_)
+        return;
+    fresh_ = false;
+
+    std::array<float, FRESH_MAX> marks{}, gaps{};
+    int nm = 0, ng = 0, learnable = 0;
+
+    for (int i = 0; i < buf_n_; i++) {
+        const Raw &r = buf_[i];
+
+        if (r.own)          /* our own keying: its speed is known (expect), not a station's */
+            continue;
+        learnable++;        /* a station's, learned or not (a rewind gives the first ones again: unlearned) */
+        if (r.mark)
+            marks[nm++] = r.ms;
+        else if (r.ms < word_from_)
+            gaps[ng++] = r.ms;
+    }
+    float unit = -1.0f;
+    if (learnable >= FRESH_LEARNED && nm >= 2 && ng >= 2) {
+        float lo = *std::min_element(marks.begin(), marks.begin() + nm);
+        float hi = *std::max_element(marks.begin(), marks.begin() + nm);
+
+        if (hi >= 2.0f * lo) {
+            float cut = std::sqrt(lo * hi);
+            std::array<float, FRESH_MAX> dits{}, dahs{}, elems{};
+            int nd = 0, nh = 0, ne = 0;
+
+            for (int i = 0; i < nm; i++)
+                (marks[i] < cut ? dits[nd++] : dahs[nh++]) = marks[i];
+            float dit = median(dits.data(), nd), dah = median(dahs.data(), nh);
+            for (int i = 0; i < ng; i++)
+                if (gaps[i] < 0.5f * (dit + dah))
+                    elems[ne++] = gaps[i];
+            /* a station's keying, not the noise's after it (the lock still on the station, its blips learnable): its
+             * dits alike within DIT_SPREAD, its element gaps within GAP_SPREAD */
+            float gap   = ne ? median(elems.data(), ne) : 0.0f;    /* (sorted: dits too, by their median) */
+            bool  alike = nd >= 2 && ne >= 2 && elems[0] > 0.0f && dits[nd - 1] <= FRESH_DIT_SPREAD * dits[0] &&
+                         elems[ne - 1] <= FRESH_GAP_SPREAD * gap && elems[0] * FRESH_GAP_SPREAD >= gap;
+            if (alike) {
+                float u = 0.5f * (dit + gap);
+                if (u > 0.0f && dah >= 2.2f * u && dah <= 4.5f * u)
+                    unit = u;
+            }
+        }
+    }
+    if (unit > 0.0f) {
+        unit = std::clamp(unit, DOT_MIN_MS, dot_max_);
+        if (std::fabs(unit - dot_ms_) > NEW_SPEED * dot_ms_) {
+            hist_.fill(0.0f);
+            hist_n_   = 0;
+            gaps_n_   = 0;
+            dot_ms_   = unit;
+            new_dot_  = -1.0f;
+            new_seen_ = 0;
+            retime();
+        }
+    }
+    for (int i = 0; i < buf_n_; i++)
+        put(close(buf_[i].mark, buf_[i].ms, buf_[i].learn));
+    buf_n_ = 0;
+}
+
 Sym ElementTimer::step(int dir, float back_ms, bool strong) {
-    Sym out = next_;
-    next_   = SYM_NONE;
-
-    /* Two symbols in one step: the second waits for the next step */
-    auto send = [&](Sym s) {
-        if (out == SYM_NONE)
-            out = s;
-        else
-            next_ = s;
-    };
-
     if (dir == 0) {
         run_ms_ += static_cast<float>(STEP_MS);
     } else {
@@ -269,8 +423,8 @@ Sym ElementTimer::step(int dir, float back_ms, bool strong) {
             held_ = false;
             if (held_strong_) {
                 /* More keying after the held mark: it was a real one */
-                out    = close(true, held_ms_, held_learn_);
-                next_  = close(false, run_ms_, !unsure_);
+                hold(true, held_ms_, held_learn_, held_own_);
+                hold(false, run_ms_, !unsure_, own_);
                 first_ = false;
             }
             /* else too weak to open a text: dropped, the new mark is the first */
@@ -280,22 +434,32 @@ Sym ElementTimer::step(int dir, float back_ms, bool strong) {
             held_        = true;
             held_ms_     = run_ms_;
             held_learn_  = !unsure_;
+            held_own_    = own_;
             held_strong_ = strong;
         } else if (down_ || !ended_) {
             /* (a gap whose end of text was already sent is not closed again) */
-            Sym s = close(down_, run_ms_, !unsure_);
-            send(s);
+            bool  mark = down_;
+            float ms   = run_ms_;
+
+            hold(mark, ms, !unsure_, own_);
             if (dir > 0)
-                first_ = s == SYM_WORD_GAP;
+                first_ = !mark && ms >= word_from_;   /* a word gap (at the speed the hold may have found) */
         } else {
             first_ = true;     /* after the end of a text */
         }
 
         unsure_ = false;
+        own_    = false;
         down_   = dir > 0;
         run_ms_ = static_cast<float>(STEP_MS) + back_ms;
-        if (down_)
+        if (down_) {
+            if (ended_) {      /* a new text: its first elements held (hold) */
+                fresh_   = true;
+                buf_n_   = 0;
+                plain_n_ = 0;
+            }
             ended_ = false;
+        }
     }
 
     /* The held mark stayed alone for a word gap: a one-element word if it is
@@ -303,8 +467,12 @@ Sym ElementTimer::step(int dir, float back_ms, bool strong) {
      * the speed up, and then more blips would pass. */
     if (held_ && run_ms_ >= word_from_) {
         held_ = false;
-        if (held_strong_ && held_ms_ >= LONE_MIN * dot_ms_)
-            out = close(true, held_ms_, false);
+        if (held_strong_ && held_ms_ >= LONE_MIN * dot_ms_) {
+            if (fresh_ && buf_n_ > 0)
+                hold(true, held_ms_, false, held_own_);   /* after what is held, in order */
+            else
+                put(close(true, held_ms_, false));
+        }
     }
 
     /* No mark after a long gap: end of the text, sent once so the last
@@ -312,8 +480,16 @@ Sym ElementTimer::step(int dir, float back_ms, bool strong) {
     if (!down_ && !ended_ && run_ms_ >= std::max({END_K * char_from_, END_MIN_MS, word_from_})) {
         ended_  = true;
         run_ms_ = 0.0f;
-        send(SYM_WORD_GAP);
+        flush();
+        put(SYM_WORD_GAP);
     }
+
+    /* One symbol a step, in order */
+    if (q_n_ == 0)
+        return SYM_NONE;
+    Sym out = q_[q_head_];
+    q_head_ = (q_head_ + 1) % static_cast<int>(q_.size());
+    q_n_--;
     return out;
 }
 

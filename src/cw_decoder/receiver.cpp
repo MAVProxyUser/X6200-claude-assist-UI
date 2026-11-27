@@ -183,8 +183,10 @@ void Receiver::detector_step(float power, float noise) {
      * Learned, its short marks and gaps took the speed up a little at a time (each estimate within NEW_SPEED of the
      * last), and the shorter the dot the more blips passed BLIP_K: the X6200, a minute or two after a text, was at
      * some 50 WPM and printed the X6100's 15 WPM "VVV" as "TTT TTT TTT" (2026-11-25, cw-text) */
-    if (text_.owning() || rewinding_ || (!tx_ && !lock_.station()))
+    if (text_.owning())
         timer_.ours();
+    else if (rewinding_ || (!tx_ && !lock_.station()))
+        timer_.unlearned();     /* a station's (or the noise's), not learned; a new text's held elements timed with it */
     Sym s = timer_.step(e.dir, e.back_ms, e.strong);
 
     if (s != SYM_NONE) {
