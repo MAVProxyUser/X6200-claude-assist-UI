@@ -780,6 +780,58 @@ def _tone_db(x, fs, hz):
     return float(20 * np.log10(spec[band].max() + 1e-12))
 
 
+OWN_DECODE_TEXT = "VVV TEST"
+OWN_DECODE_WPM = 25
+
+
+def t_cw_own_decode(o, s, l):
+    """The sender's own keying decoded (cw-decoder-own-keying): KEY Train on (sidetone only: the X6200's base keys at
+    0 W, the X6100's sounds it), KEY Speed 25, more than 2 s since a key-down (the next sets the decoder to KEY
+    Speed): its TCI CW 'VVV TEST' (its own keyer) read back by its own CW decoder from the first word. At the bench's
+    VOL; its own TCI audio of the over kept (own_decode_<s>.raw, 24 kHz int16 mono: tools/cw_replay) with its peak,
+    the decoder's only copy of it"""
+    import numpy as np
+    from tones import TciRx
+    S = o.r[s]
+    res = {}
+    text, on, off = "", None, None
+    try:
+        with cfg_kept(S, {"key_train": 1, "key_speed": OWN_DECODE_WPM, "cw_decoder": 1}):
+            ensure_alike(o, F_CW, 4, agc=2)
+            res["vol"] = {n: r.state.get("vol") for n, r in o.r.items()}
+            rx = TciRx(S.host)
+            try:
+                with session(o, f"cw-own-decode {s}", [s], F_CW) as watch:
+                    watch.shots_on_tx = False   # no screen grab into the sidetone the decoder reads
+                    role(o, s)
+                    time.sleep(2.5)
+                    n0 = len(S.cw)
+                    on, off = tci_cw(o, S, OWN_DECODE_TEXT, watch)
+                    time.sleep(2.5)             # the decoder's last character out
+                    text = " ".join(S.cw[n0:].split()).upper()
+                x, x0 = rx.audio()
+            finally:
+                rx.close()
+        res["decoded"] = text
+        if x0 is not None and len(x) and on:
+            seg = x[max(int((on - 1.0 - x0) * 24000), 0):max(int((off + 2.5 - x0) * 24000), 0)]
+            if len(seg):
+                path = os.path.join(run_dir(o), f"own_decode_{s}.raw")
+                (np.clip(seg, -1, 1) * 32767).astype("<i2").tofile(path)
+                res["audio"] = path
+                res["peak_dbfs"] = round(20 * math.log10(float(np.max(np.abs(seg))) + 1e-9), 1)
+        if OWN_DECODE_TEXT not in text:
+            return False, f"{s}'s own decoder read its {OWN_DECODE_TEXT!r} (KEY Train, {OWN_DECODE_WPM} WPM, VOL " \
+                          f"{res['vol'].get(s)}) as {text!r}; its own audio of it peaked at " \
+                          f"{res.get('peak_dbfs')} dBFS", res
+        return True, f"{s}'s own decoder read {text!r} from the first word (KEY Train, {OWN_DECODE_WPM} WPM, VOL " \
+                     f"{res['vol'].get(s)}; its own audio peaked at {res.get('peak_dbfs')} dBFS)", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        home(o, S)
+
+
 def t_cw_key_train(o, s, l):
     """KEY Train: the sender's TCI CW goes out as sidetone only (TX power held at 0 W, its message 'KEY Train...'),
     the listener hears nothing of it; Train off, the listener decodes it"""
@@ -4499,6 +4551,7 @@ COVERS = {
     "update-check-off": ([], ["system-update-daily-check"]),   # its off switch only: no check is made to see it
     "cw-key-train": ([], ["cw-key-train"]),          # its message and ON AIR at 0 W: the KEY jack, a paddle
     "cw-own-carrier": ([], ["cw-own-carrier-on-vfo-line", "cw-alc-grey"]),
+    "cw-own-decode": (["cw-decoder-own-keying"], []),
     "cw-log-qso": (["cw-log-qso-button"], ["log-quick-qso-decoder-call"]),
     "cw-msg": (["cw-msg-tx", "cw-msg-breakin-raised"], ["cw-msg-tokens"]),
     "cw-his": (["cw-msg-tokens"], []),
@@ -4567,6 +4620,8 @@ PAIRS = [
     ("cw-tuner", t_cw_tuner, 70, "the tuning bars 30 Hz off in CW and CW-R (pictures)"),
     ("cw-key-train", t_cw_key_train, 60, "KEY Train: TCI CW at 0 W, nothing heard; Train off: decoded"),
     ("cw-own-carrier", t_cw_own_carrier, 50, "the sender's TX meters and ALC; its classic screen on the air (picture)"),
+    ("cw-own-decode", t_cw_own_decode, 40, "KEY Train, 25 WPM: the sender's TCI CW 'VVV TEST' read back by its "
+     "own CW decoder from the first word, at the bench's VOL; its own audio of it kept"),
     ("cw-log-qso", t_cw_log_qso, 70, "the decoder's confirmed call logged by Log QSO (CW 1:2)"),
     ("cw-msg", t_cw_msg, 60, "MSG > CW 'TEST {CALL} TEST': decoded with the call, one over through the gaps"),
     ("cw-his", t_cw_msg_his, 80, "{HIS}: the call the decoder confirmed sent back"),
