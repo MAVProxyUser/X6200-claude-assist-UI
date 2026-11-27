@@ -1448,7 +1448,8 @@ written through to the card before it replaces the last copy, so a power cut kee
   web browser's. The MFK goes down the list as ever; a press or a drag on the bar (the mouse, or a finger) chooses
   the item at that height, the list following.
 - **VOL** at the foot of every screen names the radio it sets: `VOL: X6200 VOLUME 2` or `VOL: RTL0 VOLUME 0` (D, E
-  and F follow the radio heard last; E once said VOLUME 0 while A said VOLUME 2, the SDR's and the X6200's). When the
+  and F follow the radio heard last; E once said VOLUME 0 while A said VOLUME 2, the SDR's and the X6200's). It
+  follows a level set elsewhere too, within half a second: the web browser, a TCI program, the remote. When the
   line is full (an SDR's RF GAIN) it leaves out what the next push gives; the VOL pop-up says it.
 - **NOW** (D and E), one set of words: `3 SIG LIVE` (the band in the picture), `3 SIG 12 MIN` (heard 12 minutes
   ago, within the half hour), else what the sun says where you are (the GPS's fix, else the phone's position from

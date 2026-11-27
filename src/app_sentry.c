@@ -6113,6 +6113,12 @@ static int vol_bar(void) {
     return v;
 }
 
+/* The legend's text set only when it changed: the tick builds it each pass (legend_set) */
+static void legend_set(const char *l) {
+    if (strcmp(lv_label_get_text(legend_l), l))
+        lv_label_set_text(legend_l, l);
+}
+
 static void show_legend(void) {
     static const char *const mfk[SCR_N] = {"PAN, PUSH STRONGEST", "ROW, PUSH CHANGE", "BAND, PUSH LISTEN",
                                            "FREQ, PUSH OPEN", "ITEM, PUSH OPEN", "PAN, PUSH STRONGEST",
@@ -6126,14 +6132,13 @@ static void show_legend(void) {
     const char *who = vol_stick() ? rtl_spectrum_dev_tag() : BOARD_NAME;
 
     if (scr == SCR_SYSTEM && nf_on) {   /* F's NIFOG open */
-        lv_label_set_text(legend_l, "VFO: SCROLL | MFK: PAGE, PUSH CLOSE | F1 F3: SECTION, F4: CONTENTS | " RING_HINT
-                                    " | GEN: HELP");
+        legend_set("VFO: SCROLL | MFK: PAGE, PUSH CLOSE | F1 F3: SECTION, F4: CONTENTS | " RING_HINT " | GEN: HELP");
         return;
     }
     if (scr == SCR_WALKIE && wl_on) {   /* G's channel list open: both knobs go down it, GEN closes it */
         snprintf(l, sizeof(l), "VFO, MFK: CHANNEL, PUSH TUNE | " RING_HINT " | VOL: %s %s %s | GEN: BACK", who,
                  vol_short[vol_fn], v);
-        lv_label_set_text(legend_l, l);
+        legend_set(l);
         return;
     }
     snprintf(l, sizeof(l), "VFO: TUNE | MFK: %s | " RING_HINT " | VOL: %s %s %s, PUSH %s | GEN: HELP", mfk[scr], who,
@@ -6141,7 +6146,7 @@ static void show_legend(void) {
     if (strlen(l) > 98)
         snprintf(l, sizeof(l), "VFO: TUNE | MFK: %s | " RING_HINT " | VOL: %s %s %s | GEN: HELP", mfk[scr], who,
                  vol_short[vol_fn], v);
-    lv_label_set_text(legend_l, l);
+    legend_set(l);
 }
 
 static void osd_hide_cb(lv_timer_t *t) {
@@ -7686,8 +7691,10 @@ static void blink_cb(lv_timer_t *t) {
     radio_moni_test_poll();             /* a test of the base's monitor, while /tmp/moni_test is there */
     if (vol_fn != VF_VOL && lv_tick_get() - vol_used_ms >= VOL_BACK_MS) {     /* left on SQL or RF GAIN: the volume */
         vol_fn = VF_VOL;
-        show_legend();
     }
+    /* Each pass: the VOL line follows a level changed elsewhere too (the browser, TCI, the remote's set vol: page A
+     * said VOLUME 0 at volume 1, orch sentry-vol-line 2026-11-27); set only when its text changed */
+    show_legend();
     show_head();
     if (key_l[0]) show_keys();          /* a key's word that follows the dial (A's F2 BAND), tuned from elsewhere:
                                          * TCI, the main screen (it said 15 M on 40 M, 2026-11-14) */
