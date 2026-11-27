@@ -5183,10 +5183,106 @@ def t_sentry_vol_line(o):
         home_both(o)
 
 
+
+# One detent of the VOL knob (event2 on both radios, rotary1: REL_Y) written into its own input device on the radio,
+# as the knob's driver reports a turn: the GUI reads it as the radio's own, with no injection of the remote's to match
+# it (remote_server.c knob_emit stamps those). struct input_event on the radios' 32-bit ARM: the time (two words,
+# set by the kernel), type, code, value; then the SYN_REPORT that ends it
+VOL_DEV = "/dev/input/event2"
+
+
+def _vol_detent_sh(step):
+    val = "\\001\\000\\000\\000" if step > 0 else "\\377\\377\\377\\377"
+    z8 = "\\000" * 8
+    return (f"printf '{z8}\\002\\000\\001\\000{val}{z8}\\000\\000\\000\\000\\000\\000\\000\\000' "
+            f"> {VOL_DEV}")
+
+
+def t_control_local_log(o):
+    """The radio's own VOL knob takes control from the bench's remote ('At the radio'), and the GUI's log says so:
+    'control: to the radio's operator at HH:MM:SSZ (the VOL knob), from bench-...; the remote's last key or knob N s
+    before' (control_owner.c: nothing told why the X6100 read local all night with nobody at it, 2026-11-27). One
+    detent written into the knob's own input device on the radio, one back after (VOL as it was), control taken back
+    from the claim this test made, on each radio"""
+    res = {}
+    o.changing += 1                     # control at 'local' on purpose here: this test's own, taken back below
+    try:
+        with o.step("both on page A, 14.200 MHz USB"):
+            page_both(o, "A")
+            o.both({"freq": 14200000, "mode": 2})
+        for n in (H.A, H.B):
+            r, out = o.r[n], {}
+            res[n] = out
+            v0 = int(r.state.get("vol") or 0)
+            try:
+                with o.step(f"{n}: the bench holds control, then the VOL knob turned a detent at the radio: "
+                            f"'ctl local'") as st:
+                    r.take_control()
+                    me = r.ctl_who or "?"
+                    n0 = int(ssh(r, "grep -c 'control: to the radio' /tmp/x6100_log.txt || true", 10).strip() or 0)
+                    time.sleep(0.5)             # clear of the remote's last injection (150 ms: control_owner.c)
+                    ssh(r, _vol_detent_sh(+1), 10)
+                    r.wait("ctl local", lambda: (r.ctl_who or "") == "local", 5)
+                    out["from"] = me
+                    st.confirm(f"control from {me} to the radio's operator")
+                with o.step(f"{n}: the GUI's log names the VOL knob, who had control and the remote's last key") as st:
+                    line = ""
+                    for _ in range(6):
+                        txt = ssh(r, "grep 'control: to the radio' /tmp/x6100_log.txt || true", 10)
+                        lines = [x for x in txt.splitlines() if x.strip()]
+                        if len(lines) > n0:
+                            line = lines[-1]
+                            break
+                        time.sleep(0.5)
+                    out["log"] = line[:240]
+                    if not line:
+                        raise Refused(f"{n}: the VOL knob took control, no 'control: to the radio's operator' line "
+                                      f"in the GUI's log")
+                    m = re.search(r"at (\d\d):(\d\d):(\d\d)Z \(([^)]*)\), from (.*?); (.*)", line)
+                    if not m:
+                        raise Refused(f"{n}: the log's line not as written: {line[:200]!r}")
+                    if m.group(4) != "the VOL knob":
+                        raise Refused(f"{n}: the log names {m.group(4)!r}, not the VOL knob")
+                    if not m.group(5).startswith("bench-"):
+                        raise Refused(f"{n}: the log says control came from {m.group(5)!r}, the bench had it ({me})")
+                    now = ssh(r, "date -u +%H:%M:%S", 10).strip()
+                    hh, mm, ss = (int(x) for x in now.split(":"))
+                    lag = ((hh * 3600 + mm * 60 + ss) - (int(m.group(1)) * 3600 + int(m.group(2)) * 60 +
+                                                         int(m.group(3)))) % 86400
+                    out["lag_s"] = lag
+                    if lag > 30:
+                        raise Refused(f"{n}: the log's time {m.group(1)}:{m.group(2)}:{m.group(3)}Z is {lag} s "
+                                      f"before the radio's {now}")
+                    k = re.search(r"last key or knob ([0-9.]+) s before", m.group(6))
+                    if not k and "no key or knob from the remote" not in m.group(6):
+                        raise Refused(f"{n}: the log says nothing of the remote's last key: {m.group(6)!r}")
+                    if k and float(k.group(1)) < 0.15:
+                        raise Refused(f"{n}: the knob {k.group(1)} s after the remote's injection was taken for the "
+                                      f"operator's (the window is 150 ms)")
+                    st.confirm(f"{m.group(4)}, from {m.group(5)}, {m.group(6)[:60]}")
+            finally:
+                try:
+                    ssh(r, _vol_detent_sh(-1), 10)      # the knob back: VOL as it was (control already local)
+                    time.sleep(0.4)
+                    r.send("control take")              # this test's own claim taken back
+                    r.wait("control back with the bench", lambda: r.ctl_mine, 10)
+                    bench.ensure(r, {"vol": v0})
+                except Refused as e:
+                    o.st.ev(f"{n}: not put back after the VOL detent: {e}", "bad")
+        return True, "the VOL knob at each radio took control and the log said so: " + \
+            "; ".join(f"{n} {res[n].get('log', '')[:110]}" for n in res), res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        o.changing -= 1
+        home_both(o)
+
+
 # ---- what each test covers, its rows ----
 
 COVERS = {
     "sentry-vol-line": ([], ["sentry-vol-line"]),
+    "control-local-log": (["control-local-takes-back"], []),
     "sentry-title-tags": (["sentry-title-remote-tags"], ["sentry-title-battery", "temp-on-screen"]),
     "bands-app": (["bands-app-open", "bands-use-band"], []),
     "timesig-f2": (["timesig-f2-set-clock"], []),
@@ -5258,6 +5354,8 @@ ROWS = [
      "once it lets go, TCI CTL under a TCI program's set, WEB CTL again; its battery %"),
     ("sentry-vol-line", t_sentry_vol_line, 50, "page A's legend on each radio: 'VOL: X6100/X6200 VOLUME n' following VOL "
      "0, 1, 0"),
+    ("control-local-log", t_control_local_log, 40, "a VOL detent at each radio (its own input device) takes control "
+     "from the bench's remote, and the GUI's log names the VOL knob, the holder before and the remote's last key"),
     ("timesig-f2", t_timesig, 40, "Time Signal's F2 Set clock: Auto, Off, Auto again, as the button reads"),
     ("channels-api", t_channels_web, 60, "the Memories API: a stale Delete refused, Delete and Undo at its place, a "
      "Save of the frequency alone keeps a 40-byte name and an extra key (the files put back)"),

@@ -135,17 +135,55 @@ static bool injected_at(int64_t t) {
     return false;
 }
 
-static void local_at(int64_t t) {
+/* Control to the radio's operator, said in the GUI's log with what took it and how long after the remote's last
+ * injection: nobody's word after the fact told why the X6100 read "local" all night with nobody at it (2026-11-27,
+ * found at 04:29; changes of holder were never logged), and a remote key read too late is taken for the operator's
+ * (2026-11-23) */
+static void local_at(int64_t t, const char *what) {
+    char       was[48];
+    int64_t    last = 0;
+    bool       took = false;
+    ctl_kind_t k;
+
     pthread_mutex_lock(&mux);
-    if (!injected_at(t) && owner.kind != CTL_LOCAL)
+    if (!injected_at(t) && owner.kind != CTL_LOCAL) {
+        k = owner.kind;
+        snprintf(was, sizeof(was), "%s", k == CTL_TCI ? "a TCI client" : k == CTL_BROWSER ? owner.name : "no one");
+        for (unsigned i = 0; i < INJECT_RING; i++)
+            if (inj_us[i] > last)
+                last = inj_us[i];
         set_owner(CTL_LOCAL, 0, "");
+        took = true;
+    }
     pthread_mutex_unlock(&mux);
+    if (!took)
+        return;
+    time_t    sec = (time_t)(t / 1000000);
+    struct tm tm;
+    char      hms[16];
+
+    gmtime_r(&sec, &tm);
+    strftime(hms, sizeof(hms), "%H:%M:%S", &tm);
+    if (last)
+        fprintf(stderr, "control: to the radio's operator at %sZ (%s), from %s; the remote's last key or knob %.3f s "
+                        "before\n", hms, what ? what : "an input", was, (t - last) / 1e6);
+    else
+        fprintf(stderr, "control: to the radio's operator at %sZ (%s), from %s; no key or knob from the remote since "
+                        "the start\n", hms, what ? what : "an input", was);
 }
 
 void ctl_local_input(void) {
-    local_at(realtime_us());
+    local_at(realtime_us(), NULL);
 }
 
 void ctl_local_event(int64_t sec, int64_t usec) {
-    local_at(sec * 1000000 + usec);
+    local_at(sec * 1000000 + usec, NULL);
+}
+
+void ctl_local_from(const char *what) {
+    local_at(realtime_us(), what);
+}
+
+void ctl_local_event_from(int64_t sec, int64_t usec, const char *what) {
+    local_at(sec * 1000000 + usec, what);
 }

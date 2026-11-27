@@ -52,6 +52,10 @@ uint32_t ctl_version(void);                     /* one more at every change */
  * ctl_local_input: one with no such time (a touch, a keyboard's chord, the base's POWER key) */
 void ctl_local_input(void);
 void ctl_local_event(int64_t sec, int64_t usec);
+/* The same, naming what it was ("front key 59", "the VOL knob", "a touch on F3"): said in the GUI's log as it takes
+ * control, with the time since the remote's last injection */
+void ctl_local_from(const char *what);
+void ctl_local_event_from(int64_t sec, int64_t usec, const char *what);
 void ctl_injected(void);
 
 /* On the air, by anyone (the radio's state) */

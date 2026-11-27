@@ -2275,7 +2275,7 @@ static void kbd_ptt_tick_cb(lv_timer_t *t) {
  * radio on the air */
 static void kbd_ptt_chord_run(void) {
     if (!kbd_ptt_chord(&kbd_ptt, radio_get_ptt())) {
-        ctl_local_input();
+        ctl_local_from("the keyboard's PTT chord");
         kbd_ptt_let_go("PTT off");
         return;
     }
@@ -2283,7 +2283,7 @@ static void kbd_ptt_chord_run(void) {
     if (!main_screen_has_keys()) {
         return;
     }
-    ctl_local_input();
+    ctl_local_from("the keyboard's PTT chord");
 
     bool ok = ptt_key(KEYPAD_PRESS);
 

@@ -749,7 +749,10 @@ static void slot_event_cb(lv_event_t *e) {
     keypad_key_t    key  = (keypad_key_t)(KEYPAD_F1 + n);
 
     if (code == LV_EVENT_PRESSED) {
-        ctl_local_input();
+        char what[24];
+
+        snprintf(what, sizeof(what), "a touch on F%u", (unsigned)n + 1);
+        ctl_local_from(what);
         if (backlight_tick()) {
             return;     /* woke the screen: that was the press's job */
         }

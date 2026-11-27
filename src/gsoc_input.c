@@ -315,7 +315,10 @@ static void on_key(const struct input_event *in) {
         return;
     }
     if (in->value == 1) {
-        ctl_local_input();
+        char what[24];
+
+        snprintf(what, sizeof(what), "gsoc key %u", (unsigned)in->code);
+        ctl_local_from(what);
     }
 
     switch (map[i].act) {
