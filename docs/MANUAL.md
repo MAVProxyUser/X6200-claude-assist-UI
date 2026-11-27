@@ -3916,7 +3916,9 @@ Per band S-meter cal: see [S-meter](#s-meter). TCI SERVER: see
   [Buttons and knobs](#buttons-and-knobs)), APP > Modes as tiles and icons on
   the Settings tabs; off, APP shows its button pages only, Modes a list and
   the tabs their numbers. It shows the next time they open.
-- Knob info: the value shown while a knob turns.
+- Knob info: the value shown while a knob turns. Set here, on the web Display page or from the remote, the two lines
+  come or go at once (before 2026-11-27 a change from the web or the remote showed only when a window next opened or
+  closed), and a theme change keeps them as it says.
 - Hide buttons (Off by default): on the main screen the buttons and the knob
   lines hide after 3, 5 or 10 s without a key, and the next key brings them
   back (see [Buttons and knobs](#buttons-and-knobs)).

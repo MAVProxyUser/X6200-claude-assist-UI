@@ -244,8 +244,14 @@ static bool      covered;           /* the full-screen waterfall is over them (k
 
 static void show_lines();
 
+/* Knob info changed: shown or hidden at once, as Keep knob lines is. It only took the value before: set from the web
+ * Display page or the remote, the lines stayed as they were till a window opened or closed (orch look-knob-info,
+ * 2026-11-27) */
 static void knob_info_cb(Subject *subj, void *user_data) {
     enabled = cfg_sm.p_knob_info.get();
+    if (vol_line.obj()) {
+        show_lines();
+    }
 }
 
 /* Changed in Settings (shown as it says when the window closes) or on the web Display page: at once */
@@ -271,13 +277,16 @@ void knobs_init(lv_obj_t *parent) {
     lv_obj_set_y(mfk_line.obj(), y - h);
     tucked = false;     /* made shown, as the buttons are (buttons_init()) */
     covered = false;    /* a theme change ends the full-screen waterfall first (main_screen_set_theme()) */
-    cfg_sm.p_knob_info.subscribe_delayed_and_notify(knob_info_cb, nullptr);
 
-    static bool subscribed;     /* once: knobs_init() runs again at each theme change */
+    static bool subscribed;     /* once: knobs_init() runs again at each theme change (knob_info's was subscribed
+                                 * again at each one) */
 
     if (!subscribed) {
         subscribed = true;
+        cfg_sm.p_knob_info.subscribe_delayed_and_notify(knob_info_cb, nullptr);
         cfg_sm.p_knob_lines_stay.subscribe_delayed_and_notify(stay_cb, nullptr);
+    } else {
+        show_lines();   /* a theme change: the new lines as Knob info says (made shown, they were shown with it off) */
     }
 }
 
