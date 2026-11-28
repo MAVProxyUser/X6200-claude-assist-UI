@@ -7571,6 +7571,13 @@ _ogn.H = sys.modules[__name__]
 TESTS += _ogn.tests(Test, A, B)
 ORCH_COVERS.update(_ogn.COVERS)
 
+# The listener's images and spurs of a strong carrier (orch_rx_image.py, 2026-11-28): where air sentry-lock's HOLD
+# scan sat on the X6100
+import orch_rx_image as _orx                # noqa: E402
+_orx.H = sys.modules[__name__]
+TESTS += _orx.tests(Test, A, B)
+ORCH_COVERS.update(_orx.COVERS)
+
 # The coverage report's gaps (orch_cov_gaps.py, 2026-11-28): tests for the features whose latest result failed for the
 # test's own reasons or that no test covered (On the Air first)
 import orch_cov_gaps as _ogp                # noqa: E402

@@ -78,10 +78,18 @@ passes now; the HOLD part's scan sits on 14.0903, a steady carrier of the X6100'
 locked from before and never quiet (a lock outlives F1 off; in BROWSE it never times out), so the test's carrier is
 never reached. With the owner's word (23:30): A's scan now skips Birdie Cal's carriers
 (app_sentry.c is_birdie), and Birdie Cal ran on the X6100 (182 -> 267, the old list in /mnt/bench_backups). But
-14.0903 is no birdie: Birdie Cal did not find it, and it comes only with the bench's carrier on, at 14.0903 for
-carriers at 14.030 and 14.036 alike: most likely the X6100 receiver's image of the bench's own carrier (mirrored
-about ~14.06). The HOLD step's fix is then an image test in find_targets (a weak target mirrored about the I/Q
-centre of one 25+ dB stronger), to measure first. The birdie skip has no orch test yet (the X6100's scan stopped on
+14.0903 is no birdie: Birdie Cal did not find it, and it comes only with the bench's carrier on. Nor is it an image:
+orch rx-image x6200>x6100 (2026-11-28, runs 51-53, the X6100's dial held, the X6200's 0.1 W carrier stepped) found
+no carrier's mirror about the X6100's centre at any of 14 points. What the carrier does make there: narrow peaks at
+fixed offsets above it (about +55, +64, +72-73 and +76 kHz, -49 dBc, 18-26 dB over the X6100's floor, wherever the
+X6100's dial; for 14.036 one at 14.0911, for 14.030 at 14.0851), whether the X6200's transmitter's or the X6100's
+own mixing this bench cannot tell (a third receiver could); the X6100's frames' outer parts (beyond about 27 kHz
+from its dial, where its base IQ climbs) up 15-20 dB, following the dial; and an alias at the carrier plus 100 kHz
+(the frames' width), 55 dB over the quiet with the carrier just past the frames' edge (54 kHz under the dial), +4 to
++11 dB from 64 to 125 kHz. So A's scan, started with the carrier on and its view over such a peak, stops on a real
+signal on the cable, and the lock it keeps (it outlives F1 off and never times out in BROWSE) held the later HOLD
+attempts there. The HOLD step's fix is in the test (A's lock let go and its view on the carrier before the carrier
+starts); whether F1 off should let go of A's lock is the owner's. The birdie skip has no orch test yet (the X6100's scan stopped on
 no birdie in 45 s before or after it: a test needs a birdie put where the bench's carrier is). The HOLD step now starts 10 kHz under
 its carrier (2 kHz was inside USB's passband) and says the dials A visited.
 
