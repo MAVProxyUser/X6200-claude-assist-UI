@@ -1391,14 +1391,14 @@ static void pstate_line(char *buf, size_t n, const pstate_t *s) {
              "\"moni\":%d,\"muted\":%d,\"tcim\":%d,\"mic\":%d,\"plays\":%d,\"ifs\":%d,\"comp\":%d,\"wch\":%d,\"wchm\":%d,\"av\":%d,"
              "\"app\":\"%s\",\"win\":\"%s\",\"pg\":\"%s\",\"fp\":\"%s\",\"bhz\":%lld,\"bpre\":\"%s\",\"bmode\":\"%s\",\"bname\":\"%s\","
              "\"bscan\":%d,\"ghz\":%lld,\"garm\":%d,\"gno\":\"%s\",\"sdr\":%d,\"fsel\":\"%s\",\"gmp\":%d,"
-             "\"gmhz\":%lld,\"gmrx\":%d,\"glamp\":\"%s\",\"btx\":%d}",
+             "\"gmhz\":%lld,\"gmrx\":%d,\"glamp\":\"%s\",\"btx\":%d,\"dsel\":\"%s\",\"esel\":\"%s\"}",
              s->freq, s->mode, s->flo, s->fhi, s->kt, s->agc, s->pre, s->att, s->nb, s->nr, s->sql, s->rfg, s->vol,
              s->pwr10 / 10, s->pwr10 % 10, s->step, s->zoom, s->vfo, s->atu, s->bat, s->tx, s->lock, s->tune, s->tune_s,
              s->tpwr10, s->ulock, s->cwrise, ZOOM_MIN, s->rxo, s->ask, s->txio, s->txqo, s->txig, s->txip, s->linein, s->txf,
              s->split, s->rit, s->xit, s->play, s->heard, s->spk, s->moni, s->muted, s->tcim, s->mic, s->plays, s->ifs,
              s->comp, s->wch, s->wchm, s->av, s->app, s->win, s->pg, s->fp, (long long)s->sdr.bhz, s->sdr.bpre,
              s->sdr.bmode, s->sdr.bname, s->sdr.bscan, (long long)s->sdr.ghz, s->sdr.garm, s->sdr.gno, s->sdr.sdr,
-             s->sdr.fsel, s->sdr.gmp, (long long)s->sdr.gmhz, s->sdr.gmrx, s->sdr.glamp, s->btx);
+             s->sdr.fsel, s->sdr.gmp, (long long)s->sdr.gmhz, s->sdr.gmrx, s->sdr.glamp, s->btx, s->sdr.dsel, s->sdr.esel);
 }
 
 /* A string into JSON: quotes and backslashes escaped, control characters dropped */
@@ -2439,7 +2439,8 @@ static void *panel_thread(void *arg) {
     bool           have_last = false;
     uint32_t       sp_seq = 0, spots_gen = 0, plan_gen = band_plan_gen();
     uint64_t       state_ms = 0, meter_ms = 0, spots_ms = 0, ft8_ms = 0, ft8_sent_ms = 0;
-    char           line[1024];     /* the state line: about 830 at most (the bench's checks, B and G's SDR, G's lamp, btx, 2026-11-27) */
+    char           line[1024];     /* the state line: about 900 at most (the bench's checks, B and G's SDR, G's lamp, btx, 2026-11-27;
+                                    * D's and E's choice, 2026-11-28) */
     (void)arg;
 
     while (true) {

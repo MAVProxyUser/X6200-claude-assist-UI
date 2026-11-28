@@ -2331,7 +2331,14 @@ def c_log_back(r, h, before, said):
         time.sleep(1.0)
     t = radio_now(h)
     log_saved(h, t)
-    return [ln for ln in log_text(h).splitlines() if ln.strip()] == keep
+    after = [ln for ln in log_text(h).splitlines() if ln.strip()]
+    if after != keep:                       # what differs said (as found False in some runs, 0/7 to 2026-11-28)
+        ka, kk = {ln.split("\t")[0]: ln for ln in after}, {ln.split("\t")[0]: ln for ln in keep}
+        changed = [k for k in ka if k in kk and ka[k] != kk[k]]
+        both = [k for k in ka if k in kk]
+        said.append(f"C LOG not as found: missing {sorted(set(kk) - set(ka))}, extra {sorted(set(ka) - set(kk))}, "
+                    f"changed {[(kk[k], ka[k]) for k in changed][:4]}, order kept {both == [k for k in kk if k in ka]}")
+    return after == keep
 
 
 def near(v, hz, within=1500):

@@ -2581,9 +2581,15 @@ def _same_dial(o, S, L, app):
     """Both apps opened where their memory (/mnt/app_freqs) says, which an app holds (the remote's set freq refused
     under it): on one dial, else Refused; the power set"""
     f, m = int(L.state.get("freq", 0)), int(L.state.get("mode", -1))
+    if int(S.state.get("freq", 0)) == f and int(S.state.get("mode", -1)) != m:
+        # one dial, two modes: the memories parted on the mode alone (SSTV 3.845 MHz USB on the X6200, LSB on the
+        # X6100, 2026-11-28, from some earlier set): the sender's made the listener's (the app keeps it as it closes)
+        o.st.ev(f"the two {app} apps on {f} Hz in modes {S.state.get('mode')} ({S.name}) and {m} ({L.name}): "
+                f"{S.name}'s made {L.name}'s", "radio")
+        o.both({"freq": f, "mode": m})
     if (int(S.state.get("freq", 0)), int(S.state.get("mode", -1))) != (f, m):
-        raise Refused(f"the two {app} apps on two dials ({S.name} {S.state.get('freq')}, {L.name} {f}): each opens "
-                      f"where its memory (/mnt/app_freqs) says")
+        raise Refused(f"the two {app} apps on two dials ({S.name} {S.state.get('freq')} mode {S.state.get('mode')}, "
+                      f"{L.name} {f} mode {m}): each opens where its memory (/mnt/app_freqs) says")
     o.both({"pwr": H.W})
 
 
@@ -3699,15 +3705,19 @@ def t_scancfg_priority(o, s, l):
             o.both_page("A")
             o.both({"freq": F_USB, "mode": 2, "pwr": H.W})
         cb.cfg_open(L, "A")
-        try:
-            cur, _ = cb.cfg_find(L, L.host)
-            cb.cfg_goto(L, cur, cb.CR["PRIO"])
-            bench.ensure(L, {"freq": F_USB})
-            cb.cfg_push(L)
-            prio = cb.cfg_wait(L.host, lambda a: a.get("prio"), 4).get("prio")
-            res["prio"] = prio
-        finally:
-            cb.cfg_close(L)
+        # cfg_find puts l's dial on the quiet 41 MHz (ATT in) for its pushes, then back to 14.200: declared (the guard
+        # called it OUT OF SYNC, 2026-11-28)
+        with bench.apart({"freq": bench.STEPPED, "mode": bench.STEPPED, "att": bench.STEPPED},
+                         f"scancfg-priority: {l}'s dial on suite_cover_b.QUIET_HZ while SCAN CFG's row is found"):
+            try:
+                cur, _ = cb.cfg_find(L, L.host)
+                cb.cfg_goto(L, cur, cb.CR["PRIO"])
+                bench.ensure(L, {"freq": F_USB})
+                cb.cfg_push(L)
+                prio = cb.cfg_wait(L.host, lambda a: a.get("prio"), 4).get("prio")
+                res["prio"] = prio
+            finally:
+                cb.cfg_close(L)
         if not prio:
             raise Refused(f"{l}'s PRIORITY not set by the push ({cb.cfg_look(L.host)})")
         with bench.apart({k: bench.STEPPED for k in keep}, "scancfg-priority: l's A scans 20 m"):

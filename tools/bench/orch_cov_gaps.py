@@ -14,6 +14,7 @@ orch.py imports this module and sets H to itself; tests() gives the Test rows an
 
 SPDX-License-Identifier: LGPL-2.1-or-later
 """
+import os
 import re
 import time
 
@@ -333,10 +334,633 @@ def t_timesig_am_filter(o):
         ap.home_both(o)
 
 
+# ---- D BANDS' LISTEN on the SDR: the stick's gain by app_sentry.c rx_setup_on()'s rule ----
+
+SENTRY_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src", "app_sentry.c")
+
+
+def _on_h(r):
+    """AIRSPACE (the Sentry's H) on the screen: its own window, win 'Airspace' (app_sentry_page() names A-G and S only)"""
+    return r.state.get("win") == "Airspace" or r.state.get("pg") == "H"
+
+
+def _bands_n():
+    """D's list length: app_sentry.c bands[]'s rows (D wraps round them: band_sel + dir modulo BANDS_N)"""
+    src = open(SENTRY_SRC).read()
+    body = src[src.index("static const band_t bands[] = {"):]
+    body = body[:body.index("\n};")]
+    n = len(re.findall(r'^\s*\{"[^"]+",\s*\d+,\s*\d+,', body, re.M))
+    if n < 20:
+        raise Refused(f"app_sentry.c bands[]: {n} rows read, the list's form changed")
+    return n
+
+
+def _sdr_gain_rule(hz):
+    """app_sentry.c rx_setup_on() for the SDR, tenths of a dB: 19.7 FM (and AM) broadcast, 49.6 the weather satellites,
+    the sondes and 960 MHz up, 37.2 the airband, marine and NOAA, 28.0 the rest"""
+    k = hz // 1000
+    if 530 <= k <= 1700 or 87500 <= k <= 108000:
+        return 197
+    if 137000 <= k <= 138000 or 400000 <= k <= 406000 or k >= 960000:
+        return 496
+    if 118000 <= k < 137000 or 156000 <= k <= 162550:
+        return 372
+    return 280
+
+
+def _d_gain_walk(o, n, r, count):
+    """One radio round D's whole list, F2 LISTEN on each band: {"sdr": [(B's Hz, the gain read, the rule, the band's
+    name as the state's dsel had it)], "a"/"h": how many went to the X6200 (A) or AIRSPACE (H), "d": the bands whose
+    LISTEN left the radio on D}"""
+    out = {"sdr": [], "a": 0, "h": 0, "d": []}
+    for i in range(count):
+        bench.open_page(r, "D")
+        time.sleep(0.8)
+        if i:
+            r.take_control()
+            r.send("knob mfk 1")
+            time.sleep(0.8)
+        name = r.state.get("dsel") or "?"
+        bench.tap(r, "F2")
+        try:                            # H (ADS-B) opens AIRSPACE by an async call, its receiver started: up to 15 s
+            r.wait(f"D's LISTEN on {name} to its page", lambda: r.state.get("pg") in ("A", "B") or _on_h(r), 15)
+        except Refused:
+            out["d"].append(name)       # said at the end with the rest, the walk goes on
+            continue
+        time.sleep(1.5)                 # the stick tuned and its gain set (rtl_spectrum_want)
+        pg = r.state.get("pg")
+        if pg == "B":
+            hz = int(r.state.get("bhz") or 0)
+            g = int(float(ap.cfg(r, "rtl_gain")))
+            out["sdr"].append((hz, g, _sdr_gain_rule(hz), name))
+        elif _on_h(r):
+            out["h"] += 1
+        else:
+            out["a"] += 1
+    return out
+
+
+def t_d_sdr_gain(o):
+    """D BANDS on both, every band's F2 LISTEN in turn (D wraps: as many presses as bands[] has rows): where it puts B's
+    SDR on the band (pg B), the stick's gain (cfg rtl_gain, tenths of a dB) is app_sentry.c's rule for B's channel
+    (19.7 dB FM broadcast, 49.6 weather satellites and 960 MHz up, 37.2 airband, marine and NOAA, 28.0 the rest); at least
+    three of the four seen. The bands the X6200 takes (A) and ADS-B (H, AIRSPACE's own gain) counted, not judged. What
+    the speaker plays (heard) put back as found; both end on page A on the last frequency"""
+    res = {}
+    heard0 = {n: r.state.get("heard") for n, r in o.r.items()}
+    try:
+        count = _bands_n()
+        with o.step(f"both round D's {count} bands, F2 LISTEN on each; B's gain read where it goes to the SDR") as s:
+            with bench.apart({"freq": bench.STEPPED, "mode": bench.STEPPED},
+                             "d-sdr-gain: each radio listens round D's list at its own pace"):
+                res["walk"] = ap.each(o, lambda n, r: _d_gain_walk(o, n, r, count), wait=count * 12)
+            s.confirm(", ".join(f"{n}: {len(w['sdr'])} on the SDR, {w['a']} on A, {w['h']} on H"
+                                for n, w in res["walk"].items()))
+        with o.step("the gain on every SDR band as the rule says, three of its four values seen") as s:
+            bad, seen = [], {}
+            for n, w in res["walk"].items():
+                for hz, g, want, name in w["sdr"]:
+                    seen.setdefault(n, set()).add(want)
+                    if g != want:
+                        bad.append(f"{n} {name} ({hz / 1e6:.4f} MHz) gain {g / 10:g} dB, the rule {want / 10:g}")
+            stayed = {n: w["d"] for n, w in res["walk"].items() if w["d"]}
+            if stayed:                  # D's F2 LISTEN must leave D for A, B or H (d-f2-listen)
+                bad.append(f"F2 LISTEN left these on D past 15 s: {stayed}")
+            if bad:
+                raise Refused("; ".join(bad))
+            few = {n: sorted(v) for n, v in seen.items() if len(v) < 3}
+            if len(seen) < 2 or few:
+                raise Refused(f"too few kinds of SDR band reached to judge the rule: {few or seen}")
+            s.confirm(", ".join(f"{n}: {sorted(x / 10 for x in v)} dB" for n, v in seen.items()))
+        w = res["walk"][H.A]
+        return True, (f"D's LISTEN on the SDR sets the rule's gain on both: {len(w['sdr'])} bands each, "
+                      f"{sorted({x[1] / 10 for x in w['sdr']})} dB"), res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        o.changing += 1
+        try:
+            for n, r in o.r.items():
+                if heard0.get(n) in (0, 1, 2, 3) and r.state.get("heard") != heard0[n]:
+                    r.send(f"set heard {heard0[n]}")
+        finally:
+            o.changing -= 1
+        ap.home_both(o)
+
+
+# ---- E DECODE's OPEN for the SDR's types: B on the type's channel at the rule's gain, ACARS and ADS-B to H ----
+
+E_ON_B = {"NOAA ALERTS": "f_same", "FM RDS": "f_rds", "DIGITAL VOICE": "f_dv", "METEOR": "f_meteor"}
+E_ON_H = {"ACARS": "f_acars", "ADS-B": "f_adsb"}
+
+
+def _first_hz(array):
+    """The first channel of app_sentry.c's frequency list array (E's type opens its row 0)"""
+    m = re.search(r"static const int32_t %s\[\] = \{(\d+)" % array, open(SENTRY_SRC).read())
+    if not m:
+        raise Refused(f"app_sentry.c: no {array}[]")
+    return int(m.group(1))
+
+
+def _decoders_n():
+    """E's types: app_sentry.c decoders[]'s rows (F3/F4 step them round)"""
+    src = open(SENTRY_SRC).read()
+    body = src[src.index("static const decoder_t decoders[] = {"):]
+    body = body[:body.index("\n};")]
+    return len(re.findall(r'^\s*\{"[A-Z0-9 -]+", "', body, re.M))
+
+
+def _e_choose(r, name, n):
+    """E shown with type name chosen: F4 (the next type) till the state's esel says it, at most a round"""
+    bench.open_page(r, "E")
+    r.wait("E's type in the state", lambda: bool(r.state.get("esel")), 6)
+    for _ in range(n + 1):
+        if r.state.get("esel") == name:
+            return
+        bench.tap(r, "F4")
+        time.sleep(0.5)
+    raise Refused(f"{r.name}: E's F4 went round {n + 1} times and never reached {name} (esel {r.state.get('esel')!r})")
+
+
+def _e_sdr_walk(o, n, r, count):
+    """One radio: E's six SDR types opened in turn: {type: what it did}"""
+    out = {}
+    for name, arr in list(E_ON_B.items()) + list(E_ON_H.items()):
+        _e_choose(r, name, count)
+        hz = _first_hz(arr)
+        bench.tap(r, "F2")
+        if name in E_ON_B:
+            r.wait(f"{name}: B on {hz / 1e6:g} MHz", lambda: r.state.get("pg") == "B" and
+                   int(r.state.get("bhz") or 0) == hz, 8)
+            time.sleep(1.0)
+            g = int(float(ap.cfg(r, "rtl_gain")))
+            if g != _sdr_gain_rule(hz):
+                raise Refused(f"{n}: E's {name} put B on {hz / 1e6:g} MHz with the gain {g / 10:g} dB, the rule "
+                              f"{_sdr_gain_rule(hz) / 10:g}")
+            out[name] = f"B {hz / 1e6:g} MHz {r.state.get('bmode')} gain {g / 10:g} dB heard {r.state.get('heard')}"
+        else:
+            r.wait(f"{name}: AIRSPACE (H)", lambda: _on_h(r), 15)
+            time.sleep(1.0)
+            if name == "ACARS":         # the airband's gain set on B's SDR before H opens on its ACARS view
+                g = int(float(ap.cfg(r, "rtl_gain")))
+                if g != _sdr_gain_rule(hz):
+                    raise Refused(f"{n}: E's ACARS opened H with the SDR's gain {g / 10:g} dB, the airband's "
+                                  f"{_sdr_gain_rule(hz) / 10:g}")
+                out[name] = f"H, gain {g / 10:g} dB"
+            else:
+                out[name] = "H"
+    return out
+
+
+def t_e_sdr_open(o):
+    """E DECODE on both, its six types for the SDR each chosen (F4 till the state's esel names it) and opened (F2): NOAA
+    ALERTS, FM RDS, DIGITAL VOICE and METEOR put B on the type's first channel (app_sentry.c's lists) at the rule's gain;
+    ACARS opens H (AIRSPACE's ACARS view) with the airband's gain on the SDR; ADS-B opens H. What the speaker plays put
+    back as found; both end on page A on the last frequency"""
+    res = {}
+    heard0 = {n: r.state.get("heard") for n, r in o.r.items()}
+    try:
+        count = _decoders_n()
+        with o.step(f"E's SDR types opened in turn on both ({', '.join(list(E_ON_B) + list(E_ON_H))})") as s:
+            with bench.apart({"freq": bench.STEPPED, "mode": bench.STEPPED},
+                             "e-sdr-open: each radio opens E's types at its own pace"):
+                res["open"] = ap.each(o, lambda n, r: _e_sdr_walk(o, n, r, count), wait=240)
+            s.confirm(str(res["open"]))
+        return True, f"E's SDR types open where they should on both: {res['open'][H.A]}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        o.changing += 1
+        try:
+            for n, r in o.r.items():
+                if heard0.get(n) in (0, 1, 2, 3) and r.state.get("heard") != heard0[n]:
+                    r.send(f"set heard {heard0[n]}")
+        finally:
+            o.changing -= 1
+        ap.home_both(o)
+
+
+# ---- G WALKIE's SDR groups (an RTL-SDR on HOST): the amateur FM groups and DMR, received only ----
+
+def _g_sdr_plan():
+    """app_sentry.c w_sdr_plan[]: {Hz: [its groups]} (446.500 is 70 CM FM's S2 and DMR's S2)"""
+    src = open(SENTRY_SRC).read()
+    body = src[src.index("} w_sdr_plan[] = {"):]
+    body = body[:body.index("\n};")]
+    plan = {}
+    for grp, hz in re.findall(r'\{"([^"]+)",\s*"[^"]*",\s*(\d+)\}', body):
+        plan.setdefault(int(hz), []).append(grp)
+    if len({g for v in plan.values() for g in v}) < 5:
+        raise Refused(f"app_sentry.c w_sdr_plan[]: its groups not read ({plan})")
+    return plan
+
+
+def _g_sdr_walk(o, n, r, plan):
+    """One radio on G, the MFK through its groups (they wrap) till every SDR group of the plan was reached: {group: (its
+    channel, the state's gno there)}; then A/B on 2 M's calling channel arms nothing"""
+    groups = {g for v in plan.values() for g in v}
+    seen = {}
+    bench.open_page(r, "G")
+    r.wait("page G", lambda: r.state.get("pg") == "G", 6)
+    time.sleep(1.0)
+    for _ in range(60):
+        hz = int(r.state.get("ghz") or 0)
+        for g in plan.get(hz, ()):
+            seen.setdefault(g, (hz, r.state.get("gno") or ""))
+        if groups <= set(seen):
+            break
+        r.take_control()
+        r.send("knob mfk 1")
+        time.sleep(0.8)
+    missing = sorted(groups - set(seen))
+    if missing:
+        raise Refused(f"{n}: G's MFK went round 60 groups and never reached {missing} (reached {sorted(seen)})")
+    bad = {g: v for g, v in seen.items() if not v[1].endswith("ONLY RECEIVES")}
+    if bad:
+        raise Refused(f"{n}: G on the RTL-SDR's channels not refused as receive only: {bad}")
+    r.send("set gsdr 146520000")
+    r.wait("G on 2 M's calling channel", lambda: int(r.state.get("ghz") or 0) == 146520000, 8)
+    bench.tap(r, "AB")
+    time.sleep(1.5)
+    if r.state.get("garm") or r.state.get("tx") or r.state.get("rxo") != 1:
+        raise Refused(f"{n}: A/B on 146.520 armed something: garm {r.state.get('garm')}, tx {r.state.get('tx')}, rxo "
+                      f"{r.state.get('rxo')}")
+    return {g: f"{hz / 1e6:g} MHz" for g, (hz, _) in sorted(seen.items())}
+
+
+def t_g_sdr_groups(o):
+    """G WALKIE on both with an RTL-SDR on HOST: the MFK's groups (they wrap) include each of app_sentry.c's SDR groups
+    (2 M, 1.25 M, 70 CM, 33 CM, 23 CM FM and DMR), on each the state's gno 'THE RTL-SDR ONLY RECEIVES'; A/B on 2 M's
+    calling channel arms nothing (garm 0, tx 0, rxo 1). G back on the radio's own channel as found (set gsdr 0, set
+    wch); both end on page A on the last frequency"""
+    res = {}
+    wch0 = {n: (r.state.get("wch"), r.state.get("wchm")) for n, r in o.r.items()}
+    try:
+        plan = _g_sdr_plan()
+        with o.step("an SDR on HOST on both (the state's sdr)") as s:
+            ap.page_both(o, "A")
+            none = [n for n, r in o.r.items() if not r.state.get("sdr")]
+            if none:
+                raise Refused(f"no SDR on HOST on {none}: G has no SDR groups there")
+            s.confirm("sdr 1 on both")
+        with o.step("G on both, the MFK through the groups: every SDR group reached, receive only; A/B arms nothing") as s:
+            with bench.apart({"freq": bench.STEPPED, "mode": bench.STEPPED},
+                             "g-sdr-groups: each radio's G steps its groups at its own pace"):
+                res["walk"] = ap.each(o, lambda n, r: _g_sdr_walk(o, n, r, plan), wait=120)
+            s.confirm(str(res["walk"]))
+        return True, f"G's SDR groups on both, receive only on the RTL-SDR: {res['walk'][H.A]}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        o.changing += 1
+        try:
+            for n, r in o.r.items():
+                if r.state.get("garm"):
+                    bench.tap(r, "AB")
+                if r.state.get("pg") == "G" and int(r.state.get("ghz") or 0):
+                    r.send("set gsdr 0")
+                    try:
+                        r.wait("G on the radio", lambda: int(r.state.get("ghz") or 0) == 0, 8)
+                    except Refused as e:
+                        o.st.ev(f"{n}: {e}", "bad")
+                hz, m = wch0[n]
+                if hz and (r.state.get("wch"), r.state.get("wchm")) != (hz, m):
+                    r.send(f"set wch {hz} {m}")
+        finally:
+            o.changing -= 1
+        ap.home_both(o)
+
+
+# ---- Tuning a page puts its own radio on the speaker (A the X6200, B the SDR) ----
+
+HEARD_X6200, HEARD_SDR = 0, 1           # the remote's heard: 0 the radio's own receiver, 1 the SDR at B's channel
+
+
+def _tune_heard_one(o, n, r, page, setting, before, after):
+    """On page, its LISTEN (setting: sentry_hear_a A's, sentry_hear_f B's; 0 the X6200, 1 the SDR) set to before and the
+    speaker with it, then a VFO click: LISTEN and the speaker (heard) both after (app_sentry.c a_tuned, b_tuned)"""
+    r.take_control()
+    with ap.cfg_kept(r, {setting: before}):
+        r.send(f"set heard {before}")
+        r.wait(f"heard {before}", lambda: r.state.get("heard") == before, 5)
+        time.sleep(0.8)
+        r.send("knob main 1")
+        r.wait(f"heard {after} after the VFO on {page}", lambda: r.state.get("heard") == after, 5)
+        got = ap.wait_cfg(r, f"{page}'s LISTEN {after}", lambda v: str(v) == str(after), setting, 4)
+    return f"{page}: LISTEN {before}, a VFO click: LISTEN {got}, heard {r.state.get('heard')}"
+
+
+def t_tune_heard(o):
+    """Tuning a screen puts its own radio on the speaker, on both (an RTL-SDR on HOST each): on A with A's LISTEN the
+    SDR (sentry_hear_a 1) a VFO click makes it the X6200 and the speaker with it (heard 0); on B with B's LISTEN the
+    X6200 (sentry_hear_f 0) a VFO click makes it the SDR (heard 1). LISTEN set through the remote's cfg (set heard
+    alone changes only what plays now: the rule reads LISTEN), each put back as found, and what was heard; both end on
+    page A on the last frequency"""
+    res = {}
+    heard0 = {n: r.state.get("heard") for n, r in o.r.items()}
+    try:
+        with o.step("an SDR on HOST on both (the state's sdr)") as s:
+            ap.page_both(o, "A")
+            none = [n for n, r in o.r.items() if not r.state.get("sdr")]
+            if none:
+                raise Refused(f"no SDR on HOST on {none}")
+            s.confirm("sdr 1 on both")
+        with bench.apart({"freq": bench.STEPPED}, "tune-heard: each radio's VFO clicked once on A, once on B"):
+            with o.step("A: the SDR heard, a VFO click: the X6200 heard") as s:
+                res["A"] = ap.each(o, lambda n, r: _tune_heard_one(o, n, r, "A", "sentry_hear_a", HEARD_SDR,
+                                                                    HEARD_X6200))
+                s.confirm(str(res["A"]))
+            with o.step("B: the X6200 heard, a VFO click: the SDR heard") as s:
+                ap.page_both(o, "B")
+                res["B"] = ap.each(o, lambda n, r: _tune_heard_one(o, n, r, "B", "sentry_hear_f", HEARD_X6200,
+                                                                    HEARD_SDR))
+                s.confirm(str(res["B"]))
+        return True, "tuning A gave the speaker to the X6200, tuning B to the SDR, on both", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        o.changing += 1
+        try:
+            for n, r in o.r.items():
+                if heard0.get(n) in (0, 1, 2, 3) and r.state.get("heard") != heard0[n]:
+                    r.send(f"set heard {heard0[n]}")
+        finally:
+            o.changing -= 1
+        ap.home_both(o)
+
+
+# ---- VOL's press leaves an app and a menu open ----
+
+def _vol_presses(o, n, r, name):
+    """In window name: VOL pressed short, then held 2 s: the window still open after each"""
+    for held in (False, True):
+        r.take_control()
+        r.send("key VOL 1")
+        time.sleep(2.0 if held else 0.15)
+        r.send("key VOL 0")
+        time.sleep(1.5)
+        if ap.win(r) != name:
+            raise Refused(f"{n}: VOL {'held' if held else 'pressed'} in {name}: the screen shows {ap.win(r)!r}")
+    return f"{name} open after VOL pressed and held"
+
+
+def t_vol_press(o):
+    """VOL's press closes no window, on both: Time Signal (an app) and the Modes menu each stay open after VOL pressed
+    short and held 2 s (it chooses VOL's control: more-knob-press). Both end on page A on the last frequency"""
+    res = {}
+    try:
+        with o.step("Time Signal open on both: VOL pressed and held, still open") as s:
+            ap.page_both(o, "A")
+            ap.open_both(o, TIMESIG, "Time Signal")
+            res["app"] = ap.each(o, lambda n, r: _vol_presses(o, n, r, "Time Signal"))
+            s.confirm(str(res["app"]))
+        with o.step("the Modes menu on both: VOL pressed and held, still open") as s:
+            ap.close_both(o)
+            ap.page_both(o, "A")
+            ap.open_both(o, MODES, "Modes", same=False)
+            res["menu"] = ap.each(o, lambda n, r: _vol_presses(o, n, r, "Modes"))
+            s.confirm(str(res["menu"]))
+        return True, "VOL's press, short and held, left Time Signal and the Modes menu open on both", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        ap.home_both(o)
+
+
+# ---- Leaving the Sentry gives the speaker back to the X6200 ----
+
+def _b_heard(r):
+    """r on page B with B's SDR on the speaker: heard 1 and the base in play mode (play 1)"""
+    bench.open_page(r, "B")
+    r.wait("page B", lambda: r.state.get("pg") == "B", 6)
+    r.take_control()
+    r.send(f"set heard {HEARD_SDR}")
+    r.wait("B's SDR on the speaker (heard 1, play 1)", lambda: r.state.get("heard") == HEARD_SDR and
+           int(r.state.get("play") or 0) == 1, 6)
+
+
+def _f_choose(r, name, n=20):
+    """F shown with item name chosen: the MFK one at a time till the state's fsel says it"""
+    bench.open_page(r, "F")
+    r.wait("F's choice in the state", lambda: bool(r.state.get("fsel")), 6)
+    for _ in range(n):
+        if r.state.get("fsel") == name:
+            return
+        r.take_control()
+        r.send("knob mfk 1")
+        time.sleep(0.5)
+    raise Refused(f"{r.name}: F's MFK went round and never chose {name} (fsel {r.state.get('fsel')!r})")
+
+
+def _leave_one(o, n, r):
+    out = {}
+    # H AIRSPACE: the radio's own receiver heard (the SDR is ADS-B's there)
+    _b_heard(r)
+    r.send("open sentry H")
+    r.wait("H, the speaker the X6200's (play 0)", lambda: _on_h(r) and int(r.state.get("play") or 0) == 0, 15)
+    out["H"] = f"play {r.state.get('play')}"
+    # an app opened from B
+    _b_heard(r)
+    r.send(f"open {TIMESIG}")
+    r.wait("Time Signal, the speaker the X6200's (play 0)", lambda: ap.win(r) == "Time Signal" and
+           int(r.state.get("play") or 0) == 0, 8)
+    out["app"] = f"play {r.state.get('play')}"
+    bench.close_apps(r)
+    # F SYSTEM's CLASSIC RADIO: the Sentry closed, the classic screen
+    _b_heard(r)
+    _f_choose(r, "CLASSIC RADIO")
+    bench.tap(r, "F2")
+    r.wait("the classic screen, the speaker the X6200's (play 0)", lambda: not r.state.get("pg") and
+           int(r.state.get("play") or 0) == 0, 8)
+    out["classic"] = f"play {r.state.get('play')}, win {ap.win(r)!r}"
+    r.send("open sentry A")
+    r.wait("the Sentry back on A", lambda: r.state.get("pg") == "A", 8)
+    return out
+
+
+def t_leave_speaker(o):
+    """Leaving the Sentry gives the speaker back to the X6200, on both (an RTL-SDR on HOST each): from B with B's SDR
+    heard (heard 1, the base in play mode), H AIRSPACE, an app (Time Signal) and F SYSTEM's CLASSIC RADIO each take
+    play mode off (play 0). What was heard put back as found; both end on page A on the last frequency"""
+    res = {}
+    heard0 = {n: r.state.get("heard") for n, r in o.r.items()}
+    try:
+        with o.step("an SDR on HOST on both (the state's sdr)") as s:
+            ap.page_both(o, "A")
+            none = [n for n, r in o.r.items() if not r.state.get("sdr")]
+            if none:
+                raise Refused(f"no SDR on HOST on {none}")
+            s.confirm("sdr 1 on both")
+        with o.step("from B heard: H, an app, CLASSIC RADIO each give the speaker to the X6200 (play 0)") as s:
+            with bench.apart({"freq": bench.STEPPED, "mode": bench.STEPPED},
+                             "leave-speaker: each radio leaves B three ways at its own pace"):
+                res["leave"] = ap.each(o, lambda n, r: _leave_one(o, n, r), wait=120)
+            s.confirm(str(res["leave"]))
+        return True, f"leaving B for H, an app or the classic screen took play mode off on both: {res['leave'][H.A]}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        o.changing += 1
+        try:
+            for n, r in o.r.items():
+                if not r.state.get("pg"):           # left on the classic screen by a failure: the Sentry again
+                    bench.close_apps(r)
+                    r.send("open sentry A")
+                if heard0.get(n) in (0, 1, 2, 3) and r.state.get("heard") != heard0[n]:
+                    r.send(f"set heard {heard0[n]}")
+        finally:
+            o.changing -= 1
+        ap.home_both(o)
+
+
+# ---- The Scanner (127): Source CB, Start by the MFK's press, Pause, Resume, Skip; closing puts the dial back ----
+
+SCANNER = 127
+CB_LO, CB_HI = 26900000, 27500000       # the CB app's plan (US 40: 26.965-27.405 MHz) as the Scanner's CB source
+
+
+def _run_label(r):
+    return _fk(r)[2]                    # F3: Start / Pause / Resume (dialog_scan.c labels_refresh)
+
+
+def _scanner_one(o, n, r, f0, m0):
+    names = ("Scanner",)
+    out = {}
+    for _ in range(6):                  # Source steps Channels > Airband > HF Air > CB > Segment (empty ones passed)
+        t0 = time.time()
+        ap.press_label(r, r"^Source$", names)
+        said = ap.wait_msg(r, t0, r"^Source: ", 4)
+        if said.startswith("Source: CB"):
+            out["source"] = said
+            break
+    else:
+        raise Refused(f"{n}: Source never came to CB (last {said!r})")
+    if _run_label(r) != "Start":
+        raise Refused(f"{n}: F3 reads {_run_label(r)!r} before the start, not Start")
+    ap.press(r, "MFK", names, rest=1.0)         # the MFK's press: Start (its click taken as ENTER, 2026-11-28)
+    r.wait("Pause on F3 (scanning)", lambda: _run_label(r) == "Pause", 4)
+    r.wait("the dial on a CB channel", lambda: CB_LO <= int(r.state.get("freq") or 0) <= CB_HI, 4)
+    out["start"] = f"the MFK's press: scanning, on {int(r.state.get('freq')) / 1e6:.3f} MHz"
+    ap.press(r, "MFK", names, rest=1.0)         # its press again: Pause
+    r.wait("Resume on F3 (paused)", lambda: _run_label(r) == "Resume", 4)
+    fp = int(r.state.get("freq") or 0)
+    time.sleep(2.5)
+    if int(r.state.get("freq") or 0) != fp:
+        raise Refused(f"{n}: paused on {fp / 1e6:.3f} MHz, the dial moved on to {int(r.state.get('freq')) / 1e6:.3f}")
+    out["pause"] = f"paused on {fp / 1e6:.3f} MHz, still 2.5 s later"
+    ap.press_label(r, r"^Skip$", names)          # Skip from a pause: the next one
+    r.wait("Skip: the next channel", lambda: int(r.state.get("freq") or 0) != fp, 4)
+    fs = int(r.state.get("freq") or 0)
+    if not CB_LO <= fs <= CB_HI:
+        raise Refused(f"{n}: Skip went to {fs / 1e6:.3f} MHz, not a CB channel")
+    out["skip"] = f"{fp / 1e6:.3f} -> {fs / 1e6:.3f} MHz, {_run_label(r)} on F3"
+    r.send("close")                             # ESC: the Scanner closed, the dial and mode as before it
+    r.wait("the Scanner closed", lambda: ap.win(r) != "Scanner", 6)
+    r.wait(f"back on {f0} mode {m0}", lambda: (int(r.state.get("freq") or 0), int(r.state.get("mode", -1)))
+           == (f0, m0), 6)
+    out["close"] = f"closed, back on {f0 / 1e6:.4f} MHz mode {m0}"
+    return out
+
+
+def t_scanner(o):
+    """The Scanner on both, receive only: Source stepped to CB (the message box says it); the MFK's press starts it (F3
+    Pause, the dial on CB channels), its press again pauses (F3 Resume, the dial still), Skip goes on to the next CB
+    channel; closing puts each radio back on the dial and mode it had (14.200 USB). Both end on page A on the last
+    frequency"""
+    res = {}
+    try:
+        with o.step("both by hand on page A, on 14.200 MHz USB") as s:
+            ap.page_both(o, "A")
+            H.in_parallel(o, lambda n, r: (r.send("knob main 1"), time.sleep(1.0)))
+            o.both({"freq": 14200000, "mode": USB})
+            s.confirm("14.200 USB on both")
+        with o.step("the Scanner open on both (open 127)") as s:
+            res["open"] = ap.open_both(o, SCANNER, "Scanner", same=False)
+            s.confirm(str(res["open"]))
+        with o.step("each: Source CB, the MFK starts and pauses it, Skip, closed back on 14.200 USB") as s:
+            with bench.apart({"freq": bench.STEPPED, "mode": bench.STEPPED},
+                             "scanner: each radio scans the CB channels at its own pace"):
+                res["scan"] = ap.each(o, lambda n, r: _scanner_one(o, n, r, 14200000, USB), wait=90)
+            s.confirm(str(res["scan"]))
+        return True, f"the Scanner on both: {res['scan'][H.A]}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        ap.home_both(o)
+
+
+# ---- Winlink refuses to key with RIT or XIT set (simplex only) ----
+
+WL_REFUSALS = (("rit", 500, "RIT is set (+500 Hz)"), ("xit", 100, "XIT is set (+100 Hz)"))   # winlink.c tx_refused
+
+
+def t_winlink_no_tx(o, s, l):
+    """Pat on s calls l over ARDOP on 14.105 (APP > Mail's path, orch_cable.PatSession) with RIT +500 Hz set on s, then
+    with XIT +100 Hz: s never keys (no over in its tx history from the Connect on) and says 'Winlink: no TX, RIT is set
+    (+500 Hz)' / 'XIT is set (+100 Hz)' (winlink.c: Winlink is simplex). RIT and XIT put back to 0; Winlink as found;
+    both end on page A on the last frequency"""
+    import orch_cable as oc
+    S = o.r[s]
+    call = H.TEST_CALLS[l]
+    res = {}
+    try:
+        oc.ensure_alike(o, oc.WL_DIAL, 3)
+        oc.classic(S)       # Winlink keys from the classic screen (the Sentry holds the radio receive only)
+        with oc.winlink_on(o, "ardop"):
+            with oc.session(o, "winlink-no-tx", [s], oc.WL_DIAL):
+                oc.role(o, s)
+                for key, val, word in WL_REFUSALS:
+                    with o.step(f"{s} with {key.upper()} {val:+d} Hz: Pat's call refused, nothing keyed") as st:
+                        with bench.apart({key: bench.STEPPED}, f"winlink-no-tx: {s}'s {key.upper()} set to be refused"):
+                            try:
+                                n0 = len(S.errs)
+                                S.send(f"set {key} {val}")
+                                S.wait(f"{key} {val} or its refusal", lambda: int(S.state.get(key) or 0) == val or
+                                       any(e.startswith(f"{key}:") for e in S.errs[n0:]), 5)
+                                no = [e for e in S.errs[n0:] if e.startswith(f"{key}:")]
+                                if no:          # the X6200's base has no XIT: nothing there to be refused
+                                    res[key] = {"skipped": no[0]}
+                                    st.confirm(f"skipped: {no[0]}")
+                                    continue
+                                t0 = time.time()
+                                ps = oc.PatSession(S, f"ardop:///{call}?freq={oc.WL_DIAL // 1000}")
+                                try:
+                                    said = ap.wait_msg(S, t0, r"^Winlink: no TX, ", 60)
+                                    time.sleep(3.0)
+                                finally:
+                                    ps.close()
+                                keyed = oc.tx_spans(S, t0)
+                            finally:
+                                S.send(f"set {key} 0")
+                                S.wait(f"{key} 0", lambda: int(S.state.get(key) or 0) == 0, 5)
+                        if key in res:
+                            continue
+                        res[key] = {"said": said, "keyed": keyed}
+                        if keyed:
+                            raise Refused(f"{s} keyed with {key.upper()} set: {keyed}")
+                        if word not in said:
+                            raise Refused(f"{s} said {said!r}, not the {key.upper()} reason ({word!r})")
+                        st.confirm(f"{said!r}, nothing keyed")
+        return True, (f"{s}'s Winlink refused, nothing keyed: " + "; ".join(
+            f"{k.upper()} {v['said']!r}" if "said" in v else f"{k.upper()} {v['skipped']}" for k, v in res.items())), res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oc.home(o, S)
+
+
 COVERS = {
     "onair": (["onair-list", "onair-tune", "onair-tune-as-you-go", "onair-range"], []),
     "modes-menu": (["modes-menu"], []),
     "timesig-am-filter": (["timesig-am-filter-100hz"], []),
+    "d-sdr-gain": (["d-e-listen-sets-sdr-gain"], []),
+    "e-sdr-open": (["e-open-sdr-types"], ["d-e-listen-sets-sdr-gain"]),
+    "g-sdr-groups": (["g-sdr-groups"], []),
+    "tune-heard": (["sentry-tune-own-radio-heard"], []),
+    "vol-press": ([], ["input-vol-press"]),
+    "leave-speaker": (["sentry-leave-speaker-x6200"], []),
+    "scanner-keys": (["scanner-open-close-restore"], ["scanner-start-pause-skip", "scanner-sources"]),
+    "winlink-no-tx": ([], ["tx-shift-winlink-refused", "winlink-no-tx-reasons"]),
 }
 
 
@@ -350,4 +974,22 @@ def tests(Test, A, B):
              "'open 114' twice opens and closes it", t_modes_menu, 60),
         Test("timesig-am-filter", "both RX", "Time Signal in AM on both: the filter's low edge at 100 Hz or below",
              t_timesig_am_filter, 40),
-    ]
+        Test("d-sdr-gain", "both RX", "D BANDS' LISTEN round the whole list on both: on every band B's SDR takes, the "
+             "stick's gain by the rule (19.7 FM, 49.6 WX SAT/960 MHz+, 37.2 air/marine/NOAA, 28.0 the rest)",
+             t_d_sdr_gain, 300),
+        Test("e-sdr-open", "both RX", "E DECODE's SDR types on both: NOAA ALERTS, FM RDS, DIGITAL VOICE, METEOR put B "
+             "on their first channel at the rule's gain; ACARS opens H with the airband gain; ADS-B opens H",
+             t_e_sdr_open, 150),
+        Test("g-sdr-groups", "both RX", "G WALKIE's MFK groups on both with an RTL-SDR: 2 M, 1.25 M, 70 CM, 33 CM, 23 CM "
+             "FM and DMR reached, each 'THE RTL-SDR ONLY RECEIVES'; A/B on 146.520 arms nothing", t_g_sdr_groups, 120),
+        Test("tune-heard", "both RX", "tuning a page gives the speaker to its own radio on both: A's VFO the X6200, "
+             "B's the SDR", t_tune_heard, 40),
+        Test("vol-press", "both RX", "VOL pressed short and held 2 s on both: Time Signal and the Modes menu stay open",
+             t_vol_press, 50),
+        Test("leave-speaker", "both RX", "from B with its SDR heard, on both: H, an app and CLASSIC RADIO each give the "
+             "speaker back to the X6200 (play mode off)", t_leave_speaker, 90),
+        Test("scanner-keys", "both RX", "the Scanner on both: Source CB, the MFK's press starts and pauses it, Skip, closed "
+             "back on the dial and mode it had", t_scanner, 70),
+    ] + [Test(f"winlink-no-tx {s}>{l}", f"{s.upper()} TX, {l.upper()} RX", f"Pat on {s} calls {l} over ARDOP with "
+              f"RIT +500 Hz, then XIT +100 Hz set: refused ('Winlink: no TX, RIT/XIT is set'), nothing keyed",
+              lambda o, s=s, l=l: t_winlink_no_tx(o, s, l), 120) for s, l in ((B, A), (A, B))]

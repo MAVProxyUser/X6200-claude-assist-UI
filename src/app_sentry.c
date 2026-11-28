@@ -11832,6 +11832,8 @@ static void sdr_publish(bool closed) {
         snprintf(p.bname, sizeof(p.bname), "%s", listen_hz ? rtl_name(listen_hz) : "");
         if (w_sdr_hz && (no = w_sdr_refusal())) snprintf(p.gno, sizeof(p.gno), "%s", no);
         if (scr == SCR_SYSTEM) snprintf(p.fsel, sizeof(p.fsel), "%s", sys_items[sys_sel].name);
+        if (scr == SCR_BANDS) snprintf(p.dsel, sizeof(p.dsel), "%s", bands[band_sel].name);
+        if (scr == SCR_DECODE) snprintf(p.esel, sizeof(p.esel), "%s", decoders[dec_sel].name);
         p.gmp  = gm_on;
         p.gmhz = gm_on && !gm_tones ? gmrs_row_hz(gm_sel) : 0;
         p.gmrx = gm_rx();

@@ -4209,6 +4209,15 @@ def t_cwtrainer_learn(o):
         home_both(o)
 
 
+def _cwt_hint_20(path):
+    """The trainer's hint line 'Key back the callsign at your 20 WPM. Right: +1 WPM, wrong: -1 WPM.' read on its own
+    (the dim line over the keys, y 392-414): read across the whole screen it was missed, and alone the pixel font's 0
+    reads 6 or 46 ('at your 26 WPM', 'at your 246 WPM', 2026-11-27 pictures): a 2 then only digits a 0 is misread as"""
+    t = " ".join(ocr(path, box=(10, 392, 790, 414), psm=7).split())
+    m = re.search(r"Key back the callsign at your (\d{1,3}) WPM", t)
+    return bool(m) and m.group(1)[0] == "2" and len(m.group(1)) > 1 and all(c in "0468" for c in m.group(1)[1:])
+
+
 def t_cwtrainer_calls(o):
     """The CW Trainer's Calls on each radio in turn (KEY Speed 20): a call keyed, keyed back by TCI CW with a space
     inside it: right, the next call 1 WPM faster (TX speed Follows: KEY Speed follows it); TX speed Fixed (page 2):
@@ -4244,7 +4253,7 @@ def t_cwtrainer_calls(o):
                         if str(cfg(r, "cwt_tx_fixed")) != "1" or str(cfg(r, "key_speed")) != "20":
                             raise Refused(f"{n}: Fixed: cwt_tx_fixed {cfg(r, 'cwt_tx_fixed')}, KEY Speed "
                                           f"{cfg(r, 'key_speed')}")
-                        hint = ocr_has(shot_text(o, r, "cw trainer fixed hint")[1], "at your 20 WPM")
+                        hint = _cwt_hint_20(shot(o, r, "cw trainer fixed hint"))
                         _to_label(r, r"^\(CWT 1", CWT_NAMES)
                         g2, a2, st2 = _cwt_round(o, r)
                         time.sleep(3.0)

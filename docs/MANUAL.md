@@ -11198,7 +11198,8 @@ channel list, 3 EMERGENCY's, 4 GMRS's 22), `ghz` (G's SDR channel, 0 none), `gar
 (why it may not send there, "" it may), `sdr` (an SDR there), `fsel` (F's chosen item, "" off F), `gmp` (F's GMRS panel
 open), `gmhz` (its chosen channel, 0 on the tones), `gmrx` (where its F1 tunes: 0 nowhere, 1 B's SDR, 2 the radio's
 own through the WR12), `glamp` (G's lamp's word while G shows: `ON AIR`, `LOCKED`, `ARMED`, `DMR`, a digital
-voice's name, `SIGNAL` or `QUIET`; "" off G); all zero while the Sentry is closed. `nifog?` answers `nifog {...}`: F's
+voice's name, `SIGNAL` or `QUIET`; "" off G), `dsel` (D's chosen band, `40 M`; "" off D) and `esel` (E's chosen
+type, `NOAA ALERTS`; "" off E); all zero while the Sentry is closed. `nifog?` answers `nifog {...}`: F's
 [NIFOG](#nifog) as the screen has it, `open`, `page` (the PDF's numbering), `y` (px down it) and `maxy`, `cap`
 (its caption), `where` (the line under the page), `legend` and `keys` (the F keys' boxes); zero and empty while
 it is closed or the Sentry is (the bench's tools/bench/orch_nifog.py). `ghostnet?` answers `ghostnet {...}`: F's

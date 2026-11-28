@@ -49,11 +49,12 @@ void app_sentry_g_channel_load(void);
  * transmitter armed (A/B) and why the SDR may not transmit there ("" it may: w_sdr_refusal's words, "GMRS: ..." on
  * GMRS's channels); an SDR there; F's choice (its item's name, "" off F) and F's GMRS panel: open, its chosen
  * channel (Hz) and the receiver its F1 tunes (0 none, 1 B's SDR, 2 the radio's own: the WR12); G's lamp's word while
- * G is shown ("ON AIR", "LOCKED", "ARMED", "DMR", a digital voice's name, "SIGNAL", "QUIET"; "" off G) */
+ * G is shown ("ON AIR", "LOCKED", "ARMED", "DMR", a digital voice's name, "SIGNAL", "QUIET"; "" off G); D's chosen
+ * band ("40 M", "" off D) and E's chosen type ("NOAA ALERTS", "" off E), by their names on the screen */
 typedef struct {
     int64_t bhz, ghz, gmhz;
     int32_t bscan, sdr, garm, gmp, gmrx;
-    char    bpre[16], bmode[12], bname[16], gno[56], fsel[24], glamp[12];
+    char    bpre[16], bmode[12], bname[16], gno[56], fsel[24], glamp[12], dsel[24], esel[24];
 } app_sentry_sdr_t;
 void app_sentry_sdr_state(app_sentry_sdr_t *out);
 /* Any thread: the rows A's history has drawn for the time on the air (dim, at the rows' pace) since the GUI started:
