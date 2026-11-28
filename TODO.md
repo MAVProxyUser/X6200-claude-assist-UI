@@ -69,7 +69,12 @@ never keyed (the Sentry's receive-only hold, unarmed): armed now; the X6200 read
 (the GUI's key counts as own keying: a502535d) but garbled by its base. The X6100's factory base (V1.1.9) keys every
 mark 18 ms long (dot 77-78 ms, gap 41-43 at 20 WPM, at 0.1 and 1 W alike) and moves a few edges 27-62 ms: cw-text,
 cw-kbd, cw-dec-snr and cw-own-decode from the X6100 fail on it now and then, the X6200's pass. A keyer compensation
-would change the X6100's keying on the air: the owner's to decide.
+would change the X6100's keying on the air: the owner's to decide. air sentry-lock x6200>x6100: its SCANNER part
+passes now; the HOLD part's scan sits on 14.0903, a steady carrier of the X6100's own (not in its 11-22 birdie list),
+locked from before and never quiet (a lock outlives F1 off; in BROWSE it never times out), so the test's carrier is
+never reached. A's scan does not look at Birdie Cal's list at all: skipping it, and a Birdie Cal on the X6100 to
+record 14.0903, are the owner's to decide (the latter writes its birdies.txt). The HOLD step now starts 10 kHz under
+its carrier (2 kHz was inside USB's passband) and says the dials A visited.
 
 Open, mine: sentry-lock x6200>x6100's HOLD (the X6100's scan taken by its own 14.0903 spur, to look at live); the
 X6200's trainer adds a dit before an answer (WMK for MMK, older than today's changes); the X6100's trainer misreads

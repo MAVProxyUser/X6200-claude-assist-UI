@@ -2383,10 +2383,16 @@ def b_sentry(P):
             bench.tap(L, "F1")
             cb.gwait(h, lambda g: (g.get("s.rout", 0) != 0) == on, 6)
 
+    visited = []        # the dials A was on while lock_at waited (the HOLD step says them)
+
     def lock_at(f, secs):
         t0 = time.time()
+        del visited[:]
         while time.time() - t0 < secs:
-            if near(L.state.get("freq"), f):
+            v = L.state.get("freq")
+            if v is not None and (not visited or visited[-1] != int(v)):
+                visited.append(int(v))
+            if near(v, f):
                 return time.time()
             time.sleep(0.1)
         return None
@@ -2457,15 +2463,19 @@ def b_sentry(P):
                     f"{fmt((t_l - t_s) if t_l else None)} s after F1, stayed while it talked {stayed}, went on "
                     f"{fmt(gone_s)} s after it stopped (GO ON AFTER 3 s); {w2}")
         # 3: SCAN CFG's F2 HOLD keeps it past GO ON AFTER; F2 again (GO ON) moves on at once
+        # 10 kHz under the carrier: in the X6100's 50 kHz picture, out of its passband. 2 kHz under, USB's passband
+        # held the carrier already and the scan hopped on past it, to the band's own signals leaking in (14.0902,
+        # 14.1354: "locked on 14.036 False", 2026-11-27)
         try:
-            bench.ensure(L, {"freq": f3 - 2000, "mode": 2})
+            bench.ensure(L, {"freq": f3 - 10000, "mode": 2})
         except bench.Refused as e:          # A's dial held where its scan stopped: the scan goes on from there
             said.append(f"A's dial not set by the carrier for HOLD ({e})")
         bg = carrier(f3, 13.0)
-        until(S, lambda: S.tx, 6)
+        keyed3 = until(S, lambda: S.tx, 6)
         time.sleep(1.0)
         a_scan(True)
         t_l3 = lock_at(f3, 10.0)
+        seen3 = [round(v / 1e6, 4) for v in visited]
         cb.cfg_open(L, "A")
         bench.tap(L, "F2")                  # HOLD
         (on3, off3), _ = bg.join()
@@ -2483,6 +2493,7 @@ def b_sentry(P):
         cb.cfg_close(L)
         a_scan(False)
         res["F2 HOLD keeps it, GO ON moves on"] = not stop3 and bool(t_l3) and held and moved is not None
+        said.append(f"HOLD's carrier on the air {bool(keyed3)}, A's dial from {(f3 - 10000) / 1e6:.3f}: {seen3[:8]}")
         said.append(f"locked on {f3 / 1e6:.3f} {bool(t_l3)}, F2 HOLD in SCAN CFG: still there 7 s after the carrier "
                     f"ended {held}; F2 GO ON: moved on in {fmt(moved)} s")
         # BROWSE again (F1 round the styles, the dial where little is heard: SAMPLER, STAY and SURVEY stop on signals)
