@@ -95,6 +95,8 @@ class KeyDetector {
     float  carrier_   = 0.0f;   /* 5th percentile of power/noise */
     int    down_steps_ = 0;
     float  rise_from_  = 0.0f;  /* the level the mark keyed rose from (the lowest of the steps before it) */
+    float  young_low_  = 0.0f;  /* the lowest step of the mark's young window so far (schmitt: the AGC's dip) */
+    bool   dipped_     = false; /* the mark dipped DIP_DB under its peak while young: young longer (YOUNG_DIP_STEPS) */
     bool   trainer_    = false; /* trainer_range */
     bool   own_        = false; /* own() */
 

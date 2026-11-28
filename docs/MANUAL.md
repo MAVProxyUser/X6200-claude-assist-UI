@@ -7194,7 +7194,16 @@ every new mode cleared it, CW to CW-R and back excepted).
   and still 97-100% at -3 dB; the old decoder stopped at about +5 dB. The WPM
   reading is within about 0.5 WPM.
 - Dec SNR (5-30 dB, default 8) is how far over the noise floor a mark must
-  be. Lower copies weaker signals but can print noise.
+  be. Lower copies weaker signals but can print noise. It is measured on the
+  tone's own narrow bins: a station a spectrum shows 25 dB up can be 40 dB up
+  here, and turning the RF gain down (the X6100's attenuator) takes the
+  receiver's own noise down with it, so the decoder's SNR need not fall.
+- Through the receiver's AGC: a strong element's first few ms come out over
+  the rest of it and then dip under where it settles. A mark is not ended in
+  that dip: its first 40 ms, and 64 ms for one that dipped 9 dB or more (the
+  X6100 with its RF gain at 40 dipped 13 dB for some 80 ms, and up to the
+  next release every dah after the first came out a dit: "TESE E ESA" for
+  "TEST TEST").
 - No characters from noise: lone blips, clicks and steady carriers (birdies)
   on the tone are not decoded and do not change the speed estimate.
 - A strong station's word spaces: a key-down must be a rise, up 4 dB in a

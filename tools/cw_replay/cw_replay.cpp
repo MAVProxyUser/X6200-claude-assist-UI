@@ -26,6 +26,7 @@ int main(int argc, char **argv) {
     /* TRAINER=1: the trainer's gate on the text too (trainer_gate.h, as src/cw.cpp has it) */
     cw::TrainerGate gate;
     bool down_now = false, gated = getenv("TRAINER") != nullptr;
+    std::vector<float> keyed_snr;     /* SNR=1: the decoder's SNR at each keyed step (Receiver::snr_db), told at the end */
     rx = new cw::Receiver(
         [&](const char *s, bool own) {
             if (gated && !gate.pass(s, own)) {
@@ -42,7 +43,10 @@ int main(int argc, char **argv) {
         },
         [&]() {
             steps++;
-            if (down_now) gate.keyed_step(rx->snr_db());
+            if (down_now) {
+                gate.keyed_step(rx->snr_db());
+                keyed_snr.push_back(rx->snr_db());
+            }
         });
     rx->set_floor_db(floor_db);
     rx->set_band(lo, hi);
@@ -111,5 +115,10 @@ int main(int argc, char **argv) {
         }
     }
     printf("text: '%s' (key downs %d, wpm %.1f, lock %.0f Hz)\n", text.c_str(), keys, rx->wpm(), rx->lock_hz());
+    if (getenv("SNR") && !keyed_snr.empty()) {      /* the keyed steps' SNR as the decoder had it: its Dec SNR's units */
+        std::sort(keyed_snr.begin(), keyed_snr.end());
+        printf("keyed SNR: median %.1f dB, 10th %.1f, 90th %.1f (%zu steps)\n", keyed_snr[keyed_snr.size() / 2],
+               keyed_snr[keyed_snr.size() / 10], keyed_snr[keyed_snr.size() * 9 / 10], keyed_snr.size());
+    }
     return 0;
 }

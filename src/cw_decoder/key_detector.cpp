@@ -46,6 +46,13 @@ constexpr float  LONE_MARK_DB = 3.0f;
  * QSB: 13 % -> 18 % of its characters wrong); at 4 the same as before the rule there and in noise to 2 dB SNR */
 constexpr float  RISE_DB = 4.0f;
 constexpr int    YOUNG_STEPS = 5;   /* a mark's first 40 ms: the AGC's overshoot and dip (schmitt) */
+/* ... 64 ms for a mark that dipped DIP_DB under its peak in those 40 ms: the AGC's dip, deeper and longer at a lower RF
+ * gain. The X6100 at 40 (its base's attenuator): 13 dB under the first step, back within 6 dB of it only ~80 ms on; the
+ * dahs ended there, "TESE E ESA" for "TEST TEST" (orch cw-dec-snr, 2026-11-27, tools/cw_replay x6200_agc_dip_on_x6100).
+ * Not for every mark: 64 ms for all held a 25 WPM dit (48 ms) young through its end, and a Calls answer of the trainer's
+ * tests came out wrong; 80 ran the X6100's keying on the X6200 together ('VWV IT') */
+constexpr int    YOUNG_DIP_STEPS = 8;
+constexpr float  DIP_DB = 9.0f;
 constexpr float  YOUNG_MIN_DB = 30.0f;   /* ... of a mark peaking this far over the noise */
 
 } // namespace
@@ -120,6 +127,8 @@ KeyEdge KeyDetector::schmitt(float r) {
                 r_old_ = r;
             } else if (run_ >= need) {
                 rise_from_ = *std::min_element(past_.begin() + 1, past_.end());   /* (schmitt's young marks) */
+                young_low_ = r;
+                dipped_    = false;
                 /* the extra step of a first mark is given back */
                 back      = -crossing() + static_cast<float>((need - EDGE_STEPS) * INTEG_STEP);
                 up_steps_ = 0;
@@ -141,7 +150,12 @@ KeyEdge KeyDetector::schmitt(float r) {
          * from (rose()). And only for a mark YOUNG_MIN_DB over the noise (the AGC's shape is a strong signal's): a
          * blip 18 dB up, held to halfway (9 dB), lasted 32 ms and came out a dit ('4VV' for 'VVV'). Nor for our own
          * keying: the X6200's sidetone raised at KEY Volume 63 fills its element gaps, and its N came out a D */
-        float off = down_steps_ < YOUNG_STEPS && peak_ >= from_db(YOUNG_MIN_DB) && !own_
+        if (down_steps_ < YOUNG_STEPS) {         /* young_low_ and dipped_ set afresh at the key down */
+            young_low_ = std::min(young_low_, r);
+            dipped_    = dipped_ || peak_ >= young_low_ * from_db(DIP_DB);
+        }
+        bool  young = down_steps_ < YOUNG_STEPS || (dipped_ && down_steps_ < YOUNG_DIP_STEPS);
+        float off   = young && peak_ >= from_db(YOUNG_MIN_DB) && !own_
                         ? std::max({std::min(peak_ * from_db(-6.0f), std::sqrt(peak_)), from_db(floor_db_ - 3.0f),
                                     rise_from_ * from_db(3.0f)})
                         : off_lvl_;

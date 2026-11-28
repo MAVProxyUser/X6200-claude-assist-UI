@@ -113,5 +113,16 @@ case $out in
     *"text: 'MMM MMM '"*) echo "ok   the trainer's group and answer after the band's lines: $out" ;;
     *) echo "FAIL the trainer's group and answer after the band's lines: $out"; bad=$((bad + 1)) ;;
 esac
+# A deeper dip (2026-11-27, orch cw-dec-snr): the X6100 at RF gain 40 (its base's attenuator), the X6200's "TEST TEST"
+# at 20 WPM 28 dB over the quiet. Each dah after the first spikes 13 dB over its sustained level, dips 13 dB under the
+# spike and is back within 6 dB only some 80 ms later: past the young window's 40 ms the dahs ended at 24-32 ms and the
+# decoder printed "TESE E ESA" (the radio "TESE E ESE"). 64 ms now (key_detector.cpp YOUNG_STEPS); 80 ran the X6100's
+# keying on the X6200 together (above)
+n=$((n + 1))
+out=$(S16=1 ./cw_replay 300 1100 5 < x6200_agc_dip_on_x6100.s16 2> /dev/null)
+case $out in
+    *"text: 'TEST TEST "*) echo "ok   dahs through the AGC's deeper dip: $out" ;;
+    *) echo "FAIL dahs through the AGC's deeper dip: $out"; bad=$((bad + 1)) ;;
+esac
 echo "cw_replay: $n checks, $bad failed"
 [ $bad -eq 0 ]
