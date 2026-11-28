@@ -267,10 +267,90 @@ def t_df_panels(o):
         oa.home_both(o)
 
 
+# ---- The themes, switched live (theme-vision-layout, theme-black-metal-layout, theme-button-text) ----
+
+# A theme's own marks on the classic screen, read: (box, a pattern each line of marks must match) (2026-11-27's
+# pictures: VISION's S-meter row as bars under the dial; Black Metal's two state rows, its S/SWR/ALC scales, the other
+# VFO and its buttons in capitals on one line)
+THEME_MARKS = {
+    "VISION": [((0, 118, 610, 172), r"\b9\s*\+20")],          # its +40 read 440
+    "Black Metal": [((0, 0, 800, 55), r"STEP"), ((0, 60, 330, 155), r"SWR.*ALC|ALC"), ((640, 55, 800, 90), r"\bB\b"),
+                    ((0, 428, 800, 480), r"\b(RIT|XIT|VOLUME|SQUELCH)\s*\+?\s*\d")],    # a name and its value on
+    # one line, in capitals, whichever page the buttons are on ('RIT +0', 'VOLUME 0'); two-line themes read the names
+    # first, then the values
+    "Total Black": [((0, 0, 800, 55), r"STEP"), ((0, 60, 330, 155), r"SWR.*ALC|ALC")],
+}
+
+
+def t_themes(o):
+    """On each radio's classic screen, every theme the web Display page offers set live (its theme, read back): the
+    screen's top changes (15% or more of its pixels' colours, against the theme as found), the F keys do the same
+    (fkeys? as before), and VISION, Black Metal and Total Black show their own layout's marks (THEME_MARKS, read).
+    Back to the theme as found, the screen's top as it was"""
+    import orch_cable as oc
+    import suite_cover_a as ca
+    from orch_cov_look import _rgb_diff
+    res = {}
+    try:
+        for n, r in _both(o):
+            out = res[n] = {}
+            with o.step(f"{n}: the classic screen, the theme as found") as s:
+                oc.classic(r)
+                time.sleep(1.5)
+                found = ca.disp(r.host)
+                themes = [t for t in found.get("themes", []) if t != found.get("theme")]
+                if not found.get("theme") or not themes:
+                    raise Refused(f"{n}: the Display page names no theme ({str(found)[:80]})")
+                p0 = oa.shot(o, r, f"theme {found['theme']}")
+                keys0 = oa.fkeys(r)[0]
+                s.confirm(f"{found['theme']}; {len(themes)} others")
+            try:
+                for th in themes:
+                    with o.step(f"{n}: theme {th}: the screen changes, the F keys the same"
+                                f"{', its marks read' if th in THEME_MARKS else ''}") as s:
+                        if ca.disp_set(r.host, "theme", th) != 200:
+                            raise Refused(f"{n}: the Display page refused theme {th}")
+                        time.sleep(3.5)
+                        if ca.disp(r.host).get("theme") != th:
+                            raise Refused(f"{n}: theme {th} not read back")
+                        p = oa.shot(o, r, f"theme {th}")
+                        # on the screen's top (no waterfall moving there): RF.Guru keeps the Sentry's layout, its
+                        # colours and type its own (34% of the top, 18% of the whole screen, 2026-11-27)
+                        changed = _rgb_diff(p0, p, (0, 0, 800, 118))
+                        keys = oa.fkeys(r)[0]
+                        marks = {}
+                        for box, pat in THEME_MARKS.get(th, []):
+                            t = " ".join(oa.ocr(p, box=box, psm=6, scale=2).upper().split())
+                            marks[pat] = bool(re.search(pat, t))
+                        out[th] = {"changed": round(changed, 2), "marks": marks}
+                        if changed < 0.15:
+                            raise Refused(f"{n}: theme {th} changed {changed:.0%} of the screen's top")
+                        if keys != keys0:
+                            raise Refused(f"{n}: theme {th}: the F keys {keys0} -> {keys}")
+                        if not all(marks.values()):
+                            raise Refused(f"{n}: theme {th}: its marks not read: {marks}")
+                        s.confirm(f"{changed:.0%} changed{'; marks read' if marks else ''}")
+            finally:
+                ca.disp_set(r.host, "theme", found["theme"])
+                time.sleep(3.5)
+            with o.step(f"{n}: back to {found['theme']}: the screen's top as it was") as s:
+                back = _rgb_diff(p0, oa.shot(o, r, f"theme {found['theme']} back"), (0, 0, 800, 118))
+                out["back"] = round(back, 3)
+                if ca.disp(r.host).get("theme") != found["theme"] or back > 0.03:
+                    raise Refused(f"{n}: back on {found['theme']}, the top {back:.1%} off the first picture")
+                s.confirm(f"top {back:.1%} off")
+        return True, f"the themes on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
 COVERS = {
     "more-eth-validation": (["ethernet-static-validation"], ["ethernet-no-adapter"]),
     "more-knob-press": (["input-knob-press-choose"], []),
     "more-df-panels": (["df-f2-array", "df-f5-set"], ["df-daemon-lifecycle"]),
+    "more-themes": ([], ["theme-vision-layout", "theme-black-metal-layout", "theme-button-text"]),
 }
 
 
@@ -283,4 +363,6 @@ def tests(Test, A, B):
              "pressed again changes the value; Knob press: next control takes the next at once", t_knob_press, 60),
         Test("more-df-panels", "both", "page I: x6x00-df runs; F2 ARRAY's and F5 SET's panels open and close; the "
              "daemon ends after", t_df_panels, 70),
+        Test("more-themes", "both", "every theme set live changes the classic screen, the F keys the same; VISION's "
+             "and Black Metal's layouts read; back as found", t_themes, 150),
     ]

@@ -53,7 +53,8 @@ waterfall's depth, tilt, floor and range, the VFO line, the S-meter's colours. I
 from the web, waiting for the dial to move (waterfall_view_line_apply, 2156e668); the 3D colours do nothing under the
 Sentry theme, by design (now in the manual). An eighth batch (orch_cov_more.py): the web Network page refuses ten bad
 static addresses with the GUI's reasons, VOL's press chooses and changes (and Knob press: next control), page I's F2
-ARRAY and F5 SET panels and its daemon's lifetime. Left as not testable here: the screen recorder's monitor (raised in
+ARRAY and F5 SET panels and its daemon's lifetime; every theme set live from the web (VISION's S-meter row, Black
+Metal's state rows, scales, other VFO and one-line capital buttons read; the F keys the same; back as found). Left as not testable here: the screen recorder's monitor (raised in
 the base, not a setting the remote reads), a dropped link's held keys (released with no sign outside), the scroll
 bars (no list long enough on the bench's pages).
 
