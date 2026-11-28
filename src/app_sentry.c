@@ -57,6 +57,7 @@
 #include "dialog_shell.h"
 
 #include "band_plan.h"
+#include "birdie.h"            /* Birdie Cal's list: the radio's own carriers, never a signal to stop on */
 #include "board.h"
 #include "broadcast_db.h"
 #include "buttons.h"
@@ -1496,6 +1497,15 @@ static bool is_ignored(int32_t hz) {
     return false;
 }
 
+/* One of the radio's own steady carriers Birdie Cal keeps (birdie.h), within the peak's reach: shown, never a signal to
+ * stop on. The X6100's own 14.0903 MHz held A's scan for good (a lock it never let go: the carrier is never quiet), and
+ * the bench's carrier 50 kHz from it was never reached (orch air sentry-lock, 2026-11-27) */
+static bool is_birdie(int32_t hz) {
+    int32_t near = (int32_t)fmax(300.0, 2.0 * bin_hz);
+
+    return !broad && birdie_count_in(hz - near, hz + near) > 0;
+}
+
 static bool was_visited(int32_t hz) {
     uint32_t now = lv_tick_get();
 
@@ -1634,7 +1644,7 @@ static void find_targets(void) {
 
         for (int j = 0; j < ntg && !near; j++) near = llabs((int64_t)c[i].hz - tg[j].hz) < sep;
         if (near) continue;
-        c[i].ignored = is_ignored(c[i].hz);
+        c[i].ignored = is_ignored(c[i].hz) || is_birdie(c[i].hz);
         tg[ntg++]    = c[i];
         if (!c[i].ignored) nlive++;
         if (c[i].con >= 12) mw_vote(c[i].hz);

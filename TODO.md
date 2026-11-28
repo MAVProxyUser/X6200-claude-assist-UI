@@ -72,8 +72,13 @@ cw-kbd, cw-dec-snr and cw-own-decode from the X6100 fail on it now and then, the
 would change the X6100's keying on the air: the owner's to decide. air sentry-lock x6200>x6100: its SCANNER part
 passes now; the HOLD part's scan sits on 14.0903, a steady carrier of the X6100's own (not in its 11-22 birdie list),
 locked from before and never quiet (a lock outlives F1 off; in BROWSE it never times out), so the test's carrier is
-never reached. A's scan does not look at Birdie Cal's list at all: skipping it, and a Birdie Cal on the X6100 to
-record 14.0903, are the owner's to decide (the latter writes its birdies.txt). The HOLD step now starts 10 kHz under
+never reached. With the owner's word (23:30): A's scan now skips Birdie Cal's carriers
+(app_sentry.c is_birdie), and Birdie Cal ran on the X6100 (182 -> 267, the old list in /mnt/bench_backups). But
+14.0903 is no birdie: Birdie Cal did not find it, and it comes only with the bench's carrier on, at 14.0903 for
+carriers at 14.030 and 14.036 alike: most likely the X6100 receiver's image of the bench's own carrier (mirrored
+about ~14.06). The HOLD step's fix is then an image test in find_targets (a weak target mirrored about the I/Q
+centre of one 25+ dB stronger), to measure first. The birdie skip has no orch test yet (the X6100's scan stopped on
+no birdie in 45 s before or after it: a test needs a birdie put where the bench's carrier is). The HOLD step now starts 10 kHz under
 its carrier (2 kHz was inside USB's passband) and says the dials A visited.
 
 Open, mine: sentry-lock x6200>x6100's HOLD (the X6100's scan taken by its own 14.0903 spur, to look at live); the

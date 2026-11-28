@@ -1039,7 +1039,9 @@ the time they show stays true (up to v0.3.12.39 they stopped while it sent).
   What each does on a signal is SCAN CFG's style: BROWSE marks it (A) or moves B's channel to each picture's
   strongest and goes on; SCANNER, SAMPLER, STOP & STAY and SURVEY stop on it (A only inside the band scanned). Both
   put what they stop on into C LOG, and B's scan goes on behind the other screens. Turning the MFK or the VFO stops
-  a scan where it is.
+  a scan where it is. A never stops on one of the radio's own carriers that [Birdie Cal](#birdie-cal) has kept
+  (within 300 Hz): they stay marked, as signals skipped with F3 are. A strong station near the dial can still show a
+  weaker copy of itself mirrored about the picture's middle on the X6100 (its receiver's image), which A may stop on.
 - **F2 BAND** (A: the next band, the BAND keys too, the scan going on there; 30 M and 19 M BC are heard on WWV at
   10 and 15 MHz, just outside them, and BAND and SCAN still count that as the band) or **PRESET** (B: NOAA weather, 2 m,
   2 m repeaters, the airband, FM broadcast, marine VHF, the weather satellites, the weather balloons, 70 cm, ISM 433,
