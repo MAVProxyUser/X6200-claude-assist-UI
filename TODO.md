@@ -56,7 +56,11 @@ static addresses with the GUI's reasons, VOL's press chooses and changes (and Kn
 ARRAY and F5 SET panels and its daemon's lifetime; every theme set live from the web (VISION's S-meter row, Black
 Metal's state rows, scales, other VFO and one-line capital buttons read; the F keys the same; back as found). Left as not testable here: the screen recorder's monitor (raised in
 the base, not a setting the remote reads), a dropped link's held keys (released with no sign outside), the scroll
-bars (no list long enough on the bench's pages).
+bars (no list long enough on the bench's pages). Waiting on the owner's word: the settings file's recovery at start
+(a damaged, empty or unreadable params.db): both radios keep a good copy (/var/lib/x6100/params-good.db, 22:15 UTC),
+but the test puts a broken params.db in place of the live one across a GUI restart (the live one backed up to
+/mnt/bench_backups first and put back after). Coverage at 19:26: 704 features pass, 82 fail, 203 in part, 420 not covered
+(15:45: 675, 98, 192, 444).
 
 Open, mine: sentry-lock x6200>x6100's HOLD (the X6100's scan taken by its own 14.0903 spur, to look at live); the
 X6200's trainer adds a dit before an answer (WMK for MMK, older than today's changes); the X6100's trainer misreads
