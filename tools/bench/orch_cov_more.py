@@ -346,11 +346,122 @@ def t_themes(o):
         oa.home_both(o)
 
 
+# ---- The settings file's recovery at start (settings-restore-damaged) ----
+
+GOOD_DB = "/var/lib/x6100/params-good.db"   # params.db's last good copy, on the system partition (params/db.c)
+# Compared by equality only (callsign and QTH never said): what the good copy and the live file must agree on
+RECOVERY_KEYS = ["callsign", "qth", "theme_name", "wifi_enabled", "sentry_home", "first_start_done", "rtl_gain",
+                 "smeter_color", "language"]
+# The live files kept aside while the GUI is stopped, the file broken only once they are: random bytes are no SQLite
+# database (SQLITE_NOTADB, file_damaged)
+BREAK = r"""
+d={d}; i=0; while pidof x6100_gui >/dev/null && [ $i -lt 40 ]; do sleep 0.5; i=$((i+1)); done
+mkdir -p $d && ls /mnt/params-unusable-* > $d/aside_before 2>/dev/null
+cp -p /mnt/params.db $d/ && cp -p {good} $d/ \
+  && {{ [ -e /mnt/params.db-wal ] && cp -p /mnt/params.db-wal $d/ || true; }} \
+  && {{ [ -e /mnt/params.db-shm ] && cp -p /mnt/params.db-shm $d/ || true; }} && [ -s $d/params.db ] && sync \
+  && {{ rm -f /mnt/params.db-wal /mnt/params.db-shm; head -c 86016 /dev/urandom > /mnt/params.db; sync; \
+        echo BROKEN; }} \
+  || echo BACKUP_FAILED
+"""
+PUT_BACK = r"""
+d={d}; i=0; while pidof x6100_gui >/dev/null && [ $i -lt 40 ]; do sleep 0.5; i=$((i+1)); done
+if [ -s $d/params.db ]; then
+  rm -f /mnt/params.db-wal /mnt/params.db-shm
+  cp -p $d/params.db /mnt/params.db && for x in wal shm; do [ -e $d/params.db-$x ] && cp -p $d/params.db-$x /mnt/; done
+  cp -p $d/params-good.db {good}
+  for f in /mnt/params-unusable-*; do [ -e "$f" ] && ! grep -qx "$f" $d/aside_before 2>/dev/null && rm -f "$f"; done
+  sync; echo PUT_BACK
+else echo NO_BACKUP; fi
+"""
+
+
+def _db_vals(r, path):
+    """RECOVERY_KEYS' values in the settings database at path on r (sqlite3 on the radio), {key: value}"""
+    q = "select name||'='||val from params where name in (" + ",".join(f"'{k}'" for k in RECOVERY_KEYS) + ")"
+    out = oa.ssh(r, f'sqlite3 {path} "{q}" 2>/dev/null; true', 20)
+    return dict(x.split("=", 1) for x in out.splitlines() if "=" in x)
+
+
+def t_settings_recovery(o):
+    """On each radio, one at a time (the owner's word, 2026-11-27): its last good copy of the settings checked sound
+    and with WiFi on first (a start on the defaults turns these radios' WiFi off and cuts the bench off: those cases
+    are not run). Then, its GUI stopped (planned): the live params.db and its journals and the good copy kept in
+    /mnt/bench_backups, params.db replaced with random bytes, the GUI started: its log says the file was put aside
+    and the last good copy loaded, the damaged file lies beside as params-unusable-<time>Z.db, and the settings agree
+    with the good copy (RECOVERY_KEYS, compared, never said); its note on the screen recorded if still up. Then the
+    GUI stopped again, the live files put back as they were, the test's put-aside files removed, started: the
+    settings as before the test"""
+    import orch_cov_ui as ou
+    res = {}
+    try:
+        for n, r in _both(o):
+            out = res[n] = {}
+            d = f"/mnt/bench_backups/params_recovery_{time.strftime('%Y%m%d-%H%M%S')}"
+            with o.step(f"{n}: the last good copy sound, WiFi on in it; the live settings read") as s:
+                check = oa.ssh(r, f'sqlite3 {GOOD_DB} "pragma quick_check" 2>&1; true', 20).strip()
+                good = _db_vals(r, GOOD_DB)
+                live0 = _db_vals(r, "/mnt/params.db")
+                if check != "ok" or good.get("wifi_enabled") != "1":
+                    raise Refused(f"{n}: the good copy {'not sound (' + check[:40] + ')' if check != 'ok' else ''}"
+                                  f"{'' if good.get('wifi_enabled') == '1' else ' has WiFi off'}: not run")
+                if live0.get("wifi_enabled") != "1" or not live0:
+                    raise Refused(f"{n}: the live settings not read ({len(live0)} keys): not run")
+                out["good copy"] = f"sound, {len(good)} keys"
+                aside0 = set(oa.ssh(r, "ls /mnt/params-unusable-*.db 2>/dev/null; true").split())
+                s.confirm(f"good copy sound with WiFi on; {len(live0)} live keys read")
+            broken = False
+            try:
+                with o.step(f"{n}: params.db broken across a GUI restart: put aside, the last good copy loaded") as s:
+                    said = ou._restart(o, n, "the settings file's recovery: params.db broken, kept in "
+                                             "/mnt/bench_backups", BREAK.format(d=d, good=GOOD_DB))
+                    broken = "BROKEN" in said
+                    if not broken:
+                        raise Refused(f"{n}: the live files not kept aside ({said.strip()[-60:]!r}): nothing broken")
+                    p = oa.shot(o, r, "settings recovered")
+                    note = oa.ocr(p, psm=6, scale=2).upper()
+                    log = oa.ssh(r, "grep 'params.db' /tmp/x6100_log.txt | tail -4; true")
+                    # the lists compared here: busybox's grep -v with an empty -f file prints nothing (2026-11-27)
+                    aside = " ".join(sorted(set(oa.ssh(r, "ls /mnt/params-unusable-*.db 2>/dev/null; true").split())
+                                            - aside0))
+                    now = _db_vals(r, "/mnt/params.db")
+                    same = [k for k in good if now.get(k) == good[k]]
+                    out["recovered"] = {"log": "put aside" in log and "last good copy" in log,
+                                        "aside": len(aside.split()), "keys same as the good copy": f"{len(same)}/"
+                                        f"{len(good)}", "note on the screen": "SETTINGS FILE DAMAGED" in note}
+                    if "put aside" not in log or "last good copy" not in log:
+                        raise Refused(f"{n}: the GUI's log says no recovery ({log.strip()[-120:]!r})")
+                    if not aside.strip():
+                        raise Refused(f"{n}: no params-unusable-*.db put aside")
+                    if len(same) != len(good):
+                        raise Refused(f"{n}: the settings agree with the good copy on {len(same)} of {len(good)} keys")
+                    s.confirm(f"put aside ({aside.split()[0].rsplit('/', 1)[-1]}), the good copy loaded, "
+                              f"{len(same)}/{len(good)} keys; note on screen: {out['recovered']['note on the screen']}")
+            finally:
+                if broken:
+                    with o.step(f"{n}: the live settings put back as they were") as s:
+                        said = ou._restart(o, n, "the settings file's recovery: the live params.db put back",
+                                           PUT_BACK.format(d=d, good=GOOD_DB))
+                        live1 = _db_vals(r, "/mnt/params.db")
+                        same = [k for k in live0 if live1.get(k) == live0[k]]
+                        out["put back"] = f"{len(same)}/{len(live0)} keys as before"
+                        if "PUT_BACK" not in said or len(same) != len(live0):
+                            raise Refused(f"{n}: putting back said {said.strip()[-40:]!r}; {len(same)} of "
+                                          f"{len(live0)} keys as before (the backup: {d})")
+                        s.confirm(out["put back"])
+        return True, f"the settings file's recovery on both: {res}", res
+    except Refused as e:
+        return False, str(e), res
+    finally:
+        oa.home_both(o)
+
+
 COVERS = {
     "more-eth-validation": (["ethernet-static-validation"], ["ethernet-no-adapter"]),
     "more-knob-press": (["input-knob-press-choose"], []),
     "more-df-panels": (["df-f2-array", "df-f5-set"], ["df-daemon-lifecycle"]),
     "more-themes": ([], ["theme-vision-layout", "theme-black-metal-layout", "theme-button-text"]),
+    "more-settings-recovery": (["settings-restore-damaged"], []),
 }
 
 
@@ -365,4 +476,7 @@ def tests(Test, A, B):
              "daemon ends after", t_df_panels, 70),
         Test("more-themes", "both", "every theme set live changes the classic screen, the F keys the same; VISION's "
              "and Black Metal's layouts read; back as found", t_themes, 150),
+        Test("more-settings-recovery", "both, one at a time", "params.db broken across a GUI restart: put aside, the "
+             "last good copy loaded; the live settings put back after (the owner's word, 2026-11-27)",
+             t_settings_recovery, 240),
     ]

@@ -55,11 +55,11 @@ Sentry theme, by design (now in the manual). An eighth batch (orch_cov_more.py):
 static addresses with the GUI's reasons, VOL's press chooses and changes (and Knob press: next control), page I's F2
 ARRAY and F5 SET panels and its daemon's lifetime; every theme set live from the web (VISION's S-meter row, Black
 Metal's state rows, scales, other VFO and one-line capital buttons read; the F keys the same; back as found). Left as not testable here: the screen recorder's monitor (raised in
-the base, not a setting the remote reads), a dropped link's held keys (released with no sign outside), the scroll
-bars (no list long enough on the bench's pages). Waiting on the owner's word: the settings file's recovery at start
-(a damaged, empty or unreadable params.db): both radios keep a good copy (/var/lib/x6100/params-good.db, 22:15 UTC),
-but the test puts a broken params.db in place of the live one across a GUI restart (the live one backed up to
-/mnt/bench_backups first and put back after). Coverage at 19:26: 704 features pass, 82 fail, 203 in part, 420 not covered
+the base, not a setting the remote reads), a dropped link's held keys (released with no sign outside). The scroll bars: pages D and E have them (the
+owner, 2026-11-27): a test for them is next on the list. The settings file's recovery at start (the owner's word, 2026-11-27): more-settings-recovery passes on both
+(params.db broken across a GUI restart: put aside as params-unusable-<time>Z.db, the last good copy loaded, 9/9 keys;
+the live files put back after, 9/9). Not run: a start on the defaults (no params.db, or a damaged one with no good
+copy): these radios' WiFi is off by default (params.c wifi_enabled), which would cut the bench off from the radio. Coverage at 19:26: 704 features pass, 82 fail, 203 in part, 420 not covered
 (15:45: 675, 98, 192, 444).
 
 Open, mine: sentry-lock x6200>x6100's HOLD (the X6100's scan taken by its own 14.0903 spur, to look at live); the
