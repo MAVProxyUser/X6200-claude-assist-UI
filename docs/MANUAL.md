@@ -11234,7 +11234,7 @@ open|close|auto|cont|save|clear|plan|unplan` works the WeFax app as its buttons
 do (RX Auto, RX Cont, Save, Clear, Auto Plan on and off; operate and control, `err wefax WHAT` for one it
 does not know), and the panel state's `app` names the digital app open
 (`"FT8"`, `"WeFax"`, `""` for none), `win` the app whose window is open
-(any app: `"Cluster"`, `"Sentry"`, `""` for the main screen) and `pg` the
+(any app: `"Cluster"`, `"Sentry"`, `"Modes"` for the Modes menu, `""` for the main screen) and `pg` the
 Sentry's page (`"A"` to `"G"`, `"S"` for SCAN CFG, `""` when it is not
 open). `apps` is answered `apps [[ACTION,"Name"],...]`, the apps this radio
 has; `open ACTION` opens one of them, `open sentry L` the Sentry on its page

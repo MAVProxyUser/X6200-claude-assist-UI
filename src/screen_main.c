@@ -810,10 +810,16 @@ size_t main_screen_apps(press_action_t *ids, const char **names, size_t n) {
     return k;
 }
 
-/* The app whose window is open ("" none: the main screen, the APP grid, RTTY), for the browser remote's state "win" */
+/* The app whose window is open ("" none: the main screen, the APP grid, RTTY; "Modes" the Modes menu), for the browser
+ * remote's state "win" */
 const char *main_screen_window_name(void) {
     for (size_t i = 0; i < WINDOWS_N; i++)
-        if (dialog_type_is_run(*windows[i].window)) return app_name(windows[i].app);
+        if (dialog_type_is_run(*windows[i].window)) {
+            const char *n = app_name(windows[i].app);
+
+            /* the Modes menu has no app name (NULL): the remote's %s printed it "(null)" (orch modes-menu, 2026-11-28) */
+            return n ? n : windows[i].app == ACTION_APP_MODES ? "Modes" : "";
+        }
     return "";
 }
 

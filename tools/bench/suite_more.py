@@ -308,7 +308,7 @@ def t_d_rule(run):
             if have != want:
                 bad.append(f"{f} Hz {have} (rule {want})")
         return (n > 0 and not bad), f"{n} bands, each as the rule says" if not bad else "NOT: " + "; ".join(bad)
-    per_radio(run, "rx", "d-listen-rule", fn, ["sentry-d-listen", "radio-core-pre-att-per-band"])
+    per_radio(run, "rx", "d-listen-rule", fn, ["d-e-listen-sets-x6200", "radio-core-pre-att-per-band"])
 
 
 def t_e_rule(run):
@@ -966,10 +966,10 @@ def band_proofs(run):
                                f"({s_name}'s meter {res['sender_peak_w']} W); both screens "
                                f"{'on the air' if res.get('shots_on_air') else 'NOT caught on the air'}: "
                                + ", ".join(os.path.basename(x) for x in (res.get("shots") or {}).values() if x),
-                               covers=["path-tx-power-readback", "path-rx-level-parity", "tx-bands-each"])
+                               covers=["path-tx-power-readback", "path-rx-level-parity"])
                 except bench.Refused as e:
                     run.result("paths", f"band {band} {s_name}->{l_name}", False, str(e)[:300],
-                               covers=["path-tx-power-readback", "tx-bands-each"])
+                               covers=["path-tx-power-readback"])
         finally:
             bench.finish(radios, snaps, report=rep)
             run.result("paths", f"band put back {s_name}->{l_name}", not rep.get("not_restored"),
@@ -1157,7 +1157,7 @@ def paths(run, only):
                                      "2000,1700,1400,1100,800,500", "--tx-mode", "3", "--tag", "suite"],
               ["path-usb-tones", "path-lsb-tones", "path-rx-level-parity"]),
              ("mic-on-g", lambda s, l: [os.path.join(HERE, "acoustic.py"), l, s, "--tag", "suite"],
-              ["path-mic-voice", "sentry-g-ptt", "panel-mic-ptt"]),
+              ["path-mic-voice", "panel-mic-ptt"]),
              ("if-shift", lambda s, l: [os.path.join(HERE, "ifshift.py"), s, l], ["cw-if-shift-x6100"])]
     for name, cmd, covers in tests:
         if only and name not in only:
@@ -1181,8 +1181,7 @@ def paths(run, only):
             for s_, l_ in ((a, b), (b, a)):
                 ok, says = digi_over(run, mode, s_, l_)
                 run.result("paths", f"{mode} {s_}->{l_}", ok, says,
-                           covers=[f"path-{mode}-both-ways", "rtty-decode" if mode == "rtty" else "psk-mode-txrx",
-                                   "settings-general-text-log"])
+                           covers=["rtty-rx-decode" if mode == "rtty" else "psk-mode-txrx", "settings-general-text-log"])
     if not only or "cw" in only:
         for s_, l_ in ((a, b), (b, a)):
             ok, says = cw_over(run, s_, l_)
@@ -1197,8 +1196,7 @@ def paths(run, only):
         for x in out:
             if x.split(" ", 1)[-1].startswith(("PASS ", "FAIL ")):
                 run.result("paths", "walkie " + x.split(" ", 3)[2:4][0] + " " + x.split(" ")[3], x.split(" ", 1)[-1]
-                           .startswith("PASS"), x.split(" ", 1)[-1][:300], covers=["path-am-voice", "path-fm-voice",
-                                                                                     "sentry-g-walkie"])
+                           .startswith("PASS"), x.split(" ", 1)[-1][:300], covers=["path-am-voice", "path-fm-voice"])
         run.result("paths", "walkie", r.returncode == 0, (out[-1] if out else "")[:300],
                    covers=["path-am-voice", "path-fm-voice"])
 

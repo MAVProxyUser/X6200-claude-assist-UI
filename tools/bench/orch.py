@@ -5203,6 +5203,7 @@ ORCH_COVERS = {
     "skirt": ([], ["tx-tci-transmit-level"]),
     "tci-tail": (["tci-trx-tci-audio", "tci-wsjtx-compat"], []),
     "tci-row": (["tci-trx-tci-audio"], ["tci-wsjtx-compat"]),
+    "tci-rtl-quiet": ([], ["tci-speaker-quiet-during-client-tx", "tci-trx-tci-audio"]),
     "ft8-copies": ([], ["path-data-ft8-both-ways", "digi-tx-level-x6200-power"]),
     "cw-timing": (["path-cw-both-ways"], ["cw-keyer-settings"]),
     "ambe-vocoder": (["dmr-voice-usb3000"], ["dsdfme-voice"]),
@@ -7569,6 +7570,13 @@ import orch_ghostnet as _ogn                # noqa: E402
 _ogn.H = sys.modules[__name__]
 TESTS += _ogn.tests(Test, A, B)
 ORCH_COVERS.update(_ogn.COVERS)
+
+# The coverage report's gaps (orch_cov_gaps.py, 2026-11-28): tests for the features whose latest result failed for the
+# test's own reasons or that no test covered (On the Air first)
+import orch_cov_gaps as _ogp                # noqa: E402
+_ogp.H = sys.modules[__name__]
+TESTS += _ogp.tests(Test, A, B)
+ORCH_COVERS.update(_ogp.COVERS)
 
 
 # Other sessions put new GUIs on the radios (tools/cross_x6200/install.sh): one replaced both mid-run on 2026-11-25

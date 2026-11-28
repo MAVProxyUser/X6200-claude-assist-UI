@@ -599,6 +599,16 @@ static void key_cb(lv_event_t *e) {
     }
 }
 
+/* MFK press: the encoder sends a click, never ENTER (mfk_device.c: the keypad's press sets the encoder's pressed),
+ * taken here as ENTER, a keyboard's Enter (orch onair, 2026-11-28: On the Air's press tuned nothing) */
+static void click_cb(lv_event_t *e) {
+    lv_indev_t *indev = lv_indev_get_act();
+    uint32_t    key   = LV_KEY_ENTER;
+
+    if (indev && lv_indev_get_type(indev) == LV_INDEV_TYPE_ENCODER)
+        lv_event_send(lv_event_get_target(e), LV_EVENT_KEY, &key);
+}
+
 static void construct_cb(lv_obj_t *parent) {
     dialog.obj = dialog_init(parent);
     app_frame_create(&frame, dialog.obj);
@@ -631,6 +641,7 @@ static void construct_cb(lv_obj_t *parent) {
 
     lv_group_add_obj(keyboard_group, dialog.obj);
     lv_obj_add_event_cb(dialog.obj, key_cb, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(dialog.obj, click_cb, LV_EVENT_CLICKED, NULL);
     lv_group_focus_obj(dialog.obj);
     lv_group_set_editing(keyboard_group, true);
 
