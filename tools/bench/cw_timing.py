@@ -15,10 +15,9 @@ TIMING_MS = 25              # a mark or gap this far off its kind's median is an
 GUI_LOG = "/var/log/x6100_log.txt"
 
 
-def cw_elements(x, fs, pitch):
-    """A CW over in received audio x: its marks and gaps in ms, in order [(is_mark, ms)], from the key tone's envelope
-    (zero-phase, 150 Hz wide: both edges delayed alike), on and off halfway in dB between the marks' level and the gaps'
-    floor with 3 dB either way; the first mark from the over's start, the last gap dropped. (runs, depth in dB)"""
+def _env_db(x, fs, pitch):
+    """The key tone's envelope in dB, a step a millisecond (zero-phase, 150 Hz wide: both edges delayed alike), and the
+    marks' level and the gaps' floor"""
     import numpy as np
     from scipy.signal import butter, filtfilt
     t = np.arange(len(x)) / fs
@@ -26,12 +25,44 @@ def cw_elements(x, fs, pitch):
     b, a = butter(3, 150 / (fs / 2))
     e = np.abs(filtfilt(b, a, z.real) + 1j * filtfilt(b, a, z.imag))
     db = 20 * np.log10(e[::int(fs / 1000)] + 1e-9)
-    hi, lo = np.percentile(db, 95), np.percentile(db, 20)
-    mid = (hi + lo) / 2
+    return db, np.percentile(db, 95), np.percentile(db, 20)
+
+
+def _keyed(db, on_db, off_db):
+    """Each step on (a mark) from over on_db until under off_db"""
+    import numpy as np
     on, cur = np.zeros(len(db), bool), False
-    for i, v in enumerate(db):              # 3 dB either way: an edge's ripple is not two edges
-        cur = v > mid - 3 if cur else v > mid + 3
+    for i, v in enumerate(db):
+        cur = v > off_db if cur else v > on_db
         on[i] = cur
+    return on
+
+
+def cw_elements(x, fs, pitch):
+    """A CW over in received audio x: its marks and gaps in ms, in order [(is_mark, ms)], from the key tone's envelope
+    (_env_db), on and off halfway in dB between the marks' level and the gaps' floor with 3 dB either way (an edge's
+    ripple is not two edges); the first mark from the over's start, the last gap dropped. (runs, depth in dB). Low on
+    the edges on a shallow over (13 dB under the marks at 26 dB deep): a slow fade counts into the mark there, not its
+    timing (half_level)"""
+    db, hi, lo = _env_db(x, fs, pitch)
+    mid = (hi + lo) / 2
+    return _runs(_keyed(db, mid + 3, mid - 3)), round(float(hi - lo), 1)
+
+
+def half_level(x, fs, pitch, ideal, unit_ms):
+    """The over's marks and gaps at the marks' half amplitude (6 dB under their level, 1.5 dB either way), where CW's
+    timing is measured and a decoder ends a mark (src/cw_decoder/key_detector.cpp's off level): judge()'s result there
+    (its "medians", "weight_ms"), None when the elements there are not as keyed. cw_elements' threshold, halfway in dB,
+    counts a slow fade into the mark: 2026-11-28, the X6100's factory base's dots read 77-78 ms there at 20 WPM, 17-18
+    over the dot, and 64-65 at half amplitude, as the X6200's (an 18 ms shorter mark keyed for it went out 48 ms)"""
+    db, hi, _ = _env_db(x, fs, pitch)
+    j = judge(_runs(_keyed(db, hi - 4.5, hi - 7.5)), ideal, unit_ms)
+    return j if j["as_keyed"] else None
+
+
+def _runs(on):
+    """The steps on and off as runs [(is_mark, ms)]: a run under 8 ms into the one before it; from the first mark to the
+    last"""
     runs, k = [], 0
     while k < len(on):
         j = k
@@ -52,7 +83,7 @@ def cw_elements(x, fs, pitch):
         runs.pop(0)
     while runs and not runs[-1][0]:
         runs.pop()
-    return runs, round(float(hi - lo), 1)
+    return runs
 
 
 def cw_ideal(text):

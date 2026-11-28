@@ -6761,6 +6761,10 @@ def cw_timing_test(o, sender, listener, w=W):
     pitch, _ = peak(x, kt, 120)
     runs, depth = ct.cw_elements(x, TFS, pitch or kt)
     j = ct.judge(runs, ct.cw_ideal(text), 1200.0 / wpm)
+    # the weight where CW's timing is measured, at the marks' half amplitude: judge's threshold, low on a shallow over's
+    # edges, counts the X6100's slower fade into its marks (17-18 ms over the dot there, 5 at half amplitude as the
+    # X6200's, 2026-11-28)
+    half = ct.half_level(x, TFS, pitch or kt, ct.cw_ideal(text), 1200.0 / wpm)
     # the keyer's own lines for this over, every one since the mark (it logs each send: the last line alone held 20 of
     # the over's 112 edges, 2026-11-26), written as each ends
     edges_want = 2 * j["want"]
@@ -6773,11 +6777,15 @@ def cw_timing_test(o, sender, listener, w=W):
     base = aa.base_of(S.host) if sender == "x6100" else ""
     factory = sender == "x6100" and aa.gcfix_of(base) == 0
     data = dict(j, wpm=wpm, pitch=pitch, depth_db=depth, runs=runs, keyer=keyer, base=base, keyer_since=mark.get("n"),
+                half=half and {k: half[k] for k in ("medians", "weight_ms", "worst_ms")},
                 wav=save_wav(o, x, f"cw_timing_{sender}_to_{listener}_{w}W.wav"))
     kw = ("its keyer's line not in its log (a GUI before 11-25, or one before 11-26, whose log came out a minute late)"
           if keyer is None else
           f"its keyer: {keyer[0]} edges, {keyer[1]} late over 15 ms, the latest {keyer[2]} ms")
-    says = (f"{sender}'s {text!r} at {wpm} WPM, {w} W, in {listener}'s audio: {ct.words(j)}; {kw} (key tone "
+    hw = (f"; at half amplitude a dot {half['medians'].get('dot')} ms and a gap {half['medians'].get('gap')} "
+          f"({half['weight_ms']:+d} ms weight), the worst {half['worst_ms']} ms off" if half and
+          half.get("weight_ms") is not None else "; at half amplitude not as keyed")
+    says = (f"{sender}'s {text!r} at {wpm} WPM, {w} W, in {listener}'s audio: {ct.words(j)}{hw}; {kw} (key tone "
             f"{_num(pitch)} Hz, {depth} dB deep)")
     if keyer is not None and keyer[1]:
         return False, says + ": the keyer itself late (the GUI's)", data

@@ -66,10 +66,14 @@ RF tests, 2026-11-27 evening (the owner's chain-ok 21:20): cw-dec-snr found the 
 AGC dip at RF gain 40 ("TESE E ESA"): marks that dip 9 dB are held young 64 ms (bc94cf18), and Dec SNR's refusal is
 judged in the decoder's own units (the bench's overs are 32-45 dB there, over its top of 30). cw-own-decode was
 never keyed (the Sentry's receive-only hold, unarmed): armed now; the X6200 reads its own keying, the X6100 now too
-(the GUI's key counts as own keying: a502535d) but garbled by its base. The X6100's factory base (V1.1.9) keys every
-mark 18 ms long (dot 77-78 ms, gap 41-43 at 20 WPM, at 0.1 and 1 W alike) and moves a few edges 27-62 ms: cw-text,
-cw-kbd, cw-dec-snr and cw-own-decode from the X6100 fail on it now and then, the X6200's pass. A keyer compensation
-would change the X6100's keying on the air: the owner's to decide. air sentry-lock x6200>x6100: its SCANNER part
+(the GUI's key counts as own keying: a502535d) but garbled by its base. The X6100's factory base (V1.1.9) moves a few
+edges 27-62 ms: cw-text, cw-kbd, cw-dec-snr and cw-own-decode from the X6100 fail on it now and then, the X6200's
+pass. Its marks are not long: cw-timing's dots of 77-78 ms (gap 41-43) at 20 WPM were its threshold's, halfway in dB
+on an over 26 dB deep (13 dB under the marks), where the X6100's slower fade after the key goes up counts into the
+mark. At half amplitude, where CW is timed and our decoder ends a mark, its dots are 65 ms and gaps 54, as the X6200's
+64 and 56 (2026-11-28). The owner said yes to an 18 ms shorter mark on that base; keyed so (both keyers, run 49) its
+dots went out 48 ms at half amplitude, gaps 72: not kept, nothing of it committed. cw-timing now says
+the weight at half amplitude (cw_timing.half_level). air sentry-lock x6200>x6100: its SCANNER part
 passes now; the HOLD part's scan sits on 14.0903, a steady carrier of the X6100's own (not in its 11-22 birdie list),
 locked from before and never quiet (a lock outlives F1 off; in BROWSE it never times out), so the test's carrier is
 never reached. With the owner's word (23:30): A's scan now skips Birdie Cal's carriers
