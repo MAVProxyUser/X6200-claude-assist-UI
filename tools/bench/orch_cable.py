@@ -22,6 +22,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 
@@ -526,11 +527,33 @@ CW_WEAK_MAX_DB = 30       # a weak over heard at most this far over the quiet: D
 CW_WEAK_STEP = 15         # the RF gain stepped down by this until the weak over is that weak (t_cw_dec_snr)
 
 
+def _decoder_snr(wav):
+    """An over's SNR in the decoder's own units, from its saved audio (tools/cw_replay, SNR=1: the keyed steps'
+    Receiver::snr_db, Dec SNR's units): (median, 10th, 90th percentile) dB, or None"""
+    if not wav or not os.path.exists(wav):
+        return None
+    tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cw_replay", "replay.py")
+    try:
+        out = subprocess.run([sys.executable, tool, wav, "300", "1100", "5"], capture_output=True, text=True,
+                             timeout=120, env=dict(os.environ, SNR="1")).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"keyed SNR: median ([-\d.]+) dB, 10th ([-\d.]+), 90th ([-\d.]+)", out)
+    return tuple(float(x) for x in m.groups()) if m else None
+
+
 def t_cw_dec_snr(o, s, l):
     """Dec SNR (CW 2:2): with it at 5 dB the listener copies a signal its RF gain has brought down; at 30 dB the same
-    signal prints nothing of it; at 5 dB again it copies (the threshold, not the signal, made the difference). The weak
-    overs' RF gain is set after over()'s own set-up (which put it back to 100 before 2026-11-26: the "weak" overs were
-    heard ~50 dB up and no threshold could show), and each is heard at most CW_WEAK_MAX_DB up or the test fails"""
+    signal prints nothing of it, where the bench can make one that weak; at 5 dB again it copies. The weak overs' RF
+    gain is set after over()'s own set-up (which put it back to 100 before 2026-11-26: the "weak" overs were heard
+    ~50 dB up and no threshold could show), and each is heard at most CW_WEAK_MAX_DB up or the test fails.
+
+    Dec SNR is in the decoder's units (Receiver::snr_db, its tone's bins against their noise), not the spectrum's: the
+    bench's overs, 0.1 W through 80 dB, came to 32-45 dB there whatever the listener's RF gain (the X6100's base
+    attenuator takes its own noise down with the signal: 45 at RF gain 55, 33 at 100), over Dec SNR's top of 30. So 30's
+    refusal is judged only of an over the decoder itself had under it (_decoder_snr, from the over's audio); else said,
+    and the copy alone judged. Its "refusal" before 2026-11-27 was the AGC's dip garbling the text (key_detector.cpp
+    YOUNG_DIP_STEPS), which made 5 miss too"""
     L = o.r[l]
     res = {}
     weak_rfg = CW_WEAK_RFG.get(l, 15)
@@ -565,18 +588,28 @@ def t_cw_dec_snr(o, s, l):
         res["rfg_tried"] = tried
         res.update(snr30_weak=text30, snr5_weak=text5, heard30_db=i30.get("heard"), heard5_db=i5.get("heard"),
                    wav30=i30.get("wav"), wav5=i5.get("wav"))
+        d30, d5 = _decoder_snr(i30.get("wav")), _decoder_snr(i5.get("wav"))
+        res.update(decoder_snr30=d30, decoder_snr5=d5)
         weak = [h for h in (i30.get("heard"), i5.get("heard")) if h is not None]
         if not weak:
             return None, f"the Watch kept no level for the weak overs: {res}", res
-        if max(weak) > CW_WEAK_MAX_DB:
+        # the 30 over, which the RF gain was stepped for, at most CW_WEAK_MAX_DB; the 5 over after it as the path
+        # gives it, a few dB either way (31.0 against 26.9 at the same RF gain, 2026-11-27)
+        if (i30.get("heard") or 0) > CW_WEAK_MAX_DB or (i5.get("heard") or 0) > CW_WEAK_MAX_DB + 4:
             return False, f"RF gain down to {weak_rfg} did not bring the signal down enough to test the threshold: " \
                           f"heard {weak} dB up (at most {CW_WEAK_MAX_DB} wanted; tried {tried})", res
-        if "TEST" in text30:
-            return False, f"Dec SNR 30 still copied {text30!r} from a signal heard {i30.get('heard')} dB up", res
         if "TEST" not in text5:
-            return False, f"Dec SNR 30 printed {text30!r} (as it should), but 5 also missed ({text5!r}) at " \
-                          f"{i5.get('heard')} dB", res
-        return True, f"heard {weak} dB up: Dec SNR 5 copies {text5!r}, 30 prints {text30!r}", res
+            return False, f"Dec SNR 5 missed ({text5!r}) a signal heard {i5.get('heard')} dB up (the decoder's " \
+                          f"{d5})", res
+        under = d30 is not None and d30[2] < 30.0     # the decoder had the over under Dec SNR 30, most of it
+        if under and "TEST" in text30:
+            return False, f"Dec SNR 30 still copied {text30!r} from an over the decoder had at {d30} dB", res
+        if under:
+            return True, f"heard {weak} dB up: Dec SNR 5 copies {text5!r}, 30 prints {text30!r} (the decoder had it " \
+                         f"at {d30[0]} dB)", res
+        return True, f"heard {weak} dB up: Dec SNR 5 copies {text5!r}; 30's refusal not judged: the decoder had the " \
+                     f"over at {d30[0] if d30 else '?'} dB (median), over Dec SNR's top of 30, the weakest the " \
+                     f"bench makes (30 printed {text30!r})", res
     except Refused as e:
         return False, str(e), res
 
@@ -850,22 +883,34 @@ def _tone_db(x, fs, hz):
 
 
 OWN_DECODE_TEXT = "VVV TEST"
-OWN_DECODE_WPM = 25
+OWN_DECODE_WPM = 20      # the X6100's factory base keys 25-28 WPM with marks run together ('VVEA', 2026-11-27)
+
+
+def _encoder_overs(r):
+    """How many overs r's GUI keyer has said it keyed since its start ('cw_encoder: N key edges' in its log)"""
+    try:
+        return int(bench.ssh(r.host, "grep -c 'cw_encoder: [0-9]* key edges' /tmp/x6100_log.txt; true", 15).strip()
+                   or 0)
+    except (Refused, ValueError):
+        return 0
 
 
 def t_cw_own_decode(o, s, l):
     """The sender's own keying decoded (cw-decoder-own-keying): KEY Train on (sidetone only: the X6200's base keys at
     0 W, the X6100's sounds it), KEY Speed 25, more than 2 s since a key-down (the next sets the decoder to KEY
-    Speed): its TCI CW 'VVV TEST' (its own keyer) read back by its own CW decoder from the first word. At the bench's
-    VOL; its own TCI audio of the over kept (own_decode_<s>.raw, 24 kHz int16 mono: tools/cw_replay) with its peak,
-    the decoder's only copy of it"""
+    Speed): its TCI CW 'VVV TEST' (its own keyer) read back by its own CW decoder from the first word. At VOL 20 (the
+    CW Trainer test's TRAIN_VOL): the bases put their sidetone, the decoder's only copy of the radio's own keying, in
+    the processor's audio not at all at VOL 0 (both read nothing at the bench's VOL 0, 2026-11-27; the trainer test
+    found it on the X6200 11-26). Its own TCI audio of the over kept (own_decode_<s>.raw, 24 kHz int16 mono:
+    tools/cw_replay) with its peak"""
     import numpy as np
     from tones import TciRx
     S = o.r[s]
     res = {}
     text, on, off = "", None, None
     try:
-        with cfg_kept(S, {"key_train": 1, "key_speed": OWN_DECODE_WPM, "cw_decoder": 1}):
+        import orch_cov_apps as oa
+        with cfg_kept(S, {"key_train": 1, "key_speed": OWN_DECODE_WPM, "cw_decoder": 1, "vol": oa.TRAIN_VOL}):
             ensure_alike(o, F_CW, 4, agc=2)
             res["vol"] = {n: r.state.get("vol") for n, r in o.r.items()}
             rx = TciRx(S.host)
@@ -873,15 +918,37 @@ def t_cw_own_decode(o, s, l):
                 with session(o, f"cw-own-decode {s}", [s], F_CW) as watch:
                     watch.shots_on_tx = False   # no screen grab into the sidetone the decoder reads
                     role(o, s)
-                    time.sleep(2.5)
-                    n0 = len(S.cw)
-                    on, off = tci_cw(o, S, OWN_DECODE_TEXT, watch)
-                    time.sleep(2.5)             # the decoder's last character out
-                    text = " ".join(S.cw[n0:].split()).upper()
+                    # the Sentry's A armed, as over() arms it: on the Sentry the radio is held receive-only and a TCI
+                    # key is refused without a word; unarmed, nothing was ever keyed and the decoder had nothing to
+                    # read (both radios '', their audio flat, 2026-11-27)
+                    o.changing += 1
+                    try:
+                        bench.arm(S, True, mode=4)
+                    finally:
+                        o.changing -= 1
+                    try:
+                        time.sleep(2.5)
+                        n0 = len(S.cw)
+                        edges0 = _encoder_overs(S)
+                        on, off = tci_cw(o, S, OWN_DECODE_TEXT, watch)
+                        time.sleep(2.5)             # the decoder's last character out
+                        text = " ".join(S.cw[n0:].split()).upper()
+                        # keyed: its TX (the X6200), or its keyer's own line for the over (the X6100's base keys at 0 W
+                        # under KEY Train and reports no TX)
+                        res["keyed"] = any(k for t, k in S.tx_hist if on <= t <= off + 1) or \
+                            _encoder_overs(S) > edges0
+                    finally:
+                        try:
+                            S.wait("off the air", lambda: not S.tx, 5)
+                        except Refused:
+                            S.stop()
+                        bench.arm(S, False)
                 x, x0 = rx.audio()
             finally:
                 rx.close()
         res["decoded"] = text
+        if not res.get("keyed"):
+            return False, f"{s} never keyed its TCI CW (KEY Train, armed): nothing for its decoder to read", res
         if x0 is not None and len(x) and on:
             seg = x[max(int((on - 1.0 - x0) * 24000), 0):max(int((off + 2.5 - x0) * 24000), 0)]
             if len(seg):
@@ -4612,7 +4679,7 @@ def t_cwkbd_live(o, s, l):
 # ---- what each test covers (features.json ids), its rows ----
 
 COVERS = {
-    "cw-dec-snr": (["cw-decoder-dec-snr"], []),
+    "cw-dec-snr": ([], ["cw-decoder-dec-snr"]),     # 30's refusal: no over weak enough in the decoder's units
     "cw-parse": (["cw-parse"], []),
     "cw-zap": (["cw-zap"], []),
     "cw-tuner": ([], ["cw-tuning-indicator"]),

@@ -1720,6 +1720,15 @@ def lev(a, b):
     return d[len(b)]
 
 
+def at_cw_speed(o, sender, fn):
+    """fn() with sender's KEY Speed at orch_cable's CW_DEC_SPEED (20 WPM), put back after: the X6100's factory base keys
+    its own 28 WPM with marks late and run together ('VVEA' for VVV, 'QJTST' for Q1TST, in its own decoder too,
+    2026-11-27), as cw-dec-snr, cw-parse and cw-his found before"""
+    import orch_cable as oc
+    with oc.cfg_kept(o.r[sender], oc.CW_DEC_SPEED):
+        return fn()
+
+
 def cw_text(o, sender, listener, f, label):
     """CW_TEXT keyed by sender's own keyer (its TCI) on f, both in CW; the listener's decoder (the remote's cw lines):
     PASS when CW_MUST is in what it printed (spaces as they come), its character error rate against CW_TEXT said"""
@@ -1728,7 +1737,7 @@ def cw_text(o, sender, listener, f, label):
     got = {}
 
     def body(watch):
-        with o.step(f"{sender} keys '{CW_TEXT}' at its KEY Speed"):
+        with o.step(f"{sender} keys '{CW_TEXT}' at its KEY Speed ({S.cfgv.get('key_speed', '?')} WPM)"):
             subprocess.run(["scp", "-q", "-o", "BatchMode=yes", os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "tci_cw_tx.py"), f"root@{S.host}:/tmp/tci_cw_tx.py"], check=True)
             L.cw = ""
@@ -7243,8 +7252,8 @@ TESTS = [
          voice(A, B, 29600000, 7, "fm-steps x6100>x6200"), 30),
     Test("fm-steps x6200>x6100", "X6200 TX, X6100 RX", "FM 29.600: the stepped sequence heard",
          voice(B, A, 29600000, 7, "fm-steps x6200>x6100"), 30),
-    *pair("cw-text", "", "CW 14.040: 'VVV TEST DE Q1TST' keyed, the other's decoder must print TEST DE Q1TST",
-          lambda s, l, n: (lambda o: cw_text(o, s, l, 14040000, n)), 30),
+    *pair("cw-text", "", "CW 14.040: 'VVV TEST DE Q1TST' keyed at 20 WPM, the other's decoder must print TEST DE "
+          "Q1TST", lambda s, l, n: (lambda o: at_cw_speed(o, s, lambda: cw_text(o, s, l, 14040000, n))), 30),
     Test("cw-quiet", "both RX", "CW 14.040, nothing sent: both from USB-D to CW three times and a stay in CW, 12 s of "
          "the cable's quiet each: neither decoder prints a character (their audio kept for tools/cw_replay)",
          t_cw_quiet, 120),
@@ -7313,8 +7322,9 @@ TESTS = [
           lambda s, l, n: (lambda o: sstv_picture(o, s, l, n)), 60),
     *pair("olivia-text", "", "Olivia: the sender's app sends a macro 'TEST'; the other's text log must show it in the "
           "variant sent", lambda s, l, n: (lambda o: olivia_text(o, s, l, n)), 75),
-    *pair("cw-kbd", "", "CW Keyboard 14.040: a stored message 'VVV VVV Q1TST' keyed by the app; the other's decoder must "
-          "print Q1TST", lambda s, l, n: (lambda o: cw_kbd(o, s, l, 14040000, n)), 45),
+    *pair("cw-kbd", "", "CW Keyboard 14.040: a stored message 'VVV VVV Q1TST' keyed by the app at 20 WPM; the other's "
+          "decoder must print Q1TST", lambda s, l, n: (lambda o: at_cw_speed(o, s, lambda: cw_kbd(o, s, l, 14040000,
+                                                                                                n))), 45),
     Test("pages-look", "both RX", "the Sentry's pages A-H on both, photographed together: the Sentry's colours on each, "
          "the two alike", pages_look, 90),
     Test("comp-mic x6100", "X6100 TX (its mic), X6200 RX (its speaker plays)", "Comp through the X6100's mic: the X6200's "
