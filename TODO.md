@@ -62,6 +62,15 @@ the live files put back after, 9/9). Not run: a start on the defaults (no params
 copy): these radios' WiFi is off by default (params.c wifi_enabled), which would cut the bench off from the radio. Coverage at 19:26: 704 features pass, 82 fail, 203 in part, 420 not covered
 (15:45: 675, 98, 192, 444).
 
+RF tests, 2026-11-27 evening (the owner's chain-ok 21:20): cw-dec-snr found the CW decoder ending dahs in the X6100's
+AGC dip at RF gain 40 ("TESE E ESA"): marks that dip 9 dB are held young 64 ms (bc94cf18), and Dec SNR's refusal is
+judged in the decoder's own units (the bench's overs are 32-45 dB there, over its top of 30). cw-own-decode was
+never keyed (the Sentry's receive-only hold, unarmed): armed now; the X6200 reads its own keying, the X6100 now too
+(the GUI's key counts as own keying: a502535d) but garbled by its base. The X6100's factory base (V1.1.9) keys every
+mark 18 ms long (dot 77-78 ms, gap 41-43 at 20 WPM, at 0.1 and 1 W alike) and moves a few edges 27-62 ms: cw-text,
+cw-kbd, cw-dec-snr and cw-own-decode from the X6100 fail on it now and then, the X6200's pass. A keyer compensation
+would change the X6100's keying on the air: the owner's to decide.
+
 Open, mine: sentry-lock x6200>x6100's HOLD (the X6100's scan taken by its own 14.0903 spur, to look at live); the
 X6200's trainer adds a dit before an answer (WMK for MMK, older than today's changes); the X6100's trainer misreads
 the start of calls (IK 2DCO heard EK 2KCO); the coverage tests' remaining features (in progress).
