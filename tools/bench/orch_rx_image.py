@@ -231,9 +231,184 @@ def t_rx_image(o, sender, listener):
     return True, says, {"points": rows}
 
 
+# ---- quiet-hz: where A's dial waits while SCAN CFG goes round the styles that stop on signals ----
+# A style that stops (SCANNER, SAMPLER, STOP & STAY, SURVEY) locks at once on what stands 10 dB (app_sentry.c LOCK_DB)
+# over its view's floor, and each lock is a C LOG entry or one counted up: air sentry-lock and the scancfg tests go
+# round the styles with A's dial on suite_cover_b.quiet_hz and ATT in. On 41 MHz the X6100's own 40.9935 MHz stands
+# 11 dB up in its A's 50 kHz: counted up by each round from 2026-11-24 to 11-28 (n=9; "C LOG as found False").
+# Both radios stepped together over frequencies in no Sentry band, receive only; each one's frames (the X6100's 100 kHz
+# on its dial, the X6200's as its zoom has them: less than its A's 360 kHz) looked at in its A's view
+QUIET_TRY = (41000000, 41250000, 41500000, 41750000, 42000000, 43000000, 44000000, 45000000)
+QUIET_MAX_DB = 7.0              # over the view's floor: too near A's lock (10 dB) for a quiet frequency
+QUIET_SPOT_DB = 5.0             # peaks said from this far over it
+QUIET_FRAMES_S = 3.0            # each frequency's frames, after a second for the new dial's
+A_VIEW_HALF = {"x6100": 25000, "x6200": 180000}     # A's view either side of its dial (app_sentry.c view_hz)
+
+
+def view_peaks(frames, cen, wid, half):
+    """The frames' median, in A's view (half either side of the dial, as far as the frames go): its peaks over the
+    view's own floor [{hz, db}] (strongest first), the floor, how far either side the frames reach"""
+    import numpy as np
+    a = np.median(np.array(frames), axis=0)
+    n = len(a)
+    per = wid / n
+    hz = cen - wid / 2 + (np.arange(n) + 0.5) * per
+    idx = np.where(np.abs(hz - cen) <= half)[0]
+    floor = float(np.median(a[idx]))
+    d = a - floor
+    out, i, hi = [], int(idx[0]), int(idx[-1])
+    while i <= hi:
+        if d[i] >= QUIET_SPOT_DB:
+            j = i
+            while j + 1 <= hi and d[j + 1] >= QUIET_SPOT_DB:
+                j += 1
+            k = i + int(np.argmax(d[i:j + 1]))
+            out.append({"hz": int(round(hz[k])), "db": round(float(d[k]), 1)})
+            i = j + 1
+        else:
+            i += 1
+    out.sort(key=lambda p: -p["db"])
+    return out, floor, min(half, wid / 2)
+
+
+def t_quiet_hz(o):
+    import suite_cover_b as cb
+    names = (H.A, H.B)
+    model = {n: o.c["radios"][n].get("model") or n for n in names}
+    half = {n: A_VIEW_HALF.get(model[n], 25000) for n in names}
+    rows = {n: {} for n in names}
+    with o.step("both on page A, USB, ATT in (as the style rounds have them)") as s:
+        o.both_page("A")
+        o.both({"mode": 2, "att": 1})
+        s.confirm(", ".join(f"{n} att {o.r[n].state.get('att')}" for n in names))
+    for f in QUIET_TRY:
+        with o.step(f"both on {f / 1e6:.3f} MHz: {QUIET_FRAMES_S:.0f} s of frames, the peaks in A's view") as s:
+            try:
+                o.both({"freq": f, "mode": 2, "att": 1})
+            except Refused as e:
+                s.confirm(f"not on both: {e}")
+                continue
+            time.sleep(1.0)                 # the new dial's frames
+            t0 = time.time()
+            time.sleep(QUIET_FRAMES_S)
+            parts = []
+            for n in names:
+                L = o.r[n]
+                cen = int(L.state.get("freq") or f)
+                fr, wid = _frames(L, t0, time.time(), cen), _wid(L, cen)
+                if len(fr) < 3 or not wid:
+                    rows[n][f] = None
+                    parts.append(f"{n}: {len(fr)} frames on {cen}")
+                    continue
+                pk, floor, cov = view_peaks(fr, cen, wid, half[n])
+                rows[n][f] = {"peaks": pk[:6], "floor_db": round(floor, 1), "covered_hz": int(cov), "frames": len(fr)}
+                parts.append(f"{n} (±{cov / 1000:.0f} of A's ±{half[n] / 1000:.0f} kHz): " +
+                             (", ".join(f"{p['hz'] / 1e6:.4f} +{p['db']}" for p in pk[:4]) or "nothing"))
+            s.confirm("; ".join(parts))
+    ok, says = True, []
+    for n in names:
+        q = cb.quiet_hz(o.r[n])
+        m = rows[n].get(q)
+        clean = [f / 1e6 for f, v in rows[n].items() if v is not None and
+                 (not v["peaks"] or v["peaks"][0]["db"] < QUIET_MAX_DB)]
+        if m is None:
+            ok = False
+            says.append(f"{n}'s quiet {q / 1e6:.3f} MHz: not measured")
+            continue
+        top = m["peaks"][0] if m["peaks"] else None
+        good = top is None or top["db"] < QUIET_MAX_DB
+        ok = ok and good
+        says.append(f"{n}'s quiet {q / 1e6:.3f} MHz: " +
+                    (f"{top['hz'] / 1e6:.4f} +{top['db']} dB over the floor" if top else "nothing") +
+                    f" in ±{m['covered_hz'] / 1000:.0f} of A's ±{half[n] / 1000:.0f} kHz" +
+                    ("" if good else f" (A's lock is 10 dB: under {QUIET_MAX_DB:g} wanted)") +
+                    f"; under {QUIET_MAX_DB:g} dB on {', '.join(f'{x:g}' for x in clean) or 'none'} MHz")
+    return ok, "; ".join(says), {"rows": {n: {str(f): v for f, v in r.items()} for n, r in rows.items()}}
+
+
+# ---- centre-spike: the receivers' own spike at their frames' centre, where A's lock puts the signal ----
+# A's lock tunes the dial onto the signal, and while it holds asks whether anything 6 dB up (app_sentry.c HEARD_DB) is
+# within 1.5 kHz of it (con_at): the frames' centre, the base's FFT's DC. air sentry-lock's SCANNER step stayed on its
+# carrier's 14.030 more than 10 s after the carrier ended (2026-11-27 14:19, 11-28 06:01); quiet-hz found the X6100's
+# centre 7 to 25 dB up at 41-45 MHz, and C LOG has an X6100 stop at its dial (40.9997, 11-28). Both radios on the
+# test's 20 m frequencies in USB and CW, receive only: the centre's bins and the lock's 1.5 kHz either side measured
+SPIKE_AT = (14012000, 14018000, 14024000, 14030000, 14036000, 14042000, 14215000)
+SPIKE_MODES = ((2, "USB"), (4, "CW"))
+LOCK_HALF_HZ = 1500             # con_at's reach either side of the lock (track_step: hz_bins(1500))
+
+
+def centre_levels(frames, cen, wid, half, dial):
+    """Over the floor of A's view: the frames' centre cen (its two bins either side), and the highest within
+    LOCK_HALF_HZ of the dial (in CW the X6100's frames are centred off its dial)"""
+    import numpy as np
+    a = np.median(np.array(frames), axis=0)
+    n = len(a)
+    per = wid / n
+    hz = cen - wid / 2 + (np.arange(n) + 0.5) * per
+    floor = float(np.median(a[np.abs(hz - dial) <= half]))
+    mid = n // 2
+    near = np.abs(hz - dial) <= LOCK_HALF_HZ
+    return round(float(a[mid - 2:mid + 3].max()) - floor, 1), round(float(a[near].max()) - floor, 1)
+
+
+def t_centre_spike(o):
+    names = (H.A, H.B)
+    model = {n: o.c["radios"][n].get("model") or n for n in names}
+    half = {n: A_VIEW_HALF.get(model[n], 25000) for n in names}
+    rows = {n: [] for n in names}
+    with o.step("both on page A, ATT off, preamp off (the air tests' receiver)") as s:
+        o.both_page("A")
+        o.both({"att": 0, "pre": 0})
+        s.confirm(", ".join(f"{n} att {o.r[n].state.get('att')} pre {o.r[n].state.get('pre')}" for n in names))
+    for m, mname in SPIKE_MODES:
+        for f in SPIKE_AT:
+            with o.step(f"both on {f / 1e6:.3f} MHz {mname}: {QUIET_FRAMES_S:.0f} s of frames, the centre") as s:
+                try:
+                    o.both({"freq": f, "mode": m})
+                except Refused as e:
+                    s.confirm(f"not on both: {e}")
+                    continue
+                time.sleep(1.0)
+                t0 = time.time()
+                time.sleep(QUIET_FRAMES_S)
+                parts = []
+                for n in names:
+                    L = o.r[n]
+                    dial = int(L.state.get("freq") or f)
+                    cs = [c for t, c, w, v in list(L.r.spectra) if t0 <= t and v and abs(c - dial) <= 2000]
+                    cen = max(set(cs), key=cs.count) if cs else dial
+                    fr, wid = _frames(L, t0, time.time(), cen), _wid(L, cen)
+                    if len(fr) < 3 or not wid:
+                        parts.append(f"{n}: {len(fr)} frames on {cen}")
+                        continue
+                    c_db, lock_db = centre_levels(fr, cen, wid, half[n], dial)
+                    rows[n].append({"hz": f, "mode": mname, "centre_hz": cen, "centre_db": c_db, "lock_db": lock_db,
+                                    "frames": len(fr)})
+                    parts.append(f"{n} centre {cen - dial:+d} Hz off the dial +{c_db}, within 1.5 kHz of the dial "
+                                 f"+{lock_db}")
+                s.confirm("; ".join(parts))
+    says = []
+    for n in names:
+        r = rows[n]
+        if not r:
+            says.append(f"{n}: no frames")
+            continue
+        held = [x for x in r if x["lock_db"] >= 6.0]
+        says.append(f"{n}: the centre {min(x['centre_db'] for x in r):+} to {max(x['centre_db'] for x in r):+} dB "
+                    f"over A's floor; 6 dB up within 1.5 kHz of the dial (a lock never quiet) on " +
+                    (", ".join(f"{x['hz'] / 1e6:.3f} {x['mode']} +{x['lock_db']}" for x in held) or "none"))
+    return None, "; ".join(says), {"rows": rows}
+
+
 def tests(Test, A, B):
     """orch's Test rows of this module"""
     return [
+        Test("centre-spike", "both, receive only", "the receivers' own spike at their frames' centre (the base FFT's "
+             "DC), where A's lock puts the signal and asks whether it is still 6 dB up: air sentry-lock's 20 m "
+             "frequencies in USB and CW; a measurement (LOOK)", lambda o: t_centre_spike(o), 90),
+        Test("quiet-hz", "both, receive only", "where A's dial waits while SCAN CFG goes round the styles that stop on "
+             "signals (suite_cover_b.quiet_hz): nothing 7 dB over the floor in A's view of each radio, ATT in; the "
+             "candidates in no Sentry band measured", lambda o: t_quiet_hz(o), 60),
         Test("rx-image x6200>x6100", "X6200 TX, X6100 RX (dials apart, declared)", "what a 0.1 W carrier makes in the "
              "X6100's 100 kHz spectrum frames, the carrier stepped across them and then 54 to 125 kHz under its dial: "
              "images (none, 11-28), aliases, spurs, the frames' outer parts (air sentry-lock's HOLD scan sat on one)", lambda o: t_rx_image(o, B, A), 200),
@@ -242,4 +417,6 @@ def tests(Test, A, B):
 
 COVERS = {
     "rx-image": ([], ["sentry-a-scan-stops-on-signal"]),
+    "quiet-hz": ([], ["scancfg-style-behaviour"]),
+    "centre-spike": ([], ["sentry-a-scan-stops-on-signal"]),
 }

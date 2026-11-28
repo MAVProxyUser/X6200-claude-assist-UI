@@ -88,12 +88,24 @@ from its dial, where its base IQ climbs) up 15-20 dB, following the dial; and an
 (the frames' width), 55 dB over the quiet with the carrier just past the frames' edge (54 kHz under the dial), +4 to
 +11 dB from 64 to 125 kHz. So A's scan, started with the carrier on and its view over such a peak, stops on a real
 signal on the cable, and the lock it keeps (it outlives F1 off and never times out in BROWSE) held the later HOLD
-attempts there. The HOLD step's fix is in the test (A's lock let go and its view on the carrier before the carrier
-starts); whether F1 off should let go of A's lock is the owner's. The birdie skip has no orch test yet (the X6100's scan stopped on
-no birdie in 45 s before or after it: a test needs a birdie put where the bench's carrier is). The HOLD step now starts 10 kHz under
-its carrier (2 kHz was inside USB's passband) and says the dials A visited.
+attempts there. How it got there (2026-11-28): F1 off leaves A in a stopping style's AUTO round its place as the
+scan left it (the anchor; a dial set from the remote does not move it) with any lock it had, and a lock keeps the scan
+from its first hop: with the carrier on, A stopped near its old place (14.0903; 14.0485, 14.0514, 14.1081) and each
+lock's end tuned it back there. The HOLD step now lets A's lock go (SCAN CFG's F2 twice) and makes A's place the
+band's first view (F1 on, its first hop, F1 off) before its carrier: run 54, locked on 14.036, held 7 s past the
+carrier, went on in 0.3 s. Whether F1 off should let go of A's lock, and whether a dial set from the remote should
+move A's place, are the owner's. Also in the test now: C LOG read till it has the second push (its file read too soon
+said it once, 3 runs in 4); the styles gone round on suite_cover_b.quiet_hz, the X6100's 41.75 MHz (orch quiet-hz:
+its own 40.9941 MHz stands 14 dB up in its A's view on 41 MHz, counted up in C LOG by every round since 11-24, n=9);
+if SCANNER's A is still on its carrier 10 s after it (11-27 14:19, 11-28 06:01; no spike at the frames' centre on 20
+m, orch centre-spike), a picture of the X6100 and 15 s more. The 11-27 leftovers of runs whose put-back never ran (8
+on the X6200, 3 on the X6100, at the test's own frequencies; the X6200's blocked x6100>x6200) taken out with C's F2,
+backups in /mnt/bench_backups. Not run since: the X6200's battery at 7.2 V, 24 %, on its 11.9 V supply refuses it as
+sender and as listener (11-28 06:26). The birdie skip has no orch test yet (the X6100's scan stopped on no birdie in
+45 s before or after it: a test needs a birdie put where the bench's carrier is).
 
-Open, mine: sentry-lock x6200>x6100's HOLD (the X6100's scan taken by its own 14.0903 spur, to look at live); the
+Open, mine: air sentry-lock both ways once the X6200's battery is up (SCANNER's go-on now and then stuck: its
+picture says what A was doing); the
 X6200's trainer adds a dit before an answer (WMK for MMK, older than today's changes); the X6100's trainer misreads
 the start of calls (IK 2DCO heard EK 2KCO); the coverage tests' remaining features (in progress).
 

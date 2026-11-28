@@ -527,6 +527,14 @@ def a_idle(r, h):
 
 QUIET_HZ = 41000000         # A's dial while a push in SCAN CFG may switch a stopping style on for a moment: no band
                             # memory there, far from any C LOG entry, the attenuator in
+QUIET_HZ_X6100 = 41750000   # the X6100's (orch quiet-hz, 2026-11-28): its own 40.9941 MHz is 14 dB up in its A's
+                            # view on 41 MHz, nothing 5 dB up on 41.75 (the X6200 has 41.520 14 dB up in its frames there)
+
+
+def quiet_hz(r):
+    """QUIET_HZ for radio r: nothing in its A's view that a stopping style would lock on (orch quiet-hz)"""
+    return QUIET_HZ_X6100 if "6100" in r.name else QUIET_HZ
+
 
 
 def log_text(h):
@@ -1563,14 +1571,14 @@ def cfg_find(r, h):
     """SCAN CFG's chosen row (the GUI keeps it, no file says it): a push, the setting it changed found and put back
     with more pushes on that row. A push that shows nothing (GO ON AFTER with a stay that does not use it, or B'S STEP,
     kept nowhere) is told apart by the row before it (STAY or A'S STEP). A push on STYLE or STAY switches on a style
-    that stops on signals for a moment: A's dial is put where little is heard first (QUIET_HZ, the attenuator in),
+    that stops on signals for a moment: A's dial is put where little is heard first (quiet_hz, the attenuator in),
     and the test puts C LOG back after (log_put_back). (the row chosen now, the row it was on as found); every
     setting as before"""
     b = cfg_look(h)
     if style_of(b["dwell"], b["stay"], b["quiet"]) == 5 or b["prio"] or b["rout"]:
         raise Unsure(f"SCAN CFG as found (style {STYLE_NAMES[style_of(b['dwell'], b['stay'], b['quiet'])]}, priority "
                      f"{b['prio']}, A's routine {b['rout']}): a push there could not be put back")
-    bench.ensure(r, {"freq": QUIET_HZ, "att": 1})
+    bench.ensure(r, {"freq": quiet_hz(r), "att": 1})
     cfg_push(r)
     time.sleep(2.4)
     a = cfg_wait(h, lambda a: a != b, 2.5)
@@ -1671,7 +1679,7 @@ def t_scancfg_style(run):
         seen, ok, custom, browse, back, logged = [], True, False, False, False, False
         a = {}
         bench.open_page(r, "A")
-        bench.ensure(r, {"freq": QUIET_HZ, "att": 1})   # the styles that stop on signals: where little is heard
+        bench.ensure(r, {"freq": quiet_hz(r), "att": 1})   # the styles that stop on signals: where little is heard
         try:
             cfg_open(r, "A")
             b = cfg_look(h)
@@ -1807,7 +1815,7 @@ def t_scancfg_chans(run):
         finally:
             cfg_close(r)
             logged = log_put_back(r, h, lb)
-        visits = [v for v in visits if v["freq"] != QUIET_HZ]      # where cfg_find left the dial, before the first hop
+        visits = [v for v in visits if v["freq"] != quiet_hz(r)]      # where cfg_find left the dial, before the first hop
         for v in visits:
             c = by_hz.get(v["freq"])
             if not c:
@@ -1867,7 +1875,7 @@ def t_scancfg_sweep(run):
         finally:
             cfg_close(r)
             logged = log_put_back(r, h, lb)
-        fq = [v for _, v in seen if v != QUIET_HZ]  # where cfg_find left the dial, if the sweep had not hopped yet
+        fq = [v for _, v in seen if v != quiet_hz(r)]  # where cfg_find left the dial, if the sweep had not hopped yet
         ok = on == 1 and len(set(fq)) >= 2 and set(fq) <= set(hops) and back and logged
         return ok, (f"bands marked in D: {', '.join(hops.values())}; SWEEP ON (routine {on}): the X6200 went "
                     + " ".join(hops.get(v, f'{v / 1e6:.3f} (NOT A MARKED BAND)') for v in fq[:6])

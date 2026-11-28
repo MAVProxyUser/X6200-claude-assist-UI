@@ -2390,6 +2390,36 @@ def b_sentry(P):
             bench.tap(L, "F1")
             cb.gwait(h, lambda g: (g.get("s.rout", 0) != 0) == on, 6)
 
+    # A's view either side of its place (app_sentry.c view_hz): the X6100's middle 50 kHz, the X6200's 360
+    view_half = 25000 if model(P.run, L.name) == "x6100" else 180000
+
+    def a_let_go():
+        """A's lock let go, with or without one: SCAN CFG's F2 twice (a lock held, then gone on from; a held one gone
+        on from, then nothing to hold; none, nothing twice). A lock is in no state the bench reads"""
+        cb.cfg_open(L, "A")
+        for _ in range(2):
+            bench.tap(L, "F2")
+            time.sleep(0.6)
+        cb.cfg_close(L)
+
+    def a_first_view():
+        """A's place made the band's first view: F1 on (the scan's first hop: the band's lowest view, 20 m's 14.000
+        to 14.050 on the X6100), F1 off there within the scan's 2 s step (A's place set where the dial is). A's dial
+        then, or None when the scan did not go on or off"""
+        bench.open_page(L, "A")
+        if cb.gstate(h).get("s.rout", 0) != 0:
+            a_scan(False)
+        f0 = L.state.get("freq")
+        bench.tap(L, "F1")
+        until(L, lambda: L.state.get("freq") != f0, 1.2)     # none when the dial was there already
+        time.sleep(0.7)                                       # the frames of the new dial: A's centre follows them
+        bench.tap(L, "F1")
+        if cb.gwait(h, lambda g: g.get("s.rout", 0) == 0, 6).get("s.rout", 0) != 0:
+            a_scan(False)
+            return None
+        time.sleep(1.5)                                       # no lock with no carrier: the dial stays
+        return L.state.get("freq")
+
     visited = []        # the dials A was on while lock_at waited (the HOLD step says them)
 
     def lock_at(f, secs):
@@ -2456,6 +2486,20 @@ def b_sentry(P):
                 t_go = time.time()
                 break
             time.sleep(0.1)
+        if t_go is None:                    # A still there 10 s on (2026-11-27 14:19, 11-28 06:01; the X6100's frames
+            # have no spike there, orch centre-spike): its screen and routine, then up to 15 s more, to tell slow from
+            # stuck
+            pic = bench.screenshot(L, f"sentry-lock SCANNER still on {f2 / 1e6:.3f}")
+            g = cb.gstate(h)
+            late = None
+            while time.time() - t_e < 25:
+                if not near(L.state.get("freq"), f2):
+                    late = time.time() - off if off else None
+                    break
+                time.sleep(0.2)
+            said.append(f"SCANNER: A still on {f2 / 1e6:.3f} 10 s after the carrier (routine {g.get('s.rout')}, mode "
+                        f"{g.get('s.mode')}, style {cb.style_of(g.get('s.dwell'), g.get('s.stay'), g.get('s.quiet'))}"
+                        f"; picture {os.path.basename(pic) if pic else 'none'}): went on {fmt(late)} s after it")
         gone_s = (t_go - off) if t_go and off else None
         a_scan(False)
         r2, w2 = heard_over(P, f2, on, off) if on else (None, "no over")
@@ -2470,13 +2514,24 @@ def b_sentry(P):
                     f"{fmt((t_l - t_s) if t_l else None)} s after F1, stayed while it talked {stayed}, went on "
                     f"{fmt(gone_s)} s after it stopped (GO ON AFTER 3 s); {w2}")
         # 3: SCAN CFG's F2 HOLD keeps it past GO ON AFTER; F2 again (GO ON) moves on at once
-        # 10 kHz under the carrier: in the X6100's 50 kHz picture, out of its passband. 2 kHz under, USB's passband
-        # held the carrier already and the scan hopped on past it, to the band's own signals leaking in (14.0902,
-        # 14.1354: "locked on 14.036 False", 2026-11-27)
-        try:
-            bench.ensure(L, {"freq": f3 - 10000, "mode": 2})
-        except bench.Refused as e:          # A's dial held where its scan stopped: the scan goes on from there
-            said.append(f"A's dial not set by the carrier for HOLD ({e})")
+        # A made ready with no carrier on (2026-11-28). F1 off leaves A in SCANNER's AUTO round its place as the scan
+        # left it (anchor: the remote's dial does not move it) and with any lock it had (a lock outlives F1 off), and a
+        # lock keeps the scan from its first hop. So A stopped round its old place, on what the carrier brings 55-76
+        # kHz over itself (orch rx-image) or near it, and each lock's end tuned it back there (14.0903; 14.0485,
+        # 14.0514, 14.1081: "locked on 14.036 False", 11-27 and 11-28; the dial set 10 kHz under the carrier never
+        # counted). Now: the lock let go, then A's place made the band's first view (the scan's first hop, F1 off
+        # there), which holds the carrier and none of its far peaks; then the carrier, then the scan
+        place3, why3 = None, ""
+        for _ in range(2):
+            a_let_go()
+            place3 = a_first_view()
+            why3 = "" if place3 is not None and abs(place3 - f3) < view_half - 3000 else (
+                f"A's place {fmt(place3 and place3 / 1e6, '{:.4f}')} has no view of {f3 / 1e6:.3f}")
+            if not why3:
+                break
+        if why3:
+            said.append(why3)
+        bench.ensure(L, {"mode": 2})
         bg = carrier(f3, 13.0)
         keyed3 = until(S, lambda: S.tx, 6)
         time.sleep(1.0)
@@ -2500,11 +2555,12 @@ def b_sentry(P):
         cb.cfg_close(L)
         a_scan(False)
         res["F2 HOLD keeps it, GO ON moves on"] = not stop3 and bool(t_l3) and held and moved is not None
-        said.append(f"HOLD's carrier on the air {bool(keyed3)}, A's dial from {(f3 - 10000) / 1e6:.3f}: {seen3[:8]}")
+        said.append(f"HOLD's carrier on the air {bool(keyed3)}, A's place {fmt(place3 and place3 / 1e6, '{:.4f}')} "
+                    f"(its lock let go, the band's first view), its dials: {seen3[:8]}")
         said.append(f"locked on {f3 / 1e6:.3f} {bool(t_l3)}, F2 HOLD in SCAN CFG: still there 7 s after the carrier "
                     f"ended {held}; F2 GO ON: moved on in {fmt(moved)} s")
         # BROWSE again (F1 round the styles, the dial where little is heard: SAMPLER, STAY and SURVEY stop on signals)
-        bench.ensure(L, {"freq": cb.QUIET_HZ, "att": 1})
+        bench.ensure(L, {"freq": cb.quiet_hz(L), "att": 1})
         cb.cfg_open(L, "A")
         for k in (2, 3, 4, 0):
             bench.tap(L, "F1")
@@ -2531,10 +2587,17 @@ def b_sentry(P):
                     f"{int(L.state.get('freq', 0)) / 1e6:.4f}")
         res["the MFK pans by A's KNOB STEP, its push locks on the carrier"] = pan and push_on(f1, "push")
         # 4: the same signal again: its C LOG entry counted up and brought to the top
-        t4 = radio_now(h)
         again = push_on(f1, "the same carrier pushed again")
-        saved = log_saved(h, t4)            # the list in its file (a minute at most behind)
-        rows = log_rows(h)
+        # the list in its file, a minute at most behind: read till it has the push counted twice (75 s). A file
+        # written after the time taken before the push but before its lock read as caught up and said it once
+        # (2026-11-27 and 11-28, 3 runs in 4: "(14215000, 1)")
+        end, saved = time.time() + 75.0, False
+        while True:
+            rows = log_rows(h)
+            saved = any(near(hz, f1, 2000) and n >= 2 for hz, n, _ in rows if all(abs(hz - o) > 2500 for o in old))
+            if saved or time.time() > end:
+                break
+            time.sleep(3.0)
         new = [(hz, n) for hz, n, _ in rows if all(abs(hz - o) > 2500 for o in old)]
         top = [hz for hz, _, _ in rows[:len(new)]]
         # the test's three, in the order they came, newest first; others A's scan stopped on as it went (the
@@ -2544,8 +2607,8 @@ def b_sentry(P):
                  near(mine[1][0], f3, 2000) and mine[1][1] == 1 and near(mine[2][0], f2, 2000) and mine[2][1] == 1 and
                  [hz for hz, _ in new] == top)
         res["C LOG: each lock, newest first, the same signal counted"] = again and order
-        said.append(f"C LOG's new entries (hz, times), newest first: {new} (file caught up {saved}; the test's: the "
-                    f"push's twice, then the HOLD's, then SCANNER's: {order}"
+        said.append(f"C LOG's new entries (hz, times), newest first: {new} (the file has the push twice {saved}; "
+                    f"the test's: the push's twice, then the HOLD's, then SCANNER's: {order}"
                     + (f"; others A stopped on: {[x for x in new if x not in mine]}" if len(mine) != len(new) else "")
                     + ")")
     except bench.Refused as e:              # said, and the Sentry still put back and checked below
@@ -2557,7 +2620,7 @@ def b_sentry(P):
             if cb.gstate(h).get("s.rout", 0) != 0:
                 a_scan(False)
             if style_set:
-                bench.ensure(L, {"freq": cb.QUIET_HZ, "att": 1})
+                bench.ensure(L, {"freq": cb.quiet_hz(L), "att": 1})
                 cb.cfg_open(L, "A")
                 for _ in range(6):
                     x = cb.cfg_look(h)

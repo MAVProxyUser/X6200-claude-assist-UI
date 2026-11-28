@@ -3705,10 +3705,10 @@ def t_scancfg_priority(o, s, l):
             o.both_page("A")
             o.both({"freq": F_USB, "mode": 2, "pwr": H.W})
         cb.cfg_open(L, "A")
-        # cfg_find puts l's dial on the quiet 41 MHz (ATT in) for its pushes, then back to 14.200: declared (the guard
+        # cfg_find puts l's dial on its quiet frequency (suite_cover_b.quiet_hz, ATT in) for its pushes, then back to 14.200: declared (the guard
         # called it OUT OF SYNC, 2026-11-28)
         with bench.apart({"freq": bench.STEPPED, "mode": bench.STEPPED, "att": bench.STEPPED},
-                         f"scancfg-priority: {l}'s dial on suite_cover_b.QUIET_HZ while SCAN CFG's row is found"):
+                         f"scancfg-priority: {l}'s dial on suite_cover_b.quiet_hz while SCAN CFG's row is found"):
             try:
                 cur, _ = cb.cfg_find(L, L.host)
                 cb.cfg_goto(L, cur, cb.CR["PRIO"])
