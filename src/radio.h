@@ -235,6 +235,10 @@ void radio_set_line_out(uint8_t d);
 /* The GUI's CW key. False: a key down refused where the radio may not transmit (the screen says why, #121), or while
  * the base sends no data (#152) */
 bool radio_set_morse_key(bool on);
+/* The GUI's CW key going (its keyer: TCI CW, the CW messages, the keyboards): down now, or up for less than gap_ms.
+ * Under KEY Train the X6100's base keys at 0 W and reports no TX, so the radio's state never says its own keying is
+ * on the air (cw.cpp's decoder: cw-own-decode, 2026-11-27). Any thread */
+bool radio_gui_cw_keying(uint32_t gap_ms);
 /* The GUI's CW key down for at most ms at a time, 0: no limit (QRSS3's TX time limit): past it the radio thread lets
  * go of the key and counts it. Any thread */
 void radio_set_morse_key_limit(uint32_t ms);

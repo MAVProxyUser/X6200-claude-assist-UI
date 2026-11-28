@@ -327,6 +327,7 @@ static uint64_t         block_time;     /* the whole register block last sent (r
 static volatile bool    morse_on;
 static volatile uint32_t morse_ms;      /* the GUI's CW key last changed */
 static atomic_uint      morse_down_ms;  /* when the GUI's CW key went down (get_time, never 0), 0: up */
+static atomic_uint      morse_up_ms;    /* when it last went up (get_time, never 0), 0: never (radio_gui_cw_keying) */
 static atomic_uint      morse_limit_ms; /* radio_set_morse_key_limit, 0 none */
 static atomic_uint      morse_cuts;
 static uint64_t         atu_time;       /* the tune asked, then the base last seen in TX for it */
@@ -1742,7 +1743,15 @@ bool radio_set_morse_key(bool on) {
     }
     hw_pin_set(HW_PIN_MORSE_KEY, on);
     atomic_store(&morse_down_ms, on ? morse_ms | 1 : 0);
+    if (!on)
+        atomic_store(&morse_up_ms, morse_ms | 1);
     return true;
+}
+
+bool radio_gui_cw_keying(uint32_t gap_ms) {
+    uint32_t up = atomic_load(&morse_up_ms);
+
+    return atomic_load(&morse_down_ms) != 0 || (up != 0 && (uint32_t)get_time() - up < gap_ms);
 }
 
 void radio_set_morse_key_limit(uint32_t ms) {

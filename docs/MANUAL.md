@@ -7229,7 +7229,12 @@ every new mode cleared it, CW to CW-R and back excepted).
   -66 at 40 and -48 at 63, the Moni level not counting (measured on base
   1.0.8). While the X6200 keys in CW the decoder's audio is raised to make
   up for it. Up to v0.3.9 its decoder read nothing of your keying at the
-  usual Volumes, and the trainer missed dits (#198, #199).
+  usual Volumes, and the trainer missed dits (#198, #199). Under KEY Train
+  the X6100's base keys at 0 W and reports no transmission, so up to
+  v0.3.12.49 its decoder took the sidetone of a message or TCI text for a
+  station's, held on its own 290 Hz noise line, and read nothing of it; it
+  now counts the GUI's key going (up for less than a word gap) as your own
+  keying too.
 - Your speed: the first key-down of a transmission, after 2 s or more
   without one, sets the decoder to the KEY Speed (KEY > Speed), on both
   radios. Before that it went on at the band's speed, or at whatever speed

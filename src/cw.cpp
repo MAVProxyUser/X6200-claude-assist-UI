@@ -254,7 +254,13 @@ void cw_put_audio_samples(unsigned int n, float *samples) {
     if (own >= 0)
         receiver->own(own);
 
-    bool tx = radio_get_state() == RADIO_TX;
+    /* Our own keying: the radio's TX, or the GUI's CW key going (up less than a word gap and a half, 10 dits at the
+     * KEY Speed): under KEY Train the X6100's base keys at 0 W and reports no TX, and its decoder took its sidetone
+     * for the band's, its lock held by its own 290 Hz noise line: nothing read (orch cw-own-decode, 2026-11-27). Not
+     * with the CW Trainer open: its own keying is told its own way (pin, own) */
+    int  kw = key_wpm;
+    bool tx = radio_get_state() == RADIO_TX ||
+              (!tr && radio_gui_cw_keying(kw > 0 ? (uint32_t)(12000 / kw) : 1000u));
     if (tx && !own_tx && !tr && rx_count >= OWN_OVER_GAP_S * (AUDIO_CAPTURE_RATE / AUDIO_DECIM))
         receiver->expect(key_wpm);
     /* Our own over ended (0.4 s of receive after it, longer than a QSK break between characters): the band measured
