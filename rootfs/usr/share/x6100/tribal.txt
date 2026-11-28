@@ -16,6 +16,14 @@ Eastern Massachusetts ARES: NBEMS on 3584.5 kHz, 1500 Hz on the waterfall, THOR2
 
 Practise before you need it: with a friend, a 2 m simplex test in MT63-2KL with an flmsg form, or a Winlink message sent peer to peer, with no internet on either end.
 
+GHOSTNET: THE JS8CALL NET ON 7.107 MHZ
+
+From S2 Underground (@s2_underground): the GhostNet net in JS8Call is on 7.107 MHz on Thursday nights in North America, 01:00 UTC (already Friday by the UTC date: 8 PM Eastern in winter, 9 PM in summer), but people typically monitor the frequency 24/7, so a message sent there at any hour may be read. 7.107 MHz is the dial frequency in USB-D, as JS8Call's dials are: the stations are above it at their offsets.
+
+Their plan, GhostNet version 1.5 (github.com/s2underground/GhostNet), has after the JS8Call half hour Winlink peer to peer over VARA on 7.107 MHz (01:30 UTC), RTTY at 45.45 baud on 7.077 MHz (02:00 UTC) and LSB voice on 7.190 MHz for a dire emergency only. Europe's net is on 7.107 MHz on Thursdays at 18:00 UTC and Australia's at 07:00 UTC; the bridges between the regions are on Saturdays, mostly on 14.107 and 3.575 MHz. The groups to watch: @GHOSTNET, its routine traffic, and @GSTFLASH, emergency traffic that any station receiving it passes on at once.
+
+On this radio: F SYSTEM > GHOSTNET (LISTEN) and F1 TUNE put A on 7.107 MHz USB-D to listen, with the antenna for 40 m and the nets' next times. The JS8 app reads the messages: Freq > GhostNet adds @GHOSTNET, @GSTFLASH and your regional group, and can remind you before each net. Transmitting there is the JS8 app's, with your licence.
+
 THE TROPOSPHERIC DUCTING MAP (THE ATMOSPHERE'S TUNNELS)
 
 Above 30 MHz signals normally reach a little past the horizon. When a layer of warm, dry air lies over cooler, moist air (a temperature inversion), radio waves bend back down along it and travel inside it as in a pipe: a duct. Then 2 m, 70 cm, FM broadcast and TV signals go hundreds of km, sometimes well over a thousand. It comes most with calm high pressure, on clear nights and early mornings, in late summer and autumn, along coasts and over the Great Lakes and the Gulf of Mexico; rarely west of the Rockies but along the Pacific coast.

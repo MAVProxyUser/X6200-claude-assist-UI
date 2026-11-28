@@ -18689,6 +18689,32 @@
   "manual_ref": "### GMRS: listening only"
  },
  {
+  "id": "f-system-ghostnet",
+  "area": "sentry-F",
+  "feature": "F SYSTEM's GHOSTNET (LISTEN), last on F's list: a page over F, F1 or a push TUNEs A to 7.107 MHz USB-D (the JS8 dial, by hand from then) and shows A, nothing keyed; it shows D's antenna for the band 7.107 is in (40 M: 'ANTENNA: JPC-12 RED-SILVER, TESTED', BEST, NOW), the schedule's JS8 windows on 7.107 (ghostnet_nets.txt, /mnt's first) the next first with UTC and local times and how long till then, 'LISTENED TO AROUND THE CLOCK' and the groups; '(A IS ON IT)' once tuned; F5/BACK/APP or leaving F closes; the VFO and MFK move nothing",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "page F, MFK to s.sys 14 (fsel 'GHOSTNET (LISTEN)'), F2: 'ghostnet?' open 1, its ant as bands[]'s 40 M, its sched rows as the radio's schedule's JS8 windows on 7.107 by next start, keys F1 TUNE / F5 BACK; knob main 1: freq unmoved; F1: pg A, freq 7107000, mode 3, tx 0 (orch ghostnet-f)",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
+  "id": "f-system-tribal-ghostnet",
+  "area": "sentry-F",
+  "feature": "TRIBAL KNOWLEDGE's GhostNet entry (S2 Underground, @s2_underground): the JS8Call net on 7.107 MHz USB-D, Thursday nights in North America (01:00 UTC), monitored 24/7; GhostNet 1.5's other windows (VARA 7.107, RTTY 7.077, LSB 7.190), Europe's and Australia's nets, the bridges, @GHOSTNET and @GSTFLASH, F's GHOSTNET page and the JS8 app",
+  "radios": [
+   "x6100",
+   "x6200"
+  ],
+  "needs": "none",
+  "how_to_confirm": "/usr/share/x6100/tribal.txt has the heading 'GHOSTNET: THE JS8CALL NET ON 7.107 MHZ'; page F, MFK to s.sys 10, F2, the MFK through the pages: 'tribal?' text with the heading, S2 UNDERGROUND (@S2_UNDERGROUND), 7.107 MHZ, 01:00 UTC, 24/7 (orch ghostnet-tribal)",
+  "suite_has": null,
+  "manual_ref": "### D BANDS, E DECODE, F SYSTEM"
+ },
+ {
   "id": "a-gmrs-wr12",
   "area": "sentry-A",
   "feature": "GMRS on the X6200's own receiver through the WR12 (or a transverter covering 462-468 MHz): A's F1 on D's GMRS band scans the 22 channels in NFM (not the band), A's targets named GMRS20 / G20 IN, G's GMRS and GMRS RPT IN groups on the radio with CH-/CH+ and CH LIST; A/B there arms nothing ('NO TX: GMRS: ONLY RADIOS CERTIFIED FOR IT (47 CFR 95E)')",

@@ -64,7 +64,9 @@
  *  {HIS} would send now: 'his {"call":..,"chars":..,"shown":..}' (the decoder panel's text length, the panel shown).
  *  "fkeys?" answers what F1-F5 show now: 'fkeys {"hid":0,"t":[TEXT x5],"m":[N x5]}' (each as the code gives it,
  *  its line break a space, "" for none; m: 1 marked, 2 greyed; hid: the buttons hidden), so a test sees an
- *  app's page before it presses a key.
+ *  app's page before it presses a key. "ghostnet?" answers the Sentry F's GHOSTNET page as drawn ('ghostnet {"open":1,
+ *  "on":0,"head":..,"tune":..,"ant":..,"sched":[..],"keys":[..]}', app_sentry_ghostnet_t; "set gnp 1|0" opens it, only
+ *  on F), "tribal?" F's TRIBAL KNOWLEDGE page open ('tribal {"open":1,"page":3,"pages":9,"text":..}').
  *  "type TEXT" gives the text window open (a reference, a QSO line, a callsign) TEXT and its Enter, as a keyboard;
  *  "hkey VM|UP|DOWN 1|0" presses or lets go a hand mic key, as the base reports one; "cwsend TEXT" keys the text with
  *  the radio's own keyer in CW (a session that may transmit), as a CW message is sent: no TCI client round it.
@@ -369,7 +371,9 @@ typedef enum { P_FREQ, P_MODE, P_AGC, P_PRE, P_ATT, P_NB, P_NR, P_SQL, P_RFG, P_
                /* TUNE's own power (tenths), for the bench's tune tests, set and put back as found */
                P_TPWR, P_KT,
                /* B's channel and G's SDR channel (app_sentry.h), for the bench's SDR tests (GMRS, receive only) */
-               P_BCH, P_GSDR, P_GMP } pcmd_id_t;
+               P_BCH, P_GSDR, P_GMP,
+               /* F's GHOSTNET page opened or closed (app_sentry.h), for the bench's test of it (receive only) */
+               P_GNP } pcmd_id_t;
 
 typedef struct {
     pcmd_id_t id;
@@ -1231,6 +1235,7 @@ static void panel_apply(void *arg) {
         case P_BCH:    app_sentry_b_channel_set(p->a); break;
         case P_GSDR:   app_sentry_g_sdr_set(p->a); break;
         case P_GMP:    app_sentry_gmrs_panel(p->a != 0); break;
+        case P_GNP:    app_sentry_ghostnet_page(p->a != 0); break;
         case P_TPWR:   /* the Settings slider's range (tune_tx.h) */
             cfg_tune_pwr_set(LV_CLAMP((int)lroundf(TUNE_PWR_MIN_W * 10), p->a, (int)lroundf(TUNE_PWR_MAX_W * 10))
                              / 10.0f);
@@ -1267,6 +1272,7 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
         {"split", P_SPLIT}, {"rit", P_RIT}, {"xit", P_XIT}, {"heard", P_HEARD},
         {"ifs", P_IFS},   {"comp", P_COMP}, {"wch", P_WCH}, {"tpwr", P_TPWR},
         {"kt", P_KT},     {"bch", P_BCH},   {"gsdr", P_GSDR}, {"gmp", P_GMP},
+        {"gnp", P_GNP},
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strcasecmp(names[i].name, name))
@@ -1291,6 +1297,8 @@ static void panel_set(client_t *c, const char *name, const char *v1, const char 
             set_refused(c, "gsdr: only while the Sentry shows G");
         else if (names[i].id == P_GMP && app_sentry_page() != 'F')
             set_refused(c, "gmp: only while the Sentry shows F");
+        else if (names[i].id == P_GNP && app_sentry_page() != 'F')
+            set_refused(c, "gnp: only while the Sentry shows F");
         else if (names[i].id == P_IFS && !(radio_caps() & HW_CAP_IF_SHIFT))
             set_refused(c, "ifs: this radio's base has no IF shift");   /* the X6200's: only the dial would move */
         else if (names[i].id == P_COMP && !(radio_caps() & HW_CAP_COMP))
@@ -3001,6 +3009,59 @@ static void handle_text(client_t *c, char *text) {
             k += json_str(out + k, sizeof(out) - k, s.keys[i]);
         }
         snprintf(out + k, sizeof(out) - k, "]}");
+        client_text(c, out);
+        return;
+    }
+    if (!strcmp(text, "ghostnet?")) {       /* F's GHOSTNET page as the screen has it (the bench's): reading touches
+                                             * nothing */
+        app_sentry_ghostnet_t s;
+        char                  out[2600];
+        size_t                k;
+
+        if (!allowed(c, ROLE_OPERATE, false))
+            return;
+        app_sentry_ghostnet_state(&s);
+        for (char *q = s.foot; *q; q++)     /* its two lines one: json_str leaves control characters out */
+            if (*q == '\n') *q = ' ';
+        const struct {
+            const char *name, *text;
+        } f[] = {{"head", s.head}, {"tune", s.tune}, {"how", s.how},           {"ant", s.ant},
+                 {"band", s.band}, {"sched_head", s.sched_head}, {"watch", s.watch}, {"foot", s.foot},
+                 {"legend", s.legend}};
+
+        k = (size_t)snprintf(out, sizeof(out), "ghostnet {\"open\":%d,\"on\":%d", s.open, s.on);
+        for (size_t i = 0; i < sizeof(f) / sizeof(f[0]) && k < sizeof(out) - 420; i++) {
+            k += (size_t)snprintf(out + k, sizeof(out) - k, ",\"%s\":", f[i].name);
+            k += json_str(out + k, sizeof(out) - k, f[i].text);
+        }
+        k += (size_t)snprintf(out + k, sizeof(out) - k, ",\"sched\":[");
+        for (int i = 0; i < 5 && k < sizeof(out) - 220; i++) {
+            k += (size_t)snprintf(out + k, sizeof(out) - k, "%s", i ? "," : "");
+            k += json_str(out + k, sizeof(out) - k, s.sched[i]);
+        }
+        k += (size_t)snprintf(out + k, sizeof(out) - k, "],\"keys\":[");
+        for (int i = 0; i < 5 && k < sizeof(out) - 80; i++) {
+            k += (size_t)snprintf(out + k, sizeof(out) - k, "%s", i ? "," : "");
+            k += json_str(out + k, sizeof(out) - k, s.keys[i]);
+        }
+        snprintf(out + k, sizeof(out) - k, "]}");
+        client_text(c, out);
+        return;
+    }
+    if (!strcmp(text, "tribal?")) {         /* F's TRIBAL KNOWLEDGE as WHAT IT DOES has it (the bench's) */
+        static app_sentry_tribal_t s;       /* the server thread's alone: 2 KB off its stack */
+        static char                out[sizeof(s.text) * 2 + 96];
+        size_t                     k;
+
+        if (!allowed(c, ROLE_OPERATE, false))
+            return;
+        app_sentry_tribal_state(&s);
+        for (char *q = s.text; *q; q++)     /* its line ends as spaces: json_str leaves control characters out */
+            if (*q == '\n') *q = ' ';
+        k = (size_t)snprintf(out, sizeof(out), "tribal {\"open\":%d,\"page\":%d,\"pages\":%d,\"text\":", s.open,
+                             s.page, s.pages);
+        k += json_str(out + k, sizeof(out) - k - 2, s.text);
+        snprintf(out + k, sizeof(out) - k, "}");
         client_text(c, out);
         return;
     }

@@ -101,6 +101,7 @@
 #include "gps.h"
 #include "station.h"          /* station_position: the GPS, the phone, else the locator */
 #include "nifog.h"            /* F's NIFOG: CISA's guide, its pages drawn at build time */
+#include "ghostnet.h"         /* F's GHOSTNET: the JS8 app's GhostNet schedule */
 #include "settings_window.h"  /* settings_network_name: where NIFOG's PDF is on the web */
 
 #include <stdatomic.h>
@@ -1123,7 +1124,7 @@ static lv_obj_t *badge_l[2], *title_l, *status_l, *batt_l;
 static lv_obj_t *ab_arrow, *ab_tag;     /* PTT refused: where the A/B key is (landscape) */
 extern const lv_font_t power_sym_14;    /* the clock's: Montserrat's battery and bolt, and a plug (clock.c) */
 #define SYMBOL_PLUG "\xEF\x87\xA6"     /* U+F1E6 */
-typedef struct { lv_obj_t *frame, *cap, *line, *opt[14]; int n; } box_t;     /* opt: F SYSTEM's 14 rows the most */
+typedef struct { lv_obj_t *frame, *cap, *line, *opt[15]; int n; } box_t;     /* opt: F SYSTEM's 15 rows the most */
 static lv_obj_t *tick_l[TICKS], *tgt_l[LABELS];
 /* SCAN CFG: its rows (the MFK goes through them, its push or a tap changes the one chosen), what the chosen one does,
  * and what each radio's scan does now */
@@ -1147,7 +1148,8 @@ static list_sbar_t *sb_bd, *sb_lg, *sb_dsel, *sb_drow;     /* D's bands, C's log
 typedef enum {
     SYS_SETTINGS, SYS_APPS, SYS_MODES, SYS_AIRSPACE, SYS_VHF, SYS_POOL, SYS_GPS, SYS_CLASSIC, SYS_SHELL, SYS_BASEFW,
     SYS_TRIBAL, SYS_NIFOG, SYS_HOME,
-    SYS_GMRS,                           /* last: the items before it keep their places (the bench counts them) */
+    SYS_GMRS,
+    SYS_GHOSTNET,                       /* last: the items before it keep their places (the bench counts them) */
     SYS_N
 } sysitem_t;
 static const struct {
@@ -1201,6 +1203,10 @@ static const struct {
                       "(AN RTL-SDR, A KRAKENSDR'S, A HACKRF, A BLADERF) OR THE " BOARD_NAME "'S OWN RECEIVER WHERE IT "
                       "REACHES 462 MHZ (THE X6200 THROUGH THE WR12). F1 TUNES, F2 SCANS THE 22, F3 WATCHES ONE ON A "
                       "SPARE RTL, F4 THE CTCSS AND DCS CODES. RECEIVE ONLY: GMRS IS FOR RADIOS CERTIFIED FOR IT."},
+    {"GHOSTNET (LISTEN)", "GHOSTNET, S2 UNDERGROUND'S JS8CALL NET ON 7.107 MHZ: THURSDAY NIGHTS IN NORTH AMERICA "
+                          "(01:00 UTC, FRIDAY BY THE UTC DATE), AND LISTENED TO AROUND THE CLOCK. PUSH TO OPEN: F1 "
+                          "TUNES A THERE IN USB-D, WITH THE ANTENNA FOR 40 M AND THE NETS' TIMES. RECEIVE ONLY: THE "
+                          "JS8 APP DECODES IT (FREQ > GHOSTNET)."},
 };
 _Static_assert(sizeof(sys_items) / sizeof(sys_items[0]) == SYS_N, "F SYSTEM: an item for each of sysitem_t");
 static int       sys_sel;
@@ -1922,6 +1928,9 @@ static void box_make(box_t *b, lv_obj_t *parent, int x, int y, int w, int h, con
     for (int i = 0; i < n; i++) {
         b->opt[i] = label(parent, &pixel_20, amb, x + 3, y + 30 + i * step, w - 6, LV_TEXT_ALIGN_CENTER, "");
         lv_obj_set_height(b->opt[i], step);
+        /* pixel_20's capitals are the line's rows 3-15: rows closer than 16 px (F's 15, 15 px apart) lift the text
+         * so they end inside the row, whole, and the chosen row's bar covers nothing of the row above */
+        if (step < 16) lv_obj_set_style_pad_top(b->opt[i], step - 16, 0);
         lv_label_set_long_mode(b->opt[i], LV_LABEL_LONG_CLIP);
         lv_obj_set_style_bg_color(b->opt[i], amb, 0);
         if (tag >= 0) {
@@ -3651,6 +3660,33 @@ static void trib_turn(int dir) {
     show_screen();
 }
 
+/* For the remote's "tribal?" (each 50 ms, rtl_timer_cb): the page open as WHAT IT DOES has it, zero while closed */
+static pthread_mutex_t     trib_pub_mux = PTHREAD_MUTEX_INITIALIZER;
+static app_sentry_tribal_t trib_pub;
+static bool                trib_pub_open;
+
+static void trib_publish(void) {
+    bool open = root && trib_on && scr == SCR_SYSTEM;
+
+    if (!open && !trib_pub_open) return;    /* closed, and said so already */
+    pthread_mutex_lock(&trib_pub_mux);
+    memset(&trib_pub, 0, sizeof(trib_pub));
+    if (open) {
+        trib_pub.open  = 1;
+        trib_pub.page  = trib_n ? trib_i + 1 : 0;
+        trib_pub.pages = trib_n;
+        snprintf(trib_pub.text, sizeof(trib_pub.text), "%s", trib_n ? trib_pg[trib_i] : "");
+    }
+    pthread_mutex_unlock(&trib_pub_mux);
+    trib_pub_open = open;
+}
+
+void app_sentry_tribal_state(app_sentry_tribal_t *out) {
+    pthread_mutex_lock(&trib_pub_mux);
+    *out = trib_pub;
+    pthread_mutex_unlock(&trib_pub_mux);
+}
+
 /* ---- F's NIFOG: CISA's National Interoperability Field Operations Guide ---- */
 
 /* The owner, 2026-11-25: CISA's NIFOG (v2.02) in the firmware, on F and on the web server. Its 192 pages are drawn by
@@ -4689,6 +4725,14 @@ static void       gm_fill(void);
 static void       gm_action(int k);
 static void       gm_move(int d);
 static const char *gm_label(int k);
+static bool       gn_on;                /* F SYSTEM's GHOSTNET page (gn_open) */
+static void       gn_open(void);
+static void       gn_close(void);
+static void       gn_hide(void);        /* gn_close without redrawing: as another screen is shown */
+static void       gn_fill(void);
+static void       gn_action(int k);
+static const char *gn_label(int k);
+static void       gn_publish(void);
 static int        pp_sel, pp_n;
 static sdr_unit_t pp_u[SDR_POOL_UNITS];
 static void       show_keys(void);
@@ -5151,6 +5195,7 @@ static bool knob_taken(void) {
     if (wl_on && scr == SCR_WALKIE) return true;    /* G's channel list open: the VFO goes down it */
     if (nf_on && scr == SCR_SYSTEM) return true;    /* F's NIFOG open: the VFO scrolls its page */
     if (gm_on) return true;                         /* F's GMRS panel: the VFO goes down it, never the dial */
+    if (gn_on) return true;                         /* F's GHOSTNET page: only its TUNE moves the dial */
     if (g_armed || g_sdr_armed || radio_get_state() == RADIO_TX) return true;  /* held: dial_held says why */
     if (scr == SCR_WALKIE) return w_sdr_hz != 0;    /* the dial, fine, as on A (only the arrows step CB's
                                                      * channels); on the SDR its channel */
@@ -5425,6 +5470,8 @@ static void rtl_timer_cb(lv_timer_t *t) {
     rtl_scan_step();
     sdr_publish(false);                 /* B and G for the remote's state */
     nf_publish();                       /* F's NIFOG for the remote's "nifog?" */
+    gn_publish();                       /* F's GHOSTNET page for "ghostnet?" */
+    trib_publish();                     /* F's TRIBAL KNOWLEDGE for "tribal?" */
     {   /* The radio's own transmitter keyed by its PTT while armed (A or G): out of play mode for the over
          * (rtl_spectrum_own_tx). With B's stick on the speaker the base is in play mode, its mics at 0, and the over
          * went out silent. Let go 0.3 s after the over, so a PTT's bounce does not flip it */
@@ -6143,6 +6190,12 @@ static void show_legend(void) {
 
     if (scr == SCR_SYSTEM && nf_on) {   /* F's NIFOG open */
         legend_set("VFO: SCROLL | MFK: PAGE, PUSH CLOSE | F1 F3: SECTION, F4: CONTENTS | " RING_HINT " | GEN: HELP");
+        return;
+    }
+    if (scr == SCR_SYSTEM && gn_on) {   /* F's GHOSTNET page open: the push TUNEs, the knobs move nothing else */
+        snprintf(l, sizeof(l), "VFO: - | MFK: -, PUSH TUNE | " RING_HINT " | VOL: %s %s %s | GEN: HELP", who,
+                 vol_short[vol_fn], v);
+        legend_set(l);
         return;
     }
     if (scr == SCR_WALKIE && wl_on) {   /* G's channel list open: both knobs go down it, GEN closes it */
@@ -7095,6 +7148,7 @@ static void go(scr_t s) {
     if (s != SCR_SYSTEM) nf_close();       /* and NIFOG */
     if (scr == SCR_LOG && s != SCR_LOG) g_leave(s == SCR_RTL);
     if (s != SCR_SYSTEM) gm_hide();     /* F's GMRS panel: F's alone */
+    if (s != SCR_SYSTEM) gn_hide();     /* and its GHOSTNET page */
     scr_t was = scr;
 
     scr = s;
@@ -7664,6 +7718,7 @@ static void blink_cb(lv_timer_t *t) {
     if (scr == SCR_RTL) watch_show();                       /* the watch channels, open or quiet */
     if (pp_on) pp_fill();                                   /* the pool's panel: who has what, as it changes */
     if (gm_on && n % 2 == 0) gm_fill();                     /* F's GMRS panel: where B and A are, each second */
+    if (gn_on && n % 2 == 0) gn_fill();                     /* F's GHOSTNET page: the nets' countdown, D's NOW */
     if (gp_on && n % 2 == 0) gp_fill();                     /* the GPS panel: each second */
     rds_show(false);
     g_rds_take();                                   /* C's entries named by it */
@@ -7721,6 +7776,7 @@ static const char *f_label(int k) {
     if (pp_on) return pp_label(k);
     if (gp_on) return gp_label(k);
     if (gm_on) return gm_label(k);
+    if (gn_on) return gn_label(k);
     switch (scr) {
         case SCR_SCAN: {        /* C's keys, for the X6200: SCAN its band, the BAND, VIEW, LISTEN, SCAN CFG */
             static const char *const views[] = {"RTL", "Split", BOARD_NAME};
@@ -8097,6 +8153,10 @@ static void sys_open(int i) {
         gm_open();
         return;
     }
+    if (i == SYS_GHOSTNET) {
+        gn_open();
+        return;
+    }
     if (i == SYS_VHF) {
         go(SCR_RTL);
         return;
@@ -8239,6 +8299,10 @@ static void fkey(int k) {
     }
     if (gm_on) {                        /* F's GMRS panel: its keys */
         gm_action(k);
+        return;
+    }
+    if (gn_on) {                        /* F's GHOSTNET page: F1 TUNE, F5 back, the rest nothing */
+        gn_action(k);
         return;
     }
     if (sp_on) {                        /* B's SDR box: F4 (LISTEN) goes down it, the rest wait */
@@ -8600,6 +8664,18 @@ static void key_cb(lv_event_t *e) {
             default: break;
         }
     }
+    if (gn_on) {                        /* F's GHOSTNET page: its push tunes, BACK closes, the MFK's turn nothing (one
+                                         * item); the volume and the ring as ever */
+        switch (key) {
+            case LV_KEY_LEFT:
+            case LV_KEY_UP:
+            case LV_KEY_RIGHT:
+            case LV_KEY_DOWN: return;
+            case LV_KEY_ENTER: gn_action(0); return;
+            case LV_KEY_ESC: gn_close(); return;
+            default: break;
+        }
+    }
     if (pp_on) {                        /* the SDR pool's panel: the MFK goes through it, its push uses one on B */
         switch (key) {
             case LV_KEY_LEFT:
@@ -8693,6 +8769,8 @@ static void click_cb(lv_event_t *e) {
             pp_action(0);
         else if (gm_on)
             gm_action(0);               /* F's GMRS panel: the one chosen tuned */
+        else if (gn_on)
+            gn_action(0);               /* F's GHOSTNET page: TUNE */
         else if (sp_on)
             sp_close(sp_units[sp_sel]);
         else if (wl_on && scr == SCR_WALKIE)
@@ -8716,6 +8794,7 @@ static void rotary_cb(int32_t diff) {
         gm_move(diff > 0 ? 1 : -1);
         return;
     }
+    if (gn_on) return;                  /* F's GHOSTNET page: the dial moves only by its TUNE */
     if (dial_held()) return;            /* TX unlocked: the dial is not moved by a bump */
     if (f4_roll && scr == SCR_RTL) {    /* B's F4 held: its SDRs, one a click, used when F4 is let go */
         f4_rolled = true;
@@ -8848,6 +8927,7 @@ static bool front_key(int key, int state) {
             if (tap && gp_on) gp_close();
             else if (tap && pp_on) pp_close();
             else if (tap && gm_on) gm_close();
+            else if (tap && gn_on) gn_close();
             else if (tap) go(SCR_SYSTEM);
             else if (hold && pp_on) pp_close();
             else if (hold) pp_open();
@@ -11452,6 +11532,7 @@ static void gm_open(void) {
     if (g_portrait || !gm_box) return;
     if (pp_on) pp_close();
     if (gp_on) gp_close();
+    gn_hide();
     gm_on = true;
     gm_fill();
     lv_obj_clear_flag(gm_box, LV_OBJ_FLAG_HIDDEN);
@@ -11533,6 +11614,201 @@ static const char *gm_label(int k) {
         case 3: return gm_tones ? "Channels" : "Tones";
         default: return "Back";
     }
+}
+
+/* ---- F SYSTEM's GHOSTNET page (the owner, 2026-11-27, from S2 Underground, @s2_underground: "the S8CALL net is on
+ * 7.107 MHz Thursdays 01:00 UTC, but people typically monitor the frequency 24/7"; S8CALL is JS8Call, the one program
+ * GhostNet 1.5 names for its nets, and its 01:00 UTC is Thursday night in North America, Friday by the UTC date).
+ * One thing to do: F1 or a push TUNEs A to 7.107 MHz in USB-D, the JS8 app's GhostNet dial (the suppressed carrier,
+ * as JS8Call's dials are: the net's stations above it at their offsets), the dial the operator's from then
+ * (x62_by_hand), and A shown. Beside it D's own antenna for the band 7.107 is in (bands[]: 40 M's ANTENNA, BEST and
+ * NOW) and the schedule's JS8 windows on 7.107 (ghostnet_nets.txt, the JS8 app's GhostNet list: the DATA partition's
+ * copy first), each with its next start in UTC and the radio's time and how long till then. F5, BACK or APP closes,
+ * and so does leaving F. Receive only: nothing here transmits; the JS8 app sends, with the operator's licence ---- */
+#define GN_HZ    7107000
+#define GN_KHZ   (GN_HZ / 1000)
+#define GN_SCHED 5                      /* the windows listed, the next first */
+
+static lv_obj_t *gn_box, *gn_head_l, *gn_tune_l, *gn_how_l, *gn_ant_l, *gn_band_l, *gn_sh_l, *gn_row_l[GN_SCHED],
+                *gn_watch_l, *gn_foot_l;
+static pthread_mutex_t       gn_pub_mux = PTHREAD_MUTEX_INITIALIZER;
+static app_sentry_ghostnet_t gn_pub;    /* the page as drawn, for the remote's "ghostnet?" (gn_publish) */
+typedef struct {
+    time_t                t;            /* its next start, or the start of the one going on */
+    const ghostnet_seg_t *g;
+} gn_win_t;
+
+/* A on the net now: its dial and mode as TUNE leaves them */
+static bool gn_on_it(void) {
+    return cparam_i_get(cfg_fg_freq) == GN_HZ && cparam_i_get(cfg_cur_mode) == radio_mode_usb_dig;
+}
+
+static void gn_upper(char *s) {
+    for (; *s; s++) *s = (char)toupper((unsigned char)*s);
+}
+
+/* "IN 2 D 4 H", "IN 3 H 05 MIN", "IN 12 MIN", "ON NOW" */
+static void gn_till(time_t start, time_t now, char *s, size_t n) {
+    long d = (long)(start - now);
+
+    if (d <= 0) snprintf(s, n, "ON NOW");
+    else if (d < 3600) snprintf(s, n, "IN %ld MIN", (d + 59) / 60);
+    else if (d < 86400) snprintf(s, n, "IN %ld H %02ld MIN", d / 3600, d % 3600 / 60);
+    else snprintf(s, n, "IN %ld D %ld H", d / 86400, d % 86400 / 3600);
+}
+
+static void gn_fill(void) {
+    const ghostnet_sched_t *sc = ghostnet_sched();
+    time_t                  now = time(NULL);
+    gn_win_t                w[GHOSTNET_SEGS_MAX];
+    int                     nw = 0, bi = band_for(GN_HZ);
+    char s[240], f[16], when[64], till[24], now_s[16];
+
+    if (!gn_box) return;
+    fmt_mhz(f, sizeof(f), GN_HZ, 3);
+    lv_label_set_text_fmt(gn_head_l, "GHOSTNET: S2 UNDERGROUND'S JS8CALL NET ON %s MHZ, RECEIVE ONLY", f);
+    snprintf(s, sizeof(s), "TUNE: A ON %s MHZ USB-D, THE JS8 DIAL%s", f, gn_on_it() ? "   (A IS ON IT)" : "");
+    lv_label_set_text(gn_tune_l, s);
+    lv_label_set_text(gn_how_l, "THE NET'S STATIONS ARE ABOVE THE DIAL AT THEIR OFFSETS (HEARTBEATS UNDER 1000 HZ). THE "
+                                "JS8 APP DECODES THEM: F SYSTEM > DIGITAL MODES > JS8, FREQ > GHOSTNET.");
+    if (bi >= 0) {
+        band_now(bi, now_s, sizeof(now_s));
+        snprintf(s, sizeof(s), "ANTENNA: %s", bands[bi].ant);
+        lv_label_set_text(gn_ant_l, s);
+        snprintf(s, sizeof(s), "D'S %s: BEST %s, NOW %s", bands[bi].name, best_name(bands[bi].when), now_s);
+    } else {
+        lv_label_set_text(gn_ant_l, "ANTENNA: NONE IN D'S TABLE");
+        s[0] = 0;
+    }
+    gn_upper(s);
+    lv_label_set_text(gn_band_l, s);
+    /* The JS8 windows on 7.107, by their next start (one going on first) */
+    for (int i = 0; sc && i < sc->nsegs && nw < GHOSTNET_SEGS_MAX; i++) {
+        const ghostnet_seg_t *g = &sc->segs[i];
+
+        if (g->khz != GN_KHZ || strcmp(g->mode, "JS8")) continue;
+        w[nw].t = ghostnet_next_utc(now, g->wday, g->hh, g->mm, g->minutes);
+        w[nw].g = g;
+        for (int k = nw++; k > 0 && w[k].t < w[k - 1].t; k--) {
+            gn_win_t t = w[k];
+
+            w[k]     = w[k - 1];
+            w[k - 1] = t;
+        }
+    }
+    lv_label_set_text(gn_sh_l, nw ? "THE NETS ON 7.107 (GHOSTNET 1.5), THE NEXT FIRST"
+                                  : "THE NETS: NONE ON 7.107 IN THE SCHEDULE (GHOSTNET_NETS.TXT)");
+    for (int r = 0; r < GN_SCHED; r++) {
+        if (r >= nw) {
+            lv_label_set_text(gn_row_l[r], "");
+            continue;
+        }
+        ghostnet_when(w[r].t, when, sizeof(when));
+        gn_till(w[r].t, now, till, sizeof(till));
+        snprintf(s, sizeof(s), "%-30.30s %s  %d MIN  %s", ghostnet_net_name(sc, w[r].g->net), when, w[r].g->minutes,
+                 till);
+        gn_upper(s);
+        lv_label_set_text(gn_row_l[r], s);
+    }
+    lv_label_set_text(gn_watch_l, "LISTENED TO AROUND THE CLOCK, NOT ONLY AT THE NETS (S2 UNDERGROUND). ITS GROUPS: "
+                                  "@GHOSTNET, @GSTFLASH (EMERGENCY TRAFFIC). MORE IN TRIBAL KNOWLEDGE.");
+    lv_label_set_text(gn_foot_l, "F1/PUSH: TUNE   F5, BACK OR APP: CLOSE\nNO TX FROM HERE: THE SENTRY ONLY LISTENS.");
+}
+
+/* For the remote's "ghostnet?" (each 50 ms, rtl_timer_cb): the page's words as drawn, zero while it is closed */
+static void gn_publish(void) {
+    app_sentry_ghostnet_t p;
+
+    memset(&p, 0, sizeof(p));
+    if (root && gn_on && scr == SCR_SYSTEM && gn_box) {
+        p.open = 1;
+        p.on   = gn_on_it();
+        snprintf(p.head, sizeof(p.head), "%s", lv_label_get_text(gn_head_l));
+        snprintf(p.tune, sizeof(p.tune), "%s", lv_label_get_text(gn_tune_l));
+        snprintf(p.how, sizeof(p.how), "%s", lv_label_get_text(gn_how_l));
+        snprintf(p.ant, sizeof(p.ant), "%s", lv_label_get_text(gn_ant_l));
+        snprintf(p.band, sizeof(p.band), "%s", lv_label_get_text(gn_band_l));
+        snprintf(p.sched_head, sizeof(p.sched_head), "%s", lv_label_get_text(gn_sh_l));
+        for (int r = 0; r < GN_SCHED && r < (int)N_OF(p.sched); r++)
+            snprintf(p.sched[r], sizeof(p.sched[r]), "%s", lv_label_get_text(gn_row_l[r]));
+        snprintf(p.watch, sizeof(p.watch), "%s", lv_label_get_text(gn_watch_l));
+        snprintf(p.foot, sizeof(p.foot), "%s", lv_label_get_text(gn_foot_l));
+        if (legend_l) snprintf(p.legend, sizeof(p.legend), "%s", lv_label_get_text(legend_l));
+        for (int k = 0; k < 5; k++)
+            if (key_l[k]) snprintf(p.keys[k], sizeof(p.keys[k]), "%s", lv_label_get_text(key_l[k]));
+    }
+    pthread_mutex_lock(&gn_pub_mux);
+    gn_pub = p;
+    pthread_mutex_unlock(&gn_pub_mux);
+}
+
+void app_sentry_ghostnet_state(app_sentry_ghostnet_t *out) {
+    pthread_mutex_lock(&gn_pub_mux);
+    *out = gn_pub;
+    pthread_mutex_unlock(&gn_pub_mux);
+}
+
+void app_sentry_ghostnet_page(bool on) {
+    if (!root || scr != SCR_SYSTEM) return;
+    if (!on) {
+        if (gn_on) gn_close();
+        return;
+    }
+    trib_close();
+    nf_close();
+    sys_sel = SYS_GHOSTNET;             /* as chosen on F's list, then F2 */
+    show_screen();
+    gn_open();
+}
+
+static void gn_open(void) {
+    if (g_portrait) {                   /* drawn on the landscape screen: not over G held up */
+        w_say("GHOSTNET: FROM F", "GHOSTNET", "THE GHOSTNET PAGE OPENS FROM F SYSTEM.");
+        return;
+    }
+    if (!gn_box) return;
+    if (pp_on) pp_close();
+    if (gp_on) gp_close();
+    gm_hide();
+    gn_on = true;
+    gn_fill();
+    lv_obj_clear_flag(gn_box, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(gn_box);
+    pp_keys();
+}
+
+static void gn_hide(void) {
+    if (!gn_on) return;
+    gn_on = false;
+    if (gn_box) lv_obj_add_flag(gn_box, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void gn_close(void) {
+    gn_hide();
+    pp_keys();
+    show_screen();
+}
+
+/* TUNE: A on 7.107 MHz USB-D by hand, A shown; nothing keyed */
+static void gn_tune(void) {
+    if (dial_held()) return;            /* TX unlocked or on the air: the dial stays (dial_held says why) */
+    x62_by_hand();
+    if (!tune(GN_HZ, radio_mode_usb_dig)) {
+        osd("THE DIAL IS HELD", "AN APP OR THE LOCK HOLDS THE FREQUENCY: GHOSTNET WAS NOT TUNED.", -1);
+        return;
+    }
+    gn_close();
+    go(SCR_SCAN);
+    a_tuned();
+}
+
+static void gn_action(int k) {
+    if (k == 0) gn_tune();
+    else if (k == 4) gn_close();
+}
+
+static const char *gn_label(int k) {
+    return k == 0 ? "Tune" : k == 4 ? "Back" : "";
 }
 
 /* B, G and F's GMRS panel for the remote (app_sentry.h) */
@@ -12427,6 +12703,29 @@ static void build_overlays(void) {
     lv_obj_add_flag(gm_box, LV_OBJ_FLAG_HIDDEN);
     gm_on = false;
 
+    gn_box = rect(root, 30, 52, SW - 60, scr_h - 56, 3, false);     /* F's GHOSTNET page */
+    lv_obj_add_flag(gn_box, LV_OBJ_FLAG_CLICKABLE);
+    {
+        int tw = SW - 90;                                   /* the text's width inside the frame */
+        lv_obj_t **one[] = {&gn_head_l, &gn_tune_l, &gn_ant_l, &gn_sh_l};
+        int        oy[]  = {8, 36, 98, 146};
+
+        for (int i = 0; i < (int)N_OF(one); i++) {
+            *one[i] = label(gn_box, &pixel_20, amb, 12, oy[i], tw, LV_TEXT_ALIGN_LEFT, "");
+            lv_label_set_long_mode(*one[i], LV_LABEL_LONG_CLIP);
+        }
+        gn_how_l  = label(gn_box, &pixel_16, dim, 12, 60, tw, LV_TEXT_ALIGN_LEFT, "");
+        gn_band_l = label(gn_box, &pixel_16, dim, 12, 122, tw, LV_TEXT_ALIGN_LEFT, "");
+        for (int r = 0; r < GN_SCHED; r++) {
+            gn_row_l[r] = label(gn_box, &pixel_16, amb, 12, 170 + r * 18, tw, LV_TEXT_ALIGN_LEFT, "");
+            lv_label_set_long_mode(gn_row_l[r], LV_LABEL_LONG_CLIP);
+        }
+        gn_watch_l = label(gn_box, &pixel_16, amb, 12, 170 + GN_SCHED * 18 + 6, tw, LV_TEXT_ALIGN_LEFT, "");
+        gn_foot_l  = label(gn_box, &pixel_16, amb, 12, scr_h - 56 - 6 - 6 - 34, tw, LV_TEXT_ALIGN_LEFT, "");
+    }
+    lv_obj_add_flag(gn_box, LV_OBJ_FLAG_HIDDEN);
+    gn_on = false;
+
     gp_box = rect(root, 14, 52, GP_W, scr_h - 56, 3, false);
     lv_obj_add_flag(gp_box, LV_OBJ_FLAG_CLICKABLE);
     gp_head_l = label(gp_box, &pixel_20, amb, 12, 8, GP_W - 30, LV_TEXT_ALIGN_LEFT, "");
@@ -12686,6 +12985,8 @@ static void destruct_cb(void) {
     nf_px        = NULL;
     nf_grey_page = 0;
     nf_publish();
+    gn_on  = false;                     /* F's GHOSTNET page: its objects went with the screen too */
+    gn_box = NULL;
     f_gpu   = false;
     for (int i = 0; i < 3; i++) {       /* F SYSTEM's load bars */
         if (ld_frame[i]) {
@@ -12726,6 +13027,8 @@ static void destruct_cb(void) {
     lm_free(&lm[0]);
     lm_free(&lm[1]);
     root = img = rtl_img = NULL;
+    gn_publish();                       /* the remote's "ghostnet?" and "tribal?": closed with the Sentry */
+    trib_publish();
 }
 
 /* ---- Across a restart of the GUI (gui_state.c) ---- */

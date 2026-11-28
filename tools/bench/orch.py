@@ -7555,6 +7555,13 @@ _ocm.H = sys.modules[__name__]
 TESTS += _ocm.tests(Test, A, B)
 ORCH_COVERS.update(_ocm.COVERS)
 
+# GhostNet on the Sentry (orch_ghostnet.py, the owner, 2026-11-27, from S2 Underground): F's GHOSTNET page and its
+# TUNE, TRIBAL KNOWLEDGE's GhostNet entry, receive only
+import orch_ghostnet as _ogn                # noqa: E402
+_ogn.H = sys.modules[__name__]
+TESTS += _ogn.tests(Test, A, B)
+ORCH_COVERS.update(_ogn.COVERS)
+
 
 # Other sessions put new GUIs on the radios (tools/cross_x6200/install.sh): one replaced both mid-run on 2026-11-25
 # (15:43, its "no run going" check a moment before this run began). Who installs holds GUI_LOCK for the time it does

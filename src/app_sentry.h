@@ -76,6 +76,27 @@ void app_sentry_g_sdr_set(int64_t hz);
 /* The remote's "set gmp 1|0" (LVGL thread): F SYSTEM's GMRS chosen on F's list and its panel opened (1), or the panel
  * closed (0); only while F shows */
 void app_sentry_gmrs_panel(bool on);
+/* F's GHOSTNET page for the remote's "ghostnet?" (any thread; the LVGL thread publishes it every 50 ms while the
+ * Sentry is open, all zero while the page is closed): open or not, A on the net now (7.107 MHz USB-D), and the words as
+ * the screen has them: its head, TUNE's line and the line under it, the antenna and D's band, the schedule's head and
+ * its rows (the JS8 windows on 7.107, the next first), the line on who listens, the keys' line, the legend, the F
+ * keys' boxes */
+typedef struct {
+    int32_t open, on;
+    char    head[96], tune[96], how[200], ant[64], band[96], sched_head[80], sched[5][100], watch[200], foot[120];
+    char    legend[160], keys[5][32];
+} app_sentry_ghostnet_t;
+void app_sentry_ghostnet_state(app_sentry_ghostnet_t *out);
+/* The remote's "set gnp 1|0" (LVGL thread): F SYSTEM's GHOSTNET chosen on F's list and its page opened (1), or closed
+ * (0); only while F shows */
+void app_sentry_ghostnet_page(bool on);
+/* F's TRIBAL KNOWLEDGE for the remote's "tribal?" (any thread, published every 50 ms while it is open, zero while
+ * closed): open, the page (1 the first) of pages, and that page's text as WHAT IT DOES draws it (upper case) */
+typedef struct {
+    int32_t open, page, pages;
+    char    text[2048];
+} app_sentry_tribal_t;
+void app_sentry_tribal_state(app_sentry_tribal_t *out);
 /* The SDR pool's panel (sdr_pool.h), the Sentry opened on F for it when it is not open (APP held on H) */
 void app_sentry_open_pool(void);
 

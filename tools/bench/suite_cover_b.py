@@ -141,8 +141,8 @@ SCAN_ON = {"x6200": "10 M", "x6100": "20 M"}   # a band A's F1 takes several ste
 
 # F SYSTEM's items (sys_items[]); BASE FIRMWARE (9) is never opened: on the X6200 it writes the base
 SYS = {"SETTINGS": 0, "APPS": 1, "MODES": 2, "AIRSPACE": 3, "VHF": 4, "POOL": 5, "GPS": 6, "CLASSIC": 7, "SHELL": 8,
-       "TRIBAL": 10, "NIFOG": 11, "HOME": 12, "GMRS": 13}
-SYS_N, SYS_BASEFW = 14, 9
+       "TRIBAL": 10, "NIFOG": 11, "HOME": 12, "GMRS": 13, "GHOSTNET": 14}
+SYS_N, SYS_BASEFW = 15, 9
 
 # E's types (decoders[]) and EMERGENCY's rows (emer[])
 DEC_N, DEC_EMERGENCY, DEC_CW = 23, 0, 10

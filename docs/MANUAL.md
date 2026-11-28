@@ -1467,15 +1467,30 @@ written through to the card before it replaces the last copy, so a power cut kee
   DOES shows a spectrogram of A's: the X6200's spectrum around the dial as A takes it, flat, the newest row on top,
   following the dial as A's rows do; the GPU draws it where the image has Mesa, the processor elsewhere. A's title names
   what its scope takes in: `MF/HF/VHF SPECTRUM` (the X6200 from 100 kHz to 55 MHz, and 87.5 to 137 MHz).
-- **GMRS (LISTEN)**, last on F's list: GMRS's channels in a panel, each tuned on whatever receives it. See
+- **GMRS (LISTEN)** on F: GMRS's channels in a panel, each tuned on whatever receives it. See
   [GMRS](#gmrs-listening-only).
+- **GHOSTNET (LISTEN)**, last on F's list: S2 Underground's GhostNet, its JS8Call net on 7.107 MHz, on a page over F
+  with one thing to do: **F1 TUNE** (or a push) puts A on 7.107 MHz in USB-D, the JS8 dial GhostNet uses (the
+  stations are above it at their offsets, the heartbeats under 1000 Hz), the dial yours from then as when you turn it,
+  and shows A; nothing is keyed. The page also shows D's own antenna for the band 7.107 is in (40 M's
+  `ANTENNA: JPC-12 RED-SILVER, TESTED`, with its BEST and NOW), and the schedule's JS8 windows on 7.107, the next
+  first, each with its day and time in UTC and the radio's own time and how long till then:
+  `NORTH AMERICA  FRI 01:00 UTC (THU 20:00 EST)  30 MIN  IN 2 D 4 H` (Thursday night in North America, Friday by
+  the UTC date), Europe on Thursdays at 18:00 UTC, Australia at 07:00 UTC and the Australia-South Pacific bridge on
+  Saturdays at 09:00 UTC. They are the JS8 app's GhostNet schedule (`/usr/share/x6100/ghostnet_nets.txt`, or
+  `/mnt/ghostnet_nets.txt` when you put a newer one there). People listen on 7.107 around the clock, not only at the
+  nets (S2 Underground). F5, BACK or APP closes it, and so does leaving F. The messages are read in the JS8 app with
+  Freq > GhostNet ([GhostNet](#ghostnet)); transmitting is the JS8 app's, with your licence.
 - **TRIBAL KNOWLEDGE** on F: what hams pass on by word of mouth, read a page at a time in WHAT IT DOES, which grows
   down over the processor's box while it is open (its title `TRIBAL KNOWLEDGE 3/10`); the MFK turns the pages, a push
   or F2 closes it, and so does leaving F. The radio's own text (`/usr/share/x6100/tribal.txt`): the digital nets
   that practise sending messages and files for when a disaster takes the phones and the internet (NBEMS with fldigi,
   flmsg and flamp; Winlink; JS8Call and VARAC), how to find yours, a few open to anyone (Winlink Wednesday, the
   Maryland-DC section's monthly Winlink check-in, the Pennsylvania and Eastern Massachusetts NBEMS nets, as found in
-  November 2026: check them before relying on them), and the tropospheric ducting map: how a temperature inversion
+  November 2026: check them before relying on them), GhostNet's JS8Call net on 7.107 MHz (from S2 Underground,
+  @s2_underground: Thursday nights in North America, 01:00 UTC, and the frequency monitored around the clock; its
+  plan's other windows, groups and regions, and where F's GHOSTNET page and the JS8 app come in), and the
+  tropospheric ducting map: how a temperature inversion
   carries 2 m and 70 cm far, and how to read William Hepburn's forecasts (dxinfocentre.com/tropo.html; his licence
   does not allow the maps into other programs, so the radio says where to look and how to hear a duct on B instead).
   Your own notes come first: `/mnt/tribal.txt` on the card's DATA partition (the web page's Files, or the card in a
@@ -6219,6 +6234,9 @@ waterfall stands still while JS8 is open.
 GhostNet is a weekly JS8 net for emergency communication, with a net in
 each region on Thursday evening and data bridges between the regions on
 Saturday. Freq (Settings..., page 3) has two GhostNet items:
+
+The Sentry's F SYSTEM > **GHOSTNET (LISTEN)** tunes A to 7.107 MHz USB-D to listen and shows the antenna and the
+next nets ([F SYSTEM](#d-bands-e-decode-f-system)); TRIBAL KNOWLEDGE there has S2 Underground's word on the net.
 
 - **GhostNet mode: 7.107 + its groups** tunes 7.107 MHz, the GhostNet
   frequency of the weekly nets (the band keys step through GhostNet's list:
@@ -11173,7 +11191,8 @@ tone in Hz, 400-1200 in 10 Hz steps, the state's `kt`, as KEY 1:2's Tone sets it
 channel, with the narrowest preset it is in, B's scan stopped: only while B shows, else `err bch: only while the
 Sentry shows B`), `gsdr HZ` (G's SDR channel, one of G's plan's: only while G shows with an SDR there and nothing
 armed; 0 puts G back on the radio at its own channel), `gmp 1|0` (F SYSTEM's GMRS chosen and its panel opened, or
-closed: only while F shows). The state says B and G on the SDR: `bhz` (B's channel), `bpre`
+closed: only while F shows), `gnp 1|0` (F SYSTEM's GHOSTNET chosen and its page opened, or closed: only while F
+shows, else `err gnp: only while the Sentry shows F`). The state says B and G on the SDR: `bhz` (B's channel), `bpre`
 (its preset or band), `bmode` (`NFM`, `DMR`...), `bname` (`GMRS 20`, "" none), `bscan` (0 off, 1 the band, 2 the
 channel list, 3 EMERGENCY's, 4 GMRS's 22), `ghz` (G's SDR channel, 0 none), `garm` (its transmitter armed), `gno`
 (why it may not send there, "" it may), `sdr` (an SDR there), `fsel` (F's chosen item, "" off F), `gmp` (F's GMRS panel
@@ -11182,7 +11201,12 @@ own through the WR12), `glamp` (G's lamp's word while G shows: `ON AIR`, `LOCKED
 voice's name, `SIGNAL` or `QUIET`; "" off G); all zero while the Sentry is closed. `nifog?` answers `nifog {...}`: F's
 [NIFOG](#nifog) as the screen has it, `open`, `page` (the PDF's numbering), `y` (px down it) and `maxy`, `cap`
 (its caption), `where` (the line under the page), `legend` and `keys` (the F keys' boxes); zero and empty while
-it is closed or the Sentry is (the bench's tools/bench/orch_nifog.py). `his?` answers `his {...}`: `call`, what
+it is closed or the Sentry is (the bench's tools/bench/orch_nifog.py). `ghostnet?` answers `ghostnet {...}`: F's
+GHOSTNET page as the screen has it, `open`, `on` (A on 7.107 MHz USB-D now), `head`, `tune` (TUNE's line), `how`,
+`ant` (the antenna), `band` (D's band, its BEST and NOW), `sched_head` and `sched` (the schedule's rows), `watch`,
+`foot`, `legend` and `keys` (the F keys' boxes); zero and empty while it is closed. `tribal?` answers `tribal {...}`: F's
+TRIBAL KNOWLEDGE open, its `page` of `pages` and that page's `text` as WHAT IT DOES draws it, its line ends as
+spaces (the bench's tools/bench/orch_ghostnet.py reads both). `his?` answers `his {...}`: `call`, what
 MSG > CW's `{HIS}` would send now ("" none), `chars` (the decoder panel's text), `shown` (the panel on the screen)
 and `tail`, the panel text's last 48 characters as Parse left them (the bench's cw-his reads it before the reply goes
 out, cw-parse for Parse's split). A few read-only values answer `cfg?` for the bench: `digi_dx` (the keyboard modes'
